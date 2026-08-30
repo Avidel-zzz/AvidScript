@@ -14,6 +14,117 @@
 
 namespace
 {
+class FAvidScriptPreparedDelegateGuestMemory final
+	: public IAvidScriptVmGuestMemory
+{
+public:
+	FAvidScriptPreparedDelegateGuestMemory()
+	{
+		Bytes.SetNumZeroed(128);
+	}
+
+	void StoreInt32(const uint32 GuestAddress, const int32 Value)
+	{
+		check(GuestAddress + sizeof(Value) <= static_cast<uint32>(Bytes.Num()));
+		FMemory::Memcpy(Bytes.GetData() + GuestAddress, &Value, sizeof(Value));
+	}
+
+	bool ReadBytes(
+		const uint32 GuestAddress,
+		TArrayView<uint8> OutBytes,
+		FString& OutError) override
+	{
+		if (!IsRangeValid(GuestAddress, OutBytes.Num()))
+		{
+			OutError = TEXT("prepared delegate guest read range");
+			return false;
+		}
+		FMemory::Memcpy(
+			OutBytes.GetData(),
+			Bytes.GetData() + GuestAddress,
+			OutBytes.Num());
+		OutError.Reset();
+		return true;
+	}
+
+	bool WriteBytes(
+		const uint32 GuestAddress,
+		const TConstArrayView<uint8> InBytes,
+		FString& OutError) override
+	{
+		if (!IsRangeValid(GuestAddress, InBytes.Num()))
+		{
+			OutError = TEXT("prepared delegate guest write range");
+			return false;
+		}
+		FMemory::Memcpy(
+			Bytes.GetData() + GuestAddress,
+			InBytes.GetData(),
+			InBytes.Num());
+		OutError.Reset();
+		return true;
+	}
+
+	bool BorrowReadOnlyBytes(
+		const uint32 GuestAddress,
+		const uint32 Count,
+		const uint32 Alignment,
+		TConstArrayView<uint8>& OutBytes,
+		FString& OutError) override
+	{
+		if (!IsBorrowValid(GuestAddress, Count, Alignment))
+		{
+			OutBytes = TConstArrayView<uint8>();
+			OutError = TEXT("prepared delegate guest borrow range");
+			return false;
+		}
+		OutBytes = MakeArrayView(Bytes).Slice(GuestAddress, Count);
+		OutError.Reset();
+		return true;
+	}
+
+	bool BorrowMutableBytes(
+		const uint32 GuestAddress,
+		const uint32 Count,
+		const uint32 Alignment,
+		TArrayView<uint8>& OutBytes,
+		FString& OutError) override
+	{
+		if (!IsBorrowValid(GuestAddress, Count, Alignment))
+		{
+			OutBytes = TArrayView<uint8>();
+			OutError = TEXT("prepared delegate guest mutable borrow range");
+			return false;
+		}
+		OutBytes = MakeArrayView(Bytes).Slice(GuestAddress, Count);
+		OutError.Reset();
+		return true;
+	}
+
+private:
+	bool IsRangeValid(const uint32 GuestAddress, const int32 Count) const
+	{
+		return Count >= 0
+			&& GuestAddress <= static_cast<uint32>(Bytes.Num())
+			&& static_cast<uint32>(Count)
+				<= static_cast<uint32>(Bytes.Num()) - GuestAddress;
+	}
+
+	bool IsBorrowValid(
+		const uint32 GuestAddress,
+		const uint32 Count,
+		const uint32 Alignment) const
+	{
+		return Alignment > 0
+			&& FMath::IsPowerOfTwo(Alignment)
+			&& GuestAddress % Alignment == 0
+			&& GuestAddress <= static_cast<uint32>(Bytes.Num())
+			&& Count <= static_cast<uint32>(Bytes.Num()) - GuestAddress;
+	}
+
+	TArray<uint8> Bytes;
+};
+
 template <typename TProperty>
 TProperty* FindPreparedDelegatePropertyChecked(
 	const UStruct* Owner,
@@ -259,7 +370,7 @@ FAvidScriptBindingPackageModel MakePreparedDelegatePackage()
 {
 	FAvidScriptBindingPackageModel Package;
 	Package.SchemaVersion = 11;
-	Package.GeneratorVersion = TEXT("P57.12A.BindingsTest");
+	Package.GeneratorVersion = TEXT("P58.C.BindingsTest");
 	Package.EngineVersion =
 		FEngineVersion::Current().ToString(EVersionComponent::Patch);
 	Package.Source = TEXT("ue_reflection");
@@ -383,6 +494,20 @@ FAvidScriptBindingPackageModel MakePreparedDelegatePackage()
 				GetPreparedDelegateParameterDirection(TEXT("PreparedWideDelegate"), TEXT("Token")),
 				Int64Type)
 		}));
+	Package.DelegateEvents.Add(MakeDelegateEvent(
+		2,
+		TEXT("PreparedOutputDelegate"),
+		TEXT("PreparedOutput"),
+		{
+			MakeDelegateValue(
+				TEXT("Value"),
+				GetPreparedDelegateParameterDirection(TEXT("PreparedOutputDelegate"), TEXT("Value")),
+				Int32Type),
+			MakeDelegateValue(
+				TEXT("Result"),
+				GetPreparedDelegateParameterDirection(TEXT("PreparedOutputDelegate"), TEXT("Result")),
+				Int32Type)
+		}));
 	return Package;
 }
 
@@ -435,13 +560,15 @@ bool FAvidScriptPreparedDelegateCodecTest::RunTest(const FString& Parameters)
 		AddError(BuildError);
 		return false;
 	}
-	TestEqual(TEXT("Two prepared delegate plans"), Events.Num(), 2);
-	if (Events.Num() != 2)
+	TestEqual(TEXT("Three prepared delegate plans"), Events.Num(), 3);
+	if (Events.Num() != 3)
 	{
 		return false;
 	}
 	TestEqual(TEXT("Recursive payload fills eight cells"), Events[0].ParameterCellCount, 8u);
 	TestEqual(TEXT("Wide payload fills four cells"), Events[1].ParameterCellCount, 4u);
+	TestEqual(TEXT("Ref/out payload prepends one transaction cell"), Events[2].ParameterCellCount, 2u);
+	TestEqual(TEXT("Ref/out payload exposes two output ordinals"), Events[2].OutputParameterCount, 2u);
 	TestNotNull(TEXT("Delegate property is resolved at load"), Events[0].DelegateProperty);
 	TestNotNull(TEXT("Delegate signature is resolved at load"), Events[0].SignatureFunction);
 	TestNotNull(TEXT("Delegate codec is immutable and published"), Events[0].ImmutableCodecIdentity);
@@ -482,6 +609,7 @@ bool FAvidScriptPreparedDelegateCodecTest::RunTest(const FString& Parameters)
 				Events[0].ImmutableCodecIdentity,
 				NativeFrame,
 				Context,
+				0,
 				Frame,
 				BorrowedHandles,
 				ErrorCategory,
@@ -536,6 +664,7 @@ bool FAvidScriptPreparedDelegateCodecTest::RunTest(const FString& Parameters)
 				Events[1].ImmutableCodecIdentity,
 				WideFrame,
 				Context,
+				0,
 				Frame,
 				BorrowedHandles,
 				ErrorCategory,
@@ -551,6 +680,133 @@ bool FAvidScriptPreparedDelegateCodecTest::RunTest(const FString& Parameters)
 	{
 		TestEqual(TEXT("Wide scalar cell"), Frame.Cells[Index], ExpectedWideCells[Index]);
 	}
+
+	TestEqual(
+		TEXT("UPARAM(ref) remains a ref contract"),
+		Model.DelegateEvents[2].Parameters[0].Direction,
+		FString(TEXT("ref")));
+	TestEqual(
+		TEXT("Plain non-const reference remains an out contract"),
+		Model.DelegateEvents[2].Parameters[1].Direction,
+		FString(TEXT("out")));
+	FStructOnScope OutputParameters(Events[2].SignatureFunction);
+	void* OutputFrame = OutputParameters.GetStructMemory();
+	FIntProperty* const ValueProperty =
+		FindPreparedDelegatePropertyChecked<FIntProperty>(
+			Events[2].SignatureFunction,
+			TEXT("Value"));
+	FIntProperty* const ResultProperty =
+		FindPreparedDelegatePropertyChecked<FIntProperty>(
+			Events[2].SignatureFunction,
+			TEXT("Result"));
+	ValueProperty->SetPropertyValue_InContainer(OutputFrame, 41);
+	ResultProperty->SetPropertyValue_InContainer(OutputFrame, -7);
+
+	TUniquePtr<FAvidScriptPreparedDelegateOutputTransaction> OutputTransaction;
+	if (!TestTrue(
+			TEXT("Prepared ref/out transaction initializes"),
+			Package->BeginPreparedDelegateOutputTransaction(
+				Events[2],
+				OutputFrame,
+				OutputTransaction,
+				ErrorDetails)))
+	{
+		AddError(ErrorDetails);
+		return false;
+	}
+	constexpr uint32 OutputTransactionToken = 0x80000001u;
+	if (!TestTrue(
+			TEXT("Prepared ref/out frame encodes"),
+			Events[2].Encode(
+				Events[2].ImmutableCodecIdentity,
+				OutputFrame,
+				Context,
+				OutputTransactionToken,
+				Frame,
+				BorrowedHandles,
+				ErrorCategory,
+				ErrorDetails)))
+	{
+		AddError(ErrorCategory + TEXT(": ") + ErrorDetails);
+		return false;
+	}
+	TestEqual(TEXT("Output transaction token is the first ABI cell"), Frame.Cells[0], OutputTransactionToken);
+	TestEqual(TEXT("Ref input is encoded after the token"), Frame.Cells[1], 41u);
+
+	FAvidScriptPreparedDelegateGuestMemory GuestMemory;
+	GuestMemory.StoreInt32(16, 101);
+	GuestMemory.StoreInt32(32, 202);
+	TestTrue(
+		TEXT("Ref output stages into transaction-owned memory"),
+		OutputTransaction->StageOutput(
+			0,
+			16,
+			GuestMemory,
+			Context,
+			ErrorDetails));
+	TestEqual(
+		TEXT("Staging one output does not mutate the native ref value"),
+		ValueProperty->GetPropertyValue_InContainer(OutputFrame),
+		41);
+	TestFalse(
+		TEXT("Duplicate output staging fails closed"),
+		OutputTransaction->StageOutput(
+			0,
+			16,
+			GuestMemory,
+			Context,
+			ErrorDetails));
+	TestTrue(
+		TEXT("Out value stages into transaction-owned memory"),
+		OutputTransaction->StageOutput(
+			1,
+			32,
+			GuestMemory,
+			Context,
+			ErrorDetails));
+	TestTrue(TEXT("All prepared outputs are staged"), OutputTransaction->IsComplete());
+	TestTrue(TEXT("Complete output transaction commits"), OutputTransaction->Commit(ErrorDetails));
+	TestEqual(
+		TEXT("Commit atomically updates the native ref value"),
+		ValueProperty->GetPropertyValue_InContainer(OutputFrame),
+		101);
+	TestEqual(
+		TEXT("Commit atomically updates the native out value"),
+		ResultProperty->GetPropertyValue_InContainer(OutputFrame),
+		202);
+
+	FStructOnScope IncompleteParameters(Events[2].SignatureFunction);
+	void* IncompleteFrame = IncompleteParameters.GetStructMemory();
+	ValueProperty->SetPropertyValue_InContainer(IncompleteFrame, 5);
+	ResultProperty->SetPropertyValue_InContainer(IncompleteFrame, 6);
+	TUniquePtr<FAvidScriptPreparedDelegateOutputTransaction> IncompleteTransaction;
+	TestTrue(
+		TEXT("Second output transaction initializes"),
+		Package->BeginPreparedDelegateOutputTransaction(
+			Events[2],
+			IncompleteFrame,
+			IncompleteTransaction,
+			ErrorDetails));
+	GuestMemory.StoreInt32(48, 303);
+	TestTrue(
+		TEXT("Incomplete transaction stages one output"),
+		IncompleteTransaction->StageOutput(
+			0,
+			48,
+			GuestMemory,
+			Context,
+			ErrorDetails));
+	TestFalse(
+		TEXT("Incomplete output transaction cannot commit"),
+		IncompleteTransaction->Commit(ErrorDetails));
+	TestEqual(
+		TEXT("Failed commit preserves the original ref value"),
+		ValueProperty->GetPropertyValue_InContainer(IncompleteFrame),
+		5);
+	TestEqual(
+		TEXT("Failed commit preserves the original out value"),
+		ResultProperty->GetPropertyValue_InContainer(IncompleteFrame),
+		6);
 
 	FAvidScriptBindingPackageModel UnsupportedModel = MakePreparedDelegatePackage();
 	FAvidScriptBindingTypeModel StringType = MakeDelegateLeafType(

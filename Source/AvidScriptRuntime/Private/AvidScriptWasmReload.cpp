@@ -573,7 +573,8 @@ bool ValidateBindingPackageManifest(
 			&& DescriptorSchemaVersion != 15
 			&& DescriptorSchemaVersion != 16
 			&& DescriptorSchemaVersion != 17
-			&& DescriptorSchemaVersion != 18)
+			&& DescriptorSchemaVersion != 18
+			&& DescriptorSchemaVersion != 19)
 		|| !PackageObject->TryGetStringField(TEXT("package_name"), PackageName)
 		|| !PackageObject->TryGetStringField(TEXT("package_hash"), PackageHash)
 		|| !PackageObject->TryGetStringField(TEXT("descriptor_sha256"), DescriptorSha256))
@@ -748,6 +749,7 @@ bool ValidateBindingPackageManifest(
 
 	TMap<FString, FAvidScriptVmDynamicImport> DeclaredImports;
 	bool bSeenPackedOwner = false;
+	bool bSeenDelegateOutputWrite = false;
 	TSet<FString> SeenValueCapabilities;
 	for (const TSharedPtr<FJsonValue>& ImportValue : *RequiredImportValues)
 	{
@@ -796,6 +798,32 @@ bool ValidateBindingPackageManifest(
 				return false;
 			}
 			bSeenPackedOwner = true;
+			continue;
+		}
+		const bool bIsDelegateOutputWrite = StableId
+			== FAvidScriptPreparedDelegateOutputTransaction::GetImportStableId();
+		if (bIsDelegateOutputWrite)
+		{
+			const bool bIsValidDelegateOutputWrite =
+				DescriptorSchemaVersion >= 19
+				&& Ordinal == INDEX_NONE
+				&& ModuleName
+					== FAvidScriptPreparedDelegateOutputTransaction::GetImportModuleName()
+				&& ImportName
+					== FAvidScriptPreparedDelegateOutputTransaction::GetImportName()
+				&& Signature
+					== FAvidScriptPreparedDelegateOutputTransaction::GetImportSignature()
+				&& !bSeenDelegateOutputWrite;
+			if (!bIsValidDelegateOutputWrite)
+			{
+				SetManifestLoadFailure(
+					OutResult,
+					TEXT("binding_package_invalid"),
+					TEXT("package.json required_imports contains an invalid or duplicate delegate output capability"),
+					TEXT("republish the generated binding package"));
+				return false;
+			}
+			bSeenDelegateOutputWrite = true;
 			continue;
 		}
 		const FAvidScriptValueCapabilityImportSpec* ValueCapabilitySpec =

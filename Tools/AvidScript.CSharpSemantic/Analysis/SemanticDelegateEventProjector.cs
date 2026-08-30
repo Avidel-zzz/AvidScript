@@ -16,7 +16,10 @@ internal static class SemanticDelegateEventProjector
     private const string ContractAttributeName = "global::AvidScript.AvidEventContractAttribute";
     private const string ExportPrefix = "avid_on_delegate_";
 
-    private sealed record EventContract(string SubscriptionId, IReadOnlyList<string> ParameterTypes);
+    private sealed record EventContract(
+        string SubscriptionId,
+        IReadOnlyList<string> ParameterTypes,
+        IReadOnlyList<string> ParameterDirections);
 
     public static SemanticDelegateEventProjection Project(SemanticCompilationContext context)
     {
@@ -85,17 +88,20 @@ internal static class SemanticDelegateEventProjector
                 || method.IsExtern
                 || method.IsAbstract
                 || declaration.Body is null && declaration.ExpressionBody is null
-                || method.Parameters.Any(parameter => parameter.RefKind != RefKind.None
+                || method.Parameters.Any(parameter => parameter.RefKind == RefKind.In
                     || parameter.HasExplicitDefaultValue))
             {
                 diagnostics.Add(Error(
                     "ASCS5205",
-                    $"Delegate event handler '{method.Name}' must be concrete, non-generic, and cannot use ref, out, in, or default parameters.",
+                    $"Delegate event handler '{method.Name}' must be concrete, non-generic, and cannot use in or default parameters.",
                     span));
                 valid = false;
             }
 
-            if (contract is not null && !ParametersMatch(method.Parameters, contract.ParameterTypes))
+            if (contract is not null && !ParametersMatch(
+                method.Parameters,
+                contract.ParameterTypes,
+                contract.ParameterDirections))
             {
                 diagnostics.Add(Error(
                     "ASCS5206",
@@ -172,9 +178,15 @@ internal static class SemanticDelegateEventProjector
                     : SemanticSpanFactory.Empty;
                 string? subscriptionId = ReadStringArgument(attribute, 0);
                 string? parameterTypes = ReadStringArgument(attribute, 1);
+                string? parameterDirections = ReadStringArgument(attribute, 2);
                 string[] parameters = parameterTypes is null || parameterTypes.Length == 0
                     ? Array.Empty<string>()
                     : parameterTypes.Split(';', StringSplitOptions.None);
+                string[] directions = parameterDirections is null
+                    ? Enumerable.Repeat("none", parameters.Length).ToArray()
+                    : parameterDirections.Length == 0
+                        ? Array.Empty<string>()
+                        : parameterDirections.Split(';', StringSplitOptions.None);
                 bool valid = subscriptionId is not null
                     && IsStableId(subscriptionId)
                     && field.IsConst
@@ -183,7 +195,9 @@ internal static class SemanticDelegateEventProjector
                     && string.Equals(value, subscriptionId, StringComparison.Ordinal)
                     && parameterTypes is not null
                     && parameters.All(parameter => !string.IsNullOrWhiteSpace(parameter)
-                        && string.Equals(parameter, parameter.Trim(), StringComparison.Ordinal));
+                        && string.Equals(parameter, parameter.Trim(), StringComparison.Ordinal))
+                    && directions.Length == parameters.Length
+                    && directions.All(direction => direction is "none" or "ref" or "out");
                 if (!valid)
                 {
                     diagnostics.Add(Error(
@@ -193,7 +207,7 @@ internal static class SemanticDelegateEventProjector
                     continue;
                 }
 
-                EventContract contract = new(subscriptionId!, parameters);
+                EventContract contract = new(subscriptionId!, parameters, directions);
                 if (!contracts.TryAdd(subscriptionId!, contract))
                 {
                     diagnostics.Add(Error(
@@ -227,12 +241,27 @@ internal static class SemanticDelegateEventProjector
 
     private static bool ParametersMatch(
         IReadOnlyList<IParameterSymbol> parameters,
-        IReadOnlyList<string> expectedTypes)
+        IReadOnlyList<string> expectedTypes,
+        IReadOnlyList<string> expectedDirections)
     {
         return parameters.Count == expectedTypes.Count
-            && parameters.Select((parameter, index) => parameter.RefKind == RefKind.None
+            && parameters.Count == expectedDirections.Count
+            && parameters.Select((parameter, index) => DirectionMatches(
+                    parameter.RefKind,
+                    expectedDirections[index])
                 && TypeMatches(parameter.Type, expectedTypes[index]))
                 .All(matches => matches);
+    }
+
+    private static bool DirectionMatches(RefKind refKind, string expectedDirection)
+    {
+        return expectedDirection switch
+        {
+            "none" => refKind == RefKind.None,
+            "ref" => refKind == RefKind.Ref,
+            "out" => refKind == RefKind.Out,
+            _ => false,
+        };
     }
 
     private static bool TypeMatches(ITypeSymbol type, string expectedType)

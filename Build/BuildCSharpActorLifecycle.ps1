@@ -155,10 +155,14 @@ function Remove-LoadableArtifacts {
 
 function Invoke-AvidScriptPowerShell {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
+    $PowerShellHost = Join-Path $PSHOME "pwsh.exe"
+    if (-not (Test-Path -LiteralPath $PowerShellHost -PathType Leaf)) {
+        throw "PowerShell 7 host is missing: $PowerShellHost"
+    }
     $PreviousErrorActionPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = "Continue"
-        $RawOutput = @(& powershell.exe @Arguments 2>&1)
+        $RawOutput = @(& $PowerShellHost @Arguments 2>&1)
         $ProcessExitCode = $LASTEXITCODE
     }
     finally {
@@ -263,15 +267,26 @@ function Test-CompilerInjectedBindingImport {
         [Parameter(Mandatory = $true)][bool]$AllowDataLaneImports
     )
 
-    if (-not $AllowDataLaneImports -or
-        [string]$Import.module -cne "avidscript" -or
-        [string]$Import.dispatch_class -cne "data_lane" -or
+    if ([string]$Import.module -cne "avidscript" -or
         [string]$Import.optimization_class -cne "none" -or
         [int]$Import.binding_ordinal -ne -1) {
         return $false
     }
 
     $ParameterTypes = @($Import.parameter_type_ids | ForEach-Object { [string]$_ })
+    if ([string]$Import.id -ceq "avidscript.delegate_output_write.v1" -and
+        [string]$Import.name -ceq "avid_delegate_output_write" -and
+        [string]$Import.dispatch_class -ceq "semantic") {
+        return $ParameterTypes.Count -eq 3 -and
+            $ParameterTypes[0] -ceq "type:int32" -and
+            $ParameterTypes[1] -ceq "type:int32" -and
+            $ParameterTypes[2] -ceq "type:address" -and
+            [string]$Import.return_type_id -ceq "type:int32"
+    }
+    if (-not $AllowDataLaneImports -or
+        [string]$Import.dispatch_class -cne "data_lane") {
+        return $false
+    }
     if ([string]$Import.id -ceq "import:__avidscript_internal.avid_data_lane_epoch" -and
         [string]$Import.name -ceq "avid_data_lane_epoch") {
         return $ParameterTypes.Count -eq 0 -and

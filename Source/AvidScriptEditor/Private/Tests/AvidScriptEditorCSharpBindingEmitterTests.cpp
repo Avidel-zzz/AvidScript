@@ -1626,7 +1626,7 @@ bool FAvidScriptEditorCSharpBindingEmitterGameplayProfileTest::RunTest(const FSt
 			Manifest,
 			EmitResult));
 	TestTrue(TEXT("Gameplay profile C# emit succeeds"), EmitResult.bSucceeded);
-	TestEqual(TEXT("Gameplay profile preserves every accepted binding"), EmitResult.BindingCount, 371);
+	TestEqual(TEXT("Gameplay profile preserves every accepted binding"), EmitResult.BindingCount, 373);
 	TSharedPtr<FJsonObject> DescriptorObject;
 	TestTrue(TEXT("Gameplay descriptor parses"), ParseJsonObject(DescriptorJson, DescriptorObject));
 	if (DescriptorObject.IsValid())
@@ -1738,9 +1738,9 @@ bool FAvidScriptEditorCSharpBindingEmitterGameplayProfileTest::RunTest(const FSt
 	if (ManifestObject.IsValid())
 	{
 		TestEqual(
-			TEXT("Gameplay manifest declares 371 reflected imports and eight shared imports"),
+			TEXT("Gameplay manifest declares 373 reflected imports and 17 shared imports"),
 			ManifestObject->GetArrayField(TEXT("required_imports")).Num(),
-			379);
+			390);
 	}
 
 	const FString OutputRoot = MakePackageTestRoot();
@@ -2538,7 +2538,7 @@ bool FAvidScriptEditorCSharpBindingEmitterArrayTest::RunTest(
 	{
 		return false;
 	}
-	TestEqual(TEXT("TArray activates descriptor schema 10"), Descriptor->GetIntegerField(TEXT("schema_version")), 10);
+	TestEqual(TEXT("TArray activates descriptor schema 19"), Descriptor->GetIntegerField(TEXT("schema_version")), 19);
 	const TSharedPtr<FJsonValue>* ArrayTypeValue =
 		Descriptor->GetArrayField(TEXT("types")).FindByPredicate(
 			[](const TSharedPtr<FJsonValue>& Value)
@@ -2738,7 +2738,7 @@ bool FAvidScriptEditorDelegateEventFacadeTest::RunTest(
 	TestTrue(
 		TEXT("Facade contract uses fully-qualified parameter types"),
 		ReferenceSource.Contains(FString::Printf(
-			TEXT("[AvidEventContract(\"%s\", \"global::AvidScript.AActor;global::System.Int32;global::System.Single\")]"),
+			TEXT("[AvidEventContract(\"%s\", \"global::AvidScript.AActor;global::System.Int32;global::System.Single\", \"none;none;none\")]"),
 			*Event.StableId)));
 	TestTrue(
 		TEXT("Facade constant carries the stable subscription id"),
@@ -2841,6 +2841,232 @@ bool FAvidScriptEditorDelegateEventFacadeTest::RunTest(
 			TEXT("Reserved event facade type collision identifies the protected surface"),
 			CollisionErrorSource.Contains(ReservedTypeName));
 	}
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpBindingEmitterCompositeValuesTest,
+	"AvidScript.Editor.CSharpBindingEmitter.CompositeValues",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpBindingEmitterCompositeValuesTest::RunTest(
+	const FString& Parameters)
+{
+	const FString OwnerPath =
+		UAvidScriptCSharpBindingEmitterTestObject::StaticClass()->GetPathName();
+	const TArray<FAvidScriptReflectedPropertySelection> Properties = {
+		{ OwnerPath, TEXT("ReadableFText"), true },
+		{ OwnerPath, TEXT("ReadableSoftObject"), true },
+		{ OwnerPath, TEXT("ReadableWeakObject"), true },
+		{ OwnerPath, TEXT("ReadableStringArray"), true },
+		{ OwnerPath, TEXT("ReadableIntSet"), true },
+		{ OwnerPath, TEXT("ReadableNameStringMap"), true }
+	};
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult DescriptorResult;
+	if (!TestTrue(
+			TEXT("Composite value property descriptor generates"),
+			FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
+				TEXT("avidscript.test.composite_values"),
+				{},
+				Properties,
+				DescriptorJson,
+				DescriptorResult)))
+	{
+		AddError(DescriptorResult.ErrorCategory + TEXT(": ")
+			+ DescriptorResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Package;
+	FString ParseCategory;
+	FString ParseSource;
+	if (!TestTrue(
+			TEXT("Composite value schema parses"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				DescriptorJson,
+				Package,
+				ParseCategory,
+				ParseSource)))
+	{
+		AddError(ParseCategory + TEXT(": ") + ParseSource);
+		return false;
+	}
+	TestEqual(TEXT("Composite metadata activates schema 19"), Package.SchemaVersion, 19);
+
+	const FAvidScriptBindingTypeModel* TextType = Package.Types.FindByPredicate(
+		[](const FAvidScriptBindingTypeModel& Type)
+		{
+			return Type.Kind == TEXT("text_capability");
+		});
+	const FAvidScriptBindingTypeModel* SoftType = Package.Types.FindByPredicate(
+		[](const FAvidScriptBindingTypeModel& Type)
+		{
+			return Type.Kind == TEXT("soft_object_capability");
+		});
+	const FAvidScriptBindingTypeModel* WeakType = Package.Types.FindByPredicate(
+		[](const FAvidScriptBindingTypeModel& Type)
+		{
+			return Type.Kind == TEXT("weak_object_capability");
+		});
+	const FAvidScriptBindingTypeModel* StringArrayType = Package.Types.FindByPredicate(
+		[](const FAvidScriptBindingTypeModel& Type)
+		{
+			return Type.Kind == TEXT("array")
+				&& Type.CapabilityKind == TEXT("composite");
+		});
+	const FAvidScriptBindingTypeModel* SetType = Package.Types.FindByPredicate(
+		[](const FAvidScriptBindingTypeModel& Type)
+		{
+			return Type.Kind == TEXT("set");
+		});
+	const FAvidScriptBindingTypeModel* MapType = Package.Types.FindByPredicate(
+		[](const FAvidScriptBindingTypeModel& Type)
+		{
+			return Type.Kind == TEXT("map");
+		});
+	TestNotNull(TEXT("Descriptor contains FText capability"), TextType);
+	TestNotNull(TEXT("Descriptor contains soft object capability"), SoftType);
+	TestNotNull(TEXT("Descriptor contains weak object capability"), WeakType);
+	TestNotNull(TEXT("Descriptor contains composite string array"), StringArrayType);
+	TestNotNull(TEXT("Descriptor contains reflected set"), SetType);
+	TestNotNull(TEXT("Descriptor contains reflected map"), MapType);
+	if (TextType == nullptr || SoftType == nullptr || WeakType == nullptr
+		|| StringArrayType == nullptr || SetType == nullptr || MapType == nullptr)
+	{
+		return false;
+	}
+	TestEqual(TEXT("FText has no nested type argument"), TextType->TypeArguments.Num(), 0);
+	TestEqual(TEXT("Soft object links one object type"), SoftType->TypeArguments.Num(), 1);
+	TestEqual(TEXT("Weak object links one object type"), WeakType->TypeArguments.Num(), 1);
+	TestEqual(TEXT("Soft object uses the composite heap"), SoftType->CapabilityKind, FString(TEXT("composite")));
+	TestEqual(TEXT("Weak object uses the composite heap"), WeakType->CapabilityKind, FString(TEXT("composite")));
+	TestEqual(TEXT("Composite array links one element type"), StringArrayType->TypeArguments.Num(), 1);
+	TestEqual(TEXT("Set links one element type"), SetType->TypeArguments.Num(), 1);
+	TestEqual(TEXT("Map links key and value types"), MapType->TypeArguments.Num(), 2);
+	TestEqual(
+		TEXT("Set stable identity includes its recursive argument"),
+		SetType->StableId,
+		FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(
+			SetType->CanonicalType,
+			SetType->EnumValues,
+			SetType->StructFields,
+			INDEX_NONE,
+			INDEX_NONE,
+			FString(),
+			SetType->TypeArguments));
+	TestEqual(
+		TEXT("Map stable identity includes both ordered recursive arguments"),
+		MapType->StableId,
+		FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(
+			MapType->CanonicalType,
+			MapType->EnumValues,
+			MapType->StructFields,
+			INDEX_NONE,
+			INDEX_NONE,
+			FString(),
+			MapType->TypeArguments));
+
+	FString Source;
+	FString Manifest;
+	FAvidScriptCSharpBindingEmitResult EmitResult;
+	if (!TestTrue(
+			TEXT("Composite value facade emits"),
+			FAvidScriptEditorCSharpBindingEmitter::Emit(
+				DescriptorJson,
+				Source,
+				Manifest,
+				EmitResult)))
+	{
+		AddError(EmitResult.ErrorCategory + TEXT(": ") + EmitResult.ErrorMessage);
+		return false;
+	}
+	TestTrue(
+		TEXT("FText property uses the nominal facade"),
+		Source.Contains(TEXT("public FAvidText ReadableFText")));
+	TestTrue(
+		TEXT("Soft object property preserves its UE target type"),
+		Source.Contains(TEXT("public FAvidSoftObject<UObject> ReadableSoftObject")));
+	TestTrue(
+		TEXT("Weak object property preserves its UE target type"),
+		Source.Contains(TEXT("public FAvidWeakObject<UObject> ReadableWeakObject")));
+	TestTrue(
+		TEXT("String array property uses a recursive container capability"),
+		Source.Contains(TEXT("public FAvidArray<string> ReadableStringArray")));
+	TestTrue(
+		TEXT("Set property uses a strongly typed container capability"),
+		Source.Contains(TEXT("public FAvidSet<int> ReadableIntSet")));
+	TestTrue(
+		TEXT("Map property preserves key and mapped facade types"),
+		Source.Contains(TEXT("public FAvidMap<string, string> ReadableNameStringMap")));
+	TestTrue(
+		TEXT("Composite facade exposes one shared release import"),
+		Source.Contains(TEXT("internal static extern int ReleaseComposite(int token);")));
+	TestTrue(
+		TEXT("FText facade exposes explicit presentation conversion"),
+		Source.Contains(TEXT("public override string ToString() => AvidScriptNative.TextToString(this);")));
+	TestTrue(
+		TEXT("Container facade exposes shared count and bounded mutation imports"),
+		Source.Contains(TEXT("EntryPoint = \"avid_value_container_count\""))
+			&& Source.Contains(TEXT("EntryPoint = \"avid_value_container_resize\""))
+			&& Source.Contains(TEXT("EntryPoint = \"avid_value_container_clear\""))
+			&& Source.Contains(TEXT("EntryPoint = \"avid_value_container_find\""))
+			&& Source.Contains(TEXT("EntryPoint = \"avid_value_container_upsert\""))
+			&& Source.Contains(TEXT("EntryPoint = \"avid_value_container_remove\"")));
+	TestTrue(
+		TEXT("Composite package manifest authorizes the generated value imports"),
+		Manifest.Contains(TEXT("avidscript.value_release.v1"))
+			&& Manifest.Contains(TEXT("avidscript.value_text_to_string.v1"))
+			&& Manifest.Contains(TEXT("avidscript.value_container_read.v1"))
+			&& Manifest.Contains(TEXT("avidscript.value_container_find.v1"))
+			&& Manifest.Contains(TEXT("avidscript.value_container_upsert.v1"))
+			&& Manifest.Contains(TEXT("avidscript.value_container_remove.v1")));
+	TestTrue(
+		TEXT("Container facade exposes strongly typed snapshot access"),
+		Source.Contains(TEXT("TryGet(this FAvidArray<string>"))
+			&& Source.Contains(TEXT("TryGetKeyAt(this FAvidMap<string, string>"))
+			&& Source.Contains(TEXT("TryGetValueAt(this FAvidMap<string, string>")));
+	TestTrue(
+		TEXT("Associative facade exposes typed lookup and mutation"),
+		Source.Contains(TEXT("Contains(this FAvidSet<int>"))
+			&& Source.Contains(TEXT("Add(this FAvidSet<int>"))
+			&& Source.Contains(TEXT("ContainsKey(this FAvidMap<string, string>"))
+			&& Source.Contains(TEXT("Set(this FAvidMap<string, string>"))
+			&& Source.Contains(TEXT("Remove(this FAvidMap<string, string>")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpBindingEmitterStrongObjectContainerRejectedTest,
+	"AvidScript.Editor.CSharpBindingEmitter.StrongObjectContainerRejected",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpBindingEmitterStrongObjectContainerRejectedTest::RunTest(
+	const FString& Parameters)
+{
+	const TArray<FAvidScriptReflectedPropertySelection> Properties = {
+		{
+			UAvidScriptCSharpBindingEmitterTestObject::StaticClass()->GetPathName(),
+			TEXT("ReadableStrongObjectMap"),
+			true
+		}
+	};
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult Result;
+	TestFalse(
+		TEXT("Recursive containers with strong UObject leaves fail closed until GC anchoring exists"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
+			TEXT("avidscript.test.strong_object_container_rejected"),
+			{},
+			Properties,
+			DescriptorJson,
+			Result));
+	TestEqual(
+		TEXT("Strong object container rejection uses the property type category"),
+		Result.ErrorCategory,
+		FString(TEXT("unsupported_property_type")));
+	TestTrue(
+		TEXT("Rejected strong object container publishes no descriptor"),
+		DescriptorJson.IsEmpty());
 	return true;
 }
 

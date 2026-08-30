@@ -125,6 +125,11 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_NineParams(
 	int32, Value7,
 	int32, Value8);
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+	FAvidScriptEditorDelegateRefOutSignal,
+	UPARAM(ref) int32&, Value,
+	int32&, Doubled);
+
 UCLASS()
 class AAvidScriptEditorDelegateEventTestActor : public AActor
 {
@@ -139,6 +144,9 @@ public:
 
 	UPROPERTY(BlueprintAssignable)
 	FAvidScriptEditorDelegateLargeSignal OnLargeSignal;
+
+	UPROPERTY(BlueprintAssignable)
+	FAvidScriptEditorDelegateRefOutSignal OnRefOutSignal;
 };
 
 UCLASS()
@@ -152,6 +160,30 @@ public:
 
 	UPROPERTY(BlueprintReadWrite)
 	FString ReadableFString;
+
+	UPROPERTY(BlueprintReadWrite)
+	FText ReadableFText;
+
+	UPROPERTY(BlueprintReadWrite)
+	TSoftObjectPtr<UObject> ReadableSoftObject;
+
+	UPROPERTY(BlueprintReadWrite)
+	TWeakObjectPtr<UObject> ReadableWeakObject;
+
+	UPROPERTY(BlueprintReadWrite)
+	TArray<FString> ReadableStringArray;
+
+	UPROPERTY(BlueprintReadWrite)
+	TSet<int32> ReadableIntSet;
+
+	UPROPERTY(BlueprintReadWrite)
+	TMap<FName, FString> ReadableNameStringMap;
+
+	UPROPERTY(BlueprintReadWrite)
+	TArray<TObjectPtr<UObject>> ReadableStrongObjectArray;
+
+	UPROPERTY(BlueprintReadWrite)
+	TMap<FName, TObjectPtr<UObject>> ReadableStrongObjectMap;
 
 	UFUNCTION(BlueprintPure)
 	int32 ReservedHandleNames(int32 Slot, int32 Generation) const

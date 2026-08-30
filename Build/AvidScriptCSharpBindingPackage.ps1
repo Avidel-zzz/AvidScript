@@ -346,7 +346,8 @@ function Resolve-AvidScriptCSharpBindingPackage {
         $DescriptorSchemaVersion -ne 15 -and
         $DescriptorSchemaVersion -ne 16 -and
         $DescriptorSchemaVersion -ne 17 -and
-        $DescriptorSchemaVersion -ne 18) -or
+        $DescriptorSchemaVersion -ne 18 -and
+        $DescriptorSchemaVersion -ne 19) -or
         $ManifestDescriptorSchemaVersion -ne $DescriptorSchemaVersion -or
         [string]$Descriptor.package_name -cne $PackageName -or
         [string]$Descriptor.package_hash -cne $PackageHash) {
@@ -460,7 +461,17 @@ function Resolve-AvidScriptCSharpBindingPackage {
         'avidscript.value_release.v1' = @('avid_value_release', '(i)i')
         'avidscript.value_array_read_range.v1' = @('avid_value_array_read_range', '(iiiii)i')
         'avidscript.value_array_write_range.v1' = @('avid_value_array_write_range', '(iiiii)i')
-    }
+        'avidscript.value_text_to_string.v1' = @('avid_value_text_to_string', '(i)i')
+        'avidscript.value_container_count.v1' = @('avid_value_container_count', '(i)i')
+        'avidscript.value_container_read.v1' = @('avid_value_container_read', '(iiii)i')
+        'avidscript.value_container_write.v1' = @('avid_value_container_write', '(iiii)i')
+        'avidscript.value_container_resize.v1' = @('avid_value_container_resize', '(ii)i')
+        'avidscript.value_container_clear.v1' = @('avid_value_container_clear', '(i)i')
+        'avidscript.value_container_find.v1' = @('avid_value_container_find', '(ii)i')
+		'avidscript.value_container_upsert.v1' = @('avid_value_container_upsert', '(iii)i')
+		'avidscript.value_container_remove.v1' = @('avid_value_container_remove', '(ii)i')
+		'avidscript.delegate_output_write.v1' = @('avid_delegate_output_write', '(iii)i')
+	}
     foreach ($Import in @($Manifest.required_imports)) {
         $Ordinal = 0
         $HasOrdinal = Try-GetAvidScriptBindingJsonInt32 `

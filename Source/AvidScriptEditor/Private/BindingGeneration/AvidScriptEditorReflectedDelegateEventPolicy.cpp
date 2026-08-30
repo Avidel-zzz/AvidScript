@@ -106,20 +106,6 @@ bool FAvidScriptEditorReflectedDelegateEventPolicy::
 		OutSource = Signature->GetPathName();
 		return false;
 	}
-	for (TFieldIterator<FProperty> It(Signature); It; ++It)
-	{
-		const FProperty* Parameter = *It;
-		if (Parameter->HasAnyPropertyFlags(CPF_Parm)
-			&& Parameter->HasAnyPropertyFlags(
-				CPF_OutParm | CPF_ReferenceParm | CPF_ReturnParm))
-		{
-			OutCategory = TEXT("callback_reference_unsupported");
-			OutSource = Signature->GetPathName() + TEXT(".")
-				+ Parameter->GetName();
-			return false;
-		}
-	}
-
 	FAvidScriptProjectedFunction FunctionProjection;
 	FString ProjectionError;
 	if (!FAvidScriptEditorReflectedTypePolicy::ProjectFunction(
@@ -133,6 +119,7 @@ bool FAvidScriptEditorReflectedDelegateEventPolicy::
 		return false;
 	}
 
+	bool bHasOutputs = false;
 	for (FAvidScriptProjectedBindingValue& Parameter :
 		FunctionProjection.Parameters)
 	{
@@ -143,9 +130,12 @@ bool FAvidScriptEditorReflectedDelegateEventPolicy::
 				+ Parameter.Name;
 			return false;
 		}
-		if (Parameter.Direction != TEXT("value"))
+		if (Parameter.Direction != TEXT("value")
+			&& Parameter.Direction != TEXT("const_ref")
+			&& Parameter.Direction != TEXT("ref")
+			&& Parameter.Direction != TEXT("out"))
 		{
-			OutCategory = TEXT("callback_reference_unsupported");
+			OutCategory = TEXT("callback_direction_unsupported");
 			OutSource = Signature->GetPathName() + TEXT(".")
 				+ Parameter.Name;
 			return false;
@@ -158,7 +148,17 @@ bool FAvidScriptEditorReflectedDelegateEventPolicy::
 				+ Parameter.Name + TEXT(":") + Parameter.Type.CanonicalType;
 			return false;
 		}
-		OutProjection.AbiCellCount += ParameterCellCount;
+		const bool bOutput = Parameter.Direction == TEXT("ref")
+			|| Parameter.Direction == TEXT("out");
+		if (bOutput && !bHasOutputs)
+		{
+			++OutProjection.AbiCellCount;
+			bHasOutputs = true;
+		}
+		if (Parameter.Direction != TEXT("out"))
+		{
+			OutProjection.AbiCellCount += ParameterCellCount;
+		}
 		if (OutProjection.AbiCellCount > MaxAbiCells)
 		{
 			OutCategory = TEXT("callback_abi_cells_exceeded");

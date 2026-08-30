@@ -608,6 +608,163 @@ int32_t ValueRelease(wasm_exec_env_t ExecEnv, int32_t Token)
 		Token);
 }
 
+int32_t ValueTextToString(wasm_exec_env_t ExecEnv, int32_t Token)
+{
+	return DispatchI32(
+		ExecEnv,
+		EAvidScriptHostBindingId::ValueTextToString,
+		StaticImportName(EAvidScriptHostBindingId::ValueTextToString),
+		Token);
+}
+
+int32_t ValueContainerCount(wasm_exec_env_t ExecEnv, int32_t Token)
+{
+	return DispatchI32(
+		ExecEnv,
+		EAvidScriptHostBindingId::ValueContainerCount,
+		StaticImportName(EAvidScriptHostBindingId::ValueContainerCount),
+		Token);
+}
+
+int32_t DispatchValueContainerAccess(
+	wasm_exec_env_t ExecEnv,
+	const EAvidScriptHostBindingId BindingId,
+	const int32_t Token,
+	const int32_t Index,
+	const int32_t Lane,
+	const int32_t GuestAddress)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = BindingId;
+	Call.IntArgs[0] = Token;
+	Call.IntArgs[1] = Index;
+	Call.IntArgs[2] = Lane;
+	Call.GuestAddress = static_cast<uint32>(GuestAddress);
+	FAvidScriptHostCallResult Result;
+	return Dispatch(ExecEnv, StaticImportName(BindingId), Call, Result)
+		? Result.ReturnValue
+		: 0;
+}
+
+int32_t ValueContainerRead(
+	wasm_exec_env_t ExecEnv,
+	int32_t Token,
+	int32_t Index,
+	int32_t Lane,
+	int32_t GuestAddress)
+{
+	return DispatchValueContainerAccess(
+		ExecEnv,
+		EAvidScriptHostBindingId::ValueContainerRead,
+		Token,
+		Index,
+		Lane,
+		GuestAddress);
+}
+
+int32_t ValueContainerWrite(
+	wasm_exec_env_t ExecEnv,
+	int32_t Token,
+	int32_t Index,
+	int32_t Lane,
+	int32_t GuestAddress)
+{
+	return DispatchValueContainerAccess(
+		ExecEnv,
+		EAvidScriptHostBindingId::ValueContainerWrite,
+		Token,
+		Index,
+		Lane,
+		GuestAddress);
+}
+
+int32_t ValueContainerResize(
+	wasm_exec_env_t ExecEnv,
+	int32_t Token,
+	int32_t NewCount)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::ValueContainerResize;
+	Call.IntArgs[0] = Token;
+	Call.IntArgs[1] = NewCount;
+	FAvidScriptHostCallResult Result;
+	return Dispatch(
+		ExecEnv,
+		StaticImportName(EAvidScriptHostBindingId::ValueContainerResize),
+		Call,
+		Result)
+		? Result.ReturnValue
+		: 0;
+}
+
+int32_t ValueContainerClear(wasm_exec_env_t ExecEnv, int32_t Token)
+{
+	return DispatchI32(
+		ExecEnv,
+		EAvidScriptHostBindingId::ValueContainerClear,
+		StaticImportName(EAvidScriptHostBindingId::ValueContainerClear),
+		Token);
+}
+
+int32_t ValueContainerFind(
+	wasm_exec_env_t ExecEnv,
+	int32_t Token,
+	int32_t GuestAddress)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::ValueContainerFind;
+	Call.IntArgs[0] = Token;
+	Call.GuestAddress = static_cast<uint32>(GuestAddress);
+	FAvidScriptHostCallResult Result;
+	return Dispatch(
+		ExecEnv,
+		StaticImportName(EAvidScriptHostBindingId::ValueContainerFind),
+		Call,
+		Result)
+		? Result.ReturnValue
+		: -1;
+}
+
+int32_t ValueContainerUpsert(
+	wasm_exec_env_t ExecEnv,
+	int32_t Token,
+	int32_t KeyAddress,
+	int32_t ValueAddress)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::ValueContainerUpsert;
+	Call.IntArgs[0] = Token;
+	Call.IntArgs[1] = KeyAddress;
+	Call.GuestAddress = static_cast<uint32>(ValueAddress);
+	FAvidScriptHostCallResult Result;
+	return Dispatch(
+		ExecEnv,
+		StaticImportName(EAvidScriptHostBindingId::ValueContainerUpsert),
+		Call,
+		Result)
+		? Result.ReturnValue
+		: -1;
+}
+
+int32_t ValueContainerRemove(
+	wasm_exec_env_t ExecEnv,
+	int32_t Token,
+	int32_t KeyAddress)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::ValueContainerRemove;
+	Call.IntArgs[0] = Token;
+	Call.GuestAddress = static_cast<uint32>(KeyAddress);
+	FAvidScriptHostCallResult Result;
+	return Dispatch(
+		ExecEnv,
+		StaticImportName(EAvidScriptHostBindingId::ValueContainerRemove),
+		Call,
+		Result)
+		? Result.ReturnValue
+		: -1;
+}
+
 int32_t TimerSetOnce(wasm_exec_env_t ExecEnv, float DelaySeconds, int32_t CallbackId)
 {
 	FAvidScriptHostCall Call;
@@ -920,6 +1077,27 @@ int32_t EventUnsubscribe(wasm_exec_env_t ExecEnv, int64_t SubscriptionToken)
 		: 0;
 }
 
+int32_t DelegateOutputWrite(
+	wasm_exec_env_t ExecEnv,
+	int32_t TransactionToken,
+	int32_t OutputOrdinal,
+	int32_t GuestAddress)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::DelegateOutputWrite;
+	Call.IntArgs[0] = TransactionToken;
+	Call.IntArgs[1] = OutputOrdinal;
+	Call.GuestAddress = static_cast<uint32>(GuestAddress);
+	FAvidScriptHostCallResult Result;
+	return Dispatch(
+		ExecEnv,
+		StaticImportName(EAvidScriptHostBindingId::DelegateOutputWrite),
+		Call,
+		Result)
+		? Result.ReturnValue
+		: 0;
+}
+
 void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 {
 	switch (BindingId)
@@ -954,6 +1132,7 @@ void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 	case EAvidScriptHostBindingId::ContinuationStateRead: return reinterpret_cast<void*>(ContinuationStateRead);
 	case EAvidScriptHostBindingId::EventSubscribe: return reinterpret_cast<void*>(EventSubscribe);
 	case EAvidScriptHostBindingId::EventUnsubscribe: return reinterpret_cast<void*>(EventUnsubscribe);
+	case EAvidScriptHostBindingId::DelegateOutputWrite: return reinterpret_cast<void*>(DelegateOutputWrite);
 	case EAvidScriptHostBindingId::DataLaneGetEpoch: return reinterpret_cast<void*>(DataLaneGetEpoch);
 	case EAvidScriptHostBindingId::DataLaneSubmit: return reinterpret_cast<void*>(DataLaneSubmit);
 	case EAvidScriptHostBindingId::ValueArrayLength: return reinterpret_cast<void*>(ValueArrayLength);
@@ -962,6 +1141,15 @@ void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 	case EAvidScriptHostBindingId::ValueArrayReadRange: return reinterpret_cast<void*>(ValueArrayReadRange);
 	case EAvidScriptHostBindingId::ValueArrayWriteRange: return reinterpret_cast<void*>(ValueArrayWriteRange);
 	case EAvidScriptHostBindingId::ValueRelease: return reinterpret_cast<void*>(ValueRelease);
+	case EAvidScriptHostBindingId::ValueTextToString: return reinterpret_cast<void*>(ValueTextToString);
+	case EAvidScriptHostBindingId::ValueContainerCount: return reinterpret_cast<void*>(ValueContainerCount);
+	case EAvidScriptHostBindingId::ValueContainerRead: return reinterpret_cast<void*>(ValueContainerRead);
+	case EAvidScriptHostBindingId::ValueContainerWrite: return reinterpret_cast<void*>(ValueContainerWrite);
+	case EAvidScriptHostBindingId::ValueContainerResize: return reinterpret_cast<void*>(ValueContainerResize);
+	case EAvidScriptHostBindingId::ValueContainerClear: return reinterpret_cast<void*>(ValueContainerClear);
+	case EAvidScriptHostBindingId::ValueContainerFind: return reinterpret_cast<void*>(ValueContainerFind);
+	case EAvidScriptHostBindingId::ValueContainerUpsert: return reinterpret_cast<void*>(ValueContainerUpsert);
+	case EAvidScriptHostBindingId::ValueContainerRemove: return reinterpret_cast<void*>(ValueContainerRemove);
 	default: return nullptr;
 	}
 }

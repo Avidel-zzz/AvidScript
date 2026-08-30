@@ -57,7 +57,10 @@ internal static class SemanticCompilationTests
         Assert(vectorType.Kind == "struct" && vectorType.IsValueType, "FVector should be a canonical user struct");
 
         SemanticSymbol script = FindSymbol(document.Symbols, "symbol:type:global::AvidScript.ActorLifecycleScript");
-        Assert(script.Kind == "type" && script.IsStatic, "ActorLifecycleScript should be a static type symbol");
+        Assert(script.Kind == "type"
+            && script.IsStatic
+            && !script.IsExecutableReferenceSource,
+            "ActorLifecycleScript should remain a primary-source static type symbol");
         SemanticSymbol field = FindSymbol(document.Symbols, "symbol:field:global::AvidScript.ActorLifecycleScript.ElapsedSeconds:float32");
         Assert(field.TypeId == "type:float32" && field.Span.Length > 0, "ElapsedSeconds should retain type and declaration span");
         SemanticSymbol tick = FindSymbol(document.Symbols, "symbol:method:global::AvidScript.ActorLifecycleScript.Tick(float32):void");
@@ -165,6 +168,15 @@ internal static class Native
             });
 
         Assert(document.Succeeded, "executable reference source should pass semantic analysis");
+        SemanticSymbol primaryScript = FindSymbol(
+            document.Symbols,
+            "symbol:type:global::AvidScript.Script");
+        SemanticSymbol generatedActor = FindSymbol(
+            document.Symbols,
+            "symbol:type:global::AvidScript.Actor");
+        Assert(!primaryScript.IsExecutableReferenceSource
+            && generatedActor.IsExecutableReferenceSource,
+            "semantic symbols should retain primary versus executable-reference provenance");
         SemanticCallable import = document.Callables.Single(callable =>
             callable.Import?.Name == "avid_ue_test_scale");
         Assert(import.Import!.Module == "avidscript", "generated DllImport should enter semantic imports");

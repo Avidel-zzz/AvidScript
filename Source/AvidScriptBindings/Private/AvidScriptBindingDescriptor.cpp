@@ -276,6 +276,88 @@ bool ReadAvidScriptBindingElementTypeId(
 	return true;
 }
 
+bool ReadAvidScriptBindingCompositeMetadata(
+	const TSharedPtr<FJsonObject>& Object,
+	const int32 SchemaVersion,
+	const FString& Kind,
+	const FString& ElementTypeId,
+	TArray<FString>& OutTypeArguments,
+	FString& OutCapabilityKind,
+	FString& OutErrorSource)
+{
+	OutTypeArguments.Reset();
+	OutCapabilityKind.Reset();
+	if (SchemaVersion < 19)
+	{
+		if (Object.IsValid()
+			&& (Object->HasField(TEXT("type_arguments"))
+				|| Object->HasField(TEXT("capability_kind"))))
+		{
+			OutErrorSource = TEXT("composite_metadata");
+			return false;
+		}
+		return true;
+	}
+	if (!ReadAvidScriptBindingStringArray(
+			Object,
+			TEXT("type_arguments"),
+			OutTypeArguments,
+			OutErrorSource,
+			true)
+		|| !ReadAvidScriptBindingRequiredStringAllowEmpty(
+			Object,
+			TEXT("capability_kind"),
+			OutCapabilityKind,
+			OutErrorSource))
+	{
+		return false;
+	}
+	for (const FString& TypeArgument : OutTypeArguments)
+	{
+		if (!IsAvidScriptBindingLowerSha256(TypeArgument))
+		{
+			OutErrorSource = TEXT("type_arguments");
+			return false;
+		}
+	}
+	if ((Kind == TEXT("array")
+			&& (OutTypeArguments.Num() != 1
+				|| OutTypeArguments[0] != ElementTypeId
+				|| (OutCapabilityKind != TEXT("array_flat")
+					&& OutCapabilityKind != TEXT("composite"))))
+		|| (Kind == TEXT("set")
+			&& (OutTypeArguments.Num() != 1
+				|| OutCapabilityKind != TEXT("composite")))
+		|| (Kind == TEXT("map")
+			&& (OutTypeArguments.Num() != 2
+				|| OutCapabilityKind != TEXT("composite")))
+		|| (Kind == TEXT("text_capability")
+			&& (!OutTypeArguments.IsEmpty()
+				|| OutCapabilityKind != TEXT("composite")))
+		|| ((Kind == TEXT("soft_object_capability")
+				|| Kind == TEXT("weak_object_capability"))
+			&& (OutTypeArguments.Num() != 1
+				|| OutCapabilityKind != TEXT("composite")))
+		|| (Kind == TEXT("name_utf8") || Kind == TEXT("string_utf8"))
+			&& OutCapabilityKind != TEXT("utf8")
+		|| (Kind == TEXT("object_handle") && OutCapabilityKind != TEXT("object"))
+		|| (Kind != TEXT("array")
+			&& Kind != TEXT("set")
+			&& Kind != TEXT("map")
+			&& Kind != TEXT("text_capability")
+			&& Kind != TEXT("soft_object_capability")
+			&& Kind != TEXT("weak_object_capability")
+			&& Kind != TEXT("name_utf8")
+			&& Kind != TEXT("string_utf8")
+			&& Kind != TEXT("object_handle")
+			&& (!OutTypeArguments.IsEmpty() || !OutCapabilityKind.IsEmpty())))
+	{
+		OutErrorSource = Kind + TEXT(":composite_metadata");
+		return false;
+	}
+	return true;
+}
+
 bool ParseAvidScriptBindingType(
 	const TSharedPtr<FJsonObject>& Object,
 	const int32 SchemaVersion,
@@ -302,6 +384,14 @@ bool ParseAvidScriptBindingType(
 			OutType.Kind,
 			OutType.ElementTypeId,
 			OutErrorSource)
+		|| !ReadAvidScriptBindingCompositeMetadata(
+			Object,
+			SchemaVersion,
+			OutType.Kind,
+			OutType.ElementTypeId,
+			OutType.TypeArguments,
+			OutType.CapabilityKind,
+			OutErrorSource)
 		|| !IsAvidScriptBindingLowerSha256(OutType.StableId)
 		|| OutType.StableId != FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(
 			OutType.CanonicalType,
@@ -315,10 +405,16 @@ bool ParseAvidScriptBindingType(
 				: INDEX_NONE,
 			SchemaVersion >= 10 && OutType.Kind == TEXT("array")
 				? OutType.ElementTypeId
-				: FString())
+				: FString(),
+			SchemaVersion >= 19 ? OutType.TypeArguments : TArray<FString>())
 		|| (OutType.Kind == TEXT("enum")) != OutType.CanonicalType.StartsWith(TEXT("enum:"))
 		|| (OutType.Kind == TEXT("struct_wire")) != OutType.CanonicalType.StartsWith(TEXT("struct_wire:"))
 		|| (OutType.Kind == TEXT("array")) != OutType.CanonicalType.StartsWith(TEXT("array:tarray<"))
+		|| (OutType.Kind == TEXT("text_capability")) != (OutType.CanonicalType == TEXT("text:ftext"))
+		|| (OutType.Kind == TEXT("soft_object_capability"))
+			!= OutType.CanonicalType.StartsWith(TEXT("soft_object:"))
+		|| (OutType.Kind == TEXT("weak_object_capability"))
+			!= OutType.CanonicalType.StartsWith(TEXT("weak_object:"))
 		|| OutType.Size <= 0
 		|| OutType.Alignment <= 0)
 	{
@@ -1309,24 +1405,165 @@ bool FAvidScriptBindingDescriptorLayout::ValidateTypeGraph(
 	{
 		TypesById.Add(Type.StableId, &Type);
 	}
+	if (Types.Num() > 4096)
+	{
+		OutErrorSource = TEXT("type_graph_node_limit");
+		return false;
+	}
+	TFunction<bool(const FAvidScriptBindingTypeModel&, int32, TSet<FString>&, TSet<FString>&)> ValidateArguments;
+	ValidateArguments = [&TypesById, &OutErrorSource, &ValidateArguments](
+		const FAvidScriptBindingTypeModel& Type,
+		const int32 Depth,
+		TSet<FString>& Active,
+		TSet<FString>& Visited)
+	{
+		if (Depth > 8 || Active.Contains(Type.StableId))
+		{
+			OutErrorSource = Type.StableId + TEXT(":type_arguments_cycle");
+			return false;
+		}
+		if (Visited.Contains(Type.StableId))
+		{
+			return true;
+		}
+		Active.Add(Type.StableId);
+		for (const FString& TypeArgument : Type.TypeArguments)
+		{
+			const FAvidScriptBindingTypeModel* Argument = TypesById.FindRef(TypeArgument);
+			if (Argument == nullptr
+				|| !ValidateArguments(*Argument, Depth + 1, Active, Visited))
+			{
+				if (OutErrorSource.IsEmpty())
+				{
+					OutErrorSource = Type.StableId + TEXT(":type_arguments");
+				}
+				Active.Remove(Type.StableId);
+				return false;
+			}
+		}
+		Active.Remove(Type.StableId);
+		Visited.Add(Type.StableId);
+		return true;
+	};
+	TSet<FString> VisitedTypes;
 	for (const FAvidScriptBindingTypeModel& Type : Types)
 	{
+		TSet<FString> ActiveTypes;
+		if (!ValidateArguments(Type, 0, ActiveTypes, VisitedTypes))
+		{
+			return false;
+		}
+	}
+	for (const FAvidScriptBindingTypeModel& Type : Types)
+	{
+		for (const FString& TypeArgument : Type.TypeArguments)
+		{
+			if (!TypesById.Contains(TypeArgument))
+			{
+				OutErrorSource = Type.StableId + TEXT(":type_arguments");
+				return false;
+			}
+		}
+		if (Type.Kind == TEXT("soft_object_capability")
+			|| Type.Kind == TEXT("weak_object_capability"))
+		{
+			const FAvidScriptBindingTypeModel* ObjectType =
+				Type.TypeArguments.Num() == 1
+					? TypesById.FindRef(Type.TypeArguments[0])
+					: nullptr;
+			const bool bSoftObject = Type.Kind == TEXT("soft_object_capability");
+			const FString CanonicalPrefix = bSoftObject
+				? TEXT("soft_object:")
+				: TEXT("weak_object:");
+			const FString CppPrefix = bSoftObject
+				? TEXT("TSoftObjectPtr<")
+				: TEXT("TWeakObjectPtr<");
+			if (ObjectType == nullptr
+				|| ObjectType->Kind != TEXT("object_handle")
+				|| ObjectType->ClassPath.IsEmpty()
+				|| ObjectType->CanonicalType != TEXT("object:") + ObjectType->ClassPath
+				|| Type.CanonicalType != CanonicalPrefix + ObjectType->ClassPath
+				|| Type.CppType != CppPrefix + ObjectType->CppType + TEXT(">")
+				|| Type.Size != 4
+				|| Type.Alignment != 4
+				|| Type.AbiTypes != TArray<FString>({ TEXT("i") })
+				|| Type.CapabilityKind != TEXT("composite"))
+			{
+				OutErrorSource = Type.StableId + TEXT(":type_arguments");
+				return false;
+			}
+			continue;
+		}
+		if (Type.Kind == TEXT("set") || Type.Kind == TEXT("map"))
+		{
+			const int32 ExpectedArguments = Type.Kind == TEXT("set") ? 1 : 2;
+			const FAvidScriptBindingTypeModel* KeyOrElement =
+				Type.TypeArguments.IsValidIndex(0)
+					? TypesById.FindRef(Type.TypeArguments[0])
+					: nullptr;
+			const FAvidScriptBindingTypeModel* Mapped =
+				Type.Kind == TEXT("map") && Type.TypeArguments.IsValidIndex(1)
+					? TypesById.FindRef(Type.TypeArguments[1])
+					: nullptr;
+			const FString ExpectedCanonical = Type.Kind == TEXT("set")
+				? (KeyOrElement == nullptr
+					? FString()
+					: TEXT("set:tset<") + KeyOrElement->CanonicalType + TEXT(">"))
+				: (KeyOrElement == nullptr || Mapped == nullptr
+					? FString()
+					: TEXT("map:tmap<") + KeyOrElement->CanonicalType
+						+ TEXT(",") + Mapped->CanonicalType + TEXT(">"));
+			const FString ExpectedCpp = Type.Kind == TEXT("set")
+				? (KeyOrElement == nullptr
+					? FString()
+					: TEXT("TSet<") + KeyOrElement->CppType + TEXT(">"))
+				: (KeyOrElement == nullptr || Mapped == nullptr
+					? FString()
+					: TEXT("TMap<") + KeyOrElement->CppType
+						+ TEXT(",") + Mapped->CppType + TEXT(">"));
+			if (Type.TypeArguments.Num() != ExpectedArguments
+				|| Type.TypeArguments.ContainsByPredicate(
+					[&TypesById](const FString& TypeId)
+					{
+						const FAvidScriptBindingTypeModel* Argument =
+							TypesById.FindRef(TypeId);
+						return Argument == nullptr || Argument->Kind == TEXT("void");
+					})
+				|| Type.CanonicalType != ExpectedCanonical
+				|| Type.CppType != ExpectedCpp
+				|| Type.Size != 4
+				|| Type.Alignment != 4
+				|| Type.AbiTypes != TArray<FString>({ TEXT("i") })
+				|| Type.CapabilityKind != TEXT("composite"))
+			{
+				OutErrorSource = Type.StableId + TEXT(":type_arguments");
+				return false;
+			}
+			continue;
+		}
 		if (Type.Kind != TEXT("array"))
 		{
 			continue;
 		}
 		const FAvidScriptBindingTypeModel* Element = TypesById.FindRef(Type.ElementTypeId);
+		const bool bFlatArray = Type.CapabilityKind == TEXT("array_flat");
 		if (Element == nullptr
-			|| Element->Kind == TEXT("array")
-			|| Element->Kind == TEXT("name_utf8")
-			|| Element->Kind == TEXT("string_utf8")
+			|| (bFlatArray
+				&& (Element->Kind == TEXT("array")
+					|| Element->Kind == TEXT("set")
+					|| Element->Kind == TEXT("map")
+					|| Element->Kind == TEXT("name_utf8")
+					|| Element->Kind == TEXT("string_utf8")
+					|| Element->CapabilityKind == TEXT("composite")))
 			|| Element->Kind == TEXT("void")
 			|| Element->Size <= 0
 			|| Element->Alignment <= 0
 			|| Element->Alignment > 16
 			|| Type.Size != 4
 			|| Type.Alignment != 4
-			|| Type.AbiTypes != TArray<FString>({ TEXT("i") }))
+			|| Type.AbiTypes != TArray<FString>({ TEXT("i") })
+			|| (Type.CapabilityKind != TEXT("array_flat")
+				&& Type.CapabilityKind != TEXT("composite")))
 		{
 			OutErrorSource = Type.StableId + TEXT(":element_type_id");
 			return false;
@@ -1428,8 +1665,6 @@ bool ParseAvidScriptBindingDelegateEvent(
 				Parameter,
 				OutErrorSource)
 			|| Parameter.Direction == TEXT("return")
-			|| Parameter.Direction == TEXT("ref")
-			|| Parameter.Direction == TEXT("out")
 			|| Parameter.bHasDefault)
 		{
 			OutErrorSource = TEXT("parameters");
@@ -1484,7 +1719,8 @@ FString FAvidScriptBindingDescriptorIdentity::MakeTypeIdentity(
 	const TArray<FAvidScriptBindingStructFieldModel>& StructFields,
 	const int32 WireSize,
 	const int32 WireAlignment,
-	const FString& ElementTypeId)
+	const FString& ElementTypeId,
+	const TArray<FString>& TypeArguments)
 {
 	FString Identity = CanonicalType;
 	for (const FAvidScriptBindingEnumValue& EnumValue : EnumValues)
@@ -1517,6 +1753,13 @@ FString FAvidScriptBindingDescriptorIdentity::MakeTypeIdentity(
 	{
 		Identity += TEXT("|element:") + ElementTypeId;
 	}
+	for (const FString& TypeArgument : TypeArguments)
+	{
+		Identity += FString::Printf(
+			TEXT("|argument:%d:%s"),
+			TypeArgument.Len(),
+			*TypeArgument);
+	}
 	return Identity;
 }
 
@@ -1526,7 +1769,8 @@ FString FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(
 	const TArray<FAvidScriptBindingStructFieldModel>& StructFields,
 	const int32 WireSize,
 	const int32 WireAlignment,
-	const FString& ElementTypeId)
+	const FString& ElementTypeId,
+	const TArray<FString>& TypeArguments)
 {
 	return FAvidScriptHash::Sha256HexUtf8(MakeTypeIdentity(
 		CanonicalType,
@@ -1534,7 +1778,8 @@ FString FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(
 		StructFields,
 		WireSize,
 		WireAlignment,
-		ElementTypeId));
+		ElementTypeId,
+		TypeArguments));
 }
 
 FString FAvidScriptBindingDescriptorIdentity::MakeClassReferenceIdentity(
@@ -2128,6 +2373,20 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 				TEXT("array_element_type_id"),
 				Type.ElementTypeId);
 		}
+		if (Package.SchemaVersion >= 19)
+		{
+			for (const FString& TypeArgument : Type.TypeArguments)
+			{
+				AppendAvidScriptBindingIdentityField(
+					Identity,
+					TEXT("type_argument"),
+					TypeArgument);
+			}
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("capability_kind"),
+				Type.CapabilityKind);
+		}
 		if (Package.SchemaVersion >= 6)
 		{
 			AppendAvidScriptBindingIdentityField(
@@ -2399,7 +2658,8 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 			&& OutPackage.SchemaVersion != 15
 			&& OutPackage.SchemaVersion != 16
 			&& OutPackage.SchemaVersion != 17
-			&& OutPackage.SchemaVersion != 18)
+			&& OutPackage.SchemaVersion != 18
+			&& OutPackage.SchemaVersion != 19)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("generator_version"), OutPackage.GeneratorVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("engine_version"), OutPackage.EngineVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("source"), OutPackage.Source, OutErrorSource)
@@ -2429,7 +2689,8 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 				&& OutPackage.SchemaVersion != 15
 				&& OutPackage.SchemaVersion != 16
 				&& OutPackage.SchemaVersion != 17
-				&& OutPackage.SchemaVersion != 18)
+				&& OutPackage.SchemaVersion != 18
+				&& OutPackage.SchemaVersion != 19)
 			{
 				OutErrorSource = TEXT("schema_version");
 			}

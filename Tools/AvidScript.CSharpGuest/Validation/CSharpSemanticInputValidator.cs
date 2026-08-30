@@ -342,7 +342,7 @@ internal static class CSharpSemanticInputValidator
                 && !callable.IsConstructor
                 && callable.Import is null
                 && string.Equals(callable.ReturnTypeId, "type:void", StringComparison.Ordinal)
-                && callable.Parameters.All(parameter => parameter.RefKind == "none")
+                && callable.Parameters.All(parameter => parameter.RefKind is "none" or "ref" or "out")
                 && symbolsById.TryGetValue(callback.MethodSymbolId, out SemanticSymbol? symbol)
                 && string.Equals(symbol.Kind, "method", StringComparison.Ordinal)
                 && string.Equals(symbol.Name, callback.Name, StringComparison.Ordinal)
@@ -1188,6 +1188,7 @@ internal static class CSharpSemanticInputValidator
             (15, "1.15") => true,
             (15, "1.16") => true,
             (15, "1.17") => true,
+            (16, "1.18") => true,
             (SemanticContract.CurrentSchemaVersion, SemanticContract.CurrentSemanticVersion) => true,
             _ => false,
         };

@@ -368,6 +368,7 @@ bool FAvidScriptEditorBindingSchemaGenerator::ValidateManifestImports(
 	SupportedImports.Add(TEXT("env.timer_cancel"));
 	SupportedImports.Add(TEXT("env.timer_set_once"));
 	SupportedImports.Add(TEXT("avidscript.avid_owner_get_handle"));
+	SupportedImports.Add(TEXT("avidscript.avid_delegate_output_write"));
 
 	for (int32 Index = 0; Index < RequiredImports->Num(); ++Index)
 	{

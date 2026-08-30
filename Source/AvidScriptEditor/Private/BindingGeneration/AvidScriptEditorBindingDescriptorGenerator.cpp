@@ -38,6 +38,8 @@ constexpr const TCHAR* LatentPayloadGeneratorVersion = TEXT("57.12C10.0");
 constexpr const TCHAR* NetworkGeneratorVersion = TEXT("57.12D1.0");
 constexpr const TCHAR* ReplicatedPropertyGeneratorVersion = TEXT("57.12D2.0");
 constexpr const TCHAR* InboundHandlerGeneratorVersion = TEXT("57.12D4.0");
+constexpr const TCHAR* CompositeValueGeneratorVersion = TEXT("58.1.0");
+constexpr const TCHAR* DelegateOutputGeneratorVersion = TEXT("58.2.0");
 
 struct FResolvedBindingDescriptor
 {
@@ -311,6 +313,16 @@ bool ResolveGeneratedPropertyShape(
 
 void FinalizeType(FAvidScriptProjectedBindingType& Type)
 {
+	TArray<FString> TypeArgumentIds;
+	TypeArgumentIds.Reserve(Type.TypeArguments.Num());
+	for (const TSharedPtr<FAvidScriptProjectedBindingType>& Argument :
+		Type.TypeArguments)
+	{
+		if (Argument.IsValid())
+		{
+			TypeArgumentIds.Add(Argument->StableId);
+		}
+	}
 	Type.StableId = Type.Kind == TEXT("struct_wire")
 		? FAvidScriptEditorBindingDescriptorIdentity::MakeTypeStableId(
 			Type.CanonicalType,
@@ -326,7 +338,8 @@ void FinalizeType(FAvidScriptProjectedBindingType& Type)
 			INDEX_NONE,
 			Type.Kind == TEXT("array") && Type.ElementType.IsValid()
 				? Type.ElementType->StableId
-				: FString());
+				: FString(),
+			TypeArgumentIds);
 }
 
 FString MakeDelegateEventSelectionKey(
@@ -351,6 +364,13 @@ void AddProjectedTypeAndChildren(
 	if (Type.ElementType.IsValid())
 	{
 		AddProjectedTypeAndChildren(*Type.ElementType, TypesByCanonicalName);
+	}
+	for (const TSharedPtr<FAvidScriptProjectedBindingType>& Argument : Type.TypeArguments)
+	{
+		if (Argument.IsValid() && Argument != Type.ElementType)
+		{
+			AddProjectedTypeAndChildren(*Argument, TypesByCanonicalName);
+		}
 	}
 	TypesByCanonicalName.FindOrAdd(Type.CanonicalType) = Type;
 }
@@ -1319,6 +1339,16 @@ bool GenerateBindingDescriptor(
 		{
 			return Type.Kind == TEXT("array");
 		});
+	const bool bHasCompositeValueTypes = Types.ContainsByPredicate(
+		[](const FAvidScriptProjectedBindingType& Type)
+		{
+			return Type.CapabilityKind == TEXT("composite");
+		});
+	const bool bHasGenericValueTypes = Types.ContainsByPredicate(
+		[](const FAvidScriptProjectedBindingType& Type)
+		{
+			return !Type.TypeArguments.IsEmpty();
+		});
 	const bool bHasLatentBindings = Bindings.ContainsByPredicate(
 		[](const FResolvedBindingDescriptor& Binding)
 		{
@@ -1343,6 +1373,16 @@ bool GenerateBindingDescriptor(
 		[](const FResolvedDelegateEventDescriptor& Event)
 		{
 			return Event.CallbackKind != TEXT("multicast");
+		});
+	const bool bHasDelegateOutputs = DelegateEvents.ContainsByPredicate(
+		[](const FResolvedDelegateEventDescriptor& Event)
+		{
+			return Event.Projection.Parameters.ContainsByPredicate(
+				[](const FAvidScriptProjectedBindingValue& Parameter)
+				{
+					return Parameter.Direction == TEXT("ref")
+						|| Parameter.Direction == TEXT("out");
+				});
 		});
 	Package.SchemaVersion = bHasWritableProperties || bHasNativeDirectFunctions
 			|| bHasGeneratedNativeBindings
@@ -1382,7 +1422,15 @@ bool GenerateBindingDescriptor(
 	{
 		Package.SchemaVersion = 18;
 	}
-	Package.GeneratorVersion = bHasInboundHandlers
+	if (bHasGenericValueTypes || bHasCompositeValueTypes || bHasDelegateOutputs)
+	{
+		Package.SchemaVersion = 19;
+	}
+	Package.GeneratorVersion = bHasDelegateOutputs
+		? DelegateOutputGeneratorVersion
+		: bHasGenericValueTypes || bHasCompositeValueTypes
+		? CompositeValueGeneratorVersion
+		: bHasInboundHandlers
 		? InboundHandlerGeneratorVersion
 		: bHasReplicatedProperties
 		? ReplicatedPropertyGeneratorVersion
@@ -1407,6 +1455,47 @@ bool GenerateBindingDescriptor(
 			: ObjectFactories.IsEmpty()
 				? GeneratorVersion
 				: ObjectFactoryGeneratorVersion;
+	if (Package.SchemaVersion >= 18 && !DelegateEvents.IsEmpty())
+	{
+		for (FResolvedDelegateEventDescriptor& Event : DelegateEvents)
+		{
+			TArray<FAvidScriptBindingValueModel> ParameterModels;
+			ParameterModels.Reserve(Event.Projection.Parameters.Num());
+			for (const FAvidScriptProjectedBindingValue& Parameter :
+				Event.Projection.Parameters)
+			{
+				ParameterModels.Add(MakeBindingValueModel(Parameter));
+			}
+			Event.CanonicalIdentity =
+				FAvidScriptBindingDescriptorIdentity::MakeDelegateEventCanonicalIdentity(
+					Event.OwnerClass->GetPathName(),
+					Event.Selection.EventName.ToString(),
+					Event.CallbackKind,
+					TEXT("self"),
+					ParameterModels,
+					Event.Network,
+					Event.RepNotifyProperty == nullptr
+						? NAME_None
+						: Event.RepNotifyProperty->GetFName(),
+					Event.HandlerMode);
+			Event.StableId = FAvidScriptHash::Sha256HexUtf8(
+				Event.CanonicalIdentity);
+			Event.ExportName =
+				TEXT("avid_on_delegate_") + Event.StableId.Left(16);
+		}
+		DelegateEvents.Sort([](
+			const FResolvedDelegateEventDescriptor& Left,
+			const FResolvedDelegateEventDescriptor& Right)
+		{
+			return Left.CanonicalIdentity.Compare(
+				Right.CanonicalIdentity,
+				ESearchCase::CaseSensitive) < 0;
+		});
+		for (int32 Index = 0; Index < DelegateEvents.Num(); ++Index)
+		{
+			DelegateEvents[Index].Ordinal = Index;
+		}
+	}
 	Package.EngineVersion = FEngineVersion::Current().ToString(EVersionComponent::Patch);
 	Package.Source = TEXT("ue_reflection");
 	Package.PackageName = PackageName;
@@ -1425,6 +1514,14 @@ bool GenerateBindingDescriptor(
 		TypeModel.ElementTypeId = Type.ElementType.IsValid()
 			? Type.ElementType->StableId
 			: FString();
+		for (const TSharedPtr<FAvidScriptProjectedBindingType>& Argument : Type.TypeArguments)
+		{
+			if (Argument.IsValid())
+			{
+				TypeModel.TypeArguments.Add(Argument->StableId);
+			}
+		}
+		TypeModel.CapabilityKind = Type.CapabilityKind;
 		Package.Types.Add(MoveTemp(TypeModel));
 	}
 	for (const FResolvedBindingDescriptor& Binding : Bindings)
@@ -1676,6 +1773,7 @@ bool GenerateBindingDescriptor(
 			AddedType.Size = ProjectedType.Size;
 			AddedType.Alignment = ProjectedType.Alignment;
 			AddedType.AbiTypes = ProjectedType.AbiValueTypes;
+			AddedType.CapabilityKind = ProjectedType.CapabilityKind;
 			TypeModel = &Package.Types.Add_GetRef(MoveTemp(AddedType));
 		}
 		if (TypeModel->CanonicalType != TEXT("object:") + Node.CanonicalClassPath

@@ -101,6 +101,18 @@ internal static class CSharpGuestIds
     public static string DelegateEventAggregate(string subscriptionId, int ordinal) =>
         $"value:delegate_event:{subscriptionId}:aggregate:{ordinal}";
 
+    public static string DelegateEventOutputValue(string subscriptionId, int ordinal) =>
+        $"value:delegate_event:{subscriptionId}:output_value:{ordinal}";
+
+    public static string DelegateEventOutputAddress(string subscriptionId, int ordinal) =>
+        $"value:delegate_event:{subscriptionId}:output_address:{ordinal}";
+
+    public static string DelegateEventOutputOrdinal(string subscriptionId, int ordinal) =>
+        $"value:delegate_event:{subscriptionId}:output_ordinal:{ordinal}";
+
+    public static string DelegateEventOutputStatus(string subscriptionId, int ordinal) =>
+        $"value:delegate_event:{subscriptionId}:output_status:{ordinal}";
+
     public static string DelegateEventBlock(string subscriptionId) =>
         $"block:synthetic:delegate_event:{subscriptionId}";
 

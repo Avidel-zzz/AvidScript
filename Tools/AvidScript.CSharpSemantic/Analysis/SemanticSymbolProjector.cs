@@ -25,7 +25,8 @@ internal static class SemanticSymbolProjector
                 unit.SourceText,
                 symbols,
                 typeRegistry,
-                unit.SyntaxTree == context.PrimaryUnit.SyntaxTree);
+                unit.IsPrimary,
+                !unit.IsPrimary);
         }
 
         return symbols.Values.OrderBy(symbol => symbol.Id, StringComparer.Ordinal).ToArray();
@@ -37,14 +38,21 @@ internal static class SemanticSymbolProjector
         SourceText sourceText,
         IDictionary<string, SemanticSymbol> symbols,
         SemanticTypeRegistry typeRegistry,
-        bool projectForeachLocals)
+        bool projectForeachLocals,
+        bool isExecutableReferenceSource)
     {
         foreach (MemberDeclarationSyntax declaration in root.DescendantNodes().OfType<MemberDeclarationSyntax>())
         {
             ISymbol? symbol = semanticModel.GetDeclaredSymbol(declaration);
             if (symbol is not null)
             {
-                AddSymbol(symbols, symbol, declaration, sourceText, typeRegistry);
+                AddSymbol(
+                    symbols,
+                    symbol,
+                    declaration,
+                    sourceText,
+                    typeRegistry,
+                    isExecutableReferenceSource);
             }
 
             if (declaration is FieldDeclarationSyntax fieldDeclaration)
@@ -54,7 +62,13 @@ internal static class SemanticSymbolProjector
                     IFieldSymbol? field = semanticModel.GetDeclaredSymbol(variable) as IFieldSymbol;
                     if (field is not null)
                     {
-                        AddSymbol(symbols, field, variable, sourceText, typeRegistry);
+                        AddSymbol(
+                            symbols,
+                            field,
+                            variable,
+                            sourceText,
+                            typeRegistry,
+                            isExecutableReferenceSource);
                     }
                 }
             }
@@ -65,7 +79,13 @@ internal static class SemanticSymbolProjector
             IParameterSymbol? parameter = semanticModel.GetDeclaredSymbol(parameterSyntax) as IParameterSymbol;
             if (parameter is not null)
             {
-                AddSymbol(symbols, parameter, parameterSyntax, sourceText, typeRegistry);
+                AddSymbol(
+                    symbols,
+                    parameter,
+                    parameterSyntax,
+                    sourceText,
+                    typeRegistry,
+                    isExecutableReferenceSource);
             }
         }
 
@@ -74,7 +94,13 @@ internal static class SemanticSymbolProjector
             IMethodSymbol? accessor = semanticModel.GetDeclaredSymbol(accessorSyntax) as IMethodSymbol;
             if (accessor is not null)
             {
-                AddSymbol(symbols, accessor, accessorSyntax, sourceText, typeRegistry);
+                AddSymbol(
+                    symbols,
+                    accessor,
+                    accessorSyntax,
+                    sourceText,
+                    typeRegistry,
+                    isExecutableReferenceSource);
             }
         }
         foreach (PropertyDeclarationSyntax propertySyntax in root.DescendantNodes()
@@ -84,7 +110,13 @@ internal static class SemanticSymbolProjector
             IPropertySymbol? property = semanticModel.GetDeclaredSymbol(propertySyntax) as IPropertySymbol;
             if (property?.GetMethod is { } getter)
             {
-                AddSymbol(symbols, getter, propertySyntax.ExpressionBody!, sourceText, typeRegistry);
+                AddSymbol(
+                    symbols,
+                    getter,
+                    propertySyntax.ExpressionBody!,
+                    sourceText,
+                    typeRegistry,
+                    isExecutableReferenceSource);
             }
         }
         foreach (IndexerDeclarationSyntax indexerSyntax in root.DescendantNodes()
@@ -94,7 +126,13 @@ internal static class SemanticSymbolProjector
             IPropertySymbol? indexer = semanticModel.GetDeclaredSymbol(indexerSyntax) as IPropertySymbol;
             if (indexer?.GetMethod is { } getter)
             {
-                AddSymbol(symbols, getter, indexerSyntax.ExpressionBody!, sourceText, typeRegistry);
+                AddSymbol(
+                    symbols,
+                    getter,
+                    indexerSyntax.ExpressionBody!,
+                    sourceText,
+                    typeRegistry,
+                    isExecutableReferenceSource);
             }
         }
         foreach (VariableDeclaratorSyntax variable in root.DescendantNodes().OfType<VariableDeclaratorSyntax>())
@@ -102,7 +140,13 @@ internal static class SemanticSymbolProjector
             ILocalSymbol? local = semanticModel.GetDeclaredSymbol(variable) as ILocalSymbol;
             if (local is not null)
             {
-                AddSymbol(symbols, local, variable, sourceText, typeRegistry);
+                AddSymbol(
+                    symbols,
+                    local,
+                    variable,
+                    sourceText,
+                    typeRegistry,
+                    isExecutableReferenceSource);
             }
         }
 
@@ -113,7 +157,13 @@ internal static class SemanticSymbolProjector
             ILocalSymbol? local = semanticModel.GetDeclaredSymbol(loop) as ILocalSymbol;
             if (local is not null)
             {
-                AddSymbol(symbols, local, loop, sourceText, typeRegistry);
+                AddSymbol(
+                    symbols,
+                    local,
+                    loop,
+                    sourceText,
+                    typeRegistry,
+                    isExecutableReferenceSource);
             }
         }
 
@@ -122,7 +172,13 @@ internal static class SemanticSymbolProjector
             ILocalSymbol? local = semanticModel.GetDeclaredSymbol(designation) as ILocalSymbol;
             if (local is not null)
             {
-                AddSymbol(symbols, local, designation, sourceText, typeRegistry);
+                AddSymbol(
+                    symbols,
+                    local,
+                    designation,
+                    sourceText,
+                    typeRegistry,
+                    isExecutableReferenceSource);
             }
         }
 
@@ -133,7 +189,8 @@ internal static class SemanticSymbolProjector
         ISymbol symbol,
         SyntaxNode syntax,
         SourceText sourceText,
-        SemanticTypeRegistry typeRegistry)
+        SemanticTypeRegistry typeRegistry,
+        bool isExecutableReferenceSource)
     {
         string id = GetSymbolId(symbol);
         string? typeId = GetType(symbol) is { } type ? typeRegistry.Register(type) : null;
@@ -155,6 +212,7 @@ internal static class SemanticSymbolProjector
         {
             IsConst = symbol is IFieldSymbol constField && constField.IsConst,
             IsReadonly = symbol is IFieldSymbol readonlyField && readonlyField.IsReadOnly,
+            IsExecutableReferenceSource = isExecutableReferenceSource,
         };
         if (!symbols.TryAdd(id, projected))
         {

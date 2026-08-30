@@ -19,6 +19,8 @@ class UWorld;
 class IAvidScriptObjectOwnershipDomain;
 class FAvidScriptUtf8ValueHeap;
 class FAvidScriptArrayValueHeap;
+class FAvidScriptCompositeValueHeap;
+class FAvidScriptPreparedDelegateOutputTransaction;
 class IAvidScriptBindingLatentHost;
 struct FAvidScriptBindingTypeModel;
 
@@ -104,6 +106,7 @@ struct FAvidScriptBindingInvocationContext
 	IAvidScriptObjectOwnershipDomain* ObjectOwnership = nullptr;
 	FAvidScriptUtf8ValueHeap* Utf8ValueHeap = nullptr;
 	FAvidScriptArrayValueHeap* ArrayValueHeap = nullptr;
+	FAvidScriptCompositeValueHeap* CompositeValueHeap = nullptr;
 	FAvidScriptObjectHandle OwnerHandle;
 	TWeakObjectPtr<UWorld> World;
 	EAvidScriptActorWritePolicy WritePolicy = EAvidScriptActorWritePolicy::ReadOnly;
@@ -222,6 +225,7 @@ using FAvidScriptPreparedDelegateEncode =
 		const void* ImmutableCodecIdentity,
 		const void* NativeParameters,
 		const FAvidScriptBindingInvocationContext& InvocationContext,
+		uint32 OutputTransactionToken,
 		FAvidScriptVmCallFrame& OutFrame,
 		TArray<FAvidScriptObjectHandle>& OutBorrowedHandles,
 		FString& OutErrorCategory,
@@ -240,8 +244,40 @@ struct FAvidScriptPreparedDelegateEvent
 	FProperty* RepNotifyProperty = nullptr;
 	FAvidScriptBindingNetworkContract Network;
 	uint32 ParameterCellCount = 0;
+	uint32 OutputParameterCount = 0;
 	const void* ImmutableCodecIdentity = nullptr;
 	FAvidScriptPreparedDelegateEncode Encode = nullptr;
+};
+
+class AVIDSCRIPTBINDINGS_API FAvidScriptPreparedDelegateOutputTransaction
+{
+public:
+	static const TCHAR* GetImportStableId();
+	static const TCHAR* GetImportModuleName();
+	static const TCHAR* GetImportName();
+	static const TCHAR* GetImportSignature();
+
+	~FAvidScriptPreparedDelegateOutputTransaction();
+
+	FAvidScriptPreparedDelegateOutputTransaction(
+		const FAvidScriptPreparedDelegateOutputTransaction&) = delete;
+	FAvidScriptPreparedDelegateOutputTransaction& operator=(
+		const FAvidScriptPreparedDelegateOutputTransaction&) = delete;
+
+	bool StageOutput(
+		uint32 OutputOrdinal,
+		uint32 GuestAddress,
+		IAvidScriptVmGuestMemory& GuestMemory,
+		const FAvidScriptBindingInvocationContext& Context,
+		FString& OutError);
+	bool Commit(FString& OutError);
+	bool IsComplete() const;
+
+private:
+	friend class FAvidScriptBindingPackage;
+	struct FImpl;
+	explicit FAvidScriptPreparedDelegateOutputTransaction(TUniquePtr<FImpl>&& InImpl);
+	TUniquePtr<FImpl> Impl;
 };
 
 enum class EAvidScriptPreparedHostEffectMode : uint8
@@ -325,6 +361,11 @@ public:
 	bool BuildPreparedInboundHandlers(
 		TArray<FAvidScriptPreparedDelegateEvent>& OutHandlers,
 		FString& OutError) const;
+	bool BeginPreparedDelegateOutputTransaction(
+		const FAvidScriptPreparedDelegateEvent& Event,
+		void* NativeParameters,
+		TUniquePtr<FAvidScriptPreparedDelegateOutputTransaction>& OutTransaction,
+		FString& OutError) const;
 	bool InvokePreparedReflectionI32Pair(
 		const FAvidScriptPreparedReflectionBinding& Binding,
 		UObject& Receiver,
@@ -379,6 +420,58 @@ public:
 	bool TryResolveObjectFactory(
 		uint32 Ordinal,
 		const FAvidScriptObjectFactoryPlan*& OutPlan) const;
+	bool GetCompositeContainerCount(
+		uint32 Token,
+		const FAvidScriptBindingInvocationContext& Context,
+		int32& OutCount,
+		FString& OutError) const;
+	bool ReadCompositeContainerValue(
+		uint32 Token,
+		int32 Index,
+		int32 Lane,
+		uint32 GuestAddress,
+		IAvidScriptVmGuestMemory& GuestMemory,
+		const FAvidScriptBindingInvocationContext& Context,
+		FString& OutError) const;
+	bool WriteCompositeContainerValue(
+		uint32 Token,
+		int32 Index,
+		int32 Lane,
+		uint32 GuestAddress,
+		IAvidScriptVmGuestMemory& GuestMemory,
+		const FAvidScriptBindingInvocationContext& Context,
+		FString& OutError) const;
+	bool ResizeCompositeArray(
+		uint32 Token,
+		int32 NewCount,
+		const FAvidScriptBindingInvocationContext& Context,
+		FString& OutError) const;
+	bool ClearCompositeContainer(
+		uint32 Token,
+		const FAvidScriptBindingInvocationContext& Context,
+		FString& OutError) const;
+	bool FindCompositeContainerValue(
+		uint32 Token,
+		uint32 GuestAddress,
+		IAvidScriptVmGuestMemory& GuestMemory,
+		const FAvidScriptBindingInvocationContext& Context,
+		int32& OutIndex,
+		FString& OutError) const;
+	bool UpsertCompositeContainerValue(
+		uint32 Token,
+		uint32 KeyAddress,
+		uint32 ValueAddress,
+		IAvidScriptVmGuestMemory& GuestMemory,
+		const FAvidScriptBindingInvocationContext& Context,
+		int32& OutMutationResult,
+		FString& OutError) const;
+	bool RemoveCompositeContainerValue(
+		uint32 Token,
+		uint32 KeyAddress,
+		IAvidScriptVmGuestMemory& GuestMemory,
+		const FAvidScriptBindingInvocationContext& Context,
+		bool& bOutRemoved,
+		FString& OutError) const;
 
 	bool Dispatch(
 		const FAvidScriptDynamicHostCall& Call,

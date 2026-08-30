@@ -10,6 +10,7 @@
 #include "AvidScriptSceneAttachmentBinding.h"
 #include "Components/ActorComponent.h"
 #include "Components/SceneComponent.h"
+#include "Containers/StringConv.h"
 #include "Engine/LatentActionManager.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
@@ -587,6 +588,7 @@ bool ResolveAvidScriptRuntimeKind(
 	const FProperty* Property,
 	const FAvidScriptBindingValueModel& Model,
 	const FAvidScriptBindingTypeModel* DeclaredType,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& DeclaredTypesById,
 	EAvidScriptRuntimeBindingKind& OutKind,
 	UClass*& OutObjectClass)
 {
@@ -639,6 +641,73 @@ bool ResolveAvidScriptRuntimeKind(
 			return false;
 		}
 		OutKind = EAvidScriptRuntimeBindingKind::String;
+		return true;
+	}
+	if (Model.CanonicalType == TEXT("text:ftext"))
+	{
+		if (!Property->IsA<FTextProperty>()
+			|| Model.Kind != TEXT("text_capability")
+			|| Model.CppType != TEXT("FText")
+			|| Model.AbiTypes != TArray<FString>({ TEXT("i") })
+			|| DeclaredType == nullptr
+			|| DeclaredType->CanonicalType != TEXT("text:ftext")
+			|| DeclaredType->Kind != TEXT("text_capability")
+			|| DeclaredType->CppType != TEXT("FText")
+			|| DeclaredType->Size != 4
+			|| DeclaredType->Alignment != 4
+			|| DeclaredType->AbiTypes != TArray<FString>({ TEXT("i") })
+			|| !DeclaredType->TypeArguments.IsEmpty()
+			|| DeclaredType->CapabilityKind != TEXT("composite"))
+		{
+			return false;
+		}
+		OutKind = EAvidScriptRuntimeBindingKind::Text;
+		return true;
+	}
+	const bool bSoftObject = Model.Kind == TEXT("soft_object_capability");
+	const bool bWeakObject = Model.Kind == TEXT("weak_object_capability");
+	if (bSoftObject || bWeakObject)
+	{
+		const FObjectPropertyBase* ObjectProperty = nullptr;
+		if (bSoftObject)
+		{
+			ObjectProperty = CastField<FSoftObjectProperty>(Property);
+		}
+		else
+		{
+			ObjectProperty = CastField<FWeakObjectProperty>(Property);
+		}
+		const FString CanonicalPrefix = bSoftObject
+			? TEXT("soft_object:")
+			: TEXT("weak_object:");
+		const FAvidScriptBindingTypeModel* ObjectType =
+			DeclaredType != nullptr && DeclaredType->TypeArguments.Num() == 1
+				? DeclaredTypesById.FindRef(DeclaredType->TypeArguments[0])
+				: nullptr;
+		if (ObjectProperty == nullptr
+			|| ObjectProperty->PropertyClass == nullptr
+			|| Model.CanonicalType != CanonicalPrefix + ObjectProperty->PropertyClass->GetPathName()
+			|| Model.CppType != Property->GetCPPType()
+			|| Model.AbiTypes != TArray<FString>({ TEXT("i") })
+			|| DeclaredType == nullptr
+			|| DeclaredType->CanonicalType != Model.CanonicalType
+			|| DeclaredType->Kind != Model.Kind
+			|| DeclaredType->CppType != Model.CppType
+			|| DeclaredType->Size != 4
+			|| DeclaredType->Alignment != 4
+			|| DeclaredType->AbiTypes != TArray<FString>({ TEXT("i") })
+			|| DeclaredType->CapabilityKind != TEXT("composite")
+			|| ObjectType == nullptr
+			|| ObjectType->Kind != TEXT("object_handle")
+			|| ObjectType->ClassPath != ObjectProperty->PropertyClass->GetPathName()
+			|| ObjectType->CanonicalType != TEXT("object:") + ObjectType->ClassPath)
+		{
+			return false;
+		}
+		OutKind = bSoftObject
+			? EAvidScriptRuntimeBindingKind::SoftObject
+			: EAvidScriptRuntimeBindingKind::WeakObject;
+		OutObjectClass = ObjectProperty->PropertyClass;
 		return true;
 	}
 
@@ -738,6 +807,9 @@ int32 GetAvidScriptRuntimeGuestStorageSize(EAvidScriptRuntimeBindingKind Kind)
 	case EAvidScriptRuntimeBindingKind::Enum:
 	case EAvidScriptRuntimeBindingKind::Name:
 	case EAvidScriptRuntimeBindingKind::String:
+	case EAvidScriptRuntimeBindingKind::Text:
+	case EAvidScriptRuntimeBindingKind::SoftObject:
+	case EAvidScriptRuntimeBindingKind::WeakObject:
 		return 4;
 	case EAvidScriptRuntimeBindingKind::Int8:
 	case EAvidScriptRuntimeBindingKind::UInt8:
@@ -777,6 +849,9 @@ int32 GetAvidScriptRuntimeGuestStorageAlignment(EAvidScriptRuntimeBindingKind Ki
 	case EAvidScriptRuntimeBindingKind::Enum:
 	case EAvidScriptRuntimeBindingKind::Name:
 	case EAvidScriptRuntimeBindingKind::String:
+	case EAvidScriptRuntimeBindingKind::Text:
+	case EAvidScriptRuntimeBindingKind::SoftObject:
+	case EAvidScriptRuntimeBindingKind::WeakObject:
 	case EAvidScriptRuntimeBindingKind::Object:
 	case EAvidScriptRuntimeBindingKind::Vector:
 	case EAvidScriptRuntimeBindingKind::Rotator:
@@ -952,6 +1027,7 @@ bool BuildAvidScriptStructWireProgram(
 				ReflectedField,
 				ChildModel,
 				ChildType,
+				DeclaredTypesById,
 				Child.Kind,
 				Child.ObjectClass)
 				|| Child.Kind == EAvidScriptRuntimeBindingKind::Name
@@ -994,6 +1070,15 @@ bool BuildAvidScriptStructWireProgram(
 	return true;
 }
 
+bool BuildAvidScriptCompositeValueProgram(
+	FProperty* Property,
+	const FAvidScriptBindingTypeModel& Type,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& DeclaredTypesById,
+	int32 Depth,
+	int32& InOutNodes,
+	FAvidScriptRuntimeBindingValuePlan& OutProgram,
+	FString& OutDetails);
+
 bool BuildAvidScriptArrayProgram(
 	FProperty* Property,
 	const FAvidScriptBindingTypeModel& Type,
@@ -1011,10 +1096,32 @@ bool BuildAvidScriptArrayProgram(
 		|| Type.AbiTypes != TArray<FString>({ TEXT("i") })
 		|| Type.Size != 4
 		|| Type.Alignment != 4
-		|| ElementType == nullptr
+		|| ElementType == nullptr)
+	{
+		OutDetails = TEXT("The reflected array no longer matches its bounded descriptor type.");
+		return false;
+	}
+	if (Type.CapabilityKind == TEXT("composite"))
+	{
+		int32 Nodes = 0;
+		return BuildAvidScriptCompositeValueProgram(
+			Property,
+			Type,
+			DeclaredTypesById,
+			1,
+			Nodes,
+			OutProgram,
+			OutDetails);
+	}
+	if (Type.CapabilityKind != TEXT("array_flat")
 		|| ElementType->Kind == TEXT("array")
+		|| ElementType->Kind == TEXT("set")
+		|| ElementType->Kind == TEXT("map")
 		|| ElementType->Kind == TEXT("name_utf8")
-		|| ElementType->Kind == TEXT("string_utf8"))
+		|| ElementType->Kind == TEXT("string_utf8")
+		|| ElementType->Kind == TEXT("text_capability")
+		|| ElementType->Kind == TEXT("soft_object_capability")
+		|| ElementType->Kind == TEXT("weak_object_capability"))
 	{
 		OutDetails = TEXT("The reflected array no longer matches its bounded descriptor type.");
 		return false;
@@ -1065,6 +1172,7 @@ bool BuildAvidScriptArrayProgram(
 				ArrayProperty->Inner,
 				ElementModel,
 				ElementType,
+				DeclaredTypesById,
 				Element.Kind,
 				Element.ObjectClass)
 			|| Element.Kind == EAvidScriptRuntimeBindingKind::Void
@@ -1094,6 +1202,200 @@ bool BuildAvidScriptArrayProgram(
 		OutDetails = TEXT("The reflected array element exceeds the bounded value layout.");
 		return false;
 	}
+	return true;
+}
+
+bool BuildAvidScriptCompositeValueProgram(
+	FProperty* Property,
+	const FAvidScriptBindingTypeModel& Type,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& DeclaredTypesById,
+	const int32 Depth,
+	int32& InOutNodes,
+	FAvidScriptRuntimeBindingValuePlan& OutProgram,
+	FString& OutDetails)
+{
+	if (Property == nullptr || Depth > 8 || ++InOutNodes > 4096)
+	{
+		OutDetails = TEXT("The reflected composite value graph exceeds its bounded depth or node contract.");
+		return false;
+	}
+	OutProgram.Property = Property;
+	if (Type.Kind == TEXT("array"))
+	{
+		FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property);
+		const FAvidScriptBindingTypeModel* ElementType =
+			DeclaredTypesById.FindRef(Type.ElementTypeId);
+		if (ArrayProperty == nullptr
+			|| ArrayProperty->Inner == nullptr
+			|| ElementType == nullptr
+			|| Type.TypeArguments != TArray<FString>({ Type.ElementTypeId })
+			|| Type.CanonicalType != TEXT("array:tarray<")
+				+ ElementType->CanonicalType + TEXT(">")
+			|| Type.CapabilityKind != TEXT("composite")
+			|| Type.AbiTypes != TArray<FString>({ TEXT("i") })
+			|| Type.Size != 4
+			|| Type.Alignment != 4)
+		{
+			OutDetails = TEXT("The reflected composite array no longer matches its descriptor type graph.");
+			return false;
+		}
+		OutProgram.Kind = EAvidScriptRuntimeBindingKind::CompositeArray;
+		OutProgram.TypeId = Type.StableId;
+		OutProgram.WireSize = 4;
+		OutProgram.WireAlignment = 4;
+		OutProgram.GuestStorageSize = 4;
+		FAvidScriptRuntimeBindingValuePlan& Element =
+			OutProgram.Children.AddDefaulted_GetRef();
+		Element.Property = ArrayProperty->Inner;
+		Element.Name = TEXT("element");
+		return BuildAvidScriptCompositeValueProgram(
+			ArrayProperty->Inner,
+			*ElementType,
+			DeclaredTypesById,
+			Depth + 1,
+			InOutNodes,
+			Element,
+			OutDetails);
+	}
+	const bool bSet = Type.Kind == TEXT("set");
+	const bool bMap = Type.Kind == TEXT("map");
+	if (bSet || bMap)
+	{
+		const int32 ExpectedArguments = bSet ? 1 : 2;
+		if (Type.TypeArguments.Num() != ExpectedArguments
+			|| Type.CapabilityKind != TEXT("composite")
+			|| Type.AbiTypes != TArray<FString>({ TEXT("i") })
+			|| Type.Size != 4
+			|| Type.Alignment != 4)
+		{
+			OutDetails = TEXT("The reflected associative container no longer matches its descriptor type graph.");
+			return false;
+		}
+		OutProgram.Kind = bSet
+			? EAvidScriptRuntimeBindingKind::Set
+			: EAvidScriptRuntimeBindingKind::Map;
+		OutProgram.TypeId = Type.StableId;
+		OutProgram.WireSize = 4;
+		OutProgram.WireAlignment = 4;
+		OutProgram.GuestStorageSize = 4;
+		TArray<FProperty*, TInlineAllocator<2>> ReflectedChildren;
+		if (bSet)
+		{
+			FSetProperty* SetProperty = CastField<FSetProperty>(Property);
+			if (SetProperty != nullptr && SetProperty->ElementProp != nullptr)
+			{
+				ReflectedChildren.Add(SetProperty->ElementProp);
+			}
+		}
+		else
+		{
+			FMapProperty* MapProperty = CastField<FMapProperty>(Property);
+			if (MapProperty != nullptr
+				&& MapProperty->KeyProp != nullptr
+				&& MapProperty->ValueProp != nullptr)
+			{
+				ReflectedChildren.Add(MapProperty->KeyProp);
+				ReflectedChildren.Add(MapProperty->ValueProp);
+			}
+		}
+		if (ReflectedChildren.Num() != ExpectedArguments)
+		{
+			OutDetails = TEXT("The reflected associative container properties are unavailable.");
+			return false;
+		}
+		for (int32 Index = 0; Index < ExpectedArguments; ++Index)
+		{
+			const FAvidScriptBindingTypeModel* ChildType =
+				DeclaredTypesById.FindRef(Type.TypeArguments[Index]);
+			if (ChildType == nullptr)
+			{
+				OutDetails = TEXT("The reflected associative container child type is unavailable.");
+				return false;
+			}
+			FAvidScriptRuntimeBindingValuePlan& Child =
+				OutProgram.Children.AddDefaulted_GetRef();
+			Child.Property = ReflectedChildren[Index];
+			Child.Name = bSet ? TEXT("element")
+				: (Index == 0 ? TEXT("key") : TEXT("value"));
+			if (!BuildAvidScriptCompositeValueProgram(
+					ReflectedChildren[Index],
+					*ChildType,
+					DeclaredTypesById,
+					Depth + 1,
+					InOutNodes,
+					Child,
+					OutDetails))
+			{
+				return false;
+			}
+		}
+		const EAvidScriptRuntimeBindingKind KeyKind =
+			OutProgram.Children[0].Kind;
+		const bool bCanonicalKeyKind =
+			KeyKind == EAvidScriptRuntimeBindingKind::Bool
+			|| KeyKind == EAvidScriptRuntimeBindingKind::Int8
+			|| KeyKind == EAvidScriptRuntimeBindingKind::UInt8
+			|| KeyKind == EAvidScriptRuntimeBindingKind::Int16
+			|| KeyKind == EAvidScriptRuntimeBindingKind::UInt16
+			|| KeyKind == EAvidScriptRuntimeBindingKind::Int32
+			|| KeyKind == EAvidScriptRuntimeBindingKind::UInt32
+			|| KeyKind == EAvidScriptRuntimeBindingKind::Int64
+			|| KeyKind == EAvidScriptRuntimeBindingKind::UInt64
+			|| KeyKind == EAvidScriptRuntimeBindingKind::Enum
+			|| KeyKind == EAvidScriptRuntimeBindingKind::Name
+			|| KeyKind == EAvidScriptRuntimeBindingKind::String;
+		if (!bCanonicalKeyKind
+			|| OutProgram.Children[0].Property == nullptr
+			|| !OutProgram.Children[0].Property->HasAnyPropertyFlags(
+				CPF_HasGetValueTypeHash))
+		{
+			OutDetails = TEXT("The reflected associative key is outside the canonical key whitelist.");
+			return false;
+		}
+		return true;
+	}
+
+	if (Type.Kind == TEXT("struct_wire"))
+	{
+		TSet<FString> ActiveTypes;
+		return BuildAvidScriptStructWireProgram(
+			Property,
+			Type,
+			DeclaredTypesById,
+			Depth,
+			InOutNodes,
+			ActiveTypes,
+			OutProgram,
+			OutDetails);
+	}
+	FAvidScriptBindingValueModel ValueModel;
+	ValueModel.Name = Property->GetName();
+	ValueModel.Direction = TEXT("value");
+	ValueModel.CanonicalType = Type.CanonicalType;
+	ValueModel.TypeId = Type.StableId;
+	ValueModel.Kind = Type.Kind;
+	ValueModel.CppType = Type.CppType;
+	ValueModel.AbiTypes = Type.AbiTypes;
+	if (!ResolveAvidScriptRuntimeKind(
+			Property,
+			ValueModel,
+			&Type,
+			DeclaredTypesById,
+			OutProgram.Kind,
+			OutProgram.ObjectClass)
+		|| OutProgram.Kind == EAvidScriptRuntimeBindingKind::Void
+		|| !MatchesAvidScriptRuntimeCanonicalLeafStorage(
+			Type,
+			OutProgram.Kind,
+			OutProgram.ObjectClass))
+	{
+		OutDetails = TEXT("The reflected composite child is not a supported canonical value.");
+		return false;
+	}
+	OutProgram.TypeId = Type.StableId;
+	OutProgram.WireSize = GetAvidScriptRuntimeGuestStorageSize(OutProgram.Kind);
+	OutProgram.WireAlignment = GetAvidScriptRuntimeGuestStorageAlignment(OutProgram.Kind);
+	OutProgram.GuestStorageSize = OutProgram.WireSize;
 	return true;
 }
 
@@ -1323,10 +1625,29 @@ bool BuildAvidScriptRuntimeValuePlan(
 		OutPlan.ArgumentWidth = 1;
 		return true;
 	}
+	if (Model.Kind == TEXT("set") || Model.Kind == TEXT("map"))
+	{
+		int32 Nodes = 0;
+		if (DeclaredType == nullptr
+			|| !BuildAvidScriptCompositeValueProgram(
+				Property,
+				*DeclaredType,
+				DeclaredTypesById,
+				1,
+				Nodes,
+				OutPlan,
+				OutDetails))
+		{
+			return false;
+		}
+		OutPlan.ArgumentWidth = 1;
+		return true;
+	}
 	if (!ResolveAvidScriptRuntimeKind(
 			Property,
 			Model,
 			DeclaredType,
+			DeclaredTypesById,
 			OutPlan.Kind,
 			OutPlan.ObjectClass))
 	{
@@ -1337,6 +1658,7 @@ bool BuildAvidScriptRuntimeValuePlan(
 		return false;
 	}
 	OutPlan.ArgumentWidth = GetAvidScriptRuntimeArgumentWidth(Model, OutPlan.Direction);
+	OutPlan.TypeId = Model.TypeId;
 	OutPlan.GuestStorageSize = GetAvidScriptRuntimeGuestStorageSize(OutPlan.Kind);
 	OutPlan.WireSize = OutPlan.GuestStorageSize;
 	OutPlan.WireAlignment = DeclaredType == nullptr ? 1 : DeclaredType->Alignment;
@@ -1347,6 +1669,7 @@ struct FAvidScriptPreparedDelegateCodec
 {
 	FString StableId;
 	TArray<FAvidScriptRuntimeBindingValuePlan> Parameters;
+	TArray<int32> OutputParameterIndices;
 	uint32 ParameterCellCount = 0;
 };
 
@@ -1369,12 +1692,17 @@ bool IsAvidScriptPreparedDelegateValueSupported(
 	const FAvidScriptRuntimeBindingValuePlan& Plan)
 {
 	if (Plan.Direction != EAvidScriptRuntimeBindingDirection::Value
-		&& Plan.Direction != EAvidScriptRuntimeBindingDirection::ConstRef)
+		&& Plan.Direction != EAvidScriptRuntimeBindingDirection::ConstRef
+		&& Plan.Direction != EAvidScriptRuntimeBindingDirection::Ref
+		&& Plan.Direction != EAvidScriptRuntimeBindingDirection::Out)
 	{
 		return false;
 	}
 	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Name
 		|| Plan.Kind == EAvidScriptRuntimeBindingKind::String
+		|| Plan.Kind == EAvidScriptRuntimeBindingKind::Text
+		|| Plan.Kind == EAvidScriptRuntimeBindingKind::SoftObject
+		|| Plan.Kind == EAvidScriptRuntimeBindingKind::WeakObject
 		|| Plan.Kind == EAvidScriptRuntimeBindingKind::Array
 		|| Plan.Kind == EAvidScriptRuntimeBindingKind::Void)
 	{
@@ -1644,6 +1972,7 @@ bool EncodeAvidScriptPreparedDelegateEvent(
 	const void* ImmutableCodecIdentity,
 	const void* NativeParameters,
 	const FAvidScriptBindingInvocationContext& InvocationContext,
+	const uint32 OutputTransactionToken,
 	FAvidScriptVmCallFrame& OutFrame,
 	TArray<FAvidScriptObjectHandle>& OutBorrowedHandles,
 	FString& OutErrorCategory,
@@ -1663,9 +1992,25 @@ bool EncodeAvidScriptPreparedDelegateEvent(
 		OutErrorDetails = TEXT("The prepared delegate codec or native parameter frame is unavailable.");
 		return false;
 	}
+	if (!Codec->OutputParameterIndices.IsEmpty())
+	{
+		if (OutputTransactionToken == 0
+			|| !AppendAvidScriptPreparedDelegateCells(
+				OutputTransactionToken,
+				OutFrame))
+		{
+			OutErrorCategory = TEXT("delegate_output_transaction_invalid");
+			OutErrorDetails = TEXT("The prepared delegate output transaction token is unavailable.");
+			return false;
+		}
+	}
 
 	for (const FAvidScriptRuntimeBindingValuePlan& Parameter : Codec->Parameters)
 	{
+		if (Parameter.Direction == EAvidScriptRuntimeBindingDirection::Out)
+		{
+			continue;
+		}
 		if (!EncodeAvidScriptPreparedDelegateValue(
 				Parameter,
 				NativeParameters,
@@ -2314,6 +2659,10 @@ struct FAvidScriptBindingPackage::FImpl
 	FString PackageHash;
 	int32 DescriptorSchemaVersion = 0;
 	FAvidScriptVmBindingPackage VmPackage;
+	TArray<FAvidScriptBindingTypeModel> DescriptorTypes;
+	TMap<FString, const FAvidScriptBindingTypeModel*> DescriptorTypesById;
+	TMap<const FProperty*, FAvidScriptRuntimeBindingValuePlan>
+		CompositeAccessPlansByProperty;
 	TArray<FAvidScriptRuntimeBindingInvocationPlan> Plans;
 	TArray<TOptional<FAvidScriptBindingTypeModel>> LatentResultTypes;
 	TArray<TUniquePtr<
@@ -2538,6 +2887,14 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 	Package->Impl->DescriptorSchemaVersion = Model.SchemaVersion;
 	Package->Impl->VmPackage.PackageName = Model.PackageName;
 	Package->Impl->VmPackage.PackageHash = Model.PackageHash;
+	Package->Impl->DescriptorTypes = Model.Types;
+	Package->Impl->DescriptorTypesById.Reserve(
+		Package->Impl->DescriptorTypes.Num());
+	for (const FAvidScriptBindingTypeModel& Type :
+		Package->Impl->DescriptorTypes)
+	{
+		Package->Impl->DescriptorTypesById.Add(Type.StableId, &Type);
+	}
 	Package->Impl->LatentResultTypes.SetNum(Model.Bindings.Num());
 	for (const FAvidScriptBindingFunctionModel& Binding : Model.Bindings)
 	{
@@ -3208,12 +3565,21 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 					OutResult,
 					TEXT("binding_delegate_parameter_unsupported"),
 					Event.CanonicalIdentity + TEXT(":") + Parameter.Name,
-					TEXT("P57.12A delegate events support only value/const-ref fixed-width parameters; string, array, ref and out values fail closed."));
+					TEXT("Prepared delegate events support fixed-width value, const-ref, ref and out parameters; variable-layout values fail closed."));
 				return false;
 			}
-			if (!CountAvidScriptPreparedDelegateValueCells(
-					ValuePlan,
-					Cell->Codec.ParameterCellCount))
+			const bool bOutput = ValuePlan.Direction
+				== EAvidScriptRuntimeBindingDirection::Ref
+				|| ValuePlan.Direction == EAvidScriptRuntimeBindingDirection::Out;
+			if (bOutput && Cell->Codec.OutputParameterIndices.IsEmpty())
+			{
+				++Cell->Codec.ParameterCellCount;
+			}
+			if ((ValuePlan.Direction != EAvidScriptRuntimeBindingDirection::Out
+					&& !CountAvidScriptPreparedDelegateValueCells(
+						ValuePlan,
+						Cell->Codec.ParameterCellCount))
+				|| Cell->Codec.ParameterCellCount > FAvidScriptVmCallFrame::MaxCells)
 			{
 				SetAvidScriptBindingLoadFailure(
 					OutResult,
@@ -3223,6 +3589,10 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 						TEXT("The flattened delegate payload exceeds the fixed %u-cell VM call-frame capacity."),
 						FAvidScriptVmCallFrame::MaxCells));
 				return false;
+			}
+			if (bOutput)
+			{
+				Cell->Codec.OutputParameterIndices.Add(Index);
 			}
 			Cell->Codec.Parameters.Add(MoveTemp(ValuePlan));
 		}
@@ -4060,6 +4430,74 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		}
 	}
 
+	bool bCompositeAccessCacheValid = true;
+	FString CompositeAccessCacheError;
+	TFunction<void(const FAvidScriptRuntimeBindingValuePlan&)>
+		CacheCompositeAccessPlan;
+	CacheCompositeAccessPlan =
+		[&Package, &bCompositeAccessCacheValid, &CompositeAccessCacheError,
+			&CacheCompositeAccessPlan](
+			const FAvidScriptRuntimeBindingValuePlan& ValuePlan)
+	{
+		if (!bCompositeAccessCacheValid)
+		{
+			return;
+		}
+		const bool bCompositeContainer =
+			ValuePlan.Kind == EAvidScriptRuntimeBindingKind::CompositeArray
+			|| ValuePlan.Kind == EAvidScriptRuntimeBindingKind::Set
+			|| ValuePlan.Kind == EAvidScriptRuntimeBindingKind::Map;
+		if (bCompositeContainer)
+		{
+			if (ValuePlan.Property == nullptr || ValuePlan.TypeId.IsEmpty())
+			{
+				bCompositeAccessCacheValid = false;
+				CompositeAccessCacheError = TEXT("composite_access_plan_invalid");
+				return;
+			}
+			const FAvidScriptRuntimeBindingValuePlan* Existing =
+				Package->Impl->CompositeAccessPlansByProperty.Find(
+					ValuePlan.Property);
+			if (Existing != nullptr
+				&& (Existing->TypeId != ValuePlan.TypeId
+					|| Existing->Kind != ValuePlan.Kind))
+			{
+				bCompositeAccessCacheValid = false;
+				CompositeAccessCacheError = ValuePlan.Property->GetPathName();
+				return;
+			}
+			if (Existing == nullptr)
+			{
+				Package->Impl->CompositeAccessPlansByProperty.Add(
+					ValuePlan.Property,
+					ValuePlan);
+			}
+		}
+		for (const FAvidScriptRuntimeBindingValuePlan& Child : ValuePlan.Children)
+		{
+			CacheCompositeAccessPlan(Child);
+		}
+	};
+	for (const FAvidScriptRuntimeBindingInvocationPlan& Plan :
+		Package->Impl->Plans)
+	{
+		for (const FAvidScriptRuntimeBindingValuePlan& Parameter :
+			Plan.Parameters)
+		{
+			CacheCompositeAccessPlan(Parameter);
+		}
+		CacheCompositeAccessPlan(Plan.ReturnValue);
+	}
+	if (!bCompositeAccessCacheValid)
+	{
+		SetAvidScriptBindingLoadFailure(
+			OutResult,
+			TEXT("binding_composite_access_plan_invalid"),
+			CompositeAccessCacheError,
+			TEXT("The activated package contains conflicting recursive container access plans."));
+		return false;
+	}
+
 	Package->Impl->PreparedDynamicCells.Reserve(Model.Bindings.Num());
 	for (int32 PlanIndex = 0; PlanIndex < Model.Bindings.Num(); ++PlanIndex)
 	{
@@ -4505,6 +4943,7 @@ bool FAvidScriptBindingPackage::BuildPreparedDelegateEvents(
 		Event.RepNotifyProperty = Cell->RepNotifyProperty;
 		Event.Network = Cell->Network;
 		Event.ParameterCellCount = Cell->Codec.ParameterCellCount;
+		Event.OutputParameterCount = Cell->Codec.OutputParameterIndices.Num();
 		Event.ImmutableCodecIdentity = &Cell->Codec;
 		Event.Encode = &EncodeAvidScriptPreparedDelegateEvent;
 	}
@@ -4563,6 +5002,7 @@ bool FAvidScriptBindingPackage::BuildPreparedInboundHandlers(
 		Handler.RepNotifyProperty = Cell->RepNotifyProperty;
 		Handler.Network = Cell->Network;
 		Handler.ParameterCellCount = Cell->Codec.ParameterCellCount;
+		Handler.OutputParameterCount = Cell->Codec.OutputParameterIndices.Num();
 		Handler.ImmutableCodecIdentity = &Cell->Codec;
 		Handler.Encode = &EncodeAvidScriptPreparedDelegateEvent;
 	}
@@ -4960,6 +5400,1274 @@ bool FAvidScriptBindingPackage::TryResolveObjectFactory(
 	return OutPlan->ObjectClass != nullptr
 		&& OutPlan->RequiredOuterClass != nullptr
 		&& OutPlan->ResultObjectTypeOrdinal != INDEX_NONE;
+}
+
+namespace
+{
+const FAvidScriptRuntimeBindingValuePlan* FindAvidScriptCompositeAccessPlan(
+	const FString& TypeId,
+	const FProperty* Property,
+	const TMap<const FProperty*, FAvidScriptRuntimeBindingValuePlan>&
+		PlansByProperty,
+	FString& OutError)
+{
+	const FAvidScriptRuntimeBindingValuePlan* Plan =
+		Property == nullptr ? nullptr : PlansByProperty.Find(Property);
+	if (Plan == nullptr
+		|| Plan->Property != Property
+		|| Plan->TypeId != TypeId
+		|| (Plan->Kind != EAvidScriptRuntimeBindingKind::CompositeArray
+			&& Plan->Kind != EAvidScriptRuntimeBindingKind::Set
+			&& Plan->Kind != EAvidScriptRuntimeBindingKind::Map))
+	{
+		OutError = TEXT("composite_access_plan_missing: the activated package has no matching recursive container plan.");
+		return nullptr;
+	}
+	return Plan;
+}
+
+bool IsAvidScriptCompositeContainerKind(
+	const EAvidScriptCompositeValueKind Kind)
+{
+	return Kind == EAvidScriptCompositeValueKind::Array
+		|| Kind == EAvidScriptCompositeValueKind::Set
+		|| Kind == EAvidScriptCompositeValueKind::Map;
+}
+
+void AppendAvidScriptCanonicalUnsigned(
+	const uint64 Value,
+	const int32 Width,
+	TArray<uint8>& OutBytes)
+{
+	for (int32 Shift = (Width - 1) * 8; Shift >= 0; Shift -= 8)
+	{
+		OutBytes.Add(static_cast<uint8>((Value >> Shift) & 0xffu));
+	}
+}
+
+bool EncodeAvidScriptCanonicalKey(
+	const FAvidScriptRuntimeBindingValuePlan& Plan,
+	const void* Value,
+	TArray<uint8>& OutBytes,
+	FString& OutError)
+{
+	OutBytes.Reset();
+	if (Plan.Property == nullptr || Value == nullptr)
+	{
+		OutError = TEXT("composite_container_key_invalid: the canonical key value is unavailable.");
+		return false;
+	}
+	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Bool)
+	{
+		const FBoolProperty* Property = CastField<FBoolProperty>(Plan.Property);
+		if (Property == nullptr)
+		{
+			OutError = TEXT("composite_container_key_invalid: the bool key property is unavailable.");
+			return false;
+		}
+		OutBytes.Add(Property->GetPropertyValue(Value) ? 1u : 0u);
+		return true;
+	}
+	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Name
+		|| Plan.Kind == EAvidScriptRuntimeBindingKind::String)
+	{
+		FString Text;
+		if (Plan.Kind == EAvidScriptRuntimeBindingKind::Name)
+		{
+			const FNameProperty* Property =
+				CastField<FNameProperty>(Plan.Property);
+			if (Property == nullptr)
+			{
+				OutError = TEXT("composite_container_key_invalid: the name key property is unavailable.");
+				return false;
+			}
+			Text = Property->GetPropertyValue(Value).ToString().ToLower();
+		}
+		else
+		{
+			const FStrProperty* Property = CastField<FStrProperty>(Plan.Property);
+			if (Property == nullptr)
+			{
+				OutError = TEXT("composite_container_key_invalid: the string key property is unavailable.");
+				return false;
+			}
+			Text = Property->GetPropertyValue(Value);
+		}
+		const FTCHARToUTF8 Utf8(*Text);
+		if (Utf8.Length() > 0)
+		{
+			OutBytes.Append(
+				reinterpret_cast<const uint8*>(Utf8.Get()),
+				Utf8.Length());
+		}
+		return true;
+	}
+
+	const FNumericProperty* NumericProperty =
+		CastField<FNumericProperty>(Plan.Property);
+	if (const FEnumProperty* EnumProperty =
+		CastField<FEnumProperty>(Plan.Property))
+	{
+		NumericProperty = EnumProperty->GetUnderlyingProperty();
+	}
+	if (NumericProperty == nullptr
+		|| !NumericProperty->IsInteger()
+		|| NumericProperty->IsFloatingPoint())
+	{
+		OutError = TEXT("composite_container_key_unsupported: the key has no deterministic canonical wire encoding.");
+		return false;
+	}
+	const int32 Width = NumericProperty->GetSize();
+	if (Width != 1 && Width != 2 && Width != 4 && Width != 8)
+	{
+		OutError = TEXT("composite_container_key_unsupported: the integer key width is unsupported.");
+		return false;
+	}
+	const bool bUnsigned = NumericProperty->IsA<FByteProperty>()
+		|| NumericProperty->IsA<FUInt16Property>()
+		|| NumericProperty->IsA<FUInt32Property>()
+		|| NumericProperty->IsA<FUInt64Property>();
+	const uint64 IntegerValue = bUnsigned
+		? NumericProperty->GetUnsignedIntPropertyValue(Value)
+		: static_cast<uint64>(NumericProperty->GetSignedIntPropertyValue(Value));
+	AppendAvidScriptCanonicalUnsigned(IntegerValue, Width, OutBytes);
+	return true;
+}
+
+int32 CompareAvidScriptCanonicalBytes(
+	const TArray<uint8>& Left,
+	const TArray<uint8>& Right)
+{
+	const int32 SharedSize = FMath::Min(Left.Num(), Right.Num());
+	if (SharedSize > 0)
+	{
+		const int32 Comparison = FMemory::Memcmp(
+			Left.GetData(),
+			Right.GetData(),
+			SharedSize);
+		if (Comparison != 0)
+		{
+			return Comparison;
+		}
+	}
+	return Left.Num() < Right.Num() ? -1 : (Left.Num() > Right.Num() ? 1 : 0);
+}
+
+struct FAvidScriptCanonicalSnapshotEntry
+{
+	TArray<uint8> KeyBytes;
+	int32 InternalIndex = INDEX_NONE;
+};
+
+struct FScopedAvidScriptPropertyContainer
+{
+	FProperty* Property = nullptr;
+	TArray<uint8> Storage;
+	void* Container = nullptr;
+	void* Value = nullptr;
+
+	~FScopedAvidScriptPropertyContainer()
+	{
+		if (Property != nullptr && Value != nullptr)
+		{
+			Property->DestroyValue(Value);
+		}
+	}
+
+	bool Initialize(
+		const FAvidScriptRuntimeBindingValuePlan& Plan,
+		FString& OutError)
+	{
+		Property = Plan.Property;
+		if (Property == nullptr)
+		{
+			OutError = TEXT("composite_container_value_invalid: the reflected child property is unavailable.");
+			return false;
+		}
+		const int32 Offset = Property->GetOffset_ForInternal();
+		const int32 ValueSize = Property->GetSize();
+		const int32 Alignment = FMath::Max(1, Property->GetMinAlignment());
+		if (Offset < 0 || ValueSize <= 0 || !FMath::IsPowerOfTwo(Alignment))
+		{
+			OutError = TEXT("composite_container_value_invalid: the reflected child layout is invalid.");
+			return false;
+		}
+		Storage.SetNumZeroed(Offset + ValueSize + Alignment - 1);
+		Container = reinterpret_cast<void*>(Align(
+			reinterpret_cast<UPTRINT>(Storage.GetData()),
+			static_cast<UPTRINT>(Alignment)));
+		Value = Property->ContainerPtrToValuePtr<void>(Container);
+		if (Value == nullptr)
+		{
+			OutError = TEXT("composite_container_value_invalid: the reflected child address is invalid.");
+			return false;
+		}
+		Property->InitializeValue(Value);
+		return true;
+	}
+
+	bool InitializeCopy(
+		const FAvidScriptRuntimeBindingValuePlan& Plan,
+		const void* SourceValue,
+		FString& OutError)
+	{
+		if (SourceValue == nullptr || !Initialize(Plan, OutError))
+		{
+			if (OutError.IsEmpty())
+			{
+				OutError = TEXT("composite_container_value_invalid: the source value is unavailable.");
+			}
+			return false;
+		}
+		Property->CopyCompleteValue(Value, SourceValue);
+		return true;
+	}
+};
+
+bool GetAvidScriptSetCanonicalSnapshot(
+	FAvidScriptCompositeValueHeap& Heap,
+	const uint32 Token,
+	FScriptSetHelper& Helper,
+	const FAvidScriptRuntimeBindingValuePlan& ElementPlan,
+	TConstArrayView<int32>& OutIndices,
+	FString& OutError)
+{
+	if (Heap.TryGetCanonicalSnapshot(Token, OutIndices)
+		&& OutIndices.Num() == Helper.Num())
+	{
+		return true;
+	}
+	Heap.InvalidateCanonicalSnapshot(Token);
+	TArray<FAvidScriptCanonicalSnapshotEntry> Ordered;
+	Ordered.Reserve(Helper.Num());
+	for (int32 InternalIndex = 0; InternalIndex < Helper.GetMaxIndex(); ++InternalIndex)
+	{
+		if (!Helper.IsValidIndex(InternalIndex))
+		{
+			continue;
+		}
+		FAvidScriptCanonicalSnapshotEntry& Entry =
+			Ordered.AddDefaulted_GetRef();
+		Entry.InternalIndex = InternalIndex;
+		if (!EncodeAvidScriptCanonicalKey(
+				ElementPlan,
+				Helper.GetElementPtr(InternalIndex),
+				Entry.KeyBytes,
+				OutError))
+		{
+			return false;
+		}
+	}
+	Ordered.Sort([](
+		const FAvidScriptCanonicalSnapshotEntry& Left,
+		const FAvidScriptCanonicalSnapshotEntry& Right)
+	{
+		const int32 Comparison = CompareAvidScriptCanonicalBytes(
+			Left.KeyBytes,
+			Right.KeyBytes);
+		return Comparison == 0
+			? Left.InternalIndex < Right.InternalIndex
+			: Comparison < 0;
+	});
+	for (int32 Index = 1; Index < Ordered.Num(); ++Index)
+	{
+		if (CompareAvidScriptCanonicalBytes(
+			Ordered[Index - 1].KeyBytes,
+			Ordered[Index].KeyBytes) == 0)
+		{
+			OutError = TEXT("composite_container_key_collision: a set contains duplicate canonical key bytes.");
+			return false;
+		}
+	}
+	TArray<int32> StoredIndices;
+	StoredIndices.Reserve(Ordered.Num());
+	for (const FAvidScriptCanonicalSnapshotEntry& Entry : Ordered)
+	{
+		StoredIndices.Add(Entry.InternalIndex);
+	}
+	return Heap.StoreCanonicalSnapshot(Token, MoveTemp(StoredIndices), OutError)
+		&& Heap.TryGetCanonicalSnapshot(Token, OutIndices);
+}
+
+bool GetAvidScriptMapCanonicalSnapshot(
+	FAvidScriptCompositeValueHeap& Heap,
+	const uint32 Token,
+	FScriptMapHelper& Helper,
+	const FAvidScriptRuntimeBindingValuePlan& KeyPlan,
+	TConstArrayView<int32>& OutIndices,
+	FString& OutError)
+{
+	if (Heap.TryGetCanonicalSnapshot(Token, OutIndices)
+		&& OutIndices.Num() == Helper.Num())
+	{
+		return true;
+	}
+	Heap.InvalidateCanonicalSnapshot(Token);
+	TArray<FAvidScriptCanonicalSnapshotEntry> Ordered;
+	Ordered.Reserve(Helper.Num());
+	for (int32 InternalIndex = 0; InternalIndex < Helper.GetMaxIndex(); ++InternalIndex)
+	{
+		if (!Helper.IsValidIndex(InternalIndex))
+		{
+			continue;
+		}
+		FAvidScriptCanonicalSnapshotEntry& Entry =
+			Ordered.AddDefaulted_GetRef();
+		Entry.InternalIndex = InternalIndex;
+		if (!EncodeAvidScriptCanonicalKey(
+				KeyPlan,
+				Helper.GetKeyPtr(InternalIndex),
+				Entry.KeyBytes,
+				OutError))
+		{
+			return false;
+		}
+	}
+	Ordered.Sort([](
+		const FAvidScriptCanonicalSnapshotEntry& Left,
+		const FAvidScriptCanonicalSnapshotEntry& Right)
+	{
+		const int32 Comparison = CompareAvidScriptCanonicalBytes(
+			Left.KeyBytes,
+			Right.KeyBytes);
+		return Comparison == 0
+			? Left.InternalIndex < Right.InternalIndex
+			: Comparison < 0;
+	});
+	for (int32 Index = 1; Index < Ordered.Num(); ++Index)
+	{
+		if (CompareAvidScriptCanonicalBytes(
+			Ordered[Index - 1].KeyBytes,
+			Ordered[Index].KeyBytes) == 0)
+		{
+			OutError = TEXT("composite_container_key_collision: a map contains duplicate canonical key bytes.");
+			return false;
+		}
+	}
+	TArray<int32> StoredIndices;
+	StoredIndices.Reserve(Ordered.Num());
+	for (const FAvidScriptCanonicalSnapshotEntry& Entry : Ordered)
+	{
+		StoredIndices.Add(Entry.InternalIndex);
+	}
+	return Heap.StoreCanonicalSnapshot(Token, MoveTemp(StoredIndices), OutError)
+		&& Heap.TryGetCanonicalSnapshot(Token, OutIndices);
+}
+
+bool ResolveAvidScriptCompositeContainerElement(
+	const FAvidScriptRuntimeBindingValuePlan& Plan,
+	FAvidScriptCompositeValueHeap& Heap,
+	const uint32 Token,
+	void* ContainerValue,
+	const int32 Index,
+	const int32 Lane,
+	const FAvidScriptRuntimeBindingValuePlan*& OutElementPlan,
+	void*& OutElementValue,
+	FString& OutError)
+{
+	OutElementPlan = nullptr;
+	OutElementValue = nullptr;
+	if (ContainerValue == nullptr || Index < 0 || Lane < 0)
+	{
+		OutError = TEXT("composite_container_index_invalid: the requested index or lane is invalid.");
+		return false;
+	}
+	if (Plan.Kind == EAvidScriptRuntimeBindingKind::CompositeArray)
+	{
+		FArrayProperty* Property = CastField<FArrayProperty>(Plan.Property);
+		if (Property == nullptr || Plan.Children.Num() != 1
+			|| Lane != 0)
+		{
+			OutError = TEXT("composite_array_index_invalid: the requested array element is unavailable.");
+			return false;
+		}
+		FScriptArrayHelper Helper(Property, ContainerValue);
+		if (!Helper.IsValidIndex(Index))
+		{
+			OutError = TEXT("composite_array_index_invalid: the requested array element is unavailable.");
+			return false;
+		}
+		OutElementPlan = &Plan.Children[0];
+		OutElementValue = Helper.GetRawPtr(Index);
+		return true;
+	}
+	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Set)
+	{
+		FSetProperty* Property = CastField<FSetProperty>(Plan.Property);
+		if (Property == nullptr || Plan.Children.Num() != 1 || Lane != 0)
+		{
+			OutError = TEXT("composite_set_index_invalid: the requested set snapshot element is unavailable.");
+			return false;
+		}
+		FScriptSetHelper Helper(Property, ContainerValue);
+		TConstArrayView<int32> SnapshotIndices;
+		if (!GetAvidScriptSetCanonicalSnapshot(
+			Heap,
+			Token,
+			Helper,
+			Plan.Children[0],
+			SnapshotIndices,
+			OutError)
+			|| !SnapshotIndices.IsValidIndex(Index))
+		{
+			if (OutError.IsEmpty())
+			{
+				OutError = TEXT("composite_set_index_invalid: the requested set snapshot element is unavailable.");
+			}
+			return false;
+		}
+		const int32 InternalIndex = SnapshotIndices[Index];
+		OutElementPlan = &Plan.Children[0];
+		OutElementValue = Helper.GetElementPtr(InternalIndex);
+		return true;
+	}
+	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Map)
+	{
+		FMapProperty* Property = CastField<FMapProperty>(Plan.Property);
+		if (Property == nullptr || Plan.Children.Num() != 2 || Lane > 1)
+		{
+			OutError = TEXT("composite_map_index_invalid: the requested map snapshot entry is unavailable.");
+			return false;
+		}
+		FScriptMapHelper Helper(Property, ContainerValue);
+		TConstArrayView<int32> SnapshotIndices;
+		if (!GetAvidScriptMapCanonicalSnapshot(
+			Heap,
+			Token,
+			Helper,
+			Plan.Children[0],
+			SnapshotIndices,
+			OutError)
+			|| !SnapshotIndices.IsValidIndex(Index))
+		{
+			if (OutError.IsEmpty())
+			{
+				OutError = TEXT("composite_map_index_invalid: the requested map snapshot entry is unavailable.");
+			}
+			return false;
+		}
+		const int32 InternalIndex = SnapshotIndices[Index];
+		OutElementPlan = &Plan.Children[Lane];
+		OutElementValue = Helper.GetPairPtr(InternalIndex);
+		return true;
+	}
+	OutError = TEXT("composite_container_kind_invalid: the capability is not a recursive container.");
+	return false;
+}
+} // namespace
+
+struct FAvidScriptPreparedDelegateOutputTransaction::FImpl
+{
+	struct FOutputSlot
+	{
+		const FAvidScriptRuntimeBindingValuePlan* Plan = nullptr;
+		TUniquePtr<FScopedAvidScriptPropertyContainer> Candidate;
+		bool bStaged = false;
+	};
+
+	const FAvidScriptPreparedDelegateCodec* Codec = nullptr;
+	void* NativeParameters = nullptr;
+	TArray<FOutputSlot> Outputs;
+	bool bCommitted = false;
+};
+
+const TCHAR* FAvidScriptPreparedDelegateOutputTransaction::GetImportStableId()
+{
+	return TEXT("avidscript.delegate_output_write.v1");
+}
+
+const TCHAR* FAvidScriptPreparedDelegateOutputTransaction::GetImportModuleName()
+{
+	return TEXT("avidscript");
+}
+
+const TCHAR* FAvidScriptPreparedDelegateOutputTransaction::GetImportName()
+{
+	return TEXT("avid_delegate_output_write");
+}
+
+const TCHAR* FAvidScriptPreparedDelegateOutputTransaction::GetImportSignature()
+{
+	return TEXT("(iii)i");
+}
+
+FAvidScriptPreparedDelegateOutputTransaction::
+	FAvidScriptPreparedDelegateOutputTransaction(TUniquePtr<FImpl>&& InImpl)
+	: Impl(MoveTemp(InImpl))
+{
+}
+
+FAvidScriptPreparedDelegateOutputTransaction::
+	~FAvidScriptPreparedDelegateOutputTransaction() = default;
+
+bool FAvidScriptPreparedDelegateOutputTransaction::StageOutput(
+	const uint32 OutputOrdinal,
+	const uint32 GuestAddress,
+	IAvidScriptVmGuestMemory& GuestMemory,
+	const FAvidScriptBindingInvocationContext& Context,
+	FString& OutError)
+{
+	OutError.Reset();
+	if (!Impl.IsValid() || Impl->bCommitted)
+	{
+		OutError = TEXT("delegate_output_transaction_inactive: the output transaction is unavailable.");
+		return false;
+	}
+	if (!Impl->Outputs.IsValidIndex(static_cast<int32>(OutputOrdinal)))
+	{
+		OutError = TEXT("delegate_output_ordinal_invalid: the output ordinal is outside the prepared event contract.");
+		return false;
+	}
+	if (GuestAddress == 0)
+	{
+		OutError = TEXT("delegate_output_address_invalid: the guest output address is zero.");
+		return false;
+	}
+
+	FImpl::FOutputSlot& Slot = Impl->Outputs[OutputOrdinal];
+	if (Slot.bStaged)
+	{
+		OutError = TEXT("delegate_output_duplicate: each prepared delegate output may be staged only once.");
+		return false;
+	}
+	if (Slot.Plan == nullptr
+		|| !Slot.Candidate.IsValid()
+		|| Slot.Candidate->Container == nullptr
+		|| !UE::AvidScript::BindingPrivate::SetValueFromGuest(
+			*Slot.Plan,
+			GuestAddress,
+			GuestMemory,
+			Context,
+			Slot.Candidate->Container,
+			OutError))
+	{
+		if (OutError.IsEmpty())
+		{
+			OutError = TEXT("delegate_output_decode_failed: the guest output value does not satisfy the prepared event contract.");
+		}
+		return false;
+	}
+	Slot.bStaged = true;
+	return true;
+}
+
+bool FAvidScriptPreparedDelegateOutputTransaction::IsComplete() const
+{
+	return Impl.IsValid()
+		&& !Impl->bCommitted
+		&& !Impl->Outputs.IsEmpty()
+		&& !Impl->Outputs.ContainsByPredicate(
+			[](const FImpl::FOutputSlot& Slot)
+			{
+				return !Slot.bStaged;
+			});
+}
+
+bool FAvidScriptPreparedDelegateOutputTransaction::Commit(FString& OutError)
+{
+	OutError.Reset();
+	if (!Impl.IsValid() || Impl->bCommitted)
+	{
+		OutError = TEXT("delegate_output_transaction_inactive: the output transaction cannot be committed.");
+		return false;
+	}
+	if (!IsComplete())
+	{
+		OutError = TEXT("delegate_output_incomplete: every ref/out value must be staged before the callback returns.");
+		return false;
+	}
+	if (Impl->NativeParameters == nullptr)
+	{
+		OutError = TEXT("delegate_output_native_frame_invalid: the native parameter frame is unavailable.");
+		return false;
+	}
+
+	TArray<void*, TInlineAllocator<8>> Targets;
+	Targets.Reserve(Impl->Outputs.Num());
+	for (const FImpl::FOutputSlot& Slot : Impl->Outputs)
+	{
+		void* Target = Slot.Plan == nullptr || Slot.Plan->Property == nullptr
+			? nullptr
+			: Slot.Plan->Property->ContainerPtrToValuePtr<void>(Impl->NativeParameters);
+		if (Target == nullptr
+			|| !Slot.Candidate.IsValid()
+			|| Slot.Candidate->Value == nullptr)
+		{
+			OutError = TEXT("delegate_output_native_frame_invalid: a prepared output destination is unavailable.");
+			return false;
+		}
+		Targets.Add(Target);
+	}
+
+	for (int32 Index = 0; Index < Impl->Outputs.Num(); ++Index)
+	{
+		const FImpl::FOutputSlot& Slot = Impl->Outputs[Index];
+		Slot.Plan->Property->CopyCompleteValue(
+			Targets[Index],
+			Slot.Candidate->Value);
+	}
+	Impl->bCommitted = true;
+	return true;
+}
+
+bool FAvidScriptBindingPackage::BeginPreparedDelegateOutputTransaction(
+	const FAvidScriptPreparedDelegateEvent& Event,
+	void* NativeParameters,
+	TUniquePtr<FAvidScriptPreparedDelegateOutputTransaction>& OutTransaction,
+	FString& OutError) const
+{
+	OutTransaction.Reset();
+	OutError.Reset();
+	const FAvidScriptPreparedDelegateCodec* Codec =
+		static_cast<const FAvidScriptPreparedDelegateCodec*>(
+			Event.ImmutableCodecIdentity);
+	if (Codec == nullptr
+		|| NativeParameters == nullptr
+		|| Event.StableId.IsEmpty()
+		|| Codec->StableId != Event.StableId
+		|| Event.OutputParameterCount == 0
+		|| Event.OutputParameterCount
+			!= static_cast<uint32>(Codec->OutputParameterIndices.Num()))
+	{
+		OutError = TEXT("delegate_output_contract_invalid: the prepared output contract is unavailable or stale.");
+		return false;
+	}
+
+	TUniquePtr<FAvidScriptPreparedDelegateOutputTransaction::FImpl> TransactionImpl =
+		MakeUnique<FAvidScriptPreparedDelegateOutputTransaction::FImpl>();
+	TransactionImpl->Codec = Codec;
+	TransactionImpl->NativeParameters = NativeParameters;
+	TransactionImpl->Outputs.Reserve(Codec->OutputParameterIndices.Num());
+	for (const int32 ParameterIndex : Codec->OutputParameterIndices)
+	{
+		if (!Codec->Parameters.IsValidIndex(ParameterIndex))
+		{
+			OutError = TEXT("delegate_output_contract_invalid: a prepared output parameter index is invalid.");
+			return false;
+		}
+		const FAvidScriptRuntimeBindingValuePlan& Plan =
+			Codec->Parameters[ParameterIndex];
+		if ((Plan.Direction != EAvidScriptRuntimeBindingDirection::Ref
+				&& Plan.Direction != EAvidScriptRuntimeBindingDirection::Out)
+			|| Plan.Property == nullptr)
+		{
+			OutError = TEXT("delegate_output_contract_invalid: a prepared output parameter no longer has ref/out semantics.");
+			return false;
+		}
+
+		FAvidScriptPreparedDelegateOutputTransaction::FImpl::FOutputSlot& Slot =
+			TransactionImpl->Outputs.AddDefaulted_GetRef();
+		Slot.Plan = &Plan;
+		Slot.Candidate = MakeUnique<FScopedAvidScriptPropertyContainer>();
+		if (!Slot.Candidate->Initialize(Plan, OutError))
+		{
+			if (OutError.IsEmpty())
+			{
+				OutError = TEXT("delegate_output_candidate_invalid: the temporary output value could not be initialized.");
+			}
+			return false;
+		}
+	}
+
+	OutTransaction = TUniquePtr<FAvidScriptPreparedDelegateOutputTransaction>(
+		new FAvidScriptPreparedDelegateOutputTransaction(
+			MoveTemp(TransactionImpl)));
+	return true;
+}
+
+bool FAvidScriptBindingPackage::GetCompositeContainerCount(
+	const uint32 Token,
+	const FAvidScriptBindingInvocationContext& Context,
+	int32& OutCount,
+	FString& OutError) const
+{
+	OutCount = 0;
+	FAvidScriptCompositeValueView Value;
+	if (Context.CompositeValueHeap == nullptr
+		|| !Context.CompositeValueHeap->Resolve(
+			Token,
+			FString(),
+			nullptr,
+			Value,
+			OutError)
+		|| !IsAvidScriptCompositeContainerKind(Value.Kind)
+		|| Value.Property == nullptr
+		|| Value.Value == nullptr)
+	{
+		if (OutError.IsEmpty())
+		{
+			OutError = TEXT("composite_container_invalid: the capability is not a live recursive container.");
+		}
+		return false;
+	}
+	const FAvidScriptRuntimeBindingValuePlan* Plan =
+		FindAvidScriptCompositeAccessPlan(
+			Value.TypeId,
+			Value.Property,
+			Impl->CompositeAccessPlansByProperty,
+			OutError);
+	if (Plan == nullptr)
+	{
+		return false;
+	}
+	if (Plan->Kind == EAvidScriptRuntimeBindingKind::CompositeArray)
+	{
+		OutCount = FScriptArrayHelper(
+			CastFieldChecked<FArrayProperty>(Plan->Property),
+			Value.Value).Num();
+	}
+	else if (Plan->Kind == EAvidScriptRuntimeBindingKind::Set)
+	{
+		OutCount = FScriptSetHelper(
+			CastFieldChecked<FSetProperty>(Plan->Property),
+			Value.Value).Num();
+	}
+	else if (Plan->Kind == EAvidScriptRuntimeBindingKind::Map)
+	{
+		OutCount = FScriptMapHelper(
+			CastFieldChecked<FMapProperty>(Plan->Property),
+			Value.Value).Num();
+	}
+	else
+	{
+		OutError = TEXT("composite_container_kind_invalid: the descriptor type is not a recursive container.");
+		return false;
+	}
+	return OutCount >= 0 && OutCount <= FAvidScriptCompositeValueHeap::MaxChildValues;
+}
+
+bool FAvidScriptBindingPackage::ReadCompositeContainerValue(
+	const uint32 Token,
+	const int32 Index,
+	const int32 Lane,
+	const uint32 GuestAddress,
+	IAvidScriptVmGuestMemory& GuestMemory,
+	const FAvidScriptBindingInvocationContext& Context,
+	FString& OutError) const
+{
+	FAvidScriptCompositeValueView Value;
+	const FAvidScriptRuntimeBindingValuePlan* Plan = nullptr;
+	const FAvidScriptRuntimeBindingValuePlan* ElementPlan = nullptr;
+	void* ElementContainer = nullptr;
+	if (Context.CompositeValueHeap == nullptr
+		|| !Context.CompositeValueHeap->Resolve(Token, FString(), nullptr, Value, OutError)
+		|| Value.Property == nullptr
+		|| (Plan = FindAvidScriptCompositeAccessPlan(
+				Value.TypeId,
+				Value.Property,
+				Impl->CompositeAccessPlansByProperty,
+				OutError)) == nullptr
+		|| !ResolveAvidScriptCompositeContainerElement(
+			*Plan,
+			*Context.CompositeValueHeap,
+			Token,
+			const_cast<void*>(Value.Value),
+			Index,
+			Lane,
+			ElementPlan,
+			ElementContainer,
+			OutError))
+	{
+		return false;
+	}
+	using namespace UE::AvidScript::BindingPrivate;
+	FCodecOutputTransaction Transaction;
+	FPreparedValueOutput PreparedOutput;
+	if (!PreflightValueOutput(
+			*ElementPlan,
+			GuestAddress,
+			GuestMemory,
+			Context,
+			Transaction,
+			PreparedOutput,
+			OutError)
+		|| !WriteValueToGuest(
+			*ElementPlan,
+			Context,
+			ElementContainer,
+			Transaction,
+			PreparedOutput,
+			OutError))
+	{
+		Transaction.Rollback(Context);
+		return false;
+	}
+	PublishValueOutput(PreparedOutput);
+	Transaction.Commit();
+	return true;
+}
+
+bool FAvidScriptBindingPackage::WriteCompositeContainerValue(
+	const uint32 Token,
+	const int32 Index,
+	const int32 Lane,
+	const uint32 GuestAddress,
+	IAvidScriptVmGuestMemory& GuestMemory,
+	const FAvidScriptBindingInvocationContext& Context,
+	FString& OutError) const
+{
+	FAvidScriptMutableCompositeValueView Value;
+	const FAvidScriptRuntimeBindingValuePlan* Plan = nullptr;
+	if (Context.CompositeValueHeap == nullptr
+		|| !Context.CompositeValueHeap->ResolveMutable(Token, Value, OutError)
+		|| Value.Property == nullptr
+		|| (Plan = FindAvidScriptCompositeAccessPlan(
+				Value.TypeId,
+				Value.Property,
+				Impl->CompositeAccessPlansByProperty,
+				OutError)) == nullptr)
+	{
+		return false;
+	}
+	if (Plan->Kind == EAvidScriptRuntimeBindingKind::Set
+		|| (Plan->Kind == EAvidScriptRuntimeBindingKind::Map && Lane == 0))
+	{
+		OutError = TEXT("composite_container_key_immutable: set elements and map keys must be changed through add/remove operations.");
+		return false;
+	}
+	FScopedAvidScriptPropertyContainer Candidate;
+	const FAvidScriptRuntimeBindingValuePlan* ElementPlan = nullptr;
+	void* ElementContainer = nullptr;
+	if (!Candidate.InitializeCopy(*Plan, Value.Value, OutError)
+		|| !ResolveAvidScriptCompositeContainerElement(
+			*Plan,
+			*Context.CompositeValueHeap,
+			Token,
+			Candidate.Value,
+			Index,
+			Lane,
+			ElementPlan,
+			ElementContainer,
+			OutError))
+	{
+		return false;
+	}
+	FScopedAvidScriptPropertyContainer TemporaryValue;
+	if (!TemporaryValue.Initialize(*ElementPlan, OutError))
+	{
+		return false;
+	}
+	if (!UE::AvidScript::BindingPrivate::SetValueFromGuest(
+			*ElementPlan,
+			GuestAddress,
+			GuestMemory,
+			Context,
+			TemporaryValue.Container,
+			OutError))
+	{
+		return false;
+	}
+	void* ElementValue = ElementPlan->Property->ContainerPtrToValuePtr<void>(
+		ElementContainer);
+	ElementPlan->Property->CopyCompleteValue(
+		ElementValue,
+		TemporaryValue.Value);
+	return Context.CompositeValueHeap->ReplaceValue(
+		Token,
+		*Plan->Property,
+		Candidate.Value,
+		OutError);
+}
+
+bool FAvidScriptBindingPackage::ResizeCompositeArray(
+	const uint32 Token,
+	const int32 NewCount,
+	const FAvidScriptBindingInvocationContext& Context,
+	FString& OutError) const
+{
+	FAvidScriptMutableCompositeValueView Value;
+	const FAvidScriptRuntimeBindingValuePlan* Plan = nullptr;
+	if (NewCount < 0 || NewCount > FAvidScriptCompositeValueHeap::MaxChildValues
+		|| Context.CompositeValueHeap == nullptr
+		|| !Context.CompositeValueHeap->ResolveMutable(Token, Value, OutError)
+		|| (Plan = FindAvidScriptCompositeAccessPlan(
+				Value.TypeId,
+				Value.Property,
+				Impl->CompositeAccessPlansByProperty,
+				OutError)) == nullptr
+		|| Plan->Kind != EAvidScriptRuntimeBindingKind::CompositeArray)
+	{
+		if (OutError.IsEmpty())
+		{
+			OutError = TEXT("composite_array_resize_invalid: the requested size or capability is invalid.");
+		}
+		return false;
+	}
+	FScopedAvidScriptPropertyContainer Candidate;
+	if (!Candidate.InitializeCopy(*Plan, Value.Value, OutError))
+	{
+		return false;
+	}
+	FScriptArrayHelper(
+		CastFieldChecked<FArrayProperty>(Plan->Property),
+		Candidate.Value).Resize(NewCount);
+	return Context.CompositeValueHeap->ReplaceValue(
+		Token,
+		*Plan->Property,
+		Candidate.Value,
+		OutError);
+}
+
+bool FAvidScriptBindingPackage::ClearCompositeContainer(
+	const uint32 Token,
+	const FAvidScriptBindingInvocationContext& Context,
+	FString& OutError) const
+{
+	FAvidScriptMutableCompositeValueView Value;
+	const FAvidScriptRuntimeBindingValuePlan* Plan = nullptr;
+	if (Context.CompositeValueHeap == nullptr
+		|| !Context.CompositeValueHeap->ResolveMutable(Token, Value, OutError)
+		|| (Plan = FindAvidScriptCompositeAccessPlan(
+				Value.TypeId,
+				Value.Property,
+				Impl->CompositeAccessPlansByProperty,
+				OutError)) == nullptr)
+	{
+		return false;
+	}
+	FScopedAvidScriptPropertyContainer Candidate;
+	if (!Candidate.InitializeCopy(*Plan, Value.Value, OutError))
+	{
+		return false;
+	}
+	if (Plan->Kind == EAvidScriptRuntimeBindingKind::CompositeArray)
+	{
+		FScriptArrayHelper(CastFieldChecked<FArrayProperty>(Plan->Property), Candidate.Value).EmptyValues();
+	}
+	else if (Plan->Kind == EAvidScriptRuntimeBindingKind::Set)
+	{
+		FScriptSetHelper(CastFieldChecked<FSetProperty>(Plan->Property), Candidate.Value).EmptyElements();
+	}
+	else if (Plan->Kind == EAvidScriptRuntimeBindingKind::Map)
+	{
+		FScriptMapHelper(CastFieldChecked<FMapProperty>(Plan->Property), Candidate.Value).EmptyValues();
+	}
+	else
+	{
+		OutError = TEXT("composite_container_kind_invalid: the capability is not a recursive container.");
+		return false;
+	}
+	return Context.CompositeValueHeap->ReplaceValue(
+		Token,
+		*Plan->Property,
+		Candidate.Value,
+		OutError);
+}
+
+bool FAvidScriptBindingPackage::FindCompositeContainerValue(
+	const uint32 Token,
+	const uint32 GuestAddress,
+	IAvidScriptVmGuestMemory& GuestMemory,
+	const FAvidScriptBindingInvocationContext& Context,
+	int32& OutIndex,
+	FString& OutError) const
+{
+	OutIndex = INDEX_NONE;
+	FAvidScriptCompositeValueView Value;
+	if (GuestAddress == 0
+		|| Context.CompositeValueHeap == nullptr
+		|| !Context.CompositeValueHeap->Resolve(
+			Token,
+			FString(),
+			nullptr,
+			Value,
+			OutError))
+	{
+		if (OutError.IsEmpty())
+		{
+			OutError = TEXT("composite_container_find_invalid: the key or capability is invalid.");
+		}
+		return false;
+	}
+	const FAvidScriptRuntimeBindingValuePlan* Plan =
+		FindAvidScriptCompositeAccessPlan(
+			Value.TypeId,
+			Value.Property,
+			Impl->CompositeAccessPlansByProperty,
+			OutError);
+	if (Plan == nullptr
+		|| (Plan->Kind != EAvidScriptRuntimeBindingKind::Set
+			&& Plan->Kind != EAvidScriptRuntimeBindingKind::Map)
+		|| Plan->Children.IsEmpty())
+	{
+		if (OutError.IsEmpty())
+		{
+			OutError = TEXT("composite_container_find_invalid: only set and map capabilities support key lookup.");
+		}
+		return false;
+	}
+	FScopedAvidScriptPropertyContainer Key;
+	if (!Key.Initialize(Plan->Children[0], OutError)
+		|| !UE::AvidScript::BindingPrivate::SetValueFromGuest(
+			Plan->Children[0],
+			GuestAddress,
+			GuestMemory,
+			Context,
+			Key.Container,
+			OutError))
+	{
+		return false;
+	}
+	TConstArrayView<int32> SnapshotIndices;
+	int32 InternalIndex = INDEX_NONE;
+	if (Plan->Kind == EAvidScriptRuntimeBindingKind::Set)
+	{
+		FScriptSetHelper Helper(
+			CastFieldChecked<FSetProperty>(Plan->Property),
+			const_cast<void*>(Value.Value));
+		InternalIndex = Helper.FindElementIndexFromHash(Key.Value);
+		if (InternalIndex != INDEX_NONE
+			&& !GetAvidScriptSetCanonicalSnapshot(
+				*Context.CompositeValueHeap,
+				Token,
+				Helper,
+				Plan->Children[0],
+				SnapshotIndices,
+				OutError))
+		{
+			return false;
+		}
+	}
+	else
+	{
+		FScriptMapHelper Helper(
+			CastFieldChecked<FMapProperty>(Plan->Property),
+			const_cast<void*>(Value.Value));
+		InternalIndex = Helper.FindMapPairIndexFromHash(Key.Value);
+		if (InternalIndex != INDEX_NONE
+			&& !GetAvidScriptMapCanonicalSnapshot(
+				*Context.CompositeValueHeap,
+				Token,
+				Helper,
+				Plan->Children[0],
+				SnapshotIndices,
+				OutError))
+		{
+			return false;
+		}
+	}
+	if (InternalIndex != INDEX_NONE
+		&& !Context.CompositeValueHeap->TryResolveCanonicalIndex(
+			Token,
+			InternalIndex,
+			OutIndex))
+	{
+		OutError = TEXT("composite_container_snapshot_invalid: the located key is absent from its canonical snapshot.");
+		return false;
+	}
+	return true;
+}
+
+bool FAvidScriptBindingPackage::UpsertCompositeContainerValue(
+	const uint32 Token,
+	const uint32 KeyAddress,
+	const uint32 ValueAddress,
+	IAvidScriptVmGuestMemory& GuestMemory,
+	const FAvidScriptBindingInvocationContext& Context,
+	int32& OutMutationResult,
+	FString& OutError) const
+{
+	OutMutationResult = 0;
+	FAvidScriptMutableCompositeValueView Value;
+	if (KeyAddress == 0
+		|| Context.CompositeValueHeap == nullptr
+		|| !Context.CompositeValueHeap->ResolveMutable(Token, Value, OutError))
+	{
+		if (OutError.IsEmpty())
+		{
+			OutError = TEXT("composite_container_upsert_invalid: the input or capability is invalid.");
+		}
+		return false;
+	}
+	const FAvidScriptRuntimeBindingValuePlan* Plan =
+		FindAvidScriptCompositeAccessPlan(
+			Value.TypeId,
+			Value.Property,
+			Impl->CompositeAccessPlansByProperty,
+			OutError);
+	if (Plan == nullptr
+		|| (Plan->Kind != EAvidScriptRuntimeBindingKind::Set
+			&& Plan->Kind != EAvidScriptRuntimeBindingKind::Map)
+		|| Plan->Children.IsEmpty()
+		|| (Plan->Kind == EAvidScriptRuntimeBindingKind::Set && ValueAddress != 0)
+		|| (Plan->Kind == EAvidScriptRuntimeBindingKind::Map
+			&& (ValueAddress == 0 || Plan->Children.Num() != 2)))
+	{
+		if (OutError.IsEmpty())
+		{
+			OutError = TEXT("composite_container_upsert_invalid: the mutation shape does not match a set or map.");
+		}
+		return false;
+	}
+	FScopedAvidScriptPropertyContainer Key;
+	if (!Key.Initialize(Plan->Children[0], OutError)
+		|| !UE::AvidScript::BindingPrivate::SetValueFromGuest(
+			Plan->Children[0],
+			KeyAddress,
+			GuestMemory,
+			Context,
+			Key.Container,
+			OutError))
+	{
+		return false;
+	}
+	FScopedAvidScriptPropertyContainer Candidate;
+	if (!Candidate.InitializeCopy(*Plan, Value.Value, OutError))
+	{
+		return false;
+	}
+	if (Plan->Kind == EAvidScriptRuntimeBindingKind::Set)
+	{
+		FScriptSetHelper Helper(
+			CastFieldChecked<FSetProperty>(Plan->Property),
+			Candidate.Value);
+		const int32 ExistingIndex = Helper.FindElementIndexFromHash(Key.Value);
+		if (ExistingIndex == INDEX_NONE)
+		{
+			if (Helper.Num() >= FAvidScriptCompositeValueHeap::MaxChildValues)
+			{
+				OutError = TEXT("composite_container_limit_exceeded: the set reached its bounded element count.");
+				return false;
+			}
+			Helper.AddElement(Key.Value);
+			if (!Context.CompositeValueHeap->ReplaceValue(
+					Token,
+					*Plan->Property,
+					Candidate.Value,
+					OutError))
+			{
+				return false;
+			}
+		}
+		OutMutationResult = ExistingIndex == INDEX_NONE ? 1 : 2;
+		return true;
+	}
+
+	FScopedAvidScriptPropertyContainer MappedValue;
+	if (!MappedValue.Initialize(Plan->Children[1], OutError)
+		|| !UE::AvidScript::BindingPrivate::SetValueFromGuest(
+			Plan->Children[1],
+			ValueAddress,
+			GuestMemory,
+			Context,
+			MappedValue.Container,
+			OutError))
+	{
+		return false;
+	}
+	FScriptMapHelper Helper(
+		CastFieldChecked<FMapProperty>(Plan->Property),
+		Candidate.Value);
+	const bool bInserted =
+		Helper.FindMapPairIndexFromHash(Key.Value) == INDEX_NONE;
+	if (bInserted
+		&& Helper.Num() >= FAvidScriptCompositeValueHeap::MaxChildValues)
+	{
+		OutError = TEXT("composite_container_limit_exceeded: the map reached its bounded entry count.");
+		return false;
+	}
+	Helper.AddPair(Key.Value, MappedValue.Value);
+	if (!Context.CompositeValueHeap->ReplaceValue(
+			Token,
+			*Plan->Property,
+			Candidate.Value,
+			OutError))
+	{
+		return false;
+	}
+	OutMutationResult = bInserted ? 1 : 2;
+	return true;
+}
+
+bool FAvidScriptBindingPackage::RemoveCompositeContainerValue(
+	const uint32 Token,
+	const uint32 KeyAddress,
+	IAvidScriptVmGuestMemory& GuestMemory,
+	const FAvidScriptBindingInvocationContext& Context,
+	bool& bOutRemoved,
+	FString& OutError) const
+{
+	bOutRemoved = false;
+	FAvidScriptMutableCompositeValueView Value;
+	if (KeyAddress == 0
+		|| Context.CompositeValueHeap == nullptr
+		|| !Context.CompositeValueHeap->ResolveMutable(Token, Value, OutError))
+	{
+		if (OutError.IsEmpty())
+		{
+			OutError = TEXT("composite_container_remove_invalid: the key or capability is invalid.");
+		}
+		return false;
+	}
+	const FAvidScriptRuntimeBindingValuePlan* Plan =
+		FindAvidScriptCompositeAccessPlan(
+			Value.TypeId,
+			Value.Property,
+			Impl->CompositeAccessPlansByProperty,
+			OutError);
+	if (Plan == nullptr
+		|| (Plan->Kind != EAvidScriptRuntimeBindingKind::Set
+			&& Plan->Kind != EAvidScriptRuntimeBindingKind::Map)
+		|| Plan->Children.IsEmpty())
+	{
+		if (OutError.IsEmpty())
+		{
+			OutError = TEXT("composite_container_remove_invalid: only set and map capabilities support removal.");
+		}
+		return false;
+	}
+	FScopedAvidScriptPropertyContainer Key;
+	if (!Key.Initialize(Plan->Children[0], OutError)
+		|| !UE::AvidScript::BindingPrivate::SetValueFromGuest(
+			Plan->Children[0],
+			KeyAddress,
+			GuestMemory,
+			Context,
+			Key.Container,
+			OutError))
+	{
+		return false;
+	}
+	FScopedAvidScriptPropertyContainer Candidate;
+	if (!Candidate.InitializeCopy(*Plan, Value.Value, OutError))
+	{
+		return false;
+	}
+	int32 InternalIndex = INDEX_NONE;
+	if (Plan->Kind == EAvidScriptRuntimeBindingKind::Set)
+	{
+		FScriptSetHelper Helper(
+			CastFieldChecked<FSetProperty>(Plan->Property),
+			Candidate.Value);
+		InternalIndex = Helper.FindElementIndexFromHash(Key.Value);
+		if (InternalIndex != INDEX_NONE)
+		{
+			Helper.RemoveAt(InternalIndex);
+		}
+	}
+	else
+	{
+		FScriptMapHelper Helper(
+			CastFieldChecked<FMapProperty>(Plan->Property),
+			Candidate.Value);
+		InternalIndex = Helper.FindMapPairIndexFromHash(Key.Value);
+		if (InternalIndex != INDEX_NONE)
+		{
+			Helper.RemoveAt(InternalIndex);
+		}
+	}
+	bOutRemoved = InternalIndex != INDEX_NONE;
+	if (bOutRemoved
+		&& !Context.CompositeValueHeap->ReplaceValue(
+			Token,
+			*Plan->Property,
+			Candidate.Value,
+			OutError))
+	{
+		bOutRemoved = false;
+		return false;
+	}
+	return true;
 }
 
 bool FAvidScriptBindingPackage::Dispatch(

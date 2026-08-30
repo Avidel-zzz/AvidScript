@@ -3,6 +3,7 @@
 #include "AvidScriptBindingLatent.h"
 #include "AvidScriptBindingFastPath.h"
 #include "AvidScriptArrayValueHeap.h"
+#include "AvidScriptCompositeValueHeap.h"
 #include "AvidScriptBindingInvocationKind.h"
 #include "AvidScriptBindingNetworkPolicy.h"
 #include "AvidScriptBindingReloadEffect.h"
@@ -50,12 +51,18 @@ enum class EValueCodecKind : uint8
 	Enum,
 	Name,
 	String,
+	Text,
+	SoftObject,
+	WeakObject,
 	Object,
 	Vector,
 	Rotator,
 	Transform,
 	StructWire,
-	Array
+	Array,
+	CompositeArray,
+	Set,
+	Map
 };
 
 struct FValueCodecProgram
@@ -85,10 +92,15 @@ struct FCodecOutputTransaction
 	TArray<FAvidScriptArrayValueReservation, TInlineAllocator<16>>
 		ArrayReservations;
 	TArray<uint32, TInlineAllocator<16>> CreatedArrayTokens;
+	TArray<FAvidScriptCompositeValueReservation, TInlineAllocator<16>>
+		CompositeReservations;
+	TArray<uint32, TInlineAllocator<16>> CreatedCompositeTokens;
 	FAvidScriptUtf8ValueHeap* Utf8ValueHeap = nullptr;
 	FAvidScriptArrayValueHeap* ArrayValueHeap = nullptr;
+	FAvidScriptCompositeValueHeap* CompositeValueHeap = nullptr;
 	int32 NextUtf8Reservation = 0;
 	int32 NextArrayReservation = 0;
+	int32 NextCompositeReservation = 0;
 
 	bool ReserveUtf8Value(
 		const FAvidScriptBindingInvocationContext& Context,
@@ -107,6 +119,18 @@ struct FCodecOutputTransaction
 		int32 ElementStride,
 		int32 ElementAlignment,
 		TConstArrayView<uint8> Bytes,
+		const FAvidScriptBindingInvocationContext& Context,
+		uint32& OutToken,
+		FString& OutDetails);
+	bool ReserveCompositeValue(
+		const FAvidScriptBindingInvocationContext& Context,
+		FString& OutDetails);
+	bool PublishNextCompositeValue(
+		const FString& TypeId,
+		EAvidScriptCompositeValueKind Kind,
+		FProperty& Property,
+		const void* SourceValue,
+		TConstArrayView<uint32> ChildTokens,
 		const FAvidScriptBindingInvocationContext& Context,
 		uint32& OutToken,
 		FString& OutDetails);

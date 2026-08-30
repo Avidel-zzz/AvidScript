@@ -21,6 +21,8 @@ struct FAvidScriptProjectedBindingType
 	TArray<FAvidScriptBindingStructFieldModel> StructFields;
 	TArray<TSharedPtr<FAvidScriptProjectedBindingType>> StructFieldTypes;
 	TSharedPtr<FAvidScriptProjectedBindingType> ElementType;
+	TArray<TSharedPtr<FAvidScriptProjectedBindingType>> TypeArguments;
+	FString CapabilityKind;
 	const UClass* ObjectClass = nullptr;
 	bool bVoid = false;
 };

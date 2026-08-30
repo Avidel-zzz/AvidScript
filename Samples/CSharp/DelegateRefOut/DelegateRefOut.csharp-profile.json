@@ -1,0 +1,26 @@
+{
+  "schema_version": 10,
+  "language": "csharp",
+  "source_path": "Plugins/AvidScript/Samples/CSharp/DelegateRefOut/DelegateRefOutScript.cs",
+  "project_path": "Plugins/AvidScript/Samples/CSharp/ActorLifecycle/AvidScript.ActorLifecycle.csproj",
+  "module_id": "csharp_profile_delegate_ref_out",
+  "artifact_stem": "profile_delegate_ref_out",
+  "output_root": "Saved/AvidScriptCSharpGuest/Profiles/profile_delegate_ref_out",
+  "report_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_delegate_ref_out/profile_delegate_ref_out.csharp.report.json",
+  "manifest_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_delegate_ref_out/profile_delegate_ref_out.avidscript.json",
+  "build_script_path": "Plugins/AvidScript/Build/BuildCSharpActorLifecycle.ps1",
+  "configuration": "Release",
+  "binding_profile": {
+    "package_name": "avidscript.sample.delegate_ref_out",
+    "self_class_path": "/Script/AvidScriptEditor.AvidScriptEditorDelegateEventTestActor",
+    "classes": [
+      {
+        "class_path": "/Script/AvidScriptEditor.AvidScriptEditorDelegateEventTestActor",
+        "include_events": [
+          "OnRefOutSignal"
+        ],
+        "exclude_events": []
+      }
+    ]
+  }
+}

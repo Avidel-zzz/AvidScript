@@ -76,7 +76,7 @@ public:
 		FAvidScriptWasmSmokeResult& OutFailure);
 	bool DispatchPreparedDelegateEvent(
 		const FAvidScriptPreparedDelegateEvent& Event,
-		const void* NativeParameters,
+		void* NativeParameters,
 		FAvidScriptWasmSmokeResult& OutResult);
 	bool CaptureLiveSnapshot(FAvidScriptWasmSmokeResult& OutResult) const;
 	bool EndPlayLive(FAvidScriptWasmSmokeResult& OutResult);

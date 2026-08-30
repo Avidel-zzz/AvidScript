@@ -81,7 +81,7 @@ bool FAvidScriptRuntimeEventRouter::DispatchHot(
 
 bool FAvidScriptRuntimeEventRouter::Dispatch(
 	const FAvidScriptPreparedDelegateEvent& Event,
-	const void* NativeParameters,
+	void* NativeParameters,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
 	FAvidScriptWasmRuntimeInstance* Runtime = Scheduler.GetActiveRuntime();

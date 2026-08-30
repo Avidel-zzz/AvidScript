@@ -462,6 +462,53 @@ bool FAvidScriptVmArrayRangeImportContractTest::RunTest(const FString& Parameter
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmP58StaticImportContractTest,
+	"AvidScript.Architecture.VM.P58StaticImportContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmP58StaticImportContractTest::RunTest(const FString& Parameters)
+{
+	const FAvidScriptVmStaticHostImport& ContinuationStateRead =
+		GetAvidScriptVmStaticHostImport(
+			EAvidScriptHostBindingId::ContinuationStateRead);
+	const FAvidScriptVmStaticHostImport& TextToString =
+		GetAvidScriptVmStaticHostImport(
+			EAvidScriptHostBindingId::ValueTextToString);
+	const FAvidScriptVmStaticHostImport& DelegateOutputWrite =
+		GetAvidScriptVmStaticHostImport(
+			EAvidScriptHostBindingId::DelegateOutputWrite);
+	TestEqual(
+		TEXT("P58 imports append after the frozen continuation catalog"),
+		static_cast<uint16>(EAvidScriptHostBindingId::ValueTextToString),
+		static_cast<uint16>(EAvidScriptHostBindingId::ContinuationStateRead) + 1);
+	TestEqual(
+		TEXT("Catalog lookup keeps the final frozen continuation import"),
+		ContinuationStateRead.BindingId,
+		EAvidScriptHostBindingId::ContinuationStateRead);
+	TestEqual(
+		TEXT("FText conversion uses the shared capability import"),
+		FString(UTF8_TO_TCHAR(TextToString.ImportName)),
+		FString(TEXT("avid_value_text_to_string")));
+	TestEqual(
+		TEXT("Delegate output write freezes token, ordinal and address"),
+		FString(UTF8_TO_TCHAR(DelegateOutputWrite.Signature)),
+		FString(TEXT("(iii)i")));
+	TestFalse(
+		TEXT("P58 capability imports are not exposed through legacy env"),
+		TextToString.bSupportsEnvCompatibility
+			|| DelegateOutputWrite.bSupportsEnvCompatibility);
+	TestTrue(
+		TEXT("Delegate output write is registered only in avidscript"),
+		IsAvidScriptVmStaticHostImport(
+			TEXT("avidscript"),
+			TEXT("avid_delegate_output_write"))
+			&& !IsAvidScriptVmStaticHostImport(
+				TEXT("env"),
+				TEXT("avid_delegate_output_write")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptVmEventSubscriptionImportContractTest,
 	"AvidScript.Architecture.VM.EventSubscriptionImportContract",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

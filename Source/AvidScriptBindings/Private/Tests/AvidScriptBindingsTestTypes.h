@@ -56,6 +56,13 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	int64,
 	Token);
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+	FAvidScriptBindingsPreparedOutputDelegate,
+	UPARAM(ref) int32&,
+	Value,
+	int32&,
+	Result);
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FAvidScriptBindingsUnsupportedDelegate,
 	const FString&,
@@ -96,6 +103,9 @@ public:
 	FAvidScriptBindingsPreparedWideDelegate PreparedWideDelegate;
 
 	UPROPERTY(BlueprintAssignable, Category = "AvidScript|Tests")
+	FAvidScriptBindingsPreparedOutputDelegate PreparedOutputDelegate;
+
+	UPROPERTY(BlueprintAssignable, Category = "AvidScript|Tests")
 	FAvidScriptBindingsUnsupportedDelegate UnsupportedDelegate;
 
 	UPROPERTY(BlueprintReadWrite, Category = "AvidScript|Tests")
@@ -127,6 +137,27 @@ public:
 
 	UPROPERTY(BlueprintReadWrite, Category = "AvidScript|Tests")
 	TArray<int32> IntArrayProperty;
+
+	UPROPERTY()
+	TArray<FString> CompositeStringArrayProperty;
+
+	UPROPERTY()
+	TArray<FAvidScriptBindingsNestedStruct> CompositeStructArrayProperty;
+
+	UPROPERTY()
+	TSet<FString> CompositeStringSetProperty;
+
+	UPROPERTY()
+	TMap<FName, FString> CompositeNameStringMapProperty;
+
+	UPROPERTY()
+	FText CompositeTextProperty;
+
+	UPROPERTY()
+	TSoftObjectPtr<UObject> CompositeSoftObjectProperty;
+
+	UPROPERTY()
+	TWeakObjectPtr<UObject> CompositeWeakObjectProperty;
 
 	UPROPERTY()
 	int32 Utf8InvocationCount = 0;

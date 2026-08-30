@@ -18,4 +18,7 @@ public sealed record SemanticSymbol(
 
     [JsonPropertyOrder(8)]
     public bool IsReadonly { get; init; }
+
+    [JsonPropertyOrder(11)]
+    public bool IsExecutableReferenceSource { get; init; }
 }

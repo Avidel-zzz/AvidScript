@@ -2,6 +2,7 @@
 
 #include "AvidScriptEditorCSharpBuildService.h"
 #include "AvidScriptEditorCSharpBindingEmitter.h"
+#include "AvidScriptEditorCSharpBindingEmitterTestTypes.h"
 #include "AvidScriptHash.h"
 #include "CSharpBuild/AvidScriptEditorCSharpBuildInvoker.h"
 #include "CSharpBuild/AvidScriptEditorVmArtifactPublisher.h"
@@ -63,6 +64,82 @@ FString MakeAvidScriptZeroBindingLifecycleSource()
 		"        int eventType, int primaryId, int secondaryId, int objectSlot,\n"
 		"        int objectGeneration, float x, float y, float z) {}\n"
 		"}\n");
+}
+
+FString MakeAvidScriptGeneratedContainerFacadeSource()
+{
+	return TEXT(
+		"using System.Runtime.InteropServices;\n"
+		"\n"
+		"namespace AvidScript;\n"
+		"\n"
+		"public static class GeneratedContainerFacadeScript\n"
+		"{\n"
+		"    private static int LastScore;\n"
+		"\n"
+		"    public static int Main() => LastScore;\n"
+		"\n"
+		"    [UnmanagedCallersOnly(EntryPoint = \"avid_on_begin_play\")]\n"
+		"    public static void BeginPlay()\n"
+		"    {\n"
+		"        UAvidScriptCSharpBindingEmitterTestObject owner =\n"
+		"            UAvidScriptCSharpBindingEmitterTestObject.TryCast(UE.Self);\n"
+		"        FAvidArray<string> array = owner.ReadableStringArray;\n"
+		"        FAvidSet<int> set = owner.ReadableIntSet;\n"
+		"        FAvidMap<string, string> map = owner.ReadableNameStringMap;\n"
+		"        string arrayValue;\n"
+		"        string replacement = \"updated\";\n"
+		"        int setValue = 7;\n"
+		"        string mapKey = \"key\";\n"
+		"        string mapValue = \"value\";\n"
+		"        int score = 0;\n"
+		"        if (AvidScriptContainer.TryGet(array, 0, out arrayValue)) score++;\n"
+		"        if (AvidScriptContainer.TrySet(array, 0, in replacement)) score++;\n"
+		"        if (AvidScriptContainer.Contains(set, in setValue)) score++;\n"
+		"        if (AvidScriptContainer.Add(set, in setValue)) score++;\n"
+		"        if (AvidScriptContainer.Remove(set, in setValue)) score++;\n"
+		"        if (AvidScriptContainer.ContainsKey(map, in mapKey)) score++;\n"
+		"        if (AvidScriptContainer.Set(map, in mapKey, in mapValue)) score++;\n"
+		"        if (AvidScriptContainer.Remove(map, in mapKey)) score++;\n"
+		"        LastScore = score;\n"
+		"    }\n"
+		"}\n");
+}
+
+bool AvidScriptCSharpBuildTestUsedImportsContain(
+	const TSharedPtr<FJsonObject>& PackageObject,
+	const TArray<FString>& ExpectedStableIds)
+{
+	const TArray<TSharedPtr<FJsonValue>>* UsedImports = nullptr;
+	if (!PackageObject.IsValid()
+		|| !PackageObject->TryGetArrayField(TEXT("used_imports"), UsedImports)
+		|| UsedImports == nullptr)
+	{
+		return false;
+	}
+
+	TSet<FString> ActualStableIds;
+	for (const TSharedPtr<FJsonValue>& UsedImportValue : *UsedImports)
+	{
+		const TSharedPtr<FJsonObject> UsedImport = UsedImportValue.IsValid()
+			? UsedImportValue->AsObject()
+			: nullptr;
+		FString StableId;
+		if (UsedImport.IsValid()
+			&& UsedImport->TryGetStringField(TEXT("stable_id"), StableId))
+		{
+			ActualStableIds.Add(MoveTemp(StableId));
+		}
+	}
+
+	for (const FString& ExpectedStableId : ExpectedStableIds)
+	{
+		if (!ActualStableIds.Contains(ExpectedStableId))
+		{
+			return false;
+		}
+	}
+	return true;
 }
 
 } // namespace
@@ -196,7 +273,7 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 	TestEqual(
 		TEXT("Custom report keeps the gameplay profile and shared capabilities as its authorization ceiling"),
 		static_cast<int32>((*BindingAuthorizationObject)->GetIntegerField(TEXT("profile_import_count"))),
-		379);
+		390);
 	TestEqual(
 		TEXT("Custom authorization records five reflected bindings and packed owner access"),
 		static_cast<int32>((*BindingAuthorizationObject)->GetIntegerField(TEXT("used_import_count"))),
@@ -317,9 +394,9 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 		TEXT("Explicit build invocation can be prepared independently"),
 		FAvidScriptEditorCSharpBuildInvoker::Prepare(ExplicitConfig, Invocation, PreparedResult));
 	TestEqual(
-		TEXT("Prepared invocation uses PowerShell"),
+		TEXT("Prepared invocation uses PowerShell 7"),
 		Invocation.ExecutablePath,
-		FString(TEXT("powershell.exe")));
+		FString(TEXT("pwsh.exe")));
 	TestFalse(TEXT("Prepared invocation contains parameters"), Invocation.Parameters.IsEmpty());
 	TestTrue(
 		TEXT("Prepared invocation forwards disabled data-lane fusion"),
@@ -342,6 +419,172 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 	TestEqual(TEXT("Shared finalizer preserves WASM backend count"), FinalizedResult.WasmBackendInvocationCount, ExplicitResult.WasmBackendInvocationCount);
 	TestEqual(TEXT("Shared finalizer preserves cache lookup"), FinalizedResult.SemanticCacheLookup, ExplicitResult.SemanticCacheLookup);
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpBuildServiceGeneratedContainerFacadeTest,
+	"AvidScript.Editor.CSharpBuildService.GeneratedContainerFacadeDirectAbi",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpBuildServiceGeneratedContainerFacadeTest::RunTest(
+	const FString& Parameters)
+{
+	const FString TestRoot = NormalizeAvidScriptCSharpBuildTestPath(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptTests/CSharpProfiles/GeneratedContainerFacade")));
+	IFileManager::Get().DeleteDirectory(*TestRoot, false, true);
+	if (!TestTrue(
+		TEXT("Generated container facade test root can be created"),
+		IFileManager::Get().MakeDirectory(*TestRoot, true)))
+	{
+		return false;
+	}
+
+	const FString OwnerPath =
+		UAvidScriptCSharpBindingEmitterTestObject::StaticClass()->GetPathName();
+	FAvidScriptBindingSelectionProfile Profile;
+	Profile.PackageName =
+		TEXT("avidscript.test.csharp_build_service.container_facade");
+	Profile.ExplicitProperties = {
+		{ OwnerPath, TEXT("ReadableStringArray"), true },
+		{ OwnerPath, TEXT("ReadableIntSet"), true },
+		{ OwnerPath, TEXT("ReadableNameStringMap"), true }
+	};
+
+	FAvidScriptCSharpBindingEmitResult BindingPackage;
+	if (!TestTrue(
+		TEXT("Generated container facade binding package publishes"),
+		FAvidScriptEditorCSharpBindingEmitter::PublishProfile(
+			Profile,
+			FPaths::Combine(TestRoot, TEXT("GeneratedBindings")),
+			BindingPackage)))
+	{
+		AddError(BindingPackage.ErrorCategory + TEXT(": ")
+			+ BindingPackage.ErrorMessage);
+		return false;
+	}
+	TestTrue(
+		TEXT("Generated container facade reference source exists"),
+		FPaths::FileExists(BindingPackage.ReferenceSourcePath));
+	TestTrue(
+		TEXT("Generated container facade manifest exists"),
+		FPaths::FileExists(BindingPackage.ManifestPath));
+
+	const FString SourcePath = NormalizeAvidScriptCSharpBuildTestPath(
+		FPaths::Combine(TestRoot, TEXT("GeneratedContainerFacadeScript.cs")));
+	if (!TestTrue(
+		TEXT("Generated container facade user source can be written"),
+		FFileHelper::SaveStringToFile(
+			MakeAvidScriptGeneratedContainerFacadeSource(),
+			*SourcePath)))
+	{
+		return false;
+	}
+
+	FAvidScriptEditorCSharpBuildConfig Config;
+	Config.BuildScriptPath =
+		FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleBuildScriptPath();
+	Config.ProjectPath =
+		FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleProjectPath();
+	Config.SourcePath = SourcePath;
+	Config.ModuleId = TEXT("csharp_generated_container_facade");
+	Config.ArtifactStem = TEXT("generated_container_facade");
+	Config.OutputRoot = NormalizeAvidScriptCSharpBuildTestPath(
+		FPaths::Combine(TestRoot, TEXT("Output")));
+	Config.ReportPath =
+		FAvidScriptEditorCSharpBuildService::MakeReportPathForOutputRoot(
+			Config.OutputRoot,
+			Config.ArtifactStem);
+	Config.ManifestPath =
+		FAvidScriptEditorCSharpBuildService::MakeManifestPathForOutputRoot(
+			Config.OutputRoot,
+			Config.ArtifactStem);
+	Config.BindingPackagePath = BindingPackage.ManifestPath;
+	Config.bEnableDataLaneFusion = false;
+	Config.bDisableSemanticCache = true;
+
+	FAvidScriptEditorCSharpBuildResult BuildResult;
+	const bool bBuildSucceeded =
+		FAvidScriptEditorCSharpBuildService::BuildProfile(Config, BuildResult);
+	if (!TestTrue(
+		TEXT("Generated container facade direct ABI profile builds"),
+		bBuildSucceeded))
+	{
+		AddError(BuildResult.ErrorCategory + TEXT(": ")
+			+ BuildResult.ErrorMessage);
+		return false;
+	}
+	TestTrue(
+		TEXT("Generated container facade build result succeeds"),
+		BuildResult.bSucceeded);
+	TestEqual(
+		TEXT("Generated container facade process exit code"),
+		BuildResult.ProcessExitCode,
+		0);
+	TestEqual(
+		TEXT("Generated container facade uses one explicit build"),
+		BuildResult.BuildInvocationCount,
+		1);
+	TestEqual(
+		TEXT("Generated container facade runs WASM backend once"),
+		BuildResult.WasmBackendInvocationCount,
+		1);
+	TestEqual(
+		TEXT("Generated container facade preserves its authorization package"),
+		BuildResult.AuthorizationBindingPackagePath,
+		BindingPackage.ManifestPath);
+	TestTrue(
+		TEXT("Generated container facade publishes a WASM artifact"),
+		FPaths::FileExists(FPaths::Combine(
+			Config.OutputRoot,
+			Config.ArtifactStem + TEXT(".wasm"))));
+
+	TSharedPtr<FJsonObject> ReportObject;
+	if (!TestTrue(
+		TEXT("Generated container facade report is valid JSON"),
+		LoadAvidScriptCSharpBuildTestJsonObject(
+			Config.ReportPath,
+			ReportObject))
+		|| !ReportObject.IsValid())
+	{
+		return false;
+	}
+	TestEqual(
+		TEXT("Generated container facade report declares direct ABI success"),
+		ReportObject->GetStringField(TEXT("result")),
+		FString(TEXT("direct_abi_built")));
+
+	const TSharedPtr<FJsonObject>* AuthorizationObject = nullptr;
+	if (!TestTrue(
+		TEXT("Generated container facade report contains authorization"),
+		ReportObject->TryGetObjectField(
+			TEXT("binding_authorization"),
+			AuthorizationObject))
+		|| AuthorizationObject == nullptr
+		|| !AuthorizationObject->IsValid())
+	{
+		return false;
+	}
+	TestEqual(
+		TEXT("Generated container facade authorization package name matches"),
+		(*AuthorizationObject)->GetStringField(TEXT("package_name")),
+		BindingPackage.PackageName);
+	TestEqual(
+		TEXT("Generated container facade authorization package hash matches"),
+		(*AuthorizationObject)->GetStringField(TEXT("package_hash")),
+		BindingPackage.PackageHash);
+	TestTrue(
+		TEXT("Generated facade calls use read, write, find, upsert, and remove imports"),
+		AvidScriptCSharpBuildTestUsedImportsContain(
+			*AuthorizationObject,
+			{
+				TEXT("avidscript.value_container_read.v1"),
+				TEXT("avidscript.value_container_write.v1"),
+				TEXT("avidscript.value_container_find.v1"),
+				TEXT("avidscript.value_container_upsert.v1"),
+				TEXT("avidscript.value_container_remove.v1")
+			}));
 	return true;
 }
 

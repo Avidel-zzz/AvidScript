@@ -20,9 +20,10 @@ internal static class CSharpGuestStateSchemaTests
         CompatibleUnsafeImplicitFieldsAreSkipped();
         ContractVersionBoundsUseAsState1003();
         SourcePipelineProjectsExplicitStateSchemaV2();
+        DelegateEventOnlyScriptDefinesStateOwner();
         CompatiblePersistedUnsafeSourceFailsWithAsState1005();
         TypeFingerprintChangesWithValueLayout();
-        return 11;
+        return 12;
     }
 
     private static void LegacyContractsProduceCompatibleSchemaV2()
@@ -275,6 +276,41 @@ internal static class CSharpGuestStateSchemaTests
             "compatible persisted unsafe source fields must fail with ASSTATE1005");
     }
 
+    private static void DelegateEventOnlyScriptDefinesStateOwner()
+    {
+        const string source = """
+            using AvidScript;
+
+            namespace Game;
+
+            [AvidStateContract(AvidStateMode.Explicit)]
+            public static class EventOnlyScript
+            {
+                [AvidEvent(AvidEvents.OnSignal)]
+                public static void HandleSignal()
+                {
+                }
+            }
+            """;
+
+        SemanticDocument document = AnalyzeSource(
+            source,
+            "Scripts/DelegateEventOnlyState.cs",
+            new SemanticReferenceSource(
+                DelegateEventFacade,
+                "generated://AvidScript.DelegateEventState.cs",
+                true));
+        GuestModule module = Lower(document, '8');
+        CSharpGuestStateSchema schema = CSharpGuestStateSchemaProjector.Project(document, module);
+
+        Assert(document.Callables.All(callable => callable.Export is null)
+            && document.DelegateEventCallbacks.Count == 1
+            && schema.OwnerTypeId == "type:global::Game.EventOnlyScript"
+            && schema.Policy == "explicit"
+            && schema.Slots.Count == 0,
+            "delegate-event-only scripts should derive their state owner from entrypoint roots");
+    }
+
     private static void TypeFingerprintChangesWithValueLayout()
     {
         SemanticDocument document = CSharpGuestSemanticFixture.Create();
@@ -335,7 +371,10 @@ internal static class CSharpGuestStateSchemaTests
             ?? throw new InvalidOperationException("Fixture should lower.");
     }
 
-    private static SemanticDocument AnalyzeSource(string source, string sourceId)
+    private static SemanticDocument AnalyzeSource(
+        string source,
+        string sourceId,
+        params SemanticReferenceSource[] additionalReferences)
     {
         string hash = FrontendAnalyzer.Analyze(source, sourceId).Source.Sha256;
         SemanticDocument document = SemanticAnalyzer.Analyze(
@@ -347,7 +386,7 @@ internal static class CSharpGuestStateSchemaTests
                 new SemanticReferenceSource(
                     StateContractFacade,
                     "generated://AvidScript.StateContracts.cs"),
-            });
+            }.Concat(additionalReferences).ToArray());
         Assert(document.Succeeded,
             "source semantic analysis failed: " + string.Join(", ", document.Diagnostics.Select(
                 diagnostic => $"{diagnostic.Code}: {diagnostic.Message}")));
@@ -428,6 +467,37 @@ internal static class CSharpGuestStateSchemaTests
             }
 
             public string FormerName { get; }
+        }
+        """;
+
+    private const string DelegateEventFacade = """
+        using System;
+
+        namespace AvidScript;
+
+        [AttributeUsage(AttributeTargets.Method)]
+        public sealed class AvidEventAttribute : Attribute
+        {
+            public AvidEventAttribute(string subscriptionId)
+            {
+            }
+        }
+
+        [AttributeUsage(AttributeTargets.Field)]
+        public sealed class AvidEventContractAttribute : Attribute
+        {
+            public AvidEventContractAttribute(string subscriptionId, string parameterTypes)
+            {
+            }
+        }
+
+        public static class AvidEvents
+        {
+            [AvidEventContract(
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "")]
+            public const string OnSignal =
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         }
         """;
 }

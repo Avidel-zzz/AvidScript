@@ -60,6 +60,7 @@ bool EncodeInboundValue(
 	const void* CodecIdentity,
 	const void* NativeParameters,
 	const FAvidScriptBindingInvocationContext&,
+	uint32,
 	FAvidScriptVmCallFrame& OutFrame,
 	TArray<FAvidScriptObjectHandle>&,
 	FString& OutErrorCategory,

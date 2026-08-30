@@ -689,7 +689,7 @@ bool FAvidScriptRuntimeSession::DispatchGameplayEventHot(
 
 bool FAvidScriptRuntimeSession::DispatchPreparedDelegateEvent(
 	const FAvidScriptPreparedDelegateEvent& Event,
-	const void* NativeParameters,
+	void* NativeParameters,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
 	if (IsOperationActive())

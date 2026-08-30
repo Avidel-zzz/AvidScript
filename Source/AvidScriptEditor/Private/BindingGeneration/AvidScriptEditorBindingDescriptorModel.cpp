@@ -167,6 +167,14 @@ bool FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 		{
 			Writer->WriteValue(TEXT("element_type_id"), Type.ElementTypeId);
 		}
+		if (Package.SchemaVersion >= 19)
+		{
+			WriteDescriptorModelStringArray(
+				Writer,
+				TEXT("type_arguments"),
+				Type.TypeArguments);
+			Writer->WriteValue(TEXT("capability_kind"), Type.CapabilityKind);
+		}
 		Writer->WriteObjectEnd();
 	}
 	Writer->WriteArrayEnd();

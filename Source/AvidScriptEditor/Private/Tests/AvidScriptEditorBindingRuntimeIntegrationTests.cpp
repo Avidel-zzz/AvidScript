@@ -1033,9 +1033,9 @@ bool AcceptAvidScriptGeneratedBindingLifecycleBuild(
 		return false;
 	}
 	Test.TestEqual(
-		*FString::Printf(TEXT("%s authorization ceiling contains 371 generated bindings and eight shared imports"), *BuildLabel),
+		*FString::Printf(TEXT("%s authorization ceiling contains 373 generated bindings and 17 shared imports"), *BuildLabel),
 		AuthorizationImports->Num(),
-		379);
+		390);
 
 	FAvidScriptWasmReloadManifestLoadResult ManifestLoadResult;
 	if (!Test.TestTrue(
@@ -1315,9 +1315,9 @@ bool AcceptAvidScriptProjectGameplayWorkspaceBuild(
 		return false;
 	}
 	Test.TestEqual(
-		*FString::Printf(TEXT("%s authorization ceiling contains 371 gameplay bindings and eight shared imports"), *BuildLabel),
+		*FString::Printf(TEXT("%s authorization ceiling contains 373 gameplay bindings and 17 shared imports"), *BuildLabel),
 		AuthorizationImports->Num(),
-		379);
+		390);
 
 	FAvidScriptWasmReloadManifest Manifest;
 	TArray<uint8> Bytecode;

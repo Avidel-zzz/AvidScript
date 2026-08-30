@@ -16,11 +16,65 @@ internal static class CSharpGuestDelegateEventTests
     public static int Run()
     {
         FixedLayoutsProduceTypedExports();
+        RefOutHandlersWriteAuthorizedOutputSlots();
         AbiCellLimitFailsClosed();
         UnsupportedNestedTypesFailClosed();
         TamperedCallbackMetadataFailsClosed();
         ExplicitSubscriptionFacadeLowersSharedI64Imports();
-        return 5;
+        return 6;
+    }
+
+    private static void RefOutHandlersWriteAuthorizedOutputSlots()
+    {
+        const string source = """
+            using AvidScript;
+
+            namespace Game;
+
+            public static class Script
+            {
+                [AvidEvent(AvidEvents.OnSignal)]
+                public static void HandleSignal(ref int value, out int doubled)
+                {
+                    value += 3;
+                    doubled = value * 2;
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, GeneratedFacade(
+            "global::System.Int32;global::System.Int32",
+            string.Empty,
+            "ref;out"));
+
+        CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(document, SemanticHash);
+        GuestModule module = result.Module
+            ?? throw new InvalidOperationException("ref/out delegate event produced no Guest module");
+        GuestFunction wrapper = module.Functions.Single(function =>
+            function.Id == module.Exports.Single(export =>
+                export.Name == "avid_on_delegate_0123456789abcdef").FunctionId);
+        GuestInstruction[] instructions = wrapper.Blocks
+            .SelectMany(block => block.Instructions)
+            .ToArray();
+        GuestImport outputWrite = module.Imports.Single(import =>
+            import.Name == "avid_delegate_output_write");
+
+        Assert(result.Succeeded
+            && wrapper.Parameters.Select(parameter =>
+                    module.Types.Single(type => type.Id == parameter.TypeId).Storage)
+                .SequenceEqual(new[] { "i32", "i32" }),
+            "ref/out wrapper ABI should pass one transaction token plus the initial ref value");
+        Assert(instructions.Count(instruction => instruction.Op == "address_of") == 2
+            && instructions.Count(instruction => instruction.Op == "call"
+                && instruction.TargetId == outputWrite.Id) == 2,
+            "ref/out wrapper should stage exactly two authorized output slots after the handler call");
+        Assert(outputWrite.Module == "avidscript"
+            && outputWrite.ParameterTypeIds.SequenceEqual(new[]
+                { "type:int32", "type:int32", "type:address" })
+            && outputWrite.ReturnTypeId == "type:int32",
+            "delegate output write should use the single generic transaction import ABI");
+        Assert(GuestModuleValidator.Validate(module).Succeeded
+            && WasmModuleCompiler.Compile(module).Succeeded,
+            "transactional ref/out wrapper should validate and compile into WASM");
     }
 
     private static void FixedLayoutsProduceTypedExports()
@@ -310,8 +364,14 @@ internal static class CSharpGuestDelegateEventTests
         return document;
     }
 
-    private static string GeneratedFacade(string parameterTypes, string typeDeclarations)
+    private static string GeneratedFacade(
+        string parameterTypes,
+        string typeDeclarations,
+        string? parameterDirections = null)
     {
+        string contract = parameterDirections is null
+            ? $"[AvidEventContract(\"{SignalId}\", \"{parameterTypes}\")]"
+            : $"[AvidEventContract(\"{SignalId}\", \"{parameterTypes}\", \"{parameterDirections}\")]";
         return $$"""
             using System;
 
@@ -327,13 +387,17 @@ internal static class CSharpGuestDelegateEventTests
             public sealed class AvidEventContractAttribute : Attribute
             {
                 public AvidEventContractAttribute(string subscriptionId, string parameterTypes) { }
+                public AvidEventContractAttribute(
+                    string subscriptionId,
+                    string parameterTypes,
+                    string parameterDirections) { }
             }
 
             {{typeDeclarations}}
 
             public static class AvidEvents
             {
-                [AvidEventContract("{{SignalId}}", "{{parameterTypes}}")]
+                {{contract}}
                 public const string OnSignal = "{{SignalId}}";
             }
             """;

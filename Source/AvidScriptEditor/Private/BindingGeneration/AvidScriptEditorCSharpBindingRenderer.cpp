@@ -30,6 +30,71 @@ struct FCSharpRenderedMethod
 	FString SignatureKey;
 };
 
+void AppendUniqueValueCapabilityImports(
+	const TConstArrayView<FAvidScriptValueCapabilityImportSpec> Specs,
+	TSet<FString>& InOutStableIds,
+	TArray<const FAvidScriptValueCapabilityImportSpec*>& OutSpecs)
+{
+	for (const FAvidScriptValueCapabilityImportSpec& Spec : Specs)
+	{
+		if (Spec.StableId != nullptr
+			&& !InOutStableIds.Contains(Spec.StableId))
+		{
+			InOutStableIds.Add(Spec.StableId);
+			OutSpecs.Add(&Spec);
+		}
+	}
+}
+
+TArray<const FAvidScriptValueCapabilityImportSpec*>
+GetRequiredValueCapabilityImports(
+	const FAvidScriptBindingPackageModel& Package)
+{
+	TArray<const FAvidScriptValueCapabilityImportSpec*> Result;
+	TSet<FString> StableIds;
+	const bool bHasFlatArrays = Package.Types.ContainsByPredicate(
+		[](const FAvidScriptBindingTypeModel& Type)
+		{
+			return Type.Kind == TEXT("array")
+				&& Type.CapabilityKind == TEXT("array_flat");
+		});
+	const bool bHasCompositeValues = Package.Types.ContainsByPredicate(
+		[](const FAvidScriptBindingTypeModel& Type)
+		{
+			return Type.CapabilityKind == TEXT("composite");
+		});
+	const bool bHasCompositeContainers = Package.Types.ContainsByPredicate(
+		[](const FAvidScriptBindingTypeModel& Type)
+		{
+			return (Type.Kind == TEXT("array")
+					|| Type.Kind == TEXT("set")
+					|| Type.Kind == TEXT("map"))
+				&& Type.CapabilityKind == TEXT("composite");
+		});
+	if (bHasFlatArrays)
+	{
+		AppendUniqueValueCapabilityImports(
+			FAvidScriptValueCapability::GetArrayImportSpecs(),
+			StableIds,
+			Result);
+	}
+	if (bHasCompositeValues)
+	{
+		AppendUniqueValueCapabilityImports(
+			FAvidScriptValueCapability::GetCompositeImportSpecs(),
+			StableIds,
+			Result);
+	}
+	if (bHasCompositeContainers)
+	{
+		AppendUniqueValueCapabilityImports(
+			FAvidScriptValueCapability::GetCompositeContainerImportSpecs(),
+			StableIds,
+			Result);
+	}
+	return Result;
+}
+
 FString EscapeCSharpString(const FString& Value)
 {
 	FString Escaped = Value;
@@ -134,6 +199,14 @@ bool ResolveCSharpType(
 	if (Type.CanonicalType == TEXT("scalar:u32")) { OutType = TEXT("uint"); return Type.Kind == TEXT("scalar"); }
 	if (Type.CanonicalType == TEXT("scalar:i64")) { OutType = TEXT("long"); return Type.Kind == TEXT("scalar"); }
 	if (Type.CanonicalType == TEXT("scalar:u64")) { OutType = TEXT("ulong"); return Type.Kind == TEXT("scalar"); }
+	if (Type.CanonicalType == TEXT("text:ftext"))
+	{
+		OutType = TEXT("FAvidText");
+		return Type.Kind == TEXT("text_capability")
+			&& Type.CppType == TEXT("FText")
+			&& Type.AbiTypes == TArray<FString>{ TEXT("i") }
+			&& Type.CapabilityKind == TEXT("composite");
+	}
 	if (Type.Kind == TEXT("enum") || Type.Kind == TEXT("object_handle") || IsKnownExpandedStruct(Type))
 	{
 		OutType = FAvidScriptEditorCSharpSyntax::MakeIdentifier(Type.CppType);
@@ -149,6 +222,12 @@ bool ResolveCSharpType(
 	OutErrorSource = Type.StableId.IsEmpty() ? Type.CanonicalType : Type.StableId;
 	return false;
 }
+
+bool ResolveDescriptorCSharpType(
+	const FAvidScriptBindingTypeModel& Type,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesById,
+	FString& OutType,
+	FString& OutErrorSource);
 
 bool ResolveArrayCSharpType(
 	const FAvidScriptBindingTypeModel& Type,
@@ -167,8 +246,11 @@ bool ResolveArrayCSharpType(
 		FindRenderedTypeById(TypesById, Type.ElementTypeId);
 	FString ElementCSharpType;
 	if (ElementType == nullptr
-		|| ElementType->Kind == TEXT("array")
-		|| !ResolveCSharpType(*ElementType, ElementCSharpType, OutErrorSource))
+		|| !ResolveDescriptorCSharpType(
+			*ElementType,
+			TypesById,
+			ElementCSharpType,
+			OutErrorSource))
 	{
 		if (OutErrorSource.IsEmpty())
 		{
@@ -176,8 +258,111 @@ bool ResolveArrayCSharpType(
 		}
 		return false;
 	}
-	OutType = ElementCSharpType + TEXT("[]");
+	if (Type.CapabilityKind == TEXT("array_flat"))
+	{
+		OutType = ElementCSharpType + TEXT("[]");
+		return true;
+	}
+	if (Type.CapabilityKind != TEXT("composite"))
+	{
+		OutErrorSource = Type.StableId;
+		return false;
+	}
+	OutType = TEXT("FAvidArray<") + ElementCSharpType + TEXT(">");
 	return true;
+}
+
+bool ResolveCompositeObjectCSharpType(
+	const FAvidScriptBindingTypeModel& Type,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesById,
+	FString& OutType,
+	FString& OutErrorSource)
+{
+	const bool bSoftObject = Type.Kind == TEXT("soft_object_capability");
+	const bool bWeakObject = Type.Kind == TEXT("weak_object_capability");
+	const FAvidScriptBindingTypeModel* ObjectType =
+		Type.TypeArguments.Num() == 1
+			? FindRenderedTypeById(TypesById, Type.TypeArguments[0])
+			: nullptr;
+	FString ObjectCSharpType;
+	if ((!bSoftObject && !bWeakObject)
+		|| Type.AbiTypes != TArray<FString>{ TEXT("i") }
+		|| Type.CapabilityKind != TEXT("composite")
+		|| ObjectType == nullptr
+		|| ObjectType->Kind != TEXT("object_handle")
+		|| !ResolveCSharpType(*ObjectType, ObjectCSharpType, OutErrorSource))
+	{
+		if (OutErrorSource.IsEmpty())
+		{
+			OutErrorSource = Type.StableId;
+		}
+		return false;
+	}
+	OutType = (bSoftObject
+		? TEXT("FAvidSoftObject<")
+		: TEXT("FAvidWeakObject<"))
+		+ ObjectCSharpType + TEXT(">");
+	return true;
+}
+
+bool ResolveDescriptorCSharpType(
+	const FAvidScriptBindingTypeModel& Type,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesById,
+	FString& OutType,
+	FString& OutErrorSource)
+{
+	if (Type.Kind == TEXT("name_utf8") || Type.Kind == TEXT("string_utf8"))
+	{
+		OutType = TEXT("string");
+		return Type.AbiTypes == TArray<FString>{ TEXT("i") };
+	}
+	if (Type.Kind == TEXT("soft_object_capability")
+		|| Type.Kind == TEXT("weak_object_capability"))
+	{
+		return ResolveCompositeObjectCSharpType(
+			Type,
+			TypesById,
+			OutType,
+			OutErrorSource);
+	}
+	if (Type.Kind == TEXT("array"))
+	{
+		return ResolveArrayCSharpType(Type, TypesById, OutType, OutErrorSource);
+	}
+	if (Type.Kind == TEXT("set") || Type.Kind == TEXT("map"))
+	{
+		const int32 ExpectedArguments = Type.Kind == TEXT("set") ? 1 : 2;
+		if (Type.TypeArguments.Num() != ExpectedArguments
+			|| Type.CapabilityKind != TEXT("composite")
+			|| Type.AbiTypes != TArray<FString>{ TEXT("i") })
+		{
+			OutErrorSource = Type.StableId;
+			return false;
+		}
+		TArray<FString, TInlineAllocator<2>> ArgumentTypes;
+		for (const FString& TypeId : Type.TypeArguments)
+		{
+			const FAvidScriptBindingTypeModel* Argument =
+				FindRenderedTypeById(TypesById, TypeId);
+			FString ArgumentType;
+			if (Argument == nullptr
+				|| !ResolveDescriptorCSharpType(
+					*Argument,
+					TypesById,
+					ArgumentType,
+					OutErrorSource))
+			{
+				return false;
+			}
+			ArgumentTypes.Add(MoveTemp(ArgumentType));
+		}
+		OutType = Type.Kind == TEXT("set")
+			? TEXT("FAvidSet<") + ArgumentTypes[0] + TEXT(">")
+			: TEXT("FAvidMap<") + ArgumentTypes[0] + TEXT(", ")
+				+ ArgumentTypes[1] + TEXT(">");
+		return true;
+	}
+	return ResolveCSharpType(Type, OutType, OutErrorSource);
 }
 
 bool ResolveCSharpType(
@@ -233,7 +418,25 @@ bool ResolveCSharpType(
 		OutType = TEXT("string");
 		return true;
 	}
-	if (Value.Kind == TEXT("array"))
+	if (Value.CanonicalType == TEXT("text:ftext"))
+	{
+		const FAvidScriptBindingTypeModel* Type =
+			FindRenderedTypeById(TypesById, Value.TypeId);
+		if (Type == nullptr
+			|| Type->CanonicalType != Value.CanonicalType
+			|| Type->Kind != TEXT("text_capability")
+			|| Type->CppType != TEXT("FText")
+			|| Type->AbiTypes != TArray<FString>{ TEXT("i") }
+			|| Type->CapabilityKind != TEXT("composite"))
+		{
+			OutErrorSource = Value.TypeId;
+			return false;
+		}
+		OutType = TEXT("FAvidText");
+		return true;
+	}
+	if (Value.Kind == TEXT("soft_object_capability")
+		|| Value.Kind == TEXT("weak_object_capability"))
 	{
 		const FAvidScriptBindingTypeModel* Type =
 			FindRenderedTypeById(TypesById, Value.TypeId);
@@ -246,7 +449,32 @@ bool ResolveCSharpType(
 			OutErrorSource = Value.TypeId;
 			return false;
 		}
-		return ResolveArrayCSharpType(*Type, TypesById, OutType, OutErrorSource);
+		return ResolveCompositeObjectCSharpType(
+			*Type,
+			TypesById,
+			OutType,
+			OutErrorSource);
+	}
+	if (Value.Kind == TEXT("array")
+		|| Value.Kind == TEXT("set")
+		|| Value.Kind == TEXT("map"))
+	{
+		const FAvidScriptBindingTypeModel* Type =
+			FindRenderedTypeById(TypesById, Value.TypeId);
+		if (Type == nullptr
+			|| Type->CanonicalType != Value.CanonicalType
+			|| Type->Kind != Value.Kind
+			|| Type->CppType != Value.CppType
+			|| Type->AbiTypes != Value.AbiTypes)
+		{
+			OutErrorSource = Value.TypeId;
+			return false;
+		}
+		return ResolveDescriptorCSharpType(
+			*Type,
+			TypesById,
+			OutType,
+			OutErrorSource);
 	}
 	if (Value.Kind == TEXT("struct_wire"))
 	{
@@ -1462,6 +1690,109 @@ void AppendObjectHandleProxy(
 	}
 }
 
+void AppendAvidText(TArray<FString>& Lines)
+{
+	Lines.Append({
+		TEXT("[StructLayout(LayoutKind.Sequential)]"),
+		TEXT("public readonly struct FAvidText"),
+		TEXT("{"),
+		TEXT("    private readonly int Token;"),
+		TEXT(""),
+		TEXT("    internal FAvidText(int token)"),
+		TEXT("    {"),
+		TEXT("        Token = token;"),
+		TEXT("    }"),
+		TEXT(""),
+		TEXT("    public bool IsValid => Token < 0;"),
+		TEXT("    public override string ToString() => AvidScriptNative.TextToString(this);"),
+		TEXT("    internal int AvidScriptToken => Token;"),
+		TEXT("}"),
+		TEXT("")
+	});
+}
+
+void AppendCompositeObjectCapabilities(TArray<FString>& Lines)
+{
+	Lines.Append({
+		TEXT("[StructLayout(LayoutKind.Sequential)]"),
+		TEXT("public readonly struct FAvidSoftObject<T> where T : struct"),
+		TEXT("{"),
+		TEXT("    private readonly int Token;"),
+		TEXT(""),
+		TEXT("    internal FAvidSoftObject(int token)"),
+		TEXT("    {"),
+		TEXT("        Token = token;"),
+		TEXT("    }"),
+		TEXT(""),
+		TEXT("    public bool IsValid => Token < 0;"),
+		TEXT("    internal int AvidScriptToken => Token;"),
+		TEXT("}"),
+		TEXT(""),
+		TEXT("[StructLayout(LayoutKind.Sequential)]"),
+		TEXT("public readonly struct FAvidWeakObject<T> where T : struct"),
+		TEXT("{"),
+		TEXT("    private readonly int Token;"),
+		TEXT(""),
+		TEXT("    internal FAvidWeakObject(int token)"),
+		TEXT("    {"),
+		TEXT("        Token = token;"),
+		TEXT("    }"),
+		TEXT(""),
+		TEXT("    public bool IsValid => Token < 0;"),
+		TEXT("    internal int AvidScriptToken => Token;"),
+		TEXT("}"),
+		TEXT("")
+	});
+}
+
+void AppendCompositeContainerCapabilities(TArray<FString>& Lines)
+{
+	Lines.Append({
+		TEXT("[StructLayout(LayoutKind.Sequential)]"),
+		TEXT("public readonly struct FAvidArray<T>"),
+		TEXT("{"),
+		TEXT("    private readonly int Token;"),
+		TEXT(""),
+		TEXT("    internal FAvidArray(int token)"),
+		TEXT("    {"),
+		TEXT("        Token = token;"),
+		TEXT("    }"),
+		TEXT(""),
+		TEXT("    public bool IsValid => Token < 0;"),
+		TEXT("    internal int AvidScriptToken => Token;"),
+		TEXT("}"),
+		TEXT(""),
+		TEXT("[StructLayout(LayoutKind.Sequential)]"),
+		TEXT("public readonly struct FAvidSet<T>"),
+		TEXT("{"),
+		TEXT("    private readonly int Token;"),
+		TEXT(""),
+		TEXT("    internal FAvidSet(int token)"),
+		TEXT("    {"),
+		TEXT("        Token = token;"),
+		TEXT("    }"),
+		TEXT(""),
+		TEXT("    public bool IsValid => Token < 0;"),
+		TEXT("    internal int AvidScriptToken => Token;"),
+		TEXT("}"),
+		TEXT(""),
+		TEXT("[StructLayout(LayoutKind.Sequential)]"),
+		TEXT("public readonly struct FAvidMap<TKey, TValue>"),
+		TEXT("{"),
+		TEXT("    private readonly int Token;"),
+		TEXT(""),
+		TEXT("    internal FAvidMap(int token)"),
+		TEXT("    {"),
+		TEXT("        Token = token;"),
+		TEXT("    }"),
+		TEXT(""),
+		TEXT("    public bool IsValid => Token < 0;"),
+		TEXT("    internal int AvidScriptToken => Token;"),
+		TEXT("}"),
+		TEXT("")
+	});
+}
+
 bool IsAvidScriptActorClassReference(
 	const FAvidScriptBindingPackageModel& Package,
 	const FAvidScriptBindingClassReferenceModel& Reference)
@@ -1807,14 +2138,16 @@ bool AppendDelegateEventReferenceSurface(
 		TEXT("[AttributeUsage(AttributeTargets.Field, Inherited = false, AllowMultiple = false)]"),
 		TEXT("internal sealed class AvidEventContractAttribute : Attribute"),
 		TEXT("{"),
-		TEXT("    internal AvidEventContractAttribute(string subscriptionId, string parameterTypes)"),
+		TEXT("    internal AvidEventContractAttribute(string subscriptionId, string parameterTypes, string parameterDirections)"),
 		TEXT("    {"),
 		TEXT("        SubscriptionId = subscriptionId;"),
 		TEXT("        ParameterTypes = parameterTypes;"),
+		TEXT("        ParameterDirections = parameterDirections;"),
 		TEXT("    }"),
 		TEXT(""),
 		TEXT("    internal string SubscriptionId { get; }"),
 		TEXT("    internal string ParameterTypes { get; }"),
+		TEXT("    internal string ParameterDirections { get; }"),
 		TEXT("}"),
 		TEXT(""),
 		TEXT("public readonly struct AvidSubscription"),
@@ -1845,14 +2178,9 @@ bool AppendDelegateEventReferenceSurface(
 			return false;
 		}
 		TArray<FString> ParameterTypes;
+		TArray<FString> ParameterDirections;
 		for (const FAvidScriptBindingValueModel& Parameter : Event.Parameters)
 		{
-			if (Parameter.Direction != TEXT("value"))
-			{
-				OutErrorCategory = TEXT("descriptor_contract_invalid");
-				OutErrorSource = Event.CanonicalIdentity;
-				return false;
-			}
 			FString ParameterType;
 			if (!ResolveDelegateEventContractType(
 					Parameter,
@@ -1865,11 +2193,28 @@ bool AppendDelegateEventReferenceSurface(
 				return false;
 			}
 			ParameterTypes.Add(MoveTemp(ParameterType));
+			if (Parameter.Direction == TEXT("ref")
+				|| Parameter.Direction == TEXT("out"))
+			{
+				ParameterDirections.Add(Parameter.Direction);
+			}
+			else if (Parameter.Direction == TEXT("value")
+				|| Parameter.Direction == TEXT("const_ref"))
+			{
+				ParameterDirections.Add(TEXT("none"));
+			}
+			else
+			{
+				OutErrorCategory = TEXT("delegate_event_direction_unsupported");
+				OutErrorSource = Parameter.Direction;
+				return false;
+			}
 		}
 		Lines.Add(FString::Printf(
-			TEXT("    [AvidEventContract(\"%s\", \"%s\")]"),
+			TEXT("    [AvidEventContract(\"%s\", \"%s\", \"%s\")]"),
 			*EscapeCSharpString(Event.StableId),
-			*EscapeCSharpString(FString::Join(ParameterTypes, TEXT(";")))));
+			*EscapeCSharpString(FString::Join(ParameterTypes, TEXT(";"))),
+			*EscapeCSharpString(FString::Join(ParameterDirections, TEXT(";")))));
 		Lines.Add(FString::Printf(
 			TEXT("    public const string %s = \"%s\";"),
 			*FAvidScriptEditorCSharpSyntax::MakeIdentifier(Event.ScriptName),
@@ -1937,14 +2282,7 @@ int32 FAvidScriptEditorCSharpBindingRenderer::GetManifestImportCount(
 	{
 		ImportCount += FAvidScriptSceneAttachmentBinding::GetSpecs().Num();
 	}
-	if (Package.Types.ContainsByPredicate(
-			[](const FAvidScriptBindingTypeModel& Type)
-			{
-				return Type.Kind == TEXT("array");
-			}))
-	{
-		ImportCount += FAvidScriptValueCapability::GetArrayImportSpecs().Num();
-	}
+	ImportCount += GetRequiredValueCapabilityImports(Package).Num();
 	if (!Package.SelfTypeId.IsEmpty())
 	{
 		++ImportCount;
@@ -2092,6 +2430,7 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 	TMap<FString, const FAvidScriptBindingTypeModel*> TypesByCanonical;
 	TMap<FString, const FAvidScriptBindingTypeModel*> TypesById;
 	TArray<const FAvidScriptBindingTypeModel*> ArrayTypes;
+	TArray<const FAvidScriptBindingTypeModel*> CompositeContainerTypes;
 	TSet<FString> CSharpTypeNames;
 	bool bDescriptorHasActorProxy = false;
 	for (const FAvidScriptBindingTypeModel& Type : Package.Types)
@@ -2106,9 +2445,17 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 		}
 		TypesByCanonical.Add(Type.CanonicalType, &Type);
 		TypesById.Add(Type.StableId, &Type);
-		if (Type.Kind == TEXT("array"))
+		if (Type.Kind == TEXT("array")
+			&& Type.CapabilityKind == TEXT("array_flat"))
 		{
 			ArrayTypes.Add(&Type);
+		}
+		if ((Type.Kind == TEXT("array")
+				|| Type.Kind == TEXT("set")
+				|| Type.Kind == TEXT("map"))
+			&& Type.CapabilityKind == TEXT("composite"))
+		{
+			CompositeContainerTypes.Add(&Type);
 		}
 		if (Type.Kind == TEXT("struct") || Type.Kind == TEXT("struct_wire") || Type.Kind == TEXT("object_handle") || Type.Kind == TEXT("enum"))
 		{
@@ -2438,6 +2785,9 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 	bool bNeedsVector = false;
 	bool bNeedsRotator = false;
 	bool bNeedsTransform = false;
+	bool bNeedsText = false;
+	bool bNeedsSoftObject = false;
+	bool bNeedsWeakObject = false;
 	const bool bNeedsGeneratedVectorValueBuffer =
 		Package.Bindings.ContainsByPredicate(
 			[](const FAvidScriptBindingFunctionModel& Binding)
@@ -2450,6 +2800,9 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 		bNeedsVector |= Type.CppType == TEXT("FVector");
 		bNeedsRotator |= Type.CppType == TEXT("FRotator");
 		bNeedsTransform |= Type.CppType == TEXT("FTransform");
+		bNeedsText |= Type.Kind == TEXT("text_capability");
+		bNeedsSoftObject |= Type.Kind == TEXT("soft_object_capability");
+		bNeedsWeakObject |= Type.Kind == TEXT("weak_object_capability");
 	}
 	if (bNeedsTransform)
 	{
@@ -2522,6 +2875,15 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 		TEXT("")
 	});
 	if (bNeedsVector) { AppendVector(Lines); }
+	if (bNeedsText) { AppendAvidText(Lines); }
+	if (bNeedsSoftObject || bNeedsWeakObject)
+	{
+		AppendCompositeObjectCapabilities(Lines);
+	}
+	if (!CompositeContainerTypes.IsEmpty())
+	{
+		AppendCompositeContainerCapabilities(Lines);
+	}
 	if (bNeedsGeneratedVectorValueBuffer)
 	{
 		AppendGeneratedVectorValueBuffer(Lines);
@@ -2884,12 +3246,33 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 	}
 	Lines.Append({ TEXT("}"), TEXT("") });
 
-	if (!ArrayTypes.IsEmpty())
+	const bool bNeedsCompositeValues =
+		bNeedsText || bNeedsSoftObject || bNeedsWeakObject
+		|| !CompositeContainerTypes.IsEmpty();
+	if (!ArrayTypes.IsEmpty() || bNeedsCompositeValues)
 	{
 		Lines.Append({
 			TEXT("public static class AvidScriptValue"),
 			TEXT("{")
 		});
+		if (bNeedsText)
+		{
+			Lines.Add(TEXT("    public static bool Release(FAvidText value) => AvidScriptNative.ReleaseComposite(value.AvidScriptToken) != 0;"));
+		}
+		if (bNeedsSoftObject)
+		{
+			Lines.Add(TEXT("    public static bool Release<T>(FAvidSoftObject<T> value) where T : struct => AvidScriptNative.ReleaseComposite(value.AvidScriptToken) != 0;"));
+		}
+		if (bNeedsWeakObject)
+		{
+			Lines.Add(TEXT("    public static bool Release<T>(FAvidWeakObject<T> value) where T : struct => AvidScriptNative.ReleaseComposite(value.AvidScriptToken) != 0;"));
+		}
+		if (!CompositeContainerTypes.IsEmpty())
+		{
+			Lines.Add(TEXT("    public static bool Release<T>(FAvidArray<T> value) => AvidScriptNative.ReleaseComposite(value.AvidScriptToken) != 0;"));
+			Lines.Add(TEXT("    public static bool Release<T>(FAvidSet<T> value) => AvidScriptNative.ReleaseComposite(value.AvidScriptToken) != 0;"));
+			Lines.Add(TEXT("    public static bool Release<TKey, TValue>(FAvidMap<TKey, TValue> value) => AvidScriptNative.ReleaseComposite(value.AvidScriptToken) != 0;"));
+		}
 		TSet<FString> ReleaseSignatures;
 		for (int32 ArrayIndex = 0; ArrayIndex < ArrayTypes.Num(); ++ArrayIndex)
 		{
@@ -2908,7 +3291,7 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 				return false;
 			}
 			ReleaseSignatures.Add(ArrayType);
-			if (ArrayIndex > 0)
+			if (bNeedsCompositeValues || ArrayIndex > 0)
 			{
 				Lines.Add(TEXT(""));
 			}
@@ -2919,44 +3302,187 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 		}
 		Lines.Append({ TEXT("}"), TEXT("") });
 
-		Lines.Append({
-			TEXT("public static class AvidScriptArray"),
-			TEXT("{")
-		});
-		TSet<FString> ArraySignatures;
-		for (int32 ArrayIndex = 0; ArrayIndex < ArrayTypes.Num(); ++ArrayIndex)
+		if (!CompositeContainerTypes.IsEmpty())
 		{
-			FString ArrayType;
-			if (!ResolveArrayCSharpType(
-					*ArrayTypes[ArrayIndex],
-					TypesById,
-					ArrayType,
-					OutErrorSource)
-				|| ArraySignatures.Contains(ArrayType))
+			Lines.Append({
+				TEXT("public static class AvidScriptContainer"),
+				TEXT("{"),
+				TEXT("    public static int Count<T>(FAvidArray<T> value) => AvidScriptNative.ContainerCount(value.AvidScriptToken);"),
+				TEXT("    public static int Count<T>(FAvidSet<T> value) => AvidScriptNative.ContainerCount(value.AvidScriptToken);"),
+				TEXT("    public static int Count<TKey, TValue>(FAvidMap<TKey, TValue> value) => AvidScriptNative.ContainerCount(value.AvidScriptToken);"),
+				TEXT("    public static bool Resize<T>(FAvidArray<T> value, int count) => AvidScriptNative.ContainerResize(value.AvidScriptToken, count) != 0;"),
+				TEXT("    public static bool Clear<T>(FAvidArray<T> value) => AvidScriptNative.ContainerClear(value.AvidScriptToken) != 0;"),
+				TEXT("    public static bool Clear<T>(FAvidSet<T> value) => AvidScriptNative.ContainerClear(value.AvidScriptToken) != 0;"),
+				TEXT("    public static bool Clear<TKey, TValue>(FAvidMap<TKey, TValue> value) => AvidScriptNative.ContainerClear(value.AvidScriptToken) != 0;")
+			});
+			TSet<FString> CompositeContainerSignatures;
+			for (int32 ContainerIndex = 0;
+				ContainerIndex < CompositeContainerTypes.Num();
+				++ContainerIndex)
 			{
-				OutErrorCategory = TEXT("csharp_type_collision");
-				OutErrorSource = ArrayType.IsEmpty()
-					? ArrayTypes[ArrayIndex]->StableId
-					: ArrayType;
-				return false;
-			}
-			ArraySignatures.Add(ArrayType);
-			if (ArrayIndex > 0)
-			{
+				const FAvidScriptBindingTypeModel& Container =
+					*CompositeContainerTypes[ContainerIndex];
+				FString ContainerType;
+				if (!ResolveDescriptorCSharpType(
+						Container,
+						TypesById,
+						ContainerType,
+						OutErrorSource))
+				{
+					OutErrorCategory = TEXT("unsupported_csharp_type");
+					return false;
+				}
+				if (CompositeContainerSignatures.Contains(ContainerType))
+				{
+					OutErrorCategory = TEXT("csharp_type_collision");
+					OutErrorSource = ContainerType;
+					return false;
+				}
+				CompositeContainerSignatures.Add(ContainerType);
+				TArray<FString, TInlineAllocator<2>> ArgumentTypes;
+				for (const FString& TypeId : Container.TypeArguments)
+				{
+					const FAvidScriptBindingTypeModel* Argument =
+						FindRenderedTypeById(TypesById, TypeId);
+					FString ArgumentType;
+					if (Argument == nullptr
+						|| !ResolveDescriptorCSharpType(
+							*Argument,
+							TypesById,
+							ArgumentType,
+							OutErrorSource))
+					{
+						OutErrorCategory = TEXT("unsupported_csharp_type");
+						return false;
+					}
+					ArgumentTypes.Add(MoveTemp(ArgumentType));
+				}
 				Lines.Add(TEXT(""));
+				if (Container.Kind == TEXT("array"))
+				{
+					Lines.Add(FString::Printf(
+						TEXT("    public static bool TryGet(this %s value, int index, out %s result) => AvidScriptNative.ReadContainer%04d(value, index, 0, out result) != 0;"),
+						*ContainerType,
+						*ArgumentTypes[0],
+						ContainerIndex));
+					Lines.Add(FString::Printf(
+						TEXT("    public static bool TrySet(this %s value, int index, in %s input) => AvidScriptNative.WriteContainer%04d(value, index, 0, in input) != 0;"),
+						*ContainerType,
+						*ArgumentTypes[0],
+						ContainerIndex));
+				}
+				else if (Container.Kind == TEXT("set"))
+				{
+					Lines.Add(FString::Printf(
+						TEXT("    public static bool TryGetAt(this %s value, int index, out %s result) => AvidScriptNative.ReadContainer%04d(value, index, 0, out result) != 0;"),
+						*ContainerType,
+						*ArgumentTypes[0],
+						ContainerIndex));
+					Lines.Add(FString::Printf(
+						TEXT("    public static int FindIndex(this %s value, in %s input) => AvidScriptNative.FindContainer%04d(value, in input);"),
+						*ContainerType,
+						*ArgumentTypes[0],
+						ContainerIndex));
+					Lines.Add(FString::Printf(
+						TEXT("    public static bool Contains(this %s value, in %s input) => AvidScriptNative.FindContainer%04d(value, in input) >= 0;"),
+						*ContainerType,
+						*ArgumentTypes[0],
+						ContainerIndex));
+					Lines.Add(FString::Printf(
+						TEXT("    public static bool Add(this %s value, in %s input) => AvidScriptNative.UpsertContainer%04d(value, in input, 0) == 1;"),
+						*ContainerType,
+						*ArgumentTypes[0],
+						ContainerIndex));
+					Lines.Add(FString::Printf(
+						TEXT("    public static bool Remove(this %s value, in %s input) => AvidScriptNative.RemoveContainer%04d(value, in input) != 0;"),
+						*ContainerType,
+						*ArgumentTypes[0],
+						ContainerIndex));
+				}
+				else
+				{
+					Lines.Add(FString::Printf(
+						TEXT("    public static bool TryGetKeyAt(this %s value, int index, out %s result) => AvidScriptNative.ReadContainer%04d(value, index, 0, out result) != 0;"),
+						*ContainerType,
+						*ArgumentTypes[0],
+						ContainerIndex));
+					Lines.Add(FString::Printf(
+						TEXT("    public static bool TryGetValueAt(this %s value, int index, out %s result) => AvidScriptNative.ReadContainerValue%04d(value, index, 1, out result) != 0;"),
+						*ContainerType,
+						*ArgumentTypes[1],
+						ContainerIndex));
+					Lines.Add(FString::Printf(
+						TEXT("    public static bool TrySetValueAt(this %s value, int index, in %s input) => AvidScriptNative.WriteContainer%04d(value, index, 1, in input) != 0;"),
+						*ContainerType,
+						*ArgumentTypes[1],
+						ContainerIndex));
+					Lines.Add(FString::Printf(
+						TEXT("    public static int FindIndex(this %s value, in %s key) => AvidScriptNative.FindContainer%04d(value, in key);"),
+						*ContainerType,
+						*ArgumentTypes[0],
+						ContainerIndex));
+					Lines.Add(FString::Printf(
+						TEXT("    public static bool ContainsKey(this %s value, in %s key) => AvidScriptNative.FindContainer%04d(value, in key) >= 0;"),
+						*ContainerType,
+						*ArgumentTypes[0],
+						ContainerIndex));
+					Lines.Add(FString::Printf(
+						TEXT("    public static bool Set(this %s value, in %s key, in %s input) => AvidScriptNative.UpsertContainer%04d(value, in key, in input) > 0;"),
+						*ContainerType,
+						*ArgumentTypes[0],
+						*ArgumentTypes[1],
+						ContainerIndex));
+					Lines.Add(FString::Printf(
+						TEXT("    public static bool Remove(this %s value, in %s key) => AvidScriptNative.RemoveContainer%04d(value, in key) != 0;"),
+						*ContainerType,
+						*ArgumentTypes[0],
+						ContainerIndex));
+				}
 			}
-			Lines.Add(FString::Printf(
-				TEXT("    public static bool Snapshot(%s hostArray, int hostIndex, %s localArray, int localIndex, int count) => AvidScriptNative.ReadArrayRange%04d(hostArray, hostIndex, localArray, localIndex, count) != 0;"),
-				*ArrayType,
-				*ArrayType,
-				ArrayIndex));
-			Lines.Add(FString::Printf(
-				TEXT("    public static bool Flush(%s localArray, int localIndex, %s hostArray, int hostIndex, int count) => AvidScriptNative.WriteArrayRange%04d(hostArray, hostIndex, localArray, localIndex, count) != 0;"),
-				*ArrayType,
-				*ArrayType,
-				ArrayIndex));
+			Lines.Append({ TEXT("}"), TEXT("") });
 		}
-		Lines.Append({ TEXT("}"), TEXT("") });
+
+		if (!ArrayTypes.IsEmpty())
+		{
+			Lines.Append({
+				TEXT("public static class AvidScriptArray"),
+				TEXT("{")
+			});
+			TSet<FString> ArraySignatures;
+			for (int32 ArrayIndex = 0; ArrayIndex < ArrayTypes.Num(); ++ArrayIndex)
+			{
+				FString ArrayType;
+				if (!ResolveArrayCSharpType(
+						*ArrayTypes[ArrayIndex],
+						TypesById,
+						ArrayType,
+						OutErrorSource)
+					|| ArraySignatures.Contains(ArrayType))
+				{
+					OutErrorCategory = TEXT("csharp_type_collision");
+					OutErrorSource = ArrayType.IsEmpty()
+						? ArrayTypes[ArrayIndex]->StableId
+						: ArrayType;
+					return false;
+				}
+				ArraySignatures.Add(ArrayType);
+				if (ArrayIndex > 0)
+				{
+					Lines.Add(TEXT(""));
+				}
+				Lines.Add(FString::Printf(
+					TEXT("    public static bool Snapshot(%s hostArray, int hostIndex, %s localArray, int localIndex, int count) => AvidScriptNative.ReadArrayRange%04d(hostArray, hostIndex, localArray, localIndex, count) != 0;"),
+					*ArrayType,
+					*ArrayType,
+					ArrayIndex));
+				Lines.Add(FString::Printf(
+					TEXT("    public static bool Flush(%s localArray, int localIndex, %s hostArray, int hostIndex, int count) => AvidScriptNative.WriteArrayRange%04d(hostArray, hostIndex, localArray, localIndex, count) != 0;"),
+					*ArrayType,
+					*ArrayType,
+					ArrayIndex));
+			}
+			Lines.Append({ TEXT("}"), TEXT("") });
+		}
 	}
 
 	Lines.Add(TEXT("internal static class AvidScriptNative"));
@@ -2968,6 +3494,160 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 			Lines.Add(TEXT(""));
 		}
 		Lines.Append(RenderedMethods.FindChecked(Binding.Ordinal).NativeLines);
+	}
+	if (bNeedsCompositeValues)
+	{
+		if (!Package.Bindings.IsEmpty())
+		{
+			Lines.Add(TEXT(""));
+		}
+		Lines.Append({
+			TEXT("    [DllImport(\"avidscript\", EntryPoint = \"avid_value_release\")]"),
+			TEXT("    internal static extern int ReleaseComposite(int token);")
+		});
+		if (bNeedsText)
+		{
+			Lines.Append({
+				TEXT(""),
+				TEXT("    [DllImport(\"avidscript\", EntryPoint = \"avid_value_text_to_string\")]"),
+				TEXT("    internal static extern string TextToString(FAvidText value);")
+			});
+		}
+		if (!CompositeContainerTypes.IsEmpty())
+		{
+			Lines.Append({
+				TEXT(""),
+				TEXT("    [DllImport(\"avidscript\", EntryPoint = \"avid_value_container_count\")]"),
+				TEXT("    internal static extern int ContainerCount(int token);"),
+				TEXT(""),
+				TEXT("    [DllImport(\"avidscript\", EntryPoint = \"avid_value_container_read\")]"),
+				TEXT("    internal static extern int ContainerReadRaw(int token, int index, int lane, int guestAddress);"),
+				TEXT(""),
+				TEXT("    [DllImport(\"avidscript\", EntryPoint = \"avid_value_container_write\")]"),
+				TEXT("    internal static extern int ContainerWriteRaw(int token, int index, int lane, int guestAddress);"),
+				TEXT(""),
+				TEXT("    [DllImport(\"avidscript\", EntryPoint = \"avid_value_container_resize\")]"),
+				TEXT("    internal static extern int ContainerResize(int token, int count);"),
+				TEXT(""),
+				TEXT("    [DllImport(\"avidscript\", EntryPoint = \"avid_value_container_clear\")]"),
+				TEXT("    internal static extern int ContainerClear(int token);")
+			});
+			for (int32 ContainerIndex = 0;
+				ContainerIndex < CompositeContainerTypes.Num();
+				++ContainerIndex)
+			{
+				const FAvidScriptBindingTypeModel& Container =
+					*CompositeContainerTypes[ContainerIndex];
+				FString ContainerType;
+				if (!ResolveDescriptorCSharpType(
+						Container,
+						TypesById,
+						ContainerType,
+						OutErrorSource))
+				{
+					OutErrorCategory = TEXT("unsupported_csharp_type");
+					return false;
+				}
+				TArray<FString, TInlineAllocator<2>> ArgumentTypes;
+				for (const FString& TypeId : Container.TypeArguments)
+				{
+					const FAvidScriptBindingTypeModel* Argument =
+						FindRenderedTypeById(TypesById, TypeId);
+					FString ArgumentType;
+					if (Argument == nullptr
+						|| !ResolveDescriptorCSharpType(
+							*Argument,
+							TypesById,
+							ArgumentType,
+							OutErrorSource))
+					{
+						OutErrorCategory = TEXT("unsupported_csharp_type");
+						return false;
+					}
+					ArgumentTypes.Add(MoveTemp(ArgumentType));
+				}
+				Lines.Append({
+					TEXT(""),
+					TEXT("    [DllImport(\"avidscript\", EntryPoint = \"avid_value_container_read\")]"),
+					FString::Printf(
+						TEXT("    internal static extern int ReadContainer%04d(%s value, int index, int lane, out %s result);"),
+						ContainerIndex,
+						*ContainerType,
+						*ArgumentTypes[0])
+				});
+				if (Container.Kind == TEXT("set")
+					|| Container.Kind == TEXT("map"))
+				{
+					Lines.Append({
+						TEXT(""),
+						TEXT("    [DllImport(\"avidscript\", EntryPoint = \"avid_value_container_find\")]"),
+						FString::Printf(
+							TEXT("    internal static extern int FindContainer%04d(%s value, in %s key);"),
+							ContainerIndex,
+							*ContainerType,
+							*ArgumentTypes[0]),
+						TEXT(""),
+						TEXT("    [DllImport(\"avidscript\", EntryPoint = \"avid_value_container_remove\")]"),
+						FString::Printf(
+							TEXT("    internal static extern int RemoveContainer%04d(%s value, in %s key);"),
+							ContainerIndex,
+							*ContainerType,
+							*ArgumentTypes[0])
+					});
+				}
+				if (Container.Kind == TEXT("map"))
+				{
+					Lines.Append({
+						TEXT(""),
+						TEXT("    [DllImport(\"avidscript\", EntryPoint = \"avid_value_container_read\")]"),
+						FString::Printf(
+							TEXT("    internal static extern int ReadContainerValue%04d(%s value, int index, int lane, out %s result);"),
+							ContainerIndex,
+							*ContainerType,
+							*ArgumentTypes[1]),
+						TEXT(""),
+						TEXT("    [DllImport(\"avidscript\", EntryPoint = \"avid_value_container_write\")]"),
+						FString::Printf(
+							TEXT("    internal static extern int WriteContainer%04d(%s value, int index, int lane, in %s input);"),
+							ContainerIndex,
+							*ContainerType,
+							*ArgumentTypes[1]),
+						TEXT(""),
+						TEXT("    [DllImport(\"avidscript\", EntryPoint = \"avid_value_container_upsert\")]"),
+						FString::Printf(
+							TEXT("    internal static extern int UpsertContainer%04d(%s value, in %s key, in %s input);"),
+							ContainerIndex,
+							*ContainerType,
+							*ArgumentTypes[0],
+							*ArgumentTypes[1])
+					});
+				}
+				else if (Container.Kind == TEXT("set"))
+				{
+					Lines.Append({
+						TEXT(""),
+						TEXT("    [DllImport(\"avidscript\", EntryPoint = \"avid_value_container_upsert\")]"),
+						FString::Printf(
+							TEXT("    internal static extern int UpsertContainer%04d(%s value, in %s input, int unused);"),
+							ContainerIndex,
+							*ContainerType,
+							*ArgumentTypes[0])
+					});
+				}
+				else if (Container.Kind == TEXT("array"))
+				{
+					Lines.Append({
+						TEXT(""),
+						TEXT("    [DllImport(\"avidscript\", EntryPoint = \"avid_value_container_write\")]"),
+						FString::Printf(
+							TEXT("    internal static extern int WriteContainer%04d(%s value, int index, int lane, in %s input);"),
+							ContainerIndex,
+							*ContainerType,
+							*ArgumentTypes[0])
+					});
+				}
+			}
+		}
 	}
 	for (int32 ArrayIndex = 0; ArrayIndex < ArrayTypes.Num(); ++ArrayIndex)
 	{
@@ -2981,7 +3661,7 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 			OutErrorCategory = TEXT("unsupported_csharp_type");
 			return false;
 		}
-		if (!Package.Bindings.IsEmpty() || ArrayIndex > 0)
+		if (!Package.Bindings.IsEmpty() || bNeedsCompositeValues || ArrayIndex > 0)
 		{
 			Lines.Add(TEXT(""));
 		}
@@ -3238,23 +3918,17 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitManifest(
 			}
 		}
 	}
-	if (Package.Types.ContainsByPredicate(
-			[](const FAvidScriptBindingTypeModel& Type)
-			{
-				return Type.Kind == TEXT("array");
-			}))
+	for (const FAvidScriptValueCapabilityImportSpec* Spec :
+		GetRequiredValueCapabilityImports(Package))
 	{
-		for (const FAvidScriptValueCapabilityImportSpec& Spec :
-			FAvidScriptValueCapability::GetArrayImportSpecs())
-		{
-			Writer->WriteObjectStart();
-			Writer->WriteValue(TEXT("stable_id"), Spec.StableId);
-			Writer->WriteValue(TEXT("ordinal"), INDEX_NONE);
-			Writer->WriteValue(TEXT("module"), Spec.ModuleName);
-			Writer->WriteValue(TEXT("name"), Spec.ImportName);
-			Writer->WriteValue(TEXT("signature"), Spec.Signature);
-			Writer->WriteObjectEnd();
-		}
+		check(Spec != nullptr);
+		Writer->WriteObjectStart();
+		Writer->WriteValue(TEXT("stable_id"), Spec->StableId);
+		Writer->WriteValue(TEXT("ordinal"), INDEX_NONE);
+		Writer->WriteValue(TEXT("module"), Spec->ModuleName);
+		Writer->WriteValue(TEXT("name"), Spec->ImportName);
+		Writer->WriteValue(TEXT("signature"), Spec->Signature);
+		Writer->WriteObjectEnd();
 	}
 	if (!Package.SelfTypeId.IsEmpty())
 	{

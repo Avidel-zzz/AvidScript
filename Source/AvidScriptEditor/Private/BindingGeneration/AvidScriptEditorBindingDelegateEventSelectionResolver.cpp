@@ -245,7 +245,7 @@ bool ResolveOne(
 			Source,
 			Selection.CallbackKind == TEXT("function_handler")
 				? FString(TEXT("Select a declared native or Blueprint-bytecode Actor/ActorComponent RPC or RepNotify UFunction with a supported value-only signature and explicit chain mode."))
-				: FString(TEXT("Select a declared dynamic multicast delegate with a supported value-only signature of at most eight ABI cells.")));
+				: FString(TEXT("Select a declared dynamic multicast delegate with supported value, const-ref, ref, or out parameters within the eight-cell ABI limit.")));
 		return false;
 	}
 	return true;

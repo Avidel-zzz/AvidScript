@@ -329,6 +329,92 @@ bool SetUtf8Value(
 	return true;
 }
 
+bool ResolveCompositeValueKind(
+	const FValueCodecProgram& Program,
+	EAvidScriptCompositeValueKind& OutKind)
+{
+	if (Program.Kind == EValueCodecKind::Text
+		&& Program.Property != nullptr
+		&& Program.Property->IsA<FTextProperty>())
+	{
+		OutKind = EAvidScriptCompositeValueKind::Text;
+		return true;
+	}
+	if (Program.Kind == EValueCodecKind::SoftObject
+		&& Program.Property != nullptr
+		&& Program.Property->IsA<FSoftObjectProperty>())
+	{
+		OutKind = EAvidScriptCompositeValueKind::SoftObject;
+		return true;
+	}
+	if (Program.Kind == EValueCodecKind::WeakObject
+		&& Program.Property != nullptr
+		&& Program.Property->IsA<FWeakObjectProperty>())
+	{
+		OutKind = EAvidScriptCompositeValueKind::WeakObject;
+		return true;
+	}
+	if (Program.Kind == EValueCodecKind::CompositeArray
+		&& Program.Property != nullptr
+		&& Program.Property->IsA<FArrayProperty>())
+	{
+		OutKind = EAvidScriptCompositeValueKind::Array;
+		return true;
+	}
+	if (Program.Kind == EValueCodecKind::Set
+		&& Program.Property != nullptr
+		&& Program.Property->IsA<FSetProperty>())
+	{
+		OutKind = EAvidScriptCompositeValueKind::Set;
+		return true;
+	}
+	if (Program.Kind == EValueCodecKind::Map
+		&& Program.Property != nullptr
+		&& Program.Property->IsA<FMapProperty>())
+	{
+		OutKind = EAvidScriptCompositeValueKind::Map;
+		return true;
+	}
+	return false;
+}
+
+bool IsCompositeValueKind(const EValueCodecKind Kind)
+{
+	return Kind == EValueCodecKind::Text
+		|| Kind == EValueCodecKind::SoftObject
+		|| Kind == EValueCodecKind::WeakObject
+		|| Kind == EValueCodecKind::CompositeArray
+		|| Kind == EValueCodecKind::Set
+		|| Kind == EValueCodecKind::Map;
+}
+
+bool SetCompositeValue(
+	const FValueCodecProgram& Program,
+	const uint32 ValueReference,
+	const FAvidScriptBindingInvocationContext& Context,
+	void* Frame,
+	FString& OutDetails)
+{
+	EAvidScriptCompositeValueKind CompositeKind = EAvidScriptCompositeValueKind::Text;
+	if (Program.TypeId.IsEmpty()
+		|| !ResolveCompositeValueKind(Program, CompositeKind))
+	{
+		OutDetails = TEXT("The cached composite value program is invalid.");
+		return false;
+	}
+	if (Context.CompositeValueHeap == nullptr)
+	{
+		OutDetails = TEXT("The composite value input requires a session value heap.");
+		return false;
+	}
+	return Context.CompositeValueHeap->CopyToProperty(
+		ValueReference,
+		Program.TypeId,
+		*Program.Property,
+		Program.Property->ContainerPtrToValuePtr<void>(Frame),
+		OutDetails);
+}
+
 bool DecodeWireValue(
 	const FValueCodecProgram& Program,
 	const TConstArrayView<uint8> Wire,
@@ -597,6 +683,32 @@ bool EncodeWireValue(
 		FMemory::Memcpy(Wire.GetData(), &Token, sizeof(Token));
 		return true;
 	}
+	if (IsCompositeValueKind(Program.Kind))
+	{
+		EAvidScriptCompositeValueKind CompositeKind = EAvidScriptCompositeValueKind::Text;
+		if (Wire.Num() != static_cast<int32>(sizeof(uint32))
+			|| Program.TypeId.IsEmpty()
+			|| !ResolveCompositeValueKind(Program, CompositeKind))
+		{
+			OutDetails = TEXT("The cached composite output descriptor is invalid.");
+			return false;
+		}
+		uint32 Token = 0;
+		if (!Transaction.PublishNextCompositeValue(
+				Program.TypeId,
+				CompositeKind,
+				*Program.Property,
+				Value,
+				TConstArrayView<uint32>(),
+				Context,
+				Token,
+				OutDetails))
+		{
+			return false;
+		}
+		FMemory::Memcpy(Wire.GetData(), &Token, sizeof(Token));
+		return true;
+	}
 	if (Program.Kind == EValueCodecKind::Bool)
 	{
 		const int32 Stored = CastFieldChecked<FBoolProperty>(Program.Property)->GetPropertyValue(Value) ? 1 : 0;
@@ -744,6 +856,13 @@ void FCodecOutputTransaction::Commit()
 			ArrayValueHeap->ReleaseReservation(Reservation);
 		}
 	}
+	if (CompositeValueHeap != nullptr)
+	{
+		for (FAvidScriptCompositeValueReservation& Reservation : CompositeReservations)
+		{
+			CompositeValueHeap->ReleaseReservation(Reservation);
+		}
+	}
 	BorrowedHandles.Reset();
 	Utf8Reservations.Reset();
 	CreatedUtf8Tokens.Reset();
@@ -753,6 +872,10 @@ void FCodecOutputTransaction::Commit()
 	CreatedArrayTokens.Reset();
 	ArrayValueHeap = nullptr;
 	NextArrayReservation = 0;
+	CompositeReservations.Reset();
+	CreatedCompositeTokens.Reset();
+	CompositeValueHeap = nullptr;
+	NextCompositeReservation = 0;
 }
 
 bool FCodecOutputTransaction::ReserveUtf8Value(
@@ -1010,6 +1133,68 @@ bool FCodecOutputTransaction::PublishNextArrayValue(
 	return true;
 }
 
+bool FCodecOutputTransaction::ReserveCompositeValue(
+	const FAvidScriptBindingInvocationContext& Context,
+	FString& OutDetails)
+{
+	if (Context.CompositeValueHeap == nullptr)
+	{
+		OutDetails = TEXT("The composite output requires a session value heap.");
+		return false;
+	}
+	if (CompositeValueHeap != nullptr
+		&& CompositeValueHeap != Context.CompositeValueHeap)
+	{
+		OutDetails = TEXT("The composite output transaction cannot span runtime sessions.");
+		return false;
+	}
+	CompositeValueHeap = Context.CompositeValueHeap;
+	FAvidScriptCompositeValueReservation& Reservation =
+		CompositeReservations.AddDefaulted_GetRef();
+	if (!CompositeValueHeap->Reserve(Reservation, OutDetails))
+	{
+		CompositeReservations.Pop(EAllowShrinking::No);
+		return false;
+	}
+	return true;
+}
+
+bool FCodecOutputTransaction::PublishNextCompositeValue(
+	const FString& TypeId,
+	const EAvidScriptCompositeValueKind Kind,
+	FProperty& Property,
+	const void* SourceValue,
+	const TConstArrayView<uint32> ChildTokens,
+	const FAvidScriptBindingInvocationContext& Context,
+	uint32& OutToken,
+	FString& OutDetails)
+{
+	OutToken = 0;
+	if (CompositeValueHeap == nullptr
+		|| CompositeValueHeap != Context.CompositeValueHeap
+		|| !CompositeReservations.IsValidIndex(NextCompositeReservation))
+	{
+		OutDetails = TEXT("The composite output has no matching preflight reservation.");
+		return false;
+	}
+	FAvidScriptCompositeValueReservation& Reservation =
+		CompositeReservations[NextCompositeReservation++];
+	if (!CompositeValueHeap->PublishReserved(
+			Reservation,
+			TypeId,
+			Kind,
+			Property,
+			SourceValue,
+			ChildTokens,
+			OutToken,
+			OutDetails))
+	{
+		return false;
+	}
+	CreatedCompositeTokens.Add(OutToken);
+	return true;
+}
+
 void FCodecOutputTransaction::Rollback(
 	const FAvidScriptBindingInvocationContext& Context)
 {
@@ -1043,6 +1228,17 @@ void FCodecOutputTransaction::Rollback(
 			ArrayValueHeap->ReleaseReservation(Reservation);
 		}
 	}
+	if (CompositeValueHeap != nullptr)
+	{
+		for (int32 Index = CreatedCompositeTokens.Num() - 1; Index >= 0; --Index)
+		{
+			CompositeValueHeap->RemoveCreatedValue(CreatedCompositeTokens[Index]);
+		}
+		for (FAvidScriptCompositeValueReservation& Reservation : CompositeReservations)
+		{
+			CompositeValueHeap->ReleaseReservation(Reservation);
+		}
+	}
 	BorrowedHandles.Reset();
 	Utf8Reservations.Reset();
 	CreatedUtf8Tokens.Reset();
@@ -1052,6 +1248,10 @@ void FCodecOutputTransaction::Rollback(
 	CreatedArrayTokens.Reset();
 	ArrayValueHeap = nullptr;
 	NextArrayReservation = 0;
+	CompositeReservations.Reset();
+	CreatedCompositeTokens.Reset();
+	CompositeValueHeap = nullptr;
+	NextCompositeReservation = 0;
 }
 
 bool ResolveObjectHandle(
@@ -1153,6 +1353,20 @@ bool SetValueFromCells(
 			Program,
 			static_cast<uint32>(Cells[0]),
 			*GuestMemory,
+			Context,
+			Frame,
+			OutDetails);
+	}
+	if (IsCompositeValueKind(Program.Kind))
+	{
+		if (Cells[0] > MAX_uint32)
+		{
+			OutDetails = TEXT("The composite value reference does not fit the 32-bit capability space.");
+			return false;
+		}
+		return SetCompositeValue(
+			Program,
+			static_cast<uint32>(Cells[0]),
 			Context,
 			Frame,
 			OutDetails);
@@ -1266,6 +1480,22 @@ bool SetValueFromGuest(
 			Frame,
 			OutDetails);
 	}
+	if (IsCompositeValueKind(Program.Kind))
+	{
+		if (Wire.Num() != static_cast<int32>(sizeof(uint32)))
+		{
+			OutDetails = TEXT("The cached composite guest storage must contain one i32 capability token.");
+			return false;
+		}
+		uint32 ValueReference = 0;
+		FMemory::Memcpy(&ValueReference, Wire.GetData(), sizeof(ValueReference));
+		return SetCompositeValue(
+			Program,
+			ValueReference,
+			Context,
+			Frame,
+			OutDetails);
+	}
 	if (Program.Kind == EValueCodecKind::Array)
 	{
 		if (Wire.Num() != static_cast<int32>(sizeof(uint32)))
@@ -1355,6 +1585,10 @@ bool PreflightValueOutput(
 	if (Program.Kind == EValueCodecKind::Array)
 	{
 		return Transaction.ReserveArrayValue(Context, OutDetails);
+	}
+	if (IsCompositeValueKind(Program.Kind))
+	{
+		return Transaction.ReserveCompositeValue(Context, OutDetails);
 	}
 	return (Program.Kind != EValueCodecKind::Name
 			&& Program.Kind != EValueCodecKind::String)

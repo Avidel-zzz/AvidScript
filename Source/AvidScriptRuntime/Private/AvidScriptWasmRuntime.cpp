@@ -500,6 +500,7 @@ FAvidScriptWasmRuntimeInstance::FAvidScriptWasmRuntimeInstance()
 	BackendSelection.bAllowFallback = true;
 	BindingInvocationContext.ArrayValueHeap = &ArrayValueHeap;
 	BindingInvocationContext.Utf8ValueHeap = &Utf8ValueHeap;
+	BindingInvocationContext.CompositeValueHeap = &CompositeValueHeap;
 }
 
 FAvidScriptWasmRuntimeInstance::FAvidScriptWasmRuntimeInstance(
@@ -508,6 +509,7 @@ FAvidScriptWasmRuntimeInstance::FAvidScriptWasmRuntimeInstance(
 {
 	BindingInvocationContext.ArrayValueHeap = &ArrayValueHeap;
 	BindingInvocationContext.Utf8ValueHeap = &Utf8ValueHeap;
+	BindingInvocationContext.CompositeValueHeap = &CompositeValueHeap;
 }
 
 FAvidScriptWasmRuntimeInstance::~FAvidScriptWasmRuntimeInstance()
@@ -1760,7 +1762,7 @@ bool FAvidScriptWasmRuntimeInstance::PrepareDelegateEventExports(
 
 bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEvent(
 	const FAvidScriptPreparedDelegateEvent& Event,
-	const void* NativeParameters,
+	void* NativeParameters,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
 	CaptureSnapshot(OutResult);
@@ -1793,6 +1795,8 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEvent(
 
 	FAvidScriptVmCallFrame Frame;
 	TArray<FAvidScriptObjectHandle> BorrowedHandles;
+	TUniquePtr<FAvidScriptPreparedDelegateOutputTransaction> OutputTransaction;
+	uint32 OutputTransactionToken = 0;
 	FString EncodeCategory;
 	FString EncodeDetails;
 	const auto ReleaseBorrows = [this, &BorrowedHandles]()
@@ -1811,10 +1815,56 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEvent(
 		}
 		BorrowedHandles.Reset();
 	};
+	if (Event.OutputParameterCount > 0)
+	{
+		if (ActiveDelegateOutputTransaction != nullptr
+			|| ActiveDelegateOutputToken != 0)
+		{
+			SetFailure(
+				OutResult,
+				ModuleId,
+				Event.ExportName,
+				TEXT("reentrant_operation"),
+				TEXT("A prepared delegate output transaction is already active"),
+				TEXT("defer nested delegate dispatch until the active callback returns"));
+			return false;
+		}
+		if (!BindingPackage.IsValid()
+			|| !BindingPackage->BeginPreparedDelegateOutputTransaction(
+				Event,
+				NativeParameters,
+				OutputTransaction,
+				EncodeDetails))
+		{
+			SetFailure(
+				OutResult,
+				ModuleId,
+				Event.ExportName,
+				TEXT("delegate_output_prepare_failed"),
+				EncodeDetails.IsEmpty()
+					? TEXT("The prepared delegate output transaction could not be created")
+					: *EncodeDetails,
+				TEXT("regenerate the binding descriptor and reload the matching script artifact"));
+			return false;
+		}
+		OutputTransactionToken = FAvidScriptValueCapability::AllocateToken();
+		if (OutputTransactionToken == 0)
+		{
+			SetFailure(
+				OutResult,
+				ModuleId,
+				Event.ExportName,
+				TEXT("delegate_output_token_exhausted"),
+				TEXT("The process-wide capability token space is exhausted"),
+				TEXT("restart the process before dispatching additional script callbacks"));
+			return false;
+		}
+	}
 	if (!Event.Encode(
 			Event.ImmutableCodecIdentity,
 			NativeParameters,
 			BindingInvocationContext,
+			OutputTransactionToken,
 			Frame,
 			BorrowedHandles,
 			EncodeCategory,
@@ -1839,9 +1889,11 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEvent(
 	FAvidScriptCachedVmExport& CachedExport =
 		DelegateEventExports.FindOrAdd(Event.StableId);
 	const double EventStartSeconds = FPlatformTime::Seconds();
+	ActiveDelegateOutputTransaction = OutputTransaction.Get();
+	ActiveDelegateOutputToken = OutputTransactionToken;
 	BeginTypedCallbackEpoch();
 	FAvidScriptVmError EventError;
-	const bool bCalled = InvokeVmExport(
+	bool bCalled = InvokeVmExport(
 		VmBackend.Get(),
 		CachedExport,
 		Event.ExportName,
@@ -1849,6 +1901,20 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEvent(
 		Frame.Cells,
 		EventError);
 	EndTypedCallbackEpoch();
+	ActiveDelegateOutputTransaction = nullptr;
+	ActiveDelegateOutputToken = 0;
+	if (bCalled && OutputTransaction.IsValid())
+	{
+		FString CommitError;
+		if (!OutputTransaction->Commit(CommitError))
+		{
+			bCalled = false;
+			EventError.Category = TEXT("delegate_output_commit_failed");
+			EventError.Details = CommitError.IsEmpty()
+				? TEXT("The prepared delegate callback returned without staging every ref/out value.")
+				: MoveTemp(CommitError);
+		}
+	}
 	ReleaseBorrows();
 	Metrics.EventCallbackCallMs = MeasureElapsedMs(EventStartSeconds);
 	if (!bCalled)
@@ -2305,12 +2371,17 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	const int32 PreviousHostImportResult = LastHostImportResult;
 	const bool bHadResources = bWasRuntimeInitialized || bWasModuleLoaded || bWasModuleInstantiated;
 	const double UnloadStartSeconds = FPlatformTime::Seconds();
+	ActiveDelegateOutputTransaction = nullptr;
+	ActiveDelegateOutputToken = 0;
 
 	if (VmBackend)
 	{
 		VmBackend->Unload();
 		VmBackend.Reset();
 	}
+	ArrayValueHeap.Reset();
+	Utf8ValueHeap.Reset();
+	CompositeValueHeap.Reset();
 	PreparedGeneratedHostCalls.Reset();
 	PreparedReflectionHostCalls.Reset();
 	PreparedVmBindingPackage = FAvidScriptVmBindingPackage();
@@ -2320,8 +2391,6 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	DebugMap.Reset();
 	BindingInvocationScratch.Reset();
 	FusedCallbackFrameStack.Reset();
-	ArrayValueHeap.Reset();
-	Utf8ValueHeap.Reset();
 	InvalidateSelfCapability();
 	BeginPlayExport = {};
 	TickExport = {};
@@ -2385,6 +2454,7 @@ void FAvidScriptWasmRuntimeInstance::SetHostContext(const FAvidScriptWasmHostCon
 	BindingInvocationContext.ObjectOwnership = HostContext.ObjectOwnership;
 	BindingInvocationContext.ArrayValueHeap = &ArrayValueHeap;
 	BindingInvocationContext.Utf8ValueHeap = &Utf8ValueHeap;
+	BindingInvocationContext.CompositeValueHeap = &CompositeValueHeap;
 	BindingInvocationContext.OwnerHandle = HostContext.OwnerHandle;
 	BindingInvocationContext.World = HostContext.World;
 	BindingInvocationContext.WritePolicy = HostContext.ActorWritePolicy;
@@ -2402,6 +2472,7 @@ void FAvidScriptWasmRuntimeInstance::ClearHostContext()
 	BindingInvocationContext = FAvidScriptBindingInvocationContext();
 	BindingInvocationContext.ArrayValueHeap = &ArrayValueHeap;
 	BindingInvocationContext.Utf8ValueHeap = &Utf8ValueHeap;
+	BindingInvocationContext.CompositeValueHeap = &CompositeValueHeap;
 }
 
 int32 FAvidScriptWasmRuntimeInstance::HandleOwnerGetSlotImport()
@@ -2783,16 +2854,19 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueReleaseImport(const int32 Token
 
 	FString ArrayError;
 	FString Utf8Error;
+	FString CompositeError;
 	if (!ArrayValueHeap.ReleaseValue(static_cast<uint32>(Token), ArrayError)
-		&& !Utf8ValueHeap.ReleaseValue(static_cast<uint32>(Token), Utf8Error))
+		&& !Utf8ValueHeap.ReleaseValue(static_cast<uint32>(Token), Utf8Error)
+		&& !CompositeValueHeap.ReleaseValue(static_cast<uint32>(Token), CompositeError))
 	{
 		SetPendingHostImportFailure(
 			TEXT("avidscript"),
 			TEXT("avid_value_release"),
 			FString::Printf(
-				TEXT("value_token_stale: the capability is invalid or stale. array=[%s] utf8=[%s]"),
+				TEXT("value_token_stale: the capability is invalid or stale. array=[%s] utf8=[%s] composite=[%s]"),
 				*ArrayError,
-				*Utf8Error));
+				*Utf8Error,
+				*CompositeError));
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 		return 0;
 	}
@@ -2800,6 +2874,399 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueReleaseImport(const int32 Token
 	LastHostImportResult = 1;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return 1;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleValueTextToStringImport(const int32 Token)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = Token;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+
+	FAvidScriptCompositeValueView Value;
+	FString Error;
+	if (!IsInGameThread()
+		|| Token >= 0
+		|| !CompositeValueHeap.Resolve(
+			static_cast<uint32>(Token),
+			FString(),
+			nullptr,
+			Value,
+			Error)
+		|| Value.Kind != EAvidScriptCompositeValueKind::Text
+		|| Value.Property == nullptr
+		|| !Value.Property->IsA<FTextProperty>()
+		|| Value.Value == nullptr)
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("avid_value_text_to_string"),
+			Error.IsEmpty()
+				? FString(TEXT("text_value_invalid: the capability is not a live FText value."))
+				: MoveTemp(Error));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	const FString Presentation = static_cast<const FText*>(Value.Value)->ToString();
+	const FTCHARToUTF8 Utf8(*Presentation, Presentation.Len());
+	FAvidScriptUtf8ValueReservation Reservation;
+	if (Utf8.Length() < 0
+		|| static_cast<uint32>(Utf8.Length()) > FAvidScriptUtf8ValueHeap::MaxValueBytes
+		|| !Utf8ValueHeap.Reserve(Reservation, Error))
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("avid_value_text_to_string"),
+			Error.IsEmpty()
+				? FString(TEXT("text_value_too_large: the FText presentation exceeds the UTF-8 value limit."))
+				: MoveTemp(Error));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	uint32 ResultToken = 0;
+	bool bCreated = false;
+	const TConstArrayView<uint8> Bytes(
+		reinterpret_cast<const uint8*>(Utf8.Get()),
+		Utf8.Length());
+	if (!Utf8ValueHeap.InternReserved(
+			Reservation,
+			Bytes,
+			ResultToken,
+			bCreated,
+			Error))
+	{
+		Utf8ValueHeap.ReleaseReservation(Reservation);
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("avid_value_text_to_string"),
+			MoveTemp(Error));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	LastHostImportResult = static_cast<int32>(ResultToken);
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return LastHostImportResult;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleValueContainerCountImport(
+	const int32 Token)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = Token;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+	FString Error;
+	int32 Count = 0;
+	if (!IsInGameThread()
+		|| Token >= 0
+		|| !BindingPackage.IsValid()
+		|| !BindingPackage->GetCompositeContainerCount(
+			static_cast<uint32>(Token),
+			BindingInvocationContext,
+			Count,
+			Error))
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("avid_value_container_count"),
+			Error.IsEmpty()
+				? FString(TEXT("composite_container_invalid: the capability cannot be counted."))
+				: MoveTemp(Error));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+	LastHostImportResult = Count;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return Count;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleDelegateOutputWriteImport(
+	const int32 TransactionToken,
+	const int32 OutputOrdinal,
+	const uint32 GuestAddress)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = TransactionToken;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+	IAvidScriptVmGuestMemory* GuestMemory = VmBackend == nullptr
+		? nullptr
+		: VmBackend->GetGuestMemory();
+	FString Error;
+	const bool bSucceeded = IsInGameThread()
+		&& TransactionToken < 0
+		&& static_cast<uint32>(TransactionToken) == ActiveDelegateOutputToken
+		&& OutputOrdinal >= 0
+		&& GuestAddress != 0
+		&& ActiveDelegateOutputTransaction != nullptr
+		&& GuestMemory != nullptr
+		&& ActiveDelegateOutputTransaction->StageOutput(
+			static_cast<uint32>(OutputOrdinal),
+			GuestAddress,
+			*GuestMemory,
+			BindingInvocationContext,
+			Error);
+	if (!bSucceeded)
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("avid_delegate_output_write"),
+			Error.IsEmpty()
+				? FString(TEXT("delegate_output_write_invalid: the staged ref/out write does not match the active callback transaction."))
+				: MoveTemp(Error));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+	LastHostImportResult = 1;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return 1;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleValueContainerAccessImport(
+	const bool bRead,
+	const int32 Token,
+	const int32 Index,
+	const int32 Lane,
+	const uint32 GuestAddress)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = Token;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+	const TCHAR* ImportName = bRead
+		? TEXT("avid_value_container_read")
+		: TEXT("avid_value_container_write");
+	IAvidScriptVmGuestMemory* GuestMemory = VmBackend == nullptr
+		? nullptr
+		: VmBackend->GetGuestMemory();
+	FString Error;
+	const bool bSucceeded = IsInGameThread()
+		&& Token < 0
+		&& Index >= 0
+		&& Lane >= 0
+		&& GuestAddress != 0
+		&& BindingPackage.IsValid()
+		&& GuestMemory != nullptr
+		&& (bRead
+			? BindingPackage->ReadCompositeContainerValue(
+				static_cast<uint32>(Token),
+				Index,
+				Lane,
+				GuestAddress,
+				*GuestMemory,
+				BindingInvocationContext,
+				Error)
+			: BindingPackage->WriteCompositeContainerValue(
+				static_cast<uint32>(Token),
+				Index,
+				Lane,
+				GuestAddress,
+				*GuestMemory,
+				BindingInvocationContext,
+				Error));
+	if (!bSucceeded)
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			ImportName,
+			Error.IsEmpty()
+				? FString(TEXT("composite_container_access_invalid: the requested operation failed validation."))
+				: MoveTemp(Error));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+	LastHostImportResult = 1;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return 1;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleValueContainerResizeImport(
+	const int32 Token,
+	const int32 NewCount)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = Token;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+	FString Error;
+	if (!IsInGameThread()
+		|| Token >= 0
+		|| !BindingPackage.IsValid()
+		|| !BindingPackage->ResizeCompositeArray(
+			static_cast<uint32>(Token),
+			NewCount,
+			BindingInvocationContext,
+			Error))
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("avid_value_container_resize"),
+			Error.IsEmpty()
+				? FString(TEXT("composite_array_resize_invalid: the requested resize failed validation."))
+				: MoveTemp(Error));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+	LastHostImportResult = 1;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return 1;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleValueContainerClearImport(
+	const int32 Token)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = Token;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+	FString Error;
+	if (!IsInGameThread()
+		|| Token >= 0
+		|| !BindingPackage.IsValid()
+		|| !BindingPackage->ClearCompositeContainer(
+			static_cast<uint32>(Token),
+			BindingInvocationContext,
+			Error))
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("avid_value_container_clear"),
+			Error.IsEmpty()
+				? FString(TEXT("composite_container_clear_invalid: the requested clear failed validation."))
+				: MoveTemp(Error));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+	LastHostImportResult = 1;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return 1;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleValueContainerFindImport(
+	const int32 Token,
+	const uint32 GuestAddress)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = Token;
+	LastHostImportResult = -1;
+	++HostImportCallCount;
+	IAvidScriptVmGuestMemory* GuestMemory = VmBackend == nullptr
+		? nullptr
+		: VmBackend->GetGuestMemory();
+	FString Error;
+	int32 FoundIndex = -1;
+	if (!IsInGameThread()
+		|| Token >= 0
+		|| GuestAddress == 0
+		|| !BindingPackage.IsValid()
+		|| GuestMemory == nullptr
+		|| !BindingPackage->FindCompositeContainerValue(
+			static_cast<uint32>(Token),
+			GuestAddress,
+			*GuestMemory,
+			BindingInvocationContext,
+			FoundIndex,
+			Error)
+		|| FoundIndex < -1)
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("avid_value_container_find"),
+			Error.IsEmpty()
+				? FString(TEXT("composite_container_find_invalid: the requested lookup failed validation."))
+				: MoveTemp(Error));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return -1;
+	}
+	LastHostImportResult = FoundIndex;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return FoundIndex;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleValueContainerUpsertImport(
+	const int32 Token,
+	const uint32 KeyAddress,
+	const uint32 ValueAddress)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = Token;
+	LastHostImportResult = -1;
+	++HostImportCallCount;
+	IAvidScriptVmGuestMemory* GuestMemory = VmBackend == nullptr
+		? nullptr
+		: VmBackend->GetGuestMemory();
+	FString Error;
+	int32 MutationResult = -1;
+	if (!IsInGameThread()
+		|| Token >= 0
+		|| KeyAddress == 0
+		|| !BindingPackage.IsValid()
+		|| GuestMemory == nullptr
+		|| !BindingPackage->UpsertCompositeContainerValue(
+			static_cast<uint32>(Token),
+			KeyAddress,
+			ValueAddress,
+			*GuestMemory,
+			BindingInvocationContext,
+			MutationResult,
+			Error)
+		|| (MutationResult != 1 && MutationResult != 2))
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("avid_value_container_upsert"),
+			Error.IsEmpty()
+				? FString(TEXT("composite_container_upsert_invalid: the requested mutation failed validation."))
+				: MoveTemp(Error));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return -1;
+	}
+	LastHostImportResult = MutationResult;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return MutationResult;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleValueContainerRemoveImport(
+	const int32 Token,
+	const uint32 KeyAddress)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = Token;
+	LastHostImportResult = -1;
+	++HostImportCallCount;
+	IAvidScriptVmGuestMemory* GuestMemory = VmBackend == nullptr
+		? nullptr
+		: VmBackend->GetGuestMemory();
+	FString Error;
+	bool bRemoved = false;
+	if (!IsInGameThread()
+		|| Token >= 0
+		|| KeyAddress == 0
+		|| !BindingPackage.IsValid()
+		|| GuestMemory == nullptr
+		|| !BindingPackage->RemoveCompositeContainerValue(
+			static_cast<uint32>(Token),
+			KeyAddress,
+			*GuestMemory,
+			BindingInvocationContext,
+			bRemoved,
+			Error))
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("avid_value_container_remove"),
+			Error.IsEmpty()
+				? FString(TEXT("composite_container_remove_invalid: the requested mutation failed validation."))
+				: MoveTemp(Error));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return -1;
+	}
+	LastHostImportResult = bRemoved ? 1 : 0;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return LastHostImportResult;
 }
 
 int32 FAvidScriptWasmRuntimeInstance::HandleDataLaneSubmitImport(
@@ -6345,6 +6812,61 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 		const int32 Value = HandleValueReleaseImport(Call.IntArgs[0]);
 		return Finish(Value, Value != 0);
 	}
+	case EAvidScriptHostBindingId::ValueTextToString:
+	{
+		const int32 Value = HandleValueTextToStringImport(Call.IntArgs[0]);
+		return Finish(Value, Value != 0);
+	}
+	case EAvidScriptHostBindingId::ValueContainerCount:
+	{
+		const int32 Value = HandleValueContainerCountImport(Call.IntArgs[0]);
+		return Finish(Value, !bHasPendingHostImportFailure);
+	}
+	case EAvidScriptHostBindingId::ValueContainerRead:
+	case EAvidScriptHostBindingId::ValueContainerWrite:
+	{
+		const int32 Value = HandleValueContainerAccessImport(
+			Call.BindingId == EAvidScriptHostBindingId::ValueContainerRead,
+			Call.IntArgs[0],
+			Call.IntArgs[1],
+			Call.IntArgs[2],
+			Call.GuestAddress);
+		return Finish(Value, Value != 0);
+	}
+	case EAvidScriptHostBindingId::ValueContainerResize:
+	{
+		const int32 Value = HandleValueContainerResizeImport(
+			Call.IntArgs[0],
+			Call.IntArgs[1]);
+		return Finish(Value, Value != 0);
+	}
+	case EAvidScriptHostBindingId::ValueContainerClear:
+	{
+		const int32 Value = HandleValueContainerClearImport(Call.IntArgs[0]);
+		return Finish(Value, Value != 0);
+	}
+	case EAvidScriptHostBindingId::ValueContainerFind:
+	{
+		const int32 Value = HandleValueContainerFindImport(
+			Call.IntArgs[0],
+			Call.GuestAddress);
+		return Finish(Value, !bHasPendingHostImportFailure);
+	}
+	case EAvidScriptHostBindingId::ValueContainerUpsert:
+	{
+		const int32 Value = HandleValueContainerUpsertImport(
+			Call.IntArgs[0],
+			static_cast<uint32>(Call.IntArgs[1]),
+			Call.GuestAddress);
+		return Finish(Value, !bHasPendingHostImportFailure);
+	}
+	case EAvidScriptHostBindingId::ValueContainerRemove:
+	{
+		const int32 Value = HandleValueContainerRemoveImport(
+			Call.IntArgs[0],
+			Call.GuestAddress);
+		return Finish(Value, !bHasPendingHostImportFailure);
+	}
 	case EAvidScriptHostBindingId::TimerSetOnce:
 	{
 		const int32 Value = HandleTimerSetOnceImport(Call.FloatArgs[0], Call.IntArgs[0]);
@@ -6433,6 +6955,14 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 	{
 		const int32 Value = HandleEventUnsubscribeImport(Call.Int64Args[0]);
 		return Finish(Value, true);
+	}
+	case EAvidScriptHostBindingId::DelegateOutputWrite:
+	{
+		const int32 Value = HandleDelegateOutputWriteImport(
+			Call.IntArgs[0],
+			Call.IntArgs[1],
+			Call.GuestAddress);
+		return Finish(Value, !bHasPendingHostImportFailure);
 	}
 	case EAvidScriptHostBindingId::ActorGetLocation:
 	{
@@ -6527,6 +7057,8 @@ void FAvidScriptWasmRuntimeInstance::ResetHostImportState()
 	PendingHostImportModuleName.Empty();
 	PendingHostImportName.Empty();
 	PendingHostImportDetails.Empty();
+	ActiveDelegateOutputTransaction = nullptr;
+	ActiveDelegateOutputToken = 0;
 }
 
 void FAvidScriptWasmRuntimeInstance::CopyHostImportStateToResult(FAvidScriptWasmSmokeResult& OutResult) const

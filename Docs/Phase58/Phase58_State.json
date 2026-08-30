@@ -19,30 +19,44 @@
   "batches": [
     {
       "id": "P58.A",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "schema19 composite heap FText soft/weak object C# composite_ref; .NET 107/107; UE5.8 no-clean build succeeded; focused Automation Identity and CompositeValues succeeded; Docs/Phase58/P58.1_Composite_Value_Core_Implementation.md",
+      "completed_at_utc": "2026-08-30T08:22:29.0558869+00:00"
     },
     {
       "id": "P58.B",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "递归 TArray/TSet/TMap capability、canonical snapshot/mutation、C# facade 与 Guest lowering 已实现；AvidScript.CSharpGuest.Tests 110/110；UE5.8 no-clean Editor build Succeeded；Docs/Phase58/P58.2_Recursive_Container_Implementation.md",
+      "completed_at_utc": "2026-08-30T11:15:16.9273433+00:00"
     },
     {
       "id": "P58.C",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "delegate ref/out descriptor/C# Guest/VM/Runtime transaction 已闭环；纯事件脚本 owner 修复；正式 C# direct_abi_built；Editor Automation AvidScript.Editor.CSharp.DelegateRefOut 1/1 Success；Docs/Phase58/P58.3_Delegate_RefOut_Transaction_Implementation.md",
+      "completed_at_utc": "2026-08-30T11:15:25.1127026+00:00"
     },
     {
       "id": "P58.D",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "工作树级集中 Gate 完成：UE5.8 no-clean Editor build Succeeded；focused Automation 6/6；full Automation 383/383 Success；benchmark gate passed；Agent Harness audit PASS；Docs/Phase58/P58.4_Centralized_Gate_Report.md",
+      "completed_at_utc": "2026-08-30T12:13:04.3698049+00:00"
     }
   ],
-  "debt": [],
+  "debt": [
+    {
+      "id": "P58-D01-CompositeCapabilityAuthorization",
+      "severity": "Important",
+      "found_batch": "P58.D",
+      "scope": "C# composite capability source-origin authorization and generated-facade compilation closure",
+      "evidence": "Current CSharpCompositeValueCapabilityPolicy accepts same-shaped FAvidText/FAvidArray/FAvidSet/FAvidMap declarations from primary user source; existing Guest test deliberately lowers them without executable reference sources.",
+      "deferral_reason": "Not deferred: discovered by centralized review after P58.D was marked complete and must be fixed before freeze.",
+      "remediation": "Bind composite wrappers and intrinsic constructors to authorized executable reference-source provenance, reject primary-source forgeries, and compile a script against the emitted facade/package.",
+      "status": "Verified",
+      "resolution_evidence": "Semantic schema 17/1.19 executable-reference provenance enforced; primary-source composite wrapper forgery rejected; generated BeginPlay facade compiled through Array/Set/Map direct ABI; BuildIntegration 15/15; focused Automation 1/1 Success; full AvidScript Automation 384/384 Success; UE5.8 no-clean Editor build succeeded.",
+      "target_phase": null,
+      "transfer_reason": ""
+    }
+  ],
   "review": {
     "completed": false,
     "evidence": "",
@@ -112,7 +126,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "batch-complete -Phase 58 -BatchId P58.A -Evidence <text>",
-  "revision": 1,
-  "updated_at_utc": "2026-08-30T07:22:15.7520990+00:00"
+  "next_action": "freeze -Phase 58 -ReviewEvidence <text>",
+  "revision": 7,
+  "updated_at_utc": "2026-08-30T13:05:28.4703854+00:00"
 }

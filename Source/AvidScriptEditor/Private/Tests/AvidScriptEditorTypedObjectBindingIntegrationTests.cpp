@@ -1816,4 +1816,161 @@ bool FAvidScriptEditorCSharpReplicatedPropertyTest::RunTest(
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpDelegateRefOutTest,
+	"AvidScript.Editor.CSharp.DelegateRefOut",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpDelegateRefOutTest::RunTest(
+	const FString& Parameters)
+{
+	const FString TestRoot = MakeAvidScriptTypedObjectBindingTestPath(
+		FPaths::Combine(
+			TEXT("DelegateRefOut"),
+			FGuid::NewGuid().ToString(EGuidFormats::Digits)));
+	IFileManager::Get().MakeDirectory(*TestRoot, true);
+	ON_SCOPE_EXIT
+	{
+		IFileManager::Get().DeleteDirectory(*TestRoot, false, true);
+	};
+
+	const FString ProfilePath = GetAvidScriptTypedProjectApiPluginPath(
+		TEXT("Samples/CSharp/DelegateRefOut/DelegateRefOut.csharp-profile.json"));
+	FAvidScriptEditorCSharpProfileLoadResult ProfileResult;
+	if (!TestTrue(
+			TEXT("Delegate ref/out profile parses"),
+			FAvidScriptEditorCSharpProfileService::LoadProfile(
+				ProfilePath,
+				ProfileResult)))
+	{
+		AddError(ProfileResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptEditorCSharpBuildRequest BuildRequest =
+		FAvidScriptEditorCSharpProfileService::MakeBuildRequest(ProfileResult);
+	BuildRequest.Config.OutputRoot = FPaths::Combine(TestRoot, TEXT("Build"));
+	BuildRequest.Config.ArtifactStem = TEXT("delegate_ref_out");
+	BuildRequest.Config.ReportPath =
+		FAvidScriptEditorCSharpBuildService::MakeReportPathForOutputRoot(
+			BuildRequest.Config.OutputRoot,
+			BuildRequest.Config.ArtifactStem);
+	BuildRequest.Config.ManifestPath =
+		FAvidScriptEditorCSharpBuildService::MakeManifestPathForOutputRoot(
+			BuildRequest.Config.OutputRoot,
+			BuildRequest.Config.ArtifactStem);
+	BuildRequest.Config.SemanticCacheRoot =
+		FPaths::Combine(TestRoot, TEXT("SemanticCache/v1"));
+	BuildRequest.Config.bDisableSemanticCache = true;
+	FAvidScriptEditorCSharpBuildResult BuildResult;
+	if (!TestTrue(
+			TEXT("Delegate ref/out sample builds through Roslyn, Guest IR, and WASM"),
+			FAvidScriptEditorCSharpBuildService::BuildProfile(
+				BuildRequest,
+				BuildResult)))
+	{
+		FString BuildReport;
+		FFileHelper::LoadFileToString(BuildReport, *BuildResult.ReportPath);
+		AddError(
+			BuildResult.ErrorMessage
+			+ TEXT("\nstdout:\n") + BuildResult.Stdout
+			+ TEXT("\nstderr:\n") + BuildResult.Stderr
+			+ TEXT("\nreport:\n") + BuildReport);
+		return false;
+	}
+
+	FAvidScriptWasmReloadManifest Manifest;
+	TArray<uint8> Bytecode;
+	FAvidScriptWasmReloadManifestLoadResult ManifestLoadResult;
+	if (!TestTrue(
+			TEXT("Delegate ref/out manifest authorizes emitted WASM"),
+			FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+				BuildResult.ManifestPath,
+				Manifest,
+				Bytecode,
+				ManifestLoadResult)))
+	{
+		AddError(ManifestLoadResult.ErrorMessage);
+		return false;
+	}
+	if (!TestTrue(
+			TEXT("Delegate ref/out build keeps its authorization package"),
+			FPaths::FileExists(BuildResult.AuthorizationBindingPackagePath)))
+	{
+		return false;
+	}
+	TestTrue(
+		TEXT("Delegate ref/out build omits an empty runtime binding package"),
+		BuildResult.BindingPackagePath.IsEmpty() && !Manifest.BindingPackage.IsValid());
+
+	FString AuthorizationManifestJson;
+	TSharedPtr<FJsonObject> AuthorizationManifestObject;
+	if (!TestTrue(
+			TEXT("Delegate ref/out authorization manifest parses"),
+			LoadAvidScriptTypedProjectApiJson(
+				BuildResult.AuthorizationBindingPackagePath,
+				AuthorizationManifestJson,
+				AuthorizationManifestObject)))
+	{
+		return false;
+	}
+	const TSharedPtr<FJsonObject>* FilesObject = nullptr;
+	FString DescriptorRelativePath;
+	if (!TestTrue(
+			TEXT("Delegate ref/out authorization manifest names its descriptor"),
+			AuthorizationManifestObject->TryGetObjectField(TEXT("files"), FilesObject)
+				&& FilesObject != nullptr
+				&& FilesObject->IsValid()
+				&& (*FilesObject)->TryGetStringField(
+					TEXT("descriptor"),
+					DescriptorRelativePath)))
+	{
+		return false;
+	}
+	FString DescriptorJson;
+	const FString DescriptorPath = FPaths::Combine(
+		FPaths::GetPath(BuildResult.AuthorizationBindingPackagePath),
+		DescriptorRelativePath);
+	if (!TestTrue(
+			TEXT("Delegate ref/out authorization descriptor can be read"),
+			FFileHelper::LoadFileToString(DescriptorJson, *DescriptorPath)))
+	{
+		return false;
+	}
+	FAvidScriptBindingPackageModel AuthorizationPackage;
+	FString DescriptorParseCategory;
+	FString DescriptorParseSource;
+	if (!TestTrue(
+			TEXT("Delegate ref/out authorization descriptor parses"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				DescriptorJson,
+				AuthorizationPackage,
+				DescriptorParseCategory,
+				DescriptorParseSource)))
+	{
+		AddError(DescriptorParseCategory + TEXT(":") + DescriptorParseSource);
+		return false;
+	}
+	TestEqual(
+		TEXT("Delegate ref/out build publishes descriptor schema 19"),
+		AuthorizationPackage.SchemaVersion,
+		19);
+	TestEqual(
+		TEXT("Delegate ref/out build contains one selected event"),
+		AuthorizationPackage.DelegateEvents.Num(),
+		1);
+	TestTrue(
+		TEXT("Delegate ref/out WASM requires the transactional output import"),
+		Manifest.RequiredImports.ContainsByPredicate(
+			[](const FAvidScriptWasmRequiredImport& Import)
+			{
+				return Import.ModuleName == TEXT("avidscript")
+					&& Import.ImportName == TEXT("avid_delegate_output_write");
+			}));
+	TestTrue(
+		TEXT("Delegate ref/out build emits non-empty WASM"),
+		!Bytecode.IsEmpty());
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

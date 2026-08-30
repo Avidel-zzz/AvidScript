@@ -1767,11 +1767,11 @@ bool FAvidScriptEditorBindingDescriptorV8PropertySetTest::RunTest(const FString&
 			FString(ExpectedSource));
 	};
 	ParserRejectsWithSource(
-		TEXT("Schema v19 above the current maximum identifies its header field"),
+		TEXT("Schema v20 above the current maximum identifies its header field"),
 		TEXT("schema_version"),
 		[](TSharedPtr<FJsonObject>& Root)
 		{
-			Root->SetNumberField(TEXT("schema_version"), 19);
+			Root->SetNumberField(TEXT("schema_version"), 20);
 		});
 	ParserRejectsWithSource(
 		TEXT("Malformed package hash identifies its header field"),
@@ -3977,7 +3977,7 @@ bool FAvidScriptEditorBindingDescriptorV3FailureTest::RunTest(const FString& Par
 		TEXT("GetAttachedActors")
 	};
 	TestTrue(
-		TEXT("Supported TArray projection generates schema 10"),
+		TEXT("Supported TArray projection generates the universal value graph"),
 		FAvidScriptEditorBindingDescriptorGenerator::Generate(
 			TEXT("avidscript.engine.core"),
 			{ UnsupportedSelection },
@@ -3993,7 +3993,7 @@ bool FAvidScriptEditorBindingDescriptorV3FailureTest::RunTest(const FString& Par
 			ArrayPackage,
 			ArrayErrorCategory,
 			ArrayErrorSource));
-	TestEqual(TEXT("TArray descriptor activates schema 10"), ArrayPackage.SchemaVersion, 10);
+	TestEqual(TEXT("TArray descriptor activates schema 19"), ArrayPackage.SchemaVersion, 19);
 
 	const FAvidScriptReflectedFunctionSelection MissingSelection{
 		TEXT("/Script/Engine.Actor"),
@@ -4369,6 +4369,52 @@ bool FAvidScriptEditorDelegateEventDescriptorTest::RunTest(
 			{
 				return Type.CanonicalType == TEXT("object:/Script/Engine.Actor");
 			}));
+
+	Profile.ExplicitDelegateEvents[0].EventName = TEXT("OnRefOutSignal");
+	TestTrue(
+		TEXT("Ref/out multicast delegate event generates"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+			Profile,
+			Json,
+			SelectionResult,
+			GenerateResult));
+	TestTrue(
+		TEXT("Ref/out delegate descriptor parses"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			Json,
+			Package,
+			ErrorCategory,
+			ErrorSource));
+	TestEqual(TEXT("Delegate outputs activate schema 19"), Package.SchemaVersion, 19);
+	TestEqual(
+		TEXT("Delegate outputs record the 58.2 generator"),
+		Package.GeneratorVersion,
+		FString(TEXT("58.2.0")));
+	if (Package.DelegateEvents.Num() == 1)
+	{
+		TestEqual(
+			TEXT("First output parameter is ref"),
+			Package.DelegateEvents[0].Parameters[0].Direction,
+			FString(TEXT("ref")));
+		TestEqual(
+			TEXT("Second output parameter is out"),
+			Package.DelegateEvents[0].Parameters[1].Direction,
+			FString(TEXT("out")));
+	}
+	FString ReferenceSource;
+	FString ManifestJson;
+	FAvidScriptCSharpBindingEmitResult EmitResult;
+	TestTrue(
+		TEXT("Ref/out delegate emits a typed C# contract"),
+		FAvidScriptEditorCSharpBindingEmitter::Emit(
+			Json,
+			ReferenceSource,
+			ManifestJson,
+			EmitResult));
+	TestTrue(
+		TEXT("Generated event contract preserves ref/out directions"),
+		ReferenceSource.Contains(TEXT("OnRefOutSignal"))
+			&& ReferenceSource.Contains(TEXT("ref;out")));
 
 	Profile.ExplicitDelegateEvents[0].EventName = TEXT("OnStringSignal");
 	TestFalse(

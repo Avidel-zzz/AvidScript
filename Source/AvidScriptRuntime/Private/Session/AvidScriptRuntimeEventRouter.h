@@ -21,7 +21,7 @@ public:
 		FAvidScriptWasmSmokeResult& OutFailure);
 	bool Dispatch(
 		const FAvidScriptPreparedDelegateEvent& Event,
-		const void* NativeParameters,
+		void* NativeParameters,
 		FAvidScriptWasmSmokeResult& OutResult);
 
 private:

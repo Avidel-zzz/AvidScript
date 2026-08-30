@@ -2318,29 +2318,49 @@ $CanonicalStaticImportNames = @(
     'continuation_cancel_source_cancel',
     'continuation_cancel_source_release',
     'continuation_bind_cancel',
-    'event_subscribe',
-    'event_unsubscribe',
-    'avid_data_lane_epoch',
+	'event_subscribe',
+	'event_unsubscribe',
+	'avid_delegate_output_write',
+	'avid_data_lane_epoch',
     'avid_data_lane_submit',
     'avid_value_array_length',
     'avid_value_array_load',
     'avid_value_array_store',
     'avid_value_array_read_range',
     'avid_value_array_write_range',
-    'avid_value_release'
+    'avid_value_release',
+    'avid_value_text_to_string',
+    'avid_value_container_count',
+    'avid_value_container_read',
+    'avid_value_container_write',
+    'avid_value_container_resize',
+    'avid_value_container_clear',
+    'avid_value_container_find',
+    'avid_value_container_upsert',
+    'avid_value_container_remove'
 )
 $CompatibilityStaticImportNames = @(
     $CanonicalStaticImportNames | Where-Object {
         $_ -notin @(
-            'avid_owner_get_handle',
-            'avid_data_lane_epoch',
+			'avid_owner_get_handle',
+			'avid_delegate_output_write',
+			'avid_data_lane_epoch',
             'avid_data_lane_submit',
             'avid_value_array_length',
             'avid_value_array_load',
             'avid_value_array_store',
             'avid_value_array_read_range',
             'avid_value_array_write_range',
-            'avid_value_release')
+            'avid_value_release',
+            'avid_value_text_to_string',
+            'avid_value_container_count',
+            'avid_value_container_read',
+            'avid_value_container_write',
+            'avid_value_container_resize',
+            'avid_value_container_clear',
+            'avid_value_container_find',
+            'avid_value_container_upsert',
+            'avid_value_container_remove')
     })
 
 $StaticHostCatalogRecords = @(
@@ -2629,7 +2649,16 @@ $AllowedFixedRendererImports = @(
     'event_unsubscribe',
     'avid_value_array_read_range',
     'avid_value_array_write_range',
-    'avid_value_release'
+    'avid_value_release',
+    'avid_value_text_to_string',
+    'avid_value_container_count',
+    'avid_value_container_read',
+    'avid_value_container_write',
+    'avid_value_container_resize',
+    'avid_value_container_clear',
+    'avid_value_container_find',
+    'avid_value_container_upsert',
+    'avid_value_container_remove'
 )
 foreach ($RequiredGeneratedOutcomeFacadeContract in @(
     'AvidLatentAttribute(string module, string importName, int bindingOrdinal, string payloadTypeId)',
@@ -2675,7 +2704,8 @@ $AllowedLiteralFacadeStructs = @(
     'AvidCancellationToken',
     'AvidCancellationSource',
     'AvidDelayAwaitable',
-    'AvidObjectAwaitable'
+    'AvidObjectAwaitable',
+    'FAvidText'
 )
 $LiteralFacadeStructs = @(
     [regex]::Matches(
@@ -3028,6 +3058,8 @@ foreach ($RequiredClassReferenceOrdinalContract in @(
 }
 $SemanticAnalyzerSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs'
 $SemanticCallableProjectorSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticCallableProjector.cs'
+$SemanticSymbolProjectorSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticSymbolProjector.cs'
+$SemanticSymbolModelSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Model/SemanticSymbol.cs'
 $SemanticContractSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Model/SemanticContract.cs'
 $SemanticReachabilitySource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticReachabilityProjector.cs'
 $SemanticGameplayEventSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticGameplayEventProjector.cs'
@@ -3046,6 +3078,7 @@ $CSharpAsyncCfgLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/L
 $CSharpOutcomeOperationLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpOutcomeOperationLowerer.cs'
 $CSharpLatentStoragePlannerSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpLatentStoragePlanner.cs'
 $CSharpTypeLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpTypeLowerer.cs'
+$CSharpCompositeCapabilityPolicySource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpCompositeValueCapabilityPolicy.cs'
 $CSharpSemanticInputValidatorSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Validation/CSharpSemanticInputValidator.cs'
 $CSharpGuestDebugMapProjectorSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Diagnostics/CSharpGuestDebugMapProjector.cs'
 $GuestArrayCapabilityIntrinsicsSource = Read-RequiredFile 'Tools/AvidScript.GuestIr/Model/GuestArrayCapabilityIntrinsics.cs'
@@ -3226,11 +3259,24 @@ foreach ($RequiredReachabilityContract in @(
     }
 }
 foreach ($RequiredSemanticContract in @(
-    'CurrentSchemaVersion = 16',
-    'CurrentSemanticVersion = "1.18"'
+    'CurrentSchemaVersion = 17',
+    'CurrentSemanticVersion = "1.19"'
 )) {
     if (-not $SemanticContractSource.Contains($RequiredSemanticContract)) {
         Add-Violation "C# Semantic contract is missing current version token $RequiredSemanticContract"
+    }
+}
+foreach ($RequiredCompositeCapabilityProvenanceContract in @(
+    'IsExecutableReferenceSource',
+    'IsExecutableReferenceSource = isExecutableReferenceSource',
+    'declaration is { IsExecutableReferenceSource: true }',
+    '&& field.IsExecutableReferenceSource',
+    '&& symbol.IsExecutableReferenceSource'
+)) {
+    if (-not $SemanticSymbolModelSource.Contains($RequiredCompositeCapabilityProvenanceContract) -and
+        -not $SemanticSymbolProjectorSource.Contains($RequiredCompositeCapabilityProvenanceContract) -and
+        -not $CSharpCompositeCapabilityPolicySource.Contains($RequiredCompositeCapabilityProvenanceContract)) {
+        Add-Violation "C# composite capabilities are missing executable-reference provenance contract $RequiredCompositeCapabilityProvenanceContract"
     }
 }
 foreach ($RequiredControlledAsyncSemanticContract in @(
@@ -3384,6 +3430,16 @@ if (-not $CSharpGuestLowererSource.Contains('GetReachableCallableIds') -or
     -not $CSharpBuildScriptSource.Contains('UsedAuthorizationBindingImports') -or
     -not $CSharpBuildScriptSource.Contains('UsedRuntimeBindingImports')) {
     Add-Violation 'C# Guest and build pipeline must consume semantic binding reachability'
+}
+foreach ($RequiredCompilerInjectedDelegateOutputContract in @(
+    'Test-CompilerInjectedBindingImport',
+    'avidscript.delegate_output_write.v1',
+    'avid_delegate_output_write',
+    '$ParameterTypes[2] -ceq "type:address"'
+)) {
+    if (-not $CSharpBuildScriptSource.Contains($RequiredCompilerInjectedDelegateOutputContract)) {
+        Add-Violation "C# build authorization is missing compiler-injected delegate output contract $RequiredCompilerInjectedDelegateOutputContract"
+    }
 }
 foreach ($RequiredAsyncContinuationFacadeContract in @(
     'public enum AvidContinuationStatus',

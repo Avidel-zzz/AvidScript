@@ -19,4 +19,6 @@ public:
 	static bool IsToken(uint32 ValueReference);
 	static uint32 AllocateToken();
 	static TConstArrayView<FAvidScriptValueCapabilityImportSpec> GetArrayImportSpecs();
+	static TConstArrayView<FAvidScriptValueCapabilityImportSpec> GetCompositeImportSpecs();
+	static TConstArrayView<FAvidScriptValueCapabilityImportSpec> GetCompositeContainerImportSpecs();
 };

@@ -24,9 +24,15 @@ public static class CSharpGuestStateSchemaProjector
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(module);
 
-        string[] ownerTypeIds = document.Callables
-            .Where(callable => callable.Export is not null)
-            .Select(callable => callable.ContainingTypeId)
+        IReadOnlyDictionary<string, SemanticCallable> callablesById = document.Callables.ToDictionary(
+            callable => callable.MethodSymbolId,
+            StringComparer.Ordinal);
+        IEnumerable<string> ownerRootIds = document.Reachability?.RootCallableIds
+            ?? document.Callables
+                .Where(callable => callable.Export is not null)
+                .Select(callable => callable.MethodSymbolId);
+        string[] ownerTypeIds = ownerRootIds
+            .Select(rootId => callablesById[rootId].ContainingTypeId)
             .Distinct(StringComparer.Ordinal)
             .OrderBy(id => id, StringComparer.Ordinal)
             .ToArray();

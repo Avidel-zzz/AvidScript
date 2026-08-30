@@ -287,6 +287,29 @@ internal static class CSharpTypeLowerer
                 4);
         }
 
+        if (CSharpCompositeValueCapabilityPolicy.IsType(type))
+        {
+            if (!CSharpCompositeValueCapabilityPolicy.HasCanonicalField(type, symbols)
+                || !CSharpCompositeValueCapabilityPolicy.HasIntrinsicConstructor(
+                    type,
+                    symbols,
+                    callables))
+            {
+                Add(diagnostics, "ASCG1003", $"Composite value capability '{type.Id}' does not match the generated token wrapper contract.");
+                return null;
+            }
+
+            return new GuestType(
+                type.Id,
+                "composite_ref",
+                "i32",
+                Array.Empty<GuestField>(),
+                null,
+                null,
+                4,
+                4);
+        }
+
         if (CSharpClassReferencePolicy.IsType(type))
         {
             if (!CSharpClassReferencePolicy.HasCanonicalField(type, symbols)

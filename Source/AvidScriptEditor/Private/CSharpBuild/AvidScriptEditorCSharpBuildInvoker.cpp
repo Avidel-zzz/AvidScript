@@ -230,7 +230,7 @@ bool FAvidScriptEditorCSharpBuildInvoker::Prepare(
 	}
 
 	OutInvocation.Config = Config;
-	OutInvocation.ExecutablePath = TEXT("powershell.exe");
+	OutInvocation.ExecutablePath = TEXT("pwsh.exe");
 	OutInvocation.Parameters = BuildAvidScriptCSharpBuildInvocationParameters(Config);
 	OutInvocation.WorkingDirectory = FPaths::GetPath(Config.BuildScriptPath);
 	return true;
@@ -371,7 +371,7 @@ bool FAvidScriptEditorCSharpBuildInvoker::BuildOnce(
 		SetAvidScriptCSharpBuildInvocationFailure(
 			TEXT("process_failed"),
 			FString::Printf(TEXT("C# build process could not be launched: %s"), *Config.BuildScriptPath),
-			TEXT("verify powershell.exe can run the C# build script and retry"),
+			TEXT("verify PowerShell 7 (pwsh.exe) can run the C# build script and retry"),
 			OutResult);
 		return false;
 	}

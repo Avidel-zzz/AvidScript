@@ -10,6 +10,7 @@
 #include "AvidScriptVmBackend.h"
 #include "AvidScriptActorBinding.h"
 #include "AvidScriptArrayValueHeap.h"
+#include "AvidScriptCompositeValueHeap.h"
 #include "AvidScriptObjectOwnership.h"
 #include "AvidScriptUtf8ValueHeap.h"
 
@@ -228,7 +229,7 @@ public:
 		FString& OutError);
 	bool DispatchPreparedDelegateEvent(
 		const FAvidScriptPreparedDelegateEvent& Event,
-		const void* NativeParameters,
+		void* NativeParameters,
 		FAvidScriptWasmSmokeResult& OutResult);
 	void CaptureSnapshot(FAvidScriptWasmSmokeResult& OutResult) const;
 	FAvidScriptWasmHotSnapshot GetHotSnapshot() const;
@@ -312,6 +313,10 @@ public:
 	{
 		return ArrayValueHeap;
 	}
+	FAvidScriptCompositeValueHeap& GetCompositeValueHeapForTesting()
+	{
+		return CompositeValueHeap;
+	}
 	const FAvidScriptBindingInvocationContext&
 	GetBindingInvocationContextForTesting() const
 	{
@@ -358,6 +363,22 @@ public:
 		int32 GuestIndex,
 		int32 ElementCount);
 	int32 HandleValueReleaseImport(int32 Token);
+	int32 HandleValueTextToStringImport(int32 Token);
+	int32 HandleValueContainerCountImport(int32 Token);
+	int32 HandleValueContainerAccessImport(
+		bool bRead,
+		int32 Token,
+		int32 Index,
+		int32 Lane,
+		uint32 GuestAddress);
+	int32 HandleValueContainerResizeImport(int32 Token, int32 NewCount);
+	int32 HandleValueContainerClearImport(int32 Token);
+	int32 HandleValueContainerFindImport(int32 Token, uint32 GuestAddress);
+	int32 HandleValueContainerUpsertImport(
+		int32 Token,
+		uint32 KeyAddress,
+		uint32 ValueAddress);
+	int32 HandleValueContainerRemoveImport(int32 Token, uint32 KeyAddress);
 	int32 HandleTimerSetOnceImport(float DelaySeconds, int32 CallbackId);
 	int32 HandleTimerCancelImport(int32 TimerHandle);
 	int64 HandleContinuationDelayImport(float DelaySeconds, int32 CallbackId);
@@ -384,6 +405,10 @@ public:
 		TArrayView<uint8> OutBytes);
 	int64 HandleEventSubscribeImport(int32 Slot, int32 Generation, int32 EventOrdinal);
 	int32 HandleEventUnsubscribeImport(int64 SubscriptionToken);
+	int32 HandleDelegateOutputWriteImport(
+		int32 TransactionToken,
+		int32 OutputOrdinal,
+		uint32 GuestAddress);
 	int32 HandleActorGetLocationImport(int32 Slot, int32 Generation, FVector& OutLocation);
 	int32 HandleActorSetLocationImport(int32 Slot, int32 Generation, const FVector& Location);
 	int32 HandleActorAddLocationOffsetImport(int32 Slot, int32 Generation, const FVector& Offset);
@@ -673,6 +698,9 @@ private:
 	FString PendingHostImportModuleName;
 	FString PendingHostImportName;
 	FString PendingHostImportDetails;
+	FAvidScriptPreparedDelegateOutputTransaction*
+		ActiveDelegateOutputTransaction = nullptr;
+	uint32 ActiveDelegateOutputToken = 0;
 	bool bContinuationDispatchActive = false;
 	bool bContinuationResultConsumed = false;
 	bool bContinuationStateConsumed = false;
@@ -688,6 +716,7 @@ private:
 	FAvidScriptWasmHostContext HostContext;
 	FAvidScriptArrayValueHeap ArrayValueHeap;
 	FAvidScriptUtf8ValueHeap Utf8ValueHeap;
+	FAvidScriptCompositeValueHeap CompositeValueHeap;
 	FAvidScriptBindingInvocationContext BindingInvocationContext;
 	TSharedPtr<const FAvidScriptBindingPackage> BindingPackage;
 	TSharedPtr<const FAvidScriptWasmDebugMap> DebugMap;

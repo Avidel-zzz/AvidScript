@@ -99,9 +99,26 @@ internal sealed class WasmFunctionFrameLayout
         GuestType type,
         int cursor)
     {
-        int offset = AlignUp(cursor, type.Alignment);
+        (int size, int alignment) = GetAddressableSlotLayout(type);
+        int offset = AlignUp(cursor, alignment);
         offsets.Add(valueId, offset);
-        return checked(offset + type.Size);
+        return checked(offset + size);
+    }
+
+    private static (int Size, int Alignment) GetAddressableSlotLayout(GuestType type)
+    {
+        if (type.Size > 0)
+        {
+            return (type.Size, type.Alignment);
+        }
+
+        return type.Storage switch
+        {
+            "i32" or "f32" => (4, 4),
+            "i64" or "f64" => (8, 8),
+            _ => throw new OverflowException(
+                $"Guest value '{type.Id}' has no addressable WASM storage layout."),
+        };
     }
 
     private static int AlignUp(int value, int alignment)

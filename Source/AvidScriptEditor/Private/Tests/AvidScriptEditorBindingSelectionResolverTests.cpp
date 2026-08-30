@@ -468,30 +468,22 @@ bool FAvidScriptEditorBindingPropertySelectionCompatibilityTest::RunTest(const F
 	TArray<FAvidScriptReflectedPropertySelection> FirstSelections;
 	FAvidScriptBindingSelectionResolveResult FirstResult;
 	TestTrue(
-		TEXT("Compatible properties survive an unsupported peer"),
+		TEXT("Compatible scalar and array properties resolve together"),
 		FAvidScriptEditorBindingPropertySelectionResolver::ResolveReadable(
 			Profile,
 			FirstSelections,
 			FirstResult));
 	TestEqual(TEXT("Three reflected properties are considered"), FirstResult.CandidatePropertyCount, 3);
-	TestEqual(TEXT("Two scalar properties are accepted"), FirstResult.AcceptedPropertyCount, 2);
-	TestEqual(TEXT("One array property is rejected"), FirstResult.RejectedPropertyCount, 1);
-	TestEqual(TEXT("Selections are deterministically ordered"), FirstSelections.Num(), 2);
-	if (FirstSelections.Num() == 2)
+	TestEqual(TEXT("All three supported properties are accepted"), FirstResult.AcceptedPropertyCount, 3);
+	TestEqual(TEXT("No supported property is rejected"), FirstResult.RejectedPropertyCount, 0);
+	TestEqual(TEXT("Selections are deterministically ordered"), FirstSelections.Num(), 3);
+	if (FirstSelections.Num() == 3)
 	{
 		TestEqual(TEXT("CustomTimeDilation sorts first"), FirstSelections[0].PropertyName, FName(TEXT("CustomTimeDilation")));
 		TestEqual(TEXT("InitialLifeSpan sorts second"), FirstSelections[1].PropertyName, FName(TEXT("InitialLifeSpan")));
+		TestEqual(TEXT("Tags array sorts third"), FirstSelections[2].PropertyName, FName(TEXT("Tags")));
 	}
-	if (FirstResult.Issues.Num() == 1)
-	{
-		TestFalse(TEXT("Discovery rejection is non-fatal"), FirstResult.Issues[0].bFatal);
-		TestEqual(TEXT("Issue identifies a property"), FirstResult.Issues[0].MemberKind, FString(TEXT("property")));
-		TestEqual(TEXT("Array rejection identifies Tags"), FirstResult.Issues[0].PropertyName, FName(TEXT("Tags")));
-		TestEqual(
-			TEXT("Unsupported type uses a stable category"),
-			FirstResult.Issues[0].Category,
-			FString(TEXT("unsupported_property_type")));
-	}
+	TestTrue(TEXT("Supported property resolution reports no issues"), FirstResult.Issues.IsEmpty());
 
 	TArray<FAvidScriptReflectedPropertySelection> SecondSelections;
 	FAvidScriptBindingSelectionResolveResult SecondResult;
@@ -602,7 +594,7 @@ bool FAvidScriptEditorBindingSelectionProfileDescriptorTest::RunTest(const FStri
 			FirstJson,
 			FirstSelectionResult,
 			FirstDescriptorResult));
-	TestEqual(TEXT("Gameplay profile accepts 369 functions including bounded TArray APIs"), FirstSelectionResult.AcceptedFunctionCount, 369);
+	TestEqual(TEXT("Gameplay profile accepts 371 functions including bounded TArray APIs"), FirstSelectionResult.AcceptedFunctionCount, 371);
 	TestEqual(TEXT("Gameplay profile accepts two readable properties"), FirstSelectionResult.AcceptedPropertyCount, 2);
 	TestEqual(
 		TEXT("Descriptor binding count matches all accepted reflected members"),

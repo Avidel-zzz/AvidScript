@@ -334,6 +334,18 @@ internal static class GuestInstructionValidator
             return;
         }
 
+        if (string.Equals(instruction.OperatorKind, "composite_ref_token", StringComparison.Ordinal))
+        {
+            if (sourceType.Kind != "composite_ref"
+                || targetType.Kind != "scalar"
+                || targetType.Storage != "i32"
+                || !string.Equals(result.TypeId, "type:int32", StringComparison.Ordinal))
+            {
+                AddTypeMismatch(context, function, instruction);
+            }
+            return;
+        }
+
         if (instruction.OperatorKind is not null
             || IsNominalOrdinal(sourceType)
             || IsNominalOrdinal(targetType))
@@ -431,6 +443,6 @@ internal static class GuestInstructionValidator
 
     private static bool IsNominalOrdinal(GuestType type)
     {
-        return type.Kind is "class_ref" or "factory_ref" or "object_type_ref";
+        return type.Kind is "class_ref" or "factory_ref" or "object_type_ref" or "composite_ref";
     }
 }

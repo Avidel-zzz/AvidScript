@@ -11,7 +11,8 @@ public:
 		const TArray<FAvidScriptBindingStructFieldModel>& StructFields = {},
 		int32 WireSize = INDEX_NONE,
 		int32 WireAlignment = INDEX_NONE,
-		const FString& ElementTypeId = FString());
+		const FString& ElementTypeId = FString(),
+		const TArray<FString>& TypeArguments = {});
 
 	static FString MakeTypeStableId(
 		const FString& CanonicalType,
@@ -19,7 +20,8 @@ public:
 		const TArray<FAvidScriptBindingStructFieldModel>& StructFields = {},
 		int32 WireSize = INDEX_NONE,
 		int32 WireAlignment = INDEX_NONE,
-		const FString& ElementTypeId = FString());
+		const FString& ElementTypeId = FString(),
+		const TArray<FString>& TypeArguments = {});
 
 	static FString MakeObjectFactoryIdentity(
 		const FString& ClassReferenceId,

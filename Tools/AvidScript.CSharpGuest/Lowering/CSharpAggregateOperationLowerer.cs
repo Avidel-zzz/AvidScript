@@ -108,6 +108,39 @@ internal static class CSharpAggregateOperationLowerer
             return ordinal;
         }
 
+        if (context.TryGetGuestType(operation.Children[0].TypeId, out receiverType)
+            && receiverType.Kind == "composite_ref")
+        {
+            if (!CSharpCompositeValueCapabilityPolicy.IsTokenField(
+                context.Document,
+                operation.SymbolId,
+                operation.Children[0].TypeId))
+            {
+                context.Add("ASCG1004", $"Block {blockOrdinal} composite value token field is malformed.");
+                return null;
+            }
+
+            GuestRegister? capability = CSharpOperationLowerer.LowerValue(
+                context,
+                operation.Children[0],
+                blockOrdinal,
+                instructions);
+            GuestRegister? token = context.CreateTemporary(operation.TypeId, blockOrdinal);
+            if (capability is null || token is null)
+            {
+                return null;
+            }
+
+            instructions.Add(new GuestInstruction(
+                "convert",
+                token.Id,
+                new[] { capability.Id },
+                null,
+                "composite_ref_token",
+                null));
+            return token;
+        }
+
         GuestRegister? aggregate = CSharpOperationLowerer.LowerValue(
             context,
             operation.Children[0],

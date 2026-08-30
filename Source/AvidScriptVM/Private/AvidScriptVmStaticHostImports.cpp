@@ -47,11 +47,21 @@ const FAvidScriptVmStaticHostImport GStaticHostImports[] = {
 	{ EAvidScriptHostBindingId::ContinuationBindCancel, "continuation_bind_cancel", "(II)i", true },
 	{ EAvidScriptHostBindingId::ContinuationResultRead, "continuation_result_read", "(iiiii)i", true },
 	{ EAvidScriptHostBindingId::ContinuationStateStore, "continuation_state_store", "(Iii)i", true },
-	{ EAvidScriptHostBindingId::ContinuationStateRead, "continuation_state_read", "(Iii)i", true }
+	{ EAvidScriptHostBindingId::ContinuationStateRead, "continuation_state_read", "(Iii)i", true },
+	{ EAvidScriptHostBindingId::ValueTextToString, "avid_value_text_to_string", "(i)i", false },
+	{ EAvidScriptHostBindingId::ValueContainerCount, "avid_value_container_count", "(i)i", false },
+	{ EAvidScriptHostBindingId::ValueContainerRead, "avid_value_container_read", "(iiii)i", false },
+	{ EAvidScriptHostBindingId::ValueContainerWrite, "avid_value_container_write", "(iiii)i", false },
+	{ EAvidScriptHostBindingId::ValueContainerResize, "avid_value_container_resize", "(ii)i", false },
+	{ EAvidScriptHostBindingId::ValueContainerClear, "avid_value_container_clear", "(i)i", false },
+	{ EAvidScriptHostBindingId::ValueContainerFind, "avid_value_container_find", "(ii)i", false },
+	{ EAvidScriptHostBindingId::ValueContainerUpsert, "avid_value_container_upsert", "(iii)i", false },
+	{ EAvidScriptHostBindingId::ValueContainerRemove, "avid_value_container_remove", "(ii)i", false },
+	{ EAvidScriptHostBindingId::DelegateOutputWrite, "avid_delegate_output_write", "(iii)i", false }
 };
 
 static_assert(
-	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::ContinuationStateRead),
+	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::DelegateOutputWrite),
 	"Static host catalog must remain dense and ordered by binding id.");
 
 bool FailStaticCall(FString& OutFailureDetails, const TCHAR* Details)
@@ -211,7 +221,32 @@ bool InvokeAvidScriptVmStaticHostImport(
 	case EAvidScriptHostBindingId::TimerCancel:
 	case EAvidScriptHostBindingId::ValueArrayLength:
 	case EAvidScriptHostBindingId::ValueRelease:
+	case EAvidScriptHostBindingId::ValueTextToString:
+	case EAvidScriptHostBindingId::ValueContainerCount:
+	case EAvidScriptHostBindingId::ValueContainerClear:
 		Call.IntArgs[0] = Arguments[0].I32;
+		break;
+	case EAvidScriptHostBindingId::ValueContainerResize:
+		Call.IntArgs[0] = Arguments[0].I32;
+		Call.IntArgs[1] = Arguments[1].I32;
+		break;
+	case EAvidScriptHostBindingId::ValueContainerFind:
+	case EAvidScriptHostBindingId::ValueContainerRemove:
+		Call.IntArgs[0] = Arguments[0].I32;
+		Call.GuestAddress = static_cast<uint32>(Arguments[1].I32);
+		break;
+	case EAvidScriptHostBindingId::ValueContainerUpsert:
+	case EAvidScriptHostBindingId::DelegateOutputWrite:
+		Call.IntArgs[0] = Arguments[0].I32;
+		Call.IntArgs[1] = Arguments[1].I32;
+		Call.GuestAddress = static_cast<uint32>(Arguments[2].I32);
+		break;
+	case EAvidScriptHostBindingId::ValueContainerRead:
+	case EAvidScriptHostBindingId::ValueContainerWrite:
+		Call.IntArgs[0] = Arguments[0].I32;
+		Call.IntArgs[1] = Arguments[1].I32;
+		Call.IntArgs[2] = Arguments[2].I32;
+		Call.GuestAddress = static_cast<uint32>(Arguments[3].I32);
 		break;
 	case EAvidScriptHostBindingId::ActorGetLocation:
 	case EAvidScriptHostBindingId::ActorGetRotation:

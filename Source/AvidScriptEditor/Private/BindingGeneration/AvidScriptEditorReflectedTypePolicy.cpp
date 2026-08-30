@@ -146,6 +146,52 @@ void AppendAbiTypes(const FAvidScriptProjectedBindingValue& Value, TArray<FStrin
 	OutTypes.Append(Value.Type.AbiValueTypes);
 }
 
+bool ContainsStrongObjectLeaf(const FAvidScriptProjectedBindingType& Type)
+{
+	if (Type.Kind == TEXT("object_handle"))
+	{
+		return true;
+	}
+	if (Type.Kind == TEXT("soft_object_capability")
+		|| Type.Kind == TEXT("weak_object_capability"))
+	{
+		return false;
+	}
+	for (const TSharedPtr<FAvidScriptProjectedBindingType>& Field :
+		Type.StructFieldTypes)
+	{
+		if (Field.IsValid() && ContainsStrongObjectLeaf(*Field))
+		{
+			return true;
+		}
+	}
+	for (const TSharedPtr<FAvidScriptProjectedBindingType>& Argument :
+		Type.TypeArguments)
+	{
+		if (Argument.IsValid() && ContainsStrongObjectLeaf(*Argument))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+TArray<FString> GetProjectedTypeArgumentIds(
+	const FAvidScriptProjectedBindingType& Type)
+{
+	TArray<FString> Result;
+	Result.Reserve(Type.TypeArguments.Num());
+	for (const TSharedPtr<FAvidScriptProjectedBindingType>& Argument :
+		Type.TypeArguments)
+	{
+		if (Argument.IsValid())
+		{
+			Result.Add(Argument->StableId);
+		}
+	}
+	return Result;
+}
+
 void FinalizeProjectedType(FAvidScriptProjectedBindingType& Type)
 {
 	Type.StableId = Type.Kind == TEXT("struct_wire")
@@ -163,7 +209,8 @@ void FinalizeProjectedType(FAvidScriptProjectedBindingType& Type)
 			INDEX_NONE,
 			Type.Kind == TEXT("array") && Type.ElementType.IsValid()
 				? Type.ElementType->StableId
-				: FString());
+				: FString(),
+			GetProjectedTypeArgumentIds(Type));
 }
 
 bool IsUnsafeStructField(const FProperty* Property, const UScriptStruct* Struct)
@@ -217,6 +264,7 @@ FAvidScriptProjectedBindingType FAvidScriptEditorReflectedTypePolicy::MakeObject
 	Type.Size = 8;
 	Type.Alignment = 4;
 	Type.AbiValueTypes = { TEXT("i"), TEXT("i") };
+	Type.CapabilityKind = TEXT("object");
 	Type.ObjectClass = ObjectClass;
 	return Type;
 }
@@ -411,6 +459,7 @@ bool FAvidScriptEditorReflectedTypePolicy::ProjectProperty(
 		OutValue.Type.Size = 4;
 		OutValue.Type.Alignment = 4;
 		OutValue.Type.AbiValueTypes = { TEXT("i") };
+		OutValue.Type.CapabilityKind = TEXT("utf8");
 		return true;
 	}
 	if (Property->IsA<FStrProperty>())
@@ -421,6 +470,66 @@ bool FAvidScriptEditorReflectedTypePolicy::ProjectProperty(
 		OutValue.Type.Size = 4;
 		OutValue.Type.Alignment = 4;
 		OutValue.Type.AbiValueTypes = { TEXT("i") };
+		OutValue.Type.CapabilityKind = TEXT("utf8");
+		return true;
+	}
+	if (Property->IsA<FTextProperty>())
+	{
+		OutValue.Type.CanonicalType = TEXT("text:ftext");
+		OutValue.Type.Kind = TEXT("text_capability");
+		OutValue.Type.CppType = TEXT("FText");
+		OutValue.Type.Size = 4;
+		OutValue.Type.Alignment = 4;
+		OutValue.Type.AbiValueTypes = { TEXT("i") };
+		OutValue.Type.CapabilityKind = TEXT("composite");
+		return true;
+	}
+	if (const FSoftObjectProperty* SoftObjectProperty =
+		CastField<FSoftObjectProperty>(Property))
+	{
+		if (SoftObjectProperty->PropertyClass == nullptr)
+		{
+			OutErrorSource = Property->GetName();
+			return false;
+		}
+		FAvidScriptProjectedBindingType ObjectType =
+			MakeObjectType(SoftObjectProperty->PropertyClass);
+		FinalizeProjectedType(ObjectType);
+		OutValue.Type.CanonicalType = TEXT("soft_object:")
+			+ SoftObjectProperty->PropertyClass->GetPathName();
+		OutValue.Type.Kind = TEXT("soft_object_capability");
+		OutValue.Type.CppType = Property->GetCPPType();
+		OutValue.Type.Size = 4;
+		OutValue.Type.Alignment = 4;
+		OutValue.Type.AbiValueTypes = { TEXT("i") };
+		OutValue.Type.CapabilityKind = TEXT("composite");
+		OutValue.Type.TypeArguments.Add(
+			MakeShared<FAvidScriptProjectedBindingType>(MoveTemp(ObjectType)));
+		FinalizeProjectedType(OutValue.Type);
+		return true;
+	}
+	if (const FWeakObjectProperty* WeakObjectProperty =
+		CastField<FWeakObjectProperty>(Property))
+	{
+		if (WeakObjectProperty->PropertyClass == nullptr)
+		{
+			OutErrorSource = Property->GetName();
+			return false;
+		}
+		FAvidScriptProjectedBindingType ObjectType =
+			MakeObjectType(WeakObjectProperty->PropertyClass);
+		FinalizeProjectedType(ObjectType);
+		OutValue.Type.CanonicalType = TEXT("weak_object:")
+			+ WeakObjectProperty->PropertyClass->GetPathName();
+		OutValue.Type.Kind = TEXT("weak_object_capability");
+		OutValue.Type.CppType = Property->GetCPPType();
+		OutValue.Type.Size = 4;
+		OutValue.Type.Alignment = 4;
+		OutValue.Type.AbiValueTypes = { TEXT("i") };
+		OutValue.Type.CapabilityKind = TEXT("composite");
+		OutValue.Type.TypeArguments.Add(
+			MakeShared<FAvidScriptProjectedBindingType>(MoveTemp(ObjectType)));
+		FinalizeProjectedType(OutValue.Type);
 		return true;
 	}
 	if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
@@ -439,14 +548,22 @@ bool FAvidScriptEditorReflectedTypePolicy::ProjectProperty(
 				InOutStructNodes,
 				ActiveStructs)
 			|| ElementValue.Type.bVoid
-			|| ElementValue.Type.Kind == TEXT("array")
-			|| ElementValue.Type.Kind == TEXT("name_utf8")
-			|| ElementValue.Type.Kind == TEXT("string_utf8")
 			|| ElementValue.Type.Size <= 0
 			|| ElementValue.Type.Alignment <= 0
 			|| ElementValue.Type.Alignment > 16)
 		{
 			OutErrorSource = Property->GetName() + TEXT(":") + OutErrorSource;
+			return false;
+		}
+		const bool bFlatElement = ElementValue.Type.Kind != TEXT("array")
+			&& ElementValue.Type.Kind != TEXT("set")
+			&& ElementValue.Type.Kind != TEXT("map")
+			&& ElementValue.Type.Kind != TEXT("name_utf8")
+			&& ElementValue.Type.Kind != TEXT("string_utf8")
+			&& ElementValue.Type.CapabilityKind != TEXT("composite");
+		if (!bFlatElement && ContainsStrongObjectLeaf(ElementValue.Type))
+		{
+			OutErrorSource = Property->GetName() + TEXT(":strong_object_leaf");
 			return false;
 		}
 		FinalizeProjectedType(ElementValue.Type);
@@ -458,8 +575,110 @@ bool FAvidScriptEditorReflectedTypePolicy::ProjectProperty(
 		OutValue.Type.Size = 4;
 		OutValue.Type.Alignment = 4;
 		OutValue.Type.AbiValueTypes = { TEXT("i") };
+		OutValue.Type.CapabilityKind = bFlatElement
+			? TEXT("array_flat")
+			: TEXT("composite");
 		OutValue.Type.ElementType = MakeShared<FAvidScriptProjectedBindingType>(
 			MoveTemp(ElementValue.Type));
+		OutValue.Type.TypeArguments.Add(OutValue.Type.ElementType);
+		FinalizeProjectedType(OutValue.Type);
+		return true;
+	}
+	if (const FSetProperty* SetProperty = CastField<FSetProperty>(Property))
+	{
+		if (SetProperty->ElementProp == nullptr || StructDepth >= 8)
+		{
+			OutErrorSource = Property->GetCPPType();
+			return false;
+		}
+		FAvidScriptProjectedBindingValue ElementValue;
+		if (!ProjectProperty(
+				SetProperty->ElementProp,
+				ElementValue,
+				OutErrorSource,
+				StructDepth + 1,
+				InOutStructNodes,
+				ActiveStructs)
+			|| ElementValue.Type.bVoid
+			|| ElementValue.Type.Size <= 0
+			|| ElementValue.Type.Alignment <= 0
+			|| ElementValue.Type.Alignment > 16
+			|| ContainsStrongObjectLeaf(ElementValue.Type))
+		{
+			OutErrorSource = Property->GetName() + TEXT(":") + OutErrorSource;
+			return false;
+		}
+		FinalizeProjectedType(ElementValue.Type);
+		OutValue.Type.CanonicalType = TEXT("set:tset<")
+			+ ElementValue.Type.CanonicalType + TEXT(">");
+		OutValue.Type.Kind = TEXT("set");
+		OutValue.Type.CppType = TEXT("TSet<")
+			+ ElementValue.Type.CppType + TEXT(">");
+		OutValue.Type.Size = 4;
+		OutValue.Type.Alignment = 4;
+		OutValue.Type.AbiValueTypes = { TEXT("i") };
+		OutValue.Type.CapabilityKind = TEXT("composite");
+		OutValue.Type.TypeArguments.Add(
+			MakeShared<FAvidScriptProjectedBindingType>(MoveTemp(ElementValue.Type)));
+		FinalizeProjectedType(OutValue.Type);
+		return true;
+	}
+	if (const FMapProperty* MapProperty = CastField<FMapProperty>(Property))
+	{
+		if (MapProperty->KeyProp == nullptr
+			|| MapProperty->ValueProp == nullptr
+			|| StructDepth >= 8)
+		{
+			OutErrorSource = Property->GetCPPType();
+			return false;
+		}
+		FAvidScriptProjectedBindingValue KeyValue;
+		FAvidScriptProjectedBindingValue MappedValue;
+		if (!ProjectProperty(
+				MapProperty->KeyProp,
+				KeyValue,
+				OutErrorSource,
+				StructDepth + 1,
+				InOutStructNodes,
+				ActiveStructs)
+			|| !ProjectProperty(
+				MapProperty->ValueProp,
+				MappedValue,
+				OutErrorSource,
+				StructDepth + 1,
+				InOutStructNodes,
+				ActiveStructs)
+			|| KeyValue.Type.bVoid
+			|| MappedValue.Type.bVoid
+			|| KeyValue.Type.Size <= 0
+			|| MappedValue.Type.Size <= 0
+			|| KeyValue.Type.Alignment <= 0
+			|| MappedValue.Type.Alignment <= 0
+			|| KeyValue.Type.Alignment > 16
+			|| MappedValue.Type.Alignment > 16
+			|| ContainsStrongObjectLeaf(KeyValue.Type)
+			|| ContainsStrongObjectLeaf(MappedValue.Type))
+		{
+			OutErrorSource = Property->GetName() + TEXT(":") + OutErrorSource;
+			return false;
+		}
+		FinalizeProjectedType(KeyValue.Type);
+		FinalizeProjectedType(MappedValue.Type);
+		OutValue.Type.CanonicalType = TEXT("map:tmap<")
+			+ KeyValue.Type.CanonicalType + TEXT(",")
+			+ MappedValue.Type.CanonicalType + TEXT(">");
+		OutValue.Type.Kind = TEXT("map");
+		OutValue.Type.CppType = TEXT("TMap<")
+			+ KeyValue.Type.CppType + TEXT(",")
+			+ MappedValue.Type.CppType + TEXT(">");
+		OutValue.Type.Size = 4;
+		OutValue.Type.Alignment = 4;
+		OutValue.Type.AbiValueTypes = { TEXT("i") };
+		OutValue.Type.CapabilityKind = TEXT("composite");
+		OutValue.Type.TypeArguments.Add(
+			MakeShared<FAvidScriptProjectedBindingType>(MoveTemp(KeyValue.Type)));
+		OutValue.Type.TypeArguments.Add(
+			MakeShared<FAvidScriptProjectedBindingType>(MoveTemp(MappedValue.Type)));
 		FinalizeProjectedType(OutValue.Type);
 		return true;
 	}

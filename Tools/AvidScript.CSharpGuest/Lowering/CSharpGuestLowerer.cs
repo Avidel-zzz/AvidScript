@@ -87,6 +87,7 @@ public static class CSharpGuestLowerer
         if (delegateEvents is not null)
         {
             functions.AddRange(delegateEvents.Functions);
+            imports = imports.Concat(delegateEvents.Imports).ToArray();
         }
         CSharpContinuationLoweringResult? continuations = CSharpContinuationLowerer.Lower(
             document,
@@ -217,9 +218,9 @@ public static class CSharpGuestLowerer
                 Add(diagnostics, "ASCG1003", $"Static field '{symbol.Id}' has no Guest value type.");
                 continue;
             }
-            if (guestTypes[symbol.TypeId].Kind is "factory_ref" or "object_type_ref")
+            if (guestTypes[symbol.TypeId].Kind is "factory_ref" or "object_type_ref" or "composite_ref")
             {
-                Add(diagnostics, "ASCG1003", $"Static field '{symbol.Id}' cannot store a nominal object capability.");
+                Add(diagnostics, "ASCG1003", $"Static field '{symbol.Id}' cannot store a session-bound capability.");
                 continue;
             }
 
@@ -407,6 +408,7 @@ public static class CSharpGuestLowerer
                 && !CSharpClassReferencePolicy.IsIntrinsicConstructor(callable)
                 && !CSharpClassReferencePolicy.IsIntrinsicUpcast(document, callable)
                 && !CSharpObjectCapabilityPolicy.IsIntrinsicConstructor(callable)
+                && !CSharpCompositeValueCapabilityPolicy.IsIntrinsicConstructor(callable)
                 && !document.AsyncMethods.Any(method =>
                     method.MethodSymbolId == callable.MethodSymbolId)
                 && !IsAsyncFacadeIntrinsic(document, callable)

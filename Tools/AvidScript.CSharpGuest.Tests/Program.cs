@@ -20,6 +20,7 @@ internal static class Program
                 + CSharpGuestClassReferenceTests.Run()
                 + CSharpGuestObjectCapabilityTests.Run()
                 + CSharpGuestArrayCapabilityTests.Run()
+                + CSharpGuestCompositeCapabilityTests.Run()
                 + CSharpDataLaneFusionTests.Run()
                 + CSharpGuestDelegateEventTests.Run()
                 + CSharpGuestContinuationTests.Run();
