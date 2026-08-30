@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "phase": {
+    "id": 59,
+    "goal": "以 PC-first 的独立 LLVM AOT codegen 后端解决 P57-D06 冻结性能领导力门禁，同时保持 backend-neutral VM、受信任 artifact、UE 生命周期语义与移动端回退边界",
+    "start_commit": "4018dfb3e6c19fc3ff05b5873357c5c13225ff3a"
+  },
+  "declared_stage": "implementing",
+  "architecture": {
+    "path": "Docs/Phase59/P59.0_LLVM_AOT_Backend_Architecture.md",
+    "version": 1,
+    "sha256": "78a0773229fa14c39c764a801a5df6d7f5f1621e0f9aafc3707fb8c38eff156f",
+    "revision_reason": "initial architecture freeze"
+  },
+  "documents": {
+    "plan": "Docs/Phase59/P59.0_Implementation_Plan.md",
+    "closeout": "Docs/Phase59/P59_Closeout.md"
+  },
+  "batches": [
+    {
+      "id": "P59.A",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    },
+    {
+      "id": "P59.B",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    },
+    {
+      "id": "P59.C",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    },
+    {
+      "id": "P59.D",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    }
+  ],
+  "debt": [
+    {
+      "id": "P59-D01-ControlledLeadership",
+      "severity": "Important",
+      "found_batch": "P59.A",
+      "scope": "Frozen 12-kernel LLVM AOT versus Puerts V8 p50/p95 geomean and kernel win-rate leadership gates",
+      "evidence": "Inherited from P57-D06: Cranelift speed candidate p50/p95 geomean 0.9799725124/1.0005782997, p50/p95 win rates 66.67/41.67 percent, correctness failures 0, fallback false.",
+      "deferral_reason": "Cranelift optimization space was exhausted without crossing the frozen 0.95 leadership gate; P59 isolates an independent LLVM AOT codegen candidate.",
+      "remediation": "Evaluate WasmEdge LLVM AOT first under the unchanged 12-kernel protocol; integrate only a candidate that preserves host/artifact contracts and crosses the frozen gate, otherwise evaluate Wasmer LLVM with the same bytes and thresholds.",
+      "status": "Open",
+      "resolution_evidence": "",
+      "target_phase": null,
+      "transfer_reason": ""
+    }
+  ],
+  "review": {
+    "completed": false,
+    "evidence": "",
+    "completed_at_utc": null
+  },
+  "budgets": {
+    "ubt": 2,
+    "automation": 2,
+    "full_gate": 2
+  },
+  "invocations": {
+    "ubt": 0,
+    "automation": 0,
+    "full_gate": 0
+  },
+  "freeze": {
+    "source_commit": "",
+    "source_tree": "",
+    "state_sha256": "",
+    "review_evidence": "",
+    "at_utc": null
+  },
+  "gate": {
+    "report_path": "",
+    "report_sha256": "",
+    "run_id": "",
+    "verified_commit": "",
+    "verified_tree": "",
+    "attestation_parent": "",
+    "attested_at_utc": null
+  },
+  "protected_dirty": [
+    {
+      "path": "Docs/AvidScript_Technical_Status.md",
+      "status": "??",
+      "worktree_sha256": "3025ef2e274d0373168eea28a25bef6bd1a86a19e887d76ee51c6804d51698c2",
+      "head_blob_sha256": ""
+    },
+    {
+      "path": "Docs/Phase42/P42.0_Reflection_Binding_Generator_Architecture.md",
+      "status": " M",
+      "worktree_sha256": "569cf61960108edd6a4865da796ddf465b2ab6e6cf440dc2ae280b84f94d6655",
+      "head_blob_sha256": "5881954e78c9759dafb336484adf7dcd9d064122599e9b93337c69067b08c1cf"
+    },
+    {
+      "path": "Source/AvidScriptRuntime/Public/AvidScriptWasmReloadTypes.h",
+      "status": " M",
+      "worktree_sha256": "384b6e093dc8568e666dc0335b575383e473ecf00448c1d5c461a852b38edfed",
+      "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
+    }
+  ],
+  "next_action": "debt-update -Phase 59 -DebtId P59-D01-ControlledLeadership -Status Verified -Evidence <text>",
+  "revision": 2,
+  "updated_at_utc": "2026-08-30T15:45:37.1962623+00:00"
+}
