@@ -118,8 +118,8 @@ internal static class SemanticCallableTests
         SemanticDocument document = SemanticAnalyzer.Analyze(source, sourceId, frontend.Source.Sha256);
 
         Assert(document.Succeeded, "valid data-lane metadata should analyze successfully");
-        Assert(document.SchemaVersion == 17 && document.SemanticVersion == "1.19",
-            "data-lane metadata should publish semantic schema v17 / version 1.19");
+        Assert(document.SchemaVersion == 18 && document.SemanticVersion == "1.20",
+            "data-lane metadata should publish semantic schema v18 / version 1.20");
         SemanticCallable method = document.Callables.Single(callable =>
             callable.MethodSymbolId.Contains(".Snapshot():int32", StringComparison.Ordinal));
         Assert(method.Optimization == new SemanticCallableOptimization("snapshot_read", 4),
@@ -457,8 +457,8 @@ internal static class SemanticCallableTests
         SemanticDocument document = SemanticAnalyzer.Analyze(source, sourceId, frontend.Source.Sha256);
 
         Assert(document.Succeeded, "natural gameplay callbacks should analyze successfully");
-        Assert(document.SchemaVersion == 17 && document.SemanticVersion == "1.19",
-            "gameplay callback artifacts should use schema v17 / semantic version 1.19");
+        Assert(document.SchemaVersion == 18 && document.SemanticVersion == "1.20",
+            "gameplay callback artifacts should use schema v18 / semantic version 1.20");
         Assert(document.GameplayEventCallbacks.Select(callback => callback.EventType)
             .SequenceEqual(new[] { 1, 2, 3, 4 }),
             "gameplay callbacks should use stable event-type order");

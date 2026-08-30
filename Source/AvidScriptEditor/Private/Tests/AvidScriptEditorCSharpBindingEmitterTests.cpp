@@ -16,6 +16,7 @@
 #include "BindingGeneration/AvidScriptEditorCSharpDefaultValueFormatter.h"
 #include "BindingGeneration/AvidScriptEditorCSharpBindingRenderer.h"
 #include "BindingGeneration/AvidScriptEditorCSharpStateContractRenderer.h"
+#include "BindingGeneration/AvidScriptEditorCSharpUeTypeDeclarationRenderer.h"
 
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
@@ -91,9 +92,13 @@ FString MakePackageTestRoot()
 FString ExtractStateContractSurface(const FString& Source)
 {
 	const FString StartToken = TEXT("public enum AvidStateMode");
-	const FString EndToken = TEXT("internal static class AvidScriptBindingPackage");
+	const FString EndToken = TEXT("public sealed class UClassAttribute : Attribute");
 	const int32 StartIndex = Source.Find(StartToken);
-	const int32 EndIndex = Source.Find(EndToken);
+	int32 EndIndex = Source.Find(EndToken);
+	if (EndIndex != INDEX_NONE)
+	{
+		EndIndex = Source.Find(TEXT("[AttributeUsage"), ESearchCase::CaseSensitive, ESearchDir::FromEnd, EndIndex);
+	}
 	if (StartIndex == INDEX_NONE || EndIndex == INDEX_NONE || EndIndex <= StartIndex)
 	{
 		return FString();
@@ -268,6 +273,22 @@ bool FAvidScriptEditorCSharpBindingEmitterDeterminismTest::RunTest(const FString
 	TestTrue(TEXT("Generated facade declares transient attribute"), FirstSource.Contains(TEXT("public sealed class AvidTransientAttribute : Attribute")));
 	TestTrue(TEXT("Generated facade declares repeatable state alias attribute"), FirstSource.Contains(TEXT("public sealed class AvidStateAliasAttribute : Attribute")));
 	TestTrue(TEXT("State alias attribute allows multiple field declarations"), FirstSource.Contains(TEXT("[AttributeUsage(AttributeTargets.Field, Inherited = false, AllowMultiple = true)]")));
+	TestTrue(TEXT("Generated facade declares UClass metadata"),
+		FirstSource.Contains(TEXT("public sealed class UClassAttribute : Attribute")));
+	TestTrue(TEXT("Generated facade declares UProperty metadata"),
+		FirstSource.Contains(TEXT("public sealed class UPropertyAttribute : Attribute")));
+	TestTrue(TEXT("Generated facade declares UFunction metadata"),
+		FirstSource.Contains(TEXT("public sealed class UFunctionAttribute : Attribute")));
+	TestTrue(TEXT("Generated facade declares all P59 UE marker roots"),
+		FirstSource.Contains(TEXT("public abstract class AvidActor"))
+		&& FirstSource.Contains(TEXT("public abstract class AvidActorComponent"))
+		&& FirstSource.Contains(TEXT("public abstract class AvidWorldSubsystem"))
+		&& FirstSource.Contains(TEXT("public abstract class AvidGameInstanceSubsystem")));
+	TArray<FString> UeTypeDeclarationLines;
+	FAvidScriptEditorCSharpUeTypeDeclarationRenderer::AppendReferenceSurface(UeTypeDeclarationLines);
+	TestTrue(TEXT("Independent UE type renderer emits its canonical surface"),
+		!UeTypeDeclarationLines.IsEmpty()
+		&& FirstSource.Contains(FString::Join(UeTypeDeclarationLines, TEXT("\n"))));
 
 	TArray<FString> StateContractLines;
 	FAvidScriptEditorCSharpStateContractRenderer::AppendReferenceSurface(StateContractLines);

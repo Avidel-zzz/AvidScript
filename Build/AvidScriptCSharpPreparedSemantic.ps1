@@ -356,13 +356,13 @@ function Import-AvidScriptCSharpPreparedSemantic {
         -Message "Prepared frontend artifact contract is invalid."
     # The Semantic schema names the Frontend source hash frontend_sha256; it is not the artifact file hash.
     Assert-AvidScriptPreparedSemantic `
-        -Condition ([int]$PreparedReport.semantic.schema_version -eq 17 -and
-            [string]$PreparedReport.semantic.version -ceq "1.19" -and
+        -Condition ([int]$PreparedReport.semantic.schema_version -eq 18 -and
+            [string]$PreparedReport.semantic.version -ceq "1.20" -and
             [bool]$PreparedReport.semantic.succeeded -and
             [string]$PreparedReport.semantic.source_sha256 -ceq $ExpectedSourceSha256 -and
             [string]$PreparedReport.semantic.frontend_sha256 -ceq $ExpectedSourceSha256 -and
-            [int]$SemanticModel.schema_version -eq 17 -and
-            [string]$SemanticModel.semantic_version -ceq "1.19" -and
+            [int]$SemanticModel.schema_version -eq 18 -and
+            [string]$SemanticModel.semantic_version -ceq "1.20" -and
             [bool]$SemanticModel.succeeded -and
             [string]$SemanticModel.source.sha256 -ceq $ExpectedSourceSha256 -and
             [string]$SemanticModel.source.frontend_sha256 -ceq $ExpectedSourceSha256 -and

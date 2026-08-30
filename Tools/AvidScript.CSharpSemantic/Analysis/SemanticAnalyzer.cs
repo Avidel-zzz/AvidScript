@@ -63,6 +63,7 @@ public static class SemanticAnalyzer
         SemanticStateContractProjection stateContractProjection = SemanticStateContractProjector.Project(
             context,
             typeRegistry);
+        SemanticUeTypeProjection ueTypeProjection = SemanticUeTypeProjector.Project(context, typeRegistry);
         SemanticCallableProjection callableProjection = SemanticCallableProjector.Project(context, typeRegistry);
         SemanticGameplayEventProjection gameplayEventProjection =
             SemanticGameplayEventProjector.Project(context, callableProjection.Callables);
@@ -85,6 +86,7 @@ public static class SemanticAnalyzer
             .Concat(asyncProjection.Diagnostics)
             .Concat(callableProjection.Diagnostics)
             .Concat(stateContractProjection.Diagnostics)
+            .Concat(ueTypeProjection.Diagnostics)
             .Concat(gameplayEventProjection.Diagnostics)
             .Concat(delegateEventProjection.Diagnostics)
             .Concat(continuationProjection.Diagnostics)
@@ -143,6 +145,7 @@ public static class SemanticAnalyzer
             DelegateEventCallbacks = delegateEventProjection.Callbacks,
             ContinuationCallbacks = continuationProjection.Callbacks,
             AsyncMethods = asyncProjection.Methods,
+            UeTypeDeclarations = ueTypeProjection.Declarations,
         };
     }
 

@@ -8,9 +8,9 @@
   "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase59/P59.1_Script_Defined_UE_Types_Architecture.md",
-    "version": 3,
-    "sha256": "1d0f1e6d3ac2844a5d895482ee4b0593c1d97cc15e3c7999e71177028c1a941a",
-    "revision_reason": "移除 Markdown 行尾空白，保持架构语义不变并更新权威 hash"
+    "version": 4,
+    "sha256": "68e8b1ca98fbee4fb6825d73cadd1ac4eb355a76fffb019c3bf1512881631f8d",
+    "revision_reason": "明确 engine_name 保存 UE 反射逻辑名，A/U 语言前缀由 P59.B 生成器根据 kind 派生"
   },
   "documents": {
     "plan": "Docs/Phase59/P59.0_Implementation_Plan.md",
@@ -19,9 +19,9 @@
   "batches": [
     {
       "id": "P59.A",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "UE Type Declaration schema 18/1.20、canonical Roslyn projector、Guest fail-closed validator、generated facade 与 C# 示例完成；Semantic 91/91、Guest 112/112、Frontend 7/7、BuildIntegration 15/15、Prepared 13/13、SemanticCache 16/16+25/25+8/8、Publication 14/14、UE5.8 no-clean UBT 成功、focused Automation 1/1 Success。详见 Docs/Phase59/P59.A_UE_Type_Declaration_Contract.md。",
+      "completed_at_utc": "2026-08-30T16:28:31.1282768+00:00"
     },
     {
       "id": "P59.B",
@@ -108,7 +108,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "batch-complete -Phase 59 -BatchId P59.A -Evidence <text>",
-  "revision": 5,
-  "updated_at_utc": "2026-08-30T16:05:47.1840482+00:00"
+  "next_action": "batch-complete -Phase 59 -BatchId P59.B -Evidence <text>",
+  "revision": 7,
+  "updated_at_utc": "2026-08-30T16:28:31.1303844+00:00"
 }

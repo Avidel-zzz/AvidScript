@@ -15,13 +15,14 @@ internal static class CSharpGuestMalformedTests
         GameplayReachabilityModeMismatchFailsClosed();
         GameplayCallbackDescriptorMismatchFailsClosed();
         DuplicateGameplayPayloadFieldsFailClosedWithoutThrowing();
-        return 5;
+        ForgedUeTypeDeclarationsFailClosed();
+        return 6;
     }
 
     private static void FutureAndMismatchedSemanticVersionsFailClosed()
     {
         SemanticDocument baseline = CSharpGuestSemanticFixture.Create();
-        SemanticDocument future = baseline with { SchemaVersion = 18, SemanticVersion = "1.19" };
+        SemanticDocument future = baseline with { SchemaVersion = 19, SemanticVersion = "1.20" };
         SemanticDocument mismatched = baseline with { SchemaVersion = 10, SemanticVersion = "1.9" };
 
         AssertRejected(future, "future semantic schemas should be rejected");
@@ -109,6 +110,44 @@ internal static class CSharpGuestMalformedTests
         Assert(!duplicateResult.Succeeded && duplicateResult.Module is null
             && duplicateResult.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCG1001"),
             "duplicate semantic identities should return ASCG1001 instead of throwing");
+    }
+
+    private static void ForgedUeTypeDeclarationsFailClosed()
+    {
+        const string source = """
+            using AvidScript;
+            [UClass]
+            public partial class FirstActor : AvidActor { }
+            [UClass]
+            public partial class SecondActor : AvidActor { }
+            """;
+        const string sourceId = "Scripts/ForgedUeTypes.cs";
+        const string facade = """
+            using System;
+            namespace AvidScript;
+            [AttributeUsage(AttributeTargets.Class)]
+            public sealed class UClassAttribute : Attribute { }
+            public abstract class AvidActor { }
+            """;
+        FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
+        SemanticDocument baseline = SemanticAnalyzer.Analyze(
+            source,
+            sourceId,
+            frontend.Source.Sha256,
+            new[] { new SemanticReferenceSource(facade, "generated://AvidScript.UeTypes.cs") });
+        Assert(baseline.Succeeded && baseline.UeTypeDeclarations.Count == 2,
+            "forged UE type fixture should begin with two valid declarations");
+        SemanticUeTypeDeclaration first = baseline.UeTypeDeclarations[0];
+        SemanticUeTypeDeclaration second = baseline.UeTypeDeclarations[1] with
+        {
+            EngineName = first.EngineName,
+        };
+        SemanticDocument forged = baseline with
+        {
+            UeTypeDeclarations = new[] { first, second },
+        };
+
+        AssertRejected(forged, "duplicate generated UE class identities should fail closed");
     }
 
     private static SemanticDocument AnalyzeGameplaySource()

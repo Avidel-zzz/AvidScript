@@ -4,6 +4,7 @@
 #include "BindingGeneration/AvidScriptEditorCSharpDefaultValueFormatter.h"
 #include "BindingGeneration/AvidScriptEditorCSharpObjectFactoryRenderer.h"
 #include "BindingGeneration/AvidScriptEditorCSharpStateContractRenderer.h"
+#include "BindingGeneration/AvidScriptEditorCSharpUeTypeDeclarationRenderer.h"
 #include "BindingGeneration/AvidScriptEditorCSharpSyntax.h"
 #include "AvidScriptObjectFactoryBinding.h"
 #include "AvidScriptObjectLifecycleBinding.h"
@@ -2852,6 +2853,7 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 		return false;
 	}
 	FAvidScriptEditorCSharpStateContractRenderer::AppendReferenceSurface(Lines);
+	FAvidScriptEditorCSharpUeTypeDeclarationRenderer::AppendReferenceSurface(Lines);
 	Lines.Append({
 		TEXT("internal static class AvidScriptBindingPackage"),
 		TEXT("{"),

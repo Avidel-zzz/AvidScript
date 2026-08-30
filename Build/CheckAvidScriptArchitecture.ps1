@@ -3250,6 +3250,7 @@ if ($CSharpSemanticCacheSource -match 'Get-Content\s+-Raw\s+-LiteralPath\s+\$Sou
 foreach ($RequiredReachabilityContract in @(
     'SemanticReachabilityProjector.Project',
     'SemanticStateContractProjector.Project',
+    'SemanticUeTypeProjector.Project',
     'SemanticGameplayEventProjector.Project',
     'SemanticDelegateEventProjector.Project',
     'SemanticContinuationProjector.Project'
@@ -3259,12 +3260,15 @@ foreach ($RequiredReachabilityContract in @(
     }
 }
 foreach ($RequiredSemanticContract in @(
-    'CurrentSchemaVersion = 17',
-    'CurrentSemanticVersion = "1.19"'
+    'CurrentSchemaVersion = 18',
+    'CurrentSemanticVersion = "1.20"'
 )) {
     if (-not $SemanticContractSource.Contains($RequiredSemanticContract)) {
         Add-Violation "C# Semantic contract is missing current version token $RequiredSemanticContract"
     }
+}
+if (-not $SemanticAnalyzerSource.Contains('UeTypeDeclarations = ueTypeProjection.Declarations')) {
+    Add-Violation 'C# Semantic analyzer is missing the versioned UE type declaration output contract'
 }
 foreach ($RequiredCompositeCapabilityProvenanceContract in @(
     'IsExecutableReferenceSource',

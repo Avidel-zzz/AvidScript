@@ -11,10 +11,11 @@
 
 - P59.1 架构已纠偏到脚本定义 UE 类型；
 - 旧 LLVM AOT 方案保留为研究记录，不再作为 P59 权威目标。
+- `P59.A`：schema 18/1.20 的 UE Type Declaration Contract、generated C# 属性/标记基类、
+  Guest fail-closed validator、示例与受影响构建发布链已完成。
 
 ## 待完成
 
-- `P59.A` UE Type Declaration semantic contract；
 - `P59.B` UHT shell generator；
 - `P59.C` Runtime type/instance/inheritance dispatch；
 - `P59.D` Blueprint、网络、Cook 与集中 Gate。
