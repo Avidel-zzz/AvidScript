@@ -32,6 +32,8 @@
   上转型已落地；原生属性仍是唯一状态 owner。
 - `P59.C2c1`：generator manifest schema 4 / 1.3、显式 `class_path` 与 Runtime 不可变
   UClass/type/member 注册表已落地；构建时缓存 UClass/FProperty/UFunction，热路径只消费 ordinal。
+- `P59.C2c2`：Session-owned receiver route、canonical function prepared call、packed i64 ObjectHandle、
+  Wasmtime JIT UFunction dispatch 与 reload generation replacement 已落地；首条 `(this)->int32` 已执行。
 
 ## 待完成
 

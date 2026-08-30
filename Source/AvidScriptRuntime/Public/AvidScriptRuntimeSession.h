@@ -2,6 +2,7 @@
 
 #include "AvidScriptGameplayEvent.h"
 #include "AvidScriptWasmReloadTypes.h"
+#include "ScriptTypes/AvidScriptGeneratedTypeRouter.h"
 
 class FAvidScriptRuntimeEventRouter;
 class FAvidScriptRuntimeScheduler;
@@ -10,6 +11,8 @@ class FAvidScriptSessionDelegateSubscriptions;
 class FAvidScriptSessionInboundHandlers;
 class FAvidScriptSessionContinuations;
 class IAvidScriptBindingHostEffectJournal;
+class FAvidScriptGeneratedTypeRegistrySnapshot;
+struct FAvidScriptRuntimeGeneratedTypeInstanceState;
 struct FAvidScriptRuntimeArtifact;
 
 struct AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeSessionSnapshot
@@ -38,6 +41,7 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeSessionTestSnapshot
 #endif
 
 class AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeSession
+	: public IAvidScriptGeneratedTypeInstance
 {
 public:
 	FAvidScriptRuntimeSession();
@@ -83,6 +87,20 @@ public:
 	void SetHostContext(const FAvidScriptWasmHostContext& InHostContext);
 	void ClearHostContext();
 	void UnloadLive();
+	bool ConfigureGeneratedTypeInstance(
+		UObject& Receiver,
+		const FAvidScriptObjectHandle& ReceiverHandle,
+		uint32 TypeOrdinal,
+		const TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot>& Registry,
+		FString& OutError);
+	bool ClearGeneratedTypeInstance(FString& OutError);
+	bool InvokeGeneratedTypeMember(
+		UObject& Receiver,
+		const FAvidScriptObjectHandle& ReceiverHandle,
+		uint32 TypeOrdinal,
+		uint32 MemberOrdinal,
+		TConstArrayView<FAvidScriptGeneratedCallArgument> Arguments,
+		void* Result) override;
 
 	bool IsLiveLoaded() const;
 	bool IsOperationActive() const { return bMutationInProgress || ActiveGuestCallDepth > 0; }
@@ -165,6 +183,11 @@ private:
 		const FAvidScriptWasmReloadManifest& Manifest,
 		bool bUseHostEffectTransaction,
 		FAvidScriptWasmReloadResult& OutResult);
+	bool PrepareGeneratedTypeExports(
+		FAvidScriptWasmRuntimeInstance& Runtime,
+		TArray<FAvidScriptVmPreparedExportCall>& OutCalls,
+		TArray<uint8>& OutCallShapes,
+		FString& OutError) const;
 	bool PumpReadyContinuations(FAvidScriptWasmSmokeResult& OutResult);
 
 	TUniquePtr<FAvidScriptSessionObjectOwnership> ObjectOwnership;
@@ -174,6 +197,7 @@ private:
 	TUniquePtr<FAvidScriptWasmRuntimeInstance> LiveRuntime;
 	TUniquePtr<FAvidScriptRuntimeScheduler> Scheduler;
 	TUniquePtr<FAvidScriptRuntimeEventRouter> EventRouter;
+	TUniquePtr<FAvidScriptRuntimeGeneratedTypeInstanceState> GeneratedTypeInstance;
 	FAvidScriptWasmReloadManifest LiveManifest;
 	FAvidScriptWasmHostContext HostContext;
 	FAvidScriptVmBackendSelection BackendSelection;

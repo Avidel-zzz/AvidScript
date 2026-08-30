@@ -203,6 +203,10 @@ public:
 	bool ValidateRequiredExports(
 		const TArray<FString>& RequiredExports,
 		FAvidScriptWasmSmokeResult& OutResult);
+	bool PrepareNamedExportCall(
+		const FString& ExportName,
+		FAvidScriptVmPreparedExportCall& OutCall,
+		FString& OutError);
 	bool BeginPlay(FAvidScriptWasmSmokeResult& OutResult);
 	bool Tick(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult);
 	bool Tick(

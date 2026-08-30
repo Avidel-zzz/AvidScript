@@ -10,6 +10,7 @@
 #include "Ownership/AvidScriptSessionObjectOwnership.h"
 #include "Session/AvidScriptSessionDelegateSubscriptions.h"
 #include "Session/AvidScriptSessionInboundHandlers.h"
+#include "ScriptTypes/AvidScriptGeneratedTypeSessionPrivate.h"
 #include "StateMigration/AvidScriptRuntimeStateMigration.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
@@ -122,6 +123,11 @@ FAvidScriptRuntimeSession::~FAvidScriptRuntimeSession()
 	check(IsInGameThread());
 	checkf(!IsOperationActive(), TEXT("AvidScript RuntimeSession cannot be destroyed during an active guest call or mutation."));
 	UnloadLive();
+	FString ClearError;
+	ensureMsgf(
+		ClearGeneratedTypeInstance(ClearError),
+		TEXT("Generated type instance teardown failed: %s"),
+		ClearError.IsEmpty() ? TEXT("unknown") : *ClearError);
 }
 
 bool FAvidScriptRuntimeSession::LoadEmbeddedSmoke(FAvidScriptWasmReloadResult& OutResult)
@@ -335,6 +341,16 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 			LogAvidScriptRuntimeSession,
 			Verbose,
 			TEXT("AvidScript host context change rejected during an active guest call or mutation."));
+		return;
+	}
+	if (GeneratedTypeInstance
+		&& InHostContext.OwnerHandle.IsValid()
+		&& InHostContext.OwnerHandle != GeneratedTypeInstance->ReceiverHandle)
+	{
+		UE_LOG(
+			LogAvidScriptRuntimeSession,
+			Warning,
+			TEXT("AvidScript host context rejected because its owner handle does not match the generated type instance."));
 		return;
 	}
 	TGuardValue<bool> MutationGuard(bMutationInProgress, true);
@@ -800,6 +816,11 @@ bool FAvidScriptRuntimeSession::StopAndUnload(FAvidScriptWasmSmokeResult& OutRes
 		OutResult = FAvidScriptWasmSmokeResult();
 		OutResult.bUnloaded = true;
 	}
+	if (GeneratedTypeInstance)
+	{
+		GeneratedTypeInstance->PreparedCalls.Reset();
+		GeneratedTypeInstance->CallShapes.Reset();
+	}
 	Continuations->ReleaseRetiredEndpoint();
 	HostContext.Continuations = nullptr;
 	if (HostContext.ObjectRegistry != nullptr)
@@ -1187,6 +1208,24 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 			TEXT("rebuild and validate the candidate before activation"));
 		return false;
 	}
+	TArray<FAvidScriptVmPreparedExportCall> CandidateGeneratedCalls;
+	TArray<uint8> CandidateGeneratedCallShapes;
+	FString GeneratedTypePrepareError;
+	if (!PrepareGeneratedTypeExports(
+		*CandidateRuntime,
+		CandidateGeneratedCalls,
+		CandidateGeneratedCallShapes,
+		GeneratedTypePrepareError))
+	{
+		SetReloadFailure(
+			OutResult,
+			TEXT("<generated_types>"),
+			TEXT("generated_type_export_prepare_failed"),
+			GeneratedTypePrepareError,
+			TEXT("rebuild the generated type WASM exports and keep the previous runtime active"));
+		CandidateRuntime->Unload();
+		return false;
+	}
 	TArray<FAvidScriptPreparedDelegateEvent> CandidateDelegateEvents;
 	TArray<FAvidScriptPreparedDelegateEvent> CandidateInboundHandlers;
 	FString DelegatePrepareError;
@@ -1419,6 +1458,11 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 
 	OutResult.RuntimeResult = BeginPlayResult;
 	LiveRuntime = MoveTemp(CandidateRuntime);
+	if (GeneratedTypeInstance)
+	{
+		GeneratedTypeInstance->PreparedCalls = MoveTemp(CandidateGeneratedCalls);
+		GeneratedTypeInstance->CallShapes = MoveTemp(CandidateGeneratedCallShapes);
+	}
 	Scheduler->Attach(*LiveRuntime);
 	LiveManifest = Manifest;
 	HostContext.Continuations = CandidateHostContext.Continuations;

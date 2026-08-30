@@ -633,6 +633,10 @@ $GeneratedTypeRouterHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/
 $GeneratedTypeRouterSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/ScriptTypes/AvidScriptGeneratedTypeRouter.cpp'
 $GeneratedTypeRegistryHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/ScriptTypes/AvidScriptGeneratedTypeRegistry.h'
 $GeneratedTypeRegistrySource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/ScriptTypes/AvidScriptGeneratedTypeRegistry.cpp'
+$GeneratedTypeSessionHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptRuntimeSession.h'
+$GeneratedTypeSessionSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Session/AvidScriptRuntimeSession.cpp'
+$GeneratedTypeSessionDispatchSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/ScriptTypes/AvidScriptGeneratedTypeSession.cpp'
+$GeneratedTypeWasmRuntimeHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptWasmRuntime.h'
 $RuntimeModuleSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptRuntimeModule.cpp'
 $CSharpScriptTypeBuildSource = Read-RequiredFile 'Build/BuildCSharpScriptTypes.ps1'
 $UeTypeShellRendererSource = Read-RequiredFile 'Tools/AvidScript.UeTypeGenerator/Generation/UhtShellRenderer.cs'
@@ -681,6 +685,21 @@ foreach ($RequiredGeneratedTypeRegistryContract in @(
     if (-not $GeneratedTypeRegistryHeader.Contains($RequiredGeneratedTypeRegistryContract) -and
         -not $GeneratedTypeRegistrySource.Contains($RequiredGeneratedTypeRegistryContract)) {
         Add-Violation "generated type immutable registry is missing $RequiredGeneratedTypeRegistryContract"
+    }
+}
+foreach ($RequiredGeneratedTypeSessionContract in @(
+    'public IAvidScriptGeneratedTypeInstance',
+    'ConfigureGeneratedTypeInstance',
+    'PrepareGeneratedTypeExports',
+    'PrepareNamedExportCall',
+    'ReceiverHandle.Slot',
+    'ReceiverHandle.Generation',
+    'FAvidScriptVmPreparedExportCall')) {
+    if (-not $GeneratedTypeSessionHeader.Contains($RequiredGeneratedTypeSessionContract) -and
+        -not $GeneratedTypeSessionSource.Contains($RequiredGeneratedTypeSessionContract) -and
+        -not $GeneratedTypeSessionDispatchSource.Contains($RequiredGeneratedTypeSessionContract) -and
+        -not $GeneratedTypeWasmRuntimeHeader.Contains($RequiredGeneratedTypeSessionContract)) {
+        Add-Violation "generated type Session dispatch is missing $RequiredGeneratedTypeSessionContract"
     }
 }
 foreach ($RequiredGeneratedRouterModuleLifecycle in @(

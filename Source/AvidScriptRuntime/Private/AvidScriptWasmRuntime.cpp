@@ -1170,6 +1170,46 @@ bool FAvidScriptWasmRuntimeInstance::ValidateRequiredExports(
 	}
 	return true;
 }
+
+bool FAvidScriptWasmRuntimeInstance::PrepareNamedExportCall(
+	const FString& ExportName,
+	FAvidScriptVmPreparedExportCall& OutCall,
+	FString& OutError)
+{
+	OutCall = FAvidScriptVmPreparedExportCall();
+	OutError.Reset();
+	if (!IsLoaded() || !VmBackend)
+	{
+		OutError = TEXT("invalid_state: no loaded VM backend is available");
+		return false;
+	}
+	if (ExportName.IsEmpty())
+	{
+		OutError = TEXT("invalid_arguments: generated export name is empty");
+		return false;
+	}
+
+	FAvidScriptVmError Error;
+	FAvidScriptVmExportHandle Handle;
+	if (!VmBackend->ResolveExport(ExportName, Handle, Error)
+		|| !VmBackend->PrepareExportCall(Handle, OutCall, Error)
+		|| !OutCall.IsValid())
+	{
+		if (Error.Category.IsEmpty())
+		{
+			Error.Category = TEXT("prepared_export_invalid");
+			Error.Details = TEXT("the VM backend returned an invalid prepared export call");
+		}
+		OutError = FString::Printf(
+			TEXT("%s: %s"),
+			*Error.Category,
+			Error.Details.IsEmpty() ? TEXT("no details") : *Error.Details);
+		OutCall = FAvidScriptVmPreparedExportCall();
+		return false;
+	}
+	return true;
+}
+
 bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutResult)
 {
 	PrepareResult(OutResult, ModuleId, ActiveBackendInfo, Metrics);
