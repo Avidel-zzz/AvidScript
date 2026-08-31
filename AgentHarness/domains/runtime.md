@@ -20,3 +20,5 @@
 - generated type package 的 body-only reload 必须先比较完整反射 shape，再对全部活跃 Session 提交；
   任一实例失败时逆序回滚，回滚失败则 teardown 全部实例 fail-closed。type/member identity、ordinal、
   UClass/UFunction/FProperty 或 ABI route 改变时返回 native rebuild required，禁止当作 body-only 套用。
+- generated type 构建分类必须来自确定性 native shell 输出身份，并携带 previous package 链。Editor 只用该分类
+  做冷路径路由与事件去重；Runtime Host 仍必须重新验证实际 Registry shape，禁止把构建元数据当作执行授权。

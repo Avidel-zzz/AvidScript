@@ -67,6 +67,9 @@
 - `P59.D5a`：Generated Type Runtime Host 已支持 active instance 的 descriptor body-only package reload；
   完整反射 shape 改变时返回 `NativeRebuildRequired`，多实例中途失败会逆序恢复已提交 Session，
   只有全部实例成功后才切换 Host package snapshot。
+- `P59.D5b`：真实 C# 类型生成链会发布 native structure 指纹、reload 分类与 previous-package 链；
+  Editor 自动监听 descriptor，合并重复事件并把 body-only 更新接入 D5a 事务。结构变化停在 no-clean UBT
+  与 Editor restart 边界，Runtime 仍以实际 Registry shape 二次校验。
 
 ## 待完成
 

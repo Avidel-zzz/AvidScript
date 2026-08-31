@@ -10,14 +10,15 @@
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 Development" src="https://img.shields.io/badge/Platform-Win64-0078D4?logo=windows&logoColor=white">
-  <img alt="Phase 57.12D2" src="https://img.shields.io/badge/Status-Phase%2057.12D2-159957">
-  <img alt="Automation 371/371" src="https://img.shields.io/badge/Automation-371%2F371-26A269">
+  <img alt="Phase 59 D5" src="https://img.shields.io/badge/Status-Phase%2059%20D5-159957">
+  <img alt="Automation 376/376" src="https://img.shields.io/badge/Automation-376%2F376-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
 
 将 C# 编译为轻量 WASM Guest，通过生成式 Binding 接入 `BeginPlay`、`Tick`、
 Timer、受控 `async/await`、UE latent UFUNCTION、异步对象加载、Overlap、动态多播事件、
-普通 `UFUNCTION`、生成式 RPC、普通与 replicated `UPROPERTY`，在 UE 中编写真实游戏逻辑。
+普通 `UFUNCTION`、生成式 RPC、普通与 replicated `UPROPERTY`。C# 也可声明可供 Blueprint
+继承的 Actor、Component 与 Subsystem，并在不改变反射结构时自动热重载 WASM 方法体。
 
 </div>
 
@@ -415,6 +416,7 @@ trap 会回滚本次借出的对象 capability。
 
 | 领域 | 已实现 |
 | --- | --- |
+| C# 定义 UE 类型 | C# 声明真实 Actor、Component、World/GameInstance Subsystem、`UCLASS/UFUNCTION/UPROPERTY`、继承与 override、Blueprint 子类、RepNotify 和类型生命周期；确定性生成 native shell 与 WASM body |
 | C# 生命周期 | `BeginPlay`、`Tick`、`EndPlay`、Timer、Gameplay Event、Overlap 路由、受控 `async void` 导出 |
 | 确定性 Continuation | `Delay` / `NextTick`、`FStreamableManager` 异步对象加载、生成式 UE latent producer、typed outcome、显式 cancellation source、状态与对象结果、CPS dispatcher、不透明 token、Session active/prepared 事务、owner generation/World liveness 围栏与 teardown |
 | 受控 async/await | 多个顺序 await、分支/循环/switch/一维数组 foreach 内部 await、固定值与数组引用 local 跨 await、局部重赋值、`if/else`、integral/enum `switch`、`for`/`foreach`/`while`/`do`、`break`/`continue`/`return`、continuation CFG、per-await liveness frame、Reflection 生成 `FooAsync`、零 Guest 堆 CPS segment、稳定 resume debug map、store/read/schedule fail closed；不依赖 CLR `Task` Runtime |
@@ -428,7 +430,7 @@ trap 会回滚本次借出的对象 capability。
 | UObject / Actor | typed `UE.Self`、generational handle、异步加载结果 `TryCast`、`SpawnActor`、`DestroyActor`、`IsA`、checked cast |
 | Component | descriptor 驱动工厂、typed `FindComponent`、Attach/Detach、显式 `Release` |
 | 对象安全 | Session 所有权、World 隔离、失效句柄检测、UObject GC 强引用、Component 回收 |
-| 热重载 | C# 候选加载、显式状态迁移、失败回滚、调试映射 |
+| 热重载 | C# 候选加载、显式状态迁移、失败回滚、调试映射；Generated Type package 自动监听、body-only 多实例事务更新、package 链去重；反射结构变化明确要求 native rebuild |
 | 调用完整性 | Binding package、WASM import、immutable codec program、prepared target 与 Runtime Session 多层 provenance |
 | 性能热路径 | callback-epoch fused host cell、prepared export、`TickHot` / Event hot result |
 | VM 后端 | Win64 Wasmtime 45 主后端；WAMR 兼容后端；同一 C# Guest 双后端验证 |
@@ -685,15 +687,16 @@ cmd /c Build\BuildWAMRWin64.cmd
 - `FText` 的本地化 identity/history 语义尚未支持；
 - C# 由 Roslyn semantic/CFG lowering 编译，不提供完整 .NET Runtime；
 - 高频 `Tick` 内应优先使用已有 Generated S1 或经过 benchmark 的 prepared shape；
+- C# Generated Type 的方法体变化可在 Editor 中自动热重载；新增/删除类型、属性、函数或改变签名、继承、反射 flag 时仍需受控 no-clean UBT 并重启 Editor；
 - 数组 capability 已提供显式 `Release`；UTF-8 heap 仍以 Session/reset 为主要回收边界；
 - Cook、Shipping、崩溃隔离、Android 与 iOS 尚未完成正式验收；
 - 正式竞品矩阵目前覆盖 Puerts V8，尚未同口径覆盖 UnLua 与 AngelScript。
 
 ## 路线图
 
-1. P58 扩展 `FText`、string element、nested array、`TSet`/`TMap`、soft/weak pointer 与 delegate ref/out；
-2. 用 C# 完成真实小型联网游戏 Demo，固化生命周期、网络、对象创建、事件和热重载工作流；
-3. 继续压缩 Wasmtime P95 尾延迟，并完成 Cook、Shipping、故障隔离与 Android/iOS AOT 适配。
+1. P60 补齐 interface dispatch、单播/完整多播委托、默认参数与 Blueprint 新声明函数；
+2. P61 完成增量编译、源码定位、调用栈、断点、变量查看与 Profiler；
+3. P62-P64 完成 Cook/Shipping、移动端 AOT 与真实小型游戏 Demo 验收。
 
 路线图只表示后续工程顺序，不代表对应平台已经可用。
 
@@ -718,7 +721,7 @@ listen server + 1 remote client 独立进程证明 BeginPlay -> RPC -> replicate
 最新纯执行层正式 benchmark 使用 clean `9148bff/73eb948d` 候选，12-kernel
 correctness failure 为 0、fallback 为 false；P95 尾延迟改善但领导力门禁仍未关闭，
 未解决债务已转移到 P59。阶段末完整 AvidScript Automation 为 376/376 Success。
-最新功能报告见 [P57.12D5 中文完成报告](Docs/Phase57/P57.12D5_Real_Network_Topology.md)，
+最新功能报告见 [P59.D5b 中文完成报告](Docs/Phase59/P59.D5b_Generated_Type_Editor_Reload_Routing.md)，
 最新性能报告见 [P57.13 中文结果](Docs/Phase57/P57.13_Cranelift_Speed_Profile.md)。
 
 工程规则：

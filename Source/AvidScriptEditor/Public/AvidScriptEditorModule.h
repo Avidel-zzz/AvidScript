@@ -8,6 +8,7 @@
 #include "AvidScriptEditorMenuRegistrar.h"
 #include "AvidScriptEditorSettingsService.h"
 #include "CSharpLiveReload/AvidScriptEditorCSharpLiveReloadService.h"
+#include "GeneratedTypes/AvidScriptEditorGeneratedTypeReloadService.h"
 
 #include "CoreMinimal.h"
 #include "Logging/LogMacros.h"
@@ -125,6 +126,7 @@ private:
 
 	TUniquePtr<FAvidScriptEditorCommandLauncher> CommandLauncher;
 	TUniquePtr<FAvidScriptEditorCSharpLiveReloadService> CSharpLiveReloadService;
+	TUniquePtr<FAvidScriptEditorGeneratedTypeReloadService> GeneratedTypeReloadService;
 	IConsoleObject* GenerateBindingsConsoleCommand = nullptr;
 	IConsoleObject* PublishCSharpBindingsConsoleCommand = nullptr;
 	FDelegateHandle PublishCSharpBindingsAssetRegistryHandle;

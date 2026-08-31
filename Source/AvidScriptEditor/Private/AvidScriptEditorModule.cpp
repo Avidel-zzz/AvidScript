@@ -182,6 +182,20 @@ void FAvidScriptEditorModule::StartupModule()
 	{
 		CSharpLiveReloadService = MakeUnique<FAvidScriptEditorCSharpLiveReloadService>();
 	}
+	GeneratedTypeReloadService =
+		MakeUnique<FAvidScriptEditorGeneratedTypeReloadService>();
+	FAvidScriptEditorGeneratedTypeReloadServiceResult GeneratedTypeReloadResult;
+	if (!GeneratedTypeReloadService->Start(
+			FAvidScriptEditorGeneratedTypeReloadPolicy::GetDefaultDescriptorPath(),
+			GeneratedTypeReloadResult))
+	{
+		UE_LOG(
+			LogAvidScriptEditor,
+			Warning,
+			TEXT("Generated type reload watcher did not start: category=%s details=%s"),
+			*GeneratedTypeReloadResult.ErrorCategory,
+			*GeneratedTypeReloadResult.ErrorMessage);
+	}
 	RegisterConsoleCommands();
 	ToolMenusStartupCallbackHandle = UToolMenus::RegisterStartupCallback(
 		FSimpleMulticastDelegate::FDelegate::CreateRaw(this, &FAvidScriptEditorModule::RegisterMenus));
@@ -206,6 +220,11 @@ void FAvidScriptEditorModule::ShutdownModule()
 	{
 		CSharpLiveReloadService->Stop();
 		CSharpLiveReloadService.Reset();
+	}
+	if (GeneratedTypeReloadService)
+	{
+		GeneratedTypeReloadService->Stop();
+		GeneratedTypeReloadService.Reset();
 	}
 
 	if (ToolMenusStartupCallbackHandle.IsValid())

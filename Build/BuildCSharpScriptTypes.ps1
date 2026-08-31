@@ -18,6 +18,7 @@ $BuildDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PluginRoot = Split-Path -Parent $BuildDir
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $PluginRoot)
 $BindingPackageFunctions = Join-Path $BuildDir "AvidScriptCSharpBindingPackage.ps1"
+$ReloadClassificationFunctions = Join-Path $BuildDir "AvidScriptGeneratedTypeReloadClassification.ps1"
 $FrontendScript = Join-Path $BuildDir "InvokeCSharpFrontend.ps1"
 $SemanticScript = Join-Path $BuildDir "InvokeCSharpSemantic.ps1"
 $RuntimeBuildScript = Join-Path $BuildDir "BuildCSharpActorLifecycle.ps1"
@@ -31,6 +32,7 @@ foreach ($RequiredFile in @(
         $SourcePath,
         $BindingPackageManifestPath,
         $BindingPackageFunctions,
+        $ReloadClassificationFunctions,
         $FrontendScript,
         $SemanticScript,
         $GeneratorProject,
@@ -73,6 +75,7 @@ $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
 $ArtifactRoot = [System.IO.Path]::GetFullPath($ArtifactRoot)
 
 . $BindingPackageFunctions
+. $ReloadClassificationFunctions
 $BindingPackage = Resolve-AvidScriptCSharpBindingPackage `
     -ManifestPath $BindingPackageManifestPath
 
@@ -89,10 +92,10 @@ $RunRoot = Join-Path $ArtifactRoot $SourceSha256
 $FrontendPath = Join-Path $RunRoot "script-types.frontend.json"
 $SemanticPath = Join-Path $RunRoot "script-types.semantic.json"
 $GeneratedPackagePath = Join-Path $OutputRoot "AvidScriptGeneratedPackage.json"
+$PreviousReloadBaseline = Get-AvidScriptGeneratedTypeReloadBaseline `
+    -DescriptorPath $GeneratedPackagePath `
+    -OutputRoot $OutputRoot
 New-Item -ItemType Directory -Force -Path $RunRoot | Out-Null
-if (Test-Path -LiteralPath $GeneratedPackagePath -PathType Leaf) {
-    Remove-Item -LiteralPath $GeneratedPackagePath -Force
-}
 
 & $FrontendScript `
     -DotNetPath $DotNetPath `
@@ -183,6 +186,7 @@ foreach ($Output in @($GeneratedManifest.outputs)) {
         throw "Generated UE type output hash mismatch: $($Output.relative_path)"
     }
 }
+$NativeStructureSha256 = Get-AvidScriptGeneratedTypeNativeStructureSha256 $GeneratedManifest
 
 $RuntimeManifestPath = ""
 $PackageId = ""
@@ -222,6 +226,20 @@ if (-not $SkipRuntimePackage) {
         "$($GeneratedManifest.generation_key_sha256)`n$TypeManifestSha256`n$RuntimeManifestSha256")
     $PackageId = [System.Convert]::ToHexString(
         [System.Security.Cryptography.SHA256]::HashData($PackageIdentityBytes)).ToLowerInvariant()
+    $PreviousPackageId = if ($null -ne $PreviousReloadBaseline) {
+        $PreviousReloadBaseline.PackageId
+    } else {
+        ""
+    }
+    $PreviousNativeStructureSha256 = if ($null -ne $PreviousReloadBaseline) {
+        $PreviousReloadBaseline.NativeStructureSha256
+    } else {
+        ""
+    }
+    $ReloadMetadata = New-AvidScriptGeneratedTypeReloadMetadata `
+        -NativeStructureSha256 $NativeStructureSha256 `
+        -PreviousPackageId $PreviousPackageId `
+        -PreviousNativeStructureSha256 $PreviousNativeStructureSha256
     $TypeManifestRelativePath = [System.IO.Path]::GetRelativePath(
         $OutputRoot,
         $GeneratedManifestPath).Replace('\', '/')
@@ -243,6 +261,7 @@ if (-not $SkipRuntimePackage) {
             file = $RuntimeManifestRelativePath
             sha256 = $RuntimeManifestSha256
         }
+        reload = $ReloadMetadata
     }
     $PackageJson = $PackageDescriptor | ConvertTo-Json -Depth 8
     $PackageTempPath = "$GeneratedPackagePath.tmp"
@@ -259,6 +278,8 @@ Write-Host "  binding_package=$($BindingPackage.PackageHash)"
 Write-Host "  semantic=$SemanticPath"
 Write-Host "  ue_types=$(@($GeneratedManifest.types).Count)"
 Write-Host "  generation_key=$($GeneratedManifest.generation_key_sha256)"
+Write-Host "  native_structure=$NativeStructureSha256"
+Write-Host "  reload_classification=$(if ($SkipRuntimePackage) { 'none' } else { $ReloadMetadata.classification })"
 Write-Host "  runtime_package=$(if ($SkipRuntimePackage) { 'skipped' } else { $RuntimeManifestPath })"
 Write-Host "  package_id=$(if ($SkipRuntimePackage) { 'none' } else { $PackageId })"
 Write-Host "  output=$OutputRoot"

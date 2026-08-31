@@ -21,7 +21,7 @@
       "summary": "概念名称不能当作真实文件路径。",
       "prevention": "先用 rg --files 建立索引，再对索引中的字面路径读取；通配符只放在 rg -g 参数。",
       "source": "legacy:1931",
-      "last_observed": "2026-08-31 P59.D2 (再次把 Windows 通配符作为 rg 路径传入，产生 os error 123)"
+      "last_observed": "2026-08-31 P59.D5b (把 AvidScriptEditorCSharpBuildPipeline.* 作为 Windows 路径传给 rg，产生 os error 123)"
     },
     {
       "id": "one-command-one-evidence-domain",
@@ -29,7 +29,7 @@
       "summary": "一个 shell 调用只承担一个逻辑动作或证据域。",
       "prevention": "调度前拒绝用分号、&& 或 || 串联独立动作；多文件读取使用并行工具或逐项调用。",
       "source": "legacy:1672",
-      "last_observed": "2026-08-31 P59.D2 (把 git status 与文件索引用 PowerShell 分号放入同一 shell 调用)"
+      "last_observed": "2026-08-31 P59.D5b (用分号串联两个源码读取，并再次串联 git ls-files 与 status)"
     },
     {
       "id": "dotnet-executable-tests-use-run",

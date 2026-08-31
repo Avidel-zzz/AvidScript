@@ -639,6 +639,10 @@ $GeneratedTypeSessionDispatchSource = Read-RequiredFile 'Source/AvidScriptRuntim
 $GeneratedTypeWasmRuntimeHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptWasmRuntime.h'
 $RuntimeModuleSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptRuntimeModule.cpp'
 $CSharpScriptTypeBuildSource = Read-RequiredFile 'Build/BuildCSharpScriptTypes.ps1'
+$GeneratedTypeReloadClassificationSource = Read-RequiredFile 'Build/AvidScriptGeneratedTypeReloadClassification.ps1'
+$GeneratedTypeEditorReloadHeader = Read-RequiredFile 'Source/AvidScriptEditor/Public/GeneratedTypes/AvidScriptEditorGeneratedTypeReloadPolicy.h'
+$GeneratedTypeEditorReloadSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/GeneratedTypes/AvidScriptEditorGeneratedTypeReloadService.cpp'
+$GeneratedTypeEditorReloadPolicySource = Read-RequiredFile 'Source/AvidScriptEditor/Private/GeneratedTypes/AvidScriptEditorGeneratedTypeReloadPolicy.cpp'
 $UeTypeShellRendererSource = Read-RequiredFile 'Tools/AvidScript.UeTypeGenerator/Generation/UhtShellRenderer.cs'
 $SemanticUeRuntimeContractSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Model/SemanticUeTypeRuntimeContract.cs'
 $CSharpUePropertyPlanSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpUePropertyAccessPlan.cs'
@@ -759,9 +763,35 @@ foreach ($RequiredScriptTypeBuildContract in @(
     'schema_version -ne 5',
     'generator_version -cne "1.6"',
     'semantic_artifact_sha256',
+    'Get-AvidScriptGeneratedTypeReloadBaseline',
+    'New-AvidScriptGeneratedTypeReloadMetadata',
     'Get-FileHash')) {
     if (-not $CSharpScriptTypeBuildSource.Contains($RequiredScriptTypeBuildContract)) {
         Add-Violation "C# script type build pipeline is missing $RequiredScriptTypeBuildContract"
+    }
+}
+foreach ($RequiredGeneratedTypeReloadClassificationContract in @(
+    'avidscript-generated-native-structure-v1',
+    'initial_install',
+    'body_only',
+    'native_rebuild_required',
+    'native_structure_sha256',
+    'previous_package_id')) {
+    if (-not $GeneratedTypeReloadClassificationSource.Contains(
+            $RequiredGeneratedTypeReloadClassificationContract)) {
+        Add-Violation "generated type reload classification is missing $RequiredGeneratedTypeReloadClassificationContract"
+    }
+}
+foreach ($RequiredGeneratedTypeEditorReloadContract in @(
+    'IAvidScriptEditorCSharpLiveReloadWatchHost',
+    'LastProcessedPackageId',
+    'generated_type_reload_chain_mismatch',
+    'ReloadPackageFromDescriptorFile',
+    'NativeRebuildRequired')) {
+    if (-not $GeneratedTypeEditorReloadHeader.Contains($RequiredGeneratedTypeEditorReloadContract) -and
+        -not $GeneratedTypeEditorReloadSource.Contains($RequiredGeneratedTypeEditorReloadContract) -and
+        -not $GeneratedTypeEditorReloadPolicySource.Contains($RequiredGeneratedTypeEditorReloadContract)) {
+        Add-Violation "generated type Editor reload service is missing $RequiredGeneratedTypeEditorReloadContract"
     }
 }
 if ($CSharpScriptTypeBuildSource -match '(?i)(?<![A-Za-z0-9])[0-9a-f]{64}(?![A-Za-z0-9])') {
