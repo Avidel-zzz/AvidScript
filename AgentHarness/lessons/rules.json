@@ -301,6 +301,14 @@
       "prevention": "close 只在 Gate verified commit 的直接 attestation 子提交执行一次；后续 README 或文档提交使用 Test-AvidScriptPhaseCloseEvidence 对既有 PhaseN_Close.json 做只读验证，确认 attestation 仍是 HEAD 祖先且 tree 匹配。",
       "source": "observed:2026-08-31-P59.Close",
       "last_observed": "2026-08-31 P59 close 后 README 跟进提交误再次调用 close，状态机以 ASPW3030 拒绝；只读 validator 随后确认原证据有效"
+    },
+    {
+      "id": "nested-pwsh-array-arguments-use-delimited-string",
+      "tags": ["powershell", "phase", "workflow", "cli"],
+      "summary": "从 PowerShell 启动子 pwsh 脚本时，数组参数不能依赖调用端逗号表达式保持边界。",
+      "prevention": "对 InvokePhaseWorkflow.ps1 的 BatchId 等支持内部 Split 的参数，跨子 pwsh 统一传一个逗号分隔字符串；执行前读取脚本参数归一化逻辑，不把当前 shell 的数组语法当成 native argv 合同。",
+      "source": "observed:2026-08-31-P60.Start",
+      "last_observed": "2026-08-31 P60 start 首次把四个 BatchId 作为调用端逗号数组传给子 pwsh，子进程收到异常值并以 ASPW1010 拒绝；改为单个逗号分隔字符串后成功"
     }
   ]
 }

@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "phase": {
+    "id": 60,
+    "goal": "补齐 Interface、完整 Delegate、脚本 UFunction 默认参数、Blueprint 新声明函数和通用异步动作，保持生成式 Reflection、prepared hot path 与 Session-owned 生命周期",
+    "start_commit": "074d7b662ce1658f958be54267062aba3869d677"
+  },
+  "declared_stage": "implementing",
+  "architecture": {
+    "path": "Docs/Phase60/P60.0_Modern_UE_Interop_Architecture.md",
+    "version": 1,
+    "sha256": "68f8b543d32cd938d1c3348e951d3be6d1b29ea25a80149be06307b01c30a8e6",
+    "revision_reason": "initial architecture freeze"
+  },
+  "documents": {
+    "plan": "Docs/Phase60/P60.0_Implementation_Plan.md",
+    "closeout": "Docs/Phase60/P60_Closeout.md"
+  },
+  "batches": [
+    {
+      "id": "P60.A",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    },
+    {
+      "id": "P60.B",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    },
+    {
+      "id": "P60.C",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    },
+    {
+      "id": "P60.D",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    }
+  ],
+  "debt": [],
+  "review": {
+    "completed": false,
+    "evidence": "",
+    "completed_at_utc": null
+  },
+  "budgets": {
+    "ubt": 3,
+    "automation": 2,
+    "full_gate": 2
+  },
+  "invocations": {
+    "ubt": 0,
+    "automation": 0,
+    "full_gate": 0
+  },
+  "freeze": {
+    "source_commit": "",
+    "source_tree": "",
+    "state_sha256": "",
+    "review_evidence": "",
+    "at_utc": null
+  },
+  "gate": {
+    "report_path": "",
+    "report_sha256": "",
+    "run_id": "",
+    "verified_commit": "",
+    "verified_tree": "",
+    "attestation_parent": "",
+    "attested_at_utc": null
+  },
+  "protected_dirty": [
+    {
+      "path": "Docs/AvidScript_Technical_Status.md",
+      "status": "??",
+      "worktree_sha256": "3025ef2e274d0373168eea28a25bef6bd1a86a19e887d76ee51c6804d51698c2",
+      "head_blob_sha256": ""
+    },
+    {
+      "path": "Docs/Phase42/P42.0_Reflection_Binding_Generator_Architecture.md",
+      "status": " M",
+      "worktree_sha256": "569cf61960108edd6a4865da796ddf465b2ab6e6cf440dc2ae280b84f94d6655",
+      "head_blob_sha256": "5881954e78c9759dafb336484adf7dcd9d064122599e9b93337c69067b08c1cf"
+    },
+    {
+      "path": "Source/AvidScriptRuntime/Public/AvidScriptWasmReloadTypes.h",
+      "status": " M",
+      "worktree_sha256": "384b6e093dc8568e666dc0335b575383e473ecf00448c1d5c461a852b38edfed",
+      "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
+    }
+  ],
+  "next_action": "batch-complete -Phase 60 -BatchId P60.A -Evidence <text>",
+  "revision": 1,
+  "updated_at_utc": "2026-08-31T07:46:07.8607037+00:00"
+}
