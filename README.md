@@ -10,8 +10,8 @@
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 Development" src="https://img.shields.io/badge/Platform-Win64-0078D4?logo=windows&logoColor=white">
-  <img alt="Phase 59 D7" src="https://img.shields.io/badge/Status-Phase%2059%20D7-159957">
-  <img alt="Automation 376/376" src="https://img.shields.io/badge/Automation-376%2F376-26A269">
+  <img alt="Phase 59 Gate" src="https://img.shields.io/badge/Status-Phase%2059%20Gate-159957">
+  <img alt="GeneratedTypes 7/7" src="https://img.shields.io/badge/GeneratedTypes-7%2F7-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
 

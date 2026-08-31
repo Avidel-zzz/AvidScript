@@ -1,6 +1,6 @@
 # Phase 59 收尾记录
 
-> 当前状态：实现中
+> 当前状态：P59.A-D 实现完成，集中 Gate 进行中
 
 ## 目标
 
@@ -79,6 +79,7 @@
 - `P59.D7`：C# Generated Type 已自动发布无 `Saved/` 依赖的内容寻址 Cook bundle；UBT 只把
   `current.json` 与当前六个文件登记为 NonUFS RuntimeDependency，非 Editor 模块只读取 Content pointer。
   真实 isolated Runtime load 与 GeneratedTypes Automation `7/7` 通过；完整 BuildCookRun/Shipping 留给 P62。
+- `P59.D`：D1-D7 实现批次已由状态机标记完成；当前只执行阶段集中 Gate，不再扩展产品范围。
 
 ## 待完成
 
