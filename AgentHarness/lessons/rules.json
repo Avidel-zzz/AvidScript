@@ -29,7 +29,7 @@
       "summary": "一个 shell 调用只承担一个逻辑动作或证据域。",
       "prevention": "调度前拒绝用分号、&& 或 || 串联独立动作；多文件读取使用并行工具或逐项调用。",
       "source": "legacy:1672",
-      "last_observed": "2026-08-31 P59.D5b (用分号串联两个源码读取，并再次串联 git ls-files 与 status)"
+      "last_observed": "2026-08-31 P60.A2 (状态提交前误把 git add、diff check 与 scope readback 用分号串联；后续恢复为一条命令一个证据域)"
     },
     {
       "id": "dotnet-executable-tests-use-run",
@@ -325,6 +325,22 @@
       "prevention": "新增 helper 后，替换调用点必须带函数名或上下文锚点；补丁完成立即用 rg 列出全部调用和分支，并检查新 helper 本体，再进入构建。",
       "source": "observed:2026-08-31-P60.A1",
       "last_observed": "2026-08-31 P60.A1 宽泛替换一度把 SetObjectValue 的 object 分支改成递归调用；静态分支审计在构建前发现并修正"
+    },
+    {
+      "id": "powershell-quote-git-revisions-with-braces",
+      "tags": ["powershell", "git", "evidence"],
+      "summary": "PowerShell 会把未引用的 Git revision 花括号解释为自身语法。",
+      "prevention": "调用 git rev-parse 等命令时，把 HEAD^{tree}、HEAD^{commit} 一类 revision 写成单引号参数；同时分别核对 commit 与 tree 输出。",
+      "source": "observed:2026-08-31-P60.A2",
+      "last_observed": "2026-08-31 P60.A2 首次未引用 HEAD^{tree}，PowerShell 改写参数并导致 git rev-parse 失败；加单引号后正确取得 tree SHA"
+    },
+    {
+      "id": "phase-mutations-use-phase-workflow-entry",
+      "tags": ["phase", "harness", "workflow", "cli"],
+      "summary": "Harness bootstrap 输出的 next_action 是 PhaseWorkflow 子命令，不是 Harness 自身的 Command。",
+      "prevention": "bootstrap/context/verify/lesson-query/audit 调用 InvokeAgentHarness.ps1；batch-complete、freeze、gate 等状态 mutation 调用 InvokePhaseWorkflow.ps1，并在执行前核对入口 ValidateSet。",
+      "source": "observed:2026-08-31-P60.A2",
+      "last_observed": "2026-08-31 P60.A2 首次把 batch-complete 传给只支持五个只读命令的 Harness，ValidateSet 拒绝；改用 InvokePhaseWorkflow.ps1 后 revision 2 成功"
     }
   ]
 }
