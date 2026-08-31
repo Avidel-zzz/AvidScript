@@ -769,16 +769,28 @@ foreach ($RequiredScriptTypeBuildContract in @(
     'Resolve-AvidScriptCSharpBindingPackage',
     'InvokeCSharpFrontend.ps1',
     'InvokeCSharpSemantic.ps1',
-    'schema_version -ne 19',
-    'semantic_version -cne "1.21"',
-    'schema_version -ne 5',
-    'generator_version -cne "1.7"',
+    'schema_version -ne 20',
+    'semantic_version -cne "1.22"',
+    'schema_version -ne 6',
+    'generator_version -cne "1.8"',
     'semantic_artifact_sha256',
     'Get-AvidScriptGeneratedTypeReloadBaseline',
     'New-AvidScriptGeneratedTypeReloadMetadata',
     'Get-FileHash')) {
     if (-not $CSharpScriptTypeBuildSource.Contains($RequiredScriptTypeBuildContract)) {
         Add-Violation "C# script type build pipeline is missing $RequiredScriptTypeBuildContract"
+    }
+}
+foreach ($RequiredGeneratedFunctionDefaultContract in @(
+    'SemanticUeFunctionParameterDefault',
+    'HasExplicitDefaultValue',
+    'ParameterDefaults',
+    'CPP_Default_')) {
+    if (-not $SemanticUeTypeProjectorSource.Contains($RequiredGeneratedFunctionDefaultContract) -and
+        -not $SemanticUeTypeValidatorSource.Contains($RequiredGeneratedFunctionDefaultContract) -and
+        -not $UeTypeManifestSource.Contains($RequiredGeneratedFunctionDefaultContract) -and
+        -not $UeTypeShellRendererSource.Contains($RequiredGeneratedFunctionDefaultContract)) {
+        Add-Violation "script UFunction default contract is missing $RequiredGeneratedFunctionDefaultContract"
     }
 }
 foreach ($RequiredGeneratedTypeReloadClassificationContract in @(
@@ -3586,8 +3598,8 @@ foreach ($RequiredReachabilityContract in @(
     }
 }
 foreach ($RequiredSemanticContract in @(
-    'CurrentSchemaVersion = 19',
-    'CurrentSemanticVersion = "1.21"'
+    'CurrentSchemaVersion = 20',
+    'CurrentSemanticVersion = "1.22"'
 )) {
     if (-not $SemanticContractSource.Contains($RequiredSemanticContract)) {
         Add-Violation "C# Semantic contract is missing current version token $RequiredSemanticContract"

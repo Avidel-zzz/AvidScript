@@ -116,6 +116,7 @@ internal static class SemanticUeTypeProjector
                 context,
                 type,
                 symbols,
+                typeRegistry,
                 diagnostics);
             HashSet<string> reflectedMemberNames = new(StringComparer.OrdinalIgnoreCase);
             if (properties.Select(property => property.Name)
@@ -405,6 +406,7 @@ internal static class SemanticUeTypeProjector
         SemanticCompilationContext context,
         INamedTypeSymbol owner,
         UeTypeSymbols symbols,
+        SemanticTypeRegistry typeRegistry,
         ICollection<SemanticDiagnostic> diagnostics)
     {
         List<SemanticUeFunctionDeclaration> functions = new();
@@ -471,15 +473,128 @@ internal static class SemanticUeTypeProjector
             AddFlag(flags, unreliable, "unreliable");
             AddFlag(flags, isLifecycleOverride, "lifecycle");
             AddFlag(flags, method.IsOverride, "override");
+            IReadOnlyList<SemanticUeFunctionParameterDefault> parameterDefaults =
+                ProjectFunctionParameterDefaults(context, method, typeRegistry, diagnostics);
+            if (method.IsOverride && parameterDefaults.Count > 0)
+            {
+                diagnostics.Add(CreateSymbolDiagnostic(
+                    "ASUE1206",
+                    "UFunction overrides inherit native default metadata and cannot redeclare optional parameter defaults.",
+                    context,
+                    method));
+                parameterDefaults = Array.Empty<SemanticUeFunctionParameterDefault>();
+            }
             functions.Add(new SemanticUeFunctionDeclaration(
                 SemanticSymbolProjector.GetSymbolId(method),
                 method.Name,
                 flags,
                 GetNamedString(attribute, "Category"),
+                parameterDefaults,
                 GetSymbolSpan(context, method)));
         }
 
         return functions;
+    }
+
+    private static IReadOnlyList<SemanticUeFunctionParameterDefault> ProjectFunctionParameterDefaults(
+        SemanticCompilationContext context,
+        IMethodSymbol method,
+        SemanticTypeRegistry typeRegistry,
+        ICollection<SemanticDiagnostic> diagnostics)
+    {
+        List<SemanticUeFunctionParameterDefault> defaults = new();
+        foreach (IParameterSymbol parameter in method.Parameters.OrderBy(parameter => parameter.Ordinal))
+        {
+            if (!parameter.HasExplicitDefaultValue)
+            {
+                continue;
+            }
+            if (parameter.RefKind != RefKind.None
+                || !TryFormatFunctionParameterDefault(
+                    context,
+                    parameter,
+                    typeRegistry,
+                    out SemanticUeFunctionParameterDefault? parameterDefault))
+            {
+                diagnostics.Add(CreateSymbolDiagnostic(
+                    "ASUE1205",
+                    "UFunction optional parameters must be trailing bool, integer, finite floating-point, named enum, or string constants.",
+                    context,
+                    parameter));
+                continue;
+            }
+            defaults.Add(parameterDefault!);
+        }
+
+        if (defaults.Count > 0)
+        {
+            int firstDefaultOrdinal = defaults[0].Ordinal;
+            bool isTrailingRange = defaults.Select(value => value.Ordinal).SequenceEqual(
+                Enumerable.Range(firstDefaultOrdinal, method.Parameters.Length - firstDefaultOrdinal));
+            if (!isTrailingRange)
+            {
+                diagnostics.Add(CreateSymbolDiagnostic(
+                    "ASUE1205",
+                    "UFunction optional parameter defaults must form one trailing contiguous range.",
+                    context,
+                    method));
+                return Array.Empty<SemanticUeFunctionParameterDefault>();
+            }
+        }
+        return defaults;
+    }
+
+    private static bool TryFormatFunctionParameterDefault(
+        SemanticCompilationContext context,
+        IParameterSymbol parameter,
+        SemanticTypeRegistry typeRegistry,
+        out SemanticUeFunctionParameterDefault? parameterDefault)
+    {
+        parameterDefault = null;
+        string typeId = typeRegistry.Register(parameter.Type);
+        if (parameter.Type.TypeKind == TypeKind.Enum)
+        {
+            ExpressionSyntax? expression = parameter.DeclaringSyntaxReferences
+                .Where(reference => reference.SyntaxTree == context.PrimaryUnit.SyntaxTree)
+                .Select(reference => reference.GetSyntax())
+                .OfType<ParameterSyntax>()
+                .Select(syntax => syntax.Default?.Value)
+                .FirstOrDefault(value => value is not null);
+            if (expression is null)
+            {
+                return false;
+            }
+            SemanticModel semanticModel = context.Compilation.GetSemanticModel(expression.SyntaxTree);
+            if (semanticModel.GetSymbolInfo(expression).Symbol is not IFieldSymbol enumMember
+                || !enumMember.HasConstantValue
+                || !SymbolEqualityComparer.Default.Equals(enumMember.ContainingType, parameter.Type))
+            {
+                return false;
+            }
+            parameterDefault = new SemanticUeFunctionParameterDefault(
+                parameter.Ordinal,
+                parameter.Name,
+                typeId,
+                "enum",
+                enumMember.Name);
+            return true;
+        }
+
+        if (!TryFormatInitializer(
+            parameter.Type,
+            parameter.ExplicitDefaultValue,
+            out SemanticUePropertyInitializer? initializer)
+            || initializer is null)
+        {
+            return false;
+        }
+        parameterDefault = new SemanticUeFunctionParameterDefault(
+            parameter.Ordinal,
+            parameter.Name,
+            typeId,
+            initializer.Kind,
+            initializer.CanonicalValue);
+        return true;
     }
 
     private static bool IsLifecycleOverride(IMethodSymbol method, UeTypeSymbols symbols)

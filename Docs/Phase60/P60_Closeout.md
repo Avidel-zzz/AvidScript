@@ -13,10 +13,12 @@
 - 冻结四批次实施边界，禁止逐 API wrapper 和第二套 scheduler。
 - `P60.A1` 完成 Interface 函数、参数、返回值和属性的生成式 C# + Runtime 闭环，支持原生与
   Blueprint-only 实现；UE5.8 no-clean 构建和两条聚焦 Automation 均通过。
+- `P60.A2` 完成脚本 UFUNCTION 默认参数：C# 可选参数被冻结进 semantic schema `20/1.22`，
+  generator manifest `6/1.8` 发布真实 `CPP_Default_*`，并由生成式 Automation 从 `UFunction`
+  回读验证；详见 [P60.A2](P60.A2_Script_UFunction_Defaults.md)。
 
 ## 待完成
 
-- `P60.A2` 脚本 UFUNCTION 默认参数；
 - `P60.B` 完整 Delegate；
 - `P60.C` Blueprint 函数与通用异步；
 - `P60.D` 集成、性能与集中 Gate。

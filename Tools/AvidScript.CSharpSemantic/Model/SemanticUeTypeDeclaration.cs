@@ -33,7 +33,15 @@ public sealed record SemanticUeFunctionDeclaration(
     [property: JsonPropertyOrder(1)] string Name,
     [property: JsonPropertyOrder(2)] IReadOnlyList<string> Flags,
     [property: JsonPropertyOrder(3)] string Category,
-    [property: JsonPropertyOrder(4)] SemanticSpan Span);
+    [property: JsonPropertyOrder(4)] IReadOnlyList<SemanticUeFunctionParameterDefault> ParameterDefaults,
+    [property: JsonPropertyOrder(5)] SemanticSpan Span);
+
+public sealed record SemanticUeFunctionParameterDefault(
+    [property: JsonPropertyOrder(0)] int Ordinal,
+    [property: JsonPropertyOrder(1)] string Name,
+    [property: JsonPropertyOrder(2)] string TypeId,
+    [property: JsonPropertyOrder(3)] string Kind,
+    [property: JsonPropertyOrder(4)] string CanonicalValue);
 
 internal sealed record SemanticUeTypeProjection(
     IReadOnlyList<SemanticUeTypeDeclaration> Declarations,

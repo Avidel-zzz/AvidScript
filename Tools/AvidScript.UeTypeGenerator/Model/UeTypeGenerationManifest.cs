@@ -57,7 +57,8 @@ public sealed record UeFunctionParameterEntry(
     [property: JsonPropertyOrder(0)] int Ordinal,
     [property: JsonPropertyOrder(1)] string Name,
     [property: JsonPropertyOrder(2)] string CppType,
-    [property: JsonPropertyOrder(3)] string RefKind);
+    [property: JsonPropertyOrder(3)] string RefKind,
+    [property: JsonPropertyOrder(4)] SemanticUeFunctionParameterDefault? Default);
 
 public sealed record UeGeneratedFileEntry(
     [property: JsonPropertyOrder(0)] string RelativePath,

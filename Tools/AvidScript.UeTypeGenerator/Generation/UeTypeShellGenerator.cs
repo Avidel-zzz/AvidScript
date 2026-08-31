@@ -9,8 +9,8 @@ namespace AvidScript.UeTypeGenerator;
 
 public static class UeTypeShellGenerator
 {
-    public const int ManifestSchemaVersion = 5;
-    public const string GeneratorVersion = "1.7";
+    public const int ManifestSchemaVersion = 6;
+    public const string GeneratorVersion = "1.8";
     public const string ManifestPath = "AvidScriptGeneratedManifest.json";
 
     public static UeTypeGenerationResult Generate(

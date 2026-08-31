@@ -13,9 +13,10 @@ internal static class UeTypeGeneratorTests
     {
         GenerationIsByteDeterministicAndTopological();
         LifecycleKindsMapToNativeShells();
+        FunctionDefaultsEnterMetadataManifestAndFingerprint();
         UnsupportedTypesFailClosedBeforePublication();
         AtomicPublisherPreservesCacheHits();
-        return 4;
+        return 5;
     }
 
     private static void GenerationIsByteDeterministicAndTopological()
@@ -75,8 +76,8 @@ internal static class UeTypeGeneratorTests
         UeFunctionManifestEntry derivedActivate = first.Manifest.Types
             .Single(type => type.EngineName == "ExplosiveProjectile")
             .Functions.Single(function => function.Name == "Activate");
-        Assert(first.Manifest.SchemaVersion == 5
-            && first.Manifest.GeneratorVersion == "1.7"
+        Assert(first.Manifest.SchemaVersion == 6
+            && first.Manifest.GeneratorVersion == "1.8"
             && first.Manifest.Types.All(type =>
                 type.ClassPath == $"/Script/AvidScriptGenerated.{type.EngineName}")
             && first.Manifest.Types.SelectMany(type => type.Functions).All(function =>
@@ -90,7 +91,7 @@ internal static class UeTypeGeneratorTests
                 == new SemanticUePropertyInitializer("float32", "25")
             && derivedActivate.Flags.Contains("override")
             && derivedActivate.Flags.Contains("blueprint_native_event"),
-            "manifest schema 5 should publish explicit class paths, runtime identities and initializers");
+            "manifest schema 6 should publish explicit class paths, runtime identities, initializers and defaults");
 
         string header = Text(first, "Public/AvidScriptGeneratedTypes.h");
         string sourceText = Text(first, "Private/AvidScriptGeneratedTypes.cpp");
@@ -195,6 +196,59 @@ internal static class UeTypeGeneratorTests
             && deinitializeDispatch < deinitializeHost
             && deinitializeHost < deinitializeSuper,
             "native lifecycle should activate before canonical dispatch and tear down after it");
+    }
+
+    private static void FunctionDefaultsEnterMetadataManifestAndFingerprint()
+    {
+        const string source = """
+            using AvidScript;
+
+            [UClass]
+            public partial class DefaultProjectile : AvidActor
+            {
+                [UFunction(BlueprintCallable = true, Category = "Projectile")]
+                public void Launch(float speed = 1200.5f, bool homing = false,
+                    string label = "Avid", ELaunchMode mode = ELaunchMode.Homing) { }
+            }
+            """;
+        const string changedSource = """
+            using AvidScript;
+
+            [UClass]
+            public partial class DefaultProjectile : AvidActor
+            {
+                [UFunction(BlueprintCallable = true, Category = "Projectile")]
+                public void Launch(float speed = 2400.0f, bool homing = false,
+                    string label = "Avid", ELaunchMode mode = ELaunchMode.Homing) { }
+            }
+            """;
+        UeTypeGenerationResult result = UeTypeShellGenerator.Generate(
+            Analyze(source, "Scripts/DefaultProjectile.cs"),
+            "AvidScriptGenerated",
+            "5.8");
+        UeTypeGenerationResult changed = UeTypeShellGenerator.Generate(
+            Analyze(changedSource, "Scripts/DefaultProjectile.cs"),
+            "AvidScriptGenerated",
+            "5.8");
+        UeFunctionManifestEntry function = result.Manifest.Types.Single().Functions
+            .Single(value => value.Name == "Launch");
+        string header = Text(result, "Public/AvidScriptGeneratedTypes.h");
+
+        Assert(result.Manifest.SchemaVersion == 6 && result.Manifest.GeneratorVersion == "1.8",
+            "UFunction default metadata should activate generator manifest schema 6 / version 1.8");
+        Assert(function.Parameters.Select(parameter => parameter.Default?.CanonicalValue)
+            .SequenceEqual(new[] { "1200.5", "false", "Avid", "Homing" }),
+            "manifest parameters should retain canonical defaults in ordinal order");
+        Assert(header.Contains(
+            "UFUNCTION(BlueprintCallable, Category=\"Projectile\", meta=(CPP_Default_speed=\"1200.5\", CPP_Default_homing=\"false\", CPP_Default_label=\"Avid\", CPP_Default_mode=\"Homing\"))",
+            StringComparison.Ordinal),
+            "generated UHT shell should publish one deterministic CPP_Default metadata block");
+        Assert(Text(result, "Private/AvidScriptGeneratedTypes.cpp").Contains(
+            "GetMetaData(TEXT(\"CPP_Default_speed\"))",
+            StringComparison.Ordinal),
+            "generated reflection automation should read default metadata back from the real UFunction");
+        Assert(result.Manifest.GenerationKeySha256 != changed.Manifest.GenerationKeySha256,
+            "changing only a UFunction default should invalidate the generation key");
     }
 
     private static void UnsupportedTypesFailClosedBeforePublication()
@@ -324,6 +378,7 @@ internal static class UeTypeGeneratorTests
             public bool Unreliable { get; set; }
             public string Category { get; set; } = "";
         }
+        public enum ELaunchMode { Direct = 1, Homing = 2 }
         public abstract class AvidActor
         {
             protected virtual void BeginPlay() { }

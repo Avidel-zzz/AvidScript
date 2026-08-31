@@ -124,12 +124,15 @@ internal static class UeTypeGenerationPlanner
         {
             throw new InvalidOperationException($"UFunction '{function.MethodSymbolId}' has invalid parameters.");
         }
+        IReadOnlyDictionary<int, SemanticUeFunctionParameterDefault> defaults = function.ParameterDefaults
+            .ToDictionary(value => value.Ordinal);
         UeFunctionParameterEntry[] parameters = callable.Parameters.Select(parameter =>
             new UeFunctionParameterEntry(
                 parameter.Ordinal,
                 parameter.Name,
                 typeMapper.MapCallable(parameter.TypeId, parameter.RefKind),
-                parameter.RefKind)).ToArray();
+                parameter.RefKind,
+                defaults.GetValueOrDefault(parameter.Ordinal))).ToArray();
         return new UeFunctionManifestEntry(
             memberOrdinal,
             function.MethodSymbolId,

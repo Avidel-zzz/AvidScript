@@ -17,7 +17,8 @@ internal static class SemanticUeTypeDeclarationTests
         SerializationIsDeterministic();
         SharedContractValidatorRejectsForgedIdentifiers();
         SharedSerializerReadsStrictArtifacts();
-        return 9;
+        FunctionDefaultsAreCanonicalAndFailClosed();
+        return 10;
     }
 
     private static void ActorDeclarationsPreserveStableReflectionContract()
@@ -65,8 +66,8 @@ internal static class SemanticUeTypeDeclarationTests
         SemanticUeTypeDeclaration elite = FindType(document, "global::Game.EliteHero");
 
         Assert(document.Succeeded, "valid script-defined Actor inheritance should analyze successfully");
-        Assert(document.SchemaVersion == 19 && document.SemanticVersion == "1.21",
-            "UE type declarations should publish schema 19 / semantic 1.21");
+        Assert(document.SchemaVersion == 20 && document.SemanticVersion == "1.22",
+            "UE type declarations should publish schema 20 / semantic 1.22");
         Assert(hero.EngineName == "Hero" && hero.Kind == "actor",
             "Actor declarations should preserve the stable UE reflection name and actor kind");
         Assert(hero.Flags.SequenceEqual(new[] { "blueprintable", "blueprint_type" }),
@@ -345,6 +346,59 @@ internal static class SemanticUeTypeDeclarationTests
             rejected = true;
         }
         Assert(rejected, "the shared serializer should reject malformed semantic artifacts");
+    }
+
+    private static void FunctionDefaultsAreCanonicalAndFailClosed()
+    {
+        const string validSource = """
+            using AvidScript;
+            namespace Game;
+
+            public enum LaunchMode { Direct = 1, Homing = 2 }
+
+            [UClass]
+            public partial class DefaultActor : AvidActor
+            {
+                [UFunction(BlueprintCallable = true)]
+                public void Launch(bool enabled = true, int count = -3, float speed = 1200.5f,
+                    double precision = 0.25, string label = "Avid", LaunchMode mode = LaunchMode.Homing) { }
+            }
+            """;
+        SemanticDocument document = Analyze(validSource, "Scripts/DefaultActor.cs");
+        SemanticUeFunctionDeclaration function = FindType(document, "global::Game.DefaultActor")
+            .Functions.Single();
+
+        Assert(document.Succeeded, "supported UFunction defaults should analyze successfully");
+        Assert(function.ParameterDefaults.SequenceEqual(new[]
+        {
+            new SemanticUeFunctionParameterDefault(0, "enabled", "type:bool", "bool", "true"),
+            new SemanticUeFunctionParameterDefault(1, "count", "type:int32", "int32", "-3"),
+            new SemanticUeFunctionParameterDefault(2, "speed", "type:float32", "float32", "1200.5"),
+            new SemanticUeFunctionParameterDefault(3, "precision", "type:float64", "float64", "0.25"),
+            new SemanticUeFunctionParameterDefault(4, "label", "type:string", "string", "Avid"),
+            new SemanticUeFunctionParameterDefault(5, "mode", "type:global::Game.LaunchMode", "enum", "Homing"),
+        }), "UFunction defaults should preserve ordinal, type, kind and canonical metadata value");
+
+        const string invalidSource = """
+            using AvidScript;
+            namespace Game;
+
+            public enum LaunchMode { Direct = 1 }
+
+            [UClass]
+            public partial class InvalidDefaultActor : AvidActor
+            {
+                [UFunction]
+                public void DecimalDefault(decimal amount = 1.0m) { }
+
+                [UFunction]
+                public void UnnamedEnumDefault(LaunchMode mode = (LaunchMode)7) { }
+            }
+            """;
+        SemanticDocument invalid = Analyze(invalidSource, "Scripts/InvalidDefaultActor.cs");
+        Assert(!invalid.Succeeded
+            && invalid.Diagnostics.Count(diagnostic => diagnostic.Code == "ASUE1205") == 2,
+            "unsupported or unnamed UFunction defaults should fail closed with ASUE1205");
     }
 
     private static SemanticDocument Analyze(string source, string sourceId)

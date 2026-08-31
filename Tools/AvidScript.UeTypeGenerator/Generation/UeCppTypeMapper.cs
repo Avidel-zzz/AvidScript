@@ -105,6 +105,15 @@ internal sealed class UeCppTypeMapper
         {
             return propertyContext ? $"TObjectPtr<{objectType}>" : objectType + "*";
         }
+        const string FacadePrefix = "global::AvidScript.";
+        if (type.Kind == "enum" && type.CanonicalName.StartsWith(FacadePrefix, StringComparison.Ordinal))
+        {
+            string enumName = type.CanonicalName[FacadePrefix.Length..];
+            if (IsIdentifier(enumName))
+            {
+                return enumName;
+            }
+        }
         if (type.Kind == "array"
             && shapes.TryGetValue(typeId, out SemanticTypeShape? shape)
             && !string.IsNullOrWhiteSpace(shape.ElementTypeId))
@@ -119,5 +128,13 @@ internal sealed class UeCppTypeMapper
         }
         throw new InvalidOperationException(
             $"Semantic type '{type.CanonicalName}' has no deterministic UE shell mapping in P59.B.");
+    }
+
+    private static bool IsIdentifier(string value)
+    {
+        return value.Length > 0
+            && (value[0] == '_' || value[0] is >= 'A' and <= 'Z' or >= 'a' and <= 'z')
+            && value.Skip(1).All(character =>
+                character == '_' || character is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= '0' and <= '9');
     }
 }

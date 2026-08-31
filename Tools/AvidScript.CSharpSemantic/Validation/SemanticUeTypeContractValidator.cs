@@ -129,6 +129,7 @@ public static class SemanticUeTypeContractValidator
         }
         if (!ValidateFunctions(
             declaration,
+            types,
             symbols,
             callables,
             reflectedMemberNames.ToHashSet(StringComparer.OrdinalIgnoreCase),
@@ -223,6 +224,7 @@ public static class SemanticUeTypeContractValidator
 
     private static bool ValidateFunctions(
         SemanticUeTypeDeclaration declaration,
+        IReadOnlyDictionary<string, SemanticType> types,
         IReadOnlyDictionary<string, SemanticSymbol> symbols,
         IReadOnlyDictionary<string, SemanticCallable> callables,
         IReadOnlySet<string> reflectedMemberNames,
@@ -241,6 +243,7 @@ public static class SemanticUeTypeContractValidator
             if (!IsIdentifier(function.Name)
                 || function.Flags is null
                 || function.Category is null
+                || function.ParameterDefaults is null
                 || function.Span is null
                 || !ValidateFlags(function.Flags, FunctionFlags)
                 || !ValidateFunctionFlags(function.Flags)
@@ -254,9 +257,67 @@ public static class SemanticUeTypeContractValidator
                 || callable.ContainingTypeId != declaration.TypeId
                 || callable.Parameters is null
                 || !UniqueUeNames(callable.Parameters.Select(parameter => parameter.Name))
+                || !ValidateFunctionDefaults(function, callable, types)
                 || callable.Parameters.Any(parameter => reflectedMemberNames.Contains(parameter.Name)))
             {
                 return Fail($"UE function '{function.MethodSymbolId}' is malformed.", out error);
+            }
+        }
+        return true;
+    }
+
+    private static bool ValidateFunctionDefaults(
+        SemanticUeFunctionDeclaration function,
+        SemanticCallable callable,
+        IReadOnlyDictionary<string, SemanticType> types)
+    {
+        IReadOnlyList<SemanticUeFunctionParameterDefault> defaults = function.ParameterDefaults;
+        if (defaults.Any(value => value is null)
+            || defaults.Select(value => value.Ordinal).Distinct().Count() != defaults.Count
+            || !Unique(defaults.Select(value => value.Name))
+            || !defaults.Select(value => value.Ordinal).SequenceEqual(
+                defaults.Select(value => value.Ordinal).OrderBy(value => value))
+            || function.Flags.Contains("override") && defaults.Count > 0)
+        {
+            return false;
+        }
+        if (defaults.Count == 0)
+        {
+            return true;
+        }
+
+        int firstDefaultOrdinal = defaults[0].Ordinal;
+        if (firstDefaultOrdinal < 0
+            || firstDefaultOrdinal > callable.Parameters.Count
+            || !defaults.Select(value => value.Ordinal).SequenceEqual(
+                Enumerable.Range(firstDefaultOrdinal, callable.Parameters.Count - firstDefaultOrdinal)))
+        {
+            return false;
+        }
+        foreach (SemanticUeFunctionParameterDefault value in defaults)
+        {
+            SemanticCallableParameter parameter = callable.Parameters[value.Ordinal];
+            if (parameter.Ordinal != value.Ordinal
+                || parameter.Name != value.Name
+                || parameter.TypeId != value.TypeId
+                || parameter.RefKind != "none"
+                || !types.TryGetValue(value.TypeId, out SemanticType? type)
+                || value.CanonicalValue is null)
+            {
+                return false;
+            }
+            if (value.Kind == "enum")
+            {
+                if (type.Kind != "enum" || !IsIdentifier(value.CanonicalValue))
+                {
+                    return false;
+                }
+            }
+            else if (!ValidateInitializer(
+                new SemanticUePropertyInitializer(value.Kind, value.CanonicalValue),
+                type))
+            {
+                return false;
             }
         }
         return true;

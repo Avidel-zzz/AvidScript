@@ -215,10 +215,27 @@ internal static class UhtShellRenderer
             foreach (UeFunctionManifestEntry function in type.Functions.Where(function =>
                 !function.Flags.Contains("lifecycle")))
             {
+                string functionVariable = type.CppName + "Function" + function.MemberOrdinal;
+                output.Append("    UFunction* ").Append(functionVariable).Append(" = ")
+                    .Append(type.CppName).Append("Class->FindFunctionByName(TEXT(\"")
+                    .Append(Escape(function.Name)).AppendLine("\"));");
                 output.Append("    TestNotNull(TEXT(\"").Append(label).Append('.')
                     .Append(Escape(function.Name)).Append(" function exists\"), ")
-                    .Append(type.CppName).Append("Class->FindFunctionByName(TEXT(\"")
-                    .Append(Escape(function.Name)).AppendLine("\")));");
+                    .Append(functionVariable).AppendLine(");");
+                foreach (SemanticUeFunctionParameterDefault parameterDefault in function.Parameters
+                    .Where(parameter => parameter.Default is not null)
+                    .Select(parameter => parameter.Default!))
+                {
+                    output.Append("    if (").Append(functionVariable).AppendLine(")");
+                    output.AppendLine("    {");
+                    output.Append("        TestEqual(TEXT(\"").Append(label).Append('.')
+                        .Append(Escape(function.Name)).Append('.')
+                        .Append(Escape(parameterDefault.Name)).Append(" default metadata\"), ")
+                        .Append(functionVariable).Append("->GetMetaData(TEXT(\"CPP_Default_")
+                        .Append(Escape(parameterDefault.Name)).Append("\")), FString(TEXT(\"")
+                        .Append(Escape(parameterDefault.CanonicalValue)).AppendLine("\")));");
+                    output.AppendLine("    }");
+                }
             }
             output.AppendLine();
         }
@@ -568,6 +585,17 @@ internal static class UhtShellRenderer
         if (function.Category.Length > 0)
         {
             specifiers.Add("Category=\"" + Escape(function.Category) + "\"");
+        }
+        SemanticUeFunctionParameterDefault[] defaults = function.Parameters
+            .Where(parameter => parameter.Default is not null)
+            .Select(parameter => parameter.Default!)
+            .OrderBy(value => value.Ordinal)
+            .ToArray();
+        if (defaults.Length > 0)
+        {
+            string metadata = string.Join(", ", defaults.Select(value =>
+                "CPP_Default_" + value.Name + "=\"" + Escape(value.CanonicalValue) + "\""));
+            specifiers.Add("meta=(" + metadata + ")");
         }
         return string.Join(", ", specifiers);
     }

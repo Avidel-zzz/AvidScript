@@ -17,7 +17,7 @@
 
 将 C# 编译为轻量 WASM Guest，通过生成式 Binding 接入 `BeginPlay`、`Tick`、
 Timer、受控 `async/await`、UE latent UFUNCTION、异步对象加载、Overlap、动态多播事件、
-普通 `UFUNCTION`、生成式 RPC、普通与 replicated `UPROPERTY`。C# 也可声明可供 Blueprint
+普通 `UFUNCTION`、脚本 UFUNCTION 默认参数、生成式 RPC、普通与 replicated `UPROPERTY`。C# 也可声明可供 Blueprint
 继承的 Actor、Component 与 Subsystem，并在不改变反射结构时自动热重载 WASM 方法体。
 
 </div>
@@ -33,7 +33,7 @@ Timer、受控 `async/await`、UE latent UFUNCTION、异步对象加载、Overla
 | --- | --- |
 | C# 游戏脚本 | C# 编译为 WASM，可接入 `BeginPlay`、`Tick`、`EndPlay`、Timer、事件与受控 `async/await` |
 | UE API | Reflection/Profile 自动生成普通 `UFUNCTION`、`UPROPERTY`、UE Interface 和项目自定义 API；支持常用对象、值类型、固定 `USTRUCT`、字符串与一维数组 |
-| C# 定义 UE 类型 | 可声明 Actor、Component、World/GameInstance Subsystem、函数、属性、继承与 override，并供 Blueprint 继承 |
+| C# 定义 UE 类型 | 可声明 Actor、Component、World/GameInstance Subsystem、函数、属性、继承与 override；可发布 UFUNCTION 默认参数并供 Blueprint 继承 |
 | 网络 | 可声明或调用 Server、Client、NetMulticast RPC，读写 replicated property，并接收 RPC/RepNotify handler |
 | 网络闭环 | Generated Actor 已通过 dedicated server + 2 clients、listen server + 1 remote client 的独立进程验证 |
 | Cook 发布 | 自动生成无 `Saved/` 依赖的内容寻址 bundle；UBT 只暂存当前 pointer 与六个 NonUFS 文件 |
@@ -668,7 +668,7 @@ cmd /c Build\BuildWAMRWin64.cmd
 - 受控 `async/await` 已支持顺序等待、分支/循环/integral 或 enum switch section、一维数组 value foreach 内的直接 await、typed outcome、固定布局 local 与数组引用状态帧、控制转移和宿主 activation 失效抑制；await 仍须是直接语句或单一 local initializer，switch governing value 首批须为 local/parameter 读取，foreach 首批须为同步一维数组与精确元素类型；条件表达式与 header 中的 await、pattern/string switch、`goto case/default`、非数组 enumerator、元素转换、解构、ref/await foreach、string element、`Task` / `ValueTask`、异常传播、`try/finally`、任意 awaiter、async helper 调用链、批量加载和进度/优先级尚未支持；
 - soft object path 尚不会自动加入 Cook 依赖，打包项目必须显式纳入脚本所引用的资产；异步结果当前在 Session teardown 统一释放，尚无细粒度 lease/release；
 - completion-only、静态 Blueprint Function Library latent 已支持首批单 cell value 参数；UE Interface 函数、参数、返回值和属性已支持
-  原生及 Blueprint-only 实现；instance latent、复杂参数/返回类型的通用 completion payload、取消句柄映射和 Blueprint 图中新声明函数尚未完整支持；
+  原生及 Blueprint-only 实现；C# 脚本 UFUNCTION 的 bool、整数、有限浮点、命名 enum 与 string 默认值可发布为真实 `CPP_Default_*` 元数据；instance latent、复杂参数/返回类型的通用 completion payload、取消句柄映射和 Blueprint 图中新声明函数尚未完整支持；
 - C# 已可主动调用满足 D1 合同的 Server、Client 与 NetMulticast UFUNCTION，读取或在 authority 上写入满足 D2 合同的 replicated property，并接收满足 D4 合同的 native/Blueprint-bytecode RPC/RepNotify handler；`replace/before/after`、受支持参数图的重入 FIFO与 D5 dedicated/listen 独立进程多客户端验收已完成，但 return/ref/out/latent handler、Blueprint 图中新声明函数的通用发现、FastArray/custom delta、跨机器/丢包/断线重连、网络预测和回滚尚未支持；
 - `FText` 的本地化 identity/history 语义尚未支持；
 - C# 由 Roslyn semantic/CFG lowering 编译，不提供完整 .NET Runtime；
@@ -680,7 +680,7 @@ cmd /c Build\BuildWAMRWin64.cmd
 
 ## 路线图
 
-1. P60 继续补齐单播/完整多播委托、默认参数、Blueprint 新声明函数与通用异步动作；
+1. P60 继续补齐单播/完整多播委托、Blueprint 新声明函数与通用异步动作；
 2. P61 完成增量编译、源码定位、调用栈、断点、变量查看与 Profiler；
 3. P62-P64 完成 Cook/Shipping、移动端 AOT 与真实小型游戏 Demo 验收。
 
@@ -701,7 +701,8 @@ Actor/Component/Subsystem、UPROPERTY/UFUNCTION、Blueprint 子类与 override�
 
 纯执行层 12-kernel 候选 correctness failure 为 0、fallback 为 false，但 P95 领导力门禁仍未关闭；
 README 中的性能领先结论仅限上表已冻结 workload，不外推为所有代码都领先 V8。
-最新功能报告见 [Phase 59 中文收尾](Docs/Phase59/P59_Closeout.md)，
+Phase 60 已完成 UE Interface 与脚本 UFUNCTION 默认参数两个小节；进展见
+[Phase 60 中文收尾](Docs/Phase60/P60_Closeout.md)，
 最新性能报告见 [P59 Generated Type 四轴矩阵](Docs/Phase59/P59.D8_Generated_Type_Performance_Matrix.md)。
 
 工程规则：

@@ -73,6 +73,14 @@ public partial class Projectile : AvidActor
         return ActivationCount;
     }
 
+    [UFunction(BlueprintCallable = true, Category = "Projectile")]
+    public void ConfigureLaunch(float speed = 1200.0f, bool homing = false, int burstCount = 1)
+    {
+        PrecisionScale = speed;
+        IsActive = homing;
+        ActivationCount += burstCount;
+    }
+
     [UFunction(Server = true, Reliable = true)]
     public void ServerSubmitDamage(float submittedDamage)
     {
