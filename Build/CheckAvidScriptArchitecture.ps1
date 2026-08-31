@@ -3098,9 +3098,12 @@ $ObjectTypePlanResolveSource = Get-SourceSlice `
     'bool FAvidScriptBindingPackage::TryResolveObjectType(' `
     'UClass* FAvidScriptBindingPackage::GetExpectedSelfClass() const' `
     'cached object type plan resolver'
+$ObjectCompatibilitySource = Read-RequiredFile `
+    'Source/AvidScriptBindings/Private/Invocation/AvidScriptBindingObjectCompatibility.h'
 $TypedCastDispatchClosure = $ObjectTypeDispatchSource `
     + "`n" + $ObjectRegistryResolveSource `
-    + "`n" + $ObjectTypePlanResolveSource
+    + "`n" + $ObjectTypePlanResolveSource `
+    + "`n" + $ObjectCompatibilitySource
 foreach ($ForbiddenCheckedCastLookup in @('FindObject', 'LoadObject', 'StaticLoadObject', 'GetPathName')) {
     if ($TypedCastDispatchClosure.Contains($ForbiddenCheckedCastLookup)) {
         Add-Violation "typed cast dispatch/helper closure must use cached plans instead of $ForbiddenCheckedCastLookup"
@@ -3109,7 +3112,7 @@ foreach ($ForbiddenCheckedCastLookup in @('FindObject', 'LoadObject', 'StaticLoa
 foreach ($RequiredGenericDispatchContract in @(
     'UObject* Object = Context.ObjectRegistry->ResolveObject(Handle, ResolveResult, false);',
     'Package.TryResolveObjectType(static_cast<uint32>(Call.Arguments[2]), CachedClass)',
-    'Object->IsA(CachedClass)'
+    'IsObjectCompatibleWithReflectedType('
 )) {
     if (-not $ObjectTypeDispatchSource.Contains($RequiredGenericDispatchContract)) {
         Add-Violation "checked object type dispatch is missing UObject/cached-plan contract $RequiredGenericDispatchContract"
@@ -3588,6 +3591,15 @@ foreach ($RequiredSemanticContract in @(
 )) {
     if (-not $SemanticContractSource.Contains($RequiredSemanticContract)) {
         Add-Violation "C# Semantic contract is missing current version token $RequiredSemanticContract"
+    }
+}
+foreach ($RequiredCompatibilityContract in @(
+    'ExpectedClass->HasAnyClassFlags(CLASS_Interface)',
+    'Object->GetClass()->ImplementsInterface(ExpectedClass)',
+    'Object->IsA(ExpectedClass)'
+)) {
+    if (-not $ObjectCompatibilitySource.Contains($RequiredCompatibilityContract)) {
+        Add-Violation "object compatibility helper is missing class/interface contract $RequiredCompatibilityContract"
     }
 }
 if (-not $SemanticAnalyzerSource.Contains('UeTypeDeclarations = ueTypeProjection.Declarations')) {
@@ -4730,7 +4742,7 @@ if (-not $RuntimeSource.Contains('InvocationContext.HostEffectJournal = HostCont
 }
 $DynamicPrepareIndex = $BindingPreparedInvocation.IndexOf('InvocationContext.HostEffectJournal->PrepareEffect(')
 $ReflectedPropertyPrepareIndex = $BindingPreparedInvocation.IndexOf('->PrepareReflectedProperty(')
-$DynamicProcessEventIndex = $BindingPreparedInvocation.IndexOf('Receiver.ProcessEvent(Program->Function, Frame)')
+$DynamicProcessEventIndex = $BindingPreparedInvocation.IndexOf('Receiver.ProcessEvent(InvocationFunction, Frame)')
 if (-not $BindingPreparedInvocation.Contains('binding_reload_effect_unsupported') -or
     $DynamicPrepareIndex -lt 0 -or
     $ReflectedPropertyPrepareIndex -lt 0 -or
@@ -4738,6 +4750,19 @@ if (-not $BindingPreparedInvocation.Contains('binding_reload_effect_unsupported'
     $DynamicPrepareIndex -ge $DynamicProcessEventIndex -or
     $ReflectedPropertyPrepareIndex -ge $DynamicProcessEventIndex) {
     Add-Violation 'dynamic binding candidate policy must reject unsupported writes and prepare reversible effects before ProcessEvent'
+}
+foreach ($RequiredInterfaceDispatchContract in @(
+    'IsObjectCompatibleWithReflectedType(',
+    '&Receiver',
+    'Program->OwnerClass',
+    'Receiver.FindFunction(Program.Function->GetFName())',
+    'Resolved->IsSignatureCompatibleWith(Program.Function)',
+    'Program.CachedInterfaceReceiverClass = ReceiverClass',
+    'Program.CachedInterfaceFunction = Resolved'
+)) {
+    if (-not $BindingPreparedInvocation.Contains($RequiredInterfaceDispatchContract)) {
+        Add-Violation "prepared interface dispatch is missing contract $RequiredInterfaceDispatchContract"
+    }
 }
 if (-not $VmBackendContractSource.Contains('IAvidScriptVmGuestMemory* GetGuestMemory()') -or
     -not $WamrBackendSource.Contains('IAvidScriptVmGuestMemory* GetGuestMemory() override')) {

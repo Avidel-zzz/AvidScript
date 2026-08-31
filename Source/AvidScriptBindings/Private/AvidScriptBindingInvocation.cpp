@@ -4,6 +4,7 @@
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptHash.h"
 #include "Invocation/AvidScriptBindingCodecProgram.h"
+#include "Invocation/AvidScriptBindingObjectCompatibility.h"
 #include "Invocation/AvidScriptBindingPreparedInvocation.h"
 #include "AvidScriptObjectFactoryBinding.h"
 #include "AvidScriptObjectTypeBinding.h"
@@ -713,16 +714,23 @@ bool ResolveAvidScriptRuntimeKind(
 
 	if (Model.Kind == TEXT("object_handle"))
 	{
-		const FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property);
-		if (ObjectProperty == nullptr
-			|| ObjectProperty->PropertyClass == nullptr
-			|| Model.CanonicalType != TEXT("object:") + ObjectProperty->PropertyClass->GetPathName()
+		const FInterfaceProperty* InterfaceProperty =
+			CastField<FInterfaceProperty>(Property);
+		const FObjectPropertyBase* ObjectProperty =
+			CastField<FObjectPropertyBase>(Property);
+		UClass* ReflectedClass = InterfaceProperty != nullptr
+			? InterfaceProperty->InterfaceClass.Get()
+			: (ObjectProperty != nullptr ? ObjectProperty->PropertyClass.Get() : nullptr);
+		if (ReflectedClass == nullptr
+			|| Model.CanonicalType != TEXT("object:") + ReflectedClass->GetPathName()
 			|| Model.AbiTypes != TArray<FString>({ TEXT("i"), TEXT("i") }))
 		{
 			return false;
 		}
-		OutKind = EAvidScriptRuntimeBindingKind::Object;
-		OutObjectClass = ObjectProperty->PropertyClass;
+		OutKind = InterfaceProperty != nullptr
+			? EAvidScriptRuntimeBindingKind::Interface
+			: EAvidScriptRuntimeBindingKind::Object;
+		OutObjectClass = ReflectedClass;
 		return true;
 	}
 
@@ -821,6 +829,7 @@ int32 GetAvidScriptRuntimeGuestStorageSize(EAvidScriptRuntimeBindingKind Kind)
 	case EAvidScriptRuntimeBindingKind::UInt64:
 	case EAvidScriptRuntimeBindingKind::Double:
 	case EAvidScriptRuntimeBindingKind::Object:
+	case EAvidScriptRuntimeBindingKind::Interface:
 		return 8;
 	case EAvidScriptRuntimeBindingKind::Vector:
 	case EAvidScriptRuntimeBindingKind::Rotator:
@@ -853,6 +862,7 @@ int32 GetAvidScriptRuntimeGuestStorageAlignment(EAvidScriptRuntimeBindingKind Ki
 	case EAvidScriptRuntimeBindingKind::SoftObject:
 	case EAvidScriptRuntimeBindingKind::WeakObject:
 	case EAvidScriptRuntimeBindingKind::Object:
+	case EAvidScriptRuntimeBindingKind::Interface:
 	case EAvidScriptRuntimeBindingKind::Vector:
 	case EAvidScriptRuntimeBindingKind::Rotator:
 	case EAvidScriptRuntimeBindingKind::Transform:
@@ -879,7 +889,8 @@ bool MatchesAvidScriptRuntimeCanonicalLeafStorage(
 		return false;
 	}
 
-	if (Kind == EAvidScriptRuntimeBindingKind::Object)
+	if (Kind == EAvidScriptRuntimeBindingKind::Object
+		|| Kind == EAvidScriptRuntimeBindingKind::Interface)
 	{
 		return ObjectClass != nullptr
 			&& Type.ObjectTypeOrdinal != INDEX_NONE
@@ -1742,6 +1753,7 @@ bool CountAvidScriptPreparedDelegateValueCells(
 	case EAvidScriptRuntimeBindingKind::UInt64:
 	case EAvidScriptRuntimeBindingKind::Double:
 	case EAvidScriptRuntimeBindingKind::Object:
+	case EAvidScriptRuntimeBindingKind::Interface:
 		AddedCells = 2;
 		break;
 	case EAvidScriptRuntimeBindingKind::Vector:
@@ -1851,14 +1863,20 @@ bool EncodeAvidScriptPreparedDelegateValue(
 			->GetPropertyValue(Value);
 		return AppendAvidScriptPreparedDelegateCells(Stored, OutFrame);
 	}
-	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Object)
+	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Object
+		|| Plan.Kind == EAvidScriptRuntimeBindingKind::Interface)
 	{
-		UObject* Object = CastFieldChecked<FObjectPropertyBase>(Plan.Property)
-			->GetObjectPropertyValue(Value);
+		UObject* Object = Plan.Kind == EAvidScriptRuntimeBindingKind::Interface
+			? CastFieldChecked<FInterfaceProperty>(Plan.Property)
+				->GetPropertyValue(Value).GetObject()
+			: CastFieldChecked<FObjectPropertyBase>(Plan.Property)
+				->GetObjectPropertyValue(Value);
 		FAvidScriptObjectHandle Handle;
 		if (Object != nullptr)
 		{
-			if (Plan.ObjectClass == nullptr || !Object->IsA(Plan.ObjectClass))
+			if (!UE::AvidScript::BindingPrivate::IsObjectCompatibleWithReflectedType(
+					Object,
+					Plan.ObjectClass))
 			{
 				OutErrorCategory = TEXT("delegate_event_object_type_mismatch");
 				OutErrorDetails = TEXT("A delegate UObject parameter no longer satisfies its prepared class contract.");
@@ -2388,7 +2406,10 @@ bool DispatchAvidScriptObjectType(
 	}
 
 	OutResult.bSucceeded = true;
-	OutResult.ReturnValue = Object->IsA(CachedClass) ? 1 : 0;
+	OutResult.ReturnValue =
+		UE::AvidScript::BindingPrivate::IsObjectCompatibleWithReflectedType(
+			Object,
+			CachedClass) ? 1 : 0;
 	return true;
 }
 
@@ -5065,7 +5086,10 @@ bool FAvidScriptBindingPackage::InvokePreparedReflectionI32Pair(
 				: EAvidScriptBindingInvocationMode::AdaptivePreparedNative;
 		}
 	}
-	if (!bUseNative && !Receiver.IsA(Binding.ExpectedClass))
+	if (!bUseNative
+		&& !UE::AvidScript::BindingPrivate::IsObjectCompatibleWithReflectedType(
+			&Receiver,
+			Binding.ExpectedClass))
 	{
 		OutErrorCategory = TEXT("binding_prepared_identity_mismatch");
 		OutErrorDetails =

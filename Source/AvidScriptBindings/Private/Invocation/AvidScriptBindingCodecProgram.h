@@ -55,6 +55,7 @@ enum class EValueCodecKind : uint8
 	SoftObject,
 	WeakObject,
 	Object,
+	Interface,
 	Vector,
 	Rotator,
 	Transform,
@@ -150,6 +151,8 @@ struct FInvocationCodecProgram
 		EAvidScriptBindingInvocationKind::ReflectedFunction;
 	UClass* OwnerClass = nullptr;
 	UFunction* Function = nullptr;
+	mutable UClass* CachedInterfaceReceiverClass = nullptr;
+	mutable UFunction* CachedInterfaceFunction = nullptr;
 	FProperty* ReflectedProperty = nullptr;
 	FStructProperty* LatentInfoProperty = nullptr;
 	FObjectPropertyBase* WorldContextProperty = nullptr;

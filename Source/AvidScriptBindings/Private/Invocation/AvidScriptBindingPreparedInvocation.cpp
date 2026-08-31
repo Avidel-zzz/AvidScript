@@ -1,6 +1,7 @@
 #include "Invocation/AvidScriptBindingPreparedInvocation.h"
 
 #include "AvidScriptBindingLatent.h"
+#include "Invocation/AvidScriptBindingObjectCompatibility.h"
 #include "Components/ActorComponent.h"
 #include "Engine/LatentActionManager.h"
 #include "Engine/World.h"
@@ -37,6 +38,38 @@ bool IsReflectedProgram(const FInvocationCodecProgram& Program)
 				== EAvidScriptBindingInvocationKind::ReflectedPropertyRead
 			|| Program.Kind
 				== EAvidScriptBindingInvocationKind::ReflectedPropertyWrite);
+}
+
+UFunction* ResolveInvocationFunction(
+	const FInvocationCodecProgram& Program,
+	UObject& Receiver,
+	FAvidScriptDynamicHostCallResult& OutResult)
+{
+	if (Program.Function == nullptr
+		|| !Program.OwnerClass->HasAnyClassFlags(CLASS_Interface))
+	{
+		return Program.Function;
+	}
+	UClass* ReceiverClass = Receiver.GetClass();
+	if (Program.CachedInterfaceReceiverClass == ReceiverClass
+		&& Program.CachedInterfaceFunction != nullptr)
+	{
+		return Program.CachedInterfaceFunction;
+	}
+	UFunction* Resolved = Receiver.FindFunction(Program.Function->GetFName());
+	if (Resolved == nullptr
+		|| !Resolved->IsSignatureCompatibleWith(Program.Function))
+	{
+		SetDispatchFailure(
+			OutResult,
+			TEXT("binding_interface_implementation_missing"),
+			Program.DebugPath,
+			TEXT("The receiver no longer exposes a signature-compatible interface implementation."));
+		return nullptr;
+	}
+	Program.CachedInterfaceReceiverClass = ReceiverClass;
+	Program.CachedInterfaceFunction = Resolved;
+	return Resolved;
 }
 
 AActor* ResolveNetworkActor(UObject& Receiver)
@@ -284,7 +317,7 @@ bool InvokePreparedDynamicReflection(
 			TEXT("The runtime did not preallocate the prepared program's required invocation scratch size."));
 		return false;
 	}
-	if (!Receiver.IsA(Program->OwnerClass))
+	if (!IsObjectCompatibleWithReflectedType(&Receiver, Program->OwnerClass))
 	{
 		SetDispatchFailure(
 			OutResult,
@@ -590,13 +623,20 @@ bool InvokePreparedDynamicReflection(
 		return true;
 	}
 
-	if (Program->Function == nullptr)
+	UFunction* InvocationFunction = ResolveInvocationFunction(
+		*Program,
+		Receiver,
+		OutResult);
+	if (InvocationFunction == nullptr)
 	{
-		SetDispatchFailure(
-			OutResult,
-			TEXT("binding_prepared_identity_mismatch"),
-			Program->DebugPath,
-			TEXT("The prepared ProcessEvent program has no UFunction."));
+		if (OutResult.Details.IsEmpty())
+		{
+			SetDispatchFailure(
+				OutResult,
+				TEXT("binding_prepared_identity_mismatch"),
+				Program->DebugPath,
+				TEXT("The prepared ProcessEvent program has no UFunction."));
+		}
 		return false;
 	}
 
@@ -862,7 +902,7 @@ bool InvokePreparedDynamicReflection(
 				InvocationContext.World.Get());
 		}
 
-		Receiver.ProcessEvent(Program->Function, Frame);
+		Receiver.ProcessEvent(InvocationFunction, Frame);
 		if (!InvocationContext.LatentHost->CommitLatent(Reservation.Token))
 		{
 			SetDispatchFailure(
@@ -907,7 +947,7 @@ bool InvokePreparedDynamicReflection(
 	{
 		return false;
 	}
-	Receiver.ProcessEvent(Program->Function, Frame);
+	Receiver.ProcessEvent(InvocationFunction, Frame);
 	MarkReplicatedPropertyDirty(*Program, Receiver);
 
 	for (FGuestOutputTarget& Target : OutputTargets)

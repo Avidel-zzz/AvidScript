@@ -204,6 +204,43 @@ FValueCodecProgram MakeIntArrayCodec(
 	return Program;
 }
 
+FValueCodecProgram MakeInt32Codec(
+	FProperty* Property,
+	const EValueCodecDirection Direction,
+	const int32 ArgumentOffset)
+{
+	FValueCodecProgram Program;
+	Program.Property = Property;
+	Program.Direction = Direction;
+	Program.Kind = EValueCodecKind::Int32;
+	Program.ArgumentOffset = ArgumentOffset;
+	Program.ArgumentWidth = 1;
+	Program.GuestStorageSize = sizeof(int32);
+	Program.WireSize = sizeof(int32);
+	Program.WireAlignment = alignof(int32);
+	Program.Name = Property == nullptr ? TEXT("ReturnValue") : Property->GetName();
+	return Program;
+}
+
+FValueCodecProgram MakeInterfaceCodec(
+	FProperty* Property,
+	const EValueCodecDirection Direction,
+	const int32 ArgumentOffset)
+{
+	FValueCodecProgram Program;
+	Program.Property = Property;
+	Program.ObjectClass = UAvidScriptBindingsCallableInterface::StaticClass();
+	Program.Direction = Direction;
+	Program.Kind = EValueCodecKind::Interface;
+	Program.ArgumentOffset = ArgumentOffset;
+	Program.ArgumentWidth = Direction == EValueCodecDirection::Return ? 1 : 2;
+	Program.GuestStorageSize = sizeof(FAvidScriptObjectHandle);
+	Program.WireSize = sizeof(FAvidScriptObjectHandle);
+	Program.WireAlignment = alignof(uint32);
+	Program.Name = Property == nullptr ? TEXT("ReturnValue") : Property->GetName();
+	return Program;
+}
+
 FNativeFuncPtr GRecursiveStructOriginalNative = nullptr;
 int32 GRecursiveStructNativeInvocationCount = 0;
 
@@ -853,6 +890,253 @@ bool FAvidScriptArrayValueBindingBoundaryTest::RunTest(
 	TestFalse(
 		TEXT("Released array capability becomes stale"),
 		Heap.Resolve(ReturnToken, FString(), StaleView, ReleaseError));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptInterfaceInteropBoundaryTest,
+	"AvidScript.Bindings.PreparedDynamic.InterfaceInterop",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptInterfaceInteropBoundaryTest::RunTest(const FString& Parameters)
+{
+	UClass* InterfaceClass = UAvidScriptBindingsCallableInterface::StaticClass();
+	UAvidScriptBindingsInterfaceImplementer* Implementer =
+		NewObject<UAvidScriptBindingsInterfaceImplementer>();
+	UAvidScriptBindingsTestObject* PlainObject =
+		NewObject<UAvidScriptBindingsTestObject>();
+	if (!TestTrue(
+			TEXT("Fixture implements the reflected interface"),
+			Implementer->GetClass()->ImplementsInterface(InterfaceClass)))
+	{
+		return false;
+	}
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptBoundaryOwnership Ownership;
+	FAvidScriptObjectHandleResult HandleResult;
+	const FAvidScriptObjectHandle ImplementerHandle =
+		Registry.RegisterObject(Implementer, HandleResult, false);
+	const FAvidScriptObjectHandle PlainHandle =
+		Registry.RegisterObject(PlainObject, HandleResult, false);
+	FAvidScriptBindingInvocationContext Context;
+	Context.ObjectRegistry = &Registry;
+	Context.ObjectOwnership = &Ownership;
+
+	UObject* Resolved = nullptr;
+	FString Details;
+	TestTrue(
+		TEXT("Interface-typed handle accepts an implementation object"),
+		ResolveObjectHandle(
+			ImplementerHandle.Slot,
+			ImplementerHandle.Generation,
+			InterfaceClass,
+			Context,
+			false,
+			Resolved,
+			Details));
+	TestTrue(
+		TEXT("Resolved interface keeps UObject identity"),
+		Resolved == Implementer);
+	TestFalse(
+		TEXT("Interface-typed handle rejects a non-implementer"),
+		ResolveObjectHandle(
+			PlainHandle.Slot,
+			PlainHandle.Generation,
+			InterfaceClass,
+			Context,
+			false,
+			Resolved,
+			Details));
+
+	FProperty* InterfaceProperty = FindFProperty<FProperty>(
+		UAvidScriptBindingsTestObject::StaticClass(),
+		TEXT("InterfaceProperty"));
+	if (!TestTrue(
+			TEXT("Interface property reflects as FInterfaceProperty"),
+			InterfaceProperty != nullptr && InterfaceProperty->IsA<FInterfaceProperty>()))
+	{
+		return false;
+	}
+
+	FInvocationCodecProgram PropertyWriteProgram;
+	PropertyWriteProgram.Kind =
+		EAvidScriptBindingInvocationKind::ReflectedPropertyWrite;
+	PropertyWriteProgram.OwnerClass = UAvidScriptBindingsTestObject::StaticClass();
+	PropertyWriteProgram.ReflectedProperty = InterfaceProperty;
+	PropertyWriteProgram.DebugPath = InterfaceProperty->GetPathName();
+	PropertyWriteProgram.ExpectedArgumentCount = 4;
+	PropertyWriteProgram.Parameters.Add(MakeInterfaceCodec(
+		InterfaceProperty,
+		EValueCodecDirection::Value,
+		2));
+	FPreparedDynamicInvocationCell PropertyWriteCell{ &PropertyWriteProgram, 0 };
+	TArray<uint8> EmptyScratch;
+	FAvidScriptDynamicHostCallResult Result;
+	const uint64 PropertyWriteArguments[] = {
+		0,
+		0,
+		ImplementerHandle.Slot,
+		ImplementerHandle.Generation
+	};
+	if (!TestTrue(
+			TEXT("Prepared interface property write accepts the capability"),
+			InvokePreparedDynamicReflection(
+				&PropertyWriteCell,
+				*PlainObject,
+				PropertyWriteArguments,
+				nullptr,
+				Context,
+				EmptyScratch,
+				Result)))
+	{
+		AddError(Result.Details);
+		return false;
+	}
+	TestTrue(
+		TEXT("Interface property stores the implementation UObject"),
+		PlainObject->InterfaceProperty.GetObject() == Implementer);
+
+	FInvocationCodecProgram PropertyReadProgram;
+	PropertyReadProgram.Kind =
+		EAvidScriptBindingInvocationKind::ReflectedPropertyRead;
+	PropertyReadProgram.OwnerClass = UAvidScriptBindingsTestObject::StaticClass();
+	PropertyReadProgram.ReflectedProperty = InterfaceProperty;
+	PropertyReadProgram.DebugPath = InterfaceProperty->GetPathName();
+	PropertyReadProgram.ExpectedArgumentCount = 3;
+	PropertyReadProgram.bRequiresGuestMemory = true;
+	PropertyReadProgram.ReturnValue = MakeInterfaceCodec(
+		InterfaceProperty,
+		EValueCodecDirection::Return,
+		2);
+	FPreparedDynamicInvocationCell PropertyReadCell{ &PropertyReadProgram, 0 };
+	FAvidScriptBoundaryGuestMemory GuestMemory;
+	const uint64 PropertyReadArguments[] = { 0, 0, 32 };
+	if (!TestTrue(
+			TEXT("Prepared interface property read publishes a capability"),
+			InvokePreparedDynamicReflection(
+				&PropertyReadCell,
+				*PlainObject,
+				PropertyReadArguments,
+				&GuestMemory,
+				Context,
+				EmptyScratch,
+				Result)))
+	{
+		AddError(Result.Details);
+		return false;
+	}
+	FAvidScriptObjectHandle EncodedHandle;
+	FMemory::Memcpy(
+		&EncodedHandle,
+		GuestMemory.Bytes.GetData() + 32,
+		sizeof(EncodedHandle));
+	TestEqual(TEXT("Interface output preserves the object slot"), EncodedHandle.Slot, ImplementerHandle.Slot);
+	TestEqual(
+		TEXT("Interface output preserves the object generation"),
+		EncodedHandle.Generation,
+		ImplementerHandle.Generation);
+
+	UFunction* InterfaceFunction = InterfaceClass->FindFunctionByName(
+		GET_FUNCTION_NAME_CHECKED(
+			IAvidScriptBindingsCallableInterface,
+			TransformInterfaceValue));
+	if (!TestNotNull(TEXT("Interface function reflects"), InterfaceFunction))
+	{
+		return false;
+	}
+	FProperty* InputProperty = FindFProperty<FProperty>(InterfaceFunction, TEXT("Value"));
+	FProperty* ReturnProperty = InterfaceFunction->GetReturnProperty();
+	if (!TestNotNull(TEXT("Interface input reflects"), InputProperty)
+		|| !TestNotNull(TEXT("Interface return reflects"), ReturnProperty))
+	{
+		return false;
+	}
+
+	FInvocationCodecProgram FunctionProgram;
+	FunctionProgram.OwnerClass = InterfaceClass;
+	FunctionProgram.Function = InterfaceFunction;
+	FunctionProgram.DebugPath = InterfaceFunction->GetPathName();
+	FunctionProgram.FrameSize = InterfaceFunction->GetStructureSize();
+	FunctionProgram.FrameAlignment = FMath::Max(
+		1,
+		InterfaceFunction->GetMinAlignment());
+	FunctionProgram.RequiredScratchSize =
+		FunctionProgram.FrameSize + FunctionProgram.FrameAlignment - 1;
+	FunctionProgram.ExpectedArgumentCount = 4;
+	FunctionProgram.bRequiresGuestMemory = true;
+	FunctionProgram.Parameters.Add(MakeInt32Codec(
+		InputProperty,
+		EValueCodecDirection::Value,
+		2));
+	FunctionProgram.ReturnValue = MakeInt32Codec(
+		ReturnProperty,
+		EValueCodecDirection::Return,
+		3);
+	FPreparedDynamicInvocationCell FunctionCell{ &FunctionProgram, 0 };
+	TArray<uint8> FunctionScratch;
+	FunctionScratch.SetNumZeroed(FunctionProgram.RequiredScratchSize);
+	const uint64 FunctionArguments[] = { 0, 0, 5, 64 };
+	if (!TestTrue(
+			TEXT("Prepared interface call reaches the concrete implementation"),
+			InvokePreparedDynamicReflection(
+				&FunctionCell,
+				*Implementer,
+				FunctionArguments,
+				&GuestMemory,
+				Context,
+				FunctionScratch,
+				Result)))
+	{
+		AddError(Result.Details);
+		return false;
+	}
+	int32 ReturnValue = 0;
+	FMemory::Memcpy(
+		&ReturnValue,
+		GuestMemory.Bytes.GetData() + 64,
+		sizeof(ReturnValue));
+	TestEqual(TEXT("Interface return value reaches guest memory"), ReturnValue, 16);
+	TestEqual(TEXT("Interface implementation runs once"), Implementer->InvocationCount, 1);
+	TestEqual(
+		TEXT("Interface dispatch caches the concrete receiver class"),
+		FunctionProgram.CachedInterfaceReceiverClass,
+		Implementer->GetClass());
+	TestNotNull(
+		TEXT("Interface dispatch caches the resolved function"),
+		FunctionProgram.CachedInterfaceFunction);
+
+	const uint64 CachedArguments[] = { 0, 0, 7, 68 };
+	TestTrue(
+		TEXT("A repeated interface call reuses the prepared implementation"),
+		InvokePreparedDynamicReflection(
+			&FunctionCell,
+			*Implementer,
+			CachedArguments,
+			&GuestMemory,
+			Context,
+			FunctionScratch,
+			Result));
+	FMemory::Memcpy(
+		&ReturnValue,
+		GuestMemory.Bytes.GetData() + 68,
+		sizeof(ReturnValue));
+	TestEqual(TEXT("Cached interface call preserves behavior"), ReturnValue, 22);
+	TestEqual(TEXT("Cached interface call runs once more"), Implementer->InvocationCount, 2);
+
+	TestFalse(
+		TEXT("Prepared interface call rejects a non-implementer"),
+		InvokePreparedDynamicReflection(
+			&FunctionCell,
+			*PlainObject,
+			FunctionArguments,
+			&GuestMemory,
+			Context,
+			FunctionScratch,
+			Result));
+	TestTrue(
+		TEXT("Non-implementer reports the receiver contract"),
+		Result.Details.Contains(TEXT("binding_target_invalid")));
 	return true;
 }
 

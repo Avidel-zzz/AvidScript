@@ -5,6 +5,7 @@
 #include "GameFramework/Actor.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "Net/UnrealNetwork.h"
+#include "UObject/Interface.h"
 #include "UObject/Object.h"
 
 #include "AvidScriptEditorCSharpBindingEmitterTestTypes.generated.h"
@@ -17,6 +18,38 @@ enum class EAvidScriptCSharpEmitterTestMode : uint8
 {
 	Primary,
 	Secondary
+};
+
+UINTERFACE(BlueprintType)
+class UAvidScriptCSharpEmitterCallableInterface : public UInterface
+{
+	GENERATED_BODY()
+};
+
+class IAvidScriptCSharpEmitterCallableInterface
+{
+	GENERATED_BODY()
+
+public:
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "AvidScript")
+	int32 TransformInterfaceValue(int32 Value);
+};
+
+UCLASS()
+class UAvidScriptCSharpEmitterInterfaceConsumer : public UObject
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(BlueprintReadWrite, Category = "AvidScript")
+	TScriptInterface<IAvidScriptCSharpEmitterCallableInterface> InterfaceValue;
+
+	UFUNCTION(BlueprintCallable, Category = "AvidScript")
+	TScriptInterface<IAvidScriptCSharpEmitterCallableInterface> RoundtripInterface(
+		TScriptInterface<IAvidScriptCSharpEmitterCallableInterface> Value) const
+	{
+		return Value;
+	}
 };
 
 USTRUCT(BlueprintType)

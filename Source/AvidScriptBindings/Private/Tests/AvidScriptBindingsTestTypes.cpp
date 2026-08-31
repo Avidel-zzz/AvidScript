@@ -1,5 +1,12 @@
 #include "AvidScriptBindingsTestTypes.h"
 
+int32 UAvidScriptBindingsInterfaceImplementer::TransformInterfaceValue_Implementation(
+	const int32 Value)
+{
+	++InvocationCount;
+	return Value * 3 + 1;
+}
+
 int32 UAvidScriptBindingsTestObject::FastPathAddInt32(
 	const int32 Left,
 	const int32 Right) const

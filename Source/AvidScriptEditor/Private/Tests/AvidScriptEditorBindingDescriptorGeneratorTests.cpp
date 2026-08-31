@@ -2016,6 +2016,157 @@ bool FAvidScriptEditorBindingDescriptorNativeDirectAuthorizationTest::RunTest(
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingDescriptorInterfaceInteropTest,
+	"AvidScript.Editor.BindingDescriptor.InterfaceInterop",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingDescriptorInterfaceInteropTest::RunTest(
+	const FString& Parameters)
+{
+	const FString InterfacePath =
+		UAvidScriptCSharpEmitterCallableInterface::StaticClass()->GetPathName();
+	const FString ConsumerPath =
+		UAvidScriptCSharpEmitterInterfaceConsumer::StaticClass()->GetPathName();
+
+	FAvidScriptBindingSelectionProfile Profile;
+	Profile.PackageName = TEXT("avidscript.interface.interop");
+	FAvidScriptReflectedClassSelection InterfaceRule;
+	InterfaceRule.OwnerClassPath = InterfacePath;
+	InterfaceRule.IncludeFunctions.Add(TEXT("TransformInterfaceValue"));
+	Profile.Classes.Add(MoveTemp(InterfaceRule));
+	FAvidScriptReflectedClassSelection ConsumerRule;
+	ConsumerRule.OwnerClassPath = ConsumerPath;
+	ConsumerRule.IncludeFunctions.Add(TEXT("RoundtripInterface"));
+	ConsumerRule.IncludeProperties.Add(TEXT("InterfaceValue"));
+	ConsumerRule.WritableProperties.Add(TEXT("InterfaceValue"));
+	Profile.Classes.Add(MoveTemp(ConsumerRule));
+
+	FString DescriptorJson;
+	FAvidScriptBindingSelectionResolveResult SelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+			TEXT("Interface functions and properties generate from one profile"),
+			FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+				Profile,
+				DescriptorJson,
+				SelectionResult,
+				GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Package;
+	FString ErrorCategory;
+	FString ErrorSource;
+	if (!TestTrue(
+			TEXT("Interface descriptor satisfies the shared parser"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				DescriptorJson,
+				Package,
+				ErrorCategory,
+				ErrorSource)))
+	{
+		AddError(ErrorCategory + TEXT(":") + ErrorSource);
+		return false;
+	}
+	TestEqual(TEXT("Interface profile emits four bindings"), Package.Bindings.Num(), 4);
+	const FAvidScriptBindingFunctionModel* InterfaceCall =
+		Package.Bindings.FindByPredicate(
+			[&InterfacePath](const FAvidScriptBindingFunctionModel& Binding)
+			{
+				return Binding.OwnerClass == InterfacePath
+					&& Binding.UeFunction == TEXT("TransformInterfaceValue");
+			});
+	const FAvidScriptBindingFunctionModel* Roundtrip =
+		Package.Bindings.FindByPredicate(
+			[](const FAvidScriptBindingFunctionModel& Binding)
+			{
+				return Binding.UeFunction == TEXT("RoundtripInterface");
+			});
+	if (TestNotNull(TEXT("Interface owner call is present"), InterfaceCall))
+	{
+		TestEqual(
+			TEXT("Interface call uses cached ProcessEvent dispatch"),
+			InterfaceCall->DispatchMode,
+			FString(TEXT("cached_process_event")));
+		TestEqual(
+			TEXT("Interface owner is preserved in the descriptor"),
+			InterfaceCall->OwnerClass,
+			InterfacePath);
+	}
+	if (TestNotNull(TEXT("Interface roundtrip call is present"), Roundtrip))
+	{
+		if (TestEqual(
+				TEXT("Interface roundtrip has one parameter"),
+				Roundtrip->Parameters.Num(),
+				1))
+		{
+			TestEqual(
+				TEXT("Interface parameter uses an object handle"),
+				Roundtrip->Parameters[0].Kind,
+				FString(TEXT("object_handle")));
+		}
+		TestEqual(
+			TEXT("Interface return uses an object handle"),
+			Roundtrip->ReturnValue.Kind,
+			FString(TEXT("object_handle")));
+		TestEqual(
+			TEXT("Interface identity uses the UInterface class path"),
+			Roundtrip->ReturnValue.CanonicalType,
+			TEXT("object:") + InterfacePath);
+	}
+	const FAvidScriptBindingTypeModel* InterfaceType =
+		Package.Types.FindByPredicate(
+			[&InterfacePath](const FAvidScriptBindingTypeModel& Type)
+			{
+				return Type.CanonicalType == TEXT("object:") + InterfacePath;
+			});
+	if (TestNotNull(TEXT("Interface handle type is present"), InterfaceType))
+	{
+		TestEqual(
+			TEXT("C# interface handle uses an I-prefixed type name"),
+			InterfaceType->CppType,
+			FString(TEXT("IAvidScriptCSharpEmitterCallableInterface")));
+		if (TestEqual(
+				TEXT("Interface handle keeps two ABI cells"),
+				InterfaceType->AbiTypes.Num(),
+				2))
+		{
+			TestEqual(TEXT("Interface slot ABI is i32"), InterfaceType->AbiTypes[0], FString(TEXT("i")));
+			TestEqual(TEXT("Interface generation ABI is i32"), InterfaceType->AbiTypes[1], FString(TEXT("i")));
+		}
+	}
+
+	FString ReferenceSource;
+	FString ManifestJson;
+	FAvidScriptCSharpBindingEmitResult EmitResult;
+	if (!TestTrue(
+			TEXT("Interface descriptor renders a C# facade"),
+			FAvidScriptEditorCSharpBindingEmitter::Emit(
+				DescriptorJson,
+				ReferenceSource,
+				ManifestJson,
+				EmitResult)))
+	{
+		AddError(EmitResult.ErrorMessage);
+		return false;
+	}
+	TestTrue(
+		TEXT("C# facade declares the interface handle"),
+		ReferenceSource.Contains(
+			TEXT("public readonly struct IAvidScriptCSharpEmitterCallableInterface")));
+	TestTrue(
+		TEXT("C# facade exposes the interface method"),
+		ReferenceSource.Contains(TEXT("TransformInterfaceValue(int value)")));
+	TestTrue(
+		TEXT("C# facade exposes interface property syntax"),
+		ReferenceSource.Contains(
+			TEXT("public IAvidScriptCSharpEmitterCallableInterface InterfaceValue")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorBindingDescriptorNetworkRpcTest,
 	"AvidScript.Editor.BindingDescriptor.NetworkRpcSchema15",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

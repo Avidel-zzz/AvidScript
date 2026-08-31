@@ -10,7 +10,7 @@
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 Development" src="https://img.shields.io/badge/Platform-Win64-0078D4?logo=windows&logoColor=white">
-  <img alt="Phase 59 Complete" src="https://img.shields.io/badge/Status-Phase%2059%20Complete-159957">
+  <img alt="Phase 60 In Progress" src="https://img.shields.io/badge/Status-Phase%2060%20In%20Progress-2B6CB0">
   <img alt="Automation 398/398" src="https://img.shields.io/badge/Automation-398%2F398-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
@@ -32,7 +32,7 @@ Timer、受控 `async/await`、UE latent UFUNCTION、异步对象加载、Overla
 | 能力 | 当前状态 |
 | --- | --- |
 | C# 游戏脚本 | C# 编译为 WASM，可接入 `BeginPlay`、`Tick`、`EndPlay`、Timer、事件与受控 `async/await` |
-| UE API | Reflection/Profile 自动生成普通 `UFUNCTION`、`UPROPERTY` 和项目自定义 API；支持常用对象、值类型、固定 `USTRUCT`、字符串与一维数组 |
+| UE API | Reflection/Profile 自动生成普通 `UFUNCTION`、`UPROPERTY`、UE Interface 和项目自定义 API；支持常用对象、值类型、固定 `USTRUCT`、字符串与一维数组 |
 | C# 定义 UE 类型 | 可声明 Actor、Component、World/GameInstance Subsystem、函数、属性、继承与 override，并供 Blueprint 继承 |
 | 网络 | 可声明或调用 Server、Client、NetMulticast RPC，读写 replicated property，并接收 RPC/RepNotify handler |
 | 网络闭环 | Generated Actor 已通过 dedicated server + 2 clients、listen server + 1 remote client 的独立进程验证 |
@@ -51,7 +51,7 @@ C# Generated Type 的 Editor、网络与 Cook-layout load 已闭环；完整打�
   再输出 WebAssembly；PC 主后端使用 Wasmtime Cranelift。
 - **接入 UE 生命周期与事件**：脚本可以响应 `BeginPlay`、`Tick`、`EndPlay`、Timer、受控 `async/await`、异步对象加载、
   Gameplay Event、Overlap，并订阅 Session 授权的任意兼容 UObject 动态多播事件；同时使用 Actor、Component、递归固定宽度 `USTRUCT`、
-  `FName`、`FString`、一维 `TArray<T>` 和常用 UE 值类型，并调用项目自定义的 Server、Client 与 NetMulticast RPC，
+  UE Interface、`FName`、`FString`、一维 `TArray<T>` 和常用 UE 值类型，并调用项目自定义的 Server、Client 与 NetMulticast RPC，
   以及读取或在 authority 上写入 replicated property。
 - **性能结论可复核**：同机、同 workload 对比 Puerts V8；候选 commit、profile、
   进程样本、P50/P95 和未达门禁均进入机器可读 evidence。
@@ -667,8 +667,8 @@ cmd /c Build\BuildWAMRWin64.cmd
 - 动态多播事件支持当前 Session 授权的任意兼容 UObject 源，但仍要求 Profile 显式授权；单播委托、C# `event +=`、lambda/closure 尚未支持；
 - 受控 `async/await` 已支持顺序等待、分支/循环/integral 或 enum switch section、一维数组 value foreach 内的直接 await、typed outcome、固定布局 local 与数组引用状态帧、控制转移和宿主 activation 失效抑制；await 仍须是直接语句或单一 local initializer，switch governing value 首批须为 local/parameter 读取，foreach 首批须为同步一维数组与精确元素类型；条件表达式与 header 中的 await、pattern/string switch、`goto case/default`、非数组 enumerator、元素转换、解构、ref/await foreach、string element、`Task` / `ValueTask`、异常传播、`try/finally`、任意 awaiter、async helper 调用链、批量加载和进度/优先级尚未支持；
 - soft object path 尚不会自动加入 Cook 依赖，打包项目必须显式纳入脚本所引用的资产；异步结果当前在 Session teardown 统一释放，尚无细粒度 lease/release；
-- completion-only、静态 Blueprint Function Library latent 已支持首批单 cell value 参数；instance
-  latent、复杂参数/返回类型的通用 completion payload、取消句柄映射、interface dispatch 和 Blueprint 图中新声明函数尚未完整支持；
+- completion-only、静态 Blueprint Function Library latent 已支持首批单 cell value 参数；UE Interface 函数、参数、返回值和属性已支持
+  原生及 Blueprint-only 实现；instance latent、复杂参数/返回类型的通用 completion payload、取消句柄映射和 Blueprint 图中新声明函数尚未完整支持；
 - C# 已可主动调用满足 D1 合同的 Server、Client 与 NetMulticast UFUNCTION，读取或在 authority 上写入满足 D2 合同的 replicated property，并接收满足 D4 合同的 native/Blueprint-bytecode RPC/RepNotify handler；`replace/before/after`、受支持参数图的重入 FIFO与 D5 dedicated/listen 独立进程多客户端验收已完成，但 return/ref/out/latent handler、Blueprint 图中新声明函数的通用发现、FastArray/custom delta、跨机器/丢包/断线重连、网络预测和回滚尚未支持；
 - `FText` 的本地化 identity/history 语义尚未支持；
 - C# 由 Roslyn semantic/CFG lowering 编译，不提供完整 .NET Runtime；
@@ -680,7 +680,7 @@ cmd /c Build\BuildWAMRWin64.cmd
 
 ## 路线图
 
-1. P60 补齐 interface dispatch、单播/完整多播委托、默认参数与 Blueprint 新声明函数；
+1. P60 继续补齐单播/完整多播委托、默认参数、Blueprint 新声明函数与通用异步动作；
 2. P61 完成增量编译、源码定位、调用栈、断点、变量查看与 Profiler；
 3. P62-P64 完成 Cook/Shipping、移动端 AOT 与真实小型游戏 Demo 验收。
 

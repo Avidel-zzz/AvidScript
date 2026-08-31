@@ -260,7 +260,9 @@ FAvidScriptProjectedBindingType FAvidScriptEditorReflectedTypePolicy::MakeObject
 	FAvidScriptProjectedBindingType Type;
 	Type.CanonicalType = TEXT("object:") + ObjectClass->GetPathName();
 	Type.Kind = TEXT("object_handle");
-	Type.CppType = ObjectClass->GetPrefixCPP() + ObjectClass->GetName();
+	Type.CppType = ObjectClass->HasAnyClassFlags(CLASS_Interface)
+		? TEXT("I") + ObjectClass->GetName()
+		: ObjectClass->GetPrefixCPP() + ObjectClass->GetName();
 	Type.Size = 8;
 	Type.Alignment = 4;
 	Type.AbiValueTypes = { TEXT("i"), TEXT("i") };
@@ -680,6 +682,17 @@ bool FAvidScriptEditorReflectedTypePolicy::ProjectProperty(
 		OutValue.Type.TypeArguments.Add(
 			MakeShared<FAvidScriptProjectedBindingType>(MoveTemp(MappedValue.Type)));
 		FinalizeProjectedType(OutValue.Type);
+		return true;
+	}
+
+	if (const FInterfaceProperty* InterfaceProperty = CastField<FInterfaceProperty>(Property))
+	{
+		if (InterfaceProperty->InterfaceClass == nullptr)
+		{
+			OutErrorSource = Property->GetName();
+			return false;
+		}
+		OutValue.Type = MakeObjectType(InterfaceProperty->InterfaceClass);
 		return true;
 	}
 

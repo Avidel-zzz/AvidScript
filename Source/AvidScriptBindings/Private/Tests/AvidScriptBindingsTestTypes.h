@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "UObject/Interface.h"
 #include "UObject/Object.h"
 
 #include "AvidScriptBindingsTestTypes.generated.h"
@@ -90,6 +91,34 @@ struct FAvidScriptBindingsRecursiveStruct
 	FAvidScriptBindingsNestedStruct Nested;
 };
 
+UINTERFACE(BlueprintType)
+class UAvidScriptBindingsCallableInterface : public UInterface
+{
+	GENERATED_BODY()
+};
+
+class IAvidScriptBindingsCallableInterface
+{
+	GENERATED_BODY()
+
+public:
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "AvidScript|Tests")
+	int32 TransformInterfaceValue(int32 Value);
+};
+
+UCLASS()
+class UAvidScriptBindingsInterfaceImplementer final
+	: public UObject
+	, public IAvidScriptBindingsCallableInterface
+{
+	GENERATED_BODY()
+
+public:
+	virtual int32 TransformInterfaceValue_Implementation(int32 Value) override;
+
+	int32 InvocationCount = 0;
+};
+
 UCLASS()
 class UAvidScriptBindingsTestObject : public UObject
 {
@@ -137,6 +166,9 @@ public:
 
 	UPROPERTY(BlueprintReadWrite, Category = "AvidScript|Tests")
 	TArray<int32> IntArrayProperty;
+
+	UPROPERTY(BlueprintReadWrite, Category = "AvidScript|Tests")
+	TScriptInterface<IAvidScriptBindingsCallableInterface> InterfaceProperty;
 
 	UPROPERTY()
 	TArray<FString> CompositeStringArrayProperty;

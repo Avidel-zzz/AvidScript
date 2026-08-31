@@ -3,6 +3,7 @@
 #include "AvidScriptValueCapability.h"
 
 #include "AvidScriptBindingInvocation.h"
+#include "Invocation/AvidScriptBindingObjectCompatibility.h"
 #include "AvidScriptObjectOwnership.h"
 #include "Containers/StringConv.h"
 #include "UObject/Class.h"
@@ -12,6 +13,44 @@ namespace UE::AvidScript::BindingPrivate
 {
 namespace
 {
+bool SetObjectValue(
+	const FValueCodecProgram& Program,
+	void* Container,
+	UObject* Object,
+	FString& OutDetails)
+{
+	if (Program.Kind == EValueCodecKind::Object)
+	{
+		CastFieldChecked<FObjectPropertyBase>(Program.Property)
+			->SetObjectPropertyValue_InContainer(Container, Object);
+		return true;
+	}
+	if (Program.Kind != EValueCodecKind::Interface
+		|| Program.ObjectClass == nullptr)
+	{
+		OutDetails = TEXT("The cached object property program is invalid.");
+		return false;
+	}
+	FScriptInterface Value;
+	Value.SetObject(Object);
+	Value.SetInterface(
+		Object == nullptr ? nullptr : Object->GetInterfaceAddress(Program.ObjectClass));
+	CastFieldChecked<FInterfaceProperty>(Program.Property)
+		->SetPropertyValue_InContainer(Container, Value);
+	return true;
+}
+
+UObject* GetObjectValue(const FValueCodecProgram& Program, void* Container)
+{
+	if (Program.Kind == EValueCodecKind::Interface)
+	{
+		return CastFieldChecked<FInterfaceProperty>(Program.Property)
+			->GetPropertyValue_InContainer(Container).GetObject();
+	}
+	return CastFieldChecked<FObjectPropertyBase>(Program.Property)
+		->GetObjectPropertyValue_InContainer(Container);
+}
+
 bool ReadFiniteF32(const uint64 Cell, float& OutValue)
 {
 	const uint32 Bits = static_cast<uint32>(Cell);
@@ -486,7 +525,8 @@ bool DecodeWireValue(
 		FMemory::Memcpy(&Cell, Wire.GetData(), Wire.Num());
 		return SetNumericValue(Program, Container, Cell, OutDetails);
 	}
-	if (Program.Kind == EValueCodecKind::Object)
+	if (Program.Kind == EValueCodecKind::Object
+		|| Program.Kind == EValueCodecKind::Interface)
 	{
 		if (Wire.Num() != 8)
 		{
@@ -509,9 +549,7 @@ bool DecodeWireValue(
 		{
 			return false;
 		}
-		CastFieldChecked<FObjectPropertyBase>(Program.Property)
-			->SetObjectPropertyValue_InContainer(Container, Object);
-		return true;
+		return SetObjectValue(Program, Container, Object, OutDetails);
 	}
 	const int32 ComponentCount = Program.Kind == EValueCodecKind::Transform ? 9 : 3;
 	if ((Program.Kind != EValueCodecKind::Vector
@@ -769,14 +807,14 @@ bool EncodeWireValue(
 		FMemory::Memcpy(Wire.GetData(), &Token, sizeof(Token));
 		return true;
 	}
-	if (Program.Kind == EValueCodecKind::Object)
+	if (Program.Kind == EValueCodecKind::Object
+		|| Program.Kind == EValueCodecKind::Interface)
 	{
-		UObject* Object = CastFieldChecked<FObjectPropertyBase>(Program.Property)
-			->GetObjectPropertyValue_InContainer(Container);
+		UObject* Object = GetObjectValue(Program, Container);
 		FAvidScriptObjectHandle Handle;
 		if (Object != nullptr)
 		{
-			if (Program.ObjectClass == nullptr || !Object->IsA(Program.ObjectClass)
+			if (!IsObjectCompatibleWithReflectedType(Object, Program.ObjectClass)
 				|| Context.ObjectRegistry == nullptr || Context.ObjectOwnership == nullptr)
 			{
 				OutDetails = TEXT("The UObject output does not satisfy the cached property class or capability services.");
@@ -1288,7 +1326,8 @@ bool ResolveObjectHandle(
 		OutDetails = ResolveResult.ErrorMessage;
 		return false;
 	}
-	if (ExpectedClass != nullptr && !OutObject->IsA(ExpectedClass))
+	if (ExpectedClass != nullptr
+		&& !IsObjectCompatibleWithReflectedType(OutObject, ExpectedClass))
 	{
 		OutDetails = FString::Printf(
 			TEXT("Resolved object '%s' is not a '%s'."),
@@ -1393,7 +1432,8 @@ bool SetValueFromCells(
 			Frame,
 			OutDetails);
 	}
-	if (Program.Kind == EValueCodecKind::Object)
+	if (Program.Kind == EValueCodecKind::Object
+		|| Program.Kind == EValueCodecKind::Interface)
 	{
 		UObject* Object = nullptr;
 		if (!ResolveObjectHandle(
@@ -1407,9 +1447,7 @@ bool SetValueFromCells(
 		{
 			return false;
 		}
-		CastFieldChecked<FObjectPropertyBase>(Program.Property)
-			->SetObjectPropertyValue_InContainer(Frame, Object);
-		return true;
+		return SetObjectValue(Program, Frame, Object, OutDetails);
 	}
 
 	TArray<float, TInlineAllocator<9>> Components;

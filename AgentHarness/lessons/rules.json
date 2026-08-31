@@ -309,6 +309,22 @@
       "prevention": "对 InvokePhaseWorkflow.ps1 的 BatchId 等支持内部 Split 的参数，跨子 pwsh 统一传一个逗号分隔字符串；执行前读取脚本参数归一化逻辑，不把当前 shell 的数组语法当成 native argv 合同。",
       "source": "observed:2026-08-31-P60.Start",
       "last_observed": "2026-08-31 P60 start 首次把四个 BatchId 作为调用端逗号数组传给子 pwsh，子进程收到异常值并以 ASPW1010 拒绝；改为单个逗号分隔字符串后成功"
+    },
+    {
+      "id": "ue-automation-one-runtests-command-per-process",
+      "tags": ["ue", "automation", "verification", "evidence"],
+      "summary": "一个 ExecCmds 中重复写 Automation RunTests 不会可靠地形成两个测试队列。",
+      "prevention": "聚焦 Automation 每个进程只传一个 Automation RunTests 过滤器；需要组合测试时使用共同前缀，或分别启动并为每次运行分配唯一 abslog。必须从日志核对 Found、Test Completed 与 tests performed，不能只看退出码。",
+      "source": "observed:2026-08-31-P60.A1",
+      "last_observed": "2026-08-31 P60.A1 首次 ExecCmds 的第二个 Automation RunTests 被识别为 Unknown Automation command，只有第一条实际执行；随后用独立进程和唯一日志补齐 1/1 Success"
+    },
+    {
+      "id": "apply-patch-context-must-exclude-new-helper-body",
+      "tags": ["editing", "cpp", "review"],
+      "summary": "同一补丁先新增 helper 再用宽泛首个匹配替换调用点，可能误改 helper 自身。",
+      "prevention": "新增 helper 后，替换调用点必须带函数名或上下文锚点；补丁完成立即用 rg 列出全部调用和分支，并检查新 helper 本体，再进入构建。",
+      "source": "observed:2026-08-31-P60.A1",
+      "last_observed": "2026-08-31 P60.A1 宽泛替换一度把 SetObjectValue 的 object 分支改成递归调用；静态分支审计在构建前发现并修正"
     }
   ]
 }
