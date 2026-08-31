@@ -52,10 +52,12 @@
 - `P59.C2c4f`：派生实例已按脚本祖先类型准备稠密 export 路由；UE 虚调用进入最派生 override，
   未覆写 UFUNCTION 与父类 lifecycle 通过父类 ordinal 调度，C# `base.Method()` 在 WASM 内直接调用
   父类脚本函数；热路径保持无名称查找、无反射遍历和无分配。
+- `P59.C`：状态机已标记完成；候选提交 `3ef303d` 的隔离 clean architecture gate 通过。
+- `P59.D1`：真实 Blueprint 已能以 C# 生成 `AProjectile` 为父类完成创建、编译、CDO 默认值覆写、
+  `.uasset` 保存/卸载/重载，并在 Spawn 后通过 `ProcessEvent` 进入 C# WASM 游戏逻辑。
 
 ## 待完成
 
-- `P59.C` Runtime type/instance/inheritance dispatch；
 - `P59.D` Blueprint、网络、Cook 与集中 Gate。
 
 ## 最终证据

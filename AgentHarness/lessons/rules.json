@@ -197,6 +197,14 @@
       "prevention": "测试在 World 初始化后检查 HasActorBegunPlay；未触发时调用 DispatchBeginPlay，再断言脚本 Session 和生命周期效果，不能用 source readback 代替事件证据。",
       "source": "observed:2026-08-31-P59.C2c4f",
       "last_observed": "2026-08-31 P59.C2c4f (仅 World.BeginPlay 未注册动态 Actor 的 generated Session，派生路由测试未进入 Session)"
+    },
+    {
+      "id": "blueprint-generated-class-unwraps-tsubclassof",
+      "tags": ["ue", "blueprint", "cpp", "tests"],
+      "summary": "UE5.8 的 UBlueprint::GeneratedClass 是 TSubclassOf，不能作为裸指针模板参数使用。",
+      "prevention": "传给 TestNotNull、FindFProperty、SpawnActor 或 UClass API 前显式调用 GeneratedClass.Get()；新增 Editor 测试先核对 UE5.8 头文件的实际字段类型。",
+      "source": "observed:2026-08-31-P59.D1",
+      "last_observed": "2026-08-31 P59.D1 (首次 UBT 因 TestNotNull 无法从 TSubclassOf 推导裸指针而失败)"
     }
   ]
 }
