@@ -31,9 +31,9 @@
     },
     {
       "id": "P59.C",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "commit=3ef303da01f9462432f7c9d2db3d6fa55251f974; tree=76e32067b1c1102d8e094b644d31b4688fd5217a; generated_types=3/3; runtime_generated_types=4/4; ue58_no_clean_ubt=passed; architecture=clean",
+      "completed_at_utc": "2026-08-31T00:08:19.6147341+00:00"
     },
     {
       "id": "P59.D",
@@ -108,7 +108,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "batch-complete -Phase 59 -BatchId P59.C -Evidence <text>",
-  "revision": 8,
-  "updated_at_utc": "2026-08-30T17:23:48.0395978+00:00"
+  "next_action": "batch-complete -Phase 59 -BatchId P59.D -Evidence <text>",
+  "revision": 9,
+  "updated_at_utc": "2026-08-31T00:08:19.6168512+00:00"
 }
