@@ -350,6 +350,14 @@
       "prevention": "bootstrap/context/verify/lesson-query/audit 调用 InvokeAgentHarness.ps1；batch-complete、freeze、gate 等状态 mutation 调用 InvokePhaseWorkflow.ps1，并在执行前核对入口 ValidateSet。",
       "source": "observed:2026-08-31-P60.A2",
       "last_observed": "2026-08-31 P60.A2 首次把 batch-complete 传给只支持五个只读命令的 Harness，ValidateSet 拒绝；改用 InvokePhaseWorkflow.ps1 后 revision 2 成功"
+    },
+    {
+      "id": "architecture-allowlists-move-with-reviewed-surfaces",
+      "tags": ["architecture", "gate", "allowlist", "hash"],
+      "summary": "严格架构 allowlist 若不随已审阅公共表面同步，会把历史能力长期误报为当前提交回归。",
+      "prevention": "每个改变 static host、generated facade、registry 或 reviewed helper closure 的批次都在同批更新精确 multiset、注册输入和 canonical hash；提交后必须在 detached clean tree 跑 Gate，并用上一基线对照区分历史漂移与新增违规。",
+      "source": "observed:2026-08-31-P60.B1G",
+      "last_observed": "2026-08-31 P60.B1G (b280553 与 f8a4c7d 同报 20 类历史差异；刷新 checker 后工作树仅剩 clean-tree 拒绝)"
     }
   ]
 }

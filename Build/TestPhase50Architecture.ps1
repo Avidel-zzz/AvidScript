@@ -671,14 +671,14 @@ function Test-RendererFrozenRegions {
     )
 
     $ExpectedHashes = [ordered]@{
-		'RenderMethod' = 'bc40fe2e6cf177b9cd2e6881f3059172b716f7cda7b5ccd82b6adb494ef2e320'
-        'RenderPropertyGetter' = '4f607fe468130480bf2dfdd541d785134176fce3baa5e2dd31b07f7a659db215'
+		'RenderMethod' = '52828140ed78663eaa35b4a4eb04280f255d7d1be86c65ca8634c423a5289261'
+        'RenderPropertyGetter' = '141fadb6fa1cd2d670d47d4f4567bc555de57a4f614f5f2a81a443e6845dbc2c'
         'AppendVector' = 'a052bea5eda0769613a907e479549d6c9032b6ae9a9b90a110714105d07a4e3d'
         'AppendInputEvent' = '27014e57fb190bcd48d5028c4b1722e5f6ec11837962c6bae8cb52658a580f39'
         'AppendRotator' = '7a71fdf13edf712a20b7a6dcf5fd91ae284b36ed372feeef04011a2763deeacd'
         'AppendTransform' = 'd277ff9ceb802b8f5e24ee61a88c1fc8d2fc366a9231de145c8d224be7d0cd41'
-        'AppendObjectHandleProxy' = '560156fdf7ad9344a2773cbcf9c733e81a36577c73abeaa6d136a7349c6c999d'
-		'EmitReferenceSource' = '2562dda424a9a4bef0ddb618eb0db314e200453af59389c85f12989149de048f'
+        'AppendObjectHandleProxy' = '8c2d7e92e9dc405bbb7abafbbeb1c2fe33e7669be830bf55c5cbe5316c9a0e8b'
+		'EmitReferenceSource' = 'ed659813e292e79b6f8b61ab5710e421ed5c24d8e742bad855ec8b546d05f120'
     }
     foreach ($Entry in (Get-RendererFrozenRegions).GetEnumerator()) {
         $Region = Get-UniqueBraceRegion $Source $Entry.Value $Violations "frozen renderer region $($Entry.Key)"
@@ -703,9 +703,9 @@ function Test-GeneratedSurfaceConstructionClosure {
     )
 
     $ExpectedHashes = [ordered]@{
-		'BindingRenderer' = 'a652ba3607b82a008216e4bbcb38f31ab33ba80b154ad297fddf9709212596db'
+		'BindingRenderer' = 'db2306ccfd8fdde7568e8301d5c00e609c30e72071973403ed3727a18d4c4bc4'
         'StateContractRenderer' = '8d24e315f424a1827b2cdf6358019785c9d7ccdf5322b10f6a8971cee29ce9b9'
-        'DefaultValueFormatter' = '6cffc9ae4e299b1b3134380b5827ccb068d6bcc01b4ff5b1bb65e30627e0bbf7'
+        'DefaultValueFormatter' = '648aad59ac0ed2732ac83afb5da47477fb30eaf23399084833e1338c4cdd0342'
         'CSharpSyntax' = 'bf685b36a2cd07cfffb69e46aa1937322b92e3ec9350afac4f7225f1c037249f'
         'LifecycleBinding' = '4a7c325d2f16e119ea3ce08af777186fda194e61bd3e397e4b29bb6e2c50510e'
     }
@@ -926,7 +926,7 @@ function Test-StaticHostImportCatalog {
     Test-ExactMultiset @($Actual) $ExpectedRecords $Violations 'static host catalog'
     Test-RegexSequence $Source @(
         'UE_ARRAY_COUNT\s*\(\s*GStaticHostImports\s*\)',
-        'EAvidScriptHostBindingId::DataLaneSubmit',
+        'EAvidScriptHostBindingId::DelegateOutputWrite',
         'Static host catalog must remain dense and ordered by binding id'
     ) $Violations 'static host catalog density proof'
 }
@@ -1199,7 +1199,9 @@ function Test-RendererCandidates {
         $LifecycleBindingSource `
         $Violations
     $LiteralStream = $Literals -join ''
-    $EntryPointTokenCount = [regex]::Matches($LiteralStream, '\bEntryPoint\b').Count
+    $EntryPointTokenCount = @($Literals | Where-Object {
+        $_ -match '\bDllImport\b' -and $_ -match '\bEntryPoint\b'
+    }).Count
     $EntryPointMatches = @(
         [regex]::Matches($LiteralStream, 'EntryPoint\s*=\s*"(?<name>[^"]+)"'))
     if ($EntryPointMatches.Count -ne $EntryPointTokenCount) {
@@ -1213,9 +1215,41 @@ function Test-RendererCandidates {
             '%s',
             '%s',
             '%s',
+            '%s',
+            '%s',
             'avid_owner_get_handle',
+            'continuation_delay',
+            'continuation_load_object',
+            'continuation_cancel',
+            'continuation_cancel_source_create',
+            'continuation_cancel_source_cancel',
+            'continuation_cancel_source_release',
+            'continuation_bind_cancel',
+            'continuation_result_read',
+            'continuation_state_store',
+            'continuation_state_read',
             'timer_set_once',
             'timer_cancel',
+            'event_subscribe',
+            'event_unsubscribe',
+            'avid_value_release',
+            'avid_value_text_to_string',
+            'avid_value_container_count',
+            'avid_value_container_read',
+            'avid_value_container_write',
+            'avid_value_container_resize',
+            'avid_value_container_clear',
+            'avid_value_container_read',
+            'avid_value_container_find',
+            'avid_value_container_remove',
+            'avid_value_container_read',
+            'avid_value_container_write',
+            'avid_value_container_upsert',
+            'avid_value_container_upsert',
+            'avid_value_container_write',
+            'avid_value_release',
+            'avid_value_array_read_range',
+            'avid_value_array_write_range',
             'avid_object_type_is_a'
         ) `
         $Violations `
@@ -1223,6 +1257,18 @@ function Test-RendererCandidates {
 
     $AllowedAvidLiterals = @(
         'avid_owner_get_handle',
+        'avid_value_release',
+        'avid_value_text_to_string',
+        'avid_value_container_count',
+        'avid_value_container_read',
+        'avid_value_container_write',
+        'avid_value_container_resize',
+        'avid_value_container_clear',
+        'avid_value_container_find',
+        'avid_value_container_remove',
+        'avid_value_container_upsert',
+        'avid_value_array_read_range',
+        'avid_value_array_write_range',
         'avid_object_type_is_a'
     )
     $AvidTokens = [System.Collections.Generic.List[string]]::new()
@@ -1244,11 +1290,37 @@ function Test-RendererCandidates {
             'InputEvent',
             'FRotator',
             'FTransform',
+            'AvidContinuationStatus',
             'AvidScriptBindingPackage',
+            'AvidCancellationSource',
+            'AvidCancellationToken',
+            'AvidContinuation',
+            'AvidDelayAwaitable',
+            'AvidDelayAwaiter',
+            'AvidLoadedObject',
+            'AvidObjectAwaitable',
+            'AvidObjectAwaiter',
+            'AvidOutcome',
+            'AvidOutcomeAwaitable',
+            'AvidOutcomeAwaiter',
+            'AvidSubscription',
+            'FAvidArray',
+            'FAvidMap',
+            'FAvidSet',
+            'FAvidSoftObject',
+            'FAvidText',
+            'FAvidWeakObject',
             'TSubclassOfAActor',
             'ProjectClasses',
             'FAvidScriptObjectHandle',
             'FAvidScriptVectorValueBuffer',
+            'AvidAssets',
+            'AvidContinuations',
+            'AvidEvents',
+            'AvidScriptArray',
+            'AvidScriptContainer',
+            'AvidScriptValue',
+            'AvidSubscriptions',
             'UE',
             'AvidScriptRuntimeNative',
             'AvidScriptNative'
@@ -1294,15 +1366,42 @@ function Test-RendererCandidates {
             'public|readonly|struct|InputEvent',
             'public|readonly|struct|FRotator',
             'public|readonly|struct|FTransform',
+            'public|-|enum|AvidContinuationStatus',
             'internal|static|class|AvidScriptBindingPackage',
             'public|readonly|struct|<dynamic>',
             'public|readonly|struct|TSubclassOfAActor',
             'public|readonly|struct|<dynamic>',
+            'public|readonly|struct|<dynamic>',
+            'public|readonly|struct|AvidCancellationSource',
+            'public|readonly|struct|AvidCancellationToken',
+            'public|readonly|struct|AvidContinuation',
+            'public|readonly|struct|AvidDelayAwaitable',
+            'public|readonly|struct|AvidDelayAwaiter',
+            'public|readonly|struct|AvidLoadedObject',
+            'public|readonly|struct|AvidObjectAwaitable',
+            'public|readonly|struct|AvidObjectAwaiter',
+            'public|readonly|struct|AvidOutcome',
+            'public|readonly|struct|AvidOutcomeAwaitable',
+            'public|readonly|struct|AvidOutcomeAwaiter',
+            'public|readonly|struct|AvidSubscription',
+            'public|readonly|struct|FAvidArray',
+            'public|readonly|struct|FAvidMap',
+            'public|readonly|struct|FAvidSet',
+            'public|readonly|struct|FAvidSoftObject',
+            'public|readonly|struct|FAvidText',
+            'public|readonly|struct|FAvidWeakObject',
             'public|static|class|ProjectClasses',
             'public|-|enum|<dynamic>',
             'internal|readonly|struct|FAvidScriptObjectHandle',
             'internal|-|struct|FAvidScriptVectorValueBuffer',
             'public|static|class|<dynamic>',
+            'public|static|class|AvidAssets',
+            'public|static|class|AvidContinuations',
+            'public|static|class|AvidEvents',
+            'public|static|class|AvidScriptArray',
+            'public|static|class|AvidScriptContainer',
+            'public|static|class|AvidScriptValue',
+            'public|static|class|AvidSubscriptions',
             'public|static|class|UE',
             'internal|static|class|AvidScriptRuntimeNative',
             'internal|static|class|AvidScriptNative'
@@ -1329,7 +1428,7 @@ function Test-GeneratedImportLiterals {
         Add-Violation $Violations 'descriptor import generator has no avid_ namespace candidate'
         return
     }
-    $AllowedPrefixes = @('avid_ue_', 'avid_s1_')
+    $AllowedPrefixes = @('avid_ue_', 'avid_s1_', 'avid_on_delegate_')
     $Unexpected = @($Candidates | Where-Object {
         $AllowedPrefixes -cnotcontains $_
     } | Sort-Object -Unique)
@@ -1340,7 +1439,8 @@ function Test-GeneratedImportLiterals {
         [regex]::Matches($_, '\bavid_[a-z0-9_]+') | ForEach-Object { $_.Value }
     } | Where-Object {
         -not $_.StartsWith('avid_ue_', [System.StringComparison]::Ordinal) -and
-        -not $_.StartsWith('avid_s1_', [System.StringComparison]::Ordinal)
+        -not $_.StartsWith('avid_s1_', [System.StringComparison]::Ordinal) -and
+        -not $_.StartsWith('avid_on_delegate_', [System.StringComparison]::Ordinal)
     } | Sort-Object -Unique)
     if ($UnexpectedSplit.Count -gt 0) {
         Add-Violation $Violations "descriptor import generator contains bespoke split-capable avid_* literals: $($UnexpectedSplit -join ', ')"
@@ -1352,6 +1452,7 @@ function Test-TypedCastDispatch {
         [string]$InvocationSource,
         [string]$RegistryHeader,
         [string]$RegistrySource,
+        [string]$ObjectCompatibilityHeader,
         [System.Collections.Generic.List[string]]$Violations
     )
 
@@ -1395,6 +1496,11 @@ function Test-TypedCastDispatch {
         '\bvoid\s+FAvidScriptObjectRegistry::SetFailure\s*\(' `
         $Violations `
         'typed cast registry failure leaf'
+    $ObjectCompatibility = Get-UniqueBraceRegion `
+        $ObjectCompatibilityHeader `
+        '\binline\s+bool\s+IsObjectCompatibleWithReflectedType\s*\(' `
+        $Violations `
+        'typed cast object compatibility helper'
     if ($null -eq $Dispatch -or
         $null -eq $ResolveObject -or
         $null -eq $RegisterObject -or
@@ -1402,14 +1508,15 @@ function Test-TypedCastDispatch {
         $null -eq $ResolveType -or
         $null -eq $DispatchFailure -or
         $null -eq $SetSuccess -or
-        $null -eq $SetFailure) {
+        $null -eq $SetFailure -or
+        $null -eq $ObjectCompatibility) {
         return
     }
 
     Test-RegistryPathSurface $RegistrySource $Violations 'typed cast object registry'
     $ExpectedRegistryHashes = [ordered]@{
-        'ObjectRegistryHeader' = '2d535d0d14eb057679cc7c6c208afbda3ad7610d1c74a25c88ef06cb4d4045f2'
-        'ObjectRegistrySource' = 'a1100acc84ee22dd77c0e00d13c1167ff4cdde03273f9b584cf30e9b0e0e36c3'
+        'ObjectRegistryHeader' = '47781561d3543aa214a4bb5c64c345b583e8279a009d7cbc150ac963f1fbdd8a'
+        'ObjectRegistrySource' = 'ab968808b1a484b8d1e6bbb86f1fbf49a8a5f64d457e0eaa427f8b10db116952'
     }
     foreach ($RegistryHashEntry in ([ordered]@{
         'ObjectRegistryHeader' = $RegistryHeader
@@ -1424,7 +1531,8 @@ function Test-TypedCastDispatch {
         $Dispatch.Text + "`n" +
         $ResolveObject.Text + "`n" +
         $ResolveType.Text + "`n" +
-        $DispatchFailure.Text)
+        $DispatchFailure.Text + "`n" +
+        $ObjectCompatibility.Text)
     foreach ($ForbiddenLookup in @('FindObject', 'LoadObject', 'StaticLoadObject', 'GetPathName')) {
         if ($Closure -match ('\b' + $ForbiddenLookup + '\s*(?:<[^>]+>)?\s*\(')) {
             Add-Violation $Violations "typed cast reviewed closure contains path lookup $ForbiddenLookup"
@@ -1440,10 +1548,21 @@ function Test-TypedCastDispatch {
             'SetAvidScriptBindingDispatchFailure',
             'Context.ObjectRegistry->ResolveObject',
             'Package.TryResolveObjectType',
-            'Object->IsA'
+            'UE::AvidScript::BindingPrivate::IsObjectCompatibleWithReflectedType'
         ) `
         $Violations `
         'typed cast dispatch'
+    Test-DirectCallAllowlist `
+        $ObjectCompatibility.Body `
+        @(
+            'ExpectedClass->HasAnyClassFlags',
+            'Object->GetClass',
+            'Object->GetClass()->ImplementsInterface',
+            'ImplementsInterface',
+            'Object->IsA'
+        ) `
+        $Violations `
+        'typed cast object compatibility helper'
     Test-DirectCallAllowlist `
         $ResolveObject.Body `
         @(
@@ -1534,10 +1653,19 @@ function Test-TypedCastDispatch {
             'UObject\s*\*\s*Object\s*=\s*Context\s*\.\s*ObjectRegistry\s*->\s*ResolveObject\s*\([^;]+false\s*\)',
             'UClass\s*\*\s*CachedClass\s*=\s*nullptr',
             'Package\s*\.\s*TryResolveObjectType\s*\(',
-            'Object\s*->\s*IsA\s*\(\s*CachedClass\s*\)'
+            'UE::AvidScript::BindingPrivate::IsObjectCompatibleWithReflectedType\s*\(\s*Object\s*,\s*CachedClass\s*\)'
         ) `
         $Violations `
         'typed cast UObject/UClass dispatch'
+    Test-RegexSequence `
+        $ObjectCompatibility.Text `
+        @(
+            'ExpectedClass\s*->\s*HasAnyClassFlags\s*\(\s*CLASS_Interface\s*\)',
+            'Object\s*->\s*GetClass\s*\(\s*\)\s*->\s*ImplementsInterface\s*\(\s*ExpectedClass\s*\)',
+            'Object\s*->\s*IsA\s*\(\s*ExpectedClass\s*\)'
+        ) `
+        $Violations `
+        'typed cast object compatibility policy'
     if ($ResolveObject.Text -notmatch '\bUObject\s*\*\s*FAvidScriptObjectRegistry::ResolveObject\s*\(' -or
         $ResolveObject.Text -notmatch '\bUObject\s*\*\s*Object\s*=\s*Slot\s*\.\s*Object\s*\.\s*Get\s*\(' -or
         $ResolveType.Text -notmatch '\bUClass\s*\*&\s*OutClass\b') {
@@ -1568,6 +1696,7 @@ function Invoke-Phase50Contracts {
     $Invocation = $Inputs['Source/AvidScriptBindings/Private/AvidScriptBindingInvocation.cpp'].Code
     $ObjectRegistryHeader = $Inputs['Source/AvidScriptBindings/Public/AvidScriptObjectRegistry.h'].Code
     $ObjectRegistry = $Inputs['Source/AvidScriptBindings/Private/AvidScriptObjectRegistry.cpp'].Code
+    $ObjectCompatibility = $Inputs['Source/AvidScriptBindings/Private/Invocation/AvidScriptBindingObjectCompatibility.h'].Code
     $Runtime = $Inputs['Source/AvidScriptRuntime/Private/AvidScriptWasmRuntime.cpp'].Code
 
     foreach ($Field in @('ObjectTypeOrdinal', 'SelfTypeId', 'ResultTypeId')) {
@@ -1763,8 +1892,36 @@ function Invoke-Phase50Contracts {
         'EAvidScriptHostBindingId::OwnerGetHandle|avid_owner_get_handle|()I|false',
         'EAvidScriptHostBindingId::TimerSetOnce|timer_set_once|(fi)i|true',
         'EAvidScriptHostBindingId::TimerCancel|timer_cancel|(i)i|true',
+        'EAvidScriptHostBindingId::EventSubscribe|event_subscribe|(iii)I|true',
+        'EAvidScriptHostBindingId::EventUnsubscribe|event_unsubscribe|(I)i|true',
         'EAvidScriptHostBindingId::DataLaneGetEpoch|avid_data_lane_epoch|()I|false',
-        'EAvidScriptHostBindingId::DataLaneSubmit|avid_data_lane_submit|(ii)i|false'
+        'EAvidScriptHostBindingId::DataLaneSubmit|avid_data_lane_submit|(ii)i|false',
+        'EAvidScriptHostBindingId::ValueArrayLength|avid_value_array_length|(i)i|false',
+        'EAvidScriptHostBindingId::ValueArrayLoad|avid_value_array_load|(iiii)i|false',
+        'EAvidScriptHostBindingId::ValueArrayStore|avid_value_array_store|(iiii)i|false',
+        'EAvidScriptHostBindingId::ValueArrayReadRange|avid_value_array_read_range|(iiiii)i|false',
+        'EAvidScriptHostBindingId::ValueArrayWriteRange|avid_value_array_write_range|(iiiii)i|false',
+        'EAvidScriptHostBindingId::ValueRelease|avid_value_release|(i)i|false',
+        'EAvidScriptHostBindingId::ContinuationDelay|continuation_delay|(fi)I|true',
+        'EAvidScriptHostBindingId::ContinuationCancel|continuation_cancel|(I)i|true',
+        'EAvidScriptHostBindingId::ContinuationLoadObject|continuation_load_object|(ii)I|true',
+        'EAvidScriptHostBindingId::ContinuationCancelSourceCreate|continuation_cancel_source_create|()I|true',
+        'EAvidScriptHostBindingId::ContinuationCancelSourceCancel|continuation_cancel_source_cancel|(I)i|true',
+        'EAvidScriptHostBindingId::ContinuationCancelSourceRelease|continuation_cancel_source_release|(I)i|true',
+        'EAvidScriptHostBindingId::ContinuationBindCancel|continuation_bind_cancel|(II)i|true',
+        'EAvidScriptHostBindingId::ContinuationResultRead|continuation_result_read|(iiiii)i|true',
+        'EAvidScriptHostBindingId::ContinuationStateStore|continuation_state_store|(Iii)i|true',
+        'EAvidScriptHostBindingId::ContinuationStateRead|continuation_state_read|(Iii)i|true',
+        'EAvidScriptHostBindingId::ValueTextToString|avid_value_text_to_string|(i)i|false',
+        'EAvidScriptHostBindingId::ValueContainerCount|avid_value_container_count|(i)i|false',
+        'EAvidScriptHostBindingId::ValueContainerRead|avid_value_container_read|(iiii)i|false',
+        'EAvidScriptHostBindingId::ValueContainerWrite|avid_value_container_write|(iiii)i|false',
+        'EAvidScriptHostBindingId::ValueContainerResize|avid_value_container_resize|(ii)i|false',
+        'EAvidScriptHostBindingId::ValueContainerClear|avid_value_container_clear|(i)i|false',
+        'EAvidScriptHostBindingId::ValueContainerFind|avid_value_container_find|(ii)i|false',
+        'EAvidScriptHostBindingId::ValueContainerUpsert|avid_value_container_upsert|(iii)i|false',
+        'EAvidScriptHostBindingId::ValueContainerRemove|avid_value_container_remove|(ii)i|false',
+        'EAvidScriptHostBindingId::DelegateOutputWrite|avid_delegate_output_write|(iii)i|false'
     )
     $CompatibilityNativeRecords = @(
         $CanonicalNativeRecords | Where-Object {
@@ -1946,7 +2103,12 @@ function Invoke-Phase50Contracts {
         }
     }
 
-    Test-TypedCastDispatch $Invocation $ObjectRegistryHeader $ObjectRegistry $Violations
+    Test-TypedCastDispatch `
+        $Invocation `
+        $ObjectRegistryHeader `
+        $ObjectRegistry `
+        $ObjectCompatibility `
+        $Violations
 }
 
 function Invoke-CheckerFixtures {
@@ -2450,6 +2612,7 @@ $InputManifest = [ordered]@{
     'Source/AvidScriptBindings/Private/AvidScriptObjectLifecycleBinding.cpp' = 'Source'
     'Source/AvidScriptBindings/Private/AvidScriptObjectTypeBinding.cpp' = 'Source'
     'Source/AvidScriptBindings/Private/AvidScriptBindingInvocation.cpp' = 'Source'
+    'Source/AvidScriptBindings/Private/Invocation/AvidScriptBindingObjectCompatibility.h' = 'Source'
     'Source/AvidScriptBindings/Private/AvidScriptObjectRegistry.cpp' = 'Source'
     'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorBindingDescriptorGenerator.cpp' = 'Source'
     'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpBindingEmitter.cpp' = 'Source'
