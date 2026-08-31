@@ -39,12 +39,12 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 | 发布 | 内容寻址 Generated Type bundle、NonUFS staging 与 Cook-layout Runtime load |
 | 后端 | Wasmtime 45 Win64 主后端；WAMR 兼容后端 |
 
-Phase 60 最新完成了两项互操作能力：
+Phase 60 已完成 P60.A 与 P60.B1：
 
 - UE Interface 的函数、参数、返回值和属性可进入生成式 C# + Runtime，支持原生与 Blueprint-only 实现；
 - C# 脚本 `UFUNCTION` 的 bool、整数、有限浮点、命名 enum 与 string 默认值会发布为真实 `CPP_Default_*` 元数据；
-- Delegate 已共享一套 prepared signature，支持 singlecast Session lease、旧值安全恢复和
-  `return/ref/out` 原子输出事务。
+- Delegate 已共享 prepared signature，支持 singlecast Session lease、旧值安全恢复，
+  以及 `return/ref/out` 原子输出事务；主动 `Execute/Broadcast` 仍在实现。
 
 详细进度见 [Phase 60 中文收尾记录](Docs/Phase60/P60_Closeout.md)。
 
@@ -221,8 +221,8 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 
 最近一次完整基线为 **AvidScript Automation 398/398 通过**。Phase 59 已关闭 Generated
 Actor/Component/Subsystem、反射成员、Blueprint 子类与 override、热重载、双拓扑网络及内容寻址
-Cook bundle 闭环。Phase 60 的 UE Interface 与脚本 UFUNCTION 默认参数已通过聚焦 .NET、UE5.8
-no-clean UBT、Automation 和独立架构门禁。
+Cook bundle 闭环。Phase 60 的 UE Interface、脚本 UFUNCTION 默认参数与 Delegate P60.B1 已通过
+聚焦 .NET、UE5.8 no-clean UBT、Automation 和独立干净工作树架构门禁。
 
 阶段状态与实现证据见 [Docs](Docs/)，开发规则见 [AGENTS.md](AGENTS.md)。
 
