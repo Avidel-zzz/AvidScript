@@ -647,6 +647,9 @@ $UeTypeShellRendererSource = Read-RequiredFile 'Tools/AvidScript.UeTypeGenerator
 $SemanticUeTypeProjectorSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticUeTypeProjector.cs'
 $SemanticUeTypeValidatorSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Validation/SemanticUeTypeContractValidator.cs'
 $ScriptDefinedTypeSampleSource = Read-RequiredFile 'Samples/CSharp/ScriptDefinedTypes/ScriptDefinedTypes.cs'
+$GeneratedTypeNetworkHarnessSource = Read-RequiredFile 'Source/AvidScriptGenerated/Private/Tests/AvidScriptGeneratedNetworkTopologyHarness.cpp'
+$GeneratedTypeModuleSource = Read-RequiredFile 'Source/AvidScriptGenerated/Private/AvidScriptGeneratedModule.cpp'
+$NetworkTopologyBuildSource = Read-RequiredFile 'Build/RunAvidScriptNetworkTopology.ps1'
 $SemanticUeRuntimeContractSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Model/SemanticUeTypeRuntimeContract.cs'
 $CSharpUePropertyPlanSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpUePropertyAccessPlan.cs'
 $CSharpGuestLowererSourceForUeTypes = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpGuestLowerer.cs'
@@ -842,6 +845,33 @@ foreach ($RequiredScriptDefinedNetworkSample in @(
     'LastReplicatedDamage')) {
     if (-not $ScriptDefinedTypeSampleSource.Contains($RequiredScriptDefinedNetworkSample)) {
         Add-Violation "script-defined UE type sample is missing network closure $RequiredScriptDefinedNetworkSample"
+    }
+}
+foreach ($RequiredGeneratedNetworkTopologyContract in @(
+    'AvidScriptGeneratedNetworkTopologyRole=',
+    'ServerSubmitDamage',
+    'ClientConfirmDamage',
+    'MulticastObserveDamage',
+    'damage_rep_notify_count',
+    'active_instance')) {
+    if (-not $GeneratedTypeNetworkHarnessSource.Contains($RequiredGeneratedNetworkTopologyContract)) {
+        Add-Violation "generated type network topology harness is missing $RequiredGeneratedNetworkTopologyContract"
+    }
+}
+foreach ($RequiredGeneratedNetworkTopologyDriverContract in @(
+    'RuntimeComponent',
+    'GeneratedTypes',
+    'AvidScriptGeneratedNetworkTopology',
+    'generated_types')) {
+    if (-not $NetworkTopologyBuildSource.Contains($RequiredGeneratedNetworkTopologyDriverContract)) {
+        Add-Violation "network topology driver is missing $RequiredGeneratedNetworkTopologyDriverContract"
+    }
+}
+foreach ($RequiredGeneratedNetworkTopologyLifecycle in @(
+    'FAvidScriptGeneratedNetworkTopologyHarness::Startup()',
+    'FAvidScriptGeneratedNetworkTopologyHarness::Shutdown()')) {
+    if (-not $GeneratedTypeModuleSource.Contains($RequiredGeneratedNetworkTopologyLifecycle)) {
+        Add-Violation "generated module does not own topology harness lifecycle: $RequiredGeneratedNetworkTopologyLifecycle"
     }
 }
 

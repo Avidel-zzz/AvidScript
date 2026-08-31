@@ -10,7 +10,7 @@
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 Development" src="https://img.shields.io/badge/Platform-Win64-0078D4?logo=windows&logoColor=white">
-  <img alt="Phase 59 D5" src="https://img.shields.io/badge/Status-Phase%2059%20D5-159957">
+  <img alt="Phase 59 D6" src="https://img.shields.io/badge/Status-Phase%2059%20D6-159957">
   <img alt="Automation 376/376" src="https://img.shields.io/badge/Automation-376%2F376-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
@@ -416,7 +416,7 @@ trap 会回滚本次借出的对象 capability。
 
 | 领域 | 已实现 |
 | --- | --- |
-| C# 定义 UE 类型 | C# 声明真实 Actor、Component、World/GameInstance Subsystem、`UCLASS/UFUNCTION/UPROPERTY`、继承与 override、Blueprint 子类、RepNotify、Server/Client/NetMulticast RPC 和类型生命周期；网络声明自动启用 Actor/Component 原生复制，确定性生成 native shell 与 WASM body |
+| C# 定义 UE 类型 | C# 声明真实 Actor、Component、World/GameInstance Subsystem、`UCLASS/UFUNCTION/UPROPERTY`、继承与 override、Blueprint 子类、RepNotify、Server/Client/NetMulticast RPC 和类型生命周期；网络声明自动启用原生复制，generated Actor 已通过 dedicated/listen 独立进程闭环 |
 | C# 生命周期 | `BeginPlay`、`Tick`、`EndPlay`、Timer、Gameplay Event、Overlap 路由、受控 `async void` 导出 |
 | 确定性 Continuation | `Delay` / `NextTick`、`FStreamableManager` 异步对象加载、生成式 UE latent producer、typed outcome、显式 cancellation source、状态与对象结果、CPS dispatcher、不透明 token、Session active/prepared 事务、owner generation/World liveness 围栏与 teardown |
 | 受控 async/await | 多个顺序 await、分支/循环/switch/一维数组 foreach 内部 await、固定值与数组引用 local 跨 await、局部重赋值、`if/else`、integral/enum `switch`、`for`/`foreach`/`while`/`do`、`break`/`continue`/`return`、continuation CFG、per-await liveness frame、Reflection 生成 `FooAsync`、零 Guest 堆 CPS segment、稳定 resume debug map、store/read/schedule fail closed；不依赖 CLR `Task` Runtime |
@@ -721,7 +721,7 @@ listen server + 1 remote client 独立进程证明 BeginPlay -> RPC -> replicate
 最新纯执行层正式 benchmark 使用 clean `9148bff/73eb948d` 候选，12-kernel
 correctness failure 为 0、fallback 为 false；P95 尾延迟改善但领导力门禁仍未关闭，
 未解决债务已转移到 P59。阶段末完整 AvidScript Automation 为 376/376 Success。
-最新功能报告见 [P59.D5b 中文完成报告](Docs/Phase59/P59.D5b_Generated_Type_Editor_Reload_Routing.md)，
+最新功能报告见 [P59.D6b 中文完成报告](Docs/Phase59/P59.D6b_Generated_Type_Network_Topology.md)，
 最新性能报告见 [P57.13 中文结果](Docs/Phase57/P57.13_Cranelift_Speed_Profile.md)。
 
 工程规则：

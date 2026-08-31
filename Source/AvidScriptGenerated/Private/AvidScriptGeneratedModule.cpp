@@ -2,6 +2,7 @@
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeRuntimeHost.h"
+#include "Tests/AvidScriptGeneratedNetworkTopologyHarness.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptGenerated, Log, All);
 
@@ -16,6 +17,7 @@ class FAvidScriptGeneratedModule final : public IModuleInterface
 public:
 	virtual void StartupModule() override
 	{
+		FAvidScriptGeneratedNetworkTopologyHarness::Startup();
 		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("AvidScript"));
 		if (!Plugin.IsValid())
 		{
@@ -49,6 +51,7 @@ public:
 
 	virtual void ShutdownModule() override
 	{
+		FAvidScriptGeneratedNetworkTopologyHarness::Shutdown();
 		if (!bInstalledPackage)
 		{
 			return;

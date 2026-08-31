@@ -245,6 +245,22 @@
       "prevention": "Semantic 在运行生成器前按 OrdinalIgnoreCase 校验类型名、反射成员名和 UFUNCTION 参数名；参数不得遮蔽同一 UClass 的反射成员。",
       "source": "observed:2026-08-31-P59.D6a",
       "last_observed": "2026-08-31 P59.D6a (RPC 参数 damage 与 UPROPERTY Damage 冲突，首次 no-clean UHT 失败)"
+    },
+    {
+      "id": "ue-container-api-comes-from-current-engine-source",
+      "tags": ["ue", "cpp", "containers", "build"],
+      "summary": "UE 容器接口不能按 STL、LINQ 或其他引擎的相似命名推断。",
+      "prevention": "新增 TArray/TMap/TSet 调用前先搜索 UE5.8 当前源码或仓库已编译用例；需要计数时优先复用已验证的显式循环。",
+      "source": "observed:2026-08-31-P59.D6b",
+      "last_observed": "2026-08-31 P59.D6b (误用不存在的 TArray::CountByPredicate，首次 no-clean UBT 失败)"
+    },
+    {
+      "id": "powershell-foreach-results-materialize-before-pipeline",
+      "tags": ["powershell", "evidence", "workflow"],
+      "summary": "PowerShell 的 foreach 语句不能作为裸表达式直接接到管道。",
+      "prevention": "汇总多层循环证据时先用 $Rows = @(foreach (...) { ... }) 物化结果，再单独执行 $Rows | Format-Table 或 ConvertTo-Json。",
+      "source": "observed:2026-08-31-P59.D6b",
+      "last_observed": "2026-08-31 P59.D6b (读取已通过的 aggregate 时把 foreach 直接接 Format-Table，产生 empty pipe parser error)"
     }
   ]
 }

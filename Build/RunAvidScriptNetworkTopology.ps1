@@ -1,6 +1,8 @@
 param(
     [ValidateSet('All', 'Dedicated', 'Listen')]
     [string]$Topology = 'All',
+    [ValidateSet('RuntimeComponent', 'GeneratedTypes')]
+    [string]$Contract = 'RuntimeComponent',
     [string]$EngineRoot = 'C:\UnrealEngine',
     [string]$ProjectPath = '',
     [int]$TimeoutSeconds = 75,
@@ -29,8 +31,14 @@ $RunId = '{0}_{1}_{2}' -f (
     [DateTimeOffset]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')),
     $PID,
     ([Guid]::NewGuid().ToString('N').Substring(0, 8))
-$RunRoot = Join-Path 'C:\tmp' ("AvidScriptNetworkTopology_$RunId")
+$RunRoot = Join-Path 'C:\tmp' ("AvidScriptNetworkTopology_${Contract}_$RunId")
 [void][System.IO.Directory]::CreateDirectory($RunRoot)
+$CommandLineStem = if ($Contract -eq 'GeneratedTypes') {
+    'AvidScriptGeneratedNetworkTopology'
+}
+else {
+    'AvidScriptNetworkTopology'
+}
 
 function Get-FreeTcpPort {
     $Listener = [System.Net.Sockets.TcpListener]::new(
@@ -148,6 +156,7 @@ function Assert-RoleResult {
         [Parameter(Mandatory = $true)][int]$ExpectedProcessId
     )
     if ([int]$Result.schema_version -ne 1 -or
+        ($Contract -eq 'GeneratedTypes' -and [string]$Result.contract -cne 'generated_types') -or
         [string]$Result.topology -cne $ExpectedTopology -or
         [string]$Result.role -cne $ExpectedRole -or
         [int]$Result.client_id -ne $ExpectedClientId -or
@@ -157,6 +166,48 @@ function Assert-RoleResult {
         throw "Invalid $ExpectedTopology/$ExpectedRole result: $($Result | ConvertTo-Json -Depth 16 -Compress)"
     }
     $Actors = @($Result.actors)
+    if ($Contract -eq 'GeneratedTypes') {
+        if ($ExpectedRole -eq 'server') {
+            $CompletedActors = @($Actors | Where-Object {
+                [double]$_.damage -eq 41.0 -and
+                [int]$_.damage_rep_notify_count -eq 0 -and
+                [int]$_.server_rpc_count -eq 1 -and
+                [double]$_.last_server_damage -eq 41.0 -and
+                [int]$_.client_ack_count -eq 0 -and
+                [int]$_.multicast_count -eq 1 -and
+                [double]$_.last_multicast_damage -eq 41.0 -and
+                [bool]$_.has_authority -and
+                [bool]$_.has_begun_play -and
+                [bool]$_.actor_begun_play -and
+                [bool]$_.active_instance
+            })
+            if ($Actors.Count -ne $ExpectedClients -or
+                $CompletedActors.Count -ne $ExpectedClients) {
+                throw "$ExpectedTopology generated server has $($Actors.Count) actors and completed $($CompletedActors.Count)/$ExpectedClients."
+            }
+        }
+        else {
+            $CompletedActors = @($Actors | Where-Object {
+                [double]$_.damage -eq 41.0 -and
+                [int]$_.damage_rep_notify_count -ge 1 -and
+                [double]$_.last_replicated_damage -eq 41.0 -and
+                [int]$_.server_rpc_count -eq 0 -and
+                [double]$_.last_server_damage -eq 0.0 -and
+                [int]$_.client_ack_count -eq 1 -and
+                [double]$_.last_client_ack_damage -eq 41.0 -and
+                [int]$_.multicast_count -eq 1 -and
+                [double]$_.last_multicast_damage -eq 41.0 -and
+                -not [bool]$_.has_authority -and
+                [bool]$_.has_begun_play -and
+                [bool]$_.actor_begun_play -and
+                [bool]$_.active_instance
+            })
+            if ($Actors.Count -ne 1 -or $CompletedActors.Count -ne 1) {
+                throw "$ExpectedTopology generated client $ExpectedClientId has $($Actors.Count) actors and $($CompletedActors.Count) completed."
+            }
+        }
+        return
+    }
     if ($ExpectedRole -eq 'server') {
         $CompletedActors = @($Actors | Where-Object {
             [int]$_.replicated_score -eq 41 -and
@@ -215,12 +266,12 @@ function Invoke-Topology {
             '-nullrhi',
             '-nosound',
             "-port=$Port",
-            "-AvidScriptNetworkTopology=$Name",
-            '-AvidScriptNetworkTopologyRole=server',
-            '-AvidScriptNetworkTopologyClientId=0',
-            "-AvidScriptNetworkTopologyExpectedClients=$ClientCount",
-            "-AvidScriptNetworkTopologyTimeout=$TimeoutSeconds",
-            "-AvidScriptNetworkTopologyResult=$ServerResultPath"
+            "-${CommandLineStem}=$Name",
+            "-${CommandLineStem}Role=server",
+            "-${CommandLineStem}ClientId=0",
+            "-${CommandLineStem}ExpectedClients=$ClientCount",
+            "-${CommandLineStem}Timeout=$TimeoutSeconds",
+            "-${CommandLineStem}Result=$ServerResultPath"
         )
         $Server = Start-TopologyProcess `
             -Name "$Name-server" `
@@ -248,12 +299,12 @@ function Invoke-Topology {
                 '-nosplash',
                 '-nullrhi',
                 '-nosound',
-                "-AvidScriptNetworkTopology=$Name",
-                '-AvidScriptNetworkTopologyRole=client',
-                "-AvidScriptNetworkTopologyClientId=$ClientId",
-                "-AvidScriptNetworkTopologyExpectedClients=$ClientCount",
-                "-AvidScriptNetworkTopologyTimeout=$TimeoutSeconds",
-                "-AvidScriptNetworkTopologyResult=$ClientResultPath"
+                "-${CommandLineStem}=$Name",
+                "-${CommandLineStem}Role=client",
+                "-${CommandLineStem}ClientId=$ClientId",
+                "-${CommandLineStem}ExpectedClients=$ClientCount",
+                "-${CommandLineStem}Timeout=$TimeoutSeconds",
+                "-${CommandLineStem}Result=$ClientResultPath"
             )
             $Client = Start-TopologyProcess `
                 -Name "$Name-client-$ClientId" `
@@ -342,7 +393,7 @@ function Invoke-Topology {
 $ProfileBuild = $null
 $TopologyResults = [System.Collections.Generic.List[object]]::new()
 try {
-    if (-not $SkipProfileBuild) {
+    if ($Contract -eq 'RuntimeComponent' -and -not $SkipProfileBuild) {
         $ProfileBuild = Invoke-ProfileBuild
     }
     if ($Topology -in @('All', 'Dedicated')) {
@@ -371,6 +422,7 @@ $Aggregate = [ordered]@{
     engine_root = [System.IO.Path]::GetFullPath($EngineRoot)
     project_path = $ProjectPath
     timeout_seconds = $TimeoutSeconds
+    contract = $Contract
     profile_build = $ProfileBuild
     topologies = @($TopologyResults)
 }
@@ -380,6 +432,6 @@ $AggregateJson = $Aggregate | ConvertTo-Json -Depth 64
     $AggregatePath,
     $AggregateJson,
     [System.Text.UTF8Encoding]::new($false))
-Write-Output "AvidScript network topology: $($TopologyResults.Count)/$($TopologyResults.Count) passed"
+Write-Output "AvidScript network topology ($Contract): $($TopologyResults.Count)/$($TopologyResults.Count) passed"
 Write-Output "Aggregate: $AggregatePath"
 Write-Output "Aggregate SHA-256: $(Get-FileSha256 $AggregatePath)"

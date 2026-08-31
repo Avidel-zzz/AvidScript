@@ -73,10 +73,13 @@
 - `P59.D6a`：脚本定义 Actor/Component 的 replicated property 与 Server/Client/NetMulticast UFUNCTION
   会自动启用原生复制壳层；Subsystem 网络声明和 FName 大小写冲突在 Semantic 阶段 fail closed。真实 C#
   Server RPC 与 multicast body 已在 authority World 中进入 Wasmtime，双端传输留给 D6b。
+- `P59.D6b`：生成 `AProjectile` 已通过 dedicated server + 2 clients 与 listen server + 1 remote client
+  独立进程拓扑；客户端 Server RPC、authority C# body、replicated `Damage`、客户端 C# RepNotify、
+  owning Client RPC 与 NetMulticast 全部闭环，结果由 role/PID/计数/值和 active instance JSON 验证。
 
 ## 待完成
 
-- `P59.D` Blueprint、网络、Cook 与集中 Gate。
+- `P59.D` Cook 边界与集中 Gate。
 
 ## 最终证据
 

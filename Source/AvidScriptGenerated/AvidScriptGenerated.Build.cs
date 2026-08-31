@@ -19,6 +19,7 @@ public class AvidScriptGenerated : ModuleRules
 			new[]
 			{
 				"AvidScriptRuntime",
+				"Json",
 				"Projects"
 			}
 		);
