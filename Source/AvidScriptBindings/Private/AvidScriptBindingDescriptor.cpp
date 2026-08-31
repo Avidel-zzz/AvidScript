@@ -514,7 +514,9 @@ bool IsCanonicalAvidScriptBindingStructWireLeaf(
 	}
 	if (Type.Kind == TEXT("enum"))
 	{
-		return Type.CanonicalType.StartsWith(TEXT("enum:/Script/"))
+		return (Type.CanonicalType.StartsWith(TEXT("enum:/Script/"))
+				|| Type.CanonicalType.StartsWith(
+					TEXT("enum:avidscript_async_action:")))
 			&& !Type.CppType.IsEmpty()
 			&& Type.Size == 4
 			&& Type.Alignment == 4
@@ -588,7 +590,7 @@ bool ValidateAvidScriptBindingStructWireGraph(
 		{
 			if (!IsCanonicalAvidScriptBindingStructWireLeaf(Type))
 			{
-				OutErrorSource = TEXT("types.fields");
+				OutErrorSource = Type.StableId + TEXT(":types.fields.leaf");
 				return false;
 			}
 			return true;
@@ -602,7 +604,7 @@ bool ValidateAvidScriptBindingStructWireGraph(
 			|| Type.AbiTypes[0] != TEXT("i")
 			|| ActiveTypes.Contains(Type.StableId))
 		{
-			OutErrorSource = TEXT("types.fields");
+			OutErrorSource = Type.StableId + TEXT(":types.fields.layout");
 			return false;
 		}
 
@@ -624,11 +626,22 @@ bool ValidateAvidScriptBindingStructWireGraph(
 				|| Child->Size > 4096
 				|| Field.WireOffset != ExpectedWireOffset
 				|| Field.WireOffset > 4096
-				|| Child->Size > 4096 - Field.WireOffset
-				|| !ValidateType(*Child, Depth + 1, InOutNodes))
+				|| Child->Size > 4096 - Field.WireOffset)
 			{
 				ActiveTypes.Remove(Type.StableId);
-				OutErrorSource = TEXT("types.fields");
+				OutErrorSource = FString::Printf(
+					TEXT("%s:types.fields.%s:offset=%d:expected=%d:size=%d:alignment=%d"),
+					*Type.StableId,
+					*Field.Name,
+					Field.WireOffset,
+					ExpectedWireOffset,
+					Child == nullptr ? INDEX_NONE : Child->Size,
+					Child == nullptr ? INDEX_NONE : Child->Alignment);
+				return false;
+			}
+			if (!ValidateType(*Child, Depth + 1, InOutNodes))
+			{
+				ActiveTypes.Remove(Type.StableId);
 				return false;
 			}
 			PreviousEnd = Field.WireOffset + Child->Size;
@@ -641,7 +654,7 @@ bool ValidateAvidScriptBindingStructWireGraph(
 			|| Type.Size != PreviousEnd + Padding)
 		{
 			ActiveTypes.Remove(Type.StableId);
-			OutErrorSource = TEXT("types.fields");
+			OutErrorSource = Type.StableId + TEXT(":types.fields.size");
 			return false;
 		}
 		ActiveTypes.Remove(Type.StableId);
@@ -3461,6 +3474,24 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 							== Binding.AsyncAction.PayloadTypeId;
 					})
 				: nullptr;
+		const bool bCompositeAsyncPayload = AsyncPayloadType != nullptr
+			&& AsyncPayloadType->Kind == TEXT("struct_wire")
+			&& !AsyncPayloadType->StructFields.IsEmpty()
+			&& AsyncPayloadType->StructFields[0].Name == TEXT("Outcome")
+			&& AsyncPayloadType->StructFields[0].WireOffset == 0;
+		const FAvidScriptBindingTypeModel* AsyncOutcomeType =
+			AsyncPayloadType != nullptr
+				&& AsyncPayloadType->Kind == TEXT("enum")
+			? AsyncPayloadType
+			: bCompositeAsyncPayload
+				? OutPackage.Types.FindByPredicate(
+					[AsyncPayloadType](
+						const FAvidScriptBindingTypeModel& Type)
+					{
+						return Type.StableId
+							== AsyncPayloadType->StructFields[0].TypeId;
+					})
+				: nullptr;
 		const bool bAsyncActionContractValid = !bAsyncActionBinding
 			? !Binding.AsyncAction.IsEnabled()
 				&& Binding.AsyncAction.ActionClass.IsEmpty()
@@ -3476,18 +3507,22 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 					== TEXT("first_broadcast_wins")
 				&& Binding.AsyncAction.bCancellable
 				&& AsyncPayloadType != nullptr
-				&& AsyncPayloadType->Kind == TEXT("enum")
-				&& AsyncPayloadType->Size == sizeof(int32)
+				&& (AsyncPayloadType->Kind == TEXT("enum")
+					|| bCompositeAsyncPayload)
+				&& AsyncPayloadType->Size >= sizeof(int32)
 				&& AsyncPayloadType->AbiTypes
 					== TArray<FString>{ TEXT("i") }
-				&& AsyncPayloadType->EnumValues.Num()
+				&& AsyncOutcomeType != nullptr
+				&& AsyncOutcomeType->Kind == TEXT("enum")
+				&& AsyncOutcomeType->Size == sizeof(int32)
+				&& AsyncOutcomeType->EnumValues.Num()
 					== Binding.AsyncAction.Outcomes.Num()
 				&& Binding.AsyncAction.Outcomes.Num() > 0
 				&& Binding.AsyncAction.Outcomes.ContainsByPredicate(
-					[AsyncPayloadType](
+					[AsyncOutcomeType](
 						const FAvidScriptBindingAsyncActionOutcomeModel& Outcome)
 					{
-						return !AsyncPayloadType->EnumValues.ContainsByPredicate(
+						return !AsyncOutcomeType->EnumValues.ContainsByPredicate(
 							[&Outcome](
 								const FAvidScriptBindingEnumValue& Value)
 							{

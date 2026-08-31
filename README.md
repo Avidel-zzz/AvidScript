@@ -48,7 +48,7 @@ Phase 60 当前已经落地：
 - Blueprint 自声明 callable 双向调用，以及 `[AvidEvent]` 的 `before/after/replace` 接管；
 - `UBlueprintAsyncActionBase` 工厂的强类型 outcome awaitable，以及无参 outcome 的 Session Runtime 闭环。
 
-带 payload 的 AsyncAction outcome 仍在 P60.C2c 推进，不在当前可用范围内。
+带 payload 的 AsyncAction outcome 已生成 typed result，但 Runtime 捕获仍在 P60.C2c 推进，暂不列入可用闭环。
 
 详细进度见 [Phase 60 中文收尾记录](Docs/Phase60/P60_Closeout.md)。
 

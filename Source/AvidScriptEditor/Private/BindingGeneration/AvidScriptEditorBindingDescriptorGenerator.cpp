@@ -44,13 +44,14 @@ constexpr const TCHAR* DelegateOutputGeneratorVersion = TEXT("58.2.0");
 constexpr const TCHAR* DelegateValueGeneratorVersion = TEXT("60.2.0");
 constexpr const TCHAR* BlueprintFunctionGeneratorVersion = TEXT("60.3.0");
 constexpr const TCHAR* BlueprintEventGeneratorVersion = TEXT("60.3.1");
-constexpr const TCHAR* BlueprintAsyncActionGeneratorVersion = TEXT("60.4.0");
+constexpr const TCHAR* BlueprintAsyncActionGeneratorVersion = TEXT("60.4.1");
 
 struct FResolvedAsyncActionOutcomeDescriptor
 {
 	FString StableId;
 	FString DelegateMember;
 	int32 Ordinal = INDEX_NONE;
+	FAvidScriptProjectedDelegateEvent Projection;
 };
 
 struct FResolvedAsyncActionDescriptor
@@ -400,6 +401,46 @@ FString MakeAsyncActionAbiSignature(
 	return TEXT("(") + Parameters + TEXT("i)I");
 }
 
+bool IsBlueprintAsyncActionPayloadTypeSupported(
+	const FAvidScriptProjectedBindingType& Type,
+	const bool bNestedStruct = false)
+{
+	if (Type.Kind == TEXT("scalar")
+		|| Type.Kind == TEXT("enum")
+		|| Type.Kind == TEXT("struct"))
+	{
+		return Type.Size > 0 && Type.Size <= 4096;
+	}
+	if (Type.Kind == TEXT("object_handle"))
+	{
+		return !bNestedStruct && Type.Size == 8;
+	}
+	if (Type.Kind != TEXT("struct_wire")
+		|| Type.Size <= 0
+		|| Type.Size > 4096
+		|| Type.StructFieldTypes.Num() != Type.StructFields.Num())
+	{
+		return false;
+	}
+	for (const TSharedPtr<FAvidScriptProjectedBindingType>& Child :
+		Type.StructFieldTypes)
+	{
+		if (!Child.IsValid()
+			|| !IsBlueprintAsyncActionPayloadTypeSupported(*Child, true))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+FString MakeBlueprintAsyncActionPayloadFieldName(
+	const FString& Outcome,
+	const FString& Parameter)
+{
+	return Outcome + TEXT("_") + Parameter;
+}
+
 bool ResolveBlueprintAsyncAction(
 	const UFunction& Function,
 	const FAvidScriptProjectedFunction& Projection,
@@ -480,12 +521,31 @@ bool ResolveBlueprintAsyncAction(
 				: ProjectionSource;
 			return false;
 		}
-		if (OutcomeProjection.ReturnValue.Type.Kind != TEXT("void")
-			|| !OutcomeProjection.Parameters.IsEmpty())
+		FinalizeType(OutcomeProjection.ReturnValue.Type);
+		for (FAvidScriptProjectedBindingValue& Parameter :
+			OutcomeProjection.Parameters)
+		{
+			FinalizeType(Parameter.Type);
+		}
+		if (OutcomeProjection.ReturnValue.Type.Kind != TEXT("void"))
 		{
 			OutCategory = TEXT("async_action_outcome_payload_pending");
 			OutSource = DelegateProperty->GetPathName();
 			return false;
+		}
+		for (const FAvidScriptProjectedBindingValue& Parameter :
+			OutcomeProjection.Parameters)
+		{
+			if ((Parameter.Direction != TEXT("value")
+					&& Parameter.Direction != TEXT("const_ref"))
+				|| !IsBlueprintAsyncActionPayloadTypeSupported(
+					Parameter.Type))
+			{
+				OutCategory = TEXT("async_action_outcome_payload_type_unsupported");
+				OutSource = DelegateProperty->GetPathName()
+					+ TEXT(":") + Parameter.Name;
+				return false;
+			}
 		}
 
 		FResolvedAsyncActionOutcomeDescriptor Outcome;
@@ -497,26 +557,97 @@ bool ResolveBlueprintAsyncAction(
 			+ Outcome.DelegateMember
 			+ TEXT("::")
 			+ DelegateProperty->SignatureFunction->GetPathName());
+		Outcome.Projection = MoveTemp(OutcomeProjection);
 		OutAction.Outcomes.Add(MoveTemp(Outcome));
 	}
 
-	OutAction.PayloadType.CanonicalType =
+	FAvidScriptProjectedBindingType OutcomeType;
+	OutcomeType.CanonicalType =
 		TEXT("enum:avidscript_async_action:") + Function.GetPathName();
-	OutAction.PayloadType.Kind = TEXT("enum");
-	OutAction.PayloadType.CppType = ActionClass->GetName()
+	OutcomeType.Kind = TEXT("enum");
+	OutcomeType.CppType = ActionClass->GetName()
 		+ TEXT("_") + Function.GetName() + TEXT("Outcome");
-	OutAction.PayloadType.Size = sizeof(int32);
-	OutAction.PayloadType.Alignment = alignof(int32);
-	OutAction.PayloadType.AbiValueTypes = { TEXT("i") };
+	OutcomeType.Size = sizeof(int32);
+	OutcomeType.Alignment = alignof(int32);
+	OutcomeType.AbiValueTypes = { TEXT("i") };
+	bool bHasPayloadParameters = false;
 	for (const FResolvedAsyncActionOutcomeDescriptor& Outcome :
 		OutAction.Outcomes)
 	{
-		OutAction.PayloadType.EnumValues.Add({
+		OutcomeType.EnumValues.Add({
 			Outcome.DelegateMember,
 			Outcome.Ordinal
 		});
+		bHasPayloadParameters |= !Outcome.Projection.Parameters.IsEmpty();
 	}
-	FinalizeType(OutAction.PayloadType);
+	FinalizeType(OutcomeType);
+	if (!bHasPayloadParameters)
+	{
+		OutAction.PayloadType = MoveTemp(OutcomeType);
+		return true;
+	}
+
+	FAvidScriptProjectedBindingType ResultType;
+	ResultType.CanonicalType =
+		TEXT("struct_wire:avidscript_async_action_result:")
+		+ Function.GetPathName();
+	ResultType.Kind = TEXT("struct_wire");
+	ResultType.CppType = ActionClass->GetName()
+		+ TEXT("_") + Function.GetName() + TEXT("Result");
+	ResultType.Alignment = OutcomeType.Alignment;
+	ResultType.AbiValueTypes = { TEXT("i") };
+	ResultType.StructFields.Add({
+		TEXT("Outcome"),
+		OutcomeType.StableId,
+		0
+	});
+	ResultType.StructFieldTypes.Add(
+		MakeShared<FAvidScriptProjectedBindingType>(OutcomeType));
+	int32 WireOffset = OutcomeType.Size;
+	for (const FResolvedAsyncActionOutcomeDescriptor& Outcome :
+		OutAction.Outcomes)
+	{
+		for (const FAvidScriptProjectedBindingValue& Parameter :
+			Outcome.Projection.Parameters)
+		{
+			WireOffset = Align(
+				WireOffset,
+				FMath::Max(1, Parameter.Type.Alignment));
+			if (WireOffset < 0
+				|| Parameter.Type.Size <= 0
+				|| Parameter.Type.Size > 4096 - WireOffset)
+			{
+				OutCategory = TEXT("async_action_outcome_payload_size_exceeded");
+				OutSource = Function.GetPathName();
+				return false;
+			}
+			ResultType.StructFields.Add({
+				MakeBlueprintAsyncActionPayloadFieldName(
+					Outcome.DelegateMember,
+					Parameter.Name),
+				Parameter.Type.StableId,
+				WireOffset
+			});
+			ResultType.StructFieldTypes.Add(
+				MakeShared<FAvidScriptProjectedBindingType>(
+					Parameter.Type));
+			ResultType.Alignment = FMath::Max(
+				ResultType.Alignment,
+				Parameter.Type.Alignment);
+			WireOffset += Parameter.Type.Size;
+		}
+	}
+	ResultType.Size = Align(
+		WireOffset,
+		FMath::Max(1, ResultType.Alignment));
+	if (ResultType.Size <= 0 || ResultType.Size > 4096)
+	{
+		OutCategory = TEXT("async_action_outcome_payload_size_exceeded");
+		OutSource = Function.GetPathName();
+		return false;
+	}
+	FinalizeType(ResultType);
+	OutAction.PayloadType = MoveTemp(ResultType);
 	return true;
 }
 
@@ -2359,6 +2490,18 @@ bool GenerateBindingDescriptor(
 
 	Package.SelectionHash = FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(Package);
 	Package.PackageHash = FAvidScriptBindingDescriptorIdentity::MakePackageHash(Package);
+	FString TypeGraphError;
+	if (!FAvidScriptBindingDescriptorLayout::ValidateTypeGraph(
+			Package.Types,
+			TypeGraphError))
+	{
+		SetFailure(
+			OutResult,
+			TEXT("serialize_failed"),
+			TypeGraphError.IsEmpty() ? PackageName : TypeGraphError,
+			TEXT("Inspect the generated descriptor type graph."));
+		return false;
+	}
 	if (!FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 			Package,
 			OutJson))

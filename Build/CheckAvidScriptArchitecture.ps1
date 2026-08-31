@@ -1727,6 +1727,7 @@ $CSharpBindingSliceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/C
 $CSharpOperationLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpOperationLowerer.cs'
 $CSharpCallOperationLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpCallOperationLowerer.cs'
 $BindingRuntimeIntegrationTestsSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/Tests/AvidScriptEditorBindingRuntimeIntegrationTests.cpp'
+$BindingDescriptorGeneratorTestsSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/Tests/AvidScriptEditorBindingDescriptorGeneratorTests.cpp'
 $BidirectionalPropertiesSampleSource = Read-RequiredFile 'Samples/CSharp/BidirectionalProperties/BidirectionalProperties.cs'
 $LatentGameplaySampleSource = Read-RequiredFile 'Samples/CSharp/LatentGameplay/LatentGameplayScript.cs'
 $LatentGameplayProfile = Read-RequiredFile 'Samples/CSharp/LatentGameplay/LatentGameplay.csharp-profile.json'
@@ -4659,6 +4660,19 @@ foreach ($RequiredBlueprintAsyncActionRuntimeContract in @(
         -not $ContinuationOwnerSource.Contains($RequiredBlueprintAsyncActionRuntimeContract) -and
         -not $BindingRuntimeIntegrationTestsSource.Contains($RequiredBlueprintAsyncActionRuntimeContract)) {
         Add-Violation "Blueprint async action Runtime bridge is missing $RequiredBlueprintAsyncActionRuntimeContract"
+    }
+}
+foreach ($RequiredBlueprintAsyncActionPayloadContract in @(
+    'struct_wire:avidscript_async_action_result:',
+    'async_action_outcome_payload_type_unsupported',
+    'MakeBlueprintAsyncActionPayloadFieldName',
+    'BlueprintAsyncActionPayloadSchema23'
+)) {
+    if (-not $BindingDescriptorGeneratorSource.Contains($RequiredBlueprintAsyncActionPayloadContract) -and
+        -not $BindingDescriptorSource.Contains($RequiredBlueprintAsyncActionPayloadContract) -and
+        -not $BindingRuntimeIntegrationTestsSource.Contains($RequiredBlueprintAsyncActionPayloadContract) -and
+        -not $BindingDescriptorGeneratorTestsSource.Contains($RequiredBlueprintAsyncActionPayloadContract)) {
+        Add-Violation "Blueprint async action typed payload contract is missing $RequiredBlueprintAsyncActionPayloadContract"
     }
 }
 if ($BindingCodecProgramSource.Contains('GuestMemory.WriteBytes(')) {

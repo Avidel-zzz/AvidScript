@@ -173,6 +173,15 @@ DECLARE_DYNAMIC_DELEGATE_RetVal_TwoParams(
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(
 	FAvidScriptEditorAsyncActionOutcome);
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+	FAvidScriptEditorAsyncActionPayloadCompleted,
+	int32, Score,
+	UObject*, Target);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+	FAvidScriptEditorAsyncActionPayloadFailed,
+	int32, ErrorCode);
+
 UCLASS()
 class UAvidScriptEditorAsyncActionTestObject final
 	: public UBlueprintAsyncActionBase
@@ -192,6 +201,32 @@ public:
 	static UAvidScriptEditorAsyncActionTestObject* WaitForSignal()
 	{
 		return NewObject<UAvidScriptEditorAsyncActionTestObject>();
+	}
+
+	virtual void Activate() override
+	{
+	}
+};
+
+UCLASS()
+class UAvidScriptEditorAsyncActionPayloadTestObject final
+	: public UBlueprintAsyncActionBase
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(BlueprintAssignable)
+	FAvidScriptEditorAsyncActionPayloadCompleted Completed;
+
+	UPROPERTY(BlueprintAssignable)
+	FAvidScriptEditorAsyncActionPayloadFailed Failed;
+
+	UFUNCTION(
+		BlueprintCallable,
+		meta = (BlueprintInternalUseOnly = "true"))
+	static UAvidScriptEditorAsyncActionPayloadTestObject* WaitForPayload()
+	{
+		return NewObject<UAvidScriptEditorAsyncActionPayloadTestObject>();
 	}
 
 	virtual void Activate() override

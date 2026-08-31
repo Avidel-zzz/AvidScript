@@ -4849,4 +4849,119 @@ bool FAvidScriptEditorBindingDescriptorBlueprintAsyncActionTest::RunTest(
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingDescriptorBlueprintAsyncActionPayloadTest,
+	"AvidScript.Editor.BindingDescriptor.BlueprintAsyncActionPayloadSchema23",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingDescriptorBlueprintAsyncActionPayloadTest::RunTest(
+	const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	const TArray<FAvidScriptReflectedFunctionSelection> Functions = {
+		{
+			UAvidScriptEditorAsyncActionPayloadTestObject::StaticClass()
+				->GetPathName(),
+			TEXT("WaitForPayload")
+		}
+	};
+	FString Json;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+			TEXT("Payload async action generates from delegate structure"),
+			FAvidScriptEditorBindingDescriptorGenerator::Generate(
+				TEXT("avidscript.tests.blueprint_async_action_payload"),
+				Functions,
+				Json,
+				GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorCategory + TEXT(":")
+			+ GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Package;
+	FString ErrorCategory;
+	FString ErrorSource;
+	if (!TestTrue(
+			TEXT("Payload async action descriptor parses"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				Json,
+				Package,
+				ErrorCategory,
+				ErrorSource))
+		|| !TestEqual(TEXT("Payload action publishes one binding"), Package.Bindings.Num(), 1))
+	{
+		AddError(ErrorCategory + TEXT(":") + ErrorSource);
+		return false;
+	}
+
+	const FAvidScriptBindingFunctionModel& Binding = Package.Bindings[0];
+	const FAvidScriptBindingTypeModel* ResultType =
+		Package.Types.FindByPredicate(
+			[&Binding](const FAvidScriptBindingTypeModel& Type)
+			{
+				return Type.StableId == Binding.AsyncAction.PayloadTypeId;
+			});
+	if (!TestTrue(
+			TEXT("Payload action publishes one typed result struct"),
+			ResultType != nullptr
+				&& ResultType->Kind == TEXT("struct_wire")))
+	{
+		return false;
+	}
+	TestEqual(
+		TEXT("Result struct contains outcome plus every delegate parameter"),
+		ResultType->StructFields.Num(),
+		4);
+	if (ResultType->StructFields.Num() == 4)
+	{
+		TestEqual(TEXT("Result discriminator is first"), ResultType->StructFields[0].Name, FString(TEXT("Outcome")));
+		TestEqual(TEXT("Completed score field is namespaced"), ResultType->StructFields[1].Name, FString(TEXT("Completed_Score")));
+		TestEqual(TEXT("Completed object field is namespaced"), ResultType->StructFields[2].Name, FString(TEXT("Completed_Target")));
+		TestEqual(TEXT("Failed field is namespaced"), ResultType->StructFields[3].Name, FString(TEXT("Failed_ErrorCode")));
+		TestTrue(
+			TEXT("Result wire offsets are strictly increasing"),
+			ResultType->StructFields[0].WireOffset
+				< ResultType->StructFields[1].WireOffset
+				&& ResultType->StructFields[1].WireOffset
+					< ResultType->StructFields[2].WireOffset
+				&& ResultType->StructFields[2].WireOffset
+					< ResultType->StructFields[3].WireOffset);
+	}
+	const FAvidScriptBindingTypeModel* OutcomeType =
+		ResultType->StructFields.IsEmpty()
+		? nullptr
+		: Package.Types.FindByPredicate(
+			[ResultType](const FAvidScriptBindingTypeModel& Type)
+			{
+				return Type.StableId
+					== ResultType->StructFields[0].TypeId;
+			});
+	TestTrue(
+		TEXT("Result discriminator keeps the generated outcome enum"),
+		OutcomeType != nullptr
+			&& OutcomeType->Kind == TEXT("enum")
+			&& OutcomeType->EnumValues.Num() == 2);
+
+	FString ReferenceSource;
+	FString ManifestJson;
+	FAvidScriptCSharpBindingEmitResult EmitResult;
+	TestTrue(
+		TEXT("Payload action emits its C# facade"),
+		FAvidScriptEditorCSharpBindingEmitter::Emit(
+			Json,
+			ReferenceSource,
+			ManifestJson,
+			EmitResult));
+	TestTrue(
+		TEXT("Generated facade awaits the typed result struct"),
+		ReferenceSource.Contains(
+			TEXT("public readonly struct ") + ResultType->CppType)
+			&& ReferenceSource.Contains(
+				TEXT("AvidOutcomeAwaitable<") + ResultType->CppType
+					+ TEXT("> WaitForPayloadAsync() => default;")));
+	return true;
+}
+
 #endif
