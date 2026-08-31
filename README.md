@@ -38,7 +38,7 @@ Timer、受控 `async/await`、UE latent UFUNCTION、异步对象加载、Overla
 | 网络闭环 | Generated Actor 已通过 dedicated server + 2 clients、listen server + 1 remote client 的独立进程验证 |
 | Cook 发布 | 自动生成无 `Saved/` 依赖的内容寻址 bundle；UBT 只暂存当前 pointer 与六个 NonUFS 文件 |
 | 运行时 | Wasmtime 45 主后端，Session 生命周期、generational handle、GC/World 隔离和事务式热重载已接通 |
-| 性能 | 已冻结的 UE prepared reflection、数组区域和游戏 workload 均领先同机 Puerts 对照；纯执行层尚未达到全部 kernel 的领先门禁 |
+| 性能 | Generated Type p50：shell 68.7 ns、prepared export 61.2 ns、五属性脚本体 196.3 ns、lifecycle pair 1.611 ms；纯执行层尚未达到全部 kernel 的领先门禁 |
 
 当前生成 API 不是“完整 UE 全量绑定”：只有 Profile 授权且现有 ABI/codec 能表达的类型会被生成。
 C# Generated Type 的 Editor、网络与 Cook-layout load 已闭环；完整打包启动、Shipping 和移动端验收仍在后续阶段。

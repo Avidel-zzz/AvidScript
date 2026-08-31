@@ -5,10 +5,12 @@
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "HAL/PlatformTime.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Paths.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeRuntimeHost.h"
+#include "ScriptTypes/AvidScriptGeneratedTypeRouter.h"
 #include "UObject/StrongObjectPtr.h"
 #include "UObject/UnrealType.h"
 
@@ -67,6 +69,75 @@ void DestroyGeneratedGameInstance(UGameInstance*& GameInstance)
 	}
 	GameInstance->RemoveFromRoot();
 	GameInstance = nullptr;
+}
+
+struct FAvidScriptGeneratedTypeBenchmarkStats
+{
+	double P50Nanoseconds = 0.0;
+	double P95Nanoseconds = 0.0;
+};
+
+template <typename OperationType>
+bool MeasureGeneratedTypeLane(
+	const TCHAR* Lane,
+	int32 SampleCount,
+	int32 IterationsPerSample,
+	OperationType&& Operation,
+	FAvidScriptGeneratedTypeBenchmarkStats& OutStats)
+{
+	constexpr int32 WarmupIterations = 64;
+	for (int32 Index = 0; Index < WarmupIterations; ++Index)
+	{
+		if (!Operation())
+		{
+			return false;
+		}
+	}
+
+	TArray<double> Samples;
+	Samples.Reserve(SampleCount);
+	for (int32 SampleIndex = 0; SampleIndex < SampleCount; ++SampleIndex)
+	{
+		const uint64 StartCycles = FPlatformTime::Cycles64();
+		for (int32 Iteration = 0; Iteration < IterationsPerSample; ++Iteration)
+		{
+			if (!Operation())
+			{
+				return false;
+			}
+		}
+		const uint64 ElapsedCycles = FPlatformTime::Cycles64() - StartCycles;
+		Samples.Add(
+			FPlatformTime::ToSeconds64(ElapsedCycles)
+			* 1'000'000'000.0
+			/ static_cast<double>(IterationsPerSample));
+	}
+
+	Samples.Sort();
+	const int32 P50Index = FMath::Clamp(
+		FMath::CeilToInt(0.50 * static_cast<double>(SampleCount)) - 1,
+		0,
+		SampleCount - 1);
+	const int32 P95Index = FMath::Clamp(
+		FMath::CeilToInt(0.95 * static_cast<double>(SampleCount)) - 1,
+		0,
+		SampleCount - 1);
+	OutStats.P50Nanoseconds = Samples[P50Index];
+	OutStats.P95Nanoseconds = Samples[P95Index];
+
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("AvidScriptGeneratedTypeBenchmark lane=%s samples=%d iterations=%d p50_ns=%.3f p95_ns=%.3f"),
+		Lane,
+		SampleCount,
+		IterationsPerSample,
+		OutStats.P50Nanoseconds,
+		OutStats.P95Nanoseconds);
+	return FMath::IsFinite(OutStats.P50Nanoseconds)
+		&& FMath::IsFinite(OutStats.P95Nanoseconds)
+		&& OutStats.P50Nanoseconds > 0.0
+		&& OutStats.P95Nanoseconds > 0.0;
 }
 }
 
@@ -402,6 +473,122 @@ bool FAvidScriptGeneratedCSharpLifecycleKindsTest::RunTest(
 		ProfileAfterShutdown->DeinitializeCount,
 		1);
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptGeneratedTypePerformanceMatrixTest,
+	"AvidScript.Performance.GeneratedTypeMatrix",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptGeneratedTypePerformanceMatrixTest::RunTest(const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	UWorld* World = nullptr;
+	if (!CreateGeneratedScriptWorld(World))
+	{
+		AddError(TEXT("Failed to create the generated type benchmark world."));
+		return true;
+	}
+
+	AProjectile* const Projectile = World->SpawnActor<AProjectile>();
+	if (!TestNotNull(TEXT("Generated benchmark projectile spawns"), Projectile))
+	{
+		DestroyGeneratedScriptWorld(World);
+		return true;
+	}
+	const FURL Url;
+	World->InitializeActorsForPlay(Url);
+	World->BeginPlay();
+	World->SetBegunPlay(true);
+	if (!Projectile->HasActorBegunPlay())
+	{
+		Projectile->DispatchBeginPlay();
+	}
+
+	constexpr int32 HotSampleCount = 11;
+	constexpr int32 HotIterations = 2000;
+	constexpr int32 LifecycleSampleCount = 7;
+	constexpr int32 LifecycleIterations = 32;
+	int64 ResultSink = 0;
+	FString OperationError;
+	FAvidScriptGeneratedTypeBenchmarkStats ShellStats;
+	FAvidScriptGeneratedTypeBenchmarkStats PreparedExportStats;
+	FAvidScriptGeneratedTypeBenchmarkStats PropertyStats;
+	FAvidScriptGeneratedTypeBenchmarkStats LifecycleStats;
+
+	const bool bShellMeasured = MeasureGeneratedTypeLane(
+		TEXT("native_shell_dispatch"),
+		HotSampleCount,
+		HotIterations,
+		[&]()
+		{
+			ResultSink += Projectile->GetActivationCount();
+			return true;
+		},
+		ShellStats);
+	const bool bPreparedExportMeasured = MeasureGeneratedTypeLane(
+		TEXT("prepared_wasm_export"),
+		HotSampleCount,
+		HotIterations,
+		[&]()
+		{
+			int32 Result = 0;
+			const bool bInvoked = FAvidScriptGeneratedTypeRouter::Get().InvokeGeneratedTypeMember(
+				*Projectile,
+				4u,
+				4u,
+				TConstArrayView<FAvidScriptGeneratedCallArgument>(),
+				&Result);
+			ResultSink += Result;
+			return bInvoked;
+		},
+		PreparedExportStats);
+	const bool bPropertyMeasured = MeasureGeneratedTypeLane(
+		TEXT("prepared_property_access"),
+		HotSampleCount,
+		HotIterations,
+		[&]()
+		{
+			Projectile->Activate_Implementation(1.0f);
+			return true;
+		},
+		PropertyStats);
+	const bool bLifecycleMeasured = MeasureGeneratedTypeLane(
+		TEXT("lifecycle_crossing"),
+		LifecycleSampleCount,
+		LifecycleIterations,
+		[&]()
+		{
+			OperationError.Reset();
+			if (!FAvidScriptGeneratedTypeRuntimeHost::Get().EndInstance(
+				*Projectile,
+				OperationError))
+			{
+				return false;
+			}
+			return FAvidScriptGeneratedTypeRuntimeHost::Get().BeginInstance(
+				*Projectile,
+				4u,
+				OperationError);
+		},
+		LifecycleStats);
+
+	TestTrue(TEXT("Native shell dispatch benchmark completes"), bShellMeasured);
+	TestTrue(TEXT("Prepared WASM export benchmark completes"), bPreparedExportMeasured);
+	TestTrue(TEXT("Prepared property benchmark completes"), bPropertyMeasured);
+	TestTrue(TEXT("Lifecycle crossing benchmark completes"), bLifecycleMeasured);
+	if (!OperationError.IsEmpty())
+	{
+		AddError(OperationError);
+	}
+	TestTrue(TEXT("Benchmark calls produce an observable result"), ResultSink > 0);
+	TestTrue(TEXT("Native shell p95 remains below the catastrophic ceiling"), ShellStats.P95Nanoseconds < 1'000'000.0);
+	TestTrue(TEXT("Prepared export p95 remains below the catastrophic ceiling"), PreparedExportStats.P95Nanoseconds < 1'000'000.0);
+	TestTrue(TEXT("Prepared property p95 remains below the catastrophic ceiling"), PropertyStats.P95Nanoseconds < 2'000'000.0);
+	TestTrue(TEXT("Lifecycle p95 remains below the catastrophic ceiling"), LifecycleStats.P95Nanoseconds < 50'000'000.0);
+
+	DestroyGeneratedScriptWorld(World);
 	return true;
 }
 

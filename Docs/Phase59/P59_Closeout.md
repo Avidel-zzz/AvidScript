@@ -79,7 +79,9 @@
 - `P59.D7`：C# Generated Type 已自动发布无 `Saved/` 依赖的内容寻址 Cook bundle；UBT 只把
   `current.json` 与当前六个文件登记为 NonUFS RuntimeDependency，非 Editor 模块只读取 Content pointer。
   真实 isolated Runtime load 与 GeneratedTypes Automation `7/7` 通过；完整 BuildCookRun/Shipping 留给 P62。
-- `P59.D`：D1-D7 实现批次已由状态机标记完成；当前只执行阶段集中 Gate，不再扩展产品范围。
+- `P59.D8`：Generated Type 四轴性能矩阵已固定真实 shell、prepared export、五属性脚本体和
+  Session lifecycle crossing；本机 p50 分别为 `68.7 ns`、`61.2 ns`、`196.3 ns` 和 `1.611 ms`。
+- `P59.D`：D1-D8 实现与 Gate instrumentation 已完成；当前只执行阶段集中 Gate，不再扩展产品范围。
 
 ## 待完成
 
