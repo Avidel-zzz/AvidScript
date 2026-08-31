@@ -2055,6 +2055,58 @@ FString FAvidScriptBindingDescriptorIdentity::MakeDelegateEventStableId(
 		ReturnValue));
 }
 
+bool FAvidScriptBindingDescriptorIdentity::TryMakeDelegateInvokeSpec(
+	const FAvidScriptBindingDelegateEventModel& Event,
+	const int32 BindingOrdinal,
+	FAvidScriptBindingDelegateInvokeSpec& OutSpec)
+{
+	OutSpec = FAvidScriptBindingDelegateInvokeSpec();
+	if ((Event.DelegateKind != TEXT("singlecast")
+			&& Event.DelegateKind != TEXT("multicast"))
+		|| Event.StableId.Len() != 64
+		|| Event.CanonicalIdentity.IsEmpty()
+		|| BindingOrdinal < 0)
+	{
+		return false;
+	}
+
+	FString Parameters(TEXT("ii"));
+	for (const FAvidScriptBindingValueModel& Parameter : Event.Parameters)
+	{
+		if (Parameter.Direction == TEXT("ref")
+			|| Parameter.Direction == TEXT("out"))
+		{
+			Parameters += TEXT("i");
+			continue;
+		}
+		if ((Parameter.Direction != TEXT("value")
+				&& Parameter.Direction != TEXT("const_ref"))
+			|| Parameter.AbiTypes.IsEmpty())
+		{
+			return false;
+		}
+		Parameters += FString::Join(Parameter.AbiTypes, TEXT(""));
+	}
+	if (Event.ReturnValue.CanonicalType != TEXT("void"))
+	{
+		if (Event.ReturnValue.Direction != TEXT("return"))
+		{
+			return false;
+		}
+		Parameters += TEXT("i");
+	}
+
+	OutSpec.CanonicalIdentity = Event.CanonicalIdentity
+		+ TEXT("::delegate_invoke:v1");
+	OutSpec.StableId = FAvidScriptHash::Sha256HexUtf8(
+		OutSpec.CanonicalIdentity);
+	OutSpec.BindingOrdinal = BindingOrdinal;
+	OutSpec.ModuleName = TEXT("avidscript");
+	OutSpec.ImportName = TEXT("avid_ue_") + OutSpec.StableId.Left(16);
+	OutSpec.Signature = TEXT("(") + Parameters + TEXT(")i");
+	return true;
+}
+
 FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 	const FAvidScriptBindingPackageModel& Package)
 {
@@ -3333,13 +3385,24 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 			}
 			if (OutPackage.SchemaVersion >= 20)
 			{
-				const FAvidScriptBindingTypeModel* ReturnType =
-					TypesByCanonical.Find(Event.ReturnValue.CanonicalType);
-				if (ReturnType == nullptr
-					|| ReturnType->StableId != Event.ReturnValue.TypeId
-					|| ReturnType->Kind != Event.ReturnValue.Kind
-					|| ReturnType->CppType != Event.ReturnValue.CppType
-					|| ReturnType->AbiTypes != Event.ReturnValue.AbiTypes)
+				const bool bVoidReturn =
+					Event.ReturnValue.CanonicalType == TEXT("void")
+					&& Event.ReturnValue.TypeId
+						== FAvidScriptHash::Sha256HexUtf8(TEXT("void"))
+					&& Event.ReturnValue.Kind == TEXT("void")
+					&& Event.ReturnValue.CppType == TEXT("void")
+					&& Event.ReturnValue.AbiTypes.IsEmpty();
+				const FAvidScriptBindingTypeModel* ReturnType = bVoidReturn
+					? nullptr
+					: TypesByCanonical.Find(
+						Event.ReturnValue.CanonicalType);
+				if (!bVoidReturn
+					&& (ReturnType == nullptr
+						|| ReturnType->StableId != Event.ReturnValue.TypeId
+						|| ReturnType->Kind != Event.ReturnValue.Kind
+						|| ReturnType->CppType != Event.ReturnValue.CppType
+						|| ReturnType->AbiTypes
+							!= Event.ReturnValue.AbiTypes))
 				{
 					OutErrorCategory = TEXT("descriptor_contract_invalid");
 					OutErrorSource = Event.CanonicalIdentity + TEXT(":return");

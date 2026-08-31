@@ -516,6 +516,8 @@ bool FAvidScriptGeneratedTypePerformanceMatrixTest::RunTest(const FString& Param
 	FAvidScriptGeneratedTypeBenchmarkStats PreparedExportStats;
 	FAvidScriptGeneratedTypeBenchmarkStats PropertyStats;
 	FAvidScriptGeneratedTypeBenchmarkStats LifecycleStats;
+	constexpr uint32 ProjectileTypeOrdinal = 4u;
+	constexpr uint32 GetActivationCountMemberOrdinal = 5u;
 
 	const bool bShellMeasured = MeasureGeneratedTypeLane(
 		TEXT("native_shell_dispatch"),
@@ -536,8 +538,8 @@ bool FAvidScriptGeneratedTypePerformanceMatrixTest::RunTest(const FString& Param
 			int32 Result = 0;
 			const bool bInvoked = FAvidScriptGeneratedTypeRouter::Get().InvokeGeneratedTypeMember(
 				*Projectile,
-				4u,
-				4u,
+				ProjectileTypeOrdinal,
+				GetActivationCountMemberOrdinal,
 				TConstArrayView<FAvidScriptGeneratedCallArgument>(),
 				&Result);
 			ResultSink += Result;

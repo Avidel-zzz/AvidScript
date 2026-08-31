@@ -6172,4 +6172,311 @@ bool FAvidScriptEditorBindingLatentProcessEventTest::RunTest(
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorDelegateActiveInvokeIntegrationTest,
+	"AvidScript.Editor.BindingRuntime.DelegateActiveInvoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorDelegateActiveInvokeIntegrationTest::RunTest(
+	const FString& Parameters)
+{
+	const FString OwnerPath =
+		AAvidScriptEditorDelegateEventTestActor::StaticClass()->GetPathName();
+	FAvidScriptBindingSelectionProfile Profile;
+	Profile.PackageName = TEXT("avidscript.test.delegate_active_invoke");
+	Profile.SelfClassPath = OwnerPath;
+	Profile.ExplicitDelegateEvents.Add({
+		OwnerPath,
+		TEXT("OnScriptSignal"),
+		TEXT("multicast"),
+		TEXT("replace")
+	});
+	Profile.ExplicitDelegateEvents.Add({
+		OwnerPath,
+		TEXT("OnSinglecastSignal"),
+		TEXT("singlecast"),
+		TEXT("replace")
+	});
+
+	FString DescriptorJson;
+	FAvidScriptBindingSelectionResolveResult SelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+		TEXT("Active delegate descriptor generates from reflection"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+			Profile,
+			DescriptorJson,
+			SelectionResult,
+			GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Descriptor;
+	FString ParseCategory;
+	FString ParseSource;
+	if (!TestTrue(
+		TEXT("Active delegate descriptor parses"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			DescriptorJson,
+			Descriptor,
+			ParseCategory,
+			ParseSource)))
+	{
+		AddError(ParseCategory + TEXT(": ") + ParseSource);
+		return false;
+	}
+
+	TSharedPtr<const FAvidScriptBindingPackage> Package;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	if (!TestTrue(
+		TEXT("Active delegate package loads prepared plans"),
+		FAvidScriptBindingPackage::LoadDescriptor(
+			DescriptorJson,
+			Package,
+			LoadResult))
+		|| !TestNotNull(TEXT("Active delegate package exists"), Package.Get()))
+	{
+		AddError(LoadResult.ErrorCategory + TEXT(": ")
+			+ LoadResult.ErrorDetails);
+		return false;
+	}
+
+	TArray<FAvidScriptPreparedDynamicBinding> InvokeBindings;
+	FString BuildError;
+	if (!TestTrue(
+		TEXT("Package publishes both delegate invoke plans"),
+		Package->BuildPreparedDynamicBindings(InvokeBindings, BuildError))
+		|| !TestEqual(
+			TEXT("Two delegate invoke plans are prepared"),
+			InvokeBindings.Num(),
+			2))
+	{
+		AddError(BuildError);
+		return false;
+	}
+
+	const auto FindInvokeBinding = [&Descriptor, &InvokeBindings](
+		const FString& Kind)
+		-> const FAvidScriptPreparedDynamicBinding*
+	{
+		const FAvidScriptBindingDelegateEventModel* Event =
+			Descriptor.DelegateEvents.FindByPredicate(
+				[&Kind](const FAvidScriptBindingDelegateEventModel& Candidate)
+				{
+					return Candidate.DelegateKind == Kind;
+				});
+		FAvidScriptBindingDelegateInvokeSpec Spec;
+		if (Event == nullptr
+			|| !FAvidScriptBindingDescriptorIdentity::TryMakeDelegateInvokeSpec(
+				*Event,
+				0,
+				Spec))
+		{
+			return nullptr;
+		}
+		return InvokeBindings.FindByPredicate(
+			[&Spec](const FAvidScriptPreparedDynamicBinding& Binding)
+			{
+				return Binding.StableId == Spec.StableId;
+			});
+	};
+	const FAvidScriptPreparedDynamicBinding* Singlecast =
+		FindInvokeBinding(TEXT("singlecast"));
+	const FAvidScriptPreparedDynamicBinding* Multicast =
+		FindInvokeBinding(TEXT("multicast"));
+	if (!TestNotNull(TEXT("Singlecast invoke binding resolves"), Singlecast)
+		|| !TestNotNull(TEXT("Multicast broadcast binding resolves"), Multicast))
+	{
+		return false;
+	}
+
+	UWorld* World = nullptr;
+	if (!TestTrue(
+		TEXT("Delegate invocation world is created"),
+		CreateAvidScriptBindingRuntimeIntegrationWorld(World)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyAvidScriptBindingRuntimeIntegrationWorld(World);
+	};
+	AAvidScriptEditorDelegateEventTestActor* Receiver =
+		World->SpawnActor<AAvidScriptEditorDelegateEventTestActor>();
+	if (!TestNotNull(TEXT("Delegate invocation actor is spawned"), Receiver))
+	{
+		return false;
+	}
+	Receiver->OnSinglecastSignal.BindDynamic(
+		Receiver,
+		&AAvidScriptEditorDelegateEventTestActor::CaptureSinglecastSignal);
+	Receiver->OnScriptSignal.AddDynamic(
+		Receiver,
+		&AAvidScriptEditorDelegateEventTestActor::CaptureScriptSignal);
+
+	FAvidScriptBindingRuntimeTestGuestMemory GuestMemory(128);
+	constexpr uint32 RefAddress = 16;
+	constexpr uint32 OutAddress = 32;
+	constexpr uint32 ReturnAddress = 48;
+	GuestMemory.WriteValue<int32>(RefAddress, 5);
+	FAvidScriptBindingInvocationContext InvocationContext;
+	InvocationContext.World = World;
+	InvocationContext.WritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+	TArray<uint8> Scratch;
+	Scratch.SetNumUninitialized(FMath::Max(1, Package->GetRequiredScratchSize()));
+	FAvidScriptDynamicHostCallResult Result;
+	const uint64 SinglecastArguments[] = {
+		0,
+		0,
+		RefAddress,
+		OutAddress,
+		ReturnAddress
+	};
+	if (!TestTrue(
+		TEXT("Prepared singlecast executes its bound native target"),
+		Singlecast->Invoke(
+			Singlecast->ImmutableInvocationCell,
+			*Receiver,
+			MakeArrayView(SinglecastArguments),
+			&GuestMemory,
+			InvocationContext,
+			Scratch,
+			Result)))
+	{
+		AddError(Result.Details);
+		return false;
+	}
+	TestEqual(TEXT("Singlecast ref output commits"), GuestMemory.ReadValue<int32>(RefAddress), 8);
+	TestEqual(TEXT("Singlecast out output commits"), GuestMemory.ReadValue<int32>(OutAddress), 16);
+	TestEqual(TEXT("Singlecast return output commits"), GuestMemory.ReadValue<int32>(ReturnAddress), 18);
+	TestEqual(TEXT("Singlecast target runs once"), Receiver->SinglecastInvocationCount, 1);
+
+	uint64 MulticastArguments[] = {
+		0,
+		0,
+		0,
+		0,
+		7,
+		MakeAvidScriptBindingRuntimeF32Cell(1.5f)
+	};
+	if (!TestTrue(
+		TEXT("Prepared multicast broadcasts to its bound native target"),
+		Multicast->Invoke(
+			Multicast->ImmutableInvocationCell,
+			*Receiver,
+			MakeArrayView(MulticastArguments),
+			&GuestMemory,
+			InvocationContext,
+			Scratch,
+			Result)))
+	{
+		AddError(Result.Details);
+		return false;
+	}
+	TestEqual(TEXT("Multicast payload reaches the target"), Receiver->CapturedDelegateCount, 7);
+	TestEqual(TEXT("Multicast float payload reaches the target"), Receiver->CapturedDelegateScale, 1.5f);
+
+	static constexpr int32 WarmupCount = 3;
+	static constexpr int32 SampleCount = 20;
+	static constexpr int32 IterationsPerSample = 512;
+	TArray<double> NativeSamples;
+	TArray<double> PreparedSamples;
+	NativeSamples.Reserve(SampleCount);
+	PreparedSamples.Reserve(SampleCount);
+	const FAvidScriptBindingPackageInstrumentation WarmInstrumentation =
+		Package->GetInstrumentation();
+	for (int32 RunIndex = 0;
+		RunIndex < WarmupCount + SampleCount;
+		++RunIndex)
+	{
+		const double NativeStart = FPlatformTime::Seconds();
+		for (int32 Iteration = 0;
+			Iteration < IterationsPerSample;
+			++Iteration)
+		{
+			Receiver->OnScriptSignal.Broadcast(
+				nullptr,
+				RunIndex + Iteration,
+				1.5f);
+		}
+		const double NativeMs =
+			(FPlatformTime::Seconds() - NativeStart)
+			* 1000.0 / IterationsPerSample;
+
+		const double PreparedStart = FPlatformTime::Seconds();
+		for (int32 Iteration = 0;
+			Iteration < IterationsPerSample;
+			++Iteration)
+		{
+			MulticastArguments[4] = RunIndex + Iteration;
+			if (!Multicast->Invoke(
+					Multicast->ImmutableInvocationCell,
+					*Receiver,
+					MakeArrayView(MulticastArguments),
+					nullptr,
+					InvocationContext,
+					Scratch,
+					Result))
+			{
+				AddError(Result.Details);
+				return false;
+			}
+		}
+		const double PreparedMs =
+			(FPlatformTime::Seconds() - PreparedStart)
+			* 1000.0 / IterationsPerSample;
+		if (RunIndex >= WarmupCount)
+		{
+			NativeSamples.Add(NativeMs);
+			PreparedSamples.Add(PreparedMs);
+		}
+	}
+	const FAvidScriptBindingPackageInstrumentation FinalInstrumentation =
+		Package->GetInstrumentation();
+	const double NativeP50 =
+		CalculateAvidScriptPropertyBenchmarkPercentile(NativeSamples, 0.50);
+	const double NativeP95 =
+		CalculateAvidScriptPropertyBenchmarkPercentile(NativeSamples, 0.95);
+	const double PreparedP50 =
+		CalculateAvidScriptPropertyBenchmarkPercentile(PreparedSamples, 0.50);
+	const double PreparedP95 =
+		CalculateAvidScriptPropertyBenchmarkPercentile(PreparedSamples, 0.95);
+	TestTrue(TEXT("Native delegate P50 is sampled"), NativeP50 > 0.0);
+	TestTrue(TEXT("Prepared delegate P50 is sampled"), PreparedP50 > 0.0);
+	TestEqual(
+		TEXT("Warm delegate calls perform no reflected-name lookup"),
+		FinalInstrumentation.ReflectedNameLookupCount,
+		WarmInstrumentation.ReflectedNameLookupCount);
+	TestTrue(
+		TEXT("Prepared delegate overhead remains bounded against UE dynamic broadcast"),
+		PreparedP50 <= NativeP50 * 12.0);
+	AddInfo(FString::Printf(
+		TEXT("phase60_delegate_invoke_benchmark | samples=%d | iterations=%d | native_p50_ms=%.9f | native_p95_ms=%.9f | prepared_p50_ms=%.9f | prepared_p95_ms=%.9f | p50_ratio=%.6f | warm_reflected_name_lookups=0"),
+		SampleCount,
+		IterationsPerSample,
+		NativeP50,
+		NativeP95,
+		PreparedP50,
+		PreparedP95,
+		PreparedP50 / NativeP50));
+
+	Receiver->OnSinglecastSignal.Unbind();
+	TestFalse(
+		TEXT("Unbound singlecast fails closed"),
+		Singlecast->Invoke(
+			Singlecast->ImmutableInvocationCell,
+			*Receiver,
+			MakeArrayView(SinglecastArguments),
+			&GuestMemory,
+			InvocationContext,
+			Scratch,
+			Result));
+	TestTrue(
+		TEXT("Unbound singlecast reports a stable category"),
+		Result.Details.Contains(TEXT("binding_delegate_unbound")));
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

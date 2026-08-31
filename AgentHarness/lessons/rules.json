@@ -358,6 +358,46 @@
       "prevention": "每个改变 static host、generated facade、registry 或 reviewed helper closure 的批次都在同批更新精确 multiset、注册输入和 canonical hash；提交后必须在 detached clean tree 跑 Gate，并用上一基线对照区分历史漂移与新增违规。",
       "source": "observed:2026-08-31-P60.B1G",
       "last_observed": "2026-08-31 P60.B1G (b280553 与 f8a4c7d 同报 20 类历史差异；刷新 checker 后工作树仅剩 clean-tree 拒绝)"
+    },
+    {
+      "id": "dotnet-shared-obj-test-runners-run-serially",
+      "tags": ["dotnet", "tests", "parallelism", "workflow"],
+      "summary": "引用同一项目且共享 obj 输出的 .NET test runner 不能直接并行。",
+      "prevention": "默认串行运行共享 AvidScript.CSharpFrontend obj 的 Semantic 与 Guest runner；只有为 BaseIntermediateOutputPath 配置独立目录后才允许并行，避免 CS2012 文件锁。",
+      "source": "observed:2026-08-31-P60.B2",
+      "last_observed": "2026-08-31 P60.B2 (Semantic 与 Guest 并行写入共享 obj/Release，Semantic 以 CS2012 失败；串行重跑 96/96 通过)"
+    },
+    {
+      "id": "actor-delegate-tests-use-spawned-world-actors",
+      "tags": ["ue", "automation", "actor", "delegate"],
+      "summary": "Actor Delegate 的真实动态调用测试必须使用有效 UWorld 中 Spawn 的 Actor。",
+      "prevention": "Delegate ProcessDelegate/ProcessEvent 集成测试创建受控测试 World 并使用 SpawnActor；不要用 NewObject<AActor> 作为执行闭环证据，测试结束统一销毁 World。",
+      "source": "observed:2026-08-31-P60.B2",
+      "last_observed": "2026-08-31 P60.B2 (NewObject Actor 的 prepared 调用返回成功但目标 UFUNCTION 未执行；改为 World SpawnActor 后 ref/out/return 闭环通过)"
+    },
+    {
+      "id": "schema20-delegate-void-return-validates-inline",
+      "tags": ["descriptor", "schema", "delegate", "compatibility"],
+      "summary": "schema 20 Delegate 的 void return 是内联合同，不要求 types 表存在 void 项。",
+      "prevention": "解析混合单播/多播 descriptor 时，void return 按 canonical/type id/kind/cpp/ABI 空列表完整校验；非 void 才与 types 表交叉验证，并保留旧 schema 兼容测试。",
+      "source": "observed:2026-08-31-P60.B2",
+      "last_observed": "2026-08-31 P60.B2 (混合 schema 20 descriptor 曾因多播 void 不在 types 表而被误拒绝，修复后五条聚焦测试通过)"
+    },
+    {
+      "id": "generated-manifest-schema-bumps-update-runtime-consumers",
+      "tags": ["generated-types", "schema", "runtime", "compatibility"],
+      "summary": "Generated Type manifest schema 升级必须同步所有 Runtime 消费者和正式启动证据。",
+      "prevention": "Generator 修改 ManifestSchemaVersion 或 GeneratorVersion 时同批搜索 Registry、RuntimeHost、Build 脚本与夹具常量；除 generator 测试外，必须用当前正式 package 启动一次 Editor 并运行 GeneratedTypes 回归。",
+      "source": "observed:2026-09-01-P60.B2",
+      "last_observed": "2026-09-01 P60.B2 (P60.A2 已生成 schema 6 manifest，但 Runtime Registry 仍要求 schema 5，导致正式 EncounterSubsystem package 启动失败并污染完整 Automation)"
+    },
+    {
+      "id": "generated-member-ordinal-fixtures-follow-current-manifest",
+      "tags": ["generated-types", "manifest", "tests", "performance"],
+      "summary": "生成类型成员新增后，手写 ordinal fixture 可能调用到另一个合法成员并伪装成运行时失败。",
+      "prevention": "生成清单变更后搜索性能与运行时夹具中的 type/member ordinal；用当前 type-manifest 的 stable member identity 核对具名常量，并在聚焦回归中确认目标 call shape 与返回类型。",
+      "source": "observed:2026-09-01-P60.B2",
+      "last_observed": "2026-09-01 P60.B2 (GetActivationCount 从 member 4 移到 5，旧性能夹具误把 EndPlay void 当作 int32 prepared export 调用而 fail-closed)"
     }
   ]
 }

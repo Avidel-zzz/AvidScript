@@ -3743,12 +3743,22 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 	const int32 SceneAttachmentBindingCount = bHasSceneComponentFactory
 		? FAvidScriptSceneAttachmentBinding::GetSpecs().Num()
 		: 0;
+	int32 DelegateInvokeBindingCount = 0;
+	for (const FAvidScriptBindingDelegateEventModel& Event :
+		Model.DelegateEvents)
+	{
+		DelegateInvokeBindingCount += Event.DelegateKind == TEXT("singlecast")
+			|| Event.DelegateKind == TEXT("multicast")
+			? 1
+			: 0;
+	}
 	const int32 TotalImportCount =
 		Model.Bindings.Num()
 		+ LifecycleBindingCount
 		+ ObjectTypeBindingCount
 		+ ObjectFactoryBindingCount
-		+ SceneAttachmentBindingCount;
+		+ SceneAttachmentBindingCount
+		+ DelegateInvokeBindingCount;
 	Package->Impl->Plans.Reserve(TotalImportCount);
 	Package->Impl->VmPackage.Imports.Reserve(TotalImportCount);
 	const auto PublishGeneratedPlan = [&Package](
@@ -4395,6 +4405,177 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		Package->Impl->Plans.Add(MoveTemp(Plan));
 	}
 
+	const auto PublishDelegateInvokePlans = [&]()
+	{
+	for (int32 EventIndex = 0;
+		EventIndex < Model.DelegateEvents.Num();
+		++EventIndex)
+	{
+		const FAvidScriptBindingDelegateEventModel& Event =
+			Model.DelegateEvents[EventIndex];
+		if (Event.DelegateKind != TEXT("singlecast")
+			&& Event.DelegateKind != TEXT("multicast"))
+		{
+			continue;
+		}
+		if (!Package->Impl->PreparedDelegateEventCells.IsValidIndex(
+				EventIndex))
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_delegate_invoke_cell_missing"),
+				Event.CanonicalIdentity,
+				TEXT("The active delegate event has no prepared signature cell."));
+			return false;
+		}
+		const FAvidScriptPreparedDelegateEventCell& EventCell =
+			*Package->Impl->PreparedDelegateEventCells[EventIndex];
+		const int32 BindingOrdinal = Package->Impl->Plans.Num();
+		FAvidScriptBindingDelegateInvokeSpec InvokeSpec;
+		if (EventCell.StableId != Event.StableId
+			|| EventCell.ExpectedSourceClass == nullptr
+			|| EventCell.SignatureFunction == nullptr
+			|| !FAvidScriptBindingDescriptorIdentity::TryMakeDelegateInvokeSpec(
+				Event,
+				BindingOrdinal,
+				InvokeSpec))
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_delegate_invoke_contract_mismatch"),
+				Event.CanonicalIdentity,
+				TEXT("The delegate invoke import cannot be derived from the prepared event contract."));
+			return false;
+		}
+
+		FAvidScriptRuntimeBindingInvocationPlan Plan;
+		Plan.Kind = Event.DelegateKind == TEXT("singlecast")
+			? EAvidScriptBindingInvocationKind::DelegateSinglecastInvoke
+			: EAvidScriptBindingInvocationKind::DelegateMulticastBroadcast;
+		Plan.OwnerClass = EventCell.ExpectedSourceClass;
+		Plan.Function = EventCell.SignatureFunction;
+		Plan.ReflectedProperty = Event.DelegateKind == TEXT("singlecast")
+			? static_cast<FProperty*>(EventCell.SinglecastProperty)
+			: static_cast<FProperty*>(EventCell.MulticastProperty);
+		Plan.DebugPath = Plan.ReflectedProperty == nullptr
+			? Event.CanonicalIdentity
+			: Plan.ReflectedProperty->GetPathName();
+		Plan.bRequiresWriteAccess = true;
+		Plan.ReloadEffect = EAvidScriptBindingReloadEffect::Unsupported;
+		Plan.FrameSize = Plan.Function->GetStructureSize();
+		Plan.FrameAlignment = FMath::Max(1, Plan.Function->GetMinAlignment());
+		if (Plan.ReflectedProperty == nullptr
+			|| Plan.FrameSize < Plan.Function->ParmsSize
+			|| !FMath::IsPowerOfTwo(Plan.FrameAlignment)
+			|| Plan.FrameSize > MAX_int32 - (Plan.FrameAlignment - 1))
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_delegate_invoke_layout_invalid"),
+				Event.CanonicalIdentity,
+				TEXT("The prepared delegate property or parameter frame layout is invalid."));
+			return false;
+		}
+		Plan.RequiredScratchSize = Plan.FrameSize + Plan.FrameAlignment - 1;
+
+		TArray<FProperty*> ReflectedParameters;
+		for (TFieldIterator<FProperty> It(Plan.Function); It; ++It)
+		{
+			FProperty* Property = *It;
+			if (Property->HasAnyPropertyFlags(CPF_Parm)
+				&& !Property->HasAnyPropertyFlags(CPF_ReturnParm))
+			{
+				ReflectedParameters.Add(Property);
+			}
+		}
+		if (ReflectedParameters.Num() != Event.Parameters.Num())
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_delegate_invoke_parameter_count_mismatch"),
+				Event.CanonicalIdentity,
+				TEXT("The delegate invoke parameter count changed since descriptor generation."));
+			return false;
+		}
+
+		int32 ArgumentOffset = 2;
+		for (int32 ParameterIndex = 0;
+			ParameterIndex < Event.Parameters.Num();
+			++ParameterIndex)
+		{
+			FProperty* Property = ReflectedParameters[ParameterIndex];
+			const FAvidScriptBindingValueModel& Parameter =
+				Event.Parameters[ParameterIndex];
+			FAvidScriptRuntimeBindingValuePlan ValuePlan;
+			FString Details;
+			if (Property->GetName() != Parameter.Name
+				|| GetAvidScriptRuntimePropertyDirection(Property)
+					!= Parameter.Direction
+				|| !BuildAvidScriptRuntimeValuePlan(
+					Property,
+					Parameter,
+					DeclaredTypesById,
+					ArgumentOffset,
+					ValuePlan,
+					Details))
+			{
+				SetAvidScriptBindingLoadFailure(
+					OutResult,
+					TEXT("binding_delegate_invoke_parameter_mismatch"),
+					Event.CanonicalIdentity + TEXT(":") + Parameter.Name,
+					Details.IsEmpty()
+						? TEXT("The delegate invoke parameter no longer matches its prepared codec.")
+						: Details);
+				return false;
+			}
+			ArgumentOffset += ValuePlan.ArgumentWidth;
+			Plan.bRequiresGuestMemory |= ValuePlan.Direction
+					== EAvidScriptRuntimeBindingDirection::Ref
+				|| ValuePlan.Direction
+					== EAvidScriptRuntimeBindingDirection::Out
+				|| ValuePlan.Kind == EAvidScriptRuntimeBindingKind::Name
+				|| ValuePlan.Kind == EAvidScriptRuntimeBindingKind::String
+				|| ValuePlan.Kind == EAvidScriptRuntimeBindingKind::StructWire
+				|| ValuePlan.Kind == EAvidScriptRuntimeBindingKind::Array;
+			Plan.Parameters.Add(MoveTemp(ValuePlan));
+		}
+
+		FString ReturnDetails;
+		if (!BuildAvidScriptRuntimeValuePlan(
+				Plan.Function->GetReturnProperty(),
+				Event.ReturnValue,
+				DeclaredTypesById,
+				ArgumentOffset,
+				Plan.ReturnValue,
+				ReturnDetails))
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_delegate_invoke_return_mismatch"),
+				Event.CanonicalIdentity,
+				ReturnDetails);
+			return false;
+		}
+		ArgumentOffset += Plan.ReturnValue.ArgumentWidth;
+		Plan.bRequiresGuestMemory |= Plan.ReturnValue.Kind
+			!= EAvidScriptRuntimeBindingKind::Void;
+		Plan.ExpectedArgumentCount = ArgumentOffset;
+
+		Package->Impl->RequiredScratchSize = FMath::Max(
+			Package->Impl->RequiredScratchSize,
+			Plan.RequiredScratchSize);
+		Package->Impl->VmPackage.Imports.Add({
+			InvokeSpec.StableId,
+			static_cast<uint32>(InvokeSpec.BindingOrdinal),
+			InvokeSpec.ModuleName,
+			InvokeSpec.ImportName,
+			InvokeSpec.Signature
+		});
+		Package->Impl->Plans.Add(MoveTemp(Plan));
+	}
+	return true;
+	};
+
 	if (bHasLifecycleClassReferences)
 	{
 		for (const FAvidScriptObjectLifecycleBindingSpec& Spec : FAvidScriptObjectLifecycleBindings::GetSpecs())
@@ -4503,6 +4684,10 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			Package->Impl->Plans.Add(MoveTemp(Plan));
 		}
 	}
+	if (!PublishDelegateInvokePlans())
+	{
+		return false;
+	}
 
 	for (int32 PlanIndex = 0; PlanIndex < Model.Bindings.Num(); ++PlanIndex)
 	{
@@ -4598,8 +4783,11 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		return false;
 	}
 
-	Package->Impl->PreparedDynamicCells.Reserve(Model.Bindings.Num());
-	for (int32 PlanIndex = 0; PlanIndex < Model.Bindings.Num(); ++PlanIndex)
+	Package->Impl->PreparedDynamicCells.Reserve(
+		Model.Bindings.Num() + DelegateInvokeBindingCount);
+	for (int32 PlanIndex = 0;
+		PlanIndex < Package->Impl->Plans.Num();
+		++PlanIndex)
 	{
 		const FAvidScriptRuntimeBindingInvocationPlan& Plan =
 			Package->Impl->Plans[PlanIndex];
@@ -4608,7 +4796,11 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			|| Plan.Kind
 				== EAvidScriptBindingInvocationKind::ReflectedPropertyRead
 			|| Plan.Kind
-				== EAvidScriptBindingInvocationKind::ReflectedPropertyWrite;
+				== EAvidScriptBindingInvocationKind::ReflectedPropertyWrite
+			|| Plan.Kind
+				== EAvidScriptBindingInvocationKind::DelegateSinglecastInvoke
+			|| Plan.Kind
+				== EAvidScriptBindingInvocationKind::DelegateMulticastBroadcast;
 		if (!bReflected
 			|| Plan.OwnerClass == nullptr
 			|| Plan.GeneratedEntry != nullptr)

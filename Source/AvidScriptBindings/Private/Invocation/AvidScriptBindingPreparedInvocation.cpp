@@ -37,7 +37,11 @@ bool IsReflectedProgram(const FInvocationCodecProgram& Program)
 			|| Program.Kind
 				== EAvidScriptBindingInvocationKind::ReflectedPropertyRead
 			|| Program.Kind
-				== EAvidScriptBindingInvocationKind::ReflectedPropertyWrite);
+				== EAvidScriptBindingInvocationKind::ReflectedPropertyWrite
+			|| Program.Kind
+				== EAvidScriptBindingInvocationKind::DelegateSinglecastInvoke
+			|| Program.Kind
+				== EAvidScriptBindingInvocationKind::DelegateMulticastBroadcast);
 }
 
 UFunction* ResolveInvocationFunction(
@@ -210,6 +214,59 @@ void MarkReplicatedPropertyDirty(
 			Program.ReflectedProperty->RepIndex,
 			Program.ReflectedProperty->GetFName());
 	}
+}
+
+bool InvokePreparedCallable(
+	const FInvocationCodecProgram& Program,
+	UObject& Receiver,
+	UFunction& InvocationFunction,
+	void* Frame,
+	FAvidScriptDynamicHostCallResult& OutResult)
+{
+	if (Program.Kind
+		== EAvidScriptBindingInvocationKind::DelegateSinglecastInvoke)
+	{
+		FDelegateProperty* Property =
+			CastField<FDelegateProperty>(Program.ReflectedProperty);
+		FScriptDelegate* Delegate = Property == nullptr
+			? nullptr
+			: Property->ContainerPtrToValuePtr<FScriptDelegate>(&Receiver);
+		if (Delegate == nullptr || !Delegate->IsBound())
+		{
+			SetDispatchFailure(
+				OutResult,
+				TEXT("binding_delegate_unbound"),
+				Program.DebugPath,
+				TEXT("The prepared singlecast delegate has no live target."));
+			return false;
+		}
+		Delegate->ProcessDelegate<UObject>(Frame);
+		return true;
+	}
+	if (Program.Kind
+		== EAvidScriptBindingInvocationKind::DelegateMulticastBroadcast)
+	{
+		FMulticastDelegateProperty* Property =
+			CastField<FMulticastDelegateProperty>(Program.ReflectedProperty);
+		FMulticastScriptDelegate* Delegate = Property == nullptr
+			? nullptr
+			: Property->ContainerPtrToValuePtr<FMulticastScriptDelegate>(
+				&Receiver);
+		if (Delegate == nullptr)
+		{
+			SetDispatchFailure(
+				OutResult,
+				TEXT("binding_delegate_identity_mismatch"),
+				Program.DebugPath,
+				TEXT("The prepared multicast delegate property is unavailable."));
+			return false;
+		}
+		Delegate->ProcessDelegate<UObject>(Frame);
+		return true;
+	}
+
+	Receiver.ProcessEvent(&InvocationFunction, Frame);
+	return true;
 }
 
 struct FGuestOutputRange
@@ -947,7 +1004,15 @@ bool InvokePreparedDynamicReflection(
 	{
 		return false;
 	}
-	Receiver.ProcessEvent(InvocationFunction, Frame);
+	if (!InvokePreparedCallable(
+			*Program,
+			Receiver,
+			*InvocationFunction,
+			Frame,
+			OutResult))
+	{
+		return false;
+	}
 	MarkReplicatedPropertyDirty(*Program, Receiver);
 
 	for (FGuestOutputTarget& Target : OutputTargets)

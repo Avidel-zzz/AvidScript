@@ -22,14 +22,17 @@
 - `P60.B1G` 完成 architecture strict allowlist 与冻结 hash 的历史基线刷新，新增 Interface-aware
   compatibility helper 注册输入；21-input clean detached Gate 已恢复通过；详见
   [P60.B1G](P60.B1G_Architecture_Gate_Baseline_Refresh.md)。
+- `P60.B2` 完成 ordinal 驱动的 Delegate 主动调用：C# 生成 `ExecuteX/BroadcastX`，Runtime 复用
+  prepared codec 与 `ref/out/return` 输出事务，未绑定单播稳定失败关闭；详见
+  [P60.B2](P60.B2_Active_Delegate_Invocation.md)。
 
 ## 待完成
 
-- `P60.B` 主动 `Execute/Broadcast`、语法 facade 与性能收口；
 - `P60.C` Blueprint 函数与通用异步；
 - `P60.D` 集成、性能与集中 Gate。
 
 ## 验收边界
 
-人工 PIE、Blueprint pin 显示和实际交互观察与自动化证据分开记录。Phase 60 不宣称 Shipping、移动端
-AOT、完整调试器或 P65 跨框架性能领导力已经完成。
+P60.B 已提供显式 typed bind/subscribe 与 `ExecuteX/BroadcastX`；C# `event +=`、lambda/closure
+仍是后续语法层，不应误报为已支持。人工 PIE、Blueprint pin 显示和实际交互观察与自动化证据分开
+记录。Phase 60 不宣称 Shipping、移动端 AOT、完整调试器或 P65 跨框架性能领导力已经完成。

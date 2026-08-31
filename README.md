@@ -33,18 +33,18 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 | UE 类型 | UObject capability、`FVector`、`FRotator`、`FTransform`、固定 `USTRUCT`、`FName`、`FString`、一维 `TArray<T>` |
 | C# 定义 UE 类型 | Actor、Component、World/GameInstance Subsystem、继承、override、`UPROPERTY`、`UFUNCTION` 与默认参数 |
 | 异步 | `Delay`、`NextTick`、异步对象加载、Reflection 生成的 latent `FooAsync`、受控 `async/await` |
-| 委托 | Profile 授权的动态单播租约与多播订阅、强类型 `return/ref/out` 回调、显式取消与 Session 自动解绑 |
+| 委托 | 动态单播租约、多播订阅、强类型 `return/ref/out` 回调，以及生成式 `ExecuteX/BroadcastX` 主动调用 |
 | 网络 | Server/Client/NetMulticast RPC、replicated property、RPC/RepNotify handler、dedicated/listen 多进程闭环 |
 | 热重载 | 方法体事务式替换、候选回滚、状态帧与 handle 生命周期隔离 |
 | 发布 | 内容寻址 Generated Type bundle、NonUFS staging 与 Cook-layout Runtime load |
 | 后端 | Wasmtime 45 Win64 主后端；WAMR 兼容后端 |
 
-Phase 60 已完成 P60.A 与 P60.B1：
+Phase 60 已完成 P60.A 与 P60.B：
 
 - UE Interface 的函数、参数、返回值和属性可进入生成式 C# + Runtime，支持原生与 Blueprint-only 实现；
 - C# 脚本 `UFUNCTION` 的 bool、整数、有限浮点、命名 enum 与 string 默认值会发布为真实 `CPP_Default_*` 元数据；
-- Delegate 已共享 prepared signature，支持 singlecast Session lease、旧值安全恢复，
-  以及 `return/ref/out` 原子输出事务；主动 `Execute/Broadcast` 仍在实现。
+- Delegate 已共享 prepared signature，支持 singlecast Session lease、旧值安全恢复、
+  `return/ref/out` 原子输出事务，以及 ordinal 驱动的 `ExecuteX/BroadcastX`。
 
 详细进度见 [Phase 60 中文收尾记录](Docs/Phase60/P60_Closeout.md)。
 
@@ -146,6 +146,10 @@ Phase 56 完整游戏 workload 中，Small gameplay、Dense gameplay 与 Lifecyc
 P50 比率分别为 **`0.469x`、`0.513x`、`0.391x`**。编译器托管数组区域在 `N>=64`
 的冻结 workload 中领先 Puerts TArray **17.47x-20.04x**。
 
+P60.B2 的 UE 原生侧 Delegate workload 中，prepared broadcast P50 为 `0.000739 ms`，
+原生动态多播为 `0.000521 ms`，比率 `1.418x`；热路径反射名称查找为 `0`。该数据衡量
+主动 Delegate 调用开销，不等同于完整 WASM crossing 或竞品对比。
+
 纯执行层仍未宣布绝对领先：12-kernel Wasmtime/V8 suite 的 P50/P95 几何均值为
 `0.9800x / 1.0006x`，P95 领导力门禁仍未关闭。
 
@@ -155,6 +159,7 @@ P50 比率分别为 **`0.469x`、`0.513x`、`0.391x`**。编译器托管数组�
 - [编译器托管数组区域报告](Docs/Phase57/P57.11D_Compiler_Managed_Array_Region.md)
 - [Phase 56 游戏 workload 报告](Docs/Phase56/P56.5_Fused_Call_Frame_Implementation_Report.md)
 - [Wasmtime Cranelift Speed 报告](Docs/Phase57/P57.13_Cranelift_Speed_Profile.md)
+- [Delegate 主动调用报告](Docs/Phase60/P60.B2_Active_Delegate_Invocation.md)
 
 ## 快速开始
 
@@ -201,7 +206,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 ## 当前边界
 
 - 生成范围由 Binding Profile 与现有 ABI/codec 决定，还不是完整 UE 类型系统；
-- 主动 `Execute/Broadcast`、C# `event +=`、lambda/closure 正在 Phase 60 实现；
+- C# `event +=` 与 lambda/closure 语法糖尚未实现；当前使用生成的显式 bind/subscribe 与 `ExecuteX/BroadcastX`；
 - 容器当前聚焦一维 `TArray<T>`；nested array、`TSet`、`TMap` 与 `FText` 尚未完整支持；
 - C# 前端提供受控游戏脚本子集，不包含完整 .NET Runtime、任意 awaiter 或异常系统；
 - 反射结构变化仍需 no-clean UBT 并重启 Editor，方法体变化可自动热重载；
@@ -219,9 +224,9 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 
 ## 验证
 
-最近一次完整基线为 **AvidScript Automation 398/398 通过**。Phase 59 已关闭 Generated
+最近一次完整基线为 **AvidScript Automation 403/403 通过**。Phase 59 已关闭 Generated
 Actor/Component/Subsystem、反射成员、Blueprint 子类与 override、热重载、双拓扑网络及内容寻址
-Cook bundle 闭环。Phase 60 的 UE Interface、脚本 UFUNCTION 默认参数与 Delegate P60.B1 已通过
+Cook bundle 闭环。Phase 60 的 UE Interface、脚本 UFUNCTION 默认参数与 Delegate P60.B2 已通过
 聚焦 .NET、UE5.8 no-clean UBT、Automation 和独立干净工作树架构门禁。
 
 阶段状态与实现证据见 [Docs](Docs/)，开发规则见 [AGENTS.md](AGENTS.md)。

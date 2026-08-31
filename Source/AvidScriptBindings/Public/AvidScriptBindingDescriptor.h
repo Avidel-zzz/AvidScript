@@ -113,6 +113,16 @@ struct FAvidScriptBindingDelegateEventModel
 	TArray<FAvidScriptBindingValueModel> Parameters;
 };
 
+struct FAvidScriptBindingDelegateInvokeSpec
+{
+	FString CanonicalIdentity;
+	FString StableId;
+	int32 BindingOrdinal = INDEX_NONE;
+	FString ModuleName;
+	FString ImportName;
+	FString Signature;
+};
+
 struct FAvidScriptBindingClassReferenceModel
 {
 	FString StableId;
@@ -264,6 +274,11 @@ public:
 		const FName RepNotifyProperty = NAME_None,
 		const FString& HandlerMode = FString(),
 		const FAvidScriptBindingValueModel* ReturnValue = nullptr);
+
+	static bool TryMakeDelegateInvokeSpec(
+		const FAvidScriptBindingDelegateEventModel& Event,
+		int32 BindingOrdinal,
+		FAvidScriptBindingDelegateInvokeSpec& OutSpec);
 
 	static FString MakeSelectionHash(const FAvidScriptBindingPackageModel& Package);
 	static FString MakePackageHash(const FAvidScriptBindingPackageModel& Package);

@@ -175,6 +175,10 @@ class AAvidScriptEditorDelegateEventTestActor : public AActor
 	GENERATED_BODY()
 
 public:
+	int32 CapturedDelegateCount = 0;
+	float CapturedDelegateScale = 0.0f;
+	int32 SinglecastInvocationCount = 0;
+
 	UPROPERTY(BlueprintAssignable)
 	FAvidScriptEditorDelegateSignal OnScriptSignal;
 
@@ -189,6 +193,27 @@ public:
 
 	UPROPERTY()
 	FAvidScriptEditorSinglecastRefOutSignal OnSinglecastSignal;
+
+	UFUNCTION()
+	void CaptureScriptSignal(
+		AActor* SourceActor,
+		int32 Count,
+		float Scale)
+	{
+		CapturedDelegateCount = Count;
+		CapturedDelegateScale = Scale;
+	}
+
+	UFUNCTION()
+	int32 CaptureSinglecastSignal(
+		UPARAM(ref) int32& Value,
+		int32& Doubled)
+	{
+		++SinglecastInvocationCount;
+		Value += 3;
+		Doubled = Value * 2;
+		return Value + 10;
+	}
 };
 
 UCLASS()

@@ -690,7 +690,7 @@ foreach ($ForbiddenGeneratedTypeRouterHotPath in @('FindFunction', 'FindObject',
     }
 }
 foreach ($RequiredGeneratedTypeRegistryContract in @(
-    'ManifestSchemaVersion = 5',
+    'ManifestSchemaVersion = 6',
     'BuildFromJson',
     'FindTypeByOrdinal',
     'FindTypeByStableId',
@@ -4568,11 +4568,24 @@ Test-RequiredTokenSequence `
     -Tokens @(
         'PreflightValueOutput(',
         'PrepareHostEffect()',
-        'Receiver.ProcessEvent(',
+        'InvokePreparedCallable(',
         'WriteValueToGuest(',
         'PublishValueOutput(',
         'OutputTransaction.Commit()') `
     -Description 'prepared reflected atomic guest output path'
+foreach ($RequiredPreparedDelegateInvokeContract in @(
+    'EAvidScriptBindingInvocationKind::DelegateSinglecastInvoke',
+    'EAvidScriptBindingInvocationKind::DelegateMulticastBroadcast',
+    'CastField<FDelegateProperty>',
+    'CastField<FMulticastDelegateProperty>',
+    'binding_delegate_unbound',
+    'Delegate->ProcessDelegate<UObject>(Frame)',
+    'Receiver.ProcessEvent(&InvocationFunction, Frame)'
+)) {
+    if (-not $BindingPreparedInvocationSource.Contains($RequiredPreparedDelegateInvokeContract)) {
+        Add-Violation "prepared delegate invocation path is missing $RequiredPreparedDelegateInvokeContract"
+    }
+}
 if ($BindingCodecProgramSource.Contains('GuestMemory.WriteBytes(')) {
     Add-Violation 'Bindings output publication must use secured mutable ranges instead of fallible WriteBytes calls'
 }
@@ -4754,14 +4767,18 @@ if (-not $RuntimeSource.Contains('InvocationContext.HostEffectJournal = HostCont
 }
 $DynamicPrepareIndex = $BindingPreparedInvocation.IndexOf('InvocationContext.HostEffectJournal->PrepareEffect(')
 $ReflectedPropertyPrepareIndex = $BindingPreparedInvocation.IndexOf('->PrepareReflectedProperty(')
-$DynamicProcessEventIndex = $BindingPreparedInvocation.IndexOf('Receiver.ProcessEvent(InvocationFunction, Frame)')
+$DynamicInvokeCallableIndex = if ($DynamicPrepareIndex -ge 0) {
+    $BindingPreparedInvocation.IndexOf('InvokePreparedCallable(', $DynamicPrepareIndex)
+} else {
+    -1
+}
 if (-not $BindingPreparedInvocation.Contains('binding_reload_effect_unsupported') -or
     $DynamicPrepareIndex -lt 0 -or
     $ReflectedPropertyPrepareIndex -lt 0 -or
-    $DynamicProcessEventIndex -lt 0 -or
-    $DynamicPrepareIndex -ge $DynamicProcessEventIndex -or
-    $ReflectedPropertyPrepareIndex -ge $DynamicProcessEventIndex) {
-    Add-Violation 'dynamic binding candidate policy must reject unsupported writes and prepare reversible effects before ProcessEvent'
+    $DynamicInvokeCallableIndex -lt 0 -or
+    $DynamicPrepareIndex -ge $DynamicInvokeCallableIndex -or
+    $ReflectedPropertyPrepareIndex -ge $DynamicInvokeCallableIndex) {
+    Add-Violation 'dynamic binding candidate policy must reject unsupported writes and prepare reversible effects before prepared callable invocation'
 }
 foreach ($RequiredInterfaceDispatchContract in @(
     'IsObjectCompatibleWithReflectedType(',

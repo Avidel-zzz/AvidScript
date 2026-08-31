@@ -1767,11 +1767,11 @@ bool FAvidScriptEditorBindingDescriptorV8PropertySetTest::RunTest(const FString&
 			FString(ExpectedSource));
 	};
 	ParserRejectsWithSource(
-		TEXT("Schema v20 above the current maximum identifies its header field"),
+		TEXT("Schema v21 above the current maximum identifies its header field"),
 		TEXT("schema_version"),
 		[](TSharedPtr<FJsonObject>& Root)
 		{
-			Root->SetNumberField(TEXT("schema_version"), 20);
+			Root->SetNumberField(TEXT("schema_version"), 21);
 		});
 	ParserRejectsWithSource(
 		TEXT("Malformed package hash identifies its header field"),
@@ -4615,7 +4615,23 @@ bool FAvidScriptEditorDelegateEventDescriptorTest::RunTest(
 	TestTrue(
 		TEXT("Generated singlecast contract preserves return/ref/out"),
 		ReferenceSource.Contains(TEXT("ref;out\", \"global::System.Int32"))
-			&& ReferenceSource.Contains(TEXT("BindOnSinglecastSignal")));
+			&& ReferenceSource.Contains(TEXT("BindOnSinglecastSignal"))
+			&& ReferenceSource.Contains(TEXT(
+				"public int ExecuteOnSinglecastSignal(ref int Value, out int Doubled)")));
+	if (Package.DelegateEvents.Num() == 1)
+	{
+		FAvidScriptBindingDelegateInvokeSpec InvokeSpec;
+		TestTrue(
+			TEXT("Singlecast facade derives active invoke authority"),
+			FAvidScriptBindingDescriptorIdentity::TryMakeDelegateInvokeSpec(
+				Package.DelegateEvents[0],
+				0,
+				InvokeSpec));
+		TestTrue(
+			TEXT("Singlecast source and manifest publish the prepared import"),
+			ReferenceSource.Contains(InvokeSpec.ImportName)
+				&& ManifestJson.Contains(InvokeSpec.StableId));
+	}
 
 	TSharedPtr<const FAvidScriptBindingPackage> RuntimePackage;
 	FAvidScriptBindingPackageLoadResult LoadResult;
@@ -4634,6 +4650,17 @@ bool FAvidScriptEditorDelegateEventDescriptorTest::RunTest(
 				PreparedEvents,
 				BuildError));
 	TestEqual(TEXT("Runtime publishes one singlecast plan"), PreparedEvents.Num(), 1);
+	TArray<FAvidScriptPreparedDynamicBinding> PreparedInvokeBindings;
+	TestTrue(
+		TEXT("Runtime publishes one active singlecast invoke plan"),
+		RuntimePackage.IsValid()
+			&& RuntimePackage->BuildPreparedDynamicBindings(
+				PreparedInvokeBindings,
+				BuildError));
+	TestEqual(
+		TEXT("Runtime exposes one generated delegate invoke import"),
+		PreparedInvokeBindings.Num(),
+		1);
 	if (PreparedEvents.Num() == 1)
 	{
 		TestEqual(

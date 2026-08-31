@@ -2745,6 +2745,16 @@ bool FAvidScriptEditorDelegateEventFacadeTest::RunTest(
 		return false;
 	}
 	const FAvidScriptBindingDelegateEventModel& Event = Package.DelegateEvents[0];
+	FAvidScriptBindingDelegateInvokeSpec InvokeSpec;
+	if (!TestTrue(
+		TEXT("Multicast event derives active broadcast authority"),
+		FAvidScriptBindingDescriptorIdentity::TryMakeDelegateInvokeSpec(
+			Event,
+			0,
+			InvokeSpec)))
+	{
+		return false;
+	}
 	TestTrue(
 		TEXT("Facade declares public event attribute"),
 		ReferenceSource.Contains(
@@ -2798,6 +2808,19 @@ bool FAvidScriptEditorDelegateEventFacadeTest::RunTest(
 		&& ReferenceSource.Contains(TEXT("internal static extern long EventSubscribe(int slot, int generation, int eventOrdinal);"))
 		&& ReferenceSource.Contains(TEXT("[DllImport(\"env\", EntryPoint = \"event_unsubscribe\")]"))
 		&& ReferenceSource.Contains(TEXT("internal static extern int EventUnsubscribe(long subscriptionToken);")));
+	TestTrue(
+		TEXT("Owner facade publishes a typed multicast broadcast method"),
+		ReferenceSource.Contains(
+			TEXT("public void BroadcastOnScriptSignal(AActor SourceActor, int Count, float Scale)")));
+	TestTrue(
+		TEXT("Broadcast facade uses the derived prepared import"),
+		ReferenceSource.Contains(FString::Printf(
+			TEXT("[DllImport(\"avidscript\", EntryPoint = \"%s\")]"),
+			*InvokeSpec.ImportName)));
+	TestTrue(
+		TEXT("Manifest publishes the active broadcast stable identity"),
+		ManifestJson.Contains(InvokeSpec.StableId)
+		&& ManifestJson.Contains(InvokeSpec.ImportName));
 
 	FAvidScriptBindingPackageModel NonSequentialOrdinalPackage = Package;
 	NonSequentialOrdinalPackage.DelegateEvents[0].Ordinal = 37;

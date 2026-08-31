@@ -16,5 +16,7 @@ enum class EAvidScriptBindingInvocationKind : uint8
 	ActorFindComponent = 8,
 	SceneComponentAttach = 9,
 	SceneComponentDetach = 10,
-	ReflectedPropertyWrite = 11
+	ReflectedPropertyWrite = 11,
+	DelegateSinglecastInvoke = 12,
+	DelegateMulticastBroadcast = 13
 };

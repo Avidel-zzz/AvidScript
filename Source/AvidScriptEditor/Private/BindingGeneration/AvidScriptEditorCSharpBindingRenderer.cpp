@@ -2296,6 +2296,83 @@ bool AppendDelegateEventReferenceSurface(
 	return true;
 }
 
+int32 GetDelegateInvokeImportOffset(
+	const FAvidScriptBindingPackageModel& Package)
+{
+	int32 Offset = Package.Bindings.Num();
+	Offset += HasAvidScriptActorClassReferences(Package)
+		? FAvidScriptObjectLifecycleBindings::GetSpecs().Num()
+		: 0;
+	Offset += Package.Types.ContainsByPredicate(
+		[](const FAvidScriptBindingTypeModel& Type)
+		{
+			return Type.ObjectTypeOrdinal != INDEX_NONE;
+		})
+		? FAvidScriptObjectTypeBindings::GetSpecs().Num()
+		: 0;
+	const bool bHasObjectFactories = Package.SchemaVersion >= 7
+		&& !Package.ObjectFactories.IsEmpty();
+	Offset += bHasObjectFactories
+		? FAvidScriptObjectFactoryBinding::GetSpecs().Num()
+		: 0;
+	Offset += bHasObjectFactories
+		&& HasAvidScriptSceneComponentFactories(Package)
+		? FAvidScriptSceneAttachmentBinding::GetSpecs().Num()
+		: 0;
+	return Offset;
+}
+
+bool BuildDelegateInvokeBindings(
+	const FAvidScriptBindingPackageModel& Package,
+	TArray<FAvidScriptBindingFunctionModel>& OutBindings,
+	FString& OutErrorSource)
+{
+	OutBindings.Reset();
+	int32 Ordinal = GetDelegateInvokeImportOffset(Package);
+	for (const FAvidScriptBindingDelegateEventModel& Event :
+		Package.DelegateEvents)
+	{
+		if (Event.DelegateKind != TEXT("singlecast")
+			&& Event.DelegateKind != TEXT("multicast"))
+		{
+			continue;
+		}
+		FAvidScriptBindingDelegateInvokeSpec Spec;
+		if (!FAvidScriptBindingDescriptorIdentity::TryMakeDelegateInvokeSpec(
+				Event,
+				Ordinal,
+				Spec))
+		{
+			OutBindings.Reset();
+			OutErrorSource = Event.CanonicalIdentity;
+			return false;
+		}
+
+		FAvidScriptBindingFunctionModel& Binding =
+			OutBindings.AddDefaulted_GetRef();
+		Binding.StableId = Spec.StableId;
+		Binding.CanonicalIdentity = Spec.CanonicalIdentity;
+		Binding.Ordinal = Spec.BindingOrdinal;
+		Binding.OwnerClass = Event.OwnerClass;
+		Binding.UeMember = Event.UeMember;
+		Binding.UeFunction = Event.UeMember;
+		Binding.ScriptName = Event.DelegateKind == TEXT("singlecast")
+			? TEXT("Execute") + Event.ScriptName
+			: TEXT("Broadcast") + Event.ScriptName;
+		Binding.BindingKind = TEXT("delegate_invoke");
+		Binding.DispatchMode = TEXT("cached_delegate_invoke");
+		Binding.ReloadEffect =
+			EAvidScriptBindingReloadEffect::Unsupported;
+		Binding.ReturnValue = Event.ReturnValue;
+		Binding.Parameters = Event.Parameters;
+		Binding.HostImport.Module = Spec.ModuleName;
+		Binding.HostImport.Name = Spec.ImportName;
+		Binding.HostImport.Signature = Spec.Signature;
+		++Ordinal;
+	}
+	return true;
+}
+
 } // namespace
 
 int32 FAvidScriptEditorCSharpBindingRenderer::GetLifecycleImportCount(
@@ -2310,6 +2387,14 @@ int32 FAvidScriptEditorCSharpBindingRenderer::GetManifestImportCount(
 	const FAvidScriptBindingPackageModel& Package)
 {
 	int32 ImportCount = Package.Bindings.Num();
+	for (const FAvidScriptBindingDelegateEventModel& Event :
+		Package.DelegateEvents)
+	{
+		ImportCount += Event.DelegateKind == TEXT("singlecast")
+			|| Event.DelegateKind == TEXT("multicast")
+			? 1
+			: 0;
+	}
 	ImportCount += GetLifecycleImportCount(Package);
 	const bool bHasObjectTypeBindings = Package.Types.ContainsByPredicate(
 		[](const FAvidScriptBindingTypeModel& Type)
@@ -2675,10 +2760,23 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 		return false;
 	}
 
+	TArray<FAvidScriptBindingFunctionModel> RenderBindings =
+		Package.Bindings;
+	TArray<FAvidScriptBindingFunctionModel> DelegateInvokeBindings;
+	if (!BuildDelegateInvokeBindings(
+			Package,
+			DelegateInvokeBindings,
+			OutErrorSource))
+	{
+		OutErrorCategory = TEXT("descriptor_contract_invalid");
+		return false;
+	}
+	RenderBindings.Append(MoveTemp(DelegateInvokeBindings));
+
 	TMap<FString, TArray<const FAvidScriptBindingFunctionModel*>> BindingsByOwner;
 	TMap<FString, const FAvidScriptBindingFunctionModel*> PropertyGetters;
 	TMap<FString, const FAvidScriptBindingFunctionModel*> PropertySetters;
-	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
+	for (const FAvidScriptBindingFunctionModel& Binding : RenderBindings)
 	{
 		if (!ValidateBindingValueDirections(Binding, OutErrorSource))
 		{
@@ -2712,7 +2810,7 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 	}
 
 	TSet<FString> ObjectTypesUsedAsValues;
-	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
+	for (const FAvidScriptBindingFunctionModel& Binding : RenderBindings)
 	{
 		if (Binding.ReturnValue.Kind == TEXT("object_handle"))
 		{
@@ -2759,7 +2857,7 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 	};
 	TMap<int32, FCSharpRenderedMethod> RenderedMethods;
 	TSet<FString> MethodSignatures;
-	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
+	for (const FAvidScriptBindingFunctionModel& Binding : RenderBindings)
 	{
 		if (Binding.BindingKind == TEXT("property_set"))
 		{
@@ -3535,7 +3633,7 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 
 	Lines.Add(TEXT("internal static class AvidScriptNative"));
 	Lines.Add(TEXT("{"));
-	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
+	for (const FAvidScriptBindingFunctionModel& Binding : RenderBindings)
 	{
 		if (Binding.Ordinal > 0)
 		{
@@ -3966,6 +4064,32 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitManifest(
 				Writer->WriteObjectEnd();
 			}
 		}
+	}
+	int32 DelegateInvokeOrdinal = GetDelegateInvokeImportOffset(Package);
+	for (const FAvidScriptBindingDelegateEventModel& Event :
+		Package.DelegateEvents)
+	{
+		if (Event.DelegateKind != TEXT("singlecast")
+			&& Event.DelegateKind != TEXT("multicast"))
+		{
+			continue;
+		}
+		FAvidScriptBindingDelegateInvokeSpec Spec;
+		if (!FAvidScriptBindingDescriptorIdentity::TryMakeDelegateInvokeSpec(
+				Event,
+				DelegateInvokeOrdinal,
+				Spec))
+		{
+			return false;
+		}
+		Writer->WriteObjectStart();
+		Writer->WriteValue(TEXT("stable_id"), Spec.StableId);
+		Writer->WriteValue(TEXT("ordinal"), Spec.BindingOrdinal);
+		Writer->WriteValue(TEXT("module"), Spec.ModuleName);
+		Writer->WriteValue(TEXT("name"), Spec.ImportName);
+		Writer->WriteValue(TEXT("signature"), Spec.Signature);
+		Writer->WriteObjectEnd();
+		++DelegateInvokeOrdinal;
 	}
 	for (const FAvidScriptValueCapabilityImportSpec* Spec :
 		GetRequiredValueCapabilityImports(Package))

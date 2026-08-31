@@ -86,10 +86,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FAvidScriptEventSubscriptionHostBoundaryTest::RunTest(
 	const FString& Parameters)
 {
-	AddExpectedError(
-		TEXT("generated type instance activation requires an installed GameThread package"),
-		EAutomationExpectedErrorFlags::Contains,
-		2);
 	UWorld* World = nullptr;
 	UWorld* OtherWorld = nullptr;
 	if (!CreateEventSubscriptionWorld(

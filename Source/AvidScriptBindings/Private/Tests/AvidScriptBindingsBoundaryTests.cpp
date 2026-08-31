@@ -325,6 +325,62 @@ bool FAvidScriptBindingsBoundarySmokeTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptDelegateInvokeSpecBoundaryTest,
+	"AvidScript.Bindings.Delegate.InvokeSpec",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptDelegateInvokeSpecBoundaryTest::RunTest(
+	const FString& Parameters)
+{
+	FAvidScriptBindingDelegateEventModel Event;
+	Event.StableId = FString::ChrN(64, TEXT('a'));
+	Event.CanonicalIdentity = TEXT("delegate_event|owner=/Script/Test.Owner|member=OnSignal|kind=singlecast");
+	Event.DelegateKind = TEXT("singlecast");
+	Event.ReturnValue.CanonicalType = TEXT("scalar:int32");
+	Event.ReturnValue.Direction = TEXT("return");
+	FAvidScriptBindingValueModel RefValue;
+	RefValue.Name = TEXT("Value");
+	RefValue.Direction = TEXT("ref");
+	RefValue.CanonicalType = TEXT("scalar:int32");
+	RefValue.AbiTypes = { TEXT("i") };
+	FAvidScriptBindingValueModel OutValue = RefValue;
+	OutValue.Name = TEXT("Doubled");
+	OutValue.Direction = TEXT("out");
+	Event.Parameters = { RefValue, OutValue };
+
+	FAvidScriptBindingDelegateInvokeSpec Spec;
+	TestTrue(
+		TEXT("Singlecast delegate produces an active invoke spec"),
+		FAvidScriptBindingDescriptorIdentity::TryMakeDelegateInvokeSpec(
+			Event,
+			37,
+			Spec));
+	TestEqual(TEXT("Invoke ordinal is caller-owned"), Spec.BindingOrdinal, 37);
+	TestEqual(TEXT("Invoke module uses generated UE authority"), Spec.ModuleName, FString(TEXT("avidscript")));
+	TestTrue(TEXT("Invoke import uses the generated UE prefix"), Spec.ImportName.StartsWith(TEXT("avid_ue_")));
+	TestEqual(TEXT("Receiver, ref, out, and return use pointer cells"), Spec.Signature, FString(TEXT("(iiiii)i")));
+
+	FAvidScriptBindingDelegateInvokeSpec Repeated;
+	TestTrue(
+		TEXT("Repeated derivation succeeds"),
+		FAvidScriptBindingDescriptorIdentity::TryMakeDelegateInvokeSpec(
+			Event,
+			37,
+			Repeated));
+	TestEqual(TEXT("Invoke stable id is deterministic"), Repeated.StableId, Spec.StableId);
+
+	Event.DelegateKind = TEXT("network_rpc");
+	FAvidScriptBindingDelegateInvokeSpec Rejected;
+	TestFalse(
+		TEXT("Function handlers do not gain delegate invoke authority"),
+		FAvidScriptBindingDescriptorIdentity::TryMakeDelegateInvokeSpec(
+			Event,
+			38,
+			Rejected));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptPreparedDynamicBoundaryTest,
 	"AvidScript.Bindings.PreparedDynamic.Boundary",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

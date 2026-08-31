@@ -678,7 +678,7 @@ function Test-RendererFrozenRegions {
         'AppendRotator' = '7a71fdf13edf712a20b7a6dcf5fd91ae284b36ed372feeef04011a2763deeacd'
         'AppendTransform' = 'd277ff9ceb802b8f5e24ee61a88c1fc8d2fc366a9231de145c8d224be7d0cd41'
         'AppendObjectHandleProxy' = '8c2d7e92e9dc405bbb7abafbbeb1c2fe33e7669be830bf55c5cbe5316c9a0e8b'
-		'EmitReferenceSource' = 'ed659813e292e79b6f8b61ab5710e421ed5c24d8e742bad855ec8b546d05f120'
+		'EmitReferenceSource' = '66cc2bb7d8cc5b875d78b8567a7f8fe1912dfeb4cd42f56a10d1c8f6f43d6eee'
     }
     foreach ($Entry in (Get-RendererFrozenRegions).GetEnumerator()) {
         $Region = Get-UniqueBraceRegion $Source $Entry.Value $Violations "frozen renderer region $($Entry.Key)"
@@ -703,7 +703,7 @@ function Test-GeneratedSurfaceConstructionClosure {
     )
 
     $ExpectedHashes = [ordered]@{
-		'BindingRenderer' = 'db2306ccfd8fdde7568e8301d5c00e609c30e72071973403ed3727a18d4c4bc4'
+		'BindingRenderer' = '4a54f10eb66c77a8336b127ed2d169320242d6370244905383763cdc892a84b3'
         'StateContractRenderer' = '8d24e315f424a1827b2cdf6358019785c9d7ccdf5322b10f6a8971cee29ce9b9'
         'DefaultValueFormatter' = '648aad59ac0ed2732ac83afb5da47477fb30eaf23399084833e1338c4cdd0342'
         'CSharpSyntax' = 'bf685b36a2cd07cfffb69e46aa1937322b92e3ec9350afac4f7225f1c037249f'

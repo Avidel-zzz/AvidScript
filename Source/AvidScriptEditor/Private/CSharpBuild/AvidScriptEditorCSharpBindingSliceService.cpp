@@ -386,6 +386,37 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 		+ (bPublishesObjectFactoryCapabilities
 			? ObjectFactorySpecs.Num()
 			: 0);
+	const int32 DelegateInvokeImportOffset =
+		SceneAttachmentImportOffset
+		+ (bPublishesSceneAttachmentCapabilities
+			? AttachmentSpecs.Num()
+			: 0);
+	TArray<FAvidScriptBindingDelegateInvokeSpec> DelegateInvokeSpecs;
+	int32 DelegateInvokeOrdinal = DelegateInvokeImportOffset;
+	for (const FAvidScriptBindingDelegateEventModel& Event :
+		AuthorizationModel.DelegateEvents)
+	{
+		if (Event.DelegateKind != TEXT("singlecast")
+			&& Event.DelegateKind != TEXT("multicast"))
+		{
+			continue;
+		}
+		FAvidScriptBindingDelegateInvokeSpec Spec;
+		if (!FAvidScriptBindingDescriptorIdentity::TryMakeDelegateInvokeSpec(
+				Event,
+				DelegateInvokeOrdinal,
+				Spec))
+		{
+			SetAvidScriptCSharpBindingSliceFailure(
+				OutResult,
+				TEXT("slice_delegate_invoke_contract_invalid"),
+				Event.CanonicalIdentity,
+				TEXT("regenerate the complete delegate binding package"));
+			return false;
+		}
+		DelegateInvokeSpecs.Add(MoveTemp(Spec));
+		++DelegateInvokeOrdinal;
+	}
 	const int32 ExpectedProfileImportCount =
 		FAvidScriptEditorCSharpBindingRenderer::GetManifestImportCount(AuthorizationModel);
 	if (AuthorizationModel.PackageName != Provenance.PackageName
@@ -580,6 +611,27 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 				|| AttachmentSpec.ModuleName != Import.Module
 				|| AttachmentSpec.ImportName != Import.Name
 				|| AttachmentSpec.Signature != Import.Signature)
+			{
+				SetAvidScriptCSharpBindingSliceFailure(
+					OutResult,
+					TEXT("slice_import_identity_mismatch"),
+					Import.StableId,
+					TEXT("rerun bootstrap with untampered import provenance"));
+				return false;
+			}
+			continue;
+		}
+
+		const int32 DelegateInvokeSpecIndex =
+			Import.Ordinal - DelegateInvokeImportOffset;
+		if (DelegateInvokeSpecs.IsValidIndex(DelegateInvokeSpecIndex))
+		{
+			const FAvidScriptBindingDelegateInvokeSpec& Spec =
+				DelegateInvokeSpecs[DelegateInvokeSpecIndex];
+			if (Spec.StableId != Import.StableId
+				|| Spec.ModuleName != Import.Module
+				|| Spec.ImportName != Import.Name
+				|| Spec.Signature != Import.Signature)
 			{
 				SetAvidScriptCSharpBindingSliceFailure(
 					OutResult,
