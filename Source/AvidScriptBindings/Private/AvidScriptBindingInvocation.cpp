@@ -3488,6 +3488,37 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			&& SignatureFunction != nullptr
 			&& SignatureFunction->HasAnyFunctionFlags(FUNC_Delegate)
 			&& !SignatureFunction->HasAnyFunctionFlags(FUNC_MulticastDelegate);
+		if (Model.SchemaVersion >= 22)
+		{
+			const bool bReflectedBlueprintFunction = SignatureFunction != nullptr
+				&& SignatureFunction->GetOuterUClass() == OwnerClass
+				&& OwnerClass->ClassGeneratedBy != nullptr
+				&& !SignatureFunction->HasAnyFunctionFlags(FUNC_Native)
+				&& !SignatureFunction->Script.IsEmpty();
+			const bool bNativeProvenance =
+				Event.ReflectedOwnerKind == TEXT("native")
+				&& Event.ReflectedOwnerAsset.IsEmpty()
+				&& Event.ReflectedFunctionFingerprint.IsEmpty()
+				&& !bReflectedBlueprintFunction;
+			const bool bBlueprintProvenance = bReflectedBlueprintFunction
+				&& Event.ReflectedOwnerKind == TEXT("blueprint")
+				&& OwnerClass->ClassGeneratedBy->GetPathName()
+					== Event.ReflectedOwnerAsset
+				&& Event.ReflectedFunctionFingerprint
+					== FAvidScriptBindingDescriptorIdentity::
+					MakeReflectedFunctionFingerprint(
+						Event.CanonicalIdentity,
+						*SignatureFunction);
+			if (!bNativeProvenance && !bBlueprintProvenance)
+			{
+				SetAvidScriptBindingLoadFailure(
+					OutResult,
+					TEXT("binding_reflection_provenance_mismatch"),
+					Event.CanonicalIdentity,
+					TEXT("The reflected callback owner asset or function bytecode fingerprint changed since descriptor generation."));
+				return false;
+			}
+		}
 		const bool bNetworkRpcValid = Event.DelegateKind == TEXT("network_rpc")
 			&& SignatureFunction != nullptr
 			&& SignatureFunction->GetOuterUClass() == OwnerClass
@@ -3516,16 +3547,31 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			&& RepNotifyProperty->HasAnyPropertyFlags(CPF_RepNotify)
 			&& RepNotifyProperty->RepNotifyFunc
 				== SignatureFunction->GetFName();
+		const bool bBlueprintEventValid =
+			Event.DelegateKind == TEXT("blueprint_event")
+			&& SignatureFunction != nullptr
+			&& SignatureFunction->GetOuterUClass() == OwnerClass
+			&& OwnerClass->ClassGeneratedBy != nullptr
+			&& !SignatureFunction->HasAnyFunctionFlags(
+				FUNC_Native | FUNC_Static | FUNC_Delegate | FUNC_MulticastDelegate)
+			&& !SignatureFunction->Script.IsEmpty()
+			&& !SignatureFunction->HasMetaData(TEXT("Latent"))
+			&& SignatureFunction->GetReturnProperty() == nullptr
+			&& IsAvidScriptBindingNetworkOwnerClass(OwnerClass)
+			&& bNetworkContractValid
+			&& !Network.IsNetworked()
+			&& RepNotifyProperty == nullptr;
 		if (!bMulticastValid
 			&& !bSinglecastValid
 			&& !bNetworkRpcValid
-			&& !bRepNotifyValid)
+			&& !bRepNotifyValid
+			&& !bBlueprintEventValid)
 		{
 			SetAvidScriptBindingLoadFailure(
 				OutResult,
 				TEXT("binding_callback_member_missing"),
 				Event.OwnerClass + TEXT(".") + Event.UeMember,
-				TEXT("The reflected callback member no longer satisfies its singlecast, multicast, RPC, or RepNotify contract."));
+				TEXT("The reflected callback member no longer satisfies its singlecast, multicast, RPC, RepNotify, or Blueprint event contract."));
 			return false;
 		}
 		if (Model.SchemaVersion < 20
@@ -5295,13 +5341,21 @@ bool FAvidScriptBindingPackage::BuildPreparedInboundHandlers(
 		{
 			continue;
 		}
-		const bool bKindValid = Cell.IsValid()
-			&& (Cell->CallbackKind == TEXT("network_rpc")
-					? Cell->Network.IsNetworked()
-						&& Cell->RepNotifyProperty == nullptr
-					: Cell->CallbackKind == TEXT("rep_notify")
-						&& !Cell->Network.IsNetworked()
-						&& Cell->RepNotifyProperty != nullptr);
+		const bool bNetworkRpcKind = Cell.IsValid()
+			&& Cell->CallbackKind == TEXT("network_rpc")
+			&& Cell->Network.IsNetworked()
+			&& Cell->RepNotifyProperty == nullptr;
+		const bool bRepNotifyKind = Cell.IsValid()
+			&& Cell->CallbackKind == TEXT("rep_notify")
+			&& !Cell->Network.IsNetworked()
+			&& Cell->RepNotifyProperty != nullptr;
+		const bool bBlueprintEventKind = Cell.IsValid()
+			&& Cell->CallbackKind == TEXT("blueprint_event")
+			&& !Cell->Network.IsNetworked()
+			&& Cell->RepNotifyProperty == nullptr;
+		const bool bKindValid = bNetworkRpcKind
+			|| bRepNotifyKind
+			|| bBlueprintEventKind;
 		const bool bHandlerModeValid = Cell.IsValid()
 			&& (Cell->HandlerMode == TEXT("replace")
 				|| Cell->HandlerMode == TEXT("before")

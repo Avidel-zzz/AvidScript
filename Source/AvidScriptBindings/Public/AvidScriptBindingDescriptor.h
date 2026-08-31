@@ -111,6 +111,9 @@ struct FAvidScriptBindingDelegateEventModel
 	FString DelegateKind = TEXT("multicast");
 	FString HandlerMode = TEXT("replace");
 	FString SourceMode = TEXT("self");
+	FString ReflectedOwnerKind = TEXT("native");
+	FString ReflectedOwnerAsset;
+	FString ReflectedFunctionFingerprint;
 	FAvidScriptBindingNetworkContract Network;
 	FName RepNotifyProperty;
 	FString ExportName;

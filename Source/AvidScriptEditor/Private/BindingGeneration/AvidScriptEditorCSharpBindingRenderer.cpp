@@ -3928,6 +3928,7 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitManifest(
 			{
 				InboundHandlerCount += Event.DelegateKind == TEXT("network_rpc")
 					|| Event.DelegateKind == TEXT("rep_notify")
+					|| Event.DelegateKind == TEXT("blueprint_event")
 					? 1
 					: 0;
 			}

@@ -42,6 +42,7 @@ constexpr const TCHAR* CompositeValueGeneratorVersion = TEXT("58.1.0");
 constexpr const TCHAR* DelegateOutputGeneratorVersion = TEXT("58.2.0");
 constexpr const TCHAR* DelegateValueGeneratorVersion = TEXT("60.2.0");
 constexpr const TCHAR* BlueprintFunctionGeneratorVersion = TEXT("60.3.0");
+constexpr const TCHAR* BlueprintEventGeneratorVersion = TEXT("60.3.1");
 
 struct FResolvedBindingDescriptor
 {
@@ -1122,15 +1123,28 @@ bool GenerateBindingDescriptor(
 					Event.RepNotifyProperty = Candidate;
 				}
 			}
+			const bool bBlueprintEvent = !Event.Network.IsNetworked()
+				&& Event.RepNotifyProperty == nullptr
+				&& OwnerClass->ClassGeneratedBy != nullptr
+				&& Event.SignatureFunction->GetOwnerClass() == OwnerClass
+				&& !Event.SignatureFunction->HasAnyFunctionFlags(FUNC_Native)
+				&& !Event.SignatureFunction->Script.IsEmpty();
 			const bool bKindExclusive = Event.Network.IsNetworked()
-				!= (Event.RepNotifyProperty != nullptr);
-			const FString ResolvedKind = !bKindExclusive
-				? FString()
-				: Event.Network.IsNetworked()
-				? FString(TEXT("network_rpc"))
-				: Event.RepNotifyProperty != nullptr
-				? FString(TEXT("rep_notify"))
-				: FString();
+				? Event.RepNotifyProperty == nullptr
+				: Event.RepNotifyProperty != nullptr || bBlueprintEvent;
+			FString ResolvedKind;
+			if (bKindExclusive)
+			{
+				ResolvedKind = TEXT("blueprint_event");
+				if (Event.Network.IsNetworked())
+				{
+					ResolvedKind = TEXT("network_rpc");
+				}
+				else if (Event.RepNotifyProperty != nullptr)
+				{
+					ResolvedKind = TEXT("rep_notify");
+				}
+			}
 			if (ResolvedKind.IsEmpty()
 				|| ResolvedKind != Selection.CallbackKind
 				|| !FAvidScriptEditorReflectedDelegateEventPolicy::
@@ -1149,6 +1163,22 @@ bool GenerateBindingDescriptor(
 						: PolicyCategory,
 					PolicySource.IsEmpty() ? SelectionKey : PolicySource,
 					TEXT("Use a value-only native or Blueprint-bytecode RPC or RepNotify signature of at most eight ABI cells."));
+				return false;
+			}
+			if (ResolvedKind == TEXT("blueprint_event")
+				&& (Event.Projection.ReturnValue.Type.Kind != TEXT("void")
+					|| Event.Projection.Parameters.ContainsByPredicate(
+						[](const FAvidScriptProjectedBindingValue& Parameter)
+						{
+							return Parameter.Direction == TEXT("ref")
+								|| Parameter.Direction == TEXT("out");
+						})))
+			{
+				SetFailure(
+					OutResult,
+					TEXT("blueprint_event_signature_unsupported"),
+					Event.SignatureFunction->GetPathName(),
+					TEXT("Use a void Blueprint event with value or const-ref inputs only."));
 				return false;
 			}
 		}
@@ -1331,6 +1361,26 @@ bool GenerateBindingDescriptor(
 			return false;
 		}
 	}
+	for (const FResolvedDelegateEventDescriptor& Event : DelegateEvents)
+	{
+		if (Event.CallbackKind == TEXT("blueprint_event")
+			&& Event.HandlerMode == TEXT("replace")
+			&& Bindings.ContainsByPredicate(
+				[&Event](const FResolvedBindingDescriptor& Binding)
+				{
+					return Binding.BindingKind == TEXT("function")
+						&& Binding.OwnerClass == Event.OwnerClass
+						&& Binding.Function == Event.SignatureFunction;
+				}))
+		{
+			SetFailure(
+				OutResult,
+				TEXT("blueprint_event_replace_invocation_conflict"),
+				Event.SignatureFunction->GetPathName(),
+				TEXT("Do not expose the same Blueprint function for outbound invocation and replace-mode inbound handling."));
+			return false;
+		}
+	}
 
 	FAvidScriptBindingPackageModel Package;
 	const bool bHasWritableProperties = Bindings.ContainsByPredicate(
@@ -1393,7 +1443,8 @@ bool GenerateBindingDescriptor(
 		[](const FResolvedDelegateEventDescriptor& Event)
 		{
 			return Event.CallbackKind == TEXT("network_rpc")
-				|| Event.CallbackKind == TEXT("rep_notify");
+				|| Event.CallbackKind == TEXT("rep_notify")
+				|| Event.CallbackKind == TEXT("blueprint_event");
 		});
 	const bool bHasDelegateOutputs = DelegateEvents.ContainsByPredicate(
 		[](const FResolvedDelegateEventDescriptor& Event)
@@ -1422,6 +1473,11 @@ bool GenerateBindingDescriptor(
 				&& Binding.Function->GetOwnerClass() == Binding.OwnerClass
 				&& Binding.OwnerClass->ClassGeneratedBy != nullptr
 				&& !Binding.Function->Script.IsEmpty();
+		});
+	const bool bHasBlueprintDeclaredEvents = DelegateEvents.ContainsByPredicate(
+		[](const FResolvedDelegateEventDescriptor& Event)
+		{
+			return Event.CallbackKind == TEXT("blueprint_event");
 		});
 	Package.SchemaVersion = bHasWritableProperties || bHasNativeDirectFunctions
 			|| bHasGeneratedNativeBindings
@@ -1473,7 +1529,13 @@ bool GenerateBindingDescriptor(
 	{
 		Package.SchemaVersion = 21;
 	}
-	Package.GeneratorVersion = bHasBlueprintDeclaredFunctions
+	if (bHasBlueprintDeclaredEvents)
+	{
+		Package.SchemaVersion = 22;
+	}
+	Package.GeneratorVersion = bHasBlueprintDeclaredEvents
+		? BlueprintEventGeneratorVersion
+		: bHasBlueprintDeclaredFunctions
 		? BlueprintFunctionGeneratorVersion
 		: bHasDelegateValueSystem
 		? DelegateValueGeneratorVersion
@@ -1658,6 +1720,22 @@ bool GenerateBindingDescriptor(
 		EventModel.DelegateKind = Event.CallbackKind;
 		EventModel.HandlerMode = Event.HandlerMode;
 		EventModel.SourceMode = TEXT("self");
+		if (Event.SignatureFunction != nullptr
+			&& Event.OwnerClass != nullptr
+			&& Event.SignatureFunction->GetOwnerClass() == Event.OwnerClass
+			&& Event.OwnerClass->ClassGeneratedBy != nullptr
+			&& !Event.SignatureFunction->HasAnyFunctionFlags(FUNC_Native)
+			&& !Event.SignatureFunction->Script.IsEmpty())
+		{
+			EventModel.ReflectedOwnerKind = TEXT("blueprint");
+			EventModel.ReflectedOwnerAsset =
+				Event.OwnerClass->ClassGeneratedBy->GetPathName();
+			EventModel.ReflectedFunctionFingerprint =
+				FAvidScriptBindingDescriptorIdentity::
+				MakeReflectedFunctionFingerprint(
+					Event.CanonicalIdentity,
+					*Event.SignatureFunction);
+		}
 		EventModel.Network = Event.Network;
 		EventModel.RepNotifyProperty = Event.RepNotifyProperty == nullptr
 			? NAME_None

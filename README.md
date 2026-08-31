@@ -11,7 +11,7 @@
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 Development" src="https://img.shields.io/badge/Platform-Win64-0078D4?logo=windows&logoColor=white">
   <img alt="Phase 60 In Progress" src="https://img.shields.io/badge/Status-Phase%2060%20In%20Progress-2B6CB0">
-  <img alt="Automation Baseline 398/398" src="https://img.shields.io/badge/Baseline-398%2F398-26A269">
+  <img alt="Automation Baseline 403/403" src="https://img.shields.io/badge/Baseline-403%2F403-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
 
@@ -34,19 +34,20 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 | C# 定义 UE 类型 | Actor、Component、World/GameInstance Subsystem、继承、override、`UPROPERTY`、`UFUNCTION` 与默认参数 |
 | 异步 | `Delay`、`NextTick`、异步对象加载、Reflection 生成的 latent `FooAsync`、受控 `async/await` |
 | 委托 | 动态单播租约、多播订阅、强类型 `return/ref/out` 回调，以及生成式 `ExecuteX/BroadcastX` 主动调用 |
-| Blueprint | Profile 精确选择自声明函数、schema 21 资产/bytecode provenance、cached `ProcessEvent` 与重编译失效关闭 |
+| Blueprint | 自声明 callable/event、schema 21/22 provenance、cached `ProcessEvent`、`before/after/replace` 与重编译失效关闭 |
 | 网络 | Server/Client/NetMulticast RPC、replicated property、RPC/RepNotify handler、dedicated/listen 多进程闭环 |
 | 热重载 | 方法体事务式替换、候选回滚、状态帧与 handle 生命周期隔离 |
 | 发布 | 内容寻址 Generated Type bundle、NonUFS staging 与 Cook-layout Runtime load |
 | 后端 | Wasmtime 45 Win64 主后端；WAMR 兼容后端 |
 
-Phase 60 已完成 P60.A、P60.B 与 P60.C1a：
+Phase 60 已完成 P60.A、P60.B 与 P60.C1：
 
 - UE Interface 的函数、参数、返回值和属性可进入生成式 C# + Runtime，支持原生与 Blueprint-only 实现；
 - C# 脚本 `UFUNCTION` 的 bool、整数、有限浮点、命名 enum 与 string 默认值会发布为真实 `CPP_Default_*` 元数据；
 - Delegate 已共享 prepared signature，支持 singlecast Session lease、旧值安全恢复、
   `return/ref/out` 原子输出事务，以及 ordinal 驱动的 `ExecuteX/BroadcastX`；
-- Blueprint class 自声明函数可由 Profile 选择并通过 prepared `ProcessEvent` 调用，重编译后旧描述符会拒绝加载。
+- Blueprint class 自声明函数可双向接入：C# 可主动调用，也可用 `[AvidEvent]` 在
+  `before/after/replace` 时机承接事件；重编译后旧描述符会拒绝加载。
 
 详细进度见 [Phase 60 中文收尾记录](Docs/Phase60/P60_Closeout.md)。
 
@@ -217,7 +218,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 
 ## 路线图
 
-1. **P60**：Blueprint 入站 event、通用异步动作与集中集成 Gate；
+1. **P60**：通用异步动作与集中集成 Gate；
 2. **P61**：增量编译、源码定位、调用栈、断点、变量查看与 Profiler；
 3. **P62-P64**：Cook/Shipping、移动端 AOT 与真实小型游戏 Demo；
 4. **P65**：跨框架成熟度、稳定性与性能领导力收口。
@@ -228,7 +229,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 
 最近一次完整基线为 **AvidScript Automation 403/403 通过**。Phase 59 已关闭 Generated
 Actor/Component/Subsystem、反射成员、Blueprint 子类与 override、热重载、双拓扑网络及内容寻址
-Cook bundle 闭环。Phase 60 的 UE Interface、脚本 UFUNCTION 默认参数、Delegate 与 Blueprint callable 已通过
+Cook bundle 闭环。Phase 60 的 UE Interface、脚本 UFUNCTION 默认参数、Delegate 与 Blueprint callable/event 已通过
 聚焦 .NET、UE5.8 no-clean UBT、Automation 和独立干净工作树架构门禁。
 
 阶段状态与实现证据见 [Docs](Docs/)，开发规则见 [AGENTS.md](AGENTS.md)。

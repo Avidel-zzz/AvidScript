@@ -28,10 +28,13 @@
 - `P60.C1a` 完成 Blueprint class 自声明函数的 schema 21 provenance、cached `ProcessEvent` 出站调用与
   重编译失效关闭；无参函数使用合法零帧调用；详见
   [P60.C1a](P60.C1a_Blueprint_Declared_Callable.md)。
+- `P60.C1b` 完成 schema 22 Blueprint 自声明 event、`before/after/replace` 入站 Hook、replace/call
+  自递归门禁和重编译失效关闭；C# 继续使用统一 `[AvidEvent]`；详见
+  [P60.C1b](P60.C1b_Blueprint_Declared_Event.md)。
 
 ## 待完成
 
-- `P60.C1b-C2` Blueprint 入站 event 与通用异步；
+- `P60.C2` 通用异步；
 - `P60.D` 集成、性能与集中 Gate。
 
 ## 验收边界

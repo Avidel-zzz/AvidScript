@@ -77,11 +77,20 @@ bool TryResolveFunctionHandler(
 	}
 	if (Network.IsNetworked() == (RepNotifyProperty != nullptr))
 	{
-		OutCategory = Network.IsNetworked()
-			? FString(TEXT("function_handler_kind_ambiguous"))
-			: FString(TEXT("function_handler_kind_unsupported"));
-		OutSource = Function->GetPathName();
-		return false;
+		const bool bBlueprintEvent = !Network.IsNetworked()
+			&& RepNotifyProperty == nullptr
+			&& OwnerClass.ClassGeneratedBy != nullptr
+			&& Function->GetOwnerClass() == &OwnerClass
+			&& !Function->HasAnyFunctionFlags(FUNC_Native)
+			&& !Function->Script.IsEmpty();
+		if (!bBlueprintEvent)
+		{
+			OutCategory = Network.IsNetworked()
+				? FString(TEXT("function_handler_kind_ambiguous"))
+				: FString(TEXT("function_handler_kind_unsupported"));
+			OutSource = Function->GetPathName();
+			return false;
+		}
 	}
 
 	FAvidScriptProjectedDelegateEvent Projection;
@@ -94,10 +103,31 @@ bool TryResolveFunctionHandler(
 	{
 		return false;
 	}
+	const bool bBlueprintEvent = !Network.IsNetworked()
+		&& RepNotifyProperty == nullptr;
+	if (bBlueprintEvent
+		&& (Projection.ReturnValue.Type.Kind != TEXT("void")
+			|| Projection.Parameters.ContainsByPredicate(
+				[](const FAvidScriptProjectedBindingValue& Parameter)
+				{
+					return Parameter.Direction == TEXT("ref")
+						|| Parameter.Direction == TEXT("out");
+				})))
+	{
+		OutCategory = TEXT("blueprint_event_signature_unsupported");
+		OutSource = Function->GetPathName();
+		return false;
+	}
 	OutSelection = Selection;
-	const FString ResolvedKind = Network.IsNetworked()
-		? FString(TEXT("network_rpc"))
-		: FString(TEXT("rep_notify"));
+	FString ResolvedKind(TEXT("blueprint_event"));
+	if (Network.IsNetworked())
+	{
+		ResolvedKind = TEXT("network_rpc");
+	}
+	else if (RepNotifyProperty != nullptr)
+	{
+		ResolvedKind = TEXT("rep_notify");
+	}
 	if (Selection.CallbackKind != TEXT("function_handler")
 		&& Selection.CallbackKind != ResolvedKind)
 	{
@@ -168,7 +198,8 @@ bool ResolveOne(
 	}
 	else if (Selection.CallbackKind == TEXT("function_handler")
 		|| Selection.CallbackKind == TEXT("network_rpc")
-		|| Selection.CallbackKind == TEXT("rep_notify"))
+		|| Selection.CallbackKind == TEXT("rep_notify")
+		|| Selection.CallbackKind == TEXT("blueprint_event"))
 	{
 		FAvidScriptReflectedDelegateEventSelection ResolvedSelection;
 		if (TryResolveFunctionHandler(
@@ -257,7 +288,8 @@ bool ResolveOne(
 			Selection.CallbackKind == TEXT("function_handler")
 				|| Selection.CallbackKind == TEXT("network_rpc")
 				|| Selection.CallbackKind == TEXT("rep_notify")
-				? FString(TEXT("Select a declared native or Blueprint-bytecode Actor/ActorComponent RPC or RepNotify UFunction with a supported value-only signature and explicit chain mode."))
+				|| Selection.CallbackKind == TEXT("blueprint_event")
+				? FString(TEXT("Select a declared native or Blueprint-bytecode Actor/ActorComponent RPC, RepNotify, or void Blueprint event UFunction with a supported value-only signature and explicit chain mode."))
 				: FString(TEXT("Select a declared dynamic singlecast or multicast delegate with a supported return/value/const-ref/ref/out signature within the eight-cell ABI limit.")));
 		return false;
 	}

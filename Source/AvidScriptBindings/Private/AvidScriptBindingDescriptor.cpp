@@ -1643,6 +1643,53 @@ bool ParseAvidScriptBindingDelegateEvent(
 	{
 		return false;
 	}
+	if (SchemaVersion >= 22)
+	{
+		if (!ReadAvidScriptBindingRequiredString(
+				Object,
+				TEXT("reflected_owner_kind"),
+				OutEvent.ReflectedOwnerKind,
+				OutErrorSource)
+			|| !ReadAvidScriptBindingRequiredStringAllowEmpty(
+				Object,
+				TEXT("reflected_owner_asset"),
+				OutEvent.ReflectedOwnerAsset,
+				OutErrorSource)
+			|| !ReadAvidScriptBindingRequiredStringAllowEmpty(
+				Object,
+				TEXT("reflected_function_fingerprint"),
+				OutEvent.ReflectedFunctionFingerprint,
+				OutErrorSource))
+		{
+			return false;
+		}
+		const bool bNativeProvenance =
+			OutEvent.ReflectedOwnerKind == TEXT("native")
+			&& OutEvent.ReflectedOwnerAsset.IsEmpty()
+			&& OutEvent.ReflectedFunctionFingerprint.IsEmpty();
+		const bool bBlueprintProvenance =
+			(OutEvent.DelegateKind == TEXT("network_rpc")
+				|| OutEvent.DelegateKind == TEXT("rep_notify")
+				|| OutEvent.DelegateKind == TEXT("blueprint_event"))
+			&& OutEvent.ReflectedOwnerKind == TEXT("blueprint")
+			&& !OutEvent.ReflectedOwnerAsset.IsEmpty()
+			&& IsAvidScriptBindingLowerSha256(
+				OutEvent.ReflectedFunctionFingerprint);
+		if ((!bNativeProvenance && !bBlueprintProvenance)
+			|| (OutEvent.DelegateKind == TEXT("blueprint_event")
+				&& !bBlueprintProvenance))
+		{
+			OutErrorSource = TEXT("reflection_provenance");
+			return false;
+		}
+	}
+	else if (Object->HasField(TEXT("reflected_owner_kind"))
+		|| Object->HasField(TEXT("reflected_owner_asset"))
+		|| Object->HasField(TEXT("reflected_function_fingerprint")))
+	{
+		OutErrorSource = TEXT("reflection_provenance");
+		return false;
+	}
 
 	FString NetworkMode(TEXT("none"));
 	FString RepNotifyProperty;
@@ -2039,7 +2086,8 @@ FString FAvidScriptBindingDescriptorIdentity::MakeDelegateEventCanonicalIdentity
 		TEXT("source"),
 		SourceMode);
 	const bool bFunctionHandler = DelegateKind == TEXT("network_rpc")
-		|| DelegateKind == TEXT("rep_notify");
+		|| DelegateKind == TEXT("rep_notify")
+		|| DelegateKind == TEXT("blueprint_event");
 	if (bFunctionHandler)
 	{
 		AppendAvidScriptBindingIdentityField(
@@ -2230,6 +2278,15 @@ FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 			{
 				Key += TEXT("|handler_mode=") + Event.HandlerMode;
 			}
+			if (Package.SchemaVersion >= 22)
+			{
+				Key += TEXT("|reflected_owner_kind=")
+					+ Event.ReflectedOwnerKind
+					+ TEXT("|reflected_owner_asset=")
+					+ Event.ReflectedOwnerAsset
+					+ TEXT("|reflected_function_fingerprint=")
+					+ Event.ReflectedFunctionFingerprint;
+			}
 			SelectionKeys.Add(MoveTemp(Key));
 		}
 	}
@@ -2243,7 +2300,9 @@ FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 		return FAvidScriptHash::Sha256HexUtf8(FString::Join(SelectionKeys, TEXT("\n")));
 	}
 
-	FString Identity(Package.SchemaVersion >= 21
+	FString Identity(Package.SchemaVersion >= 22
+		? TEXT("descriptor_selection_v22")
+		: Package.SchemaVersion >= 21
 		? TEXT("descriptor_selection_v21")
 		: Package.SchemaVersion >= 20
 		? TEXT("descriptor_selection_v20")
@@ -2443,7 +2502,9 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 		return FAvidScriptHash::Sha256HexUtf8(Identity);
 	}
 
-	FString Identity(Package.SchemaVersion >= 21
+	FString Identity(Package.SchemaVersion >= 22
+		? TEXT("descriptor_package_v22")
+		: Package.SchemaVersion >= 21
 		? TEXT("descriptor_package_v21")
 		: Package.SchemaVersion >= 20
 		? TEXT("descriptor_package_v20")
@@ -2733,6 +2794,21 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 					TEXT("event_handler_mode"),
 					Event.HandlerMode);
 			}
+			if (Package.SchemaVersion >= 22)
+			{
+				AppendAvidScriptBindingIdentityField(
+					Identity,
+					TEXT("event_reflected_owner_kind"),
+					Event.ReflectedOwnerKind);
+				AppendAvidScriptBindingIdentityField(
+					Identity,
+					TEXT("event_reflected_owner_asset"),
+					Event.ReflectedOwnerAsset);
+				AppendAvidScriptBindingIdentityField(
+					Identity,
+					TEXT("event_reflected_function_fingerprint"),
+					Event.ReflectedFunctionFingerprint);
+			}
 			AppendAvidScriptBindingIdentityField(
 				Identity, TEXT("event_export"), Event.ExportName);
 			if (Package.SchemaVersion >= 20)
@@ -2845,7 +2921,8 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 			&& OutPackage.SchemaVersion != 18
 			&& OutPackage.SchemaVersion != 19
 			&& OutPackage.SchemaVersion != 20
-			&& OutPackage.SchemaVersion != 21)
+			&& OutPackage.SchemaVersion != 21
+			&& OutPackage.SchemaVersion != 22)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("generator_version"), OutPackage.GeneratorVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("engine_version"), OutPackage.EngineVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("source"), OutPackage.Source, OutErrorSource)
@@ -2878,7 +2955,8 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 				&& OutPackage.SchemaVersion != 18
 				&& OutPackage.SchemaVersion != 19
 				&& OutPackage.SchemaVersion != 20
-				&& OutPackage.SchemaVersion != 21)
+				&& OutPackage.SchemaVersion != 21
+				&& OutPackage.SchemaVersion != 22)
 			{
 				OutErrorSource = TEXT("schema_version");
 			}
@@ -3398,19 +3476,30 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 						OutPackage.SchemaVersion >= 20
 							? &Event.ReturnValue
 							: nullptr);
-			const bool bCallbackKindValid =
-				Event.DelegateKind == TEXT("multicast")
-					|| Event.DelegateKind == TEXT("singlecast")
-					? !Event.Network.IsNetworked()
-						&& !Event.Network.bReliable
-						&& Event.RepNotifyProperty.IsNone()
-					: Event.DelegateKind == TEXT("network_rpc")
-					? Event.Network.IsNetworked()
-						&& Event.RepNotifyProperty.IsNone()
-					: Event.DelegateKind == TEXT("rep_notify")
-						&& !Event.Network.IsNetworked()
-						&& !Event.Network.bReliable
-						&& !Event.RepNotifyProperty.IsNone();
+			const bool bDelegateCallbackValid =
+				(Event.DelegateKind == TEXT("multicast")
+					|| Event.DelegateKind == TEXT("singlecast"))
+				&& !Event.Network.IsNetworked()
+				&& !Event.Network.bReliable
+				&& Event.RepNotifyProperty.IsNone();
+			const bool bNetworkRpcCallbackValid =
+				Event.DelegateKind == TEXT("network_rpc")
+				&& Event.Network.IsNetworked()
+				&& Event.RepNotifyProperty.IsNone();
+			const bool bRepNotifyCallbackValid =
+				Event.DelegateKind == TEXT("rep_notify")
+				&& !Event.Network.IsNetworked()
+				&& !Event.Network.bReliable
+				&& !Event.RepNotifyProperty.IsNone();
+			const bool bBlueprintEventCallbackValid =
+				Event.DelegateKind == TEXT("blueprint_event")
+				&& !Event.Network.IsNetworked()
+				&& !Event.Network.bReliable
+				&& Event.RepNotifyProperty.IsNone();
+			const bool bCallbackKindValid = bDelegateCallbackValid
+				|| bNetworkRpcCallbackValid
+				|| bRepNotifyCallbackValid
+				|| bBlueprintEventCallbackValid;
 			const bool bHandlerModeValid =
 				Event.DelegateKind == TEXT("multicast")
 					|| Event.DelegateKind == TEXT("singlecast")
@@ -3426,6 +3515,16 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 					&& Event.DelegateKind != TEXT("multicast"))
 				|| (OutPackage.SchemaVersion < 20
 					&& Event.DelegateKind == TEXT("singlecast"))
+				|| (OutPackage.SchemaVersion < 22
+					&& Event.DelegateKind == TEXT("blueprint_event"))
+				|| (Event.DelegateKind == TEXT("blueprint_event")
+					&& (Event.ReturnValue.Kind != TEXT("void")
+						|| Event.Parameters.ContainsByPredicate(
+							[](const FAvidScriptBindingValueModel& Parameter)
+							{
+								return Parameter.Direction == TEXT("ref")
+									|| Parameter.Direction == TEXT("out");
+							})))
 				|| Event.SourceMode != TEXT("self")
 				|| !IsAvidScriptBindingIdentifier(Event.ScriptName)
 				|| Event.CanonicalIdentity != ExpectedIdentity

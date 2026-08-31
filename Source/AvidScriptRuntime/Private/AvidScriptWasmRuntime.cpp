@@ -1772,7 +1772,8 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedCallbacks(
 	OutInboundHandlers.Reset();
 	for (FAvidScriptPreparedDelegateEvent& Callback : Callbacks)
 	{
-		if (Callback.CallbackKind == TEXT("multicast"))
+		if (Callback.CallbackKind == TEXT("multicast")
+			|| Callback.CallbackKind == TEXT("singlecast"))
 		{
 			OutDelegateEvents.Add(MoveTemp(Callback));
 		}

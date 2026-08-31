@@ -6416,6 +6416,319 @@ bool FAvidScriptEditorBlueprintDeclaredFunctionIntegrationTest::RunTest(
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBlueprintDeclaredEventIntegrationTest,
+	"AvidScript.Editor.BindingRuntime.BlueprintDeclaredEvent",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBlueprintDeclaredEventIntegrationTest::RunTest(
+	const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	const FName BlueprintName(*FString::Printf(
+		TEXT("AvidScriptBlueprintEvent_%s"),
+		*FGuid::NewGuid().ToString(EGuidFormats::Digits)));
+	TStrongObjectPtr<UBlueprint> Blueprint(
+		FKismetEditorUtilities::CreateBlueprint(
+			AAvidScriptBindingRuntimeProcessEventTestActor::StaticClass(),
+			GetTransientPackage(),
+			BlueprintName,
+			BPTYPE_Normal,
+			TEXT("AvidScriptBlueprintDeclaredEventTest")));
+	if (!TestNotNull(TEXT("Transient event Blueprint is created"), Blueprint.Get()))
+	{
+		return false;
+	}
+
+	const FName FunctionName(TEXT("ScriptOnlyEvent"));
+	UEdGraph* const FunctionGraph = FBlueprintEditorUtils::CreateNewGraph(
+		Blueprint.Get(),
+		FunctionName,
+		UEdGraph::StaticClass(),
+		UEdGraphSchema_K2::StaticClass());
+	FBlueprintEditorUtils::AddFunctionGraph(
+		Blueprint.Get(),
+		FunctionGraph,
+		true,
+		static_cast<UFunction*>(nullptr));
+	TArray<UK2Node_FunctionEntry*> Entries;
+	FunctionGraph->GetNodesOfClass(Entries);
+	if (!TestEqual(TEXT("Declared event has one entry"), Entries.Num(), 1))
+	{
+		return false;
+	}
+	FGraphNodeCreator<UK2Node_CallFunction> NodeCreator(*FunctionGraph);
+	UK2Node_CallFunction* const CallNode = NodeCreator.CreateNode();
+	CallNode->FunctionReference.SetExternalMember(
+		GET_FUNCTION_NAME_CHECKED(
+			AAvidScriptBindingRuntimeProcessEventTestActor,
+			RecordBlueprintDeclaredCall),
+		AAvidScriptBindingRuntimeProcessEventTestActor::StaticClass());
+	NodeCreator.Finalize();
+	const UEdGraphSchema_K2* const Schema = CastChecked<UEdGraphSchema_K2>(
+		FunctionGraph->GetSchema());
+	if (!TestTrue(
+			TEXT("Declared event entry connects to its Blueprint body"),
+			Schema->TryCreateConnection(
+				Entries[0]->FindPinChecked(UEdGraphSchema_K2::PN_Then),
+				CallNode->FindPinChecked(UEdGraphSchema_K2::PN_Execute))))
+	{
+		return false;
+	}
+	FKismetEditorUtilities::CompileBlueprint(Blueprint.Get());
+	UClass* const BlueprintClass = Blueprint->GeneratedClass;
+	UFunction* const BlueprintFunction = BlueprintClass == nullptr
+		? nullptr
+		: BlueprintClass->FindFunctionByName(
+			FunctionName,
+			EIncludeSuperFlag::ExcludeSuper);
+	if (!TestNotNull(TEXT("Blueprint declared event compiles"), BlueprintFunction))
+	{
+		return false;
+	}
+	TestFalse(
+		TEXT("Blueprint declared event is not native"),
+		BlueprintFunction->HasAnyFunctionFlags(FUNC_Native));
+	TestTrue(
+		TEXT("Blueprint declared event owns bytecode"),
+		!BlueprintFunction->Script.IsEmpty());
+
+	FAvidScriptBindingSelectionProfile Profile;
+	Profile.PackageName = TEXT("avidscript.test.blueprint_declared_event");
+	Profile.SelfClassPath = BlueprintClass->GetPathName();
+	Profile.ExplicitDelegateEvents.Add({
+		BlueprintClass->GetPathName(),
+		FunctionName,
+		TEXT("blueprint_event"),
+		TEXT("before")
+	});
+	FString DescriptorJson;
+	FAvidScriptBindingSelectionResolveResult SelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+			TEXT("Blueprint declared event generates through the Profile path"),
+			FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+				Profile,
+				DescriptorJson,
+				SelectionResult,
+				GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorCategory + TEXT(": ")
+			+ GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Descriptor;
+	FString ParseCategory;
+	FString ParseSource;
+	if (!TestTrue(
+			TEXT("Blueprint declared event descriptor parses"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				DescriptorJson,
+				Descriptor,
+				ParseCategory,
+				ParseSource)))
+	{
+		AddError(ParseCategory + TEXT(": ") + ParseSource);
+		return false;
+	}
+	if (!TestEqual(TEXT("Blueprint event activates schema 22"), Descriptor.SchemaVersion, 22)
+		|| !TestEqual(TEXT("One Blueprint event is described"), Descriptor.DelegateEvents.Num(), 1))
+	{
+		return false;
+	}
+	const FAvidScriptBindingDelegateEventModel& Event = Descriptor.DelegateEvents[0];
+	TestEqual(
+		TEXT("Descriptor identifies a Blueprint event"),
+		Event.DelegateKind,
+		FString(TEXT("blueprint_event")));
+	TestEqual(
+		TEXT("Descriptor freezes the Blueprint event asset"),
+		Event.ReflectedOwnerAsset,
+		Blueprint->GetPathName());
+	TestEqual(
+		TEXT("Descriptor freezes the Blueprint event bytecode"),
+		Event.ReflectedFunctionFingerprint,
+		FAvidScriptBindingDescriptorIdentity::MakeReflectedFunctionFingerprint(
+			Event.CanonicalIdentity,
+			*BlueprintFunction));
+
+	FAvidScriptBindingSelectionProfile ConflictProfile = Profile;
+	ConflictProfile.ExplicitFunctions.Add({
+		BlueprintClass->GetPathName(),
+		FunctionName
+	});
+	ConflictProfile.ExplicitDelegateEvents[0].HandlerMode = TEXT("replace");
+	FString ConflictDescriptorJson;
+	FAvidScriptBindingSelectionResolveResult ConflictSelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult ConflictGenerateResult;
+	TestFalse(
+		TEXT("Replace mode rejects the same outbound Blueprint callable"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+			ConflictProfile,
+			ConflictDescriptorJson,
+			ConflictSelectionResult,
+			ConflictGenerateResult));
+	TestEqual(
+		TEXT("Replace/call conflict has a stable category"),
+		ConflictGenerateResult.ErrorCategory,
+		FString(TEXT("blueprint_event_replace_invocation_conflict")));
+
+	TSharedPtr<const FAvidScriptBindingPackage> Package;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	if (!TestTrue(
+			TEXT("Runtime accepts the live Blueprint event provenance"),
+			FAvidScriptBindingPackage::LoadDescriptor(
+				DescriptorJson,
+				Package,
+				LoadResult)))
+	{
+		AddError(LoadResult.ErrorCategory + TEXT(": ") + LoadResult.ErrorDetails);
+		return false;
+	}
+	TArray<FAvidScriptPreparedDelegateEvent> Handlers;
+	FString HandlerError;
+	if (!TestTrue(
+			TEXT("Binding package prepares one Blueprint inbound handler"),
+			Package->BuildPreparedInboundHandlers(Handlers, HandlerError))
+		|| !TestEqual(TEXT("One Blueprint handler is prepared"), Handlers.Num(), 1))
+	{
+		AddError(HandlerError);
+		return false;
+	}
+	TestEqual(
+		TEXT("Prepared handler preserves Blueprint callback kind"),
+		Handlers[0].CallbackKind,
+		FString(TEXT("blueprint_event")));
+
+	UWorld* World = nullptr;
+	if (!TestTrue(
+			TEXT("Blueprint event integration world is created"),
+			CreateAvidScriptBindingRuntimeIntegrationWorld(World)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyAvidScriptBindingRuntimeIntegrationWorld(World);
+	};
+	AAvidScriptBindingRuntimeProcessEventTestActor* const Actor =
+		Cast<AAvidScriptBindingRuntimeProcessEventTestActor>(
+			World->SpawnActor<AActor>(BlueprintClass));
+	if (!TestNotNull(TEXT("Blueprint event actor spawns"), Actor))
+	{
+		return false;
+	}
+
+	FAvidScriptRuntimeSession Session;
+	FAvidScriptWasmReloadResult RuntimeLoadResult;
+	if (!TestTrue(
+			TEXT("Embedded runtime reaches Running for Blueprint event dispatch"),
+			Session.LoadEmbeddedSmoke(RuntimeLoadResult)))
+	{
+		return false;
+	}
+	Handlers[0].ExportName = TEXT("avid_on_begin_play");
+	if (!TestTrue(
+			TEXT("Blueprint event export prepares against the live VM"),
+			Session.GetLiveRuntimeForTesting()->PrepareDelegateEventExportsForTesting(
+				Handlers,
+				HandlerError))
+		|| !TestEqual(TEXT("Live VM keeps the implemented event"), Handlers.Num(), 1))
+	{
+		AddError(HandlerError);
+		return false;
+	}
+	if (!TestTrue(
+			TEXT("Before handler prepares"),
+			Session.PrepareInboundHandlersForTesting(
+				Actor,
+				Handlers,
+				HandlerError))
+		|| !TestTrue(
+			TEXT("Before handler commits"),
+			Session.CommitInboundHandlersForTesting(HandlerError)))
+	{
+		AddError(HandlerError);
+		return false;
+	}
+	Actor->ProcessEvent(BlueprintFunction, nullptr);
+	TestEqual(TEXT("Before mode dispatches one guest callback"), Session.GetLiveEventCallbackCount(), 1);
+	TestEqual(TEXT("Before mode preserves the Blueprint body"), Actor->BlueprintDeclaredCallCount, 1);
+
+	Handlers[0].HandlerMode = TEXT("after");
+	if (!TestTrue(
+			TEXT("After handler prepares"),
+			Session.PrepareInboundHandlersForTesting(
+				Actor,
+				Handlers,
+				HandlerError))
+		|| !TestTrue(
+			TEXT("After handler commits"),
+			Session.CommitInboundHandlersForTesting(HandlerError)))
+	{
+		AddError(HandlerError);
+		return false;
+	}
+	Actor->ProcessEvent(BlueprintFunction, nullptr);
+	TestEqual(TEXT("After mode dispatches one guest callback"), Session.GetLiveEventCallbackCount(), 2);
+	TestEqual(TEXT("After mode preserves the Blueprint body"), Actor->BlueprintDeclaredCallCount, 2);
+
+	Handlers[0].HandlerMode = TEXT("replace");
+	if (!TestTrue(
+			TEXT("Replace handler prepares"),
+			Session.PrepareInboundHandlersForTesting(
+				Actor,
+				Handlers,
+				HandlerError))
+		|| !TestTrue(
+			TEXT("Replace handler commits"),
+			Session.CommitInboundHandlersForTesting(HandlerError)))
+	{
+		AddError(HandlerError);
+		return false;
+	}
+	Actor->ProcessEvent(BlueprintFunction, nullptr);
+	TestEqual(TEXT("Replace mode dispatches one guest callback"), Session.GetLiveEventCallbackCount(), 3);
+	TestEqual(TEXT("Replace mode suppresses the Blueprint body"), Actor->BlueprintDeclaredCallCount, 2);
+	Session.UnbindInboundHandlersForTesting();
+	Actor->ProcessEvent(BlueprintFunction, nullptr);
+	TestEqual(TEXT("Unbind restores the Blueprint body"), Actor->BlueprintDeclaredCallCount, 3);
+	FAvidScriptWasmSmokeResult StopResult;
+	TestTrue(TEXT("Blueprint event session stops cleanly"), Session.StopAndUnload(StopResult));
+
+	FGraphNodeCreator<UK2Node_CallFunction> SecondNodeCreator(*FunctionGraph);
+	UK2Node_CallFunction* const SecondCallNode = SecondNodeCreator.CreateNode();
+	SecondCallNode->FunctionReference.SetExternalMember(
+		GET_FUNCTION_NAME_CHECKED(
+			AAvidScriptBindingRuntimeProcessEventTestActor,
+			RecordBlueprintDeclaredCall),
+		AAvidScriptBindingRuntimeProcessEventTestActor::StaticClass());
+	SecondNodeCreator.Finalize();
+	if (!TestTrue(
+			TEXT("Blueprint event bytecode mutation extends the body"),
+			Schema->TryCreateConnection(
+				CallNode->FindPinChecked(UEdGraphSchema_K2::PN_Then),
+				SecondCallNode->FindPinChecked(UEdGraphSchema_K2::PN_Execute))))
+	{
+		return false;
+	}
+	FKismetEditorUtilities::CompileBlueprint(Blueprint.Get());
+	TSharedPtr<const FAvidScriptBindingPackage> StalePackage;
+	FAvidScriptBindingPackageLoadResult StaleLoadResult;
+	TestFalse(
+		TEXT("Runtime rejects an event descriptor after Blueprint bytecode changes"),
+		FAvidScriptBindingPackage::LoadDescriptor(
+			DescriptorJson,
+			StalePackage,
+			StaleLoadResult));
+	TestEqual(
+		TEXT("Blueprint event recompile rejection has a stable category"),
+		StaleLoadResult.ErrorCategory,
+		FString(TEXT("binding_reflection_provenance_mismatch")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorDelegateActiveInvokeIntegrationTest,
 	"AvidScript.Editor.BindingRuntime.DelegateActiveInvoke",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

@@ -245,6 +245,18 @@ bool FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 				Writer->WriteValue(TEXT("handler_mode"), Event.HandlerMode);
 			}
 			Writer->WriteValue(TEXT("source_mode"), Event.SourceMode);
+			if (Package.SchemaVersion >= 22)
+			{
+				Writer->WriteValue(
+					TEXT("reflected_owner_kind"),
+					Event.ReflectedOwnerKind);
+				Writer->WriteValue(
+					TEXT("reflected_owner_asset"),
+					Event.ReflectedOwnerAsset);
+				Writer->WriteValue(
+					TEXT("reflected_function_fingerprint"),
+					Event.ReflectedFunctionFingerprint);
+			}
 			if (Package.SchemaVersion >= 17)
 			{
 				Writer->WriteValue(

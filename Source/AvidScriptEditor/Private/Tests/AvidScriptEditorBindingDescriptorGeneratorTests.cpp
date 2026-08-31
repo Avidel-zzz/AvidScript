@@ -1771,7 +1771,7 @@ bool FAvidScriptEditorBindingDescriptorV8PropertySetTest::RunTest(const FString&
 		TEXT("schema_version"),
 		[](TSharedPtr<FJsonObject>& Root)
 		{
-			Root->SetNumberField(TEXT("schema_version"), 22);
+			Root->SetNumberField(TEXT("schema_version"), 23);
 		});
 	ParserRejectsWithSource(
 		TEXT("Malformed package hash identifies its header field"),

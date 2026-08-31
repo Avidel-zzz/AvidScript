@@ -38,12 +38,19 @@ bool TryResolveChainMode(
 bool IsPreparedHandlerValid(
 	const FAvidScriptPreparedDelegateEvent& Handler)
 {
-	const bool bKindValid = Handler.CallbackKind == TEXT("network_rpc")
-		? Handler.Network.IsNetworked()
-			&& Handler.RepNotifyProperty == nullptr
-		: Handler.CallbackKind == TEXT("rep_notify")
-			&& !Handler.Network.IsNetworked()
-			&& Handler.RepNotifyProperty != nullptr;
+	const bool bNetworkRpcKind = Handler.CallbackKind == TEXT("network_rpc")
+		&& Handler.Network.IsNetworked()
+		&& Handler.RepNotifyProperty == nullptr;
+	const bool bRepNotifyKind = Handler.CallbackKind == TEXT("rep_notify")
+		&& !Handler.Network.IsNetworked()
+		&& Handler.RepNotifyProperty != nullptr;
+	const bool bBlueprintEventKind =
+		Handler.CallbackKind == TEXT("blueprint_event")
+		&& !Handler.Network.IsNetworked()
+		&& Handler.RepNotifyProperty == nullptr;
+	const bool bKindValid = bNetworkRpcKind
+		|| bRepNotifyKind
+		|| bBlueprintEventKind;
 	return bKindValid
 		&& Handler.EventOrdinal < static_cast<uint32>(MAX_int32)
 		&& Handler.ExpectedSourceClass != nullptr

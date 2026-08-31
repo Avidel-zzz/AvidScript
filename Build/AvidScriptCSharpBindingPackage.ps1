@@ -347,7 +347,10 @@ function Resolve-AvidScriptCSharpBindingPackage {
         $DescriptorSchemaVersion -ne 16 -and
         $DescriptorSchemaVersion -ne 17 -and
         $DescriptorSchemaVersion -ne 18 -and
-        $DescriptorSchemaVersion -ne 19) -or
+        $DescriptorSchemaVersion -ne 19 -and
+        $DescriptorSchemaVersion -ne 20 -and
+        $DescriptorSchemaVersion -ne 21 -and
+        $DescriptorSchemaVersion -ne 22) -or
         $ManifestDescriptorSchemaVersion -ne $DescriptorSchemaVersion -or
         [string]$Descriptor.package_name -cne $PackageName -or
         [string]$Descriptor.package_hash -cne $PackageHash) {
@@ -385,7 +388,11 @@ function Resolve-AvidScriptCSharpBindingPackage {
 		if ($DescriptorSchemaVersion -ge 17) {
 			$ManifestInboundHandlerCount = 0
 			$DescriptorInboundHandlerCount = @($DescriptorDelegateEventProperty.Value |
-				Where-Object { [string]$_.delegate_kind -cne 'multicast' }).Count
+				Where-Object {
+					[string]$_.delegate_kind -ceq 'network_rpc' -or
+					[string]$_.delegate_kind -ceq 'rep_notify' -or
+					[string]$_.delegate_kind -ceq 'blueprint_event'
+				}).Count
 			if (-not (Try-GetAvidScriptBindingJsonInt32 `
 					-Value $Manifest.inbound_handler_count `
 					-ParsedValue ([ref]$ManifestInboundHandlerCount)) -or

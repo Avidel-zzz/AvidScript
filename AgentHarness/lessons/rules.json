@@ -29,7 +29,15 @@
       "summary": "一个 shell 调用只承担一个逻辑动作或证据域。",
       "prevention": "调度前拒绝用分号、&& 或 || 串联独立动作；多文件读取使用并行工具或逐项调用。",
       "source": "legacy:1672",
-      "last_observed": "2026-08-31 P60.A2 (状态提交前误把 git add、diff check 与 scope readback 用分号串联；后续恢复为一条命令一个证据域)"
+      "last_observed": "2026-09-01 P60.C1b (探索 selection/generator 时再次用分号串联两次读取；后续只使用并行工具调用或单文件读取)"
+    },
+    {
+      "id": "callback-kind-validation-uses-named-branches",
+      "tags": ["cpp", "callbacks", "readability"],
+      "summary": "回调类型扩展到三个以上时，嵌套三元表达式容易把末端布尔分支误当成下一层条件。",
+      "prevention": "多 kind 合同使用具名布尔值或显式 if 分支；新增 kind 后先定点回读完整表达式，再运行 no-clean 增量编译。",
+      "source": "observed:2026-09-01-P60.C1b",
+      "last_observed": "2026-09-01 P60.C1b (为 callback kind 增加 blueprint_event 时三处嵌套三元缺少问号，首次增量编译发现后改正)"
     },
     {
       "id": "dotnet-executable-tests-use-run",
