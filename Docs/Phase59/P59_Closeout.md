@@ -1,6 +1,6 @@
 # Phase 59 收尾记录
 
-> 当前状态：严格 Gate 与 attestation 已完成，等待 PhaseWorkflow close
+> 当前状态：Phase 59 已通过严格 Gate、attestation 与 PhaseWorkflow close
 
 ## 目标
 
@@ -81,11 +81,13 @@
   真实 isolated Runtime load 与 GeneratedTypes Automation `7/7` 通过；完整 BuildCookRun/Shipping 留给 P62。
 - `P59.D8`：Generated Type 四轴性能矩阵已固定真实 shell、prepared export、五属性脚本体和
   Session lifecycle crossing；本机 p50 分别为 `68.7 ns`、`61.2 ns`、`196.3 ns` 和 `1.611 ms`。
-- `P59.D`：D1-D8 实现与 Gate instrumentation 已完成；当前只执行阶段集中 Gate，不再扩展产品范围。
+- `P59.D`：D1-D8 实现、Gate instrumentation 与严格集中 Gate 已完成；Phase 59 正式关闭。
 
-## 待完成
+## 后续边界
 
-- PhaseWorkflow `close` 与关闭后的 README 状态刷新。
+- 人工 PIE 放置 Actor、Blueprint 资产视觉重开与交互观察继续单独记录；
+- P60 补 Interface、完整 delegate、默认参数与 Blueprint 新声明函数；
+- P62 完整验证 BuildCookRun 与 Shipping；P65 关闭跨框架性能领导力门禁。
 
 ## 集中修复
 

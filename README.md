@@ -10,8 +10,8 @@
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 Development" src="https://img.shields.io/badge/Platform-Win64-0078D4?logo=windows&logoColor=white">
-  <img alt="Phase 59 Gate" src="https://img.shields.io/badge/Status-Phase%2059%20Gate-159957">
-  <img alt="GeneratedTypes 7/7" src="https://img.shields.io/badge/GeneratedTypes-7%2F7-26A269">
+  <img alt="Phase 59 Complete" src="https://img.shields.io/badge/Status-Phase%2059%20Complete-159957">
+  <img alt="Automation 398/398" src="https://img.shields.io/badge/Automation-398%2F398-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
 
@@ -695,14 +695,14 @@ cmd /c Build\BuildWAMRWin64.cmd
 - UE5.8 no-clean Editor build 与 `Automation RunTests AvidScript`；
 - 同机、候选绑定的 Puerts/Wasmtime 正式性能矩阵。
 
-最近一次完整 AvidScript Automation 基线为 **376/376 通过**。P59.D6 完成 Generated Type 网络合同
-与两组独立进程拓扑；P59.D7 完成内容寻址 Cook bundle、UBT NonUFS staging 和 isolated Runtime load，
-focused Generated Types 为 `7/7`。完整 BuildCookRun/Shipping 仍留在 P62。
+最近一次完整 AvidScript Automation 基线为 **398/398 通过**。Phase 59 已关闭 C# 定义
+Actor/Component/Subsystem、UPROPERTY/UFUNCTION、Blueprint 子类与 override、热重载、双拓扑网络
+和内容寻址 Cook bundle 的闭环；完整 BuildCookRun/Shipping 仍留在 P62。
 
 纯执行层 12-kernel 候选 correctness failure 为 0、fallback 为 false，但 P95 领导力门禁仍未关闭；
 README 中的性能领先结论仅限上表已冻结 workload，不外推为所有代码都领先 V8。
-最新功能报告见 [P59.D7 中文完成报告](Docs/Phase59/P59.D7_Generated_Type_Cook_Publication.md)，
-最新性能报告见 [P57.13 中文结果](Docs/Phase57/P57.13_Cranelift_Speed_Profile.md)。
+最新功能报告见 [Phase 59 中文收尾](Docs/Phase59/P59_Closeout.md)，
+最新性能报告见 [P59 Generated Type 四轴矩阵](Docs/Phase59/P59.D8_Generated_Type_Performance_Matrix.md)。
 
 工程规则：
 
