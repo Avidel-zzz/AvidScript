@@ -285,6 +285,14 @@
       "prevention": "Cook publisher 同时重写 binding package files.descriptor、binding manifest SHA、Runtime binding_package SHA 与最终 package id；用真实 isolated Runtime load 验证，不只检查文件存在。",
       "source": "observed:2026-08-31-P59.D7",
       "last_observed": "2026-08-31 P59.D7 (首次真实 Cook package load 因 package.json 仍指向 bindings.v5.json 而 fail-closed)"
+    },
+    {
+      "id": "generated-facade-changes-update-byte-fixtures",
+      "tags": ["generator", "facade", "fixtures", "automation"],
+      "summary": "共享 generated facade 公共表面变化必须同步所有逐字节 canonical fixture。",
+      "prevention": "修改 C# renderer 的共享属性、基类或 helper 后，先检索所有 byte-for-byte facade fixture 与实际输出保存路径；更新 fixture 后同时运行其 Editor emitter 测试和消费该 fixture 的 .NET Guest 测试，再进入全量 Gate。",
+      "source": "observed:2026-08-31-P59.Gate",
+      "last_observed": "2026-08-31 P59 Gate (UClass/UProperty/UFunction facade 已进入 renderer，但 P48 FName canonical fixture 未同步，导致最终全量 Automation 失败)"
     }
   ]
 }

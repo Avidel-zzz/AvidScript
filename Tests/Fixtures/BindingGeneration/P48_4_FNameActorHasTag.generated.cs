@@ -163,6 +163,73 @@ public sealed class AvidStateAliasAttribute : Attribute
     public string FormerName { get; }
 }
 
+[AttributeUsage(AttributeTargets.Class, Inherited = false, AllowMultiple = false)]
+public sealed class UClassAttribute : Attribute
+{
+    public string Name { get; set; } = string.Empty;
+    public bool Blueprintable { get; set; } = true;
+    public bool BlueprintType { get; set; } = true;
+    public bool Abstract { get; set; }
+    public bool NotPlaceable { get; set; }
+    public bool Transient { get; set; }
+}
+
+[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, Inherited = false, AllowMultiple = false)]
+public sealed class UPropertyAttribute : Attribute
+{
+    public bool EditAnywhere { get; set; }
+    public bool VisibleAnywhere { get; set; }
+    public bool BlueprintReadOnly { get; set; }
+    public bool BlueprintReadWrite { get; set; }
+    public bool Replicated { get; set; }
+    public string ReplicatedUsing { get; set; } = string.Empty;
+    public bool SaveGame { get; set; }
+    public bool Transient { get; set; }
+    public string Category { get; set; } = string.Empty;
+}
+
+[AttributeUsage(AttributeTargets.Method, Inherited = false, AllowMultiple = false)]
+public sealed class UFunctionAttribute : Attribute
+{
+    public bool BlueprintCallable { get; set; }
+    public bool BlueprintPure { get; set; }
+    public bool BlueprintNativeEvent { get; set; }
+    public bool BlueprintImplementableEvent { get; set; }
+    public bool Server { get; set; }
+    public bool Client { get; set; }
+    public bool NetMulticast { get; set; }
+    public bool Reliable { get; set; }
+    public bool Unreliable { get; set; }
+    public string Category { get; set; } = string.Empty;
+}
+
+public abstract class AvidActor
+{
+    protected virtual void BeginPlay() { }
+    protected virtual void Tick(float deltaSeconds) { }
+    protected virtual void EndPlay() { }
+}
+
+public abstract class AvidActorComponent
+{
+    protected virtual void BeginPlay() { }
+    protected virtual void Tick(float deltaSeconds) { }
+    protected virtual void EndPlay() { }
+}
+
+public abstract class AvidWorldSubsystem
+{
+    protected virtual void Initialize() { }
+    protected virtual void Tick(float deltaSeconds) { }
+    protected virtual void Deinitialize() { }
+}
+
+public abstract class AvidGameInstanceSubsystem
+{
+    protected virtual void Initialize() { }
+    protected virtual void Deinitialize() { }
+}
+
 internal static class AvidScriptBindingPackage
 {
     internal const string PackageName = "avidscript.engine.fname.facade";

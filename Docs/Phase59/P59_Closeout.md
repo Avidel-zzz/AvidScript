@@ -87,6 +87,12 @@
 
 - `P59.D` 集中 Gate。
 
+## 集中修复
+
+- 首个冻结候选的全量 Automation 发现 P59 新增 generated type facade 未同步到 P48 FName
+  canonical fixture；生成器输出正确，fixture 少 67 行共享声明。候选已按状态机作废，fixture 与
+  防复发规则同步后重新冻结，不把失败运行计入最终通过证据。
+
 ## 最终证据
 
 阶段 Gate 完成后填写候选提交、测试计数、UBT、Automation、benchmark、人工 PIE/Blueprint 验收和
