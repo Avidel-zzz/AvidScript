@@ -97,6 +97,24 @@ public:
 		return true;
 	}
 
+	int64 BeginAsyncAction(
+		const int32 CallbackId,
+		UObject& Action,
+		const FAvidScriptBindingAsyncActionContract& Contract,
+		FString& OutError) override
+	{
+		LastAsyncCallbackId = CallbackId;
+		LastAsyncAction.Reset(&Action);
+		LastAsyncContract = Contract;
+		if (!bAllowAsyncAction || !Contract.IsValid())
+		{
+			OutError = TEXT("async_action_test_rejected");
+			return 0;
+		}
+		OutError.Reset();
+		return 9101;
+	}
+
 	UAvidScriptEditorLatentCallbackTestObject* GetCallbackTarget() const
 	{
 		return CallbackTarget.Get();
@@ -106,7 +124,11 @@ public:
 	bool bAllowCommit = true;
 	bool bObservedRegisteredAction = false;
 	bool bCommitted = false;
+	bool bAllowAsyncAction = true;
 	int32 AbortCount = 0;
+	int32 LastAsyncCallbackId = INDEX_NONE;
+	TStrongObjectPtr<UObject> LastAsyncAction;
+	FAvidScriptBindingAsyncActionContract LastAsyncContract;
 
 private:
 	UWorld* World = nullptr;
@@ -6176,6 +6198,146 @@ bool FAvidScriptEditorBindingLatentProcessEventTest::RunTest(
 		TEXT("Aborted latent action never invokes its callback"),
 		RejectingHost.GetCallbackTarget()->CompletionCount,
 		0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBlueprintAsyncActionIntegrationTest,
+	"AvidScript.Editor.BindingRuntime.BlueprintAsyncAction",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBlueprintAsyncActionIntegrationTest::RunTest(
+	const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+			TEXT("Async action descriptor generates from reflection"),
+			FAvidScriptEditorBindingDescriptorGenerator::Generate(
+				TEXT("avidscript.test.blueprint_async_action_runtime"),
+				{
+					{
+						UAvidScriptEditorAsyncActionTestObject::StaticClass()
+							->GetPathName(),
+						TEXT("WaitForSignal")
+					}
+				},
+				DescriptorJson,
+				GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorCategory + TEXT(": ")
+			+ GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Descriptor;
+	FString ParseCategory;
+	FString ParseSource;
+	TSharedPtr<const FAvidScriptBindingPackage> Package;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	if (!TestTrue(
+			TEXT("Async action descriptor parses"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				DescriptorJson,
+				Descriptor,
+				ParseCategory,
+				ParseSource))
+		|| !TestTrue(
+			TEXT("Async action package loads its prepared plan"),
+			FAvidScriptBindingPackage::LoadDescriptor(
+				DescriptorJson,
+				Package,
+				LoadResult))
+		|| !TestEqual(
+			TEXT("One async action binding is published"),
+			Descriptor.Bindings.Num(),
+			1))
+	{
+		AddError(ParseCategory + TEXT(": ") + ParseSource
+			+ TEXT(" ") + LoadResult.ErrorCategory + TEXT(": ")
+			+ LoadResult.ErrorDetails);
+		return false;
+	}
+
+	UWorld* World = nullptr;
+	if (!TestTrue(
+			TEXT("Async action invocation world is created"),
+			CreateAvidScriptBindingRuntimeIntegrationWorld(World)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyAvidScriptBindingRuntimeIntegrationWorld(World);
+	};
+
+	FAvidScriptEditorLatentTestHost Host(*World);
+	FAvidScriptBindingInvocationContext InvocationContext;
+	InvocationContext.World = World;
+	InvocationContext.WritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+	InvocationContext.LatentHost = &Host;
+	TArray<uint8> Scratch;
+	Scratch.SetNumUninitialized(
+		FMath::Max(1, Package->GetRequiredScratchSize()));
+	const uint64 Arguments[] = { 71 };
+	FAvidScriptDynamicHostCall Call;
+	Call.BindingOrdinal = Descriptor.Bindings[0].Ordinal;
+	Call.Arguments = MakeArrayView(Arguments);
+	FAvidScriptDynamicHostCallResult Result;
+	if (!TestTrue(
+			TEXT("Prepared async factory registers with the Session host"),
+			Package->Dispatch(
+				Call,
+				InvocationContext,
+				Scratch,
+				Result)))
+	{
+		AddError(Result.Details);
+		return false;
+	}
+	TestEqual(TEXT("Async callback id reaches the Session host"), Host.LastAsyncCallbackId, 71);
+	TestEqual(TEXT("Async factory returns the Session token"), Result.ReturnValueI64, 9101ll);
+	TestTrue(
+		TEXT("Factory return is retained by the Session host"),
+		Host.LastAsyncAction.IsValid()
+			&& Host.LastAsyncAction->IsA(
+				UAvidScriptEditorAsyncActionTestObject::StaticClass()));
+	TestTrue(
+		TEXT("Prepared action contract preserves the reflected class"),
+		Host.LastAsyncContract.ActionClass
+			== UAvidScriptEditorAsyncActionTestObject::StaticClass());
+	TestEqual(
+		TEXT("Prepared action contract freezes both outcomes"),
+		Host.LastAsyncContract.Outcomes.Num(),
+		2);
+	if (Host.LastAsyncContract.Outcomes.Num() == 2)
+	{
+		TestEqual(
+			TEXT("Cancelled outcome keeps ordinal zero"),
+			Host.LastAsyncContract.Outcomes[0].Ordinal,
+			0);
+		TestEqual(
+			TEXT("Completed outcome keeps ordinal one"),
+			Host.LastAsyncContract.Outcomes[1].Ordinal,
+			1);
+	}
+
+	FAvidScriptEditorLatentTestHost RejectingHost(*World);
+	RejectingHost.bAllowAsyncAction = false;
+	InvocationContext.LatentHost = &RejectingHost;
+	FAvidScriptDynamicHostCallResult RejectedResult;
+	TestFalse(
+		TEXT("Rejected Session registration fails the host call"),
+		Package->Dispatch(
+			Call,
+			InvocationContext,
+			Scratch,
+			RejectedResult));
+	TestTrue(
+		TEXT("Rejected Session registration reports a stable category"),
+		RejectedResult.Details.Contains(
+			TEXT("binding_async_action_registration_failed")));
 	return true;
 }
 

@@ -32,7 +32,7 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 | UE API | 由 Reflection/Profile 生成普通 `UFUNCTION`、`UPROPERTY`、UE Interface 与项目自定义 API |
 | UE 类型 | UObject capability、`FVector`、`FRotator`、`FTransform`、固定 `USTRUCT`、`FName`、`FString`、一维 `TArray<T>` |
 | C# 定义 UE 类型 | Actor、Component、World/GameInstance Subsystem、继承、override、`UPROPERTY`、`UFUNCTION` 与默认参数 |
-| 异步 | `Delay`、`NextTick`、异步对象加载、Reflection 生成的 latent `FooAsync`、受控 `async/await` |
+| 异步 | `Delay`、`NextTick`、异步对象加载、latent `FooAsync`、Blueprint AsyncAction outcome 与受控 `async/await` |
 | 委托 | 动态单播租约、多播订阅、强类型 `return/ref/out` 回调，以及生成式 `ExecuteX/BroadcastX` 主动调用 |
 | Blueprint | 自声明 callable/event 双向调用、`before/after/replace` 事件接管，以及 AsyncAction 强类型 awaitable 生成 |
 | 网络 | Server/Client/NetMulticast RPC、replicated property、RPC/RepNotify handler、dedicated/listen 多进程闭环 |
@@ -46,9 +46,9 @@ Phase 60 当前已经落地：
 - C# `UFUNCTION` 默认参数元数据；
 - Delegate singlecast/multicast、`return/ref/out` 与主动 `ExecuteX/BroadcastX`；
 - Blueprint 自声明 callable 双向调用，以及 `[AvidEvent]` 的 `before/after/replace` 接管；
-- `UBlueprintAsyncActionBase` 工厂的强类型 outcome awaitable 生成合同。
+- `UBlueprintAsyncActionBase` 工厂的强类型 outcome awaitable，以及无参 outcome 的 Session Runtime 闭环。
 
-AsyncAction 的 Session Runtime 完成桥仍在 P60.C2b 实现中，因此这里不把它列为可运行闭环。
+带 payload 的 AsyncAction outcome 仍在 P60.C2c 推进，不在当前可用范围内。
 
 详细进度见 [Phase 60 中文收尾记录](Docs/Phase60/P60_Closeout.md)。
 

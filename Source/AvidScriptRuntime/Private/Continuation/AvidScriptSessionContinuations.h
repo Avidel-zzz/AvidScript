@@ -4,6 +4,7 @@
 #include "AvidScriptContinuation.h"
 #include "AvidScriptObjectRegistry.h"
 #include "Continuation/AvidScriptLatentCallbackProxy.h"
+#include "Delegate/AvidScriptDelegateBridge.h"
 #include "Templates/SharedPointer.h"
 #include "TimerManager.h"
 #include "UObject/ObjectKey.h"
@@ -62,6 +63,11 @@ public:
 		FAvidScriptBindingLatentReservation& OutReservation) override;
 	bool CommitLatent(int64 Token) override;
 	bool AbortLatent(int64 Token) override;
+	int64 BeginAsyncAction(
+		int32 CallbackId,
+		UObject& Action,
+		const FAvidScriptBindingAsyncActionContract& Contract,
+		FString& OutError) override;
 
 	void Invalidate();
 	void PromoteToActive();
@@ -76,6 +82,7 @@ private:
 
 class FAvidScriptSessionContinuations final
 	: public TSharedFromThis<FAvidScriptSessionContinuations>
+	, public IAvidScriptDelegateBridgeSink
 {
 public:
 	static constexpr int32 MaximumPendingContinuations = 4096;
@@ -209,6 +216,16 @@ public:
 		int32 Generation,
 		const FString& ExpectedTypeId,
 		FAvidScriptBindingLatentCompletionPayload& OutPayload);
+	int64 BeginAsyncAction(
+		EAvidScriptContinuationLane Lane,
+		uint64 ActivationSerial,
+		int32 CallbackId,
+		UObject& Action,
+		const FAvidScriptBindingAsyncActionContract& Contract,
+		FString& OutError);
+	virtual void HandleAvidScriptDelegateBroadcast(
+		uint64 SubscriptionToken,
+		void* Parameters) override;
 
 private:
 	friend class UAvidScriptLatentCallbackProxy;
@@ -217,7 +234,8 @@ private:
 	{
 		Timer,
 		AsyncObjectLoad,
-		LatentAction
+		LatentAction,
+		AsyncAction
 	};
 
 	struct FEntry
@@ -233,6 +251,12 @@ private:
 		TSharedPtr<IAvidScriptAsyncObjectLoadHandle> AsyncLoadHandle;
 		TStrongObjectPtr<UObject> LoadedObject;
 		TStrongObjectPtr<UAvidScriptLatentCallbackProxy> LatentProxy;
+		TStrongObjectPtr<UObject> AsyncAction;
+		TArray<TStrongObjectPtr<UAvidScriptDelegateBridge>> AsyncActionBridges;
+		TArray<FScriptDelegate> AsyncActionDelegates;
+		TArray<FMulticastDelegateProperty*> AsyncActionProperties;
+		TArray<uint64> AsyncActionBridgeTokens;
+		FString AsyncActionPayloadTypeId;
 		FAvidScriptBindingLatentCompletionContract LatentCompletion;
 		EProducerKind ProducerKind = EProducerKind::Timer;
 		int32 ResultSlot = 0;
@@ -295,6 +319,11 @@ private:
 		TWeakObjectPtr<UWorld> World;
 		TStrongObjectPtr<UAvidScriptLatentCallbackProxy> Proxy;
 	};
+	struct FAsyncActionRoute
+	{
+		int64 ContinuationToken = 0;
+		int32 OutcomeOrdinal = INDEX_NONE;
+	};
 
 	static int64 PackToken(uint32 Slot, uint32 Generation);
 	static bool UnpackToken(int64 Token, uint32& OutSlot, uint32& OutGeneration);
@@ -321,6 +350,8 @@ private:
 	void HandleObjectLoadCompletion(int64 Token, UObject* LoadedObject);
 	void HandleLatentCompletion(int64 Token, int32 Linkage);
 	void QueueLatentCompletion(FEntry& Entry);
+	void ReleaseAsyncActionProducer(FEntry& Entry);
+	uint64 AllocateAsyncActionBridgeToken();
 	void CancelEntryProducer(FEntry& Entry);
 	void RetireLatentProxy(FEntry& Entry);
 	void CollectRetiredLatentProxies();
@@ -353,6 +384,7 @@ private:
 	TArray<uint32> FreeResultSlots;
 	TArray<FReadyCompletion> ReadyCompletions;
 	TArray<FRetiredLatentProxy> RetiredLatentProxies;
+	TMap<uint64, FAsyncActionRoute> AsyncActionRoutes;
 	TArray<TStrongObjectPtr<UObject>> RetainedLoadedObjects;
 	TSet<TObjectKey<UObject>> RetainedLoadedObjectKeys;
 	TSharedPtr<IAvidScriptAsyncObjectLoader> AsyncObjectLoader;
@@ -369,6 +401,7 @@ private:
 	FAvidScriptObjectHandle PreparedOwnerHandle;
 	uint64 NextActivationSerial = 1;
 	uint64 NextRegistrationSerial = 1;
+	uint64 NextAsyncActionBridgeToken = 1;
 	int32 OccupiedSlotCount = 0;
 	int32 OccupiedCancellationSourceCount = 0;
 	int32 CancellationBindingCount = 0;

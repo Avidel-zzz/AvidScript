@@ -4645,6 +4645,22 @@ foreach ($RequiredBlueprintDeclaredEventContract in @(
         Add-Violation "schema v22 Blueprint-declared event contract is missing $RequiredBlueprintDeclaredEventContract"
     }
 }
+foreach ($RequiredBlueprintAsyncActionRuntimeContract in @(
+    'binding_async_action_registration_failed',
+    'BeginAsyncAction',
+    'EProducerKind::AsyncAction',
+    'ReleaseAsyncActionProducer',
+    'AsyncActionRoutes',
+    'BlueprintAsyncAction'
+)) {
+    if (-not $BindingInvocationSource.Contains($RequiredBlueprintAsyncActionRuntimeContract) -and
+        -not $BindingPreparedInvocationSource.Contains($RequiredBlueprintAsyncActionRuntimeContract) -and
+        -not $ContinuationOwnerHeader.Contains($RequiredBlueprintAsyncActionRuntimeContract) -and
+        -not $ContinuationOwnerSource.Contains($RequiredBlueprintAsyncActionRuntimeContract) -and
+        -not $BindingRuntimeIntegrationTestsSource.Contains($RequiredBlueprintAsyncActionRuntimeContract)) {
+        Add-Violation "Blueprint async action Runtime bridge is missing $RequiredBlueprintAsyncActionRuntimeContract"
+    }
+}
 if ($BindingCodecProgramSource.Contains('GuestMemory.WriteBytes(')) {
     Add-Violation 'Bindings output publication must use secured mutable ranges instead of fallible WriteBytes calls'
 }

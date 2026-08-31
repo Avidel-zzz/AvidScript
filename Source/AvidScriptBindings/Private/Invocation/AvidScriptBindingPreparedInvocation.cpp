@@ -815,7 +815,8 @@ bool InvokePreparedDynamicReflection(
 			return false;
 		}
 	}
-	if (Program->ReturnValue.Kind != EValueCodecKind::Void
+	if (!Program->bAsyncAction
+		&& Program->ReturnValue.Kind != EValueCodecKind::Void
 		&& !PreflightGuestOutput(
 			Program->ReturnValue,
 			TEXT("binding_return_preflight_failed"),
@@ -909,6 +910,57 @@ bool InvokePreparedDynamicReflection(
 				Details);
 			return false;
 		}
+	}
+
+	if (Program->bAsyncAction)
+	{
+		const FObjectPropertyBase* const ReturnProperty =
+			CastField<FObjectPropertyBase>(Program->ReturnValue.Property);
+		if (Program->bLatent
+			|| ReturnProperty == nullptr
+			|| Program->CallbackIdArgumentOffset < 0
+			|| !Arguments.IsValidIndex(Program->CallbackIdArgumentOffset)
+			|| !OutputTargets.IsEmpty()
+			|| InvocationContext.LatentHost == nullptr
+			|| !Program->AsyncAction.IsValid())
+		{
+			SetDispatchFailure(
+				OutResult,
+				TEXT("binding_async_action_context_invalid"),
+				Program->DebugPath,
+				TEXT("The async action invocation has no live Session host or immutable action plan."));
+			return false;
+		}
+
+		Receiver.ProcessEvent(InvocationFunction, Frame);
+		UObject* const Action =
+			ReturnProperty->GetObjectPropertyValue_InContainer(Frame);
+		FString AsyncError;
+		const int64 Token = IsValid(Action)
+			? InvocationContext.LatentHost->BeginAsyncAction(
+				static_cast<int32>(
+					Arguments[Program->CallbackIdArgumentOffset]),
+				*Action,
+				Program->AsyncAction,
+				AsyncError)
+			: 0;
+		if (Token == 0)
+		{
+			SetDispatchFailure(
+				OutResult,
+				TEXT("binding_async_action_registration_failed"),
+				Program->DebugPath,
+				AsyncError.IsEmpty()
+					? TEXT("The async factory returned no action or Session registration failed.")
+					: AsyncError);
+			return false;
+		}
+
+		bOutputCommitted = true;
+		OutResult.bSucceeded = true;
+		OutResult.ReturnValue = 1;
+		OutResult.ReturnValueI64 = Token;
+		return true;
 	}
 
 	if (Program->bLatent)

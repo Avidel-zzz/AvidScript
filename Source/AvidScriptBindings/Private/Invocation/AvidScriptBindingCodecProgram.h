@@ -157,10 +157,12 @@ struct FInvocationCodecProgram
 	FStructProperty* LatentInfoProperty = nullptr;
 	FObjectPropertyBase* WorldContextProperty = nullptr;
 	FAvidScriptBindingLatentCompletionContract LatentCompletion;
+	FAvidScriptBindingAsyncActionContract AsyncAction;
 	FString DebugPath;
 	bool bStatic = false;
 	bool bRequiresWriteAccess = false;
 	bool bLatent = false;
+	bool bAsyncAction = false;
 	FAvidScriptBindingNetworkContract Network;
 	FAvidScriptBindingPropertyReplicationContract PropertyReplication;
 	EAvidScriptBindingReloadEffect ReloadEffect =

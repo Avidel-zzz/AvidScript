@@ -2,6 +2,7 @@
 
 #include "Continuation/AvidScriptAsyncObjectLoader.h"
 #include "Continuation/AvidScriptSessionContinuations.h"
+#include "AvidScriptContinuationTestTypes.h"
 #include "AvidScriptObjectRegistryTestTypes.h"
 #include "AvidScriptWasmRuntime.h"
 #include "Ownership/AvidScriptSessionObjectOwnership.h"
@@ -12,7 +13,9 @@
 #include "Engine/LatentActionManager.h"
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/ScopeExit.h"
 #include "UObject/SoftObjectPath.h"
+#include "UObject/UnrealType.h"
 
 namespace
 {
@@ -1254,6 +1257,191 @@ bool FAvidScriptContinuationLatentProducerTest::RunTest(
 
 	Owner->Teardown();
 	DestroyContinuationWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptContinuationBlueprintAsyncActionTest,
+	"AvidScript.Runtime.Continuation.BlueprintAsyncAction",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptContinuationBlueprintAsyncActionTest::RunTest(
+	const FString& Parameters)
+{
+	UWorld* World = nullptr;
+	if (!TestTrue(
+			TEXT("Async action world is created"),
+			CreateContinuationWorld(World)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyContinuationWorld(World);
+	};
+
+	const TSharedPtr<FAvidScriptSessionContinuations> Owner =
+		MakeShared<FAvidScriptSessionContinuations>();
+	FAvidScriptContinuationHostEndpoint& Host = Owner->ResetActive(World);
+	FMulticastDelegateProperty* const CancelledProperty =
+		FindFProperty<FMulticastDelegateProperty>(
+			UAvidScriptRuntimeAsyncActionTestObject::StaticClass(),
+			GET_MEMBER_NAME_CHECKED(
+				UAvidScriptRuntimeAsyncActionTestObject,
+				Cancelled));
+	FMulticastDelegateProperty* const CompletedProperty =
+		FindFProperty<FMulticastDelegateProperty>(
+			UAvidScriptRuntimeAsyncActionTestObject::StaticClass(),
+			GET_MEMBER_NAME_CHECKED(
+				UAvidScriptRuntimeAsyncActionTestObject,
+				Completed));
+	if (!TestNotNull(TEXT("Cancelled outcome resolves"), CancelledProperty)
+		|| !TestNotNull(TEXT("Completed outcome resolves"), CompletedProperty))
+	{
+		return false;
+	}
+
+	FAvidScriptBindingAsyncActionContract Contract;
+	Contract.ActionClass =
+		UAvidScriptRuntimeAsyncActionTestObject::StaticClass();
+	Contract.PayloadTypeId = FString::ChrN(64, TEXT('a'));
+	Contract.Outcomes.Add({
+		FString::ChrN(64, TEXT('1')),
+		0,
+		CancelledProperty
+	});
+	Contract.Outcomes.Add({
+		FString::ChrN(64, TEXT('2')),
+		1,
+		CompletedProperty
+	});
+
+	TStrongObjectPtr<UAvidScriptRuntimeAsyncActionTestObject> CompletedAction(
+		NewObject<UAvidScriptRuntimeAsyncActionTestObject>());
+	FString Error;
+	const int64 CompletedToken = Host.BeginAsyncAction(
+		601,
+		*CompletedAction,
+		Contract,
+		Error);
+	TestNotEqual(TEXT("Async action returns a continuation token"), CompletedToken, 0ll);
+	TestEqual(TEXT("Async action activates after all outcomes bind"), CompletedAction->ActivationCount, 1);
+	TestTrue(TEXT("Cancelled outcome is bound while pending"), CompletedAction->Cancelled.IsBound());
+	TestTrue(TEXT("Completed outcome is bound while pending"), CompletedAction->Completed.IsBound());
+
+	CompletedAction->BroadcastCompleted();
+	CompletedAction->BroadcastCancelled();
+	TestFalse(TEXT("First broadcast releases the cancelled route"), CompletedAction->Cancelled.IsBound());
+	TestFalse(TEXT("First broadcast releases the completed route"), CompletedAction->Completed.IsBound());
+	TArray<FAvidScriptContinuationCompletion> Completions;
+	Owner->DrainReady(Completions);
+	if (!TestEqual(TEXT("First broadcast queues one completion"), Completions.Num(), 1))
+	{
+		return false;
+	}
+	const FAvidScriptContinuationCompletion Completed = Completions[0];
+	TestEqual(TEXT("Async action callback id is preserved"), Completed.CallbackId, 601);
+	TestEqual(TEXT("Async action completes successfully"), Completed.Status, EAvidScriptContinuationStatus::Completed);
+	FAvidScriptBindingLatentCompletionPayload Payload;
+	TestTrue(
+		TEXT("Async outcome payload is consumed by its continuation capability"),
+		Owner->ConsumeResult(
+			EAvidScriptContinuationLane::Active,
+			Host.GetActivationSerial(),
+			Completed.Token,
+			Completed.ObjectSlot,
+			Completed.ObjectGeneration,
+			Contract.PayloadTypeId,
+			Payload));
+	TestEqual(TEXT("Async outcome payload contains one enum cell"), Payload.AbiCells.Num(), 1);
+	if (Payload.AbiCells.Num() == 1)
+	{
+		TestEqual(
+			TEXT("Completed outcome keeps its deterministic ordinal"),
+			static_cast<int32>(Payload.AbiCells[0]),
+			1);
+	}
+	TestTrue(
+		TEXT("Completed async action finalizes"),
+		Owner->FinalizeDispatched(CompletedToken, true));
+
+	TStrongObjectPtr<UAvidScriptRuntimeAsyncActionTestObject> ImmediateAction(
+		NewObject<UAvidScriptRuntimeAsyncActionTestObject>());
+	ImmediateAction->OutcomeOnActivate = 0;
+	const int64 ImmediateToken = Host.BeginAsyncAction(
+		604,
+		*ImmediateAction,
+		Contract,
+		Error);
+	TestNotEqual(
+		TEXT("Synchronous Activate completion keeps its token"),
+		ImmediateToken,
+		0ll);
+	TestFalse(
+		TEXT("Synchronous completion releases delegates before registration returns"),
+		ImmediateAction->Cancelled.IsBound());
+	Owner->DrainReady(Completions);
+	if (TestEqual(
+			TEXT("Synchronous Activate queues one completion"),
+			Completions.Num(),
+			1))
+	{
+		Payload = FAvidScriptBindingLatentCompletionPayload();
+		TestTrue(
+			TEXT("Synchronous outcome result remains consumable"),
+			Owner->ConsumeResult(
+				EAvidScriptContinuationLane::Active,
+				Host.GetActivationSerial(),
+				Completions[0].Token,
+				Completions[0].ObjectSlot,
+				Completions[0].ObjectGeneration,
+				Contract.PayloadTypeId,
+				Payload));
+		TestTrue(
+			TEXT("Synchronous outcome preserves ordinal zero"),
+			Payload.AbiCells.Num() == 1
+				&& static_cast<int32>(Payload.AbiCells[0]) == 0);
+		TestTrue(
+			TEXT("Synchronous async action finalizes"),
+			Owner->FinalizeDispatched(ImmediateToken, true));
+	}
+
+	TStrongObjectPtr<UAvidScriptRuntimeAsyncActionTestObject> CancelledAction(
+		NewObject<UAvidScriptRuntimeAsyncActionTestObject>());
+	const int64 CancelledToken = Host.BeginAsyncAction(
+		602,
+		*CancelledAction,
+		Contract,
+		Error);
+	TestNotEqual(TEXT("Cancellable action returns a token"), CancelledToken, 0ll);
+	TestTrue(TEXT("Pending async action can be cancelled"), Host.Cancel(CancelledToken));
+	TestFalse(TEXT("Cancellation unbinds all action delegates"), CancelledAction->Completed.IsBound());
+	Owner->DrainReady(Completions);
+	if (TestEqual(TEXT("Cancellation resumes the awaiter once"), Completions.Num(), 1))
+	{
+		TestEqual(
+			TEXT("Cancellation reports the outcome status"),
+			Completions[0].Status,
+			EAvidScriptContinuationStatus::Cancelled);
+		TestTrue(
+			TEXT("Cancelled async action finalizes"),
+			Owner->FinalizeDispatched(CancelledToken, true));
+	}
+
+	TStrongObjectPtr<UAvidScriptRuntimeAsyncActionTestObject> TeardownAction(
+		NewObject<UAvidScriptRuntimeAsyncActionTestObject>());
+	const int64 TeardownToken = Host.BeginAsyncAction(
+		603,
+		*TeardownAction,
+		Contract,
+		Error);
+	TestNotEqual(TEXT("Teardown fixture returns a token"), TeardownToken, 0ll);
+	Owner->Teardown();
+	TestFalse(TEXT("Teardown unbinds the async action"), TeardownAction->Completed.IsBound());
+	TestEqual(TEXT("Teardown reclaims every continuation"), Owner->GetActiveCount(), 0);
+	TeardownAction->BroadcastCompleted();
+	Owner->DrainReady(Completions);
+	TestEqual(TEXT("Late broadcast after teardown is suppressed"), Completions.Num(), 0);
 	return true;
 }
 

@@ -32,12 +32,15 @@
   自递归门禁和重编译失效关闭；C# 继续使用统一 `[AvidEvent]`；详见
   [P60.C1b](P60.C1b_Blueprint_Declared_Event.md)。
 - `P60.C2a` 完成 schema 23 `UBlueprintAsyncActionBase` 结构识别、确定性 outcome 与强类型 C# awaitable
-  生成；Runtime action lease/完成桥仍待 `P60.C2b`；详见
+  生成；详见
   [P60.C2a](P60.C2a_Blueprint_Async_Action_Contract.md)。
+- `P60.C2b` 完成 prepared factory 到 Session continuation 的 Runtime 闭环：`Activate()` 前绑定全部
+  outcome、首广播获胜、结果槽恢复、显式取消、teardown 解绑定与晚到广播抑制；详见
+  [P60.C2b](P60.C2b_Blueprint_Async_Action_Runtime.md)。
 
 ## 待完成
 
-- `P60.C2b-C2c` 通用异步 Runtime、生命周期与 typed payload；
+- `P60.C2c` typed outcome payload、reload、Blueprint reinstance 与 C# await 端到端；
 - `P60.D` 集成、性能与集中 Gate。
 
 ## 验收边界

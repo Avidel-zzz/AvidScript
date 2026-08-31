@@ -6,9 +6,11 @@
 #include "Containers/StringConv.h"
 #include "Engine/LatentActionManager.h"
 #include "Engine/World.h"
+#include "Kismet/BlueprintAsyncActionBase.h"
 #include "Misc/PackageName.h"
 #include "Ownership/AvidScriptSessionObjectOwnership.h"
 #include "UObject/SoftObjectPath.h"
+#include "UObject/UnrealType.h"
 #include "UObject/UObjectGlobals.h"
 
 #include <atomic>
@@ -222,6 +224,27 @@ bool FAvidScriptContinuationHostEndpoint::AbortLatent(const int64 Token)
 	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = Owner.Pin();
 	return bValid && PinnedOwner
 		&& PinnedOwner->AbortLatent(Lane, ActivationSerial, Token);
+}
+
+int64 FAvidScriptContinuationHostEndpoint::BeginAsyncAction(
+	const int32 CallbackId,
+	UObject& Action,
+	const FAvidScriptBindingAsyncActionContract& Contract,
+	FString& OutError)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = Owner.Pin();
+	if (!bValid || !PinnedOwner)
+	{
+		OutError = TEXT("async_action_endpoint_stale");
+		return 0;
+	}
+	return PinnedOwner->BeginAsyncAction(
+		Lane,
+		ActivationSerial,
+		CallbackId,
+		Action,
+		Contract,
+		OutError);
 }
 
 void FAvidScriptContinuationHostEndpoint::Invalidate()
@@ -1315,6 +1338,191 @@ bool FAvidScriptSessionContinuations::AbortLatent(
 	return true;
 }
 
+int64 FAvidScriptSessionContinuations::BeginAsyncAction(
+	const EAvidScriptContinuationLane Lane,
+	const uint64 ActivationSerial,
+	const int32 CallbackId,
+	UObject& Action,
+	const FAvidScriptBindingAsyncActionContract& Contract,
+	FString& OutError)
+{
+	OutError.Reset();
+	if (!IsInGameThread()
+		|| bTearingDown
+		|| CallbackId < 0
+		|| !Contract.IsValid()
+		|| !Action.IsA(Contract.ActionClass)
+		|| !Action.IsA(UBlueprintAsyncActionBase::StaticClass())
+		|| !MatchesCurrentEndpoint(Lane, ActivationSerial)
+		|| OccupiedSlotCount >= MaximumPendingContinuations)
+	{
+		OutError = TEXT("async_action_context_invalid");
+		return 0;
+	}
+	if (!IsLaneContextLive(Lane))
+	{
+		InvalidateLane(Lane, ActivationSerial);
+		OutError = TEXT("async_action_lane_stale");
+		return 0;
+	}
+
+	FEntry Entry;
+	Entry.Lane = Lane;
+	Entry.ActivationSerial = ActivationSerial;
+	Entry.RegistrationSerial = NextRegistrationSerial++;
+	Entry.CallbackId = CallbackId;
+	Entry.World = GetWorldForLane(Lane);
+	Entry.ProducerKind = EProducerKind::AsyncAction;
+	Entry.AsyncAction.Reset(&Action);
+	Entry.AsyncActionPayloadTypeId = Contract.PayloadTypeId;
+	const int64 Token = AllocateEntry(MoveTemp(Entry));
+	if (Token == 0)
+	{
+		OutError = TEXT("async_action_continuation_capacity_exceeded");
+		return 0;
+	}
+
+	uint32 SlotIndex = 0;
+	uint32 Generation = 0;
+	check(UnpackToken(Token, SlotIndex, Generation));
+	check(Slots.IsValidIndex(static_cast<int32>(SlotIndex)));
+	FEntry& Stored = Slots[SlotIndex].Entry.GetValue();
+	for (const FAvidScriptBindingAsyncActionOutcomeContract& Outcome :
+		Contract.Outcomes)
+	{
+		UFunction* BridgeFunction = nullptr;
+		if (Outcome.Ordinal != Stored.AsyncActionBridges.Num()
+			|| Outcome.DelegateProperty == nullptr
+			|| Outcome.DelegateProperty->SignatureFunction == nullptr
+			|| !PrepareAvidScriptDelegateBridgeFunction(
+				Outcome.StableId,
+				*Outcome.DelegateProperty->SignatureFunction,
+				BridgeFunction,
+				OutError))
+		{
+			CancelEntryProducer(Stored);
+			ReleaseSlot(SlotIndex);
+			if (OutError.IsEmpty())
+			{
+				OutError = TEXT("async_action_outcome_plan_invalid");
+			}
+			return 0;
+		}
+
+		const uint64 BridgeToken = AllocateAsyncActionBridgeToken();
+		UAvidScriptDelegateBridge* const Bridge =
+			NewObject<UAvidScriptDelegateBridge>(
+				GetTransientPackage(),
+				NAME_None,
+				RF_Transient);
+		FScriptDelegate Delegate;
+		if (BridgeToken == 0 || !IsValid(Bridge))
+		{
+			OutError = TEXT("async_action_bridge_allocation_failed");
+			CancelEntryProducer(Stored);
+			ReleaseSlot(SlotIndex);
+			return 0;
+		}
+		Bridge->Initialize(*this, BridgeToken, *BridgeFunction);
+		Delegate.BindUFunction(Bridge, BridgeFunction->GetFName());
+		if (!Delegate.IsBound())
+		{
+			Bridge->Deactivate();
+			OutError = TEXT("async_action_bridge_bind_failed");
+			CancelEntryProducer(Stored);
+			ReleaseSlot(SlotIndex);
+			return 0;
+		}
+
+		Outcome.DelegateProperty->AddDelegate(Delegate, &Action);
+		Stored.AsyncActionBridges.Emplace(Bridge);
+		Stored.AsyncActionDelegates.Add(Delegate);
+		Stored.AsyncActionProperties.Add(Outcome.DelegateProperty);
+		Stored.AsyncActionBridgeTokens.Add(BridgeToken);
+		AsyncActionRoutes.Add(BridgeToken, { Token, Outcome.Ordinal });
+	}
+
+	CastChecked<UBlueprintAsyncActionBase>(&Action)->Activate();
+	return Token;
+}
+
+void FAvidScriptSessionContinuations::HandleAvidScriptDelegateBroadcast(
+	const uint64 SubscriptionToken,
+	void* Parameters)
+{
+	(void)Parameters;
+	if (!IsInGameThread() || bTearingDown || SubscriptionToken == 0)
+	{
+		return;
+	}
+	const FAsyncActionRoute* const Route =
+		AsyncActionRoutes.Find(SubscriptionToken);
+	if (Route == nullptr || Route->OutcomeOrdinal < 0)
+	{
+		return;
+	}
+
+	uint32 SlotIndex = 0;
+	uint32 Generation = 0;
+	if (!UnpackToken(Route->ContinuationToken, SlotIndex, Generation)
+		|| !Slots.IsValidIndex(static_cast<int32>(SlotIndex)))
+	{
+		return;
+	}
+	FSlot& Slot = Slots[SlotIndex];
+	if (Slot.Generation != Generation
+		|| !Slot.Entry.IsSet()
+		|| Slot.Entry->ProducerKind != EProducerKind::AsyncAction
+		|| Slot.Entry->bReady
+		|| Slot.Entry->bDispatching)
+	{
+		return;
+	}
+	FEntry& Entry = Slot.Entry.GetValue();
+	if (!IsEntryContextLive(Entry))
+	{
+		InvalidateLane(Entry.Lane, Entry.ActivationSerial);
+		return;
+	}
+
+	FAvidScriptBindingLatentCompletionPayload Payload;
+	Payload.TypeId = Entry.AsyncActionPayloadTypeId;
+	Payload.Kind = EAvidScriptBindingLatentPayloadKind::AbiCells;
+	Payload.AbiCells.Add(static_cast<uint64>(Route->OutcomeOrdinal));
+	FResultEntry Result;
+	Result.Lane = Entry.Lane;
+	Result.ActivationSerial = Entry.ActivationSerial;
+	Result.ContinuationToken = Entry.Token;
+	Result.Payload = MoveTemp(Payload);
+
+	FAvidScriptContinuationCompletion Completion;
+	Completion.CallbackId = Entry.CallbackId;
+	Completion.Token = Entry.Token;
+	Completion.Status = EAvidScriptContinuationStatus::Completed;
+	Completion.RegistrationSerial = Entry.RegistrationSerial;
+	if (!AllocateResult(
+			MoveTemp(Result),
+			Entry.ResultSlot,
+			Entry.ResultGeneration))
+	{
+		Completion.Status = EAvidScriptContinuationStatus::Failed;
+		Entry.ResultSlot = 0;
+		Entry.ResultGeneration = 0;
+	}
+	else
+	{
+		Completion.ObjectSlot = Entry.ResultSlot;
+		Completion.ObjectGeneration = Entry.ResultGeneration;
+	}
+	Entry.bReady = true;
+	ReleaseAsyncActionProducer(Entry);
+	ReadyCompletions.Add(FReadyCompletion{
+		Entry.Lane,
+		Entry.ActivationSerial,
+		Completion
+	});
+}
+
 bool FAvidScriptSessionContinuations::ConsumeResult(
 	const EAvidScriptContinuationLane Lane,
 	const uint64 ActivationSerial,
@@ -1696,7 +1904,8 @@ bool FAvidScriptSessionContinuations::CancelEntry(
 	}
 
 	const bool bResumeOutcome = bDeliverTerminal
-		&& Entry.LatentCompletion.ResumesOutcomeOnCancel();
+		&& (Entry.LatentCompletion.ResumesOutcomeOnCancel()
+			|| Entry.ProducerKind == EProducerKind::AsyncAction);
 	CancelEntryProducer(Entry);
 	RemoveReadyToken(Entry.Token);
 	if (!bResumeOutcome)
@@ -1916,6 +2125,11 @@ void FAvidScriptSessionContinuations::QueueLatentCompletion(FEntry& Entry)
 
 void FAvidScriptSessionContinuations::CancelEntryProducer(FEntry& Entry)
 {
+	if (Entry.ProducerKind == EProducerKind::AsyncAction)
+	{
+		ReleaseAsyncActionProducer(Entry);
+		return;
+	}
 	if (Entry.ProducerKind == EProducerKind::Timer)
 	{
 		if (UWorld* const World = Entry.World.Get())
@@ -1945,6 +2159,57 @@ void FAvidScriptSessionContinuations::CancelEntryProducer(FEntry& Entry)
 		Entry.AsyncLoadHandle->Cancel();
 	}
 	Entry.AsyncLoadHandle.Reset();
+}
+
+void FAvidScriptSessionContinuations::ReleaseAsyncActionProducer(
+	FEntry& Entry)
+{
+	check(IsInGameThread());
+	UObject* const Action = Entry.AsyncAction.Get();
+	const int32 BoundCount = FMath::Min3(
+		Entry.AsyncActionProperties.Num(),
+		Entry.AsyncActionDelegates.Num(),
+		Entry.AsyncActionBridges.Num());
+	for (int32 Index = BoundCount - 1; Index >= 0; --Index)
+	{
+		if (IsValid(Action) && Entry.AsyncActionProperties[Index] != nullptr)
+		{
+			Entry.AsyncActionProperties[Index]->RemoveDelegate(
+				Entry.AsyncActionDelegates[Index],
+				Action);
+		}
+		if (Entry.AsyncActionBridges[Index].IsValid())
+		{
+			Entry.AsyncActionBridges[Index]->Deactivate();
+		}
+	}
+	for (const uint64 BridgeToken : Entry.AsyncActionBridgeTokens)
+	{
+		AsyncActionRoutes.Remove(BridgeToken);
+	}
+	Entry.AsyncActionProperties.Reset();
+	Entry.AsyncActionDelegates.Reset();
+	Entry.AsyncActionBridges.Reset();
+	Entry.AsyncActionBridgeTokens.Reset();
+	if (UBlueprintAsyncActionBase* const AsyncAction =
+		Cast<UBlueprintAsyncActionBase>(Action))
+	{
+		AsyncAction->SetReadyToDestroy();
+	}
+	Entry.AsyncAction.Reset();
+}
+
+uint64 FAvidScriptSessionContinuations::AllocateAsyncActionBridgeToken()
+{
+	for (int32 Attempt = 0; Attempt <= AsyncActionRoutes.Num(); ++Attempt)
+	{
+		const uint64 Candidate = NextAsyncActionBridgeToken++;
+		if (Candidate != 0 && !AsyncActionRoutes.Contains(Candidate))
+		{
+			return Candidate;
+		}
+	}
+	return 0;
 }
 
 void FAvidScriptSessionContinuations::RetireLatentProxy(FEntry& Entry)

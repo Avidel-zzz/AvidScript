@@ -15,6 +15,7 @@
 #include "Engine/LatentActionManager.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "Kismet/BlueprintAsyncActionBase.h"
 #include "Misc/EngineVersion.h"
 #include "UObject/Class.h"
 #include "UObject/StrongObjectPtr.h"
@@ -512,6 +513,95 @@ bool ResolveAvidScriptRuntimeLatentContract(
 		}
 	}
 	return true;
+}
+
+bool ResolveAvidScriptRuntimeAsyncActionContract(
+	UFunction* Function,
+	const FAvidScriptBindingFunctionModel& Binding,
+	FAvidScriptBindingAsyncActionContract& OutContract)
+{
+	OutContract = {};
+	const FObjectPropertyBase* ReturnProperty = Function == nullptr
+		? nullptr
+		: CastField<FObjectPropertyBase>(Function->GetReturnProperty());
+	UClass* const ActionClass = ReturnProperty == nullptr
+		? nullptr
+		: ReturnProperty->PropertyClass;
+	if (Function == nullptr
+		|| Binding.DispatchMode != TEXT("blueprint_async_action")
+		|| !Binding.AsyncAction.IsEnabled()
+		|| !Function->HasAnyFunctionFlags(FUNC_Static)
+		|| !Function->HasAnyFunctionFlags(FUNC_BlueprintCallable)
+		|| Function->HasAnyFunctionFlags(
+			FUNC_EditorOnly
+			| FUNC_Delegate
+			| FUNC_MulticastDelegate
+			| FUNC_Net
+			| FUNC_NetRequest
+			| FUNC_NetResponse)
+		|| Function->HasMetaData(TEXT("Latent"))
+		|| Function->HasMetaData(TEXT("CustomThunk"))
+		|| ActionClass == nullptr
+		|| !ActionClass->IsChildOf(UBlueprintAsyncActionBase::StaticClass())
+		|| ActionClass->GetPathName() != Binding.AsyncAction.ActionClass
+		|| Binding.AsyncAction.ActivationFunction != TEXT("Activate")
+		|| Binding.AsyncAction.CompletionPolicy
+			!= TEXT("first_broadcast_wins")
+		|| !Binding.AsyncAction.bCancellable
+		|| Binding.AsyncAction.Outcomes.IsEmpty())
+	{
+		return false;
+	}
+
+	OutContract.ActionClass = ActionClass;
+	OutContract.PayloadTypeId = Binding.AsyncAction.PayloadTypeId;
+	for (const FAvidScriptBindingAsyncActionOutcomeModel& Outcome :
+		Binding.AsyncAction.Outcomes)
+	{
+		FMulticastDelegateProperty* const DelegateProperty =
+			FindFProperty<FMulticastDelegateProperty>(
+				ActionClass,
+				FName(*Outcome.DelegateMember));
+		UFunction* const Signature = DelegateProperty == nullptr
+			? nullptr
+			: DelegateProperty->SignatureFunction;
+		bool bHasParameters = false;
+		if (Signature != nullptr)
+		{
+			for (TFieldIterator<FProperty> It(Signature); It; ++It)
+			{
+				if (It->HasAnyPropertyFlags(CPF_Parm))
+				{
+					bHasParameters = true;
+					break;
+				}
+			}
+		}
+		const FString ExpectedStableId = Signature == nullptr
+			? FString()
+			: FAvidScriptHash::Sha256HexUtf8(
+				ActionClass->GetPathName()
+				+ TEXT("::async_outcome:")
+				+ Outcome.DelegateMember
+				+ TEXT("::") + Signature->GetPathName());
+		if (DelegateProperty == nullptr
+			|| !DelegateProperty->HasAnyPropertyFlags(CPF_BlueprintAssignable)
+			|| Signature == nullptr
+			|| bHasParameters
+			|| Outcome.Ordinal != OutContract.Outcomes.Num()
+			|| Outcome.StableId != ExpectedStableId)
+		{
+			OutContract = {};
+			return false;
+		}
+
+		FAvidScriptBindingAsyncActionOutcomeContract RuntimeOutcome;
+		RuntimeOutcome.StableId = Outcome.StableId;
+		RuntimeOutcome.Ordinal = Outcome.Ordinal;
+		RuntimeOutcome.DelegateProperty = DelegateProperty;
+		OutContract.Outcomes.Add(MoveTemp(RuntimeOutcome));
+	}
+	return OutContract.IsValid();
 }
 
 bool IsAvidScriptRuntimePropertyReadable(const FProperty* Property)
@@ -1457,6 +1547,10 @@ FString MakeAvidScriptRuntimeExpectedSignature(const FAvidScriptBindingFunctionM
 	{
 		return TEXT("(") + Parameters + TEXT("i)I");
 	}
+	if (Binding.DispatchMode == TEXT("blueprint_async_action"))
+	{
+		return TEXT("(") + Parameters + TEXT("i)I");
+	}
 	if (Binding.ReturnValue.CanonicalType != TEXT("void"))
 	{
 		Parameters += TEXT("i");
@@ -1504,6 +1598,28 @@ FString MakeAvidScriptRuntimeCanonicalIdentity(
 				+ TEXT("|status_policy=")
 				+ Binding.Completion.StatusPolicy
 				+ TEXT("|cancellable=1");
+		}
+	}
+	if (Binding.DispatchMode == TEXT("blueprint_async_action")
+		&& Binding.AsyncAction.IsEnabled())
+	{
+		Identity += TEXT("|async_action_class=")
+			+ Binding.AsyncAction.ActionClass
+			+ TEXT("|activation=")
+			+ Binding.AsyncAction.ActivationFunction
+			+ TEXT("|payload_type_id=")
+			+ Binding.AsyncAction.PayloadTypeId
+			+ TEXT("|completion_policy=")
+			+ Binding.AsyncAction.CompletionPolicy
+			+ TEXT("|cancellable=")
+			+ (Binding.AsyncAction.bCancellable ? TEXT("1") : TEXT("0"));
+		for (const FAvidScriptBindingAsyncActionOutcomeModel& Outcome :
+			Binding.AsyncAction.Outcomes)
+		{
+			Identity += TEXT("|outcome=")
+				+ FString::FromInt(Outcome.Ordinal)
+				+ TEXT(":") + Outcome.DelegateMember
+				+ TEXT(":") + Outcome.StableId;
 		}
 	}
 	return FAvidScriptBindingDescriptorIdentity::MakeFunctionCanonicalIdentity(
@@ -2925,12 +3041,17 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 	Package->Impl->LatentResultTypes.SetNum(Model.Bindings.Num());
 	for (const FAvidScriptBindingFunctionModel& Binding : Model.Bindings)
 	{
-		if (Binding.Completion.Mode != TEXT("provider"))
+		const FString PayloadTypeId = Binding.Completion.Mode == TEXT("provider")
+			? Binding.Completion.PayloadTypeId
+			: Binding.AsyncAction.IsEnabled()
+				? Binding.AsyncAction.PayloadTypeId
+				: FString();
+		if (PayloadTypeId.IsEmpty())
 		{
 			continue;
 		}
 		const FAvidScriptBindingTypeModel* const PayloadType =
-			DeclaredTypesById.FindRef(Binding.Completion.PayloadTypeId);
+			DeclaredTypesById.FindRef(PayloadTypeId);
 		if (PayloadType == nullptr
 			|| !Package->Impl->LatentResultTypes.IsValidIndex(Binding.Ordinal))
 		{
@@ -2938,7 +3059,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 				OutResult,
 				TEXT("binding_latent_completion_type_missing"),
 				Binding.CanonicalIdentity,
-				TEXT("The provider result type is not available at its frozen binding ordinal."));
+				TEXT("The continuation result type is not available at its frozen binding ordinal."));
 			return false;
 		}
 		Package->Impl->LatentResultTypes[Binding.Ordinal].Emplace(*PayloadType);
@@ -4161,8 +4282,16 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		UFunction* Function = OwnerClass->FindFunctionByName(FName(*Binding.UeFunction));
 		const bool bLatentBinding =
 			Binding.DispatchMode == TEXT("latent_process_event");
+		const bool bAsyncActionBinding =
+			Binding.DispatchMode == TEXT("blueprint_async_action");
 		FAvidScriptRuntimeLatentContract LatentContract;
-		const bool bFunctionAllowed = bLatentBinding
+		FAvidScriptBindingAsyncActionContract AsyncActionContract;
+		const bool bFunctionAllowed = bAsyncActionBinding
+			? ResolveAvidScriptRuntimeAsyncActionContract(
+				Function,
+				Binding,
+				AsyncActionContract)
+			: bLatentBinding
 			? ResolveAvidScriptRuntimeLatentContract(
 				Function,
 				Binding,
@@ -4246,10 +4375,10 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		}
 		const bool bRuntimeReadOnly = Function->HasAnyFunctionFlags(FUNC_Const | FUNC_BlueprintPure);
 		if ((Binding.ReloadEffect == EAvidScriptBindingReloadEffect::None && !bRuntimeReadOnly)
-			|| (bLatentBinding
+			|| ((bLatentBinding || bAsyncActionBinding)
 				&& Binding.ReloadEffect
 					!= EAvidScriptBindingReloadEffect::ContinuationProducer)
-			|| (!bLatentBinding
+			|| (!bLatentBinding && !bAsyncActionBinding
 				&& Binding.ReloadEffect
 					== EAvidScriptBindingReloadEffect::ContinuationProducer)
 			|| ((Binding.ReloadEffect == EAvidScriptBindingReloadEffect::ActorTransform
@@ -4313,9 +4442,11 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		Plan.DebugPath = Function->GetPathName();
 		Plan.bStatic = Binding.bStatic;
 		Plan.bLatent = bLatentBinding;
+		Plan.bAsyncAction = bAsyncActionBinding;
 		Plan.LatentInfoProperty = LatentContract.LatentInfoProperty;
 		Plan.WorldContextProperty = LatentContract.WorldContextProperty;
 		Plan.LatentCompletion = LatentContract.Completion;
+		Plan.AsyncAction = MoveTemp(AsyncActionContract);
 		Plan.Network = RuntimeNetwork;
 		Plan.ReloadEffect = Binding.ReloadEffect;
 		Plan.bRequiresWriteAccess = RuntimeNetwork.IsNetworked()
@@ -4375,7 +4506,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 				|| ValuePlan.Kind == EAvidScriptRuntimeBindingKind::Array;
 			Plan.Parameters.Add(MoveTemp(ValuePlan));
 		}
-		if (bLatentBinding)
+		if (bLatentBinding || bAsyncActionBinding)
 		{
 			Plan.CallbackIdArgumentOffset = ArgumentOffset;
 			++ArgumentOffset;
@@ -4399,7 +4530,12 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			return false;
 		}
 		ArgumentOffset += Plan.ReturnValue.ArgumentWidth;
-		Plan.bRequiresGuestMemory |= Plan.ReturnValue.Kind != EAvidScriptRuntimeBindingKind::Void;
+		Plan.bRequiresGuestMemory |= !bAsyncActionBinding
+			&& Plan.ReturnValue.Kind != EAvidScriptRuntimeBindingKind::Void;
+		if (bAsyncActionBinding)
+		{
+			ArgumentOffset -= Plan.ReturnValue.ArgumentWidth;
+		}
 		Plan.ExpectedArgumentCount = ArgumentOffset;
 		if (Binding.CanonicalIdentity != MakeAvidScriptRuntimeCanonicalIdentity(OwnerClass, Function, Binding)
 			|| Binding.StableId != FAvidScriptHash::Sha256HexUtf8(Binding.CanonicalIdentity))
@@ -4454,7 +4590,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			GetAvidScriptFastPathValueKind(Plan.ReturnValue.Kind),
 			false
 		};
-		if (!bLatentBinding
+		if (!bLatentBinding && !bAsyncActionBinding
 			&& UE::AvidScript::BindingPrivate::TryBuildFastPath(
 			FastPathSpec,
 			Plan.FastPath))

@@ -5,6 +5,8 @@
 #include "UObject/StrongObjectPtr.h"
 
 class UObject;
+class UClass;
+class FMulticastDelegateProperty;
 
 enum class EAvidScriptBindingLatentPayloadKind : uint8
 {
@@ -101,6 +103,27 @@ struct FAvidScriptBindingLatentReservation
 	}
 };
 
+struct FAvidScriptBindingAsyncActionOutcomeContract
+{
+	FString StableId;
+	int32 Ordinal = INDEX_NONE;
+	FMulticastDelegateProperty* DelegateProperty = nullptr;
+};
+
+struct FAvidScriptBindingAsyncActionContract
+{
+	UClass* ActionClass = nullptr;
+	FString PayloadTypeId;
+	TArray<FAvidScriptBindingAsyncActionOutcomeContract> Outcomes;
+
+	bool IsValid() const
+	{
+		return ActionClass != nullptr
+			&& !PayloadTypeId.IsEmpty()
+			&& !Outcomes.IsEmpty();
+	}
+};
+
 class IAvidScriptBindingLatentHost
 {
 public:
@@ -119,4 +142,13 @@ public:
 	}
 	virtual bool CommitLatent(int64 Token) = 0;
 	virtual bool AbortLatent(int64 Token) = 0;
+	virtual int64 BeginAsyncAction(
+		int32 CallbackId,
+		UObject& Action,
+		const FAvidScriptBindingAsyncActionContract& Contract,
+		FString& OutError)
+	{
+		OutError = TEXT("async_action_host_unsupported");
+		return 0;
+	}
 };
