@@ -6,7 +6,7 @@
   "Description": "AvidScript experimental UE scripting runtime plugin.",
   "Category": "Scripting",
   "CreatedBy": "Avid",
-  "CanContainContent": false,
+  "CanContainContent": true,
   "IsBetaVersion": true,
   "EnabledByDefault": true,
   "Modules": [

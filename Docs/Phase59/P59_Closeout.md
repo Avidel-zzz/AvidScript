@@ -76,10 +76,13 @@
 - `P59.D6b`：生成 `AProjectile` 已通过 dedicated server + 2 clients 与 listen server + 1 remote client
   独立进程拓扑；客户端 Server RPC、authority C# body、replicated `Damage`、客户端 C# RepNotify、
   owning Client RPC 与 NetMulticast 全部闭环，结果由 role/PID/计数/值和 active instance JSON 验证。
+- `P59.D7`：C# Generated Type 已自动发布无 `Saved/` 依赖的内容寻址 Cook bundle；UBT 只把
+  `current.json` 与当前六个文件登记为 NonUFS RuntimeDependency，非 Editor 模块只读取 Content pointer。
+  真实 isolated Runtime load 与 GeneratedTypes Automation `7/7` 通过；完整 BuildCookRun/Shipping 留给 P62。
 
 ## 待完成
 
-- `P59.D` Cook 边界与集中 Gate。
+- `P59.D` 集中 Gate。
 
 ## 最终证据
 

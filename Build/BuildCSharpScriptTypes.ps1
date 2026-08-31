@@ -5,6 +5,7 @@ param(
     [Parameter(Mandatory = $true)][string]$BindingPackageManifestPath,
     [string]$OutputRoot = "",
     [string]$ArtifactRoot = "",
+    [string]$CookOutputRoot = "",
     [string]$ProjectPath = "",
     [string]$ModuleName = "AvidScriptGenerated",
     [string]$RuntimeModuleId = "avidscript_generated",
@@ -19,6 +20,7 @@ $PluginRoot = Split-Path -Parent $BuildDir
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $PluginRoot)
 $BindingPackageFunctions = Join-Path $BuildDir "AvidScriptCSharpBindingPackage.ps1"
 $ReloadClassificationFunctions = Join-Path $BuildDir "AvidScriptGeneratedTypeReloadClassification.ps1"
+$CookPackageFunctions = Join-Path $BuildDir "AvidScriptGeneratedTypeCookPackage.ps1"
 $FrontendScript = Join-Path $BuildDir "InvokeCSharpFrontend.ps1"
 $SemanticScript = Join-Path $BuildDir "InvokeCSharpSemantic.ps1"
 $RuntimeBuildScript = Join-Path $BuildDir "BuildCSharpActorLifecycle.ps1"
@@ -33,6 +35,7 @@ foreach ($RequiredFile in @(
         $BindingPackageManifestPath,
         $BindingPackageFunctions,
         $ReloadClassificationFunctions,
+        $CookPackageFunctions,
         $FrontendScript,
         $SemanticScript,
         $GeneratorProject,
@@ -71,11 +74,16 @@ if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
 if ([string]::IsNullOrWhiteSpace($ArtifactRoot)) {
     $ArtifactRoot = Join-Path $ProjectRoot "Saved\AvidScript\ScriptTypeGeneration"
 }
+if ([string]::IsNullOrWhiteSpace($CookOutputRoot)) {
+    $CookOutputRoot = Join-Path $PluginRoot "Content\AvidScriptGenerated"
+}
 $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
 $ArtifactRoot = [System.IO.Path]::GetFullPath($ArtifactRoot)
+$CookOutputRoot = [System.IO.Path]::GetFullPath($CookOutputRoot)
 
 . $BindingPackageFunctions
 . $ReloadClassificationFunctions
+. $CookPackageFunctions
 $BindingPackage = Resolve-AvidScriptCSharpBindingPackage `
     -ManifestPath $BindingPackageManifestPath
 
@@ -190,6 +198,7 @@ $NativeStructureSha256 = Get-AvidScriptGeneratedTypeNativeStructureSha256 $Gener
 
 $RuntimeManifestPath = ""
 $PackageId = ""
+$CookPackage = $null
 if (-not $SkipRuntimePackage) {
     $RuntimeOutputRoot = Join-Path $RunRoot "Runtime"
     $RuntimeArtifactStem = "generated_types"
@@ -270,6 +279,10 @@ if (-not $SkipRuntimePackage) {
         $PackageJson + [System.Environment]::NewLine,
         $Utf8)
     Move-Item -LiteralPath $PackageTempPath -Destination $GeneratedPackagePath -Force
+    $CookPackage = Publish-AvidScriptGeneratedTypeCookPackage `
+        -PackageDescriptorPath $GeneratedPackagePath `
+        -ProjectRoot $ProjectRoot `
+        -OutputRoot $CookOutputRoot
 }
 
 Write-Host "AvidScript C# script type generation succeeded."
@@ -282,4 +295,6 @@ Write-Host "  native_structure=$NativeStructureSha256"
 Write-Host "  reload_classification=$(if ($SkipRuntimePackage) { 'none' } else { $ReloadMetadata.classification })"
 Write-Host "  runtime_package=$(if ($SkipRuntimePackage) { 'skipped' } else { $RuntimeManifestPath })"
 Write-Host "  package_id=$(if ($SkipRuntimePackage) { 'none' } else { $PackageId })"
+Write-Host "  cook_package_id=$(if ($null -eq $CookPackage) { 'none' } else { $CookPackage.PackageId })"
+Write-Host "  cook_descriptor=$(if ($null -eq $CookPackage) { 'none' } else { $CookPackage.DescriptorPath })"
 Write-Host "  output=$OutputRoot"

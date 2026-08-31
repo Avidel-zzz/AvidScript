@@ -640,6 +640,8 @@ $GeneratedTypeWasmRuntimeHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Pu
 $RuntimeModuleSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptRuntimeModule.cpp'
 $CSharpScriptTypeBuildSource = Read-RequiredFile 'Build/BuildCSharpScriptTypes.ps1'
 $GeneratedTypeReloadClassificationSource = Read-RequiredFile 'Build/AvidScriptGeneratedTypeReloadClassification.ps1'
+$GeneratedTypeCookPackageSource = Read-RequiredFile 'Build/AvidScriptGeneratedTypeCookPackage.ps1'
+$GeneratedTypeCookPackageContractSource = Read-RequiredFile 'Build/Contracts/TestGeneratedTypeCookPackage.ps1'
 $GeneratedTypeEditorReloadHeader = Read-RequiredFile 'Source/AvidScriptEditor/Public/GeneratedTypes/AvidScriptEditorGeneratedTypeReloadPolicy.h'
 $GeneratedTypeEditorReloadSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/GeneratedTypes/AvidScriptEditorGeneratedTypeReloadService.cpp'
 $GeneratedTypeEditorReloadPolicySource = Read-RequiredFile 'Source/AvidScriptEditor/Private/GeneratedTypes/AvidScriptEditorGeneratedTypeReloadPolicy.cpp'
@@ -649,6 +651,9 @@ $SemanticUeTypeValidatorSource = Read-RequiredFile 'Tools/AvidScript.CSharpSeman
 $ScriptDefinedTypeSampleSource = Read-RequiredFile 'Samples/CSharp/ScriptDefinedTypes/ScriptDefinedTypes.cs'
 $GeneratedTypeNetworkHarnessSource = Read-RequiredFile 'Source/AvidScriptGenerated/Private/Tests/AvidScriptGeneratedNetworkTopologyHarness.cpp'
 $GeneratedTypeModuleSource = Read-RequiredFile 'Source/AvidScriptGenerated/Private/AvidScriptGeneratedModule.cpp'
+$GeneratedTypeRuntimeTestsSource = Read-RequiredFile 'Source/AvidScriptGenerated/Private/AvidScriptGeneratedRuntimeTests.cpp'
+$PluginDescriptorSource = Read-RequiredFile 'AvidScript.uplugin'
+$GitIgnoreSource = Read-RequiredFile '.gitignore'
 $NetworkTopologyBuildSource = Read-RequiredFile 'Build/RunAvidScriptNetworkTopology.ps1'
 $SemanticUeRuntimeContractSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Model/SemanticUeTypeRuntimeContract.cs'
 $CSharpUePropertyPlanSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpUePropertyAccessPlan.cs'
@@ -787,6 +792,62 @@ foreach ($RequiredGeneratedTypeReloadClassificationContract in @(
             $RequiredGeneratedTypeReloadClassificationContract)) {
         Add-Violation "generated type reload classification is missing $RequiredGeneratedTypeReloadClassificationContract"
     }
+}
+foreach ($RequiredGeneratedTypeCookPublicationContract in @(
+    'Publish-AvidScriptGeneratedTypeCookPackage',
+    'Test-AvidScriptCookPackagePathUnderRoot',
+    'generated_types.wasm',
+    'bindings/package.json',
+    'bindings/bindings.json',
+    '[System.IO.File]::Move($CurrentTempPath, $CurrentPath, $true)')) {
+    if (-not $GeneratedTypeCookPackageSource.Contains($RequiredGeneratedTypeCookPublicationContract)) {
+        Add-Violation "generated type Cook publisher is missing $RequiredGeneratedTypeCookPublicationContract"
+    }
+}
+foreach ($RequiredGeneratedTypeCookBuildContract in @(
+    'AvidScriptGeneratedTypeCookPackage.ps1',
+    'Publish-AvidScriptGeneratedTypeCookPackage',
+    'CookOutputRoot',
+    'cook_package_id')) {
+    if (-not $CSharpScriptTypeBuildSource.Contains($RequiredGeneratedTypeCookBuildContract)) {
+        Add-Violation "C# script type build pipeline is missing Cook contract $RequiredGeneratedTypeCookBuildContract"
+    }
+}
+foreach ($RequiredGeneratedTypeStagingContract in @(
+    'Path.Combine(PluginRoot, "Content", "AvidScriptGenerated")',
+    '"current.json"',
+    'ExternalDependencies.Add',
+    'RuntimeDependencies.Add',
+    'StagedFileType.NonUFS',
+    'must contain exactly the six published artifacts')) {
+    if (-not $GeneratedBuild.Contains($RequiredGeneratedTypeStagingContract)) {
+        Add-Violation "generated type Build.cs is missing Cook staging contract $RequiredGeneratedTypeStagingContract"
+    }
+}
+foreach ($RequiredGeneratedTypeRuntimeCookContract in @(
+    'EditorPackageDescriptorRelativePath',
+    'CookPackageDescriptorRelativePath',
+    '#if WITH_EDITOR',
+    'Content/AvidScriptGenerated/current.json')) {
+    if (-not $GeneratedTypeModuleSource.Contains($RequiredGeneratedTypeRuntimeCookContract)) {
+        Add-Violation "generated type Runtime module is missing Cook descriptor policy $RequiredGeneratedTypeRuntimeCookContract"
+    }
+}
+foreach ($RequiredGeneratedTypeCookTestContract in @(
+    'Generated type Cook package contracts: PASS',
+    'outside the project root')) {
+    if (-not $GeneratedTypeCookPackageContractSource.Contains($RequiredGeneratedTypeCookTestContract)) {
+        Add-Violation "generated type Cook contract test is missing $RequiredGeneratedTypeCookTestContract"
+    }
+}
+if (-not $GeneratedTypeRuntimeTestsSource.Contains('AvidScript.GeneratedTypes.CookedPackageLoad')) {
+    Add-Violation 'generated type Automation is missing the Cook package load test'
+}
+if (-not $PluginDescriptorSource.Contains('"CanContainContent": true')) {
+    Add-Violation 'AvidScript plugin must declare CanContainContent for generated Cook bundles'
+}
+if (-not $GitIgnoreSource.Contains('Content/AvidScriptGenerated/')) {
+    Add-Violation 'generated Cook bundles must remain ignored build artifacts'
 }
 foreach ($RequiredGeneratedTypeEditorReloadContract in @(
     'IAvidScriptEditorCSharpLiveReloadWatchHost',

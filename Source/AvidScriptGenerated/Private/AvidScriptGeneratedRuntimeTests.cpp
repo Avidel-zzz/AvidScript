@@ -5,7 +5,9 @@
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "Interfaces/IPluginManager.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/Paths.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeRuntimeHost.h"
 #include "UObject/StrongObjectPtr.h"
 #include "UObject/UnrealType.h"
@@ -400,6 +402,49 @@ bool FAvidScriptGeneratedCSharpLifecycleKindsTest::RunTest(
 		ProfileAfterShutdown->DeinitializeCount,
 		1);
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptGeneratedCookedPackageLoadTest,
+	"AvidScript.GeneratedTypes.CookedPackageLoad",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptGeneratedCookedPackageLoadTest::RunTest(const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("AvidScript"));
+	if (!TestTrue(TEXT("AvidScript plugin resolves"), Plugin.IsValid()))
+	{
+		return true;
+	}
+	const FString DescriptorPath = FPaths::Combine(
+		Plugin->GetBaseDir(),
+		TEXT("Content/AvidScriptGenerated/current.json"));
+	if (!TestTrue(
+		TEXT("Cook package pointer exists"),
+		FPaths::FileExists(DescriptorPath)))
+	{
+		return true;
+	}
+
+	TUniquePtr<FAvidScriptGeneratedTypeRuntimeHost> Host =
+		FAvidScriptGeneratedTypeRuntimeHost::CreateIsolatedForTesting();
+	if (!TestNotNull(TEXT("Isolated generated type host starts"), Host.Get()))
+	{
+		return true;
+	}
+	FString Error;
+	TestTrue(
+		TEXT("Content-addressed Cook package installs"),
+		Host->InstallPackageFromDescriptorFile(DescriptorPath, Error));
+	if (!Error.IsEmpty())
+	{
+		AddError(Error);
+	}
+	TestEqual(TEXT("Cook package starts without active instances"), Host->GetActiveInstanceCount(), 0);
+	TestEqual(TEXT("Cook package starts without object handles"), Host->GetRegisteredHandleCount(), 0);
+	Host->Shutdown();
 	return true;
 }
 

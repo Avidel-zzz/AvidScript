@@ -8,8 +8,31 @@ DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptGenerated, Log, All);
 
 namespace
 {
-constexpr TCHAR GeneratedPackageDescriptorRelativePath[] =
+constexpr TCHAR EditorPackageDescriptorRelativePath[] =
 	TEXT("Source/AvidScriptGenerated/AvidScriptGeneratedPackage.json");
+constexpr TCHAR CookPackageDescriptorRelativePath[] =
+	TEXT("Content/AvidScriptGenerated/current.json");
+
+bool TryResolveGeneratedPackageDescriptor(
+	const IPlugin& Plugin,
+	FString& OutDescriptorPath)
+{
+	TArray<const TCHAR*> CandidateRelativePaths;
+#if WITH_EDITOR
+	CandidateRelativePaths.Add(EditorPackageDescriptorRelativePath);
+#endif
+	CandidateRelativePaths.Add(CookPackageDescriptorRelativePath);
+	for (const TCHAR* RelativePath : CandidateRelativePaths)
+	{
+		const FString CandidatePath = FPaths::Combine(Plugin.GetBaseDir(), RelativePath);
+		if (FPaths::FileExists(CandidatePath))
+		{
+			OutDescriptorPath = CandidatePath;
+			return true;
+		}
+	}
+	return false;
+}
 }
 
 class FAvidScriptGeneratedModule final : public IModuleInterface
@@ -24,10 +47,8 @@ public:
 			UE_LOG(LogAvidScriptGenerated, Error, TEXT("AvidScript plugin root is unavailable."));
 			return;
 		}
-		const FString DescriptorPath = FPaths::Combine(
-			Plugin->GetBaseDir(),
-			GeneratedPackageDescriptorRelativePath);
-		if (!FPaths::FileExists(DescriptorPath))
+		FString DescriptorPath;
+		if (!TryResolveGeneratedPackageDescriptor(*Plugin, DescriptorPath))
 		{
 			UE_LOG(
 				LogAvidScriptGenerated,

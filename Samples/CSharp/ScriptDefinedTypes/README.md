@@ -11,3 +11,6 @@
 方法体变化可自动热重载；类型、属性、函数、签名或反射 flag 变化需要 no-clean UBT 并重启 Editor。
 RPC 壳层与真实独立进程网络传输均已验证：客户端 Server RPC、服务器 Client/NetMulticast、replicated
 property 和客户端 C# RepNotify 在 dedicated/listen 拓扑中形成闭环。
+
+构建链还会生成 `Content/AvidScriptGenerated/<package-id>/` 可移植 bundle，并由 UBT 只暂存当前
+`current.json` 指向的六个 NonUFS 文件。完整 BuildCookRun/Shipping 验收仍在后续阶段。

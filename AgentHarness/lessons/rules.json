@@ -21,7 +21,7 @@
       "summary": "概念名称不能当作真实文件路径。",
       "prevention": "先用 rg --files 建立索引，再对索引中的字面路径读取；通配符只放在 rg -g 参数。",
       "source": "legacy:1931",
-      "last_observed": "2026-08-31 P59.D6a (未先索引便猜测插件根存在 Scripts/Content/Config，产生 os error 2)"
+      "last_observed": "2026-08-31 P59.D7 (重复把 *.Build.cs 放入 Windows 路径参数；后续检索必须先索引并使用 rg -g)"
     },
     {
       "id": "one-command-one-evidence-domain",
@@ -261,6 +261,30 @@
       "prevention": "汇总多层循环证据时先用 $Rows = @(foreach (...) { ... }) 物化结果，再单独执行 $Rows | Format-Table 或 ConvertTo-Json。",
       "source": "observed:2026-08-31-P59.D6b",
       "last_observed": "2026-08-31 P59.D6b (读取已通过的 aggregate 时把 foreach 直接接 Format-Table，产生 empty pipe parser error)"
+    },
+    {
+      "id": "ubt-rules-json-use-epicgames-core",
+      "tags": ["ue", "ubt", "build-cs", "json"],
+      "summary": "ModuleRules 不应直接引入可能与 UBT RulesAssembly 引用不一致的 System.Text.Json。",
+      "prevention": "Build.cs 读取结构化 JSON 时使用 UBT 已引用的 EpicGames.Core.JsonObject 与 FileReference；新增 Rules 依赖后先跑 no-clean UBT。",
+      "source": "observed:2026-08-31-P59.D7",
+      "last_observed": "2026-08-31 P59.D7 (UE5.8 bundled .NET 10 RulesAssembly 因 System.Memory 引用不匹配而拒绝 System.Text.Json)"
+    },
+    {
+      "id": "ubt-runtime-dependency-in-place-uses-single-path-overload",
+      "tags": ["ue", "ubt", "cook", "runtime-dependency"],
+      "summary": "已位于插件目标目录的 RuntimeDependency 不能把同一路径同时声明为 source 与 target。",
+      "prevention": "插件 Content 内的现有文件使用 RuntimeDependencies.Add(absolutePath, StagedFileType.NonUFS)；只有从外部复制到 staging 目标时才使用 source/target overload。",
+      "source": "observed:2026-08-31-P59.D7",
+      "last_observed": "2026-08-31 P59.D7 (current.json 以相同 source/target 注册，UBT 抛出 FilePatternException)"
+    },
+    {
+      "id": "cook-publication-rewrites-nested-manifest-identity",
+      "tags": ["cook", "manifest", "bindings", "hash"],
+      "summary": "发布 bundle 时改变文件布局必须同步重写嵌套 manifest 路径并重新计算上层 SHA。",
+      "prevention": "Cook publisher 同时重写 binding package files.descriptor、binding manifest SHA、Runtime binding_package SHA 与最终 package id；用真实 isolated Runtime load 验证，不只检查文件存在。",
+      "source": "observed:2026-08-31-P59.D7",
+      "last_observed": "2026-08-31 P59.D7 (首次真实 Cook package load 因 package.json 仍指向 bindings.v5.json 而 fail-closed)"
     }
   ]
 }

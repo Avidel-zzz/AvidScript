@@ -10,7 +10,7 @@
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 Development" src="https://img.shields.io/badge/Platform-Win64-0078D4?logo=windows&logoColor=white">
-  <img alt="Phase 59 D6b" src="https://img.shields.io/badge/Status-Phase%2059%20D6b-159957">
+  <img alt="Phase 59 D7" src="https://img.shields.io/badge/Status-Phase%2059%20D7-159957">
   <img alt="Automation 376/376" src="https://img.shields.io/badge/Automation-376%2F376-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
@@ -24,8 +24,8 @@ Timer、受控 `async/await`、UE latent UFUNCTION、异步对象加载、Overla
 
 > [!IMPORTANT]
 > 当前版本为 **0.1.0 开发者预览**。主线验证环境是 **UE5.8 源码版 +
-> Windows 64 位 Development Editor + Wasmtime 45**。Cook、Shipping、Android
-> 与 iOS 尚未完成正式支持。
+> Windows 64 位 Development Editor + Wasmtime 45**。Generated Type Cook bundle
+> 已可发布和暂存；完整 BuildCookRun、Shipping、Android 与 iOS 尚未完成正式支持。
 
 ## 已实现
 
@@ -36,11 +36,12 @@ Timer、受控 `async/await`、UE latent UFUNCTION、异步对象加载、Overla
 | C# 定义 UE 类型 | 可声明 Actor、Component、World/GameInstance Subsystem、函数、属性、继承与 override，并供 Blueprint 继承 |
 | 网络 | 可声明或调用 Server、Client、NetMulticast RPC，读写 replicated property，并接收 RPC/RepNotify handler |
 | 网络闭环 | Generated Actor 已通过 dedicated server + 2 clients、listen server + 1 remote client 的独立进程验证 |
+| Cook 发布 | 自动生成无 `Saved/` 依赖的内容寻址 bundle；UBT 只暂存当前 pointer 与六个 NonUFS 文件 |
 | 运行时 | Wasmtime 45 主后端，Session 生命周期、generational handle、GC/World 隔离和事务式热重载已接通 |
 | 性能 | 已冻结的 UE prepared reflection、数组区域和游戏 workload 均领先同机 Puerts 对照；纯执行层尚未达到全部 kernel 的领先门禁 |
 
 当前生成 API 不是“完整 UE 全量绑定”：只有 Profile 授权且现有 ABI/codec 能表达的类型会被生成。
-C# Generated Type 的 Editor 与网络闭环已完成；Cook bundle、Shipping 和移动端验收仍在后续阶段。
+C# Generated Type 的 Editor、网络与 Cook-layout load 已闭环；完整打包启动、Shipping 和移动端验收仍在后续阶段。
 
 ## 为什么是 AvidScript
 
@@ -674,7 +675,7 @@ cmd /c Build\BuildWAMRWin64.cmd
 - 高频 `Tick` 内应优先使用已有 Generated S1 或经过 benchmark 的 prepared shape；
 - C# Generated Type 的方法体变化可在 Editor 中自动热重载；新增/删除类型、属性、函数或改变签名、继承、反射 flag 时仍需受控 no-clean UBT 并重启 Editor；
 - 数组 capability 已提供显式 `Release`；UTF-8 heap 仍以 Session/reset 为主要回收边界；
-- Cook、Shipping、崩溃隔离、Android 与 iOS 尚未完成正式验收；
+- Generated Type Cook bundle 发布、NonUFS staging 与 Runtime load 已完成；完整 BuildCookRun、Shipping、崩溃隔离、Android 与 iOS 尚未正式验收；
 - 正式竞品矩阵目前覆盖 Puerts V8，尚未同口径覆盖 UnLua 与 AngelScript。
 
 ## 路线图
@@ -694,14 +695,13 @@ cmd /c Build\BuildWAMRWin64.cmd
 - UE5.8 no-clean Editor build 与 `Automation RunTests AvidScript`；
 - 同机、候选绑定的 Puerts/Wasmtime 正式性能矩阵。
 
-最近一次完整 AvidScript Automation 基线为 **376/376 通过**。P59.D6a 额外通过 Semantic
-`94/94`、生成器 `4/4`、Generated Types `6/6`、UE5.8 no-clean Editor build 与 clean architecture gate；
-P59.D6b 又完成两组独立进程网络拓扑。C# Generated Type 现已覆盖复制启用、Server/Client/NetMulticast
-RPC、replicated property 与 RepNotify，网络路由和复制时机仍由 UE 原生网络栈负责。
+最近一次完整 AvidScript Automation 基线为 **376/376 通过**。P59.D6 完成 Generated Type 网络合同
+与两组独立进程拓扑；P59.D7 完成内容寻址 Cook bundle、UBT NonUFS staging 和 isolated Runtime load，
+focused Generated Types 为 `7/7`。完整 BuildCookRun/Shipping 仍留在 P62。
 
 纯执行层 12-kernel 候选 correctness failure 为 0、fallback 为 false，但 P95 领导力门禁仍未关闭；
 README 中的性能领先结论仅限上表已冻结 workload，不外推为所有代码都领先 V8。
-最新功能报告见 [P59.D6b 中文完成报告](Docs/Phase59/P59.D6b_Generated_Type_Network_Topology.md)，
+最新功能报告见 [P59.D7 中文完成报告](Docs/Phase59/P59.D7_Generated_Type_Cook_Publication.md)，
 最新性能报告见 [P57.13 中文结果](Docs/Phase57/P57.13_Cranelift_Speed_Profile.md)。
 
 工程规则：

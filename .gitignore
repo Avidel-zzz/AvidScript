@@ -101,4 +101,5 @@ Source/AvidScriptGenerated/AvidScriptGeneratedManifest.json
 Source/AvidScriptGenerated/AvidScriptGeneratedPackage.json
 Source/AvidScriptGenerated/Public/AvidScriptGeneratedTypes.h
 Source/AvidScriptGenerated/Private/AvidScriptGeneratedTypes.cpp
+Content/AvidScriptGenerated/
 
