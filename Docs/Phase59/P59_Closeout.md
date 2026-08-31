@@ -58,6 +58,9 @@
 - `P59.D2`：C# `BlueprintNativeEvent` 已生成标准 UHT 壳层；派生 C# override 自动继承
   `_Implementation` 形态，真实 Blueprint override graph 的 Parent Call 可在保存/重载后进入 C# WASM，
   完成 `Damage 40 -> 80` 与 `ActivationCount 0 -> 2` 的状态闭环。
+- `P59.D3`：脚本定义 `Damage` 已具备真实 `CPF_Net`、`CPF_RepNotify` 与 `RepNotifyFunc` 元数据；
+  UE `ProcessEvent(OnRepDamage)` 可通过生成壳层进入 C# WASM，并把原生 `DamageRepNotifyCount` 从 `0`
+  更新为 `1`。真实双端网络传输仍保留为后续拓扑验收。
 
 ## 待完成
 

@@ -6,6 +6,7 @@
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeRuntimeHost.h"
+#include "UObject/UnrealType.h"
 
 namespace
 {
@@ -157,6 +158,66 @@ bool FAvidScriptGeneratedCSharpInheritanceDispatchTest::RunTest(
 	TestEqual(TEXT("C# base call updates int64 state"), Projectile->AccumulatedDamage, 125LL);
 	TestEqual(TEXT("C# base call updates float64 state"), Projectile->PrecisionScale, 3.0);
 	TestTrue(TEXT("C# base call updates bool state"), Projectile->IsActive);
+
+	DestroyGeneratedScriptWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptGeneratedCSharpRepNotifyInteractionTest,
+	"AvidScript.GeneratedTypes.CSharpRepNotifyInteraction",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptGeneratedCSharpRepNotifyInteractionTest::RunTest(
+	const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	UWorld* World = nullptr;
+	if (!CreateGeneratedScriptWorld(World))
+	{
+		AddError(TEXT("Failed to create the generated RepNotify test world."));
+		return true;
+	}
+
+	AProjectile* const Projectile = World->SpawnActor<AProjectile>();
+	if (!TestNotNull(TEXT("Generated RepNotify projectile spawns"), Projectile))
+	{
+		DestroyGeneratedScriptWorld(World);
+		return true;
+	}
+	const FURL Url;
+	World->InitializeActorsForPlay(Url);
+	World->BeginPlay();
+	World->SetBegunPlay(true);
+	if (!Projectile->HasActorBegunPlay())
+	{
+		Projectile->DispatchBeginPlay();
+	}
+
+	FFloatProperty* const DamageProperty = FindFProperty<FFloatProperty>(
+		AProjectile::StaticClass(),
+		TEXT("Damage"));
+	UFunction* const RepNotifyFunction = AProjectile::StaticClass()->FindFunctionByName(
+		TEXT("OnRepDamage"));
+	if (!TestNotNull(TEXT("Generated Damage property resolves"), DamageProperty)
+		|| !TestNotNull(TEXT("Generated OnRepDamage function resolves"), RepNotifyFunction))
+	{
+		DestroyGeneratedScriptWorld(World);
+		return true;
+	}
+	TestTrue(TEXT("Damage is replicated"), DamageProperty->HasAnyPropertyFlags(CPF_Net));
+	TestTrue(TEXT("Damage owns RepNotify metadata"), DamageProperty->HasAnyPropertyFlags(CPF_RepNotify));
+	TestEqual(
+		TEXT("Damage RepNotify targets the generated callback"),
+		DamageProperty->RepNotifyFunc,
+		FName(TEXT("OnRepDamage")));
+	TestEqual(TEXT("RepNotify state starts from the C# default"), Projectile->DamageRepNotifyCount, 0);
+
+	Projectile->ProcessEvent(RepNotifyFunction, nullptr);
+	TestEqual(
+		TEXT("UE RepNotify callback reaches C# WASM state"),
+		Projectile->DamageRepNotifyCount,
+		1);
 
 	DestroyGeneratedScriptWorld(World);
 	return true;

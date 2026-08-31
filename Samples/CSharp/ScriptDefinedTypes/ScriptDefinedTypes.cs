@@ -27,6 +27,9 @@ public partial class Projectile : AvidActor
     [UProperty(BlueprintReadOnly = true, Category = "Projectile")]
     public bool HasBegunPlay { get; private set; }
 
+    [UProperty(BlueprintReadOnly = true, Category = "Projectile")]
+    public int DamageRepNotifyCount { get; private set; }
+
     [UFunction(BlueprintCallable = true, BlueprintNativeEvent = true, Category = "Projectile")]
     public virtual void Activate(float damageScale)
     {
@@ -46,6 +49,7 @@ public partial class Projectile : AvidActor
     [UFunction]
     private void OnRepDamage()
     {
+        DamageRepNotifyCount += 1;
     }
 
     protected override void BeginPlay()
