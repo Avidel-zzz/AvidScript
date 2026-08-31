@@ -61,6 +61,9 @@
 - `P59.D3`：脚本定义 `Damage` 已具备真实 `CPF_Net`、`CPF_RepNotify` 与 `RepNotifyFunc` 元数据；
   UE `ProcessEvent(OnRepDamage)` 可通过生成壳层进入 C# WASM，并把原生 `DamageRepNotifyCount` 从 `0`
   更新为 `1`。真实双端网络传输仍保留为后续拓扑验收。
+- `P59.D4`：Actor、ActorComponent、WorldSubsystem 与 GameInstanceSubsystem 的激活、Tick 和销毁
+  生命周期已通过真实 UE owner 闭环；声明 Tick 的 Actor/Component 壳层自动启用 Primary Tick，
+  `World->Tick` 可调度 C# WASM，Destroy/Shutdown 可在 Session teardown 前执行脚本结束逻辑。
 
 ## 待完成
 

@@ -3,9 +3,11 @@
 #include "AvidScriptGeneratedTypes.h"
 
 #include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeRuntimeHost.h"
+#include "UObject/StrongObjectPtr.h"
 #include "UObject/UnrealType.h"
 
 namespace
@@ -46,6 +48,23 @@ void DestroyGeneratedScriptWorld(UWorld*& World)
 	}
 	World->DestroyWorld(false);
 	World = nullptr;
+}
+
+void DestroyGeneratedGameInstance(UGameInstance*& GameInstance)
+{
+	if (GameInstance == nullptr)
+	{
+		return;
+	}
+	UWorld* const World = GameInstance->GetWorld();
+	GameInstance->Shutdown();
+	if (World != nullptr && GEngine != nullptr)
+	{
+		World->DestroyWorld(false);
+		GEngine->DestroyWorldContext(World);
+	}
+	GameInstance->RemoveFromRoot();
+	GameInstance = nullptr;
 }
 }
 
@@ -220,6 +239,95 @@ bool FAvidScriptGeneratedCSharpRepNotifyInteractionTest::RunTest(
 		1);
 
 	DestroyGeneratedScriptWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptGeneratedCSharpLifecycleKindsTest,
+	"AvidScript.GeneratedTypes.CSharpLifecycleKinds",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptGeneratedCSharpLifecycleKindsTest::RunTest(
+	const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	UWorld* World = nullptr;
+	if (!CreateGeneratedScriptWorld(World))
+	{
+		AddError(TEXT("Failed to create the generated lifecycle test world."));
+		return true;
+	}
+
+	UEncounterSubsystem* const Encounter = World->GetSubsystem<UEncounterSubsystem>();
+	AProjectile* const Projectile = World->SpawnActor<AProjectile>();
+	UHealthComponent* const Health = Projectile != nullptr
+		? NewObject<UHealthComponent>(Projectile)
+		: nullptr;
+	if (!TestNotNull(TEXT("Generated WorldSubsystem initializes"), Encounter)
+		|| !TestNotNull(TEXT("Generated lifecycle Actor spawns"), Projectile)
+		|| !TestNotNull(TEXT("Generated lifecycle Component creates"), Health))
+	{
+		DestroyGeneratedScriptWorld(World);
+		return true;
+	}
+	Projectile->AddInstanceComponent(Health);
+	Health->RegisterComponent();
+	const FURL Url;
+	World->InitializeActorsForPlay(Url);
+	World->BeginPlay();
+	World->SetBegunPlay(true);
+	if (!Projectile->HasActorBegunPlay())
+	{
+		Projectile->DispatchBeginPlay();
+	}
+	if (!Health->HasBegunPlay())
+	{
+		static_cast<UActorComponent*>(Health)->BeginPlay();
+	}
+
+	TestTrue(TEXT("Generated Actor opts into native ticking"), Projectile->PrimaryActorTick.bCanEverTick);
+	TestTrue(TEXT("Generated Component opts into native ticking"), Health->PrimaryComponentTick.bCanEverTick);
+	TestEqual(TEXT("Actor BeginPlay reaches C#"), Projectile->HasBegunPlay, true);
+	TestEqual(TEXT("Component BeginPlay reaches C# once"), Health->BeginPlayCount, 1);
+	TestEqual(TEXT("WorldSubsystem Initialize reaches C# once"), Encounter->InitializeCount, 1);
+
+	World->Tick(LEVELTICK_All, 1.0f / 60.0f);
+	TestTrue(TEXT("Actor Tick scheduling reaches C#"), Projectile->TickCount > 0);
+	TestTrue(TEXT("Component Tick scheduling reaches C#"), Health->TickCount > 0);
+	TestTrue(TEXT("WorldSubsystem Tick scheduling reaches C#"), Encounter->TickCount > 0);
+
+	TestTrue(TEXT("Destroying the Actor dispatches UE EndPlay"), Projectile->Destroy());
+	TestEqual(TEXT("Actor EndPlay reaches C# once"), Projectile->EndPlayCount, 1);
+	TestEqual(TEXT("Component EndPlay reaches C# once"), Health->EndPlayCount, 1);
+
+	TStrongObjectPtr<UEncounterSubsystem> EncounterAfterDestroy(Encounter);
+	DestroyGeneratedScriptWorld(World);
+	TestEqual(
+		TEXT("WorldSubsystem Deinitialize reaches C# once"),
+		EncounterAfterDestroy->DeinitializeCount,
+		1);
+
+	UGameInstance* GameInstance = NewObject<UGameInstance>(GEngine);
+	if (!TestNotNull(TEXT("Lifecycle GameInstance creates"), GameInstance))
+	{
+		return true;
+	}
+	GameInstance->AddToRoot();
+	GameInstance->InitializeStandalone(TEXT("AvidScriptGeneratedLifecycleGameInstance"));
+	UProfileSubsystem* const Profile = GameInstance->GetSubsystem<UProfileSubsystem>();
+	if (!TestNotNull(TEXT("Generated GameInstanceSubsystem initializes"), Profile))
+	{
+		DestroyGeneratedGameInstance(GameInstance);
+		return true;
+	}
+	TestEqual(TEXT("GameInstanceSubsystem Initialize reaches C# once"), Profile->InitializeCount, 1);
+	TStrongObjectPtr<UProfileSubsystem> ProfileAfterShutdown(Profile);
+	DestroyGeneratedGameInstance(GameInstance);
+	TestEqual(
+		TEXT("GameInstanceSubsystem Deinitialize reaches C# once"),
+		ProfileAfterShutdown->DeinitializeCount,
+		1);
+
 	return true;
 }
 

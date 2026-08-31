@@ -67,7 +67,7 @@ internal static class UeTypeGeneratorTests
             .Single(type => type.EngineName == "ExplosiveProjectile")
             .Functions.Single(function => function.Name == "Activate");
         Assert(first.Manifest.SchemaVersion == 5
-            && first.Manifest.GeneratorVersion == "1.5"
+            && first.Manifest.GeneratorVersion == "1.6"
             && first.Manifest.Types.All(type =>
                 type.ClassPath == $"/Script/AvidScriptGenerated.{type.EngineName}")
             && first.Manifest.Types.SelectMany(type => type.Functions).All(function =>
@@ -111,6 +111,12 @@ internal static class UeTypeGeneratorTests
             using AvidScript;
 
             [UClass]
+            public partial class MotionActor : AvidActor
+            {
+                protected override void Tick(float deltaSeconds) { }
+            }
+
+            [UClass]
             public partial class MotionComponent : AvidActorComponent
             {
                 protected override void Tick(float deltaSeconds) { }
@@ -136,9 +142,18 @@ internal static class UeTypeGeneratorTests
         string header = Text(result, "Public/AvidScriptGeneratedTypes.h");
         string sourceText = Text(result, "Private/AvidScriptGeneratedTypes.cpp");
 
+        Assert(header.Contains("class AVIDSCRIPTGENERATED_API AMotionActor : public AActor", StringComparison.Ordinal)
+            && header.Contains("AMotionActor();", StringComparison.Ordinal)
+            && sourceText.Contains("PrimaryActorTick.bCanEverTick = true;", StringComparison.Ordinal)
+            && sourceText.Contains("PrimaryActorTick.bStartWithTickEnabled = true;", StringComparison.Ordinal),
+            "actor Tick declarations should opt into native tick scheduling");
         Assert(header.Contains("class AVIDSCRIPTGENERATED_API UMotionComponent : public UActorComponent", StringComparison.Ordinal)
+            && header.Contains("UMotionComponent();", StringComparison.Ordinal)
             && header.Contains("void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)", StringComparison.Ordinal),
             "component Tick should map to the native TickComponent lifecycle");
+        Assert(sourceText.Contains("PrimaryComponentTick.bCanEverTick = true;", StringComparison.Ordinal)
+            && sourceText.Contains("PrimaryComponentTick.bStartWithTickEnabled = true;", StringComparison.Ordinal),
+            "component Tick declarations should opt into native tick scheduling");
         Assert(header.Contains("class AVIDSCRIPTGENERATED_API UEncounterWorld : public UTickableWorldSubsystem", StringComparison.Ordinal)
             && header.Contains("void Initialize(FSubsystemCollectionBase& Collection)", StringComparison.Ordinal)
             && header.Contains("TStatId GetStatId() const", StringComparison.Ordinal),

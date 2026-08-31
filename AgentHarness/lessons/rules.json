@@ -229,6 +229,14 @@
       "prevention": "优先选择覆盖目标的共同测试前缀；没有共同前缀时使用独立唯一日志启动，并逐个核对 Found 数量与 Test Completed 计数。",
       "source": "observed:2026-08-31-P59.D2",
       "last_observed": "2026-08-31 P59.D2 (同一 ExecCmds 中第二个 RunTests 未入队，日志只发现首个前缀的 3 个测试)"
+    },
+    {
+      "id": "actor-endplay-tests-use-public-destruction-flow",
+      "tags": ["ue", "actor", "lifecycle", "tests"],
+      "summary": "测试不能直接调用 AActor 的 protected EndPlay。",
+      "prevention": "需要验证 Actor/Component EndPlay 时调用公开 AActor::Destroy 或 UWorld::EndPlay，让 UE 自己派发生命周期；保留对象引用读取结果，不为测试扩大生成壳层可见性。",
+      "source": "observed:2026-08-31-P59.D4",
+      "last_observed": "2026-08-31 P59.D4 (首次 UBT 因测试直接调用 protected AActor::EndPlay 而失败)"
     }
   ]
 }

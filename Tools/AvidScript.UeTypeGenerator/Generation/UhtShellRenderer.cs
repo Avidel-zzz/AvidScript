@@ -35,7 +35,7 @@ internal static class UhtShellRenderer
             output.AppendLine("    GENERATED_BODY()");
             output.AppendLine();
             output.AppendLine("public:");
-            if (type.Properties.Any(property => property.Initializer is not null))
+            if (NeedsConstructor(type))
             {
                 output.Append("    ").Append(type.CppName).AppendLine("();");
                 output.AppendLine();
@@ -108,7 +108,7 @@ internal static class UhtShellRenderer
             UePropertyManifestEntry[] initializedProperties = type.Properties
                 .Where(property => property.Initializer is not null)
                 .ToArray();
-            if (initializedProperties.Length > 0)
+            if (NeedsConstructor(type))
             {
                 output.Append(type.CppName).Append("::").Append(type.CppName).AppendLine("()");
                 output.AppendLine("{");
@@ -116,6 +116,12 @@ internal static class UhtShellRenderer
                 {
                     output.Append("    ").Append(property.Name).Append(" = ")
                         .Append(RenderInitializer(property.Initializer!)).AppendLine(";");
+                }
+                if (HasScheduledTick(type))
+                {
+                    string tickMember = type.Kind == "actor" ? "PrimaryActorTick" : "PrimaryComponentTick";
+                    output.Append("    ").Append(tickMember).AppendLine(".bCanEverTick = true;");
+                    output.Append("    ").Append(tickMember).AppendLine(".bStartWithTickEnabled = true;");
                 }
                 output.AppendLine("}");
                 output.AppendLine();
@@ -478,6 +484,19 @@ internal static class UhtShellRenderer
             || function.Flags.Contains("server")
             || function.Flags.Contains("client")
             || function.Flags.Contains("net_multicast");
+    }
+
+    private static bool NeedsConstructor(UeTypeManifestEntry type)
+    {
+        return type.Properties.Any(property => property.Initializer is not null)
+            || HasScheduledTick(type);
+    }
+
+    private static bool HasScheduledTick(UeTypeManifestEntry type)
+    {
+        return type.Kind is "actor" or "actor_component"
+            && type.Functions.Any(function =>
+                function.Name == "Tick" && function.Flags.Contains("lifecycle"));
     }
 
     private static string RenderClassFlags(IReadOnlyList<string> flags)

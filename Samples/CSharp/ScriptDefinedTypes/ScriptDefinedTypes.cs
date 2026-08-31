@@ -30,6 +30,12 @@ public partial class Projectile : AvidActor
     [UProperty(BlueprintReadOnly = true, Category = "Projectile")]
     public int DamageRepNotifyCount { get; private set; }
 
+    [UProperty(BlueprintReadOnly = true, Category = "Projectile")]
+    public int TickCount { get; private set; }
+
+    [UProperty(BlueprintReadOnly = true, Category = "Projectile")]
+    public int EndPlayCount { get; private set; }
+
     [UFunction(BlueprintCallable = true, BlueprintNativeEvent = true, Category = "Projectile")]
     public virtual void Activate(float damageScale)
     {
@@ -56,6 +62,16 @@ public partial class Projectile : AvidActor
     {
         HasBegunPlay = true;
     }
+
+    protected override void Tick(float deltaSeconds)
+    {
+        TickCount += 1;
+    }
+
+    protected override void EndPlay()
+    {
+        EndPlayCount += 1;
+    }
 }
 
 [UClass(Blueprintable = true)]
@@ -73,14 +89,82 @@ public partial class HealthComponent : AvidActorComponent
 {
     [UProperty(BlueprintReadOnly = true, Category = "Health")]
     public float CurrentHealth { get; private set; } = 100.0f;
+
+    [UProperty(BlueprintReadOnly = true, Category = "Health")]
+    public int BeginPlayCount { get; private set; }
+
+    [UProperty(BlueprintReadOnly = true, Category = "Health")]
+    public int TickCount { get; private set; }
+
+    [UProperty(BlueprintReadOnly = true, Category = "Health")]
+    public int EndPlayCount { get; private set; }
+
+    protected override void BeginPlay()
+    {
+        BeginPlayCount += 1;
+    }
+
+    protected override void Tick(float deltaSeconds)
+    {
+        TickCount += 1;
+    }
+
+    protected override void EndPlay()
+    {
+        EndPlayCount += 1;
+    }
 }
 
 [UClass]
 public partial class EncounterSubsystem : AvidWorldSubsystem
 {
+    [UProperty(BlueprintReadOnly = true, Category = "Encounter")]
+    public int InitializeCount { get; private set; }
+
+    [UProperty(BlueprintReadOnly = true, Category = "Encounter")]
+    public int TickCount { get; private set; }
+
+    [UProperty(BlueprintReadOnly = true, Category = "Encounter")]
+    public int DeinitializeCount { get; private set; }
+
     [UFunction(BlueprintCallable = true, Category = "Encounter")]
     public int GetActiveEncounterCount()
     {
-        return 0;
+        return InitializeCount;
+    }
+
+    protected override void Initialize()
+    {
+        InitializeCount += 1;
+    }
+
+    protected override void Tick(float deltaSeconds)
+    {
+        TickCount += 1;
+    }
+
+    protected override void Deinitialize()
+    {
+        DeinitializeCount += 1;
+    }
+}
+
+[UClass]
+public partial class ProfileSubsystem : AvidGameInstanceSubsystem
+{
+    [UProperty(BlueprintReadOnly = true, Category = "Profile")]
+    public int InitializeCount { get; private set; }
+
+    [UProperty(BlueprintReadOnly = true, Category = "Profile")]
+    public int DeinitializeCount { get; private set; }
+
+    protected override void Initialize()
+    {
+        InitializeCount += 1;
+    }
+
+    protected override void Deinitialize()
+    {
+        DeinitializeCount += 1;
     }
 }

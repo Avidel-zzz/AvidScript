@@ -757,7 +757,7 @@ foreach ($RequiredScriptTypeBuildContract in @(
     'schema_version -ne 19',
     'semantic_version -cne "1.21"',
     'schema_version -ne 5',
-    'generator_version -cne "1.5"',
+    'generator_version -cne "1.6"',
     'semantic_artifact_sha256',
     'Get-FileHash')) {
     if (-not $CSharpScriptTypeBuildSource.Contains($RequiredScriptTypeBuildContract)) {
