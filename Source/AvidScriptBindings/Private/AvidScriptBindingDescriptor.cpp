@@ -702,6 +702,104 @@ bool ParseAvidScriptBindingValue(
 	return true;
 }
 
+bool IsAvidScriptBindingIdentifier(const FString& Value);
+
+bool ParseAvidScriptBindingAsyncAction(
+	const TSharedPtr<FJsonObject>& Object,
+	FAvidScriptBindingAsyncActionModel& OutAction,
+	FString& OutErrorSource)
+{
+	if (!ReadAvidScriptBindingRequiredString(
+			Object,
+			TEXT("mode"),
+			OutAction.Mode,
+			OutErrorSource)
+		|| !ReadAvidScriptBindingRequiredString(
+			Object,
+			TEXT("action_class"),
+			OutAction.ActionClass,
+			OutErrorSource)
+		|| !ReadAvidScriptBindingRequiredString(
+			Object,
+			TEXT("activation_function"),
+			OutAction.ActivationFunction,
+			OutErrorSource)
+		|| !ReadAvidScriptBindingRequiredString(
+			Object,
+			TEXT("payload_type_id"),
+			OutAction.PayloadTypeId,
+			OutErrorSource)
+		|| !ReadAvidScriptBindingRequiredString(
+			Object,
+			TEXT("completion_policy"),
+			OutAction.CompletionPolicy,
+			OutErrorSource)
+		|| !ReadAvidScriptBindingRequiredBool(
+			Object,
+			TEXT("cancellable"),
+			OutAction.bCancellable,
+			OutErrorSource)
+		|| OutAction.Mode != TEXT("blueprint_async_action")
+		|| OutAction.ActionClass.IsEmpty()
+		|| OutAction.ActivationFunction != TEXT("Activate")
+		|| !IsAvidScriptBindingLowerSha256(OutAction.PayloadTypeId)
+		|| OutAction.CompletionPolicy != TEXT("first_broadcast_wins")
+		|| !OutAction.bCancellable)
+	{
+		OutErrorSource = TEXT("async_action");
+		return false;
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* Outcomes = nullptr;
+	if (!Object->TryGetArrayField(TEXT("outcomes"), Outcomes)
+		|| Outcomes == nullptr
+		|| Outcomes->IsEmpty())
+	{
+		OutErrorSource = TEXT("async_action.outcomes");
+		return false;
+	}
+	TSet<FString> StableIds;
+	TSet<FString> DelegateMembers;
+	for (int32 Index = 0; Index < Outcomes->Num(); ++Index)
+	{
+		const TSharedPtr<FJsonObject> OutcomeObject =
+			(*Outcomes)[Index].IsValid()
+				? (*Outcomes)[Index]->AsObject()
+				: nullptr;
+		FAvidScriptBindingAsyncActionOutcomeModel Outcome;
+		if (!ReadAvidScriptBindingRequiredString(
+				OutcomeObject,
+				TEXT("stable_id"),
+				Outcome.StableId,
+				OutErrorSource)
+			|| !ReadAvidScriptBindingRequiredInt(
+				OutcomeObject,
+				TEXT("ordinal"),
+				Outcome.Ordinal,
+				OutErrorSource)
+			|| !ReadAvidScriptBindingRequiredString(
+				OutcomeObject,
+				TEXT("delegate_member"),
+				Outcome.DelegateMember,
+				OutErrorSource)
+			|| !IsAvidScriptBindingLowerSha256(Outcome.StableId)
+			|| Outcome.Ordinal != Index
+			|| !IsAvidScriptBindingIdentifier(Outcome.DelegateMember)
+			|| StableIds.Contains(Outcome.StableId)
+			|| DelegateMembers.Contains(Outcome.DelegateMember))
+		{
+			OutErrorSource = FString::Printf(
+				TEXT("async_action.outcomes[%d]"),
+				Index);
+			return false;
+		}
+		StableIds.Add(Outcome.StableId);
+		DelegateMembers.Add(Outcome.DelegateMember);
+		OutAction.Outcomes.Add(MoveTemp(Outcome));
+	}
+	return true;
+}
+
 bool ParseAvidScriptBindingFunction(
 	const TSharedPtr<FJsonObject>& Object,
 	const int32 SchemaVersion,
@@ -890,6 +988,27 @@ bool ParseAvidScriptBindingFunction(
 	else if (Object->HasField(TEXT("completion")))
 	{
 		OutErrorSource = TEXT("completion");
+		return false;
+	}
+	if (SchemaVersion >= 23
+		&& OutBinding.DispatchMode == TEXT("blueprint_async_action"))
+	{
+		const TSharedPtr<FJsonObject>* AsyncAction = nullptr;
+		if (!Object->TryGetObjectField(TEXT("async_action"), AsyncAction)
+			|| AsyncAction == nullptr
+			|| !AsyncAction->IsValid()
+			|| !ParseAvidScriptBindingAsyncAction(
+				*AsyncAction,
+				OutBinding.AsyncAction,
+				OutErrorSource))
+		{
+			OutErrorSource = TEXT("async_action");
+			return false;
+		}
+	}
+	else if (Object->HasField(TEXT("async_action")))
+	{
+		OutErrorSource = TEXT("async_action");
 		return false;
 	}
 	if (SchemaVersion >= 15)
@@ -1978,7 +2097,9 @@ bool FAvidScriptBindingDescriptorIdentity::IsFunctionDispatchModeSupported(
 			&& (DispatchMode == TEXT("qualified_native_direct")
 				|| DispatchMode == TEXT("generated_native_s1")))
 		|| (SchemaVersion >= 12
-			&& DispatchMode == TEXT("latent_process_event"));
+			&& DispatchMode == TEXT("latent_process_event"))
+		|| (SchemaVersion >= 23
+			&& DispatchMode == TEXT("blueprint_async_action"));
 }
 
 bool IsAvidScriptBindingLowerHex(const FString& Value)
@@ -2253,6 +2374,26 @@ FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 				+ TEXT("|reflected_function_fingerprint=")
 				+ Binding.ReflectedFunctionFingerprint;
 		}
+		if (Package.SchemaVersion >= 23
+			&& Binding.AsyncAction.IsEnabled())
+		{
+			Key += TEXT("|async_action_class=")
+				+ Binding.AsyncAction.ActionClass
+				+ TEXT("|activation=")
+				+ Binding.AsyncAction.ActivationFunction
+				+ TEXT("|payload_type_id=")
+				+ Binding.AsyncAction.PayloadTypeId
+				+ TEXT("|completion_policy=")
+				+ Binding.AsyncAction.CompletionPolicy;
+			for (const FAvidScriptBindingAsyncActionOutcomeModel& Outcome :
+				Binding.AsyncAction.Outcomes)
+			{
+				Key += TEXT("|outcome=")
+					+ FString::FromInt(Outcome.Ordinal)
+					+ TEXT(":") + Outcome.DelegateMember
+					+ TEXT(":") + Outcome.StableId;
+			}
+		}
 		SelectionKeys.Add(MoveTemp(Key));
 	}
 	if (Package.SchemaVersion >= 11)
@@ -2300,7 +2441,9 @@ FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 		return FAvidScriptHash::Sha256HexUtf8(FString::Join(SelectionKeys, TEXT("\n")));
 	}
 
-	FString Identity(Package.SchemaVersion >= 22
+	FString Identity(Package.SchemaVersion >= 23
+		? TEXT("descriptor_selection_v23")
+		: Package.SchemaVersion >= 22
 		? TEXT("descriptor_selection_v22")
 		: Package.SchemaVersion >= 21
 		? TEXT("descriptor_selection_v21")
@@ -2502,7 +2645,9 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 		return FAvidScriptHash::Sha256HexUtf8(Identity);
 	}
 
-	FString Identity(Package.SchemaVersion >= 22
+	FString Identity(Package.SchemaVersion >= 23
+		? TEXT("descriptor_package_v23")
+		: Package.SchemaVersion >= 22
 		? TEXT("descriptor_package_v22")
 		: Package.SchemaVersion >= 21
 		? TEXT("descriptor_package_v21")
@@ -2644,6 +2789,48 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 				Identity,
 				TEXT("reflected_function_fingerprint"),
 				Binding.ReflectedFunctionFingerprint);
+		}
+		if (Package.SchemaVersion >= 23
+			&& Binding.AsyncAction.IsEnabled())
+		{
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("async_action_class"),
+				Binding.AsyncAction.ActionClass);
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("async_action_activation"),
+				Binding.AsyncAction.ActivationFunction);
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("async_action_payload_type"),
+				Binding.AsyncAction.PayloadTypeId);
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("async_action_completion_policy"),
+				Binding.AsyncAction.CompletionPolicy);
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("async_action_cancellable"),
+				Binding.AsyncAction.bCancellable
+					? TEXT("1")
+					: TEXT("0"));
+			for (const FAvidScriptBindingAsyncActionOutcomeModel& Outcome :
+				Binding.AsyncAction.Outcomes)
+			{
+				AppendAvidScriptBindingIdentityField(
+					Identity,
+					TEXT("async_action_outcome_id"),
+					Outcome.StableId);
+				AppendAvidScriptBindingIdentityField(
+					Identity,
+					TEXT("async_action_outcome_ordinal"),
+					FString::FromInt(Outcome.Ordinal));
+				AppendAvidScriptBindingIdentityField(
+					Identity,
+					TEXT("async_action_outcome_delegate"),
+					Outcome.DelegateMember);
+			}
 		}
 		if (Package.SchemaVersion >= 12
 			&& Binding.DispatchMode == TEXT("latent_process_event"))
@@ -2922,7 +3109,8 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 			&& OutPackage.SchemaVersion != 19
 			&& OutPackage.SchemaVersion != 20
 			&& OutPackage.SchemaVersion != 21
-			&& OutPackage.SchemaVersion != 22)
+			&& OutPackage.SchemaVersion != 22
+			&& OutPackage.SchemaVersion != 23)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("generator_version"), OutPackage.GeneratorVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("engine_version"), OutPackage.EngineVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("source"), OutPackage.Source, OutErrorSource)
@@ -2956,7 +3144,8 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 				&& OutPackage.SchemaVersion != 19
 				&& OutPackage.SchemaVersion != 20
 				&& OutPackage.SchemaVersion != 21
-				&& OutPackage.SchemaVersion != 22)
+				&& OutPackage.SchemaVersion != 22
+				&& OutPackage.SchemaVersion != 23)
 			{
 				OutErrorSource = TEXT("schema_version");
 			}
@@ -3174,6 +3363,9 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 		const bool bLatentBinding =
 			Binding.BindingKind == TEXT("function")
 			&& Binding.DispatchMode == TEXT("latent_process_event");
+		const bool bAsyncActionBinding =
+			Binding.BindingKind == TEXT("function")
+			&& Binding.DispatchMode == TEXT("blueprint_async_action");
 		const bool bCompletionValid = OutPackage.SchemaVersion < 13
 			? Binding.Completion.Mode == TEXT("none")
 				&& Binding.Completion.ProviderId.IsEmpty()
@@ -3246,6 +3438,63 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 			}
 			ExpectedLatentSignature = TEXT("(") + LatentParameters + TEXT("i)I");
 		}
+		FString ExpectedAsyncActionSignature;
+		if (bAsyncActionBinding)
+		{
+			FString AsyncActionParameters;
+			for (const FAvidScriptBindingValueModel& Parameter :
+				Binding.Parameters)
+			{
+				AsyncActionParameters += FString::Join(
+					Parameter.AbiTypes,
+					TEXT(""));
+			}
+			ExpectedAsyncActionSignature = TEXT("(")
+				+ AsyncActionParameters + TEXT("i)I");
+		}
+		const FAvidScriptBindingTypeModel* AsyncPayloadType =
+			bAsyncActionBinding
+				? OutPackage.Types.FindByPredicate(
+					[&Binding](const FAvidScriptBindingTypeModel& Type)
+					{
+						return Type.StableId
+							== Binding.AsyncAction.PayloadTypeId;
+					})
+				: nullptr;
+		const bool bAsyncActionContractValid = !bAsyncActionBinding
+			? !Binding.AsyncAction.IsEnabled()
+				&& Binding.AsyncAction.ActionClass.IsEmpty()
+				&& Binding.AsyncAction.PayloadTypeId.IsEmpty()
+				&& Binding.AsyncAction.Outcomes.IsEmpty()
+			: OutPackage.SchemaVersion >= 23
+				&& Binding.AsyncAction.IsEnabled()
+				&& Binding.ReturnValue.CanonicalType
+					== TEXT("object:")
+						+ Binding.AsyncAction.ActionClass
+				&& Binding.AsyncAction.ActivationFunction == TEXT("Activate")
+				&& Binding.AsyncAction.CompletionPolicy
+					== TEXT("first_broadcast_wins")
+				&& Binding.AsyncAction.bCancellable
+				&& AsyncPayloadType != nullptr
+				&& AsyncPayloadType->Kind == TEXT("enum")
+				&& AsyncPayloadType->Size == sizeof(int32)
+				&& AsyncPayloadType->AbiTypes
+					== TArray<FString>{ TEXT("i") }
+				&& AsyncPayloadType->EnumValues.Num()
+					== Binding.AsyncAction.Outcomes.Num()
+				&& Binding.AsyncAction.Outcomes.Num() > 0
+				&& Binding.AsyncAction.Outcomes.ContainsByPredicate(
+					[AsyncPayloadType](
+						const FAvidScriptBindingAsyncActionOutcomeModel& Outcome)
+					{
+						return !AsyncPayloadType->EnumValues.ContainsByPredicate(
+							[&Outcome](
+								const FAvidScriptBindingEnumValue& Value)
+							{
+								return Value.Name == Outcome.DelegateMember
+									&& Value.Value == Outcome.Ordinal;
+							});
+					}) == false;
 		FString ExpectedPropertyGetIdentity =
 			Binding.OwnerClass
 			+ TEXT("::property_get:") + Binding.UeMember
@@ -3269,6 +3518,7 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 		}
 		if (!bParsedBinding
 			|| !bCompletionValid
+			|| !bAsyncActionContractValid
 			|| !bNetworkContractValid
 			|| !bPropertyReplicationContractValid
 			|| Binding.Ordinal != Index
@@ -3302,7 +3552,27 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 								})
 							|| Binding.HostImport.Signature
 								!= ExpectedLatentSignature))
-					|| (!bLatentBinding
+					|| (bAsyncActionBinding
+						&& (!Binding.bStatic
+							|| Binding.bConst
+							|| Binding.ReturnValue.Kind
+								!= TEXT("object_handle")
+							|| Binding.ReloadEffect
+								!= EAvidScriptBindingReloadEffect::ContinuationProducer
+							|| !Binding.ScriptName.EndsWith(
+								TEXT("Async"),
+								ESearchCase::CaseSensitive)
+							|| !Binding.LatentInfoParameter.IsEmpty()
+							|| !Binding.WorldContextParameter.IsEmpty()
+							|| Binding.Parameters.ContainsByPredicate(
+								[](const FAvidScriptBindingValueModel& Parameter)
+								{
+									return Parameter.Direction == TEXT("ref")
+										|| Parameter.Direction == TEXT("out");
+								})
+							|| Binding.HostImport.Signature
+								!= ExpectedAsyncActionSignature))
+					|| (!bLatentBinding && !bAsyncActionBinding
 						&& (!Binding.LatentInfoParameter.IsEmpty()
 							|| !Binding.WorldContextParameter.IsEmpty()
 							|| Binding.ReloadEffect

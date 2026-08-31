@@ -31,10 +31,13 @@
 - `P60.C1b` 完成 schema 22 Blueprint 自声明 event、`before/after/replace` 入站 Hook、replace/call
   自递归门禁和重编译失效关闭；C# 继续使用统一 `[AvidEvent]`；详见
   [P60.C1b](P60.C1b_Blueprint_Declared_Event.md)。
+- `P60.C2a` 完成 schema 23 `UBlueprintAsyncActionBase` 结构识别、确定性 outcome 与强类型 C# awaitable
+  生成；Runtime action lease/完成桥仍待 `P60.C2b`；详见
+  [P60.C2a](P60.C2a_Blueprint_Async_Action_Contract.md)。
 
 ## 待完成
 
-- `P60.C2` 通用异步；
+- `P60.C2b-C2c` 通用异步 Runtime、生命周期与 typed payload；
 - `P60.D` 集成、性能与集中 Gate。
 
 ## 验收边界

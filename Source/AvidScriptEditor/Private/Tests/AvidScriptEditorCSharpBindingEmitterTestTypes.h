@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Engine/LatentActionManager.h"
 #include "GameFramework/Actor.h"
+#include "Kismet/BlueprintAsyncActionBase.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "Net/UnrealNetwork.h"
 #include "UObject/Interface.h"
@@ -168,6 +169,35 @@ DECLARE_DYNAMIC_DELEGATE_RetVal_TwoParams(
 	FAvidScriptEditorSinglecastRefOutSignal,
 	UPARAM(ref) int32&, Value,
 	int32&, Doubled);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(
+	FAvidScriptEditorAsyncActionOutcome);
+
+UCLASS()
+class UAvidScriptEditorAsyncActionTestObject final
+	: public UBlueprintAsyncActionBase
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(BlueprintAssignable)
+	FAvidScriptEditorAsyncActionOutcome Completed;
+
+	UPROPERTY(BlueprintAssignable)
+	FAvidScriptEditorAsyncActionOutcome Cancelled;
+
+	UFUNCTION(
+		BlueprintCallable,
+		meta = (BlueprintInternalUseOnly = "true"))
+	static UAvidScriptEditorAsyncActionTestObject* WaitForSignal()
+	{
+		return NewObject<UAvidScriptEditorAsyncActionTestObject>();
+	}
+
+	virtual void Activate() override
+	{
+	}
+};
 
 UCLASS()
 class AAvidScriptEditorDelegateEventTestActor : public AActor

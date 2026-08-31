@@ -1767,11 +1767,11 @@ bool FAvidScriptEditorBindingDescriptorV8PropertySetTest::RunTest(const FString&
 			FString(ExpectedSource));
 	};
 	ParserRejectsWithSource(
-		TEXT("Schema v22 above the current maximum identifies its header field"),
+		TEXT("Schema v23 above the current maximum identifies its header field"),
 		TEXT("schema_version"),
 		[](TSharedPtr<FJsonObject>& Root)
 		{
-			Root->SetNumberField(TEXT("schema_version"), 23);
+			Root->SetNumberField(TEXT("schema_version"), 24);
 		});
 	ParserRejectsWithSource(
 		TEXT("Malformed package hash identifies its header field"),
@@ -4706,6 +4706,146 @@ bool FAvidScriptEditorDelegateEventDescriptorTest::RunTest(
 		TEXT("Oversized event category is stable"),
 		GenerateResult.ErrorCategory,
 		FString(TEXT("delegate_event_abi_cells_exceeded")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingDescriptorBlueprintAsyncActionTest,
+	"AvidScript.Editor.BindingDescriptor.BlueprintAsyncActionSchema23",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingDescriptorBlueprintAsyncActionTest::RunTest(
+	const FString& Parameters)
+{
+	const TArray<FAvidScriptReflectedFunctionSelection> Functions = {
+		{
+			UAvidScriptEditorAsyncActionTestObject::StaticClass()->GetPathName(),
+			TEXT("WaitForSignal")
+		}
+	};
+	FString Json;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+			TEXT("Structurally recognized async action generates schema 23"),
+			FAvidScriptEditorBindingDescriptorGenerator::Generate(
+				TEXT("avidscript.tests.blueprint_async_action"),
+				Functions,
+				Json,
+				GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Package;
+	FString ErrorCategory;
+	FString ErrorSource;
+	if (!TestTrue(
+			TEXT("Shared parser accepts schema 23 async action"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				Json,
+				Package,
+				ErrorCategory,
+				ErrorSource)))
+	{
+		AddError(ErrorCategory + TEXT(":") + ErrorSource);
+		return false;
+	}
+	if (!TestEqual(TEXT("Async action activates schema 23"), Package.SchemaVersion, 23)
+		|| !TestEqual(TEXT("Async action publishes one factory"), Package.Bindings.Num(), 1))
+	{
+		return false;
+	}
+
+	const FAvidScriptBindingFunctionModel& Binding = Package.Bindings[0];
+	TestEqual(
+		TEXT("Async action uses dedicated dispatch"),
+		Binding.DispatchMode,
+		FString(TEXT("blueprint_async_action")));
+	TestEqual(
+		TEXT("Async action facade is awaitable"),
+		Binding.ScriptName,
+		FString(TEXT("WaitForSignalAsync")));
+	TestEqual(
+		TEXT("Async producer returns a continuation token"),
+		Binding.HostImport.Signature,
+		FString(TEXT("(i)I")));
+	TestTrue(
+		TEXT("Async action contract is explicit"),
+		Binding.AsyncAction.IsEnabled()
+			&& Binding.AsyncAction.bCancellable
+			&& Binding.AsyncAction.CompletionPolicy
+				== TEXT("first_broadcast_wins"));
+	TestEqual(
+		TEXT("All BlueprintAssignable outcomes are frozen"),
+		Binding.AsyncAction.Outcomes.Num(),
+		2);
+	if (Binding.AsyncAction.Outcomes.Num() == 2)
+	{
+		TestEqual(
+			TEXT("Outcomes are deterministic"),
+			Binding.AsyncAction.Outcomes[0].DelegateMember,
+			FString(TEXT("Cancelled")));
+		TestEqual(
+			TEXT("Second outcome remains explicit"),
+			Binding.AsyncAction.Outcomes[1].DelegateMember,
+			FString(TEXT("Completed")));
+	}
+	const FAvidScriptBindingTypeModel* PayloadType =
+		Package.Types.FindByPredicate(
+			[&Binding](const FAvidScriptBindingTypeModel& Type)
+			{
+				return Type.StableId
+					== Binding.AsyncAction.PayloadTypeId;
+			});
+	TestTrue(
+		TEXT("Outcome payload is a generated enum"),
+		PayloadType != nullptr
+			&& PayloadType->Kind == TEXT("enum")
+			&& PayloadType->EnumValues.Num() == 2);
+
+	FString ReferenceSource;
+	FString ManifestJson;
+	FAvidScriptCSharpBindingEmitResult EmitResult;
+	TestTrue(
+		TEXT("Async action emits a typed C# awaitable"),
+		FAvidScriptEditorCSharpBindingEmitter::Emit(
+			Json,
+			ReferenceSource,
+			ManifestJson,
+			EmitResult));
+	TestTrue(
+		TEXT("Generated facade exposes typed outcome await"),
+		PayloadType != nullptr
+			&& ReferenceSource.Contains(
+				TEXT("public enum ") + PayloadType->CppType)
+			&& ReferenceSource.Contains(
+				TEXT("AvidOutcomeAwaitable<") + PayloadType->CppType
+					+ TEXT("> WaitForSignalAsync() => default;")));
+
+	FAvidScriptBindingPackageModel Tampered = Package;
+	Tampered.Bindings[0].AsyncAction.Outcomes[0].Ordinal = 1;
+	Tampered.SelectionHash =
+		FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(Tampered);
+	Tampered.PackageHash =
+		FAvidScriptBindingDescriptorIdentity::MakePackageHash(Tampered);
+	FString TamperedJson;
+	TestTrue(
+		TEXT("Canonical serializer writes the malformed outcome fixture"),
+		FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
+			Tampered,
+			TamperedJson));
+	TestFalse(
+		TEXT("Parser rejects async outcome ordinal drift"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			TamperedJson,
+			Tampered,
+			ErrorCategory,
+			ErrorSource));
+	TestEqual(
+		TEXT("Async outcome drift identifies its contract"),
+		ErrorSource,
+		FString(TEXT("async_action")));
 	return true;
 }
 

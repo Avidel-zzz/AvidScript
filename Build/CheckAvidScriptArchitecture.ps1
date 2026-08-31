@@ -2308,7 +2308,7 @@ if (-not $CSharpBindingArtifactHeader.Contains('EmitterVersion = TEXT("49.3.0")'
     -not $CSharpBindingArtifactHeader.Contains('DescriptorFileName = TEXT("bindings.v5.json")')) {
     Add-Violation 'C# binding artifact must identify the P49.3 schema-v5 object lifecycle surface'
 }
-foreach ($RequiredDescriptorSchemaVersion in 2..22) {
+foreach ($RequiredDescriptorSchemaVersion in 2..23) {
     $RequiredDescriptorSchemaToken = '$DescriptorSchemaVersion -ne ' + $RequiredDescriptorSchemaVersion
     if (-not $CSharpBindingPackageSource.Contains($RequiredDescriptorSchemaToken)) {
         Add-Violation "C# binding package resolver must preserve descriptor schema v2-v22 compatibility: $RequiredDescriptorSchemaToken"
@@ -2369,8 +2369,9 @@ if (-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 5') -or
 	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 19') -or
 	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 20') -or
 	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 21') -or
-	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 22')) {
-	Add-Violation 'Runtime reload manifest loader must accept descriptor schema v5-v22 typed object packages'
+	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 22') -or
+	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 23')) {
+	Add-Violation 'Runtime reload manifest loader must accept descriptor schema v5-v23 typed object packages'
 }
 foreach ($RequiredDelegateEventManifestContract in @(
     'delegate_event_count',
@@ -4623,10 +4624,13 @@ foreach ($RequiredZeroFrameInvocationContract in @(
 foreach ($RequiredBlueprintDeclaredEventContract in @(
     'BlueprintEventGeneratorVersion',
     'Package.SchemaVersion = 22',
+    'Package.SchemaVersion = 23',
     'TEXT("blueprint_event")',
-    'TEXT("descriptor_selection_v22")',
-    'TEXT("descriptor_package_v22")',
-    'OutPackage.SchemaVersion != 22',
+    'TEXT("descriptor_selection_v23")',
+    'TEXT("descriptor_package_v23")',
+    'OutPackage.SchemaVersion != 23',
+    'blueprint_async_action',
+    'first_broadcast_wins',
     'blueprint_event_replace_invocation_conflict',
     'binding_reflection_provenance_mismatch',
     'BlueprintDeclaredEvent'

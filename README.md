@@ -34,7 +34,7 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 | C# 定义 UE 类型 | Actor、Component、World/GameInstance Subsystem、继承、override、`UPROPERTY`、`UFUNCTION` 与默认参数 |
 | 异步 | `Delay`、`NextTick`、异步对象加载、Reflection 生成的 latent `FooAsync`、受控 `async/await` |
 | 委托 | 动态单播租约、多播订阅、强类型 `return/ref/out` 回调，以及生成式 `ExecuteX/BroadcastX` 主动调用 |
-| Blueprint | 自声明 callable/event、schema 21/22 provenance、cached `ProcessEvent`、`before/after/replace` 与重编译失效关闭 |
+| Blueprint | 自声明 callable/event、schema 21/22 provenance、`before/after/replace`，以及 schema 23 AsyncAction awaitable 生成 |
 | 网络 | Server/Client/NetMulticast RPC、replicated property、RPC/RepNotify handler、dedicated/listen 多进程闭环 |
 | 热重载 | 方法体事务式替换、候选回滚、状态帧与 handle 生命周期隔离 |
 | 发布 | 内容寻址 Generated Type bundle、NonUFS staging 与 Cook-layout Runtime load |
@@ -48,6 +48,7 @@ Phase 60 已完成 P60.A、P60.B 与 P60.C1：
   `return/ref/out` 原子输出事务，以及 ordinal 驱动的 `ExecuteX/BroadcastX`；
 - Blueprint class 自声明函数可双向接入：C# 可主动调用，也可用 `[AvidEvent]` 在
   `before/after/replace` 时机承接事件；重编译后旧描述符会拒绝加载。
+- `UBlueprintAsyncActionBase` 工厂可按反射结构生成强类型 outcome awaitable；Session Runtime 完成桥正在 P60.C2b 推进。
 
 详细进度见 [Phase 60 中文收尾记录](Docs/Phase60/P60_Closeout.md)。
 

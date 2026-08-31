@@ -702,6 +702,10 @@ FString MakeExpectedAbiSignature(const FAvidScriptBindingFunctionModel& Binding)
 	{
 		return TEXT("(") + Parameters + TEXT("i)I");
 	}
+	if (Binding.DispatchMode == TEXT("blueprint_async_action"))
+	{
+		return TEXT("(") + Parameters + TEXT("i)I");
+	}
 	if (Binding.ReturnValue.CanonicalType != TEXT("void"))
 	{
 		Parameters += TEXT("i");
@@ -740,11 +744,18 @@ bool RenderMethod(
 		Binding.DispatchMode == TEXT("latent_process_event");
 	const bool bProviderLatent =
 		bLatent && Binding.Completion.Mode == TEXT("provider");
+	const bool bAsyncAction =
+		Binding.DispatchMode == TEXT("blueprint_async_action")
+		&& Binding.AsyncAction.IsEnabled();
 	FString LatentPayloadCSharpType;
-	if (bProviderLatent)
+	if (bProviderLatent || bAsyncAction)
 	{
 		const FAvidScriptBindingTypeModel* PayloadType =
-			FindRenderedTypeById(TypesById, Binding.Completion.PayloadTypeId);
+			FindRenderedTypeById(
+				TypesById,
+				bAsyncAction
+					? Binding.AsyncAction.PayloadTypeId
+					: Binding.Completion.PayloadTypeId);
 		FAvidScriptBindingValueModel PayloadValue;
 		if (PayloadType != nullptr)
 		{
@@ -777,6 +788,17 @@ bool RenderMethod(
 		OutErrorSource = Binding.CanonicalIdentity;
 		return false;
 	}
+	if (bAsyncAction
+		&& (!Binding.bStatic
+			|| Binding.ReturnValue.Kind != TEXT("object_handle")
+			|| Binding.ReloadEffect
+				!= EAvidScriptBindingReloadEffect::ContinuationProducer
+			|| Binding.AsyncAction.Outcomes.IsEmpty()))
+	{
+		OutErrorCategory = TEXT("async_action_csharp_shape_unsupported");
+		OutErrorSource = Binding.CanonicalIdentity;
+		return false;
+	}
 
 	TArray<FString> PublicParameters;
 	TArray<FString> NativeParameters;
@@ -805,7 +827,7 @@ bool RenderMethod(
 			return false;
 		}
 		const FString PublicName = FAvidScriptEditorCSharpSyntax::MakeIdentifier(Parameter.Name);
-		if (bLatent)
+		if (bLatent || bAsyncAction)
 		{
 			FString StorageType;
 			if (!ResolveStorageType(
@@ -965,6 +987,39 @@ bool RenderMethod(
 			FString::Printf(
 				TEXT("    public static %s %s(%s) => default;"),
 				*AwaitableType,
+				*MethodName,
+				*FString::Join(PublicParameters, TEXT(", ")))
+		});
+		OutMethod.NativeLines.Append({
+			FString::Printf(
+				TEXT("    [DllImport(\"%s\", EntryPoint = \"%s\")]"),
+				*EscapeCSharpString(Binding.HostImport.Module),
+				*EscapeCSharpString(Binding.HostImport.Name)),
+			FString::Printf(
+				TEXT("    internal static extern long %s(%s);"),
+				*MakeNativeMethodName(Binding.Ordinal),
+				*FString::Join(NativeParameters, TEXT(", ")))
+		});
+		OutMethod.SignatureKey = MethodName + TEXT("(")
+			+ FString::Join(SignatureParameterTypes, TEXT(",")) + TEXT(")");
+		return true;
+	}
+	if (bAsyncAction)
+	{
+		NativeParameters.Add(TEXT("int callbackId"));
+		const FString MethodName =
+			FAvidScriptEditorCSharpSyntax::MakeIdentifier(Binding.ScriptName);
+		OutMethod.MethodLines.Append({
+			FString::Printf(
+				TEXT("    [AvidLatent(\"%s\", \"%s\", %d, \"%s\")]"),
+				*EscapeCSharpString(Binding.HostImport.Module),
+				*EscapeCSharpString(Binding.HostImport.Name),
+				Binding.Ordinal,
+				*EscapeCSharpString(
+					Binding.AsyncAction.PayloadTypeId)),
+			FString::Printf(
+				TEXT("    public static AvidOutcomeAwaitable<%s> %s(%s) => default;"),
+				*LatentPayloadCSharpType,
 				*MethodName,
 				*FString::Join(PublicParameters, TEXT(", ")))
 		});

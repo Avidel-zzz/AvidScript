@@ -354,6 +354,41 @@ bool FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 				Writer->WriteObjectEnd();
 			}
 		}
+		if (Package.SchemaVersion >= 23
+			&& Binding.DispatchMode == TEXT("blueprint_async_action"))
+		{
+			Writer->WriteObjectStart(TEXT("async_action"));
+			Writer->WriteValue(TEXT("mode"), Binding.AsyncAction.Mode);
+			Writer->WriteValue(
+				TEXT("action_class"),
+				Binding.AsyncAction.ActionClass);
+			Writer->WriteValue(
+				TEXT("activation_function"),
+				Binding.AsyncAction.ActivationFunction);
+			Writer->WriteValue(
+				TEXT("payload_type_id"),
+				Binding.AsyncAction.PayloadTypeId);
+			Writer->WriteValue(
+				TEXT("completion_policy"),
+				Binding.AsyncAction.CompletionPolicy);
+			Writer->WriteValue(
+				TEXT("cancellable"),
+				Binding.AsyncAction.bCancellable);
+			Writer->WriteArrayStart(TEXT("outcomes"));
+			for (const FAvidScriptBindingAsyncActionOutcomeModel& Outcome :
+				Binding.AsyncAction.Outcomes)
+			{
+				Writer->WriteObjectStart();
+				Writer->WriteValue(TEXT("stable_id"), Outcome.StableId);
+				Writer->WriteValue(TEXT("ordinal"), Outcome.Ordinal);
+				Writer->WriteValue(
+					TEXT("delegate_member"),
+					Outcome.DelegateMember);
+				Writer->WriteObjectEnd();
+			}
+			Writer->WriteArrayEnd();
+			Writer->WriteObjectEnd();
+		}
 		if (Binding.DispatchMode == TEXT("generated_native_s1"))
 		{
 			Writer->WriteValue(TEXT("generated_shape"), Binding.GeneratedShape);

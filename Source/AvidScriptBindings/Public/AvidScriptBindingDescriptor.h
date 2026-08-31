@@ -68,6 +68,29 @@ struct FAvidScriptBindingLatentCompletionModel
 	bool bCancellable = false;
 };
 
+struct FAvidScriptBindingAsyncActionOutcomeModel
+{
+	FString StableId;
+	int32 Ordinal = INDEX_NONE;
+	FString DelegateMember;
+};
+
+struct FAvidScriptBindingAsyncActionModel
+{
+	FString Mode = TEXT("none");
+	FString ActionClass;
+	FString ActivationFunction;
+	FString PayloadTypeId;
+	FString CompletionPolicy = TEXT("first_broadcast_wins");
+	bool bCancellable = false;
+	TArray<FAvidScriptBindingAsyncActionOutcomeModel> Outcomes;
+
+	bool IsEnabled() const
+	{
+		return Mode == TEXT("blueprint_async_action");
+	}
+};
+
 struct FAvidScriptBindingFunctionModel
 {
 	FString StableId;
@@ -85,6 +108,7 @@ struct FAvidScriptBindingFunctionModel
 	FString LatentInfoParameter;
 	FString WorldContextParameter;
 	FAvidScriptBindingLatentCompletionModel Completion;
+	FAvidScriptBindingAsyncActionModel AsyncAction;
 	FString GeneratedShape;
 	FString GeneratedReceiverMode;
 	FString GeneratedImportName;

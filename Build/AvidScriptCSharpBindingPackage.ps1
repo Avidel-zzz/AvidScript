@@ -350,7 +350,8 @@ function Resolve-AvidScriptCSharpBindingPackage {
         $DescriptorSchemaVersion -ne 19 -and
         $DescriptorSchemaVersion -ne 20 -and
         $DescriptorSchemaVersion -ne 21 -and
-        $DescriptorSchemaVersion -ne 22) -or
+        $DescriptorSchemaVersion -ne 22 -and
+        $DescriptorSchemaVersion -ne 23) -or
         $ManifestDescriptorSchemaVersion -ne $DescriptorSchemaVersion -or
         [string]$Descriptor.package_name -cne $PackageName -or
         [string]$Descriptor.package_hash -cne $PackageHash) {

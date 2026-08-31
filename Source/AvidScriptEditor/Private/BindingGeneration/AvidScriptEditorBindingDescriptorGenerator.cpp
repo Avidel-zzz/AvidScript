@@ -16,6 +16,7 @@
 #include "BindingGeneration/AvidScriptEditorCSharpSyntax.h"
 #include "GameFramework/Actor.h"
 #include "HAL/FileManager.h"
+#include "Kismet/BlueprintAsyncActionBase.h"
 #include "Misc/EngineVersion.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -43,6 +44,26 @@ constexpr const TCHAR* DelegateOutputGeneratorVersion = TEXT("58.2.0");
 constexpr const TCHAR* DelegateValueGeneratorVersion = TEXT("60.2.0");
 constexpr const TCHAR* BlueprintFunctionGeneratorVersion = TEXT("60.3.0");
 constexpr const TCHAR* BlueprintEventGeneratorVersion = TEXT("60.3.1");
+constexpr const TCHAR* BlueprintAsyncActionGeneratorVersion = TEXT("60.4.0");
+
+struct FResolvedAsyncActionOutcomeDescriptor
+{
+	FString StableId;
+	FString DelegateMember;
+	int32 Ordinal = INDEX_NONE;
+};
+
+struct FResolvedAsyncActionDescriptor
+{
+	UClass* ActionClass = nullptr;
+	FAvidScriptProjectedBindingType PayloadType;
+	TArray<FResolvedAsyncActionOutcomeDescriptor> Outcomes;
+
+	bool IsEnabled() const
+	{
+		return ActionClass != nullptr;
+	}
+};
 
 struct FResolvedBindingDescriptor
 {
@@ -65,6 +86,7 @@ struct FResolvedBindingDescriptor
 	FString CompletionProviderId;
 	FString CompletionPayloadTypeId;
 	FString CompletionStatusPolicy = TEXT("abandon_on_cancel");
+	FResolvedAsyncActionDescriptor AsyncAction;
 	FString GeneratedShape;
 	FString GeneratedReceiverMode;
 	FString WritePolicy = TEXT("none");
@@ -91,6 +113,8 @@ struct FResolvedDelegateEventDescriptor
 	FString ExportName;
 	int32 Ordinal = INDEX_NONE;
 };
+
+void FinalizeType(FAvidScriptProjectedBindingType& Type);
 
 FString HashSha256(const FString& Value)
 {
@@ -147,7 +171,8 @@ FString MakeCanonicalIdentity(
 	const FString& CompletionMode = TEXT("none"),
 	const FString& CompletionProviderId = FString(),
 	const FString& CompletionPayloadTypeId = FString(),
-	const FString& CompletionStatusPolicy = TEXT("abandon_on_cancel"))
+	const FString& CompletionStatusPolicy = TEXT("abandon_on_cancel"),
+	const FResolvedAsyncActionDescriptor* AsyncAction = nullptr)
 {
 	FString Identity = OwnerClass->GetPathName()
 		+ TEXT("::")
@@ -183,6 +208,24 @@ FString MakeCanonicalIdentity(
 				+ TEXT("|status_policy=")
 				+ CompletionStatusPolicy
 				+ TEXT("|cancellable=1");
+		}
+	}
+	if (DispatchMode == TEXT("blueprint_async_action")
+		&& AsyncAction != nullptr
+		&& AsyncAction->IsEnabled())
+	{
+		Identity += TEXT("|async_action_class=")
+			+ AsyncAction->ActionClass->GetPathName()
+			+ TEXT("|activation=Activate|payload_type_id=")
+			+ AsyncAction->PayloadType.StableId
+			+ TEXT("|completion_policy=first_broadcast_wins|cancellable=1");
+		for (const FResolvedAsyncActionOutcomeDescriptor& Outcome :
+			AsyncAction->Outcomes)
+		{
+			Identity += TEXT("|outcome=")
+				+ FString::FromInt(Outcome.Ordinal)
+				+ TEXT(":") + Outcome.DelegateMember
+				+ TEXT(":") + Outcome.StableId;
 		}
 	}
 	return FAvidScriptBindingDescriptorIdentity::MakeFunctionCanonicalIdentity(
@@ -343,6 +386,138 @@ void FinalizeType(FAvidScriptProjectedBindingType& Type)
 				? Type.ElementType->StableId
 				: FString(),
 			TypeArgumentIds);
+}
+
+FString MakeAsyncActionAbiSignature(
+	const FAvidScriptProjectedFunction& Projection)
+{
+	FString Parameters;
+	for (const FAvidScriptProjectedBindingValue& Parameter :
+		Projection.Parameters)
+	{
+		Parameters += FString::Join(Parameter.Type.AbiValueTypes, TEXT(""));
+	}
+	return TEXT("(") + Parameters + TEXT("i)I");
+}
+
+bool ResolveBlueprintAsyncAction(
+	const UFunction& Function,
+	const FAvidScriptProjectedFunction& Projection,
+	FResolvedAsyncActionDescriptor& OutAction,
+	FString& OutCategory,
+	FString& OutSource)
+{
+	OutAction = {};
+	OutCategory.Reset();
+	OutSource.Reset();
+	const FObjectPropertyBase* ReturnProperty =
+		CastField<FObjectPropertyBase>(Function.GetReturnProperty());
+	UClass* const ActionClass = ReturnProperty == nullptr
+		? nullptr
+		: ReturnProperty->PropertyClass;
+	if (ActionClass == nullptr
+		|| !ActionClass->IsChildOf(UBlueprintAsyncActionBase::StaticClass()))
+	{
+		return true;
+	}
+	if (!Function.HasAnyFunctionFlags(FUNC_Static)
+		|| Function.HasAnyFunctionFlags(FUNC_Net)
+		|| Function.HasMetaData(TEXT("Latent"))
+		|| Projection.Parameters.ContainsByPredicate(
+			[](const FAvidScriptProjectedBindingValue& Parameter)
+			{
+				return Parameter.Direction != TEXT("value")
+					&& Parameter.Direction != TEXT("const_ref");
+			}))
+	{
+		OutCategory = TEXT("async_action_factory_shape_unsupported");
+		OutSource = Function.GetPathName();
+		return false;
+	}
+
+	TArray<FMulticastDelegateProperty*> DelegateProperties;
+	for (TFieldIterator<FMulticastDelegateProperty> It(
+		ActionClass,
+		EFieldIteratorFlags::IncludeSuper); It; ++It)
+	{
+		if (It->HasAnyPropertyFlags(CPF_BlueprintAssignable))
+		{
+			DelegateProperties.Add(*It);
+		}
+	}
+	DelegateProperties.Sort([](
+		const FMulticastDelegateProperty& Left,
+		const FMulticastDelegateProperty& Right)
+	{
+		return Left.GetPathName().Compare(
+			Right.GetPathName(),
+			ESearchCase::CaseSensitive) < 0;
+	});
+	if (DelegateProperties.IsEmpty())
+	{
+		OutCategory = TEXT("async_action_outcome_missing");
+		OutSource = ActionClass->GetPathName();
+		return false;
+	}
+
+	OutAction.ActionClass = ActionClass;
+	for (int32 Index = 0; Index < DelegateProperties.Num(); ++Index)
+	{
+		FMulticastDelegateProperty* const DelegateProperty =
+			DelegateProperties[Index];
+		FAvidScriptProjectedDelegateEvent OutcomeProjection;
+		FString ProjectionCategory;
+		FString ProjectionSource;
+		if (!FAvidScriptEditorReflectedDelegateEventPolicy::EvaluateAndProject(
+				DelegateProperty,
+				OutcomeProjection,
+				ProjectionCategory,
+				ProjectionSource))
+		{
+			OutCategory = TEXT("async_action_outcome_type_unsupported");
+			OutSource = ProjectionSource.IsEmpty()
+				? DelegateProperty->GetPathName()
+				: ProjectionSource;
+			return false;
+		}
+		if (OutcomeProjection.ReturnValue.Type.Kind != TEXT("void")
+			|| !OutcomeProjection.Parameters.IsEmpty())
+		{
+			OutCategory = TEXT("async_action_outcome_payload_pending");
+			OutSource = DelegateProperty->GetPathName();
+			return false;
+		}
+
+		FResolvedAsyncActionOutcomeDescriptor Outcome;
+		Outcome.Ordinal = Index;
+		Outcome.DelegateMember = DelegateProperty->GetName();
+		Outcome.StableId = HashSha256(
+			ActionClass->GetPathName()
+			+ TEXT("::async_outcome:")
+			+ Outcome.DelegateMember
+			+ TEXT("::")
+			+ DelegateProperty->SignatureFunction->GetPathName());
+		OutAction.Outcomes.Add(MoveTemp(Outcome));
+	}
+
+	OutAction.PayloadType.CanonicalType =
+		TEXT("enum:avidscript_async_action:") + Function.GetPathName();
+	OutAction.PayloadType.Kind = TEXT("enum");
+	OutAction.PayloadType.CppType = ActionClass->GetName()
+		+ TEXT("_") + Function.GetName() + TEXT("Outcome");
+	OutAction.PayloadType.Size = sizeof(int32);
+	OutAction.PayloadType.Alignment = alignof(int32);
+	OutAction.PayloadType.AbiValueTypes = { TEXT("i") };
+	for (const FResolvedAsyncActionOutcomeDescriptor& Outcome :
+		OutAction.Outcomes)
+	{
+		OutAction.PayloadType.EnumValues.Add({
+			Outcome.DelegateMember,
+			Outcome.Ordinal
+		});
+	}
+	FinalizeType(OutAction.PayloadType);
+	return true;
 }
 
 FString MakeDelegateEventSelectionKey(
@@ -633,13 +808,35 @@ bool GenerateBindingDescriptor(
 		{
 			FinalizeType(Parameter.Type);
 		}
+		FString AsyncActionCategory;
+		FString AsyncActionSource;
+		if (!LatentContract.bLatent
+			&& !ResolveBlueprintAsyncAction(
+				*Function,
+				Binding.Projection,
+				Binding.AsyncAction,
+				AsyncActionCategory,
+				AsyncActionSource))
+		{
+			SetFailure(
+				OutResult,
+				AsyncActionCategory,
+				AsyncActionSource,
+				TEXT("Use a static Blueprint async-action factory whose BlueprintAssignable outcomes have a supported frozen payload shape."));
+			return false;
+		}
 		Binding.ScriptName = GetDescriptorScriptFunctionName(Function)
-			+ (LatentContract.bLatent ? FString(TEXT("Async")) : FString());
+			+ (LatentContract.bLatent || Binding.AsyncAction.IsEnabled()
+				? FString(TEXT("Async"))
+				: FString());
 		const bool bGeneratedNative =
 			!LatentContract.bLatent
+			&& !Binding.AsyncAction.IsEnabled()
 			&& !Binding.Network.IsNetworked()
 			&& GeneratedNativeFunctionKeys.Contains(SelectionKey);
-		Binding.DispatchMode = LatentContract.bLatent
+		Binding.DispatchMode = Binding.AsyncAction.IsEnabled()
+			? FString(TEXT("blueprint_async_action"))
+			: LatentContract.bLatent
 			? FString(TEXT("latent_process_event"))
 			: Binding.Network.IsNetworked()
 			? FString(TEXT("cached_process_event"))
@@ -659,7 +856,10 @@ bool GenerateBindingDescriptor(
 			Binding.CompletionMode,
 			Binding.CompletionProviderId,
 			Binding.CompletionPayloadTypeId,
-			Binding.CompletionStatusPolicy);
+			Binding.CompletionStatusPolicy,
+			Binding.AsyncAction.IsEnabled()
+				? &Binding.AsyncAction
+				: nullptr);
 		if (bGeneratedNative)
 		{
 			FString EligibilityCategory;
@@ -717,14 +917,23 @@ bool GenerateBindingDescriptor(
 				Binding.CompletionMode,
 				Binding.CompletionProviderId,
 				Binding.CompletionPayloadTypeId,
-				Binding.CompletionStatusPolicy);
+				Binding.CompletionStatusPolicy,
+				Binding.AsyncAction.IsEnabled()
+					? &Binding.AsyncAction
+					: nullptr);
 		}
 		Binding.StableId = HashSha256(Binding.CanonicalIdentity);
 		if (!bGeneratedNative)
 		{
 			Binding.ImportName = TEXT("avid_ue_") + Binding.StableId.Left(16);
 		}
+		if (Binding.AsyncAction.IsEnabled())
+		{
+			Binding.Projection.AbiSignature =
+				MakeAsyncActionAbiSignature(Binding.Projection);
+		}
 		Binding.ReloadEffect = LatentContract.bLatent
+			|| Binding.AsyncAction.IsEnabled()
 			? EAvidScriptBindingReloadEffect::ContinuationProducer
 			: FAvidScriptEditorBindingReloadEffectPolicy::Classify(*Function);
 		Bindings.Add(MoveTemp(Binding));
@@ -1313,6 +1522,12 @@ bool GenerateBindingDescriptor(
 		{
 			AddProjectedTypeAndChildren(Parameter.Type, TypesByCanonicalName);
 		}
+		if (Binding.AsyncAction.IsEnabled())
+		{
+			AddProjectedTypeAndChildren(
+				Binding.AsyncAction.PayloadType,
+				TypesByCanonicalName);
+		}
 	}
 	for (const FResolvedDelegateEventDescriptor& Event : DelegateEvents)
 	{
@@ -1479,6 +1694,11 @@ bool GenerateBindingDescriptor(
 		{
 			return Event.CallbackKind == TEXT("blueprint_event");
 		});
+	const bool bHasBlueprintAsyncActions = Bindings.ContainsByPredicate(
+		[](const FResolvedBindingDescriptor& Binding)
+		{
+			return Binding.AsyncAction.IsEnabled();
+		});
 	Package.SchemaVersion = bHasWritableProperties || bHasNativeDirectFunctions
 			|| bHasGeneratedNativeBindings
 		? 8
@@ -1533,7 +1753,13 @@ bool GenerateBindingDescriptor(
 	{
 		Package.SchemaVersion = 22;
 	}
-	Package.GeneratorVersion = bHasBlueprintDeclaredEvents
+	if (bHasBlueprintAsyncActions)
+	{
+		Package.SchemaVersion = 23;
+	}
+	Package.GeneratorVersion = bHasBlueprintAsyncActions
+		? BlueprintAsyncActionGeneratorVersion
+		: bHasBlueprintDeclaredEvents
 		? BlueprintEventGeneratorVersion
 		: bHasBlueprintDeclaredFunctions
 		? BlueprintFunctionGeneratorVersion
@@ -1685,6 +1911,28 @@ bool GenerateBindingDescriptor(
 			BindingModel.Completion.StatusPolicy =
 				Binding.CompletionStatusPolicy;
 			BindingModel.Completion.bCancellable = true;
+		}
+		if (Package.SchemaVersion >= 23
+			&& Binding.AsyncAction.IsEnabled())
+		{
+			BindingModel.AsyncAction.Mode = TEXT("blueprint_async_action");
+			BindingModel.AsyncAction.ActionClass =
+				Binding.AsyncAction.ActionClass->GetPathName();
+			BindingModel.AsyncAction.ActivationFunction = TEXT("Activate");
+			BindingModel.AsyncAction.PayloadTypeId =
+				Binding.AsyncAction.PayloadType.StableId;
+			BindingModel.AsyncAction.CompletionPolicy =
+				TEXT("first_broadcast_wins");
+			BindingModel.AsyncAction.bCancellable = true;
+			for (const FResolvedAsyncActionOutcomeDescriptor& Outcome :
+				Binding.AsyncAction.Outcomes)
+			{
+				FAvidScriptBindingAsyncActionOutcomeModel OutcomeModel;
+				OutcomeModel.StableId = Outcome.StableId;
+				OutcomeModel.Ordinal = Outcome.Ordinal;
+				OutcomeModel.DelegateMember = Outcome.DelegateMember;
+				BindingModel.AsyncAction.Outcomes.Add(MoveTemp(OutcomeModel));
+			}
 		}
 		BindingModel.GeneratedShape = Binding.GeneratedShape;
 		BindingModel.GeneratedReceiverMode = Binding.GeneratedReceiverMode;
