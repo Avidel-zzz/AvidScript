@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "phase_id": 59,
+  "run_id": "P59-98b6511-20260831-002",
+  "status": "attested",
+  "verified": {
+    "commit": "98b6511b8e1544f771dbefa7e2f3fa3d091053ac",
+    "tree": "731f3317dbf3c5d81b8d5e2c11b2b444f3b54db2",
+    "state_sha256": "433d12fa0da7efcd765eb470dc37675a634c5bc5b16b4b333ecb2ab007501c48"
+  },
+  "gate_report_sha256": "c992dfb79c89e5e5c25146e71e154e70c89ca9b2cd4457edb1ce37bcdfc87cca",
+  "checks": {
+    "architecture_clean": true,
+    "dotnet_272_of_272": true,
+    "powershell_12_of_12": true,
+    "powershell_parser_65_files": true,
+    "harness_audit": true,
+    "ue58_no_clean_editor_build": true,
+    "automation_398_of_398": true,
+    "generated_type_performance_matrix": true,
+    "formal_evidence_valid": true
+  },
+  "performance": {
+    "native_shell_p50_ns": 70.7,
+    "native_shell_p95_ns": 73.05,
+    "prepared_export_p50_ns": 62.65,
+    "prepared_export_p95_ns": 64.9,
+    "five_property_body_p50_ns": 193.15,
+    "five_property_body_p95_ns": 202.55,
+    "lifecycle_pair_p50_ns": 1571171.875,
+    "lifecycle_pair_p95_ns": 1626243.75
+  },
+  "transferred_debt": [
+    {
+      "id": "P59-D01-ControlledLeadership",
+      "target_phase": 65,
+      "scope": "固定同语义 workload 下的 Wasmtime/Puerts/AngelScript 跨框架性能领导力"
+    }
+  ],
+  "human_acceptance": {
+    "pie_actor_placement": false,
+    "blueprint_asset_visual_reopen": false,
+    "automation_does_not_impersonate_human_acceptance": true
+  },
+  "invocations": {
+    "ubt": 2,
+    "automation": 2,
+    "full_gate": 2,
+    "budget_exception_recorded": false
+  },
+  "attested_at_utc": "2026-08-31T04:17:53.4888413+00:00"
+}

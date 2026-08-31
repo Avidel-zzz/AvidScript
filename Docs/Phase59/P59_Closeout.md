@@ -1,6 +1,6 @@
 # Phase 59 收尾记录
 
-> 当前状态：P59.A-D 实现完成，集中 Gate 进行中
+> 当前状态：严格 Gate 与 attestation 已完成，等待 PhaseWorkflow close
 
 ## 目标
 
@@ -85,7 +85,7 @@
 
 ## 待完成
 
-- `P59.D` 集中 Gate。
+- PhaseWorkflow `close` 与关闭后的 README 状态刷新。
 
 ## 集中修复
 
@@ -95,5 +95,18 @@
 
 ## 最终证据
 
-阶段 Gate 完成后填写候选提交、测试计数、UBT、Automation、benchmark、人工 PIE/Blueprint 验收和
-剩余风险。实现中的局部结果不提前写成阶段已完成。
+最终 Gate 绑定候选 commit `98b6511b8e1544f771dbefa7e2f3fa3d091053ac`、tree
+`731f3317dbf3c5d81b8d5e2c11b2b444f3b54db2`，run id 为 `P59-98b6511-20260831-002`：
+
+| 验证项 | 结果 |
+| --- | --- |
+| 固定 .NET 8.0.416 | 6 组 console harness，`272/272` |
+| PowerShell | 12/12 runner；65 个脚本 parser 0 error；Harness audit PASS |
+| UE5.8 no-clean UBT | `AvidTPSTemplateEditor Win64 Development` 成功 |
+| 完整 Automation | Found/Completed/Success `398/398/398`，Fail/NotRun `0/0`，Queue Empty，退出 0 |
+| 干净架构 | detached candidate 输入 clean，Core/Bindings/VM/Runtime 边界通过 |
+| Generated Type 性能 | shell `70.7/73.05 ns`，prepared export `62.65/64.9 ns`，五属性脚本体 `193.15/202.55 ns`，lifecycle pair `1.571/1.626 ms`（p50/p95） |
+
+机器摘要见 `P59_Gate_Summary.json`。首个候选 `ac8b0f3` 因旧 FName fixture 漂移失败并已作废，
+不计入最终通过证据。人工 PIE 放置 Actor、Blueprint 资产视觉检查与交互观察仍保持未完成，Automation
+不冒充这些人工验收；完整 BuildCookRun/Shipping 属于 P62，跨框架性能领导力属于 P65。
