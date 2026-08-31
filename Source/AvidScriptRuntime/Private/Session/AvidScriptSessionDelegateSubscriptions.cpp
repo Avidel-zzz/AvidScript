@@ -18,6 +18,7 @@ struct FAvidScriptDelegateSubscriptionEntry
 	TWeakObjectPtr<UObject> Source;
 	TStrongObjectPtr<UAvidScriptDelegateBridge> Bridge;
 	FScriptDelegate Delegate;
+	FScriptDelegate PreviousSinglecastDelegate;
 	uint64 BridgeToken = 0;
 	int64 GuestToken = 0;
 	bool bBound = false;
@@ -27,11 +28,18 @@ bool IsPreparedEventValid(const FAvidScriptPreparedDelegateEvent& Event)
 {
 	return Event.EventOrdinal < static_cast<uint32>(MAX_int32)
 		&& Event.ExpectedSourceClass != nullptr
-		&& Event.DelegateProperty != nullptr
-		&& Event.SignatureFunction != nullptr
-		&& Event.ImmutableCodecIdentity != nullptr
-		&& Event.Encode != nullptr
-		&& Event.ParameterCellCount <= FAvidScriptVmCallFrame::MaxCells;
+		&& (Event.Signature.Kind
+				== EAvidScriptPreparedDelegateKind::Singlecast
+			? Event.Signature.SinglecastProperty != nullptr
+			: Event.Signature.Kind
+					== EAvidScriptPreparedDelegateKind::Multicast
+				? Event.Signature.MulticastProperty != nullptr
+				: false)
+		&& Event.Signature.SignatureFunction != nullptr
+		&& Event.Signature.ImmutableCodecIdentity != nullptr
+		&& Event.Signature.Encode != nullptr
+		&& Event.Signature.ParameterCellCount
+			<= FAvidScriptVmCallFrame::MaxCells;
 }
 
 bool InitializeEntry(
@@ -57,7 +65,7 @@ bool InitializeEntry(
 	UFunction* BridgeFunction = nullptr;
 	if (!PrepareAvidScriptDelegateBridgeFunction(
 			Event.StableId,
-			*Event.SignatureFunction,
+			*Event.Signature.SignatureFunction,
 			BridgeFunction,
 			OutError))
 	{
@@ -91,15 +99,46 @@ bool InitializeEntry(
 	return true;
 }
 
-void UnbindEntry(FAvidScriptDelegateSubscriptionEntry& Entry)
+void BindEntry(FAvidScriptDelegateSubscriptionEntry& Entry)
 {
-	if (Entry.bBound
-		&& Entry.Event.DelegateProperty != nullptr
-		&& Entry.Source.IsValid())
+	check(Entry.Source.IsValid());
+	if (Entry.Event.Signature.Kind
+		== EAvidScriptPreparedDelegateKind::Multicast)
 	{
-		Entry.Event.DelegateProperty->RemoveDelegate(
+		Entry.Event.Signature.MulticastProperty->AddDelegate(
 			Entry.Delegate,
 			Entry.Source.Get());
+	}
+	else
+	{
+		FScriptDelegate* const Current =
+			Entry.Event.Signature.SinglecastProperty
+				->GetPropertyValuePtr_InContainer(Entry.Source.Get());
+		check(Current != nullptr);
+		Entry.PreviousSinglecastDelegate = *Current;
+		*Current = Entry.Delegate;
+	}
+	Entry.bBound = true;
+}
+
+void UnbindEntry(FAvidScriptDelegateSubscriptionEntry& Entry)
+{
+	if (Entry.bBound && Entry.Source.IsValid())
+	{
+		if (Entry.Event.Signature.Kind
+			== EAvidScriptPreparedDelegateKind::Multicast)
+		{
+			Entry.Event.Signature.MulticastProperty->RemoveDelegate(
+				Entry.Delegate,
+				Entry.Source.Get());
+		}
+		else if (FScriptDelegate* const Current =
+			Entry.Event.Signature.SinglecastProperty
+				->GetPropertyValuePtr_InContainer(Entry.Source.Get());
+			Current != nullptr && *Current == Entry.Delegate)
+		{
+			*Current = Entry.PreviousSinglecastDelegate;
+		}
 	}
 	Entry.bBound = false;
 	if (Entry.Bridge.IsValid())
@@ -257,6 +296,11 @@ bool FAvidScriptSessionDelegateSubscriptions::Prepare(
 			return false;
 		}
 		Impl->PreparedCatalog.Add(Event.EventOrdinal, Event);
+		if (Event.Signature.Kind
+			== EAvidScriptPreparedDelegateKind::Singlecast)
+		{
+			continue;
+		}
 		if (!Source->IsA(Event.ExpectedSourceClass))
 		{
 			continue;
@@ -291,12 +335,7 @@ void FAvidScriptSessionDelegateSubscriptions::CommitPrepared()
 	Impl->RebuildActiveBridgeIndices();
 	for (FAvidScriptDelegateSubscriptionEntry& Entry : Impl->Active)
 	{
-		UObject* const Source = Entry.Source.Get();
-		check(Source != nullptr);
-		Entry.Event.DelegateProperty->AddDelegate(
-			Entry.Delegate,
-			Source);
-		Entry.bBound = true;
+		BindEntry(Entry);
 	}
 	Impl->bPreparing = false;
 }
@@ -360,6 +399,19 @@ int64 FAvidScriptSessionDelegateSubscriptions::Subscribe(
 		OutError = TEXT("delegate_event_unavailable");
 		return 0;
 	}
+	if (Event->Signature.Kind
+			== EAvidScriptPreparedDelegateKind::Singlecast
+		&& Entries.ContainsByPredicate(
+			[&Source, EventOrdinal](
+				const FAvidScriptDelegateSubscriptionEntry& Entry)
+			{
+				return Entry.Event.EventOrdinal == EventOrdinal
+					&& Entry.Source.Get() == &Source;
+			}))
+	{
+		OutError = TEXT("delegate_singlecast_already_bound");
+		return 0;
+	}
 
 	const int64 GuestToken = Impl->AllocateGuestToken();
 	if (GuestToken <= 0)
@@ -384,8 +436,7 @@ int64 FAvidScriptSessionDelegateSubscriptions::Subscribe(
 	}
 	if (!Impl->bPreparing)
 	{
-		Event->DelegateProperty->AddDelegate(Entry.Delegate, &Source);
-		Entry.bBound = true;
+		BindEntry(Entry);
 	}
 	Entries.Add(MoveTemp(Entry));
 	if (!Impl->bPreparing)

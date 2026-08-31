@@ -65,7 +65,6 @@ internal static class CSharpDelegateEventLowerer
                 || !loweredFunctionIds.Contains(CSharpGuestIds.Function(callback.MethodSymbolId))
                 || !callable.IsStatic
                 || !callable.HasBody
-                || !string.Equals(callable.ReturnTypeId, "type:void", StringComparison.Ordinal)
                 || callable.Parameters.Any(parameter => parameter.RefKind is not ("none" or "ref" or "out")))
             {
                 Add(diagnostics,
@@ -77,6 +76,7 @@ internal static class CSharpDelegateEventLowerer
                 .OrderBy(parameter => parameter.Ordinal)
                 .ToArray();
             List<AbiValuePlan> plans = new();
+            AbiValuePlan? returnPlan = null;
             bool valid = true;
             foreach (SemanticCallableParameter parameter in orderedParameters)
             {
@@ -96,7 +96,24 @@ internal static class CSharpDelegateEventLowerer
                 plans.Add(plan!);
             }
 
-            bool hasOutputs = orderedParameters.Any(parameter => parameter.RefKind is "ref" or "out");
+            if (valid && !string.Equals(
+                callable.ReturnTypeId,
+                "type:void",
+                StringComparison.Ordinal)
+                && !TryCreatePlan(
+                    callable.ReturnTypeId,
+                    guestTypes,
+                    new HashSet<string>(StringComparer.Ordinal),
+                    out returnPlan,
+                    out string returnError))
+            {
+                Add(diagnostics,
+                    $"Delegate event handler '{callback.Name}' return value is unsupported: {returnError}");
+                valid = false;
+            }
+
+            bool hasOutputs = returnPlan is not null
+                || orderedParameters.Any(parameter => parameter.RefKind is "ref" or "out");
             int cellCount = valid
                 ? plans.Select((plan, index) => orderedParameters[index].RefKind == "out"
                         ? 0
@@ -115,14 +132,19 @@ internal static class CSharpDelegateEventLowerer
                 continue;
             }
 
-            GuestFunction wrapper = BuildWrapper(callback, callable, plans);
+            GuestFunction wrapper = BuildWrapper(
+                callback,
+                callable,
+                plans,
+                returnPlan);
             functions.Add(wrapper);
             exports.Add(new GuestExport(callback.ExportName, wrapper.Id));
         }
 
         bool requiresOutputWrite = document.DelegateEventCallbacks.Any(callback =>
             callablesById.TryGetValue(callback.MethodSymbolId, out SemanticCallable? callable)
-            && callable.Parameters.Any(parameter => parameter.RefKind is "ref" or "out"));
+            && (!string.Equals(callable.ReturnTypeId, "type:void", StringComparison.Ordinal)
+                || callable.Parameters.Any(parameter => parameter.RefKind is "ref" or "out")));
         IReadOnlyList<GuestImport> outputImports = requiresOutputWrite
             ? new[]
             {
@@ -214,12 +236,14 @@ internal static class CSharpDelegateEventLowerer
     private static GuestFunction BuildWrapper(
         SemanticDelegateEventCallback callback,
         SemanticCallable callable,
-        IReadOnlyList<AbiValuePlan> plans)
+        IReadOnlyList<AbiValuePlan> plans,
+        AbiValuePlan? returnPlan)
     {
         SemanticCallableParameter[] callableParameters = callable.Parameters
             .OrderBy(parameter => parameter.Ordinal)
             .ToArray();
-        bool hasOutputs = callableParameters.Any(parameter => parameter.RefKind is "ref" or "out");
+        bool hasOutputs = returnPlan is not null
+            || callableParameters.Any(parameter => parameter.RefKind is "ref" or "out");
         List<GuestRegister> parameters = new();
         GuestRegister? transactionToken = null;
         if (hasOutputs)
@@ -285,13 +309,41 @@ internal static class CSharpDelegateEventLowerer
             }
         }
 
+        GuestRegister? returnValue = null;
+        if (returnPlan is not null)
+        {
+            returnValue = new GuestRegister(
+                CSharpGuestIds.DelegateEventOutputValue(
+                    callback.SubscriptionId,
+                    aggregateOrdinal++),
+                returnPlan.Type.Id);
+            locals.Add(returnValue);
+        }
+
         instructions.Add(new GuestInstruction(
             "call",
-            null,
+            returnValue?.Id,
             arguments,
             CSharpGuestIds.Function(callable.MethodSymbolId),
             null,
             null));
+        if (returnValue is not null)
+        {
+            GuestRegister returnAddress = new(
+                CSharpGuestIds.DelegateEventOutputAddress(
+                    callback.SubscriptionId,
+                    outputOrdinal),
+                CSharpGuestIds.AddressTypeId);
+            locals.Add(returnAddress);
+            instructions.Add(new GuestInstruction(
+                "address_of",
+                returnAddress.Id,
+                Array.Empty<string>(),
+                returnValue.Id,
+                null,
+                null));
+            outputAddresses.Add((outputOrdinal++, returnAddress));
+        }
         foreach ((int ordinal, GuestRegister address) in outputAddresses)
         {
             GuestRegister ordinalValue = new(

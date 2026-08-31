@@ -565,23 +565,23 @@ bool FAvidScriptPreparedDelegateCodecTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
-	TestEqual(TEXT("Recursive payload fills eight cells"), Events[0].ParameterCellCount, 8u);
-	TestEqual(TEXT("Wide payload fills four cells"), Events[1].ParameterCellCount, 4u);
-	TestEqual(TEXT("Ref/out payload prepends one transaction cell"), Events[2].ParameterCellCount, 2u);
-	TestEqual(TEXT("Ref/out payload exposes two output ordinals"), Events[2].OutputParameterCount, 2u);
-	TestNotNull(TEXT("Delegate property is resolved at load"), Events[0].DelegateProperty);
-	TestNotNull(TEXT("Delegate signature is resolved at load"), Events[0].SignatureFunction);
-	TestNotNull(TEXT("Delegate codec is immutable and published"), Events[0].ImmutableCodecIdentity);
-	TestNotNull(TEXT("Delegate encode thunk is published"), Events[0].Encode);
+	TestEqual(TEXT("Recursive payload fills eight cells"), Events[0].Signature.ParameterCellCount, 8u);
+	TestEqual(TEXT("Wide payload fills four cells"), Events[1].Signature.ParameterCellCount, 4u);
+	TestEqual(TEXT("Ref/out payload prepends one transaction cell"), Events[2].Signature.ParameterCellCount, 2u);
+	TestEqual(TEXT("Ref/out payload exposes two output ordinals"), Events[2].Signature.OutputValueCount, 2u);
+	TestNotNull(TEXT("Delegate property is resolved at load"), Events[0].Signature.MulticastProperty);
+	TestNotNull(TEXT("Delegate signature is resolved at load"), Events[0].Signature.SignatureFunction);
+	TestNotNull(TEXT("Delegate codec is immutable and published"), Events[0].Signature.ImmutableCodecIdentity);
+	TestNotNull(TEXT("Delegate encode thunk is published"), Events[0].Signature.Encode);
 
 	FAvidScriptObjectRegistry Registry;
 	FAvidScriptBindingInvocationContext Context;
 	Context.ObjectRegistry = &Registry;
 	UObject* Target = NewObject<UAvidScriptBindingsTestObject>();
-	FStructOnScope NativeParameters(Events[0].SignatureFunction);
+	FStructOnScope NativeParameters(Events[0].Signature.SignatureFunction);
 	void* NativeFrame = NativeParameters.GetStructMemory();
 	SetPreparedDelegateObject(
-		*Events[0].SignatureFunction,
+		*Events[0].Signature.SignatureFunction,
 		NativeFrame,
 		TEXT("Target"),
 		Target);
@@ -591,12 +591,12 @@ bool FAvidScriptPreparedDelegateCodecTest::RunTest(const FString& Parameters)
 	Payload.Nested.Count = -17;
 	Payload.Nested.Ratio = 3.25f;
 	*FindPreparedDelegatePropertyChecked<FStructProperty>(
-		Events[0].SignatureFunction,
+		Events[0].Signature.SignatureFunction,
 		TEXT("Payload"))->ContainerPtrToValuePtr<FAvidScriptBindingsDelegatePayload>(
 		NativeFrame) = Payload;
 	const int64 Sequence = -0x102030405060708LL;
 	FindPreparedDelegatePropertyChecked<FInt64Property>(
-		Events[0].SignatureFunction,
+		Events[0].Signature.SignatureFunction,
 		TEXT("Sequence"))->SetPropertyValue_InContainer(NativeFrame, Sequence);
 
 	FAvidScriptVmCallFrame Frame;
@@ -605,8 +605,8 @@ bool FAvidScriptPreparedDelegateCodecTest::RunTest(const FString& Parameters)
 	FString ErrorDetails;
 	if (!TestTrue(
 			TEXT("Prepared delegate frame encodes"),
-			Events[0].Encode(
-				Events[0].ImmutableCodecIdentity,
+			Events[0].Signature.Encode(
+				Events[0].Signature.ImmutableCodecIdentity,
 				NativeFrame,
 				Context,
 				0,
@@ -648,20 +648,20 @@ bool FAvidScriptPreparedDelegateCodecTest::RunTest(const FString& Parameters)
 	}
 	TestEqual(TEXT("Delegate leases leave no live registry slot"), Registry.GetLiveHandleCount(), 0);
 
-	FStructOnScope WideParameters(Events[1].SignatureFunction);
+	FStructOnScope WideParameters(Events[1].Signature.SignatureFunction);
 	void* WideFrame = WideParameters.GetStructMemory();
 	const double Precision = -1234.5;
 	const int64 Token = 0x7edcba9876543210LL;
 	FindPreparedDelegatePropertyChecked<FDoubleProperty>(
-		Events[1].SignatureFunction,
+		Events[1].Signature.SignatureFunction,
 		TEXT("Precision"))->SetPropertyValue_InContainer(WideFrame, Precision);
 	FindPreparedDelegatePropertyChecked<FInt64Property>(
-		Events[1].SignatureFunction,
+		Events[1].Signature.SignatureFunction,
 		TEXT("Token"))->SetPropertyValue_InContainer(WideFrame, Token);
 	if (!TestTrue(
 			TEXT("Prepared f64/i64 frame encodes"),
-			Events[1].Encode(
-				Events[1].ImmutableCodecIdentity,
+			Events[1].Signature.Encode(
+				Events[1].Signature.ImmutableCodecIdentity,
 				WideFrame,
 				Context,
 				0,
@@ -689,15 +689,15 @@ bool FAvidScriptPreparedDelegateCodecTest::RunTest(const FString& Parameters)
 		TEXT("Plain non-const reference remains an out contract"),
 		Model.DelegateEvents[2].Parameters[1].Direction,
 		FString(TEXT("out")));
-	FStructOnScope OutputParameters(Events[2].SignatureFunction);
+	FStructOnScope OutputParameters(Events[2].Signature.SignatureFunction);
 	void* OutputFrame = OutputParameters.GetStructMemory();
 	FIntProperty* const ValueProperty =
 		FindPreparedDelegatePropertyChecked<FIntProperty>(
-			Events[2].SignatureFunction,
+			Events[2].Signature.SignatureFunction,
 			TEXT("Value"));
 	FIntProperty* const ResultProperty =
 		FindPreparedDelegatePropertyChecked<FIntProperty>(
-			Events[2].SignatureFunction,
+			Events[2].Signature.SignatureFunction,
 			TEXT("Result"));
 	ValueProperty->SetPropertyValue_InContainer(OutputFrame, 41);
 	ResultProperty->SetPropertyValue_InContainer(OutputFrame, -7);
@@ -717,8 +717,8 @@ bool FAvidScriptPreparedDelegateCodecTest::RunTest(const FString& Parameters)
 	constexpr uint32 OutputTransactionToken = 0x80000001u;
 	if (!TestTrue(
 			TEXT("Prepared ref/out frame encodes"),
-			Events[2].Encode(
-				Events[2].ImmutableCodecIdentity,
+			Events[2].Signature.Encode(
+				Events[2].Signature.ImmutableCodecIdentity,
 				OutputFrame,
 				Context,
 				OutputTransactionToken,
@@ -775,7 +775,7 @@ bool FAvidScriptPreparedDelegateCodecTest::RunTest(const FString& Parameters)
 		ResultProperty->GetPropertyValue_InContainer(OutputFrame),
 		202);
 
-	FStructOnScope IncompleteParameters(Events[2].SignatureFunction);
+	FStructOnScope IncompleteParameters(Events[2].Signature.SignatureFunction);
 	void* IncompleteFrame = IncompleteParameters.GetStructMemory();
 	ValueProperty->SetPropertyValue_InContainer(IncompleteFrame, 5);
 	ResultProperty->SetPropertyValue_InContainer(IncompleteFrame, 6);

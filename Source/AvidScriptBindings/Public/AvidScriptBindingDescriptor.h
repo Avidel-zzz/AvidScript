@@ -109,6 +109,7 @@ struct FAvidScriptBindingDelegateEventModel
 	FAvidScriptBindingNetworkContract Network;
 	FName RepNotifyProperty;
 	FString ExportName;
+	FAvidScriptBindingValueModel ReturnValue;
 	TArray<FAvidScriptBindingValueModel> Parameters;
 };
 
@@ -249,7 +250,8 @@ public:
 		const FAvidScriptBindingNetworkContract& Network =
 			FAvidScriptBindingNetworkContract(),
 		const FName RepNotifyProperty = NAME_None,
-		const FString& HandlerMode = FString());
+		const FString& HandlerMode = FString(),
+		const FAvidScriptBindingValueModel* ReturnValue = nullptr);
 
 	static FString MakeDelegateEventStableId(
 		const FString& OwnerClass,
@@ -260,7 +262,8 @@ public:
 		const FAvidScriptBindingNetworkContract& Network =
 			FAvidScriptBindingNetworkContract(),
 		const FName RepNotifyProperty = NAME_None,
-		const FString& HandlerMode = FString());
+		const FString& HandlerMode = FString(),
+		const FAvidScriptBindingValueModel* ReturnValue = nullptr);
 
 	static FString MakeSelectionHash(const FAvidScriptBindingPackageModel& Package);
 	static FString MakePackageHash(const FAvidScriptBindingPackageModel& Package);

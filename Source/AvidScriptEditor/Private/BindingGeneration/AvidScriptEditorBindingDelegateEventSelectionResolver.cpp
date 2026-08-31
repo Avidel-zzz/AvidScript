@@ -138,6 +138,7 @@ void AddIssue(
 	Issue.OwnerClassPath = Selection.OwnerClassPath;
 	Issue.DelegateEventName = Selection.EventName;
 	Issue.MemberKind = Selection.CallbackKind == TEXT("multicast")
+		|| Selection.CallbackKind == TEXT("singlecast")
 		? FString(TEXT("delegate_event"))
 		: FString(TEXT("function_handler"));
 	Issue.Category = Category;
@@ -165,7 +166,9 @@ bool ResolveOne(
 		Category = TEXT("class_missing");
 		Source = Selection.OwnerClassPath;
 	}
-	else if (Selection.CallbackKind != TEXT("multicast"))
+	else if (Selection.CallbackKind == TEXT("function_handler")
+		|| Selection.CallbackKind == TEXT("network_rpc")
+		|| Selection.CallbackKind == TEXT("rep_notify"))
 	{
 		FAvidScriptReflectedDelegateEventSelection ResolvedSelection;
 		if (TryResolveFunctionHandler(
@@ -189,7 +192,8 @@ bool ResolveOne(
 			}
 		}
 	}
-	else
+	else if (Selection.CallbackKind == TEXT("multicast")
+		|| Selection.CallbackKind == TEXT("singlecast"))
 	{
 		FProperty* const Property = FindFProperty<FProperty>(
 			OwnerClass,
@@ -204,12 +208,21 @@ bool ResolveOne(
 			Category = TEXT("delegate_event_owner_mismatch");
 			Source = Key;
 		}
-		else if (const FMulticastDelegateProperty* DelegateProperty =
-			CastField<FMulticastDelegateProperty>(Property))
+		else
 		{
+			const bool bPropertyKindMatches =
+				(Selection.CallbackKind == TEXT("multicast")
+					&& Property->IsA<FMulticastDelegateProperty>())
+				|| (Selection.CallbackKind == TEXT("singlecast")
+					&& Property->IsA<FDelegateProperty>());
 			FAvidScriptProjectedDelegateEvent Projection;
-			if (FAvidScriptEditorReflectedDelegateEventPolicy::EvaluateAndProject(
-					DelegateProperty,
+			if (!bPropertyKindMatches)
+			{
+				Category = TEXT("delegate_event_kind_mismatch");
+				Source = Key;
+			}
+			else if (FAvidScriptEditorReflectedDelegateEventPolicy::EvaluateAndProject(
+					Property,
 					Projection,
 					Category,
 					Source))
@@ -227,13 +240,11 @@ bool ResolveOne(
 				}
 			}
 		}
-		else
-		{
-			Category = Property->IsA<FDelegateProperty>()
-				? FString(TEXT("delegate_event_singlecast_unsupported"))
-				: FString(TEXT("delegate_event_property_required"));
-			Source = Key;
-		}
+	}
+	else
+	{
+		Category = TEXT("delegate_event_kind_unsupported");
+		Source = Key;
 	}
 
 	AddIssue(OutResult, bFatal, Selection, Category, Source);
@@ -244,8 +255,10 @@ bool ResolveOne(
 			Category,
 			Source,
 			Selection.CallbackKind == TEXT("function_handler")
+				|| Selection.CallbackKind == TEXT("network_rpc")
+				|| Selection.CallbackKind == TEXT("rep_notify")
 				? FString(TEXT("Select a declared native or Blueprint-bytecode Actor/ActorComponent RPC or RepNotify UFunction with a supported value-only signature and explicit chain mode."))
-				: FString(TEXT("Select a declared dynamic multicast delegate with supported value, const-ref, ref, or out parameters within the eight-cell ABI limit.")));
+				: FString(TEXT("Select a declared dynamic singlecast or multicast delegate with a supported return/value/const-ref/ref/out signature within the eight-cell ABI limit.")));
 		return false;
 	}
 	return true;

@@ -2,11 +2,12 @@
 
 #include "BindingGeneration/AvidScriptEditorReflectedTypePolicy.h"
 
-class FMulticastDelegateProperty;
+class FProperty;
 class UFunction;
 
 struct FAvidScriptProjectedDelegateEvent
 {
+	FAvidScriptProjectedBindingValue ReturnValue;
 	TArray<FAvidScriptProjectedBindingValue> Parameters;
 	int32 AbiCellCount = 0;
 };
@@ -17,7 +18,7 @@ public:
 	static constexpr int32 MaxAbiCells = 8;
 
 	static bool EvaluateAndProject(
-		const FMulticastDelegateProperty* DelegateProperty,
+		const FProperty* DelegateProperty,
 		FAvidScriptProjectedDelegateEvent& OutProjection,
 		FString& OutCategory,
 		FString& OutSource);

@@ -231,6 +231,26 @@ using FAvidScriptPreparedDelegateEncode =
 		FString& OutErrorCategory,
 		FString& OutErrorDetails);
 
+enum class EAvidScriptPreparedDelegateKind : uint8
+{
+	Multicast,
+	Singlecast,
+	FunctionHandler
+};
+
+struct FAvidScriptPreparedDelegateSignaturePlan
+{
+	EAvidScriptPreparedDelegateKind Kind =
+		EAvidScriptPreparedDelegateKind::Multicast;
+	FDelegateProperty* SinglecastProperty = nullptr;
+	FMulticastDelegateProperty* MulticastProperty = nullptr;
+	UFunction* SignatureFunction = nullptr;
+	uint32 ParameterCellCount = 0;
+	uint32 OutputValueCount = 0;
+	const void* ImmutableCodecIdentity = nullptr;
+	FAvidScriptPreparedDelegateEncode Encode = nullptr;
+};
+
 struct FAvidScriptPreparedDelegateEvent
 {
 	uint32 EventOrdinal = MAX_uint32;
@@ -239,14 +259,9 @@ struct FAvidScriptPreparedDelegateEvent
 	FString CallbackKind = TEXT("multicast");
 	FString HandlerMode = TEXT("replace");
 	UClass* ExpectedSourceClass = nullptr;
-	FMulticastDelegateProperty* DelegateProperty = nullptr;
-	UFunction* SignatureFunction = nullptr;
+	FAvidScriptPreparedDelegateSignaturePlan Signature;
 	FProperty* RepNotifyProperty = nullptr;
 	FAvidScriptBindingNetworkContract Network;
-	uint32 ParameterCellCount = 0;
-	uint32 OutputParameterCount = 0;
-	const void* ImmutableCodecIdentity = nullptr;
-	FAvidScriptPreparedDelegateEncode Encode = nullptr;
 };
 
 class AVIDSCRIPTBINDINGS_API FAvidScriptPreparedDelegateOutputTransaction

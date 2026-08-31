@@ -16,10 +16,13 @@
 - `P60.A2` 完成脚本 UFUNCTION 默认参数：C# 可选参数被冻结进 semantic schema `20/1.22`，
   generator manifest `6/1.8` 发布真实 `CPP_Default_*`，并由生成式 Automation 从 `UFunction`
   回读验证；详见 [P60.A2](P60.A2_Script_UFunction_Defaults.md)。
+- `P60.B1` 完成 Delegate 共享 prepared signature、schema 20 返回值、singlecast Session lease 和
+  C# `return/ref/out` 输出事务；旧 schema 保持兼容，外部覆盖不会被 teardown 误恢复；详见
+  [P60.B1](P60.B1_Delegate_Signature_And_Singlecast_Lease.md)。
 
 ## 待完成
 
-- `P60.B` 完整 Delegate；
+- `P60.B` 主动 `Execute/Broadcast`、语法 facade 与性能收口；
 - `P60.C` Blueprint 函数与通用异步；
 - `P60.D` 集成、性能与集中 Gate。
 

@@ -2095,6 +2095,11 @@ bool ResolveDelegateEventContractType(
 		OutType = TEXT("global::System.") + *SystemType;
 		return true;
 	}
+	if (CSharpType == TEXT("void"))
+	{
+		OutType = TEXT("global::System.Void");
+		return true;
+	}
 	if (CSharpType.IsEmpty()
 		|| CSharpType.Contains(TEXT("["))
 		|| CSharpType.Contains(TEXT(".")))
@@ -2144,11 +2149,21 @@ bool AppendDelegateEventReferenceSurface(
 		TEXT("        SubscriptionId = subscriptionId;"),
 		TEXT("        ParameterTypes = parameterTypes;"),
 		TEXT("        ParameterDirections = parameterDirections;"),
+		TEXT("        ReturnType = \"global::System.Void\";"),
+		TEXT("    }"),
+		TEXT(""),
+		TEXT("    internal AvidEventContractAttribute(string subscriptionId, string parameterTypes, string parameterDirections, string returnType)"),
+		TEXT("    {"),
+		TEXT("        SubscriptionId = subscriptionId;"),
+		TEXT("        ParameterTypes = parameterTypes;"),
+		TEXT("        ParameterDirections = parameterDirections;"),
+		TEXT("        ReturnType = returnType;"),
 		TEXT("    }"),
 		TEXT(""),
 		TEXT("    internal string SubscriptionId { get; }"),
 		TEXT("    internal string ParameterTypes { get; }"),
 		TEXT("    internal string ParameterDirections { get; }"),
+		TEXT("    internal string ReturnType { get; }"),
 		TEXT("}"),
 		TEXT(""),
 		TEXT("public readonly struct AvidSubscription"),
@@ -2180,6 +2195,17 @@ bool AppendDelegateEventReferenceSurface(
 		}
 		TArray<FString> ParameterTypes;
 		TArray<FString> ParameterDirections;
+		FString ReturnType;
+		if (!ResolveDelegateEventContractType(
+				Event.ReturnValue,
+				TypesByCanonical,
+				TypesById,
+				ReturnType,
+				OutErrorSource))
+		{
+			OutErrorCategory = TEXT("delegate_event_return_unsupported");
+			return false;
+		}
 		for (const FAvidScriptBindingValueModel& Parameter : Event.Parameters)
 		{
 			FString ParameterType;
@@ -2211,11 +2237,18 @@ bool AppendDelegateEventReferenceSurface(
 				return false;
 			}
 		}
-		Lines.Add(FString::Printf(
-			TEXT("    [AvidEventContract(\"%s\", \"%s\", \"%s\")]"),
-			*EscapeCSharpString(Event.StableId),
-			*EscapeCSharpString(FString::Join(ParameterTypes, TEXT(";"))),
-			*EscapeCSharpString(FString::Join(ParameterDirections, TEXT(";")))));
+		Lines.Add(Package.SchemaVersion >= 20
+			? FString::Printf(
+				TEXT("    [AvidEventContract(\"%s\", \"%s\", \"%s\", \"%s\")]"),
+				*EscapeCSharpString(Event.StableId),
+				*EscapeCSharpString(FString::Join(ParameterTypes, TEXT(";"))),
+				*EscapeCSharpString(FString::Join(ParameterDirections, TEXT(";"))),
+				*EscapeCSharpString(ReturnType))
+			: FString::Printf(
+				TEXT("    [AvidEventContract(\"%s\", \"%s\", \"%s\")]"),
+				*EscapeCSharpString(Event.StableId),
+				*EscapeCSharpString(FString::Join(ParameterTypes, TEXT(";"))),
+				*EscapeCSharpString(FString::Join(ParameterDirections, TEXT(";")))));
 		Lines.Add(FString::Printf(
 			TEXT("    public const string %s = \"%s\";"),
 			*FAvidScriptEditorCSharpSyntax::MakeIdentifier(Event.ScriptName),
@@ -2230,7 +2263,8 @@ bool AppendDelegateEventReferenceSurface(
 	for (const FAvidScriptBindingDelegateEventModel& Event :
 		Package.DelegateEvents)
 	{
-		if (Event.DelegateKind != TEXT("multicast"))
+		if (Event.DelegateKind != TEXT("multicast")
+			&& Event.DelegateKind != TEXT("singlecast"))
 		{
 			continue;
 		}
@@ -2238,13 +2272,25 @@ bool AppendDelegateEventReferenceSurface(
 			TypesByCanonical,
 			TEXT("object:") + Event.OwnerClass);
 		check(OwnerType != nullptr);
+		const FString MethodPrefix = Event.DelegateKind == TEXT("singlecast")
+			? FString(TEXT("Bind"))
+			: FString(TEXT("Subscribe"));
 		Lines.Add(FString::Printf(
-			TEXT("    public static AvidSubscription %s(%s source)"),
+			TEXT("    public static AvidSubscription %s%s(%s source)"),
+			*MethodPrefix,
 			*FAvidScriptEditorCSharpSyntax::MakeIdentifier(Event.ScriptName),
 			*FAvidScriptEditorCSharpSyntax::MakeIdentifier(OwnerType->CppType)));
 		Lines.Add(FString::Printf(
 			TEXT("        => new(AvidScriptRuntimeNative.EventSubscribe(source.AvidScriptSlot, source.AvidScriptGeneration, %d));"),
 			Event.Ordinal));
+		if (Event.DelegateKind == TEXT("multicast"))
+		{
+			Lines.Add(FString::Printf(
+				TEXT("    public static AvidSubscription %s(%s source) => Subscribe%s(source);"),
+				*FAvidScriptEditorCSharpSyntax::MakeIdentifier(Event.ScriptName),
+				*FAvidScriptEditorCSharpSyntax::MakeIdentifier(OwnerType->CppType),
+				*FAvidScriptEditorCSharpSyntax::MakeIdentifier(Event.ScriptName)));
+		}
 	}
 	Lines.Append({ TEXT("}"), TEXT("") });
 	return true;
@@ -3782,9 +3828,10 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitManifest(
 			for (const FAvidScriptBindingDelegateEventModel& Event :
 				Package.DelegateEvents)
 			{
-				InboundHandlerCount += Event.DelegateKind == TEXT("multicast")
-					? 0
-					: 1;
+				InboundHandlerCount += Event.DelegateKind == TEXT("network_rpc")
+					|| Event.DelegateKind == TEXT("rep_notify")
+					? 1
+					: 0;
 			}
 			Writer->WriteValue(
 				TEXT("inbound_handler_count"),

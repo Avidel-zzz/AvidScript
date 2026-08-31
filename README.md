@@ -33,7 +33,7 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 | UE 类型 | UObject capability、`FVector`、`FRotator`、`FTransform`、固定 `USTRUCT`、`FName`、`FString`、一维 `TArray<T>` |
 | C# 定义 UE 类型 | Actor、Component、World/GameInstance Subsystem、继承、override、`UPROPERTY`、`UFUNCTION` 与默认参数 |
 | 异步 | `Delay`、`NextTick`、异步对象加载、Reflection 生成的 latent `FooAsync`、受控 `async/await` |
-| 委托 | Profile 授权的动态多播委托订阅、强类型回调、显式取消与 Session 自动解绑 |
+| 委托 | Profile 授权的动态单播租约与多播订阅、强类型 `return/ref/out` 回调、显式取消与 Session 自动解绑 |
 | 网络 | Server/Client/NetMulticast RPC、replicated property、RPC/RepNotify handler、dedicated/listen 多进程闭环 |
 | 热重载 | 方法体事务式替换、候选回滚、状态帧与 handle 生命周期隔离 |
 | 发布 | 内容寻址 Generated Type bundle、NonUFS staging 与 Cook-layout Runtime load |
@@ -42,7 +42,9 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 Phase 60 最新完成了两项互操作能力：
 
 - UE Interface 的函数、参数、返回值和属性可进入生成式 C# + Runtime，支持原生与 Blueprint-only 实现；
-- C# 脚本 `UFUNCTION` 的 bool、整数、有限浮点、命名 enum 与 string 默认值会发布为真实 `CPP_Default_*` 元数据。
+- C# 脚本 `UFUNCTION` 的 bool、整数、有限浮点、命名 enum 与 string 默认值会发布为真实 `CPP_Default_*` 元数据；
+- Delegate 已共享一套 prepared signature，支持 singlecast Session lease、旧值安全恢复和
+  `return/ref/out` 原子输出事务。
 
 详细进度见 [Phase 60 中文收尾记录](Docs/Phase60/P60_Closeout.md)。
 
@@ -199,7 +201,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 ## 当前边界
 
 - 生成范围由 Binding Profile 与现有 ABI/codec 决定，还不是完整 UE 类型系统；
-- 单播委托、C# `event +=`、lambda/closure 和完整多播调用正在 Phase 60 实现；
+- 主动 `Execute/Broadcast`、C# `event +=`、lambda/closure 正在 Phase 60 实现；
 - 容器当前聚焦一维 `TArray<T>`；nested array、`TSet`、`TMap` 与 `FText` 尚未完整支持；
 - C# 前端提供受控游戏脚本子集，不包含完整 .NET Runtime、任意 awaiter 或异常系统；
 - 反射结构变化仍需 no-clean UBT 并重启 Editor，方法体变化可自动热重载；

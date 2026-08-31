@@ -351,14 +351,13 @@ internal static class CSharpSemanticInputValidator
                 && callable.IsStatic
                 && !callable.IsConstructor
                 && callable.Import is null
-                && string.Equals(callable.ReturnTypeId, "type:void", StringComparison.Ordinal)
                 && callable.Parameters.All(parameter => parameter.RefKind is "none" or "ref" or "out")
                 && symbolsById.TryGetValue(callback.MethodSymbolId, out SemanticSymbol? symbol)
                 && string.Equals(symbol.Kind, "method", StringComparison.Ordinal)
                 && string.Equals(symbol.Name, callback.Name, StringComparison.Ordinal)
                 && symbol.IsStatic
                 && string.Equals(symbol.Accessibility, "public", StringComparison.Ordinal)
-                && string.Equals(symbol.TypeId, "type:void", StringComparison.Ordinal)
+                && string.Equals(symbol.TypeId, callable.ReturnTypeId, StringComparison.Ordinal)
                 && string.Equals(
                     symbol.ContainingSymbolId,
                     "symbol:" + callable.ContainingTypeId,

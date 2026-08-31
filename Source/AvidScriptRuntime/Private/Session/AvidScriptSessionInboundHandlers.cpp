@@ -47,14 +47,18 @@ bool IsPreparedHandlerValid(
 	return bKindValid
 		&& Handler.EventOrdinal < static_cast<uint32>(MAX_int32)
 		&& Handler.ExpectedSourceClass != nullptr
-		&& Handler.DelegateProperty == nullptr
-		&& Handler.SignatureFunction != nullptr
-		&& Handler.ImmutableCodecIdentity != nullptr
-		&& Handler.Encode != nullptr
+		&& Handler.Signature.Kind
+			== EAvidScriptPreparedDelegateKind::FunctionHandler
+		&& Handler.Signature.SinglecastProperty == nullptr
+		&& Handler.Signature.MulticastProperty == nullptr
+		&& Handler.Signature.SignatureFunction != nullptr
+		&& Handler.Signature.ImmutableCodecIdentity != nullptr
+		&& Handler.Signature.Encode != nullptr
 		&& (Handler.HandlerMode == TEXT("replace")
 			|| Handler.HandlerMode == TEXT("before")
 			|| Handler.HandlerMode == TEXT("after"))
-		&& Handler.ParameterCellCount <= FAvidScriptVmCallFrame::MaxCells;
+		&& Handler.Signature.ParameterCellCount
+			<= FAvidScriptVmCallFrame::MaxCells;
 }
 
 struct FAvidScriptDeferredInboundHandler
@@ -133,7 +137,7 @@ bool FAvidScriptSessionInboundHandlers::Prepare(
 		Impl->Prepared.Add(Handler.EventOrdinal, Handler);
 		Impl->PreparedRoutes.Add({
 			Source,
-			Handler.SignatureFunction,
+			Handler.Signature.SignatureFunction,
 			Handler.EventOrdinal,
 			ChainMode
 		});
@@ -220,7 +224,8 @@ FAvidScriptSessionInboundHandlers::HandleAvidScriptInboundFunction(
 	}
 	const FAvidScriptPreparedDelegateEvent* const Handler =
 		Impl->Active.Find(HandlerOrdinal);
-	if (Handler == nullptr || Handler->SignatureFunction != &Function)
+	if (Handler == nullptr
+		|| Handler->Signature.SignatureFunction != &Function)
 	{
 		return EAvidScriptInboundFunctionDispatch::Unavailable;
 	}
@@ -335,7 +340,7 @@ bool FAvidScriptSessionInboundHandlers::PumpDeferred(
 		if (!IsValid(Source)
 			|| !IsValid(Function)
 			|| Handler == nullptr
-			|| Handler->SignatureFunction != Function
+			|| Handler->Signature.SignatureFunction != Function
 			|| !Deferred.Parameters.IsValid()
 			|| !Deferred.Parameters->IsValid())
 		{

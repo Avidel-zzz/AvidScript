@@ -258,6 +258,12 @@ bool FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 					Event.RepNotifyProperty.ToString());
 			}
 			Writer->WriteValue(TEXT("export_name"), Event.ExportName);
+			if (Package.SchemaVersion >= 20)
+			{
+				Writer->WriteObjectStart(TEXT("return"));
+				WriteDescriptorModelBindingValue(Writer, Event.ReturnValue);
+				Writer->WriteObjectEnd();
+			}
 			Writer->WriteArrayStart(TEXT("parameters"));
 			for (const FAvidScriptBindingValueModel& Parameter :
 				Event.Parameters)

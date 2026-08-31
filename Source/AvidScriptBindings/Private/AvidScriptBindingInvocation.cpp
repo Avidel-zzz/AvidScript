@@ -1679,9 +1679,11 @@ bool BuildAvidScriptRuntimeValuePlan(
 struct FAvidScriptPreparedDelegateCodec
 {
 	FString StableId;
+	FAvidScriptRuntimeBindingValuePlan ReturnValue;
 	TArray<FAvidScriptRuntimeBindingValuePlan> Parameters;
 	TArray<int32> OutputParameterIndices;
 	uint32 ParameterCellCount = 0;
+	bool bHasReturnValue = false;
 };
 
 struct FAvidScriptPreparedDelegateEventCell
@@ -1692,7 +1694,10 @@ struct FAvidScriptPreparedDelegateEventCell
 	FString CallbackKind = TEXT("multicast");
 	FString HandlerMode = TEXT("replace");
 	UClass* ExpectedSourceClass = nullptr;
-	FMulticastDelegateProperty* DelegateProperty = nullptr;
+	EAvidScriptPreparedDelegateKind Kind =
+		EAvidScriptPreparedDelegateKind::Multicast;
+	FDelegateProperty* SinglecastProperty = nullptr;
+	FMulticastDelegateProperty* MulticastProperty = nullptr;
 	UFunction* SignatureFunction = nullptr;
 	FProperty* RepNotifyProperty = nullptr;
 	FAvidScriptBindingNetworkContract Network;
@@ -1705,7 +1710,8 @@ bool IsAvidScriptPreparedDelegateValueSupported(
 	if (Plan.Direction != EAvidScriptRuntimeBindingDirection::Value
 		&& Plan.Direction != EAvidScriptRuntimeBindingDirection::ConstRef
 		&& Plan.Direction != EAvidScriptRuntimeBindingDirection::Ref
-		&& Plan.Direction != EAvidScriptRuntimeBindingDirection::Out)
+		&& Plan.Direction != EAvidScriptRuntimeBindingDirection::Out
+		&& Plan.Direction != EAvidScriptRuntimeBindingDirection::Return)
 	{
 		return false;
 	}
@@ -3426,19 +3432,29 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		}
 
 		++Package->Impl->Instrumentation.ReflectedNameLookupCount;
-		FMulticastDelegateProperty* DelegateProperty = nullptr;
+		FDelegateProperty* SinglecastProperty = nullptr;
+		FMulticastDelegateProperty* MulticastProperty = nullptr;
 		UFunction* SignatureFunction = nullptr;
 		FProperty* RepNotifyProperty = nullptr;
 		FAvidScriptBindingNetworkContract Network;
 		bool bNetworkContractValid = true;
 		if (Event.DelegateKind == TEXT("multicast"))
 		{
-			DelegateProperty = FindFProperty<FMulticastDelegateProperty>(
+			MulticastProperty = FindFProperty<FMulticastDelegateProperty>(
 				OwnerClass,
 				FName(*Event.UeMember));
-			SignatureFunction = DelegateProperty == nullptr
+			SignatureFunction = MulticastProperty == nullptr
 				? nullptr
-				: DelegateProperty->SignatureFunction;
+				: MulticastProperty->SignatureFunction;
+		}
+		else if (Event.DelegateKind == TEXT("singlecast"))
+		{
+			SinglecastProperty = FindFProperty<FDelegateProperty>(
+				OwnerClass,
+				FName(*Event.UeMember));
+			SignatureFunction = SinglecastProperty == nullptr
+				? nullptr
+				: SinglecastProperty->SignatureFunction;
 		}
 		else
 		{
@@ -3460,12 +3476,18 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			}
 		}
 		const bool bMulticastValid = Event.DelegateKind == TEXT("multicast")
-			&& DelegateProperty != nullptr
-			&& DelegateProperty->GetOwnerStruct() == OwnerClass
-			&& DelegateProperty->HasAnyPropertyFlags(CPF_BlueprintAssignable)
+			&& MulticastProperty != nullptr
+			&& MulticastProperty->GetOwnerStruct() == OwnerClass
+			&& MulticastProperty->HasAnyPropertyFlags(CPF_BlueprintAssignable)
 			&& SignatureFunction != nullptr
 			&& SignatureFunction->HasAllFunctionFlags(
 				FUNC_Delegate | FUNC_MulticastDelegate);
+		const bool bSinglecastValid = Event.DelegateKind == TEXT("singlecast")
+			&& SinglecastProperty != nullptr
+			&& SinglecastProperty->GetOwnerStruct() == OwnerClass
+			&& SignatureFunction != nullptr
+			&& SignatureFunction->HasAnyFunctionFlags(FUNC_Delegate)
+			&& !SignatureFunction->HasAnyFunctionFlags(FUNC_MulticastDelegate);
 		const bool bNetworkRpcValid = Event.DelegateKind == TEXT("network_rpc")
 			&& SignatureFunction != nullptr
 			&& SignatureFunction->GetOuterUClass() == OwnerClass
@@ -3494,16 +3516,20 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			&& RepNotifyProperty->HasAnyPropertyFlags(CPF_RepNotify)
 			&& RepNotifyProperty->RepNotifyFunc
 				== SignatureFunction->GetFName();
-		if (!bMulticastValid && !bNetworkRpcValid && !bRepNotifyValid)
+		if (!bMulticastValid
+			&& !bSinglecastValid
+			&& !bNetworkRpcValid
+			&& !bRepNotifyValid)
 		{
 			SetAvidScriptBindingLoadFailure(
 				OutResult,
 				TEXT("binding_callback_member_missing"),
 				Event.OwnerClass + TEXT(".") + Event.UeMember,
-				TEXT("The reflected callback member no longer satisfies its multicast, RPC, or RepNotify contract."));
+				TEXT("The reflected callback member no longer satisfies its singlecast, multicast, RPC, or RepNotify contract."));
 			return false;
 		}
-		if (SignatureFunction->GetReturnProperty() != nullptr)
+		if (Model.SchemaVersion < 20
+			&& SignatureFunction->GetReturnProperty() != nullptr)
 		{
 			SetAvidScriptBindingLoadFailure(
 				OutResult,
@@ -3541,11 +3567,59 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		Cell->CallbackKind = Event.DelegateKind;
 		Cell->HandlerMode = Event.HandlerMode;
 		Cell->ExpectedSourceClass = OwnerClass;
-		Cell->DelegateProperty = DelegateProperty;
+		Cell->Kind = Event.DelegateKind == TEXT("singlecast")
+			? EAvidScriptPreparedDelegateKind::Singlecast
+			: Event.DelegateKind == TEXT("multicast")
+				? EAvidScriptPreparedDelegateKind::Multicast
+				: EAvidScriptPreparedDelegateKind::FunctionHandler;
+		Cell->SinglecastProperty = SinglecastProperty;
+		Cell->MulticastProperty = MulticastProperty;
 		Cell->SignatureFunction = SignatureFunction;
 		Cell->RepNotifyProperty = RepNotifyProperty;
 		Cell->Network = Network;
 		Cell->Codec.StableId = Event.StableId;
+		FProperty* const ReflectedReturn = SignatureFunction->GetReturnProperty();
+		const bool bDescriptorHasReturn =
+			Event.ReturnValue.Kind != TEXT("void");
+		if (Model.SchemaVersion >= 20
+			&& ((ReflectedReturn != nullptr) != bDescriptorHasReturn))
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_delegate_return_contract_mismatch"),
+				Event.CanonicalIdentity,
+				TEXT("The reflected delegate return presence changed since descriptor generation."));
+			return false;
+		}
+		if (ReflectedReturn != nullptr)
+		{
+			FString ReturnDetails;
+			if (GetAvidScriptRuntimePropertyDirection(ReflectedReturn)
+					!= Event.ReturnValue.Direction
+				|| !BuildAvidScriptRuntimeValuePlan(
+					ReflectedReturn,
+					Event.ReturnValue,
+					DeclaredTypesById,
+					0,
+					Cell->Codec.ReturnValue,
+					ReturnDetails)
+				|| !IsAvidScriptPreparedDelegateValueSupported(
+					Cell->Codec.ReturnValue)
+				|| Cell->Codec.ReturnValue.Direction
+					!= EAvidScriptRuntimeBindingDirection::Return)
+			{
+				SetAvidScriptBindingLoadFailure(
+					OutResult,
+					TEXT("binding_delegate_return_contract_mismatch"),
+					Event.CanonicalIdentity,
+					ReturnDetails.IsEmpty()
+						? TEXT("The reflected delegate return no longer satisfies its fixed-width prepared value contract.")
+						: ReturnDetails);
+				return false;
+			}
+			Cell->Codec.bHasReturnValue = true;
+			++Cell->Codec.ParameterCellCount;
+		}
 		Cell->Codec.Parameters.Reserve(Event.Parameters.Num());
 		for (int32 Index = 0; Index < Event.Parameters.Num(); ++Index)
 		{
@@ -3592,7 +3666,9 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			const bool bOutput = ValuePlan.Direction
 				== EAvidScriptRuntimeBindingDirection::Ref
 				|| ValuePlan.Direction == EAvidScriptRuntimeBindingDirection::Out;
-			if (bOutput && Cell->Codec.OutputParameterIndices.IsEmpty())
+			if (bOutput
+				&& !Cell->Codec.bHasReturnValue
+				&& Cell->Codec.OutputParameterIndices.IsEmpty())
 			{
 				++Cell->Codec.ParameterCellCount;
 			}
@@ -3631,7 +3707,10 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 					: RepNotifyProperty->GetFName(),
 				Model.SchemaVersion >= 18
 					? Event.HandlerMode
-					: FString());
+					: FString(),
+				Model.SchemaVersion >= 20
+					? &Event.ReturnValue
+					: nullptr);
 		if (Event.CanonicalIdentity != ExpectedIdentity
 			|| Event.StableId != FAvidScriptHash::Sha256HexUtf8(ExpectedIdentity))
 		{
@@ -4596,7 +4675,9 @@ int32 FAvidScriptBindingPackage::GetInboundHandlerCount() const
 		Impl->PreparedDelegateEventCells)
 	{
 		Count += Cell.IsValid()
-			&& Cell->CallbackKind != TEXT("multicast") ? 1 : 0;
+			&& Cell->Kind == EAvidScriptPreparedDelegateKind::FunctionHandler
+			? 1
+			: 0;
 	}
 	return Count;
 }
@@ -4934,7 +5015,8 @@ bool FAvidScriptBindingPackage::BuildPreparedDelegateEvents(
 	for (const TUniquePtr<FAvidScriptPreparedDelegateEventCell>& Cell :
 		Impl->PreparedDelegateEventCells)
 	{
-		if (Cell.IsValid() && Cell->CallbackKind != TEXT("multicast"))
+		if (Cell.IsValid()
+			&& Cell->Kind == EAvidScriptPreparedDelegateKind::FunctionHandler)
 		{
 			continue;
 		}
@@ -4943,7 +5025,9 @@ bool FAvidScriptBindingPackage::BuildPreparedDelegateEvents(
 			|| Cell->StableId.IsEmpty()
 			|| Cell->ExportName.IsEmpty()
 			|| Cell->ExpectedSourceClass == nullptr
-			|| Cell->DelegateProperty == nullptr
+			|| (Cell->Kind == EAvidScriptPreparedDelegateKind::Singlecast
+				? Cell->SinglecastProperty == nullptr
+				: Cell->MulticastProperty == nullptr)
 			|| Cell->SignatureFunction == nullptr
 			|| Cell->Codec.ParameterCellCount > FAvidScriptVmCallFrame::MaxCells)
 		{
@@ -4959,14 +5043,18 @@ bool FAvidScriptBindingPackage::BuildPreparedDelegateEvents(
 		Event.CallbackKind = Cell->CallbackKind;
 		Event.HandlerMode = Cell->HandlerMode;
 		Event.ExpectedSourceClass = Cell->ExpectedSourceClass;
-		Event.DelegateProperty = Cell->DelegateProperty;
-		Event.SignatureFunction = Cell->SignatureFunction;
+		Event.Signature.Kind = Cell->Kind;
+		Event.Signature.SinglecastProperty = Cell->SinglecastProperty;
+		Event.Signature.MulticastProperty = Cell->MulticastProperty;
+		Event.Signature.SignatureFunction = Cell->SignatureFunction;
 		Event.RepNotifyProperty = Cell->RepNotifyProperty;
 		Event.Network = Cell->Network;
-		Event.ParameterCellCount = Cell->Codec.ParameterCellCount;
-		Event.OutputParameterCount = Cell->Codec.OutputParameterIndices.Num();
-		Event.ImmutableCodecIdentity = &Cell->Codec;
-		Event.Encode = &EncodeAvidScriptPreparedDelegateEvent;
+		Event.Signature.ParameterCellCount = Cell->Codec.ParameterCellCount;
+		Event.Signature.OutputValueCount =
+			Cell->Codec.OutputParameterIndices.Num()
+			+ (Cell->Codec.bHasReturnValue ? 1 : 0);
+		Event.Signature.ImmutableCodecIdentity = &Cell->Codec;
+		Event.Signature.Encode = &EncodeAvidScriptPreparedDelegateEvent;
 	}
 	return true;
 }
@@ -4981,7 +5069,8 @@ bool FAvidScriptBindingPackage::BuildPreparedInboundHandlers(
 	for (const TUniquePtr<FAvidScriptPreparedDelegateEventCell>& Cell :
 		Impl->PreparedDelegateEventCells)
 	{
-		if (Cell.IsValid() && Cell->CallbackKind == TEXT("multicast"))
+		if (Cell.IsValid()
+			&& Cell->Kind != EAvidScriptPreparedDelegateKind::FunctionHandler)
 		{
 			continue;
 		}
@@ -5002,7 +5091,8 @@ bool FAvidScriptBindingPackage::BuildPreparedInboundHandlers(
 			|| Cell->StableId.IsEmpty()
 			|| Cell->ExportName.IsEmpty()
 			|| Cell->ExpectedSourceClass == nullptr
-			|| Cell->DelegateProperty != nullptr
+			|| Cell->SinglecastProperty != nullptr
+			|| Cell->MulticastProperty != nullptr
 			|| Cell->SignatureFunction == nullptr
 			|| Cell->Codec.ParameterCellCount > FAvidScriptVmCallFrame::MaxCells)
 		{
@@ -5019,13 +5109,16 @@ bool FAvidScriptBindingPackage::BuildPreparedInboundHandlers(
 		Handler.CallbackKind = Cell->CallbackKind;
 		Handler.HandlerMode = Cell->HandlerMode;
 		Handler.ExpectedSourceClass = Cell->ExpectedSourceClass;
-		Handler.SignatureFunction = Cell->SignatureFunction;
+		Handler.Signature.Kind = Cell->Kind;
+		Handler.Signature.SignatureFunction = Cell->SignatureFunction;
 		Handler.RepNotifyProperty = Cell->RepNotifyProperty;
 		Handler.Network = Cell->Network;
-		Handler.ParameterCellCount = Cell->Codec.ParameterCellCount;
-		Handler.OutputParameterCount = Cell->Codec.OutputParameterIndices.Num();
-		Handler.ImmutableCodecIdentity = &Cell->Codec;
-		Handler.Encode = &EncodeAvidScriptPreparedDelegateEvent;
+		Handler.Signature.ParameterCellCount = Cell->Codec.ParameterCellCount;
+		Handler.Signature.OutputValueCount =
+			Cell->Codec.OutputParameterIndices.Num()
+			+ (Cell->Codec.bHasReturnValue ? 1 : 0);
+		Handler.Signature.ImmutableCodecIdentity = &Cell->Codec;
+		Handler.Signature.Encode = &EncodeAvidScriptPreparedDelegateEvent;
 	}
 	return true;
 }
@@ -6044,14 +6137,15 @@ bool FAvidScriptBindingPackage::BeginPreparedDelegateOutputTransaction(
 	OutError.Reset();
 	const FAvidScriptPreparedDelegateCodec* Codec =
 		static_cast<const FAvidScriptPreparedDelegateCodec*>(
-			Event.ImmutableCodecIdentity);
+			Event.Signature.ImmutableCodecIdentity);
 	if (Codec == nullptr
 		|| NativeParameters == nullptr
 		|| Event.StableId.IsEmpty()
 		|| Codec->StableId != Event.StableId
-		|| Event.OutputParameterCount == 0
-		|| Event.OutputParameterCount
-			!= static_cast<uint32>(Codec->OutputParameterIndices.Num()))
+		|| Event.Signature.OutputValueCount == 0
+		|| Event.Signature.OutputValueCount
+			!= static_cast<uint32>(Codec->OutputParameterIndices.Num())
+				+ (Codec->bHasReturnValue ? 1u : 0u))
 	{
 		OutError = TEXT("delegate_output_contract_invalid: the prepared output contract is unavailable or stale.");
 		return false;
@@ -6088,6 +6182,29 @@ bool FAvidScriptBindingPackage::BeginPreparedDelegateOutputTransaction(
 			if (OutError.IsEmpty())
 			{
 				OutError = TEXT("delegate_output_candidate_invalid: the temporary output value could not be initialized.");
+			}
+			return false;
+		}
+	}
+	if (Codec->bHasReturnValue)
+	{
+		if (Codec->ReturnValue.Direction
+				!= EAvidScriptRuntimeBindingDirection::Return
+			|| Codec->ReturnValue.Property == nullptr)
+		{
+			OutError = TEXT("delegate_output_contract_invalid: the prepared return value no longer has return semantics.");
+			return false;
+		}
+
+		FAvidScriptPreparedDelegateOutputTransaction::FImpl::FOutputSlot& Slot =
+			TransactionImpl->Outputs.AddDefaulted_GetRef();
+		Slot.Plan = &Codec->ReturnValue;
+		Slot.Candidate = MakeUnique<FScopedAvidScriptPropertyContainer>();
+		if (!Slot.Candidate->Initialize(Codec->ReturnValue, OutError))
+		{
+			if (OutError.IsEmpty())
+			{
+				OutError = TEXT("delegate_output_candidate_invalid: the temporary return value could not be initialized.");
 			}
 			return false;
 		}

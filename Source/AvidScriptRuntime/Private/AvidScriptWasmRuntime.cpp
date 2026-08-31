@@ -1821,7 +1821,7 @@ bool FAvidScriptWasmRuntimeInstance::PrepareDelegateEventExports(
 		if (!AvidScriptWasmRuntimePrivate::CacheResolvedVmExport(
 				*VmBackend,
 				Handle,
-				Event.ParameterCellCount,
+				Event.Signature.ParameterCellCount,
 				CachedExport,
 				ResolveError))
 		{
@@ -1860,9 +1860,10 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEvent(
 	}
 	if (Event.StableId.IsEmpty()
 		|| Event.ExportName.IsEmpty()
-		|| Event.ImmutableCodecIdentity == nullptr
-		|| Event.Encode == nullptr
-		|| Event.ParameterCellCount > FAvidScriptVmCallFrame::MaxCells)
+		|| Event.Signature.ImmutableCodecIdentity == nullptr
+		|| Event.Signature.Encode == nullptr
+		|| Event.Signature.ParameterCellCount
+			> FAvidScriptVmCallFrame::MaxCells)
 	{
 		SetFailure(
 			OutResult,
@@ -1896,7 +1897,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEvent(
 		}
 		BorrowedHandles.Reset();
 	};
-	if (Event.OutputParameterCount > 0)
+	if (Event.Signature.OutputValueCount > 0)
 	{
 		if (ActiveDelegateOutputTransaction != nullptr
 			|| ActiveDelegateOutputToken != 0)
@@ -1941,8 +1942,8 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEvent(
 			return false;
 		}
 	}
-	if (!Event.Encode(
-			Event.ImmutableCodecIdentity,
+	if (!Event.Signature.Encode(
+			Event.Signature.ImmutableCodecIdentity,
 			NativeParameters,
 			BindingInvocationContext,
 			OutputTransactionToken,
@@ -1950,7 +1951,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEvent(
 			BorrowedHandles,
 			EncodeCategory,
 			EncodeDetails)
-		|| Frame.CellCount != Event.ParameterCellCount)
+		|| Frame.CellCount != Event.Signature.ParameterCellCount)
 	{
 		ReleaseBorrows();
 		SetFailure(

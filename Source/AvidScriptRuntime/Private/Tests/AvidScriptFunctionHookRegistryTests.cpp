@@ -244,12 +244,13 @@ bool FAvidScriptReentrantInboundHandlerQueueTest::RunTest(
 	Handler.CallbackKind = TEXT("network_rpc");
 	Handler.HandlerMode = TEXT("before");
 	Handler.ExpectedSourceClass = Source->GetClass();
-	Handler.SignatureFunction = Function;
+	Handler.Signature.Kind = EAvidScriptPreparedDelegateKind::FunctionHandler;
+	Handler.Signature.SignatureFunction = Function;
 	Handler.Network.Mode = EAvidScriptBindingNetworkMode::Server;
 	Handler.Network.bReliable = true;
-	Handler.ParameterCellCount = 1;
-	Handler.ImmutableCodecIdentity = Function;
-	Handler.Encode = &EncodeInboundValue;
+	Handler.Signature.ParameterCellCount = 1;
+	Handler.Signature.ImmutableCodecIdentity = Function;
+	Handler.Signature.Encode = &EncodeInboundValue;
 
 	FAvidScriptRuntimeSession Session;
 	FAvidScriptWasmReloadResult LoadResult;

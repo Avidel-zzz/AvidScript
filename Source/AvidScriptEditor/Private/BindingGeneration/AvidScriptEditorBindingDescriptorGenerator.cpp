@@ -40,6 +40,7 @@ constexpr const TCHAR* ReplicatedPropertyGeneratorVersion = TEXT("57.12D2.0");
 constexpr const TCHAR* InboundHandlerGeneratorVersion = TEXT("57.12D4.0");
 constexpr const TCHAR* CompositeValueGeneratorVersion = TEXT("58.1.0");
 constexpr const TCHAR* DelegateOutputGeneratorVersion = TEXT("58.2.0");
+constexpr const TCHAR* DelegateValueGeneratorVersion = TEXT("60.2.0");
 
 struct FResolvedBindingDescriptor
 {
@@ -75,7 +76,7 @@ struct FResolvedDelegateEventDescriptor
 {
 	FAvidScriptReflectedDelegateEventSelection Selection;
 	UClass* OwnerClass = nullptr;
-	FMulticastDelegateProperty* Property = nullptr;
+	FProperty* Property = nullptr;
 	UFunction* SignatureFunction = nullptr;
 	FProperty* RepNotifyProperty = nullptr;
 	FString CallbackKind = TEXT("multicast");
@@ -1028,25 +1029,39 @@ bool GenerateBindingDescriptor(
 		Event.HandlerMode = Selection.HandlerMode;
 		FString PolicyCategory;
 		FString PolicySource;
-		if (Selection.CallbackKind == TEXT("multicast"))
+		const bool bDelegatePropertySelection =
+			Selection.CallbackKind == TEXT("multicast")
+			|| Selection.CallbackKind == TEXT("singlecast");
+		if (bDelegatePropertySelection)
 		{
 			FProperty* const Property = FindFProperty<FProperty>(
 				OwnerClass,
 				Selection.EventName);
-			Event.Property = CastField<FMulticastDelegateProperty>(Property);
-			if (Event.Property == nullptr
+			Event.Property = Property;
+			const FDelegateProperty* const Singlecast =
+				CastField<FDelegateProperty>(Property);
+			const FMulticastDelegateProperty* const Multicast =
+				CastField<FMulticastDelegateProperty>(Property);
+			const bool bKindMatches =
+				(Selection.CallbackKind == TEXT("singlecast")
+					&& Singlecast != nullptr)
+				|| (Selection.CallbackKind == TEXT("multicast")
+					&& Multicast != nullptr);
+			if (!bKindMatches
 				|| Property->GetOwnerStruct() != OwnerClass)
 			{
 				SetFailure(
 					OutResult,
-					TEXT("delegate_event_property_required"),
+					TEXT("delegate_event_kind_mismatch"),
 					SelectionKey,
-					TEXT("Select a declared dynamic multicast delegate property."));
+					TEXT("Select a declared dynamic delegate property matching the requested singlecast or multicast kind."));
 				return false;
 			}
-			Event.SignatureFunction = Event.Property->SignatureFunction;
+			Event.SignatureFunction = Singlecast != nullptr
+				? Singlecast->SignatureFunction
+				: Multicast->SignatureFunction;
 			if (!FAvidScriptEditorReflectedDelegateEventPolicy::EvaluateAndProject(
-					Event.Property,
+					Property,
 					Event.Projection,
 					PolicyCategory,
 					PolicySource))
@@ -1138,6 +1153,12 @@ bool GenerateBindingDescriptor(
 		}
 		TArray<FAvidScriptBindingValueModel> ParameterModels;
 		ParameterModels.Reserve(Event.Projection.Parameters.Num());
+		FinalizeType(Event.Projection.ReturnValue.Type);
+		const FAvidScriptBindingValueModel ReturnValueModel =
+			MakeBindingValueModel(Event.Projection.ReturnValue);
+		const bool bUsesDelegateValueSystem =
+			Selection.CallbackKind == TEXT("singlecast")
+			|| Event.Projection.ReturnValue.Type.Kind != TEXT("void");
 		for (FAvidScriptProjectedBindingValue& Parameter :
 			Event.Projection.Parameters)
 		{
@@ -1145,7 +1166,7 @@ bool GenerateBindingDescriptor(
 			ParameterModels.Add(MakeBindingValueModel(Parameter));
 		}
 		Event.ScriptName = FAvidScriptEditorCSharpSyntax::MakeIdentifier(
-			Selection.CallbackKind == TEXT("multicast")
+			bDelegatePropertySelection
 				? Event.Property->GetAuthoredName()
 				: GetDescriptorScriptFunctionName(
 					Event.SignatureFunction));
@@ -1173,9 +1194,8 @@ bool GenerateBindingDescriptor(
 				Event.RepNotifyProperty == nullptr
 					? NAME_None
 					: Event.RepNotifyProperty->GetFName(),
-				Event.CallbackKind == TEXT("multicast")
-					? FString()
-					: Event.HandlerMode);
+				bDelegatePropertySelection ? FString() : Event.HandlerMode,
+				bUsesDelegateValueSystem ? &ReturnValueModel : nullptr);
 		Event.StableId = FAvidScriptBindingDescriptorIdentity::MakeDelegateEventStableId(
 			OwnerClass->GetPathName(),
 			Selection.EventName.ToString(),
@@ -1186,9 +1206,8 @@ bool GenerateBindingDescriptor(
 			Event.RepNotifyProperty == nullptr
 				? NAME_None
 				: Event.RepNotifyProperty->GetFName(),
-			Event.CallbackKind == TEXT("multicast")
-				? FString()
-				: Event.HandlerMode);
+			bDelegatePropertySelection ? FString() : Event.HandlerMode,
+			bUsesDelegateValueSystem ? &ReturnValueModel : nullptr);
 		Event.ExportName = TEXT("avid_on_delegate_") + Event.StableId.Left(16);
 		DelegateEvents.Add(MoveTemp(Event));
 	}
@@ -1372,18 +1391,27 @@ bool GenerateBindingDescriptor(
 	const bool bHasInboundHandlers = DelegateEvents.ContainsByPredicate(
 		[](const FResolvedDelegateEventDescriptor& Event)
 		{
-			return Event.CallbackKind != TEXT("multicast");
+			return Event.CallbackKind == TEXT("network_rpc")
+				|| Event.CallbackKind == TEXT("rep_notify");
 		});
 	const bool bHasDelegateOutputs = DelegateEvents.ContainsByPredicate(
 		[](const FResolvedDelegateEventDescriptor& Event)
 		{
-			return Event.Projection.Parameters.ContainsByPredicate(
+			return Event.Projection.ReturnValue.Type.Kind != TEXT("void")
+				|| Event.Projection.Parameters.ContainsByPredicate(
 				[](const FAvidScriptProjectedBindingValue& Parameter)
 				{
 					return Parameter.Direction == TEXT("ref")
 						|| Parameter.Direction == TEXT("out");
 				});
 		});
+	const bool bHasDelegateValueSystem =
+		DelegateEvents.ContainsByPredicate(
+			[](const FResolvedDelegateEventDescriptor& Event)
+			{
+				return Event.CallbackKind == TEXT("singlecast")
+					|| Event.Projection.ReturnValue.Type.Kind != TEXT("void");
+			});
 	Package.SchemaVersion = bHasWritableProperties || bHasNativeDirectFunctions
 			|| bHasGeneratedNativeBindings
 		? 8
@@ -1426,7 +1454,13 @@ bool GenerateBindingDescriptor(
 	{
 		Package.SchemaVersion = 19;
 	}
-	Package.GeneratorVersion = bHasDelegateOutputs
+	if (bHasDelegateValueSystem)
+	{
+		Package.SchemaVersion = 20;
+	}
+	Package.GeneratorVersion = bHasDelegateValueSystem
+		? DelegateValueGeneratorVersion
+		: bHasDelegateOutputs
 		? DelegateOutputGeneratorVersion
 		: bHasGenericValueTypes || bHasCompositeValueTypes
 		? CompositeValueGeneratorVersion
@@ -1466,6 +1500,8 @@ bool GenerateBindingDescriptor(
 			{
 				ParameterModels.Add(MakeBindingValueModel(Parameter));
 			}
+			const FAvidScriptBindingValueModel ReturnValueModel =
+				MakeBindingValueModel(Event.Projection.ReturnValue);
 			Event.CanonicalIdentity =
 				FAvidScriptBindingDescriptorIdentity::MakeDelegateEventCanonicalIdentity(
 					Event.OwnerClass->GetPathName(),
@@ -1477,7 +1513,10 @@ bool GenerateBindingDescriptor(
 					Event.RepNotifyProperty == nullptr
 						? NAME_None
 						: Event.RepNotifyProperty->GetFName(),
-					Event.HandlerMode);
+					Event.HandlerMode,
+					Package.SchemaVersion >= 20
+						? &ReturnValueModel
+						: nullptr);
 			Event.StableId = FAvidScriptHash::Sha256HexUtf8(
 				Event.CanonicalIdentity);
 			Event.ExportName =
@@ -1591,6 +1630,8 @@ bool GenerateBindingDescriptor(
 			? NAME_None
 			: Event.RepNotifyProperty->GetFName();
 		EventModel.ExportName = Event.ExportName;
+		EventModel.ReturnValue =
+			MakeBindingValueModel(Event.Projection.ReturnValue);
 		for (const FAvidScriptProjectedBindingValue& Parameter :
 			Event.Projection.Parameters)
 		{
@@ -1656,7 +1697,10 @@ bool GenerateBindingDescriptor(
 	{
 		for (const FResolvedDelegateEventDescriptor& Event : DelegateEvents)
 		{
-			const bool bOwnerSupported = Event.CallbackKind == TEXT("multicast")
+			const bool bDelegateProperty =
+				Event.CallbackKind == TEXT("multicast")
+				|| Event.CallbackKind == TEXT("singlecast");
+			const bool bOwnerSupported = bDelegateProperty
 				? Event.OwnerClass->IsChildOf(AActor::StaticClass())
 				: IsAvidScriptBindingNetworkOwnerClass(Event.OwnerClass);
 			if (!bOwnerSupported)

@@ -53,7 +53,7 @@ bool CountProjectedTypeCells(
 } // namespace
 
 bool FAvidScriptEditorReflectedDelegateEventPolicy::EvaluateAndProject(
-	const FMulticastDelegateProperty* DelegateProperty,
+	const FProperty* DelegateProperty,
 	FAvidScriptProjectedDelegateEvent& OutProjection,
 	FString& OutCategory,
 	FString& OutSource)
@@ -61,8 +61,16 @@ bool FAvidScriptEditorReflectedDelegateEventPolicy::EvaluateAndProject(
 	OutProjection = FAvidScriptProjectedDelegateEvent();
 	OutCategory.Reset();
 	OutSource.Reset();
-	if (DelegateProperty == nullptr
-		|| DelegateProperty->SignatureFunction == nullptr)
+	const FDelegateProperty* const Singlecast =
+		CastField<FDelegateProperty>(DelegateProperty);
+	const FMulticastDelegateProperty* const Multicast =
+		CastField<FMulticastDelegateProperty>(DelegateProperty);
+	const UFunction* const Signature = Singlecast != nullptr
+		? Singlecast->SignatureFunction
+		: Multicast != nullptr
+			? Multicast->SignatureFunction
+			: nullptr;
+	if (Signature == nullptr)
 	{
 		OutCategory = TEXT("delegate_event_signature_missing");
 		OutSource = DelegateProperty == nullptr
@@ -72,7 +80,7 @@ bool FAvidScriptEditorReflectedDelegateEventPolicy::EvaluateAndProject(
 	}
 
 	const bool bProjected = EvaluateSignatureAndProject(
-		DelegateProperty->SignatureFunction,
+		Signature,
 		OutProjection,
 		OutCategory,
 		OutSource);
@@ -100,12 +108,6 @@ bool FAvidScriptEditorReflectedDelegateEventPolicy::
 		OutSource = TEXT("<null>");
 		return false;
 	}
-	if (Signature->GetReturnProperty() != nullptr)
-	{
-		OutCategory = TEXT("callback_return_unsupported");
-		OutSource = Signature->GetPathName();
-		return false;
-	}
 	FAvidScriptProjectedFunction FunctionProjection;
 	FString ProjectionError;
 	if (!FAvidScriptEditorReflectedTypePolicy::ProjectFunction(
@@ -119,7 +121,24 @@ bool FAvidScriptEditorReflectedDelegateEventPolicy::
 		return false;
 	}
 
-	bool bHasOutputs = false;
+	OutProjection.ReturnValue = MoveTemp(FunctionProjection.ReturnValue);
+	const bool bHasReturnValue =
+		OutProjection.ReturnValue.Type.Kind != TEXT("void");
+	bool bHasOutputs = bHasReturnValue;
+	if (bHasReturnValue)
+	{
+		int32 ReturnCellCount = 0;
+		if (!CountProjectedTypeCells(
+				OutProjection.ReturnValue.Type,
+				ReturnCellCount))
+		{
+			OutCategory = TEXT("callback_return_type_unsupported");
+			OutSource = Signature->GetPathName() + TEXT(":")
+				+ OutProjection.ReturnValue.Type.CanonicalType;
+			return false;
+		}
+		++OutProjection.AbiCellCount;
+	}
 	for (FAvidScriptProjectedBindingValue& Parameter :
 		FunctionProjection.Parameters)
 	{

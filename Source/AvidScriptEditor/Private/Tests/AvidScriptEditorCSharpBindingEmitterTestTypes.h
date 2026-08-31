@@ -163,6 +163,12 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	UPARAM(ref) int32&, Value,
 	int32&, Doubled);
 
+DECLARE_DYNAMIC_DELEGATE_RetVal_TwoParams(
+	int32,
+	FAvidScriptEditorSinglecastRefOutSignal,
+	UPARAM(ref) int32&, Value,
+	int32&, Doubled);
+
 UCLASS()
 class AAvidScriptEditorDelegateEventTestActor : public AActor
 {
@@ -180,6 +186,9 @@ public:
 
 	UPROPERTY(BlueprintAssignable)
 	FAvidScriptEditorDelegateRefOutSignal OnRefOutSignal;
+
+	UPROPERTY()
+	FAvidScriptEditorSinglecastRefOutSignal OnSinglecastSignal;
 };
 
 UCLASS()

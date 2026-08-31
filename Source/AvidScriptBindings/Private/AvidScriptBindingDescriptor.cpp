@@ -1649,6 +1649,40 @@ bool ParseAvidScriptBindingDelegateEvent(
 		return false;
 	}
 	OutEvent.RepNotifyProperty = FName(*RepNotifyProperty);
+	if (SchemaVersion >= 20)
+	{
+		const TSharedPtr<FJsonObject>* ReturnObject = nullptr;
+		if (!Object->TryGetObjectField(TEXT("return"), ReturnObject)
+			|| ReturnObject == nullptr
+			|| !ReturnObject->IsValid()
+			|| !ParseAvidScriptBindingValue(
+				*ReturnObject,
+				OutEvent.ReturnValue,
+				OutErrorSource)
+			|| OutEvent.ReturnValue.Direction != TEXT("return")
+			|| OutEvent.ReturnValue.bHasDefault)
+		{
+			OutErrorSource = TEXT("return");
+			return false;
+		}
+	}
+	else
+	{
+		if (Object->HasField(TEXT("return")))
+		{
+			OutErrorSource = TEXT("return");
+			return false;
+		}
+		OutEvent.ReturnValue.Name = TEXT("ReturnValue");
+		OutEvent.ReturnValue.Direction = TEXT("return");
+		OutEvent.ReturnValue.CanonicalType = TEXT("void");
+		OutEvent.ReturnValue.TypeId =
+			FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(
+				TEXT("void"),
+				{});
+		OutEvent.ReturnValue.Kind = TEXT("void");
+		OutEvent.ReturnValue.CppType = TEXT("void");
+	}
 
 	const TArray<TSharedPtr<FJsonValue>>* Parameters = nullptr;
 	if (!Object->TryGetArrayField(TEXT("parameters"), Parameters)
@@ -1940,7 +1974,8 @@ FString FAvidScriptBindingDescriptorIdentity::MakeDelegateEventCanonicalIdentity
 	const TConstArrayView<FAvidScriptBindingValueModel> Parameters,
 	const FAvidScriptBindingNetworkContract& Network,
 	const FName RepNotifyProperty,
-	const FString& HandlerMode)
+	const FString& HandlerMode,
+	const FAvidScriptBindingValueModel* ReturnValue)
 {
 	FString Identity(TEXT("delegate_event"));
 	AppendAvidScriptBindingIdentityField(Identity, TEXT("owner"), OwnerClass);
@@ -1956,7 +1991,9 @@ FString FAvidScriptBindingDescriptorIdentity::MakeDelegateEventCanonicalIdentity
 		Identity,
 		TEXT("source"),
 		SourceMode);
-	if (DelegateKind != TEXT("multicast"))
+	const bool bFunctionHandler = DelegateKind == TEXT("network_rpc")
+		|| DelegateKind == TEXT("rep_notify");
+	if (bFunctionHandler)
 	{
 		AppendAvidScriptBindingIdentityField(
 			Identity,
@@ -1971,7 +2008,7 @@ FString FAvidScriptBindingDescriptorIdentity::MakeDelegateEventCanonicalIdentity
 			TEXT("rep_notify_property"),
 			RepNotifyProperty.ToString());
 	}
-	if (!HandlerMode.IsEmpty())
+	if (bFunctionHandler && !HandlerMode.IsEmpty())
 	{
 		AppendAvidScriptBindingIdentityField(
 			Identity,
@@ -1985,6 +2022,13 @@ FString FAvidScriptBindingDescriptorIdentity::MakeDelegateEventCanonicalIdentity
 			TEXT("parameter"),
 			Parameter);
 	}
+	if (ReturnValue != nullptr)
+	{
+		AppendAvidScriptBindingValueIdentity(
+			Identity,
+			TEXT("return"),
+			*ReturnValue);
+	}
 	return Identity;
 }
 
@@ -1996,7 +2040,8 @@ FString FAvidScriptBindingDescriptorIdentity::MakeDelegateEventStableId(
 	const TConstArrayView<FAvidScriptBindingValueModel> Parameters,
 	const FAvidScriptBindingNetworkContract& Network,
 	const FName RepNotifyProperty,
-	const FString& HandlerMode)
+	const FString& HandlerMode,
+	const FAvidScriptBindingValueModel* ReturnValue)
 {
 	return FAvidScriptHash::Sha256HexUtf8(MakeDelegateEventCanonicalIdentity(
 		OwnerClass,
@@ -2006,7 +2051,8 @@ FString FAvidScriptBindingDescriptorIdentity::MakeDelegateEventStableId(
 		Parameters,
 		Network,
 		RepNotifyProperty,
-		HandlerMode));
+		HandlerMode,
+		ReturnValue));
 }
 
 FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
@@ -2089,7 +2135,9 @@ FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 		return FAvidScriptHash::Sha256HexUtf8(FString::Join(SelectionKeys, TEXT("\n")));
 	}
 
-	FString Identity(Package.SchemaVersion >= 18
+	FString Identity(Package.SchemaVersion >= 20
+		? TEXT("descriptor_selection_v20")
+		: Package.SchemaVersion >= 18
 		? TEXT("descriptor_selection_v18")
 		: Package.SchemaVersion >= 17
 		? TEXT("descriptor_selection_v17")
@@ -2285,7 +2333,9 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 		return FAvidScriptHash::Sha256HexUtf8(Identity);
 	}
 
-	FString Identity(Package.SchemaVersion >= 18
+	FString Identity(Package.SchemaVersion >= 20
+		? TEXT("descriptor_package_v20")
+		: Package.SchemaVersion >= 18
 		? TEXT("descriptor_package_v18")
 		: Package.SchemaVersion >= 17
 		? TEXT("descriptor_package_v17")
@@ -2558,6 +2608,13 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 			}
 			AppendAvidScriptBindingIdentityField(
 				Identity, TEXT("event_export"), Event.ExportName);
+			if (Package.SchemaVersion >= 20)
+			{
+				AppendAvidScriptBindingValueIdentity(
+					Identity,
+					TEXT("event_return"),
+					Event.ReturnValue);
+			}
 			for (const FAvidScriptBindingValueModel& Parameter :
 				Event.Parameters)
 			{
@@ -2659,7 +2716,8 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 			&& OutPackage.SchemaVersion != 16
 			&& OutPackage.SchemaVersion != 17
 			&& OutPackage.SchemaVersion != 18
-			&& OutPackage.SchemaVersion != 19)
+			&& OutPackage.SchemaVersion != 19
+			&& OutPackage.SchemaVersion != 20)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("generator_version"), OutPackage.GeneratorVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("engine_version"), OutPackage.EngineVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("source"), OutPackage.Source, OutErrorSource)
@@ -2690,7 +2748,8 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 				&& OutPackage.SchemaVersion != 16
 				&& OutPackage.SchemaVersion != 17
 				&& OutPackage.SchemaVersion != 18
-				&& OutPackage.SchemaVersion != 19)
+				&& OutPackage.SchemaVersion != 19
+				&& OutPackage.SchemaVersion != 20)
 			{
 				OutErrorSource = TEXT("schema_version");
 			}
@@ -3206,9 +3265,13 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 						Event.RepNotifyProperty,
 						OutPackage.SchemaVersion >= 18
 							? Event.HandlerMode
-							: FString());
+							: FString(),
+						OutPackage.SchemaVersion >= 20
+							? &Event.ReturnValue
+							: nullptr);
 			const bool bCallbackKindValid =
 				Event.DelegateKind == TEXT("multicast")
+					|| Event.DelegateKind == TEXT("singlecast")
 					? !Event.Network.IsNetworked()
 						&& !Event.Network.bReliable
 						&& Event.RepNotifyProperty.IsNone()
@@ -3221,6 +3284,7 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 						&& !Event.RepNotifyProperty.IsNone();
 			const bool bHandlerModeValid =
 				Event.DelegateKind == TEXT("multicast")
+					|| Event.DelegateKind == TEXT("singlecast")
 					? Event.HandlerMode == TEXT("replace")
 					: Event.HandlerMode == TEXT("replace")
 						|| Event.HandlerMode == TEXT("before")
@@ -3231,6 +3295,8 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 				|| !bHandlerModeValid
 				|| (OutPackage.SchemaVersion < 17
 					&& Event.DelegateKind != TEXT("multicast"))
+				|| (OutPackage.SchemaVersion < 20
+					&& Event.DelegateKind == TEXT("singlecast"))
 				|| Event.SourceMode != TEXT("self")
 				|| !IsAvidScriptBindingIdentifier(Event.ScriptName)
 				|| Event.CanonicalIdentity != ExpectedIdentity
@@ -3262,6 +3328,21 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 				{
 					OutErrorCategory = TEXT("descriptor_contract_invalid");
 					OutErrorSource = Event.CanonicalIdentity;
+					return false;
+				}
+			}
+			if (OutPackage.SchemaVersion >= 20)
+			{
+				const FAvidScriptBindingTypeModel* ReturnType =
+					TypesByCanonical.Find(Event.ReturnValue.CanonicalType);
+				if (ReturnType == nullptr
+					|| ReturnType->StableId != Event.ReturnValue.TypeId
+					|| ReturnType->Kind != Event.ReturnValue.Kind
+					|| ReturnType->CppType != Event.ReturnValue.CppType
+					|| ReturnType->AbiTypes != Event.ReturnValue.AbiTypes)
+				{
+					OutErrorCategory = TEXT("descriptor_contract_invalid");
+					OutErrorSource = Event.CanonicalIdentity + TEXT(":return");
 					return false;
 				}
 			}

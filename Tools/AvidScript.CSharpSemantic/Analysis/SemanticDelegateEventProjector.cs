@@ -19,7 +19,8 @@ internal static class SemanticDelegateEventProjector
     private sealed record EventContract(
         string SubscriptionId,
         IReadOnlyList<string> ParameterTypes,
-        IReadOnlyList<string> ParameterDirections);
+        IReadOnlyList<string> ParameterDirections,
+        string ReturnType);
 
     public static SemanticDelegateEventProjection Project(SemanticCompilationContext context)
     {
@@ -74,12 +75,11 @@ internal static class SemanticDelegateEventProjector
             }
 
             if (method.DeclaredAccessibility != Accessibility.Public
-                || !method.IsStatic
-                || !method.ReturnsVoid)
+                || !method.IsStatic)
             {
                 diagnostics.Add(Error(
                     "ASCS5204",
-                    $"Delegate event handler '{method.Name}' must be public static and return void.",
+                    $"Delegate event handler '{method.Name}' must be public static.",
                     span));
                 valid = false;
             }
@@ -98,14 +98,16 @@ internal static class SemanticDelegateEventProjector
                 valid = false;
             }
 
-            if (contract is not null && !ParametersMatch(
-                method.Parameters,
-                contract.ParameterTypes,
-                contract.ParameterDirections))
+            if (contract is not null
+                && (!ParametersMatch(
+                    method.Parameters,
+                    contract.ParameterTypes,
+                    contract.ParameterDirections)
+                    || !TypeMatches(method.ReturnType, contract.ReturnType)))
             {
                 diagnostics.Add(Error(
                     "ASCS5206",
-                    $"Delegate event handler '{method.Name}' does not exactly match its generated parameter contract.",
+                    $"Delegate event handler '{method.Name}' does not exactly match its generated parameter and return contract.",
                     span));
                 valid = false;
             }
@@ -179,6 +181,8 @@ internal static class SemanticDelegateEventProjector
                 string? subscriptionId = ReadStringArgument(attribute, 0);
                 string? parameterTypes = ReadStringArgument(attribute, 1);
                 string? parameterDirections = ReadStringArgument(attribute, 2);
+                string returnType = ReadStringArgument(attribute, 3)
+                    ?? "global::System.Void";
                 string[] parameters = parameterTypes is null || parameterTypes.Length == 0
                     ? Array.Empty<string>()
                     : parameterTypes.Split(';', StringSplitOptions.None);
@@ -197,7 +201,9 @@ internal static class SemanticDelegateEventProjector
                     && parameters.All(parameter => !string.IsNullOrWhiteSpace(parameter)
                         && string.Equals(parameter, parameter.Trim(), StringComparison.Ordinal))
                     && directions.Length == parameters.Length
-                    && directions.All(direction => direction is "none" or "ref" or "out");
+                    && directions.All(direction => direction is "none" or "ref" or "out")
+                    && !string.IsNullOrWhiteSpace(returnType)
+                    && string.Equals(returnType, returnType.Trim(), StringComparison.Ordinal);
                 if (!valid)
                 {
                     diagnostics.Add(Error(
@@ -207,7 +213,11 @@ internal static class SemanticDelegateEventProjector
                     continue;
                 }
 
-                EventContract contract = new(subscriptionId!, parameters, directions);
+                EventContract contract = new(
+                    subscriptionId!,
+                    parameters,
+                    directions,
+                    returnType);
                 if (!contracts.TryAdd(subscriptionId!, contract))
                 {
                     diagnostics.Add(Error(
@@ -276,6 +286,7 @@ internal static class SemanticDelegateEventProjector
 
         string? specialTypeName = type.SpecialType switch
         {
+            SpecialType.System_Void => "global::System.Void",
             SpecialType.System_Boolean => "global::System.Boolean",
             SpecialType.System_Byte => "global::System.Byte",
             SpecialType.System_SByte => "global::System.SByte",

@@ -17,10 +17,42 @@ internal static class SemanticDelegateEventTests
     {
         GeneratedContractsProjectTypedHandlers();
         RefOutContractsProjectTransactionalHandlers();
+        ReturnContractsProjectTypedHandlers();
         InvalidHandlersFailClosed();
         MalformedAndDuplicateContractsFailClosed();
         DelegateSyntaxRemainsUnsupported();
-        return 5;
+        return 6;
+    }
+
+    private static void ReturnContractsProjectTypedHandlers()
+    {
+        const string source = """
+            using AvidScript;
+
+            namespace Game;
+
+            public static class Script
+            {
+                [AvidEvent(AvidEvents.OnSignal)]
+                public static int HandleSignal(ref int value, out int doubled)
+                {
+                    value += 3;
+                    doubled = value * 2;
+                    return doubled + 1;
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, Contracts(
+            $"[AvidEventContract(\"{SignalId}\", \"global::System.Int32;global::System.Int32\", \"ref;out\", \"global::System.Int32\")]\n" +
+            $"public const string OnSignal = \"{SignalId}\";"));
+
+        SemanticCallable callable = document.Callables.Single(candidate =>
+            candidate.MethodSymbolId == document.DelegateEventCallbacks.Single().MethodSymbolId);
+        Assert(document.Succeeded
+            && callable.ReturnTypeId == "type:int32"
+            && callable.Parameters.Select(parameter => parameter.RefKind)
+                .SequenceEqual(new[] { "ref", "out" }),
+            "generated return contracts should authorize an exact non-void ref/out handler");
     }
 
     private static void RefOutContractsProjectTransactionalHandlers()
@@ -81,7 +113,7 @@ internal static class SemanticDelegateEventTests
             && document.SchemaVersion == 20
             && document.SemanticVersion == "1.22"
             && document.DelegateEventCallbacks.Count == 2,
-            "valid delegate event contracts should publish semantic schema v17");
+            "valid delegate event contracts should publish semantic schema v20");
         Assert(callback.SubscriptionId == SignalId
             && callback.ExportName == "avid_on_delegate_0123456789abcdef"
             && callback.Name == "HandleSignal",
@@ -222,6 +254,11 @@ internal static class SemanticDelegateEventTests
                     string subscriptionId,
                     string parameterTypes,
                     string parameterDirections) { }
+                public AvidEventContractAttribute(
+                    string subscriptionId,
+                    string parameterTypes,
+                    string parameterDirections,
+                    string returnType) { }
             }
 
             public readonly struct AActor

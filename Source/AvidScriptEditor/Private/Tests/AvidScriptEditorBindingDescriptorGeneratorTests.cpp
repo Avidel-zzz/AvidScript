@@ -4567,7 +4567,94 @@ bool FAvidScriptEditorDelegateEventDescriptorTest::RunTest(
 		ReferenceSource.Contains(TEXT("OnRefOutSignal"))
 			&& ReferenceSource.Contains(TEXT("ref;out")));
 
+	Profile.ExplicitDelegateEvents[0].EventName = TEXT("OnSinglecastSignal");
+	Profile.ExplicitDelegateEvents[0].CallbackKind = TEXT("singlecast");
+	TestTrue(
+		TEXT("Singlecast return/ref/out delegate event generates"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+			Profile,
+			Json,
+			SelectionResult,
+			GenerateResult));
+	TestTrue(
+		TEXT("Singlecast delegate descriptor parses"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			Json,
+			Package,
+			ErrorCategory,
+			ErrorSource));
+	TestEqual(TEXT("Singlecast return activates schema 20"), Package.SchemaVersion, 20);
+	TestEqual(
+		TEXT("Singlecast return records the current generator"),
+		Package.GeneratorVersion,
+		FString(TEXT("60.2.0")));
+	if (Package.DelegateEvents.Num() == 1)
+	{
+		const FAvidScriptBindingDelegateEventModel& Event =
+			Package.DelegateEvents[0];
+		TestEqual(
+			TEXT("Singlecast kind is retained"),
+			Event.DelegateKind,
+			FString(TEXT("singlecast")));
+		TestEqual(
+			TEXT("Singlecast return type is retained"),
+			Event.ReturnValue.CppType,
+			FString(TEXT("int32")));
+		TestEqual(
+			TEXT("Singlecast return direction is retained"),
+			Event.ReturnValue.Direction,
+			FString(TEXT("return")));
+	}
+	TestTrue(
+		TEXT("Singlecast delegate emits a typed C# contract and bind facade"),
+		FAvidScriptEditorCSharpBindingEmitter::Emit(
+			Json,
+			ReferenceSource,
+			ManifestJson,
+			EmitResult));
+	TestTrue(
+		TEXT("Generated singlecast contract preserves return/ref/out"),
+		ReferenceSource.Contains(TEXT("ref;out\", \"global::System.Int32"))
+			&& ReferenceSource.Contains(TEXT("BindOnSinglecastSignal")));
+
+	TSharedPtr<const FAvidScriptBindingPackage> RuntimePackage;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	TestTrue(
+		TEXT("Runtime loads generated schema 20 singlecast descriptor"),
+		FAvidScriptBindingPackage::LoadDescriptor(
+			Json,
+			RuntimePackage,
+			LoadResult));
+	TArray<FAvidScriptPreparedDelegateEvent> PreparedEvents;
+	FString BuildError;
+	TestTrue(
+		TEXT("Runtime publishes the generated singlecast prepared plan"),
+		RuntimePackage.IsValid()
+			&& RuntimePackage->BuildPreparedDelegateEvents(
+				PreparedEvents,
+				BuildError));
+	TestEqual(TEXT("Runtime publishes one singlecast plan"), PreparedEvents.Num(), 1);
+	if (PreparedEvents.Num() == 1)
+	{
+		TestEqual(
+			TEXT("Prepared plan uses singlecast storage"),
+			PreparedEvents[0].Signature.Kind,
+			EAvidScriptPreparedDelegateKind::Singlecast);
+		TestNotNull(
+			TEXT("Prepared plan resolves FDelegateProperty"),
+			PreparedEvents[0].Signature.SinglecastProperty);
+		TestEqual(
+			TEXT("Prepared singlecast prepends one output transaction cell"),
+			PreparedEvents[0].Signature.ParameterCellCount,
+			2u);
+		TestEqual(
+			TEXT("Prepared singlecast exposes ref, out, and return outputs"),
+			PreparedEvents[0].Signature.OutputValueCount,
+			3u);
+	}
+
 	Profile.ExplicitDelegateEvents[0].EventName = TEXT("OnStringSignal");
+	Profile.ExplicitDelegateEvents[0].CallbackKind = TEXT("multicast");
 	TestFalse(
 		TEXT("String delegate event is rejected"),
 		FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(

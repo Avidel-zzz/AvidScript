@@ -35,6 +35,33 @@ bool EncodeDelegateTestFrame(
 	FMemory::Memcpy(&OutFrame.Cells[0], &Value, sizeof(Value));
 	return true;
 }
+
+bool EncodeSinglecastTestFrame(
+	const void* CodecIdentity,
+	const void* NativeParameters,
+	const FAvidScriptBindingInvocationContext&,
+	uint32,
+	FAvidScriptVmCallFrame& OutFrame,
+	TArray<FAvidScriptObjectHandle>&,
+	FString& OutErrorCategory,
+	FString& OutErrorDetails)
+{
+	const UFunction* const SignatureFunction =
+		static_cast<const UFunction*>(CodecIdentity);
+	const FIntProperty* const IntProperty = SignatureFunction != nullptr
+		? FindFProperty<FIntProperty>(SignatureFunction, TEXT("IntValue"))
+		: nullptr;
+	if (IntProperty == nullptr || NativeParameters == nullptr)
+	{
+		OutErrorCategory = TEXT("delegate_test_parameter_missing");
+		OutErrorDetails = TEXT("The real singlecast fixture did not expose IntValue.");
+		return false;
+	}
+	const int32 Value = IntProperty->GetPropertyValue_InContainer(NativeParameters);
+	OutFrame.CellCount = 1;
+	FMemory::Memcpy(&OutFrame.Cells[0], &Value, sizeof(Value));
+	return true;
+}
 } // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -45,6 +72,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptDelegateExportPreparationTest,
 	"AvidScript.Runtime.DelegateSubscription.ExportPreparation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptSinglecastDelegateLeaseTest,
+	"AvidScript.Runtime.DelegateSubscription.SinglecastLease",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FAvidScriptDelegateBridgeLifecycleTest::RunTest(const FString& Parameters)
@@ -68,11 +100,12 @@ bool FAvidScriptDelegateBridgeLifecycleTest::RunTest(const FString& Parameters)
 	Event.StableId = FString::ChrN(64, TEXT('a'));
 	Event.ExportName = TEXT("avid_on_tick");
 	Event.ExpectedSourceClass = Source->GetClass();
-	Event.DelegateProperty = Property;
-	Event.SignatureFunction = Property->SignatureFunction;
-	Event.ParameterCellCount = 1;
-	Event.ImmutableCodecIdentity = Property->SignatureFunction;
-	Event.Encode = &EncodeDelegateTestFrame;
+	Event.Signature.Kind = EAvidScriptPreparedDelegateKind::Multicast;
+	Event.Signature.MulticastProperty = Property;
+	Event.Signature.SignatureFunction = Property->SignatureFunction;
+	Event.Signature.ParameterCellCount = 1;
+	Event.Signature.ImmutableCodecIdentity = Property->SignatureFunction;
+	Event.Signature.Encode = &EncodeDelegateTestFrame;
 
 	FAvidScriptRuntimeSession Session;
 	FAvidScriptWasmReloadResult LoadResult;
@@ -254,7 +287,7 @@ bool FAvidScriptDelegateExportPreparationTest::RunTest(
 	FAvidScriptPreparedDelegateEvent MissingHandler;
 	MissingHandler.StableId = FString::ChrN(64, TEXT('b'));
 	MissingHandler.ExportName = TEXT("avid_on_delegate_bbbbbbbbbbbbbbbb");
-	MissingHandler.ParameterCellCount = 0;
+	MissingHandler.Signature.ParameterCellCount = 0;
 	TArray<FAvidScriptPreparedDelegateEvent> Events{MissingHandler};
 	FString Error;
 	TestTrue(
@@ -268,7 +301,7 @@ bool FAvidScriptDelegateExportPreparationTest::RunTest(
 	FAvidScriptPreparedDelegateEvent WrongSignature;
 	WrongSignature.StableId = FString::ChrN(64, TEXT('c'));
 	WrongSignature.ExportName = TEXT("avid_on_tick");
-	WrongSignature.ParameterCellCount = 0;
+	WrongSignature.Signature.ParameterCellCount = 0;
 	Events = {WrongSignature};
 	TestFalse(
 		TEXT("An implemented handler with an incompatible ABI is rejected"),
@@ -278,6 +311,122 @@ bool FAvidScriptDelegateExportPreparationTest::RunTest(
 		Error.Contains(TEXT("delegate_export_prepare_failed")));
 
 	Runtime.Unload();
+	return true;
+}
+
+bool FAvidScriptSinglecastDelegateLeaseTest::RunTest(
+	const FString& Parameters)
+{
+	UAvidScriptRuntimeDelegateTestObject* const Source =
+		NewObject<UAvidScriptRuntimeDelegateTestObject>();
+	FDelegateProperty* const Property = FindFProperty<FDelegateProperty>(
+		Source->GetClass(),
+		GET_MEMBER_NAME_CHECKED(
+			UAvidScriptRuntimeDelegateTestObject,
+			OnSinglecast));
+	TestNotNull(TEXT("Fixture exposes a singlecast delegate property"), Property);
+	if (Property == nullptr || Property->SignatureFunction == nullptr)
+	{
+		return false;
+	}
+
+	FAvidScriptPreparedDelegateEvent Event;
+	Event.EventOrdinal = 1;
+	Event.StableId = FString::ChrN(64, TEXT('d'));
+	Event.ExportName = TEXT("avid_on_tick");
+	Event.CallbackKind = TEXT("singlecast");
+	Event.ExpectedSourceClass = Source->GetClass();
+	Event.Signature.Kind = EAvidScriptPreparedDelegateKind::Singlecast;
+	Event.Signature.SinglecastProperty = Property;
+	Event.Signature.SignatureFunction = Property->SignatureFunction;
+	Event.Signature.ParameterCellCount = 1;
+	Event.Signature.ImmutableCodecIdentity = Property->SignatureFunction;
+	Event.Signature.Encode = &EncodeSinglecastTestFrame;
+
+	FAvidScriptRuntimeSession Session;
+	FAvidScriptWasmReloadResult LoadResult;
+	if (!TestTrue(
+			TEXT("Embedded runtime reaches Running before singlecast bind"),
+			Session.LoadEmbeddedSmoke(LoadResult)))
+	{
+		return false;
+	}
+	FString Error;
+	if (!TestTrue(
+			TEXT("Singlecast catalog prepares without mutating the property"),
+			Session.PrepareDelegateSubscriptionsForTesting(
+				Source,
+				MakeArrayView(&Event, 1),
+				Error)))
+	{
+		return false;
+	}
+	Session.CommitDelegateSubscriptionsForTesting();
+	TestEqual(
+		TEXT("Singlecast catalog does not auto-bind"),
+		Session.GetDelegateSubscriptionCountForTesting(),
+		0);
+
+	Source->OnSinglecast.BindDynamic(
+		Source,
+		&UAvidScriptRuntimeDelegateTestObject::NativeSinglecastValue);
+	const int64 Token = Session.SubscribeDelegateForTesting(
+		*Source,
+		Event.EventOrdinal,
+		Error);
+	TestTrue(TEXT("Explicit singlecast bind returns a token"), Token > 0);
+	TestEqual(
+		TEXT("Duplicate singlecast bind is rejected"),
+		Session.SubscribeDelegateForTesting(
+			*Source,
+			Event.EventOrdinal,
+			Error),
+		static_cast<int64>(0));
+	Source->ExecuteSinglecast(41);
+	TestEqual(
+		TEXT("Singlecast bridge invokes the prepared guest export"),
+		Session.GetLiveEventCallbackCount(),
+		1);
+	TestEqual(
+		TEXT("Script ownership temporarily replaces the old delegate"),
+		Source->NativeSinglecastInvocationCount,
+		0);
+	TestTrue(
+		TEXT("Cancel releases the owned singlecast lease"),
+		Session.UnsubscribeDelegateForTesting(Token, Error));
+	Source->ExecuteSinglecast(42);
+	TestEqual(
+		TEXT("Cancel restores the previous singlecast delegate"),
+		Source->NativeSinglecastInvocationCount,
+		1);
+	TestEqual(
+		TEXT("Restored delegate receives the current value"),
+		Source->LastNativeSinglecastValue,
+		42);
+
+	const int64 OverwriteToken = Session.SubscribeDelegateForTesting(
+		*Source,
+		Event.EventOrdinal,
+		Error);
+	TestTrue(TEXT("A released singlecast lease can bind again"), OverwriteToken > 0);
+	Source->OnSinglecast.BindDynamic(
+		Source,
+		&UAvidScriptRuntimeDelegateTestObject::ExternalSinglecastValue);
+	TestTrue(
+		TEXT("Cancel after external overwrite releases only the script bridge"),
+		Session.UnsubscribeDelegateForTesting(OverwriteToken, Error));
+	Source->ExecuteSinglecast(43);
+	TestEqual(
+		TEXT("External overwrite remains installed after script cancel"),
+		Source->ExternalSinglecastInvocationCount,
+		1);
+	TestEqual(
+		TEXT("External overwrite receives the current value"),
+		Source->LastExternalSinglecastValue,
+		43);
+
+	FAvidScriptWasmSmokeResult StopResult;
+	TestTrue(TEXT("Singlecast session stops cleanly"), Session.StopAndUnload(StopResult));
 	return true;
 }
 

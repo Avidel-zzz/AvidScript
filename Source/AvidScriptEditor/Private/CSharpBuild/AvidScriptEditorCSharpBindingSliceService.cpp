@@ -736,6 +736,15 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 		{
 			Rule.IncludeEvents.AddUnique(FName(*Event.UeMember));
 		}
+		else if (Event.DelegateKind == TEXT("singlecast"))
+		{
+			SliceProfile.ExplicitDelegateEvents.Add({
+				Event.OwnerClass,
+				FName(*Event.UeMember),
+				TEXT("singlecast"),
+				TEXT("replace")
+			});
+		}
 		else if (Event.HandlerMode == TEXT("before"))
 		{
 			Rule.BeforeHandlers.AddUnique(FName(*Event.UeMember));

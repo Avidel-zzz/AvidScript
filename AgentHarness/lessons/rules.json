@@ -59,7 +59,8 @@
       "tags": ["schema", "tests", "fixtures"],
       "summary": "最小手写 descriptor 夹具不能只提升 schema_version 而不补齐该版本字段。",
       "prevention": "夹具继续声明其真实最小 schema；需要验证新 schema 时复用 canonical serializer 和生成器，不复制字段集合。",
-      "source": "observed:2026-08-30-P58.C"
+      "source": "observed:2026-08-30-P58.C",
+      "last_observed": "2026-08-31 P60.B1 (把 schema 11 prepared codec 夹具直接提升到 20，遗漏中间包级字段；改由真实 Editor generator 覆盖 schema 20)"
     },
     {
       "id": "protected-dirty-is-immutable",
@@ -103,7 +104,15 @@
       "summary": "长进程返回 session id 时，输出内容不能替代可等待句柄。",
       "prevention": "编排层先保存完整工具结果及 session id，再转发用户可见输出；没有句柄不得宣称后台任务仍可验证。",
       "source": "legacy:2222",
-      "last_observed": "2026-08-30 P58.C (stdout was forwarded before preserving exec session_id)"
+      "last_observed": "2026-08-31 P60.B1 (Guest test 超过首次 yield；完整保留 session_id 后等待到 118/118 最终结果)"
+    },
+    {
+      "id": "search-output-is-scoped-before-execution",
+      "tags": ["rg", "search", "context"],
+      "summary": "跨模块宽检索会产生截断输出，既浪费上下文也可能掩盖真正残留引用。",
+      "prevention": "先按文件或模块冻结检索范围，优先 rg -F 和精确标识符；预估命中较多时分文件检查或限制输出，禁止一次倾倒整个仓库。",
+      "source": "observed:2026-08-31-P60.B1",
+      "last_observed": "2026-08-31 P60.B1 (一次 multicast 分类宽检索输出被截断，随后改为逐文件固定字符串审查)"
     },
     {
       "id": "structured-artifacts-use-parsers",
