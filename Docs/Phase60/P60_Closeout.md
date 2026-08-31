@@ -19,6 +19,9 @@
 - `P60.B1` 完成 Delegate 共享 prepared signature、schema 20 返回值、singlecast Session lease 和
   C# `return/ref/out` 输出事务；旧 schema 保持兼容，外部覆盖不会被 teardown 误恢复；详见
   [P60.B1](P60.B1_Delegate_Signature_And_Singlecast_Lease.md)。
+- `P60.B1G` 完成 architecture strict allowlist 与冻结 hash 的历史基线刷新，新增 Interface-aware
+  compatibility helper 注册输入；21-input clean detached Gate 已恢复通过；详见
+  [P60.B1G](P60.B1G_Architecture_Gate_Baseline_Refresh.md)。
 
 ## 待完成
 
