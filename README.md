@@ -10,7 +10,7 @@
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 Development" src="https://img.shields.io/badge/Platform-Win64-0078D4?logo=windows&logoColor=white">
-  <img alt="Phase 59 D6" src="https://img.shields.io/badge/Status-Phase%2059%20D6-159957">
+  <img alt="Phase 59 D6b" src="https://img.shields.io/badge/Status-Phase%2059%20D6b-159957">
   <img alt="Automation 376/376" src="https://img.shields.io/badge/Automation-376%2F376-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
@@ -26,6 +26,21 @@ Timer、受控 `async/await`、UE latent UFUNCTION、异步对象加载、Overla
 > 当前版本为 **0.1.0 开发者预览**。主线验证环境是 **UE5.8 源码版 +
 > Windows 64 位 Development Editor + Wasmtime 45**。Cook、Shipping、Android
 > 与 iOS 尚未完成正式支持。
+
+## 已实现
+
+| 能力 | 当前状态 |
+| --- | --- |
+| C# 游戏脚本 | C# 编译为 WASM，可接入 `BeginPlay`、`Tick`、`EndPlay`、Timer、事件与受控 `async/await` |
+| UE API | Reflection/Profile 自动生成普通 `UFUNCTION`、`UPROPERTY` 和项目自定义 API；支持常用对象、值类型、固定 `USTRUCT`、字符串与一维数组 |
+| C# 定义 UE 类型 | 可声明 Actor、Component、World/GameInstance Subsystem、函数、属性、继承与 override，并供 Blueprint 继承 |
+| 网络 | 可声明或调用 Server、Client、NetMulticast RPC，读写 replicated property，并接收 RPC/RepNotify handler |
+| 网络闭环 | Generated Actor 已通过 dedicated server + 2 clients、listen server + 1 remote client 的独立进程验证 |
+| 运行时 | Wasmtime 45 主后端，Session 生命周期、generational handle、GC/World 隔离和事务式热重载已接通 |
+| 性能 | 已冻结的 UE prepared reflection、数组区域和游戏 workload 均领先同机 Puerts 对照；纯执行层尚未达到全部 kernel 的领先门禁 |
+
+当前生成 API 不是“完整 UE 全量绑定”：只有 Profile 授权且现有 ABI/codec 能表达的类型会被生成。
+C# Generated Type 的 Editor 与网络闭环已完成；Cook bundle、Shipping 和移动端验收仍在后续阶段。
 
 ## 为什么是 AvidScript
 
@@ -412,36 +427,6 @@ P57.12D5 使用 UE5.8 Development Editor 独立进程跑通 dedicated server + 2
 会整 lane 关闭，并抑制已经迟到的回调。成功对象结果沿用 Session 强引用与 generational capability；callback
 trap 会回滚本次借出的对象 capability。
 
-## 当前能力
-
-| 领域 | 已实现 |
-| --- | --- |
-| C# 定义 UE 类型 | C# 声明真实 Actor、Component、World/GameInstance Subsystem、`UCLASS/UFUNCTION/UPROPERTY`、继承与 override、Blueprint 子类、RepNotify、Server/Client/NetMulticast RPC 和类型生命周期；网络声明自动启用原生复制，generated Actor 已通过 dedicated/listen 独立进程闭环 |
-| C# 生命周期 | `BeginPlay`、`Tick`、`EndPlay`、Timer、Gameplay Event、Overlap 路由、受控 `async void` 导出 |
-| 确定性 Continuation | `Delay` / `NextTick`、`FStreamableManager` 异步对象加载、生成式 UE latent producer、typed outcome、显式 cancellation source、状态与对象结果、CPS dispatcher、不透明 token、Session active/prepared 事务、owner generation/World liveness 围栏与 teardown |
-| 受控 async/await | 多个顺序 await、分支/循环/switch/一维数组 foreach 内部 await、固定值与数组引用 local 跨 await、局部重赋值、`if/else`、integral/enum `switch`、`for`/`foreach`/`while`/`do`、`break`/`continue`/`return`、continuation CFG、per-await liveness frame、Reflection 生成 `FooAsync`、零 Guest 堆 CPS segment、稳定 resume debug map、store/read/schedule fail closed；不依赖 CLR `Task` Runtime |
-| UE 事件订阅 | Profile 显式授权的动态多播委托；任意 Session capability UObject 源、生成式 `[AvidEvent]` / `AvidSubscriptions`、显式 token/cancel、事务式热重载与自动解绑 |
-| UE 网络交互 | 生成式 Server、Client、NetMulticast RPC；replicated property 双端读取、authority 写入与 Push Model dirty；Profile 授权的 native/Blueprint-bytecode RPC 与 RepNotify 入站 C# handler；`replace/before/after` 链式语义、Session 对象路由、64 项重入 FIFO、authority/callspace 前置校验与候选热重载副作用隔离；dedicated + 2 clients 与 listen + 1 remote client 独立进程闭环 |
-| 生成式 Binding | Profile 授权的普通 `UFUNCTION`/`UPROPERTY`、Generated S1、prepared dynamic executor、严格 fallback |
-| UE 值类型 | `FVector`、`FRotator`、`FTransform`、enum、`FName`、`FString` |
-| 自定义 USTRUCT | 递归固定宽度字段图；value/const-ref/ref/out/return 与 property get/set；对象叶 capability |
-| 变长字符串 | Session-owned UTF-8 capability heap；跨调用 intern；reload/跨 Runtime 失效；多输出原子发布 |
-| 通用数组 | schema v10 一维 `TArray<T>` -> C# `T[]`；函数全方向、属性读写、编译器托管 region、Snapshot/Flush、显式 Release，以及 schema v16 数组引用跨 await 与 foreach CFG |
-| UObject / Actor | typed `UE.Self`、generational handle、异步加载结果 `TryCast`、`SpawnActor`、`DestroyActor`、`IsA`、checked cast |
-| Component | descriptor 驱动工厂、typed `FindComponent`、Attach/Detach、显式 `Release` |
-| 对象安全 | Session 所有权、World 隔离、失效句柄检测、UObject GC 强引用、Component 回收 |
-| 热重载 | C# 候选加载、显式状态迁移、失败回滚、调试映射；Generated Type package 自动监听、body-only 多实例事务更新、package 链去重；反射结构变化明确要求 native rebuild |
-| 调用完整性 | Binding package、WASM import、immutable codec program、prepared target 与 Runtime Session 多层 provenance |
-| 性能热路径 | callback-epoch fused host cell、prepared export、`TickHot` / Event hot result |
-| VM 后端 | Win64 Wasmtime 45 主后端；WAMR 兼容后端；同一 C# Guest 双后端验证 |
-
-当前 UE5.8 EngineGameplay profile 生成 `371` 个 reflection binding，加上 object/owner 与
-六个 value capability，manifest 授权 `379` 个 import；这代表默认 gameplay surface，不等于完整 UE API 总量。项目 profile
-可以加入自己的 UCLASS/UFUNCTION，只要类型可由现有 descriptor/codec 表达，就会自动生成。
-
-生成 API 的覆盖范围由项目 profile、UE Reflection 结果和当前 ABI 类型能力共同决定。
-普通反射路径不会因为 fast path 缺失而静默调用错误入口。
-
 ## 性能
 
 性能数据按测试层次分开报告。**UE 交互、完整游戏 workload 与纯 Wasm 执行不是同一
@@ -525,7 +510,7 @@ P50 几何均值 `0.9800x`、P95 几何均值 `1.0006x`，P50/P95 kernel win rat
 正式性能候选：
 [`4c10239`](https://github.com/Avidel-zzz/AvidScript/commit/4c1023989596bba112de345b5533546655559df7)；
 当前功能候选：
-[`d67f2d6`](https://github.com/Avidel-zzz/AvidScript/commit/d67f2d61faca272b20cd5a063e82ba881012073d)。
+[`fdaf598`](https://github.com/Avidel-zzz/AvidScript/commit/fdaf598115e49116601b9b897411ba58579e69d8)。
 
 ## 架构
 
@@ -709,18 +694,13 @@ cmd /c Build\BuildWAMRWin64.cmd
 - UE5.8 no-clean Editor build 与 `Automation RunTests AvidScript`；
 - 同机、候选绑定的 Puerts/Wasmtime 正式性能矩阵。
 
-当前最近一次完整 AvidScript Automation 基线为 Phase 57.12D5 的 **376/376 通过**，固定 .NET
-完整基线为 `246/246`，PowerShell 合同为 `117/117`，PowerShell parser 为 `58/58`。UE5.8 no-clean
-`AvidTPSTemplateEditor` 目标构建成功，clean candidate `da198b2/fea4893` 架构门禁通过。D1 已完成项目自定义
-Server、Client 与 NetMulticast UFUNCTION 的生成式调用；D2 已完成 replicated property 双端读取、
-authority 写入、活动 Reflection/ClassReps 复核与 Push Model dirty；D3 已完成 Profile 授权的 native
-RPC/RepNotify 入站 C# handler、Session 对象路由与事务式 hook 生命周期；D4 已完成 Blueprint bytecode
-handler、`replace/before/after` 原实现链路与深拷贝重入 FIFO；D5 已用 dedicated server + 2 clients 和
-listen server + 1 remote client 独立进程证明 BeginPlay -> RPC -> replicated property -> RepNotify -> ack。
-网络路由、复制发送和 RepNotify 触发时机仍由 UE 负责。
-最新纯执行层正式 benchmark 使用 clean `9148bff/73eb948d` 候选，12-kernel
-correctness failure 为 0、fallback 为 false；P95 尾延迟改善但领导力门禁仍未关闭，
-未解决债务已转移到 P59。阶段末完整 AvidScript Automation 为 376/376 Success。
+最近一次完整 AvidScript Automation 基线为 **376/376 通过**。P59.D6a 额外通过 Semantic
+`94/94`、生成器 `4/4`、Generated Types `6/6`、UE5.8 no-clean Editor build 与 clean architecture gate；
+P59.D6b 又完成两组独立进程网络拓扑。C# Generated Type 现已覆盖复制启用、Server/Client/NetMulticast
+RPC、replicated property 与 RepNotify，网络路由和复制时机仍由 UE 原生网络栈负责。
+
+纯执行层 12-kernel 候选 correctness failure 为 0、fallback 为 false，但 P95 领导力门禁仍未关闭；
+README 中的性能领先结论仅限上表已冻结 workload，不外推为所有代码都领先 V8。
 最新功能报告见 [P59.D6b 中文完成报告](Docs/Phase59/P59.D6b_Generated_Type_Network_Topology.md)，
 最新性能报告见 [P57.13 中文结果](Docs/Phase57/P57.13_Cranelift_Speed_Profile.md)。
 
