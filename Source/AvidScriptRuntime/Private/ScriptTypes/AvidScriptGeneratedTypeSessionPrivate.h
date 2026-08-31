@@ -32,6 +32,13 @@ struct FAvidScriptGeneratedPropertyHostContext
 	FAvidScriptGeneratedPropertyF64Write WriteF64 = nullptr;
 };
 
+struct FAvidScriptGeneratedPreparedTypeRoute
+{
+	bool bEnabled = false;
+	TArray<FAvidScriptVmPreparedExportCall> Calls;
+	TArray<uint8> CallShapes;
+};
+
 struct FAvidScriptRuntimeGeneratedTypeInstanceState
 {
 	TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot> Registry;
@@ -41,6 +48,5 @@ struct FAvidScriptRuntimeGeneratedTypeInstanceState
 	FAvidScriptGeneratedTypeInstanceRegistration Registration;
 	TArray<TUniquePtr<FAvidScriptGeneratedPropertyHostContext>> PropertyContexts;
 	TArray<FAvidScriptVmTypedHostImport> PropertyImports;
-	TArray<FAvidScriptVmPreparedExportCall> PreparedCalls;
-	TArray<uint8> CallShapes;
+	TArray<FAvidScriptGeneratedPreparedTypeRoute> PreparedTypeRoutes;
 };

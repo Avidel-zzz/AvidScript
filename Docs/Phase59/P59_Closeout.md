@@ -49,6 +49,9 @@
 - `P59.C2c4e`：prepared UPROPERTY 已按 WASM cell 家族扩展为表驱动 `bool/int32/int64/float/double`
   codec；冷路径缓存 FProperty adapter，热路径只校验 packed ObjectHandle 并调用函数指针；真实 C#
   `Activate` 已一次完成五种标量的 UE 原生状态读写。
+- `P59.C2c4f`：派生实例已按脚本祖先类型准备稠密 export 路由；UE 虚调用进入最派生 override，
+  未覆写 UFUNCTION 与父类 lifecycle 通过父类 ordinal 调度，C# `base.Method()` 在 WASM 内直接调用
+  父类脚本函数；热路径保持无名称查找、无反射遍历和无分配。
 
 ## 待完成
 

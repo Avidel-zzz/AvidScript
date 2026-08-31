@@ -82,6 +82,11 @@ bool FAvidScriptGeneratedCSharpPropertyInteractionTest::RunTest(
 	World->InitializeActorsForPlay(Url);
 	World->BeginPlay();
 	World->SetBegunPlay(true);
+	if (!Projectile->HasActorBegunPlay())
+	{
+		Projectile->DispatchBeginPlay();
+	}
+	TestTrue(TEXT("C# BeginPlay updates the UE property"), Projectile->HasBegunPlay);
 
 	FString RuntimeError;
 	if (!TestTrue(
@@ -101,6 +106,57 @@ bool FAvidScriptGeneratedCSharpPropertyInteractionTest::RunTest(
 	TestEqual(TEXT("C# property codec updates int64"), Projectile->AccumulatedDamage, 125LL);
 	TestEqual(TEXT("C# property codec updates float64"), Projectile->PrecisionScale, 3.0);
 	TestTrue(TEXT("C# property codec updates bool"), Projectile->IsActive);
+
+	DestroyGeneratedScriptWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptGeneratedCSharpInheritanceDispatchTest,
+	"AvidScript.GeneratedTypes.CSharpInheritanceDispatch",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptGeneratedCSharpInheritanceDispatchTest::RunTest(
+	const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	UWorld* World = nullptr;
+	if (!CreateGeneratedScriptWorld(World))
+	{
+		AddError(TEXT("Failed to create the generated script inheritance test world."));
+		return true;
+	}
+
+	AProjectile* const Projectile = World->SpawnActor<AExplosiveProjectile>();
+	if (!TestNotNull(TEXT("Generated derived C# projectile spawns"), Projectile))
+	{
+		DestroyGeneratedScriptWorld(World);
+		return true;
+	}
+	const FURL Url;
+	World->InitializeActorsForPlay(Url);
+	World->BeginPlay();
+	World->SetBegunPlay(true);
+	if (!Projectile->HasActorBegunPlay())
+	{
+		Projectile->DispatchBeginPlay();
+	}
+	TestTrue(
+		TEXT("Derived instance reaches the inherited C# BeginPlay route"),
+		Projectile->HasBegunPlay);
+
+	Projectile->Activate(2.0f);
+	TestEqual(
+		TEXT("Virtual native dispatch reaches the C# override and direct base call"),
+		Projectile->Damage,
+		100.0f);
+	TestEqual(
+		TEXT("Inherited C# UFUNCTION routes through the base type ordinal"),
+		Projectile->GetActivationCount(),
+		2);
+	TestEqual(TEXT("C# base call updates int64 state"), Projectile->AccumulatedDamage, 125LL);
+	TestEqual(TEXT("C# base call updates float64 state"), Projectile->PrecisionScale, 3.0);
+	TestTrue(TEXT("C# base call updates bool state"), Projectile->IsActive);
 
 	DestroyGeneratedScriptWorld(World);
 	return true;

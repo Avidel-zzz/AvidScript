@@ -818,8 +818,7 @@ bool FAvidScriptRuntimeSession::StopAndUnload(FAvidScriptWasmSmokeResult& OutRes
 	}
 	if (GeneratedTypeInstance)
 	{
-		GeneratedTypeInstance->PreparedCalls.Reset();
-		GeneratedTypeInstance->CallShapes.Reset();
+		GeneratedTypeInstance->PreparedTypeRoutes.Reset();
 	}
 	Continuations->ReleaseRetiredEndpoint();
 	HostContext.Continuations = nullptr;
@@ -1239,13 +1238,11 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 			TEXT("rebuild and validate the candidate before activation"));
 		return false;
 	}
-	TArray<FAvidScriptVmPreparedExportCall> CandidateGeneratedCalls;
-	TArray<uint8> CandidateGeneratedCallShapes;
+	TArray<FAvidScriptGeneratedPreparedTypeRoute> CandidateGeneratedTypeRoutes;
 	FString GeneratedTypePrepareError;
 	if (!PrepareGeneratedTypeExports(
 		*CandidateRuntime,
-		CandidateGeneratedCalls,
-		CandidateGeneratedCallShapes,
+		CandidateGeneratedTypeRoutes,
 		GeneratedTypePrepareError))
 	{
 		SetReloadFailure(
@@ -1491,8 +1488,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 	LiveRuntime = MoveTemp(CandidateRuntime);
 	if (GeneratedTypeInstance)
 	{
-		GeneratedTypeInstance->PreparedCalls = MoveTemp(CandidateGeneratedCalls);
-		GeneratedTypeInstance->CallShapes = MoveTemp(CandidateGeneratedCallShapes);
+		GeneratedTypeInstance->PreparedTypeRoutes = MoveTemp(CandidateGeneratedTypeRoutes);
 	}
 	Scheduler->Attach(*LiveRuntime);
 	LiveManifest = Manifest;

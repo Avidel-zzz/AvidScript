@@ -462,12 +462,10 @@ bool FAvidScriptRuntimeSession::ClearGeneratedTypeInstance(FString& OutError)
 
 bool FAvidScriptRuntimeSession::PrepareGeneratedTypeExports(
 	FAvidScriptWasmRuntimeInstance& Runtime,
-	TArray<FAvidScriptVmPreparedExportCall>& OutCalls,
-	TArray<uint8>& OutCallShapes,
+	TArray<FAvidScriptGeneratedPreparedTypeRoute>& OutRoutes,
 	FString& OutError) const
 {
-	OutCalls.Reset();
-	OutCallShapes.Reset();
+	OutRoutes.Reset();
 	OutError.Reset();
 	if (!GeneratedTypeInstance)
 	{
@@ -481,48 +479,64 @@ bool FAvidScriptRuntimeSession::PrepareGeneratedTypeExports(
 		return false;
 	}
 
-	const FAvidScriptGeneratedTypePlan* const Type =
+	UObject* const Receiver = GeneratedTypeInstance->Receiver.Get();
+	const FAvidScriptGeneratedTypePlan* const ConcreteType =
 		GeneratedTypeInstance->Registry->FindTypeByOrdinal(
 			GeneratedTypeInstance->TypeOrdinal);
-	if (Type == nullptr || Type->Class == nullptr
-		|| !GeneratedTypeInstance->Receiver->IsA(Type->Class))
+	if (ConcreteType == nullptr || ConcreteType->Class == nullptr
+		|| Receiver == nullptr || !Receiver->IsA(ConcreteType->Class))
 	{
 		OutError = TEXT("generated type instance no longer satisfies its registry plan");
 		return false;
 	}
 
-	OutCalls.SetNum(Type->Members.Num());
-	OutCallShapes.SetNumZeroed(Type->Members.Num());
-	for (const FAvidScriptGeneratedMemberPlan& Member : Type->Members)
+	OutRoutes.SetNum(GeneratedTypeInstance->Registry->Num());
+	for (const FAvidScriptGeneratedTypePlan& Type : GeneratedTypeInstance->Registry->GetTypes())
 	{
-		if (Member.Kind != EAvidScriptGeneratedMemberKind::Function)
+		if (Type.Class == nullptr || !Receiver->IsA(Type.Class))
 		{
 			continue;
 		}
-		FAvidScriptVmPreparedExportCall& Call = OutCalls[Member.MemberOrdinal];
-		FString PrepareError;
-		if (!Runtime.PrepareNamedExportCall(Member.ExportName, Call, PrepareError))
+		if (!OutRoutes.IsValidIndex(static_cast<int32>(Type.TypeOrdinal)))
 		{
-			OutError = FString::Printf(
-				TEXT("stable_member_id=%s; export=%s; %s"),
-				*Member.StableMemberId,
-				*Member.ExportName,
-				PrepareError.IsEmpty() ? TEXT("prepare failed") : *PrepareError);
-			OutCalls.Reset();
-			OutCallShapes.Reset();
+			OutError = TEXT("generated type registry contains a non-dense type ordinal");
+			OutRoutes.Reset();
 			return false;
 		}
-		if (Call.ParameterCellCount < 2)
+
+		FAvidScriptGeneratedPreparedTypeRoute& Route = OutRoutes[Type.TypeOrdinal];
+		Route.bEnabled = true;
+		Route.Calls.SetNum(Type.Members.Num());
+		Route.CallShapes.SetNumZeroed(Type.Members.Num());
+		for (const FAvidScriptGeneratedMemberPlan& Member : Type.Members)
 		{
-			OutError = FString::Printf(
-				TEXT("generated export '%s' omits the packed ObjectHandle receiver"),
-				*Member.ExportName);
-			OutCalls.Reset();
-			OutCallShapes.Reset();
-			return false;
+			if (Member.Kind != EAvidScriptGeneratedMemberKind::Function)
+			{
+				continue;
+			}
+			FAvidScriptVmPreparedExportCall& Call = Route.Calls[Member.MemberOrdinal];
+			FString PrepareError;
+			if (!Runtime.PrepareNamedExportCall(Member.ExportName, Call, PrepareError))
+			{
+				OutError = FString::Printf(
+					TEXT("stable_member_id=%s; export=%s; %s"),
+					*Member.StableMemberId,
+					*Member.ExportName,
+					PrepareError.IsEmpty() ? TEXT("prepare failed") : *PrepareError);
+				OutRoutes.Reset();
+				return false;
+			}
+			if (Call.ParameterCellCount < 2)
+			{
+				OutError = FString::Printf(
+					TEXT("generated export '%s' omits the packed ObjectHandle receiver"),
+					*Member.ExportName);
+				OutRoutes.Reset();
+				return false;
+			}
+			Route.CallShapes[Member.MemberOrdinal] = static_cast<uint8>(
+				ResolveCallShape(Member, Call));
 		}
-		OutCallShapes[Member.MemberOrdinal] = static_cast<uint8>(
-			ResolveCallShape(Member, Call));
 	}
 	return true;
 }
@@ -539,24 +553,25 @@ bool FAvidScriptRuntimeSession::InvokeGeneratedTypeMember(
 		|| !GeneratedTypeInstance
 		|| GeneratedTypeInstance->Receiver.Get() != &Receiver
 		|| GeneratedTypeInstance->ReceiverHandle != ReceiverHandle
-		|| GeneratedTypeInstance->TypeOrdinal != TypeOrdinal
 		|| !GeneratedTypeInstance->Registry.IsValid()
-		|| !GeneratedTypeInstance->PreparedCalls.IsValidIndex(static_cast<int32>(MemberOrdinal))
-		|| !GeneratedTypeInstance->CallShapes.IsValidIndex(static_cast<int32>(MemberOrdinal)))
+		|| !GeneratedTypeInstance->PreparedTypeRoutes.IsValidIndex(static_cast<int32>(TypeOrdinal)))
 	{
 		return false;
 	}
 
-	const FAvidScriptGeneratedTypePlan* const Type =
-		GeneratedTypeInstance->Registry->FindTypeByOrdinal(TypeOrdinal);
-	const FAvidScriptGeneratedMemberPlan* const Member =
-		Type != nullptr ? Type->FindMember(MemberOrdinal) : nullptr;
-	const FAvidScriptVmPreparedExportCall& Call =
-		GeneratedTypeInstance->PreparedCalls[MemberOrdinal];
+	const FAvidScriptGeneratedPreparedTypeRoute& Route =
+		GeneratedTypeInstance->PreparedTypeRoutes[TypeOrdinal];
+	if (!Route.bEnabled
+		|| !Route.Calls.IsValidIndex(static_cast<int32>(MemberOrdinal))
+		|| !Route.CallShapes.IsValidIndex(static_cast<int32>(MemberOrdinal)))
+	{
+		return false;
+	}
+
+	const FAvidScriptVmPreparedExportCall& Call = Route.Calls[MemberOrdinal];
 	const EGeneratedCallShape Shape = static_cast<EGeneratedCallShape>(
-		GeneratedTypeInstance->CallShapes[MemberOrdinal]);
-	if (Member == nullptr || Member->Kind != EAvidScriptGeneratedMemberKind::Function
-		|| !Call.IsValid() || Shape == EGeneratedCallShape::Unsupported)
+		Route.CallShapes[MemberOrdinal]);
+	if (!Call.IsValid() || Shape == EGeneratedCallShape::Unsupported)
 	{
 		return false;
 	}

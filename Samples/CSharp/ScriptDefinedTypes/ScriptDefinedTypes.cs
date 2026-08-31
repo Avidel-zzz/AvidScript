@@ -24,6 +24,9 @@ public partial class Projectile : AvidActor
     [UProperty(BlueprintReadWrite = true, Category = "Projectile")]
     public bool IsActive { get; set; }
 
+    [UProperty(BlueprintReadOnly = true, Category = "Projectile")]
+    public bool HasBegunPlay { get; private set; }
+
     [UFunction(BlueprintCallable = true, Category = "Projectile")]
     public virtual void Activate(float damageScale)
     {
@@ -34,6 +37,12 @@ public partial class Projectile : AvidActor
         IsActive = true;
     }
 
+    [UFunction(BlueprintPure = true, Category = "Projectile")]
+    public int GetActivationCount()
+    {
+        return ActivationCount;
+    }
+
     [UFunction]
     private void OnRepDamage()
     {
@@ -41,6 +50,7 @@ public partial class Projectile : AvidActor
 
     protected override void BeginPlay()
     {
+        HasBegunPlay = true;
     }
 }
 

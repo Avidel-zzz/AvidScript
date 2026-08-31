@@ -173,6 +173,30 @@
       "prevention": "VM Load 冷路径先按 bSupplementalRuntimeAuthority 分类；import policy 只接收 supplemental 子集，typed linker validator 再核对完整集合与 package ordinal/signature，相关改动必须同时跑 package-backed 和 supplemental 两类用例。",
       "source": "observed:2026-08-31-P59.C2c4e",
       "last_observed": "2026-08-31 P59.C2c4e (Wasmtime Load 将完整 typed import 集合误传给 supplemental policy，旧 package-backed TypedHost 用例被拒绝)"
+    },
+    {
+      "id": "generated-type-routes-cover-script-ancestry",
+      "tags": ["runtime", "inheritance", "dispatch", "generated-types"],
+      "summary": "最派生脚本实例必须同时承接自身和脚本祖先壳层的类型序号。",
+      "prevention": "候选 Runtime 冷路径为 receiver 的完整脚本 UClass 祖先准备按 type/member ordinal 索引的路由；热路径只消费启用标记和 prepared call，兄弟类型保持 fail-closed。",
+      "source": "observed:2026-08-31-P59.C2c4f",
+      "last_observed": "2026-08-31 P59.C2c4f (单一最派生 PreparedCalls 会拒绝父类 lifecycle 和未覆写 UFUNCTION)"
+    },
+    {
+      "id": "formal-script-type-build-uses-published-binding-package",
+      "tags": ["bindings", "package", "build", "provenance"],
+      "summary": "正式脚本类型生成不能消费测试目录中的裁剪 binding package。",
+      "prevention": "先通过 AvidScript.PublishCSharpBindings 发布同源 gameplay package，再校验 package required_imports 与 descriptor bindings/shared imports 的合同；测试 subset 只用于其所属合同测试。",
+      "source": "observed:2026-08-31-P59.C2c4f",
+      "last_observed": "2026-08-31 P59.C2c4f (RuntimeSetPackage 测试子集被误用，Runtime 以 dynamic import count mismatch 拒绝安装)"
+    },
+    {
+      "id": "actor-lifecycle-tests-dispatch-begin-play",
+      "tags": ["ue", "automation", "actor", "lifecycle"],
+      "summary": "手工创建的 Automation UWorld 不保证已 Spawn Actor 自动收到 BeginPlay。",
+      "prevention": "测试在 World 初始化后检查 HasActorBegunPlay；未触发时调用 DispatchBeginPlay，再断言脚本 Session 和生命周期效果，不能用 source readback 代替事件证据。",
+      "source": "observed:2026-08-31-P59.C2c4f",
+      "last_observed": "2026-08-31 P59.C2c4f (仅 World.BeginPlay 未注册动态 Actor 的 generated Session，派生路由测试未进入 Session)"
     }
   ]
 }

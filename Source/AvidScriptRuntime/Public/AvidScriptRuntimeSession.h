@@ -12,6 +12,7 @@ class FAvidScriptSessionInboundHandlers;
 class FAvidScriptSessionContinuations;
 class IAvidScriptBindingHostEffectJournal;
 class FAvidScriptGeneratedTypeRegistrySnapshot;
+struct FAvidScriptGeneratedPreparedTypeRoute;
 struct FAvidScriptRuntimeGeneratedTypeInstanceState;
 struct FAvidScriptRuntimeArtifact;
 
@@ -185,8 +186,7 @@ private:
 		FAvidScriptWasmReloadResult& OutResult);
 	bool PrepareGeneratedTypeExports(
 		FAvidScriptWasmRuntimeInstance& Runtime,
-		TArray<FAvidScriptVmPreparedExportCall>& OutCalls,
-		TArray<uint8>& OutCallShapes,
+		TArray<FAvidScriptGeneratedPreparedTypeRoute>& OutRoutes,
 		FString& OutError) const;
 	bool PumpReadyContinuations(FAvidScriptWasmSmokeResult& OutResult);
 
