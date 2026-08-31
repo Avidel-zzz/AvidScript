@@ -7,6 +7,14 @@ namespace AvidScript.UeTypeGenerator;
 
 internal static class UeTypeGenerationPlanner
 {
+    private static readonly string[] GeneratedImplementationFlags =
+    {
+        "blueprint_native_event",
+        "server",
+        "client",
+        "net_multicast",
+    };
+
     private static readonly IReadOnlyDictionary<string, string> NativeRootTypes =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -36,6 +44,10 @@ internal static class UeTypeGenerationPlanner
             declaration => declaration.TypeId,
             declaration => GetCppName(declaration.Kind, declaration.EngineName),
             StringComparer.Ordinal);
+        Dictionary<string, SemanticUeTypeDeclaration> declarationsByTypeId =
+            document.UeTypeDeclarations.ToDictionary(
+                declaration => declaration.TypeId,
+                StringComparer.Ordinal);
         Dictionary<string, SemanticCallable> callables = document.Callables.ToDictionary(
             callable => callable.MethodSymbolId,
             StringComparer.Ordinal);
@@ -73,7 +85,8 @@ internal static class UeTypeGenerationPlanner
                     memberOrdinals[function.MethodSymbolId],
                     callables[function.MethodSymbolId],
                     symbols[function.MethodSymbolId],
-                    typeMapper)).ToArray();
+                    typeMapper,
+                    declarationsByTypeId)).ToArray();
             string baseCppName = scriptCppNames.TryGetValue(declaration.BaseTypeId, out string? scriptBase)
                 ? scriptBase
                 : NativeRootTypes[declaration.Kind];
@@ -100,7 +113,8 @@ internal static class UeTypeGenerationPlanner
         int memberOrdinal,
         SemanticCallable callable,
         SemanticSymbol symbol,
-        UeCppTypeMapper typeMapper)
+        UeCppTypeMapper typeMapper,
+        IReadOnlyDictionary<string, SemanticUeTypeDeclaration> declarationsByTypeId)
     {
         if (callable.Parameters.Select(parameter => parameter.Ordinal)
             .SequenceEqual(Enumerable.Range(0, callable.Parameters.Count)) == false
@@ -124,9 +138,78 @@ internal static class UeTypeGenerationPlanner
             SemanticUeTypeRuntimeContract.GetFunctionExportName(function.MethodSymbolId),
             typeMapper.MapCallable(callable.ReturnTypeId),
             parameters,
-            function.Flags,
+            ResolveFunctionFlags(owner, function, declarationsByTypeId),
             function.Category,
             symbol.Accessibility);
+    }
+
+    private static IReadOnlyList<string> ResolveFunctionFlags(
+        SemanticUeTypeDeclaration owner,
+        SemanticUeFunctionDeclaration function,
+        IReadOnlyDictionary<string, SemanticUeTypeDeclaration> declarationsByTypeId)
+    {
+        if (!function.Flags.Contains("override"))
+        {
+            return function.Flags;
+        }
+
+        string[] inheritedShape = FindInheritedImplementationShape(
+            owner.BaseTypeId,
+            function.Name,
+            declarationsByTypeId);
+        if (inheritedShape.Length == 0)
+        {
+            return function.Flags;
+        }
+
+        string[] declaredShape = GeneratedImplementationFlags
+            .Where(function.Flags.Contains)
+            .ToArray();
+        if (declaredShape.Length > 0 && !declaredShape.SequenceEqual(inheritedShape))
+        {
+            throw new InvalidOperationException(
+                $"UFunction override '{function.MethodSymbolId}' changes its inherited generated implementation shape.");
+        }
+
+        List<string> effectiveFlags = function.Flags.ToList();
+        int insertionIndex = effectiveFlags.FindIndex(flag => flag is "lifecycle" or "override");
+        if (insertionIndex < 0)
+        {
+            insertionIndex = effectiveFlags.Count;
+        }
+        foreach (string inheritedFlag in inheritedShape)
+        {
+            if (!effectiveFlags.Contains(inheritedFlag))
+            {
+                effectiveFlags.Insert(insertionIndex++, inheritedFlag);
+            }
+        }
+        return effectiveFlags;
+    }
+
+    private static string[] FindInheritedImplementationShape(
+        string baseTypeId,
+        string functionName,
+        IReadOnlyDictionary<string, SemanticUeTypeDeclaration> declarationsByTypeId)
+    {
+        string cursor = baseTypeId;
+        while (declarationsByTypeId.TryGetValue(cursor, out SemanticUeTypeDeclaration? declaration))
+        {
+            SemanticUeFunctionDeclaration? inheritedFunction = declaration.Functions.SingleOrDefault(
+                candidate => candidate.Name == functionName);
+            if (inheritedFunction is not null)
+            {
+                string[] inheritedShape = GeneratedImplementationFlags
+                    .Where(inheritedFunction.Flags.Contains)
+                    .ToArray();
+                if (inheritedShape.Length > 0)
+                {
+                    return inheritedShape;
+                }
+            }
+            cursor = declaration.BaseTypeId;
+        }
+        return Array.Empty<string>();
     }
 
     private static string GetCppName(string kind, string engineName)

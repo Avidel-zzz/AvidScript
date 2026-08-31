@@ -21,7 +21,7 @@
       "summary": "概念名称不能当作真实文件路径。",
       "prevention": "先用 rg --files 建立索引，再对索引中的字面路径读取；通配符只放在 rg -g 参数。",
       "source": "legacy:1931",
-      "last_observed": "2026-08-30 P58.C (guessed two source paths and passed a wildcard as an rg path)"
+      "last_observed": "2026-08-31 P59.D2 (再次把 Windows 通配符作为 rg 路径传入，产生 os error 123)"
     },
     {
       "id": "one-command-one-evidence-domain",
@@ -29,7 +29,7 @@
       "summary": "一个 shell 调用只承担一个逻辑动作或证据域。",
       "prevention": "调度前拒绝用分号、&& 或 || 串联独立动作；多文件读取使用并行工具或逐项调用。",
       "source": "legacy:1672",
-      "last_observed": "2026-08-30 Agent Harness H1 (line count and file read were joined with a PowerShell semicolon)"
+      "last_observed": "2026-08-31 P59.D2 (把 git status 与文件索引用 PowerShell 分号放入同一 shell 调用)"
     },
     {
       "id": "dotnet-executable-tests-use-run",
@@ -164,7 +164,7 @@
       "summary": "跨 Semantic、生成器和 Runtime 的 schema 升级必须一次同步所有生产者、消费者与固定测试夹具。",
       "prevention": "实现前用 rg 建立版本 token 矩阵，至少覆盖工具常量、构建脚本、Runtime 解析器、启动 descriptor 校验、架构 Gate 和测试 JSON；完成矩阵替换后再启动首次 UE Automation。",
       "source": "observed:2026-08-31-P59.C2c4d",
-      "last_observed": "2026-08-31 P59.C2c4d (generator 先升级到 5/1.4，Runtime Registry 与固定测试 manifest 未同步，首次 Automation 被严格门禁拒绝)"
+      "last_observed": "2026-08-31 P59.D2 (generator 升级到 1.5 后首次正式构建才发现 BuildCSharpScriptTypes 仍校验 1.4)"
     },
     {
       "id": "typed-import-authorities-are-partitioned-before-policy-validation",
@@ -205,6 +205,30 @@
       "prevention": "传给 TestNotNull、FindFProperty、SpawnActor 或 UClass API 前显式调用 GeneratedClass.Get()；新增 Editor 测试先核对 UE5.8 头文件的实际字段类型。",
       "source": "observed:2026-08-31-P59.D1",
       "last_observed": "2026-08-31 P59.D1 (首次 UBT 因 TestNotNull 无法从 TSubclassOf 推导裸指针而失败)"
+    },
+    {
+      "id": "generated-overrides-inherit-native-implementation-shape",
+      "tags": ["generator", "inheritance", "blueprint", "rpc"],
+      "summary": "脚本 override 必须继承父 UFunction 的 NativeEvent 或 RPC 实现入口形态。",
+      "prevention": "生成器冷路径沿脚本父类链解析同名 override，只继承 blueprint_native_event/server/client/net_multicast；显式冲突 fail-closed，生成的 C++ override 统一落到 _Implementation。",
+      "source": "observed:2026-08-31-P59.D2",
+      "last_observed": "2026-08-31 P59.D2 (派生 C# override 未重复标注 NativeEvent 时错误生成 Activate override，而非 Activate_Implementation override)"
+    },
+    {
+      "id": "ue-editor-includes-use-exported-module-paths",
+      "tags": ["ue", "include", "build", "editor"],
+      "summary": "UE include 必须使用模块导出的 include 名称，不能根据磁盘目录猜前缀。",
+      "prevention": "先用 rg --files 在 UE5.8 Source 中定位头文件，再按模块 Public/Classes 导出根决定 include；新增 include 后只做 no-clean 增量 UBT。",
+      "source": "observed:2026-08-31-P59.D2",
+      "last_observed": "2026-08-31 P59.D2 (EdGraphSchema_K2.h 被误写成不存在的 EdGraph/EdGraphSchema_K2.h)"
+    },
+    {
+      "id": "automation-exec-command-queues-one-test-filter",
+      "tags": ["ue", "automation", "verification", "workflow"],
+      "summary": "一次 ExecCmds 不应假定多个 Automation RunTests 会按序全部执行。",
+      "prevention": "优先选择覆盖目标的共同测试前缀；没有共同前缀时使用独立唯一日志启动，并逐个核对 Found 数量与 Test Completed 计数。",
+      "source": "observed:2026-08-31-P59.D2",
+      "last_observed": "2026-08-31 P59.D2 (同一 ExecCmds 中第二个 RunTests 未入队，日志只发现首个前缀的 3 个测试)"
     }
   ]
 }

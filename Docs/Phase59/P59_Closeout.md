@@ -55,6 +55,9 @@
 - `P59.C`：状态机已标记完成；候选提交 `3ef303d` 的隔离 clean architecture gate 通过。
 - `P59.D1`：真实 Blueprint 已能以 C# 生成 `AProjectile` 为父类完成创建、编译、CDO 默认值覆写、
   `.uasset` 保存/卸载/重载，并在 Spawn 后通过 `ProcessEvent` 进入 C# WASM 游戏逻辑。
+- `P59.D2`：C# `BlueprintNativeEvent` 已生成标准 UHT 壳层；派生 C# override 自动继承
+  `_Implementation` 形态，真实 Blueprint override graph 的 Parent Call 可在保存/重载后进入 C# WASM，
+  完成 `Damage 40 -> 80` 与 `ActivationCount 0 -> 2` 的状态闭环。
 
 ## 待完成
 

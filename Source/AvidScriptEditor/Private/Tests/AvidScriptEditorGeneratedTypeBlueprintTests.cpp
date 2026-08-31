@@ -4,8 +4,12 @@
 #include "Engine/BlueprintGeneratedClass.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "EdGraph/EdGraph.h"
+#include "EdGraphSchema_K2.h"
 #include "GameFramework/Actor.h"
 #include "HAL/FileManager.h"
+#include "K2Node_CallParentFunction.h"
+#include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/PackageName.h"
@@ -131,6 +135,22 @@ bool FAvidScriptEditorGeneratedTypeBlueprintSubclassTest::RunTest(
 		{
 			return true;
 		}
+		UEdGraph* const ActivateOverrideGraph = FBlueprintEditorUtils::CreateNewGraph(
+			Blueprint.Get(),
+			TEXT("Activate"),
+			UEdGraph::StaticClass(),
+			UEdGraphSchema_K2::StaticClass());
+		FBlueprintEditorUtils::AddFunctionGraph(
+			Blueprint.Get(),
+			ActivateOverrideGraph,
+			false,
+			ScriptParent);
+		TArray<UK2Node_CallParentFunction*> ParentCalls;
+		ActivateOverrideGraph->GetNodesOfClass(ParentCalls);
+		TestEqual(
+			TEXT("Blueprint override graph contains one Parent Call"),
+			ParentCalls.Num(),
+			1);
 		FKismetEditorUtilities::CompileBlueprint(Blueprint.Get());
 		UClass* const BlueprintClass = Blueprint->GeneratedClass;
 		if (!TestNotNull(TEXT("Blueprint subclass compiles"), BlueprintClass))
@@ -144,8 +164,12 @@ bool FAvidScriptEditorGeneratedTypeBlueprintSubclassTest::RunTest(
 		FFloatProperty* const DamageProperty =
 			FindFProperty<FFloatProperty>(BlueprintClass, TEXT("Damage"));
 		UFunction* const ActivateFunction = BlueprintClass->FindFunctionByName(TEXT("Activate"));
+		UFunction* const ActivateOverride = BlueprintClass->FindFunctionByName(
+			TEXT("Activate"),
+			EIncludeSuperFlag::ExcludeSuper);
 		if (!TestNotNull(TEXT("Blueprint sees the C# Damage property"), DamageProperty)
-			|| !TestNotNull(TEXT("Blueprint sees the C# Activate function"), ActivateFunction))
+			|| !TestNotNull(TEXT("Blueprint sees the C# Activate function"), ActivateFunction)
+			|| !TestNotNull(TEXT("Blueprint owns the Activate override"), ActivateOverride))
 		{
 			return true;
 		}
@@ -156,6 +180,12 @@ bool FAvidScriptEditorGeneratedTypeBlueprintSubclassTest::RunTest(
 		TestTrue(
 			TEXT("Activate is Blueprint callable"),
 			ActivateFunction->HasAnyFunctionFlags(FUNC_BlueprintCallable));
+		TestFalse(
+			TEXT("Blueprint Activate override is bytecode rather than native"),
+			ActivateOverride->HasAnyFunctionFlags(FUNC_Native));
+		TestTrue(
+			TEXT("Blueprint Activate override owns bytecode"),
+			!ActivateOverride->Script.IsEmpty());
 
 		UObject* const BlueprintDefaultObject = BlueprintClass->GetDefaultObject();
 		TestEqual(
@@ -208,6 +238,18 @@ bool FAvidScriptEditorGeneratedTypeBlueprintSubclassTest::RunTest(
 	TestTrue(
 		TEXT("Reloaded Blueprint remains a child of the C# generated UClass"),
 		ReloadedClass->IsChildOf(ScriptParent));
+	UFunction* const ReloadedActivateOverride = ReloadedClass->FindFunctionByName(
+		TEXT("Activate"),
+		EIncludeSuperFlag::ExcludeSuper);
+	if (!TestNotNull(
+			TEXT("Reloaded Blueprint retains the Activate override"),
+			ReloadedActivateOverride))
+	{
+		return true;
+	}
+	TestTrue(
+		TEXT("Reloaded Blueprint retains Activate bytecode"),
+		!ReloadedActivateOverride->Script.IsEmpty());
 	FFloatProperty* const ReloadedDamage =
 		FindFProperty<FFloatProperty>(ReloadedClass, TEXT("Damage"));
 	FIntProperty* const ReloadedActivationCount =

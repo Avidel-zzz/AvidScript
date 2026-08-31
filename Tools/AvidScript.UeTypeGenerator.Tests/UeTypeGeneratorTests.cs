@@ -29,7 +29,7 @@ internal static class UeTypeGeneratorTests
                 [UProperty(EditAnywhere = true, BlueprintReadWrite = true, ReplicatedUsing = nameof(OnRepDamage), Category = "Projectile")]
                 public float Damage { get; set; } = 25.0f;
 
-                [UFunction(BlueprintCallable = true, Category = "Projectile")]
+                [UFunction(BlueprintCallable = true, BlueprintNativeEvent = true, Category = "Projectile")]
                 public virtual void Activate(float damageScale) { }
 
                 [UFunction]
@@ -63,8 +63,11 @@ internal static class UeTypeGeneratorTests
                 SemanticSerializer.Deserialize(semantic)).ToDictionary(
                     plan => plan.PropertySymbolId,
                     StringComparer.Ordinal);
+        UeFunctionManifestEntry derivedActivate = first.Manifest.Types
+            .Single(type => type.EngineName == "ExplosiveProjectile")
+            .Functions.Single(function => function.Name == "Activate");
         Assert(first.Manifest.SchemaVersion == 5
-            && first.Manifest.GeneratorVersion == "1.4"
+            && first.Manifest.GeneratorVersion == "1.5"
             && first.Manifest.Types.All(type =>
                 type.ClassPath == $"/Script/AvidScriptGenerated.{type.EngineName}")
             && first.Manifest.Types.SelectMany(type => type.Functions).All(function =>
@@ -75,7 +78,9 @@ internal static class UeTypeGeneratorTests
                 && property.SetterImportName == propertyPlans[property.StableMemberId].SetterImportName)
             && first.Manifest.Types.SelectMany(type => type.Properties)
                 .Single(property => property.Name == "Damage").Initializer
-                == new SemanticUePropertyInitializer("float32", "25"),
+                == new SemanticUePropertyInitializer("float32", "25")
+            && derivedActivate.Flags.Contains("override")
+            && derivedActivate.Flags.Contains("blueprint_native_event"),
             "manifest schema 5 should publish explicit class paths, runtime identities and initializers");
 
         string header = Text(first, "Public/AvidScriptGeneratedTypes.h");
@@ -85,11 +90,14 @@ internal static class UeTypeGeneratorTests
             "native shell output should place script bases before derived classes");
         Assert(header.Contains("UPROPERTY(EditAnywhere, BlueprintReadWrite, ReplicatedUsing=OnRepDamage, Category=\"Projectile\")", StringComparison.Ordinal)
             && header.Contains("AProjectile();", StringComparison.Ordinal)
-            && header.Contains("virtual void Activate(float damageScale);", StringComparison.Ordinal)
-            && header.Contains("virtual void Activate(float damageScale) override;", StringComparison.Ordinal),
-            "native shell output should preserve normalized reflection and override declarations");
+            && header.Contains("void Activate(float damageScale);", StringComparison.Ordinal)
+            && header.Contains("virtual void Activate_Implementation(float damageScale);", StringComparison.Ordinal)
+            && header.Contains("virtual void Activate_Implementation(float damageScale) override;", StringComparison.Ordinal),
+            "native shell output should preserve normalized reflection and inherited implementation declarations");
         Assert(sourceText.Contains("FAvidScriptGeneratedTypeDispatcher::Invoke(", StringComparison.Ordinal)
             && sourceText.Contains("AProjectile::AProjectile()", StringComparison.Ordinal)
+            && sourceText.Contains("AProjectile::Activate_Implementation(float damageScale)", StringComparison.Ordinal)
+            && sourceText.Contains("AExplosiveProjectile::Activate_Implementation(float damageScale)", StringComparison.Ordinal)
             && sourceText.Contains("Damage = 25.0f;", StringComparison.Ordinal)
             && sourceText.Contains("DOREPLIFETIME(AProjectile, Damage);", StringComparison.Ordinal)
             && sourceText.Contains("AvidScript.GeneratedTypes.Reflection", StringComparison.Ordinal)
