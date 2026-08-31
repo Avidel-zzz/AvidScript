@@ -5,7 +5,7 @@
     "goal": "实现 C# 定义 Actor、Component、Subsystem、UCLASS/UFUNCTION/UPROPERTY、继承、覆写与 Blueprint 子类的真实 UE 类型闭环",
     "start_commit": "4018dfb3e6c19fc3ff05b5873357c5c13225ff3a"
   },
-  "declared_stage": "implementing",
+  "declared_stage": "gate_ready",
   "architecture": {
     "path": "Docs/Phase59/P59.1_Script_Defined_UE_Types_Architecture.md",
     "version": 4,
@@ -58,9 +58,9 @@
     }
   ],
   "review": {
-    "completed": false,
-    "evidence": "reopened: 最终全量 Automation 发现 P59 新增 UClass/UProperty/UFunction facade 未同步到 P48 FName 字节 fixture；候选 ac8b0f3 作废，集中修复 fixture 漂移后重新冻结。",
-    "completed_at_utc": null
+    "completed": true,
+    "evidence": "P59.A-D 与 D8 经集中复审；首轮全量 Gate 唯一失败为共享 generated facade 未同步 P48 FName fixture，已以 c6aec46 最小修复并由 CSharpGuest 117/117、FName Automation 1/1 与 clean architecture 验证。产品架构、Runtime 热路径与转移债务不变，无 Blocker/Critical/Important。",
+    "completed_at_utc": "2026-08-31T03:56:16.0878162+00:00"
   },
   "budgets": {
     "ubt": 2,
@@ -73,11 +73,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "",
-    "source_tree": "",
-    "state_sha256": "",
-    "review_evidence": "",
-    "at_utc": null
+    "source_commit": "c6aec4680489d9ba3fea5798f9bc52da87d2f747",
+    "source_tree": "4ae266a06093b3a0a1894fc7abf58ef5f60aba2d",
+    "state_sha256": "3224b62413ca9666965c5cd61ba24ee8a8a7335251049eb136d22fa617f350dd",
+    "review_evidence": "P59.A-D 与 D8 经集中复审；首轮全量 Gate 唯一失败为共享 generated facade 未同步 P48 FName fixture，已以 c6aec46 最小修复并由 CSharpGuest 117/117、FName Automation 1/1 与 clean architecture 验证。产品架构、Runtime 热路径与转移债务不变，无 Blocker/Critical/Important。",
+    "at_utc": "2026-08-31T03:56:16.0878162+00:00"
   },
   "gate": {
     "report_path": "",
@@ -108,7 +108,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "freeze -Phase 59 -ReviewEvidence <text>",
-  "revision": 13,
-  "updated_at_utc": "2026-08-31T03:53:20.3611020+00:00"
+  "next_action": "attest -Phase 59 -GateReportPath <path>",
+  "revision": 14,
+  "updated_at_utc": "2026-08-31T03:56:16.0941353+00:00"
 }
