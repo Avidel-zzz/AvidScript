@@ -192,6 +192,87 @@ bool TeardownInstance(
 	}
 	return bSucceeded;
 }
+
+bool IsCompleteRuntimePackage(
+	const TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot>& Registry,
+	const FAvidScriptRuntimeArtifact& Artifact,
+	FString& OutError)
+{
+	if (!Registry.IsValid() || Registry->Num() == 0)
+	{
+		OutError = TEXT("generated type package registry is empty");
+		return false;
+	}
+	if (Artifact.Manifest.ModuleId.IsEmpty()
+		|| Artifact.Manifest.RequiredExports.IsEmpty()
+		|| (Artifact.VmArtifact.ExecutionBytes.IsEmpty()
+			&& Artifact.VmArtifact.CanonicalWasmBytes.IsEmpty()))
+	{
+		OutError = TEXT("generated type package Runtime artifact is incomplete");
+		return false;
+	}
+	return true;
+}
+
+bool AreBodyOnlyCompatibleRegistries(
+	const FAvidScriptGeneratedTypeRegistrySnapshot& Current,
+	const FAvidScriptGeneratedTypeRegistrySnapshot& Candidate,
+	FString& OutReason)
+{
+	const TConstArrayView<FAvidScriptGeneratedTypePlan> CurrentTypes = Current.GetTypes();
+	const TConstArrayView<FAvidScriptGeneratedTypePlan> CandidateTypes = Candidate.GetTypes();
+	if (CurrentTypes.Num() != CandidateTypes.Num())
+	{
+		OutReason = TEXT("generated type count changed");
+		return false;
+	}
+	for (int32 TypeIndex = 0; TypeIndex < CurrentTypes.Num(); ++TypeIndex)
+	{
+		const FAvidScriptGeneratedTypePlan& CurrentType = CurrentTypes[TypeIndex];
+		const FAvidScriptGeneratedTypePlan& CandidateType = CandidateTypes[TypeIndex];
+		if (CurrentType.TypeOrdinal != CandidateType.TypeOrdinal
+			|| CurrentType.StableTypeId != CandidateType.StableTypeId
+			|| CurrentType.Class != CandidateType.Class)
+		{
+			OutReason = FString::Printf(
+				TEXT("generated type identity changed at ordinal %d"),
+				TypeIndex);
+			return false;
+		}
+		if (CurrentType.Members.Num() != CandidateType.Members.Num())
+		{
+			OutReason = FString::Printf(
+				TEXT("generated member count changed for type ordinal %u"),
+				CurrentType.TypeOrdinal);
+			return false;
+		}
+		for (int32 MemberIndex = 0; MemberIndex < CurrentType.Members.Num(); ++MemberIndex)
+		{
+			const FAvidScriptGeneratedMemberPlan& CurrentMember =
+				CurrentType.Members[MemberIndex];
+			const FAvidScriptGeneratedMemberPlan& CandidateMember =
+				CandidateType.Members[MemberIndex];
+			if (CurrentMember.MemberOrdinal != CandidateMember.MemberOrdinal
+				|| CurrentMember.Kind != CandidateMember.Kind
+				|| CurrentMember.StableMemberId != CandidateMember.StableMemberId
+				|| CurrentMember.Property != CandidateMember.Property
+				|| CurrentMember.Function != CandidateMember.Function
+				|| CurrentMember.GetterImportName != CandidateMember.GetterImportName
+				|| CurrentMember.SetterImportName != CandidateMember.SetterImportName
+				|| CurrentMember.ExportName != CandidateMember.ExportName
+				|| CurrentMember.bLifecycle != CandidateMember.bLifecycle)
+			{
+				OutReason = FString::Printf(
+					TEXT("generated member shape changed at type %u member %d"),
+					CurrentType.TypeOrdinal,
+					MemberIndex);
+				return false;
+			}
+		}
+	}
+	OutReason.Reset();
+	return true;
+}
 }
 
 struct FAvidScriptGeneratedTypeRuntimeHost::FImpl
@@ -200,6 +281,9 @@ struct FAvidScriptGeneratedTypeRuntimeHost::FImpl
 	TOptional<FGeneratedTypeRuntimePackage> Package;
 	FAvidScriptObjectRegistry ObjectRegistry;
 	TMap<FObjectKey, TUniquePtr<FGeneratedTypeRuntimeInstance>> Instances;
+#if WITH_DEV_AUTOMATION_TESTS
+	int32 ReloadFailureAfterInstanceCountForTesting = INDEX_NONE;
+#endif
 };
 
 FAvidScriptGeneratedTypeRuntimeHost& FAvidScriptGeneratedTypeRuntimeHost::Get()
@@ -216,6 +300,13 @@ FAvidScriptGeneratedTypeRuntimeHost::CreateIsolatedForTesting()
 		new FAvidScriptGeneratedTypeRuntimeHost());
 	Host->Startup();
 	return Host;
+}
+
+void FAvidScriptGeneratedTypeRuntimeHost::SetReloadFailureAfterInstanceCountForTesting(
+	const int32 InstanceCount)
+{
+	check(Impl && Impl->bStarted && IsInGameThread());
+	Impl->ReloadFailureAfterInstanceCountForTesting = InstanceCount;
 }
 #endif
 
@@ -278,17 +369,8 @@ bool FAvidScriptGeneratedTypeRuntimeHost::InstallPackage(
 		OutError = TEXT("generated type package replacement requires zero active instances");
 		return false;
 	}
-	if (!Registry.IsValid() || Registry->Num() == 0)
+	if (!IsCompleteRuntimePackage(Registry, Artifact, OutError))
 	{
-		OutError = TEXT("generated type package registry is empty");
-		return false;
-	}
-	if (Artifact.Manifest.ModuleId.IsEmpty()
-		|| Artifact.Manifest.RequiredExports.IsEmpty()
-		|| Artifact.VmArtifact.ExecutionBytes.IsEmpty()
-			&& Artifact.VmArtifact.CanonicalWasmBytes.IsEmpty())
-	{
-		OutError = TEXT("generated type package Runtime artifact is incomplete");
 		return false;
 	}
 
@@ -296,19 +378,144 @@ bool FAvidScriptGeneratedTypeRuntimeHost::InstallPackage(
 	return true;
 }
 
+bool FAvidScriptGeneratedTypeRuntimeHost::ReloadPackage(
+	const TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot>& Registry,
+	const FAvidScriptRuntimeArtifact& Artifact,
+	FAvidScriptGeneratedTypePackageReloadResult& OutResult,
+	FString& OutError)
+{
+	OutResult = FAvidScriptGeneratedTypePackageReloadResult();
+	OutError.Reset();
+	if (!Impl || !Impl->bStarted || !IsInGameThread() || !Impl->Package.IsSet())
+	{
+		OutError = TEXT("generated type package reload requires an installed GameThread package");
+		return false;
+	}
+	if (!IsCompleteRuntimePackage(Registry, Artifact, OutError))
+	{
+		return false;
+	}
+
+	const FGeneratedTypeRuntimePackage PreviousPackage = Impl->Package.GetValue();
+	if (!AreBodyOnlyCompatibleRegistries(
+		*PreviousPackage.Registry,
+		*Registry,
+		OutResult.StructuralChangeReason))
+	{
+		OutResult.Disposition =
+			EAvidScriptGeneratedTypePackageReloadDisposition::NativeRebuildRequired;
+		OutResult.CandidateInstanceCount = Impl->Instances.Num();
+		OutResult.bRollbackPreservedLivePackage = true;
+		OutError = FString::Printf(
+			TEXT("generated type package reload requires a native rebuild: %s"),
+			*OutResult.StructuralChangeReason);
+		return false;
+	}
+
+	OutResult.CandidateInstanceCount = Impl->Instances.Num();
+	TArray<FGeneratedTypeRuntimeInstance*> ReloadedInstances;
+	ReloadedInstances.Reserve(Impl->Instances.Num());
+	for (TPair<FObjectKey, TUniquePtr<FGeneratedTypeRuntimeInstance>>& Pair : Impl->Instances)
+	{
+#if WITH_DEV_AUTOMATION_TESTS
+		if (Impl->ReloadFailureAfterInstanceCountForTesting == ReloadedInstances.Num())
+		{
+			Impl->ReloadFailureAfterInstanceCountForTesting = INDEX_NONE;
+			OutError = TEXT("generated type package reload injected a deterministic test failure");
+			break;
+		}
+#endif
+		FGeneratedTypeRuntimeInstance* const Instance = Pair.Value.Get();
+		if (Instance == nullptr || !Instance->Session || !Instance->Session->IsLiveLoaded())
+		{
+			OutError = TEXT("generated type package reload found an inactive Runtime Session");
+			break;
+		}
+		FAvidScriptWasmReloadResult SessionResult;
+		if (!Instance->Session->ReloadArtifact(Artifact, SessionResult))
+		{
+			OutError = SessionResult.ErrorMessage.IsEmpty()
+				? TEXT("generated type Runtime Session rejected the candidate package")
+				: SessionResult.ErrorMessage;
+			break;
+		}
+		ReloadedInstances.Add(Instance);
+	}
+#if WITH_DEV_AUTOMATION_TESTS
+	Impl->ReloadFailureAfterInstanceCountForTesting = INDEX_NONE;
+#endif
+
+	OutResult.ReloadedInstanceCount = ReloadedInstances.Num();
+	if (ReloadedInstances.Num() != Impl->Instances.Num())
+	{
+		bool bRollbackSucceeded = true;
+		for (int32 Index = ReloadedInstances.Num() - 1; Index >= 0; --Index)
+		{
+			FAvidScriptWasmReloadResult RollbackResult;
+			if (!ReloadedInstances[Index]->Session->ReloadArtifact(
+				PreviousPackage.Artifact,
+				RollbackResult))
+			{
+				bRollbackSucceeded = false;
+				if (!RollbackResult.ErrorMessage.IsEmpty())
+				{
+					OutError += FString::Printf(
+						TEXT("; rollback failed: %s"),
+						*RollbackResult.ErrorMessage);
+				}
+				break;
+			}
+			++OutResult.RolledBackInstanceCount;
+		}
+		OutResult.bRollbackPreservedLivePackage = bRollbackSucceeded;
+		if (!bRollbackSucceeded)
+		{
+			for (TPair<FObjectKey, TUniquePtr<FGeneratedTypeRuntimeInstance>>& Pair : Impl->Instances)
+			{
+				FString TeardownError;
+				TeardownInstance(*Pair.Value, Impl->ObjectRegistry, TeardownError);
+			}
+			Impl->Instances.Reset();
+			OutError += TEXT("; all generated type Sessions were torn down fail-closed");
+		}
+		return false;
+	}
+
+	Impl->Package.Emplace(FGeneratedTypeRuntimePackage{ Registry, Artifact });
+	OutResult.Disposition =
+		EAvidScriptGeneratedTypePackageReloadDisposition::BodyOnlyApplied;
+	return true;
+}
+
 bool FAvidScriptGeneratedTypeRuntimeHost::InstallPackageFromDescriptorFile(
 	const FString& DescriptorPath,
 	FString& OutError)
 {
+	TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot> Registry;
+	FAvidScriptRuntimeArtifact Artifact;
+	if (!LoadPackageFromDescriptorFile(
+		DescriptorPath,
+		Registry,
+		Artifact,
+		OutError))
+	{
+		return false;
+	}
+	return InstallPackage(Registry, Artifact, OutError);
+}
+
+bool FAvidScriptGeneratedTypeRuntimeHost::LoadPackageFromDescriptorFile(
+	const FString& DescriptorPath,
+	TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot>& OutRegistry,
+	FAvidScriptRuntimeArtifact& OutArtifact,
+	FString& OutError)
+{
+	OutRegistry.Reset();
+	OutArtifact = FAvidScriptRuntimeArtifact();
 	OutError.Reset();
 	if (!Impl || !Impl->bStarted || !IsInGameThread())
 	{
-		OutError = TEXT("generated type package installation requires a started GameThread host");
-		return false;
-	}
-	if (!Impl->Instances.IsEmpty())
-	{
-		OutError = TEXT("generated type package replacement requires zero active instances");
+		OutError = TEXT("generated type package load requires a started GameThread host");
 		return false;
 	}
 
@@ -491,7 +698,28 @@ bool FAvidScriptGeneratedTypeRuntimeHost::InstallPackageFromDescriptorFile(
 	Artifact.RequestedBackend = ExecutionBackend;
 	Artifact.SelectedBackend = ExecutionBackend;
 	Artifact.ExecutionPolicy = TEXT("generated_type_package");
-	return InstallPackage(Registry, Artifact, OutError);
+	OutRegistry = MoveTemp(Registry);
+	OutArtifact = MoveTemp(Artifact);
+	return true;
+}
+
+bool FAvidScriptGeneratedTypeRuntimeHost::ReloadPackageFromDescriptorFile(
+	const FString& DescriptorPath,
+	FAvidScriptGeneratedTypePackageReloadResult& OutResult,
+	FString& OutError)
+{
+	TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot> Registry;
+	FAvidScriptRuntimeArtifact Artifact;
+	if (!LoadPackageFromDescriptorFile(
+		DescriptorPath,
+		Registry,
+		Artifact,
+		OutError))
+	{
+		OutResult = FAvidScriptGeneratedTypePackageReloadResult();
+		return false;
+	}
+	return ReloadPackage(Registry, Artifact, OutResult, OutError);
 }
 
 bool FAvidScriptGeneratedTypeRuntimeHost::ClearPackage(FString& OutError)

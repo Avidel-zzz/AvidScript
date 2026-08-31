@@ -17,3 +17,6 @@
 - Tick 热路径避免动态分配、反射重建和全局锁；按 Session 批量调度并保留预算/超时观测。
 - 异常、trap、fuel、超时和 host error 映射到稳定诊断，不允许跨 C ABI 展开异常。
 - reload 使用 prepare/validate/commit/rollback 事务；旧实例在新实例可用前保持一致状态。
+- generated type package 的 body-only reload 必须先比较完整反射 shape，再对全部活跃 Session 提交；
+  任一实例失败时逆序回滚，回滚失败则 teardown 全部实例 fail-closed。type/member identity、ordinal、
+  UClass/UFunction/FProperty 或 ABI route 改变时返回 native rebuild required，禁止当作 body-only 套用。

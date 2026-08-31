@@ -46,8 +46,9 @@ void AppendWasmExport(
 	Payload.Add(FunctionIndex);
 }
 
-TArray<uint8> BuildGeneratedTypeSessionModule()
+TArray<uint8> BuildGeneratedTypeSessionModule(const int32 ReturnConstant = INDEX_NONE)
 {
+	check(ReturnConstant == INDEX_NONE || ReturnConstant >= 0 && ReturnConstant < 64);
 	TArray<uint8> Module = {
 		0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00
 	};
@@ -67,16 +68,23 @@ TArray<uint8> BuildGeneratedTypeSessionModule()
 		"avid_ue_0123456789abcdef0123456789abcdef",
 		1);
 	AppendWasmSection(Module, 0x07, ExportSection);
-	const TArray<uint8> CodeSection = {
-		0x02,
-		0x02, 0x00, 0x0b,
-		0x05, 0x00, 0x20, 0x00, 0xa7, 0x0b
-	};
+	const TArray<uint8> CodeSection = ReturnConstant == INDEX_NONE
+		? TArray<uint8>{
+			0x02,
+			0x02, 0x00, 0x0b,
+			0x05, 0x00, 0x20, 0x00, 0xa7, 0x0b
+		}
+		: TArray<uint8>{
+			0x02,
+			0x02, 0x00, 0x0b,
+			0x04, 0x00, 0x41, static_cast<uint8>(ReturnConstant), 0x0b
+		};
 	AppendWasmSection(Module, 0x0a, CodeSection);
 	return Module;
 }
 
-FString BuildGeneratedTypeSessionManifest()
+FString BuildGeneratedTypeSessionManifest(
+	const TCHAR* const StableTypeId = TEXT("type:generated-session-fixture"))
 {
 	return FString::Printf(
 		TEXT(R"JSON({
@@ -87,7 +95,7 @@ FString BuildGeneratedTypeSessionManifest()
   "types": [
     {
       "type_ordinal": 0,
-      "stable_type_id": "type:generated-session-fixture",
+      "stable_type_id": "%s",
       "engine_name": "AvidScriptGeneratedTypeSessionTestObject",
       "class_path": "%s",
       "properties": [],
@@ -104,6 +112,7 @@ FString BuildGeneratedTypeSessionManifest()
   ]
 })JSON"),
 		GeneratedTypeGenerationKey,
+		StableTypeId,
 		*UAvidScriptGeneratedTypeSessionTestObject::StaticClass()->GetPathName(),
 		GeneratedExportName);
 }
@@ -384,6 +393,174 @@ bool FAvidScriptGeneratedTypeRuntimeHostTest::RunTest(const FString& Parameters)
 			TConstArrayView<FAvidScriptGeneratedCallArgument>(),
 			&ScriptResult));
 	TestTrue(TEXT("Runtime-owned packed handle reaches the guest"), ScriptResult > 0);
+
+	const TArray<uint8> BodyOnlyModule = BuildGeneratedTypeSessionModule(37);
+	TestTrue(
+		TEXT("Body-only candidate WASM writes"),
+		FFileHelper::SaveArrayToFile(BodyOnlyModule, *WasmPath));
+	const FString BodyOnlyRuntimeManifestJson = BuildRuntimeManifestFixture(
+		FAvidScriptHash::Sha256Hex(BodyOnlyModule));
+	TestTrue(
+		TEXT("Body-only Runtime manifest writes"),
+		SaveUtf8Fixture(
+			RuntimeManifestPath,
+			BodyOnlyRuntimeManifestJson,
+			RuntimeManifestBytes));
+	const FString BodyOnlyRuntimeManifestSha256 =
+		FAvidScriptHash::Sha256Hex(RuntimeManifestBytes);
+	TestTrue(
+		TEXT("Body-only package descriptor writes"),
+		SaveUtf8Fixture(
+			DescriptorPath,
+			BuildPackageDescriptorFixture(
+				TypeManifestSha256,
+				BodyOnlyRuntimeManifestSha256),
+			DescriptorBytes));
+	FAvidScriptGeneratedTypePackageReloadResult BodyOnlyResult;
+	if (!TestTrue(
+		TEXT("Active generated package accepts a body-only descriptor reload"),
+		Host->ReloadPackageFromDescriptorFile(
+			DescriptorPath,
+			BodyOnlyResult,
+			Error)))
+	{
+		AddError(Error);
+		Host->EndInstance(*Receiver, Error);
+		Host->ClearPackage(Error);
+		return true;
+	}
+	TestTrue(
+		TEXT("Body-only reload reports its applied disposition"),
+		BodyOnlyResult.Disposition
+			== EAvidScriptGeneratedTypePackageReloadDisposition::BodyOnlyApplied);
+	TestEqual(TEXT("Body-only reload sees one active Session"), BodyOnlyResult.CandidateInstanceCount, 1);
+	TestEqual(TEXT("Body-only reload commits one active Session"), BodyOnlyResult.ReloadedInstanceCount, 1);
+	ScriptResult = 0;
+	TestTrue(
+		TEXT("Body-only package keeps the generated route live"),
+		FAvidScriptGeneratedTypeDispatcher::Invoke(
+			Receiver.Get(),
+			0,
+			0,
+			TConstArrayView<FAvidScriptGeneratedCallArgument>(),
+			&ScriptResult));
+	TestEqual(TEXT("Body-only package executes the new WASM body"), ScriptResult, 37);
+
+	const FString StructuralTypeManifestJson = BuildGeneratedTypeSessionManifest(
+		TEXT("type:generated-session-fixture-structural-change"));
+	TestTrue(
+		TEXT("Structural candidate type manifest writes"),
+		SaveUtf8Fixture(
+			TypeManifestPath,
+			StructuralTypeManifestJson,
+			TypeManifestBytes));
+	const FString StructuralTypeManifestSha256 =
+		FAvidScriptHash::Sha256Hex(TypeManifestBytes);
+	TestTrue(
+		TEXT("Structural package descriptor writes"),
+		SaveUtf8Fixture(
+			DescriptorPath,
+			BuildPackageDescriptorFixture(
+				StructuralTypeManifestSha256,
+				BodyOnlyRuntimeManifestSha256),
+			DescriptorBytes));
+	FAvidScriptGeneratedTypePackageReloadResult StructuralResult;
+	TestFalse(
+		TEXT("Active generated package rejects a structural descriptor reload"),
+		Host->ReloadPackageFromDescriptorFile(
+			DescriptorPath,
+			StructuralResult,
+			Error));
+	TestTrue(
+		TEXT("Structural reload requests a native rebuild"),
+		StructuralResult.Disposition
+			== EAvidScriptGeneratedTypePackageReloadDisposition::NativeRebuildRequired);
+	TestTrue(
+		TEXT("Structural rejection preserves the live package"),
+		StructuralResult.bRollbackPreservedLivePackage);
+	TestTrue(
+		TEXT("Structural rejection names the changed type identity"),
+		StructuralResult.StructuralChangeReason.Contains(TEXT("type identity")));
+	ScriptResult = 0;
+	TestTrue(
+		TEXT("Structural rejection preserves generated dispatch"),
+		FAvidScriptGeneratedTypeDispatcher::Invoke(
+			Receiver.Get(),
+			0,
+			0,
+			TConstArrayView<FAvidScriptGeneratedCallArgument>(),
+			&ScriptResult));
+	TestEqual(TEXT("Structural rejection preserves the body-only runtime"), ScriptResult, 37);
+
+	TestTrue(
+		TEXT("Compatible type manifest is restored for rollback testing"),
+		SaveUtf8Fixture(TypeManifestPath, TypeManifestJson, TypeManifestBytes));
+	const TArray<uint8> RollbackCandidateModule = BuildGeneratedTypeSessionModule(41);
+	TestTrue(
+		TEXT("Rollback candidate WASM writes"),
+		FFileHelper::SaveArrayToFile(RollbackCandidateModule, *WasmPath));
+	const FString RollbackRuntimeManifestJson = BuildRuntimeManifestFixture(
+		FAvidScriptHash::Sha256Hex(RollbackCandidateModule));
+	TestTrue(
+		TEXT("Rollback candidate Runtime manifest writes"),
+		SaveUtf8Fixture(
+			RuntimeManifestPath,
+			RollbackRuntimeManifestJson,
+			RuntimeManifestBytes));
+	const FString RollbackRuntimeManifestSha256 =
+		FAvidScriptHash::Sha256Hex(RuntimeManifestBytes);
+	TestTrue(
+		TEXT("Rollback candidate package descriptor writes"),
+		SaveUtf8Fixture(
+			DescriptorPath,
+			BuildPackageDescriptorFixture(
+				TypeManifestSha256,
+				RollbackRuntimeManifestSha256),
+			DescriptorBytes));
+
+	TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> SecondReceiver(
+		NewObject<UAvidScriptGeneratedTypeSessionTestObject>());
+	if (!TestTrue(
+		TEXT("Runtime host activates a second generated receiver"),
+		Host->BeginInstance(*SecondReceiver, 0, Error)))
+	{
+		AddError(Error);
+		Host->EndInstance(*Receiver, Error);
+		Host->ClearPackage(Error);
+		return true;
+	}
+	Host->SetReloadFailureAfterInstanceCountForTesting(1);
+	FAvidScriptGeneratedTypePackageReloadResult RollbackResult;
+	TestFalse(
+		TEXT("Multi-instance package transaction surfaces an injected candidate failure"),
+		Host->ReloadPackageFromDescriptorFile(
+			DescriptorPath,
+			RollbackResult,
+			Error));
+	TestEqual(TEXT("Rollback transaction sees two Sessions"), RollbackResult.CandidateInstanceCount, 2);
+	TestEqual(TEXT("Rollback transaction commits one candidate before failure"), RollbackResult.ReloadedInstanceCount, 1);
+	TestEqual(TEXT("Rollback transaction restores one committed candidate"), RollbackResult.RolledBackInstanceCount, 1);
+	TestTrue(
+		TEXT("Rollback transaction preserves the previous live package"),
+		RollbackResult.bRollbackPreservedLivePackage);
+	for (UObject* const ActiveReceiver : {
+		static_cast<UObject*>(Receiver.Get()),
+		static_cast<UObject*>(SecondReceiver.Get()) })
+	{
+		ScriptResult = 0;
+		TestTrue(
+			TEXT("Rolled-back generated receiver remains dispatchable"),
+			FAvidScriptGeneratedTypeDispatcher::Invoke(
+				ActiveReceiver,
+				0,
+				0,
+				TConstArrayView<FAvidScriptGeneratedCallArgument>(),
+				&ScriptResult));
+		TestEqual(TEXT("Rolled-back generated receiver keeps body version 37"), ScriptResult, 37);
+	}
+	TestTrue(
+		TEXT("Runtime host tears down the second reloaded receiver"),
+		Host->EndInstance(*SecondReceiver, Error));
 
 	TestTrue(
 		TEXT("Runtime host tears down Session, route and ObjectHandle"),

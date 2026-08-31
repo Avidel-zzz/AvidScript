@@ -64,6 +64,9 @@
 - `P59.D4`：Actor、ActorComponent、WorldSubsystem 与 GameInstanceSubsystem 的激活、Tick 和销毁
   生命周期已通过真实 UE owner 闭环；声明 Tick 的 Actor/Component 壳层自动启用 Primary Tick，
   `World->Tick` 可调度 C# WASM，Destroy/Shutdown 可在 Session teardown 前执行脚本结束逻辑。
+- `P59.D5a`：Generated Type Runtime Host 已支持 active instance 的 descriptor body-only package reload；
+  完整反射 shape 改变时返回 `NativeRebuildRequired`，多实例中途失败会逆序恢复已提交 Session，
+  只有全部实例成功后才切换 Host package snapshot。
 
 ## 待完成
 

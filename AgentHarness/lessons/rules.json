@@ -13,7 +13,7 @@
       "summary": "恢复、压缩或断线后的首个仓库动作必须读取最高未关闭 Phase 状态。",
       "prevention": "由 bootstrap 自动发现 Phase 并调用现有 PhaseWorkflow status；在成功前不读产品代码、不改状态。",
       "source": "legacy:2201",
-      "last_observed": "2026-08-30 Agent Harness H1 (git status ran before the newly discovered bootstrap entry)"
+      "last_observed": "2026-08-31 P59.D5a (恢复后先读取 AGENTS.md，随后才执行 bootstrap)"
     },
     {
       "id": "index-paths-before-read",
