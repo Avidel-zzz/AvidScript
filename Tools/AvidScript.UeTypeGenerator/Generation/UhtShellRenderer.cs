@@ -123,6 +123,12 @@ internal static class UhtShellRenderer
                     output.Append("    ").Append(tickMember).AppendLine(".bCanEverTick = true;");
                     output.Append("    ").Append(tickMember).AppendLine(".bStartWithTickEnabled = true;");
                 }
+                if (HasNetworkContract(type))
+                {
+                    output.AppendLine(type.Kind == "actor"
+                        ? "    bReplicates = true;"
+                        : "    SetIsReplicatedByDefault(true);");
+                }
                 output.AppendLine("}");
                 output.AppendLine();
             }
@@ -489,7 +495,16 @@ internal static class UhtShellRenderer
     private static bool NeedsConstructor(UeTypeManifestEntry type)
     {
         return type.Properties.Any(property => property.Initializer is not null)
-            || HasScheduledTick(type);
+            || HasScheduledTick(type)
+            || HasNetworkContract(type);
+    }
+
+    private static bool HasNetworkContract(UeTypeManifestEntry type)
+    {
+        return type.Kind is "actor" or "actor_component"
+            && (type.Properties.Any(property => property.Flags.Contains("replicated"))
+                || type.Functions.Any(function => function.Flags.Any(flag =>
+                    flag is "server" or "client" or "net_multicast")));
     }
 
     private static bool HasScheduledTick(UeTypeManifestEntry type)

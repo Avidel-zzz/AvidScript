@@ -75,7 +75,7 @@ public static class SemanticUeTypeContractValidator
         if (declarations.Any(declaration => declaration is null)
             || !Unique(declarations.Select(declaration => declaration.TypeId))
             || !Unique(declarations.Select(declaration => declaration.SymbolId))
-            || !Unique(declarations.Select(declaration => declaration.EngineName))
+            || !UniqueUeNames(declarations.Select(declaration => declaration.EngineName))
             || !IsOrdinalSorted(declarations.Select(declaration => declaration.SymbolId)))
         {
             return Fail("UE type identities must be non-null, unique and sorted by symbol id.", out error);
@@ -118,13 +118,34 @@ public static class SemanticUeTypeContractValidator
         {
             return false;
         }
-        if (!ValidateFunctions(declaration, symbols, callables, out error))
+        string[] reflectedMemberNames = declaration.Properties.Select(property => property.Name)
+            .Concat(declaration.Functions.Select(function => function.Name))
+            .ToArray();
+        if (!UniqueUeNames(reflectedMemberNames))
+        {
+            return Fail(
+                $"UE members on '{declaration.SymbolId}' must have case-insensitively unique reflection names.",
+                out error);
+        }
+        if (!ValidateFunctions(
+            declaration,
+            symbols,
+            callables,
+            reflectedMemberNames.ToHashSet(StringComparer.OrdinalIgnoreCase),
+            out error))
         {
             return false;
         }
-        return Unique(declaration.Properties.Select(property => property.Name)
-                .Concat(declaration.Functions.Select(function => function.Name)))
-            || Fail($"UE members on '{declaration.SymbolId}' must have unique reflection names.", out error);
+        if (declaration.Kind is "world_subsystem" or "game_instance_subsystem"
+            && (declaration.Properties.Any(property => property.Flags.Contains("replicated"))
+                || declaration.Functions.Any(function => function.Flags.Any(flag =>
+                    flag is "server" or "client" or "net_multicast"))))
+        {
+            return Fail(
+                $"UE subsystem '{declaration.SymbolId}' cannot own replicated properties or RPC functions.",
+                out error);
+        }
+        return true;
     }
 
     private static bool ValidateProperties(
@@ -204,6 +225,7 @@ public static class SemanticUeTypeContractValidator
         SemanticUeTypeDeclaration declaration,
         IReadOnlyDictionary<string, SemanticSymbol> symbols,
         IReadOnlyDictionary<string, SemanticCallable> callables,
+        IReadOnlySet<string> reflectedMemberNames,
         out string error)
     {
         error = string.Empty;
@@ -229,7 +251,10 @@ public static class SemanticUeTypeContractValidator
                 || symbol.ContainingSymbolId != declaration.SymbolId
                 || !callables.TryGetValue(function.MethodSymbolId, out SemanticCallable? callable)
                 || callable.IsStatic
-                || callable.ContainingTypeId != declaration.TypeId)
+                || callable.ContainingTypeId != declaration.TypeId
+                || callable.Parameters is null
+                || !UniqueUeNames(callable.Parameters.Select(parameter => parameter.Name))
+                || callable.Parameters.Any(parameter => reflectedMemberNames.Contains(parameter.Name)))
             {
                 return Fail($"UE function '{function.MethodSymbolId}' is malformed.", out error);
             }
@@ -312,6 +337,12 @@ public static class SemanticUeTypeContractValidator
     private static bool Unique(IEnumerable<string> values)
     {
         HashSet<string> seen = new(StringComparer.Ordinal);
+        return values.All(value => !string.IsNullOrWhiteSpace(value) && seen.Add(value));
+    }
+
+    private static bool UniqueUeNames(IEnumerable<string> values)
+    {
+        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
         return values.All(value => !string.IsNullOrWhiteSpace(value) && seen.Add(value));
     }
 

@@ -11,12 +11,13 @@ internal static class SemanticUeTypeDeclarationTests
         ActorDeclarationsPreserveStableReflectionContract();
         ComponentAndSubsystemKindsResolveFromCanonicalRoots();
         InvalidClassContractsFailClosed();
+        SubsystemNetworkContractsFailClosed();
         InvalidMemberContractsFailClosed();
         SpoofAttributesDoNotCreateUeTypes();
         SerializationIsDeterministic();
         SharedContractValidatorRejectsForgedIdentifiers();
         SharedSerializerReadsStrictArtifacts();
-        return 8;
+        return 9;
     }
 
     private static void ActorDeclarationsPreserveStableReflectionContract()
@@ -163,6 +164,33 @@ internal static class SemanticUeTypeDeclarationTests
             "duplicate engine names should use ASUE1004");
     }
 
+    private static void SubsystemNetworkContractsFailClosed()
+    {
+        const string source = """
+            using AvidScript;
+            namespace Game;
+
+            [UClass]
+            public partial class InvalidNetworkSubsystem : AvidWorldSubsystem
+            {
+                [UProperty(ReplicatedUsing = nameof(OnRepValue))]
+                public int Value { get; set; }
+
+                [UFunction]
+                private void OnRepValue() { }
+
+                [UFunction(Server = true, Reliable = true)]
+                public void ServerSubmitValue(int value) { }
+            }
+            """;
+
+        SemanticDocument document = Analyze(source, "Scripts/InvalidNetworkSubsystem.cs");
+
+        Assert(!document.Succeeded, "Subsystem network contracts should fail semantic analysis");
+        Assert(document.Diagnostics.Any(diagnostic => diagnostic.Code == "ASUE1005"),
+            "Subsystem replication and RPC declarations should use ASUE1005");
+    }
+
     private static void InvalidMemberContractsFailClosed()
     {
         const string source = """
@@ -184,6 +212,12 @@ internal static class SemanticUeTypeDeclarationTests
                 [UFunction(Server = true, Client = true, Reliable = true, Unreliable = true)]
                 public void InvalidRpc() { }
 
+                [UProperty]
+                public int RpcValue { get; set; }
+
+                [UFunction(Server = true, Reliable = true)]
+                public void ShadowedRpcParameter(int rpcValue) { }
+
                 [UFunction]
                 public static void StaticFunction() { }
             }
@@ -202,6 +236,8 @@ internal static class SemanticUeTypeDeclarationTests
             "static UFunctions should use ASUE1202");
         Assert(document.Diagnostics.Any(diagnostic => diagnostic.Code == "ASUE1203"),
             "conflicting network flags should use ASUE1203");
+        Assert(document.Diagnostics.Any(diagnostic => diagnostic.Code == "ASUE1204"),
+            "UHT case-insensitive parameter shadowing should use ASUE1204");
     }
 
     private static void SpoofAttributesDoNotCreateUeTypes()

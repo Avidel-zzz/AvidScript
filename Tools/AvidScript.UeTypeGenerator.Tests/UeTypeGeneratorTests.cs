@@ -35,6 +35,15 @@ internal static class UeTypeGeneratorTests
                 [UFunction]
                 private void OnRepDamage() { }
 
+                [UFunction(Server = true, Reliable = true)]
+                public void ServerSubmitDamage(float submittedDamage) { }
+
+                [UFunction(Client = true, Reliable = true)]
+                public void ClientConfirmDamage(float confirmedDamage) { }
+
+                [UFunction(NetMulticast = true, Reliable = true)]
+                public void MulticastObserveDamage(float observedDamage) { }
+
                 protected override void BeginPlay() { }
             }
 
@@ -56,7 +65,7 @@ internal static class UeTypeGeneratorTests
             .SequenceEqual(Enumerable.Range(0, first.Manifest.Types.Count)),
             "type ordinals should be dense and deterministic");
         Assert(first.Manifest.Types.SelectMany(type => type.Properties.Cast<object>().Concat(type.Functions))
-            .Count() == 5,
+            .Count() == 8,
             "the manifest should retain reflected properties, functions and lifecycle members");
         IReadOnlyDictionary<string, SemanticUePropertyRuntimePlan> propertyPlans =
             SemanticUeTypeRuntimeContract.BuildPropertyPlans(
@@ -67,7 +76,7 @@ internal static class UeTypeGeneratorTests
             .Single(type => type.EngineName == "ExplosiveProjectile")
             .Functions.Single(function => function.Name == "Activate");
         Assert(first.Manifest.SchemaVersion == 5
-            && first.Manifest.GeneratorVersion == "1.6"
+            && first.Manifest.GeneratorVersion == "1.7"
             && first.Manifest.Types.All(type =>
                 type.ClassPath == $"/Script/AvidScriptGenerated.{type.EngineName}")
             && first.Manifest.Types.SelectMany(type => type.Functions).All(function =>
@@ -92,6 +101,10 @@ internal static class UeTypeGeneratorTests
             && header.Contains("AProjectile();", StringComparison.Ordinal)
             && header.Contains("void Activate(float damageScale);", StringComparison.Ordinal)
             && header.Contains("virtual void Activate_Implementation(float damageScale);", StringComparison.Ordinal)
+            && header.Contains("UFUNCTION(Server, Reliable)", StringComparison.Ordinal)
+            && header.Contains("virtual void ServerSubmitDamage_Implementation(float submittedDamage);", StringComparison.Ordinal)
+            && header.Contains("UFUNCTION(Client, Reliable)", StringComparison.Ordinal)
+            && header.Contains("UFUNCTION(NetMulticast, Reliable)", StringComparison.Ordinal)
             && header.Contains("virtual void Activate_Implementation(float damageScale) override;", StringComparison.Ordinal),
             "native shell output should preserve normalized reflection and inherited implementation declarations");
         Assert(sourceText.Contains("FAvidScriptGeneratedTypeDispatcher::Invoke(", StringComparison.Ordinal)
@@ -99,6 +112,8 @@ internal static class UeTypeGeneratorTests
             && sourceText.Contains("AProjectile::Activate_Implementation(float damageScale)", StringComparison.Ordinal)
             && sourceText.Contains("AExplosiveProjectile::Activate_Implementation(float damageScale)", StringComparison.Ordinal)
             && sourceText.Contains("Damage = 25.0f;", StringComparison.Ordinal)
+            && sourceText.Contains("bReplicates = true;", StringComparison.Ordinal)
+            && sourceText.Contains("AProjectile::ServerSubmitDamage_Implementation(float submittedDamage)", StringComparison.Ordinal)
             && sourceText.Contains("DOREPLIFETIME(AProjectile, Damage);", StringComparison.Ordinal)
             && sourceText.Contains("AvidScript.GeneratedTypes.Reflection", StringComparison.Ordinal)
             && sourceText.Contains("FindFProperty<FProperty>", StringComparison.Ordinal),

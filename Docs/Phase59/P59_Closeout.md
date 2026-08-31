@@ -70,6 +70,9 @@
 - `P59.D5b`：真实 C# 类型生成链会发布 native structure 指纹、reload 分类与 previous-package 链；
   Editor 自动监听 descriptor，合并重复事件并把 body-only 更新接入 D5a 事务。结构变化停在 no-clean UBT
   与 Editor restart 边界，Runtime 仍以实际 Registry shape 二次校验。
+- `P59.D6a`：脚本定义 Actor/Component 的 replicated property 与 Server/Client/NetMulticast UFUNCTION
+  会自动启用原生复制壳层；Subsystem 网络声明和 FName 大小写冲突在 Semantic 阶段 fail closed。真实 C#
+  Server RPC 与 multicast body 已在 authority World 中进入 Wasmtime，双端传输留给 D6b。
 
 ## 待完成
 

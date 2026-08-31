@@ -45,7 +45,7 @@ internal static class SemanticUeTypeProjector
         Dictionary<INamedTypeSymbol, string?> resolvedKinds = new(SymbolEqualityComparer.Default);
         List<SemanticDiagnostic> diagnostics = new();
         List<SemanticUeTypeDeclaration> declarations = new();
-        HashSet<string> engineNames = new(StringComparer.Ordinal);
+        HashSet<string> engineNames = new(StringComparer.OrdinalIgnoreCase);
 
         foreach (INamedTypeSymbol type in candidates)
         {
@@ -106,6 +106,59 @@ internal static class SemanticUeTypeProjector
                     classAttributes[0]));
             }
 
+            IReadOnlyList<SemanticUePropertyDeclaration> properties = ProjectProperties(
+                context,
+                type,
+                symbols,
+                typeRegistry,
+                diagnostics);
+            IReadOnlyList<SemanticUeFunctionDeclaration> functions = ProjectFunctions(
+                context,
+                type,
+                symbols,
+                diagnostics);
+            HashSet<string> reflectedMemberNames = new(StringComparer.OrdinalIgnoreCase);
+            if (properties.Select(property => property.Name)
+                .Concat(functions.Select(function => function.Name))
+                .Any(name => !reflectedMemberNames.Add(name)))
+            {
+                diagnostics.Add(CreateAttributeDiagnostic(
+                    "ASUE1006",
+                    "UClass reflected member names must be unique under UE case-insensitive name rules.",
+                    context,
+                    classAttributes[0]));
+            }
+            foreach (SemanticUeFunctionDeclaration function in functions)
+            {
+                IMethodSymbol method = type.GetMembers()
+                    .OfType<IMethodSymbol>()
+                    .Single(candidate => SemanticSymbolProjector.GetSymbolId(candidate) == function.MethodSymbolId);
+                HashSet<string> parameterNames = new(StringComparer.OrdinalIgnoreCase);
+                foreach (IParameterSymbol parameter in method.Parameters)
+                {
+                    if (!parameterNames.Add(parameter.Name)
+                        || reflectedMemberNames.Contains(parameter.Name))
+                    {
+                        diagnostics.Add(CreateSymbolDiagnostic(
+                            "ASUE1204",
+                            "UFunction parameter names must be unique and must not shadow reflected members under UE case-insensitive name rules.",
+                            context,
+                            parameter));
+                    }
+                }
+            }
+            if (kind is WorldSubsystemKind or GameInstanceSubsystemKind
+                && (properties.Any(property => property.Flags.Contains("replicated"))
+                    || functions.Any(function => function.Flags.Any(flag =>
+                        flag is "server" or "client" or "net_multicast"))))
+            {
+                diagnostics.Add(CreateAttributeDiagnostic(
+                    "ASUE1005",
+                    "Replicated properties and RPC functions require an Actor or ActorComponent script type.",
+                    context,
+                    classAttributes[0]));
+            }
+
             declarations.Add(new SemanticUeTypeDeclaration(
                 typeRegistry.Register(type),
                 SemanticSymbolProjector.GetSymbolId(type),
@@ -113,8 +166,8 @@ internal static class SemanticUeTypeProjector
                 kind,
                 type.BaseType is null ? "type:none" : typeRegistry.Register(type.BaseType),
                 ProjectClassFlags(type, classAttributes[0]),
-                ProjectProperties(context, type, symbols, typeRegistry, diagnostics),
-                ProjectFunctions(context, type, symbols, diagnostics),
+                properties,
+                functions,
                 SemanticSpanFactory.Create(context.SourceText, declaration.Span)));
         }
 

@@ -13,7 +13,7 @@ FString BuildValidGeneratedTypeManifest()
 	return FString::Printf(
 		TEXT(R"JSON({
   "schema_version": 5,
-  "generator_version": "1.6",
+  "generator_version": "1.7",
   "module_name": "AvidScriptRuntime",
   "types": [
     {

@@ -169,7 +169,7 @@ $GeneratedManifestPath = Join-Path $OutputRoot "AvidScriptGeneratedManifest.json
 $GeneratedManifest = Get-Content -Raw -LiteralPath $GeneratedManifestPath | ConvertFrom-Json
 $SemanticSha256 = (Get-FileHash -LiteralPath $SemanticPath -Algorithm SHA256).Hash.ToLowerInvariant()
 if ([int]$GeneratedManifest.schema_version -ne 5 -or
-    [string]$GeneratedManifest.generator_version -cne "1.6" -or
+    [string]$GeneratedManifest.generator_version -cne "1.7" -or
     [string]$GeneratedManifest.semantic_artifact_sha256 -cne $SemanticSha256 -or
     [string]$GeneratedManifest.module_name -cne $ModuleName -or
     [string]$GeneratedManifest.unreal_version -cne $UnrealVersion -or

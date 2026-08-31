@@ -416,7 +416,7 @@ trap 会回滚本次借出的对象 capability。
 
 | 领域 | 已实现 |
 | --- | --- |
-| C# 定义 UE 类型 | C# 声明真实 Actor、Component、World/GameInstance Subsystem、`UCLASS/UFUNCTION/UPROPERTY`、继承与 override、Blueprint 子类、RepNotify 和类型生命周期；确定性生成 native shell 与 WASM body |
+| C# 定义 UE 类型 | C# 声明真实 Actor、Component、World/GameInstance Subsystem、`UCLASS/UFUNCTION/UPROPERTY`、继承与 override、Blueprint 子类、RepNotify、Server/Client/NetMulticast RPC 和类型生命周期；网络声明自动启用 Actor/Component 原生复制，确定性生成 native shell 与 WASM body |
 | C# 生命周期 | `BeginPlay`、`Tick`、`EndPlay`、Timer、Gameplay Event、Overlap 路由、受控 `async void` 导出 |
 | 确定性 Continuation | `Delay` / `NextTick`、`FStreamableManager` 异步对象加载、生成式 UE latent producer、typed outcome、显式 cancellation source、状态与对象结果、CPS dispatcher、不透明 token、Session active/prepared 事务、owner generation/World liveness 围栏与 teardown |
 | 受控 async/await | 多个顺序 await、分支/循环/switch/一维数组 foreach 内部 await、固定值与数组引用 local 跨 await、局部重赋值、`if/else`、integral/enum `switch`、`for`/`foreach`/`while`/`do`、`break`/`continue`/`return`、continuation CFG、per-await liveness frame、Reflection 生成 `FooAsync`、零 Guest 堆 CPS segment、稳定 resume debug map、store/read/schedule fail closed；不依赖 CLR `Task` Runtime |

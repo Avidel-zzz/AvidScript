@@ -237,6 +237,78 @@ bool FAvidScriptGeneratedCSharpRepNotifyInteractionTest::RunTest(
 		TEXT("UE RepNotify callback reaches C# WASM state"),
 		Projectile->DamageRepNotifyCount,
 		1);
+	TestEqual(
+		TEXT("C# RepNotify observes the native replicated value"),
+		Projectile->LastReplicatedDamage,
+		25.0f);
+
+	DestroyGeneratedScriptWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptGeneratedCSharpNetworkFunctionInteractionTest,
+	"AvidScript.GeneratedTypes.CSharpNetworkFunctionInteraction",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptGeneratedCSharpNetworkFunctionInteractionTest::RunTest(
+	const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	UWorld* World = nullptr;
+	if (!CreateGeneratedScriptWorld(World))
+	{
+		AddError(TEXT("Failed to create the generated network function test world."));
+		return true;
+	}
+
+	AProjectile* const Projectile = World->SpawnActor<AProjectile>();
+	if (!TestNotNull(TEXT("Generated network projectile spawns"), Projectile))
+	{
+		DestroyGeneratedScriptWorld(World);
+		return true;
+	}
+	const FURL Url;
+	World->InitializeActorsForPlay(Url);
+	World->BeginPlay();
+	World->SetBegunPlay(true);
+	if (!Projectile->HasActorBegunPlay())
+	{
+		Projectile->DispatchBeginPlay();
+	}
+
+	UFunction* const ServerFunction = AProjectile::StaticClass()->FindFunctionByName(
+		TEXT("ServerSubmitDamage"));
+	UFunction* const ClientFunction = AProjectile::StaticClass()->FindFunctionByName(
+		TEXT("ClientConfirmDamage"));
+	UFunction* const MulticastFunction = AProjectile::StaticClass()->FindFunctionByName(
+		TEXT("MulticastObserveDamage"));
+	if (!TestNotNull(TEXT("Generated Server RPC resolves"), ServerFunction)
+		|| !TestNotNull(TEXT("Generated Client RPC resolves"), ClientFunction)
+		|| !TestNotNull(TEXT("Generated multicast RPC resolves"), MulticastFunction))
+	{
+		DestroyGeneratedScriptWorld(World);
+		return true;
+	}
+	TestTrue(TEXT("Network contract enables native Actor replication"), Projectile->GetIsReplicated());
+	TestTrue(
+		TEXT("Server RPC owns UE server/reliable flags"),
+		ServerFunction->HasAllFunctionFlags(FUNC_Net | FUNC_NetServer | FUNC_NetReliable));
+	TestTrue(
+		TEXT("Client RPC owns UE client/reliable flags"),
+		ClientFunction->HasAllFunctionFlags(FUNC_Net | FUNC_NetClient | FUNC_NetReliable));
+	TestTrue(
+		TEXT("Multicast RPC owns UE multicast/reliable flags"),
+		MulticastFunction->HasAllFunctionFlags(FUNC_Net | FUNC_NetMulticast | FUNC_NetReliable));
+
+	Projectile->ServerSubmitDamage(41.0f);
+	TestEqual(TEXT("Authority RPC reaches the C# WASM body"), Projectile->ServerRpcCount, 1);
+	TestEqual(TEXT("C# Server RPC updates native replicated state"), Projectile->Damage, 41.0f);
+	TestEqual(TEXT("C# Server RPC records its argument"), Projectile->LastServerDamage, 41.0f);
+
+	Projectile->MulticastObserveDamage(41.0f);
+	TestEqual(TEXT("Authority multicast executes the local C# body"), Projectile->MulticastCount, 1);
+	TestEqual(TEXT("C# multicast records its argument"), Projectile->LastMulticastDamage, 41.0f);
 
 	DestroyGeneratedScriptWorld(World);
 	return true;

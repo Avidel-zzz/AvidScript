@@ -31,6 +31,27 @@ public partial class Projectile : AvidActor
     public int DamageRepNotifyCount { get; private set; }
 
     [UProperty(BlueprintReadOnly = true, Category = "Projectile")]
+    public float LastReplicatedDamage { get; private set; }
+
+    [UProperty(BlueprintReadOnly = true, Category = "Projectile")]
+    public int ServerRpcCount { get; private set; }
+
+    [UProperty(BlueprintReadOnly = true, Category = "Projectile")]
+    public float LastServerDamage { get; private set; }
+
+    [UProperty(BlueprintReadOnly = true, Category = "Projectile")]
+    public int ClientAckCount { get; private set; }
+
+    [UProperty(BlueprintReadOnly = true, Category = "Projectile")]
+    public float LastClientAckDamage { get; private set; }
+
+    [UProperty(BlueprintReadOnly = true, Category = "Projectile")]
+    public int MulticastCount { get; private set; }
+
+    [UProperty(BlueprintReadOnly = true, Category = "Projectile")]
+    public float LastMulticastDamage { get; private set; }
+
+    [UProperty(BlueprintReadOnly = true, Category = "Projectile")]
     public int TickCount { get; private set; }
 
     [UProperty(BlueprintReadOnly = true, Category = "Projectile")]
@@ -52,10 +73,33 @@ public partial class Projectile : AvidActor
         return ActivationCount;
     }
 
+    [UFunction(Server = true, Reliable = true)]
+    public void ServerSubmitDamage(float submittedDamage)
+    {
+        Damage = submittedDamage;
+        ServerRpcCount += 1;
+        LastServerDamage = submittedDamage;
+    }
+
+    [UFunction(Client = true, Reliable = true)]
+    public void ClientConfirmDamage(float confirmedDamage)
+    {
+        ClientAckCount += 1;
+        LastClientAckDamage = confirmedDamage;
+    }
+
+    [UFunction(NetMulticast = true, Reliable = true)]
+    public void MulticastObserveDamage(float observedDamage)
+    {
+        MulticastCount += 1;
+        LastMulticastDamage = observedDamage;
+    }
+
     [UFunction]
     private void OnRepDamage()
     {
         DamageRepNotifyCount += 1;
+        LastReplicatedDamage = Damage;
     }
 
     protected override void BeginPlay()

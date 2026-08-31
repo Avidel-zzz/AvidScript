@@ -644,6 +644,9 @@ $GeneratedTypeEditorReloadHeader = Read-RequiredFile 'Source/AvidScriptEditor/Pu
 $GeneratedTypeEditorReloadSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/GeneratedTypes/AvidScriptEditorGeneratedTypeReloadService.cpp'
 $GeneratedTypeEditorReloadPolicySource = Read-RequiredFile 'Source/AvidScriptEditor/Private/GeneratedTypes/AvidScriptEditorGeneratedTypeReloadPolicy.cpp'
 $UeTypeShellRendererSource = Read-RequiredFile 'Tools/AvidScript.UeTypeGenerator/Generation/UhtShellRenderer.cs'
+$SemanticUeTypeProjectorSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticUeTypeProjector.cs'
+$SemanticUeTypeValidatorSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Validation/SemanticUeTypeContractValidator.cs'
+$ScriptDefinedTypeSampleSource = Read-RequiredFile 'Samples/CSharp/ScriptDefinedTypes/ScriptDefinedTypes.cs'
 $SemanticUeRuntimeContractSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Model/SemanticUeTypeRuntimeContract.cs'
 $CSharpUePropertyPlanSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpUePropertyAccessPlan.cs'
 $CSharpGuestLowererSourceForUeTypes = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpGuestLowerer.cs'
@@ -761,7 +764,7 @@ foreach ($RequiredScriptTypeBuildContract in @(
     'schema_version -ne 19',
     'semantic_version -cne "1.21"',
     'schema_version -ne 5',
-    'generator_version -cne "1.6"',
+    'generator_version -cne "1.7"',
     'semantic_artifact_sha256',
     'Get-AvidScriptGeneratedTypeReloadBaseline',
     'New-AvidScriptGeneratedTypeReloadMetadata',
@@ -806,6 +809,39 @@ foreach ($RequiredGeneratedReflectionContract in @(
     'property.Initializer')) {
     if (-not $UeTypeShellRendererSource.Contains($RequiredGeneratedReflectionContract)) {
         Add-Violation "generated UE type renderer is missing $RequiredGeneratedReflectionContract"
+    }
+}
+foreach ($RequiredGeneratedNetworkContract in @(
+    'HasNetworkContract',
+    'bReplicates = true',
+    'SetIsReplicatedByDefault(true)')) {
+    if (-not $UeTypeShellRendererSource.Contains($RequiredGeneratedNetworkContract)) {
+        Add-Violation "generated UE type renderer is missing network contract $RequiredGeneratedNetworkContract"
+    }
+}
+foreach ($RequiredGeneratedNetworkProjectionContract in @(
+    'ASUE1005',
+    'ASUE1204',
+    'StringComparer.OrdinalIgnoreCase')) {
+    if (-not $SemanticUeTypeProjectorSource.Contains($RequiredGeneratedNetworkProjectionContract)) {
+        Add-Violation "generated UE type semantic projection is missing $RequiredGeneratedNetworkProjectionContract"
+    }
+}
+foreach ($RequiredGeneratedNetworkValidationContract in @(
+    'UniqueUeNames',
+    'cannot own replicated properties or RPC functions',
+    'StringComparer.OrdinalIgnoreCase')) {
+    if (-not $SemanticUeTypeValidatorSource.Contains($RequiredGeneratedNetworkValidationContract)) {
+        Add-Violation "generated UE type semantic validator is missing $RequiredGeneratedNetworkValidationContract"
+    }
+}
+foreach ($RequiredScriptDefinedNetworkSample in @(
+    'ServerSubmitDamage',
+    'ClientConfirmDamage',
+    'MulticastObserveDamage',
+    'LastReplicatedDamage')) {
+    if (-not $ScriptDefinedTypeSampleSource.Contains($RequiredScriptDefinedNetworkSample)) {
+        Add-Violation "script-defined UE type sample is missing network closure $RequiredScriptDefinedNetworkSample"
     }
 }
 

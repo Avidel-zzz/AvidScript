@@ -21,7 +21,7 @@
       "summary": "概念名称不能当作真实文件路径。",
       "prevention": "先用 rg --files 建立索引，再对索引中的字面路径读取；通配符只放在 rg -g 参数。",
       "source": "legacy:1931",
-      "last_observed": "2026-08-31 P59.D5b (把 AvidScriptEditorCSharpBuildPipeline.* 作为 Windows 路径传给 rg，产生 os error 123)"
+      "last_observed": "2026-08-31 P59.D6a (未先索引便猜测插件根存在 Scripts/Content/Config，产生 os error 2)"
     },
     {
       "id": "one-command-one-evidence-domain",
@@ -237,6 +237,14 @@
       "prevention": "需要验证 Actor/Component EndPlay 时调用公开 AActor::Destroy 或 UWorld::EndPlay，让 UE 自己派发生命周期；保留对象引用读取结果，不为测试扩大生成壳层可见性。",
       "source": "observed:2026-08-31-P59.D4",
       "last_observed": "2026-08-31 P59.D4 (首次 UBT 因测试直接调用 protected AActor::EndPlay 而失败)"
+    },
+    {
+      "id": "generated-ue-names-follow-fname-case-folding",
+      "tags": ["ue", "uht", "semantic", "generator"],
+      "summary": "C# 标识符区分大小写，但 UHT 反射作用域按 FName 规则禁止大小写不同的成员或参数遮蔽。",
+      "prevention": "Semantic 在运行生成器前按 OrdinalIgnoreCase 校验类型名、反射成员名和 UFUNCTION 参数名；参数不得遮蔽同一 UClass 的反射成员。",
+      "source": "observed:2026-08-31-P59.D6a",
+      "last_observed": "2026-08-31 P59.D6a (RPC 参数 damage 与 UPROPERTY Damage 冲突，首次 no-clean UHT 失败)"
     }
   ]
 }
