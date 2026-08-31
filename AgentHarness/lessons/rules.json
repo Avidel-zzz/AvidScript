@@ -293,6 +293,14 @@
       "prevention": "修改 C# renderer 的共享属性、基类或 helper 后，先检索所有 byte-for-byte facade fixture 与实际输出保存路径；更新 fixture 后同时运行其 Editor emitter 测试和消费该 fixture 的 .NET Guest 测试，再进入全量 Gate。",
       "source": "observed:2026-08-31-P59.Gate",
       "last_observed": "2026-08-31 P59 Gate (UClass/UProperty/UFunction facade 已进入 renderer，但 P48 FName canonical fixture 未同步，导致最终全量 Automation 失败)"
+    },
+    {
+      "id": "closed-phase-followups-use-readonly-close-validator",
+      "tags": ["phase", "close", "evidence", "workflow"],
+      "summary": "Phase close 成功后的合法后继提交不能再次调用 close 命令来复核旧证据。",
+      "prevention": "close 只在 Gate verified commit 的直接 attestation 子提交执行一次；后续 README 或文档提交使用 Test-AvidScriptPhaseCloseEvidence 对既有 PhaseN_Close.json 做只读验证，确认 attestation 仍是 HEAD 祖先且 tree 匹配。",
+      "source": "observed:2026-08-31-P59.Close",
+      "last_observed": "2026-08-31 P59 close 后 README 跟进提交误再次调用 close，状态机以 ASPW3030 拒绝；只读 validator 随后确认原证据有效"
     }
   ]
 }
