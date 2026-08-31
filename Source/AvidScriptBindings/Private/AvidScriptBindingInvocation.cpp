@@ -4131,6 +4131,35 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 				TEXT("The reflected function is missing or no longer satisfies runtime policy."));
 			return false;
 		}
+		if (Model.SchemaVersion >= 21)
+		{
+			const bool bNativeProvenance =
+				Binding.ReflectedOwnerKind == TEXT("native")
+				&& Binding.ReflectedOwnerAsset.IsEmpty()
+				&& Binding.ReflectedFunctionFingerprint.IsEmpty();
+			const bool bBlueprintProvenance =
+				Binding.ReflectedOwnerKind == TEXT("blueprint")
+				&& OwnerClass->ClassGeneratedBy != nullptr
+				&& OwnerClass->ClassGeneratedBy->GetPathName()
+					== Binding.ReflectedOwnerAsset
+				&& Function->GetOwnerClass() == OwnerClass
+				&& !Function->HasAnyFunctionFlags(FUNC_Native)
+				&& !Function->Script.IsEmpty()
+				&& Binding.ReflectedFunctionFingerprint
+					== FAvidScriptBindingDescriptorIdentity::
+					MakeReflectedFunctionFingerprint(
+						Binding.CanonicalIdentity,
+						*Function);
+			if (!bNativeProvenance && !bBlueprintProvenance)
+			{
+				SetAvidScriptBindingLoadFailure(
+					OutResult,
+					TEXT("binding_reflection_provenance_mismatch"),
+					Binding.CanonicalIdentity,
+					TEXT("The reflected owner asset or function bytecode fingerprint changed since descriptor generation."));
+				return false;
+			}
+		}
 		FAvidScriptBindingNetworkContract RuntimeNetwork;
 		if (!TryResolveAvidScriptBindingNetworkContract(
 				*Function,

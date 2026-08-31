@@ -18,11 +18,18 @@
 
 #include "Components/SceneComponent.h"
 #include "Dom/JsonObject.h"
+#include "EdGraph/EdGraph.h"
+#include "EdGraphSchema_K2.h"
+#include "Engine/Blueprint.h"
 #include "Engine/Engine.h"
 #include "Engine/LatentActionManager.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/ProjectileMovementComponent.h"
+#include "K2Node_CallFunction.h"
+#include "K2Node_FunctionEntry.h"
+#include "Kismet2/BlueprintEditorUtils.h"
+#include "Kismet2/KismetEditorUtilities.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -6169,6 +6176,242 @@ bool FAvidScriptEditorBindingLatentProcessEventTest::RunTest(
 		TEXT("Aborted latent action never invokes its callback"),
 		RejectingHost.GetCallbackTarget()->CompletionCount,
 		0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBlueprintDeclaredFunctionIntegrationTest,
+	"AvidScript.Editor.BindingRuntime.BlueprintDeclaredFunction",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBlueprintDeclaredFunctionIntegrationTest::RunTest(
+	const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	const FName BlueprintName(*FString::Printf(
+		TEXT("AvidScriptBlueprintCallable_%s"),
+		*FGuid::NewGuid().ToString(EGuidFormats::Digits)));
+	TStrongObjectPtr<UBlueprint> Blueprint(
+		FKismetEditorUtilities::CreateBlueprint(
+			AAvidScriptBindingRuntimeProcessEventTestActor::StaticClass(),
+			GetTransientPackage(),
+			BlueprintName,
+			BPTYPE_Normal,
+			TEXT("AvidScriptBlueprintDeclaredFunctionTest")));
+	if (!TestNotNull(TEXT("Transient callable Blueprint is created"), Blueprint.Get()))
+	{
+		return false;
+	}
+
+	const FName FunctionName(TEXT("ScriptOnlyPulse"));
+	UEdGraph* const FunctionGraph = FBlueprintEditorUtils::CreateNewGraph(
+		Blueprint.Get(),
+		FunctionName,
+		UEdGraph::StaticClass(),
+		UEdGraphSchema_K2::StaticClass());
+	FBlueprintEditorUtils::AddFunctionGraph(
+		Blueprint.Get(),
+		FunctionGraph,
+		true,
+		static_cast<UFunction*>(nullptr));
+	TArray<UK2Node_FunctionEntry*> Entries;
+	FunctionGraph->GetNodesOfClass(Entries);
+	if (!TestEqual(TEXT("Declared function has one entry"), Entries.Num(), 1))
+	{
+		return false;
+	}
+	FGraphNodeCreator<UK2Node_CallFunction> NodeCreator(*FunctionGraph);
+	UK2Node_CallFunction* const CallNode = NodeCreator.CreateNode();
+	CallNode->FunctionReference.SetExternalMember(
+		GET_FUNCTION_NAME_CHECKED(
+			AAvidScriptBindingRuntimeProcessEventTestActor,
+			RecordBlueprintDeclaredCall),
+		AAvidScriptBindingRuntimeProcessEventTestActor::StaticClass());
+	NodeCreator.Finalize();
+	const UEdGraphSchema_K2* const Schema = CastChecked<UEdGraphSchema_K2>(
+		FunctionGraph->GetSchema());
+	if (!TestTrue(
+			TEXT("Declared function entry connects to its Blueprint body"),
+			Schema->TryCreateConnection(
+				Entries[0]->FindPinChecked(UEdGraphSchema_K2::PN_Then),
+				CallNode->FindPinChecked(UEdGraphSchema_K2::PN_Execute))))
+	{
+		return false;
+	}
+	FKismetEditorUtilities::CompileBlueprint(Blueprint.Get());
+	UClass* const BlueprintClass = Blueprint->GeneratedClass;
+	UFunction* const BlueprintFunction = BlueprintClass == nullptr
+		? nullptr
+		: BlueprintClass->FindFunctionByName(
+			FunctionName,
+			EIncludeSuperFlag::ExcludeSuper);
+	if (!TestNotNull(TEXT("Blueprint declared function compiles"), BlueprintFunction))
+	{
+		return false;
+	}
+	TestFalse(
+		TEXT("Blueprint declared function is not native"),
+		BlueprintFunction->HasAnyFunctionFlags(FUNC_Native));
+	TestTrue(
+		TEXT("Blueprint declared function owns bytecode"),
+		!BlueprintFunction->Script.IsEmpty());
+
+	FAvidScriptBindingSelectionProfile Profile;
+	Profile.PackageName = TEXT("avidscript.test.blueprint_declared_function");
+	Profile.SelfClassPath = BlueprintClass->GetPathName();
+	Profile.ExplicitFunctions.Add({ BlueprintClass->GetPathName(), FunctionName });
+	FString DescriptorJson;
+	FAvidScriptBindingSelectionResolveResult SelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+			TEXT("Blueprint declared function generates through the Profile path"),
+			FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+				Profile,
+				DescriptorJson,
+				SelectionResult,
+				GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorCategory + TEXT(": ")
+			+ GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Descriptor;
+	FString ParseCategory;
+	FString ParseSource;
+	if (!TestTrue(
+			TEXT("Blueprint declared function descriptor parses"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				DescriptorJson,
+				Descriptor,
+				ParseCategory,
+				ParseSource)))
+	{
+		AddError(ParseCategory + TEXT(": ") + ParseSource);
+		return false;
+	}
+	if (!TestEqual(TEXT("Blueprint provenance activates schema 21"), Descriptor.SchemaVersion, 21)
+		|| !TestEqual(TEXT("One Blueprint function is described"), Descriptor.Bindings.Num(), 1))
+	{
+		return false;
+	}
+	const FAvidScriptBindingFunctionModel& Binding = Descriptor.Bindings[0];
+	TestEqual(
+		TEXT("Descriptor identifies a Blueprint owner"),
+		Binding.ReflectedOwnerKind,
+		FString(TEXT("blueprint")));
+	TestEqual(
+		TEXT("Descriptor freezes the Blueprint asset identity"),
+		Binding.ReflectedOwnerAsset,
+		Blueprint->GetPathName());
+	TestEqual(
+		TEXT("Descriptor freezes bytecode and signature provenance"),
+		Binding.ReflectedFunctionFingerprint,
+		FAvidScriptBindingDescriptorIdentity::MakeReflectedFunctionFingerprint(
+			Binding.CanonicalIdentity,
+			*BlueprintFunction));
+
+	TSharedPtr<const FAvidScriptBindingPackage> Package;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	if (!TestTrue(
+			TEXT("Runtime accepts the live Blueprint provenance"),
+			FAvidScriptBindingPackage::LoadDescriptor(
+				DescriptorJson,
+				Package,
+				LoadResult)))
+	{
+		AddError(LoadResult.ErrorCategory + TEXT(": ") + LoadResult.ErrorDetails);
+		return false;
+	}
+
+	UWorld* World = nullptr;
+	if (!TestTrue(
+			TEXT("Blueprint callable integration world is created"),
+			CreateAvidScriptBindingRuntimeIntegrationWorld(World)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyAvidScriptBindingRuntimeIntegrationWorld(World);
+	};
+	AAvidScriptBindingRuntimeProcessEventTestActor* const Actor =
+		Cast<AAvidScriptBindingRuntimeProcessEventTestActor>(
+			World->SpawnActor<AActor>(BlueprintClass));
+	if (!TestNotNull(TEXT("Blueprint callable actor spawns"), Actor))
+	{
+		return false;
+	}
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle ActorHandle = Registry.RegisterObject(
+		Actor,
+		RegisterResult);
+	if (!TestTrue(TEXT("Blueprint callable actor registers"), RegisterResult.bSucceeded))
+	{
+		return false;
+	}
+	const uint64 Arguments[] = { ActorHandle.Slot, ActorHandle.Generation };
+	FAvidScriptDynamicHostCall Call;
+	Call.BindingOrdinal = static_cast<uint32>(Binding.Ordinal);
+	Call.Arguments = MakeArrayView(Arguments);
+	FAvidScriptBindingInvocationContext Context;
+	Context.ObjectRegistry = &Registry;
+	Context.OwnerHandle = ActorHandle;
+	Context.WritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+	TArray<uint8> Scratch;
+	Scratch.SetNumUninitialized(Package->GetRequiredScratchSize());
+	FAvidScriptDynamicHostCallResult DispatchResult;
+	const bool bDispatched = Package->Dispatch(
+		Call,
+		Context,
+		Scratch,
+		DispatchResult);
+	if (!TestTrue(
+		TEXT("Prepared ProcessEvent invokes Blueprint-owned bytecode"),
+		bDispatched))
+	{
+		AddError(DispatchResult.Details);
+	}
+	TestTrue(TEXT("Blueprint dispatch reports success"), DispatchResult.bSucceeded);
+	TestEqual(
+		TEXT("Blueprint graph reaches its native observation point"),
+		Actor->BlueprintDeclaredCallCount,
+		1);
+	TestTrue(
+		TEXT("Blueprint call crosses ProcessEvent"),
+		Actor->ProcessEventCallCount > 0);
+
+	FGraphNodeCreator<UK2Node_CallFunction> SecondNodeCreator(*FunctionGraph);
+	UK2Node_CallFunction* const SecondCallNode = SecondNodeCreator.CreateNode();
+	SecondCallNode->FunctionReference.SetExternalMember(
+		GET_FUNCTION_NAME_CHECKED(
+			AAvidScriptBindingRuntimeProcessEventTestActor,
+			RecordBlueprintDeclaredCall),
+		AAvidScriptBindingRuntimeProcessEventTestActor::StaticClass());
+	SecondNodeCreator.Finalize();
+	if (!TestTrue(
+			TEXT("Blueprint bytecode mutation extends the callable body"),
+			Schema->TryCreateConnection(
+				CallNode->FindPinChecked(UEdGraphSchema_K2::PN_Then),
+				SecondCallNode->FindPinChecked(UEdGraphSchema_K2::PN_Execute))))
+	{
+		return false;
+	}
+	FKismetEditorUtilities::CompileBlueprint(Blueprint.Get());
+	TSharedPtr<const FAvidScriptBindingPackage> StalePackage;
+	FAvidScriptBindingPackageLoadResult StaleLoadResult;
+	TestFalse(
+		TEXT("Runtime rejects a descriptor after Blueprint bytecode changes"),
+		FAvidScriptBindingPackage::LoadDescriptor(
+			DescriptorJson,
+			StalePackage,
+			StaleLoadResult));
+	TestEqual(
+		TEXT("Blueprint recompile rejection has a stable category"),
+		StaleLoadResult.ErrorCategory,
+		FString(TEXT("binding_reflection_provenance_mismatch")));
 	return true;
 }
 

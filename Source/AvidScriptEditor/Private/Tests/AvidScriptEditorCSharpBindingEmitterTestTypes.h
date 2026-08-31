@@ -630,6 +630,12 @@ public:
 		RoutedValue = Value + 2.0f;
 	}
 
+	UFUNCTION(BlueprintCallable)
+	void RecordBlueprintDeclaredCall()
+	{
+		++BlueprintDeclaredCallCount;
+	}
+
 	virtual void ProcessEvent(UFunction* Function, void* Parameters) override
 	{
 		++ProcessEventCallCount;
@@ -641,6 +647,7 @@ public:
 
 	int32 ProcessEventCallCount = 0;
 	int32 BlueprintSetterCallCount = 0;
+	int32 BlueprintDeclaredCallCount = 0;
 
 private:
 	UPROPERTY(

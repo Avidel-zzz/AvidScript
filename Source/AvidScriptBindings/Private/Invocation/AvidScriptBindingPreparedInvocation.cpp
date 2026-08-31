@@ -826,14 +826,20 @@ bool InvokePreparedDynamicReflection(
 		return false;
 	}
 
-	const UPTRINT ScratchAddress =
-		reinterpret_cast<UPTRINT>(InvocationScratch.GetData());
-	const UPTRINT FrameAddress = Align(
-		ScratchAddress,
-		static_cast<UPTRINT>(Program->FrameAlignment));
-	const int32 FrameOffset =
-		static_cast<int32>(FrameAddress - ScratchAddress);
-	if (FrameOffset + Program->FrameSize > InvocationScratch.Num())
+	const bool bHasFrameStorage = Program->FrameSize > 0;
+	const UPTRINT ScratchAddress = bHasFrameStorage
+		? reinterpret_cast<UPTRINT>(InvocationScratch.GetData())
+		: 0;
+	const UPTRINT FrameAddress = bHasFrameStorage
+		? Align(
+			ScratchAddress,
+			static_cast<UPTRINT>(Program->FrameAlignment))
+		: 0;
+	const int32 FrameOffset = bHasFrameStorage
+		? static_cast<int32>(FrameAddress - ScratchAddress)
+		: 0;
+	if (bHasFrameStorage
+		&& FrameOffset + Program->FrameSize > InvocationScratch.Num())
 	{
 		SetDispatchFailure(
 			OutResult,
@@ -842,11 +848,19 @@ bool InvokePreparedDynamicReflection(
 			TEXT("The runtime invocation scratch could not satisfy the cached frame alignment."));
 		return false;
 	}
-	void* Frame = reinterpret_cast<void*>(FrameAddress);
-	Program->Function->InitializeStruct(Frame);
+	void* Frame = bHasFrameStorage
+		? reinterpret_cast<void*>(FrameAddress)
+		: nullptr;
+	if (bHasFrameStorage)
+	{
+		Program->Function->InitializeStruct(Frame);
+	}
 	ON_SCOPE_EXIT
 	{
-		Program->Function->DestroyStruct(Frame);
+		if (bHasFrameStorage)
+		{
+			Program->Function->DestroyStruct(Frame);
+		}
 	};
 
 	for (int32 ParameterIndex = 0;

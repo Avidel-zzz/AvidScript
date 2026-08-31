@@ -41,6 +41,7 @@ constexpr const TCHAR* InboundHandlerGeneratorVersion = TEXT("57.12D4.0");
 constexpr const TCHAR* CompositeValueGeneratorVersion = TEXT("58.1.0");
 constexpr const TCHAR* DelegateOutputGeneratorVersion = TEXT("58.2.0");
 constexpr const TCHAR* DelegateValueGeneratorVersion = TEXT("60.2.0");
+constexpr const TCHAR* BlueprintFunctionGeneratorVersion = TEXT("60.3.0");
 
 struct FResolvedBindingDescriptor
 {
@@ -1412,6 +1413,16 @@ bool GenerateBindingDescriptor(
 				return Event.CallbackKind == TEXT("singlecast")
 					|| Event.Projection.ReturnValue.Type.Kind != TEXT("void");
 			});
+	const bool bHasBlueprintDeclaredFunctions = Bindings.ContainsByPredicate(
+		[](const FResolvedBindingDescriptor& Binding)
+		{
+			return Binding.BindingKind == TEXT("function")
+				&& Binding.OwnerClass != nullptr
+				&& Binding.Function != nullptr
+				&& Binding.Function->GetOwnerClass() == Binding.OwnerClass
+				&& Binding.OwnerClass->ClassGeneratedBy != nullptr
+				&& !Binding.Function->Script.IsEmpty();
+		});
 	Package.SchemaVersion = bHasWritableProperties || bHasNativeDirectFunctions
 			|| bHasGeneratedNativeBindings
 		? 8
@@ -1458,7 +1469,13 @@ bool GenerateBindingDescriptor(
 	{
 		Package.SchemaVersion = 20;
 	}
-	Package.GeneratorVersion = bHasDelegateValueSystem
+	if (bHasBlueprintDeclaredFunctions)
+	{
+		Package.SchemaVersion = 21;
+	}
+	Package.GeneratorVersion = bHasBlueprintDeclaredFunctions
+		? BlueprintFunctionGeneratorVersion
+		: bHasDelegateValueSystem
 		? DelegateValueGeneratorVersion
 		: bHasDelegateOutputs
 		? DelegateOutputGeneratorVersion
@@ -1577,6 +1594,22 @@ bool GenerateBindingDescriptor(
 			: Binding.Function->GetName();
 		BindingModel.ScriptName = Binding.ScriptName;
 		BindingModel.DispatchMode = Binding.DispatchMode;
+		if (Binding.BindingKind == TEXT("function")
+			&& Binding.OwnerClass != nullptr
+			&& Binding.Function != nullptr
+			&& Binding.Function->GetOwnerClass() == Binding.OwnerClass
+			&& Binding.OwnerClass->ClassGeneratedBy != nullptr
+			&& !Binding.Function->Script.IsEmpty())
+		{
+			BindingModel.ReflectedOwnerKind = TEXT("blueprint");
+			BindingModel.ReflectedOwnerAsset =
+				Binding.OwnerClass->ClassGeneratedBy->GetPathName();
+			BindingModel.ReflectedFunctionFingerprint =
+				FAvidScriptBindingDescriptorIdentity::
+				MakeReflectedFunctionFingerprint(
+					Binding.CanonicalIdentity,
+					*Binding.Function);
+		}
 		BindingModel.LatentInfoParameter = Binding.LatentInfoParameter;
 		BindingModel.WorldContextParameter = Binding.WorldContextParameter;
 		if (Package.SchemaVersion >= 13

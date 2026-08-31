@@ -1767,11 +1767,11 @@ bool FAvidScriptEditorBindingDescriptorV8PropertySetTest::RunTest(const FString&
 			FString(ExpectedSource));
 	};
 	ParserRejectsWithSource(
-		TEXT("Schema v21 above the current maximum identifies its header field"),
+		TEXT("Schema v22 above the current maximum identifies its header field"),
 		TEXT("schema_version"),
 		[](TSharedPtr<FJsonObject>& Root)
 		{
-			Root->SetNumberField(TEXT("schema_version"), 21);
+			Root->SetNumberField(TEXT("schema_version"), 22);
 		});
 	ParserRejectsWithSource(
 		TEXT("Malformed package hash identifies its header field"),

@@ -302,6 +302,18 @@ bool FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 		}
 		Writer->WriteValue(TEXT("script_name"), Binding.ScriptName);
 		Writer->WriteValue(TEXT("dispatch_mode"), Binding.DispatchMode);
+		if (Package.SchemaVersion >= 21)
+		{
+			Writer->WriteValue(
+				TEXT("reflected_owner_kind"),
+				Binding.ReflectedOwnerKind);
+			Writer->WriteValue(
+				TEXT("reflected_owner_asset"),
+				Binding.ReflectedOwnerAsset);
+			Writer->WriteValue(
+				TEXT("reflected_function_fingerprint"),
+				Binding.ReflectedFunctionFingerprint);
+		}
 		if (Package.SchemaVersion >= 12
 			&& Binding.DispatchMode == TEXT("latent_process_event"))
 		{

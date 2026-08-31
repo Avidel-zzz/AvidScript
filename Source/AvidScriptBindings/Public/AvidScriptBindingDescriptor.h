@@ -5,6 +5,8 @@
 #include "AvidScriptObjectFactoryPolicy.h"
 #include "CoreMinimal.h"
 
+class UFunction;
+
 struct FAvidScriptBindingEnumValue
 {
 	FString Name;
@@ -77,6 +79,9 @@ struct FAvidScriptBindingFunctionModel
 	FString UeFunction;
 	FString ScriptName;
 	FString DispatchMode;
+	FString ReflectedOwnerKind = TEXT("native");
+	FString ReflectedOwnerAsset;
+	FString ReflectedFunctionFingerprint;
 	FString LatentInfoParameter;
 	FString WorldContextParameter;
 	FAvidScriptBindingLatentCompletionModel Completion;
@@ -244,6 +249,10 @@ public:
 		const FString& GeneratedShape = FString(),
 		const FString& GeneratedReceiverMode = FString(),
 		const FString& GeneratedImportName = FString());
+
+	static FString MakeReflectedFunctionFingerprint(
+		const FString& CanonicalIdentity,
+		const UFunction& Function);
 
 	static FString MakePropertySetCanonicalIdentity(
 		const FString& OwnerClass,

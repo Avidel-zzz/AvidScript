@@ -4586,6 +4586,36 @@ foreach ($RequiredPreparedDelegateInvokeContract in @(
         Add-Violation "prepared delegate invocation path is missing $RequiredPreparedDelegateInvokeContract"
     }
 }
+foreach ($RequiredBlueprintDeclaredFunctionContract in @(
+    'BlueprintFunctionGeneratorVersion',
+    'Package.SchemaVersion = 21',
+    'TEXT("reflected_owner_kind")',
+    'MakeReflectedFunctionFingerprint',
+    'TEXT("descriptor_selection_v21")',
+    'TEXT("descriptor_package_v21")',
+    'OutPackage.SchemaVersion != 21',
+    'binding_reflection_provenance_mismatch',
+    'BlueprintDeclaredFunction'
+)) {
+    if (-not $BindingDescriptorGeneratorSource.Contains($RequiredBlueprintDeclaredFunctionContract) -and
+        -not $BindingDescriptorModelSource.Contains($RequiredBlueprintDeclaredFunctionContract) -and
+        -not $BindingDescriptorHeader.Contains($RequiredBlueprintDeclaredFunctionContract) -and
+        -not $BindingDescriptorSource.Contains($RequiredBlueprintDeclaredFunctionContract) -and
+        -not $BindingInvocationSource.Contains($RequiredBlueprintDeclaredFunctionContract) -and
+        -not $BindingRuntimeIntegrationTestsSource.Contains($RequiredBlueprintDeclaredFunctionContract)) {
+        Add-Violation "schema v21 Blueprint-declared function provenance is missing $RequiredBlueprintDeclaredFunctionContract"
+    }
+}
+foreach ($RequiredZeroFrameInvocationContract in @(
+    'bHasFrameStorage = Program->FrameSize > 0',
+    'Frame = bHasFrameStorage',
+    'Program->Function->InitializeStruct(Frame)',
+    'Program->Function->DestroyStruct(Frame)'
+)) {
+    if (-not $BindingPreparedInvocationSource.Contains($RequiredZeroFrameInvocationContract)) {
+        Add-Violation "prepared zero-frame ProcessEvent safety is missing $RequiredZeroFrameInvocationContract"
+    }
+}
 if ($BindingCodecProgramSource.Contains('GuestMemory.WriteBytes(')) {
     Add-Violation 'Bindings output publication must use secured mutable ranges instead of fallible WriteBytes calls'
 }

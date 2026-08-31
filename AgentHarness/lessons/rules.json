@@ -333,7 +333,7 @@
       "summary": "同一补丁先新增 helper 再用宽泛首个匹配替换调用点，可能误改 helper 自身。",
       "prevention": "新增 helper 后，替换调用点必须带函数名或上下文锚点；补丁完成立即用 rg 列出全部调用和分支，并检查新 helper 本体，再进入构建。",
       "source": "observed:2026-08-31-P60.A1",
-      "last_observed": "2026-08-31 P60.A1 宽泛替换一度把 SetObjectValue 的 object 分支改成递归调用；静态分支审计在构建前发现并修正"
+      "last_observed": "2026-08-31 P60.A1 宽泛替换一度把 SetObjectValue 的 object 分支改成递归调用；2026-09-01 P60.C1a 非唯一 Context 锚点又把 WritePolicy 写入既有 RPC 用例，均由补丁后立即定点回读发现"
     },
     {
       "id": "powershell-quote-git-revisions-with-braces",
@@ -398,6 +398,14 @@
       "prevention": "生成清单变更后搜索性能与运行时夹具中的 type/member ordinal；用当前 type-manifest 的 stable member identity 核对具名常量，并在聚焦回归中确认目标 call shape 与返回类型。",
       "source": "observed:2026-09-01-P60.B2",
       "last_observed": "2026-09-01 P60.B2 (GetActivationCount 从 member 4 移到 5，旧性能夹具误把 EndPlay void 当作 int32 prepared export 调用而 fail-closed)"
+    },
+    {
+      "id": "zero-frame-process-event-skips-struct-initialization",
+      "tags": ["ue", "reflection", "process-event", "runtime"],
+      "summary": "无参数且无返回值的 UFunction 可以拥有零字节参数帧，空 scratch 不能传给 UStruct::InitializeStruct。",
+      "prevention": "prepared ProcessEvent 仅在 FrameSize 大于 0 时对已对齐 scratch 执行 InitializeStruct/DestroyStruct；零帧调用使用 nullptr 参数，并以真实无参 Blueprint 函数 Automation 覆盖。",
+      "source": "observed:2026-09-01-P60.C1a",
+      "last_observed": "2026-09-01 P60.C1a (ScriptOnlyPulse 的 FrameSize 为 0，旧路径 InitializeStruct(nullptr) 触发 UE Class.cpp:1151 断言；改为零帧 nullptr ProcessEvent 后闭环通过)"
     }
   ]
 }

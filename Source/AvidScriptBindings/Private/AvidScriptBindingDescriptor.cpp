@@ -4,6 +4,7 @@
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "UObject/Class.h"
 
 namespace
 {
@@ -751,6 +752,42 @@ bool ParseAvidScriptBindingFunction(
 				OutBinding.UeFunction,
 				OutErrorSource))
 		{
+			return false;
+		}
+	}
+	if (SchemaVersion >= 21)
+	{
+		if (!ReadAvidScriptBindingRequiredString(
+				Object,
+				TEXT("reflected_owner_kind"),
+				OutBinding.ReflectedOwnerKind,
+				OutErrorSource)
+			|| !ReadAvidScriptBindingRequiredStringAllowEmpty(
+				Object,
+				TEXT("reflected_owner_asset"),
+				OutBinding.ReflectedOwnerAsset,
+				OutErrorSource)
+			|| !ReadAvidScriptBindingRequiredStringAllowEmpty(
+				Object,
+				TEXT("reflected_function_fingerprint"),
+				OutBinding.ReflectedFunctionFingerprint,
+				OutErrorSource))
+		{
+			return false;
+		}
+		const bool bNativeProvenance =
+			OutBinding.ReflectedOwnerKind == TEXT("native")
+			&& OutBinding.ReflectedOwnerAsset.IsEmpty()
+			&& OutBinding.ReflectedFunctionFingerprint.IsEmpty();
+		const bool bBlueprintProvenance =
+			OutBinding.BindingKind == TEXT("function")
+			&& OutBinding.ReflectedOwnerKind == TEXT("blueprint")
+			&& !OutBinding.ReflectedOwnerAsset.IsEmpty()
+			&& IsAvidScriptBindingLowerSha256(
+				OutBinding.ReflectedFunctionFingerprint);
+		if (!bNativeProvenance && !bBlueprintProvenance)
+		{
+			OutErrorSource = TEXT("reflection_provenance");
 			return false;
 		}
 	}
@@ -1950,6 +1987,16 @@ FString FAvidScriptBindingDescriptorIdentity::MakeFunctionCanonicalIdentity(
 	return Identity;
 }
 
+FString FAvidScriptBindingDescriptorIdentity::MakeReflectedFunctionFingerprint(
+	const FString& CanonicalIdentity,
+	const UFunction& Function)
+{
+	return FAvidScriptHash::Sha256HexUtf8(
+		CanonicalIdentity
+		+ TEXT("|bytecode_sha256=")
+		+ FAvidScriptHash::Sha256Hex(Function.Script));
+}
+
 FString FAvidScriptBindingDescriptorIdentity::MakePropertySetCanonicalIdentity(
 	const FString& OwnerClass,
 	const FString& PropertyName,
@@ -2149,6 +2196,15 @@ FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 						: TEXT("0"));
 			}
 		}
+		if (Package.SchemaVersion >= 21)
+		{
+			Key += TEXT("|reflected_owner_kind=")
+				+ Binding.ReflectedOwnerKind
+				+ TEXT("|reflected_owner_asset=")
+				+ Binding.ReflectedOwnerAsset
+				+ TEXT("|reflected_function_fingerprint=")
+				+ Binding.ReflectedFunctionFingerprint;
+		}
 		SelectionKeys.Add(MoveTemp(Key));
 	}
 	if (Package.SchemaVersion >= 11)
@@ -2187,7 +2243,9 @@ FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 		return FAvidScriptHash::Sha256HexUtf8(FString::Join(SelectionKeys, TEXT("\n")));
 	}
 
-	FString Identity(Package.SchemaVersion >= 20
+	FString Identity(Package.SchemaVersion >= 21
+		? TEXT("descriptor_selection_v21")
+		: Package.SchemaVersion >= 20
 		? TEXT("descriptor_selection_v20")
 		: Package.SchemaVersion >= 18
 		? TEXT("descriptor_selection_v18")
@@ -2385,7 +2443,9 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 		return FAvidScriptHash::Sha256HexUtf8(Identity);
 	}
 
-	FString Identity(Package.SchemaVersion >= 20
+	FString Identity(Package.SchemaVersion >= 21
+		? TEXT("descriptor_package_v21")
+		: Package.SchemaVersion >= 20
 		? TEXT("descriptor_package_v20")
 		: Package.SchemaVersion >= 18
 		? TEXT("descriptor_package_v18")
@@ -2509,6 +2569,21 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("member"), Binding.UeMember);
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("script_name"), Binding.ScriptName);
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("dispatch"), Binding.DispatchMode);
+		if (Package.SchemaVersion >= 21)
+		{
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("reflected_owner_kind"),
+				Binding.ReflectedOwnerKind);
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("reflected_owner_asset"),
+				Binding.ReflectedOwnerAsset);
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("reflected_function_fingerprint"),
+				Binding.ReflectedFunctionFingerprint);
+		}
 		if (Package.SchemaVersion >= 12
 			&& Binding.DispatchMode == TEXT("latent_process_event"))
 		{
@@ -2769,7 +2844,8 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 			&& OutPackage.SchemaVersion != 17
 			&& OutPackage.SchemaVersion != 18
 			&& OutPackage.SchemaVersion != 19
-			&& OutPackage.SchemaVersion != 20)
+			&& OutPackage.SchemaVersion != 20
+			&& OutPackage.SchemaVersion != 21)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("generator_version"), OutPackage.GeneratorVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("engine_version"), OutPackage.EngineVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("source"), OutPackage.Source, OutErrorSource)
@@ -2801,7 +2877,8 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 				&& OutPackage.SchemaVersion != 17
 				&& OutPackage.SchemaVersion != 18
 				&& OutPackage.SchemaVersion != 19
-				&& OutPackage.SchemaVersion != 20)
+				&& OutPackage.SchemaVersion != 20
+				&& OutPackage.SchemaVersion != 21)
 			{
 				OutErrorSource = TEXT("schema_version");
 			}
