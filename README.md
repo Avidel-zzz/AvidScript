@@ -54,12 +54,13 @@ callable/event，以及带 typed payload 的 AsyncAction `await` 已接入真实
 
 详细进度见 [Phase 60 中文收尾记录](Docs/Phase60/P60_Closeout.md)。
 
-Phase 61 已完成 `P61.A-P61.B` 与 `P61.C4b`：增量编译、Debug Map v2、可导航调用栈，
+Phase 61 已完成 `P61.A-P61.C`：增量编译、Debug Map v2、可导航调用栈，
 以及同步顶层 `void` 导出的 CPS 暂停/恢复闭环已落地。Editor 的 AvidScript Debugger 面板可选择 PIE
 Component Session、维护源码断点、控制执行、查看暂停变量并跳转源码，reload/teardown 时自动安全重绑定或失效。
+真实 Debug C# WASM 的 PIE World 集成用例已覆盖 pause、变量、step、continue、reload 与 EndPlay。
 `EndPlay`、non-void、async 和 Guest helper 暂不生成可暂停点。
 5 轮增量矩阵的无修改、方法体、Binding、工具链中位耗时为
-`884 / 1833 / 1826 / 3223 ms`；真实 PIE 交互验收、Profiler 与 IDE workspace 仍在后续批次。
+`884 / 1833 / 1826 / 3223 ms`；Profiler、IDE workspace 与人工 Editor 交互验收仍在后续批次。
 
 ## C# 游戏脚本
 

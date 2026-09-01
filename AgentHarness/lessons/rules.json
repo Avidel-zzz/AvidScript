@@ -19,9 +19,9 @@
       "id": "index-paths-before-read",
       "tags": ["path", "rg", "discovery"],
       "summary": "概念名称不能当作真实文件路径。",
-      "prevention": "先用 rg --files 建立索引，再对索引中的字面路径读取；通配符只放在 rg -g 参数。",
+      "prevention": "先用 rg --files 建立索引，再对索引中的字面路径读取；通配符只放在 rg -g 参数，所有 -g 选项必须位于 -- 终止符之前。",
       "source": "legacy:1931",
-      "last_observed": "2026-09-01 P60.D (再次把 Docs/Phase5* 作为 rg 的直接路径参数，Windows 路径解析失败；目录通配必须放入 -g，目标目录必须先由 rg --files 索引确认)"
+      "last_observed": "2026-09-02 P61.C4c (再次把 AvidScriptRuntimeSession*.h 作为直接路径、猜错 Session 源文件位置，并把 -g 放到 -- 之后；已恢复为索引、字面路径和正确选项顺序)"
     },
     {
       "id": "one-command-one-evidence-domain",

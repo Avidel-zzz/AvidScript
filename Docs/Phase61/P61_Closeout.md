@@ -1,6 +1,6 @@
 # Phase 61 收尾记录
 
-状态：实施中，`P61.A1-A3b`、`P61.B1a-B2`、`P61.C1a-C4b` 已完成
+状态：实施中，`P61.A1-A3b`、`P61.B1a-B2`、`P61.C1a-C4c` 已完成
 
 ## 目标
 
@@ -82,10 +82,15 @@
 - UI 只通过共享 Controller 读写 Session Model，低频 ticker 负责 PIE 目标刷新；关闭 PIE 或卸载模块时按
   ticker、delegate、Controller、Tab 的顺序释放，不缓存裸 Runtime 指针；
 - 详细实现与证据见 [P61.C4b Editor Debugger 面板](P61.C4b_Editor_Debugger_Panel.md)。
+- 完成 `P61.C4c` PIE 调试集成：Debug C# ActorLifecycle 编译为真实 WASM，在 `EWorldType::PIE`
+  World 中由生产目标发现器绑定真实 `UAvidScriptComponent` Session；
+- 集成用例覆盖源码断点解析、attach、pause-next、`deltaSeconds` 变量、step、continue、同清单 reload
+  后 epoch/断点重绑，以及 EndPlay 后目标消失和断点保留；
+- 单入口 Runner 自动构建 Debug fixture、执行 Automation 并严格校验测试数量、Success 与正常退出；
+- 详细实现与证据见 [P61.C4c PIE 调试集成](P61.C4c_PIE_Debug_Integration.md)。
 
 ## 待完成
 
-- `P61.C4c` 真实 PIE 调试体验与交互验收；
 - `P61.D` Profiler 与 IDE workspace；
 - `P61.E` 集成与集中 Gate。
 
