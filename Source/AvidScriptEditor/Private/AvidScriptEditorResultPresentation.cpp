@@ -155,13 +155,15 @@ FString MakeAvidScriptCSharpWorkspaceDetails(const FAvidScriptEditorCSharpWorksp
 	AddAvidScriptPresentationDetailLine(Lines, TEXT("Editor config"), Result.EditorConfigPath);
 	AddAvidScriptPresentationDetailLine(Lines, TEXT("Profile"), Result.ProfilePath);
 	AddAvidScriptPresentationDetailLine(Lines, TEXT("Generated facade"), Result.FacadePath);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Source index"), Result.SourceIndexPath);
 	AddAvidScriptPresentationDetailLine(Lines, TEXT("IDE binding package"), Result.BindingPackageManifestPath);
 	Lines.Add(FString::Printf(
-		TEXT("User files: created=%d updated=%d preserved=%d facade_refreshed=%s"),
+		TEXT("User files: created=%d updated=%d preserved=%d facade_refreshed=%s source_index_refreshed=%s"),
 		Result.CreatedUserFileCount,
 		Result.UpdatedUserFileCount,
 		Result.PreservedUserFileCount,
-		Result.bFacadeRefreshed ? TEXT("true") : TEXT("false")));
+		Result.bFacadeRefreshed ? TEXT("true") : TEXT("false"),
+		Result.bSourceIndexRefreshed ? TEXT("true") : TEXT("false")));
 	return FString::Join(Lines, TEXT("\n"));
 }
 

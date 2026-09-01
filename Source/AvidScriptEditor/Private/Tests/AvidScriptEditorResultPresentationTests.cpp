@@ -171,6 +171,7 @@ bool FAvidScriptEditorPresentationCSharpWorkspaceTest::RunTest(const FString& Pa
 	FAvidScriptEditorCSharpWorkspaceResult CreatedResult;
 	CreatedResult.bSucceeded = true;
 	CreatedResult.bFacadeRefreshed = true;
+	CreatedResult.bSourceIndexRefreshed = true;
 	CreatedResult.CreatedUserFileCount = 6;
 	CreatedResult.WorkspaceRoot = TEXT("C:/Project/Scripts/AvidScript");
 	CreatedResult.SourcePath = TEXT("C:/Project/Scripts/AvidScript/GameplayScript.cs");
@@ -179,6 +180,7 @@ bool FAvidScriptEditorPresentationCSharpWorkspaceTest::RunTest(const FString& Pa
 	CreatedResult.EditorConfigPath = TEXT("C:/Project/Scripts/AvidScript/.editorconfig");
 	CreatedResult.ProfilePath = TEXT("C:/Project/Scripts/AvidScript/default.csharp-profile.json");
 	CreatedResult.FacadePath = TEXT("C:/Project/Intermediate/AvidScript/CSharpWorkspace/AvidScript.Bindings.generated.cs");
+	CreatedResult.SourceIndexPath = TEXT("C:/Project/Intermediate/AvidScript/CSharpWorkspace/AvidScript.SourceIndex.json");
 	CreatedResult.BindingPackageManifestPath = TEXT("C:/Project/Intermediate/AvidScript/CSharpWorkspace/BindingPackages/package.json");
 	CreatedResult.ManifestPath = TEXT("C:/Project/Saved/AvidScriptCSharpGuest/ProjectGameplay/project_gameplay.avidscript.json");
 	CreatedResult.NextAction = TEXT("open GameplayScript.cs, then build and bind");
@@ -192,7 +194,9 @@ bool FAvidScriptEditorPresentationCSharpWorkspaceTest::RunTest(const FString& Pa
 	TestTrue(TEXT("C# workspace details include solution"), CreatedPresentation.Details.Contains(TEXT("AvidScript.Gameplay.slnx")));
 	TestTrue(TEXT("C# workspace details include editor config"), CreatedPresentation.Details.Contains(TEXT(".editorconfig")));
 	TestTrue(TEXT("C# workspace details include facade"), CreatedPresentation.Details.Contains(TEXT("AvidScript.Bindings.generated.cs")));
+	TestTrue(TEXT("C# workspace details include source index"), CreatedPresentation.Details.Contains(TEXT("AvidScript.SourceIndex.json")));
 	TestTrue(TEXT("C# workspace details include refreshed state"), CreatedPresentation.Details.Contains(TEXT("facade_refreshed=true")));
+	TestTrue(TEXT("C# workspace details include index state"), CreatedPresentation.Details.Contains(TEXT("source_index_refreshed=true")));
 
 	FAvidScriptEditorCSharpWorkspaceResult PreservedResult = CreatedResult;
 	PreservedResult.CreatedUserFileCount = 0;

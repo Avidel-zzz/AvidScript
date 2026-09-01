@@ -22,6 +22,7 @@ struct AVIDSCRIPTEDITOR_API FAvidScriptEditorCSharpWorkspaceResult
     bool bProfileCreated = false;
     bool bGlobalJsonCreated = false;
     bool bFacadeRefreshed = false;
+    bool bSourceIndexRefreshed = false;
     int32 CreatedUserFileCount = 0;
     int32 UpdatedUserFileCount = 0;
     int32 PreservedUserFileCount = 0;
@@ -34,6 +35,8 @@ struct AVIDSCRIPTEDITOR_API FAvidScriptEditorCSharpWorkspaceResult
     FString GlobalJsonPath;
     FString GeneratedRoot;
     FString FacadePath;
+    FString SourceIndexPath;
+    FString SourceIndexSha256;
     FString BindingPackageRoot;
     FString BindingPackageManifestPath;
     FString BindingPackageHash;

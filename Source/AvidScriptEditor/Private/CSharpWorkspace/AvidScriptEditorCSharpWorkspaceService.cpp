@@ -2,6 +2,7 @@
 
 #include "AvidScriptEditorCSharpBindingEmitter.h"
 #include "AvidScriptEditorCSharpBuildService.h"
+#include "AvidScriptEditorCSharpSourceIndexService.h"
 
 #include "HAL/FileManager.h"
 #include "Interfaces/IPluginManager.h"
@@ -371,6 +372,8 @@ bool FAvidScriptEditorCSharpWorkspaceService::CreateOrRefresh(
     OutResult.FacadePath = NormalizeAvidScriptWorkspacePath(FPaths::Combine(
         OutResult.GeneratedRoot,
         AvidScriptWorkspaceFacadeFile));
+    OutResult.SourceIndexPath = FAvidScriptEditorCSharpSourceIndexService::MakeDefaultPath(
+        OutResult.GeneratedRoot);
     OutResult.ReportPath = FAvidScriptEditorCSharpBuildService::MakeReportPathForOutputRoot(
         OutResult.OutputRoot,
         AvidScriptWorkspaceArtifactStem);
@@ -531,6 +534,30 @@ bool FAvidScriptEditorCSharpWorkspaceService::CreateOrRefresh(
     {
         return false;
     }
+
+    FAvidScriptEditorCSharpSourceIndexConfig SourceIndexConfig;
+    SourceIndexConfig.ProjectRoot = ProjectRoot;
+    SourceIndexConfig.WorkspaceRoot = OutResult.WorkspaceRoot;
+    SourceIndexConfig.SolutionPath = OutResult.SolutionPath;
+    SourceIndexConfig.ProjectPath = OutResult.ProjectPath;
+    SourceIndexConfig.UserSourcePath = OutResult.SourcePath;
+    SourceIndexConfig.GeneratedSourcePath = OutResult.FacadePath;
+    SourceIndexConfig.OutputPath = OutResult.SourceIndexPath;
+    FAvidScriptEditorCSharpSourceIndexResult SourceIndexResult;
+    if (!FAvidScriptEditorCSharpSourceIndexService::Publish(
+            SourceIndexConfig,
+            SourceIndexResult))
+    {
+        SetAvidScriptWorkspaceFailure(
+            SourceIndexResult.ErrorCategory,
+            SourceIndexResult.ErrorMessage,
+            SourceIndexResult.NextAction,
+            OutResult);
+        return false;
+    }
+    OutResult.bSourceIndexRefreshed = true;
+    OutResult.SourceIndexPath = SourceIndexResult.IndexPath;
+    OutResult.SourceIndexSha256 = SourceIndexResult.IndexSha256;
 
     OutResult.bSucceeded = true;
     OutResult.NextAction = TEXT("open AvidScript.Gameplay.slnx, then run Build And Bind Project C# Gameplay Script");

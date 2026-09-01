@@ -123,10 +123,13 @@
 - 完成 `P61.D4a` 现代 C# 工作区：新增 `.slnx` 与 `.editorconfig` 模板、结果路径和保留语义；
 - 首次创建六个用户文件，普通刷新不覆盖用户内容，生成 facade 仍独立原子刷新；
 - 详细实现与证据见 [P61.D4a 现代 C# 工作区](P61.D4a_Modern_CSharp_Workspace.md)。
+- 完成 `P61.D4b` 离线源码索引：原子发布 schema v1 JSON，记录项目相对源码身份、角色与 SHA-256；
+- 索引 Reader 对 schema、路径穿越、角色和哈希失败关闭，Workspace Result 暴露路径与内容哈希；
+- 详细实现与证据见 [P61.D4b 离线源码索引](P61.D4b_Offline_Source_Index.md)。
 
 ## 待完成
 
-- `P61.D4b-D4c` 离线源码索引与 IDE 启动工作流；
+- `P61.D4c` IDE 启动工作流；
 - `P61.E` 集成与集中 Gate。
 
 ## 人工验收边界

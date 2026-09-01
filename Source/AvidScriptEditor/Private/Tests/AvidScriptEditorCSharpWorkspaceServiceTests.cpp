@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AvidScriptEditorCSharpProfileService.h"
+#include "AvidScriptEditorCSharpSourceIndexService.h"
 #include "AvidScriptEditorCSharpWorkspaceService.h"
 
 #include "HAL/FileManager.h"
@@ -81,6 +82,7 @@ bool FAvidScriptEditorCSharpWorkspaceCreateRefreshTest::RunTest(const FString& P
     TestTrue(TEXT("Profile is created"), First.bProfileCreated);
     TestTrue(TEXT("Global json is created"), First.bGlobalJsonCreated);
     TestTrue(TEXT("Generated facade refreshes"), First.bFacadeRefreshed);
+    TestTrue(TEXT("Source index refreshes"), First.bSourceIndexRefreshed);
     TestTrue(TEXT("Source exists"), FPaths::FileExists(First.SourcePath));
     TestTrue(TEXT("Project exists"), FPaths::FileExists(First.ProjectPath));
     TestTrue(TEXT("Solution exists"), FPaths::FileExists(First.SolutionPath));
@@ -88,6 +90,8 @@ bool FAvidScriptEditorCSharpWorkspaceCreateRefreshTest::RunTest(const FString& P
     TestTrue(TEXT("Profile exists"), FPaths::FileExists(First.ProfilePath));
     TestTrue(TEXT("Global json exists"), FPaths::FileExists(First.GlobalJsonPath));
     TestTrue(TEXT("Facade exists"), FPaths::FileExists(First.FacadePath));
+    TestTrue(TEXT("Source index exists"), FPaths::FileExists(First.SourceIndexPath));
+    TestEqual(TEXT("Source index hash is SHA-256"), First.SourceIndexSha256.Len(), 64);
     TestTrue(TEXT("IDE binding package exists"), FPaths::FileExists(First.BindingPackageManifestPath));
     TestFalse(TEXT("IDE binding package hash is present"), First.BindingPackageHash.IsEmpty());
 
@@ -102,6 +106,23 @@ bool FAvidScriptEditorCSharpWorkspaceCreateRefreshTest::RunTest(const FString& P
     const FString EditorConfigText = ReadAvidScriptWorkspaceTestText(*this, First.EditorConfigPath);
     TestTrue(TEXT("Editor config scopes C#"), EditorConfigText.Contains(TEXT("[*.cs]")));
     TestTrue(TEXT("Editor config selects CRLF"), EditorConfigText.Contains(TEXT("end_of_line = crlf")));
+    FAvidScriptEditorCSharpSourceIndex SourceIndex;
+    FAvidScriptEditorCSharpSourceIndexResult SourceIndexResult;
+    TestTrue(
+        TEXT("Source index loads offline"),
+        FAvidScriptEditorCSharpSourceIndexService::Load(
+            First.SourceIndexPath,
+            SourceIndex,
+            SourceIndexResult));
+    TestEqual(TEXT("Source index schema is current"), SourceIndex.SchemaVersion, 1);
+    TestEqual(TEXT("Source index has user and generated source"), SourceIndex.Sources.Num(), 2);
+    TestEqual(TEXT("Loaded source index hash matches publish"), SourceIndexResult.IndexSha256, First.SourceIndexSha256);
+    TestTrue(TEXT("Source index workspace is project relative"), FPaths::IsRelative(SourceIndex.WorkspaceId));
+    for (const FAvidScriptEditorCSharpSourceIndexEntry& Entry : SourceIndex.Sources)
+    {
+        TestTrue(TEXT("Indexed source path is project relative"), FPaths::IsRelative(Entry.SourceId));
+        TestEqual(TEXT("Indexed source hash is SHA-256"), Entry.Sha256.Len(), 64);
+    }
     const FString ProfileText = ReadAvidScriptWorkspaceTestText(*this, First.ProfilePath);
     TestFalse(TEXT("Profile has no unresolved tokens"), ProfileText.Contains(TEXT("{{")));
 	const FString InitialSourceText = ReadAvidScriptWorkspaceTestText(*this, First.SourcePath);
@@ -173,6 +194,7 @@ bool FAvidScriptEditorCSharpWorkspaceCreateRefreshTest::RunTest(const FString& P
     TestTrue(TEXT("Generated facade is refreshed"), RefreshedFacade.Contains(TEXT("public static class UE")));
 	TestTrue(TEXT("Generated facade retains state contract authoring surface"), RefreshedFacade.Contains(TEXT("public enum AvidStateMode")));
     TestFalse(TEXT("Stale facade marker is removed"), RefreshedFacade.Contains(TEXT("stale generated facade")));
+    TestNotEqual(TEXT("Source index changes when user source changes"), Second.SourceIndexSha256, First.SourceIndexSha256);
 
     FAvidScriptEditorCSharpWorkspaceConfig OverwriteConfig = Config;
     OverwriteConfig.bOverwriteUserFiles = true;
