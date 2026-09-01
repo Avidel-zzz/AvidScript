@@ -1,6 +1,6 @@
 # Phase 60 收尾记录
 
-状态：进行中
+状态：集中 Gate 已通过，待 attestation 与 close
 
 ## 目标
 
@@ -49,10 +49,20 @@
 - `P60.C2c4` 完成 Blueprint action reinstance、action 失效、显式取消、Session/World teardown 的
   生命周期矩阵；详见
   [P60.C2c4](P60.C2c4_Blueprint_Async_Action_Lifecycle.md)。
+- `P60.D` 完成 Interface、Delegate、Blueprint callable 与 AsyncAction 分层基准；三条新增 focused
+  Automation 为 3/3 Success，完整 AvidScript Automation 为 411/411 Success；详见
+  [P60.D](P60.D_Performance_And_Gate.md)。
 
-## 待完成
+## 集中 Gate
 
-- `P60.D` 集成、性能与集中 Gate。
+- 固定 .NET suites：Frontend 7/7、Semantic 96/96、CSharpGuest 118/118、GuestIr 35/35、
+  UeTypeGenerator 5/5、WasmBackend 15/15；
+- AgentHarness 7/7；Semantic/Prepared/Build/Publication/Workflow 等 PowerShell 合同全部通过；
+- UE5.8 Development Editor no-clean UBT 10/10 actions Success；
+- 完整 AvidScript Automation：Found 411、Completed 411、Success 411、非成功 0、fatal 0；
+- clean detached architecture Gate：提交 `5163b463a6f9164238b003cc11ae778d38542bcf`，
+  tree `1ad6ef66de32727b643da09efe8990a30ddb11c7`，21 个注册输入，提交树 clean；
+- Harness audit 与 README 链接检查均通过。
 
 ## 验收边界
 

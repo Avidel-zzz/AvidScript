@@ -10,8 +10,8 @@
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 Development" src="https://img.shields.io/badge/Platform-Win64-0078D4?logo=windows&logoColor=white">
-  <img alt="Phase 60 Gate In Progress" src="https://img.shields.io/badge/Status-Phase%2060%20Gate%20In%20Progress-2B6CB0">
-  <img alt="Automation Baseline 403/403" src="https://img.shields.io/badge/Baseline-403%2F403-26A269">
+  <img alt="Phase 60 Gate Passed" src="https://img.shields.io/badge/Status-Phase%2060%20Gate%20Passed-26A269">
+  <img alt="Automation Baseline 411/411" src="https://img.shields.io/badge/Baseline-411%2F411-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
 
@@ -44,7 +44,8 @@ Phase 60 的功能批次已完成：UE Interface 与默认参数、Delegate 双�
 callable/event，以及带 typed payload 的 AsyncAction `await` 已接入真实 C# Session Runtime。
 异步对象支持 reload 重绑、reinstance 失效取消、teardown 回收与迟到广播抑制。
 
-当前仅剩集中集成、性能矩阵与全量 Gate，尚未将其标记为正式关闭。
+完整 AvidScript Automation `411/411`、UE5.8 no-clean UBT 与 clean detached architecture Gate
+均已通过；阶段状态机正在完成最终 attestation 与 close。
 
 详细进度见 [Phase 60 中文收尾记录](Docs/Phase60/P60_Closeout.md)。
 
@@ -146,9 +147,16 @@ Phase 56 完整游戏 workload 中，Small gameplay、Dense gameplay 与 Lifecyc
 P50 比率分别为 **`0.469x`、`0.513x`、`0.391x`**。编译器托管数组区域在 `N>=64`
 的冻结 workload 中领先 Puerts TArray **17.47x-20.04x**。
 
-P60.B2 的 UE 原生侧 Delegate workload 中，prepared broadcast P50 为 `0.000739 ms`，
-原生动态多播为 `0.000521 ms`，比率 `1.418x`；热路径反射名称查找为 `0`。该数据衡量
-主动 Delegate 调用开销，不等同于完整 WASM crossing 或竞品对比。
+P60 的新增 UE 交互路径均在 warm path 禁止名称反射查找，并使用固定 20 组样本：
+
+| P60 路径 | UE/原生 P50 | AvidScript P50 | 比率或预算 |
+| --- | ---: | ---: | ---: |
+| Interface | `0.151 us` | `0.387 us` | `2.56x` |
+| Delegate 主动调用 | `0.553 us` | `0.726 us` | `1.31x` |
+| Blueprint callable | `0.641 us` | `0.779 us` | `1.22x` |
+| AsyncAction Session 生命周期 | 不适用 | `4.308 us` | `< 250 us` |
+
+这些数字用于同一 UE 构建内的回归门禁，不等同于完整 WASM crossing 或竞品对比。
 
 纯执行层仍未宣布绝对领先：12-kernel Wasmtime/V8 suite 的 P50/P95 几何均值为
 `0.9800x / 1.0006x`，P95 领导力门禁仍未关闭。
@@ -159,7 +167,7 @@ P60.B2 的 UE 原生侧 Delegate workload 中，prepared broadcast P50 为 `0.00
 - [编译器托管数组区域报告](Docs/Phase57/P57.11D_Compiler_Managed_Array_Region.md)
 - [Phase 56 游戏 workload 报告](Docs/Phase56/P56.5_Fused_Call_Frame_Implementation_Report.md)
 - [Wasmtime Cranelift Speed 报告](Docs/Phase57/P57.13_Cranelift_Speed_Profile.md)
-- [Delegate 主动调用报告](Docs/Phase60/P60.B2_Active_Delegate_Invocation.md)
+- [Phase 60 性能矩阵与 Gate](Docs/Phase60/P60.D_Performance_And_Gate.md)
 
 ## 快速开始
 
@@ -215,19 +223,17 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 
 ## 路线图
 
-1. **当前**：完成 Phase 60 集成、性能与全量 Gate；
-2. **P61**：增量编译、源码定位、调用栈、断点、变量查看与 Profiler；
-3. **P62-P64**：Cook/Shipping、移动端 AOT 与真实小型游戏 Demo；
-4. **P65**：跨框架成熟度、稳定性与性能领导力收口。
+1. **P61**：增量编译、源码定位、调用栈、断点、变量查看与 Profiler；
+2. **P62-P64**：Cook/Shipping、移动端 AOT 与真实小型游戏 Demo；
+3. **P65**：跨框架成熟度、稳定性与性能领导力收口。
 
 路线图只表示工程顺序，不代表对应能力已经可用。
 
 ## 验证
 
-最近一次完整基线为 **AvidScript Automation 403/403 通过**。Phase 59 已关闭 Generated
-Actor/Component/Subsystem、反射成员、Blueprint 子类与 override、热重载、双拓扑网络及内容寻址
-Cook bundle 闭环。Phase 60 的功能批次已完成并通过对应 .NET、UE5.8 no-clean UBT 与聚焦
-Automation；全量 Automation、性能矩阵和阶段关闭证据正在集中验收。
+最近一次完整基线为 **AvidScript Automation 411/411 通过**。Phase 60 已完成 Interface、默认参数、
+Delegate 双向调用、Blueprint callable/event 与 AsyncAction typed payload/await 闭环；UE5.8 no-clean
+UBT、完整 Automation、性能预算和 clean detached architecture Gate 均已通过。
 
 阶段状态与实现证据见 [Docs](Docs/)，开发规则见 [AGENTS.md](AGENTS.md)。
 

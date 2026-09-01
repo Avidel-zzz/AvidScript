@@ -37,9 +37,9 @@
     },
     {
       "id": "P60.D",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "UE5.8 no-clean UBT 10/10；focused 3/3；完整 AvidScript Automation 411/411 Success；Phase 60 四层 benchmark 全部在预算内；clean detached architecture Gate 21 inputs 通过；证据提交 5163b463a6f9164238b003cc11ae778d38542bcf。",
+      "completed_at_utc": "2026-09-01T02:57:35.6826259+00:00"
     }
   ],
   "debt": [],
@@ -94,7 +94,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "batch-complete -Phase 60 -BatchId P60.D -Evidence <text>",
-  "revision": 4,
-  "updated_at_utc": "2026-09-01T01:40:42.3331073+00:00"
+  "next_action": "freeze -Phase 60 -ReviewEvidence <text>",
+  "revision": 5,
+  "updated_at_utc": "2026-09-01T02:57:35.6849081+00:00"
 }
