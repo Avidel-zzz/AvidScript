@@ -943,6 +943,41 @@ void FAvidScriptWasmDebugMap::MapFrames(
 	}
 }
 
+void FAvidScriptWasmDebugMap::BuildBreakpointCatalog(
+	TArray<FAvidScriptDebugBreakpoint>& OutBreakpoints) const
+{
+	OutBreakpoints.Reset(FunctionIndicesByProbeId.Num());
+	TArray<uint32> FunctionIndices;
+	Functions.GetKeys(FunctionIndices);
+	FunctionIndices.Sort();
+	for (const uint32 FunctionIndex : FunctionIndices)
+	{
+		const FFunction& Function = Functions.FindChecked(FunctionIndex);
+		for (const FSequencePoint& SequencePoint : Function.SequencePoints)
+		{
+			if (SequencePoint.bHidden || !SequencePoint.bHasProbeId)
+			{
+				continue;
+			}
+
+			FAvidScriptDebugBreakpoint& Breakpoint = OutBreakpoints.AddDefaulted_GetRef();
+			Breakpoint.ProbeId = SequencePoint.ProbeId;
+			Breakpoint.FunctionIndex = FunctionIndex;
+			Breakpoint.FunctionOffset = SequencePoint.FunctionOffset;
+			Breakpoint.SourceFile = SourceFile;
+			Breakpoint.SourceSha256 = SourceSha256;
+			Breakpoint.FunctionName = Function.DisplayName;
+			Breakpoint.Kind = SequencePoint.Kind;
+			Breakpoint.Start = SequencePoint.Start;
+			Breakpoint.Length = SequencePoint.Length;
+			Breakpoint.Line = SequencePoint.Line + 1;
+			Breakpoint.Column = SequencePoint.Column + 1;
+			Breakpoint.EndLine = SequencePoint.EndLine + 1;
+			Breakpoint.EndColumn = SequencePoint.EndColumn + 1;
+		}
+	}
+}
+
 bool FAvidScriptWasmDebugMap::BuildVariableSnapshot(
 	const uint64 ProbeId,
 	const TConstArrayView<uint8> FrameBytes,

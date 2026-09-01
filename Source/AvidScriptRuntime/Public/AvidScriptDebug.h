@@ -32,6 +32,23 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptDebugSessionSnapshot
 	int32 BreakpointCount = 0;
 };
 
+struct AVIDSCRIPTRUNTIME_API FAvidScriptDebugBreakpoint
+{
+	uint64 ProbeId = 0;
+	uint32 FunctionIndex = MAX_uint32;
+	uint32 FunctionOffset = 0;
+	FString SourceFile;
+	FString SourceSha256;
+	FString FunctionName;
+	FString Kind;
+	int32 Start = 0;
+	int32 Length = 0;
+	int32 Line = 0;
+	int32 Column = 0;
+	int32 EndLine = 0;
+	int32 EndColumn = 0;
+};
+
 struct AVIDSCRIPTRUNTIME_API FAvidScriptDebugVariableSnapshot
 {
 	FString SymbolId;

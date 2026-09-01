@@ -116,6 +116,9 @@ public:
 	bool StepIntoDebugExecution();
 	bool StepIntoDebugExecution(FAvidScriptWasmSmokeResult& OutResult);
 	FAvidScriptDebugSessionSnapshot GetDebugSnapshot() const;
+	bool GetDebugBreakpointCatalog(
+		TArray<FAvidScriptDebugBreakpoint>& OutBreakpoints,
+		FString& OutError) const;
 	bool GetDebugVariables(
 		FAvidScriptDebugVariablesSnapshot& OutSnapshot,
 		FString& OutError) const;

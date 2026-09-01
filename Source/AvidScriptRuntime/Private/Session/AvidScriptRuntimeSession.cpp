@@ -1021,6 +1021,23 @@ FAvidScriptDebugSessionSnapshot FAvidScriptRuntimeSession::GetDebugSnapshot() co
 	return Debugger->GetSnapshot();
 }
 
+bool FAvidScriptRuntimeSession::GetDebugBreakpointCatalog(
+	TArray<FAvidScriptDebugBreakpoint>& OutBreakpoints,
+	FString& OutError) const
+{
+	check(IsInGameThread());
+	OutBreakpoints.Reset();
+	OutError.Reset();
+	if (!IsLiveLoaded() || !LiveManifest.DebugMap.IsValid())
+	{
+		OutError = TEXT("the live Runtime Session has no validated debug map");
+		return false;
+	}
+
+	LiveManifest.DebugMap->BuildBreakpointCatalog(OutBreakpoints);
+	return true;
+}
+
 bool FAvidScriptRuntimeSession::GetDebugVariables(
 	FAvidScriptDebugVariablesSnapshot& OutSnapshot,
 	FString& OutError) const

@@ -479,6 +479,21 @@ bool FAvidScriptWasmDebugMapValidationTest::RunTest(const FString& Parameters)
 			ErrorSource));
 	if (V2Map.IsValid())
 	{
+		TArray<FAvidScriptDebugBreakpoint> Breakpoints;
+		V2Map->BuildBreakpointCatalog(Breakpoints);
+		TestEqual(TEXT("breakpoint catalog omits hidden and missing probes"), Breakpoints.Num(), 2);
+		if (Breakpoints.Num() == 2)
+		{
+			TestEqual(TEXT("catalog is ordered by function offset"), Breakpoints[0].ProbeId, 0x1111111111111111ULL);
+			TestEqual(TEXT("later probe keeps deterministic order"), Breakpoints[1].ProbeId, 0x3333333333333333ULL);
+			TestEqual(TEXT("catalog source remains project relative"), Breakpoints[0].SourceFile, SourceFile);
+			TestEqual(TEXT("catalog source hash remains available"), Breakpoints[0].SourceSha256, GDiagnosticsSourceSha);
+			TestEqual(TEXT("catalog function name survives"), Breakpoints[0].FunctionName, FString(TEXT("Test.Helper()")));
+			TestEqual(TEXT("catalog kind survives"), Breakpoints[1].Kind, FString(TEXT("call")));
+			TestEqual(TEXT("catalog line is one based"), Breakpoints[0].Line, 21);
+			TestEqual(TEXT("catalog column is one based"), Breakpoints[0].Column, 5);
+		}
+
 		TArray<FAvidScriptVmStackFrame> V2VmFrames;
 		for (const uint32 Offset : { 5u, 10u, 35u, 40u })
 		{
@@ -817,6 +832,12 @@ bool FAvidScriptWasmDiagnosticRuntimeIntegrationTest::RunTest(const FString& Par
 			TickTrapManifest,
 			InitialResult));
 	TestTrue(TEXT("healthy BeginPlay exposes no diagnostic frames"), InitialResult.RuntimeResult.DiagnosticFrames.IsEmpty());
+	TArray<FAvidScriptDebugBreakpoint> TickTrapBreakpoints;
+	FString BreakpointCatalogError;
+	TestTrue(
+		TEXT("live Session exposes its validated breakpoint catalog"),
+		TickTrapSession.GetDebugBreakpointCatalog(TickTrapBreakpoints, BreakpointCatalogError));
+	TestTrue(TEXT("v1 Session catalog remains empty"), TickTrapBreakpoints.IsEmpty());
 
 	FAvidScriptWasmSmokeResult TickResult;
 	TestFalse(TEXT("real WAMR Tick trap reaches Runtime"), TickTrapSession.TickLive(1.0f / 60.0f, TickResult));
@@ -865,6 +886,13 @@ bool FAvidScriptWasmDiagnosticRuntimeIntegrationTest::RunTest(const FString& Par
 			LegacyBytecode.Num(),
 			LegacyManifest,
 			LegacyInitialResult));
+	TArray<FAvidScriptDebugBreakpoint> LegacyBreakpoints;
+	BreakpointCatalogError.Reset();
+	TestFalse(
+		TEXT("Session without a validated debug map rejects breakpoint discovery"),
+		LegacySession.GetDebugBreakpointCatalog(LegacyBreakpoints, BreakpointCatalogError));
+	TestTrue(TEXT("rejected catalog cannot leak stale entries"), LegacyBreakpoints.IsEmpty());
+	TestTrue(TEXT("rejected catalog explains the missing map"), !BreakpointCatalogError.IsEmpty());
 	FAvidScriptWasmSmokeResult LegacyTickResult;
 	TestFalse(TEXT("legacy runtime trap is preserved"), LegacySession.TickLive(1.0f / 60.0f, LegacyTickResult));
 	TestTrue(TEXT("legacy trap keeps raw frames"), !LegacyTickResult.DiagnosticFrames.IsEmpty());

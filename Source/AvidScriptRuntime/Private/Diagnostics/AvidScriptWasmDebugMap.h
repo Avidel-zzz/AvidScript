@@ -20,6 +20,7 @@ public:
 	void MapFrames(
 		TConstArrayView<FAvidScriptVmStackFrame> VmFrames,
 		TArray<FAvidScriptWasmDiagnosticFrame>& OutFrames) const;
+	void BuildBreakpointCatalog(TArray<FAvidScriptDebugBreakpoint>& OutBreakpoints) const;
 	bool BuildVariableSnapshot(
 		uint64 ProbeId,
 		TConstArrayView<uint8> FrameBytes,
