@@ -136,7 +136,9 @@ bool FAvidScriptEditorDebugTargetController::SelectTarget(
 	{
 		return false;
 	}
+	ProfilerModel.UnbindRuntime();
 	BoundRuntime.Reset();
+	BoundProfilerRuntime.Reset();
 	BoundRuntimeIdentity = nullptr;
 	SelectedTargetId = TargetId;
 	return BindTarget(*Target, OutError);
@@ -154,7 +156,12 @@ bool FAvidScriptEditorDebugTargetController::Tick(FString& OutError)
 		OutError.Reset();
 		return true;
 	}
-	return SessionModel.Refresh(OutError);
+	if (!SessionModel.Refresh(OutError))
+	{
+		return false;
+	}
+	return !BoundProfilerRuntime.IsValid()
+		|| ProfilerModel.Refresh(OutError);
 }
 
 bool FAvidScriptEditorDebugTargetController::SetSourceBreakpoint(
@@ -214,6 +221,49 @@ bool FAvidScriptEditorDebugTargetController::StepInto(FString& OutError)
 		&& SessionModel.StepInto(OutError);
 }
 
+bool FAvidScriptEditorDebugTargetController::SetProfilerCaptureEnabled(
+	const bool bEnabled,
+	FString& OutError)
+{
+	if (!RefreshBeforeCommand(OutError) || !BoundProfilerRuntime.IsValid())
+	{
+		if (OutError.IsEmpty())
+		{
+			OutError = TEXT("the selected AvidScript target does not expose profiler data");
+		}
+		return false;
+	}
+	return ProfilerModel.SetCaptureEnabled(bEnabled, OutError);
+}
+
+bool FAvidScriptEditorDebugTargetController::ResetProfiler(FString& OutError)
+{
+	if (!RefreshBeforeCommand(OutError) || !BoundProfilerRuntime.IsValid())
+	{
+		if (OutError.IsEmpty())
+		{
+			OutError = TEXT("the selected AvidScript target does not expose profiler data");
+		}
+		return false;
+	}
+	return ProfilerModel.ResetCapture(OutError);
+}
+
+bool FAvidScriptEditorDebugTargetController::ExportProfilerJson(
+	const FString& OutputPath,
+	FString& OutError)
+{
+	if (!RefreshBeforeCommand(OutError) || !BoundProfilerRuntime.IsValid())
+	{
+		if (OutError.IsEmpty())
+		{
+			OutError = TEXT("the selected AvidScript target does not expose profiler data");
+		}
+		return false;
+	}
+	return ProfilerModel.ExportJson(OutputPath, OutError);
+}
+
 void FAvidScriptEditorDebugTargetController::DiscoverComponentTargets(
 	TArray<FAvidScriptEditorDebugTarget>& OutTargets)
 {
@@ -259,6 +309,17 @@ void FAvidScriptEditorDebugTargetController::DiscoverComponentTargets(
 			}
 			return MakeShared<FAvidScriptEditorRuntimeDebugAdapter>(*RuntimeSession);
 		};
+		Target.CreateProfilerRuntime = [WeakComponent, RuntimeSession]()
+			-> TSharedPtr<IAvidScriptEditorProfilerRuntime>
+		{
+			UAvidScriptComponent* LiveComponent = WeakComponent.Get();
+			if (LiveComponent == nullptr
+				|| LiveComponent->GetRuntimeSessionForEditorDebugging() != RuntimeSession)
+			{
+				return nullptr;
+			}
+			return MakeShared<FAvidScriptEditorRuntimeProfilerAdapter>(*RuntimeSession);
+		};
 	}
 }
 
@@ -276,9 +337,26 @@ bool FAvidScriptEditorDebugTargetController::BindTarget(
 	{
 		return false;
 	}
+	TSharedPtr<IAvidScriptEditorProfilerRuntime> NextProfilerRuntime;
+	if (Target.CreateProfilerRuntime)
+	{
+		NextProfilerRuntime = Target.CreateProfilerRuntime();
+		if (!NextProfilerRuntime.IsValid())
+		{
+			SessionModel.NotifyRuntimeDestroyed();
+			OutError = TEXT("the selected debug target no longer owns its profiler Runtime Session");
+			return false;
+		}
+		if (!ProfilerModel.BindRuntime(*NextProfilerRuntime, OutError))
+		{
+			SessionModel.NotifyRuntimeDestroyed();
+			return false;
+		}
+	}
 
 	BoundRuntimeIdentity = Target.RuntimeIdentity;
 	BoundRuntime = MoveTemp(NextRuntime);
+	BoundProfilerRuntime = MoveTemp(NextProfilerRuntime);
 	return true;
 }
 
@@ -300,6 +378,8 @@ bool FAvidScriptEditorDebugTargetController::RefreshBeforeCommand(FString& OutEr
 void FAvidScriptEditorDebugTargetController::InvalidateBinding()
 {
 	SessionModel.NotifyRuntimeDestroyed();
+	ProfilerModel.NotifyRuntimeDestroyed();
 	BoundRuntime.Reset();
+	BoundProfilerRuntime.Reset();
 	BoundRuntimeIdentity = nullptr;
 }

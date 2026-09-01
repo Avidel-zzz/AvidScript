@@ -109,10 +109,15 @@
 - JSON 导出使用版本化 schema，64 位标识保持字符串精度，并通过同目录临时文件原子发布；
 - `AvidScript.Editor.Profiling.Model` Automation `1/1` 通过；
 - 详细实现与证据见 [P61.D2a Editor Profiler 数据模型](P61.D2a_Editor_Profiler_Model.md)。
+- 完成 `P61.D2b` Profiler target 生命周期：同一 target descriptor 分别创建 debug/profiler adapter，
+  Controller 统一 target identity，但两个模型和命令面保持独立；
+- target 切换、Session replacement、reload 与 PIE EndPlay 会同步重绑或失效 profiler，模型不保存 UObject；
+- fake target Controller Automation `1/1` 与真实 Debug C# WASM PIE Integration `1/1` 通过；
+- 详细实现与证据见 [P61.D2b Profiler target 生命周期](P61.D2b_Profiler_Target_Lifecycle.md)。
 
 ## 待完成
 
-- `P61.D2b-D4` Profiler target/UI 与 IDE workspace；
+- `P61.D2c-D4` Profiler UI 与 IDE workspace；
 - `P61.E` 集成与集中 Gate。
 
 ## 人工验收边界

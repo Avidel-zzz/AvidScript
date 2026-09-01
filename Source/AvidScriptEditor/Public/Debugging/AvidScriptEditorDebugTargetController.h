@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Debugging/AvidScriptEditorDebugSession.h"
+#include "Profiling/AvidScriptEditorProfiler.h"
 
 #include "CoreMinimal.h"
 
@@ -12,6 +13,7 @@ struct AVIDSCRIPTEDITOR_API FAvidScriptEditorDebugTarget
 	FString ModuleId;
 	const void* RuntimeIdentity = nullptr;
 	TFunction<TSharedPtr<IAvidScriptEditorDebugRuntime>()> CreateRuntime;
+	TFunction<TSharedPtr<IAvidScriptEditorProfilerRuntime>()> CreateProfilerRuntime;
 
 	bool IsValid() const
 	{
@@ -41,12 +43,17 @@ public:
 	bool RequestPause(FString& OutError);
 	bool ContinueExecution(FString& OutError);
 	bool StepInto(FString& OutError);
+	bool SetProfilerCaptureEnabled(bool bEnabled, FString& OutError);
+	bool ResetProfiler(FString& OutError);
+	bool ExportProfilerJson(const FString& OutputPath, FString& OutError);
 
 	bool IsPIEActive() const { return bPIEActive; }
 	const FString& GetSelectedTargetId() const { return SelectedTargetId; }
 	TConstArrayView<FAvidScriptEditorDebugTarget> GetTargets() const { return Targets; }
 	FAvidScriptEditorDebugSessionModel& GetSessionModel() { return SessionModel; }
 	const FAvidScriptEditorDebugSessionModel& GetSessionModel() const { return SessionModel; }
+	FAvidScriptEditorProfilerModel& GetProfilerModel() { return ProfilerModel; }
+	const FAvidScriptEditorProfilerModel& GetProfilerModel() const { return ProfilerModel; }
 
 	static void DiscoverComponentTargets(TArray<FAvidScriptEditorDebugTarget>& OutTargets);
 
@@ -60,6 +67,8 @@ private:
 	FString SelectedTargetId;
 	const void* BoundRuntimeIdentity = nullptr;
 	TSharedPtr<IAvidScriptEditorDebugRuntime> BoundRuntime;
+	TSharedPtr<IAvidScriptEditorProfilerRuntime> BoundProfilerRuntime;
 	FAvidScriptEditorDebugSessionModel SessionModel;
+	FAvidScriptEditorProfilerModel ProfilerModel;
 	bool bPIEActive = false;
 };

@@ -154,9 +154,6 @@ bool FAvidScriptEditorPIEDebugIntegrationTest::RunTest(const FString& Parameters
 		DestroyDebuggerPIEWorld(World);
 		return true;
 	}
-	Runtime->SetProfilerEnabled(true);
-	TestTrue(TEXT("real PIE Session enables profiler capture"), Runtime->IsProfilerEnabled());
-
 	TArray<FAvidScriptDebugBreakpoint> Catalog;
 	FString Error;
 	TestTrue(
@@ -177,6 +174,13 @@ bool FAvidScriptEditorPIEDebugIntegrationTest::RunTest(const FString& Parameters
 	}
 
 	TestTrue(TEXT("production discovery binds a PIE target"), Controller.Tick(Error));
+	TestTrue(
+		TEXT("production discovery binds the PIE profiler target"),
+		Controller.GetProfilerModel().GetView().bRuntimeBound);
+	TestTrue(
+		TEXT("Controller enables profiler capture on the real PIE Session"),
+		Controller.SetProfilerCaptureEnabled(true, Error));
+	TestTrue(TEXT("real PIE Session enables profiler capture"), Runtime->IsProfilerEnabled());
 	TestTrue(
 		TEXT("the real Component target can be selected"),
 		Controller.SelectTarget(Component->GetPathName(), Error));
@@ -304,6 +308,9 @@ bool FAvidScriptEditorPIEDebugIntegrationTest::RunTest(const FString& Parameters
 	TestTrue(TEXT("PIE World EndPlay succeeds"), World->EndPlay(EEndPlayReason::Quit));
 	TestTrue(TEXT("target refresh tolerates Runtime teardown"), Controller.Tick(Error));
 	TestTrue(TEXT("teardown removes the live target"), Controller.GetTargets().IsEmpty());
+	TestFalse(
+		TEXT("teardown invalidates the profiler Runtime binding"),
+		Controller.GetProfilerModel().GetView().bRuntimeBound);
 	TestFalse(
 		TEXT("teardown invalidates the Runtime binding"),
 		Controller.GetSessionModel().GetView().bRuntimeBound);

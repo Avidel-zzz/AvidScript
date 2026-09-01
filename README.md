@@ -64,7 +64,8 @@ Component Session、维护源码断点、控制执行、查看暂停变量并跳
 `884 / 1833 / 1826 / 3223 ms`；Editor Profiler、IDE workspace 与人工 Editor 交互验收仍在后续批次。
 Profiler 已覆盖 Runtime load、Tick/Event、UE host call、continuation、reload 与 EndPlay，且可用 probe ID
 关联源码位置。固定性能门禁中 disabled/enabled 中位数为 `1.989 / 33.318 ns/op`，disabled 占 `5.97%`；
-Editor 数据模型已支持组合过滤、热点聚合和原子 JSON 导出，面板控件与 PIE target 自动绑定正在 `P61.D` 推进。
+Editor 数据模型已支持组合过滤、热点聚合和原子 JSON 导出，并与 PIE Component target 同步选择、
+reload 重绑和 EndPlay 失效；面板控件正在 `P61.D` 推进。
 
 ## C# 游戏脚本
 
