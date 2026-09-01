@@ -97,6 +97,8 @@ public sealed class CompilerStageExecutor
 
     private static int ExecuteGuest(CompilerWorkerRequest request)
     {
+        string debugOffsetPath = request.DebugMapPath + ".offsets.json";
+        File.Delete(debugOffsetPath);
         int exitCode = GuestCommandLine.Run(new[]
         {
             "--semantic", request.SemanticPath,
@@ -111,22 +113,53 @@ public sealed class CompilerStageExecutor
             return exitCode;
         }
 
-        exitCode = WasmBackendCommandLine.Run(new[]
+        try
         {
-            request.GuestIrPath,
-            request.WasmPath,
-        });
-        if (exitCode != 0)
-        {
-            File.Delete(request.WasmPath);
+            exitCode = WasmBackendCommandLine.Run(new[]
+            {
+                request.GuestIrPath,
+                request.WasmPath,
+                "--debug-offsets",
+                debugOffsetPath,
+            });
+            if (exitCode != 0)
+            {
+                File.Delete(request.WasmPath);
+                File.Delete(request.DebugMapPath);
+                return exitCode;
+            }
+
+            exitCode = GuestCommandLine.Run(new[]
+            {
+                "--finalize-debug-map",
+                request.DebugMapPath,
+                "--offset-map",
+                debugOffsetPath,
+            });
+            if (exitCode != 0)
+            {
+                File.Delete(request.WasmPath);
+                File.Delete(request.DebugMapPath);
+                return exitCode;
+            }
+            exitCode = WasmBackendCommandLine.Run(new[]
+            {
+                "--inspect",
+                request.WasmPath,
+                request.InspectionPath,
+            });
+            if (exitCode != 0)
+            {
+                File.Delete(request.WasmPath);
+                File.Delete(request.DebugMapPath);
+                File.Delete(request.InspectionPath);
+            }
             return exitCode;
         }
-        return WasmBackendCommandLine.Run(new[]
+        finally
         {
-            "--inspect",
-            request.WasmPath,
-            request.InspectionPath,
-        });
+            File.Delete(debugOffsetPath);
+        }
     }
 
     private static int CaptureDiagnostics(Func<int> action, List<string> diagnostics)

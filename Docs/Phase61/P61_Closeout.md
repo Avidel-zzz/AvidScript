@@ -1,6 +1,6 @@
 # Phase 61 收尾记录
 
-状态：实施中，`P61.A1-A3b` 已完成
+状态：实施中，`P61.A1-A3b`、`P61.B1a` 已完成
 
 ## 目标
 
@@ -30,10 +30,13 @@
 - 5 轮正式矩阵全部通过，四类场景中位数分别为 `883.915 / 1832.748 / 1825.998 /
   3222.949 ms`；
 - 详细实现与证据见 [P61.A3b 增量构建性能矩阵](P61.A3b_Incremental_Build_Performance_Matrix.md)。
+- 完成 `P61.B1a` DebugMap v2 与 backend offset 回填：同步 CFG 语义点携带稳定身份，
+  WASM backend 以真实编码偏移和 WASM hash 原子完成最终 map；
+- 详细实现与证据见 [P61.B1a DebugMap v2 与 Backend 偏移回填](P61.B1a_DebugMap_V2_Backend_Offsets.md)。
 
 ## 待完成
 
-- `P61.B` 指令级 source map 与调用栈；
+- `P61.B1b/B2` async/host crossing sequence point、Runtime 二分映射与 Editor 调用栈；
 - `P61.C` 断点、单步与变量查看；
 - `P61.D` Profiler 与 IDE workspace；
 - `P61.E` 集成与集中 Gate。

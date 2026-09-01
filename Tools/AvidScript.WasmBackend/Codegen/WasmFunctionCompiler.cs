@@ -64,9 +64,10 @@ internal sealed class WasmFunctionCompiler
         functions = module.Functions.ToDictionary(item => item.Id, StringComparer.Ordinal);
     }
 
-    public byte[] Compile()
+    public WasmFunctionCompilationResult Compile()
     {
         WasmBinaryWriter body = new();
+        List<WasmFunctionInstructionOffset> instructionOffsets = new();
         WriteLocals(body);
         WriteFramePrologue(body);
         Dictionary<string, int> blockIndices = function.Blocks
@@ -88,11 +89,20 @@ internal sealed class WasmFunctionCompiler
             body.WriteByte(0x04);
             body.WriteByte(0x40);
 
-            foreach (GuestInstruction instruction in block.Instructions)
+            for (int instructionIndex = 0;
+                instructionIndex < block.Instructions.Count;
+                ++instructionIndex)
             {
+                GuestInstruction instruction = block.Instructions[instructionIndex];
+                instructionOffsets.Add(new WasmFunctionInstructionOffset(
+                    GuestDebugIdentity.Instruction(function.Id, block.Id, instructionIndex),
+                    body.Count));
                 CompileInstruction(body, instruction);
             }
 
+            instructionOffsets.Add(new WasmFunctionInstructionOffset(
+                GuestDebugIdentity.Terminator(function.Id, block.Id),
+                body.Count));
             CompileTerminator(body, block.Terminator, blockIndices);
             body.WriteByte(0x0b);
         }
@@ -101,7 +111,7 @@ internal sealed class WasmFunctionCompiler
         body.WriteByte(0x0b);
         body.WriteByte(0x00);
         body.WriteByte(0x0b);
-        return body.ToArray();
+        return new WasmFunctionCompilationResult(body.ToArray(), instructionOffsets);
     }
 
     private void WriteLocals(WasmBinaryWriter body)

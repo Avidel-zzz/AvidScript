@@ -518,6 +518,14 @@
       "prevention": "bootstrap 给出 batch-complete、freeze、review-complete 等 Next 时，调用 Build/InvokePhaseWorkflow.ps1；仅使用 Harness ValidateSet 中的 bootstrap/context/verify/lesson-query/audit。",
       "source": "observed:2026-09-01-P61.A3b",
       "last_observed": "2026-09-01 P61.A3b 曾把 Next: batch-complete 直接传给 InvokeAgentHarness.ps1，被 ValidateSet 拒绝；仓库未发生变化"
+    },
+    {
+      "id": "shutdown-persistent-worker-before-output-build",
+      "tags": ["compiler-worker", "dotnet", "build", "workflow"],
+      "summary": "persistent compiler Worker 会锁定自身输出目录中的依赖 DLL，直接重建同一输出目录会触发 MSB3021/MSB3027。",
+      "prevention": "Worker 集成或增量矩阵结束后，若要直接 build AvidScript.CSharpCompilerWorker，先按已验证 pipe/fingerprint 发送 shutdown 并等待进程退出；不要把 DLL 文件锁误判为源码编译失败。",
+      "source": "observed:2026-09-01-P61.B1a",
+      "last_observed": "2026-09-01 P61.B1a Worker 集成留下 PID 42996，直接 build 因依赖 DLL 被锁失败；确认命令行后通过 shutdown 协议退出，仓库文件未受影响"
     }
   ]
 }

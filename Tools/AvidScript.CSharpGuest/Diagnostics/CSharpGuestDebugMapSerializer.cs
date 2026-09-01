@@ -27,6 +27,19 @@ public static class CSharpGuestDebugMapSerializer
         return artifact;
     }
 
+    public static CSharpGuestDebugMap Deserialize(ReadOnlySpan<byte> artifact)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<CSharpGuestDebugMap>(artifact, Options)
+                ?? throw new InvalidDataException("Debug map artifact contains JSON null.");
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException("Debug map artifact is not valid schema JSON.", exception);
+        }
+    }
+
     public static void Write(string path, CSharpGuestDebugMap debugMap)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);

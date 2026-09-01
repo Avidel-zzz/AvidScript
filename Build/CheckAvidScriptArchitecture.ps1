@@ -3425,11 +3425,18 @@ $CSharpLatentStoragePlannerSource = Read-RequiredFile 'Tools/AvidScript.CSharpGu
 $CSharpTypeLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpTypeLowerer.cs'
 $CSharpCompositeCapabilityPolicySource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpCompositeValueCapabilityPolicy.cs'
 $CSharpSemanticInputValidatorSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Validation/CSharpSemanticInputValidator.cs'
+$CSharpGuestDebugMapModelSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Diagnostics/CSharpGuestDebugMap.cs'
 $CSharpGuestDebugMapProjectorSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Diagnostics/CSharpGuestDebugMapProjector.cs'
+$CSharpGuestDebugMapFinalizerSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Diagnostics/CSharpGuestDebugMapFinalizer.cs'
+$GuestInstructionSource = Read-RequiredFile 'Tools/AvidScript.GuestIr/Model/GuestInstruction.cs'
+$GuestWasmDebugOffsetMapSource = Read-RequiredFile 'Tools/AvidScript.GuestIr/Model/GuestWasmDebugOffsetMap.cs'
 $GuestArrayCapabilityIntrinsicsSource = Read-RequiredFile 'Tools/AvidScript.GuestIr/Model/GuestArrayCapabilityIntrinsics.cs'
 $WasmFunctionCompilerSource = Read-RequiredFile 'Tools/AvidScript.WasmBackend/Codegen/WasmFunctionCompiler.cs'
+$WasmBackendCommandLineSource = Read-RequiredFile 'Tools/AvidScript.WasmBackend/Cli/WasmBackendCommandLine.cs'
 $CSharpBuildScriptSource = Read-RequiredFile 'Build/BuildCSharpActorLifecycle.ps1'
+$CSharpGuestCompilerScriptSource = Read-RequiredFile 'Build/InvokeCSharpGuestCompiler.ps1'
 $CSharpCompilerWorkerScriptSource = Read-RequiredFile 'Build/AvidScriptCSharpCompilerWorker.ps1'
+$CSharpCompilerStageExecutorSource = Read-RequiredFile 'Tools/AvidScript.CSharpCompilerWorker/Execution/CompilerStageExecutor.cs'
 $CSharpCompilerWorkerServerSource = Read-RequiredFile 'Tools/AvidScript.CSharpCompilerWorker/Server/CompilerWorkerServer.cs'
 $FrontendReportHeaderSource = Read-RequiredFile 'Source/AvidScriptEditor/Public/AvidScriptFrontendReport.h'
 $FrontendReportSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/AvidScriptFrontendReport.cpp'
@@ -3447,6 +3454,25 @@ foreach ($RequiredIncrementalBenchmarkContract in @(
 )) {
     if (-not $CSharpIncrementalBenchmarkSource.Contains($RequiredIncrementalBenchmarkContract)) {
         Add-Violation "C# incremental benchmark is missing matrix contract $RequiredIncrementalBenchmarkContract"
+    }
+}
+foreach ($RequiredDebugMapV2Contract in @(
+    @{ Source = $CSharpGuestDebugMapModelSource; Token = 'CSharpGuestDebugSequencePoint' },
+    @{ Source = $CSharpGuestDebugMapProjectorSource; Token = 'BuildSequencePoints' },
+    @{ Source = $CSharpGuestDebugMapProjectorSource; Token = '"2.0"' },
+    @{ Source = $CSharpGuestDebugMapFinalizerSource; Token = 'WasmSha256' },
+    @{ Source = $CSharpGuestDebugMapFinalizerSource; Token = 'ASDEBUG2001' },
+    @{ Source = $GuestInstructionSource; Token = '[property: JsonIgnore] GuestDebugLocation?' },
+    @{ Source = $GuestWasmDebugOffsetMapSource; Token = 'GuestWasmDebugOffsetMap' },
+    @{ Source = $WasmFunctionCompilerSource; Token = 'GuestDebugIdentity.Instruction' },
+    @{ Source = $WasmFunctionCompilerSource; Token = 'body.Count' },
+    @{ Source = $WasmBackendCommandLineSource; Token = '--debug-offsets' },
+    @{ Source = $CSharpGuestCompilerScriptSource; Token = '--finalize-debug-map' },
+    @{ Source = $CSharpCompilerStageExecutorSource; Token = '--finalize-debug-map' },
+    @{ Source = $CSharpBuildScriptSource; Token = 'provenance.wasm_sha256' }
+)) {
+    if (-not $RequiredDebugMapV2Contract.Source.Contains($RequiredDebugMapV2Contract.Token)) {
+        Add-Violation "DebugMap v2 pipeline is missing contract $($RequiredDebugMapV2Contract.Token)"
     }
 }
 foreach ($RequiredUnifiedDiagnosticBuildContract in @(

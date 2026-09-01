@@ -1723,6 +1723,9 @@ $DebugIndexSpaceValid = (Try-GetJsonInt32 -Value $DebugMapModel.imported_functio
     $DebugImportedFunctionCount -le ([int]::MaxValue - $DebugDefinedFunctionCount) -and
     $DebugImportedFunctionCount -eq @($GuestIrModel.imports).Count -and
     $DebugDefinedFunctionCount -eq @($GuestIrModel.functions).Count
+$DebugSchemaVersion = if ($null -eq $DebugMapModel) { 0 } else { [int]$DebugMapModel.schema_version }
+$DebugVersionValid = ($DebugSchemaVersion -eq 1 -and [string]$DebugMapModel.debug_version -eq "1.0") -or
+    ($DebugSchemaVersion -eq 2 -and [string]$DebugMapModel.debug_version -eq "2.0")
 $DebugMapContractValid = (Test-JsonObjectHasProperties -Value $DebugMapModel -RequiredProperties @(
         "schema_version",
         "debug_version",
@@ -1732,8 +1735,7 @@ $DebugMapContractValid = (Test-JsonObjectHasProperties -Value $DebugMapModel -Re
         "source",
         "provenance",
         "functions")) -and
-    [int]$DebugMapModel.schema_version -eq 1 -and
-    [string]$DebugMapModel.debug_version -eq "1.0" -and
+    $DebugVersionValid -and
     [string]$DebugMapModel.module_id -ceq [string]$GuestIrModel.module_id -and
     $DebugIndexSpaceValid -and
     (Test-JsonObjectHasProperties -Value $DebugMapModel.source -RequiredProperties @("id", "sha256")) -and
@@ -1750,6 +1752,10 @@ $DebugMapContractValid = (Test-JsonObjectHasProperties -Value $DebugMapModel -Re
     [string]$DebugMapModel.provenance.frontend_artifact_sha256 -ceq $FrontendArtifactSha256 -and
     [string]$DebugMapModel.provenance.semantic_sha256 -ceq $SemanticSha256 -and
     [string]$DebugMapModel.provenance.guest_ir_sha256 -ceq $GuestIrSha256 -and
+    ($DebugSchemaVersion -eq 1 -or
+        ((Test-JsonObjectHasProperties -Value $DebugMapModel.provenance -RequiredProperties @("wasm_sha256")) -and
+         (Test-JsonLowercaseSha256 -Value $DebugMapModel.provenance.wasm_sha256) -and
+         [string]$DebugMapModel.provenance.wasm_sha256 -ceq $WasmSha256)) -and
     $DebugMapModel.functions -is [System.Array] -and
     $DebugMapModel.functions.Count -gt 0
 if ($DebugMapContractValid) {
@@ -1801,6 +1807,61 @@ if ($DebugMapContractValid) {
             ($SpanEndLine -eq $SpanLine -and $SpanEndColumn -lt $SpanColumn)) {
             $DebugMapContractValid = $false
             break
+        }
+        if ($DebugSchemaVersion -eq 2) {
+            if ($Function.sequence_points -isnot [System.Array]) {
+                $DebugMapContractValid = $false
+                break
+            }
+            $PreviousSequenceOffset = -1
+            $SequenceInstructionIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+            $SequenceOperationIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+            foreach ($SequencePoint in $Function.sequence_points) {
+                $SequenceOffset = -1
+                $SequenceStart = -1
+                $SequenceLength = -1
+                $SequenceLine = -1
+                $SequenceColumn = -1
+                $SequenceEndLine = -1
+                $SequenceEndColumn = -1
+                if (-not (Test-JsonObjectHasProperties -Value $SequencePoint -RequiredProperties @(
+                        "wasm_function_offset",
+                        "guest_instruction_id",
+                        "semantic_operation_id",
+                        "kind",
+                        "hidden",
+                        "span")) -or
+                    -not (Try-GetJsonInt32 -Value $SequencePoint.wasm_function_offset -ParsedValue ([ref]$SequenceOffset)) -or
+                    $SequenceOffset -lt 0 -or
+                    $SequenceOffset -lt $PreviousSequenceOffset -or
+                    -not (Test-JsonNonEmptyString -Value $SequencePoint.guest_instruction_id) -or
+                    -not (Test-JsonNonEmptyString -Value $SequencePoint.semantic_operation_id) -or
+                    -not $SequenceInstructionIds.Add([string]$SequencePoint.guest_instruction_id) -or
+                    -not $SequenceOperationIds.Add([string]$SequencePoint.semantic_operation_id) -or
+                    [string]$SequencePoint.kind -notin @("hidden", "statement", "call", "await", "return") -or
+                    -not (Test-JsonObjectHasProperties -Value $SequencePoint.span -RequiredProperties @(
+                            "start", "length", "line", "column", "end_line", "end_column")) -or
+                    -not (Try-GetJsonInt32 -Value $SequencePoint.span.start -ParsedValue ([ref]$SequenceStart)) -or
+                    -not (Try-GetJsonInt32 -Value $SequencePoint.span.length -ParsedValue ([ref]$SequenceLength)) -or
+                    -not (Try-GetJsonInt32 -Value $SequencePoint.span.line -ParsedValue ([ref]$SequenceLine)) -or
+                    -not (Try-GetJsonInt32 -Value $SequencePoint.span.column -ParsedValue ([ref]$SequenceColumn)) -or
+                    -not (Try-GetJsonInt32 -Value $SequencePoint.span.end_line -ParsedValue ([ref]$SequenceEndLine)) -or
+                    -not (Try-GetJsonInt32 -Value $SequencePoint.span.end_column -ParsedValue ([ref]$SequenceEndColumn)) -or
+                    $SequenceStart -lt 0 -or
+                    $SequenceLength -le 0 -or
+                    $SequenceLine -lt 0 -or
+                    $SequenceColumn -lt 0 -or
+                    $SequenceEndLine -lt $SequenceLine -or
+                    $SequenceEndColumn -lt 0 -or
+                    ($SequenceEndLine -eq $SequenceLine -and $SequenceEndColumn -lt $SequenceColumn)) {
+                    $DebugMapContractValid = $false
+                    break
+                }
+                $PreviousSequenceOffset = $SequenceOffset
+            }
+            if (-not $DebugMapContractValid) {
+                break
+            }
         }
         $PreviousDebugFunctionIndex = $FunctionIndex
     }

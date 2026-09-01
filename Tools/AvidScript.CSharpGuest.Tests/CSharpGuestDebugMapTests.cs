@@ -6,6 +6,7 @@ using AvidScript.CSharpFrontend;
 using AvidScript.CSharpGuest;
 using AvidScript.CSharpSemantic;
 using AvidScript.GuestIr;
+using AvidScript.WasmBackend;
 
 internal static class CSharpGuestDebugMapTests
 {
@@ -327,8 +328,8 @@ internal static class CSharpGuestDebugMapTests
 
         Assert(module.Imports.Count == 1 && module.Functions.Count == 2,
             "fixture should retain one reachable import and two defined functions");
-        Assert(first.SchemaVersion == 1
-            && first.DebugVersion == "1.0"
+        Assert(first.SchemaVersion == 2
+            && first.DebugVersion == "2.0"
             && first.ModuleId == module.ModuleId
             && first.ImportedFunctionCount == module.Imports.Count
             && first.DefinedFunctionCount == module.Functions.Count,
@@ -351,6 +352,35 @@ internal static class CSharpGuestDebugMapTests
         Assert(main.GuestFunctionId == "function:" + main.MethodSymbolId
             && main.Span == expectedSpan,
             "method identity and zero-based Roslyn declaration span should be retained");
+        Assert(main.SequencePoints is { Count: > 0 }
+            && main.SequencePoints.All(point => point.WasmFunctionOffset == -1)
+            && main.SequencePoints.Any(point => point.Kind == "call"),
+            "v2 draft maps should retain stable semantic sequence points before backend offset backfill");
+
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(module);
+        Assert(wasm.Succeeded && wasm.DebugOffsets.Count > 0,
+            "WASM backend should publish authoritative instruction offsets");
+        string wasmSha256 = Convert.ToHexString(SHA256.HashData(wasm.Bytes)).ToLowerInvariant();
+        CSharpGuestDebugMap finalized = CSharpGuestDebugMapFinalizer.Finalize(
+            first,
+            new GuestWasmDebugOffsetMap(
+                1,
+                module.ModuleId,
+                guestIrSha256,
+                wasmSha256,
+                module.Imports.Count,
+                module.Functions.Count,
+                wasm.DebugOffsets));
+        CSharpGuestDebugFunction finalizedMain = finalized.Functions.Single(function =>
+            function.MethodSymbolId == main.MethodSymbolId);
+        Assert(finalized.Provenance.WasmSha256 == wasmSha256
+            && finalizedMain.SequencePoints is { Count: > 0 }
+            && finalizedMain.SequencePoints.All(point => point.WasmFunctionOffset >= 0)
+            && finalizedMain.SequencePoints.Select(point => point.WasmFunctionOffset)
+                .SequenceEqual(finalizedMain.SequencePoints
+                    .Select(point => point.WasmFunctionOffset)
+                    .OrderBy(offset => offset)),
+            "backend finalization should bind the WASM hash and order resolved function-relative offsets");
         Assert(CSharpGuestDebugMapSerializer.Serialize(first)
                 .SequenceEqual(CSharpGuestDebugMapSerializer.Serialize(second)),
             "equivalent semantic and Guest IR inputs should produce byte-identical debug maps");

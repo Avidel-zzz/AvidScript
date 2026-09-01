@@ -1140,13 +1140,17 @@ Assert-Condition (@($ControlledAsyncFunctions | ForEach-Object {
         @($_.blocks | Where-Object { [string]$_.terminator.kind -ceq 'trap' })
     }).Count -eq 8) `
     "each ActorLifecycle await producer does not fail closed on state-store or scheduling rejection"
-Assert-Condition ($DebugMapJson.schema_version -eq 1 -and $DebugMapJson.debug_version -eq "1.0") "C# debug map contract is invalid"
+Assert-Condition ($DebugMapJson.schema_version -eq 2 -and $DebugMapJson.debug_version -eq "2.0") "C# debug map contract is invalid"
 Assert-Condition ($DebugMapJson.module_id -eq $GuestIrJson.module_id) "C# debug map module identity differs from Guest IR"
 Assert-Condition ($DebugMapJson.source.id -eq $NormalJson.source.file -and $DebugMapJson.source.sha256 -eq $FrontendJson.source.sha256) "C# debug map source identity differs"
 Assert-Condition ($DebugMapJson.provenance.frontend_artifact_sha256 -eq $FrontendArtifactSha256) "C# debug map frontend artifact provenance hash differs"
 Assert-Condition ($DebugMapJson.provenance.semantic_sha256 -eq $SemanticSha256) "C# debug map semantic provenance hash differs"
 Assert-Condition ($DebugMapJson.provenance.guest_ir_sha256 -eq $GuestIrSha256) "C# debug map Guest IR provenance hash differs"
+Assert-Condition ($DebugMapJson.provenance.wasm_sha256 -eq $WasmSha256) "C# debug map WASM provenance hash differs"
 Assert-Condition (@($DebugMapJson.functions).Count -gt 0) "C# debug map does not contain generated function symbols"
+Assert-Condition (@($DebugMapJson.functions | ForEach-Object { @($_.sequence_points) } | Where-Object {
+    [int]$_.wasm_function_offset -ge 0
+}).Count -gt 0) "C# debug map does not contain resolved v2 sequence points"
 Assert-Condition (@($GuestIrJson.functions | Where-Object { $_.id -ceq 'function:synthetic:gameplay_event' }).Count -eq 1) "Guest IR does not contain exactly one generated gameplay router"
 Assert-Condition (@($DebugMapJson.functions | Where-Object { $_.guest_function_id -ceq 'function:synthetic:gameplay_event' }).Count -eq 0) "generated gameplay router published a fake C# source location"
 Assert-Condition (@($DebugMapJson.functions | Where-Object {
@@ -1157,7 +1161,7 @@ Assert-Condition ([int]$DebugMapJson.defined_function_count -eq @($GuestIrJson.f
 Assert-Condition ($NormalJson.guest_ir.schema_version -eq 2 -and $NormalJson.guest_ir.version -eq "1.1") "report Guest IR contract is invalid"
 Assert-Condition ($NormalJson.guest_ir.semantic_sha256 -eq $SemanticSha256) "report Guest IR semantic hash differs"
 Assert-Condition ($NormalJson.guest_ir.sha256 -eq $GuestIrSha256) "report Guest IR artifact hash differs"
-Assert-Condition ($NormalJson.debug_map.schema_version -eq 1 -and $NormalJson.debug_map.version -eq "1.0") "report C# debug map contract is invalid"
+Assert-Condition ($NormalJson.debug_map.schema_version -eq 2 -and $NormalJson.debug_map.version -eq "2.0") "report C# debug map contract is invalid"
 Assert-Condition ($NormalJson.debug_map.module_id -eq $GuestIrJson.module_id) "report C# debug map module identity differs"
 Assert-Condition ($NormalJson.debug_map.sha256 -eq $DebugMapSha256) "report C# debug map artifact hash differs"
 Assert-Condition ($StateSchemaJson.schema_version -eq 2 -and
@@ -1188,7 +1192,7 @@ Assert-Condition ($ManifestJson.guest_ir.schema_version -eq 2 -and $ManifestJson
 Assert-Condition ($ManifestJson.guest_ir.module_id -eq $GuestIrJson.module_id) "manifest Guest IR module identity differs"
 Assert-Condition ($ManifestJson.guest_ir.sha256 -eq $GuestIrSha256) "manifest Guest IR hash differs"
 Assert-Condition ($ManifestJson.debug_map.file -eq $NormalJson.artifacts.debug_map_file) "manifest C# debug map path differs"
-Assert-Condition ($ManifestJson.debug_map.schema_version -eq 1 -and $ManifestJson.debug_map.version -eq "1.0") "manifest C# debug map contract is invalid"
+Assert-Condition ($ManifestJson.debug_map.schema_version -eq 2 -and $ManifestJson.debug_map.version -eq "2.0") "manifest C# debug map contract is invalid"
 Assert-Condition ($ManifestJson.debug_map.module_id -eq $GuestIrJson.module_id) "manifest C# debug map module identity differs"
 Assert-Condition ($ManifestJson.debug_map.sha256 -eq $DebugMapSha256) "manifest C# debug map hash differs"
 Assert-Condition ($ManifestJson.state_migration.schema_version -eq 2 -and

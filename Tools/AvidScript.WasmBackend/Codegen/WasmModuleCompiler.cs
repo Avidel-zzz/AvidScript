@@ -24,12 +24,21 @@ public static class WasmModuleCompiler
                 "ASWB1001",
                 "error",
                 "Guest IR validation failed before WASM compilation.");
-            return new WasmCompilationResult(false, Array.Empty<byte>(), new[] { diagnostic });
+            return new WasmCompilationResult(
+                false,
+                Array.Empty<byte>(),
+                Array.Empty<GuestWasmDebugOffset>(),
+                new[] { diagnostic });
         }
 
         try
         {
-            return new WasmCompilationResult(true, CompileValidated(module), Array.Empty<WasmDiagnostic>());
+            (byte[] bytes, IReadOnlyList<GuestWasmDebugOffset> offsets) = CompileValidated(module);
+            return new WasmCompilationResult(
+                true,
+                bytes,
+                offsets,
+                Array.Empty<WasmDiagnostic>());
         }
         catch (Exception exception) when (exception is NotSupportedException
             or InvalidOperationException
@@ -38,14 +47,20 @@ public static class WasmModuleCompiler
             or OverflowException)
         {
             WasmDiagnostic diagnostic = new("ASWB1002", "error", exception.Message);
-            return new WasmCompilationResult(false, Array.Empty<byte>(), new[] { diagnostic });
+            return new WasmCompilationResult(
+                false,
+                Array.Empty<byte>(),
+                Array.Empty<GuestWasmDebugOffset>(),
+                new[] { diagnostic });
         }
     }
 
-    private static byte[] CompileValidated(GuestModule module)
+    private static (byte[] Bytes, IReadOnlyList<GuestWasmDebugOffset> DebugOffsets) CompileValidated(
+        GuestModule module)
     {
         WasmModuleLayout layout = WasmModuleLayout.Create(module);
         WasmBinaryWriter writer = new();
+        List<GuestWasmDebugOffset> debugOffsets = new();
         writer.WriteBytes(Header);
         WriteProvenanceSection(writer, module);
         WriteTypeSection(writer, layout);
@@ -54,9 +69,9 @@ public static class WasmModuleCompiler
         WriteMemorySection(writer, module, layout);
         WriteStackPointerGlobalSection(writer, module);
         WriteExportSection(writer, module, layout);
-        WriteCodeSection(writer, module, layout);
+        WriteCodeSection(writer, module, layout, debugOffsets);
         WriteDataSection(writer, module, layout);
-        return writer.ToArray();
+        return (writer.ToArray(), debugOffsets);
     }
 
     private static void WriteProvenanceSection(WasmBinaryWriter writer, GuestModule module)
@@ -202,16 +217,26 @@ public static class WasmModuleCompiler
     private static void WriteCodeSection(
         WasmBinaryWriter writer,
         GuestModule module,
-        WasmModuleLayout layout)
+        WasmModuleLayout layout,
+        ICollection<GuestWasmDebugOffset> debugOffsets)
     {
         writer.WriteSection(10, section =>
         {
             section.WriteU32(checked((uint)module.Functions.Count));
             foreach (GuestFunction function in module.Functions)
             {
-                byte[] body = new WasmFunctionCompiler(module, function, layout).Compile();
-                section.WriteU32(checked((uint)body.Length));
-                section.WriteBytes(body);
+                WasmFunctionCompilationResult body =
+                    new WasmFunctionCompiler(module, function, layout).Compile();
+                int functionIndex = checked((int)layout.FunctionIndices[function.Id]);
+                foreach (WasmFunctionInstructionOffset offset in body.InstructionOffsets)
+                {
+                    debugOffsets.Add(new GuestWasmDebugOffset(
+                        functionIndex,
+                        offset.GuestInstructionId,
+                        offset.FunctionOffset));
+                }
+                section.WriteU32(checked((uint)body.Bytes.Length));
+                section.WriteBytes(body.Bytes);
             }
         });
     }

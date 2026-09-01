@@ -35,9 +35,19 @@ internal static class CSharpControlFlowLowerer
         foreach (SemanticBasicBlock block in graph.Blocks.OrderBy(item => item.Ordinal))
         {
             List<GuestInstruction> instructions = new();
-            foreach (SemanticOperation operation in block.Operations)
+            for (int operationOrdinal = 0; operationOrdinal < block.Operations.Count; ++operationOrdinal)
             {
+                SemanticOperation operation = block.Operations[operationOrdinal];
+                int instructionStart = instructions.Count;
                 CSharpOperationLowerer.LowerValue(context, operation, block.Ordinal, instructions);
+                CSharpGuestDebugTagger.TagFirstEmitted(
+                    instructions,
+                    instructionStart,
+                    operation,
+                    CSharpGuestDebugTagger.OperationId(
+                        callable.MethodSymbolId,
+                        $"cfg:{block.Ordinal}",
+                        operationOrdinal));
             }
 
             GuestTerminator? terminator = LowerTerminator(context, graph, block, instructions);
@@ -135,11 +145,21 @@ internal static class CSharpControlFlowLowerer
                 return null;
             }
 
+            int instructionStart = instructions.Count;
             GuestRegister? returnValue = CSharpOperationLowerer.LowerValue(
                 context,
                 block.BranchValue,
                 block.Ordinal,
                 instructions);
+            CSharpGuestDebugTagger.TagFirstEmitted(
+                instructions,
+                instructionStart,
+                block.BranchValue,
+                CSharpGuestDebugTagger.OperationId(
+                    context.Callable.MethodSymbolId,
+                    $"cfg:{block.Ordinal}:return",
+                    0),
+                "return");
             return returnValue is null
                 ? null
                 : new GuestTerminator("return", null, null, null, returnValue.Id);
@@ -205,6 +225,7 @@ internal static class CSharpControlFlowLowerer
         SemanticControlFlowEdge fallthrough = fallthroughEdges[0];
         SemanticControlFlowEdge conditional = conditionalEdges[0];
 
+        int instructionStart = instructions.Count;
         GuestRegister? condition = CSharpOperationLowerer.LowerValue(
             context,
             block.BranchValue!,
@@ -214,6 +235,14 @@ internal static class CSharpControlFlowLowerer
         {
             return null;
         }
+        CSharpGuestDebugTagger.TagFirstEmitted(
+            instructions,
+            instructionStart,
+            block.BranchValue!,
+            CSharpGuestDebugTagger.OperationId(
+                context.Callable.MethodSymbolId,
+                $"cfg:{block.Ordinal}:branch",
+                0));
 
         SemanticControlFlowEdge trueEdge;
         SemanticControlFlowEdge falseEdge;

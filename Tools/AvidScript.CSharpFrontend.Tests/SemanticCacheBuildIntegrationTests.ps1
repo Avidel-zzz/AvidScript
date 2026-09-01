@@ -171,14 +171,15 @@ function Assert-DebugArtifact {
     $DebugMap = Get-Content -Raw -LiteralPath $DebugMapPath | ConvertFrom-Json
     $Manifest = Get-Content -Raw -LiteralPath $Build.ManifestPath | ConvertFrom-Json
     Assert-Condition (
-        [int]$DebugMap.schema_version -eq 1 -and
-        [string]$DebugMap.debug_version -ceq "1.0" -and
+        [int]$DebugMap.schema_version -eq 2 -and
+        [string]$DebugMap.debug_version -ceq "2.0" -and
         [string]$DebugMap.module_id -ceq [string]$Manifest.guest_ir.module_id) `
         "$Label C# debug map contract differs from Guest IR"
     Assert-Condition (
         [string]$DebugMap.source.id -ceq [string]$Build.Report.source.file -and
         [string]$DebugMap.provenance.semantic_sha256 -ceq [string]$Build.Report.guest_ir.semantic_sha256 -and
-        [string]$DebugMap.provenance.guest_ir_sha256 -ceq [string]$Build.Report.guest_ir.sha256) `
+        [string]$DebugMap.provenance.guest_ir_sha256 -ceq [string]$Build.Report.guest_ir.sha256 -and
+        [string]$DebugMap.provenance.wasm_sha256 -ceq [string]$Build.Report.wasm.sha256) `
         "$Label C# debug map provenance differs from report"
     Assert-Condition (
         [string]$Manifest.debug_map.file -ceq [string]$Build.Report.artifacts.debug_map_file -and

@@ -25,6 +25,7 @@ $NuGetPackages = Join-Path $ToolRoot "NuGet\Packages"
 $NuGetDirectory = Join-Path $AppData "NuGet"
 $NuGetConfig = Join-Path $NuGetDirectory "NuGet.Config"
 $Utf8 = [System.Text.UTF8Encoding]::new($false)
+$DebugOffsetPath = "$DebugMapPath.offsets.json"
 
 foreach ($RequiredFile in @($DotNetPath, $SemanticPath, $GuestProject, $BackendProject)) {
     if (-not (Test-Path -LiteralPath $RequiredFile -PathType Leaf)) {
@@ -45,7 +46,7 @@ foreach ($Directory in @(
     New-Item -ItemType Directory -Force -Path $Directory | Out-Null
 }
 
-foreach ($StaleArtifact in @($GuestIrPath, $DebugMapPath, $StateSchemaPath, $WasmPath, $InspectionPath)) {
+foreach ($StaleArtifact in @($GuestIrPath, $DebugMapPath, $DebugOffsetPath, $StateSchemaPath, $WasmPath, $InspectionPath)) {
     if (Test-Path -LiteralPath $StaleArtifact -PathType Leaf) {
         Remove-Item -LiteralPath $StaleArtifact -Force
     }
@@ -94,10 +95,14 @@ try {
         throw "C# semantic to Guest IR lowering failed with exit code $ExitCode."
     }
 
-    & $DotNetPath $BackendDll $GuestIrPath $WasmPath
+    & $DotNetPath $BackendDll $GuestIrPath $WasmPath --debug-offsets $DebugOffsetPath
     $ExitCode = $LASTEXITCODE
     if ($ExitCode -ne 0 -and (Test-Path -LiteralPath $WasmPath -PathType Leaf)) {
         Remove-Item -LiteralPath $WasmPath -Force
+    }
+    if ($ExitCode -eq 0) {
+        & $DotNetPath $GuestDll --finalize-debug-map $DebugMapPath --offset-map $DebugOffsetPath
+        $ExitCode = $LASTEXITCODE
     }
     if ($ExitCode -eq 0) {
         & $DotNetPath $BackendDll --inspect $WasmPath $InspectionPath
@@ -106,6 +111,13 @@ try {
 }
 finally {
     Pop-Location
+    Remove-Item -LiteralPath $DebugOffsetPath -Force -ErrorAction SilentlyContinue
+}
+
+if ($ExitCode -ne 0) {
+    foreach ($FailedArtifact in @($DebugMapPath, $WasmPath, $InspectionPath)) {
+        Remove-Item -LiteralPath $FailedArtifact -Force -ErrorAction SilentlyContinue
+    }
 }
 
 if ($ExitCode -eq 0) {

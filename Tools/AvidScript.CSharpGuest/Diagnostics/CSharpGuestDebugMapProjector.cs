@@ -117,12 +117,13 @@ public static class CSharpGuestDebugMapProjector
                 function.Id,
                 methodId,
                 $"{ownerName}.{methodSymbol.Signature}",
-                methodSymbol.Span));
+                methodSymbol.Span,
+                BuildSequencePoints(function)));
         }
 
         return new CSharpGuestDebugMap(
-            1,
-            "1.0",
+            2,
+            "2.0",
             module.ModuleId,
             module.Imports.Count,
             module.Functions.Count,
@@ -130,7 +131,8 @@ public static class CSharpGuestDebugMapProjector
             new CSharpGuestDebugProvenance(
                 frontendArtifactSha256,
                 module.Provenance.SemanticSha256,
-                guestIrSha256),
+                guestIrSha256,
+                null),
             functions);
     }
 
@@ -226,7 +228,51 @@ public static class CSharpGuestDebugMapProjector
             functionId,
             debugMethodId,
             $"{ownerName}.{methodSymbol.Signature} [async resume {target.SegmentOrdinal}]",
-            target.Span));
+            target.Span,
+            Array.Empty<CSharpGuestDebugSequencePoint>()));
+    }
+
+    private static IReadOnlyList<CSharpGuestDebugSequencePoint> BuildSequencePoints(
+        GuestFunction function)
+    {
+        List<CSharpGuestDebugSequencePoint> sequencePoints = new();
+        HashSet<string> semanticOperationIds = new(StringComparer.Ordinal);
+        for (int blockIndex = 0; blockIndex < function.Blocks.Count; ++blockIndex)
+        {
+            GuestBasicBlock block = function.Blocks[blockIndex];
+            for (int instructionIndex = 0;
+                instructionIndex < block.Instructions.Count;
+                ++instructionIndex)
+            {
+                GuestDebugLocation? debugLocation = block.Instructions[instructionIndex].DebugLocation;
+                if (debugLocation is null)
+                {
+                    continue;
+                }
+                SemanticSpan span = new(
+                    debugLocation.Start,
+                    debugLocation.Length,
+                    debugLocation.Line,
+                    debugLocation.Column,
+                    debugLocation.EndLine,
+                    debugLocation.EndColumn);
+                if (!semanticOperationIds.Add(debugLocation.SemanticOperationId)
+                    || !IsValidSpan(span)
+                    || debugLocation.Kind is not ("hidden" or "statement" or "call" or "await" or "return"))
+                {
+                    throw new InvalidDataException(
+                        $"ASDEBUG1004: Function '{function.Id}' contains an invalid or duplicated sequence point.");
+                }
+                sequencePoints.Add(new CSharpGuestDebugSequencePoint(
+                    -1,
+                    GuestDebugIdentity.Instruction(function.Id, block.Id, instructionIndex),
+                    debugLocation.SemanticOperationId,
+                    debugLocation.Kind,
+                    debugLocation.Hidden,
+                    span));
+            }
+        }
+        return sequencePoints;
     }
 
     private static Dictionary<string, T> UniqueBy<T>(

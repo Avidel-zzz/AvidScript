@@ -21,11 +21,21 @@ public sealed record CSharpGuestDebugSource(
 public sealed record CSharpGuestDebugProvenance(
     [property: JsonPropertyOrder(0)] string FrontendArtifactSha256,
     [property: JsonPropertyOrder(1)] string SemanticSha256,
-    [property: JsonPropertyOrder(2)] string GuestIrSha256);
+    [property: JsonPropertyOrder(2)] string GuestIrSha256,
+    [property: JsonPropertyOrder(3)] string? WasmSha256 = null);
 
 public sealed record CSharpGuestDebugFunction(
     [property: JsonPropertyOrder(0)] int WasmFunctionIndex,
     [property: JsonPropertyOrder(1)] string GuestFunctionId,
     [property: JsonPropertyOrder(2)] string MethodSymbolId,
     [property: JsonPropertyOrder(3)] string DisplayName,
-    [property: JsonPropertyOrder(4)] SemanticSpan Span);
+    [property: JsonPropertyOrder(4)] SemanticSpan Span,
+    [property: JsonPropertyOrder(5)] IReadOnlyList<CSharpGuestDebugSequencePoint>? SequencePoints = null);
+
+public sealed record CSharpGuestDebugSequencePoint(
+    [property: JsonPropertyOrder(0)] int WasmFunctionOffset,
+    [property: JsonPropertyOrder(1)] string GuestInstructionId,
+    [property: JsonPropertyOrder(2)] string SemanticOperationId,
+    [property: JsonPropertyOrder(3)] string Kind,
+    [property: JsonPropertyOrder(4)] bool Hidden,
+    [property: JsonPropertyOrder(5)] SemanticSpan Span);

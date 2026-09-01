@@ -16,6 +16,16 @@ public static class GuestCommandLine
         string? debugMapPath = null;
         try
         {
+            if (args.Length == 4
+                && args[0] == "--finalize-debug-map"
+                && args[2] == "--offset-map"
+                && !string.IsNullOrWhiteSpace(args[1])
+                && !string.IsNullOrWhiteSpace(args[3]))
+            {
+                CSharpGuestDebugMapFinalizer.FinalizeFile(args[1], args[3]);
+                return 0;
+            }
+
             IReadOnlyDictionary<string, string> options = ParseOptions(args);
             string semanticPath = options["--semantic"];
             outputPath = options["--output"];
@@ -115,7 +125,7 @@ public static class GuestCommandLine
             && args.Length != 12)
         {
             throw new ArgumentException(
-                "Usage: --semantic <path> --output <path> [--state-schema <path>] [--debug-map <path> --frontend-artifact-sha256 <sha256>] [--data-lane-fusion enabled|disabled]");
+                "Usage: --semantic <path> --output <path> [--state-schema <path>] [--debug-map <path> --frontend-artifact-sha256 <sha256>] [--data-lane-fusion enabled|disabled] | --finalize-debug-map <path> --offset-map <path>");
         }
 
         Dictionary<string, string> options = new(StringComparer.Ordinal);
