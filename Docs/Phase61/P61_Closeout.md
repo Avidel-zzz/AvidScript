@@ -1,6 +1,6 @@
 # Phase 61 收尾记录
 
-状态：`P61.A-P61.E` 已完成，集中 Gate 已完成正式 attestation，等待 close
+状态：`P61.A-P61.E` 已完成；因 close 禁止 `artifacts` 路径而 reopen，正在迁移证据目录
 
 ## 目标
 
@@ -140,7 +140,7 @@
 
 ## 待完成
 
-- Phase 61 workflow close；
+- 证据目录迁移完成后重新执行 Phase 61 attestation 与 close；
 - 真实 Editor 中的调试、源码导航、Profiler 操作和三类 IDE 启动由人工验收，不以 Automation 代替。
 
 ## 人工验收边界

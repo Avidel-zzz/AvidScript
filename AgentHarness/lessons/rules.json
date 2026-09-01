@@ -558,6 +558,22 @@
       "prevention": "修改 Runtime Public 结构字段、大小或成员顺序后，focused producer build 只用于编译反馈；启动 Automation 前必须执行完整 no-clean Editor build，确认所有消费者重新编译和链接。",
       "source": "observed:2026-09-02-P61.D1b",
       "last_observed": "2026-09-02 P61.D1b 给 FAvidScriptWasmHostContext 增加 Profiler 指针后仅重建 Runtime，Editor 启动在 UObject::IsValidLowLevel 断言；需完整 no-clean Editor relink"
+    },
+    {
+      "id": "phase-committed-evidence-uses-evidence-directory",
+      "tags": ["phase", "privacy", "evidence", "workflow"],
+      "summary": "Phase 提交范围中的证据目录不能命名为 artifacts。",
+      "prevention": "阶段内需要提交的脱敏 JSON 和报告统一放在 `Docs/PhaseN/Evidence/`；生成前先运行与 close 相同的禁止路径检查。`Artifacts/`、`Saved/`、`Binaries/` 等路径只用于仓库外或忽略内容。",
+      "source": "observed:2026-09-02-P61.E",
+      "last_observed": "2026-09-02 P61 首次 close 因两份已提交性能 JSON 位于 Docs/Phase61/Artifacts 而触发 ASPW4030；数据无隐私问题，但路径合同要求 reopen 并迁移"
+    },
+    {
+      "id": "redirected-incremental-matrix-shuts-down-worker",
+      "tags": ["compiler-worker", "performance", "logging", "powershell"],
+      "summary": "重定向增量矩阵输出时，persistent Worker 继承日志句柄会延迟宿主退出。",
+      "prevention": "性能 runner 写完报告后按 pipe/fingerprint 发送 shutdown 并等待 Worker 退出；在修复 runner 前，Gate 包装只终止本轮已核对命令行和 PID 的专属 Worker，不能等待 600 秒 idle timeout 或按进程名批量结束。",
+      "source": "observed:2026-09-02-P61.E",
+      "last_observed": "2026-09-02 冻结增量矩阵已写出完整通过报告，但 Worker 继承重定向句柄使 exec 长时间不返回；核对唯一 PID 和 pipe 后精确结束，宿主以 exit 0 收口"
     }
   ]
 }
