@@ -2,7 +2,7 @@
   "schema_version": 1,
   "phase_id": 61,
   "run_id": "P61-9547104-20260902-001",
-  "status": "attested",
+  "status": "superseded_by_reopen",
   "verified": {
     "commit": "9547104367f1c382a2cbc0bdec81faa7e4bc87d8",
     "tree": "bea4c844dfdce9fe411fac5ea8dc4c96016c8dae",
