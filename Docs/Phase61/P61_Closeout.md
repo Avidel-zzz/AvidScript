@@ -1,6 +1,6 @@
 # Phase 61 收尾记录
 
-状态：`P61.A-P61.E` 已完成；close 禁止路径已修复，等待重新 freeze、attestation 与 close
+状态：`P61.A-P61.E` 已完成，修复后集中 Gate 已重新 attestation，等待 close
 
 ## 目标
 
@@ -140,7 +140,7 @@
 
 ## 待完成
 
-- 重新执行 Phase 61 freeze、attestation 与 close；
+- Phase 61 workflow close；
 - 真实 Editor 中的调试、源码导航、Profiler 操作和三类 IDE 启动由人工验收，不以 Automation 代替。
 
 ## 人工验收边界

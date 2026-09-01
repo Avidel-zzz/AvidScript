@@ -5,7 +5,7 @@
     "goal": "交付增量编译、结构化错误定位、指令级 source map、调用栈、断点、变量查看、Profiler 与 IDE workspace。",
     "start_commit": "0dd6b15ad8a0a31d2f6bdcf256b0e1a8032ee4ab"
   },
-  "declared_stage": "gate_ready",
+  "declared_stage": "gate_attested",
   "architecture": {
     "path": "Docs/Phase61/P61.0_Editor_Debugging_Architecture.md",
     "version": 1,
@@ -72,13 +72,13 @@
     "at_utc": "2026-09-01T20:13:20.6615011+00:00"
   },
   "gate": {
-    "report_path": "",
-    "report_sha256": "",
-    "run_id": "",
-    "verified_commit": "",
-    "verified_tree": "",
-    "attestation_parent": "",
-    "attested_at_utc": null
+    "report_path": "C:\\tmp\\AvidScriptP61Gate\\20260902-3837af7\\Phase61_Gate.json",
+    "report_sha256": "b8ecadb0f995ec3a7061a41d391767db63a07183c4230c56e40dd3aab3023da4",
+    "run_id": "P61-3837af7-20260902-002",
+    "verified_commit": "3837af74663fcedcab91b046d6a9bc51c5ffdead",
+    "verified_tree": "b4f36106c1ee3c5562774d67aecdfb5ac4c9cf3a",
+    "attestation_parent": "3837af74663fcedcab91b046d6a9bc51c5ffdead",
+    "attested_at_utc": "2026-09-01T20:15:12.8761675+00:00"
   },
   "protected_dirty": [
     {
@@ -100,7 +100,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "attest -Phase 61 -GateReportPath <path>",
-  "revision": 11,
-  "updated_at_utc": "2026-09-01T20:13:20.6660310+00:00"
+  "next_action": "close -Phase 61",
+  "revision": 12,
+  "updated_at_utc": "2026-09-01T20:15:12.8789434+00:00"
 }
