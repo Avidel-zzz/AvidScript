@@ -494,6 +494,14 @@
       "prevention": "包含 `$paths`、`$path` 等内层变量的 `-Command` 使用外层单引号封装脚本块，或改用独立 `.ps1`；解析失败时先区分命令包装错误与被测脚本错误。",
       "source": "observed:2026-09-01-P61.A1",
       "last_observed": "2026-09-01 P61.A1 批量 PowerShell parser smoke 的内层 foreach 变量被外层提前展开，改用单引号脚本块后 3/3 解析通过"
+    },
+    {
+      "id": "named-pipe-timeout-fixture-drains-request",
+      "tags": ["named-pipe", "timeout", "powershell", "verification"],
+      "summary": "Named-pipe 响应超时夹具必须先读取请求，不能让客户端阻塞在写侧背压。",
+      "prevention": "测试 response timeout 时使用独立 server 进程读取一整行请求后保持静默；不要只建立连接而不读取，否则 StreamWriter.Flush 可能阻塞，测到的不是响应超时。",
+      "source": "observed:2026-09-01-P61.A2b2",
+      "last_observed": "2026-09-01 P61.A2b2 初版 blackhole server 只接受连接未读取请求，客户端阻塞在 Flush；改为独立进程读取请求后静默，auto/required 超时测试 2/2 通过"
     }
   ]
 }

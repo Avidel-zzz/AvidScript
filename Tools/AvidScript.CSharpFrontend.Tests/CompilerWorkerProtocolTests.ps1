@@ -111,6 +111,7 @@ try {
     Assert-Condition ($Ping.succeeded -and [int]$Ping.exit_code -eq 0) "compiler worker ping failed"
     $WorkerInstanceId = [string]$Ping.worker_instance_id
     Assert-Condition ($WorkerInstanceId -cmatch '^[0-9a-f]{32}$') "compiler worker instance id is invalid"
+    Assert-Condition ([int]$Ping.worker_process_id -eq $WorkerProcess.Id) "compiler worker process id is invalid"
 
     $FrontendPath = Join-Path $RunRoot "module.frontend.json"
     $FrontendRequest = New-WorkerRequest -RequestId "frontend-1" -Stage "frontend"

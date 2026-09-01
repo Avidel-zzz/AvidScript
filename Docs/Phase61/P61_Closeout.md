@@ -1,6 +1,6 @@
 # Phase 61 收尾记录
 
-状态：实施中，`P61.A1`、`P61.A2a-A2b1` 已完成
+状态：实施中，`P61.A1-A2` 已完成
 
 ## 目标
 
@@ -18,10 +18,14 @@
 - 完成 `P61.A2b1` Roslyn workspace 复用：同一 Worker 只构建一次 metadata reference set，
   以有界 LRU 复用 primary/reference syntax tree，并通过协议暴露累计指标；
 - 详细实现与证据见 [P61.A2b1 Roslyn workspace 复用](P61.A2b1_Roslyn_Workspace_Reuse.md)。
+- 完成 `P61.A2b2` Build 链路接入：按 toolchain fingerprint 懒启动同用户 Worker，
+  `auto` 传输失败回退 one-shot、`required` fail-closed、`disabled` 保留旧链路；
+- 完整 cache hit 不启动 Worker，自定义 Guest compiler 仅将 Frontend/Semantic 放入 Worker；
+- 详细实现与证据见 [P61.A2b2 Build 链路接入](P61.A2b2_Build_Worker_Integration.md)。
 
 ## 待完成
 
-- `P61.A2b2-A3` Worker 构建链路接入、结构化诊断统一与增量性能矩阵；
+- `P61.A3` 结构化诊断统一与增量性能矩阵；
 - `P61.B` 指令级 source map 与调用栈；
 - `P61.C` 断点、单步与变量查看；
 - `P61.D` Profiler 与 IDE workspace；

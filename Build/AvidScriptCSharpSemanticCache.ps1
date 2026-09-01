@@ -73,7 +73,8 @@ function Get-AvidScriptSemanticCacheToolchainFiles {
     $RequiredFiles = @(
         (Join-Path $PluginRootFullPath "global.json"),
         (Join-Path $PluginRootFullPath "Build\InvokeCSharpFrontend.ps1"),
-        (Join-Path $PluginRootFullPath "Build\InvokeCSharpSemantic.ps1"))
+        (Join-Path $PluginRootFullPath "Build\InvokeCSharpSemantic.ps1"),
+        (Join-Path $PluginRootFullPath "Build\AvidScriptCSharpCompilerWorker.ps1"))
     foreach ($RequiredFile in $RequiredFiles) {
         Assert-AvidScriptCSharpSemanticCache `
             -Condition (Test-Path -LiteralPath $RequiredFile -PathType Leaf) `
@@ -82,7 +83,10 @@ function Get-AvidScriptSemanticCacheToolchainFiles {
     }
 
     $SourceFiles = @()
-    foreach ($SourceRootName in @("AvidScript.CSharpFrontend", "AvidScript.CSharpSemantic")) {
+    foreach ($SourceRootName in @(
+        "AvidScript.CSharpFrontend",
+        "AvidScript.CSharpSemantic",
+        "AvidScript.CSharpCompilerWorker")) {
         $SourceRoot = Join-Path $PluginRootFullPath ("Tools\" + $SourceRootName)
         Assert-AvidScriptCSharpSemanticCache `
             -Condition (Test-Path -LiteralPath $SourceRoot -PathType Container) `

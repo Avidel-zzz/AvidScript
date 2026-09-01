@@ -52,6 +52,7 @@ function Get-AvidScriptCompilationCacheToolchainFingerprint {
         (Join-Path $PluginRootFullPath "global.json"),
         (Join-Path $PluginRootFullPath "Build\BuildCSharpActorLifecycle.ps1"),
         (Join-Path $PluginRootFullPath "Build\InvokeCSharpGuestCompiler.ps1"),
+        (Join-Path $PluginRootFullPath "Build\AvidScriptCSharpCompilerWorker.ps1"),
         (Join-Path $PluginRootFullPath "Build\AvidScriptCSharpCompilationCache.ps1"))
     $Files = foreach ($RequiredFile in $RequiredFiles) {
         Assert-AvidScriptCSharpCompilationCache `
@@ -63,7 +64,8 @@ function Get-AvidScriptCompilationCacheToolchainFingerprint {
     foreach ($SourceRootName in @(
         "AvidScript.GuestIr",
         "AvidScript.CSharpGuest",
-        "AvidScript.WasmBackend")) {
+        "AvidScript.WasmBackend",
+        "AvidScript.CSharpCompilerWorker")) {
         $SourceRoot = Join-Path $PluginRootFullPath ("Tools\" + $SourceRootName)
         Assert-AvidScriptCSharpCompilationCache `
             -Condition (Test-Path -LiteralPath $SourceRoot -PathType Container) `

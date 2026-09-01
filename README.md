@@ -39,7 +39,7 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 | 热重载 | 方法体事务式替换、候选回滚、状态帧与 handle 生命周期隔离 |
 | 发布 | 内容寻址 Generated Type bundle、NonUFS staging 与 Cook-layout Runtime load |
 | 后端 | Wasmtime 45 Win64 主后端；WAMR 兼容后端 |
-| 增量构建 | Frontend/Semantic 与完整 WASM 产物双层缓存；无修改热构建四个编译阶段均为零调用 |
+| 增量构建 | 双层产物缓存；persistent Worker 复用 Roslyn 与四阶段进程，无修改热构建零编译调用 |
 
 Phase 60 的功能批次已完成：UE Interface 与默认参数、Delegate 双向调用、Blueprint
 callable/event，以及带 typed payload 的 AsyncAction `await` 已接入真实 C# Session Runtime。
@@ -50,9 +50,9 @@ callable/event，以及带 typed payload 的 AsyncAction `await` 已接入真实
 
 详细进度见 [Phase 60 中文收尾记录](Docs/Phase60/P60_Closeout.md)。
 
-Phase 61 已完成编辑器调试架构冻结、`P61.A1` 完整编译产物缓存，以及 persistent
-compiler Worker 协议、进程内四阶段执行和 Roslyn metadata/syntax-tree 跨请求复用；
-构建链路接入、源码级调用栈、断点、变量查看和 Profiler 将在后续小节逐项验收。
+Phase 61 已完成编辑器调试架构冻结、`P61.A1` 完整编译产物缓存与 `P61.A2`
+persistent compiler：构建链路默认自动复用同用户 Worker，传输故障回退 one-shot，
+自定义 Guest compiler 不被绕过。源码级调用栈、断点、变量查看和 Profiler 尚待后续小节。
 
 ## C# 游戏脚本
 

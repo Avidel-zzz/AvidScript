@@ -20,7 +20,13 @@ param(
     [switch]$AllowGeneratedTypeImports,
     [string]$GeneratedTypeManifestPath = "",
     [switch]$DisableSemanticCache,
-    [switch]$DisableCompilationCache
+    [switch]$DisableCompilationCache,
+    [ValidateSet("auto", "required", "disabled")]
+    [string]$CompilerWorkerMode = "auto",
+    [ValidateRange(1, 300)]
+    [int]$CompilerWorkerTimeoutSeconds = 30,
+    [ValidateRange(5, 3600)]
+    [int]$CompilerWorkerIdleTimeoutSeconds = 300
 )
 
 $ErrorActionPreference = "Stop"
@@ -40,6 +46,7 @@ $script:GeneratedTypeExportNames = [System.Collections.Generic.HashSet[string]]:
     [System.StringComparer]::Ordinal)
 . (Join-Path $BuildDir "AvidScriptCSharpSemanticCache.ps1")
 . (Join-Path $BuildDir "AvidScriptCSharpCompilationCache.ps1")
+. (Join-Path $BuildDir "AvidScriptCSharpCompilerWorker.ps1")
 
 if ([string]::IsNullOrWhiteSpace($CompilationCacheRoot)) {
     $CompilationCacheRoot = Join-Path $ProjectRoot "Saved\AvidScript\CSharpCompilationCache\v1"
@@ -554,6 +561,7 @@ function Write-BuildReport {
         build_reuse = $BuildReuse
         semantic_cache = $SemanticCache
         compilation_cache = $CompilationCache
+        compiler_worker = $CompilerWorker
         tool_invocations = $ToolInvocations
         binding_authorization = New-BindingPackageReportValue `
             -PackageInfo $BindingAuthorizationInfo `
@@ -698,6 +706,146 @@ if ($AllowGeneratedTypeImports) {
         }
     }
 }
+
+function Update-CompilerWorkerReportFromResponse {
+    param([Parameter(Mandatory = $true)]$Response)
+
+    $script:CompilerWorker.available = $true
+    $script:CompilerWorker.used = $true
+    $script:CompilerWorker.status = "ready"
+    $script:CompilerWorker.worker_instance_id = [string]$Response.worker_instance_id
+    $script:CompilerWorker.worker_process_id = [int]$Response.worker_process_id
+    ++$script:CompilerWorker.request_count
+    $script:CompilerWorker.total_duration_ms += [double]$Response.duration_ms
+    $StageReport = $script:CompilerWorker.stages[[string]$Response.stage]
+    ++$StageReport.count
+    $StageReport.duration_ms += [double]$Response.duration_ms
+    $script:CompilerWorker.workspace.metadata_reference_set_builds =
+        [int]$Response.workspace.metadata_reference_set_builds
+    $script:CompilerWorker.workspace.syntax_tree_cache_hits =
+        [int]$Response.workspace.syntax_tree_cache_hits
+    $script:CompilerWorker.workspace.syntax_tree_cache_misses =
+        [int]$Response.workspace.syntax_tree_cache_misses
+    $script:CompilerWorker.workspace.syntax_tree_cache_entries =
+        [int]$Response.workspace.syntax_tree_cache_entries
+}
+
+function Initialize-BuildCompilerWorkerIfNeeded {
+    if ($script:CompilerWorkerMode -ceq "disabled" -or
+        $script:CompilerWorkerInitializationAttempted) {
+        return
+    }
+    $script:CompilerWorkerInitializationAttempted = $true
+    try {
+        $Context = Get-AvidScriptCompilerWorkerContext `
+            -PluginRoot $PluginRoot `
+            -DotNetPath $DotNet.Path `
+            -Configuration $Configuration `
+            -RequestTimeoutSeconds $CompilerWorkerTimeoutSeconds `
+            -IdleTimeoutSeconds $CompilerWorkerIdleTimeoutSeconds
+        $script:CompilerWorker.toolchain_fingerprint = [string]$Context.ToolchainFingerprint
+        $script:CompilerWorker.pipe_name = [string]$Context.PipeName
+        $script:CompilerWorkerContext = Initialize-AvidScriptCompilerWorker -Context $Context
+        $script:CompilerWorker.available = $true
+        $script:CompilerWorker.status = "ready"
+        $script:CompilerWorker.worker_built = [bool]$Context.WorkerBuilt
+        $script:CompilerWorker.worker_started = [bool]$Context.WorkerStarted
+        $script:CompilerWorker.worker_instance_id = [string]$Context.WorkerInstanceId
+        $script:CompilerWorker.worker_process_id = [int]$Context.WorkerProcessId
+    }
+    catch {
+        $script:CompilerWorkerInitializationFailed = $true
+        $script:CompilerWorker.available = $false
+        $script:CompilerWorker.fallback_used = $CompilerWorkerMode -ceq "auto"
+        $script:CompilerWorker.status = if ($CompilerWorkerMode -ceq "required") {
+            "failed"
+        }
+        else {
+            "fallback"
+        }
+        $script:CompilerWorker.diagnostic_code = "ASCW3010"
+        $script:CompilerWorker.diagnostic_message = $_.Exception.Message
+        $script:Diagnostics += [ordered]@{
+            code = "ASCW3010"
+            severity = if ($CompilerWorkerMode -ceq "required") { "error" } else { "warning" }
+            message = $_.Exception.Message
+            file = "Build/AvidScriptCSharpCompilerWorker.ps1"
+        }
+    }
+}
+
+function Invoke-BuildCompilerWorkerStage {
+    param(
+        [Parameter(Mandatory = $true)][string]$Stage,
+        [Parameter(Mandatory = $true)][hashtable]$Fields
+    )
+
+    Initialize-BuildCompilerWorkerIfNeeded
+    if ($null -eq $script:CompilerWorkerContext) {
+        return [pscustomobject]@{
+            UseWorker = $false
+            RequiredFailure = $script:CompilerWorkerMode -ceq "required" -and
+                $script:CompilerWorkerInitializationFailed
+            Response = $null
+        }
+    }
+
+    $Request = New-AvidScriptCompilerWorkerRequest `
+        -Context $script:CompilerWorkerContext `
+        -Stage $Stage `
+        -Fields $Fields
+    try {
+        $Invocation = Invoke-AvidScriptCompilerWorkerWithPolicy `
+            -Context $script:CompilerWorkerContext `
+            -Request $Request `
+            -Mode $CompilerWorkerMode
+    }
+    catch {
+        $script:CompilerWorker.available = $false
+        $script:CompilerWorker.status = "failed"
+        $script:CompilerWorker.diagnostic_code = "ASCW3009"
+        $script:CompilerWorker.diagnostic_message = $_.Exception.Message
+        $script:Diagnostics += [ordered]@{
+            code = "ASCW3009"
+            severity = "error"
+            message = $_.Exception.Message
+            file = "Build/AvidScriptCSharpCompilerWorker.ps1"
+        }
+        $script:CompilerWorkerContext = $null
+        return [pscustomobject]@{
+            UseWorker = $false
+            RequiredFailure = $true
+            Response = $null
+        }
+    }
+
+    if (-not $Invocation.UseWorker) {
+        $script:CompilerWorker.available = $false
+        $script:CompilerWorker.fallback_used = $true
+        $script:CompilerWorker.status = "fallback"
+        $script:CompilerWorker.diagnostic_code = [string]$Invocation.DiagnosticCode
+        $script:CompilerWorker.diagnostic_message = [string]$Invocation.DiagnosticMessage
+        $script:Diagnostics += [ordered]@{
+            code = [string]$Invocation.DiagnosticCode
+            severity = "warning"
+            message = [string]$Invocation.DiagnosticMessage
+            file = "Build/AvidScriptCSharpCompilerWorker.ps1"
+        }
+        $script:CompilerWorkerContext = $null
+        return [pscustomobject]@{
+            UseWorker = $false
+            RequiredFailure = $false
+            Response = $null
+        }
+    }
+
+    Update-CompilerWorkerReportFromResponse -Response $Invocation.Response
+    return [pscustomobject]@{
+        UseWorker = $true
+        RequiredFailure = $false
+        Response = $Invocation.Response
+    }
+}
 $FrontendArtifactPath = Join-Path $OutputRoot "$ArtifactStem.csharp.frontend.json"
 $SemanticArtifactPath = Join-Path $OutputRoot "$ArtifactStem.csharp.semantic.json"
 $GuestIrArtifactPath = Join-Path $OutputRoot "$ArtifactStem.guestir.json"
@@ -725,6 +873,9 @@ $BindingAuthorizationInfo = $null
 $BindingPackageInfo = $null
 $Diagnostics = @()
 $DotNet = [pscustomobject]@{ Found = $false; Source = ""; Path = ""; Checked = @() }
+$CompilerWorkerContext = $null
+$CompilerWorkerInitializationAttempted = $false
+$CompilerWorkerInitializationFailed = $false
 $BuildReuse = [ordered]@{
     prepared_report_file = ""
     prepared_report_sha256 = ""
@@ -756,6 +907,39 @@ $CompilationCache = [ordered]@{
     entry_report_file = ""
     entry_report_sha256 = ""
     published = $false
+    diagnostic_code = ""
+    diagnostic_message = ""
+}
+$CompilerWorker = [ordered]@{
+    schema_version = 1
+    protocol_version = 1
+    mode = $CompilerWorkerMode
+    status = if ($CompilerWorkerMode -ceq "disabled") { "disabled" } else { "not_needed" }
+    available = $false
+    used = $false
+    fallback_used = $false
+    guest_stage_enabled = [System.IO.Path]::GetFullPath($GuestCompilerPath).Equals(
+        [System.IO.Path]::GetFullPath($DefaultGuestCompilerPath),
+        [System.StringComparison]::OrdinalIgnoreCase)
+    worker_built = $false
+    worker_started = $false
+    toolchain_fingerprint = ""
+    pipe_name = ""
+    worker_instance_id = ""
+    worker_process_id = 0
+    request_count = 0
+    total_duration_ms = [double]0
+    stages = [ordered]@{
+        frontend = [ordered]@{ count = 0; duration_ms = [double]0 }
+        semantic = [ordered]@{ count = 0; duration_ms = [double]0 }
+        guest = [ordered]@{ count = 0; duration_ms = [double]0 }
+    }
+    workspace = [ordered]@{
+        metadata_reference_set_builds = 0
+        syntax_tree_cache_hits = 0
+        syntax_tree_cache_misses = 0
+        syntax_tree_cache_entries = 0
+    }
     diagnostic_code = ""
     diagnostic_message = ""
 }
@@ -979,18 +1163,36 @@ if (-not [string]::IsNullOrWhiteSpace($PreparedBuildReportPath)) {
     }
 }
 elseif (-not $SemanticCacheHit) {
-    $FrontendArguments = @(
-        "-NoProfile", "-ExecutionPolicy", "Bypass",
-        "-File", (Join-Path $BuildDir "InvokeCSharpFrontend.ps1"),
-        "-DotNetPath", $DotNet.Path,
-        "-SourcePath", $SourcePath,
-        "-SourceId", $SourceId,
-        "-OutputPath", $FrontendArtifactPath,
-        "-Configuration", $Configuration)
     ++$ToolInvocations.frontend
-    $FrontendInvocation = Invoke-AvidScriptPowerShell -Arguments $FrontendArguments
-    $FrontendOutput = @($FrontendInvocation.Output)
-    $FrontendExitCode = [int]$FrontendInvocation.ExitCode
+    $FrontendWorkerInvocation = Invoke-BuildCompilerWorkerStage `
+        -Stage "frontend" `
+        -Fields @{
+            source_path = $SourcePath
+            source_id = $SourceId
+            output_path = $FrontendArtifactPath
+        }
+    if ($FrontendWorkerInvocation.RequiredFailure) {
+        Write-BuildReport -Result "compiler_worker_failed" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics
+        Write-Output "[AvidScript][CSharp][Worker] result=compiler_worker_failed stage=frontend report=$ReportPath"
+        exit 1
+    }
+    if ($FrontendWorkerInvocation.UseWorker) {
+        $FrontendOutput = @($FrontendWorkerInvocation.Response.diagnostics)
+        $FrontendExitCode = [int]$FrontendWorkerInvocation.Response.exit_code
+    }
+    else {
+        $FrontendArguments = @(
+            "-NoProfile", "-ExecutionPolicy", "Bypass",
+            "-File", (Join-Path $BuildDir "InvokeCSharpFrontend.ps1"),
+            "-DotNetPath", $DotNet.Path,
+            "-SourcePath", $SourcePath,
+            "-SourceId", $SourceId,
+            "-OutputPath", $FrontendArtifactPath,
+            "-Configuration", $Configuration)
+        $FrontendInvocation = Invoke-AvidScriptPowerShell -Arguments $FrontendArguments
+        $FrontendOutput = @($FrontendInvocation.Output)
+        $FrontendExitCode = [int]$FrontendInvocation.ExitCode
+    }
     if (Test-Path -LiteralPath $FrontendArtifactPath -PathType Leaf) {
         try {
             $FrontendModel = Get-Content -Raw -LiteralPath $FrontendArtifactPath | ConvertFrom-Json
@@ -1009,24 +1211,48 @@ elseif (-not $SemanticCacheHit) {
         exit 1
     }
 
-    $SemanticArguments = @(
-        "-NoProfile", "-ExecutionPolicy", "Bypass",
-        "-File", (Join-Path $BuildDir "InvokeCSharpSemantic.ps1"),
-        "-DotNetPath", $DotNet.Path,
-        "-SourcePath", $SourcePath,
-        "-SourceId", $SourceId,
-        "-FrontendPath", $FrontendArtifactPath,
-        "-OutputPath", $SemanticArtifactPath,
-        "-Configuration", $Configuration)
+    $SemanticWorkerFields = @{
+        source_path = $SourcePath
+        source_id = $SourceId
+        frontend_path = $FrontendArtifactPath
+        output_path = $SemanticArtifactPath
+    }
     if (-not $IsDefaultSource) {
-        $SemanticArguments += @(
-            "-ExecutableReferenceSourcePath",
-            $BindingAuthorizationInfo.ReferenceSourcePath)
+        $SemanticWorkerFields.executable_reference_source_path =
+            $BindingAuthorizationInfo.ReferenceSourcePath
     }
     ++$ToolInvocations.semantic
-    $SemanticInvocation = Invoke-AvidScriptPowerShell -Arguments $SemanticArguments
-    $SemanticOutput = @($SemanticInvocation.Output)
-    $SemanticExitCode = [int]$SemanticInvocation.ExitCode
+    $SemanticWorkerInvocation = Invoke-BuildCompilerWorkerStage `
+        -Stage "semantic" `
+        -Fields $SemanticWorkerFields
+    if ($SemanticWorkerInvocation.RequiredFailure) {
+        Write-BuildReport -Result "compiler_worker_failed" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics
+        Write-Output "[AvidScript][CSharp][Worker] result=compiler_worker_failed stage=semantic report=$ReportPath"
+        exit 1
+    }
+    if ($SemanticWorkerInvocation.UseWorker) {
+        $SemanticOutput = @($SemanticWorkerInvocation.Response.diagnostics)
+        $SemanticExitCode = [int]$SemanticWorkerInvocation.Response.exit_code
+    }
+    else {
+        $SemanticArguments = @(
+            "-NoProfile", "-ExecutionPolicy", "Bypass",
+            "-File", (Join-Path $BuildDir "InvokeCSharpSemantic.ps1"),
+            "-DotNetPath", $DotNet.Path,
+            "-SourcePath", $SourcePath,
+            "-SourceId", $SourceId,
+            "-FrontendPath", $FrontendArtifactPath,
+            "-OutputPath", $SemanticArtifactPath,
+            "-Configuration", $Configuration)
+        if (-not $IsDefaultSource) {
+            $SemanticArguments += @(
+                "-ExecutableReferenceSourcePath",
+                $BindingAuthorizationInfo.ReferenceSourcePath)
+        }
+        $SemanticInvocation = Invoke-AvidScriptPowerShell -Arguments $SemanticArguments
+        $SemanticOutput = @($SemanticInvocation.Output)
+        $SemanticExitCode = [int]$SemanticInvocation.ExitCode
+    }
     if (Test-Path -LiteralPath $SemanticArtifactPath -PathType Leaf) {
         try {
             $SemanticModel = Get-Content -Raw -LiteralPath $SemanticArtifactPath | ConvertFrom-Json
@@ -1128,24 +1354,50 @@ if (-not $DisableCompilationCache) {
 $CompilerOutput = @()
 $CompilerExitCode = 0
 if (-not $CompilationCacheHit) {
-    $CompilerArguments = @(
-        "-NoProfile", "-ExecutionPolicy", "Bypass",
-        "-File", $GuestCompilerPath,
-        "-DotNetPath", $DotNet.Path,
-        "-SemanticPath", $SemanticArtifactPath,
-        "-FrontendArtifactSha256", $FrontendArtifactSha256,
-        "-GuestIrPath", $GuestIrArtifactPath,
-        "-DebugMapPath", $DebugMapArtifactPath,
-        "-StateSchemaPath", $StateSchemaArtifactPath,
-        "-WasmPath", $WasmArtifactPath,
-        "-InspectionPath", $WasmInspectionArtifactPath,
-        "-Configuration", $Configuration,
-        "-DataLaneFusion", $DataLaneFusion)
-        ++$ToolInvocations.guest_ir
-        ++$ToolInvocations.wasm_backend
-    $CompilerInvocation = Invoke-AvidScriptPowerShell -Arguments $CompilerArguments
-    $CompilerOutput = @($CompilerInvocation.Output)
-    $CompilerExitCode = [int]$CompilerInvocation.ExitCode
+    ++$ToolInvocations.guest_ir
+    ++$ToolInvocations.wasm_backend
+    $GuestWorkerInvocation = $null
+    if ($CompilerWorker.guest_stage_enabled) {
+        $GuestWorkerInvocation = Invoke-BuildCompilerWorkerStage `
+            -Stage "guest" `
+            -Fields @{
+                semantic_path = $SemanticArtifactPath
+                guest_ir_path = $GuestIrArtifactPath
+                debug_map_path = $DebugMapArtifactPath
+                state_schema_path = $StateSchemaArtifactPath
+                wasm_path = $WasmArtifactPath
+                inspection_path = $WasmInspectionArtifactPath
+                frontend_artifact_sha256 = $FrontendArtifactSha256
+                data_lane_fusion = $DataLaneFusion
+            }
+        if ($GuestWorkerInvocation.RequiredFailure) {
+            Write-BuildReport -Result "compiler_worker_failed" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics
+            Write-Output "[AvidScript][CSharp][Worker] result=compiler_worker_failed stage=guest report=$ReportPath"
+            exit 1
+        }
+    }
+    if ($null -ne $GuestWorkerInvocation -and $GuestWorkerInvocation.UseWorker) {
+        $CompilerOutput = @($GuestWorkerInvocation.Response.diagnostics)
+        $CompilerExitCode = [int]$GuestWorkerInvocation.Response.exit_code
+    }
+    else {
+        $CompilerArguments = @(
+            "-NoProfile", "-ExecutionPolicy", "Bypass",
+            "-File", $GuestCompilerPath,
+            "-DotNetPath", $DotNet.Path,
+            "-SemanticPath", $SemanticArtifactPath,
+            "-FrontendArtifactSha256", $FrontendArtifactSha256,
+            "-GuestIrPath", $GuestIrArtifactPath,
+            "-DebugMapPath", $DebugMapArtifactPath,
+            "-StateSchemaPath", $StateSchemaArtifactPath,
+            "-WasmPath", $WasmArtifactPath,
+            "-InspectionPath", $WasmInspectionArtifactPath,
+            "-Configuration", $Configuration,
+            "-DataLaneFusion", $DataLaneFusion)
+        $CompilerInvocation = Invoke-AvidScriptPowerShell -Arguments $CompilerArguments
+        $CompilerOutput = @($CompilerInvocation.Output)
+        $CompilerExitCode = [int]$CompilerInvocation.ExitCode
+    }
 }
 if (Test-Path -LiteralPath $GuestIrArtifactPath -PathType Leaf) {
     try {

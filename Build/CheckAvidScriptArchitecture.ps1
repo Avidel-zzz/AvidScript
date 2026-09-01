@@ -3429,6 +3429,8 @@ $CSharpGuestDebugMapProjectorSource = Read-RequiredFile 'Tools/AvidScript.CSharp
 $GuestArrayCapabilityIntrinsicsSource = Read-RequiredFile 'Tools/AvidScript.GuestIr/Model/GuestArrayCapabilityIntrinsics.cs'
 $WasmFunctionCompilerSource = Read-RequiredFile 'Tools/AvidScript.WasmBackend/Codegen/WasmFunctionCompiler.cs'
 $CSharpBuildScriptSource = Read-RequiredFile 'Build/BuildCSharpActorLifecycle.ps1'
+$CSharpCompilerWorkerScriptSource = Read-RequiredFile 'Build/AvidScriptCSharpCompilerWorker.ps1'
+$CSharpCompilerWorkerServerSource = Read-RequiredFile 'Tools/AvidScript.CSharpCompilerWorker/Server/CompilerWorkerServer.cs'
 foreach ($RequiredPreparedBuildContract in @(
     'AvidScriptCSharpSemanticCache.ps1',
     'Import-AvidScriptCSharpPreparedSemantic',
@@ -3473,6 +3475,30 @@ foreach ($RequiredCompilationCacheBuildContract in @(
     if (-not $CSharpBuildScriptSource.Contains($RequiredCompilationCacheBuildContract)) {
         Add-Violation "C# build pipeline is missing compilation cache contract $RequiredCompilationCacheBuildContract"
     }
+}
+foreach ($RequiredCompilerWorkerBuildContract in @(
+    'AvidScriptCSharpCompilerWorker.ps1',
+    'CompilerWorkerMode',
+    'Invoke-BuildCompilerWorkerStage',
+    'compiler_worker',
+    'fallback_used',
+    'guest_stage_enabled')) {
+    if (-not $CSharpBuildScriptSource.Contains($RequiredCompilerWorkerBuildContract)) {
+        Add-Violation "C# build pipeline is missing compiler worker contract $RequiredCompilerWorkerBuildContract"
+    }
+}
+foreach ($RequiredCompilerWorkerClientContract in @(
+    'Get-AvidScriptCompilerWorkerToolchainFingerprint',
+    'Initialize-AvidScriptCompilerWorker',
+    'Invoke-AvidScriptCompilerWorkerWithPolicy',
+    'ASCW3004',
+    'ASCW3009')) {
+    if (-not $CSharpCompilerWorkerScriptSource.Contains($RequiredCompilerWorkerClientContract)) {
+        Add-Violation "C# compiler worker client is missing contract $RequiredCompilerWorkerClientContract"
+    }
+}
+if (-not $CSharpCompilerWorkerServerSource.Contains('PipeOptions.CurrentUserOnly')) {
+    Add-Violation 'C# compiler worker server must restrict its named pipe to the current user'
 }
 foreach ($RequiredDirectAbiBuildContract in @(
     '$RequiredExports.Count -eq 0',

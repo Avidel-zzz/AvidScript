@@ -60,6 +60,8 @@ public sealed record CompilerWorkerResponse
 
     public string WorkerInstanceId { get; init; } = string.Empty;
 
+    public int WorkerProcessId { get; init; } = Environment.ProcessId;
+
     public string ToolchainFingerprint { get; init; } = string.Empty;
 
     public string Stage { get; init; } = string.Empty;
