@@ -10,7 +10,7 @@
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 Development" src="https://img.shields.io/badge/Platform-Win64-0078D4?logo=windows&logoColor=white">
-  <img alt="Phase 61 Gate" src="https://img.shields.io/badge/Status-Phase%2061%20Gate-2B6CB0">
+  <img alt="Phase 61 Complete" src="https://img.shields.io/badge/Status-Phase%2061%20Complete-26A269">
   <img alt="Automation Baseline 427/427" src="https://img.shields.io/badge/Baseline-427%2F427-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
@@ -51,7 +51,8 @@ Phase 61 已实现增量编译、Debug Map v2、跨层调用栈、源码断点�
 Editor Debugger/Profiler，以及现代 C# 工作区。集中 Gate 已通过 Automation `427/427`、
 UE5.8 no-clean UBT、clean detached architecture 和两项性能预算。5 轮增量矩阵中位耗时为
 `806 / 1826 / 1802 / 3732 ms`；Profiler 关闭采集的增量中位开销为 `0.490 ns`，占启用采集的
-`6.10%`。真实 Editor 中的三类 IDE 启动和人工调试体验仍需人工验收。
+`6.10%`。Phase 61 已完成正式 attestation 与 close；真实 Editor 中的三类 IDE 启动和人工调试体验
+仍需人工验收。
 
 详细结果见 [Phase 61 集中 Gate](Docs/Phase61/P61.E_Integration_Gate.md)。
 

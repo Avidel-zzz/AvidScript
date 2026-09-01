@@ -1,6 +1,6 @@
 # Phase 61 收尾记录
 
-状态：`P61.A-P61.E` 已完成，修复后集中 Gate 已重新 attestation，等待 close
+状态：`P61.A-P61.E`、集中 Gate、attestation 与 close 均已完成
 
 ## 目标
 
@@ -138,9 +138,8 @@
   disabled 增量中位开销为 `0.490 ns`，占 enabled 的 `6.10%`；
 - 详细结果与人工验收清单见 [P61.E 集成与集中 Gate](P61.E_Integration_Gate.md)。
 
-## 待完成
+## 保留边界
 
-- Phase 61 workflow close；
 - 真实 Editor 中的调试、源码导航、Profiler 操作和三类 IDE 启动由人工验收，不以 Automation 代替。
 
 ## 人工验收边界
