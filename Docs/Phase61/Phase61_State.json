@@ -19,9 +19,9 @@
   "batches": [
     {
       "id": "P61.A",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "P61.A1-A3b complete; 5x incremental matrix correctness and budgets passed; README and Chinese docs updated; clean architecture commit 014253925e4f6dbab3b8902c320e59e233d917bb tree 56be36bdf037e2867c05f287f6c6deecf944a25d",
+      "completed_at_utc": "2026-09-01T08:39:44.7833286+00:00"
     },
     {
       "id": "P61.B",
@@ -100,7 +100,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "batch-complete -Phase 61 -BatchId P61.A -Evidence <text>",
-  "revision": 1,
-  "updated_at_utc": "2026-09-01T03:24:31.5155090+00:00"
+  "next_action": "batch-complete -Phase 61 -BatchId P61.B -Evidence <text>",
+  "revision": 2,
+  "updated_at_utc": "2026-09-01T08:39:44.7854122+00:00"
 }

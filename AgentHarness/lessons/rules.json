@@ -510,6 +510,14 @@
       "prevention": "需要稳定 SHA-256 时使用已链接的跨平台加密实现并运行真实 Editor Automation；禁止仅凭 GenericPlatform 声明判断该函数在目标平台可用。",
       "source": "observed:2026-09-01-P61.A3a",
       "last_observed": "2026-09-01 P61.A3a 源码导航测试在 Windows Editor 调用 GetSHA256Signature，命中 No SHA256 Platform implementation 断言；改用 UE 自带 OpenSSL 后修复"
+    },
+    {
+      "id": "phase-next-action-is-phase-workflow-command",
+      "tags": ["phase", "harness", "workflow", "cli"],
+      "summary": "Harness bootstrap 输出的 Next 是 PhaseWorkflow 状态动作，不一定是 Harness 自身子命令。",
+      "prevention": "bootstrap 给出 batch-complete、freeze、review-complete 等 Next 时，调用 Build/InvokePhaseWorkflow.ps1；仅使用 Harness ValidateSet 中的 bootstrap/context/verify/lesson-query/audit。",
+      "source": "observed:2026-09-01-P61.A3b",
+      "last_observed": "2026-09-01 P61.A3b 曾把 Next: batch-complete 直接传给 InvokeAgentHarness.ps1，被 ValidateSet 拒绝；仓库未发生变化"
     }
   ]
 }
