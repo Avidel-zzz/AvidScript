@@ -5,7 +5,7 @@
     "goal": "补齐 Interface、完整 Delegate、脚本 UFunction 默认参数、Blueprint 新声明函数和通用异步动作，保持生成式 Reflection、prepared hot path 与 Session-owned 生命周期",
     "start_commit": "074d7b662ce1658f958be54267062aba3869d677"
   },
-  "declared_stage": "implementing",
+  "declared_stage": "gate_ready",
   "architecture": {
     "path": "Docs/Phase60/P60.0_Modern_UE_Interop_Architecture.md",
     "version": 2,
@@ -44,9 +44,9 @@
   ],
   "debt": [],
   "review": {
-    "completed": false,
-    "evidence": "reopened: close 全 Phase 范围检查发现架构文档两处历史行尾空格；规范化并登记 freeze 前全范围预检规则后重新 attestation。",
-    "completed_at_utc": null
+    "completed": true,
+    "evidence": "P60.A-D 边界复审完成；产品 Gate 证据保持有效；PowerShell Git revision 与全 Phase whitespace 预检教训已登记；phase.start_commit..HEAD diff --check 通过；protected dirty 3/3 基线保持。",
+    "completed_at_utc": "2026-09-01T03:13:58.1938125+00:00"
   },
   "budgets": {
     "ubt": 3,
@@ -59,11 +59,11 @@
     "full_gate": 2
   },
   "freeze": {
-    "source_commit": "",
-    "source_tree": "",
-    "state_sha256": "",
-    "review_evidence": "",
-    "at_utc": null
+    "source_commit": "4bcef5484d7ad1d52a9a90a11ccac15f590364c1",
+    "source_tree": "773f14a64d127aa0bd3e11774c58f5da225c4924",
+    "state_sha256": "d652f8eb2babd2c30c03bbceaa3a7775e9a5658c57b8cc07fedf51a033bcd766",
+    "review_evidence": "P60.A-D 边界复审完成；产品 Gate 证据保持有效；PowerShell Git revision 与全 Phase whitespace 预检教训已登记；phase.start_commit..HEAD diff --check 通过；protected dirty 3/3 基线保持。",
+    "at_utc": "2026-09-01T03:13:58.1938125+00:00"
   },
   "gate": {
     "report_path": "",
@@ -94,7 +94,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "freeze -Phase 60 -ReviewEvidence <text>",
-  "revision": 13,
-  "updated_at_utc": "2026-09-01T03:12:46.1284892+00:00"
+  "next_action": "attest -Phase 60 -GateReportPath <path>",
+  "revision": 14,
+  "updated_at_utc": "2026-09-01T03:13:58.1987010+00:00"
 }
