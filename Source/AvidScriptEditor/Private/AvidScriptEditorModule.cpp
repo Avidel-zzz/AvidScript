@@ -7,13 +7,21 @@
 #include "AvidScriptEditorResultPresentation.h"
 #include "AvidScriptEditorSourceConfig.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "Containers/Ticker.h"
+#include "Debugging/AvidScriptEditorDebugTargetController.h"
+#include "Debugging/SAvidScriptEditorDebugPanel.h"
+#include "Editor.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Framework/Docking/TabManager.h"
 #include "GameFramework/Actor.h"
 #include "HAL/IConsoleManager.h"
 #include "HAL/PlatformMisc.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
+#include "Styling/AppStyle.h"
 #include "ToolMenus.h"
+#include "Widgets/Docking/SDockTab.h"
 
 DEFINE_LOG_CATEGORY(LogAvidScriptEditor);
 
@@ -187,6 +195,21 @@ void FAvidScriptEditorModule::StartupModule()
 	}
 	GeneratedTypeReloadService =
 		MakeUnique<FAvidScriptEditorGeneratedTypeReloadService>();
+	DebugTargetController = MakeShared<FAvidScriptEditorDebugTargetController>();
+	RegisterDebuggerTab();
+	BeginPIEHandle = FEditorDelegates::BeginPIE.AddRaw(
+		this,
+		&FAvidScriptEditorModule::HandleBeginPIE);
+	EndPIEHandle = FEditorDelegates::EndPIE.AddRaw(
+		this,
+		&FAvidScriptEditorModule::HandleEndPIE);
+	DebugTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateRaw(this, &FAvidScriptEditorModule::TickDebugger),
+		0.2f);
+	if (GEditor != nullptr && GEditor->PlayWorld != nullptr)
+	{
+		DebugTargetController->HandleBeginPIE();
+	}
 	FAvidScriptEditorGeneratedTypeReloadServiceResult GeneratedTypeReloadResult;
 	if (!GeneratedTypeReloadService->Start(
 			FAvidScriptEditorGeneratedTypeReloadPolicy::GetDefaultDescriptorPath(),
@@ -210,6 +233,26 @@ void FAvidScriptEditorModule::ShutdownModule()
 {
 	UnregisterConsoleCommands();
 	FAvidScriptEditorDiagnosticLog::Unregister();
+	if (DebugTickerHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(DebugTickerHandle);
+		DebugTickerHandle.Reset();
+	}
+	if (BeginPIEHandle.IsValid())
+	{
+		FEditorDelegates::BeginPIE.Remove(BeginPIEHandle);
+		BeginPIEHandle.Reset();
+	}
+	if (EndPIEHandle.IsValid())
+	{
+		FEditorDelegates::EndPIE.Remove(EndPIEHandle);
+		EndPIEHandle.Reset();
+	}
+	if (DebugTargetController.IsValid())
+	{
+		DebugTargetController->HandleEndPIE();
+	}
+	UnregisterDebuggerTab();
 	if (PublishCSharpBindingsAssetRegistryHandle.IsValid()
 		&& FModuleManager::Get().IsModuleLoaded(TEXT("AssetRegistry")))
 	{
@@ -243,6 +286,7 @@ void FAvidScriptEditorModule::ShutdownModule()
 	}
 
 	CommandLauncher.Reset();
+	DebugTargetController.Reset();
 
 	UE_LOG(LogAvidScriptEditor, Display, TEXT("AvidScriptEditor module stopped."));
 }
@@ -485,6 +529,16 @@ FName FAvidScriptEditorModule::GetCSharpWorkspaceLiveReloadStopEntryName()
 	return TEXT("AvidScript.StopProjectCSharpLiveReload");
 }
 
+FName FAvidScriptEditorModule::GetDebuggerTabName()
+{
+	return TEXT("AvidScript.Debugger");
+}
+
+FName FAvidScriptEditorModule::GetDebuggerMenuEntryName()
+{
+	return TEXT("AvidScript.OpenDebugger");
+}
+
 FString FAvidScriptEditorModule::GetCSharpActorLifecycleReportPath()
 {
 	return FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleReportPath();
@@ -677,6 +731,23 @@ FAvidScriptEditorMenuEntryConfig FAvidScriptEditorModule::MakeCSharpWorkspaceLiv
 	Config.ToolTip = LOCTEXT(
 		"AvidScriptStopProjectCSharpLiveReloadToolTip",
 		"Stop watching and automatically rebuilding the project C# gameplay workspace.");
+	Config.ExecuteAction = MoveTemp(ExecuteAction);
+	return Config;
+}
+
+FAvidScriptEditorMenuEntryConfig FAvidScriptEditorModule::MakeDebuggerMenuEntryConfig(
+	FSimpleDelegate ExecuteAction)
+{
+	FAvidScriptEditorMenuEntryConfig Config;
+	Config.OwnerName = GetToolMenuOwnerName();
+	Config.MenuName = GetSampleCommandMenuName();
+	Config.SectionName = GetSampleCommandSectionName();
+	Config.EntryName = GetDebuggerMenuEntryName();
+	Config.SectionLabel = LOCTEXT("AvidScriptMenuSection", "AvidScript");
+	Config.Label = LOCTEXT("AvidScriptDebuggerLabel", "AvidScript Debugger");
+	Config.ToolTip = LOCTEXT(
+		"AvidScriptDebuggerToolTip",
+		"Open the AvidScript C# debugger for live PIE sessions.");
 	Config.ExecuteAction = MoveTemp(ExecuteAction);
 	return Config;
 }
@@ -923,9 +994,109 @@ bool FAvidScriptEditorModule::IsCSharpWorkspaceLiveReloadRunning() const
 	return CSharpLiveReloadService && CSharpLiveReloadService->IsRunning();
 }
 
+void FAvidScriptEditorModule::RegisterDebuggerTab()
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		return;
+	}
+	if (FGlobalTabmanager::Get()->HasTabSpawner(GetDebuggerTabName()))
+	{
+		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(GetDebuggerTabName());
+	}
+	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
+		GetDebuggerTabName(),
+		FOnSpawnTab::CreateRaw(this, &FAvidScriptEditorModule::SpawnDebuggerTab))
+		.SetDisplayName(LOCTEXT("AvidScriptDebuggerTabTitle", "AvidScript Debugger"))
+		.SetTooltipText(LOCTEXT(
+			"AvidScriptDebuggerTabToolTip",
+			"Debug live C# WebAssembly gameplay sessions."))
+		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "BlueprintDebugger.TabIcon"))
+		.SetMenuType(ETabSpawnerMenuType::Hidden);
+}
+
+void FAvidScriptEditorModule::UnregisterDebuggerTab()
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		return;
+	}
+	if (const TSharedPtr<SDockTab> ExistingTab =
+		FGlobalTabmanager::Get()->FindExistingLiveTab(GetDebuggerTabName()))
+	{
+		ExistingTab->RequestCloseTab();
+	}
+	if (FGlobalTabmanager::Get()->HasTabSpawner(GetDebuggerTabName()))
+	{
+		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(GetDebuggerTabName());
+	}
+}
+
+TSharedRef<SDockTab> FAvidScriptEditorModule::SpawnDebuggerTab(const FSpawnTabArgs& Args)
+{
+	check(DebugTargetController.IsValid());
+	return SNew(SDockTab)
+		.TabRole(ETabRole::NomadTab)
+		[
+			MakeAvidScriptEditorDebugPanel(DebugTargetController.ToSharedRef())
+		];
+}
+
+bool FAvidScriptEditorModule::TickDebugger(float DeltaTime)
+{
+	if (!DebugTargetController.IsValid() || !DebugTargetController->IsPIEActive())
+	{
+		return true;
+	}
+	FString Error;
+	if (!DebugTargetController->Tick(Error))
+	{
+		if (!Error.IsEmpty() && Error != LastDebuggerTickError)
+		{
+			UE_LOG(LogAvidScriptEditor, Warning, TEXT("AvidScript debugger refresh failed: %s"), *Error);
+		}
+		LastDebuggerTickError = MoveTemp(Error);
+		return true;
+	}
+	LastDebuggerTickError.Reset();
+	return true;
+}
+
+void FAvidScriptEditorModule::HandleBeginPIE(bool bIsSimulating)
+{
+	if (DebugTargetController.IsValid())
+	{
+		DebugTargetController->HandleBeginPIE();
+	}
+}
+
+void FAvidScriptEditorModule::HandleEndPIE(bool bIsSimulating)
+{
+	LastDebuggerTickError.Reset();
+	if (DebugTargetController.IsValid())
+	{
+		DebugTargetController->HandleEndPIE();
+	}
+}
+
+void FAvidScriptEditorModule::HandleOpenDebugger()
+{
+	if (FSlateApplication::IsInitialized())
+	{
+		FGlobalTabmanager::Get()->TryInvokeTab(GetDebuggerTabName());
+	}
+}
+
 void FAvidScriptEditorModule::RegisterMenus()
 {
 	FAvidScriptEditorMenuRegistrationResult Result;
+	const FAvidScriptEditorMenuEntryConfig DebuggerMenuConfig = MakeDebuggerMenuEntryConfig(
+		FSimpleDelegate::CreateRaw(this, &FAvidScriptEditorModule::HandleOpenDebugger));
+	if (!FAvidScriptEditorMenuRegistrar::RegisterMenuEntry(DebuggerMenuConfig, Result))
+	{
+		LogAvidScriptMenuRegistrationFailure(Result);
+	}
+
 	const FAvidScriptEditorMenuEntryConfig SampleMenuConfig = MakeSampleMenuEntryConfig(
 		FSimpleDelegate::CreateRaw(this, &FAvidScriptEditorModule::HandleRunSampleCommand));
 	if (!FAvidScriptEditorMenuRegistrar::RegisterMenuEntry(SampleMenuConfig, Result))

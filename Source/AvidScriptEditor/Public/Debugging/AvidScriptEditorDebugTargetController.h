@@ -34,6 +34,13 @@ public:
 	bool RefreshTargets(FString& OutError);
 	bool SelectTarget(const FString& TargetId, FString& OutError);
 	bool Tick(FString& OutError);
+	bool SetSourceBreakpoint(const FString& SourceFile, int32 Line, bool bEnabled, FString& OutError);
+	bool RemoveSourceBreakpoint(const FString& SourceFile, int32 Line, FString& OutError);
+	bool AttachDebugger(FString& OutError);
+	bool DetachDebugger(FString& OutError);
+	bool RequestPause(FString& OutError);
+	bool ContinueExecution(FString& OutError);
+	bool StepInto(FString& OutError);
 
 	bool IsPIEActive() const { return bPIEActive; }
 	const FString& GetSelectedTargetId() const { return SelectedTargetId; }
@@ -45,6 +52,7 @@ public:
 
 private:
 	bool BindTarget(const FAvidScriptEditorDebugTarget& Target, FString& OutError);
+	bool RefreshBeforeCommand(FString& OutError);
 	void InvalidateBinding();
 
 	FDiscoverTargets DiscoverTargets;

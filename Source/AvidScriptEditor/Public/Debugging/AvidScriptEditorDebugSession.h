@@ -19,6 +19,7 @@ struct AVIDSCRIPTEDITOR_API FAvidScriptEditorSourceBreakpoint
 	EAvidScriptEditorBreakpointBindingState BindingState =
 		EAvidScriptEditorBreakpointBindingState::Unresolved;
 	uint64 ProbeId = 0;
+	FString SourceSha256;
 	FString FunctionName;
 	FString Kind;
 	int32 ResolvedLine = 0;

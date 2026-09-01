@@ -2,6 +2,7 @@
 
 #include "AvidScriptEditorModule.h"
 
+#include "Framework/Docking/TabManager.h"
 #include "Misc/AutomationTest.h"
 #include "Modules/ModuleManager.h"
 
@@ -19,6 +20,9 @@ bool FAvidScriptEditorModuleLoadsSmokeTest::RunTest(const FString& Parameters)
 
 	TestTrue(TEXT("AvidScriptEditor module is loaded"), FModuleManager::Get().IsModuleLoaded(ModuleName));
 	TestTrue(TEXT("AvidScriptEditor module interface is valid"), &Module != nullptr);
+	TestTrue(
+		TEXT("AvidScript debugger tab is registered"),
+		FGlobalTabmanager::Get()->HasTabSpawner(FAvidScriptEditorModule::GetDebuggerTabName()));
 	TestFalse(
 		TEXT("Project C# Auto Live Reload is opt-in at module startup"),
 		AvidScriptEditorModule.IsCSharpWorkspaceLiveReloadRunning());

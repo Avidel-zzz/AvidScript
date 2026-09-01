@@ -157,6 +157,63 @@ bool FAvidScriptEditorDebugTargetController::Tick(FString& OutError)
 	return SessionModel.Refresh(OutError);
 }
 
+bool FAvidScriptEditorDebugTargetController::SetSourceBreakpoint(
+	const FString& SourceFile,
+	const int32 Line,
+	const bool bEnabled,
+	FString& OutError)
+{
+	check(IsInGameThread());
+	if (bPIEActive && !RefreshTargets(OutError))
+	{
+		return false;
+	}
+	return SessionModel.SetSourceBreakpoint(SourceFile, Line, bEnabled, OutError);
+}
+
+bool FAvidScriptEditorDebugTargetController::RemoveSourceBreakpoint(
+	const FString& SourceFile,
+	const int32 Line,
+	FString& OutError)
+{
+	check(IsInGameThread());
+	if (bPIEActive && !RefreshTargets(OutError))
+	{
+		return false;
+	}
+	return SessionModel.RemoveSourceBreakpoint(SourceFile, Line, OutError);
+}
+
+bool FAvidScriptEditorDebugTargetController::AttachDebugger(FString& OutError)
+{
+	return RefreshBeforeCommand(OutError)
+		&& SessionModel.AttachDebugger(OutError);
+}
+
+bool FAvidScriptEditorDebugTargetController::DetachDebugger(FString& OutError)
+{
+	return RefreshBeforeCommand(OutError)
+		&& SessionModel.DetachDebugger(OutError);
+}
+
+bool FAvidScriptEditorDebugTargetController::RequestPause(FString& OutError)
+{
+	return RefreshBeforeCommand(OutError)
+		&& SessionModel.RequestPause(OutError);
+}
+
+bool FAvidScriptEditorDebugTargetController::ContinueExecution(FString& OutError)
+{
+	return RefreshBeforeCommand(OutError)
+		&& SessionModel.ContinueExecution(OutError);
+}
+
+bool FAvidScriptEditorDebugTargetController::StepInto(FString& OutError)
+{
+	return RefreshBeforeCommand(OutError)
+		&& SessionModel.StepInto(OutError);
+}
+
 void FAvidScriptEditorDebugTargetController::DiscoverComponentTargets(
 	TArray<FAvidScriptEditorDebugTarget>& OutTargets)
 {
@@ -222,6 +279,21 @@ bool FAvidScriptEditorDebugTargetController::BindTarget(
 
 	BoundRuntimeIdentity = Target.RuntimeIdentity;
 	BoundRuntime = MoveTemp(NextRuntime);
+	return true;
+}
+
+bool FAvidScriptEditorDebugTargetController::RefreshBeforeCommand(FString& OutError)
+{
+	check(IsInGameThread());
+	if (!Tick(OutError))
+	{
+		return false;
+	}
+	if (!SessionModel.GetView().bRuntimeBound)
+	{
+		OutError = TEXT("no live PIE AvidScript debug target is selected");
+		return false;
+	}
 	return true;
 }
 

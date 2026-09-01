@@ -311,6 +311,7 @@ void FAvidScriptEditorDebugSessionModel::ResolveBreakpoints()
 	{
 		Breakpoint.BindingState = EAvidScriptEditorBreakpointBindingState::Unresolved;
 		Breakpoint.ProbeId = 0;
+		Breakpoint.SourceSha256.Reset();
 		Breakpoint.FunctionName.Reset();
 		Breakpoint.Kind.Reset();
 		Breakpoint.ResolvedLine = 0;
@@ -336,6 +337,7 @@ void FAvidScriptEditorDebugSessionModel::ResolveBreakpoints()
 		{
 			Breakpoint.BindingState = EAvidScriptEditorBreakpointBindingState::Bound;
 			Breakpoint.ProbeId = Best->ProbeId;
+			Breakpoint.SourceSha256 = Best->SourceSha256;
 			Breakpoint.FunctionName = Best->FunctionName;
 			Breakpoint.Kind = Best->Kind;
 			Breakpoint.ResolvedLine = Best->Line;

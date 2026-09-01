@@ -25,6 +25,7 @@ public class AvidScriptEditor : ModuleRules
 				"AvidScriptVM",
 				"BlueprintGraph",
 				"DirectoryWatcher",
+				"InputCore",
 				"Projects",
 				"Json",
 				"Kismet",

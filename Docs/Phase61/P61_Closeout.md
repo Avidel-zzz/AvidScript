@@ -1,6 +1,6 @@
 # Phase 61 收尾记录
 
-状态：实施中，`P61.A1-A3b`、`P61.B1a-B2`、`P61.C1a-C4a` 已完成
+状态：实施中，`P61.A1-A3b`、`P61.B1a-B2`、`P61.C1a-C4b` 已完成
 
 ## 目标
 
@@ -77,10 +77,15 @@
   首个目标；目标替换时重建 Runtime adapter，目标消失或 PIE 结束时不解引用旧 Session；
 - 目标发现函数可注入，生产路径与 Automation fake 共用 Controller 状态机；
 - 详细实现与证据见 [P61.C4a PIE 调试目标与生命周期](P61.C4a_PIE_Debug_Target_Lifecycle.md)。
+- 完成 `P61.C4b` Editor Debugger 面板：Tools 菜单打开隐藏 Nomad Tab，提供 PIE 目标选择、
+  attach/detach、pause/continue/step、源码断点启停与删除、暂停变量查看及源码跳转；
+- UI 只通过共享 Controller 读写 Session Model，低频 ticker 负责 PIE 目标刷新；关闭 PIE 或卸载模块时按
+  ticker、delegate、Controller、Tab 的顺序释放，不缓存裸 Runtime 指针；
+- 详细实现与证据见 [P61.C4b Editor Debugger 面板](P61.C4b_Editor_Debugger_Panel.md)。
 
 ## 待完成
 
-- `P61.C4b-C4c` Editor 面板、源码交互与 PIE 调试体验；
+- `P61.C4c` 真实 PIE 调试体验与交互验收；
 - `P61.D` Profiler 与 IDE workspace；
 - `P61.E` 集成与集中 Gate。
 

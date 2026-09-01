@@ -356,6 +356,19 @@ bool FAvidScriptEditorModuleSampleCommandConfigTest::RunTest(const FString& Para
 	TestFalse(TEXT("C# live reload stop tooltip is set"), CSharpLiveReloadStopMenuConfig.ToolTip.IsEmpty());
 	TestTrue(TEXT("C# live reload stop action is bound"), CSharpLiveReloadStopMenuConfig.ExecuteAction.IsBound());
 
+	FAvidScriptEditorMenuEntryConfig DebuggerMenuConfig =
+		FAvidScriptEditorModule::MakeDebuggerMenuEntryConfig(
+			FSimpleDelegate::CreateLambda([]() {
+			}));
+	TestEqual(TEXT("debugger command owner"), DebuggerMenuConfig.OwnerName, FName(TEXT("AvidScriptEditor")));
+	TestEqual(TEXT("debugger command menu"), DebuggerMenuConfig.MenuName, FName(TEXT("LevelEditor.MainMenu.Tools")));
+	TestEqual(TEXT("debugger command section"), DebuggerMenuConfig.SectionName, FName(TEXT("AvidScript")));
+	TestEqual(TEXT("debugger command entry"), DebuggerMenuConfig.EntryName, FName(TEXT("AvidScript.OpenDebugger")));
+	TestEqual(TEXT("debugger tab name"), FAvidScriptEditorModule::GetDebuggerTabName(), FName(TEXT("AvidScript.Debugger")));
+	TestFalse(TEXT("debugger command label is set"), DebuggerMenuConfig.Label.IsEmpty());
+	TestFalse(TEXT("debugger command tooltip is set"), DebuggerMenuConfig.ToolTip.IsEmpty());
+	TestTrue(TEXT("debugger command execute action is bound"), DebuggerMenuConfig.ExecuteAction.IsBound());
+
 	return true;
 }
 

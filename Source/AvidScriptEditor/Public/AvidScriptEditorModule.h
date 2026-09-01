@@ -11,12 +11,16 @@
 #include "GeneratedTypes/AvidScriptEditorGeneratedTypeReloadService.h"
 
 #include "CoreMinimal.h"
+#include "Containers/Ticker.h"
 #include "Logging/LogMacros.h"
 #include "Modules/ModuleInterface.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogAvidScriptEditor, Log, All);
 
 class IConsoleObject;
+class FAvidScriptEditorDebugTargetController;
+class SDockTab;
+class FSpawnTabArgs;
 
 class FAvidScriptEditorModule final : public IModuleInterface
 {
@@ -41,6 +45,8 @@ public:
 	static FName GetCSharpWorkspaceBuildAndBindEntryName();
 	static FName GetCSharpWorkspaceLiveReloadStartEntryName();
 	static FName GetCSharpWorkspaceLiveReloadStopEntryName();
+	static FName GetDebuggerTabName();
+	static FName GetDebuggerMenuEntryName();
 	static FString GetCSharpActorLifecycleReportPath();
 	static FString GetCSharpActorLifecycleBuildScriptPath();
 	static FString GetDefaultCSharpProfilePath();
@@ -66,6 +72,7 @@ public:
 	static FAvidScriptEditorMenuEntryConfig MakeCSharpWorkspaceBuildAndBindMenuEntryConfig(FSimpleDelegate ExecuteAction);
 	static FAvidScriptEditorMenuEntryConfig MakeCSharpWorkspaceLiveReloadStartMenuEntryConfig(FSimpleDelegate ExecuteAction);
 	static FAvidScriptEditorMenuEntryConfig MakeCSharpWorkspaceLiveReloadStopMenuEntryConfig(FSimpleDelegate ExecuteAction);
+	static FAvidScriptEditorMenuEntryConfig MakeDebuggerMenuEntryConfig(FSimpleDelegate ExecuteAction);
 	bool ExecuteSampleCommand(FAvidScriptEditorCommandLaunchResult& OutResult);
 	bool ExecuteCSharpActorLifecycleBinding(FAvidScriptEditorComponentBindingResult& OutResult);
 	bool ExecuteCSharpActorLifecycleBuildAndBinding(
@@ -114,6 +121,13 @@ private:
 	void HandleAssetRegistryReadyForCSharpBindings();
 	bool ExecutePublishCSharpBindings(const FString& OutputRoot);
 	void RegisterMenus();
+	void RegisterDebuggerTab();
+	void UnregisterDebuggerTab();
+	TSharedRef<SDockTab> SpawnDebuggerTab(const FSpawnTabArgs& Args);
+	bool TickDebugger(float DeltaTime);
+	void HandleBeginPIE(bool bIsSimulating);
+	void HandleEndPIE(bool bIsSimulating);
+	void HandleOpenDebugger();
 	void HandleRunSampleCommand();
 	void HandleBindCSharpActorLifecycleReport();
 	void HandleBuildAndBindCSharpActorLifecycleReport();
@@ -127,10 +141,15 @@ private:
 	TUniquePtr<FAvidScriptEditorCommandLauncher> CommandLauncher;
 	TUniquePtr<FAvidScriptEditorCSharpLiveReloadService> CSharpLiveReloadService;
 	TUniquePtr<FAvidScriptEditorGeneratedTypeReloadService> GeneratedTypeReloadService;
+	TSharedPtr<FAvidScriptEditorDebugTargetController> DebugTargetController;
 	IConsoleObject* GenerateBindingsConsoleCommand = nullptr;
 	IConsoleObject* PublishCSharpBindingsConsoleCommand = nullptr;
 	FDelegateHandle PublishCSharpBindingsAssetRegistryHandle;
 	FString PendingCSharpBindingsOutputRoot;
 	bool bExitAfterCSharpBindingsPublish = false;
 	FDelegateHandle ToolMenusStartupCallbackHandle;
+	FTSTicker::FDelegateHandle DebugTickerHandle;
+	FDelegateHandle BeginPIEHandle;
+	FDelegateHandle EndPIEHandle;
+	FString LastDebuggerTickError;
 };

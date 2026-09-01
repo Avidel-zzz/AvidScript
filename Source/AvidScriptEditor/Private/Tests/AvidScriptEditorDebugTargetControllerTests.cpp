@@ -2,6 +2,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "Debugging/SAvidScriptEditorDebugPanel.h"
 #include "Misc/AutomationTest.h"
 
 namespace
@@ -122,7 +123,7 @@ bool FAvidScriptEditorDebugTargetControllerTest::RunTest(const FString& Paramete
 	FString Error;
 	TestTrue(
 		TEXT("breakpoint can be authored before PIE"),
-		Controller.GetSessionModel().SetSourceBreakpoint(
+		Controller.SetSourceBreakpoint(
 			TEXT("Scripts/AvidScript/Controller.cs"),
 			12,
 			true,
@@ -136,7 +137,7 @@ bool FAvidScriptEditorDebugTargetControllerTest::RunTest(const FString& Paramete
 		TEXT("offline breakpoint resolves on selected target"),
 		Controller.GetSessionModel().GetView().Breakpoints[0].ProbeId,
 		0x1111111111111111ULL);
-	TestTrue(TEXT("debugger attaches to selected target"), Controller.GetSessionModel().AttachDebugger(Error));
+	TestTrue(TEXT("debugger attaches to selected target"), Controller.AttachDebugger(Error));
 
 	bFirstAvailable = false;
 	bSecondAvailable = true;
@@ -151,7 +152,7 @@ bool FAvidScriptEditorDebugTargetControllerTest::RunTest(const FString& Paramete
 		FirstRuntime->DetachCallCount,
 		0);
 
-	TestTrue(TEXT("replacement debugger attaches"), Controller.GetSessionModel().AttachDebugger(Error));
+	TestTrue(TEXT("replacement debugger attaches"), Controller.AttachDebugger(Error));
 	Controller.HandleEndPIE();
 	TestFalse(TEXT("PIE end clears active target"), Controller.IsPIEActive());
 	TestTrue(TEXT("PIE end clears target list"), Controller.GetTargets().IsEmpty());
@@ -163,6 +164,22 @@ bool FAvidScriptEditorDebugTargetControllerTest::RunTest(const FString& Paramete
 	TestFalse(
 		TEXT("PIE end preserves user breakpoint requests"),
 		Controller.GetSessionModel().GetView().Breakpoints.IsEmpty());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorDebugPanelConstructionTest,
+	"AvidScript.Editor.Debugging.PanelConstruction",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorDebugPanelConstructionTest::RunTest(const FString& Parameters)
+{
+	TSharedRef<FAvidScriptEditorDebugTargetController> Controller =
+		MakeShared<FAvidScriptEditorDebugTargetController>();
+	TSharedRef<SWidget> Panel = MakeAvidScriptEditorDebugPanel(Controller);
+
+	TestTrue(TEXT("debugger panel factory returns a widget"), Panel->GetType() != NAME_None);
+	TestFalse(TEXT("debugger panel construction does not activate PIE"), Controller->IsPIEActive());
 	return true;
 }
 
