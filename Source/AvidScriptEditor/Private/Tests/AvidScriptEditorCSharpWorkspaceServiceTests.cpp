@@ -72,15 +72,19 @@ bool FAvidScriptEditorCSharpWorkspaceCreateRefreshTest::RunTest(const FString& P
         return false;
     }
     TestTrue(TEXT("Workspace result succeeds"), First.bSucceeded);
-    TestEqual(TEXT("First create writes four user files"), First.CreatedUserFileCount, 4);
+    TestEqual(TEXT("First create writes six user files"), First.CreatedUserFileCount, 6);
     TestEqual(TEXT("First create preserves no user files"), First.PreservedUserFileCount, 0);
     TestTrue(TEXT("Source is created"), First.bSourceCreated);
     TestTrue(TEXT("Project is created"), First.bProjectCreated);
+    TestTrue(TEXT("Solution is created"), First.bSolutionCreated);
+    TestTrue(TEXT("Editor config is created"), First.bEditorConfigCreated);
     TestTrue(TEXT("Profile is created"), First.bProfileCreated);
     TestTrue(TEXT("Global json is created"), First.bGlobalJsonCreated);
     TestTrue(TEXT("Generated facade refreshes"), First.bFacadeRefreshed);
     TestTrue(TEXT("Source exists"), FPaths::FileExists(First.SourcePath));
     TestTrue(TEXT("Project exists"), FPaths::FileExists(First.ProjectPath));
+    TestTrue(TEXT("Solution exists"), FPaths::FileExists(First.SolutionPath));
+    TestTrue(TEXT("Editor config exists"), FPaths::FileExists(First.EditorConfigPath));
     TestTrue(TEXT("Profile exists"), FPaths::FileExists(First.ProfilePath));
     TestTrue(TEXT("Global json exists"), FPaths::FileExists(First.GlobalJsonPath));
     TestTrue(TEXT("Facade exists"), FPaths::FileExists(First.FacadePath));
@@ -92,6 +96,12 @@ bool FAvidScriptEditorCSharpWorkspaceCreateRefreshTest::RunTest(const FString& P
         TEXT("Project links generated facade"),
         ProjectText.Contains(TEXT("AvidScript.Bindings.generated.cs")));
     TestFalse(TEXT("Project has no unresolved tokens"), ProjectText.Contains(TEXT("{{")));
+    const FString SolutionText = ReadAvidScriptWorkspaceTestText(*this, First.SolutionPath);
+    TestTrue(TEXT("Solution links gameplay project"), SolutionText.Contains(TEXT("AvidScript.Gameplay.csproj")));
+    TestFalse(TEXT("Solution has no unresolved tokens"), SolutionText.Contains(TEXT("{{")));
+    const FString EditorConfigText = ReadAvidScriptWorkspaceTestText(*this, First.EditorConfigPath);
+    TestTrue(TEXT("Editor config scopes C#"), EditorConfigText.Contains(TEXT("[*.cs]")));
+    TestTrue(TEXT("Editor config selects CRLF"), EditorConfigText.Contains(TEXT("end_of_line = crlf")));
     const FString ProfileText = ReadAvidScriptWorkspaceTestText(*this, First.ProfilePath);
     TestFalse(TEXT("Profile has no unresolved tokens"), ProfileText.Contains(TEXT("{{")));
 	const FString InitialSourceText = ReadAvidScriptWorkspaceTestText(*this, First.SourcePath);
@@ -154,7 +164,7 @@ bool FAvidScriptEditorCSharpWorkspaceCreateRefreshTest::RunTest(const FString& P
         TEXT("Project C# workspace refreshes"),
         FAvidScriptEditorCSharpWorkspaceService::CreateOrRefresh(Config, Second));
     TestEqual(TEXT("Second refresh creates no user files"), Second.CreatedUserFileCount, 0);
-    TestEqual(TEXT("Second refresh preserves four user files"), Second.PreservedUserFileCount, 4);
+    TestEqual(TEXT("Second refresh preserves six user files"), Second.PreservedUserFileCount, 6);
     TestEqual(
         TEXT("User source is preserved byte-for-byte"),
         ReadAvidScriptWorkspaceTestText(*this, Second.SourcePath),
@@ -170,7 +180,7 @@ bool FAvidScriptEditorCSharpWorkspaceCreateRefreshTest::RunTest(const FString& P
     TestTrue(
         TEXT("Explicit overwrite refreshes user templates"),
         FAvidScriptEditorCSharpWorkspaceService::CreateOrRefresh(OverwriteConfig, Overwritten));
-    TestEqual(TEXT("Explicit overwrite updates four user files"), Overwritten.UpdatedUserFileCount, 4);
+    TestEqual(TEXT("Explicit overwrite updates six user files"), Overwritten.UpdatedUserFileCount, 6);
 	const FString StarterText = ReadAvidScriptWorkspaceTestText(*this, Overwritten.SourcePath)
 		.Replace(TEXT("\r\n"), TEXT("\n"), ESearchCase::CaseSensitive);
     TestTrue(

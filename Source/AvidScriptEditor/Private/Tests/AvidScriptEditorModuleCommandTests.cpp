@@ -762,9 +762,11 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 	}
 
 	TestTrue(TEXT("Project C# workspace result succeeds"), WorkspaceResult.bSucceeded);
-	TestEqual(TEXT("Project C# workspace creates four user files"), WorkspaceResult.CreatedUserFileCount, 4);
+	TestEqual(TEXT("Project C# workspace creates six user files"), WorkspaceResult.CreatedUserFileCount, 6);
 	TestTrue(TEXT("Project C# workspace source exists"), FPaths::FileExists(WorkspaceResult.SourcePath));
 	TestTrue(TEXT("Project C# workspace project exists"), FPaths::FileExists(WorkspaceResult.ProjectPath));
+	TestTrue(TEXT("Project C# workspace solution exists"), FPaths::FileExists(WorkspaceResult.SolutionPath));
+	TestTrue(TEXT("Project C# workspace editor config exists"), FPaths::FileExists(WorkspaceResult.EditorConfigPath));
 	TestTrue(TEXT("Project C# workspace profile exists"), FPaths::FileExists(WorkspaceResult.ProfilePath));
 	TestTrue(TEXT("Project C# workspace facade exists"), FPaths::FileExists(WorkspaceResult.FacadePath));
 	TestTrue(TEXT("Project C# workspace build succeeds"), BuildResult.bSucceeded);

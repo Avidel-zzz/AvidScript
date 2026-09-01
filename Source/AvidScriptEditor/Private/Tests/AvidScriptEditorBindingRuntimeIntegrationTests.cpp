@@ -4444,7 +4444,7 @@ bool FAvidScriptEditorBindingRuntimeProjectCSharpGameplayWorkspaceTest::RunTest(
 		AddError(WorkspaceResult.ErrorMessage);
 		return false;
 	}
-	TestEqual(TEXT("Project C# gameplay workspace creates four user files"), WorkspaceResult.CreatedUserFileCount, 4);
+	TestEqual(TEXT("Project C# gameplay workspace creates six user files"), WorkspaceResult.CreatedUserFileCount, 6);
 
 	FAvidScriptEditorCSharpProfileLoadResult ProfileResult;
 	if (!TestTrue(

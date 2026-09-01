@@ -17,6 +17,8 @@ struct AVIDSCRIPTEDITOR_API FAvidScriptEditorCSharpWorkspaceResult
     bool bSucceeded = false;
     bool bSourceCreated = false;
     bool bProjectCreated = false;
+    bool bSolutionCreated = false;
+    bool bEditorConfigCreated = false;
     bool bProfileCreated = false;
     bool bGlobalJsonCreated = false;
     bool bFacadeRefreshed = false;
@@ -26,6 +28,8 @@ struct AVIDSCRIPTEDITOR_API FAvidScriptEditorCSharpWorkspaceResult
     FString WorkspaceRoot;
     FString SourcePath;
     FString ProjectPath;
+    FString SolutionPath;
+    FString EditorConfigPath;
     FString ProfilePath;
     FString GlobalJsonPath;
     FString GeneratedRoot;
@@ -51,6 +55,8 @@ public:
     static FString GetDefaultOutputRoot();
     static FString GetDefaultSourcePath();
     static FString GetDefaultProjectPath();
+    static FString GetDefaultSolutionPath();
+    static FString GetDefaultEditorConfigPath();
     static FString GetDefaultProfilePath();
     static FString GetDefaultGlobalJsonPath();
     static FString GetDefaultFacadePath();

@@ -151,6 +151,8 @@ FString MakeAvidScriptCSharpWorkspaceDetails(const FAvidScriptEditorCSharpWorksp
 	AddAvidScriptPresentationDetailLine(Lines, TEXT("Workspace"), Result.WorkspaceRoot);
 	AddAvidScriptPresentationDetailLine(Lines, TEXT("Source"), Result.SourcePath);
 	AddAvidScriptPresentationDetailLine(Lines, TEXT("Project"), Result.ProjectPath);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Solution"), Result.SolutionPath);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Editor config"), Result.EditorConfigPath);
 	AddAvidScriptPresentationDetailLine(Lines, TEXT("Profile"), Result.ProfilePath);
 	AddAvidScriptPresentationDetailLine(Lines, TEXT("Generated facade"), Result.FacadePath);
 	AddAvidScriptPresentationDetailLine(Lines, TEXT("IDE binding package"), Result.BindingPackageManifestPath);

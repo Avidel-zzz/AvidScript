@@ -120,10 +120,13 @@
 - Slate 最多渲染最新 `250` 条匹配事件和前 `50` 个热点，仅在 snapshot revision 或过滤签名变化时重建；
 - `AvidScript.Editor.Debugging` `4/4`、`AvidScript.Editor.Profiling` `1/1`、UE5.8 Editor build 通过；
 - 详细实现与证据见 [P61.D2c Profiler 面板](P61.D2c_Profiler_Panel.md)。
+- 完成 `P61.D4a` 现代 C# 工作区：新增 `.slnx` 与 `.editorconfig` 模板、结果路径和保留语义；
+- 首次创建六个用户文件，普通刷新不覆盖用户内容，生成 facade 仍独立原子刷新；
+- 详细实现与证据见 [P61.D4a 现代 C# 工作区](P61.D4a_Modern_CSharp_Workspace.md)。
 
 ## 待完成
 
-- `P61.D4` IDE workspace；
+- `P61.D4b-D4c` 离线源码索引与 IDE 启动工作流；
 - `P61.E` 集成与集中 Gate。
 
 ## 人工验收边界

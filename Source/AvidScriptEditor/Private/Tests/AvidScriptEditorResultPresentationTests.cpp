@@ -171,10 +171,12 @@ bool FAvidScriptEditorPresentationCSharpWorkspaceTest::RunTest(const FString& Pa
 	FAvidScriptEditorCSharpWorkspaceResult CreatedResult;
 	CreatedResult.bSucceeded = true;
 	CreatedResult.bFacadeRefreshed = true;
-	CreatedResult.CreatedUserFileCount = 4;
+	CreatedResult.CreatedUserFileCount = 6;
 	CreatedResult.WorkspaceRoot = TEXT("C:/Project/Scripts/AvidScript");
 	CreatedResult.SourcePath = TEXT("C:/Project/Scripts/AvidScript/GameplayScript.cs");
 	CreatedResult.ProjectPath = TEXT("C:/Project/Scripts/AvidScript/AvidScript.Gameplay.csproj");
+	CreatedResult.SolutionPath = TEXT("C:/Project/Scripts/AvidScript/AvidScript.Gameplay.slnx");
+	CreatedResult.EditorConfigPath = TEXT("C:/Project/Scripts/AvidScript/.editorconfig");
 	CreatedResult.ProfilePath = TEXT("C:/Project/Scripts/AvidScript/default.csharp-profile.json");
 	CreatedResult.FacadePath = TEXT("C:/Project/Intermediate/AvidScript/CSharpWorkspace/AvidScript.Bindings.generated.cs");
 	CreatedResult.BindingPackageManifestPath = TEXT("C:/Project/Intermediate/AvidScript/CSharpWorkspace/BindingPackages/package.json");
@@ -185,17 +187,19 @@ bool FAvidScriptEditorPresentationCSharpWorkspaceTest::RunTest(const FString& Pa
 		FAvidScriptEditorResultPresenter::MakeCSharpWorkspacePresentation(CreatedResult);
 	TestEqual(TEXT("C# workspace created severity"), CreatedPresentation.Severity, EAvidScriptEditorPresentationSeverity::Info);
 	TestTrue(TEXT("C# workspace created title"), CreatedPresentation.Title.Contains(TEXT("workspace ready")));
-	TestTrue(TEXT("C# workspace created body count"), CreatedPresentation.Body.Contains(TEXT("created=4")));
+	TestTrue(TEXT("C# workspace created body count"), CreatedPresentation.Body.Contains(TEXT("created=6")));
 	TestTrue(TEXT("C# workspace details include source"), CreatedPresentation.Details.Contains(TEXT("GameplayScript.cs")));
+	TestTrue(TEXT("C# workspace details include solution"), CreatedPresentation.Details.Contains(TEXT("AvidScript.Gameplay.slnx")));
+	TestTrue(TEXT("C# workspace details include editor config"), CreatedPresentation.Details.Contains(TEXT(".editorconfig")));
 	TestTrue(TEXT("C# workspace details include facade"), CreatedPresentation.Details.Contains(TEXT("AvidScript.Bindings.generated.cs")));
 	TestTrue(TEXT("C# workspace details include refreshed state"), CreatedPresentation.Details.Contains(TEXT("facade_refreshed=true")));
 
 	FAvidScriptEditorCSharpWorkspaceResult PreservedResult = CreatedResult;
 	PreservedResult.CreatedUserFileCount = 0;
-	PreservedResult.PreservedUserFileCount = 4;
+	PreservedResult.PreservedUserFileCount = 6;
 	const FAvidScriptEditorCommandPresentation PreservedPresentation =
 		FAvidScriptEditorResultPresenter::MakeCSharpWorkspacePresentation(PreservedResult);
-	TestTrue(TEXT("C# workspace preserved body count"), PreservedPresentation.Body.Contains(TEXT("preserved=4")));
+	TestTrue(TEXT("C# workspace preserved body count"), PreservedPresentation.Body.Contains(TEXT("preserved=6")));
 
 	FAvidScriptEditorCSharpWorkspaceResult FailureResult;
 	FailureResult.bSucceeded = false;

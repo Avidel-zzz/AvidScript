@@ -119,6 +119,8 @@ public static class GameScript
 
 完整样例见 [TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) 与
 [ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)。
+Editor 可生成含 `.slnx`、`.editorconfig`、WASI `.csproj`、固定 SDK 和构建 profile 的 C# 工作区；
+刷新默认保留用户文件，只更新 Reflection 生成的 typed facade。
 
 ## 架构
 

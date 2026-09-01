@@ -13,6 +13,8 @@ namespace
 {
 constexpr const TCHAR* AvidScriptWorkspaceSourceFile = TEXT("GameplayScript.cs");
 constexpr const TCHAR* AvidScriptWorkspaceProjectFile = TEXT("AvidScript.Gameplay.csproj");
+constexpr const TCHAR* AvidScriptWorkspaceSolutionFile = TEXT("AvidScript.Gameplay.slnx");
+constexpr const TCHAR* AvidScriptWorkspaceEditorConfigFile = TEXT(".editorconfig");
 constexpr const TCHAR* AvidScriptWorkspaceProfileFile = TEXT("default.csharp-profile.json");
 constexpr const TCHAR* AvidScriptWorkspaceGlobalJsonFile = TEXT("global.json");
 constexpr const TCHAR* AvidScriptWorkspaceFacadeFile = TEXT("AvidScript.Bindings.generated.cs");
@@ -303,6 +305,20 @@ FString FAvidScriptEditorCSharpWorkspaceService::GetDefaultProfilePath()
         AvidScriptWorkspaceProfileFile));
 }
 
+FString FAvidScriptEditorCSharpWorkspaceService::GetDefaultSolutionPath()
+{
+    return NormalizeAvidScriptWorkspacePath(FPaths::Combine(
+        GetDefaultWorkspaceRoot(),
+        AvidScriptWorkspaceSolutionFile));
+}
+
+FString FAvidScriptEditorCSharpWorkspaceService::GetDefaultEditorConfigPath()
+{
+    return NormalizeAvidScriptWorkspacePath(FPaths::Combine(
+        GetDefaultWorkspaceRoot(),
+        AvidScriptWorkspaceEditorConfigFile));
+}
+
 FString FAvidScriptEditorCSharpWorkspaceService::GetDefaultGlobalJsonPath()
 {
     return NormalizeAvidScriptWorkspacePath(FPaths::Combine(
@@ -340,6 +356,12 @@ bool FAvidScriptEditorCSharpWorkspaceService::CreateOrRefresh(
     OutResult.ProjectPath = NormalizeAvidScriptWorkspacePath(FPaths::Combine(
         OutResult.WorkspaceRoot,
         AvidScriptWorkspaceProjectFile));
+    OutResult.SolutionPath = NormalizeAvidScriptWorkspacePath(FPaths::Combine(
+        OutResult.WorkspaceRoot,
+        AvidScriptWorkspaceSolutionFile));
+    OutResult.EditorConfigPath = NormalizeAvidScriptWorkspacePath(FPaths::Combine(
+        OutResult.WorkspaceRoot,
+        AvidScriptWorkspaceEditorConfigFile));
     OutResult.ProfilePath = NormalizeAvidScriptWorkspacePath(FPaths::Combine(
         OutResult.WorkspaceRoot,
         AvidScriptWorkspaceProfileFile));
@@ -376,10 +398,14 @@ bool FAvidScriptEditorCSharpWorkspaceService::CreateOrRefresh(
 
     FString SourceTemplate;
     FString ProjectTemplate;
+    FString SolutionTemplate;
+    FString EditorConfigTemplate;
     FString ProfileTemplate;
     FString GlobalJsonTemplate;
     if (!LoadAvidScriptWorkspaceTemplate(TemplateRoot, AvidScriptWorkspaceSourceFile, SourceTemplate, OutResult)
         || !LoadAvidScriptWorkspaceTemplate(TemplateRoot, TEXT("AvidScript.Gameplay.csproj.template"), ProjectTemplate, OutResult)
+        || !LoadAvidScriptWorkspaceTemplate(TemplateRoot, TEXT("AvidScript.Gameplay.slnx.template"), SolutionTemplate, OutResult)
+        || !LoadAvidScriptWorkspaceTemplate(TemplateRoot, TEXT(".editorconfig.template"), EditorConfigTemplate, OutResult)
         || !LoadAvidScriptWorkspaceTemplate(TemplateRoot, TEXT("default.csharp-profile.json.template"), ProfileTemplate, OutResult)
         || !LoadAvidScriptWorkspaceTemplate(TemplateRoot, AvidScriptWorkspaceGlobalJsonFile, GlobalJsonTemplate, OutResult))
     {
@@ -406,6 +432,10 @@ bool FAvidScriptEditorCSharpWorkspaceService::CreateOrRefresh(
         TEXT("{{GENERATED_FACADE_RELATIVE_PATH}}"),
         *EscapeAvidScriptWorkspaceXmlAttribute(FacadeRelativePath),
         ESearchCase::CaseSensitive);
+    SolutionTemplate.ReplaceInline(
+        TEXT("{{PROJECT_PATH}}"),
+        *EscapeAvidScriptWorkspaceXmlAttribute(AvidScriptWorkspaceProjectFile),
+        ESearchCase::CaseSensitive);
 
     ProfileTemplate.ReplaceInline(TEXT("{{SOURCE_PATH}}"), *OutResult.SourcePath, ESearchCase::CaseSensitive);
     ProfileTemplate.ReplaceInline(TEXT("{{PROJECT_PATH}}"), *OutResult.ProjectPath, ESearchCase::CaseSensitive);
@@ -418,6 +448,8 @@ bool FAvidScriptEditorCSharpWorkspaceService::CreateOrRefresh(
         ESearchCase::CaseSensitive);
 
     if (!ValidateAvidScriptWorkspaceTemplateResolved(AvidScriptWorkspaceProjectFile, ProjectTemplate, OutResult)
+        || !ValidateAvidScriptWorkspaceTemplateResolved(AvidScriptWorkspaceSolutionFile, SolutionTemplate, OutResult)
+        || !ValidateAvidScriptWorkspaceTemplateResolved(AvidScriptWorkspaceEditorConfigFile, EditorConfigTemplate, OutResult)
         || !ValidateAvidScriptWorkspaceTemplateResolved(AvidScriptWorkspaceProfileFile, ProfileTemplate, OutResult))
     {
         return false;
@@ -473,6 +505,18 @@ bool FAvidScriptEditorCSharpWorkspaceService::CreateOrRefresh(
             OutResult.bProjectCreated,
             OutResult)
         || !WriteAvidScriptWorkspaceUserFile(
+            OutResult.SolutionPath,
+            SolutionTemplate,
+            Config.bOverwriteUserFiles,
+            OutResult.bSolutionCreated,
+            OutResult)
+        || !WriteAvidScriptWorkspaceUserFile(
+            OutResult.EditorConfigPath,
+            EditorConfigTemplate,
+            Config.bOverwriteUserFiles,
+            OutResult.bEditorConfigCreated,
+            OutResult)
+        || !WriteAvidScriptWorkspaceUserFile(
             OutResult.ProfilePath,
             ProfileTemplate,
             Config.bOverwriteUserFiles,
@@ -489,6 +533,6 @@ bool FAvidScriptEditorCSharpWorkspaceService::CreateOrRefresh(
     }
 
     OutResult.bSucceeded = true;
-    OutResult.NextAction = TEXT("open GameplayScript.cs, then run Build And Bind Project C# Gameplay Script");
+    OutResult.NextAction = TEXT("open AvidScript.Gameplay.slnx, then run Build And Bind Project C# Gameplay Script");
     return true;
 }
