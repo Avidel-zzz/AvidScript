@@ -43,9 +43,9 @@
     },
     {
       "id": "P61.E",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "修复 close 禁止路径：两份脱敏性能 JSON 已从 Docs/Phase61/Artifacts 迁移到 Docs/Phase61/Evidence，文档链接与 Harness 防复发规则已同步；阶段范围不再包含禁止路径，产品源码与既有 427/427、279/279、UBT 和性能结果未变化。",
+      "completed_at_utc": "2026-09-01T20:08:51.1608130+00:00"
     }
   ],
   "debt": [],
@@ -100,7 +100,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "batch-complete -Phase 61 -BatchId P61.E -Evidence <text>",
-  "revision": 9,
-  "updated_at_utc": "2026-09-01T20:05:31.2357306+00:00"
+  "next_action": "freeze -Phase 61 -ReviewEvidence <text>",
+  "revision": 10,
+  "updated_at_utc": "2026-09-01T20:08:51.1629759+00:00"
 }
