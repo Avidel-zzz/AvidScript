@@ -116,6 +116,9 @@ public:
 	bool StepIntoDebugExecution();
 	bool StepIntoDebugExecution(FAvidScriptWasmSmokeResult& OutResult);
 	FAvidScriptDebugSessionSnapshot GetDebugSnapshot() const;
+	bool GetDebugVariables(
+		FAvidScriptDebugVariablesSnapshot& OutSnapshot,
+		FString& OutError) const;
 	FString GetLiveModuleId() const;
 	int32 GetLiveTickCallCount() const;
 	int32 GetLivePendingTimerCount() const;

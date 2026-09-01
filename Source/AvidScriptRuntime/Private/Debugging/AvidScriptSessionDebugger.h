@@ -16,6 +16,7 @@ public:
 	bool StepInto();
 	void OnRuntimeGenerationChanged();
 	FAvidScriptDebugSessionSnapshot GetSnapshot() const;
+	bool CopySuspensionFrame(TArray<uint8>& OutFrameBytes) const;
 
 	EAvidScriptDebugProbeAction EvaluateProbe(uint64 ProbeId) override;
 	int64 CommitSuspension(

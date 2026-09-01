@@ -32,6 +32,30 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptDebugSessionSnapshot
 	int32 BreakpointCount = 0;
 };
 
+struct AVIDSCRIPTRUNTIME_API FAvidScriptDebugVariableSnapshot
+{
+	FString SymbolId;
+	FString Name;
+	FString Kind;
+	FString TypeId;
+	FString ValueKind;
+	FString Value;
+};
+
+struct AVIDSCRIPTRUNTIME_API FAvidScriptDebugVariablesSnapshot
+{
+	uint64 Epoch = 0;
+	uint64 PauseSequence = 0;
+	uint64 ActiveProbeId = 0;
+	FString SourceFile;
+	FString SourceSha256;
+	FString FunctionName;
+	int32 Line = 0;
+	int32 Column = 0;
+	bool bTruncated = false;
+	TArray<FAvidScriptDebugVariableSnapshot> Variables;
+};
+
 class AVIDSCRIPTRUNTIME_API IAvidScriptDebugProbeHost
 {
 public:

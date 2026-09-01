@@ -108,10 +108,13 @@ FString MakeDiagnosticsDebugMapV2Json(
 		TEXT("  \"provenance\": { \"frontend_artifact_sha256\": \"%s\", \"semantic_sha256\": \"%s\", \"guest_ir_sha256\": \"%s\", \"wasm_sha256\": \"%s\" },\n")
 		TEXT("  \"functions\": [\n")
 		TEXT("    { \"wasm_function_index\": 7, \"guest_function_id\": \"function:symbol:method:Test.Helper()\", \"method_symbol_id\": \"symbol:method:Test.Helper()\", \"display_name\": \"Test.Helper()\", \"span\": { \"start\": 10, \"length\": 20, \"line\": 10, \"column\": 2, \"end_line\": 12, \"end_column\": 3 }, \"sequence_points\": [\n")
-		TEXT("      { \"wasm_function_offset\": 10, \"guest_instruction_id\": \"helper:i0\", \"semantic_operation_id\": \"helper:op0\", \"kind\": \"statement\", \"hidden\": false, \"span\": { \"start\": 50, \"length\": 4, \"line\": 20, \"column\": 4, \"end_line\": 20, \"end_column\": 8 } },\n")
-		TEXT("      { \"wasm_function_offset\": 30, \"guest_instruction_id\": \"helper:i1\", \"semantic_operation_id\": \"helper:op1\", \"kind\": \"hidden\", \"hidden\": true, \"span\": { \"start\": 60, \"length\": 2, \"line\": 25, \"column\": 1, \"end_line\": 25, \"end_column\": 3 } },\n")
-		TEXT("      { \"wasm_function_offset\": 40, \"guest_instruction_id\": \"helper:i2\", \"semantic_operation_id\": \"helper:op2\", \"kind\": \"call\", \"hidden\": false, \"span\": { \"start\": 70, \"length\": 6, \"line\": 30, \"column\": 6, \"end_line\": 30, \"end_column\": 12 } }\n")
-		TEXT("    ] },\n")
+		TEXT("      { \"wasm_function_offset\": 10, \"guest_instruction_id\": \"helper:i0\", \"semantic_operation_id\": \"helper:op0\", \"probe_id\": \"1111111111111111\", \"kind\": \"statement\", \"hidden\": false, \"span\": { \"start\": 50, \"length\": 4, \"line\": 20, \"column\": 4, \"end_line\": 20, \"end_column\": 8 } },\n")
+		TEXT("      { \"wasm_function_offset\": 30, \"guest_instruction_id\": \"helper:i1\", \"semantic_operation_id\": \"helper:op1\", \"probe_id\": null, \"kind\": \"hidden\", \"hidden\": true, \"span\": { \"start\": 60, \"length\": 2, \"line\": 25, \"column\": 1, \"end_line\": 25, \"end_column\": 3 } },\n")
+		TEXT("      { \"wasm_function_offset\": 40, \"guest_instruction_id\": \"helper:i2\", \"semantic_operation_id\": \"helper:op2\", \"probe_id\": \"3333333333333333\", \"kind\": \"call\", \"hidden\": false, \"span\": { \"start\": 70, \"length\": 6, \"line\": 30, \"column\": 6, \"end_line\": 30, \"end_column\": 12 } }\n")
+		TEXT("    ], \"frame\": { \"byte_size\": 24, \"variables\": [\n")
+		TEXT("      { \"symbol_id\": \"symbol:parameter:input\", \"name\": \"input\", \"kind\": \"parameter\", \"type_id\": \"type:int32\", \"value_kind\": \"scalar\", \"storage\": \"i32\", \"offset\": 4, \"byte_size\": 4, \"declaration\": { \"start\": 20, \"length\": 5, \"line\": 10, \"column\": 5, \"end_line\": 10, \"end_column\": 10 }, \"scope\": { \"start\": 10, \"length\": 70, \"line\": 10, \"column\": 2, \"end_line\": 40, \"end_column\": 10 } },\n")
+		TEXT("      { \"symbol_id\": \"symbol:local:result\", \"name\": \"result\", \"kind\": \"local\", \"type_id\": \"type:int32\", \"value_kind\": \"scalar\", \"storage\": \"i32\", \"offset\": 8, \"byte_size\": 4, \"declaration\": { \"start\": 60, \"length\": 2, \"line\": 25, \"column\": 1, \"end_line\": 25, \"end_column\": 3 }, \"scope\": { \"start\": 10, \"length\": 70, \"line\": 10, \"column\": 2, \"end_line\": 40, \"end_column\": 10 } }\n")
+		TEXT("    ] } },\n")
 		TEXT("    { \"wasm_function_index\": 8, \"guest_function_id\": \"function:symbol:method:Test.Tick(float)\", \"method_symbol_id\": \"symbol:method:Test.Tick(float)\", \"display_name\": \"Test.Tick(float)\", \"span\": { \"start\": 80, \"length\": 8, \"line\": 40, \"column\": 2, \"end_line\": 40, \"end_column\": 10 }, \"sequence_points\": [] }\n")
 		TEXT("  ]\n")
 		TEXT("}\n"),
@@ -497,7 +500,81 @@ bool FAvidScriptWasmDebugMapValidationTest::RunTest(const FString& Parameters)
 			TestEqual(TEXT("call point line is one based"), V2Frames[3].Line, 31);
 			TestEqual(TEXT("call point kind survives"), V2Frames[3].SourceKind, FString(TEXT("call")));
 		}
+
+		TArray<uint8> FrameBytes;
+		FrameBytes.SetNumZeroed(24);
+		const int32 InputValue = 42;
+		const int32 LocalValue = -7;
+		FMemory::Memcpy(FrameBytes.GetData() + 4, &InputValue, sizeof(InputValue));
+		FMemory::Memcpy(FrameBytes.GetData() + 8, &LocalValue, sizeof(LocalValue));
+		FAvidScriptDebugVariablesSnapshot EarlySnapshot;
+		FString VariableError;
+		TestTrue(
+			TEXT("first probe builds a bounded variable snapshot"),
+			V2Map->BuildVariableSnapshot(
+				0x1111111111111111ULL,
+				FrameBytes,
+				EarlySnapshot,
+				VariableError));
+		TestEqual(TEXT("parameter is visible before local declaration"), EarlySnapshot.Variables.Num(), 1);
+		if (EarlySnapshot.Variables.Num() == 1)
+		{
+			TestEqual(TEXT("parameter name survives"), EarlySnapshot.Variables[0].Name, FString(TEXT("input")));
+			TestEqual(TEXT("parameter value is decoded"), EarlySnapshot.Variables[0].Value, FString(TEXT("42")));
+		}
+
+		FAvidScriptDebugVariablesSnapshot LateSnapshot;
+		VariableError.Reset();
+		TestTrue(
+			TEXT("later probe builds a lexical variable snapshot"),
+			V2Map->BuildVariableSnapshot(
+				0x3333333333333333ULL,
+				FrameBytes,
+				LateSnapshot,
+				VariableError));
+		TestEqual(TEXT("local appears after its declaration"), LateSnapshot.Variables.Num(), 2);
+		if (LateSnapshot.Variables.Num() == 2)
+		{
+			TestEqual(TEXT("local name survives"), LateSnapshot.Variables[1].Name, FString(TEXT("result")));
+			TestEqual(TEXT("signed local value is decoded"), LateSnapshot.Variables[1].Value, FString(TEXT("-7")));
+		}
+		TestEqual(TEXT("snapshot source remains project relative"), LateSnapshot.SourceFile, SourceFile);
+		TestEqual(TEXT("snapshot line is one based"), LateSnapshot.Line, 31);
 	}
+
+	const FString InvalidVariablesPath = FPaths::Combine(
+		Root,
+		TEXT("invalid-variables.csharp.debug.json"));
+	FString InvalidVariablesSha;
+	const FString InvalidVariablesJson = MakeDiagnosticsDebugMapV2Json(
+		ModuleId,
+		SourceFile,
+		GDiagnosticsWasmSha).Replace(
+			TEXT("\"offset\": 8, \"byte_size\": 4"),
+			TEXT("\"offset\": 4, \"byte_size\": 4"));
+	TestTrue(
+		TEXT("invalid variable map writes"),
+		WriteDiagnosticsArtifact(
+			InvalidVariablesPath,
+			InvalidVariablesJson,
+			InvalidVariablesSha));
+	TSharedPtr<const FAvidScriptWasmDebugMap> InvalidVariablesMap;
+	ErrorCategory.Reset();
+	ErrorSource.Reset();
+	TestFalse(
+		TEXT("overlapping variable slots are rejected"),
+		FAvidScriptWasmDebugMap::LoadAndValidate(
+			InvalidVariablesPath,
+			InvalidVariablesSha,
+			V2Expected,
+			MakeArrayView(FunctionExports),
+			InvalidVariablesMap,
+			ErrorCategory,
+			ErrorSource));
+	TestEqual(
+		TEXT("invalid variable layout category"),
+		ErrorCategory,
+		FString(TEXT("debug_map_variable_layout_invalid")));
 
 	FAvidScriptWasmDebugProvenance WrongWasmExpected = V2Expected;
 	WrongWasmExpected.WasmSha256 = GDiagnosticsArtifactWrongSha;

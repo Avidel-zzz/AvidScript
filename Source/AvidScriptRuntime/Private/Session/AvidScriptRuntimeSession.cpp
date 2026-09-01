@@ -6,6 +6,7 @@
 #include "AvidScriptRuntimeScheduler.h"
 #include "Continuation/AvidScriptSessionContinuations.h"
 #include "Debugging/AvidScriptSessionDebugger.h"
+#include "Diagnostics/AvidScriptWasmDebugMap.h"
 #include "GameFramework/Actor.h"
 #include "HostEffects/AvidScriptHostEffectTransaction.h"
 #include "Ownership/AvidScriptSessionObjectOwnership.h"
@@ -1018,6 +1019,45 @@ bool FAvidScriptRuntimeSession::ResumeDebugExecution(
 FAvidScriptDebugSessionSnapshot FAvidScriptRuntimeSession::GetDebugSnapshot() const
 {
 	return Debugger->GetSnapshot();
+}
+
+bool FAvidScriptRuntimeSession::GetDebugVariables(
+	FAvidScriptDebugVariablesSnapshot& OutSnapshot,
+	FString& OutError) const
+{
+	check(IsInGameThread());
+	OutSnapshot = FAvidScriptDebugVariablesSnapshot();
+	OutError.Reset();
+	const FAvidScriptDebugSessionSnapshot DebugSnapshot = Debugger->GetSnapshot();
+	if (DebugSnapshot.State != EAvidScriptDebugSessionState::Paused)
+	{
+		OutError = TEXT("debug variables require a paused Runtime Session");
+		return false;
+	}
+	if (!LiveManifest.DebugMap.IsValid())
+	{
+		OutError = TEXT("the live Runtime Session has no validated debug map");
+		return false;
+	}
+
+	TArray<uint8> FrameBytes;
+	if (!Debugger->CopySuspensionFrame(FrameBytes))
+	{
+		OutError = TEXT("the paused Runtime Session has no readable suspension frame");
+		return false;
+	}
+	if (!LiveManifest.DebugMap->BuildVariableSnapshot(
+		DebugSnapshot.ActiveProbeId,
+		FrameBytes,
+		OutSnapshot,
+		OutError))
+	{
+		OutSnapshot = FAvidScriptDebugVariablesSnapshot();
+		return false;
+	}
+	OutSnapshot.Epoch = DebugSnapshot.Epoch;
+	OutSnapshot.PauseSequence = DebugSnapshot.PauseSequence;
+	return true;
 }
 
 int32 FAvidScriptRuntimeSession::GetLivePendingContinuationCount() const

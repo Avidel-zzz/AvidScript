@@ -47,6 +47,14 @@ bool FAvidScriptSessionDebuggerStateMachineTest::RunTest(const FString& Paramete
 		Debugger.GetSnapshot().State,
 		EAvidScriptDebugSessionState::Paused);
 	TestTrue(TEXT("Paused execution remains suspended"), Debugger.IsExecutionSuspended());
+	TArray<uint8> InspectedFrame;
+	TestTrue(
+		TEXT("Paused frame can be inspected without consuming it"),
+		Debugger.CopySuspensionFrame(InspectedFrame));
+	TestTrue(
+		TEXT("Inspected frame preserves bytes"),
+		InspectedFrame.Num() == UE_ARRAY_COUNT(FrameBytes)
+			&& FMemory::Memcmp(FrameBytes, InspectedFrame.GetData(), sizeof(FrameBytes)) == 0);
 
 	TestTrue(TEXT("Paused execution continues"), Debugger.ContinueExecution());
 	uint8 RestoredFrame[UE_ARRAY_COUNT(FrameBytes)] = {};
@@ -54,6 +62,7 @@ bool FAvidScriptSessionDebuggerStateMachineTest::RunTest(const FString& Paramete
 		TEXT("Resume consumes the exact suspension frame"),
 		Debugger.ReadSuspensionFrame(FirstToken, RestoredFrame));
 	TestFalse(TEXT("Consumed resume frame unblocks guest entries"), Debugger.IsExecutionSuspended());
+	TestFalse(TEXT("Running frame cannot be inspected"), Debugger.CopySuspensionFrame(InspectedFrame));
 	TestTrue(
 		TEXT("Suspension frame roundtrips"),
 		FMemory::Memcmp(FrameBytes, RestoredFrame, sizeof(FrameBytes)) == 0);

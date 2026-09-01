@@ -1,6 +1,6 @@
 # Phase 61 收尾记录
 
-状态：实施中，`P61.A1-A3b`、`P61.B1a-B2`、`P61.C1a-C2c1` 已完成
+状态：实施中，`P61.A1-A3b`、`P61.B1a-B2`、`P61.C1a-C2c2` 已完成
 
 ## 目标
 
@@ -59,10 +59,15 @@
   记录稳定 symbol、类型、存储、偏移、大小、声明位置和词法作用域；
 - 编译器 temporary 与合成调试寄存器不会暴露，布局不匹配或越过 4 KiB frame 时 fail-closed；
 - 详细实现与证据见 [P61.C2c1 词法变量帧元数据](P61.C2c1_Lexical_Variable_Frame_Metadata.md)。
+- 完成 `P61.C2c2` Runtime 有界变量 snapshot：validated Debug Map 按 active probe 定位函数和
+  sequence point，Session 只在 `Paused` 状态复制自己持有的 suspension frame；
+- 对外结果不包含原始 WASM memory，首版格式化标量、enum、ObjectHandle/能力 token 和值类型摘要，
+  单次最多 128 个变量与 16 KiB 展示文本；continue、reload 或 teardown 后旧 frame 自动失效；
+- 详细实现与证据见 [P61.C2c2 Runtime 有界变量 Snapshot](P61.C2c2_Runtime_Bounded_Variable_Snapshot.md)。
 
 ## 待完成
 
-- `P61.C2c2-C4` Runtime 有界变量 snapshot、Editor 断点管理、变量查看与调试体验；
+- `P61.C3-C4` Editor 断点管理、变量视图与调试体验；
 - `P61.D` Profiler 与 IDE workspace；
 - `P61.E` 集成与集中 Gate。
 

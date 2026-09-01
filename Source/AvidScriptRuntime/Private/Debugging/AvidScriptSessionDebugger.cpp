@@ -117,6 +117,22 @@ FAvidScriptDebugSessionSnapshot FAvidScriptSessionDebugger::GetSnapshot() const
 	return Snapshot;
 }
 
+bool FAvidScriptSessionDebugger::CopySuspensionFrame(
+	TArray<uint8>& OutFrameBytes) const
+{
+	check(IsInGameThread());
+	OutFrameBytes.Reset();
+	if (State != EAvidScriptDebugSessionState::Paused
+		|| SuspensionToken <= 0
+		|| SuspensionFrame.IsEmpty()
+		|| SuspensionFrame.Num() > MaxFrameByteCount)
+	{
+		return false;
+	}
+	OutFrameBytes = SuspensionFrame;
+	return true;
+}
+
 EAvidScriptDebugProbeAction FAvidScriptSessionDebugger::EvaluateProbe(
 	const uint64 ProbeId)
 {

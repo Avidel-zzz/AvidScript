@@ -1143,6 +1143,25 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 				&& PausedSnapshot.ResumeRoute > 0
 				&& PausedSnapshot.FrameByteCount > 0
 				&& PausedSnapshot.FrameByteCount <= 4096);
+		FAvidScriptDebugVariablesSnapshot PausedVariables;
+		FString VariablesError;
+		TestTrue(
+			TEXT("Paused Tick exposes its bounded C# variable snapshot"),
+			Session.GetDebugVariables(PausedVariables, VariablesError));
+		TestTrue(
+			TEXT("Variable snapshot belongs to the exact paused generation and probe"),
+			PausedVariables.Epoch == PausedSnapshot.Epoch
+				&& PausedVariables.PauseSequence == PausedSnapshot.PauseSequence
+				&& PausedVariables.ActiveProbeId == PausedSnapshot.ActiveProbeId);
+		TestTrue(
+			TEXT("Initial Tick pause exposes the deltaSeconds parameter"),
+			PausedVariables.Variables.ContainsByPredicate(
+				[](const FAvidScriptDebugVariableSnapshot& Variable)
+				{
+					return Variable.Name == TEXT("deltaSeconds")
+						&& Variable.TypeId == TEXT("type:float32")
+						&& !Variable.Value.IsEmpty();
+				}));
 
 		FAvidScriptWasmSmokeResult BlockedTickResult;
 		TestFalse(
@@ -1180,6 +1199,9 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 		TestTrue(
 			TEXT("Resumed Tick commits gameplay work after the pause"),
 			!Actor->GetActorLocation().Equals(LocationBeforePause, 0.01));
+		TestFalse(
+			TEXT("Running Session no longer exposes the consumed frame"),
+			Session.GetDebugVariables(PausedVariables, VariablesError));
 		TestTrue(TEXT("Running debugger detaches cleanly"), Session.DetachDebugger());
 	}
 
