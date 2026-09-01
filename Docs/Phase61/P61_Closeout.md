@@ -1,6 +1,6 @@
 # Phase 61 收尾记录
 
-状态：实施中，`P61.A1-A3b`、`P61.B1a-B2`、`P61.C1a-C3a` 已完成
+状态：实施中，`P61.A1-A3b`、`P61.B1a-B2`、`P61.C1a-C3b` 已完成
 
 ## 目标
 
@@ -68,10 +68,15 @@
   序列点，结果按函数和指令偏移确定排序，并保留项目相对源码、hash、函数、类型与一基 span；
 - Editor 无需重复解析 Debug Map，缺失或未验证的 map 会 fail-closed；
 - 详细实现与证据见 [P61.C3a Runtime 源码断点目录](P61.C3a_Runtime_Source_Breakpoint_Catalog.md)。
+- 完成 `P61.C3b` Editor 调试会话模型：用户断点独立于 PIE Session 保存，绑定后按源码行解析 probe，
+  attach 状态下的启停修改会原子同步到 Runtime；
+- pause-next、continue、step-into 和变量刷新均为单次非阻塞调用，变量 snapshot 必须与 epoch、pause sequence
+  和 active probe 一致；reload epoch 变化时自动刷新目录并重绑定断点；
+- 详细实现与证据见 [P61.C3b Editor 调试会话模型](P61.C3b_Editor_Debug_Session_Model.md)。
 
 ## 待完成
 
-- `P61.C3b-C4` Editor 断点管理、变量视图与调试体验；
+- `P61.C4` Editor 面板、源码交互与 PIE 调试体验；
 - `P61.D` Profiler 与 IDE workspace；
 - `P61.E` 集成与集中 Gate。
 
