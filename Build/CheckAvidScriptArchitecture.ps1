@@ -3478,22 +3478,22 @@ foreach ($RequiredIncrementalBenchmarkContract in @(
     }
 }
 foreach ($RequiredDebugMapV2Contract in @(
-    @{ Source = $CSharpGuestDebugMapModelSource; Token = 'CSharpGuestDebugSequencePoint' },
-    @{ Source = $CSharpGuestDebugMapProjectorSource; Token = 'BuildSequencePoints' },
-    @{ Source = $CSharpGuestDebugMapProjectorSource; Token = '"2.0"' },
-    @{ Source = $CSharpGuestDebugMapFinalizerSource; Token = 'WasmSha256' },
-    @{ Source = $CSharpGuestDebugMapFinalizerSource; Token = 'ASDEBUG2001' },
-    @{ Source = $GuestInstructionSource; Token = '[property: JsonIgnore] GuestDebugLocation?' },
-    @{ Source = $GuestWasmDebugOffsetMapSource; Token = 'GuestWasmDebugOffsetMap' },
-    @{ Source = $WasmFunctionCompilerSource; Token = 'GuestDebugIdentity.Instruction' },
-    @{ Source = $WasmFunctionCompilerSource; Token = 'body.Count' },
-    @{ Source = $WasmBackendCommandLineSource; Token = '--debug-offsets' },
-    @{ Source = $CSharpGuestCompilerScriptSource; Token = '--finalize-debug-map' },
-    @{ Source = $CSharpCompilerStageExecutorSource; Token = '--finalize-debug-map' },
-    @{ Source = $CSharpBuildScriptSource; Token = 'provenance.wasm_sha256' }
+    @{ Source = $CSharpGuestDebugMapModelSource; ExpectedText = 'CSharpGuestDebugSequencePoint' },
+    @{ Source = $CSharpGuestDebugMapProjectorSource; ExpectedText = 'BuildSequencePoints' },
+    @{ Source = $CSharpGuestDebugMapProjectorSource; ExpectedText = '"2.0"' },
+    @{ Source = $CSharpGuestDebugMapFinalizerSource; ExpectedText = 'WasmSha256' },
+    @{ Source = $CSharpGuestDebugMapFinalizerSource; ExpectedText = 'ASDEBUG2001' },
+    @{ Source = $GuestInstructionSource; ExpectedText = '[property: JsonIgnore] GuestDebugLocation?' },
+    @{ Source = $GuestWasmDebugOffsetMapSource; ExpectedText = 'GuestWasmDebugOffsetMap' },
+    @{ Source = $WasmFunctionCompilerSource; ExpectedText = 'GuestDebugIdentity.Instruction' },
+    @{ Source = $WasmFunctionCompilerSource; ExpectedText = 'body.Count' },
+    @{ Source = $WasmBackendCommandLineSource; ExpectedText = '--debug-offsets' },
+    @{ Source = $CSharpGuestCompilerScriptSource; ExpectedText = '--finalize-debug-map' },
+    @{ Source = $CSharpCompilerStageExecutorSource; ExpectedText = '--finalize-debug-map' },
+    @{ Source = $CSharpBuildScriptSource; ExpectedText = 'provenance.wasm_sha256' }
 )) {
-    if (-not $RequiredDebugMapV2Contract.Source.Contains($RequiredDebugMapV2Contract.Token)) {
-        Add-Violation "DebugMap v2 pipeline is missing contract $($RequiredDebugMapV2Contract.Token)"
+    if (-not $RequiredDebugMapV2Contract.Source.Contains($RequiredDebugMapV2Contract.ExpectedText)) {
+        Add-Violation "DebugMap v2 pipeline is missing contract $($RequiredDebugMapV2Contract.ExpectedText)"
     }
 }
 foreach ($RequiredUnifiedDiagnosticBuildContract in @(
@@ -3531,20 +3531,20 @@ foreach ($RequiredDiagnosticNavigationContract in @(
     }
 }
 foreach ($RequiredRuntimeCallStackContract in @(
-	@{ Source = $RuntimeDiagnosticsHeader; Token = 'EAvidScriptWasmDiagnosticFrameKind' },
-	@{ Source = $RuntimeDiagnosticsHeader; Token = 'HostImport' },
-	@{ Source = $RuntimeDiagnosticsHeader; Token = 'HostEntry' },
-	@{ Source = $RuntimeDiagnosticsHeader; Token = 'SourceSha256' },
-	@{ Source = $RuntimeSource; Token = 'HostImportFrame.Kind = EAvidScriptWasmDiagnosticFrameKind::HostImport' },
-	@{ Source = $RuntimeSource; Token = 'HostEntryFrame.Kind = EAvidScriptWasmDiagnosticFrameKind::HostEntry' },
-	@{ Source = $EditorCallStackSource; Token = 'FAvidScriptEditorDiagnosticNavigation::Open' },
-	@{ Source = $EditorCallStackHeaderSource; Token = 'IsSourceNavigable' },
-	@{ Source = $EditorResultPresentationHeaderSource; Token = 'TArray<FAvidScriptEditorCallStackFrame> CallStack' },
-	@{ Source = $EditorDiagnosticLogSource; Token = 'FActionToken::Create' },
-	@{ Source = $EditorDiagnosticLogSource; Token = 'FMessageLog' }
+	@{ Source = $RuntimeDiagnosticsHeader; ExpectedText = 'EAvidScriptWasmDiagnosticFrameKind' },
+	@{ Source = $RuntimeDiagnosticsHeader; ExpectedText = 'HostImport' },
+	@{ Source = $RuntimeDiagnosticsHeader; ExpectedText = 'HostEntry' },
+	@{ Source = $RuntimeDiagnosticsHeader; ExpectedText = 'SourceSha256' },
+	@{ Source = $RuntimeSource; ExpectedText = 'HostImportFrame.Kind = EAvidScriptWasmDiagnosticFrameKind::HostImport' },
+	@{ Source = $RuntimeSource; ExpectedText = 'HostEntryFrame.Kind = EAvidScriptWasmDiagnosticFrameKind::HostEntry' },
+	@{ Source = $EditorCallStackSource; ExpectedText = 'FAvidScriptEditorDiagnosticNavigation::Open' },
+	@{ Source = $EditorCallStackHeaderSource; ExpectedText = 'IsSourceNavigable' },
+	@{ Source = $EditorResultPresentationHeaderSource; ExpectedText = 'TArray<FAvidScriptEditorCallStackFrame> CallStack' },
+	@{ Source = $EditorDiagnosticLogSource; ExpectedText = 'FActionToken::Create' },
+	@{ Source = $EditorDiagnosticLogSource; ExpectedText = 'FMessageLog' }
 )) {
-	if (-not $RequiredRuntimeCallStackContract.Source.Contains($RequiredRuntimeCallStackContract.Token)) {
-		Add-Violation "Runtime/Editor call-stack contract is missing $($RequiredRuntimeCallStackContract.Token)"
+	if (-not $RequiredRuntimeCallStackContract.Source.Contains($RequiredRuntimeCallStackContract.ExpectedText)) {
+		Add-Violation "Runtime/Editor call-stack contract is missing $($RequiredRuntimeCallStackContract.ExpectedText)"
 	}
 }
 if (-not $AvidScriptEditorBuildRulesSource.Contains(
@@ -4290,15 +4290,15 @@ if (-not $CSharpGuestDebugMapProjectorSource.Contains('BuildAsyncResumeTargets')
     Add-Violation 'C# Guest debug maps must project async resume functions back to source segments'
 }
 foreach ($RequiredAsyncDebugContract in @(
-    @{ Source = $CSharpAsyncLowererSource; Token = '$"async:{segment.Ordinal}:await"' },
-    @{ Source = $CSharpAsyncCfgLowererSource; Token = '$"async:{segment.Ordinal}:await"' },
-    @{ Source = $CSharpAsyncControlFlowLowererSource; Token = 'DebugLocation(operation, "return")' },
-    @{ Source = $CSharpGuestDebugMapProjectorSource; Token = 'BuildSequencePoints(moduleId, function, probeIds)' },
-    @{ Source = $CSharpGuestDebugMapProjectorSource; Token = 'GuestDebugIdentity.Terminator' },
-    @{ Source = $CSharpDataLaneFusionSource; Token = 'call.Instruction.DebugLocation' }
+    @{ Source = $CSharpAsyncLowererSource; ExpectedText = '$"async:{segment.Ordinal}:await"' },
+    @{ Source = $CSharpAsyncCfgLowererSource; ExpectedText = '$"async:{segment.Ordinal}:await"' },
+    @{ Source = $CSharpAsyncControlFlowLowererSource; ExpectedText = 'DebugLocation(operation, "return")' },
+    @{ Source = $CSharpGuestDebugMapProjectorSource; ExpectedText = 'BuildSequencePoints(moduleId, function, probeIds)' },
+    @{ Source = $CSharpGuestDebugMapProjectorSource; ExpectedText = 'GuestDebugIdentity.Terminator' },
+    @{ Source = $CSharpDataLaneFusionSource; ExpectedText = 'call.Instruction.DebugLocation' }
 )) {
-    if (-not $RequiredAsyncDebugContract.Source.Contains($RequiredAsyncDebugContract.Token)) {
-        Add-Violation "C# Guest async debug mapping is missing $($RequiredAsyncDebugContract.Token)"
+    if (-not $RequiredAsyncDebugContract.Source.Contains($RequiredAsyncDebugContract.ExpectedText)) {
+        Add-Violation "C# Guest async debug mapping is missing $($RequiredAsyncDebugContract.ExpectedText)"
     }
 }
 foreach ($RequiredAsyncContinuationRuntimeContract in @(
