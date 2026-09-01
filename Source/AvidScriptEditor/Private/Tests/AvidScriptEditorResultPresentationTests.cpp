@@ -5,6 +5,7 @@
 #include "AvidScriptEditorCSharpBuildService.h"
 #include "AvidScriptEditorCSharpProfileService.h"
 #include "AvidScriptEditorCSharpWorkspaceService.h"
+#include "AvidScriptEditorIdeLaunchService.h"
 
 #include "Misc/AutomationTest.h"
 
@@ -217,6 +218,27 @@ bool FAvidScriptEditorPresentationCSharpWorkspaceTest::RunTest(const FString& Pa
 	TestTrue(TEXT("C# workspace failure title"), FailurePresentation.Title.Contains(TEXT("failed")));
 	TestTrue(TEXT("C# workspace failure category"), FailurePresentation.Body.Contains(TEXT("workspace_template_missing")));
 	TestTrue(TEXT("C# workspace failure next action"), FailurePresentation.Details.Contains(TEXT("restore")));
+
+	FAvidScriptEditorIdeLaunchResult LaunchResult;
+	LaunchResult.bSucceeded = true;
+	LaunchResult.Ide = EAvidScriptEditorIdeKind::Rider;
+	LaunchResult.TargetPath = TEXT("C:/Project/Scripts/AvidScript/AvidScript.Gameplay.slnx");
+	LaunchResult.ExecutablePath = TEXT("C:/Program Files/JetBrains/Rider/bin/rider64.exe");
+	LaunchResult.WorkingDirectory = TEXT("C:/Project/Scripts/AvidScript");
+	LaunchResult.NextAction = TEXT("edit GameplayScript.cs");
+	const FAvidScriptEditorCommandPresentation LaunchPresentation =
+		FAvidScriptEditorResultPresenter::MakeIdeLaunchPresentation(LaunchResult);
+	TestEqual(TEXT("IDE launch success severity"), LaunchPresentation.Severity, EAvidScriptEditorPresentationSeverity::Info);
+	TestTrue(TEXT("IDE launch success names Rider"), LaunchPresentation.Body.Contains(TEXT("Rider")));
+	TestTrue(TEXT("IDE launch details include solution"), LaunchPresentation.Details.Contains(TEXT("AvidScript.Gameplay.slnx")));
+
+	LaunchResult.bSucceeded = false;
+	LaunchResult.ErrorCategory = TEXT("ide_executable_missing");
+	LaunchResult.ErrorMessage = TEXT("Rider executable could not be discovered.");
+	const FAvidScriptEditorCommandPresentation LaunchFailurePresentation =
+		FAvidScriptEditorResultPresenter::MakeIdeLaunchPresentation(LaunchResult);
+	TestEqual(TEXT("IDE launch failure severity"), LaunchFailurePresentation.Severity, EAvidScriptEditorPresentationSeverity::Error);
+	TestTrue(TEXT("IDE launch failure category"), LaunchFailurePresentation.Body.Contains(TEXT("ide_executable_missing")));
 	return true;
 }
 

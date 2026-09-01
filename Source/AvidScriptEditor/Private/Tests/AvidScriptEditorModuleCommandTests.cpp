@@ -322,6 +322,25 @@ bool FAvidScriptEditorModuleSampleCommandConfigTest::RunTest(const FString& Para
 	TestTrue(TEXT("C# workspace create command label is explicit"), CSharpWorkspaceCreateMenuConfig.Label.ToString().Contains(TEXT("Project C# Gameplay Workspace")));
 	TestFalse(TEXT("C# workspace create command tooltip is set"), CSharpWorkspaceCreateMenuConfig.ToolTip.IsEmpty());
 	TestTrue(TEXT("C# workspace create command execute action is bound"), CSharpWorkspaceCreateMenuConfig.ExecuteAction.IsBound());
+	for (const EAvidScriptEditorIdeKind Ide : {
+		EAvidScriptEditorIdeKind::SystemDefault,
+		EAvidScriptEditorIdeKind::VisualStudio,
+		EAvidScriptEditorIdeKind::Rider,
+		EAvidScriptEditorIdeKind::VisualStudioCode })
+	{
+		const FAvidScriptEditorMenuEntryConfig OpenWorkspaceConfig =
+			FAvidScriptEditorModule::MakeCSharpWorkspaceOpenMenuEntryConfig(
+				Ide,
+				FSimpleDelegate::CreateLambda([]() {}));
+		TestFalse(TEXT("C# workspace open command entry is set"), OpenWorkspaceConfig.EntryName.IsNone());
+		TestFalse(TEXT("C# workspace open command label is set"), OpenWorkspaceConfig.Label.IsEmpty());
+		TestFalse(TEXT("C# workspace open command tooltip is set"), OpenWorkspaceConfig.ToolTip.IsEmpty());
+		TestTrue(TEXT("C# workspace open command action is bound"), OpenWorkspaceConfig.ExecuteAction.IsBound());
+	}
+	TestNotEqual(
+		TEXT("C# workspace IDE commands use distinct entries"),
+		FAvidScriptEditorModule::GetCSharpWorkspaceOpenEntryName(EAvidScriptEditorIdeKind::VisualStudio),
+		FAvidScriptEditorModule::GetCSharpWorkspaceOpenEntryName(EAvidScriptEditorIdeKind::Rider));
 
 	FAvidScriptEditorMenuEntryConfig CSharpWorkspaceBuildAndBindMenuConfig =
 		FAvidScriptEditorModule::MakeCSharpWorkspaceBuildAndBindMenuEntryConfig(FSimpleDelegate::CreateLambda([]() {

@@ -5,6 +5,7 @@
 #include "AvidScriptEditorCSharpBuildService.h"
 #include "AvidScriptEditorCSharpProfileService.h"
 #include "AvidScriptEditorCSharpWorkspaceService.h"
+#include "AvidScriptEditorIdeLaunchService.h"
 #include "AvidScriptEditorMenuRegistrar.h"
 #include "AvidScriptEditorSettingsService.h"
 #include "CSharpLiveReload/AvidScriptEditorCSharpLiveReloadService.h"
@@ -45,6 +46,7 @@ public:
 	static FName GetCSharpWorkspaceBuildAndBindEntryName();
 	static FName GetCSharpWorkspaceLiveReloadStartEntryName();
 	static FName GetCSharpWorkspaceLiveReloadStopEntryName();
+	static FName GetCSharpWorkspaceOpenEntryName(EAvidScriptEditorIdeKind Ide);
 	static FName GetDebuggerTabName();
 	static FName GetDebuggerMenuEntryName();
 	static FString GetCSharpActorLifecycleReportPath();
@@ -72,6 +74,9 @@ public:
 	static FAvidScriptEditorMenuEntryConfig MakeCSharpWorkspaceBuildAndBindMenuEntryConfig(FSimpleDelegate ExecuteAction);
 	static FAvidScriptEditorMenuEntryConfig MakeCSharpWorkspaceLiveReloadStartMenuEntryConfig(FSimpleDelegate ExecuteAction);
 	static FAvidScriptEditorMenuEntryConfig MakeCSharpWorkspaceLiveReloadStopMenuEntryConfig(FSimpleDelegate ExecuteAction);
+	static FAvidScriptEditorMenuEntryConfig MakeCSharpWorkspaceOpenMenuEntryConfig(
+		EAvidScriptEditorIdeKind Ide,
+		FSimpleDelegate ExecuteAction);
 	static FAvidScriptEditorMenuEntryConfig MakeDebuggerMenuEntryConfig(FSimpleDelegate ExecuteAction);
 	bool ExecuteSampleCommand(FAvidScriptEditorCommandLaunchResult& OutResult);
 	bool ExecuteCSharpActorLifecycleBinding(FAvidScriptEditorComponentBindingResult& OutResult);
@@ -112,6 +117,11 @@ public:
 	bool ExecuteStopCSharpWorkspaceLiveReload(
 		FAvidScriptEditorCSharpLiveReloadServiceResult& OutLiveReloadResult);
 	bool IsCSharpWorkspaceLiveReloadRunning() const;
+	bool ExecuteOpenCSharpWorkspace(
+		EAvidScriptEditorIdeKind Ide,
+		FAvidScriptEditorCSharpWorkspaceResult& OutWorkspaceResult,
+		FAvidScriptEditorIdeLaunchResult& OutLaunchResult,
+		IAvidScriptEditorIdeLaunchHost* HostOverride = nullptr);
 
 private:
 	void RegisterConsoleCommands();
@@ -137,6 +147,7 @@ private:
 	void HandleBuildAndBindCSharpWorkspace();
 	void HandleStartCSharpWorkspaceLiveReload();
 	void HandleStopCSharpWorkspaceLiveReload();
+	void HandleOpenCSharpWorkspace(EAvidScriptEditorIdeKind Ide);
 
 	TUniquePtr<FAvidScriptEditorCommandLauncher> CommandLauncher;
 	TUniquePtr<FAvidScriptEditorCSharpLiveReloadService> CSharpLiveReloadService;

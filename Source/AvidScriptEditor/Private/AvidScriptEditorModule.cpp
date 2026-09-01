@@ -529,6 +529,24 @@ FName FAvidScriptEditorModule::GetCSharpWorkspaceLiveReloadStopEntryName()
 	return TEXT("AvidScript.StopProjectCSharpLiveReload");
 }
 
+FName FAvidScriptEditorModule::GetCSharpWorkspaceOpenEntryName(
+	const EAvidScriptEditorIdeKind Ide)
+{
+	switch (Ide)
+	{
+	case EAvidScriptEditorIdeKind::SystemDefault:
+		return TEXT("AvidScript.OpenProjectCSharpGameplayWorkspace");
+	case EAvidScriptEditorIdeKind::VisualStudio:
+		return TEXT("AvidScript.OpenProjectCSharpGameplayWorkspace.VisualStudio");
+	case EAvidScriptEditorIdeKind::Rider:
+		return TEXT("AvidScript.OpenProjectCSharpGameplayWorkspace.Rider");
+	case EAvidScriptEditorIdeKind::VisualStudioCode:
+		return TEXT("AvidScript.OpenProjectCSharpGameplayWorkspace.VisualStudioCode");
+	default:
+		return NAME_None;
+	}
+}
+
 FName FAvidScriptEditorModule::GetDebuggerTabName()
 {
 	return TEXT("AvidScript.Debugger");
@@ -735,6 +753,41 @@ FAvidScriptEditorMenuEntryConfig FAvidScriptEditorModule::MakeCSharpWorkspaceLiv
 	return Config;
 }
 
+FAvidScriptEditorMenuEntryConfig FAvidScriptEditorModule::MakeCSharpWorkspaceOpenMenuEntryConfig(
+	const EAvidScriptEditorIdeKind Ide,
+	FSimpleDelegate ExecuteAction)
+{
+	FAvidScriptEditorMenuEntryConfig Config;
+	Config.OwnerName = GetToolMenuOwnerName();
+	Config.MenuName = GetSampleCommandMenuName();
+	Config.SectionName = GetSampleCommandSectionName();
+	Config.EntryName = GetCSharpWorkspaceOpenEntryName(Ide);
+	Config.SectionLabel = LOCTEXT("AvidScriptMenuSection", "AvidScript");
+	switch (Ide)
+	{
+	case EAvidScriptEditorIdeKind::SystemDefault:
+		Config.Label = LOCTEXT("AvidScriptOpenCSharpWorkspaceLabel", "Open Project C# Workspace");
+		Config.ToolTip = LOCTEXT("AvidScriptOpenCSharpWorkspaceToolTip", "Refresh and open the project C# gameplay workspace with the system default IDE.");
+		break;
+	case EAvidScriptEditorIdeKind::VisualStudio:
+		Config.Label = LOCTEXT("AvidScriptOpenCSharpWorkspaceVisualStudioLabel", "Open C# Workspace in Visual Studio");
+		Config.ToolTip = LOCTEXT("AvidScriptOpenCSharpWorkspaceVisualStudioToolTip", "Refresh and open the project C# gameplay solution in Visual Studio.");
+		break;
+	case EAvidScriptEditorIdeKind::Rider:
+		Config.Label = LOCTEXT("AvidScriptOpenCSharpWorkspaceRiderLabel", "Open C# Workspace in Rider");
+		Config.ToolTip = LOCTEXT("AvidScriptOpenCSharpWorkspaceRiderToolTip", "Refresh and open the project C# gameplay solution in Rider.");
+		break;
+	case EAvidScriptEditorIdeKind::VisualStudioCode:
+		Config.Label = LOCTEXT("AvidScriptOpenCSharpWorkspaceVisualStudioCodeLabel", "Open C# Workspace in VS Code");
+		Config.ToolTip = LOCTEXT("AvidScriptOpenCSharpWorkspaceVisualStudioCodeToolTip", "Refresh and open the project C# gameplay workspace folder in Visual Studio Code.");
+		break;
+	default:
+		break;
+	}
+	Config.ExecuteAction = MoveTemp(ExecuteAction);
+	return Config;
+}
+
 FAvidScriptEditorMenuEntryConfig FAvidScriptEditorModule::MakeDebuggerMenuEntryConfig(
 	FSimpleDelegate ExecuteAction)
 {
@@ -846,6 +899,34 @@ bool FAvidScriptEditorModule::ExecuteCreateCSharpWorkspace(
 	FAvidScriptEditorCSharpWorkspaceConfig Config;
 	Config.bOverwriteUserFiles = bOverwriteUserFiles;
 	return FAvidScriptEditorCSharpWorkspaceService::CreateOrRefresh(Config, OutResult);
+}
+
+bool FAvidScriptEditorModule::ExecuteOpenCSharpWorkspace(
+	const EAvidScriptEditorIdeKind Ide,
+	FAvidScriptEditorCSharpWorkspaceResult& OutWorkspaceResult,
+	FAvidScriptEditorIdeLaunchResult& OutLaunchResult,
+	IAvidScriptEditorIdeLaunchHost* HostOverride)
+{
+	if (!ExecuteCreateCSharpWorkspace(OutWorkspaceResult, false))
+	{
+		OutLaunchResult = FAvidScriptEditorIdeLaunchResult();
+		OutLaunchResult.Ide = Ide;
+		OutLaunchResult.ErrorCategory = OutWorkspaceResult.ErrorCategory;
+		OutLaunchResult.ErrorMessage = OutWorkspaceResult.ErrorMessage;
+		OutLaunchResult.NextAction = OutWorkspaceResult.NextAction;
+		return false;
+	}
+
+	FAvidScriptEditorIdeLaunchConfig Config;
+	Config.Ide = Ide;
+	Config.ProjectRoot = FPaths::ProjectDir();
+	Config.WorkspaceRoot = OutWorkspaceResult.WorkspaceRoot;
+	Config.SolutionPath = OutWorkspaceResult.SolutionPath;
+	Config.ProjectPath = OutWorkspaceResult.ProjectPath;
+	return FAvidScriptEditorIdeLaunchService::Launch(
+		Config,
+		OutLaunchResult,
+		HostOverride);
 }
 
 bool FAvidScriptEditorModule::ExecuteCSharpWorkspaceBuildAndBinding(
@@ -1126,6 +1207,27 @@ void FAvidScriptEditorModule::RegisterMenus()
 		LogAvidScriptMenuRegistrationFailure(Result);
 	}
 
+	const TArray<EAvidScriptEditorIdeKind> WorkspaceIdeKinds = {
+		EAvidScriptEditorIdeKind::SystemDefault,
+		EAvidScriptEditorIdeKind::VisualStudio,
+		EAvidScriptEditorIdeKind::Rider,
+		EAvidScriptEditorIdeKind::VisualStudioCode
+	};
+	for (const EAvidScriptEditorIdeKind Ide : WorkspaceIdeKinds)
+	{
+		const FAvidScriptEditorMenuEntryConfig OpenWorkspaceMenuConfig =
+			MakeCSharpWorkspaceOpenMenuEntryConfig(
+				Ide,
+				FSimpleDelegate::CreateLambda([this, Ide]()
+				{
+					HandleOpenCSharpWorkspace(Ide);
+				}));
+		if (!FAvidScriptEditorMenuRegistrar::RegisterMenuEntry(OpenWorkspaceMenuConfig, Result))
+		{
+			LogAvidScriptMenuRegistrationFailure(Result);
+		}
+	}
+
 	const FAvidScriptEditorMenuEntryConfig CSharpLiveReloadStartMenuConfig =
 		MakeCSharpWorkspaceLiveReloadStartMenuEntryConfig(
 			FSimpleDelegate::CreateRaw(
@@ -1281,6 +1383,19 @@ void FAvidScriptEditorModule::HandleBuildAndBindCSharpWorkspace()
 			GetProjectCSharpWorkspaceProfilePath(),
 			BuildResult,
 			BindingResult));
+}
+
+void FAvidScriptEditorModule::HandleOpenCSharpWorkspace(
+	const EAvidScriptEditorIdeKind Ide)
+{
+	FAvidScriptEditorCSharpWorkspaceResult WorkspaceResult;
+	FAvidScriptEditorIdeLaunchResult LaunchResult;
+	ExecuteOpenCSharpWorkspace(
+		Ide,
+		WorkspaceResult,
+		LaunchResult);
+	LogAvidScriptEditorPresentation(
+		FAvidScriptEditorResultPresenter::MakeIdeLaunchPresentation(LaunchResult));
 }
 
 void FAvidScriptEditorModule::HandleStartCSharpWorkspaceLiveReload()

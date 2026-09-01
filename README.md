@@ -121,7 +121,7 @@ public static class GameScript
 [ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)。
 Editor 可生成含 `.slnx`、`.editorconfig`、WASI `.csproj`、固定 SDK 和构建 profile 的 C# 工作区；
 刷新默认保留用户文件，只更新 Reflection typed facade 与不含绝对路径的离线源码索引。IDE 启动服务支持
-系统默认关联、Visual Studio、Rider 和 VS Code。
+系统默认关联、Visual Studio、Rider 和 VS Code，并已接入 Editor Tools 菜单。
 
 ## 架构
 

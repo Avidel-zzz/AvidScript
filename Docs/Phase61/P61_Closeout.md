@@ -129,10 +129,12 @@
 - 完成 `P61.D4c1` IDE 启动服务：可注入 host 统一支持默认关联、Visual Studio、Rider 与 VS Code；
 - 结构化启动计划和失败分类已经 Automation 验证，测试不会真实拉起外部 IDE；
 - 详细实现与证据见 [P61.D4c1 IDE 启动服务](P61.D4c1_IDE_Launch_Service.md)。
+- 完成 `P61.D4c2` Editor IDE 命令：Tools > AvidScript 提供默认、Visual Studio、Rider 与 VS Code 入口；
+- 命令先安全刷新工作区，再通过统一服务启动并向 AvidScript Diagnostic Log 发布结构化结果；
+- 详细实现与证据见 [P61.D4c2 Editor IDE 命令](P61.D4c2_Editor_IDE_Commands.md)。
 
 ## 待完成
 
-- `P61.D4c2` Editor IDE 打开命令；
 - `P61.E` 集成与集中 Gate。
 
 ## 人工验收边界

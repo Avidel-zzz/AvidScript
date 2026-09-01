@@ -4,6 +4,7 @@
 #include "AvidScriptEditorCSharpBuildService.h"
 #include "AvidScriptEditorCSharpProfileService.h"
 #include "AvidScriptEditorCSharpWorkspaceService.h"
+#include "AvidScriptEditorIdeLaunchService.h"
 
 #include "Misc/Paths.h"
 
@@ -308,6 +309,33 @@ FAvidScriptEditorCommandPresentation FAvidScriptEditorResultPresenter::MakeCShar
 		Result.CreatedUserFileCount,
 		Result.UpdatedUserFileCount,
 		Result.PreservedUserFileCount);
+	return Presentation;
+}
+
+FAvidScriptEditorCommandPresentation FAvidScriptEditorResultPresenter::MakeIdeLaunchPresentation(
+	const FAvidScriptEditorIdeLaunchResult& Result)
+{
+	FAvidScriptEditorCommandPresentation Presentation;
+	const FString IdeName = FAvidScriptEditorIdeLaunchService::GetIdeName(Result.Ide);
+	Presentation.Severity = Result.bSucceeded
+		? EAvidScriptEditorPresentationSeverity::Info
+		: EAvidScriptEditorPresentationSeverity::Error;
+	Presentation.Title = Result.bSucceeded
+		? TEXT("C# workspace opened")
+		: TEXT("C# workspace open failed");
+	Presentation.Body = Result.bSucceeded
+		? FString::Printf(TEXT("Opened the project C# workspace with %s."), *IdeName)
+		: FString::Printf(
+			TEXT("%s: %s"),
+			*Result.ErrorCategory,
+			*Result.ErrorMessage);
+	TArray<FString> Lines;
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Next action"), Result.NextAction);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("IDE"), IdeName);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Target"), Result.TargetPath);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Executable"), Result.ExecutablePath);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Working directory"), Result.WorkingDirectory);
+	Presentation.Details = FString::Join(Lines, TEXT("\n"));
 	return Presentation;
 }
 
