@@ -5,7 +5,7 @@
     "goal": "补齐 Interface、完整 Delegate、脚本 UFunction 默认参数、Blueprint 新声明函数和通用异步动作，保持生成式 Reflection、prepared hot path 与 Session-owned 生命周期",
     "start_commit": "074d7b662ce1658f958be54267062aba3869d677"
   },
-  "declared_stage": "implementing",
+  "declared_stage": "gate_ready",
   "architecture": {
     "path": "Docs/Phase60/P60.0_Modern_UE_Interop_Architecture.md",
     "version": 1,
@@ -44,9 +44,9 @@
   ],
   "debt": [],
   "review": {
-    "completed": false,
-    "evidence": "",
-    "completed_at_utc": null
+    "completed": true,
+    "evidence": "P60.A-D 边界复审完成；无逐 API wrapper、无第二套 scheduler；protected dirty 3/3 保持基线；最终 UBT、411/411 Automation、分层 benchmark 与 clean detached architecture Gate 均通过。",
+    "completed_at_utc": "2026-09-01T03:00:15.7626593+00:00"
   },
   "budgets": {
     "ubt": 3,
@@ -59,11 +59,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "",
-    "source_tree": "",
-    "state_sha256": "",
-    "review_evidence": "",
-    "at_utc": null
+    "source_commit": "75b630cd7a7d3da959d0830574be4aa0a47d8c50",
+    "source_tree": "ca4bb29da099e7b98345ab7b2fdd9869ad9b635e",
+    "state_sha256": "962522236bc482931cb6a366afa4e978a170d01c9492163b790a62c4cc4599d0",
+    "review_evidence": "P60.A-D 边界复审完成；无逐 API wrapper、无第二套 scheduler；protected dirty 3/3 保持基线；最终 UBT、411/411 Automation、分层 benchmark 与 clean detached architecture Gate 均通过。",
+    "at_utc": "2026-09-01T03:00:15.7626593+00:00"
   },
   "gate": {
     "report_path": "",
@@ -94,7 +94,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "freeze -Phase 60 -ReviewEvidence <text>",
-  "revision": 5,
-  "updated_at_utc": "2026-09-01T02:57:35.6849081+00:00"
+  "next_action": "attest -Phase 60 -GateReportPath <path>",
+  "revision": 6,
+  "updated_at_utc": "2026-09-01T03:00:15.7681910+00:00"
 }
