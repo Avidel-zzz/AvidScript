@@ -10,7 +10,7 @@
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 Development" src="https://img.shields.io/badge/Platform-Win64-0078D4?logo=windows&logoColor=white">
-  <img alt="Phase 61 P61.A In Progress" src="https://img.shields.io/badge/Status-Phase%2061%20P61.A-F59E0B">
+  <img alt="Phase 61 P61.A Complete" src="https://img.shields.io/badge/Status-Phase%2061%20P61.A-26A269">
   <img alt="Automation Baseline 411/411" src="https://img.shields.io/badge/Baseline-411%2F411-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
@@ -39,7 +39,7 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 | 热重载 | 方法体事务式替换、候选回滚、状态帧与 handle 生命周期隔离 |
 | 发布 | 内容寻址 Generated Type bundle、NonUFS staging 与 Cook-layout Runtime load |
 | 后端 | Wasmtime 45 Win64 主后端；WAMR 兼容后端 |
-| 增量构建 | 双层产物缓存；persistent Worker 复用 Roslyn 与四阶段进程，无修改热构建零编译调用 |
+| 增量构建 | 双层产物缓存与 persistent Worker；无修改热构建零编译调用，5 轮中位数 `884 ms` |
 | 结构化诊断 | 编译 stage/code/span/source hash 统一；Editor 安全解析项目相对源码位置 |
 
 Phase 60 的功能批次已完成：UE Interface 与默认参数、Delegate 双向调用、Blueprint
@@ -51,9 +51,9 @@ callable/event，以及带 typed payload 的 AsyncAction `await` 已接入真实
 
 详细进度见 [Phase 60 中文收尾记录](Docs/Phase60/P60_Closeout.md)。
 
-Phase 61 已完成编辑器调试架构冻结、`P61.A1` 完整产物缓存、`P61.A2` persistent
-compiler 与 `P61.A3a` 结构化诊断/源码定位服务。增量性能矩阵、源码级调用栈、断点、变量查看
-和 Profiler 尚待后续小节。
+Phase 61 的 `P61.A` 已完成：完整产物缓存、persistent compiler、结构化诊断/源码定位及
+增量性能矩阵均已通过门禁。5 轮矩阵中，无修改、方法体、Binding 与工具链变更的中位耗时
+分别为 `884 / 1833 / 1826 / 3223 ms`；源码级调用栈、断点、变量查看和 Profiler 属于后续批次。
 
 ## C# 游戏脚本
 

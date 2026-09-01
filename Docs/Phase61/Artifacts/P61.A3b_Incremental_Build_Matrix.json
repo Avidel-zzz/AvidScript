@@ -1,0 +1,437 @@
+{
+  "schema_version": 1,
+  "phase": "P61.A3b",
+  "generated_utc": "2026-09-01T08:34:04.4314011Z",
+  "git_commit": "1722d04c2dd7d83cf46757590d15a32db2a2cdb0",
+  "configuration": "Release",
+  "platform": "Microsoft Windows 10.0.26200",
+  "architecture": "X64",
+  "iterations": 5,
+  "correctness_gate": "passed",
+  "budgets": {
+    "enforced": true,
+    "no_op_median_ms": 1000.0,
+    "no_op_p95_ms": 1500.0,
+    "method_body_median_ms": 3000.0,
+    "binding_median_ms": 3000.0,
+    "toolchain_median_ms": 10000.0,
+    "passed": true,
+    "violations": []
+  },
+  "summaries": [
+    {
+      "scenario": "no_op",
+      "count": 5,
+      "min_ms": 831.685,
+      "median_ms": 883.915,
+      "p95_ms": 938.301,
+      "max_ms": 938.301
+    },
+    {
+      "scenario": "method_body_change",
+      "count": 5,
+      "min_ms": 1790.496,
+      "median_ms": 1832.748,
+      "p95_ms": 1947.226,
+      "max_ms": 1947.226
+    },
+    {
+      "scenario": "binding_change",
+      "count": 5,
+      "min_ms": 1769.704,
+      "median_ms": 1825.998,
+      "p95_ms": 1852.99,
+      "max_ms": 1852.99
+    },
+    {
+      "scenario": "toolchain_change",
+      "count": 5,
+      "min_ms": 3198.255,
+      "median_ms": 3222.949,
+      "p95_ms": 4637.354,
+      "max_ms": 4637.354
+    }
+  ],
+  "measurements": [
+    {
+      "scenario": "no_op",
+      "iteration": 1,
+      "duration_ms": 938.301,
+      "semantic_cache_lookup": "hit",
+      "compilation_cache_lookup": "hit",
+      "tool_invocations": {
+        "frontend": 0,
+        "semantic": 0,
+        "guest_ir": 0,
+        "wasm_backend": 0
+      },
+      "worker": {
+        "used": false,
+        "started": false,
+        "request_count": 0,
+        "duration_ms": 0.0
+      }
+    },
+    {
+      "scenario": "no_op",
+      "iteration": 2,
+      "duration_ms": 867.815,
+      "semantic_cache_lookup": "hit",
+      "compilation_cache_lookup": "hit",
+      "tool_invocations": {
+        "frontend": 0,
+        "semantic": 0,
+        "guest_ir": 0,
+        "wasm_backend": 0
+      },
+      "worker": {
+        "used": false,
+        "started": false,
+        "request_count": 0,
+        "duration_ms": 0.0
+      }
+    },
+    {
+      "scenario": "no_op",
+      "iteration": 3,
+      "duration_ms": 914.48,
+      "semantic_cache_lookup": "hit",
+      "compilation_cache_lookup": "hit",
+      "tool_invocations": {
+        "frontend": 0,
+        "semantic": 0,
+        "guest_ir": 0,
+        "wasm_backend": 0
+      },
+      "worker": {
+        "used": false,
+        "started": false,
+        "request_count": 0,
+        "duration_ms": 0.0
+      }
+    },
+    {
+      "scenario": "no_op",
+      "iteration": 4,
+      "duration_ms": 831.685,
+      "semantic_cache_lookup": "hit",
+      "compilation_cache_lookup": "hit",
+      "tool_invocations": {
+        "frontend": 0,
+        "semantic": 0,
+        "guest_ir": 0,
+        "wasm_backend": 0
+      },
+      "worker": {
+        "used": false,
+        "started": false,
+        "request_count": 0,
+        "duration_ms": 0.0
+      }
+    },
+    {
+      "scenario": "no_op",
+      "iteration": 5,
+      "duration_ms": 883.915,
+      "semantic_cache_lookup": "hit",
+      "compilation_cache_lookup": "hit",
+      "tool_invocations": {
+        "frontend": 0,
+        "semantic": 0,
+        "guest_ir": 0,
+        "wasm_backend": 0
+      },
+      "worker": {
+        "used": false,
+        "started": false,
+        "request_count": 0,
+        "duration_ms": 0.0
+      }
+    },
+    {
+      "scenario": "method_body_change",
+      "iteration": 1,
+      "duration_ms": 1947.226,
+      "semantic_cache_lookup": "miss",
+      "compilation_cache_lookup": "miss",
+      "tool_invocations": {
+        "frontend": 1,
+        "semantic": 1,
+        "guest_ir": 1,
+        "wasm_backend": 1
+      },
+      "worker": {
+        "used": true,
+        "started": false,
+        "request_count": 3,
+        "duration_ms": 79.215
+      }
+    },
+    {
+      "scenario": "method_body_change",
+      "iteration": 2,
+      "duration_ms": 1940.306,
+      "semantic_cache_lookup": "miss",
+      "compilation_cache_lookup": "miss",
+      "tool_invocations": {
+        "frontend": 1,
+        "semantic": 1,
+        "guest_ir": 1,
+        "wasm_backend": 1
+      },
+      "worker": {
+        "used": true,
+        "started": false,
+        "request_count": 3,
+        "duration_ms": 89.963
+      }
+    },
+    {
+      "scenario": "method_body_change",
+      "iteration": 3,
+      "duration_ms": 1804.396,
+      "semantic_cache_lookup": "miss",
+      "compilation_cache_lookup": "miss",
+      "tool_invocations": {
+        "frontend": 1,
+        "semantic": 1,
+        "guest_ir": 1,
+        "wasm_backend": 1
+      },
+      "worker": {
+        "used": true,
+        "started": false,
+        "request_count": 3,
+        "duration_ms": 78.329
+      }
+    },
+    {
+      "scenario": "method_body_change",
+      "iteration": 4,
+      "duration_ms": 1832.748,
+      "semantic_cache_lookup": "miss",
+      "compilation_cache_lookup": "miss",
+      "tool_invocations": {
+        "frontend": 1,
+        "semantic": 1,
+        "guest_ir": 1,
+        "wasm_backend": 1
+      },
+      "worker": {
+        "used": true,
+        "started": false,
+        "request_count": 3,
+        "duration_ms": 72.862
+      }
+    },
+    {
+      "scenario": "method_body_change",
+      "iteration": 5,
+      "duration_ms": 1790.496,
+      "semantic_cache_lookup": "miss",
+      "compilation_cache_lookup": "miss",
+      "tool_invocations": {
+        "frontend": 1,
+        "semantic": 1,
+        "guest_ir": 1,
+        "wasm_backend": 1
+      },
+      "worker": {
+        "used": true,
+        "started": false,
+        "request_count": 3,
+        "duration_ms": 74.465
+      }
+    },
+    {
+      "scenario": "binding_change",
+      "iteration": 1,
+      "duration_ms": 1769.704,
+      "semantic_cache_lookup": "miss",
+      "compilation_cache_lookup": "miss",
+      "tool_invocations": {
+        "frontend": 1,
+        "semantic": 1,
+        "guest_ir": 1,
+        "wasm_backend": 1
+      },
+      "worker": {
+        "used": true,
+        "started": false,
+        "request_count": 3,
+        "duration_ms": 63.899
+      }
+    },
+    {
+      "scenario": "binding_change",
+      "iteration": 2,
+      "duration_ms": 1852.99,
+      "semantic_cache_lookup": "miss",
+      "compilation_cache_lookup": "miss",
+      "tool_invocations": {
+        "frontend": 1,
+        "semantic": 1,
+        "guest_ir": 1,
+        "wasm_backend": 1
+      },
+      "worker": {
+        "used": true,
+        "started": false,
+        "request_count": 3,
+        "duration_ms": 86.41
+      }
+    },
+    {
+      "scenario": "binding_change",
+      "iteration": 3,
+      "duration_ms": 1825.998,
+      "semantic_cache_lookup": "miss",
+      "compilation_cache_lookup": "miss",
+      "tool_invocations": {
+        "frontend": 1,
+        "semantic": 1,
+        "guest_ir": 1,
+        "wasm_backend": 1
+      },
+      "worker": {
+        "used": true,
+        "started": false,
+        "request_count": 3,
+        "duration_ms": 76.558
+      }
+    },
+    {
+      "scenario": "binding_change",
+      "iteration": 4,
+      "duration_ms": 1843.139,
+      "semantic_cache_lookup": "miss",
+      "compilation_cache_lookup": "miss",
+      "tool_invocations": {
+        "frontend": 1,
+        "semantic": 1,
+        "guest_ir": 1,
+        "wasm_backend": 1
+      },
+      "worker": {
+        "used": true,
+        "started": false,
+        "request_count": 3,
+        "duration_ms": 79.94
+      }
+    },
+    {
+      "scenario": "binding_change",
+      "iteration": 5,
+      "duration_ms": 1791.475,
+      "semantic_cache_lookup": "miss",
+      "compilation_cache_lookup": "miss",
+      "tool_invocations": {
+        "frontend": 1,
+        "semantic": 1,
+        "guest_ir": 1,
+        "wasm_backend": 1
+      },
+      "worker": {
+        "used": true,
+        "started": false,
+        "request_count": 3,
+        "duration_ms": 70.551
+      }
+    },
+    {
+      "scenario": "toolchain_change",
+      "iteration": 1,
+      "duration_ms": 4637.354,
+      "semantic_cache_lookup": "hit",
+      "compilation_cache_lookup": "miss",
+      "tool_invocations": {
+        "frontend": 0,
+        "semantic": 0,
+        "guest_ir": 1,
+        "wasm_backend": 1
+      },
+      "worker": {
+        "used": false,
+        "started": false,
+        "request_count": 0,
+        "duration_ms": 0.0
+      }
+    },
+    {
+      "scenario": "toolchain_change",
+      "iteration": 2,
+      "duration_ms": 3222.949,
+      "semantic_cache_lookup": "hit",
+      "compilation_cache_lookup": "miss",
+      "tool_invocations": {
+        "frontend": 0,
+        "semantic": 0,
+        "guest_ir": 1,
+        "wasm_backend": 1
+      },
+      "worker": {
+        "used": false,
+        "started": false,
+        "request_count": 0,
+        "duration_ms": 0.0
+      }
+    },
+    {
+      "scenario": "toolchain_change",
+      "iteration": 3,
+      "duration_ms": 3401.001,
+      "semantic_cache_lookup": "hit",
+      "compilation_cache_lookup": "miss",
+      "tool_invocations": {
+        "frontend": 0,
+        "semantic": 0,
+        "guest_ir": 1,
+        "wasm_backend": 1
+      },
+      "worker": {
+        "used": false,
+        "started": false,
+        "request_count": 0,
+        "duration_ms": 0.0
+      }
+    },
+    {
+      "scenario": "toolchain_change",
+      "iteration": 4,
+      "duration_ms": 3198.255,
+      "semantic_cache_lookup": "hit",
+      "compilation_cache_lookup": "miss",
+      "tool_invocations": {
+        "frontend": 0,
+        "semantic": 0,
+        "guest_ir": 1,
+        "wasm_backend": 1
+      },
+      "worker": {
+        "used": false,
+        "started": false,
+        "request_count": 0,
+        "duration_ms": 0.0
+      }
+    },
+    {
+      "scenario": "toolchain_change",
+      "iteration": 5,
+      "duration_ms": 3208.95,
+      "semantic_cache_lookup": "hit",
+      "compilation_cache_lookup": "miss",
+      "tool_invocations": {
+        "frontend": 0,
+        "semantic": 0,
+        "guest_ir": 1,
+        "wasm_backend": 1
+      },
+      "worker": {
+        "used": false,
+        "started": false,
+        "request_count": 0,
+        "duration_ms": 0.0
+      }
+    }
+  ]
+}

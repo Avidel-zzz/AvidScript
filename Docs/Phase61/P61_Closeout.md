@@ -1,6 +1,6 @@
 # Phase 61 收尾记录
 
-状态：实施中，`P61.A1-A3a` 已完成
+状态：实施中，`P61.A1-A3b` 已完成
 
 ## 目标
 
@@ -25,10 +25,14 @@
 - 完成 `P61.A3a` 结构化诊断统一：Frontend/Semantic 使用稳定 code、stage、项目相对
   source id、source SHA-256 与 1-based span，Editor 可安全解析并交给源码访问器；
 - 详细实现与证据见 [P61.A3a 结构化诊断与源码定位](P61.A3a_Structured_Diagnostics_And_Navigation.md)。
+- 完成 `P61.A3b` 增量性能矩阵：覆盖 no-op、方法体、Binding 与工具链变更，强制验证
+  cache 命中、阶段调用次数与耗时预算；
+- 5 轮正式矩阵全部通过，四类场景中位数分别为 `883.915 / 1832.748 / 1825.998 /
+  3222.949 ms`；
+- 详细实现与证据见 [P61.A3b 增量构建性能矩阵](P61.A3b_Incremental_Build_Performance_Matrix.md)。
 
 ## 待完成
 
-- `P61.A3b` 增量性能矩阵；
 - `P61.B` 指令级 source map 与调用栈；
 - `P61.C` 断点、单步与变量查看；
 - `P61.D` Profiler 与 IDE workspace；
