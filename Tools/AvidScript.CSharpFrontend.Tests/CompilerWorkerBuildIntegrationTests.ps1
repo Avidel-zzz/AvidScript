@@ -172,7 +172,8 @@ param(
     [string]`$WasmPath,
     [string]`$InspectionPath,
     [string]`$Configuration = "Release",
-    [string]`$DataLaneFusion = "enabled")
+    [string]`$DataLaneFusion = "enabled",
+    [string]`$DebugInstrumentation = "disabled")
 [System.IO.File]::WriteAllText('$EscapedCustomMarker', 'called')
 & '$EscapedDefaultGuestCompiler' @PSBoundParameters
 exit `$LASTEXITCODE

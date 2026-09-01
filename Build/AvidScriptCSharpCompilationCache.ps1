@@ -116,6 +116,7 @@ function Get-AvidScriptCSharpCompilationCacheContext {
         [Parameter(Mandatory = $true)][string]$ModuleId,
         [Parameter(Mandatory = $true)][string]$Configuration,
         [Parameter(Mandatory = $true)][string]$DataLaneFusion,
+        [Parameter(Mandatory = $true)][string]$DebugInstrumentation,
         [AllowNull()][object]$AuthorizationPackage,
         [AllowNull()][object]$RuntimePackage
     )
@@ -160,6 +161,7 @@ function Get-AvidScriptCSharpCompilationCacheContext {
         module_id = $ModuleId
         configuration = $Configuration
         data_lane_fusion = $DataLaneFusion
+        debug_instrumentation = $DebugInstrumentation
         frontend_artifact_sha256 = $FrontendArtifactSha256
         semantic_artifact_sha256 = $SemanticSha256
         toolchain_fingerprint = $ToolchainFingerprint

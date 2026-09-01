@@ -76,6 +76,11 @@ public static partial class CompilerWorkerRequestValidator
                     throw new ArgumentException(
                         "ASCW1006: Guest stage data_lane_fusion must be enabled or disabled.");
                 }
+                if (request.DebugInstrumentation is not ("enabled" or "disabled"))
+                {
+                    throw new ArgumentException(
+                        "ASCW1006: Guest stage debug_instrumentation must be enabled or disabled.");
+                }
                 return;
         }
     }

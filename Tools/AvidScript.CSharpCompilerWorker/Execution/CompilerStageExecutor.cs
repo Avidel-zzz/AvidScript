@@ -107,6 +107,7 @@ public sealed class CompilerStageExecutor
             "--debug-map", request.DebugMapPath,
             "--frontend-artifact-sha256", request.FrontendArtifactSha256,
             "--data-lane-fusion", request.DataLaneFusion,
+            "--debug-instrumentation", request.DebugInstrumentation,
         });
         if (exitCode != 0)
         {

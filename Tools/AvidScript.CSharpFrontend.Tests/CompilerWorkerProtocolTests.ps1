@@ -160,11 +160,18 @@ try {
     $GuestRequest.inspection_path = [System.IO.Path]::GetFullPath($InspectionPath)
     $GuestRequest.frontend_artifact_sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $FrontendPath).Hash.ToLowerInvariant()
     $GuestRequest.data_lane_fusion = "enabled"
+    $GuestRequest.debug_instrumentation = "enabled"
     $Guest = Invoke-WorkerRequest $GuestRequest
     Assert-Condition ($Guest.succeeded) "worker Guest/WASM stage failed: $(@($Guest.diagnostics) -join '; ')"
     foreach ($Artifact in @($GuestIrPath, $DebugMapPath, $StateSchemaPath, $WasmPath, $InspectionPath)) {
         Assert-Condition (Test-Path -LiteralPath $Artifact -PathType Leaf) "worker artifact is missing: $Artifact"
     }
+    $GuestIr = Get-Content -Raw -LiteralPath $GuestIrPath | ConvertFrom-Json
+    Assert-Condition (@($GuestIr.imports | Where-Object {
+        [string]$_.module -ceq "avidscript" -and
+        [string]$_.name -ceq "avid_debug_probe" -and
+        [string]$_.dispatch_class -ceq "debug"
+    }).Count -eq 1) "worker did not forward enabled debug instrumentation"
     Assert-Condition ([string]$Guest.worker_instance_id -ceq $WorkerInstanceId) "worker restarted before Guest/WASM stage"
 
     $InvalidRequest = New-WorkerRequest -RequestId "invalid-version" -Stage "ping"

@@ -53,8 +53,9 @@ callable/event，以及带 typed payload 的 AsyncAction `await` 已接入真实
 
 Phase 61 已完成 `P61.A-P61.B`：完整产物缓存、persistent compiler、Debug Map v2、同步/异步
 序列点及 Editor 可导航调用栈已落地；`P61.C1a` 已加入可校验、跨函数唯一的稳定 probe ID，
-`P61.C1b` 已加入默认关闭的 `avidscript.avid_debug_probe(i64) -> i32` 插桩；暂停、单步和变量
-查看仍未宣称可用。5 轮矩阵中，无修改、方法体、Binding 与工具链变更的
+`P61.C1b-C1c` 已加入默认关闭的 `avidscript.avid_debug_probe(i64) -> i32` 插桩，并接入正式
+构建、persistent worker 与缓存身份；暂停、单步和变量查看仍未宣称可用。5 轮矩阵中，
+无修改、方法体、Binding 与工具链变更的
 中位耗时分别为 `884 / 1833 / 1826 / 3223 ms`；断点、变量查看和 Profiler 仍在后续批次。
 
 ## C# 游戏脚本

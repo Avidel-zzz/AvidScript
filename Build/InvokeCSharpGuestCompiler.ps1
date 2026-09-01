@@ -9,7 +9,9 @@ param(
     [Parameter(Mandatory = $true)][string]$InspectionPath,
     [string]$Configuration = "Release",
     [ValidateSet("enabled", "disabled")]
-    [string]$DataLaneFusion = "enabled"
+    [string]$DataLaneFusion = "enabled",
+    [ValidateSet("enabled", "disabled")]
+    [string]$DebugInstrumentation = "disabled"
 )
 
 $ErrorActionPreference = "Stop"
@@ -89,7 +91,8 @@ try {
         --state-schema $StateSchemaPath `
         --debug-map $DebugMapPath `
         --frontend-artifact-sha256 $FrontendArtifactSha256 `
-        --data-lane-fusion $DataLaneFusion
+        --data-lane-fusion $DataLaneFusion `
+        --debug-instrumentation $DebugInstrumentation
     if ($LASTEXITCODE -ne 0) {
         $ExitCode = $LASTEXITCODE
         throw "C# semantic to Guest IR lowering failed with exit code $ExitCode."

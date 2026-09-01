@@ -42,6 +42,7 @@ function Invoke-CompilationCacheBuild {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
         [ValidateSet("enabled", "disabled")][string]$DataLaneFusion = "enabled",
+        [ValidateSet("enabled", "disabled")][string]$DebugInstrumentation = "disabled",
         [switch]$DisableCompilationCache
     )
 
@@ -60,6 +61,7 @@ function Invoke-CompilationCacheBuild {
         SemanticCacheRoot = $SemanticCacheRoot
         CompilationCacheRoot = $CompilationCacheRoot
         DataLaneFusion = $DataLaneFusion
+        DebugInstrumentation = $DebugInstrumentation
     }
     if ($DisableCompilationCache) {
         $Arguments.DisableCompilationCache = $true
@@ -154,6 +156,28 @@ Assert-Condition ($Invalidated.Report.compilation_cache.lookup -ceq "miss") "dat
 Assert-Condition (
     [string]$Invalidated.Report.compilation_cache.key -cne [string]$Recovered.Report.compilation_cache.key) `
     "data-lane change retained the previous compilation cache key"
+
+$DebugInvalidated = Invoke-CompilationCacheBuild `
+    -Name "DebugInvalidated" `
+    -DataLaneFusion "disabled" `
+    -DebugInstrumentation "enabled"
+Assert-Condition ($DebugInvalidated.ExitCode -eq 0 -and $DebugInvalidated.Report.succeeded) `
+    "debug instrumentation cache invalidation build failed"
+Assert-Condition ($DebugInvalidated.Report.compilation_cache.lookup -ceq "miss") `
+    "debug instrumentation change did not invalidate compilation cache"
+Assert-Condition (
+    [string]$DebugInvalidated.Report.compilation_cache.key -cne
+        [string]$Invalidated.Report.compilation_cache.key) `
+    "debug instrumentation change retained the previous compilation cache key"
+Assert-Condition (
+    [string]$DebugInvalidated.Report.compilation.debug_instrumentation -ceq "enabled") `
+    "debug instrumentation mode was not reported"
+$DebugGuestIr = Get-Content -Raw -LiteralPath (
+    Resolve-ProjectPath ([string]$DebugInvalidated.Report.artifacts.guest_ir_file)) | ConvertFrom-Json
+Assert-Condition (@($DebugGuestIr.imports | Where-Object {
+    [string]$_.module -ceq "avidscript" -and
+    [string]$_.name -ceq "avid_debug_probe"
+}).Count -eq 1) "debug instrumentation build did not publish the probe import"
 
 $Disabled = Invoke-CompilationCacheBuild -Name "Disabled" -DisableCompilationCache
 Assert-Condition ($Disabled.ExitCode -eq 0 -and $Disabled.Report.succeeded) "disabled compilation-cache build failed"

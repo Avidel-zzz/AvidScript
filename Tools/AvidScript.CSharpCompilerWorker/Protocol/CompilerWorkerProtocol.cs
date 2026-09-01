@@ -47,6 +47,8 @@ public sealed record CompilerWorkerRequest
 
     public string DataLaneFusion { get; init; } = "enabled";
 
+    public string DebugInstrumentation { get; init; } = "disabled";
+
     public string ReferenceSourcePath { get; init; } = string.Empty;
 
     public string ExecutableReferenceSourcePath { get; init; } = string.Empty;

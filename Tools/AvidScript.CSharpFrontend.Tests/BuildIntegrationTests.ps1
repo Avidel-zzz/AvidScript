@@ -315,7 +315,9 @@ param(
     [Parameter(Mandatory = $true)][string]$InspectionPath,
     [string]$Configuration = "Release",
     [ValidateSet("enabled", "disabled")]
-    [string]$DataLaneFusion = "enabled"
+    [string]$DataLaneFusion = "enabled",
+    [ValidateSet("enabled", "disabled")]
+    [string]$DebugInstrumentation = "disabled"
 )
 
 $ErrorActionPreference = "Stop"

@@ -17,6 +17,8 @@ param(
     [string]$CompilationCacheRoot = "",
     [ValidateSet("enabled", "disabled")]
     [string]$DataLaneFusion = "enabled",
+    [ValidateSet("auto", "enabled", "disabled")]
+    [string]$DebugInstrumentation = "auto",
     [switch]$AllowGeneratedTypeImports,
     [string]$GeneratedTypeManifestPath = "",
     [switch]$DisableSemanticCache,
@@ -47,6 +49,13 @@ $script:GeneratedTypeExportNames = [System.Collections.Generic.HashSet[string]]:
 . (Join-Path $BuildDir "AvidScriptCSharpSemanticCache.ps1")
 . (Join-Path $BuildDir "AvidScriptCSharpCompilationCache.ps1")
 . (Join-Path $BuildDir "AvidScriptCSharpCompilerWorker.ps1")
+
+$ResolvedDebugInstrumentation = if ($DebugInstrumentation -ceq "auto") {
+    if ($Configuration -ieq "Debug") { "enabled" } else { "disabled" }
+}
+else {
+    $DebugInstrumentation
+}
 
 if ([string]::IsNullOrWhiteSpace($CompilationCacheRoot)) {
     $CompilationCacheRoot = Join-Path $ProjectRoot "Saved\AvidScript\CSharpCompilationCache\v1"
@@ -406,7 +415,8 @@ function Test-CompilerInjectedBindingImport {
     param(
         [Parameter(Mandatory = $true)][object]$Import,
         [Parameter(Mandatory = $true)][bool]$AllowDataLaneImports,
-        [Parameter(Mandatory = $true)][bool]$AllowGeneratedTypeImports
+        [Parameter(Mandatory = $true)][bool]$AllowGeneratedTypeImports,
+        [Parameter(Mandatory = $true)][bool]$AllowDebugImports
     )
 
     if ([string]$Import.module -cne "avidscript" -or
@@ -416,6 +426,14 @@ function Test-CompilerInjectedBindingImport {
     }
 
     $ParameterTypes = @($Import.parameter_type_ids | ForEach-Object { [string]$_ })
+    if ($AllowDebugImports -and
+        [string]$Import.id -ceq "import:synthetic:debug_probe:v1" -and
+        [string]$Import.name -ceq "avid_debug_probe" -and
+        [string]$Import.dispatch_class -ceq "debug") {
+        return $ParameterTypes.Count -eq 1 -and
+            $ParameterTypes[0] -ceq "type:int64" -and
+            [string]$Import.return_type_id -ceq "type:int32"
+    }
     if ([string]$Import.id -ceq "avidscript.delegate_output_write.v1" -and
         [string]$Import.name -ceq "avid_delegate_output_write" -and
         [string]$Import.dispatch_class -ceq "semantic") {
@@ -471,7 +489,8 @@ function Test-BindingPackageImports {
         [AllowNull()][object]$PackageInfo,
         [AllowEmptyCollection()][object[]]$GuestImports,
         [bool]$AllowDataLaneImports = $false,
-        [bool]$AllowGeneratedTypeImports = $false
+        [bool]$AllowGeneratedTypeImports = $false,
+        [bool]$AllowDebugImports = $false
     )
 
     $DeclaredByKey = [System.Collections.Generic.Dictionary[string, object]]::new(
@@ -492,7 +511,8 @@ function Test-BindingPackageImports {
             -not (Test-CompilerInjectedBindingImport `
                 -Import $Import `
                 -AllowDataLaneImports $AllowDataLaneImports `
-                -AllowGeneratedTypeImports $AllowGeneratedTypeImports)) {
+                -AllowGeneratedTypeImports $AllowGeneratedTypeImports `
+                -AllowDebugImports $AllowDebugImports)) {
             $UnexpectedImports += "$([string]$Import.module).$([string]$Import.name)"
         }
     }
@@ -680,6 +700,7 @@ function Write-BuildReport {
         output_root = Convert-ToProjectRelativePath $OutputRoot
         compilation = [ordered]@{
             data_lane_fusion = $DataLaneFusion
+            debug_instrumentation = $ResolvedDebugInstrumentation
         }
         build_reuse = $BuildReuse
         semantic_cache = $SemanticCache
@@ -1414,6 +1435,7 @@ if (-not $DisableCompilationCache) {
             -ModuleId $ModuleId `
             -Configuration $Configuration `
             -DataLaneFusion $DataLaneFusion `
+            -DebugInstrumentation $ResolvedDebugInstrumentation `
             -AuthorizationPackage $BindingAuthorizationInfo `
             -RuntimePackage $BindingPackageInfo
         $CompilationCache.key = [string]$CompilationCacheContext.CacheKey
@@ -1492,6 +1514,7 @@ if (-not $CompilationCacheHit) {
                 inspection_path = $WasmInspectionArtifactPath
                 frontend_artifact_sha256 = $FrontendArtifactSha256
                 data_lane_fusion = $DataLaneFusion
+                debug_instrumentation = $ResolvedDebugInstrumentation
             }
         if ($GuestWorkerInvocation.RequiredFailure) {
             Write-BuildReport -Result "compiler_worker_failed" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics
@@ -1516,7 +1539,8 @@ if (-not $CompilationCacheHit) {
             "-WasmPath", $WasmArtifactPath,
             "-InspectionPath", $WasmInspectionArtifactPath,
             "-Configuration", $Configuration,
-            "-DataLaneFusion", $DataLaneFusion)
+            "-DataLaneFusion", $DataLaneFusion,
+            "-DebugInstrumentation", $ResolvedDebugInstrumentation)
         $CompilerInvocation = Invoke-AvidScriptPowerShell -Arguments $CompilerArguments
         $CompilerOutput = @($CompilerInvocation.Output)
         $CompilerExitCode = [int]$CompilerInvocation.ExitCode
@@ -1605,7 +1629,8 @@ if (-not $IsDefaultSource) {
         -PackageInfo $BindingAuthorizationInfo `
         -GuestImports @($GuestIrModel.imports) `
         -AllowDataLaneImports ($DataLaneFusion -ceq "enabled") `
-        -AllowGeneratedTypeImports ([bool]$AllowGeneratedTypeImports)
+        -AllowGeneratedTypeImports ([bool]$AllowGeneratedTypeImports) `
+        -AllowDebugImports ($ResolvedDebugInstrumentation -ceq "enabled")
     $UsedAuthorizationBindingImports = @($AuthorizationValidation.UsedImports)
     if (@($AuthorizationValidation.UnexpectedImports).Count -gt 0) {
         Remove-LoadableArtifacts
@@ -1624,7 +1649,8 @@ if (-not $IsDefaultSource) {
         -PackageInfo $BindingPackageInfo `
         -GuestImports @($GuestIrModel.imports) `
         -AllowDataLaneImports ($DataLaneFusion -ceq "enabled") `
-        -AllowGeneratedTypeImports ([bool]$AllowGeneratedTypeImports)
+        -AllowGeneratedTypeImports ([bool]$AllowGeneratedTypeImports) `
+        -AllowDebugImports ($ResolvedDebugInstrumentation -ceq "enabled")
     $UsedRuntimeBindingImports = @($RuntimeValidation.UsedImports)
     $RuntimeIdentityMismatch = @()
     $RuntimeUsedByKey = [System.Collections.Generic.Dictionary[string, object]]::new(
@@ -1996,6 +2022,7 @@ $Manifest = [ordered]@{
     }
     compilation = [ordered]@{
         data_lane_fusion = $DataLaneFusion
+        debug_instrumentation = $ResolvedDebugInstrumentation
     }
     binding_package = if ($null -eq $BindingPackageInfo) { $null } else {
         [ordered]@{
