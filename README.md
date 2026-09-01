@@ -234,8 +234,8 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 
 ## 路线图
 
-1. **P61**：增量编译、源码定位、调用栈、断点、变量查看与 Profiler；
-2. **P62-P64**：Cook/Shipping、移动端 AOT 与真实小型游戏 Demo；
+1. **P62**：Win64 Cook/Shipping、发布资产策略与脚本故障隔离；
+2. **P63-P64**：移动端 AOT 与真实小型游戏 Demo；
 3. **P65**：跨框架成熟度、稳定性与性能领导力收口。
 
 路线图只表示工程顺序，不代表对应能力已经可用。
