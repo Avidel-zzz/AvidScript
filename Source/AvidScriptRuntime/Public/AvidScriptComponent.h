@@ -61,6 +61,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "AvidScript|Runtime")
 	bool ReloadScript();
 
+#if WITH_EDITOR
+	FAvidScriptRuntimeSession* GetRuntimeSessionForEditorDebugging() const;
+#endif
+
 #if WITH_DEV_AUTOMATION_TESTS
 	FAvidScriptRuntimeSession* GetRuntimeSessionForTesting() const { return RuntimeSession.Get(); }
 #endif

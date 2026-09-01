@@ -1,6 +1,6 @@
 # Phase 61 收尾记录
 
-状态：实施中，`P61.A1-A3b`、`P61.B1a-B2`、`P61.C1a-C3b` 已完成
+状态：实施中，`P61.A1-A3b`、`P61.B1a-B2`、`P61.C1a-C4a` 已完成
 
 ## 目标
 
@@ -73,10 +73,14 @@
 - pause-next、continue、step-into 和变量刷新均为单次非阻塞调用，变量 snapshot 必须与 epoch、pause sequence
   和 active probe 一致；reload epoch 变化时自动刷新目录并重绑定断点；
 - 详细实现与证据见 [P61.C3b Editor 调试会话模型](P61.C3b_Editor_Debug_Session_Model.md)。
+- 完成 `P61.C4a` PIE 调试目标 Controller：冷路径发现 live `UAvidScriptComponent` Session，稳定排序并自动选择
+  首个目标；目标替换时重建 Runtime adapter，目标消失或 PIE 结束时不解引用旧 Session；
+- 目标发现函数可注入，生产路径与 Automation fake 共用 Controller 状态机；
+- 详细实现与证据见 [P61.C4a PIE 调试目标与生命周期](P61.C4a_PIE_Debug_Target_Lifecycle.md)。
 
 ## 待完成
 
-- `P61.C4` Editor 面板、源码交互与 PIE 调试体验；
+- `P61.C4b-C4c` Editor 面板、源码交互与 PIE 调试体验；
 - `P61.D` Profiler 与 IDE workspace；
 - `P61.E` 集成与集中 Gate。
 

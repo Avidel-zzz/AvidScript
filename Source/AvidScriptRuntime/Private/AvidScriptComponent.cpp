@@ -86,6 +86,13 @@ UAvidScriptComponent::UAvidScriptComponent()
 	PrimaryComponentTick.bStartWithTickEnabled = true;
 }
 
+#if WITH_EDITOR
+FAvidScriptRuntimeSession* UAvidScriptComponent::GetRuntimeSessionForEditorDebugging() const
+{
+	return RuntimeSession.Get();
+}
+#endif
+
 void UAvidScriptComponent::SetScriptManifestPath(const FString& InScriptManifestPath)
 {
 	ScriptManifestFile.FilePath = InScriptManifestPath;

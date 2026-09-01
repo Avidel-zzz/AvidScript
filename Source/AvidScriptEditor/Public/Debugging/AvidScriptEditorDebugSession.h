@@ -92,6 +92,7 @@ class AVIDSCRIPTEDITOR_API FAvidScriptEditorDebugSessionModel
 public:
 	bool BindRuntime(IAvidScriptEditorDebugRuntime& InRuntime, FString& OutError);
 	bool UnbindRuntime(FString& OutError);
+	void NotifyRuntimeDestroyed();
 
 	bool SetSourceBreakpoint(
 		const FString& SourceFile,

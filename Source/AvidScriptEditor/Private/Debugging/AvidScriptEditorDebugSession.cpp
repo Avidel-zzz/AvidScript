@@ -68,6 +68,13 @@ bool FAvidScriptEditorDebugSessionModel::UnbindRuntime(FString& OutError)
 	return true;
 }
 
+void FAvidScriptEditorDebugSessionModel::NotifyRuntimeDestroyed()
+{
+	check(IsInGameThread());
+	Runtime = nullptr;
+	ClearRuntimeState();
+}
+
 bool FAvidScriptEditorDebugSessionModel::SetSourceBreakpoint(
 	const FString& SourceFile,
 	const int32 Line,

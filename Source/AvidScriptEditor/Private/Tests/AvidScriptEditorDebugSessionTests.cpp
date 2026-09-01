@@ -217,6 +217,10 @@ bool FAvidScriptEditorDebugSessionModelTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("view clears Runtime binding"), Model.GetView().bRuntimeBound);
 	TestFalse(TEXT("user breakpoint survives Session teardown"), Model.GetView().Breakpoints.IsEmpty());
 	TestFalse(TEXT("surviving breakpoint becomes unresolved"), Model.GetView().Breakpoints[0].IsBound());
+	TestTrue(TEXT("Runtime can bind again"), Model.BindRuntime(Runtime, Error));
+	Model.NotifyRuntimeDestroyed();
+	TestFalse(TEXT("destroy notification clears Runtime without calling it"), Model.GetView().bRuntimeBound);
+	TestFalse(TEXT("destroy notification also preserves user breakpoints"), Model.GetView().Breakpoints.IsEmpty());
 	return true;
 }
 

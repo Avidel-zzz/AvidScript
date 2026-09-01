@@ -542,6 +542,14 @@
       "prevention": "spawn 输出截断后禁止立即重复派发同一写入范围；先等待通知、检查工作树或查询已知代理状态。只有确认原调用未创建代理后才能重试，并始终保持写入范围唯一。",
       "source": "observed:2026-09-01-P61.C2b2",
       "last_observed": "2026-09-01 P61.C2b2 首次 spawn 输出被上下文截断后又派发同范围任务，形成两个并发编译器代理；发现后关闭全部代理并核对共享改动"
+    },
+    {
+      "id": "dllimport-accessors-require-exported-definition",
+      "tags": ["ue", "cpp", "dll", "editor", "build"],
+      "summary": "跨模块调用的 dllimport 类 accessor 需要导出定义，不能只依赖类内 inline。",
+      "prevention": "Runtime 类型新增供 Editor 调用的方法时，在 Public 头中声明并在 Runtime .cpp 中提供定义；no-clean UBT 后必须启动真实 Editor 验证模块加载，不能把链接成功等同于 DLL 导入解析成功。",
+      "source": "observed:2026-09-01-P61.C4a",
+      "last_observed": "2026-09-01 P61.C4a Editor 调试 accessor 初版仅在 UAvidScriptComponent 类内 inline，UBT 成功但 Editor 加载 AvidScriptEditor.dll 报 GetLastError=127；改为 Runtime 导出定义"
     }
   ]
 }
