@@ -11,7 +11,8 @@ public static class CSharpGuestLowerer
     public static CSharpGuestLoweringResult Lower(
         SemanticDocument document,
         string semanticSha256,
-        bool enableDataLaneFusion = true)
+        bool enableDataLaneFusion = true,
+        bool enableDebugInstrumentation = false)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(semanticSha256);
@@ -134,6 +135,19 @@ public static class CSharpGuestLowerer
         if (diagnostics.Count != 0)
         {
             return Failure(diagnostics);
+        }
+
+        if (enableDebugInstrumentation)
+        {
+            CSharpGuestDebugInstrumentationResult instrumentation =
+                CSharpGuestDebugInstrumenter.Instrument(
+                    $"csharp:{document.Source.SourceId}",
+                    moduleTypes,
+                    imports,
+                    functions);
+            moduleTypes = instrumentation.Types;
+            imports = instrumentation.Imports.ToArray();
+            functions = instrumentation.Functions.ToList();
         }
 
         GuestLayoutResult layout = GuestLayoutBuilder.Build(

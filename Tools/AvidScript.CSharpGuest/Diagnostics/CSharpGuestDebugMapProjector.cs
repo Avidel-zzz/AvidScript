@@ -121,7 +121,7 @@ public static class CSharpGuestDebugMapProjector
                 methodId,
                 $"{ownerName}.{methodSymbol.Signature}",
                 methodSymbol.Span,
-                BuildSequencePoints(module.ModuleId, methodId, function, probeIds)));
+                BuildSequencePoints(module.ModuleId, function, probeIds)));
         }
 
         return new CSharpGuestDebugMap(
@@ -235,12 +235,11 @@ public static class CSharpGuestDebugMapProjector
             debugMethodId,
             $"{ownerName}.{methodSymbol.Signature} [async resume {target.SegmentOrdinal}]",
             target.Span,
-            BuildSequencePoints(moduleId, debugMethodId, function, probeIds)));
+            BuildSequencePoints(moduleId, function, probeIds)));
     }
 
     private static IReadOnlyList<CSharpGuestDebugSequencePoint> BuildSequencePoints(
         string moduleId,
-        string methodSymbolId,
         GuestFunction function,
         ISet<string> probeIds)
     {
@@ -266,7 +265,7 @@ public static class CSharpGuestDebugMapProjector
                 ? null
                 : CSharpGuestDebugProbeIdentity.Create(
                     moduleId,
-                    methodSymbolId,
+                    function.Id,
                     debugLocation.SemanticOperationId);
             if (probeId is not null && !probeIds.Add(probeId))
             {

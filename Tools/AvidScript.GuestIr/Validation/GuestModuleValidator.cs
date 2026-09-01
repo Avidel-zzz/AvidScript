@@ -161,7 +161,7 @@ public static class GuestModuleValidator
                 context.Add("ASIR1009", $"Import '{import.Id}' has an invalid host module or name.");
             }
 
-            if (import.DispatchClass is not ("semantic" or "generated_s1" or "data_lane"))
+            if (import.DispatchClass is not ("semantic" or "generated_s1" or "data_lane" or "debug"))
             {
                 context.Add("ASIR1011", $"Import '{import.Id}' has an invalid dispatch class '{import.DispatchClass}'.");
             }

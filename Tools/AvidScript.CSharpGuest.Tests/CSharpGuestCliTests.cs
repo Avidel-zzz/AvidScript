@@ -77,6 +77,15 @@ internal static class CSharpGuestCliTests
             Assert(invalidFusionExitCode == 2,
                 "unknown data-lane fusion modes should be rejected by the CLI contract");
 
+            int invalidDebugInstrumentationExitCode = GuestCommandLine.Run(new[]
+            {
+                "--semantic", semanticPath,
+                "--output", outputPath,
+                "--debug-instrumentation", "automatic",
+            });
+            Assert(invalidDebugInstrumentationExitCode == 2,
+                "unknown debug instrumentation modes should be rejected by the CLI contract");
+
             File.WriteAllText(outputPath, "stale");
             File.WriteAllText(stateSchemaPath, "stale");
             File.WriteAllText(debugMapPath, "stale");

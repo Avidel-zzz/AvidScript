@@ -33,6 +33,7 @@ public static class GuestCommandLine
             options.TryGetValue("--debug-map", out debugMapPath);
             options.TryGetValue("--frontend-artifact-sha256", out string? frontendArtifactSha256);
             bool dataLaneFusionEnabled = ParseDataLaneFusion(options);
+            bool debugInstrumentationEnabled = ParseDebugInstrumentation(options);
             if ((debugMapPath is null) != (frontendArtifactSha256 is null))
             {
                 throw new ArgumentException(
@@ -58,7 +59,8 @@ public static class GuestCommandLine
             CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(
                 document,
                 semanticSha256,
-                enableDataLaneFusion: dataLaneFusionEnabled);
+                enableDataLaneFusion: dataLaneFusionEnabled,
+                enableDebugInstrumentation: debugInstrumentationEnabled);
             if (!result.Succeeded || result.Module is null)
             {
                 DeletePublishedArtifacts(outputPath, stateSchemaPath, debugMapPath);
@@ -122,10 +124,11 @@ public static class GuestCommandLine
             && args.Length != 6
             && args.Length != 8
             && args.Length != 10
-            && args.Length != 12)
+            && args.Length != 12
+            && args.Length != 14)
         {
             throw new ArgumentException(
-                "Usage: --semantic <path> --output <path> [--state-schema <path>] [--debug-map <path> --frontend-artifact-sha256 <sha256>] [--data-lane-fusion enabled|disabled] | --finalize-debug-map <path> --offset-map <path>");
+                "Usage: --semantic <path> --output <path> [--state-schema <path>] [--debug-map <path> --frontend-artifact-sha256 <sha256>] [--data-lane-fusion enabled|disabled] [--debug-instrumentation enabled|disabled] | --finalize-debug-map <path> --offset-map <path>");
         }
 
         Dictionary<string, string> options = new(StringComparer.Ordinal);
@@ -138,7 +141,8 @@ public static class GuestCommandLine
                     && name != "--state-schema"
                     && name != "--debug-map"
                     && name != "--frontend-artifact-sha256"
-                    && name != "--data-lane-fusion")
+                    && name != "--data-lane-fusion"
+                    && name != "--debug-instrumentation")
                 || string.IsNullOrWhiteSpace(value)
                 || !options.TryAdd(name, value))
             {
@@ -167,6 +171,21 @@ public static class GuestCommandLine
         }
 
         throw new ArgumentException("--data-lane-fusion must be enabled or disabled.");
+    }
+
+    private static bool ParseDebugInstrumentation(IReadOnlyDictionary<string, string> options)
+    {
+        if (!options.TryGetValue("--debug-instrumentation", out string? value)
+            || value.Equals("disabled", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        if (value.Equals("enabled", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        throw new ArgumentException("--debug-instrumentation must be enabled or disabled.");
     }
 
     private static void DeletePublishedArtifacts(params string?[] paths)

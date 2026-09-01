@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -16,8 +17,97 @@ internal static class CSharpGuestDebugMapTests
         NonMethodGuestFunctionsRetainIndexSpaceWithoutFakeSourceLocations();
         GeneratedGameplayRouterRetainsIndexSpaceWithoutFakeSourceLocation();
         GeneratedContinuationRouterRetainsIndexSpaceWithoutFakeSourceLocation();
+        DebugInstrumentationEmitsStableBackendNeutralProbeCalls();
         ReversedSameLineSpanFailsClosed();
-        return 5;
+        return 6;
+    }
+
+    private static void DebugInstrumentationEmitsStableBackendNeutralProbeCalls()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+
+            namespace Game;
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "guest_main")]
+                public static int Main(int value)
+                {
+                    int result = value + 1;
+                    return result;
+                }
+            }
+            """;
+        const string sourceId = "Scripts/DebugProbe.cs";
+        FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
+        SemanticDocument semantic = SemanticAnalyzer.Analyze(source, sourceId, frontend.Source.Sha256);
+        Assert(semantic.Succeeded, "debug probe source should analyze successfully");
+
+        string semanticSha256 = new('c', 64);
+        GuestModule disabled = CSharpGuestLowerer.Lower(semantic, semanticSha256).Module
+            ?? throw new InvalidOperationException("disabled debug probe fixture should lower");
+        CSharpGuestLoweringResult enabledResult = CSharpGuestLowerer.Lower(
+            semantic,
+            semanticSha256,
+            enableDebugInstrumentation: true);
+        GuestModule enabled = enabledResult.Module
+            ?? throw new InvalidOperationException(
+                "enabled debug probe fixture should lower: "
+                + string.Join(" | ", enabledResult.Diagnostics.Select(item => item.Message)));
+
+        Assert(!disabled.Imports.Any(item => item.Id == CSharpGuestDebugProbeAbi.ImportId)
+            && disabled.Functions.SelectMany(function => function.Blocks)
+                .SelectMany(block => block.Instructions)
+                .All(instruction => instruction.TargetId != CSharpGuestDebugProbeAbi.ImportId),
+            "debug instrumentation should remain disabled by default");
+        GuestImport probeImport = enabled.Imports.Single(item =>
+            item.Id == CSharpGuestDebugProbeAbi.ImportId);
+        Assert(probeImport.Module == CSharpGuestDebugProbeAbi.ModuleName
+            && probeImport.Name == CSharpGuestDebugProbeAbi.ImportName
+            && probeImport.ParameterTypeIds.SequenceEqual(new[] { "type:int64" })
+            && probeImport.ReturnTypeId == "type:int32"
+            && probeImport.DispatchClass == "debug",
+            "enabled instrumentation should publish the versioned backend-neutral probe ABI");
+
+        GuestInstruction[] instructions = enabled.Functions
+            .SelectMany(function => function.Blocks)
+            .SelectMany(block => block.Instructions)
+            .ToArray();
+        GuestInstruction[] probeCalls = instructions.Where(instruction =>
+            instruction.Op == "call"
+            && instruction.TargetId == CSharpGuestDebugProbeAbi.ImportId).ToArray();
+        Dictionary<string, GuestInstruction> constants = instructions
+            .Where(instruction => instruction.Op == "constant" && instruction.ResultId is not null)
+            .ToDictionary(instruction => instruction.ResultId!, StringComparer.Ordinal);
+        string[] emittedProbeIds = probeCalls.Select(call =>
+        {
+            GuestInstruction constant = constants[call.OperandIds.Single()];
+            long bits = long.Parse(constant.Constant!.Value!, System.Globalization.CultureInfo.InvariantCulture);
+            return unchecked((ulong)bits).ToString("x16", System.Globalization.CultureInfo.InvariantCulture);
+        }).ToArray();
+
+        string guestIrSha256 = Convert.ToHexString(
+            SHA256.HashData(GuestIrSerializer.Serialize(enabled))).ToLowerInvariant();
+        CSharpGuestDebugMap debugMap = CSharpGuestDebugMapProjector.Project(
+            semantic,
+            enabled,
+            guestIrSha256,
+            new string('e', 64));
+        string[] mappedProbeIds = debugMap.Functions
+            .SelectMany(function => function.SequencePoints ?? Array.Empty<CSharpGuestDebugSequencePoint>())
+            .Where(point => !point.Hidden)
+            .Select(point => point.ProbeId!)
+            .ToArray();
+        Assert(probeCalls.Length > 0
+            && probeCalls.All(call => call.DebugLocation is { Hidden: false })
+            && emittedProbeIds.OrderBy(item => item, StringComparer.Ordinal)
+                .SequenceEqual(mappedProbeIds.OrderBy(item => item, StringComparer.Ordinal)),
+            "every source-visible sequence point should map to exactly one stable probe call");
+
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(enabled);
+        Assert(GuestModuleValidator.Validate(enabled).Succeeded && wasm.Succeeded,
+            "instrumented Guest IR should remain valid and compile through the backend");
     }
 
     private static void GeneratedContinuationRouterRetainsIndexSpaceWithoutFakeSourceLocation()

@@ -10,27 +10,27 @@ internal static class CSharpGuestDebugProbeIdentity
 
     public static string Create(
         string moduleId,
-        string methodSymbolId,
+        string functionId,
         string semanticOperationId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(moduleId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(methodSymbolId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(functionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(semanticOperationId);
 
         string identity = string.Create(
             moduleId.Length.ToString().Length
-                + methodSymbolId.Length.ToString().Length
+                + functionId.Length.ToString().Length
                 + semanticOperationId.Length.ToString().Length
                 + moduleId.Length
-                + methodSymbolId.Length
+                + functionId.Length
                 + semanticOperationId.Length
                 + 6,
-            (moduleId, methodSymbolId, semanticOperationId),
+            (moduleId, functionId, semanticOperationId),
             static (buffer, state) =>
             {
                 int offset = 0;
                 offset += WriteComponent(buffer[offset..], state.moduleId);
-                offset += WriteComponent(buffer[offset..], state.methodSymbolId);
+                offset += WriteComponent(buffer[offset..], state.functionId);
                 WriteComponent(buffer[offset..], state.semanticOperationId);
             });
         byte[] digest = SHA256.HashData(Encoding.UTF8.GetBytes(identity));
