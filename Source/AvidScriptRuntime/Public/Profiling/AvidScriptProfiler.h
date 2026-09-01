@@ -13,6 +13,21 @@ enum class EAvidScriptProfilerEventKind : uint8
 	Cache
 };
 
+enum class EAvidScriptProfilerOperation : uint32
+{
+	LoadEmbedded = 1,
+	LoadInitial = 2,
+	Reload = 3,
+	Tick = 10,
+	Event = 11,
+	GameplayEvent = 12,
+	DelegateEvent = 13,
+	ContinuationDispatch = 14,
+	DebugResume = 15,
+	EndPlay = 16,
+	DynamicHostCall = 20
+};
+
 struct AVIDSCRIPTRUNTIME_API FAvidScriptProfilerEvent
 {
 	uint64 Sequence = 0;

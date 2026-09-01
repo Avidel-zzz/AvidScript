@@ -9,6 +9,7 @@
 #include "DataBridge/AvidScriptCommandBuffer.h"
 #include "Diagnostics/AvidScriptWasmDebugMap.h"
 #include "Misc/PackageName.h"
+#include "Profiling/AvidScriptProfiler.h"
 #include "UObject/SoftObjectPath.h"
 #include "UObject/UnrealType.h"
 
@@ -6873,6 +6874,14 @@ bool FAvidScriptWasmRuntimeInstance::DispatchDynamicHostCall(
 	const FAvidScriptDynamicHostCall& Call,
 	FAvidScriptDynamicHostCallResult& OutResult)
 {
+	FAvidScriptProfilerScope ProfileScope(
+		HostContext.Profiler,
+		EAvidScriptProfilerEventKind::HostCall,
+		static_cast<uint32>(EAvidScriptProfilerOperation::DynamicHostCall),
+		0,
+		0,
+		static_cast<uint64>(Call.BindingOrdinal));
+	ProfileScope.SetSucceeded(false);
 	if (BindingInvocationContext.InvocationInstrumentation != nullptr)
 	{
 		++BindingInvocationContext.InvocationInstrumentation
@@ -6909,6 +6918,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchDynamicHostCall(
 		OutResult);
 	LastHostImportResult = OutResult.ReturnValue;
 	RecordTiming();
+	ProfileScope.SetSucceeded(bSucceeded);
 	return bSucceeded;
 }
 
@@ -6916,8 +6926,19 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 	const FAvidScriptHostCall& Call,
 	FAvidScriptHostCallResult& OutResult)
 {
+	const uint64 ProbeId = Call.BindingId == EAvidScriptHostBindingId::DebugProbe
+		|| Call.BindingId == EAvidScriptHostBindingId::DebugSuspend
+		? static_cast<uint64>(Call.Int64Args[0])
+		: 0;
+	FAvidScriptProfilerScope ProfileScope(
+		HostContext.Profiler,
+		EAvidScriptProfilerEventKind::HostCall,
+		static_cast<uint32>(Call.BindingId),
+		0,
+		ProbeId);
+	ProfileScope.SetSucceeded(false);
 	OutResult = FAvidScriptHostCallResult();
-	auto Finish = [this, &OutResult](int32 ReturnValue, bool bSucceeded)
+	auto Finish = [this, &OutResult, &ProfileScope](int32 ReturnValue, bool bSucceeded)
 	{
 		OutResult.ReturnValue = ReturnValue;
 		OutResult.bSucceeded = bSucceeded;
@@ -6930,6 +6951,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 				OutResult.Details = TEXT("The Runtime host dispatcher rejected the binding call.");
 			}
 		}
+		ProfileScope.SetSucceeded(bSucceeded);
 		return bSucceeded;
 	};
 	auto FinishI64 = [&Finish, &OutResult](int64 ReturnValue, bool bSucceeded)

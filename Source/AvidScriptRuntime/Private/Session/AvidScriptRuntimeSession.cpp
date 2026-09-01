@@ -127,11 +127,13 @@ FAvidScriptRuntimeSession::FAvidScriptRuntimeSession()
 		MakeUnique<FAvidScriptSessionDelegateSubscriptions>(*this))
 	, InboundHandlers(MakeUnique<FAvidScriptSessionInboundHandlers>(*this))
 	, Continuations(MakeShared<FAvidScriptSessionContinuations>())
+	, Profiler(MakeUnique<FAvidScriptProfilerEventBuffer>())
 	, Debugger(MakeUnique<FAvidScriptSessionDebugger>())
 	, Scheduler(MakeUnique<FAvidScriptRuntimeScheduler>())
 	, EventRouter(MakeUnique<FAvidScriptRuntimeEventRouter>(*Scheduler))
 {
 	HostContext.DebugProbes = Debugger.Get();
+	HostContext.Profiler = Profiler.Get();
 	BackendSelection.BackendKind = EAvidScriptVmBackendKind::Wamr;
 	BackendSelection.ExecutionMode = EAvidScriptVmExecutionMode::Auto;
 	BackendSelection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
@@ -153,6 +155,14 @@ FAvidScriptRuntimeSession::~FAvidScriptRuntimeSession()
 bool FAvidScriptRuntimeSession::LoadEmbeddedSmoke(FAvidScriptWasmReloadResult& OutResult)
 {
 	const FString ModuleId = TEXT("embedded_smoke");
+	FAvidScriptProfilerScope ProfileScope(
+		Profiler.Get(),
+		EAvidScriptProfilerEventKind::RuntimeLoad,
+		static_cast<uint32>(EAvidScriptProfilerOperation::LoadEmbedded),
+		0,
+		0,
+		GetTypeHash(ModuleId));
+	ProfileScope.SetSucceeded(false);
 	const FString PreviousModuleId = GetLiveModuleId();
 	ResetReloadResult(OutResult, PreviousModuleId, ModuleId, PreviousModuleId);
 	if (IsOperationActive())
@@ -188,6 +198,7 @@ bool FAvidScriptRuntimeSession::LoadEmbeddedSmoke(FAvidScriptWasmReloadResult& O
 
 	OutResult.bSucceeded = true;
 	OutResult.ActiveModuleId = ModuleId;
+	ProfileScope.SetSucceeded(true);
 	return true;
 }
 
@@ -215,6 +226,14 @@ bool FAvidScriptRuntimeSession::LoadInitialArtifact(
 	FAvidScriptWasmReloadResult& OutResult)
 {
 	const FAvidScriptWasmReloadManifest& Manifest = Artifact.Manifest;
+	FAvidScriptProfilerScope ProfileScope(
+		Profiler.Get(),
+		EAvidScriptProfilerEventKind::RuntimeLoad,
+		static_cast<uint32>(EAvidScriptProfilerOperation::LoadInitial),
+		0,
+		0,
+		GetTypeHash(Manifest.ModuleId));
+	ProfileScope.SetSucceeded(false);
 	const FString PreviousModuleId = GetLiveModuleId();
 	ResetReloadResult(OutResult, PreviousModuleId, Manifest.ModuleId, PreviousModuleId);
 	if (IsOperationActive())
@@ -249,6 +268,7 @@ bool FAvidScriptRuntimeSession::LoadInitialArtifact(
 
 	OutResult.bSucceeded = true;
 	OutResult.ActiveModuleId = Manifest.ModuleId;
+	ProfileScope.SetSucceeded(true);
 	return true;
 }
 
@@ -276,6 +296,14 @@ bool FAvidScriptRuntimeSession::ReloadArtifact(
 	FAvidScriptWasmReloadResult& OutResult)
 {
 	const FAvidScriptWasmReloadManifest& Manifest = Artifact.Manifest;
+	FAvidScriptProfilerScope ProfileScope(
+		Profiler.Get(),
+		EAvidScriptProfilerEventKind::Reload,
+		static_cast<uint32>(EAvidScriptProfilerOperation::Reload),
+		Debugger->GetSnapshot().Epoch,
+		0,
+		GetTypeHash(Manifest.ModuleId));
+	ProfileScope.SetSucceeded(false);
 	const FString PreviousModuleId = GetLiveModuleId();
 	ResetReloadResult(OutResult, PreviousModuleId, Manifest.ModuleId, PreviousModuleId);
 	if (IsOperationActive())
@@ -351,6 +379,7 @@ bool FAvidScriptRuntimeSession::ReloadArtifact(
 	OutResult.bSucceeded = true;
 	OutResult.bReloadApplied = true;
 	OutResult.ActiveModuleId = Manifest.ModuleId;
+	ProfileScope.SetSucceeded(true);
 	return true;
 }
 void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext& InHostContext)
@@ -380,6 +409,7 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 	NextHostContext.EventSubscriptions = DelegateSubscriptions.Get();
 	NextHostContext.Continuations = HostContext.Continuations;
 	NextHostContext.DebugProbes = Debugger.Get();
+	NextHostContext.Profiler = Profiler.Get();
 	NextHostContext.LatentHost = HostContext.LatentHost;
 	if (NextHostContext.ObjectRegistry != nullptr
 		&& NextHostContext.OwnerHandle.IsValid())
@@ -507,6 +537,7 @@ void FAvidScriptRuntimeSession::ClearHostContext()
 	}
 	HostContext = FAvidScriptWasmHostContext();
 	HostContext.DebugProbes = Debugger.Get();
+	HostContext.Profiler = Profiler.Get();
 	if (LiveRuntime)
 	{
 		LiveRuntime->SetHostContext(HostContext);
@@ -561,6 +592,11 @@ bool FAvidScriptRuntimeSession::DispatchGameplayEvent(
 
 bool FAvidScriptRuntimeSession::TickLive(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult)
 {
+	FAvidScriptProfilerScope ProfileScope(
+		Profiler.Get(),
+		EAvidScriptProfilerEventKind::GuestCall,
+		static_cast<uint32>(EAvidScriptProfilerOperation::Tick));
+	ProfileScope.SetSucceeded(false);
 	if (!CanEnterGuest(TEXT("avid_on_tick"), OutResult))
 	{
 		return false;
@@ -587,15 +623,22 @@ bool FAvidScriptRuntimeSession::TickLive(float DeltaSeconds, FAvidScriptWasmSmok
 			bSucceeded = PumpReadyContinuations(OutResult);
 		}
 	}
-	return bSucceeded
+	const bool bCompleted = bSucceeded
 		&& (IsDebugExecutionSuspended()
 			|| InboundHandlers->PumpDeferred(OutResult));
+	ProfileScope.SetSucceeded(bCompleted);
+	return bCompleted;
 }
 
 bool FAvidScriptRuntimeSession::TickHot(
 	const float DeltaSeconds,
 	FAvidScriptWasmSmokeResult& OutFailure)
 {
+	FAvidScriptProfilerScope ProfileScope(
+		Profiler.Get(),
+		EAvidScriptProfilerEventKind::GuestCall,
+		static_cast<uint32>(EAvidScriptProfilerOperation::Tick));
+	ProfileScope.SetSucceeded(false);
 	if (!CanEnterGuest(TEXT("avid_on_tick"), OutFailure))
 	{
 		return false;
@@ -619,9 +662,11 @@ bool FAvidScriptRuntimeSession::TickHot(
 			bSucceeded = PumpReadyContinuations(OutFailure);
 		}
 	}
-	return bSucceeded
+	const bool bCompleted = bSucceeded
 		&& (IsDebugExecutionSuspended()
 			|| InboundHandlers->PumpDeferred(OutFailure));
+	ProfileScope.SetSucceeded(bCompleted);
+	return bCompleted;
 }
 
 bool FAvidScriptRuntimeSession::PumpReadyContinuations(
@@ -631,6 +676,14 @@ bool FAvidScriptRuntimeSession::PumpReadyContinuations(
 	Continuations->DrainReady(Completions);
 	for (const FAvidScriptContinuationCompletion& Completion : Completions)
 	{
+		FAvidScriptProfilerScope ProfileScope(
+			Profiler.Get(),
+			EAvidScriptProfilerEventKind::Continuation,
+			static_cast<uint32>(EAvidScriptProfilerOperation::ContinuationDispatch),
+			0,
+			0,
+			static_cast<uint64>(Completion.Token));
+		ProfileScope.SetSucceeded(false);
 		const bool bDispatched = LiveRuntime
 			&& LiveRuntime->DispatchContinuation(Completion, OutResult);
 		const bool bFinalized = Continuations->FinalizeDispatched(
@@ -647,6 +700,7 @@ bool FAvidScriptRuntimeSession::PumpReadyContinuations(
 			Continuations->ReleaseRetiredEndpoint();
 			return false;
 		}
+		ProfileScope.SetSucceeded(true);
 	}
 	return true;
 }
@@ -685,12 +739,22 @@ bool FAvidScriptRuntimeSession::DispatchEventLive(
 	float Value,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
+	FAvidScriptProfilerScope ProfileScope(
+		Profiler.Get(),
+		EAvidScriptProfilerEventKind::GuestCall,
+		static_cast<uint32>(EAvidScriptProfilerOperation::Event),
+		0,
+		0,
+		static_cast<uint64>(static_cast<uint32>(EventId)));
+	ProfileScope.SetSucceeded(false);
 	if (!CanEnterGuest(TEXT("avid_on_event"), OutResult))
 	{
 		return false;
 	}
 	TGuardValue<int32> GuestCallGuard(ActiveGuestCallDepth, ActiveGuestCallDepth + 1);
-	return EventRouter->Dispatch(EventId, Value, OutResult);
+	const bool bSucceeded = EventRouter->Dispatch(EventId, Value, OutResult);
+	ProfileScope.SetSucceeded(bSucceeded);
+	return bSucceeded;
 }
 
 bool FAvidScriptRuntimeSession::DispatchEventHot(
@@ -698,6 +762,14 @@ bool FAvidScriptRuntimeSession::DispatchEventHot(
 	const float Value,
 	FAvidScriptWasmSmokeResult& OutFailure)
 {
+	FAvidScriptProfilerScope ProfileScope(
+		Profiler.Get(),
+		EAvidScriptProfilerEventKind::GuestCall,
+		static_cast<uint32>(EAvidScriptProfilerOperation::Event),
+		0,
+		0,
+		static_cast<uint64>(static_cast<uint32>(EventId)));
+	ProfileScope.SetSucceeded(false);
 	if (!CanEnterGuest(TEXT("avid_on_event"), OutFailure))
 	{
 		return false;
@@ -705,25 +777,45 @@ bool FAvidScriptRuntimeSession::DispatchEventHot(
 	TGuardValue<int32> GuestCallGuard(
 		ActiveGuestCallDepth,
 		ActiveGuestCallDepth + 1);
-	return EventRouter->DispatchHot(EventId, Value, OutFailure);
+	const bool bSucceeded = EventRouter->DispatchHot(EventId, Value, OutFailure);
+	ProfileScope.SetSucceeded(bSucceeded);
+	return bSucceeded;
 }
 
 bool FAvidScriptRuntimeSession::DispatchGameplayEventLive(
 	const FAvidScriptGameplayEvent& Event,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
+	FAvidScriptProfilerScope ProfileScope(
+		Profiler.Get(),
+		EAvidScriptProfilerEventKind::GuestCall,
+		static_cast<uint32>(EAvidScriptProfilerOperation::GameplayEvent),
+		0,
+		0,
+		static_cast<uint64>(Event.Type));
+	ProfileScope.SetSucceeded(false);
 	if (!CanEnterGuest(TEXT("avid_on_gameplay_event"), OutResult))
 	{
 		return false;
 	}
 	TGuardValue<int32> GuestCallGuard(ActiveGuestCallDepth, ActiveGuestCallDepth + 1);
-	return EventRouter->Dispatch(Event, OutResult);
+	const bool bSucceeded = EventRouter->Dispatch(Event, OutResult);
+	ProfileScope.SetSucceeded(bSucceeded);
+	return bSucceeded;
 }
 
 bool FAvidScriptRuntimeSession::DispatchGameplayEventHot(
 	const FAvidScriptGameplayEvent& Event,
 	FAvidScriptWasmSmokeResult& OutFailure)
 {
+	FAvidScriptProfilerScope ProfileScope(
+		Profiler.Get(),
+		EAvidScriptProfilerEventKind::GuestCall,
+		static_cast<uint32>(EAvidScriptProfilerOperation::GameplayEvent),
+		0,
+		0,
+		static_cast<uint64>(Event.Type));
+	ProfileScope.SetSucceeded(false);
 	if (!CanEnterGuest(TEXT("avid_on_gameplay_event"), OutFailure))
 	{
 		return false;
@@ -731,7 +823,9 @@ bool FAvidScriptRuntimeSession::DispatchGameplayEventHot(
 	TGuardValue<int32> GuestCallGuard(
 		ActiveGuestCallDepth,
 		ActiveGuestCallDepth + 1);
-	return EventRouter->DispatchHot(Event, OutFailure);
+	const bool bSucceeded = EventRouter->DispatchHot(Event, OutFailure);
+	ProfileScope.SetSucceeded(bSucceeded);
+	return bSucceeded;
 }
 
 bool FAvidScriptRuntimeSession::DispatchPreparedDelegateEvent(
@@ -739,6 +833,14 @@ bool FAvidScriptRuntimeSession::DispatchPreparedDelegateEvent(
 	void* NativeParameters,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
+	FAvidScriptProfilerScope ProfileScope(
+		Profiler.Get(),
+		EAvidScriptProfilerEventKind::GuestCall,
+		static_cast<uint32>(EAvidScriptProfilerOperation::DelegateEvent),
+		0,
+		0,
+		GetTypeHash(Event.ExportName));
+	ProfileScope.SetSucceeded(false);
 	if (!CanEnterGuest(Event.ExportName, OutResult))
 	{
 		return false;
@@ -746,7 +848,9 @@ bool FAvidScriptRuntimeSession::DispatchPreparedDelegateEvent(
 	TGuardValue<int32> GuestCallGuard(
 		ActiveGuestCallDepth,
 		ActiveGuestCallDepth + 1);
-	return EventRouter->Dispatch(Event, NativeParameters, OutResult);
+	const bool bSucceeded = EventRouter->Dispatch(Event, NativeParameters, OutResult);
+	ProfileScope.SetSucceeded(bSucceeded);
+	return bSucceeded;
 }
 
 bool FAvidScriptRuntimeSession::CaptureLiveSnapshot(
@@ -767,6 +871,11 @@ bool FAvidScriptRuntimeSession::CaptureLiveSnapshot(
 
 bool FAvidScriptRuntimeSession::EndPlayLive(FAvidScriptWasmSmokeResult& OutResult)
 {
+	FAvidScriptProfilerScope ProfileScope(
+		Profiler.Get(),
+		EAvidScriptProfilerEventKind::GuestCall,
+		static_cast<uint32>(EAvidScriptProfilerOperation::EndPlay));
+	ProfileScope.SetSucceeded(false);
 	if (IsOperationActive())
 	{
 		SetSessionExecutionFailure(
@@ -801,6 +910,7 @@ bool FAvidScriptRuntimeSession::EndPlayLive(FAvidScriptWasmSmokeResult& OutResul
 	{
 		ObjectOwnership->Cleanup(*HostContext.ObjectRegistry);
 	}
+	ProfileScope.SetSucceeded(bSucceeded);
 	return bSucceeded;
 }
 
@@ -885,6 +995,26 @@ int32 FAvidScriptRuntimeSession::GetLivePendingTimerCount() const
 	return Scheduler->GetPendingTimerCount();
 }
 
+void FAvidScriptRuntimeSession::SetProfilerEnabled(const bool bEnabled)
+{
+	Profiler->SetBufferEnabled(bEnabled);
+}
+
+bool FAvidScriptRuntimeSession::IsProfilerEnabled() const
+{
+	return Profiler->IsBufferEnabled();
+}
+
+void FAvidScriptRuntimeSession::ResetProfiler()
+{
+	Profiler->Reset();
+}
+
+FAvidScriptProfilerSnapshot FAvidScriptRuntimeSession::GetProfilerSnapshot() const
+{
+	return Profiler->Snapshot();
+}
+
 bool FAvidScriptRuntimeSession::AttachDebugger(
 	const TConstArrayView<uint64> BreakpointProbeIds)
 {
@@ -942,6 +1072,11 @@ bool FAvidScriptRuntimeSession::ResumeDebugExecution(
 	const EAvidScriptDebugRunMode RunMode,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
+	FAvidScriptProfilerScope ProfileScope(
+		Profiler.Get(),
+		EAvidScriptProfilerEventKind::GuestCall,
+		static_cast<uint32>(EAvidScriptProfilerOperation::DebugResume));
+	ProfileScope.SetSucceeded(false);
 	const FString ExportName(TEXT("avid_on_debug_resume"));
 	if (IsOperationActive() || !LiveRuntime)
 	{
@@ -1013,6 +1148,7 @@ bool FAvidScriptRuntimeSession::ResumeDebugExecution(
 			OutResult);
 		return false;
 	}
+	ProfileScope.SetSucceeded(true);
 	return true;
 }
 
@@ -1706,6 +1842,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 
 	Debugger->OnRuntimeGenerationChanged();
 	CandidateHostContext.DebugProbes = Debugger.Get();
+	CandidateHostContext.Profiler = Profiler.Get();
 	CandidateRuntime->SetHostContext(CandidateHostContext);
 	OutResult.RuntimeResult = BeginPlayResult;
 	LiveRuntime = MoveTemp(CandidateRuntime);
@@ -1717,6 +1854,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 	LiveManifest = Manifest;
 	HostContext.Continuations = CandidateHostContext.Continuations;
 	HostContext.DebugProbes = Debugger.Get();
+	HostContext.Profiler = Profiler.Get();
 	DelegateSubscriptions->CommitPrepared();
 	DelegateSubscriptions->SetDispatchEnabled(true);
 	InboundCommitError.Reset();

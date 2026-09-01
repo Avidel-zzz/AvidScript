@@ -93,10 +93,15 @@
 - 同一事件可输出到 `AvidScriptProfiler` UE Trace channel，buffer 未启用且 Trace channel 关闭时 scope
   不读取 cycles；
 - 详细实现与证据见 [P61.D1a Profiler 事件底座](P61.D1a_Bounded_Profiler_Event_Lane.md)。
+- 完成 `P61.D1b` Runtime Profiler 埋点：Session 记录 load、Tick/Event、continuation、reload、EndPlay，
+  WASM host dispatcher 统一记录静态/动态 UE crossing，并携带 epoch、probe 与 correlation；
+- 真实 Debug C# WASM 的 PIE 集成验证覆盖 Tick guest work、带源码 probe 的 host crossing、reload 与
+  continuation，保持调试器和 profiler 使用同一个 Session 生命周期；
+- 详细实现与证据见 [P61.D1b Runtime Profiler 埋点](P61.D1b_Runtime_Profiler_Instrumentation.md)。
 
 ## 待完成
 
-- `P61.D1b-D3` Runtime 埋点、Editor Profiler 与 IDE workspace；
+- `P61.D1c-D3` disabled 性能门禁、Editor Profiler 与 IDE workspace；
 - `P61.E` 集成与集中 Gate。
 
 ## 人工验收边界

@@ -18,6 +18,7 @@
 #include "CoreMinimal.h"
 
 class FAvidScriptWasmDebugMap;
+class FAvidScriptProfilerEventBuffer;
 class UWorld;
 
 class AVIDSCRIPTRUNTIME_API IAvidScriptEventSubscriptionHost
@@ -122,6 +123,7 @@ struct FAvidScriptWasmHostContext
 	IAvidScriptEventSubscriptionHost* EventSubscriptions = nullptr;
 	IAvidScriptContinuationHost* Continuations = nullptr;
 	IAvidScriptDebugProbeHost* DebugProbes = nullptr;
+	FAvidScriptProfilerEventBuffer* Profiler = nullptr;
 	IAvidScriptBindingLatentHost* LatentHost = nullptr;
 	EAvidScriptBindingInvocationPolicy BindingInvocationPolicy =
 		EAvidScriptBindingInvocationPolicy::SemanticProcessEvent;

@@ -550,6 +550,14 @@
       "prevention": "Runtime 类型新增供 Editor 调用的方法时，在 Public 头中声明并在 Runtime .cpp 中提供定义；no-clean UBT 后必须启动真实 Editor 验证模块加载，不能把链接成功等同于 DLL 导入解析成功。",
       "source": "observed:2026-09-01-P61.C4a",
       "last_observed": "2026-09-01 P61.C4a Editor 调试 accessor 初版仅在 UAvidScriptComponent 类内 inline，UBT 成功但 Editor 加载 AvidScriptEditor.dll 报 GetLastError=127；改为 Runtime 导出定义"
+    },
+    {
+      "id": "public-runtime-layout-changes-relink-editor-consumers",
+      "tags": ["ue", "cpp", "abi", "runtime", "editor", "build"],
+      "summary": "Runtime 公开结构布局变化后只重建 producer DLL 会让旧 Editor 消费者以错误 ABI 启动。",
+      "prevention": "修改 Runtime Public 结构字段、大小或成员顺序后，focused producer build 只用于编译反馈；启动 Automation 前必须执行完整 no-clean Editor build，确认所有消费者重新编译和链接。",
+      "source": "observed:2026-09-02-P61.D1b",
+      "last_observed": "2026-09-02 P61.D1b 给 FAvidScriptWasmHostContext 增加 Profiler 指针后仅重建 Runtime，Editor 启动在 UObject::IsValidLowLevel 断言；需完整 no-clean Editor relink"
     }
   ]
 }

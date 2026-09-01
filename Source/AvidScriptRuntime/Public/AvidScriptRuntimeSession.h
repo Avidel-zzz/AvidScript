@@ -3,6 +3,7 @@
 #include "AvidScriptGameplayEvent.h"
 #include "AvidScriptDebug.h"
 #include "AvidScriptWasmReloadTypes.h"
+#include "Profiling/AvidScriptProfiler.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeRouter.h"
 
 class FAvidScriptRuntimeEventRouter;
@@ -122,6 +123,10 @@ public:
 	bool GetDebugVariables(
 		FAvidScriptDebugVariablesSnapshot& OutSnapshot,
 		FString& OutError) const;
+	void SetProfilerEnabled(bool bEnabled);
+	bool IsProfilerEnabled() const;
+	void ResetProfiler();
+	FAvidScriptProfilerSnapshot GetProfilerSnapshot() const;
 	FString GetLiveModuleId() const;
 	int32 GetLiveTickCallCount() const;
 	int32 GetLivePendingTimerCount() const;
@@ -218,6 +223,7 @@ private:
 	TUniquePtr<FAvidScriptSessionDelegateSubscriptions> DelegateSubscriptions;
 	TUniquePtr<FAvidScriptSessionInboundHandlers> InboundHandlers;
 	TSharedPtr<FAvidScriptSessionContinuations> Continuations;
+	TUniquePtr<FAvidScriptProfilerEventBuffer> Profiler;
 	TUniquePtr<FAvidScriptSessionDebugger> Debugger;
 	TUniquePtr<FAvidScriptWasmRuntimeInstance> LiveRuntime;
 	TUniquePtr<FAvidScriptRuntimeScheduler> Scheduler;

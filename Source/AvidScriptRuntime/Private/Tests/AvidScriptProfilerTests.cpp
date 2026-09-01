@@ -2,6 +2,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "AvidScriptRuntimeSession.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/AutomationTest.h"
 
@@ -91,6 +92,80 @@ bool FAvidScriptProfilerScopeTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("scope keeps epoch"), Snapshot.Events[0].Epoch, 3ULL);
 	TestEqual(TEXT("scope keeps correlation"), Snapshot.Events[0].CorrelationId, 91ULL);
 	TestFalse(TEXT("scope keeps outcome"), Snapshot.Events[0].bSucceeded);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptSessionProfilerIntegrationTest,
+	"AvidScript.Runtime.Profiling.SessionIntegration",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptSessionProfilerIntegrationTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptRuntimeSession Session;
+	Session.SetProfilerEnabled(true);
+	TestTrue(TEXT("Session profiler is enabled"), Session.IsProfilerEnabled());
+
+	FAvidScriptWasmReloadResult LoadResult;
+	TestTrue(TEXT("profiled embedded Runtime loads"), Session.LoadEmbeddedSmoke(LoadResult));
+	FAvidScriptWasmSmokeResult TickResult;
+	TestTrue(TEXT("profiled Runtime ticks"), Session.TickLive(1.0f / 60.0f, TickResult));
+
+	FAvidScriptWasmRuntimeInstance* Runtime = Session.GetLiveRuntimeForTesting();
+	TestNotNull(TEXT("profiled Session exposes its live Runtime"), Runtime);
+	if (Runtime != nullptr)
+	{
+		FAvidScriptHostCall Call;
+		Call.BindingId = EAvidScriptHostBindingId::HostAddI32;
+		Call.IntArgs[0] = 41;
+		FAvidScriptHostCallResult HostResult;
+		TestTrue(TEXT("profiled host crossing succeeds"), Runtime->DispatchHostCall(Call, HostResult));
+		TestEqual(TEXT("host crossing returns the expected value"), HostResult.ReturnValue, 42);
+	}
+
+	const FAvidScriptProfilerSnapshot Snapshot = Session.GetProfilerSnapshot();
+	TestTrue(
+		TEXT("Session snapshot contains Runtime load"),
+		Snapshot.Events.ContainsByPredicate(
+			[](const FAvidScriptProfilerEvent& Event)
+			{
+				return Event.Kind == EAvidScriptProfilerEventKind::RuntimeLoad
+					&& Event.OperationId == static_cast<uint32>(
+						EAvidScriptProfilerOperation::LoadEmbedded)
+					&& Event.bSucceeded;
+			}));
+	TestTrue(
+		TEXT("Session snapshot contains Tick guest call"),
+		Snapshot.Events.ContainsByPredicate(
+			[](const FAvidScriptProfilerEvent& Event)
+			{
+				return Event.Kind == EAvidScriptProfilerEventKind::GuestCall
+					&& Event.OperationId == static_cast<uint32>(
+						EAvidScriptProfilerOperation::Tick)
+					&& Event.bSucceeded;
+			}));
+	TestTrue(
+		TEXT("Session snapshot contains host crossing"),
+		Snapshot.Events.ContainsByPredicate(
+			[](const FAvidScriptProfilerEvent& Event)
+			{
+				return Event.Kind == EAvidScriptProfilerEventKind::HostCall
+					&& Event.OperationId == static_cast<uint32>(
+						EAvidScriptHostBindingId::HostAddI32)
+					&& Event.bSucceeded;
+			}));
+
+	const int32 CapturedCount = Snapshot.Events.Num();
+	Session.SetProfilerEnabled(false);
+	TestFalse(TEXT("Session profiler is disabled"), Session.IsProfilerEnabled());
+	TestTrue(TEXT("Runtime still ticks with profiler disabled"), Session.TickLive(1.0f / 60.0f, TickResult));
+	TestEqual(
+		TEXT("disabled profiler adds no buffered event"),
+		Session.GetProfilerSnapshot().Events.Num(),
+		CapturedCount);
+
+	FAvidScriptWasmSmokeResult StopResult;
+	TestTrue(TEXT("profiled Session stops cleanly"), Session.StopAndUnload(StopResult));
 	return true;
 }
 

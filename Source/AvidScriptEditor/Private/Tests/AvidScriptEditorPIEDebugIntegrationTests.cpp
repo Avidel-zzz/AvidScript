@@ -5,6 +5,7 @@
 #include "AvidScriptComponent.h"
 #include "AvidScriptRuntimeSession.h"
 #include "Components/SceneComponent.h"
+#include "CoreGlobals.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
@@ -92,6 +93,14 @@ UAvidScriptComponent* AddDebuggerPIEComponent(
 	Component->RegisterComponent();
 	return Component;
 }
+
+void AdvanceDebuggerPIEWorld(UWorld& World, const float ElapsedSeconds)
+{
+	World.Tick(LEVELTICK_All, 0.0f);
+	++GFrameCounter;
+	World.Tick(LEVELTICK_All, ElapsedSeconds);
+	++GFrameCounter;
+}
 } // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -145,6 +154,8 @@ bool FAvidScriptEditorPIEDebugIntegrationTest::RunTest(const FString& Parameters
 		DestroyDebuggerPIEWorld(World);
 		return true;
 	}
+	Runtime->SetProfilerEnabled(true);
+	TestTrue(TEXT("real PIE Session enables profiler capture"), Runtime->IsProfilerEnabled());
 
 	TArray<FAvidScriptDebugBreakpoint> Catalog;
 	FString Error;
@@ -219,6 +230,10 @@ bool FAvidScriptEditorPIEDebugIntegrationTest::RunTest(const FString& Parameters
 		EAvidScriptDebugSessionState::Running);
 
 	TestTrue(TEXT("same-manifest hot reload succeeds"), Component->ReloadScript());
+	TestTrue(
+		TEXT("reload preserves the component Runtime Session"),
+		Component->GetRuntimeSessionForEditorDebugging() == Runtime);
+	TestTrue(TEXT("reload preserves profiler capture"), Runtime->IsProfilerEnabled());
 	TestTrue(TEXT("Editor model refreshes after reload"), Controller.Tick(Error));
 	const FAvidScriptEditorDebugSessionView& ReloadedView =
 		Controller.GetSessionModel().GetView();
@@ -235,6 +250,56 @@ bool FAvidScriptEditorPIEDebugIntegrationTest::RunTest(const FString& Parameters
 		Controller.GetSessionModel().GetView().Runtime.State,
 		EAvidScriptDebugSessionState::Paused);
 	TestTrue(TEXT("reloaded pause continues"), Controller.ContinueExecution(Error));
+	TestTrue(
+		TEXT("debugger detaches before continuation profiling"),
+		Controller.DetachDebugger(Error));
+	FAvidScriptProfilerSnapshot Profile;
+	for (int32 Frame = 0; Frame < 8; ++Frame)
+	{
+		AdvanceDebuggerPIEWorld(*World, 0.02f);
+		TestTrue(TEXT("unpaused World frame refreshes the Editor model"), Controller.Tick(Error));
+		Profile = Runtime->GetProfilerSnapshot();
+		if (Profile.Events.ContainsByPredicate(
+				[](const FAvidScriptProfilerEvent& Event)
+				{
+					return Event.Kind == EAvidScriptProfilerEventKind::Continuation;
+				}))
+		{
+			break;
+		}
+	}
+	TestTrue(
+		TEXT("PIE profile contains Tick guest work"),
+		Profile.Events.ContainsByPredicate(
+			[](const FAvidScriptProfilerEvent& Event)
+			{
+				return Event.Kind == EAvidScriptProfilerEventKind::GuestCall
+					&& Event.OperationId == static_cast<uint32>(
+						EAvidScriptProfilerOperation::Tick);
+			}));
+	TestTrue(
+		TEXT("PIE profile correlates a host crossing to a source probe"),
+		Profile.Events.ContainsByPredicate(
+			[](const FAvidScriptProfilerEvent& Event)
+			{
+				return Event.Kind == EAvidScriptProfilerEventKind::HostCall
+					&& Event.ProbeId != 0;
+			}));
+	TestTrue(
+		TEXT("PIE profile contains the Runtime reload"),
+		Profile.Events.ContainsByPredicate(
+			[](const FAvidScriptProfilerEvent& Event)
+			{
+				return Event.Kind == EAvidScriptProfilerEventKind::Reload
+					&& Event.bSucceeded;
+			}));
+	TestTrue(
+		TEXT("PIE profile contains continuation dispatch"),
+		Profile.Events.ContainsByPredicate(
+			[](const FAvidScriptProfilerEvent& Event)
+			{
+				return Event.Kind == EAvidScriptProfilerEventKind::Continuation;
+			}));
 
 	TestTrue(TEXT("PIE World EndPlay succeeds"), World->EndPlay(EEndPlayReason::Quit));
 	TestTrue(TEXT("target refresh tolerates Runtime teardown"), Controller.Tick(Error));
