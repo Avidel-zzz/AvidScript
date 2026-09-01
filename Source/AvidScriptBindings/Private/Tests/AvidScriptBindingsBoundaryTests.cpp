@@ -13,6 +13,7 @@
 #include "AvidScriptBindingsTestTypes.h"
 
 #include "Containers/StringConv.h"
+#include "HAL/PlatformTime.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
 #include "UObject/Script.h"
@@ -239,6 +240,22 @@ FValueCodecProgram MakeInterfaceCodec(
 	Program.WireAlignment = alignof(uint32);
 	Program.Name = Property == nullptr ? TEXT("ReturnValue") : Property->GetName();
 	return Program;
+}
+
+double CalculateAvidScriptBoundaryBenchmarkPercentile(
+	TArray<double> Samples,
+	const double Quantile)
+{
+	Samples.Sort();
+	if (Samples.IsEmpty())
+	{
+		return 0.0;
+	}
+	const int32 Index = FMath::Clamp(
+		FMath::FloorToInt(Quantile * static_cast<double>(Samples.Num() - 1)),
+		0,
+		Samples.Num() - 1);
+	return Samples[Index];
 }
 
 FNativeFuncPtr GRecursiveStructOriginalNative = nullptr;
@@ -1179,6 +1196,90 @@ bool FAvidScriptInterfaceInteropBoundaryTest::RunTest(const FString& Parameters)
 		sizeof(ReturnValue));
 	TestEqual(TEXT("Cached interface call preserves behavior"), ReturnValue, 22);
 	TestEqual(TEXT("Cached interface call runs once more"), Implementer->InvocationCount, 2);
+
+	static constexpr int32 WarmupCount = 3;
+	static constexpr int32 SampleCount = 20;
+	static constexpr int32 IterationsPerSample = 512;
+	TArray<double> NativeSamples;
+	TArray<double> PreparedSamples;
+	NativeSamples.Reserve(SampleCount);
+	PreparedSamples.Reserve(SampleCount);
+	int64 NativeChecksum = 0;
+	uint64 BenchmarkArguments[] = { 0, 0, 0, 72 };
+	for (int32 RunIndex = 0;
+		RunIndex < WarmupCount + SampleCount;
+		++RunIndex)
+	{
+		const double NativeStart = FPlatformTime::Seconds();
+		for (int32 Iteration = 0;
+			Iteration < IterationsPerSample;
+			++Iteration)
+		{
+			NativeChecksum +=
+				IAvidScriptBindingsCallableInterface::
+					Execute_TransformInterfaceValue(
+						Implementer,
+						RunIndex + Iteration);
+		}
+		const double NativeMs =
+			(FPlatformTime::Seconds() - NativeStart)
+			* 1000.0 / IterationsPerSample;
+
+		const double PreparedStart = FPlatformTime::Seconds();
+		for (int32 Iteration = 0;
+			Iteration < IterationsPerSample;
+			++Iteration)
+		{
+			BenchmarkArguments[2] = static_cast<uint64>(RunIndex + Iteration);
+			if (!InvokePreparedDynamicReflection(
+					&FunctionCell,
+					*Implementer,
+					BenchmarkArguments,
+					&GuestMemory,
+					Context,
+					FunctionScratch,
+					Result))
+			{
+				AddError(Result.Details);
+				return false;
+			}
+		}
+		const double PreparedMs =
+			(FPlatformTime::Seconds() - PreparedStart)
+			* 1000.0 / IterationsPerSample;
+		if (RunIndex >= WarmupCount)
+		{
+			NativeSamples.Add(NativeMs);
+			PreparedSamples.Add(PreparedMs);
+		}
+	}
+	const double NativeP50 =
+		CalculateAvidScriptBoundaryBenchmarkPercentile(NativeSamples, 0.50);
+	const double NativeP95 =
+		CalculateAvidScriptBoundaryBenchmarkPercentile(NativeSamples, 0.95);
+	const double PreparedP50 =
+		CalculateAvidScriptBoundaryBenchmarkPercentile(PreparedSamples, 0.50);
+	const double PreparedP95 =
+		CalculateAvidScriptBoundaryBenchmarkPercentile(PreparedSamples, 0.95);
+	TestTrue(TEXT("Native interface P50 is sampled"), NativeP50 > 0.0);
+	TestTrue(TEXT("Prepared interface P50 is sampled"), PreparedP50 > 0.0);
+	TestNotEqual(TEXT("Native interface benchmark is observable"), NativeChecksum, 0ll);
+	TestTrue(
+		TEXT("Prepared interface overhead remains bounded against UE Execute"),
+		PreparedP50 <= NativeP50 * 12.0);
+	TestEqual(
+		TEXT("Warm interface calls retain the concrete-class PIC"),
+		FunctionProgram.CachedInterfaceReceiverClass,
+		Implementer->GetClass());
+	AddInfo(FString::Printf(
+		TEXT("phase60_interface_benchmark | samples=%d | iterations=%d | ue_execute_p50_ms=%.9f | ue_execute_p95_ms=%.9f | prepared_p50_ms=%.9f | prepared_p95_ms=%.9f | p50_ratio=%.6f | pic_resolved=1"),
+		SampleCount,
+		IterationsPerSample,
+		NativeP50,
+		NativeP95,
+		PreparedP50,
+		PreparedP95,
+		PreparedP50 / NativeP50));
 
 	TestFalse(
 		TEXT("Prepared interface call rejects a non-implementer"),

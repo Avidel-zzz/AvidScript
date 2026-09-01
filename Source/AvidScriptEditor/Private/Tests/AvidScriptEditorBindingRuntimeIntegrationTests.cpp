@@ -27,6 +27,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/ProjectileMovementComponent.h"
+#include "HAL/PlatformTime.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_FunctionEntry.h"
 #include "Kismet2/BlueprintEditorUtils.h"
@@ -7102,6 +7103,83 @@ bool FAvidScriptEditorBlueprintDeclaredFunctionIntegrationTest::RunTest(
 	TestTrue(
 		TEXT("Blueprint call crosses ProcessEvent"),
 		Actor->ProcessEventCallCount > 0);
+
+	static constexpr int32 WarmupCount = 3;
+	static constexpr int32 SampleCount = 20;
+	static constexpr int32 IterationsPerSample = 512;
+	TArray<double> NativeSamples;
+	TArray<double> PreparedSamples;
+	NativeSamples.Reserve(SampleCount);
+	PreparedSamples.Reserve(SampleCount);
+	const FAvidScriptBindingPackageInstrumentation WarmInstrumentation =
+		Package->GetInstrumentation();
+	for (int32 RunIndex = 0;
+		RunIndex < WarmupCount + SampleCount;
+		++RunIndex)
+	{
+		const double NativeStart = FPlatformTime::Seconds();
+		for (int32 Iteration = 0;
+			Iteration < IterationsPerSample;
+			++Iteration)
+		{
+			Actor->ProcessEvent(BlueprintFunction, nullptr);
+		}
+		const double NativeMs =
+			(FPlatformTime::Seconds() - NativeStart)
+			* 1000.0 / IterationsPerSample;
+
+		const double PreparedStart = FPlatformTime::Seconds();
+		for (int32 Iteration = 0;
+			Iteration < IterationsPerSample;
+			++Iteration)
+		{
+			if (!Package->Dispatch(
+					Call,
+					Context,
+					Scratch,
+					DispatchResult))
+			{
+				AddError(DispatchResult.Details);
+				return false;
+			}
+		}
+		const double PreparedMs =
+			(FPlatformTime::Seconds() - PreparedStart)
+			* 1000.0 / IterationsPerSample;
+		if (RunIndex >= WarmupCount)
+		{
+			NativeSamples.Add(NativeMs);
+			PreparedSamples.Add(PreparedMs);
+		}
+	}
+	const FAvidScriptBindingPackageInstrumentation FinalInstrumentation =
+		Package->GetInstrumentation();
+	const double NativeP50 =
+		CalculateAvidScriptPropertyBenchmarkPercentile(NativeSamples, 0.50);
+	const double NativeP95 =
+		CalculateAvidScriptPropertyBenchmarkPercentile(NativeSamples, 0.95);
+	const double PreparedP50 =
+		CalculateAvidScriptPropertyBenchmarkPercentile(PreparedSamples, 0.50);
+	const double PreparedP95 =
+		CalculateAvidScriptPropertyBenchmarkPercentile(PreparedSamples, 0.95);
+	TestTrue(TEXT("Native Blueprint P50 is sampled"), NativeP50 > 0.0);
+	TestTrue(TEXT("Prepared Blueprint P50 is sampled"), PreparedP50 > 0.0);
+	TestTrue(
+		TEXT("Prepared Blueprint overhead remains bounded against cached ProcessEvent"),
+		PreparedP50 <= NativeP50 * 12.0);
+	TestEqual(
+		TEXT("Warm Blueprint calls perform no reflected-name lookup"),
+		FinalInstrumentation.ReflectedNameLookupCount,
+		WarmInstrumentation.ReflectedNameLookupCount);
+	AddInfo(FString::Printf(
+		TEXT("phase60_blueprint_callable_benchmark | samples=%d | iterations=%d | process_event_p50_ms=%.9f | process_event_p95_ms=%.9f | prepared_p50_ms=%.9f | prepared_p95_ms=%.9f | p50_ratio=%.6f | warm_reflected_name_lookups=0"),
+		SampleCount,
+		IterationsPerSample,
+		NativeP50,
+		NativeP95,
+		PreparedP50,
+		PreparedP95,
+		PreparedP50 / NativeP50));
 
 	FGraphNodeCreator<UK2Node_CallFunction> SecondNodeCreator(*FunctionGraph);
 	UK2Node_CallFunction* const SecondCallNode = SecondNodeCreator.CreateNode();

@@ -12,6 +12,7 @@
 #include "Engine/Engine.h"
 #include "Engine/LatentActionManager.h"
 #include "Engine/World.h"
+#include "HAL/PlatformTime.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
 #include "UObject/SoftObjectPath.h"
@@ -19,6 +20,22 @@
 
 namespace
 {
+double CalculateAvidScriptContinuationBenchmarkPercentile(
+	TArray<double> Samples,
+	const double Quantile)
+{
+	Samples.Sort();
+	if (Samples.IsEmpty())
+	{
+		return 0.0;
+	}
+	const int32 Index = FMath::Clamp(
+		FMath::FloorToInt(Quantile * static_cast<double>(Samples.Num() - 1)),
+		0,
+		Samples.Num() - 1);
+	return Samples[Index];
+}
+
 class FAvidScriptTestAsyncActionPayloadEncoder final
 	: public IAvidScriptBindingAsyncActionPayloadEncoder
 {
@@ -1537,6 +1554,91 @@ bool FAvidScriptContinuationBlueprintAsyncActionTest::RunTest(
 			TEXT("Synchronous async action finalizes"),
 			Owner->FinalizeDispatched(ImmediateToken, true));
 	}
+
+	static constexpr int32 WarmupCount = 3;
+	static constexpr int32 SampleCount = 20;
+	static constexpr int32 IterationsPerSample = 64;
+	TStrongObjectPtr<UAvidScriptRuntimeAsyncActionTestObject> BenchmarkAction(
+		NewObject<UAvidScriptRuntimeAsyncActionTestObject>());
+	TArray<double> LifecycleSamples;
+	LifecycleSamples.Reserve(SampleCount);
+	TArray<FAvidScriptContinuationCompletion> BenchmarkCompletions;
+	BenchmarkCompletions.Reserve(1);
+	FAvidScriptBindingLatentCompletionPayload BenchmarkPayload;
+	for (int32 RunIndex = 0;
+		RunIndex < WarmupCount + SampleCount;
+		++RunIndex)
+	{
+		const double Start = FPlatformTime::Seconds();
+		for (int32 Iteration = 0;
+			Iteration < IterationsPerSample;
+			++Iteration)
+		{
+			BenchmarkCompletions.Reset();
+			BenchmarkPayload = {};
+			const int64 Token = Host.BeginAsyncAction(
+				700,
+				*BenchmarkAction,
+				Contract,
+				Error);
+			if (Token == 0)
+			{
+				AddError(Error);
+				return false;
+			}
+			BenchmarkAction->BroadcastCompleted();
+			Owner->DrainReady(BenchmarkCompletions);
+			if (BenchmarkCompletions.Num() != 1)
+			{
+				AddError(TEXT("Async action benchmark did not produce exactly one completion."));
+				return false;
+			}
+			const FAvidScriptContinuationCompletion& Completion =
+				BenchmarkCompletions[0];
+			if (!Owner->ConsumeResult(
+					EAvidScriptContinuationLane::Active,
+					Host.GetActivationSerial(),
+					Completion.Token,
+					Completion.ObjectSlot,
+					Completion.ObjectGeneration,
+					Contract.PayloadTypeId,
+					BenchmarkPayload)
+				|| !Owner->FinalizeDispatched(Token, true))
+			{
+				AddError(TEXT("Async action benchmark could not consume and finalize its result."));
+				return false;
+			}
+		}
+		const double LifecycleMs =
+			(FPlatformTime::Seconds() - Start)
+			* 1000.0 / IterationsPerSample;
+		if (RunIndex >= WarmupCount)
+		{
+			LifecycleSamples.Add(LifecycleMs);
+		}
+	}
+	const double LifecycleP50 =
+		CalculateAvidScriptContinuationBenchmarkPercentile(
+			LifecycleSamples,
+			0.50);
+	const double LifecycleP95 =
+		CalculateAvidScriptContinuationBenchmarkPercentile(
+			LifecycleSamples,
+			0.95);
+	TestTrue(TEXT("Async action lifecycle P50 is sampled"), LifecycleP50 > 0.0);
+	TestTrue(
+		TEXT("Async action Session lifecycle remains within its fixed budget"),
+		LifecycleP50 <= 0.250);
+	TestEqual(
+		TEXT("Async action benchmark leaves no pending continuation"),
+		Owner->GetActiveCount(),
+		0);
+	AddInfo(FString::Printf(
+		TEXT("phase60_async_action_benchmark | samples=%d | iterations=%d | session_lifecycle_p50_ms=%.9f | session_lifecycle_p95_ms=%.9f | action_allocation_included=0 | tick_polling=0"),
+		SampleCount,
+		IterationsPerSample,
+		LifecycleP50,
+		LifecycleP95));
 
 	TStrongObjectPtr<UAvidScriptRuntimeAsyncActionTestObject> CancelledAction(
 		NewObject<UAvidScriptRuntimeAsyncActionTestObject>());
