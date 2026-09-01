@@ -1,6 +1,6 @@
 # Phase 61 收尾记录
 
-状态：实施中，`P61.A1-A3b`、`P61.B1a-B2`、`P61.C1a-C4c` 已完成
+状态：`P61.A-P61.E` 已完成，集中 Gate 已通过，等待正式 attestation 与 close
 
 ## 目标
 
@@ -132,10 +132,16 @@
 - 完成 `P61.D4c2` Editor IDE 命令：Tools > AvidScript 提供默认、Visual Studio、Rider 与 VS Code 入口；
 - 命令先安全刷新工作区，再通过统一服务启动并向 AvidScript Diagnostic Log 发布结构化结果；
 - 详细实现与证据见 [P61.D4c2 Editor IDE 命令](P61.D4c2_Editor_IDE_Commands.md)。
+- 完成 `P61.E` 集中 Gate：托管 Runner `279/279`、完整 UE Automation `427/427`、
+  UE5.8 no-clean Editor UBT、clean detached architecture 与固定性能预算全部通过；
+- 5 轮增量矩阵中位数为 `806.372 / 1826.086 / 1802.300 / 3731.952 ms`；Profiler
+  disabled 增量中位开销为 `0.490 ns`，占 enabled 的 `6.10%`；
+- 详细结果与人工验收清单见 [P61.E 集成与集中 Gate](P61.E_Integration_Gate.md)。
 
 ## 待完成
 
-- `P61.E` 集成与集中 Gate。
+- Phase 61 workflow attestation 与 close；
+- 真实 Editor 中的调试、源码导航、Profiler 操作和三类 IDE 启动由人工验收，不以 Automation 代替。
 
 ## 人工验收边界
 

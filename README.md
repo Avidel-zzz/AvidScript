@@ -10,8 +10,8 @@
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 Development" src="https://img.shields.io/badge/Platform-Win64-0078D4?logo=windows&logoColor=white">
-  <img alt="Phase 61 P61.C In Progress" src="https://img.shields.io/badge/Status-Phase%2061%20P61.C-2B6CB0">
-  <img alt="Automation Baseline 411/411" src="https://img.shields.io/badge/Baseline-411%2F411-26A269">
+  <img alt="Phase 61 Gate" src="https://img.shields.io/badge/Status-Phase%2061%20Gate-2B6CB0">
+  <img alt="Automation Baseline 427/427" src="https://img.shields.io/badge/Baseline-427%2F427-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
 
@@ -39,34 +39,21 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 | 热重载 | 方法体事务式替换、候选回滚、状态帧与 handle 生命周期隔离 |
 | 发布 | 内容寻址 Generated Type bundle、NonUFS staging 与 Cook-layout Runtime load |
 | 后端 | Wasmtime 45 Win64 主后端；WAMR 兼容后端 |
-| 增量构建 | 双层产物缓存与 persistent Worker；无修改热构建零编译调用，5 轮中位数 `884 ms` |
+| 增量构建 | 双层产物缓存与 persistent Worker；无修改热构建零编译调用，5 轮中位数 `806 ms` |
 | 结构化诊断 | Debug Map v2、同步/async 序列点、稳定 probe ID、双后端 probe 执行、跨层调用栈、Editor 源码导航 |
 | 同步调试 | 顶层 `void` 导出的非阻塞 pause、continue、step-into、4 KiB 状态帧、双后端恢复与源码断点目录 |
 | 调试变量 | Session 按 probe 与词法作用域生成有界只读 snapshot，支持标量、enum、ObjectHandle/能力 token 与值类型摘要 |
 | Editor 调试 | PIE 目标选择、源码断点、attach/pause/continue/step、暂停变量、源码跳转与 reload/teardown 安全 |
 | Profiler | 全链路埋点与 UE Trace；Editor capture、过滤、热点、源码跳转和 JSON 导出面板 |
+| C# 工作区 | `.slnx`、WASI 工程、固定 SDK、离线源码索引，以及 Visual Studio/Rider/VS Code 启动命令 |
 
-Phase 60 的功能批次已完成：UE Interface 与默认参数、Delegate 双向调用、Blueprint
-callable/event，以及带 typed payload 的 AsyncAction `await` 已接入真实 C# Session Runtime。
-异步对象支持 reload 重绑、reinstance 失效取消、teardown 回收与迟到广播抑制。
+Phase 61 已实现增量编译、Debug Map v2、跨层调用栈、源码断点、暂停变量、非阻塞单步、
+Editor Debugger/Profiler，以及现代 C# 工作区。集中 Gate 已通过 Automation `427/427`、
+UE5.8 no-clean UBT、clean detached architecture 和两项性能预算。5 轮增量矩阵中位耗时为
+`806 / 1826 / 1802 / 3732 ms`；Profiler 关闭采集的增量中位开销为 `0.490 ns`，占启用采集的
+`6.10%`。真实 Editor 中的三类 IDE 启动和人工调试体验仍需人工验收。
 
-完整 AvidScript Automation `411/411`、UE5.8 no-clean UBT 与 clean detached architecture Gate
-均已通过，Phase 60 已完成正式 attestation 与 close。
-
-详细进度见 [Phase 60 中文收尾记录](Docs/Phase60/P60_Closeout.md)。
-
-Phase 61 已完成 `P61.A-P61.C`：增量编译、Debug Map v2、可导航调用栈，
-以及同步顶层 `void` 导出的 CPS 暂停/恢复闭环已落地。Editor 的 AvidScript Debugger 面板可选择 PIE
-Component Session、维护源码断点、控制执行、查看暂停变量并跳转源码，reload/teardown 时自动安全重绑定或失效。
-真实 Debug C# WASM 的 PIE World 集成用例已覆盖 pause、变量、step、continue、reload 与 EndPlay。
-`EndPlay`、non-void、async 和 Guest helper 暂不生成可暂停点。
-5 轮增量矩阵的无修改、方法体、Binding、工具链中位耗时为
-`884 / 1833 / 1826 / 3223 ms`；Editor Profiler、IDE workspace 与人工 Editor 交互验收仍在后续批次。
-Profiler 已覆盖 Runtime load、Tick/Event、UE host call、continuation、reload 与 EndPlay，且可用 probe ID
-关联源码位置。固定性能门禁中 disabled/enabled 中位数为 `1.989 / 33.318 ns/op`，disabled 占 `5.97%`；
-Editor 数据模型已支持组合过滤、热点聚合和原子 JSON 导出，并与 PIE Component target 同步选择、
-reload 重绑和 EndPlay 失效。Debugger Tab 已提供 capture/reset、事件类型与时长过滤、热点/事件表、
-源码跳转和 JSON 导出；真实 Editor 人工交互验收保留到 `P61.E`。
+详细结果见 [Phase 61 集中 Gate](Docs/Phase61/P61.E_Integration_Gate.md)。
 
 ## C# 游戏脚本
 
@@ -190,6 +177,7 @@ P60 的新增 UE 交互路径均在 warm path 禁止名称反射查找，并使�
 - [Phase 56 游戏 workload 报告](Docs/Phase56/P56.5_Fused_Call_Frame_Implementation_Report.md)
 - [Wasmtime Cranelift Speed 报告](Docs/Phase57/P57.13_Cranelift_Speed_Profile.md)
 - [Phase 60 性能矩阵与 Gate](Docs/Phase60/P60.D_Performance_And_Gate.md)
+- [Phase 61 集中 Gate](Docs/Phase61/P61.E_Integration_Gate.md)
 
 ## 快速开始
 
@@ -253,9 +241,8 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 
 ## 验证
 
-最近一次完整基线为 **AvidScript Automation 411/411 通过**。Phase 60 已完成 Interface、默认参数、
-Delegate 双向调用、Blueprint callable/event 与 AsyncAction typed payload/await 闭环；UE5.8 no-clean
-UBT、完整 Automation、性能预算和 clean detached architecture Gate 均已通过。
+最近一次完整基线为 **AvidScript Automation 427/427 通过**。Phase 61 的托管测试 `279/279`、
+UE5.8 no-clean UBT、增量构建与 Profiler 性能预算，以及 clean detached architecture Gate 均已通过。
 
 阶段状态与实现证据见 [Docs](Docs/)，开发规则见 [AGENTS.md](AGENTS.md)。
 
