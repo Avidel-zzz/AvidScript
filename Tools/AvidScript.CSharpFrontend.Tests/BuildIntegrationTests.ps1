@@ -912,11 +912,23 @@ Assert-Condition ($BrokenExit -eq 1) "syntax errors must return exit code 1; act
 Assert-Condition (Test-Path -LiteralPath $BrokenReport -PathType Leaf) "syntax failure report is missing"
 $BrokenJson = Get-Content -Raw -LiteralPath $BrokenReport | ConvertFrom-Json
 Assert-Condition ($BrokenJson.result -eq "frontend_failed") "syntax failure report result is not frontend_failed"
+Assert-Condition ([int]$BrokenJson.diagnostic_schema_version -eq 1) `
+    "syntax failure diagnostic schema is invalid"
 Assert-Condition (
     [int]$BrokenJson.tool_invocations.frontend -eq 1 -and
     [int]$BrokenJson.tool_invocations.semantic -eq 0) `
     "syntax failure structured invocation counts differ"
 Assert-Condition (@($BrokenJson.diagnostics | Where-Object severity -eq "error").Count -gt 0) "syntax failure report has no error diagnostic"
+$BrokenDiagnostic = @($BrokenJson.diagnostics | Where-Object severity -eq "error")[0]
+Assert-Condition ([int]$BrokenDiagnostic.schema_version -eq 1 -and
+    [string]$BrokenDiagnostic.stage -ceq "frontend" -and
+    [string]$BrokenDiagnostic.source_sha256 -ceq (Get-Sha256Hex $BrokenSource) -and
+    [int]$BrokenDiagnostic.line_base -eq 1 -and
+    [int]$BrokenDiagnostic.line -ge 1 -and
+    [int]$BrokenDiagnostic.column -ge 1) `
+    "syntax failure diagnostic identity/span contract is invalid"
+Assert-Condition (-not [System.IO.Path]::IsPathRooted([string]$BrokenDiagnostic.source_id)) `
+    "syntax failure diagnostic leaked an absolute source path"
 Assert-Condition (-not (Test-Path -LiteralPath $BrokenManifest -PathType Leaf)) "syntax failure must not produce a manifest"
 Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $BrokenRoot "broken.csharp_adapter.wasm") -PathType Leaf)) "syntax failure must remove stale adapter WASM"
 $BrokenFrontendPath = Resolve-ArtifactPath $BrokenJson.artifacts.frontend_file
@@ -972,6 +984,13 @@ Assert-Condition (Test-Path -LiteralPath $SemanticBrokenArtifact -PathType Leaf)
 $SemanticBrokenArtifactJson = Get-Content -Raw -LiteralPath $SemanticBrokenArtifact | ConvertFrom-Json
 Assert-Condition (-not $SemanticBrokenArtifactJson.succeeded) "semantic failure artifact reports success"
 Assert-Condition (@($SemanticBrokenJson.diagnostics | Where-Object code -eq "CS0029").Count -eq 1) "semantic failure report did not retain CS0029"
+$SemanticBrokenDiagnostic = @($SemanticBrokenJson.diagnostics | Where-Object code -eq "CS0029")[0]
+Assert-Condition ([string]$SemanticBrokenDiagnostic.stage -ceq "semantic" -and
+    [string]$SemanticBrokenDiagnostic.source_sha256 -ceq (Get-Sha256Hex $SemanticBrokenSource) -and
+    [int]$SemanticBrokenDiagnostic.line_base -eq 1 -and
+    [int]$SemanticBrokenDiagnostic.span.line_base -eq 1 -and
+    [int]$SemanticBrokenDiagnostic.span.start -eq [int]$SemanticBrokenDiagnostic.start) `
+    "semantic failure diagnostic identity/span contract is invalid"
 Assert-Condition (-not (Test-Path -LiteralPath $SemanticBrokenManifest -PathType Leaf)) "semantic failure must remove stale manifest"
 Assert-Condition (-not (Test-Path -LiteralPath $SemanticBrokenWasm -PathType Leaf)) "semantic failure must remove stale adapter WASM"
 Assert-Condition (-not (Test-Path -LiteralPath $SemanticBrokenDotNetWasm -PathType Leaf)) "semantic failure must remove stale dotnet WASM"

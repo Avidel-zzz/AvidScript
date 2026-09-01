@@ -35,5 +35,7 @@ public class AvidScriptEditor : ModuleRules
 				"LevelEditor"
 			}
 		);
+
+		AddEngineThirdPartyPrivateStaticDependencies(Target, "OpenSSL");
 	}
 }

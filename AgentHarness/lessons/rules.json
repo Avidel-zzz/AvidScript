@@ -502,6 +502,14 @@
       "prevention": "测试 response timeout 时使用独立 server 进程读取一整行请求后保持静默；不要只建立连接而不读取，否则 StreamWriter.Flush 可能阻塞，测到的不是响应超时。",
       "source": "observed:2026-09-01-P61.A2b2",
       "last_observed": "2026-09-01 P61.A2b2 初版 blackhole server 只接受连接未读取请求，客户端阻塞在 Flush；改为独立进程读取请求后静默，auto/required 超时测试 2/2 通过"
+    },
+    {
+      "id": "ue-generic-platform-sha256-is-not-portable-implementation",
+      "tags": ["ue", "hash", "editor", "verification"],
+      "summary": "FPlatformMisc::GetSHA256Signature 是可缺省的平台桩，不是 UE Editor 的通用 SHA-256 实现。",
+      "prevention": "需要稳定 SHA-256 时使用已链接的跨平台加密实现并运行真实 Editor Automation；禁止仅凭 GenericPlatform 声明判断该函数在目标平台可用。",
+      "source": "observed:2026-09-01-P61.A3a",
+      "last_observed": "2026-09-01 P61.A3a 源码导航测试在 Windows Editor 调用 GetSHA256Signature，命中 No SHA256 Platform implementation 断言；改用 UE 自带 OpenSSL 后修复"
     }
   ]
 }

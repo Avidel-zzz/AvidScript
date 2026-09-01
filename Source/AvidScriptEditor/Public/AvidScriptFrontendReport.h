@@ -6,16 +6,23 @@ struct FAvidScriptFrontendDiagnostic
 {
 	FString Code;
 	FString Severity;
+	FString Stage;
 	FString File;
+	FString SourceSha256;
+	FString ModuleId;
 	int32 Start = INDEX_NONE;
 	int32 Length = 0;
 	int32 Line = 0;
 	int32 Column = 0;
 	int32 EndLine = 0;
 	int32 EndColumn = 0;
+	int32 LineBase = 0;
 	FString Message;
 
 	bool IsError() const;
+	bool HasSourceLocation() const;
+	int32 GetDisplayLine() const;
+	int32 GetDisplayColumn() const;
 };
 
 struct FAvidScriptFrontendBuildEvent
@@ -54,6 +61,7 @@ struct FAvidScriptFrontendBindingPackage
 struct FAvidScriptFrontendReport
 {
 	int32 SchemaVersion = 0;
+	int32 DiagnosticSchemaVersion = 0;
 	FString Result;
 	FString Source;
 	FString SourceSha256;

@@ -39,6 +39,7 @@ bool FAvidScriptFrontendReportSuccessLoadTest::RunTest(const FString& Parameters
 	const FString ReportPath = GetAvidScriptReportFixturePath(TEXT("success.report.json"));
 	const FString ReportJson = TEXT("{\n")
 		TEXT("  \"schema_version\": 1,\n")
+		TEXT("  \"diagnostic_schema_version\": 1,\n")
 		TEXT("  \"source\": \"Samples/ActorSetLocation/actor_set_location.avid\",\n")
 		TEXT("  \"bindings\": \"Bindings/ActorHostBindings.avidscript.json\",\n")
 		TEXT("  \"output_root\": \"Saved/AvidScriptGenerated/actor_set_location\",\n")
@@ -94,6 +95,7 @@ bool FAvidScriptFrontendReportDiagnosticLoadTest::RunTest(const FString& Paramet
 	const FString ReportPath = GetAvidScriptReportFixturePath(TEXT("unknown_binding.report.json"));
 	const FString ReportJson = TEXT("{\n")
 		TEXT("  \"schema_version\": 1,\n")
+		TEXT("  \"diagnostic_schema_version\": 1,\n")
 		TEXT("  \"result\": \"unknown_binding\",\n")
 		TEXT("  \"source\": \"Saved/AvidScriptGenerated/NegativeTests/p9_2_unknown_binding.avid\",\n")
 		TEXT("  \"bindings\": \"Bindings/ActorHostBindings.avidscript.json\",\n")
@@ -101,7 +103,7 @@ bool FAvidScriptFrontendReportDiagnosticLoadTest::RunTest(const FString& Paramet
 		TEXT("  \"exit_code\": 1,\n")
 		TEXT("  \"succeeded\": false,\n")
 		TEXT("  \"diagnostics\": [\n")
-		TEXT("    { \"code\": \"ASL1202\", \"severity\": \"error\", \"file\": \"Scripts/Broken.cs\", \"start\": 29, \"length\": 4, \"line\": 6, \"column\": 5, \"end_line\": 6, \"end_column\": 9, \"message\": \"unknown binding 'teleport_actor'\" }\n")
+		TEXT("    { \"schema_version\": 1, \"code\": \"ASL1202\", \"severity\": \"error\", \"stage\": \"frontend\", \"source_id\": \"Scripts/Broken.cs\", \"source_sha256\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"module_id\": \"broken\", \"start\": 29, \"length\": 4, \"line\": 7, \"column\": 6, \"end_line\": 7, \"end_column\": 10, \"line_base\": 1, \"message\": \"unknown binding 'teleport_actor'\" }\n")
 		TEXT("  ],\n")
 		TEXT("  \"build_events\": [\n")
 		TEXT("    { \"result\": \"unknown_binding\", \"fields\": { \"code\": \"ASL1202\", \"binding\": \"teleport_actor\" } }\n")
@@ -116,6 +118,7 @@ bool FAvidScriptFrontendReportDiagnosticLoadTest::RunTest(const FString& Paramet
 	TestTrue(TEXT("Diagnostic report loads"), FAvidScriptFrontendReportReader::LoadFromFile(ReportPath, Report, LoadResult));
 	TestTrue(TEXT("Load result succeeded"), LoadResult.bSucceeded);
 	TestEqual(TEXT("Report result"), Report.Result, FString(TEXT("unknown_binding")));
+	TestEqual(TEXT("Diagnostic schema"), Report.DiagnosticSchemaVersion, 1);
 	TestFalse(TEXT("Report did not succeed"), Report.bSucceeded);
 	TestTrue(TEXT("Error diagnostics detected"), Report.HasErrorDiagnostics());
 	TestEqual(TEXT("Diagnostic count"), Report.Diagnostics.Num(), 1);
@@ -125,13 +128,20 @@ bool FAvidScriptFrontendReportDiagnosticLoadTest::RunTest(const FString& Paramet
 		const FAvidScriptFrontendDiagnostic& Diagnostic = Report.Diagnostics[0];
 		TestEqual(TEXT("Diagnostic code"), Diagnostic.Code, FString(TEXT("ASL1202")));
 		TestEqual(TEXT("Diagnostic severity"), Diagnostic.Severity, FString(TEXT("error")));
+		TestEqual(TEXT("Diagnostic stage"), Diagnostic.Stage, FString(TEXT("frontend")));
 		TestEqual(TEXT("Diagnostic file"), Diagnostic.File, FString(TEXT("Scripts/Broken.cs")));
+		TestEqual(TEXT("Diagnostic source hash"), Diagnostic.SourceSha256, FString::ChrN(64, TEXT('a')));
+		TestEqual(TEXT("Diagnostic module"), Diagnostic.ModuleId, FString(TEXT("broken")));
 		TestEqual(TEXT("Diagnostic start"), Diagnostic.Start, 29);
 		TestEqual(TEXT("Diagnostic length"), Diagnostic.Length, 4);
-		TestEqual(TEXT("Diagnostic line"), Diagnostic.Line, 6);
-		TestEqual(TEXT("Diagnostic column"), Diagnostic.Column, 5);
-		TestEqual(TEXT("Diagnostic end line"), Diagnostic.EndLine, 6);
-		TestEqual(TEXT("Diagnostic end column"), Diagnostic.EndColumn, 9);
+		TestEqual(TEXT("Diagnostic line"), Diagnostic.Line, 7);
+		TestEqual(TEXT("Diagnostic column"), Diagnostic.Column, 6);
+		TestEqual(TEXT("Diagnostic end line"), Diagnostic.EndLine, 7);
+		TestEqual(TEXT("Diagnostic end column"), Diagnostic.EndColumn, 10);
+		TestEqual(TEXT("Diagnostic line base"), Diagnostic.LineBase, 1);
+		TestEqual(TEXT("Diagnostic display line"), Diagnostic.GetDisplayLine(), 7);
+		TestEqual(TEXT("Diagnostic display column"), Diagnostic.GetDisplayColumn(), 6);
+		TestTrue(TEXT("Diagnostic source location is navigable"), Diagnostic.HasSourceLocation());
 		TestEqual(TEXT("Diagnostic message"), Diagnostic.Message, FString(TEXT("unknown binding 'teleport_actor'")));
 		TestTrue(TEXT("Diagnostic reports error"), Diagnostic.IsError());
 	}
@@ -162,6 +172,7 @@ bool FAvidScriptFrontendReportCSharpStructuredLoadTest::RunTest(const FString& P
 	const FString ReportPath = GetAvidScriptReportFixturePath(TEXT("csharp_structured.report.json"));
 	const FString ReportJson = TEXT("{\n")
 		TEXT("  \"schema_version\": 1,\n")
+		TEXT("  \"diagnostic_schema_version\": 1,\n")
 		TEXT("  \"source\": { \"file\": \"Scripts/ActorLifecycleScript.cs\", \"sha256\": \"abc123\", \"script_type\": \"ActorLifecycleScript\" },\n")
 		TEXT("  \"output_root\": \"Saved/AvidScriptCSharpGuest\",\n")
 		TEXT("  \"succeeded\": true,\n")

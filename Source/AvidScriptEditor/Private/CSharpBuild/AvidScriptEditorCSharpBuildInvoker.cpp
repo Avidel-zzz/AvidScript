@@ -26,6 +26,7 @@ bool ApplyAvidScriptCSharpBuildReportMetadata(
 {
 	if (!Report.bHasToolInvocations
 		|| !Report.bToolInvocationsValid
+		|| Report.DiagnosticSchemaVersion != 1
 		|| !Report.bHasSemanticCache
 		|| !Report.bSemanticCacheValid
 		|| !Report.bHasCompilationCache
@@ -63,6 +64,7 @@ bool ApplyAvidScriptCSharpBuildReportMetadata(
 	OutResult.bCompilationCachePublished = Report.bCompilationCachePublished;
 	OutResult.CompilationCacheDiagnosticCode = Report.CompilationCacheDiagnosticCode;
 	OutResult.CompilationCacheDiagnosticMessage = Report.CompilationCacheDiagnosticMessage;
+	OutResult.Diagnostics = Report.Diagnostics;
 	return true;
 }
 
@@ -90,12 +92,12 @@ bool SetAvidScriptCSharpStructuredInvocationFailure(
 			const FString DiagnosticMessage = Diagnostic.Code.IsEmpty()
 				? Diagnostic.Message
 				: FString::Printf(TEXT("%s: %s"), *Diagnostic.Code, *Diagnostic.Message);
-			ErrorMessage = Diagnostic.Start != INDEX_NONE && !Diagnostic.File.IsEmpty()
+			ErrorMessage = Diagnostic.HasSourceLocation()
 				? FString::Printf(
 					TEXT("%s(%d,%d): %s"),
 					*Diagnostic.File,
-					Diagnostic.Line + 1,
-					Diagnostic.Column + 1,
+					Diagnostic.GetDisplayLine(),
+					Diagnostic.GetDisplayColumn(),
 					*DiagnosticMessage)
 				: DiagnosticMessage;
 			break;

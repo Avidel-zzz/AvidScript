@@ -3431,6 +3431,48 @@ $WasmFunctionCompilerSource = Read-RequiredFile 'Tools/AvidScript.WasmBackend/Co
 $CSharpBuildScriptSource = Read-RequiredFile 'Build/BuildCSharpActorLifecycle.ps1'
 $CSharpCompilerWorkerScriptSource = Read-RequiredFile 'Build/AvidScriptCSharpCompilerWorker.ps1'
 $CSharpCompilerWorkerServerSource = Read-RequiredFile 'Tools/AvidScript.CSharpCompilerWorker/Server/CompilerWorkerServer.cs'
+$FrontendReportHeaderSource = Read-RequiredFile 'Source/AvidScriptEditor/Public/AvidScriptFrontendReport.h'
+$FrontendReportSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/AvidScriptFrontendReport.cpp'
+$DiagnosticNavigationSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/AvidScriptEditorDiagnosticNavigation.cpp'
+$AvidScriptEditorBuildRulesSource = Read-RequiredFile 'Source/AvidScriptEditor/AvidScriptEditor.Build.cs'
+foreach ($RequiredUnifiedDiagnosticBuildContract in @(
+    'diagnostic_schema_version = 1',
+    'Convert-ToUnifiedCompilerDiagnostics',
+    'source_sha256',
+    'line_base = 1'
+)) {
+    if (-not $CSharpBuildScriptSource.Contains($RequiredUnifiedDiagnosticBuildContract)) {
+        Add-Violation "C# build pipeline is missing unified diagnostic contract $RequiredUnifiedDiagnosticBuildContract"
+    }
+}
+foreach ($RequiredUnifiedDiagnosticEditorContract in @(
+    'DiagnosticSchemaVersion',
+    'SourceSha256',
+    'ModuleId',
+    'LineBase',
+    'GetDisplayLine',
+    'GetDisplayColumn'
+)) {
+    if (-not $FrontendReportHeaderSource.Contains($RequiredUnifiedDiagnosticEditorContract) -and
+        -not $FrontendReportSource.Contains($RequiredUnifiedDiagnosticEditorContract)) {
+        Add-Violation "Editor report reader is missing unified diagnostic contract $RequiredUnifiedDiagnosticEditorContract"
+    }
+}
+foreach ($RequiredDiagnosticNavigationContract in @(
+    'FPaths::IsRelative',
+    'FPaths::IsUnderDirectory',
+    'diagnostic_source_changed',
+    'FSourceCodeNavigation::OpenSourceFile',
+    '::SHA256('
+)) {
+    if (-not $DiagnosticNavigationSource.Contains($RequiredDiagnosticNavigationContract)) {
+        Add-Violation "Editor diagnostic navigation is missing safe source contract $RequiredDiagnosticNavigationContract"
+    }
+}
+if (-not $AvidScriptEditorBuildRulesSource.Contains(
+        'AddEngineThirdPartyPrivateStaticDependencies(Target, "OpenSSL")')) {
+    Add-Violation 'Editor diagnostic source hashing must link the UE-provided OpenSSL implementation'
+}
 foreach ($RequiredPreparedBuildContract in @(
     'AvidScriptCSharpSemanticCache.ps1',
     'Import-AvidScriptCSharpPreparedSemantic',

@@ -2,6 +2,7 @@
 
 #include "AvidScriptEditorProjectBindingProfile.h"
 #include "AvidScriptEditorBindingSelectionTypes.h"
+#include "AvidScriptFrontendReport.h"
 
 #include "CoreMinimal.h"
 
@@ -91,6 +92,7 @@ struct FAvidScriptEditorCSharpBuildResult
 	bool bCompilationCachePublished = false;
 	FString CompilationCacheDiagnosticCode;
 	FString CompilationCacheDiagnosticMessage;
+	TArray<FAvidScriptFrontendDiagnostic> Diagnostics;
 	FString BindingSelectionHash;
 	bool bReusedAuthorizationBindingPackage = false;
 	bool bVmArtifactPublished = false;

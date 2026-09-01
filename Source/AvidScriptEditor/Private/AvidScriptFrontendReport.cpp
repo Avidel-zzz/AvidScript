@@ -143,13 +143,20 @@ void LoadAvidScriptDiagnostics(
 		FAvidScriptFrontendDiagnostic Diagnostic;
 		DiagnosticObject->TryGetStringField(TEXT("code"), Diagnostic.Code);
 		DiagnosticObject->TryGetStringField(TEXT("severity"), Diagnostic.Severity);
-		DiagnosticObject->TryGetStringField(TEXT("file"), Diagnostic.File);
+		DiagnosticObject->TryGetStringField(TEXT("stage"), Diagnostic.Stage);
+		if (!DiagnosticObject->TryGetStringField(TEXT("source_id"), Diagnostic.File))
+		{
+			DiagnosticObject->TryGetStringField(TEXT("file"), Diagnostic.File);
+		}
+		DiagnosticObject->TryGetStringField(TEXT("source_sha256"), Diagnostic.SourceSha256);
+		DiagnosticObject->TryGetStringField(TEXT("module_id"), Diagnostic.ModuleId);
 		Diagnostic.Start = GetAvidScriptJsonIntField(DiagnosticObject, TEXT("start"), INDEX_NONE);
 		Diagnostic.Length = GetAvidScriptJsonIntField(DiagnosticObject, TEXT("length"), 0);
 		Diagnostic.Line = GetAvidScriptJsonIntField(DiagnosticObject, TEXT("line"), 0);
 		Diagnostic.Column = GetAvidScriptJsonIntField(DiagnosticObject, TEXT("column"), 0);
 		Diagnostic.EndLine = GetAvidScriptJsonIntField(DiagnosticObject, TEXT("end_line"), Diagnostic.Line);
 		Diagnostic.EndColumn = GetAvidScriptJsonIntField(DiagnosticObject, TEXT("end_column"), Diagnostic.Column);
+		Diagnostic.LineBase = GetAvidScriptJsonIntField(DiagnosticObject, TEXT("line_base"), 0);
 		DiagnosticObject->TryGetStringField(TEXT("message"), Diagnostic.Message);
 		OutDiagnostics.Add(MoveTemp(Diagnostic));
 	}
@@ -508,6 +515,21 @@ bool FAvidScriptFrontendDiagnostic::IsError() const
 	return Severity.Equals(TEXT("error"), ESearchCase::IgnoreCase);
 }
 
+bool FAvidScriptFrontendDiagnostic::HasSourceLocation() const
+{
+	return Start != INDEX_NONE && !File.IsEmpty() && GetDisplayLine() > 0 && GetDisplayColumn() > 0;
+}
+
+int32 FAvidScriptFrontendDiagnostic::GetDisplayLine() const
+{
+	return Line + (LineBase == 0 ? 1 : 0);
+}
+
+int32 FAvidScriptFrontendDiagnostic::GetDisplayColumn() const
+{
+	return Column + (LineBase == 0 ? 1 : 0);
+}
+
 const FAvidScriptFrontendBuildEvent* FAvidScriptFrontendReport::GetLastBuildEvent() const
 {
 	return BuildEvents.Num() > 0 ? &BuildEvents.Last() : nullptr;
@@ -581,6 +603,10 @@ bool FAvidScriptFrontendReportReader::LoadFromFile(
 		OutReport = FAvidScriptFrontendReport();
 		return false;
 	}
+	OutReport.DiagnosticSchemaVersion = GetAvidScriptJsonIntField(
+		RootObject,
+		TEXT("diagnostic_schema_version"),
+		0);
 
 	RootObject->TryGetStringField(TEXT("result"), OutReport.Result);
 	LoadAvidScriptSource(RootObject, OutReport);

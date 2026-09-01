@@ -196,23 +196,144 @@ function Invoke-AvidScriptPowerShell {
 }
 
 function Convert-CompilerDiagnostics {
-    param([Parameter(Mandatory = $true)]$Model, [string]$SourceId)
+    param(
+        [Parameter(Mandatory = $true)]$Model,
+        [string]$SourceId,
+        [Parameter(Mandatory = $true)][string]$Stage
+    )
     $Converted = @()
     foreach ($Diagnostic in @($Model.diagnostics)) {
         $Converted += [ordered]@{
+            schema_version = 1
             code = [string]$Diagnostic.code
             severity = [string]$Diagnostic.severity
+            stage = $Stage
             message = [string]$Diagnostic.message
             file = $SourceId
+            source_id = $SourceId
+            source_sha256 = [string]$Model.source.sha256
+            module_id = $ModuleId
             start = [int]$Diagnostic.span.start
             length = [int]$Diagnostic.span.length
             line = [int]$Diagnostic.span.line
             column = [int]$Diagnostic.span.column
             end_line = [int]$Diagnostic.span.end_line
             end_column = [int]$Diagnostic.span.end_column
+            line_base = 0
         }
     }
     return $Converted
+}
+
+function Convert-ToDiagnosticDictionary {
+    param([Parameter(Mandatory = $true)]$Diagnostic)
+
+    $Dictionary = [ordered]@{}
+    if ($Diagnostic -is [System.Collections.IDictionary]) {
+        foreach ($Entry in $Diagnostic.GetEnumerator()) {
+            $Dictionary[[string]$Entry.Key] = $Entry.Value
+        }
+    }
+    else {
+        foreach ($Property in $Diagnostic.PSObject.Properties) {
+            $Dictionary[[string]$Property.Name] = $Property.Value
+        }
+    }
+    return $Dictionary
+}
+
+function Convert-ToDiagnosticSourceId {
+    param([AllowEmptyString()][string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return ""
+    }
+    if (-not [System.IO.Path]::IsPathRooted($Value)) {
+        return $Value.Replace("\", "/")
+    }
+    $Relative = Convert-ToProjectRelativePath $Value
+    if ([System.IO.Path]::IsPathRooted($Relative)) {
+        return "external/" + [System.IO.Path]::GetFileName($Value)
+    }
+    return $Relative
+}
+
+function Convert-ToUnifiedCompilerDiagnostics {
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$InputDiagnostics)
+
+    $Unified = @()
+    foreach ($Diagnostic in @($InputDiagnostics)) {
+        $Record = Convert-ToDiagnosticDictionary $Diagnostic
+        $Record.schema_version = 1
+        if (-not $Record.Contains("code") -or [string]::IsNullOrWhiteSpace([string]$Record.code)) {
+            $Record.code = "ASBI0000"
+        }
+        if (-not $Record.Contains("severity") -or
+            [string]::IsNullOrWhiteSpace([string]$Record.severity)) {
+            $Record.severity = "error"
+        }
+        if (-not $Record.Contains("stage") -or [string]::IsNullOrWhiteSpace([string]$Record.stage)) {
+            $Record.stage = if ([string]$Record.code -clike "ASCW*") { "worker" } else { "build" }
+        }
+        if (-not $Record.Contains("message")) {
+            $Record.message = ""
+        }
+
+        $DiagnosticSourceId = if ($Record.Contains("source_id")) {
+            [string]$Record.source_id
+        }
+        elseif ($Record.Contains("file")) {
+            [string]$Record.file
+        }
+        else {
+            ""
+        }
+        $DiagnosticSourceId = Convert-ToDiagnosticSourceId $DiagnosticSourceId
+        $Record.source_id = $DiagnosticSourceId
+        $Record.file = $DiagnosticSourceId
+        if (-not $Record.Contains("source_sha256")) {
+            $Record.source_sha256 = if ($DiagnosticSourceId -ceq $SourceId -and
+                (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
+                Get-AvidScriptUtf8Sha256 ([System.IO.File]::ReadAllText($SourcePath))
+            }
+            else {
+                ""
+            }
+        }
+        $Record.module_id = $ModuleId
+
+        $Start = if ($Record.Contains("start")) { [int]$Record.start } else { -1 }
+        $Length = if ($Record.Contains("length")) { [int]$Record.length } else { 0 }
+        $Line = if ($Record.Contains("line")) { [int]$Record.line } else { 0 }
+        $Column = if ($Record.Contains("column")) { [int]$Record.column } else { 0 }
+        $EndLine = if ($Record.Contains("end_line")) { [int]$Record.end_line } else { $Line }
+        $EndColumn = if ($Record.Contains("end_column")) { [int]$Record.end_column } else { $Column }
+        $LineBase = if ($Record.Contains("line_base")) { [int]$Record.line_base } else { 0 }
+        if ($Start -ge 0 -and $LineBase -eq 0) {
+            ++$Line
+            ++$Column
+            ++$EndLine
+            ++$EndColumn
+        }
+        $Record.start = $Start
+        $Record.length = $Length
+        $Record.line = $Line
+        $Record.column = $Column
+        $Record.end_line = $EndLine
+        $Record.end_column = $EndColumn
+        $Record.line_base = 1
+        $Record.span = [ordered]@{
+            start = $Start
+            length = $Length
+            line = $Line
+            column = $Column
+            end_line = $EndLine
+            end_column = $EndColumn
+            line_base = 1
+        }
+        $Unified += $Record
+    }
+    return $Unified
 }
 
 function Get-SelectedScriptTypeName {
@@ -541,8 +662,10 @@ function Write-BuildReport {
         [void](Try-GetJsonInt32 -Value $StateSchemaModel.contract_version -ParsedValue ([ref]$StateContractVersion))
     }
 
+    $UnifiedDiagnostics = @(Convert-ToUnifiedCompilerDiagnostics $ReportDiagnostics)
     $Report = [ordered]@{
         schema_version = 1
+        diagnostic_schema_version = 1
         language = "csharp"
         module_id = $ModuleId
         result = $Result
@@ -640,7 +763,7 @@ function Write-BuildReport {
             target_framework = "net8.0"
             target = "wasm32"
         }
-        diagnostics = @($ReportDiagnostics)
+        diagnostics = @($UnifiedDiagnostics)
     }
     Write-JsonAtomic -Path $ReportPath -Value $Report
 }
@@ -1091,8 +1214,8 @@ if ([string]::IsNullOrWhiteSpace($PreparedBuildReportPath) -and -not $DisableSem
             $SemanticCache.entry_report_sha256 = [string]$CacheImport.EntryReportSha256
             $FrontendModel = $CacheImport.FrontendModel
             $SemanticModel = $CacheImport.SemanticModel
-            $Diagnostics += @(Convert-CompilerDiagnostics $FrontendModel $SourceId)
-            $Diagnostics += @(Convert-CompilerDiagnostics $SemanticModel $SourceId)
+            $Diagnostics += @(Convert-CompilerDiagnostics $FrontendModel $SourceId "frontend")
+            $Diagnostics += @(Convert-CompilerDiagnostics $SemanticModel $SourceId "semantic")
             $SelectedScriptTypeName = Get-SelectedScriptTypeName
             $BuildReuse.frontend_reused = $true
             $BuildReuse.semantic_reused = $true
@@ -1133,8 +1256,8 @@ if (-not [string]::IsNullOrWhiteSpace($PreparedBuildReportPath)) {
             -SemanticDestinationPath $SemanticArtifactPath
         $FrontendModel = $PreparedSemantic.FrontendModel
         $SemanticModel = $PreparedSemantic.SemanticModel
-        $Diagnostics += @(Convert-CompilerDiagnostics $FrontendModel $SourceId)
-        $Diagnostics += @(Convert-CompilerDiagnostics $SemanticModel $SourceId)
+        $Diagnostics += @(Convert-CompilerDiagnostics $FrontendModel $SourceId "frontend")
+        $Diagnostics += @(Convert-CompilerDiagnostics $SemanticModel $SourceId "semantic")
         $SelectedScriptTypeName = Get-SelectedScriptTypeName
         $BuildReuse.prepared_report_file = Convert-ToProjectRelativePath $PreparedSemantic.PreparedReportPath
         $BuildReuse.prepared_report_sha256 = [string]$PreparedSemantic.PreparedReportSha256
@@ -1196,7 +1319,7 @@ elseif (-not $SemanticCacheHit) {
     if (Test-Path -LiteralPath $FrontendArtifactPath -PathType Leaf) {
         try {
             $FrontendModel = Get-Content -Raw -LiteralPath $FrontendArtifactPath | ConvertFrom-Json
-            $Diagnostics += @(Convert-CompilerDiagnostics $FrontendModel $SourceId)
+            $Diagnostics += @(Convert-CompilerDiagnostics $FrontendModel $SourceId "frontend")
         }
         catch {
             $Diagnostics += [ordered]@{ code = "frontend_artifact_invalid"; severity = "error"; message = $_.Exception.Message; file = $SourceId }
@@ -1256,7 +1379,7 @@ elseif (-not $SemanticCacheHit) {
     if (Test-Path -LiteralPath $SemanticArtifactPath -PathType Leaf) {
         try {
             $SemanticModel = Get-Content -Raw -LiteralPath $SemanticArtifactPath | ConvertFrom-Json
-            $Diagnostics += @(Convert-CompilerDiagnostics $SemanticModel $SourceId)
+            $Diagnostics += @(Convert-CompilerDiagnostics $SemanticModel $SourceId "semantic")
             $SelectedScriptTypeName = Get-SelectedScriptTypeName
         }
         catch {
@@ -1534,36 +1657,38 @@ if (-not $IsDefaultSource) {
         exit 1
     }
 
-    if ([bool]$BindingPackageInfo.HasActiveObjectTypeOrdinals) {
-        $RuntimeActiveObjectTypeOrdinals =
-            @($BindingPackageInfo.ActiveObjectTypeOrdinals)
-        $ObjectTypeOrdinalsMatch =
-            $RuntimeActiveObjectTypeOrdinals.Count -eq $UsedObjectTypeOrdinals.Count
-        if ($ObjectTypeOrdinalsMatch) {
-            for ($Index = 0; $Index -lt $UsedObjectTypeOrdinals.Count; ++$Index) {
-                if ([int]$RuntimeActiveObjectTypeOrdinals[$Index] -ne
-                    [int]$UsedObjectTypeOrdinals[$Index]) {
-                    $ObjectTypeOrdinalsMatch = $false
-                    break
+    if ($null -ne $BindingPackageInfo) {
+        if ([bool]$BindingPackageInfo.HasActiveObjectTypeOrdinals) {
+            $RuntimeActiveObjectTypeOrdinals =
+                @($BindingPackageInfo.ActiveObjectTypeOrdinals)
+            $ObjectTypeOrdinalsMatch =
+                $RuntimeActiveObjectTypeOrdinals.Count -eq $UsedObjectTypeOrdinals.Count
+            if ($ObjectTypeOrdinalsMatch) {
+                for ($Index = 0; $Index -lt $UsedObjectTypeOrdinals.Count; ++$Index) {
+                    if ([int]$RuntimeActiveObjectTypeOrdinals[$Index] -ne
+                        [int]$UsedObjectTypeOrdinals[$Index]) {
+                        $ObjectTypeOrdinalsMatch = $false
+                        break
+                    }
                 }
             }
-        }
-        if (-not $ObjectTypeOrdinalsMatch) {
-            Remove-LoadableArtifacts
-            $Diagnostics += [ordered]@{
-                code = "ASBI4304"
-                severity = "error"
-                message = "Final Guest IR object-type provenance does not match the selected runtime binding package activation set."
-                runtime_active_object_type_ordinals =
-                    @($RuntimeActiveObjectTypeOrdinals)
-                guest_used_object_type_ordinals = @($UsedObjectTypeOrdinals)
+            if (-not $ObjectTypeOrdinalsMatch) {
+                Remove-LoadableArtifacts
+                $Diagnostics += [ordered]@{
+                    code = "ASBI4304"
+                    severity = "error"
+                    message = "Final Guest IR object-type provenance does not match the selected runtime binding package activation set."
+                    runtime_active_object_type_ordinals =
+                        @($RuntimeActiveObjectTypeOrdinals)
+                    guest_used_object_type_ordinals = @($UsedObjectTypeOrdinals)
+                }
+                Write-BuildReport `
+                    -Result "binding_runtime_object_type_mismatch" `
+                    -DirectAbiSupported $false `
+                    -ReportDiagnostics $Diagnostics
+                Write-Output "[AvidScript][CSharp][Build] result=binding_runtime_object_type_mismatch report=$ReportPath"
+                exit 1
             }
-            Write-BuildReport `
-                -Result "binding_runtime_object_type_mismatch" `
-                -DirectAbiSupported $false `
-                -ReportDiagnostics $Diagnostics
-            Write-Output "[AvidScript][CSharp][Build] result=binding_runtime_object_type_mismatch report=$ReportPath"
-            exit 1
         }
     }
 }

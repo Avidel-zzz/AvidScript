@@ -37,6 +37,7 @@ FString MakeCSharpContractScript(const FString& Body)
 FString GetCSharpContractReportMetadataJson()
 {
 	return TEXT(
+		"\"diagnostic_schema_version\":1,"
 		"\"semantic_cache\":{\"schema_version\":1,\"enabled\":true,"
 		"\"key\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
 		"\"toolchain_fingerprint\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\","
@@ -54,6 +55,7 @@ FString GetCSharpContractReportMetadataJson()
 FString GetCSharpContractZeroInvocationReportMetadataJson()
 {
 	return TEXT(
+		"\"diagnostic_schema_version\":1,"
 		"\"semantic_cache\":{\"schema_version\":1,\"enabled\":true,"
 		"\"key\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
 		"\"toolchain_fingerprint\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\","
