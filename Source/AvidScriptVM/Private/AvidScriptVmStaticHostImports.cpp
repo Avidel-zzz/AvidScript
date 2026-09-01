@@ -6,6 +6,7 @@ constexpr int32 StaticImportMaxTransformBatchCount = 256;
 constexpr int32 StaticImportMaxArrayElementCount = 4096;
 constexpr int32 StaticImportMaxContinuationResultBytes = 4096;
 constexpr int32 StaticImportMaxContinuationStateBytes = 4096;
+constexpr int32 StaticImportMaxDebugFrameBytes = 4096;
 constexpr uint32 StaticImportTransformBatchInputCellsPerItem = 2;
 constexpr uint32 StaticImportTransformBatchOutputFloatsPerItem = 9;
 
@@ -58,11 +59,13 @@ const FAvidScriptVmStaticHostImport GStaticHostImports[] = {
 	{ EAvidScriptHostBindingId::ValueContainerUpsert, "avid_value_container_upsert", "(iii)i", false },
 	{ EAvidScriptHostBindingId::ValueContainerRemove, "avid_value_container_remove", "(ii)i", false },
 	{ EAvidScriptHostBindingId::DelegateOutputWrite, "avid_delegate_output_write", "(iii)i", false },
-	{ EAvidScriptHostBindingId::DebugProbe, "avid_debug_probe", "(I)i", false }
+	{ EAvidScriptHostBindingId::DebugProbe, "avid_debug_probe", "(I)i", false },
+	{ EAvidScriptHostBindingId::DebugSuspend, "avid_debug_suspend", "(Iiii)I", false },
+	{ EAvidScriptHostBindingId::DebugFrameRead, "avid_debug_frame_read", "(Iii)i", false }
 };
 
 static_assert(
-	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::DebugProbe),
+	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::DebugFrameRead),
 	"Static host catalog must remain dense and ordered by binding id.");
 
 bool FailStaticCall(FString& OutFailureDetails, const TCHAR* Details)
@@ -496,6 +499,67 @@ bool InvokeAvidScriptVmStaticHostImport(
 		}
 		Call.Int64Args[0] = ContinuationToken;
 		Call.IntArgs[0] = ByteCount;
+		Call.GuestAddress = static_cast<uint32>(GuestAddress);
+		break;
+	}
+	case EAvidScriptHostBindingId::DebugSuspend:
+	case EAvidScriptHostBindingId::DebugFrameRead:
+	{
+		const bool bSuspend = Import.BindingId == EAvidScriptHostBindingId::DebugSuspend;
+		const int64 TokenOrProbeId = Arguments[0].I64;
+		const int32 ResumeRoute = bSuspend ? Arguments[1].I32 : 0;
+		const int32 GuestAddress = Arguments[bSuspend ? 2 : 1].I32;
+		const int32 ByteCount = Arguments[bSuspend ? 3 : 2].I32;
+		if ((bSuspend && ResumeRoute <= 0)
+			|| ByteCount <= 0
+			|| ByteCount > StaticImportMaxDebugFrameBytes)
+		{
+			return FailStaticCall(
+				OutFailureDetails,
+				TEXT("debug_frame_invalid: suspension frame arguments are outside the supported range."));
+		}
+		if (!ValidateGuestRange(
+				GuestAddress,
+				static_cast<uint64>(ByteCount),
+				1,
+				1,
+				TEXT("debug suspension frame"),
+				OutFailureDetails))
+		{
+			return false;
+		}
+
+		FString MemoryError;
+		if (bSuspend)
+		{
+			if (!GuestMemory.BorrowReadOnlyBytes(
+					static_cast<uint32>(GuestAddress),
+					static_cast<uint32>(ByteCount),
+					1,
+					Call.InputBytes,
+					MemoryError))
+			{
+				OutFailureDetails = MemoryError.IsEmpty()
+					? TEXT("guest_memory_invalid: debug suspension frame input borrow failed.")
+					: MoveTemp(MemoryError);
+				return false;
+			}
+		}
+		else if (!GuestMemory.BorrowMutableBytes(
+				static_cast<uint32>(GuestAddress),
+				static_cast<uint32>(ByteCount),
+				1,
+				Call.OutputBytes,
+				MemoryError))
+		{
+			OutFailureDetails = MemoryError.IsEmpty()
+				? TEXT("guest_memory_invalid: debug suspension frame output borrow failed.")
+				: MoveTemp(MemoryError);
+			return false;
+		}
+		Call.Int64Args[0] = TokenOrProbeId;
+		Call.IntArgs[0] = ResumeRoute;
+		Call.IntArgs[1] = ByteCount;
 		Call.GuestAddress = static_cast<uint32>(GuestAddress);
 		break;
 	}

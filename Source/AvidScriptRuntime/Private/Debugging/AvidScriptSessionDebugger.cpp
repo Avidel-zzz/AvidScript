@@ -13,6 +13,9 @@ bool FAvidScriptSessionDebugger::Attach(const TConstArrayView<uint64> InBreakpoi
 	RunMode = EAvidScriptDebugRunMode::Continue;
 	SuppressedProbeId.Reset();
 	ActiveProbeId = 0;
+	SuspensionToken = 0;
+	ResumeRoute = 0;
+	SuspensionFrame.Reset();
 	return true;
 }
 
@@ -25,6 +28,9 @@ void FAvidScriptSessionDebugger::Detach()
 	RunMode = EAvidScriptDebugRunMode::Continue;
 	SuppressedProbeId.Reset();
 	ActiveProbeId = 0;
+	SuspensionToken = 0;
+	ResumeRoute = 0;
+	SuspensionFrame.Reset();
 }
 
 bool FAvidScriptSessionDebugger::SetBreakpoints(
@@ -86,6 +92,9 @@ void FAvidScriptSessionDebugger::OnRuntimeGenerationChanged()
 	RunMode = EAvidScriptDebugRunMode::Continue;
 	SuppressedProbeId.Reset();
 	ActiveProbeId = 0;
+	SuspensionToken = 0;
+	ResumeRoute = 0;
+	SuspensionFrame.Reset();
 	if (IsAttached())
 	{
 		State = EAvidScriptDebugSessionState::Running;
@@ -101,6 +110,9 @@ FAvidScriptDebugSessionSnapshot FAvidScriptSessionDebugger::GetSnapshot() const
 	Snapshot.Epoch = Epoch;
 	Snapshot.PauseSequence = PauseSequence;
 	Snapshot.ActiveProbeId = ActiveProbeId;
+	Snapshot.SuspensionToken = SuspensionToken;
+	Snapshot.ResumeRoute = ResumeRoute;
+	Snapshot.FrameByteCount = SuspensionFrame.Num();
 	Snapshot.BreakpointCount = Breakpoints.Num();
 	return Snapshot;
 }
@@ -116,6 +128,14 @@ EAvidScriptDebugProbeAction FAvidScriptSessionDebugger::EvaluateProbe(
 	if (State == EAvidScriptDebugSessionState::Paused)
 	{
 		return EAvidScriptDebugProbeAction::Pause;
+	}
+	if (State == EAvidScriptDebugSessionState::Suspending)
+	{
+		return EAvidScriptDebugProbeAction::Continue;
+	}
+	if (State == EAvidScriptDebugSessionState::Resuming)
+	{
+		return EAvidScriptDebugProbeAction::Abort;
 	}
 
 	if (SuppressedProbeId.IsSet())
@@ -135,11 +155,63 @@ EAvidScriptDebugProbeAction FAvidScriptSessionDebugger::EvaluateProbe(
 		return EAvidScriptDebugProbeAction::Continue;
 	}
 
-	State = EAvidScriptDebugSessionState::Paused;
+	State = EAvidScriptDebugSessionState::Suspending;
 	RunMode = EAvidScriptDebugRunMode::Continue;
 	ActiveProbeId = ProbeId;
-	++PauseSequence;
 	return EAvidScriptDebugProbeAction::Pause;
+}
+
+int64 FAvidScriptSessionDebugger::CommitSuspension(
+	const uint64 ProbeId,
+	const uint32 InResumeRoute,
+	const TConstArrayView<uint8> FrameBytes)
+{
+	check(IsInGameThread());
+	if (State != EAvidScriptDebugSessionState::Suspending
+		|| ActiveProbeId != ProbeId
+		|| InResumeRoute == 0
+		|| FrameBytes.IsEmpty()
+		|| FrameBytes.Num() > MaxFrameByteCount)
+	{
+		return 0;
+	}
+
+	do
+	{
+		++NextSuspensionToken;
+	}
+	while (NextSuspensionToken <= 0);
+	SuspensionToken = NextSuspensionToken;
+	ResumeRoute = InResumeRoute;
+	SuspensionFrame = TArray<uint8>(FrameBytes.GetData(), FrameBytes.Num());
+	State = EAvidScriptDebugSessionState::Paused;
+	++PauseSequence;
+	return SuspensionToken;
+}
+
+bool FAvidScriptSessionDebugger::ReadSuspensionFrame(
+	const int64 InSuspensionToken,
+	const TArrayView<uint8> OutFrameBytes)
+{
+	check(IsInGameThread());
+	if (State != EAvidScriptDebugSessionState::Resuming
+		|| InSuspensionToken <= 0
+		|| InSuspensionToken != SuspensionToken
+		|| OutFrameBytes.Num() != SuspensionFrame.Num()
+		|| OutFrameBytes.IsEmpty())
+	{
+		return false;
+	}
+
+	FMemory::Memcpy(
+		OutFrameBytes.GetData(),
+		SuspensionFrame.GetData(),
+		SuspensionFrame.Num());
+	SuspensionToken = 0;
+	ResumeRoute = 0;
+	SuspensionFrame.Reset();
+	State = EAvidScriptDebugSessionState::Running;
+	return true;
 }
 
 bool FAvidScriptSessionDebugger::IsAttached() const
@@ -151,7 +223,8 @@ void FAvidScriptSessionDebugger::Resume(const EAvidScriptDebugRunMode NextMode)
 {
 	SuppressedProbeId = ActiveProbeId;
 	ActiveProbeId = 0;
-	State = EAvidScriptDebugSessionState::Running;
+	State = SuspensionToken > 0
+		? EAvidScriptDebugSessionState::Resuming
+		: EAvidScriptDebugSessionState::Running;
 	RunMode = NextMode;
 }
-

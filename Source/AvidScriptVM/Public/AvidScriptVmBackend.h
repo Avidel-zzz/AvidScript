@@ -167,7 +167,9 @@ enum class EAvidScriptHostBindingId : uint16
 	ValueContainerUpsert,
 	ValueContainerRemove,
 	DelegateOutputWrite,
-	DebugProbe
+	DebugProbe,
+	DebugSuspend,
+	DebugFrameRead
 };
 
 struct FAvidScriptVmStackFrame

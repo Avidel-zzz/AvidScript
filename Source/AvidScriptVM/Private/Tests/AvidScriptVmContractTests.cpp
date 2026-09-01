@@ -520,6 +520,10 @@ bool FAvidScriptVmDebugProbeImportContractTest::RunTest(const FString& Parameter
 {
 	const FAvidScriptVmStaticHostImport& Probe =
 		GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::DebugProbe);
+	const FAvidScriptVmStaticHostImport& Suspend =
+		GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::DebugSuspend);
+	const FAvidScriptVmStaticHostImport& FrameRead =
+		GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::DebugFrameRead);
 	TestEqual(
 		TEXT("Debug probe appends after the frozen P58 catalog"),
 		static_cast<uint16>(EAvidScriptHostBindingId::DebugProbe),
@@ -532,13 +536,35 @@ bool FAvidScriptVmDebugProbeImportContractTest::RunTest(const FString& Parameter
 		TEXT("Debug probe consumes i64 and returns i32 action"),
 		FString(UTF8_TO_TCHAR(Probe.Signature)),
 		FString(TEXT("(I)i")));
+	TestEqual(
+		TEXT("Debug suspend follows the probe"),
+		static_cast<uint16>(EAvidScriptHostBindingId::DebugSuspend),
+		static_cast<uint16>(EAvidScriptHostBindingId::DebugProbe) + 1);
+	TestEqual(
+		TEXT("Debug suspend freezes probe, route and frame range"),
+		FString(UTF8_TO_TCHAR(Suspend.Signature)),
+		FString(TEXT("(Iiii)I")));
+	TestEqual(
+		TEXT("Debug frame read follows suspension"),
+		static_cast<uint16>(EAvidScriptHostBindingId::DebugFrameRead),
+		static_cast<uint16>(EAvidScriptHostBindingId::DebugSuspend) + 1);
+	TestEqual(
+		TEXT("Debug frame read freezes token and frame range"),
+		FString(UTF8_TO_TCHAR(FrameRead.Signature)),
+		FString(TEXT("(Iii)i")));
 	TestFalse(
 		TEXT("Debug probe is not exposed through legacy env"),
-		Probe.bSupportsEnvCompatibility);
+		Probe.bSupportsEnvCompatibility
+			|| Suspend.bSupportsEnvCompatibility
+			|| FrameRead.bSupportsEnvCompatibility);
 	TestTrue(
 		TEXT("Debug probe is registered only in avidscript"),
 		IsAvidScriptVmStaticHostImport(TEXT("avidscript"), TEXT("avid_debug_probe"))
-			&& !IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("avid_debug_probe")));
+			&& IsAvidScriptVmStaticHostImport(TEXT("avidscript"), TEXT("avid_debug_suspend"))
+			&& IsAvidScriptVmStaticHostImport(TEXT("avidscript"), TEXT("avid_debug_frame_read"))
+			&& !IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("avid_debug_probe"))
+			&& !IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("avid_debug_suspend"))
+			&& !IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("avid_debug_frame_read")));
 	return true;
 }
 

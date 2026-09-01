@@ -6863,6 +6863,24 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 			static_cast<int32>(Action),
 			Action != EAvidScriptDebugProbeAction::Abort);
 	}
+	case EAvidScriptHostBindingId::DebugSuspend:
+	{
+		const int64 SuspensionToken = HostContext.DebugProbes != nullptr
+			? HostContext.DebugProbes->CommitSuspension(
+				static_cast<uint64>(Call.Int64Args[0]),
+				static_cast<uint32>(Call.IntArgs[0]),
+				Call.InputBytes)
+			: 0;
+		return FinishI64(SuspensionToken, SuspensionToken > 0);
+	}
+	case EAvidScriptHostBindingId::DebugFrameRead:
+	{
+		const bool bRead = HostContext.DebugProbes != nullptr
+			&& HostContext.DebugProbes->ReadSuspensionFrame(
+				Call.Int64Args[0],
+				Call.OutputBytes);
+		return Finish(bRead ? 1 : 0, bRead);
+	}
 	case EAvidScriptHostBindingId::OwnerGetSlot:
 	{
 		const int32 Value = HandleOwnerGetSlotImport();

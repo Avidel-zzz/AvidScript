@@ -22,6 +22,7 @@ constexpr uint32 TransformBatchInputCellsPerItem = 2;
 constexpr uint32 TransformBatchOutputFloatsPerItem = 9;
 constexpr int32 MaxContinuationResultBytes = 4096;
 constexpr int32 MaxContinuationStateBytes = 4096;
+constexpr int32 MaxDebugFrameBytes = 4096;
 
 const char* StaticImportName(EAvidScriptHostBindingId BindingId)
 {
@@ -1113,6 +1114,100 @@ int32_t DebugProbe(wasm_exec_env_t ExecEnv, int64_t ProbeId)
 		: static_cast<int32>(EAvidScriptDebugProbeAction::Abort);
 }
 
+int64_t DebugSuspend(
+	wasm_exec_env_t ExecEnv,
+	int64_t ProbeId,
+	int32_t ResumeRoute,
+	int32_t InputAddress,
+	int32_t ByteCount)
+{
+	const char* ImportName = StaticImportName(EAvidScriptHostBindingId::DebugSuspend);
+	IAvidScriptWamrHostBridge* Bridge = GetBridge(ExecEnv);
+	if (ResumeRoute <= 0 || ByteCount <= 0 || ByteCount > MaxDebugFrameBytes)
+	{
+		Fail(
+			ExecEnv,
+			Bridge,
+			ImportName,
+			TEXT("The debug suspension frame arguments are outside the supported range."));
+		return 0;
+	}
+
+	void* NativeInput = nullptr;
+	if (!TranslateGuestRange(
+			ExecEnv,
+			ImportName,
+			TEXT("debug suspension frame input"),
+			InputAddress,
+			static_cast<uint32>(ByteCount),
+			1,
+			1,
+			NativeInput))
+	{
+		return 0;
+	}
+
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::DebugSuspend;
+	Call.Int64Args[0] = ProbeId;
+	Call.IntArgs[0] = ResumeRoute;
+	Call.IntArgs[1] = ByteCount;
+	Call.GuestAddress = static_cast<uint32>(InputAddress);
+	Call.InputBytes = MakeArrayView(
+		static_cast<const uint8*>(NativeInput),
+		ByteCount);
+	FAvidScriptHostCallResult Result;
+	return Dispatch(ExecEnv, ImportName, Call, Result)
+		? Result.ReturnValueI64
+		: 0;
+}
+
+int32_t DebugFrameRead(
+	wasm_exec_env_t ExecEnv,
+	int64_t SuspensionToken,
+	int32_t OutputAddress,
+	int32_t ByteCount)
+{
+	const char* ImportName = StaticImportName(EAvidScriptHostBindingId::DebugFrameRead);
+	IAvidScriptWamrHostBridge* Bridge = GetBridge(ExecEnv);
+	if (SuspensionToken <= 0 || ByteCount <= 0 || ByteCount > MaxDebugFrameBytes)
+	{
+		Fail(
+			ExecEnv,
+			Bridge,
+			ImportName,
+			TEXT("The debug resume frame arguments are outside the supported range."));
+		return 0;
+	}
+
+	void* NativeOutput = nullptr;
+	if (!TranslateGuestRange(
+			ExecEnv,
+			ImportName,
+			TEXT("debug suspension frame output"),
+			OutputAddress,
+			static_cast<uint32>(ByteCount),
+			1,
+			1,
+			NativeOutput))
+	{
+		return 0;
+	}
+
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::DebugFrameRead;
+	Call.Int64Args[0] = SuspensionToken;
+	Call.IntArgs[1] = ByteCount;
+	Call.GuestAddress = static_cast<uint32>(OutputAddress);
+	Call.OutputBytes = MakeArrayView(
+		static_cast<uint8*>(NativeOutput),
+		ByteCount);
+	FAvidScriptHostCallResult Result;
+	return Dispatch(ExecEnv, ImportName, Call, Result)
+		? Result.ReturnValue
+		: 0;
+}
+
 void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 {
 	switch (BindingId)
@@ -1166,6 +1261,8 @@ void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 	case EAvidScriptHostBindingId::ValueContainerUpsert: return reinterpret_cast<void*>(ValueContainerUpsert);
 	case EAvidScriptHostBindingId::ValueContainerRemove: return reinterpret_cast<void*>(ValueContainerRemove);
 	case EAvidScriptHostBindingId::DebugProbe: return reinterpret_cast<void*>(DebugProbe);
+	case EAvidScriptHostBindingId::DebugSuspend: return reinterpret_cast<void*>(DebugSuspend);
+	case EAvidScriptHostBindingId::DebugFrameRead: return reinterpret_cast<void*>(DebugFrameRead);
 	default: return nullptr;
 	}
 }

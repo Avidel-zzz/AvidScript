@@ -14,6 +14,7 @@ bool FAvidScriptSessionDebuggerStateMachineTest::RunTest(const FString& Paramete
 {
 	constexpr uint64 BreakpointProbe = 0x123456789abcdef0ULL;
 	constexpr uint64 NextProbe = 0x0fedcba987654321ULL;
+	const uint8 FrameBytes[] = { 1, 3, 5, 7 };
 	const uint64 Breakpoints[] = { BreakpointProbe, BreakpointProbe };
 	FAvidScriptSessionDebugger Debugger;
 
@@ -28,11 +29,31 @@ bool FAvidScriptSessionDebuggerStateMachineTest::RunTest(const FString& Paramete
 		Debugger.EvaluateProbe(BreakpointProbe),
 		EAvidScriptDebugProbeAction::Pause);
 	TestEqual(
-		TEXT("Pause snapshot retains the probe"),
+		TEXT("Pending suspension retains the probe"),
 		Debugger.GetSnapshot().ActiveProbeId,
 		BreakpointProbe);
+	TestEqual(
+		TEXT("Probe decision waits for a frame commit"),
+		Debugger.GetSnapshot().State,
+		EAvidScriptDebugSessionState::Suspending);
+	const int64 FirstToken = Debugger.CommitSuspension(
+		BreakpointProbe,
+		1,
+		FrameBytes);
+	TestTrue(TEXT("Frame commit returns a capability token"), FirstToken > 0);
+	TestEqual(
+		TEXT("Frame commit enters paused state"),
+		Debugger.GetSnapshot().State,
+		EAvidScriptDebugSessionState::Paused);
 
 	TestTrue(TEXT("Paused execution continues"), Debugger.ContinueExecution());
+	uint8 RestoredFrame[UE_ARRAY_COUNT(FrameBytes)] = {};
+	TestTrue(
+		TEXT("Resume consumes the exact suspension frame"),
+		Debugger.ReadSuspensionFrame(FirstToken, RestoredFrame));
+	TestTrue(
+		TEXT("Suspension frame roundtrips"),
+		FMemory::Memcmp(FrameBytes, RestoredFrame, sizeof(FrameBytes)) == 0);
 	TestEqual(
 		TEXT("Continue suppresses the resumed probe once"),
 		Debugger.EvaluateProbe(BreakpointProbe),
@@ -41,8 +62,16 @@ bool FAvidScriptSessionDebuggerStateMachineTest::RunTest(const FString& Paramete
 		TEXT("A later visit to the breakpoint pauses again"),
 		Debugger.EvaluateProbe(BreakpointProbe),
 		EAvidScriptDebugProbeAction::Pause);
+	TestTrue(
+		TEXT("Second pause commits"),
+		Debugger.CommitSuspension(BreakpointProbe, 2, FrameBytes) > 0);
 
 	TestTrue(TEXT("Paused execution accepts step into"), Debugger.StepInto());
+	const int64 SecondToken = Debugger.GetSnapshot().SuspensionToken;
+	TestTrue(TEXT("Step resume has a suspension token"), SecondToken > 0);
+	TestTrue(
+		TEXT("Step resume restores its frame"),
+		Debugger.ReadSuspensionFrame(SecondToken, RestoredFrame));
 	TestEqual(
 		TEXT("Step suppresses the resumed probe once"),
 		Debugger.EvaluateProbe(BreakpointProbe),
@@ -51,12 +80,15 @@ bool FAvidScriptSessionDebuggerStateMachineTest::RunTest(const FString& Paramete
 		TEXT("Step pauses on the next probe"),
 		Debugger.EvaluateProbe(NextProbe),
 		EAvidScriptDebugProbeAction::Pause);
+	TestTrue(
+		TEXT("Step pause commits"),
+		Debugger.CommitSuspension(NextProbe, 3, FrameBytes) > 0);
 
 	const uint64 PreviousEpoch = Debugger.GetSnapshot().Epoch;
 	Debugger.OnRuntimeGenerationChanged();
 	TestTrue(TEXT("Runtime replacement advances the debug epoch"), Debugger.GetSnapshot().Epoch > PreviousEpoch);
 	TestEqual(
-		TEXT("Runtime replacement clears a stale pause"),
+		TEXT("Runtime replacement clears a stale suspension"),
 		Debugger.GetSnapshot().State,
 		EAvidScriptDebugSessionState::Running);
 	TestEqual(
@@ -101,6 +133,33 @@ bool FAvidScriptRuntimeDebugProbeRouteTest::RunTest(const FString& Parameters)
 		TEXT("Session records the routed probe"),
 		Debugger.GetSnapshot().ActiveProbeId,
 		BreakpointProbe);
+
+	const uint8 FrameBytes[] = { 2, 4, 6, 8 };
+	Call = FAvidScriptHostCall();
+	Call.BindingId = EAvidScriptHostBindingId::DebugSuspend;
+	Call.Int64Args[0] = static_cast<int64>(BreakpointProbe);
+	Call.IntArgs[0] = 7;
+	Call.IntArgs[1] = UE_ARRAY_COUNT(FrameBytes);
+	Call.InputBytes = FrameBytes;
+	TestTrue(TEXT("Runtime commits the suspension frame"), Runtime.DispatchHostCall(Call, Result));
+	const int64 SuspensionToken = Result.ReturnValueI64;
+	TestTrue(TEXT("Runtime returns an opaque suspension token"), SuspensionToken > 0);
+	TestEqual(
+		TEXT("Committed suspension is paused"),
+		Debugger.GetSnapshot().State,
+		EAvidScriptDebugSessionState::Paused);
+	TestTrue(TEXT("Runtime route can continue"), Debugger.ContinueExecution());
+
+	uint8 RestoredFrame[UE_ARRAY_COUNT(FrameBytes)] = {};
+	Call = FAvidScriptHostCall();
+	Call.BindingId = EAvidScriptHostBindingId::DebugFrameRead;
+	Call.Int64Args[0] = SuspensionToken;
+	Call.IntArgs[1] = UE_ARRAY_COUNT(RestoredFrame);
+	Call.OutputBytes = RestoredFrame;
+	TestTrue(TEXT("Runtime restores the suspension frame"), Runtime.DispatchHostCall(Call, Result));
+	TestTrue(
+		TEXT("Runtime frame route preserves bytes"),
+		FMemory::Memcmp(FrameBytes, RestoredFrame, sizeof(FrameBytes)) == 0);
 	return true;
 }
 

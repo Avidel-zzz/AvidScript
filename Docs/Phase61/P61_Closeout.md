@@ -1,6 +1,6 @@
 # Phase 61 收尾记录
 
-状态：实施中，`P61.A1-A3b`、`P61.B1a-B2`、`P61.C1a-C2a` 已完成
+状态：实施中，`P61.A1-A3b`、`P61.B1a-B2`、`P61.C1a-C2b1` 已完成
 
 ## 目标
 
@@ -48,10 +48,13 @@
 - 完成 `P61.C2a` Session debug lane：断点命中、pause-next、continue、step-into 与 runtime
   epoch 失效均由 Session 管理，且不会阻塞 GameThread；
 - 详细实现与边界见 [P61.C2a Session 调试通道](P61.C2a_Session_Debug_Lane.md)。
+- 完成 `P61.C2b1` 两阶段协作式暂停 frame：只有 Guest spill 提交成功才进入 `Paused`，
+  continue/step 通过一次性 token 恢复最多 4 KiB 状态，双后端共享同一 ABI；
+- 详细实现与边界见 [P61.C2b1 协作式暂停 Frame](P61.C2b1_Cooperative_Suspension_Frame.md)。
 
 ## 待完成
 
-- `P61.C2b-C4` Guest 可恢复挂起、Editor 断点与变量查看；
+- `P61.C2b2-C4` Guest CPS 恢复、Editor 断点与变量查看；
 - `P61.D` Profiler 与 IDE workspace；
 - `P61.E` 集成与集中 Gate。
 

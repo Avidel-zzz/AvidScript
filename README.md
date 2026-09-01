@@ -53,9 +53,9 @@ callable/event，以及带 typed payload 的 AsyncAction `await` 已接入真实
 
 Phase 61 已完成 `P61.A-P61.B`：完整产物缓存、persistent compiler、Debug Map v2、同步/异步
 序列点及 Editor 可导航调用栈已落地；`P61.C1a-C1d` 已加入稳定 probe ID、可选插桩、构建缓存
-身份和 Wasmtime/WAMR 静态导入；Session 已具备断点命中、continue、step-into 与 reload 失效
-状态机。带插桩的 WASM 现在可以加载执行，但 Guest 可恢复挂起尚未接通，暂停和变量查看仍未
-宣称可用。5 轮矩阵中，
+身份和 Wasmtime/WAMR 静态导入；Session 已具备断点命中、continue、step-into、reload 失效
+及 4 KiB 有界 suspension frame 协议。带插桩的 WASM 现在可以加载执行，但编译器尚未生成
+同步 CPS 恢复路径，暂停和变量查看仍未宣称可用。5 轮矩阵中，
 无修改、方法体、Binding 与工具链变更的
 中位耗时分别为 `884 / 1833 / 1826 / 3223 ms`；断点、变量查看和 Profiler 仍在后续批次。
 

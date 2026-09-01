@@ -6,6 +6,7 @@ class FAvidScriptSessionDebugger final : public IAvidScriptDebugProbeHost
 {
 public:
 	static constexpr int32 MaxBreakpointCount = 65536;
+	static constexpr int32 MaxFrameByteCount = 4096;
 
 	bool Attach(TConstArrayView<uint64> InBreakpoints);
 	void Detach();
@@ -17,6 +18,13 @@ public:
 	FAvidScriptDebugSessionSnapshot GetSnapshot() const;
 
 	EAvidScriptDebugProbeAction EvaluateProbe(uint64 ProbeId) override;
+	int64 CommitSuspension(
+		uint64 ProbeId,
+		uint32 ResumeRoute,
+		TConstArrayView<uint8> FrameBytes) override;
+	bool ReadSuspensionFrame(
+		int64 SuspensionToken,
+		TArrayView<uint8> OutFrameBytes) override;
 
 private:
 	bool IsAttached() const;
@@ -29,5 +37,8 @@ private:
 	uint64 Epoch = 0;
 	uint64 PauseSequence = 0;
 	uint64 ActiveProbeId = 0;
+	int64 NextSuspensionToken = 0;
+	int64 SuspensionToken = 0;
+	uint32 ResumeRoute = 0;
+	TArray<uint8> SuspensionFrame;
 };
-
