@@ -44,7 +44,7 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 | 同步调试 | 顶层 `void` 导出的非阻塞 pause、continue、step-into、4 KiB 状态帧、双后端恢复与源码断点目录 |
 | 调试变量 | Session 按 probe 与词法作用域生成有界只读 snapshot，支持标量、enum、ObjectHandle/能力 token 与值类型摘要 |
 | Editor 调试 | PIE 目标选择、源码断点、attach/pause/continue/step、暂停变量、源码跳转与 reload/teardown 安全 |
-| Profiler | 有界无锁事件环、全链路埋点与 UE Trace；关闭采集实测 `1.99 ns/op`，增量约 `0.45 ns/op` |
+| Profiler | 全链路埋点、UE Trace、Editor 过滤/热点/JSON 模型；关闭采集增量约 `0.45 ns/op` |
 
 Phase 60 的功能批次已完成：UE Interface 与默认参数、Delegate 双向调用、Blueprint
 callable/event，以及带 typed payload 的 AsyncAction `await` 已接入真实 C# Session Runtime。
@@ -64,7 +64,7 @@ Component Session、维护源码断点、控制执行、查看暂停变量并跳
 `884 / 1833 / 1826 / 3223 ms`；Editor Profiler、IDE workspace 与人工 Editor 交互验收仍在后续批次。
 Profiler 已覆盖 Runtime load、Tick/Event、UE host call、continuation、reload 与 EndPlay，且可用 probe ID
 关联源码位置。固定性能门禁中 disabled/enabled 中位数为 `1.989 / 33.318 ns/op`，disabled 占 `5.97%`；
-Editor 聚合、过滤与导出视图正在 `P61.D` 推进。
+Editor 数据模型已支持组合过滤、热点聚合和原子 JSON 导出，面板控件与 PIE target 自动绑定正在 `P61.D` 推进。
 
 ## C# 游戏脚本
 

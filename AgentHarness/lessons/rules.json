@@ -529,11 +529,11 @@
     },
     {
       "id": "source-addition-can-expose-unity-include-debt",
-      "tags": ["ue", "unity-build", "includes", "build"],
-      "summary": "新增 C++ 源文件会重排 unity 分组，从而暴露依赖其他翻译单元间接 include 的既有代码。",
-      "prevention": "新增 .cpp 后执行 no-clean UBT；若未修改的文件出现未知类型，先检查其直接 include 完整性并做最小显式 include 修复，不清理 Editor Target，也不把 unity 偶然可编译当作契约。",
+      "tags": ["ue", "unity-build", "includes", "symbols", "build"],
+      "summary": "新增 C++ 源文件会重排 unity 分组，从而暴露间接 include 或同一聚合翻译单元内的 helper 符号碰撞。",
+      "prevention": "新增 .cpp 后执行 no-clean UBT；若出现未知类型，检查直接 include；若匿名命名空间 helper 发生遮蔽或重载碰撞，使用模块唯一名称或显式全局限定。只做最小修复，不清理 Editor Target，也不把 unity 偶然可编译当作契约。",
       "source": "observed:2026-09-01-P61.B2",
-      "last_observed": "2026-09-01 P61.B2 新增 Editor CallStack 源文件后 unity 重排，BindingDescriptorGeneratorTests 缺少 AvidScriptHash.h 导致编译失败；补充一行显式 include 后 4-action no-clean UBT 通过"
+      "last_observed": "2026-09-02 P61.D2a 新增 Profiler 模型后与 unity 内既有 LexToString/GetTypeHash 发生遮蔽；改为显式全局哈希和唯一数字格式化后 no-clean UBT 通过。此前 P61.B2 也暴露过间接 include 缺失"
     },
     {
       "id": "truncated-agent-spawn-output-does-not-authorize-duplicate",

@@ -104,10 +104,15 @@
   disabled 增量约 `0.451 ns/op`，占 enabled `5.97%`；
 - 门禁固定为 disabled `<= 10 ns/op` 且 `<= enabled 25%`，同时要求关闭采集零事件、开启采集事件总数守恒；
 - 详细实现与证据见 [P61.D1c Profiler disabled 性能门禁](P61.D1c_Profiler_Disabled_Performance_Gate.md)。
+- 完成 `P61.D2a` Editor Profiler 数据模型：Runtime adapter 只暴露 snapshot、capture/reset 和 source catalog，
+  Editor 侧负责组合过滤、最新行上限、按 kind/operation/probe 的热点聚合与源码关联；
+- JSON 导出使用版本化 schema，64 位标识保持字符串精度，并通过同目录临时文件原子发布；
+- `AvidScript.Editor.Profiling.Model` Automation `1/1` 通过；
+- 详细实现与证据见 [P61.D2a Editor Profiler 数据模型](P61.D2a_Editor_Profiler_Model.md)。
 
 ## 待完成
 
-- `P61.D2-D4` Editor Profiler 与 IDE workspace；
+- `P61.D2b-D4` Profiler target/UI 与 IDE workspace；
 - `P61.E` 集成与集中 Gate。
 
 ## 人工验收边界
