@@ -470,6 +470,14 @@
       "prevention": "任何 .cpp/.h 测试改动后先执行 no-clean 增量 UBT，再运行聚焦 Automation；文档或外部 fixture 变化才可复用既有 DLL。",
       "source": "observed:2026-09-01-P60.C2c4",
       "last_observed": "2026-09-01 P60.C2c4 修正 reinstance 断言后曾口头误判无需重建，随即更正并完成 4-action no-clean UBT 后再验证 1/1 Success"
+    },
+    {
+      "id": "powershell-quotes-git-revisions-with-braces",
+      "tags": ["git", "powershell", "evidence", "workflow"],
+      "summary": "PowerShell 中含花括号的 Git revision 必须作为单个字符串传递。",
+      "prevention": "调用 git rev-parse、show 等命令时把 `HEAD^{tree}`、`ref^{commit}` 之类 revision 用单引号包围；证据脚本优先复用 PhaseWorkflow 的 Git helper，避免 PowerShell 把花括号解释为表达式。",
+      "source": "observed:2026-09-01-P60.D",
+      "last_observed": "2026-09-01 P60.D 读取 Gate tree 时未引用 HEAD^{tree}，PowerShell 错误拆解 revision；只读命令失败且仓库未发生改动"
     }
   ]
 }
