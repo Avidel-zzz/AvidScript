@@ -14,7 +14,6 @@ internal static class CSharpGuestDebugResumableInstrumenter
         CSharpGuestIds.DelegateEventFunctionPrefix + "debug_resume:v1";
     private const string WrapperFunctionPrefix =
         CSharpGuestIds.DelegateEventFunctionPrefix + "debug_resumable_wrapper:v1:";
-    private const string FrameTypePrefix = "type:synthetic:debug_resumable_frame:v1:";
 
     public static CSharpGuestDebugInstrumentationResult Instrument(
         string moduleId,
@@ -152,7 +151,7 @@ internal static class CSharpGuestDebugResumableInstrumenter
         foreach (GuestFunction candidate in candidates)
         {
             string wrapperId = WrapperFunctionPrefix + candidate.Id;
-            string frameTypeId = FrameTypePrefix + candidate.Id;
+            string frameTypeId = CSharpGuestDebugProbeAbi.FrameTypePrefix + candidate.Id;
             if (functionIds.Contains(wrapperId) || typeIds.Contains(frameTypeId))
             {
                 throw new InvalidOperationException(
@@ -239,7 +238,7 @@ internal static class CSharpGuestDebugResumableInstrumenter
         int alignment = 1;
 
         GuestType routeType = types[CSharpGuestDebugProbeAbi.ActionTypeId];
-        GuestField routeField = AddField("resume_route", routeType);
+        GuestField routeField = AddField(CSharpGuestDebugProbeAbi.FrameRouteFieldName, routeType);
         List<SpillSlot> slots = new(function.Parameters.Count + function.Locals.Count);
         foreach (GuestRegister register in function.Parameters.Concat(function.Locals))
         {
@@ -258,7 +257,7 @@ internal static class CSharpGuestDebugResumableInstrumenter
         }
 
         GuestType frameType = new(
-            FrameTypePrefix + function.Id,
+            CSharpGuestDebugProbeAbi.FrameTypePrefix + function.Id,
             "struct",
             "memory",
             fields,

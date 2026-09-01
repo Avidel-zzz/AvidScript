@@ -18,8 +18,80 @@ internal static class CSharpGuestDebugMapTests
         GeneratedGameplayRouterRetainsIndexSpaceWithoutFakeSourceLocation();
         GeneratedContinuationRouterRetainsIndexSpaceWithoutFakeSourceLocation();
         DebugInstrumentationEmitsStableBackendNeutralProbeCalls();
+        DebugFramesPublishBoundedLexicalVariables();
         ReversedSameLineSpanFailsClosed();
-        return 6;
+        return 7;
+    }
+
+    private static void DebugFramesPublishBoundedLexicalVariables()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+
+            namespace Game;
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "guest_main")]
+                public static void Main(int input)
+                {
+                    int outer = input + 1;
+                    if (outer > 0)
+                    {
+                        int inner = outer + 2;
+                        outer = inner;
+                    }
+                }
+            }
+            """;
+        const string sourceId = "Scripts/DebugVariables.cs";
+        FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
+        SemanticDocument semantic = SemanticAnalyzer.Analyze(source, sourceId, frontend.Source.Sha256);
+        GuestModule module = CSharpGuestLowerer.Lower(
+            semantic,
+            new string('c', 64),
+            enableDebugInstrumentation: true).Module
+            ?? throw new InvalidOperationException("debug variable fixture should lower");
+        string guestIrSha256 = Convert.ToHexString(
+            SHA256.HashData(GuestIrSerializer.Serialize(module))).ToLowerInvariant();
+
+        CSharpGuestDebugMap first = CSharpGuestDebugMapProjector.Project(
+            semantic,
+            module,
+            guestIrSha256,
+            new string('e', 64));
+        CSharpGuestDebugMap second = CSharpGuestDebugMapProjector.Project(
+            semantic,
+            module,
+            guestIrSha256,
+            new string('e', 64));
+        CSharpGuestDebugFrameLayout frame = first.Functions.Single(function =>
+            function.GuestFunctionId.Contains(".Main(", StringComparison.Ordinal)).Frame
+            ?? throw new InvalidOperationException("resumable source function should publish a frame");
+        CSharpGuestDebugVariable[] variables = frame.Variables.ToArray();
+        CSharpGuestDebugVariable input = variables.Single(variable => variable.Name == "input");
+        CSharpGuestDebugVariable outer = variables.Single(variable => variable.Name == "outer");
+        CSharpGuestDebugVariable inner = variables.Single(variable => variable.Name == "inner");
+
+        Assert(frame.ByteSize > 0
+            && frame.ByteSize <= 4096
+            && variables.All(variable => variable.Offset >= 0
+                && variable.ByteSize > 0
+                && variable.Offset <= frame.ByteSize - variable.ByteSize),
+            "debug variable slots should remain inside the bounded suspension frame");
+        Assert(input.Kind == "parameter"
+            && input.Storage == "i32"
+            && input.Scope.Start <= outer.Declaration.Start
+            && input.Scope.End >= inner.Scope.End,
+            "parameters should retain method-wide scope and scalar storage metadata");
+        Assert(outer.Kind == "local"
+            && inner.Kind == "local"
+            && inner.Scope.Start > outer.Scope.Start
+            && inner.Scope.End < outer.Scope.End,
+            "nested locals should retain their narrower lexical block scope");
+        Assert(CSharpGuestDebugMapSerializer.Serialize(first)
+                .SequenceEqual(CSharpGuestDebugMapSerializer.Serialize(second)),
+            "equivalent debug frame metadata should serialize byte-identically");
     }
 
     private static void DebugInstrumentationEmitsStableBackendNeutralProbeCalls()

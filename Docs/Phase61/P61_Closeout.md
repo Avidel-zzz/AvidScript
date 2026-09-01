@@ -1,6 +1,6 @@
 # Phase 61 收尾记录
 
-状态：实施中，`P61.A1-A3b`、`P61.B1a-B2`、`P61.C1a-C2b2` 已完成
+状态：实施中，`P61.A1-A3b`、`P61.B1a-B2`、`P61.C1a-C2c1` 已完成
 
 ## 目标
 
@@ -55,10 +55,14 @@
   通过 `avid_on_debug_resume` 恢复参数、locals、聚合值和任意 CFG；
 - Session 暂停期间阻止新 Guest 入口与 Tick 后续派发，未执行 Timer 保留到后续调度；
 - 详细实现与证据见 [P61.C2b2 同步 Guest CPS 恢复](P61.C2b2_Synchronous_Guest_CPS_Resume.md)。
+- 完成 `P61.C2c1` 变量帧元数据：Debug Map 从真实 suspension frame 投影源参数与局部变量，
+  记录稳定 symbol、类型、存储、偏移、大小、声明位置和词法作用域；
+- 编译器 temporary 与合成调试寄存器不会暴露，布局不匹配或越过 4 KiB frame 时 fail-closed；
+- 详细实现与证据见 [P61.C2c1 词法变量帧元数据](P61.C2c1_Lexical_Variable_Frame_Metadata.md)。
 
 ## 待完成
 
-- `P61.C2c-C4` Editor 断点管理、变量查看与调试体验；
+- `P61.C2c2-C4` Runtime 有界变量 snapshot、Editor 断点管理、变量查看与调试体验；
 - `P61.D` Profiler 与 IDE workspace；
 - `P61.E` 集成与集中 Gate。
 

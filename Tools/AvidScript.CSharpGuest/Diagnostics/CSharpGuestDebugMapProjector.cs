@@ -121,7 +121,8 @@ public static class CSharpGuestDebugMapProjector
                 methodId,
                 $"{ownerName}.{methodSymbol.Signature}",
                 methodSymbol.Span,
-                BuildSequencePoints(module.ModuleId, function, probeIds)));
+                BuildSequencePoints(module.ModuleId, function, probeIds),
+                BuildFrameLayout(document, module, function, callable, methodSymbol.Span)));
         }
 
         return new CSharpGuestDebugMap(
@@ -307,6 +308,166 @@ public static class CSharpGuestDebugMapProjector
             }
         }
         return sequencePoints;
+    }
+
+    private static CSharpGuestDebugFrameLayout? BuildFrameLayout(
+        SemanticDocument document,
+        GuestModule module,
+        GuestFunction function,
+        SemanticCallable callable,
+        SemanticSpan methodSpan)
+    {
+        GuestType? frame = module.Types.SingleOrDefault(type =>
+            type.Id == CSharpGuestDebugProbeAbi.FrameTypePrefix + function.Id);
+        if (frame is null)
+        {
+            return null;
+        }
+        if (frame.Kind != "struct"
+            || frame.Storage != "memory"
+            || frame.Size <= 0
+            || frame.Size > 4096
+            || frame.Fields.Count == 0
+            || frame.Fields[0].Name != CSharpGuestDebugProbeAbi.FrameRouteFieldName)
+        {
+            throw new InvalidDataException(
+                $"ASDEBUG1006: Function '{function.Id}' has an invalid debug frame layout.");
+        }
+
+        int sourceParameterCount = function.Parameters.TakeWhile(parameter =>
+            !parameter.Id.StartsWith("value:debug_resumable:", StringComparison.Ordinal)).Count();
+        int sourceLocalCount = frame.Fields.Count - 1 - sourceParameterCount;
+        if (sourceLocalCount < 0 || sourceLocalCount > function.Locals.Count)
+        {
+            throw new InvalidDataException(
+                $"ASDEBUG1006: Function '{function.Id}' debug frame slots do not match its registers.");
+        }
+
+        GuestRegister[] registers = function.Parameters.Take(sourceParameterCount)
+            .Concat(function.Locals.Take(sourceLocalCount))
+            .ToArray();
+        if (registers.Length != frame.Fields.Count - 1)
+        {
+            throw new InvalidDataException(
+                $"ASDEBUG1006: Function '{function.Id}' debug frame register count is invalid.");
+        }
+
+        Dictionary<string, SemanticSymbol> symbols = document.Symbols.ToDictionary(
+            symbol => symbol.Id,
+            StringComparer.Ordinal);
+        Dictionary<string, GuestType> types = module.Types.ToDictionary(
+            type => type.Id,
+            StringComparer.Ordinal);
+        SemanticMethodBody? method = document.Methods.SingleOrDefault(item =>
+            item.MethodSymbolId == callable.MethodSymbolId);
+        List<CSharpGuestDebugVariable> variables = new();
+        for (int index = 0; index < registers.Length; ++index)
+        {
+            GuestRegister register = registers[index];
+            string? symbolId = TryGetSourceSymbolId(register.Id);
+            if (symbolId is null)
+            {
+                continue;
+            }
+            if (!symbols.TryGetValue(symbolId, out SemanticSymbol? symbol)
+                || symbol.TypeId is null
+                || symbol.TypeId != register.TypeId
+                || symbol.Kind is not ("parameter" or "local")
+                || !types.TryGetValue(register.TypeId, out GuestType? type))
+            {
+                throw new InvalidDataException(
+                    $"ASDEBUG1006: Debug register '{register.Id}' has no valid source variable mapping.");
+            }
+
+            GuestField field = frame.Fields[index + 1];
+            if (field.TypeId != register.TypeId
+                || field.Offset < 0
+                || type.Size <= 0
+                || field.Offset > frame.Size - type.Size)
+            {
+                throw new InvalidDataException(
+                    $"ASDEBUG1006: Debug variable '{symbolId}' exceeds its frame bounds.");
+            }
+
+            SemanticSpan scope = symbol.Kind == "parameter"
+                ? methodSpan
+                : FindLocalScope(method?.Root, symbol);
+            variables.Add(new CSharpGuestDebugVariable(
+                symbol.Id,
+                symbol.Name,
+                symbol.Kind,
+                symbol.TypeId,
+                type.Kind,
+                type.Storage,
+                field.Offset,
+                type.Size,
+                symbol.Span,
+                scope));
+        }
+        return new CSharpGuestDebugFrameLayout(frame.Size, variables);
+    }
+
+    private static string? TryGetSourceSymbolId(string registerId)
+    {
+        const string ParameterPrefix = "value:parameter:";
+        const string LocalPrefix = "value:local:";
+        if (registerId.StartsWith(ParameterPrefix, StringComparison.Ordinal))
+        {
+            return registerId[ParameterPrefix.Length..];
+        }
+        if (registerId.StartsWith(LocalPrefix, StringComparison.Ordinal))
+        {
+            return registerId[LocalPrefix.Length..];
+        }
+        return null;
+    }
+
+    private static SemanticSpan FindLocalScope(
+        SemanticOperation? root,
+        SemanticSymbol local)
+    {
+        if (root is null)
+        {
+            throw new InvalidDataException(
+                $"ASDEBUG1006: Local '{local.Id}' has no semantic method body.");
+        }
+
+        List<SemanticOperation> ancestors = new();
+        SemanticSpan? result = null;
+        bool Visit(SemanticOperation operation)
+        {
+            ancestors.Add(operation);
+            if (operation.Kind == "variable_declarator"
+                && operation.SymbolId == local.Id)
+            {
+                result = ancestors.AsEnumerable().Reverse()
+                    .FirstOrDefault(IsLexicalScope)?.Span;
+                ancestors.RemoveAt(ancestors.Count - 1);
+                return true;
+            }
+            foreach (SemanticOperation child in operation.Children)
+            {
+                if (Visit(child))
+                {
+                    ancestors.RemoveAt(ancestors.Count - 1);
+                    return true;
+                }
+            }
+            ancestors.RemoveAt(ancestors.Count - 1);
+            return false;
+        }
+
+        if (!Visit(root) || result is null || !IsValidSpan(result))
+        {
+            throw new InvalidDataException(
+                $"ASDEBUG1006: Local '{local.Id}' has no bounded lexical scope.");
+        }
+        return result;
+    }
+
+    private static bool IsLexicalScope(SemanticOperation operation)
+    {
+        return operation.Kind is "block" or "loop" or "switch_case";
     }
 
     private static Dictionary<string, T> UniqueBy<T>(

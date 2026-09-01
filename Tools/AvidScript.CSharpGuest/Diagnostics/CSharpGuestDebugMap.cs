@@ -30,7 +30,8 @@ public sealed record CSharpGuestDebugFunction(
     [property: JsonPropertyOrder(2)] string MethodSymbolId,
     [property: JsonPropertyOrder(3)] string DisplayName,
     [property: JsonPropertyOrder(4)] SemanticSpan Span,
-    [property: JsonPropertyOrder(5)] IReadOnlyList<CSharpGuestDebugSequencePoint>? SequencePoints = null);
+    [property: JsonPropertyOrder(5)] IReadOnlyList<CSharpGuestDebugSequencePoint>? SequencePoints = null,
+    [property: JsonPropertyOrder(6)] CSharpGuestDebugFrameLayout? Frame = null);
 
 public sealed record CSharpGuestDebugSequencePoint(
     [property: JsonPropertyOrder(0)] int WasmFunctionOffset,
@@ -40,3 +41,19 @@ public sealed record CSharpGuestDebugSequencePoint(
     [property: JsonPropertyOrder(4)] string Kind,
     [property: JsonPropertyOrder(5)] bool Hidden,
     [property: JsonPropertyOrder(6)] SemanticSpan Span);
+
+public sealed record CSharpGuestDebugFrameLayout(
+    [property: JsonPropertyOrder(0)] int ByteSize,
+    [property: JsonPropertyOrder(1)] IReadOnlyList<CSharpGuestDebugVariable> Variables);
+
+public sealed record CSharpGuestDebugVariable(
+    [property: JsonPropertyOrder(0)] string SymbolId,
+    [property: JsonPropertyOrder(1)] string Name,
+    [property: JsonPropertyOrder(2)] string Kind,
+    [property: JsonPropertyOrder(3)] string TypeId,
+    [property: JsonPropertyOrder(4)] string ValueKind,
+    [property: JsonPropertyOrder(5)] string Storage,
+    [property: JsonPropertyOrder(6)] int Offset,
+    [property: JsonPropertyOrder(7)] int ByteSize,
+    [property: JsonPropertyOrder(8)] SemanticSpan Declaration,
+    [property: JsonPropertyOrder(9)] SemanticSpan Scope);

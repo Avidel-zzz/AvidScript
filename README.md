@@ -42,6 +42,7 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 | 增量构建 | 双层产物缓存与 persistent Worker；无修改热构建零编译调用，5 轮中位数 `884 ms` |
 | 结构化诊断 | Debug Map v2、同步/async 序列点、稳定 probe ID、双后端 probe 执行、跨层调用栈、Editor 源码导航 |
 | 同步调试 | 顶层 `void` 导出的非阻塞 pause、continue、step-into、4 KiB 状态帧与 Wasmtime/WAMR 恢复 |
+| 变量元数据 | Debug Map 记录源参数/局部变量的稳定身份、类型、帧偏移、声明位置与词法作用域 |
 
 Phase 60 的功能批次已完成：UE Interface 与默认参数、Delegate 双向调用、Blueprint
 callable/event，以及带 typed payload 的 AsyncAction `await` 已接入真实 C# Session Runtime。
@@ -52,9 +53,10 @@ callable/event，以及带 typed payload 的 AsyncAction `await` 已接入真实
 
 详细进度见 [Phase 60 中文收尾记录](Docs/Phase60/P60_Closeout.md)。
 
-Phase 61 已完成 `P61.A-P61.B` 与 `P61.C2b2`：增量编译、Debug Map v2、Editor 可导航调用栈，
+Phase 61 已完成 `P61.A-P61.B` 与 `P61.C2c1`：增量编译、Debug Map v2、Editor 可导航调用栈，
 以及同步顶层 `void` 导出的 CPS 暂停/恢复闭环已落地。Session 在暂停期间阻止 Tick、Event、Delegate
-重入，并支持 continue 与 step-into；`EndPlay`、non-void、async 和 Guest helper 暂不生成可暂停点。
+重入，并支持 continue 与 step-into；编译器已生成有界变量布局，Runtime 查询与 Editor 展示仍在推进。
+`EndPlay`、non-void、async 和 Guest helper 暂不生成可暂停点。
 5 轮增量矩阵的无修改、方法体、Binding、工具链中位耗时为
 `884 / 1833 / 1826 / 3223 ms`；变量查看、Editor 断点管理和 Profiler 仍在后续批次。
 

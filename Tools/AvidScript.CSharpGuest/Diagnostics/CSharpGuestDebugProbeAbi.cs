@@ -10,6 +10,8 @@ public static class CSharpGuestDebugProbeAbi
     public const string SuspendImportName = "avid_debug_suspend";
     public const string FrameReadImportId = "import:synthetic:debug_frame_read:v1";
     public const string FrameReadImportName = "avid_debug_frame_read";
+    public const string FrameTypePrefix = "type:synthetic:debug_resumable_frame:v1:";
+    public const string FrameRouteFieldName = "resume_route";
     public const string ProbeIdTypeId = "type:int64";
     public const string ActionTypeId = "type:int32";
 
