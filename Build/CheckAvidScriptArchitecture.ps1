@@ -3435,6 +3435,20 @@ $FrontendReportHeaderSource = Read-RequiredFile 'Source/AvidScriptEditor/Public/
 $FrontendReportSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/AvidScriptFrontendReport.cpp'
 $DiagnosticNavigationSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/AvidScriptEditorDiagnosticNavigation.cpp'
 $AvidScriptEditorBuildRulesSource = Read-RequiredFile 'Source/AvidScriptEditor/AvidScriptEditor.Build.cs'
+$CSharpIncrementalBenchmarkSource = Read-RequiredFile 'Build/MeasureAvidScriptCSharpIncrementalBuild.ps1'
+foreach ($RequiredIncrementalBenchmarkContract in @(
+    'no_op',
+    'method_body_change',
+    'binding_change',
+    'toolchain_change',
+    'Assert-InvocationCounts',
+    'correctness_gate = "passed"',
+    'EnforceBudgets'
+)) {
+    if (-not $CSharpIncrementalBenchmarkSource.Contains($RequiredIncrementalBenchmarkContract)) {
+        Add-Violation "C# incremental benchmark is missing matrix contract $RequiredIncrementalBenchmarkContract"
+    }
+}
 foreach ($RequiredUnifiedDiagnosticBuildContract in @(
     'diagnostic_schema_version = 1',
     'Convert-ToUnifiedCompilerDiagnostics',
