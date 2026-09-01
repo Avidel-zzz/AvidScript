@@ -1,6 +1,6 @@
 # Phase 60 收尾记录
 
-状态：已通过最终 Gate 并完成 attestation，待工作流生成外部不可变 close evidence
+状态：已通过最终 Gate、attestation 与 close
 
 ## 目标
 
@@ -69,6 +69,8 @@
 `2109c03b6b43cbb93b87fa8387bca441547ef0bd`。机器摘要见
 `P60_Gate_Summary.json`；仓库外 Gate report SHA-256 为
 `c47e0afe3154fbe0e7fa1790c13211eeb77574d11304eb55380725fc442ac622`。
+工作流已生成并验证外部不可变 close evidence；attestation 提交为
+`46c6fad2540c0d1285c4dca44f469a21b3ee8773`。
 
 ## 验收边界
 

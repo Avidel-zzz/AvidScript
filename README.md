@@ -10,7 +10,7 @@
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 Development" src="https://img.shields.io/badge/Platform-Win64-0078D4?logo=windows&logoColor=white">
-  <img alt="Phase 60 Gate Passed" src="https://img.shields.io/badge/Status-Phase%2060%20Gate%20Passed-26A269">
+  <img alt="Phase 60 Complete" src="https://img.shields.io/badge/Status-Phase%2060%20Complete-26A269">
   <img alt="Automation Baseline 411/411" src="https://img.shields.io/badge/Baseline-411%2F411-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
@@ -45,7 +45,7 @@ callable/event，以及带 typed payload 的 AsyncAction `await` 已接入真实
 异步对象支持 reload 重绑、reinstance 失效取消、teardown 回收与迟到广播抑制。
 
 完整 AvidScript Automation `411/411`、UE5.8 no-clean UBT 与 clean detached architecture Gate
-均已通过；阶段状态机正在完成最终 attestation 与 close。
+均已通过，Phase 60 已完成正式 attestation 与 close。
 
 详细进度见 [Phase 60 中文收尾记录](Docs/Phase60/P60_Closeout.md)。
 
