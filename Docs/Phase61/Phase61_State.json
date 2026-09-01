@@ -5,7 +5,7 @@
     "goal": "交付增量编译、结构化错误定位、指令级 source map、调用栈、断点、变量查看、Profiler 与 IDE workspace。",
     "start_commit": "0dd6b15ad8a0a31d2f6bdcf256b0e1a8032ee4ab"
   },
-  "declared_stage": "implementing",
+  "declared_stage": "gate_ready",
   "architecture": {
     "path": "Docs/Phase61/P61.0_Editor_Debugging_Architecture.md",
     "version": 1,
@@ -50,9 +50,9 @@
   ],
   "debt": [],
   "review": {
-    "completed": false,
-    "evidence": "",
-    "completed_at_utc": null
+    "completed": true,
+    "evidence": "已完成 Phase 61 全范围集中复审：五个批次与中文证据一致，自动化 427/427、托管 Runner 279/279、no-clean UBT、两项性能矩阵和 clean architecture 均通过；提交范围 whitespace、隐私与受保护 dirty 基线通过，人工 Editor 验收边界明确保留。",
+    "completed_at_utc": "2026-09-01T19:48:33.0181633+00:00"
   },
   "budgets": {
     "ubt": 4,
@@ -65,11 +65,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "",
-    "source_tree": "",
-    "state_sha256": "",
-    "review_evidence": "",
-    "at_utc": null
+    "source_commit": "797674a794917d3de292d4bff967f43690f3299f",
+    "source_tree": "b03a3e0c1a6518495d50494fd28b981c8156abe4",
+    "state_sha256": "82a7085ec76658f1e772c71e4d298de3643fd8fbdddbaf5b642f334be153c20b",
+    "review_evidence": "已完成 Phase 61 全范围集中复审：五个批次与中文证据一致，自动化 427/427、托管 Runner 279/279、no-clean UBT、两项性能矩阵和 clean architecture 均通过；提交范围 whitespace、隐私与受保护 dirty 基线通过，人工 Editor 验收边界明确保留。",
+    "at_utc": "2026-09-01T19:48:33.0181633+00:00"
   },
   "gate": {
     "report_path": "",
@@ -100,7 +100,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "freeze -Phase 61 -ReviewEvidence <text>",
-  "revision": 6,
-  "updated_at_utc": "2026-09-01T19:46:18.1598769+00:00"
+  "next_action": "attest -Phase 61 -GateReportPath <path>",
+  "revision": 7,
+  "updated_at_utc": "2026-09-01T19:48:33.0225361+00:00"
 }
