@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
   "phase_id": 60,
-  "run_id": "P60-43d1b5b-20260901-001",
+  "run_id": "P60-c52476f-20260901-002",
   "status": "attested",
   "verified": {
-    "commit": "43d1b5b8a3f448529d4d87698800eb434eb3b86f",
-    "tree": "3e03b326d5aa7b79043f0899176fb5f28744b3e8",
-    "state_sha256": "eb810315a46fec89d74eeb8d8d790bd3a9b33e0b66612f9888cd63a5d431fe27"
+    "commit": "c52476f89e7644a528eec4fbc81b7989742b27f3",
+    "tree": "2109c03b6b43cbb93b87fa8387bca441547ef0bd",
+    "state_sha256": "ffe77b688ddcb92170b270d324347c3cf5639ae4608c689e245c1a5f4ceb2c02"
   },
-  "gate_report_sha256": "3bc126e1a535f361d63410ac96dec97079b229c7f2244c5b74ba13e048d519c2",
+  "gate_report_sha256": "c47e0afe3154fbe0e7fa1790c13211eeb77574d11304eb55380725fc442ac622",
   "checks": {
     "architecture_clean": true,
     "dotnet_276_of_276": true,
@@ -42,5 +42,5 @@
     "full_gate": 2,
     "budget_exception_recorded": false
   },
-  "attested_at_utc": "2026-09-01T03:08:49.3728092+00:00"
+  "attested_at_utc": "2026-09-01T03:16:20.6168148+00:00"
 }

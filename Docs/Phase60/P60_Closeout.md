@@ -64,11 +64,11 @@
   tree `1ad6ef66de32727b643da09efe8990a30ddb11c7`，21 个注册输入，提交树 clean；
 - Harness audit 与 README 链接检查均通过。
 
-正式 Gate run 为 `P60-43d1b5b-20260901-001`，验证提交
-`43d1b5b8a3f448529d4d87698800eb434eb3b86f`，tree
-`3e03b326d5aa7b79043f0899176fb5f28744b3e8`。机器摘要见
+正式 Gate run 为 `P60-c52476f-20260901-002`，验证提交
+`c52476f89e7644a528eec4fbc81b7989742b27f3`，tree
+`2109c03b6b43cbb93b87fa8387bca441547ef0bd`。机器摘要见
 `P60_Gate_Summary.json`；仓库外 Gate report SHA-256 为
-`3bc126e1a535f361d63410ac96dec97079b229c7f2244c5b74ba13e048d519c2`。
+`c47e0afe3154fbe0e7fa1790c13211eeb77574d11304eb55380725fc442ac622`。
 
 ## 验收边界
 

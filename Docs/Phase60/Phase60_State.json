@@ -5,7 +5,7 @@
     "goal": "补齐 Interface、完整 Delegate、脚本 UFunction 默认参数、Blueprint 新声明函数和通用异步动作，保持生成式 Reflection、prepared hot path 与 Session-owned 生命周期",
     "start_commit": "074d7b662ce1658f958be54267062aba3869d677"
   },
-  "declared_stage": "gate_ready",
+  "declared_stage": "gate_attested",
   "architecture": {
     "path": "Docs/Phase60/P60.0_Modern_UE_Interop_Architecture.md",
     "version": 2,
@@ -66,13 +66,13 @@
     "at_utc": "2026-09-01T03:13:58.1938125+00:00"
   },
   "gate": {
-    "report_path": "",
-    "report_sha256": "",
-    "run_id": "",
-    "verified_commit": "",
-    "verified_tree": "",
-    "attestation_parent": "",
-    "attested_at_utc": null
+    "report_path": "C:\\tmp\\AvidScript-P60-Gate-c52476f.json",
+    "report_sha256": "c47e0afe3154fbe0e7fa1790c13211eeb77574d11304eb55380725fc442ac622",
+    "run_id": "P60-c52476f-20260901-002",
+    "verified_commit": "c52476f89e7644a528eec4fbc81b7989742b27f3",
+    "verified_tree": "2109c03b6b43cbb93b87fa8387bca441547ef0bd",
+    "attestation_parent": "c52476f89e7644a528eec4fbc81b7989742b27f3",
+    "attested_at_utc": "2026-09-01T03:16:20.6168148+00:00"
   },
   "protected_dirty": [
     {
@@ -94,7 +94,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "attest -Phase 60 -GateReportPath <path>",
-  "revision": 14,
-  "updated_at_utc": "2026-09-01T03:13:58.1987010+00:00"
+  "next_action": "close -Phase 60",
+  "revision": 15,
+  "updated_at_utc": "2026-09-01T03:16:20.6189745+00:00"
 }
