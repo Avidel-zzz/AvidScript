@@ -46,10 +46,12 @@
 - `P60.C2c3` 完成 typed payload 的真实 C# `await`、事务式 Guest reload、新 action 重绑与旧 action
   迟到广播抑制；详见
   [P60.C2c3](P60.C2c3_Blueprint_Async_Action_CSharp_End_To_End.md)。
+- `P60.C2c4` 完成 Blueprint action reinstance、action 失效、显式取消、Session/World teardown 的
+  生命周期矩阵；详见
+  [P60.C2c4](P60.C2c4_Blueprint_Async_Action_Lifecycle.md)。
 
 ## 待完成
 
-- `P60.C2c4+` Blueprint class reinstance、取消/销毁矩阵；
 - `P60.D` 集成、性能与集中 Gate。
 
 ## 验收边界

@@ -1560,6 +1560,33 @@ bool FAvidScriptContinuationBlueprintAsyncActionTest::RunTest(
 			Owner->FinalizeDispatched(CancelledToken, true));
 	}
 
+	TStrongObjectPtr<UAvidScriptRuntimeAsyncActionTestObject> InvalidAction(
+		NewObject<UAvidScriptRuntimeAsyncActionTestObject>());
+	const int64 InvalidToken = Host.BeginAsyncAction(
+		606,
+		*InvalidAction,
+		Contract,
+		Error);
+	TestNotEqual(TEXT("Invalid-action fixture returns a token"), InvalidToken, 0ll);
+	InvalidAction->MarkAsGarbage();
+	Owner->DrainReady(Completions);
+	if (TestEqual(
+		TEXT("Invalid action resumes its awaiter once"),
+		Completions.Num(),
+		1))
+	{
+		TestEqual(
+			TEXT("Invalid action reports Cancelled"),
+			Completions[0].Status,
+			EAvidScriptContinuationStatus::Cancelled);
+		TestTrue(
+			TEXT("Invalid action cancellation finalizes"),
+			Owner->FinalizeDispatched(InvalidToken, true));
+	}
+	TestFalse(
+		TEXT("Invalid action releases its delegate lease"),
+		InvalidAction->Completed.IsBound());
+
 	TStrongObjectPtr<UAvidScriptRuntimeAsyncActionTestObject> TeardownAction(
 		NewObject<UAvidScriptRuntimeAsyncActionTestObject>());
 	const int64 TeardownToken = Host.BeginAsyncAction(
@@ -1574,6 +1601,41 @@ bool FAvidScriptContinuationBlueprintAsyncActionTest::RunTest(
 	TeardownAction->BroadcastCompleted();
 	Owner->DrainReady(Completions);
 	TestEqual(TEXT("Late broadcast after teardown is suppressed"), Completions.Num(), 0);
+
+	FAvidScriptContinuationHostEndpoint& WorldTeardownHost =
+		Owner->ResetActive(World);
+	TStrongObjectPtr<UAvidScriptRuntimeAsyncActionTestObject> WorldTeardownAction(
+		NewObject<UAvidScriptRuntimeAsyncActionTestObject>());
+	const int64 WorldTeardownToken = WorldTeardownHost.BeginAsyncAction(
+		607,
+		*WorldTeardownAction,
+		Contract,
+		Error);
+	TestNotEqual(
+		TEXT("World-teardown action returns a token"),
+		WorldTeardownToken,
+		0ll);
+	World->bIsTearingDown = true;
+	Owner->DrainReady(Completions);
+	TestEqual(
+		TEXT("World teardown does not dispatch into an invalid Guest context"),
+		Completions.Num(),
+		0);
+	TestEqual(
+		TEXT("World teardown reclaims the pending action"),
+		Owner->GetActiveCount(),
+		0);
+	TestFalse(
+		TEXT("World teardown releases the action delegate lease"),
+		WorldTeardownAction->Completed.IsBound());
+	World->bIsTearingDown = false;
+	WorldTeardownAction->BroadcastCompleted();
+	Owner->DrainReady(Completions);
+	TestEqual(
+		TEXT("Late action broadcast after world teardown is suppressed"),
+		Completions.Num(),
+		0);
+	Owner->Teardown();
 	return true;
 }
 

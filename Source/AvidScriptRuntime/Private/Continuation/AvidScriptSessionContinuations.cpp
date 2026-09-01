@@ -316,6 +316,12 @@ FAvidScriptSessionContinuations::FAvidScriptSessionContinuations(
 FAvidScriptSessionContinuations::~FAvidScriptSessionContinuations()
 {
 	check(IsInGameThread());
+	if (ObjectsReinstancedHandle.IsValid())
+	{
+		FCoreUObjectDelegates::OnObjectsReinstanced.Remove(
+			ObjectsReinstancedHandle);
+		ObjectsReinstancedHandle.Reset();
+	}
 	Teardown();
 }
 
@@ -544,6 +550,7 @@ void FAvidScriptSessionContinuations::DrainReady(
 	{
 		return;
 	}
+	SweepInvalidAsyncActions();
 	const uint64 ActiveActivation = ActiveEndpoint->GetActivationSerial();
 	if (!HasLaneEntries(
 			EAvidScriptContinuationLane::Active,
@@ -1434,6 +1441,14 @@ int64 FAvidScriptSessionContinuations::BeginAsyncAction(
 	check(UnpackToken(Token, SlotIndex, Generation));
 	check(Slots.IsValidIndex(static_cast<int32>(SlotIndex)));
 	FEntry& Stored = Slots[SlotIndex].Entry.GetValue();
+	if (!ObjectsReinstancedHandle.IsValid())
+	{
+		ObjectsReinstancedHandle =
+			FCoreUObjectDelegates::OnObjectsReinstanced.AddRaw(
+				this,
+				&FAvidScriptSessionContinuations::HandleObjectsReinstanced);
+	}
+	++PendingAsyncActionCount;
 	for (const FAvidScriptBindingAsyncActionOutcomeContract& Outcome :
 		Contract.Outcomes)
 	{
@@ -2258,7 +2273,9 @@ void FAvidScriptSessionContinuations::ReleaseAsyncActionProducer(
 		Entry.AsyncActionBridges.Num());
 	for (int32 Index = BoundCount - 1; Index >= 0; --Index)
 	{
-		if (IsValid(Action) && Entry.AsyncActionProperties[Index] != nullptr)
+		if (Action != nullptr
+			&& !Action->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed)
+			&& Entry.AsyncActionProperties[Index] != nullptr)
 		{
 			Entry.AsyncActionProperties[Index]->RemoveDelegate(
 				Entry.AsyncActionDelegates[Index],
@@ -2284,6 +2301,79 @@ void FAvidScriptSessionContinuations::ReleaseAsyncActionProducer(
 		AsyncAction->SetReadyToDestroy();
 	}
 	Entry.AsyncAction.Reset();
+	if (Action != nullptr)
+	{
+		check(PendingAsyncActionCount > 0);
+		--PendingAsyncActionCount;
+		if (PendingAsyncActionCount == 0
+			&& ObjectsReinstancedHandle.IsValid())
+		{
+			FCoreUObjectDelegates::OnObjectsReinstanced.Remove(
+				ObjectsReinstancedHandle);
+			ObjectsReinstancedHandle.Reset();
+		}
+	}
+}
+
+void FAvidScriptSessionContinuations::HandleObjectsReinstanced(
+	const TMap<UObject*, UObject*>& ReplacementObjects)
+{
+	if (!IsInGameThread()
+		|| bTearingDown
+		|| ReplacementObjects.IsEmpty())
+	{
+		return;
+	}
+
+	for (int32 SlotIndex = Slots.Num() - 1; SlotIndex >= 0; --SlotIndex)
+	{
+		FSlot& Slot = Slots[SlotIndex];
+		if (!Slot.Entry.IsSet()
+			|| Slot.Entry->ProducerKind != EProducerKind::AsyncAction
+			|| Slot.Entry->bReady
+			|| Slot.Entry->bDispatching)
+		{
+			continue;
+		}
+
+		UObject* const Action = Slot.Entry->AsyncAction.Get();
+		UClass* const ActionClass = Action == nullptr
+			? nullptr
+			: Action->GetClass();
+		if ((Action != nullptr && ReplacementObjects.Contains(Action))
+			|| (ActionClass != nullptr
+				&& ReplacementObjects.Contains(ActionClass)))
+		{
+			CancelEntry(static_cast<uint32>(SlotIndex), true);
+		}
+	}
+}
+
+void FAvidScriptSessionContinuations::SweepInvalidAsyncActions()
+{
+	check(IsInGameThread());
+	for (int32 SlotIndex = Slots.Num() - 1; SlotIndex >= 0; --SlotIndex)
+	{
+		FSlot& Slot = Slots[SlotIndex];
+		if (!Slot.Entry.IsSet()
+			|| Slot.Entry->ProducerKind != EProducerKind::AsyncAction
+			|| Slot.Entry->bReady
+			|| Slot.Entry->bDispatching)
+		{
+			continue;
+		}
+
+		UObject* const Action = Slot.Entry->AsyncAction.Get();
+		UClass* const ActionClass = Action == nullptr
+			? nullptr
+			: Action->GetClass();
+		if (!IsValid(Action)
+			|| ActionClass == nullptr
+			|| ActionClass->HasAnyClassFlags(CLASS_NewerVersionExists))
+		{
+			CancelEntry(static_cast<uint32>(SlotIndex), true);
+		}
+	}
 }
 
 uint64 FAvidScriptSessionContinuations::AllocateAsyncActionBridgeToken()

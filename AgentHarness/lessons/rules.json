@@ -21,7 +21,7 @@
       "summary": "概念名称不能当作真实文件路径。",
       "prevention": "先用 rg --files 建立索引，再对索引中的字面路径读取；通配符只放在 rg -g 参数。",
       "source": "legacy:1931",
-      "last_observed": "2026-09-01 P60.C2c3 (检索 continuation codec 时猜测不存在的 Private/Binding 目录；后续先用 rg --files 取得真实目录再检索)"
+      "last_observed": "2026-09-01 P60.C2c4 (检索 C# generator 与 RuntimeSession 时再次猜测不存在的目录/文件；后续概念检索必须先从 rg --files 的真实索引选路径)"
     },
     {
       "id": "one-command-one-evidence-domain",
@@ -454,6 +454,22 @@
       "prevention": "每次恢复或上下文切换后，先从插件根执行 bootstrap，再读取 Git、README 或产品代码；不能因为已有摘要而跳过。",
       "source": "observed:2026-09-01-P60.C2c3",
       "last_observed": "2026-09-01 P60.C2c3 恢复时先检查了 Git 与 README，随后发现顺序错误并在继续产品编辑前补跑 bootstrap"
+    },
+    {
+      "id": "blueprint-reinstance-evidence-is-behavioral",
+      "tags": ["ue", "blueprint", "reinstance", "automation"],
+      "summary": "Blueprint structural compile 可 reinstance 对象但不保证 GeneratedClass 指针改变。",
+      "prevention": "reinstance 用例验证 replacement 回调产生的 lease 解绑、旧 route 抑制、Cancelled 状态和 token 回收；不要把 UClass 指针不等当作必要条件。",
+      "source": "observed:2026-09-01-P60.C2c4",
+      "last_observed": "2026-09-01 P60.C2c4 (真实 Blueprint compile 已安全取消 C# await，但测试因错误要求 GeneratedClass 指针变化而失败；改用行为证据后通过)"
+    },
+    {
+      "id": "cpp-automation-edits-require-incremental-ubt",
+      "tags": ["ue", "automation", "build", "workflow"],
+      "summary": "C++ Automation 断言修改后必须先更新测试 DLL，不能直接重跑旧二进制。",
+      "prevention": "任何 .cpp/.h 测试改动后先执行 no-clean 增量 UBT，再运行聚焦 Automation；文档或外部 fixture 变化才可复用既有 DLL。",
+      "source": "observed:2026-09-01-P60.C2c4",
+      "last_observed": "2026-09-01 P60.C2c4 修正 reinstance 断言后曾口头误判无需重建，随即更正并完成 4-action no-clean UBT 后再验证 1/1 Success"
     }
   ]
 }

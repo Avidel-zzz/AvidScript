@@ -353,6 +353,9 @@ private:
 	void HandleLatentCompletion(int64 Token, int32 Linkage);
 	void QueueLatentCompletion(FEntry& Entry);
 	void ReleaseAsyncActionProducer(FEntry& Entry);
+	void HandleObjectsReinstanced(
+		const TMap<UObject*, UObject*>& ReplacementObjects);
+	void SweepInvalidAsyncActions();
 	uint64 AllocateAsyncActionBridgeToken();
 	void CancelEntryProducer(FEntry& Entry);
 	void RetireLatentProxy(FEntry& Entry);
@@ -390,6 +393,7 @@ private:
 	TArray<TStrongObjectPtr<UObject>> RetainedLoadedObjects;
 	TSet<TObjectKey<UObject>> RetainedLoadedObjectKeys;
 	TSharedPtr<IAvidScriptAsyncObjectLoader> AsyncObjectLoader;
+	FDelegateHandle ObjectsReinstancedHandle;
 	TSharedPtr<FAvidScriptContinuationHostEndpoint> ActiveEndpoint;
 	TSharedPtr<FAvidScriptContinuationHostEndpoint> PreparedEndpoint;
 	TSharedPtr<FAvidScriptContinuationHostEndpoint> RetiredEndpoint;
@@ -405,6 +409,7 @@ private:
 	uint64 NextRegistrationSerial = 1;
 	uint64 NextAsyncActionBridgeToken = 1;
 	int32 OccupiedSlotCount = 0;
+	int32 PendingAsyncActionCount = 0;
 	int32 OccupiedCancellationSourceCount = 0;
 	int32 CancellationBindingCount = 0;
 	int32 OccupiedResultSlotCount = 0;

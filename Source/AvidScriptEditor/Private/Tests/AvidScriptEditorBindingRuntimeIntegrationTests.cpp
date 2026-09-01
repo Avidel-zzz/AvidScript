@@ -21,6 +21,7 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraphSchema_K2.h"
 #include "Engine/Blueprint.h"
+#include "Engine/BlueprintGeneratedClass.h"
 #include "Engine/Engine.h"
 #include "Engine/LatentActionManager.h"
 #include "Engine/World.h"
@@ -42,6 +43,8 @@
 
 TWeakObjectPtr<UAvidScriptEditorAsyncActionPayloadTestObject>
 	UAvidScriptEditorAsyncActionPayloadTestObject::LastCreatedForTesting;
+TWeakObjectPtr<UClass>
+	UAvidScriptEditorAsyncActionPayloadTestObject::ActionClassOverrideForTesting;
 
 namespace
 {
@@ -6634,6 +6637,7 @@ bool FAvidScriptEditorBlueprintAsyncActionPayloadCSharpTest::RunTest(
 	}
 	ON_SCOPE_EXIT
 	{
+		UAvidScriptEditorAsyncActionPayloadTestObject::ActionClassOverrideForTesting.Reset();
 		UAvidScriptEditorAsyncActionPayloadTestObject::LastCreatedForTesting.Reset();
 		DestroyAvidScriptBindingRuntimeIntegrationWorld(World);
 	};
@@ -6661,6 +6665,7 @@ bool FAvidScriptEditorBlueprintAsyncActionPayloadCSharpTest::RunTest(
 	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
 	FAvidScriptRuntimeSession Session;
 	Session.SetHostContext(HostContext);
+	UAvidScriptEditorAsyncActionPayloadTestObject::ActionClassOverrideForTesting.Reset();
 	UAvidScriptEditorAsyncActionPayloadTestObject::LastCreatedForTesting.Reset();
 	FAvidScriptWasmReloadResult LoadResult;
 	if (!TestTrue(
@@ -6772,6 +6777,119 @@ bool FAvidScriptEditorBlueprintAsyncActionPayloadCSharpTest::RunTest(
 	TestFalse(
 		TEXT("First live outcome releases its producer lease"),
 		ReloadedAction->Completed.IsBound());
+
+	if (!TestTrue(
+			TEXT("Async action test type permits a Blueprint subclass"),
+			FKismetEditorUtilities::CanCreateBlueprintOfClass(
+				UAvidScriptEditorAsyncActionPayloadTestObject::StaticClass())))
+	{
+		Session.UnloadLive();
+		return false;
+	}
+	const FName BlueprintName(*FString::Printf(
+		TEXT("AvidScriptAsyncActionReinstance_%s"),
+		*FGuid::NewGuid().ToString(EGuidFormats::Digits)));
+	TStrongObjectPtr<UBlueprint> Blueprint(
+		FKismetEditorUtilities::CreateBlueprint(
+			UAvidScriptEditorAsyncActionPayloadTestObject::StaticClass(),
+			GetTransientPackage(),
+			BlueprintName,
+			BPTYPE_Normal,
+			UBlueprint::StaticClass(),
+			UBlueprintGeneratedClass::StaticClass()));
+	if (!TestNotNull(
+			TEXT("Transient async action Blueprint is created"),
+			Blueprint.Get()))
+	{
+		Session.UnloadLive();
+		return false;
+	}
+	FKismetEditorUtilities::CompileBlueprint(Blueprint.Get());
+	UClass* const InitialBlueprintClass = Blueprint->GeneratedClass;
+	if (!TestNotNull(
+			TEXT("Transient async action Blueprint compiles"),
+			InitialBlueprintClass))
+	{
+		Session.UnloadLive();
+		return false;
+	}
+
+	UAvidScriptEditorAsyncActionPayloadTestObject::ActionClassOverrideForTesting =
+		InitialBlueprintClass;
+	UAvidScriptEditorAsyncActionPayloadTestObject::LastCreatedForTesting.Reset();
+	if (!TestTrue(
+			TEXT("C# Guest reloads with a Blueprint-generated action instance"),
+			Session.ReloadModule(
+				Bytecode.GetData(),
+				Bytecode.Num(),
+				Manifest,
+				ReloadResult)))
+	{
+		AddError(ReloadResult.ErrorCategory + TEXT(": ")
+			+ ReloadResult.ErrorMessage);
+		Session.UnloadLive();
+		return false;
+	}
+	TStrongObjectPtr<UAvidScriptEditorAsyncActionPayloadTestObject>
+		ReinstancedAction(
+			UAvidScriptEditorAsyncActionPayloadTestObject::LastCreatedForTesting.Get());
+	if (!TestNotNull(
+			TEXT("Reload creates the Blueprint-generated action"),
+			ReinstancedAction.Get()))
+	{
+		Session.UnloadLive();
+		return false;
+	}
+	TestEqual(
+		TEXT("Pending action uses the generated Blueprint class"),
+		ReinstancedAction->GetClass(),
+		InitialBlueprintClass);
+	TestTrue(
+		TEXT("Blueprint-generated action owns a pending completion lease"),
+		ReinstancedAction->Completed.IsBound());
+
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint.Get());
+	FKismetEditorUtilities::CompileBlueprint(Blueprint.Get());
+	UClass* const ReplacementBlueprintClass = Blueprint->GeneratedClass;
+	if (!TestNotNull(
+			TEXT("Async action Blueprint recompiles a replacement class"),
+			ReplacementBlueprintClass))
+	{
+		Session.UnloadLive();
+		return false;
+	}
+	TestTrue(
+		TEXT("Recompiled action class preserves the expected parent contract"),
+		ReplacementBlueprintClass->IsChildOf(
+			UAvidScriptEditorAsyncActionPayloadTestObject::StaticClass()));
+	TestFalse(
+		TEXT("Reinstance releases the stale action delegate lease"),
+		ReinstancedAction->Completed.IsBound());
+	if (!TestTrue(
+			TEXT("Cancelled reinstance resumes the C# awaiter safely"),
+			Session.TickLive(1.0f / 60.0f, TickResult)))
+	{
+		AddError(TickResult.ErrorMessage);
+		Session.UnloadLive();
+		return false;
+	}
+	const FVector ReinstanceScale = Actor->GetActorScale3D();
+	TestEqual(
+		TEXT("Reinstance cancellation does not expose a payload"),
+		ReinstanceScale.X,
+		0.0);
+	TestEqual(
+		TEXT("C# observes Cancelled after Blueprint reinstance"),
+		ReinstanceScale.Y,
+		3.0);
+	TestEqual(
+		TEXT("Cancelled reinstance leaves the outcome unset"),
+		ReinstanceScale.Z,
+		9.0);
+	TestEqual(
+		TEXT("Reinstance cancellation reclaims the continuation"),
+		Session.GetLivePendingContinuationCount(),
+		0);
 
 	Session.UnloadLive();
 	TestEqual(

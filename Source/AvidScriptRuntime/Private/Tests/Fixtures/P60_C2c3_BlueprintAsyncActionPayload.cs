@@ -26,21 +26,25 @@ public static class P60C2c3BlueprintAsyncActionPayload
         }
 
         float outcomeState = 9.0f;
-        if (result.Value.Outcome ==
-            AvidScriptEditorAsyncActionPayloadTestObject_WaitForPayloadOutcome.Completed)
+        float scoreState = 0.0f;
+        if (result.Succeeded)
         {
-            outcomeState = 0.0f;
-        }
-        if (result.Value.Outcome ==
-            AvidScriptEditorAsyncActionPayloadTestObject_WaitForPayloadOutcome.Failed)
-        {
-            outcomeState = 1.0f;
-        }
+            if (result.Value.Outcome ==
+                AvidScriptEditorAsyncActionPayloadTestObject_WaitForPayloadOutcome.Completed)
+            {
+                outcomeState = 0.0f;
+            }
+            if (result.Value.Outcome ==
+                AvidScriptEditorAsyncActionPayloadTestObject_WaitForPayloadOutcome.Failed)
+            {
+                outcomeState = 1.0f;
+            }
 
-        float scoreState = (float)result.Value.Completed_Score;
-        if (!result.Value.Completed_Target.HasHandle)
-        {
-            scoreState = -scoreState;
+            scoreState = (float)result.Value.Completed_Score;
+            if (!result.Value.Completed_Target.HasHandle)
+            {
+                scoreState = -scoreState;
+            }
         }
 
         UE.Self.SetActorScale3D(new FVector(

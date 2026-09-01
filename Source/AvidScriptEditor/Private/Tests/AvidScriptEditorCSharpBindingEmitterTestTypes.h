@@ -208,8 +208,8 @@ public:
 	}
 };
 
-UCLASS()
-class UAvidScriptEditorAsyncActionPayloadTestObject final
+UCLASS(BlueprintType, Blueprintable)
+class UAvidScriptEditorAsyncActionPayloadTestObject
 	: public UBlueprintAsyncActionBase
 {
 	GENERATED_BODY()
@@ -217,6 +217,7 @@ class UAvidScriptEditorAsyncActionPayloadTestObject final
 public:
 	static TWeakObjectPtr<UAvidScriptEditorAsyncActionPayloadTestObject>
 		LastCreatedForTesting;
+	static TWeakObjectPtr<UClass> ActionClassOverrideForTesting;
 
 	UPROPERTY(BlueprintAssignable)
 	FAvidScriptEditorAsyncActionPayloadCompleted Completed;
@@ -229,8 +230,16 @@ public:
 		meta = (BlueprintInternalUseOnly = "true"))
 	static UAvidScriptEditorAsyncActionPayloadTestObject* WaitForPayload()
 	{
+		UClass* ActionClass = ActionClassOverrideForTesting.Get();
+		if (!IsValid(ActionClass)
+			|| !ActionClass->IsChildOf(StaticClass()))
+		{
+			ActionClass = StaticClass();
+		}
 		UAvidScriptEditorAsyncActionPayloadTestObject* const Action =
-			NewObject<UAvidScriptEditorAsyncActionPayloadTestObject>();
+			NewObject<UAvidScriptEditorAsyncActionPayloadTestObject>(
+				GetTransientPackage(),
+				ActionClass);
 		LastCreatedForTesting = Action;
 		return Action;
 	}
