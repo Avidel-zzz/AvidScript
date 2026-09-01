@@ -1761,6 +1761,7 @@ $DebugMapContractValid = (Test-JsonObjectHasProperties -Value $DebugMapModel -Re
 if ($DebugMapContractValid) {
     $DebugFunctionIndices = [System.Collections.Generic.HashSet[int]]::new()
     $DebugGuestFunctionIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $DebugProbeIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
     $PreviousDebugFunctionIndex = -1
     foreach ($Function in $DebugMapModel.functions) {
         $FunctionIndex = -1
@@ -1828,6 +1829,7 @@ if ($DebugMapContractValid) {
                         "wasm_function_offset",
                         "guest_instruction_id",
                         "semantic_operation_id",
+                        "probe_id",
                         "kind",
                         "hidden",
                         "span")) -or
@@ -1838,6 +1840,12 @@ if ($DebugMapContractValid) {
                     -not (Test-JsonNonEmptyString -Value $SequencePoint.semantic_operation_id) -or
                     -not $SequenceInstructionIds.Add([string]$SequencePoint.guest_instruction_id) -or
                     -not $SequenceOperationIds.Add([string]$SequencePoint.semantic_operation_id) -or
+                    $SequencePoint.hidden -isnot [bool] -or
+                    ([bool]$SequencePoint.hidden -and $null -ne $SequencePoint.probe_id) -or
+                    (-not [bool]$SequencePoint.hidden -and
+                        (-not (Test-JsonNonEmptyString -Value $SequencePoint.probe_id) -or
+                         [string]$SequencePoint.probe_id -cnotmatch '^[0-9a-f]{16}$' -or
+                         -not $DebugProbeIds.Add([string]$SequencePoint.probe_id))) -or
                     [string]$SequencePoint.kind -notin @("hidden", "statement", "call", "await", "return") -or
                     -not (Test-JsonObjectHasProperties -Value $SequencePoint.span -RequiredProperties @(
                             "start", "length", "line", "column", "end_line", "end_column")) -or

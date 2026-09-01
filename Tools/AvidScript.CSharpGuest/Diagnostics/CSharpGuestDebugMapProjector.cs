@@ -57,6 +57,7 @@ public static class CSharpGuestDebugMapProjector
         Dictionary<string, AsyncResumeDebugTarget> asyncResumeTargets = BuildAsyncResumeTargets(document);
         HashSet<string> functionIds = new(StringComparer.Ordinal);
         HashSet<string> methodIds = new(StringComparer.Ordinal);
+        HashSet<string> probeIds = new(StringComparer.Ordinal);
         List<CSharpGuestDebugFunction> functions = new(module.Functions.Count);
         for (int ordinal = 0; ordinal < module.Functions.Count; ++ordinal)
         {
@@ -83,7 +84,9 @@ public static class CSharpGuestDebugMapProjector
                     symbols,
                     functionIndex,
                     function,
-                    resumeTarget);
+                    resumeTarget,
+                    module.ModuleId,
+                    probeIds);
                 continue;
             }
 
@@ -118,7 +121,7 @@ public static class CSharpGuestDebugMapProjector
                 methodId,
                 $"{ownerName}.{methodSymbol.Signature}",
                 methodSymbol.Span,
-                BuildSequencePoints(function)));
+                BuildSequencePoints(module.ModuleId, methodId, function, probeIds)));
         }
 
         return new CSharpGuestDebugMap(
@@ -195,7 +198,9 @@ public static class CSharpGuestDebugMapProjector
         IReadOnlyDictionary<string, SemanticSymbol> symbols,
         int functionIndex,
         GuestFunction function,
-        AsyncResumeDebugTarget target)
+        AsyncResumeDebugTarget target,
+        string moduleId,
+        ISet<string> probeIds)
     {
         string functionId = function.Id;
         if (!callables.TryGetValue(target.MethodSymbolId, out SemanticCallable? callable)
@@ -230,11 +235,14 @@ public static class CSharpGuestDebugMapProjector
             debugMethodId,
             $"{ownerName}.{methodSymbol.Signature} [async resume {target.SegmentOrdinal}]",
             target.Span,
-            BuildSequencePoints(function)));
+            BuildSequencePoints(moduleId, debugMethodId, function, probeIds)));
     }
 
     private static IReadOnlyList<CSharpGuestDebugSequencePoint> BuildSequencePoints(
-        GuestFunction function)
+        string moduleId,
+        string methodSymbolId,
+        GuestFunction function,
+        ISet<string> probeIds)
     {
         List<CSharpGuestDebugSequencePoint> sequencePoints = new();
         HashSet<string> semanticOperationIds = new(StringComparer.Ordinal);
@@ -254,10 +262,22 @@ public static class CSharpGuestDebugMapProjector
                 throw new InvalidDataException(
                     $"ASDEBUG1004: Function '{function.Id}' contains an invalid or duplicated sequence point.");
             }
+            string? probeId = debugLocation.Hidden
+                ? null
+                : CSharpGuestDebugProbeIdentity.Create(
+                    moduleId,
+                    methodSymbolId,
+                    debugLocation.SemanticOperationId);
+            if (probeId is not null && !probeIds.Add(probeId))
+            {
+                throw new InvalidDataException(
+                    $"ASDEBUG1005: Function '{function.Id}' contains a colliding debug probe identity.");
+            }
             sequencePoints.Add(new CSharpGuestDebugSequencePoint(
                 -1,
                 guestInstructionId,
                 debugLocation.SemanticOperationId,
+                probeId,
                 debugLocation.Kind,
                 debugLocation.Hidden,
                 span));

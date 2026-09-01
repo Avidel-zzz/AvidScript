@@ -36,6 +36,7 @@ public sealed record CSharpGuestDebugSequencePoint(
     [property: JsonPropertyOrder(0)] int WasmFunctionOffset,
     [property: JsonPropertyOrder(1)] string GuestInstructionId,
     [property: JsonPropertyOrder(2)] string SemanticOperationId,
-    [property: JsonPropertyOrder(3)] string Kind,
-    [property: JsonPropertyOrder(4)] bool Hidden,
-    [property: JsonPropertyOrder(5)] SemanticSpan Span);
+    [property: JsonPropertyOrder(3)] string? ProbeId,
+    [property: JsonPropertyOrder(4)] string Kind,
+    [property: JsonPropertyOrder(5)] bool Hidden,
+    [property: JsonPropertyOrder(6)] SemanticSpan Span);

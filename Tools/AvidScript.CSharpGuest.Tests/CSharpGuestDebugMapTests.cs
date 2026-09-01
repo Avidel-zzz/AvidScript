@@ -354,8 +354,15 @@ internal static class CSharpGuestDebugMapTests
             "method identity and zero-based Roslyn declaration span should be retained");
         Assert(main.SequencePoints is { Count: > 0 }
             && main.SequencePoints.All(point => point.WasmFunctionOffset == -1)
+            && main.SequencePoints.Where(point => !point.Hidden).All(point =>
+                point.ProbeId is { Length: 16 }
+                && point.ProbeId.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f'))
+            && main.SequencePoints.Select(point => point.ProbeId)
+                .Where(probeId => probeId is not null)
+                .Distinct(StringComparer.Ordinal)
+                .Count() == main.SequencePoints.Count(point => !point.Hidden)
             && main.SequencePoints.Any(point => point.Kind == "call"),
-            "v2 draft maps should retain stable semantic sequence points before backend offset backfill");
+            "v2 draft maps should retain stable semantic sequence points and probe ids before backend offset backfill");
 
         WasmCompilationResult wasm = WasmModuleCompiler.Compile(module);
         Assert(wasm.Succeeded && wasm.DebugOffsets.Count > 0,
@@ -383,7 +390,7 @@ internal static class CSharpGuestDebugMapTests
             "backend finalization should bind the WASM hash and order resolved function-relative offsets");
         Assert(CSharpGuestDebugMapSerializer.Serialize(first)
                 .SequenceEqual(CSharpGuestDebugMapSerializer.Serialize(second)),
-            "equivalent semantic and Guest IR inputs should produce byte-identical debug maps");
+            "equivalent semantic and Guest IR inputs should produce byte-identical debug maps and probe ids");
     }
 
     private static void Assert(bool condition, string message)
