@@ -19,6 +19,7 @@ const FString GDiagnosticsSourceSha = FString::ChrN(64, TEXT('a'));
 const FString GDiagnosticsSemanticSha = FString::ChrN(64, TEXT('b'));
 const FString GDiagnosticsGuestIrSha = FString::ChrN(64, TEXT('c'));
 const FString GDiagnosticsArtifactWrongSha = FString::ChrN(64, TEXT('d'));
+const FString GDiagnosticsWasmSha = FString::ChrN(64, TEXT('e'));
 
 FString BytesToDiagnosticsHex(const uint8* Bytes, int32 ByteCount)
 {
@@ -89,6 +90,38 @@ FString MakeDiagnosticsDebugMapJson(
 		FirstFunctionIndex,
 		*OptionalBeginPlayFunction,
 		bDuplicateIndex ? FirstFunctionIndex : TickFunctionIndex);
+}
+
+FString MakeDiagnosticsDebugMapV2Json(
+	const FString& ModuleId,
+	const FString& SourceFile,
+	const FString& WasmSha256)
+{
+	return FString::Printf(
+		TEXT("{\n")
+		TEXT("  \"schema_version\": 2,\n")
+		TEXT("  \"debug_version\": \"2.0\",\n")
+		TEXT("  \"module_id\": \"%s\",\n")
+		TEXT("  \"imported_function_count\": 7,\n")
+		TEXT("  \"defined_function_count\": 2,\n")
+		TEXT("  \"source\": { \"id\": \"%s\", \"sha256\": \"%s\" },\n")
+		TEXT("  \"provenance\": { \"frontend_artifact_sha256\": \"%s\", \"semantic_sha256\": \"%s\", \"guest_ir_sha256\": \"%s\", \"wasm_sha256\": \"%s\" },\n")
+		TEXT("  \"functions\": [\n")
+		TEXT("    { \"wasm_function_index\": 7, \"guest_function_id\": \"function:symbol:method:Test.Helper()\", \"method_symbol_id\": \"symbol:method:Test.Helper()\", \"display_name\": \"Test.Helper()\", \"span\": { \"start\": 10, \"length\": 20, \"line\": 10, \"column\": 2, \"end_line\": 12, \"end_column\": 3 }, \"sequence_points\": [\n")
+		TEXT("      { \"wasm_function_offset\": 10, \"guest_instruction_id\": \"helper:i0\", \"semantic_operation_id\": \"helper:op0\", \"kind\": \"statement\", \"hidden\": false, \"span\": { \"start\": 50, \"length\": 4, \"line\": 20, \"column\": 4, \"end_line\": 20, \"end_column\": 8 } },\n")
+		TEXT("      { \"wasm_function_offset\": 30, \"guest_instruction_id\": \"helper:i1\", \"semantic_operation_id\": \"helper:op1\", \"kind\": \"hidden\", \"hidden\": true, \"span\": { \"start\": 60, \"length\": 2, \"line\": 25, \"column\": 1, \"end_line\": 25, \"end_column\": 3 } },\n")
+		TEXT("      { \"wasm_function_offset\": 40, \"guest_instruction_id\": \"helper:i2\", \"semantic_operation_id\": \"helper:op2\", \"kind\": \"call\", \"hidden\": false, \"span\": { \"start\": 70, \"length\": 6, \"line\": 30, \"column\": 6, \"end_line\": 30, \"end_column\": 12 } }\n")
+		TEXT("    ] },\n")
+		TEXT("    { \"wasm_function_index\": 8, \"guest_function_id\": \"function:symbol:method:Test.Tick(float)\", \"method_symbol_id\": \"symbol:method:Test.Tick(float)\", \"display_name\": \"Test.Tick(float)\", \"span\": { \"start\": 80, \"length\": 8, \"line\": 40, \"column\": 2, \"end_line\": 40, \"end_column\": 10 }, \"sequence_points\": [] }\n")
+		TEXT("  ]\n")
+		TEXT("}\n"),
+		*ModuleId,
+		*SourceFile,
+		*GDiagnosticsSourceSha,
+		*GDiagnosticsSourceSha,
+		*GDiagnosticsSemanticSha,
+		*GDiagnosticsGuestIrSha,
+		*WasmSha256);
 }
 
 bool WriteDiagnosticsArtifact(const FString& Path, const FString& Json, FString& OutSha256)
@@ -408,6 +441,74 @@ bool FAvidScriptWasmDebugMapValidationTest::RunTest(const FString& Parameters)
 			TestEqual(TEXT("named export retains raw token"), Frames[2].RawFunctionToken, FString(TEXT("avid_on_begin_play")));
 		}
 	}
+
+	const FString V2Path = FPaths::Combine(Root, TEXT("valid-v2.csharp.debug.json"));
+	FString V2Sha;
+	FAvidScriptWasmDebugProvenance V2Expected = Expected;
+	V2Expected.WasmSha256 = GDiagnosticsWasmSha;
+	TestTrue(
+		TEXT("v2 debug map writes"),
+		WriteDiagnosticsArtifact(
+			V2Path,
+			MakeDiagnosticsDebugMapV2Json(ModuleId, SourceFile, GDiagnosticsWasmSha),
+			V2Sha));
+	TSharedPtr<const FAvidScriptWasmDebugMap> V2Map;
+	ErrorCategory.Reset();
+	ErrorSource.Reset();
+	TestTrue(
+		TEXT("v2 debug map loads"),
+		FAvidScriptWasmDebugMap::LoadAndValidate(
+			V2Path,
+			V2Sha,
+			V2Expected,
+			MakeArrayView(FunctionExports),
+			V2Map,
+			ErrorCategory,
+			ErrorSource));
+	if (V2Map.IsValid())
+	{
+		TArray<FAvidScriptVmStackFrame> V2VmFrames;
+		for (const uint32 Offset : { 5u, 10u, 35u, 40u })
+		{
+			FAvidScriptVmStackFrame& VmFrame = V2VmFrames.AddDefaulted_GetRef();
+			VmFrame.FunctionIndex = 7;
+			VmFrame.FunctionOffset = Offset;
+			VmFrame.RawFunctionToken = TEXT("$f7");
+		}
+		TArray<FAvidScriptWasmDiagnosticFrame> V2Frames;
+		V2Map->MapFrames(V2VmFrames, V2Frames);
+		TestEqual(TEXT("v2 mapping preserves frames"), V2Frames.Num(), 4);
+		if (V2Frames.Num() == 4)
+		{
+			TestFalse(TEXT("offset before first point uses function fallback"), V2Frames[0].bSequencePointMapped);
+			TestEqual(TEXT("function fallback kind"), V2Frames[0].SourceKind, FString(TEXT("function")));
+			TestTrue(TEXT("exact first point maps"), V2Frames[1].bSequencePointMapped);
+			TestEqual(TEXT("first point line is one based"), V2Frames[1].Line, 21);
+			TestEqual(TEXT("hidden point resolves previous visible point"), V2Frames[2].Line, 21);
+			TestEqual(TEXT("call point line is one based"), V2Frames[3].Line, 31);
+			TestEqual(TEXT("call point kind survives"), V2Frames[3].SourceKind, FString(TEXT("call")));
+		}
+	}
+
+	FAvidScriptWasmDebugProvenance WrongWasmExpected = V2Expected;
+	WrongWasmExpected.WasmSha256 = GDiagnosticsArtifactWrongSha;
+	TSharedPtr<const FAvidScriptWasmDebugMap> WrongWasmMap;
+	ErrorCategory.Reset();
+	ErrorSource.Reset();
+	TestFalse(
+		TEXT("v2 WASM provenance mismatch is rejected"),
+		FAvidScriptWasmDebugMap::LoadAndValidate(
+			V2Path,
+			V2Sha,
+			WrongWasmExpected,
+			MakeArrayView(FunctionExports),
+			WrongWasmMap,
+			ErrorCategory,
+			ErrorSource));
+	TestEqual(
+		TEXT("v2 WASM mismatch category"),
+		ErrorCategory,
+		FString(TEXT("debug_map_wasm_mismatch")));
 
 	const FString SparsePath = FPaths::Combine(Root, TEXT("sparse.csharp.debug.json"));
 	FString SparseSha;

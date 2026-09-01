@@ -1087,8 +1087,8 @@ bool LoadManifestDebugMap(
 		|| !TryGetInt32Field(DebugMapObject, TEXT("schema_version"), DebugSchemaVersion)
 		|| !TryGetInt32Field(DebugMapObject, TEXT("imported_function_count"), DebugImportedFunctionCount)
 		|| !TryGetInt32Field(DebugMapObject, TEXT("defined_function_count"), DebugDefinedFunctionCount)
-		|| DebugSchemaVersion != 1
-		|| DebugVersion != TEXT("1.0")
+		|| !((DebugSchemaVersion == 1 && DebugVersion == TEXT("1.0"))
+			|| (DebugSchemaVersion == 2 && DebugVersion == TEXT("2.0")))
 		|| DebugImportedFunctionCount < 0
 		|| DebugDefinedFunctionCount <= 0
 		|| DebugDefinedFunctionCount > 65536
@@ -1172,6 +1172,7 @@ bool LoadManifestDebugMap(
 	Manifest.DebugProvenance.FrontendArtifactSha256 = FrontendArtifactSha256;
 	Manifest.DebugProvenance.ImportedFunctionCount = static_cast<uint32>(DebugImportedFunctionCount);
 	Manifest.DebugProvenance.DefinedFunctionCount = static_cast<uint32>(DebugDefinedFunctionCount);
+	Manifest.DebugProvenance.WasmSha256 = Manifest.WasmSha256;
 	if (DebugModuleId != Manifest.DebugProvenance.GuestModuleId)
 	{
 		SetManifestLoadFailure(

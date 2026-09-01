@@ -1,6 +1,6 @@
 # Phase 61 收尾记录
 
-状态：实施中，`P61.A1-A3b`、`P61.B1a` 已完成
+状态：实施中，`P61.A1-A3b`、`P61.B1a-B1b` 已完成
 
 ## 目标
 
@@ -33,10 +33,13 @@
 - 完成 `P61.B1a` DebugMap v2 与 backend offset 回填：同步 CFG 语义点携带稳定身份，
   WASM backend 以真实编码偏移和 WASM hash 原子完成最终 map；
 - 详细实现与证据见 [P61.B1a DebugMap v2 与 Backend 偏移回填](P61.B1a_DebugMap_V2_Backend_Offsets.md)。
+- 完成 `P61.B1b` Runtime sequence point 映射：v2 map 绑定实际 WASM hash，按函数内 offset
+  有界二分查找，同时保留 v1/首点之前的函数级回退；
+- 详细实现与证据见 [P61.B1b Runtime Sequence Point 映射](P61.B1b_Runtime_Sequence_Point_Mapping.md)。
 
 ## 待完成
 
-- `P61.B1b/B2` async/host crossing sequence point、Runtime 二分映射与 Editor 调用栈；
+- `P61.B1c/B2` async/host crossing sequence point 与 Editor 结构化调用栈；
 - `P61.C` 断点、单步与变量查看；
 - `P61.D` Profiler 与 IDE workspace；
 - `P61.E` 集成与集中 Gate。

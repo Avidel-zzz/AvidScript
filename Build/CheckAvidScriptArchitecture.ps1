@@ -1218,6 +1218,9 @@ foreach ($RequiredRuntimeDiagnosticContract in @(
     'FunctionOffset',
     'RawFunctionToken',
     'bSourceMapped',
+    'bSequencePointMapped',
+    'SourceKind',
+    'WasmSha256',
     'FrontendArtifactSha256',
     'ImportedFunctionCount',
     'DefinedFunctionCount'
@@ -1243,6 +1246,11 @@ foreach ($RequiredDebugMapValidation in @(
     'debug_map_hash_mismatch',
     'debug_map_module_mismatch',
     'debug_map_guest_ir_mismatch',
+    'debug_map_wasm_mismatch',
+    'MaxDebugSequencePointsPerFunction = 16384',
+    'MaxDebugSequencePointCount = 262144',
+    'debug_map_sequence_point_invalid',
+    'Function->SequencePoints[Middle].FunctionOffset',
     'debug_map_duplicate_function_index',
     'debug_map_function_index_range_mismatch',
     'frontend_artifact_sha256',
@@ -1281,6 +1289,8 @@ if (-not $RuntimeReloadSource.Contains('LoadManifestDebugMap') -or
     -not $RuntimeReloadSource.Contains('wasm_layout_invalid') -or
     -not $RuntimeReloadSource.Contains('debug_map_wasm_layout_mismatch') -or
     -not $RuntimeReloadSource.Contains('LoadManifestDebugMap(*RootObject, ManifestFullPath, WasmLayout') -or
+    -not $RuntimeReloadSource.Contains('DebugSchemaVersion == 2') -or
+    -not $RuntimeReloadSource.Contains('DebugProvenance.WasmSha256 = Manifest.WasmSha256') -or
     -not $RuntimeReloadSource.Contains('DebugImportedFunctionCount') -or
     -not $RuntimeReloadSource.Contains('DebugDefinedFunctionCount')) {
     Add-Violation 'Runtime reload must resolve and validate the immutable debug map before candidate activation'

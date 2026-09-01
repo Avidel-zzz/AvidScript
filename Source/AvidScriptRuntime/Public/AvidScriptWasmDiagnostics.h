@@ -12,6 +12,7 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmDebugProvenance
 	FString GuestIrSha256;
 	uint32 ImportedFunctionCount = 0;
 	uint32 DefinedFunctionCount = 0;
+	FString WasmSha256;
 };
 
 struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmDiagnosticFrame
@@ -25,5 +26,7 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmDiagnosticFrame
 	int32 Column = 0;
 	int32 EndLine = 0;
 	int32 EndColumn = 0;
+	FString SourceKind;
 	bool bSourceMapped = false;
+	bool bSequencePointMapped = false;
 };

@@ -16,6 +16,8 @@ namespace
 {
 constexpr int64 MaxDebugMapByteSize = 4 * 1024 * 1024;
 constexpr int32 MaxDebugFunctionCount = 65536;
+constexpr int32 MaxDebugSequencePointsPerFunction = 16384;
+constexpr int32 MaxDebugSequencePointCount = 262144;
 constexpr int32 MaxDisplayNameLength = 512;
 constexpr int32 MaxIdentityLength = 2048;
 
@@ -230,9 +232,10 @@ bool FAvidScriptWasmDebugMap::LoadAndValidate(
 	int32 DefinedFunctionCount = 0;
 	FString DebugVersion;
 	FString ModuleId;
-	if (!TryGetDebugMapStrictInt32(*Root, TEXT("schema_version"), 1, 1, SchemaVersion)
+	if (!TryGetDebugMapStrictInt32(*Root, TEXT("schema_version"), 1, 2, SchemaVersion)
 		|| !Root->TryGetStringField(TEXT("debug_version"), DebugVersion)
-		|| DebugVersion != TEXT("1.0")
+		|| !((SchemaVersion == 1 && DebugVersion == TEXT("1.0"))
+			|| (SchemaVersion == 2 && DebugVersion == TEXT("2.0")))
 		|| !Root->TryGetStringField(TEXT("module_id"), ModuleId)
 		|| ModuleId.IsEmpty()
 		|| ModuleId.Len() > MaxIdentityLength
@@ -310,6 +313,7 @@ bool FAvidScriptWasmDebugMap::LoadAndValidate(
 	FString FrontendArtifactSha256;
 	FString SemanticSha256;
 	FString GuestIrSha256;
+	FString WasmSha256;
 	if (!TryGetDebugMapRequiredObject(*Root, TEXT("provenance"), ProvenanceObject)
 		|| !ProvenanceObject->TryGetStringField(TEXT("frontend_artifact_sha256"), FrontendArtifactSha256)
 		|| !ProvenanceObject->TryGetStringField(TEXT("semantic_sha256"), SemanticSha256)
@@ -330,6 +334,20 @@ bool FAvidScriptWasmDebugMap::LoadAndValidate(
 	if (GuestIrSha256 != ExpectedProvenance.GuestIrSha256)
 	{
 		SetDebugMapFailure(OutMap, OutErrorCategory, OutErrorSource, TEXT("debug_map_guest_ir_mismatch"), DebugMapPath);
+		return false;
+	}
+	if (SchemaVersion == 2
+		&& (!ProvenanceObject->TryGetStringField(TEXT("wasm_sha256"), WasmSha256)
+			|| !IsDebugMapLowercaseSha256(WasmSha256)
+			|| !IsDebugMapLowercaseSha256(ExpectedProvenance.WasmSha256)
+			|| WasmSha256 != ExpectedProvenance.WasmSha256))
+	{
+		SetDebugMapFailure(
+			OutMap,
+			OutErrorCategory,
+			OutErrorSource,
+			TEXT("debug_map_wasm_mismatch"),
+			DebugMapPath);
 		return false;
 	}
 
@@ -357,6 +375,7 @@ bool FAvidScriptWasmDebugMap::LoadAndValidate(
 	TSet<FString> MethodSymbolIds;
 	uint32 PreviousFunctionIndex = 0;
 	bool bHasPreviousFunctionIndex = false;
+	int32 TotalSequencePointCount = 0;
 	const uint64 FunctionIndexLimit =
 		static_cast<uint64>(ImportedFunctionCount) + static_cast<uint64>(DefinedFunctionCount);
 	for (const TSharedPtr<FJsonValue>& FunctionValue : *FunctionValues)
@@ -439,6 +458,130 @@ bool FAvidScriptWasmDebugMap::LoadAndValidate(
 		}
 
 		Function.DisplayName = MoveTemp(DisplayName);
+		if (SchemaVersion == 2)
+		{
+			const TArray<TSharedPtr<FJsonValue>>* SequencePointValues = nullptr;
+			if (!FunctionObject->TryGetArrayField(TEXT("sequence_points"), SequencePointValues)
+				|| SequencePointValues == nullptr
+				|| SequencePointValues->Num() > MaxDebugSequencePointsPerFunction
+				|| SequencePointValues->Num() > MaxDebugSequencePointCount - TotalSequencePointCount)
+			{
+				SetDebugMapFailure(
+					OutMap,
+					OutErrorCategory,
+					OutErrorSource,
+					TEXT("debug_map_sequence_point_limit_exceeded"),
+					Function.DisplayName);
+				return false;
+			}
+
+			Function.SequencePoints.Reserve(SequencePointValues->Num());
+			TSet<FString> GuestInstructionIds;
+			TSet<FString> SemanticOperationIds;
+			uint32 PreviousFunctionOffset = 0;
+			bool bHasPreviousFunctionOffset = false;
+			for (const TSharedPtr<FJsonValue>& SequencePointValue : *SequencePointValues)
+			{
+				const TSharedPtr<FJsonObject> SequencePointObject =
+					SequencePointValue.IsValid() ? SequencePointValue->AsObject() : nullptr;
+				TSharedPtr<FJsonObject> SequenceSpanObject;
+				FString GuestInstructionId;
+				FString SemanticOperationId;
+				FString Kind;
+				bool bHidden = false;
+				FSequencePoint SequencePoint;
+				int32 SequenceStart = 0;
+				int32 SequenceLength = 0;
+				if (!SequencePointObject.IsValid()
+					|| !TryGetDebugMapStrictUint32(
+						*SequencePointObject,
+						TEXT("wasm_function_offset"),
+						SequencePoint.FunctionOffset)
+					|| !SequencePointObject->TryGetStringField(
+						TEXT("guest_instruction_id"),
+						GuestInstructionId)
+					|| !SequencePointObject->TryGetStringField(
+						TEXT("semantic_operation_id"),
+						SemanticOperationId)
+					|| !SequencePointObject->TryGetStringField(TEXT("kind"), Kind)
+					|| !SequencePointObject->TryGetBoolField(TEXT("hidden"), bHidden)
+					|| !TryGetDebugMapRequiredObject(
+						*SequencePointObject,
+						TEXT("span"),
+						SequenceSpanObject)
+					|| GuestInstructionId.IsEmpty()
+					|| GuestInstructionId.Len() > MaxIdentityLength
+					|| SemanticOperationId.IsEmpty()
+					|| SemanticOperationId.Len() > MaxIdentityLength
+					|| (Kind != TEXT("hidden")
+						&& Kind != TEXT("statement")
+						&& Kind != TEXT("call")
+						&& Kind != TEXT("await")
+						&& Kind != TEXT("return"))
+					|| GuestInstructionIds.Contains(GuestInstructionId)
+					|| SemanticOperationIds.Contains(SemanticOperationId)
+					|| (bHasPreviousFunctionOffset
+						&& SequencePoint.FunctionOffset < PreviousFunctionOffset)
+					|| !TryGetDebugMapStrictInt32(
+						*SequenceSpanObject,
+						TEXT("start"),
+						0,
+						MAX_int32,
+						SequenceStart)
+					|| !TryGetDebugMapStrictInt32(
+						*SequenceSpanObject,
+						TEXT("length"),
+						0,
+						MAX_int32,
+						SequenceLength)
+					|| SequenceLength > MAX_int32 - SequenceStart
+					|| !TryGetDebugMapStrictInt32(
+						*SequenceSpanObject,
+						TEXT("line"),
+						0,
+						MAX_int32 - 1,
+						SequencePoint.Line)
+					|| !TryGetDebugMapStrictInt32(
+						*SequenceSpanObject,
+						TEXT("column"),
+						0,
+						MAX_int32 - 1,
+						SequencePoint.Column)
+					|| !TryGetDebugMapStrictInt32(
+						*SequenceSpanObject,
+						TEXT("end_line"),
+						0,
+						MAX_int32 - 1,
+						SequencePoint.EndLine)
+					|| !TryGetDebugMapStrictInt32(
+						*SequenceSpanObject,
+						TEXT("end_column"),
+						0,
+						MAX_int32 - 1,
+						SequencePoint.EndColumn)
+					|| SequencePoint.EndLine < SequencePoint.Line
+					|| (SequencePoint.EndLine == SequencePoint.Line
+						&& SequencePoint.EndColumn < SequencePoint.Column))
+				{
+					SetDebugMapFailure(
+						OutMap,
+						OutErrorCategory,
+						OutErrorSource,
+						TEXT("debug_map_sequence_point_invalid"),
+						Function.DisplayName);
+					return false;
+				}
+
+				SequencePoint.Kind = MoveTemp(Kind);
+				SequencePoint.bHidden = bHidden;
+				Function.SequencePoints.Add(MoveTemp(SequencePoint));
+				GuestInstructionIds.Add(MoveTemp(GuestInstructionId));
+				SemanticOperationIds.Add(MoveTemp(SemanticOperationId));
+				PreviousFunctionOffset = Function.SequencePoints.Last().FunctionOffset;
+				bHasPreviousFunctionOffset = true;
+			}
+			TotalSequencePointCount += SequencePointValues->Num();
+		}
 		MutableMap->Functions.Add(FunctionIndex, MoveTemp(Function));
 		GuestFunctionIds.Add(MoveTemp(GuestFunctionId));
 		MethodSymbolIds.Add(MoveTemp(MethodSymbolId));
@@ -496,10 +639,49 @@ void FAvidScriptWasmDebugMap::MapFrames(
 		}
 		Frame.FunctionName = Function->DisplayName;
 		Frame.SourceFile = SourceFile;
-		Frame.Line = Function->Line + 1;
-		Frame.Column = Function->Column + 1;
-		Frame.EndLine = Function->EndLine + 1;
-		Frame.EndColumn = Function->EndColumn + 1;
+
+		const FSequencePoint* ResolvedSequencePoint = nullptr;
+		int32 Low = 0;
+		int32 High = Function->SequencePoints.Num();
+		while (Low < High)
+		{
+			const int32 Middle = Low + ((High - Low) / 2);
+			if (Function->SequencePoints[Middle].FunctionOffset <= VmFrame.FunctionOffset)
+			{
+				Low = Middle + 1;
+			}
+			else
+			{
+				High = Middle;
+			}
+		}
+		for (int32 CandidateIndex = Low - 1; CandidateIndex >= 0; --CandidateIndex)
+		{
+			const FSequencePoint& Candidate = Function->SequencePoints[CandidateIndex];
+			if (!Candidate.bHidden)
+			{
+				ResolvedSequencePoint = &Candidate;
+				break;
+			}
+		}
+
+		if (ResolvedSequencePoint != nullptr)
+		{
+			Frame.Line = ResolvedSequencePoint->Line + 1;
+			Frame.Column = ResolvedSequencePoint->Column + 1;
+			Frame.EndLine = ResolvedSequencePoint->EndLine + 1;
+			Frame.EndColumn = ResolvedSequencePoint->EndColumn + 1;
+			Frame.SourceKind = ResolvedSequencePoint->Kind;
+			Frame.bSequencePointMapped = true;
+		}
+		else
+		{
+			Frame.Line = Function->Line + 1;
+			Frame.Column = Function->Column + 1;
+			Frame.EndLine = Function->EndLine + 1;
+			Frame.EndColumn = Function->EndColumn + 1;
+			Frame.SourceKind = TEXT("function");
+		}
 		Frame.bSourceMapped = true;
 	}
 }
