@@ -139,6 +139,7 @@ public sealed class CompilerWorkerServer
                 ExitCode = 2,
                 DurationMs = stopwatch.Elapsed.TotalMilliseconds,
                 Diagnostics = new[] { $"ASCW1010: {exception.Message}" },
+                Workspace = new CompilerWorkerWorkspaceMetrics(),
             };
         }
 

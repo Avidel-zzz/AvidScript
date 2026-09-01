@@ -130,6 +130,20 @@ try {
     $Semantic = Invoke-WorkerRequest $SemanticRequest
     Assert-Condition ($Semantic.succeeded -and (Test-Path -LiteralPath $SemanticPath -PathType Leaf)) "worker Semantic stage failed"
     Assert-Condition ([string]$Semantic.worker_instance_id -ceq $WorkerInstanceId) "worker restarted before Semantic stage"
+    Assert-Condition ([int]$Semantic.workspace.metadata_reference_set_builds -eq 1) "worker did not initialize one Roslyn metadata-reference set"
+    Assert-Condition ([int]$Semantic.workspace.syntax_tree_cache_misses -ge 1) "worker did not report the initial Roslyn syntax-tree miss"
+
+    $SecondSemanticPath = Join-Path $RunRoot "module.second.semantic.json"
+    $SecondSemanticRequest = New-WorkerRequest -RequestId "semantic-2" -Stage "semantic"
+    $SecondSemanticRequest.source_path = [System.IO.Path]::GetFullPath($SourcePath)
+    $SecondSemanticRequest.source_id = "Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs"
+    $SecondSemanticRequest.frontend_path = [System.IO.Path]::GetFullPath($FrontendPath)
+    $SecondSemanticRequest.output_path = [System.IO.Path]::GetFullPath($SecondSemanticPath)
+    $SecondSemantic = Invoke-WorkerRequest $SecondSemanticRequest
+    Assert-Condition ($SecondSemantic.succeeded -and (Test-Path -LiteralPath $SecondSemanticPath -PathType Leaf)) "second worker Semantic stage failed"
+    Assert-Condition ([string]$SecondSemantic.worker_instance_id -ceq $WorkerInstanceId) "worker restarted before the second Semantic stage"
+    Assert-Condition ([int]$SecondSemantic.workspace.metadata_reference_set_builds -eq 1) "worker rebuilt Roslyn metadata references"
+    Assert-Condition ([int]$SecondSemantic.workspace.syntax_tree_cache_hits -gt [int]$Semantic.workspace.syntax_tree_cache_hits) "worker did not reuse the Roslyn syntax tree"
 
     $GuestIrPath = Join-Path $RunRoot "module.guestir.json"
     $DebugMapPath = Join-Path $RunRoot "module.debug.json"

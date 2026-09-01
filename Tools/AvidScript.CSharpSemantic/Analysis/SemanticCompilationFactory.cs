@@ -22,48 +22,50 @@ internal sealed record SemanticCompilationContext(
 
 internal static class SemanticCompilationFactory
 {
+    private static readonly CSharpParseOptions ParseOptions = new(
+        languageVersion: LanguageVersion.CSharp12,
+        documentationMode: DocumentationMode.Parse,
+        kind: SourceCodeKind.Regular);
+
+    private static readonly CSharpCompilationOptions CompilationOptions = new(
+        OutputKind.DynamicallyLinkedLibrary,
+        optimizationLevel: OptimizationLevel.Release,
+        allowUnsafe: false,
+        nullableContextOptions: NullableContextOptions.Enable,
+        deterministic: true);
+
     public static SemanticCompilationContext Create(
         string source,
         string sourceId,
-        IReadOnlyList<SemanticReferenceSource> referenceSources)
+        IReadOnlyList<SemanticReferenceSource> referenceSources,
+        SemanticCompilerWorkspace workspace)
     {
-        SourceText sourceText = SourceText.From(source);
-        CSharpParseOptions parseOptions = new(
-            languageVersion: LanguageVersion.CSharp12,
-            documentationMode: DocumentationMode.Parse,
-            kind: SourceCodeKind.Regular);
-        SyntaxTree syntaxTree = CSharpSyntaxTree.ParseText(sourceText, parseOptions, sourceId);
-        SemanticCompilationUnit primaryUnit = new(syntaxTree, sourceText, true);
-        List<SyntaxTree> syntaxTrees = new() { syntaxTree };
+        SemanticCompilationUnit primaryUnit = workspace.GetOrParseSyntaxTree(
+            source,
+            sourceId,
+            ParseOptions,
+            isPrimary: true);
+        List<SyntaxTree> syntaxTrees = new() { primaryUnit.SyntaxTree };
         List<SemanticCompilationUnit> projectionUnits = new() { primaryUnit };
         foreach (SemanticReferenceSource reference in referenceSources)
         {
-            SourceText referenceText = SourceText.From(reference.Source);
-            SyntaxTree referenceTree = CSharpSyntaxTree.ParseText(
-                referenceText,
-                parseOptions,
-                reference.SourceId);
-            syntaxTrees.Add(referenceTree);
+            SemanticCompilationUnit referenceUnit = workspace.GetOrParseSyntaxTree(
+                reference.Source,
+                reference.SourceId,
+                ParseOptions,
+                isPrimary: false);
+            syntaxTrees.Add(referenceUnit.SyntaxTree);
             if (reference.IsExecutable)
             {
-                projectionUnits.Add(new SemanticCompilationUnit(
-                    referenceTree,
-                    referenceText,
-                    false));
+                projectionUnits.Add(referenceUnit);
             }
         }
 
-        CSharpCompilationOptions compilationOptions = new(
-            OutputKind.DynamicallyLinkedLibrary,
-            optimizationLevel: OptimizationLevel.Release,
-            allowUnsafe: false,
-            nullableContextOptions: NullableContextOptions.Enable,
-            deterministic: true);
         CSharpCompilation compilation = CSharpCompilation.Create(
             "AvidScript.SemanticAnalysis",
             syntaxTrees,
-            SemanticReferenceResolver.ResolveTrustedPlatformAssemblies(),
-            compilationOptions);
+            workspace.GetMetadataReferences(),
+            CompilationOptions);
         return new SemanticCompilationContext(compilation, primaryUnit, projectionUnits);
     }
 }

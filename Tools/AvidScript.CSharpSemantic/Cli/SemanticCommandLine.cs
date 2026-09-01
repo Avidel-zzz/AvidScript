@@ -19,6 +19,12 @@ public static class SemanticCommandLine
 
     public static int Run(string[] args)
     {
+        return Run(args, new SemanticCompilerWorkspace());
+    }
+
+    public static int Run(string[] args, SemanticCompilerWorkspace workspace)
+    {
+        ArgumentNullException.ThrowIfNull(workspace);
         try
         {
             IReadOnlyDictionary<string, string> options = ParseOptions(args, out List<ReferenceSourceOption> referenceSourceOptions);
@@ -39,7 +45,12 @@ public static class SemanticCommandLine
             string source = File.ReadAllText(sourcePath);
             string frontendSourceSha256 = ReadFrontendSourceSha256(frontendPath);
             IReadOnlyList<SemanticReferenceSource> referenceSources = LoadReferenceSources(referenceSourceOptions);
-            SemanticDocument document = SemanticAnalyzer.Analyze(source, sourceId, frontendSourceSha256, referenceSources);
+            SemanticDocument document = SemanticAnalyzer.Analyze(
+                source,
+                sourceId,
+                frontendSourceSha256,
+                referenceSources,
+                workspace);
             SemanticArtifactWriter.WriteAtomic(outputPath, SemanticSerializer.Serialize(document));
             return document.Succeeded ? 0 : 1;
         }

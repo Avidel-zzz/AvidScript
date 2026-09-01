@@ -71,6 +71,19 @@ public sealed record CompilerWorkerResponse
     public double DurationMs { get; init; }
 
     public IReadOnlyList<string> Diagnostics { get; init; } = Array.Empty<string>();
+
+    public CompilerWorkerWorkspaceMetrics Workspace { get; init; } = new();
+}
+
+public sealed record CompilerWorkerWorkspaceMetrics
+{
+    public int MetadataReferenceSetBuilds { get; init; }
+
+    public int SyntaxTreeCacheHits { get; init; }
+
+    public int SyntaxTreeCacheMisses { get; init; }
+
+    public int SyntaxTreeCacheEntries { get; init; }
 }
 
 public static class CompilerWorkerJson

@@ -13,6 +13,7 @@ namespace AvidScript.CSharpCompilerWorker;
 public sealed class CompilerStageExecutor
 {
     private static readonly object ConsoleErrorGate = new();
+    private readonly SemanticCompilerWorkspace semanticWorkspace = new();
 
     public CompilerWorkerResponse Execute(
         CompilerWorkerRequest request,
@@ -58,6 +59,7 @@ public sealed class CompilerStageExecutor
             ExitCode = exitCode,
             DurationMs = stopwatch.Elapsed.TotalMilliseconds,
             Diagnostics = NormalizeDiagnostics(diagnostics),
+            Workspace = GetWorkspaceMetrics(),
         };
     }
 
@@ -71,7 +73,7 @@ public sealed class CompilerStageExecutor
         });
     }
 
-    private static int ExecuteSemantic(CompilerWorkerRequest request)
+    private int ExecuteSemantic(CompilerWorkerRequest request)
     {
         List<string> arguments = new()
         {
@@ -90,7 +92,7 @@ public sealed class CompilerStageExecutor
             arguments.Add("--executable-reference-source");
             arguments.Add(request.ExecutableReferenceSourcePath);
         }
-        return SemanticCommandLine.Run(arguments.ToArray());
+        return SemanticCommandLine.Run(arguments.ToArray(), semanticWorkspace);
     }
 
     private static int ExecuteGuest(CompilerWorkerRequest request)
@@ -158,5 +160,17 @@ public sealed class CompilerStageExecutor
                 : item[..CompilerWorkerProtocol.MaximumDiagnosticCharacters])
             .Take(CompilerWorkerProtocol.MaximumDiagnostics)
             .ToArray();
+    }
+
+    private CompilerWorkerWorkspaceMetrics GetWorkspaceMetrics()
+    {
+        SemanticCompilerWorkspaceSnapshot snapshot = semanticWorkspace.GetSnapshot();
+        return new CompilerWorkerWorkspaceMetrics
+        {
+            MetadataReferenceSetBuilds = snapshot.MetadataReferenceSetBuilds,
+            SyntaxTreeCacheHits = snapshot.SyntaxTreeCacheHits,
+            SyntaxTreeCacheMisses = snapshot.SyntaxTreeCacheMisses,
+            SyntaxTreeCacheEntries = snapshot.SyntaxTreeCacheEntries,
+        };
     }
 }

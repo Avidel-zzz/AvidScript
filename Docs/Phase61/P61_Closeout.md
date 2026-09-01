@@ -1,6 +1,6 @@
 # Phase 61 收尾记录
 
-状态：实施中，`P61.A1`、`P61.A2a` 已完成
+状态：实施中，`P61.A1`、`P61.A2a-A2b1` 已完成
 
 ## 目标
 
@@ -15,10 +15,13 @@
 - 完成 `P61.A2a` persistent compiler Worker：版本化 JSON-lines、同用户 named pipe、
   Frontend/Semantic/Guest IR/WASM 进程内执行、严格请求校验、空闲退出与优雅关闭；
 - 详细实现与证据见 [P61.A2a 编译 Worker 协议](P61.A2a_Compiler_Worker_Protocol.md)。
+- 完成 `P61.A2b1` Roslyn workspace 复用：同一 Worker 只构建一次 metadata reference set，
+  以有界 LRU 复用 primary/reference syntax tree，并通过协议暴露累计指标；
+- 详细实现与证据见 [P61.A2b1 Roslyn workspace 复用](P61.A2b1_Roslyn_Workspace_Reuse.md)。
 
 ## 待完成
 
-- `P61.A2b-A3` Worker 构建链路接入、Roslyn workspace 复用、结构化诊断统一与增量性能矩阵；
+- `P61.A2b2-A3` Worker 构建链路接入、结构化诊断统一与增量性能矩阵；
 - `P61.B` 指令级 source map 与调用栈；
 - `P61.C` 断点、单步与变量查看；
 - `P61.D` Profiler 与 IDE workspace；

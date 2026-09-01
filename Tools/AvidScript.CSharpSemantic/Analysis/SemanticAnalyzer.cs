@@ -21,10 +21,26 @@ public static class SemanticAnalyzer
         string frontendSourceSha256,
         IReadOnlyList<SemanticReferenceSource> referenceSources)
     {
+        return Analyze(
+            source,
+            sourceId,
+            frontendSourceSha256,
+            referenceSources,
+            new SemanticCompilerWorkspace());
+    }
+
+    public static SemanticDocument Analyze(
+        string source,
+        string sourceId,
+        string frontendSourceSha256,
+        IReadOnlyList<SemanticReferenceSource> referenceSources,
+        SemanticCompilerWorkspace workspace)
+    {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceId);
         ArgumentException.ThrowIfNullOrWhiteSpace(frontendSourceSha256);
         ArgumentNullException.ThrowIfNull(referenceSources);
+        ArgumentNullException.ThrowIfNull(workspace);
 
         string sourceSha256 = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source))).ToLowerInvariant();
         SemanticSource semanticSource = new(sourceId, sourceSha256, frontendSourceSha256, source.Length);
@@ -57,7 +73,11 @@ public static class SemanticAnalyzer
                 });
         }
 
-        SemanticCompilationContext context = SemanticCompilationFactory.Create(source, sourceId, referenceSources);
+        SemanticCompilationContext context = SemanticCompilationFactory.Create(
+            source,
+            sourceId,
+            referenceSources,
+            workspace);
         SemanticTypeRegistry typeRegistry = new();
         IReadOnlyList<SemanticSymbol> symbols = SemanticSymbolProjector.Project(context, typeRegistry);
         SemanticStateContractProjection stateContractProjection = SemanticStateContractProjector.Project(
