@@ -15,6 +15,8 @@
 
 #include <atomic>
 
+DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptSessionContinuations, Log, All);
+
 namespace
 {
 std::atomic<uint32> GAvidScriptContinuationGeneration{1};
@@ -47,6 +49,51 @@ bool TryMakeAsyncObjectPath(
 	}
 
 	OutObjectPath = MoveTemp(Candidate);
+	return true;
+}
+
+bool IsBoundedCompositeResultPayload(
+	const FAvidScriptBindingLatentCompletionPayload& Payload)
+{
+	if (Payload.Fields.IsEmpty()
+		|| Payload.Fields.Num()
+			> FAvidScriptSessionContinuations::MaximumResultPayloadCells)
+	{
+		return false;
+	}
+
+	for (int32 FieldIndex = 0;
+		FieldIndex < Payload.Fields.Num();
+		++FieldIndex)
+	{
+		const FAvidScriptBindingLatentCompletionField& Field =
+			Payload.Fields[FieldIndex];
+		const int32 FieldSize =
+			Field.Kind == EAvidScriptBindingLatentPayloadKind::FixedWire
+				? Field.Bytes.Num()
+				: Field.Kind == EAvidScriptBindingLatentPayloadKind::Object
+					? static_cast<int32>(sizeof(FAvidScriptObjectHandle))
+					: 0;
+		if (Field.TypeId.IsEmpty()
+			|| Field.WireOffset < 0
+			|| FieldSize <= 0
+			|| Field.WireOffset
+				> FAvidScriptSessionContinuations::MaximumFixedResultBytes
+					- FieldSize)
+		{
+			return false;
+		}
+		for (int32 PriorIndex = 0;
+			PriorIndex < FieldIndex;
+			++PriorIndex)
+		{
+			if (Payload.Fields[PriorIndex].WireOffset
+				== Field.WireOffset)
+			{
+				return false;
+			}
+		}
+	}
 	return true;
 }
 }
@@ -1541,6 +1588,14 @@ void FAvidScriptSessionContinuations::HandleAvidScriptDelegateBroadcast(
 	{
 		Entry.ResultSlot = 0;
 		Entry.ResultGeneration = 0;
+		UE_LOG(
+			LogAvidScriptSessionContinuations,
+			Warning,
+			TEXT("AsyncAction outcome %d payload capture failed: %s"),
+			Route->OutcomeOrdinal,
+			CaptureError.IsEmpty()
+				? TEXT("async_action_payload_capture_failed")
+				: *CaptureError);
 	}
 	Entry.bReady = true;
 	ReleaseAsyncActionProducer(Entry);
@@ -1789,6 +1844,9 @@ bool FAvidScriptSessionContinuations::AllocateResult(
 			&& ExpectedBytes <= FAvidScriptArrayValueHeap::MaxValueBytes;
 		break;
 	}
+	case EAvidScriptBindingLatentPayloadKind::Composite:
+		bPayloadValid = IsBoundedCompositeResultPayload(Payload);
+		break;
 	default:
 		break;
 	}

@@ -1,0 +1,31 @@
+{
+  "schema_version": 5,
+  "language": "csharp",
+  "source_path": "Plugins/AvidScript/Source/AvidScriptRuntime/Private/Tests/Fixtures/P60_C2c3_BlueprintAsyncActionPayload.cs",
+  "project_path": "Plugins/AvidScript/Samples/CSharp/ActorLifecycle/AvidScript.ActorLifecycle.csproj",
+  "module_id": "csharp_p60_c2c3_blueprint_async_action_payload",
+  "artifact_stem": "blueprint_async_action_payload",
+  "output_root": "Saved/AvidScriptCSharpGuest/P60_C2c3_BlueprintAsyncActionPayload",
+  "report_path": "Saved/AvidScriptCSharpGuest/P60_C2c3_BlueprintAsyncActionPayload/blueprint_async_action_payload.csharp.report.json",
+  "manifest_path": "Saved/AvidScriptCSharpGuest/P60_C2c3_BlueprintAsyncActionPayload/blueprint_async_action_payload.avidscript.json",
+  "build_script_path": "Plugins/AvidScript/Build/BuildCSharpActorLifecycle.ps1",
+  "configuration": "Release",
+  "binding_profile": {
+    "package_name": "avidscript.test.p60_c2c3.blueprint_async_action_payload",
+    "self_class_path": "/Script/Engine.Actor",
+    "classes": [
+      {
+        "class_path": "/Script/Engine.Actor",
+        "include_functions": [
+          "SetActorScale3D"
+        ]
+      },
+      {
+        "class_path": "/Script/AvidScriptEditor.AvidScriptEditorAsyncActionPayloadTestObject",
+        "include_functions": [
+          "WaitForPayload"
+        ]
+      }
+    ]
+  }
+}

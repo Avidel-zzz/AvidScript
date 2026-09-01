@@ -215,6 +215,9 @@ class UAvidScriptEditorAsyncActionPayloadTestObject final
 	GENERATED_BODY()
 
 public:
+	static TWeakObjectPtr<UAvidScriptEditorAsyncActionPayloadTestObject>
+		LastCreatedForTesting;
+
 	UPROPERTY(BlueprintAssignable)
 	FAvidScriptEditorAsyncActionPayloadCompleted Completed;
 
@@ -226,12 +229,18 @@ public:
 		meta = (BlueprintInternalUseOnly = "true"))
 	static UAvidScriptEditorAsyncActionPayloadTestObject* WaitForPayload()
 	{
-		return NewObject<UAvidScriptEditorAsyncActionPayloadTestObject>();
+		UAvidScriptEditorAsyncActionPayloadTestObject* const Action =
+			NewObject<UAvidScriptEditorAsyncActionPayloadTestObject>();
+		LastCreatedForTesting = Action;
+		return Action;
 	}
 
 	virtual void Activate() override
 	{
+		++ActivationCount;
 	}
+
+	int32 ActivationCount = 0;
 };
 
 UCLASS()

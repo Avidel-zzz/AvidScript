@@ -46,10 +46,10 @@ Phase 60 当前已经落地：
 - C# `UFUNCTION` 默认参数元数据；
 - Delegate singlecast/multicast、`return/ref/out` 与主动 `ExecuteX/BroadcastX`；
 - Blueprint 自声明 callable 双向调用，以及 `[AvidEvent]` 的 `before/after/replace` 接管；
-- `UBlueprintAsyncActionBase` 工厂的强类型 outcome awaitable，以及无参 outcome 的 Session Runtime 闭环。
+- `UBlueprintAsyncActionBase` 工厂的强类型 outcome awaitable、typed payload，以及真实 C# `await` 的 Session Runtime 闭环；
+- AsyncAction 在事务式 Guest reload 后重新绑定，新实例完成可恢复脚本，旧实例的迟到广播会被抑制。
 
-带 payload 的 AsyncAction 已完成 scalar/UObject 参数捕获与结果槽；C# 实际 await 和
-reload/reinstance 仍在 P60.C2c 推进。
+Blueprint class reinstance、取消/销毁矩阵与 Phase 60 集成 Gate 仍在推进。
 
 详细进度见 [Phase 60 中文收尾记录](Docs/Phase60/P60_Closeout.md)。
 
@@ -220,7 +220,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 
 ## 路线图
 
-1. **当前**：完成 Blueprint AsyncAction Runtime、取消/热重载/销毁语义与 Phase 60 集成 Gate；
+1. **当前**：完成 Blueprint AsyncAction reinstance、取消/销毁矩阵与 Phase 60 集成 Gate；
 2. **P61**：增量编译、源码定位、调用栈、断点、变量查看与 Profiler；
 3. **P62-P64**：Cook/Shipping、移动端 AOT 与真实小型游戏 Demo；
 4. **P65**：跨框架成熟度、稳定性与性能领导力收口。
@@ -231,8 +231,8 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 
 最近一次完整基线为 **AvidScript Automation 403/403 通过**。Phase 59 已关闭 Generated
 Actor/Component/Subsystem、反射成员、Blueprint 子类与 override、热重载、双拓扑网络及内容寻址
-Cook bundle 闭环。Phase 60 的 UE Interface、脚本 UFUNCTION 默认参数、Delegate 与 Blueprint callable/event 已通过
-聚焦 .NET、UE5.8 no-clean UBT、Automation 和独立干净工作树架构门禁。
+Cook bundle 闭环。Phase 60 的 UE Interface、脚本 UFUNCTION 默认参数、Delegate、Blueprint callable/event，
+以及 typed AsyncAction 的实际 C# `await` 与 reload 聚焦闭环，已通过对应 .NET、UE5.8 no-clean UBT 和 Automation。
 
 阶段状态与实现证据见 [Docs](Docs/)，开发规则见 [AGENTS.md](AGENTS.md)。
 

@@ -21,7 +21,7 @@
       "summary": "概念名称不能当作真实文件路径。",
       "prevention": "先用 rg --files 建立索引，再对索引中的字面路径读取；通配符只放在 rg -g 参数。",
       "source": "legacy:1931",
-      "last_observed": "2026-08-31 P59.D7 (重复把 *.Build.cs 放入 Windows 路径参数；后续检索必须先索引并使用 rg -g)"
+      "last_observed": "2026-09-01 P60.C2c3 (检索 continuation codec 时猜测不存在的 Private/Binding 目录；后续先用 rg --files 取得真实目录再检索)"
     },
     {
       "id": "one-command-one-evidence-domain",
@@ -29,7 +29,7 @@
       "summary": "一个 shell 调用只承担一个逻辑动作或证据域。",
       "prevention": "调度前拒绝用分号、&& 或 || 串联独立动作；多文件读取使用并行工具或逐项调用。",
       "source": "legacy:1672",
-      "last_observed": "2026-09-01 P60.C1b (探索 selection/generator 时再次用分号串联两次读取；后续只使用并行工具调用或单文件读取)"
+      "last_observed": "2026-09-01 P60.C2c3 (回读 C# fixture 与 profile 时误用分号串联两个读取；后续文件读取必须逐项调用，当前批次已重新收紧执行)"
     },
     {
       "id": "callback-kind-validation-uses-named-branches",
@@ -430,6 +430,30 @@
       "prevention": "prepared ProcessEvent 仅在 FrameSize 大于 0 时对已对齐 scratch 执行 InitializeStruct/DestroyStruct；零帧调用使用 nullptr 参数，并以真实无参 Blueprint 函数 Automation 覆盖。",
       "source": "observed:2026-09-01-P60.C1a",
       "last_observed": "2026-09-01 P60.C1a (ScriptOnlyPulse 的 FrameSize 为 0，旧路径 InitializeStruct(nullptr) 触发 UE Class.cpp:1151 断言；改为零帧 nullptr ProcessEvent 后闭环通过)"
+    },
+    {
+      "id": "continuation-result-allocator-follows-payload-kinds",
+      "tags": ["async", "continuation", "payload", "runtime"],
+      "summary": "Continuation 新增 payload kind 时，结果槽分配器必须同步支持并执行有界校验。",
+      "prevention": "扩展 payload kind 时同批核对 allocator、capture encoder、result codec、rollback 与真实 C# await 用例；未知或越界 composite 必须 fail closed。",
+      "source": "observed:2026-09-01-P60.C2c3",
+      "last_observed": "2026-09-01 P60.C2c3 (payload 捕获成功，但 AllocateResult 遗漏 Composite 分支，把 completion 静默转为 Failed；补齐有界校验后端到端恢复通过)"
+    },
+    {
+      "id": "binding-slice-retains-continuation-payload-types",
+      "tags": ["bindings", "descriptor", "async", "types"],
+      "summary": "Binding slice 的类型闭包必须包含 continuation 间接引用的 payload/result 类型。",
+      "prevention": "裁剪 binding descriptor 时，把 completion payload 与 async outcome payload 的 TypeId 作为图根递归保留；使用 production profile 构建并加载 descriptor 验证。",
+      "source": "observed:2026-09-01-P60.C2c3",
+      "last_observed": "2026-09-01 P60.C2c3 (profile 只选择工厂与消费函数时，payload 类型被裁剪并触发 descriptor_contract_invalid；补齐隐藏类型闭包后恢复)"
+    },
+    {
+      "id": "bootstrap-precedes-repository-inspection-after-resume",
+      "tags": ["harness", "bootstrap", "workflow", "resume"],
+      "summary": "恢复任务后，首个仓库动作仍必须是 Harness bootstrap。",
+      "prevention": "每次恢复或上下文切换后，先从插件根执行 bootstrap，再读取 Git、README 或产品代码；不能因为已有摘要而跳过。",
+      "source": "observed:2026-09-01-P60.C2c3",
+      "last_observed": "2026-09-01 P60.C2c3 恢复时先检查了 Git 与 README，随后发现顺序错误并在继续产品编辑前补跑 bootstrap"
     }
   ]
 }

@@ -199,6 +199,14 @@ bool BuildAvidScriptCSharpBindingSliceTypeClosure(
 		{
 			RequiredTypeIds.Add(Binding.ReturnValue.TypeId);
 		}
+		if (!Binding.Completion.PayloadTypeId.IsEmpty())
+		{
+			RequiredTypeIds.Add(Binding.Completion.PayloadTypeId);
+		}
+		if (!Binding.AsyncAction.PayloadTypeId.IsEmpty())
+		{
+			RequiredTypeIds.Add(Binding.AsyncAction.PayloadTypeId);
+		}
 		for (const FAvidScriptBindingValueModel& Parameter : Binding.Parameters)
 		{
 			RequiredTypeIds.Add(Parameter.TypeId);

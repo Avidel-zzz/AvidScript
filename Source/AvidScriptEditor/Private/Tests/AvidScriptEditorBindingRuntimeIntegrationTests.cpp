@@ -40,6 +40,9 @@
 #include "UObject/UnrealType.h"
 #include "UObject/StrongObjectPtr.h"
 
+TWeakObjectPtr<UAvidScriptEditorAsyncActionPayloadTestObject>
+	UAvidScriptEditorAsyncActionPayloadTestObject::LastCreatedForTesting;
+
 namespace
 {
 
@@ -6541,6 +6544,240 @@ bool FAvidScriptEditorBlueprintAsyncActionPayloadIntegrationTest::RunTest(
 		Payload.Fields[2].Kind
 				== EAvidScriptBindingLatentPayloadKind::Object
 			&& Payload.Fields[2].ObjectValue.Get() == Target.Get());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBlueprintAsyncActionPayloadCSharpTest,
+	"AvidScript.Editor.BindingRuntime.BlueprintAsyncActionPayloadCSharp",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBlueprintAsyncActionPayloadCSharpTest::RunTest(
+	const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	FString ProfilePath = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectPluginsDir(),
+		TEXT("AvidScript/Source/AvidScriptRuntime/Private/Tests/Fixtures/"
+			"P60_C2c3_BlueprintAsyncActionPayload.csharp-profile.json")));
+	FPaths::NormalizeFilename(ProfilePath);
+	FAvidScriptEditorCSharpProfileLoadResult ProfileResult;
+	if (!TestTrue(
+			TEXT("Typed async action C# profile loads"),
+			FAvidScriptEditorCSharpProfileService::LoadProfile(
+				ProfilePath,
+				ProfileResult)))
+	{
+		AddError(ProfileResult.ErrorCategory + TEXT(": ")
+			+ ProfileResult.ErrorMessage);
+		return false;
+	}
+
+	FString OutputRoot = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptCSharpGuest/Tests/P60/C2c3/BlueprintAsyncActionPayload")));
+	FString SemanticCacheRoot = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScript/Tests/P60/C2c3/CSharpSemanticCache/v1")));
+	FPaths::NormalizeFilename(OutputRoot);
+	FPaths::NormalizeFilename(SemanticCacheRoot);
+	IFileManager::Get().DeleteDirectory(*OutputRoot, false, true);
+	IFileManager::Get().DeleteDirectory(*SemanticCacheRoot, false, true);
+	FAvidScriptEditorCSharpBuildRequest BuildRequest =
+		FAvidScriptEditorCSharpProfileService::MakeBuildRequest(ProfileResult);
+	BuildRequest.Config.OutputRoot = OutputRoot;
+	BuildRequest.Config.ReportPath =
+		FAvidScriptEditorCSharpBuildService::MakeReportPathForOutputRoot(
+			OutputRoot,
+			BuildRequest.Config.ArtifactStem);
+	BuildRequest.Config.ManifestPath =
+		FAvidScriptEditorCSharpBuildService::MakeManifestPathForOutputRoot(
+			OutputRoot,
+			BuildRequest.Config.ArtifactStem);
+	BuildRequest.Config.SemanticCacheRoot = SemanticCacheRoot;
+
+	FAvidScriptEditorCSharpBuildResult BuildResult;
+	if (!TestTrue(
+			TEXT("Typed async action builds through the production C# profile pipeline"),
+			FAvidScriptEditorCSharpBuildService::BuildProfile(
+				BuildRequest,
+				BuildResult)))
+	{
+		AddError(BuildResult.ErrorMessage + TEXT("\nstdout:\n")
+			+ BuildResult.Stdout + TEXT("\nstderr:\n")
+			+ BuildResult.Stderr);
+		return false;
+	}
+
+	FAvidScriptWasmReloadManifest Manifest;
+	TArray<uint8> Bytecode;
+	FAvidScriptWasmReloadManifestLoadResult ManifestResult;
+	if (!TestTrue(
+			TEXT("Typed async action manifest, WASM and runtime package load"),
+			FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+				BuildResult.ManifestPath,
+				Manifest,
+				Bytecode,
+				ManifestResult)))
+	{
+		AddError(ManifestResult.ErrorCategory + TEXT(": ")
+			+ ManifestResult.ErrorMessage);
+		return false;
+	}
+
+	UWorld* World = nullptr;
+	if (!TestTrue(
+			TEXT("Typed async action integration world is created"),
+			CreateAvidScriptBindingRuntimeIntegrationWorld(World)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		UAvidScriptEditorAsyncActionPayloadTestObject::LastCreatedForTesting.Reset();
+		DestroyAvidScriptBindingRuntimeIntegrationWorld(World);
+	};
+	AActor* const Actor = SpawnAvidScriptBindingRuntimeIntegrationActor(*World);
+	if (!TestNotNull(TEXT("Typed async action owner Actor spawns"), Actor))
+	{
+		return false;
+	}
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle ActorHandle = Registry.RegisterObject(
+		Actor,
+		RegisterResult);
+	if (!TestTrue(
+			TEXT("Typed async action owner Actor registers"),
+			RegisterResult.bSucceeded))
+	{
+		return false;
+	}
+
+	FAvidScriptWasmHostContext HostContext;
+	HostContext.ObjectRegistry = &Registry;
+	HostContext.OwnerHandle = ActorHandle;
+	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+	FAvidScriptRuntimeSession Session;
+	Session.SetHostContext(HostContext);
+	UAvidScriptEditorAsyncActionPayloadTestObject::LastCreatedForTesting.Reset();
+	FAvidScriptWasmReloadResult LoadResult;
+	if (!TestTrue(
+			TEXT("Typed async action C# Guest loads and enters BeginPlay"),
+			Session.LoadInitialModule(
+				Bytecode.GetData(),
+				Bytecode.Num(),
+				Manifest,
+				LoadResult)))
+	{
+		AddError(LoadResult.ErrorCategory + TEXT(": ")
+			+ LoadResult.ErrorMessage);
+		return false;
+	}
+	TStrongObjectPtr<UAvidScriptEditorAsyncActionPayloadTestObject> InitialAction(
+		UAvidScriptEditorAsyncActionPayloadTestObject::LastCreatedForTesting.Get());
+	if (!TestNotNull(
+			TEXT("C# BeginPlay creates the reflected async action"),
+			InitialAction.Get()))
+	{
+		Session.UnloadLive();
+		return false;
+	}
+	TestEqual(
+		TEXT("Initial async action activates once"),
+		InitialAction->ActivationCount,
+		1);
+	TestTrue(
+		TEXT("Initial async action owns its completion lease"),
+		InitialAction->Completed.IsBound());
+	TestTrue(
+		TEXT("C# executes until the await suspension point"),
+		Actor->GetActorScale3D().Equals(
+			FVector(1.0, 1.0, 1.0),
+			0.001));
+
+	FAvidScriptWasmReloadResult ReloadResult;
+	if (!TestTrue(
+			TEXT("Pending typed async action survives a transactional Guest reload"),
+			Session.ReloadModule(
+				Bytecode.GetData(),
+				Bytecode.Num(),
+				Manifest,
+				ReloadResult)))
+	{
+		AddError(ReloadResult.ErrorCategory + TEXT(": ")
+			+ ReloadResult.ErrorMessage);
+		Session.UnloadLive();
+		return false;
+	}
+	TStrongObjectPtr<UAvidScriptEditorAsyncActionPayloadTestObject> ReloadedAction(
+		UAvidScriptEditorAsyncActionPayloadTestObject::LastCreatedForTesting.Get());
+	if (!TestNotNull(
+			TEXT("Reload candidate creates a fresh reflected async action"),
+			ReloadedAction.Get()))
+	{
+		Session.UnloadLive();
+		return false;
+	}
+	TestNotEqual(
+		TEXT("Reload does not reuse the stale action instance"),
+		ReloadedAction.Get(),
+		InitialAction.Get());
+	TestFalse(
+		TEXT("Committed reload releases the stale completion lease"),
+		InitialAction->Completed.IsBound());
+	TestTrue(
+		TEXT("Committed reload promotes the candidate completion lease"),
+		ReloadedAction->Completed.IsBound());
+
+	InitialAction->Completed.Broadcast(99, Actor);
+	FAvidScriptWasmSmokeResult TickResult;
+	if (!TestTrue(
+			TEXT("Late stale action broadcast leaves the live Guest healthy"),
+			Session.TickLive(1.0f / 60.0f, TickResult)))
+	{
+		AddError(TickResult.ErrorMessage);
+		Session.UnloadLive();
+		return false;
+	}
+	TestTrue(
+		TEXT("Late stale action broadcast cannot resume the new Guest"),
+		Actor->GetActorScale3D().Equals(
+			FVector(1.0, 1.0, 1.0),
+			0.001));
+
+	ReloadedAction->Completed.Broadcast(314, Actor);
+	if (!TestTrue(
+			TEXT("Live action payload resumes the generated C# await"),
+			Session.TickLive(1.0f / 60.0f, TickResult)))
+	{
+		AddError(TickResult.ErrorMessage);
+		Session.UnloadLive();
+		return false;
+	}
+	const FVector ObservedScale = Actor->GetActorScale3D();
+	TestEqual(
+		TEXT("C# observes the scalar payload field"),
+		ObservedScale.X,
+		314.0);
+	TestEqual(
+		TEXT("C# observes the completed continuation status"),
+		ObservedScale.Y,
+		1.0);
+	TestEqual(
+		TEXT("C# observes the completed action outcome"),
+		ObservedScale.Z,
+		0.0);
+	TestFalse(
+		TEXT("First live outcome releases its producer lease"),
+		ReloadedAction->Completed.IsBound());
+
+	Session.UnloadLive();
+	TestEqual(
+		TEXT("Unload reclaims every typed continuation"),
+		Session.GetLivePendingContinuationCount(),
+		0);
 	return true;
 }
 

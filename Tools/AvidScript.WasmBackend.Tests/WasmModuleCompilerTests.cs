@@ -180,6 +180,9 @@ internal static class WasmModuleCompilerTests
             new[]
             {
                 new GuestRegister("value:condition", boolType.Id),
+                new GuestRegister("value:not_equal", boolType.Id),
+                new GuestRegister("value:either", boolType.Id),
+                new GuestRegister("value:both", boolType.Id),
                 new GuestRegister("value:one", "type:int32"),
                 new GuestRegister("value:left_result", "type:int32"),
                 new GuestRegister("value:right_result", "type:int32"),
@@ -196,9 +199,18 @@ internal static class WasmModuleCompilerTests
                         new GuestInstruction(
                             "binary", "value:condition", new[] { "value:left", "value:right" },
                             null, "greater_than", null),
+                        new GuestInstruction(
+                            "binary", "value:not_equal", new[] { "value:left", "value:right" },
+                            null, "not_equals", null),
+                        new GuestInstruction(
+                            "binary", "value:either", new[] { "value:condition", "value:not_equal" },
+                            null, "logical_or", null),
+                        new GuestInstruction(
+                            "binary", "value:both", new[] { "value:either", "value:not_equal" },
+                            null, "logical_and", null),
                     },
                     new GuestTerminator(
-                        "branch_if", "value:condition", "block:left", "block:right", null)),
+                        "branch_if", "value:both", "block:left", "block:right", null)),
                 new GuestBasicBlock(
                     "block:left",
                     new[]

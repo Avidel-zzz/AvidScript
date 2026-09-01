@@ -17,7 +17,7 @@
 4. 集中审查：只做一次完整代码与架构审查，一次列全 findings。
 5. 集中修复：普通问题合并处理；只有新 Blocker/Critical 才触发额外最小探针。
 6. 统一 Gate：静态检查、受影响 .NET、no-clean UBT、Automation、必要 benchmark。
-7. 小节提交与发布：每个架构、功能、集中修复或 Gate 小节完成集中验证后，精确核对 staged path，立即提交并推送 `origin/main`；不等待整个 Phase 结束。
+7. 小节提交与发布：每个架构、功能、集中修复或 Gate 小节完成集中验证后，先用简短条目同步 README 的已实现能力、未完成边界与当前验证，再精确核对 staged path，立即提交并推送 `origin/main`；不等待整个 Phase 结束。
 8. 中文收尾：证据、文档、Git tree 和验证提交保持一致。
 
 如果在任何实现批次、审查和代码冻结之前发现阶段目标与长期路线不一致，使用
