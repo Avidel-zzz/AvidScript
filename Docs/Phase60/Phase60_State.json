@@ -5,7 +5,7 @@
     "goal": "补齐 Interface、完整 Delegate、脚本 UFunction 默认参数、Blueprint 新声明函数和通用异步动作，保持生成式 Reflection、prepared hot path 与 Session-owned 生命周期",
     "start_commit": "074d7b662ce1658f958be54267062aba3869d677"
   },
-  "declared_stage": "implementing",
+  "declared_stage": "gate_ready",
   "architecture": {
     "path": "Docs/Phase60/P60.0_Modern_UE_Interop_Architecture.md",
     "version": 1,
@@ -44,9 +44,9 @@
   ],
   "debt": [],
   "review": {
-    "completed": false,
-    "evidence": "reopened: 记录 PowerShell 中 git revision 花括号必须引用的流程教训后重新冻结；产品代码与 Gate 结果未变化。",
-    "completed_at_utc": null
+    "completed": true,
+    "evidence": "P60.A-D 边界复审完成；无逐 API wrapper、无第二套 scheduler；protected dirty 3/3 保持基线；最终 UBT、411/411 Automation、分层 benchmark 与 clean detached architecture Gate 均通过；PowerShell Git revision 教训已登记并通过 Harness audit。",
+    "completed_at_utc": "2026-09-01T03:05:48.7843880+00:00"
   },
   "budgets": {
     "ubt": 3,
@@ -59,11 +59,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "",
-    "source_tree": "",
-    "state_sha256": "",
-    "review_evidence": "",
-    "at_utc": null
+    "source_commit": "f99272e9adf9e8b51ab083d7b0003bd8c1089cf6",
+    "source_tree": "b4740d658cfdb3e6c33335c54dc97f68ad05501b",
+    "state_sha256": "615424cbb0e3302dad27dc5fec1dcd2d713df3ff22fb3a6a57f0e82799ff7c39",
+    "review_evidence": "P60.A-D 边界复审完成；无逐 API wrapper、无第二套 scheduler；protected dirty 3/3 保持基线；最终 UBT、411/411 Automation、分层 benchmark 与 clean detached architecture Gate 均通过；PowerShell Git revision 教训已登记并通过 Harness audit。",
+    "at_utc": "2026-09-01T03:05:48.7843880+00:00"
   },
   "gate": {
     "report_path": "",
@@ -94,7 +94,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "freeze -Phase 60 -ReviewEvidence <text>",
-  "revision": 8,
-  "updated_at_utc": "2026-09-01T03:04:58.2560209+00:00"
+  "next_action": "attest -Phase 60 -GateReportPath <path>",
+  "revision": 9,
+  "updated_at_utc": "2026-09-01T03:05:48.7897440+00:00"
 }
