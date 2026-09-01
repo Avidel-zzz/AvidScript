@@ -5,7 +5,7 @@
     "goal": "交付增量编译、结构化错误定位、指令级 source map、调用栈、断点、变量查看、Profiler 与 IDE workspace。",
     "start_commit": "0dd6b15ad8a0a31d2f6bdcf256b0e1a8032ee4ab"
   },
-  "declared_stage": "gate_attested",
+  "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase61/P61.0_Editor_Debugging_Architecture.md",
     "version": 1,
@@ -43,16 +43,16 @@
     },
     {
       "id": "P61.E",
-      "status": "Completed",
-      "evidence": "托管 Runner 279/279、UE Automation 427/427、UE5.8 no-clean UBT、clean detached architecture、增量构建与 Profiler 性能预算全部通过；README 与中文 Gate 证据已在 2128301 推送，人工 Editor 操作清单明确保留。",
-      "completed_at_utc": "2026-09-01T19:46:18.1577533+00:00"
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
     }
   ],
   "debt": [],
   "review": {
-    "completed": true,
-    "evidence": "已完成 Phase 61 全范围集中复审：五个批次与中文证据一致，自动化 427/427、托管 Runner 279/279、no-clean UBT、两项性能矩阵和 clean architecture 均通过；提交范围 whitespace、隐私与受保护 dirty 基线通过，人工 Editor 验收边界明确保留。",
-    "completed_at_utc": "2026-09-01T19:48:33.0181633+00:00"
+    "completed": false,
+    "evidence": "reopened: close 隐私合同禁止 phase commit range 出现 artifacts 目录；迁移两份脱敏性能报告到 Evidence 并修正引用后重新冻结。",
+    "completed_at_utc": null
   },
   "budgets": {
     "ubt": 4,
@@ -65,20 +65,20 @@
     "full_gate": 2
   },
   "freeze": {
-    "source_commit": "797674a794917d3de292d4bff967f43690f3299f",
-    "source_tree": "b03a3e0c1a6518495d50494fd28b981c8156abe4",
-    "state_sha256": "82a7085ec76658f1e772c71e4d298de3643fd8fbdddbaf5b642f334be153c20b",
-    "review_evidence": "已完成 Phase 61 全范围集中复审：五个批次与中文证据一致，自动化 427/427、托管 Runner 279/279、no-clean UBT、两项性能矩阵和 clean architecture 均通过；提交范围 whitespace、隐私与受保护 dirty 基线通过，人工 Editor 验收边界明确保留。",
-    "at_utc": "2026-09-01T19:48:33.0181633+00:00"
+    "source_commit": "",
+    "source_tree": "",
+    "state_sha256": "",
+    "review_evidence": "",
+    "at_utc": null
   },
   "gate": {
-    "report_path": "C:\\tmp\\AvidScriptP61Gate\\20260902-9547104\\Phase61_Gate.json",
-    "report_sha256": "1a34dd127f1f4ca708980b165945dbe253bef3252a63c718c7ac39cbec51c6ff",
-    "run_id": "P61-9547104-20260902-001",
-    "verified_commit": "9547104367f1c382a2cbc0bdec81faa7e4bc87d8",
-    "verified_tree": "bea4c844dfdce9fe411fac5ea8dc4c96016c8dae",
-    "attestation_parent": "9547104367f1c382a2cbc0bdec81faa7e4bc87d8",
-    "attested_at_utc": "2026-09-01T20:03:27.0112742+00:00"
+    "report_path": "",
+    "report_sha256": "",
+    "run_id": "",
+    "verified_commit": "",
+    "verified_tree": "",
+    "attestation_parent": "",
+    "attested_at_utc": null
   },
   "protected_dirty": [
     {
@@ -100,7 +100,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "close -Phase 61",
-  "revision": 8,
-  "updated_at_utc": "2026-09-01T20:03:27.0134683+00:00"
+  "next_action": "batch-complete -Phase 61 -BatchId P61.E -Evidence <text>",
+  "revision": 9,
+  "updated_at_utc": "2026-09-01T20:05:31.2357306+00:00"
 }
