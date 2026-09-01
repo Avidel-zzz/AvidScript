@@ -9,6 +9,7 @@
 #include "AvidScriptEditorCSharpBindingEmitterTestTypes.h"
 #include "AvidScriptEditorCSharpBuildService.h"
 #include "AvidScriptEditorCSharpProfileService.h"
+#include "AvidScriptHash.h"
 #include "BindingGeneration/AvidScriptEditorBindingDescriptorModel.h"
 #include "BindingGeneration/AvidScriptEditorBindingDescriptorIdentity.h"
 #include "BindingGeneration/AvidScriptEditorObjectTypeGraph.h"
