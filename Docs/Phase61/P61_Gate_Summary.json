@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "phase_id": 61,
+  "run_id": "P61-9547104-20260902-001",
+  "status": "attested",
+  "verified": {
+    "commit": "9547104367f1c382a2cbc0bdec81faa7e4bc87d8",
+    "tree": "bea4c844dfdce9fe411fac5ea8dc4c96016c8dae",
+    "state_sha256": "64844e599c01426796a107d20eb8d03296fa82bbe760a8c75837df8210d58e90"
+  },
+  "gate_report_sha256": "1a34dd127f1f4ca708980b165945dbe253bef3252a63c718c7ac39cbec51c6ff",
+  "checks": {
+    "architecture_clean": true,
+    "dotnet_279_of_279": true,
+    "powershell_contracts": true,
+    "harness_audit": true,
+    "ue58_no_clean_editor_build": true,
+    "automation_427_of_427": true,
+    "incremental_build_budget": true,
+    "profiler_disabled_budget": true,
+    "formal_evidence_valid": true
+  },
+  "performance": {
+    "incremental_no_op_median_ms": 933.377,
+    "incremental_method_body_median_ms": 2116.638,
+    "incremental_binding_median_ms": 2095.873,
+    "incremental_toolchain_median_ms": 3544.005,
+    "profiler_control_p50_ns": 1.538,
+    "profiler_disabled_p50_ns": 2.012,
+    "profiler_disabled_incremental_p50_ns": 0.474,
+    "profiler_enabled_p50_ns": 33.309,
+    "profiler_disabled_to_enabled_ratio": 0.0604
+  },
+  "transferred_debt": [],
+  "human_acceptance": {
+    "pie_debugger_interaction": false,
+    "source_navigation": false,
+    "profiler_panel_interaction": false,
+    "ide_launches": false,
+    "automation_does_not_impersonate_human_acceptance": true
+  },
+  "invocations": {
+    "ubt": 1,
+    "automation": 1,
+    "full_gate": 2,
+    "budget_exception_recorded": false
+  },
+  "attested_at_utc": "2026-09-01T20:03:27.0112742+00:00"
+}
