@@ -3,6 +3,7 @@
 #include "AvidScriptGameplayEvent.h"
 #include "AvidScriptDataBridgeTypes.h"
 #include "AvidScriptContinuation.h"
+#include "AvidScriptDebug.h"
 #include "AvidScriptWasmDiagnostics.h"
 #include "AvidScriptBindingInvocation.h"
 #include "AvidScriptLifecycleState.h"
@@ -120,6 +121,7 @@ struct FAvidScriptWasmHostContext
 	IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr;
 	IAvidScriptEventSubscriptionHost* EventSubscriptions = nullptr;
 	IAvidScriptContinuationHost* Continuations = nullptr;
+	IAvidScriptDebugProbeHost* DebugProbes = nullptr;
 	IAvidScriptBindingLatentHost* LatentHost = nullptr;
 	EAvidScriptBindingInvocationPolicy BindingInvocationPolicy =
 		EAvidScriptBindingInvocationPolicy::SemanticProcessEvent;

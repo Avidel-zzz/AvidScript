@@ -1,6 +1,6 @@
 # Phase 61 收尾记录
 
-状态：实施中，`P61.A1-A3b`、`P61.B1a-B2`、`P61.C1a-C1d` 已完成
+状态：实施中，`P61.A1-A3b`、`P61.B1a-B2`、`P61.C1a-C2a` 已完成
 
 ## 目标
 
@@ -45,10 +45,13 @@
 - 完成 `P61.C1a-C1d` 调试 probe 基础闭环：稳定 64 位身份、可选 Guest IR 插桩、正式
   build/worker/cache profile，以及 Wasmtime/WAMR 静态导入和 inactive `Continue` 分发；
 - 详细实现与证据见 [P61.C1d VM 调试 Probe 能力](P61.C1d_VM_Debug_Probe_Capability.md)。
+- 完成 `P61.C2a` Session debug lane：断点命中、pause-next、continue、step-into 与 runtime
+  epoch 失效均由 Session 管理，且不会阻塞 GameThread；
+- 详细实现与边界见 [P61.C2a Session 调试通道](P61.C2a_Session_Debug_Lane.md)。
 
 ## 待完成
 
-- `P61.C2-C4` Session debug lane、断点、单步与变量查看；
+- `P61.C2b-C4` Guest 可恢复挂起、Editor 断点与变量查看；
 - `P61.D` Profiler 与 IDE workspace；
 - `P61.E` 集成与集中 Gate。
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AvidScriptGameplayEvent.h"
+#include "AvidScriptDebug.h"
 #include "AvidScriptWasmReloadTypes.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeRouter.h"
 
@@ -10,6 +11,7 @@ class FAvidScriptSessionObjectOwnership;
 class FAvidScriptSessionDelegateSubscriptions;
 class FAvidScriptSessionInboundHandlers;
 class FAvidScriptSessionContinuations;
+class FAvidScriptSessionDebugger;
 class IAvidScriptBindingHostEffectJournal;
 class FAvidScriptGeneratedTypeRegistrySnapshot;
 struct FAvidScriptGeneratedPreparedTypeRoute;
@@ -105,6 +107,13 @@ public:
 
 	bool IsLiveLoaded() const;
 	bool IsOperationActive() const { return bMutationInProgress || ActiveGuestCallDepth > 0; }
+	bool AttachDebugger(TConstArrayView<uint64> BreakpointProbeIds);
+	bool DetachDebugger();
+	bool SetDebugBreakpoints(TConstArrayView<uint64> BreakpointProbeIds);
+	bool RequestDebugPause();
+	bool ContinueDebugExecution();
+	bool StepIntoDebugExecution();
+	FAvidScriptDebugSessionSnapshot GetDebugSnapshot() const;
 	FString GetLiveModuleId() const;
 	int32 GetLiveTickCallCount() const;
 	int32 GetLivePendingTimerCount() const;
@@ -194,6 +203,7 @@ private:
 	TUniquePtr<FAvidScriptSessionDelegateSubscriptions> DelegateSubscriptions;
 	TUniquePtr<FAvidScriptSessionInboundHandlers> InboundHandlers;
 	TSharedPtr<FAvidScriptSessionContinuations> Continuations;
+	TUniquePtr<FAvidScriptSessionDebugger> Debugger;
 	TUniquePtr<FAvidScriptWasmRuntimeInstance> LiveRuntime;
 	TUniquePtr<FAvidScriptRuntimeScheduler> Scheduler;
 	TUniquePtr<FAvidScriptRuntimeEventRouter> EventRouter;

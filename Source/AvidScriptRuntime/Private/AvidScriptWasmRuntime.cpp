@@ -6854,9 +6854,15 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 		HandleHostFailI32Import(Call.IntArgs[0]);
 		return Finish(0, false);
 	case EAvidScriptHostBindingId::DebugProbe:
+	{
+		const EAvidScriptDebugProbeAction Action = HostContext.DebugProbes != nullptr
+			? HostContext.DebugProbes->EvaluateProbe(
+				static_cast<uint64>(Call.Int64Args[0]))
+			: EAvidScriptDebugProbeAction::Continue;
 		return Finish(
-			static_cast<int32>(EAvidScriptDebugProbeAction::Continue),
-			true);
+			static_cast<int32>(Action),
+			Action != EAvidScriptDebugProbeAction::Abort);
+	}
 	case EAvidScriptHostBindingId::OwnerGetSlot:
 	{
 		const int32 Value = HandleOwnerGetSlotImport();

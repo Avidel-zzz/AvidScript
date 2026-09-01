@@ -5,6 +5,7 @@
 #include "AvidScriptRuntimeEventRouter.h"
 #include "AvidScriptRuntimeScheduler.h"
 #include "Continuation/AvidScriptSessionContinuations.h"
+#include "Debugging/AvidScriptSessionDebugger.h"
 #include "GameFramework/Actor.h"
 #include "HostEffects/AvidScriptHostEffectTransaction.h"
 #include "Ownership/AvidScriptSessionObjectOwnership.h"
@@ -109,9 +110,11 @@ FAvidScriptRuntimeSession::FAvidScriptRuntimeSession()
 		MakeUnique<FAvidScriptSessionDelegateSubscriptions>(*this))
 	, InboundHandlers(MakeUnique<FAvidScriptSessionInboundHandlers>(*this))
 	, Continuations(MakeShared<FAvidScriptSessionContinuations>())
+	, Debugger(MakeUnique<FAvidScriptSessionDebugger>())
 	, Scheduler(MakeUnique<FAvidScriptRuntimeScheduler>())
 	, EventRouter(MakeUnique<FAvidScriptRuntimeEventRouter>(*Scheduler))
 {
+	HostContext.DebugProbes = Debugger.Get();
 	BackendSelection.BackendKind = EAvidScriptVmBackendKind::Wamr;
 	BackendSelection.ExecutionMode = EAvidScriptVmExecutionMode::Auto;
 	BackendSelection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
@@ -359,6 +362,7 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 	NextHostContext.HostEffectJournal = nullptr;
 	NextHostContext.EventSubscriptions = DelegateSubscriptions.Get();
 	NextHostContext.Continuations = HostContext.Continuations;
+	NextHostContext.DebugProbes = Debugger.Get();
 	NextHostContext.LatentHost = HostContext.LatentHost;
 	if (NextHostContext.ObjectRegistry != nullptr
 		&& NextHostContext.OwnerHandle.IsValid())
@@ -485,9 +489,10 @@ void FAvidScriptRuntimeSession::ClearHostContext()
 		ObjectOwnership->Cleanup(*HostContext.ObjectRegistry);
 	}
 	HostContext = FAvidScriptWasmHostContext();
+	HostContext.DebugProbes = Debugger.Get();
 	if (LiveRuntime)
 	{
-		LiveRuntime->ClearHostContext();
+		LiveRuntime->SetHostContext(HostContext);
 		Continuations->ReleaseRetiredEndpoint();
 	}
 }
@@ -828,6 +833,7 @@ bool FAvidScriptRuntimeSession::StopAndUnload(FAvidScriptWasmSmokeResult& OutRes
 	}
 
 	LiveManifest = FAvidScriptWasmReloadManifest();
+	Debugger->OnRuntimeGenerationChanged();
 	return bSucceeded;
 }
 
@@ -856,6 +862,48 @@ int32 FAvidScriptRuntimeSession::GetLiveTickCallCount() const
 int32 FAvidScriptRuntimeSession::GetLivePendingTimerCount() const
 {
 	return Scheduler->GetPendingTimerCount();
+}
+
+bool FAvidScriptRuntimeSession::AttachDebugger(
+	const TConstArrayView<uint64> BreakpointProbeIds)
+{
+	return !IsOperationActive() && Debugger->Attach(BreakpointProbeIds);
+}
+
+bool FAvidScriptRuntimeSession::DetachDebugger()
+{
+	if (IsOperationActive())
+	{
+		return false;
+	}
+	Debugger->Detach();
+	return true;
+}
+
+bool FAvidScriptRuntimeSession::SetDebugBreakpoints(
+	const TConstArrayView<uint64> BreakpointProbeIds)
+{
+	return !IsOperationActive() && Debugger->SetBreakpoints(BreakpointProbeIds);
+}
+
+bool FAvidScriptRuntimeSession::RequestDebugPause()
+{
+	return !IsOperationActive() && Debugger->RequestPause();
+}
+
+bool FAvidScriptRuntimeSession::ContinueDebugExecution()
+{
+	return !IsOperationActive() && Debugger->ContinueExecution();
+}
+
+bool FAvidScriptRuntimeSession::StepIntoDebugExecution()
+{
+	return !IsOperationActive() && Debugger->StepInto();
+}
+
+FAvidScriptDebugSessionSnapshot FAvidScriptRuntimeSession::GetDebugSnapshot() const
+{
+	return Debugger->GetSnapshot();
 }
 
 int32 FAvidScriptRuntimeSession::GetLivePendingContinuationCount() const
@@ -1345,6 +1393,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 			ObjectOwnership.Get(),
 			HostContext.OwnerHandle);
 	FAvidScriptWasmHostContext CandidateHostContext = HostContext;
+	CandidateHostContext.DebugProbes = nullptr;
 	CandidateHostContext.Continuations = &PreparedContinuationHost;
 	CandidateHostContext.LatentHost = &PreparedContinuationHost;
 	CandidateRuntime->SetHostContext(CandidateHostContext);
@@ -1484,6 +1533,9 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 	}
 	Continuations->ReleaseRetiredEndpoint();
 
+	Debugger->OnRuntimeGenerationChanged();
+	CandidateHostContext.DebugProbes = Debugger.Get();
+	CandidateRuntime->SetHostContext(CandidateHostContext);
 	OutResult.RuntimeResult = BeginPlayResult;
 	LiveRuntime = MoveTemp(CandidateRuntime);
 	if (GeneratedTypeInstance)
@@ -1493,6 +1545,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 	Scheduler->Attach(*LiveRuntime);
 	LiveManifest = Manifest;
 	HostContext.Continuations = CandidateHostContext.Continuations;
+	HostContext.DebugProbes = Debugger.Get();
 	DelegateSubscriptions->CommitPrepared();
 	DelegateSubscriptions->SetDispatchEnabled(true);
 	InboundCommitError.Reset();
