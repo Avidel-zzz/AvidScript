@@ -44,4 +44,5 @@ public:
 	virtual bool ReadSuspensionFrame(
 		int64 SuspensionToken,
 		TArrayView<uint8> OutFrameBytes) = 0;
+	virtual bool IsExecutionSuspended() const { return false; }
 };

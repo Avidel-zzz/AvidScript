@@ -102,6 +102,22 @@ void SetSessionExecutionFailure(
 		ExportName.IsEmpty() ? TEXT("<none>") : *ExportName,
 		*Details);
 }
+
+void SetSessionDebugSuspendedFailure(
+	const FString& ModuleId,
+	const FString& ExportName,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	OutResult = FAvidScriptWasmSmokeResult();
+	OutResult.ModuleId = ModuleId;
+	OutResult.ExportName = ExportName;
+	OutResult.ErrorCategory = TEXT("debug_execution_suspended");
+	OutResult.NextAction = TEXT("continue, step, reload, or unload the paused Runtime Session before dispatching another guest entry");
+	OutResult.ErrorMessage = FString::Printf(
+		TEXT("AvidScript runtime operation rejected | module=%s | export=%s | category=debug_execution_suspended | details=the Session owns a suspended guest frame"),
+		ModuleId.IsEmpty() ? TEXT("<none>") : *ModuleId,
+		ExportName.IsEmpty() ? TEXT("<none>") : *ExportName);
+}
 } // namespace
 
 FAvidScriptRuntimeSession::FAvidScriptRuntimeSession()
@@ -499,13 +515,8 @@ void FAvidScriptRuntimeSession::ClearHostContext()
 
 bool FAvidScriptRuntimeSession::Tick(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult)
 {
-	if (IsOperationActive())
+	if (!CanEnterGuest(TEXT("avid_on_tick"), OutResult))
 	{
-		SetSessionExecutionFailure(
-			GetLiveModuleId(),
-			TEXT("avid_on_tick"),
-			TEXT("tick was requested while another guest call or Runtime mutation is active"),
-			OutResult);
 		return false;
 	}
 	bool bSucceeded = false;
@@ -521,10 +532,15 @@ bool FAvidScriptRuntimeSession::Tick(float DeltaSeconds, FAvidScriptWasmSmokeRes
 			Observer();
 		}
 #endif
-		bSucceeded = Scheduler->Tick(DeltaSeconds, OutResult)
-			&& PumpReadyContinuations(OutResult);
+		bSucceeded = Scheduler->Tick(DeltaSeconds, OutResult);
+		if (bSucceeded && !IsDebugExecutionSuspended())
+		{
+			bSucceeded = PumpReadyContinuations(OutResult);
+		}
 	}
-	return bSucceeded && InboundHandlers->PumpDeferred(OutResult);
+	return bSucceeded
+		&& (IsDebugExecutionSuspended()
+			|| InboundHandlers->PumpDeferred(OutResult));
 }
 
 bool FAvidScriptRuntimeSession::DispatchEvent(
@@ -544,13 +560,8 @@ bool FAvidScriptRuntimeSession::DispatchGameplayEvent(
 
 bool FAvidScriptRuntimeSession::TickLive(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult)
 {
-	if (IsOperationActive())
+	if (!CanEnterGuest(TEXT("avid_on_tick"), OutResult))
 	{
-		SetSessionExecutionFailure(
-			GetLiveModuleId(),
-			TEXT("avid_on_tick"),
-			TEXT("tick was requested while another guest call or Runtime mutation is active"),
-			OutResult);
 		return false;
 	}
 	bool bSucceeded = false;
@@ -569,23 +580,23 @@ bool FAvidScriptRuntimeSession::TickLive(float DeltaSeconds, FAvidScriptWasmSmok
 		bSucceeded = Scheduler->Tick(
 			DeltaSeconds,
 			OutResult,
-			EAvidScriptWasmResultDetail::FailureOnly)
-			&& PumpReadyContinuations(OutResult);
+			EAvidScriptWasmResultDetail::FailureOnly);
+		if (bSucceeded && !IsDebugExecutionSuspended())
+		{
+			bSucceeded = PumpReadyContinuations(OutResult);
+		}
 	}
-	return bSucceeded && InboundHandlers->PumpDeferred(OutResult);
+	return bSucceeded
+		&& (IsDebugExecutionSuspended()
+			|| InboundHandlers->PumpDeferred(OutResult));
 }
 
 bool FAvidScriptRuntimeSession::TickHot(
 	const float DeltaSeconds,
 	FAvidScriptWasmSmokeResult& OutFailure)
 {
-	if (IsOperationActive())
+	if (!CanEnterGuest(TEXT("avid_on_tick"), OutFailure))
 	{
-		SetSessionExecutionFailure(
-			GetLiveModuleId(),
-			TEXT("avid_on_tick"),
-			TEXT("tick was requested while another guest call or Runtime mutation is active"),
-			OutFailure);
 		return false;
 	}
 	bool bSucceeded = false;
@@ -601,10 +612,15 @@ bool FAvidScriptRuntimeSession::TickHot(
 			Observer();
 		}
 #endif
-		bSucceeded = Scheduler->TickHot(DeltaSeconds, OutFailure)
-			&& PumpReadyContinuations(OutFailure);
+		bSucceeded = Scheduler->TickHot(DeltaSeconds, OutFailure);
+		if (bSucceeded && !IsDebugExecutionSuspended())
+		{
+			bSucceeded = PumpReadyContinuations(OutFailure);
+		}
 	}
-	return bSucceeded && InboundHandlers->PumpDeferred(OutFailure);
+	return bSucceeded
+		&& (IsDebugExecutionSuspended()
+			|| InboundHandlers->PumpDeferred(OutFailure));
 }
 
 bool FAvidScriptRuntimeSession::PumpReadyContinuations(
@@ -634,18 +650,42 @@ bool FAvidScriptRuntimeSession::PumpReadyContinuations(
 	return true;
 }
 
-bool FAvidScriptRuntimeSession::DispatchEventLive(
-	int32 EventId,
-	float Value,
-	FAvidScriptWasmSmokeResult& OutResult)
+bool FAvidScriptRuntimeSession::CanEnterGuest(
+	const FString& ExportName,
+	FAvidScriptWasmSmokeResult& OutResult) const
 {
 	if (IsOperationActive())
 	{
 		SetSessionExecutionFailure(
 			GetLiveModuleId(),
-			TEXT("avid_on_event"),
-			TEXT("event dispatch was requested while another guest call or Runtime mutation is active"),
+			ExportName,
+			TEXT("guest entry was requested while another guest call or Runtime mutation is active"),
 			OutResult);
+		return false;
+	}
+	if (IsDebugExecutionSuspended())
+	{
+		SetSessionDebugSuspendedFailure(
+			GetLiveModuleId(),
+			ExportName,
+			OutResult);
+		return false;
+	}
+	return true;
+}
+
+bool FAvidScriptRuntimeSession::IsDebugExecutionSuspended() const
+{
+	return Debugger->IsExecutionSuspended();
+}
+
+bool FAvidScriptRuntimeSession::DispatchEventLive(
+	int32 EventId,
+	float Value,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	if (!CanEnterGuest(TEXT("avid_on_event"), OutResult))
+	{
 		return false;
 	}
 	TGuardValue<int32> GuestCallGuard(ActiveGuestCallDepth, ActiveGuestCallDepth + 1);
@@ -657,13 +697,8 @@ bool FAvidScriptRuntimeSession::DispatchEventHot(
 	const float Value,
 	FAvidScriptWasmSmokeResult& OutFailure)
 {
-	if (IsOperationActive())
+	if (!CanEnterGuest(TEXT("avid_on_event"), OutFailure))
 	{
-		SetSessionExecutionFailure(
-			GetLiveModuleId(),
-			TEXT("avid_on_event"),
-			TEXT("event dispatch was requested while another guest call or Runtime mutation is active"),
-			OutFailure);
 		return false;
 	}
 	TGuardValue<int32> GuestCallGuard(
@@ -676,13 +711,8 @@ bool FAvidScriptRuntimeSession::DispatchGameplayEventLive(
 	const FAvidScriptGameplayEvent& Event,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
-	if (IsOperationActive())
+	if (!CanEnterGuest(TEXT("avid_on_gameplay_event"), OutResult))
 	{
-		SetSessionExecutionFailure(
-			GetLiveModuleId(),
-			TEXT("avid_on_gameplay_event"),
-			TEXT("gameplay event dispatch was requested while another guest call or Runtime mutation is active"),
-			OutResult);
 		return false;
 	}
 	TGuardValue<int32> GuestCallGuard(ActiveGuestCallDepth, ActiveGuestCallDepth + 1);
@@ -693,13 +723,8 @@ bool FAvidScriptRuntimeSession::DispatchGameplayEventHot(
 	const FAvidScriptGameplayEvent& Event,
 	FAvidScriptWasmSmokeResult& OutFailure)
 {
-	if (IsOperationActive())
+	if (!CanEnterGuest(TEXT("avid_on_gameplay_event"), OutFailure))
 	{
-		SetSessionExecutionFailure(
-			GetLiveModuleId(),
-			TEXT("avid_on_gameplay_event"),
-			TEXT("gameplay event dispatch was requested while another guest call or Runtime mutation is active"),
-			OutFailure);
 		return false;
 	}
 	TGuardValue<int32> GuestCallGuard(
@@ -713,13 +738,8 @@ bool FAvidScriptRuntimeSession::DispatchPreparedDelegateEvent(
 	void* NativeParameters,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
-	if (IsOperationActive())
+	if (!CanEnterGuest(Event.ExportName, OutResult))
 	{
-		SetSessionExecutionFailure(
-			GetLiveModuleId(),
-			*Event.ExportName,
-			TEXT("delegate event dispatch was requested while another guest call or Runtime mutation is active"),
-			OutResult);
 		return false;
 	}
 	TGuardValue<int32> GuestCallGuard(
@@ -867,12 +887,14 @@ int32 FAvidScriptRuntimeSession::GetLivePendingTimerCount() const
 bool FAvidScriptRuntimeSession::AttachDebugger(
 	const TConstArrayView<uint64> BreakpointProbeIds)
 {
-	return !IsOperationActive() && Debugger->Attach(BreakpointProbeIds);
+	return !IsOperationActive()
+		&& !IsDebugExecutionSuspended()
+		&& Debugger->Attach(BreakpointProbeIds);
 }
 
 bool FAvidScriptRuntimeSession::DetachDebugger()
 {
-	if (IsOperationActive())
+	if (IsOperationActive() || IsDebugExecutionSuspended())
 	{
 		return false;
 	}
@@ -893,12 +915,104 @@ bool FAvidScriptRuntimeSession::RequestDebugPause()
 
 bool FAvidScriptRuntimeSession::ContinueDebugExecution()
 {
-	return !IsOperationActive() && Debugger->ContinueExecution();
+	FAvidScriptWasmSmokeResult Result;
+	return ContinueDebugExecution(Result);
+}
+
+bool FAvidScriptRuntimeSession::ContinueDebugExecution(
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	return ResumeDebugExecution(EAvidScriptDebugRunMode::Continue, OutResult);
 }
 
 bool FAvidScriptRuntimeSession::StepIntoDebugExecution()
 {
-	return !IsOperationActive() && Debugger->StepInto();
+	FAvidScriptWasmSmokeResult Result;
+	return StepIntoDebugExecution(Result);
+}
+
+bool FAvidScriptRuntimeSession::StepIntoDebugExecution(
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	return ResumeDebugExecution(EAvidScriptDebugRunMode::StepInto, OutResult);
+}
+
+bool FAvidScriptRuntimeSession::ResumeDebugExecution(
+	const EAvidScriptDebugRunMode RunMode,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	const FString ExportName(TEXT("avid_on_debug_resume"));
+	if (IsOperationActive() || !LiveRuntime)
+	{
+		SetSessionExecutionFailure(
+			GetLiveModuleId(),
+			ExportName,
+			TEXT("debug resume was requested without an idle live Runtime Session"),
+			OutResult);
+		return false;
+	}
+
+	const FAvidScriptDebugSessionSnapshot PausedSnapshot = Debugger->GetSnapshot();
+	if (PausedSnapshot.State != EAvidScriptDebugSessionState::Paused
+		|| PausedSnapshot.SuspensionToken <= 0
+		|| PausedSnapshot.ResumeRoute == 0)
+	{
+		SetSessionExecutionFailure(
+			GetLiveModuleId(),
+			ExportName,
+			TEXT("debug resume requires a paused session with a committed suspension frame"),
+			OutResult);
+		return false;
+	}
+
+	const bool bPrepared = RunMode == EAvidScriptDebugRunMode::StepInto
+		? Debugger->StepInto()
+		: Debugger->ContinueExecution();
+	if (!bPrepared)
+	{
+		SetSessionExecutionFailure(
+			GetLiveModuleId(),
+			ExportName,
+			TEXT("the debugger rejected the requested resume transition"),
+			OutResult);
+		return false;
+	}
+
+	bool bDispatched = false;
+	{
+		TGuardValue<int32> GuestCallGuard(
+			ActiveGuestCallDepth,
+			ActiveGuestCallDepth + 1);
+		bDispatched = LiveRuntime->DispatchDebugResume(
+			PausedSnapshot.SuspensionToken,
+			PausedSnapshot.ResumeRoute,
+			OutResult);
+	}
+	if (!bDispatched)
+	{
+		Debugger->OnRuntimeGenerationChanged();
+		return false;
+	}
+
+	const FAvidScriptDebugSessionSnapshot ResumedSnapshot = Debugger->GetSnapshot();
+	const bool bRunning =
+		ResumedSnapshot.State == EAvidScriptDebugSessionState::Running;
+	const bool bPausedAgain =
+		ResumedSnapshot.State == EAvidScriptDebugSessionState::Paused
+		&& ResumedSnapshot.PauseSequence > PausedSnapshot.PauseSequence
+		&& ResumedSnapshot.SuspensionToken > 0
+		&& ResumedSnapshot.SuspensionToken != PausedSnapshot.SuspensionToken;
+	if (!bRunning && !bPausedAgain)
+	{
+		Debugger->OnRuntimeGenerationChanged();
+		SetSessionExecutionFailure(
+			GetLiveModuleId(),
+			ExportName,
+			TEXT("the debug resume export returned without consuming its suspension frame or committing a later pause"),
+			OutResult);
+		return false;
+	}
+	return true;
 }
 
 FAvidScriptDebugSessionSnapshot FAvidScriptRuntimeSession::GetDebugSnapshot() const

@@ -112,7 +112,9 @@ public:
 	bool SetDebugBreakpoints(TConstArrayView<uint64> BreakpointProbeIds);
 	bool RequestDebugPause();
 	bool ContinueDebugExecution();
+	bool ContinueDebugExecution(FAvidScriptWasmSmokeResult& OutResult);
 	bool StepIntoDebugExecution();
+	bool StepIntoDebugExecution(FAvidScriptWasmSmokeResult& OutResult);
 	FAvidScriptDebugSessionSnapshot GetDebugSnapshot() const;
 	FString GetLiveModuleId() const;
 	int32 GetLiveTickCallCount() const;
@@ -198,6 +200,13 @@ private:
 		TArray<FAvidScriptGeneratedPreparedTypeRoute>& OutRoutes,
 		FString& OutError) const;
 	bool PumpReadyContinuations(FAvidScriptWasmSmokeResult& OutResult);
+	bool CanEnterGuest(
+		const FString& ExportName,
+		FAvidScriptWasmSmokeResult& OutResult) const;
+	bool IsDebugExecutionSuspended() const;
+	bool ResumeDebugExecution(
+		EAvidScriptDebugRunMode RunMode,
+		FAvidScriptWasmSmokeResult& OutResult);
 
 	TUniquePtr<FAvidScriptSessionObjectOwnership> ObjectOwnership;
 	TUniquePtr<FAvidScriptSessionDelegateSubscriptions> DelegateSubscriptions;

@@ -32,10 +32,9 @@ internal static class CSharpGuestDebugMapTests
             public static class Script
             {
                 [UnmanagedCallersOnly(EntryPoint = "guest_main")]
-                public static int Main(int value)
+                public static void Main(int value)
                 {
                     int result = value + 1;
-                    return result;
                 }
             }
             """;

@@ -15,6 +15,7 @@ internal static class Program
                 + CSharpGuestCliTests.Run()
                 + CSharpGuestStateSchemaTests.Run()
                 + CSharpGuestDebugMapTests.Run()
+                + CSharpGuestDebugResumableTests.Run()
                 + CSharpGuestMalformedTests.Run()
                 + CSharpGuestOperatorTests.Run()
                 + CSharpGuestClassReferenceTests.Run()

@@ -1120,6 +1120,69 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	TestTrue(TEXT("Reloaded object and Timer callbacks each have one movement effect"), Actor->GetActorLocation().Equals(FVector(106.0, 200.0, 360.0), 0.01));
 	TestEqual(TEXT("Session Tick does not advance delay or async NextTick TimerManager producers"), Session.GetLivePendingContinuationCount(), 2);
 
+	if (Manifest.RequiredExports.Contains(TEXT("avid_on_debug_resume")))
+	{
+		TestTrue(
+			TEXT("Debug artifact attaches an empty-breakpoint Session debugger"),
+			Session.AttachDebugger(TConstArrayView<uint64>()));
+		TestTrue(TEXT("Debug artifact accepts pause-next"), Session.RequestDebugPause());
+		const FVector LocationBeforePause = Actor->GetActorLocation();
+		FAvidScriptWasmSmokeResult PausedTickResult;
+		TestTrue(
+			TEXT("Instrumented Tick cooperatively returns after committing a frame"),
+			Session.TickLive(1.0f / 60.0f, PausedTickResult));
+		const FAvidScriptDebugSessionSnapshot PausedSnapshot =
+			Session.GetDebugSnapshot();
+		TestEqual(
+			TEXT("Instrumented Tick enters Paused"),
+			PausedSnapshot.State,
+			EAvidScriptDebugSessionState::Paused);
+		TestTrue(
+			TEXT("Paused Tick owns a bounded suspension frame"),
+			PausedSnapshot.SuspensionToken > 0
+				&& PausedSnapshot.ResumeRoute > 0
+				&& PausedSnapshot.FrameByteCount > 0
+				&& PausedSnapshot.FrameByteCount <= 4096);
+
+		FAvidScriptWasmSmokeResult BlockedTickResult;
+		TestFalse(
+			TEXT("Paused Session rejects a second Tick entry"),
+			Session.TickLive(1.0f / 60.0f, BlockedTickResult));
+		TestEqual(
+			TEXT("Paused entry rejection is explicit"),
+			BlockedTickResult.ErrorCategory,
+			FString(TEXT("debug_execution_suspended")));
+
+		FAvidScriptWasmSmokeResult StepResult;
+		TestTrue(
+			TEXT("StepInto resumes through avid_on_debug_resume"),
+			Session.StepIntoDebugExecution(StepResult));
+		const FAvidScriptDebugSessionSnapshot SteppedSnapshot =
+			Session.GetDebugSnapshot();
+		TestEqual(
+			TEXT("StepInto pauses at a later sequence point"),
+			SteppedSnapshot.State,
+			EAvidScriptDebugSessionState::Paused);
+		TestTrue(
+			TEXT("StepInto replaces the consumed suspension token"),
+			SteppedSnapshot.PauseSequence > PausedSnapshot.PauseSequence
+				&& SteppedSnapshot.SuspensionToken > 0
+				&& SteppedSnapshot.SuspensionToken != PausedSnapshot.SuspensionToken);
+
+		FAvidScriptWasmSmokeResult ContinueResult;
+		TestTrue(
+			TEXT("Continue completes the suspended Tick body"),
+			Session.ContinueDebugExecution(ContinueResult));
+		TestEqual(
+			TEXT("Continue returns the Session to Running"),
+			Session.GetDebugSnapshot().State,
+			EAvidScriptDebugSessionState::Running);
+		TestTrue(
+			TEXT("Resumed Tick commits gameplay work after the pause"),
+			!Actor->GetActorLocation().Equals(LocationBeforePause, 0.01));
+		TestTrue(TEXT("Running debugger detaches cleanly"), Session.DetachDebugger());
+	}
+
 	FAvidScriptWasmSmokeResult EndPlayResult;
 	if (!Session.EndPlayLive(EndPlayResult))
 	{

@@ -25,6 +25,7 @@ public:
 	bool ReadSuspensionFrame(
 		int64 SuspensionToken,
 		TArrayView<uint8> OutFrameBytes) override;
+	bool IsExecutionSuspended() const override;
 
 private:
 	bool IsAttached() const;

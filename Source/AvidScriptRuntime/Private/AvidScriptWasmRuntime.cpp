@@ -100,6 +100,7 @@ const FString AvidScriptTimerExportName(TEXT("avid_on_timer"));
 const FString AvidScriptContinuationExportName(TEXT("avid_on_continuation"));
 const FString AvidScriptContinuationV2ExportName(
 	TEXT("avid_on_continuation_v2"));
+const FString AvidScriptDebugResumeExportName(TEXT("avid_on_debug_resume"));
 constexpr uint32 AvidScriptWasmHeapSize = 64 * 1024;
 constexpr uint32 AvidScriptWasmErrorBufferSize = 512;
 constexpr double AvidScriptMinimumMeasuredMs = 0.0001;
@@ -1202,6 +1203,11 @@ bool FAvidScriptWasmRuntimeInstance::ValidateRequiredExports(
 			CachedExport = &ContinuationV2Export;
 			ExpectedParameterCellCount = 6;
 		}
+		else if (RequiredExport == AvidScriptDebugResumeExportName)
+		{
+			CachedExport = &DebugResumeExport;
+			ExpectedParameterCellCount = 3;
+		}
 		else if (RequiredExport == AvidScriptEventExportName)
 		{
 			CachedExport = &EventExport;
@@ -1507,6 +1513,15 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 		OutResult.Metrics = Metrics;
 		OutResult.bTickCalled = true;
 		OutResult.TickCallCount = TickCallCount;
+	}
+	if (IsDebugExecutionSuspended())
+	{
+		RequeueDueTimerCallbacks(0);
+		if (!bHotFailureOnly)
+		{
+			CopyObservableStateToResult(OutResult);
+		}
+		return true;
 	}
 
 	FAvidScriptVmError TimerError;
@@ -2137,6 +2152,56 @@ bool FAvidScriptWasmRuntimeInstance::DispatchContinuation(
 	return true;
 }
 
+bool FAvidScriptWasmRuntimeInstance::DispatchDebugResume(
+	const int64 SuspensionToken,
+	const uint32 ResumeRoute,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	CaptureSnapshot(OutResult);
+	if (!IsLoaded() || !bHasBegunPlay || bEndPlayAttempted
+		|| !DebugResumeExport.Handle.IsValid()
+		|| SuspensionToken <= 0
+		|| ResumeRoute == 0)
+	{
+		SetFailure(
+			OutResult,
+			ModuleId,
+			AvidScriptDebugResumeExportName,
+			TEXT("invalid_state"),
+			TEXT("Debug resume requires an active runtime, a cached resume export, and a valid suspension token and route"),
+			TEXT("resume only a paused Runtime Session generated with resumable debug instrumentation"));
+		return false;
+	}
+
+	uint32 Args[3] = { 0, 0, ResumeRoute };
+	static_assert(sizeof(SuspensionToken) == sizeof(uint32) * 2);
+	FMemory::Memcpy(&Args[0], &SuspensionToken, sizeof(SuspensionToken));
+
+	BeginTypedCallbackEpoch();
+	FAvidScriptVmError Error;
+	const bool bCalled = InvokeVmExport(
+		VmBackend.Get(),
+		DebugResumeExport,
+		AvidScriptDebugResumeExportName,
+		UE_ARRAY_COUNT(Args),
+		Args,
+		Error);
+	EndTypedCallbackEpoch();
+	if (!bCalled)
+	{
+		SetFailureFromVmError(
+			OutResult,
+			ModuleId,
+			AvidScriptDebugResumeExportName,
+			Error,
+			DebugMap.Get());
+		FAvidScriptLifecycleTransitionResult LifecycleResult;
+		LifecycleState.MarkFaulted(LifecycleResult);
+		return false;
+	}
+	return true;
+}
+
 bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 	const FAvidScriptGameplayEvent& Event,
 	FAvidScriptWasmSmokeResult& OutResult,
@@ -2502,6 +2567,7 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	TimerExport = {};
 	ContinuationExport = {};
 	ContinuationV2Export = {};
+	DebugResumeExport = {};
 	EventExport = {};
 	GameplayEventExport = {};
 	DelegateEventExports.Reset();
@@ -4710,8 +4776,9 @@ bool FAvidScriptWasmRuntimeInstance::ExecuteDueTimerCallbacks(
 	FAvidScriptVmError& OutError)
 {
 	OutError = FAvidScriptVmError();
-	for (const FAvidScriptWasmTimerEntry& Timer : DueTimerScratch)
+	for (int32 TimerIndex = 0; TimerIndex < DueTimerScratch.Num(); ++TimerIndex)
 	{
+		const FAvidScriptWasmTimerEntry& Timer = DueTimerScratch[TimerIndex];
 		uint32 TimerArgs[2] = {
 			static_cast<uint32>(Timer.CallbackId),
 			static_cast<uint32>(Timer.Handle)
@@ -4736,8 +4803,33 @@ bool FAvidScriptWasmRuntimeInstance::ExecuteDueTimerCallbacks(
 		++TimerCallbackCount;
 		LastTimerCallbackId = Timer.CallbackId;
 		LastTimerHandle = Timer.Handle;
+		if (IsDebugExecutionSuspended())
+		{
+			RequeueDueTimerCallbacks(TimerIndex + 1);
+			break;
+		}
 	}
 	return true;
+}
+
+void FAvidScriptWasmRuntimeInstance::RequeueDueTimerCallbacks(
+	const int32 FirstTimerIndex)
+{
+	const FAvidScriptTimerDeadlineLess DeadlineLess;
+	for (int32 TimerIndex = FMath::Max(0, FirstTimerIndex);
+		TimerIndex < DueTimerScratch.Num();
+		++TimerIndex)
+	{
+		const FAvidScriptWasmTimerEntry& Timer = DueTimerScratch[TimerIndex];
+		ActiveTimers.Add(Timer.Handle, Timer);
+		TimerHeap.HeapPush(Timer, DeadlineLess);
+	}
+}
+
+bool FAvidScriptWasmRuntimeInstance::IsDebugExecutionSuspended() const
+{
+	return HostContext.DebugProbes != nullptr
+		&& HostContext.DebugProbes->IsExecutionSuspended();
 }
 
 int32 FAvidScriptWasmRuntimeInstance::AllocateTimerHandle()

@@ -226,6 +226,10 @@ public:
 	bool DispatchContinuation(
 		const FAvidScriptContinuationCompletion& Completion,
 		FAvidScriptWasmSmokeResult& OutResult);
+	bool DispatchDebugResume(
+		int64 SuspensionToken,
+		uint32 ResumeRoute,
+		FAvidScriptWasmSmokeResult& OutResult);
 	bool DispatchGameplayEventHot(
 		const FAvidScriptGameplayEvent& Event,
 		FAvidScriptWasmSmokeResult& OutFailure);
@@ -641,6 +645,8 @@ private:
 		EAvidScriptVmTypedHostStatus Status);
 	void CollectDueTimers(float DeltaSeconds);
 	bool ExecuteDueTimerCallbacks(FAvidScriptVmError& OutError);
+	void RequeueDueTimerCallbacks(int32 FirstTimerIndex);
+	bool IsDebugExecutionSuspended() const;
 	bool DispatchEvent(
 		int32 EventId,
 		float Value,
@@ -672,6 +678,7 @@ private:
 	FAvidScriptCachedVmExport TimerExport;
 	FAvidScriptCachedVmExport ContinuationExport;
 	FAvidScriptCachedVmExport ContinuationV2Export;
+	FAvidScriptCachedVmExport DebugResumeExport;
 	FAvidScriptCachedVmExport EventExport;
 	FAvidScriptCachedVmExport GameplayEventExport;
 	TMap<FString, FAvidScriptCachedVmExport> DelegateEventExports;

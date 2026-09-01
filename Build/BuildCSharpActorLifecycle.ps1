@@ -1726,7 +1726,8 @@ $DirectAbiExports = @(
     "avid_on_event",
     "avid_on_gameplay_event",
     "avid_on_continuation",
-    "avid_on_continuation_v2")
+    "avid_on_continuation_v2",
+    "avid_on_debug_resume")
 $DirectAbiExports += @($SemanticModel.delegate_event_callbacks |
     ForEach-Object { [string]$_.export_name })
 $DirectAbiExports += @($script:GeneratedTypeExportNames)

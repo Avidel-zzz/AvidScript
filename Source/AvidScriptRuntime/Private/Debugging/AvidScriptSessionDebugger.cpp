@@ -214,6 +214,13 @@ bool FAvidScriptSessionDebugger::ReadSuspensionFrame(
 	return true;
 }
 
+bool FAvidScriptSessionDebugger::IsExecutionSuspended() const
+{
+	return State == EAvidScriptDebugSessionState::Suspending
+		|| State == EAvidScriptDebugSessionState::Paused
+		|| State == EAvidScriptDebugSessionState::Resuming;
+}
+
 bool FAvidScriptSessionDebugger::IsAttached() const
 {
 	return State != EAvidScriptDebugSessionState::Detached;

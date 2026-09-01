@@ -144,10 +144,18 @@ public static class CSharpGuestLowerer
                     $"csharp:{document.Source.SourceId}",
                     moduleTypes,
                     imports,
-                    functions);
+                    functions,
+                    exports,
+                    GetDebugResumableFunctionIds(document, functions));
             moduleTypes = instrumentation.Types;
             imports = instrumentation.Imports.ToArray();
             functions = instrumentation.Functions.ToList();
+            exports = instrumentation.Exports.ToList();
+            diagnostics.AddRange(instrumentation.Diagnostics);
+            if (diagnostics.Count != 0)
+            {
+                return Failure(diagnostics);
+            }
         }
 
         GuestLayoutResult layout = GuestLayoutBuilder.Build(
@@ -720,6 +728,33 @@ public static class CSharpGuestLowerer
         }
 
         return document.Reachability!.ReachableCallableIds.ToHashSet(StringComparer.Ordinal);
+    }
+
+    private static IReadOnlySet<string> GetDebugResumableFunctionIds(
+        SemanticDocument document,
+        IReadOnlyList<GuestFunction> functions)
+    {
+        HashSet<string> asyncMethodIds = document.AsyncMethods
+            .Select(method => method.MethodSymbolId)
+            .ToHashSet(StringComparer.Ordinal);
+        HashSet<string> guestCallTargets = functions
+            .SelectMany(function => function.Blocks)
+            .SelectMany(block => block.Instructions)
+            .Where(instruction => instruction.Op == "call" && instruction.TargetId is not null)
+            .Select(instruction => instruction.TargetId!)
+            .ToHashSet(StringComparer.Ordinal);
+        return document.Callables
+            .Where(callable => callable.Export is not null
+                && !string.Equals(
+                    callable.Export.Name,
+                    CSharpGuestIds.UeEndPlayCompatibilityExportName,
+                    StringComparison.Ordinal)
+                && callable.HasBody
+                && callable.ReturnTypeId == CSharpGuestIds.VoidTypeId
+                && !asyncMethodIds.Contains(callable.MethodSymbolId)
+                && !guestCallTargets.Contains(CSharpGuestIds.Function(callable.MethodSymbolId)))
+            .Select(callable => CSharpGuestIds.Function(callable.MethodSymbolId))
+            .ToHashSet(StringComparer.Ordinal);
     }
 
     private static CSharpGuestLoweringResult Failure(IEnumerable<GuestDiagnostic> diagnostics)

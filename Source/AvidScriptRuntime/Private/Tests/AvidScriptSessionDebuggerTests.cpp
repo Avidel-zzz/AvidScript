@@ -36,6 +36,7 @@ bool FAvidScriptSessionDebuggerStateMachineTest::RunTest(const FString& Paramete
 		TEXT("Probe decision waits for a frame commit"),
 		Debugger.GetSnapshot().State,
 		EAvidScriptDebugSessionState::Suspending);
+	TestTrue(TEXT("Suspending blocks later guest entries"), Debugger.IsExecutionSuspended());
 	const int64 FirstToken = Debugger.CommitSuspension(
 		BreakpointProbe,
 		1,
@@ -45,12 +46,14 @@ bool FAvidScriptSessionDebuggerStateMachineTest::RunTest(const FString& Paramete
 		TEXT("Frame commit enters paused state"),
 		Debugger.GetSnapshot().State,
 		EAvidScriptDebugSessionState::Paused);
+	TestTrue(TEXT("Paused execution remains suspended"), Debugger.IsExecutionSuspended());
 
 	TestTrue(TEXT("Paused execution continues"), Debugger.ContinueExecution());
 	uint8 RestoredFrame[UE_ARRAY_COUNT(FrameBytes)] = {};
 	TestTrue(
 		TEXT("Resume consumes the exact suspension frame"),
 		Debugger.ReadSuspensionFrame(FirstToken, RestoredFrame));
+	TestFalse(TEXT("Consumed resume frame unblocks guest entries"), Debugger.IsExecutionSuspended());
 	TestTrue(
 		TEXT("Suspension frame roundtrips"),
 		FMemory::Memcmp(FrameBytes, RestoredFrame, sizeof(FrameBytes)) == 0);

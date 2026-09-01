@@ -29,7 +29,7 @@
       "summary": "一个 shell 调用只承担一个逻辑动作或证据域。",
       "prevention": "调度前拒绝用分号、&& 或 || 串联独立动作；多文件读取使用并行工具或逐项调用。",
       "source": "legacy:1672",
-      "last_observed": "2026-09-01 P60.C2c3 (回读 C# fixture 与 profile 时误用分号串联两个读取；后续文件读取必须逐项调用，当前批次已重新收紧执行)"
+      "last_observed": "2026-09-01 P61.C2b2 (staged 隐私扫描脚本仍用分号串联多个 PowerShell 语句；扫描通过且无文件副作用，后续扫描改用独立脚本或单表达式入口)"
     },
     {
       "id": "callback-kind-validation-uses-named-branches",
@@ -534,6 +534,14 @@
       "prevention": "新增 .cpp 后执行 no-clean UBT；若未修改的文件出现未知类型，先检查其直接 include 完整性并做最小显式 include 修复，不清理 Editor Target，也不把 unity 偶然可编译当作契约。",
       "source": "observed:2026-09-01-P61.B2",
       "last_observed": "2026-09-01 P61.B2 新增 Editor CallStack 源文件后 unity 重排，BindingDescriptorGeneratorTests 缺少 AvidScriptHash.h 导致编译失败；补充一行显式 include 后 4-action no-clean UBT 通过"
+    },
+    {
+      "id": "truncated-agent-spawn-output-does-not-authorize-duplicate",
+      "tags": ["agents", "delegation", "workflow", "parallelism"],
+      "summary": "代理创建输出被截断时，状态未知不等于创建失败。",
+      "prevention": "spawn 输出截断后禁止立即重复派发同一写入范围；先等待通知、检查工作树或查询已知代理状态。只有确认原调用未创建代理后才能重试，并始终保持写入范围唯一。",
+      "source": "observed:2026-09-01-P61.C2b2",
+      "last_observed": "2026-09-01 P61.C2b2 首次 spawn 输出被上下文截断后又派发同范围任务，形成两个并发编译器代理；发现后关闭全部代理并核对共享改动"
     }
   ]
 }
