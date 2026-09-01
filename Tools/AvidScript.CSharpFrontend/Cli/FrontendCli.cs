@@ -5,7 +5,7 @@ using System.Text;
 
 namespace AvidScript.CSharpFrontend;
 
-internal static class FrontendCli
+public static class FrontendCli
 {
     private const string Usage =
         "Usage: AvidScript.CSharpFrontend --source <path> --source-id <id> --output <path>";

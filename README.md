@@ -50,8 +50,9 @@ callable/event，以及带 typed payload 的 AsyncAction `await` 已接入真实
 
 详细进度见 [Phase 60 中文收尾记录](Docs/Phase60/P60_Closeout.md)。
 
-Phase 61 已完成编辑器调试架构冻结与 `P61.A1` 完整编译产物缓存；persistent compiler、
-源码级调用栈、断点、变量查看和 Profiler 将在后续小节逐项验收后再列入“已实现”。
+Phase 61 已完成编辑器调试架构冻结、`P61.A1` 完整编译产物缓存，以及 `P61.A2a`
+persistent compiler Worker 协议与进程内四阶段执行；构建链路接入、源码级调用栈、断点、
+变量查看和 Profiler 将在后续小节逐项验收后再列入“已实现”。
 
 ## C# 游戏脚本
 
