@@ -88,10 +88,15 @@
   后 epoch/断点重绑，以及 EndPlay 后目标消失和断点保留；
 - 单入口 Runner 自动构建 Debug fixture、执行 Automation 并严格校验测试数量、Success 与正常退出；
 - 详细实现与证据见 [P61.C4c PIE 调试集成](P61.C4c_PIE_Debug_Integration.md)。
+- 完成 `P61.D1a` Profiler 事件底座：Session 可复用的单写者无锁固定容量环，热路径只写数值字段，
+  覆盖时保留最新事件并累计 dropped 计数；
+- 同一事件可输出到 `AvidScriptProfiler` UE Trace channel，buffer 未启用且 Trace channel 关闭时 scope
+  不读取 cycles；
+- 详细实现与证据见 [P61.D1a Profiler 事件底座](P61.D1a_Bounded_Profiler_Event_Lane.md)。
 
 ## 待完成
 
-- `P61.D` Profiler 与 IDE workspace；
+- `P61.D1b-D3` Runtime 埋点、Editor Profiler 与 IDE workspace；
 - `P61.E` 集成与集中 Gate。
 
 ## 人工验收边界

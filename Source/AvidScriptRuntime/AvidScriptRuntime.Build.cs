@@ -23,7 +23,8 @@ public class AvidScriptRuntime : ModuleRules
 			{
 				"Projects",
 				"Json",
-				"SSL"
+				"SSL",
+				"TraceLog"
 			}
 		);
 
