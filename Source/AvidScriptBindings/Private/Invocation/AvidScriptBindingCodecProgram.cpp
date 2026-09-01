@@ -876,7 +876,86 @@ bool EncodeWireValue(
 	FMemory::Memcpy(Wire.GetData(), &Stored, Wire.Num());
 	return true;
 }
+
+bool CanCaptureContinuationFixedValue(const FValueCodecProgram& Program)
+{
+	switch (Program.Kind)
+	{
+	case EValueCodecKind::Bool:
+	case EValueCodecKind::Int8:
+	case EValueCodecKind::UInt8:
+	case EValueCodecKind::Int16:
+	case EValueCodecKind::UInt16:
+	case EValueCodecKind::Int32:
+	case EValueCodecKind::UInt32:
+	case EValueCodecKind::Int64:
+	case EValueCodecKind::UInt64:
+	case EValueCodecKind::Float:
+	case EValueCodecKind::Double:
+	case EValueCodecKind::Enum:
+	case EValueCodecKind::Vector:
+	case EValueCodecKind::Rotator:
+	case EValueCodecKind::Transform:
+		return Program.WireSize > 0 && Program.WireSize <= 4096;
+	case EValueCodecKind::StructWire:
+		return Program.WireSize > 0
+			&& Program.WireSize <= 4096
+			&& !Program.Children.IsEmpty()
+			&& Program.Children.ContainsByPredicate(
+				[](const FValueCodecProgram& Child)
+				{
+					return !CanCaptureContinuationFixedValue(Child);
+				}) == false;
+	default:
+		return false;
+	}
+}
 } // namespace
+
+bool CaptureContinuationField(
+	const FValueCodecProgram& Program,
+	void* Container,
+	const int32 WireOffset,
+	FAvidScriptBindingLatentCompletionField& OutField,
+	FString& OutDetails)
+{
+	OutField = {};
+	OutDetails.Reset();
+	if (Container == nullptr
+		|| Program.Property == nullptr
+		|| Program.TypeId.IsEmpty()
+		|| WireOffset < 0)
+	{
+		OutDetails = TEXT("The async outcome payload field plan is invalid.");
+		return false;
+	}
+	OutField.WireOffset = WireOffset;
+	OutField.TypeId = Program.TypeId;
+	if (Program.Kind == EValueCodecKind::Object
+		|| Program.Kind == EValueCodecKind::Interface)
+	{
+		OutField.Kind = EAvidScriptBindingLatentPayloadKind::Object;
+		OutField.ObjectValue.Reset(GetObjectValue(Program, Container));
+		return true;
+	}
+	if (!CanCaptureContinuationFixedValue(Program))
+	{
+		OutDetails = TEXT("The async outcome payload field kind is unsupported.");
+		return false;
+	}
+
+	OutField.Kind = EAvidScriptBindingLatentPayloadKind::FixedWire;
+	OutField.Bytes.SetNumZeroed(Program.WireSize);
+	FAvidScriptBindingInvocationContext EmptyContext;
+	FCodecOutputTransaction Transaction;
+	return EncodeWireValue(
+		Program,
+		OutField.Bytes,
+		EmptyContext,
+		Container,
+		Transaction,
+		OutDetails);
+}
 
 void FCodecOutputTransaction::Commit()
 {

@@ -237,5 +237,12 @@ bool WriteValueToGuest(
 	FPreparedValueOutput& PreparedOutput,
 	FString& OutDetails);
 
+bool CaptureContinuationField(
+	const FValueCodecProgram& Program,
+	void* Container,
+	int32 WireOffset,
+	FAvidScriptBindingLatentCompletionField& OutField,
+	FString& OutDetails);
+
 void PublishValueOutput(FPreparedValueOutput& PreparedOutput);
 } // namespace UE::AvidScript::BindingPrivate

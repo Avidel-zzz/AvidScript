@@ -61,6 +61,66 @@ bool EncodeAbiCells(
 		? true
 		: FailCodec(OutError, TEXT("continuation_result_abi_size_mismatch"));
 }
+
+bool EncodeObjectValue(
+	UObject* Object,
+	const FAvidScriptBindingTypeModel& Type,
+	const FAvidScriptBindingPackage& Package,
+	FAvidScriptObjectRegistry* ObjectRegistry,
+	IAvidScriptObjectOwnershipDomain* ObjectOwnership,
+	TArrayView<uint8> OutBytes,
+	FString& OutError)
+{
+	UClass* ExpectedClass = nullptr;
+	if (Type.Kind != TEXT("object_handle")
+		|| Type.Size != 8
+		|| OutBytes.Num() != Type.Size
+		|| ObjectRegistry == nullptr
+		|| ObjectOwnership == nullptr
+		|| Type.ObjectTypeOrdinal < 0
+		|| !Package.TryResolveObjectType(
+			static_cast<uint32>(Type.ObjectTypeOrdinal),
+			ExpectedClass)
+		|| ExpectedClass == nullptr
+		|| (Object != nullptr
+			&& (!IsValid(Object) || !Object->IsA(ExpectedClass))))
+	{
+		return FailCodec(
+			OutError,
+			TEXT("continuation_result_object_type_mismatch"));
+	}
+
+	FAvidScriptObjectHandle Handle;
+	if (Object != nullptr)
+	{
+		FAvidScriptObjectHandleResult BorrowResult;
+		if (!ObjectOwnership->Borrow(
+				*ObjectRegistry,
+				*Object,
+				BorrowResult)
+			|| !BorrowResult.Handle.IsValid())
+		{
+			return FailCodec(
+				OutError,
+				TEXT("continuation_result_object_borrow_failed"));
+		}
+		Handle = BorrowResult.Handle;
+	}
+	FMemory::Memcpy(OutBytes.GetData(), &Handle.Slot, sizeof(Handle.Slot));
+	FMemory::Memcpy(
+		OutBytes.GetData() + sizeof(Handle.Slot),
+		&Handle.Generation,
+		sizeof(Handle.Generation));
+	return true;
+}
+
+bool IsFixedWirePayloadType(const FAvidScriptBindingTypeModel& Type)
+{
+	return Type.Kind == TEXT("scalar")
+		|| Type.Kind == TEXT("enum")
+		|| Type.Kind == TEXT("struct")
+		|| Type.Kind == TEXT("struct_wire");
+}
 }
 
 void FAvidScriptContinuationResultCodecTransaction::Commit()
@@ -112,7 +172,7 @@ bool FAvidScriptContinuationResultCodec::Encode(
 	case EAvidScriptBindingLatentPayloadKind::AbiCells:
 		return EncodeAbiCells(Payload, Type, OutBytes, OutError);
 	case EAvidScriptBindingLatentPayloadKind::FixedWire:
-		if (Type.Kind != TEXT("struct_wire")
+		if (!IsFixedWirePayloadType(Type)
 			|| Payload.Bytes.Num() != Type.Size)
 		{
 			return FailCodec(
@@ -122,43 +182,14 @@ bool FAvidScriptContinuationResultCodec::Encode(
 		FMemory::Memcpy(OutBytes.GetData(), Payload.Bytes.GetData(), Type.Size);
 		return true;
 	case EAvidScriptBindingLatentPayloadKind::Object:
-	{
-		UObject* const Object = Payload.ObjectValue.Get();
-		UClass* ExpectedClass = nullptr;
-		if (Type.Kind != TEXT("object_handle")
-			|| Type.Size != 8
-			|| ObjectRegistry == nullptr
-			|| ObjectOwnership == nullptr
-			|| !IsValid(Object)
-			|| Type.ObjectTypeOrdinal < 0
-			|| !Package.TryResolveObjectType(
-				static_cast<uint32>(Type.ObjectTypeOrdinal),
-				ExpectedClass)
-			|| ExpectedClass == nullptr
-			|| !Object->IsA(ExpectedClass))
-		{
-			return FailCodec(
-				OutError,
-				TEXT("continuation_result_object_type_mismatch"));
-		}
-		FAvidScriptObjectHandleResult BorrowResult;
-		if (!ObjectOwnership->Borrow(
-				*ObjectRegistry,
-				*Object,
-				BorrowResult)
-			|| !BorrowResult.Handle.IsValid())
-		{
-			return FailCodec(
-				OutError,
-				TEXT("continuation_result_object_borrow_failed"));
-		}
-		const uint32 HandleCells[] = {
-			BorrowResult.Handle.Slot,
-			BorrowResult.Handle.Generation
-		};
-		FMemory::Memcpy(OutBytes.GetData(), HandleCells, sizeof(HandleCells));
-		return true;
-	}
+		return EncodeObjectValue(
+			Payload.ObjectValue.Get(),
+			Type,
+			Package,
+			ObjectRegistry,
+			ObjectOwnership,
+			OutBytes,
+			OutError);
 	case EAvidScriptBindingLatentPayloadKind::Utf8:
 	{
 		if ((Type.Kind != TEXT("string_utf8")
@@ -227,6 +258,91 @@ bool FAvidScriptContinuationResultCodec::Encode(
 		Transaction.CreatedArrayTokens.Add(Token);
 		FMemory::Memcpy(OutBytes.GetData(), &Token, sizeof(Token));
 		return true;
+	}
+	case EAvidScriptBindingLatentPayloadKind::Composite:
+	{
+		if (Type.Kind != TEXT("struct_wire")
+			|| Type.StructFields.IsEmpty()
+			|| Payload.Fields.IsEmpty())
+		{
+			return FailCodec(
+				OutError,
+				TEXT("continuation_result_composite_shape_mismatch"));
+		}
+		TSet<int32> WrittenOffsets;
+		bool bHasDiscriminator = false;
+		for (const FAvidScriptBindingLatentCompletionField& Field :
+			Payload.Fields)
+		{
+			const FAvidScriptBindingStructFieldModel* const DescriptorField =
+				Type.StructFields.FindByPredicate(
+					[&Field](
+						const FAvidScriptBindingStructFieldModel& Candidate)
+					{
+						return Candidate.WireOffset == Field.WireOffset
+							&& Candidate.TypeId == Field.TypeId;
+					});
+			const FAvidScriptBindingTypeModel* FieldType = nullptr;
+			if (DescriptorField == nullptr
+				|| WrittenOffsets.Contains(Field.WireOffset)
+				|| !Package.TryGetDescriptorType(Field.TypeId, FieldType)
+				|| FieldType == nullptr
+				|| Field.WireOffset < 0
+				|| Field.WireOffset > OutBytes.Num()
+				|| FieldType->Size > OutBytes.Num() - Field.WireOffset)
+			{
+				return FailCodec(
+					OutError,
+					TEXT("continuation_result_composite_field_mismatch"));
+			}
+			TArrayView<uint8> FieldBytes = OutBytes.Slice(
+				Field.WireOffset,
+				FieldType->Size);
+			if (Field.Kind == EAvidScriptBindingLatentPayloadKind::FixedWire)
+			{
+				if (!IsFixedWirePayloadType(*FieldType)
+					|| Field.Bytes.Num() != FieldType->Size)
+				{
+					return FailCodec(
+						OutError,
+						TEXT("continuation_result_composite_wire_mismatch"));
+				}
+				FMemory::Memcpy(
+					FieldBytes.GetData(),
+					Field.Bytes.GetData(),
+					Field.Bytes.Num());
+			}
+			else if (Field.Kind
+				== EAvidScriptBindingLatentPayloadKind::Object)
+			{
+				if (!EncodeObjectValue(
+						Field.ObjectValue.Get(),
+						*FieldType,
+						Package,
+						ObjectRegistry,
+						ObjectOwnership,
+						FieldBytes,
+						OutError))
+				{
+					return false;
+				}
+			}
+			else
+			{
+				return FailCodec(
+					OutError,
+					TEXT("continuation_result_composite_kind_unsupported"));
+			}
+			WrittenOffsets.Add(Field.WireOffset);
+			bHasDiscriminator |= Field.WireOffset == 0
+				&& DescriptorField->Name == TEXT("Outcome")
+				&& FieldType->Kind == TEXT("enum");
+		}
+		return bHasDiscriminator
+			? true
+			: FailCodec(
+				OutError,
+				TEXT("continuation_result_composite_discriminator_missing"));
 	}
 	default:
 		return FailCodec(

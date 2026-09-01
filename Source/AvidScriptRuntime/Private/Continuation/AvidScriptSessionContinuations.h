@@ -256,6 +256,8 @@ private:
 		TArray<FScriptDelegate> AsyncActionDelegates;
 		TArray<FMulticastDelegateProperty*> AsyncActionProperties;
 		TArray<uint64> AsyncActionBridgeTokens;
+		TArray<TSharedPtr<const IAvidScriptBindingAsyncActionPayloadEncoder>>
+			AsyncActionPayloadEncoders;
 		FString AsyncActionPayloadTypeId;
 		FAvidScriptBindingLatentCompletionContract LatentCompletion;
 		EProducerKind ProducerKind = EProducerKind::Timer;

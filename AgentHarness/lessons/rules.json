@@ -408,6 +408,22 @@
       "last_observed": "2026-09-01 P60.B2 (GetActivationCount 从 member 4 移到 5，旧性能夹具误把 EndPlay void 当作 int32 prepared export 调用而 fail-closed)"
     },
     {
+      "id": "optional-automation-plugins-require-availability-check",
+      "tags": ["ue", "automation", "plugins", "verification"],
+      "summary": "功能聚焦 Automation 不能无条件启用未构建的可选性能插件。",
+      "prevention": "启动前按测试依赖检查可选插件的模块与二进制；仅性能或依赖该模块的过滤器启用 PerfHarness，模块缺失且测试尚未发现的运行不计证据。",
+      "source": "observed:2026-09-01-P60.C2c2",
+      "last_observed": "2026-09-01 P60.C2c2 (功能过滤器误启用未构建的 AvidScriptPerfHarness，Editor 在发现测试前退出；移除无关开关后聚焦用例通过)"
+    },
+    {
+      "id": "ue-test-object-fixtures-use-concrete-uclass",
+      "tags": ["ue", "automation", "uobject", "fixtures"],
+      "summary": "UE5.8 测试不能直接实例化标记为抽象的 UObject 基类。",
+      "prevention": "ObjectHandle 与 payload 夹具使用插件内最小具体 UCLASS；新增 NewObject 夹具时先检查 CLASS_Abstract，禁止用 NewObject<UObject>() 作为普通对象。",
+      "source": "observed:2026-09-01-P60.C2c2",
+      "last_observed": "2026-09-01 P60.C2c2 (payload encoder 用例直接 NewObject<UObject> 触发 UObjectGlobals ensure；改用具体 async action UCLASS 后 2/2 通过)"
+    },
+    {
       "id": "zero-frame-process-event-skips-struct-initialization",
       "tags": ["ue", "reflection", "process-event", "runtime"],
       "summary": "无参数且无返回值的 UFunction 可以拥有零字节参数帧，空 scratch 不能传给 UStruct::InitializeStruct。",

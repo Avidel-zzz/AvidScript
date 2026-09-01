@@ -39,6 +39,16 @@ void SetAvidScriptBindingLoadFailure(
 	const FString& Source,
 	const FString& Details);
 
+bool BuildAvidScriptRuntimeValuePlan(
+	FProperty* Property,
+	const FAvidScriptBindingValueModel& Model,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& DeclaredTypesById,
+	int32 ArgumentOffset,
+	FAvidScriptRuntimeBindingValuePlan& OutPlan,
+	FString& OutDetails);
+
+FString GetAvidScriptRuntimePropertyDirection(const FProperty* Property);
+
 bool TryParseAvidScriptGeneratedShape(
 	const FString& Shape,
 	EAvidScriptGeneratedBindingShape& OutGeneratedShape,
@@ -515,9 +525,128 @@ bool ResolveAvidScriptRuntimeLatentContract(
 	return true;
 }
 
+bool IsAvidScriptAsyncActionCapturePlanSupported(
+	const FAvidScriptRuntimeBindingValuePlan& Plan)
+{
+	switch (Plan.Kind)
+	{
+	case EAvidScriptRuntimeBindingKind::Bool:
+	case EAvidScriptRuntimeBindingKind::Int8:
+	case EAvidScriptRuntimeBindingKind::UInt8:
+	case EAvidScriptRuntimeBindingKind::Int16:
+	case EAvidScriptRuntimeBindingKind::UInt16:
+	case EAvidScriptRuntimeBindingKind::Int32:
+	case EAvidScriptRuntimeBindingKind::UInt32:
+	case EAvidScriptRuntimeBindingKind::Int64:
+	case EAvidScriptRuntimeBindingKind::UInt64:
+	case EAvidScriptRuntimeBindingKind::Float:
+	case EAvidScriptRuntimeBindingKind::Double:
+	case EAvidScriptRuntimeBindingKind::Enum:
+	case EAvidScriptRuntimeBindingKind::Vector:
+	case EAvidScriptRuntimeBindingKind::Rotator:
+	case EAvidScriptRuntimeBindingKind::Transform:
+	case EAvidScriptRuntimeBindingKind::Object:
+	case EAvidScriptRuntimeBindingKind::Interface:
+		return true;
+	case EAvidScriptRuntimeBindingKind::StructWire:
+		return !Plan.Children.IsEmpty()
+			&& !Plan.Children.ContainsByPredicate(
+				[](const FAvidScriptRuntimeBindingValuePlan& Child)
+				{
+					return !IsAvidScriptAsyncActionCapturePlanSupported(
+						Child);
+				});
+	default:
+		return false;
+	}
+}
+
+struct FAvidScriptAsyncActionPayloadFieldPlan
+{
+	int32 WireOffset = INDEX_NONE;
+	FAvidScriptRuntimeBindingValuePlan Codec;
+};
+
+class FAvidScriptAsyncActionPayloadEncoder final
+	: public IAvidScriptBindingAsyncActionPayloadEncoder
+{
+public:
+	FAvidScriptAsyncActionPayloadEncoder(
+		FString InPayloadTypeId,
+		FString InOutcomeTypeId,
+		const int32 InOutcomeOrdinal,
+		TArray<FAvidScriptAsyncActionPayloadFieldPlan>&& InFields)
+		: PayloadTypeId(MoveTemp(InPayloadTypeId))
+		, OutcomeTypeId(MoveTemp(InOutcomeTypeId))
+		, OutcomeOrdinal(InOutcomeOrdinal)
+		, Fields(MoveTemp(InFields))
+	{
+	}
+
+	virtual bool Capture(
+		void* Parameters,
+		FAvidScriptBindingLatentCompletionPayload& OutPayload,
+		FString& OutError) const override
+	{
+		OutPayload = {};
+		OutError.Reset();
+		if (PayloadTypeId.IsEmpty()
+			|| OutcomeTypeId.IsEmpty()
+			|| OutcomeOrdinal < 0
+			|| (!Fields.IsEmpty() && Parameters == nullptr))
+		{
+			OutError = TEXT("async_action_payload_capture_invalid");
+			return false;
+		}
+
+		OutPayload.TypeId = PayloadTypeId;
+		OutPayload.Kind = EAvidScriptBindingLatentPayloadKind::Composite;
+		OutPayload.Fields.Reserve(Fields.Num() + 1);
+		FAvidScriptBindingLatentCompletionField& Discriminator =
+			OutPayload.Fields.AddDefaulted_GetRef();
+		Discriminator.WireOffset = 0;
+		Discriminator.TypeId = OutcomeTypeId;
+		Discriminator.Kind =
+			EAvidScriptBindingLatentPayloadKind::FixedWire;
+		Discriminator.Bytes.SetNumUninitialized(sizeof(int32));
+		FMemory::Memcpy(
+			Discriminator.Bytes.GetData(),
+			&OutcomeOrdinal,
+			sizeof(OutcomeOrdinal));
+
+		for (const FAvidScriptAsyncActionPayloadFieldPlan& Field : Fields)
+		{
+			FAvidScriptBindingLatentCompletionField Captured;
+			if (!UE::AvidScript::BindingPrivate::CaptureContinuationField(
+					Field.Codec,
+					Parameters,
+					Field.WireOffset,
+					Captured,
+					OutError))
+			{
+				OutPayload = {};
+				if (OutError.IsEmpty())
+				{
+					OutError = TEXT("async_action_payload_capture_failed");
+				}
+				return false;
+			}
+			OutPayload.Fields.Add(MoveTemp(Captured));
+		}
+		return true;
+	}
+
+private:
+	FString PayloadTypeId;
+	FString OutcomeTypeId;
+	int32 OutcomeOrdinal = INDEX_NONE;
+	TArray<FAvidScriptAsyncActionPayloadFieldPlan> Fields;
+};
+
 bool ResolveAvidScriptRuntimeAsyncActionContract(
 	UFunction* Function,
 	const FAvidScriptBindingFunctionModel& Binding,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& DeclaredTypesById,
 	FAvidScriptBindingAsyncActionContract& OutContract)
 {
 	OutContract = {};
@@ -553,8 +682,33 @@ bool ResolveAvidScriptRuntimeAsyncActionContract(
 		return false;
 	}
 
+	const FAvidScriptBindingTypeModel* const PayloadType =
+		DeclaredTypesById.FindRef(Binding.AsyncAction.PayloadTypeId);
+	const bool bCompositePayload = PayloadType != nullptr
+		&& PayloadType->Kind == TEXT("struct_wire")
+		&& !PayloadType->StructFields.IsEmpty()
+		&& PayloadType->StructFields[0].Name == TEXT("Outcome")
+		&& PayloadType->StructFields[0].WireOffset == 0;
+	const FAvidScriptBindingTypeModel* const OutcomeType =
+		PayloadType != nullptr && PayloadType->Kind == TEXT("enum")
+			? PayloadType
+			: bCompositePayload
+				? DeclaredTypesById.FindRef(
+					PayloadType->StructFields[0].TypeId)
+				: nullptr;
+	if (PayloadType == nullptr
+		|| (PayloadType->Kind != TEXT("enum") && !bCompositePayload)
+		|| OutcomeType == nullptr
+		|| OutcomeType->Kind != TEXT("enum")
+		|| OutcomeType->Size != sizeof(int32))
+	{
+		return false;
+	}
+
 	OutContract.ActionClass = ActionClass;
 	OutContract.PayloadTypeId = Binding.AsyncAction.PayloadTypeId;
+	TSet<FString> CapturedPayloadFields;
+	CapturedPayloadFields.Add(TEXT("Outcome"));
 	for (const FAvidScriptBindingAsyncActionOutcomeModel& Outcome :
 		Binding.AsyncAction.Outcomes)
 	{
@@ -565,18 +719,6 @@ bool ResolveAvidScriptRuntimeAsyncActionContract(
 		UFunction* const Signature = DelegateProperty == nullptr
 			? nullptr
 			: DelegateProperty->SignatureFunction;
-		bool bHasParameters = false;
-		if (Signature != nullptr)
-		{
-			for (TFieldIterator<FProperty> It(Signature); It; ++It)
-			{
-				if (It->HasAnyPropertyFlags(CPF_Parm))
-				{
-					bHasParameters = true;
-					break;
-				}
-			}
-		}
 		const FString ExpectedStableId = Signature == nullptr
 			? FString()
 			: FAvidScriptHash::Sha256HexUtf8(
@@ -587,21 +729,106 @@ bool ResolveAvidScriptRuntimeAsyncActionContract(
 		if (DelegateProperty == nullptr
 			|| !DelegateProperty->HasAnyPropertyFlags(CPF_BlueprintAssignable)
 			|| Signature == nullptr
-			|| bHasParameters
 			|| Outcome.Ordinal != OutContract.Outcomes.Num()
-			|| Outcome.StableId != ExpectedStableId)
+			|| Outcome.StableId != ExpectedStableId
+			|| !OutcomeType->EnumValues.ContainsByPredicate(
+				[&Outcome](const FAvidScriptBindingEnumValue& Value)
+				{
+					return Value.Name == Outcome.DelegateMember
+						&& Value.Value == Outcome.Ordinal;
+				}))
 		{
 			OutContract = {};
 			return false;
+		}
+
+		TArray<FAvidScriptAsyncActionPayloadFieldPlan> FieldPlans;
+		for (TFieldIterator<FProperty> It(Signature); It; ++It)
+		{
+			FProperty* const Property = *It;
+			if (!Property->HasAnyPropertyFlags(CPF_Parm)
+				|| Property->HasAnyPropertyFlags(CPF_ReturnParm))
+			{
+				continue;
+			}
+			if (!bCompositePayload)
+			{
+				OutContract = {};
+				return false;
+			}
+			const FString Direction =
+				GetAvidScriptRuntimePropertyDirection(Property);
+			const FString FieldName = Outcome.DelegateMember
+				+ TEXT("_") + Property->GetName();
+			const FAvidScriptBindingStructFieldModel* const Field =
+				PayloadType->StructFields.FindByPredicate(
+					[&FieldName](
+						const FAvidScriptBindingStructFieldModel& Candidate)
+					{
+						return Candidate.Name == FieldName;
+					});
+			const FAvidScriptBindingTypeModel* const FieldType =
+				Field == nullptr
+					? nullptr
+					: DeclaredTypesById.FindRef(Field->TypeId);
+			if ((Direction != TEXT("value")
+					&& Direction != TEXT("const_ref"))
+				|| Field == nullptr
+				|| FieldType == nullptr
+				|| CapturedPayloadFields.Contains(FieldName))
+			{
+				OutContract = {};
+				return false;
+			}
+
+			FAvidScriptBindingValueModel ValueModel;
+			ValueModel.Name = Property->GetName();
+			ValueModel.Direction = Direction;
+			ValueModel.CanonicalType = FieldType->CanonicalType;
+			ValueModel.TypeId = FieldType->StableId;
+			ValueModel.Kind = FieldType->Kind;
+			ValueModel.CppType = FieldType->CppType;
+			ValueModel.AbiTypes = FieldType->AbiTypes;
+			FAvidScriptAsyncActionPayloadFieldPlan FieldPlan;
+			FString PlanDetails;
+			if (!BuildAvidScriptRuntimeValuePlan(
+					Property,
+					ValueModel,
+					DeclaredTypesById,
+					0,
+					FieldPlan.Codec,
+					PlanDetails)
+				|| !IsAvidScriptAsyncActionCapturePlanSupported(
+					FieldPlan.Codec))
+			{
+				OutContract = {};
+				return false;
+			}
+			FieldPlan.Codec.TypeId = FieldType->StableId;
+			FieldPlan.WireOffset = Field->WireOffset;
+			FieldPlans.Add(MoveTemp(FieldPlan));
+			CapturedPayloadFields.Add(FieldName);
 		}
 
 		FAvidScriptBindingAsyncActionOutcomeContract RuntimeOutcome;
 		RuntimeOutcome.StableId = Outcome.StableId;
 		RuntimeOutcome.Ordinal = Outcome.Ordinal;
 		RuntimeOutcome.DelegateProperty = DelegateProperty;
+		if (bCompositePayload)
+		{
+			RuntimeOutcome.PayloadEncoder =
+				MakeShared<FAvidScriptAsyncActionPayloadEncoder>(
+					PayloadType->StableId,
+					OutcomeType->StableId,
+					Outcome.Ordinal,
+					MoveTemp(FieldPlans));
+		}
 		OutContract.Outcomes.Add(MoveTemp(RuntimeOutcome));
 	}
-	return OutContract.IsValid();
+	return OutContract.IsValid()
+		&& (!bCompositePayload
+			|| CapturedPayloadFields.Num()
+				== PayloadType->StructFields.Num());
 }
 
 bool IsAvidScriptRuntimePropertyReadable(const FProperty* Property)
@@ -4290,6 +4517,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			? ResolveAvidScriptRuntimeAsyncActionContract(
 				Function,
 				Binding,
+				DeclaredTypesById,
 				AsyncActionContract)
 			: bLatentBinding
 			? ResolveAvidScriptRuntimeLatentContract(
@@ -5857,6 +6085,14 @@ bool FAvidScriptBindingPackage::TryGetLatentCompletionResultType(
 	}
 	OutType = &Impl->LatentResultTypes[Ordinal].GetValue();
 	return true;
+}
+
+bool FAvidScriptBindingPackage::TryGetDescriptorType(
+	const FString& TypeId,
+	const FAvidScriptBindingTypeModel*& OutType) const
+{
+	OutType = Impl->DescriptorTypesById.FindRef(TypeId);
+	return OutType != nullptr;
 }
 
 int32 FAvidScriptBindingPackage::GetRequiredScratchSize() const

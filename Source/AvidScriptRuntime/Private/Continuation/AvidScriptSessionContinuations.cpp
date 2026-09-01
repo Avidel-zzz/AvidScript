@@ -1439,6 +1439,7 @@ int64 FAvidScriptSessionContinuations::BeginAsyncAction(
 		Stored.AsyncActionDelegates.Add(Delegate);
 		Stored.AsyncActionProperties.Add(Outcome.DelegateProperty);
 		Stored.AsyncActionBridgeTokens.Add(BridgeToken);
+		Stored.AsyncActionPayloadEncoders.Add(Outcome.PayloadEncoder);
 		AsyncActionRoutes.Add(BridgeToken, { Token, Outcome.Ordinal });
 	}
 
@@ -1450,7 +1451,6 @@ void FAvidScriptSessionContinuations::HandleAvidScriptDelegateBroadcast(
 	const uint64 SubscriptionToken,
 	void* Parameters)
 {
-	(void)Parameters;
 	if (!IsInGameThread() || bTearingDown || SubscriptionToken == 0)
 	{
 		return;
@@ -1486,33 +1486,61 @@ void FAvidScriptSessionContinuations::HandleAvidScriptDelegateBroadcast(
 	}
 
 	FAvidScriptBindingLatentCompletionPayload Payload;
-	Payload.TypeId = Entry.AsyncActionPayloadTypeId;
-	Payload.Kind = EAvidScriptBindingLatentPayloadKind::AbiCells;
-	Payload.AbiCells.Add(static_cast<uint64>(Route->OutcomeOrdinal));
-	FResultEntry Result;
-	Result.Lane = Entry.Lane;
-	Result.ActivationSerial = Entry.ActivationSerial;
-	Result.ContinuationToken = Entry.Token;
-	Result.Payload = MoveTemp(Payload);
+	FString CaptureError;
+	const bool bHasPayloadEncoder =
+		Entry.AsyncActionPayloadEncoders.IsValidIndex(
+			Route->OutcomeOrdinal)
+		&& Entry.AsyncActionPayloadEncoders[Route->OutcomeOrdinal].IsValid();
+	bool bPayloadCaptured = false;
+	if (bHasPayloadEncoder)
+	{
+		bPayloadCaptured =
+			Entry.AsyncActionPayloadEncoders[Route->OutcomeOrdinal]->Capture(
+				Parameters,
+				Payload,
+				CaptureError);
+	}
+	else
+	{
+		Payload.TypeId = Entry.AsyncActionPayloadTypeId;
+		Payload.Kind = EAvidScriptBindingLatentPayloadKind::AbiCells;
+		Payload.AbiCells.Add(static_cast<uint64>(Route->OutcomeOrdinal));
+		bPayloadCaptured = true;
+	}
 
 	FAvidScriptContinuationCompletion Completion;
 	Completion.CallbackId = Entry.CallbackId;
 	Completion.Token = Entry.Token;
-	Completion.Status = EAvidScriptContinuationStatus::Completed;
+	Completion.Status = bPayloadCaptured
+		? EAvidScriptContinuationStatus::Completed
+		: EAvidScriptContinuationStatus::Failed;
 	Completion.RegistrationSerial = Entry.RegistrationSerial;
-	if (!AllocateResult(
-			MoveTemp(Result),
-			Entry.ResultSlot,
-			Entry.ResultGeneration))
+	if (bPayloadCaptured)
 	{
-		Completion.Status = EAvidScriptContinuationStatus::Failed;
-		Entry.ResultSlot = 0;
-		Entry.ResultGeneration = 0;
+		FResultEntry Result;
+		Result.Lane = Entry.Lane;
+		Result.ActivationSerial = Entry.ActivationSerial;
+		Result.ContinuationToken = Entry.Token;
+		Result.Payload = MoveTemp(Payload);
+		if (AllocateResult(
+				MoveTemp(Result),
+				Entry.ResultSlot,
+				Entry.ResultGeneration))
+		{
+			Completion.ObjectSlot = Entry.ResultSlot;
+			Completion.ObjectGeneration = Entry.ResultGeneration;
+		}
+		else
+		{
+			Completion.Status = EAvidScriptContinuationStatus::Failed;
+			Entry.ResultSlot = 0;
+			Entry.ResultGeneration = 0;
+		}
 	}
 	else
 	{
-		Completion.ObjectSlot = Entry.ResultSlot;
-		Completion.ObjectGeneration = Entry.ResultGeneration;
+		Entry.ResultSlot = 0;
+		Entry.ResultGeneration = 0;
 	}
 	Entry.bReady = true;
 	ReleaseAsyncActionProducer(Entry);
@@ -2191,6 +2219,7 @@ void FAvidScriptSessionContinuations::ReleaseAsyncActionProducer(
 	Entry.AsyncActionDelegates.Reset();
 	Entry.AsyncActionBridges.Reset();
 	Entry.AsyncActionBridgeTokens.Reset();
+	Entry.AsyncActionPayloadEncoders.Reset();
 	if (UBlueprintAsyncActionBase* const AsyncAction =
 		Cast<UBlueprintAsyncActionBase>(Action))
 	{

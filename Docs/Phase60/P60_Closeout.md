@@ -38,12 +38,15 @@
   outcome、首广播获胜、结果槽恢复、显式取消、teardown 解绑定与晚到广播抑制；详见
   [P60.C2b](P60.C2b_Blueprint_Async_Action_Runtime.md)。
 - `P60.C2c1` 完成带参数 outcome 的确定性 result type graph 与 `AvidOutcomeAwaitable<TResult>` 生成；
-  Runtime payload 捕获仍待 C2c2；详见
+  详见
   [P60.C2c1](P60.C2c1_Blueprint_Async_Action_Payload_Schema.md)。
+- `P60.C2c2` 完成 immutable payload encoder、Delegate 广播参数帧捕获、对象强引用和 composite
+  result codec；详见
+  [P60.C2c2](P60.C2c2_Blueprint_Async_Action_Payload_Runtime.md)。
 
 ## 待完成
 
-- `P60.C2c2+` typed outcome Runtime、reload、Blueprint reinstance 与 C# await 端到端；
+- `P60.C2c3+` typed outcome C# await 端到端、reload 与 Blueprint reinstance；
 - `P60.D` 集成、性能与集中 Gate。
 
 ## 验收边界

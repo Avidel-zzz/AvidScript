@@ -8,6 +8,10 @@
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(
 	FAvidScriptRuntimeAsyncActionOutcome);
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+	FAvidScriptRuntimeAsyncActionPayloadOutcome,
+	int32, Value);
+
 UCLASS()
 class UAvidScriptRuntimeAsyncActionTestObject final
 	: public UBlueprintAsyncActionBase
@@ -46,4 +50,27 @@ public:
 
 	int32 ActivationCount = 0;
 	int32 OutcomeOnActivate = INDEX_NONE;
+};
+
+UCLASS()
+class UAvidScriptRuntimeAsyncActionPayloadTestObject final
+	: public UBlueprintAsyncActionBase
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(BlueprintAssignable)
+	FAvidScriptRuntimeAsyncActionPayloadOutcome Completed;
+
+	virtual void Activate() override
+	{
+		++ActivationCount;
+	}
+
+	void BroadcastCompleted(const int32 Value)
+	{
+		Completed.Broadcast(Value);
+	}
+
+	int32 ActivationCount = 0;
 };

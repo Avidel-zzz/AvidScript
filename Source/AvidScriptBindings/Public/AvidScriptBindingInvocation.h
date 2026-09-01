@@ -422,6 +422,9 @@ public:
 	bool TryGetLatentCompletionResultType(
 		uint32 Ordinal,
 		const FAvidScriptBindingTypeModel*& OutType) const;
+	bool TryGetDescriptorType(
+		const FString& TypeId,
+		const FAvidScriptBindingTypeModel*& OutType) const;
 	int32 GetRequiredScratchSize() const;
 	int32 GetObjectTypeCount() const;
 	bool TryResolveObjectType(uint32 Ordinal, UClass*& OutClass) const;

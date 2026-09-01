@@ -19,6 +19,47 @@
 
 namespace
 {
+class FAvidScriptTestAsyncActionPayloadEncoder final
+	: public IAvidScriptBindingAsyncActionPayloadEncoder
+{
+public:
+	FAvidScriptTestAsyncActionPayloadEncoder(
+		FString InPayloadTypeId,
+		FIntProperty& InValueProperty)
+		: PayloadTypeId(MoveTemp(InPayloadTypeId))
+		, ValueProperty(&InValueProperty)
+	{
+	}
+
+	virtual bool Capture(
+		void* Parameters,
+		FAvidScriptBindingLatentCompletionPayload& OutPayload,
+		FString& OutError) const override
+	{
+		OutPayload = {};
+		OutError.Reset();
+		if (Parameters == nullptr || ValueProperty == nullptr)
+		{
+			OutError = TEXT("test_async_action_payload_missing");
+			return false;
+		}
+		const int32 Value =
+			ValueProperty->GetPropertyValue_InContainer(Parameters);
+		OutPayload.TypeId = PayloadTypeId;
+		OutPayload.Kind = EAvidScriptBindingLatentPayloadKind::FixedWire;
+		OutPayload.Bytes.SetNumUninitialized(sizeof(Value));
+		FMemory::Memcpy(
+			OutPayload.Bytes.GetData(),
+			&Value,
+			sizeof(Value));
+		return true;
+	}
+
+private:
+	FString PayloadTypeId;
+	FIntProperty* ValueProperty = nullptr;
+};
+
 class FAvidScriptTestPendingLatentAction final : public FPendingLatentAction
 {
 public:
@@ -1364,6 +1405,97 @@ bool FAvidScriptContinuationBlueprintAsyncActionTest::RunTest(
 	TestTrue(
 		TEXT("Completed async action finalizes"),
 		Owner->FinalizeDispatched(CompletedToken, true));
+
+	FMulticastDelegateProperty* const PayloadCompletedProperty =
+		FindFProperty<FMulticastDelegateProperty>(
+			UAvidScriptRuntimeAsyncActionPayloadTestObject::StaticClass(),
+			GET_MEMBER_NAME_CHECKED(
+				UAvidScriptRuntimeAsyncActionPayloadTestObject,
+				Completed));
+	FIntProperty* const PayloadValueProperty =
+		PayloadCompletedProperty == nullptr
+			|| PayloadCompletedProperty->SignatureFunction == nullptr
+			? nullptr
+			: FindFProperty<FIntProperty>(
+				PayloadCompletedProperty->SignatureFunction,
+				TEXT("Value"));
+	if (!TestNotNull(
+			TEXT("Payload outcome resolves"),
+			PayloadCompletedProperty)
+		|| !TestNotNull(
+			TEXT("Payload outcome value resolves"),
+			PayloadValueProperty))
+	{
+		return false;
+	}
+	const FString PayloadTypeId = FString::ChrN(64, TEXT('b'));
+	FAvidScriptBindingAsyncActionContract MixedEncoderContract = Contract;
+	MixedEncoderContract.Outcomes[0].PayloadEncoder =
+		MakeShared<FAvidScriptTestAsyncActionPayloadEncoder>(
+			PayloadTypeId,
+			*PayloadValueProperty);
+	TestFalse(
+		TEXT("Mixed legacy and typed outcome encoders fail closed"),
+		MixedEncoderContract.IsValid());
+	FAvidScriptBindingAsyncActionContract PayloadContract;
+	PayloadContract.ActionClass =
+		UAvidScriptRuntimeAsyncActionPayloadTestObject::StaticClass();
+	PayloadContract.PayloadTypeId = PayloadTypeId;
+	FAvidScriptBindingAsyncActionOutcomeContract PayloadOutcome;
+	PayloadOutcome.StableId = FString::ChrN(64, TEXT('3'));
+	PayloadOutcome.Ordinal = 0;
+	PayloadOutcome.DelegateProperty = PayloadCompletedProperty;
+	PayloadOutcome.PayloadEncoder =
+		MakeShared<FAvidScriptTestAsyncActionPayloadEncoder>(
+			PayloadTypeId,
+			*PayloadValueProperty);
+	PayloadContract.Outcomes.Add(MoveTemp(PayloadOutcome));
+	TStrongObjectPtr<UAvidScriptRuntimeAsyncActionPayloadTestObject>
+		PayloadAction(
+			NewObject<UAvidScriptRuntimeAsyncActionPayloadTestObject>());
+	const int64 PayloadToken = Host.BeginAsyncAction(
+		605,
+		*PayloadAction,
+		PayloadContract,
+		Error);
+	TestNotEqual(
+		TEXT("Payload action returns a continuation token"),
+		PayloadToken,
+		0ll);
+	PayloadAction->BroadcastCompleted(73);
+	Owner->DrainReady(Completions);
+	if (TestEqual(
+			TEXT("Payload broadcast queues one completion"),
+			Completions.Num(),
+			1))
+	{
+		Payload = {};
+		TestTrue(
+			TEXT("Payload result remains consumable"),
+			Owner->ConsumeResult(
+				EAvidScriptContinuationLane::Active,
+				Host.GetActivationSerial(),
+				Completions[0].Token,
+				Completions[0].ObjectSlot,
+				Completions[0].ObjectGeneration,
+				PayloadTypeId,
+				Payload));
+		int32 CapturedValue = 0;
+		if (Payload.Bytes.Num() == sizeof(CapturedValue))
+		{
+			FMemory::Memcpy(
+				&CapturedValue,
+				Payload.Bytes.GetData(),
+				sizeof(CapturedValue));
+		}
+		TestEqual(
+			TEXT("Session captures the transient delegate parameter frame"),
+			CapturedValue,
+			73);
+		TestTrue(
+			TEXT("Payload async action finalizes"),
+			Owner->FinalizeDispatched(PayloadToken, true));
+	}
 
 	TStrongObjectPtr<UAvidScriptRuntimeAsyncActionTestObject> ImmediateAction(
 		NewObject<UAvidScriptRuntimeAsyncActionTestObject>());

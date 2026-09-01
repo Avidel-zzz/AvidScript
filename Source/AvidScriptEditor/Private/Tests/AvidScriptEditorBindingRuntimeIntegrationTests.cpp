@@ -6342,6 +6342,209 @@ bool FAvidScriptEditorBlueprintAsyncActionIntegrationTest::RunTest(
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBlueprintAsyncActionPayloadIntegrationTest,
+	"AvidScript.Editor.BindingRuntime.BlueprintAsyncActionPayload",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBlueprintAsyncActionPayloadIntegrationTest::RunTest(
+	const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+			TEXT("Payload async action descriptor generates"),
+			FAvidScriptEditorBindingDescriptorGenerator::Generate(
+				TEXT("avidscript.test.blueprint_async_action_payload_runtime"),
+				{
+					{
+						UAvidScriptEditorAsyncActionPayloadTestObject::StaticClass()
+							->GetPathName(),
+						TEXT("WaitForPayload")
+					}
+				},
+				DescriptorJson,
+				GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorCategory + TEXT(": ")
+			+ GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Descriptor;
+	FString ParseCategory;
+	FString ParseSource;
+	TSharedPtr<const FAvidScriptBindingPackage> Package;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	if (!TestTrue(
+			TEXT("Payload async action descriptor parses"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				DescriptorJson,
+				Descriptor,
+				ParseCategory,
+				ParseSource))
+		|| !TestTrue(
+			TEXT("Payload async action package prepares encoders"),
+			FAvidScriptBindingPackage::LoadDescriptor(
+				DescriptorJson,
+				Package,
+				LoadResult))
+		|| Descriptor.Bindings.Num() != 1)
+	{
+		AddError(ParseCategory + TEXT(": ") + ParseSource
+			+ TEXT(" ") + LoadResult.ErrorCategory + TEXT(": ")
+			+ LoadResult.ErrorDetails);
+		return false;
+	}
+
+	UWorld* World = nullptr;
+	if (!TestTrue(
+			TEXT("Payload async action world is created"),
+			CreateAvidScriptBindingRuntimeIntegrationWorld(World)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyAvidScriptBindingRuntimeIntegrationWorld(World);
+	};
+
+	FAvidScriptEditorLatentTestHost Host(*World);
+	FAvidScriptBindingInvocationContext InvocationContext;
+	InvocationContext.World = World;
+	InvocationContext.WritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+	InvocationContext.LatentHost = &Host;
+	TArray<uint8> Scratch;
+	Scratch.SetNumUninitialized(
+		FMath::Max(1, Package->GetRequiredScratchSize()));
+	const uint64 Arguments[] = { 72 };
+	FAvidScriptDynamicHostCall Call;
+	Call.BindingOrdinal = Descriptor.Bindings[0].Ordinal;
+	Call.Arguments = MakeArrayView(Arguments);
+	FAvidScriptDynamicHostCallResult Result;
+	if (!TestTrue(
+			TEXT("Payload async factory registers with the Session host"),
+			Package->Dispatch(
+				Call,
+				InvocationContext,
+				Scratch,
+				Result)))
+	{
+		AddError(Result.Details);
+		return false;
+	}
+
+	FMulticastDelegateProperty* const CompletedProperty =
+		FindFProperty<FMulticastDelegateProperty>(
+			UAvidScriptEditorAsyncActionPayloadTestObject::StaticClass(),
+			GET_MEMBER_NAME_CHECKED(
+				UAvidScriptEditorAsyncActionPayloadTestObject,
+				Completed));
+	const FAvidScriptBindingAsyncActionOutcomeContract* const CompletedOutcome =
+		Host.LastAsyncContract.Outcomes.FindByPredicate(
+			[CompletedProperty](
+				const FAvidScriptBindingAsyncActionOutcomeContract& Outcome)
+			{
+				return Outcome.DelegateProperty == CompletedProperty;
+			});
+	UFunction* const Signature = CompletedProperty == nullptr
+		? nullptr
+		: CompletedProperty->SignatureFunction;
+	FIntProperty* const ScoreProperty = Signature == nullptr
+		? nullptr
+		: FindFProperty<FIntProperty>(Signature, TEXT("Score"));
+	FObjectPropertyBase* const TargetProperty = Signature == nullptr
+		? nullptr
+		: FindFProperty<FObjectPropertyBase>(Signature, TEXT("Target"));
+	if (!TestNotNull(TEXT("Completed outcome resolves"), CompletedOutcome)
+		|| !TestTrue(
+			TEXT("Completed outcome owns an immutable payload encoder"),
+			CompletedOutcome != nullptr
+				&& CompletedOutcome->PayloadEncoder.IsValid())
+		|| !TestNotNull(TEXT("Completed signature resolves"), Signature)
+		|| !TestNotNull(TEXT("Score parameter resolves"), ScoreProperty)
+		|| !TestNotNull(TEXT("Target parameter resolves"), TargetProperty))
+	{
+		return false;
+	}
+
+	TArray<uint8> ParameterFrame;
+	ParameterFrame.SetNumZeroed(Signature->ParmsSize);
+	Signature->InitializeStruct(ParameterFrame.GetData());
+	ON_SCOPE_EXIT
+	{
+		Signature->DestroyStruct(ParameterFrame.GetData());
+	};
+	ScoreProperty->SetPropertyValue_InContainer(
+		ParameterFrame.GetData(),
+		314);
+	TStrongObjectPtr<UAvidScriptEditorAsyncActionPayloadTestObject> Target(
+		NewObject<UAvidScriptEditorAsyncActionPayloadTestObject>());
+	TargetProperty->SetObjectPropertyValue_InContainer(
+		ParameterFrame.GetData(),
+		Target.Get());
+	FAvidScriptBindingLatentCompletionPayload Payload;
+	FString CaptureError;
+	if (!TestTrue(
+			TEXT("Prepared encoder captures the transient parameter frame"),
+			CompletedOutcome->PayloadEncoder->Capture(
+				ParameterFrame.GetData(),
+				Payload,
+				CaptureError)))
+	{
+		AddError(CaptureError);
+		return false;
+	}
+	TestEqual(
+		TEXT("Captured payload keeps the generated result type"),
+		Payload.TypeId,
+		Host.LastAsyncContract.PayloadTypeId);
+	TestEqual(
+		TEXT("Captured payload uses composite wire fields"),
+		Payload.Kind,
+		EAvidScriptBindingLatentPayloadKind::Composite);
+	if (!TestEqual(
+			TEXT("Outcome, score and target are captured"),
+			Payload.Fields.Num(),
+			3))
+	{
+		return false;
+	}
+	if (!TestEqual(
+			TEXT("Outcome discriminator has fixed width"),
+			Payload.Fields[0].Bytes.Num(),
+			static_cast<int32>(sizeof(int32)))
+		|| !TestEqual(
+			TEXT("Score payload has fixed width"),
+			Payload.Fields[1].Bytes.Num(),
+			static_cast<int32>(sizeof(int32))))
+	{
+		return false;
+	}
+	int32 OutcomeOrdinal = INDEX_NONE;
+	int32 Score = 0;
+	FMemory::Memcpy(
+		&OutcomeOrdinal,
+		Payload.Fields[0].Bytes.GetData(),
+		sizeof(OutcomeOrdinal));
+	FMemory::Memcpy(
+		&Score,
+		Payload.Fields[1].Bytes.GetData(),
+		sizeof(Score));
+	TestEqual(
+		TEXT("Outcome discriminator keeps its generated ordinal"),
+		OutcomeOrdinal,
+		CompletedOutcome->Ordinal);
+	TestEqual(TEXT("Scalar payload value is captured"), Score, 314);
+	TestTrue(
+		TEXT("Object payload remains strongly owned until Guest resume"),
+		Payload.Fields[2].Kind
+				== EAvidScriptBindingLatentPayloadKind::Object
+			&& Payload.Fields[2].ObjectValue.Get() == Target.Get());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorBlueprintDeclaredFunctionIntegrationTest,
 	"AvidScript.Editor.BindingRuntime.BlueprintDeclaredFunction",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

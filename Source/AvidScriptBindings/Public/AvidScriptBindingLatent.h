@@ -14,7 +14,18 @@ enum class EAvidScriptBindingLatentPayloadKind : uint8
 	FixedWire,
 	Object,
 	Utf8,
-	Array
+	Array,
+	Composite
+};
+
+struct FAvidScriptBindingLatentCompletionField
+{
+	int32 WireOffset = INDEX_NONE;
+	FString TypeId;
+	EAvidScriptBindingLatentPayloadKind Kind =
+		EAvidScriptBindingLatentPayloadKind::FixedWire;
+	TArray<uint8> Bytes;
+	TStrongObjectPtr<UObject> ObjectValue;
 };
 
 struct FAvidScriptBindingLatentCompletionPayload
@@ -29,6 +40,18 @@ struct FAvidScriptBindingLatentCompletionPayload
 	int32 ElementCount = 0;
 	int32 ElementStride = 0;
 	int32 ElementAlignment = 1;
+	TArray<FAvidScriptBindingLatentCompletionField> Fields;
+};
+
+class IAvidScriptBindingAsyncActionPayloadEncoder
+{
+public:
+	virtual ~IAvidScriptBindingAsyncActionPayloadEncoder() = default;
+
+	virtual bool Capture(
+		void* Parameters,
+		FAvidScriptBindingLatentCompletionPayload& OutPayload,
+		FString& OutError) const = 0;
 };
 
 class IAvidScriptLatentCompletionProvider
@@ -108,6 +131,8 @@ struct FAvidScriptBindingAsyncActionOutcomeContract
 	FString StableId;
 	int32 Ordinal = INDEX_NONE;
 	FMulticastDelegateProperty* DelegateProperty = nullptr;
+	TSharedPtr<const IAvidScriptBindingAsyncActionPayloadEncoder>
+		PayloadEncoder;
 };
 
 struct FAvidScriptBindingAsyncActionContract
@@ -118,9 +143,21 @@ struct FAvidScriptBindingAsyncActionContract
 
 	bool IsValid() const
 	{
-		return ActionClass != nullptr
-			&& !PayloadTypeId.IsEmpty()
-			&& !Outcomes.IsEmpty();
+		if (ActionClass == nullptr
+			|| PayloadTypeId.IsEmpty()
+			|| Outcomes.IsEmpty())
+		{
+			return false;
+		}
+		const bool bUsesPayloadEncoders =
+			Outcomes[0].PayloadEncoder.IsValid();
+		return !Outcomes.ContainsByPredicate(
+			[bUsesPayloadEncoders](
+				const FAvidScriptBindingAsyncActionOutcomeContract& Outcome)
+			{
+				return Outcome.PayloadEncoder.IsValid()
+					!= bUsesPayloadEncoders;
+			});
 	}
 };
 
