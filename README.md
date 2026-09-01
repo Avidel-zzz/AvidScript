@@ -40,7 +40,7 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 | 发布 | 内容寻址 Generated Type bundle、NonUFS staging 与 Cook-layout Runtime load |
 | 后端 | Wasmtime 45 Win64 主后端；WAMR 兼容后端 |
 | 增量构建 | 双层产物缓存与 persistent Worker；无修改热构建零编译调用，5 轮中位数 `884 ms` |
-| 结构化诊断 | Debug Map v2、同步/async 序列点、稳定 probe ID 与可选后端无关插桩、跨层调用栈、Editor 源码导航 |
+| 结构化诊断 | Debug Map v2、同步/async 序列点、稳定 probe ID、双后端 probe 执行、跨层调用栈、Editor 源码导航 |
 
 Phase 60 的功能批次已完成：UE Interface 与默认参数、Delegate 双向调用、Blueprint
 callable/event，以及带 typed payload 的 AsyncAction `await` 已接入真实 C# Session Runtime。
@@ -52,9 +52,9 @@ callable/event，以及带 typed payload 的 AsyncAction `await` 已接入真实
 详细进度见 [Phase 60 中文收尾记录](Docs/Phase60/P60_Closeout.md)。
 
 Phase 61 已完成 `P61.A-P61.B`：完整产物缓存、persistent compiler、Debug Map v2、同步/异步
-序列点及 Editor 可导航调用栈已落地；`P61.C1a` 已加入可校验、跨函数唯一的稳定 probe ID，
-`P61.C1b-C1c` 已加入默认关闭的 `avidscript.avid_debug_probe(i64) -> i32` 插桩，并接入正式
-构建、persistent worker 与缓存身份；暂停、单步和变量查看仍未宣称可用。5 轮矩阵中，
+序列点及 Editor 可导航调用栈已落地；`P61.C1a-C1d` 已加入稳定 probe ID、可选插桩、构建缓存
+身份和 Wasmtime/WAMR 静态导入。带插桩的 WASM 现在可以加载执行，但 probe 默认 `Continue`，
+暂停、单步和变量查看仍未宣称可用。5 轮矩阵中，
 无修改、方法体、Binding 与工具链变更的
 中位耗时分别为 `884 / 1833 / 1826 / 3223 ms`；断点、变量查看和 Profiler 仍在后续批次。
 

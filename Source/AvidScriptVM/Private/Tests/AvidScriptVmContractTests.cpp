@@ -236,6 +236,9 @@ bool FAvidScriptVmBackendInfoContractTest::RunTest(const FString& Parameters)
 	TestTrue(
 		TEXT("structured stack capability is advertised"),
 		EnumHasAnyFlags(Info.Capabilities, EAvidScriptVmCapability::StructuredStack));
+	TestTrue(
+		TEXT("cooperative debug probe capability is advertised"),
+		EnumHasAnyFlags(Info.Capabilities, EAvidScriptVmCapability::DebugProbe));
 	TestFalse(TEXT("stable backend id is populated"), Info.StableBackendId.IsEmpty());
 	TestFalse(TEXT("runtime version is populated"), Info.RuntimeVersion.IsEmpty());
 	TestFalse(TEXT("runtime artifact identity is populated"), Info.RuntimeArtifactSha256.IsEmpty());
@@ -505,6 +508,37 @@ bool FAvidScriptVmP58StaticImportContractTest::RunTest(const FString& Parameters
 			&& !IsAvidScriptVmStaticHostImport(
 				TEXT("env"),
 				TEXT("avid_delegate_output_write")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmDebugProbeImportContractTest,
+	"AvidScript.Architecture.VM.DebugProbeImportContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmDebugProbeImportContractTest::RunTest(const FString& Parameters)
+{
+	const FAvidScriptVmStaticHostImport& Probe =
+		GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::DebugProbe);
+	TestEqual(
+		TEXT("Debug probe appends after the frozen P58 catalog"),
+		static_cast<uint16>(EAvidScriptHostBindingId::DebugProbe),
+		static_cast<uint16>(EAvidScriptHostBindingId::DelegateOutputWrite) + 1);
+	TestEqual(
+		TEXT("Debug probe uses the compiler ABI import name"),
+		FString(UTF8_TO_TCHAR(Probe.ImportName)),
+		FString(TEXT("avid_debug_probe")));
+	TestEqual(
+		TEXT("Debug probe consumes i64 and returns i32 action"),
+		FString(UTF8_TO_TCHAR(Probe.Signature)),
+		FString(TEXT("(I)i")));
+	TestFalse(
+		TEXT("Debug probe is not exposed through legacy env"),
+		Probe.bSupportsEnvCompatibility);
+	TestTrue(
+		TEXT("Debug probe is registered only in avidscript"),
+		IsAvidScriptVmStaticHostImport(TEXT("avidscript"), TEXT("avid_debug_probe"))
+			&& !IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("avid_debug_probe")));
 	return true;
 }
 
@@ -985,6 +1019,13 @@ public:
 	{
 		++CallCount;
 		LastBindingId = Call.BindingId;
+		if (Call.BindingId == EAvidScriptHostBindingId::DebugProbe)
+		{
+			LastInt64Argument = Call.Int64Args[0];
+			OutResult.bSucceeded = true;
+			OutResult.ReturnValue = static_cast<int32>(EAvidScriptDebugProbeAction::Pause);
+			return true;
+		}
 		OutResult.bSucceeded = Call.BindingId == EAvidScriptHostBindingId::HostAddI32;
 		OutResult.ReturnValue = Call.IntArgs[0] + 1;
 		return OutResult.bSucceeded;
@@ -992,6 +1033,7 @@ public:
 
 	int32 CallCount = 0;
 	EAvidScriptHostBindingId LastBindingId = EAvidScriptHostBindingId::Invalid;
+	int64 LastInt64Argument = 0;
 };
 
 class FAvidScriptVmContinuationHostDispatcher final : public IAvidScriptHostDispatcher
@@ -1030,6 +1072,52 @@ public:
 	int32 ObjectPathId = 0;
 	int32 LoadCallbackId = 0;
 };
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmDebugProbeStaticInvocationTest,
+	"AvidScript.Architecture.VM.DebugProbeStaticInvocation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmDebugProbeStaticInvocationTest::RunTest(const FString& Parameters)
+{
+	const FAvidScriptVmStaticHostImport& Import =
+		GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::DebugProbe);
+	FAvidScriptVmAbiSignature Signature;
+	FString FailureDetails;
+	if (!TestTrue(
+			TEXT("Debug probe catalog signature parses"),
+			ParseAvidScriptVmAbiSignature(
+				UTF8_TO_TCHAR(Import.Signature),
+				Signature,
+				FailureDetails)))
+	{
+		return false;
+	}
+
+	constexpr int64 ProbeId = 0x123456789abcdef0LL;
+	FAvidScriptVmStaticValue Argument;
+	Argument.Kind = EAvidScriptVmValueKind::I64;
+	Argument.I64 = ProbeId;
+	FAvidScriptVmTestHostDispatcher Dispatcher;
+	FAvidScriptNonBorrowingGuestMemory GuestMemory;
+	FAvidScriptVmStaticCallResult Result;
+	TestTrue(
+		TEXT("Static catalog dispatches debug probe"),
+		InvokeAvidScriptVmStaticHostImport(
+			Import,
+			Signature,
+			MakeArrayView(&Argument, 1),
+			&Dispatcher,
+			GuestMemory,
+			Result,
+			FailureDetails));
+	TestEqual(TEXT("Probe id is forwarded without truncation"), Dispatcher.LastInt64Argument, ProbeId);
+	TestEqual(
+		TEXT("Probe action is returned to the Guest"),
+		Result.I32,
+		static_cast<int32>(EAvidScriptDebugProbeAction::Pause));
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(

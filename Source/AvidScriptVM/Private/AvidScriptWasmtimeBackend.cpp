@@ -61,7 +61,8 @@ FAvidScriptVmBackendInfo MakeWasmtimeBackendInfo(
 		: EAvidScriptVmExecutionMode::Jit;
 	Info.ArtifactFormat = ArtifactFormat;
 	Info.Capabilities = EAvidScriptVmCapability::GuestMemory
-		| EAvidScriptVmCapability::StructuredStack;
+		| EAvidScriptVmCapability::StructuredStack
+		| EAvidScriptVmCapability::DebugProbe;
 	if (ArtifactFormat == EAvidScriptVmArtifactFormat::WasmtimeSerialized)
 	{
 		Info.Capabilities |= EAvidScriptVmCapability::Aot

@@ -1178,6 +1178,29 @@ bool FAvidScriptRuntimeUtf8ValueHeapLifecycleTest::RunTest(
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptRuntimeDebugProbeContinueTest,
+	"AvidScript.Runtime.Diagnostics.DebugProbeContinue",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptRuntimeDebugProbeContinueTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptWasmRuntimeInstance Runtime;
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::DebugProbe;
+	Call.Int64Args[0] = 0x123456789abcdef0LL;
+	FAvidScriptHostCallResult Result;
+	TestTrue(
+		TEXT("Runtime accepts an inactive debug probe"),
+		Runtime.DispatchHostCall(Call, Result));
+	TestTrue(TEXT("Inactive debug probe succeeds"), Result.bSucceeded);
+	TestEqual(
+		TEXT("Inactive debug probe continues execution"),
+		Result.ReturnValue,
+		static_cast<int32>(EAvidScriptDebugProbeAction::Continue));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptRuntimeArrayValueHeapLifecycleTest,
 	"AvidScript.Runtime.ArrayValueHeap.Lifecycle",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

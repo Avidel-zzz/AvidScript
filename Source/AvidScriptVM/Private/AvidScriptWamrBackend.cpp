@@ -62,7 +62,8 @@ FAvidScriptVmBackendInfo MakeWamrBackendInfo()
 	Info.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
 	Info.Capabilities = EAvidScriptVmCapability::GuestMemory
 		| EAvidScriptVmCapability::Interpreter
-		| EAvidScriptVmCapability::StructuredStack;
+		| EAvidScriptVmCapability::StructuredStack
+		| EAvidScriptVmCapability::DebugProbe;
 	Info.StableBackendId = TEXT("wamr.interpreter");
 	Info.TargetTriple = GetWamrTargetTriple();
 #if AVIDSCRIPT_WITH_WAMR

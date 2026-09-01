@@ -1,6 +1,6 @@
 # Phase 61 收尾记录
 
-状态：实施中，`P61.A1-A3b`、`P61.B1a-B2` 已完成
+状态：实施中，`P61.A1-A3b`、`P61.B1a-B2`、`P61.C1a-C1d` 已完成
 
 ## 目标
 
@@ -42,10 +42,13 @@
 - 完成 `P61.B2` 结构化调用栈：Runtime 区分 C#、WASM、UE host import 与 UE entry，Editor
   Message Log 提供源码 action token，导航前验证项目边界与 source SHA；
 - 详细实现与证据见 [P61.B2 Editor 结构化调用栈](P61.B2_Editor_Structured_Call_Stack.md)。
+- 完成 `P61.C1a-C1d` 调试 probe 基础闭环：稳定 64 位身份、可选 Guest IR 插桩、正式
+  build/worker/cache profile，以及 Wasmtime/WAMR 静态导入和 inactive `Continue` 分发；
+- 详细实现与证据见 [P61.C1d VM 调试 Probe 能力](P61.C1d_VM_Debug_Probe_Capability.md)。
 
 ## 待完成
 
-- `P61.C` 断点、单步与变量查看；
+- `P61.C2-C4` Session debug lane、断点、单步与变量查看；
 - `P61.D` Profiler 与 IDE workspace；
 - `P61.E` 集成与集中 Gate。
 

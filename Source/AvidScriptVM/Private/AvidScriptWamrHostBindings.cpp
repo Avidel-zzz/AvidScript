@@ -1098,6 +1098,21 @@ int32_t DelegateOutputWrite(
 		: 0;
 }
 
+int32_t DebugProbe(wasm_exec_env_t ExecEnv, int64_t ProbeId)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::DebugProbe;
+	Call.Int64Args[0] = ProbeId;
+	FAvidScriptHostCallResult Result;
+	return Dispatch(
+		ExecEnv,
+		StaticImportName(EAvidScriptHostBindingId::DebugProbe),
+		Call,
+		Result)
+		? Result.ReturnValue
+		: static_cast<int32>(EAvidScriptDebugProbeAction::Abort);
+}
+
 void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 {
 	switch (BindingId)
@@ -1150,6 +1165,7 @@ void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 	case EAvidScriptHostBindingId::ValueContainerFind: return reinterpret_cast<void*>(ValueContainerFind);
 	case EAvidScriptHostBindingId::ValueContainerUpsert: return reinterpret_cast<void*>(ValueContainerUpsert);
 	case EAvidScriptHostBindingId::ValueContainerRemove: return reinterpret_cast<void*>(ValueContainerRemove);
+	case EAvidScriptHostBindingId::DebugProbe: return reinterpret_cast<void*>(DebugProbe);
 	default: return nullptr;
 	}
 }

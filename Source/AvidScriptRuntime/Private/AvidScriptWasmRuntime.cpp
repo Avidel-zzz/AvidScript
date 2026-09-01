@@ -6853,6 +6853,10 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 	case EAvidScriptHostBindingId::HostFailI32:
 		HandleHostFailI32Import(Call.IntArgs[0]);
 		return Finish(0, false);
+	case EAvidScriptHostBindingId::DebugProbe:
+		return Finish(
+			static_cast<int32>(EAvidScriptDebugProbeAction::Continue),
+			true);
 	case EAvidScriptHostBindingId::OwnerGetSlot:
 	{
 		const int32 Value = HandleOwnerGetSlotImport();

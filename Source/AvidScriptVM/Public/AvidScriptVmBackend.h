@@ -38,9 +38,17 @@ enum class EAvidScriptVmCapability : uint32
 	Aot = 1 << 2,
 	Jit = 1 << 3,
 	PrecompiledArtifact = 1 << 4,
-	StructuredStack = 1 << 5
+	StructuredStack = 1 << 5,
+	DebugProbe = 1 << 6
 };
 ENUM_CLASS_FLAGS(EAvidScriptVmCapability);
+
+enum class EAvidScriptDebugProbeAction : int32
+{
+	Continue = 0,
+	Pause = 1,
+	Abort = 2
+};
 
 struct FAvidScriptVmBackendInfo
 {
@@ -158,7 +166,8 @@ enum class EAvidScriptHostBindingId : uint16
 	ValueContainerFind,
 	ValueContainerUpsert,
 	ValueContainerRemove,
-	DelegateOutputWrite
+	DelegateOutputWrite,
+	DebugProbe
 };
 
 struct FAvidScriptVmStackFrame

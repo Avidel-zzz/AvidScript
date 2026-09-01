@@ -2673,6 +2673,7 @@ $CanonicalStaticImportNames = @(
 	'event_subscribe',
 	'event_unsubscribe',
 	'avid_delegate_output_write',
+	'avid_debug_probe',
 	'avid_data_lane_epoch',
     'avid_data_lane_submit',
     'avid_value_array_length',
@@ -2696,6 +2697,7 @@ $CompatibilityStaticImportNames = @(
         $_ -notin @(
 			'avid_owner_get_handle',
 			'avid_delegate_output_write',
+			'avid_debug_probe',
 			'avid_data_lane_epoch',
             'avid_data_lane_submit',
             'avid_value_array_length',
@@ -4287,7 +4289,7 @@ foreach ($RequiredAsyncDebugContract in @(
     @{ Source = $CSharpAsyncLowererSource; Token = '$"async:{segment.Ordinal}:await"' },
     @{ Source = $CSharpAsyncCfgLowererSource; Token = '$"async:{segment.Ordinal}:await"' },
     @{ Source = $CSharpAsyncControlFlowLowererSource; Token = 'DebugLocation(operation, "return")' },
-    @{ Source = $CSharpGuestDebugMapProjectorSource; Token = 'BuildSequencePoints(function)' },
+    @{ Source = $CSharpGuestDebugMapProjectorSource; Token = 'BuildSequencePoints(moduleId, function, probeIds)' },
     @{ Source = $CSharpGuestDebugMapProjectorSource; Token = 'GuestDebugIdentity.Terminator' },
     @{ Source = $CSharpDataLaneFusionSource; Token = 'call.Instruction.DebugLocation' }
 )) {
