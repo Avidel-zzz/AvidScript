@@ -560,6 +560,7 @@ bool FAvidScriptEditorBindingDescriptorGeneratedNativePropertyTest::RunTest(
 		Rule.ExcludeFunctions.Add(TEXT("SetAlternateRoutedValue"));
 		Rule.ExcludeFunctions.Add(TEXT("SetGeneratedSetterInt"));
 		Rule.ExcludeFunctions.Add(TEXT("SetRoutedValue"));
+		Rule.ExcludeFunctions.Add(TEXT("RecordBlueprintDeclaredCall"));
 		Rule.IncludeProperties.Add(PropertyName);
 		Rule.GeneratedNativeProperties.Add(PropertyName);
 		if (bWritable)

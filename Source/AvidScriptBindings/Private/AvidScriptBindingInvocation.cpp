@@ -3158,6 +3158,15 @@ FAvidScriptBindingPackage::MakePreparedDynamicPlanForTesting(
 	{
 		return nullptr;
 	}
+	const int32 FrameSize = Function->GetStructureSize();
+	const int32 FrameAlignment = FMath::Max(1, Function->GetMinAlignment());
+	if (FrameSize < Function->ParmsSize
+		|| !FMath::IsPowerOfTwo(FrameAlignment)
+		|| FrameSize > MAX_int32 - (FrameAlignment - 1)
+		|| RequiredScratchSize < FrameSize + FrameAlignment - 1)
+	{
+		return nullptr;
+	}
 
 	TSharedPtr<FAvidScriptBindingPackage> Package =
 		MakeShareable(new FAvidScriptBindingPackage());
@@ -3174,6 +3183,8 @@ FAvidScriptBindingPackage::MakePreparedDynamicPlanForTesting(
 	Program.bStatic = bStatic;
 	Program.bRequiresGuestMemory = bRequiresGuestMemory;
 	Program.ExpectedArgumentCount = ExpectedArgumentCount;
+	Program.FrameSize = FrameSize;
+	Program.FrameAlignment = FrameAlignment;
 	Program.RequiredScratchSize = RequiredScratchSize;
 	Package->Impl->RequiredScratchSize = RequiredScratchSize;
 	Package->Impl->VmPackage.Imports.Add({

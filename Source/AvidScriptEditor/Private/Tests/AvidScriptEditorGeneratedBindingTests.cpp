@@ -270,6 +270,7 @@ bool FAvidScriptEditorGeneratedPropertyReachabilityTest::RunTest(
 	Rule.ExcludeFunctions.Add(TEXT("SetAlternateRoutedValue"));
 	Rule.ExcludeFunctions.Add(TEXT("SetGeneratedSetterInt"));
 	Rule.ExcludeFunctions.Add(TEXT("SetRoutedValue"));
+	Rule.ExcludeFunctions.Add(TEXT("RecordBlueprintDeclaredCall"));
 	Rule.IncludeProperties.Add(TEXT("GeneratedPublicInt"));
 	Rule.WritableProperties.Add(TEXT("GeneratedPublicInt"));
 	Rule.GeneratedNativeProperties.Add(TEXT("GeneratedPublicInt"));
