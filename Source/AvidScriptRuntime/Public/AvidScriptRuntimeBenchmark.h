@@ -36,6 +36,37 @@ struct FAvidScriptRuntimeBenchmarkResult
 	FAvidScriptBenchmarkStats Unload;
 };
 
+struct FAvidScriptProfilerOverheadBenchmarkOptions
+{
+	int32 WarmupCount = 3;
+	int32 SampleCount = 21;
+	int32 IterationsPerSample = 250000;
+	double MaximumDisabledP50Nanoseconds = 10.0;
+	double MaximumDisabledToEnabledRatio = 0.25;
+};
+
+struct FAvidScriptProfilerOverheadBenchmarkResult
+{
+	bool bSucceeded = false;
+	bool bWithinBudget = false;
+	int32 WarmupCount = 0;
+	int32 SampleCount = 0;
+	int32 IterationsPerSample = 0;
+	double DisabledP50Nanoseconds = 0.0;
+	double DisabledIncrementalP50Nanoseconds = 0.0;
+	double EnabledP50Nanoseconds = 0.0;
+	double DisabledToEnabledRatio = 0.0;
+	uint64 DisabledCapturedEventCount = 0;
+	uint64 EnabledCapturedEventCount = 0;
+	uint64 EnabledDroppedEventCount = 0;
+	FString ErrorCategory;
+	FString ErrorMessage;
+	FString Summary;
+	FAvidScriptBenchmarkStats ControlScope;
+	FAvidScriptBenchmarkStats DisabledScope;
+	FAvidScriptBenchmarkStats EnabledScope;
+};
+
 struct FAvidScriptTimerSchedulerBenchmarkOptions
 {
 	int32 WarmupCount = 3;
@@ -212,6 +243,10 @@ public:
 	static bool RunEmbeddedSmokeBenchmark(
 		const FAvidScriptRuntimeBenchmarkOptions& Options,
 		FAvidScriptRuntimeBenchmarkResult& OutResult);
+
+	static bool RunProfilerOverheadBenchmark(
+		const FAvidScriptProfilerOverheadBenchmarkOptions& Options,
+		FAvidScriptProfilerOverheadBenchmarkResult& OutResult);
 
 	static bool RunTimerSchedulerBenchmark(
 		const FAvidScriptTimerSchedulerBenchmarkOptions& Options,

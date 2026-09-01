@@ -98,10 +98,16 @@
 - 真实 Debug C# WASM 的 PIE 集成验证覆盖 Tick guest work、带源码 probe 的 host crossing、reload 与
   continuation，保持调试器和 profiler 使用同一个 Session 生命周期；
 - 详细实现与证据见 [P61.D1b Runtime Profiler 埋点](P61.D1b_Runtime_Profiler_Instrumentation.md)。
+- 完成 `P61.D1c` profiler disabled 性能门禁：`3` 轮预热、`21` 个样本、每样本 `250,000` 次，
+  交替测量 control、disabled 和 enabled scope；
+- 本机最终中位数为 control `1.538 ns/op`、disabled `1.989 ns/op`、enabled `33.318 ns/op`，
+  disabled 增量约 `0.451 ns/op`，占 enabled `5.97%`；
+- 门禁固定为 disabled `<= 10 ns/op` 且 `<= enabled 25%`，同时要求关闭采集零事件、开启采集事件总数守恒；
+- 详细实现与证据见 [P61.D1c Profiler disabled 性能门禁](P61.D1c_Profiler_Disabled_Performance_Gate.md)。
 
 ## 待完成
 
-- `P61.D1c-D3` disabled 性能门禁、Editor Profiler 与 IDE workspace；
+- `P61.D2-D4` Editor Profiler 与 IDE workspace；
 - `P61.E` 集成与集中 Gate。
 
 ## 人工验收边界

@@ -9,6 +9,7 @@
 #include "AvidScriptObjectRegistry.h"
 #include "AvidScriptObjectTypeBinding.h"
 #include "AvidScriptWasmRuntime.h"
+#include "Profiling/AvidScriptProfiler.h"
 
 #include "Components/ActorComponent.h"
 #include "Components/SceneComponent.h"
@@ -37,6 +38,7 @@ struct FAvidScriptTypedObjectWasmObservation
 };
 
 volatile uint64 GAvidScriptTypedObjectBenchmarkSink = 0;
+volatile uint64 GAvidScriptProfilerBenchmarkSink = 0;
 
 FORCENOINLINE uint64 CreateOpaqueTypedObjectBenchmarkRoundSeed(const uint64 RoundTag)
 {
@@ -73,6 +75,30 @@ FORCENOINLINE uint64 ConsumeTypedObjectBenchmarkValue(
 		* 0x100000001b3ull;
 	GAvidScriptTypedObjectBenchmarkSink = Mixed;
 	return Mixed;
+}
+
+uint64 MixProfilerBenchmarkValue(const uint64 Accumulator, const uint64 OperationTag)
+{
+	uint64 Mixed = Accumulator ^ (OperationTag + 0x9e3779b97f4a7c15ull);
+	Mixed ^= Mixed >> 30;
+	Mixed *= 0xbf58476d1ce4e5b9ull;
+	Mixed ^= Mixed >> 27;
+	return Mixed;
+}
+
+void SetProfilerOverheadFailure(
+	FAvidScriptProfilerOverheadBenchmarkResult& OutResult,
+	const FString& ErrorCategory,
+	const FString& ErrorMessage)
+{
+	OutResult.bSucceeded = false;
+	OutResult.bWithinBudget = false;
+	OutResult.ErrorCategory = ErrorCategory;
+	OutResult.ErrorMessage = ErrorMessage;
+	OutResult.Summary = FString::Printf(
+		TEXT("profiler_overhead_benchmark_failed | category=%s | message=%s"),
+		ErrorCategory.IsEmpty() ? TEXT("<none>") : *ErrorCategory,
+		ErrorMessage.IsEmpty() ? TEXT("<none>") : *ErrorMessage);
 }
 
 FAvidScriptBenchmarkStats CalculateStats(TArray<double> Samples)
@@ -1803,6 +1829,162 @@ bool FAvidScriptRuntimeBenchmark::RunTypedObjectBenchmark(
 		OutResult.BindingPackageReflectedNameLookupsDuringWarmLoop,
 		OutResult.UpcastHostImportsPerIteration,
 		*OutResult.ExistingTypedBindingRegressionStatus);
+	UE_LOG(LogAvidScriptRuntimeBenchmark, Display, TEXT("%s"), *OutResult.Summary);
+	return true;
+}
+
+bool FAvidScriptRuntimeBenchmark::RunProfilerOverheadBenchmark(
+	const FAvidScriptProfilerOverheadBenchmarkOptions& Options,
+	FAvidScriptProfilerOverheadBenchmarkResult& OutResult)
+{
+	OutResult = FAvidScriptProfilerOverheadBenchmarkResult();
+	OutResult.WarmupCount = Options.WarmupCount;
+	OutResult.SampleCount = Options.SampleCount;
+	OutResult.IterationsPerSample = Options.IterationsPerSample;
+	if (Options.WarmupCount < 0
+		|| Options.SampleCount < 5
+		|| Options.IterationsPerSample < 1000
+		|| Options.MaximumDisabledP50Nanoseconds <= 0.0
+		|| Options.MaximumDisabledToEnabledRatio <= 0.0)
+	{
+		SetProfilerOverheadFailure(
+			OutResult,
+			TEXT("invalid_options"),
+			TEXT("Profiler overhead benchmark requires non-negative warmup, at least five samples, at least 1000 iterations, and positive budgets."));
+		return false;
+	}
+
+	FAvidScriptProfilerEventBuffer DisabledBuffer(256);
+	FAvidScriptProfilerEventBuffer EnabledBuffer(256);
+	EnabledBuffer.SetBufferEnabled(true);
+	if (DisabledBuffer.IsCaptureEnabled())
+	{
+		SetProfilerOverheadFailure(
+			OutResult,
+			TEXT("trace_channel_enabled"),
+			TEXT("Disable the AvidScriptProfiler UE Trace channel before measuring the buffer-disabled fast path."));
+		return false;
+	}
+
+	TArray<double> ControlSamples;
+	TArray<double> DisabledSamples;
+	TArray<double> EnabledSamples;
+	ControlSamples.Reserve(Options.SampleCount);
+	DisabledSamples.Reserve(Options.SampleCount);
+	EnabledSamples.Reserve(Options.SampleCount);
+
+	auto MeasureControl = [&](const uint64 RunSeed)
+	{
+		uint64 Accumulator = RunSeed;
+		const double StartSeconds = FPlatformTime::Seconds();
+		for (int32 Iteration = 0; Iteration < Options.IterationsPerSample; ++Iteration)
+		{
+			Accumulator = MixProfilerBenchmarkValue(
+				Accumulator,
+				static_cast<uint64>(Iteration + 1));
+		}
+		const double ElapsedMs = MeasureElapsedPerIterationMs(
+			StartSeconds,
+			Options.IterationsPerSample);
+		GAvidScriptProfilerBenchmarkSink = Accumulator;
+		return ElapsedMs;
+	};
+	auto MeasureScope = [&](FAvidScriptProfilerEventBuffer& Buffer, const uint64 RunSeed)
+	{
+		uint64 Accumulator = RunSeed;
+		const double StartSeconds = FPlatformTime::Seconds();
+		for (int32 Iteration = 0; Iteration < Options.IterationsPerSample; ++Iteration)
+		{
+			Accumulator = MixProfilerBenchmarkValue(
+				Accumulator,
+				static_cast<uint64>(Iteration + 1));
+			FAvidScriptProfilerScope Scope(
+				&Buffer,
+				EAvidScriptProfilerEventKind::GuestCall,
+				static_cast<uint32>(EAvidScriptProfilerOperation::Tick),
+				0,
+				0,
+				Accumulator);
+			Scope.SetSucceeded(true);
+		}
+		const double ElapsedMs = MeasureElapsedPerIterationMs(
+			StartSeconds,
+			Options.IterationsPerSample);
+		GAvidScriptProfilerBenchmarkSink = Accumulator;
+		return ElapsedMs;
+	};
+
+	const int32 TotalRuns = Options.WarmupCount + Options.SampleCount;
+	for (int32 RunIndex = 0; RunIndex < TotalRuns; ++RunIndex)
+	{
+		const uint64 Seed = static_cast<uint64>(RunIndex + 1) * 0x94d049bb133111ebull;
+		double ControlMs = 0.0;
+		double DisabledMs = 0.0;
+		double EnabledMs = 0.0;
+		if ((RunIndex & 1) == 0)
+		{
+			ControlMs = MeasureControl(Seed);
+			DisabledMs = MeasureScope(DisabledBuffer, Seed);
+			EnabledMs = MeasureScope(EnabledBuffer, Seed);
+		}
+		else
+		{
+			EnabledMs = MeasureScope(EnabledBuffer, Seed);
+			DisabledMs = MeasureScope(DisabledBuffer, Seed);
+			ControlMs = MeasureControl(Seed);
+		}
+		if (RunIndex >= Options.WarmupCount)
+		{
+			ControlSamples.Add(ControlMs);
+			DisabledSamples.Add(DisabledMs);
+			EnabledSamples.Add(EnabledMs);
+		}
+	}
+
+	OutResult.ControlScope = CalculateStats(MoveTemp(ControlSamples));
+	OutResult.DisabledScope = CalculateStats(MoveTemp(DisabledSamples));
+	OutResult.EnabledScope = CalculateStats(MoveTemp(EnabledSamples));
+	OutResult.DisabledP50Nanoseconds = OutResult.DisabledScope.P50Ms * 1000000.0;
+	OutResult.DisabledIncrementalP50Nanoseconds = FMath::Max(
+		0.0,
+		(OutResult.DisabledScope.P50Ms - OutResult.ControlScope.P50Ms) * 1000000.0);
+	OutResult.EnabledP50Nanoseconds = OutResult.EnabledScope.P50Ms * 1000000.0;
+	OutResult.DisabledToEnabledRatio = OutResult.EnabledP50Nanoseconds > 0.0
+		? OutResult.DisabledP50Nanoseconds / OutResult.EnabledP50Nanoseconds
+		: TNumericLimits<double>::Max();
+	const FAvidScriptProfilerSnapshot DisabledSnapshot = DisabledBuffer.Snapshot();
+	const FAvidScriptProfilerSnapshot EnabledSnapshot = EnabledBuffer.Snapshot();
+	OutResult.DisabledCapturedEventCount = static_cast<uint64>(DisabledSnapshot.Events.Num());
+	OutResult.EnabledCapturedEventCount = static_cast<uint64>(EnabledSnapshot.Events.Num());
+	OutResult.EnabledDroppedEventCount = EnabledSnapshot.DroppedEventCount;
+	EnabledBuffer.SetBufferEnabled(false);
+
+	const uint64 EnabledOperationCount = static_cast<uint64>(TotalRuns)
+		* static_cast<uint64>(Options.IterationsPerSample);
+	OutResult.bWithinBudget = OutResult.DisabledCapturedEventCount == 0
+		&& OutResult.EnabledCapturedEventCount + OutResult.EnabledDroppedEventCount
+			== EnabledOperationCount
+		&& OutResult.DisabledP50Nanoseconds <= Options.MaximumDisabledP50Nanoseconds
+		&& OutResult.DisabledToEnabledRatio <= Options.MaximumDisabledToEnabledRatio;
+	OutResult.bSucceeded = true;
+	OutResult.Summary = FString::Printf(
+		TEXT("profiler_overhead_benchmark | warmup=%d | samples=%d | iterations=%d | control_p50_ns=%.3f | disabled_p50_ns=%.3f | disabled_incremental_p50_ns=%.3f | disabled_p95_ns=%.3f | enabled_p50_ns=%.3f | enabled_p95_ns=%.3f | disabled_to_enabled_ratio=%.4f | disabled_events=%llu | enabled_events=%llu | enabled_dropped=%llu | max_disabled_p50_ns=%.3f | max_disabled_to_enabled_ratio=%.4f | budget=%s"),
+		OutResult.WarmupCount,
+		OutResult.SampleCount,
+		OutResult.IterationsPerSample,
+		OutResult.ControlScope.P50Ms * 1000000.0,
+		OutResult.DisabledP50Nanoseconds,
+		OutResult.DisabledIncrementalP50Nanoseconds,
+		OutResult.DisabledScope.P95Ms * 1000000.0,
+		OutResult.EnabledP50Nanoseconds,
+		OutResult.EnabledScope.P95Ms * 1000000.0,
+		OutResult.DisabledToEnabledRatio,
+		OutResult.DisabledCapturedEventCount,
+		OutResult.EnabledCapturedEventCount,
+		OutResult.EnabledDroppedEventCount,
+		Options.MaximumDisabledP50Nanoseconds,
+		Options.MaximumDisabledToEnabledRatio,
+		OutResult.bWithinBudget ? TEXT("pass") : TEXT("fail"));
 	UE_LOG(LogAvidScriptRuntimeBenchmark, Display, TEXT("%s"), *OutResult.Summary);
 	return true;
 }

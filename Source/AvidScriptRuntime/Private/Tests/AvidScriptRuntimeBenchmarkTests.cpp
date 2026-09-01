@@ -40,6 +40,43 @@ bool FAvidScriptRuntimeMicrobenchmarkSmokeTest::RunTest(const FString& Parameter
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptProfilerDisabledPerformanceGateTest,
+	"AvidScript.Performance.ProfilerDisabledGate",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptProfilerDisabledPerformanceGateTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptProfilerOverheadBenchmarkOptions Options;
+	FAvidScriptProfilerOverheadBenchmarkResult Result;
+	const bool bSucceeded = FAvidScriptRuntimeBenchmark::RunProfilerOverheadBenchmark(
+		Options,
+		Result);
+	if (!bSucceeded)
+	{
+		AddError(Result.ErrorMessage);
+	}
+
+	TestTrue(TEXT("Profiler overhead benchmark succeeds"), Result.bSucceeded);
+	TestTrue(TEXT("Profiler disabled path stays within budget"), Result.bWithinBudget);
+	TestEqual(TEXT("Profiler disabled path captures no event"), Result.DisabledCapturedEventCount, uint64(0));
+	TestTrue(TEXT("Profiler enabled control captures events"), Result.EnabledCapturedEventCount > 0);
+	const uint64 EnabledOperationCount = static_cast<uint64>(Options.WarmupCount + Options.SampleCount)
+		* static_cast<uint64>(Options.IterationsPerSample);
+	TestEqual(
+		TEXT("Profiler enabled capture accounts for every operation"),
+		Result.EnabledCapturedEventCount + Result.EnabledDroppedEventCount,
+		EnabledOperationCount);
+	TestTrue(
+		TEXT("Profiler disabled median is under the absolute budget"),
+		Result.DisabledP50Nanoseconds <= Options.MaximumDisabledP50Nanoseconds);
+	TestTrue(
+		TEXT("Profiler disabled median is a minority of enabled capture"),
+		Result.DisabledToEnabledRatio <= Options.MaximumDisabledToEnabledRatio);
+	TestTrue(TEXT("Profiler benchmark summary is emitted"), Result.Summary.Contains(TEXT("budget=pass")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptTimerSchedulerBenchmarkSmokeTest,
 	"AvidScript.Performance.TimerSchedulerBenchmarkSmoke",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
