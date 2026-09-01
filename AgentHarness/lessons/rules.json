@@ -478,6 +478,14 @@
       "prevention": "调用 git rev-parse、show 等命令时把 `HEAD^{tree}`、`ref^{commit}` 之类 revision 用单引号包围；证据脚本优先复用 PhaseWorkflow 的 Git helper，避免 PowerShell 把花括号解释为表达式。",
       "source": "observed:2026-09-01-P60.D",
       "last_observed": "2026-09-01 P60.D 读取 Gate tree 时未引用 HEAD^{tree}，PowerShell 错误拆解 revision；只读命令失败且仓库未发生改动"
+    },
+    {
+      "id": "phase-freeze-prechecks-full-commit-range",
+      "tags": ["phase", "git", "whitespace", "privacy", "workflow"],
+      "summary": "阶段 freeze 前的格式与隐私预检必须覆盖完整 Phase commit range。",
+      "prevention": "从状态读取 phase.start_commit，并在 freeze 前运行与 close 相同的 `git diff --check start_commit..HEAD -- .` 及隐私/禁止路径检查；局部 working-tree diff 通过不能替代全阶段提交范围检查。",
+      "source": "observed:2026-09-01-P60.D",
+      "last_observed": "2026-09-01 P60.D 局部 diff --check 均通过，但 close 才发现 Phase 早期架构文档两处 Markdown 行尾空格，导致 ASPW4032 并要求重新 attestation"
     }
   ]
 }
