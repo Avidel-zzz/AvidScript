@@ -126,10 +126,13 @@
 - 完成 `P61.D4b` 离线源码索引：原子发布 schema v1 JSON，记录项目相对源码身份、角色与 SHA-256；
 - 索引 Reader 对 schema、路径穿越、角色和哈希失败关闭，Workspace Result 暴露路径与内容哈希；
 - 详细实现与证据见 [P61.D4b 离线源码索引](P61.D4b_Offline_Source_Index.md)。
+- 完成 `P61.D4c1` IDE 启动服务：可注入 host 统一支持默认关联、Visual Studio、Rider 与 VS Code；
+- 结构化启动计划和失败分类已经 Automation 验证，测试不会真实拉起外部 IDE；
+- 详细实现与证据见 [P61.D4c1 IDE 启动服务](P61.D4c1_IDE_Launch_Service.md)。
 
 ## 待完成
 
-- `P61.D4c` IDE 启动工作流；
+- `P61.D4c2` Editor IDE 打开命令；
 - `P61.E` 集成与集中 Gate。
 
 ## 人工验收边界
