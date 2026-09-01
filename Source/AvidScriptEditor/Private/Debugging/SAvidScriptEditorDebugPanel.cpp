@@ -2,6 +2,7 @@
 
 #include "AvidScriptEditorDiagnosticNavigation.h"
 #include "Debugging/AvidScriptEditorDebugTargetController.h"
+#include "Profiling/SAvidScriptEditorProfilerPanel.h"
 #include "Misc/Paths.h"
 #include "Styling/AppStyle.h"
 #include "Widgets/DeclarativeSyntaxSupport.h"
@@ -15,6 +16,8 @@
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Layout/SSplitter.h"
+#include "Widgets/Layout/SUniformGridPanel.h"
+#include "Widgets/Layout/SWidgetSwitcher.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 
@@ -77,7 +80,6 @@ public:
 	{
 		Controller = InController;
 		StatusText = LOCTEXT("WaitingForPIE", "Start PIE to discover an AvidScript target.");
-
 		ChildSlot
 		[
 			SNew(SVerticalBox)
@@ -89,40 +91,23 @@ public:
 			]
 			+ SVerticalBox::Slot()
 			.AutoHeight()
-			.Padding(8.0f, 2.0f)
+			.Padding(8.0f, 2.0f, 8.0f, 3.0f)
 			[
-				BuildBreakpointInput()
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(8.0f, 3.0f)
-			[
-				SNew(SButton)
-				.ButtonStyle(FAppStyle::Get(), "SimpleButton")
-				.ContentPadding(FMargin(4.0f, 2.0f))
-				.ToolTipText(LOCTEXT("OpenPausedSourceToolTip", "Open the active paused C# source location."))
-				.OnClicked(this, &SAvidScriptEditorDebugPanel::HandleOpenPausedSource)
-				.IsEnabled(this, &SAvidScriptEditorDebugPanel::CanOpenPausedSource)
-				[
-					SNew(STextBlock)
-					.Text(this, &SAvidScriptEditorDebugPanel::GetPausedSourceText)
-				]
+				BuildPageSelector()
 			]
 			+ SVerticalBox::Slot()
 			.FillHeight(1.0f)
 			.Padding(8.0f, 3.0f)
 			[
-				SNew(SSplitter)
-				.Orientation(Orient_Vertical)
-				+ SSplitter::Slot()
-				.Value(0.5f)
+				SAssignNew(WorkspaceSwitcher, SWidgetSwitcher)
+				.WidgetIndex(CurrentWorkspace)
+				+ SWidgetSwitcher::Slot()
 				[
-					BuildBreakpointList()
+					BuildDebuggerWorkspace()
 				]
-				+ SSplitter::Slot()
-				.Value(0.5f)
+				+ SWidgetSwitcher::Slot()
 				[
-					BuildVariableList()
+					MakeAvidScriptEditorProfilerPanel(Controller.ToSharedRef())
 				]
 			]
 			+ SVerticalBox::Slot()
@@ -132,6 +117,12 @@ public:
 				SNew(STextBlock)
 				.Text(this, &SAvidScriptEditorDebugPanel::GetStatusText)
 				.AutoWrapText(true)
+				.Visibility_Lambda([this]()
+				{
+					return CurrentWorkspace == 0
+						? EVisibility::Visible
+						: EVisibility::Collapsed;
+				})
 			]
 		];
 
@@ -217,6 +208,100 @@ private:
 					LOCTEXT("RefreshDebuggerToolTip", "Refresh PIE targets and debugger state."),
 					FOnClicked::CreateSP(this, &SAvidScriptEditorDebugPanel::HandleRefresh),
 					TAttribute<bool>(true))
+			];
+	}
+
+	TSharedRef<SWidget> BuildPageSelector()
+	{
+		return SNew(SUniformGridPanel)
+			.SlotPadding(FMargin(1.0f))
+			+ SUniformGridPanel::Slot(0, 0)
+			[
+				SNew(SCheckBox)
+				.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+				.IsChecked_Lambda([this]()
+				{
+					return CurrentWorkspace == 0
+						? ECheckBoxState::Checked
+						: ECheckBoxState::Unchecked;
+				})
+				.OnCheckStateChanged_Lambda([this](const ECheckBoxState State)
+				{
+					if (State == ECheckBoxState::Checked)
+					{
+						SetWorkspace(0);
+					}
+				})
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("DebuggerWorkspaceTab", "Debugger"))
+					.Justification(ETextJustify::Center)
+				]
+			]
+			+ SUniformGridPanel::Slot(1, 0)
+			[
+				SNew(SCheckBox)
+				.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+				.IsChecked_Lambda([this]()
+				{
+					return CurrentWorkspace == 1
+						? ECheckBoxState::Checked
+						: ECheckBoxState::Unchecked;
+				})
+				.OnCheckStateChanged_Lambda([this](const ECheckBoxState State)
+				{
+					if (State == ECheckBoxState::Checked)
+					{
+						SetWorkspace(1);
+					}
+				})
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("ProfilerWorkspaceTab", "Profiler"))
+					.Justification(ETextJustify::Center)
+				]
+			];
+	}
+
+	TSharedRef<SWidget> BuildDebuggerWorkspace()
+	{
+		return SNew(SVerticalBox)
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 0.0f, 0.0f, 3.0f)
+			[
+				BuildBreakpointInput()
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 0.0f, 0.0f, 3.0f)
+			[
+				SNew(SButton)
+				.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+				.ContentPadding(FMargin(4.0f, 2.0f))
+				.ToolTipText(LOCTEXT("OpenPausedSourceToolTip", "Open the active paused C# source location."))
+				.OnClicked(this, &SAvidScriptEditorDebugPanel::HandleOpenPausedSource)
+				.IsEnabled(this, &SAvidScriptEditorDebugPanel::CanOpenPausedSource)
+				[
+					SNew(STextBlock)
+					.Text(this, &SAvidScriptEditorDebugPanel::GetPausedSourceText)
+				]
+			]
+			+ SVerticalBox::Slot()
+			.FillHeight(1.0f)
+			[
+				SNew(SSplitter)
+				.Orientation(Orient_Vertical)
+				+ SSplitter::Slot()
+				.Value(0.5f)
+				[
+					BuildBreakpointList()
+				]
+				+ SSplitter::Slot()
+				.Value(0.5f)
+				[
+					BuildVariableList()
+				]
 			];
 	}
 
@@ -531,6 +616,17 @@ private:
 		}
 	}
 
+	void SetWorkspace(const int32 Workspace)
+	{
+		CurrentWorkspace = FMath::Clamp(Workspace, 0, 1);
+		LastCommandError.Reset();
+		if (WorkspaceSwitcher.IsValid())
+		{
+			WorkspaceSwitcher->SetActiveWidgetIndex(CurrentWorkspace);
+		}
+		RefreshPanel();
+	}
+
 	TSharedRef<SWidget> GenerateTargetWidget(
 		TSharedPtr<FAvidScriptDebugTargetOption> Option) const
 	{
@@ -685,6 +781,7 @@ private:
 	TSharedPtr<FAvidScriptEditorDebugTargetController> Controller;
 	TArray<TSharedPtr<FAvidScriptDebugTargetOption>> TargetOptions;
 	TSharedPtr<SComboBox<TSharedPtr<FAvidScriptDebugTargetOption>>> TargetCombo;
+	TSharedPtr<SWidgetSwitcher> WorkspaceSwitcher;
 	TSharedPtr<SEditableTextBox> SourceInput;
 	TSharedPtr<SVerticalBox> BreakpointRows;
 	TSharedPtr<SVerticalBox> VariableRows;
@@ -692,6 +789,7 @@ private:
 	FString LastCommandError;
 	FText StatusText;
 	int32 BreakpointLine = 1;
+	int32 CurrentWorkspace = 0;
 	bool bRefreshingTargets = false;
 };
 } // namespace

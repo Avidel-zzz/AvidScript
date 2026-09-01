@@ -114,10 +114,16 @@
 - target 切换、Session replacement、reload 与 PIE EndPlay 会同步重绑或失效 profiler，模型不保存 UObject；
 - fake target Controller Automation `1/1` 与真实 Debug C# WASM PIE Integration `1/1` 通过；
 - 详细实现与证据见 [P61.D2b Profiler target 生命周期](P61.D2b_Profiler_Target_Lifecycle.md)。
+- 完成 `P61.D2c` Profiler 面板：现有 Debugger Tab 增加 Debugger/Profiler 页签，提供 capture、reset、
+  Guest/UE/Async/Runtime/Build 类型过滤、最小时长、文本、失败事件、热点表、最新事件表、源码跳转与 JSON 导出；
+- Profiler Slate 独立成组件并自行维护刷新和状态，父调试面板只负责共享 target 与页面切换；
+- Slate 最多渲染最新 `250` 条匹配事件和前 `50` 个热点，仅在 snapshot revision 或过滤签名变化时重建；
+- `AvidScript.Editor.Debugging` `4/4`、`AvidScript.Editor.Profiling` `1/1`、UE5.8 Editor build 通过；
+- 详细实现与证据见 [P61.D2c Profiler 面板](P61.D2c_Profiler_Panel.md)。
 
 ## 待完成
 
-- `P61.D2c-D4` Profiler UI 与 IDE workspace；
+- `P61.D4` IDE workspace；
 - `P61.E` 集成与集中 Gate。
 
 ## 人工验收边界
