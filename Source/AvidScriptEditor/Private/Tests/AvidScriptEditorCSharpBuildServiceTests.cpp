@@ -194,7 +194,11 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 	Config.SemanticCacheRoot = NormalizeAvidScriptCSharpBuildTestPath(FPaths::Combine(
 		FPaths::ProjectSavedDir(),
 		TEXT("AvidScript/Tests/P43_5/CustomMover/CSharpSemanticCache/v1")));
+	Config.CompilationCacheRoot = NormalizeAvidScriptCSharpBuildTestPath(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScript/Tests/P61/A1/CustomMover/CSharpCompilationCache/v1")));
 	IFileManager::Get().DeleteDirectory(*Config.SemanticCacheRoot, false, true);
+	IFileManager::Get().DeleteDirectory(*Config.CompilationCacheRoot, false, true);
 
 	FAvidScriptEditorCSharpBuildResult BuildResult;
 	const bool bBuildSucceeded = FAvidScriptEditorCSharpBuildService::BuildProfile(Config, BuildResult);
@@ -211,6 +215,8 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 	TestEqual(TEXT("Cold custom C# profile records a cache miss"), BuildResult.SemanticCacheLookup, FString(TEXT("miss")));
 	TestFalse(TEXT("Cold custom C# profile records a semantic cache key"), BuildResult.SemanticCacheKey.IsEmpty());
 	TestTrue(TEXT("Cold custom C# profile publishes a semantic cache entry"), BuildResult.bSemanticCachePublished);
+	TestEqual(TEXT("Cold custom C# profile records a compilation cache miss"), BuildResult.CompilationCacheLookup, FString(TEXT("miss")));
+	TestTrue(TEXT("Cold custom C# profile publishes a compilation cache entry"), BuildResult.bCompilationCachePublished);
 	TestTrue(
 		TEXT("Custom C# profile records an authorization binding package manifest"),
 		FPaths::FileExists(BuildResult.AuthorizationBindingPackagePath));
@@ -375,6 +381,7 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 		TEXT("missing.csharp.report.json")));
 	ExplicitConfig.bEnableDataLaneFusion = false;
 	ExplicitConfig.bDisableSemanticCache = true;
+	ExplicitConfig.bDisableCompilationCache = true;
 	FAvidScriptEditorCSharpBuildResult ExplicitResult;
 	TestTrue(TEXT("Explicit package custom C# profile builds"), FAvidScriptEditorCSharpBuildService::BuildProfile(ExplicitConfig, ExplicitResult));
 	TestEqual(TEXT("Explicit package uses one build invocation"), ExplicitResult.BuildInvocationCount, 1);
@@ -503,6 +510,7 @@ bool FAvidScriptEditorCSharpBuildServiceGeneratedContainerFacadeTest::RunTest(
 	Config.BindingPackagePath = BindingPackage.ManifestPath;
 	Config.bEnableDataLaneFusion = false;
 	Config.bDisableSemanticCache = true;
+	Config.bDisableCompilationCache = true;
 
 	FAvidScriptEditorCSharpBuildResult BuildResult;
 	const bool bBuildSucceeded =
@@ -687,7 +695,11 @@ bool FAvidScriptEditorCSharpBuildServiceZeroBindingProfileTest::RunTest(const FS
 	Config.SemanticCacheRoot = NormalizeAvidScriptCSharpBuildTestPath(FPaths::Combine(
 		FPaths::ProjectSavedDir(),
 		TEXT("AvidScript/Tests/P43_5/ZeroBinding/CSharpSemanticCache/v1")));
+	Config.CompilationCacheRoot = NormalizeAvidScriptCSharpBuildTestPath(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScript/Tests/P61/A1/ZeroBinding/CSharpCompilationCache/v1")));
 	IFileManager::Get().DeleteDirectory(*Config.SemanticCacheRoot, false, true);
+	IFileManager::Get().DeleteDirectory(*Config.CompilationCacheRoot, false, true);
 
 	FAvidScriptEditorCSharpBuildResult BuildResult;
 	TestTrue(TEXT("Zero-binding custom C# profile builds"), FAvidScriptEditorCSharpBuildService::BuildProfile(Config, BuildResult));

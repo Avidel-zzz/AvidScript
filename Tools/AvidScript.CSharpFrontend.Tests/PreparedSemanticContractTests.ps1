@@ -183,6 +183,7 @@ Write-LifecycleSource `
     -Path $SourcePath `
     -BeginPlayBody "UE.Self.SetActorScale3D(new FVector(1.0f, 1.0f, 1.0f));"
 & $BuildScript `
+    -DisableCompilationCache `
     -DotNetPath $DotNetPath `
     -OutputRoot $FixtureRoot `
     -SourcePath $SourcePath `

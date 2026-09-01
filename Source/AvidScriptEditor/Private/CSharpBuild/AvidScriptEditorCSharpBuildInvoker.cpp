@@ -27,11 +27,13 @@ bool ApplyAvidScriptCSharpBuildReportMetadata(
 	if (!Report.bHasToolInvocations
 		|| !Report.bToolInvocationsValid
 		|| !Report.bHasSemanticCache
-		|| !Report.bSemanticCacheValid)
+		|| !Report.bSemanticCacheValid
+		|| !Report.bHasCompilationCache
+		|| !Report.bCompilationCacheValid)
 	{
 		SetAvidScriptCSharpBuildInvocationFailure(
 			TEXT("report_contract_invalid"),
-			TEXT("C# build report is missing valid tool_invocations or semantic_cache metadata."),
+			TEXT("C# build report is missing valid invocation or cache metadata."),
 			TEXT("regenerate the C# build report with the current AvidScript toolchain"),
 			OutResult);
 		return false;
@@ -51,6 +53,16 @@ bool ApplyAvidScriptCSharpBuildReportMetadata(
 	OutResult.bSemanticCachePublished = Report.bSemanticCachePublished;
 	OutResult.SemanticCacheDiagnosticCode = Report.SemanticCacheDiagnosticCode;
 	OutResult.SemanticCacheDiagnosticMessage = Report.SemanticCacheDiagnosticMessage;
+	OutResult.CompilationCacheSchemaVersion = Report.CompilationCacheSchemaVersion;
+	OutResult.bCompilationCacheEnabled = Report.bCompilationCacheEnabled;
+	OutResult.CompilationCacheKey = Report.CompilationCacheKey;
+	OutResult.CompilationCacheToolchainFingerprint = Report.CompilationCacheToolchainFingerprint;
+	OutResult.CompilationCacheLookup = Report.CompilationCacheLookup;
+	OutResult.CompilationCacheEntryReport = Report.CompilationCacheEntryReport;
+	OutResult.CompilationCacheEntryReportSha256 = Report.CompilationCacheEntryReportSha256;
+	OutResult.bCompilationCachePublished = Report.bCompilationCachePublished;
+	OutResult.CompilationCacheDiagnosticCode = Report.CompilationCacheDiagnosticCode;
+	OutResult.CompilationCacheDiagnosticMessage = Report.CompilationCacheDiagnosticMessage;
 	return true;
 }
 
@@ -152,6 +164,10 @@ FString BuildAvidScriptCSharpBuildInvocationParameters(const FAvidScriptEditorCS
 		Arguments,
 		TEXT("-SemanticCacheRoot"),
 		Config.SemanticCacheRoot);
+	AddAvidScriptCSharpBuildInvocationValueArgument(
+		Arguments,
+		TEXT("-CompilationCacheRoot"),
+		Config.CompilationCacheRoot);
 	AddAvidScriptCSharpBuildInvocationValueArgument(Arguments, TEXT("-BindingPackagePath"), Config.BindingPackagePath);
 	AddAvidScriptCSharpBuildInvocationValueArgument(
 		Arguments,
@@ -164,6 +180,10 @@ FString BuildAvidScriptCSharpBuildInvocationParameters(const FAvidScriptEditorCS
 	if (Config.bDisableSemanticCache)
 	{
 		Arguments.Add(TEXT("-DisableSemanticCache"));
+	}
+	if (Config.bDisableCompilationCache)
+	{
+		Arguments.Add(TEXT("-DisableCompilationCache"));
 	}
 	return FString::Join(Arguments, TEXT(" "));
 }

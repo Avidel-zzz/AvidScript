@@ -95,6 +95,18 @@ struct FAvidScriptFrontendReport
 	bool bSemanticCachePublished = false;
 	FString SemanticCacheDiagnosticCode;
 	FString SemanticCacheDiagnosticMessage;
+	bool bHasCompilationCache = false;
+	bool bCompilationCacheValid = false;
+	int32 CompilationCacheSchemaVersion = 0;
+	bool bCompilationCacheEnabled = false;
+	FString CompilationCacheKey;
+	FString CompilationCacheToolchainFingerprint;
+	FString CompilationCacheLookup;
+	FString CompilationCacheEntryReport;
+	FString CompilationCacheEntryReportSha256;
+	bool bCompilationCachePublished = false;
+	FString CompilationCacheDiagnosticCode;
+	FString CompilationCacheDiagnosticMessage;
 	int32 ExitCode = 0;
 	bool bSucceeded = false;
 	TArray<FAvidScriptFrontendDiagnostic> Diagnostics;

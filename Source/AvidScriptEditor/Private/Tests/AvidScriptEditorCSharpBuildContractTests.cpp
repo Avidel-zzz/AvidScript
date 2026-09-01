@@ -27,8 +27,10 @@ FString MakeCSharpContractScript(const FString& Body)
 		"    [string]$SourcePath, [string]$ProjectPath, [string]$ModuleId,\n"
 		"    [string]$ArtifactStem, [string]$ReportPath, [string]$ManifestPath,\n"
 		"    [string]$PreparedBuildReportPath, [string]$SemanticCacheRoot,\n"
+		"    [string]$CompilationCacheRoot,\n"
 		"    [string]$BindingPackagePath, [string]$RuntimeBindingPackagePath,\n"
-		"    [switch]$OmitRuntimeBindingPackage, [switch]$DisableSemanticCache)\n"
+		"    [switch]$OmitRuntimeBindingPackage, [switch]$DisableSemanticCache,\n"
+		"    [switch]$DisableCompilationCache)\n"
 		"$ErrorActionPreference = 'Stop'\n")) + Body + TEXT("\nexit 0\n");
 }
 
@@ -39,6 +41,12 @@ FString GetCSharpContractReportMetadataJson()
 		"\"key\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
 		"\"toolchain_fingerprint\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\","
 		"\"lookup\":\"miss\",\"entry_report_file\":\"\",\"entry_report_sha256\":\"\","
+		"\"published\":false,\"diagnostic_code\":\"\",\"diagnostic_message\":\"\"},"
+		"\"compilation_cache\":{\"schema_version\":1,\"enabled\":true,"
+		"\"key\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\","
+		"\"toolchain_fingerprint\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\","
+		"\"lookup\":\"hit\",\"entry_report_file\":\"entry.json\","
+		"\"entry_report_sha256\":\"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\","
 		"\"published\":false,\"diagnostic_code\":\"\",\"diagnostic_message\":\"\"},"
 		"\"tool_invocations\":{\"frontend\":1,\"semantic\":1,\"guest_ir\":1,\"wasm_backend\":1},");
 }
@@ -51,6 +59,10 @@ FString GetCSharpContractZeroInvocationReportMetadataJson()
 		"\"toolchain_fingerprint\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\","
 		"\"lookup\":\"miss\",\"entry_report_file\":\"\",\"entry_report_sha256\":\"\","
 		"\"published\":false,\"diagnostic_code\":\"\",\"diagnostic_message\":\"\"},"
+		"\"compilation_cache\":{\"schema_version\":1,\"enabled\":false,\"key\":\"\","
+		"\"toolchain_fingerprint\":\"\",\"lookup\":\"disabled\",\"entry_report_file\":\"\","
+		"\"entry_report_sha256\":\"\",\"published\":false,\"diagnostic_code\":\"\","
+		"\"diagnostic_message\":\"\"},"
 		"\"tool_invocations\":{\"frontend\":0,\"semantic\":0,\"guest_ir\":0,\"wasm_backend\":0},");
 }
 
@@ -75,6 +87,7 @@ FAvidScriptEditorCSharpBuildConfig MakeCSharpContractConfig(
 	Config.ReportPath = FAvidScriptEditorCSharpBuildService::MakeReportPathForOutputRoot(OutputRoot, Config.ArtifactStem);
 	Config.ManifestPath = FAvidScriptEditorCSharpBuildService::MakeManifestPathForOutputRoot(OutputRoot, Config.ArtifactStem);
 	Config.SemanticCacheRoot = NormalizeCSharpContractTestPath(FPaths::Combine(OutputRoot, TEXT("SemanticCache")));
+	Config.CompilationCacheRoot = NormalizeCSharpContractTestPath(FPaths::Combine(OutputRoot, TEXT("CompilationCache")));
 	return Config;
 }
 
@@ -137,6 +150,7 @@ bool FAvidScriptEditorCSharpBuildSuccessContractTest::RunTest(const FString& Par
 	TestEqual(TEXT("Failed report preserves Guest IR count"), FailedReportResult.GuestIrInvocationCount, 1);
 	TestEqual(TEXT("Failed report preserves WASM count"), FailedReportResult.WasmBackendInvocationCount, 1);
 	TestEqual(TEXT("Failed report preserves cache lookup"), FailedReportResult.SemanticCacheLookup, FString(TEXT("miss")));
+	TestEqual(TEXT("Failed report preserves compilation cache lookup"), FailedReportResult.CompilationCacheLookup, FString(TEXT("hit")));
 
 	const FString FrontendNotInvokedBody = FString::Printf(TEXT(
 		"$Json = '{\"schema_version\":1,\"result\":\"frontend_failed\",\"succeeded\":false,%s"
@@ -197,6 +211,7 @@ bool FAvidScriptEditorCSharpBuildSuccessContractTest::RunTest(const FString& Par
 	const FString NegativeCountBody = TEXT(
 		"$Json = '{\"schema_version\":1,\"result\":\"direct_abi_built\",\"succeeded\":true,"
 		"\"semantic_cache\":{\"schema_version\":1,\"enabled\":false,\"key\":\"\",\"toolchain_fingerprint\":\"\",\"lookup\":\"disabled\",\"entry_report_file\":\"\",\"entry_report_sha256\":\"\",\"published\":false,\"diagnostic_code\":\"\",\"diagnostic_message\":\"\"},"
+		"\"compilation_cache\":{\"schema_version\":1,\"enabled\":false,\"key\":\"\",\"toolchain_fingerprint\":\"\",\"lookup\":\"disabled\",\"entry_report_file\":\"\",\"entry_report_sha256\":\"\",\"published\":false,\"diagnostic_code\":\"\",\"diagnostic_message\":\"\"},"
 		"\"tool_invocations\":{\"frontend\":-1,\"semantic\":0,\"guest_ir\":0,\"wasm_backend\":0},\"diagnostics\":[]}'\n"
 		"[System.IO.File]::WriteAllText($ReportPath, $Json)");
 	const FAvidScriptEditorCSharpBuildConfig NegativeCountConfig = MakeCSharpContractConfig(

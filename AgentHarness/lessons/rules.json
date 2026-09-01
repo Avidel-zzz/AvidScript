@@ -486,6 +486,14 @@
       "prevention": "从状态读取 phase.start_commit，并在 freeze 前运行与 close 相同的 `git diff --check start_commit..HEAD -- .` 及隐私/禁止路径检查；局部 working-tree diff 通过不能替代全阶段提交范围检查。",
       "source": "observed:2026-09-01-P60.D",
       "last_observed": "2026-09-01 P60.D 局部 diff --check 均通过，但 close 才发现 Phase 早期架构文档两处 Markdown 行尾空格，导致 ASPW4032 并要求重新 attestation"
+    },
+    {
+      "id": "nested-powershell-command-protects-inner-variables",
+      "tags": ["powershell", "verification", "quoting", "workflow"],
+      "summary": "从 PowerShell 启动嵌套 PowerShell 时，外层双引号会提前展开内层变量。",
+      "prevention": "包含 `$paths`、`$path` 等内层变量的 `-Command` 使用外层单引号封装脚本块，或改用独立 `.ps1`；解析失败时先区分命令包装错误与被测脚本错误。",
+      "source": "observed:2026-09-01-P61.A1",
+      "last_observed": "2026-09-01 P61.A1 批量 PowerShell parser smoke 的内层 foreach 变量被外层提前展开，改用单引号脚本块后 3/3 解析通过"
     }
   ]
 }

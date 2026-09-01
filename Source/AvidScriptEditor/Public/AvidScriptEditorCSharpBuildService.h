@@ -22,6 +22,7 @@ struct FAvidScriptEditorCSharpBuildConfig
 	FString ManifestPath;
 	FString PreparedBuildReportPath;
 	FString SemanticCacheRoot;
+	FString CompilationCacheRoot;
 	FString BindingPackagePath;
 	FString RuntimeBindingPackagePath;
 	FString DotNetPath;
@@ -33,6 +34,7 @@ struct FAvidScriptEditorCSharpBuildConfig
 	bool bEnableDataLaneFusion = true;
 	bool bOmitRuntimeBindingPackage = false;
 	bool bDisableSemanticCache = false;
+	bool bDisableCompilationCache = false;
 };
 
 struct FAvidScriptEditorCSharpBuildRequest
@@ -79,6 +81,16 @@ struct FAvidScriptEditorCSharpBuildResult
 	bool bSemanticCachePublished = false;
 	FString SemanticCacheDiagnosticCode;
 	FString SemanticCacheDiagnosticMessage;
+	int32 CompilationCacheSchemaVersion = 0;
+	bool bCompilationCacheEnabled = false;
+	FString CompilationCacheKey;
+	FString CompilationCacheToolchainFingerprint;
+	FString CompilationCacheLookup;
+	FString CompilationCacheEntryReport;
+	FString CompilationCacheEntryReportSha256;
+	bool bCompilationCachePublished = false;
+	FString CompilationCacheDiagnosticCode;
+	FString CompilationCacheDiagnosticMessage;
 	FString BindingSelectionHash;
 	bool bReusedAuthorizationBindingPackage = false;
 	bool bVmArtifactPublished = false;

@@ -178,8 +178,9 @@ FString MakeAvidScriptCSharpProfileBuildAndBindDetails(
 	AddAvidScriptPresentationDetailLine(Lines, TEXT("Actor"), BindingResult.ActorPath);
 	AddAvidScriptPresentationDetailLine(Lines, TEXT("Stdout"), BuildResult.Stdout);
 	Lines.Add(FString::Printf(
-		TEXT("Pipeline: cache=%s build=%d frontend=%d semantic=%d guest_ir=%d wasm=%d"),
+		TEXT("Pipeline: semantic_cache=%s compilation_cache=%s build=%d frontend=%d semantic=%d guest_ir=%d wasm=%d"),
 		BuildResult.SemanticCacheLookup.IsEmpty() ? TEXT("not-reported") : *BuildResult.SemanticCacheLookup,
+		BuildResult.CompilationCacheLookup.IsEmpty() ? TEXT("not-reported") : *BuildResult.CompilationCacheLookup,
 		BuildResult.BuildInvocationCount,
 		BuildResult.FrontendInvocationCount,
 		BuildResult.SemanticInvocationCount,

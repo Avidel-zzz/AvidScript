@@ -996,6 +996,7 @@ bool BuildAvidScriptGeneratedBindingLifecycle(
 		Config.OutputRoot,
 		Config.ArtifactStem);
 	Config.SemanticCacheRoot = SemanticCacheRoot;
+	Config.CompilationCacheRoot = SemanticCacheRoot + TEXT(".compilation");
 	return FAvidScriptEditorCSharpBuildService::BuildProfile(Config, OutBuildResult);
 }
 
@@ -1021,6 +1022,7 @@ bool BuildAvidScriptPlayablePickup(
 		Config.OutputRoot,
 		Config.ArtifactStem);
 	Config.SemanticCacheRoot = SemanticCacheRoot;
+	Config.bDisableCompilationCache = true;
 	return FAvidScriptEditorCSharpBuildService::BuildProfile(Config, OutBuildResult);
 }
 
@@ -3649,6 +3651,7 @@ bool FAvidScriptEditorBindingRuntimeGeneratedCSharpLifecycleTest::RunTest(const 
 		TEXT("AvidScript/Tests/P43_5/GeneratedBindingLifecycle/CSharpSemanticCache/v1")));
 	FPaths::NormalizeFilename(SemanticCacheRoot);
 	IFileManager::Get().DeleteDirectory(*SemanticCacheRoot, false, true);
+	IFileManager::Get().DeleteDirectory(*(SemanticCacheRoot + TEXT(".compilation")), false, true);
 
 	FAvidScriptEditorCSharpBuildResult ColdBuildResult;
 	if (!TestTrue(
@@ -3665,6 +3668,8 @@ bool FAvidScriptEditorBindingRuntimeGeneratedCSharpLifecycleTest::RunTest(const 
 	TestEqual(TEXT("Cold lifecycle invokes WASM backend twice"), ColdBuildResult.WasmBackendInvocationCount, 2);
 	TestEqual(TEXT("Cold lifecycle records semantic cache miss"), ColdBuildResult.SemanticCacheLookup, FString(TEXT("miss")));
 	TestTrue(TEXT("Cold lifecycle publishes semantic cache entry"), ColdBuildResult.bSemanticCachePublished);
+	TestEqual(TEXT("Cold lifecycle records compilation cache miss"), ColdBuildResult.CompilationCacheLookup, FString(TEXT("miss")));
+	TestTrue(TEXT("Cold lifecycle publishes compilation cache entry"), ColdBuildResult.bCompilationCachePublished);
 
 	FAvidScriptWasmReloadManifest ColdManifest;
 	TArray<uint8> ColdBytecode;
@@ -3689,10 +3694,12 @@ bool FAvidScriptEditorBindingRuntimeGeneratedCSharpLifecycleTest::RunTest(const 
 	TestEqual(TEXT("Generated lifecycle performs bootstrap and final builds"), BuildResult.BuildInvocationCount, 2);
 	TestEqual(TEXT("Warm lifecycle skips the C# frontend"), BuildResult.FrontendInvocationCount, 0);
 	TestEqual(TEXT("Warm lifecycle skips C# semantic analysis"), BuildResult.SemanticInvocationCount, 0);
-	TestEqual(TEXT("Warm lifecycle still invokes Guest IR twice"), BuildResult.GuestIrInvocationCount, 2);
-	TestEqual(TEXT("Warm lifecycle still invokes WASM backend twice"), BuildResult.WasmBackendInvocationCount, 2);
+	TestEqual(TEXT("Warm lifecycle skips Guest IR"), BuildResult.GuestIrInvocationCount, 0);
+	TestEqual(TEXT("Warm lifecycle skips WASM backend"), BuildResult.WasmBackendInvocationCount, 0);
 	TestEqual(TEXT("Warm lifecycle records semantic cache hit"), BuildResult.SemanticCacheLookup, FString(TEXT("hit")));
 	TestFalse(TEXT("Warm lifecycle does not republish semantic cache entry"), BuildResult.bSemanticCachePublished);
+	TestEqual(TEXT("Warm lifecycle records compilation cache hit"), BuildResult.CompilationCacheLookup, FString(TEXT("hit")));
+	TestFalse(TEXT("Warm lifecycle does not republish compilation cache entry"), BuildResult.bCompilationCachePublished);
 
 	FAvidScriptWasmReloadManifest Manifest;
 	TArray<uint8> Bytecode;
@@ -4454,6 +4461,11 @@ bool FAvidScriptEditorBindingRuntimeProjectCSharpGameplayWorkspaceTest::RunTest(
 	ProfileResult.BuildConfig.SemanticCacheRoot = FPaths::Combine(
 		TestSavedRoot,
 		TEXT("CSharpSemanticCache/v1"));
+	ProfileResult.BuildConfig.CompilationCacheRoot = FPaths::Combine(
+		TestSavedRoot,
+		TEXT("CSharpCompilationCache/v1"));
+	IFileManager::Get().DeleteDirectory(*ProfileResult.BuildConfig.SemanticCacheRoot, false, true);
+	IFileManager::Get().DeleteDirectory(*ProfileResult.BuildConfig.CompilationCacheRoot, false, true);
 
 	FAvidScriptEditorCSharpBuildResult ColdBuildResult;
 	if (!TestTrue(
@@ -4471,6 +4483,7 @@ bool FAvidScriptEditorBindingRuntimeProjectCSharpGameplayWorkspaceTest::RunTest(
 	TestEqual(TEXT("Cold gameplay build invokes Guest IR twice"), ColdBuildResult.GuestIrInvocationCount, 2);
 	TestEqual(TEXT("Cold gameplay build invokes WASM twice"), ColdBuildResult.WasmBackendInvocationCount, 2);
 	TestEqual(TEXT("Cold gameplay build records cache miss"), ColdBuildResult.SemanticCacheLookup, FString(TEXT("miss")));
+	TestEqual(TEXT("Cold gameplay build records compilation cache miss"), ColdBuildResult.CompilationCacheLookup, FString(TEXT("miss")));
 	if (!AcceptAvidScriptProjectGameplayWorkspaceBuild(
 			*this,
 			TEXT("Cold gameplay workspace"),
@@ -4493,9 +4506,10 @@ bool FAvidScriptEditorBindingRuntimeProjectCSharpGameplayWorkspaceTest::RunTest(
 	TestEqual(TEXT("Warm gameplay build performs two build passes"), WarmBuildResult.BuildInvocationCount, 2);
 	TestEqual(TEXT("Warm gameplay build skips Frontend"), WarmBuildResult.FrontendInvocationCount, 0);
 	TestEqual(TEXT("Warm gameplay build skips Semantic"), WarmBuildResult.SemanticInvocationCount, 0);
-	TestEqual(TEXT("Warm gameplay build still invokes Guest IR twice"), WarmBuildResult.GuestIrInvocationCount, 2);
-	TestEqual(TEXT("Warm gameplay build still invokes WASM twice"), WarmBuildResult.WasmBackendInvocationCount, 2);
+	TestEqual(TEXT("Warm gameplay build skips Guest IR"), WarmBuildResult.GuestIrInvocationCount, 0);
+	TestEqual(TEXT("Warm gameplay build skips WASM"), WarmBuildResult.WasmBackendInvocationCount, 0);
 	TestEqual(TEXT("Warm gameplay build records cache hit"), WarmBuildResult.SemanticCacheLookup, FString(TEXT("hit")));
+	TestEqual(TEXT("Warm gameplay build records compilation cache hit"), WarmBuildResult.CompilationCacheLookup, FString(TEXT("hit")));
 	return AcceptAvidScriptProjectGameplayWorkspaceBuild(
 		*this,
 		TEXT("Warm gameplay workspace"),

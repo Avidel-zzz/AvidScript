@@ -54,6 +54,7 @@ $SeedRoot = Join-Path $RunRoot "Seed"
 $SeedReport = Join-Path $SeedRoot "actor_lifecycle.csharp.report.json"
 $SeedManifest = Join-Path $SeedRoot "actor_lifecycle.avidscript.json"
 & $BuildScript `
+    -DisableCompilationCache `
     -DotNetPath $DotNetPath `
     -OutputRoot $SeedRoot `
     -SourcePath $SourcePath `
@@ -149,6 +150,7 @@ $ZeroExportRoot = Join-Path $RunRoot "ZeroExport"
 $ZeroExportReport = Join-Path $ZeroExportRoot "zero_export.csharp.report.json"
 $ZeroExportManifest = Join-Path $ZeroExportRoot "zero_export.avidscript.json"
 & $BuildScript `
+    -DisableCompilationCache `
     -DotNetPath $DotNetPath `
     -OutputRoot $ZeroExportRoot `
     -SourcePath $SourcePath `
@@ -289,6 +291,7 @@ $GuestFailureRoot = Join-Path $RunRoot "GuestFailure"
 $GuestFailureReport = Join-Path $GuestFailureRoot "actor_lifecycle.csharp.report.json"
 $GuestFailureManifest = Join-Path $GuestFailureRoot "actor_lifecycle.avidscript.json"
 & $BuildScript `
+    -DisableCompilationCache `
     -DotNetPath $DotNetPath `
     -OutputRoot $GuestFailureRoot `
     -SourcePath $SourcePath `
@@ -340,6 +343,7 @@ $MissingExportRoot = Join-Path $RunRoot "MissingExport"
 $MissingExportReport = Join-Path $MissingExportRoot "actor_lifecycle.csharp.report.json"
 $MissingExportManifest = Join-Path $MissingExportRoot "actor_lifecycle.avidscript.json"
 & $BuildScript `
+    -DisableCompilationCache `
     -DotNetPath $DotNetPath `
     -OutputRoot $MissingExportRoot `
     -SourcePath $SourcePath `
@@ -376,6 +380,7 @@ $TamperedDebugRoot = Join-Path $RunRoot "TamperedDebug"
 $TamperedDebugReport = Join-Path $TamperedDebugRoot "actor_lifecycle.csharp.report.json"
 $TamperedDebugManifest = Join-Path $TamperedDebugRoot "actor_lifecycle.avidscript.json"
 & $BuildScript `
+    -DisableCompilationCache `
     -DotNetPath $DotNetPath `
     -OutputRoot $TamperedDebugRoot `
     -SourcePath $SourcePath `
@@ -405,6 +410,7 @@ $PublicationReportDirectory = Join-Path $PublicationRoot "ReportIsDirectory"
 $PublicationManifest = Join-Path $PublicationRoot "actor_lifecycle.avidscript.json"
 New-Item -ItemType Directory -Force -Path $PublicationReportDirectory | Out-Null
 & $BuildScript `
+    -DisableCompilationCache `
     -DotNetPath $DotNetPath `
     -OutputRoot $PublicationRoot `
     -SourcePath $SourcePath `
@@ -431,6 +437,7 @@ New-Item -ItemType Directory -Force -Path $PreparedFailureRoot | Out-Null
 [System.IO.File]::WriteAllText($PreparedFailureWasm, "stale-wasm", $Utf8)
 [System.IO.File]::WriteAllText($PreparedFailureDebugMap, "stale-debug-map", $Utf8)
 & $BuildScript `
+    -DisableCompilationCache `
     -DotNetPath $DotNetPath `
     -OutputRoot $PreparedFailureRoot `
     -SourcePath $SourcePath `

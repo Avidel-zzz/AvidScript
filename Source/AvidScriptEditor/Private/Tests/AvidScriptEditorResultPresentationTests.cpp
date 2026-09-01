@@ -268,6 +268,7 @@ bool FAvidScriptEditorPresentationCSharpProfileBuildAndBindSuccessTest::RunTest(
 	BuildResult.GuestIrInvocationCount = 2;
 	BuildResult.WasmBackendInvocationCount = 2;
 	BuildResult.SemanticCacheLookup = TEXT("hit");
+	BuildResult.CompilationCacheLookup = TEXT("miss");
 	const FAvidScriptEditorCommandPresentation Presentation =
 		FAvidScriptEditorResultPresenter::MakeCSharpProfileBuildAndBindPresentation(ProfilePath, BuildResult, BindingResult);
 	TestEqual(TEXT("C# profile build-and-bind success severity"), Presentation.Severity, EAvidScriptEditorPresentationSeverity::Info);
@@ -276,7 +277,8 @@ bool FAvidScriptEditorPresentationCSharpProfileBuildAndBindSuccessTest::RunTest(
 	TestTrue(TEXT("C# profile build-and-bind success body actor"), Presentation.Body.Contains(TEXT("AvidScriptProfileActor")));
 	TestTrue(TEXT("C# profile build-and-bind success details profile"), Presentation.Details.Contains(TEXT("default.csharp-profile.json")));
 	TestTrue(TEXT("C# profile build-and-bind success details report"), Presentation.Details.Contains(TEXT("csharp.report.json")));
-	TestTrue(TEXT("C# profile build-and-bind details include cache"), Presentation.Details.Contains(TEXT("cache=hit")));
+	TestTrue(TEXT("C# profile build-and-bind details include semantic cache"), Presentation.Details.Contains(TEXT("semantic_cache=hit")));
+	TestTrue(TEXT("C# profile build-and-bind details include compilation cache"), Presentation.Details.Contains(TEXT("compilation_cache=miss")));
 	TestTrue(TEXT("C# profile build-and-bind details include Frontend count"), Presentation.Details.Contains(TEXT("frontend=0")));
 	TestTrue(TEXT("C# profile build-and-bind details include WASM count"), Presentation.Details.Contains(TEXT("wasm=2")));
 	TestEqual(TEXT("C# profile build-and-bind source copied"), Presentation.SourcePath, BuildResult.SourcePath);

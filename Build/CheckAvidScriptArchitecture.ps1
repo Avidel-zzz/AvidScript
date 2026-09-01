@@ -1746,6 +1746,7 @@ $CSharpLiveReloadCompletionSource = Read-RequiredFile 'Source/AvidScriptEditor/P
 $CSharpPreparedSemanticSource = Read-RequiredFile 'Build/AvidScriptCSharpPreparedSemantic.ps1'
 $CSharpBindingPackageSource = Read-RequiredFile 'Build/AvidScriptCSharpBindingPackage.ps1'
 $CSharpSemanticCacheSource = Read-RequiredFile 'Build/AvidScriptCSharpSemanticCache.ps1'
+$CSharpCompilationCacheSource = Read-RequiredFile 'Build/AvidScriptCSharpCompilationCache.ps1'
 foreach ($RequiredChainedHandlerProfileContract in @(
     'BeforeHandlers',
     'AfterHandlers',
@@ -3457,6 +3458,22 @@ foreach ($RequiredSemanticCacheBuildContract in @(
         Add-Violation "C# build pipeline is missing semantic cache contract $RequiredSemanticCacheBuildContract"
     }
 }
+foreach ($RequiredCompilationCacheBuildContract in @(
+    'CompilationCacheRoot',
+    'DisableCompilationCache',
+    'Get-AvidScriptCSharpCompilationCacheContext',
+    'Import-AvidScriptCSharpCompilationCacheEntry',
+    'Publish-AvidScriptCSharpCompilationCacheEntry',
+    'compilation_cache',
+    'guest_ir_reused',
+    'debug_map_reused',
+    'state_schema_reused',
+    'wasm_reused'
+)) {
+    if (-not $CSharpBuildScriptSource.Contains($RequiredCompilationCacheBuildContract)) {
+        Add-Violation "C# build pipeline is missing compilation cache contract $RequiredCompilationCacheBuildContract"
+    }
+}
 foreach ($RequiredDirectAbiBuildContract in @(
     '$RequiredExports.Count -eq 0',
     'required_export_count = $RequiredExports.Count',
@@ -3585,6 +3602,41 @@ foreach ($ForbiddenSemanticCacheConcern in @(
 )) {
     if ($CSharpSemanticCacheSource -match $ForbiddenSemanticCacheConcern) {
         Add-Violation "C# semantic cache helper owns forbidden process, backend, or package-policy concern $ForbiddenSemanticCacheConcern"
+    }
+}
+foreach ($RequiredCompilationCacheContract in @(
+    'Get-AvidScriptCSharpCompilationCacheContext',
+    'Get-AvidScriptCompilationCacheToolchainFingerprint',
+    'Import-AvidScriptCSharpCompilationCacheEntry',
+    'Publish-AvidScriptCSharpCompilationCacheEntry',
+    'Assert-AvidScriptCompilationCacheArtifactPaths',
+    'guest_compiler_sha256',
+    'dotnet_sha256',
+    'guest_ir.json',
+    'debug_map.json',
+    'state_schema.json',
+    'module.wasm',
+    'wasm_inspection.json',
+    '.staging',
+    '.corrupt',
+    '.locks',
+    'ASBI4601',
+    'ASBI4602',
+    'ASBI4603',
+    'ASBI4604'
+)) {
+    if (-not $CSharpCompilationCacheSource.Contains($RequiredCompilationCacheContract)) {
+        Add-Violation "C# compilation cache helper is missing immutable artifact contract $RequiredCompilationCacheContract"
+    }
+}
+foreach ($ForbiddenCompilationCacheConcern in @(
+    '\bStart-Process\b',
+    '\bInvoke-AvidScriptPowerShell\b',
+    '\bUObject\b',
+    '\bProcessEvent\b'
+)) {
+    if ($CSharpCompilationCacheSource -match $ForbiddenCompilationCacheConcern) {
+        Add-Violation "C# compilation cache helper owns forbidden process or runtime concern $ForbiddenCompilationCacheConcern"
     }
 }
 if ($CSharpSemanticCacheSource -match 'Get-Content\s+-Raw\s+-LiteralPath\s+\$Source' -or

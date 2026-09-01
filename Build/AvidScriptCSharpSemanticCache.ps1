@@ -587,6 +587,7 @@ function Import-AvidScriptCSharpSemanticCacheEntry {
 
     $CanIsolate = $false
     $OwnedCacheLock = $null
+    $CorruptEntryPath = ""
     try {
         Assert-AvidScriptSemanticCacheContext -Context $Context -ProjectRoot $ProjectRoot
         Assert-AvidScriptSemanticCacheDestinations `
@@ -646,8 +647,15 @@ function Import-AvidScriptCSharpSemanticCacheEntry {
             -Code "ASBI4503" `
             -Message "Semantic cache entry report paths do not match the immutable entry layout."
         foreach ($LoadableField in @("manifest_file", "wasm_file", "guest_ir_file")) {
+            $LoadableProperty = $EntryReport.artifacts.PSObject.Properties[$LoadableField]
+            $LoadableValue = if ($null -eq $LoadableProperty) {
+                ""
+            }
+            else {
+                [string]$LoadableProperty.Value
+            }
             Assert-AvidScriptCSharpSemanticCache `
-                -Condition ([string]::IsNullOrWhiteSpace([string]$EntryReport.artifacts.$LoadableField)) `
+                -Condition ([string]::IsNullOrWhiteSpace($LoadableValue)) `
                 -Code "ASBI4502" `
                 -Message "Semantic cache entry must not reference $LoadableField."
         }

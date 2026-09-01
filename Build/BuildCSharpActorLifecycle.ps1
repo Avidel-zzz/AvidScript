@@ -14,11 +14,13 @@ param(
     [switch]$OmitRuntimeBindingPackage,
     [string]$PreparedBuildReportPath = "",
     [string]$SemanticCacheRoot = "",
+    [string]$CompilationCacheRoot = "",
     [ValidateSet("enabled", "disabled")]
     [string]$DataLaneFusion = "enabled",
     [switch]$AllowGeneratedTypeImports,
     [string]$GeneratedTypeManifestPath = "",
-    [switch]$DisableSemanticCache
+    [switch]$DisableSemanticCache,
+    [switch]$DisableCompilationCache
 )
 
 $ErrorActionPreference = "Stop"
@@ -37,6 +39,11 @@ $script:GeneratedTypeImportNames = [System.Collections.Generic.HashSet[string]]:
 $script:GeneratedTypeExportNames = [System.Collections.Generic.HashSet[string]]::new(
     [System.StringComparer]::Ordinal)
 . (Join-Path $BuildDir "AvidScriptCSharpSemanticCache.ps1")
+. (Join-Path $BuildDir "AvidScriptCSharpCompilationCache.ps1")
+
+if ([string]::IsNullOrWhiteSpace($CompilationCacheRoot)) {
+    $CompilationCacheRoot = Join-Path $ProjectRoot "Saved\AvidScript\CSharpCompilationCache\v1"
+}
 
 function Resolve-ExistingFile {
     param([string]$Path)
@@ -546,6 +553,7 @@ function Write-BuildReport {
         }
         build_reuse = $BuildReuse
         semantic_cache = $SemanticCache
+        compilation_cache = $CompilationCache
         tool_invocations = $ToolInvocations
         binding_authorization = New-BindingPackageReportValue `
             -PackageInfo $BindingAuthorizationInfo `
@@ -722,10 +730,26 @@ $BuildReuse = [ordered]@{
     prepared_report_sha256 = ""
     frontend_reused = $false
     semantic_reused = $false
+    guest_ir_reused = $false
+    debug_map_reused = $false
+    state_schema_reused = $false
+    wasm_reused = $false
 }
 $SemanticCache = [ordered]@{
     schema_version = 1
     enabled = -not [bool]$DisableSemanticCache
+    key = ""
+    toolchain_fingerprint = ""
+    lookup = "disabled"
+    entry_report_file = ""
+    entry_report_sha256 = ""
+    published = $false
+    diagnostic_code = ""
+    diagnostic_message = ""
+}
+$CompilationCache = [ordered]@{
+    schema_version = 1
+    enabled = -not [bool]$DisableCompilationCache
     key = ""
     toolchain_fingerprint = ""
     lookup = "disabled"
@@ -1025,24 +1049,104 @@ elseif (-not $SemanticCacheHit) {
 
 
 $FrontendArtifactSha256 = Get-Sha256Hex $FrontendArtifactPath
-$CompilerArguments = @(
-    "-NoProfile", "-ExecutionPolicy", "Bypass",
-    "-File", $GuestCompilerPath,
-    "-DotNetPath", $DotNet.Path,
-    "-SemanticPath", $SemanticArtifactPath,
-    "-FrontendArtifactSha256", $FrontendArtifactSha256,
-    "-GuestIrPath", $GuestIrArtifactPath,
-    "-DebugMapPath", $DebugMapArtifactPath,
-    "-StateSchemaPath", $StateSchemaArtifactPath,
-    "-WasmPath", $WasmArtifactPath,
-    "-InspectionPath", $WasmInspectionArtifactPath,
-    "-Configuration", $Configuration,
-    "-DataLaneFusion", $DataLaneFusion)
-    ++$ToolInvocations.guest_ir
-    ++$ToolInvocations.wasm_backend
-$CompilerInvocation = Invoke-AvidScriptPowerShell -Arguments $CompilerArguments
-$CompilerOutput = @($CompilerInvocation.Output)
-$CompilerExitCode = [int]$CompilerInvocation.ExitCode
+$SemanticSha256 = Get-Sha256Hex $SemanticArtifactPath
+$CompilationCacheContext = $null
+$CompilationCacheHit = $false
+if (-not $DisableCompilationCache) {
+    try {
+        $CompilationCacheContext = Get-AvidScriptCSharpCompilationCacheContext `
+            -PluginRoot $PluginRoot `
+            -ProjectRoot $ProjectRoot `
+            -CacheRoot $CompilationCacheRoot `
+            -SemanticArtifactPath $SemanticArtifactPath `
+            -FrontendArtifactSha256 $FrontendArtifactSha256 `
+            -GuestCompilerPath $GuestCompilerPath `
+            -DotNetPath $DotNet.Path `
+            -ModuleId $ModuleId `
+            -Configuration $Configuration `
+            -DataLaneFusion $DataLaneFusion `
+            -AuthorizationPackage $BindingAuthorizationInfo `
+            -RuntimePackage $BindingPackageInfo
+        $CompilationCache.key = [string]$CompilationCacheContext.CacheKey
+        $CompilationCache.toolchain_fingerprint =
+            [string]$CompilationCacheContext.ToolchainFingerprint
+        $CompilationImport = Import-AvidScriptCSharpCompilationCacheEntry `
+            -Context $CompilationCacheContext `
+            -Destinations @{
+                guest_ir = $GuestIrArtifactPath
+                debug_map = $DebugMapArtifactPath
+                state_schema = $StateSchemaArtifactPath
+                wasm = $WasmArtifactPath
+                wasm_inspection = $WasmInspectionArtifactPath
+            }
+        $CompilationCache.lookup = [string]$CompilationImport.Status
+        $CompilationCache.entry_report_file = if (
+            [string]::IsNullOrWhiteSpace([string]$CompilationImport.EntryReportPath)) {
+            ""
+        }
+        else {
+            Convert-ToProjectRelativePath $CompilationImport.EntryReportPath
+        }
+        $CompilationCache.entry_report_sha256 =
+            [string]$CompilationImport.EntryReportSha256
+        $CompilationCache.diagnostic_code = [string]$CompilationImport.DiagnosticCode
+        $CompilationCache.diagnostic_message = [string]$CompilationImport.DiagnosticMessage
+        if ($CompilationImport.Status -ceq "hit") {
+            $CompilationCacheHit = $true
+            $BuildReuse.guest_ir_reused = $true
+            $BuildReuse.debug_map_reused = $true
+            $BuildReuse.state_schema_reused = $true
+            $BuildReuse.wasm_reused = $true
+        }
+        elseif ($CompilationImport.Status -ceq "rejected") {
+            $Diagnostics += [ordered]@{
+                code = [string]$CompilationImport.DiagnosticCode
+                severity = "warning"
+                message = [string]$CompilationImport.DiagnosticMessage
+                file = Convert-ToProjectRelativePath $CompilationCacheRoot
+            }
+        }
+    }
+    catch {
+        $CompilationCacheContext = $null
+        $CompilationCache.lookup = "rejected"
+        $CompilationErrorCode = [string]$_.Exception.Data["AvidScriptCode"]
+        if ([string]::IsNullOrWhiteSpace($CompilationErrorCode)) {
+            $CompilationErrorCode = "ASBI4603"
+        }
+        $CompilationCache.diagnostic_code = $CompilationErrorCode
+        $CompilationCache.diagnostic_message = $_.Exception.Message
+        $Diagnostics += [ordered]@{
+            code = $CompilationErrorCode
+            severity = "warning"
+            message = $_.Exception.Message
+            file = Convert-ToProjectRelativePath $CompilationCacheRoot
+        }
+    }
+}
+
+$CompilerOutput = @()
+$CompilerExitCode = 0
+if (-not $CompilationCacheHit) {
+    $CompilerArguments = @(
+        "-NoProfile", "-ExecutionPolicy", "Bypass",
+        "-File", $GuestCompilerPath,
+        "-DotNetPath", $DotNet.Path,
+        "-SemanticPath", $SemanticArtifactPath,
+        "-FrontendArtifactSha256", $FrontendArtifactSha256,
+        "-GuestIrPath", $GuestIrArtifactPath,
+        "-DebugMapPath", $DebugMapArtifactPath,
+        "-StateSchemaPath", $StateSchemaArtifactPath,
+        "-WasmPath", $WasmArtifactPath,
+        "-InspectionPath", $WasmInspectionArtifactPath,
+        "-Configuration", $Configuration,
+        "-DataLaneFusion", $DataLaneFusion)
+        ++$ToolInvocations.guest_ir
+        ++$ToolInvocations.wasm_backend
+    $CompilerInvocation = Invoke-AvidScriptPowerShell -Arguments $CompilerArguments
+    $CompilerOutput = @($CompilerInvocation.Output)
+    $CompilerExitCode = [int]$CompilerInvocation.ExitCode
+}
 if (Test-Path -LiteralPath $GuestIrArtifactPath -PathType Leaf) {
     try {
         $GuestIrModel = Get-Content -Raw -LiteralPath $GuestIrArtifactPath | ConvertFrom-Json
@@ -1093,7 +1197,6 @@ if ($CompilerExitCode -ne 0 -or -not $GuestIrSucceeded -or -not $DebugMapPublish
     exit 1
 }
 
-$SemanticSha256 = Get-Sha256Hex $SemanticArtifactPath
 $GuestIrSha256 = Get-Sha256Hex $GuestIrArtifactPath
 $DebugMapSha256 = Get-Sha256Hex $DebugMapArtifactPath
 $StateSchemaSha256 = Get-Sha256Hex $StateSchemaArtifactPath
@@ -1501,6 +1604,42 @@ if ($null -eq $BindingPackageInfo) {
 }
 try {
     Write-JsonAtomic -Path $ManifestPath -Value $Manifest
+    $ShouldPublishCompilationCache = $null -ne $CompilationCacheContext -and
+        -not $CompilationCacheHit -and
+        -not $DisableCompilationCache
+    if ($ShouldPublishCompilationCache) {
+        try {
+            $CompilationPublication = Publish-AvidScriptCSharpCompilationCacheEntry `
+                -Context $CompilationCacheContext `
+                -Artifacts @{
+                    guest_ir = $GuestIrArtifactPath
+                    debug_map = $DebugMapArtifactPath
+                    state_schema = $StateSchemaArtifactPath
+                    wasm = $WasmArtifactPath
+                    wasm_inspection = $WasmInspectionArtifactPath
+                }
+            $CompilationCache.entry_report_file =
+                Convert-ToProjectRelativePath $CompilationPublication.EntryReportPath
+            $CompilationCache.entry_report_sha256 =
+                [string]$CompilationPublication.EntryReportSha256
+            $CompilationCache.published = [bool]$CompilationPublication.Published
+        }
+        catch {
+            $CompilationPublicationCode =
+                [string]$_.Exception.Data["AvidScriptCode"]
+            if ([string]::IsNullOrWhiteSpace($CompilationPublicationCode)) {
+                $CompilationPublicationCode = "ASBI4604"
+            }
+            $CompilationCache.diagnostic_code = $CompilationPublicationCode
+            $CompilationCache.diagnostic_message = $_.Exception.Message
+            $Diagnostics += [ordered]@{
+                code = $CompilationPublicationCode
+                severity = "warning"
+                message = $_.Exception.Message
+                file = Convert-ToProjectRelativePath $CompilationCacheRoot
+            }
+        }
+    }
     Write-BuildReport -Result "direct_abi_built" -DirectAbiSupported $true -ReportDiagnostics $Diagnostics
     $ShouldPublishSemanticCache = $null -ne $SemanticCacheContext -and
         -not $SemanticCacheHit -and

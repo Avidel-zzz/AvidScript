@@ -481,6 +481,7 @@ Write-LifecycleSource `
     -Path $RuntimeAllowedSource `
     -BeginPlayBody "UE.Self.SetActorScale3D(new FVector(1.0f, 1.0f, 1.0f));"
 & $BuildScript `
+    -DisableCompilationCache `
     -DotNetPath $DotNetPath `
     -OutputRoot $RuntimeAllowedRoot `
     -SourcePath $RuntimeAllowedSource `
@@ -523,6 +524,7 @@ Write-LifecycleSource `
     -Path $GuestObjectTypeMismatchSource `
     -BeginPlayBody 'UObject value = UE.Self; AActor casted = AActor.TryCast(value);'
 & $BuildScript `
+    -DisableCompilationCache `
     -DotNetPath $DotNetPath `
     -OutputRoot $GuestObjectTypeMismatchRoot `
     -SourcePath $GuestObjectTypeMismatchSource `
@@ -634,6 +636,7 @@ Write-LifecycleSource `
     -Path $RuntimeObjectTypeMismatchSource `
     -BeginPlayBody 'UE.Self.ApplyGameplayValue(1.0f);'
 & $BuildScript `
+    -DisableCompilationCache `
     -DotNetPath $DotNetPath `
     -OutputRoot $RuntimeObjectTypeMismatchRoot `
     -SourcePath $RuntimeObjectTypeMismatchSource `
@@ -681,6 +684,7 @@ $ScalarActiveManifest = Join-Path `
     $ScalarActiveRoot `
     "scalar_active_object_type.avidscript.json"
 & $BuildScript `
+    -DisableCompilationCache `
     -DotNetPath $DotNetPath `
     -OutputRoot $ScalarActiveRoot `
     -SourcePath $RuntimeObjectTypeMismatchSource `
@@ -715,6 +719,7 @@ $PreparedBootstrapRoot = Join-Path $RunRoot "PreparedBootstrap"
 $PreparedBootstrapReport = Join-Path $PreparedBootstrapRoot "prepared_bootstrap.csharp.report.json"
 $PreparedBootstrapManifest = Join-Path $PreparedBootstrapRoot "prepared_bootstrap.avidscript.json"
 & $BuildScript `
+    -DisableCompilationCache `
     -DotNetPath $DotNetPath `
     -OutputRoot $PreparedBootstrapRoot `
     -SourcePath $RuntimeAllowedSource `
@@ -730,6 +735,7 @@ $PreparedFinalRoot = Join-Path $RunRoot "PreparedFinal"
 $PreparedFinalReport = Join-Path $PreparedFinalRoot "prepared_final.csharp.report.json"
 $PreparedFinalManifest = Join-Path $PreparedFinalRoot "prepared_final.avidscript.json"
 & $BuildScript `
+    -DisableCompilationCache `
     -DotNetPath $DotNetPath `
     -OutputRoot $PreparedFinalRoot `
     -SourcePath $RuntimeAllowedSource `
@@ -776,6 +782,7 @@ New-Item -ItemType Directory -Force -Path $LegacyPackageRoot | Out-Null
 $LegacyPackageReport = Join-Path $LegacyPackageRoot "legacy_package.csharp.report.json"
 $LegacyPackageManifest = Join-Path $LegacyPackageRoot "legacy_package.avidscript.json"
 & $BuildScript `
+    -DisableCompilationCache `
     -DotNetPath $DotNetPath `
     -OutputRoot $LegacyPackageRoot `
     -SourcePath $RuntimeAllowedSource `
@@ -806,6 +813,7 @@ Write-LifecycleSource `
     -Path $RuntimeMismatchSource `
     -TickBody "FVector scale = UE.Self.GetActorScale3D();`n        UE.Self.SetActorScale3D(scale);"
 & $BuildScript `
+    -DisableCompilationCache `
     -DotNetPath $DotNetPath `
     -OutputRoot $RuntimeMismatchRoot `
     -SourcePath $RuntimeMismatchSource `
@@ -830,6 +838,7 @@ $OmitRuntimeReport = Join-Path $OmitRuntimeRoot "omit_runtime.csharp.report.json
 $OmitRuntimeManifest = Join-Path $OmitRuntimeRoot "omit_runtime.avidscript.json"
 Write-LifecycleSource -Path $OmitRuntimeSource
 & $BuildScript `
+    -DisableCompilationCache `
     -DotNetPath $DotNetPath `
     -OutputRoot $OmitRuntimeRoot `
     -SourcePath $OmitRuntimeSource `
@@ -852,6 +861,7 @@ New-Item -ItemType Directory -Force -Path $OmitDynamicRoot | Out-Null
 $OmitDynamicReport = Join-Path $OmitDynamicRoot "omit_dynamic.csharp.report.json"
 $OmitDynamicManifest = Join-Path $OmitDynamicRoot "omit_dynamic.avidscript.json"
 & $BuildScript `
+    -DisableCompilationCache `
     -DotNetPath $DotNetPath `
     -OutputRoot $OmitDynamicRoot `
     -SourcePath $RuntimeAllowedSource `
@@ -888,6 +898,7 @@ public static class BrokenScript
 [System.IO.File]::WriteAllText($BrokenSource, $BrokenText, $Utf8)
 
 & $BuildScript `
+    -DisableCompilationCache `
     -DotNetPath $DotNetPath `
     -OutputRoot $BrokenRoot `
     -SourcePath $BrokenSource `
@@ -941,6 +952,7 @@ public static class SemanticBrokenScript
 [System.IO.File]::WriteAllBytes($SemanticBrokenFinalWasm, [byte[]]@(0, 97, 115, 109))
 
 & $BuildScript `
+    -DisableCompilationCache `
     -DotNetPath $DotNetPath `
     -OutputRoot $SemanticBrokenRoot `
     -SourcePath $SemanticBrokenSource `
@@ -973,6 +985,7 @@ $NormalSource = Join-Path $PluginRoot "Samples\CSharp\ActorLifecycle\ActorLifecy
 New-Item -ItemType Directory -Force -Path $NormalRoot | Out-Null
 
 & $BuildScript `
+    -DisableCompilationCache `
     -DotNetPath $DotNetPath `
     -OutputRoot $NormalRoot `
     -SourcePath $NormalSource `

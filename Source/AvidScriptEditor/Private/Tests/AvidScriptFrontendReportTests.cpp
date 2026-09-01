@@ -168,7 +168,8 @@ bool FAvidScriptFrontendReportCSharpStructuredLoadTest::RunTest(const FString& P
 		TEXT("  \"artifacts\": { \"frontend_file\": \"Saved/AvidScriptCSharpGuest/actor.csharp.frontend.json\" },\n")
 		TEXT("  \"frontend\": { \"schema_version\": 1, \"version\": \"1.0\" },\n")
 		TEXT("  \"semantic_cache\": { \"schema_version\": 1, \"enabled\": true, \"key\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"toolchain_fingerprint\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"lookup\": \"hit\", \"entry_report_file\": \"Saved/AvidScript/CSharpSemanticCache/v1/aa/entry.csharp.report.json\", \"entry_report_sha256\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"published\": false, \"diagnostic_code\": \"\", \"diagnostic_message\": \"\" },\n")
-		TEXT("  \"tool_invocations\": { \"frontend\": 0, \"semantic\": 0, \"guest_ir\": 1, \"wasm_backend\": 1 },\n")
+		TEXT("  \"compilation_cache\": { \"schema_version\": 1, \"enabled\": true, \"key\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"toolchain_fingerprint\": \"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\", \"lookup\": \"hit\", \"entry_report_file\": \"Saved/AvidScript/CSharpCompilationCache/v1/dd/entry.json\", \"entry_report_sha256\": \"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\", \"published\": false, \"diagnostic_code\": \"\", \"diagnostic_message\": \"\" },\n")
+		TEXT("  \"tool_invocations\": { \"frontend\": 0, \"semantic\": 0, \"guest_ir\": 0, \"wasm_backend\": 0 },\n")
 		TEXT("  \"diagnostics\": []\n")
 		TEXT("}\n");
 
@@ -192,8 +193,8 @@ bool FAvidScriptFrontendReportCSharpStructuredLoadTest::RunTest(const FString& P
 	TestTrue(TEXT("C# report tool invocation metadata is valid"), Report.bToolInvocationsValid);
 	TestEqual(TEXT("C# report Frontend invocation count"), Report.FrontendInvocationCount, 0);
 	TestEqual(TEXT("C# report Semantic invocation count"), Report.SemanticInvocationCount, 0);
-	TestEqual(TEXT("C# report Guest IR invocation count"), Report.GuestIrInvocationCount, 1);
-	TestEqual(TEXT("C# report WASM backend invocation count"), Report.WasmBackendInvocationCount, 1);
+	TestEqual(TEXT("C# report Guest IR invocation count"), Report.GuestIrInvocationCount, 0);
+	TestEqual(TEXT("C# report WASM backend invocation count"), Report.WasmBackendInvocationCount, 0);
 	TestTrue(TEXT("C# report has semantic cache metadata"), Report.bHasSemanticCache);
 	TestTrue(TEXT("C# report semantic cache metadata is valid"), Report.bSemanticCacheValid);
 	TestEqual(TEXT("C# report semantic cache schema"), Report.SemanticCacheSchemaVersion, 1);
@@ -206,6 +207,18 @@ bool FAvidScriptFrontendReportCSharpStructuredLoadTest::RunTest(const FString& P
 		FString::ChrN(64, TEXT('b')));
 	TestFalse(TEXT("C# report semantic cache hit was not published"), Report.bSemanticCachePublished);
 	TestTrue(TEXT("C# report semantic cache diagnostic is empty"), Report.SemanticCacheDiagnosticCode.IsEmpty());
+	TestTrue(TEXT("C# report has compilation cache metadata"), Report.bHasCompilationCache);
+	TestTrue(TEXT("C# report compilation cache metadata is valid"), Report.bCompilationCacheValid);
+	TestEqual(TEXT("C# report compilation cache schema"), Report.CompilationCacheSchemaVersion, 1);
+	TestTrue(TEXT("C# report compilation cache is enabled"), Report.bCompilationCacheEnabled);
+	TestEqual(TEXT("C# report compilation cache lookup"), Report.CompilationCacheLookup, FString(TEXT("hit")));
+	TestEqual(TEXT("C# report compilation cache key"), Report.CompilationCacheKey, FString::ChrN(64, TEXT('d')));
+	TestEqual(
+		TEXT("C# report compilation cache toolchain fingerprint"),
+		Report.CompilationCacheToolchainFingerprint,
+		FString::ChrN(64, TEXT('e')));
+	TestFalse(TEXT("C# report compilation cache hit was not published"), Report.bCompilationCachePublished);
+	TestTrue(TEXT("C# report compilation cache diagnostic is empty"), Report.CompilationCacheDiagnosticCode.IsEmpty());
 	return true;
 }
 

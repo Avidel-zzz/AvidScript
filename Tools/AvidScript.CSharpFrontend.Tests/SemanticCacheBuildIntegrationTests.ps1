@@ -137,6 +137,7 @@ function Invoke-CacheBuild {
         ReportPath = $ReportPath
         ManifestPath = $ManifestPath
         SemanticCacheRoot = $CacheRoot
+        DisableCompilationCache = $true
     }
     if (-not [string]::IsNullOrWhiteSpace($PreparedReportPath)) {
         $Arguments.PreparedBuildReportPath = $PreparedReportPath

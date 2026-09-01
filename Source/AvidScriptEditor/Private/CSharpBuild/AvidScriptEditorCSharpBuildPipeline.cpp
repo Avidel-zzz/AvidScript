@@ -124,6 +124,22 @@ void CopyAvidScriptCSharpSemanticCacheAudit(
 	Destination.SemanticCacheDiagnosticMessage = Source.SemanticCacheDiagnosticMessage;
 }
 
+void CopyAvidScriptCSharpCompilationCacheAudit(
+	const FAvidScriptEditorCSharpBuildResult& Source,
+	FAvidScriptEditorCSharpBuildResult& Destination)
+{
+	Destination.CompilationCacheSchemaVersion = Source.CompilationCacheSchemaVersion;
+	Destination.bCompilationCacheEnabled = Source.bCompilationCacheEnabled;
+	Destination.CompilationCacheKey = Source.CompilationCacheKey;
+	Destination.CompilationCacheToolchainFingerprint = Source.CompilationCacheToolchainFingerprint;
+	Destination.CompilationCacheLookup = Source.CompilationCacheLookup;
+	Destination.CompilationCacheEntryReport = Source.CompilationCacheEntryReport;
+	Destination.CompilationCacheEntryReportSha256 = Source.CompilationCacheEntryReportSha256;
+	Destination.bCompilationCachePublished = Source.bCompilationCachePublished;
+	Destination.CompilationCacheDiagnosticCode = Source.CompilationCacheDiagnosticCode;
+	Destination.CompilationCacheDiagnosticMessage = Source.CompilationCacheDiagnosticMessage;
+}
+
 TArray<FString> GetAvidScriptCSharpCommittedArtifactPaths(
 	const FAvidScriptEditorCSharpBuildConfig& Config)
 {
@@ -413,6 +429,7 @@ static bool PrepareAvidScriptCSharpBuildPipeline(
 	NormalizeAvidScriptCSharpBuildPipelinePath(NormalizedConfig.ReportPath);
 	NormalizeAvidScriptCSharpBuildPipelinePath(NormalizedConfig.ManifestPath);
 	NormalizeAvidScriptCSharpBuildPipelinePath(NormalizedConfig.SemanticCacheRoot);
+	NormalizeAvidScriptCSharpBuildPipelinePath(NormalizedConfig.CompilationCacheRoot);
 	NormalizeAvidScriptCSharpBuildPipelinePath(NormalizedConfig.BindingPackagePath);
 	NormalizeAvidScriptCSharpBuildPipelinePath(NormalizedConfig.RuntimeBindingPackagePath);
 	NormalizedConfig.PreparedBuildReportPath.Reset();
@@ -786,6 +803,14 @@ bool FAvidScriptEditorCSharpBuildPipeline::CompleteFinal(
 		&& !Plan.BootstrapResult.SemanticCacheLookup.IsEmpty())
 	{
 		CopyAvidScriptCSharpSemanticCacheAudit(
+			Plan.BootstrapResult,
+			AggregateResult);
+	}
+	if (FinalResult.CompilationCacheLookup == TEXT("disabled")
+		&& Plan.BootstrapResult.CompilationCacheLookup != TEXT("disabled")
+		&& !Plan.BootstrapResult.CompilationCacheLookup.IsEmpty())
+	{
+		CopyAvidScriptCSharpCompilationCacheAudit(
 			Plan.BootstrapResult,
 			AggregateResult);
 	}

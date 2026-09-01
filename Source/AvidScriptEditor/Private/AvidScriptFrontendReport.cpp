@@ -431,6 +431,76 @@ void LoadAvidScriptSemanticCacheMetadata(
 		&& OutReport.SemanticCacheSchemaVersion == 1
 		&& bLookupValid;
 }
+
+void LoadAvidScriptCompilationCacheMetadata(
+	const TSharedPtr<FJsonObject>& RootObject,
+	FAvidScriptFrontendReport& OutReport)
+{
+	const TSharedPtr<FJsonValue>* CompilationCacheValue =
+		RootObject->Values.Find(TEXT("compilation_cache"));
+	if (CompilationCacheValue == nullptr)
+	{
+		return;
+	}
+
+	OutReport.bHasCompilationCache = true;
+	if (!CompilationCacheValue->IsValid()
+		|| (*CompilationCacheValue)->Type != EJson::Object)
+	{
+		return;
+	}
+
+	const TSharedPtr<FJsonObject> CompilationCacheObject =
+		(*CompilationCacheValue)->AsObject();
+	const bool bHasValidFields =
+		TryGetAvidScriptJsonNonNegativeIntField(
+			CompilationCacheObject,
+			TEXT("schema_version"),
+			OutReport.CompilationCacheSchemaVersion)
+		&& TryGetAvidScriptJsonBoolField(
+			CompilationCacheObject,
+			TEXT("enabled"),
+			OutReport.bCompilationCacheEnabled)
+		&& TryGetAvidScriptJsonStringField(
+			CompilationCacheObject,
+			TEXT("key"),
+			OutReport.CompilationCacheKey)
+		&& TryGetAvidScriptJsonStringField(
+			CompilationCacheObject,
+			TEXT("toolchain_fingerprint"),
+			OutReport.CompilationCacheToolchainFingerprint)
+		&& TryGetAvidScriptJsonStringField(
+			CompilationCacheObject,
+			TEXT("lookup"),
+			OutReport.CompilationCacheLookup)
+		&& TryGetAvidScriptJsonStringField(
+			CompilationCacheObject,
+			TEXT("entry_report_file"),
+			OutReport.CompilationCacheEntryReport)
+		&& TryGetAvidScriptJsonStringField(
+			CompilationCacheObject,
+			TEXT("entry_report_sha256"),
+			OutReport.CompilationCacheEntryReportSha256)
+		&& TryGetAvidScriptJsonBoolField(
+			CompilationCacheObject,
+			TEXT("published"),
+			OutReport.bCompilationCachePublished)
+		&& TryGetAvidScriptJsonStringField(
+			CompilationCacheObject,
+			TEXT("diagnostic_code"),
+			OutReport.CompilationCacheDiagnosticCode)
+		&& TryGetAvidScriptJsonStringField(
+			CompilationCacheObject,
+			TEXT("diagnostic_message"),
+			OutReport.CompilationCacheDiagnosticMessage);
+	const bool bLookupValid = OutReport.CompilationCacheLookup == TEXT("disabled")
+		|| OutReport.CompilationCacheLookup == TEXT("miss")
+		|| OutReport.CompilationCacheLookup == TEXT("hit")
+		|| OutReport.CompilationCacheLookup == TEXT("rejected");
+	OutReport.bCompilationCacheValid = bHasValidFields
+		&& OutReport.CompilationCacheSchemaVersion == 1
+		&& bLookupValid;
+}
 } // namespace
 
 bool FAvidScriptFrontendDiagnostic::IsError() const
@@ -520,6 +590,7 @@ bool FAvidScriptFrontendReportReader::LoadFromFile(
 	LoadAvidScriptBindingPackageMetadata(RootObject, OutReport);
 	LoadAvidScriptToolInvocationMetadata(RootObject, OutReport);
 	LoadAvidScriptSemanticCacheMetadata(RootObject, OutReport);
+	LoadAvidScriptCompilationCacheMetadata(RootObject, OutReport);
 	RootObject->TryGetStringField(TEXT("bindings"), OutReport.Bindings);
 	RootObject->TryGetStringField(TEXT("output_root"), OutReport.OutputRoot);
 	OutReport.ExitCode = GetAvidScriptJsonIntField(RootObject, TEXT("exit_code"), 0);
