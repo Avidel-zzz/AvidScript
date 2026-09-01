@@ -293,8 +293,11 @@ internal static class CSharpAsyncCfgLowerer
             activeBlockId,
             blocks);
         int diagnosticStart = diagnostics.Count;
-        foreach (SemanticAsyncStatement statement in segment.Statements)
+        for (int statementOrdinal = 0;
+            statementOrdinal < segment.Statements.Count;
+            ++statementOrdinal)
         {
+            SemanticAsyncStatement statement = segment.Statements[statementOrdinal];
             if (CSharpAsyncControlFlowLowerer.IsStructuredFlow(statement.Operation))
             {
                 if (!structuredFlow.Emit(
@@ -310,6 +313,7 @@ internal static class CSharpAsyncCfgLowerer
             }
             else
             {
+                int instructionStart = instructions.Count;
                 GuestRegister? value = CSharpOperationLowerer.LowerValue(
                     context,
                     statement.Operation,
@@ -326,6 +330,14 @@ internal static class CSharpAsyncCfgLowerer
                 {
                     return false;
                 }
+                CSharpGuestDebugTagger.TagFirstEmitted(
+                    instructions,
+                    instructionStart,
+                    statement.Operation,
+                    CSharpGuestDebugTagger.OperationId(
+                        method.MethodSymbolId,
+                        $"async:{segment.Ordinal}",
+                        statementOrdinal));
             }
         }
         if (diagnostics.Count != diagnosticStart || !activeReachable || segment.Transfer is null)
@@ -351,6 +363,7 @@ internal static class CSharpAsyncCfgLowerer
 
             case SemanticAsyncMethod.BranchTransferKind:
             {
+                int instructionStart = instructions.Count;
                 GuestRegister? condition = CSharpOperationLowerer.LowerValue(
                     context,
                     transfer.Condition!,
@@ -361,6 +374,14 @@ internal static class CSharpAsyncCfgLowerer
                     Add(diagnostics, method, $"Continuation CFG segment {segment.Ordinal} has no canonical bool condition.");
                     return false;
                 }
+                CSharpGuestDebugTagger.TagFirstEmitted(
+                    instructions,
+                    instructionStart,
+                    transfer.Condition!,
+                    CSharpGuestDebugTagger.OperationId(
+                        method.MethodSymbolId,
+                        $"async:{segment.Ordinal}:branch",
+                        0));
                 blocks.Add(new GuestBasicBlock(
                     activeBlockId,
                     instructions,
@@ -377,7 +398,19 @@ internal static class CSharpAsyncCfgLowerer
                 blocks.Add(new GuestBasicBlock(
                     activeBlockId,
                     instructions,
-                    new GuestTerminator("return", null, null, null, null)));
+                    new GuestTerminator(
+                        "return",
+                        null,
+                        null,
+                        null,
+                        null,
+                        CSharpGuestDebugTagger.Create(
+                            segment.Span,
+                            CSharpGuestDebugTagger.OperationId(
+                                method.MethodSymbolId,
+                                $"async:{segment.Ordinal}:return",
+                                0),
+                            "return"))));
                 return true;
 
             case SemanticAsyncMethod.AwaitTransferKind:
@@ -408,6 +441,7 @@ internal static class CSharpAsyncCfgLowerer
         List<GuestDiagnostic> diagnostics)
     {
         SemanticAsyncAwaitSite? awaitSite = segment.AwaitSite;
+        int awaitInstructionStart = instructions.Count;
         if (awaitSite is null
             || !CSharpAsyncLowerer.EmitProducer(
                 context,
@@ -423,6 +457,15 @@ internal static class CSharpAsyncCfgLowerer
         {
             return false;
         }
+        CSharpGuestDebugTagger.TagFirstEmitted(
+            instructions,
+            awaitInstructionStart,
+            awaitSite.Span,
+            CSharpGuestDebugTagger.OperationId(
+                method.MethodSymbolId,
+                $"async:{segment.Ordinal}:await",
+                awaitSite.CallbackId),
+            "await");
 
         GuestRegister? stateStoreAccepted = null;
         if (awaitSite.StateFrame is { } outgoingFrame

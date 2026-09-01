@@ -82,7 +82,7 @@ public static class CSharpGuestDebugMapProjector
                     callables,
                     symbols,
                     functionIndex,
-                    function.Id,
+                    function,
                     resumeTarget);
                 continue;
             }
@@ -194,9 +194,10 @@ public static class CSharpGuestDebugMapProjector
         IReadOnlyDictionary<string, SemanticCallable> callables,
         IReadOnlyDictionary<string, SemanticSymbol> symbols,
         int functionIndex,
-        string functionId,
+        GuestFunction function,
         AsyncResumeDebugTarget target)
     {
+        string functionId = function.Id;
         if (!callables.TryGetValue(target.MethodSymbolId, out SemanticCallable? callable)
             || !callable.HasBody
             || !symbols.TryGetValue(target.MethodSymbolId, out SemanticSymbol? methodSymbol)
@@ -229,7 +230,7 @@ public static class CSharpGuestDebugMapProjector
             debugMethodId,
             $"{ownerName}.{methodSymbol.Signature} [async resume {target.SegmentOrdinal}]",
             target.Span,
-            Array.Empty<CSharpGuestDebugSequencePoint>()));
+            BuildSequencePoints(function)));
     }
 
     private static IReadOnlyList<CSharpGuestDebugSequencePoint> BuildSequencePoints(
@@ -237,6 +238,31 @@ public static class CSharpGuestDebugMapProjector
     {
         List<CSharpGuestDebugSequencePoint> sequencePoints = new();
         HashSet<string> semanticOperationIds = new(StringComparer.Ordinal);
+        void AddSequencePoint(GuestDebugLocation debugLocation, string guestInstructionId)
+        {
+            SemanticSpan span = new(
+                debugLocation.Start,
+                debugLocation.Length,
+                debugLocation.Line,
+                debugLocation.Column,
+                debugLocation.EndLine,
+                debugLocation.EndColumn);
+            if (!semanticOperationIds.Add(debugLocation.SemanticOperationId)
+                || !IsValidSpan(span)
+                || debugLocation.Kind is not ("hidden" or "statement" or "call" or "await" or "return"))
+            {
+                throw new InvalidDataException(
+                    $"ASDEBUG1004: Function '{function.Id}' contains an invalid or duplicated sequence point.");
+            }
+            sequencePoints.Add(new CSharpGuestDebugSequencePoint(
+                -1,
+                guestInstructionId,
+                debugLocation.SemanticOperationId,
+                debugLocation.Kind,
+                debugLocation.Hidden,
+                span));
+        }
+
         for (int blockIndex = 0; blockIndex < function.Blocks.Count; ++blockIndex)
         {
             GuestBasicBlock block = function.Blocks[blockIndex];
@@ -249,27 +275,16 @@ public static class CSharpGuestDebugMapProjector
                 {
                     continue;
                 }
-                SemanticSpan span = new(
-                    debugLocation.Start,
-                    debugLocation.Length,
-                    debugLocation.Line,
-                    debugLocation.Column,
-                    debugLocation.EndLine,
-                    debugLocation.EndColumn);
-                if (!semanticOperationIds.Add(debugLocation.SemanticOperationId)
-                    || !IsValidSpan(span)
-                    || debugLocation.Kind is not ("hidden" or "statement" or "call" or "await" or "return"))
-                {
-                    throw new InvalidDataException(
-                        $"ASDEBUG1004: Function '{function.Id}' contains an invalid or duplicated sequence point.");
-                }
-                sequencePoints.Add(new CSharpGuestDebugSequencePoint(
-                    -1,
-                    GuestDebugIdentity.Instruction(function.Id, block.Id, instructionIndex),
-                    debugLocation.SemanticOperationId,
-                    debugLocation.Kind,
-                    debugLocation.Hidden,
-                    span));
+                AddSequencePoint(
+                    debugLocation,
+                    GuestDebugIdentity.Instruction(function.Id, block.Id, instructionIndex));
+            }
+
+            if (block.Terminator.DebugLocation is { } terminatorDebugLocation)
+            {
+                AddSequencePoint(
+                    terminatorDebugLocation,
+                    GuestDebugIdentity.Terminator(function.Id, block.Id));
             }
         }
         return sequencePoints;

@@ -3430,6 +3430,7 @@ $CSharpContinuationLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGue
 $CSharpAsyncLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpAsyncLowerer.cs'
 $CSharpAsyncControlFlowLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpAsyncControlFlowLowerer.cs'
 $CSharpAsyncCfgLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpAsyncCfgLowerer.cs'
+$CSharpDataLaneFusionSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Optimization/CSharpDataLaneFusionPass.cs'
 $CSharpOutcomeOperationLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpOutcomeOperationLowerer.cs'
 $CSharpLatentStoragePlannerSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpLatentStoragePlanner.cs'
 $CSharpTypeLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpTypeLowerer.cs'
@@ -4260,6 +4261,18 @@ foreach ($RequiredAsyncStateTypeContract in @(
 }
 if (-not $CSharpGuestDebugMapProjectorSource.Contains('BuildAsyncResumeTargets')) {
     Add-Violation 'C# Guest debug maps must project async resume functions back to source segments'
+}
+foreach ($RequiredAsyncDebugContract in @(
+    @{ Source = $CSharpAsyncLowererSource; Token = '$"async:{segment.Ordinal}:await"' },
+    @{ Source = $CSharpAsyncCfgLowererSource; Token = '$"async:{segment.Ordinal}:await"' },
+    @{ Source = $CSharpAsyncControlFlowLowererSource; Token = 'DebugLocation(operation, "return")' },
+    @{ Source = $CSharpGuestDebugMapProjectorSource; Token = 'BuildSequencePoints(function)' },
+    @{ Source = $CSharpGuestDebugMapProjectorSource; Token = 'GuestDebugIdentity.Terminator' },
+    @{ Source = $CSharpDataLaneFusionSource; Token = 'call.Instruction.DebugLocation' }
+)) {
+    if (-not $RequiredAsyncDebugContract.Source.Contains($RequiredAsyncDebugContract.Token)) {
+        Add-Violation "C# Guest async debug mapping is missing $($RequiredAsyncDebugContract.Token)"
+    }
 }
 foreach ($RequiredAsyncContinuationRuntimeContract in @(
     'continuation_load_object',

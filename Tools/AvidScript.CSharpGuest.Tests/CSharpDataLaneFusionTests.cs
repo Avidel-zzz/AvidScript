@@ -23,8 +23,9 @@ internal static class CSharpDataLaneFusionTests
         PotentiallyTrappingPreparationSplitsFusionGroups();
         DirectExternPropertyPreservesImportMetadata();
         FusionCanBeDisabledPerProfile();
+        FusionPreservesRemovedCallDebugLocations();
         HostAbiBudgetSplitsLargeGroups();
-        return 9;
+        return 10;
     }
 
     private static void ThreeSettersProduceExecutableCommandBuffer()
@@ -435,6 +436,45 @@ internal static class CSharpDataLaneFusionTests
                 instruction.Op == "call"
                 && instruction.TargetId?.Contains(".Set(", StringComparison.Ordinal) == true) == 3,
             "profile-disabled fusion should preserve ordinary generated extern calls");
+    }
+
+    private static void FusionPreservesRemovedCallDebugLocations()
+    {
+        const string body = """
+            AvidScript.Generated.Set(target, value);
+            AvidScript.Generated.Set(target, value);
+            AvidScript.Generated.Set(target, value);
+            """;
+        string source = BuildSource(body).Replace(
+            "Main(AvidScript.Target target)",
+            "Main(AvidScript.Target target, int value)",
+            StringComparison.Ordinal);
+        Lowered lowered = LowerSource(
+            source,
+            "Scripts/DataLaneDebugLocations.cs",
+            new[]
+            {
+                new SemanticReferenceSource(
+                    GeneratedDataLaneReferenceSource,
+                    "generated://AvidScript.Bindings.generated.cs",
+                    IsExecutable: true),
+            });
+        GuestModule module = lowered.Module;
+        GuestFunction fusedFunction = MainFunction(module);
+        GuestDebugLocation[] debugLocations = fusedFunction.Blocks
+            .SelectMany(block => block.Instructions)
+            .Where(instruction => instruction.DebugLocation is not null)
+            .Select(instruction => instruction.DebugLocation!)
+            .ToArray();
+
+        Assert(!fusedFunction.Blocks.SelectMany(block => block.Instructions).Any(instruction =>
+                instruction.Op == "call"
+                && module.Imports.Any(import => import.Id == instruction.TargetId
+                    && import.Name == "avid_generated_property_set"))
+            && debugLocations.Length == 3
+            && debugLocations.Select(location => location.SemanticOperationId).Distinct().Count() == 3
+            && debugLocations.All(location => location.Kind == "call"),
+            "data-lane fusion should migrate every removed call sequence point to its command record");
     }
 
     private static Lowered Lower(string body, string sourceId)

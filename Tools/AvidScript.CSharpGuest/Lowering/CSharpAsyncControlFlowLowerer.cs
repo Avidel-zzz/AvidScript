@@ -12,6 +12,7 @@ internal sealed class CSharpAsyncControlFlowLowerer
     private readonly string segmentBlockId;
     private readonly List<GuestBasicBlock> blocks;
     private int nextBlockOrdinal;
+    private int nextDebugOrdinal;
 
     public CSharpAsyncControlFlowLowerer(
         CSharpFunctionLoweringContext context,
@@ -115,6 +116,7 @@ internal sealed class CSharpAsyncControlFlowLowerer
             return cursor;
         }
 
+        int instructionStart = cursor.Instructions.Count;
         GuestRegister? value = CSharpOperationLowerer.LowerValue(
             context,
             operation.Children[0],
@@ -130,6 +132,7 @@ internal sealed class CSharpAsyncControlFlowLowerer
         {
             return null;
         }
+        TagFirstEmitted(cursor.Instructions, instructionStart, operation);
         return cursor;
     }
 
@@ -358,7 +361,16 @@ internal sealed class CSharpAsyncControlFlowLowerer
             Add("Async loop transfer has no compatible loop target.");
             return null;
         }
-        BranchTo(cursor, targetBlockId);
+        blocks.Add(new GuestBasicBlock(
+            cursor.BlockId,
+            cursor.Instructions.ToArray(),
+            new GuestTerminator(
+                "branch",
+                null,
+                targetBlockId,
+                null,
+                null,
+                DebugLocation(operation, "statement"))));
         return new Cursor(cursor.BlockId, new List<GuestInstruction>(), false);
     }
 
@@ -374,7 +386,13 @@ internal sealed class CSharpAsyncControlFlowLowerer
         blocks.Add(new GuestBasicBlock(
             cursor.BlockId,
             cursor.Instructions.ToArray(),
-            new GuestTerminator("return", null, null, null, null)));
+            new GuestTerminator(
+                "return",
+                null,
+                null,
+                null,
+                null,
+                DebugLocation(operation, "return"))));
         return new Cursor(cursor.BlockId, new List<GuestInstruction>(), false);
     }
 
@@ -383,11 +401,16 @@ internal sealed class CSharpAsyncControlFlowLowerer
         Cursor cursor)
     {
         int before = context.Diagnostics.Count;
+        int instructionStart = cursor.Instructions.Count;
         _ = CSharpOperationLowerer.LowerValue(
             context,
             operation,
             segmentOrdinal,
             cursor.Instructions);
+        if (context.Diagnostics.Count == before)
+        {
+            TagFirstEmitted(cursor.Instructions, instructionStart, operation);
+        }
         return context.Diagnostics.Count == before ? cursor : null;
     }
 
@@ -395,6 +418,7 @@ internal sealed class CSharpAsyncControlFlowLowerer
         SemanticOperation operation,
         List<GuestInstruction> instructions)
     {
+        int instructionStart = instructions.Count;
         GuestRegister? condition = CSharpOperationLowerer.LowerValue(
             context,
             operation,
@@ -402,6 +426,7 @@ internal sealed class CSharpAsyncControlFlowLowerer
             instructions);
         if (condition?.TypeId == "type:bool")
         {
+            TagFirstEmitted(instructions, instructionStart, operation);
             return condition;
         }
         Add("Async structured-flow condition did not lower to canonical bool storage.");
@@ -424,6 +449,36 @@ internal sealed class CSharpAsyncControlFlowLowerer
     private string NextBlockId(string kind)
     {
         return $"{segmentBlockId}:flow_{nextBlockOrdinal++}_{kind}";
+    }
+
+    private void TagFirstEmitted(
+        IList<GuestInstruction> instructions,
+        int startIndex,
+        SemanticOperation operation)
+    {
+        CSharpGuestDebugTagger.TagFirstEmitted(
+            instructions,
+            startIndex,
+            operation,
+            NextDebugOperationId());
+    }
+
+    private GuestDebugLocation DebugLocation(
+        SemanticOperation operation,
+        string kind)
+    {
+        return CSharpGuestDebugTagger.Create(
+            operation.Span,
+            NextDebugOperationId(),
+            kind);
+    }
+
+    private string NextDebugOperationId()
+    {
+        return CSharpGuestDebugTagger.OperationId(
+            context.Callable.MethodSymbolId,
+            $"async:{segmentOrdinal}:structured",
+            nextDebugOrdinal++);
     }
 
     private void Add(string message)

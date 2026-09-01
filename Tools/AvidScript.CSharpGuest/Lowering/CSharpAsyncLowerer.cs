@@ -306,8 +306,11 @@ internal static class CSharpAsyncLowerer
                     blockId,
                     prefixBlocks);
                 int statementDiagnosticStart = diagnostics.Count;
-                foreach (SemanticAsyncStatement statement in segment.Statements)
+                for (int statementOrdinal = 0;
+                    statementOrdinal < segment.Statements.Count;
+                    ++statementOrdinal)
                 {
+                    SemanticAsyncStatement statement = segment.Statements[statementOrdinal];
                     if (!activeReachable)
                     {
                         break;
@@ -317,6 +320,7 @@ internal static class CSharpAsyncLowerer
                     {
                         if (!EmitEarlyReturnGuard(
                             context,
+                            method.MethodSymbolId,
                             statement.Operation,
                             segment.Ordinal,
                             guardOrdinal++,
@@ -348,6 +352,7 @@ internal static class CSharpAsyncLowerer
                         continue;
                     }
 
+                    int instructionStart = instructions.Count;
                     GuestRegister? value = CSharpOperationLowerer.LowerValue(
                         context,
                         statement.Operation,
@@ -364,6 +369,14 @@ internal static class CSharpAsyncLowerer
                     {
                         break;
                     }
+                    CSharpGuestDebugTagger.TagFirstEmitted(
+                        instructions,
+                        instructionStart,
+                        statement.Operation,
+                        CSharpGuestDebugTagger.OperationId(
+                            method.MethodSymbolId,
+                            $"async:{segment.Ordinal}",
+                            statementOrdinal));
                 }
                 if (diagnostics.Count != statementDiagnosticStart)
                 {
@@ -380,6 +393,7 @@ internal static class CSharpAsyncLowerer
                 GuestRegister? stateStoreAccepted = null;
                 if (activeReachable && segment.AwaitSite is { } awaitSite)
                 {
+                    int awaitInstructionStart = instructions.Count;
                     if (!EmitProducer(
                         context,
                         awaitSite,
@@ -394,6 +408,15 @@ internal static class CSharpAsyncLowerer
                     {
                         break;
                     }
+                    CSharpGuestDebugTagger.TagFirstEmitted(
+                        instructions,
+                        awaitInstructionStart,
+                        awaitSite.Span,
+                        CSharpGuestDebugTagger.OperationId(
+                            method.MethodSymbolId,
+                            $"async:{segment.Ordinal}:await",
+                            awaitSite.CallbackId),
+                        "await");
 
                     if (awaitSite.StateFrame is { } outgoingFrame
                         && !EmitOutgoingState(
@@ -522,7 +545,19 @@ internal static class CSharpAsyncLowerer
                         new GuestBasicBlock(
                             activeBlockId,
                             instructions,
-                            new GuestTerminator("return", null, null, null, null)),
+                            new GuestTerminator(
+                                "return",
+                                null,
+                                null,
+                                null,
+                                null,
+                                CSharpGuestDebugTagger.Create(
+                                    segment.Span,
+                                    CSharpGuestDebugTagger.OperationId(
+                                        method.MethodSymbolId,
+                                        $"async:{segment.Ordinal}:return",
+                                        0),
+                                    "return"))),
                     };
                 }
 
@@ -754,6 +789,7 @@ internal static class CSharpAsyncLowerer
 
     private static bool EmitEarlyReturnGuard(
         CSharpFunctionLoweringContext context,
+        string methodSymbolId,
         SemanticOperation operation,
         int segmentOrdinal,
         int guardOrdinal,
@@ -772,6 +808,7 @@ internal static class CSharpAsyncLowerer
             return false;
         }
 
+        int instructionStart = instructions.Count;
         GuestRegister? condition = CSharpOperationLowerer.LowerValue(
             context,
             operation.Children[0],
@@ -788,6 +825,15 @@ internal static class CSharpAsyncLowerer
             Add(context.Diagnostics, "Async early-return guard did not lower to the canonical bool storage.");
             return false;
         }
+        CSharpGuestDebugTagger.TagFirstEmitted(
+            instructions,
+            instructionStart,
+            operation,
+            CSharpGuestDebugTagger.OperationId(
+                methodSymbolId,
+                $"async:{segmentOrdinal}:guard",
+                guardOrdinal),
+            "return");
 
         continueBlockId = blockId + $":guard_{guardOrdinal}_continue";
         blocks.Add(new GuestBasicBlock(

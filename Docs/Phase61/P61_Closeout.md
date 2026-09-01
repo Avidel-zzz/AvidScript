@@ -1,6 +1,6 @@
 # Phase 61 收尾记录
 
-状态：实施中，`P61.A1-A3b`、`P61.B1a-B1b` 已完成
+状态：实施中，`P61.A1-A3b`、`P61.B1a-B1c` 已完成
 
 ## 目标
 
@@ -36,10 +36,13 @@
 - 完成 `P61.B1b` Runtime sequence point 映射：v2 map 绑定实际 WASM hash，按函数内 offset
   有界二分查找，同时保留 v1/首点之前的函数级回退；
 - 详细实现与证据见 [P61.B1b Runtime Sequence Point 映射](P61.B1b_Runtime_Sequence_Point_Mapping.md)。
+- 完成 `P61.B1c` async sequence point：同步 CPS 与 continuation CFG 的 statement、condition、
+  await、return 均投影到初始/恢复函数，DataLane Fusion 不再丢失被替换调用的调试位置；
+- 详细实现与证据见 [P61.B1c Async Sequence Point](P61.B1c_Async_Sequence_Point_Mapping.md)。
 
 ## 待完成
 
-- `P61.B1c/B2` async/host crossing sequence point 与 Editor 结构化调用栈；
+- `P61.B2` host crossing 与 Editor 结构化调用栈；
 - `P61.C` 断点、单步与变量查看；
 - `P61.D` Profiler 与 IDE workspace；
 - `P61.E` 集成与集中 Gate。

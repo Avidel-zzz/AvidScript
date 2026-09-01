@@ -502,11 +502,25 @@ internal static class CSharpGuestContinuationTests
             .ToArray();
         GuestFunction router = module.Functions.Single(function =>
             function.Id == "function:synthetic:continuation_v2");
+        GuestFunction initial = module.Functions.Single(function =>
+            function.Id == module.Exports.Single(export =>
+                export.Name == "avid_on_begin_play").FunctionId);
         CSharpGuestDebugMap debugMap = CSharpGuestDebugMapProjector.Project(
             document,
             module,
             SemanticHash,
             document.Source.FrontendSha256);
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(module);
+        CSharpGuestDebugMap finalizedDebugMap = CSharpGuestDebugMapFinalizer.Finalize(
+            debugMap,
+            new GuestWasmDebugOffsetMap(
+                1,
+                module.ModuleId,
+                SemanticHash,
+                new string('f', 64),
+                module.Imports.Count,
+                module.Functions.Count,
+                wasm.DebugOffsets));
         CSharpGuestDebugFunction[] resumeDebugFunctions = debugMap.Functions
             .Where(function => function.GuestFunctionId.StartsWith(
                 "function:synthetic:async_resume:",
@@ -562,8 +576,20 @@ internal static class CSharpGuestContinuationTests
             && resumeDebugFunctions.Select(function => function.Span)
                 .SequenceEqual(asyncMethod.Segments.Skip(1).Select(segment => segment.Span)),
             "each generated resume function should map back to its source async segment");
+        CSharpGuestDebugFunction[] asyncDebugFunctions = finalizedDebugMap.Functions
+            .Where(function => function.GuestFunctionId == initial.Id
+                || function.GuestFunctionId.StartsWith(
+                    "function:synthetic:async_resume:",
+                    StringComparison.Ordinal))
+            .ToArray();
+        Assert(asyncDebugFunctions.Length == 4
+            && asyncDebugFunctions.All(function => function.SequencePoints is { Count: > 0 }
+                && function.SequencePoints.All(point => point.WasmFunctionOffset >= 0))
+            && asyncDebugFunctions.SelectMany(function => function.SequencePoints!)
+                .Count(point => point.Kind == "await") == 3,
+            "async entry and resume functions should retain backend-resolved statement, await, or return sequence points");
         Assert(GuestModuleValidator.Validate(module).Succeeded
-            && WasmModuleCompiler.Compile(module).Succeeded,
+            && wasm.Succeeded,
             "zero-heap async Guest IR should validate and compile to WASM");
     }
 
@@ -924,6 +950,12 @@ internal static class CSharpGuestContinuationTests
             module,
             SemanticHash,
             document.Source.FrontendSha256);
+        CSharpGuestDebugFunction[] asyncDebugFunctions = debugMap.Functions
+            .Where(function => function.GuestFunctionId == initial.Id
+                || function.GuestFunctionId.StartsWith(
+                    "function:synthetic:async_resume:",
+                    StringComparison.Ordinal))
+            .ToArray();
 
         Assert(first.Succeeded
             && second.Succeeded
@@ -944,7 +976,11 @@ internal static class CSharpGuestContinuationTests
             && branchResume.Blocks.Any(block => block.Terminator.Kind == "return")
             && debugMap.Functions.Count(function => function.GuestFunctionId.StartsWith(
                 "function:synthetic:async_resume:",
-                StringComparison.Ordinal)) == 2,
+                StringComparison.Ordinal)) == 2
+            && asyncDebugFunctions.Length == 3
+            && asyncDebugFunctions.All(function => function.SequencePoints is { Count: > 0 })
+            && asyncDebugFunctions.SelectMany(function => function.SequencePoints!)
+                .Count(point => point.Kind == "await") >= 2,
             "each nested await should restore its exact frame before branching to its source resume segment");
         Assert(GuestIrSerializer.Serialize(module)
                 .SequenceEqual(GuestIrSerializer.Serialize(second.Module!))

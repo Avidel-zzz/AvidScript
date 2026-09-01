@@ -15,6 +15,22 @@ internal static class CSharpGuestDebugTagger
         string semanticOperationId,
         string? kind = null)
     {
+        TagFirstEmitted(
+            instructions,
+            startIndex,
+            operation.Span,
+            semanticOperationId,
+            kind ?? Classify(operation));
+    }
+
+    public static void TagFirstEmitted(
+        IList<GuestInstruction> instructions,
+        int startIndex,
+        SemanticSpan span,
+        string semanticOperationId,
+        string kind,
+        bool hidden = false)
+    {
         if (startIndex < 0 || startIndex >= instructions.Count)
         {
             return;
@@ -27,7 +43,7 @@ internal static class CSharpGuestDebugTagger
         }
         instructions[startIndex] = first with
         {
-            DebugLocation = Create(operation.Span, semanticOperationId, kind ?? Classify(operation)),
+            DebugLocation = Create(span, semanticOperationId, kind, hidden),
         };
     }
 

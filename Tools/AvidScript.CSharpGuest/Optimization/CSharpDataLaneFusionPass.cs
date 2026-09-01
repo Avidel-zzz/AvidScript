@@ -523,7 +523,12 @@ internal static class CSharpDataLaneFusionPass
             return id;
         }
 
-        string Constant(string typeId, string kind, uint value, string role)
+        string Constant(
+            string typeId,
+            string kind,
+            uint value,
+            string role,
+            GuestDebugLocation? debugLocation = null)
         {
             string id = Define(typeId, role);
             instructions.Add(new GuestInstruction(
@@ -532,7 +537,8 @@ internal static class CSharpDataLaneFusionPass
                 Array.Empty<string>(),
                 null,
                 null,
-                new GuestConstant(kind, value.ToString(CultureInfo.InvariantCulture))));
+                new GuestConstant(kind, value.ToString(CultureInfo.InvariantCulture)),
+                debugLocation));
             return id;
         }
 
@@ -619,7 +625,8 @@ internal static class CSharpDataLaneFusionPass
                 "type:uint32",
                 "uint32",
                 checked((uint)call.Target.BindingOrdinal),
-                $"command_{index}_binding");
+                $"command_{index}_binding",
+                call.Instruction.DebugLocation);
             Store($"Command[{index}].Opcode", opcodeId);
             Store($"Command[{index}].Flags", zeroU16Id);
             Store($"Command[{index}].RecordBytes", recordBytesId);
