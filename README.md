@@ -10,7 +10,7 @@
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 Development" src="https://img.shields.io/badge/Platform-Win64-0078D4?logo=windows&logoColor=white">
-  <img alt="Phase 60 Complete" src="https://img.shields.io/badge/Status-Phase%2060%20Complete-26A269">
+  <img alt="Phase 61 P61.A In Progress" src="https://img.shields.io/badge/Status-Phase%2061%20P61.A-F59E0B">
   <img alt="Automation Baseline 411/411" src="https://img.shields.io/badge/Baseline-411%2F411-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
@@ -48,6 +48,9 @@ callable/event，以及带 typed payload 的 AsyncAction `await` 已接入真实
 均已通过，Phase 60 已完成正式 attestation 与 close。
 
 详细进度见 [Phase 60 中文收尾记录](Docs/Phase60/P60_Closeout.md)。
+
+Phase 61 已完成编辑器调试架构冻结，当前正在实现 `P61.A` 完整编译产物缓存与结构化诊断；
+源码级调用栈、断点、变量查看和 Profiler 将在后续批次逐项验收后再列入“已实现”。
 
 ## C# 游戏脚本
 
