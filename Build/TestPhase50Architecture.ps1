@@ -671,7 +671,7 @@ function Test-RendererFrozenRegions {
     )
 
     $ExpectedHashes = [ordered]@{
-		'RenderMethod' = '52828140ed78663eaa35b4a4eb04280f255d7d1be86c65ca8634c423a5289261'
+		'RenderMethod' = '41ecf89d3f5440d4296a9dc739be79ae5694a5d48ce0e756d281a7b58c433a09'
         'RenderPropertyGetter' = '141fadb6fa1cd2d670d47d4f4567bc555de57a4f614f5f2a81a443e6845dbc2c'
         'AppendVector' = 'a052bea5eda0769613a907e479549d6c9032b6ae9a9b90a110714105d07a4e3d'
         'AppendInputEvent' = '27014e57fb190bcd48d5028c4b1722e5f6ec11837962c6bae8cb52658a580f39'
@@ -703,7 +703,7 @@ function Test-GeneratedSurfaceConstructionClosure {
     )
 
     $ExpectedHashes = [ordered]@{
-		'BindingRenderer' = '4a54f10eb66c77a8336b127ed2d169320242d6370244905383763cdc892a84b3'
+		'BindingRenderer' = '0cd49bf872cb9c281878f2d3a37ff35f73219eb15bb8ef545907f1ae0ab0b698'
         'StateContractRenderer' = '8d24e315f424a1827b2cdf6358019785c9d7ccdf5322b10f6a8971cee29ce9b9'
         'DefaultValueFormatter' = '648aad59ac0ed2732ac83afb5da47477fb30eaf23399084833e1338c4cdd0342'
         'CSharpSyntax' = 'bf685b36a2cd07cfffb69e46aa1937322b92e3ec9350afac4f7225f1c037249f'
@@ -1211,6 +1211,7 @@ function Test-RendererCandidates {
     Test-ExactMultiset `
         @($ParsedEntryPoints) `
         @(
+            '%s',
             '%s',
             '%s',
             '%s',
