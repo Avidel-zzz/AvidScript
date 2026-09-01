@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AvidScriptEditorCallStack.h"
 #include "AvidScriptEditorCommandLauncher.h"
 
 #include "CoreMinimal.h"
@@ -24,6 +25,7 @@ struct FAvidScriptEditorCommandPresentation
 	FString Details;
 	FString SourcePath;
 	FString ManifestPath;
+	TArray<FAvidScriptEditorCallStackFrame> CallStack;
 };
 
 class FAvidScriptEditorResultPresenter

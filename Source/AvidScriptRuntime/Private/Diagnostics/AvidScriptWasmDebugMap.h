@@ -43,6 +43,7 @@ private:
 	};
 
 	FString SourceFile;
+	FString SourceSha256;
 	TMap<uint32, FFunction> Functions;
 	TMap<FString, uint32> FunctionIndicesByExportName;
 };

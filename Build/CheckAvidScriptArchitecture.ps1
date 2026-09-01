@@ -3452,6 +3452,10 @@ $CSharpCompilerWorkerServerSource = Read-RequiredFile 'Tools/AvidScript.CSharpCo
 $FrontendReportHeaderSource = Read-RequiredFile 'Source/AvidScriptEditor/Public/AvidScriptFrontendReport.h'
 $FrontendReportSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/AvidScriptFrontendReport.cpp'
 $DiagnosticNavigationSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/AvidScriptEditorDiagnosticNavigation.cpp'
+$EditorCallStackHeaderSource = Read-RequiredFile 'Source/AvidScriptEditor/Public/AvidScriptEditorCallStack.h'
+$EditorCallStackSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/AvidScriptEditorCallStack.cpp'
+$EditorDiagnosticLogSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/AvidScriptEditorDiagnosticLog.cpp'
+$EditorResultPresentationHeaderSource = Read-RequiredFile 'Source/AvidScriptEditor/Public/AvidScriptEditorResultPresentation.h'
 $AvidScriptEditorBuildRulesSource = Read-RequiredFile 'Source/AvidScriptEditor/AvidScriptEditor.Build.cs'
 $CSharpIncrementalBenchmarkSource = Read-RequiredFile 'Build/MeasureAvidScriptCSharpIncrementalBuild.ps1'
 foreach ($RequiredIncrementalBenchmarkContract in @(
@@ -3510,15 +3514,32 @@ foreach ($RequiredUnifiedDiagnosticEditorContract in @(
     }
 }
 foreach ($RequiredDiagnosticNavigationContract in @(
-    'FPaths::IsRelative',
-    'FPaths::IsUnderDirectory',
-    'diagnostic_source_changed',
-    'FSourceCodeNavigation::OpenSourceFile',
+	'FPaths::IsRelative',
+	'FPaths::IsUnderDirectory',
+	'TEXT("_source_changed")',
+	'FSourceCodeNavigation::OpenSourceFile',
     '::SHA256('
 )) {
     if (-not $DiagnosticNavigationSource.Contains($RequiredDiagnosticNavigationContract)) {
         Add-Violation "Editor diagnostic navigation is missing safe source contract $RequiredDiagnosticNavigationContract"
     }
+}
+foreach ($RequiredRuntimeCallStackContract in @(
+	@{ Source = $RuntimeDiagnosticsHeader; Token = 'EAvidScriptWasmDiagnosticFrameKind' },
+	@{ Source = $RuntimeDiagnosticsHeader; Token = 'HostImport' },
+	@{ Source = $RuntimeDiagnosticsHeader; Token = 'HostEntry' },
+	@{ Source = $RuntimeDiagnosticsHeader; Token = 'SourceSha256' },
+	@{ Source = $RuntimeSource; Token = 'HostImportFrame.Kind = EAvidScriptWasmDiagnosticFrameKind::HostImport' },
+	@{ Source = $RuntimeSource; Token = 'HostEntryFrame.Kind = EAvidScriptWasmDiagnosticFrameKind::HostEntry' },
+	@{ Source = $EditorCallStackSource; Token = 'FAvidScriptEditorDiagnosticNavigation::Open' },
+	@{ Source = $EditorCallStackHeaderSource; Token = 'IsSourceNavigable' },
+	@{ Source = $EditorResultPresentationHeaderSource; Token = 'TArray<FAvidScriptEditorCallStackFrame> CallStack' },
+	@{ Source = $EditorDiagnosticLogSource; Token = 'FActionToken::Create' },
+	@{ Source = $EditorDiagnosticLogSource; Token = 'FMessageLog' }
+)) {
+	if (-not $RequiredRuntimeCallStackContract.Source.Contains($RequiredRuntimeCallStackContract.Token)) {
+		Add-Violation "Runtime/Editor call-stack contract is missing $($RequiredRuntimeCallStackContract.Token)"
+	}
 }
 if (-not $AvidScriptEditorBuildRulesSource.Contains(
         'AddEngineThirdPartyPrivateStaticDependencies(Target, "OpenSSL")')) {

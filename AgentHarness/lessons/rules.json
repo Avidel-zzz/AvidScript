@@ -526,6 +526,14 @@
       "prevention": "Worker 集成或增量矩阵结束后，若要直接 build AvidScript.CSharpCompilerWorker，先按已验证 pipe/fingerprint 发送 shutdown 并等待进程退出；不要把 DLL 文件锁误判为源码编译失败。",
       "source": "observed:2026-09-01-P61.B1a",
       "last_observed": "2026-09-01 P61.B1a Worker 集成留下 PID 42996，直接 build 因依赖 DLL 被锁失败；确认命令行后通过 shutdown 协议退出，仓库文件未受影响"
+    },
+    {
+      "id": "source-addition-can-expose-unity-include-debt",
+      "tags": ["ue", "unity-build", "includes", "build"],
+      "summary": "新增 C++ 源文件会重排 unity 分组，从而暴露依赖其他翻译单元间接 include 的既有代码。",
+      "prevention": "新增 .cpp 后执行 no-clean UBT；若未修改的文件出现未知类型，先检查其直接 include 完整性并做最小显式 include 修复，不清理 Editor Target，也不把 unity 偶然可编译当作契约。",
+      "source": "observed:2026-09-01-P61.B2",
+      "last_observed": "2026-09-01 P61.B2 新增 Editor CallStack 源文件后 unity 重排，BindingDescriptorGeneratorTests 缺少 AvidScriptHash.h 导致编译失败；补充一行显式 include 后 4-action no-clean UBT 通过"
     }
   ]
 }

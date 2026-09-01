@@ -38,60 +38,60 @@ bool TryGetAvidScriptSourceSha256(const FString& Path, FString& OutSha256)
 	OutSha256 = BytesToHex(Digest, UE_ARRAY_COUNT(Digest)).ToLower();
 	return true;
 }
-} // namespace
 
-bool FAvidScriptEditorDiagnosticNavigation::Resolve(
-	const FAvidScriptFrontendDiagnostic& Diagnostic,
+bool ResolveAvidScriptSourceLocation(
+	const FAvidScriptEditorSourceLocation& Location,
 	const FString& ProjectDirectory,
+	const FString& ErrorPrefix,
 	FAvidScriptEditorDiagnosticNavigationResult& OutResult)
 {
 	OutResult = FAvidScriptEditorDiagnosticNavigationResult();
-	if (!Diagnostic.HasSourceLocation() || ProjectDirectory.IsEmpty())
+	if (!Location.IsValid() || ProjectDirectory.IsEmpty())
 	{
 		SetAvidScriptDiagnosticNavigationFailure(
-			TEXT("diagnostic_location_missing"),
-			TEXT("The diagnostic does not contain a navigable source location."),
+			ErrorPrefix + TEXT("_location_missing"),
+			TEXT("The source location is not navigable."),
 			OutResult);
 		return false;
 	}
-	if (!FPaths::IsRelative(Diagnostic.File))
+	if (!FPaths::IsRelative(Location.File))
 	{
 		SetAvidScriptDiagnosticNavigationFailure(
-			TEXT("diagnostic_source_not_relative"),
-			TEXT("The diagnostic source id must be project-relative."),
+			ErrorPrefix + TEXT("_source_not_relative"),
+			TEXT("The source id must be project-relative."),
 			OutResult);
 		return false;
 	}
 
 	FString ProjectRoot = FPaths::ConvertRelativePathToFull(ProjectDirectory);
-	FString SourcePath = FPaths::ConvertRelativePathToFull(ProjectRoot, Diagnostic.File);
+	FString SourcePath = FPaths::ConvertRelativePathToFull(ProjectRoot, Location.File);
 	FPaths::NormalizeDirectoryName(ProjectRoot);
 	FPaths::NormalizeFilename(SourcePath);
 	if (!FPaths::IsUnderDirectory(SourcePath, ProjectRoot))
 	{
 		SetAvidScriptDiagnosticNavigationFailure(
-			TEXT("diagnostic_source_outside_project"),
-			TEXT("The diagnostic source id escapes the project directory."),
+			ErrorPrefix + TEXT("_source_outside_project"),
+			TEXT("The source id escapes the project directory."),
 			OutResult);
 		return false;
 	}
 	if (!FPaths::FileExists(SourcePath))
 	{
 		SetAvidScriptDiagnosticNavigationFailure(
-			TEXT("diagnostic_source_missing"),
-			TEXT("The diagnostic source file no longer exists."),
+			ErrorPrefix + TEXT("_source_missing"),
+			TEXT("The source file no longer exists."),
 			OutResult);
 		return false;
 	}
-	if (!Diagnostic.SourceSha256.IsEmpty())
+	if (!Location.SourceSha256.IsEmpty())
 	{
 		FString CurrentSha256;
 		if (!TryGetAvidScriptSourceSha256(SourcePath, CurrentSha256)
-			|| !CurrentSha256.Equals(Diagnostic.SourceSha256, ESearchCase::IgnoreCase))
+			|| !CurrentSha256.Equals(Location.SourceSha256, ESearchCase::IgnoreCase))
 		{
 			SetAvidScriptDiagnosticNavigationFailure(
-				TEXT("diagnostic_source_changed"),
-				TEXT("The source changed after this diagnostic was produced; rebuild before navigating."),
+				ErrorPrefix + TEXT("_source_changed"),
+				TEXT("The source changed after this location was produced; rebuild before navigating."),
 				OutResult);
 			return false;
 		}
@@ -99,9 +99,65 @@ bool FAvidScriptEditorDiagnosticNavigation::Resolve(
 
 	OutResult.bSucceeded = true;
 	OutResult.AbsoluteSourcePath = SourcePath;
-	OutResult.Line = Diagnostic.GetDisplayLine();
-	OutResult.Column = Diagnostic.GetDisplayColumn();
+	OutResult.Line = Location.Line;
+	OutResult.Column = Location.Column;
 	return true;
+}
+} // namespace
+
+bool FAvidScriptEditorDiagnosticNavigation::Resolve(
+	const FAvidScriptEditorSourceLocation& Location,
+	const FString& ProjectDirectory,
+	FAvidScriptEditorDiagnosticNavigationResult& OutResult)
+{
+	return ResolveAvidScriptSourceLocation(
+		Location,
+		ProjectDirectory,
+		TEXT("runtime_frame"),
+		OutResult);
+}
+
+bool FAvidScriptEditorDiagnosticNavigation::Open(
+	const FAvidScriptEditorSourceLocation& Location,
+	const FString& ProjectDirectory,
+	FAvidScriptEditorDiagnosticNavigationResult& OutResult)
+{
+	if (!Resolve(Location, ProjectDirectory, OutResult))
+	{
+		return false;
+	}
+	if (!FSourceCodeNavigation::OpenSourceFile(
+		OutResult.AbsoluteSourcePath,
+		OutResult.Line,
+		OutResult.Column))
+	{
+		SetAvidScriptDiagnosticNavigationFailure(
+			TEXT("source_accessor_unavailable"),
+			TEXT("The configured source-code accessor could not open the source location."),
+			OutResult);
+		return false;
+	}
+	return true;
+}
+
+bool FAvidScriptEditorDiagnosticNavigation::Resolve(
+	const FAvidScriptFrontendDiagnostic& Diagnostic,
+	const FString& ProjectDirectory,
+	FAvidScriptEditorDiagnosticNavigationResult& OutResult)
+{
+	FAvidScriptEditorSourceLocation Location;
+	if (Diagnostic.HasSourceLocation())
+	{
+		Location.File = Diagnostic.File;
+		Location.SourceSha256 = Diagnostic.SourceSha256;
+		Location.Line = Diagnostic.GetDisplayLine();
+		Location.Column = Diagnostic.GetDisplayColumn();
+	}
+	return ResolveAvidScriptSourceLocation(
+		Location,
+		ProjectDirectory,
+		TEXT("diagnostic"),
+		OutResult);
 }
 
 bool FAvidScriptEditorDiagnosticNavigation::Open(

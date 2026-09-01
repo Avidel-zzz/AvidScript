@@ -32,7 +32,8 @@ public class AvidScriptEditor : ModuleRules
 				"ToolMenus",
 				"Slate",
 				"SlateCore",
-				"LevelEditor"
+				"LevelEditor",
+				"MessageLog"
 			}
 		);
 

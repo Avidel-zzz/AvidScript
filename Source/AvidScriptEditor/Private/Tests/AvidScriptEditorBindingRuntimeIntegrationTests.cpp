@@ -4672,6 +4672,18 @@ bool FAvidScriptGeneratedCSharpDiagnosticsTest::RunTest(const FString& Parameter
 	TestEqual(TEXT("top trap frame exposes one-based source line"), TopFrame.Line, HelperLine);
 	TestEqual(TEXT("top trap frame exposes one-based source column"), TopFrame.Column, HelperColumn);
 	TestEqual(TEXT("top trap frame preserves function index"), TopFrame.FunctionIndex, HelperFunctionIndex);
+	TestEqual(
+		TEXT("top trap frame is classified as C#"),
+		TopFrame.Kind,
+		EAvidScriptWasmDiagnosticFrameKind::CSharp);
+	TestEqual(
+		TEXT("top trap frame preserves source hash"),
+		TopFrame.SourceSha256,
+		Manifest.DebugProvenance.SourceSha256);
+	TestEqual(
+		TEXT("candidate trap retains UE entry boundary"),
+		DiagnosticFrames.Last().Kind,
+		EAvidScriptWasmDiagnosticFrameKind::HostEntry);
 
 	FAvidScriptEditorCommandLaunchResult LaunchResult;
 	LaunchResult.bSucceeded = false;
@@ -4698,6 +4710,14 @@ bool FAvidScriptGeneratedCSharpDiagnosticsTest::RunTest(const FString& Parameter
 		Presentation.Details.Contains(FString::Printf(
 			TEXT("wasm frame: function=%u offset=0x"),
 			HelperFunctionIndex)));
+	TestEqual(
+		TEXT("Editor presentation exposes structured call-stack frames"),
+		Presentation.CallStack.Num(),
+		DiagnosticFrames.Num());
+	TestTrue(
+		TEXT("Editor structured top frame is source navigable"),
+		!Presentation.CallStack.IsEmpty()
+			&& Presentation.CallStack[0].IsSourceNavigable());
 
 	if (!TestTrue(
 		TEXT("old generated C# runtime ticks after candidate rejection"),

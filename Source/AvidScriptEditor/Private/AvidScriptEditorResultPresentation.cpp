@@ -36,6 +36,16 @@ void AppendAvidScriptRuntimeDiagnosticFrames(
 {
 	for (const FAvidScriptWasmDiagnosticFrame& Frame : Frames)
 	{
+		if (Frame.Kind == EAvidScriptWasmDiagnosticFrameKind::HostImport)
+		{
+			Lines.Add(FString::Printf(TEXT("host import: %s"), *Frame.FunctionName));
+			continue;
+		}
+		if (Frame.Kind == EAvidScriptWasmDiagnosticFrameKind::HostEntry)
+		{
+			Lines.Add(FString::Printf(TEXT("host entry: %s"), *Frame.FunctionName));
+			continue;
+		}
 		if (Frame.bSourceMapped
 			&& !Frame.FunctionName.IsEmpty()
 			&& !Frame.SourceFile.IsEmpty()
@@ -197,6 +207,9 @@ FAvidScriptEditorCommandPresentation FAvidScriptEditorResultPresenter::MakePrese
 	FAvidScriptEditorCommandPresentation Presentation;
 	Presentation.SourcePath = Result.SourcePath;
 	Presentation.ManifestPath = Result.ManifestPath;
+	FAvidScriptEditorCallStack::Build(
+		Result.CommandResult.ReloadApplyResult.RuntimeResult.RuntimeResult.DiagnosticFrames,
+		Presentation.CallStack);
 	Presentation.Details = MakeAvidScriptPresentationDetails(Result);
 
 	if (!Result.bSucceeded)

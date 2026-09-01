@@ -427,13 +427,22 @@ bool FAvidScriptWasmDebugMapValidationTest::RunTest(const FString& Parameters)
 		if (Frames.Num() == 3)
 		{
 			TestTrue(TEXT("known function is source mapped"), Frames[0].bSourceMapped);
+			TestEqual(
+				TEXT("known function publishes C# frame kind"),
+				Frames[0].Kind,
+				EAvidScriptWasmDiagnosticFrameKind::CSharp);
 			TestEqual(TEXT("known function name"), Frames[0].FunctionName, FString(TEXT("Test.Helper()")));
 			TestEqual(TEXT("source identity remains project relative"), Frames[0].SourceFile, SourceFile);
+			TestEqual(TEXT("source hash remains navigable provenance"), Frames[0].SourceSha256, GDiagnosticsSourceSha);
 			TestEqual(TEXT("public source line is one based"), Frames[0].Line, 11);
 			TestEqual(TEXT("public source column is one based"), Frames[0].Column, 3);
 			TestEqual(TEXT("public end line is one based"), Frames[0].EndLine, 13);
 			TestEqual(TEXT("public end column is one based"), Frames[0].EndColumn, 4);
 			TestFalse(TEXT("unknown function remains raw"), Frames[1].bSourceMapped);
+			TestEqual(
+				TEXT("unknown function publishes WASM frame kind"),
+				Frames[1].Kind,
+				EAvidScriptWasmDiagnosticFrameKind::Wasm);
 			TestEqual(TEXT("unknown function index survives"), Frames[1].FunctionIndex, 99u);
 			TestEqual(TEXT("unknown raw token survives"), Frames[1].RawFunctionToken, FString(TEXT("$f99")));
 			TestTrue(TEXT("named export frame is source mapped"), Frames[2].bSourceMapped);
@@ -743,6 +752,16 @@ bool FAvidScriptWasmDiagnosticRuntimeIntegrationTest::RunTest(const FString& Par
 		TestEqual(TEXT("Tick helper method name"), FirstFrame.FunctionName, FString(TEXT("Test.Helper()")));
 		TestEqual(TEXT("Tick helper source line"), FirstFrame.Line, 11);
 		TestEqual(TEXT("Tick helper raw index"), FirstFrame.FunctionIndex, 1u);
+		TestEqual(
+			TEXT("Tick helper is a C# call-stack frame"),
+			FirstFrame.Kind,
+			EAvidScriptWasmDiagnosticFrameKind::CSharp);
+		const FAvidScriptWasmDiagnosticFrame& EntryFrame = TickResult.DiagnosticFrames.Last();
+		TestEqual(
+			TEXT("Tick failure retains UE entry boundary"),
+			EntryFrame.Kind,
+			EAvidScriptWasmDiagnosticFrameKind::HostEntry);
+		TestEqual(TEXT("Tick failure entry export"), EntryFrame.FunctionName, FString(TEXT("avid_on_tick")));
 	}
 
 	FString LegacyManifestPath;

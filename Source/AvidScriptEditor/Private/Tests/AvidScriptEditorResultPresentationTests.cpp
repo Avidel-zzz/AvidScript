@@ -109,11 +109,19 @@ bool FAvidScriptEditorPresentationRuntimeDiagnosticsTest::RunTest(const FString&
 	MappedFrame.Column = 5;
 	MappedFrame.EndLine = 19;
 	MappedFrame.EndColumn = 6;
+	MappedFrame.SourceKind = TEXT("call");
 	MappedFrame.bSourceMapped = true;
+	MappedFrame.bSequencePointMapped = true;
+	MappedFrame.Kind = EAvidScriptWasmDiagnosticFrameKind::CSharp;
+	MappedFrame.SourceSha256 = FString::ChrN(64, TEXT('a'));
 	FAvidScriptWasmDiagnosticFrame& RawFrame = Frames.AddDefaulted_GetRef();
 	RawFrame.FunctionIndex = 8;
 	RawFrame.FunctionOffset = 3;
 	RawFrame.RawFunctionToken = TEXT("$f8");
+	RawFrame.Kind = EAvidScriptWasmDiagnosticFrameKind::Wasm;
+	FAvidScriptWasmDiagnosticFrame& HostEntryFrame = Frames.AddDefaulted_GetRef();
+	HostEntryFrame.Kind = EAvidScriptWasmDiagnosticFrameKind::HostEntry;
+	HostEntryFrame.FunctionName = TEXT("avid_on_begin_play");
 
 	const FAvidScriptEditorCommandPresentation Presentation =
 		FAvidScriptEditorResultPresenter::MakePresentation(Result);
@@ -130,6 +138,26 @@ bool FAvidScriptEditorPresentationRuntimeDiagnosticsTest::RunTest(const FString&
 	TestFalse(
 		TEXT("unmapped frame does not fabricate a source identity"),
 		Presentation.Details.Contains(TEXT("at $f8")));
+	TestTrue(
+		TEXT("host entry is rendered as a logical crossing frame"),
+		Presentation.Details.Contains(TEXT("host entry: avid_on_begin_play")));
+	TestEqual(TEXT("structured call stack preserves all frames"), Presentation.CallStack.Num(), 3);
+	if (Presentation.CallStack.Num() == 3)
+	{
+		const FAvidScriptEditorCallStackFrame& CSharpFrame = Presentation.CallStack[0];
+		TestEqual(TEXT("structured C# frame ordinal"), CSharpFrame.Ordinal, 0);
+		TestEqual(
+			TEXT("structured C# frame kind"),
+			CSharpFrame.Kind,
+			EAvidScriptWasmDiagnosticFrameKind::CSharp);
+		TestTrue(TEXT("structured C# frame is navigable"), CSharpFrame.IsSourceNavigable());
+		TestTrue(TEXT("structured C# frame retains sequence-point state"), CSharpFrame.bSequencePointMapped);
+		TestEqual(TEXT("structured C# source kind"), CSharpFrame.SourceKind, FString(TEXT("call")));
+		TestEqual(
+			TEXT("structured host entry display"),
+			Presentation.CallStack.Last().DisplayName,
+			FString(TEXT("UE entry: avid_on_begin_play")));
+	}
 	return true;
 }
 

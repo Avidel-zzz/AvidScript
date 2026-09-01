@@ -45,10 +45,34 @@ bool FAvidScriptEditorDiagnosticNavigationResolveTest::RunTest(const FString& Pa
 	TestEqual(TEXT("Resolved line"), Result.Line, 1);
 	TestEqual(TEXT("Resolved column"), Result.Column, 8);
 
+	FAvidScriptEditorSourceLocation RuntimeLocation;
+	RuntimeLocation.File = SourceId;
+	RuntimeLocation.SourceSha256 = Diagnostic.SourceSha256;
+	RuntimeLocation.Line = 1;
+	RuntimeLocation.Column = 8;
+	TestTrue(
+		TEXT("Runtime call-stack location shares hash-checked navigation"),
+		FAvidScriptEditorDiagnosticNavigation::Resolve(
+			RuntimeLocation,
+			FPaths::ProjectDir(),
+			Result));
+	TestEqual(TEXT("Runtime location path"), Result.AbsoluteSourcePath, FPaths::ConvertRelativePathToFull(SourcePath));
+
 	Diagnostic.SourceSha256 = FString::ChrN(64, TEXT('0'));
 	TestFalse(TEXT("Changed source hash is rejected"),
 		FAvidScriptEditorDiagnosticNavigation::Resolve(Diagnostic, FPaths::ProjectDir(), Result));
 	TestEqual(TEXT("Changed source category"), Result.ErrorCategory, FString(TEXT("diagnostic_source_changed")));
+	RuntimeLocation.SourceSha256 = Diagnostic.SourceSha256;
+	TestFalse(
+		TEXT("Changed runtime-frame source hash is rejected"),
+		FAvidScriptEditorDiagnosticNavigation::Resolve(
+			RuntimeLocation,
+			FPaths::ProjectDir(),
+			Result));
+	TestEqual(
+		TEXT("Changed runtime-frame category"),
+		Result.ErrorCategory,
+		FString(TEXT("runtime_frame_source_changed")));
 
 	Diagnostic.SourceSha256.Reset();
 	Diagnostic.File = TEXT("../Outside.cs");

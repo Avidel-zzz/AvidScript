@@ -2,6 +2,7 @@
 
 #include "AvidScriptComponent.h"
 #include "AvidScriptEditorCSharpBindingEmitter.h"
+#include "AvidScriptEditorDiagnosticLog.h"
 #include "AvidScriptEditorGeneratedBindingService.h"
 #include "AvidScriptEditorResultPresentation.h"
 #include "AvidScriptEditorSourceConfig.h"
@@ -135,6 +136,7 @@ void LogAvidScriptMenuRegistrationFailure(const FAvidScriptEditorMenuRegistratio
 
 void LogAvidScriptEditorPresentation(const FAvidScriptEditorCommandPresentation& Presentation)
 {
+	FAvidScriptEditorDiagnosticLog::Publish(Presentation);
 	if (Presentation.Severity == EAvidScriptEditorPresentationSeverity::Info)
 	{
 		UE_LOG(
@@ -177,6 +179,7 @@ FAvidScriptEditorModule::FAvidScriptEditorModule(
 
 void FAvidScriptEditorModule::StartupModule()
 {
+	FAvidScriptEditorDiagnosticLog::Register();
 	CommandLauncher = MakeUnique<FAvidScriptEditorCommandLauncher>();
 	if (!CSharpLiveReloadService)
 	{
@@ -206,6 +209,7 @@ void FAvidScriptEditorModule::StartupModule()
 void FAvidScriptEditorModule::ShutdownModule()
 {
 	UnregisterConsoleCommands();
+	FAvidScriptEditorDiagnosticLog::Unregister();
 	if (PublishCSharpBindingsAssetRegistryHandle.IsValid()
 		&& FModuleManager::Get().IsModuleLoaded(TEXT("AssetRegistry")))
 	{
@@ -998,38 +1002,7 @@ void FAvidScriptEditorModule::HandleRunSampleCommand()
 
 	const FAvidScriptEditorCommandPresentation Presentation =
 		FAvidScriptEditorResultPresenter::MakePresentation(Result);
-
-	if (Presentation.Severity == EAvidScriptEditorPresentationSeverity::Info)
-	{
-		UE_LOG(
-			LogAvidScriptEditor,
-			Display,
-			TEXT("%s: %s\n%s"),
-			*Presentation.Title,
-			*Presentation.Body,
-			*Presentation.Details);
-		return;
-	}
-
-	if (Presentation.Severity == EAvidScriptEditorPresentationSeverity::Warning)
-	{
-		UE_LOG(
-			LogAvidScriptEditor,
-			Warning,
-			TEXT("%s: %s\n%s"),
-			*Presentation.Title,
-			*Presentation.Body,
-			*Presentation.Details);
-		return;
-	}
-
-	UE_LOG(
-		LogAvidScriptEditor,
-		Error,
-		TEXT("%s: %s\n%s"),
-		*Presentation.Title,
-		*Presentation.Body,
-		*Presentation.Details);
+	LogAvidScriptEditorPresentation(Presentation);
 }
 
 void FAvidScriptEditorModule::HandleBindCSharpActorLifecycleReport()

@@ -131,6 +131,24 @@ bool FAvidScriptWasmFailingImportSmokeTest::RunTest(const FString& Parameters)
 		TestTrue(
 			*AvidScriptRuntimeLaneLabel(Lane, TEXT("host failure diagnostic names the import")),
 			Result.ErrorMessage.Contains(TEXT("avidscript.host_fail_i32")));
+		TestTrue(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("host failure publishes crossing frames")),
+			Result.DiagnosticFrames.Num() >= 2);
+		if (Result.DiagnosticFrames.Num() >= 2)
+		{
+			TestEqual(
+				*AvidScriptRuntimeLaneLabel(Lane, TEXT("host import is the top logical frame")),
+				Result.DiagnosticFrames[0].Kind,
+				EAvidScriptWasmDiagnosticFrameKind::HostImport);
+			TestEqual(
+				*AvidScriptRuntimeLaneLabel(Lane, TEXT("host import frame identity")),
+				Result.DiagnosticFrames[0].FunctionName,
+				FString(TEXT("avidscript.host_fail_i32")));
+			TestEqual(
+				*AvidScriptRuntimeLaneLabel(Lane, TEXT("host entry is the bottom logical frame")),
+				Result.DiagnosticFrames.Last().Kind,
+				EAvidScriptWasmDiagnosticFrameKind::HostEntry);
+		}
 	}
 
 	return true;

@@ -405,6 +405,27 @@ void SetFailureFromVmError(
 			Frame.FunctionName = VmFrame.RawFunctionToken;
 		}
 	}
+
+	if (Category == TEXT("host_import_failed")
+		&& (!Error.ImportModuleName.IsEmpty() || !Error.ImportName.IsEmpty()))
+	{
+		FAvidScriptWasmDiagnosticFrame HostImportFrame;
+		HostImportFrame.Kind = EAvidScriptWasmDiagnosticFrameKind::HostImport;
+		HostImportFrame.FunctionName = Error.ImportModuleName.IsEmpty()
+			? Error.ImportName
+			: FString::Printf(TEXT("%s.%s"), *Error.ImportModuleName, *Error.ImportName);
+		HostImportFrame.RawFunctionToken = Error.ImportName;
+		OutResult.DiagnosticFrames.Insert(MoveTemp(HostImportFrame), 0);
+	}
+
+	if (!ExportName.IsEmpty())
+	{
+		FAvidScriptWasmDiagnosticFrame& HostEntryFrame =
+			OutResult.DiagnosticFrames.AddDefaulted_GetRef();
+		HostEntryFrame.Kind = EAvidScriptWasmDiagnosticFrameKind::HostEntry;
+		HostEntryFrame.FunctionName = ExportName;
+		HostEntryFrame.RawFunctionToken = ExportName;
+	}
 }
 
 bool InvokeVmExport(

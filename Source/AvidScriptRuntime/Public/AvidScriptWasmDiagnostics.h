@@ -15,6 +15,14 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmDebugProvenance
 	FString WasmSha256;
 };
 
+enum class EAvidScriptWasmDiagnosticFrameKind : uint8
+{
+	Wasm,
+	CSharp,
+	HostImport,
+	HostEntry
+};
+
 struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmDiagnosticFrame
 {
 	uint32 FunctionIndex = MAX_uint32;
@@ -29,4 +37,6 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmDiagnosticFrame
 	FString SourceKind;
 	bool bSourceMapped = false;
 	bool bSequencePointMapped = false;
+	EAvidScriptWasmDiagnosticFrameKind Kind = EAvidScriptWasmDiagnosticFrameKind::Wasm;
+	FString SourceSha256;
 };

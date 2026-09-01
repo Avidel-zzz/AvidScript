@@ -370,6 +370,7 @@ bool FAvidScriptWasmDebugMap::LoadAndValidate(
 
 	TSharedRef<FAvidScriptWasmDebugMap> MutableMap = MakeShared<FAvidScriptWasmDebugMap>();
 	MutableMap->SourceFile = SourceFile;
+	MutableMap->SourceSha256 = SourceSha256;
 	MutableMap->Functions.Reserve(FunctionValues->Num());
 	TSet<FString> GuestFunctionIds;
 	TSet<FString> MethodSymbolIds;
@@ -639,6 +640,8 @@ void FAvidScriptWasmDebugMap::MapFrames(
 		}
 		Frame.FunctionName = Function->DisplayName;
 		Frame.SourceFile = SourceFile;
+		Frame.SourceSha256 = SourceSha256;
+		Frame.Kind = EAvidScriptWasmDiagnosticFrameKind::CSharp;
 
 		const FSequencePoint* ResolvedSequencePoint = nullptr;
 		int32 Low = 0;
