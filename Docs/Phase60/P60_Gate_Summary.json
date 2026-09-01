@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "phase_id": 60,
+  "run_id": "P60-43d1b5b-20260901-001",
+  "status": "attested",
+  "verified": {
+    "commit": "43d1b5b8a3f448529d4d87698800eb434eb3b86f",
+    "tree": "3e03b326d5aa7b79043f0899176fb5f28744b3e8",
+    "state_sha256": "eb810315a46fec89d74eeb8d8d790bd3a9b33e0b66612f9888cd63a5d431fe27"
+  },
+  "gate_report_sha256": "3bc126e1a535f361d63410ac96dec97079b229c7f2244c5b74ba13e048d519c2",
+  "checks": {
+    "architecture_clean": true,
+    "dotnet_276_of_276": true,
+    "agent_harness_7_of_7": true,
+    "powershell_contracts": true,
+    "powershell_parser_65_files": true,
+    "harness_audit": true,
+    "ue58_no_clean_editor_build": true,
+    "automation_411_of_411": true,
+    "phase60_performance_matrix": true,
+    "formal_evidence_valid": true
+  },
+  "performance": {
+    "interface_prepared_p50_us": 0.387496,
+    "interface_p50_ratio": 2.559940,
+    "delegate_prepared_p50_us": 0.726366,
+    "delegate_p50_ratio": 1.314136,
+    "blueprint_callable_prepared_p50_us": 0.779102,
+    "blueprint_callable_p50_ratio": 1.215426,
+    "async_action_session_lifecycle_p50_us": 4.307774
+  },
+  "transferred_debt": [],
+  "human_acceptance": {
+    "pie_gameplay_interaction": false,
+    "blueprint_pin_visual_check": false,
+    "automation_does_not_impersonate_human_acceptance": true
+  },
+  "invocations": {
+    "ubt": 1,
+    "automation": 2,
+    "full_gate": 2,
+    "budget_exception_recorded": false
+  },
+  "attested_at_utc": "2026-09-01T03:08:49.3728092+00:00"
+}

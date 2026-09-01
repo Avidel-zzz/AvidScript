@@ -1,6 +1,6 @@
 # Phase 60 收尾记录
 
-状态：集中 Gate 已通过，待 attestation 与 close
+状态：已通过最终 Gate 并完成 attestation，待工作流生成外部不可变 close evidence
 
 ## 目标
 
@@ -63,6 +63,12 @@
 - clean detached architecture Gate：提交 `5163b463a6f9164238b003cc11ae778d38542bcf`，
   tree `1ad6ef66de32727b643da09efe8990a30ddb11c7`，21 个注册输入，提交树 clean；
 - Harness audit 与 README 链接检查均通过。
+
+正式 Gate run 为 `P60-43d1b5b-20260901-001`，验证提交
+`43d1b5b8a3f448529d4d87698800eb434eb3b86f`，tree
+`3e03b326d5aa7b79043f0899176fb5f28744b3e8`。机器摘要见
+`P60_Gate_Summary.json`；仓库外 Gate report SHA-256 为
+`3bc126e1a535f361d63410ac96dec97079b229c7f2244c5b74ba13e048d519c2`。
 
 ## 验收边界
 
