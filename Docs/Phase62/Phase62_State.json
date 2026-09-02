@@ -19,9 +19,9 @@
   "batches": [
     {
       "id": "P62.A",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "module publisher 12/12; Generated Type v2 7/7; UE5.8 no-clean UBT passed; resolver, RuntimeArtifactLoader and CookedPackageLoad Automation 3/3 passed; architecture contracts pass with only protected dirty baseline remaining",
+      "completed_at_utc": "2026-09-02T00:27:10.6535099+00:00"
     },
     {
       "id": "P62.B",
@@ -94,7 +94,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "batch-complete -Phase 62 -BatchId P62.A -Evidence <text>",
-  "revision": 1,
-  "updated_at_utc": "2026-09-01T23:35:01.6529492+00:00"
+  "next_action": "batch-complete -Phase 62 -BatchId P62.B -Evidence <text>",
+  "revision": 2,
+  "updated_at_utc": "2026-09-02T00:27:10.6556106+00:00"
 }
