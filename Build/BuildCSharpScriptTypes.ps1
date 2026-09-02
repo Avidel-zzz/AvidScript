@@ -333,11 +333,13 @@ if (-not $SkipRuntimePackage) {
         $PackageJson + [System.Environment]::NewLine,
         $Utf8)
     Move-Item -LiteralPath $PackageTempPath -Destination $GeneratedPackagePath -Force
-    $CookPackage = Publish-AvidScriptGeneratedTypeCookPackage `
-        -PackageDescriptorPath $GeneratedPackagePath `
-        -ProjectRoot $ProjectRoot `
-        -OutputRoot $CookOutputRoot `
-        -Configuration $PackageConfiguration
+    if ($HeadlessRelease) {
+        $CookPackage = Publish-AvidScriptGeneratedTypeCookPackage `
+            -PackageDescriptorPath $GeneratedPackagePath `
+            -ProjectRoot $ProjectRoot `
+            -OutputRoot $CookOutputRoot `
+            -Configuration $PackageConfiguration
+    }
 }
 
 Write-Host "AvidScript C# script type generation succeeded."

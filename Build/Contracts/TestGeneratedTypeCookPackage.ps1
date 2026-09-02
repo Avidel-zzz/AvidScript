@@ -376,6 +376,10 @@ try {
                 throw "Generated Type headless release route is missing: $RequiredToken"
             }
         }
+        if ($ScriptTypeBuilderSource -notmatch
+            '(?s)if\s*\(\$HeadlessRelease\)\s*\{\s*\$CookPackage\s*=\s*Publish-AvidScriptGeneratedTypeCookPackage') {
+            throw 'Editor JIT Generated Type builds are not isolated from the Cook publisher.'
+        }
     }
 
     Invoke-ContractTest -Name 'Runtime artifact hash rejection' -Body {
