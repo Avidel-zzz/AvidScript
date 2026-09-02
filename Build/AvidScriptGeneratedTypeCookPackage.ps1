@@ -69,11 +69,20 @@ function Assert-AvidScriptCookPackageFileHash {
     }
 }
 
+$AvidScriptModuleReleasePublisherPath = Join-Path `
+    $PSScriptRoot `
+    'AvidScriptModuleReleasePackage.ps1'
+if (-not (Test-Path -LiteralPath $AvidScriptModuleReleasePublisherPath -PathType Leaf)) {
+    throw "AvidScript module release publisher is missing: $AvidScriptModuleReleasePublisherPath"
+}
+. $AvidScriptModuleReleasePublisherPath
+
 function Publish-AvidScriptGeneratedTypeCookPackage {
     param(
         [Parameter(Mandatory = $true)][string]$PackageDescriptorPath,
         [Parameter(Mandatory = $true)][string]$ProjectRoot,
-        [Parameter(Mandatory = $true)][string]$OutputRoot
+        [Parameter(Mandatory = $true)][string]$OutputRoot,
+        [ValidateSet('Development', 'Shipping')][string]$Configuration = 'Development'
     )
 
     $PackageDescriptorPath = (Resolve-Path -LiteralPath $PackageDescriptorPath).Path
@@ -112,81 +121,21 @@ function Publish-AvidScriptGeneratedTypeCookPackage {
         -Path $RuntimeManifestPath `
         -ExpectedSha256 ([string]$Descriptor.runtime_manifest.sha256) `
         -Label 'generated Runtime manifest'
-
-    $RuntimeManifest = Get-Content -Raw -LiteralPath $RuntimeManifestPath | ConvertFrom-Json -Depth 64
-    if ($null -eq $RuntimeManifest.wasm -or
-        $null -eq $RuntimeManifest.debug_map -or
-        $null -eq $RuntimeManifest.binding_package) {
-        throw "Generated Runtime manifest is missing Cook-required artifact entries."
-    }
-    $WasmPath = Resolve-AvidScriptCookPackageArtifactPath `
-        -ManifestPath $RuntimeManifestPath `
-        -ArtifactPath ([string]$RuntimeManifest.wasm.file) `
-        -ProjectRoot $ProjectRoot
-    $DebugMapPath = Resolve-AvidScriptCookPackageArtifactPath `
-        -ManifestPath $RuntimeManifestPath `
-        -ArtifactPath ([string]$RuntimeManifest.debug_map.file) `
-        -ProjectRoot $ProjectRoot
-    $BindingManifestPath = Resolve-AvidScriptCookPackageArtifactPath `
-        -ManifestPath $RuntimeManifestPath `
-        -ArtifactPath ([string]$RuntimeManifest.binding_package.manifest_file) `
-        -ProjectRoot $ProjectRoot
-    $BindingDescriptorPath = Resolve-AvidScriptCookPackageArtifactPath `
-        -ManifestPath $RuntimeManifestPath `
-        -ArtifactPath ([string]$RuntimeManifest.binding_package.descriptor_file) `
-        -ProjectRoot $ProjectRoot
-    Assert-AvidScriptCookPackageFileHash -Path $WasmPath -ExpectedSha256 ([string]$RuntimeManifest.wasm.sha256) -Label 'WASM'
-    Assert-AvidScriptCookPackageFileHash -Path $DebugMapPath -ExpectedSha256 ([string]$RuntimeManifest.debug_map.sha256) -Label 'debug map'
-    Assert-AvidScriptCookPackageFileHash -Path $BindingManifestPath -ExpectedSha256 ([string]$RuntimeManifest.binding_package.manifest_sha256) -Label 'binding package manifest'
-    Assert-AvidScriptCookPackageFileHash -Path $BindingDescriptorPath -ExpectedSha256 ([string]$RuntimeManifest.binding_package.descriptor_sha256) -Label 'binding descriptor'
-
-    $BindingManifest = Get-Content -Raw -LiteralPath $BindingManifestPath | ConvertFrom-Json -Depth 64
-    if ($null -eq $BindingManifest.files -or
-        [string]$BindingManifest.descriptor_sha256 -cne [string]$RuntimeManifest.binding_package.descriptor_sha256) {
-        throw 'Binding package manifest is invalid for Cook publication.'
-    }
-    $BindingManifest.files.descriptor = 'bindings.json'
-    if ($BindingManifest.files.PSObject.Properties.Name -contains 'reference_source') {
-        $BindingManifest.files.reference_source = ''
-    }
-    $Utf8 = [System.Text.UTF8Encoding]::new($false)
-    $BindingManifestJson = ($BindingManifest | ConvertTo-Json -Depth 64) + [System.Environment]::NewLine
-    $BindingManifestBytes = $Utf8.GetBytes($BindingManifestJson)
-    $BindingManifestSha256 = [System.Convert]::ToHexString(
-        [System.Security.Cryptography.SHA256]::HashData($BindingManifestBytes)).ToLowerInvariant()
-
-    $RuntimeManifest.wasm.file = 'generated_types.wasm'
-    $RuntimeManifest.debug_map.file = 'generated_types.debug.json'
-    $RuntimeManifest.binding_package.manifest_file = 'bindings/package.json'
-    $RuntimeManifest.binding_package.manifest_sha256 = $BindingManifestSha256
-    $RuntimeManifest.binding_package.descriptor_file = 'bindings/bindings.json'
-    if ($null -ne $RuntimeManifest.source) {
-        if ($RuntimeManifest.source.PSObject.Properties.Name -contains 'frontend_file') {
-            $RuntimeManifest.source.frontend_file = ''
-        }
-        if ($RuntimeManifest.source.PSObject.Properties.Name -contains 'semantic_file') {
-            $RuntimeManifest.source.semantic_file = ''
-        }
-    }
-    if ($RuntimeManifest.binding_package.PSObject.Properties.Name -contains 'reference_source_file') {
-        $RuntimeManifest.binding_package.reference_source_file = ''
-    }
-    if ($null -ne $RuntimeManifest.guest_ir -and
-        $RuntimeManifest.guest_ir.PSObject.Properties.Name -contains 'file') {
-        $RuntimeManifest.guest_ir.file = ''
-    }
-    $RuntimeJson = ($RuntimeManifest | ConvertTo-Json -Depth 64) + [System.Environment]::NewLine
-    $RuntimeBytes = $Utf8.GetBytes($RuntimeJson)
-    $RuntimeSha256 = [System.Convert]::ToHexString(
-        [System.Security.Cryptography.SHA256]::HashData($RuntimeBytes)).ToLowerInvariant()
     $TypeSha256 = Get-AvidScriptCookPackageSha256 $TypeManifestPath
-    $PackageIdentityBytes = [System.Text.Encoding]::UTF8.GetBytes(
-        "$($Descriptor.generation_key_sha256)`n$TypeSha256`n$RuntimeSha256")
-    $PackageId = [System.Convert]::ToHexString(
-        [System.Security.Cryptography.SHA256]::HashData($PackageIdentityBytes)).ToLowerInvariant()
+    $RuntimePackage = Publish-AvidScriptModuleReleasePackage `
+        -RuntimeManifestPath $RuntimeManifestPath `
+        -ProjectRoot $ProjectRoot `
+        -ModuleId ([string]$Descriptor.runtime_module_id) `
+        -Configuration $Configuration
+    $GeneratedPackageIdentityBytes = [System.Text.Encoding]::UTF8.GetBytes(
+        "$($Descriptor.generation_key_sha256)`n$TypeSha256`n$($RuntimePackage.ModuleId)`n$($RuntimePackage.PackageId)")
+    $GeneratedPackageId = [System.Convert]::ToHexString(
+        [System.Security.Cryptography.SHA256]::HashData(
+            $GeneratedPackageIdentityBytes)).ToLowerInvariant()
 
     [void][System.IO.Directory]::CreateDirectory($OutputRoot)
-    $BundleRoot = [System.IO.Path]::GetFullPath((Join-Path $OutputRoot $PackageId))
+    $BundleRoot = [System.IO.Path]::GetFullPath(
+        (Join-Path $OutputRoot $GeneratedPackageId))
     if (-not $BundleRoot.StartsWith(
             $OutputRoot + [System.IO.Path]::DirectorySeparatorChar,
             [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -195,13 +144,8 @@ function Publish-AvidScriptGeneratedTypeCookPackage {
     if (-not (Test-Path -LiteralPath $BundleRoot -PathType Container)) {
         $TempBundleRoot = "$BundleRoot.tmp.$PID.$([Guid]::NewGuid().ToString('N'))"
         try {
-            [void][System.IO.Directory]::CreateDirectory((Join-Path $TempBundleRoot 'bindings'))
+            [void][System.IO.Directory]::CreateDirectory($TempBundleRoot)
             Copy-Item -LiteralPath $TypeManifestPath -Destination (Join-Path $TempBundleRoot 'type-manifest.json')
-            [System.IO.File]::WriteAllBytes((Join-Path $TempBundleRoot 'runtime-manifest.json'), $RuntimeBytes)
-            Copy-Item -LiteralPath $WasmPath -Destination (Join-Path $TempBundleRoot 'generated_types.wasm')
-            Copy-Item -LiteralPath $DebugMapPath -Destination (Join-Path $TempBundleRoot 'generated_types.debug.json')
-            [System.IO.File]::WriteAllBytes((Join-Path $TempBundleRoot 'bindings\package.json'), $BindingManifestBytes)
-            Copy-Item -LiteralPath $BindingDescriptorPath -Destination (Join-Path $TempBundleRoot 'bindings\bindings.json')
             Move-Item -LiteralPath $TempBundleRoot -Destination $BundleRoot
         }
         finally {
@@ -211,17 +155,20 @@ function Publish-AvidScriptGeneratedTypeCookPackage {
         }
     }
 
-    $ExpectedBundleFiles = [ordered]@{
-        'type-manifest.json' = $TypeSha256
-        'runtime-manifest.json' = $RuntimeSha256
-        'generated_types.wasm' = [string]$RuntimeManifest.wasm.sha256
-        'generated_types.debug.json' = [string]$RuntimeManifest.debug_map.sha256
-        'bindings/package.json' = $BindingManifestSha256
-        'bindings/bindings.json' = [string]$RuntimeManifest.binding_package.descriptor_sha256
+    $ExpectedBundleFiles = [ordered]@{ 'type-manifest.json' = $TypeSha256 }
+    $ActualBundleFiles = @(
+        Get-ChildItem -LiteralPath $BundleRoot -File -Recurse |
+            ForEach-Object {
+                [System.IO.Path]::GetRelativePath(
+                    $BundleRoot,
+                    $_.FullName).Replace('\', '/')
+            })
+    if ($ActualBundleFiles.Count -ne $ExpectedBundleFiles.Count) {
+        throw 'Content-addressed Generated Type bundle contains extra files.'
     }
     foreach ($Entry in $ExpectedBundleFiles.GetEnumerator()) {
         $BundleFile = Join-Path $BundleRoot $Entry.Key
-        if (-not (Test-Path -LiteralPath $BundleFile -PathType Leaf) -or
+        if ($ActualBundleFiles -cnotcontains $Entry.Key -or
             (Get-AvidScriptCookPackageSha256 $BundleFile) -cne $Entry.Value) {
             throw "Content-addressed Cook bundle is incomplete or collided: $($Entry.Key)"
         }
@@ -235,22 +182,18 @@ function Publish-AvidScriptGeneratedTypeCookPackage {
         previous_package_id = ''
     }
     $CookDescriptor = [ordered]@{
-        schema_version = 1
-        package_id = $PackageId
+        schema_version = 2
         module_name = [string]$Descriptor.module_name
-        runtime_module_id = [string]$Descriptor.runtime_module_id
-        execution_backend = [string]$Descriptor.execution_backend
+        module_id = [string]$RuntimePackage.ModuleId
+        package_id = [string]$RuntimePackage.PackageId
         generation_key_sha256 = [string]$Descriptor.generation_key_sha256
         type_manifest = [ordered]@{
-            file = "$PackageId/type-manifest.json"
+            file = "$GeneratedPackageId/type-manifest.json"
             sha256 = $TypeSha256
-        }
-        runtime_manifest = [ordered]@{
-            file = "$PackageId/runtime-manifest.json"
-            sha256 = $RuntimeSha256
         }
         reload = $ReloadMetadata
     }
+    $Utf8 = [System.Text.UTF8Encoding]::new($false)
     $CurrentPath = Join-Path $OutputRoot 'current.json'
     $CurrentTempPath = "$CurrentPath.tmp.$PID.$([Guid]::NewGuid().ToString('N'))"
     [System.IO.File]::WriteAllText(
@@ -260,10 +203,16 @@ function Publish-AvidScriptGeneratedTypeCookPackage {
     [System.IO.File]::Move($CurrentTempPath, $CurrentPath, $true)
 
     return [pscustomobject][ordered]@{
-        PackageId = $PackageId
+        ModuleId = [string]$RuntimePackage.ModuleId
+        PackageId = [string]$RuntimePackage.PackageId
+        GeneratedTypePackageId = $GeneratedPackageId
         DescriptorPath = $CurrentPath
         BundleRoot = $BundleRoot
-        RuntimeManifestSha256 = $RuntimeSha256
+        RuntimePackageRoot = [string]$RuntimePackage.PackageRoot
+        RuntimeDescriptorPath = [string]$RuntimePackage.DescriptorPath
+        RuntimeManifestSha256 = Get-AvidScriptCookPackageSha256 (
+            Join-Path $RuntimePackage.PackageRoot 'runtime.avidscript.json')
         FileCount = $ExpectedBundleFiles.Count + 1
+        RuntimeFileCount = [int]$RuntimePackage.FileCount
     }
 }

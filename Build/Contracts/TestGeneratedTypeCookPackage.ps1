@@ -2,8 +2,78 @@ $ErrorActionPreference = 'Stop'
 $BuildRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 . (Join-Path $BuildRoot 'AvidScriptGeneratedTypeCookPackage.ps1')
 
-$Root = Join-Path ([System.IO.Path]::GetTempPath()) ("AvidScriptCookPackageContract_$PID`_$([Guid]::NewGuid().ToString('N'))")
+$Root = Join-Path `
+    ([System.IO.Path]::GetTempPath()) `
+    ("AvidScriptCookPackageContract_$PID`_$([Guid]::NewGuid().ToString('N'))")
 $Utf8 = [System.Text.UTF8Encoding]::new($false)
+$Passed = 0
+$Total = 7
+$Failure = $null
+
+function Write-TestJson {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][object]$Value
+    )
+
+    [System.IO.File]::WriteAllText(
+        $Path,
+        ($Value | ConvertTo-Json -Depth 64) + "`n",
+        $Utf8)
+}
+
+function Get-TestTreeIdentity {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    return [string]::Join(
+        "`n",
+        @(Get-ChildItem -LiteralPath $Path -File -Recurse |
+            Sort-Object { [System.IO.Path]::GetRelativePath($Path, $_.FullName) } |
+            ForEach-Object {
+                $RelativePath = [System.IO.Path]::GetRelativePath(
+                    $Path,
+                    $_.FullName).Replace('\', '/')
+                "$RelativePath=$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())"
+            }))
+}
+
+function Resolve-TestGeneratedTypeRuntimeDescriptor {
+    param(
+        [Parameter(Mandatory = $true)][object]$Pointer,
+        [Parameter(Mandatory = $true)][object]$Catalog,
+        [Parameter(Mandatory = $true)][string]$CatalogPath
+    )
+
+    if ([int]$Pointer.schema_version -ne 2) {
+        throw 'Generated Type pointer is not schema v2.'
+    }
+    $Matches = @($Catalog.modules | Where-Object {
+            [string]$_.module_id -ceq [string]$Pointer.module_id
+        })
+    if ($Matches.Count -ne 1) {
+        throw "Generated Type Runtime module is missing: $($Pointer.module_id)"
+    }
+    if ([string]$Matches[0].package_id -cne [string]$Pointer.package_id) {
+        throw "Generated Type Runtime package id drift: expected=$($Pointer.package_id) resolved=$($Matches[0].package_id)"
+    }
+    return Join-Path (Split-Path -Parent $CatalogPath) ([string]$Matches[0].descriptor_file)
+}
+
+function Invoke-ContractTest {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][scriptblock]$Body
+    )
+
+    try {
+        & $Body
+        $script:Passed++
+    }
+    catch {
+        throw "$Name failed: $($_.Exception.Message)"
+    }
+}
+
 try {
     $ProjectRoot = Join-Path $Root 'Project'
     $SourceRoot = Join-Path $ProjectRoot 'Source'
@@ -16,45 +86,75 @@ try {
 
     $TypePath = Join-Path $SourceRoot 'types.json'
     $WasmPath = Join-Path $RuntimeRoot 'module.wasm'
-    $DebugPath = Join-Path $RuntimeRoot 'debug.json'
+    $PrecompiledPath = Join-Path $RuntimeRoot 'module.wasmtime.cwasm'
+    $DebugPath = Join-Path $RuntimeRoot 'debug-map.json'
     $BindingManifestPath = Join-Path $BindingRoot 'package.json'
     $BindingDescriptorPath = Join-Path $BindingRoot 'bindings.json'
-    [System.IO.File]::WriteAllText($TypePath, '{"schema_version":5}', $Utf8)
-    [System.IO.File]::WriteAllBytes($WasmPath, [byte[]](0x00, 0x61, 0x73, 0x6d))
-    [System.IO.File]::WriteAllText($DebugPath, '{"schema_version":1}', $Utf8)
-    [System.IO.File]::WriteAllText($BindingDescriptorPath, '{"schema_version":19}', $Utf8)
-    $BindingManifest = [ordered]@{
-        schema_version = 1
-        descriptor_sha256 = Get-AvidScriptCookPackageSha256 $BindingDescriptorPath
-        files = [ordered]@{
-            descriptor = 'bindings.v5.json'
-            reference_source = 'Saved/Bindings/AvidScript.Bindings.generated.cs'
-        }
-    }
-    [System.IO.File]::WriteAllText(
-        $BindingManifestPath,
-        ($BindingManifest | ConvertTo-Json -Depth 8),
-        $Utf8)
+    Write-TestJson -Path $TypePath -Value ([ordered]@{
+            schema_version = 5
+            module_name = 'AvidScriptGenerated'
+            generation_key_sha256 = ('b' * 64)
+            types = @()
+        })
+    [System.IO.File]::WriteAllBytes(
+        $WasmPath,
+        [byte[]](0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00))
+    [System.IO.File]::WriteAllBytes(
+        $PrecompiledPath,
+        [byte[]](0x61, 0x76, 0x69, 0x64, 0x2d, 0x63, 0x77, 0x61, 0x73, 0x6d))
+    Write-TestJson -Path $DebugPath -Value ([ordered]@{
+            schema_version = 1
+            module_id = 'avidscript_generated'
+        })
+    Write-TestJson -Path $BindingDescriptorPath -Value ([ordered]@{
+            schema_version = 19
+            modules = @()
+        })
+    $BindingDescriptorSha256 = Get-AvidScriptCookPackageSha256 $BindingDescriptorPath
+    Write-TestJson -Path $BindingManifestPath -Value ([ordered]@{
+            schema_version = 1
+            descriptor_sha256 = $BindingDescriptorSha256
+            files = [ordered]@{ descriptor = 'bindings.json' }
+        })
 
-    $RuntimePath = Join-Path $RuntimeRoot 'runtime.json'
-    $Runtime = [ordered]@{
-        source = [ordered]@{
-            file = 'Plugins/AvidScript/Samples/CSharp/Test.cs'
-            frontend_file = 'Saved/Runtime/frontend.json'
-            semantic_file = 'Saved/Runtime/semantic.json'
+    $RuntimePath = Join-Path $RuntimeRoot 'runtime.avidscript.json'
+    $WasmSha256 = Get-AvidScriptCookPackageSha256 $WasmPath
+    $RuntimeManifest = [ordered]@{
+        schema_version = 1
+        module_id = 'avidscript_generated'
+        abi_version = 1
+        language = 'csharp'
+        wasm = [ordered]@{
+            file = 'module.wasm'
+            sha256 = $WasmSha256
         }
-        wasm = [ordered]@{ file = 'module.wasm'; sha256 = Get-AvidScriptCookPackageSha256 $WasmPath }
-        debug_map = [ordered]@{ file = 'debug.json'; sha256 = Get-AvidScriptCookPackageSha256 $DebugPath }
+        execution = [ordered]@{
+            backend = 'wasmtime'
+            format = 'wasmtime_serialized_v1'
+            file = 'module.wasmtime.cwasm'
+            sha256 = Get-AvidScriptCookPackageSha256 $PrecompiledPath
+            canonical_sha256 = $WasmSha256
+            compiler_build_identity = 'wasmtime-contract-build'
+            target_triple = 'x86_64-pc-windows-msvc'
+            cpu_features = 'x86-64-v3'
+            policy = 'prefer_precompiled'
+            fallback = 'wasmtime_jit'
+        }
         binding_package = [ordered]@{
             manifest_file = 'Saved/Bindings/package.json'
             manifest_sha256 = Get-AvidScriptCookPackageSha256 $BindingManifestPath
             descriptor_file = 'Saved/Bindings/bindings.json'
-            descriptor_sha256 = Get-AvidScriptCookPackageSha256 $BindingDescriptorPath
-            reference_source_file = 'Saved/Bindings/AvidScript.Bindings.generated.cs'
+            descriptor_sha256 = $BindingDescriptorSha256
         }
-        guest_ir = [ordered]@{ file = 'Saved/Runtime/module.guestir.json' }
+        debug_map = [ordered]@{
+            file = 'debug-map.json'
+            sha256 = Get-AvidScriptCookPackageSha256 $DebugPath
+        }
+        required_exports = @()
+        required_imports = @()
     }
-    [System.IO.File]::WriteAllText($RuntimePath, ($Runtime | ConvertTo-Json -Depth 8), $Utf8)
+    Write-TestJson -Path $RuntimePath -Value $RuntimeManifest
+
     $DescriptorPath = Join-Path $SourceRoot 'package.json'
     $Descriptor = [ordered]@{
         schema_version = 1
@@ -63,72 +163,189 @@ try {
         runtime_module_id = 'avidscript_generated'
         execution_backend = 'wasmtime_jit'
         generation_key_sha256 = ('b' * 64)
-        type_manifest = [ordered]@{ file = 'types.json'; sha256 = Get-AvidScriptCookPackageSha256 $TypePath }
-        runtime_manifest = [ordered]@{ file = '../Saved/Runtime/runtime.json'; sha256 = Get-AvidScriptCookPackageSha256 $RuntimePath }
+        type_manifest = [ordered]@{
+            file = 'types.json'
+            sha256 = Get-AvidScriptCookPackageSha256 $TypePath
+        }
+        runtime_manifest = [ordered]@{
+            file = [System.IO.Path]::GetRelativePath(
+                $SourceRoot,
+                $RuntimePath).Replace('\', '/')
+            sha256 = Get-AvidScriptCookPackageSha256 $RuntimePath
+        }
         reload = [ordered]@{ native_structure_sha256 = ('c' * 64) }
     }
-    $Descriptor.runtime_manifest.file = [System.IO.Path]::GetRelativePath($SourceRoot, $RuntimePath).Replace('\', '/')
-    [System.IO.File]::WriteAllText($DescriptorPath, ($Descriptor | ConvertTo-Json -Depth 8), $Utf8)
+    Write-TestJson -Path $DescriptorPath -Value $Descriptor
 
-    $First = Publish-AvidScriptGeneratedTypeCookPackage -PackageDescriptorPath $DescriptorPath -ProjectRoot $ProjectRoot -OutputRoot $OutputRoot
-    $Second = Publish-AvidScriptGeneratedTypeCookPackage -PackageDescriptorPath $DescriptorPath -ProjectRoot $ProjectRoot -OutputRoot $OutputRoot
-    if ($First.PackageId -cne $Second.PackageId -or
-        $First.FileCount -ne 7 -or
-        -not (Test-Path -LiteralPath $First.DescriptorPath -PathType Leaf)) {
-        throw 'Cook package publication is not deterministic.'
-    }
-    $Current = Get-Content -Raw -LiteralPath $First.DescriptorPath | ConvertFrom-Json
-    $CookRuntimeJson = Get-Content -Raw -LiteralPath (Join-Path $First.BundleRoot 'runtime-manifest.json')
-    $CookRuntime = $CookRuntimeJson | ConvertFrom-Json
-    $CookBindingJson = Get-Content -Raw -LiteralPath (Join-Path $First.BundleRoot 'bindings\package.json')
-    $CookBinding = $CookBindingJson | ConvertFrom-Json
-    if ([string]$Current.package_id -cne $First.PackageId -or
-        [string]$Current.type_manifest.file -cne "$($First.PackageId)/type-manifest.json" -or
-        [string]$CookRuntime.wasm.file -cne 'generated_types.wasm' -or
-        [string]$CookRuntime.debug_map.file -cne 'generated_types.debug.json' -or
-        [string]$CookRuntime.binding_package.manifest_file -cne 'bindings/package.json' -or
-        [string]$CookRuntime.binding_package.descriptor_file -cne 'bindings/bindings.json' -or
-        [string]$CookBinding.files.descriptor -cne 'bindings.json' -or
-        (Get-Content -Raw -LiteralPath $First.DescriptorPath).Contains('Saved/') -or
-        $CookRuntimeJson.Contains('Saved/') -or
-        $CookBindingJson.Contains('Saved/')) {
-        throw 'Cook package contains a non-portable runtime path.'
-    }
+    $First = $null
+    $Second = $null
+    $Current = $null
+    $Catalog = $null
+    $CatalogPath = Join-Path $ProjectRoot 'Content\AvidScript\Modules\catalog.json'
 
-    $OutsideRoot = Join-Path $Root 'OutsideProject'
-    [void][System.IO.Directory]::CreateDirectory($OutsideRoot)
-    $OutsideArtifactPath = Join-Path $OutsideRoot 'outside.json'
-    [System.IO.File]::WriteAllText($OutsideArtifactPath, '{}', $Utf8)
-    $RejectedOutsideProject = $false
-    try {
-        Resolve-AvidScriptCookPackageArtifactPath `
-            -ManifestPath $DescriptorPath `
-            -ArtifactPath $OutsideArtifactPath `
-            -ProjectRoot $ProjectRoot | Out-Null
-    }
-    catch {
-        $RejectedOutsideProject = $_.Exception.Message.Contains('outside the project root')
-    }
-    if (-not $RejectedOutsideProject) {
-        throw 'Cook package publication accepted an artifact outside the project root.'
+    Invoke-ContractTest -Name 'schema v2 deterministic publication' -Body {
+        $script:First = Publish-AvidScriptGeneratedTypeCookPackage `
+            -PackageDescriptorPath $DescriptorPath `
+            -ProjectRoot $ProjectRoot `
+            -OutputRoot $OutputRoot
+        $FirstPointerIdentity = Get-AvidScriptCookPackageSha256 $First.DescriptorPath
+        $FirstGeneratedIdentity = Get-TestTreeIdentity $First.BundleRoot
+        $FirstRuntimeIdentity = Get-TestTreeIdentity $First.RuntimePackageRoot
+        $FirstCatalogIdentity = Get-AvidScriptCookPackageSha256 $CatalogPath
+        $script:Second = Publish-AvidScriptGeneratedTypeCookPackage `
+            -PackageDescriptorPath $DescriptorPath `
+            -ProjectRoot $ProjectRoot `
+            -OutputRoot $OutputRoot
+        if ($First.ModuleId -cne $Second.ModuleId -or
+            $First.PackageId -cne $Second.PackageId -or
+            $First.GeneratedTypePackageId -cne $Second.GeneratedTypePackageId -or
+            $First.FileCount -ne 2 -or
+            $First.RuntimeFileCount -ne 7 -or
+            $FirstPointerIdentity -cne (Get-AvidScriptCookPackageSha256 $Second.DescriptorPath) -or
+            $FirstGeneratedIdentity -cne (Get-TestTreeIdentity $Second.BundleRoot) -or
+            $FirstRuntimeIdentity -cne (Get-TestTreeIdentity $Second.RuntimePackageRoot) -or
+            $FirstCatalogIdentity -cne (Get-AvidScriptCookPackageSha256 $CatalogPath)) {
+            throw 'Repeated publication changed an identity, file set, or hash.'
+        }
+        $GeneratedFiles = @(Get-ChildItem -LiteralPath $First.BundleRoot -File -Recurse)
+        if ($GeneratedFiles.Count -ne 1 -or $GeneratedFiles[0].Name -cne 'type-manifest.json') {
+            throw 'Generated Type content-addressed bundle is not the exact v2 file set.'
+        }
     }
 
-    [System.IO.File]::WriteAllBytes($WasmPath, [byte[]](0x00, 0x61, 0x73, 0x6d, 0x01))
-    $RejectedTamper = $false
-    try {
-        Publish-AvidScriptGeneratedTypeCookPackage -PackageDescriptorPath $DescriptorPath -ProjectRoot $ProjectRoot -OutputRoot $OutputRoot | Out-Null
-    }
-    catch {
-        $RejectedTamper = $_.Exception.Message.Contains('WASM SHA-256')
-    }
-    if (-not $RejectedTamper) {
-        throw 'Cook package publication accepted a tampered WASM artifact.'
+    Invoke-ContractTest -Name 'schema v2 pointer and catalog' -Body {
+        $script:Current = Get-Content -Raw -LiteralPath $First.DescriptorPath |
+            ConvertFrom-Json -Depth 64
+        $script:Catalog = Get-Content -Raw -LiteralPath $CatalogPath |
+            ConvertFrom-Json -Depth 64
+        if ([int]$Current.schema_version -ne 2 -or
+            [string]$Current.module_id -cne $First.ModuleId -or
+            [string]$Current.package_id -cne $First.PackageId -or
+            [string]$Current.type_manifest.file -cne
+                "$($First.GeneratedTypePackageId)/type-manifest.json" -or
+            $Current.PSObject.Properties.Name -ccontains 'runtime_manifest' -or
+            $Current.PSObject.Properties.Name -ccontains 'runtime_module_id') {
+            throw 'Cook pointer does not have the frozen schema v2 shape.'
+        }
+        $ResolvedDescriptor = Resolve-TestGeneratedTypeRuntimeDescriptor `
+            -Pointer $Current `
+            -Catalog $Catalog `
+            -CatalogPath $CatalogPath
+        if (-not $ResolvedDescriptor.Equals(
+                $First.RuntimeDescriptorPath,
+                [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Generated Type pointer and Runtime catalog resolve different descriptors.'
+        }
     }
 
-    Write-Output 'Generated type Cook package contracts: PASS'
+    Invoke-ContractTest -Name 'RuntimeHost public resolver integration' -Body {
+        $RuntimeHostPath = Join-Path `
+            (Split-Path -Parent $BuildRoot) `
+            'Source/AvidScriptRuntime/Private/ScriptTypes/AvidScriptGeneratedTypeRuntimeHost.cpp'
+        $RuntimeHostSource = Get-Content -Raw -LiteralPath $RuntimeHostPath
+        foreach ($RequiredToken in @(
+                'FAvidScriptRuntimeArtifactLoader::LoadPublishedModule(',
+                'FName(*RuntimeModuleId)',
+                'PackageId,',
+                'TEXT("runtime_module_id")',
+                'TEXT("execution_backend")')) {
+            if (-not $RuntimeHostSource.Contains($RequiredToken)) {
+                throw "RuntimeHost is missing compatibility token: $RequiredToken"
+            }
+        }
+    }
+
+    Invoke-ContractTest -Name 'package id drift rejection' -Body {
+        $DriftedPointer = $Current | ConvertTo-Json -Depth 64 |
+            ConvertFrom-Json -Depth 64
+        $DriftedPointer.package_id = ('d' * 64)
+        $Rejected = $false
+        try {
+            Resolve-TestGeneratedTypeRuntimeDescriptor `
+                -Pointer $DriftedPointer `
+                -Catalog $Catalog `
+                -CatalogPath $CatalogPath | Out-Null
+        }
+        catch {
+            $Rejected = $_.Exception.Message.Contains('package id drift')
+        }
+        if (-not $Rejected) {
+            throw 'A Generated Type pointer with a drifted package id was accepted.'
+        }
+    }
+
+    Invoke-ContractTest -Name 'missing module rejection' -Body {
+        $MissingPointer = $Current | ConvertTo-Json -Depth 64 |
+            ConvertFrom-Json -Depth 64
+        $MissingPointer.module_id = 'missing_generated_module'
+        $Rejected = $false
+        try {
+            Resolve-TestGeneratedTypeRuntimeDescriptor `
+                -Pointer $MissingPointer `
+                -Catalog $Catalog `
+                -CatalogPath $CatalogPath | Out-Null
+        }
+        catch {
+            $Rejected = $_.Exception.Message.Contains('module is missing')
+        }
+        if (-not $Rejected) {
+            throw 'A Generated Type pointer for a missing module was accepted.'
+        }
+    }
+
+    Invoke-ContractTest -Name 'project-root escape rejection' -Body {
+        $OutsideRoot = Join-Path $Root 'OutsideProject'
+        [void][System.IO.Directory]::CreateDirectory($OutsideRoot)
+        $OutsideArtifactPath = Join-Path $OutsideRoot 'outside.json'
+        [System.IO.File]::WriteAllText($OutsideArtifactPath, '{}', $Utf8)
+        $Rejected = $false
+        try {
+            Resolve-AvidScriptCookPackageArtifactPath `
+                -ManifestPath $DescriptorPath `
+                -ArtifactPath $OutsideArtifactPath `
+                -ProjectRoot $ProjectRoot | Out-Null
+        }
+        catch {
+            $Rejected = $_.Exception.Message.Contains('outside the project root')
+        }
+        if (-not $Rejected) {
+            throw 'An artifact outside the project root was accepted.'
+        }
+    }
+
+    Invoke-ContractTest -Name 'Runtime artifact hash rejection' -Body {
+        [System.IO.File]::WriteAllBytes(
+            $WasmPath,
+            [byte[]](0x00, 0x61, 0x73, 0x6d, 0x02, 0x00, 0x00, 0x00))
+        $Rejected = $false
+        try {
+            Publish-AvidScriptGeneratedTypeCookPackage `
+                -PackageDescriptorPath $DescriptorPath `
+                -ProjectRoot $ProjectRoot `
+                -OutputRoot $OutputRoot | Out-Null
+        }
+        catch {
+            $Rejected = $_.Exception.Message.Contains('WASM SHA-256 mismatch')
+        }
+        if (-not $Rejected) {
+            throw 'A tampered canonical WASM artifact was accepted.'
+        }
+    }
+}
+catch {
+    $Failure = $_.Exception.Message
 }
 finally {
     if (Test-Path -LiteralPath $Root -PathType Container) {
         Remove-Item -LiteralPath $Root -Recurse -Force
     }
 }
+
+if ($null -ne $Failure) {
+    [Console]::Error.WriteLine(
+        "Generated type Cook package contracts: $Passed/$Total passed; FAIL: $Failure")
+    exit 1
+}
+
+Write-Output "Generated type Cook package contracts: PASS ($Passed/$Total)"
+exit 0

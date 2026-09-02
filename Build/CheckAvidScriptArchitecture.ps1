@@ -652,6 +652,7 @@ $ScriptDefinedTypeSampleSource = Read-RequiredFile 'Samples/CSharp/ScriptDefined
 $GeneratedTypeNetworkHarnessSource = Read-RequiredFile 'Source/AvidScriptGenerated/Private/Tests/AvidScriptGeneratedNetworkTopologyHarness.cpp'
 $GeneratedTypeModuleSource = Read-RequiredFile 'Source/AvidScriptGenerated/Private/AvidScriptGeneratedModule.cpp'
 $GeneratedTypeRuntimeTestsSource = Read-RequiredFile 'Source/AvidScriptGenerated/Private/AvidScriptGeneratedRuntimeTests.cpp'
+$GeneratedTypeRuntimeHostSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/ScriptTypes/AvidScriptGeneratedTypeRuntimeHost.cpp'
 $PluginDescriptorSource = Read-RequiredFile 'AvidScript.uplugin'
 $GitIgnoreSource = Read-RequiredFile '.gitignore'
 $NetworkTopologyBuildSource = Read-RequiredFile 'Build/RunAvidScriptNetworkTopology.ps1'
@@ -808,9 +809,10 @@ foreach ($RequiredGeneratedTypeReloadClassificationContract in @(
 foreach ($RequiredGeneratedTypeCookPublicationContract in @(
     'Publish-AvidScriptGeneratedTypeCookPackage',
     'Test-AvidScriptCookPackagePathUnderRoot',
-    'generated_types.wasm',
-    'bindings/package.json',
-    'bindings/bindings.json',
+    'Publish-AvidScriptModuleReleasePackage',
+    'schema_version = 2',
+    'GeneratedTypePackageId',
+    'type-manifest.json',
     '[System.IO.File]::Move($CurrentTempPath, $CurrentPath, $true)')) {
     if (-not $GeneratedTypeCookPackageSource.Contains($RequiredGeneratedTypeCookPublicationContract)) {
         Add-Violation "generated type Cook publisher is missing $RequiredGeneratedTypeCookPublicationContract"
@@ -830,8 +832,9 @@ foreach ($RequiredGeneratedTypeStagingContract in @(
     '"current.json"',
     'ExternalDependencies.Add',
     'RuntimeDependencies.Add',
-    'StagedFileType.NonUFS',
-    'must contain exactly the six published artifacts')) {
+    'StagedFileType.UFS',
+    'packaged targets require Generated Type Cook pointer schema v2',
+    'v2 bundle must contain only type-manifest.json')) {
     if (-not $GeneratedBuild.Contains($RequiredGeneratedTypeStagingContract)) {
         Add-Violation "generated type Build.cs is missing Cook staging contract $RequiredGeneratedTypeStagingContract"
     }
@@ -850,6 +853,15 @@ foreach ($RequiredGeneratedTypeCookTestContract in @(
     'outside the project root')) {
     if (-not $GeneratedTypeCookPackageContractSource.Contains($RequiredGeneratedTypeCookTestContract)) {
         Add-Violation "generated type Cook contract test is missing $RequiredGeneratedTypeCookTestContract"
+    }
+}
+foreach ($RequiredGeneratedTypeResolvedPackageContract in @(
+    'SchemaVersion != 1.0 && SchemaVersion != 2.0',
+    'LoadPublishedModule',
+    'PackageId')) {
+    if (-not $GeneratedTypeRuntimeHostSource.Contains(
+            $RequiredGeneratedTypeResolvedPackageContract)) {
+        Add-Violation "generated type Runtime host is missing package resolver contract $RequiredGeneratedTypeResolvedPackageContract"
     }
 }
 if (-not $GeneratedTypeRuntimeTestsSource.Contains('AvidScript.GeneratedTypes.CookedPackageLoad')) {

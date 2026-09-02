@@ -539,31 +539,14 @@ bool FAvidScriptGeneratedTypeRuntimeHost::LoadPackageFromDescriptorFile(
 	FGeneratedTypePackageFile RuntimeManifestEntry;
 	if (!DeserializeJsonObject(DescriptorBytes, Descriptor)
 		|| !Descriptor->TryGetNumberField(TEXT("schema_version"), SchemaVersion)
-		|| SchemaVersion != 1.0
-		|| !Descriptor->TryGetStringField(TEXT("package_id"), PackageId)
-		|| !IsLowercaseSha256(PackageId)
+		|| (SchemaVersion != 1.0 && SchemaVersion != 2.0)
 		|| !Descriptor->TryGetStringField(TEXT("module_name"), ModuleName)
 		|| ModuleName.IsEmpty()
-		|| !Descriptor->TryGetStringField(TEXT("runtime_module_id"), RuntimeModuleId)
-		|| RuntimeModuleId.IsEmpty()
-		|| !Descriptor->TryGetStringField(TEXT("execution_backend"), ExecutionBackend)
-		|| ExecutionBackend != TEXT("wasmtime_jit")
 		|| !Descriptor->TryGetStringField(TEXT("generation_key_sha256"), GenerationKey)
 		|| !IsLowercaseSha256(GenerationKey)
-		|| !ReadPackageFileEntry(Descriptor, TEXT("type_manifest"), TypeManifestEntry)
-		|| !ReadPackageFileEntry(Descriptor, TEXT("runtime_manifest"), RuntimeManifestEntry))
+		|| !ReadPackageFileEntry(Descriptor, TEXT("type_manifest"), TypeManifestEntry))
 	{
 		OutError = TEXT("generated type package descriptor schema is invalid");
-		return false;
-	}
-	const FString ExpectedPackageId = FAvidScriptHash::Sha256HexUtf8(FString::Printf(
-		TEXT("%s\n%s\n%s"),
-		*GenerationKey,
-		*TypeManifestEntry.Sha256,
-		*RuntimeManifestEntry.Sha256));
-	if (PackageId != ExpectedPackageId)
-	{
-		OutError = TEXT("generated type package identity does not match its manifest hashes");
 		return false;
 	}
 
@@ -573,30 +556,91 @@ bool FAvidScriptGeneratedTypeRuntimeHost::LoadPackageFromDescriptorFile(
 			NormalizedDescriptorPath,
 			TypeManifestEntry,
 			TypeManifestPath,
-			OutError)
-		|| !ResolvePackageFile(
-			NormalizedDescriptorPath,
-			RuntimeManifestEntry,
-			RuntimeManifestPath,
 			OutError))
 	{
 		return false;
 	}
 
 	TArray<uint8> TypeManifestBytes;
-	TArray<uint8> RuntimeManifestBytes;
 	if (!LoadVerifiedPackageFile(
 			TypeManifestPath,
 			TypeManifestEntry.Sha256,
 			TypeManifestBytes,
-			OutError)
-		|| !LoadVerifiedPackageFile(
-			RuntimeManifestPath,
-			RuntimeManifestEntry.Sha256,
-			RuntimeManifestBytes,
 			OutError))
 	{
 		return false;
+	}
+
+	const bool bUsesResolvedRuntimePackage = SchemaVersion == 2.0;
+	if (!bUsesResolvedRuntimePackage)
+	{
+		if (!Descriptor->TryGetStringField(TEXT("package_id"), PackageId)
+			|| !IsLowercaseSha256(PackageId)
+			|| !Descriptor->TryGetStringField(TEXT("runtime_module_id"), RuntimeModuleId)
+			|| RuntimeModuleId.IsEmpty()
+			|| !Descriptor->TryGetStringField(TEXT("execution_backend"), ExecutionBackend)
+			|| ExecutionBackend != TEXT("wasmtime_jit")
+			|| !ReadPackageFileEntry(
+				Descriptor,
+				TEXT("runtime_manifest"),
+				RuntimeManifestEntry))
+		{
+			OutError = TEXT("generated type package descriptor schema is invalid");
+			return false;
+		}
+		const FString ExpectedPackageId = FAvidScriptHash::Sha256HexUtf8(FString::Printf(
+			TEXT("%s\n%s\n%s"),
+			*GenerationKey,
+			*TypeManifestEntry.Sha256,
+			*RuntimeManifestEntry.Sha256));
+		if (PackageId != ExpectedPackageId)
+		{
+			OutError = TEXT("generated type package identity does not match its manifest hashes");
+			return false;
+		}
+		if (!ResolvePackageFile(
+				NormalizedDescriptorPath,
+				RuntimeManifestEntry,
+				RuntimeManifestPath,
+				OutError))
+		{
+			return false;
+		}
+		TArray<uint8> RuntimeManifestBytes;
+		if (!LoadVerifiedPackageFile(
+				RuntimeManifestPath,
+				RuntimeManifestEntry.Sha256,
+				RuntimeManifestBytes,
+				OutError))
+		{
+			return false;
+		}
+	}
+	else
+	{
+		if (!Descriptor->TryGetStringField(TEXT("module_id"), RuntimeModuleId)
+			|| RuntimeModuleId.IsEmpty()
+			|| !Descriptor->TryGetStringField(TEXT("package_id"), PackageId)
+			|| !IsLowercaseSha256(PackageId))
+		{
+			OutError = TEXT("generated type package descriptor schema is invalid");
+			return false;
+		}
+		const FString GeneratedTypePackageId = FAvidScriptHash::Sha256HexUtf8(
+			FString::Printf(
+				TEXT("%s\n%s\n%s\n%s"),
+				*GenerationKey,
+				*TypeManifestEntry.Sha256,
+				*RuntimeModuleId,
+				*PackageId));
+		if (TypeManifestEntry.RelativePath != FString::Printf(
+			TEXT("%s/type-manifest.json"),
+			*GeneratedTypePackageId))
+		{
+			OutError = TEXT("generated type package identity does not match its manifest hashes");
+			return false;
+		}
+
 	}
 
 	TSharedPtr<FJsonObject> TypeManifestObject;
@@ -660,10 +704,17 @@ bool FAvidScriptGeneratedTypeRuntimeHost::LoadPackageFromDescriptorFile(
 	FAvidScriptRuntimeArtifactLoadResult LoadResult;
 	const FScopedAvidScriptRuntimeImportAuthority RuntimeImportAuthority(
 		RuntimeAuthorizedImports);
-	if (!FAvidScriptRuntimeArtifactLoader::LoadFromFile(
-		RuntimeManifestPath,
-		Artifact,
-		LoadResult))
+	const bool bArtifactLoaded = bUsesResolvedRuntimePackage
+		? FAvidScriptRuntimeArtifactLoader::LoadPublishedModule(
+			FName(*RuntimeModuleId),
+			PackageId,
+			Artifact,
+			LoadResult)
+		: FAvidScriptRuntimeArtifactLoader::LoadFromFile(
+			RuntimeManifestPath,
+			Artifact,
+			LoadResult);
+	if (!bArtifactLoaded)
 	{
 		OutError = LoadResult.CanonicalResult.ErrorMessage.IsEmpty()
 			? TEXT("generated type Runtime artifact failed to load")
@@ -692,12 +743,15 @@ bool FAvidScriptGeneratedTypeRuntimeHost::LoadPackageFromDescriptorFile(
 	{
 		Artifact.Manifest.BindingPackage.Reset();
 	}
-	Artifact.BackendSelection.BackendKind = EAvidScriptVmBackendKind::Wasmtime;
-	Artifact.BackendSelection.ExecutionMode = EAvidScriptVmExecutionMode::Jit;
-	Artifact.BackendSelection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
-	Artifact.RequestedBackend = ExecutionBackend;
-	Artifact.SelectedBackend = ExecutionBackend;
-	Artifact.ExecutionPolicy = TEXT("generated_type_package");
+	if (!bUsesResolvedRuntimePackage)
+	{
+		Artifact.BackendSelection.BackendKind = EAvidScriptVmBackendKind::Wasmtime;
+		Artifact.BackendSelection.ExecutionMode = EAvidScriptVmExecutionMode::Jit;
+		Artifact.BackendSelection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
+		Artifact.RequestedBackend = ExecutionBackend;
+		Artifact.SelectedBackend = ExecutionBackend;
+		Artifact.ExecutionPolicy = TEXT("generated_type_package");
+	}
 	OutRegistry = MoveTemp(Registry);
 	OutArtifact = MoveTemp(Artifact);
 	return true;
