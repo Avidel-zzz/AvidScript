@@ -124,6 +124,16 @@ try {
         module_id = 'avidscript_generated'
         abi_version = 1
         language = 'csharp'
+        source = [ordered]@{
+            file = 'GeneratedTypes.cs'
+            sha256 = ('d' * 64)
+            frontend_sha256 = ('e' * 64)
+            semantic_sha256 = ('f' * 64)
+        }
+        guest_ir = [ordered]@{
+            module_id = 'avidscript_generated'
+            sha256 = ('1' * 64)
+        }
         wasm = [ordered]@{
             file = 'module.wasm'
             sha256 = $WasmSha256
