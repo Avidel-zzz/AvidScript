@@ -115,6 +115,7 @@ bool UAvidScriptWorldSubsystem::StartPackagedOracle(UWorld& InWorld)
 
 	bPackagedOracleActive = true;
 	bPackagedOracleCompleted = false;
+	bPackagedOracleRuntimeReady = false;
 	bPackagedOracleFaultInjected = false;
 	bPackagedOracleFaultRejected = false;
 	PackagedOracleElapsedSeconds = 0.0f;
@@ -162,22 +163,11 @@ bool UAvidScriptWorldSubsystem::StartPackagedOracle(UWorld& InWorld)
 
 	UAvidScriptComponent* HealthyComponent = PackagedOracleHealthyComponent.Get();
 	UAvidScriptComponent* FaultComponent = PackagedOracleFaultComponent.Get();
-	if (HealthyComponent == nullptr
-		|| FaultComponent == nullptr
-		|| !HealthyComponent->GetRuntimeStats().bRuntimeLoaded
-		|| !FaultComponent->GetRuntimeStats().bRuntimeLoaded
-		|| !HealthyComponent->DispatchScriptEvent(62001, 25.0f))
+	if (HealthyComponent == nullptr || FaultComponent == nullptr)
 	{
 		CompletePackagedOracle(false, TEXT("runtime_start_failed"));
 		return true;
 	}
-
-	UE_LOG(
-		LogAvidScriptPackagedOracle,
-		Log,
-		TEXT("AvidScript packaged oracle started | module=%s | report=%s"),
-		*PackagedOracleModuleId,
-		*PackagedOracleReportPath);
 	return true;
 }
 
@@ -191,6 +181,37 @@ void UAvidScriptWorldSubsystem::TickPackagedOracle(float DeltaTime)
 		CompletePackagedOracle(false, TEXT("oracle_object_lost"));
 		return;
 	}
+	if (PackagedOracleElapsedSeconds >= OracleTimeoutSeconds)
+	{
+		CompletePackagedOracle(false, TEXT("oracle_timeout"));
+		return;
+	}
+
+	if (!bPackagedOracleRuntimeReady)
+	{
+		const FAvidScriptComponentRuntimeStats& HealthyStats = HealthyComponent->GetRuntimeStats();
+		const FAvidScriptComponentRuntimeStats& FaultStats = FaultComponent->GetRuntimeStats();
+		if (!HealthyStats.bRuntimeLoaded || !FaultStats.bRuntimeLoaded)
+		{
+			if (!HealthyStats.LastErrorMessage.IsEmpty() || !FaultStats.LastErrorMessage.IsEmpty())
+			{
+				CompletePackagedOracle(false, TEXT("runtime_start_failed"));
+			}
+			return;
+		}
+		if (!HealthyComponent->DispatchScriptEvent(62001, 25.0f))
+		{
+			CompletePackagedOracle(false, TEXT("initial_event_dispatch_failed"));
+			return;
+		}
+		bPackagedOracleRuntimeReady = true;
+		UE_LOG(
+			LogAvidScriptPackagedOracle,
+			Log,
+			TEXT("AvidScript packaged oracle started | module=%s | report=%s"),
+			*PackagedOracleModuleId,
+			*PackagedOracleReportPath);
+	}
 
 	if (!bPackagedOracleFaultInjected
 		&& PackagedOracleElapsedSeconds >= FaultInjectionDelaySeconds)
@@ -202,11 +223,6 @@ void UAvidScriptWorldSubsystem::TickPackagedOracle(float DeltaTime)
 		bPackagedOracleFaultInjected = true;
 	}
 
-	if (PackagedOracleElapsedSeconds >= OracleTimeoutSeconds)
-	{
-		CompletePackagedOracle(false, TEXT("oracle_timeout"));
-		return;
-	}
 	if (!bPackagedOracleFaultInjected
 		|| PackagedOracleElapsedSeconds < OracleCompletionDelaySeconds)
 	{
@@ -352,6 +368,7 @@ void UAvidScriptWorldSubsystem::CompletePackagedOracle(
 void UAvidScriptWorldSubsystem::StopPackagedOracle()
 {
 	bPackagedOracleActive = false;
+	bPackagedOracleRuntimeReady = false;
 	if (AActor* HealthyActor = PackagedOracleHealthyActor.Get())
 	{
 		HealthyActor->Destroy();

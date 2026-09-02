@@ -51,6 +51,7 @@ private:
 	bool bRuntimeReleaseInProgress = false;
 	bool bPackagedOracleActive = false;
 	bool bPackagedOracleCompleted = false;
+	bool bPackagedOracleRuntimeReady = false;
 	bool bPackagedOracleFaultInjected = false;
 	bool bPackagedOracleFaultRejected = false;
 	float PackagedOracleElapsedSeconds = 0.0f;
