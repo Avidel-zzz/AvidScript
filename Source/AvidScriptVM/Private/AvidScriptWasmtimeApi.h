@@ -58,11 +58,14 @@ typedef struct AvidScriptWasmtimeEngineProfile
 	AvidScriptWasmtimeInliningMode Inlining;
 	AvidScriptWasmtimeCpuProfile CpuProfile;
 	uint64_t Wasm32MemoryReservationBytes;
+	uint64_t MaxWasmStackBytes;
 	bool bMemoryMayMove;
 	bool bSpectreMitigation;
 	bool bNanCanonicalization;
 	bool bParallelCompilation;
 	bool bWasmGc;
+	bool bConsumeFuel;
+	bool bEpochInterruption;
 	AvidScriptWasmtimeCompilerInliningSetter CompilerInliningSetter;
 } AvidScriptWasmtimeEngineProfile;
 
@@ -72,6 +75,16 @@ typedef enum AvidScriptWasmtimeCallStatus
 	AVIDSCRIPT_WASMTIME_CALL_RUNTIME_FAILURE = 1,
 	AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE = 2
 } AvidScriptWasmtimeCallStatus;
+
+typedef enum AvidScriptWasmtimeTrapCode
+{
+	AVIDSCRIPT_WASMTIME_TRAP_UNKNOWN = -1,
+	AVIDSCRIPT_WASMTIME_TRAP_STACK_OVERFLOW = 0,
+	AVIDSCRIPT_WASMTIME_TRAP_MEMORY_OUT_OF_BOUNDS = 1,
+	AVIDSCRIPT_WASMTIME_TRAP_INTERRUPT = 10,
+	AVIDSCRIPT_WASMTIME_TRAP_OUT_OF_FUEL = 11,
+	AVIDSCRIPT_WASMTIME_TRAP_ALLOCATION_TOO_LARGE = 15
+} AvidScriptWasmtimeTrapCode;
 
 typedef enum AvidScriptWasmtimePreparedCallShape
 {
@@ -110,6 +123,7 @@ typedef bool (*AvidScriptWasmtimeHostCallback)(
 AvidScriptWasmtimeEngine* avidscript_wasmtime_engine_new(void);
 AvidScriptWasmtimeEngine* avidscript_wasmtime_engine_new_with_profile(
 	const AvidScriptWasmtimeEngineProfile* profile);
+void avidscript_wasmtime_engine_increment_epoch(AvidScriptWasmtimeEngine* engine);
 void avidscript_wasmtime_engine_delete(AvidScriptWasmtimeEngine* engine);
 
 AvidScriptWasmtimeFailure* avidscript_wasmtime_module_new(
@@ -130,6 +144,18 @@ void avidscript_wasmtime_serialized_bytes_delete(uint8_t* serialized_bytes);
 void avidscript_wasmtime_module_delete(AvidScriptWasmtimeModule* module);
 
 AvidScriptWasmtimeStore* avidscript_wasmtime_store_new(AvidScriptWasmtimeEngine* engine);
+bool avidscript_wasmtime_store_set_limits(
+	AvidScriptWasmtimeStore* store,
+	uint64_t max_linear_memory_bytes);
+AvidScriptWasmtimeFailure* avidscript_wasmtime_store_set_fuel(
+	AvidScriptWasmtimeStore* store,
+	uint64_t fuel);
+AvidScriptWasmtimeFailure* avidscript_wasmtime_store_get_fuel(
+	const AvidScriptWasmtimeStore* store,
+	uint64_t* out_fuel);
+bool avidscript_wasmtime_store_set_epoch_deadline(
+	AvidScriptWasmtimeStore* store,
+	uint64_t ticks_beyond_current);
 void avidscript_wasmtime_store_delete(AvidScriptWasmtimeStore* store);
 
 AvidScriptWasmtimeLinker* avidscript_wasmtime_linker_new(AvidScriptWasmtimeEngine* engine);
@@ -206,6 +232,8 @@ bool avidscript_wasmtime_memory_data(
 	size_t* out_size);
 
 bool avidscript_wasmtime_failure_is_trap(const AvidScriptWasmtimeFailure* failure);
+int32_t avidscript_wasmtime_failure_trap_code(
+	const AvidScriptWasmtimeFailure* failure);
 const char* avidscript_wasmtime_failure_message(
 	const AvidScriptWasmtimeFailure* failure,
 	size_t* out_size);

@@ -62,7 +62,11 @@ FAvidScriptVmBackendInfo MakeWasmtimeBackendInfo(
 	Info.ArtifactFormat = ArtifactFormat;
 	Info.Capabilities = EAvidScriptVmCapability::GuestMemory
 		| EAvidScriptVmCapability::StructuredStack
-		| EAvidScriptVmCapability::DebugProbe;
+		| EAvidScriptVmCapability::DebugProbe
+		| EAvidScriptVmCapability::ExecutionFuel
+		| EAvidScriptVmCapability::EpochInterruption
+		| EAvidScriptVmCapability::StoreLimiter
+		| EAvidScriptVmCapability::HostCallBudget;
 	if (ArtifactFormat == EAvidScriptVmArtifactFormat::WasmtimeSerialized)
 	{
 		Info.Capabilities |= EAvidScriptVmCapability::Aot
@@ -96,10 +100,15 @@ FString ConvertWasmtimeUtf8(const char* Data, size_t Size)
 FString ConsumeWasmtimeFailure(
 	AvidScriptWasmtimeFailure* Failure,
 	TArray<FAvidScriptVmStackFrame>& OutFrames,
-	bool& bOutWasTrap)
+	bool& bOutWasTrap,
+	int32* OutTrapCode = nullptr)
 {
 	OutFrames.Reset();
 	bOutWasTrap = avidscript_wasmtime_failure_is_trap(Failure);
+	if (OutTrapCode != nullptr)
+	{
+		*OutTrapCode = avidscript_wasmtime_failure_trap_code(Failure);
+	}
 	if (Failure == nullptr)
 	{
 		return FString();
@@ -333,6 +342,15 @@ public:
 			SetWasmtimeError(OutError, TEXT("invalid_config"), TEXT("VM stack and heap sizes must be non-zero."));
 			return false;
 		}
+		if (Config.ExecutionBudget.MaxLinearMemoryBytes > static_cast<uint64>(MAX_int64))
+		{
+			SetWasmtimeError(
+				OutError,
+				TEXT("invalid_config"),
+				TEXT("The Wasmtime linear-memory budget exceeds the supported signed 64-bit limit."));
+			return false;
+		}
+		ExecutionBudget = Config.ExecutionBudget;
 		FAvidScriptWasmModuleLayout ModuleLayout;
 		FString LayoutError;
 		if (!InspectAvidScriptWasmModuleLayout(
@@ -462,6 +480,23 @@ public:
 			PerformUnload();
 			return false;
 		}
+		if (ExecutionBudget.MaxLinearMemoryBytes > 0
+			&& !avidscript_wasmtime_store_set_limits(
+				Store,
+				ExecutionBudget.MaxLinearMemoryBytes))
+		{
+			SetWasmtimeError(
+				OutError,
+				TEXT("invalid_config"),
+				TEXT("Wasmtime rejected the linear-memory budget."));
+			PerformUnload();
+			return false;
+		}
+		if (!ResetExecutionBudget(OutError))
+		{
+			PerformUnload();
+			return false;
+		}
 
 		const double InstantiateStart = FPlatformTime::Seconds();
 		Linker = avidscript_wasmtime_linker_new(Engine);
@@ -504,11 +539,39 @@ public:
 			const FString Details = InstantiateFailure != nullptr
 				? ConsumeWasmtimeFailure(InstantiateFailure, Frames, bWasTrap)
 				: TEXT("Wasmtime instance allocation failed.");
-			SetWasmtimeError(OutError, TEXT("instantiate_failed"), Details);
+			SetWasmtimeError(
+				OutError,
+				ExecutionBudget.MaxLinearMemoryBytes > 0
+					? TEXT("memory_limit_exceeded")
+					: TEXT("instantiate_failed"),
+				Details);
 			OutError.StackFrames = MoveTemp(Frames);
 			PerformUnload();
 			return false;
 		}
+		return true;
+#endif
+	}
+
+	bool RequestInterrupt(FAvidScriptVmError& OutError) override
+	{
+		OutError.Reset();
+#if !AVIDSCRIPT_WITH_WASMTIME
+		SetWasmtimeError(
+			OutError,
+			TEXT("backend_unavailable"),
+			TEXT("Wasmtime is unavailable for this target."));
+		return false;
+#else
+		if (!IsLoaded() || ExecutionBudget.EpochDeadlineTicks == 0)
+		{
+			SetWasmtimeError(
+				OutError,
+				TEXT("interrupt_unavailable"),
+				TEXT("Epoch interruption is not active for this VM instance."));
+			return false;
+		}
+		avidscript_wasmtime_engine_increment_epoch(Engine);
 		return true;
 #endif
 	}
@@ -706,6 +769,7 @@ public:
 		bHasPendingHostFailure = false;
 		PendingHostImportModuleName.Reset();
 		PendingHostImportName.Reset();
+		PendingHostFailureCategory.Reset();
 		PendingHostFailureDetails.Reset();
 		if (Frame.CellCount > FAvidScriptVmCallFrame::MaxCells)
 		{
@@ -754,6 +818,10 @@ public:
 		if (Frame.CellCount != Entry->CellCount)
 		{
 			SetWasmtimeError(OutError, TEXT("invalid_arguments"), TEXT("VM call frame does not match the cached export signature."));
+			return false;
+		}
+		if (!ResetExecutionBudget(OutError))
+		{
 			return false;
 		}
 		return InvokeResolvedExport(*Entry, Frame, OutError, OutResult);
@@ -957,6 +1025,12 @@ public:
 		AvidScriptWasmtimeValue* Results,
 		size_t ResultCount)
 	{
+		if (!TryConsumeHostCallBudget(
+			TEXT("avidscript"),
+			UTF8_TO_TCHAR(HostContext.Import->ImportName)))
+		{
+			return false;
+		}
 		if (ArgumentCount != static_cast<size_t>(HostContext.Signature.Parameters.Num())
 			|| ResultCount != (HostContext.Signature.bHasResult ? 1u : 0u))
 		{
@@ -1056,6 +1130,12 @@ public:
 		AvidScriptWasmtimeValue* Results,
 		size_t ResultCount)
 	{
+		if (!TryConsumeHostCallBudget(
+			HostContext.ModuleName,
+			HostContext.ImportName))
+		{
+			return false;
+		}
 		const size_t ExpectedResultCount = HostContext.Signature.bHasResult ? 1u : 0u;
 		if (ArgumentCount != static_cast<size_t>(HostContext.Signature.Parameters.Num())
 			|| ResultCount != ExpectedResultCount)
@@ -1168,6 +1248,10 @@ public:
 		FAvidScriptWasmtimeTypedHostContext& HostContext,
 		int32& OutValue)
 	{
+		if (!TryConsumeHostCallBudget(HostContext.ModuleName, HostContext.ImportName))
+		{
+			return 1;
+		}
 		if (TypedHostDispatcher == nullptr)
 		{
 			RecordPendingHostFailure(
@@ -1197,6 +1281,10 @@ public:
 		int32 Right,
 		int32& OutValue)
 	{
+		if (!TryConsumeHostCallBudget(HostContext.ModuleName, HostContext.ImportName))
+		{
+			return 1;
+		}
 		if (TypedHostDispatcher == nullptr)
 		{
 			RecordPendingHostFailure(
@@ -1232,6 +1320,10 @@ public:
 		int32 Right,
 		int32& OutValue)
 	{
+		if (!TryConsumeHostCallBudget(HostContext.ModuleName, HostContext.ImportName))
+		{
+			return 1;
+		}
 		if (HostContext.PreparedTarget.IsBoundForShape(HostContext.Shape))
 		{
 			const EAvidScriptVmTypedHostStatus Status =
@@ -1263,6 +1355,10 @@ public:
 		const int32 GuestAddress,
 		int32& OutStatus)
 	{
+		if (!TryConsumeHostCallBudget(HostContext.ModuleName, HostContext.ImportName))
+		{
+			return 1;
+		}
 		if (!HostContext.PreparedTarget.IsBoundForShape(HostContext.Shape))
 		{
 			RecordPendingHostFailure(
@@ -1293,6 +1389,10 @@ public:
 		const int32 GuestAddress,
 		int32& OutStatus)
 	{
+		if (!TryConsumeHostCallBudget(HostContext.ModuleName, HostContext.ImportName))
+		{
+			return 1;
+		}
 		if (!HostContext.PreparedTarget.IsBoundForShape(HostContext.Shape))
 		{
 			RecordPendingHostFailure(
@@ -1320,6 +1420,10 @@ public:
 		const int32 SelfGeneration,
 		int32& OutValue)
 	{
+		if (!TryConsumeHostCallBudget(HostContext.ModuleName, HostContext.ImportName))
+		{
+			return 1;
+		}
 		if (!HostContext.PreparedTarget.IsBoundForShape(HostContext.Shape))
 		{
 			RecordPendingHostFailure(
@@ -1344,6 +1448,10 @@ public:
 		const int32 Value,
 		int32& OutValue)
 	{
+		if (!TryConsumeHostCallBudget(HostContext.ModuleName, HostContext.ImportName))
+		{
+			return 1;
+		}
 		OutValue = 0;
 		if (!HostContext.PreparedTarget.IsBoundForShape(HostContext.Shape))
 		{
@@ -1373,6 +1481,10 @@ public:
 		int32 GuestAddress,
 		int32& OutValue)
 	{
+		if (!TryConsumeHostCallBudget(HostContext.ModuleName, HostContext.ImportName))
+		{
+			return 1;
+		}
 		if (HostContext.PreparedTarget.IsBoundForShape(HostContext.Shape))
 		{
 			const EAvidScriptVmTypedHostStatus Status =
@@ -1401,6 +1513,10 @@ public:
 		int32 GuestAddress,
 		int32& OutValue)
 	{
+		if (!TryConsumeHostCallBudget(HostContext.ModuleName, HostContext.ImportName))
+		{
+			return 1;
+		}
 		if (HostContext.PreparedTarget.IsBoundForShape(HostContext.Shape))
 		{
 			const EAvidScriptVmTypedHostStatus Status =
@@ -1431,6 +1547,10 @@ public:
 		int32 GuestAddress,
 		int32& OutValue)
 	{
+		if (!TryConsumeHostCallBudget(HostContext.ModuleName, HostContext.ImportName))
+		{
+			return 1;
+		}
 		if (HostContext.PreparedTarget.IsBoundForShape(HostContext.Shape))
 		{
 			const EAvidScriptVmTypedHostStatus Status =
@@ -1466,6 +1586,10 @@ public:
 		int32 ByteCount,
 		int32& OutValue)
 	{
+		if (!TryConsumeHostCallBudget(HostContext.ModuleName, HostContext.ImportName))
+		{
+			return 1;
+		}
 		if (TypedHostDispatcher == nullptr)
 		{
 			RecordPendingHostFailure(HostContext.ModuleName, HostContext.ImportName, TEXT("The typed host dispatcher is unavailable."));
@@ -1551,7 +1675,57 @@ private:
 		bHasPendingHostFailure = false;
 		PendingHostImportModuleName.Reset();
 		PendingHostImportName.Reset();
+		PendingHostFailureCategory.Reset();
 		PendingHostFailureDetails.Reset();
+	}
+
+	bool ResetExecutionBudget(FAvidScriptVmError& OutError)
+	{
+#if !AVIDSCRIPT_WITH_WASMTIME
+		static_cast<void>(OutError);
+		return true;
+#else
+		if (ActiveCallDepth > 0)
+		{
+			return true;
+		}
+		CurrentHostCallCount = 0;
+		const uint64 Fuel = ExecutionBudget.FuelPerEntry > 0
+			? ExecutionBudget.FuelPerEntry
+			: MAX_uint64;
+		AvidScriptWasmtimeFailure* FuelFailure =
+			avidscript_wasmtime_store_set_fuel(Store, Fuel);
+		if (FuelFailure != nullptr)
+		{
+			TArray<FAvidScriptVmStackFrame> Frames;
+			bool bWasTrap = false;
+			const FString Details = ConsumeWasmtimeFailure(
+				FuelFailure,
+				Frames,
+				bWasTrap);
+			SetWasmtimeError(
+				OutError,
+				TEXT("execution_budget_unavailable"),
+				Details.IsEmpty()
+					? TEXT("Wasmtime rejected the per-entry fuel budget.")
+					: Details);
+			return false;
+		}
+		const uint64 EpochDeadline = ExecutionBudget.EpochDeadlineTicks > 0
+			? ExecutionBudget.EpochDeadlineTicks
+			: MAX_uint64;
+		if (!avidscript_wasmtime_store_set_epoch_deadline(
+			Store,
+			EpochDeadline))
+		{
+			SetWasmtimeError(
+				OutError,
+				TEXT("execution_budget_unavailable"),
+				TEXT("Wasmtime rejected the epoch deadline."));
+			return false;
+		}
+		return true;
+#endif
 	}
 
 	bool CallPreparedExport(
@@ -1571,6 +1745,10 @@ private:
 				TEXT("The prepared Wasmtime export is no longer active."));
 			return false;
 		}
+		if (!ResetExecutionBudget(OutError))
+		{
+			return false;
+		}
 		return InvokeResolvedExport(Entry, Frame, OutError, OutResult);
 	}
 
@@ -1581,13 +1759,18 @@ private:
 		FAvidScriptVmCallResult* OutResult)
 	{
 		ResetCallState(OutError, OutResult);
-		if (Entry.Generation != ExportGeneration
+		if (!IsLoaded()
+			|| Entry.Generation != ExportGeneration
 			|| Entry.Function == nullptr)
 		{
 			SetWasmtimeError(
 				OutError,
 				TEXT("stale_export"),
 				TEXT("The prepared Wasmtime export is no longer active."));
+			return false;
+		}
+		if (!ResetExecutionBudget(OutError))
+		{
 			return false;
 		}
 
@@ -1657,10 +1840,15 @@ private:
 		FString FailureDetails;
 		TArray<FAvidScriptVmStackFrame> StackFrames;
 		bool bWasTrap = false;
+		int32 TrapCode = AVIDSCRIPT_WASMTIME_TRAP_UNKNOWN;
 		if (CallFailure != nullptr)
 		{
 			FailureDetails =
-				ConsumeWasmtimeFailure(CallFailure, StackFrames, bWasTrap);
+				ConsumeWasmtimeFailure(
+					CallFailure,
+					StackFrames,
+					bWasTrap,
+					&TrapCode);
 		}
 		else if (bCallFailed)
 		{
@@ -1688,16 +1876,41 @@ private:
 			if (bHasPendingHostFailure)
 			{
 				OutError.Reset();
-				OutError.Category = TEXT("host_import_failed");
+				OutError.Category = PendingHostFailureCategory.IsEmpty()
+					? TEXT("host_import_failed")
+					: PendingHostFailureCategory;
 				OutError.ImportModuleName = PendingHostImportModuleName;
 				OutError.ImportName = PendingHostImportName;
 				OutError.Details = PendingHostFailureDetails;
 			}
 			else
 			{
+				const TCHAR* Category = TEXT("invalid_arguments");
+				if (bWasTrap)
+				{
+					switch (TrapCode)
+					{
+					case AVIDSCRIPT_WASMTIME_TRAP_OUT_OF_FUEL:
+						Category = TEXT("execution_fuel_exhausted");
+						break;
+					case AVIDSCRIPT_WASMTIME_TRAP_INTERRUPT:
+						Category = TEXT("execution_interrupted");
+						break;
+					case AVIDSCRIPT_WASMTIME_TRAP_STACK_OVERFLOW:
+						Category = TEXT("execution_stack_exhausted");
+						break;
+					case AVIDSCRIPT_WASMTIME_TRAP_MEMORY_OUT_OF_BOUNDS:
+					case AVIDSCRIPT_WASMTIME_TRAP_ALLOCATION_TOO_LARGE:
+						Category = TEXT("guest_memory_fault");
+						break;
+					default:
+						Category = TEXT("guest_trap");
+						break;
+					}
+				}
 				SetWasmtimeError(
 					OutError,
-					bWasTrap ? TEXT("trap") : TEXT("invalid_arguments"),
+					Category,
 					FailureDetails.IsEmpty()
 						? TEXT("Wasmtime call failed without a diagnostic message.")
 						: FailureDetails);
@@ -1759,15 +1972,47 @@ private:
 			: 1;
 	}
 
+	static FORCEINLINE bool ConsumePreparedTypedHostCall(
+		FAvidScriptWasmtimeTypedHostContext& HostContext)
+	{
+		return HostContext.Backend != nullptr
+			&& HostContext.Backend->TryConsumeHostCallBudget(
+				HostContext.ModuleName,
+				HostContext.ImportName);
+	}
+
 	void RecordPendingHostFailure(
 		const FString& ModuleName,
 		const FString& ImportName,
-		FString Details)
+		FString Details,
+		const TCHAR* Category = TEXT("host_import_failed"))
 	{
 		bHasPendingHostFailure = true;
 		PendingHostImportModuleName = ModuleName;
 		PendingHostImportName = ImportName;
+		PendingHostFailureCategory = Category;
 		PendingHostFailureDetails = MoveTemp(Details);
+	}
+
+	bool TryConsumeHostCallBudget(
+		const FString& ModuleName,
+		const FString& ImportName)
+	{
+		if (ExecutionBudget.MaxHostCallsPerEntry == 0)
+		{
+			return true;
+		}
+		if (CurrentHostCallCount >= ExecutionBudget.MaxHostCallsPerEntry)
+		{
+			RecordPendingHostFailure(
+				ModuleName,
+				ImportName,
+				TEXT("The guest exceeded the per-entry host-call budget."),
+				TEXT("host_call_budget_exhausted"));
+			return false;
+		}
+		++CurrentHostCallCount;
+		return true;
 	}
 
 	static bool StaticHostCallback(
@@ -1863,6 +2108,10 @@ private:
 		if (HostContext->PreparedTarget.SelfI32Pair != nullptr
 			&& HostContext->PreparedTarget.Context != nullptr)
 		{
+			if (!ConsumePreparedTypedHostCall(*HostContext))
+			{
+				return 1;
+			}
 			const EAvidScriptVmTypedHostStatus Status =
 				HostContext->PreparedTarget.SelfI32Pair(
 					HostContext->PreparedTarget.Context,
@@ -1985,6 +2234,10 @@ private:
 					*OutValue)
 				: 1;
 		}
+		if (!ConsumePreparedTypedHostCall(*HostContext))
+		{
+			return 1;
+		}
 		const EAvidScriptVmTypedHostStatus Status = Target(
 			HostContext->PreparedTarget.Context,
 			SelfSlot,
@@ -2021,6 +2274,10 @@ private:
 					*OutValue)
 				: 1;
 		}
+		if (!ConsumePreparedTypedHostCall(*HostContext))
+		{
+			return 1;
+		}
 		const EAvidScriptVmTypedHostStatus Status = Target(
 			HostContext->PreparedTarget.Context,
 			SelfSlot,
@@ -2046,6 +2303,10 @@ private:
 		{
 			return 1;
 		}
+		if (!ConsumePreparedTypedHostCall(*HostContext))
+		{
+			return 1;
+		}
 		const EAvidScriptVmTypedHostStatus Status =
 			HostContext->PreparedTarget.PackedSelfPropertyF32Get(
 				HostContext->PreparedTarget.Context,
@@ -2064,6 +2325,10 @@ private:
 		if (HostContext == nullptr
 			|| HostContext->PreparedTarget.Context == nullptr
 			|| HostContext->PreparedTarget.PackedSelfPropertyF32Set == nullptr)
+		{
+			return 1;
+		}
+		if (!ConsumePreparedTypedHostCall(*HostContext))
 		{
 			return 1;
 		}
@@ -2088,6 +2353,10 @@ private:
 		{
 			return 1;
 		}
+		if (!ConsumePreparedTypedHostCall(*HostContext))
+		{
+			return 1;
+		}
 		const EAvidScriptVmTypedHostStatus Status =
 			HostContext->PreparedTarget.PackedSelfPropertyI32Get(
 				HostContext->PreparedTarget.Context,
@@ -2106,6 +2375,10 @@ private:
 		if (HostContext == nullptr
 			|| HostContext->PreparedTarget.Context == nullptr
 			|| HostContext->PreparedTarget.PackedSelfPropertyI32Set == nullptr)
+		{
+			return 1;
+		}
+		if (!ConsumePreparedTypedHostCall(*HostContext))
 		{
 			return 1;
 		}
@@ -2130,6 +2403,10 @@ private:
 		{
 			return 1;
 		}
+		if (!ConsumePreparedTypedHostCall(*HostContext))
+		{
+			return 1;
+		}
 		const EAvidScriptVmTypedHostStatus Status =
 			HostContext->PreparedTarget.PackedSelfPropertyI64Get(
 				HostContext->PreparedTarget.Context,
@@ -2148,6 +2425,10 @@ private:
 		if (HostContext == nullptr
 			|| HostContext->PreparedTarget.Context == nullptr
 			|| HostContext->PreparedTarget.PackedSelfPropertyI64Set == nullptr)
+		{
+			return 1;
+		}
+		if (!ConsumePreparedTypedHostCall(*HostContext))
 		{
 			return 1;
 		}
@@ -2172,6 +2453,10 @@ private:
 		{
 			return 1;
 		}
+		if (!ConsumePreparedTypedHostCall(*HostContext))
+		{
+			return 1;
+		}
 		const EAvidScriptVmTypedHostStatus Status =
 			HostContext->PreparedTarget.PackedSelfPropertyF64Get(
 				HostContext->PreparedTarget.Context,
@@ -2190,6 +2475,10 @@ private:
 		if (HostContext == nullptr
 			|| HostContext->PreparedTarget.Context == nullptr
 			|| HostContext->PreparedTarget.PackedSelfPropertyF64Set == nullptr)
+		{
+			return 1;
+		}
+		if (!ConsumePreparedTypedHostCall(*HostContext))
 		{
 			return 1;
 		}
@@ -2935,6 +3224,8 @@ private:
 		ModuleId.Reset();
 		HostDispatcher = nullptr;
 		TypedHostDispatcher = nullptr;
+		ExecutionBudget = FAvidScriptVmLoadConfig::FExecutionBudget();
+		CurrentHostCallCount = 0;
 		bUnloadDeferred = false;
 		AdvanceBackendInstanceIdentity();
 	}
@@ -2960,7 +3251,10 @@ private:
 	bool bHasPendingHostFailure = false;
 	FString PendingHostImportModuleName;
 	FString PendingHostImportName;
+	FString PendingHostFailureCategory;
 	FString PendingHostFailureDetails;
+	FAvidScriptVmLoadConfig::FExecutionBudget ExecutionBudget;
+	uint32 CurrentHostCallCount = 0;
 
 #if AVIDSCRIPT_WITH_WASMTIME
 	AvidScriptWasmtimeEngine* Engine = nullptr;

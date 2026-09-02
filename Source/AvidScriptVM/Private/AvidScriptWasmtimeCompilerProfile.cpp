@@ -6,12 +6,12 @@
 
 namespace
 {
-constexpr uint32 WasmtimeCompilerProfileSchemaVersion = 1;
+constexpr uint32 WasmtimeCompilerProfileSchemaVersion = 2;
 
 FAvidScriptWasmtimeCompilerProfile MakeCompilerProfile()
 {
 	FAvidScriptWasmtimeCompilerProfile Profile;
-	Profile.Id = TEXT("cranelift-speed-x86_64-v3-inlining-v2");
+	Profile.Id = TEXT("cranelift-speed-x86_64-v3-contained-v3");
 	Profile.TargetTriple = TEXT("x86_64-pc-windows-msvc");
 	Profile.CpuProfile = TEXT("x86-64-v3");
 	Profile.EngineProfile.SchemaVersion =
@@ -28,11 +28,14 @@ FAvidScriptWasmtimeCompilerProfile MakeCompilerProfile()
 		AVIDSCRIPT_WASMTIME_ENGINE_CPU_X86_64_V3;
 	Profile.EngineProfile.Wasm32MemoryReservationBytes =
 		UINT64_C(1) << 32;
+	Profile.EngineProfile.MaxWasmStackBytes = UINT64_C(2) << 20;
 	Profile.EngineProfile.bMemoryMayMove = false;
 	Profile.EngineProfile.bSpectreMitigation = true;
 	Profile.EngineProfile.bNanCanonicalization = false;
 	Profile.EngineProfile.bParallelCompilation = true;
 	Profile.EngineProfile.bWasmGc = true;
+	Profile.EngineProfile.bConsumeFuel = true;
+	Profile.EngineProfile.bEpochInterruption = true;
 	return Profile;
 }
 
@@ -129,6 +132,7 @@ FString BuildAvidScriptWasmtimeCompilerIdentity(
 		TEXT("wasmtime-v%s+avidscript.1;strategy=cranelift;")
 		TEXT("opt=speed;regalloc=backtracking;inlining=all;")
 		TEXT("cpu=x86-64-v3;wasm32_memory=4g_fixed;memory_may_move=0;")
+		TEXT("max_wasm_stack=2m;fuel=on;epoch_interruption=on;")
 		TEXT("spectre=on;nan_canonicalization=off;parallel_compilation=on;")
 		TEXT("wasm_gc=on;gc_collector=drc;")
 		TEXT("runtime_profile=fastest-runtime;dll_sha256=%s"),

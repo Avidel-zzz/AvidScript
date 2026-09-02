@@ -226,7 +226,7 @@ AvidScriptWasmtimeEngine* avidscript_wasmtime_engine_new_with_profile(
 	AvidScriptWasmtimeEngine* engine;
 	wasmtime_error_t* target_error;
 	if (profile == NULL
-		|| profile->SchemaVersion != 1
+		|| profile->SchemaVersion != 2
 		|| profile->Strategy != AVIDSCRIPT_WASMTIME_ENGINE_STRATEGY_CRANELIFT
 		|| (profile->Optimization != AVIDSCRIPT_WASMTIME_ENGINE_OPT_SPEED_AND_SIZE
 			&& profile->Optimization != AVIDSCRIPT_WASMTIME_ENGINE_OPT_SPEED)
@@ -234,6 +234,7 @@ AvidScriptWasmtimeEngine* avidscript_wasmtime_engine_new_with_profile(
 		|| profile->Inlining != AVIDSCRIPT_WASMTIME_ENGINE_INLINING_ALL
 		|| profile->CpuProfile != AVIDSCRIPT_WASMTIME_ENGINE_CPU_X86_64_V3
 		|| profile->Wasm32MemoryReservationBytes == 0
+		|| profile->MaxWasmStackBytes == 0
 		|| !profile->bWasmGc
 		|| profile->CompilerInliningSetter == NULL)
 	{
@@ -291,7 +292,12 @@ AvidScriptWasmtimeEngine* avidscript_wasmtime_engine_new_with_profile(
 	wasmtime_config_memory_reservation_set(
 		config,
 		profile->Wasm32MemoryReservationBytes);
+	wasmtime_config_max_wasm_stack_set(
+		config,
+		(size_t)profile->MaxWasmStackBytes);
 	wasmtime_config_memory_may_move_set(config, profile->bMemoryMayMove);
+	wasmtime_config_consume_fuel_set(config, profile->bConsumeFuel);
+	wasmtime_config_epoch_interruption_set(config, profile->bEpochInterruption);
 	wasmtime_config_signals_based_traps_set(config, true);
 #ifdef WASMTIME_FEATURE_PARALLEL_COMPILATION
 	wasmtime_config_parallel_compilation_set(
@@ -314,6 +320,14 @@ AvidScriptWasmtimeEngine* avidscript_wasmtime_engine_new_with_profile(
 		return NULL;
 	}
 	return engine;
+}
+
+void avidscript_wasmtime_engine_increment_epoch(AvidScriptWasmtimeEngine* engine)
+{
+	if (engine != NULL && engine->value != NULL)
+	{
+		wasmtime_engine_increment_epoch(engine->value);
+	}
 }
 
 void avidscript_wasmtime_engine_delete(AvidScriptWasmtimeEngine* engine)
@@ -436,6 +450,65 @@ AvidScriptWasmtimeStore* avidscript_wasmtime_store_new(AvidScriptWasmtimeEngine*
 		return NULL;
 	}
 	return store;
+}
+
+bool avidscript_wasmtime_store_set_limits(
+	AvidScriptWasmtimeStore* store,
+	uint64_t max_linear_memory_bytes)
+{
+	if (store == NULL
+		|| store->value == NULL
+		|| max_linear_memory_bytes == 0
+		|| max_linear_memory_bytes > INT64_MAX)
+	{
+		return false;
+	}
+	wasmtime_store_limiter(
+		store->value,
+		(int64_t)max_linear_memory_bytes,
+		-1,
+		-1,
+		-1,
+		-1);
+	return true;
+}
+
+AvidScriptWasmtimeFailure* avidscript_wasmtime_store_set_fuel(
+	AvidScriptWasmtimeStore* store,
+	uint64_t fuel)
+{
+	wasmtime_error_t* error;
+	if (store == NULL || store->context == NULL)
+	{
+		return avidscript_wasmtime_local_failure("Wasmtime store is unavailable.");
+	}
+	error = wasmtime_context_set_fuel(store->context, fuel);
+	return error != NULL ? avidscript_wasmtime_failure_new(error, NULL) : NULL;
+}
+
+AvidScriptWasmtimeFailure* avidscript_wasmtime_store_get_fuel(
+	const AvidScriptWasmtimeStore* store,
+	uint64_t* out_fuel)
+{
+	wasmtime_error_t* error;
+	if (store == NULL || store->context == NULL || out_fuel == NULL)
+	{
+		return avidscript_wasmtime_local_failure("Wasmtime store or fuel output is unavailable.");
+	}
+	error = wasmtime_context_get_fuel(store->context, out_fuel);
+	return error != NULL ? avidscript_wasmtime_failure_new(error, NULL) : NULL;
+}
+
+bool avidscript_wasmtime_store_set_epoch_deadline(
+	AvidScriptWasmtimeStore* store,
+	uint64_t ticks_beyond_current)
+{
+	if (store == NULL || store->context == NULL || ticks_beyond_current == 0)
+	{
+		return false;
+	}
+	wasmtime_context_set_epoch_deadline(store->context, ticks_beyond_current);
+	return true;
 }
 
 void avidscript_wasmtime_store_delete(AvidScriptWasmtimeStore* store)
@@ -1114,6 +1187,19 @@ bool avidscript_wasmtime_memory_data(
 bool avidscript_wasmtime_failure_is_trap(const AvidScriptWasmtimeFailure* failure)
 {
 	return failure != NULL && failure->trap != NULL;
+}
+
+int32_t avidscript_wasmtime_failure_trap_code(
+	const AvidScriptWasmtimeFailure* failure)
+{
+	wasmtime_trap_code_t code;
+	if (failure == NULL
+		|| failure->trap == NULL
+		|| !wasmtime_trap_code(failure->trap, &code))
+	{
+		return -1;
+	}
+	return (int32_t)code;
 }
 
 const char* avidscript_wasmtime_failure_message(

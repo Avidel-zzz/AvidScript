@@ -148,6 +148,68 @@ TArray<uint8> BuildWasmtimeLifecycleFixture()
 	return Module;
 }
 
+TArray<uint8> BuildWasmtimeExecutionBudgetFixture()
+{
+	TArray<uint8> Module = MakeWasmtimeModule();
+
+	TArray<uint8> Types;
+	AppendWasmtimeU32Leb(Types, 2);
+	const uint8 EmptyType[] = { 0x60, 0x00, 0x00 };
+	Types.Append(EmptyType, UE_ARRAY_COUNT(EmptyType));
+	const uint8 GrowType[] = { 0x60, 0x00, 0x01, 0x7f };
+	Types.Append(GrowType, UE_ARRAY_COUNT(GrowType));
+	AppendWasmtimeSection(Module, 1, Types);
+
+	TArray<uint8> Functions;
+	AppendWasmtimeU32Leb(Functions, 3);
+	AppendWasmtimeU32Leb(Functions, 0);
+	AppendWasmtimeU32Leb(Functions, 0);
+	AppendWasmtimeU32Leb(Functions, 1);
+	AppendWasmtimeSection(Module, 3, Functions);
+
+	TArray<uint8> Memory;
+	AppendWasmtimeU32Leb(Memory, 1);
+	Memory.Add(0x00);
+	AppendWasmtimeU32Leb(Memory, 1);
+	AppendWasmtimeSection(Module, 5, Memory);
+
+	TArray<uint8> Exports;
+	AppendWasmtimeU32Leb(Exports, 4);
+	AppendWasmtimeString(Exports, "avid_safe");
+	Exports.Add(0x00);
+	AppendWasmtimeU32Leb(Exports, 0);
+	AppendWasmtimeString(Exports, "avid_spin");
+	Exports.Add(0x00);
+	AppendWasmtimeU32Leb(Exports, 1);
+	AppendWasmtimeString(Exports, "memory");
+	Exports.Add(0x02);
+	AppendWasmtimeU32Leb(Exports, 0);
+	AppendWasmtimeString(Exports, "avid_grow_memory");
+	Exports.Add(0x00);
+	AppendWasmtimeU32Leb(Exports, 2);
+	AppendWasmtimeSection(Module, 7, Exports);
+
+	TArray<uint8> Code;
+	AppendWasmtimeU32Leb(Code, 3);
+	const TArray<uint8> EmptyBody = { 0x00, 0x0b };
+	AppendWasmtimeU32Leb(Code, static_cast<uint32>(EmptyBody.Num()));
+	Code.Append(EmptyBody);
+	const TArray<uint8> SpinBody = {
+		0x00,
+		0x03, 0x40,
+		0x0c, 0x00,
+		0x0b,
+		0x0b
+	};
+	AppendWasmtimeU32Leb(Code, static_cast<uint32>(SpinBody.Num()));
+	Code.Append(SpinBody);
+	const TArray<uint8> GrowBody = { 0x00, 0x41, 0x01, 0x40, 0x00, 0x0b };
+	AppendWasmtimeU32Leb(Code, static_cast<uint32>(GrowBody.Num()));
+	Code.Append(GrowBody);
+	AppendWasmtimeSection(Module, 10, Code);
+	return Module;
+}
+
 TArray<uint8> BuildWasmtimeWideParameterFixture()
 {
 	TArray<uint8> Module = MakeWasmtimeModule();
@@ -857,7 +919,7 @@ bool FAvidScriptVmWasmtimeCompilerProfileTest::RunTest(
 	TestEqual(
 		TEXT("compiler profile id"),
 		DeclaredProfile.Id,
-		FString(TEXT("cranelift-speed-x86_64-v3-inlining-v2")));
+		FString(TEXT("cranelift-speed-x86_64-v3-contained-v3")));
 	TestEqual(
 		TEXT("compiler target triple"),
 		DeclaredProfile.TargetTriple,
@@ -875,6 +937,16 @@ bool FAvidScriptVmWasmtimeCompilerProfileTest::RunTest(
 	TestTrue(
 		TEXT("Wasm GC compatibility remains enabled"),
 		DeclaredProfile.EngineProfile.bWasmGc);
+	TestEqual(
+		TEXT("controlled native stack budget"),
+		DeclaredProfile.EngineProfile.MaxWasmStackBytes,
+		UINT64_C(2) << 20);
+	TestTrue(
+		TEXT("fuel instrumentation is compiled in"),
+		DeclaredProfile.EngineProfile.bConsumeFuel);
+	TestTrue(
+		TEXT("epoch interruption is compiled in"),
+		DeclaredProfile.EngineProfile.bEpochInterruption);
 
 	FAvidScriptVmBackendInfo RuntimeInfo;
 	RuntimeInfo.Kind = EAvidScriptVmBackendKind::Wasmtime;
@@ -919,17 +991,113 @@ bool FAvidScriptVmWasmtimeCompilerProfileTest::RunTest(
 		RuntimeInfo.RuntimeBuildIdentity.Contains(
 			TEXT("wasm_gc=on;gc_collector=drc"),
 			ESearchCase::CaseSensitive));
+	TestTrue(
+		TEXT("runtime identity binds containment instrumentation"),
+		RuntimeInfo.RuntimeBuildIdentity.Contains(
+			TEXT("max_wasm_stack=2m;fuel=on;epoch_interruption=on"),
+			ESearchCase::CaseSensitive));
 	AvidScriptWasmtimeEngine* Engine =
 		avidscript_wasmtime_engine_new_with_profile(&ResolvedProfile);
 	if (!TestNotNull(TEXT("controlled compiler engine is created"), Engine))
 	{
 		return false;
 	}
+	AvidScriptWasmtimeStore* Store = avidscript_wasmtime_store_new(Engine);
+	if (!TestNotNull(TEXT("controlled store is created"), Store))
+	{
+		avidscript_wasmtime_engine_delete(Engine);
+		return false;
+	}
+	TestTrue(
+		TEXT("linear-memory limiter is accepted"),
+		avidscript_wasmtime_store_set_limits(Store, UINT64_C(64) << 10));
+	AvidScriptWasmtimeFailure* FuelFailure =
+		avidscript_wasmtime_store_set_fuel(Store, 4096);
+	TestNull(TEXT("fuel budget is accepted"), FuelFailure);
+	if (FuelFailure != nullptr)
+	{
+		avidscript_wasmtime_failure_delete(FuelFailure);
+	}
+	uint64 RemainingFuel = 0;
+	FuelFailure = avidscript_wasmtime_store_get_fuel(Store, &RemainingFuel);
+	TestNull(TEXT("fuel budget can be read"), FuelFailure);
+	if (FuelFailure != nullptr)
+	{
+		avidscript_wasmtime_failure_delete(FuelFailure);
+	}
+	TestEqual(TEXT("fuel budget is stable"), RemainingFuel, UINT64_C(4096));
+	TestTrue(
+		TEXT("epoch deadline is accepted"),
+		avidscript_wasmtime_store_set_epoch_deadline(Store, 1));
+	avidscript_wasmtime_store_delete(Store);
 	avidscript_wasmtime_engine_delete(Engine);
 	ResolvedProfile.CompilerInliningSetter = nullptr;
 	TestNull(
 		TEXT("profile without the verified extension fails closed"),
 		avidscript_wasmtime_engine_new_with_profile(&ResolvedProfile));
+	return true;
+#endif
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmWasmtimeExecutionBudgetTest,
+	"AvidScript.VM.Wasmtime.ExecutionBudget",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmWasmtimeExecutionBudgetTest::RunTest(
+	const FString& Parameters)
+{
+	FAvidScriptVmError Error;
+	TUniquePtr<IAvidScriptVmBackend> Backend = CreateWasmtimeBackendForTest(Error);
+#if !AVIDSCRIPT_WITH_WASMTIME
+	TestNull(TEXT("Wasmtime is unavailable without its managed dependency"), Backend.Get());
+	return true;
+#else
+	if (!TestNotNull(TEXT("Wasmtime backend is created"), Backend.Get()))
+	{
+		return false;
+	}
+	const EAvidScriptVmCapability RequiredCapabilities =
+		EAvidScriptVmCapability::ExecutionFuel
+		| EAvidScriptVmCapability::EpochInterruption
+		| EAvidScriptVmCapability::StoreLimiter
+		| EAvidScriptVmCapability::HostCallBudget;
+	TestTrue(
+		TEXT("containment capabilities are explicit"),
+		EnumHasAllFlags(Backend->GetBackendInfo().Capabilities, RequiredCapabilities));
+
+	FAvidScriptVmLoadConfig Config;
+	Config.ExecutionBudget.FuelPerEntry = 1024;
+	Config.ExecutionBudget.EpochDeadlineTicks = 64;
+	Config.ExecutionBudget.MaxLinearMemoryBytes = UINT64_C(64) << 10;
+	Config.ExecutionBudget.MaxHostCallsPerEntry = 8;
+	const TArray<uint8> Bytecode = BuildWasmtimeExecutionBudgetFixture();
+	if (!LoadWasmtimeTestModule(*this, *Backend, Bytecode, Config, Error))
+	{
+		return false;
+	}
+
+	FAvidScriptVmExportHandle SpinHandle;
+	FAvidScriptVmExportHandle SafeHandle;
+	FAvidScriptVmExportHandle GrowHandle;
+	TestTrue(TEXT("spin export resolves"), Backend->ResolveExport(TEXT("avid_spin"), SpinHandle, Error));
+	TestTrue(TEXT("safe export resolves"), Backend->ResolveExport(TEXT("avid_safe"), SafeHandle, Error));
+	TestTrue(TEXT("grow export resolves"), Backend->ResolveExport(TEXT("avid_grow_memory"), GrowHandle, Error));
+
+	FAvidScriptVmCallFrame EmptyFrame;
+	TestFalse(TEXT("infinite loop is interrupted by fuel"), Backend->Call(SpinHandle, EmptyFrame, Error));
+	TestEqual(
+		TEXT("fuel exhaustion has a stable category"),
+		Error.Category,
+		FString(TEXT("execution_fuel_exhausted")));
+	TestTrue(TEXT("fuel resets for the next entry"), Backend->Call(SafeHandle, EmptyFrame, Error));
+
+	FAvidScriptVmCallResult GrowResult;
+	TestTrue(
+		TEXT("limited memory.grow returns to the guest"),
+		Backend->Call(GrowHandle, EmptyFrame, Error, &GrowResult));
+	TestEqual(TEXT("grow result cell count"), GrowResult.CellCount, 1u);
+	TestEqual(TEXT("linear-memory limiter rejects growth"), GrowResult.Cells[0], MAX_uint32);
 	return true;
 #endif
 }
@@ -974,6 +1142,7 @@ bool FAvidScriptVmWasmtimeLifecycleTest::RunTest(const FString& Parameters)
 			TEXT("wasmtime-v45.0.0+avidscript.1;strategy=cranelift;")
 			TEXT("opt=speed;regalloc=backtracking;inlining=all;")
 			TEXT("cpu=x86-64-v3;wasm32_memory=4g_fixed;memory_may_move=0;")
+			TEXT("max_wasm_stack=2m;fuel=on;epoch_interruption=on;")
 			TEXT("spectre=on;nan_canonicalization=off;parallel_compilation=on;")
 			TEXT("wasm_gc=on;gc_collector=drc;")
 			TEXT("runtime_profile=fastest-runtime;dll_sha256=%s"),
@@ -2219,7 +2388,7 @@ bool FAvidScriptVmWasmtimeTrapAndReentrantUnloadTest::RunTest(const FString& Par
 		TEXT("trap export prepares"),
 		Backend->PrepareExportCall(TrapHandle, PreparedTrap, Error));
 	TestFalse(TEXT("guest trap fails"), Backend->Call(TrapHandle, FAvidScriptVmCallFrame(), Error));
-	TestEqual(TEXT("guest trap category"), Error.Category, FString(TEXT("trap")));
+	TestEqual(TEXT("guest trap category"), Error.Category, FString(TEXT("guest_trap")));
 	TestFalse(TEXT("guest trap details are nonempty"), Error.Details.IsEmpty());
 	TestTrue(TEXT("guest trap has structured frames"), !Error.StackFrames.IsEmpty());
 	TestFalse(
@@ -2228,7 +2397,7 @@ bool FAvidScriptVmWasmtimeTrapAndReentrantUnloadTest::RunTest(const FString& Par
 	TestEqual(
 		TEXT("prepared guest trap category"),
 		Error.Category,
-		FString(TEXT("trap")));
+		FString(TEXT("guest_trap")));
 	TestTrue(
 		TEXT("prepared guest trap has structured frames"),
 		!Error.StackFrames.IsEmpty());

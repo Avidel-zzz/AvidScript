@@ -813,6 +813,29 @@ bool FAvidScriptWamrBackendSmokeTest::RunTest(const FString& Parameters)
 	}
 
 	FAvidScriptVmError Error;
+	TestTrue(
+		TEXT("WAMR declares host-call budgeting"),
+		EnumHasAnyFlags(
+			Backend->GetBackendInfo().Capabilities,
+			EAvidScriptVmCapability::HostCallBudget));
+	TestFalse(
+		TEXT("WAMR does not claim fuel metering"),
+		EnumHasAnyFlags(
+			Backend->GetBackendInfo().Capabilities,
+			EAvidScriptVmCapability::ExecutionFuel));
+	FAvidScriptVmLoadConfig UnsupportedBudgetConfig;
+	UnsupportedBudgetConfig.ExecutionBudget.FuelPerEntry = 1;
+	TestFalse(
+		TEXT("WAMR rejects unsupported required execution budget"),
+		Backend->Load(
+			MakeArrayView(MinimalModule),
+			TEXT("vm_budget_unsupported"),
+			UnsupportedBudgetConfig,
+			Error));
+	TestEqual(
+		TEXT("WAMR budget rejection category"),
+		Error.Category,
+		FString(TEXT("execution_budget_unsupported")));
 	FAvidScriptVmLoadConfig Config;
 	TestTrue(TEXT("minimal module loads"), Backend->Load(MakeArrayView(MinimalModule), TEXT("vm_smoke"), Config, Error));
 	TestTrue(TEXT("backend reports loaded"), Backend->IsLoaded());

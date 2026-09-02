@@ -95,19 +95,22 @@
     "compiler_profile": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "strategy", "optimization", "register_allocator", "inlining", "cpu", "wasm32_memory_reservation_bytes", "memory_may_move", "spectre_mitigation", "nan_canonicalization", "wasm_gc", "gc_collector"],
+      "required": ["id", "strategy", "optimization", "register_allocator", "inlining", "cpu", "wasm32_memory_reservation_bytes", "max_wasm_stack_bytes", "memory_may_move", "spectre_mitigation", "nan_canonicalization", "wasm_gc", "consume_fuel", "epoch_interruption", "gc_collector"],
       "properties": {
-        "id": { "const": "cranelift-speed-x86_64-v3-inlining-v2" },
+        "id": { "const": "cranelift-speed-x86_64-v3-contained-v3" },
         "strategy": { "const": "cranelift" },
         "optimization": { "const": "speed" },
         "register_allocator": { "const": "backtracking" },
         "inlining": { "const": "all" },
         "cpu": { "const": "x86-64-v3" },
         "wasm32_memory_reservation_bytes": { "const": 4294967296 },
+        "max_wasm_stack_bytes": { "const": 2097152 },
         "memory_may_move": { "const": false },
         "spectre_mitigation": { "const": true },
         "nan_canonicalization": { "const": false },
         "wasm_gc": { "const": true },
+        "consume_fuel": { "const": true },
+        "epoch_interruption": { "const": true },
         "gc_collector": { "const": "drc" }
       }
     },

@@ -77,6 +77,12 @@ Assert-True (-not [bool]$Lock.compiler_profile.nan_canonicalization) `
     'NaN canonicalization contract drifted'
 Assert-True ([bool]$Lock.compiler_profile.wasm_gc) `
     'Wasm GC compatibility must remain enabled'
+Assert-True ([uint64]$Lock.compiler_profile.max_wasm_stack_bytes -eq 2097152) `
+    'native Wasm stack budget drifted'
+Assert-True ([bool]$Lock.compiler_profile.consume_fuel) `
+    'fuel instrumentation must remain enabled'
+Assert-True ([bool]$Lock.compiler_profile.epoch_interruption) `
+    'epoch interruption must remain enabled'
 Assert-True ([string]$Lock.compiler_profile.gc_collector -ceq 'drc') `
     'Wasm GC collector contract drifted'
 
@@ -148,7 +154,10 @@ foreach ($IdentityField in @(
     'spectre=on',
     'wasm_gc=on',
     'gc_collector=drc',
-    'runtime_profile=fastest-runtime')) {
+    'runtime_profile=fastest-runtime',
+    'max_wasm_stack=2m',
+    'fuel=on',
+    'epoch_interruption=on')) {
     Assert-True $ProfileText.Contains($IdentityField) `
         "compiler identity lacks field: $IdentityField"
 }
@@ -160,6 +169,18 @@ Assert-True $ApiText.Contains('enable_heap_access_spectre_mitigation') `
     'engine factory does not explicitly preserve heap Spectre mitigation'
 Assert-True $ApiText.Contains('enable_table_access_spectre_mitigation') `
     'engine factory does not explicitly preserve table Spectre mitigation'
+foreach ($ContainmentApi in @(
+    'wasmtime_config_consume_fuel_set',
+    'wasmtime_config_epoch_interruption_set',
+    'wasmtime_config_max_wasm_stack_set',
+    'wasmtime_store_limiter',
+    'wasmtime_context_set_fuel',
+    'wasmtime_context_set_epoch_deadline',
+    'wasmtime_engine_increment_epoch',
+    'wasmtime_trap_code')) {
+    Assert-True $ApiText.Contains($ContainmentApi) `
+        "Wasmtime containment wrapper lacks API: $ContainmentApi"
+}
 Assert-True $ApiText.Contains('wasmtime_config_wasm_gc_set') `
     'engine factory does not explicitly enable the frozen Wasm GC contract'
 Assert-True $RuntimeSupportText.Contains('FPlatformProcess::GetDllExport') `
@@ -182,7 +203,7 @@ Assert-True ([string]$Validation.patch_sha256 -ceq $PatchSha256) `
 
 [pscustomobject]@{
     result = 'wasmtime_performance_toolchain_contracts_passed'
-    assertion_count = 55
+    assertion_count = 66
     toolchain_id = [string]$Lock.toolchain_id
     source_sha256 = [string]$Lock.upstream.source_archive.sha256
     patch_sha256 = $PatchSha256

@@ -140,7 +140,9 @@ TArray<uint8> BuildTypedHostFixture(bool bPairImport, int32 Left = 0, int32 Righ
 	return Module;
 }
 
-TArray<uint8> BuildTypedHostFixture(TConstArrayView<int32> Arguments)
+TArray<uint8> BuildTypedHostFixture(
+	TConstArrayView<int32> Arguments,
+	const uint32 ImportCallCount = 1)
 {
 	TArray<uint8> Module;
 	const uint8 Header[] = { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 };
@@ -182,12 +184,19 @@ TArray<uint8> BuildTypedHostFixture(TConstArrayView<int32> Arguments)
 
 	TArray<uint8> Body;
 	Body.Add(0x00);
-	for (int32 Argument : Arguments)
+	for (uint32 CallIndex = 0; CallIndex < ImportCallCount; ++CallIndex)
 	{
-		AppendTypedI32Const(Body, Argument);
+		for (int32 Argument : Arguments)
+		{
+			AppendTypedI32Const(Body, Argument);
+		}
+		Body.Add(0x10);
+		AppendTypedU32Leb(Body, 0);
+		if (CallIndex + 1 < ImportCallCount)
+		{
+			Body.Add(0x1a);
+		}
 	}
-	Body.Add(0x10);
-	AppendTypedU32Leb(Body, 0);
 	Body.Add(0x0b);
 	TArray<uint8> Code;
 	AppendTypedU32Leb(Code, 1);
@@ -834,6 +843,48 @@ bool FAvidScriptVmWasmtimeTypedHostTest::RunTest(const FString& Parameters)
 		TEXT("prepared target bypasses the virtual dispatcher"),
 		PreparedFallbackDispatcher.SelfI32PairCalls,
 		0);
+
+	FAvidScriptVmError PreparedBudgetError;
+	TUniquePtr<IAvidScriptVmBackend> PreparedBudgetBackend =
+		CreateTypedWasmtimeBackend(PreparedBudgetError);
+	FPreparedSelfI32PairContext PreparedBudgetContext;
+	PreparedBudgetContext.Bias = 5;
+	TArray<FAvidScriptVmTypedHostImport> PreparedBudgetImports =
+		PreparedImports;
+	PreparedBudgetImports[0].PreparedTarget.Context =
+		&PreparedBudgetContext;
+	FAvidScriptVmLoadConfig PreparedBudgetConfig = PreparedConfig;
+	PreparedBudgetConfig.TypedHostImports = PreparedBudgetImports;
+	PreparedBudgetConfig.ExecutionBudget.MaxHostCallsPerEntry = 1;
+	TestTrue(
+		TEXT("prepared typed budget fixture loads"),
+		PreparedBudgetBackend->Load(
+			BuildTypedHostFixture(SelfPairArguments, 2),
+			TEXT("typed_prepared_budget"),
+			PreparedBudgetConfig,
+			PreparedBudgetError));
+	FAvidScriptVmExportHandle PreparedBudgetHandle;
+	TestTrue(
+		TEXT("prepared typed budget export resolves"),
+		PreparedBudgetBackend->ResolveExport(
+			TEXT("run"),
+			PreparedBudgetHandle,
+			PreparedBudgetError));
+	FAvidScriptVmCallFrame PreparedBudgetFrame;
+	TestFalse(
+		TEXT("prepared typed fast path enforces host-call budget"),
+		PreparedBudgetBackend->Call(
+			PreparedBudgetHandle,
+			PreparedBudgetFrame,
+			PreparedBudgetError));
+	TestEqual(
+		TEXT("prepared typed budget category is stable"),
+		PreparedBudgetError.Category,
+		FString(TEXT("host_call_budget_exhausted")));
+	TestEqual(
+		TEXT("prepared target stops at the host-call budget"),
+		PreparedBudgetContext.CallCount,
+		1);
 
 	FAvidScriptVmError PreparedVectorError;
 	TUniquePtr<IAvidScriptVmBackend> PreparedVectorBackend =

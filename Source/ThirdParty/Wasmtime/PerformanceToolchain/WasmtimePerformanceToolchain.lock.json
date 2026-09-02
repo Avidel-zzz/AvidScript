@@ -59,17 +59,20 @@
     "license_relative_path": "LICENSE"
   },
   "compiler_profile": {
-    "id": "cranelift-speed-x86_64-v3-inlining-v2",
+    "id": "cranelift-speed-x86_64-v3-contained-v3",
     "strategy": "cranelift",
     "optimization": "speed",
     "register_allocator": "backtracking",
     "inlining": "all",
     "cpu": "x86-64-v3",
     "wasm32_memory_reservation_bytes": 4294967296,
+    "max_wasm_stack_bytes": 2097152,
     "memory_may_move": false,
     "spectre_mitigation": true,
     "nan_canonicalization": false,
     "wasm_gc": true,
+    "consume_fuel": true,
+    "epoch_interruption": true,
     "gc_collector": "drc"
   },
   "license": {

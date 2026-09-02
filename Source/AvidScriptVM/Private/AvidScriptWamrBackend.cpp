@@ -63,7 +63,8 @@ FAvidScriptVmBackendInfo MakeWamrBackendInfo()
 	Info.Capabilities = EAvidScriptVmCapability::GuestMemory
 		| EAvidScriptVmCapability::Interpreter
 		| EAvidScriptVmCapability::StructuredStack
-		| EAvidScriptVmCapability::DebugProbe;
+		| EAvidScriptVmCapability::DebugProbe
+		| EAvidScriptVmCapability::HostCallBudget;
 	Info.StableBackendId = TEXT("wamr.interpreter");
 	Info.TargetTriple = GetWamrTargetTriple();
 #if AVIDSCRIPT_WITH_WAMR
@@ -202,6 +203,17 @@ public:
 			SetVmError(OutError, TEXT("invalid_config"), TEXT("VM stack and heap sizes must be non-zero."));
 			return false;
 		}
+		if (Config.ExecutionBudget.FuelPerEntry > 0
+			|| Config.ExecutionBudget.EpochDeadlineTicks > 0
+			|| Config.ExecutionBudget.MaxLinearMemoryBytes > 0)
+		{
+			SetVmError(
+				OutError,
+				TEXT("execution_budget_unsupported"),
+				TEXT("This WAMR build does not provide verified fuel, epoch, or linear-memory budget enforcement."));
+			return false;
+		}
+		MaxHostCallsPerEntry = Config.ExecutionBudget.MaxHostCallsPerEntry;
 		if (Config.BindingPackage != nullptr)
 		{
 			if (Config.HostDispatcher == nullptr)
@@ -469,6 +481,8 @@ public:
 			*OutResult = FAvidScriptVmCallResult();
 		}
 		bHasPendingHostImportFailure = false;
+		bHostCallBudgetExceeded = false;
+		CurrentHostCallCount = 0;
 		PendingHostImportName.Reset();
 		PendingHostImportDetails.Reset();
 #if !AVIDSCRIPT_WITH_WAMR
@@ -554,7 +568,9 @@ public:
 			if (bHasPendingHostImportFailure)
 			{
 				OutError.Reset();
-				OutError.Category = TEXT("host_import_failed");
+				OutError.Category = bHostCallBudgetExceeded
+					? TEXT("host_call_budget_exhausted")
+					: TEXT("host_import_failed");
 				OutError.ImportModuleName = TEXT("avidscript");
 				OutError.ImportName = PendingHostImportName;
 				OutError.Details = PendingHostImportDetails;
@@ -614,6 +630,11 @@ public:
 	bool DispatchHostCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult) override
 	{
 		OutResult = FAvidScriptHostCallResult();
+		if (!TryConsumeHostCallBudget())
+		{
+			OutResult.Details = TEXT("The guest exceeded the per-entry host-call budget.");
+			return false;
+		}
 		if (HostDispatcher == nullptr)
 		{
 			OutResult.Details = TEXT("No host dispatcher is attached to the VM instance.");
@@ -630,6 +651,11 @@ public:
 	{
 		OutReturnValue = 0;
 		OutFailureDetails.Reset();
+		if (!TryConsumeHostCallBudget())
+		{
+			OutFailureDetails = TEXT("The guest exceeded the per-entry host-call budget.");
+			return false;
+		}
 		const uint32* Ordinal = DynamicOrdinals.Find(&Attachment);
 		if (Ordinal == nullptr)
 		{
@@ -861,6 +887,21 @@ public:
 	}
 
 private:
+	bool TryConsumeHostCallBudget()
+	{
+		if (MaxHostCallsPerEntry == 0)
+		{
+			return true;
+		}
+		if (CurrentHostCallCount >= MaxHostCallsPerEntry)
+		{
+			bHostCallBudgetExceeded = true;
+			return false;
+		}
+		++CurrentHostCallCount;
+		return true;
+	}
+
 	void PerformUnload()
 	{
 #if AVIDSCRIPT_WITH_WAMR
@@ -899,6 +940,9 @@ private:
 		ModuleBuffer.Reset();
 		ModuleId.Reset();
 		HostDispatcher = nullptr;
+		MaxHostCallsPerEntry = 0;
+		CurrentHostCallCount = 0;
+		bHostCallBudgetExceeded = false;
 		bUnloadDeferred = false;
 		AdvanceBackendInstanceIdentity();
 	}
@@ -925,6 +969,9 @@ private:
 	int32 ActiveCallDepth = 0;
 	bool bUnloadDeferred = false;
 	bool bHasPendingHostImportFailure = false;
+	bool bHostCallBudgetExceeded = false;
+	uint32 MaxHostCallsPerEntry = 0;
+	uint32 CurrentHostCallCount = 0;
 	FString PendingHostImportName;
 	FString PendingHostImportDetails;
 

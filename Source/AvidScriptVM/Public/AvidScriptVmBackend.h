@@ -39,7 +39,11 @@ enum class EAvidScriptVmCapability : uint32
 	Jit = 1 << 3,
 	PrecompiledArtifact = 1 << 4,
 	StructuredStack = 1 << 5,
-	DebugProbe = 1 << 6
+	DebugProbe = 1 << 6,
+	ExecutionFuel = 1 << 7,
+	EpochInterruption = 1 << 8,
+	StoreLimiter = 1 << 9,
+	HostCallBudget = 1 << 10
 };
 ENUM_CLASS_FLAGS(EAvidScriptVmCapability);
 
@@ -465,8 +469,25 @@ AVIDSCRIPTVM_API bool ValidateAvidScriptVmImportContract(
 
 struct FAvidScriptVmLoadConfig
 {
+	struct FExecutionBudget
+	{
+		uint64 FuelPerEntry = 0;
+		uint64 EpochDeadlineTicks = 0;
+		uint64 MaxLinearMemoryBytes = 0;
+		uint32 MaxHostCallsPerEntry = 0;
+
+		bool IsEnabled() const
+		{
+			return FuelPerEntry > 0
+				|| EpochDeadlineTicks > 0
+				|| MaxLinearMemoryBytes > 0
+				|| MaxHostCallsPerEntry > 0;
+		}
+	};
+
 	uint32 StackSize = 64 * 1024;
 	uint32 HeapSize = 64 * 1024;
+	FExecutionBudget ExecutionBudget;
 	IAvidScriptHostDispatcher* HostDispatcher = nullptr;
 	const FAvidScriptVmBindingPackage* BindingPackage = nullptr;
 	IAvidScriptVmTypedHostDispatcher* TypedHostDispatcher = nullptr;
@@ -517,6 +538,13 @@ public:
 			return false;
 		}
 		return Load(Artifact.CanonicalWasmBytes, ModuleId, Config, OutError);
+	}
+	virtual bool RequestInterrupt(FAvidScriptVmError& OutError)
+	{
+		OutError.Reset();
+		OutError.Category = TEXT("interrupt_unsupported");
+		OutError.Details = TEXT("This VM backend does not support epoch interruption.");
+		return false;
 	}
 	virtual bool ResolveExport(
 		const FString& ExportName,
