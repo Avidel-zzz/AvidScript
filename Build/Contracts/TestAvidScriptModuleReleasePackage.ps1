@@ -71,10 +71,14 @@ function New-ReleaseFixture {
         language = 'csharp'
         source = [ordered]@{
             file = 'Source/Fixture.cs'
+            sha256 = ('d' * 64)
+            frontend_sha256 = ('e' * 64)
+            semantic_sha256 = ('f' * 64)
             semantic_file = 'Saved/ReleaseInput/fixture.semantic.json'
         }
         guest_ir = [ordered]@{
             file = 'Saved/ReleaseInput/fixture.guestir.json'
+            module_id = $ModuleId
             sha256 = ('b' * 64)
         }
         semantic = [ordered]@{
@@ -304,6 +308,29 @@ try {
         finally {
             $RuntimeDocument.Dispose()
             $BindingDocument.Dispose()
+        }
+    }
+
+    Invoke-ReleaseContract 'Development debug map preserves compact provenance' {
+        $Fixture = New-ReleaseFixture -Name 'DevelopmentDebugProvenance'
+        $Published = Publish-AvidScriptModuleReleasePackage `
+            -RuntimeManifestPath $Fixture.RuntimeManifestPath `
+            -ProjectRoot $Fixture.ProjectRoot `
+            -Configuration Development
+        $Runtime = Get-Content -Raw -LiteralPath (
+            Join-Path $Published.PackageRoot 'runtime.avidscript.json') | ConvertFrom-Json -Depth 32
+        $SourceProperties = @($Runtime.source.PSObject.Properties.Name | Sort-Object)
+        $GuestIrProperties = @($Runtime.guest_ir.PSObject.Properties.Name | Sort-Object)
+        if ($Runtime.PSObject.Properties.Name -cnotcontains 'debug_map' -or
+            [string]::Join(',', $SourceProperties) -cne
+                'file,frontend_sha256,semantic_sha256,sha256' -or
+            [string]::Join(',', $GuestIrProperties) -cne 'module_id,sha256' -or
+            [string]$Runtime.source.sha256 -cne ('d' * 64) -or
+            [string]$Runtime.source.frontend_sha256 -cne ('e' * 64) -or
+            [string]$Runtime.source.semantic_sha256 -cne ('f' * 64) -or
+            [string]$Runtime.guest_ir.module_id -cne 'fixture.module' -or
+            [string]$Runtime.guest_ir.sha256 -cne ('b' * 64)) {
+            throw 'Development package lost debug provenance or retained build-only paths.'
         }
     }
 

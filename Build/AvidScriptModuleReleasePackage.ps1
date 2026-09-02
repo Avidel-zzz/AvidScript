@@ -963,6 +963,45 @@ function Publish-AvidScriptModuleReleasePackage {
     Remove-AvidScriptModuleReleaseProperty $ReleaseBindingPackage 'reference_source_sha256'
     $ReleaseRuntimeManifest.binding_package = $ReleaseBindingPackage
     if ($IncludeDebugMap) {
+        Assert-AvidScriptModuleReleaseObjectShape `
+            -Value $RuntimeManifest.source `
+            -Label 'Runtime manifest.source debug provenance' `
+            -Required @('file', 'sha256', 'frontend_sha256', 'semantic_sha256') `
+            -Optional @(
+                'script_type',
+                'frontend_file',
+                'frontend_schema_version',
+                'frontend_version',
+                'semantic_file',
+                'semantic_schema_version',
+                'semantic_version')
+        Assert-AvidScriptModuleReleaseObjectShape `
+            -Value $RuntimeManifest.guest_ir `
+            -Label 'Runtime manifest.guest_ir debug provenance' `
+            -Required @('module_id', 'sha256') `
+            -Optional @('file', 'schema_version', 'version')
+        foreach ($HashProperty in @('sha256', 'frontend_sha256', 'semantic_sha256')) {
+            Assert-AvidScriptModuleReleaseSha256 `
+                -Value ([string]$RuntimeManifest.source.$HashProperty) `
+                -Label "Runtime manifest.source.$HashProperty"
+        }
+        Assert-AvidScriptModuleReleaseSha256 `
+            -Value ([string]$RuntimeManifest.guest_ir.sha256) `
+            -Label 'Runtime manifest.guest_ir.sha256'
+        $ReleaseRuntimeManifest | Add-Member `
+            -NotePropertyName source `
+            -NotePropertyValue ([pscustomobject][ordered]@{
+            file = [string]$RuntimeManifest.source.file
+            sha256 = [string]$RuntimeManifest.source.sha256
+            frontend_sha256 = [string]$RuntimeManifest.source.frontend_sha256
+            semantic_sha256 = [string]$RuntimeManifest.source.semantic_sha256
+        })
+        $ReleaseRuntimeManifest | Add-Member `
+            -NotePropertyName guest_ir `
+            -NotePropertyValue ([pscustomobject][ordered]@{
+            module_id = [string]$RuntimeManifest.guest_ir.module_id
+            sha256 = [string]$RuntimeManifest.guest_ir.sha256
+        })
         $ReleaseDebugMap = Copy-AvidScriptModuleReleaseJsonObject $RuntimeManifest.debug_map
         $ReleaseDebugMap.file = 'diagnostics/debug-map.json'
         $ReleaseRuntimeManifest.debug_map = $ReleaseDebugMap
