@@ -7,7 +7,7 @@ $Root = Join-Path `
     ("AvidScriptCookPackageContract_$PID`_$([Guid]::NewGuid().ToString('N'))")
 $Utf8 = [System.Text.UTF8Encoding]::new($false)
 $Passed = 0
-$Total = 7
+$Total = 10
 $Failure = $null
 
 function Write-TestJson {
@@ -310,6 +310,61 @@ try {
         }
         if (-not $Rejected) {
             throw 'An artifact outside the project root was accepted.'
+        }
+    }
+
+    Invoke-ContractTest -Name 'Shipping rejects JIT Generated Type package' -Body {
+        $Rejected = $false
+        try {
+            Publish-AvidScriptGeneratedTypeCookPackage `
+                -PackageDescriptorPath $DescriptorPath `
+                -ProjectRoot $ProjectRoot `
+                -OutputRoot $OutputRoot `
+                -Configuration Shipping | Out-Null
+        }
+        catch {
+            $Rejected = $_.Exception.Message.Contains(
+                'require a precompiled Runtime module')
+        }
+        if (-not $Rejected) {
+            throw 'Shipping accepted a JIT Generated Type package.'
+        }
+    }
+
+    Invoke-ContractTest -Name 'Shipping precompiled Generated Type package' -Body {
+        $Descriptor.execution_backend = 'wasmtime_precompiled'
+        Write-TestJson -Path $DescriptorPath -Value $Descriptor
+        $ShippingPackage = Publish-AvidScriptGeneratedTypeCookPackage `
+            -PackageDescriptorPath $DescriptorPath `
+            -ProjectRoot $ProjectRoot `
+            -OutputRoot $OutputRoot `
+            -Configuration Shipping
+        $ShippingRuntimeDescriptor = Get-Content `
+            -Raw `
+            -LiteralPath $ShippingPackage.RuntimeDescriptorPath |
+            ConvertFrom-Json -Depth 64
+        if ([string]$ShippingRuntimeDescriptor.configuration -cne 'shipping' -or
+            [string]$ShippingRuntimeDescriptor.execution.policy -cne
+                'require_precompiled') {
+            throw 'Shipping Generated Type package did not preserve its precompiled policy.'
+        }
+    }
+
+    Invoke-ContractTest -Name 'headless Generated Type release route' -Body {
+        $ScriptTypeBuilderPath = Join-Path $BuildRoot 'BuildCSharpScriptTypes.ps1'
+        $ScriptTypeBuilderSource = Get-Content `
+            -Raw `
+            -LiteralPath $ScriptTypeBuilderPath
+        foreach ($RequiredToken in @(
+                '[string]$PackageConfiguration = "Development"',
+                '[switch]$HeadlessRelease',
+                'InvokeAvidScriptRelease.ps1',
+                '-GeneratedTypeManifestPath $GeneratedManifestPath',
+                '-Configuration $PackageConfiguration',
+                '"wasmtime_precompiled"')) {
+            if (-not $ScriptTypeBuilderSource.Contains($RequiredToken)) {
+                throw "Generated Type headless release route is missing: $RequiredToken"
+            }
         }
     }
 

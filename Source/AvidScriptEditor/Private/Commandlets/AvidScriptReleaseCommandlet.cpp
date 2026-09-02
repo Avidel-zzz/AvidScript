@@ -27,6 +27,7 @@ struct FAvidScriptReleaseArguments
 	FString DotNetPath;
 	FString BindingPackagePath;
 	FString RuntimeBindingPackagePath;
+	FString GeneratedTypeManifestPath;
 };
 
 int32 FailAvidScriptRelease(
@@ -67,6 +68,7 @@ const FString* FindAvidScriptReleaseCanonicalParameter(
 		{ TEXT("bindingpackagepath"), TEXT("BindingPackagePath") },
 		{ TEXT("csharpprojectpath"), TEXT("CSharpProjectPath") },
 		{ TEXT("dotnetpath"), TEXT("DotNetPath") },
+		{ TEXT("generatedtypemanifestpath"), TEXT("GeneratedTypeManifestPath") },
 		{ TEXT("moduleid"), TEXT("ModuleId") },
 		{ TEXT("outputroot"), TEXT("OutputRoot") },
 		{ TEXT("runtimebindingpackagepath"), TEXT("RuntimeBindingPackagePath") },
@@ -193,6 +195,9 @@ bool ParseAvidScriptReleaseArguments(
 	Values.RemoveAndCopyValue(
 		TEXT("RuntimeBindingPackagePath"),
 		OutArguments.RuntimeBindingPackagePath);
+	Values.RemoveAndCopyValue(
+		TEXT("GeneratedTypeManifestPath"),
+		OutArguments.GeneratedTypeManifestPath);
 	return true;
 }
 
@@ -315,6 +320,7 @@ int32 UAvidScriptReleaseCommandlet::Main(const FString& Params)
 	FString OutputRoot;
 	FString BindingPackagePath;
 	FString RuntimeBindingPackagePath;
+	FString GeneratedTypeManifestPath;
 	if (!NormalizeAvidScriptReleaseProjectPath(
 			Arguments.SourcePath,
 			ProjectRoot,
@@ -336,7 +342,12 @@ int32 UAvidScriptReleaseCommandlet::Main(const FString& Params)
 			&& !NormalizeAvidScriptReleaseProjectPath(
 				Arguments.RuntimeBindingPackagePath,
 				ProjectRoot,
-				RuntimeBindingPackagePath)))
+				RuntimeBindingPackagePath))
+		|| (!Arguments.GeneratedTypeManifestPath.IsEmpty()
+			&& !NormalizeAvidScriptReleaseProjectPath(
+				Arguments.GeneratedTypeManifestPath,
+				ProjectRoot,
+				GeneratedTypeManifestPath)))
 	{
 		return FailAvidScriptRelease(
 			TEXT("path_outside_project"),
@@ -380,6 +391,14 @@ int32 UAvidScriptReleaseCommandlet::Main(const FString& Params)
 			&RuntimeBindingPackagePath
 		});
 	}
+	if (!GeneratedTypeManifestPath.IsEmpty())
+	{
+		RequiredFiles.Add({
+			TEXT("generated_type_manifest_missing"),
+			TEXT("Generated Type manifest"),
+			&GeneratedTypeManifestPath
+		});
+	}
 	for (const FRequiredFile& RequiredFile : RequiredFiles)
 	{
 		if (!FPaths::FileExists(*RequiredFile.Path))
@@ -415,6 +434,9 @@ int32 UAvidScriptReleaseCommandlet::Main(const FString& Params)
 			Arguments.ArtifactStem);
 	Config.BindingPackagePath = BindingPackagePath;
 	Config.RuntimeBindingPackagePath = RuntimeBindingPackagePath;
+	Config.GeneratedTypeManifestPath = GeneratedTypeManifestPath;
+	Config.bAllowGeneratedTypeImports =
+		!GeneratedTypeManifestPath.IsEmpty();
 	Config.DotNetPath = DotNetPath;
 	Config.ModuleId = Arguments.ModuleId;
 	Config.ArtifactStem = Arguments.ArtifactStem;

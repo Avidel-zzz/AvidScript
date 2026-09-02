@@ -432,6 +432,7 @@ static bool PrepareAvidScriptCSharpBuildPipeline(
 	NormalizeAvidScriptCSharpBuildPipelinePath(NormalizedConfig.CompilationCacheRoot);
 	NormalizeAvidScriptCSharpBuildPipelinePath(NormalizedConfig.BindingPackagePath);
 	NormalizeAvidScriptCSharpBuildPipelinePath(NormalizedConfig.RuntimeBindingPackagePath);
+	NormalizeAvidScriptCSharpBuildPipelinePath(NormalizedConfig.GeneratedTypeManifestPath);
 	NormalizedConfig.PreparedBuildReportPath.Reset();
 	NormalizeAvidScriptCSharpBuildPipelinePath(NormalizedConfig.DotNetPath);
 
@@ -481,6 +482,30 @@ static bool PrepareAvidScriptCSharpBuildPipeline(
 				TEXT("C# project file does not exist: %s"),
 				*NormalizedConfig.ProjectPath),
 			TEXT("choose an existing C# project file or update project_path in the C# profile"),
+			OutResult);
+		return false;
+	}
+	if (NormalizedConfig.bAllowGeneratedTypeImports
+		&& (NormalizedConfig.GeneratedTypeManifestPath.IsEmpty()
+			|| !FPaths::FileExists(
+				NormalizedConfig.GeneratedTypeManifestPath)))
+	{
+		SetAvidScriptCSharpBuildPipelineFailure(
+			TEXT("generated_type_manifest_missing"),
+			FString::Printf(
+				TEXT("Generated Type manifest does not exist: %s"),
+				*NormalizedConfig.GeneratedTypeManifestPath),
+			TEXT("generate the native type shell before compiling its Runtime module"),
+			OutResult);
+		return false;
+	}
+	if (!NormalizedConfig.bAllowGeneratedTypeImports
+		&& !NormalizedConfig.GeneratedTypeManifestPath.IsEmpty())
+	{
+		SetAvidScriptCSharpBuildPipelineFailure(
+			TEXT("generated_type_manifest_unused"),
+			TEXT("Generated Type manifest requires generated type imports to be enabled."),
+			TEXT("enable generated type imports or remove GeneratedTypeManifestPath"),
 			OutResult);
 		return false;
 	}

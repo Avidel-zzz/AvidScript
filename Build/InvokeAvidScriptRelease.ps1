@@ -8,6 +8,7 @@ param(
     [Parameter(Mandatory = $true)][string]$DotNetPath,
     [string]$BindingPackagePath = '',
     [string]$RuntimeBindingPackagePath = '',
+    [string]$GeneratedTypeManifestPath = '',
     [ValidateSet('Development', 'Shipping')][string]$Configuration = 'Development',
     [string]$EngineRoot = 'C:\UnrealEngine'
 )
@@ -184,7 +185,8 @@ function New-AvidScriptReleaseCommandletArguments {
         [Parameter(Mandatory = $true)][string]$DotNetPath,
         [Parameter(Mandatory = $true)][string]$AbsLog,
         [string]$BindingPackagePath = '',
-        [string]$RuntimeBindingPackagePath = ''
+        [string]$RuntimeBindingPackagePath = '',
+        [string]$GeneratedTypeManifestPath = ''
     )
 
     $Arguments = [System.Collections.Generic.List[string]]::new()
@@ -203,6 +205,9 @@ function New-AvidScriptReleaseCommandletArguments {
     }
     if (-not [string]::IsNullOrWhiteSpace($RuntimeBindingPackagePath)) {
         $Arguments.Add("-RuntimeBindingPackagePath=$RuntimeBindingPackagePath")
+    }
+    if (-not [string]::IsNullOrWhiteSpace($GeneratedTypeManifestPath)) {
+        $Arguments.Add("-GeneratedTypeManifestPath=$GeneratedTypeManifestPath")
     }
     foreach ($Argument in @(
             "-abslog=$AbsLog",
@@ -271,6 +276,7 @@ function Invoke-AvidScriptRelease {
         [Parameter(Mandatory = $true)][string]$DotNetPath,
         [string]$BindingPackagePath,
         [string]$RuntimeBindingPackagePath,
+        [string]$GeneratedTypeManifestPath,
         [ValidateSet('Development', 'Shipping')]
         [Parameter(Mandatory = $true)][string]$Configuration,
         [Parameter(Mandatory = $true)][string]$EngineRoot
@@ -331,6 +337,14 @@ function Invoke-AvidScriptRelease {
             -Path $RuntimeBindingPackagePath `
             -ProjectRoot $ProjectRoot `
             -Label 'RuntimeBindingPackagePath' `
+            -PathType Leaf
+    }
+    $NormalizedGeneratedTypeManifestPath = ''
+    if (-not [string]::IsNullOrWhiteSpace($GeneratedTypeManifestPath)) {
+        $NormalizedGeneratedTypeManifestPath = Resolve-AvidScriptReleaseProjectPath `
+            -Path $GeneratedTypeManifestPath `
+            -ProjectRoot $ProjectRoot `
+            -Label 'GeneratedTypeManifestPath' `
             -PathType Leaf
     }
 
@@ -426,6 +440,7 @@ function Invoke-AvidScriptRelease {
         -DotNetPath $NormalizedDotNetPath `
         -BindingPackagePath $NormalizedBindingPackagePath `
         -RuntimeBindingPackagePath $NormalizedRuntimeBindingPackagePath `
+        -GeneratedTypeManifestPath $NormalizedGeneratedTypeManifestPath `
         -AbsLog $AbsLog
     $EditorResult = Invoke-AvidScriptReleaseProcess `
         -Executable $EditorCmdPath `
@@ -488,6 +503,7 @@ function Invoke-AvidScriptRelease {
         build_output_root = $NormalizedOutputRoot
         runtime_manifest_path = $RuntimeManifestPath
         precompiled_artifact_path = $PrecompiledArtifactPath
+        generated_type_manifest_path = $NormalizedGeneratedTypeManifestPath
         package_root = [string]$Package.PackageRoot
         descriptor_path = [string]$Package.DescriptorPath
         catalog_path = [string]$Package.CatalogPath
@@ -510,6 +526,7 @@ try {
         -DotNetPath $DotNetPath `
         -BindingPackagePath $BindingPackagePath `
         -RuntimeBindingPackagePath $RuntimeBindingPackagePath `
+        -GeneratedTypeManifestPath $GeneratedTypeManifestPath `
         -Configuration $Configuration `
         -EngineRoot $EngineRoot
     Write-Output ($Summary | ConvertTo-Json -Depth 16 -Compress)

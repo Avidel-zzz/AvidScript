@@ -97,12 +97,16 @@ function Publish-AvidScriptGeneratedTypeCookPackage {
         [string]$Descriptor.generation_key_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
         [string]::IsNullOrWhiteSpace([string]$Descriptor.module_name) -or
         [string]::IsNullOrWhiteSpace([string]$Descriptor.runtime_module_id) -or
-        [string]$Descriptor.execution_backend -cne 'wasmtime_jit' -or
+        [string]$Descriptor.execution_backend -cnotin @('wasmtime_jit', 'wasmtime_precompiled') -or
         $null -eq $Descriptor.type_manifest -or
         $null -eq $Descriptor.runtime_manifest -or
         $null -eq $Descriptor.reload -or
         [string]$Descriptor.reload.native_structure_sha256 -cnotmatch '^[0-9a-f]{64}$') {
         throw "Generated type package descriptor is invalid for Cook publication."
+    }
+    if ($Configuration -ceq 'Shipping' -and
+        [string]$Descriptor.execution_backend -cne 'wasmtime_precompiled') {
+        throw "Shipping Generated Type packages require a precompiled Runtime module."
     }
 
     $TypeManifestPath = Resolve-AvidScriptCookPackageArtifactPath `

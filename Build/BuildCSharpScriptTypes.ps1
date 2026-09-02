@@ -11,6 +11,9 @@ param(
     [string]$RuntimeModuleId = "avidscript_generated",
     [string]$UnrealVersion = "5.8",
     [string]$Configuration = "Release",
+    [ValidateSet("Development", "Shipping")]
+    [string]$PackageConfiguration = "Development",
+    [switch]$HeadlessRelease,
     [switch]$SkipRuntimePackage
 )
 
@@ -24,6 +27,7 @@ $CookPackageFunctions = Join-Path $BuildDir "AvidScriptGeneratedTypeCookPackage.
 $FrontendScript = Join-Path $BuildDir "InvokeCSharpFrontend.ps1"
 $SemanticScript = Join-Path $BuildDir "InvokeCSharpSemantic.ps1"
 $RuntimeBuildScript = Join-Path $BuildDir "BuildCSharpActorLifecycle.ps1"
+$ReleaseRunner = Join-Path $BuildDir "InvokeAvidScriptRelease.ps1"
 $GeneratorProject = Join-Path $PluginRoot "Tools\AvidScript.UeTypeGenerator\AvidScript.UeTypeGenerator.csproj"
 $GlobalJsonPath = Join-Path $PluginRoot "global.json"
 $DefaultProjectPath = Join-Path $PluginRoot "Samples\CSharp\ActorLifecycle\AvidScript.ActorLifecycle.csproj"
@@ -64,9 +68,19 @@ if ([string]::IsNullOrWhiteSpace($ProjectPath)) {
     $ProjectPath = $DefaultProjectPath
 }
 $ProjectPath = (Resolve-Path -LiteralPath $ProjectPath).Path
-if (-not $SkipRuntimePackage -and
-    -not (Test-Path -LiteralPath $RuntimeBuildScript -PathType Leaf)) {
-    throw "Formal C# runtime build script is missing: $RuntimeBuildScript"
+if (-not $SkipRuntimePackage) {
+    $RequiredRuntimeBuilder = if ($HeadlessRelease) {
+        $ReleaseRunner
+    }
+    else {
+        $RuntimeBuildScript
+    }
+    if (-not (Test-Path -LiteralPath $RequiredRuntimeBuilder -PathType Leaf)) {
+        throw "Formal C# runtime release entry is missing: $RequiredRuntimeBuilder"
+    }
+    if ($PackageConfiguration -ceq "Shipping" -and -not $HeadlessRelease) {
+        throw "Shipping Generated Type packages require -HeadlessRelease."
+    }
 }
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $OutputRoot = Join-Path $PluginRoot "Source\AvidScriptGenerated"
@@ -203,22 +217,62 @@ if (-not $SkipRuntimePackage) {
     $RuntimeOutputRoot = Join-Path $RunRoot "Runtime"
     $RuntimeArtifactStem = "generated_types"
     $RuntimeManifestPath = Join-Path $RuntimeOutputRoot "$RuntimeArtifactStem.avidscript.json"
-    & $RuntimeBuildScript `
-        -DotNetPath $DotNetPath `
-        -OutputRoot $RuntimeOutputRoot `
-        -Configuration $Configuration `
-        -SourcePath $SourcePath `
-        -ProjectPath $ProjectPath `
-        -ModuleId $RuntimeModuleId `
-        -ArtifactStem $RuntimeArtifactStem `
-        -ManifestPath $RuntimeManifestPath `
-        -BindingPackagePath $BindingPackageManifestPath `
-        -RuntimeBindingPackagePath $BindingPackageManifestPath `
-        -AllowGeneratedTypeImports `
-        -GeneratedTypeManifestPath $GeneratedManifestPath
-    if ($LASTEXITCODE -ne 0 -or
-        -not (Test-Path -LiteralPath $RuntimeManifestPath -PathType Leaf)) {
-        throw "Formal C# generated type Runtime package failed with exit code $LASTEXITCODE."
+    if ($HeadlessRelease) {
+        $PowerShellPath = Join-Path $PSHOME "pwsh.exe"
+        $ReleaseOutput = @(& $PowerShellPath `
+                -NoProfile `
+                -File $ReleaseRunner `
+                -DotNetPath $DotNetPath `
+                -OutputRoot $RuntimeOutputRoot `
+                -SourcePath $SourcePath `
+                -CSharpProjectPath $ProjectPath `
+                -ModuleId $RuntimeModuleId `
+                -ArtifactStem $RuntimeArtifactStem `
+                -BindingPackagePath $BindingPackageManifestPath `
+                -RuntimeBindingPackagePath $BindingPackageManifestPath `
+                -GeneratedTypeManifestPath $GeneratedManifestPath `
+                -Configuration $PackageConfiguration)
+        $ReleaseExitCode = $LASTEXITCODE
+        if ($ReleaseExitCode -ne 0) {
+            throw "Headless Generated Type Runtime release failed with exit code $ReleaseExitCode."
+        }
+        try {
+            $ReleaseSummary = $ReleaseOutput |
+                Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
+                Select-Object -Last 1 |
+                ConvertFrom-Json -Depth 32
+        }
+        catch {
+            throw "Headless Generated Type Runtime release did not return valid JSON."
+        }
+        if ([string]$ReleaseSummary.result -cne "avidscript_module_release_succeeded" -or
+            [string]$ReleaseSummary.module_id -cne $RuntimeModuleId -or
+            -not ([string]$ReleaseSummary.configuration).Equals(
+                $PackageConfiguration,
+                [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Headless Generated Type Runtime release identity is invalid."
+        }
+    }
+    else {
+        & $RuntimeBuildScript `
+            -DotNetPath $DotNetPath `
+            -OutputRoot $RuntimeOutputRoot `
+            -Configuration $Configuration `
+            -SourcePath $SourcePath `
+            -ProjectPath $ProjectPath `
+            -ModuleId $RuntimeModuleId `
+            -ArtifactStem $RuntimeArtifactStem `
+            -ManifestPath $RuntimeManifestPath `
+            -BindingPackagePath $BindingPackageManifestPath `
+            -RuntimeBindingPackagePath $BindingPackageManifestPath `
+            -AllowGeneratedTypeImports `
+            -GeneratedTypeManifestPath $GeneratedManifestPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "Formal C# generated type Runtime build failed with exit code $LASTEXITCODE."
+        }
+    }
+    if (-not (Test-Path -LiteralPath $RuntimeManifestPath -PathType Leaf)) {
+        throw "Formal C# generated type Runtime manifest was not published."
     }
 
     $RuntimeManifest = Get-Content -Raw -LiteralPath $RuntimeManifestPath | ConvertFrom-Json
@@ -260,7 +314,7 @@ if (-not $SkipRuntimePackage) {
         package_id = $PackageId
         module_name = $ModuleName
         runtime_module_id = $RuntimeModuleId
-        execution_backend = "wasmtime_jit"
+        execution_backend = if ($HeadlessRelease) { "wasmtime_precompiled" } else { "wasmtime_jit" }
         generation_key_sha256 = [string]$GeneratedManifest.generation_key_sha256
         type_manifest = [ordered]@{
             file = $TypeManifestRelativePath
@@ -282,7 +336,8 @@ if (-not $SkipRuntimePackage) {
     $CookPackage = Publish-AvidScriptGeneratedTypeCookPackage `
         -PackageDescriptorPath $GeneratedPackagePath `
         -ProjectRoot $ProjectRoot `
-        -OutputRoot $CookOutputRoot
+        -OutputRoot $CookOutputRoot `
+        -Configuration $PackageConfiguration
 }
 
 Write-Host "AvidScript C# script type generation succeeded."

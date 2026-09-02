@@ -175,9 +175,17 @@ FString BuildAvidScriptCSharpBuildInvocationParameters(const FAvidScriptEditorCS
 		Arguments,
 		TEXT("-RuntimeBindingPackagePath"),
 		Config.RuntimeBindingPackagePath);
+	AddAvidScriptCSharpBuildInvocationValueArgument(
+		Arguments,
+		TEXT("-GeneratedTypeManifestPath"),
+		Config.GeneratedTypeManifestPath);
 	if (Config.bOmitRuntimeBindingPackage)
 	{
 		Arguments.Add(TEXT("-OmitRuntimeBindingPackage"));
+	}
+	if (Config.bAllowGeneratedTypeImports)
+	{
+		Arguments.Add(TEXT("-AllowGeneratedTypeImports"));
 	}
 	if (Config.bDisableSemanticCache)
 	{

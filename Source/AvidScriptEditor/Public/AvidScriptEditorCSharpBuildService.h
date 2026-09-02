@@ -26,6 +26,7 @@ struct FAvidScriptEditorCSharpBuildConfig
 	FString CompilationCacheRoot;
 	FString BindingPackagePath;
 	FString RuntimeBindingPackagePath;
+	FString GeneratedTypeManifestPath;
 	FString DotNetPath;
 	FString ModuleId;
 	FString ArtifactStem;
@@ -34,6 +35,7 @@ struct FAvidScriptEditorCSharpBuildConfig
 		EAvidScriptEditorVmArtifactPolicy::PreferPrecompiled;
 	bool bEnableDataLaneFusion = true;
 	bool bOmitRuntimeBindingPackage = false;
+	bool bAllowGeneratedTypeImports = false;
 	bool bDisableSemanticCache = false;
 	bool bDisableCompilationCache = false;
 };

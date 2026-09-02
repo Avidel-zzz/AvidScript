@@ -8,6 +8,15 @@ $HeaderPath = Join-Path `
 $CommandletPath = Join-Path `
     $PluginRoot `
     'Source/AvidScriptEditor/Private/Commandlets/AvidScriptReleaseCommandlet.cpp'
+$BuildConfigPath = Join-Path `
+    $PluginRoot `
+    'Source/AvidScriptEditor/Public/AvidScriptEditorCSharpBuildService.h'
+$BuildInvokerPath = Join-Path `
+    $PluginRoot `
+    'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBuildInvoker.cpp'
+$BuildPipelinePath = Join-Path `
+    $PluginRoot `
+    'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBuildPipeline.cpp'
 $Root = Join-Path `
     ([System.IO.Path]::GetTempPath()) `
     ("AvidScriptReleaseContract_$PID`_$([Guid]::NewGuid().ToString('N'))")
@@ -63,7 +72,13 @@ function Get-ReleaseFunctionAst {
 }
 
 try {
-    foreach ($RequiredFile in @($RunnerPath, $HeaderPath, $CommandletPath)) {
+    foreach ($RequiredFile in @(
+            $RunnerPath,
+            $HeaderPath,
+            $CommandletPath,
+            $BuildConfigPath,
+            $BuildInvokerPath,
+            $BuildPipelinePath)) {
         if (-not (Test-Path -LiteralPath $RequiredFile -PathType Leaf)) {
             throw "Required release contract file is missing: $RequiredFile"
         }
@@ -79,6 +94,9 @@ try {
     $HeaderSource = Get-Content -Raw -LiteralPath $HeaderPath
     $CommandletSource = Get-Content -Raw -LiteralPath $CommandletPath
     $RunnerSource = Get-Content -Raw -LiteralPath $RunnerPath
+    $BuildConfigSource = Get-Content -Raw -LiteralPath $BuildConfigPath
+    $BuildInvokerSource = Get-Content -Raw -LiteralPath $BuildInvokerPath
+    $BuildPipelineSource = Get-Content -Raw -LiteralPath $BuildPipelinePath
 
     Invoke-ReleaseContractTest -Name 'command schema' -Body {
         $ExpectedParameters = @(
@@ -88,6 +106,7 @@ try {
             'CSharpProjectPath',
             'DotNetPath',
             'EngineRoot',
+            'GeneratedTypeManifestPath',
             'ModuleId',
             'OutputRoot',
             'RuntimeBindingPackagePath',
@@ -111,6 +130,7 @@ try {
                 'TEXT("DotNetPath")',
                 'TEXT("BindingPackagePath")',
                 'TEXT("RuntimeBindingPackagePath")',
+                'TEXT("GeneratedTypeManifestPath")',
                 'ParameterName.Equals(TEXT("run"), ESearchCase::IgnoreCase)',
                 'TEXT("AvidScriptRelease")',
                 'TEXT("argument_missing")',
@@ -130,15 +150,30 @@ try {
                 -DotNetPath 'C:\DotNet\dotnet.exe' `
                 -BindingPackagePath 'C:\Project\Saved\Bindings\package.json' `
                 -RuntimeBindingPackagePath 'C:\Project\Saved\Bindings\runtime.json' `
+                -GeneratedTypeManifestPath 'C:\Project\Saved\Generated\types.json' `
                 -AbsLog 'C:\Project\Saved\Logs\release.log')
         foreach ($ExpectedArgument in @(
                 '-run=AvidScriptRelease',
                 '-ModuleId=contract_module',
                 '-ArtifactStem=contract_artifact',
+                '-GeneratedTypeManifestPath=C:\Project\Saved\Generated\types.json',
                 '-unattended',
                 '-nullrhi')) {
             if ($Arguments -cnotcontains $ExpectedArgument) {
                 throw "Commandlet argument is missing: $ExpectedArgument"
+            }
+        }
+        foreach ($RequiredBuildToken in @(
+                'FString GeneratedTypeManifestPath;',
+                'bool bAllowGeneratedTypeImports = false;',
+                'TEXT("-GeneratedTypeManifestPath")',
+                'TEXT("-AllowGeneratedTypeImports")',
+                'TEXT("generated_type_manifest_missing")',
+                'TEXT("generated_type_manifest_unused")')) {
+            if (-not ($BuildConfigSource.Contains($RequiredBuildToken) -or
+                    $BuildInvokerSource.Contains($RequiredBuildToken) -or
+                    $BuildPipelineSource.Contains($RequiredBuildToken))) {
+                throw "Generated Type release plumbing is missing: $RequiredBuildToken"
             }
         }
     }
