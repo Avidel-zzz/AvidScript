@@ -9,7 +9,7 @@
   <img alt="C# Guest" src="https://img.shields.io/badge/Guest-C%23-512BD4?logo=dotnet&logoColor=white">
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
-  <img alt="Win64 Development" src="https://img.shields.io/badge/Platform-Win64-0078D4?logo=windows&logoColor=white">
+  <img alt="Win64 Development and Shipping" src="https://img.shields.io/badge/Platform-Win64%20Dev%20%2B%20Shipping-0078D4?logo=windows&logoColor=white">
   <img alt="Phase 62 In Progress" src="https://img.shields.io/badge/Status-Phase%2062%20In%20Progress-D97706">
   <img alt="Automation Baseline 427/427" src="https://img.shields.io/badge/Baseline-427%2F427-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
@@ -22,7 +22,7 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 
 > [!IMPORTANT]
 > 当前版本为 **0.1.0 开发者预览**，主线验证环境是 **UE5.8 源码版 + Win64
-> Development + Wasmtime 45**。Win64 Development BuildCookRun 已通过；Shipping、Android 与 iOS 仍待正式验收。
+> Development/Shipping + Wasmtime 45**。两种 Win64 配置的 BuildCookRun 均已通过；Android 与 iOS 仍待正式验收。
 
 ## 已实现
 
@@ -37,7 +37,7 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 | Blueprint | 自声明 callable/event 双向调用、`before/after/replace` 事件接管，以及 AsyncAction 强类型 awaitable 生成 |
 | 网络 | Server/Client/NetMulticast RPC、replicated property、RPC/RepNotify handler、dedicated/listen 多进程闭环 |
 | 热重载 | 方法体事务式替换、候选回滚、状态帧与 handle 生命周期隔离 |
-| 发布 | 内容寻址模块包、逻辑 `ModuleId`、无头 C# Release、包回执校验、Generated Type 预编译，以及已通过的 Win64 Development BuildCookRun/打包进程 Oracle |
+| 发布 | 内容寻址模块包、逻辑 `ModuleId`、无头 C# Release、包回执校验、Generated Type 预编译，以及已通过的 Win64 Development/Shipping BuildCookRun 与打包进程 Oracle |
 | 运行时安全 | Wasmtime fuel/epoch/内存/Host Call 预算、进程级共享 watchdog，以及 Session 故障隔离与有界诊断 |
 | 后端 | Wasmtime 45 Win64 主后端；WAMR 兼容后端 |
 | 增量构建 | 双层产物缓存与 persistent Worker；无修改热构建零编译调用，5 轮中位数 `806 ms` |
@@ -59,9 +59,10 @@ Phase 62 已贯通确定性 package/catalog、逻辑 `ModuleId`、Cook UFS 信�
 真实 ScriptDefinedTypes 已生成 Shipping `require_precompiled` 包、`.cwasm` 和 Generated Type v2 指针。
 固定 UE5.8、禁用 clean 的 Win64 BuildCookRun 编排与机器可读回执已落地。P62.C 已完成执行预算、共享 epoch
 watchdog 与 Session 故障隔离。P62.D 已实现打包进程内 Oracle，覆盖 `BeginPlay/Tick/EndPlay`、事件、定时器、
-continuation、生成式反射 API 与真实 WASM trap 隔离；Development 已通过，Shipping 验收正在推进。
+continuation、生成式反射 API 与真实 WASM trap 隔离；Development 与 Shipping 均已通过，集中 Gate 正在推进。
 
-详细结果见 [Phase 61 集中 Gate](Docs/Phase61/P61.E_Integration_Gate.md)。
+详细结果见 [Phase 61 集中 Gate](Docs/Phase61/P61.E_Integration_Gate.md) 与
+[Phase 62 Shipping BuildCookRun](Docs/Phase62/P62.D11_Shipping_BuildCookRun_Result.md)。
 
 ## C# 游戏脚本
 
@@ -236,7 +237,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 - 容器当前聚焦一维 `TArray<T>`；nested array、`TSet`、`TMap` 与 `FText` 尚未完整支持；
 - C# 前端提供受控游戏脚本子集，不包含完整 .NET Runtime、任意 awaiter 或异常系统；
 - 反射结构变化仍需 no-clean UBT 并重启 Editor，方法体变化可自动热重载；
-- Generated Type 预编译发布与 Win64 Development 打包启动已验收，Shipping 与移动端 AOT 尚未验收；Session 可隔离受控 WASM 故障，但原生 C++/DLL 崩溃不属于进程沙箱能力；
+- Generated Type 预编译发布与 Win64 Development/Shipping 打包启动已验收，移动端 AOT 尚未验收；Session 可隔离受控 WASM 故障，但原生 C++/DLL 崩溃不属于进程沙箱能力；
 - 正式竞品性能矩阵目前覆盖 Puerts V8，尚未同口径覆盖 UnLua 与 AngelScript。
 
 ## 路线图
@@ -251,7 +252,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 
 最近一次完整基线为 **AvidScript Automation 427/427 通过**。Phase 61 的托管测试 `279/279`、
 UE5.8 no-clean UBT、增量构建与 Profiler 性能预算，以及 clean detached architecture Gate 均已通过。
-Phase 62 的 Win64 Development BCR、20 项 package receipt 与打包游戏逻辑 Oracle 已通过。
+Phase 62 的 Win64 Development/Shipping BCR、对应的 `20/18` 项 package receipt 与打包游戏逻辑 Oracle 均已通过。
 
 阶段状态与实现证据见 [Docs](Docs/)，开发规则见 [AGENTS.md](AGENTS.md)。
 
