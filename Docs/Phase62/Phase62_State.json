@@ -5,7 +5,7 @@
     "goal": "交付 UE5.8 Win64 的确定性 Cook/Shipping C# WASM 闭环，包括预编译 artifact、资源依赖、Shipping 安全策略、Session 故障隔离和版本兼容。",
     "start_commit": "346fa907cb59f8f9c94ab0c616302e1544cef0fc"
   },
-  "declared_stage": "gate_ready",
+  "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase62/P62.0_Cook_Shipping_Architecture.md",
     "version": 1,
@@ -38,15 +38,15 @@
     {
       "id": "P62.D",
       "status": "Completed",
-      "evidence": "P62.D12 remediation: ModuleRelease 15/15, UE5.8 Editor build succeeded, Headless Development package b5240c27 published, full Automation 427/429 then lifecycle focused 2/2 Success.",
-      "completed_at_utc": "2026-09-02T06:09:16.6310881+00:00"
+      "evidence": "Final Gate Cook contract fixture aligned with Development attestation policy; GeneratedTypeCookPackage 10/10 passed",
+      "completed_at_utc": "2026-09-02T06:23:35.0305751+00:00"
     }
   ],
   "debt": [],
   "review": {
-    "completed": true,
-    "evidence": "WASM-first and fail-closed architecture preserved. Development and Shipping trust policies are configuration-owned; cache isolation and lane-specific diagnostics are deterministic. ModuleRelease 15/15, UE5.8 Editor build, full 427/429 plus focused 2/2 remediation evidence passed; protected dirty baselines unchanged.",
-    "completed_at_utc": "2026-09-02T06:10:16.6780287+00:00"
+    "completed": false,
+    "evidence": "reopened: P62 final Gate exposed missing Development attestation fixture in Generated Type Cook package contract",
+    "completed_at_utc": null
   },
   "budgets": {
     "ubt": 4,
@@ -59,11 +59,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "7723f8b989834414adf9be4fd565bc5cbc9a4011",
-    "source_tree": "7390812edb7ac21efbd7f60876ca3bdaffc334ae",
-    "state_sha256": "2f0174ad86534c580db4dbcd033f5d18040b99ae82449889378687e19430b531",
-    "review_evidence": "WASM-first and fail-closed architecture preserved. Development and Shipping trust policies are configuration-owned; cache isolation and lane-specific diagnostics are deterministic. ModuleRelease 15/15, UE5.8 Editor build, full 427/429 plus focused 2/2 remediation evidence passed; protected dirty baselines unchanged.",
-    "at_utc": "2026-09-02T06:10:16.6780287+00:00"
+    "source_commit": "",
+    "source_tree": "",
+    "state_sha256": "",
+    "review_evidence": "",
+    "at_utc": null
   },
   "gate": {
     "report_path": "",
@@ -94,7 +94,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "attest -Phase 62 -GateReportPath <path>",
-  "revision": 15,
-  "updated_at_utc": "2026-09-02T06:10:16.6830554+00:00"
+  "next_action": "freeze -Phase 62 -ReviewEvidence <text>",
+  "revision": 17,
+  "updated_at_utc": "2026-09-02T06:23:35.0326894+00:00"
 }

@@ -147,6 +147,7 @@ try {
             compiler_build_identity = 'wasmtime-contract-build'
             target_triple = 'x86_64-pc-windows-msvc'
             cpu_features = 'x86-64-v3'
+            attestation_id = ('1' * 32)
             policy = 'prefer_precompiled'
             fallback = 'wasmtime_jit'
         }
