@@ -258,18 +258,25 @@ try {
             -Configuration Development
         $Catalog = Get-Content -Raw -LiteralPath $Second.CatalogPath | ConvertFrom-Json -Depth 32
         $Names = @($Catalog.modules.module_id)
-        if ([int]$Catalog.schema_version -ne 1 -or
+        if ([int]$Catalog.schema_version -ne 2 -or
             $Names.Count -ne 2 -or
             $Names[0] -cne 'alpha.module' -or
             $Names[1] -cne 'zeta.module') {
             throw 'Catalog schema or ordinal module ordering is wrong.'
         }
-        foreach ($Entry in @($Catalog.modules)) {
-            if ([string]$Entry.descriptor_file -cne
-                "$($Entry.module_id)/$($Entry.package_id)/package.json" -or
-                [string]$Entry.platform -cne 'win64' -or
-                [string]$Entry.configuration -cne 'development') {
-                throw 'Catalog entry does not match schema v1.'
+        foreach ($Module in @($Catalog.modules)) {
+            if (@($Module.variants).Count -ne 1) {
+                throw 'Catalog module must contain one published variant.'
+            }
+            $Variant = $Module.variants[0]
+            if ([string]$Variant.descriptor_file -cne
+                "$($Module.module_id)/$($Variant.package_id)/package.json" -or
+                [string]$Variant.platform -cne 'win64' -or
+                [string]$Variant.architecture -cne 'x86_64' -or
+                [string]$Variant.configuration -cne 'development' -or
+                [string]$Variant.backend -cne 'wasmtime' -or
+                [string]$Variant.format -cne 'wasmtime_serialized_v1') {
+                throw 'Catalog variant does not match schema v2.'
             }
         }
         $null = $First
@@ -339,27 +346,23 @@ try {
         }
     }
 
-    Invoke-ReleaseContract 'catalog is a single configuration view' {
-        $Fixture = New-ReleaseFixture -Name 'CatalogProfileDevelopment' -ModuleId 'development.module'
+    Invoke-ReleaseContract 'catalog preserves exact target variants' {
+        $Fixture = New-ReleaseFixture -Name 'CatalogProfileDevelopment' -ModuleId 'shared.module'
         $Development = Publish-AvidScriptModuleReleasePackage `
             -RuntimeManifestPath $Fixture.RuntimeManifestPath `
             -ProjectRoot $Fixture.ProjectRoot `
             -Configuration Development
-        $ShippingFixture = New-ReleaseFixture -Name 'CatalogProfileShipping' -ModuleId 'shipping.module'
-        $ShippingArtifactRoot = Join-Path $Fixture.ProjectRoot 'Saved/ShippingInput'
-        Copy-Item `
-            -LiteralPath $ShippingFixture.ArtifactRoot `
-            -Destination $ShippingArtifactRoot `
-            -Recurse
         $Shipping = Publish-AvidScriptModuleReleasePackage `
-            -RuntimeManifestPath (Join-Path $ShippingArtifactRoot 'fixture.avidscript.json') `
+            -RuntimeManifestPath $Fixture.RuntimeManifestPath `
             -ProjectRoot $Fixture.ProjectRoot `
             -Configuration Shipping
         $Catalog = Get-Content -Raw -LiteralPath $Shipping.CatalogPath | ConvertFrom-Json -Depth 32
         if (@($Catalog.modules).Count -ne 1 -or
-            [string]$Catalog.modules[0].module_id -cne 'shipping.module' -or
-            [string]$Catalog.modules[0].configuration -cne 'shipping') {
-            throw 'Catalog retained entries from an incompatible target configuration.'
+            [string]$Catalog.modules[0].module_id -cne 'shared.module' -or
+            @($Catalog.modules[0].variants).Count -ne 2 -or
+            [string]$Catalog.modules[0].variants[0].configuration -cne 'development' -or
+            [string]$Catalog.modules[0].variants[1].configuration -cne 'shipping') {
+            throw 'Catalog did not preserve ordered Development and Shipping variants.'
         }
         $null = $Development
     }
@@ -490,9 +493,11 @@ try {
             -RuntimeManifestPath $Fixture.RuntimeManifestPath `
             -ProjectRoot $Fixture.ProjectRoot
         $Catalog = Get-Content -Raw -LiteralPath $Published.CatalogPath | ConvertFrom-Json -Depth 32
-        $Catalog.modules = @($Catalog.modules[0], $Catalog.modules[0])
+        $Catalog.modules[0].variants = @(
+            $Catalog.modules[0].variants[0],
+            $Catalog.modules[0].variants[0])
         Write-TestJson -Path $Published.CatalogPath -Value $Catalog
-        Assert-ReleaseRejected -Pattern 'unique and strictly increasing' -Body {
+        Assert-ReleaseRejected -Pattern 'variants must be unique and strictly increasing' -Body {
             Publish-AvidScriptModuleReleasePackage `
                 -RuntimeManifestPath $Fixture.RuntimeManifestPath `
                 -ProjectRoot $Fixture.ProjectRoot | Out-Null

@@ -81,7 +81,8 @@ bool WriteShippingFixture(
 	const FString& Root,
 	const FString& ModuleId,
 	FString& OutCatalogPath,
-	FString& OutPackageRoot)
+	FString& OutPackageRoot,
+	const bool bUseLegacyCatalog = false)
 {
 	const FString StagingRoot = FPaths::Combine(Root, TEXT("staging"));
 	const FString BindingRoot = FPaths::Combine(StagingRoot, TEXT("bindings"));
@@ -253,22 +254,55 @@ bool WriteShippingFixture(
 		return false;
 	}
 
-	TSharedRef<FJsonObject> CatalogEntry = MakeShared<FJsonObject>();
-	CatalogEntry->SetStringField(TEXT("module_id"), ModuleId);
-	CatalogEntry->SetStringField(TEXT("package_id"), PackageId);
-	CatalogEntry->SetStringField(
+	TSharedRef<FJsonObject> CatalogVariant = MakeShared<FJsonObject>();
+	CatalogVariant->SetStringField(TEXT("package_id"), PackageId);
+	CatalogVariant->SetStringField(
 		TEXT("descriptor_file"),
 		FString::Printf(TEXT("%s/%s/package.json"), *ModuleId, *PackageId));
-	CatalogEntry->SetStringField(TEXT("descriptor_sha256"), HashFile(PackagePath));
-	CatalogEntry->SetStringField(TEXT("platform"), TEXT("win64"));
-	CatalogEntry->SetStringField(TEXT("configuration"), TEXT("shipping"));
+	CatalogVariant->SetStringField(TEXT("descriptor_sha256"), HashFile(PackagePath));
+	CatalogVariant->SetStringField(TEXT("platform"), TEXT("win64"));
+	CatalogVariant->SetStringField(TEXT("configuration"), TEXT("shipping"));
+	TSharedRef<FJsonObject> CatalogEntry = MakeShared<FJsonObject>();
+	CatalogEntry->SetStringField(TEXT("module_id"), ModuleId);
+	if (bUseLegacyCatalog)
+	{
+		CatalogEntry->SetStringField(TEXT("package_id"), PackageId);
+		CatalogEntry->SetStringField(
+			TEXT("descriptor_file"),
+			FString::Printf(TEXT("%s/%s/package.json"), *ModuleId, *PackageId));
+		CatalogEntry->SetStringField(TEXT("descriptor_sha256"), HashFile(PackagePath));
+		CatalogEntry->SetStringField(TEXT("platform"), TEXT("win64"));
+		CatalogEntry->SetStringField(TEXT("configuration"), TEXT("shipping"));
+	}
+	else
+	{
+		CatalogVariant->SetStringField(TEXT("architecture"), TEXT("x86_64"));
+		CatalogVariant->SetStringField(TEXT("backend"), TEXT("wasmtime"));
+		CatalogVariant->SetStringField(
+			TEXT("format"),
+			TEXT("wasmtime_serialized_v1"));
+		CatalogEntry->SetArrayField(
+			TEXT("variants"),
+			{ MakeShared<FJsonValueObject>(CatalogVariant) });
+	}
 	TSharedRef<FJsonObject> Catalog = MakeShared<FJsonObject>();
-	Catalog->SetNumberField(TEXT("schema_version"), 1);
+	Catalog->SetNumberField(TEXT("schema_version"), bUseLegacyCatalog ? 1 : 2);
 	Catalog->SetArrayField(
 		TEXT("modules"),
 		{ MakeShared<FJsonValueObject>(CatalogEntry) });
 	OutCatalogPath = FPaths::Combine(CatalogRoot, TEXT("catalog.json"));
 	return WriteJsonObject(OutCatalogPath, Catalog);
+}
+
+FAvidScriptModulePlatformContext MakeWin64ShippingContext()
+{
+	FAvidScriptModulePlatformContext Context;
+	Context.Platform = TEXT("win64");
+	Context.Architecture = TEXT("x86_64");
+	Context.Configuration = TEXT("shipping");
+	Context.Backend = TEXT("wasmtime");
+	Context.Format = TEXT("wasmtime_serialized_v1");
+	return Context;
 }
 } // namespace
 
@@ -304,11 +338,14 @@ bool FAvidScriptModulePackageResolverTest::RunTest(const FString& Parameters)
 
 	FAvidScriptResolvedModulePackage Package;
 	FAvidScriptModuleResolveResult Result;
+	const FAvidScriptModulePlatformContext ShippingContext =
+		MakeWin64ShippingContext();
 	TestTrue(
 		TEXT("Verified Shipping package resolves"),
 		FAvidScriptModulePackageResolver::ResolveModuleFromCatalogFile(
 			CatalogPath,
 			TEXT("actor_lifecycle"),
+			ShippingContext,
 			Package,
 			Result));
 	TestTrue(TEXT("Resolve result succeeds"), Result.bSucceeded);
@@ -320,6 +357,14 @@ bool FAvidScriptModulePackageResolverTest::RunTest(const FString& Parameters)
 		TEXT("Resolved policy is precompiled-only"),
 		Package.ExecutionPolicy,
 		FString(TEXT("require_precompiled")));
+	TestEqual(
+		TEXT("Resolved architecture is explicit"),
+		Package.Architecture,
+		FString(TEXT("x86_64")));
+	TestEqual(
+		TEXT("Resolved backend is explicit"),
+		Package.ExecutionBackend,
+		FString(TEXT("wasmtime")));
 	TestEqual(
 		TEXT("Custom catalog remains Development trust"),
 		Package.TrustDomain,
@@ -334,6 +379,7 @@ bool FAvidScriptModulePackageResolverTest::RunTest(const FString& Parameters)
 		FAvidScriptModulePackageResolver::ResolveModuleFromCatalogFile(
 			CatalogPath,
 			TEXT("actor_lifecycle"),
+			ShippingContext,
 			Package,
 			Result));
 	TestEqual(
@@ -351,6 +397,7 @@ bool FAvidScriptModulePackageResolverTest::RunTest(const FString& Parameters)
 		FAvidScriptModulePackageResolver::ResolveModuleFromCatalogFile(
 			CatalogPath,
 			TEXT("actor_lifecycle"),
+			ShippingContext,
 			Package,
 			Result));
 	TestEqual(
@@ -363,12 +410,49 @@ bool FAvidScriptModulePackageResolverTest::RunTest(const FString& Parameters)
 		FAvidScriptModulePackageResolver::ResolveModuleFromCatalogFile(
 			CatalogPath,
 			TEXT("Actor/Lifecycle"),
+			ShippingContext,
 			Package,
 			Result));
 	TestEqual(
 		TEXT("Invalid module id category"),
 		Result.ErrorCategory,
 		FString(TEXT("module_id_invalid")));
+
+	FAvidScriptModulePlatformContext AndroidContext = ShippingContext;
+	AndroidContext.Platform = TEXT("android");
+	AndroidContext.Architecture = TEXT("arm64");
+	TestFalse(
+		TEXT("Missing Android variant fails closed"),
+		FAvidScriptModulePackageResolver::ResolveModuleFromCatalogFile(
+			CatalogPath,
+			TEXT("actor_lifecycle"),
+			AndroidContext,
+			Package,
+			Result));
+	TestEqual(
+		TEXT("Missing Android variant category"),
+		Result.ErrorCategory,
+		FString(TEXT("module_variant_not_found")));
+
+	const FString LegacyRoot = FPaths::Combine(TestRoot, TEXT("Legacy"));
+	FString LegacyCatalogPath;
+	FString LegacyPackageRoot;
+	TestTrue(
+		TEXT("Legacy schema v1 fixture writes"),
+		WriteShippingFixture(
+			LegacyRoot,
+			TEXT("legacy_lifecycle"),
+			LegacyCatalogPath,
+			LegacyPackageRoot,
+			true));
+	TestTrue(
+		TEXT("Legacy schema v1 remains readable"),
+		FAvidScriptModulePackageResolver::ResolveModuleFromCatalogFile(
+			LegacyCatalogPath,
+			TEXT("legacy_lifecycle"),
+			ShippingContext,
+			Package,
+			Result));
 	return true;
 }
 

@@ -19,9 +19,9 @@
   "batches": [
     {
       "id": "P63.A",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "catalog v2 variants; release 15/15; receipt 10/10; Generated Type Cook 10/10; UE5.8 no-clean UBT passed; Runtime resolver Automation 1/1 passed",
+      "completed_at_utc": "2026-09-02T07:32:09.4418046+00:00"
     },
     {
       "id": "P63.B",
@@ -94,7 +94,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "batch-complete -Phase 63 -BatchId P63.A -Evidence <text>",
-  "revision": 1,
-  "updated_at_utc": "2026-09-02T06:57:38.3855841+00:00"
+  "next_action": "batch-complete -Phase 63 -BatchId P63.B -Evidence <text>",
+  "revision": 2,
+  "updated_at_utc": "2026-09-02T07:32:09.4439414+00:00"
 }

@@ -8,12 +8,24 @@ enum class EAvidScriptModulePackageTrustDomain : uint8
 	CookedPackage
 };
 
+struct AVIDSCRIPTRUNTIME_API FAvidScriptModulePlatformContext
+{
+	FString Platform;
+	FString Architecture;
+	FString Configuration;
+	FString Backend;
+	FString Format;
+};
+
 struct AVIDSCRIPTRUNTIME_API FAvidScriptResolvedModulePackage
 {
 	FName ModuleId;
 	FString PackageId;
 	FString Platform;
+	FString Architecture;
 	FString Configuration;
+	FString ExecutionBackend;
+	FString ExecutionFormat;
 	int32 AbiVersion = 0;
 	FString MinimumRuntimeVersion;
 	FString DescriptorPath;
@@ -46,8 +58,21 @@ class AVIDSCRIPTRUNTIME_API FAvidScriptModulePackageResolver
 {
 public:
 	static FString GetDefaultCatalogPath();
+	static FAvidScriptModulePlatformContext GetCurrentPlatformContext();
 
 	static bool ResolveModule(
+		FName ModuleId,
+		FAvidScriptResolvedModulePackage& OutPackage,
+		FAvidScriptModuleResolveResult& OutResult);
+
+	static bool ResolveModule(
+		FName ModuleId,
+		const FAvidScriptModulePlatformContext& PlatformContext,
+		FAvidScriptResolvedModulePackage& OutPackage,
+		FAvidScriptModuleResolveResult& OutResult);
+
+	static bool ResolveModuleFromCatalogFile(
+		const FString& CatalogPath,
 		FName ModuleId,
 		FAvidScriptResolvedModulePackage& OutPackage,
 		FAvidScriptModuleResolveResult& OutResult);
@@ -55,6 +80,7 @@ public:
 	static bool ResolveModuleFromCatalogFile(
 		const FString& CatalogPath,
 		FName ModuleId,
+		const FAvidScriptModulePlatformContext& PlatformContext,
 		FAvidScriptResolvedModulePackage& OutPackage,
 		FAvidScriptModuleResolveResult& OutResult);
 };

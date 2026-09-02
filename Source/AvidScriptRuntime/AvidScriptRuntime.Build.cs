@@ -60,36 +60,65 @@ public class AvidScriptRuntime : ModuleRules
 
 		JsonObject Catalog = ReadJson(CatalogPath, "module catalog");
 		if (!Catalog.TryGetIntegerField("schema_version", out int SchemaVersion)
-			|| SchemaVersion != 1
+			|| (SchemaVersion != 1 && SchemaVersion != 2)
 			|| !Catalog.TryGetObjectArrayField("modules", out JsonObject[] Modules))
 		{
 			throw new BuildException("AvidScript module catalog schema is invalid.");
 		}
 
+		string ExpectedPlatform = Target.Platform == UnrealTargetPlatform.Win64
+			? "win64"
+			: Target.Platform == UnrealTargetPlatform.Android
+				? "android"
+				: Target.Platform == UnrealTargetPlatform.IOS
+					? "ios"
+					: "unsupported";
+		string ExpectedArchitecture = ExpectedPlatform == "win64" ? "x86_64" : "arm64";
 		string ExpectedConfiguration =
 			Target.Configuration == UnrealTargetConfiguration.Shipping
 				? "shipping"
 				: "development";
+		if (ExpectedPlatform == "unsupported")
+		{
+			throw new BuildException(
+				$"AvidScript has no module package platform identity for {Target.Platform}.");
+		}
 		HashSet<string> StagedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
 		{
 			CatalogPath
 		};
+		string PreviousModuleId = String.Empty;
 		foreach (JsonObject Module in Modules)
 		{
 			if (!Module.TryGetStringField("module_id", out string ModuleId)
-				|| !Module.TryGetStringField("package_id", out string PackageId)
-				|| !Module.TryGetStringField("descriptor_file", out string DescriptorFile)
-				|| !Module.TryGetStringField("platform", out string Platform)
-				|| !Module.TryGetStringField("configuration", out string Configuration)
 				|| !IsNormalizedModuleId(ModuleId)
-				|| !IsLowercaseSha256(PackageId)
-				|| Platform != "win64"
-				|| (Target.Type != TargetType.Editor
-					&& Configuration != ExpectedConfiguration))
+				|| (!String.IsNullOrEmpty(PreviousModuleId)
+					&& String.CompareOrdinal(PreviousModuleId, ModuleId) >= 0))
 			{
-				throw new BuildException("AvidScript module catalog entry is invalid for this target.");
+				throw new BuildException(
+					"AvidScript module catalog modules are invalid, duplicated, or unsorted.");
 			}
+			PreviousModuleId = ModuleId;
 
+			List<PublishedModuleVariant> Variants = ReadCatalogVariants(
+				Module,
+				ModuleId,
+				SchemaVersion);
+			PublishedModuleVariant[] Matches = Variants.Where(Variant =>
+				Variant.Platform == ExpectedPlatform
+				&& Variant.Architecture == ExpectedArchitecture
+				&& Variant.Configuration == ExpectedConfiguration
+				&& Variant.Backend == "wasmtime"
+				&& Variant.Format == "wasmtime_serialized_v1").ToArray();
+			if (Matches.Length != 1)
+			{
+				throw new BuildException(
+					$"AvidScript module '{ModuleId}' has no unique variant for "
+					+ $"{ExpectedPlatform}/{ExpectedArchitecture}/{ExpectedConfiguration}/wasmtime.");
+			}
+			PublishedModuleVariant Selected = Matches[0];
+			string PackageId = Selected.PackageId;
+			string DescriptorFile = Selected.DescriptorFile;
 			string ExpectedDescriptor = $"{ModuleId}/{PackageId}/package.json";
 			if (!String.Equals(DescriptorFile, ExpectedDescriptor, StringComparison.Ordinal))
 			{
@@ -102,10 +131,17 @@ public class AvidScriptRuntime : ModuleRules
 			JsonObject Descriptor = ReadJson(DescriptorPath, "module descriptor");
 			if (!Descriptor.TryGetStringField("module_id", out string DescriptorModuleId)
 				|| !Descriptor.TryGetStringField("package_id", out string DescriptorPackageId)
+				|| !Descriptor.TryGetStringField("platform", out string DescriptorPlatform)
 				|| !Descriptor.TryGetStringField("configuration", out string DescriptorConfiguration)
 				|| DescriptorModuleId != ModuleId
 				|| DescriptorPackageId != PackageId
-				|| DescriptorConfiguration != Configuration
+				|| DescriptorPlatform != Selected.Platform
+				|| DescriptorConfiguration != Selected.Configuration
+				|| !Descriptor.TryGetObjectField("execution", out JsonObject Execution)
+				|| !Execution.TryGetStringField("backend", out string DescriptorBackend)
+				|| !Execution.TryGetStringField("format", out string DescriptorFormat)
+				|| DescriptorBackend != Selected.Backend
+				|| DescriptorFormat != Selected.Format
 				|| !Descriptor.TryGetObjectField("artifacts", out JsonObject Artifacts))
 			{
 				throw new BuildException("AvidScript module descriptor does not match its catalog entry.");
@@ -135,6 +171,132 @@ public class AvidScriptRuntime : ModuleRules
 			ExternalDependencies.Add(FilePath);
 			RuntimeDependencies.Add(FilePath, StagedFileType.UFS);
 		}
+	}
+
+	private static List<PublishedModuleVariant> ReadCatalogVariants(
+		JsonObject Module,
+		string ModuleId,
+		int SchemaVersion)
+	{
+		if (SchemaVersion == 1)
+		{
+			return new List<PublishedModuleVariant>
+			{
+				ReadCatalogVariant(Module, ModuleId, true)
+			};
+		}
+		if (!Module.TryGetObjectArrayField("variants", out JsonObject[] VariantObjects)
+			|| VariantObjects.Length == 0)
+		{
+			throw new BuildException(
+				$"AvidScript module '{ModuleId}' has no catalog variants.");
+		}
+
+		List<PublishedModuleVariant> Variants = new List<PublishedModuleVariant>();
+		string PreviousKey = String.Empty;
+		foreach (JsonObject VariantObject in VariantObjects)
+		{
+			PublishedModuleVariant Variant = ReadCatalogVariant(
+				VariantObject,
+				ModuleId,
+				false);
+			string Key = Variant.IdentityKey;
+			if (!String.IsNullOrEmpty(PreviousKey)
+				&& String.CompareOrdinal(PreviousKey, Key) >= 0)
+			{
+				throw new BuildException(
+					$"AvidScript module '{ModuleId}' variants are duplicated or unsorted.");
+			}
+			PreviousKey = Key;
+			Variants.Add(Variant);
+		}
+		return Variants;
+	}
+
+	private static PublishedModuleVariant ReadCatalogVariant(
+		JsonObject Variant,
+		string ModuleId,
+		bool Legacy)
+	{
+		string Architecture = Legacy ? "x86_64" : ReadRequiredString(Variant, "architecture");
+		string Backend = Legacy ? "wasmtime" : ReadRequiredString(Variant, "backend");
+		string Format = Legacy ? "wasmtime_serialized_v1" : ReadRequiredString(Variant, "format");
+		string Platform = ReadRequiredString(Variant, "platform");
+		string Configuration = ReadRequiredString(Variant, "configuration");
+		string PackageId = ReadRequiredString(Variant, "package_id");
+		string DescriptorFile = ReadRequiredString(Variant, "descriptor_file");
+		string DescriptorSha256 = ReadRequiredString(Variant, "descriptor_sha256");
+		bool PlatformIdentityValid =
+			(Platform == "win64" && Architecture == "x86_64")
+			|| (Platform == "android" && Architecture == "arm64")
+			|| (Platform == "ios" && Architecture == "arm64");
+		bool BackendFormatValid =
+			(Backend == "wasmtime" && Format == "wasmtime_serialized_v1")
+			|| (Backend == "wamr" && Format == "wamr_aot_v1");
+		if (!PlatformIdentityValid
+			|| (Configuration != "development" && Configuration != "shipping")
+			|| !BackendFormatValid
+			|| !IsLowercaseSha256(PackageId)
+			|| !IsLowercaseSha256(DescriptorSha256)
+			|| DescriptorFile != $"{ModuleId}/{PackageId}/package.json")
+		{
+			throw new BuildException(
+				$"AvidScript module '{ModuleId}' contains an invalid catalog variant.");
+		}
+		return new PublishedModuleVariant(
+			Platform,
+			Architecture,
+			Configuration,
+			Backend,
+			Format,
+			PackageId,
+			DescriptorFile);
+	}
+
+	private static string ReadRequiredString(JsonObject Object, string Field)
+	{
+		if (!Object.TryGetStringField(Field, out string Value)
+			|| String.IsNullOrWhiteSpace(Value))
+		{
+			throw new BuildException($"AvidScript catalog field '{Field}' is invalid.");
+		}
+		return Value;
+	}
+
+	private sealed class PublishedModuleVariant
+	{
+		public PublishedModuleVariant(
+			string Platform,
+			string Architecture,
+			string Configuration,
+			string Backend,
+			string Format,
+			string PackageId,
+			string DescriptorFile)
+		{
+			this.Platform = Platform;
+			this.Architecture = Architecture;
+			this.Configuration = Configuration;
+			this.Backend = Backend;
+			this.Format = Format;
+			this.PackageId = PackageId;
+			this.DescriptorFile = DescriptorFile;
+		}
+
+		public string Platform { get; }
+		public string Architecture { get; }
+		public string Configuration { get; }
+		public string Backend { get; }
+		public string Format { get; }
+		public string PackageId { get; }
+		public string DescriptorFile { get; }
+		public string IdentityKey => String.Join(
+			"\n",
+			Platform,
+			Architecture,
+			Configuration,
+			Backend,
+			Format);
 	}
 
 	private static string ReadArtifactPath(

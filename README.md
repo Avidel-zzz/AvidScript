@@ -10,7 +10,7 @@
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 Development and Shipping" src="https://img.shields.io/badge/Platform-Win64%20Dev%20%2B%20Shipping-0078D4?logo=windows&logoColor=white">
-  <img alt="Phase 62 Closed" src="https://img.shields.io/badge/Status-Phase%2062%20Closed-26A269">
+  <img alt="Phase 63 Active" src="https://img.shields.io/badge/Status-Phase%2063%20Active-2B6CB0">
   <img alt="Automation Baseline 429/429" src="https://img.shields.io/badge/Baseline-429%2F429-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
@@ -37,7 +37,7 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 | Blueprint | 自声明 callable/event 双向调用、`before/after/replace` 事件接管，以及 AsyncAction 强类型 awaitable 生成 |
 | 网络 | Server/Client/NetMulticast RPC、replicated property、RPC/RepNotify handler、dedicated/listen 多进程闭环 |
 | 热重载 | 方法体事务式替换、候选回滚、状态帧与 handle 生命周期隔离 |
-| 发布 | 内容寻址模块包、逻辑 `ModuleId`、无头 C# Release、包回执校验、Generated Type 预编译，以及已通过的 Win64 Development/Shipping BuildCookRun 与打包进程 Oracle |
+| 发布 | 内容寻址模块包、catalog v2 多平台 variant 精确选择、无头 C# Release、包回执校验、Generated Type 预编译，以及已通过的 Win64 Development/Shipping BuildCookRun 与打包进程 Oracle |
 | 运行时安全 | Wasmtime fuel/epoch/内存/Host Call 预算、进程级共享 watchdog，以及 Session 故障隔离与有界诊断 |
 | 后端 | Wasmtime 45 Win64 主后端；WAMR 兼容后端 |
 | 增量构建 | 双层产物缓存与 persistent Worker；无修改热构建零编译调用，5 轮中位数 `806 ms` |
@@ -52,6 +52,7 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 Editor 调试与 Profiler，以及 Win64 Development/Shipping 的确定性 Cook 发布闭环均已接通。
 发布包支持逻辑 `ModuleId`、内容寻址 catalog、Wasmtime 预编译 artifact、回执校验和
 fail-closed 加载；运行时具备执行预算、共享 watchdog 与 Session 故障隔离。
+Phase 63 已完成 P63.A 的多平台 identity 与 catalog variant 解析；Android artifact 仍在后续批次。
 
 集中 Gate 已通过 `.NET 284/284`、AvidScript Automation `429/429`、UE5.8 no-clean UBT、
 干净架构检查和发布/Cook/回执合同。详细证据见 [Phase 62 Gate 摘要](Docs/Phase62/P62_Gate_Summary.json)、
@@ -237,8 +238,9 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 ## 路线图
 
 1. **P62 已完成**：Win64 Cook/Shipping、发布资产策略与脚本故障隔离；
-2. **P63-P64**：移动端 AOT 与真实小型游戏 Demo；
-3. **P65**：跨框架成熟度、稳定性与性能领导力收口。
+2. **P63 进行中**：P63.A 多平台 catalog 已完成，继续交付 Android arm64 AOT；
+3. **P64**：真实小型游戏 Demo 与移动真机验收；
+4. **P65**：跨框架成熟度、稳定性与性能领导力收口。
 
 路线图只表示工程顺序，不代表对应能力已经可用。
 

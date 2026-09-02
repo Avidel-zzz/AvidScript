@@ -567,6 +567,119 @@ function Sort-AvidScriptModuleReleaseCatalogModules {
     return @($Sorted)
 }
 
+function Get-AvidScriptModuleReleaseVariantKey {
+    param([Parameter(Mandatory = $true)][object]$Variant)
+
+    return [string]::Join("`n", @(
+            [string]$Variant.platform,
+            [string]$Variant.architecture,
+            [string]$Variant.configuration,
+            [string]$Variant.backend,
+            [string]$Variant.format))
+}
+
+function Sort-AvidScriptModuleReleaseCatalogVariants {
+    param([object[]]$Variants)
+
+    $Sorted = [System.Collections.Generic.List[object]]::new()
+    foreach ($Variant in @($Variants)) {
+        $VariantKey = Get-AvidScriptModuleReleaseVariantKey $Variant
+        $InsertAt = $Sorted.Count
+        for ($Index = 0; $Index -lt $Sorted.Count; ++$Index) {
+            $ExistingKey = Get-AvidScriptModuleReleaseVariantKey $Sorted[$Index]
+            if ([System.StringComparer]::Ordinal.Compare($VariantKey, $ExistingKey) -lt 0) {
+                $InsertAt = $Index
+                break
+            }
+        }
+        $Sorted.Insert($InsertAt, $Variant)
+    }
+    return @($Sorted)
+}
+
+function ConvertTo-AvidScriptModuleReleaseCatalogVariant {
+    param(
+        [Parameter(Mandatory = $true)][string]$ModuleId,
+        [Parameter(Mandatory = $true)][object]$Variant,
+        [Parameter(Mandatory = $true)][string]$OutputRoot,
+        [switch]$Legacy
+    )
+
+    $Required = if ($Legacy) {
+        @(
+            'module_id',
+            'package_id',
+            'descriptor_file',
+            'descriptor_sha256',
+            'platform',
+            'configuration')
+    }
+    else {
+        @(
+            'platform',
+            'architecture',
+            'configuration',
+            'backend',
+            'format',
+            'package_id',
+            'descriptor_file',
+            'descriptor_sha256')
+    }
+    Assert-AvidScriptModuleReleaseObjectShape `
+        -Value $Variant `
+        -Label 'catalog.json variant entry' `
+        -Required $Required
+
+    if ($Legacy -and [string]$Variant.module_id -cne $ModuleId) {
+        throw 'catalog.json legacy module id is inconsistent.'
+    }
+    $Architecture = if ($Legacy) { 'x86_64' } else { [string]$Variant.architecture }
+    $Backend = if ($Legacy) { 'wasmtime' } else { [string]$Variant.backend }
+    $Format = if ($Legacy) { 'wasmtime_serialized_v1' } else { [string]$Variant.format }
+    if ([string]$Variant.platform -cne 'win64' -or
+        $Architecture -cne 'x86_64' -or
+        @('development', 'shipping') -cnotcontains [string]$Variant.configuration -or
+        $Backend -cne 'wasmtime' -or
+        $Format -cne 'wasmtime_serialized_v1') {
+        throw 'catalog.json variant contains an unsupported platform identity.'
+    }
+
+    Assert-AvidScriptModuleReleaseSha256 `
+        -Value ([string]$Variant.package_id) `
+        -Label 'catalog.json package_id'
+    Assert-AvidScriptModuleReleaseSha256 `
+        -Value ([string]$Variant.descriptor_sha256) `
+        -Label 'catalog.json descriptor_sha256'
+    $ExpectedDescriptorFile = "$ModuleId/$($Variant.package_id)/package.json"
+    if ([string]$Variant.descriptor_file -cne $ExpectedDescriptorFile) {
+        throw 'catalog.json variant descriptor path is not canonical.'
+    }
+    Assert-AvidScriptModuleReleaseRelativePath `
+        -Value ([string]$Variant.descriptor_file) `
+        -Label 'catalog.json descriptor_file'
+    $DescriptorPath = [System.IO.Path]::GetFullPath(
+        (Join-Path $OutputRoot ([string]$Variant.descriptor_file)))
+    if (-not (Test-AvidScriptModuleReleasePathUnderRoot -Path $DescriptorPath -Root $OutputRoot)) {
+        throw 'catalog.json descriptor_file escapes the module release root.'
+    }
+    Assert-AvidScriptModuleReleasePackageDirectory `
+        -PackageRoot (Split-Path -Parent $DescriptorPath) `
+        -ExpectedDescriptorSha256 ([string]$Variant.descriptor_sha256) `
+        -ExpectedModuleId $ModuleId `
+        -ExpectedPackageId ([string]$Variant.package_id) | Out-Null
+
+    return [pscustomobject][ordered]@{
+        platform = [string]$Variant.platform
+        architecture = $Architecture
+        configuration = [string]$Variant.configuration
+        backend = $Backend
+        format = $Format
+        package_id = [string]$Variant.package_id
+        descriptor_file = [string]$Variant.descriptor_file
+        descriptor_sha256 = [string]$Variant.descriptor_sha256
+    }
+}
+
 function Read-AvidScriptModuleReleaseCatalog {
     param(
         [Parameter(Mandatory = $true)][string]$CatalogPath,
@@ -575,7 +688,7 @@ function Read-AvidScriptModuleReleaseCatalog {
 
     if (-not (Test-Path -LiteralPath $CatalogPath -PathType Leaf)) {
         return [pscustomobject][ordered]@{
-            schema_version = 1
+            schema_version = 2
             modules = @()
         }
     }
@@ -585,57 +698,66 @@ function Read-AvidScriptModuleReleaseCatalog {
         -Label 'catalog.json' `
         -Required @('schema_version', 'modules')
     if (-not (Test-AvidScriptModuleReleaseJsonInteger $Catalog.schema_version) -or
-        [int64]$Catalog.schema_version -ne 1 -or
+        @([int64]1, [int64]2) -cnotcontains [int64]$Catalog.schema_version -or
         $Catalog.modules -isnot [System.Array]) {
-        throw 'catalog.json must use schema_version 1 and a modules array.'
+        throw 'catalog.json must use schema_version 1 or 2 and a modules array.'
     }
 
+    $NormalizedModules = [System.Collections.Generic.List[object]]::new()
     $PreviousModuleId = $null
     foreach ($Module in @($Catalog.modules)) {
-        Assert-AvidScriptModuleReleaseObjectShape `
-            -Value $Module `
-            -Label 'catalog.json module entry' `
-            -Required @(
-                'module_id',
-                'package_id',
-                'descriptor_file',
-                'descriptor_sha256',
-                'platform',
-                'configuration')
+        if ([int64]$Catalog.schema_version -eq 1) {
+            $ModuleId = Normalize-AvidScriptModuleReleaseModuleId ([string]$Module.module_id)
+            $Variants = @(
+                ConvertTo-AvidScriptModuleReleaseCatalogVariant `
+                    -ModuleId $ModuleId `
+                    -Variant $Module `
+                    -OutputRoot $OutputRoot `
+                    -Legacy)
+        }
+        else {
+            Assert-AvidScriptModuleReleaseObjectShape `
+                -Value $Module `
+                -Label 'catalog.json module entry' `
+                -Required @('module_id', 'variants')
+            $ModuleId = Normalize-AvidScriptModuleReleaseModuleId ([string]$Module.module_id)
+            if ($Module.variants -isnot [System.Array] -or @($Module.variants).Count -eq 0) {
+                throw 'catalog.json module variants must be a non-empty array.'
+            }
+            $Variants = @(
+                foreach ($Variant in @($Module.variants)) {
+                    ConvertTo-AvidScriptModuleReleaseCatalogVariant `
+                        -ModuleId $ModuleId `
+                        -Variant $Variant `
+                        -OutputRoot $OutputRoot
+                })
+        }
         $ModuleId = Normalize-AvidScriptModuleReleaseModuleId ([string]$Module.module_id)
         if ($ModuleId -cne [string]$Module.module_id -or
             ($null -ne $PreviousModuleId -and
                 [System.StringComparer]::Ordinal.Compare($PreviousModuleId, $ModuleId) -ge 0)) {
             throw 'catalog.json modules must be unique and strictly increasing by module_id ordinal.'
         }
-        Assert-AvidScriptModuleReleaseSha256 `
-            -Value ([string]$Module.package_id) `
-            -Label 'catalog.json package_id'
-        Assert-AvidScriptModuleReleaseSha256 `
-            -Value ([string]$Module.descriptor_sha256) `
-            -Label 'catalog.json descriptor_sha256'
-        $ExpectedDescriptorFile = "$ModuleId/$($Module.package_id)/package.json"
-        if ([string]$Module.descriptor_file -cne $ExpectedDescriptorFile -or
-            [string]$Module.platform -cne 'win64' -or
-            @('development', 'shipping') -cnotcontains [string]$Module.configuration) {
-            throw 'catalog.json module entry contains an invalid descriptor path, platform, or configuration.'
+
+        $PreviousVariantKey = $null
+        foreach ($Variant in $Variants) {
+            $VariantKey = Get-AvidScriptModuleReleaseVariantKey $Variant
+            if ($null -ne $PreviousVariantKey -and
+                [System.StringComparer]::Ordinal.Compare($PreviousVariantKey, $VariantKey) -ge 0) {
+                throw 'catalog.json variants must be unique and strictly increasing by identity ordinal.'
+            }
+            $PreviousVariantKey = $VariantKey
         }
-        Assert-AvidScriptModuleReleaseRelativePath `
-            -Value ([string]$Module.descriptor_file) `
-            -Label 'catalog.json descriptor_file'
-        $DescriptorPath = [System.IO.Path]::GetFullPath(
-            (Join-Path $OutputRoot ([string]$Module.descriptor_file)))
-        if (-not (Test-AvidScriptModuleReleasePathUnderRoot -Path $DescriptorPath -Root $OutputRoot)) {
-            throw 'catalog.json descriptor_file escapes the module release root.'
-        }
-        Assert-AvidScriptModuleReleasePackageDirectory `
-            -PackageRoot (Split-Path -Parent $DescriptorPath) `
-            -ExpectedDescriptorSha256 ([string]$Module.descriptor_sha256) `
-            -ExpectedModuleId $ModuleId `
-            -ExpectedPackageId ([string]$Module.package_id) | Out-Null
+        $NormalizedModules.Add([pscustomobject][ordered]@{
+                module_id = $ModuleId
+                variants = @($Variants)
+            })
         $PreviousModuleId = $ModuleId
     }
-    return $Catalog
+    return [pscustomobject][ordered]@{
+        schema_version = 2
+        modules = @($NormalizedModules)
+    }
 }
 
 function Enter-AvidScriptModuleReleaseCatalogLock {
@@ -1129,22 +1251,36 @@ function Publish-AvidScriptModuleReleasePackage {
                 -ExpectedPackageId ([string]$Descriptor.package_id) | Out-Null
         }
 
-        $NewEntry = [pscustomobject][ordered]@{
-            module_id = $ModuleId
+        $NewVariant = [pscustomobject][ordered]@{
+            platform = 'win64'
+            architecture = 'x86_64'
+            configuration = $ConfigurationValue
+            backend = 'wasmtime'
+            format = 'wasmtime_serialized_v1'
             package_id = [string]$Descriptor.package_id
             descriptor_file = "$ModuleId/$($Descriptor.package_id)/package.json"
             descriptor_sha256 = $DescriptorSha256
-            platform = 'win64'
-            configuration = $ConfigurationValue
         }
+        $NewVariantKey = Get-AvidScriptModuleReleaseVariantKey $NewVariant
         $Modules = @($Catalog.modules | Where-Object {
-                [string]$_.module_id -cne $ModuleId -and
-                [string]$_.configuration -ceq $ConfigurationValue
+                [string]$_.module_id -cne $ModuleId
             })
-        $Modules += $NewEntry
+        $ExistingModule = @($Catalog.modules | Where-Object {
+                [string]$_.module_id -ceq $ModuleId
+            })
+        $Variants = @(if ($ExistingModule.Count -eq 1) {
+                $ExistingModule[0].variants | Where-Object {
+                    (Get-AvidScriptModuleReleaseVariantKey $_) -cne $NewVariantKey
+                }
+            })
+        $Variants += $NewVariant
+        $Modules += [pscustomobject][ordered]@{
+            module_id = $ModuleId
+            variants = @(Sort-AvidScriptModuleReleaseCatalogVariants $Variants)
+        }
         $SortedModules = Sort-AvidScriptModuleReleaseCatalogModules $Modules
         $NewCatalog = [pscustomobject][ordered]@{
-            schema_version = 1
+            schema_version = 2
             modules = @($SortedModules)
         }
         $CatalogBytes = ConvertTo-AvidScriptModuleReleaseJsonBytes -Value $NewCatalog

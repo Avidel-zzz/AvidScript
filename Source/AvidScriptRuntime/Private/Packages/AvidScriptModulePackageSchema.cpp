@@ -173,7 +173,7 @@ bool ParseCatalogEntry(
 	const TSharedPtr<FJsonObject>& Object,
 	FCatalogEntry& OutEntry)
 {
-	return Object.IsValid()
+	const bool bValid = Object.IsValid()
 		&& HasExactFields(
 			*Object,
 			{
@@ -203,6 +203,92 @@ bool ParseCatalogEntry(
 		&& Object->TryGetStringField(TEXT("configuration"), OutEntry.Configuration)
 		&& (OutEntry.Configuration == TEXT("development")
 			|| OutEntry.Configuration == TEXT("shipping"));
+	if (!bValid)
+	{
+		return false;
+	}
+	OutEntry.Architecture = TEXT("x86_64");
+	OutEntry.Backend = TEXT("wasmtime");
+	OutEntry.Format = TEXT("wasmtime_serialized_v1");
+	return true;
+}
+
+bool IsValidVariantIdentity(
+	const FString& Platform,
+	const FString& Architecture,
+	const FString& Configuration,
+	const FString& Backend,
+	const FString& Format)
+{
+	const bool bPlatformArchitectureValid =
+		(Platform == TEXT("win64") && Architecture == TEXT("x86_64"))
+		|| (Platform == TEXT("android") && Architecture == TEXT("arm64"))
+		|| (Platform == TEXT("ios") && Architecture == TEXT("arm64"));
+	const bool bConfigurationValid = Configuration == TEXT("development")
+		|| Configuration == TEXT("shipping");
+	const bool bBackendFormatValid =
+		(Backend == TEXT("wasmtime") && Format == TEXT("wasmtime_serialized_v1"))
+		|| (Backend == TEXT("wamr") && Format == TEXT("wamr_aot_v1"));
+	return bPlatformArchitectureValid
+		&& bConfigurationValid
+		&& bBackendFormatValid;
+}
+
+bool ParseCatalogVariant(
+	const FString& ModuleId,
+	const TSharedPtr<FJsonObject>& Object,
+	FCatalogEntry& OutEntry)
+{
+	OutEntry.ModuleId = ModuleId;
+	return IsNormalizedModuleId(ModuleId)
+		&& Object.IsValid()
+		&& HasExactFields(
+			*Object,
+			{
+				TEXT("platform"),
+				TEXT("architecture"),
+				TEXT("configuration"),
+				TEXT("backend"),
+				TEXT("format"),
+				TEXT("package_id"),
+				TEXT("descriptor_file"),
+				TEXT("descriptor_sha256")
+			})
+		&& Object->TryGetStringField(TEXT("platform"), OutEntry.Platform)
+		&& Object->TryGetStringField(TEXT("architecture"), OutEntry.Architecture)
+		&& Object->TryGetStringField(TEXT("configuration"), OutEntry.Configuration)
+		&& Object->TryGetStringField(TEXT("backend"), OutEntry.Backend)
+		&& Object->TryGetStringField(TEXT("format"), OutEntry.Format)
+		&& IsValidVariantIdentity(
+			OutEntry.Platform,
+			OutEntry.Architecture,
+			OutEntry.Configuration,
+			OutEntry.Backend,
+			OutEntry.Format)
+		&& Object->TryGetStringField(TEXT("package_id"), OutEntry.PackageId)
+		&& IsLowercaseSha256(OutEntry.PackageId)
+		&& Object->TryGetStringField(TEXT("descriptor_file"), OutEntry.DescriptorFile)
+		&& OutEntry.DescriptorFile
+			== FString::Printf(
+				TEXT("%s/%s/package.json"),
+				*OutEntry.ModuleId,
+				*OutEntry.PackageId)
+		&& Object->TryGetStringField(
+			TEXT("descriptor_sha256"),
+			OutEntry.DescriptorSha256)
+		&& IsLowercaseSha256(OutEntry.DescriptorSha256);
+}
+
+FString MakeVariantKey(const FCatalogEntry& Entry)
+{
+	const TArray<FString> Fields{
+		Entry.Platform,
+		Entry.Architecture,
+		Entry.Configuration,
+		Entry.Backend,
+		Entry.Format
+	};
+	return FString::Join(Fields, TEXT("\n"));
 }
 
 FString MakeIdentityPayload(const FDocument& Package)

@@ -6,7 +6,8 @@ class FJsonObject;
 
 namespace AvidScript::ModulePackage
 {
-inline constexpr int32 CatalogSchemaVersion = 1;
+inline constexpr int32 LegacyCatalogSchemaVersion = 1;
+inline constexpr int32 CatalogSchemaVersion = 2;
 inline constexpr int32 PackageSchemaVersion = 1;
 inline constexpr TCHAR ModuleIdPatternDescription[] =
 	TEXT("a lowercase id matching [a-z][a-z0-9_.-]{0,63}");
@@ -18,7 +19,10 @@ struct FCatalogEntry
 	FString DescriptorFile;
 	FString DescriptorSha256;
 	FString Platform;
+	FString Architecture;
 	FString Configuration;
+	FString Backend;
+	FString Format;
 };
 
 struct FArtifactEntry
@@ -57,6 +61,17 @@ bool TryParseSimpleSemanticVersion(
 bool ParseCatalogEntry(
 	const TSharedPtr<FJsonObject>& Object,
 	FCatalogEntry& OutEntry);
+bool ParseCatalogVariant(
+	const FString& ModuleId,
+	const TSharedPtr<FJsonObject>& Object,
+	FCatalogEntry& OutEntry);
+bool IsValidVariantIdentity(
+	const FString& Platform,
+	const FString& Architecture,
+	const FString& Configuration,
+	const FString& Backend,
+	const FString& Format);
+FString MakeVariantKey(const FCatalogEntry& Entry);
 bool ParseDocument(
 	const TSharedPtr<FJsonObject>& Root,
 	FDocument& OutPackage);

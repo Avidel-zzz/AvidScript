@@ -61,6 +61,29 @@ bool LoadJsonObject(
 		&& OutObject.IsValid();
 }
 
+bool MatchesPlatformContext(
+	const FCatalogEntry& Entry,
+	const FAvidScriptModulePlatformContext& Context)
+{
+	return Entry.Platform == Context.Platform
+		&& Entry.Architecture == Context.Architecture
+		&& Entry.Configuration == Context.Configuration
+		&& Entry.Backend == Context.Backend
+		&& Entry.Format == Context.Format;
+}
+
+FString DescribePlatformContext(
+	const FAvidScriptModulePlatformContext& Context)
+{
+	return FString::Printf(
+		TEXT("platform=%s architecture=%s configuration=%s backend=%s format=%s"),
+		*Context.Platform,
+		*Context.Architecture,
+		*Context.Configuration,
+		*Context.Backend,
+		*Context.Format);
+}
+
 bool LoadVerifiedBytes(
 	const FString& Path,
 	const FString& ExpectedSha256,
@@ -196,13 +219,17 @@ bool LoadAndValidateArtifacts(
 void PopulateResolvedPackage(
 	const FString& DescriptorPath,
 	const FString& PackageRoot,
+	const FCatalogEntry& Entry,
 	const FDocument& Package,
 	FAvidScriptResolvedModulePackage& OutPackage)
 {
 	OutPackage.ModuleId = FName(*Package.ModuleId);
 	OutPackage.PackageId = Package.PackageId;
 	OutPackage.Platform = Package.Platform;
+	OutPackage.Architecture = Entry.Architecture;
 	OutPackage.Configuration = Package.Configuration;
+	OutPackage.ExecutionBackend = Package.Backend;
+	OutPackage.ExecutionFormat = Package.Format;
 	OutPackage.AbiVersion = Package.AbiVersion;
 	OutPackage.MinimumRuntimeVersion = Package.MinimumRuntimeVersion;
 	OutPackage.DescriptorPath = DescriptorPath;
@@ -241,14 +268,58 @@ FString FAvidScriptModulePackageResolver::GetDefaultCatalogPath()
 		TEXT("AvidScript/Modules/catalog.json")));
 }
 
+FAvidScriptModulePlatformContext
+FAvidScriptModulePackageResolver::GetCurrentPlatformContext()
+{
+	FAvidScriptModulePlatformContext Context;
+#if PLATFORM_WINDOWS
+	Context.Platform = TEXT("win64");
+#elif PLATFORM_ANDROID
+	Context.Platform = TEXT("android");
+#elif PLATFORM_IOS
+	Context.Platform = TEXT("ios");
+#else
+	Context.Platform = TEXT("unsupported");
+#endif
+
+#if defined(PLATFORM_CPU_ARM_FAMILY) && PLATFORM_CPU_ARM_FAMILY
+	Context.Architecture = TEXT("arm64");
+#else
+	Context.Architecture = TEXT("x86_64");
+#endif
+
+#if UE_BUILD_SHIPPING
+	Context.Configuration = TEXT("shipping");
+#else
+	Context.Configuration = TEXT("development");
+#endif
+	Context.Backend = TEXT("wasmtime");
+	Context.Format = TEXT("wasmtime_serialized_v1");
+	return Context;
+}
+
 bool FAvidScriptModulePackageResolver::ResolveModule(
 	const FName ModuleId,
+	FAvidScriptResolvedModulePackage& OutPackage,
+	FAvidScriptModuleResolveResult& OutResult)
+{
+	return ResolveModule(
+		ModuleId,
+		GetCurrentPlatformContext(),
+		OutPackage,
+		OutResult);
+}
+
+bool FAvidScriptModulePackageResolver::ResolveModule(
+	const FName ModuleId,
+	const FAvidScriptModulePlatformContext& PlatformContext,
 	FAvidScriptResolvedModulePackage& OutPackage,
 	FAvidScriptModuleResolveResult& OutResult)
 {
 	return ResolveModuleFromCatalogFile(
 		GetDefaultCatalogPath(),
 		ModuleId,
+		PlatformContext,
 		OutPackage,
 		OutResult);
 }
@@ -256,6 +327,21 @@ bool FAvidScriptModulePackageResolver::ResolveModule(
 bool FAvidScriptModulePackageResolver::ResolveModuleFromCatalogFile(
 	const FString& CatalogPath,
 	const FName ModuleId,
+	FAvidScriptResolvedModulePackage& OutPackage,
+	FAvidScriptModuleResolveResult& OutResult)
+{
+	return ResolveModuleFromCatalogFile(
+		CatalogPath,
+		ModuleId,
+		GetCurrentPlatformContext(),
+		OutPackage,
+		OutResult);
+}
+
+bool FAvidScriptModulePackageResolver::ResolveModuleFromCatalogFile(
+	const FString& CatalogPath,
+	const FName ModuleId,
+	const FAvidScriptModulePlatformContext& PlatformContext,
 	FAvidScriptResolvedModulePackage& OutPackage,
 	FAvidScriptModuleResolveResult& OutResult)
 {
@@ -274,6 +360,20 @@ bool FAvidScriptModulePackageResolver::ResolveModuleFromCatalogFile(
 			TEXT("publish and reference a normalized logical module id"));
 		return false;
 	}
+	if (!AvidScript::ModulePackage::IsValidVariantIdentity(
+			PlatformContext.Platform,
+			PlatformContext.Architecture,
+			PlatformContext.Configuration,
+			PlatformContext.Backend,
+			PlatformContext.Format))
+	{
+		SetResolveFailure(
+			OutResult,
+			TEXT("platform_context_invalid"),
+			DescribePlatformContext(PlatformContext),
+			TEXT("use a supported normalized platform variant identity"));
+		return false;
+	}
 	if (!FPaths::FileExists(OutResult.CatalogPath))
 	{
 		SetResolveFailure(
@@ -289,7 +389,8 @@ bool FAvidScriptModulePackageResolver::ResolveModuleFromCatalogFile(
 	const TArray<TSharedPtr<FJsonValue>>* Modules = nullptr;
 	if (!LoadJsonObject(OutResult.CatalogPath, Catalog)
 		|| !Catalog->TryGetNumberField(TEXT("schema_version"), CatalogVersion)
-		|| CatalogVersion != AvidScript::ModulePackage::CatalogSchemaVersion
+		|| (CatalogVersion != AvidScript::ModulePackage::LegacyCatalogSchemaVersion
+			&& CatalogVersion != AvidScript::ModulePackage::CatalogSchemaVersion)
 		|| Catalog->Values.Num() != 2
 		|| !Catalog->HasField(TEXT("modules"))
 		|| !Catalog->TryGetArrayField(TEXT("modules"), Modules)
@@ -299,22 +400,19 @@ bool FAvidScriptModulePackageResolver::ResolveModuleFromCatalogFile(
 			OutResult,
 			TEXT("catalog_invalid"),
 			TEXT("catalog schema is invalid"),
-			TEXT("republish catalog schema v1 with the current release tool"));
+			TEXT("republish catalog schema v2 with the current release tool"));
 		return false;
 	}
 
 	TOptional<FCatalogEntry> SelectedEntry;
+	bool bModuleFound = false;
 	FString PreviousModuleId;
 	for (const TSharedPtr<FJsonValue>& Value : *Modules)
 	{
 		const TSharedPtr<FJsonObject>* Object = nullptr;
-		FCatalogEntry Entry;
 		if (!Value.IsValid()
 			|| !Value->TryGetObject(Object)
-			|| Object == nullptr
-			|| !AvidScript::ModulePackage::ParseCatalogEntry(*Object, Entry)
-			|| (!PreviousModuleId.IsEmpty()
-				&& PreviousModuleId.Compare(Entry.ModuleId, ESearchCase::CaseSensitive) >= 0))
+			|| Object == nullptr)
 		{
 			SetResolveFailure(
 				OutResult,
@@ -323,19 +421,121 @@ bool FAvidScriptModulePackageResolver::ResolveModuleFromCatalogFile(
 				TEXT("republish the complete module catalog"));
 			return false;
 		}
-		PreviousModuleId = Entry.ModuleId;
-		if (Entry.ModuleId == OutResult.ModuleId)
+
+		FString CatalogModuleId;
+		if (CatalogVersion == AvidScript::ModulePackage::LegacyCatalogSchemaVersion)
 		{
-			SelectedEntry = Entry;
+			FCatalogEntry Entry;
+			if (!AvidScript::ModulePackage::ParseCatalogEntry(*Object, Entry))
+			{
+				SetResolveFailure(
+					OutResult,
+					TEXT("catalog_invalid"),
+					TEXT("legacy catalog entry is invalid"),
+					TEXT("republish the complete module catalog"));
+				return false;
+			}
+			CatalogModuleId = Entry.ModuleId;
+			if (Entry.ModuleId == OutResult.ModuleId)
+			{
+				bModuleFound = true;
+				if (MatchesPlatformContext(Entry, PlatformContext))
+				{
+					SelectedEntry = Entry;
+				}
+			}
 		}
+		else
+		{
+			const TArray<TSharedPtr<FJsonValue>>* Variants = nullptr;
+			if ((*Object)->Values.Num() != 2
+				|| !(*Object)->HasField(TEXT("module_id"))
+				|| !(*Object)->HasField(TEXT("variants"))
+				|| !(*Object)->TryGetStringField(TEXT("module_id"), CatalogModuleId)
+				|| !AvidScript::ModulePackage::IsNormalizedModuleId(CatalogModuleId)
+				|| !(*Object)->TryGetArrayField(TEXT("variants"), Variants)
+				|| Variants == nullptr
+				|| Variants->IsEmpty())
+			{
+				SetResolveFailure(
+					OutResult,
+					TEXT("catalog_invalid"),
+					TEXT("catalog module or variants array is invalid"),
+					TEXT("republish the complete module catalog"));
+				return false;
+			}
+
+			FString PreviousVariantKey;
+			for (const TSharedPtr<FJsonValue>& VariantValue : *Variants)
+			{
+				const TSharedPtr<FJsonObject>* VariantObject = nullptr;
+				FCatalogEntry Entry;
+				if (!VariantValue.IsValid()
+					|| !VariantValue->TryGetObject(VariantObject)
+					|| VariantObject == nullptr
+					|| !AvidScript::ModulePackage::ParseCatalogVariant(
+						CatalogModuleId,
+						*VariantObject,
+						Entry))
+				{
+					SetResolveFailure(
+						OutResult,
+						TEXT("catalog_invalid"),
+						TEXT("catalog variant entry is invalid"),
+						TEXT("republish the complete module catalog"));
+					return false;
+				}
+				const FString VariantKey =
+					AvidScript::ModulePackage::MakeVariantKey(Entry);
+				if (!PreviousVariantKey.IsEmpty()
+					&& PreviousVariantKey.Compare(
+						VariantKey,
+						ESearchCase::CaseSensitive) >= 0)
+				{
+					SetResolveFailure(
+						OutResult,
+						TEXT("catalog_invalid"),
+						TEXT("catalog variants are duplicated or not ordinally sorted"),
+						TEXT("republish the complete module catalog"));
+					return false;
+				}
+				PreviousVariantKey = VariantKey;
+				if (CatalogModuleId == OutResult.ModuleId)
+				{
+					bModuleFound = true;
+					if (MatchesPlatformContext(Entry, PlatformContext))
+					{
+						SelectedEntry = Entry;
+					}
+				}
+			}
+		}
+
+		if (!PreviousModuleId.IsEmpty()
+			&& PreviousModuleId.Compare(
+				CatalogModuleId,
+				ESearchCase::CaseSensitive) >= 0)
+		{
+			SetResolveFailure(
+				OutResult,
+				TEXT("catalog_invalid"),
+				TEXT("catalog modules are duplicated or not ordinally sorted"),
+				TEXT("republish the complete module catalog"));
+			return false;
+		}
+		PreviousModuleId = CatalogModuleId;
 	}
 	if (!SelectedEntry.IsSet())
 	{
 		SetResolveFailure(
 			OutResult,
-			TEXT("module_not_found"),
-			TEXT("module id is not present in the release catalog"),
-			TEXT("publish the requested module or update the component reference"));
+			bModuleFound ? TEXT("module_variant_not_found") : TEXT("module_not_found"),
+			bModuleFound
+				? DescribePlatformContext(PlatformContext)
+				: TEXT("module id is not present in the release catalog"),
+			bModuleFound
+				? TEXT("publish the exact target variant before loading the game")
+				: TEXT("publish the requested module or update the component reference"));
 		return false;
 	}
 
@@ -374,7 +574,9 @@ bool FAvidScriptModulePackageResolver::ResolveModuleFromCatalogFile(
 		|| Package.PackageId != Entry.PackageId
 		|| Package.ModuleId != Entry.ModuleId
 		|| Package.Platform != Entry.Platform
-		|| Package.Configuration != Entry.Configuration)
+		|| Package.Configuration != Entry.Configuration
+		|| Package.Backend != Entry.Backend
+		|| Package.Format != Entry.Format)
 	{
 		SetResolveFailure(
 			OutResult,
@@ -423,7 +625,7 @@ bool FAvidScriptModulePackageResolver::ResolveModuleFromCatalogFile(
 		return false;
 	}
 
-	PopulateResolvedPackage(DescriptorPath, PackageRoot, Package, OutPackage);
+	PopulateResolvedPackage(DescriptorPath, PackageRoot, Entry, Package, OutPackage);
 #if WITH_EDITOR
 	OutPackage.TrustDomain = EAvidScriptModulePackageTrustDomain::DevelopmentCatalog;
 #else

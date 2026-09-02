@@ -290,8 +290,9 @@ try {
     $ModulesRoot = Join-Path $ResolvedProjectRoot 'Content/AvidScript/Modules'
     $CatalogPath = Join-Path $ModulesRoot 'catalog.json'
     $Catalog = Read-StrictJsonObject -Path $CatalogPath -Label 'module catalog'
-    if ([long](Get-RequiredPropertyValue $Catalog 'schema_version' 'module catalog') -ne 1) {
-        Throw-ReceiptValidationFailure 'JSON_SCHEMA_INVALID' 'Module catalog schema_version must be 1.'
+    $CatalogSchemaVersion = [long](Get-RequiredPropertyValue $Catalog 'schema_version' 'module catalog')
+    if (@([long]1, [long]2) -cnotcontains $CatalogSchemaVersion) {
+        Throw-ReceiptValidationFailure 'JSON_SCHEMA_INVALID' 'Module catalog schema_version must be 1 or 2.'
     }
     $CatalogModules = @(Get-RequiredPropertyValue $Catalog 'modules' 'module catalog')
     if ($CatalogModules.Count -eq 0) {
@@ -309,24 +310,60 @@ try {
         [System.StringComparer]::Ordinal)
     foreach ($Module in $CatalogModules) {
         $ModuleId = [string](Get-RequiredPropertyValue $Module 'module_id' 'module catalog entry')
-        $PackageId = [string](Get-RequiredPropertyValue $Module 'package_id' "module '$ModuleId'")
-        $DescriptorFile = [string](Get-RequiredPropertyValue $Module 'descriptor_file' "module '$ModuleId'")
-        $DescriptorSha256 = [string](Get-RequiredPropertyValue $Module 'descriptor_sha256' "module '$ModuleId'")
-        $Platform = [string](Get-RequiredPropertyValue $Module 'platform' "module '$ModuleId'")
-        $ModuleConfiguration = [string](Get-RequiredPropertyValue $Module 'configuration' "module '$ModuleId'")
         if ($ModuleId -cnotmatch '^[a-z][a-z0-9_.-]{0,63}$') {
             Throw-ReceiptValidationFailure 'JSON_SCHEMA_INVALID' "Module id is invalid: '$ModuleId'."
         }
+
+        $Variants = @(if ($CatalogSchemaVersion -eq 1) {
+                $Module
+            }
+            else {
+                Get-RequiredPropertyValue $Module 'variants' "module '$ModuleId'"
+            })
+        if ($Variants.Count -eq 0) {
+            Throw-ReceiptValidationFailure 'JSON_SCHEMA_INVALID' "Module '$ModuleId' has no variants."
+        }
+        $SelectedVariants = @(
+            foreach ($Variant in $Variants) {
+                $Platform = [string](Get-RequiredPropertyValue $Variant 'platform' "module '$ModuleId' variant")
+                $ModuleConfiguration = [string](Get-RequiredPropertyValue $Variant 'configuration' "module '$ModuleId' variant")
+                $Architecture = if ($CatalogSchemaVersion -eq 1) {
+                    'x86_64'
+                }
+                else {
+                    [string](Get-RequiredPropertyValue $Variant 'architecture' "module '$ModuleId' variant")
+                }
+                $Backend = if ($CatalogSchemaVersion -eq 1) {
+                    'wasmtime'
+                }
+                else {
+                    [string](Get-RequiredPropertyValue $Variant 'backend' "module '$ModuleId' variant")
+                }
+                $Format = if ($CatalogSchemaVersion -eq 1) {
+                    'wasmtime_serialized_v1'
+                }
+                else {
+                    [string](Get-RequiredPropertyValue $Variant 'format' "module '$ModuleId' variant")
+                }
+                if ($Platform -ceq 'win64' -and
+                    $Architecture -ceq 'x86_64' -and
+                    $ModuleConfiguration -ceq $ExpectedConfiguration -and
+                    $Backend -ceq 'wasmtime' -and
+                    $Format -ceq 'wasmtime_serialized_v1') {
+                    $Variant
+                }
+            })
+        if ($SelectedVariants.Count -ne 1) {
+            Throw-ReceiptValidationFailure `
+                'PACKAGE_VARIANT_MISMATCH' `
+                "Module '$ModuleId' has no unique Win64/x86_64/$ExpectedConfiguration/Wasmtime variant."
+        }
+        $SelectedVariant = $SelectedVariants[0]
+        $PackageId = [string](Get-RequiredPropertyValue $SelectedVariant 'package_id' "module '$ModuleId' variant")
+        $DescriptorFile = [string](Get-RequiredPropertyValue $SelectedVariant 'descriptor_file' "module '$ModuleId' variant")
+        $DescriptorSha256 = [string](Get-RequiredPropertyValue $SelectedVariant 'descriptor_sha256' "module '$ModuleId' variant")
         Assert-LowercaseSha256 -Value $PackageId -Label "module '$ModuleId'.package_id"
         Assert-LowercaseSha256 -Value $DescriptorSha256 -Label "module '$ModuleId'.descriptor_sha256"
-        if ($Platform -cne 'win64') {
-            Throw-ReceiptValidationFailure 'PACKAGE_PLATFORM_MISMATCH' "Module '$ModuleId' platform is '$Platform', expected 'win64'."
-        }
-        if ($ModuleConfiguration -cne $ExpectedConfiguration) {
-            Throw-ReceiptValidationFailure `
-                'PACKAGE_CONFIGURATION_MISMATCH' `
-                "Module '$ModuleId' configuration is '$ModuleConfiguration', expected '$ExpectedConfiguration'."
-        }
         $ExpectedDescriptorFile = "$ModuleId/$PackageId/package.json"
         if ($DescriptorFile -cne $ExpectedDescriptorFile) {
             Throw-ReceiptValidationFailure 'SOURCE_PATH_INVALID' "Module '$ModuleId' descriptor path is not canonical."
@@ -361,6 +398,13 @@ try {
             Throw-ReceiptValidationFailure `
                 'PACKAGE_CONFIGURATION_MISMATCH' `
                 "Module '$ModuleId' descriptor configuration does not match '$ExpectedConfiguration'."
+        }
+        $DescriptorExecution = Get-RequiredPropertyValue $Descriptor 'execution' "module '$ModuleId' descriptor"
+        if ([string](Get-RequiredPropertyValue $DescriptorExecution 'backend' "module '$ModuleId' execution") -cne 'wasmtime' -or
+            [string](Get-RequiredPropertyValue $DescriptorExecution 'format' "module '$ModuleId' execution") -cne 'wasmtime_serialized_v1') {
+            Throw-ReceiptValidationFailure `
+                'PACKAGE_VARIANT_MISMATCH' `
+                "Module '$ModuleId' descriptor execution identity does not match the selected variant."
         }
 
         $Artifacts = Get-RequiredPropertyValue $Descriptor 'artifacts' "module '$ModuleId' descriptor"

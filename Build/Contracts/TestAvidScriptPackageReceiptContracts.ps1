@@ -115,6 +115,7 @@ function New-PackageReceiptFixture {
         minimum_runtime_version = '0.1.0'
         execution = [ordered]@{
             backend = 'wasmtime'
+            format = 'wasmtime_serialized_v1'
             policy = if ($Configuration -ceq 'Shipping') { 'require_precompiled' } else { 'prefer_precompiled' }
         }
         artifacts = $Artifacts
@@ -122,14 +123,19 @@ function New-PackageReceiptFixture {
     $DescriptorSha256 = Get-FixtureSha256 -Path $DescriptorPath
     $CatalogPath = Join-Path $ModulesRoot 'catalog.json'
     Write-FixtureJson -Path $CatalogPath -Value ([ordered]@{
-        schema_version = 1
+        schema_version = 2
         modules = @([ordered]@{
             module_id = $ModuleId
-            package_id = $PackageId
-            descriptor_file = "$PackageRelative/package.json"
-            descriptor_sha256 = $DescriptorSha256
-            platform = 'win64'
-            configuration = $ConfigurationValue
+            variants = @([ordered]@{
+                platform = 'win64'
+                architecture = 'x86_64'
+                configuration = $ConfigurationValue
+                backend = 'wasmtime'
+                format = 'wasmtime_serialized_v1'
+                package_id = $PackageId
+                descriptor_file = "$PackageRelative/package.json"
+                descriptor_sha256 = $DescriptorSha256
+            })
         })
     })
 
@@ -359,7 +365,7 @@ try {
         Assert-ValidatorRejected `
             -Fixture $Fixture `
             -Configuration Shipping `
-            -ErrorCode 'PACKAGE_CONFIGURATION_MISMATCH'
+            -ErrorCode 'PACKAGE_VARIANT_MISMATCH'
     }
 
     Invoke-ContractCase 'package Shipping Development mismatch rejected' {

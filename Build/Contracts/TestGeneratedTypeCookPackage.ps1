@@ -53,10 +53,24 @@ function Resolve-TestGeneratedTypeRuntimeDescriptor {
     if ($Matches.Count -ne 1) {
         throw "Generated Type Runtime module is missing: $($Pointer.module_id)"
     }
-    if ([string]$Matches[0].package_id -cne [string]$Pointer.package_id) {
+    $Variants = @(if ([int]$Catalog.schema_version -eq 1) {
+            $Matches[0]
+        }
+        elseif ([int]$Catalog.schema_version -eq 2) {
+            @($Matches[0].variants)
+        }
+        else {
+            throw "Generated Type Runtime catalog schema is unsupported: $($Catalog.schema_version)"
+        })
+    $PackageMatches = @($Variants | Where-Object {
+            [string]$_.package_id -ceq [string]$Pointer.package_id
+        })
+    if ($PackageMatches.Count -ne 1) {
         throw "Generated Type Runtime package id drift: expected=$($Pointer.package_id) resolved=$($Matches[0].package_id)"
     }
-    return Join-Path (Split-Path -Parent $CatalogPath) ([string]$Matches[0].descriptor_file)
+    return Join-Path `
+        (Split-Path -Parent $CatalogPath) `
+        ([string]$PackageMatches[0].descriptor_file)
 }
 
 function Invoke-ContractTest {
