@@ -146,6 +146,7 @@ try {
                 'TEXT("BindingPackagePath")',
                 'TEXT("RuntimeBindingPackagePath")',
                 'TEXT("GeneratedTypeManifestPath")',
+                'TEXT("avidscriptsuppressgeneratedtypeexecution")',
                 'ParameterName.Equals(TEXT("run"), ESearchCase::IgnoreCase)',
                 'TEXT("AvidScriptRelease")',
                 'TEXT("argument_missing")',

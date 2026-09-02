@@ -50,6 +50,7 @@ int32 FailAvidScriptRelease(
 bool IsAvidScriptReleaseGlobalSwitch(const FString& SwitchName)
 {
 	static const TSet<FString> AllowedSwitches = {
+		TEXT("avidscriptsuppressgeneratedtypeexecution"),
 		TEXT("fullstdoutlogoutput"),
 		TEXT("nop4"),
 		TEXT("nosplash"),
