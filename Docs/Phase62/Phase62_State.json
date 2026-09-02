@@ -25,9 +25,9 @@
     },
     {
       "id": "P62.B",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "commits 7be220c,1ed788c,d6a916d,9c00561,fa2ccd8,68e5d03,87c43a4; headless C# release and Generated Type Shipping precompile verified, release/receipt/BuildCookRun contracts 5/5+10/10+11/11, UE5.8 no-clean build passed; real Development/Shipping BuildCookRun remains P62.D gate",
+      "completed_at_utc": "2026-09-02T01:11:46.1199750+00:00"
     },
     {
       "id": "P62.C",
@@ -94,7 +94,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "batch-complete -Phase 62 -BatchId P62.B -Evidence <text>",
-  "revision": 2,
-  "updated_at_utc": "2026-09-02T00:27:10.6556106+00:00"
+  "next_action": "batch-complete -Phase 62 -BatchId P62.C -Evidence <text>",
+  "revision": 3,
+  "updated_at_utc": "2026-09-02T01:11:46.1220817+00:00"
 }
