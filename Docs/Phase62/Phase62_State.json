@@ -5,7 +5,7 @@
     "goal": "交付 UE5.8 Win64 的确定性 Cook/Shipping C# WASM 闭环，包括预编译 artifact、资源依赖、Shipping 安全策略、Session 故障隔离和版本兼容。",
     "start_commit": "346fa907cb59f8f9c94ab0c616302e1544cef0fc"
   },
-  "declared_stage": "gate_ready",
+  "declared_stage": "gate_attested",
   "architecture": {
     "path": "Docs/Phase62/P62.0_Cook_Shipping_Architecture.md",
     "version": 1,
@@ -54,9 +54,9 @@
     "full_gate": 2
   },
   "invocations": {
-    "ubt": 0,
-    "automation": 0,
-    "full_gate": 0
+    "ubt": 1,
+    "automation": 1,
+    "full_gate": 1
   },
   "freeze": {
     "source_commit": "00e4167c84bb312a455a29122bc6fdc82ce11387",
@@ -66,13 +66,13 @@
     "at_utc": "2026-09-02T06:24:37.4863831+00:00"
   },
   "gate": {
-    "report_path": "",
-    "report_sha256": "",
-    "run_id": "",
-    "verified_commit": "",
-    "verified_tree": "",
-    "attestation_parent": "",
-    "attested_at_utc": null
+    "report_path": "C:\\tmp\\AvidScript\\P62Gate\\P62-089a5af-20260902-001\\gate-report.json",
+    "report_sha256": "3746b501f29aaa4e33643fe32e9120686539ef7b1abceff948ea92879f45d969",
+    "run_id": "P62-089a5af-20260902-001",
+    "verified_commit": "089a5afb5d8040b2a282d61b1327d7116ae00641",
+    "verified_tree": "a87ff12b85a02b3bc7d1d60a269ca109e08ff7c3",
+    "attestation_parent": "089a5afb5d8040b2a282d61b1327d7116ae00641",
+    "attested_at_utc": "2026-09-02T06:40:28.6992554+00:00"
   },
   "protected_dirty": [
     {
@@ -94,7 +94,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "attest -Phase 62 -GateReportPath <path>",
-  "revision": 18,
-  "updated_at_utc": "2026-09-02T06:24:37.4915385+00:00"
+  "next_action": "close -Phase 62",
+  "revision": 19,
+  "updated_at_utc": "2026-09-02T06:40:28.7017768+00:00"
 }

@@ -1,28 +1,30 @@
 # Phase 62 收尾记录
 
-状态：架构冻结候选，尚未开始产品实现
+状态：已完成并通过集中 Gate
 
-## 目标
+## 交付结果
 
-交付 UE5.8 Win64 的确定性 Cook/Shipping C# WASM 闭环，包括预编译 artifact、资源依赖、Shipping 安全策略、
-Session 故障隔离和版本兼容。
+- 建立逻辑模块 ID、内容寻址 Runtime package 与 catalog 解析，组件不再依赖开发机绝对 manifest 路径。
+- 打通 C# 到 WASM、Wasmtime 预编译 artifact、Generated Type bundle、Cook staging、回执校验与
+  Development/Shipping 发布闭环。
+- Development 使用 `prefer_precompiled + wasmtime_jit fallback`；Shipping 强制
+  `require_precompiled`，并移除调试映射、构建输入和进程证明等非运行时内容。
+- 为 Wasmtime Store 加入 fuel、epoch、内存和调用深度预算；Session 对 guest trap、超预算、
+  reload 失败和模块故障执行实例级隔离，不拖垮其他脚本实例。
+- 固化版本、CPU feature、artifact hash、依赖图和 binding package 的 fail-closed 兼容检查。
 
-## 已完成
+## Gate 证据
 
-- 盘点现有 C# build、Runtime Artifact Loader、Generated Type Cook bundle、Wasmtime backend 与历史 packaged smoke；
-- 确认发布阻塞：Component 开发路径、脚本 `NonUFS` staging、进程内临时 attestation、缺失 Store 执行预算、
-  干净 checkout 无 release orchestrator、缺输入静默降级和 Wasmtime fallback contract 不一致；
-- 冻结“逻辑模块引用 + 内容寻址发布包 + CookedPackage trust + Session fault containment”的 P62 架构；
-- 拆分 P62.A-D 四个完整能力批次，并限定集中构建与 BuildCookRun 预算。
+- 干净提交架构检查通过，Agent Harness 自审通过。
+- 固定 .NET 8.0.416 套件：`284/284`。
+- 发布、Cook、回执、reload 与 Wasmtime 工具链 PowerShell 合同全部通过。
+- UE5.8 `AvidTPSTemplateEditor Win64 Development` 无清理 UBT：`Result: Succeeded`。
+- 完整 AvidScript Automation：`429/429`，`0 Failed`、`0 NotRun`、Queue Empty、进程退出码 `0`。
+- 正式报告绑定提交 `089a5afb5d8040b2a282d61b1327d7116ae00641` 与 tree
+  `a87ff12b85a02b3bc7d1d60a269ca109e08ff7c3`。
 
 ## 当前边界
 
-- 尚未创建 Phase 62 状态或提交产品代码；
-- 当前 `AvidScriptGenerated` 仍只支持单个 JIT Cook bundle；
-- 当前 `UAvidScriptComponent` 仍保存 manifest 文件路径；
-- 当前 packaged evidence 不证明真实 C# Wasmtime precompiled Shipping 闭环；
-- Android/iOS AOT 属于 Phase 63。
-
-## 下一步
-
-完成架构文档提交后启动 Phase 62 状态机，进入 P62.A 模块 catalog、package schema、publisher 与 Runtime resolver 实现。
+- 已验证平台为 UE5.8 Win64 Development/Shipping。
+- Android/iOS 的 AOT、平台 ABI、包格式和设备端验收转入 Phase 63。
+- 自动化证据不替代真实项目的 PIE 操作、设备安装、网络拓扑和长时间游戏运行验收。
