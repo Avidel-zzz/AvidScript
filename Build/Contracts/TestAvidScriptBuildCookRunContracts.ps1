@@ -452,6 +452,39 @@ try {
         }
     }
 
+    Invoke-BuildCookRunContractCase 'packaged oracle selects the real configuration binary' {
+        $OracleFixtureRoot = Join-Path $FixtureRoot 'PackagedOracleExecutable'
+        $PackageRoot = Join-Path $OracleFixtureRoot 'Windows'
+        $BinaryRoot = Join-Path $PackageRoot 'Game/Binaries/Win64'
+        [void][System.IO.Directory]::CreateDirectory($BinaryRoot)
+        $LauncherPath = Join-Path $PackageRoot 'Game.exe'
+        $DevelopmentPath = Join-Path $BinaryRoot 'Game.exe'
+        $ShippingPath = Join-Path $BinaryRoot 'Game-Win64-Shipping.exe'
+        foreach ($Path in @($LauncherPath, $DevelopmentPath, $ShippingPath)) {
+            [System.IO.File]::WriteAllBytes($Path, [byte[]](0x4d, 0x5a))
+        }
+        . $PackagedOraclePath `
+            -ArchiveRoot $OracleFixtureRoot `
+            -TargetName Game `
+            -ModuleId test.module `
+            -Configuration Development `
+            -TimeoutSeconds 10
+        $ResolvedDevelopment = Resolve-AvidScriptPackagedOracleExecutable `
+            -ResolvedArchiveRoot $OracleFixtureRoot `
+            -ResolvedTargetName Game `
+            -ResolvedConfiguration Development
+        $ResolvedShipping = Resolve-AvidScriptPackagedOracleExecutable `
+            -ResolvedArchiveRoot $OracleFixtureRoot `
+            -ResolvedTargetName Game `
+            -ResolvedConfiguration Shipping
+        Assert-BuildCookRunContract `
+            ($ResolvedDevelopment -ceq [System.IO.Path]::GetFullPath($DevelopmentPath)) `
+            'Development resolved the launcher instead of the real game binary.'
+        Assert-BuildCookRunContract `
+            ($ResolvedShipping -ceq [System.IO.Path]::GetFullPath($ShippingPath)) `
+            'Shipping resolved the launcher instead of the configuration binary.'
+    }
+
     Invoke-BuildCookRunContractCase 'packaged oracle process and report contract' {
         foreach ($RequiredToken in @(
                 'Resolve-AvidScriptPackagedOracleExecutable',
@@ -497,6 +530,7 @@ try {
             'archive_safety',
             'receipt_exact_stale_ambiguous',
             'receipt_validator_handoff',
+            'packaged_oracle_configuration_binary',
             'packaged_oracle_process_report'
         )
     } | ConvertTo-Json -Depth 4 -Compress

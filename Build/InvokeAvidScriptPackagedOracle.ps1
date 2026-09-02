@@ -112,13 +112,26 @@ function Get-AvidScriptPackagedOracleProperty {
 function Resolve-AvidScriptPackagedOracleExecutable {
     param(
         [Parameter(Mandatory = $true)][string]$ResolvedArchiveRoot,
-        [Parameter(Mandatory = $true)][string]$ResolvedTargetName
+        [Parameter(Mandatory = $true)][string]$ResolvedTargetName,
+        [ValidateSet('Development', 'Shipping')]
+        [Parameter(Mandatory = $true)][string]$ResolvedConfiguration
     )
 
-    $Candidates = @(
-        (Join-Path $ResolvedArchiveRoot "Windows/$ResolvedTargetName.exe"),
-        (Join-Path $ResolvedArchiveRoot "$ResolvedTargetName.exe")
-    )
+    $BinaryName = if ($ResolvedConfiguration -ceq 'Shipping') {
+        "$ResolvedTargetName-Win64-Shipping.exe"
+    }
+    else {
+        "$ResolvedTargetName.exe"
+    }
+    $Candidates = [System.Collections.Generic.List[string]]::new()
+    foreach ($PackageRoot in @(
+            (Join-Path $ResolvedArchiveRoot 'Windows'),
+            $ResolvedArchiveRoot)) {
+        $Candidates.Add((Join-Path `
+                    $PackageRoot `
+                    "$ResolvedTargetName/Binaries/Win64/$BinaryName"))
+        $Candidates.Add((Join-Path $PackageRoot "$ResolvedTargetName.exe"))
+    }
     foreach ($Candidate in $Candidates) {
         if (Test-Path -LiteralPath $Candidate -PathType Leaf) {
             return [System.IO.Path]::GetFullPath($Candidate)
@@ -158,10 +171,14 @@ function Invoke-AvidScriptPackagedOracle {
     }
     $ExecutablePath = Resolve-AvidScriptPackagedOracleExecutable `
         -ResolvedArchiveRoot $ResolvedArchiveRoot `
-        -ResolvedTargetName $TargetName
-    $ExecutableRoot = Split-Path -Parent $ExecutablePath
+        -ResolvedTargetName $TargetName `
+        -ResolvedConfiguration $Configuration
+    $PackageRoot = Join-Path $ResolvedArchiveRoot 'Windows'
+    if (-not (Test-Path -LiteralPath $PackageRoot -PathType Container)) {
+        $PackageRoot = $ResolvedArchiveRoot
+    }
     $EvidenceRoot = Join-Path `
-        $ExecutableRoot `
+        $PackageRoot `
         "$TargetName/Saved/AvidScript/PackagedOracle"
     [void][System.IO.Directory]::CreateDirectory($EvidenceRoot)
     $RunId = "$Configuration-$PID-$([Guid]::NewGuid().ToString('N'))"
@@ -183,7 +200,7 @@ function Invoke-AvidScriptPackagedOracle {
     )
     $StartInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $StartInfo.FileName = $ExecutablePath
-    $StartInfo.WorkingDirectory = $ExecutableRoot
+    $StartInfo.WorkingDirectory = $PackageRoot
     $StartInfo.UseShellExecute = $false
     $StartInfo.CreateNoWindow = $true
     $StartInfo.RedirectStandardOutput = $true
