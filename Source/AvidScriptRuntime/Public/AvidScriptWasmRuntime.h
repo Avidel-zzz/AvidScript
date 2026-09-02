@@ -215,6 +215,13 @@ public:
 	bool SetSupplementalTypedHostImports(
 		TConstArrayView<FAvidScriptVmTypedHostImport> Imports,
 		FString& OutError);
+	bool ConfigureExecutionBudget(
+		const FAvidScriptVmLoadConfig::FExecutionBudget& InBudget,
+		FString& OutError);
+	void RecordPreparedVmFailure(
+		const FString& ExportName,
+		const FAvidScriptVmError& Error,
+		FAvidScriptWasmSmokeResult& OutResult);
 	bool BeginPlay(FAvidScriptWasmSmokeResult& OutResult);
 	bool Tick(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult);
 	bool Tick(
@@ -675,6 +682,7 @@ private:
 	TUniquePtr<IAvidScriptVmBackend> VmBackend;
 	FAvidScriptVmBackendSelection BackendSelection;
 	FAvidScriptVmBackendInfo ActiveBackendInfo;
+	FAvidScriptVmLoadConfig::FExecutionBudget ExecutionBudget;
 	FAvidScriptCachedVmExport BeginPlayExport;
 	FAvidScriptCachedVmExport TickExport;
 	FAvidScriptCachedVmExport EndPlayExport;

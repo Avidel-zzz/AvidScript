@@ -46,7 +46,9 @@ void AppendWasmExport(
 	Payload.Add(FunctionIndex);
 }
 
-TArray<uint8> BuildGeneratedTypeSessionModule(const int32 ReturnConstant = INDEX_NONE)
+TArray<uint8> BuildGeneratedTypeSessionModule(
+	const int32 ReturnConstant = INDEX_NONE,
+	const bool bTrapGeneratedExport = false)
 {
 	check(ReturnConstant == INDEX_NONE || ReturnConstant >= 0 && ReturnConstant < 64);
 	TArray<uint8> Module = {
@@ -68,7 +70,13 @@ TArray<uint8> BuildGeneratedTypeSessionModule(const int32 ReturnConstant = INDEX
 		"avid_ue_0123456789abcdef0123456789abcdef",
 		1);
 	AppendWasmSection(Module, 0x07, ExportSection);
-	const TArray<uint8> CodeSection = ReturnConstant == INDEX_NONE
+	const TArray<uint8> CodeSection = bTrapGeneratedExport
+		? TArray<uint8>{
+			0x02,
+			0x02, 0x00, 0x0b,
+			0x03, 0x00, 0x00, 0x0b
+		}
+		: ReturnConstant == INDEX_NONE
 		? TArray<uint8>{
 			0x02,
 			0x02, 0x00, 0x0b,
@@ -282,6 +290,63 @@ bool FAvidScriptGeneratedTypeSessionTest::RunTest(const FString& Parameters)
 	TestTrue(
 		TEXT("Generated receiver route tears down explicitly"),
 		Session.ClearGeneratedTypeInstance(Error));
+
+	FAvidScriptRuntimeSession TrapSession;
+	TestTrue(
+		TEXT("Trap Session owns the generated receiver route"),
+		TrapSession.ConfigureGeneratedTypeInstance(
+			*Receiver,
+			ReceiverHandle,
+			0,
+			Registry,
+			Error));
+	TrapSession.SetBackendSelectionForTesting(Selection);
+	const TArray<uint8> TrapModule =
+		BuildGeneratedTypeSessionModule(INDEX_NONE, true);
+	FAvidScriptWasmReloadResult TrapLoadResult;
+	TestTrue(
+		TEXT("Generated trap fixture loads"),
+		TrapSession.LoadInitialModule(
+			TrapModule.GetData(),
+			TrapModule.Num(),
+			Manifest,
+			TrapLoadResult));
+	TestFalse(
+		TEXT("Generated prepared trap fails closed"),
+		FAvidScriptGeneratedTypeDispatcher::Invoke(
+			Receiver.Get(),
+			0,
+			0,
+			TConstArrayView<FAvidScriptGeneratedCallArgument>(),
+			&ScriptResult));
+	const FAvidScriptRuntimeSessionSnapshot TrapSnapshot =
+		TrapSession.GetSnapshot();
+	TestTrue(TEXT("Generated trap quarantines its Session"), TrapSnapshot.bFaultQuarantined);
+	TestFalse(TEXT("Generated trap unloads its Runtime"), TrapSnapshot.bHasActiveRuntime);
+	TestEqual(
+		TEXT("Generated trap keeps its root category"),
+		TrapSnapshot.FaultCategory,
+		FString(TEXT("guest_trap")));
+	TestEqual(
+		TEXT("Generated trap records its export"),
+		TrapSnapshot.FaultExportName,
+		FString(GeneratedExportName));
+	TestEqual(TEXT("Generated trap records one root fault"), TrapSnapshot.FaultCount, 1);
+	TestFalse(
+		TEXT("Quarantined generated route rejects repeated entry"),
+		FAvidScriptGeneratedTypeDispatcher::Invoke(
+			Receiver.Get(),
+			0,
+			0,
+			TConstArrayView<FAvidScriptGeneratedCallArgument>(),
+			&ScriptResult));
+	TestEqual(
+		TEXT("Repeated generated entry is counted"),
+		TrapSession.GetSnapshot().FaultedEntryRejectCount,
+		1);
+	TestTrue(
+		TEXT("Trap generated receiver route tears down explicitly"),
+		TrapSession.ClearGeneratedTypeInstance(Error));
 	return true;
 }
 

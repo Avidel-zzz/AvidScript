@@ -314,6 +314,16 @@ double MeasureElapsedMs(double StartSeconds)
 	return FMath::Max((FPlatformTime::Seconds() - StartSeconds) * 1000.0, AvidScriptMinimumMeasuredMs);
 }
 
+constexpr int32 MaxDiagnosticDetailsChars = 2048;
+constexpr int32 MaxDiagnosticMessageChars = 4096;
+constexpr int32 MaxDiagnosticFrameCount = 32;
+constexpr int32 MaxDiagnosticFrameTextChars = 512;
+
+FString BoundDiagnosticText(const FString& Text, const int32 MaxChars)
+{
+	return Text.Len() <= MaxChars ? Text : Text.Left(MaxChars);
+}
+
 void PrepareResult(
 	FAvidScriptWasmSmokeResult& OutResult,
 	const FString& ModuleId,
@@ -347,14 +357,18 @@ void SetFailure(
 		? FString::Printf(TEXT(" | import=%s.%s"), ImportModuleName.IsEmpty() ? TEXT("<none>") : *ImportModuleName, ImportName.IsEmpty() ? TEXT("<none>") : *ImportName)
 		: FString();
 
-	OutResult.ErrorMessage = FString::Printf(
+	const FString BoundedDetails = BoundDiagnosticText(
+		Details,
+		MaxDiagnosticDetailsChars);
+	OutResult.ErrorMessage = BoundDiagnosticText(FString::Printf(
 		TEXT("AvidScript VM error | backend=VM | module=%s | export=%s%s | category=%s | details=%s | next=%s"),
 		ModuleId.IsEmpty() ? TEXT("<none>") : *ModuleId,
 		ExportName.IsEmpty() ? TEXT("<none>") : *ExportName,
 		*ImportText,
 		*Category,
-		*Details,
-		*NextAction);
+		*BoundedDetails,
+		*NextAction),
+		MaxDiagnosticMessageChars);
 
 	UE_LOG(LogAvidScriptWasmRuntime, Warning, TEXT("%s"), *OutResult.ErrorMessage);
 }
@@ -372,13 +386,19 @@ void SetFailureFromVmError(
 	{
 		NextAction = TEXT("skip this script instance and report the guest ABI mismatch");
 	}
-	else if (Category == TEXT("host_import_failed"))
+	else if (Category == TEXT("host_import_failed")
+		|| Category == TEXT("host_call_budget_exhausted"))
 	{
 		NextAction = TEXT("stop this script instance and surface the host import failure");
 	}
-	else if (Category == TEXT("trap"))
+	else if (Category == TEXT("guest_trap")
+		|| Category == TEXT("guest_memory_fault")
+		|| Category == TEXT("execution_stack_exhausted")
+		|| Category == TEXT("execution_fuel_exhausted")
+		|| Category == TEXT("execution_interrupted")
+		|| Category == TEXT("memory_limit_exceeded"))
 	{
-		NextAction = TEXT("stop ticking this script instance and surface the trap to UE logs");
+		NextAction = TEXT("quarantine this script Session and surface the bounded VM diagnostic");
 	}
 
 	SetFailure(
@@ -391,14 +411,20 @@ void SetFailureFromVmError(
 		Error.ImportModuleName,
 		Error.ImportName);
 
+	const int32 VmFrameCount = FMath::Min(
+		Error.StackFrames.Num(),
+		MaxDiagnosticFrameCount - 2);
+	const TConstArrayView<FAvidScriptVmStackFrame> BoundedVmFrames(
+		Error.StackFrames.GetData(),
+		VmFrameCount);
 	if (DebugMap != nullptr)
 	{
-		DebugMap->MapFrames(Error.StackFrames, OutResult.DiagnosticFrames);
+		DebugMap->MapFrames(BoundedVmFrames, OutResult.DiagnosticFrames);
 	}
 	else
 	{
-		OutResult.DiagnosticFrames.Reset(Error.StackFrames.Num());
-		for (const FAvidScriptVmStackFrame& VmFrame : Error.StackFrames)
+		OutResult.DiagnosticFrames.Reset(VmFrameCount);
+		for (const FAvidScriptVmStackFrame& VmFrame : BoundedVmFrames)
 		{
 			FAvidScriptWasmDiagnosticFrame& Frame = OutResult.DiagnosticFrames.AddDefaulted_GetRef();
 			Frame.FunctionIndex = VmFrame.FunctionIndex;
@@ -427,6 +453,28 @@ void SetFailureFromVmError(
 		HostEntryFrame.Kind = EAvidScriptWasmDiagnosticFrameKind::HostEntry;
 		HostEntryFrame.FunctionName = ExportName;
 		HostEntryFrame.RawFunctionToken = ExportName;
+	}
+	if (OutResult.DiagnosticFrames.Num() > MaxDiagnosticFrameCount)
+	{
+		OutResult.DiagnosticFrames.SetNum(MaxDiagnosticFrameCount);
+	}
+	for (FAvidScriptWasmDiagnosticFrame& Frame : OutResult.DiagnosticFrames)
+	{
+		Frame.RawFunctionToken = BoundDiagnosticText(
+			Frame.RawFunctionToken,
+			MaxDiagnosticFrameTextChars);
+		Frame.FunctionName = BoundDiagnosticText(
+			Frame.FunctionName,
+			MaxDiagnosticFrameTextChars);
+		Frame.SourceFile = BoundDiagnosticText(
+			Frame.SourceFile,
+			MaxDiagnosticFrameTextChars);
+		Frame.SourceKind = BoundDiagnosticText(
+			Frame.SourceKind,
+			MaxDiagnosticFrameTextChars);
+		Frame.SourceSha256 = BoundDiagnosticText(
+			Frame.SourceSha256,
+			MaxDiagnosticFrameTextChars);
 	}
 }
 
@@ -799,6 +847,35 @@ bool FAvidScriptWasmRuntimeInstance::SetSupplementalTypedHostImports(
 	return true;
 }
 
+bool FAvidScriptWasmRuntimeInstance::ConfigureExecutionBudget(
+	const FAvidScriptVmLoadConfig::FExecutionBudget& InBudget,
+	FString& OutError)
+{
+	OutError.Reset();
+	if (IsLoaded())
+	{
+		OutError = TEXT("execution budget must be configured before VM load");
+		return false;
+	}
+	ExecutionBudget = InBudget;
+	return true;
+}
+
+void FAvidScriptWasmRuntimeInstance::RecordPreparedVmFailure(
+	const FString& ExportName,
+	const FAvidScriptVmError& Error,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	SetFailureFromVmError(
+		OutResult,
+		ModuleId,
+		ExportName,
+		Error,
+		DebugMap.Get());
+	FAvidScriptLifecycleTransitionResult LifecycleResult;
+	LifecycleState.MarkFaulted(LifecycleResult);
+}
+
 bool FAvidScriptWasmRuntimeInstance::BuildPreparedDynamicHostImports(
 	FString& OutError)
 {
@@ -1096,6 +1173,7 @@ bool FAvidScriptWasmRuntimeInstance::LoadArtifactView(
 	}
 
 	FAvidScriptVmLoadConfig Config;
+	Config.ExecutionBudget = ExecutionBudget;
 	Config.HostDispatcher = this;
 	Config.TypedHostDispatcher = this;
 	Config.TypedHostImports = TypedHostImports;

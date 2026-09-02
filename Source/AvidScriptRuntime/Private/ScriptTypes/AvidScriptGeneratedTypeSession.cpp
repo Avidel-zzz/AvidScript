@@ -549,7 +549,10 @@ bool FAvidScriptRuntimeSession::InvokeGeneratedTypeMember(
 	const TConstArrayView<FAvidScriptGeneratedCallArgument> Arguments,
 	void* Result)
 {
-	if (!IsInGameThread() || IsOperationActive() || !IsLiveLoaded()
+	FAvidScriptWasmSmokeResult EntryFailure;
+	if (!IsInGameThread()
+		|| !CanEnterGuest(TEXT("<generated_type>"), EntryFailure)
+		|| !IsLiveLoaded()
 		|| !GeneratedTypeInstance
 		|| GeneratedTypeInstance->Receiver.Get() != &Receiver
 		|| GeneratedTypeInstance->ReceiverHandle != ReceiverHandle
@@ -558,6 +561,14 @@ bool FAvidScriptRuntimeSession::InvokeGeneratedTypeMember(
 	{
 		return false;
 	}
+	const FAvidScriptGeneratedTypePlan* const Type =
+		GeneratedTypeInstance->Registry->FindTypeByOrdinal(TypeOrdinal);
+	if (Type == nullptr
+		|| !Type->Members.IsValidIndex(static_cast<int32>(MemberOrdinal)))
+	{
+		return false;
+	}
+	const FString& ExportName = Type->Members[MemberOrdinal].ExportName;
 
 	const FAvidScriptGeneratedPreparedTypeRoute& Route =
 		GeneratedTypeInstance->PreparedTypeRoutes[TypeOrdinal];
@@ -596,16 +607,45 @@ bool FAvidScriptRuntimeSession::InvokeGeneratedTypeMember(
 
 	FAvidScriptVmCallResult CallResult;
 	FAvidScriptVmError Error;
-	TGuardValue<int32> GuestCallGuard(ActiveGuestCallDepth, ActiveGuestCallDepth + 1);
+	if ((Shape == EGeneratedCallShape::ReceiverI32 && Result == nullptr)
+		|| (Shape != EGeneratedCallShape::ReceiverI32 && Result != nullptr))
+	{
+		return false;
+	}
+	bool bCalled = false;
+	bool bResultValid = false;
+	{
+		TGuardValue<int32> GuestCallGuard(
+			ActiveGuestCallDepth,
+			ActiveGuestCallDepth + 1);
+		bCalled = Call.Call(
+			Frame,
+			Error,
+			Shape == EGeneratedCallShape::ReceiverI32
+				? &CallResult
+				: nullptr);
+		bResultValid = bCalled
+			&& (Shape != EGeneratedCallShape::ReceiverI32
+				|| CallResult.CellCount == 1);
+	}
+	if (!bCalled)
+	{
+		FAvidScriptWasmSmokeResult Failure;
+		LiveRuntime->RecordPreparedVmFailure(
+			ExportName,
+			Error,
+			Failure);
+		QuarantineFaultedRuntime(Failure);
+		return false;
+	}
 	if (Shape == EGeneratedCallShape::ReceiverI32)
 	{
-		if (Result == nullptr || !Call.Call(Frame, Error, &CallResult)
-			|| CallResult.CellCount != 1)
+		if (!bResultValid)
 		{
 			return false;
 		}
 		*static_cast<int32*>(Result) = static_cast<int32>(CallResult.Cells[0]);
 		return true;
 	}
-	return Result == nullptr && Call.Call(Frame, Error);
+	return bResultValid;
 }

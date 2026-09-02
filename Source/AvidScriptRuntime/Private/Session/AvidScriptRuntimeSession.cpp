@@ -137,6 +137,20 @@ void SetSessionFaultedFailure(
 		ExportName.IsEmpty() ? TEXT("<none>") : *ExportName,
 		FaultCategory.IsEmpty() ? TEXT("unknown") : *FaultCategory);
 }
+
+FAvidScriptVmLoadConfig::FExecutionBudget MakeSessionExecutionBudget(
+	const FAvidScriptVmBackendSelection& Selection)
+{
+	FAvidScriptVmLoadConfig::FExecutionBudget Budget;
+	Budget.MaxHostCallsPerEntry = 100000;
+	if (Selection.BackendKind == EAvidScriptVmBackendKind::Wasmtime)
+	{
+		Budget.FuelPerEntry = 50000000;
+		Budget.EpochDeadlineTicks = 1;
+		Budget.MaxLinearMemoryBytes = UINT64_C(64) << 20;
+	}
+	return Budget;
+}
 } // namespace
 
 FAvidScriptRuntimeSession::FAvidScriptRuntimeSession()
@@ -199,6 +213,19 @@ bool FAvidScriptRuntimeSession::LoadEmbeddedSmoke(FAvidScriptWasmReloadResult& O
 	TUniquePtr<FAvidScriptWasmRuntimeInstance> CandidateRuntime =
 		MakeUnique<FAvidScriptWasmRuntimeInstance>(BackendSelection);
 	FAvidScriptWasmSmokeResult RuntimeResult;
+	FString BudgetError;
+	if (!CandidateRuntime->ConfigureExecutionBudget(
+			MakeSessionExecutionBudget(BackendSelection),
+			BudgetError))
+	{
+		SetReloadFailure(
+			OutResult,
+			TEXT("<runtime>"),
+			TEXT("execution_budget_invalid"),
+			BudgetError,
+			TEXT("fix the Session execution policy before loading the script"));
+		return false;
+	}
 	if (!CandidateRuntime->LoadEmbeddedSmokeModule(RuntimeResult) ||
 		!CandidateRuntime->ValidateRequiredExports(Manifest.RequiredExports, RuntimeResult))
 	{
@@ -588,9 +615,14 @@ bool FAvidScriptRuntimeSession::Tick(float DeltaSeconds, FAvidScriptWasmSmokeRes
 			bSucceeded = PumpReadyContinuations(OutResult);
 		}
 	}
-	return bSucceeded
+	const bool bCompleted = bSucceeded
 		&& (IsDebugExecutionSuspended()
 			|| InboundHandlers->PumpDeferred(OutResult));
+	if (!bCompleted)
+	{
+		QuarantineFaultedRuntime(OutResult);
+	}
+	return bCompleted;
 }
 
 bool FAvidScriptRuntimeSession::DispatchEvent(
@@ -733,10 +765,12 @@ bool FAvidScriptRuntimeSession::PumpReadyContinuations(
 
 bool FAvidScriptRuntimeSession::CanEnterGuest(
 	const FString& ExportName,
-	FAvidScriptWasmSmokeResult& OutResult) const
+	FAvidScriptWasmSmokeResult& OutResult)
 {
 	if (bFaultQuarantined)
 	{
+		++FaultedEntryRejectCount;
+		++SuppressedFaultDiagnosticCount;
 		SetSessionFaultedFailure(
 			FaultedModuleId,
 			ExportName,
@@ -776,11 +810,16 @@ void FAvidScriptRuntimeSession::QuarantineFaultedRuntime(
 
 	const FString FailedModuleId = LiveManifest.ModuleId;
 	const FString RootCategory = Failure.ErrorCategory;
+	const FString FailedExportName = Failure.ExportName;
+	const FString FailedDiagnostic = Failure.ErrorMessage.Left(4096);
 	FAvidScriptWasmSmokeResult IgnoredUnloadResult;
 	StopAndUnload(IgnoredUnloadResult);
 	bFaultQuarantined = true;
 	FaultedModuleId = FailedModuleId;
 	FaultCategory = RootCategory;
+	FaultExportName = FailedExportName;
+	FaultDiagnostic = FailedDiagnostic;
+	++FaultCount;
 }
 
 void FAvidScriptRuntimeSession::ClearFaultQuarantine()
@@ -788,6 +827,8 @@ void FAvidScriptRuntimeSession::ClearFaultQuarantine()
 	bFaultQuarantined = false;
 	FaultedModuleId.Reset();
 	FaultCategory.Reset();
+	FaultExportName.Reset();
+	FaultDiagnostic.Reset();
 }
 
 bool FAvidScriptRuntimeSession::IsDebugExecutionSuspended() const
@@ -988,7 +1029,6 @@ bool FAvidScriptRuntimeSession::EndPlayLive(FAvidScriptWasmSmokeResult& OutResul
 	DelegateSubscriptions->UnbindActive();
 	InboundHandlers->UnbindActive();
 	Continuations->Teardown();
-	TGuardValue<int32> GuestCallGuard(ActiveGuestCallDepth, ActiveGuestCallDepth + 1);
 	if (!IsLiveLoaded())
 	{
 		OutResult = FAvidScriptWasmSmokeResult();
@@ -1002,11 +1042,21 @@ bool FAvidScriptRuntimeSession::EndPlayLive(FAvidScriptWasmSmokeResult& OutResul
 		return false;
 	}
 
-	const bool bSucceeded = LiveRuntime->EndPlay(OutResult);
+	bool bSucceeded = false;
+	{
+		TGuardValue<int32> GuestCallGuard(
+			ActiveGuestCallDepth,
+			ActiveGuestCallDepth + 1);
+		bSucceeded = LiveRuntime->EndPlay(OutResult);
+	}
 	HostContext.Continuations = nullptr;
 	LiveRuntime->SetHostContext(HostContext);
 	Continuations->ReleaseRetiredEndpoint();
-	if (bSucceeded && HostContext.ObjectRegistry != nullptr)
+	if (!bSucceeded)
+	{
+		QuarantineFaultedRuntime(OutResult);
+	}
+	else if (HostContext.ObjectRegistry != nullptr)
 	{
 		ObjectOwnership->Cleanup(*HostContext.ObjectRegistry);
 	}
@@ -1228,6 +1278,7 @@ bool FAvidScriptRuntimeSession::ResumeDebugExecution(
 	if (!bDispatched)
 	{
 		Debugger->OnRuntimeGenerationChanged();
+		QuarantineFaultedRuntime(OutResult);
 		return false;
 	}
 
@@ -1355,6 +1406,12 @@ FAvidScriptRuntimeSessionSnapshot FAvidScriptRuntimeSession::GetSnapshot() const
 		? FaultedModuleId
 		: GetLiveModuleId();
 	Snapshot.FaultCategory = FaultCategory;
+	Snapshot.FaultExportName = FaultExportName;
+	Snapshot.FaultDiagnostic = FaultDiagnostic;
+	Snapshot.FaultCount = FaultCount;
+	Snapshot.FaultedEntryRejectCount = FaultedEntryRejectCount;
+	Snapshot.SuppressedFaultDiagnosticCount =
+		SuppressedFaultDiagnosticCount;
 	Snapshot.TickCallCount = GetLiveTickCallCount();
 	Snapshot.PendingTimerCount = GetLivePendingTimerCount();
 	Snapshot.PendingContinuationCount = GetLivePendingContinuationCount();
@@ -1583,6 +1640,19 @@ bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 		MakeUnique<FAvidScriptWasmRuntimeInstance>(Artifact.BackendSelection);
 	FAvidScriptWasmSmokeResult RuntimeResult;
 	FString SupplementalImportError;
+	FString BudgetError;
+	if (!CandidateRuntime->ConfigureExecutionBudget(
+			MakeSessionExecutionBudget(Artifact.BackendSelection),
+			BudgetError))
+	{
+		SetReloadFailure(
+			OutResult,
+			TEXT("<runtime>"),
+			TEXT("execution_budget_invalid"),
+			BudgetError,
+			TEXT("fix the Session execution policy before loading the script"));
+		return false;
+	}
 	if (!CandidateRuntime->SetSupplementalTypedHostImports(
 			GeneratedPropertyImports,
 			SupplementalImportError))

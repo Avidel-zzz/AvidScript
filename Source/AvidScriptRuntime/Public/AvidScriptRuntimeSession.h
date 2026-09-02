@@ -26,6 +26,11 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeSessionSnapshot
 	bool bFaultQuarantined = false;
 	FString ModuleId;
 	FString FaultCategory;
+	FString FaultExportName;
+	FString FaultDiagnostic;
+	int32 FaultCount = 0;
+	int32 FaultedEntryRejectCount = 0;
+	int32 SuppressedFaultDiagnosticCount = 0;
 	int32 TickCallCount = 0;
 	int32 PendingTimerCount = 0;
 	int32 PendingContinuationCount = 0;
@@ -215,7 +220,7 @@ private:
 	bool PumpReadyContinuations(FAvidScriptWasmSmokeResult& OutResult);
 	bool CanEnterGuest(
 		const FString& ExportName,
-		FAvidScriptWasmSmokeResult& OutResult) const;
+		FAvidScriptWasmSmokeResult& OutResult);
 	void QuarantineFaultedRuntime(
 		const FAvidScriptWasmSmokeResult& Failure);
 	void ClearFaultQuarantine();
@@ -244,6 +249,11 @@ private:
 	bool bFaultQuarantined = false;
 	FString FaultedModuleId;
 	FString FaultCategory;
+	FString FaultExportName;
+	FString FaultDiagnostic;
+	int32 FaultCount = 0;
+	int32 FaultedEntryRejectCount = 0;
+	int32 SuppressedFaultDiagnosticCount = 0;
 #if WITH_DEV_AUTOMATION_TESTS
 	TFunction<void(IAvidScriptBindingHostEffectJournal*)>
 		CandidateBeginPlayObserverForTesting;

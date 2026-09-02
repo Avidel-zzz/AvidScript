@@ -878,6 +878,14 @@ bool FAvidScriptWasmDiagnosticRuntimeIntegrationTest::RunTest(const FString& Par
 		QuarantinedSnapshot.FaultCategory,
 		FString(TEXT("trap")));
 	TestEqual(
+		TEXT("Quarantine preserves the failing export"),
+		QuarantinedSnapshot.FaultExportName,
+		FString(TEXT("avid_on_tick")));
+	TestEqual(TEXT("Session records one root fault"), QuarantinedSnapshot.FaultCount, 1);
+	TestTrue(
+		TEXT("Stored fault diagnostic is bounded"),
+		QuarantinedSnapshot.FaultDiagnostic.Len() <= 4096);
+	TestEqual(
 		TEXT("Quarantine clears pending timers"),
 		QuarantinedSnapshot.PendingTimerCount,
 		0);
@@ -893,6 +901,17 @@ bool FAvidScriptWasmDiagnosticRuntimeIntegrationTest::RunTest(const FString& Par
 		TEXT("Repeated guest entry has a stable category"),
 		ReentryResult.ErrorCategory,
 		FString(TEXT("session_faulted")));
+	const FAvidScriptRuntimeSessionSnapshot RejectedSnapshot =
+		TickTrapSession.GetSnapshot();
+	TestEqual(
+		TEXT("Faulted entry rejection is counted"),
+		RejectedSnapshot.FaultedEntryRejectCount,
+		1);
+	TestEqual(
+		TEXT("Duplicate fault logging is suppressed"),
+		RejectedSnapshot.SuppressedFaultDiagnosticCount,
+		1);
+	TestEqual(TEXT("Repeated rejection does not create a new fault"), RejectedSnapshot.FaultCount, 1);
 
 	FString HealthyManifestPath;
 	TestTrue(
@@ -962,7 +981,10 @@ bool FAvidScriptWasmDiagnosticRuntimeIntegrationTest::RunTest(const FString& Par
 	TestTrue(TEXT("rejected catalog cannot leak stale entries"), LegacyBreakpoints.IsEmpty());
 	TestTrue(TEXT("rejected catalog explains the missing map"), !BreakpointCatalogError.IsEmpty());
 	FAvidScriptWasmSmokeResult LegacyTickResult;
-	TestFalse(TEXT("legacy runtime trap is preserved"), LegacySession.TickLive(1.0f / 60.0f, LegacyTickResult));
+	TestFalse(TEXT("legacy runtime trap is preserved"), LegacySession.Tick(1.0f / 60.0f, LegacyTickResult));
+	TestTrue(
+		TEXT("legacy Tick entry also quarantines the Session"),
+		LegacySession.GetSnapshot().bFaultQuarantined);
 	TestTrue(TEXT("legacy trap keeps raw frames"), !LegacyTickResult.DiagnosticFrames.IsEmpty());
 	TestFalse(
 		TEXT("legacy trap does not invent source mapping"),
