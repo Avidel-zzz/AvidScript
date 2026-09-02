@@ -970,6 +970,24 @@ bool FAvidScriptRuntimeArtifactLoaderTest::RunTest(const FString& Parameters)
 		TEXT("Authorized runtime artifact selects Wasmtime serialized"),
 		RuntimeArtifact.BackendSelection.ArtifactFormat,
 		EAvidScriptVmArtifactFormat::WasmtimeSerialized);
+	TestEqual(
+		TEXT("Editor artifact remains process-attested"),
+		RuntimeArtifact.ArtifactTrust,
+		EAvidScriptVmArtifactTrust::Untrusted);
+	TestFalse(
+		TEXT("Loose manifest is not a verified published package"),
+		LoadResult.bVerifiedPublishedPackage);
+	TestFalse(
+		TEXT("Published module loader rejects invalid logical ids before catalog access"),
+		FAvidScriptRuntimeArtifactLoader::LoadPublishedModule(
+			FName(TEXT("Invalid/Module")),
+			FString(),
+			RuntimeArtifact,
+			LoadResult));
+	TestEqual(
+		TEXT("Published module rejection has stable category"),
+		LoadResult.CanonicalResult.ErrorCategory,
+		FString(TEXT("module_id_invalid")));
 	const FString MissingAttestationJson = MakeReloadExecutionJson(
 		CompileResult.Artifact,
 		ArtifactFileName,

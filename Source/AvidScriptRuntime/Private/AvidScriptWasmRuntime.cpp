@@ -996,14 +996,16 @@ bool FAvidScriptWasmRuntimeInstance::LoadArtifact(
 	const FString& InModuleId,
 	const TSharedPtr<const FAvidScriptBindingPackage>& InBindingPackage,
 	const TSharedPtr<const FAvidScriptWasmDebugMap>& InDebugMap,
+	const EAvidScriptVmArtifactTrust ArtifactTrust,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
 	const bool bAuthorizedSerializedArtifact =
 		Artifact.ArtifactFormat ==
 			EAvidScriptVmArtifactFormat::WasmtimeSerialized
-		&& AuthorizeAvidScriptVmArtifact(
-			Artifact.AttestationId,
-			Artifact);
+		&& (ArtifactTrust == EAvidScriptVmArtifactTrust::VerifiedPackage
+			|| AuthorizeAvidScriptVmArtifact(
+				Artifact.AttestationId,
+				Artifact));
 	return LoadArtifactView(
 		Artifact.MakeView(
 			bAuthorizedSerializedArtifact

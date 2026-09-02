@@ -224,8 +224,9 @@ FAvidScriptRuntimeArtifact FAvidScriptRuntimeArtifact::FromCanonicalWasm(
 	return Artifact;
 }
 
-bool FAvidScriptRuntimeArtifactLoader::LoadFromFile(
+static bool LoadRuntimeArtifactFromFile(
 	const FString& ManifestPath,
+	const FAvidScriptResolvedModulePackage* PublishedPackage,
 	FAvidScriptRuntimeArtifact& OutArtifact,
 	FAvidScriptRuntimeArtifactLoadResult& OutResult)
 {
@@ -243,6 +244,24 @@ bool FAvidScriptRuntimeArtifactLoader::LoadFromFile(
 	}
 	const FString& CanonicalManifestPath =
 		OutResult.CanonicalResult.ManifestPath;
+	const bool bUsePersistentPackageTrust = PublishedPackage != nullptr
+		&& PublishedPackage->TrustDomain ==
+			EAvidScriptModulePackageTrustDomain::CookedPackage;
+	OutResult.PackageId = PublishedPackage != nullptr
+		? PublishedPackage->PackageId
+		: FString();
+	OutResult.bVerifiedPublishedPackage = bUsePersistentPackageTrust;
+	if (PublishedPackage != nullptr
+		&& NormalizeArtifactPath(CanonicalManifestPath)
+			!= NormalizeArtifactPath(PublishedPackage->RuntimeManifestPath))
+	{
+		SetArtifactLoadFailure(
+			OutResult,
+			TEXT("package_manifest_mismatch"),
+			TEXT("The resolved package manifest differs from the canonical manifest selected by the loader."),
+			TEXT("republish the module package and catalog as one transaction"));
+		return false;
+	}
 
 	FString ManifestJson;
 	TSharedPtr<FJsonObject> RootObject;
@@ -300,6 +319,10 @@ bool FAvidScriptRuntimeArtifactLoader::LoadFromFile(
 	FString AttestationId;
 	FString Policy;
 	FString Fallback;
+	const bool bHasAttestation =
+		RequireExecutionString(ExecutionObject, TEXT("attestation_id"), AttestationId);
+	const bool bHasFallback =
+		RequireExecutionString(ExecutionObject, TEXT("fallback"), Fallback);
 	if (!RequireExecutionString(ExecutionObject, TEXT("format"), Format)
 		|| !RequireExecutionString(ExecutionObject, TEXT("file"), ExecutionFile)
 		|| !RequireExecutionString(ExecutionObject, TEXT("sha256"), ExecutionSha256)
@@ -315,19 +338,20 @@ bool FAvidScriptRuntimeArtifactLoader::LoadFromFile(
 			ExecutionObject,
 			TEXT("target_triple"),
 			TargetTriple)
-		|| !RequireExecutionString(
-			ExecutionObject,
-			TEXT("attestation_id"),
-			AttestationId)
 		|| !RequireExecutionString(ExecutionObject, TEXT("policy"), Policy)
-		|| !RequireExecutionString(ExecutionObject, TEXT("fallback"), Fallback)
 		|| Format != TEXT("wasmtime_serialized_v1")
 		|| (Policy != TEXT("prefer_precompiled")
 			&& Policy != TEXT("require_precompiled"))
-		|| Fallback != TEXT("wasmtime_jit")
 		|| !IsRuntimeArtifactLowercaseSha256(ExecutionSha256)
 		|| !IsRuntimeArtifactLowercaseSha256(CanonicalSha256)
-		|| !IsRuntimeArtifactLowercaseAttestationId(AttestationId))
+		|| (bUsePersistentPackageTrust
+			? (bHasAttestation
+					&& !IsRuntimeArtifactLowercaseAttestationId(AttestationId))
+				|| (bHasFallback && Fallback != TEXT("wasmtime_jit"))
+			: !bHasAttestation
+				|| !bHasFallback
+				|| Fallback != TEXT("wasmtime_jit")
+				|| !IsRuntimeArtifactLowercaseAttestationId(AttestationId)))
 	{
 		SetArtifactLoadFailure(
 			OutResult,
@@ -347,6 +371,17 @@ bool FAvidScriptRuntimeArtifactLoader::LoadFromFile(
 			TEXT("execution_path_invalid"),
 			TEXT("The serialized artifact path is absolute, escapes its allowed roots, or has the wrong extension."),
 			TEXT("publish cwasm beside the canonical manifest"));
+		return false;
+	}
+	if (PublishedPackage != nullptr
+		&& NormalizeArtifactPath(OutResult.ExecutionPath)
+			!= NormalizeArtifactPath(PublishedPackage->PrecompiledArtifactPath))
+	{
+		SetArtifactLoadFailure(
+			OutResult,
+			TEXT("package_execution_mismatch"),
+			TEXT("The runtime manifest selected a precompiled artifact outside the resolved package contract."),
+			TEXT("republish the module package and catalog as one transaction"));
 		return false;
 	}
 	if (!FPaths::FileExists(OutResult.ExecutionPath))
@@ -408,7 +443,8 @@ bool FAvidScriptRuntimeArtifactLoader::LoadFromFile(
 	VmArtifact.CompilerBuildIdentity = CompilerBuildIdentity;
 	VmArtifact.TargetTriple = TargetTriple;
 	VmArtifact.AttestationId = AttestationId;
-	if (!AuthorizeAvidScriptVmArtifact(AttestationId, VmArtifact))
+	if (!bUsePersistentPackageTrust
+		&& !AuthorizeAvidScriptVmArtifact(AttestationId, VmArtifact))
 	{
 		return ApplyJitFallback(
 			TEXT("execution_attestation_invalid"),
@@ -425,10 +461,100 @@ bool FAvidScriptRuntimeArtifactLoader::LoadFromFile(
 	OutArtifact.RequestedBackend = TEXT("wasmtime.cranelift.precompiled");
 	OutArtifact.SelectedBackend = TEXT("wasmtime.cranelift.precompiled");
 	OutArtifact.ExecutionPolicy = Policy;
+	OutArtifact.ArtifactTrust = bUsePersistentPackageTrust
+		? EAvidScriptVmArtifactTrust::VerifiedPackage
+		: EAvidScriptVmArtifactTrust::Untrusted;
 	OutArtifact.bUsesPrecompiledArtifact = true;
 	OutResult.bSucceeded = true;
 	OutResult.bUsesPrecompiledArtifact = true;
 	OutResult.RequestedBackend = OutArtifact.RequestedBackend;
 	OutResult.SelectedBackend = OutArtifact.SelectedBackend;
+	return true;
+}
+
+bool FAvidScriptRuntimeArtifactLoader::LoadFromFile(
+	const FString& ManifestPath,
+	FAvidScriptRuntimeArtifact& OutArtifact,
+	FAvidScriptRuntimeArtifactLoadResult& OutResult)
+{
+	return LoadRuntimeArtifactFromFile(
+		ManifestPath,
+		nullptr,
+		OutArtifact,
+		OutResult);
+}
+
+bool FAvidScriptRuntimeArtifactLoader::LoadPublishedModule(
+	const FName ModuleId,
+	const FString& ExpectedPackageId,
+	FAvidScriptRuntimeArtifact& OutArtifact,
+	FAvidScriptRuntimeArtifactLoadResult& OutResult,
+	FAvidScriptResolvedModulePackage* OutPackage)
+{
+	OutArtifact = FAvidScriptRuntimeArtifact();
+	OutResult = FAvidScriptRuntimeArtifactLoadResult();
+	if (OutPackage != nullptr)
+	{
+		*OutPackage = FAvidScriptResolvedModulePackage();
+	}
+
+	FAvidScriptResolvedModulePackage Package;
+	FAvidScriptModuleResolveResult ResolveResult;
+	if (!FAvidScriptModulePackageResolver::ResolveModule(
+			ModuleId,
+			Package,
+			ResolveResult))
+	{
+		OutResult.CanonicalResult.ManifestPath =
+			FAvidScriptModulePackageResolver::GetDefaultCatalogPath();
+		SetArtifactLoadFailure(
+			OutResult,
+			ResolveResult.ErrorCategory.IsEmpty()
+				? TEXT("module_resolve_failed")
+				: ResolveResult.ErrorCategory,
+			ResolveResult.ErrorMessage,
+			ResolveResult.NextAction);
+		return false;
+	}
+	if (!ExpectedPackageId.IsEmpty()
+		&& ExpectedPackageId != Package.PackageId)
+	{
+		OutResult.CanonicalResult.ManifestPath = Package.RuntimeManifestPath;
+		SetArtifactLoadFailure(
+			OutResult,
+			TEXT("package_identity_mismatch"),
+			TEXT("The resolved package identity differs from the caller's expected package."),
+			TEXT("refresh the Generated Type pointer or republish the module catalog"));
+		return false;
+	}
+
+	if (!LoadRuntimeArtifactFromFile(
+			Package.RuntimeManifestPath,
+			&Package,
+			OutArtifact,
+			OutResult))
+	{
+		return false;
+	}
+	if (OutArtifact.ExecutionPolicy != Package.ExecutionPolicy
+		|| (OutArtifact.bUsesPrecompiledArtifact
+			&& (OutArtifact.VmArtifact.CompilerBuildIdentity !=
+					Package.CompilerBuildIdentity
+				|| OutArtifact.VmArtifact.TargetTriple != Package.TargetTriple)))
+	{
+		OutArtifact = FAvidScriptRuntimeArtifact();
+		SetArtifactLoadFailure(
+			OutResult,
+			TEXT("package_execution_contract_mismatch"),
+			TEXT("The loaded artifact execution identity differs from its resolved package descriptor."),
+			TEXT("republish the module package with the active toolchain"));
+		return false;
+	}
+
+	OutResult.PackageId = Package.PackageId;
+	if (OutPackage != nullptr)
+	{
+		*OutPackage = MoveTemp(Package);
+	}
 	return true;
 }

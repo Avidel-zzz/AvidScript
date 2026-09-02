@@ -217,10 +217,17 @@ bool UAvidScriptComponent::LoadConfiguredScriptModule(FAvidScriptWasmSmokeResult
 	{
 		FAvidScriptRuntimeArtifact Artifact;
 		FAvidScriptRuntimeArtifactLoadResult LoadResult;
-		if (!FAvidScriptRuntimeArtifactLoader::LoadFromFile(
+		const bool bArtifactLoaded = ScriptModule.IsSet()
+			? FAvidScriptRuntimeArtifactLoader::LoadPublishedModule(
+				ScriptModule.ModuleId,
+				RuntimeStats.PackageId,
+				Artifact,
+				LoadResult)
+			: FAvidScriptRuntimeArtifactLoader::LoadFromFile(
 				RuntimeStats.ScriptManifestPath,
 				Artifact,
-				LoadResult))
+				LoadResult);
+		if (!bArtifactLoaded)
 		{
 			SetComponentManifestLoadFailure(
 				LoadResult.CanonicalResult,
@@ -323,10 +330,17 @@ bool UAvidScriptComponent::ReloadConfiguredScript(FAvidScriptWasmReloadResult& O
 
 	FAvidScriptRuntimeArtifact Artifact;
 	FAvidScriptRuntimeArtifactLoadResult LoadResult;
-	if (!FAvidScriptRuntimeArtifactLoader::LoadFromFile(
+	const bool bArtifactLoaded = ScriptModule.IsSet()
+		? FAvidScriptRuntimeArtifactLoader::LoadPublishedModule(
+			ScriptModule.ModuleId,
+			CandidatePackageId,
+			Artifact,
+			LoadResult)
+		: FAvidScriptRuntimeArtifactLoader::LoadFromFile(
 			CandidateManifestPath,
 			Artifact,
-			LoadResult))
+			LoadResult);
+	if (!bArtifactLoaded)
 	{
 		SetComponentReloadManifestLoadFailure(
 			LoadResult.CanonicalResult,

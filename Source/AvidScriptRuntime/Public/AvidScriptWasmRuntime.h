@@ -203,6 +203,7 @@ public:
 		const FString& InModuleId,
 		const TSharedPtr<const FAvidScriptBindingPackage>& InBindingPackage,
 		const TSharedPtr<const FAvidScriptWasmDebugMap>& InDebugMap,
+		EAvidScriptVmArtifactTrust ArtifactTrust,
 		FAvidScriptWasmSmokeResult& OutResult);
 	bool ValidateRequiredExports(
 		const TArray<FString>& RequiredExports,

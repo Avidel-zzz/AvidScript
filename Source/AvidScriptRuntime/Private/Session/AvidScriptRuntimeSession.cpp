@@ -1494,6 +1494,7 @@ bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 		Manifest.ModuleId,
 		Manifest.BindingPackage,
 		Manifest.DebugMap,
+		Artifact.ArtifactTrust,
 		RuntimeResult))
 	{
 		CopyRuntimeFailure(RuntimeResult, OutResult);

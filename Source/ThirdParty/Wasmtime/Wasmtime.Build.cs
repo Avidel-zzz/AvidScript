@@ -45,6 +45,17 @@ public class Wasmtime : ModuleRules
 			File.Exists(ImportLibraryPath) &&
 			File.Exists(LicensePath) &&
 			File.Exists(MarkerPath);
+		bool bPackagedRuntimeTarget =
+			Target.Type == TargetType.Game
+			|| Target.Type == TargetType.Client
+			|| Target.Type == TargetType.Server;
+		if (Target.Platform == UnrealTargetPlatform.Win64
+			&& bPackagedRuntimeTarget
+			&& !bHasPerformanceLayout)
+		{
+			throw new BuildException(
+				"AvidScript packaged Win64 targets require the managed Wasmtime performance toolchain.");
+		}
 
 		PublicDefinitions.Add(
 			bHasManagedLayout
@@ -68,6 +79,7 @@ public class Wasmtime : ModuleRules
 			PublicAdditionalLibraries.Add(ImportLibraryPath);
 			PublicDelayLoadDLLs.Add("wasmtime.dll");
 			RuntimeDependencies.Add("$(PluginDir)/Binaries/Win64/wasmtime.dll", DllPath, StagedFileType.NonUFS);
+			RuntimeDependencies.Add("$(PluginDir)/Binaries/Win64/wasmtime.LICENSE.txt", LicensePath, StagedFileType.NonUFS);
 		}
 	}
 

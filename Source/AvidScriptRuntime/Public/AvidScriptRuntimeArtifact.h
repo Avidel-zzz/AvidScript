@@ -2,6 +2,7 @@
 
 #include "AvidScriptVmArtifact.h"
 #include "AvidScriptWasmReloadTypes.h"
+#include "Packages/AvidScriptModulePackage.h"
 
 struct AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeArtifact
 {
@@ -12,6 +13,8 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeArtifact
 	FString SelectedBackend;
 	FString FallbackCategory;
 	FString ExecutionPolicy;
+	EAvidScriptVmArtifactTrust ArtifactTrust =
+		EAvidScriptVmArtifactTrust::Untrusted;
 	bool bUsesPrecompiledArtifact = false;
 
 	static FAvidScriptRuntimeArtifact FromCanonicalWasm(
@@ -30,6 +33,8 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeArtifactLoadResult
 	FString FallbackCategory;
 	FString ExecutionPolicy;
 	FString ExecutionPath;
+	FString PackageId;
+	bool bVerifiedPublishedPackage = false;
 	FAvidScriptWasmReloadManifestLoadResult CanonicalResult;
 };
 
@@ -40,4 +45,11 @@ public:
 		const FString& ManifestPath,
 		FAvidScriptRuntimeArtifact& OutArtifact,
 		FAvidScriptRuntimeArtifactLoadResult& OutResult);
+
+	static bool LoadPublishedModule(
+		FName ModuleId,
+		const FString& ExpectedPackageId,
+		FAvidScriptRuntimeArtifact& OutArtifact,
+		FAvidScriptRuntimeArtifactLoadResult& OutResult,
+		FAvidScriptResolvedModulePackage* OutPackage = nullptr);
 };
