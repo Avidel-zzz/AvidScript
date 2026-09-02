@@ -861,6 +861,74 @@ bool FAvidScriptWasmDiagnosticRuntimeIntegrationTest::RunTest(const FString& Par
 			EAvidScriptWasmDiagnosticFrameKind::HostEntry);
 		TestEqual(TEXT("Tick failure entry export"), EntryFrame.FunctionName, FString(TEXT("avid_on_tick")));
 	}
+	const FAvidScriptRuntimeSessionSnapshot QuarantinedSnapshot =
+		TickTrapSession.GetSnapshot();
+	TestTrue(
+		TEXT("Tick trap quarantines the Session"),
+		QuarantinedSnapshot.bFaultQuarantined);
+	TestFalse(
+		TEXT("Quarantine unloads the faulted Runtime"),
+		QuarantinedSnapshot.bHasActiveRuntime);
+	TestEqual(
+		TEXT("Quarantine preserves the fault lifecycle"),
+		QuarantinedSnapshot.LifecycleState,
+		EAvidScriptLifecycleState::Faulted);
+	TestEqual(
+		TEXT("Quarantine preserves the root category"),
+		QuarantinedSnapshot.FaultCategory,
+		FString(TEXT("trap")));
+	TestEqual(
+		TEXT("Quarantine clears pending timers"),
+		QuarantinedSnapshot.PendingTimerCount,
+		0);
+	TestEqual(
+		TEXT("Quarantine clears pending continuations"),
+		QuarantinedSnapshot.PendingContinuationCount,
+		0);
+	FAvidScriptWasmSmokeResult ReentryResult;
+	TestFalse(
+		TEXT("Quarantined Session rejects repeated guest entry"),
+		TickTrapSession.TickLive(1.0f / 60.0f, ReentryResult));
+	TestEqual(
+		TEXT("Repeated guest entry has a stable category"),
+		ReentryResult.ErrorCategory,
+		FString(TEXT("session_faulted")));
+
+	FString HealthyManifestPath;
+	TestTrue(
+		TEXT("healthy peer Session fixture writes"),
+		WriteRuntimeDiagnosticsFixture(
+			Root,
+			TEXT("healthy_peer"),
+			false,
+			false,
+			false,
+			false,
+			1,
+			HealthyManifestPath));
+	FAvidScriptWasmReloadManifest PeerManifest;
+	TArray<uint8> PeerBytecode;
+	FAvidScriptWasmReloadManifestLoadResult PeerLoadResult;
+	TestTrue(
+		TEXT("healthy peer Session manifest loads"),
+		FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+			HealthyManifestPath,
+			PeerManifest,
+			PeerBytecode,
+			PeerLoadResult));
+	FAvidScriptRuntimeSession PeerSession;
+	FAvidScriptWasmReloadResult PeerInitialResult;
+	TestTrue(
+		TEXT("healthy peer Session begins after another Session faults"),
+			PeerSession.LoadInitialModule(
+				PeerBytecode.GetData(),
+				PeerBytecode.Num(),
+				PeerManifest,
+				PeerInitialResult));
+	FAvidScriptWasmSmokeResult PeerTickResult;
+	TestTrue(
+		TEXT("healthy peer Session continues ticking"),
+			PeerSession.TickLive(1.0f / 60.0f, PeerTickResult));
 
 	FString LegacyManifestPath;
 	TestTrue(

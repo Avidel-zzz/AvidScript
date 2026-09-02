@@ -119,6 +119,24 @@ void SetSessionDebugSuspendedFailure(
 		ModuleId.IsEmpty() ? TEXT("<none>") : *ModuleId,
 		ExportName.IsEmpty() ? TEXT("<none>") : *ExportName);
 }
+
+void SetSessionFaultedFailure(
+	const FString& ModuleId,
+	const FString& ExportName,
+	const FString& FaultCategory,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	OutResult = FAvidScriptWasmSmokeResult();
+	OutResult.ModuleId = ModuleId;
+	OutResult.ExportName = ExportName;
+	OutResult.ErrorCategory = TEXT("session_faulted");
+	OutResult.NextAction = TEXT("load a new validated module or explicitly unload the quarantined Session");
+	OutResult.ErrorMessage = FString::Printf(
+		TEXT("AvidScript guest entry rejected | module=%s | export=%s | category=session_faulted | root=%s | details=the previous guest failure quarantined this Session"),
+		ModuleId.IsEmpty() ? TEXT("<none>") : *ModuleId,
+		ExportName.IsEmpty() ? TEXT("<none>") : *ExportName,
+		FaultCategory.IsEmpty() ? TEXT("unknown") : *FaultCategory);
+}
 } // namespace
 
 FAvidScriptRuntimeSession::FAvidScriptRuntimeSession()
@@ -626,6 +644,10 @@ bool FAvidScriptRuntimeSession::TickLive(float DeltaSeconds, FAvidScriptWasmSmok
 	const bool bCompleted = bSucceeded
 		&& (IsDebugExecutionSuspended()
 			|| InboundHandlers->PumpDeferred(OutResult));
+	if (!bCompleted)
+	{
+		QuarantineFaultedRuntime(OutResult);
+	}
 	ProfileScope.SetSucceeded(bCompleted);
 	return bCompleted;
 }
@@ -665,6 +687,10 @@ bool FAvidScriptRuntimeSession::TickHot(
 	const bool bCompleted = bSucceeded
 		&& (IsDebugExecutionSuspended()
 			|| InboundHandlers->PumpDeferred(OutFailure));
+	if (!bCompleted)
+	{
+		QuarantineFaultedRuntime(OutFailure);
+	}
 	ProfileScope.SetSucceeded(bCompleted);
 	return bCompleted;
 }
@@ -709,6 +735,15 @@ bool FAvidScriptRuntimeSession::CanEnterGuest(
 	const FString& ExportName,
 	FAvidScriptWasmSmokeResult& OutResult) const
 {
+	if (bFaultQuarantined)
+	{
+		SetSessionFaultedFailure(
+			FaultedModuleId,
+			ExportName,
+			FaultCategory,
+			OutResult);
+		return false;
+	}
 	if (IsOperationActive())
 	{
 		SetSessionExecutionFailure(
@@ -727,6 +762,32 @@ bool FAvidScriptRuntimeSession::CanEnterGuest(
 		return false;
 	}
 	return true;
+}
+
+void FAvidScriptRuntimeSession::QuarantineFaultedRuntime(
+	const FAvidScriptWasmSmokeResult& Failure)
+{
+	if (!LiveRuntime
+		|| LiveRuntime->GetLifecycleState() !=
+			EAvidScriptLifecycleState::Faulted)
+	{
+		return;
+	}
+
+	const FString FailedModuleId = LiveManifest.ModuleId;
+	const FString RootCategory = Failure.ErrorCategory;
+	FAvidScriptWasmSmokeResult IgnoredUnloadResult;
+	StopAndUnload(IgnoredUnloadResult);
+	bFaultQuarantined = true;
+	FaultedModuleId = FailedModuleId;
+	FaultCategory = RootCategory;
+}
+
+void FAvidScriptRuntimeSession::ClearFaultQuarantine()
+{
+	bFaultQuarantined = false;
+	FaultedModuleId.Reset();
+	FaultCategory.Reset();
 }
 
 bool FAvidScriptRuntimeSession::IsDebugExecutionSuspended() const
@@ -751,8 +812,17 @@ bool FAvidScriptRuntimeSession::DispatchEventLive(
 	{
 		return false;
 	}
-	TGuardValue<int32> GuestCallGuard(ActiveGuestCallDepth, ActiveGuestCallDepth + 1);
-	const bool bSucceeded = EventRouter->Dispatch(EventId, Value, OutResult);
+	bool bSucceeded = false;
+	{
+		TGuardValue<int32> GuestCallGuard(
+			ActiveGuestCallDepth,
+			ActiveGuestCallDepth + 1);
+		bSucceeded = EventRouter->Dispatch(EventId, Value, OutResult);
+	}
+	if (!bSucceeded)
+	{
+		QuarantineFaultedRuntime(OutResult);
+	}
 	ProfileScope.SetSucceeded(bSucceeded);
 	return bSucceeded;
 }
@@ -774,10 +844,17 @@ bool FAvidScriptRuntimeSession::DispatchEventHot(
 	{
 		return false;
 	}
-	TGuardValue<int32> GuestCallGuard(
-		ActiveGuestCallDepth,
-		ActiveGuestCallDepth + 1);
-	const bool bSucceeded = EventRouter->DispatchHot(EventId, Value, OutFailure);
+	bool bSucceeded = false;
+	{
+		TGuardValue<int32> GuestCallGuard(
+			ActiveGuestCallDepth,
+			ActiveGuestCallDepth + 1);
+		bSucceeded = EventRouter->DispatchHot(EventId, Value, OutFailure);
+	}
+	if (!bSucceeded)
+	{
+		QuarantineFaultedRuntime(OutFailure);
+	}
 	ProfileScope.SetSucceeded(bSucceeded);
 	return bSucceeded;
 }
@@ -798,8 +875,17 @@ bool FAvidScriptRuntimeSession::DispatchGameplayEventLive(
 	{
 		return false;
 	}
-	TGuardValue<int32> GuestCallGuard(ActiveGuestCallDepth, ActiveGuestCallDepth + 1);
-	const bool bSucceeded = EventRouter->Dispatch(Event, OutResult);
+	bool bSucceeded = false;
+	{
+		TGuardValue<int32> GuestCallGuard(
+			ActiveGuestCallDepth,
+			ActiveGuestCallDepth + 1);
+		bSucceeded = EventRouter->Dispatch(Event, OutResult);
+	}
+	if (!bSucceeded)
+	{
+		QuarantineFaultedRuntime(OutResult);
+	}
 	ProfileScope.SetSucceeded(bSucceeded);
 	return bSucceeded;
 }
@@ -820,10 +906,17 @@ bool FAvidScriptRuntimeSession::DispatchGameplayEventHot(
 	{
 		return false;
 	}
-	TGuardValue<int32> GuestCallGuard(
-		ActiveGuestCallDepth,
-		ActiveGuestCallDepth + 1);
-	const bool bSucceeded = EventRouter->DispatchHot(Event, OutFailure);
+	bool bSucceeded = false;
+	{
+		TGuardValue<int32> GuestCallGuard(
+			ActiveGuestCallDepth,
+			ActiveGuestCallDepth + 1);
+		bSucceeded = EventRouter->DispatchHot(Event, OutFailure);
+	}
+	if (!bSucceeded)
+	{
+		QuarantineFaultedRuntime(OutFailure);
+	}
 	ProfileScope.SetSucceeded(bSucceeded);
 	return bSucceeded;
 }
@@ -845,10 +938,17 @@ bool FAvidScriptRuntimeSession::DispatchPreparedDelegateEvent(
 	{
 		return false;
 	}
-	TGuardValue<int32> GuestCallGuard(
-		ActiveGuestCallDepth,
-		ActiveGuestCallDepth + 1);
-	const bool bSucceeded = EventRouter->Dispatch(Event, NativeParameters, OutResult);
+	bool bSucceeded = false;
+	{
+		TGuardValue<int32> GuestCallGuard(
+			ActiveGuestCallDepth,
+			ActiveGuestCallDepth + 1);
+		bSucceeded = EventRouter->Dispatch(Event, NativeParameters, OutResult);
+	}
+	if (!bSucceeded)
+	{
+		QuarantineFaultedRuntime(OutResult);
+	}
 	ProfileScope.SetSucceeded(bSucceeded);
 	return bSucceeded;
 }
@@ -965,6 +1065,7 @@ bool FAvidScriptRuntimeSession::StopAndUnload(FAvidScriptWasmSmokeResult& OutRes
 
 	LiveManifest = FAvidScriptWasmReloadManifest();
 	Debugger->OnRuntimeGenerationChanged();
+	ClearFaultQuarantine();
 	return bSucceeded;
 }
 
@@ -1246,8 +1347,14 @@ FAvidScriptRuntimeSessionSnapshot FAvidScriptRuntimeSession::GetSnapshot() const
 {
 	FAvidScriptRuntimeSessionSnapshot Snapshot;
 	Snapshot.bHasActiveRuntime = IsLiveLoaded();
-	Snapshot.LifecycleState = Scheduler->GetLifecycleState();
-	Snapshot.ModuleId = GetLiveModuleId();
+	Snapshot.bFaultQuarantined = bFaultQuarantined;
+	Snapshot.LifecycleState = bFaultQuarantined
+		? EAvidScriptLifecycleState::Faulted
+		: Scheduler->GetLifecycleState();
+	Snapshot.ModuleId = bFaultQuarantined
+		? FaultedModuleId
+		: GetLiveModuleId();
+	Snapshot.FaultCategory = FaultCategory;
 	Snapshot.TickCallCount = GetLiveTickCallCount();
 	Snapshot.PendingTimerCount = GetLivePendingTimerCount();
 	Snapshot.PendingContinuationCount = GetLivePendingContinuationCount();
@@ -1866,5 +1973,6 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 		TEXT("Validated AvidScript inbound handler commit failed: %s"),
 		InboundCommitError.IsEmpty() ? TEXT("unknown") : *InboundCommitError);
 	InboundHandlers->SetDispatchEnabled(true);
+	ClearFaultQuarantine();
 	return true;
 }

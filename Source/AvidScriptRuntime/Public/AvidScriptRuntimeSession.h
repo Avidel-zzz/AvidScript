@@ -23,7 +23,9 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeSessionSnapshot
 {
 	EAvidScriptLifecycleState LifecycleState = EAvidScriptLifecycleState::Empty;
 	bool bHasActiveRuntime = false;
+	bool bFaultQuarantined = false;
 	FString ModuleId;
+	FString FaultCategory;
 	int32 TickCallCount = 0;
 	int32 PendingTimerCount = 0;
 	int32 PendingContinuationCount = 0;
@@ -214,6 +216,9 @@ private:
 	bool CanEnterGuest(
 		const FString& ExportName,
 		FAvidScriptWasmSmokeResult& OutResult) const;
+	void QuarantineFaultedRuntime(
+		const FAvidScriptWasmSmokeResult& Failure);
+	void ClearFaultQuarantine();
 	bool IsDebugExecutionSuspended() const;
 	bool ResumeDebugExecution(
 		EAvidScriptDebugRunMode RunMode,
@@ -236,6 +241,9 @@ private:
 	int32 RejectedReloadCount = 0;
 	int32 ActiveGuestCallDepth = 0;
 	bool bMutationInProgress = false;
+	bool bFaultQuarantined = false;
+	FString FaultedModuleId;
+	FString FaultCategory;
 #if WITH_DEV_AUTOMATION_TESTS
 	TFunction<void(IAvidScriptBindingHostEffectJournal*)>
 		CandidateBeginPlayObserverForTesting;
