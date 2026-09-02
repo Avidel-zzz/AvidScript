@@ -5,7 +5,7 @@
     "goal": "交付 UE5.8 Win64 的确定性 Cook/Shipping C# WASM 闭环，包括预编译 artifact、资源依赖、Shipping 安全策略、Session 故障隔离和版本兼容。",
     "start_commit": "346fa907cb59f8f9c94ab0c616302e1544cef0fc"
   },
-  "declared_stage": "implementing",
+  "declared_stage": "gate_ready",
   "architecture": {
     "path": "Docs/Phase62/P62.0_Cook_Shipping_Architecture.md",
     "version": 1,
@@ -44,9 +44,9 @@
   ],
   "debt": [],
   "review": {
-    "completed": false,
-    "evidence": "reopened: Close validator found one Phase-owned EOF whitespace violation in P62.B3 documentation",
-    "completed_at_utc": null
+    "completed": true,
+    "evidence": "P62 close-only remediation review: product tree unchanged; Phase commit range whitespace clean after removing P62.B3 EOF blank line",
+    "completed_at_utc": "2026-09-02T06:45:47.1443189+00:00"
   },
   "budgets": {
     "ubt": 4,
@@ -59,11 +59,11 @@
     "full_gate": 1
   },
   "freeze": {
-    "source_commit": "",
-    "source_tree": "",
-    "state_sha256": "",
-    "review_evidence": "",
-    "at_utc": null
+    "source_commit": "d7ce519c4d687e1749c74783df6f60668291edc9",
+    "source_tree": "843e7a48494d19c0e5b9fd3bad8b8a23cf7d7dd2",
+    "state_sha256": "3087d377ca525484258f0c9fc2ec2e9c3006d8f332545570ddf90d2f9247b929",
+    "review_evidence": "P62 close-only remediation review: product tree unchanged; Phase commit range whitespace clean after removing P62.B3 EOF blank line",
+    "at_utc": "2026-09-02T06:45:47.1443189+00:00"
   },
   "gate": {
     "report_path": "",
@@ -94,7 +94,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "freeze -Phase 62 -ReviewEvidence <text>",
-  "revision": 21,
-  "updated_at_utc": "2026-09-02T06:44:57.4300973+00:00"
+  "next_action": "attest -Phase 62 -GateReportPath <path>",
+  "revision": 22,
+  "updated_at_utc": "2026-09-02T06:45:47.1497657+00:00"
 }
