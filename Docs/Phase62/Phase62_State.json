@@ -5,7 +5,7 @@
     "goal": "交付 UE5.8 Win64 的确定性 Cook/Shipping C# WASM 闭环，包括预编译 artifact、资源依赖、Shipping 安全策略、Session 故障隔离和版本兼容。",
     "start_commit": "346fa907cb59f8f9c94ab0c616302e1544cef0fc"
   },
-  "declared_stage": "implementing",
+  "declared_stage": "gate_ready",
   "architecture": {
     "path": "Docs/Phase62/P62.0_Cook_Shipping_Architecture.md",
     "version": 1,
@@ -44,9 +44,9 @@
   ],
   "debt": [],
   "review": {
-    "completed": false,
-    "evidence": "",
-    "completed_at_utc": null
+    "completed": true,
+    "evidence": "P62.A-D 集中复审完成：发布包与 catalog 确定性身份一致；Win64 Development/Shipping BuildCookRun、18/20 项回执、真实生命周期与 WASM trap 隔离均通过；未发现 Blocker/Critical/Important 债务。",
+    "completed_at_utc": "2026-09-02T04:57:49.8200860+00:00"
   },
   "budgets": {
     "ubt": 4,
@@ -59,11 +59,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "",
-    "source_tree": "",
-    "state_sha256": "",
-    "review_evidence": "",
-    "at_utc": null
+    "source_commit": "d4daaabed88a4a249c66c297a535221ee83f7282",
+    "source_tree": "e2d0c4700bcff2eb7e59b54994122e270e127e41",
+    "state_sha256": "de4c323fffb0ee702ebcce18818f546ab28f8dc01ed38569464d4db666a17f76",
+    "review_evidence": "P62.A-D 集中复审完成：发布包与 catalog 确定性身份一致；Win64 Development/Shipping BuildCookRun、18/20 项回执、真实生命周期与 WASM trap 隔离均通过；未发现 Blocker/Critical/Important 债务。",
+    "at_utc": "2026-09-02T04:57:49.8200860+00:00"
   },
   "gate": {
     "report_path": "",
@@ -94,7 +94,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "freeze -Phase 62 -ReviewEvidence <text>",
-  "revision": 5,
-  "updated_at_utc": "2026-09-02T04:55:57.1413360+00:00"
+  "next_action": "attest -Phase 62 -GateReportPath <path>",
+  "revision": 6,
+  "updated_at_utc": "2026-09-02T04:57:49.8254580+00:00"
 }
