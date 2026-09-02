@@ -110,6 +110,14 @@ function New-ReleaseFixture {
             schema_version = 1
             module_id = $ModuleId
         }
+        state_migration = [ordered]@{
+            schema_version = 2
+            strategy = 'host_snapshot'
+            policy = 'compatible'
+            contract_version = 1
+            owner_type_id = 'type:global::Fixture'
+            slots = @()
+        }
         required_exports = @('avid_on_begin_play')
         required_imports = @()
     }
@@ -261,6 +269,42 @@ try {
             }
         }
         $null = $First
+    }
+
+    Invoke-ReleaseContract 'canonical JSON preserves array shape' {
+        $Fixture = New-ReleaseFixture -Name 'ArrayShape'
+        $Published = Publish-AvidScriptModuleReleasePackage `
+            -RuntimeManifestPath $Fixture.RuntimeManifestPath `
+            -ProjectRoot $Fixture.ProjectRoot `
+            -Configuration Development
+        $RuntimePath = Join-Path $Published.PackageRoot 'runtime.avidscript.json'
+        $BindingPath = Join-Path $Published.PackageRoot 'bindings/package.json'
+        $RuntimeDocument = [System.Text.Json.JsonDocument]::Parse(
+            [System.IO.File]::ReadAllText($RuntimePath))
+        $BindingDocument = [System.Text.Json.JsonDocument]::Parse(
+            [System.IO.File]::ReadAllText($BindingPath))
+        try {
+            $RuntimeRoot = $RuntimeDocument.RootElement
+            $BindingRoot = $BindingDocument.RootElement
+            $Slots = $RuntimeRoot.GetProperty('state_migration').GetProperty('slots')
+            $RequiredExports = $RuntimeRoot.GetProperty('required_exports')
+            $RequiredImports = $RuntimeRoot.GetProperty('required_imports')
+            $BindingRequiredImports = $BindingRoot.GetProperty('required_imports')
+            if ($Slots.ValueKind -ne [System.Text.Json.JsonValueKind]::Array -or
+                $Slots.GetArrayLength() -ne 0 -or
+                $RequiredExports.ValueKind -ne [System.Text.Json.JsonValueKind]::Array -or
+                $RequiredExports.GetArrayLength() -ne 1 -or
+                $RequiredImports.ValueKind -ne [System.Text.Json.JsonValueKind]::Array -or
+                $RequiredImports.GetArrayLength() -ne 0 -or
+                $BindingRequiredImports.ValueKind -ne [System.Text.Json.JsonValueKind]::Array -or
+                $BindingRequiredImports.GetArrayLength() -ne 0) {
+                throw 'Canonical publication changed an array into null or a scalar.'
+            }
+        }
+        finally {
+            $RuntimeDocument.Dispose()
+            $BindingDocument.Dispose()
+        }
     }
 
     Invoke-ReleaseContract 'catalog is a single configuration view' {

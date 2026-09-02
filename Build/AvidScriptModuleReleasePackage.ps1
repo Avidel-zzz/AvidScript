@@ -145,7 +145,12 @@ function ConvertTo-AvidScriptModuleReleaseCanonicalValue {
         return $Result
     }
     if ($Value -is [System.Array]) {
-        return @($Value | ForEach-Object { ConvertTo-AvidScriptModuleReleaseCanonicalValue $_ })
+        $Items = [System.Collections.Generic.List[object]]::new()
+        foreach ($Item in $Value) {
+            $Items.Add((ConvertTo-AvidScriptModuleReleaseCanonicalValue $Item))
+        }
+        Write-Output -NoEnumerate $Items.ToArray()
+        return
     }
     return $Value
 }
