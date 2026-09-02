@@ -599,9 +599,7 @@ bool FAvidScriptRuntimeSession::Tick(float DeltaSeconds, FAvidScriptWasmSmokeRes
 	}
 	bool bSucceeded = false;
 	{
-		TGuardValue<int32> GuestCallGuard(
-			ActiveGuestCallDepth,
-			ActiveGuestCallDepth + 1);
+		TGuardValue<int32> GuestCallGuard(ActiveGuestCallDepth, ActiveGuestCallDepth + 1);
 #if WITH_DEV_AUTOMATION_TESTS
 		if (LiveExecutionObserverForTesting)
 		{
