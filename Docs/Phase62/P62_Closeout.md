@@ -20,8 +20,8 @@
 - 发布、Cook、回执、reload 与 Wasmtime 工具链 PowerShell 合同全部通过。
 - UE5.8 `AvidTPSTemplateEditor Win64 Development` 无清理 UBT：`Result: Succeeded`。
 - 完整 AvidScript Automation：`429/429`，`0 Failed`、`0 NotRun`、Queue Empty、进程退出码 `0`。
-- 正式报告绑定提交 `089a5afb5d8040b2a282d61b1327d7116ae00641` 与 tree
-  `a87ff12b85a02b3bc7d1d60a269ca109e08ff7c3`。
+- 正式报告绑定提交 `f44bdc8a70dfed309c409236d53ee5b6ad137dcb` 与 tree
+  `13ca5c9b39dd9ca87dad11df04e8143d932c7c06`；关闭前提交区间 whitespace 检查通过。
 
 ## 当前边界
 
