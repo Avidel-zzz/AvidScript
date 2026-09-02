@@ -205,7 +205,7 @@ try {
                 '-stage',
                 '-pak',
                 '-archive',
-                '-AdditionalCookerOptions=-SkipZenStore')) {
+                '-AdditionalCookerOptions=-SkipZenStore -AvidScriptSuppressGeneratedTypeExecution')) {
             Assert-BuildCookRunContract `
                 ($Arguments -ccontains $Expected) `
                 "Development UAT argument is missing: $Expected"
@@ -231,7 +231,7 @@ try {
             ($Arguments -ccontains '-clientconfig=Shipping') `
             'Shipping is not forwarded to BuildCookRun.'
         Assert-BuildCookRunContract `
-            ($Arguments -ccontains '-AdditionalCookerOptions=-SkipZenStore') `
+            ($Arguments -ccontains '-AdditionalCookerOptions=-SkipZenStore -AvidScriptSuppressGeneratedTypeExecution') `
             'Shipping does not retain the Zen workaround.'
         Assert-BuildCookRunContract `
             ($Arguments -ccontains '-skipbuildeditor') `

@@ -564,7 +564,7 @@ function New-AvidScriptBuildCookRunUatArguments {
         '-pak',
         '-archive',
         "-archivedirectory=$ArchiveRoot",
-        '-AdditionalCookerOptions=-SkipZenStore'
+        '-AdditionalCookerOptions=-SkipZenStore -AvidScriptSuppressGeneratedTypeExecution'
     )
 }
 
