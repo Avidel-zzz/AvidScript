@@ -12,6 +12,8 @@ param(
     [ValidateSet('Development', 'Shipping')]
     [string]$Configuration = 'Development',
     [Parameter(Mandatory = $true)][string]$ArchiveRoot,
+    [ValidateRange(10, 600)]
+    [int]$PackagedOracleTimeoutSeconds = 120,
     [string]$EngineRoot = 'C:\UnrealEngine'
 )
 
@@ -769,6 +771,88 @@ function Invoke-AvidScriptBuildCookRunReceiptStep {
     return $Payload
 }
 
+function Invoke-AvidScriptBuildCookRunOracleStep {
+    param(
+        [Parameter(Mandatory = $true)][object]$ProjectContext,
+        [Parameter(Mandatory = $true)][string]$ArchiveRoot,
+        [Parameter(Mandatory = $true)][string]$ModuleId,
+        [ValidateSet('Development', 'Shipping')]
+        [Parameter(Mandatory = $true)][string]$Configuration,
+        [ValidateRange(10, 600)]
+        [Parameter(Mandatory = $true)][int]$TimeoutSeconds
+    )
+
+    $OraclePath = Join-Path `
+        $AvidScriptBuildCookRunScriptRoot `
+        'InvokeAvidScriptPackagedOracle.ps1'
+    $PowerShellPath = Join-Path $PSHOME 'pwsh.exe'
+    foreach ($RequiredFile in @($OraclePath, $PowerShellPath)) {
+        if (-not (Test-Path -LiteralPath $RequiredFile -PathType Leaf)) {
+            Throw-AvidScriptBuildCookRunError `
+                -Category 'packaged_oracle_host_missing' `
+                -Message "Packaged oracle dependency is missing: $RequiredFile"
+        }
+    }
+    $Arguments = @(
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        $OraclePath,
+        '-ArchiveRoot',
+        $ArchiveRoot,
+        '-TargetName',
+        $ProjectContext.TargetName,
+        '-ModuleId',
+        $ModuleId,
+        '-Configuration',
+        $Configuration,
+        '-TimeoutSeconds',
+        $TimeoutSeconds.ToString([System.Globalization.CultureInfo]::InvariantCulture))
+    $ProcessResult = Invoke-AvidScriptBuildCookRunProcess `
+        -Executable $PowerShellPath `
+        -Arguments $Arguments `
+        -WorkingDirectory $ProjectContext.ProjectRoot
+    if (-not [string]::IsNullOrWhiteSpace($ProcessResult.Stderr)) {
+        Throw-AvidScriptBuildCookRunError `
+            -Category 'packaged_oracle_output_invalid' `
+            -Message 'Packaged oracle runner wrote unexpected stderr output.'
+    }
+    try {
+        $Payload = ConvertFrom-AvidScriptBuildCookRunJsonText `
+            -Text $ProcessResult.Stdout `
+            -Label 'packaged oracle stdout' `
+            -RequireSingleLine
+    }
+    catch {
+        Throw-AvidScriptBuildCookRunError `
+            -Category 'packaged_oracle_output_invalid' `
+            -Message $_.Exception.Message
+    }
+    if ($ProcessResult.ExitCode -ne 0) {
+        $Category = [string](Get-AvidScriptBuildCookRunRequiredProperty `
+                $Payload 'category' 'packaged oracle failure')
+        $Message = [string](Get-AvidScriptBuildCookRunRequiredProperty `
+                $Payload 'message' 'packaged oracle failure')
+        Throw-AvidScriptBuildCookRunError `
+            -Category 'packaged_oracle_failed' `
+            -Message "Packaged oracle failed ($Category): $Message"
+    }
+    if ([long](Get-AvidScriptBuildCookRunRequiredProperty $Payload 'schema_version' 'packaged oracle result') -ne 1 -or
+        [string](Get-AvidScriptBuildCookRunRequiredProperty $Payload 'result' 'packaged oracle result') -cne
+            'avidscript_packaged_oracle_process_passed' -or
+        [string](Get-AvidScriptBuildCookRunRequiredProperty $Payload 'configuration' 'packaged oracle result') -cne
+            $Configuration -or
+        [string](Get-AvidScriptBuildCookRunRequiredProperty $Payload 'module_id' 'packaged oracle result') -cne
+            $ModuleId) {
+        Throw-AvidScriptBuildCookRunError `
+            -Category 'packaged_oracle_output_invalid' `
+            -Message 'Packaged oracle JSON does not match the requested release.'
+    }
+    return $Payload
+}
+
 function Invoke-AvidScriptBuildCookRun {
     param(
         [Parameter(Mandatory = $true)][string]$SourcePath,
@@ -783,6 +867,8 @@ function Invoke-AvidScriptBuildCookRun {
         [ValidateSet('Development', 'Shipping')]
         [Parameter(Mandatory = $true)][string]$Configuration,
         [Parameter(Mandatory = $true)][string]$ArchiveRoot,
+        [ValidateRange(10, 600)]
+        [Parameter(Mandatory = $true)][int]$PackagedOracleTimeoutSeconds,
         [Parameter(Mandatory = $true)][string]$EngineRoot
     )
 
@@ -830,6 +916,14 @@ function Invoke-AvidScriptBuildCookRun {
         -ReceiptPath $SelectedReceipt.Path `
         -Configuration $Configuration
 
+    $script:AvidScriptBuildCookRunStep = 'packaged_oracle'
+    $OracleResult = Invoke-AvidScriptBuildCookRunOracleStep `
+        -ProjectContext $ProjectContext `
+        -ArchiveRoot $ResolvedArchiveRoot `
+        -ModuleId $ModuleId `
+        -Configuration $Configuration `
+        -TimeoutSeconds $PackagedOracleTimeoutSeconds
+
     return [pscustomobject][ordered]@{
         schema_version = 1
         result = 'avidscript_build_cook_run_succeeded'
@@ -842,6 +936,7 @@ function Invoke-AvidScriptBuildCookRun {
         receipt_path = $SelectedReceipt.Path
         release = $ReleaseResult
         receipt_validation = $ReceiptResult
+        packaged_oracle = $OracleResult
     }
 }
 
@@ -862,6 +957,7 @@ try {
         -GeneratedTypeManifestPath $GeneratedTypeManifestPath `
         -Configuration $Configuration `
         -ArchiveRoot $ArchiveRoot `
+        -PackagedOracleTimeoutSeconds $PackagedOracleTimeoutSeconds `
         -EngineRoot $EngineRoot
     [Console]::Out.WriteLine(($Summary | ConvertTo-Json -Depth 32 -Compress))
     exit 0

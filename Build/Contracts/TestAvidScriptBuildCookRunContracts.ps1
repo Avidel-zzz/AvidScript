@@ -97,6 +97,11 @@ try {
         throw "Runner contains PowerShell parse errors: $($ParseErrors.Message -join '; ')"
     }
     $RunnerSource = [System.IO.File]::ReadAllText($RunnerPath)
+    $PackagedOraclePath = Join-Path $BuildRoot 'InvokeAvidScriptPackagedOracle.ps1'
+    if (-not (Test-Path -LiteralPath $PackagedOraclePath -PathType Leaf)) {
+        throw "Packaged oracle runner is missing: $PackagedOraclePath"
+    }
+    $PackagedOracleSource = [System.IO.File]::ReadAllText($PackagedOraclePath)
     . $RunnerPath `
         -SourcePath 'contract-source' `
         -CSharpProjectPath 'contract-project' `
@@ -118,6 +123,7 @@ try {
             'GeneratedTypeManifestPath',
             'ModuleId',
             'OutputRoot',
+            'PackagedOracleTimeoutSeconds',
             'RuntimeBindingPackagePath',
             'SourcePath')
         $ActualParameters = @($RunnerAst.ParamBlock.Parameters |
@@ -157,7 +163,7 @@ try {
         }
     }
 
-    Invoke-BuildCookRunContractCase 'release before UAT before receipt' {
+    Invoke-BuildCookRunContractCase 'release before UAT before receipt before oracle' {
         $InvokeFunction = Get-BuildCookRunFunctionAst `
             -Ast $RunnerAst `
             -Name 'Invoke-AvidScriptBuildCookRun'
@@ -171,11 +177,15 @@ try {
         $ReceiptIndex = $InvokeText.IndexOf(
             'Invoke-AvidScriptBuildCookRunReceiptStep',
             [System.StringComparison]::Ordinal)
+        $OracleIndex = $InvokeText.IndexOf(
+            'Invoke-AvidScriptBuildCookRunOracleStep',
+            [System.StringComparison]::Ordinal)
         Assert-BuildCookRunContract `
             ($ReleaseIndex -ge 0 -and
                 $UatIndex -gt $ReleaseIndex -and
-                $ReceiptIndex -gt $UatIndex) `
-            'Orchestration order is not release -> UAT -> receipt validator.'
+                $ReceiptIndex -gt $UatIndex -and
+                $OracleIndex -gt $ReceiptIndex) `
+            'Orchestration order is not release -> UAT -> receipt validator -> packaged oracle.'
     }
 
     Invoke-BuildCookRunContractCase 'Development UAT no-clean Zen contract' {
@@ -399,6 +409,28 @@ try {
         }
     }
 
+    Invoke-BuildCookRunContractCase 'packaged oracle process and report contract' {
+        foreach ($RequiredToken in @(
+                'Resolve-AvidScriptPackagedOracleExecutable',
+                'System.Diagnostics.ProcessStartInfo',
+                'ArgumentList.Add($Argument)',
+                '-AvidScriptPackagedOracle=',
+                '-AvidScriptPackagedOracleReport=',
+                'WaitForExit($TimeoutSeconds * 1000)',
+                'Process.Kill($true)',
+                'avidscript_packaged_oracle_process_passed',
+                'continuation_observed',
+                'world_continued',
+                'resolved_from_package')) {
+            Assert-BuildCookRunContract `
+                ($PackagedOracleSource.Contains($RequiredToken)) `
+                "Packaged oracle contract token is missing: $RequiredToken"
+        }
+        Assert-BuildCookRunContract `
+            (-not $PackagedOracleSource.Contains('Invoke-Expression')) `
+            'Packaged oracle uses Invoke-Expression.'
+    }
+
     if ($Failures.Count -ne 0) {
         throw "BuildCookRun contracts failed ($Passed/$Total): $($Failures -join ' | ')"
     }
@@ -419,7 +451,8 @@ try {
             'single_line_json',
             'archive_safety',
             'receipt_exact_stale_ambiguous',
-            'receipt_validator_handoff'
+            'receipt_validator_handoff',
+            'packaged_oracle_process_report'
         )
     } | ConvertTo-Json -Depth 4 -Compress
 }
