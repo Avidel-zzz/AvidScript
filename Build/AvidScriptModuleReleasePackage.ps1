@@ -420,7 +420,7 @@ function Assert-AvidScriptModuleReleasePackageDescriptor {
         [int64]$Descriptor.abi_version -lt 1) {
         throw 'package.json abi_version must be a positive JSON integer.'
     }
-    if ([string]$Descriptor.platform -cne 'win64' -or
+    if (@('win64', 'android') -cnotcontains [string]$Descriptor.platform -or
         @('development', 'shipping') -cnotcontains [string]$Descriptor.configuration) {
         throw 'package.json platform or configuration is invalid.'
     }
@@ -446,9 +446,29 @@ function Assert-AvidScriptModuleReleasePackageDescriptor {
         [string]::IsNullOrWhiteSpace([string]$Descriptor.execution.cpu_features)) {
         throw 'package.json execution contract is invalid.'
     }
+    $ExpectedTargetTriple = if ([string]$Descriptor.platform -ceq 'android') {
+        'aarch64-linux-android'
+    }
+    else {
+        'x86_64-pc-windows-msvc'
+    }
+    $ExpectedCpuFeatures = if ([string]$Descriptor.platform -ceq 'android') {
+        'arm64-v8a'
+    }
+    else {
+        'x86-64-v3'
+    }
+    if ([string]$Descriptor.execution.target_triple -cne $ExpectedTargetTriple -or
+        [string]$Descriptor.execution.cpu_features -cne $ExpectedCpuFeatures) {
+        throw 'package.json execution target does not match its platform identity.'
+    }
     if ([string]$Descriptor.configuration -ceq 'shipping' -and
         [string]$Descriptor.execution.policy -cne 'require_precompiled') {
         throw 'Shipping package.json must require precompiled execution.'
+    }
+    if ([string]$Descriptor.platform -ceq 'android' -and
+        [string]$Descriptor.execution.policy -cne 'require_precompiled') {
+        throw 'Android package.json must require precompiled execution.'
     }
     $RequiredArtifacts = @(
         'runtime_manifest',
@@ -636,8 +656,10 @@ function ConvertTo-AvidScriptModuleReleaseCatalogVariant {
     $Architecture = if ($Legacy) { 'x86_64' } else { [string]$Variant.architecture }
     $Backend = if ($Legacy) { 'wasmtime' } else { [string]$Variant.backend }
     $Format = if ($Legacy) { 'wasmtime_serialized_v1' } else { [string]$Variant.format }
-    if ([string]$Variant.platform -cne 'win64' -or
-        $Architecture -cne 'x86_64' -or
+    $PlatformIdentitySupported =
+        ([string]$Variant.platform -ceq 'win64' -and $Architecture -ceq 'x86_64') -or
+        ([string]$Variant.platform -ceq 'android' -and $Architecture -ceq 'arm64')
+    if (-not $PlatformIdentitySupported -or
         @('development', 'shipping') -cnotcontains [string]$Variant.configuration -or
         $Backend -cne 'wasmtime' -or
         $Format -cne 'wasmtime_serialized_v1') {
@@ -786,8 +808,19 @@ function Publish-AvidScriptModuleReleasePackage {
         [Parameter(Mandatory = $true)][string]$ProjectRoot,
         [string]$ModuleId = '',
         [ValidateSet('Development', 'Shipping')][string]$Configuration = 'Development',
+        [ValidateSet('Win64', 'Android')][string]$TargetPlatform = 'Win64',
         [string]$OutputRoot = ''
     )
+
+    $PlatformValue = if ($TargetPlatform -ieq 'Android') { 'android' } else { 'win64' }
+    $Architecture = if ($TargetPlatform -ieq 'Android') { 'arm64' } else { 'x86_64' }
+    $TargetTriple = if ($TargetPlatform -ieq 'Android') {
+        'aarch64-linux-android'
+    }
+    else {
+        'x86_64-pc-windows-msvc'
+    }
+    $CpuFeatures = if ($TargetPlatform -ieq 'Android') { 'arm64-v8a' } else { 'x86-64-v3' }
 
     $ProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot -ErrorAction Stop).Path
     $RuntimeManifestPath = (Resolve-Path -LiteralPath $RuntimeManifestPath -ErrorAction Stop).Path
@@ -880,17 +913,20 @@ function Publish-AvidScriptModuleReleasePackage {
         ($RuntimeManifest.execution.PSObject.Properties.Name -ccontains 'backend' -and
             [string]$RuntimeManifest.execution.backend -cne 'wasmtime') -or
         ($RuntimeManifest.execution.PSObject.Properties.Name -ccontains 'cpu_features' -and
-            [string]$RuntimeManifest.execution.cpu_features -cne 'x86-64-v3') -or
+            [string]$RuntimeManifest.execution.cpu_features -cne $CpuFeatures) -or
         @('require_precompiled', 'prefer_precompiled') -cnotcontains [string]$RuntimeManifest.execution.policy -or
         [string]::IsNullOrWhiteSpace([string]$RuntimeManifest.execution.compiler_build_identity) -or
-        [string]$RuntimeManifest.execution.target_triple -cne 'x86_64-pc-windows-msvc') {
+        [string]$RuntimeManifest.execution.target_triple -cne $TargetTriple -or
+        ($TargetPlatform -ieq 'Android' -and
+            [string]$RuntimeManifest.execution.policy -cne 'require_precompiled')) {
         throw 'Runtime manifest execution contract is invalid.'
     }
     if ([string]$RuntimeManifest.execution.canonical_sha256 -cne [string]$RuntimeManifest.wasm.sha256) {
         throw 'Runtime manifest execution canonical_sha256 does not match wasm.sha256.'
     }
     $ConfigurationValue = $Configuration.ToLowerInvariant()
-    $Policy = if ($ConfigurationValue -ceq 'shipping') {
+    $Policy = if ($TargetPlatform -ieq 'Android' -or
+        $ConfigurationValue -ceq 'shipping') {
         'require_precompiled'
     }
     else {
@@ -1075,7 +1111,7 @@ function Publish-AvidScriptModuleReleasePackage {
         canonical_sha256 = [string]$RuntimeManifest.wasm.sha256
         compiler_build_identity = [string]$RuntimeManifest.execution.compiler_build_identity
         target_triple = [string]$RuntimeManifest.execution.target_triple
-        cpu_features = 'x86-64-v3'
+        cpu_features = $CpuFeatures
         policy = $Policy
     }
     if ($Policy -ceq 'prefer_precompiled') {
@@ -1150,7 +1186,7 @@ function Publish-AvidScriptModuleReleasePackage {
         package_id = ''
         module_id = $ModuleId
         abi_version = [int64]$RuntimeManifest.abi_version
-        platform = 'win64'
+        platform = $PlatformValue
         configuration = $ConfigurationValue
         minimum_runtime_version = '0.1.0'
         execution = [pscustomobject][ordered]@{
@@ -1159,7 +1195,7 @@ function Publish-AvidScriptModuleReleasePackage {
             policy = $Policy
             compiler_build_identity = [string]$RuntimeManifest.execution.compiler_build_identity
             target_triple = [string]$RuntimeManifest.execution.target_triple
-            cpu_features = 'x86-64-v3'
+            cpu_features = $CpuFeatures
         }
         artifacts = [pscustomobject][ordered]@{
             runtime_manifest = [pscustomobject][ordered]@{
@@ -1252,8 +1288,8 @@ function Publish-AvidScriptModuleReleasePackage {
         }
 
         $NewVariant = [pscustomobject][ordered]@{
-            platform = 'win64'
-            architecture = 'x86_64'
+            platform = $PlatformValue
+            architecture = $Architecture
             configuration = $ConfigurationValue
             backend = 'wasmtime'
             format = 'wasmtime_serialized_v1'
@@ -1313,6 +1349,9 @@ function Publish-AvidScriptModuleReleasePackage {
         DescriptorSha256 = $DescriptorSha256
         CatalogPath = $CatalogPath
         Configuration = $ConfigurationValue
+        Platform = $PlatformValue
+        Architecture = $Architecture
+        TargetTriple = $TargetTriple
         FileCount = $ExpectedFiles.Count
     }
 }

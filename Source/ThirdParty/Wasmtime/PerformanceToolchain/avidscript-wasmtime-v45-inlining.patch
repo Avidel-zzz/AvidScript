@@ -52,3 +52,35 @@ index abecac5..27b7048 100644
 +    });
 +}
 +
+diff --git a/crates/c-api/include/wasmtime/module.h b/crates/c-api/include/wasmtime/module.h
+--- a/crates/c-api/include/wasmtime/module.h
++++ b/crates/c-api/include/wasmtime/module.h
+@@ -50,0 +51,10 @@ WASM_API_EXTERN wasmtime_error_t *wasmtime_module_new(wasm_engine_t *engine,
++/**
++ * \brief Cross-compiles a WebAssembly module for the engine's configured
++ * target and returns Wasmtime's serialized precompiled artifact.
++ */
++WASM_API_EXTERN wasmtime_error_t *
++avidscript_wasmtime_engine_precompile_module(wasm_engine_t *engine,
++                                             const uint8_t *wasm,
++                                             size_t wasm_len,
++                                             wasm_byte_vec_t *ret);
++
+diff --git a/crates/c-api/src/module.rs b/crates/c-api/src/module.rs
+--- a/crates/c-api/src/module.rs
++++ b/crates/c-api/src/module.rs
+@@ -150,0 +151,14 @@ pub unsafe extern "C" fn wasmtime_module_new(
++#[unsafe(no_mangle)]
++#[cfg(any(feature = "cranelift", feature = "winch"))]
++pub unsafe extern "C" fn avidscript_wasmtime_engine_precompile_module(
++    engine: &wasm_engine_t,
++    wasm: *const u8,
++    len: usize,
++    ret: &mut wasm_byte_vec_t,
++) -> Option<Box<wasmtime_error_t>> {
++    let bytes = crate::slice_from_raw_parts(wasm, len);
++    handle_result(engine.engine.precompile_module(bytes), |compiled| {
++        ret.set_buffer(compiled);
++    })
++}
++

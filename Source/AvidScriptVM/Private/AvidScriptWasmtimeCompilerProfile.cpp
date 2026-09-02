@@ -6,9 +6,9 @@
 
 namespace
 {
-constexpr uint32 WasmtimeCompilerProfileSchemaVersion = 2;
+constexpr uint32 WasmtimeCompilerProfileSchemaVersion = 3;
 
-FAvidScriptWasmtimeCompilerProfile MakeCompilerProfile()
+FAvidScriptWasmtimeCompilerProfile MakeWin64CompilerProfile()
 {
 	FAvidScriptWasmtimeCompilerProfile Profile;
 	Profile.Id = TEXT("cranelift-speed-x86_64-v3-contained-v3");
@@ -24,6 +24,8 @@ FAvidScriptWasmtimeCompilerProfile MakeCompilerProfile()
 		AVIDSCRIPT_WASMTIME_ENGINE_REGALLOC_BACKTRACKING;
 	Profile.EngineProfile.Inlining =
 		AVIDSCRIPT_WASMTIME_ENGINE_INLINING_ALL;
+	Profile.EngineProfile.TargetProfile =
+		AVIDSCRIPT_WASMTIME_ENGINE_TARGET_X86_64_WINDOWS;
 	Profile.EngineProfile.CpuProfile =
 		AVIDSCRIPT_WASMTIME_ENGINE_CPU_X86_64_V3;
 	Profile.EngineProfile.Wasm32MemoryReservationBytes =
@@ -39,6 +41,19 @@ FAvidScriptWasmtimeCompilerProfile MakeCompilerProfile()
 	return Profile;
 }
 
+FAvidScriptWasmtimeCompilerProfile MakeAndroidCompilerProfile()
+{
+	FAvidScriptWasmtimeCompilerProfile Profile = MakeWin64CompilerProfile();
+	Profile.Id = TEXT("cranelift-speed-arm64-v8a-contained-v1");
+	Profile.TargetTriple = TEXT("aarch64-linux-android");
+	Profile.CpuProfile = TEXT("arm64-v8a");
+	Profile.EngineProfile.TargetProfile =
+		AVIDSCRIPT_WASMTIME_ENGINE_TARGET_AARCH64_ANDROID;
+	Profile.EngineProfile.CpuProfile =
+		AVIDSCRIPT_WASMTIME_ENGINE_CPU_ARM64_V8A;
+	return Profile;
+}
+
 #if PLATFORM_WINDOWS && PLATFORM_CPU_X86_FAMILY
 bool HasBit(const int32 Value, const uint32 Bit)
 {
@@ -51,8 +66,25 @@ const FAvidScriptWasmtimeCompilerProfile&
 GetAvidScriptWasmtimeCompilerProfile()
 {
 	static const FAvidScriptWasmtimeCompilerProfile Profile =
-		MakeCompilerProfile();
+		MakeWin64CompilerProfile();
 	return Profile;
+}
+
+const FAvidScriptWasmtimeCompilerProfile*
+FindAvidScriptWasmtimeCompilerProfile(const FString& TargetTriple)
+{
+	static const FAvidScriptWasmtimeCompilerProfile AndroidProfile =
+		MakeAndroidCompilerProfile();
+	if (TargetTriple.IsEmpty()
+		|| TargetTriple == TEXT("x86_64-pc-windows-msvc"))
+	{
+		return &GetAvidScriptWasmtimeCompilerProfile();
+	}
+	if (TargetTriple == AndroidProfile.TargetTriple)
+	{
+		return &AndroidProfile;
+	}
+	return nullptr;
 }
 
 bool ValidateAvidScriptWasmtimeCompilerCpuProfile(FString& OutError)
@@ -126,16 +158,21 @@ bool ValidateAvidScriptWasmtimeCompilerCpuProfile(FString& OutError)
 
 FString BuildAvidScriptWasmtimeCompilerIdentity(
 	const FString& RuntimeVersion,
-	const FString& RuntimeArtifactSha256)
+	const FString& RuntimeArtifactSha256,
+	const FAvidScriptWasmtimeCompilerProfile& CompilerProfile)
 {
 	return FString::Printf(
 		TEXT("wasmtime-v%s+avidscript.1;strategy=cranelift;")
 		TEXT("opt=speed;regalloc=backtracking;inlining=all;")
-		TEXT("cpu=x86-64-v3;wasm32_memory=4g_fixed;memory_may_move=0;")
+		TEXT("profile=%s;target=%s;cpu=%s;")
+		TEXT("wasm32_memory=4g_fixed;memory_may_move=0;")
 		TEXT("max_wasm_stack=2m;fuel=on;epoch_interruption=on;")
 		TEXT("spectre=on;nan_canonicalization=off;parallel_compilation=on;")
 		TEXT("wasm_gc=on;gc_collector=drc;")
-		TEXT("runtime_profile=fastest-runtime;dll_sha256=%s"),
+		TEXT("runtime_profile=fastest-runtime;runtime_artifact_sha256=%s"),
 		*RuntimeVersion,
+		*CompilerProfile.Id,
+		*CompilerProfile.TargetTriple,
+		*CompilerProfile.CpuProfile,
 		*RuntimeArtifactSha256);
 }

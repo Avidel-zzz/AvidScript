@@ -8,7 +8,7 @@ $ThirdPartyRoot = Join-Path $PluginRoot 'Source/ThirdParty/Wasmtime'
 $LockPath = Join-Path $ThirdPartyRoot 'WasmtimeAndroidDependency.lock.json'
 $SchemaPath = Join-Path $ThirdPartyRoot 'WasmtimeAndroidDependency.schema.json'
 $Passed = 0
-$Total = 15
+$Total = 16
 
 function Assert-Contract {
     param(
@@ -164,6 +164,10 @@ Assert-Contract ($BuildSource -match '(?s)"installed".*?"Android".*?"arm64".*?"v
     'Wasmtime.Build.cs has no Android arm64 root.'
 Assert-Contract ($BuildSource.Contains('"libwasmtime.a"')) `
     'Wasmtime.Build.cs does not link the Android static library.'
+Assert-Contract (
+    $BuildSource.Contains('bHasAndroidCrossTargetLayout') -and
+    $BuildSource.Contains('AVIDSCRIPT_WASMTIME_ANDROID_STATIC_SHA256')) `
+    'Wasmtime.Build.cs does not expose the Android runtime identity to the host cross-compiler.'
 Assert-Contract (
     $BuildSource.Contains('Target.Architecture != UnrealArch.Arm64') -and
     -not $BuildSource.Contains('Binaries/Android/wasmtime.so')) `

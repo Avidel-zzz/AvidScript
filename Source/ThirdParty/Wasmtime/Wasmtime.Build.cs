@@ -14,7 +14,7 @@ public class Wasmtime : ModuleRules
 			ModuleDirectory,
 			"installed",
 			"Win64",
-			"v45.0.0-avidscript.1");
+			"v45.0.0-avidscript.2");
 		string OfficialInstallRoot = Path.Combine(
 			ModuleDirectory,
 			"installed",
@@ -44,8 +44,10 @@ public class Wasmtime : ModuleRules
 			"Android",
 			"arm64",
 			"v45.0.0");
+		bool bHasAndroidCrossTargetLayout =
+			HasAndroidManagedLayout(AndroidInstallRoot);
 		bool bHasAndroidLayout = bAndroidTarget
-			&& HasAndroidManagedLayout(AndroidInstallRoot);
+			&& bHasAndroidCrossTargetLayout;
 		bool bHasManagedLayout = bHasWin64Layout || bHasAndroidLayout;
 		bool bPackagedRuntimeTarget =
 			Target.Type == TargetType.Game
@@ -82,6 +84,10 @@ public class Wasmtime : ModuleRules
 			bHasWin64Layout
 				? $"AVIDSCRIPT_WASMTIME_DLL_SHA256=\"{ComputeFileSha256(Win64DllPath)}\""
 				: "AVIDSCRIPT_WASMTIME_DLL_SHA256=\"unavailable\"");
+		PublicDefinitions.Add(
+			bHasAndroidCrossTargetLayout
+				? $"AVIDSCRIPT_WASMTIME_ANDROID_STATIC_SHA256=\"{ComputeFileSha256(Path.Combine(AndroidInstallRoot, "lib", "libwasmtime.a"))}\""
+				: "AVIDSCRIPT_WASMTIME_ANDROID_STATIC_SHA256=\"unavailable\"");
 
 		if (bHasWin64Layout)
 		{

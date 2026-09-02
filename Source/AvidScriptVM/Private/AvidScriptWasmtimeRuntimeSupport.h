@@ -14,4 +14,5 @@ bool ResolveAvidScriptWasmtimeCompilerProfile(
 	FAvidScriptVmBackendInfo& InOutInfo,
 	AvidScriptWasmtimeEngineProfile& OutProfile,
 	FString& OutError,
-	FString* OutErrorCategory = nullptr);
+	FString* OutErrorCategory = nullptr,
+	const FString& RequestedTargetTriple = FString());

@@ -57,7 +57,7 @@ Assert-True ([string]$Lock.rust.toolchain -ceq '1.93.0-x86_64-pc-windows-msvc') 
     'Rust toolchain drifted'
 Assert-True ([string]$Lock.rust.build_profile -ceq 'fastest-runtime') `
     'runtime build profile drifted'
-Assert-True (@($Lock.rust.features) -join ',' -ceq 'cranelift,parallel-compilation,gc,gc-drc,disable-logging') `
+Assert-True (@($Lock.rust.features) -join ',' -ceq 'cranelift,all-arch,parallel-compilation,gc,gc-drc,disable-logging') `
     'Cargo feature set drifted'
 Assert-True (@($Lock.rust.cmake_arguments) -contains 'Visual Studio 17 2022') `
     'Windows build generator drifted'
@@ -95,15 +95,24 @@ $PatchedFiles = @(
         $PatchText,
         '(?m)^diff --git a/(?<path>\S+) b/[^\r\n]+\r?$') |
         ForEach-Object { $_.Groups['path'].Value })
-Assert-True ($PatchedFiles.Count -eq 2) 'patch must touch exactly two upstream C API files'
+Assert-True ($PatchedFiles.Count -eq 4) 'patch must touch exactly four upstream C API files'
 Assert-True ($PatchedFiles -contains 'crates/c-api/src/config.rs') `
     'patch must own the Rust C API implementation'
 Assert-True ($PatchedFiles -contains 'crates/c-api/include/wasmtime/config.h') `
     'patch must own the public C API declaration'
+Assert-True ($PatchedFiles -contains 'crates/c-api/src/module.rs') `
+    'patch must own the cross-target precompile implementation'
+Assert-True ($PatchedFiles -contains 'crates/c-api/include/wasmtime/module.h') `
+    'patch must own the cross-target precompile declaration'
 $ExportCount = ([regex]::Matches(
     $PatchText,
     'avidscript_wasmtime_config_compiler_inlining_set')).Count
 Assert-True ($ExportCount -eq 2) 'extension symbol must occur once in each patched file'
+$PrecompileExportCount = ([regex]::Matches(
+    $PatchText,
+    'avidscript_wasmtime_engine_precompile_module')).Count
+Assert-True ($PrecompileExportCount -eq 2) `
+    'precompile symbol must occur once in each patched file'
 Assert-True (-not $PatchText.Contains('enable_heap_access_spectre_mitigation')) `
     'patch must not weaken heap Spectre mitigation'
 Assert-True (-not $PatchText.Contains('enable_table_access_spectre_mitigation')) `
@@ -127,8 +136,14 @@ Assert-True $GitIgnore.Contains('Source/ThirdParty/Wasmtime/installed/') `
     'generated Wasmtime managed layouts must remain ignored'
 
 $BuildRulesText = Get-Content -LiteralPath $BuildRulesPath -Raw
-Assert-True $BuildRulesText.Contains('v45.0.0-avidscript.1') `
+Assert-True $BuildRulesText.Contains('v45.0.0-avidscript.2') `
     'UBT rules do not prefer the performance managed layout'
+Assert-True (
+    [Array]::IndexOf($Lock.rust.features, 'all-arch') -ge 0 -and
+    [Array]::IndexOf(
+        $Lock.rust.cmake_arguments,
+        '-DWASMTIME_FEATURE_ALL_ARCH=ON') -ge 0) `
+    'performance toolchain does not compile all Cranelift target architectures'
 Assert-True $BuildRulesText.Contains('AVIDSCRIPT_WITH_WASMTIME_PERFORMANCE_TOOLCHAIN=1') `
     'UBT rules do not publish performance toolchain availability'
 Assert-True $BuildRulesText.Contains('ExternalDependencies.Add(MarkerPath)') `
@@ -150,7 +165,7 @@ foreach ($IdentityField in @(
     'opt=speed',
     'regalloc=backtracking',
     'inlining=all',
-    'cpu=x86-64-v3',
+    'target=%s;cpu=%s',
     'spectre=on',
     'wasm_gc=on',
     'gc_collector=drc',
@@ -203,7 +218,7 @@ Assert-True ([string]$Validation.patch_sha256 -ceq $PatchSha256) `
 
 [pscustomobject]@{
     result = 'wasmtime_performance_toolchain_contracts_passed'
-    assertion_count = 66
+    assertion_count = 70
     toolchain_id = [string]$Lock.toolchain_id
     source_sha256 = [string]$Lock.upstream.source_archive.sha256
     patch_sha256 = $PatchSha256

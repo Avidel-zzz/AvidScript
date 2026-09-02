@@ -9,6 +9,16 @@ namespace AvidScript::ModulePackage
 inline constexpr int32 LegacyCatalogSchemaVersion = 1;
 inline constexpr int32 CatalogSchemaVersion = 2;
 inline constexpr int32 PackageSchemaVersion = 1;
+inline constexpr TCHAR Win64Platform[] = TEXT("win64");
+inline constexpr TCHAR Win64Architecture[] = TEXT("x86_64");
+inline constexpr TCHAR Win64TargetTriple[] =
+	TEXT("x86_64-pc-windows-msvc");
+inline constexpr TCHAR Win64CpuFeatures[] = TEXT("x86-64-v3");
+inline constexpr TCHAR AndroidPlatform[] = TEXT("android");
+inline constexpr TCHAR AndroidArchitecture[] = TEXT("arm64");
+inline constexpr TCHAR AndroidTargetTriple[] =
+	TEXT("aarch64-linux-android");
+inline constexpr TCHAR AndroidCpuFeatures[] = TEXT("arm64-v8a");
 inline constexpr TCHAR ModuleIdPatternDescription[] =
 	TEXT("a lowercase id matching [a-z][a-z0-9_.-]{0,63}");
 

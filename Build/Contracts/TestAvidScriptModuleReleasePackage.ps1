@@ -24,8 +24,25 @@ function New-ReleaseFixture {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
         [string]$ModuleId = 'fixture.module',
-        [string]$Policy = 'prefer_precompiled'
+        [ValidateSet('Win64', 'Android')][string]$TargetPlatform = 'Win64',
+        [string]$Policy = ''
     )
+
+    $TargetTriple = if ($TargetPlatform -ieq 'Android') {
+        'aarch64-linux-android'
+    }
+    else {
+        'x86_64-pc-windows-msvc'
+    }
+    $CpuFeatures = if ($TargetPlatform -ieq 'Android') { 'arm64-v8a' } else { 'x86-64-v3' }
+    if ([string]::IsNullOrWhiteSpace($Policy)) {
+        $Policy = if ($TargetPlatform -ieq 'Android') {
+            'require_precompiled'
+        }
+        else {
+            'prefer_precompiled'
+        }
+    }
 
     $ProjectRoot = Join-Path $Root $Name
     $ArtifactRoot = Join-Path $ProjectRoot 'Saved/ReleaseInput'
@@ -95,7 +112,8 @@ function New-ReleaseFixture {
             sha256 = Get-AvidScriptModuleReleaseSha256 $PrecompiledPath
             canonical_sha256 = Get-AvidScriptModuleReleaseSha256 $WasmPath
             compiler_build_identity = 'wasmtime-fixture-build'
-            target_triple = 'x86_64-pc-windows-msvc'
+            target_triple = $TargetTriple
+            cpu_features = $CpuFeatures
             attestation_id = ('1' * 32)
             policy = $Policy
             fallback = 'wasmtime_jit'
@@ -346,6 +364,38 @@ try {
         }
     }
 
+    Invoke-ReleaseContract 'Android Development is precompiled arm64' {
+        $Fixture = New-ReleaseFixture `
+            -Name 'AndroidDevelopment' `
+            -TargetPlatform Android
+        $Published = Publish-AvidScriptModuleReleasePackage `
+            -RuntimeManifestPath $Fixture.RuntimeManifestPath `
+            -ProjectRoot $Fixture.ProjectRoot `
+            -Configuration Development `
+            -TargetPlatform Android
+        $Descriptor = Get-Content -Raw -LiteralPath $Published.DescriptorPath |
+            ConvertFrom-Json -Depth 32
+        $Runtime = Get-Content -Raw -LiteralPath (
+            Join-Path $Published.PackageRoot 'runtime.avidscript.json') |
+            ConvertFrom-Json -Depth 32
+        $Catalog = Get-Content -Raw -LiteralPath $Published.CatalogPath |
+            ConvertFrom-Json -Depth 32
+        $Variant = $Catalog.modules[0].variants[0]
+        if ([string]$Published.Platform -cne 'android' -or
+            [string]$Published.Architecture -cne 'arm64' -or
+            [string]$Published.TargetTriple -cne 'aarch64-linux-android' -or
+            [string]$Descriptor.platform -cne 'android' -or
+            [string]$Descriptor.execution.policy -cne 'require_precompiled' -or
+            [string]$Descriptor.execution.target_triple -cne 'aarch64-linux-android' -or
+            [string]$Descriptor.execution.cpu_features -cne 'arm64-v8a' -or
+            [string]$Runtime.execution.policy -cne 'require_precompiled' -or
+            $Runtime.execution.PSObject.Properties.Name -ccontains 'fallback' -or
+            [string]$Variant.platform -cne 'android' -or
+            [string]$Variant.architecture -cne 'arm64') {
+            throw 'Android Development package did not preserve its fail-closed arm64 identity.'
+        }
+    }
+
     Invoke-ReleaseContract 'catalog preserves exact target variants' {
         $Fixture = New-ReleaseFixture -Name 'CatalogProfileDevelopment' -ModuleId 'shared.module'
         $Development = Publish-AvidScriptModuleReleasePackage `
@@ -356,15 +406,36 @@ try {
             -RuntimeManifestPath $Fixture.RuntimeManifestPath `
             -ProjectRoot $Fixture.ProjectRoot `
             -Configuration Shipping
+        $AndroidFixture = New-ReleaseFixture `
+            -Name 'CatalogProfileAndroid' `
+            -ModuleId 'shared.module' `
+            -TargetPlatform Android
+        $AndroidArtifactRoot = Join-Path $Fixture.ProjectRoot 'Saved/AndroidInput'
+        Copy-Item `
+            -LiteralPath $AndroidFixture.ArtifactRoot `
+            -Destination $AndroidArtifactRoot `
+            -Recurse
+        $AndroidManifestPath = Join-Path $AndroidArtifactRoot 'fixture.avidscript.json'
+        $Android = Publish-AvidScriptModuleReleasePackage `
+            -RuntimeManifestPath $AndroidManifestPath `
+            -ProjectRoot $Fixture.ProjectRoot `
+            -Configuration Development `
+            -TargetPlatform Android
         $Catalog = Get-Content -Raw -LiteralPath $Shipping.CatalogPath | ConvertFrom-Json -Depth 32
         if (@($Catalog.modules).Count -ne 1 -or
             [string]$Catalog.modules[0].module_id -cne 'shared.module' -or
-            @($Catalog.modules[0].variants).Count -ne 2 -or
+            @($Catalog.modules[0].variants).Count -ne 3 -or
+            [string]$Catalog.modules[0].variants[0].platform -cne 'android' -or
+            [string]$Catalog.modules[0].variants[0].architecture -cne 'arm64' -or
             [string]$Catalog.modules[0].variants[0].configuration -cne 'development' -or
-            [string]$Catalog.modules[0].variants[1].configuration -cne 'shipping') {
-            throw 'Catalog did not preserve ordered Development and Shipping variants.'
+            [string]$Catalog.modules[0].variants[1].platform -cne 'win64' -or
+            [string]$Catalog.modules[0].variants[1].configuration -cne 'development' -or
+            [string]$Catalog.modules[0].variants[2].platform -cne 'win64' -or
+            [string]$Catalog.modules[0].variants[2].configuration -cne 'shipping') {
+            throw 'Catalog did not preserve ordered Win64 and Android variants.'
         }
         $null = $Development
+        $null = $Android
     }
 
     Invoke-ReleaseContract 'Shipping strips diagnostics and build-only inputs' {

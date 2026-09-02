@@ -17,6 +17,9 @@ $BuildInvokerPath = Join-Path `
 $BuildPipelinePath = Join-Path `
     $PluginRoot `
     'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBuildPipeline.cpp'
+$VmArtifactPublisherPath = Join-Path `
+    $PluginRoot `
+    'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorVmArtifactPublisher.cpp'
 $GeneratedRuntimeHostHeaderPath = Join-Path `
     $PluginRoot `
     'Source/AvidScriptRuntime/Public/ScriptTypes/AvidScriptGeneratedTypeRuntimeHost.h'
@@ -30,7 +33,7 @@ $Root = Join-Path `
     ([System.IO.Path]::GetTempPath()) `
     ("AvidScriptReleaseContract_$PID`_$([Guid]::NewGuid().ToString('N'))")
 $Passed = 0
-$Total = 5
+$Total = 6
 $Failure = $null
 
 function Invoke-ReleaseContractTest {
@@ -88,6 +91,7 @@ try {
             $BuildConfigPath,
             $BuildInvokerPath,
             $BuildPipelinePath,
+            $VmArtifactPublisherPath,
             $GeneratedRuntimeHostHeaderPath,
             $GeneratedRuntimeHostSourcePath,
             $GeneratedModulePath)) {
@@ -109,6 +113,7 @@ try {
     $BuildConfigSource = Get-Content -Raw -LiteralPath $BuildConfigPath
     $BuildInvokerSource = Get-Content -Raw -LiteralPath $BuildInvokerPath
     $BuildPipelineSource = Get-Content -Raw -LiteralPath $BuildPipelinePath
+    $VmArtifactPublisherSource = Get-Content -Raw -LiteralPath $VmArtifactPublisherPath
     $GeneratedRuntimeHostHeader = Get-Content -Raw -LiteralPath $GeneratedRuntimeHostHeaderPath
     $GeneratedRuntimeHostSource = Get-Content -Raw -LiteralPath $GeneratedRuntimeHostSourcePath
     $GeneratedModuleSource = Get-Content -Raw -LiteralPath $GeneratedModulePath
@@ -125,7 +130,8 @@ try {
             'ModuleId',
             'OutputRoot',
             'RuntimeBindingPackagePath',
-            'SourcePath')
+            'SourcePath',
+            'TargetPlatform')
         $ActualParameters = @($RunnerAst.ParamBlock.Parameters |
                 ForEach-Object { $_.Name.VariablePath.UserPath } |
                 Sort-Object)
@@ -146,6 +152,7 @@ try {
                 'TEXT("BindingPackagePath")',
                 'TEXT("RuntimeBindingPackagePath")',
                 'TEXT("GeneratedTypeManifestPath")',
+                'TEXT("AvidScriptTargetPlatform")',
                 'TEXT("avidscriptsuppressgeneratedtypeexecution")',
                 'ParameterName.Equals(TEXT("run"), ESearchCase::IgnoreCase)',
                 'TEXT("AvidScriptRelease")',
@@ -164,6 +171,7 @@ try {
                 -ArtifactStem 'contract_artifact' `
                 -OutputRoot 'C:\Project\Saved\Release' `
                 -DotNetPath 'C:\DotNet\dotnet.exe' `
+                -TargetPlatform 'Android' `
                 -BindingPackagePath 'C:\Project\Saved\Bindings\package.json' `
                 -RuntimeBindingPackagePath 'C:\Project\Saved\Bindings\runtime.json' `
                 -GeneratedTypeManifestPath 'C:\Project\Saved\Generated\types.json' `
@@ -172,6 +180,7 @@ try {
                 '-run=AvidScriptRelease',
                 '-ModuleId=contract_module',
                 '-ArtifactStem=contract_artifact',
+                '-AvidScriptTargetPlatform=Android',
                 '-GeneratedTypeManifestPath=C:\Project\Saved\Generated\types.json',
                 '-AvidScriptSuppressGeneratedTypeExecution',
                 '-unattended',
@@ -266,6 +275,32 @@ try {
         }
     }
 
+    Invoke-ReleaseContractTest -Name 'Android cross target plumbing' -Body {
+        foreach ($RequiredRunnerToken in @(
+                "[ValidateSet('Win64', 'Android')]",
+                '"-AvidScriptTargetPlatform=$TargetPlatform"',
+                '-TargetPlatform $TargetPlatform')) {
+            if (-not $RunnerSource.Contains($RequiredRunnerToken)) {
+                throw "Android release runner token is missing: $RequiredRunnerToken"
+            }
+        }
+        foreach ($RequiredCommandletToken in @(
+                'TargetTriple = TEXT("aarch64-linux-android")',
+                'Config.VmArtifactTargetTriple = TargetTriple',
+                'BuildResult.VmArtifactTargetTriple != TargetTriple',
+                'TEXT("TargetPlatform must be Win64 or Android.")')) {
+            if (-not $CommandletSource.Contains($RequiredCommandletToken)) {
+                throw "Android commandlet token is missing: $RequiredCommandletToken"
+            }
+        }
+        if (-not $BuildConfigSource.Contains(
+                'FString VmArtifactTargetTriple = TEXT("x86_64-pc-windows-msvc");') -or
+            -not $VmArtifactPublisherSource.Contains(
+                'CompileRequest.TargetTriple = Config.VmArtifactTargetTriple;')) {
+            throw 'Editor VM artifact target triple is not wired into the compile request.'
+        }
+    }
+
     Invoke-ReleaseContractTest -Name 'publisher handoff' -Body {
         $PublishFunction = Get-ReleaseFunctionAst `
             -Ast $RunnerAst `
@@ -277,7 +312,8 @@ try {
                 '-RuntimeManifestPath $RuntimeManifestPath',
                 '-ProjectRoot $ProjectRoot',
                 '-ModuleId $ModuleId',
-                '-Configuration $Configuration')) {
+                '-Configuration $Configuration',
+                '-TargetPlatform $TargetPlatform')) {
             if (-not $PublishText.Contains($RequiredToken)) {
                 throw "Publisher handoff token is missing: $RequiredToken"
             }

@@ -3,6 +3,7 @@
 #include "AvidScriptHash.h"
 #include "AvidScriptVmStaticHostImports.h"
 #include "AvidScriptWasmtimeApi.h"
+#include "AvidScriptWasmtimeCompilerProfile.h"
 #include "AvidScriptWasmtimeRuntimeSupport.h"
 #include "AvidScriptWasmtimeTypedHostApi.h"
 #include "AvidScriptWasmModuleLayout.h"
@@ -598,10 +599,10 @@ public:
 		}
 
 		const double RuntimeInitStart = FPlatformTime::Seconds();
+		AvidScriptWasmtimeEngineProfile CompilerProfile = {};
 #if PLATFORM_WINDOWS
 		FString DllLoadError;
 		FString CompilerProfileErrorCategory;
-		AvidScriptWasmtimeEngineProfile CompilerProfile = {};
 		if (!ResolveAvidScriptWasmtimeCompilerProfile(
 				BackendInfo,
 				CompilerProfile,
@@ -617,16 +618,47 @@ public:
 				DllLoadError);
 			return false;
 		}
-#else
-		if (bSerialized)
+	#elif PLATFORM_ANDROID && PLATFORM_CPU_ARM_FAMILY
+		if (!bSerialized)
 		{
 			LoadMetrics.RuntimeInitMs = MeasureWasmtimeElapsedMs(RuntimeInitStart);
 			SetWasmtimeError(
 				OutError,
-				TEXT("artifact_target_mismatch"),
-				TEXT("Wasmtime serialized artifacts currently support Win64 only."));
+				TEXT("artifact_format_unsupported"),
+				TEXT("Android Wasmtime accepts verified precompiled artifacts only."));
 			return false;
 		}
+		FString RuntimeIdentityError;
+		if (!ResolveAvidScriptWasmtimeRuntimeIdentity(
+				BackendInfo,
+				RuntimeIdentityError))
+		{
+			LoadMetrics.RuntimeInitMs = MeasureWasmtimeElapsedMs(RuntimeInitStart);
+			SetWasmtimeError(
+				OutError,
+				TEXT("runtime_init_failed"),
+				RuntimeIdentityError);
+			return false;
+		}
+		const FAvidScriptWasmtimeCompilerProfile* RuntimeProfile =
+			FindAvidScriptWasmtimeCompilerProfile(BackendInfo.TargetTriple);
+		if (RuntimeProfile == nullptr)
+		{
+			LoadMetrics.RuntimeInitMs = MeasureWasmtimeElapsedMs(RuntimeInitStart);
+			SetWasmtimeError(
+				OutError,
+				TEXT("runtime_profile_invalid"),
+				TEXT("The Android Wasmtime runtime profile is unavailable."));
+			return false;
+		}
+		CompilerProfile = RuntimeProfile->EngineProfile;
+#else
+		LoadMetrics.RuntimeInitMs = MeasureWasmtimeElapsedMs(RuntimeInitStart);
+		SetWasmtimeError(
+			OutError,
+			TEXT("platform_unsupported"),
+			TEXT("Wasmtime is unsupported on this runtime platform."));
+		return false;
 #endif
 		if (bSerialized
 			&& Artifact.CompilerBuildIdentity != BackendInfo.RuntimeBuildIdentity)

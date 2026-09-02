@@ -9,6 +9,7 @@
 struct AvidScriptWasmtimeEngine
 {
 	wasm_engine_t* value;
+	AvidScriptWasmtimeModulePrecompiler module_precompiler;
 };
 
 struct AvidScriptWasmtimeModule

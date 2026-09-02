@@ -225,18 +225,30 @@ AvidScriptWasmtimeEngine* avidscript_wasmtime_engine_new_with_profile(
 	wasm_config_t* config;
 	AvidScriptWasmtimeEngine* engine;
 	wasmtime_error_t* target_error;
+	const bool is_windows_target = profile != NULL
+		&& profile->TargetProfile ==
+			AVIDSCRIPT_WASMTIME_ENGINE_TARGET_X86_64_WINDOWS;
+	const bool is_android_target = profile != NULL
+		&& profile->TargetProfile ==
+			AVIDSCRIPT_WASMTIME_ENGINE_TARGET_AARCH64_ANDROID;
 	if (profile == NULL
-		|| profile->SchemaVersion != 2
+		|| profile->SchemaVersion != 3
 		|| profile->Strategy != AVIDSCRIPT_WASMTIME_ENGINE_STRATEGY_CRANELIFT
 		|| (profile->Optimization != AVIDSCRIPT_WASMTIME_ENGINE_OPT_SPEED_AND_SIZE
 			&& profile->Optimization != AVIDSCRIPT_WASMTIME_ENGINE_OPT_SPEED)
 		|| profile->RegisterAllocator != AVIDSCRIPT_WASMTIME_ENGINE_REGALLOC_BACKTRACKING
 		|| profile->Inlining != AVIDSCRIPT_WASMTIME_ENGINE_INLINING_ALL
-		|| profile->CpuProfile != AVIDSCRIPT_WASMTIME_ENGINE_CPU_X86_64_V3
+		|| (!is_windows_target && !is_android_target)
+		|| (is_windows_target
+			&& profile->CpuProfile != AVIDSCRIPT_WASMTIME_ENGINE_CPU_X86_64_V3)
+		|| (is_android_target
+			&& profile->CpuProfile != AVIDSCRIPT_WASMTIME_ENGINE_CPU_ARM64_V8A)
 		|| profile->Wasm32MemoryReservationBytes == 0
 		|| profile->MaxWasmStackBytes == 0
 		|| !profile->bWasmGc
-		|| profile->CompilerInliningSetter == NULL)
+		|| (is_windows_target
+			&& (profile->CompilerInliningSetter == NULL
+				|| profile->ModulePrecompiler == NULL)))
 	{
 		return NULL;
 	}
@@ -278,17 +290,25 @@ AvidScriptWasmtimeEngine* avidscript_wasmtime_engine_new_with_profile(
 		profile->bSpectreMitigation ? "true" : "false");
 	target_error = wasmtime_config_target_set(
 		config,
-		"x86_64-pc-windows-msvc");
+		is_windows_target
+			? "x86_64-pc-windows-msvc"
+			: "aarch64-linux-android");
 	if (target_error != NULL)
 	{
 		wasmtime_error_delete(target_error);
 		wasm_config_delete(config);
 		return NULL;
 	}
-	wasmtime_config_cranelift_flag_enable(config, "x86-64-v3");
-	profile->CompilerInliningSetter(
-		config,
-		(uint8_t)profile->Inlining);
+	if (is_windows_target)
+	{
+		wasmtime_config_cranelift_flag_enable(config, "x86-64-v3");
+	}
+	if (profile->CompilerInliningSetter != NULL)
+	{
+		profile->CompilerInliningSetter(
+			config,
+			(uint8_t)profile->Inlining);
+	}
 	wasmtime_config_memory_reservation_set(
 		config,
 		profile->Wasm32MemoryReservationBytes);
@@ -319,6 +339,7 @@ AvidScriptWasmtimeEngine* avidscript_wasmtime_engine_new_with_profile(
 		free(engine);
 		return NULL;
 	}
+	engine->module_precompiler = profile->ModulePrecompiler;
 	return engine;
 }
 
@@ -412,6 +433,56 @@ AvidScriptWasmtimeFailure* avidscript_wasmtime_module_serialize(
 		wasm_byte_vec_delete(&serialized);
 		return avidscript_wasmtime_local_failure(
 			"Wasmtime serialized module allocation failed.");
+	}
+	memcpy(copied_bytes, serialized.data, serialized.size);
+	*out_serialized_bytes = copied_bytes;
+	*out_serialized_size = serialized.size;
+	wasm_byte_vec_delete(&serialized);
+	return NULL;
+}
+
+AvidScriptWasmtimeFailure* avidscript_wasmtime_module_precompile(
+	AvidScriptWasmtimeEngine* engine,
+	const uint8_t* wasm,
+	size_t wasm_size,
+	uint8_t** out_serialized_bytes,
+	size_t* out_serialized_size)
+{
+	wasm_byte_vec_t serialized;
+	wasmtime_error_t* error;
+	uint8_t* copied_bytes;
+	*out_serialized_bytes = NULL;
+	*out_serialized_size = 0;
+	if (engine == NULL
+		|| engine->value == NULL
+		|| engine->module_precompiler == NULL
+		|| wasm == NULL
+		|| wasm_size == 0)
+	{
+		return avidscript_wasmtime_local_failure(
+			"Wasmtime cross-target precompiler is unavailable.");
+	}
+	error = (wasmtime_error_t*)engine->module_precompiler(
+		engine->value,
+		wasm,
+		wasm_size,
+		&serialized);
+	if (error != NULL)
+	{
+		return avidscript_wasmtime_failure_new(error, NULL);
+	}
+	if (serialized.data == NULL || serialized.size == 0)
+	{
+		wasm_byte_vec_delete(&serialized);
+		return avidscript_wasmtime_local_failure(
+			"Wasmtime produced an empty precompiled module.");
+	}
+	copied_bytes = (uint8_t*)malloc(serialized.size);
+	if (copied_bytes == NULL)
+	{
+		wasm_byte_vec_delete(&serialized);
+		return avidscript_wasmtime_local_failure(
+			"Wasmtime precompiled module allocation failed.");
 	}
 	memcpy(copied_bytes, serialized.data, serialized.size);
 	*out_serialized_bytes = copied_bytes;

@@ -95,6 +95,24 @@ bool LoadJsonObject(
 			OutObject)
 		&& OutObject.IsValid();
 }
+
+bool IsValidExecutionContract(const FDocument& Package)
+{
+	if (Package.Platform == Win64Platform)
+	{
+		return Package.TargetTriple == Win64TargetTriple
+			&& Package.CpuFeatures == Win64CpuFeatures
+			&& (Package.Configuration != TEXT("shipping")
+				|| Package.Policy == TEXT("require_precompiled"));
+	}
+	if (Package.Platform == AndroidPlatform)
+	{
+		return Package.TargetTriple == AndroidTargetTriple
+			&& Package.CpuFeatures == AndroidCpuFeatures
+			&& Package.Policy == TEXT("require_precompiled");
+	}
+	return false;
+}
 } // namespace
 
 bool IsLowercaseSha256(const FString& Value)
@@ -323,6 +341,7 @@ bool ParseDocument(
 	const TSharedPtr<FJsonObject>& Root,
 	FDocument& OutPackage)
 {
+	OutPackage = FDocument();
 	if (!Root.IsValid()
 		|| !HasExactFields(
 			*Root,
@@ -353,7 +372,8 @@ bool ParseDocument(
 		|| !TryGetExactInteger(*Root, TEXT("abi_version"), OutPackage.AbiVersion)
 		|| OutPackage.AbiVersion <= 0
 		|| !Root->TryGetStringField(TEXT("platform"), OutPackage.Platform)
-		|| OutPackage.Platform != TEXT("win64")
+		|| (OutPackage.Platform != Win64Platform
+			&& OutPackage.Platform != AndroidPlatform)
 		|| !Root->TryGetStringField(TEXT("configuration"), OutPackage.Configuration)
 		|| (OutPackage.Configuration != TEXT("development")
 			&& OutPackage.Configuration != TEXT("shipping"))
@@ -383,8 +403,6 @@ bool ParseDocument(
 		|| !(*Execution)->TryGetStringField(TEXT("policy"), OutPackage.Policy)
 		|| (OutPackage.Policy != TEXT("require_precompiled")
 			&& OutPackage.Policy != TEXT("prefer_precompiled"))
-		|| (OutPackage.Configuration == TEXT("shipping")
-			&& OutPackage.Policy != TEXT("require_precompiled"))
 		|| !(*Execution)->TryGetStringField(
 			TEXT("compiler_build_identity"),
 			OutPackage.CompilerBuildIdentity)
@@ -392,11 +410,10 @@ bool ParseDocument(
 		|| !(*Execution)->TryGetStringField(
 			TEXT("target_triple"),
 			OutPackage.TargetTriple)
-		|| OutPackage.TargetTriple != TEXT("x86_64-pc-windows-msvc")
 		|| !(*Execution)->TryGetStringField(
 			TEXT("cpu_features"),
 			OutPackage.CpuFeatures)
-		|| OutPackage.CpuFeatures.IsEmpty()
+		|| !IsValidExecutionContract(OutPackage)
 		|| !Root->TryGetObjectField(TEXT("artifacts"), Artifacts)
 		|| Artifacts == nullptr
 		|| !Artifacts->IsValid()

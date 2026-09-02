@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "toolchain_id": "avidscript-wasmtime-v45.0.0-patchset.1-win64",
+  "toolchain_id": "avidscript-wasmtime-v45.0.0-patchset.2-win64-multiarch",
   "platform": "Win64",
   "upstream": {
     "version": "v45.0.0",
@@ -15,8 +15,9 @@
   },
   "patch": {
     "relative_path": "Source/ThirdParty/Wasmtime/PerformanceToolchain/avidscript-wasmtime-v45-inlining.patch",
-    "canonical_sha256": "84a7fc654be125c128143348999387ad742600fef7f03c682076bfb94bee9553",
+    "canonical_sha256": "f65bb04acf87f1b518c839f8863bcc5195c675546dbbcf55482d9ee24f17fad0",
     "export_symbol": "avidscript_wasmtime_config_compiler_inlining_set",
+    "precompile_export_symbol": "avidscript_wasmtime_engine_precompile_module",
     "api_revision": 1
   },
   "rust": {
@@ -26,6 +27,7 @@
     "build_profile": "fastest-runtime",
     "features": [
       "cranelift",
+      "all-arch",
       "parallel-compilation",
       "gc",
       "gc-drc",
@@ -41,6 +43,7 @@
       "-DWASMTIME_FASTEST_RUNTIME=ON",
       "-DWASMTIME_DISABLE_ALL_FEATURES=ON",
       "-DWASMTIME_FEATURE_CRANELIFT=ON",
+      "-DWASMTIME_FEATURE_ALL_ARCH=ON",
       "-DWASMTIME_FEATURE_PARALLEL_COMPILATION=ON",
       "-DWASMTIME_FEATURE_GC=ON",
       "-DWASMTIME_FEATURE_GC_DRC=ON",
@@ -49,7 +52,7 @@
     "source_date_epoch": 1779385346
   },
   "install": {
-    "relative_path": "Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.1",
+    "relative_path": "Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.2",
     "managed_marker_name": ".avidscript-wasmtime-performance-managed.json"
   },
   "layout": {

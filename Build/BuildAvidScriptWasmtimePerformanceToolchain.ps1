@@ -317,6 +317,7 @@ function Test-ManagedInstall {
         throw 'ASP57W1505 managed runtime content SHA-256 mismatch'
     }
     Assert-Export -DllPath $DllPath -Symbol ([string]$Lock.patch.export_symbol)
+    Assert-Export -DllPath $DllPath -Symbol ([string]$Lock.patch.precompile_export_symbol)
     return [pscustomobject]@{
         install_path = $Paths.InstallPath
         dll_sha256 = [string]$Marker.dll_sha256
@@ -405,6 +406,7 @@ Copy-Item -LiteralPath (Join-Path $SourceRoot 'LICENSE') `
     -Destination (Join-Path $StagingRoot ([string]$Lock.layout.license_relative_path))
 $StagedDll = Join-Path $StagingRoot ([string]$Lock.layout.dll_relative_path)
 Assert-Export -DllPath $StagedDll -Symbol ([string]$Lock.patch.export_symbol)
+Assert-Export -DllPath $StagedDll -Symbol ([string]$Lock.patch.precompile_export_symbol)
 $MarkerName = [string]$Lock.install.managed_marker_name
 $MarkerPath = Join-Path $StagingRoot $MarkerName
 $InstalledContentSha256 = Get-InstalledContentSha256 -Root $StagingRoot -MarkerName $MarkerName

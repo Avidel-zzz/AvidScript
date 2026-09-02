@@ -42,12 +42,25 @@ typedef enum AvidScriptWasmtimeInliningMode
 
 typedef enum AvidScriptWasmtimeCpuProfile
 {
-	AVIDSCRIPT_WASMTIME_ENGINE_CPU_X86_64_V3 = 0
+	AVIDSCRIPT_WASMTIME_ENGINE_CPU_X86_64_V3 = 0,
+	AVIDSCRIPT_WASMTIME_ENGINE_CPU_ARM64_V8A = 1
 } AvidScriptWasmtimeCpuProfile;
+
+typedef enum AvidScriptWasmtimeTargetProfile
+{
+	AVIDSCRIPT_WASMTIME_ENGINE_TARGET_X86_64_WINDOWS = 0,
+	AVIDSCRIPT_WASMTIME_ENGINE_TARGET_AARCH64_ANDROID = 1
+} AvidScriptWasmtimeTargetProfile;
 
 typedef void (*AvidScriptWasmtimeCompilerInliningSetter)(
 	void* config,
 	uint8_t mode);
+
+typedef void* (*AvidScriptWasmtimeModulePrecompiler)(
+	void* engine,
+	const uint8_t* wasm,
+	size_t wasm_size,
+	void* out_serialized);
 
 typedef struct AvidScriptWasmtimeEngineProfile
 {
@@ -56,6 +69,7 @@ typedef struct AvidScriptWasmtimeEngineProfile
 	AvidScriptWasmtimeOptimization Optimization;
 	AvidScriptWasmtimeRegisterAllocator RegisterAllocator;
 	AvidScriptWasmtimeInliningMode Inlining;
+	AvidScriptWasmtimeTargetProfile TargetProfile;
 	AvidScriptWasmtimeCpuProfile CpuProfile;
 	uint64_t Wasm32MemoryReservationBytes;
 	uint64_t MaxWasmStackBytes;
@@ -67,6 +81,7 @@ typedef struct AvidScriptWasmtimeEngineProfile
 	bool bConsumeFuel;
 	bool bEpochInterruption;
 	AvidScriptWasmtimeCompilerInliningSetter CompilerInliningSetter;
+	AvidScriptWasmtimeModulePrecompiler ModulePrecompiler;
 } AvidScriptWasmtimeEngineProfile;
 
 typedef enum AvidScriptWasmtimeCallStatus
@@ -138,6 +153,12 @@ AvidScriptWasmtimeFailure* avidscript_wasmtime_module_deserialize(
 	AvidScriptWasmtimeModule** out_module);
 AvidScriptWasmtimeFailure* avidscript_wasmtime_module_serialize(
 	const AvidScriptWasmtimeModule* module,
+	uint8_t** out_serialized_bytes,
+	size_t* out_serialized_size);
+AvidScriptWasmtimeFailure* avidscript_wasmtime_module_precompile(
+	AvidScriptWasmtimeEngine* engine,
+	const uint8_t* wasm,
+	size_t wasm_size,
 	uint8_t** out_serialized_bytes,
 	size_t* out_serialized_size);
 void avidscript_wasmtime_serialized_bytes_delete(uint8_t* serialized_bytes);

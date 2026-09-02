@@ -314,6 +314,7 @@ bool FAvidScriptEditorVmArtifactPublisher::Publish(
 		EAvidScriptVmExecutionMode::Aot;
 	CompileRequest.Selection.ArtifactFormat =
 		EAvidScriptVmArtifactFormat::WasmtimeSerialized;
+	CompileRequest.TargetTriple = Config.VmArtifactTargetTriple;
 	CompileRequest.CanonicalWasmBytes = CanonicalWasmBytes;
 	FAvidScriptVmArtifactCompileResult CompileResult;
 	if (!CompileAvidScriptVmArtifact(CompileRequest, CompileResult))

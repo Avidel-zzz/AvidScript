@@ -947,6 +947,23 @@ bool FAvidScriptVmWasmtimeCompilerProfileTest::RunTest(
 	TestTrue(
 		TEXT("epoch interruption is compiled in"),
 		DeclaredProfile.EngineProfile.bEpochInterruption);
+	const FAvidScriptWasmtimeCompilerProfile* AndroidProfile =
+		FindAvidScriptWasmtimeCompilerProfile(TEXT("aarch64-linux-android"));
+	if (!TestNotNull(TEXT("Android compiler profile is declared"), AndroidProfile))
+	{
+		return false;
+	}
+	TestEqual(
+		TEXT("Android compiler CPU profile"),
+		AndroidProfile->CpuProfile,
+		FString(TEXT("arm64-v8a")));
+	TestEqual(
+		TEXT("Android engine target profile"),
+		AndroidProfile->EngineProfile.TargetProfile,
+		AVIDSCRIPT_WASMTIME_ENGINE_TARGET_AARCH64_ANDROID);
+	TestNull(
+		TEXT("unknown targets fail closed"),
+		FindAvidScriptWasmtimeCompilerProfile(TEXT("unknown-target")));
 
 	FAvidScriptVmBackendInfo RuntimeInfo;
 	RuntimeInfo.Kind = EAvidScriptVmBackendKind::Wasmtime;
@@ -976,6 +993,9 @@ bool FAvidScriptVmWasmtimeCompilerProfileTest::RunTest(
 	TestTrue(
 		TEXT("compiler inlining extension resolves"),
 		ResolvedProfile.CompilerInliningSetter != nullptr);
+	TestTrue(
+		TEXT("cross-target precompiler extension resolves"),
+		ResolvedProfile.ModulePrecompiler != nullptr);
 	TestTrue(
 		TEXT("runtime identity binds compiler inlining"),
 		RuntimeInfo.RuntimeBuildIdentity.Contains(
@@ -1035,6 +1055,38 @@ bool FAvidScriptVmWasmtimeCompilerProfileTest::RunTest(
 	TestNull(
 		TEXT("profile without the verified extension fails closed"),
 		avidscript_wasmtime_engine_new_with_profile(&ResolvedProfile));
+
+	FAvidScriptVmBackendInfo AndroidRuntimeInfo;
+	AndroidRuntimeInfo.Kind = EAvidScriptVmBackendKind::Wasmtime;
+	AndroidRuntimeInfo.ExecutionMode = EAvidScriptVmExecutionMode::Aot;
+	AndroidRuntimeInfo.ArtifactFormat =
+		EAvidScriptVmArtifactFormat::WasmtimeSerialized;
+	AvidScriptWasmtimeEngineProfile AndroidResolvedProfile = {};
+	if (!TestTrue(
+		TEXT("Android cross-compiler profile resolves"),
+		ResolveAvidScriptWasmtimeCompilerProfile(
+			AndroidRuntimeInfo,
+			AndroidResolvedProfile,
+			Error,
+			&ErrorCategory,
+			TEXT("aarch64-linux-android"))))
+	{
+		AddError(ErrorCategory + TEXT(": ") + Error);
+		return false;
+	}
+	TestEqual(
+		TEXT("Android runtime target is exact"),
+		AndroidRuntimeInfo.TargetTriple,
+		FString(TEXT("aarch64-linux-android")));
+	TestTrue(
+		TEXT("Android runtime identity binds arm64-v8a"),
+		AndroidRuntimeInfo.RuntimeBuildIdentity.Contains(
+			TEXT("target=aarch64-linux-android;cpu=arm64-v8a"),
+			ESearchCase::CaseSensitive));
+	Engine = avidscript_wasmtime_engine_new_with_profile(
+		&AndroidResolvedProfile);
+	TestNotNull(TEXT("Android cross-compiler engine is created"), Engine);
+	avidscript_wasmtime_engine_delete(Engine);
 	return true;
 #endif
 }
@@ -1209,11 +1261,13 @@ bool FAvidScriptVmWasmtimeLifecycleTest::RunTest(const FString& Parameters)
 		FString::Printf(
 			TEXT("wasmtime-v45.0.0+avidscript.1;strategy=cranelift;")
 			TEXT("opt=speed;regalloc=backtracking;inlining=all;")
-			TEXT("cpu=x86-64-v3;wasm32_memory=4g_fixed;memory_may_move=0;")
+			TEXT("profile=cranelift-speed-x86_64-v3-contained-v3;")
+			TEXT("target=x86_64-pc-windows-msvc;cpu=x86-64-v3;")
+			TEXT("wasm32_memory=4g_fixed;memory_may_move=0;")
 			TEXT("max_wasm_stack=2m;fuel=on;epoch_interruption=on;")
 			TEXT("spectre=on;nan_canonicalization=off;parallel_compilation=on;")
 			TEXT("wasm_gc=on;gc_collector=drc;")
-			TEXT("runtime_profile=fastest-runtime;dll_sha256=%s"),
+			TEXT("runtime_profile=fastest-runtime;runtime_artifact_sha256=%s"),
 			*LoadedInfo.RuntimeArtifactSha256));
 	TestTrue(TEXT("RuntimeInitMs is measured"), Backend->GetLoadMetrics().RuntimeInitMs > 0.0);
 	TestTrue(TEXT("ModuleLoadMs is measured"), Backend->GetLoadMetrics().ModuleLoadMs > 0.0);
@@ -1659,6 +1713,33 @@ bool FAvidScriptVmWasmtimeArtifactCompilerTest::RunTest(
 		AuthorizeAvidScriptVmArtifact(
 			CachedResult.Artifact.AttestationId,
 			MutatedArtifact));
+
+	FAvidScriptVmArtifactCompileRequest AndroidRequest = Request;
+	AndroidRequest.TargetTriple = TEXT("aarch64-linux-android");
+	FAvidScriptVmArtifactCompileResult AndroidResult;
+	if (!TestTrue(
+		TEXT("Android arm64 artifact cross-compiles"),
+		CompileAvidScriptVmArtifact(AndroidRequest, AndroidResult)))
+	{
+		AddError(
+			AndroidResult.Error.Category
+			+ TEXT(": ")
+			+ AndroidResult.Error.Details);
+		return false;
+	}
+	TestEqual(
+		TEXT("Android artifact target is exact"),
+		AndroidResult.Artifact.TargetTriple,
+		FString(TEXT("aarch64-linux-android")));
+	TestTrue(
+		TEXT("Android artifact identity binds the target runtime"),
+		AndroidResult.Artifact.CompilerBuildIdentity.Contains(
+			TEXT("target=aarch64-linux-android;cpu=arm64-v8a"),
+			ESearchCase::CaseSensitive));
+	TestNotEqual(
+		TEXT("cross-target artifacts have distinct compiler identities"),
+		AndroidResult.Artifact.CompilerBuildIdentity,
+		FirstResult.Artifact.CompilerBuildIdentity);
 	return true;
 #endif
 }

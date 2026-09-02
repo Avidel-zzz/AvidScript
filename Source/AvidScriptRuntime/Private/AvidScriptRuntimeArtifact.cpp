@@ -1,6 +1,7 @@
 #include "AvidScriptRuntimeArtifact.h"
 
 #include "AvidScriptHash.h"
+#include "Packages/AvidScriptModulePackageSchema.h"
 
 #include "Dom/JsonObject.h"
 #include "Misc/FileHelper.h"
@@ -420,9 +421,33 @@ static bool LoadRuntimeArtifactFromFile(
 			OutArtifact,
 			OutResult);
 	}
-#if PLATFORM_WINDOWS
-	if (TargetTriple != TEXT("x86_64-pc-windows-msvc"))
+	FString ExpectedTargetTriple;
+	if (PublishedPackage != nullptr)
 	{
+		ExpectedTargetTriple = PublishedPackage->TargetTriple;
+	}
+	else
+	{
+#if PLATFORM_WINDOWS
+		ExpectedTargetTriple =
+			AvidScript::ModulePackage::Win64TargetTriple;
+#elif PLATFORM_ANDROID
+		ExpectedTargetTriple =
+			AvidScript::ModulePackage::AndroidTargetTriple;
+#endif
+	}
+	if (ExpectedTargetTriple.IsEmpty()
+		|| TargetTriple != ExpectedTargetTriple)
+	{
+		if (PublishedPackage != nullptr)
+		{
+			SetArtifactLoadFailure(
+				OutResult,
+				TEXT("package_execution_contract_mismatch"),
+				TEXT("The runtime manifest target differs from its verified package descriptor."),
+				TEXT("republish the module package with the active target toolchain"));
+			return false;
+		}
 		return ApplyJitFallback(
 			TEXT("execution_target_mismatch"),
 			Policy,
@@ -431,7 +456,6 @@ static bool LoadRuntimeArtifactFromFile(
 			OutArtifact,
 			OutResult);
 	}
-#endif
 
 	FAvidScriptVmOwnedArtifact VmArtifact;
 	VmArtifact.ExecutionBytes = MoveTemp(SerializedBytes);

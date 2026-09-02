@@ -110,11 +110,15 @@ public class AvidScriptRuntime : ModuleRules
 				&& Variant.Configuration == ExpectedConfiguration
 				&& Variant.Backend == "wasmtime"
 				&& Variant.Format == "wasmtime_serialized_v1").ToArray();
-			if (Matches.Length != 1)
+			if (Matches.Length > 1)
 			{
 				throw new BuildException(
-					$"AvidScript module '{ModuleId}' has no unique variant for "
+					$"AvidScript module '{ModuleId}' has multiple variants for "
 					+ $"{ExpectedPlatform}/{ExpectedArchitecture}/{ExpectedConfiguration}/wasmtime.");
+			}
+			if (Matches.Length == 0)
+			{
+				continue;
 			}
 			PublishedModuleVariant Selected = Matches[0];
 			string PackageId = Selected.PackageId;

@@ -19,6 +19,9 @@ THIRD_PARTY_INCLUDES_END
 #ifndef AVIDSCRIPT_WASMTIME_DLL_SHA256
 #define AVIDSCRIPT_WASMTIME_DLL_SHA256 "unavailable"
 #endif
+#ifndef AVIDSCRIPT_WASMTIME_ANDROID_STATIC_SHA256
+#define AVIDSCRIPT_WASMTIME_ANDROID_STATIC_SHA256 "unavailable"
+#endif
 
 namespace
 {
@@ -26,6 +29,7 @@ FCriticalSection GWasmtimeDllCriticalSection;
 void* GWasmtimeDllHandle = nullptr;
 FString GWasmtimeObservedDllSha256;
 void* GWasmtimeCompilerInliningExport = nullptr;
+void* GWasmtimeModulePrecompilerExport = nullptr;
 
 #if AVIDSCRIPT_WITH_WASMTIME && PLATFORM_WINDOWS
 bool GetWasmtimeDllSha256(
@@ -121,12 +125,16 @@ bool EnsureWasmtimeDllLoaded(
 			GWasmtimeCompilerInliningExport = FPlatformProcess::GetDllExport(
 				GWasmtimeDllHandle,
 				TEXT("avidscript_wasmtime_config_compiler_inlining_set"));
-			if (GWasmtimeCompilerInliningExport == nullptr)
+			GWasmtimeModulePrecompilerExport = FPlatformProcess::GetDllExport(
+				GWasmtimeDllHandle,
+				TEXT("avidscript_wasmtime_engine_precompile_module"));
+			if (GWasmtimeCompilerInliningExport == nullptr
+				|| GWasmtimeModulePrecompilerExport == nullptr)
 			{
 				FPlatformProcess::FreeDllHandle(GWasmtimeDllHandle);
 				GWasmtimeDllHandle = nullptr;
 				OutError = FString::Printf(
-					TEXT("The verified Wasmtime DLL lacks the AvidScript compiler inlining extension: %s"),
+					TEXT("The verified Wasmtime DLL lacks the AvidScript compiler inlining extension or precompile extension: %s"),
 					*Candidate);
 				return false;
 			}
@@ -157,6 +165,19 @@ void InitializeAvidScriptWasmtimeRuntimeDescriptor(
 	InOutInfo.RuntimeVersion = TEXT("45.0.0");
 #if PLATFORM_WINDOWS
 	InOutInfo.TargetTriple = TEXT("x86_64-pc-windows-msvc");
+#elif PLATFORM_ANDROID && PLATFORM_CPU_ARM_FAMILY
+	InOutInfo.TargetTriple = TEXT("aarch64-linux-android");
+	InOutInfo.RuntimeArtifactSha256 =
+		UTF8_TO_TCHAR(AVIDSCRIPT_WASMTIME_ANDROID_STATIC_SHA256);
+	if (const FAvidScriptWasmtimeCompilerProfile* Profile =
+			FindAvidScriptWasmtimeCompilerProfile(InOutInfo.TargetTriple))
+	{
+		InOutInfo.RuntimeBuildIdentity =
+			BuildAvidScriptWasmtimeCompilerIdentity(
+				InOutInfo.RuntimeVersion,
+				InOutInfo.RuntimeArtifactSha256,
+				*Profile);
+	}
 #else
 	InOutInfo.TargetTriple = TEXT("unknown-unknown-unknown");
 #endif
@@ -166,18 +187,32 @@ bool ResolveAvidScriptWasmtimeRuntimeIdentity(
 	FAvidScriptVmBackendInfo& InOutInfo,
 	FString& OutError)
 {
+#if PLATFORM_ANDROID && PLATFORM_CPU_ARM_FAMILY
+	InitializeAvidScriptWasmtimeRuntimeDescriptor(InOutInfo);
+	if (InOutInfo.RuntimeArtifactSha256 == TEXT("unavailable")
+		|| InOutInfo.RuntimeBuildIdentity.IsEmpty())
+	{
+		OutError = TEXT(
+			"The locked Wasmtime Android arm64 runtime identity is unavailable.");
+		return false;
+	}
+	OutError.Reset();
+	return true;
+#else
 	AvidScriptWasmtimeEngineProfile IgnoredProfile = {};
 	return ResolveAvidScriptWasmtimeCompilerProfile(
 		InOutInfo,
 		IgnoredProfile,
 		OutError);
+#endif
 }
 
 bool ResolveAvidScriptWasmtimeCompilerProfile(
 	FAvidScriptVmBackendInfo& InOutInfo,
 	AvidScriptWasmtimeEngineProfile& OutProfile,
 	FString& OutError,
-	FString* OutErrorCategory)
+	FString* OutErrorCategory,
+	const FString& RequestedTargetTriple)
 {
 	OutError.Reset();
 	OutProfile = {};
@@ -185,6 +220,9 @@ bool ResolveAvidScriptWasmtimeCompilerProfile(
 	{
 		OutErrorCategory->Reset();
 	}
+	const FString EffectiveTargetTriple = RequestedTargetTriple.IsEmpty()
+		? TEXT("x86_64-pc-windows-msvc")
+		: RequestedTargetTriple;
 	InitializeAvidScriptWasmtimeRuntimeDescriptor(InOutInfo);
 #if !AVIDSCRIPT_WITH_WASMTIME
 	if (OutErrorCategory != nullptr)
@@ -201,6 +239,19 @@ bool ResolveAvidScriptWasmtimeCompilerProfile(
 	OutError = TEXT("Wasmtime artifact production currently supports Win64 only.");
 	return false;
 #else
+	const FAvidScriptWasmtimeCompilerProfile* CompilerProfile =
+		FindAvidScriptWasmtimeCompilerProfile(EffectiveTargetTriple);
+	if (CompilerProfile == nullptr)
+	{
+		if (OutErrorCategory != nullptr)
+		{
+			*OutErrorCategory = TEXT("artifact_target_unsupported");
+		}
+		OutError = FString::Printf(
+			TEXT("Wasmtime artifact target is unsupported: %s"),
+			*EffectiveTargetTriple);
+		return false;
+	}
 	FString ObservedDllSha256;
 	if (!EnsureWasmtimeDllLoaded(ObservedDllSha256, OutError))
 	{
@@ -221,7 +272,17 @@ bool ResolveAvidScriptWasmtimeCompilerProfile(
 		OutError = TEXT("The AvidScript Wasmtime compiler extension is unavailable.");
 		return false;
 	}
-	if (!ValidateAvidScriptWasmtimeCompilerCpuProfile(OutError))
+	if (GWasmtimeModulePrecompilerExport == nullptr)
+	{
+		if (OutErrorCategory != nullptr)
+		{
+			*OutErrorCategory = TEXT("compiler_extension_missing");
+		}
+		OutError = TEXT("The AvidScript Wasmtime module precompiler is unavailable.");
+		return false;
+	}
+	if (CompilerProfile->TargetTriple == TEXT("x86_64-pc-windows-msvc")
+		&& !ValidateAvidScriptWasmtimeCompilerCpuProfile(OutError))
 	{
 		if (OutErrorCategory != nullptr)
 		{
@@ -229,17 +290,34 @@ bool ResolveAvidScriptWasmtimeCompilerProfile(
 		}
 		return false;
 	}
-	const FAvidScriptWasmtimeCompilerProfile& CompilerProfile =
-		GetAvidScriptWasmtimeCompilerProfile();
-	OutProfile = CompilerProfile.EngineProfile;
+	const FString RuntimeArtifactSha256 =
+		CompilerProfile->TargetTriple == TEXT("aarch64-linux-android")
+			? FString(UTF8_TO_TCHAR(AVIDSCRIPT_WASMTIME_ANDROID_STATIC_SHA256))
+			: ObservedDllSha256;
+	if (RuntimeArtifactSha256 == TEXT("unavailable"))
+	{
+		if (OutErrorCategory != nullptr)
+		{
+			*OutErrorCategory = TEXT("target_runtime_unavailable");
+		}
+		OutError = FString::Printf(
+			TEXT("The managed target runtime is unavailable for %s."),
+			*CompilerProfile->TargetTriple);
+		return false;
+	}
+	OutProfile = CompilerProfile->EngineProfile;
 	OutProfile.CompilerInliningSetter =
 		reinterpret_cast<AvidScriptWasmtimeCompilerInliningSetter>(
 			GWasmtimeCompilerInliningExport);
-	InOutInfo.TargetTriple = CompilerProfile.TargetTriple;
-	InOutInfo.RuntimeArtifactSha256 = ObservedDllSha256;
+	OutProfile.ModulePrecompiler =
+		reinterpret_cast<AvidScriptWasmtimeModulePrecompiler>(
+			GWasmtimeModulePrecompilerExport);
+	InOutInfo.TargetTriple = CompilerProfile->TargetTriple;
+	InOutInfo.RuntimeArtifactSha256 = RuntimeArtifactSha256;
 	InOutInfo.RuntimeBuildIdentity = BuildAvidScriptWasmtimeCompilerIdentity(
 		InOutInfo.RuntimeVersion,
-		ObservedDllSha256);
+		RuntimeArtifactSha256,
+		*CompilerProfile);
 	return true;
 #endif
 }

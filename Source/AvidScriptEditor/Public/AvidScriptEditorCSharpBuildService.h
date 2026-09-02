@@ -31,6 +31,7 @@ struct FAvidScriptEditorCSharpBuildConfig
 	FString ModuleId;
 	FString ArtifactStem;
 	FString Configuration = TEXT("Release");
+	FString VmArtifactTargetTriple = TEXT("x86_64-pc-windows-msvc");
 	EAvidScriptEditorVmArtifactPolicy VmArtifactPolicy =
 		EAvidScriptEditorVmArtifactPolicy::PreferPrecompiled;
 	bool bEnableDataLaneFusion = true;

@@ -197,7 +197,8 @@ bool CompileAvidScriptVmArtifact(
 			RuntimeInfo,
 			CompilerProfile,
 			RuntimeIdentityError,
-			&CompilerProfileErrorCategory))
+			&CompilerProfileErrorCategory,
+			Request.TargetTriple))
 	{
 		SetCompileError(
 			OutResult,
@@ -247,31 +248,12 @@ bool CompileAvidScriptVmArtifact(
 		return false;
 	}
 
-	AvidScriptWasmtimeModule* Module = nullptr;
-	AvidScriptWasmtimeFailure* Failure = avidscript_wasmtime_module_new(
+	uint8_t* SerializedBytes = nullptr;
+	size_t SerializedSize = 0;
+	AvidScriptWasmtimeFailure* Failure = avidscript_wasmtime_module_precompile(
 		Engine,
 		Request.CanonicalWasmBytes.GetData(),
 		static_cast<size_t>(Request.CanonicalWasmBytes.Num()),
-		&Module);
-	if (Failure != nullptr || Module == nullptr)
-	{
-		const FString Details = Failure != nullptr
-			? ConsumeArtifactCompilerFailure(Failure)
-			: TEXT("Wasmtime module allocation failed.");
-		avidscript_wasmtime_module_delete(Module);
-		avidscript_wasmtime_engine_delete(Engine);
-		SetCompileError(
-			OutResult,
-			TEXT("artifact_compile_failed"),
-			Details,
-			StartSeconds);
-		return false;
-	}
-
-	uint8_t* SerializedBytes = nullptr;
-	size_t SerializedSize = 0;
-	Failure = avidscript_wasmtime_module_serialize(
-		Module,
 		&SerializedBytes,
 		&SerializedSize);
 	if (Failure != nullptr
@@ -281,13 +263,12 @@ bool CompileAvidScriptVmArtifact(
 	{
 		const FString Details = Failure != nullptr
 			? ConsumeArtifactCompilerFailure(Failure)
-			: TEXT("Wasmtime produced an invalid serialized module.");
+			: TEXT("Wasmtime produced an invalid precompiled module.");
 		avidscript_wasmtime_serialized_bytes_delete(SerializedBytes);
-		avidscript_wasmtime_module_delete(Module);
 		avidscript_wasmtime_engine_delete(Engine);
 		SetCompileError(
 			OutResult,
-			TEXT("artifact_serialize_failed"),
+			TEXT("artifact_compile_failed"),
 			Details,
 			StartSeconds);
 		return false;
@@ -309,7 +290,6 @@ bool CompileAvidScriptVmArtifact(
 	CompiledArtifact.TargetTriple = RuntimeInfo.TargetTriple;
 
 	avidscript_wasmtime_serialized_bytes_delete(SerializedBytes);
-	avidscript_wasmtime_module_delete(Module);
 	avidscript_wasmtime_engine_delete(Engine);
 
 	{

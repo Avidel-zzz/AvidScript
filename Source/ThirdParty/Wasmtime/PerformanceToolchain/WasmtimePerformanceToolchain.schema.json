@@ -16,7 +16,7 @@
   ],
   "properties": {
     "schema_version": { "const": 1 },
-    "toolchain_id": { "const": "avidscript-wasmtime-v45.0.0-patchset.1-win64" },
+    "toolchain_id": { "const": "avidscript-wasmtime-v45.0.0-patchset.2-win64-multiarch" },
     "platform": { "const": "Win64" },
     "upstream": {
       "type": "object",
@@ -42,11 +42,12 @@
     "patch": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["relative_path", "canonical_sha256", "export_symbol", "api_revision"],
+      "required": ["relative_path", "canonical_sha256", "export_symbol", "precompile_export_symbol", "api_revision"],
       "properties": {
         "relative_path": { "type": "string", "minLength": 1 },
         "canonical_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
         "export_symbol": { "const": "avidscript_wasmtime_config_compiler_inlining_set" },
+        "precompile_export_symbol": { "const": "avidscript_wasmtime_engine_precompile_module" },
         "api_revision": { "const": 1 }
       }
     },
@@ -77,7 +78,7 @@
       "additionalProperties": false,
       "required": ["relative_path", "managed_marker_name"],
       "properties": {
-        "relative_path": { "const": "Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.1" },
+        "relative_path": { "const": "Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.2" },
         "managed_marker_name": { "const": ".avidscript-wasmtime-performance-managed.json" }
       }
     },

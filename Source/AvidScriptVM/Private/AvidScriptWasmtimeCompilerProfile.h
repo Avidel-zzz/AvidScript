@@ -14,8 +14,12 @@ struct FAvidScriptWasmtimeCompilerProfile
 const FAvidScriptWasmtimeCompilerProfile&
 GetAvidScriptWasmtimeCompilerProfile();
 
+const FAvidScriptWasmtimeCompilerProfile*
+FindAvidScriptWasmtimeCompilerProfile(const FString& TargetTriple);
+
 bool ValidateAvidScriptWasmtimeCompilerCpuProfile(FString& OutError);
 
 FString BuildAvidScriptWasmtimeCompilerIdentity(
 	const FString& RuntimeVersion,
-	const FString& RuntimeArtifactSha256);
+	const FString& RuntimeArtifactSha256,
+	const FAvidScriptWasmtimeCompilerProfile& CompilerProfile);

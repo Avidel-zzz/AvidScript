@@ -10,6 +10,7 @@ param(
     [string]$RuntimeBindingPackagePath = '',
     [string]$GeneratedTypeManifestPath = '',
     [ValidateSet('Development', 'Shipping')][string]$Configuration = 'Development',
+    [ValidateSet('Win64', 'Android')][string]$TargetPlatform = 'Win64',
     [string]$EngineRoot = 'C:\UnrealEngine'
 )
 
@@ -183,6 +184,8 @@ function New-AvidScriptReleaseCommandletArguments {
         [Parameter(Mandatory = $true)][string]$ArtifactStem,
         [Parameter(Mandatory = $true)][string]$OutputRoot,
         [Parameter(Mandatory = $true)][string]$DotNetPath,
+        [ValidateSet('Win64', 'Android')]
+        [Parameter(Mandatory = $true)][string]$TargetPlatform,
         [Parameter(Mandatory = $true)][string]$AbsLog,
         [string]$BindingPackagePath = '',
         [string]$RuntimeBindingPackagePath = '',
@@ -197,7 +200,8 @@ function New-AvidScriptReleaseCommandletArguments {
             "-ModuleId=$ModuleId",
             "-ArtifactStem=$ArtifactStem",
             "-OutputRoot=$OutputRoot",
-            "-DotNetPath=$DotNetPath")) {
+            "-DotNetPath=$DotNetPath",
+            "-AvidScriptTargetPlatform=$TargetPlatform")) {
         $Arguments.Add($Argument)
     }
     if (-not [string]::IsNullOrWhiteSpace($BindingPackagePath)) {
@@ -229,7 +233,9 @@ function Publish-AvidScriptReleaseRuntimePackage {
         [Parameter(Mandatory = $true)][string]$ProjectRoot,
         [Parameter(Mandatory = $true)][string]$ModuleId,
         [ValidateSet('Development', 'Shipping')]
-        [Parameter(Mandatory = $true)][string]$Configuration
+        [Parameter(Mandatory = $true)][string]$Configuration,
+        [ValidateSet('Win64', 'Android')]
+        [Parameter(Mandatory = $true)][string]$TargetPlatform
     )
 
     $PublisherPath = Join-Path `
@@ -245,7 +251,8 @@ function Publish-AvidScriptReleaseRuntimePackage {
         -RuntimeManifestPath $RuntimeManifestPath `
         -ProjectRoot $ProjectRoot `
         -ModuleId $ModuleId `
-        -Configuration $Configuration
+        -Configuration $Configuration `
+        -TargetPlatform $TargetPlatform
 }
 
 function Get-AvidScriptReleaseCommandletCategory {
@@ -280,6 +287,8 @@ function Invoke-AvidScriptRelease {
         [string]$GeneratedTypeManifestPath,
         [ValidateSet('Development', 'Shipping')]
         [Parameter(Mandatory = $true)][string]$Configuration,
+        [ValidateSet('Win64', 'Android')]
+        [Parameter(Mandatory = $true)][string]$TargetPlatform,
         [Parameter(Mandatory = $true)][string]$EngineRoot
     )
 
@@ -439,6 +448,7 @@ function Invoke-AvidScriptRelease {
         -ArtifactStem $ArtifactStem `
         -OutputRoot $NormalizedOutputRoot `
         -DotNetPath $NormalizedDotNetPath `
+        -TargetPlatform $TargetPlatform `
         -BindingPackagePath $NormalizedBindingPackagePath `
         -RuntimeBindingPackagePath $NormalizedRuntimeBindingPackagePath `
         -GeneratedTypeManifestPath $NormalizedGeneratedTypeManifestPath `
@@ -482,7 +492,8 @@ function Invoke-AvidScriptRelease {
             -RuntimeManifestPath $RuntimeManifestPath `
             -ProjectRoot $ProjectRoot `
             -ModuleId $ModuleId `
-            -Configuration $Configuration
+            -Configuration $Configuration `
+            -TargetPlatform $TargetPlatform
     }
     catch {
         if ($_.Exception.Data.Contains('category')) {
@@ -499,6 +510,9 @@ function Invoke-AvidScriptRelease {
         module_id = [string]$Package.ModuleId
         package_id = [string]$Package.PackageId
         configuration = [string]$Package.Configuration
+        target_platform = [string]$Package.Platform
+        architecture = [string]$Package.Architecture
+        target_triple = [string]$Package.TargetTriple
         source_path = $NormalizedSourcePath
         csharp_project_path = $NormalizedProjectPath
         build_output_root = $NormalizedOutputRoot
@@ -529,6 +543,7 @@ try {
         -RuntimeBindingPackagePath $RuntimeBindingPackagePath `
         -GeneratedTypeManifestPath $GeneratedTypeManifestPath `
         -Configuration $Configuration `
+        -TargetPlatform $TargetPlatform `
         -EngineRoot $EngineRoot
     Write-Output ($Summary | ConvertTo-Json -Depth 16 -Compress)
     exit 0

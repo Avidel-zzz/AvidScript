@@ -1,4 +1,5 @@
 #include "Packages/AvidScriptModulePackage.h"
+#include "Packages/AvidScriptModulePackageSchema.h"
 
 #include "AvidScriptHash.h"
 
@@ -304,7 +305,200 @@ FAvidScriptModulePlatformContext MakeWin64ShippingContext()
 	Context.Format = TEXT("wasmtime_serialized_v1");
 	return Context;
 }
+
+TSharedRef<FJsonObject> MakePackageDocument(
+	const FString& Platform,
+	const FString& Configuration,
+	const FString& Policy,
+	const FString& TargetTriple,
+	const FString& CpuFeatures)
+{
+	const FString Sha256 = FString::ChrN(64, TEXT('0'));
+	AvidScript::ModulePackage::FDocument Identity;
+	Identity.ModuleId = TEXT("platform_contract");
+	Identity.AbiVersion = 1;
+	Identity.Platform = Platform;
+	Identity.Configuration = Configuration;
+	Identity.MinimumRuntimeVersion = TEXT("0.1.0");
+	Identity.Backend = TEXT("wasmtime");
+	Identity.Format = TEXT("wasmtime_serialized_v1");
+	Identity.Policy = Policy;
+	Identity.CompilerBuildIdentity = TEXT("wasmtime-test-build");
+	Identity.TargetTriple = TargetTriple;
+	Identity.CpuFeatures = CpuFeatures;
+	Identity.RuntimeManifest = { TEXT("runtime.avidscript.json"), Sha256 };
+	Identity.CanonicalWasm = { TEXT("module.wasm"), Sha256 };
+	Identity.Precompiled = { TEXT("module.wasmtime.cwasm"), Sha256 };
+	Identity.BindingManifest = { TEXT("bindings/package.json"), Sha256 };
+	Identity.BindingDescriptor = { TEXT("bindings/bindings.json"), Sha256 };
+	Identity.PackageId = FAvidScriptHash::Sha256HexUtf8(
+		AvidScript::ModulePackage::MakeIdentityPayload(Identity));
+
+	TSharedRef<FJsonObject> Execution = MakeShared<FJsonObject>();
+	Execution->SetStringField(TEXT("backend"), Identity.Backend);
+	Execution->SetStringField(TEXT("format"), Identity.Format);
+	Execution->SetStringField(TEXT("policy"), Identity.Policy);
+	Execution->SetStringField(
+		TEXT("compiler_build_identity"),
+		Identity.CompilerBuildIdentity);
+	Execution->SetStringField(TEXT("target_triple"), Identity.TargetTriple);
+	Execution->SetStringField(TEXT("cpu_features"), Identity.CpuFeatures);
+
+	TSharedRef<FJsonObject> Artifacts = MakeShared<FJsonObject>();
+	Artifacts->SetObjectField(
+		TEXT("runtime_manifest"),
+		MakeFileEntry(TEXT("runtime.avidscript.json"), Sha256));
+	Artifacts->SetObjectField(
+		TEXT("canonical_wasm"),
+		MakeFileEntry(TEXT("module.wasm"), Sha256));
+	Artifacts->SetObjectField(
+		TEXT("precompiled"),
+		MakeFileEntry(TEXT("module.wasmtime.cwasm"), Sha256));
+	Artifacts->SetObjectField(
+		TEXT("binding_manifest"),
+		MakeFileEntry(TEXT("bindings/package.json"), Sha256));
+	Artifacts->SetObjectField(
+		TEXT("binding_descriptor"),
+		MakeFileEntry(TEXT("bindings/bindings.json"), Sha256));
+
+	TSharedRef<FJsonObject> Package = MakeShared<FJsonObject>();
+	Package->SetNumberField(
+		TEXT("schema_version"),
+		AvidScript::ModulePackage::PackageSchemaVersion);
+	Package->SetStringField(TEXT("package_id"), Identity.PackageId);
+	Package->SetStringField(TEXT("module_id"), Identity.ModuleId);
+	Package->SetNumberField(TEXT("abi_version"), Identity.AbiVersion);
+	Package->SetStringField(TEXT("platform"), Identity.Platform);
+	Package->SetStringField(TEXT("configuration"), Identity.Configuration);
+	Package->SetStringField(
+		TEXT("minimum_runtime_version"),
+		Identity.MinimumRuntimeVersion);
+	Package->SetObjectField(TEXT("execution"), Execution);
+	Package->SetObjectField(TEXT("artifacts"), Artifacts);
+	return Package;
+}
+
+bool ParsePackageDocument(const TSharedRef<FJsonObject>& Package)
+{
+	AvidScript::ModulePackage::FDocument Parsed;
+	return AvidScript::ModulePackage::ParseDocument(Package, Parsed);
+}
 } // namespace
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptModulePackagePlatformSchemaTest,
+	"AvidScript.Runtime.ModulePackage.PlatformSchema",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptModulePackagePlatformSchemaTest::RunTest(
+	const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	using namespace AvidScript::ModulePackage;
+
+	TestTrue(
+		TEXT("Win64 Development may prefer precompiled"),
+		ParsePackageDocument(MakePackageDocument(
+			Win64Platform,
+			TEXT("development"),
+			TEXT("prefer_precompiled"),
+			Win64TargetTriple,
+			Win64CpuFeatures)));
+	TestTrue(
+		TEXT("Win64 Shipping requires precompiled"),
+		ParsePackageDocument(MakePackageDocument(
+			Win64Platform,
+			TEXT("shipping"),
+			TEXT("require_precompiled"),
+			Win64TargetTriple,
+			Win64CpuFeatures)));
+	TestFalse(
+		TEXT("Win64 Shipping rejects prefer precompiled"),
+		ParsePackageDocument(MakePackageDocument(
+			Win64Platform,
+			TEXT("shipping"),
+			TEXT("prefer_precompiled"),
+			Win64TargetTriple,
+			Win64CpuFeatures)));
+
+	const TArray<FString> AndroidConfigurations{
+		TEXT("development"),
+		TEXT("shipping")
+	};
+	for (const FString& Configuration : AndroidConfigurations)
+	{
+		TestTrue(
+			*FString::Printf(
+				TEXT("Android %s requires precompiled"),
+				*Configuration),
+			ParsePackageDocument(MakePackageDocument(
+				AndroidPlatform,
+				Configuration,
+				TEXT("require_precompiled"),
+				AndroidTargetTriple,
+				AndroidCpuFeatures)));
+		TestFalse(
+			*FString::Printf(
+				TEXT("Android %s rejects prefer precompiled"),
+				*Configuration),
+			ParsePackageDocument(MakePackageDocument(
+				AndroidPlatform,
+				Configuration,
+				TEXT("prefer_precompiled"),
+				AndroidTargetTriple,
+				AndroidCpuFeatures)));
+	}
+
+	TestFalse(
+		TEXT("Win64 rejects Android target"),
+		ParsePackageDocument(MakePackageDocument(
+			Win64Platform,
+			TEXT("development"),
+			TEXT("require_precompiled"),
+			AndroidTargetTriple,
+			Win64CpuFeatures)));
+	TestFalse(
+		TEXT("Android rejects Win64 CPU features"),
+		ParsePackageDocument(MakePackageDocument(
+			AndroidPlatform,
+			TEXT("development"),
+			TEXT("require_precompiled"),
+			AndroidTargetTriple,
+			Win64CpuFeatures)));
+	TestFalse(
+		TEXT("Unknown platform fails closed"),
+		ParsePackageDocument(MakePackageDocument(
+			TEXT("linux"),
+			TEXT("development"),
+			TEXT("require_precompiled"),
+			TEXT("x86_64-unknown-linux-gnu"),
+			TEXT("x86-64-v3"))));
+	TestTrue(
+		TEXT("Win64 catalog architecture is exact"),
+		IsValidVariantIdentity(
+			Win64Platform,
+			Win64Architecture,
+			TEXT("development"),
+			TEXT("wasmtime"),
+			TEXT("wasmtime_serialized_v1")));
+	TestTrue(
+		TEXT("Android catalog architecture is exact"),
+		IsValidVariantIdentity(
+			AndroidPlatform,
+			AndroidArchitecture,
+			TEXT("shipping"),
+			TEXT("wasmtime"),
+			TEXT("wasmtime_serialized_v1")));
+	TestFalse(
+		TEXT("Cross-platform catalog architecture fails closed"),
+		IsValidVariantIdentity(
+			AndroidPlatform,
+			Win64Architecture,
+			TEXT("shipping"),
+			TEXT("wasmtime"),
+			TEXT("wasmtime_serialized_v1")));
+	return true;
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptModulePackageResolverTest,

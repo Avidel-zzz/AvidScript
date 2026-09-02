@@ -28,6 +28,7 @@ struct FAvidScriptReleaseArguments
 	FString BindingPackagePath;
 	FString RuntimeBindingPackagePath;
 	FString GeneratedTypeManifestPath;
+	FString TargetPlatform = TEXT("Win64");
 };
 
 int32 FailAvidScriptRelease(
@@ -73,7 +74,8 @@ const FString* FindAvidScriptReleaseCanonicalParameter(
 		{ TEXT("moduleid"), TEXT("ModuleId") },
 		{ TEXT("outputroot"), TEXT("OutputRoot") },
 		{ TEXT("runtimebindingpackagepath"), TEXT("RuntimeBindingPackagePath") },
-		{ TEXT("sourcepath"), TEXT("SourcePath") }
+		{ TEXT("sourcepath"), TEXT("SourcePath") },
+		{ TEXT("avidscripttargetplatform"), TEXT("AvidScriptTargetPlatform") }
 	};
 	return AllowedParameters.Find(ParameterName.ToLower());
 }
@@ -199,6 +201,9 @@ bool ParseAvidScriptReleaseArguments(
 	Values.RemoveAndCopyValue(
 		TEXT("GeneratedTypeManifestPath"),
 		OutArguments.GeneratedTypeManifestPath);
+	Values.RemoveAndCopyValue(
+		TEXT("AvidScriptTargetPlatform"),
+		OutArguments.TargetPlatform);
 	return true;
 }
 
@@ -237,7 +242,8 @@ bool NormalizeAvidScriptReleaseProjectPath(
 bool ValidateAvidScriptReleaseManifest(
 	const FString& ManifestPath,
 	const FString& ModuleId,
-	const FString& ArtifactFile)
+	const FString& ArtifactFile,
+	const FString& TargetTriple)
 {
 	FString ManifestJson;
 	if (!FFileHelper::LoadFileToString(ManifestJson, *ManifestPath))
@@ -257,6 +263,7 @@ bool ValidateAvidScriptReleaseManifest(
 	FString Format;
 	FString Policy;
 	FString File;
+	FString ManifestTargetTriple;
 	return Manifest->TryGetStringField(TEXT("module_id"), ManifestModuleId)
 		&& ManifestModuleId == ModuleId
 		&& Manifest->TryGetObjectField(TEXT("execution"), Execution)
@@ -267,7 +274,11 @@ bool ValidateAvidScriptReleaseManifest(
 		&& (*Execution)->TryGetStringField(TEXT("policy"), Policy)
 		&& Policy == TEXT("require_precompiled")
 		&& (*Execution)->TryGetStringField(TEXT("file"), File)
-		&& File == ArtifactFile;
+		&& File == ArtifactFile
+		&& (*Execution)->TryGetStringField(
+			TEXT("target_triple"),
+			ManifestTargetTriple)
+		&& ManifestTargetTriple == TargetTriple;
 }
 } // namespace
 
@@ -311,6 +322,29 @@ int32 UAvidScriptReleaseCommandlet::Main(const FString& Params)
 		return FailAvidScriptRelease(
 			TEXT("argument_invalid"),
 			TEXT("ModuleId or ArtifactStem does not match the release command schema."),
+			AvidScriptReleaseArgumentFailure);
+	}
+
+	FString TargetTriple;
+	if (Arguments.TargetPlatform.Equals(
+			TEXT("Win64"),
+			ESearchCase::IgnoreCase))
+	{
+		Arguments.TargetPlatform = TEXT("Win64");
+		TargetTriple = TEXT("x86_64-pc-windows-msvc");
+	}
+	else if (Arguments.TargetPlatform.Equals(
+			TEXT("Android"),
+			ESearchCase::IgnoreCase))
+	{
+		Arguments.TargetPlatform = TEXT("Android");
+		TargetTriple = TEXT("aarch64-linux-android");
+	}
+	else
+	{
+		return FailAvidScriptRelease(
+			TEXT("argument_invalid"),
+			TEXT("TargetPlatform must be Win64 or Android."),
 			AvidScriptReleaseArgumentFailure);
 	}
 
@@ -442,6 +476,7 @@ int32 UAvidScriptReleaseCommandlet::Main(const FString& Params)
 	Config.ModuleId = Arguments.ModuleId;
 	Config.ArtifactStem = Arguments.ArtifactStem;
 	Config.Configuration = TEXT("Release");
+	Config.VmArtifactTargetTriple = TargetTriple;
 	Config.VmArtifactPolicy =
 		EAvidScriptEditorVmArtifactPolicy::RequirePrecompiled;
 
@@ -481,6 +516,7 @@ int32 UAvidScriptReleaseCommandlet::Main(const FString& Params)
 	if (!BuildResult.bVmArtifactPublished
 		|| BuildResult.VmArtifactFormat != TEXT("wasmtime_serialized_v1")
 		|| BuildResult.VmArtifactPolicy != TEXT("require_precompiled")
+		|| BuildResult.VmArtifactTargetTriple != TargetTriple
 		|| !BuildResult.VmArtifactPath.Equals(
 			ExpectedArtifactPath,
 			ESearchCase::IgnoreCase)
@@ -494,7 +530,8 @@ int32 UAvidScriptReleaseCommandlet::Main(const FString& Params)
 	if (!ValidateAvidScriptReleaseManifest(
 			ExpectedManifestPath,
 			Arguments.ModuleId,
-			ArtifactFile))
+			ArtifactFile,
+			TargetTriple))
 	{
 		return FailAvidScriptRelease(
 			TEXT("manifest_contract_invalid"),
@@ -505,8 +542,9 @@ int32 UAvidScriptReleaseCommandlet::Main(const FString& Params)
 	UE_LOG(
 		LogAvidScriptReleaseCommandlet,
 		Display,
-		TEXT("AVIDSCRIPT_RELEASE_RESULT category=success module_id=%s manifest=\"%s\" cwasm=\"%s\""),
+		TEXT("AVIDSCRIPT_RELEASE_RESULT category=success module_id=%s target_platform=%s manifest=\"%s\" cwasm=\"%s\""),
 		*Arguments.ModuleId,
+		*Arguments.TargetPlatform,
 		*ExpectedManifestPath,
 		*ExpectedArtifactPath);
 	return 0;
