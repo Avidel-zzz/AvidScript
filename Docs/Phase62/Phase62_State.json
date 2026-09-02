@@ -5,7 +5,7 @@
     "goal": "交付 UE5.8 Win64 的确定性 Cook/Shipping C# WASM 闭环，包括预编译 artifact、资源依赖、Shipping 安全策略、Session 故障隔离和版本兼容。",
     "start_commit": "346fa907cb59f8f9c94ab0c616302e1544cef0fc"
   },
-  "declared_stage": "gate_ready",
+  "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase62/P62.0_Cook_Shipping_Architecture.md",
     "version": 1,
@@ -38,15 +38,15 @@
     {
       "id": "P62.D",
       "status": "Completed",
-      "evidence": "Final Gate remediation: Editor JIT generated-type builds no longer invoke the precompiled Cook publisher; Cook contract 10/10 and real five-type Editor JIT generation passed with cook_package_id=none.",
-      "completed_at_utc": "2026-09-02T05:26:53.0872071+00:00"
+      "evidence": "P62.D12 remediation: ModuleRelease 15/15, UE5.8 Editor build succeeded, Headless Development package b5240c27 published, full Automation 427/429 then lifecycle focused 2/2 Success.",
+      "completed_at_utc": "2026-09-02T06:09:16.6310881+00:00"
     }
   ],
   "debt": [],
   "review": {
-    "completed": true,
-    "evidence": "Architecture remains WASM-first and fail-closed. Final remediation separates Editor JIT source descriptors from precompiled Cook publication; focused contract and real script-defined type generation passed, with protected dirty baselines unchanged.",
-    "completed_at_utc": "2026-09-02T05:27:40.8342983+00:00"
+    "completed": false,
+    "evidence": "reopened: 最终 Automation Gate 暴露异步断言漂移、测试编译缓存隔离、Wasmtime trap 分类与开发目录 Cook 包执行信任契约问题",
+    "completed_at_utc": null
   },
   "budgets": {
     "ubt": 4,
@@ -59,11 +59,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "24827d2bd35aee7c8bd4b3a995ceecde1f0a58ce",
-    "source_tree": "822a73d045186c5e088ef5b80f40f1abe490ee16",
-    "state_sha256": "09d29904d442477031b3f37b3e401621938014a8b6db44ef357027db063c35f3",
-    "review_evidence": "Architecture remains WASM-first and fail-closed. Final remediation separates Editor JIT source descriptors from precompiled Cook publication; focused contract and real script-defined type generation passed, with protected dirty baselines unchanged.",
-    "at_utc": "2026-09-02T05:27:40.8342983+00:00"
+    "source_commit": "",
+    "source_tree": "",
+    "state_sha256": "",
+    "review_evidence": "",
+    "at_utc": null
   },
   "gate": {
     "report_path": "",
@@ -94,7 +94,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "attest -Phase 62 -GateReportPath <path>",
-  "revision": 12,
-  "updated_at_utc": "2026-09-02T05:27:40.8391304+00:00"
+  "next_action": "freeze -Phase 62 -ReviewEvidence <text>",
+  "revision": 14,
+  "updated_at_utc": "2026-09-02T06:09:16.6331957+00:00"
 }
