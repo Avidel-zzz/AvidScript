@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "phase": {
+    "id": 63,
+    "goal": "交付 backend-neutral 多平台发布合同与 Android arm64 Wasmtime 预编译路径，并冻结 iOS 无 JIT fail-closed 边界",
+    "start_commit": "ae7717a238133b8fc126cad6c2d6104d0c3f3e91"
+  },
+  "declared_stage": "implementing",
+  "architecture": {
+    "path": "Docs/Phase63/P63.0_Mobile_AOT_Architecture.md",
+    "version": 1,
+    "sha256": "31a6d37726091a2e9418ed5def541cfb4518d5a2a63521c57dd571015da470ab",
+    "revision_reason": "initial architecture freeze"
+  },
+  "documents": {
+    "plan": "Docs/Phase63/P63.0_Implementation_Plan.md",
+    "closeout": "Docs/Phase63/P63_Closeout.md"
+  },
+  "batches": [
+    {
+      "id": "P63.A",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    },
+    {
+      "id": "P63.B",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    },
+    {
+      "id": "P63.C",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    },
+    {
+      "id": "P63.D",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    }
+  ],
+  "debt": [],
+  "review": {
+    "completed": false,
+    "evidence": "",
+    "completed_at_utc": null
+  },
+  "budgets": {
+    "ubt": 3,
+    "automation": 2,
+    "full_gate": 2
+  },
+  "invocations": {
+    "ubt": 0,
+    "automation": 0,
+    "full_gate": 0
+  },
+  "freeze": {
+    "source_commit": "",
+    "source_tree": "",
+    "state_sha256": "",
+    "review_evidence": "",
+    "at_utc": null
+  },
+  "gate": {
+    "report_path": "",
+    "report_sha256": "",
+    "run_id": "",
+    "verified_commit": "",
+    "verified_tree": "",
+    "attestation_parent": "",
+    "attested_at_utc": null
+  },
+  "protected_dirty": [
+    {
+      "path": "Docs/AvidScript_Technical_Status.md",
+      "status": "??",
+      "worktree_sha256": "3025ef2e274d0373168eea28a25bef6bd1a86a19e887d76ee51c6804d51698c2",
+      "head_blob_sha256": ""
+    },
+    {
+      "path": "Docs/Phase42/P42.0_Reflection_Binding_Generator_Architecture.md",
+      "status": " M",
+      "worktree_sha256": "569cf61960108edd6a4865da796ddf465b2ab6e6cf440dc2ae280b84f94d6655",
+      "head_blob_sha256": "5881954e78c9759dafb336484adf7dcd9d064122599e9b93337c69067b08c1cf"
+    },
+    {
+      "path": "Source/AvidScriptRuntime/Public/AvidScriptWasmReloadTypes.h",
+      "status": " M",
+      "worktree_sha256": "384b6e093dc8568e666dc0335b575383e473ecf00448c1d5c461a852b38edfed",
+      "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
+    }
+  ],
+  "next_action": "batch-complete -Phase 63 -BatchId P63.A -Evidence <text>",
+  "revision": 1,
+  "updated_at_utc": "2026-09-02T06:57:38.3855841+00:00"
+}
