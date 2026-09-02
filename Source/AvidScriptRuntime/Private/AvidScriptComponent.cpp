@@ -1,6 +1,7 @@
 #include "AvidScriptComponent.h"
 
 #include "AvidScriptRuntimeArtifact.h"
+#include "Packages/AvidScriptModulePackage.h"
 
 #include "GameFramework/Actor.h"
 #include "Misc/Paths.h"
@@ -99,18 +100,61 @@ void UAvidScriptComponent::SetScriptManifestPath(const FString& InScriptManifest
 	FPaths::NormalizeFilename(ScriptManifestFile.FilePath);
 }
 
+void UAvidScriptComponent::SetScriptModuleId(const FName InModuleId)
+{
+	ScriptModule.ModuleId = InModuleId;
+}
+
+FName UAvidScriptComponent::GetScriptModuleId() const
+{
+	return ScriptModule.ModuleId;
+}
+
 FString UAvidScriptComponent::GetScriptManifestPath() const
 {
 	return ScriptManifestFile.FilePath;
 }
 
-FString UAvidScriptComponent::ResolveScriptManifestPath() const
+bool UAvidScriptComponent::ResolveConfiguredScriptManifestPath(
+	FString& OutManifestPath,
+	FString& OutPackageId,
+	FString& OutError) const
 {
+	OutManifestPath.Reset();
+	OutPackageId.Reset();
+	OutError.Reset();
+	if (ScriptModule.IsSet())
+	{
+		FAvidScriptResolvedModulePackage Package;
+		FAvidScriptModuleResolveResult ResolveResult;
+		if (!FAvidScriptModulePackageResolver::ResolveModule(
+				ScriptModule.ModuleId,
+				Package,
+				ResolveResult))
+		{
+			OutError = ResolveResult.ErrorMessage;
+			return false;
+		}
+		OutManifestPath = Package.RuntimeManifestPath;
+		OutPackageId = Package.PackageId;
+		return true;
+	}
+
 	FString ManifestPath = ScriptManifestFile.FilePath;
 	if (ManifestPath.IsEmpty())
 	{
-		return FString();
+#if UE_BUILD_SHIPPING
+		OutError = TEXT("Shipping AvidScript components require a published logical module id.");
+		return false;
+#else
+		return true;
+#endif
 	}
+
+#if UE_BUILD_SHIPPING
+	OutError = TEXT("Shipping AvidScript components reject loose manifest paths; publish and assign a logical module id.");
+	return false;
+#else
 
 	FPaths::NormalizeFilename(ManifestPath);
 	if (FPaths::IsRelative(ManifestPath))
@@ -120,7 +164,9 @@ FString UAvidScriptComponent::ResolveScriptManifestPath() const
 
 	ManifestPath = FPaths::ConvertRelativePathToFull(ManifestPath);
 	FPaths::NormalizeFilename(ManifestPath);
-	return ManifestPath;
+	OutManifestPath = MoveTemp(ManifestPath);
+	return true;
+#endif
 }
 
 bool UAvidScriptComponent::LoadConfiguredScriptModule(FAvidScriptWasmSmokeResult& OutResult)
@@ -141,7 +187,26 @@ bool UAvidScriptComponent::LoadConfiguredScriptModule(FAvidScriptWasmSmokeResult
 	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
 	RuntimeSession->SetHostContext(HostContext);
 
-	RuntimeStats.ScriptManifestPath = ResolveScriptManifestPath();
+	FString PackageId;
+	FString ResolveError;
+	if (!ResolveConfiguredScriptManifestPath(
+			RuntimeStats.ScriptManifestPath,
+			PackageId,
+			ResolveError))
+	{
+		OutResult = FAvidScriptWasmSmokeResult();
+		OutResult.ModuleId = ScriptModule.IsSet()
+			? ScriptModule.ModuleId.ToString()
+			: TEXT("<component_manifest>");
+		OutResult.ExportName = TEXT("<module_resolve>");
+		OutResult.ErrorCategory = TEXT("module_resolve_failed");
+		OutResult.ErrorMessage = ResolveError;
+		OutResult.NextAction = TEXT("publish the module release package and assign its logical module id");
+		return false;
+	}
+	RuntimeStats.ConfiguredModuleId = ScriptModule.ModuleId.ToString();
+	RuntimeStats.PackageId = MoveTemp(PackageId);
+	RuntimeStats.bResolvedFromPackage = !RuntimeStats.PackageId.IsEmpty();
 	FAvidScriptWasmReloadResult SessionResult;
 	bool bLoaded = false;
 	if (RuntimeStats.ScriptManifestPath.IsEmpty())
@@ -187,7 +252,6 @@ bool UAvidScriptComponent::ReloadConfiguredScript(FAvidScriptWasmReloadResult& O
 	const FAvidScriptRuntimeSessionSnapshot PreviousSnapshot = RuntimeSession.IsValid()
 		? RuntimeSession->GetSnapshot()
 		: FAvidScriptRuntimeSessionSnapshot();
-	const FString CandidateManifestPath = ResolveScriptManifestPath();
 
 	if (RuntimeSession.IsValid() && RuntimeSession->IsOperationActive())
 	{
@@ -215,6 +279,30 @@ bool UAvidScriptComponent::ReloadConfiguredScript(FAvidScriptWasmReloadResult& O
 		OutResult.ErrorMessage = TEXT("AvidScript component reload requires a running script runtime.");
 		OutResult.NextAction = TEXT("start the component runtime before requesting a live reload");
 		OutResult.bRollbackPreservedLiveRuntime = PreviousSnapshot.bHasActiveRuntime;
+		++RuntimeStats.RejectedReloadCount;
+		RuntimeStats.LastErrorMessage = OutResult.ErrorMessage;
+		return false;
+	}
+
+	FString CandidateManifestPath;
+	FString CandidatePackageId;
+	FString ResolveError;
+	if (!ResolveConfiguredScriptManifestPath(
+			CandidateManifestPath,
+			CandidatePackageId,
+			ResolveError))
+	{
+		FAvidScriptWasmReloadManifestLoadResult LoadResult;
+		LoadResult.ManifestPath = ScriptModule.IsSet()
+			? ScriptModule.ModuleId.ToString()
+			: ScriptManifestFile.FilePath;
+		LoadResult.ErrorCategory = TEXT("module_resolve_failed");
+		LoadResult.ErrorMessage = ResolveError;
+		LoadResult.NextAction = TEXT("publish the module release package and assign its logical module id");
+		SetComponentReloadManifestLoadFailure(
+			LoadResult,
+			PreviousSnapshot.ModuleId,
+			OutResult);
 		++RuntimeStats.RejectedReloadCount;
 		RuntimeStats.LastErrorMessage = OutResult.ErrorMessage;
 		return false;
@@ -280,6 +368,9 @@ bool UAvidScriptComponent::ReloadConfiguredScript(FAvidScriptWasmReloadResult& O
 	RuntimeStats.Metrics = RuntimeResult.Metrics;
 	RuntimeStats.ModuleId = AppliedSnapshot.ModuleId;
 	RuntimeStats.ScriptManifestPath = CandidateManifestPath;
+	RuntimeStats.ConfiguredModuleId = ScriptModule.ModuleId.ToString();
+	RuntimeStats.PackageId = MoveTemp(CandidatePackageId);
+	RuntimeStats.bResolvedFromPackage = !RuntimeStats.PackageId.IsEmpty();
 	RuntimeStats.LastErrorMessage.Reset();
 
 	UE_LOG(

@@ -4,6 +4,7 @@
 #include "AvidScriptObjectRegistry.h"
 #include "AvidScriptRuntimeSession.h"
 #include "Components/ActorComponent.h"
+#include "Packages/AvidScriptModuleReference.h"
 #include "UObject/SoftObjectPath.h"
 
 #include "AvidScriptComponent.generated.h"
@@ -32,8 +33,11 @@ struct FAvidScriptComponentRuntimeStats
 	FAvidScriptObjectHandle OwnerHandle;
 	FString OwnerObjectPath;
 	FString ScriptManifestPath;
+	FString ConfiguredModuleId;
+	FString PackageId;
 	FString ModuleId;
 	FString LastErrorMessage;
+	bool bResolvedFromPackage = false;
 	FAvidScriptWasmRuntimeMetrics Metrics;
 };
 
@@ -46,6 +50,8 @@ public:
 	UAvidScriptComponent();
 
 	const FAvidScriptComponentRuntimeStats& GetRuntimeStats() const { return RuntimeStats; }
+	void SetScriptModuleId(FName InModuleId);
+	FName GetScriptModuleId() const;
 	void SetScriptManifestPath(const FString& InScriptManifestPath);
 	FString GetScriptManifestPath() const;
 	bool ResolveOwnerActor(AActor*& OutOwner, FAvidScriptObjectHandleResult& OutResult) const;
@@ -98,10 +104,16 @@ private:
 	void HandleOwnerHit(AActor* SelfActor, AActor* OtherActor, FVector NormalImpulse, const FHitResult& Hit);
 
 	bool LoadConfiguredScriptModule(FAvidScriptWasmSmokeResult& OutResult);
-	FString ResolveScriptManifestPath() const;
+	bool ResolveConfiguredScriptManifestPath(
+		FString& OutManifestPath,
+		FString& OutPackageId,
+		FString& OutError) const;
 	void RecordRuntimeFailure(const FAvidScriptWasmSmokeResult& Result);
 	void ReleaseRuntime(FAvidScriptWasmSmokeResult* OutUnloadResult = nullptr);
 	void FlushDeferredRuntimeRelease();
+
+	UPROPERTY(EditAnywhere, Category = "AvidScript")
+	FAvidScriptModuleReference ScriptModule;
 
 	UPROPERTY(EditAnywhere, Category = "AvidScript", meta = (FilePathFilter = "avidscript.json"))
 	FFilePath ScriptManifestFile;

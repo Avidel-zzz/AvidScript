@@ -10,7 +10,7 @@
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 Development" src="https://img.shields.io/badge/Platform-Win64-0078D4?logo=windows&logoColor=white">
-  <img alt="Phase 61 Complete" src="https://img.shields.io/badge/Status-Phase%2061%20Complete-26A269">
+  <img alt="Phase 62 In Progress" src="https://img.shields.io/badge/Status-Phase%2062%20In%20Progress-D97706">
   <img alt="Automation Baseline 427/427" src="https://img.shields.io/badge/Baseline-427%2F427-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
@@ -37,7 +37,7 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 | Blueprint | 自声明 callable/event 双向调用、`before/after/replace` 事件接管，以及 AsyncAction 强类型 awaitable 生成 |
 | 网络 | Server/Client/NetMulticast RPC、replicated property、RPC/RepNotify handler、dedicated/listen 多进程闭环 |
 | 热重载 | 方法体事务式替换、候选回滚、状态帧与 handle 生命周期隔离 |
-| 发布 | 内容寻址 Generated Type bundle、NonUFS staging 与 Cook-layout Runtime load |
+| 发布 | 确定性内容寻址模块包、严格 catalog/package 校验、逻辑 `ModuleId` 解析；Generated Type Cook bundle |
 | 后端 | Wasmtime 45 Win64 主后端；WAMR 兼容后端 |
 | 增量构建 | 双层产物缓存与 persistent Worker；无修改热构建零编译调用，5 轮中位数 `806 ms` |
 | 结构化诊断 | Debug Map v2、同步/async 序列点、稳定 probe ID、双后端 probe 执行、跨层调用栈、Editor 源码导航 |
@@ -53,6 +53,10 @@ UE5.8 no-clean UBT、clean detached architecture 和两项性能预算。5 轮�
 `806 / 1826 / 1802 / 3732 ms`；Profiler 关闭采集的增量中位开销为 `0.490 ns`，占启用采集的
 `6.10%`。Phase 61 已完成正式 attestation 与 close；真实 Editor 中的三类 IDE 启动和人工调试体验
 仍需人工验收。
+
+Phase 62 已完成首批模块发布基础设施：发布器会生成确定性 package identity 与有序 catalog，
+Runtime 可由逻辑 `ModuleId` 解析并逐项校验描述文件、artifact hash、ABI、平台和最低运行时版本。
+Cook UFS staging、Shipping 持久信任链与资源隔离仍在推进。
 
 详细结果见 [Phase 61 集中 Gate](Docs/Phase61/P61.E_Integration_Gate.md)。
 
