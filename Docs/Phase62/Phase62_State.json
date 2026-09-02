@@ -5,7 +5,7 @@
     "goal": "交付 UE5.8 Win64 的确定性 Cook/Shipping C# WASM 闭环，包括预编译 artifact、资源依赖、Shipping 安全策略、Session 故障隔离和版本兼容。",
     "start_commit": "346fa907cb59f8f9c94ab0c616302e1544cef0fc"
   },
-  "declared_stage": "implementing",
+  "declared_stage": "gate_ready",
   "architecture": {
     "path": "Docs/Phase62/P62.0_Cook_Shipping_Architecture.md",
     "version": 1,
@@ -44,9 +44,9 @@
   ],
   "debt": [],
   "review": {
-    "completed": false,
-    "evidence": "reopened: 集中 Gate 发现 Generated Type Cook 的 Development fixture 未补齐 release debug provenance，需同步 source/guest_ir 身份字段后重新冻结。",
-    "completed_at_utc": null
+    "completed": true,
+    "evidence": "集中 Gate remediation 已复审：Generated Type Cook fixture 与 release debug provenance 合同一致并通过 10/10；六个托管 Runner 284/284、其余 PowerShell 合同预检通过，产品发布闭环证据未变化。",
+    "completed_at_utc": "2026-09-02T05:07:08.5373592+00:00"
   },
   "budgets": {
     "ubt": 4,
@@ -59,11 +59,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "",
-    "source_tree": "",
-    "state_sha256": "",
-    "review_evidence": "",
-    "at_utc": null
+    "source_commit": "3eeaf7b1caa2ed416dbb72c9c907c003eb105fdd",
+    "source_tree": "d59e79299b6198ad4f54004442f2c9a0f86f43a6",
+    "state_sha256": "892b7248f3bc066341c0c4a9023039dc77ab71dd8f809058196fc35bd76b6227",
+    "review_evidence": "集中 Gate remediation 已复审：Generated Type Cook fixture 与 release debug provenance 合同一致并通过 10/10；六个托管 Runner 284/284、其余 PowerShell 合同预检通过，产品发布闭环证据未变化。",
+    "at_utc": "2026-09-02T05:07:08.5373592+00:00"
   },
   "gate": {
     "report_path": "",
@@ -94,7 +94,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "freeze -Phase 62 -ReviewEvidence <text>",
-  "revision": 8,
-  "updated_at_utc": "2026-09-02T05:06:24.8624761+00:00"
+  "next_action": "attest -Phase 62 -GateReportPath <path>",
+  "revision": 9,
+  "updated_at_utc": "2026-09-02T05:07:08.5427628+00:00"
 }
