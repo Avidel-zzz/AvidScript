@@ -38,6 +38,7 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 | 网络 | Server/Client/NetMulticast RPC、replicated property、RPC/RepNotify handler、dedicated/listen 多进程闭环 |
 | 热重载 | 方法体事务式替换、候选回滚、状态帧与 handle 生命周期隔离 |
 | 发布 | 内容寻址模块包、逻辑 `ModuleId`、无头 C# Release、包回执校验、Generated Type Shipping 预编译，以及 Win64 BuildCookRun 单入口编排 |
+| 运行时安全 | Wasmtime fuel/epoch/内存/Host Call 预算、进程级共享 watchdog，以及 Session 故障隔离与有界诊断 |
 | 后端 | Wasmtime 45 Win64 主后端；WAMR 兼容后端 |
 | 增量构建 | 双层产物缓存与 persistent Worker；无修改热构建零编译调用，5 轮中位数 `806 ms` |
 | 结构化诊断 | Debug Map v2、同步/async 序列点、稳定 probe ID、双后端 probe 执行、跨层调用栈、Editor 源码导航 |
@@ -56,7 +57,8 @@ UE5.8 no-clean UBT、clean detached architecture 和两项性能预算。5 轮�
 
 Phase 62 已贯通确定性 package/catalog、逻辑 `ModuleId`、Cook UFS 信任、无头 C# Release 与包回执校验；
 真实 ScriptDefinedTypes 已生成 Shipping `require_precompiled` 包、`.cwasm` 和 Generated Type v2 指针。
-固定 UE5.8、禁用 clean 的 Win64 BuildCookRun 编排与机器可读回执已落地；真实打包启动验收与执行资源隔离仍在推进。
+固定 UE5.8、禁用 clean 的 Win64 BuildCookRun 编排与机器可读回执已落地。P62.C 已完成执行预算、共享 epoch
+watchdog 与 Session 故障隔离；真实 Development/Shipping 打包启动验收仍在推进。
 
 详细结果见 [Phase 61 集中 Gate](Docs/Phase61/P61.E_Integration_Gate.md)。
 
@@ -233,7 +235,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 - 容器当前聚焦一维 `TArray<T>`；nested array、`TSet`、`TMap` 与 `FText` 尚未完整支持；
 - C# 前端提供受控游戏脚本子集，不包含完整 .NET Runtime、任意 awaiter 或异常系统；
 - 反射结构变化仍需 no-clean UBT 并重启 Editor，方法体变化可自动热重载；
-- Generated Type Shipping 预编译发布和 Win64 BuildCookRun 编排入口已完成，真实打包启动、崩溃隔离与移动端 AOT 尚未验收；
+- Generated Type Shipping 预编译发布和 Win64 BuildCookRun 编排入口已完成，真实打包启动与移动端 AOT 尚未验收；Session 可隔离受控 WASM 故障，但原生 C++/DLL 崩溃不属于进程沙箱能力；
 - 正式竞品性能矩阵目前覆盖 Puerts V8，尚未同口径覆盖 UnLua 与 AngelScript。
 
 ## 路线图
