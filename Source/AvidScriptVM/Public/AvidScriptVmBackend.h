@@ -473,6 +473,7 @@ struct FAvidScriptVmLoadConfig
 	{
 		uint64 FuelPerEntry = 0;
 		uint64 EpochDeadlineTicks = 0;
+		uint32 EpochTimeoutMilliseconds = 0;
 		uint64 MaxLinearMemoryBytes = 0;
 		uint32 MaxHostCallsPerEntry = 0;
 
@@ -480,6 +481,7 @@ struct FAvidScriptVmLoadConfig
 		{
 			return FuelPerEntry > 0
 				|| EpochDeadlineTicks > 0
+				|| EpochTimeoutMilliseconds > 0
 				|| MaxLinearMemoryBytes > 0
 				|| MaxHostCallsPerEntry > 0;
 		}

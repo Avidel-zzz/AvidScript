@@ -205,6 +205,7 @@ public:
 		}
 		if (Config.ExecutionBudget.FuelPerEntry > 0
 			|| Config.ExecutionBudget.EpochDeadlineTicks > 0
+			|| Config.ExecutionBudget.EpochTimeoutMilliseconds > 0
 			|| Config.ExecutionBudget.MaxLinearMemoryBytes > 0)
 		{
 			SetVmError(

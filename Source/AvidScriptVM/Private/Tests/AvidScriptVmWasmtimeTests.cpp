@@ -1098,6 +1098,74 @@ bool FAvidScriptVmWasmtimeExecutionBudgetTest::RunTest(
 		Backend->Call(GrowHandle, EmptyFrame, Error, &GrowResult));
 	TestEqual(TEXT("grow result cell count"), GrowResult.CellCount, 1u);
 	TestEqual(TEXT("linear-memory limiter rejects growth"), GrowResult.Cells[0], MAX_uint32);
+
+	FAvidScriptVmLoadConfig EpochConfig;
+	EpochConfig.ExecutionBudget.EpochDeadlineTicks = 1;
+	EpochConfig.ExecutionBudget.EpochTimeoutMilliseconds = 20;
+	TUniquePtr<IAvidScriptVmBackend> EpochBackend =
+		CreateWasmtimeBackendForTest(Error);
+	TUniquePtr<IAvidScriptVmBackend> PeerBackend =
+		CreateWasmtimeBackendForTest(Error);
+	if (!TestNotNull(TEXT("epoch backend is created"), EpochBackend.Get())
+		|| !TestNotNull(TEXT("peer backend is created"), PeerBackend.Get()))
+	{
+		return false;
+	}
+	if (!LoadWasmtimeTestModule(
+			*this,
+			*EpochBackend,
+			Bytecode,
+			EpochConfig,
+			Error)
+		|| !LoadWasmtimeTestModule(
+			*this,
+			*PeerBackend,
+			Bytecode,
+			EpochConfig,
+			Error))
+	{
+		return false;
+	}
+	FAvidScriptVmExportHandle EpochSpinHandle;
+	FAvidScriptVmExportHandle EpochSafeHandle;
+	FAvidScriptVmExportHandle PeerSafeHandle;
+	TestTrue(
+		TEXT("epoch spin export resolves"),
+		EpochBackend->ResolveExport(
+			TEXT("avid_spin"),
+			EpochSpinHandle,
+			Error));
+	TestTrue(
+		TEXT("epoch safe export resolves"),
+		EpochBackend->ResolveExport(
+			TEXT("avid_safe"),
+			EpochSafeHandle,
+			Error));
+	TestTrue(
+		TEXT("peer safe export resolves"),
+		PeerBackend->ResolveExport(
+			TEXT("avid_safe"),
+			PeerSafeHandle,
+			Error));
+	const double EpochStartSeconds = FPlatformTime::Seconds();
+	TestFalse(
+		TEXT("shared epoch watchdog interrupts infinite loop"),
+		EpochBackend->Call(EpochSpinHandle, EmptyFrame, Error));
+	const double EpochElapsedSeconds =
+		FPlatformTime::Seconds() - EpochStartSeconds;
+	TestEqual(
+		TEXT("epoch interruption has a stable category"),
+		Error.Category,
+		FString(TEXT("execution_interrupted")));
+	TestTrue(
+		TEXT("epoch watchdog returns within a bounded interval"),
+		EpochElapsedSeconds < 2.0);
+	TestTrue(
+		TEXT("interrupted backend receives a fresh epoch deadline"),
+		EpochBackend->Call(EpochSafeHandle, EmptyFrame, Error));
+	TestTrue(
+		TEXT("shared watchdog does not interrupt a peer backend"),
+		PeerBackend->Call(PeerSafeHandle, EmptyFrame, Error));
 	return true;
 #endif
 }

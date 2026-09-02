@@ -147,6 +147,7 @@ FAvidScriptVmLoadConfig::FExecutionBudget MakeSessionExecutionBudget(
 	{
 		Budget.FuelPerEntry = 50000000;
 		Budget.EpochDeadlineTicks = 1;
+		Budget.EpochTimeoutMilliseconds = 100;
 		Budget.MaxLinearMemoryBytes = UINT64_C(64) << 20;
 	}
 	return Budget;
