@@ -558,6 +558,7 @@ function New-AvidScriptBuildCookRunUatArguments {
         '-targetplatform=Win64',
         "-clientconfig=$Configuration",
         '-build',
+        '-skipbuildeditor',
         '-cook',
         '-stage',
         '-pak',

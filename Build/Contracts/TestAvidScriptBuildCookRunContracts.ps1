@@ -200,6 +200,7 @@ try {
                 '-targetplatform=Win64',
                 '-clientconfig=Development',
                 '-build',
+                '-skipbuildeditor',
                 '-cook',
                 '-stage',
                 '-pak',
@@ -213,8 +214,11 @@ try {
             (@($Arguments | Where-Object { $_ -imatch '^-clean(?:$|=)' }).Count -eq 0) `
             'UAT arguments contain a forbidden clean switch.'
         Assert-BuildCookRunContract `
-            (@($Arguments | Where-Object { $_ -imatch 'Editor' }).Count -eq 0) `
-            'UAT arguments select or clear an Editor target.'
+            (@($Arguments | Where-Object {
+                        $_ -imatch '^-target=.*Editor' -or
+                            $_ -imatch '^-clean(?:$|=)'
+                    }).Count -eq 0) `
+            'UAT arguments select, clean, or clear an Editor target.'
     }
 
     Invoke-BuildCookRunContractCase 'Shipping UAT contract' {
@@ -229,6 +233,9 @@ try {
         Assert-BuildCookRunContract `
             ($Arguments -ccontains '-AdditionalCookerOptions=-SkipZenStore') `
             'Shipping does not retain the Zen workaround.'
+        Assert-BuildCookRunContract `
+            ($Arguments -ccontains '-skipbuildeditor') `
+            'Shipping unexpectedly rebuilds the Editor target.'
     }
 
     Invoke-BuildCookRunContractCase 'ProcessStartInfo and JSON output' {
