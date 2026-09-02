@@ -19,7 +19,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptPackagedOracle, Log, All);
 
 namespace
 {
-constexpr int32 PackagedFaultProbeEvent = -62001;
+constexpr int32 PackagedFaultProbeEvent = 62004;
 constexpr float FaultInjectionDelaySeconds = 0.12f;
 constexpr float OracleCompletionDelaySeconds = 0.30f;
 constexpr float OracleTimeoutSeconds = 5.0f;

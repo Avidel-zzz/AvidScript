@@ -6,7 +6,7 @@ public static class GeneratedBindingLifecycleScript
 {
     private const int ContinuationCallbackId = 62002;
     private const int TimerCallbackId = 62003;
-    private const int PackagedFaultProbeEvent = -62001;
+    private const int PackagedFaultProbeEvent = 62004;
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
     public static void BeginPlay()
