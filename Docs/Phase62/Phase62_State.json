@@ -5,7 +5,7 @@
     "goal": "交付 UE5.8 Win64 的确定性 Cook/Shipping C# WASM 闭环，包括预编译 artifact、资源依赖、Shipping 安全策略、Session 故障隔离和版本兼容。",
     "start_commit": "346fa907cb59f8f9c94ab0c616302e1544cef0fc"
   },
-  "declared_stage": "gate_attested",
+  "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase62/P62.0_Cook_Shipping_Architecture.md",
     "version": 1,
@@ -38,15 +38,15 @@
     {
       "id": "P62.D",
       "status": "Completed",
-      "evidence": "Final Gate Cook contract fixture aligned with Development attestation policy; GeneratedTypeCookPackage 10/10 passed",
-      "completed_at_utc": "2026-09-02T06:23:35.0305751+00:00"
+      "evidence": "Close validator remediation: removed the only Phase-owned EOF whitespace violation; product Gate evidence remains unchanged",
+      "completed_at_utc": "2026-09-02T06:44:57.4279180+00:00"
     }
   ],
   "debt": [],
   "review": {
-    "completed": true,
-    "evidence": "P62 final review: Development execution policy, package contracts, lifecycle scheduler, backend fault isolation, clean architecture, and evidence identity reviewed after Cook attestation fixture correction",
-    "completed_at_utc": "2026-09-02T06:24:37.4863831+00:00"
+    "completed": false,
+    "evidence": "reopened: Close validator found one Phase-owned EOF whitespace violation in P62.B3 documentation",
+    "completed_at_utc": null
   },
   "budgets": {
     "ubt": 4,
@@ -59,20 +59,20 @@
     "full_gate": 1
   },
   "freeze": {
-    "source_commit": "00e4167c84bb312a455a29122bc6fdc82ce11387",
-    "source_tree": "71e18bc8079a74b3eabcb9ce67a5f4969aedcabf",
-    "state_sha256": "2e405f34bed4b43b26c26e017d099547b462da8d6293b93ba2ec6b83bcbf24d0",
-    "review_evidence": "P62 final review: Development execution policy, package contracts, lifecycle scheduler, backend fault isolation, clean architecture, and evidence identity reviewed after Cook attestation fixture correction",
-    "at_utc": "2026-09-02T06:24:37.4863831+00:00"
+    "source_commit": "",
+    "source_tree": "",
+    "state_sha256": "",
+    "review_evidence": "",
+    "at_utc": null
   },
   "gate": {
-    "report_path": "C:\\tmp\\AvidScript\\P62Gate\\P62-089a5af-20260902-001\\gate-report.json",
-    "report_sha256": "3746b501f29aaa4e33643fe32e9120686539ef7b1abceff948ea92879f45d969",
-    "run_id": "P62-089a5af-20260902-001",
-    "verified_commit": "089a5afb5d8040b2a282d61b1327d7116ae00641",
-    "verified_tree": "a87ff12b85a02b3bc7d1d60a269ca109e08ff7c3",
-    "attestation_parent": "089a5afb5d8040b2a282d61b1327d7116ae00641",
-    "attested_at_utc": "2026-09-02T06:40:28.6992554+00:00"
+    "report_path": "",
+    "report_sha256": "",
+    "run_id": "",
+    "verified_commit": "",
+    "verified_tree": "",
+    "attestation_parent": "",
+    "attested_at_utc": null
   },
   "protected_dirty": [
     {
@@ -94,7 +94,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "close -Phase 62",
-  "revision": 19,
-  "updated_at_utc": "2026-09-02T06:40:28.7017768+00:00"
+  "next_action": "freeze -Phase 62 -ReviewEvidence <text>",
+  "revision": 21,
+  "updated_at_utc": "2026-09-02T06:44:57.4300973+00:00"
 }
