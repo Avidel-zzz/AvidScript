@@ -8,6 +8,8 @@ public class Wasmtime : ModuleRules
 	{
 		Type = ModuleType.External;
 
+		bool bWin64Target = Target.Platform == UnrealTargetPlatform.Win64;
+		bool bAndroidTarget = Target.Platform == UnrealTargetPlatform.Android;
 		string PerformanceInstallRoot = Path.Combine(
 			ModuleDirectory,
 			"installed",
@@ -18,43 +20,54 @@ public class Wasmtime : ModuleRules
 			"installed",
 			"Win64",
 			"v45.0.0");
-		bool bHasPerformanceLayout =
-			Target.Platform == UnrealTargetPlatform.Win64 &&
-			HasManagedLayout(
+		bool bHasPerformanceLayout = bWin64Target &&
+			HasWin64ManagedLayout(
 				PerformanceInstallRoot,
 				".avidscript-wasmtime-performance-managed.json");
-		string InstallRoot = bHasPerformanceLayout
+		string Win64InstallRoot = bHasPerformanceLayout
 			? PerformanceInstallRoot
 			: OfficialInstallRoot;
-		string IncludePath = Path.Combine(InstallRoot, "include");
-		string HeaderPath = Path.Combine(IncludePath, "wasmtime.h");
-		string DllPath = Path.Combine(InstallRoot, "lib", "wasmtime.dll");
-		string ImportLibraryPath = Path.Combine(InstallRoot, "lib", "wasmtime.dll.lib");
-		string LicensePath = Path.Combine(InstallRoot, "LICENSE");
-		string MarkerPath = Path.Combine(
-			InstallRoot,
+		string Win64DllPath = Path.Combine(
+			Win64InstallRoot,
+			"lib",
+			"wasmtime.dll");
+		string Win64MarkerName =
 			bHasPerformanceLayout
 				? ".avidscript-wasmtime-performance-managed.json"
-				: ".avidscript-wasmtime-managed.json");
+				: ".avidscript-wasmtime-managed.json";
+		bool bHasWin64Layout = bWin64Target
+			&& HasWin64ManagedLayout(Win64InstallRoot, Win64MarkerName);
 
-		bool bHasManagedLayout =
-			Target.Platform == UnrealTargetPlatform.Win64 &&
-			Directory.Exists(IncludePath) &&
-			File.Exists(HeaderPath) &&
-			File.Exists(DllPath) &&
-			File.Exists(ImportLibraryPath) &&
-			File.Exists(LicensePath) &&
-			File.Exists(MarkerPath);
+		string AndroidInstallRoot = Path.Combine(
+			ModuleDirectory,
+			"installed",
+			"Android",
+			"arm64",
+			"v45.0.0");
+		bool bHasAndroidLayout = bAndroidTarget
+			&& HasAndroidManagedLayout(AndroidInstallRoot);
+		bool bHasManagedLayout = bHasWin64Layout || bHasAndroidLayout;
 		bool bPackagedRuntimeTarget =
 			Target.Type == TargetType.Game
 			|| Target.Type == TargetType.Client
 			|| Target.Type == TargetType.Server;
-		if (Target.Platform == UnrealTargetPlatform.Win64
+		if (bWin64Target
 			&& bPackagedRuntimeTarget
 			&& !bHasPerformanceLayout)
 		{
 			throw new BuildException(
 				"AvidScript packaged Win64 targets require the managed Wasmtime performance toolchain.");
+		}
+		if (bAndroidTarget && Target.Architecture != UnrealArch.Arm64)
+		{
+			throw new BuildException(
+				$"AvidScript Wasmtime supports Android arm64 only, got {Target.Architecture}.");
+		}
+		if (bAndroidTarget && !bHasAndroidLayout)
+		{
+			throw new BuildException(
+				"AvidScript Android arm64 targets require the managed Wasmtime v45 Android dependency. "
+				+ "Run Build/InstallWasmtimeDependency.ps1 -Mode Install -Platform AndroidArm64.");
 		}
 
 		PublicDefinitions.Add(
@@ -66,24 +79,51 @@ public class Wasmtime : ModuleRules
 				? "AVIDSCRIPT_WITH_WASMTIME_PERFORMANCE_TOOLCHAIN=1"
 				: "AVIDSCRIPT_WITH_WASMTIME_PERFORMANCE_TOOLCHAIN=0");
 		PublicDefinitions.Add(
-			bHasManagedLayout
-				? $"AVIDSCRIPT_WASMTIME_DLL_SHA256=\"{ComputeFileSha256(DllPath)}\""
+			bHasWin64Layout
+				? $"AVIDSCRIPT_WASMTIME_DLL_SHA256=\"{ComputeFileSha256(Win64DllPath)}\""
 				: "AVIDSCRIPT_WASMTIME_DLL_SHA256=\"unavailable\"");
 
-		if (bHasManagedLayout)
+		if (bHasWin64Layout)
 		{
+			string IncludePath = Path.Combine(Win64InstallRoot, "include");
+			string ImportLibraryPath = Path.Combine(
+				Win64InstallRoot,
+				"lib",
+				"wasmtime.dll.lib");
+			string LicensePath = Path.Combine(Win64InstallRoot, "LICENSE");
+			string MarkerPath = Path.Combine(Win64InstallRoot, Win64MarkerName);
 			ExternalDependencies.Add(MarkerPath);
-			ExternalDependencies.Add(DllPath);
+			ExternalDependencies.Add(Win64DllPath);
 			ExternalDependencies.Add(ImportLibraryPath);
 			PublicIncludePaths.Add(IncludePath);
 			PublicAdditionalLibraries.Add(ImportLibraryPath);
 			PublicDelayLoadDLLs.Add("wasmtime.dll");
-			RuntimeDependencies.Add("$(PluginDir)/Binaries/Win64/wasmtime.dll", DllPath, StagedFileType.NonUFS);
+			RuntimeDependencies.Add("$(PluginDir)/Binaries/Win64/wasmtime.dll", Win64DllPath, StagedFileType.NonUFS);
 			RuntimeDependencies.Add("$(PluginDir)/Binaries/Win64/wasmtime.LICENSE.txt", LicensePath, StagedFileType.NonUFS);
+		}
+		else if (bHasAndroidLayout)
+		{
+			string IncludePath = Path.Combine(AndroidInstallRoot, "include");
+			string StaticLibraryPath = Path.Combine(
+				AndroidInstallRoot,
+				"lib",
+				"libwasmtime.a");
+			string LicensePath = Path.Combine(AndroidInstallRoot, "LICENSE");
+			string MarkerPath = Path.Combine(
+				AndroidInstallRoot,
+				".avidscript-wasmtime-managed.json");
+			ExternalDependencies.Add(MarkerPath);
+			ExternalDependencies.Add(StaticLibraryPath);
+			PublicIncludePaths.Add(IncludePath);
+			PublicAdditionalLibraries.Add(StaticLibraryPath);
+			RuntimeDependencies.Add(
+				"$(PluginDir)/Binaries/Android/wasmtime.LICENSE.txt",
+				LicensePath,
+				StagedFileType.NonUFS);
 		}
 	}
 
-	private static bool HasManagedLayout(string InstallRoot, string MarkerName)
+	private static bool HasWin64ManagedLayout(string InstallRoot, string MarkerName)
 	{
 		return
 			Directory.Exists(Path.Combine(InstallRoot, "include")) &&
@@ -92,6 +132,18 @@ public class Wasmtime : ModuleRules
 			File.Exists(Path.Combine(InstallRoot, "lib", "wasmtime.dll.lib")) &&
 			File.Exists(Path.Combine(InstallRoot, "LICENSE")) &&
 			File.Exists(Path.Combine(InstallRoot, MarkerName));
+	}
+
+	private static bool HasAndroidManagedLayout(string InstallRoot)
+	{
+		return
+			Directory.Exists(Path.Combine(InstallRoot, "include")) &&
+			File.Exists(Path.Combine(InstallRoot, "include", "wasmtime.h")) &&
+			File.Exists(Path.Combine(InstallRoot, "lib", "libwasmtime.a")) &&
+			File.Exists(Path.Combine(InstallRoot, "LICENSE")) &&
+			File.Exists(Path.Combine(
+				InstallRoot,
+				".avidscript-wasmtime-managed.json"));
 	}
 
 	private static string ComputeFileSha256(string Path)

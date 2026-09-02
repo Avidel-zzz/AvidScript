@@ -52,7 +52,7 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 Editor 调试与 Profiler，以及 Win64 Development/Shipping 的确定性 Cook 发布闭环均已接通。
 发布包支持逻辑 `ModuleId`、内容寻址 catalog、Wasmtime 预编译 artifact、回执校验和
 fail-closed 加载；运行时具备执行预算、共享 watchdog 与 Session 故障隔离。
-Phase 63 已完成 P63.A 的多平台 identity 与 catalog variant 解析；Android artifact 仍在后续批次。
+Phase 63 已完成多平台 catalog 与 Android arm64 Wasmtime 受控静态依赖；交叉预编译和真机仍在后续批次。
 
 集中 Gate 已通过 `.NET 284/284`、AvidScript Automation `429/429`、UE5.8 no-clean UBT、
 干净架构检查和发布/Cook/回执合同。详细证据见 [Phase 62 Gate 摘要](Docs/Phase62/P62_Gate_Summary.json)、
@@ -238,7 +238,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 ## 路线图
 
 1. **P62 已完成**：Win64 Cook/Shipping、发布资产策略与脚本故障隔离；
-2. **P63 进行中**：P63.A 多平台 catalog 已完成，继续交付 Android arm64 AOT；
+2. **P63 进行中**：多平台 catalog 与 Android arm64 依赖已完成，继续交付交叉 AOT 发布；
 3. **P64**：真实小型游戏 Demo 与移动真机验收；
 4. **P65**：跨框架成熟度、稳定性与性能领导力收口。
 

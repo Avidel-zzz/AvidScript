@@ -1,0 +1,82 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AvidScript Wasmtime Android arm64 dependency lock",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "dependency",
+    "version",
+    "platform",
+    "architecture",
+    "release_url",
+    "archive",
+    "layout",
+    "install",
+    "license"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "dependency": { "const": "Wasmtime Cranelift C API" },
+    "version": { "const": "v45.0.0" },
+    "platform": { "const": "Android" },
+    "architecture": { "const": "arm64" },
+    "release_url": {
+      "const": "https://github.com/bytecodealliance/wasmtime/releases/tag/v45.0.0"
+    },
+    "archive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "url", "size_bytes", "sha256", "root"],
+      "properties": {
+        "name": { "const": "wasmtime-v45.0.0-aarch64-android-c-api.tar.xz" },
+        "url": {
+          "const": "https://github.com/bytecodealliance/wasmtime/releases/download/v45.0.0/wasmtime-v45.0.0-aarch64-android-c-api.tar.xz"
+        },
+        "size_bytes": { "const": 13413296 },
+        "sha256": {
+          "const": "af5160bb3975686aec2f2ae1494bcd7ed4adcd3d4922af23e16bea3b687bfc1b"
+        },
+        "root": { "const": "wasmtime-v45.0.0-aarch64-android-c-api" }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "include_relative_path",
+        "static_library_relative_path",
+        "static_library_sha256",
+        "license_relative_path"
+      ],
+      "properties": {
+        "include_relative_path": { "const": "include" },
+        "static_library_relative_path": { "const": "lib/libwasmtime.a" },
+        "static_library_sha256": {
+          "const": "d53dd5a687cc555b1a8b77c4639bfc355812000b7987c4a0f559982e61e75b28"
+        },
+        "license_relative_path": { "const": "LICENSE" }
+      }
+    },
+    "install": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relative_path", "managed_marker_name"],
+      "properties": {
+        "relative_path": {
+          "const": "Source/ThirdParty/Wasmtime/installed/Android/arm64/v45.0.0"
+        },
+        "managed_marker_name": { "const": ".avidscript-wasmtime-managed.json" }
+      }
+    },
+    "license": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expression", "tracked_file"],
+      "properties": {
+        "expression": { "const": "Apache-2.0 WITH LLVM-exception" },
+        "tracked_file": { "const": "Source/ThirdParty/Wasmtime/LICENSE.txt" }
+      }
+    }
+  }
+}

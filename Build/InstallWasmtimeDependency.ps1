@@ -2,6 +2,8 @@
 param(
     [ValidateSet('ValidateLock', 'Install', 'Verify', 'Remove')]
     [string]$Mode,
+    [ValidateSet('Win64', 'AndroidArm64')]
+    [string]$Platform = 'Win64',
     [string]$RepositoryRoot = '',
     [string]$CacheRoot = '',
     [string]$LockPath = '',
@@ -15,9 +17,21 @@ if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
 }
 $RepositoryRoot = [System.IO.Path]::GetFullPath($RepositoryRoot)
 if ([string]::IsNullOrWhiteSpace($LockPath)) {
-    $LockPath = Join-Path $RepositoryRoot 'Source/ThirdParty/Wasmtime/WasmtimeDependency.lock.json'
+    $LockFile = if ($Platform -ceq 'AndroidArm64') {
+        'WasmtimeAndroidDependency.lock.json'
+    }
+    else {
+        'WasmtimeDependency.lock.json'
+    }
+    $LockPath = Join-Path $RepositoryRoot "Source/ThirdParty/Wasmtime/$LockFile"
 }
-$SchemaPath = Join-Path $RepositoryRoot 'Source/ThirdParty/Wasmtime/WasmtimeDependency.schema.json'
+$SchemaFile = if ($Platform -ceq 'AndroidArm64') {
+    'WasmtimeAndroidDependency.schema.json'
+}
+else {
+    'WasmtimeDependency.schema.json'
+}
+$SchemaPath = Join-Path $RepositoryRoot "Source/ThirdParty/Wasmtime/$SchemaFile"
 
 function Get-Sha256Bytes {
     param([Parameter(Mandatory = $true)][byte[]]$Bytes)
@@ -45,6 +59,57 @@ function Get-CanonicalFileSha256 {
 
 function Assert-PinnedLockIdentity {
     param([Parameter(Mandatory = $true)]$Lock)
+
+    if ([string]$Lock.platform -ceq 'Android') {
+        $ExpectedAndroid = [ordered]@{
+            schema_version = 1
+            dependency = 'Wasmtime Cranelift C API'
+            version = 'v45.0.0'
+            platform = 'Android'
+            architecture = 'arm64'
+            release_url = 'https://github.com/bytecodealliance/wasmtime/releases/tag/v45.0.0'
+            archive_name = 'wasmtime-v45.0.0-aarch64-android-c-api.tar.xz'
+            archive_url = 'https://github.com/bytecodealliance/wasmtime/releases/download/v45.0.0/wasmtime-v45.0.0-aarch64-android-c-api.tar.xz'
+            archive_size = [int64]13413296
+            archive_sha256 = 'af5160bb3975686aec2f2ae1494bcd7ed4adcd3d4922af23e16bea3b687bfc1b'
+            archive_root = 'wasmtime-v45.0.0-aarch64-android-c-api'
+            include_path = 'include'
+            static_path = 'lib/libwasmtime.a'
+            static_sha256 = 'd53dd5a687cc555b1a8b77c4639bfc355812000b7987c4a0f559982e61e75b28'
+            license_path = 'LICENSE'
+            install_path = 'Source/ThirdParty/Wasmtime/installed/Android/arm64/v45.0.0'
+            marker_name = '.avidscript-wasmtime-managed.json'
+            license_expression = 'Apache-2.0 WITH LLVM-exception'
+            tracked_license = 'Source/ThirdParty/Wasmtime/LICENSE.txt'
+        }
+        $ActualAndroid = [ordered]@{
+            schema_version = [int]$Lock.schema_version
+            dependency = [string]$Lock.dependency
+            version = [string]$Lock.version
+            platform = [string]$Lock.platform
+            architecture = [string]$Lock.architecture
+            release_url = [string]$Lock.release_url
+            archive_name = [string]$Lock.archive.name
+            archive_url = [string]$Lock.archive.url
+            archive_size = [int64]$Lock.archive.size_bytes
+            archive_sha256 = [string]$Lock.archive.sha256
+            archive_root = [string]$Lock.archive.root
+            include_path = [string]$Lock.layout.include_relative_path
+            static_path = [string]$Lock.layout.static_library_relative_path
+            static_sha256 = [string]$Lock.layout.static_library_sha256
+            license_path = [string]$Lock.layout.license_relative_path
+            install_path = [string]$Lock.install.relative_path
+            marker_name = [string]$Lock.install.managed_marker_name
+            license_expression = [string]$Lock.license.expression
+            tracked_license = [string]$Lock.license.tracked_file
+        }
+        foreach ($Name in $ExpectedAndroid.Keys) {
+            if ($ActualAndroid[$Name] -cne $ExpectedAndroid[$Name]) {
+                throw "ASP54W1004 pinned Android lock identity mismatch: $Name"
+            }
+        }
+        return
+    }
 
     $Expected = [ordered]@{
         schema_version = 1
@@ -245,8 +310,17 @@ function Get-WasmtimeInstallPaths {
     $InstalledRoot = [System.IO.Path]::GetFullPath(
         (Join-Path $Root 'Source/ThirdParty/Wasmtime/installed'))
     $InstallPath = [System.IO.Path]::GetFullPath((Join-Path $Root $Lock.install.relative_path))
+    $ExpectedRelativePath = if ([string]$Lock.platform -ceq 'Android') {
+        'Android/arm64/v45.0.0'
+    }
+    elseif ([string]$Lock.platform -ceq 'Win64') {
+        'Win64/v45.0.0'
+    }
+    else {
+        throw 'ASP54W1102 dependency lock has an unsupported platform boundary'
+    }
     $ExpectedPath = [System.IO.Path]::GetFullPath(
-        (Join-Path $InstalledRoot 'Win64/v45.0.0'))
+        (Join-Path $InstalledRoot $ExpectedRelativePath))
     if ($InstallPath -cne $ExpectedPath) {
         throw 'ASP54W1102 dependency lock attempted to escape the managed install path'
     }
@@ -259,10 +333,23 @@ function Get-WasmtimeInstallPaths {
         throw 'ASP54W1102 dependency lock attempted to escape the installed boundary'
     }
     Assert-ContainedOrdinaryDirectoryPath -TrustedRoot $Root -TargetPath $InstallPath
+    $PlatformRoot = if ([string]$Lock.platform -ceq 'Android') {
+        Join-Path $InstalledRoot 'Android/arm64'
+    }
+    else {
+        Join-Path $InstalledRoot 'Win64'
+    }
+    $PlatformFamilyRoot = if ([string]$Lock.platform -ceq 'Android') {
+        Join-Path $InstalledRoot 'Android'
+    }
+    else {
+        $PlatformRoot
+    }
     return [pscustomobject]@{
         RepositoryRoot = $Root
         InstalledRoot = $InstalledRoot
-        PlatformRoot = Join-Path $InstalledRoot 'Win64'
+        PlatformRoot = $PlatformRoot
+        PlatformFamilyRoot = $PlatformFamilyRoot
         InstallPath = $InstallPath
         MarkerPath = Join-Path $InstallPath $Lock.install.managed_marker_name
     }
@@ -379,7 +466,7 @@ function Assert-ArchiveEntryIsSafe {
     }
 }
 
-function Expand-ValidatedWasmtimeArchive {
+function Expand-ValidatedWasmtimeZipArchive {
     param(
         [Parameter(Mandatory = $true)][string]$ArchivePath,
         [Parameter(Mandatory = $true)][string]$Destination,
@@ -451,18 +538,159 @@ function Expand-ValidatedWasmtimeArchive {
     return $ArchiveRoot
 }
 
+function Expand-ValidatedWasmtimeTarArchive {
+    param(
+        [Parameter(Mandatory = $true)][string]$ArchivePath,
+        [Parameter(Mandatory = $true)][string]$Destination,
+        [Parameter(Mandatory = $true)]$Lock
+    )
+
+    $TarCommand = Get-Command tar.exe -CommandType Application -ErrorAction SilentlyContinue
+    if ($null -eq $TarCommand) {
+        throw 'ASP54W1406 tar.exe is required for the Android Wasmtime archive'
+    }
+    $Entries = @(& $TarCommand.Source -tf $ArchivePath)
+    if ($LASTEXITCODE -ne 0 -or $Entries.Count -eq 0) {
+        throw 'ASP54W1406 Android Wasmtime archive listing failed'
+    }
+    $VerboseEntries = @(& $TarCommand.Source -tvf $ArchivePath)
+    if ($LASTEXITCODE -ne 0 -or $VerboseEntries.Count -ne $Entries.Count) {
+        throw 'ASP54W1406 Android Wasmtime archive type listing failed'
+    }
+    foreach ($VerboseEntry in $VerboseEntries) {
+        if ([string]::IsNullOrWhiteSpace([string]$VerboseEntry) -or
+            @('-', 'd') -cnotcontains ([string]$VerboseEntry)[0].ToString()) {
+            throw 'ASP54W1402 Android archive contains a link or special entry'
+        }
+    }
+
+    $SeenPaths = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($Entry in $Entries) {
+        $RawPath = [string]$Entry
+        $NormalizedPath = $RawPath.Replace('\', '/').TrimEnd('/')
+        if ([string]::IsNullOrWhiteSpace($NormalizedPath) -or
+            $NormalizedPath.StartsWith('/', [System.StringComparison]::Ordinal) -or
+            $NormalizedPath -match '^[A-Za-z]:') {
+            throw "ASP54W1401 unsafe archive entry path: $RawPath"
+        }
+        $Segments = @($NormalizedPath.Split('/') | Where-Object { $_ -cne '' })
+        if ($Segments.Count -eq 0 -or
+            $Segments[0] -cne [string]$Lock.archive.root -or
+            @($Segments | Where-Object {
+                    $_ -ceq '..' -or
+                    $_ -ceq '.' -or
+                    $_.Contains(':')
+                }).Count -gt 0 -or
+            -not $SeenPaths.Add(($Segments -join '/'))) {
+            throw "ASP54W1401 archive entry escaped, duplicated, or added an unexpected root: $RawPath"
+        }
+    }
+
+    New-Item -ItemType Directory -Path $Destination | Out-Null
+    & $TarCommand.Source -xf $ArchivePath -C $Destination
+    if ($LASTEXITCODE -ne 0) {
+        throw 'ASP54W1406 Android Wasmtime archive extraction failed'
+    }
+    Assert-NoReparseTree -Root $Destination -Code 'ASP54W1402'
+    $ArchiveRoot = Join-Path $Destination $Lock.archive.root
+    if (-not (Test-Path -LiteralPath $ArchiveRoot -PathType Container)) {
+        throw 'ASP54W1403 archive root is missing'
+    }
+    return $ArchiveRoot
+}
+
+function Expand-ValidatedWasmtimeArchive {
+    param(
+        [Parameter(Mandatory = $true)][string]$ArchivePath,
+        [Parameter(Mandatory = $true)][string]$Destination,
+        [Parameter(Mandatory = $true)]$Lock
+    )
+
+    if ([string]$Lock.platform -ceq 'Android') {
+        return Expand-ValidatedWasmtimeTarArchive `
+            -ArchivePath $ArchivePath `
+            -Destination $Destination `
+            -Lock $Lock
+    }
+    return Expand-ValidatedWasmtimeZipArchive `
+        -ArchivePath $ArchivePath `
+        -Destination $Destination `
+        -Lock $Lock
+}
+
+function Assert-AvidScriptAarch64StaticArchive {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $Stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $Signature = [byte[]]::new(8)
+        if ($Stream.Read($Signature, 0, $Signature.Length) -ne $Signature.Length -or
+            [System.Text.Encoding]::ASCII.GetString($Signature) -cne "!<arch>`n") {
+            throw 'ASP54W1407 Android static library is not a standard ar archive'
+        }
+        $FoundAarch64Elf = $false
+        while ($Stream.Position -lt $Stream.Length) {
+            $Header = [byte[]]::new(60)
+            if ($Stream.Read($Header, 0, $Header.Length) -ne $Header.Length -or
+                $Header[58] -ne [byte][char]'`' -or
+                $Header[59] -ne [byte]10) {
+                throw 'ASP54W1407 Android static library has an invalid member header'
+            }
+            $SizeText = [System.Text.Encoding]::ASCII.GetString($Header, 48, 10).Trim()
+            $MemberSize = [int64]0
+            if (-not [int64]::TryParse($SizeText, [ref]$MemberSize) -or $MemberSize -lt 0) {
+                throw 'ASP54W1407 Android static library has an invalid member size'
+            }
+            $MemberStart = $Stream.Position
+            if ($MemberSize -ge 20) {
+                $Prefix = [byte[]]::new(20)
+                if ($Stream.Read($Prefix, 0, $Prefix.Length) -ne $Prefix.Length) {
+                    throw 'ASP54W1407 Android static library member is truncated'
+                }
+                if ($Prefix[0] -eq 0x7f -and
+                    $Prefix[1] -eq [byte][char]'E' -and
+                    $Prefix[2] -eq [byte][char]'L' -and
+                    $Prefix[3] -eq [byte][char]'F') {
+                    $Machine = [System.BitConverter]::ToUInt16($Prefix, 18)
+                    if ($Prefix[4] -ne 2 -or $Prefix[5] -ne 1 -or $Machine -ne 183) {
+                        throw 'ASP54W1407 Android static library contains a non-AArch64 ELF object'
+                    }
+                    $FoundAarch64Elf = $true
+                }
+            }
+            $NextMember = $MemberStart + $MemberSize + ($MemberSize % 2)
+            if ($NextMember -gt $Stream.Length) {
+                throw 'ASP54W1407 Android static library member exceeds the archive boundary'
+            }
+            $Stream.Position = $NextMember
+        }
+        if (-not $FoundAarch64Elf) {
+            throw 'ASP54W1407 Android static library contains no AArch64 ELF object'
+        }
+    }
+    finally {
+        $Stream.Dispose()
+    }
+}
+
 function Assert-WasmtimeArchiveLayout {
     param(
         [Parameter(Mandatory = $true)][string]$ArchiveRoot,
         [Parameter(Mandatory = $true)]$Lock
     )
 
-    $RequiredPaths = @(
-        (Join-Path $ArchiveRoot "$($Lock.layout.include_relative_path)/wasmtime.h"),
-        (Join-Path $ArchiveRoot "$($Lock.layout.include_relative_path)/wasmtime/conf.h"),
-        (Join-Path $ArchiveRoot $Lock.layout.dll_relative_path),
-        (Join-Path $ArchiveRoot $Lock.layout.import_library_relative_path),
-        (Join-Path $ArchiveRoot $Lock.layout.license_relative_path))
+    $RequiredPaths = [System.Collections.Generic.List[string]]::new()
+    $RequiredPaths.Add((Join-Path $ArchiveRoot "$($Lock.layout.include_relative_path)/wasmtime.h"))
+    $RequiredPaths.Add((Join-Path $ArchiveRoot "$($Lock.layout.include_relative_path)/wasmtime/conf.h"))
+    $RequiredPaths.Add((Join-Path $ArchiveRoot $Lock.layout.license_relative_path))
+    if ([string]$Lock.platform -ceq 'Android') {
+        $RequiredPaths.Add((Join-Path $ArchiveRoot $Lock.layout.static_library_relative_path))
+    }
+    else {
+        $RequiredPaths.Add((Join-Path $ArchiveRoot $Lock.layout.dll_relative_path))
+        $RequiredPaths.Add((Join-Path $ArchiveRoot $Lock.layout.import_library_relative_path))
+    }
     foreach ($RequiredPath in $RequiredPaths) {
         if (-not (Test-Path -LiteralPath $RequiredPath -PathType Leaf)) {
             throw "ASP54W1404 archive Cranelift layout is incomplete: $RequiredPath"
@@ -472,6 +700,14 @@ function Assert-WasmtimeArchiveLayout {
     $ConfigText = [System.IO.File]::ReadAllText($ConfigPath)
     if ($ConfigText -notmatch '(?m)^\s*#define\s+WASMTIME_FEATURE_CRANELIFT\b') {
         throw 'ASP54W1405 archive C API does not enable the Cranelift compiler feature'
+    }
+    if ([string]$Lock.platform -ceq 'Android') {
+        $StaticLibraryPath = Join-Path $ArchiveRoot $Lock.layout.static_library_relative_path
+        if ((Get-FileSha256 -Path $StaticLibraryPath) -cne
+            [string]$Lock.layout.static_library_sha256) {
+            throw 'ASP54W1407 Android static library SHA-256 mismatch'
+        }
+        Assert-AvidScriptAarch64StaticArchive -Path $StaticLibraryPath
     }
 }
 
@@ -520,6 +756,9 @@ function Write-ManagedMarker {
         installed_content_sha256 = $Summary.sha256
         installed_file_count = $Summary.file_count
     }
+    if ($Lock.PSObject.Properties.Name -ccontains 'architecture') {
+        $Marker['architecture'] = [string]$Lock.architecture
+    }
     $MarkerPath = Join-Path $InstallPath $Lock.install.managed_marker_name
     $MarkerJson = $Marker | ConvertTo-Json -Depth 8
     [System.IO.File]::WriteAllText(
@@ -559,6 +798,9 @@ function Test-WasmtimeDependency {
         'archive_sha256',
         'installed_content_sha256',
         'installed_file_count')
+    if ($Lock.PSObject.Properties.Name -ccontains 'architecture') {
+        $ExpectedProperties += 'architecture'
+    }
     $ActualProperties = @($Marker.PSObject.Properties.Name)
     if ($ActualProperties.Count -ne $ExpectedProperties.Count -or
         @($ExpectedProperties | Where-Object { $_ -notin $ActualProperties }).Count -gt 0) {
@@ -571,14 +813,28 @@ function Test-WasmtimeDependency {
         [string]$Marker.archive_sha256 -cne [string]$Lock.archive.sha256) {
         throw 'ASP54W1604 managed marker or lock identity drifted'
     }
-    foreach ($RelativePath in @(
-        'include/wasmtime.h',
-        'lib/wasmtime.dll',
-        'lib/wasmtime.dll.lib',
-        'LICENSE')) {
+    if ($Lock.PSObject.Properties.Name -ccontains 'architecture' -and
+        [string]$Marker.architecture -cne [string]$Lock.architecture) {
+        throw 'ASP54W1604 managed marker architecture drifted'
+    }
+    $RequiredInstalledPaths = if ([string]$Lock.platform -ceq 'Android') {
+        @('include/wasmtime.h', 'lib/libwasmtime.a', 'LICENSE')
+    }
+    else {
+        @('include/wasmtime.h', 'lib/wasmtime.dll', 'lib/wasmtime.dll.lib', 'LICENSE')
+    }
+    foreach ($RelativePath in $RequiredInstalledPaths) {
         if (-not (Test-Path -LiteralPath (Join-Path $Paths.InstallPath $RelativePath) -PathType Leaf)) {
             throw "ASP54W1605 managed content is incomplete: $RelativePath"
         }
+    }
+    if ([string]$Lock.platform -ceq 'Android') {
+        $StaticLibraryPath = Join-Path $Paths.InstallPath 'lib/libwasmtime.a'
+        if ((Get-FileSha256 -Path $StaticLibraryPath) -cne
+            [string]$Lock.layout.static_library_sha256) {
+            throw 'ASP54W1605 Android static library identity drifted'
+        }
+        Assert-AvidScriptAarch64StaticArchive -Path $StaticLibraryPath
     }
     $Summary = Get-InstalledContentSummary `
         -InstallPath $Paths.InstallPath `
@@ -638,12 +894,19 @@ function Install-WasmtimeDependency {
             -Destination (Join-Path $CandidatePath 'include') `
             -Recurse
         New-Item -ItemType Directory -Path (Join-Path $CandidatePath 'lib') | Out-Null
-        Copy-Item `
-            -LiteralPath (Join-Path $ArchiveRoot $Lock.layout.dll_relative_path) `
-            -Destination (Join-Path $CandidatePath 'lib/wasmtime.dll')
-        Copy-Item `
-            -LiteralPath (Join-Path $ArchiveRoot $Lock.layout.import_library_relative_path) `
-            -Destination (Join-Path $CandidatePath 'lib/wasmtime.dll.lib')
+        if ([string]$Lock.platform -ceq 'Android') {
+            Copy-Item `
+                -LiteralPath (Join-Path $ArchiveRoot $Lock.layout.static_library_relative_path) `
+                -Destination (Join-Path $CandidatePath 'lib/libwasmtime.a')
+        }
+        else {
+            Copy-Item `
+                -LiteralPath (Join-Path $ArchiveRoot $Lock.layout.dll_relative_path) `
+                -Destination (Join-Path $CandidatePath 'lib/wasmtime.dll')
+            Copy-Item `
+                -LiteralPath (Join-Path $ArchiveRoot $Lock.layout.import_library_relative_path) `
+                -Destination (Join-Path $CandidatePath 'lib/wasmtime.dll.lib')
+        }
         Copy-Item `
             -LiteralPath (Join-Path $ArchiveRoot $Lock.layout.license_relative_path) `
             -Destination (Join-Path $CandidatePath 'LICENSE')
@@ -722,7 +985,10 @@ function Remove-WasmtimeDependency {
     Assert-NoReparseTree -Root $InstallFullPath -Code 'ASP54W1702'
     Assert-NoAlternateDataStreams -Root $InstallFullPath -Code 'ASP54W1606'
     Remove-Item -LiteralPath $InstallFullPath -Recurse -Force
-    foreach ($Parent in @($RemovalPaths.PlatformRoot, $RemovalPaths.InstalledRoot)) {
+    foreach ($Parent in @(
+            $RemovalPaths.PlatformRoot,
+            $RemovalPaths.PlatformFamilyRoot,
+            $RemovalPaths.InstalledRoot) | Select-Object -Unique) {
         if ((Test-Path -LiteralPath $Parent -PathType Container) -and
             @(Get-ChildItem -LiteralPath $Parent -Force).Count -eq 0) {
             Assert-ContainedOrdinaryDirectoryPath `

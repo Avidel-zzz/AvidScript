@@ -25,9 +25,9 @@
     },
     {
       "id": "P63.B",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "official Android arm64 Wasmtime install/verify passed; Android contracts 15/15; Win64 dependency contracts passed; UE5.8 Win64 no-clean UBT passed",
+      "completed_at_utc": "2026-09-02T10:58:52.0898114+00:00"
     },
     {
       "id": "P63.C",
@@ -94,7 +94,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "batch-complete -Phase 63 -BatchId P63.B -Evidence <text>",
-  "revision": 2,
-  "updated_at_utc": "2026-09-02T07:32:09.4439414+00:00"
+  "next_action": "batch-complete -Phase 63 -BatchId P63.C -Evidence <text>",
+  "revision": 3,
+  "updated_at_utc": "2026-09-02T10:58:52.0919255+00:00"
 }
