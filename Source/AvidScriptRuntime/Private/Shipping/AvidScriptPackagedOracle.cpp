@@ -5,6 +5,7 @@
 #include "Dom/JsonObject.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "Components/SceneComponent.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformMisc.h"
 #include "Misc/CommandLine.h"
@@ -51,6 +52,19 @@ bool SpawnOracleActor(
 	{
 		return false;
 	}
+	USceneComponent* RootComponent = NewObject<USceneComponent>(
+		Actor,
+		USceneComponent::StaticClass(),
+		NAME_None,
+		RF_Transient);
+	if (RootComponent == nullptr)
+	{
+		Actor->Destroy();
+		return false;
+	}
+	Actor->SetRootComponent(RootComponent);
+	Actor->AddInstanceComponent(RootComponent);
+	RootComponent->RegisterComponent();
 
 	UAvidScriptComponent* Component = NewObject<UAvidScriptComponent>(
 		Actor,
@@ -204,7 +218,7 @@ void UAvidScriptWorldSubsystem::TickPackagedOracle(float DeltaTime)
 	const AActor* HealthyActor = PackagedOracleHealthyActor.Get();
 	const bool bWorldContinued = HealthyStats.TickCallCount > PackagedOracleHealthyTicksBeforeFault;
 	const bool bContinuationObserved = HealthyActor != nullptr
-		&& HealthyActor->GetActorLocation().Y >= 264.0;
+		&& HealthyActor->GetActorScale3D().Y >= 64.0;
 	const bool bSucceeded = HealthyStats.bResolvedFromPackage
 		&& HealthyStats.bRuntimeLoaded
 		&& HealthyStats.bBeginPlayCalled
@@ -242,8 +256,8 @@ void UAvidScriptWorldSubsystem::CompletePackagedOracle(
 	FAvidScriptComponentRuntimeStats FaultStats = FaultComponent != nullptr
 		? FaultComponent->GetRuntimeStats()
 		: FAvidScriptComponentRuntimeStats();
-	const FVector HealthyLocation = HealthyActor != nullptr
-		? HealthyActor->GetActorLocation()
+	const FVector HealthyScale = HealthyActor != nullptr
+		? HealthyActor->GetActorScale3D()
 		: FVector::ZeroVector;
 
 	if (HealthyActor != nullptr)
@@ -290,10 +304,10 @@ void UAvidScriptWorldSubsystem::CompletePackagedOracle(
 	Root->SetBoolField(
 		TEXT("world_continued"),
 		HealthyStats.TickCallCount > PackagedOracleHealthyTicksBeforeFault);
-	Root->SetBoolField(TEXT("continuation_observed"), HealthyLocation.Y >= 264.0);
-	Root->SetNumberField(TEXT("healthy_location_x"), HealthyLocation.X);
-	Root->SetNumberField(TEXT("healthy_location_y"), HealthyLocation.Y);
-	Root->SetNumberField(TEXT("healthy_location_z"), HealthyLocation.Z);
+	Root->SetBoolField(TEXT("continuation_observed"), HealthyScale.Y >= 64.0);
+	Root->SetNumberField(TEXT("healthy_scale_x"), HealthyScale.X);
+	Root->SetNumberField(TEXT("healthy_scale_y"), HealthyScale.Y);
+	Root->SetNumberField(TEXT("healthy_scale_z"), HealthyScale.Z);
 
 	const TSharedRef<FJsonObject> HealthyObject = MakeShared<FJsonObject>();
 	SetOracleStats(HealthyObject, HealthyStats);
