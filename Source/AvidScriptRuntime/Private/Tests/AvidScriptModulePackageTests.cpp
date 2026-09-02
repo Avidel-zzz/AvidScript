@@ -72,8 +72,7 @@ FString MakePackageIdentity(
 		WasmSha256,
 		PrecompiledSha256,
 		BindingManifestSha256,
-		BindingDescriptorSha256,
-		FString()
+		BindingDescriptorSha256
 	};
 	return FAvidScriptHash::Sha256HexUtf8(FString::Join(Fields, TEXT("\n")));
 }

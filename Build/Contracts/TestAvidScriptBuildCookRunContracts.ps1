@@ -489,6 +489,8 @@ try {
         foreach ($RequiredToken in @(
                 'Resolve-AvidScriptPackagedOracleExecutable',
                 'System.Diagnostics.ProcessStartInfo',
+                'SpecialFolder]::LocalApplicationData',
+                '$Arguments.Add($TargetName)',
                 'ArgumentList.Add($Argument)',
                 '-AvidScriptPackagedOracle=',
                 '-AvidScriptPackagedOracleReport=',

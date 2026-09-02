@@ -207,7 +207,7 @@ bool ParseCatalogEntry(
 
 FString MakeIdentityPayload(const FDocument& Package)
 {
-	const TArray<FString> Fields{
+	TArray<FString> Fields{
 		FString::FromInt(PackageSchemaVersion),
 		Package.ModuleId,
 		FString::FromInt(Package.AbiVersion),
@@ -224,9 +224,12 @@ FString MakeIdentityPayload(const FDocument& Package)
 		Package.CanonicalWasm.Sha256,
 		Package.Precompiled.Sha256,
 		Package.BindingManifest.Sha256,
-		Package.BindingDescriptor.Sha256,
-		Package.DebugMap.IsSet() ? Package.DebugMap->Sha256 : FString()
+		Package.BindingDescriptor.Sha256
 	};
+	if (Package.DebugMap.IsSet())
+	{
+		Fields.Add(Package.DebugMap->Sha256);
+	}
 	return FString::Join(Fields, TEXT("\n"));
 }
 

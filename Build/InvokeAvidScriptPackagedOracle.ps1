@@ -177,27 +177,49 @@ function Invoke-AvidScriptPackagedOracle {
     if (-not (Test-Path -LiteralPath $PackageRoot -PathType Container)) {
         $PackageRoot = $ResolvedArchiveRoot
     }
-    $EvidenceRoot = Join-Path `
-        $PackageRoot `
-        "$TargetName/Saved/AvidScript/PackagedOracle"
+    $ProjectSavedRoot = if ($Configuration -ceq 'Shipping') {
+        $LocalAppData = [System.Environment]::GetFolderPath(
+            [System.Environment+SpecialFolder]::LocalApplicationData)
+        if ([string]::IsNullOrWhiteSpace($LocalAppData)) {
+            Throw-AvidScriptPackagedOracleError `
+                -Category 'shipping_saved_root_missing' `
+                -Message 'Shipping ProjectSavedDir could not be resolved.'
+        }
+        Join-Path $LocalAppData "$TargetName/Saved"
+    }
+    else {
+        Join-Path $PackageRoot "$TargetName/Saved"
+    }
+    $EvidenceRoot = Join-Path $ProjectSavedRoot 'AvidScript/PackagedOracle'
     [void][System.IO.Directory]::CreateDirectory($EvidenceRoot)
     $RunId = "$Configuration-$PID-$([Guid]::NewGuid().ToString('N'))"
     $ReportPath = Join-Path $EvidenceRoot "$RunId.json"
     $LogPath = Join-Path $EvidenceRoot "$RunId.log"
 
-    $Arguments = @(
-        '/Game/TopDown/Lvl_TopDown',
-        '-game',
-        '-unattended',
-        '-nullrhi',
-        '-nosplash',
-        '-nosound',
-        '-stdout',
-        '-FullStdOutLogOutput',
-        "-abslog=$LogPath",
-        "-AvidScriptPackagedOracle=$ModuleId",
-        "-AvidScriptPackagedOracleReport=$ReportPath"
-    )
+    $Arguments = [System.Collections.Generic.List[string]]::new()
+    $ExpectedBinaryRoot = [System.IO.Path]::GetFullPath((Join-Path `
+                $PackageRoot `
+                "$TargetName/Binaries/Win64"))
+    $ActualBinaryRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $ExecutablePath))
+    if ($ActualBinaryRoot.Equals(
+            $ExpectedBinaryRoot,
+            [System.StringComparison]::OrdinalIgnoreCase)) {
+        $Arguments.Add($TargetName)
+    }
+    foreach ($Argument in @(
+            '/Game/TopDown/Lvl_TopDown',
+            '-game',
+            '-unattended',
+            '-nullrhi',
+            '-nosplash',
+            '-nosound',
+            '-stdout',
+            '-FullStdOutLogOutput',
+            "-abslog=$LogPath",
+            "-AvidScriptPackagedOracle=$ModuleId",
+            "-AvidScriptPackagedOracleReport=$ReportPath")) {
+        $Arguments.Add($Argument)
+    }
     $StartInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $StartInfo.FileName = $ExecutablePath
     $StartInfo.WorkingDirectory = $PackageRoot
