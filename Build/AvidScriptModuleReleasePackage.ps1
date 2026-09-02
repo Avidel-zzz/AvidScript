@@ -775,6 +775,12 @@ function Publish-AvidScriptModuleReleasePackage {
         [string]$RuntimeManifest.execution.policy
     }
 
+    if ($Policy -ceq 'prefer_precompiled' -and
+        ([string]$RuntimeManifest.execution.attestation_id -cnotmatch '^[0-9a-f]{32}$' -or
+            [string]$RuntimeManifest.execution.fallback -cne 'wasmtime_jit')) {
+        throw 'Development precompiled execution requires a lowercase 32-hex attestation_id and wasmtime_jit fallback.'
+    }
+
     $WasmPath = Resolve-AvidScriptModuleReleaseDependency `
         -RuntimeManifestPath $RuntimeManifestPath `
         -RelativePath ([string]$RuntimeManifest.wasm.file) `
@@ -951,6 +957,9 @@ function Publish-AvidScriptModuleReleasePackage {
         policy = $Policy
     }
     if ($Policy -ceq 'prefer_precompiled') {
+        $ReleaseRuntimeManifest.execution | Add-Member `
+            -NotePropertyName attestation_id `
+            -NotePropertyValue ([string]$RuntimeManifest.execution.attestation_id)
         $ReleaseRuntimeManifest.execution | Add-Member `
             -NotePropertyName fallback `
             -NotePropertyValue 'wasmtime_jit'

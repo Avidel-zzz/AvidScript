@@ -96,7 +96,7 @@ function New-ReleaseFixture {
             canonical_sha256 = Get-AvidScriptModuleReleaseSha256 $WasmPath
             compiler_build_identity = 'wasmtime-fixture-build'
             target_triple = 'x86_64-pc-windows-msvc'
-            attestation_id = 'editor-process-only'
+            attestation_id = ('1' * 32)
             policy = $Policy
             fallback = 'wasmtime_jit'
         }
@@ -329,7 +329,9 @@ try {
             [string]$Runtime.source.frontend_sha256 -cne ('e' * 64) -or
             [string]$Runtime.source.semantic_sha256 -cne ('f' * 64) -or
             [string]$Runtime.guest_ir.module_id -cne 'fixture.module' -or
-            [string]$Runtime.guest_ir.sha256 -cne ('b' * 64)) {
+            [string]$Runtime.guest_ir.sha256 -cne ('b' * 64) -or
+            [string]$Runtime.execution.attestation_id -cne ('1' * 32) -or
+            [string]$Runtime.execution.fallback -cne 'wasmtime_jit') {
             throw 'Development package lost debug provenance or retained build-only paths.'
         }
     }

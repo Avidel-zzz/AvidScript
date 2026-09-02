@@ -1420,6 +1420,8 @@ bool FAvidScriptEditorCSharpComponentGameplayTest::RunTest(
 	BuildRequest.Config.SemanticCacheRoot =
 		FPaths::Combine(TestRoot, TEXT("SemanticCache/v1"));
 	BuildRequest.Config.bDisableSemanticCache = true;
+	BuildRequest.Config.CompilationCacheRoot =
+		FPaths::Combine(TestRoot, TEXT("CompilationCache/v1"));
 	FAvidScriptEditorCSharpBuildResult BuildResult;
 	if (!TestTrue(
 		TEXT("Component gameplay builds through Roslyn, Guest IR, and WASM"),

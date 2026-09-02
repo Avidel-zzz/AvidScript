@@ -1069,7 +1069,14 @@ bool FAvidScriptWasmErrorSmokeTest::RunTest(const FString& Parameters)
 				1.0f / 60.0f,
 				Result,
 				EAvidScriptWasmResultDetail::FailureOnly));
-		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("trap category")), Result.ErrorCategory, FString(TEXT("trap")));
+		const FString ExpectedTrapCategory =
+			Lane.ExpectedKind == EAvidScriptVmBackendKind::Wasmtime
+				? TEXT("guest_trap")
+				: TEXT("trap");
+		TestEqual(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("trap category")),
+			Result.ErrorCategory,
+			ExpectedTrapCategory);
 		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("trap export name")), Result.ExportName, FString(TEXT("avid_on_tick")));
 		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("trap preserves stack frames")), !Result.DiagnosticFrames.IsEmpty());
 		TestEqual(
