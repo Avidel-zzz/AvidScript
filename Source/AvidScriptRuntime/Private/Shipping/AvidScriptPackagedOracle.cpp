@@ -23,6 +23,10 @@ constexpr int32 PackagedFaultProbeEvent = 62004;
 constexpr float FaultInjectionDelaySeconds = 0.12f;
 constexpr float OracleCompletionDelaySeconds = 0.30f;
 constexpr float OracleTimeoutSeconds = 5.0f;
+constexpr const TCHAR* PackagedOracleModuleEnvironment =
+	TEXT("AVIDSCRIPT_PACKAGED_ORACLE_MODULE");
+constexpr const TCHAR* PackagedOracleReportEnvironment =
+	TEXT("AVIDSCRIPT_PACKAGED_ORACLE_REPORT");
 
 bool IsPathUnderRoot(const FString& Path, const FString& Root)
 {
@@ -110,7 +114,12 @@ bool UAvidScriptWorldSubsystem::StartPackagedOracle(UWorld& InWorld)
 			TEXT("AvidScriptPackagedOracle="),
 			RequestedModuleId))
 	{
-		return false;
+		RequestedModuleId = FPlatformMisc::GetEnvironmentVariable(
+			PackagedOracleModuleEnvironment);
+		if (RequestedModuleId.IsEmpty())
+		{
+			return false;
+		}
 	}
 
 	bPackagedOracleActive = true;
@@ -126,6 +135,11 @@ bool UAvidScriptWorldSubsystem::StartPackagedOracle(UWorld& InWorld)
 		FCommandLine::Get(),
 		TEXT("AvidScriptPackagedOracleReport="),
 		PackagedOracleReportPath);
+	if (PackagedOracleReportPath.IsEmpty())
+	{
+		PackagedOracleReportPath = FPlatformMisc::GetEnvironmentVariable(
+			PackagedOracleReportEnvironment);
+	}
 	if (PackagedOracleReportPath.IsEmpty())
 	{
 		PackagedOracleReportPath = FPaths::Combine(

@@ -445,6 +445,8 @@ try {
                 'ArgumentList.Add($Argument)',
                 '-AvidScriptPackagedOracle=',
                 '-AvidScriptPackagedOracleReport=',
+                "Environment['AVIDSCRIPT_PACKAGED_ORACLE_MODULE']",
+                "Environment['AVIDSCRIPT_PACKAGED_ORACLE_REPORT']",
                 'WaitForExit($TimeoutSeconds * 1000)',
                 'Process.Kill($true)',
                 'avidscript_packaged_oracle_process_passed',

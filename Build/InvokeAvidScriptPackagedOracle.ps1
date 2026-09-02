@@ -191,6 +191,8 @@ function Invoke-AvidScriptPackagedOracle {
     foreach ($Argument in $Arguments) {
         [void]$StartInfo.ArgumentList.Add($Argument)
     }
+    $StartInfo.Environment['AVIDSCRIPT_PACKAGED_ORACLE_MODULE'] = $ModuleId
+    $StartInfo.Environment['AVIDSCRIPT_PACKAGED_ORACLE_REPORT'] = $ReportPath
 
     $Process = [System.Diagnostics.Process]::new()
     $Process.StartInfo = $StartInfo
@@ -227,7 +229,7 @@ function Invoke-AvidScriptPackagedOracle {
         if (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf)) {
             Throw-AvidScriptPackagedOracleError `
                 -Category 'oracle_report_missing' `
-                -Message "Packaged process produced no oracle report. See $LogPath"
+                -Message "Packaged process exited $($Process.ExitCode) without an oracle report. See $LogPath"
         }
         $Oracle = ConvertFrom-AvidScriptPackagedOracleJson `
             -Text ([System.IO.File]::ReadAllText($ReportPath)) `
