@@ -41,6 +41,14 @@ public:
 	virtual void StartupModule() override
 	{
 		FAvidScriptGeneratedNetworkTopologyHarness::Startup();
+		if (FAvidScriptGeneratedTypeRuntimeHost::IsCommandletExecutionSuppressed())
+		{
+			UE_LOG(
+				LogAvidScriptGenerated,
+				Verbose,
+				TEXT("Generated Type execution is suppressed for this commandlet."));
+			return;
+		}
 		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("AvidScript"));
 		if (!Plugin.IsValid())
 		{

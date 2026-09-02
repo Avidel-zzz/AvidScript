@@ -211,6 +211,7 @@ function New-AvidScriptReleaseCommandletArguments {
     }
     foreach ($Argument in @(
             "-abslog=$AbsLog",
+            '-AvidScriptSuppressGeneratedTypeExecution',
             '-unattended',
             '-nop4',
             '-nosplash',

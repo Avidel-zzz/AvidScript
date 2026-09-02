@@ -6,7 +6,9 @@
 #include "AvidScriptRuntimeSession.h"
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
+#include "Misc/CommandLine.h"
 #include "Misc/FileHelper.h"
+#include "Misc/Parse.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -290,6 +292,18 @@ FAvidScriptGeneratedTypeRuntimeHost& FAvidScriptGeneratedTypeRuntimeHost::Get()
 {
 	static FAvidScriptGeneratedTypeRuntimeHost Host;
 	return Host;
+}
+
+bool FAvidScriptGeneratedTypeRuntimeHost::IsCommandletExecutionSuppressed()
+{
+#if WITH_EDITOR
+	return IsRunningCommandlet()
+		&& FParse::Param(
+			FCommandLine::Get(),
+			TEXT("AvidScriptSuppressGeneratedTypeExecution"));
+#else
+	return false;
+#endif
 }
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -799,6 +813,10 @@ bool FAvidScriptGeneratedTypeRuntimeHost::BeginInstance(
 	FString& OutError)
 {
 	OutError.Reset();
+	if (IsCommandletExecutionSuppressed())
+	{
+		return true;
+	}
 	if (!Impl || !Impl->bStarted || !IsInGameThread() || !Impl->Package.IsSet())
 	{
 		OutError = TEXT("generated type instance activation requires an installed GameThread package");
@@ -892,6 +910,10 @@ bool FAvidScriptGeneratedTypeRuntimeHost::BeginInstance(
 bool FAvidScriptGeneratedTypeRuntimeHost::EndInstance(UObject& Receiver, FString& OutError)
 {
 	OutError.Reset();
+	if (IsCommandletExecutionSuppressed())
+	{
+		return true;
+	}
 	if (!Impl || !Impl->bStarted || !IsInGameThread())
 	{
 		OutError = TEXT("generated type instance teardown requires a started GameThread host");

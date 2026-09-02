@@ -17,6 +17,15 @@ $BuildInvokerPath = Join-Path `
 $BuildPipelinePath = Join-Path `
     $PluginRoot `
     'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBuildPipeline.cpp'
+$GeneratedRuntimeHostHeaderPath = Join-Path `
+    $PluginRoot `
+    'Source/AvidScriptRuntime/Public/ScriptTypes/AvidScriptGeneratedTypeRuntimeHost.h'
+$GeneratedRuntimeHostSourcePath = Join-Path `
+    $PluginRoot `
+    'Source/AvidScriptRuntime/Private/ScriptTypes/AvidScriptGeneratedTypeRuntimeHost.cpp'
+$GeneratedModulePath = Join-Path `
+    $PluginRoot `
+    'Source/AvidScriptGenerated/Private/AvidScriptGeneratedModule.cpp'
 $Root = Join-Path `
     ([System.IO.Path]::GetTempPath()) `
     ("AvidScriptReleaseContract_$PID`_$([Guid]::NewGuid().ToString('N'))")
@@ -78,7 +87,10 @@ try {
             $CommandletPath,
             $BuildConfigPath,
             $BuildInvokerPath,
-            $BuildPipelinePath)) {
+            $BuildPipelinePath,
+            $GeneratedRuntimeHostHeaderPath,
+            $GeneratedRuntimeHostSourcePath,
+            $GeneratedModulePath)) {
         if (-not (Test-Path -LiteralPath $RequiredFile -PathType Leaf)) {
             throw "Required release contract file is missing: $RequiredFile"
         }
@@ -97,6 +109,9 @@ try {
     $BuildConfigSource = Get-Content -Raw -LiteralPath $BuildConfigPath
     $BuildInvokerSource = Get-Content -Raw -LiteralPath $BuildInvokerPath
     $BuildPipelineSource = Get-Content -Raw -LiteralPath $BuildPipelinePath
+    $GeneratedRuntimeHostHeader = Get-Content -Raw -LiteralPath $GeneratedRuntimeHostHeaderPath
+    $GeneratedRuntimeHostSource = Get-Content -Raw -LiteralPath $GeneratedRuntimeHostSourcePath
+    $GeneratedModuleSource = Get-Content -Raw -LiteralPath $GeneratedModulePath
 
     Invoke-ReleaseContractTest -Name 'command schema' -Body {
         $ExpectedParameters = @(
@@ -157,10 +172,21 @@ try {
                 '-ModuleId=contract_module',
                 '-ArtifactStem=contract_artifact',
                 '-GeneratedTypeManifestPath=C:\Project\Saved\Generated\types.json',
+                '-AvidScriptSuppressGeneratedTypeExecution',
                 '-unattended',
                 '-nullrhi')) {
             if ($Arguments -cnotcontains $ExpectedArgument) {
                 throw "Commandlet argument is missing: $ExpectedArgument"
+            }
+        }
+        foreach ($RequiredIsolationToken in @(
+                'static bool IsCommandletExecutionSuppressed();',
+                'IsRunningCommandlet()',
+                'TEXT("AvidScriptSuppressGeneratedTypeExecution")')) {
+            if (-not ($GeneratedRuntimeHostHeader.Contains($RequiredIsolationToken) -or
+                    $GeneratedRuntimeHostSource.Contains($RequiredIsolationToken) -or
+                    $GeneratedModuleSource.Contains($RequiredIsolationToken))) {
+                throw "Generated Type commandlet isolation token is missing: $RequiredIsolationToken"
             }
         }
         foreach ($RequiredBuildToken in @(

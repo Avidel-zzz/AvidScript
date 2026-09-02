@@ -28,6 +28,7 @@ class AVIDSCRIPTRUNTIME_API FAvidScriptGeneratedTypeRuntimeHost final
 {
 public:
 	static FAvidScriptGeneratedTypeRuntimeHost& Get();
+	static bool IsCommandletExecutionSuppressed();
 	~FAvidScriptGeneratedTypeRuntimeHost();
 
 	bool Startup();
