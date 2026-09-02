@@ -263,6 +263,31 @@ try {
         $null = $First
     }
 
+    Invoke-ReleaseContract 'catalog is a single configuration view' {
+        $Fixture = New-ReleaseFixture -Name 'CatalogProfileDevelopment' -ModuleId 'development.module'
+        $Development = Publish-AvidScriptModuleReleasePackage `
+            -RuntimeManifestPath $Fixture.RuntimeManifestPath `
+            -ProjectRoot $Fixture.ProjectRoot `
+            -Configuration Development
+        $ShippingFixture = New-ReleaseFixture -Name 'CatalogProfileShipping' -ModuleId 'shipping.module'
+        $ShippingArtifactRoot = Join-Path $Fixture.ProjectRoot 'Saved/ShippingInput'
+        Copy-Item `
+            -LiteralPath $ShippingFixture.ArtifactRoot `
+            -Destination $ShippingArtifactRoot `
+            -Recurse
+        $Shipping = Publish-AvidScriptModuleReleasePackage `
+            -RuntimeManifestPath (Join-Path $ShippingArtifactRoot 'fixture.avidscript.json') `
+            -ProjectRoot $Fixture.ProjectRoot `
+            -Configuration Shipping
+        $Catalog = Get-Content -Raw -LiteralPath $Shipping.CatalogPath | ConvertFrom-Json -Depth 32
+        if (@($Catalog.modules).Count -ne 1 -or
+            [string]$Catalog.modules[0].module_id -cne 'shipping.module' -or
+            [string]$Catalog.modules[0].configuration -cne 'shipping') {
+            throw 'Catalog retained entries from an incompatible target configuration.'
+        }
+        $null = $Development
+    }
+
     Invoke-ReleaseContract 'Shipping strips diagnostics and build-only inputs' {
         $Fixture = New-ReleaseFixture -Name 'Shipping'
         $Published = Publish-AvidScriptModuleReleasePackage `

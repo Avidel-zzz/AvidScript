@@ -1084,7 +1084,10 @@ function Publish-AvidScriptModuleReleasePackage {
             platform = 'win64'
             configuration = $ConfigurationValue
         }
-        $Modules = @($Catalog.modules | Where-Object { [string]$_.module_id -cne $ModuleId })
+        $Modules = @($Catalog.modules | Where-Object {
+                [string]$_.module_id -cne $ModuleId -and
+                [string]$_.configuration -ceq $ConfigurationValue
+            })
         $Modules += $NewEntry
         $SortedModules = Sort-AvidScriptModuleReleaseCatalogModules $Modules
         $NewCatalog = [pscustomobject][ordered]@{
