@@ -41,6 +41,10 @@ void UAvidScriptWorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	RuntimeStats = FAvidScriptWorldRuntimeStats();
 	bRuntimeReleaseDeferred = false;
 	bRuntimeReleaseInProgress = false;
+	if (StartPackagedOracle(InWorld))
+	{
+		return;
+	}
 	RuntimeSession = MakeUnique<FAvidScriptRuntimeSession>();
 
 	FAvidScriptWasmReloadResult ReloadResult;
@@ -74,6 +78,8 @@ void UAvidScriptWorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 
 void UAvidScriptWorldSubsystem::OnWorldEndPlay(UWorld& InWorld)
 {
+	StopPackagedOracle();
+
 	FAvidScriptWasmSmokeResult UnloadResult;
 	const bool bHadRuntime = RuntimeSession.IsValid() && RuntimeSession->GetSnapshot().bHasActiveRuntime;
 	ReleaseRuntime(&UnloadResult);
@@ -98,6 +104,11 @@ void UAvidScriptWorldSubsystem::Tick(float DeltaTime)
 	{
 		FlushDeferredRuntimeRelease();
 	};
+
+	if (bPackagedOracleActive)
+	{
+		TickPackagedOracle(DeltaTime);
+	}
 
 	if (RuntimeSession.IsValid() &&
 		RuntimeSession->GetSnapshot().LifecycleState == EAvidScriptLifecycleState::Running)
@@ -135,8 +146,9 @@ void UAvidScriptWorldSubsystem::Tick(float DeltaTime)
 
 bool UAvidScriptWorldSubsystem::IsTickable() const
 {
-	return RuntimeSession.IsValid() &&
-		RuntimeSession->GetSnapshot().LifecycleState == EAvidScriptLifecycleState::Running;
+	return bPackagedOracleActive ||
+		(RuntimeSession.IsValid() &&
+			RuntimeSession->GetSnapshot().LifecycleState == EAvidScriptLifecycleState::Running);
 }
 
 TStatId UAvidScriptWorldSubsystem::GetStatId() const

@@ -8,6 +8,7 @@ public static class ActorLifecycleScript
 {
     private const int DeferredBeginPlay = 9;
     private const int DefaultMeshLoaded = 10;
+    private const int PackagedFaultProbeEvent = -62001;
     private static float ElapsedSeconds;
     private static AActor ActiveOverlapActor;
     private static bool HasActiveOverlap;
@@ -110,6 +111,14 @@ public static class ActorLifecycleScript
     [UnmanagedCallersOnly(EntryPoint = "avid_on_event")]
     public static void OnEvent(int eventId, float value)
     {
+        if (eventId == PackagedFaultProbeEvent)
+        {
+            int divisor = eventId - PackagedFaultProbeEvent;
+            int unreachableValue = 1 / divisor;
+            UE.Self.AddActorWorldOffset(new FVector(unreachableValue, 0.0f, 0.0f));
+            return;
+        }
+
         UE.Self.AddActorWorldOffset(new FVector(0.0f, value, 0.0f));
     }
 

@@ -6,6 +6,9 @@
 
 #include "AvidScriptWorldSubsystem.generated.h"
 
+class AActor;
+class UAvidScriptComponent;
+
 struct FAvidScriptWorldRuntimeStats
 {
 	bool bRuntimeLoaded = false;
@@ -34,6 +37,10 @@ public:
 	virtual void Deinitialize() override;
 
 private:
+	bool StartPackagedOracle(UWorld& InWorld);
+	void TickPackagedOracle(float DeltaTime);
+	void StopPackagedOracle();
+	void CompletePackagedOracle(bool bSucceeded, const FString& FailureCategory);
 	void RecordFailure(const FAvidScriptWasmSmokeResult& Result);
 	void ReleaseRuntime(FAvidScriptWasmSmokeResult* OutUnloadResult = nullptr);
 	void FlushDeferredRuntimeRelease();
@@ -42,4 +49,16 @@ private:
 	FAvidScriptWorldRuntimeStats RuntimeStats;
 	bool bRuntimeReleaseDeferred = false;
 	bool bRuntimeReleaseInProgress = false;
+	bool bPackagedOracleActive = false;
+	bool bPackagedOracleCompleted = false;
+	bool bPackagedOracleFaultInjected = false;
+	bool bPackagedOracleFaultRejected = false;
+	float PackagedOracleElapsedSeconds = 0.0f;
+	int32 PackagedOracleHealthyTicksBeforeFault = 0;
+	FString PackagedOracleModuleId;
+	FString PackagedOracleReportPath;
+	TWeakObjectPtr<AActor> PackagedOracleHealthyActor;
+	TWeakObjectPtr<AActor> PackagedOracleFaultActor;
+	TWeakObjectPtr<UAvidScriptComponent> PackagedOracleHealthyComponent;
+	TWeakObjectPtr<UAvidScriptComponent> PackagedOracleFaultComponent;
 };
