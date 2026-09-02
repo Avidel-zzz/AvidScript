@@ -633,7 +633,8 @@ function Get-AvidScriptBuildCookRunGameReceipt {
         [Parameter(Mandatory = $true)][string]$TargetName,
         [ValidateSet('Development', 'Shipping')]
         [Parameter(Mandatory = $true)][string]$Configuration,
-        [Parameter(Mandatory = $true)][datetime]$NotBeforeUtc
+        [Parameter(Mandatory = $true)][datetime]$NotBeforeUtc,
+        [string]$UatLogPath = ''
     )
 
     $ReceiptRoot = Join-Path $ProjectRoot 'Binaries/Win64'
@@ -687,12 +688,33 @@ function Get-AvidScriptBuildCookRunGameReceipt {
             -Message "Multiple exact $TargetName Win64 $Configuration Game receipts were produced."
     }
     $Selected = $Matches[0]
+    $Freshness = 'fresh'
     if ($Selected.LastWriteTimeUtc -lt $NotBeforeUtc.ToUniversalTime()) {
-        Throw-AvidScriptBuildCookRunError `
-            -Category 'receipt_stale' `
-            -Message "Selected receipt predates this UAT run: $($Selected.Path)"
+        $ExpectedBinaryPath = [System.IO.Path]::GetFullPath(
+            (Join-Path $ProjectRoot "Binaries/Win64/$TargetName.exe"))
+        $ExpectedEvidence = "Output binary: $ExpectedBinaryPath"
+        $UatLogText = if (-not [string]::IsNullOrWhiteSpace($UatLogPath) -and
+            (Test-Path -LiteralPath $UatLogPath -PathType Leaf)) {
+            [System.IO.File]::ReadAllText($UatLogPath)
+        }
+        else {
+            ''
+        }
+        if ($UatLogText.IndexOf(
+                $ExpectedEvidence,
+                [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            Throw-AvidScriptBuildCookRunError `
+                -Category 'receipt_stale' `
+                -Message "Selected receipt predates this UAT run without exact Game output evidence: $($Selected.Path)"
+        }
+        $Freshness = 'uat_validated_existing'
     }
-    return $Selected
+    return [pscustomobject][ordered]@{
+        Path = $Selected.Path
+        LastWriteTimeUtc = $Selected.LastWriteTimeUtc
+        Receipt = $Selected.Receipt
+        Freshness = $Freshness
+    }
 }
 
 function Invoke-AvidScriptBuildCookRunReceiptStep {
@@ -909,7 +931,8 @@ function Invoke-AvidScriptBuildCookRun {
         -ProjectRoot $ProjectContext.ProjectRoot `
         -TargetName $ProjectContext.TargetName `
         -Configuration $Configuration `
-        -NotBeforeUtc $UatResult.StartedUtc
+        -NotBeforeUtc $UatResult.StartedUtc `
+        -UatLogPath $UatResult.LogPath
 
     $script:AvidScriptBuildCookRunStep = 'receipt_validation'
     $ReceiptResult = Invoke-AvidScriptBuildCookRunReceiptStep `
@@ -935,6 +958,7 @@ function Invoke-AvidScriptBuildCookRun {
         archive_root = $ResolvedArchiveRoot
         uat_log = $UatResult.LogPath
         receipt_path = $SelectedReceipt.Path
+        receipt_freshness = $SelectedReceipt.Freshness
         release = $ReleaseResult
         receipt_validation = $ReceiptResult
         packaged_oracle = $OracleResult

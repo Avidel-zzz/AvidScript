@@ -344,6 +344,9 @@ try {
         Assert-BuildCookRunContract `
             ($Selected.Path -ceq $ExpectedPath) `
             'Receipt selector did not choose the exact Game target.'
+        Assert-BuildCookRunContract `
+            ($Selected.Freshness -ceq 'fresh') `
+            'A fresh receipt received an unexpected freshness classification.'
     }
 
     Invoke-BuildCookRunContractCase 'stale receipt rejection' {
@@ -367,6 +370,25 @@ try {
             $Rejected = [string]$_.Exception.Data['category'] -ceq 'receipt_stale'
         }
         Assert-BuildCookRunContract $Rejected 'A stale exact receipt was accepted.'
+
+        $UatLogPath = Join-Path $ProjectRoot 'Saved/BuildCookRun.log'
+        [void][System.IO.Directory]::CreateDirectory(
+            [System.IO.Path]::GetDirectoryName($UatLogPath))
+        $ExpectedBinaryPath = [System.IO.Path]::GetFullPath(
+            (Join-Path $ProjectRoot 'Binaries/Win64/Game.exe'))
+        [System.IO.File]::WriteAllText(
+            $UatLogPath,
+            "Output binary: $ExpectedBinaryPath",
+            $Utf8)
+        $ValidatedExisting = Get-AvidScriptBuildCookRunGameReceipt `
+            -ProjectRoot $ProjectRoot `
+            -TargetName 'Game' `
+            -Configuration Shipping `
+            -NotBeforeUtc $Cutoff `
+            -UatLogPath $UatLogPath
+        Assert-BuildCookRunContract `
+            ($ValidatedExisting.Freshness -ceq 'uat_validated_existing') `
+            'An exact UAT-validated existing receipt was not classified explicitly.'
     }
 
     Invoke-BuildCookRunContractCase 'ambiguous receipt rejection' {
