@@ -312,7 +312,9 @@ try {
     }
 
     Invoke-ReleaseContract 'Development debug map preserves compact provenance' {
-        $Fixture = New-ReleaseFixture -Name 'DevelopmentDebugProvenance'
+        $Fixture = New-ReleaseFixture `
+            -Name 'DevelopmentDebugProvenance' `
+            -Policy 'require_precompiled'
         $Published = Publish-AvidScriptModuleReleasePackage `
             -RuntimeManifestPath $Fixture.RuntimeManifestPath `
             -ProjectRoot $Fixture.ProjectRoot `
@@ -331,7 +333,8 @@ try {
             [string]$Runtime.guest_ir.module_id -cne 'fixture.module' -or
             [string]$Runtime.guest_ir.sha256 -cne ('b' * 64) -or
             [string]$Runtime.execution.attestation_id -cne ('1' * 32) -or
-            [string]$Runtime.execution.fallback -cne 'wasmtime_jit') {
+            [string]$Runtime.execution.fallback -cne 'wasmtime_jit' -or
+            [string]$Runtime.execution.policy -cne 'prefer_precompiled') {
             throw 'Development package lost debug provenance or retained build-only paths.'
         }
     }

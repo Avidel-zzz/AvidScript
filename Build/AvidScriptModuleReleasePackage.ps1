@@ -772,7 +772,7 @@ function Publish-AvidScriptModuleReleasePackage {
         'require_precompiled'
     }
     else {
-        [string]$RuntimeManifest.execution.policy
+        'prefer_precompiled'
     }
 
     if ($Policy -ceq 'prefer_precompiled' -and
