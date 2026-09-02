@@ -226,6 +226,7 @@ internal static class UhtShellRenderer
                     .Where(parameter => parameter.Default is not null)
                     .Select(parameter => parameter.Default!))
                 {
+                    output.AppendLine("#if WITH_METADATA");
                     output.Append("    if (").Append(functionVariable).AppendLine(")");
                     output.AppendLine("    {");
                     output.Append("        TestEqual(TEXT(\"").Append(label).Append('.')
@@ -235,6 +236,7 @@ internal static class UhtShellRenderer
                         .Append(Escape(parameterDefault.Name)).Append("\")), FString(TEXT(\"")
                         .Append(Escape(parameterDefault.CanonicalValue)).AppendLine("\")));");
                     output.AppendLine("    }");
+                    output.AppendLine("#endif");
                 }
             }
             output.AppendLine();

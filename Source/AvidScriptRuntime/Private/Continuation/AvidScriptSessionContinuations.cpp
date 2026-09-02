@@ -316,12 +316,14 @@ FAvidScriptSessionContinuations::FAvidScriptSessionContinuations(
 FAvidScriptSessionContinuations::~FAvidScriptSessionContinuations()
 {
 	check(IsInGameThread());
+#if WITH_EDITOR
 	if (ObjectsReinstancedHandle.IsValid())
 	{
 		FCoreUObjectDelegates::OnObjectsReinstanced.Remove(
 			ObjectsReinstancedHandle);
 		ObjectsReinstancedHandle.Reset();
 	}
+#endif
 	Teardown();
 }
 
@@ -1441,6 +1443,7 @@ int64 FAvidScriptSessionContinuations::BeginAsyncAction(
 	check(UnpackToken(Token, SlotIndex, Generation));
 	check(Slots.IsValidIndex(static_cast<int32>(SlotIndex)));
 	FEntry& Stored = Slots[SlotIndex].Entry.GetValue();
+#if WITH_EDITOR
 	if (!ObjectsReinstancedHandle.IsValid())
 	{
 		ObjectsReinstancedHandle =
@@ -1448,6 +1451,7 @@ int64 FAvidScriptSessionContinuations::BeginAsyncAction(
 				this,
 				&FAvidScriptSessionContinuations::HandleObjectsReinstanced);
 	}
+#endif
 	++PendingAsyncActionCount;
 	for (const FAvidScriptBindingAsyncActionOutcomeContract& Outcome :
 		Contract.Outcomes)
@@ -2305,6 +2309,7 @@ void FAvidScriptSessionContinuations::ReleaseAsyncActionProducer(
 	{
 		check(PendingAsyncActionCount > 0);
 		--PendingAsyncActionCount;
+#if WITH_EDITOR
 		if (PendingAsyncActionCount == 0
 			&& ObjectsReinstancedHandle.IsValid())
 		{
@@ -2312,6 +2317,7 @@ void FAvidScriptSessionContinuations::ReleaseAsyncActionProducer(
 				ObjectsReinstancedHandle);
 			ObjectsReinstancedHandle.Reset();
 		}
+#endif
 	}
 }
 

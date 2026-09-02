@@ -410,6 +410,102 @@ GetAvidScriptFastPathValueKind(
 	}
 }
 
+bool HasAvidScriptRuntimeFunctionMetadata(
+	const UFunction* Function,
+	const TCHAR* Key)
+{
+#if WITH_METADATA
+	return Function != nullptr && Function->HasMetaData(Key);
+#else
+	static_cast<void>(Function);
+	static_cast<void>(Key);
+	return false;
+#endif
+}
+
+FString GetAvidScriptRuntimePropertyMetadata(
+	const FProperty* Property,
+	const TCHAR* Key,
+	FString PackagedFallback)
+{
+#if WITH_METADATA
+	return Property == nullptr ? FString() : Property->GetMetaData(Key);
+#else
+	static_cast<void>(Property);
+	static_cast<void>(Key);
+	return PackagedFallback;
+#endif
+}
+
+bool IsAvidScriptRuntimeLatentFunction(const UFunction* Function)
+{
+	if (Function == nullptr)
+	{
+		return false;
+	}
+	if (HasAvidScriptRuntimeFunctionMetadata(Function, TEXT("Latent")))
+	{
+		return true;
+	}
+	for (TFieldIterator<FProperty> PropertyIt(Function); PropertyIt; ++PropertyIt)
+	{
+		const FStructProperty* const StructProperty =
+			CastField<FStructProperty>(*PropertyIt);
+		if (StructProperty != nullptr
+			&& StructProperty->HasAnyPropertyFlags(CPF_Parm)
+			&& StructProperty->Struct == FLatentActionInfo::StaticStruct())
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool DoesAvidScriptRuntimeLatentMetadataMatch(
+	const UFunction& Function,
+	const FAvidScriptBindingFunctionModel& Binding)
+{
+#if WITH_METADATA
+	return Function.GetMetaData(TEXT("LatentInfo"))
+			== Binding.LatentInfoParameter
+		&& Function.GetMetaData(TEXT("WorldContext"))
+			== Binding.WorldContextParameter;
+#else
+	static_cast<void>(Function);
+	static_cast<void>(Binding);
+	return true;
+#endif
+}
+
+bool IsAvidScriptRuntimeBlueprintClass(const UClass* OwnerClass)
+{
+	if (OwnerClass == nullptr)
+	{
+		return false;
+	}
+#if WITH_EDITORONLY_DATA
+	return OwnerClass->ClassGeneratedBy != nullptr;
+#else
+	return OwnerClass->HasAnyClassFlags(CLASS_CompiledFromBlueprint);
+#endif
+}
+
+bool DoesAvidScriptRuntimeBlueprintAssetMatch(
+	const UClass* OwnerClass,
+	const FString& ReflectedOwnerAsset)
+{
+	if (!IsAvidScriptRuntimeBlueprintClass(OwnerClass)
+		|| ReflectedOwnerAsset.IsEmpty())
+	{
+		return false;
+	}
+#if WITH_EDITORONLY_DATA
+	return OwnerClass->ClassGeneratedBy->GetPathName() == ReflectedOwnerAsset;
+#else
+	return OwnerClass->GetPathName() == ReflectedOwnerAsset + TEXT("_C");
+#endif
+}
+
 bool IsAvidScriptRuntimeFunctionAllowed(const UFunction* Function)
 {
 	return Function != nullptr
@@ -420,8 +516,10 @@ bool IsAvidScriptRuntimeFunctionAllowed(const UFunction* Function)
 			| FUNC_MulticastDelegate
 			| FUNC_NetRequest
 			| FUNC_NetResponse)
-		&& !Function->HasMetaData(TEXT("Latent"))
-		&& !Function->HasMetaData(TEXT("CustomThunk"));
+		&& !IsAvidScriptRuntimeLatentFunction(Function)
+		&& !HasAvidScriptRuntimeFunctionMetadata(
+			Function,
+			TEXT("CustomThunk"));
 }
 
 struct FAvidScriptRuntimeLatentContract
@@ -445,14 +543,13 @@ bool ResolveAvidScriptRuntimeLatentContract(
 			| FUNC_MulticastDelegate
 			| FUNC_NetRequest
 			| FUNC_NetResponse)
-		|| !Function->HasMetaData(TEXT("Latent"))
-		|| Function->HasMetaData(TEXT("CustomThunk"))
+		|| !IsAvidScriptRuntimeLatentFunction(Function)
+		|| HasAvidScriptRuntimeFunctionMetadata(
+			Function,
+			TEXT("CustomThunk"))
 		|| Function->GetReturnProperty() != nullptr
 		|| Binding.LatentInfoParameter.IsEmpty()
-		|| Function->GetMetaData(TEXT("LatentInfo"))
-			!= Binding.LatentInfoParameter
-		|| Function->GetMetaData(TEXT("WorldContext"))
-			!= Binding.WorldContextParameter)
+		|| !DoesAvidScriptRuntimeLatentMetadataMatch(*Function, Binding))
 	{
 		return false;
 	}
@@ -668,8 +765,10 @@ bool ResolveAvidScriptRuntimeAsyncActionContract(
 			| FUNC_Net
 			| FUNC_NetRequest
 			| FUNC_NetResponse)
-		|| Function->HasMetaData(TEXT("Latent"))
-		|| Function->HasMetaData(TEXT("CustomThunk"))
+		|| IsAvidScriptRuntimeLatentFunction(Function)
+		|| HasAvidScriptRuntimeFunctionMetadata(
+			Function,
+			TEXT("CustomThunk"))
 		|| ActionClass == nullptr
 		|| !ActionClass->IsChildOf(UBlueprintAsyncActionBase::StaticClass())
 		|| ActionClass->GetPathName() != Binding.AsyncAction.ActionClass
@@ -3851,7 +3950,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		{
 			const bool bReflectedBlueprintFunction = SignatureFunction != nullptr
 				&& SignatureFunction->GetOuterUClass() == OwnerClass
-				&& OwnerClass->ClassGeneratedBy != nullptr
+				&& IsAvidScriptRuntimeBlueprintClass(OwnerClass)
 				&& !SignatureFunction->HasAnyFunctionFlags(FUNC_Native)
 				&& !SignatureFunction->Script.IsEmpty();
 			const bool bNativeProvenance =
@@ -3861,8 +3960,9 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 				&& !bReflectedBlueprintFunction;
 			const bool bBlueprintProvenance = bReflectedBlueprintFunction
 				&& Event.ReflectedOwnerKind == TEXT("blueprint")
-				&& OwnerClass->ClassGeneratedBy->GetPathName()
-					== Event.ReflectedOwnerAsset
+				&& DoesAvidScriptRuntimeBlueprintAssetMatch(
+					OwnerClass,
+					Event.ReflectedOwnerAsset)
 				&& Event.ReflectedFunctionFingerprint
 					== FAvidScriptBindingDescriptorIdentity::
 					MakeReflectedFunctionFingerprint(
@@ -3885,7 +3985,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 				|| !SignatureFunction->Script.IsEmpty())
 			&& !SignatureFunction->HasAnyFunctionFlags(
 				FUNC_Static | FUNC_Delegate | FUNC_MulticastDelegate)
-			&& !SignatureFunction->HasMetaData(TEXT("Latent"))
+			&& !IsAvidScriptRuntimeLatentFunction(SignatureFunction)
 			&& IsAvidScriptBindingNetworkOwnerClass(OwnerClass)
 			&& bNetworkContractValid
 			&& Network == Event.Network
@@ -3898,7 +3998,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 				|| !SignatureFunction->Script.IsEmpty())
 			&& !SignatureFunction->HasAnyFunctionFlags(
 				FUNC_Static | FUNC_Delegate | FUNC_MulticastDelegate)
-			&& !SignatureFunction->HasMetaData(TEXT("Latent"))
+			&& !IsAvidScriptRuntimeLatentFunction(SignatureFunction)
 			&& IsAvidScriptBindingNetworkOwnerClass(OwnerClass)
 			&& bNetworkContractValid
 			&& !Network.IsNetworked()
@@ -3910,11 +4010,11 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			Event.DelegateKind == TEXT("blueprint_event")
 			&& SignatureFunction != nullptr
 			&& SignatureFunction->GetOuterUClass() == OwnerClass
-			&& OwnerClass->ClassGeneratedBy != nullptr
+			&& IsAvidScriptRuntimeBlueprintClass(OwnerClass)
 			&& !SignatureFunction->HasAnyFunctionFlags(
 				FUNC_Native | FUNC_Static | FUNC_Delegate | FUNC_MulticastDelegate)
 			&& !SignatureFunction->Script.IsEmpty()
-			&& !SignatureFunction->HasMetaData(TEXT("Latent"))
+			&& !IsAvidScriptRuntimeLatentFunction(SignatureFunction)
 			&& SignatureFunction->GetReturnProperty() == nullptr
 			&& IsAvidScriptBindingNetworkOwnerClass(OwnerClass)
 			&& bNetworkContractValid
@@ -4222,7 +4322,12 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			}
 
 			const FString BlueprintSetterName =
-				Property->GetMetaData(TEXT("BlueprintSetter"));
+				GetAvidScriptRuntimePropertyMetadata(
+					Property,
+					TEXT("BlueprintSetter"),
+					Binding.WritePolicy == TEXT("blueprint_setter")
+						? Binding.UeFunction
+						: FString());
 			UFunction* BlueprintSetter = nullptr;
 			TArray<FProperty*> SetterParameters;
 			if (Binding.UeFunction != BlueprintSetterName)
@@ -4553,9 +4658,9 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 				&& Binding.ReflectedFunctionFingerprint.IsEmpty();
 			const bool bBlueprintProvenance =
 				Binding.ReflectedOwnerKind == TEXT("blueprint")
-				&& OwnerClass->ClassGeneratedBy != nullptr
-				&& OwnerClass->ClassGeneratedBy->GetPathName()
-					== Binding.ReflectedOwnerAsset
+				&& DoesAvidScriptRuntimeBlueprintAssetMatch(
+					OwnerClass,
+					Binding.ReflectedOwnerAsset)
 				&& Function->GetOwnerClass() == OwnerClass
 				&& !Function->HasAnyFunctionFlags(FUNC_Native)
 				&& !Function->Script.IsEmpty()
@@ -4591,7 +4696,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			&& (!IsAvidScriptBindingNetworkOwnerClass(OwnerClass)
 				|| Binding.DispatchMode != TEXT("cached_process_event")
 				|| Function->HasAnyFunctionFlags(FUNC_Static | FUNC_Const)
-				|| Function->HasMetaData(TEXT("Latent"))
+				|| IsAvidScriptRuntimeLatentFunction(Function)
 				|| Function->GetReturnProperty() != nullptr))
 		{
 			SetAvidScriptBindingLoadFailure(

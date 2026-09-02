@@ -398,8 +398,12 @@ FAvidScriptBindingPackageModel MakePreparedDelegatePackage()
 	for (int32 Index = 0; Index < ModeEnum->NumEnums(); ++Index)
 	{
 		const FString Name = ModeEnum->GetNameStringByIndex(Index);
+		bool bHidden = false;
+#if WITH_METADATA
+		bHidden = ModeEnum->HasMetaData(TEXT("Hidden"), Index);
+#endif
 		if (!Name.IsEmpty()
-			&& !ModeEnum->HasMetaData(TEXT("Hidden"), Index)
+			&& !bHidden
 			&& !Name.EndsWith(TEXT("_MAX"), ESearchCase::CaseSensitive))
 		{
 			EnumType.EnumValues.Add({ Name, ModeEnum->GetValueByIndex(Index) });
