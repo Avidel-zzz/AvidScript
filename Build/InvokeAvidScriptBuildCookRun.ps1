@@ -690,8 +690,45 @@ function Get-AvidScriptBuildCookRunGameReceipt {
     $Selected = $Matches[0]
     $Freshness = 'fresh'
     if ($Selected.LastWriteTimeUtc -lt $NotBeforeUtc.ToUniversalTime()) {
+        $BuildProducts = @(Get-AvidScriptBuildCookRunRequiredProperty `
+                $Selected.Receipt `
+                'BuildProducts' `
+                "receipt '$([System.IO.Path]::GetFileName($Selected.Path))'")
+        $ExecutableProducts = @($BuildProducts | Where-Object {
+                [string](Get-AvidScriptBuildCookRunRequiredProperty `
+                        $_ `
+                        'Type' `
+                        'receipt BuildProduct') -ceq 'Executable'
+            })
+        if ($ExecutableProducts.Count -ne 1) {
+            Throw-AvidScriptBuildCookRunError `
+                -Category 'receipt_executable_invalid' `
+                -Message "Selected receipt must contain exactly one executable BuildProduct: $($Selected.Path)"
+        }
+        $ExecutableReceiptPath = [string](Get-AvidScriptBuildCookRunRequiredProperty `
+                $ExecutableProducts[0] `
+                'Path' `
+                'receipt executable BuildProduct')
+        $ProjectPrefix = '$(ProjectDir)/'
+        if (-not $ExecutableReceiptPath.StartsWith(
+                $ProjectPrefix,
+                [System.StringComparison]::Ordinal)) {
+            Throw-AvidScriptBuildCookRunError `
+                -Category 'receipt_executable_invalid' `
+                -Message "Receipt executable must use the ProjectDir macro: $ExecutableReceiptPath"
+        }
+        $ExecutableRelativePath = $ExecutableReceiptPath.Substring($ProjectPrefix.Length)
         $ExpectedBinaryPath = [System.IO.Path]::GetFullPath(
-            (Join-Path $ProjectRoot "Binaries/Win64/$TargetName.exe"))
+            (Join-Path $ProjectRoot $ExecutableRelativePath))
+        if (-not (Test-AvidScriptBuildCookRunPathUnderRoot `
+                -Path $ExpectedBinaryPath `
+                -Root $ProjectRoot) -or
+            [System.IO.Path]::GetExtension($ExpectedBinaryPath) -cne '.exe' -or
+            -not (Test-Path -LiteralPath $ExpectedBinaryPath -PathType Leaf)) {
+            Throw-AvidScriptBuildCookRunError `
+                -Category 'receipt_executable_invalid' `
+                -Message "Receipt executable is missing or escapes ProjectRoot: $ExpectedBinaryPath"
+        }
         $ExpectedEvidence = "Output binary: $ExpectedBinaryPath"
         $UatLogText = if (-not [string]::IsNullOrWhiteSpace($UatLogPath) -and
             (Test-Path -LiteralPath $UatLogPath -PathType Leaf)) {

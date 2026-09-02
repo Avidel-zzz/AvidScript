@@ -67,11 +67,25 @@ function Write-BuildCookRunReceiptFixture {
     $ReceiptRoot = Join-Path $ProjectRoot 'Binaries/Win64'
     [void][System.IO.Directory]::CreateDirectory($ReceiptRoot)
     $ReceiptPath = Join-Path $ReceiptRoot $FileName
+    $ExecutableName = if ($Configuration -ceq 'Shipping') {
+        "$TargetName-Win64-Shipping.exe"
+    }
+    else {
+        "$TargetName.exe"
+    }
+    [System.IO.File]::WriteAllBytes(
+        (Join-Path $ReceiptRoot $ExecutableName),
+        [byte[]](0x4d, 0x5a))
     $Receipt = [pscustomobject][ordered]@{
         TargetName = $TargetName
         Platform = 'Win64'
         Configuration = $Configuration
         TargetType = 'Game'
+        BuildProducts = @(
+            [pscustomobject][ordered]@{
+                Path = "`$(ProjectDir)/Binaries/Win64/$ExecutableName"
+                Type = 'Executable'
+            })
         RuntimeDependencies = @()
     }
     [System.IO.File]::WriteAllText(
@@ -375,7 +389,7 @@ try {
         [void][System.IO.Directory]::CreateDirectory(
             [System.IO.Path]::GetDirectoryName($UatLogPath))
         $ExpectedBinaryPath = [System.IO.Path]::GetFullPath(
-            (Join-Path $ProjectRoot 'Binaries/Win64/Game.exe'))
+            (Join-Path $ProjectRoot 'Binaries/Win64/Game-Win64-Shipping.exe'))
         [System.IO.File]::WriteAllText(
             $UatLogPath,
             "Output binary: $ExpectedBinaryPath",
