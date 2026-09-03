@@ -182,6 +182,43 @@ try {
             } | Out-Null
             Write-AvidScriptPhaseStatus (Read-AvidScriptPhaseState $RepositoryRoot $Phase) $RepositoryRoot
         }
+        'adopt-protected-path' {
+            Assert-AvidScriptCliText $Scope 'Scope'
+            Assert-AvidScriptCliText $Reason 'Reason'
+            Assert-AvidScriptCliText $Evidence 'Evidence'
+            if ($Evidence -cnotmatch '^[0-9a-f]{7,40}$') {
+                Throw-AvidScriptPhaseError 'ASPW1120' 'adoption evidence must be a committed Git identity'
+            }
+            $AdoptPath = ConvertTo-AvidScriptRepositoryPath $Scope
+            Resolve-AvidScriptRepositoryPath $RepositoryRoot $AdoptPath | Out-Null
+            Update-AvidScriptPhaseState $RepositoryRoot $Phase {
+                param($State)
+                if ($State.declared_stage -cne 'implementing' -or $State.review.completed) {
+                    Throw-AvidScriptPhaseError 'ASPW1121' 'protected path adoption is only valid during implementation'
+                }
+                if (@($State.protected_dirty | Where-Object { $_.path -ceq $AdoptPath }).Count -ne 1) {
+                    Throw-AvidScriptPhaseError 'ASPW1122' 'adoption requires one exact protected path'
+                }
+                $Dirty = Invoke-AvidScriptGit $RepositoryRoot @('--literal-pathspecs', 'status', '--porcelain=v1', '--', $AdoptPath)
+                if (-not [string]::IsNullOrWhiteSpace($Dirty.Text)) {
+                    Throw-AvidScriptPhaseError 'ASPW1123' 'adoption cannot hide uncommitted or staged changes'
+                }
+                $Ancestor = Invoke-AvidScriptGit $RepositoryRoot @('merge-base', '--is-ancestor', $Evidence, 'HEAD') -AllowFailure
+                if ($Ancestor.ExitCode -ne 0) {
+                    Throw-AvidScriptPhaseError 'ASPW1124' 'adoption evidence must be an ancestor of HEAD'
+                }
+                $History = Invoke-AvidScriptGit $RepositoryRoot @(
+                    '--literal-pathspecs', 'log', '--format=%H', "$($State.phase.start_commit)..$Evidence", '--', $AdoptPath)
+                if ([string]::IsNullOrWhiteSpace($History.Text)) {
+                    Throw-AvidScriptPhaseError 'ASPW1125' 'adoption evidence does not contain a phase-owned path commit'
+                }
+                $State.protected_dirty = @($State.protected_dirty | Where-Object { $_.path -cne $AdoptPath })
+            } | Out-Null
+            if (-not $Json) {
+                Write-Output "Adopted protected path: $AdoptPath; evidence=$Evidence; reason=$Reason"
+            }
+            Write-AvidScriptPhaseStatus (Read-AvidScriptPhaseState $RepositoryRoot $Phase) $RepositoryRoot
+        }
         'batch-complete' {
             Assert-AvidScriptCliText $BatchId[0] 'BatchId'
             Assert-AvidScriptCliText $Evidence 'Evidence'

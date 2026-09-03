@@ -535,6 +535,30 @@ Invoke-ContractCase 'Transitions.ProtectedDirtyBaseline' {
         'freeze', '-Phase', '91', '-ReviewEvidence', 'reviewed') 'ASPW4023'
 }
 
+Invoke-ContractCase 'Transitions.AdoptCommittedProtectedPath' {
+    $Root = New-FixtureRepository 'AdoptCommittedProtected'
+    Write-Utf8Text (Join-Path $Root 'README.md') "# Approved documentation change`n"
+    Write-Utf8Text (Join-Path $Root 'UserNotes.md') "private notes`n"
+    $StatePath = Start-FixturePhase $Root
+    Commit-Paths $Root @('README.md', 'Docs/Phase91/Phase91_State.json') 'approved README publication'
+    $Commit = Invoke-FixtureGit $Root @('rev-parse', 'HEAD')
+    $Result = Invoke-WorkflowCli $Root @('adopt-protected-path', '-Phase', '91', '-Scope', 'README.md', '-Evidence', $Commit, '-Reason', 'explicit user-approved README publication')
+    Assert-Condition ($Result.ExitCode -eq 0) "adoption failed: $($Result.Output)"
+    $State = Read-AvidScriptPhaseState $Root 91
+    Assert-Condition (@($State.protected_dirty).Count -eq 1) 'adoption removed unrelated protection'
+    Assert-Condition ($State.protected_dirty[0].path -ceq 'UserNotes.md') 'user notes lost protection'
+}
+
+Invoke-ContractCase 'Transitions.AdoptDirtyProtectedPathRejected' {
+    $Root = New-FixtureRepository 'AdoptDirtyProtected'
+    Write-Utf8Text (Join-Path $Root 'README.md') "# Uncommitted user change`n"
+    $StatePath = Start-FixturePhase $Root
+    $Commit = Invoke-FixtureGit $Root @('rev-parse', 'HEAD')
+    $Result = Invoke-WorkflowCli $Root @('adopt-protected-path', '-Phase', '91', '-Scope', 'README.md', '-Evidence', $Commit, '-Reason', 'fixture')
+    Assert-Condition ($Result.ExitCode -ne 0 -and $Result.Output.Contains('ASPW1123')) 'dirty protected path was adopted'
+    Assert-Condition (@((Read-AvidScriptPhaseState $Root 91).protected_dirty).Count -eq 1) 'rejected adoption changed protection'
+}
+
 Invoke-ContractCase 'Transitions.PhaseOwnedDirtyIsNotProtected' {
     $Root = New-FixtureRepository 'TransitionPhaseOwned'
     Write-Utf8Text (Join-Path $Root 'Docs\Phase91\Architecture.md') "# Revised architecture`n"

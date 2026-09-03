@@ -88,12 +88,6 @@
       "head_blob_sha256": "5881954e78c9759dafb336484adf7dcd9d064122599e9b93337c69067b08c1cf"
     },
     {
-      "path": "README.md",
-      "status": " M",
-      "worktree_sha256": "78de7c14fe9ab727aee8dccaac16675886382857bd6a4d63250d034f2389d916",
-      "head_blob_sha256": "6de9a31178eaf9a7706721a7b7d1a82ada5197c0b05f498510c70c4b02c476d3"
-    },
-    {
       "path": "Source/AvidScriptRuntime/Public/AvidScriptWasmReloadTypes.h",
       "status": " M",
       "worktree_sha256": "384b6e093dc8568e666dc0335b575383e473ecf00448c1d5c461a852b38edfed",
@@ -101,6 +95,6 @@
     }
   ],
   "next_action": "batch-complete -Phase 64 -BatchId P64.D -Evidence <text>",
-  "revision": 4,
-  "updated_at_utc": "2026-09-03T18:34:50.6171028+00:00"
+  "revision": 5,
+  "updated_at_utc": "2026-09-03T18:51:01.5261393+00:00"
 }

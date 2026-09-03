@@ -574,6 +574,14 @@
       "prevention": "性能 runner 写完报告后按 pipe/fingerprint 发送 shutdown 并等待 Worker 退出；在修复 runner 前，Gate 包装只终止本轮已核对命令行和 PID 的专属 Worker，不能等待 600 秒 idle timeout 或按进程名批量结束。",
       "source": "observed:2026-09-02-P61.E",
       "last_observed": "2026-09-02 冻结增量矩阵已写出完整通过报告，但 Worker 继承重定向句柄使 exec 长时间不返回；核对唯一 PID 和 pipe 后精确结束，宿主以 exit 0 收口"
+    },
+    {
+      "id": "adopt-authorized-committed-protected-path",
+      "tags": ["git", "workflow", "harness", "protected-dirty"],
+      "summary": "已授权并提交的路径需要显式移交旧 protected-dirty 所有权。",
+      "prevention": "确认用户授权、当前路径干净及祖先提交证据后，使用 PhaseWorkflow adopt-protected-path 单路径移交；禁止重采全部基线或回退合法提交。",
+      "source": "Docs/Workflow/Protected_Path_Adoption.md",
+      "last_observed": "2026-09-04 P64 README 已按用户要求提交推送，但旧保护快照阻塞两个并行代理；受控移交后 bootstrap 恢复 3/3"
     }
   ]
 }

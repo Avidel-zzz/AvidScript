@@ -4,6 +4,7 @@
 
 - 当前工作树可能同时包含用户改动、进行中的 Phase 和本任务改动。默认全部保留。
 - 当前 Phase state 的 `protected_dirty` 是基线合同。Harness 负责比较状态和内容哈希；发生漂移时停止相关写入并明确报告。
+- 用户已授权且已经提交的路径可在实现期通过 `adopt-protected-path` 精确移交；必须提供提交证据和原因，不能重采整个基线。详见 `Docs/Workflow/Protected_Path_Adoption.md`。
 - 不使用 `git reset --hard`、`git checkout --`、`git clean` 或等价破坏性操作，除非用户明确授权具体目标。
 - 不结束、清理或重启用户的 Unreal Editor、编译器、dotnet 或其他进程。只有已证明归属本任务的子进程才能由其 owner 管理。
 
