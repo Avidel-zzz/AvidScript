@@ -26,26 +26,20 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 > Development/Shipping + Wasmtime 45**。两种 Win64 配置的 BuildCookRun 均已通过；Android arm64
 > 交叉 AOT 发布已验证，Android UBT/真机与 iOS 仍待正式验收。
 
-## 当前进展
+## 现在可以做什么
 
-更新于 **2026-09-04**；**P64 仍在实施中**，以下区分已交付与待验收内容。
+更新于 **2026-09-04**，**P64 实施中**。已能用 C# 编写 UE 游戏逻辑、调用项目自定义 API，
+并运行 Win64 打包样例；不需要 `.avid`，也不是完整 UE/.NET 替代层。
 
-| 状态 | 内容 |
+最近交付 **UMG 按钮与跨进程 SaveGame 样例**，补齐普通 UObject 接收者授权、独立事件来源查询，
+以及无需 Tick 导出的事件型脚本。完整能力与当前边界如下：
+
+| 领域 | 已实现内容 |
 | --- | --- |
-| 已交付 | [PickupRush](Samples/CSharp/PickupRush/README.md) 的 Editor、Win64 Development/Shipping 包内玩法闭环 |
-| 最近新增 | [UiSaveDemo](Samples/CSharp/UiSaveDemo/README.md)：C# 驱动 UMG 事件与 SaveGame，已通过保存、重启读回、缺档和 GC 四进程验证 |
-| 最近补齐 | [事件型 Guest](Docs/Phase64/P64.D_EventOnly_Runtime.md) 可省略 Tick；[普通 UObject 接收者](Docs/Phase64/P64.D_Reflection_Receiver.md) 支持 owned/borrowed 授权及 Self 缓存隔离 |
-| 待验收 | UI 异常存档、物理输入与视觉、热重载压力、长稳和移动构建/设备验证 |
-
-## 已实现
-
-可以用 C# 编写并打包 Win64 游戏逻辑，调用项目自定义 UE API；目前仍是开发者预览，不是完整 UE/.NET 替代层。
-
-| 领域 | 已验证能力 |
-| --- | --- |
-| 生命周期与启动 | `BeginPlay/Tick/EndPlay`，事件型 Guest 可省略 Tick；Timer、Overlap、Gameplay Event；Startup Scenario 自动挂载、原子回滚与 teardown |
-| C# 游戏样例 | `PickupRush` 计时、收集、复活和胜负逻辑；同源 Editor、Win64 Development/Shipping 包内行为验证通过 |
-| 生成式 UE API | Reflection/Profile 生成 `UFUNCTION`、`UPROPERTY`、Interface 与项目自定义 API；typed Self、Spawn、cast、销毁，无需逐个手写 VM wrapper |
+| 游戏流程 | `BeginPlay/Tick/EndPlay`、Timer、Overlap、Gameplay Event；事件型 Guest 可省略 Tick，Startup Scenario 自动挂载与回滚 |
+| C# 玩法 | [PickupRush](Samples/CSharp/PickupRush/README.md)：计时、收集、复活和胜负；Editor、Win64 Development/Shipping 包内闭环已验证 |
+| UI 与存档 | [UiSaveDemo](Samples/CSharp/UiSaveDemo/README.md)：UMG 按钮、计分、SaveGame；保存、重启读回、缺档与 GC 四进程验证通过 |
+| 生成式 UE API | Reflection/Profile 生成 `UFUNCTION`、`UPROPERTY`、Interface 与项目自定义 API；typed Self、Spawn、cast、销毁，无需逐个手写 VM wrapper；普通 UObject 的 owned/borrowed 授权与 Self 缓存隔离 |
 | 类型与容器 | UObject、向量/变换、固定 `USTRUCT`、名称/字符串、`FText`；字符串数组、递归容器、`TSet/TMap`；soft/weak object 身份往返，详见下方边界 |
 | C# 定义 UE 类型 | Actor、Component、World/GameInstance Subsystem，含继承、override、属性、函数与默认参数 |
 | 异步与委托 | 受控 `async/await`、Delay/NextTick、异步加载、Latent、AsyncAction；单播/多播、受支持签名的 `return/ref/out` 与主动调用；独立 UObject 订阅与回调来源查询 |
@@ -56,66 +50,18 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 | 构建与 IDE | 增量缓存、persistent Worker、`.slnx`/WASI 工作区、离线源码索引与 Visual Studio/Rider/VS Code 启动 |
 | 调试与 Profiler | 源码映射、跨层调用栈、PIE 目标、受控同步断点/步进、只读变量；UE Trace、热点与 JSON 导出 |
 
-类型支持与限制可追溯至 [P58 验收](Docs/Phase58/P58.4_Centralized_Gate_Report.md)，
-当前玩法及打包结果见 [P64 记录](Docs/Phase64/P64_Closeout.md)。
+类型覆盖见 [P58 验收](Docs/Phase58/P58.4_Centralized_Gate_Report.md)，最新交付见
+[P64 记录](Docs/Phase64/P64_Closeout.md)。UI 异常存档、真实输入/视觉、包内 UI、热重载压力、长稳和移动端仍待验收。
 
 ## C# 游戏脚本
 
-从 [PickupRush](Samples/CSharp/PickupRush/README.md) 开始体验完整玩法；
-[TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) 展示项目自定义 API，
-[ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) 展示生命周期、Timer 与异步。
+直接阅读随样例构建的源码，而不是另写一套展示代码：
 
-<details>
-<summary>C# 示例：生成式 UE API、BeginPlay、Tick 与 EndPlay</summary>
+- [PickupRushScript.cs](Samples/CSharp/PickupRush/PickupRushScript.cs)：完整计时收集玩法。
+- [UiSaveDemoScript.cs](Samples/CSharp/UiSaveDemo/UiSaveDemoScript.cs)：按钮订阅、文本更新、保存/加载和清理。
+- [ActorLifecycleScript.cs](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)：生命周期、Timer 与受控异步。
 
-下面的 typed API 来自项目 Reflection，需要相应 Binding Profile，不是逐个手写的 VM wrapper。
-
-```csharp
-using System.Runtime.InteropServices;
-
-namespace AvidScript;
-
-public static class GameScript
-{
-    private static AActor Projectile;
-
-    [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
-    public static async void BeginPlay()
-    {
-        AAvidScriptTypedTestActor self = UE.Self;
-        self.ApplyGameplayValue(4.0f);
-
-        Projectile = UE.SpawnActor(
-            ProjectClasses.Projectile,
-            FTransform.Identity);
-
-        await AvidContinuations.NextTickAsync();
-        Projectile.SetActorScale3D(new FVector(1.05f, 1.0f, 1.0f));
-    }
-
-    [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
-    public static void Tick(float deltaSeconds)
-    {
-        if (Projectile.HasHandle)
-        {
-            Projectile.AddActorWorldOffset(
-                new FVector(100.0f * deltaSeconds, 0.0f, 0.0f));
-        }
-    }
-
-    [UnmanagedCallersOnly(EntryPoint = "avid_on_end_play")]
-    public static void EndPlay()
-    {
-        if (Projectile.HasHandle)
-        {
-            UE.DestroyActor(Projectile);
-            Projectile = default;
-        }
-    }
-}
-```
-
-</details>
+项目类型与方法来自 Reflection/Profile 生成的 C# API；运行方式见下方样例链接。
 
 ## 架构
 
@@ -172,26 +118,8 @@ P50 比率分别为 **`0.469x`、`0.513x`、`0.391x`**，详见
 纯执行领导力门禁仍未关闭，也没有同口径 UnLua/AngelScript 排行榜。见
 [执行层报告](Docs/Phase57/P57.13_Cranelift_Speed_Profile.md)。
 
-<details>
-<summary>补充基准：容器、增量构建与 UE 原生对照</summary>
-
-[编译器托管数组区域](Docs/Phase57/P57.11D_Compiler_Managed_Array_Region.md)在 `N>=64`
-的冻结 workload 中领先 Puerts TArray **17.47x-20.04x**。
-[增量构建](Docs/Phase61/P61.E_Integration_Gate.md)的无修改热路径为零编译调用，5 轮中位数 `806 ms`。
-
-P60 的新增 UE 交互路径均在 warm path 禁止名称反射查找，并使用固定 20 组样本：
-
-| P60 路径 | UE/原生 P50 | AvidScript P50 | 比率或预算 |
-| --- | ---: | ---: | ---: |
-| Interface | `0.151 us` | `0.387 us` | `2.56x` |
-| Delegate 主动调用 | `0.553 us` | `0.726 us` | `1.31x` |
-| Blueprint callable | `0.641 us` | `0.779 us` | `1.22x` |
-| AsyncAction Session 生命周期 | 不适用 | `4.308 us` | `< 250 us` |
-
-这些数字来自 [P60 最终 Gate](Docs/Phase60/P60_Gate_Summary.json)，用于同一 UE 构建内的回归门禁，
-不等同于完整 WASM crossing 或竞品对比；[测试口径](Docs/Phase60/P60.D_Performance_And_Gate.md)另有说明。
-
-</details>
+其他归档结果：[容器基准](Docs/Phase57/P57.11D_Compiler_Managed_Array_Region.md)、
+[UE 原生对照](Docs/Phase60/P60.D_Performance_And_Gate.md)、[增量构建](Docs/Phase61/P61.E_Integration_Gate.md)。
 
 ## 快速开始
 
@@ -243,32 +171,25 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 - **C# 子集**：无完整 .NET Runtime、任意 awaiter 或异常系统；暂不支持 `event +=`、lambda/closure，使用显式 bind/subscribe 与 `ExecuteX/BroadcastX`。
 - **重载与隔离**：方法体可热重载；反射结构变更需增量 UBT 并重启 Editor。WASM 故障隔离不等于原生 C++/DLL 进程沙箱。
 - **玩法与平台**：UI/存档已通过 Editor 合成事件验证，异常场景、物理输入、视觉、包内 UI、热重载压力与长稳仍待验收；Android UBT/APK/真机及 iOS 尚未验收。
-- **性能结论**：已有 Puerts V8 对比，但纯执行 P95 领先门禁未关闭，也未完成同口径 UnLua/AngelScript 矩阵。
+- **诊断与性能**：typed Host 的具体拒绝原因尚未统一透传到 VM 错误；纯执行 P50/P95 领先门禁未关闭，也未完成同口径 UnLua/AngelScript 矩阵。
 
 下一步补齐 P64 的 UI/存档边界、热重载压力与长稳验证，以及移动构建/设备证据；
 随后推进安装、升级、兼容和诊断等发布工程，不以阶段编号代替实际验收。
 
 ## 验证
 
-最近完整技术回归绑定候选 **`9e08cdc`**，不代表后续改动已通过全量回归。
+完整回归与后续专项分别记录，**不累加成当前全量通过数**：
 
-| 验证范围 | 结果 |
+| 范围 | 已归档证据 |
 | --- | --- |
-| 完整 AvidScript Automation / .NET | **439/439 / 284/284** |
-| PowerShell、架构与构建 | 10 组合同、干净候选架构检查、no-clean Editor UBT 通过 |
-| PickupRush Editor / Win64 Development / Shipping | 均为 5/5 事件、胜利状态、零丢弃回调 |
-| Development / Shipping 包回执 | 21/21 / 19/19，实际运行包身份与发布结果一致 |
+| [完整技术基线](Docs/Phase64/P64_Closeout.md)，候选 `9e08cdc` | Automation **439/439**、.NET **284/284**；10 组 PowerShell 合同、干净候选架构检查和 no-clean Editor UBT 通过 |
+| [PickupRush](Samples/CSharp/PickupRush/README.md) | Editor / Win64 Development / Shipping 均为 **5/5** 事件与胜利状态；包回执 **21/21 / 19/19** |
+| [UI/存档集成](Docs/Phase64/P64.D_UI_Save_Integration.md) | **4/4** 独立进程、**13/13** 动作、**53/53** runner 合同；Binding/UI 资产专项 **18/18** 与增量构建 |
 
-已交付的 **`35e67ad`** [委托来源小节](Docs/Phase64/P64.D_Delegate_Source_Context.md)另通过 UE Automation **10/10**、
-C# 专项 **8/8** 与增量 Editor 构建；这些专项结果不扩充上表的历史全量基线。
-[事件型 Guest 小节](Docs/Phase64/P64.D_EventOnly_Runtime.md)另通过 Runtime/VM/Reload **20/20** 专项与增量构建。
-[C# 捕获赋值修复](Docs/Phase64/P64.D_Captured_Assignment.md)通过 CSharpGuest **133/133**（专项 **12/12**，不重复计数）。
-[UObject 接收者小节](Docs/Phase64/P64.D_Reflection_Receiver.md)通过 Binding 专项 **17/17** 与增量构建。
-[UI/存档样例](Docs/Phase64/P64.D_UI_Save_Integration.md)通过 **4/4** 独立进程、**13/13** 动作及 **53/53** runner 合同。
-
-这些是自动化与包内探针证据，不替代真实输入、视觉、设备和长稳验收。
-详见 [P64 记录](Docs/Phase64/P64_Closeout.md)、[Android 边界](Docs/Phase64/P64.D_Android_Readiness.md)
-及已关闭阶段的 [P63 Gate](Docs/Phase63/P63_Gate_Summary.json)。
+后续专项证据：[委托来源](Docs/Phase64/P64.D_Delegate_Source_Context.md)、
+[事件型 Guest](Docs/Phase64/P64.D_EventOnly_Runtime.md)、[C# 捕获赋值](Docs/Phase64/P64.D_Captured_Assignment.md)、
+[UObject 授权](Docs/Phase64/P64.D_Reflection_Receiver.md)。这些验证不替代真实输入、视觉、设备和长稳验收；
+[Android 边界](Docs/Phase64/P64.D_Android_Readiness.md)单独保留。
 
 阶段状态与实现证据见 [Docs](Docs/)，开发规则见 [AGENTS.md](AGENTS.md)。
 
