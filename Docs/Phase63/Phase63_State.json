@@ -5,7 +5,7 @@
     "goal": "交付 backend-neutral 多平台发布合同与 Android arm64 Wasmtime 预编译路径，并冻结 iOS 无 JIT fail-closed 边界",
     "start_commit": "ae7717a238133b8fc126cad6c2d6104d0c3f3e91"
   },
-  "declared_stage": "implementing",
+  "declared_stage": "gate_ready",
   "architecture": {
     "path": "Docs/Phase63/P63.0_Mobile_AOT_Architecture.md",
     "version": 1,
@@ -44,9 +44,9 @@
   ],
   "debt": [],
   "review": {
-    "completed": false,
-    "evidence": "reopened: 完整 Automation 发现 WorldSubsystem Deinitialize 在 OnWorldCleanup 硬失效后无法进入 C#；修复终止时序并更新简洁 README",
-    "completed_at_utc": null
+    "completed": true,
+    "evidence": "集中复审覆盖多平台 catalog、Android 依赖与交叉 AOT、发布精确选型、应用生命周期及 WorldSubsystem 终止时序；完整 Gate 首轮发现的 Deinitialize 回归已修复并定点通过；无未关闭 Blocker/Critical/Important，Android 真机与 iOS 继续保留为后续平台 Gate",
+    "completed_at_utc": "2026-09-03T16:47:49.9064532+00:00"
   },
   "budgets": {
     "ubt": 3,
@@ -59,11 +59,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "",
-    "source_tree": "",
-    "state_sha256": "",
-    "review_evidence": "",
-    "at_utc": null
+    "source_commit": "85de57930299a51f96ee0db90b8c35f4eafc5459",
+    "source_tree": "d6ce0e05b98454a0b193070cd2852a03698d0bd0",
+    "state_sha256": "afa827432a50057554b8961e116cf407e96f474560f876d667670fd0a904e2f7",
+    "review_evidence": "集中复审覆盖多平台 catalog、Android 依赖与交叉 AOT、发布精确选型、应用生命周期及 WorldSubsystem 终止时序；完整 Gate 首轮发现的 Deinitialize 回归已修复并定点通过；无未关闭 Blocker/Critical/Important，Android 真机与 iOS 继续保留为后续平台 Gate",
+    "at_utc": "2026-09-03T16:47:49.9064532+00:00"
   },
   "gate": {
     "report_path": "",
@@ -94,7 +94,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "freeze -Phase 63 -ReviewEvidence <text>",
-  "revision": 8,
-  "updated_at_utc": "2026-09-03T16:47:18.8959377+00:00"
+  "next_action": "attest -Phase 63 -GateReportPath <path>",
+  "revision": 9,
+  "updated_at_utc": "2026-09-03T16:47:49.9116659+00:00"
 }
