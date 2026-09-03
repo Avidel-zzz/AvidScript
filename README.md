@@ -26,6 +26,16 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 > Development/Shipping + Wasmtime 45**。两种 Win64 配置的 BuildCookRun 均已通过；Android arm64
 > 交叉 AOT 发布已验证，Android UBT/真机与 iOS 仍待正式验收。
 
+## 当前进展
+
+更新于 **2026-09-04**，已交付能力截至 **`35e67ad`**；**P64 仍在实施中**。
+
+| 状态 | 内容 |
+| --- | --- |
+| 已交付 | [PickupRush](Samples/CSharp/PickupRush/README.md) 的 Editor、Win64 Development/Shipping 包内玩法闭环 |
+| 最近新增 | [独立 UObject 委托来源查询](Docs/Phase64/P64.D_Delegate_Source_Context.md)：Actor 脚本显式订阅其他对象的事件，在回调中通过 `AvidSubscriptions.IsCurrentSource(source)` 区分来源 |
+| 本地联调中，未交付 | UI/存档样例已完成资产生成、Profile 发布与 WASM/AOT 启动；按钮订阅仍未通过联调，跨进程存档闭环尚未验收 |
+
 ## 已实现
 
 可以用 C# 编写并打包 Win64 游戏逻辑，调用项目自定义 UE API；目前仍是开发者预览，不是完整 UE/.NET 替代层。
@@ -45,16 +55,19 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 | 构建与 IDE | 增量缓存、persistent Worker、`.slnx`/WASI 工作区、离线源码索引与 Visual Studio/Rider/VS Code 启动 |
 | 调试与 Profiler | 源码映射、跨层调用栈、PIE 目标、受控同步断点/步进、只读变量；UE Trace、热点与 JSON 导出 |
 
-**最近交付（2026-09-04）：** [PickupRush](Samples/CSharp/PickupRush/README.md) 已通过 Editor 与
-Win64 Development/Shipping 包内玩法探针；[委托来源查询](Docs/Phase64/P64.D_Delegate_Source_Context.md)
-让 Actor 脚本显式订阅独立 UObject 事件并识别来源。UI、跨进程存档与长稳仍在联调，未计入已验收能力。
-
 类型支持与限制可追溯至 [P58 验收](Docs/Phase58/P58.4_Centralized_Gate_Report.md)，
 当前玩法及打包结果见 [P64 记录](Docs/Phase64/P64_Closeout.md)。
 
 ## C# 游戏脚本
 
-下面的 typed API 来自项目 Reflection，不是为单个 API 手写的 VM wrapper：
+从 [PickupRush](Samples/CSharp/PickupRush/README.md) 开始体验完整玩法；
+[TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) 展示项目自定义 API，
+[ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) 展示生命周期、Timer 与异步。
+
+<details>
+<summary>C# 示例：生成式 UE API、BeginPlay、Tick 与 EndPlay</summary>
+
+下面的 typed API 来自项目 Reflection，需要相应 Binding Profile，不是逐个手写的 VM wrapper。
 
 ```csharp
 using System.Runtime.InteropServices;
@@ -101,10 +114,7 @@ public static class GameScript
 }
 ```
 
-完整样例见 [PickupRush](Samples/CSharp/PickupRush/README.md)、
-[TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) 与
-[ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)。
-Editor Tools 可生成 C# 工作区、刷新 typed facade，并启动 Visual Studio、Rider 或 VS Code；默认保留用户文件。
+</details>
 
 ## 架构
 
@@ -136,9 +146,9 @@ flowchart LR
 
 ## 性能摘要
 
-以下为 P56/P57/P60 已归档基准，不是本次文档更新重新测得的成绩。环境为 UE5.8 Win64
-Development、同机冻结 workload；竞品表中比率为 AvidScript / Puerts，小于 `1.0x` 表示更快。
-结论只适用于对应 workload，不外推到所有脚本代码。
+以下为已归档基准，**没有对当前 P64 改动重新测量**。主表来自 P57：UE5.8 Win64 Development、
+Intel Core Ultra 7 265K、Wasmtime 45 Cranelift JIT，与冻结版本的 Puerts V8 同机对照；
+5 个计时进程，每进程 5 次预热、每单元 30 次采样。比率为 AvidScript / Puerts，越低越好。
 
 ![Prepared Reflection 性能对比](Docs/Assets/README/phase57-prepared-reflection-performance.svg)
 
@@ -149,11 +159,24 @@ Development、同机冻结 workload；竞品表中比率为 AvidScript / Puerts�
 | FVector value | `66.49 ns` | `1193.10 ns` | **`0.056x`** |
 | UObject roundtrip | `69.60 ns` | `130.90 ns` | **`0.532x`** |
 
-Phase 56 完整游戏 workload 中，Small gameplay、Dense gameplay 与 Lifecycle callback 的
-P50 比率分别为 **`0.469x`、`0.513x`、`0.391x`**。编译器托管数组区域在 `N>=64`
-的冻结 workload 中领先 Puerts TArray **17.47x-20.04x**。
+以上是指定 prepared/fused 路径的每逻辑操作耗时，不代表任意 `UFUNCTION` 都有相同收益。
+环境、路由计数与正确性结果见 [P57 原始证据](Docs/Phase57/P57.11B1_Recursive_Fixed_Struct_Codec_Evidence.json)。
 
-增量构建的无修改热路径为零编译调用，5 轮中位数 `806 ms`。
+Phase 56 完整游戏 workload 中，Small gameplay、Dense gameplay 与 Lifecycle callback 的
+P50 比率分别为 **`0.469x`、`0.513x`、`0.391x`**，详见
+[游戏 workload 报告](Docs/Phase56/P56.5_Fused_Call_Frame_Implementation_Report.md)。
+
+**尚未全面领先：** 12-kernel 相同 WASM 的 Wasmtime/V8 对照中，P50/P95 几何均值为
+`0.9800x / 1.0006x`，均未达到冻结的 `<= 0.95x` 目标；这不是 C# 与 JavaScript 的完整游戏比较。
+纯执行领导力门禁仍未关闭，也没有同口径 UnLua/AngelScript 排行榜。见
+[执行层报告](Docs/Phase57/P57.13_Cranelift_Speed_Profile.md)。
+
+<details>
+<summary>补充基准：容器、增量构建与 UE 原生对照</summary>
+
+[编译器托管数组区域](Docs/Phase57/P57.11D_Compiler_Managed_Array_Region.md)在 `N>=64`
+的冻结 workload 中领先 Puerts TArray **17.47x-20.04x**。
+[增量构建](Docs/Phase61/P61.E_Integration_Gate.md)的无修改热路径为零编译调用，5 轮中位数 `806 ms`。
 
 P60 的新增 UE 交互路径均在 warm path 禁止名称反射查找，并使用固定 20 组样本：
 
@@ -164,19 +187,10 @@ P60 的新增 UE 交互路径均在 warm path 禁止名称反射查找，并使�
 | Blueprint callable | `0.641 us` | `0.779 us` | `1.22x` |
 | AsyncAction Session 生命周期 | 不适用 | `4.308 us` | `< 250 us` |
 
-这些数字用于同一 UE 构建内的回归门禁，不等同于完整 WASM crossing 或竞品对比。
+这些数字来自 [P60 最终 Gate](Docs/Phase60/P60_Gate_Summary.json)，用于同一 UE 构建内的回归门禁，
+不等同于完整 WASM crossing 或竞品对比；[测试口径](Docs/Phase60/P60.D_Performance_And_Gate.md)另有说明。
 
-纯执行层仍未宣布绝对领先：12-kernel Wasmtime/V8 suite 的 P50/P95 几何均值为
-`0.9800x / 1.0006x`，P95 领导力门禁仍未关闭。
-
-完整口径与机器可读证据：
-
-- [Prepared Reflection 证据](Docs/Phase57/P57.11B1_Recursive_Fixed_Struct_Codec_Evidence.json)
-- [编译器托管数组区域报告](Docs/Phase57/P57.11D_Compiler_Managed_Array_Region.md)
-- [Phase 56 游戏 workload 报告](Docs/Phase56/P56.5_Fused_Call_Frame_Implementation_Report.md)
-- [Wasmtime Cranelift Speed 报告](Docs/Phase57/P57.13_Cranelift_Speed_Profile.md)
-- [Phase 60 性能矩阵与 Gate](Docs/Phase60/P60.D_Performance_And_Gate.md)
-- [Phase 61 集中 Gate](Docs/Phase61/P61.E_Integration_Gate.md)
+</details>
 
 ## 快速开始
 
@@ -229,17 +243,12 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 - **玩法与平台**：UI、跨进程存档、热重载压力、长稳及人工游玩仍待验收；Android 仅完成交叉 AOT 和集成合同，UBT/APK/真机及 iOS 尚未验收。
 - **性能结论**：已有 Puerts V8 对比，但纯执行 P95 领先门禁未关闭，也未完成同口径 UnLua/AngelScript 矩阵。
 
-## 路线图
-
-1. **P62/P63 已收尾**：Win64 Cook/Shipping、多平台 catalog、Android 交叉 AOT 与移动 Runtime 生命周期；
-2. **P64 进行中**：PickupRush 与跨平台运行工具已落地；继续补齐 UI、存档、长稳与移动构建/设备验收；
-3. **后续发布工程**：安装/升级、兼容与诊断，逐项补齐类型、移动端、真实游戏及性能验收缺口。
-
-路线图只表示工程顺序，不代表对应能力已经可用。
+下一步先完成 P64 的 UI/存档、热重载压力与长稳验证，并补齐移动构建/设备证据；
+随后推进安装、升级、兼容和诊断等发布工程，不以阶段编号代替实际验收。
 
 ## 验证
 
-最近完整技术回归绑定候选 **`9e08cdc`**，不代表后续未完成改动已通过；**P64 尚未关闭**。
+最近完整技术回归绑定候选 **`9e08cdc`**，不代表后续改动已通过全量回归。
 
 | 验证范围 | 结果 |
 | --- | --- |
@@ -248,7 +257,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 | PickupRush Editor / Win64 Development / Shipping | 均为 5/5 事件、胜利状态、零丢弃回调 |
 | Development / Shipping 包回执 | 21/21 / 19/19，实际运行包身份与发布结果一致 |
 
-新增[委托来源小节](Docs/Phase64/P64.D_Delegate_Source_Context.md)另通过 UE Automation **10/10**、
+已交付的 **`35e67ad`** [委托来源小节](Docs/Phase64/P64.D_Delegate_Source_Context.md)另通过 UE Automation **10/10**、
 C# 专项 **8/8** 与增量 Editor 构建；这些专项结果不扩充上表的历史全量基线。
 
 这些是自动化与包内探针证据，不替代真实输入、视觉、设备和长稳验收。
