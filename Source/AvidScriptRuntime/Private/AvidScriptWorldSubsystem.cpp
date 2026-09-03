@@ -39,6 +39,7 @@ void UAvidScriptWorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		RuntimeStats.LastErrorCategory = StartupResult.ErrorCategory;
 		RuntimeStats.LastErrorMessage = StartupResult.ErrorMessage;
 		UE_LOG(LogAvidScriptWorldSubsystem, Error, TEXT("%s"), *StartupResult.ErrorMessage);
+		StartStartupScenarioProbe();
 		delete StartupCoordinator;
 		StartupCoordinator = nullptr;
 		return;
@@ -58,6 +59,7 @@ void UAvidScriptWorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 
 	if (!StartupResult.bRequested)
 	{
+		StartStartupScenarioProbe();
 		delete StartupCoordinator;
 		StartupCoordinator = nullptr;
 		return;
@@ -72,11 +74,13 @@ void UAvidScriptWorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		StartupResult.BindingCount,
 		StartupResult.ComponentCount,
 		StartupResult.OwnedActorCount);
+	StartStartupScenarioProbe();
 }
 
 void UAvidScriptWorldSubsystem::OnWorldEndPlay(UWorld& InWorld)
 {
 	StopPackagedOracle();
+	StopStartupScenarioProbe();
 	if (StartupCoordinator != nullptr)
 	{
 		StartupCoordinator->Deactivate();
@@ -95,12 +99,16 @@ void UAvidScriptWorldSubsystem::Tick(float DeltaTime)
 	{
 		TickPackagedOracle(DeltaTime);
 	}
+	if (bStartupScenarioProbeActive)
+	{
+		TickStartupScenarioProbe(DeltaTime);
+	}
 	Super::Tick(DeltaTime);
 }
 
 bool UAvidScriptWorldSubsystem::IsTickable() const
 {
-	return bPackagedOracleActive;
+	return bPackagedOracleActive || bStartupScenarioProbeActive;
 }
 
 TStatId UAvidScriptWorldSubsystem::GetStatId() const
@@ -117,6 +125,7 @@ void UAvidScriptWorldSubsystem::Deinitialize()
 	else
 	{
 		StopPackagedOracle();
+		StopStartupScenarioProbe();
 		if (StartupCoordinator != nullptr)
 		{
 			StartupCoordinator->Deactivate();

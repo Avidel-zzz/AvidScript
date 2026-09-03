@@ -25,6 +25,8 @@ struct FAvidScriptComponentRuntimeStats
 	int32 LastTimerCallbackId = 0;
 	int32 LastTimerHandle = 0;
 	int32 EventCallbackCount = 0;
+	int32 DeferredGameplayEventCount = 0;
+	int32 DroppedGameplayEventCount = 0;
 	int32 LastEventId = 0;
 	float LastEventValue = 0.0f;
 	int32 LastInputActionId = 0;
@@ -39,6 +41,13 @@ struct FAvidScriptComponentRuntimeStats
 	FString LastErrorMessage;
 	bool bResolvedFromPackage = false;
 	FAvidScriptWasmRuntimeMetrics Metrics;
+};
+
+struct FAvidScriptDeferredOwnerGameplayEvent
+{
+	EAvidScriptGameplayEventType EventType = EAvidScriptGameplayEventType::BeginOverlap;
+	TWeakObjectPtr<AActor> OtherActor;
+	FVector VectorValue = FVector::ZeroVector;
 };
 
 UCLASS(ClassGroup = (AvidScript), meta = (BlueprintSpawnableComponent))
@@ -92,6 +101,11 @@ private:
 		EAvidScriptGameplayEventType EventType,
 		AActor* OtherActor,
 		const FVector& VectorValue);
+	bool QueueDeferredOwnerGameplayEvent(
+		EAvidScriptGameplayEventType EventType,
+		AActor* OtherActor,
+		const FVector& VectorValue);
+	void FlushDeferredGameplayEvents();
 	void ReleaseGameplayObjectHandles();
 
 	UFUNCTION()
@@ -121,9 +135,11 @@ private:
 	FAvidScriptObjectRegistry ObjectRegistry;
 	FAvidScriptObjectHandle OwnerHandle;
 	TSet<uint64> GameplayObjectHandleValues;
+	TArray<FAvidScriptDeferredOwnerGameplayEvent> DeferredGameplayEvents;
 	TUniquePtr<FAvidScriptRuntimeSession> RuntimeSession;
 	FAvidScriptComponentRuntimeStats RuntimeStats;
 	bool bRuntimeReleaseDeferred = false;
 	bool bOwnerReleaseDeferred = false;
 	bool bRuntimeReleaseInProgress = false;
+	bool bFlushingDeferredGameplayEvents = false;
 };

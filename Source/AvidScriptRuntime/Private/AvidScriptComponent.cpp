@@ -11,6 +11,8 @@ DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptComponent, Log, All);
 
 namespace
 {
+constexpr int32 MaximumDeferredGameplayEvents = 64;
+
 void SetComponentManifestLoadFailure(
 	const FAvidScriptWasmReloadManifestLoadResult& LoadResult,
 	FAvidScriptWasmSmokeResult& OutResult)
@@ -720,6 +722,10 @@ bool UAvidScriptComponent::DispatchOwnerGameplayEvent(
 	{
 		return false;
 	}
+	if (RuntimeSession->IsOperationActive())
+	{
+		return QueueDeferredOwnerGameplayEvent(EventType, OtherActor, VectorValue);
+	}
 
 	FAvidScriptObjectHandleResult RegisterResult;
 	const FAvidScriptObjectHandle OtherHandle = ObjectRegistry.RegisterObject(OtherActor, RegisterResult, false);
@@ -743,6 +749,56 @@ bool UAvidScriptComponent::DispatchOwnerGameplayEvent(
 		static_cast<float>(VectorValue.Z));
 
 	return DispatchGameplayEvent(Event);
+}
+
+bool UAvidScriptComponent::QueueDeferredOwnerGameplayEvent(
+	const EAvidScriptGameplayEventType EventType,
+	AActor* OtherActor,
+	const FVector& VectorValue)
+{
+	if (DeferredGameplayEvents.Num() >= MaximumDeferredGameplayEvents)
+	{
+		++RuntimeStats.DroppedGameplayEventCount;
+		RuntimeStats.LastErrorMessage = TEXT(
+			"AvidScript deferred gameplay event queue reached its bounded capacity.");
+		UE_LOG(LogAvidScriptComponent, Warning, TEXT("%s"), *RuntimeStats.LastErrorMessage);
+		return false;
+	}
+
+	FAvidScriptDeferredOwnerGameplayEvent& DeferredEvent = DeferredGameplayEvents.AddDefaulted_GetRef();
+	DeferredEvent.EventType = EventType;
+	DeferredEvent.OtherActor = OtherActor;
+	DeferredEvent.VectorValue = VectorValue;
+	++RuntimeStats.DeferredGameplayEventCount;
+	return true;
+}
+
+void UAvidScriptComponent::FlushDeferredGameplayEvents()
+{
+	if (bFlushingDeferredGameplayEvents || bRuntimeReleaseDeferred ||
+		!RuntimeSession.IsValid() || RuntimeSession->IsOperationActive())
+	{
+		return;
+	}
+
+	TGuardValue<bool> FlushGuard(bFlushingDeferredGameplayEvents, true);
+	int32 DispatchedCount = 0;
+	while (!DeferredGameplayEvents.IsEmpty()
+		&& DispatchedCount < MaximumDeferredGameplayEvents
+		&& RuntimeSession.IsValid()
+		&& !bRuntimeReleaseDeferred)
+	{
+		FAvidScriptDeferredOwnerGameplayEvent DeferredEvent = MoveTemp(DeferredGameplayEvents[0]);
+		DeferredGameplayEvents.RemoveAt(0, 1, EAllowShrinking::No);
+		++DispatchedCount;
+		if (AActor* OtherActor = DeferredEvent.OtherActor.Get(); IsValid(OtherActor))
+		{
+			DispatchOwnerGameplayEvent(
+				DeferredEvent.EventType,
+				OtherActor,
+				DeferredEvent.VectorValue);
+		}
+	}
 }
 
 void UAvidScriptComponent::HandleOwnerBeginOverlap(AActor* OverlappedActor, AActor* OtherActor)
@@ -782,6 +838,7 @@ void UAvidScriptComponent::HandleOwnerHit(
 
 void UAvidScriptComponent::ReleaseGameplayObjectHandles()
 {
+	DeferredGameplayEvents.Reset();
 	for (const uint64 HandleValue : GameplayObjectHandleValues)
 	{
 		const FAvidScriptObjectHandle Handle{
@@ -877,6 +934,7 @@ void UAvidScriptComponent::FlushDeferredRuntimeRelease()
 	{
 		return;
 	}
+	FlushDeferredGameplayEvents();
 
 	if (bRuntimeReleaseDeferred)
 	{

@@ -31,6 +31,7 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 | --- | --- |
 | 游戏生命周期 | `BeginPlay`、`Tick`、`EndPlay`、Timer、Overlap、Gameplay Event |
 | 启动编排 | 显式 Startup Scenario 驱动 world/existing/spawn 三种目标挂载，支持 world 白名单、原子回滚、幂等激活与 teardown 回收 |
+| 可玩闭环 | `PickupRush` 用同一份 C# 完成计时、收集、复活和胜负逻辑；一键 Editor 发布与行为报告已通过 |
 | UE API | 由 Reflection/Profile 生成普通 `UFUNCTION`、`UPROPERTY`、UE Interface 与项目自定义 API |
 | UE 类型 | UObject capability、`FVector`、`FRotator`、`FTransform`、固定 `USTRUCT`、`FName`、`FString`、一维 `TArray<T>` |
 | C# 定义 UE 类型 | Actor、Component、World/GameInstance Subsystem、继承、override、`UPROPERTY`、`UFUNCTION` 与默认参数 |
@@ -54,7 +55,8 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 Profiler，以及 Win64 Development/Shipping 的确定性 Cook 发布闭环。Phase 63 已完成多平台
 catalog、Android arm64 受控静态依赖、真实 C# 交叉 AOT 发布，以及应用后台恢复、低内存回收和
 World teardown 的 Runtime 生命周期协调；Android UBT、打包和真机执行仍待后续验收。
-Phase 64 已接通严格 scenario 与 Runtime 自动挂载；未指定 scenario 的 World 默认保持空闲。
+Phase 64 已接通严格 scenario、Runtime 自动挂载与首个 C# 可玩纵向切片；未指定 scenario 的 World
+默认保持空闲，PC 打包与移动端验收仍在推进。
 
 集中 Gate 已通过 `.NET 284/284`、AvidScript Automation `433/433`、UE5.8 no-clean UBT、
 干净架构检查和发布/Cook/回执合同。详细证据见 [Phase 63 Gate 摘要](Docs/Phase63/P63_Gate_Summary.json)
@@ -109,7 +111,8 @@ public static class GameScript
 }
 ```
 
-完整样例见 [TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) 与
+完整样例见 [PickupRush](Samples/CSharp/PickupRush/README.md)、
+[TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) 与
 [ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)。
 Editor 可生成含 `.slnx`、`.editorconfig`、WASI `.csproj`、固定 SDK 和构建 profile 的 C# 工作区；
 刷新默认保留用户文件，只更新 Reflection typed facade 与不含绝对路径的离线源码索引。IDE 启动服务支持
@@ -221,6 +224,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 | --- | --- |
 | [TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) | typed Self、自定义 UFUNCTION、Spawn、cast 与销毁 |
 | [ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) | 生命周期、Timer、异步加载与受控 async/await |
+| [PickupRush](Samples/CSharp/PickupRush/README.md) | Startup Scenario、真实地图自动挂载、计时收集与胜负闭环 |
 | [PlayablePickup](Samples/CSharp/PlayablePickup/README.md) | Overlap、Gameplay Event、持久状态与热重载 |
 | [NetworkRpc](Samples/CSharp/NetworkRpc/README.md) | C# 调用项目 Server、Client 与 NetMulticast RPC |
 | [ReplicatedProperty](Samples/CSharp/ReplicatedProperty/README.md) | replicated property、authority setter 与 Push Model |
@@ -250,6 +254,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 最近一次完整基线为 **AvidScript Automation `433/433`、.NET `284/284` 通过**。
 Phase 63 的 clean detached architecture、UE5.8 no-clean UBT、Android arm64 交叉 AOT、
 发布/Cook/回执合同与移动 Runtime 生命周期均已通过，并已完成正式 attestation 与 close。
+Phase 64 的 `PickupRush` Editor 闭环已验证 5 次事件、胜利状态和零丢弃回调；PC package Gate 尚未计入完整基线。
 
 阶段状态与实现证据见 [Docs](Docs/)，开发规则见 [AGENTS.md](AGENTS.md)。
 

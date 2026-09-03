@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "scenarios": [
+    {
+      "scenario_id": "pickup_rush",
+      "activation": "explicit",
+      "worlds": [
+        "/Game/TopDown/Lvl_TopDown",
+        "/Game/Variant_TwinStick/LVL_TwinStick"
+      ],
+      "bindings": [
+        {
+          "module_id": "avidscript.pickup_rush",
+          "target": {
+            "mode": "spawn_actor",
+            "class_path": "/Script/AvidScriptRuntime.AvidScriptPrimitiveHost",
+            "transforms": [
+              {
+                "location": [600.0, 0.0, 120.0],
+                "rotation": [0.0, 0.0, 0.0],
+                "scale": [1.0, 1.0, 1.0]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

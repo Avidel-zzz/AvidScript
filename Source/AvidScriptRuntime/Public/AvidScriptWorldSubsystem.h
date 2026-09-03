@@ -52,6 +52,10 @@ private:
 	void TickPackagedOracle(float DeltaTime);
 	void StopPackagedOracle();
 	void CompletePackagedOracle(bool bSucceeded, const FString& FailureCategory);
+	bool StartStartupScenarioProbe();
+	void TickStartupScenarioProbe(float DeltaTime);
+	void StopStartupScenarioProbe();
+	void CompleteStartupScenarioProbe(bool bSucceeded, const FString& FailureCategory);
 
 	FAvidScriptStartupCoordinator* StartupCoordinator = nullptr;
 	FAvidScriptWorldRuntimeStats RuntimeStats;
@@ -68,4 +72,12 @@ private:
 	TWeakObjectPtr<AActor> PackagedOracleFaultActor;
 	TWeakObjectPtr<UAvidScriptComponent> PackagedOracleHealthyComponent;
 	TWeakObjectPtr<UAvidScriptComponent> PackagedOracleFaultComponent;
+	bool bStartupScenarioProbeActive = false;
+	bool bStartupScenarioProbeCompleted = false;
+	bool bStartupScenarioProbeRuntimeReady = false;
+	float StartupScenarioProbeElapsedSeconds = 0.0f;
+	float StartupScenarioProbeNextEventSeconds = 0.0f;
+	int32 StartupScenarioProbeEventIndex = 0;
+	FString StartupScenarioProbeReportPath;
+	TArray<int32> StartupScenarioProbeEvents;
 };
