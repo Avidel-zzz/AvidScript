@@ -31,13 +31,20 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 更新于 **2026-09-04**，**P64 实施中**。已能用 C# 编写 UE 游戏逻辑、调用项目自定义 API，
 并运行 Win64 打包样例；不需要 `.avid`，也不是完整 UE/.NET 替代层。
 
-目前可以从三个现成入口开始：
+| 开始开发 | 已跑通的能力 | 样例与用法 |
+| --- | --- | --- |
+| C# 玩法 | 计时、收集、复活与胜负；Editor 和 Win64 Development/Shipping 包 | [PickupRush](Samples/CSharp/PickupRush/README.md) |
+| UI 与存档 | UMG 按钮、文本、SaveGame 跨进程读回；失败处理、Reset、退出解绑与迟到事件隔离 | [UiSaveDemo](Samples/CSharp/UiSaveDemo/README.md) |
+| 项目 UE API | 从 Profile 生成自定义 `UFUNCTION/UPROPERTY` 接口；typed Self、Spawn、cast 与销毁 | [TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) |
 
-- **写玩法**：[PickupRush](Samples/CSharp/PickupRush/README.md) 用 C# 实现计时、收集、复活与胜负，已跑通 Editor 和 Win64 Development/Shipping 包。
-- **写 UI 与存档**：[UiSaveDemo](Samples/CSharp/UiSaveDemo/README.md) 用 C# 订阅 UMG 按钮、更新文本、保存并在新进程读回；最近补齐错误处理、Reset、组件退出清理和迟到事件隔离。
-- **接自己的 UE API**：[TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) 通过 Profile 生成项目 `UFUNCTION/UPROPERTY` 的 C# 接口，支持 typed Self、Spawn、cast 与销毁，不逐个手写 VM wrapper。
+**近期已交付**
 
-最近修复了 [async 初始化中的隐式类型转换](Docs/Phase64/P64.D_Async_Initializer_Conversion.md)，支持异步 BeginPlay 与生成式 UObject facade 上转组合编译；UI 热重载仍在联调。
+- [UI/存档异常流程](Docs/Phase64/P64.D_UI_Save_Edges.md)：失败读档保留原对象，写锁下保存失败不改存档，退出后按钮不再进入脚本；五进程 **31/31** 动作通过。
+- [UObject 授权](Docs/Phase64/P64.D_Reflection_Receiver.md)与[委托来源](Docs/Phase64/P64.D_Delegate_Source_Context.md)：可操作获授权的非 Self 对象，并区分多个按钮等对象的回调来源。
+- [事件型脚本](Docs/Phase64/P64.D_EventOnly_Runtime.md)：不写 Tick 也能接收事件、Timer 与异步恢复；省去无用的 Guest Tick 调用。
+- [async 初始化转换](Docs/Phase64/P64.D_Async_Initializer_Conversion.md)：修复异步 BeginPlay 中生成式 UObject facade 的隐式上转，真实样例已编译为 WASM。
+
+UI 热重载与 async 短路语义修复仍在进行中，不计入已完成能力。
 
 ## 框架能力
 
@@ -94,7 +101,7 @@ Intel Core Ultra 7 265K、Wasmtime 45 Cranelift JIT，与冻结版本的 Puerts 
 
 ![Prepared Reflection 性能对比](Docs/Assets/README/phase57-prepared-reflection-performance.svg)
 
-| UE 交互场景 | AvidScript P50 | Puerts Reflection P50 | 比率 |
+| UE 交互场景 | AvidScript 耗时（P50） | Puerts Reflection 耗时（P50） | 比率 |
 | --- | ---: | ---: | ---: |
 | Scalar UFUNCTION | `54.57 ns` | `106.15 ns` | **`0.514x`** |
 | Property get/set | `68.14 ns` | `103.01 ns` | **`0.661x`** |
@@ -147,18 +154,9 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 
 项目自定义 API 需要先通过 Editor Reflection 与 Binding Profile 生成 binding package 和 C# facade。
 
-## 样例
-
-| 样例 | 展示内容 |
-| --- | --- |
-| [TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) | typed Self、自定义 UFUNCTION、Spawn、cast 与销毁 |
-| [ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) | 生命周期、Timer、异步加载与受控 async/await |
-| [PickupRush](Samples/CSharp/PickupRush/README.md) | Startup Scenario、计时收集与胜负闭环；[C# 源码](Samples/CSharp/PickupRush/PickupRushScript.cs) |
-| [UiSaveDemo](Samples/CSharp/UiSaveDemo/README.md) | 按钮订阅、存档、错误状态与退出清理；[C# 源码](Samples/CSharp/UiSaveDemo/UiSaveDemoScript.cs) |
-| [PlayablePickup](Samples/CSharp/PlayablePickup/README.md) | Overlap、Gameplay Event、持久状态与热重载 |
-| [NetworkRpc](Samples/CSharp/NetworkRpc/README.md) | C# 调用项目 Server、Client 与 NetMulticast RPC |
-| [ReplicatedProperty](Samples/CSharp/ReplicatedProperty/README.md) | replicated property、authority setter 与 Push Model |
-| [NetworkTopology](Samples/CSharp/NetworkTopology/README.md) | dedicated/listen 多进程网络闭环 |
+更多样例：[生命周期与异步](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)、
+[事件与热重载](Samples/CSharp/PlayablePickup/README.md)、[RPC](Samples/CSharp/NetworkRpc/README.md)、
+[属性复制](Samples/CSharp/ReplicatedProperty/README.md)、[多进程网络](Samples/CSharp/NetworkTopology/README.md)。
 
 ## 当前边界
 
@@ -180,11 +178,10 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 | [完整技术基线](Docs/Phase64/P64_Closeout.md)，候选 `9e08cdc` | Automation **439/439**、.NET **284/284**；10 组 PowerShell 合同、干净候选架构检查和 no-clean Editor UBT 通过 |
 | [PickupRush](Samples/CSharp/PickupRush/README.md) | Editor / Win64 Development / Shipping 均为 **5/5** 事件与胜利状态；包回执 **21/21 / 19/19** |
 | [UI/存档异常流程](Docs/Phase64/P64.D_UI_Save_Edges.md) | **5/5** 独立进程、**31/31** 动作、**79/79** runner 合同；增量 Editor 构建通过 |
+| [async 初始化转换](Docs/Phase64/P64.D_Async_Initializer_Conversion.md) | Semantic **98/98**、Guest **135/135**；真实 UI 样例 WASM 编译通过，不代表 UI 热重载验收 |
 
-后续专项证据：[委托来源](Docs/Phase64/P64.D_Delegate_Source_Context.md)、
-[事件型 Guest](Docs/Phase64/P64.D_EventOnly_Runtime.md)、[C# 捕获赋值](Docs/Phase64/P64.D_Captured_Assignment.md)、
-[UObject 授权](Docs/Phase64/P64.D_Reflection_Receiver.md)。这些验证不替代真实输入、视觉、设备和长稳验收；
-[Android 边界](Docs/Phase64/P64.D_Android_Readiness.md)单独保留。
+其他修复证据见 [C# 捕获赋值](Docs/Phase64/P64.D_Captured_Assignment.md)及上方近期交付。
+机器验证不替代真实输入、视觉、设备和长稳验收；[Android 边界](Docs/Phase64/P64.D_Android_Readiness.md)单独保留。
 
 阶段状态与实现证据见 [Docs](Docs/)，开发规则见 [AGENTS.md](AGENTS.md)。
 
