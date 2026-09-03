@@ -28,24 +28,25 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 
 ## 现在可以做什么
 
-更新于 **2026-09-04**，**P64 实施中**。已跑通 **C# → WASM → UE 事件与 API → Win64 打包运行**，
-可开始尝试小型玩法 Demo；不需要 `.avid`。当前仍是开发者预览，不是完整 UE/.NET 替代层。
+更新于 **2026-09-04**，最近交付代码为 [`d34f6c2`](https://github.com/Avidel-zzz/AvidScript/commit/d34f6c2dec0f7b0073d344065836f9dab8c2d6a1)，**P64 仍在实施中**。
+已跑通 **C# → WASM → UE 事件与 API → Win64 打包运行**，可开始尝试小型玩法 Demo，不需要 `.avid`；
+下面区分已交付能力与待验收内容，不把开发者预览视为完整 UE/.NET 替代层。
 
 | 开始开发 | 已跑通的能力 | 样例与用法 |
 | --- | --- | --- |
-| C# 玩法 | BeginPlay/Tick/EndPlay、计时、收集、复活与胜负；Editor 和 Win64 Development/Shipping 包 | [PickupRush](Samples/CSharp/PickupRush/README.md) |
-| UI 与存档 | UMG 按钮与文本、SaveGame 跨进程读回、存取穿插正文热重载与退出解绑 | [UiSaveDemo](Samples/CSharp/UiSaveDemo/README.md) |
+| C# 玩法 | BeginPlay/Tick/EndPlay、计时、收集、复活与胜负；Editor 和 Win64 Development/Shipping 包 | [用法](Samples/CSharp/PickupRush/README.md) · [C# 源码](Samples/CSharp/PickupRush/PickupRushScript.cs) |
+| UI 与存档 | UMG 按钮/文本、SaveGame 跨进程读回、失败处理；存取穿插正文热重载与退出解绑 | [用法](Samples/CSharp/UiSaveDemo/README.md) · [C# 源码](Samples/CSharp/UiSaveDemo/UiSaveDemoScript.cs) |
 | 项目 UE API | 从 Profile 生成自定义 `UFUNCTION/UPROPERTY` 接口；typed Self、Spawn、cast 与销毁 | [TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) |
 | 联机玩法 | RPC、属性复制与 RepNotify；dedicated/listen 多进程验证 | [NetworkTopology](Samples/CSharp/NetworkTopology/README.md) |
 
-**最新交付**
+**最近补齐**
 
-- [存取与正文热重载](Docs/Phase64/P64.D_Save_Reload_Ownership.md)：**20 轮、165/165** 动作通过；存档对象复用、Load 后旧对象 GC 回收、候选回滚与退出隔离，资源登记不随轮次累积。
-- [存档异常处理](Docs/Phase64/P64.D_UI_Save_Edges.md)：五进程 **31/31** 动作通过；失败读档保留原对象，Reset 与写锁下保存失败不改存档。
-- C# 编译器：修复 [async 初始化隐式上转](Docs/Phase64/P64.D_Async_Initializer_Conversion.md)与 [`&&/||` 短路求值](Docs/Phase64/P64.D_Async_Short_Circuit.md)。
+- **存取与热重载可交错使用**：存档对象复用，Load 后旧对象可由 GC 回收；非法候选回滚后旧逻辑继续运行，退出时解绑按钮并释放 Session。见[实现与验证](Docs/Phase64/P64.D_Save_Reload_Ownership.md)。
+- **失败存取保留有效状态**：读档失败不替换原对象与分数；Reset 不改磁盘存档，写锁导致保存失败时文件保持不变。见[异常流程](Docs/Phase64/P64.D_UI_Save_Edges.md)。
+- **C# 异步语义修正**：[初始化隐式上转](Docs/Phase64/P64.D_Async_Initializer_Conversion.md)和 [`&&/||` 短路求值](Docs/Phase64/P64.D_Async_Short_Circuit.md)，支持样例的延迟 UI 初始化。
 
-**正在补齐：** World 销毁重建、长稳与内存趋势、UI 真实输入/视觉和包内验收。
-上述 20 轮是有界流程，不代表长期运行无泄漏或全场景验收完成。
+**尚未验收：** World 销毁重建、长稳与内存趋势、UI 真实输入/视觉和包内运行；Android UBT/真机及 iOS。
+当前 20 轮热重载验证不代表长期运行无泄漏。具体计数集中列在[验证](#验证)，性能口径见[性能摘要](#性能摘要)。
 
 ## 框架能力
 
@@ -180,6 +181,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 | [完整技术基线](Docs/Phase64/P64_Closeout.md)，候选 `9e08cdc` | Automation **439/439**、.NET **284/284**；10 组 PowerShell 合同、干净候选架构检查和 no-clean Editor UBT 通过 |
 | [PickupRush](Samples/CSharp/PickupRush/README.md) | Editor / Win64 Development / Shipping 均为 **5/5** 事件与胜利状态；包回执 **21/21 / 19/19** |
 | [存取与正文重载专项](Docs/Phase64/P64.D_Save_Reload_Ownership.md) | 组合流程 **165/165** 动作、runner **118/118**、生命周期 **18/18**；103 个快照 owned 为 0，GC 后 borrowed 稳定为 8；纯 UI 重载 **84/84** 回归通过 |
+| [存档与异常流程](Docs/Phase64/P64.D_UI_Save_Edges.md) | 五个独立进程 **31/31** 动作；覆盖保存、重启读取、缺档、GC、读取失败、写锁与组件退出 |
 | [C# 编译器专项](Docs/Phase64/P64.D_Async_Short_Circuit.md) | Guest **140/140**、Semantic **98/98**；新增 **13** 个 IR 执行场景及 WASM 编译，不宣称真实 WASM 执行 |
 
 其他修复证据见 [C# 捕获赋值](Docs/Phase64/P64.D_Captured_Assignment.md)及上方近期交付。
