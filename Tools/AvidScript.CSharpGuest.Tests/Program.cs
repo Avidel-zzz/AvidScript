@@ -12,14 +12,23 @@ internal static class Program
                 Console.WriteLine($"AvidScript.CSharpGuest.Tests.DelegateEvents: {focusedCount}/{focusedCount} passed");
                 return 0;
             }
+            if (args.Length == 1 && args[0] == "--captured-assignments")
+            {
+                int focusedCount = CSharpGuestCapturedAssignmentTests.Run()
+                    + CSharpGuestFlowTests.Run()
+                    + CSharpGuestReferenceTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.CapturedAssignments: {focusedCount}/{focusedCount} passed");
+                return 0;
+            }
             if (args.Length != 0)
             {
-                throw new ArgumentException("Supported argument: --delegate-events; omit arguments for the full suite.");
+                throw new ArgumentException("Supported arguments: --delegate-events, --captured-assignments; omit arguments for the full suite.");
             }
             int count = CSharpGuestLoweringTests.Run()
                 + CSharpGuestOperationTests.Run()
                 + CSharpGuestAdvancedTests.Run()
                 + CSharpGuestFlowTests.Run()
+                + CSharpGuestCapturedAssignmentTests.Run()
                 + CSharpGuestDataTests.Run()
                 + CSharpGuestReferenceTests.Run()
                 + CSharpGuestCliTests.Run()

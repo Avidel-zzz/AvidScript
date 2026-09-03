@@ -1135,7 +1135,7 @@ internal static class CSharpOperationLowerer
             return Malformed(context, operation, blockOrdinal);
         }
 
-        context.TrackCaptureAddressTarget(operation.CaptureId, operation.Children[0], blockOrdinal);
+        context.TrackCaptureTarget(operation.CaptureId, operation.Children[0], blockOrdinal);
         GuestRegister? value = LowerValue(context, operation.Children[0], blockOrdinal, instructions);
         GuestRegister? capture = context.GetOrCreateCapture(
             operation.CaptureId,
@@ -1230,47 +1230,16 @@ internal static class CSharpOperationLowerer
 
         if (target.Kind == "flow_capture_reference")
         {
-            if (context.TryGetCaptureAddressTarget(
-                    target.CaptureId,
-                    out GuestRegister capturedStorage,
-                    out bool capturedStorageIsAddress))
+            if (context.TryGetCaptureTarget(target.CaptureId, out SemanticOperation capturedTarget)
+                && string.Equals(target.TypeId, value.TypeId, StringComparison.Ordinal)
+                && string.Equals(capturedTarget.TypeId, value.TypeId, StringComparison.Ordinal))
             {
-                if (!string.Equals(target.TypeId, value.TypeId, StringComparison.Ordinal))
-                {
-                    return false;
-                }
-
-                instructions.Add(capturedStorageIsAddress
-                    ? new GuestInstruction(
-                        "indirect_store",
-                        null,
-                        new[] { capturedStorage.Id, value.Id },
-                        target.TypeId,
-                        null,
-                        null)
-                    : new GuestInstruction(
-                        "local_store",
-                        null,
-                        new[] { value.Id },
-                        capturedStorage.Id,
-                        null,
-                        null));
-                return true;
+                return StoreValue(context, capturedTarget, value, blockOrdinal, instructions);
             }
 
-            GuestRegister? capture = context.GetOrCreateCapture(
-                target.CaptureId,
-                target.TypeId,
-                blockOrdinal);
-            if (capture is null
-                || !string.Equals(capture.TypeId, value.TypeId, StringComparison.Ordinal))
-            {
-                return false;
-            }
-
-            instructions.Add(new GuestInstruction(
-                "local_store", null, new[] { value.Id }, capture.Id, null, null));
-            return true;
+            context.Add("ASCG1004",
+                $"Block {blockOrdinal} captured assignment target '{target.CaptureId}' has no supported stable storage.");
+            return false;
         }
 
         if (target.Kind == "property_reference")

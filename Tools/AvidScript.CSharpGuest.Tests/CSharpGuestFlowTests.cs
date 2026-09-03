@@ -11,7 +11,7 @@ internal static class CSharpGuestFlowTests
     public static int Run()
     {
         FlowCapturesAndCompoundAssignmentsUseExplicitStorage();
-        AssignmentsCanStoreIntoExistingFlowCaptures();
+        AssignmentsCannotWriteValueOnlyFlowCaptures();
         AssignmentThroughAddressCaptureUpdatesOriginalStorage();
         return 3;
     }
@@ -64,7 +64,7 @@ internal static class CSharpGuestFlowTests
             "flow capture should use a stable explicit storage slot");
     }
 
-    private static void AssignmentsCanStoreIntoExistingFlowCaptures()
+    private static void AssignmentsCannotWriteValueOnlyFlowCaptures()
     {
         SemanticDocument baseline = CSharpGuestSemanticFixture.Create();
         SemanticOperation capture = CSharpGuestSemanticFixture.Operation(
@@ -93,20 +93,10 @@ internal static class CSharpGuestFlowTests
         SemanticDocument document = baseline with { ControlFlowGraphs = new[] { graph } };
 
         CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(document, SemanticHash);
-        GuestModule module = result.Module
-            ?? throw new InvalidOperationException(string.Join(
-                " | ",
-                result.Diagnostics.Select(item => $"{item.Code}:{item.Message}")));
-        GuestInstruction[] instructions = module.Functions
-            .SelectMany(function => function.Blocks)
-            .SelectMany(block => block.Instructions)
-            .ToArray();
-
-        Assert(result.Succeeded && GuestModuleValidator.Validate(module).Succeeded,
-            "flow capture assignment module should lower and validate");
-        Assert(instructions.Count(item => item.Op == "local_store") == 2
-            && instructions.Count(item => item.Op == "global_store") == 1,
-            "capture creation and overwrite should share one explicit storage slot");
+        Assert(!result.Succeeded && result.Module is null
+            && result.Diagnostics.Any(item => item.Code == "ASCG1004"
+                && item.Message.Contains("captured assignment target", StringComparison.Ordinal)),
+            "a literal capture is a value, not a writable assignment target");
     }
 
     private static void AssignmentThroughAddressCaptureUpdatesOriginalStorage()

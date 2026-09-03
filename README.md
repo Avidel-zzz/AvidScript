@@ -35,7 +35,8 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 | 已交付 | [PickupRush](Samples/CSharp/PickupRush/README.md) 的 Editor、Win64 Development/Shipping 包内玩法闭环 |
 | 最近新增 | [独立 UObject 委托来源查询](Docs/Phase64/P64.D_Delegate_Source_Context.md)：Actor 脚本显式订阅其他对象的事件，在回调中通过 `AvidSubscriptions.IsCurrentSource(source)` 区分来源 |
 | 最近新增 | [事件型 Guest](Docs/Phase64/P64.D_EventOnly_Runtime.md) 可省略 Tick，仍保留 Session 心跳；双后端精确校验导出签名，修复 FText/数组共享能力加载 |
-| 本地联调中，未交付 | UI/存档样例已发布并启动，UE 订阅成功；C# 捕获左值写回缺陷仍在修复，跨进程存档闭环尚未验收 |
+| 最近修复 | [C# 捕获赋值](Docs/Phase64/P64.D_Captured_Assignment.md)：短路表达式正确写回静态字段、局部变量和 ref 参数；不支持的捕获目标明确报错 |
+| 本地联调中，未交付 | UI 初始化及三次收集事件已在真实 WASM/UE 中通过；非 Self UObject 的 typed 属性写入仍阻塞存档，跨进程闭环尚未验收 |
 
 ## 已实现
 
@@ -261,6 +262,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 已交付的 **`35e67ad`** [委托来源小节](Docs/Phase64/P64.D_Delegate_Source_Context.md)另通过 UE Automation **10/10**、
 C# 专项 **8/8** 与增量 Editor 构建；这些专项结果不扩充上表的历史全量基线。
 [事件型 Guest 小节](Docs/Phase64/P64.D_EventOnly_Runtime.md)另通过 Runtime/VM/Reload **20/20** 专项与增量构建。
+[C# 捕获赋值修复](Docs/Phase64/P64.D_Captured_Assignment.md)通过 CSharpGuest **133/133**（专项 **12/12**，不重复计数）。
 
 这些是自动化与包内探针证据，不替代真实输入、视觉、设备和长稳验收。
 详见 [P64 记录](Docs/Phase64/P64_Closeout.md)、[Android 边界](Docs/Phase64/P64.D_Android_Readiness.md)

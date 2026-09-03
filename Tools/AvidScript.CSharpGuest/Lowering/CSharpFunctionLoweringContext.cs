@@ -16,7 +16,8 @@ internal sealed class CSharpFunctionLoweringContext
     private readonly IReadOnlyDictionary<string, SemanticUeTypeDeclaration> ueTypesById;
     private readonly Dictionary<string, SemanticCallableParameter> parametersBySymbol = new(StringComparer.Ordinal);
     private readonly Dictionary<string, GuestRegister> capturesById = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, CaptureAddressTarget> captureAddressTargetsById = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SemanticOperation?> captureTargetsById = new(StringComparer.Ordinal);
+    private readonly HashSet<string> writableCaptureIds = new(StringComparer.Ordinal);
     private readonly List<GuestRegister> locals = new();
     private int nextTemporaryOrdinal;
 
@@ -178,7 +179,7 @@ internal sealed class CSharpFunctionLoweringContext
         return false;
     }
 
-    public void TrackCaptureAddressTarget(
+    public void TrackCaptureTarget(
         string? captureId,
         SemanticOperation source,
         int blockOrdinal)
@@ -192,24 +193,40 @@ internal sealed class CSharpFunctionLoweringContext
             && source.Children.Count == 1
                 ? source.Children[0]
                 : source;
-        if (target.Kind is not ("local_reference" or "parameter_reference")
-            || !TryGetStorage(target.SymbolId, out GuestRegister storage))
-        {
-            return;
-        }
+        SemanticOperation? candidate = target.Children.Count == 0
+            && ((target.Kind is "local_reference" or "parameter_reference"
+                    && TryGetStorage(target.SymbolId, out _))
+                || (target.Kind == "field_reference" && TryGetGlobal(target.SymbolId, out _)))
+                ? target
+                : null;
 
-        bool isAlreadyAddress = target.Kind == "parameter_reference"
-            && TryGetParameter(target.SymbolId, out SemanticCallableParameter parameter)
-            && parameter.RefKind != "none";
-        CaptureAddressTarget candidate = new(storage, isAlreadyAddress);
-        if (captureAddressTargetsById.TryGetValue(captureId, out CaptureAddressTarget? existing)
-            && existing != candidate)
+        // Value captures may merge different sources. Only a stable storage identity is writable.
+        if (captureTargetsById.TryGetValue(captureId, out SemanticOperation? existing)
+            && (existing is null || candidate is null
+                || existing.Kind != candidate.Kind || existing.SymbolId != candidate.SymbolId
+                || existing.TypeId != candidate.TypeId))
         {
-            Add("ASCG1004", $"Block {blockOrdinal} flow capture '{captureId}' changed address target.");
-            return;
+            candidate = null;
         }
+        captureTargetsById[captureId] = candidate;
+        if (candidate is null && writableCaptureIds.Contains(captureId))
+        {
+            Add("ASCG1004", $"Block {blockOrdinal} flow capture '{captureId}' changed writable target.");
+        }
+    }
 
-        captureAddressTargetsById.TryAdd(captureId, candidate);
+    public bool TryGetCaptureTarget(string? captureId, out SemanticOperation target)
+    {
+        if (captureId is not null
+            && captureTargetsById.TryGetValue(captureId, out SemanticOperation? found)
+            && found is not null)
+        {
+            writableCaptureIds.Add(captureId);
+            target = found;
+            return true;
+        }
+        target = null!;
+        return false;
     }
 
     public bool TryGetCaptureAddressTarget(
@@ -217,11 +234,13 @@ internal sealed class CSharpFunctionLoweringContext
         out GuestRegister storage,
         out bool isAlreadyAddress)
     {
-        if (captureId is not null
-            && captureAddressTargetsById.TryGetValue(captureId, out CaptureAddressTarget? target))
+        if (TryGetCaptureTarget(captureId, out SemanticOperation target)
+            && target.Kind is "local_reference" or "parameter_reference"
+            && TryGetStorage(target.SymbolId, out storage))
         {
-            storage = target.Storage;
-            isAlreadyAddress = target.IsAlreadyAddress;
+            isAlreadyAddress = target.Kind == "parameter_reference"
+                && TryGetParameter(target.SymbolId, out SemanticCallableParameter parameter)
+                && parameter.RefKind != "none";
             return true;
         }
 
@@ -433,8 +452,6 @@ internal sealed class CSharpFunctionLoweringContext
         constant = new GuestConstant(kind, value);
         return true;
     }
-    private sealed record CaptureAddressTarget(GuestRegister Storage, bool IsAlreadyAddress);
-
     public void Add(string code, string message)
     {
         Diagnostics.Add(new GuestDiagnostic(
