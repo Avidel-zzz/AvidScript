@@ -1,6 +1,6 @@
 # Phase 63 收尾记录
 
-状态：候选冻结前，待集中 Gate
+状态：已完成并通过集中 Gate
 
 ## 交付结果
 
@@ -16,14 +16,17 @@
 - Runtime 统一处理后台暂停、前台恢复、低内存和 World teardown。恢复前校验 Runtime、
   module、World 与 owner generation；失效 Session 取消 Timer/continuation 后无 Guest 回调卸载。
 
-## 集中 Gate 条件
+## Gate 证据
 
-- Agent Harness audit 与干净提交 architecture check；
-- 固定 .NET 8.0.416 全套测试；
-- 发布、package、Android dependency、Wasmtime toolchain、Cook/receipt 与 workflow 合同；
-- UE5.8 Win64 Development no-clean UBT；
-- 完整 `AvidScript.*` Automation，要求 Found、Completed、Succeeded 完全相等，
-  `0 Failed`、`0 NotRun`、Queue Empty 和进程退出码 `0`。
+- Agent Harness audit 与干净候选 architecture check 通过。
+- 固定 .NET 8.0.416 套件：`284/284`。
+- 发布、package、Android dependency、Wasmtime toolchain、Cook/receipt 与 workflow 合同全部通过。
+- UE5.8 `AvidTPSTemplateEditor Win64 Development` no-clean UBT：`Result: Succeeded`。
+- 完整 `AvidScript.*` Automation：`433/433`，`0 Failed`、`0 NotRun`、Queue Empty、进程退出码 `0`。
+- 正式报告绑定提交 `26d050fbefc09f2465a04c7d739c39de679501b1` 与 tree
+  `a25b5a7e1cc1dd5fd3f0d0bbfe450dc4c0b8c380`，并通过仓库内证据校验器。
+- 首轮完整 Automation 发现的生成式 WorldSubsystem `Deinitialize` 时序回归已修复，
+  定点复验与最终完整 Automation 均通过。
 
 ## 平台边界与转移项
 

@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "phase_id": 63,
+  "run_id": "P63-26d050f-20260904-001",
+  "status": "attested",
+  "verified": {
+    "commit": "26d050fbefc09f2465a04c7d739c39de679501b1",
+    "tree": "a25b5a7e1cc1dd5fd3f0d0bbfe450dc4c0b8c380",
+    "state_sha256": "d0b6ffa02619406fcd9d2230fd8548433ee6583105de2ada6d8347ec80674ea3"
+  },
+  "gate_report_sha256": "3ab094276a9c3c23029e5f2db69aa942bf661a5603b43dadf65280f722b61c52",
+  "checks": {
+    "architecture_clean": true,
+    "phase_whitespace_clean": true,
+    "candidate_impact_analysis": true,
+    "dotnet_284_of_284": true,
+    "powershell_contracts": true,
+    "harness_audit": true,
+    "ue58_no_clean_editor_build": true,
+    "automation_433_of_433": true,
+    "formal_evidence_valid": true
+  },
+  "platform_scope": {
+    "ue_version": "5.8",
+    "win64_development": true,
+    "win64_shipping_baseline": true,
+    "android_arm64_cross_aot": true,
+    "android_ubt": false,
+    "android_device": false,
+    "ios_aot": false
+  },
+  "transferred_boundaries": [
+    "Android UBT, package, install and device lifecycle validation move to Phase 64",
+    "iOS remote toolchain, signing and device validation remain future platform work"
+  ],
+  "human_acceptance": {
+    "real_game_pie": false,
+    "mobile_device_install": false,
+    "mobile_background_resume": false,
+    "long_running_gameplay": false,
+    "automation_does_not_impersonate_human_acceptance": true
+  },
+  "invocations": {
+    "ubt": 1,
+    "automation": 1,
+    "full_gate": 1,
+    "budget_exception_recorded": false
+  },
+  "attested_at_utc": "2026-09-03T17:02:01.4263540+00:00"
+}
