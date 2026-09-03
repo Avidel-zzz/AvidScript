@@ -82,7 +82,8 @@ function Publish-AvidScriptGeneratedTypeCookPackage {
         [Parameter(Mandatory = $true)][string]$PackageDescriptorPath,
         [Parameter(Mandatory = $true)][string]$ProjectRoot,
         [Parameter(Mandatory = $true)][string]$OutputRoot,
-        [ValidateSet('Development', 'Shipping')][string]$Configuration = 'Development'
+        [ValidateSet('Development', 'Shipping')][string]$Configuration = 'Development',
+        [ValidateSet('Win64', 'Android')][string]$TargetPlatform = 'Win64'
     )
 
     $PackageDescriptorPath = (Resolve-Path -LiteralPath $PackageDescriptorPath).Path
@@ -104,9 +105,9 @@ function Publish-AvidScriptGeneratedTypeCookPackage {
         [string]$Descriptor.reload.native_structure_sha256 -cnotmatch '^[0-9a-f]{64}$') {
         throw "Generated type package descriptor is invalid for Cook publication."
     }
-    if ($Configuration -ceq 'Shipping' -and
+    if (($Configuration -ieq 'Shipping' -or $TargetPlatform -ieq 'Android') -and
         [string]$Descriptor.execution_backend -cne 'wasmtime_precompiled') {
-        throw "Shipping Generated Type packages require a precompiled Runtime module."
+        throw "$TargetPlatform $Configuration Generated Type packages require a precompiled Runtime module."
     }
 
     $TypeManifestPath = Resolve-AvidScriptCookPackageArtifactPath `
@@ -130,7 +131,23 @@ function Publish-AvidScriptGeneratedTypeCookPackage {
         -RuntimeManifestPath $RuntimeManifestPath `
         -ProjectRoot $ProjectRoot `
         -ModuleId ([string]$Descriptor.runtime_module_id) `
+        -TargetPlatform $TargetPlatform `
         -Configuration $Configuration
+    $ExpectedArchitecture = if ($TargetPlatform -ieq 'Android') { 'arm64' } else { 'x86_64' }
+    $ExpectedTargetTriple = if ($TargetPlatform -ieq 'Android') {
+        'aarch64-linux-android'
+    }
+    else {
+        'x86_64-pc-windows-msvc'
+    }
+    if ([string]$RuntimePackage.ModuleId -cne [string]$Descriptor.runtime_module_id -or
+        [string]$RuntimePackage.PackageId -cnotmatch '^[0-9a-f]{64}$' -or
+        [string]$RuntimePackage.Platform -cne $TargetPlatform.ToLowerInvariant() -or
+        [string]$RuntimePackage.Architecture -cne $ExpectedArchitecture -or
+        [string]$RuntimePackage.TargetTriple -cne $ExpectedTargetTriple -or
+        [string]$RuntimePackage.Configuration -cne $Configuration.ToLowerInvariant()) {
+        throw 'Generated Type Runtime publication identity is invalid.'
+    }
     $GeneratedPackageIdentityBytes = [System.Text.Encoding]::UTF8.GetBytes(
         "$($Descriptor.generation_key_sha256)`n$TypeSha256`n$($RuntimePackage.ModuleId)`n$($RuntimePackage.PackageId)")
     $GeneratedPackageId = [System.Convert]::ToHexString(
@@ -209,6 +226,10 @@ function Publish-AvidScriptGeneratedTypeCookPackage {
     return [pscustomobject][ordered]@{
         ModuleId = [string]$RuntimePackage.ModuleId
         PackageId = [string]$RuntimePackage.PackageId
+        Configuration = [string]$RuntimePackage.Configuration
+        Platform = [string]$RuntimePackage.Platform
+        Architecture = [string]$RuntimePackage.Architecture
+        TargetTriple = [string]$RuntimePackage.TargetTriple
         GeneratedTypePackageId = $GeneratedPackageId
         DescriptorPath = $CurrentPath
         BundleRoot = $BundleRoot

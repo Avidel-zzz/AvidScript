@@ -29,38 +29,21 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 
 | 领域 | 已验证能力 |
 | --- | --- |
-| 游戏生命周期 | `BeginPlay`、`Tick`、`EndPlay`、Timer、Overlap、Gameplay Event |
-| 启动编排 | 显式 Startup Scenario 驱动 world/existing/spawn 三种目标挂载，支持 world 白名单、原子回滚、幂等激活与 teardown 回收 |
-| 可玩闭环 | `PickupRush` 用同一份 C# 完成计时、收集、复活和胜负逻辑；Editor、Win64 Development/Shipping 包内行为报告均通过 |
-| UE API | 由 Reflection/Profile 生成普通 `UFUNCTION`、`UPROPERTY`、UE Interface 与项目自定义 API |
-| UE 类型 | UObject capability、`FVector`、`FRotator`、`FTransform`、固定 `USTRUCT`、`FName`、`FString`、一维 `TArray<T>` |
-| C# 定义 UE 类型 | Actor、Component、World/GameInstance Subsystem、继承、override、`UPROPERTY`、`UFUNCTION` 与默认参数 |
-| 异步 | `Delay`、`NextTick`、异步对象加载、latent `FooAsync`、Blueprint AsyncAction outcome 与受控 `async/await` |
-| 委托 | 动态单播租约、多播订阅、强类型 `return/ref/out` 回调，以及生成式 `ExecuteX/BroadcastX` 主动调用 |
-| Blueprint | 自声明 callable/event 双向调用、`before/after/replace` 事件接管，以及 AsyncAction 强类型 awaitable 生成 |
-| 网络 | Server/Client/NetMulticast RPC、replicated property、RPC/RepNotify handler、dedicated/listen 多进程闭环 |
-| 热重载 | 方法体事务式替换、候选回滚、状态帧与 handle 生命周期隔离 |
-| 发布 | 内容寻址模块包、catalog v2 多平台 variant 精确选择、无头 C# Release、包回执校验、Generated Type 预编译，以及已通过的 Win64 Development/Shipping BuildCookRun 与打包进程 Oracle |
-| 运行时安全 | Wasmtime fuel/epoch/内存/Host Call 预算、共享 watchdog、Session 故障隔离，以及后台恢复 generation gate、低内存缓存回收与 World teardown 自动取消 |
-| 后端 | Wasmtime 45 Win64 JIT/AOT；Windows 主机可交叉生成 Android arm64 AOT；WAMR 兼容后端 |
-| 增量构建 | 双层产物缓存与 persistent Worker；无修改热构建零编译调用，5 轮中位数 `806 ms` |
-| 结构化诊断 | Debug Map v2、同步/async 序列点、稳定 probe ID、双后端 probe 执行、跨层调用栈、Editor 源码导航 |
-| 同步调试 | 顶层 `void` 导出的非阻塞 pause、continue、step-into、4 KiB 状态帧、双后端恢复与源码断点目录 |
-| 调试变量 | Session 按 probe 与词法作用域生成有界只读 snapshot，支持标量、enum、ObjectHandle/能力 token 与值类型摘要 |
-| Editor 调试 | PIE 目标选择、源码断点、attach/pause/continue/step、暂停变量、源码跳转与 reload/teardown 安全 |
-| Profiler | 全链路埋点与 UE Trace；Editor capture、过滤、热点、源码跳转和 JSON 导出面板 |
-| C# 工作区 | `.slnx`、WASI 工程、固定 SDK、离线源码索引，以及 Visual Studio/Rider/VS Code 启动命令 |
+| 生命周期与启动 | `BeginPlay/Tick/EndPlay`、Timer、Overlap、Gameplay Event；Startup Scenario 自动挂载、原子回滚与 teardown |
+| C# 游戏样例 | `PickupRush` 计时、收集、复活和胜负逻辑；同源 Editor、Win64 Development/Shipping 包内行为验证通过 |
+| 生成式 UE API | Reflection/Profile 生成 `UFUNCTION`、`UPROPERTY`、Interface 与项目自定义 API；支持 UObject、向量/变换、固定 `USTRUCT`、名称/字符串、一维 `TArray<T>` |
+| C# 定义 UE 类型 | Actor、Component、World/GameInstance Subsystem，含继承、override、属性、函数与默认参数 |
+| 异步与委托 | 受控 `async/await`、Delay/NextTick、异步加载、Latent、AsyncAction；单播/多播、强类型 `return/ref/out` 与主动调用 |
+| Blueprint 与网络 | callable/event 双向交互；Server/Client/NetMulticast RPC、属性复制与 RepNotify，dedicated/listen 多进程验证 |
+| 热重载与安全 | 方法体事务式替换与回滚；ObjectHandle、Session 隔离、执行预算、后台恢复、低内存回收及 teardown 自动取消 |
+| Cook 与发布 | 内容寻址模块、多平台 catalog、无头 Release、Generated Type 预编译；Win64 Development/Shipping BuildCookRun 与回执校验 |
+| VM 后端 | Wasmtime 45 Win64 JIT/AOT；Android arm64 脚本及 Generated Type 交叉 AOT；WAMR 兼容后端 |
+| 构建与 IDE | 增量缓存、persistent Worker、`.slnx`/WASI 工作区、离线源码索引与 Visual Studio/Rider/VS Code 启动 |
+| 调试与 Profiler | 源码映射、跨层调用栈、PIE 目标、受控同步断点/步进、只读变量；UE Trace、热点与 JSON 导出 |
 
-当前主线已完成 C# 游戏逻辑、生成式 UE API、生命周期/事件/异步/网络、热重载、Editor 调试与
-Profiler，以及 Win64 Development/Shipping 的确定性 Cook 发布闭环。Phase 63 已完成多平台
-catalog、Android arm64 受控静态依赖、真实 C# 交叉 AOT 发布，以及应用后台恢复、低内存回收和
-World teardown 的 Runtime 生命周期协调；Android UBT、打包和真机执行仍待后续验收。
-Phase 64 已接通严格 scenario、Runtime 自动挂载与首个 C# 可玩纵向切片；未指定 scenario 的 World
-默认保持空闲；Win64 Development/Shipping package 已通过，人工游玩与移动端验收仍在推进。
-
-集中 Gate 已通过 `.NET 284/284`、AvidScript Automation `433/433`、UE5.8 no-clean UBT、
-干净架构检查和发布/Cook/回执合同。详细证据见 [Phase 63 Gate 摘要](Docs/Phase63/P63_Gate_Summary.json)
-与 [收尾记录](Docs/Phase63/P63_Closeout.md)。
+**最近落地：** [PickupRush](Samples/CSharp/PickupRush/README.md) 已完成 Win64 包内事件与胜利状态验证；
+[Android 就绪工具](Docs/Phase64/P64.D_Android_Readiness.md) 已提供 SDK 预检、平台回执和设备运行入口。
+Android APK/真机及人工游玩仍待验收，不能用交叉 AOT 或自动事件注入替代。
 
 ## C# 游戏脚本
 
@@ -164,6 +147,8 @@ Phase 56 完整游戏 workload 中，Small gameplay、Dense gameplay 与 Lifecyc
 P50 比率分别为 **`0.469x`、`0.513x`、`0.391x`**。编译器托管数组区域在 `N>=64`
 的冻结 workload 中领先 Puerts TArray **17.47x-20.04x**。
 
+增量构建的无修改热路径为零编译调用，5 轮中位数 `806 ms`。
+
 P60 的新增 UE 交互路径均在 warm path 禁止名称反射查找，并使用固定 20 组样本：
 
 | P60 路径 | UE/原生 P50 | AvidScript P50 | 比率或预算 |
@@ -242,10 +227,9 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 
 ## 路线图
 
-1. **P62 已完成**：Win64 Cook/Shipping、发布资产策略与脚本故障隔离；
-2. **P63 已完成**：多平台 catalog、Android arm64 交叉 AOT 与移动 Runtime 生命周期；
-3. **P64**：真实小型游戏 Demo 与移动真机验收；
-4. **P65**：跨框架成熟度、稳定性与性能领导力收口。
+1. **P62/P63 已收尾**：Win64 Cook/Shipping、多平台 catalog、Android 交叉 AOT 与移动 Runtime 生命周期；
+2. **P64 进行中**：游戏 Demo、跨平台运行工具与集中回归；移动真机验收仍是开放项；
+3. **后续发布工程**：安装/升级、兼容与诊断，逐项补齐类型、移动端、真实游戏及性能验收缺口。
 
 路线图只表示工程顺序，不代表对应能力已经可用。
 
@@ -254,8 +238,10 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 最近一次完整基线为 **AvidScript Automation `433/433`、.NET `284/284` 通过**。
 Phase 63 的 clean detached architecture、UE5.8 no-clean UBT、Android arm64 交叉 AOT、
 发布/Cook/回执合同与移动 Runtime 生命周期均已通过，并已完成正式 attestation 与 close。
+证据见 [Phase 63 Gate](Docs/Phase63/P63_Gate_Summary.json) 与 [收尾记录](Docs/Phase63/P63_Closeout.md)。
 Phase 64 的 `PickupRush` Editor、Development/Shipping package 均验证 5/5 事件、胜利状态与零丢弃回调；
 两种打包配置的精确回执分别为 21/21、19/19。该批次证据尚未计入完整 Automation 基线。
+Android 就绪入口及当前未运行项见 [P64.D 验证记录](Docs/Phase64/P64.D_Android_Readiness.md)。
 
 阶段状态与实现证据见 [Docs](Docs/)，开发规则见 [AGENTS.md](AGENTS.md)。
 

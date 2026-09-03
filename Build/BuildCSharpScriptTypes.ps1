@@ -14,7 +14,9 @@ param(
     [ValidateSet("Development", "Shipping")]
     [string]$PackageConfiguration = "Development",
     [switch]$HeadlessRelease,
-    [switch]$SkipRuntimePackage
+    [switch]$SkipRuntimePackage,
+    [ValidateSet("Win64", "Android")]
+    [string]$TargetPlatform = "Win64"
 )
 
 $ErrorActionPreference = "Stop"
@@ -32,6 +34,17 @@ $GeneratorProject = Join-Path $PluginRoot "Tools\AvidScript.UeTypeGenerator\Avid
 $GlobalJsonPath = Join-Path $PluginRoot "global.json"
 $DefaultProjectPath = Join-Path $PluginRoot "Samples\CSharp\ActorLifecycle\AvidScript.ActorLifecycle.csproj"
 $Utf8 = [System.Text.UTF8Encoding]::new($false)
+
+if ($TargetPlatform -ieq "Android" -and -not $HeadlessRelease) {
+    throw "Android Generated Type packages require -HeadlessRelease."
+}
+$ExpectedArchitecture = if ($TargetPlatform -ieq "Android") { "arm64" } else { "x86_64" }
+$ExpectedTargetTriple = if ($TargetPlatform -ieq "Android") {
+    "aarch64-linux-android"
+}
+else {
+    "x86_64-pc-windows-msvc"
+}
 
 foreach ($RequiredFile in @(
         $DotNetPath,
@@ -78,7 +91,7 @@ if (-not $SkipRuntimePackage) {
     if (-not (Test-Path -LiteralPath $RequiredRuntimeBuilder -PathType Leaf)) {
         throw "Formal C# runtime release entry is missing: $RequiredRuntimeBuilder"
     }
-    if ($PackageConfiguration -ceq "Shipping" -and -not $HeadlessRelease) {
+    if ($PackageConfiguration -ieq "Shipping" -and -not $HeadlessRelease) {
         throw "Shipping Generated Type packages require -HeadlessRelease."
     }
 }
@@ -231,6 +244,7 @@ if (-not $SkipRuntimePackage) {
                 -BindingPackagePath $BindingPackageManifestPath `
                 -RuntimeBindingPackagePath $BindingPackageManifestPath `
                 -GeneratedTypeManifestPath $GeneratedManifestPath `
+                -TargetPlatform $TargetPlatform `
                 -Configuration $PackageConfiguration)
         $ReleaseExitCode = $LASTEXITCODE
         if ($ReleaseExitCode -ne 0) {
@@ -245,8 +259,13 @@ if (-not $SkipRuntimePackage) {
         catch {
             throw "Headless Generated Type Runtime release did not return valid JSON."
         }
-        if ([string]$ReleaseSummary.result -cne "avidscript_module_release_succeeded" -or
+        if ([int]$ReleaseSummary.schema_version -ne 1 -or
+            [string]$ReleaseSummary.result -cne "avidscript_module_release_succeeded" -or
             [string]$ReleaseSummary.module_id -cne $RuntimeModuleId -or
+            [string]$ReleaseSummary.package_id -cnotmatch '^[0-9a-f]{64}$' -or
+            [string]$ReleaseSummary.target_platform -cne $TargetPlatform.ToLowerInvariant() -or
+            [string]$ReleaseSummary.architecture -cne $ExpectedArchitecture -or
+            [string]$ReleaseSummary.target_triple -cne $ExpectedTargetTriple -or
             -not ([string]$ReleaseSummary.configuration).Equals(
                 $PackageConfiguration,
                 [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -338,12 +357,22 @@ if (-not $SkipRuntimePackage) {
             -PackageDescriptorPath $GeneratedPackagePath `
             -ProjectRoot $ProjectRoot `
             -OutputRoot $CookOutputRoot `
+            -TargetPlatform $TargetPlatform `
             -Configuration $PackageConfiguration
+        if ([string]$CookPackage.ModuleId -cne $RuntimeModuleId -or
+            [string]$CookPackage.PackageId -cne [string]$ReleaseSummary.package_id -or
+            [string]$CookPackage.Platform -cne $TargetPlatform.ToLowerInvariant() -or
+            [string]$CookPackage.Architecture -cne $ExpectedArchitecture -or
+            [string]$CookPackage.TargetTriple -cne $ExpectedTargetTriple -or
+            [string]$CookPackage.Configuration -cne $PackageConfiguration.ToLowerInvariant()) {
+            throw "Generated Type Cook publication identity does not match the headless Runtime release."
+        }
     }
 }
 
 Write-Host "AvidScript C# script type generation succeeded."
 Write-Host "  source_id=$SourceId"
+Write-Host "  target_platform=$TargetPlatform"
 Write-Host "  binding_package=$($BindingPackage.PackageHash)"
 Write-Host "  semantic=$SemanticPath"
 Write-Host "  ue_types=$(@($GeneratedManifest.types).Count)"

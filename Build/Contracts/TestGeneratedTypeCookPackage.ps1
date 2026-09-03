@@ -7,7 +7,7 @@ $Root = Join-Path `
     ("AvidScriptCookPackageContract_$PID`_$([Guid]::NewGuid().ToString('N'))")
 $Utf8 = [System.Text.UTF8Encoding]::new($false)
 $Passed = 0
-$Total = 10
+$Total = 0
 $Failure = $null
 
 function Write-TestJson {
@@ -79,13 +79,38 @@ function Invoke-ContractTest {
         [Parameter(Mandatory = $true)][scriptblock]$Body
     )
 
+    $script:Total++
     try {
         & $Body
         $script:Passed++
+        Write-Output "PASS $Name"
     }
     catch {
         throw "$Name failed: $($_.Exception.Message)"
     }
+}
+
+function Get-TestBuilderIdentityGuard {
+    param([Parameter(Mandatory = $true)][string]$Token)
+
+    $Tokens = $null
+    $ParseErrors = $null
+    $Ast = [System.Management.Automation.Language.Parser]::ParseFile(
+        (Join-Path $BuildRoot 'BuildCSharpScriptTypes.ps1'),
+        [ref]$Tokens,
+        [ref]$ParseErrors)
+    if ($ParseErrors.Count -ne 0) {
+        throw 'Generated Type builder has PowerShell parse errors.'
+    }
+    $Guards = @($Ast.FindAll({
+                param($Node)
+                $Node -is [System.Management.Automation.Language.IfStatementAst] -and
+                    $Node.Clauses[0].Item1.Extent.Text.Contains($Token)
+            }, $true))
+    if ($Guards.Count -ne 1) {
+        throw "Expected one Generated Type identity guard for $Token."
+    }
+    return [scriptblock]::Create($Guards[0].Extent.Text)
 }
 
 try {
@@ -220,10 +245,15 @@ try {
         $script:Second = Publish-AvidScriptGeneratedTypeCookPackage `
             -PackageDescriptorPath $DescriptorPath `
             -ProjectRoot $ProjectRoot `
-            -OutputRoot $OutputRoot
+            -OutputRoot $OutputRoot `
+            -TargetPlatform Win64
         if ($First.ModuleId -cne $Second.ModuleId -or
             $First.PackageId -cne $Second.PackageId -or
             $First.GeneratedTypePackageId -cne $Second.GeneratedTypePackageId -or
+            $First.Platform -cne 'win64' -or
+            $First.Architecture -cne 'x86_64' -or
+            $First.TargetTriple -cne 'x86_64-pc-windows-msvc' -or
+            $First.Configuration -cne 'development' -or
             $First.FileCount -ne 2 -or
             $First.RuntimeFileCount -ne 7 -or
             $FirstPointerIdentity -cne (Get-AvidScriptCookPackageSha256 $Second.DescriptorPath) -or
@@ -382,9 +412,11 @@ try {
             -LiteralPath $ScriptTypeBuilderPath
         foreach ($RequiredToken in @(
                 '[string]$PackageConfiguration = "Development"',
+                '[string]$TargetPlatform = "Win64"',
                 '[switch]$HeadlessRelease',
                 'InvokeAvidScriptRelease.ps1',
                 '-GeneratedTypeManifestPath $GeneratedManifestPath',
+                '-TargetPlatform $TargetPlatform',
                 '-Configuration $PackageConfiguration',
                 '"wasmtime_precompiled"')) {
             if (-not $ScriptTypeBuilderSource.Contains($RequiredToken)) {
@@ -395,8 +427,223 @@ try {
             '(?s)if\s*\(\$HeadlessRelease\)\s*\{\s*\$CookPackage\s*=\s*Publish-AvidScriptGeneratedTypeCookPackage') {
             throw 'Editor JIT Generated Type builds are not isolated from the Cook publisher.'
         }
+        if ([regex]::Matches($ScriptTypeBuilderSource, '-TargetPlatform \$TargetPlatform').Count -ne 2) {
+            throw 'Generated Type builder must forward TargetPlatform to Release and Cook publication.'
+        }
     }
 
+    foreach ($GuardKind in @('Release', 'Cook')) {
+        Invoke-ContractTest -Name "$GuardKind return identity validation" -Body {
+            $Token = if ($GuardKind -ceq 'Release') { '$ReleaseSummary.result' } else { '$CookPackage.ModuleId' }
+            $Guard = Get-TestBuilderIdentityGuard -Token $Token
+            foreach ($TargetPlatform in @('Win64', 'Android')) {
+                $RuntimeModuleId = 'avidscript_generated'
+                $PackageConfiguration = 'Development'
+                $ExpectedArchitecture = if ($TargetPlatform -ceq 'Android') { 'arm64' } else { 'x86_64' }
+                $ExpectedTargetTriple = if ($TargetPlatform -ceq 'Android') {
+                    'aarch64-linux-android'
+                }
+                else {
+                    'x86_64-pc-windows-msvc'
+                }
+                $ReleaseSummary = [pscustomobject]@{
+                    schema_version = 1
+                    result = 'avidscript_module_release_succeeded'
+                    module_id = $RuntimeModuleId
+                    package_id = ('a' * 64)
+                    configuration = 'development'
+                    target_platform = $TargetPlatform.ToLowerInvariant()
+                    architecture = $ExpectedArchitecture
+                    target_triple = $ExpectedTargetTriple
+                }
+                $CookPackage = [pscustomobject]@{
+                    ModuleId = $RuntimeModuleId
+                    PackageId = $ReleaseSummary.package_id
+                    Configuration = 'development'
+                    Platform = $TargetPlatform.ToLowerInvariant()
+                    Architecture = $ExpectedArchitecture
+                    TargetTriple = $ExpectedTargetTriple
+                }
+                & $Guard
+                $Identity = if ($GuardKind -ceq 'Release') { $ReleaseSummary } else { $CookPackage }
+                foreach ($Property in @($Identity.PSObject.Properties)) {
+                    $Original = $Property.Value
+                    $Property.Value = if ($Property.Name -ceq 'schema_version') { 0 } else { 'drifted' }
+                    $Rejected = $false
+                    try { & $Guard }
+                    catch { $Rejected = $_.Exception.Message.Contains('identity') }
+                    finally { $Property.Value = $Original }
+                    if (-not $Rejected) {
+                        throw "$GuardKind accepted $TargetPlatform identity drift in $($Property.Name)."
+                    }
+                }
+            }
+        }
+    }
+
+    foreach ($AndroidConfiguration in @('Development', 'Shipping')) {
+        Invoke-ContractTest -Name "Android $AndroidConfiguration requires HeadlessRelease" -Body {
+            foreach ($SkipPackage in @($false, $true)) {
+                $Rejected = $false
+                try {
+                    & (Join-Path $BuildRoot 'BuildCSharpScriptTypes.ps1') `
+                        -DotNetPath 'unused' `
+                        -SourcePath 'unused' `
+                        -SourceId 'Fixture.cs' `
+                        -BindingPackageManifestPath 'unused' `
+                        -TargetPlatform android `
+                        -PackageConfiguration $AndroidConfiguration `
+                        -SkipRuntimePackage:$SkipPackage | Out-Null
+                }
+                catch {
+                    $Rejected = $_.Exception.Message.Contains(
+                        'Android Generated Type packages require -HeadlessRelease')
+                }
+                if (-not $Rejected) {
+                    throw 'Android reached generation without HeadlessRelease.'
+                }
+            }
+        }
+    }
+
+    $AndroidDescriptor = $Descriptor | ConvertTo-Json -Depth 64 | ConvertFrom-Json -Depth 64
+    $AndroidDescriptor.execution_backend = 'wasmtime_jit'
+    Write-TestJson -Path $DescriptorPath -Value $AndroidDescriptor
+    foreach ($AndroidConfiguration in @('Development', 'Shipping')) {
+        Invoke-ContractTest -Name "Android $AndroidConfiguration rejects JIT Generated Type package" -Body {
+            $PointerIdentity = Get-AvidScriptCookPackageSha256 $First.DescriptorPath
+            $CatalogIdentity = Get-AvidScriptCookPackageSha256 $CatalogPath
+            $Rejected = $false
+            try {
+                Publish-AvidScriptGeneratedTypeCookPackage `
+                    -PackageDescriptorPath $DescriptorPath `
+                    -ProjectRoot $ProjectRoot `
+                    -OutputRoot $OutputRoot `
+                    -TargetPlatform android `
+                    -Configuration $AndroidConfiguration | Out-Null
+            }
+            catch {
+                $Rejected = $_.Exception.Message.Contains('require a precompiled Runtime module')
+            }
+            if (-not $Rejected -or
+                $PointerIdentity -cne (Get-AvidScriptCookPackageSha256 $First.DescriptorPath) -or
+                $CatalogIdentity -cne (Get-AvidScriptCookPackageSha256 $CatalogPath)) {
+                throw 'Android JIT rejection failed or changed published identities.'
+            }
+        }
+    }
+
+    $AndroidRuntimeManifest = $RuntimeManifest | ConvertTo-Json -Depth 64 | ConvertFrom-Json -Depth 64
+    $AndroidRuntimeManifest.execution.target_triple = 'aarch64-linux-android'
+    $AndroidRuntimeManifest.execution.cpu_features = 'arm64-v8a'
+    $AndroidRuntimeManifest.execution.policy = 'require_precompiled'
+    Write-TestJson -Path $RuntimePath -Value $AndroidRuntimeManifest
+    $AndroidDescriptor.execution_backend = 'wasmtime_precompiled'
+    $AndroidDescriptor.runtime_manifest.sha256 = Get-AvidScriptCookPackageSha256 $RuntimePath
+    Write-TestJson -Path $DescriptorPath -Value $AndroidDescriptor
+    foreach ($AndroidConfiguration in @('Development', 'Shipping')) {
+        Invoke-ContractTest -Name "Android $AndroidConfiguration precompiled arm64 publication" -Body {
+            $AndroidPackage = Publish-AvidScriptGeneratedTypeCookPackage `
+                -PackageDescriptorPath $DescriptorPath `
+                -ProjectRoot $ProjectRoot `
+                -OutputRoot $OutputRoot `
+                -TargetPlatform Android `
+                -Configuration $AndroidConfiguration
+            $Published = Get-Content -Raw -LiteralPath $AndroidPackage.RuntimeDescriptorPath |
+                ConvertFrom-Json -Depth 64
+            $PublishedRuntime = Get-Content -Raw -LiteralPath (
+                Join-Path $AndroidPackage.RuntimePackageRoot 'runtime.avidscript.json') |
+                ConvertFrom-Json -Depth 64
+            $AndroidCatalog = Get-Content -Raw -LiteralPath $CatalogPath | ConvertFrom-Json -Depth 64
+            $Variant = @($AndroidCatalog.modules[0].variants | Where-Object {
+                    $_.package_id -ceq $AndroidPackage.PackageId
+                })
+            $Pointer = Get-Content -Raw -LiteralPath $AndroidPackage.DescriptorPath |
+                ConvertFrom-Json -Depth 64
+            $Resolved = Resolve-TestGeneratedTypeRuntimeDescriptor `
+                -Pointer $Pointer -Catalog $AndroidCatalog -CatalogPath $CatalogPath
+            if ($AndroidPackage.Platform -cne 'android' -or
+                $AndroidPackage.Architecture -cne 'arm64' -or
+                $AndroidPackage.TargetTriple -cne 'aarch64-linux-android' -or
+                $AndroidPackage.Configuration -cne $AndroidConfiguration.ToLowerInvariant() -or
+                $Published.platform -cne 'android' -or
+                $Published.configuration -cne $AndroidConfiguration.ToLowerInvariant() -or
+                $Published.execution.policy -cne 'require_precompiled' -or
+                $Published.execution.target_triple -cne 'aarch64-linux-android' -or
+                $Published.execution.cpu_features -cne 'arm64-v8a' -or
+                $PublishedRuntime.execution.format -cne 'wasmtime_serialized_v1' -or
+                $PublishedRuntime.execution.policy -cne 'require_precompiled' -or
+                $PublishedRuntime.execution.PSObject.Properties.Name -ccontains 'fallback' -or
+                $Variant.Count -ne 1 -or $Variant[0].platform -cne 'android' -or
+                $Variant[0].architecture -cne 'arm64' -or
+                $Resolved -cne $AndroidPackage.RuntimeDescriptorPath -or
+                @($AndroidCatalog.modules[0].variants | Where-Object {
+                    $_.platform -ceq 'win64' -and $_.package_id -ceq $First.PackageId
+                }).Count -ne 1) {
+                throw 'Android publication lost its arm64/AOT identity, pointer resolution, or Win64 variant.'
+            }
+        }
+    }
+
+    foreach ($InvalidExecution in @(
+            @{ Name = 'JIT fallback policy'; Field = 'policy'; Value = 'prefer_precompiled' },
+            @{ Name = 'loose WASM'; Field = 'format'; Value = 'wasm' },
+            @{ Name = 'Win64 target'; Field = 'target_triple'; Value = 'x86_64-pc-windows-msvc' })) {
+        Invoke-ContractTest -Name "Android rejects $($InvalidExecution.Name)" -Body {
+            $InvalidManifest = $AndroidRuntimeManifest | ConvertTo-Json -Depth 64 |
+                ConvertFrom-Json -Depth 64
+            $InvalidManifest.execution.($InvalidExecution.Field) = $InvalidExecution.Value
+            Write-TestJson -Path $RuntimePath -Value $InvalidManifest
+            $AndroidDescriptor.runtime_manifest.sha256 = Get-AvidScriptCookPackageSha256 $RuntimePath
+            Write-TestJson -Path $DescriptorPath -Value $AndroidDescriptor
+            $Rejected = $false
+            try {
+                Publish-AvidScriptGeneratedTypeCookPackage `
+                    -PackageDescriptorPath $DescriptorPath `
+                    -ProjectRoot $ProjectRoot `
+                    -OutputRoot $OutputRoot `
+                    -TargetPlatform Android | Out-Null
+            }
+            catch {
+                $Rejected = $_.Exception.Message.Contains('Runtime manifest execution contract is invalid')
+            }
+            if (-not $Rejected) {
+                throw "Android accepted $($InvalidExecution.Name)."
+            }
+        }
+    }
+
+    Invoke-ContractTest -Name 'Cook publisher rejects Runtime return identity drift' -Body {
+        function Publish-AvidScriptModuleReleasePackage { return $InvalidPackage }
+        foreach ($Field in @('ModuleId', 'PackageId', 'Platform', 'Architecture', 'TargetTriple', 'Configuration')) {
+            $InvalidPackage = [pscustomobject]@{
+                ModuleId = 'avidscript_generated'
+                PackageId = ('a' * 64)
+                Platform = 'android'
+                Architecture = 'arm64'
+                TargetTriple = 'aarch64-linux-android'
+                Configuration = 'development'
+            }
+            $InvalidPackage.$Field = 'drifted'
+            $Rejected = $false
+            try {
+                Publish-AvidScriptGeneratedTypeCookPackage `
+                    -PackageDescriptorPath $DescriptorPath `
+                    -ProjectRoot $ProjectRoot `
+                    -OutputRoot $OutputRoot `
+                    -TargetPlatform Android | Out-Null
+            }
+            catch {
+                $Rejected = $_.Exception.Message.Contains('Runtime publication identity is invalid')
+            }
+            if (-not $Rejected) {
+                throw "Cook publisher accepted Runtime identity drift in $Field."
+            }
+        }
+    }
+
+    Write-TestJson -Path $RuntimePath -Value $RuntimeManifest
+    Write-TestJson -Path $DescriptorPath -Value $Descriptor
     Invoke-ContractTest -Name 'Runtime artifact hash rejection' -Body {
         [System.IO.File]::WriteAllBytes(
             $WasmPath,

@@ -37,12 +37,39 @@
     },
     {
       "id": "P64.D",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "Android 只读预检、no-clean 打包与 ADB 探针入口落地；合同 Toolchain 30/30、runner 10/10、Generated Type Cook 22/22、receipt 15/15。5 个 Generated Type 真实 Android AOT 与 Win64 指针恢复完成；Editor RunId 探针 5/5、零丢弃；UE no-clean UBT 通过。Android SDK/APK/设备与人工游玩未验收，已显式转交 P65。详见 Docs/Phase64/P64.D_Android_Readiness.md。",
+      "completed_at_utc": "2026-09-03T19:08:33.6112794+00:00"
     }
   ],
-  "debt": [],
+  "debt": [
+    {
+      "id": "P64-D01-AndroidDevice",
+      "severity": "Important",
+      "found_batch": "P64.D",
+      "scope": "Android SDK/UBT/APK/device and Shipping report transport",
+      "evidence": "Docs/Phase64/P64.D_Android_Readiness.md: 19 toolchain checks, 3 passed, 16 missing; adb_missing/not_run",
+      "deferral_reason": "当前环境无 SDK/ADB；交叉 AOT 不代表 Android 二进制或设备执行通过。",
+      "remediation": "发布门禁保留：安装受控 SDK 后完成 arm64 UBT/APK、Development 真机探针和 Shipping 嵌入命令及报告传输。",
+      "status": "Transferred",
+      "resolution_evidence": "Docs/Phase64/P64.D_Android_Readiness.md",
+      "target_phase": 65,
+      "transfer_reason": "保留为发布前必需的外部平台验收；P64.D 按冻结计划交付当前环境最高真实层，不宣称移动端完成。"
+    },
+    {
+      "id": "P64-D02-ManualGameplay",
+      "severity": "Important",
+      "found_batch": "P64.C",
+      "scope": "PickupRush 键鼠/手柄、视觉与真实游玩",
+      "evidence": "Docs/Phase64/P64.C_PC_Playable_Vertical_Slice.md: 同源 Editor 与两种 Win64 package 自动探针通过；人工游玩未执行。",
+      "deferral_reason": "自动事件注入只证明脚本和状态链路，不替代图形、输入与体验验收。",
+      "remediation": "按样例说明完成键鼠/手柄收集、胜负、重启、视觉与实际地图体验记录。",
+      "status": "Transferred",
+      "resolution_evidence": "Docs/Phase64/P64.C_PC_Playable_Vertical_Slice.md",
+      "target_phase": 65,
+      "transfer_reason": "保留为真实游戏与发布验收项，不以自动探针代替人工体验。"
+    }
+  ],
   "review": {
     "completed": false,
     "evidence": "",
@@ -94,7 +121,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "batch-complete -Phase 64 -BatchId P64.D -Evidence <text>",
-  "revision": 5,
-  "updated_at_utc": "2026-09-03T18:51:01.5261393+00:00"
+  "next_action": "freeze -Phase 64 -ReviewEvidence <text>",
+  "revision": 10,
+  "updated_at_utc": "2026-09-03T19:08:33.6133532+00:00"
 }

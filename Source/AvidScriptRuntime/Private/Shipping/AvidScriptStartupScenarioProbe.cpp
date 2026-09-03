@@ -8,8 +8,10 @@
 #include "HAL/PlatformMisc.h"
 #include "Misc/CommandLine.h"
 #include "Misc/FileHelper.h"
+#include "Misc/Guid.h"
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
+#include "Policies/CondensedJsonPrintPolicy.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 
@@ -54,10 +56,14 @@ TSharedRef<FJsonObject> MakeRotatorObject(const FRotator& Value)
 bool UAvidScriptWorldSubsystem::StartStartupScenarioProbe()
 {
 	FString RequestedReportPath;
-	if (!FParse::Value(
+	const bool bHasReportPath = FParse::Value(
 			FCommandLine::Get(),
 			TEXT("AvidScriptScenarioProbeReport="),
-			RequestedReportPath))
+			RequestedReportPath);
+	FString RunId;
+	const bool bHasRunId = FParse::Value(
+		FCommandLine::Get(), TEXT("AvidScriptScenarioProbeRunId="), RunId);
+	if (!bHasReportPath && !bHasRunId)
 	{
 		return false;
 	}
@@ -69,6 +75,20 @@ bool UAvidScriptWorldSubsystem::StartStartupScenarioProbe()
 	StartupScenarioProbeNextEventSeconds = FirstEventSeconds;
 	StartupScenarioProbeEventIndex = 0;
 	StartupScenarioProbeEvents.Reset();
+	if (bHasRunId)
+	{
+		FGuid ParsedRunId;
+		if (bHasReportPath || !FGuid::ParseExact(RunId, EGuidFormats::Digits, ParsedRunId))
+		{
+			StartupScenarioProbeReportPath = FPaths::Combine(
+				FPaths::ProjectSavedDir(), TEXT("AvidScript/ScenarioProbe/rejected-identity.json"));
+			CompleteStartupScenarioProbe(false, TEXT("probe_identity_invalid"));
+			return true;
+		}
+		RequestedReportPath = FPaths::Combine(
+			FPaths::ProjectSavedDir(), TEXT("AvidScript/ScenarioProbe"),
+			ParsedRunId.ToString(EGuidFormats::Digits) + TEXT(".json"));
+	}
 
 	StartupScenarioProbeReportPath = FPaths::ConvertRelativePathToFull(RequestedReportPath);
 	FPaths::NormalizeFilename(StartupScenarioProbeReportPath);
@@ -242,6 +262,9 @@ void UAvidScriptWorldSubsystem::CompleteStartupScenarioProbe(
 
 	const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
 	Root->SetNumberField(TEXT("schema_version"), 1);
+	FString RunId;
+	FParse::Value(FCommandLine::Get(), TEXT("AvidScriptScenarioProbeRunId="), RunId);
+	Root->SetStringField(TEXT("run_id"), RunId.ToLower());
 	Root->SetStringField(
 		TEXT("result"),
 		bFinalSucceeded
@@ -259,7 +282,8 @@ void UAvidScriptWorldSubsystem::CompleteStartupScenarioProbe(
 	Root->SetArrayField(TEXT("components"), MoveTemp(ComponentValues));
 
 	FString Json;
-	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Json);
+	const TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
+		TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Json);
 	const bool bSerialized = FJsonSerializer::Serialize(Root, Writer);
 	IFileManager::Get().MakeDirectory(*FPaths::GetPath(StartupScenarioProbeReportPath), true);
 	const bool bReportWritten = bSerialized

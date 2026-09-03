@@ -5,7 +5,9 @@ param(
     [Parameter(Mandatory = $true)][string]$PluginRoot,
     [Parameter(Mandatory = $true)]
     [ValidateSet('Development', 'Shipping')]
-    [string]$Configuration
+    [string]$Configuration,
+    [ValidateSet('Win64', 'Android')]
+    [string]$TargetPlatform = 'Win64'
 )
 
 Set-StrictMode -Version Latest
@@ -275,6 +277,8 @@ try {
     }
     $PluginTargetRoot = '$(ProjectDir)/Plugins/AvidScript'
     $ExpectedConfiguration = $Configuration.ToLowerInvariant()
+    $ExpectedPlatform = $TargetPlatform.ToLowerInvariant()
+    $ExpectedArchitecture = if ($TargetPlatform -ceq 'Android') { 'arm64' } else { 'x86_64' }
     $ExpectedDependencies = [System.Collections.Generic.Dictionary[string, object]]::new(
         [System.StringComparer]::OrdinalIgnoreCase)
 
@@ -375,8 +379,8 @@ try {
                 else {
                     [string](Get-RequiredPropertyValue $Variant 'format' "module '$ModuleId' variant")
                 }
-                if ($Platform -ceq 'win64' -and
-                    $Architecture -ceq 'x86_64' -and
+                if ($Platform -ceq $ExpectedPlatform -and
+                    $Architecture -ceq $ExpectedArchitecture -and
                     $ModuleConfiguration -ceq $ExpectedConfiguration -and
                     $Backend -ceq 'wasmtime' -and
                     $Format -ceq 'wasmtime_serialized_v1') {
@@ -386,7 +390,7 @@ try {
         if ($SelectedVariants.Count -gt 1) {
             Throw-ReceiptValidationFailure `
                 'PACKAGE_VARIANT_MISMATCH' `
-                "Module '$ModuleId' has multiple Win64/x86_64/$ExpectedConfiguration/Wasmtime variants."
+                "Module '$ModuleId' has multiple $TargetPlatform/$ExpectedArchitecture/$ExpectedConfiguration/Wasmtime variants."
         }
         if ($SelectedVariants.Count -eq 0) {
             continue
@@ -425,7 +429,7 @@ try {
             [string](Get-RequiredPropertyValue $Descriptor 'package_id' "module '$ModuleId' descriptor") -cne $PackageId) {
             Throw-ReceiptValidationFailure 'JSON_SCHEMA_INVALID' "Module '$ModuleId' descriptor identity is invalid."
         }
-        if ([string](Get-RequiredPropertyValue $Descriptor 'platform' "module '$ModuleId' descriptor") -cne 'win64') {
+        if ([string](Get-RequiredPropertyValue $Descriptor 'platform' "module '$ModuleId' descriptor") -cne $ExpectedPlatform) {
             Throw-ReceiptValidationFailure 'PACKAGE_PLATFORM_MISMATCH' "Module '$ModuleId' descriptor platform is invalid."
         }
         if ([string](Get-RequiredPropertyValue $Descriptor 'configuration' "module '$ModuleId' descriptor") -cne $ExpectedConfiguration) {
@@ -439,6 +443,14 @@ try {
             Throw-ReceiptValidationFailure `
                 'PACKAGE_VARIANT_MISMATCH' `
                 "Module '$ModuleId' descriptor execution identity does not match the selected variant."
+        }
+        if ($TargetPlatform -ceq 'Android' -and
+            ([string](Get-RequiredPropertyValue $DescriptorExecution 'policy' "module '$ModuleId' execution") -cne 'require_precompiled' -or
+             [string](Get-RequiredPropertyValue $DescriptorExecution 'target_triple' "module '$ModuleId' execution") -cne 'aarch64-linux-android' -or
+             [string](Get-RequiredPropertyValue $DescriptorExecution 'cpu_features' "module '$ModuleId' execution") -cne 'arm64-v8a')) {
+            Throw-ReceiptValidationFailure `
+                'PACKAGE_VARIANT_MISMATCH' `
+                "Module '$ModuleId' must use precompiled Android arm64 execution."
         }
 
         $Artifacts = Get-RequiredPropertyValue $Descriptor 'artifacts' "module '$ModuleId' descriptor"
@@ -487,7 +499,7 @@ try {
     if ($SelectedModuleCount -eq 0) {
         Throw-ReceiptValidationFailure `
             'PACKAGE_VARIANT_MISMATCH' `
-            "Module catalog has no Win64/x86_64/$ExpectedConfiguration/Wasmtime variant."
+            "Module catalog has no $TargetPlatform/$ExpectedArchitecture/$ExpectedConfiguration/Wasmtime variant."
     }
 
     $GeneratedRoot = Join-Path $ResolvedPluginRoot 'Content/AvidScriptGenerated'
@@ -530,31 +542,63 @@ try {
         -ExpectedSha256 $TypeManifestSha256 `
         -Owner 'generated_type:type_manifest'
 
-    $WasmtimeRoot = Join-Path $ResolvedPluginRoot 'Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.1'
-    $WasmtimeMarkerPath = Join-Path $WasmtimeRoot '.avidscript-wasmtime-performance-managed.json'
-    $WasmtimeDllPath = Join-Path $WasmtimeRoot 'lib/wasmtime.dll'
-    $WasmtimeLicensePath = Join-Path $WasmtimeRoot 'LICENSE'
-    $WasmtimeMarker = Read-StrictJsonObject -Path $WasmtimeMarkerPath -Label 'Wasmtime performance managed marker'
-    if ([long](Get-RequiredPropertyValue $WasmtimeMarker 'schema_version' 'Wasmtime performance managed marker') -ne 1) {
-        Throw-ReceiptValidationFailure 'WASMTIME_MARKER_SCHEMA_MISMATCH' 'Wasmtime performance marker schema_version must be 1.'
+    $LockRelativePath = if ($TargetPlatform -ceq 'Android') {
+        'Source/ThirdParty/Wasmtime/WasmtimeAndroidDependency.lock.json'
     }
-    $ManagedDllSha256 = [string](Get-RequiredPropertyValue $WasmtimeMarker 'dll_sha256' 'Wasmtime performance managed marker')
-    Assert-LowercaseSha256 -Value $ManagedDllSha256 -Label 'Wasmtime performance managed marker.dll_sha256'
-    if ((Get-FileSha256 -Path $WasmtimeDllPath) -cne $ManagedDllSha256) {
-        Throw-ReceiptValidationFailure `
-            'WASMTIME_DLL_HASH_MISMATCH' `
-            'Wasmtime performance marker dll_sha256 does not match lib/wasmtime.dll.'
+    else {
+        'Source/ThirdParty/Wasmtime/PerformanceToolchain/WasmtimePerformanceToolchain.lock.json'
+    }
+    $WasmtimeLock = Read-StrictJsonObject `
+        -Path (Join-Path $ResolvedPluginRoot $LockRelativePath) -Label 'Wasmtime dependency lock'
+    $Install = Get-RequiredPropertyValue $WasmtimeLock 'install' 'Wasmtime dependency lock'
+    $Layout = Get-RequiredPropertyValue $WasmtimeLock 'layout' 'Wasmtime dependency lock'
+    $InstallRelativePath = [string](Get-RequiredPropertyValue $Install 'relative_path' 'Wasmtime install')
+    $MarkerRelativePath = [string](Get-RequiredPropertyValue $Install 'managed_marker_name' 'Wasmtime install')
+    $WasmtimeMarkerPath = Resolve-ContainedSourceFile -Root $ResolvedPluginRoot `
+        -RelativePath "$InstallRelativePath/$MarkerRelativePath" -Label 'Wasmtime managed marker'
+    $WasmtimeMarker = Read-StrictJsonObject -Path $WasmtimeMarkerPath -Label 'Wasmtime managed marker'
+    if ([long](Get-RequiredPropertyValue $WasmtimeMarker 'schema_version' 'Wasmtime managed marker') -ne 1) {
+        Throw-ReceiptValidationFailure 'WASMTIME_MARKER_SCHEMA_MISMATCH' 'Wasmtime marker schema_version must be 1.'
+    }
+    $LicenseRelativePath = [string](Get-RequiredPropertyValue $Layout 'license_relative_path' 'Wasmtime layout')
+    $WasmtimeLicensePath = Resolve-ContainedSourceFile -Root $ResolvedPluginRoot `
+        -RelativePath "$InstallRelativePath/$LicenseRelativePath" -Label 'Wasmtime license'
+    $ManagedDllSha256 = ''
+    $ManagedStaticSha256 = ''
+    if ($TargetPlatform -ceq 'Android') {
+        if ([string](Get-RequiredPropertyValue $WasmtimeMarker 'platform' 'Wasmtime managed marker') -cne 'Android' -or
+            [string](Get-RequiredPropertyValue $WasmtimeMarker 'architecture' 'Wasmtime managed marker') -cne 'arm64') {
+            Throw-ReceiptValidationFailure 'WASMTIME_PLATFORM_MISMATCH' 'Wasmtime dependency is not Android arm64.'
+        }
+        $LibraryRelativePath = [string](Get-RequiredPropertyValue $Layout 'static_library_relative_path' 'Wasmtime layout')
+        $LibraryPath = Resolve-ContainedSourceFile -Root $ResolvedPluginRoot `
+            -RelativePath "$InstallRelativePath/$LibraryRelativePath" -Label 'Wasmtime static library'
+        $ManagedStaticSha256 = [string](Get-RequiredPropertyValue $Layout 'static_library_sha256' 'Wasmtime layout')
+        Assert-LowercaseSha256 -Value $ManagedStaticSha256 -Label 'Wasmtime static library hash'
+        if ((Get-FileSha256 -Path $LibraryPath) -cne $ManagedStaticSha256) {
+            Throw-ReceiptValidationFailure 'WASMTIME_STATIC_HASH_MISMATCH' 'Wasmtime static library differs from its lock.'
+        }
+    }
+    else {
+        $DllRelativePath = [string](Get-RequiredPropertyValue $Layout 'dll_relative_path' 'Wasmtime layout')
+        $WasmtimeDllPath = Resolve-ContainedSourceFile -Root $ResolvedPluginRoot `
+            -RelativePath "$InstallRelativePath/$DllRelativePath" -Label 'Wasmtime DLL'
+        $ManagedDllSha256 = [string](Get-RequiredPropertyValue $WasmtimeMarker 'dll_sha256' 'Wasmtime managed marker')
+        Assert-LowercaseSha256 -Value $ManagedDllSha256 -Label 'Wasmtime managed marker.dll_sha256'
+        if ((Get-FileSha256 -Path $WasmtimeDllPath) -cne $ManagedDllSha256) {
+            Throw-ReceiptValidationFailure 'WASMTIME_DLL_HASH_MISMATCH' 'Wasmtime DLL differs from its managed marker.'
+        }
+        Add-ExpectedDependency `
+            -Dependencies $ExpectedDependencies `
+            -TargetPath "$PluginTargetRoot/Binaries/Win64/wasmtime.dll" `
+            -Type NonUFS `
+            -SourcePath $WasmtimeDllPath `
+            -ExpectedSha256 $ManagedDllSha256 `
+            -Owner 'wasmtime:dll'
     }
     Add-ExpectedDependency `
         -Dependencies $ExpectedDependencies `
-        -TargetPath "$PluginTargetRoot/Binaries/Win64/wasmtime.dll" `
-        -Type NonUFS `
-        -SourcePath $WasmtimeDllPath `
-        -ExpectedSha256 $ManagedDllSha256 `
-        -Owner 'wasmtime:dll'
-    Add-ExpectedDependency `
-        -Dependencies $ExpectedDependencies `
-        -TargetPath "$PluginTargetRoot/Binaries/Win64/wasmtime.LICENSE.txt" `
+        -TargetPath "$PluginTargetRoot/Binaries/$TargetPlatform/wasmtime.LICENSE.txt" `
         -Type NonUFS `
         -SourcePath $WasmtimeLicensePath `
         -ExpectedSha256 '' `
@@ -568,8 +612,8 @@ try {
             "Receipt configuration is '$ReceiptConfiguration', expected '$Configuration'."
     }
     $ReceiptPlatform = [string](Get-RequiredPropertyValue $Receipt 'Platform' 'UBT target receipt')
-    if ($ReceiptPlatform -cne 'Win64') {
-        Throw-ReceiptValidationFailure 'RECEIPT_PLATFORM_MISMATCH' "Receipt platform is '$ReceiptPlatform', expected 'Win64'."
+    if ($ReceiptPlatform -cne $TargetPlatform) {
+        Throw-ReceiptValidationFailure 'RECEIPT_PLATFORM_MISMATCH' "Receipt platform is '$ReceiptPlatform', expected '$TargetPlatform'."
     }
     $RuntimeDependencies = @(Get-RequiredPropertyValue $Receipt 'RuntimeDependencies' 'UBT target receipt')
     $ActualDependencies = [System.Collections.Generic.Dictionary[string, object]]::new(
@@ -636,10 +680,12 @@ try {
         receipt_path = $ResolvedReceiptPath
         configuration = $Configuration
         platform = $ReceiptPlatform
+        architecture = $ExpectedArchitecture
         target_name = [string](Get-RequiredPropertyValue $Receipt 'TargetName' 'UBT target receipt')
-        module_count = $CatalogModules.Count
+        module_count = $SelectedModuleCount
         generated_type_package_id = $TypeManifestFile.Split('/')[0]
         wasmtime_dll_sha256 = $ManagedDllSha256
+        wasmtime_static_sha256 = $ManagedStaticSha256
         expected_dependency_count = $ExpectedDependencies.Count
         actual_dependency_count = $ActualDependencies.Count
         ufs_dependency_count = @($ExpectedList | Where-Object type -ceq 'UFS').Count

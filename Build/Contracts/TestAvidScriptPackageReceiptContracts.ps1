@@ -68,7 +68,8 @@ function Get-FixtureSha256 {
 function New-PackageReceiptFixture {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
-        [ValidateSet('Development', 'Shipping')][string]$Configuration = 'Development'
+        [ValidateSet('Development', 'Shipping')][string]$Configuration = 'Development',
+        [ValidateSet('Win64', 'Android')][string]$TargetPlatform = 'Win64'
     )
 
     $ProjectRoot = Join-Path $FixtureRoot $Name
@@ -110,13 +111,15 @@ function New-PackageReceiptFixture {
         package_id = $PackageId
         module_id = $ModuleId
         abi_version = 1
-        platform = 'win64'
+        platform = $TargetPlatform.ToLowerInvariant()
         configuration = $ConfigurationValue
         minimum_runtime_version = '0.1.0'
         execution = [ordered]@{
             backend = 'wasmtime'
             format = 'wasmtime_serialized_v1'
-            policy = if ($Configuration -ceq 'Shipping') { 'require_precompiled' } else { 'prefer_precompiled' }
+            policy = if ($TargetPlatform -ceq 'Android' -or $Configuration -ceq 'Shipping') { 'require_precompiled' } else { 'prefer_precompiled' }
+            target_triple = if ($TargetPlatform -ceq 'Android') { 'aarch64-linux-android' } else { 'x86_64-pc-windows-msvc' }
+            cpu_features = if ($TargetPlatform -ceq 'Android') { 'arm64-v8a' } else { 'x86-64-v3' }
         }
         artifacts = $Artifacts
     })
@@ -127,8 +130,8 @@ function New-PackageReceiptFixture {
         modules = @([ordered]@{
             module_id = $ModuleId
             variants = @([ordered]@{
-                platform = 'win64'
-                architecture = 'x86_64'
+                platform = $TargetPlatform.ToLowerInvariant()
+                architecture = if ($TargetPlatform -ceq 'Android') { 'arm64' } else { 'x86_64' }
                 configuration = $ConfigurationValue
                 backend = 'wasmtime'
                 format = 'wasmtime_serialized_v1'
@@ -164,16 +167,41 @@ function New-PackageReceiptFixture {
         }
     })
 
-    $WasmtimeRoot = Join-Path $PluginRoot 'Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.1'
-    $WasmtimeDllPath = Join-Path $WasmtimeRoot 'lib/wasmtime.dll'
+    $Android = $TargetPlatform -ceq 'Android'
+    $InstallRelativePath = if ($Android) {
+        'Source/ThirdParty/Wasmtime/installed/Android/arm64/v45.0.0'
+    } else {
+        'Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.2'
+    }
+    $WasmtimeRoot = Join-Path $PluginRoot $InstallRelativePath
+    $BinaryRelativePath = if ($Android) { 'lib/libwasmtime.a' } else { 'lib/wasmtime.dll' }
+    $WasmtimeDllPath = Join-Path $WasmtimeRoot $BinaryRelativePath
     Write-FixtureBytes -Path $WasmtimeDllPath -Bytes ([byte[]](0x4d, 0x5a, 0x46, 0x49, 0x58, 0x54, 0x55, 0x52, 0x45))
     Write-FixtureBytes -Path (Join-Path $WasmtimeRoot 'LICENSE') -Bytes ([System.Text.Encoding]::UTF8.GetBytes("fixture license`n"))
+    $MarkerName = if ($Android) { '.avidscript-wasmtime-managed.json' } else { '.avidscript-wasmtime-performance-managed.json' }
     Write-FixtureJson `
-        -Path (Join-Path $WasmtimeRoot '.avidscript-wasmtime-performance-managed.json') `
+        -Path (Join-Path $WasmtimeRoot $MarkerName) `
         -Value ([ordered]@{
             schema_version = 1
             toolchain_id = 'fixture-toolchain'
             dll_sha256 = Get-FixtureSha256 -Path $WasmtimeDllPath
+            platform = $TargetPlatform
+            architecture = if ($Android) { 'arm64' } else { 'x86_64' }
+        })
+    $LockRelativePath = if ($Android) {
+        'Source/ThirdParty/Wasmtime/WasmtimeAndroidDependency.lock.json'
+    } else {
+        'Source/ThirdParty/Wasmtime/PerformanceToolchain/WasmtimePerformanceToolchain.lock.json'
+    }
+    Write-FixtureJson -Path (Join-Path $PluginRoot $LockRelativePath) -Value ([ordered]@{
+            schema_version = 1
+            install = [ordered]@{ relative_path = $InstallRelativePath; managed_marker_name = $MarkerName }
+            layout = [ordered]@{
+                dll_relative_path = $BinaryRelativePath
+                static_library_relative_path = $BinaryRelativePath
+                static_library_sha256 = Get-FixtureSha256 -Path $WasmtimeDllPath
+                license_relative_path = 'LICENSE'
+            }
         })
 
     $RuntimeDependencies = [System.Collections.Generic.List[object]]::new()
@@ -188,14 +216,16 @@ function New-PackageReceiptFixture {
     }
     $RuntimeDependencies.Add([ordered]@{ Path = '$(PluginDir)/Content/AvidScriptGenerated/current.json'; Type = 'UFS' })
     $RuntimeDependencies.Add([ordered]@{ Path = "`$(PluginDir)/Content/AvidScriptGenerated/$TypeManifestRelative"; Type = 'UFS' })
-    $RuntimeDependencies.Add([ordered]@{ Path = '$(ProjectDir)/Plugins/AvidScript/Binaries/Win64/wasmtime.dll'; Type = 'NonUFS' })
-    $RuntimeDependencies.Add([ordered]@{ Path = '$(PluginDir)/Binaries/Win64/wasmtime.LICENSE.txt'; Type = 'NonUFS' })
+    if (-not $Android) {
+        $RuntimeDependencies.Add([ordered]@{ Path = '$(ProjectDir)/Plugins/AvidScript/Binaries/Win64/wasmtime.dll'; Type = 'NonUFS' })
+    }
+    $RuntimeDependencies.Add([ordered]@{ Path = "`$(PluginDir)/Binaries/$TargetPlatform/wasmtime.LICENSE.txt"; Type = 'NonUFS' })
     $RuntimeDependencies.Add([ordered]@{ Path = '$(EngineDir)/Content/Slate/Fonts/Roboto-Regular.ttf'; Type = 'UFS' })
 
-    $ReceiptPath = Join-Path $ProjectRoot "Binaries/Win64/AvidFixture-$Configuration.target"
+    $ReceiptPath = Join-Path $ProjectRoot "Binaries/$TargetPlatform/AvidFixture-$Configuration.target"
     Write-FixtureJson -Path $ReceiptPath -Value ([ordered]@{
         TargetName = 'AvidFixture'
-        Platform = 'Win64'
+        Platform = $TargetPlatform
         Configuration = $Configuration
         TargetType = 'Game'
         RuntimeDependencies = @($RuntimeDependencies)
@@ -206,6 +236,7 @@ function New-PackageReceiptFixture {
         ReceiptPath = $ReceiptPath
         CatalogPath = $CatalogPath
         Configuration = $Configuration
+        TargetPlatform = $TargetPlatform
         PackageRoot = $PackageRoot
         WasmtimeDllPath = $WasmtimeDllPath
     }
@@ -238,7 +269,8 @@ function Invoke-ReceiptValidator {
         -ReceiptPath $Fixture.ReceiptPath `
         -ProjectRoot $Fixture.ProjectRoot `
         -PluginRoot $Fixture.PluginRoot `
-        -Configuration $Configuration 2>&1
+        -Configuration $Configuration `
+        -TargetPlatform $Fixture.TargetPlatform 2>&1
     $ExitCode = $LASTEXITCODE
     $Text = @($Output | ForEach-Object { $_.ToString() }) -join [System.Environment]::NewLine
     try {
@@ -318,6 +350,36 @@ try {
         $Result = Invoke-ReceiptValidator -Fixture $Fixture
         Assert-ContractCondition ($Result.ExitCode -eq 0) "Foreign-platform module was rejected: $($Result.Raw)"
         Assert-ContractCondition ([int]$Result.Summary.expected_dependency_count -eq 13) 'Foreign-platform module changed staged dependency count.'
+        Assert-ContractCondition ([int]$Result.Summary.module_count -eq 1) 'Foreign-platform module inflated the selected module count.'
+    }
+
+    Invoke-ContractCase 'Android arm64 receipt stages no Windows DLL' {
+        $Fixture = New-PackageReceiptFixture -Name 'AndroidArm64' -TargetPlatform Android
+        $Result = Invoke-ReceiptValidator -Fixture $Fixture
+        Assert-ContractCondition ($Result.ExitCode -eq 0) "Android receipt was rejected: $($Result.Raw)"
+        Assert-ContractCondition ($Result.Summary.architecture -ceq 'arm64') 'Android architecture identity is invalid.'
+        Assert-ContractCondition ($Result.Summary.expected_dependency_count -eq 12) 'Android dependency count is invalid.'
+        Assert-ContractCondition ($Result.Summary.non_ufs_dependency_count -eq 1) 'Android must stage only the Wasmtime license as NonUFS.'
+        Assert-ContractCondition ($Result.Summary.wasmtime_dll_sha256 -ceq '') 'Android reported a Windows DLL hash.'
+        Assert-ContractCondition ($Result.Summary.wasmtime_static_sha256 -ceq (Get-FixtureSha256 $Fixture.WasmtimeDllPath)) 'Android static library hash is invalid.'
+    }
+
+    Invoke-ContractCase 'Android static library drift rejected' {
+        $Fixture = New-PackageReceiptFixture -Name 'AndroidStaticDrift' -TargetPlatform Android
+        [System.IO.File]::AppendAllText($Fixture.WasmtimeDllPath, 'drift', $Utf8)
+        Assert-ValidatorRejected -Fixture $Fixture -ErrorCode 'WASMTIME_STATIC_HASH_MISMATCH'
+    }
+
+    Invoke-ContractCase 'Android JIT fallback rejected' {
+        $Fixture = New-PackageReceiptFixture -Name 'AndroidJitFallback' -TargetPlatform Android
+        $DescriptorPath = Join-Path $Fixture.PackageRoot 'package.json'
+        $Descriptor = Get-Content -LiteralPath $DescriptorPath -Raw | ConvertFrom-Json -Depth 64
+        $Descriptor.execution.policy = 'prefer_precompiled'
+        Write-FixtureJson -Path $DescriptorPath -Value $Descriptor
+        $Catalog = Get-Content -LiteralPath $Fixture.CatalogPath -Raw | ConvertFrom-Json -Depth 64
+        $Catalog.modules[0].variants[0].descriptor_sha256 = Get-FixtureSha256 $DescriptorPath
+        Write-FixtureJson -Path $Fixture.CatalogPath -Value $Catalog
+        Assert-ValidatorRejected -Fixture $Fixture -ErrorCode 'PACKAGE_VARIANT_MISMATCH'
     }
 
     Invoke-ContractCase 'plugin startup scenario is required as UFS' {
@@ -433,6 +495,9 @@ try {
         coverage = @(
             'positive',
             'foreign_platform_variant',
+            'android_arm64_static_dependency',
+            'android_static_hash_drift',
+            'android_no_jit_fallback',
             'startup_scenario_ufs',
             'missing_dependency',
             'extra_dependency',
