@@ -37,9 +37,9 @@
     },
     {
       "id": "P63.D",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "UE lifecycle coordinator implemented; application pause/resume, stale owner generation, World teardown continuation cancellation Automation 3/3; Wasmtime artifact cache eviction passed; UE5.8 no-clean UBT passed; Chinese lifecycle and closeout docs updated",
+      "completed_at_utc": "2026-09-03T16:26:35.0834674+00:00"
     }
   ],
   "debt": [],
@@ -94,7 +94,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "batch-complete -Phase 63 -BatchId P63.D -Evidence <text>",
-  "revision": 4,
-  "updated_at_utc": "2026-09-02T12:08:37.8990315+00:00"
+  "next_action": "freeze -Phase 63 -ReviewEvidence <text>",
+  "revision": 5,
+  "updated_at_utc": "2026-09-03T16:26:35.0856114+00:00"
 }
