@@ -31,37 +31,30 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 更新于 **2026-09-04**，**P64 实施中**。已能用 C# 编写 UE 游戏逻辑、调用项目自定义 API，
 并运行 Win64 打包样例；不需要 `.avid`，也不是完整 UE/.NET 替代层。
 
-最近补齐 **UI/存档异常处理与组件退出验证**：失败读取保留原对象、Reset、保存失败、取消订阅与迟到事件隔离。
-普通 UObject 授权、独立事件来源查询和无需 Tick 的脚本也已交付。当前能力如下：
+目前可以从三个现成入口开始：
+
+- **写玩法**：[PickupRush](Samples/CSharp/PickupRush/README.md) 用 C# 实现计时、收集、复活与胜负，已跑通 Editor 和 Win64 Development/Shipping 包。
+- **写 UI 与存档**：[UiSaveDemo](Samples/CSharp/UiSaveDemo/README.md) 用 C# 订阅 UMG 按钮、更新文本、保存并在新进程读回；最近补齐错误处理、Reset、组件退出清理和迟到事件隔离。
+- **接自己的 UE API**：[TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) 通过 Profile 生成项目 `UFUNCTION/UPROPERTY` 的 C# 接口，支持 typed Self、Spawn、cast 与销毁，不逐个手写 VM wrapper。
+
+## 框架能力
 
 | 领域 | 已实现内容 |
 | --- | --- |
 | 游戏流程 | `BeginPlay/Tick/EndPlay`、Timer、Overlap、Gameplay Event；事件型 Guest 可省略 Tick，Startup Scenario 自动挂载与回滚 |
-| C# 玩法 | [PickupRush](Samples/CSharp/PickupRush/README.md)：计时、收集、复活和胜负；Editor、Win64 Development/Shipping 包内闭环已验证 |
-| UI 与存档 | [UiSaveDemo](Samples/CSharp/UiSaveDemo/README.md)：UMG 按钮、计分、SaveGame；正常存取、缺档/GC、错误类型/分数、Reset 与组件退出，五进程验证通过 |
-| 生成式 UE API | Reflection/Profile 生成 `UFUNCTION`、`UPROPERTY`、Interface 与项目自定义 API；typed Self、Spawn、cast、销毁，无需逐个手写 VM wrapper；普通 UObject 的 owned/borrowed 授权与 Self 缓存隔离 |
-| 类型与容器 | UObject、向量/变换、固定 `USTRUCT`、名称/字符串、`FText`；字符串数组、递归容器、`TSet/TMap`；soft/weak object 身份往返，详见下方边界 |
+| 生成式 UE API | Reflection/Profile、Interface、项目与 Blueprint 类型；普通 UObject 的 owned/borrowed 授权与 Self 缓存隔离 |
+| 类型与容器 | `UObject/AActor`、`FVector/FTransform`、固定 `USTRUCT`、名称/字符串、`FText`；数组、递归容器、`TSet/TMap`，soft/weak object 身份往返；覆盖限制见下方 |
 | C# 定义 UE 类型 | Actor、Component、World/GameInstance Subsystem，含继承、override、属性、函数与默认参数 |
 | 异步与委托 | 受控 `async/await`、Delay/NextTick、异步加载、Latent、AsyncAction；单播/多播、受支持签名的 `return/ref/out` 与主动调用；独立 UObject 订阅与回调来源查询 |
 | Blueprint 与网络 | callable/event 双向交互；Server/Client/NetMulticast RPC、属性复制与 RepNotify，dedicated/listen 多进程验证 |
-| 热重载与安全 | 方法体事务式替换与回滚；ObjectHandle、Session 隔离、执行预算、后台恢复、低内存回收及 teardown 自动取消 |
+| 热重载与安全 | 方法体替换、持久字段迁移与失败回滚，候选激活仅允许可回滚的 Host 副作用；ObjectHandle、Session 隔离、执行预算与退出取消 |
 | Cook 与发布 | 内容寻址模块、多平台 catalog、无头 Release、Generated Type 预编译；Win64 Development/Shipping BuildCookRun 与回执校验 |
 | VM 后端 | Wasmtime 45 Win64 JIT/AOT；Android arm64 脚本及 Generated Type 交叉 AOT；WAMR 兼容后端 |
 | 构建与 IDE | 增量缓存、persistent Worker、`.slnx`/WASI 工作区、离线源码索引与 Visual Studio/Rider/VS Code 启动 |
 | 调试与 Profiler | 源码映射、跨层调用栈、PIE 目标、受控同步断点/步进、只读变量；UE Trace、热点与 JSON 导出 |
 
 类型覆盖见 [P58 验收](Docs/Phase58/P58.4_Centralized_Gate_Report.md)，最新交付见
-[P64 记录](Docs/Phase64/P64_Closeout.md)。真实输入/视觉、包内 UI、World 销毁、热重载压力、长稳和移动端仍待验收。
-
-## C# 游戏脚本
-
-直接阅读随样例构建的源码，而不是另写一套展示代码：
-
-- [PickupRushScript.cs](Samples/CSharp/PickupRush/PickupRushScript.cs)：完整计时收集玩法。
-- [UiSaveDemoScript.cs](Samples/CSharp/UiSaveDemo/UiSaveDemoScript.cs)：按钮订阅、文本更新、保存/加载和清理。
-- [ActorLifecycleScript.cs](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)：生命周期、Timer 与受控异步。
-
-项目类型与方法来自 Reflection/Profile 生成的 C# API；运行方式见下方样例链接。
+[P64 记录](Docs/Phase64/P64_Closeout.md)。**功能已实现不等于全部场景验收完成**，具体限制见[当前边界](#当前边界)。
 
 ## 架构
 
@@ -109,8 +102,8 @@ Intel Core Ultra 7 265K、Wasmtime 45 Cranelift JIT，与冻结版本的 Puerts 
 以上是指定 prepared/fused 路径的每逻辑操作耗时，不代表任意 `UFUNCTION` 都有相同收益。
 环境、路由计数与正确性结果见 [P57 原始证据](Docs/Phase57/P57.11B1_Recursive_Fixed_Struct_Codec_Evidence.json)。
 
-Phase 56 完整游戏 workload 中，Small gameplay、Dense gameplay 与 Lifecycle callback 的
-P50 比率分别为 **`0.469x`、`0.513x`、`0.391x`**，详见
+Phase 56 的游戏逻辑基准中，Small gameplay、Dense gameplay 与 Lifecycle callback 相对各自冻结 Puerts 对照路径的
+P50 比率分别为 **`0.469x`、`0.513x`、`0.391x`**；这是受控 workload，不是整款游戏帧率。详见
 [游戏 workload 报告](Docs/Phase56/P56.5_Fused_Call_Frame_Implementation_Report.md)。
 
 **尚未全面领先：** 12-kernel 相同 WASM 的 Wasmtime/V8 对照中，P50/P95 几何均值为
@@ -158,8 +151,8 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 | --- | --- |
 | [TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) | typed Self、自定义 UFUNCTION、Spawn、cast 与销毁 |
 | [ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) | 生命周期、Timer、异步加载与受控 async/await |
-| [PickupRush](Samples/CSharp/PickupRush/README.md) | Startup Scenario、真实地图自动挂载、计时收集与胜负闭环 |
-| [UiSaveDemo](Samples/CSharp/UiSaveDemo/README.md) | UMG 按钮、计分与 SaveGame 落盘/重启读回；Editor 游戏进程验证 |
+| [PickupRush](Samples/CSharp/PickupRush/README.md) | Startup Scenario、计时收集与胜负闭环；[C# 源码](Samples/CSharp/PickupRush/PickupRushScript.cs) |
+| [UiSaveDemo](Samples/CSharp/UiSaveDemo/README.md) | 按钮订阅、存档、错误状态与退出清理；[C# 源码](Samples/CSharp/UiSaveDemo/UiSaveDemoScript.cs) |
 | [PlayablePickup](Samples/CSharp/PlayablePickup/README.md) | Overlap、Gameplay Event、持久状态与热重载 |
 | [NetworkRpc](Samples/CSharp/NetworkRpc/README.md) | C# 调用项目 Server、Client 与 NetMulticast RPC |
 | [ReplicatedProperty](Samples/CSharp/ReplicatedProperty/README.md) | replicated property、authority setter 与 Push Model |
@@ -169,7 +162,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 
 - **UE 类型**：由 Profile 与 ABI/codec 决定生成范围，并非所有 UE API 自动可用。复合容器内强 UObject 引用仍拒绝，平面 `TArray<UObject*>` 可用；Set/Map key 受确定性编码限制，soft/weak 的脚本侧解析易用接口待补齐。
 - **C# 子集**：无完整 .NET Runtime、任意 awaiter 或异常系统；暂不支持 `event +=`、lambda/closure，使用显式 bind/subscribe 与 `ExecuteX/BroadcastX`。
-- **重载与隔离**：方法体可热重载；反射结构变更需增量 UBT 并重启 Editor。WASM 故障隔离不等于原生 C++/DLL 进程沙箱。
+- **重载与隔离**：方法体可热重载，但候选 BeginPlay 中无可回滚适配的反射写入会被拒绝；当前 UI 的 `UTextBlock.SetText` 属于这一缺口，不能宣称 UI 已支持热重载。反射结构变更需增量 UBT 并重启 Editor；WASM 隔离不是原生 DLL 进程沙箱。
 - **玩法与平台**：UI/存档通过 Editor 合成事件验证，不等于真实输入/视觉、任意损坏存档、World 销毁、包内 UI 或热重载长稳验收；Android UBT/APK/真机及 iOS 尚未验收。
 - **诊断与性能**：typed Host 的具体拒绝原因尚未统一透传到 VM 错误；纯执行 P50/P95 领先门禁未关闭，也未完成同口径 UnLua/AngelScript 矩阵。
 
