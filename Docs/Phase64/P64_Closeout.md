@@ -21,9 +21,17 @@
 
 打包后已恢复 Win64 Development Generated Type 指针和 canonical Editor target，三份 BuildId 一致。
 
+## UI 与存档小节
+
+`UiSaveDemo` 已实现 C# 驱动 UMG 按钮、计分与 SaveGame。最终 run
+`b41db4a6bbef42b68294c7ec882a3a6f` 在四个独立 Editor 游戏进程中通过保存、重启读回、缺档和 GC，
+13/13 动作、8 次脚本事件、零丢弃回调；读取/GC 前后存档哈希相同。
+同批 Binding/UI 资产专项 18/18、UI runner 合同 53/53 通过；这些不扩充上面的历史全量基线。
+参见 [UI 与存档集成](P64.D_UI_Save_Integration.md)及[C# 使用说明](../../Samples/CSharp/UiSaveDemo/README.md)。
+
 ## 未完成
 
-P64.D 依架构 v2 补齐 UI、跨进程存档、热重载压力、长时间运行，以及 Android toolchain/UBT/APK。
+P64.D 依架构 v6 继续补齐 UI 异常存档/输入/退出路径、热重载压力、长时间运行，以及 Android toolchain/UBT/APK。
 人工游玩和真实设备验收独立保留。P58 类型、iOS、发布工程及性能领先等总目标缺口不会随本阶段编号自动关闭。
 
 ## 流程修正

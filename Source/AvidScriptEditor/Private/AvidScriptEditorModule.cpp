@@ -10,6 +10,8 @@
 #include "Containers/Ticker.h"
 #include "Debugging/AvidScriptEditorDebugTargetController.h"
 #include "Debugging/SAvidScriptEditorDebugPanel.h"
+#include "Demos/AvidScriptUiSaveDemoAssets.h"
+#include "Demos/AvidScriptUiSaveDemoProbe.h"
 #include "Editor.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/Docking/TabManager.h"
@@ -187,6 +189,12 @@ FAvidScriptEditorModule::FAvidScriptEditorModule(
 
 void FAvidScriptEditorModule::StartupModule()
 {
+	const bool bUiSaveProbeRequested = AvidScript::UiSaveDemo::StartProbe();
+	if (bUiSaveProbeRequested && !GIsEditor)
+	{
+		bUiSaveProbeOnlyStartup = true;
+		return;
+	}
 	FAvidScriptEditorDiagnosticLog::Register();
 	CommandLauncher = MakeUnique<FAvidScriptEditorCommandLauncher>();
 	if (!CSharpLiveReloadService)
@@ -231,6 +239,8 @@ void FAvidScriptEditorModule::StartupModule()
 
 void FAvidScriptEditorModule::ShutdownModule()
 {
+	AvidScript::UiSaveDemo::StopProbe();
+	if (bUiSaveProbeOnlyStartup) { return; }
 	UnregisterConsoleCommands();
 	FAvidScriptEditorDiagnosticLog::Unregister();
 	if (DebugTickerHandle.IsValid())
@@ -293,6 +303,11 @@ void FAvidScriptEditorModule::ShutdownModule()
 
 void FAvidScriptEditorModule::RegisterConsoleCommands()
 {
+	PrepareUiSaveDemoConsoleCommand = IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("AvidScript.PrepareUiSaveDemo"),
+		TEXT("Create or validate the UI/Save demo assets. Usage: AvidScript.PrepareUiSaveDemo [exit]"),
+		FConsoleCommandWithArgsDelegate::CreateStatic(&AvidScript::UiSaveDemo::ConsoleCommand),
+		ECVF_Default);
 	GenerateBindingsConsoleCommand = IConsoleManager::Get().RegisterConsoleCommand(
 		TEXT("AvidScript.GenerateBindings"),
 		TEXT("Generate the project binding module from a descriptor file. Usage: AvidScript.GenerateBindings <descriptor>"),
@@ -311,6 +326,11 @@ void FAvidScriptEditorModule::RegisterConsoleCommands()
 
 void FAvidScriptEditorModule::UnregisterConsoleCommands()
 {
+	if (PrepareUiSaveDemoConsoleCommand != nullptr)
+	{
+		IConsoleManager::Get().UnregisterConsoleObject(PrepareUiSaveDemoConsoleCommand);
+		PrepareUiSaveDemoConsoleCommand = nullptr;
+	}
 	if (GenerateBindingsConsoleCommand != nullptr)
 	{
 		IConsoleManager::Get().UnregisterConsoleObject(GenerateBindingsConsoleCommand);

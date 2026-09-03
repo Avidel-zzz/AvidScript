@@ -28,16 +28,14 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 
 ## 当前进展
 
-更新于 **2026-09-04**；**P64 仍在实施中**，以下区分已交付与本地联调。
+更新于 **2026-09-04**；**P64 仍在实施中**，以下区分已交付与待验收内容。
 
 | 状态 | 内容 |
 | --- | --- |
 | 已交付 | [PickupRush](Samples/CSharp/PickupRush/README.md) 的 Editor、Win64 Development/Shipping 包内玩法闭环 |
-| 最近新增 | [独立 UObject 委托来源查询](Docs/Phase64/P64.D_Delegate_Source_Context.md)：Actor 脚本显式订阅其他对象的事件，在回调中通过 `AvidSubscriptions.IsCurrentSource(source)` 区分来源 |
-| 最近新增 | [事件型 Guest](Docs/Phase64/P64.D_EventOnly_Runtime.md) 可省略 Tick，仍保留 Session 心跳；双后端精确校验导出签名，修复 FText/数组共享能力加载 |
-| 最近修复 | [C# 捕获赋值](Docs/Phase64/P64.D_Captured_Assignment.md)：短路表达式正确写回静态字段、局部变量和 ref 参数；不支持的捕获目标明确报错 |
-| 最近修复 | [普通 UObject 接收者](Docs/Phase64/P64.D_Reflection_Receiver.md) 可经 owned/borrowed 授权调用 prepared reflection；保持 Self 缓存隔离及跨 World 拒绝 |
-| 本地验证通过，待发布 | UI/存档样例已通过保存、重启读回、缺档和 GC 四进程闭环；物理点击与视觉体验尚未验收 |
+| 最近新增 | [UiSaveDemo](Samples/CSharp/UiSaveDemo/README.md)：C# 驱动 UMG 事件与 SaveGame，已通过保存、重启读回、缺档和 GC 四进程验证 |
+| 最近补齐 | [事件型 Guest](Docs/Phase64/P64.D_EventOnly_Runtime.md) 可省略 Tick；[普通 UObject 接收者](Docs/Phase64/P64.D_Reflection_Receiver.md) 支持 owned/borrowed 授权及 Self 缓存隔离 |
+| 待验收 | UI 异常存档、物理输入与视觉、热重载压力、长稳和移动构建/设备验证 |
 
 ## 已实现
 
@@ -233,6 +231,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 | [TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) | typed Self、自定义 UFUNCTION、Spawn、cast 与销毁 |
 | [ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) | 生命周期、Timer、异步加载与受控 async/await |
 | [PickupRush](Samples/CSharp/PickupRush/README.md) | Startup Scenario、真实地图自动挂载、计时收集与胜负闭环 |
+| [UiSaveDemo](Samples/CSharp/UiSaveDemo/README.md) | UMG 按钮、计分与 SaveGame 落盘/重启读回；Editor 游戏进程验证 |
 | [PlayablePickup](Samples/CSharp/PlayablePickup/README.md) | Overlap、Gameplay Event、持久状态与热重载 |
 | [NetworkRpc](Samples/CSharp/NetworkRpc/README.md) | C# 调用项目 Server、Client 与 NetMulticast RPC |
 | [ReplicatedProperty](Samples/CSharp/ReplicatedProperty/README.md) | replicated property、authority setter 与 Push Model |
@@ -243,10 +242,10 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 - **UE 类型**：由 Profile 与 ABI/codec 决定生成范围，并非所有 UE API 自动可用。复合容器内强 UObject 引用仍拒绝，平面 `TArray<UObject*>` 可用；Set/Map key 受确定性编码限制，soft/weak 的脚本侧解析易用接口待补齐。
 - **C# 子集**：无完整 .NET Runtime、任意 awaiter 或异常系统；暂不支持 `event +=`、lambda/closure，使用显式 bind/subscribe 与 `ExecuteX/BroadcastX`。
 - **重载与隔离**：方法体可热重载；反射结构变更需增量 UBT 并重启 Editor。WASM 故障隔离不等于原生 C++/DLL 进程沙箱。
-- **玩法与平台**：UI、跨进程存档、热重载压力、长稳及人工游玩仍待验收；Android 仅完成交叉 AOT 和集成合同，UBT/APK/真机及 iOS 尚未验收。
+- **玩法与平台**：UI/存档已通过 Editor 合成事件验证，异常场景、物理输入、视觉、包内 UI、热重载压力与长稳仍待验收；Android UBT/APK/真机及 iOS 尚未验收。
 - **性能结论**：已有 Puerts V8 对比，但纯执行 P95 领先门禁未关闭，也未完成同口径 UnLua/AngelScript 矩阵。
 
-下一步先完成 P64 的 UI/存档、热重载压力与长稳验证，并补齐移动构建/设备证据；
+下一步补齐 P64 的 UI/存档边界、热重载压力与长稳验证，以及移动构建/设备证据；
 随后推进安装、升级、兼容和诊断等发布工程，不以阶段编号代替实际验收。
 
 ## 验证
@@ -265,6 +264,7 @@ C# 专项 **8/8** 与增量 Editor 构建；这些专项结果不扩充上表的
 [事件型 Guest 小节](Docs/Phase64/P64.D_EventOnly_Runtime.md)另通过 Runtime/VM/Reload **20/20** 专项与增量构建。
 [C# 捕获赋值修复](Docs/Phase64/P64.D_Captured_Assignment.md)通过 CSharpGuest **133/133**（专项 **12/12**，不重复计数）。
 [UObject 接收者小节](Docs/Phase64/P64.D_Reflection_Receiver.md)通过 Binding 专项 **17/17** 与增量构建。
+[UI/存档样例](Docs/Phase64/P64.D_UI_Save_Integration.md)通过 **4/4** 独立进程、**13/13** 动作及 **53/53** runner 合同。
 
 这些是自动化与包内探针证据，不替代真实输入、视觉、设备和长稳验收。
 详见 [P64 记录](Docs/Phase64/P64_Closeout.md)、[Android 边界](Docs/Phase64/P64.D_Android_Readiness.md)

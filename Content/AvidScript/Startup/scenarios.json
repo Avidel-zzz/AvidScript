@@ -24,6 +24,23 @@
           }
         }
       ]
+    },
+    {
+      "scenario_id": "ui_save_demo",
+      "activation": "explicit",
+      "worlds": [
+        "/AvidScript/Demos/UiSave/L_UiSave"
+      ],
+      "bindings": [
+        {
+          "module_id": "avidscript.ui_save_demo",
+          "target": {
+            "mode": "existing_actor",
+            "class_path": "/AvidScript/Demos/UiSave/BP_UiSaveHost.BP_UiSaveHost_C",
+            "max_instances": 1
+          }
+        }
+      ]
     }
   ]
 }

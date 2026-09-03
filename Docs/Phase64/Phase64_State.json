@@ -77,6 +77,19 @@
       "evidence": "Docs/Phase64/P64.0_Production_Gameplay_Architecture.md v2；9e08cdc 仅证明技术回归和 PC PickupRush，不覆盖这些原始目标。",
       "deferral_reason": "集中补全最后实现批次，完成前禁止 freeze/close；不能仅沿用历史转移状态。",
       "remediation": "按 D.UI、D.Save、D.Soak、D.Android 落地并取得真实运行证据，保持现有通用 Binding/Session 架构。",
+      "status": "Fixing",
+      "resolution_evidence": "",
+      "target_phase": null,
+      "transfer_reason": ""
+    },
+    {
+      "id": "P64-D05-TypedHostDiagnostics",
+      "severity": "Normal",
+      "found_batch": "P64.D",
+      "scope": "typed Host 拒绝原因跨 VM 传递与错误生命周期",
+      "evidence": "Docs/Phase64/P64.D_Reflection_Receiver.md：具体 capability/write 拒绝原因保存在 Runtime，VM 仅返回通用 host_import_failed；行为拒绝和无副作用已验证。",
+      "deferral_reason": "非阻塞诊断缺口，按既定流程集中处理，不中断当前真实 UI/存档交付。",
+      "remediation": "统一 typed Host 失败诊断的传递与消费，保留 import 身份，避免旧错误跨 callback 串用，并补双后端/重入验证。",
       "status": "Open",
       "resolution_evidence": "",
       "target_phase": null,
@@ -148,6 +161,6 @@
     }
   ],
   "next_action": "debt-update -Phase 64 -DebtId P64-D03-OriginalGameplayAcceptance -Status Verified -Evidence <text>",
-  "revision": 20,
-  "updated_at_utc": "2026-09-03T20:55:23.9714493+00:00"
+  "revision": 22,
+  "updated_at_utc": "2026-09-03T21:48:09.3530446+00:00"
 }

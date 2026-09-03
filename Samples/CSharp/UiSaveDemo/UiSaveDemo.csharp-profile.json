@@ -1,0 +1,75 @@
+{
+  "schema_version": 10,
+  "language": "csharp",
+  "source_path": "Plugins/AvidScript/Samples/CSharp/UiSaveDemo/UiSaveDemoScript.cs",
+  "project_path": "Plugins/AvidScript/Samples/CSharp/UiSaveDemo/AvidScript.UiSaveDemo.csproj",
+  "module_id": "avidscript.ui_save_demo",
+  "artifact_stem": "ui_save_demo",
+  "output_root": "Saved/AvidScriptCSharpGuest/Profiles/ui_save_demo",
+  "report_path": "Saved/AvidScriptCSharpGuest/Profiles/ui_save_demo/ui_save_demo.csharp.report.json",
+  "manifest_path": "Saved/AvidScriptCSharpGuest/Profiles/ui_save_demo/ui_save_demo.avidscript.json",
+  "build_script_path": "Plugins/AvidScript/Build/BuildCSharpActorLifecycle.ps1",
+  "configuration": "Release",
+  "binding_profile": {
+    "package_name": "avidscript.sample.ui_save_demo",
+    "self_class_path": "/AvidScript/Demos/UiSave/BP_UiSaveHost.BP_UiSaveHost_C",
+    "classes": [
+      {
+        "class_path": "/AvidScript/Demos/UiSave/BP_UiSaveHost.BP_UiSaveHost_C",
+        "include_properties": ["RootWidget", "SavedObject"],
+        "writable_properties": ["SavedObject"]
+      },
+      {
+        "class_path": "/AvidScript/Demos/UiSave/WBP_UiSave.WBP_UiSave_C",
+        "include_properties": ["CollectButton", "SaveButton", "LoadButton", "ResetButton", "ScoreText", "StatusText"]
+      },
+      {
+        "class_path": "/AvidScript/Demos/UiSave/BP_PlayerSave.BP_PlayerSave_C",
+        "include_properties": ["Score"],
+        "writable_properties": ["Score"]
+      },
+      {
+        "class_path": "/Script/UMG.Button",
+        "include_events": ["OnClicked"]
+      },
+      {
+        "class_path": "/Script/UMG.TextBlock",
+        "include_functions": ["SetText"]
+      },
+      {
+        "class_path": "/Script/UMG.UserWidget",
+        "include_functions": ["AddToViewport"]
+      },
+      {
+        "class_path": "/Script/UMG.Widget",
+        "include_functions": ["RemoveFromParent", "IsInViewport"]
+      },
+      {
+        "class_path": "/Script/Engine.GameplayStatics",
+        "include_functions": ["SaveGameToSlot", "LoadGameFromSlot", "DoesSaveGameExist"]
+      },
+      {
+        "class_path": "/Script/Engine.KismetTextLibrary",
+        "include_functions": ["Conv_IntToText", "Conv_StringToText"]
+      }
+    ],
+    "class_references": [
+      {
+        "script_name": "PlayerSaveClass",
+        "class_path": "/AvidScript/Demos/UiSave/BP_PlayerSave.BP_PlayerSave_C",
+        "base_class_path": "/AvidScript/Demos/UiSave/BP_PlayerSave.BP_PlayerSave_C",
+        "load_policy": "CookRequired"
+      }
+    ],
+    "object_factories": [
+      {
+        "script_name": "PlayerSave",
+        "class_reference": "PlayerSaveClass",
+        "kind": "new_object",
+        "outer_base_class_path": "/AvidScript/Demos/UiSave/BP_UiSaveHost.BP_UiSaveHost_C",
+        "ownership": "session",
+        "registration": "none"
+      }
+    ]
+  }
+}

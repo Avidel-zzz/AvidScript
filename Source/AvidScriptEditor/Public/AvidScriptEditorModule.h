@@ -154,6 +154,8 @@ private:
 	TUniquePtr<FAvidScriptEditorGeneratedTypeReloadService> GeneratedTypeReloadService;
 	TSharedPtr<FAvidScriptEditorDebugTargetController> DebugTargetController;
 	IConsoleObject* GenerateBindingsConsoleCommand = nullptr;
+	IConsoleObject* PrepareUiSaveDemoConsoleCommand = nullptr;
+	bool bUiSaveProbeOnlyStartup = false;
 	IConsoleObject* PublishCSharpBindingsConsoleCommand = nullptr;
 	FDelegateHandle PublishCSharpBindingsAssetRegistryHandle;
 	FString PendingCSharpBindingsOutputRoot;
