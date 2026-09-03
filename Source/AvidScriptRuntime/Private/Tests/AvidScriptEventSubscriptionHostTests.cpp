@@ -36,9 +36,16 @@ public:
 		OutError.Reset();
 		return SubscriptionToken == ExpectedToken;
 	}
+	virtual bool IsCurrentSource(const UObject& Source) const override
+	{
+		++SourceQueryCount;
+		return CurrentSource.Get() == &Source;
+	}
 
 	static constexpr int64 ExpectedToken = 0x0000000100000001LL;
 	TWeakObjectPtr<UObject> LastSource;
+	TWeakObjectPtr<UObject> CurrentSource;
+	mutable int32 SourceQueryCount = 0;
 	uint32 LastEventOrdinal = MAX_uint32;
 	int64 LastUnsubscribeToken = 0;
 	int32 SubscribeCallCount = 0;
@@ -199,7 +206,27 @@ bool FAvidScriptEventSubscriptionHostBoundaryTest::RunTest(
 		HostSpy.SubscribeCallCount,
 		1);
 
+	const auto IsCurrent = [&Runtime](const FAvidScriptObjectHandle Handle)
+	{
+		return Runtime.HandleEventIsCurrentSourceImport(
+			static_cast<int32>(Handle.Slot), static_cast<int32>(Handle.Generation));
+	};
+	TestEqual(TEXT("No active callback has no current source"), IsCurrent(SourceHandle), 0);
+	HostSpy.CurrentSource = Source;
+	TestEqual(TEXT("Authorized callback source matches"), IsCurrent(SourceHandle), 1);
+	TestEqual(TEXT("A different authorized source does not match"), IsCurrent(OwnerHandle), 0);
+	const int32 ValidQueryCount = HostSpy.SourceQueryCount;
+	TestEqual(TEXT("Source query rejects unauthorized handles"), IsCurrent(UnauthorizedHandle), 0);
+	TestEqual(TEXT("Source query rejects another world"), IsCurrent(ForeignWorldHandle), 0);
+	TestEqual(TEXT("Source query rejects stale generations"),
+		IsCurrent({ SourceHandle.Slot, SourceHandle.Generation + 1 }), 0);
+	TestEqual(TEXT("Source query rejects empty handles"), IsCurrent({}), 0);
+	TestEqual(TEXT("Invalid queries never reach the context owner"), HostSpy.SourceQueryCount, ValidQueryCount);
+	HostSpy.CurrentSource.Reset();
+	TestEqual(TEXT("Completed callback source does not leak"), IsCurrent(SourceHandle), 0);
 	Runtime.Unload();
+	HostSpy.CurrentSource = Source;
+	TestEqual(TEXT("Unloaded runtime cannot query callback context"), IsCurrent(SourceHandle), 0);
 	Ownership.Cleanup(Registry);
 	DestroyEventSubscriptionWorld(OtherWorld);
 	DestroyEventSubscriptionWorld(World);

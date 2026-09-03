@@ -2,10 +2,20 @@ using System;
 
 internal static class Program
 {
-    private static int Main()
+    private static int Main(string[] args)
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--delegate-events")
+            {
+                int focusedCount = CSharpGuestDelegateEventTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.DelegateEvents: {focusedCount}/{focusedCount} passed");
+                return 0;
+            }
+            if (args.Length != 0)
+            {
+                throw new ArgumentException("Supported argument: --delegate-events; omit arguments for the full suite.");
+            }
             int count = CSharpGuestLoweringTests.Run()
                 + CSharpGuestOperationTests.Run()
                 + CSharpGuestAdvancedTests.Run()

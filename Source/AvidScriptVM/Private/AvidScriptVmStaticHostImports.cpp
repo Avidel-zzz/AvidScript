@@ -61,11 +61,12 @@ const FAvidScriptVmStaticHostImport GStaticHostImports[] = {
 	{ EAvidScriptHostBindingId::DelegateOutputWrite, "avid_delegate_output_write", "(iii)i", false },
 	{ EAvidScriptHostBindingId::DebugProbe, "avid_debug_probe", "(I)i", false },
 	{ EAvidScriptHostBindingId::DebugSuspend, "avid_debug_suspend", "(Iiii)I", false },
-	{ EAvidScriptHostBindingId::DebugFrameRead, "avid_debug_frame_read", "(Iii)i", false }
+	{ EAvidScriptHostBindingId::DebugFrameRead, "avid_debug_frame_read", "(Iii)i", false },
+	{ EAvidScriptHostBindingId::EventIsCurrentSource, "event_is_current_source", "(ii)i", true }
 };
 
 static_assert(
-	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::DebugFrameRead),
+	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::EventIsCurrentSource),
 	"Static host catalog must remain dense and ordered by binding id.");
 
 bool FailStaticCall(FString& OutFailureDetails, const TCHAR* Details)
@@ -283,6 +284,7 @@ bool InvokeAvidScriptVmStaticHostImport(
 		Call.IntArgs[2] = Arguments[2].I32;
 		break;
 	case EAvidScriptHostBindingId::ContinuationLoadObject:
+	case EAvidScriptHostBindingId::EventIsCurrentSource:
 		Call.IntArgs[0] = Arguments[0].I32;
 		Call.IntArgs[1] = Arguments[1].I32;
 		break;

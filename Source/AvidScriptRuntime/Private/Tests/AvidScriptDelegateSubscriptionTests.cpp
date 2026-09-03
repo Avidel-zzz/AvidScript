@@ -2,6 +2,7 @@
 
 #include "AvidScriptRuntimeSession.h"
 #include "Delegate/AvidScriptDelegateBridge.h"
+#include "Session/AvidScriptSessionDelegateSubscriptions.h"
 #include "Tests/AvidScriptDelegateSubscriptionTestTypes.h"
 
 #include "Misc/AutomationTest.h"
@@ -9,6 +10,18 @@
 
 namespace
 {
+bool EncodeSourceContextTestFrame(
+	const void* CodecIdentity, const void*, const FAvidScriptBindingInvocationContext&,
+	uint32, FAvidScriptVmCallFrame& OutFrame, TArray<FAvidScriptObjectHandle>&,
+	FString&, FString&)
+{
+	(*static_cast<const TFunction<void()>*>(CodecIdentity))();
+	const float Value = 0.016f;
+	OutFrame.CellCount = 1;
+	FMemory::Memcpy(&OutFrame.Cells[0], &Value, sizeof(Value));
+	return true;
+}
+
 bool EncodeDelegateTestFrame(
 	const void* CodecIdentity,
 	const void* NativeParameters,
@@ -63,6 +76,78 @@ bool EncodeSinglecastTestFrame(
 	return true;
 }
 } // namespace
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptDelegateCurrentSourceTest,
+	"AvidScript.Runtime.DelegateSubscription.CurrentSource",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptDelegateCurrentSourceTest::RunTest(const FString& Parameters)
+{
+	auto* Source = NewObject<UAvidScriptRuntimeDelegateTestObject>();
+	auto* Other = NewObject<UAvidScriptRuntimeDelegateTestObject>();
+	auto* Property = FindFProperty<FMulticastDelegateProperty>(Source->GetClass(),
+		GET_MEMBER_NAME_CHECKED(UAvidScriptRuntimeDelegateTestObject, OnSignal));
+	if (!TestNotNull(TEXT("Fixture has a real multicast property"), Property))
+	{
+		return false;
+	}
+	FAvidScriptRuntimeSession Session;
+	FAvidScriptWasmReloadResult LoadResult;
+	if (!TestTrue(TEXT("Context fixture loads a real Guest"), Session.LoadEmbeddedSmoke(LoadResult)))
+	{
+		return false;
+	}
+	FAvidScriptSessionDelegateSubscriptions Subscriptions(Session);
+	TFunction<void()> Observe;
+	FAvidScriptPreparedDelegateEvent Event;
+	Event.EventOrdinal = 0;
+	Event.StableId = FString::ChrN(64, TEXT('e'));
+	Event.ExportName = TEXT("avid_on_tick");
+	Event.ExpectedSourceClass = Source->GetClass();
+	Event.Signature.Kind = EAvidScriptPreparedDelegateKind::Multicast;
+	Event.Signature.MulticastProperty = Property;
+	Event.Signature.SignatureFunction = Property->SignatureFunction;
+	Event.Signature.ParameterCellCount = 1;
+	Event.Signature.ImmutableCodecIdentity = &Observe;
+	Event.Signature.Encode = &EncodeSourceContextTestFrame;
+	FString Error;
+	if (!TestTrue(TEXT("Source context subscription prepares"),
+		Subscriptions.Prepare(Source, MakeArrayView(&Event, 1), Error)))
+	{
+		return false;
+	}
+	Subscriptions.CommitPrepared();
+	Subscriptions.SetDispatchEnabled(true);
+	const int64 OtherToken = Subscriptions.Subscribe(*Other, 0, Error);
+	TestTrue(TEXT("Second source shares the event contract"), OtherToken > 0);
+	TestFalse(TEXT("Source is absent outside callback"), Subscriptions.IsCurrentSource(*Source));
+	Observe = [&]()
+	{
+		TestTrue(TEXT("Callback sees its actual source"), Subscriptions.IsCurrentSource(*Source));
+		TestFalse(TEXT("Another source does not match"), Subscriptions.IsCurrentSource(*Other));
+		Other->Broadcast(Other, 1, 1.0f);
+		TestTrue(TEXT("Rejected reentry restores outer source"), Subscriptions.IsCurrentSource(*Source));
+		TestFalse(TEXT("Rejected reentry does not leak nested source"), Subscriptions.IsCurrentSource(*Other));
+	};
+	Source->Broadcast(Source, 1, 1.0f);
+	TestEqual(TEXT("Reentry did not add a Guest callback"), Session.GetLiveEventCallbackCount(), 1);
+	TestFalse(TEXT("Normal return clears source"), Subscriptions.IsCurrentSource(*Source));
+	Observe = [&]()
+	{
+		TestTrue(TEXT("Second instance has its own source"), Subscriptions.IsCurrentSource(*Other));
+		TestTrue(TEXT("Callback can cancel its own entry"), Subscriptions.Unsubscribe(OtherToken, Error));
+		TestTrue(TEXT("Entry removal preserves the executing callback identity"), Subscriptions.IsCurrentSource(*Other));
+		Subscriptions.UnbindActive();
+		TestFalse(TEXT("Teardown immediately invalidates callback context"), Subscriptions.IsCurrentSource(*Other));
+	};
+	Other->Broadcast(Other, 2, 2.0f);
+	TestEqual(TEXT("Second source reaches the Guest once"), Session.GetLiveEventCallbackCount(), 2);
+	TestFalse(TEXT("Teardown return leaves no context"), Subscriptions.IsCurrentSource(*Other));
+	Source->Broadcast(Source, 3, 3.0f);
+	TestEqual(TEXT("Teardown prevents later delivery"), Session.GetLiveEventCallbackCount(), 2);
+	return true;
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptDelegateBridgeLifecycleTest,

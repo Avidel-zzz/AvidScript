@@ -8,9 +8,9 @@
   "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase64/P64.0_Production_Gameplay_Architecture.md",
-    "version": 2,
-    "sha256": "6f5920323568a0e1462a093bfb453d2852505b576032640a97d3d1d22428eb29",
-    "revision_reason": "恢复原始 P64 验收范围：保留 Startup/PickupRush 与 Android 最低构建要求，在重开的 P64.D 纳入 UI、跨进程存档、热重载压力和长时间运行；同步静态 EOF 整理，不降低完成标准。"
+    "version": 4,
+    "sha256": "22b301d272f4bd30ba717cd44f7066d9ed63d524b7bf7278cfbab5ddc60c0270",
+    "revision_reason": "真实 UI Profile 暴露旧 Actor-only 委托和 Self 继承限制；明确支持独立 UObject 普通委托来源，不改变网络 inbound owner/Self 权限"
   },
   "documents": {
     "plan": "Docs/Phase64/P64.0_Implementation_Plan.md",
@@ -148,6 +148,6 @@
     }
   ],
   "next_action": "debt-update -Phase 64 -DebtId P64-D03-OriginalGameplayAcceptance -Status Verified -Evidence <text>",
-  "revision": 16,
-  "updated_at_utc": "2026-09-03T20:05:36.7173663+00:00"
+  "revision": 18,
+  "updated_at_utc": "2026-09-03T20:30:51.0540562+00:00"
 }

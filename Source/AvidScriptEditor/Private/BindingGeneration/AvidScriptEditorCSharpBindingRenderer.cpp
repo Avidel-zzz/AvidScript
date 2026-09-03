@@ -2315,6 +2315,7 @@ bool AppendDelegateEventReferenceSurface(
 		TEXT("public static class AvidSubscriptions"),
 		TEXT("{")
 	});
+	TSet<FString> SenderOwnerClasses;
 	for (const FAvidScriptBindingDelegateEventModel& Event :
 		Package.DelegateEvents)
 	{
@@ -2327,6 +2328,14 @@ bool AppendDelegateEventReferenceSurface(
 			TypesByCanonical,
 			TEXT("object:") + Event.OwnerClass);
 		check(OwnerType != nullptr);
+		if (!SenderOwnerClasses.Contains(Event.OwnerClass))
+		{
+			SenderOwnerClasses.Add(Event.OwnerClass);
+			Lines.Add(FString::Printf(
+				TEXT("    public static bool IsCurrentSource(%s source)"),
+				*FAvidScriptEditorCSharpSyntax::MakeIdentifier(OwnerType->CppType)));
+			Lines.Add(TEXT("        => AvidScriptRuntimeNative.EventIsCurrentSource(source.AvidScriptSlot, source.AvidScriptGeneration) != 0;"));
+		}
 		const FString MethodPrefix = Event.DelegateKind == TEXT("singlecast")
 			? FString(TEXT("Bind"))
 			: FString(TEXT("Subscribe"));
@@ -3442,7 +3451,10 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 			TEXT("    internal static extern long EventSubscribe(int slot, int generation, int eventOrdinal);"),
 			TEXT(""),
 			TEXT("    [DllImport(\"env\", EntryPoint = \"event_unsubscribe\")]"),
-			TEXT("    internal static extern int EventUnsubscribe(long subscriptionToken);")
+			TEXT("    internal static extern int EventUnsubscribe(long subscriptionToken);"),
+			TEXT(""),
+			TEXT("    [DllImport(\"env\", EntryPoint = \"event_is_current_source\")]"),
+			TEXT("    internal static extern int EventIsCurrentSource(int slot, int generation);")
 		});
 	}
 	Lines.Append({ TEXT("}"), TEXT("") });

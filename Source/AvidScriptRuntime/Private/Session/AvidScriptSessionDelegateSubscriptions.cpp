@@ -182,6 +182,7 @@ struct FAvidScriptSessionDelegateSubscriptions::FImpl
 	TMap<uint32, FAvidScriptPreparedDelegateEvent> ActiveCatalog;
 	TMap<uint32, FAvidScriptPreparedDelegateEvent> PreparedCatalog;
 	TMap<uint64, int32> ActiveBridgeIndices;
+	TWeakObjectPtr<UObject> CurrentSource;
 	uint64 NextBridgeToken = 1;
 	uint64 NextGuestToken = 1;
 	bool bPreparing = false;
@@ -350,6 +351,7 @@ void FAvidScriptSessionDelegateSubscriptions::DiscardPrepared()
 void FAvidScriptSessionDelegateSubscriptions::UnbindActive()
 {
 	Impl->bDispatchEnabled = false;
+	Impl->CurrentSource.Reset();
 	UnbindEntries(Impl->Active);
 	Impl->ActiveCatalog.Reset();
 	Impl->ActiveBridgeIndices.Reset();
@@ -485,6 +487,12 @@ bool FAvidScriptSessionDelegateSubscriptions::Unsubscribe(
 	return true;
 }
 
+bool FAvidScriptSessionDelegateSubscriptions::IsCurrentSource(const UObject& Source) const
+{
+	return IsInGameThread() && Impl->bDispatchEnabled
+		&& Impl->CurrentSource.IsValid() && Impl->CurrentSource.Get() == &Source;
+}
+
 void FAvidScriptSessionDelegateSubscriptions::
 	HandleAvidScriptDelegateBroadcast(
 		const uint64 SubscriptionToken,
@@ -505,6 +513,13 @@ void FAvidScriptSessionDelegateSubscriptions::
 	}
 	const FAvidScriptPreparedDelegateEvent Event =
 		Impl->Active[*EntryIndex].Event;
+	const TWeakObjectPtr<UObject> Source = Impl->Active[*EntryIndex].Source;
+	if (!Source.IsValid())
+	{
+		return;
+	}
+	// Keep callback identity independent of entries that a handler may cancel or replace.
+	TGuardValue<TWeakObjectPtr<UObject>> SourceGuard(Impl->CurrentSource, Source);
 
 	FAvidScriptWasmSmokeResult Result;
 	if (!Impl->Session.DispatchPreparedDelegateEvent(

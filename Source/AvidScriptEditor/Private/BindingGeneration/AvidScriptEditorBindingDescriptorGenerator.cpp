@@ -2191,7 +2191,7 @@ bool GenerateBindingDescriptor(
 				Event.CallbackKind == TEXT("multicast")
 				|| Event.CallbackKind == TEXT("singlecast");
 			const bool bOwnerSupported = bDelegateProperty
-				? Event.OwnerClass->IsChildOf(AActor::StaticClass())
+				? Event.OwnerClass->IsChildOf(UObject::StaticClass())
 				: IsAvidScriptBindingNetworkOwnerClass(Event.OwnerClass);
 			if (!bOwnerSupported)
 			{
@@ -2199,8 +2199,13 @@ bool GenerateBindingDescriptor(
 					OutResult,
 					TEXT("callback_owner_unsupported"),
 					Event.OwnerClass->GetPathName(),
-					TEXT("Use an Actor delegate event or an Actor/ActorComponent inbound network handler."));
+					TEXT("Use a UObject delegate event or an Actor/ActorComponent inbound network handler."));
 				return false;
+			}
+			if (bDelegateProperty && bHasRequestedSelfClass)
+			{
+				// Non-Self delegate sources are selected by explicit subscriptions.
+				continue;
 			}
 			if (SelfClass == nullptr)
 			{

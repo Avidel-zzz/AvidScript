@@ -2331,9 +2331,9 @@ foreach ($RequiredBindingInstrumentationContract in @(
         Add-Violation "binding package instrumentation is missing $RequiredBindingInstrumentationContract"
     }
 }
-if (-not $CSharpBindingArtifactHeader.Contains('EmitterVersion = TEXT("49.3.0")') -or
+if (-not $CSharpBindingArtifactHeader.Contains('EmitterVersion = TEXT("49.4.0")') -or
     -not $CSharpBindingArtifactHeader.Contains('DescriptorFileName = TEXT("bindings.v5.json")')) {
-    Add-Violation 'C# binding artifact must identify the P49.3 schema-v5 object lifecycle surface'
+    Add-Violation 'C# binding artifact must identify the 49.4 schema-v5 object lifecycle and event source surface'
 }
 foreach ($RequiredDescriptorSchemaVersion in 2..23) {
     $RequiredDescriptorSchemaToken = '$DescriptorSchemaVersion -ne ' + $RequiredDescriptorSchemaVersion
@@ -2687,6 +2687,7 @@ $CanonicalStaticImportNames = @(
     'continuation_bind_cancel',
 	'event_subscribe',
 	'event_unsubscribe',
+	'event_is_current_source',
 	'avid_delegate_output_write',
 	'avid_debug_probe',
 	'avid_debug_suspend',
@@ -3020,6 +3021,7 @@ $AllowedFixedRendererImports = @(
     'continuation_bind_cancel',
     'event_subscribe',
     'event_unsubscribe',
+    'event_is_current_source',
     'avid_value_array_read_range',
     'avid_value_array_write_range',
     'avid_value_release',

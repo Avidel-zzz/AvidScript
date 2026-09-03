@@ -37,7 +37,7 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 | 生成式 UE API | Reflection/Profile 生成 `UFUNCTION`、`UPROPERTY`、Interface 与项目自定义 API；typed Self、Spawn、cast、销毁，无需逐个手写 VM wrapper |
 | 类型与容器 | UObject、向量/变换、固定 `USTRUCT`、名称/字符串、`FText`；字符串数组、递归容器、`TSet/TMap`；soft/weak object 身份往返，详见下方边界 |
 | C# 定义 UE 类型 | Actor、Component、World/GameInstance Subsystem，含继承、override、属性、函数与默认参数 |
-| 异步与委托 | 受控 `async/await`、Delay/NextTick、异步加载、Latent、AsyncAction；单播/多播、强类型 `return/ref/out` 与主动调用 |
+| 异步与委托 | 受控 `async/await`、Delay/NextTick、异步加载、Latent、AsyncAction；单播/多播、受支持签名的 `return/ref/out` 与主动调用；独立 UObject 订阅与回调来源查询 |
 | Blueprint 与网络 | callable/event 双向交互；Server/Client/NetMulticast RPC、属性复制与 RepNotify，dedicated/listen 多进程验证 |
 | 热重载与安全 | 方法体事务式替换与回滚；ObjectHandle、Session 隔离、执行预算、后台恢复、低内存回收及 teardown 自动取消 |
 | Cook 与发布 | 内容寻址模块、多平台 catalog、无头 Release、Generated Type 预编译；Win64 Development/Shipping BuildCookRun 与回执校验 |
@@ -46,9 +46,8 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 | 调试与 Profiler | 源码映射、跨层调用栈、PIE 目标、受控同步断点/步进、只读变量；UE Trace、热点与 JSON 导出 |
 
 **最近交付（2026-09-04）：** [PickupRush](Samples/CSharp/PickupRush/README.md) 已通过 Editor 与
-Win64 Development/Shipping 包内玩法探针；启动回滚、热重载事件隔离和冷启动 AOT 包校验已修复。
-[Android 就绪工具](Docs/Phase64/P64.D_Android_Readiness.md) 已提供 SDK 预检与设备运行入口，但 APK/真机尚未验收。
-P64 正在补齐 UI、跨进程存档与长稳闭环，未计入已实现能力。
+Win64 Development/Shipping 包内玩法探针；[委托来源查询](Docs/Phase64/P64.D_Delegate_Source_Context.md)
+让 Actor 脚本显式订阅独立 UObject 事件并识别来源。UI、跨进程存档与长稳仍在联调，未计入已验收能力。
 
 类型支持与限制可追溯至 [P58 验收](Docs/Phase58/P58.4_Centralized_Gate_Report.md)，
 当前玩法及打包结果见 [P64 记录](Docs/Phase64/P64_Closeout.md)。
@@ -248,6 +247,9 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 | PowerShell、架构与构建 | 10 组合同、干净候选架构检查、no-clean Editor UBT 通过 |
 | PickupRush Editor / Win64 Development / Shipping | 均为 5/5 事件、胜利状态、零丢弃回调 |
 | Development / Shipping 包回执 | 21/21 / 19/19，实际运行包身份与发布结果一致 |
+
+新增[委托来源小节](Docs/Phase64/P64.D_Delegate_Source_Context.md)另通过 UE Automation **10/10**、
+C# 专项 **8/8** 与增量 Editor 构建；这些专项结果不扩充上表的历史全量基线。
 
 这些是自动化与包内探针证据，不替代真实输入、视觉、设备和长稳验收。
 详见 [P64 记录](Docs/Phase64/P64_Closeout.md)、[Android 边界](Docs/Phase64/P64.D_Android_Readiness.md)

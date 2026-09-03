@@ -22,7 +22,8 @@ internal static class CSharpGuestDelegateEventTests
         UnsupportedNestedTypesFailClosed();
         TamperedCallbackMetadataFailsClosed();
         ExplicitSubscriptionFacadeLowersSharedI64Imports();
-        return 7;
+        SenderFacadeUsesGenericDllImportWithoutChangingCallbackAbi();
+        return 8;
     }
 
     private static void ReturnRefOutHandlersShareOutputTransaction()
@@ -399,6 +400,79 @@ internal static class CSharpGuestDelegateEventTests
             "event unsubscribe should retain the shared i64->i32 ABI");
         Assert(WasmModuleCompiler.Compile(module).Succeeded,
             "explicit subscription Guest IR should compile into WASM");
+    }
+
+    private static void SenderFacadeUsesGenericDllImportWithoutChangingCallbackAbi()
+    {
+        const string source = """
+            using AvidScript;
+
+            namespace Game;
+
+            public static class Script
+            {
+                private static int count;
+
+                [AvidEvent(AvidEvents.OnSignal)]
+                public static void HandleSignal()
+                {
+                    if (AvidSubscriptions.IsCurrentSource(UE.Button))
+                    {
+                        count += 1;
+                    }
+                }
+            }
+            """;
+        const string senderTypes = """
+            public readonly struct UButton
+            {
+                internal readonly int Slot;
+                internal readonly int Generation;
+                internal UButton(int slot, int generation)
+                {
+                    Slot = slot;
+                    Generation = generation;
+                }
+                internal int AvidScriptSlot => Slot;
+                internal int AvidScriptGeneration => Generation;
+            }
+
+            public static class UE
+            {
+                public static UButton Button => new(17, 23);
+            }
+
+            public static class AvidSubscriptions
+            {
+                public static bool IsCurrentSource(UButton source)
+                    => AvidScriptRuntimeNative.EventIsCurrentSource(
+                        source.AvidScriptSlot, source.AvidScriptGeneration) != 0;
+            }
+
+            internal static class AvidScriptRuntimeNative
+            {
+                [System.Runtime.InteropServices.DllImport("env", EntryPoint = "event_is_current_source")]
+                internal static extern int EventIsCurrentSource(int slot, int generation);
+            }
+            """;
+        SemanticDocument document = Analyze(source, GeneratedFacade(string.Empty, senderTypes));
+        CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(document, SemanticHash);
+        GuestModule module = result.Module
+            ?? throw new InvalidOperationException("sender facade produced no Guest module");
+        GuestImport sender = module.Imports.Single(import => import.Name == "event_is_current_source");
+        Assert(result.Succeeded && GuestModuleValidator.Validate(module).Succeeded,
+            "sender facade should use the existing authorized DllImport lowering path");
+        Assert(sender.Module == "env"
+            && sender.ParameterTypeIds.SequenceEqual(new[] { "type:int32", "type:int32" })
+            && sender.ReturnTypeId == "type:int32",
+            "sender query must preserve env (i32,i32)->i32");
+        GuestFunction callback = module.Functions.Single(function =>
+            function.Id == module.Exports.Single(export =>
+                export.Name == "avid_on_delegate_0123456789abcdef").FunctionId);
+        Assert(callback.Parameters.Count == 0,
+            "sender inspection must not change the zero-argument delegate callback ABI");
+        Assert(WasmModuleCompiler.Compile(module).Succeeded,
+            "sender facade Guest IR should compile into WASM");
     }
 
     private static SemanticDocument Analyze(string source, string generatedSource)

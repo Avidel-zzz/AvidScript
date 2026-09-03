@@ -30,6 +30,8 @@ public class AvidScriptEditor : ModuleRules
 				"Json",
 				"Kismet",
 				"UnrealEd",
+				"UMG",
+				"UMGEditor",
 				"ToolMenus",
 				"Slate",
 				"SlateCore",

@@ -1063,6 +1063,22 @@ int64_t EventSubscribe(
 		: 0;
 }
 
+int32_t EventIsCurrentSource(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::EventIsCurrentSource;
+	Call.IntArgs[0] = Slot;
+	Call.IntArgs[1] = Generation;
+	FAvidScriptHostCallResult Result;
+	return Dispatch(
+		ExecEnv,
+		StaticImportName(EAvidScriptHostBindingId::EventIsCurrentSource),
+		Call,
+		Result)
+		? Result.ReturnValue
+		: 0;
+}
+
 int32_t EventUnsubscribe(wasm_exec_env_t ExecEnv, int64_t SubscriptionToken)
 {
 	FAvidScriptHostCall Call;
@@ -1242,6 +1258,7 @@ void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 	case EAvidScriptHostBindingId::ContinuationStateRead: return reinterpret_cast<void*>(ContinuationStateRead);
 	case EAvidScriptHostBindingId::EventSubscribe: return reinterpret_cast<void*>(EventSubscribe);
 	case EAvidScriptHostBindingId::EventUnsubscribe: return reinterpret_cast<void*>(EventUnsubscribe);
+	case EAvidScriptHostBindingId::EventIsCurrentSource: return reinterpret_cast<void*>(EventIsCurrentSource);
 	case EAvidScriptHostBindingId::DelegateOutputWrite: return reinterpret_cast<void*>(DelegateOutputWrite);
 	case EAvidScriptHostBindingId::DataLaneGetEpoch: return reinterpret_cast<void*>(DataLaneGetEpoch);
 	case EAvidScriptHostBindingId::DataLaneSubmit: return reinterpret_cast<void*>(DataLaneSubmit);

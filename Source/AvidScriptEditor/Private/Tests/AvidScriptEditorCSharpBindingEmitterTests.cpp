@@ -2808,6 +2808,14 @@ bool FAvidScriptEditorDelegateEventFacadeTest::RunTest(
 		&& ReferenceSource.Contains(TEXT("internal static extern long EventSubscribe(int slot, int generation, int eventOrdinal);"))
 		&& ReferenceSource.Contains(TEXT("[DllImport(\"env\", EntryPoint = \"event_unsubscribe\")]"))
 		&& ReferenceSource.Contains(TEXT("internal static extern int EventUnsubscribe(long subscriptionToken);")));
+	const FString SenderSignature = FString::Printf(
+		TEXT("public static bool IsCurrentSource(%s source)"), *ExpectedOwnerProxy);
+	TestTrue(TEXT("Sender query requires the event owner wrapper"),
+		ReferenceSource.Contains(SenderSignature));
+	TestTrue(TEXT("Sender query forwards the source handle through the frozen env ABI"),
+		ReferenceSource.Contains(TEXT("[DllImport(\"env\", EntryPoint = \"event_is_current_source\")]"))
+		&& ReferenceSource.Contains(TEXT("internal static extern int EventIsCurrentSource(int slot, int generation);"))
+		&& ReferenceSource.Contains(TEXT("AvidScriptRuntimeNative.EventIsCurrentSource(source.AvidScriptSlot, source.AvidScriptGeneration) != 0;")));
 	TestTrue(
 		TEXT("Owner facade publishes a typed multicast broadcast method"),
 		ReferenceSource.Contains(
@@ -2843,6 +2851,26 @@ bool FAvidScriptEditorDelegateEventFacadeTest::RunTest(
 		TEXT("Facade does not derive the event ordinal from array position"),
 		NonSequentialOrdinalSource.Contains(TEXT(
 			"AvidScriptRuntimeNative.EventSubscribe(source.AvidScriptSlot, source.AvidScriptGeneration, 37)")));
+
+	FAvidScriptBindingSelectionProfile SharedOwnerProfile = Profile;
+	SharedOwnerProfile.ExplicitDelegateEvents.Add({ OwnerPath, TEXT("OnRefOutSignal") });
+	FString SharedOwnerDescriptor;
+	FString SharedOwnerSource;
+	FString SharedOwnerManifest;
+	FAvidScriptCSharpBindingEmitResult SharedOwnerResult;
+	if (!TestTrue(TEXT("Two events with the same owner emit successfully"),
+		FAvidScriptEditorCSharpBindingEmitter::EmitProfile(SharedOwnerProfile,
+			SharedOwnerDescriptor, SharedOwnerSource, SharedOwnerManifest, SharedOwnerResult)))
+	{
+		AddError(SharedOwnerResult.ErrorMessage);
+		return false;
+	}
+	TestEqual(TEXT("Shared-owner fixture retains both events"), SharedOwnerResult.DelegateEventCount, 2);
+	const int32 SenderOffset = SharedOwnerSource.Find(SenderSignature, ESearchCase::CaseSensitive);
+	TestTrue(TEXT("Sender facade is emitted once per owner, not once per event"),
+		SenderOffset != INDEX_NONE
+			&& SharedOwnerSource.Find(SenderSignature, ESearchCase::CaseSensitive,
+				ESearchDir::FromStart, SenderOffset + SenderSignature.Len()) == INDEX_NONE);
 
 	const TArray<FString> ReservedTypeNames = {
 		TEXT("AvidSubscription"),

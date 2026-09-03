@@ -31,6 +31,7 @@ public:
 		uint32 EventOrdinal,
 		FString& OutError) = 0;
 	virtual bool Unsubscribe(int64 SubscriptionToken, FString& OutError) = 0;
+	virtual bool IsCurrentSource(const UObject& Source) const { return false; }
 };
 
 struct FAvidScriptWasmRuntimeMetrics
@@ -428,6 +429,7 @@ public:
 		TArrayView<uint8> OutBytes);
 	int64 HandleEventSubscribeImport(int32 Slot, int32 Generation, int32 EventOrdinal);
 	int32 HandleEventUnsubscribeImport(int64 SubscriptionToken);
+	int32 HandleEventIsCurrentSourceImport(int32 Slot, int32 Generation);
 	int32 HandleDelegateOutputWriteImport(
 		int32 TransactionToken,
 		int32 OutputOrdinal,

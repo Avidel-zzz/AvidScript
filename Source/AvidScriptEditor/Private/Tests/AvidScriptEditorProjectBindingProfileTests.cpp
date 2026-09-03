@@ -5,9 +5,11 @@
 #include "AvidScriptEditorProjectBindingProfile.h"
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptHash.h"
+#include "AvidScriptEditorCSharpBindingEmitterTestTypes.h"
 #include "BindingGeneration/AvidScriptEditorReflectedFunctionPolicy.h"
 
 #include "Algo/Reverse.h"
+#include "Components/Button.h"
 #include "HAL/PlatformProcess.h"
 #include "Misc/AutomationTest.h"
 #include "Modules/ModuleManifest.h"
@@ -464,6 +466,144 @@ bool FAvidScriptEditorProjectBindingProfileTypedSelfValidationTest::RunTest(cons
 	ResolveInvalidSelf(
 		TEXT("/Script/Engine.SceneComponent"),
 		TEXT("self_class_not_actor"));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorProjectBindingProfileUObjectDelegateTypedSelfTest,
+	"AvidScript.Editor.ProjectBindingProfile.UObjectDelegateTypedSelf",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorProjectBindingProfileUObjectDelegateTypedSelfTest::RunTest(
+	const FString& Parameters)
+{
+	const FString ButtonClassPath = UButton::StaticClass()->GetPathName();
+	FAvidScriptProjectBindingProfileSpec Spec;
+	Spec.PackageName = TEXT("avidscript.project.uobject_delegate_typed_self");
+	Spec.SelfClassPath = ProjectBindingProfileTypedSelfClassPath;
+	FAvidScriptReflectedClassSelection& Rule = Spec.Classes.AddDefaulted_GetRef();
+	Rule.OwnerClassPath = ButtonClassPath;
+	Rule.IncludeEvents = { TEXT("OnClicked") };
+
+	FAvidScriptBindingSelectionProfile Selection;
+	TArray<FAvidScriptProjectBindingClassSpec> ClassReferences;
+	FString SelectionHash;
+	FAvidScriptBindingSelectionResolveResult ResolveResult;
+	if (!TestTrue(
+			TEXT("Real UButton delegate resolves with an independent typed Actor Self"),
+			FAvidScriptEditorProjectBindingProfile::Resolve(
+				Spec, Selection, ClassReferences, SelectionHash, ResolveResult)))
+	{
+		AddError(ResolveResult.ErrorMessage);
+		return false;
+	}
+	TestEqual(TEXT("Resolution does not rewrite explicit Self"),
+		Selection.SelfClassPath, FString(ProjectBindingProfileTypedSelfClassPath));
+
+	FString DescriptorJson;
+	FAvidScriptBindingSelectionResolveResult DescriptorSelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult DescriptorResult;
+	if (!TestTrue(
+			TEXT("UObject delegate profile generates a descriptor"),
+			FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+				Selection, ClassReferences, DescriptorJson,
+				DescriptorSelectionResult, DescriptorResult)))
+	{
+		AddError(DescriptorResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Package;
+	FString ErrorCategory;
+	FString ErrorSource;
+	if (!TestTrue(TEXT("UObject delegate descriptor parses"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			DescriptorJson, Package, ErrorCategory, ErrorSource)))
+	{
+		AddError(ErrorCategory + TEXT(": ") + ErrorSource);
+		return false;
+	}
+	const FAvidScriptBindingTypeModel* SelfType = Package.Types.FindByPredicate(
+		[&Package](const FAvidScriptBindingTypeModel& Type)
+		{
+			return Type.StableId == Package.SelfTypeId;
+		});
+	const FAvidScriptBindingTypeModel* ButtonType = Package.Types.FindByPredicate(
+		[&ButtonClassPath](const FAvidScriptBindingTypeModel& Type)
+		{
+			return Type.ClassPath == ButtonClassPath;
+		});
+	if (!TestNotNull(TEXT("Typed Self is present in the type graph"), SelfType)
+		|| !TestNotNull(TEXT("UButton has its own handle type"), ButtonType)
+		|| !TestEqual(TEXT("Only the selected callback is emitted"), Package.DelegateEvents.Num(), 1))
+	{
+		return false;
+	}
+	TestEqual(TEXT("Descriptor retains typed Actor Self"),
+		SelfType->ClassPath, FString(ProjectBindingProfileTypedSelfClassPath));
+	TestNotEqual(TEXT("Delegate owner is not the Self type"),
+		ButtonType->StableId, Package.SelfTypeId);
+	const FAvidScriptBindingDelegateEventModel& Event = Package.DelegateEvents[0];
+	TestEqual(TEXT("Callback owner remains UButton"), Event.OwnerClass, ButtonClassPath);
+	TestEqual(TEXT("Callback is the real OnClicked member"), Event.UeMember, FString(TEXT("OnClicked")));
+	TestEqual(TEXT("Callback retains multicast kind"), Event.DelegateKind, FString(TEXT("multicast")));
+	TestFalse(TEXT("UObject subscription grants no network authority"), Event.Network.IsNetworked());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorProjectBindingProfileInboundSelfMismatchTest,
+	"AvidScript.Editor.ProjectBindingProfile.InboundSelfMismatch",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorProjectBindingProfileInboundSelfMismatchTest::RunTest(
+	const FString& Parameters)
+{
+	const FString NetworkOwnerPath =
+		AAvidScriptBindingRuntimeNetworkTestActor::StaticClass()->GetPathName();
+	for (const bool bRepNotify : { false, true })
+	{
+		FAvidScriptProjectBindingProfileSpec Spec;
+		Spec.PackageName = TEXT("avidscript.project.inbound_self_mismatch");
+		Spec.SelfClassPath = NetworkOwnerPath;
+		FAvidScriptReflectedClassSelection& NetworkRule = Spec.Classes.AddDefaulted_GetRef();
+		NetworkRule.OwnerClassPath = NetworkOwnerPath;
+		if (bRepNotify)
+		{
+			NetworkRule.AfterHandlers = { TEXT("OnRep_ReplicatedScore") };
+		}
+		else
+		{
+			NetworkRule.BeforeHandlers = { TEXT("ServerSubmitValue") };
+		}
+		FAvidScriptReflectedClassSelection& ButtonRule = Spec.Classes.AddDefaulted_GetRef();
+		ButtonRule.OwnerClassPath = UButton::StaticClass()->GetPathName();
+		ButtonRule.IncludeEvents = { TEXT("OnClicked") };
+
+		FAvidScriptBindingSelectionProfile Selection;
+		TArray<FAvidScriptProjectBindingClassSpec> ClassReferences;
+		FString SelectionHash;
+		FAvidScriptBindingSelectionResolveResult Result;
+		if (!TestTrue(TEXT("Compatible inbound Self resolves alongside an independent UObject delegate"),
+			FAvidScriptEditorProjectBindingProfile::Resolve(
+				Spec, Selection, ClassReferences, SelectionHash, Result)))
+		{
+			AddError(Result.ErrorMessage);
+			return false;
+		}
+
+		Spec.SelfClassPath = ProjectBindingProfileTypedSelfClassPath;
+		TestFalse(bRepNotify
+			? TEXT("Independent delegate does not relax RepNotify Self compatibility")
+			: TEXT("Independent delegate does not relax RPC Self compatibility"),
+			FAvidScriptEditorProjectBindingProfile::Resolve(
+				Spec, Selection, ClassReferences, SelectionHash, Result));
+		TestEqual(TEXT("Inbound mismatch rejection category is unchanged"),
+			Result.ErrorCategory, FString(TEXT("delegate_event_self_type_mismatch")));
+		TestEqual(TEXT("Mismatch identifies Self and the inbound owner"),
+			Result.ErrorSource,
+			FString(ProjectBindingProfileTypedSelfClassPath) + TEXT(" -> ") + NetworkOwnerPath);
+	}
 	return true;
 }
 

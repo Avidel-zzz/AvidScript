@@ -582,6 +582,9 @@ bool FAvidScriptVmEventSubscriptionImportContractTest::RunTest(
 	const FAvidScriptVmStaticHostImport& Unsubscribe =
 		GetAvidScriptVmStaticHostImport(
 			EAvidScriptHostBindingId::EventUnsubscribe);
+	const FAvidScriptVmStaticHostImport& IsCurrentSource =
+		GetAvidScriptVmStaticHostImport(
+			EAvidScriptHostBindingId::EventIsCurrentSource);
 	TestEqual(
 		TEXT("Event subscribe uses the generated facade import name"),
 		FString(UTF8_TO_TCHAR(Subscribe.ImportName)),
@@ -598,6 +601,22 @@ bool FAvidScriptVmEventSubscriptionImportContractTest::RunTest(
 		TEXT("C#/LDC env compatibility remains available on both event imports"),
 		Subscribe.bSupportsEnvCompatibility
 			&& Unsubscribe.bSupportsEnvCompatibility);
+	TestEqual(
+		TEXT("Sender query appends after the frozen debug imports"),
+		static_cast<uint16>(EAvidScriptHostBindingId::EventIsCurrentSource),
+		static_cast<uint16>(EAvidScriptHostBindingId::DebugFrameRead) + 1);
+	TestEqual(
+		TEXT("Sender query uses the shared import name"),
+		FString(UTF8_TO_TCHAR(IsCurrentSource.ImportName)),
+		FString(TEXT("event_is_current_source")));
+	TestEqual(
+		TEXT("Sender query accepts slot and generation and returns i32"),
+		FString(UTF8_TO_TCHAR(IsCurrentSource.Signature)),
+		FString(TEXT("(ii)i")));
+	TestTrue(
+		TEXT("Sender query is available through generated facade env imports"),
+		IsCurrentSource.bSupportsEnvCompatibility
+			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("event_is_current_source")));
 	return true;
 }
 
@@ -1075,6 +1094,14 @@ public:
 			OutResult.ReturnValue = static_cast<int32>(EAvidScriptDebugProbeAction::Pause);
 			return true;
 		}
+		if (Call.BindingId == EAvidScriptHostBindingId::EventIsCurrentSource)
+		{
+			LastSlot = Call.IntArgs[0];
+			LastGeneration = Call.IntArgs[1];
+			OutResult.bSucceeded = true;
+			OutResult.ReturnValue = LastSlot == 17 && LastGeneration == 23 ? 1 : 0;
+			return true;
+		}
 		OutResult.bSucceeded = Call.BindingId == EAvidScriptHostBindingId::HostAddI32;
 		OutResult.ReturnValue = Call.IntArgs[0] + 1;
 		return OutResult.bSucceeded;
@@ -1083,6 +1110,8 @@ public:
 	int32 CallCount = 0;
 	EAvidScriptHostBindingId LastBindingId = EAvidScriptHostBindingId::Invalid;
 	int64 LastInt64Argument = 0;
+	int32 LastSlot = 0;
+	int32 LastGeneration = 0;
 };
 
 class FAvidScriptVmContinuationHostDispatcher final : public IAvidScriptHostDispatcher
@@ -1121,6 +1150,48 @@ public:
 	int32 ObjectPathId = 0;
 	int32 LoadCallbackId = 0;
 };
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmEventSenderStaticInvocationTest,
+	"AvidScript.Architecture.VM.EventSenderStaticInvocation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmEventSenderStaticInvocationTest::RunTest(const FString& Parameters)
+{
+	const FAvidScriptVmStaticHostImport& Import =
+		GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::EventIsCurrentSource);
+	FAvidScriptVmAbiSignature Signature;
+	FString FailureDetails;
+	if (!TestTrue(TEXT("Sender query catalog signature parses"),
+		ParseAvidScriptVmAbiSignature(UTF8_TO_TCHAR(Import.Signature), Signature, FailureDetails)))
+	{
+		return false;
+	}
+	FAvidScriptVmStaticValue Arguments[2];
+	Arguments[0].I32 = 17;
+	Arguments[1].I32 = 23;
+	FAvidScriptVmTestHostDispatcher Dispatcher;
+	FAvidScriptNonBorrowingGuestMemory GuestMemory;
+	FAvidScriptVmStaticCallResult Result;
+	TestTrue(TEXT("Sender query dispatches without guest memory access"),
+		InvokeAvidScriptVmStaticHostImport(Import, Signature, MakeArrayView(Arguments),
+			&Dispatcher, GuestMemory, Result, FailureDetails));
+	TestEqual(TEXT("Sender query preserves slot"), Dispatcher.LastSlot, 17);
+	TestEqual(TEXT("Sender query preserves generation"), Dispatcher.LastGeneration, 23);
+	TestEqual(TEXT("Matching sender returns true"), Result.I32, 1);
+	TestEqual(TEXT("Sender query result stays i32"), Result.Kind, EAvidScriptVmValueKind::I32);
+	Arguments[1].I32 = 24;
+	TestTrue(TEXT("Non-matching sender remains a successful host call"),
+		InvokeAvidScriptVmStaticHostImport(Import, Signature, MakeArrayView(Arguments),
+			&Dispatcher, GuestMemory, Result, FailureDetails));
+	TestEqual(TEXT("Non-matching sender returns false"), Result.I32, 0);
+	Arguments[1].Kind = EAvidScriptVmValueKind::I64;
+	TestFalse(TEXT("Sender query rejects an incorrect argument type"),
+		InvokeAvidScriptVmStaticHostImport(Import, Signature, MakeArrayView(Arguments),
+			&Dispatcher, GuestMemory, Result, FailureDetails));
+	TestEqual(TEXT("Malformed sender query does not reach the host"), Dispatcher.CallCount, 2);
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(

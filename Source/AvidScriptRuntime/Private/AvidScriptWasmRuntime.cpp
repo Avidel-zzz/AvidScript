@@ -4822,6 +4822,44 @@ int32 FAvidScriptWasmRuntimeInstance::HandleEventUnsubscribeImport(
 	return 1;
 }
 
+int32 FAvidScriptWasmRuntimeInstance::HandleEventIsCurrentSourceImport(
+	const int32 Slot,
+	const int32 Generation)
+{
+	if (!IsInGameThread())
+	{
+		return 0;
+	}
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = Slot;
+	++HostImportCallCount;
+	const auto Finish = [this, HostImportStartSeconds](const bool bMatches)
+	{
+		LastHostImportResult = bMatches ? 1 : 0;
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return LastHostImportResult;
+	};
+	if (!IsLoaded() || Slot <= 0 || Generation <= 0
+		|| HostContext.ObjectRegistry == nullptr || HostContext.EventSubscriptions == nullptr
+		|| !HostContext.World.IsValid())
+	{
+		return Finish(false);
+	}
+	const FAvidScriptObjectHandle SourceHandle{
+		static_cast<uint32>(Slot), static_cast<uint32>(Generation)
+	};
+	FAvidScriptObjectHandleResult ResolveResult;
+	UObject* const Source = HostContext.ObjectRegistry->ResolveObject(SourceHandle, ResolveResult, false);
+	if (Source == nullptr || Source->GetWorld() != HostContext.World.Get()
+		|| (SourceHandle != HostContext.OwnerHandle
+			&& (HostContext.ObjectOwnership == nullptr
+				|| !HostContext.ObjectOwnership->HasCapability(SourceHandle, Source))))
+	{
+		return Finish(false);
+	}
+	return Finish(HostContext.EventSubscriptions->IsCurrentSource(*Source));
+}
+
 void FAvidScriptWasmRuntimeInstance::CollectDueTimers(float DeltaSeconds)
 {
 	DueTimerScratch.Reset();
@@ -7280,6 +7318,11 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 	case EAvidScriptHostBindingId::EventUnsubscribe:
 	{
 		const int32 Value = HandleEventUnsubscribeImport(Call.Int64Args[0]);
+		return Finish(Value, true);
+	}
+	case EAvidScriptHostBindingId::EventIsCurrentSource:
+	{
+		const int32 Value = HandleEventIsCurrentSourceImport(Call.IntArgs[0], Call.IntArgs[1]);
 		return Finish(Value, true);
 	}
 	case EAvidScriptHostBindingId::DelegateOutputWrite:

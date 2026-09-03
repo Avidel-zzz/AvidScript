@@ -33,6 +33,7 @@ public:
 	virtual bool Unsubscribe(
 		int64 SubscriptionToken,
 		FString& OutError) override;
+	virtual bool IsCurrentSource(const UObject& Source) const override;
 
 	virtual void HandleAvidScriptDelegateBroadcast(
 		uint64 SubscriptionToken,
