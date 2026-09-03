@@ -572,6 +572,10 @@ internal static class CSharpAsyncLowerer
                         new GuestTerminator("return", null, null, null, null)));
                 }
 
+                if (!context.ShortCircuitFlow.Rewrite(context, blocks))
+                {
+                    break;
+                }
                 functions.Add(new GuestFunction(
                     functionId,
                     parameters,

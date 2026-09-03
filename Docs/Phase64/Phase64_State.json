@@ -103,8 +103,8 @@
       "evidence": "异步 UI 初始化组合回归发现既有短路缺口；CSharpAsyncControlFlowLowerer 的值路径调用 CSharpOperationLowerer.LowerValue，LowerBinary 先连续求值两个子操作。隐式 initializer 转换修复未改变该行为。",
       "deferral_reason": "本轮 UI Ready 的两侧是无副作用的 token/handle 有效性读取，不阻塞正文重载联调；一般游戏逻辑的条件 RHS 副作用仍需在本阶段关闭前集中修复。",
       "remediation": "在异步控制流中用条件分支保留 &&/|| 的惰性求值，复用既有 IR CFG，覆盖嵌套表达式、静态字段赋值、RHS 副作用与跨 await 路径；不得将两侧求值后做 bitwise 运算当作等价。",
-      "status": "Fixing",
-      "resolution_evidence": "",
+      "status": "Verified",
+      "resolution_evidence": "Docs/Phase64/P64.D_Async_Short_Circuit.md: Guest 140/140, Semantic 98/98; 13 actual Guest IR execution scenarios, 3 negative inputs, WASM compilation; no new ABI/Schema, no real WASM execution claim.",
       "target_phase": null,
       "transfer_reason": ""
     },
@@ -174,6 +174,6 @@
     }
   ],
   "next_action": "debt-update -Phase 64 -DebtId P64-D03-OriginalGameplayAcceptance -Status Verified -Evidence <text>",
-  "revision": 25,
-  "updated_at_utc": "2026-09-03T22:44:33.6254575+00:00"
+  "revision": 26,
+  "updated_at_utc": "2026-09-03T23:07:22.6135232+00:00"
 }

@@ -39,6 +39,9 @@ UI [正文重载小节](P64.D_UI_Reload.md)已通过 20 轮、84/84 动作、99/
 生命周期专项。复用 NextTickAsync 在提交后初始化 UI，分数迁移、失败候选回滚及退出隔离通过；
 实测 Wasmtime 45 JIT，62 个资源快照无相对基线增长。异步版本原有存档五进程复验也通过。
 
+[async 短路修复](P64.D_Async_Short_Circuit.md)已通过 Guest 140/140 与 Semantic 98/98；
+13 个 Guest IR 执行场景和 WASM 编译验证不替代真实 WASM 执行，也不并入历史完整技术基线。
+
 P64.D 依架构 v7 继续补齐 UI 真实输入/视觉、包内 UI、Save/Load 穿插重载、World 退出、长时间运行，以及 Android toolchain/UBT/APK。
 人工游玩和真实设备验收独立保留。P58 类型、iOS、发布工程及性能领先等总目标缺口不会随本阶段编号自动关闭。
 

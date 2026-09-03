@@ -1563,7 +1563,7 @@ internal static class CSharpGuestContinuationTests
             "guest input validation should reject mismatched and schema 10 object payload metadata");
     }
 
-    private static SemanticDocument Analyze(string source, string sourceId, string additionalFacade = "")
+    internal static SemanticDocument Analyze(string source, string sourceId, string additionalFacade = "")
     {
         FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
         SemanticDocument document = SemanticAnalyzer.Analyze(

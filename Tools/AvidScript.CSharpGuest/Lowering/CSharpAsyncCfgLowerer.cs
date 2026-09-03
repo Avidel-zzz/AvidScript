@@ -266,6 +266,10 @@ internal static class CSharpAsyncCfgLowerer
             Add(diagnostics, method, $"Continuation entry '{entry.FunctionId}' generated duplicate basic-block identities.");
             return false;
         }
+        if (!context.ShortCircuitFlow.Rewrite(context, blocks))
+        {
+            return false;
+        }
         function = new GuestFunction(
             entry.FunctionId,
             parameters,

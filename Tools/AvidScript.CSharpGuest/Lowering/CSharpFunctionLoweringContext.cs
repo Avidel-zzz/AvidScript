@@ -102,6 +102,8 @@ internal sealed class CSharpFunctionLoweringContext
 
     public IReadOnlyList<GuestRegister> Locals => locals;
 
+    public CSharpShortCircuitLowerer ShortCircuitFlow { get; } = new();
+
     public GuestRegister? CreateTemporary(string? typeId, int blockOrdinal)
     {
         if (typeId is null || !guestTypes.ContainsKey(typeId))

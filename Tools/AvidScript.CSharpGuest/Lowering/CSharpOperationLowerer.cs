@@ -401,7 +401,17 @@ internal static class CSharpOperationLowerer
             return Malformed(context, operation, blockOrdinal);
         }
 
+        bool shortCircuit = operation.OperatorKind is "logical_and" or "logical_or";
+        if (shortCircuit && (operation.TypeId != "type:bool"
+            || operation.Children[0].TypeId != "type:bool"
+            || operation.Children[1].TypeId != "type:bool"
+            || operation.SymbolId is not null || operation.IsLifted))
+        {
+            return Malformed(context, operation, blockOrdinal);
+        }
+
         GuestRegister? left = LowerValue(context, operation.Children[0], blockOrdinal, instructions);
+        int rightStart = instructions.Count;
         GuestRegister? right = LowerValue(context, operation.Children[1], blockOrdinal, instructions);
         right = WidenShiftCount(context, operation.OperatorKind, left, right, blockOrdinal, instructions);
         if (left is null || right is null)
@@ -430,6 +440,18 @@ internal static class CSharpOperationLowerer
         if (result is null)
         {
             return null;
+        }
+
+        if (shortCircuit)
+        {
+            GuestRegister? merge = context.CreateTemporary("type:bool", blockOrdinal);
+            if (merge is null)
+            {
+                return null;
+            }
+            context.ShortCircuitFlow.Record(
+                result, left, right, merge, instructions.Count - rightStart,
+                operation.OperatorKind == "logical_and");
         }
 
         instructions.Add(new GuestInstruction(

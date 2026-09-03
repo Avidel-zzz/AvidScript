@@ -62,6 +62,10 @@ internal static class CSharpControlFlowLowerer
                 terminator));
         }
 
+        if (!context.ShortCircuitFlow.Rewrite(context, blocks))
+        {
+            return null;
+        }
         return new GuestFunction(
             CSharpGuestIds.Function(callable.MethodSymbolId),
             parameters,
