@@ -553,6 +553,18 @@ public:
 		const FString& ExportName,
 		FAvidScriptVmExportHandle& OutHandle,
 		FAvidScriptVmError& OutError) = 0;
+	virtual bool ValidateExportSignature(
+		const FAvidScriptVmExportHandle& Handle,
+		const FAvidScriptVmAbiSignature& ExpectedSignature,
+		FAvidScriptVmError& OutError)
+	{
+		static_cast<void>(Handle);
+		static_cast<void>(ExpectedSignature);
+		OutError.Reset();
+		OutError.Category = TEXT("export_signature_unsupported");
+		OutError.Details = TEXT("This VM backend does not support export signature validation.");
+		return false;
+	}
 	virtual bool PrepareExportCall(
 		const FAvidScriptVmExportHandle& Handle,
 		FAvidScriptVmPreparedExportCall& OutCall,

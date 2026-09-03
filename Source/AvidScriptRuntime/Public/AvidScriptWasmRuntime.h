@@ -686,6 +686,7 @@ private:
 	FAvidScriptVmBackendInfo ActiveBackendInfo;
 	FAvidScriptVmLoadConfig::FExecutionBudget ExecutionBudget;
 	FAvidScriptCachedVmExport BeginPlayExport;
+	// Resolved once during Load; an invalid handle on a loaded instance means no guest Tick.
 	FAvidScriptCachedVmExport TickExport;
 	FAvidScriptCachedVmExport EndPlayExport;
 	FAvidScriptCachedVmExport TimerExport;

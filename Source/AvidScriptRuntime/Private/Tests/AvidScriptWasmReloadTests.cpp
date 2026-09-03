@@ -2,6 +2,10 @@
 
 #include "AvidScriptWasmReload.h"
 
+#include "AvidScriptBindingDescriptor.h"
+#include "AvidScriptBindingInvocation.h"
+#include "AvidScriptHash.h"
+#include "AvidScriptValueCapability.h"
 #include "AvidScriptRuntimeBackendTestLanes.h"
 #include "AvidScriptRuntimeArtifact.h"
 #include "AvidScriptObjectRegistry.h"
@@ -10,11 +14,17 @@
 
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Dom/JsonObject.h"
 #include "GameFramework/Actor.h"
 #include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/EngineVersion.h"
 #include "Misc/FileHelper.h"
+#include "Misc/Guid.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 #include "Ssl.h"
 
 THIRD_PARTY_INCLUDES_START
@@ -144,6 +154,88 @@ bool WriteReloadManifestFixture(
 		*RequiredImportsJson);
 
 	return FFileHelper::SaveStringToFile(ManifestJson, *ManifestPath);
+}
+
+bool WriteReloadCapabilityJson(const FString& Path, const TSharedRef<FJsonObject>& Object)
+{
+	FString Json;
+	return FJsonSerializer::Serialize(Object, TJsonWriterFactory<>::Create(&Json))
+		&& FFileHelper::SaveStringToFile(
+			Json, *Path, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+}
+
+TSharedRef<FJsonObject> MakeReloadCapabilityDescriptor(FAvidScriptBindingPackageModel& Package)
+{
+	Package.SchemaVersion = 10;
+	Package.GeneratorVersion = TEXT("58.0.test");
+	Package.EngineVersion = FEngineVersion::Current().ToString(EVersionComponent::Patch);
+	Package.Source = TEXT("ue_reflection");
+	Package.PackageName = TEXT("avidscript.test.reload_capabilities");
+	TArray<TSharedPtr<FJsonValue>> Types;
+	for (const UClass* Class : { UObject::StaticClass(), AActor::StaticClass() })
+	{
+		FAvidScriptBindingTypeModel Type;
+		Type.ClassPath = Class->GetPathName();
+		Type.CanonicalType = TEXT("object:") + Type.ClassPath;
+		Type.StableId = FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(Type.CanonicalType, {});
+		Type.Kind = TEXT("object_handle");
+		Type.CppType = FString(Class->GetPrefixCPP()) + Class->GetName();
+		Type.Size = 8;
+		Type.Alignment = 4;
+		Type.AbiTypes = { TEXT("i"), TEXT("i") };
+		Type.ObjectTypeOrdinal = Package.Types.Num();
+		Type.BaseTypeId = Package.Types.IsEmpty() ? FString() : Package.Types[0].StableId;
+		Package.Types.Add(Type);
+		TSharedRef<FJsonObject> Object = MakeShared<FJsonObject>();
+		Object->SetStringField(TEXT("stable_id"), Type.StableId);
+		Object->SetStringField(TEXT("canonical_type"), Type.CanonicalType);
+		Object->SetStringField(TEXT("kind"), Type.Kind);
+		Object->SetStringField(TEXT("cpp_type"), Type.CppType);
+		Object->SetNumberField(TEXT("size"), Type.Size);
+		Object->SetNumberField(TEXT("alignment"), Type.Alignment);
+		Object->SetArrayField(TEXT("abi_types"), {
+			MakeShared<FJsonValueString>(TEXT("i")), MakeShared<FJsonValueString>(TEXT("i")) });
+		Object->SetNumberField(TEXT("object_type_ordinal"), Type.ObjectTypeOrdinal);
+		Object->SetStringField(TEXT("class_path"), Type.ClassPath);
+		Object->SetStringField(TEXT("base_type_id"), Type.BaseTypeId);
+		Types.Add(MakeShared<FJsonValueObject>(Object));
+	}
+	Package.SelfTypeId = Package.Types[1].StableId;
+	FAvidScriptBindingClassReferenceModel Reference;
+	Reference.Ordinal = 0;
+	Reference.ScriptName = TEXT("ActorClass");
+	Reference.ClassPath = TEXT("/Script/Engine.StaticMeshActor");
+	Reference.BaseClassPath = AActor::StaticClass()->GetPathName();
+	Reference.LoadPolicy = TEXT("EditorLoad");
+	Reference.ResultTypeId = Package.SelfTypeId;
+	Reference.StableId = FAvidScriptBindingDescriptorIdentity::MakeClassReferenceStableId(
+		Reference.ClassPath, Reference.BaseClassPath, Reference.LoadPolicy);
+	Package.ClassReferences.Add(Reference);
+	Package.SelectionHash = FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(Package);
+	Package.PackageHash = FAvidScriptBindingDescriptorIdentity::MakePackageHash(Package);
+
+	TSharedRef<FJsonObject> ClassReference = MakeShared<FJsonObject>();
+	ClassReference->SetStringField(TEXT("stable_id"), Reference.StableId);
+	ClassReference->SetNumberField(TEXT("ordinal"), Reference.Ordinal);
+	ClassReference->SetStringField(TEXT("script_name"), Reference.ScriptName);
+	ClassReference->SetStringField(TEXT("class_path"), Reference.ClassPath);
+	ClassReference->SetStringField(TEXT("base_class_path"), Reference.BaseClassPath);
+	ClassReference->SetStringField(TEXT("load_policy"), Reference.LoadPolicy);
+	ClassReference->SetStringField(TEXT("result_type_id"), Reference.ResultTypeId);
+	TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+	Root->SetNumberField(TEXT("schema_version"), Package.SchemaVersion);
+	Root->SetStringField(TEXT("generator_version"), Package.GeneratorVersion);
+	Root->SetStringField(TEXT("engine_version"), Package.EngineVersion);
+	Root->SetStringField(TEXT("source"), Package.Source);
+	Root->SetStringField(TEXT("package_name"), Package.PackageName);
+	Root->SetStringField(TEXT("package_hash"), Package.PackageHash);
+	Root->SetStringField(TEXT("selection_hash"), Package.SelectionHash);
+	Root->SetStringField(TEXT("self_type_id"), Package.SelfTypeId);
+	Root->SetArrayField(TEXT("types"), Types);
+	Root->SetArrayField(TEXT("bindings"), {});
+	Root->SetArrayField(TEXT("object_factories"), {});
+	Root->SetArrayField(TEXT("class_references"), { MakeShared<FJsonValueObject>(ClassReference) });
+	return Root;
 }
 
 FString MakeReloadExecutionJson(
@@ -1108,6 +1200,210 @@ bool FAvidScriptRuntimeArtifactLoaderTest::RunTest(const FString& Parameters)
 		TEXT("Canonical layout failure remains authoritative"),
 		LoadResult.CanonicalResult.ErrorCategory,
 		FString(TEXT("wasm_layout_invalid")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptReloadValueCapabilityGroupsManifestTest,
+	"AvidScript.Reload.ValueCapabilityGroupsManifest",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptReloadValueCapabilityGroupsManifestTest::RunTest(const FString& Parameters)
+{
+	const FString Root = FPaths::Combine(
+		GetReloadManifestTestRoot(), TEXT("Capabilities_") + FGuid::NewGuid().ToString(EGuidFormats::Digits));
+	if (!TestTrue(TEXT("Capability fixture directory is created"), IFileManager::Get().MakeDirectory(*Root, true)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Root, false, true); };
+	const FString DescriptorPath = FPaths::Combine(Root, TEXT("bindings.json"));
+	const FString PackagePath = FPaths::Combine(Root, TEXT("package.json"));
+	const FString WasmPath = FPaths::Combine(Root, TEXT("module.wasm"));
+	const FString ManifestPath = FPaths::Combine(Root, TEXT("runtime.avidscript.json"));
+	FAvidScriptBindingPackageModel Descriptor;
+	TArray<uint8> Wasm;
+	Wasm.Append(GAvidScriptReloadCompatibleWasmModule, UE_ARRAY_COUNT(GAvidScriptReloadCompatibleWasmModule));
+	if (!TestTrue(TEXT("Capability descriptor writes"),
+		WriteReloadCapabilityJson(DescriptorPath, MakeReloadCapabilityDescriptor(Descriptor)))
+		|| !TestTrue(TEXT("Capability WASM writes"), FFileHelper::SaveArrayToFile(Wasm, *WasmPath))
+		|| !TestTrue(TEXT("Capability runtime manifest writes"), WriteReloadManifestFixture(
+			ManifestPath, TEXT("reload_capabilities"), WasmPath, ComputeReloadTestSha256Hex(Wasm), FString(), TEXT("[]"))))
+	{
+		return false;
+	}
+	TArray<uint8> DescriptorBytes;
+	FString DescriptorJson;
+	FString RuntimeJson;
+	TSharedPtr<FJsonObject> RuntimeManifest;
+	if (!TestTrue(TEXT("Capability fixture files read back"),
+		FFileHelper::LoadFileToArray(DescriptorBytes, *DescriptorPath)
+			&& FFileHelper::LoadFileToString(DescriptorJson, *DescriptorPath)
+			&& FFileHelper::LoadFileToString(RuntimeJson, *ManifestPath)
+			&& FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(RuntimeJson), RuntimeManifest)
+			&& RuntimeManifest.IsValid()))
+	{
+		return false;
+	}
+	TSharedPtr<const FAvidScriptBindingPackage> DescriptorPackage;
+	FAvidScriptBindingPackageLoadResult DescriptorLoadResult;
+	if (!TestTrue(TEXT("Capability fixture descriptor resolves its complete import contract"),
+		FAvidScriptBindingPackage::LoadDescriptor(DescriptorJson, DescriptorPackage, DescriptorLoadResult)))
+	{
+		AddError(DescriptorLoadResult.ErrorCategory + TEXT(": ") + DescriptorLoadResult.ErrorDetails);
+		return false;
+	}
+	// Class references and the object type graph synthesize imports beyond explicit bindings.
+	TArray<TSharedPtr<FJsonValue>> DynamicImports;
+	for (const FAvidScriptVmDynamicImport& Spec : DescriptorPackage->GetVmPackage().Imports)
+	{
+		TSharedRef<FJsonObject> Import = MakeShared<FJsonObject>();
+		Import->SetStringField(TEXT("stable_id"), Spec.StableId);
+		Import->SetNumberField(TEXT("ordinal"), Spec.Ordinal);
+		Import->SetStringField(TEXT("module"), Spec.ModuleName);
+		Import->SetStringField(TEXT("name"), Spec.ImportName);
+		Import->SetStringField(TEXT("signature"), Spec.Signature);
+		DynamicImports.Add(MakeShared<FJsonValueObject>(Import));
+	}
+	if (!TestFalse(TEXT("Fixture exercises synthesized dynamic imports"), DynamicImports.IsEmpty()))
+	{
+		return false;
+	}
+	const FString DescriptorHash = FAvidScriptHash::Sha256Hex(DescriptorBytes);
+	TSharedRef<FJsonObject> Package = MakeShared<FJsonObject>();
+	Package->SetNumberField(TEXT("schema_version"), 1);
+	Package->SetNumberField(TEXT("descriptor_schema_version"), Descriptor.SchemaVersion);
+	Package->SetNumberField(TEXT("object_factory_count"), 0);
+	Package->SetStringField(TEXT("package_name"), Descriptor.PackageName);
+	Package->SetStringField(TEXT("package_hash"), Descriptor.PackageHash);
+	Package->SetStringField(TEXT("descriptor_sha256"), DescriptorHash);
+	TSharedRef<FJsonObject> Files = MakeShared<FJsonObject>();
+	Files->SetStringField(TEXT("descriptor"), TEXT("bindings.json"));
+	Package->SetObjectField(TEXT("files"), Files);
+	TSharedRef<FJsonObject> BindingPackage = MakeShared<FJsonObject>();
+	BindingPackage->SetStringField(TEXT("package_name"), Descriptor.PackageName);
+	BindingPackage->SetStringField(TEXT("package_hash"), Descriptor.PackageHash);
+	BindingPackage->SetStringField(TEXT("manifest_file"), PackagePath);
+	BindingPackage->SetStringField(TEXT("descriptor_file"), DescriptorPath);
+	BindingPackage->SetStringField(TEXT("descriptor_sha256"), DescriptorHash);
+	RuntimeManifest->SetObjectField(TEXT("binding_package"), BindingPackage);
+
+	const auto CheckImports = [&](const TCHAR* Label,
+		const TArray<FAvidScriptValueCapabilityImportSpec>& Specs,
+		const TCHAR* ExpectedError)
+	{
+		TArray<TSharedPtr<FJsonValue>> Imports = DynamicImports;
+		for (const FAvidScriptValueCapabilityImportSpec& Spec : Specs)
+		{
+			TSharedRef<FJsonObject> Import = MakeShared<FJsonObject>();
+			Import->SetStringField(TEXT("stable_id"), Spec.StableId);
+			Import->SetNumberField(TEXT("ordinal"), INDEX_NONE);
+			Import->SetStringField(TEXT("module"), Spec.ModuleName);
+			Import->SetStringField(TEXT("name"), Spec.ImportName);
+			Import->SetStringField(TEXT("signature"), Spec.Signature);
+			Imports.Add(MakeShared<FJsonValueObject>(Import));
+		}
+		Package->SetArrayField(TEXT("required_imports"), Imports);
+		TArray<uint8> PackageBytes;
+		if (!TestTrue(TEXT("Capability package writes and hashes"),
+			WriteReloadCapabilityJson(PackagePath, Package)
+				&& FFileHelper::LoadFileToArray(PackageBytes, *PackagePath)))
+		{
+			return false;
+		}
+		BindingPackage->SetStringField(TEXT("manifest_sha256"), FAvidScriptHash::Sha256Hex(PackageBytes));
+		if (!TestTrue(TEXT("Capability runtime manifest updates hash"),
+			WriteReloadCapabilityJson(ManifestPath, RuntimeManifest.ToSharedRef())))
+		{
+			return false;
+		}
+		FAvidScriptWasmReloadManifest Loaded;
+		FAvidScriptWasmReloadManifestLoadResult Result;
+		TArray<uint8> LoadedWasm;
+		const bool bLoaded = FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+			ManifestPath, Loaded, LoadedWasm, Result);
+		if (ExpectedError == nullptr)
+		{
+			if (!TestTrue(Label, bLoaded))
+			{
+				AddError(Result.ErrorMessage);
+				return false;
+			}
+			TestTrue(TEXT("Loaded package retains descriptor authorization"), Loaded.BindingPackage.IsValid());
+			TestTrue(TEXT("Manifest loading retains the verified WASM bytes"), LoadedWasm == Wasm);
+		}
+		else
+		{
+			TestFalse(Label, bLoaded);
+			TestEqual(TEXT("Capability rejection remains fail-closed"),
+				Result.ErrorCategory, FString(TEXT("binding_package_invalid")));
+			TestTrue(TEXT("Rejection reaches the intended capability check"), Result.ErrorMessage.Contains(ExpectedError));
+		}
+		return true;
+	};
+	const auto Arrays = FAvidScriptValueCapability::GetArrayImportSpecs();
+	const auto Composite = FAvidScriptValueCapability::GetCompositeImportSpecs();
+	const auto Containers = FAvidScriptValueCapability::GetCompositeContainerImportSpecs();
+	const auto AppendUnique = [](TArray<FAvidScriptValueCapabilityImportSpec>& Target,
+		const TConstArrayView<FAvidScriptValueCapabilityImportSpec> Specs)
+	{
+		for (const FAvidScriptValueCapabilityImportSpec& Spec : Specs)
+		{
+			if (!Target.ContainsByPredicate([&Spec](const FAvidScriptValueCapabilityImportSpec& Existing)
+				{ return FCString::Strcmp(Existing.StableId, Spec.StableId) == 0; }))
+			{
+				Target.Add(Spec);
+			}
+		}
+	};
+	for (const int32 ArrayCount : { 0, FAvidScriptValueCapability::LegacyArrayImportCount, Arrays.Num() })
+	{
+		for (int32 Groups = 0; Groups < 4; ++Groups)
+		{
+			TArray<FAvidScriptValueCapabilityImportSpec> Specs;
+			AppendUnique(Specs, Arrays.Left(ArrayCount));
+			if ((Groups & 1) != 0) { AppendUnique(Specs, Composite); }
+			if ((Groups & 2) != 0) { AppendUnique(Specs, Containers); }
+			if (!Specs.IsEmpty())
+			{
+				const FString Label = FString::Printf(TEXT("Complete groups load: arrays=%d composite=%d container=%d"),
+					ArrayCount, Groups & 1, (Groups >> 1) & 1);
+				if (!CheckImports(*Label, Specs, nullptr)) { return false; }
+			}
+		}
+	}
+	// Removing either bulk extension must not silently downgrade current arrays to legacy.
+	for (int32 Missing = 0; Missing < Arrays.Num(); ++Missing)
+	{
+		TArray<FAvidScriptValueCapabilityImportSpec> Specs(Arrays.GetData(), Arrays.Num());
+		Specs.RemoveAt(Missing);
+		CheckImports(TEXT("Incomplete current arrays reject"), Specs, TEXT("incomplete value capability set"));
+	}
+	for (int32 Missing = 0; Missing < FAvidScriptValueCapability::LegacyArrayImportCount; ++Missing)
+	{
+		TArray<FAvidScriptValueCapabilityImportSpec> Specs(Arrays.GetData(), FAvidScriptValueCapability::LegacyArrayImportCount);
+		Specs.RemoveAt(Missing);
+		CheckImports(TEXT("Incomplete legacy arrays reject"), Specs, TEXT("incomplete value capability set"));
+	}
+	CheckImports(TEXT("Text without shared release rejects"), { Composite[1] }, TEXT("incomplete composite capability set"));
+	for (int32 Missing = 0; Missing < Containers.Num(); ++Missing)
+	{
+		TArray<FAvidScriptValueCapabilityImportSpec> Specs;
+		AppendUnique(Specs, Arrays);
+		AppendUnique(Specs, Composite);
+		for (int32 Index = 0; Index < Containers.Num(); ++Index)
+		{
+			if (Index != Missing) { Specs.Add(Containers[Index]); }
+		}
+		CheckImports(TEXT("Other complete groups cannot mask an incomplete container group"),
+			Specs, TEXT("incomplete container capability set"));
+	}
+	FAvidScriptValueCapabilityImportSpec WrongSignature = Composite[0];
+	WrongSignature.Signature = TEXT("()i");
+	CheckImports(TEXT("Shared release signature remains validated"),
+		{ WrongSignature, Composite[1] }, TEXT("invalid or duplicate value capability"));
+	CheckImports(TEXT("Duplicate shared release remains rejected"),
+		{ Composite[0], Composite[1], Composite[0] }, TEXT("invalid or duplicate value capability"));
 	return true;
 }
 

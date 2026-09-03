@@ -8,9 +8,9 @@
   "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase64/P64.0_Production_Gameplay_Architecture.md",
-    "version": 4,
-    "sha256": "22b301d272f4bd30ba717cd44f7066d9ed63d524b7bf7278cfbab5ddc60c0270",
-    "revision_reason": "真实 UI Profile 暴露旧 Actor-only 委托和 Self 继承限制；明确支持独立 UObject 普通委托来源，不改变网络 inbound owner/Self 权限"
+    "version": 6,
+    "sha256": "40a29cb76c93d0d0082f9296565c3ba44e51307cde67a6b7ded9fdc97e861637",
+    "revision_reason": "可选 Tick 集成发现 cell-count 检查不能验证 F32/void；冻结通用 ValidateExportSignature 后端接口，Runtime 与双后端按独立写集并行，既有要求与缺省规则保持不变"
   },
   "documents": {
     "plan": "Docs/Phase64/P64.0_Implementation_Plan.md",
@@ -148,6 +148,6 @@
     }
   ],
   "next_action": "debt-update -Phase 64 -DebtId P64-D03-OriginalGameplayAcceptance -Status Verified -Evidence <text>",
-  "revision": 18,
-  "updated_at_utc": "2026-09-03T20:30:51.0540562+00:00"
+  "revision": 20,
+  "updated_at_utc": "2026-09-03T20:55:23.9714493+00:00"
 }

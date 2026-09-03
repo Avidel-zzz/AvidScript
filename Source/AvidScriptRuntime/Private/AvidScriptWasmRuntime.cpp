@@ -1208,6 +1208,29 @@ bool FAvidScriptWasmRuntimeInstance::LoadArtifactView(
 		return false;
 	}
 
+	// Resolve the optional guest Tick once; the Session heartbeat still runs without it.
+	FAvidScriptVmExportHandle TickHandle;
+	if (VmBackend->ResolveExport(AvidScriptTickExportName, TickHandle, Error))
+	{
+		FAvidScriptVmAbiSignature TickSignature;
+		TickSignature.Parameters = { EAvidScriptVmValueKind::F32 };
+		TickSignature.bHasResult = false;
+		if (!VmBackend->ValidateExportSignature(TickHandle, TickSignature, Error)
+			|| !AvidScriptWasmRuntimePrivate::CacheResolvedVmExport(
+				*VmBackend, TickHandle, 1, TickExport, Error))
+		{
+			SetFailureFromVmError(OutResult, ModuleId, AvidScriptTickExportName, Error, DebugMap.Get());
+			Unload();
+			return false;
+		}
+	}
+	else if (Error.Category != TEXT("missing_export"))
+	{
+		SetFailureFromVmError(OutResult, ModuleId, AvidScriptTickExportName, Error, DebugMap.Get());
+		Unload();
+		return false;
+	}
+
 	OutResult.bRuntimeInitialized = true;
 	OutResult.bModuleLoaded = true;
 	OutResult.bModuleInstantiated = true;
@@ -1241,6 +1264,18 @@ bool FAvidScriptWasmRuntimeInstance::ValidateRequiredExports(
 
 	for (const FString& RequiredExport : RequiredExports)
 	{
+		if (RequiredExport == AvidScriptTickExportName)
+		{
+			if (!TickExport.Handle.IsValid())
+			{
+				SetFailure(OutResult, ModuleId, RequiredExport, TEXT("missing_export"),
+					TEXT("The manifest explicitly requires the missing avid_on_tick export"),
+					TEXT("provide the required Tick export or correct the manifest contract"));
+				return false;
+			}
+			continue;
+		}
+
 		if (RequiredExport.IsEmpty())
 		{
 			SetFailure(OutResult, ModuleId, TEXT("<manifest>"), TEXT("missing_export"), TEXT("Required export name is empty"), TEXT("fix the reload manifest before activating this script"));
@@ -1259,11 +1294,6 @@ bool FAvidScriptWasmRuntimeInstance::ValidateRequiredExports(
 		if (RequiredExport == AvidScriptBeginPlayExportName)
 		{
 			CachedExport = &BeginPlayExport;
-		}
-		else if (RequiredExport == AvidScriptTickExportName)
-		{
-			CachedExport = &TickExport;
-			ExpectedParameterCellCount = 1;
 		}
 		else if (RequiredExport == AvidScriptEndPlayExportName)
 		{
@@ -1539,60 +1569,65 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 
 	CollectDueTimers(DeltaSeconds);
 	Metrics.TimerCallbackCallMs = 0.0;
+	Metrics.TickCallMs = 0.0;
 
-	uint32 TickArgs[1] = {};
-	static_assert(sizeof(TickArgs[0]) == sizeof(DeltaSeconds), "VM f32 argument must fit in one cell.");
-	FMemory::Memcpy(&TickArgs[0], &DeltaSeconds, sizeof(DeltaSeconds));
-
-	const double TickStartSeconds = FPlatformTime::Seconds();
-	BeginTypedCallbackEpoch();
-	FAvidScriptVmError TickError;
-	const bool bTickCalled = bHotFailureOnly
-		? InvokeVmExport(
-			VmBackend.Get(),
-			TickExport,
-			AvidScriptTickExportName,
-			UE_ARRAY_COUNT(TickArgs),
-			TickArgs,
-			TickError)
-		: CallVmExport(
-			VmBackend.Get(),
-			TickExport,
-			ModuleId,
-			AvidScriptTickExportName,
-			UE_ARRAY_COUNT(TickArgs),
-			TickArgs,
-			DebugMap.Get(),
-			OutResult);
-	EndTypedCallbackEpoch();
-	if (!bTickCalled)
+	const bool bHasGuestTick = TickExport.Handle.IsValid();
+	if (bHasGuestTick)
 	{
-		Metrics.TickCallMs = MeasureElapsedMs(TickStartSeconds);
-		if (bHotFailureOnly)
-		{
-			CaptureSnapshot(OutResult);
-			SetFailureFromVmError(
-				OutResult,
+		uint32 TickArgs[1] = {};
+		static_assert(sizeof(TickArgs[0]) == sizeof(DeltaSeconds), "VM f32 argument must fit in one cell.");
+		FMemory::Memcpy(&TickArgs[0], &DeltaSeconds, sizeof(DeltaSeconds));
+
+		const double TickStartSeconds = FPlatformTime::Seconds();
+		BeginTypedCallbackEpoch();
+		FAvidScriptVmError TickError;
+		const bool bTickCalled = bHotFailureOnly
+			? InvokeVmExport(
+				VmBackend.Get(),
+				TickExport,
+				AvidScriptTickExportName,
+				UE_ARRAY_COUNT(TickArgs),
+				TickArgs,
+				TickError)
+			: CallVmExport(
+				VmBackend.Get(),
+				TickExport,
 				ModuleId,
 				AvidScriptTickExportName,
-				TickError,
-				DebugMap.Get());
+				UE_ARRAY_COUNT(TickArgs),
+				TickArgs,
+				DebugMap.Get(),
+				OutResult);
+		EndTypedCallbackEpoch();
+		if (!bTickCalled)
+		{
+			Metrics.TickCallMs = MeasureElapsedMs(TickStartSeconds);
+			if (bHotFailureOnly)
+			{
+				CaptureSnapshot(OutResult);
+				SetFailureFromVmError(
+					OutResult,
+					ModuleId,
+					AvidScriptTickExportName,
+					TickError,
+					DebugMap.Get());
+			}
+			OutResult.ModuleId = ModuleId;
+			OutResult.BackendInfo = ActiveBackendInfo;
+			OutResult.Metrics = Metrics;
+			CopyObservableStateToResult(OutResult);
+			FAvidScriptLifecycleTransitionResult LifecycleResult;
+			LifecycleState.MarkFaulted(LifecycleResult);
+			return false;
 		}
-		OutResult.ModuleId = ModuleId;
-		OutResult.BackendInfo = ActiveBackendInfo;
-		OutResult.Metrics = Metrics;
-		CopyObservableStateToResult(OutResult);
-		FAvidScriptLifecycleTransitionResult LifecycleResult;
-		LifecycleState.MarkFaulted(LifecycleResult);
-		return false;
-	}
 
-	Metrics.TickCallMs = MeasureElapsedMs(TickStartSeconds);
-	++TickCallCount;
+		Metrics.TickCallMs = MeasureElapsedMs(TickStartSeconds);
+		++TickCallCount;
+	}
 	if (!bHotFailureOnly)
 	{
 		OutResult.Metrics = Metrics;
-		OutResult.bTickCalled = true;
+		OutResult.bTickCalled = bHasGuestTick;
 		OutResult.TickCallCount = TickCallCount;
 	}
 	if (IsDebugExecutionSuspended())
@@ -1621,7 +1656,7 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 		OutResult.ModuleId = ModuleId;
 		OutResult.BackendInfo = ActiveBackendInfo;
 		OutResult.Metrics = Metrics;
-		OutResult.bTickCalled = true;
+		OutResult.bTickCalled = bHasGuestTick;
 		OutResult.TickCallCount = TickCallCount;
 		CopyObservableStateToResult(OutResult);
 		FAvidScriptLifecycleTransitionResult LifecycleResult;
@@ -4721,8 +4756,11 @@ int64 FAvidScriptWasmRuntimeInstance::HandleEventSubscribeImport(
 	LastHostImportResult = 0;
 	++HostImportCallCount;
 
-	const auto Fail = [this, HostImportStartSeconds](const FString& Details)
+	const auto Fail = [this, HostImportStartSeconds, Slot, Generation, EventOrdinal](const FString& Details)
 	{
+		UE_LOG(LogAvidScriptWasmRuntime, Verbose,
+			TEXT("AvidScript event subscription rejected | reason=%s | slot=%d | generation=%d | event=%d"),
+			*Details, Slot, Generation, EventOrdinal);
 		if (Details.StartsWith(TEXT("delegate_bridge_"))
 			|| Details == TEXT("delegate_prepared_plan_invalid"))
 		{
@@ -4792,6 +4830,9 @@ int64 FAvidScriptWasmRuntimeInstance::HandleEventSubscribeImport(
 
 	LastHostImportResult = 1;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	UE_LOG(LogAvidScriptWasmRuntime, Verbose,
+		TEXT("AvidScript event subscription accepted | token=%lld | slot=%d | generation=%d | event=%d"),
+		SubscriptionToken, Slot, Generation, EventOrdinal);
 	return SubscriptionToken;
 }
 

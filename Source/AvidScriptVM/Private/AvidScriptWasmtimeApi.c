@@ -847,6 +847,55 @@ void avidscript_wasmtime_function_delete(AvidScriptWasmtimeFunction* function)
 	free(function);
 }
 
+static bool avidscript_wasmtime_kind_matches(
+	wasm_valkind_t actual,
+	AvidScriptWasmtimeValueKind expected)
+{
+	switch (expected)
+	{
+	case AVIDSCRIPT_WASMTIME_I32: return actual == WASM_I32;
+	case AVIDSCRIPT_WASMTIME_I64: return actual == WASM_I64;
+	case AVIDSCRIPT_WASMTIME_F32: return actual == WASM_F32;
+	case AVIDSCRIPT_WASMTIME_F64: return actual == WASM_F64;
+	default: return false;
+	}
+}
+
+bool avidscript_wasmtime_function_matches_signature(
+	const AvidScriptWasmtimeFunction* function,
+	const AvidScriptWasmtimeValueKind* parameter_kinds,
+	size_t parameter_count,
+	const AvidScriptWasmtimeValueKind* result_kinds,
+	size_t result_count)
+{
+	size_t index;
+	if (function == NULL
+		|| parameter_count > AVIDSCRIPT_WASMTIME_MAX_VALUES
+		|| result_count > AVIDSCRIPT_WASMTIME_MAX_VALUES
+		|| function->parameter_count != parameter_count
+		|| function->result_count != result_count
+		|| (parameter_count > 0 && parameter_kinds == NULL)
+		|| (result_count > 0 && result_kinds == NULL))
+	{
+		return false;
+	}
+	for (index = 0; index < parameter_count; ++index)
+	{
+		if (!avidscript_wasmtime_kind_matches(function->parameter_kinds[index], parameter_kinds[index]))
+		{
+			return false;
+		}
+	}
+	for (index = 0; index < result_count; ++index)
+	{
+		if (!avidscript_wasmtime_kind_matches(function->result_kinds[index], result_kinds[index]))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
 AvidScriptWasmtimePreparedCallShape avidscript_wasmtime_function_prepared_call_shape(
 	const AvidScriptWasmtimeFunction* function)
 {

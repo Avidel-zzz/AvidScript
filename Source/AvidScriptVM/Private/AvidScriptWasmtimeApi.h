@@ -209,6 +209,12 @@ int avidscript_wasmtime_instance_resolve_event_export(
 	uint32_t* out_parameter_cell_count,
 	uint32_t* out_result_cell_count);
 void avidscript_wasmtime_function_delete(AvidScriptWasmtimeFunction* function);
+bool avidscript_wasmtime_function_matches_signature(
+	const AvidScriptWasmtimeFunction* function,
+	const AvidScriptWasmtimeValueKind* parameter_kinds,
+	size_t parameter_count,
+	const AvidScriptWasmtimeValueKind* result_kinds,
+	size_t result_count);
 AvidScriptWasmtimePreparedCallShape avidscript_wasmtime_function_prepared_call_shape(
 	const AvidScriptWasmtimeFunction* function);
 AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_event(

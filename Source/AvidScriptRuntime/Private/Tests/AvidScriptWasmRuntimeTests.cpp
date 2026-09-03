@@ -43,9 +43,12 @@ const uint8 GAvidScriptMissingTickWasmModule[] = {
 	0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
 	0x01, 0x04, 0x01, 0x60, 0x00, 0x00,
 	0x03, 0x02, 0x01, 0x00,
-	0x07, 0x16, 0x01, 0x12, 0x61, 0x76, 0x69, 0x64,
+	0x07, 0x29, 0x02, 0x12, 0x61, 0x76, 0x69, 0x64,
 	0x5f, 0x6f, 0x6e, 0x5f, 0x62, 0x65, 0x67, 0x69,
 	0x6e, 0x5f, 0x70, 0x6c, 0x61, 0x79, 0x00, 0x00,
+	0x10, 0x61, 0x76, 0x69, 0x64, 0x5f, 0x6f, 0x6e,
+	0x5f, 0x65, 0x6e, 0x64, 0x5f, 0x70, 0x6c, 0x61,
+	0x79, 0x00, 0x00,
 	0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b
 };
 
@@ -114,6 +117,47 @@ TArray<uint8> MakeTestWasmModuleHeader()
 {
 	TArray<uint8> Module;
 	AppendTestWasmBytes(Module, { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 });
+	return Module;
+}
+
+TArray<uint8> MakeTickSignatureWasmModule(const uint8 ParameterType, const bool bReturnsValue)
+{
+	TArray<uint8> Module = MakeTestWasmModuleHeader();
+	TArray<uint8> Types;
+	AppendTestWasmBytes(Types, { 0x02, 0x60, 0x00, 0x00, 0x60, 0x01, ParameterType });
+	AppendTestWasmU32(Types, bReturnsValue ? 1 : 0);
+	if (bReturnsValue)
+	{
+		Types.Add(0x7f);
+	}
+	AppendTestWasmSection(Module, 0x01, Types);
+
+	TArray<uint8> Functions;
+	AppendTestWasmBytes(Functions, { 0x02, 0x00, 0x01 });
+	AppendTestWasmSection(Module, 0x03, Functions);
+
+	TArray<uint8> Exports;
+	AppendTestWasmU32(Exports, 3);
+	AppendTestWasmName(Exports, "avid_on_begin_play");
+	AppendTestWasmBytes(Exports, { 0x00, 0x00 });
+	AppendTestWasmName(Exports, "avid_on_tick");
+	AppendTestWasmBytes(Exports, { 0x00, 0x01 });
+	AppendTestWasmName(Exports, "avid_on_end_play");
+	AppendTestWasmBytes(Exports, { 0x00, 0x00 });
+	AppendTestWasmSection(Module, 0x07, Exports);
+
+	TArray<uint8> TickBody;
+	TickBody.Add(0x00);
+	if (bReturnsValue)
+	{
+		AppendTestWasmBytes(TickBody, { 0x41, 0x07 });
+	}
+	TickBody.Add(0x0b);
+	TArray<uint8> Code;
+	AppendTestWasmBytes(Code, { 0x02, 0x02, 0x00, 0x0b });
+	AppendTestWasmU32(Code, static_cast<uint32>(TickBody.Num()));
+	Code.Append(TickBody);
+	AppendTestWasmSection(Module, 0x0a, Code);
 	return Module;
 }
 
@@ -1036,6 +1080,83 @@ bool FAvidScriptWasmSessionRestartSmokeTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptOptionalTickLifecycleTest,
+	"AvidScript.Runtime.OptionalTick.LifecycleAndReload",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptOptionalTickLifecycleTest::RunTest(const FString& Parameters)
+{
+	for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
+	{
+		FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
+		FAvidScriptWasmSmokeResult Result;
+		// Both directions exercise replacement of the cached presence/absence decision.
+		for (const bool bWithTick : { false, true, false, true })
+		{
+			const bool bLoaded = bWithTick
+				? Runtime.LoadEmbeddedSmokeModule(Result)
+				: Runtime.LoadModule(GAvidScriptMissingTickWasmModule,
+					UE_ARRAY_COUNT(GAvidScriptMissingTickWasmModule), TEXT("event_only"), Result);
+			if (!TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("replacement loads")), bLoaded))
+			{
+				AddError(Result.ErrorMessage);
+				break;
+			}
+			TestAvidScriptRuntimeLaneIdentity(*this, Lane, Result);
+			TestEqual(TEXT("Load resets Tick count"), Runtime.GetTickCallCount(), 0);
+			TestEqual(TEXT("Load resets Tick timing"), Runtime.GetMetrics().TickCallMs, 0.0);
+			if (bWithTick)
+			{
+				TestTrue(TEXT("Required Tick reuses the loaded export"),
+					Runtime.ValidateRequiredExports({ TEXT("avid_on_tick") }, Result));
+			}
+			TestTrue(TEXT("BeginPlay runs"), Runtime.BeginPlay(Result));
+			TestTrue(TEXT("BeginPlay reports called"), Result.bBeginPlayCalled);
+			TestTrue(TEXT("Hot heartbeat succeeds"), Runtime.TickHot(0.016f, Result));
+			TestTrue(TEXT("Full heartbeat succeeds"), Runtime.Tick(0.016f, Result));
+			TestEqual(TEXT("Only guest Tick is marked called"), Result.bTickCalled, bWithTick);
+			TestEqual(TEXT("Only guest Tick increments count"), Runtime.GetTickCallCount(), bWithTick ? 2 : 0);
+			TestEqual(TEXT("Heartbeat keeps lifecycle running"), Runtime.GetLifecycleState(), EAvidScriptLifecycleState::Running);
+			if (!bWithTick)
+			{
+				TestEqual(TEXT("No guest Tick means zero timing"), Result.Metrics.TickCallMs, 0.0);
+			}
+			TestTrue(TEXT("EndPlay succeeds"), Runtime.EndPlay(Result));
+			if (!bWithTick)
+			{
+				TestTrue(TEXT("Event-only EndPlay really runs"), Result.bEndPlayCalled);
+			}
+		}
+		Runtime.Unload(Result);
+		TestFalse(TEXT("Unload clears loaded state"), Runtime.IsLoaded());
+		TestEqual(TEXT("Unload resets Tick count"), Runtime.GetTickCallCount(), 0);
+		for (const bool bReturnsValue : { false, true })
+		{
+			const TArray<uint8> InvalidTick = MakeTickSignatureWasmModule(
+				bReturnsValue ? 0x7d : 0x7f, bReturnsValue);
+			const FString ModuleName = bReturnsValue ? TEXT("tick_nonvoid") : TEXT("tick_wrong_i32");
+			TestFalse(*AvidScriptRuntimeLaneLabel(Lane, *ModuleName), Runtime.LoadModule(
+				InvalidTick.GetData(), InvalidTick.Num(), ModuleName, Result));
+			TestEqual(TEXT("Valid WASM with wrong Tick signature is rejected"),
+				Result.ErrorCategory, FString(TEXT("invalid_export")));
+			TestEqual(TEXT("Signature failure identifies Tick"), Result.ExportName, FString(TEXT("avid_on_tick")));
+			TestEqual(TEXT("Signature failure preserves module identity"), Result.ModuleId, ModuleName);
+			TestFalse(TEXT("Signature failure unloads the VM"), Runtime.IsLoaded());
+			TestFalse(TEXT("Signature failure never enters BeginPlay"), Result.bBeginPlayCalled);
+			TestFalse(TEXT("Signature failure never calls Tick"), Result.bTickCalled);
+			TestEqual(TEXT("Signature failure leaves zero guest Tick count"), Runtime.GetTickCallCount(), 0);
+			TestEqual(TEXT("Signature failure leaves zero guest Tick timing"), Result.Metrics.TickCallMs, 0.0);
+		}
+		TestTrue(TEXT("Reload event-only after unload"), Runtime.LoadModule(
+			GAvidScriptMissingTickWasmModule, UE_ARRAY_COUNT(GAvidScriptMissingTickWasmModule), TEXT("event_only_reset"), Result));
+		TestTrue(TEXT("Reload BeginPlay"), Runtime.BeginPlay(Result));
+		TestTrue(TEXT("Reload heartbeat has no stale export"), Runtime.TickHot(0.016f, Result));
+		TestEqual(TEXT("Reload retains zero guest ticks"), Runtime.GetTickCallCount(), 0);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptWasmErrorSmokeTest,
 	"AvidScript.Runtime.ErrorSmoke",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -1051,8 +1172,8 @@ bool FAvidScriptWasmErrorSmokeTest::RunTest(const FString& Parameters)
 			*AvidScriptRuntimeLaneLabel(Lane, TEXT("module missing tick export still loads")),
 			Runtime.LoadModule(GAvidScriptMissingTickWasmModule, UE_ARRAY_COUNT(GAvidScriptMissingTickWasmModule), TEXT("missing_tick"), Result));
 		TestAvidScriptRuntimeLaneIdentity(*this, Lane, Result);
-		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("BeginPlay still succeeds")), Runtime.BeginPlay(Result));
-		TestFalse(*AvidScriptRuntimeLaneLabel(Lane, TEXT("missing Tick export is reported")), Runtime.Tick(1.0f / 60.0f, Result));
+		TestFalse(*AvidScriptRuntimeLaneLabel(Lane, TEXT("explicitly required missing Tick is rejected")),
+			Runtime.ValidateRequiredExports({ TEXT("avid_on_tick") }, Result));
 		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("missing export category")), Result.ErrorCategory, FString(TEXT("missing_export")));
 		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("missing export name")), Result.ExportName, FString(TEXT("avid_on_tick")));
 

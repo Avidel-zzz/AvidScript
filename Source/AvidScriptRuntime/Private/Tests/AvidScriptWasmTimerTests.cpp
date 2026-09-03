@@ -40,7 +40,7 @@ void AppendTimerSection(TArray<uint8>& Module, uint8 SectionId, const TArray<uin
 	Module.Append(Payload);
 }
 
-TArray<uint8> BuildTimerCallbackFixture(bool bTrap, bool bReschedule = true)
+TArray<uint8> BuildTimerCallbackFixture(bool bTrap, bool bReschedule = true, bool bExportTick = true)
 {
 	TArray<uint8> Module;
 	const uint8 Header[] = { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 };
@@ -68,7 +68,7 @@ TArray<uint8> BuildTimerCallbackFixture(bool bTrap, bool bReschedule = true)
 	TArray<uint8> FunctionSection;
 	AppendTimerU32Leb(FunctionSection, 3);
 	AppendTimerU32Leb(FunctionSection, 1);
-	AppendTimerU32Leb(FunctionSection, 2);
+	AppendTimerU32Leb(FunctionSection, bExportTick ? 2 : 1);
 	AppendTimerU32Leb(FunctionSection, 3);
 	AppendTimerSection(Module, 3, FunctionSection);
 
@@ -77,7 +77,7 @@ TArray<uint8> BuildTimerCallbackFixture(bool bTrap, bool bReschedule = true)
 	AppendTimerString(ExportSection, "avid_on_begin_play");
 	ExportSection.Add(0x00);
 	AppendTimerU32Leb(ExportSection, 1);
-	AppendTimerString(ExportSection, "avid_on_tick");
+	AppendTimerString(ExportSection, bExportTick ? "avid_on_tick" : "avid_on_end_play");
 	ExportSection.Add(0x00);
 	AppendTimerU32Leb(ExportSection, 2);
 	AppendTimerString(ExportSection, "avid_on_timer");
@@ -113,6 +113,53 @@ TArray<uint8> BuildTimerCallbackFixture(bool bTrap, bool bReschedule = true)
 	return Module;
 }
 } // namespace
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptWasmEventOnlyTimerHeartbeatTest,
+	"AvidScript.Runtime.Timer.EventOnlyHeartbeat",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptWasmEventOnlyTimerHeartbeatTest::RunTest(const FString& Parameters)
+{
+	const TArray<uint8> WasmBytes = BuildTimerCallbackFixture(false, true, false);
+	for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
+	{
+		FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
+		FAvidScriptWasmSmokeResult Result;
+		if (!TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("event-only timer fixture loads")),
+			Runtime.LoadModule(WasmBytes.GetData(), WasmBytes.Num(), TEXT("event_only_timer"), Result)))
+		{
+			AddError(Result.ErrorMessage);
+			continue;
+		}
+		TestAvidScriptRuntimeLaneIdentity(*this, Lane, Result);
+		TestTrue(TEXT("BeginPlay schedules real timer"), Runtime.BeginPlay(Result));
+		TestEqual(TEXT("One pending timer"), Runtime.GetPendingTimerCount(), 1);
+		TestTrue(TEXT("Hot heartbeat dispatches timer without guest Tick"), Runtime.TickHot(0.016f, Result));
+		TestEqual(TEXT("Real timer callback ran"), Runtime.GetTimerCallbackCount(), 1);
+		TestEqual(TEXT("Guest timer callback reschedules"), Runtime.GetPendingTimerCount(), 1);
+		TestTrue(TEXT("Second heartbeat dispatches rescheduled timer"), Runtime.Tick(0.016f, Result));
+		TestEqual(TEXT("Two real timer callbacks"), Runtime.GetTimerCallbackCount(), 2);
+		TestFalse(TEXT("No guest Tick was called"), Result.bTickCalled);
+		TestEqual(TEXT("No guest Tick count"), Result.TickCallCount, 0);
+		TestEqual(TEXT("No guest Tick time"), Result.Metrics.TickCallMs, 0.0);
+		TestEqual(TEXT("Heartbeat stays running"), Runtime.GetLifecycleState(), EAvidScriptLifecycleState::Running);
+		TestTrue(TEXT("Real EndPlay succeeds"), Runtime.EndPlay(Result));
+		TestTrue(TEXT("EndPlay reports called"), Result.bEndPlayCalled);
+		Runtime.Unload();
+		TestEqual(TEXT("Unload clears remaining timer"), Runtime.GetPendingTimerCount(), 0);
+
+		const TArray<uint8> TrapBytes = BuildTimerCallbackFixture(true, false, false);
+		TestTrue(TEXT("Event-only timer trap fixture loads"), Runtime.LoadModule(
+			TrapBytes.GetData(), TrapBytes.Num(), TEXT("event_only_timer_trap"), Result));
+		TestTrue(TEXT("BeginPlay schedules trapping callback"), Runtime.BeginPlay(Result));
+		TestFalse(TEXT("Missing guest Tick does not swallow timer failure"), Runtime.TickHot(0.016f, Result));
+		TestEqual(TEXT("Failure identifies timer export"), Result.ExportName, FString(TEXT("avid_on_timer")));
+		TestFalse(TEXT("Timer failure does not claim a guest Tick"), Result.bTickCalled);
+		TestEqual(TEXT("Timer failure keeps guest Tick time zero"), Result.Metrics.TickCallMs, 0.0);
+	}
+	return true;
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptWasmTimerRegistrationAndCancellationSmokeTest,

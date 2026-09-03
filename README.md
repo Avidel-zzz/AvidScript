@@ -28,13 +28,14 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 
 ## 当前进展
 
-更新于 **2026-09-04**，已交付能力截至 **`35e67ad`**；**P64 仍在实施中**。
+更新于 **2026-09-04**；**P64 仍在实施中**，以下区分已交付与本地联调。
 
 | 状态 | 内容 |
 | --- | --- |
 | 已交付 | [PickupRush](Samples/CSharp/PickupRush/README.md) 的 Editor、Win64 Development/Shipping 包内玩法闭环 |
 | 最近新增 | [独立 UObject 委托来源查询](Docs/Phase64/P64.D_Delegate_Source_Context.md)：Actor 脚本显式订阅其他对象的事件，在回调中通过 `AvidSubscriptions.IsCurrentSource(source)` 区分来源 |
-| 本地联调中，未交付 | UI/存档样例已完成资产生成、Profile 发布与 WASM/AOT 启动；按钮订阅仍未通过联调，跨进程存档闭环尚未验收 |
+| 最近新增 | [事件型 Guest](Docs/Phase64/P64.D_EventOnly_Runtime.md) 可省略 Tick，仍保留 Session 心跳；双后端精确校验导出签名，修复 FText/数组共享能力加载 |
+| 本地联调中，未交付 | UI/存档样例已发布并启动，UE 订阅成功；C# 捕获左值写回缺陷仍在修复，跨进程存档闭环尚未验收 |
 
 ## 已实现
 
@@ -42,7 +43,7 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 
 | 领域 | 已验证能力 |
 | --- | --- |
-| 生命周期与启动 | `BeginPlay/Tick/EndPlay`、Timer、Overlap、Gameplay Event；Startup Scenario 自动挂载、原子回滚与 teardown |
+| 生命周期与启动 | `BeginPlay/Tick/EndPlay`，事件型 Guest 可省略 Tick；Timer、Overlap、Gameplay Event；Startup Scenario 自动挂载、原子回滚与 teardown |
 | C# 游戏样例 | `PickupRush` 计时、收集、复活和胜负逻辑；同源 Editor、Win64 Development/Shipping 包内行为验证通过 |
 | 生成式 UE API | Reflection/Profile 生成 `UFUNCTION`、`UPROPERTY`、Interface 与项目自定义 API；typed Self、Spawn、cast、销毁，无需逐个手写 VM wrapper |
 | 类型与容器 | UObject、向量/变换、固定 `USTRUCT`、名称/字符串、`FText`；字符串数组、递归容器、`TSet/TMap`；soft/weak object 身份往返，详见下方边界 |
@@ -259,6 +260,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 
 已交付的 **`35e67ad`** [委托来源小节](Docs/Phase64/P64.D_Delegate_Source_Context.md)另通过 UE Automation **10/10**、
 C# 专项 **8/8** 与增量 Editor 构建；这些专项结果不扩充上表的历史全量基线。
+[事件型 Guest 小节](Docs/Phase64/P64.D_EventOnly_Runtime.md)另通过 Runtime/VM/Reload **20/20** 专项与增量构建。
 
 这些是自动化与包内探针证据，不替代真实输入、视觉、设备和长稳验收。
 详见 [P64 记录](Docs/Phase64/P64_Closeout.md)、[Android 边界](Docs/Phase64/P64.D_Android_Readiness.md)

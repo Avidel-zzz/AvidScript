@@ -941,6 +941,80 @@ public:
 #endif
 	}
 
+	bool ValidateExportSignature(
+		const FAvidScriptVmExportHandle& Handle,
+		const FAvidScriptVmAbiSignature& ExpectedSignature,
+		FAvidScriptVmError& OutError) override
+	{
+		OutError.Reset();
+#if !AVIDSCRIPT_WITH_WASMTIME
+		static_cast<void>(Handle);
+		static_cast<void>(ExpectedSignature);
+		SetWasmtimeError(OutError, TEXT("backend_unavailable"), TEXT("Wasmtime is unavailable for this target."));
+		return false;
+#else
+		if (!IsLoaded()
+			|| Handle.BackendInstanceIdentity != BackendInstanceIdentity
+			|| Handle.Slot == 0
+			|| Handle.Slot > static_cast<uint32>(ExportEntries.Num())
+			|| Handle.Generation != ExportGeneration)
+		{
+			SetWasmtimeError(OutError, TEXT("invalid_export"), TEXT("Export signature validation requires a current handle from this loaded VM instance."));
+			return false;
+		}
+		const FAvidScriptWasmtimeExportEntry* Entry = ExportEntries[Handle.Slot - 1].Get();
+		if (Entry == nullptr || Entry->Generation != ExportGeneration || Entry->Function == nullptr)
+		{
+			SetWasmtimeError(OutError, TEXT("invalid_export"), TEXT("The cached Wasmtime export is no longer available."));
+			return false;
+		}
+		const auto IsSupportedKind = [](const EAvidScriptVmValueKind Kind)
+		{
+			switch (Kind)
+			{
+			case EAvidScriptVmValueKind::I32:
+			case EAvidScriptVmValueKind::I64:
+			case EAvidScriptVmValueKind::F32:
+			case EAvidScriptVmValueKind::F64:
+				return true;
+			default:
+				return false;
+			}
+		};
+		TArray<AvidScriptWasmtimeValueKind, TInlineAllocator<8>> ParameterKinds;
+		for (const EAvidScriptVmValueKind Kind : ExpectedSignature.Parameters)
+		{
+			if (!IsSupportedKind(Kind))
+			{
+				SetWasmtimeError(OutError, TEXT("invalid_export"), TEXT("Expected export signature contains an unsupported parameter kind."));
+				return false;
+			}
+			ParameterKinds.Add(ToWasmtimeValueKind(Kind));
+		}
+		AvidScriptWasmtimeValueKind ResultKind = AVIDSCRIPT_WASMTIME_I32;
+		if (ExpectedSignature.bHasResult)
+		{
+			if (!IsSupportedKind(ExpectedSignature.Result))
+			{
+				SetWasmtimeError(OutError, TEXT("invalid_export"), TEXT("Expected export signature contains an unsupported result kind."));
+				return false;
+			}
+			ResultKind = ToWasmtimeValueKind(ExpectedSignature.Result);
+		}
+		if (!avidscript_wasmtime_function_matches_signature(
+			Entry->Function,
+			ParameterKinds.GetData(),
+			static_cast<size_t>(ParameterKinds.Num()),
+			ExpectedSignature.bHasResult ? &ResultKind : nullptr,
+			ExpectedSignature.bHasResult ? 1u : 0u))
+		{
+			SetWasmtimeError(OutError, TEXT("invalid_export"), TEXT("Wasmtime export parameter or result signature does not match the expected signature."));
+			return false;
+		}
+		return true;
+#endif
+	}
+
 	bool PrepareExportCall(
 		const FAvidScriptVmExportHandle& Handle,
 		FAvidScriptVmPreparedExportCall& OutCall,

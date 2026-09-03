@@ -456,6 +456,81 @@ public:
 #endif
 	}
 
+	bool ValidateExportSignature(
+		const FAvidScriptVmExportHandle& Handle,
+		const FAvidScriptVmAbiSignature& ExpectedSignature,
+		FAvidScriptVmError& OutError) override
+	{
+		OutError.Reset();
+#if !AVIDSCRIPT_WITH_WAMR
+		static_cast<void>(Handle);
+		static_cast<void>(ExpectedSignature);
+		SetVmError(OutError, TEXT("backend_unavailable"), TEXT("WAMR artifacts are unavailable for this target."));
+		return false;
+#else
+		if (!IsLoaded() || Handle.BackendInstanceIdentity != BackendInstanceIdentity)
+		{
+			SetVmError(OutError, TEXT("invalid_export"), TEXT("Export signature validation requires a handle from this loaded VM instance."));
+			return false;
+		}
+		void* FunctionValue = nullptr;
+		if (!ExportTable.TryGet(Handle, FunctionValue, OutError))
+		{
+			return false;
+		}
+		if (FunctionValue == nullptr)
+		{
+			SetVmError(OutError, TEXT("invalid_export"), TEXT("The cached WAMR export is no longer available."));
+			return false;
+		}
+		const wasm_function_inst_t Function = static_cast<wasm_function_inst_t>(FunctionValue);
+		const uint32 ParameterCount = wasm_func_get_param_count(Function, ModuleInstance);
+		const uint32 ResultCount = wasm_func_get_result_count(Function, ModuleInstance);
+		if (ParameterCount != static_cast<uint32>(ExpectedSignature.Parameters.Num())
+			|| ResultCount != (ExpectedSignature.bHasResult ? 1u : 0u))
+		{
+			SetVmError(OutError, TEXT("invalid_export"), TEXT("WAMR export parameter or result count does not match the expected signature."));
+			return false;
+		}
+		const auto MatchesKind = [](const wasm_valkind_t Actual, const EAvidScriptVmValueKind Expected)
+		{
+			switch (Expected)
+			{
+			case EAvidScriptVmValueKind::I32: return Actual == WASM_I32;
+			case EAvidScriptVmValueKind::I64: return Actual == WASM_I64;
+			case EAvidScriptVmValueKind::F32: return Actual == WASM_F32;
+			case EAvidScriptVmValueKind::F64: return Actual == WASM_F64;
+			default: return false;
+			}
+		};
+		TArray<wasm_valkind_t, TInlineAllocator<8>> ParameterTypes;
+		ParameterTypes.SetNumUninitialized(ExpectedSignature.Parameters.Num());
+		if (ParameterCount > 0)
+		{
+			wasm_func_get_param_types(Function, ModuleInstance, ParameterTypes.GetData());
+		}
+		for (int32 Index = 0; Index < ParameterTypes.Num(); ++Index)
+		{
+			if (!MatchesKind(ParameterTypes[Index], ExpectedSignature.Parameters[Index]))
+			{
+				SetVmError(OutError, TEXT("invalid_export"), TEXT("WAMR export parameter kind does not match the expected signature."));
+				return false;
+			}
+		}
+		if (ExpectedSignature.bHasResult)
+		{
+			wasm_valkind_t ResultType;
+			wasm_func_get_result_types(Function, ModuleInstance, &ResultType);
+			if (!MatchesKind(ResultType, ExpectedSignature.Result))
+			{
+				SetVmError(OutError, TEXT("invalid_export"), TEXT("WAMR export result kind does not match the expected signature."));
+				return false;
+			}
+		}
+		return true;
+#endif
+	}
+
 	bool PrepareExportCall(
 		const FAvidScriptVmExportHandle& Handle,
 		FAvidScriptVmPreparedExportCall& OutCall,

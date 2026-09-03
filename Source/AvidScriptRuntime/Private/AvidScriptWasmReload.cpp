@@ -935,12 +935,22 @@ bool ValidateBindingPackageManifest(
 		}
 		return true;
 	};
-	const auto ContainsAnyCapability = [&SeenValueCapabilities](
-		const TConstArrayView<FAvidScriptValueCapabilityImportSpec> Specs)
+	const auto ContainsGroupCapability = [&SeenValueCapabilities](
+		const TConstArrayView<FAvidScriptValueCapabilityImportSpec> Specs,
+		const TConstArrayView<FAvidScriptValueCapabilityImportSpec> OtherSpecs,
+		const TConstArrayView<FAvidScriptValueCapabilityImportSpec> RemainingSpecs)
 	{
 		for (const FAvidScriptValueCapabilityImportSpec& Spec : Specs)
 		{
-			if (SeenValueCapabilities.Contains(Spec.StableId))
+			const auto HasSameIdentity = [&Spec](
+				const FAvidScriptValueCapabilityImportSpec& Other)
+			{
+				return FCString::Strcmp(Spec.StableId, Other.StableId) == 0;
+			};
+			// Shared helpers such as value_release do not select an owning group.
+			if (SeenValueCapabilities.Contains(Spec.StableId)
+				&& !OtherSpecs.ContainsByPredicate(HasSameIdentity)
+				&& !RemainingSpecs.ContainsByPredicate(HasSameIdentity))
 			{
 				return true;
 			}
@@ -948,16 +958,12 @@ bool ValidateBindingPackageManifest(
 		return false;
 	};
 	const bool bHasLegacyValueCapabilities =
-		SeenValueCapabilities.Num()
-			== FAvidScriptValueCapability::LegacyArrayImportCount
-		&& [&SeenValueCapabilities, ValueCapabilitySpecs]()
+		[&SeenValueCapabilities, ValueCapabilitySpecs]()
 		{
-			for (int32 Index = 0;
-				Index < FAvidScriptValueCapability::LegacyArrayImportCount;
-				++Index)
+			for (int32 Index = 0; Index < ValueCapabilitySpecs.Num(); ++Index)
 			{
-				if (!SeenValueCapabilities.Contains(
-						ValueCapabilitySpecs[Index].StableId))
+				const bool bExpected = Index < FAvidScriptValueCapability::LegacyArrayImportCount;
+				if (SeenValueCapabilities.Contains(ValueCapabilitySpecs[Index].StableId) != bExpected)
 				{
 					return false;
 				}
@@ -966,7 +972,7 @@ bool ValidateBindingPackageManifest(
 		}();
 	const bool bHasCurrentValueCapabilities =
 		ContainsAllCapabilities(ValueCapabilitySpecs);
-	if (ContainsAnyCapability(ValueCapabilitySpecs)
+	if (ContainsGroupCapability(ValueCapabilitySpecs, CompositeCapabilitySpecs, ContainerCapabilitySpecs)
 		&& !bHasLegacyValueCapabilities
 		&& !bHasCurrentValueCapabilities)
 	{
@@ -977,9 +983,7 @@ bool ValidateBindingPackageManifest(
 			TEXT("republish the generated binding package"));
 		return false;
 	}
-	const bool bHasCompositeOnlyCapability =
-		SeenValueCapabilities.Contains(TEXT("avidscript.value_text_to_string.v1"));
-	if (bHasCompositeOnlyCapability
+	if (ContainsGroupCapability(CompositeCapabilitySpecs, ValueCapabilitySpecs, ContainerCapabilitySpecs)
 		&& !ContainsAllCapabilities(CompositeCapabilitySpecs))
 	{
 		SetManifestLoadFailure(
@@ -989,7 +993,7 @@ bool ValidateBindingPackageManifest(
 			TEXT("republish the generated binding package"));
 		return false;
 	}
-	if (ContainsAnyCapability(ContainerCapabilitySpecs)
+	if (ContainsGroupCapability(ContainerCapabilitySpecs, ValueCapabilitySpecs, CompositeCapabilitySpecs)
 		&& !ContainsAllCapabilities(ContainerCapabilitySpecs))
 	{
 		SetManifestLoadFailure(
