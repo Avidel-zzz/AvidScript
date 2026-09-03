@@ -5,12 +5,12 @@
     "goal": "交付可直接启动的 C# 游戏纵向切片、数据驱动 Runtime 挂载层，以及 Android arm64 构建与设备就绪 Gate",
     "start_commit": "e036d0765a16fa177e73935905e160065a62eb96"
   },
-  "declared_stage": "gate_ready",
+  "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase64/P64.0_Production_Gameplay_Architecture.md",
-    "version": 1,
-    "sha256": "39a4e3e2a817f15170d3b6ddaf231ef9423b37415d13d357fb258808ee282749",
-    "revision_reason": "initial architecture freeze"
+    "version": 2,
+    "sha256": "6f5920323568a0e1462a093bfb453d2852505b576032640a97d3d1d22428eb29",
+    "revision_reason": "恢复原始 P64 验收范围：保留 Startup/PickupRush 与 Android 最低构建要求，在重开的 P64.D 纳入 UI、跨进程存档、热重载压力和长时间运行；同步静态 EOF 整理，不降低完成标准。"
   },
   "documents": {
     "plan": "Docs/Phase64/P64.0_Implementation_Plan.md",
@@ -37,9 +37,9 @@
     },
     {
       "id": "P64.D",
-      "status": "Completed",
-      "evidence": "Android 只读预检、no-clean 打包与 ADB 探针入口落地；合同 Toolchain 30/30、runner 10/10、Generated Type Cook 22/22、receipt 15/15。5 个 Generated Type 真实 Android AOT 与 Win64 指针恢复完成；Editor RunId 探针 5/5、零丢弃；UE no-clean UBT 通过。Android SDK/APK/设备与人工游玩未验收，已显式转交 P65。详见 Docs/Phase64/P64.D_Android_Readiness.md。",
-      "completed_at_utc": "2026-09-03T19:08:33.6112794+00:00"
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
     }
   ],
   "debt": [
@@ -70,6 +70,19 @@
       "transfer_reason": "保留为真实游戏与发布验收项，不以自动探针代替人工体验。"
     },
     {
+      "id": "P64-D03-OriginalGameplayAcceptance",
+      "severity": "Important",
+      "found_batch": "P64.D",
+      "scope": "UI、跨进程存档、真实样例热重载压力及长时间运行、Android toolchain/UBT/APK 最低 Gate",
+      "evidence": "Docs/Phase64/P64.0_Production_Gameplay_Architecture.md v2；9e08cdc 仅证明技术回归和 PC PickupRush，不覆盖这些原始目标。",
+      "deferral_reason": "集中补全最后实现批次，完成前禁止 freeze/close；不能仅沿用历史转移状态。",
+      "remediation": "按 D.UI、D.Save、D.Soak、D.Android 落地并取得真实运行证据，保持现有通用 Binding/Session 架构。",
+      "status": "Open",
+      "resolution_evidence": "",
+      "target_phase": null,
+      "transfer_reason": ""
+    },
+    {
       "id": "P64-R01-Integration",
       "severity": "Critical",
       "found_batch": "P64.D",
@@ -84,9 +97,9 @@
     }
   ],
   "review": {
-    "completed": true,
-    "evidence": "Docs/Phase64/P64_Integration_Review.md; cb2cc02 集中修复已提交推送，聚焦 Automation 9/9、Android runner 24/24、当前 PickupRush 包胜利状态、clean detached architecture 通过。冻结用于本实现范围的统一回归，不代表 Android、人工游玩、UI/存档/长跑原始验收完成。",
-    "completed_at_utc": "2026-09-03T19:43:08.8390471+00:00"
+    "completed": false,
+    "evidence": "reopened: 集中静态检查发现四处 EOF 空行；原始 P64 目标中的 UI、存档与长时间运行验收尚未落地，Android UBT/APK 也未完成。保留 9e08cdc 的技术回归与打包历史证据，重开最后批次补齐真实游戏验证，不以工具就绪替代原始目标。",
+    "completed_at_utc": null
   },
   "budgets": {
     "ubt": 3,
@@ -99,11 +112,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "cb2cc02e257a3c0c19fd6f5bdbb56237875d0f47",
-    "source_tree": "f05b75aa3285eededf0ccd0e0cb70bb28591d716",
-    "state_sha256": "4fb16169ad021278b91e7f4f5909e55535cce272fbfa66db681ae3670662ef60",
-    "review_evidence": "Docs/Phase64/P64_Integration_Review.md; cb2cc02 集中修复已提交推送，聚焦 Automation 9/9、Android runner 24/24、当前 PickupRush 包胜利状态、clean detached architecture 通过。冻结用于本实现范围的统一回归，不代表 Android、人工游玩、UI/存档/长跑原始验收完成。",
-    "at_utc": "2026-09-03T19:43:08.8390471+00:00"
+    "source_commit": "",
+    "source_tree": "",
+    "state_sha256": "",
+    "review_evidence": "",
+    "at_utc": null
   },
   "gate": {
     "report_path": "",
@@ -134,7 +147,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "attest -Phase 64 -GateReportPath <path>",
-  "revision": 13,
-  "updated_at_utc": "2026-09-03T19:43:08.8440816+00:00"
+  "next_action": "debt-update -Phase 64 -DebtId P64-D03-OriginalGameplayAcceptance -Status Verified -Evidence <text>",
+  "revision": 16,
+  "updated_at_utc": "2026-09-03T20:05:36.7173663+00:00"
 }

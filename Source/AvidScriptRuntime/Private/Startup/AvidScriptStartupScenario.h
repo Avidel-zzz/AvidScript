@@ -68,4 +68,3 @@ bool IsWorldAllowed(
 	const FAvidScriptStartupScenario& Scenario,
 	const FString& WorldPackageName);
 }
-

@@ -11,7 +11,7 @@
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 and Android arm64 AOT" src="https://img.shields.io/badge/Platform-Win64%20%2B%20Android%20arm64%20AOT-0078D4?logo=windows&logoColor=white">
   <img alt="Phase 64 Active" src="https://img.shields.io/badge/Status-Phase%2064%20Active-2B6CB0">
-  <img alt="Automation Baseline 433/433" src="https://img.shields.io/badge/Baseline-433%2F433-26A269">
+  <img alt="Automation Baseline 439/439" src="https://img.shields.io/badge/Baseline-439%2F439-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
 
@@ -229,22 +229,24 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 ## 路线图
 
 1. **P62/P63 已收尾**：Win64 Cook/Shipping、多平台 catalog、Android 交叉 AOT 与移动 Runtime 生命周期；
-2. **P64 进行中**：游戏 Demo、跨平台运行工具与集中回归；移动真机验收仍是开放项；
+2. **P64 进行中**：PickupRush 与跨平台运行工具已落地；继续补齐 UI、存档、长稳与移动构建/设备验收；
 3. **后续发布工程**：安装/升级、兼容与诊断，逐项补齐类型、移动端、真实游戏及性能验收缺口。
 
 路线图只表示工程顺序，不代表对应能力已经可用。
 
 ## 验证
 
-最近一次完整基线为 **AvidScript Automation `433/433`、.NET `284/284` 通过**。
+最新技术回归（候选 `9e08cdc`）为 **AvidScript Automation `439/439`、.NET `284/284` 通过**，
+另有 10 组 PowerShell 合同、干净候选架构检查和 no-clean Editor UBT 通过；P64 尚未正式关闭。
 Phase 63 的 clean detached architecture、UE5.8 no-clean UBT、Android arm64 交叉 AOT、
 发布/Cook/回执合同与移动 Runtime 生命周期均已通过，并已完成正式 attestation 与 close。
 证据见 [Phase 63 Gate](Docs/Phase63/P63_Gate_Summary.json) 与 [收尾记录](Docs/Phase63/P63_Closeout.md)。
 Phase 64 的 `PickupRush` Editor、Development/Shipping package 均验证 5/5 事件、胜利状态与零丢弃回调；
 两种打包配置的精确回执分别为 21/21、19/19。该批次证据尚未计入完整 Automation 基线。
 Android 就绪入口及当前未运行项见 [P64.D 验证记录](Docs/Phase64/P64.D_Android_Readiness.md)。
-集中修复已通过聚焦 Automation `9/9`、Android runner `24/24` 和修正版 PickupRush Editor 胜利状态校验；
-修正版完整 Gate 与 Win64 打包重验仍待完成，不沿用旧包证据。
+集中修复已通过聚焦 Automation `9/9`、Android runner `24/24`；修正版 PickupRush 的 Editor、
+Development/Shipping 均验证胜利状态，两种包的回执为 `21/21`、`19/19`。
+剩余原始验收与阶段收尾边界见 [P64 记录](Docs/Phase64/P64_Closeout.md)。
 
 阶段状态与实现证据见 [Docs](Docs/)，开发规则见 [AGENTS.md](AGENTS.md)。
 
