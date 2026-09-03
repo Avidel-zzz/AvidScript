@@ -6,7 +6,7 @@ param(
     [string]$Configuration = 'Development',
     [string]$ArchiveRoot = '',
     [string]$BindingPackagePath = '',
-    [string]$DotNetPath = 'C:\Users\12159\.dotnet\dotnet.exe',
+    [string]$DotNetPath = (Join-Path $HOME '.dotnet/dotnet.exe'),
     [string]$EngineRoot = 'C:\UnrealEngine',
     [ValidateRange(30, 1800)]
     [int]$TimeoutSeconds = 300
@@ -190,6 +190,75 @@ function Invoke-AvidScriptPickupRushRelease {
         -TimeoutSeconds $TimeoutSeconds
 }
 
+function Publish-AvidScriptPickupRushGeneratedTypes {
+    param([Parameter(Mandatory = $true)][string]$ResolvedBindingPackagePath)
+
+    $GeneratorScript = Join-Path $BuildRoot 'BuildCSharpScriptTypes.ps1'
+    $Arguments = @(
+        '-NoProfile',
+        '-NonInteractive',
+        '-File', $GeneratorScript,
+        '-DotNetPath', $DotNetPath,
+        '-SourcePath', (Join-Path $PluginRoot 'Samples/CSharp/ScriptDefinedTypes/ScriptDefinedTypes.cs'),
+        '-SourceId', 'Plugins/AvidScript/Samples/CSharp/ScriptDefinedTypes/ScriptDefinedTypes.cs',
+        '-BindingPackageManifestPath', $ResolvedBindingPackagePath,
+        '-ProjectPath', (Join-Path $PluginRoot 'Samples/CSharp/ActorLifecycle/AvidScript.ActorLifecycle.csproj'),
+        '-PackageConfiguration', $Configuration,
+        '-HeadlessRelease')
+    $ProcessResult = Invoke-AvidScriptPickupRushProcess `
+        -Executable (Join-Path $PSHOME 'pwsh.exe') `
+        -Arguments $Arguments `
+        -WorkingDirectory $PluginRoot `
+        -TimeoutSeconds $TimeoutSeconds
+    if ($ProcessResult.ExitCode -ne 0) {
+        $Details = (($ProcessResult.Stdout, $ProcessResult.Stderr) -join [Environment]::NewLine).Trim()
+        if ($Details.Length -gt 2000) {
+            $Details = $Details.Substring($Details.Length - 2000)
+        }
+        Throw-AvidScriptPickupRushError `
+            -Category 'generated_type_publication_failed' `
+            -Message "Generated Type publication failed for $Configuration. $Details"
+    }
+
+    $CurrentPath = Join-Path $PluginRoot 'Content/AvidScriptGenerated/current.json'
+    $CatalogPath = Join-Path $ProjectRoot 'Content/AvidScript/Modules/catalog.json'
+    if (-not (Test-Path -LiteralPath $CurrentPath -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $CatalogPath -PathType Leaf)) {
+        Throw-AvidScriptPickupRushError `
+            -Category 'generated_type_publication_invalid' `
+            -Message 'Generated Type publication did not produce its pointer and catalog.'
+    }
+
+    $Current = [System.IO.File]::ReadAllText($CurrentPath) | ConvertFrom-Json -Depth 32 -NoEnumerate
+    $Catalog = [System.IO.File]::ReadAllText($CatalogPath) | ConvertFrom-Json -Depth 64 -NoEnumerate
+    $ExpectedConfiguration = $Configuration.ToLowerInvariant()
+    $MatchingVariants = @(
+        $Catalog.modules |
+            Where-Object { $_.module_id -ceq [string]$Current.module_id } |
+            ForEach-Object { $_.variants } |
+            Where-Object {
+                $_.platform -ceq 'win64' -and
+                $_.architecture -ceq 'x86_64' -and
+                $_.configuration -ceq $ExpectedConfiguration -and
+                $_.package_id -ceq [string]$Current.package_id
+            })
+    if ($Current.module_id -cne 'avidscript_generated' -or
+        [string]::IsNullOrWhiteSpace([string]$Current.package_id) -or
+        $MatchingVariants.Count -ne 1) {
+        Throw-AvidScriptPickupRushError `
+            -Category 'generated_type_publication_invalid' `
+            -Message "Generated Type pointer does not select one Win64 $Configuration catalog variant."
+    }
+
+    return [pscustomobject][ordered]@{
+        module_id = [string]$Current.module_id
+        package_id = [string]$Current.package_id
+        configuration = $ExpectedConfiguration
+        current_path = $CurrentPath
+        catalog_path = $CatalogPath
+    }
+}
+
 function Assert-AvidScriptPickupRushReport {
     param([Parameter(Mandatory = $true)][object]$Report)
 
@@ -283,11 +352,14 @@ try {
     $BuildCookRun = $null
     $PackagedProbe = $null
     $Play = $null
+    $GeneratedTypes = $null
 
     if ($Mode -eq 'Editor') {
         $EditorProbe = Invoke-AvidScriptPickupRushEditorProbe
     }
     elseif ($Mode -eq 'BuildCookRun') {
+        $GeneratedTypes = Publish-AvidScriptPickupRushGeneratedTypes `
+            -ResolvedBindingPackagePath $BindingManifest
         $ResolvedArchiveRoot = if ([string]::IsNullOrWhiteSpace($ArchiveRoot)) {
             Join-Path $ProjectRoot "Saved/AvidScript/PickupRush/Packages/$Configuration-$PID-$([Guid]::NewGuid().ToString('N'))"
         }
@@ -345,6 +417,7 @@ try {
         configuration = $Configuration
         binding_package = $BindingManifest
         release = $Release
+        generated_types = $GeneratedTypes
         editor_probe = $EditorProbe
         build_cook_run = $BuildCookRun
         packaged_probe = $PackagedProbe

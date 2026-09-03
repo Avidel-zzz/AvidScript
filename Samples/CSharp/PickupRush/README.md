@@ -13,4 +13,6 @@ pwsh -NoProfile -File Build/InvokeAvidScriptPickupRush.ps1 -Mode Editor
 5 次 Gameplay Event 和最终胜利状态。需要人工游玩时使用 `-Mode Play`；PC 打包验证使用
 `-Mode BuildCookRun -Configuration Development` 或 `Shipping`。
 
+打包入口会先发布同配置 Generated Type；Editor、Development 与 Shipping 的 5/5 事件及胜利状态报告均已通过。
+
 自动报告不能替代键鼠/手柄、碰撞手感与画面表现验收。

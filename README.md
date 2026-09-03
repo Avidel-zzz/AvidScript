@@ -31,7 +31,7 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 | --- | --- |
 | 游戏生命周期 | `BeginPlay`、`Tick`、`EndPlay`、Timer、Overlap、Gameplay Event |
 | 启动编排 | 显式 Startup Scenario 驱动 world/existing/spawn 三种目标挂载，支持 world 白名单、原子回滚、幂等激活与 teardown 回收 |
-| 可玩闭环 | `PickupRush` 用同一份 C# 完成计时、收集、复活和胜负逻辑；Editor 与 Win64 Development package 行为报告已通过 |
+| 可玩闭环 | `PickupRush` 用同一份 C# 完成计时、收集、复活和胜负逻辑；Editor、Win64 Development/Shipping 包内行为报告均通过 |
 | UE API | 由 Reflection/Profile 生成普通 `UFUNCTION`、`UPROPERTY`、UE Interface 与项目自定义 API |
 | UE 类型 | UObject capability、`FVector`、`FRotator`、`FTransform`、固定 `USTRUCT`、`FName`、`FString`、一维 `TArray<T>` |
 | C# 定义 UE 类型 | Actor、Component、World/GameInstance Subsystem、继承、override、`UPROPERTY`、`UFUNCTION` 与默认参数 |
@@ -56,7 +56,7 @@ Profiler，以及 Win64 Development/Shipping 的确定性 Cook 发布闭环。Ph
 catalog、Android arm64 受控静态依赖、真实 C# 交叉 AOT 发布，以及应用后台恢复、低内存回收和
 World teardown 的 Runtime 生命周期协调；Android UBT、打包和真机执行仍待后续验收。
 Phase 64 已接通严格 scenario、Runtime 自动挂载与首个 C# 可玩纵向切片；未指定 scenario 的 World
-默认保持空闲；Win64 Development package 已通过，Shipping 与移动端验收仍在推进。
+默认保持空闲；Win64 Development/Shipping package 已通过，人工游玩与移动端验收仍在推进。
 
 集中 Gate 已通过 `.NET 284/284`、AvidScript Automation `433/433`、UE5.8 no-clean UBT、
 干净架构检查和发布/Cook/回执合同。详细证据见 [Phase 63 Gate 摘要](Docs/Phase63/P63_Gate_Summary.json)
@@ -254,8 +254,8 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 最近一次完整基线为 **AvidScript Automation `433/433`、.NET `284/284` 通过**。
 Phase 63 的 clean detached architecture、UE5.8 no-clean UBT、Android arm64 交叉 AOT、
 发布/Cook/回执合同与移动 Runtime 生命周期均已通过，并已完成正式 attestation 与 close。
-Phase 64 的 `PickupRush` Editor/Development package 闭环已验证 5 次事件、胜利状态、零丢弃回调与
-21/21 精确回执依赖；Shipping Gate 尚未计入完整基线。
+Phase 64 的 `PickupRush` Editor、Development/Shipping package 均验证 5/5 事件、胜利状态与零丢弃回调；
+两种打包配置的精确回执分别为 21/21、19/19。该批次证据尚未计入完整 Automation 基线。
 
 阶段状态与实现证据见 [Docs](Docs/)，开发规则见 [AGENTS.md](AGENTS.md)。
 

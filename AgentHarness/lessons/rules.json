@@ -88,9 +88,9 @@
       "id": "pinned-dotnet-sdk",
       "tags": ["dotnet", "sdk", "toolchain"],
       "summary": "仓库 .NET 工具链由 global.json 固定为 8.0.416。",
-      "prevention": "从插件 cwd 使用 %USERPROFILE%/.dotnet/dotnet.exe，先验证 --version，临时 cache 放在仓库外。",
+      "prevention": "从插件 cwd 使用 %USERPROFILE%/.dotnet/dotnet.exe，先验证 --version；ProcessStartInfo 子进程也必须显式设置插件根 WorkingDirectory，否则项目根会绕过 global.json 选择其他已安装 SDK。临时 cache 放在仓库外。",
       "source": "legacy:2091",
-      "last_observed": "2026-08-30 P58.B"
+      "last_observed": "2026-09-04 P64.C 单入口 Generated Type 发布从项目根启动而选中 10.0.301，改为插件根后 Shipping BuildCookRun 与包内探针通过"
     },
     {
       "id": "no-clean-canonical-build",

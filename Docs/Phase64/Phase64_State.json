@@ -31,9 +31,9 @@
     },
     {
       "id": "P64.C",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "PickupRush 同源 Editor、Win64 Development/Shipping package 均通过 5/5 事件、胜利状态与零丢弃回调；回执分别 21/21、19/19；BuildCookRun 合同 14/14、receipt 合同 12/12、Harness audit 通过；人工游玩保留待验收。详见 Docs/Phase64/P64.C_PC_Playable_Vertical_Slice.md。",
+      "completed_at_utc": "2026-09-03T18:34:50.6149602+00:00"
     },
     {
       "id": "P64.D",
@@ -100,7 +100,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "batch-complete -Phase 64 -BatchId P64.C -Evidence <text>",
-  "revision": 3,
-  "updated_at_utc": "2026-09-03T17:39:49.3079173+00:00"
+  "next_action": "batch-complete -Phase 64 -BatchId P64.D -Evidence <text>",
+  "revision": 4,
+  "updated_at_utc": "2026-09-03T18:34:50.6171028+00:00"
 }

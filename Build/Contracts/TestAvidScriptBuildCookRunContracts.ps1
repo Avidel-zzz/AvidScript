@@ -513,6 +513,55 @@ try {
             'Packaged oracle uses Invoke-Expression.'
     }
 
+    Invoke-BuildCookRunContractCase 'PickupRush prepares the matching Generated Type with pinned SDK cwd' {
+        $PickupRushPath = Join-Path $BuildRoot 'InvokeAvidScriptPickupRush.ps1'
+        $Errors = $null
+        $PickupRushAst = [System.Management.Automation.Language.Parser]::ParseFile(
+            $PickupRushPath, [ref]$null, [ref]$Errors)
+        Assert-BuildCookRunContract ($Errors.Count -eq 0) 'PickupRush runner has parse errors.'
+        foreach ($Name in @('Throw-AvidScriptPickupRushError', 'Publish-AvidScriptPickupRushGeneratedTypes')) {
+            $Function = Get-BuildCookRunFunctionAst -Ast $PickupRushAst -Name $Name
+            . ([scriptblock]::Create($Function.Extent.Text))
+        }
+        $ProjectRoot = Join-Path $FixtureRoot 'PickupRushProject'
+        $PluginRoot = Join-Path $ProjectRoot 'Plugins/AvidScript'
+        $CurrentRoot = Join-Path $PluginRoot 'Content/AvidScriptGenerated'
+        $CatalogRoot = Join-Path $ProjectRoot 'Content/AvidScript/Modules'
+        [void][System.IO.Directory]::CreateDirectory($CurrentRoot)
+        [void][System.IO.Directory]::CreateDirectory($CatalogRoot)
+        [System.IO.File]::WriteAllText(
+            (Join-Path $CurrentRoot 'current.json'),
+            '{"module_id":"avidscript_generated","package_id":"fixture-package"}', $Utf8)
+        [System.IO.File]::WriteAllText(
+            (Join-Path $CatalogRoot 'catalog.json'),
+            '{"modules":[{"module_id":"avidscript_generated","variants":[{"platform":"win64","architecture":"x86_64","configuration":"shipping","package_id":"fixture-package"}]}]}',
+            $Utf8)
+        $Configuration = 'Shipping'
+        $DotNetPath = 'fixture-dotnet'
+        $TimeoutSeconds = 30
+        function Invoke-AvidScriptPickupRushProcess {
+            param($Executable, $Arguments, $WorkingDirectory, $TimeoutSeconds)
+            Assert-BuildCookRunContract ($WorkingDirectory -ceq $PluginRoot) 'Generator bypassed plugin global.json.'
+            $ConfigurationIndex = [Array]::IndexOf($Arguments, '-PackageConfiguration')
+            Assert-BuildCookRunContract `
+                ($ConfigurationIndex -ge 0 -and $Arguments[$ConfigurationIndex + 1] -ceq $Configuration) `
+                'Generator did not receive the package configuration.'
+            Assert-BuildCookRunContract ($Arguments -contains '-HeadlessRelease') 'Generator did not request precompiled release.'
+            return [pscustomobject]@{ ExitCode = 0; Stdout = ''; Stderr = '' }
+        }
+        $Published = Publish-AvidScriptPickupRushGeneratedTypes -ResolvedBindingPackagePath 'fixture-binding'
+        Assert-BuildCookRunContract ($Published.package_id -ceq 'fixture-package') 'Published package identity was lost.'
+        $Configuration = 'Development'
+        $Rejected = $false
+        try {
+            Publish-AvidScriptPickupRushGeneratedTypes -ResolvedBindingPackagePath 'fixture-binding' | Out-Null
+        }
+        catch {
+            $Rejected = $_.Exception.Data['category'] -ceq 'generated_type_publication_invalid'
+        }
+        Assert-BuildCookRunContract $Rejected 'A mismatched package configuration was accepted.'
+    }
+
     if ($Failures.Count -ne 0) {
         throw "BuildCookRun contracts failed ($Passed/$Total): $($Failures -join ' | ')"
     }
@@ -535,7 +584,8 @@ try {
             'receipt_exact_stale_ambiguous',
             'receipt_validator_handoff',
             'packaged_oracle_configuration_binary',
-            'packaged_oracle_process_report'
+            'packaged_oracle_process_report',
+            'pickup_rush_generated_type_configuration_sdk_cwd'
         )
     } | ConvertTo-Json -Depth 4 -Compress
 }
