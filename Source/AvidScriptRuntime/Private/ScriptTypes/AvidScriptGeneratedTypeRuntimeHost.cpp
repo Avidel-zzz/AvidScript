@@ -593,7 +593,8 @@ bool FAvidScriptGeneratedTypeRuntimeHost::LoadPackageFromDescriptorFile(
 			|| !Descriptor->TryGetStringField(TEXT("runtime_module_id"), RuntimeModuleId)
 			|| RuntimeModuleId.IsEmpty()
 			|| !Descriptor->TryGetStringField(TEXT("execution_backend"), ExecutionBackend)
-			|| ExecutionBackend != TEXT("wasmtime_jit")
+			|| (ExecutionBackend != TEXT("wasmtime_jit")
+				&& ExecutionBackend != TEXT("wasmtime_precompiled"))
 			|| !ReadPackageFileEntry(
 				Descriptor,
 				TEXT("runtime_manifest"),
@@ -759,12 +760,40 @@ bool FAvidScriptGeneratedTypeRuntimeHost::LoadPackageFromDescriptorFile(
 	}
 	if (!bUsesResolvedRuntimePackage)
 	{
-		Artifact.BackendSelection.BackendKind = EAvidScriptVmBackendKind::Wasmtime;
-		Artifact.BackendSelection.ExecutionMode = EAvidScriptVmExecutionMode::Jit;
-		Artifact.BackendSelection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
-		Artifact.RequestedBackend = ExecutionBackend;
-		Artifact.SelectedBackend = ExecutionBackend;
-		Artifact.ExecutionPolicy = TEXT("generated_type_package");
+		if (ExecutionBackend == TEXT("wasmtime_precompiled"))
+		{
+			// Preserve the loader's verified AOT selection, including target and attestation.
+			if (!Artifact.bUsesPrecompiledArtifact || !LoadResult.bUsesPrecompiledArtifact
+				|| LoadResult.bFellBackToJit || !Artifact.FallbackCategory.IsEmpty()
+				|| Artifact.ExecutionPolicy != TEXT("require_precompiled")
+				|| Artifact.BackendSelection.BackendKind != EAvidScriptVmBackendKind::Wasmtime
+				|| Artifact.BackendSelection.ExecutionMode != EAvidScriptVmExecutionMode::Aot
+				|| Artifact.BackendSelection.ArtifactFormat != EAvidScriptVmArtifactFormat::WasmtimeSerialized
+				|| Artifact.BackendSelection.bAllowFallback
+				|| Artifact.VmArtifact.ArtifactFormat != EAvidScriptVmArtifactFormat::WasmtimeSerialized
+				|| Artifact.VmArtifact.ExecutionBytes.IsEmpty())
+			{
+				OutError = TEXT("generated type precompiled package requires a verified AOT artifact with require_precompiled policy and no JIT fallback");
+				return false;
+			}
+		}
+		else
+		{
+			if (Artifact.bUsesPrecompiledArtifact || LoadResult.bFellBackToJit
+				|| !Artifact.ExecutionPolicy.IsEmpty()
+				|| Artifact.VmArtifact.ArtifactFormat != EAvidScriptVmArtifactFormat::WasmBytecode)
+			{
+				OutError = TEXT("generated type JIT package cannot override an execution artifact policy");
+				return false;
+			}
+			Artifact.BackendSelection.BackendKind = EAvidScriptVmBackendKind::Wasmtime;
+			Artifact.BackendSelection.ExecutionMode = EAvidScriptVmExecutionMode::Jit;
+			Artifact.BackendSelection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
+			Artifact.BackendSelection.bAllowFallback = false;
+			Artifact.RequestedBackend = ExecutionBackend;
+			Artifact.SelectedBackend = ExecutionBackend;
+			Artifact.ExecutionPolicy = TEXT("generated_type_package");
+		}
 	}
 	OutRegistry = MoveTemp(Registry);
 	OutArtifact = MoveTemp(Artifact);

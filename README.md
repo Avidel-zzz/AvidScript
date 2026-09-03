@@ -42,7 +42,8 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 | 调试与 Profiler | 源码映射、跨层调用栈、PIE 目标、受控同步断点/步进、只读变量；UE Trace、热点与 JSON 导出 |
 
 **最近落地：** [PickupRush](Samples/CSharp/PickupRush/README.md) 已完成 Win64 包内事件与胜利状态验证；
-[Android 就绪工具](Docs/Phase64/P64.D_Android_Readiness.md) 已提供 SDK 预检、平台回执和设备运行入口。
+[集成修复](Docs/Phase64/P64_Integration_Review.md) 补齐真实启动回滚、热重载事件隔离及冷启动预编译包校验。
+[Android 就绪工具](Docs/Phase64/P64.D_Android_Readiness.md) 提供 SDK 预检、平台回执和绑定包身份的设备运行入口。
 Android APK/真机及人工游玩仍待验收，不能用交叉 AOT 或自动事件注入替代。
 
 ## C# 游戏脚本
@@ -242,6 +243,8 @@ Phase 63 的 clean detached architecture、UE5.8 no-clean UBT、Android arm64 �
 Phase 64 的 `PickupRush` Editor、Development/Shipping package 均验证 5/5 事件、胜利状态与零丢弃回调；
 两种打包配置的精确回执分别为 21/21、19/19。该批次证据尚未计入完整 Automation 基线。
 Android 就绪入口及当前未运行项见 [P64.D 验证记录](Docs/Phase64/P64.D_Android_Readiness.md)。
+集中修复已通过聚焦 Automation `9/9`、Android runner `24/24` 和修正版 PickupRush Editor 胜利状态校验；
+修正版完整 Gate 与 Win64 打包重验仍待完成，不沿用旧包证据。
 
 阶段状态与实现证据见 [Docs](Docs/)，开发规则见 [AGENTS.md](AGENTS.md)。
 

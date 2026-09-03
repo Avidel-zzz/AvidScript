@@ -68,6 +68,19 @@
       "resolution_evidence": "Docs/Phase64/P64.C_PC_Playable_Vertical_Slice.md",
       "target_phase": 65,
       "transfer_reason": "保留为真实游戏与发布验收项，不以自动探针代替人工体验。"
+    },
+    {
+      "id": "P64-R01-Integration",
+      "severity": "Critical",
+      "found_batch": "P64.D",
+      "scope": "Startup activation, reload event transactions, package-bound probe, numeric schema, timer restart and probe defaults",
+      "evidence": "集中审查 main 2010168：正常 World 启动失败回滚、失败 reload 事件隔离与 Android 包身份缺口；另有 JSON 数字类型、样例 timer 重开和 CLI 默认参数问题。",
+      "deferral_reason": "统一集中修复，修复验证前不冻结 Gate、不继续发布。",
+      "remediation": "修复全部六项，补充针对性合同后统一 no-clean UBT/Automation；README 保留真实已验证边界。",
+      "status": "Verified",
+      "resolution_evidence": "Docs/Phase64/P64_Integration_Review.md: 六项集中修复及冷启动 AOT 身份问题已修复；UE5.8 no-clean UBT 通过，最终聚焦 Automation 9/9、Android runner 24/24，修正版 PickupRush package 42fd8cdd 通过 5/5 事件与胜利状态。完整 Gate 与修正版 package 重验仍待执行。",
+      "target_phase": null,
+      "transfer_reason": ""
     }
   ],
   "review": {
@@ -122,6 +135,6 @@
     }
   ],
   "next_action": "freeze -Phase 64 -ReviewEvidence <text>",
-  "revision": 10,
-  "updated_at_utc": "2026-09-03T19:08:33.6133532+00:00"
+  "revision": 12,
+  "updated_at_utc": "2026-09-03T19:40:46.9717590+00:00"
 }

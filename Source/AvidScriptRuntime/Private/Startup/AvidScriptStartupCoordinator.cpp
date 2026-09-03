@@ -189,6 +189,11 @@ bool FAvidScriptStartupCoordinator::Activate(
 		SetFailure(OutResult, TEXT("world_not_allowed"), GetWorldPackageName(World));
 		return false;
 	}
+	if (!World.HasBegunPlay() || World.bIsTearingDown)
+	{
+		SetFailure(OutResult, TEXT("world_not_started"), TEXT("actors must begin play before startup activation"));
+		return false;
+	}
 
 	ActiveWorld = &World;
 	ActiveScenarioId = Scenario.ScenarioId;
@@ -297,6 +302,11 @@ bool FAvidScriptStartupCoordinator::AttachComponent(
 	const bool bUseEmbeddedSmokeModuleForTesting,
 	FAvidScriptStartupRuntimeResult& OutResult)
 {
+	if (!Actor.HasActorBegunPlay() || Actor.IsActorBeingDestroyed())
+	{
+		SetFailure(OutResult, TEXT("target_not_started"), Actor.GetPathName());
+		return false;
+	}
 	UAvidScriptComponent* Component = NewObject<UAvidScriptComponent>(
 		&Actor,
 		UAvidScriptComponent::StaticClass(),
@@ -332,7 +342,9 @@ bool FAvidScriptStartupCoordinator::AttachComponent(
 	}
 	Components.Add(Component);
 
-	if (Actor.HasActorBegunPlay() && !Component->GetRuntimeStats().bRuntimeLoaded)
+	if (!Component->HasBegunPlay()
+		|| !Component->GetRuntimeStats().bRuntimeLoaded
+		|| !Component->GetRuntimeStats().bBeginPlayCalled)
 	{
 		SetFailure(
 			OutResult,

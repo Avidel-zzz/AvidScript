@@ -582,6 +582,30 @@
       "prevention": "确认用户授权、当前路径干净及祖先提交证据后，使用 PhaseWorkflow adopt-protected-path 单路径移交；禁止重采全部基线或回退合法提交。",
       "source": "Docs/Workflow/Protected_Path_Adoption.md",
       "last_observed": "2026-09-04 P64 README 已按用户要求提交推送，但旧保护快照阻塞两个并行代理；受控移交后 bootstrap 恢复 3/3"
+    },
+    {
+      "id": "startup-tests-use-real-world-beginplay-order",
+      "tags": ["runtime", "lifecycle", "startup", "automation"],
+      "summary": "只在已 BeginPlay 的世界测试激活，会遗漏 Subsystem 先于 Actor 启动的失败路径。",
+      "prevention": "启动编排测试必须覆盖实际 UWorld BeginPlay 顺序；组件创建不等于 Runtime 加载成功，整组激活需以真实结果确认，失败统一回收。",
+      "source": "Docs/Phase64/P64_Integration_Review.md",
+      "last_observed": "2026-09-04 P64 集中审查发现提前设置 active 会遗漏后续组件加载失败"
+    },
+    {
+      "id": "deferred-events-participate-in-runtime-transactions",
+      "tags": ["runtime", "reload", "events", "transaction"],
+      "summary": "仅限制事件队列容量不能保证候选 reload 的提交与回滚隔离。",
+      "prevention": "候选执行及 Host effect 回滚产生的回调须隔离在候选队列，失败时丢弃，成功时只向已提交实例投递；不可在 scope exit 无条件发送给旧 Guest。",
+      "source": "Docs/Phase64/P64_Integration_Review.md",
+      "last_observed": "2026-09-04 P64 deferred collision queue 缺少 reload 队列所有权"
+    },
+    {
+      "id": "gameplay-evidence-binds-package-not-only-run-id",
+      "tags": ["android", "package", "evidence", "runtime"],
+      "summary": "新运行 ID 和逻辑 ModuleId 不能证明设备运行的是预期脚本包。",
+      "prevention": "Runtime 报告实际解析的 PackageId，runner 在安装前校验预期身份并在结果中精确比较；旧 OBB 或旧模块即使产生新 Run ID 也不得通过。玩法验收还须检查最终状态，不把事件送达数视为玩法完成；延迟事件以实际派发时刻计算间隔。",
+      "source": "Docs/Phase64/P64_Integration_Review.md",
+      "last_observed": "2026-09-04 P64 Android install-r 可保留同版本旧 OBB，需包身份校验"
     }
   ]
 }

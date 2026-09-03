@@ -42,7 +42,7 @@ inline void AppendF32(TArray<uint8>& Bytes, float Value)
 	Bytes.Append(RawBytes, UE_ARRAY_COUNT(RawBytes));
 }
 
-inline TArray<uint8> Build(bool bTrap, float XOffset = 0.0f)
+inline TArray<uint8> Build(bool bTrap, float XOffset = 0.0f, bool bTrapBeginPlay = false)
 {
 	TArray<uint8> Module;
 	const uint8 Header[] = { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 };
@@ -88,8 +88,16 @@ inline TArray<uint8> Build(bool bTrap, float XOffset = 0.0f)
 	TArray<uint8> Code;
 	AppendU32Leb(Code, 3);
 	const uint8 EmptyBody[] = { 0x00, 0x0b };
-	AppendU32Leb(Code, UE_ARRAY_COUNT(EmptyBody));
-	Code.Append(EmptyBody, UE_ARRAY_COUNT(EmptyBody));
+	const uint8 TrapBody[] = { 0x00, 0x00, 0x0b };
+	AppendU32Leb(Code, bTrapBeginPlay ? UE_ARRAY_COUNT(TrapBody) : UE_ARRAY_COUNT(EmptyBody));
+	if (bTrapBeginPlay)
+	{
+		Code.Append(TrapBody, UE_ARRAY_COUNT(TrapBody));
+	}
+	else
+	{
+		Code.Append(EmptyBody, UE_ARRAY_COUNT(EmptyBody));
+	}
 	AppendU32Leb(Code, UE_ARRAY_COUNT(EmptyBody));
 	Code.Append(EmptyBody, UE_ARRAY_COUNT(EmptyBody));
 

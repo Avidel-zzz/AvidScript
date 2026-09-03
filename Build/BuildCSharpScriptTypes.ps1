@@ -345,6 +345,9 @@ if (-not $SkipRuntimePackage) {
         }
         reload = $ReloadMetadata
     }
+    if ($HeadlessRelease) {
+        $PackageDescriptor['runtime_package_id'] = [string]$ReleaseSummary.package_id
+    }
     $PackageJson = $PackageDescriptor | ConvertTo-Json -Depth 8
     $PackageTempPath = "$GeneratedPackagePath.tmp"
     [System.IO.File]::WriteAllText(

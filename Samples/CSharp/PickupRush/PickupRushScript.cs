@@ -25,6 +25,8 @@ public static class PickupRushScript
     private static float RemainingSeconds;
     [AvidPersist]
     private static FVector Origin;
+    [AvidTransient]
+    private static int RespawnHandle;
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
     public static void BeginPlay()
@@ -53,6 +55,7 @@ public static class PickupRushScript
         RemainingSeconds -= deltaSeconds;
         if (RemainingSeconds <= 0.0f)
         {
+            CancelRespawn();
             State = Lost;
             UE.Self.SetActorHiddenInGame(false);
             UE.Self.SetActorEnableCollision(true);
@@ -92,10 +95,11 @@ public static class PickupRushScript
     [UnmanagedCallersOnly(EntryPoint = "avid_on_timer")]
     public static void OnTimer(int callbackId, int timerHandle)
     {
-        if (callbackId != RespawnTimerId || State != Playing)
+        if (callbackId != RespawnTimerId || State != Playing || timerHandle != RespawnHandle || RespawnHandle <= 0)
         {
             return;
         }
+        RespawnHandle = 0;
         FVector pickupLocation = GetPickupLocation(Score);
         FRotator pickupRotation = UE.Self.GetActorRotation();
         UE.Self.Teleport(pickupLocation, pickupRotation);
@@ -106,13 +110,14 @@ public static class PickupRushScript
     [UnmanagedCallersOnly(EntryPoint = "avid_on_end_play")]
     public static void EndPlay()
     {
+        CancelRespawn();
         UE.Self.SetActorHiddenInGame(false);
         UE.Self.SetActorEnableCollision(false);
     }
 
     private static void Collect()
     {
-        if (State != Playing)
+        if (State != Playing || RespawnHandle > 0)
         {
             return;
         }
@@ -134,11 +139,12 @@ public static class PickupRushScript
         UE.Self.SetActorScale3D(new FVector(scale, scale, scale));
         UE.Self.SetActorHiddenInGame(true);
         UE.Self.SetActorEnableCollision(false);
-        UE.SetTimer(RespawnSeconds, RespawnTimerId);
+        RespawnHandle = UE.SetTimer(RespawnSeconds, RespawnTimerId);
     }
 
     private static void Restart()
     {
+        CancelRespawn();
         State = Playing;
         Score = 0;
         RemainingSeconds = RoundSeconds;
@@ -146,6 +152,15 @@ public static class PickupRushScript
         UE.Self.SetActorScale3D(new FVector(1.0f, 1.0f, 1.0f));
         UE.Self.SetActorHiddenInGame(false);
         UE.Self.SetActorEnableCollision(true);
+    }
+
+    private static void CancelRespawn()
+    {
+        if (RespawnHandle > 0)
+        {
+            UE.CancelTimer(RespawnHandle);
+            RespawnHandle = 0;
+        }
     }
 
     private static FVector GetPickupLocation(int score)

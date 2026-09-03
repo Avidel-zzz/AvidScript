@@ -4,15 +4,19 @@
 #include "AvidScriptHash.h"
 #include "AvidScriptRuntimeArtifact.h"
 #include "AvidScriptRuntimeSession.h"
+#include "AvidScriptVmArtifact.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeDispatcher.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeRegistry.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeRuntimeHost.h"
 
+#include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 #include "UObject/StrongObjectPtr.h"
 
 namespace
@@ -157,7 +161,8 @@ FString BuildRuntimeManifestFixture(const FString& WasmSha256)
 
 FString BuildPackageDescriptorFixture(
 	const FString& TypeManifestSha256,
-	const FString& RuntimeManifestSha256)
+	const FString& RuntimeManifestSha256,
+	const TCHAR* ExecutionBackend = TEXT("wasmtime_jit"))
 {
 	const FString PackageId = FAvidScriptHash::Sha256HexUtf8(FString::Printf(
 		TEXT("%s\n%s\n%s"),
@@ -170,7 +175,7 @@ FString BuildPackageDescriptorFixture(
   "package_id": "%s",
   "module_name": "AvidScriptRuntime",
   "runtime_module_id": "generated_type_runtime_host",
-  "execution_backend": "wasmtime_jit",
+  "execution_backend": "%s",
   "generation_key_sha256": "%s",
   "type_manifest": {
     "file": "generated-types.json",
@@ -182,6 +187,7 @@ FString BuildPackageDescriptorFixture(
   }
 })JSON"),
 		*PackageId,
+		ExecutionBackend,
 		GeneratedTypeGenerationKey,
 		*TypeManifestSha256,
 		*RuntimeManifestSha256);
@@ -637,6 +643,161 @@ bool FAvidScriptGeneratedTypeRuntimeHostTest::RunTest(const FString& Parameters)
 		TEXT("Repeated native Super-chain teardown is idempotent"),
 		Host->EndInstance(*Receiver, Error));
 	TestTrue(TEXT("Inactive package can be cleared"), Host->ClearPackage(Error));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptGeneratedTypeRuntimeHostPrecompiledTest,
+	"AvidScript.Runtime.GeneratedTypes.RuntimeHostPrecompiled",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptGeneratedTypeRuntimeHostPrecompiledTest::RunTest(const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	const TArray<uint8> Module = BuildGeneratedTypeSessionModule(37);
+	FAvidScriptVmArtifactCompileRequest CompileRequest;
+	CompileRequest.Selection.BackendKind = EAvidScriptVmBackendKind::Wasmtime;
+	CompileRequest.Selection.ExecutionMode = EAvidScriptVmExecutionMode::Aot;
+	CompileRequest.Selection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmtimeSerialized;
+	CompileRequest.CanonicalWasmBytes = Module;
+	FAvidScriptVmArtifactCompileResult CompileResult;
+	if (!TestTrue(TEXT("Generated type fixture precompiles"),
+		CompileAvidScriptVmArtifact(CompileRequest, CompileResult)))
+	{
+		AddError(CompileResult.Error.Category + TEXT(": ") + CompileResult.Error.Details);
+		return false;
+	}
+	const FAvidScriptVmOwnedArtifact& Compiled = CompileResult.Artifact;
+	const FString PackageRoot = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectSavedDir(), TEXT("AvidScriptTests/GeneratedTypePrecompiled"),
+		FGuid::NewGuid().ToString(EGuidFormats::Digits)));
+	if (!TestTrue(TEXT("Precompiled package fixture directory is created"),
+		IFileManager::Get().MakeDirectory(*PackageRoot, true)))
+	{
+		return false;
+	}
+	TUniquePtr<FAvidScriptGeneratedTypeRuntimeHost> Host =
+		FAvidScriptGeneratedTypeRuntimeHost::CreateIsolatedForTesting();
+	ON_SCOPE_EXIT
+	{
+		Host->Shutdown();
+		IFileManager::Get().DeleteDirectory(*PackageRoot, false, true);
+	};
+	const FString WasmPath = FPaths::Combine(PackageRoot, TEXT("generated-types.wasm"));
+	const FString ExecutionFile = TEXT("generated-types.cwasm");
+	const FString ExecutionPath = FPaths::Combine(PackageRoot, ExecutionFile);
+	const FString TypeManifestPath = FPaths::Combine(PackageRoot, TEXT("generated-types.json"));
+	const FString RuntimeManifestPath = FPaths::Combine(PackageRoot, TEXT("generated-types.avidscript.json"));
+	const FString DescriptorPath = FPaths::Combine(PackageRoot, TEXT("package.json"));
+	TArray<uint8> TypeManifestBytes;
+	if (!TestTrue(TEXT("Precompiled fixture canonical WASM writes"),
+		FFileHelper::SaveArrayToFile(Module, *WasmPath))
+		|| !TestTrue(TEXT("Precompiled fixture execution bytes write"),
+			FFileHelper::SaveArrayToFile(Compiled.ExecutionBytes, *ExecutionPath))
+		|| !TestTrue(TEXT("Precompiled fixture type manifest writes"),
+			SaveUtf8Fixture(TypeManifestPath, BuildGeneratedTypeSessionManifest(), TypeManifestBytes)))
+	{
+		return false;
+	}
+	const FString TypeManifestSha256 = FAvidScriptHash::Sha256Hex(TypeManifestBytes);
+	const TSharedRef<FJsonObject> Execution = MakeShared<FJsonObject>();
+	Execution->SetStringField(TEXT("format"), TEXT("wasmtime_serialized_v1"));
+	Execution->SetStringField(TEXT("file"), ExecutionFile);
+	Execution->SetStringField(TEXT("sha256"), Compiled.ExecutionIdentity);
+	Execution->SetStringField(TEXT("canonical_sha256"), Compiled.CanonicalWasmIdentity);
+	Execution->SetStringField(TEXT("compiler_build_identity"), Compiled.CompilerBuildIdentity);
+	Execution->SetStringField(TEXT("target_triple"), Compiled.TargetTriple);
+	Execution->SetStringField(TEXT("attestation_id"), Compiled.AttestationId);
+	Execution->SetStringField(TEXT("policy"), TEXT("require_precompiled"));
+	Execution->SetStringField(TEXT("fallback"), TEXT("wasmtime_jit"));
+	auto WritePackage = [&](const TSharedPtr<FJsonObject>& ExecutionObject,
+		const TCHAR* Backend = TEXT("wasmtime_precompiled"))
+	{
+		TSharedPtr<FJsonObject> RuntimeManifest;
+		if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(
+			BuildRuntimeManifestFixture(FAvidScriptHash::Sha256Hex(Module))), RuntimeManifest))
+		{
+			AddError(TEXT("Runtime manifest fixture could not be parsed"));
+			return false;
+		}
+		if (ExecutionObject.IsValid())
+		{
+			RuntimeManifest->SetObjectField(TEXT("execution"), ExecutionObject);
+		}
+		FString RuntimeJson;
+		TArray<uint8> RuntimeBytes;
+		TArray<uint8> DescriptorBytes;
+		return TestTrue(TEXT("Runtime manifest fixture serializes"),
+			FJsonSerializer::Serialize(RuntimeManifest.ToSharedRef(), TJsonWriterFactory<>::Create(&RuntimeJson)))
+			&& TestTrue(TEXT("Runtime manifest fixture writes"),
+				SaveUtf8Fixture(RuntimeManifestPath, RuntimeJson, RuntimeBytes))
+			&& TestTrue(TEXT("Package descriptor fixture writes with matching hashes"),
+				SaveUtf8Fixture(DescriptorPath,
+					BuildPackageDescriptorFixture(TypeManifestSha256, FAvidScriptHash::Sha256Hex(RuntimeBytes), Backend),
+					DescriptorBytes));
+	};
+	FString Error;
+	if (!WritePackage(Execution)
+		|| !TestTrue(TEXT("Schema1 installs a verified required precompiled artifact"),
+			Host->InstallPackageFromDescriptorFile(DescriptorPath, Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+	TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> Receiver(
+		NewObject<UAvidScriptGeneratedTypeSessionTestObject>());
+	if (!TestTrue(TEXT("Precompiled generated Session activates"), Host->BeginInstance(*Receiver, 0, Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+	int32 ScriptResult = 0;
+	TestTrue(TEXT("Precompiled generated export dispatches"), FAvidScriptGeneratedTypeDispatcher::Invoke(
+		Receiver.Get(), 0, 0, TConstArrayView<FAvidScriptGeneratedCallArgument>(), &ScriptResult));
+	TestEqual(TEXT("Precompiled generated body executes"), ScriptResult, 37);
+	TestTrue(TEXT("Precompiled Session tears down"), Host->EndInstance(*Receiver, Error));
+	TestTrue(TEXT("Precompiled package clears"), Host->ClearPackage(Error));
+
+	auto RejectPackage = [&](const TCHAR* Label, const TCHAR* ExpectedError)
+	{
+		TestFalse(Label, Host->InstallPackageFromDescriptorFile(DescriptorPath, Error));
+		TestTrue(TEXT("Rejected package keeps an explicit diagnostic"), Error.Contains(ExpectedError));
+		TestEqual(TEXT("Rejected package has no active instance"), Host->GetActiveInstanceCount(), 0);
+		TestFalse(TEXT("Rejected package cannot activate a receiver"), Host->BeginInstance(*Receiver, 0, Error));
+	};
+	if (!WritePackage(nullptr)) { return false; }
+	RejectPackage(TEXT("Canonical JIT cannot masquerade as precompiled"), TEXT("requires a verified AOT artifact"));
+	if (!WritePackage(Execution, TEXT("wasmtime_jit"))) { return false; }
+	RejectPackage(TEXT("JIT descriptor cannot downgrade an AOT policy"), TEXT("cannot override an execution artifact policy"));
+
+	Execution->SetStringField(TEXT("policy"), TEXT("prefer_precompiled"));
+	if (!WritePackage(Execution)) { return false; }
+	RejectPackage(TEXT("Precompiled descriptor requires a no-fallback policy"), TEXT("require_precompiled"));
+	Execution->SetStringField(TEXT("file"), TEXT("missing.cwasm"));
+	if (!WritePackage(Execution)) { return false; }
+	RejectPackage(TEXT("Loader JIT fallback cannot satisfy a precompiled descriptor"), TEXT("no JIT fallback"));
+	Execution->SetStringField(TEXT("policy"), TEXT("require_precompiled"));
+	if (!WritePackage(Execution)) { return false; }
+	RejectPackage(TEXT("Required missing artifact is rejected"), TEXT("execution_file_missing"));
+	Execution->SetStringField(TEXT("file"), ExecutionFile);
+
+	Execution->SetStringField(TEXT("target_triple"), TEXT("foreign-target"));
+	if (!WritePackage(Execution)) { return false; }
+	RejectPackage(TEXT("Precompiled target mismatch is rejected"), TEXT("execution_target_mismatch"));
+	Execution->SetStringField(TEXT("target_triple"), Compiled.TargetTriple);
+	Execution->SetStringField(TEXT("attestation_id"), FString::ChrN(32, TEXT('0')));
+	if (!WritePackage(Execution)) { return false; }
+	RejectPackage(TEXT("Precompiled expired attestation is rejected"), TEXT("execution_attestation_invalid"));
+	Execution->SetStringField(TEXT("attestation_id"), Compiled.AttestationId);
+	Execution->SetStringField(TEXT("sha256"), FString::ChrN(64, TEXT('0')));
+	if (!WritePackage(Execution)) { return false; }
+	RejectPackage(TEXT("Precompiled execution hash mismatch is rejected"), TEXT("execution_identity_mismatch"));
+
+	TestTrue(TEXT("Disguised canonical bytes write with cwasm extension"),
+		FFileHelper::SaveArrayToFile(Module, *ExecutionPath));
+	Execution->SetStringField(TEXT("sha256"), FAvidScriptHash::Sha256Hex(Module));
+	if (!WritePackage(Execution)) { return false; }
+	RejectPackage(TEXT("Renamed JIT bytes cannot reuse an AOT attestation"), TEXT("execution_attestation_invalid"));
 	return true;
 }
 

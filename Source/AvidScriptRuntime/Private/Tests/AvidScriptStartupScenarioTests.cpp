@@ -4,6 +4,11 @@
 
 #include "Startup/AvidScriptStartupScenario.h"
 
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptStartupScenarioSchemaTest,
 	"AvidScript.Runtime.StartupScenario.Schema",
@@ -140,8 +145,50 @@ bool FAvidScriptStartupScenarioSchemaTest::RunTest(const FString& Parameters)
 		TEXT("Zero spawn scale fails closed"),
 		ValidJson.Replace(TEXT("\"scale\": [1.0, 1.0, 1.0]"), TEXT("\"scale\": [0.0, 1.0, 1.0]")),
 		TEXT("target_invalid"));
+	for (const bool bBoolean : { true, false })
+	{
+		TSharedPtr<FJsonObject> TypedDocument;
+		if (!TestTrue(TEXT("Numeric type fixture parses"), FJsonSerializer::Deserialize(
+			TJsonReaderFactory<>::Create(ValidJson), TypedDocument)))
+		{
+			return true;
+		}
+		auto NonNumber = [bBoolean](const TCHAR* Text) -> TSharedPtr<FJsonValue>
+		{
+			if (bBoolean)
+			{
+				return MakeShared<FJsonValueBoolean>(true);
+			}
+			return MakeShared<FJsonValueString>(Text);
+		};
+		auto ExpectTypeRejected = [&](const TCHAR* Field, const TCHAR* Category)
+		{
+			FString Json;
+			if (TestTrue(TEXT("Numeric type fixture serializes"), FJsonSerializer::Serialize(
+				TypedDocument.ToSharedRef(), TJsonWriterFactory<>::Create(&Json))))
+			{
+				ExpectRejected(*FString::Printf(TEXT("%s %s is not a number"),
+					bBoolean ? TEXT("Boolean") : TEXT("String"), Field), Json, Category);
+			}
+		};
+		TypedDocument->SetField(TEXT("schema_version"), NonNumber(TEXT("1")));
+		ExpectTypeRejected(TEXT("schema version"), TEXT("document_invalid"));
+		TypedDocument->SetNumberField(TEXT("schema_version"), 1);
+
+		const TArray<TSharedPtr<FJsonValue>>& Bindings = TypedDocument->GetArrayField(TEXT("scenarios"))[0]
+			->AsObject()->GetArrayField(TEXT("bindings"));
+		const TSharedPtr<FJsonObject> ExistingTarget = Bindings[1]->AsObject()->GetObjectField(TEXT("target"));
+		ExistingTarget->SetField(TEXT("max_instances"), NonNumber(TEXT("8")));
+		ExpectTypeRejected(TEXT("instance limit"), TEXT("target_invalid"));
+		ExistingTarget->SetNumberField(TEXT("max_instances"), 8);
+
+		const TSharedPtr<FJsonObject> Transform = Bindings[2]->AsObject()->GetObjectField(TEXT("target"))
+			->GetArrayField(TEXT("transforms"))[0]->AsObject();
+		Transform->SetArrayField(TEXT("location"), {
+			NonNumber(TEXT("100.0")), MakeShared<FJsonValueNumber>(200.0), MakeShared<FJsonValueNumber>(300.0) });
+		ExpectTypeRejected(TEXT("transform component"), TEXT("target_invalid"));
+	}
 	return true;
 }
 
 #endif
-

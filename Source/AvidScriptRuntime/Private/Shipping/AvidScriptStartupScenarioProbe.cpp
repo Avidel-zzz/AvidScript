@@ -19,9 +19,9 @@ DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptStartupScenarioProbe, Log, All);
 
 namespace
 {
-constexpr float ProbeTimeoutSeconds = 5.0f;
+constexpr float ProbeTimeoutSeconds = 30.0f;
 constexpr float FirstEventSeconds = 0.08f;
-constexpr float EventIntervalSeconds = 0.08f;
+constexpr float EventIntervalSeconds = 0.4f;
 constexpr float CompletionDelaySeconds = 0.25f;
 constexpr int32 MaximumProbeEvents = 64;
 
@@ -183,13 +183,12 @@ void UAvidScriptWorldSubsystem::TickStartupScenarioProbe(float DeltaTime)
 			return;
 		}
 		++StartupScenarioProbeEventIndex;
-		StartupScenarioProbeNextEventSeconds += EventIntervalSeconds;
+		// Preserve the gameplay delay even when startup or a frame stalls.
+		StartupScenarioProbeNextEventSeconds = StartupScenarioProbeElapsedSeconds + EventIntervalSeconds;
 		return;
 	}
 
-	const float ExpectedCompletionSeconds = FirstEventSeconds
-		+ EventIntervalSeconds * static_cast<float>(StartupScenarioProbeEvents.Num())
-		+ CompletionDelaySeconds;
+	const float ExpectedCompletionSeconds = StartupScenarioProbeNextEventSeconds + CompletionDelaySeconds;
 	if (StartupScenarioProbeEventIndex == StartupScenarioProbeEvents.Num()
 		&& StartupScenarioProbeElapsedSeconds >= ExpectedCompletionSeconds)
 	{
@@ -231,6 +230,8 @@ void UAvidScriptWorldSubsystem::CompleteStartupScenarioProbe(
 			TEXT("owner"),
 			Owner != nullptr ? Owner->GetPathName() : TEXT("<none>"));
 		ComponentObject->SetStringField(TEXT("module_id"), Stats.ModuleId);
+		ComponentObject->SetStringField(TEXT("package_id"), Stats.PackageId);
+		ComponentObject->SetBoolField(TEXT("resolved_from_package"), Stats.bResolvedFromPackage);
 		ComponentObject->SetBoolField(TEXT("runtime_loaded"), Stats.bRuntimeLoaded);
 		ComponentObject->SetBoolField(TEXT("begin_play"), Stats.bBeginPlayCalled);
 		ComponentObject->SetNumberField(TEXT("ticks"), Stats.TickCallCount);

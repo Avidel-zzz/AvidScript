@@ -52,12 +52,14 @@ private:
 	void TickPackagedOracle(float DeltaTime);
 	void StopPackagedOracle();
 	void CompletePackagedOracle(bool bSucceeded, const FString& FailureCategory);
+	void ActivateStartupScenario(UWorld& InWorld);
 	bool StartStartupScenarioProbe();
 	void TickStartupScenarioProbe(float DeltaTime);
 	void StopStartupScenarioProbe();
 	void CompleteStartupScenarioProbe(bool bSucceeded, const FString& FailureCategory);
 
 	FAvidScriptStartupCoordinator* StartupCoordinator = nullptr;
+	bool bStartupActivationPending = false;
 	FAvidScriptWorldRuntimeStats RuntimeStats;
 	bool bPackagedOracleActive = false;
 	bool bPackagedOracleCompleted = false;

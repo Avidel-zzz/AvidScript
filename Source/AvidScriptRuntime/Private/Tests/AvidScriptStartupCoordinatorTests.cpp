@@ -3,11 +3,24 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AvidScriptComponent.h"
+#include "AvidScriptWorldSubsystem.h"
 #include "Startup/AvidScriptStartupCoordinator.h"
 
+#include "Dom/JsonObject.h"
 #include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "GameFramework/Actor.h"
+#include "HAL/FileManager.h"
+#include "Misc/CommandLine.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Guid.h"
+#include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
+#include "UObject/Package.h"
 
 namespace
 {
@@ -18,10 +31,14 @@ bool CreateStartupWorld(UWorld*& OutWorld)
 	{
 		return false;
 	}
+	const FString WorldName = TEXT("AvidScriptStartupWorld_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	UPackage* WorldPackage = CreatePackage(*(TEXT("/Game/AvidScriptTests/") + WorldName));
+	WorldPackage->SetFlags(RF_Transient);
 	OutWorld = UWorld::CreateWorld(
 		EWorldType::PIE,
 		false,
-		MakeUniqueObjectName(nullptr, UWorld::StaticClass(), TEXT("AvidScriptStartupWorld")));
+		FName(*WorldName),
+		WorldPackage);
 	if (OutWorld == nullptr)
 	{
 		return false;
@@ -103,10 +120,33 @@ bool FAvidScriptStartupCoordinatorLifecycleTest::RunTest(const FString& Paramete
 	}
 	ExistingActor->Tags.Add(TEXT("startup_target"));
 
-	const FURL Url;
+	FAvidScriptStartupScenario BeforeStartScenario;
+	BeforeStartScenario.ScenarioId = TEXT("before_world_start");
+	BeforeStartScenario.Worlds.Add(World->GetOutermost()->GetName());
+	BeforeStartScenario.Bindings.Add(MakeWorldHostBinding());
+	FAvidScriptStartupCoordinator BeforeStartCoordinator;
+	FAvidScriptStartupRuntimeResult BeforeStartResult;
+	TestFalse(
+		TEXT("Activation cannot commit a runtime before actors begin"),
+		BeforeStartCoordinator.Activate(*World, BeforeStartScenario, BeforeStartResult, true));
+	TestEqual(TEXT("Pre-BeginPlay activation is rejected"), BeforeStartResult.ErrorCategory, FString(TEXT("world_not_started")));
+	TestEqual(TEXT("Pre-BeginPlay activation creates no actors"), BeforeStartCoordinator.GetLiveOwnedActorCount(), 0);
+
+	World->SetGameInstance(NewObject<UGameInstance>(GEngine));
+	FURL Url;
+	Url.AddOption(TEXT("game=/Script/Engine.GameModeBase"));
+	if (!TestTrue(TEXT("Native GameMode is installed"), World->SetGameMode(Url)))
+	{
+		DestroyStartupWorld(World);
+		return true;
+	}
 	World->InitializeActorsForPlay(Url);
 	World->BeginPlay();
-	World->SetBegunPlay(true);
+	if (!TestTrue(TEXT("UWorld BeginPlay starts actors through GameMode"), World->HasBegunPlay()))
+	{
+		DestroyStartupWorld(World);
+		return true;
+	}
 
 	FAvidScriptStartupScenario Scenario;
 	Scenario.ScenarioId = TEXT("coordinator_lifecycle");
@@ -189,6 +229,94 @@ bool FAvidScriptStartupCoordinatorLifecycleTest::RunTest(const FString& Paramete
 	TestEqual(TEXT("Rejected scenario rolls back actors"), Coordinator.GetLiveOwnedActorCount(), 0);
 
 	DestroyStartupWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptStartupWorldBeginPlayRollbackTest,
+	"AvidScript.Runtime.StartupScenario.WorldBeginPlayRollback",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptStartupWorldBeginPlayRollbackTest::RunTest(const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	UWorld* World = nullptr;
+	if (!CreateStartupWorld(World))
+	{
+		AddError(TEXT("Failed to create startup World BeginPlay fixture."));
+		return true;
+	}
+	const FString OriginalCommandLine = FCommandLine::Get();
+	const FString FixtureId = FGuid::NewGuid().ToString(EGuidFormats::Digits).ToLower();
+	const FString DocumentPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectContentDir(), TEXT("AvidScriptStartupContract-") + FixtureId + TEXT(".json")));
+	ON_SCOPE_EXIT
+	{
+		DestroyStartupWorld(World);
+		FCommandLine::Set(*OriginalCommandLine);
+		IFileManager::Get().Delete(*DocumentPath);
+	};
+
+	const TSharedRef<FJsonObject> Target = MakeShared<FJsonObject>();
+	Target->SetStringField(TEXT("mode"), TEXT("world_host"));
+	const TSharedRef<FJsonObject> Binding = MakeShared<FJsonObject>();
+	Binding->SetStringField(TEXT("module_id"), TEXT("startup.missing.") + FixtureId);
+	Binding->SetObjectField(TEXT("target"), Target);
+	const TSharedRef<FJsonObject> Scenario = MakeShared<FJsonObject>();
+	Scenario->SetStringField(TEXT("scenario_id"), TEXT("world_start_failure"));
+	Scenario->SetStringField(TEXT("activation"), TEXT("explicit"));
+	Scenario->SetArrayField(TEXT("worlds"), {
+		MakeShared<FJsonValueString>(World->GetOutermost()->GetName()) });
+	Scenario->SetArrayField(TEXT("bindings"), { MakeShared<FJsonValueObject>(Binding) });
+	const TSharedRef<FJsonObject> Document = MakeShared<FJsonObject>();
+	Document->SetNumberField(TEXT("schema_version"), 1);
+	Document->SetArrayField(TEXT("scenarios"), { MakeShared<FJsonValueObject>(Scenario) });
+	FString Json;
+	if (!TestTrue(TEXT("Startup fixture serializes"), FJsonSerializer::Serialize(
+			Document, TJsonWriterFactory<>::Create(&Json)))
+		|| !TestTrue(TEXT("Startup fixture is written"), FFileHelper::SaveStringToFile(Json, *DocumentPath)))
+	{
+		return true;
+	}
+	FCommandLine::Set(*FString::Printf(
+		TEXT("-AvidScriptScenario=world_start_failure -AvidScriptScenarioFile=\"%s\""), *DocumentPath));
+	UAvidScriptWorldSubsystem* Subsystem = World->GetSubsystem<UAvidScriptWorldSubsystem>();
+	if (!TestNotNull(TEXT("Startup subsystem exists"), Subsystem))
+	{
+		return true;
+	}
+	World->SetGameInstance(NewObject<UGameInstance>(GEngine));
+	FURL Url;
+	Url.AddOption(TEXT("game=/Script/Engine.GameModeBase"));
+	if (!TestTrue(TEXT("Native GameMode is installed"), World->SetGameMode(Url)))
+	{
+		return true;
+	}
+	World->InitializeActorsForPlay(Url);
+	World->BeginPlay();
+	if (!TestTrue(TEXT("Real World BeginPlay has started actors"), World->HasBegunPlay()))
+	{
+		return true;
+	}
+	TestFalse(TEXT("Subsystem has not prematurely committed activation"), Subsystem->GetRuntimeStats().bStartupScenarioActive);
+	TestTrue(TEXT("Subsystem is waiting to activate after actor startup"), Subsystem->IsTickable());
+	AddExpectedError(TEXT("AvidScript startup activation failed"), EAutomationExpectedErrorFlags::Contains, 1);
+	World->Tick(LEVELTICK_All, 1.0f / 60.0f);
+	const FAvidScriptWorldRuntimeStats& Stats = Subsystem->GetRuntimeStats();
+	TestTrue(TEXT("The actual process scenario was requested"), Stats.bStartupScenarioRequested);
+	TestEqual(TEXT("Missing Runtime fails the activation"), Stats.LastErrorCategory, FString(TEXT("component_runtime_start_failed")));
+	TestFalse(TEXT("Failed scenario is not active"), Stats.bStartupScenarioActive);
+	TestFalse(TEXT("Failed scenario has no Runtime"), Stats.bRuntimeLoaded);
+	TestFalse(TEXT("Failed startup stops its pending Tick"), Subsystem->IsTickable());
+	int32 LiveStartupActors = 0;
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		if (IsValid(*It) && !It->IsActorBeingDestroyed() && It->GetName().StartsWith(TEXT("AvidScriptStartupHost")))
+		{
+			++LiveStartupActors;
+		}
+	}
+	TestEqual(TEXT("Failed startup rolls back owned actors"), LiveStartupActors, 0);
 	return true;
 }
 

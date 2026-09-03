@@ -14,7 +14,8 @@ param(
     [string]$Map = '/Game/TopDown/Lvl_TopDown',
     [string]$EventIds = '64001,64001,64001,64001,64001',
     [string]$OutputRoot = '',
-    [ValidateRange(10, 600)][int]$TimeoutSeconds = 90
+    [ValidateRange(10, 600)][int]$TimeoutSeconds = 90,
+    [string]$ExpectedPackageId = ''
 )
 
 Set-StrictMode -Version Latest
@@ -53,6 +54,13 @@ function Find-AvidScriptAndroidScenarioReport {
 }
 
 function Invoke-AvidScriptAndroidScenario {
+    $CanonicalExpectedPackageId = ''
+    if ($Mode -ieq 'Run') {
+        if ($ExpectedPackageId -notmatch '\A[0-9a-f]{64}\z') {
+            throw 'Run mode requires ExpectedPackageId to be a 64-hex package identity.'
+        }
+        $CanonicalExpectedPackageId = $ExpectedPackageId.ToLowerInvariant()
+    }
     $ResolvedAdb = $AdbPath
     if ([string]::IsNullOrWhiteSpace($ResolvedAdb)) {
         $Command = Get-Command adb.exe -ErrorAction SilentlyContinue
@@ -81,11 +89,11 @@ function Invoke-AvidScriptAndroidScenario {
     }
     $Serial = $ReadyDevices[0].serial
     $Result.device_id = $Serial
-    if ($Mode -ceq 'Inspect') {
+    if ($Mode -ieq 'Inspect') {
         $Result.result = 'avidscript_android_device_ready'; $Result.status = 'ok'; $Result.reason = 'inspect_only'
         return [pscustomobject]$Result
     }
-    if ($Configuration -ceq 'Shipping') {
+    if ($Configuration -ieq 'Shipping') {
         $Result.reason = 'shipping_requires_embedded_commandline_and_report_transport'
         return [pscustomobject]$Result
     }
@@ -160,8 +168,11 @@ function Invoke-AvidScriptAndroidScenario {
     }
     if ($null -eq $Report) { throw 'Android scenario report timed out; no result is accepted from an earlier run.' }
     $Components = @($Report.components | Where-Object { $_.module_id -ceq $ModuleId })
-    if ($Report.result -cne 'avidscript_startup_scenario_probe_passed' -or $Report.scenario_id -cne $ScenarioId -or
+    if ($Report.schema_version -ne 1 -or
+        $Report.result -cne 'avidscript_startup_scenario_probe_passed' -or $Report.scenario_id -cne $ScenarioId -or
         $Report.events_requested -ne $Events.Count -or $Report.events_dispatched -ne $Events.Count -or $Components.Count -ne 1 -or
+        $Components[0].package_id -cne $CanonicalExpectedPackageId -or
+        $Components[0].resolved_from_package -isnot [bool] -or -not $Components[0].resolved_from_package -or
         -not $Components[0].runtime_loaded -or -not $Components[0].begin_play -or $Components[0].ticks -le 0 -or
         $Components[0].dropped_gameplay_events -ne 0 -or $Components[0].last_error -cne '') {
         throw 'Android scenario report did not satisfy the requested runtime identity and lifecycle.'
@@ -170,6 +181,8 @@ function Invoke-AvidScriptAndroidScenario {
     $Result.report = $Report
     $Result['run_id'] = $RunId
     $Result['package_name'] = $ResolvedPackage
+    $Result['expected_package_id'] = $CanonicalExpectedPackageId
+    $Result['package_id'] = [string]$Components[0].package_id
     $Result['apk_sha256'] = $ApkIdentity.sha256
     $Result['process_exit'] = 'not_observable_via_activity_manager'
     $ResolvedOutputRoot = if ([string]::IsNullOrWhiteSpace($OutputRoot)) { Join-Path $ProjectRoot 'Saved/AvidScript/Android/DeviceReports' } else { [IO.Path]::GetFullPath($OutputRoot) }

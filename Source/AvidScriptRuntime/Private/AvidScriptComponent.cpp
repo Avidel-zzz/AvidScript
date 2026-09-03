@@ -356,8 +356,12 @@ bool UAvidScriptComponent::ReloadConfiguredScript(FAvidScriptWasmReloadResult& O
 		return false;
 	}
 
+	// Candidate Host effects and rollback can synchronously raise collision callbacks.
+	// Keep their queue separate; a rejected candidate must not deliver them to the old Guest.
+	TArray<FAvidScriptDeferredOwnerGameplayEvent> PreviousDeferredEvents = MoveTemp(DeferredGameplayEvents);
 	if (!RuntimeSession->ReloadArtifact(Artifact, OutResult))
 	{
+		DeferredGameplayEvents = MoveTemp(PreviousDeferredEvents);
 		const FAvidScriptRuntimeSessionSnapshot RejectedSnapshot = RuntimeSession->GetSnapshot();
 		++RuntimeStats.RejectedReloadCount;
 		RuntimeStats.LastErrorMessage = OutResult.ErrorMessage;

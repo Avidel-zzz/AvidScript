@@ -3,6 +3,8 @@
 #include "Startup/AvidScriptStartupCoordinator.h"
 
 #include "Engine/World.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptWorldSubsystem, Log, All);
 
@@ -22,12 +24,32 @@ void UAvidScriptWorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	Super::OnWorldBeginPlay(InWorld);
 
 	RuntimeStats = FAvidScriptWorldRuntimeStats();
+	bStartupActivationPending = false;
 	delete StartupCoordinator;
 	StartupCoordinator = nullptr;
 	if (StartPackagedOracle(InWorld))
 	{
 		return;
 	}
+	FString RequestedValue;
+	if (!FParse::Value(FCommandLine::Get(), TEXT("AvidScriptScenario="), RequestedValue)
+		&& !FParse::Value(FCommandLine::Get(), TEXT("AvidScriptScenarioProbeReport="), RequestedValue)
+		&& !FParse::Value(FCommandLine::Get(), TEXT("AvidScriptScenarioProbeRunId="), RequestedValue))
+	{
+		return;
+	}
+
+	// World subsystems begin before GameMode starts actors; validate all runtimes after that boundary.
+	bStartupActivationPending = true;
+	if (InWorld.HasBegunPlay())
+	{
+		ActivateStartupScenario(InWorld);
+	}
+}
+
+void UAvidScriptWorldSubsystem::ActivateStartupScenario(UWorld& InWorld)
+{
+	bStartupActivationPending = false;
 
 	StartupCoordinator = new FAvidScriptStartupCoordinator();
 	FAvidScriptStartupRuntimeResult StartupResult;
@@ -79,6 +101,7 @@ void UAvidScriptWorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 
 void UAvidScriptWorldSubsystem::OnWorldEndPlay(UWorld& InWorld)
 {
+	bStartupActivationPending = false;
 	StopPackagedOracle();
 	StopStartupScenarioProbe();
 	if (StartupCoordinator != nullptr)
@@ -95,6 +118,13 @@ void UAvidScriptWorldSubsystem::OnWorldEndPlay(UWorld& InWorld)
 
 void UAvidScriptWorldSubsystem::Tick(float DeltaTime)
 {
+	if (bStartupActivationPending)
+	{
+		if (UWorld* World = GetWorld(); World != nullptr && World->HasBegunPlay() && !World->bIsTearingDown)
+		{
+			ActivateStartupScenario(*World);
+		}
+	}
 	if (bPackagedOracleActive)
 	{
 		TickPackagedOracle(DeltaTime);
@@ -108,7 +138,7 @@ void UAvidScriptWorldSubsystem::Tick(float DeltaTime)
 
 bool UAvidScriptWorldSubsystem::IsTickable() const
 {
-	return bPackagedOracleActive || bStartupScenarioProbeActive;
+	return bStartupActivationPending || bPackagedOracleActive || bStartupScenarioProbeActive;
 }
 
 TStatId UAvidScriptWorldSubsystem::GetStatId() const
@@ -118,6 +148,7 @@ TStatId UAvidScriptWorldSubsystem::GetStatId() const
 
 void UAvidScriptWorldSubsystem::Deinitialize()
 {
+	bStartupActivationPending = false;
 	if (UWorld* World = GetWorld(); World != nullptr && !RuntimeStats.bEndPlayCalled)
 	{
 		OnWorldEndPlay(*World);

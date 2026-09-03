@@ -132,6 +132,7 @@ bool TryReadFiniteNumber(
 	double& OutNumber)
 {
 	return Value.IsValid()
+		&& Value->Type == EJson::Number
 		&& Value->TryGetNumber(OutNumber)
 		&& FMath::IsFinite(OutNumber);
 }
@@ -206,8 +207,11 @@ bool TryReadExactInteger(
 	const TCHAR* Field,
 	int32& OutValue)
 {
+	const TSharedPtr<FJsonValue> Value = Object.TryGetField(Field);
 	double Number = 0.0;
-	if (!Object.TryGetNumberField(Field, Number)
+	if (!Value.IsValid()
+		|| Value->Type != EJson::Number
+		|| !Value->TryGetNumber(Number)
 		|| !FMath::IsFinite(Number)
 		|| Number < static_cast<double>(MIN_int32)
 		|| Number > static_cast<double>(MAX_int32))

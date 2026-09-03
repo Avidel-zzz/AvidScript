@@ -37,19 +37,19 @@ FString ComputeCollisionSha256(const TArray<uint8>& Bytes)
 	return CollisionBytesToLowerHex(Digest, UE_ARRAY_COUNT(Digest));
 }
 
-bool WriteCollisionFixture(bool bTrap, FString& OutManifestPath)
+bool WriteCollisionFixture(bool bTrap, FString& OutManifestPath, bool bTrapBeginPlay = false)
 {
 	FString Root = FPaths::ConvertRelativePathToFull(FPaths::Combine(
 		FPaths::ProjectSavedDir(),
 		TEXT("AvidScriptTests/Phase38/Collision"),
-		bTrap ? TEXT("Trap") : TEXT("Success")));
+		bTrapBeginPlay ? TEXT("BeginPlayTrap") : (bTrap ? TEXT("Trap") : TEXT("Success"))));
 	FPaths::NormalizeFilename(Root);
 	if (!IFileManager::Get().MakeDirectory(*Root, true))
 	{
 		return false;
 	}
 
-	const TArray<uint8> WasmBytes = AvidScriptGameplayEventFixture::Build(bTrap, 100.0f);
+	const TArray<uint8> WasmBytes = AvidScriptGameplayEventFixture::Build(bTrap, 100.0f, bTrapBeginPlay);
 	const FString WasmPath = FPaths::Combine(Root, TEXT("collision_event.wasm"));
 	OutManifestPath = FPaths::Combine(Root, TEXT("collision_event.avidscript.json"));
 	if (!FFileHelper::SaveArrayToFile(WasmBytes, *WasmPath))
@@ -267,6 +267,63 @@ bool FAvidScriptComponentInputTrapTest::RunTest(const FString& Parameters)
 		TestFalse(TEXT("input trap unbinds gameplay delegates"), Component->GetRuntimeStats().bCollisionDelegatesBound);
 		TestTrue(TEXT("input teardown preserves the guest trap"), Component->GetRuntimeStats().LastErrorMessage.Contains(TEXT("category=trap")));
 	}
+	DestroyCollisionWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptComponentCollisionReloadTransactionTest,
+	"AvidScript.Component.Collision.ReloadTransactionIsolation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptComponentCollisionReloadTransactionTest::RunTest(const FString& Parameters)
+{
+	FString ManifestPath;
+	FString TrapManifestPath;
+	if (!TestTrue(TEXT("live collision fixture writes"), WriteCollisionFixture(false, ManifestPath)) ||
+		!TestTrue(TEXT("candidate BeginPlay trap fixture writes"), WriteCollisionFixture(false, TrapManifestPath, true)))
+	{
+		return true;
+	}
+	UWorld* World = nullptr;
+	if (!CreateCollisionWorld(World))
+	{
+		AddError(TEXT("Failed to create collision reload world."));
+		return true;
+	}
+	BeginCollisionWorld(World);
+	AActor* Owner = World->SpawnActor<AAvidScriptActorBindingTestActor>();
+	AActor* Other = World->SpawnActor<AAvidScriptActorBindingTestActor>();
+	UAvidScriptComponent* Component = Owner != nullptr ? AddCollisionComponent(Owner, ManifestPath) : nullptr;
+	if (Component == nullptr || Other == nullptr || Component->GetRuntimeSessionForTesting() == nullptr)
+	{
+		AddError(TEXT("Collision reload fixture could not start."));
+		DestroyCollisionWorld(World);
+		return true;
+	}
+	Other->SetActorLocation(FVector(10.0, 20.0, 30.0));
+	Component->GetRuntimeSessionForTesting()->SetCandidateBeginPlayObserverForTesting([Owner, Other]()
+	{
+		Owner->OnActorBeginOverlap.Broadcast(Owner, Other);
+	});
+	FAvidScriptWasmReloadResult Result;
+	Component->SetScriptManifestPath(TrapManifestPath);
+	TestFalse(TEXT("candidate BeginPlay trap rejects reload"), Component->ReloadConfiguredScript(Result));
+	TestTrue(TEXT("old Runtime survives candidate rejection"), Result.bRollbackPreservedLiveRuntime);
+	TestEqual(TEXT("candidate collision callback was queued"), Component->GetRuntimeStats().DeferredGameplayEventCount, 1);
+	TestEqual(TEXT("rejected candidate never dispatches to old Runtime"), Component->GetRuntimeStats().EventCallbackCount, 0);
+	TestTrue(TEXT("old Guest does not mutate the OtherActor"), Other->GetActorLocation().Equals(FVector(10.0, 20.0, 30.0)));
+	TestTrue(TEXT("old Runtime remains healthy"), Component->GetRuntimeStats().bRuntimeLoaded);
+
+	Component->GetRuntimeSessionForTesting()->SetCandidateBeginPlayObserverForTesting([Owner, Other]()
+	{
+		Owner->OnActorBeginOverlap.Broadcast(Owner, Other);
+	});
+	Component->SetScriptManifestPath(ManifestPath);
+	TestTrue(TEXT("valid candidate commits"), Component->ReloadConfiguredScript(Result));
+	TestEqual(TEXT("committed candidate event dispatches exactly once"), Component->GetRuntimeStats().EventCallbackCount, 1);
+	TestTrue(TEXT("committed Guest receives the queued event"), Other->GetActorLocation().Equals(FVector(110.0, 20.0, 30.0)));
+	TestEqual(TEXT("transaction discard does not count as capacity overflow"), Component->GetRuntimeStats().DroppedGameplayEventCount, 0);
 	DestroyCollisionWorld(World);
 	return true;
 }

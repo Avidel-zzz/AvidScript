@@ -290,7 +290,15 @@ if ($MyInvocation.InvocationName -eq '.') {
 }
 
 try {
-    $Result = Invoke-AvidScriptStartupScenarioProbe @PSBoundParameters
+    $Result = Invoke-AvidScriptStartupScenarioProbe `
+        -ArchiveRoot $ArchiveRoot `
+        -TargetName $TargetName `
+        -ScenarioId $ScenarioId `
+        -ModuleId $ModuleId `
+        -EventIds $EventIds `
+        -Map $Map `
+        -Configuration $Configuration `
+        -TimeoutSeconds $TimeoutSeconds
     [Console]::Out.WriteLine(($Result | ConvertTo-Json -Depth 64 -Compress))
     exit 0
 }
