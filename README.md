@@ -37,6 +37,8 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 - **写 UI 与存档**：[UiSaveDemo](Samples/CSharp/UiSaveDemo/README.md) 用 C# 订阅 UMG 按钮、更新文本、保存并在新进程读回；最近补齐错误处理、Reset、组件退出清理和迟到事件隔离。
 - **接自己的 UE API**：[TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) 通过 Profile 生成项目 `UFUNCTION/UPROPERTY` 的 C# 接口，支持 typed Self、Spawn、cast 与销毁，不逐个手写 VM wrapper。
 
+最近修复了 [async 初始化中的隐式类型转换](Docs/Phase64/P64.D_Async_Initializer_Conversion.md)，支持异步 BeginPlay 与生成式 UObject facade 上转组合编译；UI 热重载仍在联调。
+
 ## 框架能力
 
 | 领域 | 已实现内容 |
@@ -161,7 +163,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 ## 当前边界
 
 - **UE 类型**：由 Profile 与 ABI/codec 决定生成范围，并非所有 UE API 自动可用。复合容器内强 UObject 引用仍拒绝，平面 `TArray<UObject*>` 可用；Set/Map key 受确定性编码限制，soft/weak 的脚本侧解析易用接口待补齐。
-- **C# 子集**：无完整 .NET Runtime、任意 awaiter 或异常系统；暂不支持 `event +=`、lambda/closure，使用显式 bind/subscribe 与 `ExecuteX/BroadcastX`。
+- **C# 子集**：无完整 .NET Runtime、任意 awaiter 或异常系统；暂不支持 `event +=`、lambda/closure，使用显式 bind/subscribe 与 `ExecuteX/BroadcastX`。async 逻辑运算的短路语义仍待修正。
 - **重载与隔离**：方法体可热重载，但候选 BeginPlay 中无可回滚适配的反射写入会被拒绝；当前 UI 的 `UTextBlock.SetText` 属于这一缺口，不能宣称 UI 已支持热重载。反射结构变更需增量 UBT 并重启 Editor；WASM 隔离不是原生 DLL 进程沙箱。
 - **玩法与平台**：UI/存档通过 Editor 合成事件验证，不等于真实输入/视觉、任意损坏存档、World 销毁、包内 UI 或热重载长稳验收；Android UBT/APK/真机及 iOS 尚未验收。
 - **诊断与性能**：typed Host 的具体拒绝原因尚未统一透传到 VM 错误；纯执行 P50/P95 领先门禁未关闭，也未完成同口径 UnLua/AngelScript 矩阵。

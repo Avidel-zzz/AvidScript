@@ -31,8 +31,188 @@ internal static class CSharpGuestContinuationTests
         NestedAwaitCfgLowersBranchAndLoopResumes();
         SwitchAwaitCfgLowersDeterministicDispatch();
         ArrayForeachAwaitLowersDynamicState();
-        return 17;
+        AsyncFacadeInitializersLowerWithSubscriptions();
+        TamperedAsyncFacadeInitializersFailClosed();
+        return 19;
     }
+
+    private static void AsyncFacadeInitializersLowerWithSubscriptions()
+    {
+        SemanticDocument document = Analyze(
+            AsyncUiSource, "Scripts/AsyncUi.cs", AsyncUiFacade);
+        SemanticAsyncMethod method = document.AsyncMethods.Single();
+        SemanticAsyncStatement[] conversions = method.Segments.SelectMany(segment => segment.Statements)
+            .Where(statement => statement.TargetSymbolId is not null
+                && statement.Operation.Kind == "conversion").ToArray();
+        Assert(conversions.Length == 2 && conversions.All(statement =>
+                document.Symbols.Single(symbol => symbol.Id == statement.TargetSymbolId).TypeId
+                    == statement.Operation.TypeId),
+            "facade upcasts must retain the destination type on async initializers");
+        CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(document, SemanticHash);
+        GuestModule module = result.Module ?? throw new InvalidOperationException(string.Join(
+            " | ", result.Diagnostics.Select(diagnostic => diagnostic.Message)));
+        GuestFunction resume = module.Functions.Single(function =>
+            function.Id == $"function:synthetic:async_resume:{method.Segments[0].AwaitSite!.CallbackId}");
+        string ready = module.Globals.Single(global => global.Id.Contains(".Ready:", StringComparison.Ordinal)).Id;
+        Assert(result.Succeeded && resume.Blocks.SelectMany(block => block.Instructions)
+                .Any(instruction => instruction.Op == "global_store" && instruction.TargetId == ready),
+            "async resume must store the combined subscription validity into static Ready");
+        Assert(module.Imports.Any(import => import.Name == "event_subscribe" && import.ReturnTypeId == "type:int64")
+            && module.Imports.Any(import => import.Name == "event_unsubscribe")
+            && module.Imports.Any(import => import.Name == "continuation_delay")
+            && module.Exports.Any(export => export.Name == "avid_on_begin_play")
+            && module.Exports.Any(export => export.Name == "avid_on_end_play")
+            && module.Exports.Any(export => export.Name == "avid_on_delegate_0123456789abcdef")
+            && GuestModuleValidator.Validate(module).Succeeded
+            && WasmModuleCompiler.Compile(module).Succeeded,
+            "async BeginPlay, facade conversions, static subscriptions and OnClicked must compile together into real WASM");
+    }
+
+    private static void TamperedAsyncFacadeInitializersFailClosed()
+    {
+        SemanticDocument document = Analyze(
+            AsyncUiSource, "Scripts/AsyncUiTampered.cs", AsyncUiFacade);
+        SemanticAsyncMethod method = document.AsyncMethods.Single();
+        SemanticAsyncSegment segment = method.Segments[1];
+        SemanticAsyncStatement statement = segment.Statements.First(item => item.TargetSymbolId is not null
+            && item.Operation.Kind == "conversion");
+        SemanticOperation[] malformedInitializers =
+        {
+            statement.Operation.Children.Single(),
+            statement.Operation with { TypeId = "type:int32" },
+        };
+        foreach (SemanticOperation malformed in malformedInitializers)
+        {
+            SemanticDocument tampered = document with
+            {
+                AsyncMethods = new[]
+                {
+                    method with
+                    {
+                        Segments = method.Segments.Select(item => item.Ordinal != segment.Ordinal ? item : item with
+                        {
+                            Statements = item.Statements.Select(candidate => candidate != statement ? candidate
+                                : candidate with { Operation = malformed }).ToArray(),
+                        }).ToArray(),
+                    },
+                },
+            };
+            CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(tampered, SemanticHash);
+            Assert(!result.Succeeded && result.Module is null
+                && result.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCG1001"),
+                "missing conversion or mismatched initializer type must remain fail-closed");
+        }
+    }
+
+    private const string AsyncUiSource = """
+        using AvidScript;
+        using System.Runtime.InteropServices;
+        namespace Game;
+        public static class Script
+        {
+            [AvidTransient] private static AvidSubscription First;
+            [AvidTransient] private static AvidSubscription Second;
+            [AvidTransient] private static AvidSubscription Third;
+            [AvidTransient] private static AvidSubscription Fourth;
+            private static bool Ready;
+            private static int Score;
+
+            [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+            public static async void BeginPlay()
+            {
+                CancelSubscriptions();
+                await AvidContinuations.NextTickAsync();
+                UWBP_UiSave widget = new UWBP_UiSave(17, 1);
+                UUserWidget userWidget = widget;
+                UWidget baseWidget = userWidget;
+                if (!baseWidget.HasHandle) { return; }
+                First = AvidSubscriptions.SubscribeOnClicked(widget.CollectButton);
+                Second = AvidSubscriptions.SubscribeOnClicked(widget.SaveButton);
+                Third = AvidSubscriptions.SubscribeOnClicked(widget.LoadButton);
+                Fourth = AvidSubscriptions.SubscribeOnClicked(widget.ResetButton);
+                Ready = First.IsValid && Second.IsValid && Third.IsValid && Fourth.IsValid;
+                if (!Ready) { CancelSubscriptions(); return; }
+            }
+            [AvidEvent(AvidEvents.OnClicked)]
+            public static void OnClicked() { if (Ready) { Score += 1; } }
+            [UnmanagedCallersOnly(EntryPoint = "avid_on_end_play")]
+            public static void EndPlay() { CancelSubscriptions(); }
+            private static void CancelSubscriptions()
+            {
+                Ready = false;
+                First.Cancel(); Second.Cancel(); Third.Cancel(); Fourth.Cancel();
+            }
+        }
+        """;
+
+    private const string AsyncUiFacade = """
+
+        [AttributeUsage(AttributeTargets.Method)]
+        public sealed class AvidEventAttribute : Attribute
+        {
+            public AvidEventAttribute(string subscriptionId) { }
+        }
+        [AttributeUsage(AttributeTargets.Field)]
+        public sealed class AvidEventContractAttribute : Attribute
+        {
+            public AvidEventContractAttribute(string subscriptionId, string parameterTypes) { }
+        }
+        public static class AvidEvents
+        {
+            [AvidEventContract("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "")]
+            public const string OnClicked = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        }
+        public readonly struct UWidget
+        {
+            private readonly int Slot;
+            private readonly int Generation;
+            internal UWidget(int slot, int generation) { Slot = slot; Generation = generation; }
+            public bool HasHandle => Slot > 0 && Generation > 0;
+        }
+        public readonly struct UUserWidget
+        {
+            private readonly int Slot;
+            private readonly int Generation;
+            internal UUserWidget(int slot, int generation) { Slot = slot; Generation = generation; }
+            public static implicit operator UWidget(UUserWidget value) => new(value.Slot, value.Generation);
+        }
+        public readonly struct UWBP_UiSave
+        {
+            private readonly int Slot;
+            private readonly int Generation;
+            public UWBP_UiSave(int slot, int generation) { Slot = slot; Generation = generation; }
+            public static implicit operator UUserWidget(UWBP_UiSave value) => new(value.Slot, value.Generation);
+            public UButton CollectButton => new(Slot + 1, Generation);
+            public UButton SaveButton => new(Slot + 2, Generation);
+            public UButton LoadButton => new(Slot + 3, Generation);
+            public UButton ResetButton => new(Slot + 4, Generation);
+        }
+        public readonly struct UButton
+        {
+            internal readonly int Slot;
+            internal readonly int Generation;
+            internal UButton(int slot, int generation) { Slot = slot; Generation = generation; }
+        }
+        public readonly struct AvidSubscription
+        {
+            private readonly long Token;
+            internal AvidSubscription(long token) { Token = token; }
+            public bool IsValid => Token > 0;
+            public bool Cancel() => UiNative.Unsubscribe(Token) != 0;
+        }
+        public static class AvidSubscriptions
+        {
+            public static AvidSubscription SubscribeOnClicked(UButton button)
+                => new(UiNative.Subscribe(button.Slot, button.Generation, 0));
+        }
+        internal static class UiNative
+        {
+            [DllImport("env", EntryPoint = "event_subscribe")]
+            internal static extern long Subscribe(int slot, int generation, int ordinal);
+            [DllImport("env", EntryPoint = "event_unsubscribe")]
+            internal static extern int Unsubscribe(long token);
+        }
+        """;
 
     private static void AsyncOutcomeGuardBranchesBeforeNextAwait()
     {
@@ -1383,7 +1563,7 @@ internal static class CSharpGuestContinuationTests
             "guest input validation should reject mismatched and schema 10 object payload metadata");
     }
 
-    private static SemanticDocument Analyze(string source, string sourceId)
+    private static SemanticDocument Analyze(string source, string sourceId, string additionalFacade = "")
     {
         FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
         SemanticDocument document = SemanticAnalyzer.Analyze(
@@ -1393,7 +1573,7 @@ internal static class CSharpGuestContinuationTests
             new[]
             {
                 new SemanticReferenceSource(
-                    ContinuationFacade,
+                    ContinuationFacade + additionalFacade,
                     "generated://AvidScript.Continuations.generated.cs",
                     true),
             });

@@ -858,7 +858,7 @@ internal static class SemanticAsyncControlFlowProjector
                 List<SemanticOperation> children = new(1);
                 if (variable.Initializer is not null)
                 {
-                    if (!TryProjectValue(variable.Initializer.Value, out SemanticOperation? value))
+                    if (!TryProjectValue(variable.Initializer, out SemanticOperation? value))
                     {
                         projected = null;
                         return false;
@@ -934,6 +934,10 @@ internal static class SemanticAsyncControlFlowProjector
                 return false;
             }
             IOperation? operation = semanticModel.GetOperation(syntax);
+            if (operation is IVariableInitializerOperation initializer)
+            {
+                operation = initializer.Value;
+            }
             if (operation is null || SemanticAsyncProjector.ContainsAsyncHelperOrTask(operation))
             {
                 diagnostics.Add(Error(

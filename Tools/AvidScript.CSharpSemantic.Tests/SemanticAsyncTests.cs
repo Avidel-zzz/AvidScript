@@ -21,7 +21,47 @@ internal static class SemanticAsyncTests
         CallbackRangesAndAwaitLimitsAreEnforced();
         ControlFlowSegmentLimitFailsClosed();
         GeneratedLatentProducerProjectsImportIdentity();
-        return 11;
+        LocalInitializersPreserveContextualConversions();
+        return 12;
+    }
+
+    private static void LocalInitializersPreserveContextualConversions()
+    {
+        string[] bodies =
+        {
+            "await AvidContinuations.NextTickAsync(); double value = GetValue(); Consume(value);",
+            "await AvidContinuations.NextTickAsync(); if (GetValue() > 0) { double value = GetValue(); Consume(value); }",
+            "for (double value = GetValue(); value < 3; value++) { await AvidContinuations.NextTickAsync(); Consume(value); }",
+        };
+        for (int index = 0; index < bodies.Length; ++index)
+        {
+            string source = $$"""
+                using AvidScript;
+                using System.Runtime.InteropServices;
+                namespace Game;
+                public static class Script
+                {
+                    [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                    public static async void BeginPlay() { {{bodies[index]}} }
+                    private static int GetValue() => 1;
+                    private static void Consume(double value) { }
+                }
+                """;
+            SemanticDocument document = Analyze(source, $"Scripts/AsyncInitializer{index}.cs");
+            Assert(document.Succeeded, "async initializer source must analyze successfully");
+            SemanticAsyncMethod method = document.AsyncMethods.Single();
+            SemanticOperation[] roots = method.Segments.SelectMany(segment => segment.Statements)
+                .Select(statement => statement.Operation).ToArray();
+            SemanticOperation initializer = index == 0
+                ? method.Segments.SelectMany(segment => segment.Statements)
+                    .Single(statement => statement.TargetSymbolId is not null).Operation
+                : roots.SelectMany(Enumerate).Single(operation => operation.Kind
+                    == SemanticAsyncMethod.LocalDeclarationOperationKind).Children.Single();
+            Assert(initializer.Kind == "conversion"
+                && initializer.TypeId == "type:float64"
+                && initializer.Children.Single().TypeId == "type:int32",
+                "CPS, structured flow, and CFG for declarations must retain the Roslyn int-to-double conversion");
+        }
     }
 
     private static void EarlyReturnGuardsProjectStableControlOperations()

@@ -372,7 +372,9 @@ internal static class SemanticAsyncProjector
             && local.Declaration.Variables[0] is { Initializer: not null } variable
             && semanticModel.GetDeclaredSymbol(variable) is ILocalSymbol localSymbol)
         {
-            operation = semanticModel.GetOperation(variable.Initializer!.Value);
+            // The initializer operation retains the assignment's implicit conversion.
+            operation = (semanticModel.GetOperation(variable.Initializer!)
+                as IVariableInitializerOperation)?.Value;
             targetSymbolId = SemanticSymbolProjector.GetSymbolId(localSymbol);
         }
         else

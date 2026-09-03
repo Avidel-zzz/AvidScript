@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Operations;
 using Microsoft.CodeAnalysis.Text;
 
 namespace AvidScript.CSharpSemantic;
@@ -280,7 +281,7 @@ internal static class SemanticAsyncStructuredStatementProjector
                 if (!TryProjectValue(
                     context,
                     semanticModel,
-                    variable.Initializer.Value,
+                    variable.Initializer,
                     typeRegistry,
                     diagnostics,
                     out SemanticOperation? value))
@@ -575,6 +576,10 @@ internal static class SemanticAsyncStructuredStatementProjector
         out SemanticOperation? projected)
     {
         IOperation? operation = semanticModel.GetOperation(syntax);
+        if (operation is IVariableInitializerOperation initializer)
+        {
+            operation = initializer.Value;
+        }
         if (operation is null || SemanticAsyncProjector.ContainsAsyncHelperOrTask(operation))
         {
             diagnostics.Add(Error(
