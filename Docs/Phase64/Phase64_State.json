@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "phase": {
+    "id": 64,
+    "goal": "交付可直接启动的 C# 游戏纵向切片、数据驱动 Runtime 挂载层，以及 Android arm64 构建与设备就绪 Gate",
+    "start_commit": "e036d0765a16fa177e73935905e160065a62eb96"
+  },
+  "declared_stage": "implementing",
+  "architecture": {
+    "path": "Docs/Phase64/P64.0_Production_Gameplay_Architecture.md",
+    "version": 1,
+    "sha256": "39a4e3e2a817f15170d3b6ddaf231ef9423b37415d13d357fb258808ee282749",
+    "revision_reason": "initial architecture freeze"
+  },
+  "documents": {
+    "plan": "Docs/Phase64/P64.0_Implementation_Plan.md",
+    "closeout": "Docs/Phase64/P64_Closeout.md"
+  },
+  "batches": [
+    {
+      "id": "P64.A",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    },
+    {
+      "id": "P64.B",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    },
+    {
+      "id": "P64.C",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    },
+    {
+      "id": "P64.D",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    }
+  ],
+  "debt": [],
+  "review": {
+    "completed": false,
+    "evidence": "",
+    "completed_at_utc": null
+  },
+  "budgets": {
+    "ubt": 3,
+    "automation": 2,
+    "full_gate": 2
+  },
+  "invocations": {
+    "ubt": 0,
+    "automation": 0,
+    "full_gate": 0
+  },
+  "freeze": {
+    "source_commit": "",
+    "source_tree": "",
+    "state_sha256": "",
+    "review_evidence": "",
+    "at_utc": null
+  },
+  "gate": {
+    "report_path": "",
+    "report_sha256": "",
+    "run_id": "",
+    "verified_commit": "",
+    "verified_tree": "",
+    "attestation_parent": "",
+    "attested_at_utc": null
+  },
+  "protected_dirty": [
+    {
+      "path": "Docs/AvidScript_Technical_Status.md",
+      "status": "??",
+      "worktree_sha256": "3025ef2e274d0373168eea28a25bef6bd1a86a19e887d76ee51c6804d51698c2",
+      "head_blob_sha256": ""
+    },
+    {
+      "path": "Docs/Phase42/P42.0_Reflection_Binding_Generator_Architecture.md",
+      "status": " M",
+      "worktree_sha256": "569cf61960108edd6a4865da796ddf465b2ab6e6cf440dc2ae280b84f94d6655",
+      "head_blob_sha256": "5881954e78c9759dafb336484adf7dcd9d064122599e9b93337c69067b08c1cf"
+    },
+    {
+      "path": "README.md",
+      "status": " M",
+      "worktree_sha256": "78de7c14fe9ab727aee8dccaac16675886382857bd6a4d63250d034f2389d916",
+      "head_blob_sha256": "6de9a31178eaf9a7706721a7b7d1a82ada5197c0b05f498510c70c4b02c476d3"
+    },
+    {
+      "path": "Source/AvidScriptRuntime/Public/AvidScriptWasmReloadTypes.h",
+      "status": " M",
+      "worktree_sha256": "384b6e093dc8568e666dc0335b575383e473ecf00448c1d5c461a852b38edfed",
+      "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
+    }
+  ],
+  "next_action": "batch-complete -Phase 64 -BatchId P64.A -Evidence <text>",
+  "revision": 1,
+  "updated_at_utc": "2026-09-03T17:14:27.5142027+00:00"
+}

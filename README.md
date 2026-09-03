@@ -10,7 +10,7 @@
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 and Android arm64 AOT" src="https://img.shields.io/badge/Platform-Win64%20%2B%20Android%20arm64%20AOT-0078D4?logo=windows&logoColor=white">
-  <img alt="Phase 63 Complete" src="https://img.shields.io/badge/Status-Phase%2063%20Complete-26A269">
+  <img alt="Phase 64 Active" src="https://img.shields.io/badge/Status-Phase%2064%20Active-2B6CB0">
   <img alt="Automation Baseline 433/433" src="https://img.shields.io/badge/Baseline-433%2F433-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
