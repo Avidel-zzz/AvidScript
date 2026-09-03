@@ -13,7 +13,6 @@ public static class PickupRushScript
     private const int Playing = 1;
     private const int Won = 2;
     private const int Lost = 3;
-    private const int PackagedFaultProbeEvent = 62004;
     private const float RoundSeconds = 20.0f;
     private const float RespawnSeconds = 0.35f;
     private const float RotationDegreesPerSecond = 120.0f;
@@ -79,13 +78,6 @@ public static class PickupRushScript
     [UnmanagedCallersOnly(EntryPoint = "avid_on_event")]
     public static void OnEvent(int eventId, float value)
     {
-        if (eventId == PackagedFaultProbeEvent)
-        {
-            int divisor = eventId - PackagedFaultProbeEvent;
-            int unreachableValue = 1 / divisor;
-            UE.Self.SetActorScale3D(new FVector(unreachableValue, 0.0f, 0.0f));
-            return;
-        }
         if (eventId == CollectEventId)
         {
             Collect();

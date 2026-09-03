@@ -204,6 +204,7 @@ function New-PackageReceiptFixture {
         ProjectRoot = $ProjectRoot
         PluginRoot = $PluginRoot
         ReceiptPath = $ReceiptPath
+        CatalogPath = $CatalogPath
         Configuration = $Configuration
         PackageRoot = $PackageRoot
         WasmtimeDllPath = $WasmtimeDllPath
@@ -294,6 +295,47 @@ try {
         Assert-ContractCondition ([int]$Result.Summary.expected_dependency_count -eq 13) 'Unexpected exact dependency count.'
         Assert-ContractCondition ([int]$Result.Summary.ufs_dependency_count -eq 11) 'Unexpected UFS dependency count.'
         Assert-ContractCondition ([int]$Result.Summary.non_ufs_dependency_count -eq 2) 'Unexpected NonUFS dependency count.'
+    }
+
+    Invoke-ContractCase 'foreign-platform catalog module is ignored' {
+        $Fixture = New-PackageReceiptFixture -Name 'ForeignPlatformModule'
+        $Catalog = Get-Content -LiteralPath $Fixture.CatalogPath -Raw | ConvertFrom-Json -Depth 64
+        $ForeignModule = [pscustomobject][ordered]@{
+            module_id = 'android.only'
+            variants = @([pscustomobject][ordered]@{
+                platform = 'android'
+                architecture = 'arm64'
+                configuration = 'development'
+                backend = 'wasmtime'
+                format = 'wasmtime_serialized_v1'
+                package_id = 'd' * 64
+                descriptor_file = "android.only/$('d' * 64)/package.json"
+                descriptor_sha256 = 'e' * 64
+            })
+        }
+        $Catalog.modules = @($ForeignModule) + @($Catalog.modules)
+        Write-FixtureJson -Path $Fixture.CatalogPath -Value $Catalog
+        $Result = Invoke-ReceiptValidator -Fixture $Fixture
+        Assert-ContractCondition ($Result.ExitCode -eq 0) "Foreign-platform module was rejected: $($Result.Raw)"
+        Assert-ContractCondition ([int]$Result.Summary.expected_dependency_count -eq 13) 'Foreign-platform module changed staged dependency count.'
+    }
+
+    Invoke-ContractCase 'plugin startup scenario is required as UFS' {
+        $Fixture = New-PackageReceiptFixture -Name 'StartupScenario'
+        $ScenarioPath = Join-Path $Fixture.PluginRoot 'Content/AvidScript/Startup/scenarios.json'
+        Write-FixtureJson -Path $ScenarioPath -Value ([ordered]@{
+            schema_version = 1
+            scenarios = @()
+        })
+        $Receipt = Read-FixtureReceipt $Fixture
+        $Receipt.RuntimeDependencies = @($Receipt.RuntimeDependencies) + @([pscustomobject]@{
+            Path = '$(ProjectDir)/Plugins/AvidScript/Content/AvidScript/Startup/scenarios.json'
+            Type = 'UFS'
+        })
+        Write-FixtureReceipt -Fixture $Fixture -Receipt $Receipt
+        $Result = Invoke-ReceiptValidator -Fixture $Fixture
+        Assert-ContractCondition ($Result.ExitCode -eq 0) "Startup scenario dependency was rejected: $($Result.Raw)"
+        Assert-ContractCondition ([int]$Result.Summary.expected_dependency_count -eq 14) 'Startup scenario expected dependency count is invalid.'
     }
 
     Invoke-ContractCase 'missing staged dependency rejected' {
@@ -390,6 +432,8 @@ try {
         total = $Total
         coverage = @(
             'positive',
+            'foreign_platform_variant',
+            'startup_scenario_ufs',
             'missing_dependency',
             'extra_dependency',
             'ufs_type',

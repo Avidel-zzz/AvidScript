@@ -14,6 +14,8 @@ param(
     [Parameter(Mandatory = $true)][string]$ArchiveRoot,
     [ValidateRange(10, 600)]
     [int]$PackagedOracleTimeoutSeconds = 120,
+    [ValidateSet('Legacy', 'None')]
+    [string]$PackagedOracleMode = 'Legacy',
     [string]$EngineRoot = 'C:\UnrealEngine'
 )
 
@@ -929,6 +931,8 @@ function Invoke-AvidScriptBuildCookRun {
         [Parameter(Mandatory = $true)][string]$ArchiveRoot,
         [ValidateRange(10, 600)]
         [Parameter(Mandatory = $true)][int]$PackagedOracleTimeoutSeconds,
+        [ValidateSet('Legacy', 'None')]
+        [Parameter(Mandatory = $true)][string]$PackagedOracleMode,
         [Parameter(Mandatory = $true)][string]$EngineRoot
     )
 
@@ -977,13 +981,16 @@ function Invoke-AvidScriptBuildCookRun {
         -ReceiptPath $SelectedReceipt.Path `
         -Configuration $Configuration
 
-    $script:AvidScriptBuildCookRunStep = 'packaged_oracle'
-    $OracleResult = Invoke-AvidScriptBuildCookRunOracleStep `
-        -ProjectContext $ProjectContext `
-        -ArchiveRoot $ResolvedArchiveRoot `
-        -ModuleId $ModuleId `
-        -Configuration $Configuration `
-        -TimeoutSeconds $PackagedOracleTimeoutSeconds
+    $OracleResult = $null
+    if ($PackagedOracleMode -ceq 'Legacy') {
+        $script:AvidScriptBuildCookRunStep = 'packaged_oracle'
+        $OracleResult = Invoke-AvidScriptBuildCookRunOracleStep `
+            -ProjectContext $ProjectContext `
+            -ArchiveRoot $ResolvedArchiveRoot `
+            -ModuleId $ModuleId `
+            -Configuration $Configuration `
+            -TimeoutSeconds $PackagedOracleTimeoutSeconds
+    }
 
     return [pscustomobject][ordered]@{
         schema_version = 1
@@ -996,6 +1003,7 @@ function Invoke-AvidScriptBuildCookRun {
         uat_log = $UatResult.LogPath
         receipt_path = $SelectedReceipt.Path
         receipt_freshness = $SelectedReceipt.Freshness
+        packaged_oracle_mode = $PackagedOracleMode
         release = $ReleaseResult
         receipt_validation = $ReceiptResult
         packaged_oracle = $OracleResult
@@ -1020,6 +1028,7 @@ try {
         -Configuration $Configuration `
         -ArchiveRoot $ArchiveRoot `
         -PackagedOracleTimeoutSeconds $PackagedOracleTimeoutSeconds `
+        -PackagedOracleMode $PackagedOracleMode `
         -EngineRoot $EngineRoot
     [Console]::Out.WriteLine(($Summary | ConvertTo-Json -Depth 32 -Compress))
     exit 0
@@ -1038,6 +1047,7 @@ catch {
         category = $Category
         step = $script:AvidScriptBuildCookRunStep
         configuration = $Configuration
+        packaged_oracle_mode = $PackagedOracleMode
         archive_root = $ArchiveRoot
         uat_log = $script:AvidScriptBuildCookRunUatLog
         message = $_.Exception.Message

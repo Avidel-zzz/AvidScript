@@ -287,6 +287,35 @@ try {
         -ExpectedSha256 '' `
         -Owner 'plugin_descriptor'
 
+    foreach ($ScenarioRootDefinition in @(
+            [pscustomobject]@{
+                SourceRoot = Join-Path $ResolvedProjectRoot 'Content/AvidScript/Startup'
+                TargetRoot = '$(ProjectDir)/Content/AvidScript/Startup'
+            },
+            [pscustomobject]@{
+                SourceRoot = Join-Path $ResolvedPluginRoot 'Content/AvidScript/Startup'
+                TargetRoot = "$PluginTargetRoot/Content/AvidScript/Startup"
+            })) {
+        if (-not (Test-Path -LiteralPath $ScenarioRootDefinition.SourceRoot -PathType Container)) {
+            continue
+        }
+        foreach ($ScenarioPath in [System.IO.Directory]::GetFiles(
+                $ScenarioRootDefinition.SourceRoot,
+                '*.json',
+                [System.IO.SearchOption]::AllDirectories)) {
+            $ScenarioRelativePath = [System.IO.Path]::GetRelativePath(
+                $ScenarioRootDefinition.SourceRoot,
+                $ScenarioPath).Replace('\', '/')
+            Add-ExpectedDependency `
+                -Dependencies $ExpectedDependencies `
+                -TargetPath "$($ScenarioRootDefinition.TargetRoot)/$ScenarioRelativePath" `
+                -Type UFS `
+                -SourcePath $ScenarioPath `
+                -ExpectedSha256 '' `
+                -Owner 'startup_scenario'
+        }
+    }
+
     $ModulesRoot = Join-Path $ResolvedProjectRoot 'Content/AvidScript/Modules'
     $CatalogPath = Join-Path $ModulesRoot 'catalog.json'
     $Catalog = Read-StrictJsonObject -Path $CatalogPath -Label 'module catalog'
@@ -308,6 +337,7 @@ try {
 
     $CatalogIdentities = [System.Collections.Generic.HashSet[string]]::new(
         [System.StringComparer]::Ordinal)
+    $SelectedModuleCount = 0
     foreach ($Module in $CatalogModules) {
         $ModuleId = [string](Get-RequiredPropertyValue $Module 'module_id' 'module catalog entry')
         if ($ModuleId -cnotmatch '^[a-z][a-z0-9_.-]{0,63}$') {
@@ -353,11 +383,15 @@ try {
                     $Variant
                 }
             })
-        if ($SelectedVariants.Count -ne 1) {
+        if ($SelectedVariants.Count -gt 1) {
             Throw-ReceiptValidationFailure `
                 'PACKAGE_VARIANT_MISMATCH' `
-                "Module '$ModuleId' has no unique Win64/x86_64/$ExpectedConfiguration/Wasmtime variant."
+                "Module '$ModuleId' has multiple Win64/x86_64/$ExpectedConfiguration/Wasmtime variants."
         }
+        if ($SelectedVariants.Count -eq 0) {
+            continue
+        }
+        ++$SelectedModuleCount
         $SelectedVariant = $SelectedVariants[0]
         $PackageId = [string](Get-RequiredPropertyValue $SelectedVariant 'package_id' "module '$ModuleId' variant")
         $DescriptorFile = [string](Get-RequiredPropertyValue $SelectedVariant 'descriptor_file' "module '$ModuleId' variant")
@@ -449,6 +483,11 @@ try {
                 -ExpectedSha256 $DebugMapSha256 `
                 -Owner "module:${ModuleId}:debug_map"
         }
+    }
+    if ($SelectedModuleCount -eq 0) {
+        Throw-ReceiptValidationFailure `
+            'PACKAGE_VARIANT_MISMATCH' `
+            "Module catalog has no Win64/x86_64/$ExpectedConfiguration/Wasmtime variant."
     }
 
     $GeneratedRoot = Join-Path $ResolvedPluginRoot 'Content/AvidScriptGenerated'

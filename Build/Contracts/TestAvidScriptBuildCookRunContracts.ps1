@@ -137,6 +137,7 @@ try {
             'GeneratedTypeManifestPath',
             'ModuleId',
             'OutputRoot',
+            'PackagedOracleMode',
             'PackagedOracleTimeoutSeconds',
             'RuntimeBindingPackagePath',
             'SourcePath')
@@ -151,6 +152,7 @@ try {
                 "[ValidateSet('Development', 'Shipping')]",
                 "[string]`$Configuration = 'Development'",
                 "[string]`$EngineRoot = 'C:\UnrealEngine'",
+                "[string]`$PackagedOracleMode = 'Legacy'",
                 "[string]`$GeneratedTypeManifestPath = ''",
                 '[Parameter(Mandatory = $true)][string]$ArchiveRoot')) {
             Assert-BuildCookRunContract `

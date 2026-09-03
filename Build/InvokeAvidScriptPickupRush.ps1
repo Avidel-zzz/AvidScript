@@ -305,6 +305,7 @@ try {
             '-RuntimeBindingPackagePath', $BindingManifest,
             '-Configuration', $Configuration,
             '-ArchiveRoot', $ResolvedArchiveRoot,
+            '-PackagedOracleMode', 'None',
             '-PackagedOracleTimeoutSeconds', $TimeoutSeconds,
             '-EngineRoot', $EngineRoot)
         $BuildCookRun = Invoke-AvidScriptPickupRushJsonScript `
