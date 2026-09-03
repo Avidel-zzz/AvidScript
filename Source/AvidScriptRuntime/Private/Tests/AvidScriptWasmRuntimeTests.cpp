@@ -1373,9 +1373,9 @@ bool FAvidScriptWorldSubsystemLifecycleSmokeTest::RunTest(const FString& Paramet
 	if (Subsystem != nullptr)
 	{
 		const FAvidScriptWorldRuntimeStats StatsAfterTick = Subsystem->GetRuntimeStats();
-		TestTrue(TEXT("Subsystem loaded runtime on BeginPlay"), StatsAfterTick.bRuntimeLoaded);
-		TestTrue(TEXT("Subsystem called avid_on_begin_play"), StatsAfterTick.bBeginPlayCalled);
-		TestTrue(TEXT("Subsystem ticked avid_on_tick"), StatsAfterTick.TickCallCount > 0);
+		TestFalse(TEXT("Subsystem stays idle without an explicit scenario"), StatsAfterTick.bRuntimeLoaded);
+		TestFalse(TEXT("Subsystem records no implicit startup request"), StatsAfterTick.bStartupScenarioRequested);
+		TestFalse(TEXT("Subsystem does not retain an idle coordinator"), Subsystem->IsTickable());
 	}
 
 	TestTrue(TEXT("Smoke world routes EndPlay to world subsystems"), World->EndPlay(EEndPlayReason::Quit));
@@ -1383,7 +1383,7 @@ bool FAvidScriptWorldSubsystemLifecycleSmokeTest::RunTest(const FString& Paramet
 	if (Subsystem != nullptr)
 	{
 		const FAvidScriptWorldRuntimeStats StatsAfterEndPlay = Subsystem->GetRuntimeStats();
-		TestFalse(TEXT("Subsystem unloads runtime on EndPlay"), StatsAfterEndPlay.bRuntimeLoaded);
+		TestFalse(TEXT("Subsystem remains unloaded on EndPlay"), StatsAfterEndPlay.bRuntimeLoaded);
 		TestTrue(TEXT("Subsystem records EndPlay cleanup"), StatsAfterEndPlay.bEndPlayCalled);
 	}
 

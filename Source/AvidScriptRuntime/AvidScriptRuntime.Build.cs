@@ -35,6 +35,37 @@ public class AvidScriptRuntime : ModuleRules
 
 		AddEngineThirdPartyPrivateStaticDependencies(Target, "OpenSSL");
 		StagePublishedModules(Target);
+		StageStartupScenarios(Target);
+	}
+
+	private void StageStartupScenarios(ReadOnlyTargetRules Target)
+	{
+		if (Target.ProjectFile == null)
+		{
+			return;
+		}
+
+		string ProjectRoot = Path.GetDirectoryName(Target.ProjectFile.FullName)!;
+		string PluginRoot = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", ".."));
+		foreach (string ScenarioRoot in new[]
+		{
+			Path.Combine(ProjectRoot, "Content", "AvidScript", "Startup"),
+			Path.Combine(PluginRoot, "Content", "AvidScript", "Startup")
+		})
+		{
+			if (!Directory.Exists(ScenarioRoot))
+			{
+				continue;
+			}
+			foreach (string ScenarioPath in Directory.GetFiles(
+				ScenarioRoot,
+				"*.json",
+				SearchOption.AllDirectories).OrderBy(Path => Path, StringComparer.OrdinalIgnoreCase))
+			{
+				ExternalDependencies.Add(ScenarioPath);
+				RuntimeDependencies.Add(ScenarioPath, StagedFileType.UFS);
+			}
+		}
 	}
 
 	private void StagePublishedModules(ReadOnlyTargetRules Target)

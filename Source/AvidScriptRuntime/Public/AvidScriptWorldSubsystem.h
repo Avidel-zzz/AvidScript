@@ -7,6 +7,7 @@
 #include "AvidScriptWorldSubsystem.generated.h"
 
 class AActor;
+class FAvidScriptStartupCoordinator;
 class UAvidScriptComponent;
 
 struct FAvidScriptWorldRuntimeStats
@@ -14,7 +15,15 @@ struct FAvidScriptWorldRuntimeStats
 	bool bRuntimeLoaded = false;
 	bool bBeginPlayCalled = false;
 	bool bEndPlayCalled = false;
+	bool bStartupScenarioRequested = false;
+	bool bStartupScenarioActive = false;
 	int32 TickCallCount = 0;
+	int32 StartupBindingCount = 0;
+	int32 StartupComponentCount = 0;
+	int32 StartupOwnedActorCount = 0;
+	FString StartupScenarioId;
+	FString StartupDocumentPath;
+	FString LastErrorCategory;
 	FString LastErrorMessage;
 	FAvidScriptWasmRuntimeMetrics Metrics;
 };
@@ -25,6 +34,8 @@ class AVIDSCRIPTRUNTIME_API UAvidScriptWorldSubsystem : public UTickableWorldSub
 	GENERATED_BODY()
 
 public:
+	virtual ~UAvidScriptWorldSubsystem() override;
+
 	const FAvidScriptWorldRuntimeStats& GetRuntimeStats() const { return RuntimeStats; }
 
 	virtual bool DoesSupportWorldType(EWorldType::Type WorldType) const override;
@@ -41,14 +52,9 @@ private:
 	void TickPackagedOracle(float DeltaTime);
 	void StopPackagedOracle();
 	void CompletePackagedOracle(bool bSucceeded, const FString& FailureCategory);
-	void RecordFailure(const FAvidScriptWasmSmokeResult& Result);
-	void ReleaseRuntime(FAvidScriptWasmSmokeResult* OutUnloadResult = nullptr);
-	void FlushDeferredRuntimeRelease();
 
-	TUniquePtr<FAvidScriptRuntimeSession> RuntimeSession;
+	FAvidScriptStartupCoordinator* StartupCoordinator = nullptr;
 	FAvidScriptWorldRuntimeStats RuntimeStats;
-	bool bRuntimeReleaseDeferred = false;
-	bool bRuntimeReleaseInProgress = false;
 	bool bPackagedOracleActive = false;
 	bool bPackagedOracleCompleted = false;
 	bool bPackagedOracleRuntimeReady = false;

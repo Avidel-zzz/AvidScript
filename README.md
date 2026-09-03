@@ -30,7 +30,7 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 | 领域 | 已验证能力 |
 | --- | --- |
 | 游戏生命周期 | `BeginPlay`、`Tick`、`EndPlay`、Timer、Overlap、Gameplay Event |
-| 启动编排 | 严格版本化 Startup Scenario，支持 world 白名单、ModuleId 与 world/existing/spawn 三种目标合同；Runtime 自动挂载将在 P64.B 接入 |
+| 启动编排 | 显式 Startup Scenario 驱动 world/existing/spawn 三种目标挂载，支持 world 白名单、原子回滚、幂等激活与 teardown 回收 |
 | UE API | 由 Reflection/Profile 生成普通 `UFUNCTION`、`UPROPERTY`、UE Interface 与项目自定义 API |
 | UE 类型 | UObject capability、`FVector`、`FRotator`、`FTransform`、固定 `USTRUCT`、`FName`、`FString`、一维 `TArray<T>` |
 | C# 定义 UE 类型 | Actor、Component、World/GameInstance Subsystem、继承、override、`UPROPERTY`、`UFUNCTION` 与默认参数 |
@@ -54,6 +54,7 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 Profiler，以及 Win64 Development/Shipping 的确定性 Cook 发布闭环。Phase 63 已完成多平台
 catalog、Android arm64 受控静态依赖、真实 C# 交叉 AOT 发布，以及应用后台恢复、低内存回收和
 World teardown 的 Runtime 生命周期协调；Android UBT、打包和真机执行仍待后续验收。
+Phase 64 已接通严格 scenario 与 Runtime 自动挂载；未指定 scenario 的 World 默认保持空闲。
 
 集中 Gate 已通过 `.NET 284/284`、AvidScript Automation `433/433`、UE5.8 no-clean UBT、
 干净架构检查和发布/Cook/回执合同。详细证据见 [Phase 63 Gate 摘要](Docs/Phase63/P63_Gate_Summary.json)

@@ -1,33 +1,16 @@
 #include "AvidScriptWorldSubsystem.h"
 
+#include "Startup/AvidScriptStartupCoordinator.h"
+
 #include "Engine/World.h"
-#include "Misc/ScopeExit.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptWorldSubsystem, Log, All);
 
-namespace
+UAvidScriptWorldSubsystem::~UAvidScriptWorldSubsystem()
 {
-void CopyRuntimeResultToStats(const FAvidScriptWasmSmokeResult& Result, FAvidScriptWorldRuntimeStats& Stats)
-{
-	Stats.bBeginPlayCalled = Result.bBeginPlayCalled;
-	Stats.TickCallCount = Result.TickCallCount;
-	Stats.Metrics = Result.Metrics;
+	delete StartupCoordinator;
+	StartupCoordinator = nullptr;
 }
-
-void CopyWorldSessionLoadResult(
-	const FAvidScriptWasmReloadResult& ReloadResult,
-	FAvidScriptWasmSmokeResult& OutResult)
-{
-	OutResult = ReloadResult.RuntimeResult;
-	if (!ReloadResult.bSucceeded)
-	{
-		OutResult.ExportName = ReloadResult.ExportName;
-		OutResult.ErrorCategory = ReloadResult.ErrorCategory;
-		OutResult.NextAction = ReloadResult.NextAction;
-		OutResult.ErrorMessage = ReloadResult.ErrorMessage;
-	}
-}
-} // namespace
 
 bool UAvidScriptWorldSubsystem::DoesSupportWorldType(EWorldType::Type WorldType) const
 {
@@ -39,116 +22,85 @@ void UAvidScriptWorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	Super::OnWorldBeginPlay(InWorld);
 
 	RuntimeStats = FAvidScriptWorldRuntimeStats();
-	bRuntimeReleaseDeferred = false;
-	bRuntimeReleaseInProgress = false;
+	delete StartupCoordinator;
+	StartupCoordinator = nullptr;
 	if (StartPackagedOracle(InWorld))
 	{
 		return;
 	}
-	RuntimeSession = MakeUnique<FAvidScriptRuntimeSession>();
 
-	FAvidScriptWasmReloadResult ReloadResult;
-	if (!RuntimeSession->LoadEmbeddedSmoke(ReloadResult))
+	StartupCoordinator = new FAvidScriptStartupCoordinator();
+	FAvidScriptStartupRuntimeResult StartupResult;
+	if (!StartupCoordinator->ActivateFromProcess(InWorld, StartupResult))
 	{
-		FAvidScriptWasmSmokeResult Result;
-		CopyWorldSessionLoadResult(ReloadResult, Result);
-		RecordFailure(Result);
-		ReleaseRuntime();
+		RuntimeStats.bStartupScenarioRequested = StartupResult.bRequested;
+		RuntimeStats.StartupScenarioId = StartupResult.ScenarioId;
+		RuntimeStats.StartupDocumentPath = StartupResult.DocumentPath;
+		RuntimeStats.LastErrorCategory = StartupResult.ErrorCategory;
+		RuntimeStats.LastErrorMessage = StartupResult.ErrorMessage;
+		UE_LOG(LogAvidScriptWorldSubsystem, Error, TEXT("%s"), *StartupResult.ErrorMessage);
+		delete StartupCoordinator;
+		StartupCoordinator = nullptr;
 		return;
 	}
 
-	const FAvidScriptWasmSmokeResult& Result = ReloadResult.RuntimeResult;
-	const FAvidScriptRuntimeSessionSnapshot Snapshot = RuntimeSession->GetSnapshot();
-	RuntimeStats.bRuntimeLoaded = Snapshot.bHasActiveRuntime;
-	CopyRuntimeResultToStats(Result, RuntimeStats);
-	RuntimeStats.TickCallCount = Snapshot.TickCallCount;
+	RuntimeStats.bStartupScenarioRequested = StartupResult.bRequested;
+	RuntimeStats.bStartupScenarioActive = StartupResult.bActive;
+	RuntimeStats.StartupScenarioId = StartupResult.ScenarioId;
+	RuntimeStats.StartupDocumentPath = StartupResult.DocumentPath;
+	RuntimeStats.StartupBindingCount = StartupResult.BindingCount;
+	RuntimeStats.StartupComponentCount = StartupResult.ComponentCount;
+	RuntimeStats.StartupOwnedActorCount = StartupResult.OwnedActorCount;
+	RuntimeStats.bRuntimeLoaded = StartupResult.ComponentCount > 0
+		&& StartupResult.RuntimeLoadedCount == StartupResult.ComponentCount;
+	RuntimeStats.bBeginPlayCalled = StartupResult.ComponentCount > 0
+		&& StartupResult.BeginPlayCount == StartupResult.ComponentCount;
+
+	if (!StartupResult.bRequested)
+	{
+		delete StartupCoordinator;
+		StartupCoordinator = nullptr;
+		return;
+	}
 
 	UE_LOG(
 		LogAvidScriptWorldSubsystem,
 		Log,
-		TEXT("AvidScript packaged smoke start | world=%s | module=%s | runtime_init_ms=%.4f | load_ms=%.4f | instantiate_ms=%.4f | exec_env_ms=%.4f | begin_play_ms=%.4f"),
+		TEXT("AvidScript startup scenario active | world=%s | scenario=%s | bindings=%d | components=%d | owned_actors=%d"),
 		*InWorld.GetName(),
-		*Result.ModuleId,
-		Result.Metrics.RuntimeInitMs,
-		Result.Metrics.ModuleLoadMs,
-		Result.Metrics.ModuleInstantiateMs,
-		Result.Metrics.ExecEnvCreateMs,
-		Result.Metrics.BeginPlayCallMs);
+		*StartupResult.ScenarioId,
+		StartupResult.BindingCount,
+		StartupResult.ComponentCount,
+		StartupResult.OwnedActorCount);
 }
 
 void UAvidScriptWorldSubsystem::OnWorldEndPlay(UWorld& InWorld)
 {
 	StopPackagedOracle();
-
-	FAvidScriptWasmSmokeResult UnloadResult;
-	const bool bHadRuntime = RuntimeSession.IsValid() && RuntimeSession->GetSnapshot().bHasActiveRuntime;
-	ReleaseRuntime(&UnloadResult);
-	RuntimeStats.bEndPlayCalled = true;
-
-	if (bHadRuntime)
+	if (StartupCoordinator != nullptr)
 	{
-		UE_LOG(
-			LogAvidScriptWorldSubsystem,
-			Log,
-			TEXT("AvidScript packaged smoke stop | world=%s | module=%s | ticks=%d | unload_ms=%.4f"),
-			*InWorld.GetName(),
-			UnloadResult.ModuleId.IsEmpty() ? TEXT("<none>") : *UnloadResult.ModuleId,
-			UnloadResult.TickCallCount,
-			UnloadResult.Metrics.UnloadMs);
+		StartupCoordinator->Deactivate();
+		delete StartupCoordinator;
+		StartupCoordinator = nullptr;
 	}
+	RuntimeStats.bRuntimeLoaded = false;
+	RuntimeStats.bStartupScenarioActive = false;
+	RuntimeStats.bEndPlayCalled = true;
+	Super::OnWorldEndPlay(InWorld);
 }
 
 void UAvidScriptWorldSubsystem::Tick(float DeltaTime)
 {
-	ON_SCOPE_EXIT
-	{
-		FlushDeferredRuntimeRelease();
-	};
-
 	if (bPackagedOracleActive)
 	{
 		TickPackagedOracle(DeltaTime);
 	}
-
-	if (RuntimeSession.IsValid() &&
-		RuntimeSession->GetSnapshot().LifecycleState == EAvidScriptLifecycleState::Running)
-	{
-		FAvidScriptWasmSmokeResult Result;
-		const int32 PreviousTickCallCount = RuntimeStats.TickCallCount;
-		if (RuntimeSession->Tick(DeltaTime, Result))
-		{
-			const FAvidScriptRuntimeSessionSnapshot Snapshot = RuntimeSession->GetSnapshot();
-			RuntimeStats.bRuntimeLoaded = Snapshot.bHasActiveRuntime;
-			CopyRuntimeResultToStats(Result, RuntimeStats);
-			RuntimeStats.TickCallCount = Snapshot.TickCallCount;
-
-			if (PreviousTickCallCount == 0 && RuntimeStats.TickCallCount > 0)
-			{
-				UE_LOG(
-					LogAvidScriptWorldSubsystem,
-					Log,
-					TEXT("AvidScript packaged smoke tick | world=%s | module=%s | ticks=%d | tick_ms=%.4f"),
-					GetWorld() != nullptr ? *GetWorld()->GetName() : TEXT("<none>"),
-					*Result.ModuleId,
-					RuntimeStats.TickCallCount,
-					Result.Metrics.TickCallMs);
-			}
-		}
-		else
-		{
-			RecordFailure(Result);
-			ReleaseRuntime();
-		}
-	}
-
 	Super::Tick(DeltaTime);
 }
 
 bool UAvidScriptWorldSubsystem::IsTickable() const
 {
-	return bPackagedOracleActive ||
-		(RuntimeSession.IsValid() &&
-			RuntimeSession->GetSnapshot().LifecycleState == EAvidScriptLifecycleState::Running);
+	return bPackagedOracleActive;
 }
 
 TStatId UAvidScriptWorldSubsystem::GetStatId() const
@@ -158,87 +110,19 @@ TStatId UAvidScriptWorldSubsystem::GetStatId() const
 
 void UAvidScriptWorldSubsystem::Deinitialize()
 {
-	if (UWorld* World = GetWorld())
+	if (UWorld* World = GetWorld(); World != nullptr && !RuntimeStats.bEndPlayCalled)
 	{
 		OnWorldEndPlay(*World);
 	}
 	else
 	{
-		ReleaseRuntime();
-	}
-
-	Super::Deinitialize();
-}
-
-void UAvidScriptWorldSubsystem::RecordFailure(const FAvidScriptWasmSmokeResult& Result)
-{
-	const FAvidScriptRuntimeSessionSnapshot Snapshot = RuntimeSession.IsValid()
-		? RuntimeSession->GetSnapshot()
-		: FAvidScriptRuntimeSessionSnapshot();
-	RuntimeStats.LastErrorMessage = Result.ErrorMessage;
-	RuntimeStats.bRuntimeLoaded = Snapshot.bHasActiveRuntime;
-	CopyRuntimeResultToStats(Result, RuntimeStats);
-	RuntimeStats.TickCallCount = FMath::Max(Snapshot.TickCallCount, Result.TickCallCount);
-
-	UE_LOG(LogAvidScriptWorldSubsystem, Warning, TEXT("%s"), *Result.ErrorMessage);
-}
-
-void UAvidScriptWorldSubsystem::ReleaseRuntime(FAvidScriptWasmSmokeResult* OutUnloadResult)
-{
-	FAvidScriptWasmSmokeResult LocalUnloadResult;
-	FAvidScriptWasmSmokeResult& UnloadResult = OutUnloadResult != nullptr ? *OutUnloadResult : LocalUnloadResult;
-
-	if (bRuntimeReleaseInProgress
-		|| (RuntimeSession.IsValid() && RuntimeSession->IsOperationActive()))
-	{
-		bRuntimeReleaseDeferred = true;
-		UnloadResult = FAvidScriptWasmSmokeResult();
-		UnloadResult.ModuleId = RuntimeSession.IsValid() ? RuntimeSession->GetLiveModuleId() : FString();
-		UnloadResult.ExportName = TEXT("<unload>");
-		UnloadResult.ErrorCategory = TEXT("reentrant_operation");
-		UnloadResult.NextAction = TEXT("defer world Runtime release until the active script callback returns");
-		UnloadResult.ErrorMessage = TEXT("AvidScript world subsystem deferred Runtime release while a script operation was active.");
-		return;
-	}
-
-	bRuntimeReleaseInProgress = true;
-	ON_SCOPE_EXIT
-	{
-		bRuntimeReleaseInProgress = false;
-	};
-
-	if (RuntimeSession.IsValid())
-	{
-		if (!RuntimeSession->StopAndUnload(UnloadResult))
+		StopPackagedOracle();
+		if (StartupCoordinator != nullptr)
 		{
-			RecordFailure(UnloadResult);
-			if (RuntimeSession->IsOperationActive())
-			{
-				bRuntimeReleaseDeferred = true;
-				return;
-			}
+			StartupCoordinator->Deactivate();
+			delete StartupCoordinator;
+			StartupCoordinator = nullptr;
 		}
-		RuntimeSession.Reset();
 	}
-	else
-	{
-		UnloadResult = FAvidScriptWasmSmokeResult();
-	}
-
-	RuntimeStats.Metrics = UnloadResult.Metrics;
-	RuntimeStats.TickCallCount = FMath::Max(RuntimeStats.TickCallCount, UnloadResult.TickCallCount);
-	RuntimeStats.bRuntimeLoaded = false;
-}
-
-void UAvidScriptWorldSubsystem::FlushDeferredRuntimeRelease()
-{
-	if (!bRuntimeReleaseDeferred
-		|| bRuntimeReleaseInProgress
-		|| (RuntimeSession.IsValid() && RuntimeSession->IsOperationActive()))
-	{
-		return;
-	}
-
-	bRuntimeReleaseDeferred = false;
-	ReleaseRuntime();
+	Super::Deinitialize();
 }
