@@ -24,6 +24,35 @@ function Write-UiSaveFixtureJson {
     [IO.File]::WriteAllText($Path, ($Object | ConvertTo-Json -Depth 32), [Text.UTF8Encoding]::new($false))
 }
 
+$EdgesFaults = [ordered]@{
+    'missing edges' = { param($Report) $Report.Remove('edges') }
+    'snapshot phase' = { param($Report) $Report.runtime_snapshot_phase = 'after_teardown' }
+    'extra Guest event' = { param($Report) $Report.runtime.events = 10 }
+    'GC claim' = { param($Report) $Report.gc_performed = $true }
+    'missing action' = { param($Report) $Report.actions = @($Report.actions | Select-Object -SkipLast 1) }
+    'action order' = { param($Report) $First = $Report.actions[1]; $Report.actions[1] = $Report.actions[2]; $Report.actions[2] = $First }
+    'numeric score' = { param($Report) $Report.actions[1].observed_score = 1 }
+    'lost saved object' = { param($Report) $Report.actions[8].saved_object_preserved = $false }
+    'reset changed save' = { param($Report) $Report.actions[3].save_sha256_after = 'a' * 64 }
+    'forged save preservation' = { param($Report) $Report.actions[15].save_sha256_before = 'a' * 64; $Report.actions[15].save_sha256_after = 'a' * 64 }
+    'missing fixture' = { param($Report) $Report.edges.fixtures = @($Report.edges.fixtures | Select-Object -SkipLast 1) }
+    'extra fixture' = { param($Report) $Report.edges.fixtures += $Report.edges.fixtures[-1] }
+    'fixture order' = { param($Report) $First = $Report.edges.fixtures[1]; $Report.edges.fixtures[1] = $Report.edges.fixtures[2]; $Report.edges.fixtures[2] = $First }
+    'broken fixture chain' = { param($Report) $Report.edges.fixtures[1].before_sha256 = 'a' * 64 }
+    'empty hash' = { param($Report) $Report.edges.fixtures[3].sha256 = 'a' * 64; $Report.edges.fixtures[4].before_sha256 = 'a' * 64 }
+    'empty bytes' = { param($Report) $Report.edges.fixtures[3].bytes = 1 }
+    'string fixture bytes' = { param($Report) $Report.edges.fixtures[0].bytes = '10' }
+    'final fixture bytes' = { param($Report) ++$Report.edges.fixtures[4].bytes }
+    'missing teardown' = { param($Report) $Report.edges.Remove('teardown') }
+    'fake cleanup' = { param($Report) $Report.edges.teardown.owner_resolves = $true }
+    'wrong teardown kind' = { param($Report) $Report.edges.teardown.kind = 'runtime_unload' }
+    'string teardown count' = { param($Report) $Report.edges.teardown.bound_buttons = '0' }
+    'string boolean' = { param($Report) $Report.edges.save_lock_released = 'true' }
+    'invalid loads count' = { param($Report) $Report.edges.invalid_loads_preserved_count = 3 }
+    'late event entered Guest' = { param($Report) $Report.edges.late_event_events_after = 10 }
+    'final file tamper' = { param($Report, $SavePath) [IO.File]::AppendAllText($SavePath, 'changed') }
+}
+
 function Invoke-UiSaveFixture {
     param([string]$Mode, [string]$Fault = '')
     $Root = Join-Path ([IO.Path]::GetTempPath()) "AvidScriptUiSaveContract_$([Guid]::NewGuid().ToString('N'))"
@@ -64,12 +93,26 @@ function Invoke-UiSaveFixture {
                 if ($ProbeMode -in @('read', 'gc')) {
                     Assert-UiSaveContract (Test-Path -LiteralPath $SavePath) 'Read/GC did not reuse the write save.'
                     $InitialHash = Get-AvidScriptBindingSha256Hex $SavePath
-                } else { Assert-UiSaveContract (-not (Test-Path -LiteralPath $SavePath)) 'Write/missing inherited a save.' }
+                } else { Assert-UiSaveContract (-not (Test-Path -LiteralPath $SavePath)) 'Write/missing/edges inherited a save.' }
                 if ($ProbeMode -ceq 'write' -or ($ProbeMode -ceq 'missing' -and $Fault -ceq 'missing creates save')) {
                     [void][IO.Directory]::CreateDirectory((Split-Path -Parent $SavePath))
                     [IO.File]::WriteAllText($SavePath, 'fixture score=3')
                 }
                 if ($ProbeMode -in @('read', 'gc') -and $Fault -ceq "$ProbeMode mutates save") { [IO.File]::AppendAllText($SavePath, 'changed') }
+                if ($ProbeMode -ceq 'edges') {
+                    Assert-UiSaveContract (@(Get-ChildItem -LiteralPath $UserRoot -Force).Count -eq 0) 'Edges UserDir was not fresh.'
+                    [void][IO.Directory]::CreateDirectory((Split-Path -Parent $SavePath))
+                    [IO.File]::WriteAllText($SavePath, 'fixture script score=1')
+                    $ScriptSaveHash = Get-AvidScriptBindingSha256Hex $SavePath
+                    $Fixtures = @()
+                    foreach ($Kind in @('wrong_type', 'negative', 'overflow', 'empty', 'valid')) {
+                        $BeforeHash = Get-AvidScriptBindingSha256Hex $SavePath
+                        $Content = if ($Kind -ceq 'empty') { '' } else { "fixture $Kind score=1" }
+                        [IO.File]::WriteAllText($SavePath, $Content, [Text.UTF8Encoding]::new($false))
+                        $Fixtures += [ordered]@{ kind = $Kind; before_sha256 = $BeforeHash
+                            sha256 = (Get-AvidScriptBindingSha256Hex $SavePath); bytes = (Get-Item -LiteralPath $SavePath).Length }
+                    }
+                }
                 $Steps = switch ($ProbeMode) {
                     'write' { ,@(@('ready', 'None', '0', 'Ready'), @('collect', 'CollectButton', '1', 'Collected'),
                         @('collect', 'CollectButton', '2', 'Collected'), @('collect', 'CollectButton', '3', 'Collected'), @('save', 'SaveButton', '3', 'Saved')) }
@@ -77,6 +120,15 @@ function Invoke-UiSaveFixture {
                     'missing' { ,@(@('ready', 'None', '0', 'Ready'), @('load', 'LoadButton', '0', 'No saved score')) }
                     'gc' { ,@(@('ready', 'None', '0', 'Ready'), @('load', 'LoadButton', '3', 'Loaded'),
                         @('collect_garbage', 'None', '3', 'Loaded'), @('collect', 'CollectButton', '4', 'Collected')) }
+                    'edges' { ,@(@('ready', 'None', '0', 'Ready'), @('collect', 'CollectButton', '1', 'Collected'),
+                        @('save', 'SaveButton', '1', 'Saved'), @('reset', 'ResetButton', '0', 'Reset'),
+                        @('load', 'LoadButton', '1', 'Loaded'), @('fixture_wrong_type', 'None', '1', 'Loaded'),
+                        @('load', 'LoadButton', '1', 'Wrong save type'), @('fixture_negative', 'None', '1', 'Wrong save type'),
+                        @('load', 'LoadButton', '1', 'Invalid saved score'), @('fixture_overflow', 'None', '1', 'Invalid saved score'),
+                        @('load', 'LoadButton', '1', 'Invalid saved score'), @('fixture_empty', 'None', '1', 'Invalid saved score'),
+                        @('load', 'LoadButton', '1', 'Load failed'), @('fixture_valid', 'None', '1', 'Load failed'),
+                        @('lock_save', 'None', '1', 'Load failed'), @('save_failed', 'SaveButton', '1', 'Save failed'),
+                        @('teardown', 'None', '1', 'Save failed'), @('late_collect', 'CollectButton', '1', 'Save failed')) }
                 }
                 $Actions = @($Steps | ForEach-Object { [ordered]@{ action = $_[0]; button = $_[1]; expected_score = $_[2]
                     expected_status = $_[3]; observed_score = $_[2]; observed_status = $_[3]; passed = $true; synthetic_ue_event = ($_[1] -cne 'None') } })
@@ -93,6 +145,23 @@ function Invoke-UiSaveFixture {
                         runtime_loaded = $true; begin_play = $true; owner_registered = $true; owner_handle_valid = $true
                         error_message = ''; dropped_events = 0; events = 4 }
                     startup = @{ active = $true; scenario_id = 'ui_save_demo'; error_category = ''; error_message = '' } }
+                if ($ProbeMode -ceq 'edges') {
+                    $Report.runtime.events = 9
+                    $Report.runtime_snapshot_phase = 'before_teardown'
+                    $Report.edges = [ordered]@{ script_save_sha256 = $ScriptSaveHash; reset_preserved_save = $true
+                        invalid_loads_preserved_count = 4; save_failure_preserved_save = $true; save_lock_released = $true
+                        fixtures = $Fixtures; late_event_ignored = $true; late_event_events_before = 9; late_event_events_after = 9
+                        teardown = [ordered]@{ kind = 'component_end_play'; component_end_play = $true; guest_end_play = $true
+                            runtime_loaded = $false; owner_released = $true; owner_resolves = $false; session_present = $false
+                            widget_in_viewport = $false; saved_object_present = $false; bound_buttons = 0
+                            events_before = 9; events_after = 9; dropped_events = 0; error_message = '' } }
+                    foreach ($Index in @(6, 8, 10, 12)) { $Report.actions[$Index].saved_object_preserved = $true }
+                    $Report.actions[3].save_sha256_before = $ScriptSaveHash
+                    $Report.actions[3].save_sha256_after = $ScriptSaveHash
+                    $Report.actions[15].save_sha256_before = $Report.save_file_sha256
+                    $Report.actions[15].save_sha256_after = $Report.save_file_sha256
+                    if ($EdgesFaults.Contains($Fault)) { & $EdgesFaults[$Fault] $Report $SavePath }
+                }
                 switch ($Fault) {
                     'failed report exit zero' { $Report.result = 'avidscript_ui_save_probe_failed'; $Report.succeeded = $false; $Report.failure_category = 'missing avid_on_tick' }
                     'probe identity' { $Report.runtime.package_id = 'e' * 64 }
@@ -179,12 +248,14 @@ function Invoke-UiSaveFixture {
         try { $Result = Invoke-AvidScriptUiSaveDemo } catch { $Failure = $_.Exception.Message }
         $Aggregate = $null
         $Retained = $false
+        $RetainedEdges = $false
         if ($Mode -ceq 'Verify' -and $null -ne $Result) {
             $Aggregate = Get-Content -Raw -LiteralPath $Result.report_path | ConvertFrom-Json -Depth 32
             $Retained = Test-Path -LiteralPath (Join-Path $VerifyUserRoot 'write/Saved/SaveGames/AvidScript_UiSaveDemo_v1.sav')
+            $RetainedEdges = Test-Path -LiteralPath (Join-Path $VerifyUserRoot 'edges/Saved/SaveGames/AvidScript_UiSaveDemo_v1.sav')
         }
         return [pscustomobject]@{ result = $Result; failure = $Failure; calls = $Calls.ToArray(); plays = $PlayCalls.ToArray()
-            aggregate = $Aggregate; retained_save = $Retained }
+            aggregate = $Aggregate; retained_save = $Retained; retained_edges_save = $RetainedEdges }
     }
     finally {
         $FullRoot = [IO.Path]::GetFullPath($Root)
@@ -283,17 +354,17 @@ Invoke-UiSaveCase 'Startup retains PickupRush and adds one existing UI host' {
         $Binding.target.max_instances -eq 1 -and $Binding.target.class_path -ceq '/AvidScript/Demos/UiSave/BP_UiSaveHost.BP_UiSaveHost_C') 'UI scenario host is not uniquely constrained.'
 }
 
-Invoke-UiSaveCase 'Verify consumes four reports and reuses only the write UserDir' {
+Invoke-UiSaveCase 'Verify consumes five reports and reuses only the write UserDir' {
     $Fixture = Invoke-UiSaveFixture Verify
     Assert-UiSaveContract ($Fixture.failure -ceq '') $Fixture.failure
-    Assert-UiSaveContract ($Fixture.result.succeeded -and $Fixture.calls.Count -eq 4) $Fixture.result.message
+    Assert-UiSaveContract ($Fixture.result.succeeded -and $Fixture.calls.Count -eq 5) $Fixture.result.message
     Assert-UiSaveContract ($Fixture.result.result -ceq 'avidscript_ui_save_verify_passed' -and $Fixture.aggregate.succeeded -and
-        $Fixture.result.probes.Count -eq 4 -and $Fixture.retained_save) 'Verify did not retain machine-readable evidence/save.'
+        $Fixture.result.probes.Count -eq 5 -and $Fixture.retained_save -and $Fixture.retained_edges_save) 'Verify did not retain machine-readable evidence/save.'
     $Roots = @()
     $Reports = @()
     $Logs = @()
-    $Modes = @('write', 'read', 'missing', 'gc')
-    for ($Index = 0; $Index -lt 4; ++$Index) {
+    $Modes = @('write', 'read', 'missing', 'gc', 'edges')
+    for ($Index = 0; $Index -lt 5; ++$Index) {
         $Arguments = $Fixture.calls[$Index].arguments
         Assert-UiSaveContract ($Fixture.calls[$Index].timeout -eq [Math]::Min($TimeoutSeconds, 180)) 'Verify child timeout is not bounded.'
         foreach ($Flag in @('-game', '/AvidScript/Demos/UiSave/L_UiSave', '-ExecCmds=Module Load AvidScriptEditor',
@@ -307,7 +378,13 @@ Invoke-UiSaveCase 'Verify consumes four reports and reuses only the write UserDi
         $Logs += @($Arguments | Where-Object { $_ -like '-abslog=*' })
     }
     Assert-UiSaveContract ($Roots[0] -ceq $Roots[1] -and $Roots[0] -ceq $Roots[3] -and $Roots[2] -cne $Roots[0]) 'UserDir reuse contract is broken.'
-    Assert-UiSaveContract (@($Reports | Select-Object -Unique).Count -eq 4 -and @($Logs | Select-Object -Unique).Count -eq 4) 'Reports/logs are not distinct.'
+    Assert-UiSaveContract ($Roots[4] -cne $Roots[0] -and $Roots[4] -cne $Roots[2] -and $Roots[4] -match '[\\/]edges$') 'Edges did not use an independent fresh UserDir.'
+    Assert-UiSaveContract (@($Reports | Select-Object -Unique).Count -eq 5 -and @($Logs | Select-Object -Unique).Count -eq 5) 'Reports/logs are not distinct.'
+    $Edges = $Fixture.result.probes[4].evidence
+    Assert-UiSaveContract ($Edges.actions.Count -eq 18 -and $Edges.runtime.events -eq 9 -and
+        $Edges.actions[-1].synthetic_ue_event -and $Edges.edges.late_event_ignored) 'Edges action/late-event contract is incomplete.'
+    Assert-UiSaveContract ($Fixture.result.save_file_sha256 -ceq $Fixture.result.probes[0].evidence.save_file_sha256 -and
+        $Edges.save_file_sha256 -cne $Fixture.result.save_file_sha256 -and $Edges.initial_save_sha256 -ceq '') 'Edges altered or inherited the write/read/GC hash chain.'
     Assert-UiSaveContract ($Fixture.result.gameplay_acceptance -ceq 'synthetic_probe_only' -and
         -not $Fixture.result.physical_click_verified -and -not $Fixture.result.visual_verified -and -not $Fixture.result.long_run_verified) 'Synthetic input was overstated.'
 }
@@ -330,6 +407,16 @@ foreach ($Fault in @('failed report exit zero', 'missing probe report', 'probe i
         $ExpectedCalls = switch ($Fault) { 'duplicate pid' { 2 }; 'read mutates save' { 2 }; 'missing creates save' { 3 }
             'gc mutates save' { 4 }; 'gc not performed' { 4 }; default { 1 } }
         Assert-UiSaveContract ($Fixture.calls.Count -eq $ExpectedCalls) "Verify did not stop at the failing process: $($Fixture.result.message)"
+    }
+}
+
+foreach ($Fault in $EdgesFaults.Keys) {
+    Invoke-UiSaveCase "Verify rejects edges evidence: $Fault" {
+        $Fixture = Invoke-UiSaveFixture Verify $Fault
+        Assert-UiSaveContract ($Fixture.failure -ceq '' -and -not $Fixture.result.succeeded -and -not $Fixture.aggregate.succeeded -and
+            $Fixture.result.result -ceq 'avidscript_ui_save_verify_failed') 'Invalid edges evidence passed or lost its aggregate.'
+        Assert-UiSaveContract ($Fixture.calls.Count -eq 5 -and $Fixture.result.probes.Count -eq 4 -and $Fixture.retained_save) `
+            "Edges failure did not preserve the four completed reports/write save: $($Fixture.result.message)"
     }
 }
 

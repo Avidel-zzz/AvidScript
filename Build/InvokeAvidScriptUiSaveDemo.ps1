@@ -179,6 +179,15 @@ function Get-AvidScriptUiSaveProbeSteps {
         'missing' { $Steps += ,@('load', 'LoadButton', '0', 'No saved score') }
         'gc' { $Steps += @(@('load', 'LoadButton', '3', 'Loaded'), @('collect_garbage', 'None', '3', 'Loaded'),
             @('collect', 'CollectButton', '4', 'Collected')) }
+        'edges' { $Steps += @(@('collect', 'CollectButton', '1', 'Collected'), @('save', 'SaveButton', '1', 'Saved'),
+            @('reset', 'ResetButton', '0', 'Reset'), @('load', 'LoadButton', '1', 'Loaded'),
+            @('fixture_wrong_type', 'None', '1', 'Loaded'), @('load', 'LoadButton', '1', 'Wrong save type'),
+            @('fixture_negative', 'None', '1', 'Wrong save type'), @('load', 'LoadButton', '1', 'Invalid saved score'),
+            @('fixture_overflow', 'None', '1', 'Invalid saved score'), @('load', 'LoadButton', '1', 'Invalid saved score'),
+            @('fixture_empty', 'None', '1', 'Invalid saved score'), @('load', 'LoadButton', '1', 'Load failed'),
+            @('fixture_valid', 'None', '1', 'Load failed'), @('lock_save', 'None', '1', 'Load failed'),
+            @('save_failed', 'SaveButton', '1', 'Save failed'), @('teardown', 'None', '1', 'Save failed'),
+            @('late_collect', 'CollectButton', '1', 'Save failed')) }
         default { throw 'Unknown probe mode.' }
     }
     return ,$Steps
@@ -194,6 +203,95 @@ function Assert-AvidScriptUiSaveSaveDirectory {
                 throw 'Isolated SaveGames directory contains an unexpected entry.'
             }
             Assert-AvidScriptUiSaveSafePath $Entry.FullName
+        }
+    }
+}
+
+function Test-AvidScriptUiSaveEdgesHash {
+    param([object]$Value)
+    return $Value -is [string] -and $Value -cmatch '\A[0-9a-f]{64}\z'
+}
+
+function Assert-AvidScriptUiSaveEdgesReport {
+    param([object]$Report)
+    foreach ($Field in @('runtime_snapshot_phase', 'initial_save_sha256', 'save_file_sha256', 'score_text', 'status_text',
+        'result', 'failure_category', 'mode', 'process_mode', 'input_kind', 'expected_module_id', 'expected_package_id', 'map')) {
+        if ($Report.$Field -isnot [string]) { throw "Edges report field must be a string: $Field" }
+    }
+    if ($Report.runtime_snapshot_phase -cne 'before_teardown' -or $Report.initial_save_sha256 -cne '' -or
+        $Report.runtime -isnot [pscustomobject] -or $Report.startup -isnot [pscustomobject] -or
+        $Report.edges -isnot [pscustomobject]) { throw 'Edges snapshot or object evidence is invalid.' }
+    foreach ($Field in @('module_id', 'package_id', 'error_message')) {
+        if ($Report.runtime.$Field -isnot [string]) { throw "Edges runtime field must be a string: $Field" }
+    }
+    foreach ($Field in @('scenario_id', 'error_category', 'error_message')) {
+        if ($Report.startup.$Field -isnot [string]) { throw "Edges startup field must be a string: $Field" }
+    }
+    $Count = -1
+    if (-not (Try-GetAvidScriptBindingJsonInt32 $Report.runtime.events ([ref]$Count)) -or $Count -ne 9) {
+        throw 'Edges before-teardown runtime must contain exactly nine Guest events.'
+    }
+    $Edges = $Report.edges
+    foreach ($Field in @('reset_preserved_save', 'save_failure_preserved_save', 'save_lock_released', 'late_event_ignored')) {
+        if ($Edges.$Field -isnot [bool] -or -not $Edges.$Field) { throw "Edges assertion is missing or false: $Field" }
+    }
+    foreach ($Expected in @(@('invalid_loads_preserved_count', 4), @('late_event_events_before', 9), @('late_event_events_after', 9))) {
+        if (-not (Try-GetAvidScriptBindingJsonInt32 $Edges.($Expected[0]) ([ref]$Count)) -or $Count -ne $Expected[1]) {
+            throw "Edges count is invalid: $($Expected[0])"
+        }
+    }
+    if (-not (Test-AvidScriptUiSaveEdgesHash $Edges.script_save_sha256) -or
+        $Edges.fixtures -isnot [array] -or $Edges.fixtures.Count -ne 5) { throw 'Edges script save or fixture set is invalid.' }
+    $Hash = $Edges.script_save_sha256
+    $Kinds = @('wrong_type', 'negative', 'overflow', 'empty', 'valid')
+    $EmptyHash = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+    for ($Index = 0; $Index -lt $Kinds.Count; ++$Index) {
+        $Fixture = $Edges.fixtures[$Index]
+        $Bytes = -1
+        if ($Fixture -isnot [pscustomobject] -or $Fixture.kind -isnot [string] -or $Fixture.kind -cne $Kinds[$Index] -or
+            -not (Test-AvidScriptUiSaveEdgesHash $Fixture.before_sha256) -or $Fixture.before_sha256 -cne $Hash -or
+            -not (Test-AvidScriptUiSaveEdgesHash $Fixture.sha256) -or
+            -not (Try-GetAvidScriptBindingJsonInt32 $Fixture.bytes ([ref]$Bytes))) { throw "Edges fixture identity/hash chain is invalid: $Index" }
+        if ($Fixture.kind -ceq 'empty') {
+            if ($Bytes -ne 0 -or $Fixture.sha256 -cne $EmptyHash) { throw 'Edges empty fixture must have the canonical empty SHA-256 and zero bytes.' }
+        } elseif ($Bytes -le 0) { throw 'Edges nonempty fixture must contain bytes.' }
+        $Hash = $Fixture.sha256
+    }
+    if ($Hash -cne $Report.save_file_sha256 -or $Edges.fixtures[-1].bytes -ne $Report.save_file_bytes) {
+        throw 'Edges final valid fixture differs from the actual final save.'
+    }
+    foreach ($Action in $Report.actions) {
+        if ($Action -isnot [pscustomobject]) { throw 'Edges action must be an object.' }
+        foreach ($Field in @('action', 'button', 'expected_score', 'observed_score', 'expected_status', 'observed_status')) {
+            if ($Action.$Field -isnot [string]) { throw "Edges action field must be a string: $Field" }
+        }
+    }
+    foreach ($Index in @(6, 8, 10, 12)) {
+        if ($Report.actions[$Index].saved_object_preserved -isnot [bool] -or -not $Report.actions[$Index].saved_object_preserved) {
+            throw "Edges invalid load did not preserve the prior object: $Index"
+        }
+    }
+    foreach ($Index in @(3, 15)) {
+        $Action = $Report.actions[$Index]
+        $ExpectedHash = if ($Index -eq 3) { $Edges.script_save_sha256 } else { $Hash }
+        if (-not (Test-AvidScriptUiSaveEdgesHash $Action.save_sha256_before) -or
+            -not (Test-AvidScriptUiSaveEdgesHash $Action.save_sha256_after) -or
+            $Action.save_sha256_before -cne $ExpectedHash -or $Action.save_sha256_after -cne $ExpectedHash) {
+            throw "Edges reset/failed save hash preservation is invalid: $Index"
+        }
+    }
+    $Teardown = $Edges.teardown
+    if ($Teardown -isnot [pscustomobject] -or $Teardown.kind -isnot [string] -or $Teardown.kind -cne 'component_end_play' -or
+        $Teardown.error_message -isnot [string] -or $Teardown.error_message -cne '') { throw 'Edges teardown identity/error is invalid.' }
+    foreach ($Field in @('component_end_play', 'guest_end_play', 'owner_released')) {
+        if ($Teardown.$Field -isnot [bool] -or -not $Teardown.$Field) { throw "Edges teardown did not complete: $Field" }
+    }
+    foreach ($Field in @('runtime_loaded', 'owner_resolves', 'session_present', 'widget_in_viewport', 'saved_object_present')) {
+        if ($Teardown.$Field -isnot [bool] -or $Teardown.$Field) { throw "Edges teardown retained live state: $Field" }
+    }
+    foreach ($Expected in @(@('bound_buttons', 0), @('events_before', 9), @('events_after', 9), @('dropped_events', 0))) {
+        if (-not (Try-GetAvidScriptBindingJsonInt32 $Teardown.($Expected[0]) ([ref]$Count)) -or $Count -ne $Expected[1]) {
+            throw "Edges teardown count is invalid: $($Expected[0])"
         }
     }
 }
@@ -239,7 +337,7 @@ function Resolve-AvidScriptUiSaveProbeReport {
         $Step = $Steps[$Index]
         $Action = $Report.actions[$Index]
         $Synthetic = $Step[1] -cne 'None'
-        if ($Synthetic) { ++$RequiredEvents }
+        if ($Synthetic -and -not ($ProbeMode -ceq 'edges' -and $Step[0] -ceq 'late_collect')) { ++$RequiredEvents }
         if ($Action.passed -isnot [bool] -or -not $Action.passed -or $Action.action -cne $Step[0] -or $Action.button -cne $Step[1] -or
             $Action.expected_score -cne $Step[2] -or $Action.observed_score -cne $Step[2] -or
             $Action.expected_status -cne $Step[3] -or $Action.observed_status -cne $Step[3] -or
@@ -262,12 +360,13 @@ function Resolve-AvidScriptUiSaveProbeReport {
         if (-not $Report.save_file_exists -or -not (Test-Path -LiteralPath $SavePath -PathType Leaf) -or $Bytes -le 0 -or
             $Bytes -ne (Get-Item -LiteralPath $SavePath).Length -or -not (Test-AvidScriptBindingSha256 $Report.save_file_sha256) -or
             $Report.save_file_sha256 -cne (Get-AvidScriptBindingSha256Hex $SavePath)) { throw 'Probe save hash/size does not match the actual file.' }
-        if ($ProbeMode -ceq 'write') {
-            if ($Report.initial_save_sha256 -cne '') { throw 'Write probe did not start with an empty save.' }
+        if ($ProbeMode -in @('write', 'edges')) {
+            if ($Report.initial_save_sha256 -cne '') { throw 'Write/edges probe did not start with an empty save.' }
         } elseif ($Report.initial_save_sha256 -cne $WriteHash -or $Report.save_file_sha256 -cne $WriteHash) {
             throw 'Read/GC save hash differs from the preceding write process.'
         }
     }
+    if ($ProbeMode -ceq 'edges') { Assert-AvidScriptUiSaveEdgesReport $Report }
     return $Report
 }
 
@@ -283,17 +382,19 @@ function Invoke-AvidScriptUiSaveVerify {
         New-AvidScriptUiSaveDirectory $UserRoot
         $WriteRoot = Join-Path $UserRoot 'write'
         $MissingRoot = Join-Path $UserRoot 'missing'
+        $EdgesRoot = Join-Path $UserRoot 'edges'
         New-AvidScriptUiSaveDirectory $WriteRoot
         New-AvidScriptUiSaveDirectory $MissingRoot
+        New-AvidScriptUiSaveDirectory $EdgesRoot
         $ProcessIds = [Collections.Generic.HashSet[int]]::new()
         $WriteHash = ''
-        foreach ($ProbeMode in @('write', 'read', 'missing', 'gc')) {
-            $CurrentUserRoot = if ($ProbeMode -ceq 'missing') { $MissingRoot } else { $WriteRoot }
+        foreach ($ProbeMode in @('write', 'read', 'missing', 'gc', 'edges')) {
+            $CurrentUserRoot = switch ($ProbeMode) { 'missing' { $MissingRoot }; 'edges' { $EdgesRoot }; default { $WriteRoot } }
             Assert-AvidScriptUiSaveUserRoot $CurrentUserRoot $Context
             $SavePath = Join-Path $CurrentUserRoot 'Saved/SaveGames/AvidScript_UiSaveDemo_v1.sav'
             Assert-AvidScriptUiSaveSaveDirectory $SavePath
-            if ($ProbeMode -in @('write', 'missing')) {
-                if (Test-Path -LiteralPath $SavePath) { throw 'Write/missing save must not preexist.' }
+            if ($ProbeMode -in @('write', 'missing', 'edges')) {
+                if (Test-Path -LiteralPath $SavePath) { throw 'Write/missing/edges save must not preexist.' }
             } elseif ((Get-AvidScriptBindingSha256Hex $SavePath) -cne $WriteHash) { throw 'Saved bytes changed before read/GC.' }
             $ReportPath = Join-Path $RunRoot "$ProbeMode.json"
             $Log = Join-Path $RunRoot "$ProbeMode.editor.log"

@@ -29,9 +29,13 @@
 同批 Binding/UI 资产专项 18/18、UI runner 合同 53/53 通过；这些不扩充上面的历史全量基线。
 参见 [UI 与存档集成](P64.D_UI_Save_Integration.md)及[C# 使用说明](../../Samples/CSharp/UiSaveDemo/README.md)。
 
+后续[异常流程小节](P64.D_UI_Save_Edges.md)已通过五进程 31/31 动作和 runner 79/79：覆盖错误类型、
+负数/越界分数、空文件、Reset、写锁下保存失败、组件 EndPlay 与迟到事件。四次失败 Load 保留原对象，
+退出后 Session/授权和按钮订阅已释放。run 为 `62bc62bd35a040eda72de5725073644b`，不代替 World/长稳验收。
+
 ## 未完成
 
-P64.D 依架构 v6 继续补齐 UI 异常存档/输入/退出路径、热重载压力、长时间运行，以及 Android toolchain/UBT/APK。
+P64.D 依架构 v6 继续补齐 UI 真实输入/视觉、包内 UI、World 退出、热重载压力、长时间运行，以及 Android toolchain/UBT/APK。
 人工游玩和真实设备验收独立保留。P58 类型、iOS、发布工程及性能领先等总目标缺口不会随本阶段编号自动关闭。
 
 ## 流程修正

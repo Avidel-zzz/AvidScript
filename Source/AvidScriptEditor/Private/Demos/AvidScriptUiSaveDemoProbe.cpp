@@ -1,4 +1,6 @@
 #include "Demos/AvidScriptUiSaveDemoProbe.h"
+#include "Demos/AvidScriptUiSaveDemoEdges.h"
+#include "Demos/AvidScriptUiSaveDemoObservation.h"
 
 #include "AvidScriptComponent.h"
 #include "AvidScriptHash.h"
@@ -79,22 +81,6 @@ bool HasSafeParents(const FString& Path)
 	return true;
 }
 
-template<typename T>
-T* ReadObject(UObject* Owner, FName Name)
-{
-	if (!IsValid(Owner)) { return nullptr; }
-	FObjectPropertyBase* Property = FindFProperty<FObjectPropertyBase>(Owner->GetClass(), Name);
-	return Property ? Cast<T>(Property->GetObjectPropertyValue_InContainer(Owner)) : nullptr;
-}
-
-struct FStep
-{
-	FString Action;
-	FName Button;
-	FString Score;
-	FString Status;
-};
-
 class FProbe
 {
 public:
@@ -124,7 +110,8 @@ public:
 	TWeakObjectPtr<UAvidScriptComponent> Component;
 	TWeakObjectPtr<UUserWidget> Widget;
 	TWeakObjectPtr<UObject> SavedBeforeGc;
-	TArray<FStep> Steps;
+	TArray<FProbeStep> Steps;
+	TUniquePtr<FUiSaveEdges> Edges;
 	TArray<TSharedPtr<FJsonValue>> Actions;
 	TSharedRef<FJsonObject> Runtime = MakeShared<FJsonObject>();
 	TSharedRef<FJsonObject> Startup = MakeShared<FJsonObject>();
@@ -151,9 +138,10 @@ public:
 		FString Scenario;
 		FParse::Value(Command, TEXT("AvidScriptScenario="), Scenario);
 		if (Scenario != TEXT("ui_save_demo")) { InitializationError = TEXT("scenario_must_be_ui_save_demo"); return; }
-		if (Mode != TEXT("write") && Mode != TEXT("read") && Mode != TEXT("missing") && Mode != TEXT("gc"))
+		if (Mode != TEXT("write") && Mode != TEXT("read") && Mode != TEXT("missing")
+			&& Mode != TEXT("gc") && Mode != TEXT("edges"))
 		{
-			InitializationError = TEXT("mode_must_be_write_read_missing_or_gc"); return;
+			InitializationError = TEXT("mode_must_be_write_read_missing_gc_or_edges"); return;
 		}
 		if (!IsHexIdentity(ExpectedPackage)) { InitializationError = TEXT("expected_package_requires_64hex"); return; }
 		ExpectedPackage.ToLowerInline();
@@ -174,9 +162,9 @@ public:
 		SavePath = FullPath(UserRoot / TEXT("Saved/SaveGames") / SaveName);
 		if (!CheckSaveDirectory()) { InitializationError = TEXT("save_directory_is_not_isolated_or_contains_other_files"); return; }
 		const bool bExists = IFileManager::Get().FileExists(*SavePath);
-		if ((Mode == TEXT("write") || Mode == TEXT("missing")) && bExists)
+		if ((Mode == TEXT("write") || Mode == TEXT("missing") || Mode == TEXT("edges")) && bExists)
 		{
-			InitializationError = TEXT("write_and_missing_require_a_new_save_directory"); return;
+			InitializationError = TEXT("write_missing_and_edges_require_a_new_save_directory"); return;
 		}
 		if (Mode == TEXT("read") || Mode == TEXT("gc"))
 		{
@@ -188,7 +176,12 @@ public:
 			InitialSaveHash = FAvidScriptHash::Sha256Hex(Bytes);
 		}
 		Steps.Add({ TEXT("ready"), NAME_None, TEXT("0"), TEXT("Ready") });
-		if (Mode == TEXT("write"))
+		if (Mode == TEXT("edges"))
+		{
+			Edges = MakeUnique<FUiSaveEdges>(SavePath, [this]() { return CheckSaveDirectory(); });
+			FUiSaveEdges::AppendSteps(Steps);
+		}
+		else if (Mode == TEXT("write"))
 		{
 			for (int32 Score = 1; Score <= 3; ++Score)
 			{
@@ -227,6 +220,7 @@ public:
 	{
 		if (bFinished) { return; }
 		bFinished = true;
+		if (Edges) { Edges->Unlock(); }
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetNumberField(TEXT("schema_version"), 1);
 		Report->SetStringField(TEXT("result"), bSucceeded ? TEXT("avidscript_ui_save_probe_passed") : TEXT("avidscript_ui_save_probe_failed"));
@@ -256,6 +250,9 @@ public:
 		Report->SetNumberField(TEXT("timeout_seconds"), TimeoutSeconds);
 		Report->SetBoolField(TEXT("gc_performed"), bGcPerformed);
 		Report->SetObjectField(TEXT("runtime"), Runtime);
+		Report->SetStringField(TEXT("runtime_snapshot_phase"), Edges && Edges->IsStopped()
+			? TEXT("before_teardown") : TEXT("final_active"));
+		if (Edges) { Report->SetObjectField(TEXT("edges"), Edges->GetReport()); }
 		Report->SetObjectField(TEXT("startup"), Startup);
 		Report->SetArrayField(TEXT("actions"), Actions);
 		Report->SetBoolField(TEXT("save_file_exists"), !SavePath.IsEmpty() && IFileManager::Get().FileExists(*SavePath));
@@ -284,6 +281,15 @@ public:
 
 	bool RefreshRuntime()
 	{
+		if (Edges && Edges->IsStopped())
+		{
+			FString Error;
+			if (!Edges->RefreshStopped(Host.Get(), Component.Get(), Widget.Get(), Error))
+			{
+				Finish(false, Error); return false;
+			}
+			return ReadUiText();
+		}
 		if (!GEngine) { return false; }
 		UWorld* FoundWorld = nullptr;
 		for (const FWorldContext& Context : GEngine->GetWorldContexts())
@@ -359,7 +365,7 @@ public:
 		{
 			Finish(false, TEXT("runtime_owner_or_event_integrity_failed")); return false;
 		}
-		UUserWidget* RootWidget = ReadObject<UUserWidget>(FoundHost, TEXT("RootWidget"));
+		UUserWidget* RootWidget = ReadUiObject<UUserWidget>(FoundHost, TEXT("RootWidget"));
 		if (!RootWidget || !RootWidget->IsInViewport())
 		{
 			if (StepIndex > 0) { Finish(false, TEXT("root_widget_lost")); }
@@ -372,8 +378,13 @@ public:
 		Host = FoundHost;
 		Component = FoundComponent;
 		Widget = RootWidget;
-		UTextBlock* Score = ReadObject<UTextBlock>(RootWidget, TEXT("ScoreText"));
-		UTextBlock* Status = ReadObject<UTextBlock>(RootWidget, TEXT("StatusText"));
+		return ReadUiText();
+	}
+
+	bool ReadUiText()
+	{
+		UTextBlock* Score = ReadUiObject<UTextBlock>(Widget.Get(), TEXT("ScoreText"));
+		UTextBlock* Status = ReadUiObject<UTextBlock>(Widget.Get(), TEXT("StatusText"));
 		if (!Score || !Status) { Finish(false, TEXT("ui_text_contract_invalid")); return false; }
 		LastScore = Score->GetText().ToString();
 		LastStatus = Status->GetText().ToString();
@@ -391,7 +402,7 @@ public:
 		}
 		if (!RefreshRuntime()) { return !bFinished; }
 		if (!CheckSaveDirectory()) { Finish(false, TEXT("save_directory_safety_changed")); return false; }
-		const FStep& Step = Steps[StepIndex];
+		const FProbeStep& Step = Steps[StepIndex];
 		if (!bDispatched)
 		{
 			if (Step.Action == TEXT("ready")
@@ -412,9 +423,14 @@ public:
 			Actions.Add(MakeShared<FJsonValueObject>(Action));
 			StepStarted = FPlatformTime::Seconds();
 			bDispatched = true;
+			FString EdgeError;
+			if (Edges && !Edges->BeforeStep(Step, Host.Get(), Component.Get(), Widget.Get(), *Action, EdgeError))
+			{
+				Finish(false, EdgeError); return false;
+			}
 			if (Step.Action == TEXT("collect_garbage"))
 			{
-				SavedBeforeGc = ReadObject<UObject>(Host.Get(), TEXT("SavedObject"));
+				SavedBeforeGc = ReadUiObject<UObject>(Host.Get(), TEXT("SavedObject"));
 				if (!SavedBeforeGc.IsValid()) { Finish(false, TEXT("saved_object_not_strongly_held_before_gc")); return false; }
 				CollectGarbage(RF_NoFlags, true);
 				bGcPerformed = true;
@@ -425,8 +441,9 @@ public:
 				{
 					Finish(false, TEXT("refusing_to_overwrite_existing_save")); return false;
 				}
-				UButton* Button = ReadObject<UButton>(Widget.Get(), Step.Button);
-				if (!Button || !Button->GetIsEnabled() || !Button->OnClicked.IsBound())
+				UButton* Button = ReadUiObject<UButton>(Widget.Get(), Step.Button);
+				const bool bRequireSubscription = Step.Action != TEXT("late_collect");
+				if (!Button || !Button->GetIsEnabled() || Button->OnClicked.IsBound() != bRequireSubscription)
 				{
 					Finish(false, TEXT("button_or_csharp_subscription_unavailable")); return false;
 				}
@@ -434,7 +451,7 @@ public:
 			}
 			return true;
 		}
-		if (bGcPerformed && (!SavedBeforeGc.IsValid() || ReadObject<UObject>(Host.Get(), TEXT("SavedObject")) != SavedBeforeGc.Get()))
+		if (bGcPerformed && (!SavedBeforeGc.IsValid() || ReadUiObject<UObject>(Host.Get(), TEXT("SavedObject")) != SavedBeforeGc.Get()))
 		{
 			Finish(false, TEXT("saved_object_lost_after_gc")); return false;
 		}
@@ -446,6 +463,11 @@ public:
 		{
 			if (FPlatformTime::Seconds() - StepStarted > 3.0) { Finish(false, TEXT("csharp_ui_assertion_failed")); return false; }
 			return true;
+		}
+		FString EdgeError;
+		if (Edges && !Edges->AfterStep(Step, Host.Get(), Component.Get(), Widget.Get(), *Action, EdgeError))
+		{
+			Finish(false, EdgeError); return false;
 		}
 		Action->SetBoolField(TEXT("passed"), true);
 		++StepIndex;
@@ -462,9 +484,13 @@ public:
 			{
 				Finish(false, TEXT("save_file_missing_or_empty")); return false;
 			}
-			else if (Mode != TEXT("write") && FAvidScriptHash::Sha256Hex(Bytes) != InitialSaveHash)
+			else if ((Mode == TEXT("read") || Mode == TEXT("gc")) && FAvidScriptHash::Sha256Hex(Bytes) != InitialSaveHash)
 			{
 				Finish(false, TEXT("read_or_gc_modified_save")); return false;
+			}
+			else if (Edges && FAvidScriptHash::Sha256Hex(Bytes) != Edges->GetExpectedHash())
+			{
+				Finish(false, TEXT("edges_save_modified_outside_fixture")); return false;
 			}
 			FinalSaveBytes = Bytes.Num();
 			if (!Bytes.IsEmpty()) { FinalSaveHash = FAvidScriptHash::Sha256Hex(Bytes); }

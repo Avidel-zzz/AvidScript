@@ -13,6 +13,7 @@
 - `Binaries/`、`Intermediate/`、`Saved/`、`DerivedDataCache/`、工具缓存和机器日志不得进入 Git。
 - 第三方源码、许可证、集成元数据和有意维护的样例可跟踪；下载缓存、构建目录和本机设置不可跟踪。
 - 新文件先确认 owner 模块和依赖方向。禁止为了方便把 VM、Binding、Runtime、Editor 或工具链实现堆进同一模块。
+- 拆分或新增 UE cpp 时考虑 Unity Build 会合并翻译单元：共用 helper 保持单一定义，私有 helper 使用领域限定名；同一命名空间下的匿名命名空间不能防止跨 cpp 重定义。不通过关闭 Unity 或清理 target 绕过命名冲突。
 
 ## 工作树
 

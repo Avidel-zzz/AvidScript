@@ -2,7 +2,7 @@
 
 本样例用 C# 实现按钮事件、计分和 UE SaveGame 存取。模块为 `avidscript.ui_save_demo`，binding package 为
 `avidscript.sample.ui_save_demo`。已通过资产生成、C# 到 WASM/AOT 发布，以及 Editor 游戏进程的
-保存、重启读回、缺档和 GC 后交互验证；物理输入与视觉体验仍待验收。
+保存、重启读回、缺档、GC、存档异常与组件退出清理验证；物理输入与视觉体验仍待验收。
 
 ## 行为与生命周期
 
@@ -60,8 +60,9 @@ pwsh -NoProfile -File Build/InvokeAvidScriptUiSaveDemo.ps1 `
   -Mode Verify -ExpectedPackageId <发布返回的64位十六进制package_id>
 ```
 
-Verify 依次启动四个独立游戏进程：写入 3 分、重启读回 3 分、独立空目录缺档、GC 后继续计分到 4。
-读回与 GC 复用写入进程的隔离目录，并检查存档字节未变化。每个进程有唯一日志/JSON，单进程等待最多 180 秒；
+Verify 依次启动五个独立游戏进程：写入 3 分、重启读回 3 分、独立空目录缺档、GC 后继续计分到 4，
+以及另一个隔离目录中的错误类型/负数/越界/空文件、Reset、保存失败与组件退出清理。
+读回与 GC 复用写入目录，异常夹具不修改该存档。每个进程有唯一日志/JSON，单进程等待最多 180 秒；
 报告核对模块身份、UI 文本、UE 回调、存档哈希和失败字段，不只看退出码。
 
 结果与存档保留在报告所列目录，不自动删除。默认存档根位于系统临时目录；可用 `-VerifyUserRoot`
@@ -85,8 +86,10 @@ callback 内比较经验证的来源对象，callback 外返回 false，拒绝�
 
 ## 集成验收
 
-已通过四个独立 UE 进程的 13 项动作：Collect/文本更新、保存 3 分、重启读回 3 分、缺档提示、
-GC 后保持引用并继续计分到 4。读回和 GC 不修改存档字节，事件零丢弃。
+已通过五个独立 UE 进程的 **31/31** 动作：正常存取和 GC 交互，以及四种读取失败、Reset、
+写锁下的保存失败。失败 Load 保留原对象和分数；Reset 和保存失败不改存档字节。
+组件 EndPlay/注销后，四个按钮解绑、UI 移除、Session 与 Owner 授权释放；迟到 Collect 不再进入 Guest。
+报告中的 `runtime_snapshot_phase=before_teardown` 明确区分停止前 runtime 与最终 teardown 证据。
 
-错误存档类型、非法分数、保存失败、Reset、World teardown 和热重载后的订阅清理/恢复仍需补充验收；
-本样例尚未完成包内与长稳验证。合成事件不能替代真实输入和视觉验收。
+详见[异常流程验收](../../../Docs/Phase64/P64.D_UI_Save_Edges.md)。World 销毁、热重载后的清理/恢复、
+包内 UI 与长稳仍待验证；空文件分支不代表任意损坏文件都可安全解析。合成事件不替代真实输入和视觉验收。
