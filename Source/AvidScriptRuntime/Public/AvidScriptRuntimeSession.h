@@ -35,6 +35,11 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeSessionSnapshot
 	int32 TickCallCount = 0;
 	int32 PendingTimerCount = 0;
 	int32 PendingContinuationCount = 0;
+	int32 PreparedContinuationCount = 0;
+	int32 ActiveDelegateSubscriptionCount = 0;
+	int32 PreparedDelegateSubscriptionCount = 0;
+	int32 OwnedObjectEntryCount = 0;
+	int32 BorrowedHandleEntryCount = 0;
 	int32 TimerCallbackCount = 0;
 	int32 EventCallbackCount = 0;
 	int32 SuccessfulReloadCount = 0;

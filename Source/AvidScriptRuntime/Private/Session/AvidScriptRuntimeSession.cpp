@@ -1700,6 +1700,11 @@ FAvidScriptRuntimeSessionSnapshot FAvidScriptRuntimeSession::GetSnapshot() const
 	Snapshot.TickCallCount = GetLiveTickCallCount();
 	Snapshot.PendingTimerCount = GetLivePendingTimerCount();
 	Snapshot.PendingContinuationCount = GetLivePendingContinuationCount();
+	Snapshot.PreparedContinuationCount = Continuations->GetPreparedCount();
+	Snapshot.ActiveDelegateSubscriptionCount = DelegateSubscriptions->NumActive();
+	Snapshot.PreparedDelegateSubscriptionCount = DelegateSubscriptions->NumPrepared();
+	Snapshot.OwnedObjectEntryCount = ObjectOwnership->Num();
+	Snapshot.BorrowedHandleEntryCount = ObjectOwnership->GetBorrowedHandleCount();
 	Snapshot.TimerCallbackCount = GetLiveTimerCallbackCount();
 	Snapshot.EventCallbackCount = GetLiveEventCallbackCount();
 	Snapshot.SuccessfulReloadCount = SuccessfulReloadCount;

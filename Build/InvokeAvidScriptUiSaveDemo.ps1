@@ -1,11 +1,15 @@
 #requires -Version 7.0
 [CmdletBinding()]
 param(
-    [ValidateSet('Prepare', 'Publish', 'Play', 'Verify')][string]$Mode = 'Prepare',
+    [ValidateSet('Prepare', 'Publish', 'Play', 'Verify', 'VerifyReload')][string]$Mode = 'Prepare',
     [string]$ProfilePath = '',
     [string]$OutputRoot = '',
     [string]$ExpectedPackageId = '',
     [string]$VerifyUserRoot = '',
+    [string]$ReloadBaselineManifestPath = '',
+    [string]$ReloadChangedManifestPath = '',
+    [string]$ReloadRejectedManifestPath = '',
+    [ValidateRange(1, 100)][int]$ReloadCycles = 20,
     [string]$DotNetPath = (Join-Path $env:USERPROFILE '.dotnet/dotnet.exe'),
     [ValidateRange(10, 7200)][int]$TimeoutSeconds = 1200
 )
@@ -426,18 +430,299 @@ function Invoke-AvidScriptUiSaveVerify {
     return [pscustomobject]$Summary
 }
 
+function Get-AvidScriptUiSaveReloadArtifacts {
+    param([object]$Context)
+    $Saved = Join-Path (Split-Path -Parent $Context.project) 'Saved'
+    $Artifacts = [ordered]@{}
+    $Inputs = [ordered]@{ baseline = $ReloadBaselineManifestPath; changed = $ReloadChangedManifestPath; rejected = $ReloadRejectedManifestPath }
+    foreach ($Kind in $Inputs.Keys) {
+        $Path = $Inputs[$Kind]
+        Assert-AvidScriptUiSaveSafePath $Path
+        if (-not (Test-AvidScriptBindingPathContained -RootPath $Saved -CandidatePath $Path) -or
+            -not (Test-Path -LiteralPath $Path -PathType Leaf) -or (Get-Item -LiteralPath $Path).Length -gt 4MB) {
+            throw "Reload $Kind manifest must be a file below project Saved."
+        }
+        $Manifest = Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json -Depth 32
+        $Schema = 0
+        $Abi = 0
+        if (-not (Try-GetAvidScriptBindingJsonInt32 $Manifest.schema_version ([ref]$Schema)) -or $Schema -ne 1 -or
+            -not (Try-GetAvidScriptBindingJsonInt32 $Manifest.abi_version ([ref]$Abi)) -or $Abi -ne 1 -or
+            $Manifest.module_id -isnot [string] -or $Manifest.module_id -cne 'avidscript.ui_save_demo' -or
+            $Manifest.wasm.file -isnot [string] -or [string]::IsNullOrWhiteSpace($Manifest.wasm.file) -or
+            -not (Test-AvidScriptUiSaveEdgesHash $Manifest.wasm.sha256)) { throw "Reload $Kind manifest identity is invalid." }
+        $WasmReference = $Manifest.wasm.file.Replace('\', '/')
+        $WasmPath = Resolve-AvidScriptBindingPath (Split-Path -Parent $Path) $WasmReference
+        if (-not [IO.Path]::IsPathFullyQualified($WasmReference)) {
+            # Keep the same candidate order as FAvidScriptWasmReloadManifestLoader.
+            $ProjectCandidate = Resolve-AvidScriptBindingPath (Split-Path -Parent $Context.project) $WasmReference
+            $Candidates = if ($WasmReference -match '\A(?:Saved|Content|Plugins)/') { @($ProjectCandidate, $WasmPath) } else { @($WasmPath, $ProjectCandidate) }
+            $WasmPath = $Candidates[0]
+            foreach ($Candidate in $Candidates) {
+                if (Test-Path -LiteralPath $Candidate -PathType Leaf) { $WasmPath = $Candidate; break }
+            }
+        }
+        Assert-AvidScriptUiSaveSafePath $WasmPath
+        if (-not (Test-AvidScriptBindingPathContained -RootPath $Saved -CandidatePath $WasmPath) -or
+            -not (Test-Path -LiteralPath $WasmPath -PathType Leaf) -or (Get-Item -LiteralPath $WasmPath).Length -le 0 -or
+            (Get-AvidScriptBindingSha256Hex $WasmPath) -cne $Manifest.wasm.sha256) { throw "Reload $Kind WASM path/hash is invalid." }
+        $Artifacts[$Kind] = [pscustomobject][ordered]@{ manifest_path = [IO.Path]::GetFullPath($Path)
+            manifest_sha256 = Get-AvidScriptBindingSha256Hex $Path; wasm_path = $WasmPath
+            wasm_sha256 = $Manifest.wasm.sha256; module_id = $Manifest.module_id }
+    }
+    if (@($Artifacts.Values.wasm_sha256 | Sort-Object -Unique).Count -ne 3) { throw 'Reload requires three distinct WASM bodies.' }
+    return [pscustomobject]$Artifacts
+}
+
+function Assert-AvidScriptUiSaveReloadArtifactsUnchanged {
+    param([object]$Artifacts)
+    foreach ($Kind in @('baseline', 'changed', 'rejected')) {
+        $Artifact = $Artifacts.$Kind
+        foreach ($Pair in @(@('manifest_path', 'manifest_sha256'), @('wasm_path', 'wasm_sha256'))) {
+            Assert-AvidScriptUiSaveSafePath $Artifact.($Pair[0])
+            if ((Get-AvidScriptBindingSha256Hex $Artifact.($Pair[0])) -cne $Artifact.($Pair[1])) { throw "Pinned reload $Kind artifact changed." }
+        }
+    }
+}
+
+function Assert-AvidScriptUiSaveReloadEqual {
+    param([object]$Actual, [object]$Expected, [string]$Name)
+    if ($Expected -is [bool]) { $Valid = $Actual -is [bool] -and $Actual -eq $Expected }
+    elseif ($Expected -is [string]) { $Valid = $Actual -is [string] -and $Actual -ceq $Expected }
+    else {
+        $Number = -1
+        $Valid = (Try-GetAvidScriptBindingJsonInt32 $Actual ([ref]$Number)) -and $Number -eq $Expected
+    }
+    if (-not $Valid) { throw "Reload evidence mismatch: $Name" }
+}
+
+function Assert-AvidScriptUiSaveReloadResources {
+    param([object]$Resources, [object]$Baseline, [int]$Successes, [int]$Rejections)
+    foreach ($Field in @('pending_timers', 'pending_continuations', 'prepared_continuations', 'prepared_subscriptions')) {
+        Assert-AvidScriptUiSaveReloadEqual $Resources.$Field 0 $Field
+    }
+    foreach ($Field in @('active_subscriptions', 'bound_buttons')) { Assert-AvidScriptUiSaveReloadEqual $Resources.$Field 4 $Field }
+    foreach ($Field in @('session_present', 'session_preserved')) { Assert-AvidScriptUiSaveReloadEqual $Resources.$Field $true $Field }
+    foreach ($Field in @('owned_entries', 'borrowed_entries')) {
+        $Count = -1
+        $Limit = -1
+        if (-not (Try-GetAvidScriptBindingJsonInt32 $Resources.$Field ([ref]$Count)) -or $Count -lt 0 -or
+            -not (Try-GetAvidScriptBindingJsonInt32 $Baseline.$Field ([ref]$Limit)) -or $Limit -lt 0 -or $Count -gt $Limit) {
+            throw "Reload resource entries grew: $Field"
+        }
+    }
+    Assert-AvidScriptUiSaveReloadEqual $Resources.session_successful_reloads ($Baseline.session_successful_reloads + $Successes) 'session successes'
+    Assert-AvidScriptUiSaveReloadEqual $Resources.session_rejected_reloads ($Baseline.session_rejected_reloads + $Rejections) 'session rejections'
+}
+
+function Resolve-AvidScriptUiSaveReloadReport {
+    param([string]$ReportPath, [string]$UserRoot, [string]$PackageId, [object]$Artifacts, [int]$Cycles)
+    Assert-AvidScriptUiSaveSafePath $ReportPath
+    if (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf) -or (Get-Item -LiteralPath $ReportPath).Length -gt 4MB) {
+        throw 'Reload probe report is missing or oversized.'
+    }
+    $Report = Get-Content -Raw -LiteralPath $ReportPath | ConvertFrom-Json -Depth 32
+    $Expected = [ordered]@{ schema_version = 1; result = 'avidscript_ui_save_probe_passed'; succeeded = $true; failure_category = ''
+        mode = 'reload'; process_mode = 'editor_binary_game'; input_kind = 'synthetic_ue_button_onclicked_broadcast'
+        expected_module_id = 'avidscript.ui_save_demo'; expected_package_id = $PackageId; map = '/AvidScript/Demos/UiSave/L_UiSave'
+        physical_click_verified = $false; visual_verified = $false; long_run_verified = $false; gc_performed = $false
+        runtime_snapshot_phase = 'before_teardown'; save_file_exists = $false; save_file_bytes = 0; initial_save_sha256 = ''; save_file_sha256 = '' }
+    foreach ($Field in $Expected.Keys) { Assert-AvidScriptUiSaveReloadEqual $Report.$Field $Expected[$Field] $Field }
+    $ProcessId = 0
+    if (-not (Try-GetAvidScriptBindingJsonInt32 $Report.process_id ([ref]$ProcessId)) -or $ProcessId -le 0) { throw 'Reload process id is invalid.' }
+    foreach ($Elapsed in @($Report.elapsed_seconds, $Report.reload.elapsed_seconds)) {
+        if (($Elapsed -isnot [double] -and $Elapsed -isnot [long] -and $Elapsed -isnot [int] -and $Elapsed -isnot [decimal]) -or
+            -not [double]::IsFinite([double]$Elapsed) -or $Elapsed -lt 0 -or $Elapsed -gt (30 + 6 * $Cycles)) { throw 'Reload elapsed time is invalid.' }
+    }
+    Assert-AvidScriptUiSaveReloadEqual $Report.timeout_seconds (30 + 6 * $Cycles) 'timeout'
+    $SavePath = Join-Path $UserRoot 'Saved/SaveGames/AvidScript_UiSaveDemo_v1.sav'
+    if (-not (Test-AvidScriptUiSaveSamePath $Report.user_dir $UserRoot) -or
+        -not (Test-AvidScriptUiSaveSamePath $Report.save_path $SavePath)) { throw 'Reload report escaped its isolated paths.' }
+    Assert-AvidScriptUiSaveSaveDirectory $SavePath
+    if (Test-Path -LiteralPath $SavePath) { throw 'Reload probe unexpectedly created a save.' }
+    foreach ($Field in @('scenario_id', 'error_category', 'error_message')) {
+        Assert-AvidScriptUiSaveReloadEqual $Report.startup.$Field $(if ($Field -eq 'scenario_id') { 'ui_save_demo' } else { '' }) "startup $Field"
+    }
+    Assert-AvidScriptUiSaveReloadEqual $Report.startup.active $true 'startup active'
+    $Reload = $Report.reload
+    foreach ($Field in @('requested_cycles', 'completed_cycles', 'successful_reloads', 'rejected_reloads')) {
+        Assert-AvidScriptUiSaveReloadEqual $Reload.$Field $Cycles $Field
+    }
+    foreach ($Field in @('configuration_restored', 'artifacts_unchanged', 'late_event_ignored')) { Assert-AvidScriptUiSaveReloadEqual $Reload.$Field $true $Field }
+    foreach ($Field in @('instance_pointer_identity_measured', 'gc_memory_measured')) { Assert-AvidScriptUiSaveReloadEqual $Reload.$Field $false $Field }
+    Assert-AvidScriptUiSaveReloadEqual $Reload.object_count_kind 'registered_entries_not_live_gc_memory' 'object count scope'
+    Assert-AvidScriptUiSaveReloadEqual $Reload.identity_evidence 'manifest_and_wasm_hashes_component_stats_session_identity_reload_result_and_observed_behavior' 'identity scope'
+    Assert-AvidScriptUiSaveReloadEqual $Reload.startup_package_id $PackageId 'startup package'
+    Assert-AvidScriptUiSaveReloadEqual $Reload.startup_wasm_sha256 $Artifacts.baseline.wasm_sha256 'startup body'
+    foreach ($Kind in @('baseline', 'changed', 'rejected')) {
+        foreach ($Field in @('module_id', 'manifest_sha256', 'wasm_sha256')) {
+            Assert-AvidScriptUiSaveReloadEqual $Reload.artifacts.$Kind.$Field $Artifacts.$Kind.$Field "$Kind $Field"
+        }
+        foreach ($Field in @('manifest_path', 'wasm_path')) {
+            if (-not (Test-AvidScriptUiSaveSamePath $Reload.artifacts.$Kind.$Field $Artifacts.$Kind.$Field)) { throw "Reload artifact path mismatch: $Kind $Field" }
+        }
+    }
+    if ($Reload.cycles -isnot [array] -or $Reload.cycles.Count -ne $Cycles) { throw 'Reload cycle records are incomplete.' }
+    Assert-AvidScriptUiSaveReloadEqual $Reload.resources_baseline.session_successful_reloads 0 'initial session reloads'
+    Assert-AvidScriptUiSaveReloadEqual $Reload.resources_baseline.session_rejected_reloads 0 'initial session rejections'
+    Assert-AvidScriptUiSaveReloadResources $Reload.resources_baseline $Reload.resources_baseline 0 0
+    $Steps = @(@('ready', 'None', '0', 'Ready'), @('collect', 'CollectButton', '1', 'Collected'))
+    $Score = 1
+    $PreviousHash = $Artifacts.baseline.wasm_sha256
+    for ($Index = 0; $Index -lt $Cycles; ++$Index) {
+        $Cycle = $Reload.cycles[$Index]
+        $Target = if ($Index % 2 -eq 0) { 'changed' } else { 'baseline' }
+        $Delta = if ($Target -ceq 'changed') { 2 } else { 1 }
+        foreach ($Pair in @(@('cycle', ($Index + 1)), @('target', $Target), @('delta', $Delta), @('before_score', "$Score"),
+            @('ready_score', "$Score"), @('previous_wasm_sha256', $PreviousHash), @('active_wasm_sha256', $Artifacts.$Target.wasm_sha256),
+            @('passed', $true), @('ready_after_tick', $true), @('rejection_tick_verified', $true))) {
+            Assert-AvidScriptUiSaveReloadEqual $Cycle.($Pair[0]) $Pair[1] "cycle $Index $($Pair[0])"
+        }
+        foreach ($Field in @('returned', 'succeeded', 'applied', 'state_migrated', 'host_effects_attempted', 'host_effects_committed')) {
+            Assert-AvidScriptUiSaveReloadEqual $Cycle.reload.$Field $true "commit $Field"
+        }
+        $Slots = 0
+        if (-not (Try-GetAvidScriptBindingJsonInt32 $Cycle.reload.migrated_slots ([ref]$Slots)) -or $Slots -lt 1) { throw 'Reload did not migrate score state.' }
+        foreach ($Field in @('error_category', 'error_message')) { Assert-AvidScriptUiSaveReloadEqual $Cycle.reload.$Field '' "commit $Field" }
+        foreach ($Outcome in @($Cycle.reload, $Cycle.rejection)) {
+            foreach ($Field in @('previous_module_id', 'candidate_module_id', 'active_module_id')) {
+                Assert-AvidScriptUiSaveReloadEqual $Outcome.$Field 'avidscript.ui_save_demo' $Field
+            }
+        }
+        foreach ($Field in @('returned', 'succeeded', 'applied', 'host_effects_committed')) { Assert-AvidScriptUiSaveReloadEqual $Cycle.rejection.$Field $false "rejection $Field" }
+        Assert-AvidScriptUiSaveReloadEqual $Cycle.rejection.rollback_preserved_runtime $true 'rejection rollback'
+        Assert-AvidScriptUiSaveReloadEqual $Cycle.rejection.host_effects_attempted $true 'rejection prepare'
+        if ($Cycle.rejection.error_category -isnot [string] -or [string]::IsNullOrEmpty($Cycle.rejection.error_category) -or
+            $Cycle.rejection.error_message -isnot [string] -or -not $Cycle.rejection.error_message.Contains('binding_reload_effect_unsupported') -or
+            $Cycle.component_rejection_error -isnot [string] -or -not $Cycle.component_rejection_error.Contains('binding_reload_effect_unsupported')) {
+            throw 'Rejected candidate failed for the wrong reason, or lost its host error details.'
+        }
+        $DispatchFrame = 0
+        $CheckFrame = 0
+        if (-not (Try-GetAvidScriptBindingJsonInt32 $Cycle.rejection_dispatch_frame ([ref]$DispatchFrame)) -or $DispatchFrame -lt 0 -or
+            -not (Try-GetAvidScriptBindingJsonInt32 $Cycle.rejection_check_frame ([ref]$CheckFrame)) -or $CheckFrame -le ($DispatchFrame + 1)) {
+            throw 'Rejected candidate was not observed across a safe Tick.'
+        }
+        Assert-AvidScriptUiSaveReloadEqual $Cycle.events_before_rejection 1 'events before rejection'
+        Assert-AvidScriptUiSaveReloadEqual $Cycle.events_after_rejection 1 'events after rejection'
+        Assert-AvidScriptUiSaveReloadResources $Cycle.resources_ready $Reload.resources_baseline ($Index + 1) $Index
+        Assert-AvidScriptUiSaveReloadResources $Cycle.resources_after_rejection $Reload.resources_baseline ($Index + 1) ($Index + 1)
+        Assert-AvidScriptUiSaveReloadResources $Cycle.resources_after_collect $Reload.resources_baseline ($Index + 1) ($Index + 1)
+        $Steps += ,@("reload_$Target", 'None', "$Score", 'Ready')
+        $Score += $Delta
+        Assert-AvidScriptUiSaveReloadEqual $Cycle.collect_score "$Score" 'new body collect'
+        Assert-AvidScriptUiSaveReloadEqual $Cycle.rejection_score "$Score" 'rejection preserves score'
+        $Steps += @(@('collect', 'CollectButton', "$Score", 'Collected'), @('reject', 'None', "$Score", 'Collected'))
+        $Score += $Delta
+        Assert-AvidScriptUiSaveReloadEqual $Cycle.after_rejection_collect_score "$Score" 'old body collect after rejection'
+        $Steps += ,@('collect_after_reject', 'CollectButton', "$Score", 'Collected')
+        $PreviousHash = $Artifacts.$Target.wasm_sha256
+    }
+    $Steps += @(@('teardown', 'None', "$Score", 'Collected'), @('late_collect', 'CollectButton', "$Score", 'Collected'))
+    if ($Report.actions -isnot [array] -or $Report.actions.Count -ne $Steps.Count) { throw 'Reload actions are incomplete.' }
+    $PriorScore = '0'
+    $PriorStatus = 'Ready'
+    $PriorFrame = -1
+    for ($Index = 0; $Index -lt $Steps.Count; ++$Index) {
+        $Action = $Report.actions[$Index]
+        $Step = $Steps[$Index]
+        $Fields = [ordered]@{ action = $Step[0]; button = $Step[1]; expected_score = $Step[2]; observed_score = $Step[2]
+            expected_status = $Step[3]; observed_status = $Step[3]; before_score = $PriorScore; before_status = $PriorStatus
+            passed = $true; synthetic_ue_event = ($Step[1] -cne 'None') }
+        foreach ($Field in $Fields.Keys) { Assert-AvidScriptUiSaveReloadEqual $Action.$Field $Fields[$Field] "action $Index $Field" }
+        $StartFrame = 0
+        $EndFrame = 0
+        if (-not (Try-GetAvidScriptBindingJsonInt32 $Action.dispatch_frame ([ref]$StartFrame)) -or $StartFrame -le $PriorFrame -or
+            -not (Try-GetAvidScriptBindingJsonInt32 $Action.check_frame ([ref]$EndFrame)) -or $EndFrame -le ($StartFrame + 1)) { throw 'Reload action frame order is invalid.' }
+        if ($Step[0] -ceq 'reject') {
+            $Record = $Reload.cycles[[int](($Index - 4) / 4)]
+            Assert-AvidScriptUiSaveReloadEqual $Record.rejection_dispatch_frame $StartFrame 'rejection dispatch frame'
+            Assert-AvidScriptUiSaveReloadEqual $Record.rejection_check_frame $EndFrame 'rejection check frame'
+        }
+        $PriorScore = $Step[2]; $PriorStatus = $Step[3]; $PriorFrame = $EndFrame
+    }
+    Assert-AvidScriptUiSaveReloadEqual $Report.score_text "$Score" 'final score'
+    Assert-AvidScriptUiSaveReloadEqual $Report.status_text 'Collected' 'final status'
+    foreach ($Field in @('runtime_loaded', 'begin_play', 'owner_registered', 'owner_handle_valid')) { Assert-AvidScriptUiSaveReloadEqual $Report.runtime.$Field $true $Field }
+    Assert-AvidScriptUiSaveReloadEqual $Report.runtime.resolved_from_package $false 'loose runtime'
+    Assert-AvidScriptUiSaveReloadEqual $Report.runtime.package_id '' 'loose package must not claim startup package'
+    Assert-AvidScriptUiSaveReloadEqual $Report.runtime.module_id 'avidscript.ui_save_demo' 'live module'
+    Assert-AvidScriptUiSaveReloadEqual $Report.runtime.events 2 'final active Guest events'
+    Assert-AvidScriptUiSaveReloadEqual $Report.runtime.dropped_events 0 'dropped events'
+    Assert-AvidScriptUiSaveReloadEqual $Report.runtime.error_message $Reload.cycles[-1].component_rejection_error 'retained rejection error'
+    if (-not (Test-AvidScriptUiSaveSamePath $Report.runtime.script_manifest_path $Artifacts.$Target.manifest_path)) { throw 'Active loose runtime path is incorrect.' }
+    Assert-AvidScriptUiSaveReloadResources $Reload.resources_before_teardown $Reload.resources_baseline $Cycles $Cycles
+    $Teardown = $Reload.teardown
+    Assert-AvidScriptUiSaveReloadEqual $Teardown.kind 'component_end_play' 'teardown kind'
+    foreach ($Field in @('component_end_play', 'guest_end_play', 'owner_released', 'resource_owner_destroyed')) { Assert-AvidScriptUiSaveReloadEqual $Teardown.$Field $true "teardown $Field" }
+    foreach ($Field in @('runtime_loaded', 'owner_resolves', 'session_present', 'widget_in_viewport', 'saved_object_present', 'resource_counts_measured')) {
+        Assert-AvidScriptUiSaveReloadEqual $Teardown.$Field $false "teardown $Field"
+    }
+    foreach ($Field in @('bound_buttons', 'dropped_events')) { Assert-AvidScriptUiSaveReloadEqual $Teardown.$Field 0 "teardown $Field" }
+    foreach ($Field in @('events_before', 'events_after')) { Assert-AvidScriptUiSaveReloadEqual $Teardown.$Field 2 "teardown $Field" }
+    Assert-AvidScriptUiSaveReloadEqual $Teardown.error_message $Reload.cycles[-1].component_rejection_error 'teardown retained error'
+    Assert-AvidScriptUiSaveReloadEqual $Reload.late_event_events_before 2 'late event before'
+    Assert-AvidScriptUiSaveReloadEqual $Reload.late_event_events_after 2 'late event after'
+    return $Report
+}
+
+function Invoke-AvidScriptUiSaveVerifyReload {
+    param([object]$Context, [string]$RunRoot, [string]$RunId, [string]$UserRoot, [object]$Artifacts)
+    $Summary = [ordered]@{ schema_version = 1; result = 'avidscript_ui_save_reload_verify_failed'; status = 'failed'; succeeded = $false
+        mode = 'verifyreload'; run_id = $RunId; module_id = 'avidscript.ui_save_demo'; startup_package_id = $ExpectedPackageId.ToLowerInvariant()
+        evidence_root = $RunRoot; verify_user_root = $UserRoot; report_path = (Join-Path $RunRoot 'verify-reload.json')
+        probe_report_path = (Join-Path $RunRoot 'reload.json'); editor_log = (Join-Path $RunRoot 'reload.editor.log')
+        process_mode = 'editor_binary_game'; input_kind = 'synthetic_ue_button_onclicked_broadcast'; gameplay_acceptance = 'bounded_editor_reload_probe_only'
+        physical_click_verified = $false; visual_verified = $false; long_run_verified = $false; packaged_verified = $false
+        reload_cycles = $ReloadCycles; artifacts = $Artifacts; artifacts_unchanged = $false; message = '' }
+    try {
+        New-AvidScriptUiSaveDirectory $UserRoot
+        $ReloadRoot = Join-Path $UserRoot 'reload'
+        New-AvidScriptUiSaveDirectory $ReloadRoot
+        Assert-AvidScriptUiSaveUserRoot $ReloadRoot $Context
+        Assert-AvidScriptUiSaveReloadArtifactsUnchanged $Artifacts
+        Write-AvidScriptUiSaveNewJson (Join-Path $RunRoot 'reload-inputs.json') $Artifacts
+        $Arguments = @($Context.project, '/AvidScript/Demos/UiSave/L_UiSave', '-game', '-ExecCmds=Module Load AvidScriptEditor',
+            '-AvidScriptScenario=ui_save_demo', '-AvidScriptUiSaveProbe=reload', "-AvidScriptUiSaveReport=$($Summary.probe_report_path)",
+            "-AvidScriptUiSaveExpectedPackage=$($Summary.startup_package_id)", "-AvidScriptUiSaveReloadCycles=$ReloadCycles", "-UserDir=$ReloadRoot",
+            '-unattended', '-nullrhi', '-nosound', '-nop4', '-nosplash', '-stdout', '-FullStdOutLogOutput', "-abslog=$($Summary.editor_log)")
+        foreach ($Kind in @('baseline', 'changed', 'rejected')) {
+            $Arguments += @("-AvidScriptUiSaveReload$($Kind)Manifest=$($Artifacts.$Kind.manifest_path)",
+                "-AvidScriptUiSaveReload$($Kind)ManifestSha256=$($Artifacts.$Kind.manifest_sha256)",
+                "-AvidScriptUiSaveReload$($Kind)WasmSha256=$($Artifacts.$Kind.wasm_sha256)")
+        }
+        [void](Invoke-AvidScriptUiSaveTool -Executable $Context.editor -Arguments $Arguments `
+            -LogPath (Join-Path $RunRoot 'reload.process.log') -ProcessTimeoutSeconds ([Math]::Min($TimeoutSeconds, (60 + 6 * $ReloadCycles))))
+        $Summary.evidence = Resolve-AvidScriptUiSaveReloadReport $Summary.probe_report_path $ReloadRoot $Summary.startup_package_id $Artifacts $ReloadCycles
+        $Summary.probe_report_sha256 = Get-AvidScriptBindingSha256Hex $Summary.probe_report_path
+        $Summary.result = 'avidscript_ui_save_reload_verify_passed'
+        $Summary.status = 'verified'
+        $Summary.succeeded = $true
+    } catch { $Summary.message = $_.Exception.Message }
+    try {
+        Assert-AvidScriptUiSaveReloadArtifactsUnchanged $Artifacts
+        $Summary.artifacts_unchanged = $true
+    } catch {
+        $Summary.succeeded = $false; $Summary.status = 'failed'; $Summary.result = 'avidscript_ui_save_reload_verify_failed'
+        $Summary.message += " Pinned artifacts verification: $($_.Exception.Message)"
+    }
+    Write-AvidScriptUiSaveNewJson $Summary.report_path $Summary
+    return [pscustomobject]$Summary
+}
+
 function Invoke-AvidScriptUiSaveDemo {
-    if ($Mode -ieq 'Verify' -and $ExpectedPackageId -notmatch '\A[0-9a-fA-F]{64}\z') { throw 'Verify requires ExpectedPackageId (64hex).' }
+    if ($Mode -in @('Verify', 'VerifyReload') -and $ExpectedPackageId -notmatch '\A[0-9a-fA-F]{64}\z') { throw 'Verify requires ExpectedPackageId (64hex).' }
     $Context = Get-AvidScriptUiSaveContext
+    if ($Mode -ieq 'VerifyReload') { $ReloadArtifacts = Get-AvidScriptUiSaveReloadArtifacts $Context }
     $RunId = [Guid]::NewGuid().ToString('N')
     $RunRoot = Join-Path $Context.output_root $RunId
-    if ($Mode -ieq 'Verify') {
+    if ($Mode -in @('Verify', 'VerifyReload')) {
         $UserRoot = if ($VerifyUserRoot) { $VerifyUserRoot } else { Join-Path ([IO.Path]::GetTempPath()) "AvidScriptUiSaveVerify/$RunId" }
         Assert-AvidScriptUiSaveUserRoot $UserRoot $Context
         $UserRoot = [IO.Path]::GetFullPath($UserRoot)
     }
     New-AvidScriptUiSaveDirectory $RunRoot
     if ($Mode -ieq 'Verify') { return Invoke-AvidScriptUiSaveVerify $Context $RunRoot $RunId $UserRoot }
+    if ($Mode -ieq 'VerifyReload') { return Invoke-AvidScriptUiSaveVerifyReload $Context $RunRoot $RunId $UserRoot $ReloadArtifacts }
     $Log = Join-Path $RunRoot 'editor.log'
     $Result = [ordered]@{ schema_version = 1; result = 'avidscript_ui_save_demo_succeeded'; mode = $Mode.ToLowerInvariant()
         run_id = $RunId; module_id = 'avidscript.ui_save_demo'; evidence_root = $RunRoot
@@ -504,7 +789,7 @@ if ($MyInvocation.InvocationName -eq '.') { return }
 try {
     $Summary = Invoke-AvidScriptUiSaveDemo
     [Console]::Out.WriteLine(($Summary | ConvertTo-Json -Depth 32 -Compress))
-    if ($Mode -ieq 'Verify' -and -not $Summary.succeeded) { exit 1 }
+    if ($Mode -in @('Verify', 'VerifyReload') -and -not $Summary.succeeded) { exit 1 }
     exit 0
 }
 catch {

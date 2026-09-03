@@ -28,9 +28,11 @@ public static class UiSaveDemoScript
     private static AvidSubscription ResetSubscription;
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
-    public static void BeginPlay()
+    public static async void BeginPlay()
     {
         CancelSubscriptions();
+        // UI writes run after activation commits; rejected candidates never resume.
+        await AvidContinuations.NextTickAsync();
         UUiSaveWidget widget = GetWidget();
         if (!widget.HasHandle)
         {

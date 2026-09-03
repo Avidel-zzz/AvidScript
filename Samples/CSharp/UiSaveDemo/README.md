@@ -2,17 +2,22 @@
 
 本样例用 C# 实现按钮事件、计分和 UE SaveGame 存取。模块为 `avidscript.ui_save_demo`，binding package 为
 `avidscript.sample.ui_save_demo`。已通过资产生成、C# 到 WASM/AOT 发布，以及 Editor 游戏进程的
-保存、重启读回、缺档、GC、存档异常与组件退出清理验证；物理输入与视觉体验仍待验收。
+保存、重启读回、缺档、GC、存档异常、20 轮正文热重载与组件退出清理验证；物理输入与视觉体验仍待验收。
 
 ## 行为与生命周期
 
 - Collect 增加分数，上限 999999；Reset 仅清零当前分数，不删除存档。
 - Save 使用 UE `SaveGameToSlot`；Load 先检查存在性，再读取并验证类型与分数范围。
 - 缺档、读取失败、错误类型、无效分数或保存失败显示独立状态，不把失败解释为成功。
-- BeginPlay 订阅四个 Button；任意订阅失败取消整组。EndPlay 先禁用派发并取消订阅，再移除 UI，释放本 Session 创建的存档对象。
+- 异步 BeginPlay 先 `await AvidContinuations.NextTickAsync()`，候选提交后再挂载 UI、订阅四个 Button 并显示 Ready；任意订阅失败取消整组。EndPlay 先禁用派发并取消订阅，再移除 UI，释放本 Session 创建的存档对象。
 - 计分字段使用 `[AvidPersist]`，订阅和对象句柄使用 `[AvidTransient]`。热重载状态与磁盘存档是两条独立通路。
 - 存档 slot 固定为 `AvidScript_UiSaveDemo_v1`，UserIndex 为 0。只操作本样例的 slot，不枚举、清理或覆盖其他 slot。
 - 自动验收使用隔离的 UE `-UserDir`；跨进程读回复用同一个隔离目录，不操作用户实际样例存档。
+
+UI 初始化需要等待一个安全 Tick，而不是在重载准备期执行 `SetText` 等无法通用回滚的外部副作用。
+候选提交失败时其 continuation 被丢弃；提交后的初始化失败属于活跃实例故障。这里复用现有受控
+`async/await`，不添加 UI 专用 Host API。正文切换与资源观测进度见
+[UI 重载记录](../../../Docs/Phase64/P64.D_UI_Reload.md)，尚未完成的验收不能视为通过。
 
 ## 冻结资产接口
 
@@ -91,5 +96,9 @@ callback 内比较经验证的来源对象，callback 外返回 false，拒绝�
 组件 EndPlay/注销后，四个按钮解绑、UI 移除、Session 与 Owner 授权释放；迟到 Collect 不再进入 Guest。
 报告中的 `runtime_snapshot_phase=before_teardown` 明确区分停止前 runtime 与最终 teardown 证据。
 
-详见[异常流程验收](../../../Docs/Phase64/P64.D_UI_Save_Edges.md)。World 销毁、热重载后的清理/恢复、
+另已通过 **20 轮、84/84 动作**的 [UI 正文热重载](../../../Docs/Phase64/P64.D_UI_Reload.md)：交替切换
+Collect 加 1/加 2，分数迁移，非法候选拒绝后旧逻辑继续运行；订阅不累积，退出后迟到事件无效。
+实测后端为 Wasmtime 45 JIT，启动发布包不代表整个重载流程都以 AOT 执行。
+
+详见[异常流程验收](../../../Docs/Phase64/P64.D_UI_Save_Edges.md)。Save/Load 穿插重载、World 销毁、
 包内 UI 与长稳仍待验证；空文件分支不代表任意损坏文件都可安全解析。合成事件不替代真实输入和视觉验收。

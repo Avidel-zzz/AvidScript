@@ -8,9 +8,9 @@
   "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase64/P64.0_Production_Gameplay_Architecture.md",
-    "version": 6,
-    "sha256": "40a29cb76c93d0d0082f9296565c3ba44e51307cde67a6b7ded9fdc97e861637",
-    "revision_reason": "可选 Tick 集成发现 cell-count 检查不能验证 F32/void；冻结通用 ValidateExportSignature 后端接口，Runtime 与双后端按独立写集并行，既有要求与缺省规则保持不变"
+    "version": 7,
+    "sha256": "48d121773e1fe06cb0993649821a397aeebd6b77dbff6ee10aca5dbacf24b235",
+    "revision_reason": "保留原始 P64 目标；复用现有 NextTickAsync 的准备/提交生命周期分离 UI 初始化，冻结真实正文切换、失败候选回滚与有界重载证据合同，不增加 ABI 或 UMG 特判"
   },
   "documents": {
     "plan": "Docs/Phase64/P64.0_Implementation_Plan.md",
@@ -96,6 +96,19 @@
       "transfer_reason": ""
     },
     {
+      "id": "P64-D06-AsyncShortCircuit",
+      "severity": "Important",
+      "found_batch": "P64.D",
+      "scope": "C# async 方法中的条件逻辑运算短路语义",
+      "evidence": "异步 UI 初始化组合回归发现既有短路缺口；CSharpAsyncControlFlowLowerer 的值路径调用 CSharpOperationLowerer.LowerValue，LowerBinary 先连续求值两个子操作。隐式 initializer 转换修复未改变该行为。",
+      "deferral_reason": "本轮 UI Ready 的两侧是无副作用的 token/handle 有效性读取，不阻塞正文重载联调；一般游戏逻辑的条件 RHS 副作用仍需在本阶段关闭前集中修复。",
+      "remediation": "在异步控制流中用条件分支保留 &&/|| 的惰性求值，复用既有 IR CFG，覆盖嵌套表达式、静态字段赋值、RHS 副作用与跨 await 路径；不得将两侧求值后做 bitwise 运算当作等价。",
+      "status": "Fixing",
+      "resolution_evidence": "",
+      "target_phase": null,
+      "transfer_reason": ""
+    },
+    {
       "id": "P64-R01-Integration",
       "severity": "Critical",
       "found_batch": "P64.D",
@@ -161,6 +174,6 @@
     }
   ],
   "next_action": "debt-update -Phase 64 -DebtId P64-D03-OriginalGameplayAcceptance -Status Verified -Evidence <text>",
-  "revision": 22,
-  "updated_at_utc": "2026-09-03T21:48:09.3530446+00:00"
+  "revision": 25,
+  "updated_at_utc": "2026-09-03T22:44:33.6254575+00:00"
 }

@@ -1,5 +1,6 @@
 #include "Demos/AvidScriptUiSaveDemoProbe.h"
 #include "Demos/AvidScriptUiSaveDemoEdges.h"
+#include "Demos/AvidScriptUiSaveDemoReload.h"
 #include "Demos/AvidScriptUiSaveDemoObservation.h"
 
 #include "AvidScriptComponent.h"
@@ -115,6 +116,7 @@ public:
 	TArray<TSharedPtr<FJsonValue>> Actions;
 	TSharedRef<FJsonObject> Runtime = MakeShared<FJsonObject>();
 	TSharedRef<FJsonObject> Startup = MakeShared<FJsonObject>();
+	TUniquePtr<FUiSaveReload> Reload;
 
 	void Initialize()
 	{
@@ -139,9 +141,9 @@ public:
 		FParse::Value(Command, TEXT("AvidScriptScenario="), Scenario);
 		if (Scenario != TEXT("ui_save_demo")) { InitializationError = TEXT("scenario_must_be_ui_save_demo"); return; }
 		if (Mode != TEXT("write") && Mode != TEXT("read") && Mode != TEXT("missing")
-			&& Mode != TEXT("gc") && Mode != TEXT("edges"))
+			&& Mode != TEXT("gc") && Mode != TEXT("edges") && Mode != TEXT("reload"))
 		{
-			InitializationError = TEXT("mode_must_be_write_read_missing_gc_or_edges"); return;
+			InitializationError = TEXT("unknown_ui_save_probe_mode"); return;
 		}
 		if (!IsHexIdentity(ExpectedPackage)) { InitializationError = TEXT("expected_package_requires_64hex"); return; }
 		ExpectedPackage.ToLowerInline();
@@ -162,9 +164,9 @@ public:
 		SavePath = FullPath(UserRoot / TEXT("Saved/SaveGames") / SaveName);
 		if (!CheckSaveDirectory()) { InitializationError = TEXT("save_directory_is_not_isolated_or_contains_other_files"); return; }
 		const bool bExists = IFileManager::Get().FileExists(*SavePath);
-		if ((Mode == TEXT("write") || Mode == TEXT("missing") || Mode == TEXT("edges")) && bExists)
+		if (Mode != TEXT("read") && Mode != TEXT("gc") && bExists)
 		{
-			InitializationError = TEXT("write_missing_and_edges_require_a_new_save_directory"); return;
+			InitializationError = TEXT("probe_requires_a_new_save_directory"); return;
 		}
 		if (Mode == TEXT("read") || Mode == TEXT("gc"))
 		{
@@ -176,7 +178,13 @@ public:
 			InitialSaveHash = FAvidScriptHash::Sha256Hex(Bytes);
 		}
 		Steps.Add({ TEXT("ready"), NAME_None, TEXT("0"), TEXT("Ready") });
-		if (Mode == TEXT("edges"))
+		if (Mode == TEXT("reload"))
+		{
+			Reload = MakeUnique<FUiSaveReload>();
+			if (!Reload->Initialize(InitializationError)) { return; }
+			Reload->AppendSteps(Steps);
+		}
+		else if (Mode == TEXT("edges"))
 		{
 			Edges = MakeUnique<FUiSaveEdges>(SavePath, [this]() { return CheckSaveDirectory(); });
 			FUiSaveEdges::AppendSteps(Steps);
@@ -221,11 +229,21 @@ public:
 		if (bFinished) { return; }
 		bFinished = true;
 		if (Edges) { Edges->Unlock(); }
+		FString FinalFailure = Failure;
+		if (Reload)
+		{
+			FString ReloadError;
+			if (!Reload->Finish(ReloadError))
+			{
+				bSucceeded = false;
+				if (FinalFailure.IsEmpty()) { FinalFailure = ReloadError; }
+			}
+		}
 		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
 		Report->SetNumberField(TEXT("schema_version"), 1);
 		Report->SetStringField(TEXT("result"), bSucceeded ? TEXT("avidscript_ui_save_probe_passed") : TEXT("avidscript_ui_save_probe_failed"));
 		Report->SetBoolField(TEXT("succeeded"), bSucceeded);
-		Report->SetStringField(TEXT("failure_category"), Failure);
+		Report->SetStringField(TEXT("failure_category"), FinalFailure);
 		Report->SetStringField(TEXT("mode"), Mode);
 		Report->SetStringField(TEXT("process_mode"), IsRunningCommandlet() ? TEXT("commandlet")
 			: FParse::Param(FCommandLine::Get(), TEXT("game")) ? TEXT("editor_binary_game") : TEXT("editor"));
@@ -247,12 +265,13 @@ public:
 		Report->SetStringField(TEXT("started_utc"), StartedUtc);
 		Report->SetStringField(TEXT("finished_utc"), FDateTime::UtcNow().ToIso8601());
 		Report->SetNumberField(TEXT("elapsed_seconds"), FPlatformTime::Seconds() - Started);
-		Report->SetNumberField(TEXT("timeout_seconds"), TimeoutSeconds);
+		Report->SetNumberField(TEXT("timeout_seconds"), Reload ? Reload->GetTimeoutSeconds() : TimeoutSeconds);
 		Report->SetBoolField(TEXT("gc_performed"), bGcPerformed);
 		Report->SetObjectField(TEXT("runtime"), Runtime);
-		Report->SetStringField(TEXT("runtime_snapshot_phase"), Edges && Edges->IsStopped()
+		Report->SetStringField(TEXT("runtime_snapshot_phase"), (Edges && Edges->IsStopped()) || (Reload && Reload->IsStopped())
 			? TEXT("before_teardown") : TEXT("final_active"));
 		if (Edges) { Report->SetObjectField(TEXT("edges"), Edges->GetReport()); }
+		if (Reload) { Report->SetObjectField(TEXT("reload"), Reload->GetReport()); }
 		Report->SetObjectField(TEXT("startup"), Startup);
 		Report->SetArrayField(TEXT("actions"), Actions);
 		Report->SetBoolField(TEXT("save_file_exists"), !SavePath.IsEmpty() && IFileManager::Get().FileExists(*SavePath));
@@ -281,6 +300,12 @@ public:
 
 	bool RefreshRuntime()
 	{
+		if (Reload && Reload->IsStopped())
+		{
+			FString Error;
+			if (!Reload->RefreshStopped(Host.Get(), Component.Get(), Widget.Get(), Error)) { Finish(false, Error); return false; }
+			return ReadUiText();
+		}
 		if (Edges && Edges->IsStopped())
 		{
 			FString Error;
@@ -331,7 +356,7 @@ public:
 		UAvidScriptComponent* FoundComponent = nullptr;
 		for (UAvidScriptComponent* Candidate : Components)
 		{
-			if (Candidate->GetScriptModuleId() == FName(ModuleId))
+			if ((Reload && Component.IsValid()) ? Candidate == Component.Get() : Candidate->GetScriptModuleId() == FName(ModuleId))
 			{
 				if (FoundComponent) { Finish(false, TEXT("ambiguous_ui_module")); return false; }
 				FoundComponent = Candidate;
@@ -341,6 +366,7 @@ public:
 		const FAvidScriptComponentRuntimeStats& Stats = FoundComponent->GetRuntimeStats();
 		Runtime->SetStringField(TEXT("module_id"), Stats.ModuleId);
 		Runtime->SetStringField(TEXT("package_id"), Stats.PackageId);
+		Runtime->SetStringField(TEXT("script_manifest_path"), Stats.ScriptManifestPath);
 		Runtime->SetBoolField(TEXT("resolved_from_package"), Stats.bResolvedFromPackage);
 		Runtime->SetBoolField(TEXT("runtime_loaded"), Stats.bRuntimeLoaded);
 		Runtime->SetBoolField(TEXT("begin_play"), Stats.bBeginPlayCalled);
@@ -351,15 +377,20 @@ public:
 		Runtime->SetNumberField(TEXT("ticks"), Stats.TickCallCount);
 		Runtime->SetNumberField(TEXT("events"), Stats.EventCallbackCount);
 		Runtime->SetNumberField(TEXT("dropped_events"), Stats.DroppedGameplayEventCount);
-		if (!Stats.LastErrorMessage.IsEmpty()) { Finish(false, TEXT("runtime_activation_failed")); return false; }
+		if (!Reload && !Stats.LastErrorMessage.IsEmpty()) { Finish(false, TEXT("runtime_activation_failed")); return false; }
 		if (!Stats.bRuntimeLoaded || !Stats.bBeginPlayCalled)
 		{
 			if (StepIndex > 0) { Finish(false, TEXT("runtime_became_inactive")); }
 			return false;
 		}
-		if (Stats.ModuleId != ModuleId || Stats.PackageId != ExpectedPackage || !Stats.bResolvedFromPackage)
+		if ((!Reload || !Reload->IsLoose()) && (Stats.ModuleId != ModuleId || Stats.PackageId != ExpectedPackage || !Stats.bResolvedFromPackage))
 		{
 			Finish(false, TEXT("runtime_package_identity_mismatch")); return false;
+		}
+		if (Reload)
+		{
+			FString Error;
+			if (!Reload->ValidateRuntime(*FoundComponent, Error)) { Finish(false, Error); return false; }
 		}
 		if (!Stats.bOwnerRegistered || !Stats.OwnerHandle.IsValid() || Stats.DroppedGameplayEventCount != 0)
 		{
@@ -396,7 +427,7 @@ public:
 		static_cast<void>(DeltaTime);
 		if (bFinished) { return false; }
 		if (!InitializationError.IsEmpty()) { Finish(false, InitializationError); return false; }
-		if (FPlatformTime::Seconds() - Started >= TimeoutSeconds)
+		if (FPlatformTime::Seconds() - Started >= (Reload ? Reload->GetTimeoutSeconds() : TimeoutSeconds))
 		{
 			Finish(false, StepIndex == 0 ? TEXT("runtime_or_ready_timeout") : TEXT("probe_step_timeout")); return false;
 		}
@@ -428,6 +459,10 @@ public:
 			{
 				Finish(false, EdgeError); return false;
 			}
+			if (Reload && !Reload->BeforeStep(Step, Host.Get(), Component.Get(), Widget.Get(), *Action, EdgeError))
+			{
+				Finish(false, EdgeError); return false;
+			}
 			if (Step.Action == TEXT("collect_garbage"))
 			{
 				SavedBeforeGc = ReadUiObject<UObject>(Host.Get(), TEXT("SavedObject"));
@@ -451,6 +486,7 @@ public:
 			}
 			return true;
 		}
+		if (Reload && !Reload->CanObserveStep()) { return true; }
 		if (bGcPerformed && (!SavedBeforeGc.IsValid() || ReadUiObject<UObject>(Host.Get(), TEXT("SavedObject")) != SavedBeforeGc.Get()))
 		{
 			Finish(false, TEXT("saved_object_lost_after_gc")); return false;
@@ -469,6 +505,10 @@ public:
 		{
 			Finish(false, EdgeError); return false;
 		}
+		if (Reload && !Reload->AfterStep(Step, Host.Get(), Component.Get(), Widget.Get(), *Action, EdgeError))
+		{
+			Finish(false, EdgeError); return false;
+		}
 		Action->SetBoolField(TEXT("passed"), true);
 		++StepIndex;
 		bDispatched = false;
@@ -476,9 +516,9 @@ public:
 		{
 			TArray<uint8> Bytes;
 			const bool bExists = IFileManager::Get().FileExists(*SavePath);
-			if (Mode == TEXT("missing"))
+			if (Mode == TEXT("missing") || Mode == TEXT("reload"))
 			{
-				if (bExists) { Finish(false, TEXT("missing_probe_created_a_save")); return false; }
+				if (bExists) { Finish(false, TEXT("non_saving_probe_created_a_save")); return false; }
 			}
 			else if (!FFileHelper::LoadFileToArray(Bytes, *SavePath) || Bytes.IsEmpty())
 			{

@@ -35,7 +35,11 @@
 
 ## 未完成
 
-P64.D 依架构 v6 继续补齐 UI 真实输入/视觉、包内 UI、World 退出、热重载压力、长时间运行，以及 Android toolchain/UBT/APK。
+UI [正文重载小节](P64.D_UI_Reload.md)已通过 20 轮、84/84 动作、99/99 runner 合同和 11/11
+生命周期专项。复用 NextTickAsync 在提交后初始化 UI，分数迁移、失败候选回滚及退出隔离通过；
+实测 Wasmtime 45 JIT，62 个资源快照无相对基线增长。异步版本原有存档五进程复验也通过。
+
+P64.D 依架构 v7 继续补齐 UI 真实输入/视觉、包内 UI、Save/Load 穿插重载、World 退出、长时间运行，以及 Android toolchain/UBT/APK。
 人工游玩和真实设备验收独立保留。P58 类型、iOS、发布工程及性能领先等总目标缺口不会随本阶段编号自动关闭。
 
 ## 流程修正

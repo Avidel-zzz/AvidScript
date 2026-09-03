@@ -1505,6 +1505,7 @@ bool FAvidScriptRuntimeSessionObjectOwnershipTest::RunTest(const FString& Parame
 		EAvidScriptObjectFactoryKind::NewObject,
 		HandleResult));
 	TestTrue(TEXT("Ownership authority is observable"), Ownership->Owns(ObjectHandle, Object));
+	TestEqual(TEXT("Public snapshot counts owned entries"), Session.GetSnapshot().OwnedObjectEntryCount, 1);
 	FAvidScriptObjectRegistry OtherRegistry;
 	TestFalse(TEXT("Ownership rejects release through another registry"), Ownership->Release(
 		ObjectHandle,
@@ -1521,6 +1522,7 @@ bool FAvidScriptRuntimeSessionObjectOwnershipTest::RunTest(const FString& Parame
 		Registry,
 		HandleResult));
 	TestFalse(TEXT("Released object leaves ownership domain"), Ownership->Owns(ObjectHandle, WeakObject.Get()));
+	TestEqual(TEXT("Public snapshot reflects explicit release"), Session.GetSnapshot().OwnedObjectEntryCount, 0);
 	CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
 	TestFalse(TEXT("Released ordinary object is collectable"), WeakObject.IsValid());
 
@@ -1617,6 +1619,12 @@ bool FAvidScriptRuntimeSessionObjectOwnershipTest::RunTest(const FString& Parame
 
 	FAvidScriptWasmSmokeResult StopResult;
 	TestTrue(TEXT("Session stop cleans owned objects"), Session.StopAndUnload(StopResult));
+	const FAvidScriptRuntimeSessionSnapshot StoppedResources = Session.GetSnapshot();
+	TestEqual(TEXT("Stopped snapshot has no owned entries"), StoppedResources.OwnedObjectEntryCount, 0);
+	TestEqual(TEXT("Stopped snapshot has no borrowed entries"), StoppedResources.BorrowedHandleEntryCount, 0);
+	TestEqual(TEXT("Stopped snapshot has no active subscriptions"), StoppedResources.ActiveDelegateSubscriptionCount, 0);
+	TestEqual(TEXT("Stopped snapshot has no prepared subscriptions"), StoppedResources.PreparedDelegateSubscriptionCount, 0);
+	TestEqual(TEXT("Stopped snapshot has no prepared continuations"), StoppedResources.PreparedContinuationCount, 0);
 	TestTrue(TEXT("First owned dynamic component is destroyed"), FirstComponent->IsBeingDestroyed());
 	TestTrue(TEXT("Second owned dynamic component is destroyed"), SecondComponent->IsBeingDestroyed());
 	const TArray<int32>& DestructionOrder = UAvidScriptSessionOwnershipTestComponent::GetDestructionOrder();

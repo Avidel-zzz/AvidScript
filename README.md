@@ -40,11 +40,12 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 **近期已交付**
 
 - [UI/存档异常流程](Docs/Phase64/P64.D_UI_Save_Edges.md)：失败读档保留原对象，写锁下保存失败不改存档，退出后按钮不再进入脚本；五进程 **31/31** 动作通过。
+- [UI 正文热重载](Docs/Phase64/P64.D_UI_Reload.md)：**20 轮、84/84** 动作通过，保留分数、拒绝非法候选后继续交互，订阅不累积；实测 Wasmtime 45 JIT。
 - [UObject 授权](Docs/Phase64/P64.D_Reflection_Receiver.md)与[委托来源](Docs/Phase64/P64.D_Delegate_Source_Context.md)：可操作获授权的非 Self 对象，并区分多个按钮等对象的回调来源。
 - [事件型脚本](Docs/Phase64/P64.D_EventOnly_Runtime.md)：不写 Tick 也能接收事件、Timer 与异步恢复；省去无用的 Guest Tick 调用。
 - [async 初始化转换](Docs/Phase64/P64.D_Async_Initializer_Conversion.md)：修复异步 BeginPlay 中生成式 UObject facade 的隐式上转，真实样例已编译为 WASM。
 
-UI 热重载与 async 短路语义修复仍在进行中，不计入已完成能力。
+UI 的长稳、包内与真实输入验收，以及 async 短路语义修复仍在推进，不计入已完成能力。
 
 ## 框架能力
 
@@ -162,7 +163,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 
 - **UE 类型**：由 Profile 与 ABI/codec 决定生成范围，并非所有 UE API 自动可用。复合容器内强 UObject 引用仍拒绝，平面 `TArray<UObject*>` 可用；Set/Map key 受确定性编码限制，soft/weak 的脚本侧解析易用接口待补齐。
 - **C# 子集**：无完整 .NET Runtime、任意 awaiter 或异常系统；暂不支持 `event +=`、lambda/closure，使用显式 bind/subscribe 与 `ExecuteX/BroadcastX`。async 逻辑运算的短路语义仍待修正。
-- **重载与隔离**：方法体可热重载，但候选 BeginPlay 中无可回滚适配的反射写入会被拒绝；当前 UI 的 `UTextBlock.SetText` 属于这一缺口，不能宣称 UI 已支持热重载。反射结构变更需增量 UBT 并重启 Editor；WASM 隔离不是原生 DLL 进程沙箱。
+- **重载与隔离**：方法体可热重载；UI 样例通过 `NextTickAsync` 在候选提交后初始化。准备期无可回滚适配的反射写入仍被拒绝，不承诺回滚任意外部副作用。反射结构变更需增量 UBT 并重启 Editor；WASM 隔离不是原生 DLL 进程沙箱。
 - **玩法与平台**：UI/存档通过 Editor 合成事件验证，不等于真实输入/视觉、任意损坏存档、World 销毁、包内 UI 或热重载长稳验收；Android UBT/APK/真机及 iOS 尚未验收。
 - **诊断与性能**：typed Host 的具体拒绝原因尚未统一透传到 VM 错误；纯执行 P50/P95 领先门禁未关闭，也未完成同口径 UnLua/AngelScript 矩阵。
 
@@ -178,6 +179,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 | [完整技术基线](Docs/Phase64/P64_Closeout.md)，候选 `9e08cdc` | Automation **439/439**、.NET **284/284**；10 组 PowerShell 合同、干净候选架构检查和 no-clean Editor UBT 通过 |
 | [PickupRush](Samples/CSharp/PickupRush/README.md) | Editor / Win64 Development / Shipping 均为 **5/5** 事件与胜利状态；包回执 **21/21 / 19/19** |
 | [UI/存档异常流程](Docs/Phase64/P64.D_UI_Save_Edges.md) | **5/5** 独立进程、**31/31** 动作、**79/79** runner 合同；增量 Editor 构建通过 |
+| [UI 正文热重载](Docs/Phase64/P64.D_UI_Reload.md) | **20/20** 轮、**84/84** 动作、**99/99** runner 合同、**11/11** 生命周期专项；异步版本存档五进程复验通过 |
 | [async 初始化转换](Docs/Phase64/P64.D_Async_Initializer_Conversion.md) | Semantic **98/98**、Guest **135/135**；真实 UI 样例 WASM 编译通过，不代表 UI 热重载验收 |
 
 其他修复证据见 [C# 捕获赋值](Docs/Phase64/P64.D_Captured_Assignment.md)及上方近期交付。
