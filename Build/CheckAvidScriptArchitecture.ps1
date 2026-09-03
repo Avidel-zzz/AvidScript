@@ -3389,7 +3389,10 @@ $CSharpClassReferenceLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpG
 $CSharpTypeLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpTypeLowerer.cs'
 $GuestInstructionValidatorSource = Read-RequiredFile 'Tools/AvidScript.GuestIr/Validation/GuestInstructionValidator.cs'
 foreach ($RequiredCaptureAddressContract in @(
-    'TrackCaptureAddressTarget',
+    'TrackCaptureTarget',
+    'TryGetCaptureTarget',
+    'captureTargetsById',
+    'writableCaptureIds',
     'TryGetCaptureAddressTarget',
     'EmitStorageAddress'
 )) {

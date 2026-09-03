@@ -2,6 +2,7 @@
 
 #include "AvidScriptBindingFastPath.h"
 #include "AvidScriptBindingDescriptor.h"
+#include "AvidScriptBindingReceiver.h"
 #include "AvidScriptHash.h"
 #include "Invocation/AvidScriptBindingCodecProgram.h"
 #include "Invocation/AvidScriptBindingObjectCompatibility.h"
@@ -7685,20 +7686,19 @@ bool FAvidScriptBindingPackage::Dispatch(
 	{
 		Target = Plan.OwnerClass->GetDefaultObject();
 	}
-	else if (!UE::AvidScript::BindingPrivate::ResolveObjectHandle(
-		static_cast<uint32>(Call.Arguments[0]),
-		static_cast<uint32>(Call.Arguments[1]),
-		Plan.OwnerClass,
-		Context,
-		false,
-		Target,
-		Details))
+	else if (Call.Arguments.Num() < 2
+		|| Call.Arguments[0] > MAX_uint32 || Call.Arguments[1] > MAX_uint32
+		|| !ResolveAvidScriptBindingReceiver(
+			{ static_cast<uint32>(Call.Arguments[0]), static_cast<uint32>(Call.Arguments[1]) },
+			Plan.OwnerClass, Context, Target, Details))
 	{
 		SetAvidScriptBindingDispatchFailure(
 			OutResult,
 			TEXT("binding_target_invalid"),
 			Plan.DebugPath,
-			Details);
+			Details.IsEmpty()
+				? TEXT("The receiver handle is outside the 32-bit ABI.")
+				: Details);
 		return false;
 	}
 	if (Target == nullptr)

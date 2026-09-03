@@ -2,6 +2,7 @@
 #include "AvidScriptWasmRuntimePrivate.h"
 
 #include "AvidScriptBindingDescriptor.h"
+#include "AvidScriptBindingReceiver.h"
 #include "AvidScriptSceneComponentBinding.h"
 #include "AvidScriptValueCapability.h"
 #include "Containers/StringConv.h"
@@ -5367,17 +5368,36 @@ FAvidScriptWasmRuntimeInstance::ResolvePreparedReflectionCallMode(
 	bOutUseNative = false;
 	bOutAdaptiveGuardRejected = false;
 	OutMode = EAvidScriptBindingInvocationMode::SemanticProcessEvent;
-	if (!Call.Package.IsValid()
-		|| !TryResolveFusedCallbackReceiver(
-			SelfSlot,
-			SelfGeneration,
-			OutReceiver)
-		|| OutReceiver == nullptr)
+	if (!Call.Package.IsValid() || Call.Package.Get() != BindingPackage.Get()
+		|| Call.Binding.ImmutablePlanIdentity == nullptr
+		|| Call.Binding.ExpectedClass == nullptr
+		|| !IsInGameThread() || FusedCallbackFrameStack.IsEmpty()
+		|| SelfSlot <= 0 || SelfGeneration <= 0)
 	{
 		SetPendingHostImportFailure(
 			Call.Binding.TypedHostImport.ModuleName,
 			Call.Binding.TypedHostImport.ImportName,
 			TEXT("The prepared reflection receiver or call cell is unavailable."));
+		return false;
+	}
+	const FAvidScriptObjectHandle ReceiverHandle{
+		static_cast<uint32>(SelfSlot), static_cast<uint32>(SelfGeneration)
+	};
+	const bool bOwnerReceiver = ReceiverHandle == HostContext.OwnerHandle;
+	FString ReceiverError;
+	const bool bReceiverResolved = bOwnerReceiver
+		? TryResolveFusedCallbackReceiver(SelfSlot, SelfGeneration, OutReceiver)
+		: ResolveAvidScriptBindingReceiver(
+			ReceiverHandle, Call.Binding.ExpectedClass,
+			BindingInvocationContext, OutReceiver, ReceiverError);
+	if (!bReceiverResolved || OutReceiver == nullptr)
+	{
+		SetPendingHostImportFailure(
+			Call.Binding.TypedHostImport.ModuleName,
+			Call.Binding.TypedHostImport.ImportName,
+			ReceiverError.IsEmpty()
+				? TEXT("The prepared reflection receiver is unavailable.")
+				: ReceiverError);
 		return false;
 	}
 
@@ -5391,20 +5411,27 @@ FAvidScriptWasmRuntimeInstance::ResolvePreparedReflectionCallMode(
 		&& Call.Binding.bQualifiedNativeEligible;
 	if (bAdaptiveRequested || bQualifiedRequested)
 	{
-		FAvidScriptFusedCallbackFrame& Frame =
-			FusedCallbackFrameStack.Last();
-		if (Frame.PreparedReflectionGuardIdentity
-			!= Call.Binding.ImmutablePlanIdentity)
+		// The callback frame caches only Self. Other receivers must not share its guard.
+		if (bOwnerReceiver)
 		{
-			Frame.PreparedReflectionGuardIdentity =
-				Call.Binding.ImmutablePlanIdentity;
-			Frame.bPreparedReflectionNativeGuardAllowed =
+			FAvidScriptFusedCallbackFrame& Frame = FusedCallbackFrameStack.Last();
+			if (Frame.PreparedReflectionGuardIdentity != Call.Binding.ImmutablePlanIdentity)
+			{
+				Frame.PreparedReflectionGuardIdentity = Call.Binding.ImmutablePlanIdentity;
+				Frame.bPreparedReflectionNativeGuardAllowed =
+					Call.Binding.NativeGuard != nullptr
+					&& Call.Binding.NativeGuard(Call.Binding.ImmutablePlanIdentity, *OutReceiver);
+			}
+			bOutUseNative = Frame.bPreparedReflectionNativeGuardAllowed;
+		}
+		else
+		{
+			bOutUseNative =
 				Call.Binding.NativeGuard != nullptr
 				&& Call.Binding.NativeGuard(
 					Call.Binding.ImmutablePlanIdentity,
 					*OutReceiver);
 		}
-		bOutUseNative = Frame.bPreparedReflectionNativeGuardAllowed;
 		bOutAdaptiveGuardRejected =
 			bAdaptiveRequested && !bOutUseNative;
 		if (bQualifiedRequested && !bOutUseNative)
@@ -6979,34 +7006,25 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDynamicHost(
 			&& Generation <= static_cast<uint32>(MAX_int32)
 			&& HostContext.OwnerHandle.Slot == Slot
 			&& HostContext.OwnerHandle.Generation == Generation;
-		if (!bCanUseSelfCache
-			|| !ResolveSelfCapability(
+		if (bCanUseSelfCache)
+		{
+			if (!ResolveSelfCapability(
 				static_cast<int32>(Slot),
 				static_cast<int32>(Generation),
 				Call.Binding.ExpectedClass,
 				Receiver))
-		{
-			if (HostContext.ObjectRegistry == nullptr
-				|| Slot == 0
-				|| Generation == 0)
 			{
 				OutResult.Details =
-					TEXT("binding_target_invalid: no object registry is available for the prepared receiver.");
+					TEXT("binding_target_invalid: the prepared Self receiver is unavailable.");
 				return false;
 			}
-			FAvidScriptObjectHandleResult ResolveResult;
-			Receiver = HostContext.ObjectRegistry->ResolveObject(
-				{ Slot, Generation },
-				ResolveResult,
-				false);
-			if (Receiver == nullptr
-				|| !Receiver->IsA(Call.Binding.ExpectedClass))
-			{
-				OutResult.Details = ResolveResult.ErrorMessage.IsEmpty()
-					? FString(TEXT("binding_target_invalid: the prepared receiver does not match its owner class."))
-					: MoveTemp(ResolveResult.ErrorMessage);
-				return false;
-			}
+		}
+		else if (FusedCallbackFrameStack.IsEmpty()
+			|| !ResolveAvidScriptBindingReceiver(
+				{ Slot, Generation }, Call.Binding.ExpectedClass,
+				BindingInvocationContext, Receiver, OutResult.Details))
+		{
+			return false;
 		}
 	}
 	if (Receiver == nullptr)

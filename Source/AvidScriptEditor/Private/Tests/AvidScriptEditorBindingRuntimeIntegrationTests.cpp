@@ -13,6 +13,7 @@
 #include "AvidScriptEditorResultPresentation.h"
 #include "AvidScriptHash.h"
 #include "AvidScriptObjectRegistry.h"
+#include "AvidScriptObjectOwnership.h"
 #include "AvidScriptRuntimeSession.h"
 #include "AvidScriptWasmRuntime.h"
 
@@ -296,10 +297,58 @@ TArray<uint8> BuildAvidScriptPropertyBenchmarkModule(
 	return Module;
 }
 
+class FAvidScriptPreparedPropertyTestOwnership final
+	: public IAvidScriptObjectOwnershipDomain
+{
+public:
+	FAvidScriptPreparedPropertyTestOwnership(
+		const FAvidScriptObjectHandle& InHandle, UObject& InObject)
+		: Handle(InHandle), Object(&InObject)
+	{
+	}
+
+	bool Adopt(FAvidScriptObjectRegistry&, UObject&, const FAvidScriptObjectHandle&,
+		EAvidScriptObjectFactoryKind, FAvidScriptObjectHandleResult&) override
+	{
+		return false;
+	}
+	bool Borrow(FAvidScriptObjectRegistry&, UObject&, FAvidScriptObjectHandleResult&) override
+	{
+		return false;
+	}
+	bool Release(const FAvidScriptObjectHandle&, FAvidScriptObjectRegistry&,
+		FAvidScriptObjectHandleResult&) override
+	{
+		return false;
+	}
+	bool Owns(const FAvidScriptObjectHandle&, const UObject* = nullptr) const override
+	{
+		return false;
+	}
+	bool HasCapability(const FAvidScriptObjectHandle& Candidate,
+		const UObject* ExpectedObject = nullptr) const override
+	{
+		++CapabilityCheckCount;
+		return bGranted && Candidate == Handle && Object.IsValid()
+			&& (ExpectedObject == nullptr || ExpectedObject == Object.Get());
+	}
+	void Cleanup(FAvidScriptObjectRegistry&) override { bGranted = false; }
+
+	bool bGranted = true;
+	mutable int32 CapabilityCheckCount = 0;
+
+private:
+	FAvidScriptObjectHandle Handle;
+	TWeakObjectPtr<UObject> Object;
+};
+
 TArray<uint8> BuildAvidScriptPreparedI32PropertyModule(
 	const FAvidScriptBindingHostImportModel& GetterImport,
 	const FAvidScriptBindingHostImportModel& SetterImport,
-	const FAvidScriptObjectHandle& OwnerHandle)
+	TConstArrayView<FAvidScriptObjectHandle> ReceiverHandles,
+	const bool bWriteOnBeginPlay = true,
+	const bool bReadOnTick = true,
+	const bool bWriteOnTick = true)
 {
 	TArray<uint8> Module = {
 		0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00
@@ -349,37 +398,56 @@ TArray<uint8> BuildAvidScriptPreparedI32PropertyModule(
 	AppendAvidScriptPropertyBenchmarkU32Leb(Exports, 3);
 	AppendAvidScriptPropertyBenchmarkSection(Module, 7, Exports);
 
-	const auto AppendOwner = [&OwnerHandle](TArray<uint8>& Body)
+	const auto AppendReceiver = [](TArray<uint8>& Body,
+		const FAvidScriptObjectHandle& Handle)
 	{
 		Body.Add(0x41);
 		AppendAvidScriptPropertyBenchmarkI32Leb(
 			Body,
-			static_cast<int32>(OwnerHandle.Slot));
+			static_cast<int32>(Handle.Slot));
 		Body.Add(0x41);
 		AppendAvidScriptPropertyBenchmarkI32Leb(
 			Body,
-			static_cast<int32>(OwnerHandle.Generation));
+			static_cast<int32>(Handle.Generation));
 	};
 	TArray<uint8> BeginPlayBody;
 	AppendAvidScriptPropertyBenchmarkU32Leb(BeginPlayBody, 0);
-	AppendOwner(BeginPlayBody);
-	BeginPlayBody.Add(0x41);
-	AppendAvidScriptPropertyBenchmarkI32Leb(BeginPlayBody, 41);
-	BeginPlayBody.Append({ 0x10, 0x01, 0x1a, 0x0b });
+	if (bWriteOnBeginPlay)
+	{
+		for (const FAvidScriptObjectHandle& Handle : ReceiverHandles)
+		{
+			AppendReceiver(BeginPlayBody, Handle);
+			BeginPlayBody.Add(0x41);
+			AppendAvidScriptPropertyBenchmarkI32Leb(BeginPlayBody, 41);
+			BeginPlayBody.Append({ 0x10, 0x01, 0x1a });
+		}
+	}
+	BeginPlayBody.Add(0x0b);
 
 	TArray<uint8> TickBody;
 	AppendAvidScriptPropertyBenchmarkU32Leb(TickBody, 0);
-	AppendOwner(TickBody);
-	TickBody.Add(0x41);
-	AppendAvidScriptPropertyBenchmarkI32Leb(TickBody, 32);
-	TickBody.Append({ 0x10, 0x00, 0x1a });
-	AppendOwner(TickBody);
-	TickBody.Add(0x41);
-	AppendAvidScriptPropertyBenchmarkI32Leb(TickBody, 32);
-	TickBody.Append({ 0x28, 0x02, 0x00 });
-	TickBody.Add(0x41);
-	AppendAvidScriptPropertyBenchmarkI32Leb(TickBody, 1);
-	TickBody.Append({ 0x6a, 0x10, 0x01, 0x1a, 0x0b });
+	for (const FAvidScriptObjectHandle& Handle : ReceiverHandles)
+	{
+		if (bReadOnTick)
+		{
+			AppendReceiver(TickBody, Handle);
+			TickBody.Add(0x41);
+			AppendAvidScriptPropertyBenchmarkI32Leb(TickBody, 32);
+			TickBody.Append({ 0x10, 0x00, 0x1a });
+		}
+		if (bWriteOnTick)
+		{
+			AppendReceiver(TickBody, Handle);
+			TickBody.Add(0x41);
+			AppendAvidScriptPropertyBenchmarkI32Leb(TickBody, bReadOnTick ? 32 : 42);
+			if (bReadOnTick)
+			{
+				TickBody.Append({ 0x28, 0x02, 0x00, 0x41, 0x01, 0x6a });
+			}
+			TickBody.Append({ 0x10, 0x01, 0x1a });
+		}
+	}
+	TickBody.Add(0x0b);
 
 	TArray<uint8> Code;
 	AppendAvidScriptPropertyBenchmarkU32Leb(Code, 2);
@@ -1147,6 +1215,7 @@ bool AcceptAvidScriptGeneratedBindingLifecycleBuild(
 	FAvidScriptWasmHostContext HostContext;
 	HostContext.ObjectRegistry = &Registry;
 	HostContext.OwnerHandle = ActorHandle;
+	HostContext.World = World;
 	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
 
 	FAvidScriptRuntimeSession Session;
@@ -1291,6 +1360,7 @@ bool AcceptAvidScriptGeneratedBindingLifecycleBuild(
 	FAvidScriptWasmHostContext RootlessHostContext;
 	RootlessHostContext.ObjectRegistry = &RootlessRegistry;
 	RootlessHostContext.OwnerHandle = RootlessActorHandle;
+	RootlessHostContext.World = World;
 	RootlessHostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
 
 	FAvidScriptRuntimeSession RootlessSession;
@@ -1594,6 +1664,7 @@ bool FAvidScriptEditorBindingRuntimeFNameInputTest::RunTest(const FString& Param
 	FAvidScriptBindingInvocationContext Context;
 	Context.ObjectRegistry = &Registry;
 	Context.OwnerHandle = ActorHandle;
+	Context.World = World;
 	TArray<uint8> Scratch;
 	Scratch.SetNumUninitialized(Package->GetRequiredScratchSize());
 	const uint32 BindingOrdinal = Package->GetVmPackage().Imports[0].Ordinal;
@@ -1976,6 +2047,7 @@ bool FAvidScriptEditorBindingRuntimeReflectedPropertyGetTest::RunTest(const FStr
 	FAvidScriptBindingInvocationContext Context;
 	Context.ObjectRegistry = &Registry;
 	Context.OwnerHandle = ActorHandle;
+	Context.World = World;
 	TArray<uint8> Scratch;
 	Scratch.SetNumUninitialized(Package->GetRequiredScratchSize());
 	FAvidScriptDynamicHostCallResult DispatchResult;
@@ -2096,6 +2168,7 @@ bool FAvidScriptEditorBindingRuntimeReflectedPropertySetTest::RunTest(const FStr
 	FAvidScriptBindingInvocationContext Context;
 	Context.ObjectRegistry = &Registry;
 	Context.OwnerHandle = ActorHandle;
+	Context.World = World;
 	TArray<uint8> Scratch;
 	Scratch.SetNumUninitialized(Package->GetRequiredScratchSize());
 	FAvidScriptDynamicHostCallResult DispatchResult;
@@ -2225,6 +2298,7 @@ bool FAvidScriptEditorBindingRuntimeReflectedVectorPropertySetTest::RunTest(cons
 	FAvidScriptBindingInvocationContext Context;
 	Context.ObjectRegistry = &Registry;
 	Context.OwnerHandle = MovementHandle;
+	Context.World = World;
 	Context.WritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
 	TArray<uint8> Scratch;
 	Scratch.SetNumUninitialized(Package->GetRequiredScratchSize());
@@ -2346,6 +2420,7 @@ bool FAvidScriptEditorBindingRuntimeNetworkRpcTest::RunTest(
 	FAvidScriptBindingInvocationContext Context;
 	Context.ObjectRegistry = &Registry;
 	Context.OwnerHandle = ActorHandle;
+	Context.World = World;
 	Context.WritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
 	TArray<uint8> Scratch;
 	Scratch.SetNumUninitialized(Package->GetRequiredScratchSize());
@@ -2536,6 +2611,7 @@ bool FAvidScriptEditorBindingRuntimeReplicatedPropertyTest::RunTest(
 	FAvidScriptBindingInvocationContext Context;
 	Context.ObjectRegistry = &Registry;
 	Context.OwnerHandle = ActorHandle;
+	Context.World = World;
 	Context.WritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
 	TArray<uint8> Scratch;
 	Scratch.SetNumUninitialized(Package->GetRequiredScratchSize());
@@ -2723,6 +2799,7 @@ bool FAvidScriptEditorBindingRuntimeBlueprintSetterPropertyTest::RunTest(const F
 	FAvidScriptBindingInvocationContext Context;
 	Context.ObjectRegistry = &Registry;
 	Context.OwnerHandle = ActorHandle;
+	Context.World = World;
 	TArray<uint8> Scratch;
 	Scratch.SetNumUninitialized(Package->GetRequiredScratchSize());
 	FAvidScriptDynamicHostCallResult DispatchResult;
@@ -3108,6 +3185,7 @@ bool FAvidScriptEditorBindingRuntimeBidirectionalPropertiesSampleTest::RunTest(c
 	FAvidScriptWasmHostContext HostContext;
 	HostContext.ObjectRegistry = &Registry;
 	HostContext.OwnerHandle = ActorHandle;
+	HostContext.World = World;
 	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
 	FAvidScriptWasmRuntimeInstance Runtime;
 	Runtime.SetHostContext(HostContext);
@@ -3240,6 +3318,7 @@ bool FAvidScriptEditorBindingRuntimeReflectedPropertyBenchmarkTest::RunTest(cons
 	FAvidScriptBindingInvocationContext InvocationContext;
 	InvocationContext.ObjectRegistry = &Registry;
 	InvocationContext.OwnerHandle = ActorHandle;
+	InvocationContext.World = World;
 	InvocationContext.WritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
 	TArray<uint8> Scratch;
 	Scratch.SetNumUninitialized(Package->GetRequiredScratchSize());
@@ -3256,6 +3335,7 @@ bool FAvidScriptEditorBindingRuntimeReflectedPropertyBenchmarkTest::RunTest(cons
 	FAvidScriptWasmHostContext HostContext;
 	HostContext.ObjectRegistry = &Registry;
 	HostContext.OwnerHandle = ActorHandle;
+	HostContext.World = World;
 	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
 	FAvidScriptWasmRuntimeInstance Runtime;
 	Runtime.SetHostContext(HostContext);
@@ -3489,6 +3569,7 @@ bool FAvidScriptEditorBindingRuntimeReflectedSetActorScaleTest::RunTest(const FS
 	FAvidScriptBindingInvocationContext DirectContext;
 	DirectContext.ObjectRegistry = &Registry;
 	DirectContext.OwnerHandle = ActorHandle;
+	DirectContext.World = World;
 	DirectContext.WritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
 	TArray<uint8> DirectScratch;
 	DirectScratch.SetNumUninitialized(Package->GetRequiredScratchSize());
@@ -3562,6 +3643,7 @@ bool FAvidScriptEditorBindingRuntimeReflectedSetActorScaleTest::RunTest(const FS
 	FAvidScriptBindingRuntimeRecordingJournal PermissiveJournal(true);
 	FAvidScriptBindingInvocationContext VisibilityContext = DirectContext;
 	VisibilityContext.OwnerHandle = RootHandle;
+	VisibilityContext.World = World;
 	VisibilityContext.HostEffectJournal = &PermissiveJournal;
 	RootComponent->SetVisibility(true);
 	TestFalse(
@@ -3588,6 +3670,7 @@ bool FAvidScriptEditorBindingRuntimeReflectedSetActorScaleTest::RunTest(const FS
 	FAvidScriptWasmHostContext ReadOnlyContext;
 	ReadOnlyContext.ObjectRegistry = &Registry;
 	ReadOnlyContext.OwnerHandle = ActorHandle;
+	ReadOnlyContext.World = World;
 	ReadOnlyContext.ActorWritePolicy = EAvidScriptActorWritePolicy::ReadOnly;
 
 	FAvidScriptWasmRuntimeInstance ReadOnlyRuntime;
@@ -4222,6 +4305,7 @@ bool FAvidScriptEditorBindingRuntimePlayablePickupTest::RunTest(const FString& P
 	FAvidScriptWasmHostContext MetricsHostContext;
 	MetricsHostContext.ObjectRegistry = &MetricsRegistry;
 	MetricsHostContext.OwnerHandle = PickupHandle;
+	MetricsHostContext.World = World;
 	MetricsHostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
 	FAvidScriptRuntimeSession MetricsSession;
 	MetricsSession.SetHostContext(MetricsHostContext);
@@ -4618,6 +4702,7 @@ bool FAvidScriptGeneratedCSharpDiagnosticsTest::RunTest(const FString& Parameter
 	FAvidScriptWasmHostContext HostContext;
 	HostContext.ObjectRegistry = &Registry;
 	HostContext.OwnerHandle = ActorHandle;
+	HostContext.World = World;
 	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
 
 	FAvidScriptRuntimeSession Session;
@@ -6043,7 +6128,7 @@ bool FAvidScriptEditorPreparedReflectionPropertyRuntimeTest::RunTest(
 		BuildAvidScriptPreparedI32PropertyModule(
 			Getter->HostImport,
 			Setter->HostImport,
-			Handle);
+			MakeArrayView(&Handle, 1));
 	FAvidScriptVmBackendSelection BackendSelection;
 	BackendSelection.BackendKind = EAvidScriptVmBackendKind::Wasmtime;
 	BackendSelection.ExecutionMode = EAvidScriptVmExecutionMode::Jit;
@@ -6098,6 +6183,223 @@ bool FAvidScriptEditorPreparedReflectionPropertyRuntimeTest::RunTest(
 		Instrumentation.SemanticProcessEventCount,
 		0ull);
 	Runtime.Unload();
+
+	UWorld* World = nullptr;
+	if (!TestTrue(TEXT("Non-Self property host world is created"),
+			CreateAvidScriptBindingRuntimeIntegrationWorld(World)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT { DestroyAvidScriptBindingRuntimeIntegrationWorld(World); };
+	AActor* HostActor = World->SpawnActor<AActor>();
+	if (!TestNotNull(TEXT("Non-Self property host Actor is created"), HostActor))
+	{
+		return false;
+	}
+	const FAvidScriptObjectHandle HostHandle = Registry.RegisterObject(
+		HostActor, RegisterResult, false);
+	if (!TestTrue(TEXT("Non-Self property host registers"), RegisterResult.bSucceeded))
+	{
+		return false;
+	}
+	TestNull(TEXT("Non-Self property target is world independent"), Target->GetWorld());
+	TestTrue(TEXT("Non-Self property target is distinct from Self"), Handle != HostHandle);
+	FAvidScriptPreparedPropertyTestOwnership Ownership(Handle, *Target.Get());
+	TestFalse(TEXT("Borrowed capability does not imply ownership"), Ownership.Owns(Handle));
+	const auto LoadPropertyRuntime = [this, &Package](FAvidScriptWasmRuntimeInstance& Instance,
+		const TArray<uint8>& Module, const FString& Label)
+	{
+		FAvidScriptWasmSmokeResult Load;
+		if (!TestTrue(*FString::Printf(TEXT("%s WASM loads"), *Label),
+				Instance.LoadModule(Module.GetData(), Module.Num(), Label, Package, Load)))
+		{
+			AddError(Load.ErrorCategory + TEXT(": ") + Load.ErrorMessage);
+			return false;
+		}
+		return true;
+	};
+	const auto CompletedCalls = [](const FAvidScriptBindingInvocationInstrumentation& Counts)
+	{
+		return Counts.SemanticProcessEventCount + Counts.AdaptivePreparedNativeHitCount
+			+ Counts.QualifiedNativeDirectCount;
+	};
+	const auto CheckHostDenial = [this](FAvidScriptWasmRuntimeInstance& Instance,
+		const FAvidScriptWasmSmokeResult& Failure, const FString& Label,
+		const FAvidScriptBindingHostImportModel& Import, const TCHAR* Category)
+	{
+		TestEqual(*FString::Printf(TEXT("%s reports a VM host failure"), *Label),
+			Failure.ErrorCategory, FString(TEXT("host_import_failed")));
+		FString ModuleName;
+		FString ImportName;
+		FString Details;
+		TestTrue(*FString::Printf(TEXT("%s retains the Runtime denial"), *Label),
+			Instance.ConsumePendingHostImportFailure(ModuleName, ImportName, Details));
+		TestTrue(*FString::Printf(TEXT("%s identifies the denied import and cause"), *Label),
+			ModuleName == Import.Module && ImportName == Import.Name && Details.Contains(Category));
+	};
+	TArray<FAvidScriptPreparedReflectionBinding> PropertyBindings;
+	FString BindingError;
+	if (!TestTrue(TEXT("Property route metadata is available"),
+			Package->BuildPreparedReflectionBindings(PropertyBindings, BindingError)))
+	{
+		return false;
+	}
+	TestTrue(TEXT("This property fixture has no qualified native contract"),
+		!PropertyBindings.IsEmpty() && !PropertyBindings.ContainsByPredicate(
+			[](const FAvidScriptPreparedReflectionBinding& Binding) { return Binding.bQualifiedNativeEligible; }));
+	for (const EAvidScriptBindingInvocationPolicy Policy : {
+		EAvidScriptBindingInvocationPolicy::SemanticProcessEvent,
+		EAvidScriptBindingInvocationPolicy::QualifiedNativeDirect,
+		EAvidScriptBindingInvocationPolicy::AdaptiveSemantic })
+	{
+		const FString Label = FString::Printf(TEXT("non_self_property_policy_%d"),
+			static_cast<int32>(Policy));
+		Ownership.bGranted = true;
+		Ownership.CapabilityCheckCount = 0;
+		Property->SetPropertyValue_InContainer(Target.Get(), 0);
+		FAvidScriptBindingInvocationInstrumentation NonSelfCounts;
+		FAvidScriptWasmHostContext NonSelfContext = HostContext;
+		NonSelfContext.OwnerHandle = HostHandle;
+		NonSelfContext.World = World;
+		NonSelfContext.ObjectOwnership = &Ownership;
+		NonSelfContext.BindingInvocationPolicy = Policy;
+		NonSelfContext.BindingInvocationInstrumentation = &NonSelfCounts;
+		FAvidScriptWasmRuntimeInstance NonSelfRuntime(BackendSelection);
+		NonSelfRuntime.SetHostContext(NonSelfContext);
+		if (!LoadPropertyRuntime(NonSelfRuntime, Bytecode, Label))
+		{
+			return false;
+		}
+		TestEqual(*FString::Printf(TEXT("%s retains both typed property cells"), *Label),
+			NonSelfRuntime.GetPreparedTypedHostImportsForTesting().Num(), 2);
+		TestTrue(*FString::Printf(TEXT("%s BeginPlay writes non-Self"), *Label),
+			NonSelfRuntime.BeginPlay(Result));
+		TestEqual(*FString::Printf(TEXT("%s setter writes 41"), *Label),
+			Property->GetPropertyValue_InContainer(Target.Get()), 41);
+		TestTrue(*FString::Printf(TEXT("%s Tick reads and writes non-Self"), *Label),
+			NonSelfRuntime.Tick(0.016f, Result));
+		TestEqual(*FString::Printf(TEXT("%s getter feeds setter with 42"), *Label),
+			Property->GetPropertyValue_InContainer(Target.Get()), 42);
+		TestEqual(*FString::Printf(TEXT("%s records all three calls"), *Label),
+			CompletedCalls(NonSelfCounts), 3ull);
+		TestEqual(*FString::Printf(TEXT("%s preserves semantic routing"), *Label),
+			NonSelfCounts.SemanticProcessEventCount,
+			Policy != EAvidScriptBindingInvocationPolicy::AdaptiveSemantic ? 3ull : 0ull);
+		TestEqual(*FString::Printf(TEXT("%s preserves qualified routing"), *Label),
+			NonSelfCounts.QualifiedNativeDirectCount,
+			0ull);
+		TestEqual(*FString::Printf(TEXT("%s preserves adaptive routing"), *Label),
+			NonSelfCounts.AdaptivePreparedNativeHitCount,
+			Policy == EAvidScriptBindingInvocationPolicy::AdaptiveSemantic ? 3ull : 0ull);
+		TestTrue(*FString::Printf(TEXT("%s checks borrowed capability on each call"), *Label),
+			Ownership.CapabilityCheckCount >= 3);
+
+		const uint64 RegistryRevision = Registry.GetRevision();
+		Ownership.bGranted = false;
+		TestFalse(*FString::Printf(TEXT("%s revoked capability rejects the next getter"), *Label),
+			NonSelfRuntime.Tick(0.016f, Result));
+		CheckHostDenial(NonSelfRuntime, Result, Label, Getter->HostImport,
+			TEXT("binding_receiver_capability_denied"));
+		TestEqual(*FString::Printf(TEXT("%s revocation needs no registry invalidation"), *Label),
+			Registry.GetRevision(), RegistryRevision);
+		TestEqual(*FString::Printf(TEXT("%s denial preserves the property"), *Label),
+			Property->GetPropertyValue_InContainer(Target.Get()), 42);
+		TestEqual(*FString::Printf(TEXT("%s denied calls are not successful invocations"), *Label),
+			CompletedCalls(NonSelfCounts), 3ull);
+		NonSelfRuntime.Unload();
+
+		for (const bool bRevokeSetter : { false, true })
+		{
+			const FString DenialLabel = Label + (bRevokeSetter ? TEXT("_revoked_setter") : TEXT("_read_only"));
+			Ownership.bGranted = true;
+			Property->SetPropertyValue_InContainer(Target.Get(), 17);
+			FAvidScriptBindingInvocationInstrumentation DenialCounts;
+			FAvidScriptWasmHostContext DenialContext = NonSelfContext;
+			DenialContext.ActorWritePolicy = bRevokeSetter
+				? EAvidScriptActorWritePolicy::AllowWrites : EAvidScriptActorWritePolicy::ReadOnly;
+			DenialContext.BindingInvocationInstrumentation = &DenialCounts;
+			const TArray<uint8> DenialModule = BuildAvidScriptPreparedI32PropertyModule(
+				Getter->HostImport, Setter->HostImport, MakeArrayView(&Handle, 1),
+				false, !bRevokeSetter, true);
+			FAvidScriptWasmRuntimeInstance DenialRuntime(BackendSelection);
+			DenialRuntime.SetHostContext(DenialContext);
+			if (!LoadPropertyRuntime(DenialRuntime, DenialModule, DenialLabel))
+			{
+				return false;
+			}
+			TestTrue(*FString::Printf(TEXT("%s enters a no-op BeginPlay"), *DenialLabel),
+				DenialRuntime.BeginPlay(Result));
+			Ownership.bGranted = !bRevokeSetter;
+			TestFalse(*FString::Printf(TEXT("%s rejects the setter"), *DenialLabel),
+				DenialRuntime.Tick(0.016f, Result));
+			CheckHostDenial(DenialRuntime, Result, DenialLabel, Setter->HostImport,
+				bRevokeSetter ? TEXT("binding_receiver_capability_denied") : TEXT("binding_write_denied"));
+			TestEqual(*FString::Printf(TEXT("%s never mutates the property"), *DenialLabel),
+				Property->GetPropertyValue_InContainer(Target.Get()), 17);
+			TestEqual(*FString::Printf(TEXT("%s allows only the ReadOnly getter"), *DenialLabel),
+				CompletedCalls(DenialCounts), bRevokeSetter ? 0ull : 1ull);
+			DenialRuntime.Unload();
+		}
+	}
+
+	UClass* DerivedClass = LoadObject<UClass>(nullptr,
+		TEXT("/Script/AvidScriptBindings.AvidScriptBindingsDerivedTestObject"));
+	TStrongObjectPtr<UObject> DerivedTarget(DerivedClass == nullptr
+		? nullptr : NewObject<UObject>(GetTransientPackage(), DerivedClass));
+	if (!TestNotNull(TEXT("Cache isolation derived target is created"), DerivedTarget.Get()))
+	{
+		return false;
+	}
+	const FAvidScriptObjectHandle DerivedHandle = Registry.RegisterObject(
+		DerivedTarget.Get(), RegisterResult, false);
+	if (!TestTrue(TEXT("Cache isolation derived target registers"), RegisterResult.bSucceeded))
+	{
+		return false;
+	}
+	for (const bool bDerivedSelf : { false, true })
+	{
+		const FString Label = bDerivedSelf ? TEXT("derived_self_cache") : TEXT("exact_self_cache");
+		Property->SetPropertyValue_InContainer(Target.Get(), 0);
+		Property->SetPropertyValue_InContainer(DerivedTarget.Get(), 0);
+		const FAvidScriptObjectHandle OtherHandle = bDerivedSelf ? Handle : DerivedHandle;
+		UObject* Other = bDerivedSelf ? Target.Get() : DerivedTarget.Get();
+		FAvidScriptPreparedPropertyTestOwnership CacheOwnership(OtherHandle, *Other);
+		FAvidScriptBindingInvocationInstrumentation CacheCounts;
+		FAvidScriptWasmHostContext CacheContext = HostContext;
+		CacheContext.World.Reset();
+		CacheContext.OwnerHandle = bDerivedSelf ? DerivedHandle : Handle;
+		CacheContext.ObjectOwnership = &CacheOwnership;
+		CacheContext.BindingInvocationInstrumentation = &CacheCounts;
+		// The same setter cell sees native/fallback/native receivers in one callback.
+		const FAvidScriptObjectHandle Receivers[] = { Handle, DerivedHandle, Handle };
+		const TArray<uint8> CacheModule = BuildAvidScriptPreparedI32PropertyModule(
+			Getter->HostImport, Setter->HostImport, MakeArrayView(Receivers));
+		FAvidScriptWasmRuntimeInstance CacheRuntime(BackendSelection);
+		CacheRuntime.SetHostContext(CacheContext);
+		if (!LoadPropertyRuntime(CacheRuntime, CacheModule, Label))
+		{
+			return false;
+		}
+		TestTrue(*FString::Printf(TEXT("%s alternates receivers within BeginPlay"), *Label),
+			CacheRuntime.BeginPlay(Result));
+		TestEqual(*FString::Printf(TEXT("%s keeps native guard results receiver-specific"), *Label),
+			CacheCounts.AdaptivePreparedNativeHitCount, 2ull);
+		TestEqual(*FString::Printf(TEXT("%s derived guard falls back exactly once"), *Label),
+			CacheCounts.AdaptiveProcessEventFallbackCount, 1ull);
+		TestTrue(*FString::Printf(TEXT("%s alternates receivers within Tick"), *Label),
+			CacheRuntime.Tick(0.016f, Result));
+		TestEqual(*FString::Printf(TEXT("%s exact receiver has two independent increments"), *Label),
+			Property->GetPropertyValue_InContainer(Target.Get()), 43);
+		TestEqual(*FString::Printf(TEXT("%s derived receiver has one independent increment"), *Label),
+			Property->GetPropertyValue_InContainer(DerivedTarget.Get()), 42);
+		TestEqual(*FString::Printf(TEXT("%s native calls do not inherit a fallback guard"), *Label),
+			CacheCounts.AdaptivePreparedNativeHitCount, 6ull);
+		TestEqual(*FString::Printf(TEXT("%s derived calls do not inherit a native guard"), *Label),
+			CacheCounts.AdaptiveProcessEventFallbackCount, 3ull);
+		TestEqual(*FString::Printf(TEXT("%s records each derived guard rejection"), *Label),
+			CacheCounts.AdaptiveGuardRejectCount, 3ull);
+		CacheRuntime.Unload();
+	}
 	return true;
 }
 
@@ -6697,6 +6999,7 @@ bool FAvidScriptEditorBlueprintAsyncActionPayloadCSharpTest::RunTest(
 	FAvidScriptWasmHostContext HostContext;
 	HostContext.ObjectRegistry = &Registry;
 	HostContext.OwnerHandle = ActorHandle;
+	HostContext.World = World;
 	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
 	FAvidScriptRuntimeSession Session;
 	Session.SetHostContext(HostContext);
@@ -7114,6 +7417,7 @@ bool FAvidScriptEditorBlueprintDeclaredFunctionIntegrationTest::RunTest(
 	FAvidScriptBindingInvocationContext Context;
 	Context.ObjectRegistry = &Registry;
 	Context.OwnerHandle = ActorHandle;
+	Context.World = World;
 	Context.WritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
 	TArray<uint8> Scratch;
 	Scratch.SetNumUninitialized(Package->GetRequiredScratchSize());
