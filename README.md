@@ -39,7 +39,7 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 | 网络 | Server/Client/NetMulticast RPC、replicated property、RPC/RepNotify handler、dedicated/listen 多进程闭环 |
 | 热重载 | 方法体事务式替换、候选回滚、状态帧与 handle 生命周期隔离 |
 | 发布 | 内容寻址模块包、catalog v2 多平台 variant 精确选择、无头 C# Release、包回执校验、Generated Type 预编译，以及已通过的 Win64 Development/Shipping BuildCookRun 与打包进程 Oracle |
-| 运行时安全 | Wasmtime fuel/epoch/内存/Host Call 预算、进程级共享 watchdog，以及 Session 故障隔离与有界诊断 |
+| 运行时安全 | Wasmtime fuel/epoch/内存/Host Call 预算、共享 watchdog、Session 故障隔离，以及后台恢复 generation gate、低内存缓存回收与 World teardown 自动取消 |
 | 后端 | Wasmtime 45 Win64 JIT/AOT；Windows 主机可交叉生成 Android arm64 AOT；WAMR 兼容后端 |
 | 增量构建 | 双层产物缓存与 persistent Worker；无修改热构建零编译调用，5 轮中位数 `806 ms` |
 | 结构化诊断 | Debug Map v2、同步/async 序列点、稳定 probe ID、双后端 probe 执行、跨层调用栈、Editor 源码导航 |

@@ -364,3 +364,11 @@ bool AuthorizeAvidScriptVmArtifact(
 	}
 	return false;
 }
+
+int32 ReleaseAvidScriptVmArtifactMemoryCache()
+{
+	FScopeLock Lock(&GArtifactCompilerCriticalSection);
+	const int32 ReleasedEntryCount = GArtifactCache.Num();
+	GArtifactCache.Reset();
+	return ReleasedEntryCount;
+}

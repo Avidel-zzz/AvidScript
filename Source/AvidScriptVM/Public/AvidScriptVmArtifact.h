@@ -57,3 +57,5 @@ AVIDSCRIPTVM_API bool CompileAvidScriptVmArtifact(
 AVIDSCRIPTVM_API bool AuthorizeAvidScriptVmArtifact(
 	const FString& AttestationId,
 	const FAvidScriptVmOwnedArtifact& Artifact);
+
+AVIDSCRIPTVM_API int32 ReleaseAvidScriptVmArtifactMemoryCache();

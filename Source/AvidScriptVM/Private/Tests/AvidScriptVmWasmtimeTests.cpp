@@ -1689,6 +1689,33 @@ bool FAvidScriptVmWasmtimeArtifactCompilerTest::RunTest(
 		AuthorizeAvidScriptVmArtifact(
 			CachedResult.Artifact.AttestationId,
 			CachedResult.Artifact));
+	TestTrue(
+		TEXT("low-memory cache release evicts compiled entries"),
+		ReleaseAvidScriptVmArtifactMemoryCache() >= 1);
+	TestTrue(
+		TEXT("cache eviction preserves issued artifact attestation"),
+		AuthorizeAvidScriptVmArtifact(
+			CachedResult.Artifact.AttestationId,
+			CachedResult.Artifact));
+
+	FAvidScriptVmArtifactCompileResult RecompiledResult;
+	if (!TestTrue(
+		TEXT("artifact recompiles after cache eviction"),
+		CompileAvidScriptVmArtifact(Request, RecompiledResult)))
+	{
+		AddError(
+			RecompiledResult.Error.Category
+			+ TEXT(": ")
+			+ RecompiledResult.Error.Details);
+		return false;
+	}
+	TestFalse(
+		TEXT("compile after cache eviction is a cache miss"),
+		RecompiledResult.bCacheHit);
+	TestEqual(
+		TEXT("cache eviction does not change artifact identity"),
+		RecompiledResult.Artifact.ExecutionIdentity,
+		CachedResult.Artifact.ExecutionIdentity);
 
 	FAvidScriptVmOwnedArtifact MutatedArtifact = CachedResult.Artifact;
 	MutatedArtifact.ExecutionIdentity = TEXT("invalid-execution-sha256");

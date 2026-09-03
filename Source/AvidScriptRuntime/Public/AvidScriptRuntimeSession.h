@@ -7,6 +7,7 @@
 #include "ScriptTypes/AvidScriptGeneratedTypeRouter.h"
 
 class FAvidScriptRuntimeEventRouter;
+class FAvidScriptRuntimeLifecycleCoordinator;
 class FAvidScriptRuntimeScheduler;
 class FAvidScriptSessionObjectOwnership;
 class FAvidScriptSessionDelegateSubscriptions;
@@ -38,6 +39,12 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeSessionSnapshot
 	int32 EventCallbackCount = 0;
 	int32 SuccessfulReloadCount = 0;
 	int32 RejectedReloadCount = 0;
+	uint64 ApplicationLifecycleGeneration = 0;
+	int32 SuppressedLifecycleEntryCount = 0;
+	int32 LowMemoryNotificationCount = 0;
+	int32 LifecycleInvalidationCount = 0;
+	bool bApplicationSuspended = false;
+	bool bLifecycleInvalidated = false;
 };
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -196,6 +203,18 @@ public:
 #endif
 
 private:
+	friend class FAvidScriptRuntimeLifecycleCoordinator;
+
+	void SuspendForApplicationLifecycle(uint64 Generation);
+	bool ResumeFromApplicationLifecycle(uint64 Generation);
+	void HandleApplicationLowMemory();
+	bool InvalidateForWorldTeardown(UWorld& World);
+	bool SuppressApplicationLifecycleEntry(
+		const FString& ExportName,
+		FAvidScriptWasmSmokeResult& OutResult);
+	bool IsSuspendedContextCurrent(uint64 Generation) const;
+	void AbortRuntimeForLifecycleInvalidation();
+	void ResetSuspendedContext();
 	bool ValidateManifest(
 		const FAvidScriptWasmReloadManifest& Manifest,
 		const FString& PreviousModuleId,
@@ -254,6 +273,16 @@ private:
 	int32 FaultCount = 0;
 	int32 FaultedEntryRejectCount = 0;
 	int32 SuppressedFaultDiagnosticCount = 0;
+	TWeakObjectPtr<UWorld> SuspendedWorld;
+	FAvidScriptObjectHandle SuspendedOwnerHandle;
+	const FAvidScriptWasmRuntimeInstance* SuspendedRuntimeIdentity = nullptr;
+	FString SuspendedModuleId;
+	uint64 ApplicationLifecycleGeneration = 0;
+	int32 SuppressedLifecycleEntryCount = 0;
+	int32 LowMemoryNotificationCount = 0;
+	int32 LifecycleInvalidationCount = 0;
+	bool bApplicationSuspended = false;
+	bool bLifecycleInvalidated = false;
 #if WITH_DEV_AUTOMATION_TESTS
 	TFunction<void(IAvidScriptBindingHostEffectJournal*)>
 		CandidateBeginPlayObserverForTesting;

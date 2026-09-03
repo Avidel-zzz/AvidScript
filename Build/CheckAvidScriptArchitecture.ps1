@@ -390,18 +390,21 @@ foreach ($RequiredBatchContract in @(
 }
 foreach ($RequiredArtifactContract in @(
     'FAvidScriptVmOwnedArtifact',
-    'CompileAvidScriptVmArtifact',
-    'AuthorizeAvidScriptVmArtifact',
-    'AttestationId')) {
+	'CompileAvidScriptVmArtifact',
+	'AuthorizeAvidScriptVmArtifact',
+	'ReleaseAvidScriptVmArtifactMemoryCache',
+	'AttestationId')) {
     if (-not $VmArtifactHeader.Contains($RequiredArtifactContract)) {
         Add-Violation "VM owned-artifact contract is missing $RequiredArtifactContract"
     }
 }
 foreach ($RequiredArtifactCompilerContract in @(
-    'ArtifactCacheCapacity = 32',
-    'AttestationRegistryCapacity = 32',
-    'avidscript_wasmtime_module_serialize',
-    'RegisterArtifactAttestationLocked',
+	'ArtifactCacheCapacity = 32',
+	'AttestationRegistryCapacity = 32',
+	'avidscript_wasmtime_module_precompile',
+	'Request.TargetTriple',
+	'ReleaseAvidScriptVmArtifactMemoryCache',
+	'RegisterArtifactAttestationLocked',
     'FAvidScriptHash::Sha256Hex')) {
     if (-not $VmArtifactCompilerSource.Contains($RequiredArtifactCompilerContract)) {
         Add-Violation "VM artifact compiler is missing $RequiredArtifactCompilerContract"

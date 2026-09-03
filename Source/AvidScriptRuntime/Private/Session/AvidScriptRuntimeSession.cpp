@@ -9,6 +9,7 @@
 #include "Diagnostics/AvidScriptWasmDebugMap.h"
 #include "GameFramework/Actor.h"
 #include "HostEffects/AvidScriptHostEffectTransaction.h"
+#include "Lifecycle/AvidScriptRuntimeLifecycleCoordinator.h"
 #include "Ownership/AvidScriptSessionObjectOwnership.h"
 #include "Session/AvidScriptSessionDelegateSubscriptions.h"
 #include "Session/AvidScriptSessionInboundHandlers.h"
@@ -171,18 +172,194 @@ FAvidScriptRuntimeSession::FAvidScriptRuntimeSession()
 	BackendSelection.ExecutionMode = EAvidScriptVmExecutionMode::Auto;
 	BackendSelection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
 	BackendSelection.bAllowFallback = true;
+	FAvidScriptRuntimeLifecycleCoordinator::Get().RegisterSession(*this);
 }
 
 FAvidScriptRuntimeSession::~FAvidScriptRuntimeSession()
 {
 	check(IsInGameThread());
 	checkf(!IsOperationActive(), TEXT("AvidScript RuntimeSession cannot be destroyed during an active guest call or mutation."));
+	FAvidScriptRuntimeLifecycleCoordinator::Get().UnregisterSession(*this);
 	UnloadLive();
 	FString ClearError;
 	ensureMsgf(
 		ClearGeneratedTypeInstance(ClearError),
 		TEXT("Generated type instance teardown failed: %s"),
 		ClearError.IsEmpty() ? TEXT("unknown") : *ClearError);
+}
+
+void FAvidScriptRuntimeSession::SuspendForApplicationLifecycle(
+	const uint64 Generation)
+{
+	check(IsInGameThread());
+	if (bApplicationSuspended || bLifecycleInvalidated)
+	{
+		return;
+	}
+
+	bApplicationSuspended = true;
+	ApplicationLifecycleGeneration = Generation;
+	SuspendedWorld = HostContext.World;
+	SuspendedOwnerHandle = HostContext.OwnerHandle;
+	SuspendedRuntimeIdentity = LiveRuntime.Get();
+	SuspendedModuleId = LiveManifest.ModuleId;
+	DelegateSubscriptions->SetDispatchEnabled(false);
+	InboundHandlers->SetDispatchEnabled(false);
+}
+
+bool FAvidScriptRuntimeSession::ResumeFromApplicationLifecycle(
+	const uint64 Generation)
+{
+	check(IsInGameThread());
+	if (!bApplicationSuspended)
+	{
+		return !bLifecycleInvalidated;
+	}
+	if (!IsSuspendedContextCurrent(Generation))
+	{
+		AbortRuntimeForLifecycleInvalidation();
+		bLifecycleInvalidated = true;
+		++LifecycleInvalidationCount;
+		return false;
+	}
+
+	bApplicationSuspended = false;
+	ResetSuspendedContext();
+	if (LiveRuntime
+		&& LiveRuntime->GetLifecycleState() == EAvidScriptLifecycleState::Running)
+	{
+		DelegateSubscriptions->SetDispatchEnabled(true);
+		InboundHandlers->SetDispatchEnabled(true);
+	}
+	return true;
+}
+
+void FAvidScriptRuntimeSession::HandleApplicationLowMemory()
+{
+	check(IsInGameThread());
+	++LowMemoryNotificationCount;
+	Profiler->Reset();
+}
+
+bool FAvidScriptRuntimeSession::InvalidateForWorldTeardown(UWorld& World)
+{
+	check(IsInGameThread());
+	if (HostContext.World.Get() != &World)
+	{
+		return false;
+	}
+
+	AbortRuntimeForLifecycleInvalidation();
+	bLifecycleInvalidated = true;
+	++LifecycleInvalidationCount;
+	return true;
+}
+
+bool FAvidScriptRuntimeSession::SuppressApplicationLifecycleEntry(
+	const FString& ExportName,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	if (!bApplicationSuspended)
+	{
+		return false;
+	}
+
+	++SuppressedLifecycleEntryCount;
+	OutResult = FAvidScriptWasmSmokeResult();
+	OutResult.ModuleId = GetLiveModuleId();
+	OutResult.ExportName = ExportName;
+	const FAvidScriptWasmHotSnapshot Snapshot = GetLiveHotSnapshot();
+	OutResult.bModuleLoaded = Snapshot.bRuntimeLoaded;
+	OutResult.bBeginPlayCalled = Snapshot.bBeginPlayCalled;
+	OutResult.bEndPlayCalled = Snapshot.bEndPlayCalled;
+	OutResult.TickCallCount = Snapshot.TickCallCount;
+	OutResult.TimerCallbackCount = Snapshot.TimerCallbackCount;
+	OutResult.LastTimerCallbackId = Snapshot.LastTimerCallbackId;
+	OutResult.LastTimerHandle = Snapshot.LastTimerHandle;
+	OutResult.EventCallbackCount = Snapshot.EventCallbackCount;
+	OutResult.LastEventId = Snapshot.LastEventId;
+	OutResult.LastEventValue = Snapshot.LastEventValue;
+	OutResult.Metrics = Snapshot.Metrics;
+	return true;
+}
+
+bool FAvidScriptRuntimeSession::IsSuspendedContextCurrent(
+	const uint64 Generation) const
+{
+	if (Generation == 0
+		|| Generation != ApplicationLifecycleGeneration
+		|| bLifecycleInvalidated
+		|| LiveRuntime.Get() != SuspendedRuntimeIdentity
+		|| LiveManifest.ModuleId != SuspendedModuleId
+		|| SuspendedWorld.IsStale()
+		|| HostContext.World != SuspendedWorld
+		|| HostContext.OwnerHandle != SuspendedOwnerHandle)
+	{
+		return false;
+	}
+
+	if (!SuspendedOwnerHandle.IsValid())
+	{
+		return true;
+	}
+	if (HostContext.ObjectRegistry == nullptr)
+	{
+		return false;
+	}
+	FAvidScriptObjectHandleResult ResolveResult;
+	const UObject* Owner = HostContext.ObjectRegistry->ResolveObject(
+		SuspendedOwnerHandle,
+		ResolveResult,
+		false);
+	return Owner != nullptr && Owner->GetWorld() == SuspendedWorld.Get();
+}
+
+void FAvidScriptRuntimeSession::AbortRuntimeForLifecycleInvalidation()
+{
+	check(IsInGameThread());
+	checkf(
+		!IsOperationActive(),
+		TEXT("AvidScript lifecycle invalidation cannot interrupt an active Runtime operation."));
+	TGuardValue<bool> MutationGuard(bMutationInProgress, true);
+	DelegateSubscriptions->SetDispatchEnabled(false);
+	DelegateSubscriptions->UnbindActive();
+	DelegateSubscriptions->DiscardPrepared();
+	InboundHandlers->SetDispatchEnabled(false);
+	InboundHandlers->UnbindActive();
+	InboundHandlers->DiscardPrepared();
+	Continuations->Teardown();
+	Scheduler->Detach();
+	if (LiveRuntime)
+	{
+		FAvidScriptWasmSmokeResult IgnoredUnloadResult;
+		LiveRuntime->Unload(IgnoredUnloadResult);
+		LiveRuntime.Reset();
+	}
+	if (GeneratedTypeInstance)
+	{
+		GeneratedTypeInstance->PreparedTypeRoutes.Reset();
+	}
+	Continuations->ReleaseRetiredEndpoint();
+	if (HostContext.ObjectRegistry != nullptr)
+	{
+		ObjectOwnership->Cleanup(*HostContext.ObjectRegistry);
+	}
+	HostContext = FAvidScriptWasmHostContext();
+	HostContext.DebugProbes = Debugger.Get();
+	HostContext.Profiler = Profiler.Get();
+	LiveManifest = FAvidScriptWasmReloadManifest();
+	Debugger->OnRuntimeGenerationChanged();
+	ClearFaultQuarantine();
+	bApplicationSuspended = false;
+	ResetSuspendedContext();
+}
+
+void FAvidScriptRuntimeSession::ResetSuspendedContext()
+{
+	SuspendedWorld.Reset();
+	SuspendedOwnerHandle = FAvidScriptObjectHandle();
+	SuspendedRuntimeIdentity = nullptr;
+	SuspendedModuleId.Reset();
 }
 
 bool FAvidScriptRuntimeSession::LoadEmbeddedSmoke(FAvidScriptWasmReloadResult& OutResult)
@@ -198,6 +375,16 @@ bool FAvidScriptRuntimeSession::LoadEmbeddedSmoke(FAvidScriptWasmReloadResult& O
 	ProfileScope.SetSucceeded(false);
 	const FString PreviousModuleId = GetLiveModuleId();
 	ResetReloadResult(OutResult, PreviousModuleId, ModuleId, PreviousModuleId);
+	if (bApplicationSuspended)
+	{
+		SetReloadFailure(
+			OutResult,
+			TEXT("<session>"),
+			TEXT("application_suspended"),
+			TEXT("embedded module load was requested while the application is suspended"),
+			TEXT("resume the application before loading a Runtime module"));
+		return false;
+	}
 	if (IsOperationActive())
 	{
 		SetReloadFailure(
@@ -282,6 +469,16 @@ bool FAvidScriptRuntimeSession::LoadInitialArtifact(
 	ProfileScope.SetSucceeded(false);
 	const FString PreviousModuleId = GetLiveModuleId();
 	ResetReloadResult(OutResult, PreviousModuleId, Manifest.ModuleId, PreviousModuleId);
+	if (bApplicationSuspended)
+	{
+		SetReloadFailure(
+			OutResult,
+			TEXT("<session>"),
+			TEXT("application_suspended"),
+			TEXT("initial module load was requested while the application is suspended"),
+			TEXT("resume the application before loading a Runtime module"));
+		return false;
+	}
 	if (IsOperationActive())
 	{
 		SetReloadFailure(
@@ -352,6 +549,18 @@ bool FAvidScriptRuntimeSession::ReloadArtifact(
 	ProfileScope.SetSucceeded(false);
 	const FString PreviousModuleId = GetLiveModuleId();
 	ResetReloadResult(OutResult, PreviousModuleId, Manifest.ModuleId, PreviousModuleId);
+	if (bApplicationSuspended)
+	{
+		SetReloadFailure(
+			OutResult,
+			TEXT("<session>"),
+			TEXT("application_suspended"),
+			TEXT("reload was requested while the application is suspended"),
+			TEXT("resume the application before replacing the Runtime module"));
+		++RejectedReloadCount;
+		MarkRejectedReloadWithRollback(PreviousModuleId, OutResult);
+		return false;
+	}
 	if (IsOperationActive())
 	{
 		SetReloadFailure(
@@ -593,6 +802,10 @@ void FAvidScriptRuntimeSession::ClearHostContext()
 
 bool FAvidScriptRuntimeSession::Tick(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult)
 {
+	if (SuppressApplicationLifecycleEntry(TEXT("avid_on_tick"), OutResult))
+	{
+		return true;
+	}
 	if (!CanEnterGuest(TEXT("avid_on_tick"), OutResult))
 	{
 		return false;
@@ -641,6 +854,10 @@ bool FAvidScriptRuntimeSession::DispatchGameplayEvent(
 
 bool FAvidScriptRuntimeSession::TickLive(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult)
 {
+	if (SuppressApplicationLifecycleEntry(TEXT("avid_on_tick"), OutResult))
+	{
+		return true;
+	}
 	FAvidScriptProfilerScope ProfileScope(
 		Profiler.Get(),
 		EAvidScriptProfilerEventKind::GuestCall,
@@ -687,6 +904,10 @@ bool FAvidScriptRuntimeSession::TickHot(
 	const float DeltaSeconds,
 	FAvidScriptWasmSmokeResult& OutFailure)
 {
+	if (SuppressApplicationLifecycleEntry(TEXT("avid_on_tick"), OutFailure))
+	{
+		return true;
+	}
 	FAvidScriptProfilerScope ProfileScope(
 		Profiler.Get(),
 		EAvidScriptProfilerEventKind::GuestCall,
@@ -766,6 +987,24 @@ bool FAvidScriptRuntimeSession::CanEnterGuest(
 	const FString& ExportName,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
+	if (bApplicationSuspended || bLifecycleInvalidated)
+	{
+		OutResult = FAvidScriptWasmSmokeResult();
+		OutResult.ModuleId = GetLiveModuleId();
+		OutResult.ExportName = ExportName;
+		OutResult.ErrorCategory = bApplicationSuspended
+			? TEXT("application_suspended")
+			: TEXT("lifecycle_invalidated");
+		OutResult.NextAction = bApplicationSuspended
+			? TEXT("resume the application before entering guest code")
+			: TEXT("bind a live World and load a new validated module");
+		OutResult.ErrorMessage = FString::Printf(
+			TEXT("AvidScript guest entry rejected | module=%s | export=%s | category=%s"),
+			OutResult.ModuleId.IsEmpty() ? TEXT("<none>") : *OutResult.ModuleId,
+			ExportName.IsEmpty() ? TEXT("<none>") : *ExportName,
+			*OutResult.ErrorCategory);
+		return false;
+	}
 	if (bFaultQuarantined)
 	{
 		++FaultedEntryRejectCount;
@@ -840,6 +1079,10 @@ bool FAvidScriptRuntimeSession::DispatchEventLive(
 	float Value,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
+	if (SuppressApplicationLifecycleEntry(TEXT("avid_on_event"), OutResult))
+	{
+		return true;
+	}
 	FAvidScriptProfilerScope ProfileScope(
 		Profiler.Get(),
 		EAvidScriptProfilerEventKind::GuestCall,
@@ -872,6 +1115,10 @@ bool FAvidScriptRuntimeSession::DispatchEventHot(
 	const float Value,
 	FAvidScriptWasmSmokeResult& OutFailure)
 {
+	if (SuppressApplicationLifecycleEntry(TEXT("avid_on_event"), OutFailure))
+	{
+		return true;
+	}
 	FAvidScriptProfilerScope ProfileScope(
 		Profiler.Get(),
 		EAvidScriptProfilerEventKind::GuestCall,
@@ -903,6 +1150,12 @@ bool FAvidScriptRuntimeSession::DispatchGameplayEventLive(
 	const FAvidScriptGameplayEvent& Event,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
+	if (SuppressApplicationLifecycleEntry(
+			TEXT("avid_on_gameplay_event"),
+			OutResult))
+	{
+		return true;
+	}
 	FAvidScriptProfilerScope ProfileScope(
 		Profiler.Get(),
 		EAvidScriptProfilerEventKind::GuestCall,
@@ -934,6 +1187,12 @@ bool FAvidScriptRuntimeSession::DispatchGameplayEventHot(
 	const FAvidScriptGameplayEvent& Event,
 	FAvidScriptWasmSmokeResult& OutFailure)
 {
+	if (SuppressApplicationLifecycleEntry(
+			TEXT("avid_on_gameplay_event"),
+			OutFailure))
+	{
+		return true;
+	}
 	FAvidScriptProfilerScope ProfileScope(
 		Profiler.Get(),
 		EAvidScriptProfilerEventKind::GuestCall,
@@ -966,6 +1225,10 @@ bool FAvidScriptRuntimeSession::DispatchPreparedDelegateEvent(
 	void* NativeParameters,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
+	if (SuppressApplicationLifecycleEntry(Event.ExportName, OutResult))
+	{
+		return true;
+	}
 	FAvidScriptProfilerScope ProfileScope(
 		Profiler.Get(),
 		EAvidScriptProfilerEventKind::GuestCall,
@@ -1074,6 +1337,16 @@ bool FAvidScriptRuntimeSession::StopAndUnload(FAvidScriptWasmSmokeResult& OutRes
 			OutResult);
 		return false;
 	}
+	if (bApplicationSuspended)
+	{
+		const FString SuspendedModule = GetLiveModuleId();
+		AbortRuntimeForLifecycleInvalidation();
+		bLifecycleInvalidated = false;
+		OutResult = FAvidScriptWasmSmokeResult();
+		OutResult.ModuleId = SuspendedModule;
+		OutResult.bUnloaded = true;
+		return true;
+	}
 	TGuardValue<bool> MutationGuard(bMutationInProgress, true);
 	bool bSucceeded = true;
 	FAvidScriptWasmSmokeResult EndPlayFailure;
@@ -1115,6 +1388,9 @@ bool FAvidScriptRuntimeSession::StopAndUnload(FAvidScriptWasmSmokeResult& OutRes
 	LiveManifest = FAvidScriptWasmReloadManifest();
 	Debugger->OnRuntimeGenerationChanged();
 	ClearFaultQuarantine();
+	bLifecycleInvalidated = false;
+	bApplicationSuspended = false;
+	ResetSuspendedContext();
 	return bSucceeded;
 }
 
@@ -1418,6 +1694,12 @@ FAvidScriptRuntimeSessionSnapshot FAvidScriptRuntimeSession::GetSnapshot() const
 	Snapshot.EventCallbackCount = GetLiveEventCallbackCount();
 	Snapshot.SuccessfulReloadCount = SuccessfulReloadCount;
 	Snapshot.RejectedReloadCount = RejectedReloadCount;
+	Snapshot.ApplicationLifecycleGeneration = ApplicationLifecycleGeneration;
+	Snapshot.SuppressedLifecycleEntryCount = SuppressedLifecycleEntryCount;
+	Snapshot.LowMemoryNotificationCount = LowMemoryNotificationCount;
+	Snapshot.LifecycleInvalidationCount = LifecycleInvalidationCount;
+	Snapshot.bApplicationSuspended = bApplicationSuspended;
+	Snapshot.bLifecycleInvalidated = bLifecycleInvalidated;
 	return Snapshot;
 }
 
@@ -2043,5 +2325,6 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 		InboundCommitError.IsEmpty() ? TEXT("unknown") : *InboundCommitError);
 	InboundHandlers->SetDispatchEnabled(true);
 	ClearFaultQuarantine();
+	bLifecycleInvalidated = false;
 	return true;
 }
