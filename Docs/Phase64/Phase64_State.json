@@ -5,7 +5,7 @@
     "goal": "交付可直接启动的 C# 游戏纵向切片、数据驱动 Runtime 挂载层，以及 Android arm64 构建与设备就绪 Gate",
     "start_commit": "e036d0765a16fa177e73935905e160065a62eb96"
   },
-  "declared_stage": "implementing",
+  "declared_stage": "gate_ready",
   "architecture": {
     "path": "Docs/Phase64/P64.0_Production_Gameplay_Architecture.md",
     "version": 1,
@@ -84,9 +84,9 @@
     }
   ],
   "review": {
-    "completed": false,
-    "evidence": "",
-    "completed_at_utc": null
+    "completed": true,
+    "evidence": "Docs/Phase64/P64_Integration_Review.md; cb2cc02 集中修复已提交推送，聚焦 Automation 9/9、Android runner 24/24、当前 PickupRush 包胜利状态、clean detached architecture 通过。冻结用于本实现范围的统一回归，不代表 Android、人工游玩、UI/存档/长跑原始验收完成。",
+    "completed_at_utc": "2026-09-03T19:43:08.8390471+00:00"
   },
   "budgets": {
     "ubt": 3,
@@ -99,11 +99,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "",
-    "source_tree": "",
-    "state_sha256": "",
-    "review_evidence": "",
-    "at_utc": null
+    "source_commit": "cb2cc02e257a3c0c19fd6f5bdbb56237875d0f47",
+    "source_tree": "f05b75aa3285eededf0ccd0e0cb70bb28591d716",
+    "state_sha256": "4fb16169ad021278b91e7f4f5909e55535cce272fbfa66db681ae3670662ef60",
+    "review_evidence": "Docs/Phase64/P64_Integration_Review.md; cb2cc02 集中修复已提交推送，聚焦 Automation 9/9、Android runner 24/24、当前 PickupRush 包胜利状态、clean detached architecture 通过。冻结用于本实现范围的统一回归，不代表 Android、人工游玩、UI/存档/长跑原始验收完成。",
+    "at_utc": "2026-09-03T19:43:08.8390471+00:00"
   },
   "gate": {
     "report_path": "",
@@ -134,7 +134,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "freeze -Phase 64 -ReviewEvidence <text>",
-  "revision": 12,
-  "updated_at_utc": "2026-09-03T19:40:46.9717590+00:00"
+  "next_action": "attest -Phase 64 -GateReportPath <path>",
+  "revision": 13,
+  "updated_at_utc": "2026-09-03T19:43:08.8440816+00:00"
 }
