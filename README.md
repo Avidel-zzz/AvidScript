@@ -49,12 +49,10 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 | Profiler | 全链路埋点与 UE Trace；Editor capture、过滤、热点、源码跳转和 JSON 导出面板 |
 | C# 工作区 | `.slnx`、WASI 工程、固定 SDK、离线源码索引，以及 Visual Studio/Rider/VS Code 启动命令 |
 
-当前主线已完成 Phase 62：C# 游戏逻辑、生成式 UE API、生命周期/事件/异步/网络、热重载、
-Editor 调试与 Profiler，以及 Win64 Development/Shipping 的确定性 Cook 发布闭环均已接通。
-发布包支持逻辑 `ModuleId`、内容寻址 catalog、Wasmtime 预编译 artifact、回执校验和
-fail-closed 加载；运行时具备执行预算、共享 watchdog 与 Session 故障隔离。
-Phase 63 已完成多平台 catalog、Android arm64 受控静态依赖与真实 C# 交叉 AOT 发布闭环；
-Android UBT、打包和真机执行仍在后续批次。
+当前主线已完成 C# 游戏逻辑、生成式 UE API、生命周期/事件/异步/网络、热重载、Editor 调试与
+Profiler，以及 Win64 Development/Shipping 的确定性 Cook 发布闭环。Phase 63 已实现多平台
+catalog、Android arm64 受控静态依赖、真实 C# 交叉 AOT 发布，以及应用后台恢复、低内存回收和
+World teardown 的 Runtime 生命周期协调；Android UBT、打包和真机执行仍待后续验收。
 
 集中 Gate 已通过 `.NET 284/284`、AvidScript Automation `429/429`、UE5.8 no-clean UBT、
 干净架构检查和发布/Cook/回执合同。详细证据见 [Phase 62 Gate 摘要](Docs/Phase62/P62_Gate_Summary.json)、
@@ -234,13 +232,13 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 - 容器当前聚焦一维 `TArray<T>`；nested array、`TSet`、`TMap` 与 `FText` 尚未完整支持；
 - C# 前端提供受控游戏脚本子集，不包含完整 .NET Runtime、任意 awaiter 或异常系统；
 - 反射结构变化仍需 no-clean UBT 并重启 Editor，方法体变化可自动热重载；
-- Generated Type 预编译发布与 Win64 Development/Shipping 打包启动已验收，移动端 AOT 尚未验收；Session 可隔离受控 WASM 故障，但原生 C++/DLL 崩溃不属于进程沙箱能力；
+- Generated Type 预编译发布与 Win64 Development/Shipping 打包启动已验收；Android arm64 交叉 AOT 已验证，但移动端 UBT、打包和真机尚未验收；Session 可隔离受控 WASM 故障，但原生 C++/DLL 崩溃不属于进程沙箱能力；
 - 正式竞品性能矩阵目前覆盖 Puerts V8，尚未同口径覆盖 UnLua 与 AngelScript。
 
 ## 路线图
 
 1. **P62 已完成**：Win64 Cook/Shipping、发布资产策略与脚本故障隔离；
-2. **P63 进行中**：多平台 catalog 与 Android arm64 依赖已完成，继续交付交叉 AOT 发布；
+2. **P63 进行中**：多平台 catalog、Android arm64 交叉 AOT 与移动 Runtime 生命周期已实现，正在完成集中 Gate；
 3. **P64**：真实小型游戏 Demo 与移动真机验收；
 4. **P65**：跨框架成熟度、稳定性与性能领导力收口。
 

@@ -15,6 +15,7 @@
 #include "Session/AvidScriptSessionInboundHandlers.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeSessionPrivate.h"
 #include "StateMigration/AvidScriptRuntimeStateMigration.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
 #include "Validation/AvidScriptWasmImportPolicy.h"
@@ -245,6 +246,15 @@ bool FAvidScriptRuntimeSession::InvalidateForWorldTeardown(UWorld& World)
 {
 	check(IsInGameThread());
 	if (HostContext.World.Get() != &World)
+	{
+		return false;
+	}
+
+	// UWorld broadcasts cleanup before its subsystems receive Deinitialize.
+	// Their generated terminal route owns orderly Session teardown.
+	if (GeneratedTypeInstance
+		&& GeneratedTypeInstance->Receiver.IsValid()
+		&& GeneratedTypeInstance->Receiver->IsA<UWorldSubsystem>())
 	{
 		return false;
 	}
