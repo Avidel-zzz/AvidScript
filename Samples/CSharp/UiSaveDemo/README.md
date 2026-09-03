@@ -2,15 +2,15 @@
 
 本样例用 C# 实现按钮事件、计分和 UE SaveGame 存取。模块为 `avidscript.ui_save_demo`，binding package 为
 `avidscript.sample.ui_save_demo`。已通过资产生成、C# 到 WASM/AOT 发布，以及 Editor 游戏进程的
-保存、重启读回、缺档、GC、存档异常、20 轮正文热重载与组件退出清理验证；物理输入与视觉体验仍待验收。
+保存、重启读回、缺档、GC、存档异常、20 轮存取穿插正文热重载与组件退出清理验证；物理输入与视觉体验仍待验收。
 
 ## 行为与生命周期
 
 - Collect 增加分数，上限 999999；Reset 仅清零当前分数，不删除存档。
 - Save 使用 UE `SaveGameToSlot`；Load 先检查存在性，再读取并验证类型与分数范围。
 - 缺档、读取失败、错误类型、无效分数或保存失败显示独立状态，不把失败解释为成功。
-- 异步 BeginPlay 先 `await AvidContinuations.NextTickAsync()`，候选提交后再挂载 UI、订阅四个 Button 并显示 Ready；任意订阅失败取消整组。EndPlay 先禁用派发并取消订阅，再移除 UI，释放本 Session 创建的存档对象。
-- 计分字段使用 `[AvidPersist]`，订阅和对象句柄使用 `[AvidTransient]`。热重载状态与磁盘存档是两条独立通路。
+- 异步 BeginPlay 先 `await AvidContinuations.NextTickAsync()`，候选提交后再挂载 UI、订阅四个 Button 并显示 Ready；任意订阅失败取消整组。EndPlay 先禁用派发并取消订阅，再移除 UI、清空宿主的存档对象引用。
+- 计分字段使用 `[AvidPersist]`，就绪状态与订阅使用 `[AvidTransient]`。存档对象由宿主属性持有，不放入重载时清空的 static 字段；热重载状态与磁盘存档是两条独立通路。
 - 存档 slot 固定为 `AvidScript_UiSaveDemo_v1`，UserIndex 为 0。只操作本样例的 slot，不枚举、清理或覆盖其他 slot。
 - 自动验收使用隔离的 UE `-UserDir`；跨进程读回复用同一个隔离目录，不操作用户实际样例存档。
 
@@ -34,6 +34,11 @@ Host 必须先完成 Widget 初始化，startup coordinator 再激活脚本。
 `RootWidget` 保留宿主强引用；脚本 EndPlay 移除挂载后，后续 BeginPlay 通过标准 `AddToViewport` 重新挂载。
 `SavedObject` 持有读取/创建结果，不能把 Guest static handle 当作 GC 引用。
 Load 先将 `USaveGame` 返回值 TryCast 为 `UPlayerSave` 并校验 Score，全部通过后才提交到强类型 `SavedObject`；失败保留原引用和分数。
+
+Save 优先复用 `SavedObject`，只在为空时 `UE.NewObject`。新对象先交给宿主强引用，保存完成后
+立即 `UE.Release` 本次新建的 Session ownership，无论保存成功还是失败；此后不再使用这个句柄。
+下一次通过宿主属性取得新的 borrowed 授权。不能对已加载/借用的对象按 owned 对象释放，也不能
+在每次热重载时清空整个 Session 的 owned 对象集合。存取与重载交错的专项已通过，见下方集成验收。
 
 源码中的 `AUiSaveHost/UUiSaveWidget/UPlayerSave` 是标准 C# using aliases，分别指向生成类型
 `ABP_UiSaveHost_C/UWBP_UiSave_C/UBP_PlayerSave_C`，没有手写这些 facade 类型。
@@ -100,5 +105,10 @@ callback 内比较经验证的来源对象，callback 外返回 false，拒绝�
 Collect 加 1/加 2，分数迁移，非法候选拒绝后旧逻辑继续运行；订阅不累积，退出后迟到事件无效。
 实测后端为 Wasmtime 45 JIT，启动发布包不代表整个重载流程都以 AOT 执行。
 
-详见[异常流程验收](../../../Docs/Phase64/P64.D_UI_Save_Edges.md)。Save/Load 穿插重载、World 销毁、
-包内 UI 与长稳仍待验证；空文件分支不代表任意损坏文件都可安全解析。合成事件不替代真实输入和视觉验收。
+新增 [Save/Load 穿插重载验收](../../../Docs/Phase64/P64.D_Save_Reload_Ownership.md)通过 **20 轮、165/165 动作**：
+每轮保存、Reset、加载与 GC 后，再拒绝非法候选并继续交互。旧存档对象均可回收，当前对象仍存活；
+保存返回时 owned 为 0，GC 后 borrowed 稳定为 UI 基线加 1。使用 `VerifyReload -ReloadWithSaveLoad`
+启用，三个制品参数与纯 UI 重载相同；省略开关保留原有不存档模式。
+
+详见[异常流程验收](../../../Docs/Phase64/P64.D_UI_Save_Edges.md)。World 销毁、包内 UI 与长稳仍待验证；
+空文件分支不代表任意损坏文件都可安全解析。合成事件不替代真实输入和视觉验收。

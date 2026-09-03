@@ -42,7 +42,12 @@ UI [正文重载小节](P64.D_UI_Reload.md)已通过 20 轮、84/84 动作、99/
 [async 短路修复](P64.D_Async_Short_Circuit.md)已通过 Guest 140/140 与 Semantic 98/98；
 13 个 Guest IR 执行场景和 WASM 编译验证不替代真实 WASM 执行，也不并入历史完整技术基线。
 
-P64.D 依架构 v7 继续补齐 UI 真实输入/视觉、包内 UI、Save/Load 穿插重载、World 退出、长时间运行，以及 Android toolchain/UBT/APK。
+架构 v8 的[存取穿插重载小节](P64.D_Save_Reload_Ownership.md)已通过 20 轮、165/165 动作和
+20 次真实 GC；旧存档对象全部回收，103 个快照的 owned 为 0、borrowed 为 7～8。Runtime 仅在
+GC 完成后清理失效 borrowed lease，活跃调用与候选准备期延迟；生命周期专项 18/18、runner 合同
+118/118、原有纯 UI 重载 84/84 通过，不扩充历史全量基线。
+
+P64.D 依架构 v8 继续补齐 UI 真实输入/视觉、包内 UI、World 退出、长时间运行，以及 Android toolchain/UBT/APK。
 人工游玩和真实设备验收独立保留。P58 类型、iOS、发布工程及性能领先等总目标缺口不会随本阶段编号自动关闭。
 
 ## 流程修正

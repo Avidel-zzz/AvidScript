@@ -4,6 +4,7 @@
 #include "AvidScriptVmArtifact.h"
 #include "Engine/World.h"
 #include "Misc/CoreDelegates.h"
+#include "UObject/UObjectGlobals.h"
 
 FAvidScriptRuntimeLifecycleCoordinator&
 FAvidScriptRuntimeLifecycleCoordinator::Get()
@@ -35,6 +36,9 @@ void FAvidScriptRuntimeLifecycleCoordinator::Startup()
 	WorldCleanupHandle = FWorldDelegates::OnWorldCleanup.AddRaw(
 		this,
 		&FAvidScriptRuntimeLifecycleCoordinator::HandleWorldCleanup);
+	GarbageCollectCompleteHandle = FCoreUObjectDelegates::GarbageCollectComplete.AddRaw(
+		this,
+		&FAvidScriptRuntimeLifecycleCoordinator::HandleGarbageCollectComplete);
 	bStarted = true;
 }
 
@@ -53,6 +57,11 @@ void FAvidScriptRuntimeLifecycleCoordinator::Shutdown()
 	FCoreDelegates::ApplicationShouldUnloadResourcesDelegate.Remove(
 		LowMemoryHandle);
 	FWorldDelegates::OnWorldCleanup.Remove(WorldCleanupHandle);
+	FCoreUObjectDelegates::GarbageCollectComplete.Remove(GarbageCollectCompleteHandle);
+	for (FAvidScriptRuntimeSession* Session : Sessions)
+	{
+		Session->bBorrowedHandlePrunePending = false;
+	}
 	Sessions.Reset();
 	bStarted = false;
 	bApplicationSuspended = false;
@@ -73,6 +82,7 @@ void FAvidScriptRuntimeLifecycleCoordinator::UnregisterSession(
 	FAvidScriptRuntimeSession& Session)
 {
 	check(IsInGameThread());
+	Session.bBorrowedHandlePrunePending = false;
 	Sessions.Remove(&Session);
 }
 
@@ -148,6 +158,18 @@ void FAvidScriptRuntimeLifecycleCoordinator::HandleLowMemory()
 		if (Session != nullptr && Sessions.Contains(Session))
 		{
 			Session->HandleApplicationLowMemory();
+		}
+	}
+}
+
+void FAvidScriptRuntimeLifecycleCoordinator::HandleGarbageCollectComplete()
+{
+	check(IsInGameThread());
+	for (FAvidScriptRuntimeSession* Session : SnapshotSessions())
+	{
+		if (Session != nullptr && Sessions.Contains(Session))
+		{
+			Session->HandleGarbageCollectComplete();
 		}
 	}
 }

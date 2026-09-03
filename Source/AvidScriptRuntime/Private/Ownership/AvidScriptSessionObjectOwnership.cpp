@@ -271,6 +271,45 @@ void FAvidScriptSessionObjectOwnership::Cleanup(FAvidScriptObjectRegistry& Regis
 	}
 }
 
+void FAvidScriptSessionObjectOwnership::PruneInvalidBorrowedHandles(
+	FAvidScriptObjectRegistry& Registry)
+{
+	check(IsInGameThread());
+	if (!ensureMsgf(BoundRegistry == nullptr || BoundRegistry == &Registry,
+		TEXT("Borrowed-handle pruning used a registry other than the bound session registry.")))
+	{
+		return;
+	}
+
+	// Retain journal order in one pass. The Session must not call this while a
+	// candidate owns a RetainedCount checkpoint into the borrowed journal.
+	int32 RetainedCount = 0;
+	for (int32 Index = 0; Index < BorrowedObjects.Num(); ++Index)
+	{
+		const FBorrowedObject& BorrowedObject = BorrowedObjects[Index];
+		if (!IsValid(BorrowedObject.ObjectKey.ResolveObjectPtr()))
+		{
+			FAvidScriptObjectHandleResult ReleaseResult;
+			// The registry validates the generation and releases only this lease;
+			// an already invalidated handle must not affect a recycled slot.
+			Registry.ReleaseBorrowedHandle(BorrowedObject.Handle, ReleaseResult, false);
+			ObjectToBorrowedIndex.Remove(BorrowedObject.ObjectKey);
+			HandleToBorrowedIndex.Remove(BorrowedObject.Handle.ToUInt64());
+			continue;
+		}
+		if (RetainedCount != Index)
+		{
+			BorrowedObjects[RetainedCount] = MoveTemp(BorrowedObjects[Index]);
+			const FBorrowedObject& Retained = BorrowedObjects[RetainedCount];
+			ObjectToBorrowedIndex.FindChecked(Retained.ObjectKey) = RetainedCount;
+			HandleToBorrowedIndex.FindChecked(Retained.Handle.ToUInt64()) = RetainedCount;
+		}
+		++RetainedCount;
+	}
+	BorrowedObjects.SetNum(RetainedCount, EAllowShrinking::No);
+	ResetBoundRegistryIfEmpty();
+}
+
 bool FAvidScriptSessionObjectOwnership::RollbackBorrowedHandles(
 	FAvidScriptObjectRegistry& Registry,
 	const int32 RetainedCount,

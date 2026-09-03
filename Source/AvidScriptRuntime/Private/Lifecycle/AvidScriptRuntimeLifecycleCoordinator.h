@@ -41,6 +41,7 @@ private:
 	void HandleEnterBackground();
 	void HandleEnterForeground();
 	void HandleLowMemory();
+	void HandleGarbageCollectComplete();
 	void HandleWorldCleanup(UWorld* World, bool bSessionEnded, bool bCleanupResources);
 	TArray<FAvidScriptRuntimeSession*> SnapshotSessions() const;
 
@@ -49,6 +50,7 @@ private:
 	FDelegateHandle EnterForegroundHandle;
 	FDelegateHandle LowMemoryHandle;
 	FDelegateHandle WorldCleanupHandle;
+	FDelegateHandle GarbageCollectCompleteHandle;
 	uint64 ApplicationGeneration = 0;
 	int32 BackgroundCount = 0;
 	int32 ForegroundCount = 0;

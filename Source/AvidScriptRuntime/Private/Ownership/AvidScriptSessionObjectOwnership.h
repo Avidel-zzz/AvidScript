@@ -43,6 +43,7 @@ public:
 
 	int32 Num() const { return OwnedObjects.Num(); }
 	int32 GetBorrowedHandleCount() const { return BorrowedObjects.Num(); }
+	void PruneInvalidBorrowedHandles(FAvidScriptObjectRegistry& Registry);
 	bool RollbackBorrowedHandles(
 		FAvidScriptObjectRegistry& Registry,
 		int32 RetainedCount,

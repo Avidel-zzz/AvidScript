@@ -146,6 +146,10 @@ public:
 			InitializationError = TEXT("unknown_ui_save_probe_mode"); return;
 		}
 		if (!IsHexIdentity(ExpectedPackage)) { InitializationError = TEXT("expected_package_requires_64hex"); return; }
+		if (FParse::Param(Command, TEXT("AvidScriptUiSaveReloadWithSaveLoad")) && Mode != TEXT("reload"))
+		{
+			InitializationError = TEXT("save_load_flag_requires_reload_mode"); return;
+		}
 		ExpectedPackage.ToLowerInline();
 		if (UserRoot.IsEmpty() || FPaths::IsRelative(UserRoot))
 		{
@@ -181,7 +185,7 @@ public:
 		if (Mode == TEXT("reload"))
 		{
 			Reload = MakeUnique<FUiSaveReload>();
-			if (!Reload->Initialize(InitializationError)) { return; }
+			if (!Reload->Initialize(SavePath, InitializationError)) { return; }
 			Reload->AppendSteps(Steps);
 		}
 		else if (Mode == TEXT("edges"))
@@ -472,7 +476,7 @@ public:
 			}
 			else if (!Step.Button.IsNone())
 			{
-				if (Step.Action == TEXT("save") && IFileManager::Get().FileExists(*SavePath))
+				if (Step.Action == TEXT("save") && !(Reload && Reload->IsWithSaveLoad()) && IFileManager::Get().FileExists(*SavePath))
 				{
 					Finish(false, TEXT("refusing_to_overwrite_existing_save")); return false;
 				}
@@ -483,11 +487,17 @@ public:
 					Finish(false, TEXT("button_or_csharp_subscription_unavailable")); return false;
 				}
 				Button->OnClicked.Broadcast();
+				if (Reload && Reload->IsWithSaveLoad() && Step.Action == TEXT("save"))
+				{
+					if (!Component.IsValid()) { Finish(false, TEXT("reload_save_return_component_lost")); return false; }
+					if (!Reload->ObserveSaveReturn(*Component.Get(), *Action, EdgeError)) { Finish(false, EdgeError); return false; }
+				}
 			}
 			return true;
 		}
 		if (Reload && !Reload->CanObserveStep()) { return true; }
-		if (bGcPerformed && (!SavedBeforeGc.IsValid() || ReadUiObject<UObject>(Host.Get(), TEXT("SavedObject")) != SavedBeforeGc.Get()))
+		if (bGcPerformed && !(Reload && Reload->IsWithSaveLoad())
+			&& (!SavedBeforeGc.IsValid() || ReadUiObject<UObject>(Host.Get(), TEXT("SavedObject")) != SavedBeforeGc.Get()))
 		{
 			Finish(false, TEXT("saved_object_lost_after_gc")); return false;
 		}
@@ -516,7 +526,7 @@ public:
 		{
 			TArray<uint8> Bytes;
 			const bool bExists = IFileManager::Get().FileExists(*SavePath);
-			if (Mode == TEXT("missing") || Mode == TEXT("reload"))
+			if (Mode == TEXT("missing") || (Mode == TEXT("reload") && !Reload->IsWithSaveLoad()))
 			{
 				if (bExists) { Finish(false, TEXT("non_saving_probe_created_a_save")); return false; }
 			}
@@ -531,6 +541,10 @@ public:
 			else if (Edges && FAvidScriptHash::Sha256Hex(Bytes) != Edges->GetExpectedHash())
 			{
 				Finish(false, TEXT("edges_save_modified_outside_fixture")); return false;
+			}
+			else if (Reload && Reload->IsWithSaveLoad() && FAvidScriptHash::Sha256Hex(Bytes) != Reload->GetExpectedSaveHash())
+			{
+				Finish(false, TEXT("reload_final_save_changed")); return false;
 			}
 			FinalSaveBytes = Bytes.Num();
 			if (!Bytes.IsEmpty()) { FinalSaveHash = FAvidScriptHash::Sha256Hex(Bytes); }

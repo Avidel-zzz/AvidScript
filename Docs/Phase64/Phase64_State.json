@@ -8,9 +8,9 @@
   "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase64/P64.0_Production_Gameplay_Architecture.md",
-    "version": 7,
-    "sha256": "48d121773e1fe06cb0993649821a397aeebd6b77dbff6ee10aca5dbacf24b235",
-    "revision_reason": "保留原始 P64 目标；复用现有 NextTickAsync 的准备/提交生命周期分离 UI 初始化，冻结真实正文切换、失败候选回滚与有界重载证据合同，不增加 ABI 或 UMG 特判"
+    "version": 8,
+    "sha256": "366ee7a381d6a620c3c145ef0382e0dfc2beb572215f290c1cfab9e637da677a",
+    "revision_reason": "保留P64全部原始目标；冻结Save/Load穿插重载、宿主持有与短期ownership、GC完成后冷路径回收失效borrowed lease；不清空跨重载owned对象，不改变ABI"
   },
   "documents": {
     "plan": "Docs/Phase64/P64.0_Implementation_Plan.md",
@@ -174,6 +174,6 @@
     }
   ],
   "next_action": "debt-update -Phase 64 -DebtId P64-D03-OriginalGameplayAcceptance -Status Verified -Evidence <text>",
-  "revision": 26,
-  "updated_at_utc": "2026-09-03T23:07:22.6135232+00:00"
+  "revision": 27,
+  "updated_at_utc": "2026-09-03T23:11:11.6594710+00:00"
 }

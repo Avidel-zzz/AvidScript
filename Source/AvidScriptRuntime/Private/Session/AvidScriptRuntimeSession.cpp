@@ -212,6 +212,7 @@ bool FAvidScriptRuntimeSession::ResumeFromApplicationLifecycle(
 	const uint64 Generation)
 {
 	check(IsInGameThread());
+	PrunePendingBorrowedHandles();
 	if (!bApplicationSuspended)
 	{
 		return !bLifecycleInvalidated;
@@ -240,6 +241,28 @@ void FAvidScriptRuntimeSession::HandleApplicationLowMemory()
 	check(IsInGameThread());
 	++LowMemoryNotificationCount;
 	Profiler->Reset();
+}
+
+void FAvidScriptRuntimeSession::HandleGarbageCollectComplete()
+{
+	check(IsInGameThread());
+	bBorrowedHandlePrunePending = true;
+	PrunePendingBorrowedHandles();
+}
+
+void FAvidScriptRuntimeSession::PrunePendingBorrowedHandles()
+{
+	if (!bBorrowedHandlePrunePending || IsOperationActive())
+	{
+		return;
+	}
+	check(IsInGameThread());
+	TGuardValue<bool> MutationGuard(bMutationInProgress, true);
+	bBorrowedHandlePrunePending = false;
+	if (HostContext.ObjectRegistry != nullptr)
+	{
+		ObjectOwnership->PruneInvalidBorrowedHandles(*HostContext.ObjectRegistry);
+	}
 }
 
 bool FAvidScriptRuntimeSession::InvalidateForWorldTeardown(UWorld& World)
@@ -361,6 +384,7 @@ void FAvidScriptRuntimeSession::AbortRuntimeForLifecycleInvalidation()
 	Debugger->OnRuntimeGenerationChanged();
 	ClearFaultQuarantine();
 	bApplicationSuspended = false;
+	bBorrowedHandlePrunePending = false;
 	ResetSuspendedContext();
 }
 
@@ -374,6 +398,7 @@ void FAvidScriptRuntimeSession::ResetSuspendedContext()
 
 bool FAvidScriptRuntimeSession::LoadEmbeddedSmoke(FAvidScriptWasmReloadResult& OutResult)
 {
+	PrunePendingBorrowedHandles();
 	const FString ModuleId = TEXT("embedded_smoke");
 	FAvidScriptProfilerScope ProfileScope(
 		Profiler.Get(),
@@ -468,6 +493,7 @@ bool FAvidScriptRuntimeSession::LoadInitialArtifact(
 	const FAvidScriptRuntimeArtifact& Artifact,
 	FAvidScriptWasmReloadResult& OutResult)
 {
+	PrunePendingBorrowedHandles();
 	const FAvidScriptWasmReloadManifest& Manifest = Artifact.Manifest;
 	FAvidScriptProfilerScope ProfileScope(
 		Profiler.Get(),
@@ -548,6 +574,7 @@ bool FAvidScriptRuntimeSession::ReloadArtifact(
 	const FAvidScriptRuntimeArtifact& Artifact,
 	FAvidScriptWasmReloadResult& OutResult)
 {
+	PrunePendingBorrowedHandles();
 	const FAvidScriptWasmReloadManifest& Manifest = Artifact.Manifest;
 	FAvidScriptProfilerScope ProfileScope(
 		Profiler.Get(),
@@ -649,6 +676,7 @@ bool FAvidScriptRuntimeSession::ReloadArtifact(
 }
 void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext& InHostContext)
 {
+	PrunePendingBorrowedHandles();
 	if (IsOperationActive())
 	{
 		UE_LOG(
@@ -727,6 +755,10 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 	{
 		ObjectOwnership->Cleanup(*HostContext.ObjectRegistry);
 	}
+	if (bDelegateSourceChanged)
+	{
+		bBorrowedHandlePrunePending = false;
+	}
 	HostContext = MoveTemp(NextHostContext);
 	if (LiveRuntime)
 	{
@@ -803,6 +835,7 @@ void FAvidScriptRuntimeSession::ClearHostContext()
 	HostContext = FAvidScriptWasmHostContext();
 	HostContext.DebugProbes = Debugger.Get();
 	HostContext.Profiler = Profiler.Get();
+	bBorrowedHandlePrunePending = false;
 	if (LiveRuntime)
 	{
 		LiveRuntime->SetHostContext(HostContext);
@@ -997,6 +1030,7 @@ bool FAvidScriptRuntimeSession::CanEnterGuest(
 	const FString& ExportName,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
+	PrunePendingBorrowedHandles();
 	if (bApplicationSuspended || bLifecycleInvalidated)
 	{
 		OutResult = FAvidScriptWasmSmokeResult();
@@ -1284,6 +1318,7 @@ bool FAvidScriptRuntimeSession::CaptureLiveSnapshot(
 
 bool FAvidScriptRuntimeSession::EndPlayLive(FAvidScriptWasmSmokeResult& OutResult)
 {
+	PrunePendingBorrowedHandles();
 	FAvidScriptProfilerScope ProfileScope(
 		Profiler.Get(),
 		EAvidScriptProfilerEventKind::GuestCall,
@@ -1330,7 +1365,9 @@ bool FAvidScriptRuntimeSession::EndPlayLive(FAvidScriptWasmSmokeResult& OutResul
 	}
 	else if (HostContext.ObjectRegistry != nullptr)
 	{
+		TGuardValue<bool> MutationGuard(bMutationInProgress, true);
 		ObjectOwnership->Cleanup(*HostContext.ObjectRegistry);
+		bBorrowedHandlePrunePending = false;
 	}
 	ProfileScope.SetSucceeded(bSucceeded);
 	return bSucceeded;
@@ -1400,6 +1437,7 @@ bool FAvidScriptRuntimeSession::StopAndUnload(FAvidScriptWasmSmokeResult& OutRes
 	ClearFaultQuarantine();
 	bLifecycleInvalidated = false;
 	bApplicationSuspended = false;
+	bBorrowedHandlePrunePending = false;
 	ResetSuspendedContext();
 	return bSucceeded;
 }
@@ -1508,6 +1546,7 @@ bool FAvidScriptRuntimeSession::ResumeDebugExecution(
 	const EAvidScriptDebugRunMode RunMode,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
+	PrunePendingBorrowedHandles();
 	FAvidScriptProfilerScope ProfileScope(
 		Profiler.Get(),
 		EAvidScriptProfilerEventKind::GuestCall,

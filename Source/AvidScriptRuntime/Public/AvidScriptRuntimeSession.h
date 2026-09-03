@@ -213,6 +213,8 @@ private:
 	void SuspendForApplicationLifecycle(uint64 Generation);
 	bool ResumeFromApplicationLifecycle(uint64 Generation);
 	void HandleApplicationLowMemory();
+	void HandleGarbageCollectComplete();
+	void PrunePendingBorrowedHandles();
 	bool InvalidateForWorldTeardown(UWorld& World);
 	bool SuppressApplicationLifecycleEntry(
 		const FString& ExportName,
@@ -270,6 +272,7 @@ private:
 	int32 RejectedReloadCount = 0;
 	int32 ActiveGuestCallDepth = 0;
 	bool bMutationInProgress = false;
+	bool bBorrowedHandlePrunePending = false;
 	bool bFaultQuarantined = false;
 	FString FaultedModuleId;
 	FString FaultCategory;

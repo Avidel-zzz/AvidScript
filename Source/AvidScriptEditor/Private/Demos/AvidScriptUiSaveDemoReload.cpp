@@ -10,6 +10,7 @@
 #include "CoreGlobals.h"
 #include "Dom/JsonObject.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/SaveGame.h"
 #include "HAL/PlatformFileManager.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/CommandLine.h"
@@ -17,6 +18,7 @@
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonSerializer.h"
+#include "UObject/UnrealType.h"
 
 namespace AvidScript::UiSaveDemo
 {
@@ -77,6 +79,15 @@ int32 CountButtons(UUserWidget& Widget)
 	return Count;
 }
 
+bool ReadReloadSavedScore(UObject* Object, int32& Score)
+{
+	if (!IsValid(Object) || !Object->IsA<USaveGame>()) { return false; }
+	const FIntProperty* Property = FindFProperty<FIntProperty>(Object->GetClass(), TEXT("Score"));
+	if (!Property) { return false; }
+	Score = Property->GetPropertyValue_InContainer(Object);
+	return true;
+}
+
 TSharedRef<FJsonObject> ReloadResultJson(const FAvidScriptWasmReloadResult& Result, bool bReturned)
 {
 	TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
@@ -99,9 +110,12 @@ TSharedRef<FJsonObject> ReloadResultJson(const FAvidScriptWasmReloadResult& Resu
 }
 }
 
-bool FUiSaveReload::Initialize(FString& Error)
+bool FUiSaveReload::Initialize(const FString& InSavePath, FString& Error)
 {
 	Started = FPlatformTime::Seconds();
+	SavePath = InSavePath;
+	bWithSaveLoad = FParse::Param(FCommandLine::Get(), TEXT("AvidScriptUiSaveReloadWithSaveLoad"));
+	Report->SetBoolField(TEXT("with_save_load"), bWithSaveLoad);
 	FString CycleText;
 	if (FParse::Value(FCommandLine::Get(), TEXT("AvidScriptUiSaveReloadCycles="), CycleText))
 	{
@@ -206,13 +220,21 @@ void FUiSaveReload::AppendSteps(TArray<FProbeStep>& Steps) const
 {
 	int32 Score = 1;
 	Steps.Add({ TEXT("collect"), TEXT("CollectButton"), TEXT("1"), TEXT("Collected") });
+	if (bWithSaveLoad) { Steps.Add({ TEXT("save"), TEXT("SaveButton"), TEXT("1"), TEXT("Saved") }); }
 	for (int32 Cycle = 1; Cycle <= Cycles; ++Cycle)
 	{
 		const int32 Delta = Cycle % 2 == 1 ? 2 : 1;
 		Steps.Add({ Delta == 2 ? TEXT("reload_changed") : TEXT("reload_baseline"), NAME_None, FString::FromInt(Score), TEXT("Ready") });
 		Score += Delta;
 		Steps.Add({ TEXT("collect"), TEXT("CollectButton"), FString::FromInt(Score), TEXT("Collected") });
-		Steps.Add({ TEXT("reject"), NAME_None, FString::FromInt(Score), TEXT("Collected") });
+		if (bWithSaveLoad)
+		{
+			Steps.Add({ TEXT("save"), TEXT("SaveButton"), FString::FromInt(Score), TEXT("Saved") });
+			Steps.Add({ TEXT("reset"), TEXT("ResetButton"), TEXT("0"), TEXT("Reset") });
+			Steps.Add({ TEXT("load"), TEXT("LoadButton"), FString::FromInt(Score), TEXT("Loaded") });
+			Steps.Add({ TEXT("collect_garbage"), NAME_None, FString::FromInt(Score), TEXT("Loaded") });
+		}
+		Steps.Add({ TEXT("reject"), NAME_None, FString::FromInt(Score), bWithSaveLoad ? TEXT("Loaded") : TEXT("Collected") });
 		Score += Delta;
 		Steps.Add({ TEXT("collect_after_reject"), TEXT("CollectButton"), FString::FromInt(Score), TEXT("Collected") });
 	}
@@ -283,7 +305,8 @@ bool FUiSaveReload::CaptureResources(UAvidScriptComponent& Component, UUserWidge
 	Destination->SetNumberField(TEXT("session_successful_reloads"), Snapshot.SuccessfulReloadCount);
 	Destination->SetNumberField(TEXT("session_rejected_reloads"), Snapshot.RejectedReloadCount);
 	if (Counts[0] != 0 || Counts[1] != 0 || Counts[2] != 0 || Counts[3] != 4 || Counts[4] != 0 || Counts[7] != 4
-		|| Counts[5] < 0 || Counts[6] < 0 || Snapshot.bFaultQuarantined || !Snapshot.bHasActiveRuntime)
+		|| Counts[5] < 0 || Counts[6] < 0 || (bWithSaveLoad && Counts[5] != 0)
+		|| Snapshot.bFaultQuarantined || !Snapshot.bHasActiveRuntime)
 	{
 		Error = TEXT("reload_ready_resources_invalid"); return false;
 	}
@@ -291,7 +314,8 @@ bool FUiSaveReload::CaptureResources(UAvidScriptComponent& Component, UUserWidge
 	if (!ResourceBaseline) { Error = TEXT("reload_resource_baseline_missing"); return false; }
 	for (int32 Index = 0; Index < UE_ARRAY_COUNT(Counts); ++Index)
 	{
-		if (Counts[Index] > ResourceBaseline->GetNumberField(ResourceNames[Index]))
+		const int32 CurrentSaveAllowance = bWithSaveLoad && !bEstablishBaseline && Index == 6 ? 1 : 0;
+		if (Counts[Index] > ResourceBaseline->GetNumberField(ResourceNames[Index]) + CurrentSaveAllowance)
 		{
 			Error = FString(TEXT("reload_resource_growth: ")) + ResourceNames[Index]; return false;
 		}
@@ -304,6 +328,7 @@ bool FUiSaveReload::BeforeStep(const FProbeStep& Step, AActor* Host, UAvidScript
 {
 	if (!IsValid(Host) || !IsValid(Component) || !IsValid(Widget)) { Error = TEXT("reload_objects_missing"); return false; }
 	StepFrame = GFrameCounter;
+	if (bWithSaveLoad && !BeforeSaveLoadStep(Step, *Host, Action, Error)) { return false; }
 	if (Step.Action == TEXT("ready"))
 	{
 		OriginalModuleId = Component->GetScriptModuleId();
@@ -396,6 +421,7 @@ bool FUiSaveReload::AfterStep(const FProbeStep& Step, AActor* Host, UAvidScriptC
 	UUserWidget* Widget, FJsonObject& Action, FString& Error)
 {
 	if (!CanObserveStep()) { Error = TEXT("reload_observation_requires_later_tick"); return false; }
+	if (bWithSaveLoad && !AfterSaveLoadStep(Step, *Host, *Component, *Widget, Action, Error)) { return false; }
 	if (Step.Action.StartsWith(TEXT("reload_")) || Step.Action == TEXT("reject"))
 	{
 		TSharedRef<FJsonObject> Resources = MakeShared<FJsonObject>();
@@ -439,6 +465,131 @@ bool FUiSaveReload::AfterStep(const FProbeStep& Step, AActor* Host, UAvidScriptC
 	return true;
 }
 
+bool FUiSaveReload::ObserveSaveReturn(UAvidScriptComponent& Component, FJsonObject& Action, FString& Error) const
+{
+	const FAvidScriptRuntimeSession* Session = Component.GetRuntimeSessionForEditorDebugging();
+	if (!Session) { Error = TEXT("reload_save_return_session_missing"); return false; }
+	const int32 OwnedEntries = Session->GetSnapshot().OwnedObjectEntryCount;
+	Action.SetNumberField(TEXT("owned_entries_after_save_return"), OwnedEntries);
+	if (OwnedEntries != 0) { Error = TEXT("reload_save_return_retained_owned_object"); return false; }
+	return true;
+}
+
+bool FUiSaveReload::CheckSaveFile(FString& Error) const
+{
+	FString Hash;
+	if (SaveHash.IsEmpty() ? FPaths::FileExists(SavePath)
+		: (!SafeFile(SavePath, false) || !ReadHash(SavePath, Hash) || Hash != SaveHash))
+	{
+		Error = TEXT("reload_save_changed_outside_save_action"); return false;
+	}
+	return true;
+}
+
+bool FUiSaveReload::BeforeSaveLoadStep(const FProbeStep& Step, AActor& Host, FJsonObject& Action, FString& Error)
+{
+	if (!CheckSaveFile(Error)) { return false; }
+	Action.SetStringField(TEXT("save_sha256_before"), SaveHash);
+	if (Step.Action == TEXT("late_collect")) { return true; }
+	UObject* Saved = ReadUiObject<UObject>(&Host, TEXT("SavedObject"));
+	int32 Score = 0;
+	if (SaveHash.IsEmpty() ? Saved != nullptr
+		: (!CurrentSavedObject.IsValid() || Saved != CurrentSavedObject.Get() || !ReadReloadSavedScore(Saved, Score) || Score != SavedScore))
+	{
+		Error = TEXT("reload_current_save_object_changed_before_action"); return false;
+	}
+	if (Step.Action == TEXT("save")) { SavedBeforeSave = Saved; }
+	if (Step.Action == TEXT("load"))
+	{
+		SavedBeforeLoad = Saved;
+		Action.SetBoolField(TEXT("old_saved_object_was_valid"), SavedBeforeLoad.IsValid());
+		if (!SavedBeforeLoad.IsValid()) { Error = TEXT("reload_load_has_no_previous_save_object"); return false; }
+	}
+	return true;
+}
+
+bool FUiSaveReload::AfterSaveLoadStep(const FProbeStep& Step, AActor& Host, UAvidScriptComponent& Component,
+	UUserWidget& Widget, FJsonObject& Action, FString& Error)
+{
+	UObject* Saved = ReadUiObject<UObject>(&Host, TEXT("SavedObject"));
+	if (Step.Action == TEXT("save"))
+	{
+		const bool bInitialSave = SaveHash.IsEmpty();
+		int32 Score = 0;
+		TArray<uint8> Bytes;
+		const bool bReused = SavedBeforeSave.IsValid() && Saved == SavedBeforeSave.Get();
+		Action.SetBoolField(TEXT("saved_object_reused"), bReused);
+		if ((!bInitialSave && !bReused) || !ReadReloadSavedScore(Saved, Score) || Score != FCString::Atoi(*Step.Score)
+			|| !SafeFile(SavePath, false) || !FFileHelper::LoadFileToArray(Bytes, *SavePath) || Bytes.IsEmpty())
+		{
+			Error = TEXT("reload_save_object_or_file_invalid"); return false;
+		}
+		SaveHash = FAvidScriptHash::Sha256Hex(Bytes);
+		SavedScore = Score;
+		CurrentSavedObject = Saved;
+		Action.SetNumberField(TEXT("saved_score"), Score);
+		Action.SetNumberField(TEXT("save_file_bytes"), Bytes.Num());
+		TSharedRef<FJsonObject> Resources = MakeShared<FJsonObject>();
+		Action.SetObjectField(TEXT("resources_after_save"), Resources);
+		if (!CaptureResources(Component, Widget, Resources, false, Error)) { return false; }
+		if (bInitialSave)
+		{
+			Report->SetStringField(TEXT("initial_save_sha256"), SaveHash);
+			Report->SetObjectField(TEXT("resources_after_initial_save"), Resources);
+		}
+		else
+		{
+			CycleRecord->SetStringField(TEXT("save_sha256"), SaveHash);
+			CycleRecord->SetNumberField(TEXT("save_file_bytes"), Bytes.Num());
+			CycleRecord->SetNumberField(TEXT("saved_score"), Score);
+			CycleRecord->SetBoolField(TEXT("saved_object_reused"), bReused);
+			CycleRecord->SetObjectField(TEXT("resources_after_save"), Resources);
+		}
+	}
+	else
+	{
+		if (!CheckSaveFile(Error)) { return false; }
+		if (Step.Action == TEXT("load"))
+		{
+			int32 Score = 0;
+			const bool bReplaced = SavedBeforeLoad != TWeakObjectPtr<UObject>(Saved);
+			Action.SetBoolField(TEXT("saved_object_replaced"), bReplaced);
+			if (!bReplaced || !ReadReloadSavedScore(Saved, Score) || Score != SavedScore || Score != FCString::Atoi(*Step.Score))
+			{
+				Error = TEXT("reload_load_did_not_replace_with_saved_score"); return false;
+			}
+			CurrentSavedObject = Saved;
+			Action.SetNumberField(TEXT("loaded_score"), Score);
+			CycleRecord->SetNumberField(TEXT("loaded_score"), Score);
+			CycleRecord->SetBoolField(TEXT("saved_object_replaced"), true);
+		}
+		else if (Step.Action != TEXT("teardown") && Step.Action != TEXT("late_collect") && !SaveHash.IsEmpty())
+		{
+			int32 Score = 0;
+			const bool bPreserved = CurrentSavedObject.IsValid() && Saved == CurrentSavedObject.Get()
+				&& ReadReloadSavedScore(Saved, Score) && Score == SavedScore;
+			Action.SetBoolField(TEXT("saved_object_preserved"), bPreserved);
+			if (!bPreserved) { Error = TEXT("reload_saved_object_not_preserved"); return false; }
+		}
+		if (Step.Action == TEXT("collect_garbage"))
+		{
+			const bool bOldCollected = !SavedBeforeLoad.IsValid();
+			Action.SetBoolField(TEXT("old_saved_object_collected"), bOldCollected);
+			Action.SetBoolField(TEXT("current_saved_object_alive"), CurrentSavedObject.IsValid());
+			CycleRecord->SetBoolField(TEXT("old_saved_object_collected"), bOldCollected);
+			CycleRecord->SetBoolField(TEXT("current_saved_object_alive"), CurrentSavedObject.IsValid());
+			if (!bOldCollected) { Error = TEXT("reload_old_save_object_retained_after_gc"); return false; }
+			TSharedRef<FJsonObject> Resources = MakeShared<FJsonObject>();
+			Action.SetObjectField(TEXT("resources_after_gc"), Resources);
+			CycleRecord->SetObjectField(TEXT("resources_after_gc"), Resources);
+			if (!CaptureResources(Component, Widget, Resources, false, Error)) { return false; }
+			Report->SetNumberField(TEXT("gc_cycles"), ++GcCycles);
+		}
+	}
+	Action.SetStringField(TEXT("save_sha256_after"), SaveHash);
+	return true;
+}
+
 bool FUiSaveReload::RefreshStopped(AActor* Host, UAvidScriptComponent* Component, UUserWidget* Widget, FString& Error)
 {
 	if (!IsValid(Host) || !IsValid(Component) || !IsValid(Widget)) { Error = TEXT("reload_teardown_observers_lost"); return false; }
@@ -479,6 +630,7 @@ bool FUiSaveReload::RefreshStopped(AActor* Host, UAvidScriptComponent* Component
 bool FUiSaveReload::Finish(FString& Error)
 {
 	const bool bUnchanged = CheckArtifacts(Error);
+	const bool bSavePreserved = !bWithSaveLoad || CheckSaveFile(Error);
 	Report->SetBoolField(TEXT("artifacts_unchanged"), bUnchanged);
 	Report->SetNumberField(TEXT("elapsed_seconds"), FPlatformTime::Seconds() - Started);
 	bool bRestored = !bHasConfiguration;
@@ -491,6 +643,6 @@ bool FUiSaveReload::Finish(FString& Error)
 	}
 	Report->SetBoolField(TEXT("configuration_restored"), bRestored);
 	if (!bRestored) { Error = TEXT("reload_configuration_not_restored"); }
-	return bRestored && bUnchanged;
+	return bRestored && bUnchanged && bSavePreserved;
 }
 }

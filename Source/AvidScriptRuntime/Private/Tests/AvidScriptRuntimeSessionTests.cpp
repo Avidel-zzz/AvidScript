@@ -1464,6 +1464,173 @@ bool FAvidScriptRuntimeSessionTypedOwnerValidationTest::RunTest(const FString& P
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptRuntimeSessionBorrowedGcGuestDeferralTest,
+	"AvidScript.Architecture.Session.BorrowedGcGuestDeferral",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptRuntimeSessionBorrowedGcGuestDeferralTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptRuntimeSession Session;
+	FAvidScriptRuntimeSession Peer;
+	FAvidScriptWasmHostContext Context;
+	Context.ObjectRegistry = &Registry;
+	Session.SetHostContext(Context);
+	Peer.SetHostContext(Context);
+	FAvidScriptWasmReloadResult LoadResult;
+	if (!TestTrue(TEXT("GC deferral fixture starts"), Session.LoadInitialModule(
+		GSessionCompatibleModule, UE_ARRAY_COUNT(GSessionCompatibleModule),
+		FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("gc_guest_live")), LoadResult)))
+	{
+		return false;
+	}
+	IAvidScriptObjectOwnershipDomain* Ownership = Session.GetTestSnapshot().HostContext.ObjectOwnership;
+	IAvidScriptObjectOwnershipDomain* PeerOwnership = Peer.GetTestSnapshot().HostContext.ObjectOwnership;
+	TStrongObjectPtr<UObject> Collected(NewObject<UAvidScriptObjectRegistryTestObject>(GetTransientPackage()));
+	TWeakObjectPtr<UObject> WeakCollected(Collected.Get());
+	FAvidScriptObjectHandleResult Result;
+	TestTrue(TEXT("Active Session borrows object"), Ownership->Borrow(Registry, *Collected.Get(), Result));
+	const FAvidScriptObjectHandle Handle = Result.Handle;
+	TestTrue(TEXT("Peer borrows the same object"), PeerOwnership->Borrow(Registry, *Collected.Get(), Result));
+	bool bObserved = false;
+	Session.SetLiveExecutionObserverForTesting([&]()
+	{
+		bObserved = true;
+		TestTrue(TEXT("Observer runs inside the Guest call guard"), Session.IsOperationActive());
+		Collected.Reset();
+		CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS, true);
+		TestFalse(TEXT("GC collected the weak borrowed object"), WeakCollected.IsValid());
+		TestEqual(TEXT("Active Session defers its lease journal mutation"), Session.GetSnapshot().BorrowedHandleEntryCount, 1);
+		TestEqual(TEXT("Idle peer prunes its lease immediately"), Peer.GetSnapshot().BorrowedHandleEntryCount, 0);
+		TestEqual(TEXT("Active Session lease still occupies the shared slot"), Registry.GetLiveHandleCount(), 1);
+		FAvidScriptWasmSmokeResult NestedResult;
+		TestFalse(TEXT("Nested entry remains rejected"), Session.TickHot(0.01f, NestedResult));
+		TestEqual(TEXT("Rejected nested entry cannot drain pending pruning"), Session.GetSnapshot().BorrowedHandleEntryCount, 1);
+	});
+	FAvidScriptWasmSmokeResult TickResult;
+	TestTrue(TEXT("Outer guest call completes"), Session.TickHot(0.01f, TickResult));
+	TestTrue(TEXT("Real execution reached the observer"), bObserved);
+	TestEqual(TEXT("Pruning waits until the next safe entry"), Session.GetSnapshot().BorrowedHandleEntryCount, 1);
+	TestTrue(TEXT("Next safe guest entry succeeds"), Session.TickHot(0.01f, TickResult));
+	TestEqual(TEXT("Safe entry prunes the final dead lease"), Session.GetSnapshot().BorrowedHandleEntryCount, 0);
+	TestEqual(TEXT("Shared dead slot retires after both leases"), Registry.GetLiveHandleCount(), 0);
+	TestFalse(TEXT("Deferred stale capability is removed"), Ownership->HasCapability(Handle));
+	TestTrue(TEXT("GC does not quarantine a healthy Session"), Session.IsLiveLoaded());
+
+	UObject* StopObject = NewObject<UAvidScriptObjectRegistryTestObject>(GetTransientPackage());
+	Ownership->Borrow(Registry, *StopObject, Result);
+	StopObject = nullptr;
+	Session.SetLiveExecutionObserverForTesting([&]()
+	{
+		CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS, true);
+		TestEqual(TEXT("Another GC is pending before stop"), Session.GetSnapshot().BorrowedHandleEntryCount, 1);
+	});
+	TestTrue(TEXT("Guest call with pending stop cleanup completes"), Session.TickHot(0.01f, TickResult));
+	TestTrue(TEXT("Stop clears pending ownership work"), Session.StopAndUnload(TickResult));
+	TestEqual(TEXT("Stop releases deferred entries"), Session.GetSnapshot().BorrowedHandleEntryCount, 0);
+	TestEqual(TEXT("Stop releases the deferred registry lease"), Registry.GetLiveHandleCount(), 0);
+	CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS, true);
+	TestEqual(TEXT("Post-stop GC cannot revive ownership"), Session.GetSnapshot().BorrowedHandleEntryCount, 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptRuntimeSessionBorrowedGcCandidateCheckpointTest,
+	"AvidScript.Architecture.Session.BorrowedGcCandidateCheckpoint",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptRuntimeSessionBorrowedGcCandidateCheckpointTest::RunTest(const FString& Parameters)
+{
+	for (const bool bRejectCandidate : { true, false })
+	{
+		FAvidScriptObjectRegistry Registry;
+		FAvidScriptRuntimeSession Session;
+		FAvidScriptWasmHostContext Context;
+		Context.ObjectRegistry = &Registry;
+		Session.SetHostContext(Context);
+		FAvidScriptWasmReloadResult ReloadResult;
+		if (!TestTrue(TEXT("Checkpoint fixture starts"), Session.LoadInitialModule(
+			GSessionCompatibleModule, UE_ARRAY_COUNT(GSessionCompatibleModule),
+			FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("gc_checkpoint_live")), ReloadResult)))
+		{
+			return false;
+		}
+		IAvidScriptObjectOwnershipDomain* Ownership = Session.GetTestSnapshot().HostContext.ObjectOwnership;
+		TStrongObjectPtr<UObject> DeadPrefix(NewObject<UAvidScriptObjectRegistryTestObject>(GetTransientPackage()));
+		TStrongObjectPtr<UObject> LivePrefix(NewObject<UAvidScriptObjectRegistryTestObject>(GetTransientPackage()));
+		TStrongObjectPtr<UObject> LiveCandidate(NewObject<UAvidScriptObjectRegistryTestObject>(GetTransientPackage()));
+		TWeakObjectPtr<UObject> WeakPrefix(DeadPrefix.Get());
+		TWeakObjectPtr<UObject> WeakCandidate;
+		FAvidScriptObjectHandleResult Result;
+		Ownership->Borrow(Registry, *DeadPrefix.Get(), Result);
+		const FAvidScriptObjectHandle DeadPrefixHandle = Result.Handle;
+		Ownership->Borrow(Registry, *LivePrefix.Get(), Result);
+		const FAvidScriptObjectHandle LivePrefixHandle = Result.Handle;
+		FAvidScriptObjectHandle LiveCandidateHandle;
+		FAvidScriptObjectHandle DeadCandidateHandle;
+		bool bObserved = false;
+		Session.SetCandidateBeginPlayObserverForTesting([&]()
+		{
+			bObserved = true;
+			TestTrue(TEXT("Candidate observer runs inside mutation guard"), Session.IsOperationActive());
+			TestEqual(TEXT("Candidate checkpoint has two retained entries"), Session.GetSnapshot().BorrowedHandleEntryCount, 2);
+			TestTrue(TEXT("Candidate borrows a live object"), Ownership->Borrow(Registry, *LiveCandidate.Get(), Result));
+			LiveCandidateHandle = Result.Handle;
+			UObject* Candidate = NewObject<UAvidScriptObjectRegistryTestObject>(GetTransientPackage());
+			WeakCandidate = Candidate;
+			TestTrue(TEXT("Candidate borrows a collectable object"), Ownership->Borrow(Registry, *Candidate, Result));
+			DeadCandidateHandle = Result.Handle;
+			Candidate = nullptr;
+			DeadPrefix.Reset();
+			CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS, true);
+			TestFalse(TEXT("Retained prefix object is really collected"), WeakPrefix.IsValid());
+			TestFalse(TEXT("Candidate tail object is really collected"), WeakCandidate.IsValid());
+			TestEqual(TEXT("GC must not compact across the active RetainedCount boundary"), Session.GetSnapshot().BorrowedHandleEntryCount, 4);
+			TestEqual(TEXT("GC preserves all four leases during preparation"), Registry.GetLiveHandleCount(), 4);
+		});
+		const bool bReloaded = Session.ReloadModule(
+			bRejectCandidate ? GSessionBeginTrapModule : GSessionCompatibleModule,
+			bRejectCandidate ? UE_ARRAY_COUNT(GSessionBeginTrapModule) : UE_ARRAY_COUNT(GSessionCompatibleModule),
+			FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("gc_checkpoint_candidate")), ReloadResult);
+		TestTrue(TEXT("Real candidate preparation reached observer"), bObserved);
+		TestEqual(TEXT("Reload outcome matches the real WASM body"), bReloaded, !bRejectCandidate);
+		TestEqual(TEXT("Transaction completes before pending GC pruning"),
+			Session.GetSnapshot().BorrowedHandleEntryCount, bRejectCandidate ? 2 : 4);
+		TestTrue(TEXT("Live prefix capability always survives the transaction"), Ownership->HasCapability(LivePrefixHandle, LivePrefix.Get()));
+		TestTrue(TEXT("Dead prefix remains journaled until the safe entry"), Ownership->HasCapability(DeadPrefixHandle));
+		if (bRejectCandidate)
+		{
+			TestTrue(TEXT("Candidate trap preserves the live runtime"), ReloadResult.bRollbackPreservedLiveRuntime);
+			TestTrue(TEXT("Borrowed checkpoint rollback succeeds after GC"), ReloadResult.bHostEffectRollbackSucceeded);
+			TestFalse(TEXT("Rollback releases the candidate's live capability"), Ownership->HasCapability(LiveCandidateHandle));
+			TestFalse(TEXT("Rollback releases the candidate's dead capability"), Ownership->HasCapability(DeadCandidateHandle));
+			TestEqual(TEXT("Rollback retains exactly the pre-candidate leases"), Registry.GetLiveHandleCount(), 2);
+			bool bNextCheckpointObserved = false;
+			Session.SetCandidateBeginPlayObserverForTesting([&]()
+			{
+				bNextCheckpointObserved = true;
+				TestEqual(TEXT("Next reload drains pending GC before creating its checkpoint"), Session.GetSnapshot().BorrowedHandleEntryCount, 1);
+			});
+			TestTrue(TEXT("A subsequent valid candidate can commit"), Session.ReloadModule(
+				GSessionCompatibleModule, UE_ARRAY_COUNT(GSessionCompatibleModule),
+				FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("gc_checkpoint_recovered")), ReloadResult));
+			TestTrue(TEXT("Subsequent candidate reaches its checkpoint"), bNextCheckpointObserved);
+		}
+		FAvidScriptWasmSmokeResult TickResult;
+		TestTrue(TEXT("Safe Tick remains usable after candidate GC"), Session.TickHot(0.01f, TickResult));
+		TestEqual(TEXT("Safe entry keeps only committed live borrowed objects"),
+			Session.GetSnapshot().BorrowedHandleEntryCount, bRejectCandidate ? 1 : 2);
+		TestEqual(TEXT("Registry leases match committed live objects"), Registry.GetLiveHandleCount(), bRejectCandidate ? 1 : 2);
+		TestFalse(TEXT("Safe pruning removes the old dead prefix"), Ownership->HasCapability(DeadPrefixHandle));
+		TestEqual(TEXT("Candidate live authority follows commit outcome"), Ownership->HasCapability(LiveCandidateHandle, LiveCandidate.Get()), !bRejectCandidate);
+		TestEqual(TEXT("Original live handle retains its generation"), Registry.ResolveObject(LivePrefixHandle, Result, false), LivePrefix.Get());
+		TestTrue(TEXT("Checkpoint Session stops cleanly"), Session.StopAndUnload(TickResult));
+		TestEqual(TEXT("Checkpoint stop leaves no registry slots"), Registry.GetLiveHandleCount(), 0);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptRuntimeSessionObjectOwnershipTest,
 	"AvidScript.Architecture.Session.ObjectOwnership",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

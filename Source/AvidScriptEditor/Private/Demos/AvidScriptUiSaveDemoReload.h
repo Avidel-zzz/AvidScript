@@ -17,19 +17,22 @@ namespace AvidScript::UiSaveDemo
 class FUiSaveReload
 {
 public:
-	bool Initialize(FString& Error);
+	bool Initialize(const FString& InSavePath, FString& Error);
 	void AppendSteps(TArray<FProbeStep>& Steps) const;
 	bool ValidateRuntime(UAvidScriptComponent& Component, FString& Error) const;
 	bool BeforeStep(const FProbeStep& Step, AActor* Host, UAvidScriptComponent* Component,
 		UUserWidget* Widget, FJsonObject& Action, FString& Error);
 	bool AfterStep(const FProbeStep& Step, AActor* Host, UAvidScriptComponent* Component,
 		UUserWidget* Widget, FJsonObject& Action, FString& Error);
+	bool ObserveSaveReturn(UAvidScriptComponent& Component, FJsonObject& Action, FString& Error) const;
 	bool RefreshStopped(AActor* Host, UAvidScriptComponent* Component, UUserWidget* Widget, FString& Error);
 	bool Finish(FString& Error);
 	bool IsStopped() const { return bStopped; }
 	bool IsLoose() const { return bLoose; }
+	bool IsWithSaveLoad() const { return bWithSaveLoad; }
+	const FString& GetExpectedSaveHash() const { return SaveHash; }
 	bool CanObserveStep() const { return GFrameCounter > StepFrame + 1; }
-	double GetTimeoutSeconds() const { return 30.0 + 6.0 * Cycles; }
+	double GetTimeoutSeconds() const { return 30.0 + (bWithSaveLoad ? 10.0 : 6.0) * Cycles; }
 	TSharedRef<FJsonObject> GetReport() const { return Report; }
 
 private:
@@ -41,6 +44,10 @@ private:
 		FString WasmHash;
 	};
 	bool CheckArtifacts(FString& Error) const;
+	bool CheckSaveFile(FString& Error) const;
+	bool BeforeSaveLoadStep(const FProbeStep& Step, AActor& Host, FJsonObject& Action, FString& Error);
+	bool AfterSaveLoadStep(const FProbeStep& Step, AActor& Host, UAvidScriptComponent& Component,
+		UUserWidget& Widget, FJsonObject& Action, FString& Error);
 	bool CaptureResources(UAvidScriptComponent& Component, UUserWidget& Widget,
 		TSharedRef<FJsonObject> Destination, bool bEstablishBaseline, FString& Error);
 	FArtifact Artifacts[3];
@@ -53,6 +60,14 @@ private:
 	bool bLoose = false;
 	bool bStopped = false;
 	bool bHasConfiguration = false;
+	bool bWithSaveLoad = false;
+	FString SavePath;
+	FString SaveHash;
+	int32 SavedScore = 0;
+	int32 GcCycles = 0;
+	TWeakObjectPtr<UObject> CurrentSavedObject;
+	TWeakObjectPtr<UObject> SavedBeforeSave;
+	TWeakObjectPtr<UObject> SavedBeforeLoad;
 	FName OriginalModuleId;
 	FString OriginalManifestPath;
 	FString ExpectedRejectionError;

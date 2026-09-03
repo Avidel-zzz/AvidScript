@@ -10,6 +10,9 @@
 #include "GameFramework/Actor.h"
 #include "Lifecycle/AvidScriptRuntimeLifecycleCoordinator.h"
 #include "Misc/ScopeExit.h"
+#include "UObject/StrongObjectPtr.h"
+#include "AvidScriptObjectRegistryTestTypes.h"
+#include "UObject/UObjectGlobals.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptRuntimeApplicationLifecycleTest,
@@ -146,9 +149,11 @@ bool FAvidScriptRuntimeWorldTeardownLifecycleTest::RunTest(
 	const int32 InvalidatedBefore =
 		Coordinator.GetSnapshot().InvalidatedWorldSessionCount;
 	{
+		FAvidScriptObjectRegistry Registry;
 		FAvidScriptRuntimeSession Session;
 		FAvidScriptWasmHostContext HostContext;
 		HostContext.World = World;
+		HostContext.ObjectRegistry = &Registry;
 		Session.SetHostContext(HostContext);
 
 		FAvidScriptWasmReloadResult LoadResult;
@@ -158,6 +163,21 @@ bool FAvidScriptRuntimeWorldTeardownLifecycleTest::RunTest(
 		{
 			return false;
 		}
+		UObject* Dead = NewObject<UAvidScriptObjectRegistryTestObject>(GetTransientPackage());
+		FAvidScriptObjectHandleResult BorrowResult;
+		Session.GetTestSnapshot().HostContext.ObjectOwnership->Borrow(Registry, *Dead, BorrowResult);
+		Dead = nullptr;
+		bool bObservedGc = false;
+		Session.SetLiveExecutionObserverForTesting([&]()
+		{
+			bObservedGc = true;
+			CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS, true);
+			TestEqual(TEXT("World Session defers GC while guest call is active"), Session.GetSnapshot().BorrowedHandleEntryCount, 1);
+		});
+		FAvidScriptWasmSmokeResult TickResult;
+		TestTrue(TEXT("World Session executes the GC observer"), Session.TickHot(0.01f, TickResult));
+		TestTrue(TEXT("World fixture reached actual GC"), bObservedGc);
+		TestEqual(TEXT("Borrowed cleanup remains pending before World teardown"), Session.GetSnapshot().BorrowedHandleEntryCount, 1);
 		FAvidScriptWasmRuntimeInstance* Runtime =
 			Session.GetLiveRuntimeForTesting();
 		if (!TestNotNull(TEXT("World-bound Runtime is accessible"), Runtime))
@@ -189,6 +209,8 @@ bool FAvidScriptRuntimeWorldTeardownLifecycleTest::RunTest(
 			TEXT("World teardown cancels pending continuations"),
 			Invalidated.PendingContinuationCount,
 			0);
+		TestEqual(TEXT("World teardown clears deferred borrowed entries"), Invalidated.BorrowedHandleEntryCount, 0);
+		TestEqual(TEXT("World teardown releases deferred borrowed leases"), Registry.GetLiveHandleCount(), 0);
 		TestEqual(
 			TEXT("World teardown is counted once"),
 			Invalidated.LifecycleInvalidationCount,
@@ -295,6 +317,66 @@ bool FAvidScriptRuntimeOwnerGenerationLifecycleTest::RunTest(
 			Invalidated.LifecycleInvalidationCount,
 			1);
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptRuntimeGcBorrowedLeasesTest,
+	"AvidScript.Runtime.Lifecycle.GarbageCollectBorrowedLeases",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptRuntimeGcBorrowedLeasesTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptRuntimeLifecycleCoordinator& Coordinator = FAvidScriptRuntimeLifecycleCoordinator::Get();
+	if (!TestTrue(TEXT("GC lifecycle hook is started"), Coordinator.GetSnapshot().bStarted))
+	{
+		return false;
+	}
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptRuntimeSession First;
+	FAvidScriptRuntimeSession Second;
+	FAvidScriptWasmHostContext Context;
+	Context.ObjectRegistry = &Registry;
+	First.SetHostContext(Context);
+	Second.SetHostContext(Context);
+	IAvidScriptObjectOwnershipDomain* FirstOwnership = First.GetTestSnapshot().HostContext.ObjectOwnership;
+	IAvidScriptObjectOwnershipDomain* SecondOwnership = Second.GetTestSnapshot().HostContext.ObjectOwnership;
+	TStrongObjectPtr<UObject> Live(NewObject<UAvidScriptObjectRegistryTestObject>(GetTransientPackage()));
+	UObject* Dead = NewObject<UAvidScriptObjectRegistryTestObject>(GetTransientPackage());
+	TWeakObjectPtr<UObject> WeakDead(Dead);
+	FAvidScriptObjectHandleResult Result;
+	FirstOwnership->Borrow(Registry, *Live.Get(), Result);
+	const FAvidScriptObjectHandle LiveHandle = Result.Handle;
+	SecondOwnership->Borrow(Registry, *Live.Get(), Result);
+	FirstOwnership->Borrow(Registry, *Dead, Result);
+	const FAvidScriptObjectHandle DeadHandle = Result.Handle;
+	SecondOwnership->Borrow(Registry, *Dead, Result);
+	TestTrue(TEXT("Dead object shares the same registry identity"), DeadHandle == Result.Handle);
+	Registry.AcquireBorrowedObject(Dead, Result, false);
+	Dead = nullptr;
+
+	CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS, true);
+	TestFalse(TEXT("Borrowed leases do not retain the UObject"), WeakDead.IsValid());
+	TestEqual(TEXT("GC complete prunes the first Session immediately"), First.GetSnapshot().BorrowedHandleEntryCount, 1);
+	TestEqual(TEXT("GC complete prunes the second Session immediately"), Second.GetSnapshot().BorrowedHandleEntryCount, 1);
+	TestFalse(TEXT("First dead capability is removed"), FirstOwnership->HasCapability(DeadHandle));
+	TestFalse(TEXT("Second dead capability is removed"), SecondOwnership->HasCapability(DeadHandle));
+	TestTrue(TEXT("Live capability survives in both Sessions"),
+		FirstOwnership->HasCapability(LiveHandle, Live.Get()) && SecondOwnership->HasCapability(LiveHandle, Live.Get()));
+	TestEqual(TEXT("An independent lease still occupies the dead slot"), Registry.GetLiveHandleCount(), 2);
+	TestTrue(TEXT("Independent dead lease was not consumed by Session pruning"),
+		Registry.ReleaseBorrowedHandle(DeadHandle, Result, false));
+	TestEqual(TEXT("Dead slot retires only after its last lease"), Registry.GetLiveHandleCount(), 1);
+
+	FAvidScriptWasmSmokeResult StopResult;
+	TestTrue(TEXT("First Session stops"), First.StopAndUnload(StopResult));
+	TestEqual(TEXT("Stopping first Session preserves second live lease"),
+		Registry.ResolveObject(LiveHandle, Result, false), Live.Get());
+	Second.ClearHostContext();
+	TestEqual(TEXT("Host detach releases the last Session lease"), Registry.GetLiveHandleCount(), 0);
+	CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS, true);
+	TestEqual(TEXT("GC after stop remains empty"), First.GetSnapshot().BorrowedHandleEntryCount, 0);
+	TestEqual(TEXT("GC after host detach remains empty"), Second.GetSnapshot().BorrowedHandleEntryCount, 0);
 	return true;
 }
 

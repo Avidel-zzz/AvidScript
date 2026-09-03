@@ -17,8 +17,6 @@ public static class UiSaveDemoScript
     [AvidTransient]
     private static bool Ready;
     [AvidTransient]
-    private static UPlayerSave OwnedSave;
-    [AvidTransient]
     private static AvidSubscription CollectSubscription;
     [AvidTransient]
     private static AvidSubscription SaveSubscription;
@@ -117,22 +115,29 @@ public static class UiSaveDemoScript
     private static void Save()
     {
         AUiSaveHost host = UE.Self;
-        if (!OwnedSave.HasHandle)
+        UPlayerSave save = host.SavedObject;
+        bool created = !save.HasHandle;
+        if (created)
         {
-            OwnedSave = UE.NewObject(host, ProjectFactories.PlayerSave);
+            save = UE.NewObject(host, ProjectFactories.PlayerSave);
         }
-        UPlayerSave save = OwnedSave;
         if (!save.HasHandle)
         {
             ShowStatus("Save object unavailable");
             return;
         }
 
-        // The host owns the GC-visible reference; the guest handle is not a strong reference.
+        // Keep the GC-visible host reference across reloads, not transient guest ownership.
         host.SavedObject = save;
         save.Score = Score;
         USaveGame saveGame = save;
-        if (!UGameplayStatics.SaveGameToSlot(saveGame, SaveSlot, UserIndex))
+        bool saved = UGameplayStatics.SaveGameToSlot(saveGame, SaveSlot, UserIndex);
+        if (created)
+        {
+            // The host keeps the object alive even when saving fails. Do not use this handle again.
+            UE.Release(save);
+        }
+        if (!saved)
         {
             ShowStatus("Save failed");
             return;
@@ -197,12 +202,6 @@ public static class UiSaveDemoScript
                 baseWidget.RemoveFromParent();
             }
             host.SavedObject = default;
-        }
-        UPlayerSave owned = OwnedSave;
-        OwnedSave = default;
-        if (owned.HasHandle)
-        {
-            UE.Release(owned);
         }
     }
 
