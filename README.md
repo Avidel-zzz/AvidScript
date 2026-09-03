@@ -10,8 +10,8 @@
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 and Android arm64 AOT" src="https://img.shields.io/badge/Platform-Win64%20%2B%20Android%20arm64%20AOT-0078D4?logo=windows&logoColor=white">
-  <img alt="Phase 63 Active" src="https://img.shields.io/badge/Status-Phase%2063%20Active-2B6CB0">
-  <img alt="Automation Baseline 429/429" src="https://img.shields.io/badge/Baseline-429%2F429-26A269">
+  <img alt="Phase 63 Complete" src="https://img.shields.io/badge/Status-Phase%2063%20Complete-26A269">
+  <img alt="Automation Baseline 433/433" src="https://img.shields.io/badge/Baseline-433%2F433-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
 
@@ -50,14 +50,13 @@ AvidScript 将 C# 编译为轻量 WASM Guest，通过 Reflection 生成的 Bindi
 | C# 工作区 | `.slnx`、WASI 工程、固定 SDK、离线源码索引，以及 Visual Studio/Rider/VS Code 启动命令 |
 
 当前主线已完成 C# 游戏逻辑、生成式 UE API、生命周期/事件/异步/网络、热重载、Editor 调试与
-Profiler，以及 Win64 Development/Shipping 的确定性 Cook 发布闭环。Phase 63 已实现多平台
+Profiler，以及 Win64 Development/Shipping 的确定性 Cook 发布闭环。Phase 63 已完成多平台
 catalog、Android arm64 受控静态依赖、真实 C# 交叉 AOT 发布，以及应用后台恢复、低内存回收和
 World teardown 的 Runtime 生命周期协调；Android UBT、打包和真机执行仍待后续验收。
 
-集中 Gate 已通过 `.NET 284/284`、AvidScript Automation `429/429`、UE5.8 no-clean UBT、
-干净架构检查和发布/Cook/回执合同。详细证据见 [Phase 62 Gate 摘要](Docs/Phase62/P62_Gate_Summary.json)、
-[收尾记录](Docs/Phase62/P62_Closeout.md) 与
-[Shipping BuildCookRun](Docs/Phase62/P62.D11_Shipping_BuildCookRun_Result.md)。
+集中 Gate 已通过 `.NET 284/284`、AvidScript Automation `433/433`、UE5.8 no-clean UBT、
+干净架构检查和发布/Cook/回执合同。详细证据见 [Phase 63 Gate 摘要](Docs/Phase63/P63_Gate_Summary.json)
+与 [收尾记录](Docs/Phase63/P63_Closeout.md)。
 
 ## C# 游戏脚本
 
@@ -238,7 +237,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 ## 路线图
 
 1. **P62 已完成**：Win64 Cook/Shipping、发布资产策略与脚本故障隔离；
-2. **P63 进行中**：多平台 catalog、Android arm64 交叉 AOT 与移动 Runtime 生命周期已实现，正在完成集中 Gate；
+2. **P63 已完成**：多平台 catalog、Android arm64 交叉 AOT 与移动 Runtime 生命周期；
 3. **P64**：真实小型游戏 Demo 与移动真机验收；
 4. **P65**：跨框架成熟度、稳定性与性能领导力收口。
 
@@ -246,9 +245,9 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 
 ## 验证
 
-最近一次完整基线为 **AvidScript Automation `429/429`、.NET `284/284` 通过**。
-Phase 62 的 clean detached architecture、UE5.8 no-clean UBT、Win64 Development/Shipping BCR、
-发布/Cook/回执合同与打包游戏逻辑 Oracle 均已通过，并已完成正式 attestation 与 close。
+最近一次完整基线为 **AvidScript Automation `433/433`、.NET `284/284` 通过**。
+Phase 63 的 clean detached architecture、UE5.8 no-clean UBT、Android arm64 交叉 AOT、
+发布/Cook/回执合同与移动 Runtime 生命周期均已通过，并已完成正式 attestation 与 close。
 
 阶段状态与实现证据见 [Docs](Docs/)，开发规则见 [AGENTS.md](AGENTS.md)。
 
