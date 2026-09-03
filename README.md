@@ -28,34 +28,34 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 
 ## 现在可以做什么
 
-更新于 **2026-09-04**，**P64 实施中**。已能用 C# 编写 UE 游戏逻辑、调用项目自定义 API，
-并运行 Win64 打包样例；不需要 `.avid`，也不是完整 UE/.NET 替代层。
+更新于 **2026-09-04**，**P64 实施中**。已跑通 **C# → WASM → UE 事件与 API → Win64 打包运行**，
+可开始尝试小型玩法 Demo；不需要 `.avid`。当前仍是开发者预览，不是完整 UE/.NET 替代层。
 
 | 开始开发 | 已跑通的能力 | 样例与用法 |
 | --- | --- | --- |
-| C# 玩法 | 计时、收集、复活与胜负；Editor 和 Win64 Development/Shipping 包 | [PickupRush](Samples/CSharp/PickupRush/README.md) |
-| UI 与存档 | UMG 按钮、文本、SaveGame 跨进程读回；失败处理、Reset、退出解绑与迟到事件隔离 | [UiSaveDemo](Samples/CSharp/UiSaveDemo/README.md) |
+| C# 玩法 | BeginPlay/Tick/EndPlay、计时、收集、复活与胜负；Editor 和 Win64 Development/Shipping 包 | [PickupRush](Samples/CSharp/PickupRush/README.md) |
+| UI 与存档 | UMG 按钮与文本、SaveGame 跨进程读回、失败处理与退出解绑 | [UiSaveDemo](Samples/CSharp/UiSaveDemo/README.md) |
 | 项目 UE API | 从 Profile 生成自定义 `UFUNCTION/UPROPERTY` 接口；typed Self、Spawn、cast 与销毁 | [TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) |
+| 联机玩法 | RPC、属性复制与 RepNotify；dedicated/listen 多进程验证 | [NetworkTopology](Samples/CSharp/NetworkTopology/README.md) |
 
-**近期已交付**
+**最新交付**
 
-- [UI/存档异常流程](Docs/Phase64/P64.D_UI_Save_Edges.md)：失败读档保留原对象，写锁下保存失败不改存档，退出后按钮不再进入脚本；五进程 **31/31** 动作通过。
-- [UI 正文热重载](Docs/Phase64/P64.D_UI_Reload.md)：**20 轮、84/84** 动作通过，保留分数、拒绝非法候选后继续交互，订阅不累积；实测 Wasmtime 45 JIT。
-- [UObject 授权](Docs/Phase64/P64.D_Reflection_Receiver.md)与[委托来源](Docs/Phase64/P64.D_Delegate_Source_Context.md)：可操作获授权的非 Self 对象，并区分多个按钮等对象的回调来源。
-- [事件型脚本](Docs/Phase64/P64.D_EventOnly_Runtime.md)：不写 Tick 也能接收事件、Timer 与异步恢复；省去无用的 Guest Tick 调用。
-- C# 编译器：修复 [async 初始化隐式上转](Docs/Phase64/P64.D_Async_Initializer_Conversion.md)与 [`&&/||` 短路求值](Docs/Phase64/P64.D_Async_Short_Circuit.md)，不再执行被短路的 RHS 副作用。
+- [UI 正文热重载](Docs/Phase64/P64.D_UI_Reload.md)：**20 轮、84/84** 动作通过；保留分数，非法候选回滚后可继续交互，订阅不累积，退出后迟到事件无效。
+- [存档异常处理](Docs/Phase64/P64.D_UI_Save_Edges.md)：五进程 **31/31** 动作通过；失败读档保留原对象，Reset 与写锁下保存失败不改存档。
+- C# 编译器：修复 [async 初始化隐式上转](Docs/Phase64/P64.D_Async_Initializer_Conversion.md)与 [`&&/||` 短路求值](Docs/Phase64/P64.D_Async_Short_Circuit.md)。
 
-UI 的长稳、包内与真实输入验收仍在推进，不计入已完成能力。
+**正在补齐：** Save/Load 穿插热重载时的对象释放与 GC 后借用登记回收，尚未验收。
+上面的重载测试不执行存取存档，不能视为这一组合流程无泄漏的证明。
 
 ## 框架能力
 
 | 领域 | 已实现内容 |
 | --- | --- |
-| 游戏流程 | `BeginPlay/Tick/EndPlay`、Timer、Overlap、Gameplay Event；事件型 Guest 可省略 Tick，Startup Scenario 自动挂载与回滚 |
-| 生成式 UE API | Reflection/Profile、Interface、项目与 Blueprint 类型；普通 UObject 的 owned/borrowed 授权与 Self 缓存隔离 |
+| 游戏流程 | `BeginPlay/Tick/EndPlay`、Timer、Overlap、Gameplay Event；[事件型脚本](Docs/Phase64/P64.D_EventOnly_Runtime.md)可省略 Tick，Startup Scenario 自动挂载与回滚 |
+| 生成式 UE API | Reflection/Profile、Interface、项目与 Blueprint 类型；普通 UObject 的 [owned/borrowed 授权](Docs/Phase64/P64.D_Reflection_Receiver.md)与 Self 缓存隔离 |
 | 类型与容器 | `UObject/AActor`、`FVector/FTransform`、固定 `USTRUCT`、名称/字符串、`FText`；数组、递归容器、`TSet/TMap`，soft/weak object 身份往返；覆盖限制见下方 |
 | C# 定义 UE 类型 | Actor、Component、World/GameInstance Subsystem，含继承、override、属性、函数与默认参数 |
-| 异步与委托 | 受控 `async/await`、Delay/NextTick、异步加载、Latent、AsyncAction；单播/多播、受支持签名的 `return/ref/out` 与主动调用；独立 UObject 订阅与回调来源查询 |
+| 异步与委托 | 受控 `async/await`、Delay/NextTick、异步加载、Latent、AsyncAction；单播/多播、受支持签名的 `return/ref/out` 与主动调用；独立 UObject 订阅与[回调来源查询](Docs/Phase64/P64.D_Delegate_Source_Context.md) |
 | Blueprint 与网络 | callable/event 双向交互；Server/Client/NetMulticast RPC、属性复制与 RepNotify，dedicated/listen 多进程验证 |
 | 热重载与安全 | 方法体替换、持久字段迁移与失败回滚，候选激活仅允许可回滚的 Host 副作用；ObjectHandle、Session 隔离、执行预算与退出取消 |
 | Cook 与发布 | 内容寻址模块、多平台 catalog、无头 Release、Generated Type 预编译；Win64 Development/Shipping BuildCookRun 与回执校验 |
@@ -96,6 +96,7 @@ flowchart LR
 
 ## 性能摘要
 
+**指定 UE 交互路径已领先冻结版本的 Puerts；纯执行层尚未全面领先。**
 以下为已归档基准，**没有对当前 P64 改动重新测量**。主表来自 P57：UE5.8 Win64 Development、
 Intel Core Ultra 7 265K、Wasmtime 45 Cranelift JIT，与冻结版本的 Puerts V8 同机对照；
 5 个计时进程，每进程 5 次预热、每单元 30 次采样。比率为 AvidScript / Puerts，越低越好。
@@ -167,7 +168,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 - **玩法与平台**：UI/存档通过 Editor 合成事件验证，不等于真实输入/视觉、任意损坏存档、World 销毁、包内 UI 或热重载长稳验收；Android UBT/APK/真机及 iOS 尚未验收。
 - **诊断与性能**：typed Host 的具体拒绝原因尚未统一透传到 VM 错误；纯执行 P50/P95 领先门禁未关闭，也未完成同口径 UnLua/AngelScript 矩阵。
 
-下一步补齐 P64 的 UI 真实输入/包内运行、World/热重载压力与长稳验证，以及移动构建/设备证据；
+下一步先完成存取存档与热重载的组合生命周期，再补齐 UI 真实输入/包内运行、World/长稳及移动构建/设备证据；
 随后推进安装、升级、兼容和诊断等发布工程，不以阶段编号代替实际验收。
 
 ## 验证
@@ -178,10 +179,8 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 | --- | --- |
 | [完整技术基线](Docs/Phase64/P64_Closeout.md)，候选 `9e08cdc` | Automation **439/439**、.NET **284/284**；10 组 PowerShell 合同、干净候选架构检查和 no-clean Editor UBT 通过 |
 | [PickupRush](Samples/CSharp/PickupRush/README.md) | Editor / Win64 Development / Shipping 均为 **5/5** 事件与胜利状态；包回执 **21/21 / 19/19** |
-| [UI/存档异常流程](Docs/Phase64/P64.D_UI_Save_Edges.md) | **5/5** 独立进程、**31/31** 动作、**79/79** runner 合同；增量 Editor 构建通过 |
-| [UI 正文热重载](Docs/Phase64/P64.D_UI_Reload.md) | **20/20** 轮、**84/84** 动作、**99/99** runner 合同、**11/11** 生命周期专项；异步版本存档五进程复验通过 |
-| [async 初始化转换](Docs/Phase64/P64.D_Async_Initializer_Conversion.md) | Semantic **98/98**、Guest **135/135**；真实 UI 样例 WASM 编译通过，不代表 UI 热重载验收 |
-| [async 短路求值](Docs/Phase64/P64.D_Async_Short_Circuit.md) | Guest **140/140**、Semantic **98/98**；新增 **13** 个 IR 执行场景及 WASM 编译，不宣称真实 WASM 执行 |
+| [UI/存档与正文重载专项](Docs/Phase64/P64.D_UI_Reload.md) | 存档五进程复验、重载 **84/84** 动作、runner **99/99**、生命周期 **11/11**；不是存取与重载组合验收 |
+| [C# 编译器专项](Docs/Phase64/P64.D_Async_Short_Circuit.md) | Guest **140/140**、Semantic **98/98**；新增 **13** 个 IR 执行场景及 WASM 编译，不宣称真实 WASM 执行 |
 
 其他修复证据见 [C# 捕获赋值](Docs/Phase64/P64.D_Captured_Assignment.md)及上方近期交付。
 机器验证不替代真实输入、视觉、设备和长稳验收；[Android 边界](Docs/Phase64/P64.D_Android_Readiness.md)单独保留。
