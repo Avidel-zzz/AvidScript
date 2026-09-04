@@ -8,9 +8,9 @@
   "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase64/P64.0_Production_Gameplay_Architecture.md",
-    "version": 8,
-    "sha256": "366ee7a381d6a620c3c145ef0382e0dfc2beb572215f290c1cfab9e637da677a",
-    "revision_reason": "保留P64全部原始目标；冻结Save/Load穿插重载、宿主持有与短期ownership、GC完成后冷路径回收失效borrowed lease；不清空跨重载owned对象，不改变ABI"
+    "version": 9,
+    "sha256": "e01f10e8f98604472f7b3194c789af2cc56e2af4c26479455b47c91daf91f80c",
+    "revision_reason": "保留全部原始目标；冻结真实OpenLevel世界重建、C#存档恢复与每轮GC观测，独立World控制器和有界持续时长模式，不替代包内或人工验收"
   },
   "documents": {
     "plan": "Docs/Phase64/P64.0_Implementation_Plan.md",
@@ -109,6 +109,19 @@
       "transfer_reason": ""
     },
     {
+      "id": "P64-D07-WorldSoakMemoryAttribution",
+      "severity": "Important",
+      "found_batch": "P64.D",
+      "scope": "World一小时连续运行的进程内存增长归因与必要优化",
+      "evidence": "Docs/Phase64/P64.D_World_Soak.md：3601.889秒/877次切图通过；相对第三轮Physical +306.316MiB、Virtual +72.574MiB，UObject恒52523；探针保留周期JSON，增长来源未分层测量。",
+      "deferral_reason": "流程正确性、旧对象回收与有界Session资源已验证；内存趋势不能直接等价为泄漏或无泄漏，保留到集中归因，不为通过而更改基线。",
+      "remediation": "区分探针历史记录、UE/VM缓存、分配器与真实存活分配，取得同口径趋势后处理增长来源；保持一般Binding、Session与后端边界，不为测试关闭安全检查。",
+      "status": "Open",
+      "resolution_evidence": "",
+      "target_phase": null,
+      "transfer_reason": ""
+    },
+    {
       "id": "P64-R01-Integration",
       "severity": "Critical",
       "found_batch": "P64.D",
@@ -174,6 +187,6 @@
     }
   ],
   "next_action": "debt-update -Phase 64 -DebtId P64-D03-OriginalGameplayAcceptance -Status Verified -Evidence <text>",
-  "revision": 27,
-  "updated_at_utc": "2026-09-03T23:11:11.6594710+00:00"
+  "revision": 29,
+  "updated_at_utc": "2026-09-04T01:01:45.0206161+00:00"
 }

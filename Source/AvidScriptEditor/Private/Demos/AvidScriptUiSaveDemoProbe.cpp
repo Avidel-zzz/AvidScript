@@ -2,6 +2,7 @@
 #include "Demos/AvidScriptUiSaveDemoEdges.h"
 #include "Demos/AvidScriptUiSaveDemoReload.h"
 #include "Demos/AvidScriptUiSaveDemoObservation.h"
+#include "Demos/AvidScriptUiSaveDemoWorld.h"
 
 #include "AvidScriptComponent.h"
 #include "AvidScriptHash.h"
@@ -117,6 +118,7 @@ public:
 	TSharedRef<FJsonObject> Runtime = MakeShared<FJsonObject>();
 	TSharedRef<FJsonObject> Startup = MakeShared<FJsonObject>();
 	TUniquePtr<FUiSaveReload> Reload;
+	TUniquePtr<FUiSaveWorld> Worlds;
 
 	void Initialize()
 	{
@@ -141,7 +143,7 @@ public:
 		FParse::Value(Command, TEXT("AvidScriptScenario="), Scenario);
 		if (Scenario != TEXT("ui_save_demo")) { InitializationError = TEXT("scenario_must_be_ui_save_demo"); return; }
 		if (Mode != TEXT("write") && Mode != TEXT("read") && Mode != TEXT("missing")
-			&& Mode != TEXT("gc") && Mode != TEXT("edges") && Mode != TEXT("reload"))
+			&& Mode != TEXT("gc") && Mode != TEXT("edges") && Mode != TEXT("reload") && Mode != TEXT("world"))
 		{
 			InitializationError = TEXT("unknown_ui_save_probe_mode"); return;
 		}
@@ -182,7 +184,12 @@ public:
 			InitialSaveHash = FAvidScriptHash::Sha256Hex(Bytes);
 		}
 		Steps.Add({ TEXT("ready"), NAME_None, TEXT("0"), TEXT("Ready") });
-		if (Mode == TEXT("reload"))
+		if (Mode == TEXT("world"))
+		{
+			Worlds = MakeUnique<FUiSaveWorld>(ExpectedPackage, SavePath, [this]() { return CheckSaveDirectory(); });
+			Worlds->Initialize(InitializationError);
+		}
+		else if (Mode == TEXT("reload"))
 		{
 			Reload = MakeUnique<FUiSaveReload>();
 			if (!Reload->Initialize(SavePath, InitializationError)) { return; }
@@ -269,7 +276,7 @@ public:
 		Report->SetStringField(TEXT("started_utc"), StartedUtc);
 		Report->SetStringField(TEXT("finished_utc"), FDateTime::UtcNow().ToIso8601());
 		Report->SetNumberField(TEXT("elapsed_seconds"), FPlatformTime::Seconds() - Started);
-		Report->SetNumberField(TEXT("timeout_seconds"), Reload ? Reload->GetTimeoutSeconds() : TimeoutSeconds);
+		Report->SetNumberField(TEXT("timeout_seconds"), Worlds ? Worlds->GetTimeoutSeconds() : Reload ? Reload->GetTimeoutSeconds() : TimeoutSeconds);
 		Report->SetBoolField(TEXT("gc_performed"), bGcPerformed);
 		Report->SetObjectField(TEXT("runtime"), Runtime);
 		Report->SetStringField(TEXT("runtime_snapshot_phase"), (Edges && Edges->IsStopped()) || (Reload && Reload->IsStopped())
@@ -279,6 +286,7 @@ public:
 		Report->SetObjectField(TEXT("startup"), Startup);
 		Report->SetArrayField(TEXT("actions"), Actions);
 		Report->SetBoolField(TEXT("save_file_exists"), !SavePath.IsEmpty() && IFileManager::Get().FileExists(*SavePath));
+		if (Worlds) { Worlds->AppendReport(*Report); }
 		FString Json;
 		auto Serialize = [&]()
 		{
@@ -431,6 +439,13 @@ public:
 		static_cast<void>(DeltaTime);
 		if (bFinished) { return false; }
 		if (!InitializationError.IsEmpty()) { Finish(false, InitializationError); return false; }
+		if (Worlds)
+		{
+			FString Error;
+			const EWorldProbeResult Result = Worlds->Tick(Error);
+			if (Result != EWorldProbeResult::Pending) { Finish(Result == EWorldProbeResult::Succeeded, Error); return false; }
+			return true;
+		}
 		if (FPlatformTime::Seconds() - Started >= (Reload ? Reload->GetTimeoutSeconds() : TimeoutSeconds))
 		{
 			Finish(false, StepIndex == 0 ? TEXT("runtime_or_ready_timeout") : TEXT("probe_step_timeout")); return false;

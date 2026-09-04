@@ -1,7 +1,7 @@
 #requires -Version 7.0
 [CmdletBinding()]
 param(
-    [ValidateSet('Prepare', 'Publish', 'Play', 'Verify', 'VerifyReload')][string]$Mode = 'Prepare',
+    [ValidateSet('Prepare', 'Publish', 'Play', 'Verify', 'VerifyReload', 'VerifyWorld')][string]$Mode = 'Prepare',
     [string]$ProfilePath = '',
     [string]$OutputRoot = '',
     [string]$ExpectedPackageId = '',
@@ -11,8 +11,10 @@ param(
     [string]$ReloadRejectedManifestPath = '',
     [ValidateRange(1, 100)][int]$ReloadCycles = 20,
     [switch]$ReloadWithSaveLoad,
+    [ValidateRange(2, 1000)][int]$WorldCycles = 10,
+    [ValidateRange(0, 21600)][int]$SoakSeconds = 0,
     [string]$DotNetPath = (Join-Path $env:USERPROFILE '.dotnet/dotnet.exe'),
-    [ValidateRange(10, 7200)][int]$TimeoutSeconds = 1200
+    [ValidateRange(10, 41630)][int]$TimeoutSeconds = 1200
 )
 
 Set-StrictMode -Version Latest
@@ -20,8 +22,10 @@ $ErrorActionPreference = 'Stop'
 $UiSaveBuildRoot = $PSScriptRoot
 $UiSavePluginRoot = Split-Path -Parent $UiSaveBuildRoot
 $UiSaveProjectRoot = Split-Path -Parent (Split-Path -Parent $UiSavePluginRoot)
+$UiSaveTimeoutExplicit = $PSBoundParameters.ContainsKey('TimeoutSeconds')
 . (Join-Path $UiSaveBuildRoot 'Android/AvidScriptAndroidProcess.ps1')
 . (Join-Path $UiSaveBuildRoot 'AvidScriptCSharpBindingPackage.ps1')
+. (Join-Path $UiSaveBuildRoot 'AvidScriptUiSaveWorld.ps1')
 
 function Get-AvidScriptUiSaveContext {
     if ($PSVersionTable.PSVersion.Major -ne 7) { throw 'PowerShell 7 is required.' }
@@ -61,7 +65,7 @@ function Get-AvidScriptUiSaveContext {
 
 function Invoke-AvidScriptUiSaveTool {
     param([string]$Executable, [string[]]$Arguments, [string]$LogPath, [hashtable]$Environment = @{},
-        [ValidateRange(1, 7200)][int]$ProcessTimeoutSeconds = $TimeoutSeconds)
+        [ValidateRange(1, 41630)][int]$ProcessTimeoutSeconds = $TimeoutSeconds)
     $Result = Invoke-AvidScriptAndroidProcess -Executable $Executable -Arguments $Arguments `
         -WorkingDirectory $UiSavePluginRoot -TimeoutSeconds $ProcessTimeoutSeconds -Environment $Environment
     [IO.File]::WriteAllText($LogPath, $Result.stdout + "`n" + $Result.stderr, [Text.UTF8Encoding]::new($false))
@@ -787,12 +791,12 @@ function Invoke-AvidScriptUiSaveVerifyReload {
 
 function Invoke-AvidScriptUiSaveDemo {
     if ($ReloadWithSaveLoad -and $Mode -ine 'VerifyReload') { throw 'ReloadWithSaveLoad requires VerifyReload mode.' }
-    if ($Mode -in @('Verify', 'VerifyReload') -and $ExpectedPackageId -notmatch '\A[0-9a-fA-F]{64}\z') { throw 'Verify requires ExpectedPackageId (64hex).' }
+    if ($Mode -in @('Verify', 'VerifyReload', 'VerifyWorld') -and $ExpectedPackageId -notmatch '\A[0-9a-fA-F]{64}\z') { throw 'Verify requires ExpectedPackageId (64hex).' }
     $Context = Get-AvidScriptUiSaveContext
     if ($Mode -ieq 'VerifyReload') { $ReloadArtifacts = Get-AvidScriptUiSaveReloadArtifacts $Context }
     $RunId = [Guid]::NewGuid().ToString('N')
     $RunRoot = Join-Path $Context.output_root $RunId
-    if ($Mode -in @('Verify', 'VerifyReload')) {
+    if ($Mode -in @('Verify', 'VerifyReload', 'VerifyWorld')) {
         $UserRoot = if ($VerifyUserRoot) { $VerifyUserRoot } else { Join-Path ([IO.Path]::GetTempPath()) "AvidScriptUiSaveVerify/$RunId" }
         Assert-AvidScriptUiSaveUserRoot $UserRoot $Context
         $UserRoot = [IO.Path]::GetFullPath($UserRoot)
@@ -800,6 +804,7 @@ function Invoke-AvidScriptUiSaveDemo {
     New-AvidScriptUiSaveDirectory $RunRoot
     if ($Mode -ieq 'Verify') { return Invoke-AvidScriptUiSaveVerify $Context $RunRoot $RunId $UserRoot }
     if ($Mode -ieq 'VerifyReload') { return Invoke-AvidScriptUiSaveVerifyReload $Context $RunRoot $RunId $UserRoot $ReloadArtifacts }
+    if ($Mode -ieq 'VerifyWorld') { return Invoke-AvidScriptUiSaveVerifyWorld $Context $RunRoot $RunId $UserRoot }
     $Log = Join-Path $RunRoot 'editor.log'
     $Result = [ordered]@{ schema_version = 1; result = 'avidscript_ui_save_demo_succeeded'; mode = $Mode.ToLowerInvariant()
         run_id = $RunId; module_id = 'avidscript.ui_save_demo'; evidence_root = $RunRoot
@@ -866,7 +871,7 @@ if ($MyInvocation.InvocationName -eq '.') { return }
 try {
     $Summary = Invoke-AvidScriptUiSaveDemo
     [Console]::Out.WriteLine(($Summary | ConvertTo-Json -Depth 32 -Compress))
-    if ($Mode -in @('Verify', 'VerifyReload') -and -not $Summary.succeeded) { exit 1 }
+    if ($Mode -in @('Verify', 'VerifyReload', 'VerifyWorld') -and -not $Summary.succeeded) { exit 1 }
     exit 0
 }
 catch {

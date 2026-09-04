@@ -28,7 +28,7 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 
 ## 现在可以做什么
 
-更新于 **2026-09-04**，最近交付代码为 [`d34f6c2`](https://github.com/Avidel-zzz/AvidScript/commit/d34f6c2dec0f7b0073d344065836f9dab8c2d6a1)，**P64 仍在实施中**。
+更新于 **2026-09-04**，**P64 仍在实施中**，交付证据见 [P64 记录](Docs/Phase64/P64_Closeout.md)。
 已跑通 **C# → WASM → UE 事件与 API → Win64 打包运行**，可开始尝试小型玩法 Demo，不需要 `.avid`；
 下面区分已交付能力与待验收内容，不把开发者预览视为完整 UE/.NET 替代层。
 
@@ -41,12 +41,12 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 
 **最近补齐**
 
+- **地图重建后恢复 C# 玩法状态**：真实 OpenLevel、旧 World/对象和 Session 清理、新实例读取存档，已完成一小时连续运行。见 [World 验证](Docs/Phase64/P64.D_World_Soak.md)。
 - **存取与热重载可交错使用**：存档对象复用，Load 后旧对象可由 GC 回收；非法候选回滚后旧逻辑继续运行，退出时解绑按钮并释放 Session。见[实现与验证](Docs/Phase64/P64.D_Save_Reload_Ownership.md)。
 - **失败存取保留有效状态**：读档失败不替换原对象与分数；Reset 不改磁盘存档，写锁导致保存失败时文件保持不变。见[异常流程](Docs/Phase64/P64.D_UI_Save_Edges.md)。
-- **C# 异步语义修正**：[初始化隐式上转](Docs/Phase64/P64.D_Async_Initializer_Conversion.md)和 [`&&/||` 短路求值](Docs/Phase64/P64.D_Async_Short_Circuit.md)，支持样例的延迟 UI 初始化。
 
-**尚未验收：** World 销毁重建、长稳与内存趋势、UI 真实输入/视觉和包内运行；Android UBT/真机及 iOS。
-当前 20 轮热重载验证不代表长期运行无泄漏。具体计数集中列在[验证](#验证)，性能口径见[性能摘要](#性能摘要)。
+**尚未验收：** 内存增长归因、网络/重载长稳、UI 真实输入/视觉和包内运行；Android UBT/真机及 iOS。
+一小时流程通过不代表无泄漏。具体计数集中列在[验证](#验证)，性能口径见[性能摘要](#性能摘要)。
 
 ## 框架能力
 
@@ -166,10 +166,10 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 - **UE 类型**：由 Profile 与 ABI/codec 决定生成范围，并非所有 UE API 自动可用。复合容器内强 UObject 引用仍拒绝，平面 `TArray<UObject*>` 可用；Set/Map key 受确定性编码限制，soft/weak 的脚本侧解析易用接口待补齐。
 - **C# 子集**：无完整 .NET Runtime、任意 awaiter 或异常系统；暂不支持 `event +=`、lambda/closure，使用显式 bind/subscribe 与 `ExecuteX/BroadcastX`。
 - **重载与隔离**：方法体可热重载；UI 样例通过 `NextTickAsync` 在候选提交后初始化。准备期无可回滚适配的反射写入仍被拒绝，不承诺回滚任意外部副作用。反射结构变更需增量 UBT 并重启 Editor；WASM 隔离不是原生 DLL 进程沙箱。
-- **玩法与平台**：UI/存档通过 Editor 合成事件验证，不等于真实输入/视觉、任意损坏存档、World 销毁、包内 UI 或热重载长稳验收；Android UBT/APK/真机及 iOS 尚未验收。
+- **玩法与平台**：UI/存档与 World 重建通过 Editor 合成事件验证，不等于真实输入/视觉、任意损坏存档、包内 UI 或网络/热重载长稳验收；一小时切图存在待归因的进程内存增长。Android UBT/APK/真机及 iOS 尚未验收。
 - **诊断与性能**：typed Host 的具体拒绝原因尚未统一透传到 VM 错误；纯执行 P50/P95 领先门禁未关闭，也未完成同口径 UnLua/AngelScript 矩阵。
 
-下一步补齐 World 销毁重建、长稳、UI 真实输入/包内运行及移动构建/设备证据；
+下一步补齐内存归因、网络/重载长稳、UI 真实输入/包内运行及移动构建/设备证据；
 随后推进安装、升级、兼容和诊断等发布工程，不以阶段编号代替实际验收。
 
 ## 验证
@@ -182,6 +182,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 | [PickupRush](Samples/CSharp/PickupRush/README.md) | Editor / Win64 Development / Shipping 均为 **5/5** 事件与胜利状态；包回执 **21/21 / 19/19** |
 | [存取与正文重载专项](Docs/Phase64/P64.D_Save_Reload_Ownership.md) | 组合流程 **165/165** 动作、runner **118/118**、生命周期 **18/18**；103 个快照 owned 为 0，GC 后 borrowed 稳定为 8；纯 UI 重载 **84/84** 回归通过 |
 | [存档与异常流程](Docs/Phase64/P64.D_UI_Save_Edges.md) | 五个独立进程 **31/31** 动作；覆盖保存、重启读取、缺档、GC、读取失败、写锁与组件退出 |
+| [World 连续运行](Docs/Phase64/P64.D_World_Soak.md) | **3601.889 秒、877 次切图、4386/4386 动作**；旧对象逐轮回收，UObject 数恒为 52523；合同 **46/46**，内存归因待完成 |
 | [C# 编译器专项](Docs/Phase64/P64.D_Async_Short_Circuit.md) | Guest **140/140**、Semantic **98/98**；新增 **13** 个 IR 执行场景及 WASM 编译，不宣称真实 WASM 执行 |
 
 其他修复证据见 [C# 捕获赋值](Docs/Phase64/P64.D_Captured_Assignment.md)及上方近期交付。

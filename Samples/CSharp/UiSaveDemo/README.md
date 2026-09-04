@@ -2,7 +2,8 @@
 
 本样例用 C# 实现按钮事件、计分和 UE SaveGame 存取。模块为 `avidscript.ui_save_demo`，binding package 为
 `avidscript.sample.ui_save_demo`。已通过资产生成、C# 到 WASM/AOT 发布，以及 Editor 游戏进程的
-保存、重启读回、缺档、GC、存档异常、20 轮存取穿插正文热重载与组件退出清理验证；物理输入与视觉体验仍待验收。
+保存、重启读回、缺档、GC、存档异常、20 轮存取穿插正文热重载与组件退出清理验证，
+以及一小时真实 World 重建与存档恢复；物理输入、视觉与包内 UI 仍待验收。
 
 ## 行为与生命周期
 
@@ -110,5 +111,18 @@ Collect 加 1/加 2，分数迁移，非法候选拒绝后旧逻辑继续运行�
 保存返回时 owned 为 0，GC 后 borrowed 稳定为 UI 基线加 1。使用 `VerifyReload -ReloadWithSaveLoad`
 启用，三个制品参数与纯 UI 重载相同；省略开关保留原有不存档模式。
 
-详见[异常流程验收](../../../Docs/Phase64/P64.D_UI_Save_Edges.md)。World 销毁、包内 UI 与长稳仍待验证；
-空文件分支不代表任意损坏文件都可安全解析。合成事件不替代真实输入和视觉验收。
+### 地图重建与连续运行
+
+```powershell
+pwsh -NoProfile -File Build/InvokeAvidScriptUiSaveDemo.ps1 `
+  -Mode VerifyWorld -ExpectedPackageId <当前发布的package_id> `
+  -WorldCycles 10 -SoakSeconds 3600 -TimeoutSeconds 3830
+```
+
+通过真实 OpenLevel 在同一进程中销毁并重建地图：每个新 C# 实例从 0 分开始，再 Load 上一轮存档、
+Collect、Save；最终新 World 再次 Load。省略 SoakSeconds 时只执行指定轮数，默认 10 次。
+一小时实跑完成 **877 次切图、4386/4386 动作**，旧 World/对象和 Session 清理通过，最终恢复 877 分。
+进程内存有增长，归因未完成，不表示无泄漏。见 [World 与持续运行报告](../../../Docs/Phase64/P64.D_World_Soak.md)。
+
+包内 UI、网络/热重载持续时长、真实输入和视觉验收仍保留。
+[异常流程](../../../Docs/Phase64/P64.D_UI_Save_Edges.md)的空文件分支不代表任意损坏文件均可安全解析。

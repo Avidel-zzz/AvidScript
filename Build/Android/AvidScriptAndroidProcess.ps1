@@ -38,7 +38,7 @@ function Invoke-AvidScriptAndroidProcess {
         [Parameter(Mandatory = $true)][string]$Executable,
         [Parameter(Mandatory = $true)][string[]]$Arguments,
         [Parameter(Mandatory = $true)][string]$WorkingDirectory,
-        [ValidateRange(1, 7200)][int]$TimeoutSeconds = 60,
+        [ValidateRange(1, 41630)][int]$TimeoutSeconds = 60,
         [hashtable]$Environment = @{}
     )
 
