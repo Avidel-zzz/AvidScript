@@ -95,6 +95,13 @@ Development/Shipping Game。Development 同一进程运行 3602.566 秒，完成
 参数帧与 backend 历史保留已修复，Editor/全历史探针开销、分配器驻留和包内资源已完成分层，D07
 据此标记 Verified；该结论不等于整个进程零增长。
 
+当前候选 `a7a9226` 复跑 RuntimeComponent 网络闭环：dedicated server + 2 clients 与 listen server +
+1 remote client 两种拓扑 **2/2** 通过，共 5 个真实 UE 进程；Server RPC、脚本 handler、复制属性、
+RepNotify 与客户端确认均完成，Runtime 保持加载且无脚本错误。run
+`20260904T222449915Z_39344_6514b6d4` 实际编排约 103.835 秒，聚合 SHA-256 为
+`cf98b6c6fc85a75f8a51b2cec4768c4195d6a3b3bf446d240c94f1f586837085`。这是当前提交的有界网络回归，
+不宣称一小时网络长稳或替代物理输入验收。
+
 ## 仍需完成
 
 P64.D 依架构 v15 继续补齐 UI 人工重启读档与 Shipping 视觉、网络/重载持续时长，以及 Android
@@ -119,3 +126,6 @@ toolchain/UBT/APK。
   仍工作时让 PowerShell 返回，随后重复启动会造成重叠分析和缺失 CSV。只重试离线分析，不重采 trace。
 - 长任务成功后只读取报告 schema 中存在的字段；用于展示的尾部表达式失败不能覆盖已持久化的原生
   成功证据，也不应触发昂贵重跑。先校验报告、日志关闭和哈希，再单独修正包装层。
+- 重放旧的 UI reload 命令前必须从当前 catalog/runtime snapshot 取得 PackageId，并核对启动正文 SHA
+  与 baseline 制品；不能照抄旧文档中的身份。身份或正文漂移时探针应在零轮 fail-closed，随后重新生成
+  同源 C# 制品，而不是替换 expected 值后反复试跑。
