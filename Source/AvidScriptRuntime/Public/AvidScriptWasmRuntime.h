@@ -452,8 +452,17 @@ public:
 	void SetPendingHostImportFailure(
 		const FString& ImportModuleName,
 		const FString& ImportName,
-		const FString& Details);
-	bool ConsumePendingHostImportFailure(FString& OutImportModuleName, FString& OutImportName, FString& OutDetails);
+		const FString& Details,
+		const TCHAR* ErrorCategory = TEXT("host_import_failed"));
+	bool ConsumePendingHostImportFailure(
+		FString& OutImportModuleName,
+		FString& OutImportName,
+		FString& OutDetails,
+		FString* OutErrorCategory = nullptr);
+	bool ConsumeTypedHostFailure(
+		const FString& ExpectedModuleName,
+		const FString& ExpectedImportName,
+		FAvidScriptVmTypedHostFailure& OutFailure) override;
 	bool DispatchHostCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult) override;
 	bool DispatchDynamicHostCall(
 		const FAvidScriptDynamicHostCall& Call,
@@ -674,6 +683,7 @@ private:
 	void CopyTimerStateToResult(FAvidScriptWasmSmokeResult& OutResult) const;
 	void ResetEventState();
 	void CopyEventStateToResult(FAvidScriptWasmSmokeResult& OutResult) const;
+	void ClearPendingHostImportFailure();
 	void ResetHostImportState();
 	void CopyHostImportStateToResult(FAvidScriptWasmSmokeResult& OutResult) const;
 	void CopyObservableStateToResult(FAvidScriptWasmSmokeResult& OutResult) const;
@@ -725,8 +735,10 @@ private:
 	int32 LastHostImportInput = 0;
 	int32 LastHostImportResult = 0;
 	bool bHasPendingHostImportFailure = false;
+	uint64 PendingHostImportCallbackEpoch = 0;
 	FString PendingHostImportModuleName;
 	FString PendingHostImportName;
+	FString PendingHostImportErrorCategory;
 	FString PendingHostImportDetails;
 	FAvidScriptPreparedDelegateOutputTransaction*
 		ActiveDelegateOutputTransaction = nullptr;

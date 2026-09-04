@@ -23,6 +23,7 @@ void SetDispatchFailure(
 	const FString& Details)
 {
 	OutResult = FAvidScriptDynamicHostCallResult();
+	OutResult.ErrorCategory = Category;
 	OutResult.Details = FString::Printf(
 		TEXT("%s | source=%s | %s"),
 		*Category,

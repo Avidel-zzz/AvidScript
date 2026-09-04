@@ -4664,6 +4664,38 @@ foreach ($PreparedShapeContract in @(
         Add-Violation "VM prepared reflection shape is missing $PreparedShapeContract"
     }
 }
+foreach ($TypedHostDiagnosticContract in @(
+    'FAvidScriptVmTypedHostFailure',
+    'ConsumeTypedHostFailure('
+)) {
+    if (-not $VmTypedHostHeader.Contains($TypedHostDiagnosticContract)) {
+        Add-Violation "VM typed Host diagnostic contract is missing $TypedHostDiagnosticContract"
+    }
+}
+foreach ($RuntimeTypedHostDiagnosticContract in @(
+    'PendingHostImportCallbackEpoch',
+    'PendingHostImportErrorCategory',
+    'FAvidScriptWasmRuntimeInstance::ConsumeTypedHostFailure('
+)) {
+    if (-not $WasmRuntimeHeader.Contains($RuntimeTypedHostDiagnosticContract) -and
+        -not $WasmRuntimeSource.Contains($RuntimeTypedHostDiagnosticContract)) {
+        Add-Violation "Runtime typed Host diagnostic lifecycle is missing $RuntimeTypedHostDiagnosticContract"
+    }
+}
+if (-not $WasmtimeBackendSource.Contains('TypedHostDispatcher->ConsumeTypedHostFailure(')) {
+    Add-Violation 'Wasmtime typed Host failure path must consume the Runtime diagnostic before forming the VM error'
+}
+foreach ($BackendHostDiagnosticContract in @(
+    'FString ErrorCategory;',
+    'FAvidScriptDynamicHostCallResult'
+)) {
+    if (-not $VmBackendContractSource.Contains($BackendHostDiagnosticContract)) {
+        Add-Violation "VM Host result contract is missing $BackendHostDiagnosticContract"
+    }
+}
+if (-not $WamrBackendSource.Contains('PendingHostFailureCategory')) {
+    Add-Violation 'WAMR Host compatibility path must preserve the structured failure category'
+}
 $PreparedReflectionRuntimeSlice = Get-SourceSlice `
     -Source $WasmRuntimeSource `
     -StartToken 'FAvidScriptWasmRuntimeInstance::ResolvePreparedReflectionCallMode(' `

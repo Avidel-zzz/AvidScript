@@ -327,6 +327,25 @@ TUniquePtr<IAvidScriptVmBackend> CreateTypedWasmtimeBackend(FAvidScriptVmError& 
 class FTypedHostDispatcher final : public IAvidScriptVmTypedHostDispatcher
 {
 public:
+	bool ConsumeTypedHostFailure(
+		const FString& ExpectedModuleName,
+		const FString& ExpectedImportName,
+		FAvidScriptVmTypedHostFailure& OutFailure) override
+	{
+		++FailureConsumeCount;
+		LastExpectedModuleName = ExpectedModuleName;
+		LastExpectedImportName = ExpectedImportName;
+		OutFailure.Reset();
+		if (!bFailureAvailable)
+		{
+			return false;
+		}
+		bFailureAvailable = false;
+		OutFailure.Category = FailureCategory;
+		OutFailure.Details = FailureDetails;
+		return true;
+	}
+
 	EAvidScriptVmTypedHostStatus DispatchEmptyI32(
 		uint32 BindingOrdinal,
 		int32& OutValue) override
@@ -448,7 +467,13 @@ public:
 	int32 SelfVectorCalls = 0;
 	int32 StableObjectCalls = 0;
 	int32 CommandBufferCalls = 0;
+	int32 FailureConsumeCount = 0;
 	int32 Bias = 0;
+	bool bFailureAvailable = false;
+	FString FailureCategory;
+	FString FailureDetails;
+	FString LastExpectedModuleName;
+	FString LastExpectedImportName;
 };
 
 struct FPreparedSelfI32PairContext
@@ -1198,6 +1223,25 @@ bool FAvidScriptVmWasmtimeTypedHostTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("typed rejection traps"), Backend->Call(RejectHandle, EmptyFrame, Error));
 	TestEqual(TEXT("typed rejection category"), Error.Category, FString(TEXT("host_import_failed")));
 	TestEqual(TEXT("typed rejection import"), Error.ImportName, FString(TypedImportName));
+	TestEqual(TEXT("generic rejection probes the failure channel once"), Dispatcher.FailureConsumeCount, 1);
+
+	Dispatcher.bFailureAvailable = true;
+	Dispatcher.FailureCategory = TEXT("binding_write_denied");
+	Dispatcher.FailureDetails = TEXT("The reflected property is read-only for this Session.");
+	TestFalse(TEXT("structured typed rejection traps"), Backend->Call(RejectHandle, EmptyFrame, Error));
+	TestEqual(TEXT("structured typed category crosses the VM"), Error.Category, Dispatcher.FailureCategory);
+	TestEqual(TEXT("structured typed details cross the VM"), Error.Details, Dispatcher.FailureDetails);
+	TestEqual(TEXT("VM metadata keeps the typed module identity"), Error.ImportModuleName, FString(TEXT("avidscript")));
+	TestEqual(TEXT("VM metadata keeps the typed import identity"), Error.ImportName, FString(TypedImportName));
+	TestEqual(TEXT("failure consumer receives the expected module"), Dispatcher.LastExpectedModuleName, FString(TEXT("avidscript")));
+	TestEqual(TEXT("failure consumer receives the expected import"), Dispatcher.LastExpectedImportName, FString(TypedImportName));
+
+	TestFalse(TEXT("consumed typed failure is not reused"), Backend->Call(RejectHandle, EmptyFrame, Error));
+	TestEqual(TEXT("one-shot failure falls back to the generic category"), Error.Category, FString(TEXT("host_import_failed")));
+	const int32 FailureConsumeCount = Dispatcher.FailureConsumeCount;
+	Dispatcher.Status = EAvidScriptVmTypedHostStatus::Succeeded;
+	TestTrue(TEXT("typed success still returns after failures"), Backend->Call(RejectHandle, EmptyFrame, Error));
+	TestEqual(TEXT("typed success does not enter the failure channel"), Dispatcher.FailureConsumeCount, FailureConsumeCount);
 
 	FAvidScriptVmLoadConfig MissingDispatcherConfig;
 	MissingDispatcherConfig.BindingPackage = &Package;

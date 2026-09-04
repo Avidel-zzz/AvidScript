@@ -33,6 +33,18 @@ enum class EAvidScriptVmTypedHostStatus : uint8
 	FallbackRequired
 };
 
+struct FAvidScriptVmTypedHostFailure
+{
+	FString Category;
+	FString Details;
+
+	void Reset()
+	{
+		Category.Reset();
+		Details.Reset();
+	}
+};
+
 static_assert(sizeof(EAvidScriptVmTypedHostShape) == 1);
 static_assert(sizeof(EAvidScriptVmTypedHostStatus) == 1);
 
@@ -236,6 +248,17 @@ class AVIDSCRIPTVM_API IAvidScriptVmTypedHostDispatcher
 {
 public:
 	virtual ~IAvidScriptVmTypedHostDispatcher() = default;
+
+	virtual bool ConsumeTypedHostFailure(
+		const FString& ExpectedModuleName,
+		const FString& ExpectedImportName,
+		FAvidScriptVmTypedHostFailure& OutFailure)
+	{
+		static_cast<void>(ExpectedModuleName);
+		static_cast<void>(ExpectedImportName);
+		OutFailure.Reset();
+		return false;
+	}
 
 	virtual EAvidScriptVmTypedHostStatus DispatchEmptyI32(
 		uint32 BindingOrdinal,

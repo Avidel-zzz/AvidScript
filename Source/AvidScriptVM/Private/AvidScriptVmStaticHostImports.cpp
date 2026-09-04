@@ -106,7 +106,8 @@ bool DispatchStaticCall(
 	IAvidScriptHostDispatcher* HostDispatcher,
 	FAvidScriptHostCall& Call,
 	FAvidScriptHostCallResult& OutHostResult,
-	FString& OutFailureDetails)
+	FString& OutFailureDetails,
+	FString* OutFailureCategory)
 {
 	if (HostDispatcher == nullptr)
 	{
@@ -114,6 +115,10 @@ bool DispatchStaticCall(
 	}
 	if (!HostDispatcher->DispatchHostCall(Call, OutHostResult) || !OutHostResult.bSucceeded)
 	{
+		if (OutFailureCategory != nullptr)
+		{
+			*OutFailureCategory = OutHostResult.ErrorCategory;
+		}
 		OutFailureDetails = OutHostResult.Details.IsEmpty()
 			? FString::Printf(TEXT("Host dispatcher rejected avidscript.%s."), UTF8_TO_TCHAR(Import.ImportName))
 			: OutHostResult.Details;
@@ -207,10 +212,15 @@ bool InvokeAvidScriptVmStaticHostImport(
 	IAvidScriptHostDispatcher* HostDispatcher,
 	IAvidScriptVmGuestMemory& GuestMemory,
 	FAvidScriptVmStaticCallResult& OutResult,
-	FString& OutFailureDetails)
+	FString& OutFailureDetails,
+	FString* OutFailureCategory)
 {
 	OutResult = FAvidScriptVmStaticCallResult();
 	OutFailureDetails.Reset();
+	if (OutFailureCategory != nullptr)
+	{
+		OutFailureCategory->Reset();
+	}
 	if (!ValidateStaticArguments(Signature, Arguments, OutFailureDetails))
 	{
 		return false;
@@ -641,7 +651,13 @@ bool InvokeAvidScriptVmStaticHostImport(
 				static_cast<int32>(OutputFloatCount));
 		}
 		Call.IntArgs[0] = Count;
-		if (!DispatchStaticCall(Import, HostDispatcher, Call, HostResult, OutFailureDetails))
+		if (!DispatchStaticCall(
+				Import,
+				HostDispatcher,
+				Call,
+				HostResult,
+				OutFailureDetails,
+				OutFailureCategory))
 		{
 			return false;
 		}
@@ -652,7 +668,13 @@ bool InvokeAvidScriptVmStaticHostImport(
 		return FailStaticCall(OutFailureDetails, TEXT("Static host import has no adapter."));
 	}
 
-	if (!DispatchStaticCall(Import, HostDispatcher, Call, HostResult, OutFailureDetails))
+	if (!DispatchStaticCall(
+			Import,
+			HostDispatcher,
+			Call,
+			HostResult,
+			OutFailureDetails,
+			OutFailureCategory))
 	{
 		return false;
 	}

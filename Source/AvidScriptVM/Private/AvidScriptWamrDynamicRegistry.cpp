@@ -147,6 +147,7 @@ void InvokeAvidScriptDynamicRawImport(wasm_exec_env_t ExecEnv, uint64* Arguments
 		? static_cast<IAvidScriptWamrHostBridge*>(wasm_runtime_get_user_data(ExecEnv))
 		: nullptr;
 	int64 ReturnValue = 0;
+	FString FailureCategory;
 	FString FailureDetails;
 	const bool bSucceeded = Attachment != nullptr
 		&& Bridge != nullptr
@@ -154,6 +155,7 @@ void InvokeAvidScriptDynamicRawImport(wasm_exec_env_t ExecEnv, uint64* Arguments
 			*Attachment,
 			MakeArrayView(Arguments, static_cast<int32>(Attachment->ParameterCount)),
 			ReturnValue,
+			FailureCategory,
 			FailureDetails);
 	if (!bSucceeded)
 	{
@@ -164,7 +166,12 @@ void InvokeAvidScriptDynamicRawImport(wasm_exec_env_t ExecEnv, uint64* Arguments
 		if (Bridge != nullptr)
 		{
 			FTCHARToUTF8 ImportNameUtf8(*ImportName);
-			Bridge->RecordHostImportFailure(ImportNameUtf8.Get(), Details);
+			Bridge->RecordHostImportFailure(
+				ImportNameUtf8.Get(),
+				FailureCategory.IsEmpty()
+					? FString(TEXT("host_import_failed"))
+					: FailureCategory,
+				Details);
 		}
 		SetDynamicRawException(ExecEnv);
 		ReturnValue = 0;

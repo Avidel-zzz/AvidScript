@@ -311,6 +311,7 @@ struct FAvidScriptHostCallResult
 	int64 ReturnValueI64 = 0;
 	uint32 IntValues[2] = {};
 	float FloatValues[3] = {};
+	FString ErrorCategory;
 	FString Details;
 };
 
@@ -363,6 +364,7 @@ struct FAvidScriptDynamicHostCallResult
 	bool bSucceeded = false;
 	int32 ReturnValue = 0;
 	int64 ReturnValueI64 = 0;
+	FString ErrorCategory;
 	FString Details;
 };
 
@@ -399,6 +401,7 @@ public:
 		FAvidScriptDynamicHostCallResult& OutResult)
 	{
 		OutResult = FAvidScriptDynamicHostCallResult();
+		OutResult.ErrorCategory = TEXT("dynamic_host_unsupported");
 		OutResult.Details = TEXT("Dynamic host calls are not supported by this dispatcher.");
 		return false;
 	}

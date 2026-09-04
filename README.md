@@ -41,7 +41,7 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 | Blueprint 与联机 | callable/event 双向交互；Server/Client/NetMulticast RPC、属性复制与 RepNotify，dedicated/listen 多进程验证 |
 | 热重载与生命周期 | 方法体替换、持久字段迁移、失败候选回滚；存取可穿插重载，退出时取消异步并解绑事件；ObjectHandle 与 Session 隔离 |
 | 构建与发布 | Wasmtime 45 Win64 JIT/AOT、WAMR 兼容后端；内容寻址模块、Generated Type 预编译、Development/Shipping BuildCookRun；Android arm64 交叉 AOT |
-| IDE 与诊断 | 增量缓存、persistent Worker、`.slnx`/WASI 工作区；VS/Rider/VS Code 启动、源码映射、跨层栈、受控断点/步进与只读变量；UE Trace 和 Profiler 导出 |
+| IDE 与诊断 | 增量缓存、persistent Worker、`.slnx`/WASI 工作区；源码映射、跨层栈、受控断点/步进与只读变量；typed Host 错误保留具体分类、原因和 import 身份；UE Trace 和 Profiler 导出 |
 
 直接看 C# 样例：[收集玩法](Samples/CSharp/PickupRush/README.md) ·
 [UI/存档](Samples/CSharp/UiSaveDemo/README.md)（[源码](Samples/CSharp/UiSaveDemo/UiSaveDemoScript.cs)）·
@@ -49,7 +49,8 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 
 **近期交付：** [Development/Shipping 包内 UI/存档](Docs/Phase64/P64.D_Packaged_UI.md)、
 [包内 World 生命周期门槛](Docs/Phase64/P64.D_Packaged_World_Soak.md)、两次 Editor 一小时切图、
-[分配栈诊断](Docs/Phase64/P64.D_Native_Allocation_Tracing.md)与[调用生命周期修复](Docs/Phase64/P64.D_Invocation_Lifetime.md)。
+[分配栈诊断](Docs/Phase64/P64.D_Native_Allocation_Tracing.md)、[调用生命周期修复](Docs/Phase64/P64.D_Invocation_Lifetime.md)
+与[类型化 Host 结构化诊断](Docs/Phase64/P64.D_Typed_Host_Diagnostics.md)。
 已知字符串参数帧逐轮保留已归零；整个 Editor 进程的剩余增长仍在归因，不宣称无泄漏。
 完整记录见 [P64 交付](Docs/Phase64/P64_Closeout.md)，类型范围见 [P58 验收](Docs/Phase58/P58.4_Centralized_Gate_Report.md)。
 实现与验收分别记录，限制见[当前边界](#当前边界)。
@@ -146,7 +147,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 - **C# 子集**：无完整 .NET Runtime、任意 awaiter 或异常系统；暂不支持 `event +=`、lambda/closure，使用显式 bind/subscribe 与 `ExecuteX/BroadcastX`。
 - **重载与隔离**：方法体可热重载；UI 样例通过 `NextTickAsync` 在候选提交后初始化。准备期无可回滚适配的反射写入仍被拒绝，不承诺回滚任意外部副作用。反射结构变更需增量 UBT 并重启 Editor；WASM 隔离不是原生 DLL 进程沙箱。
 - **玩法与平台**：UI 包使用独立验证插件和隔离启动配置，Development/Shipping 均通过跨进程自动存取；Development 首轮人工界面/按钮反馈无问题，人工重启读档、Shipping 视觉及网络/重载长稳仍待验收。任意损坏存档不在现有保证内；两次一小时切图均通过，但剩余 Editor/探针/分配器内存增长、Android UBT/APK/真机及 iOS 仍未验收。
-- **诊断与性能**：[typed Host 结构化诊断合同](Docs/Phase64/P64.D_Typed_Host_Diagnostics.md)已冻结，产品透传与双后端/重入验证尚未完成；纯执行 P50/P95 领先门禁未关闭，也未完成同口径 UnLua/AngelScript 矩阵。
+- **诊断与性能**：typed Host 拒绝已在 Wasmtime 保留具体 category/details/import，WAMR semantic/dynamic 路径同样保留分类；尚无完整 C# 异常系统。纯执行 P50/P95 领先门禁未关闭，也未完成同口径 UnLua/AngelScript 矩阵。
 
 下一步补齐人工重启读档与 Shipping 视觉、内存归因、网络/重载长稳及移动构建/设备证据；
 随后推进安装、升级、兼容和诊断等发布工程，不以阶段编号代替实际验收。
@@ -166,6 +167,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 | [World 连续运行](Docs/Phase64/P64.D_World_Soak.md) | 修复前后两次各 **约 3601 秒、877 次切图、4386/4386 动作**；旧对象逐轮回收，Session/backend live/UObject 有界；Editor 增长已由包内一小时分层 |
 | [内存归因与分配栈](Docs/Phase64/P64.D_Native_Allocation_Tracing.md) | VM/Trace/FName/LLM 快照、GC 书签与 Insights 四组查询；`SetUtf8Value` 两窗口 **0 项/0 字节**，结合包内稳态验证 D07，但不宣称整个进程零增长 |
 | [调用生命周期修复](Docs/Phase64/P64.D_Invocation_Lifetime.md) | 原生 UFunction 非平凡帧统一析构；Wasmtime 重载历史改为调用者按需持有；Binding **1/1**、Wasmtime **14/14**，修复后一小时 **877/877** 轮通过 |
+| [类型化 Host 结构化诊断](Docs/Phase64/P64.D_Typed_Host_Diagnostics.md) | Wasmtime typed 与 WAMR dynamic 实际 WASM、Runtime epoch/重入和 Reflection 拒绝共 **4/4** 通过；no-clean Editor UBT 成功 |
 
 编译器专项见 [async 短路求值](Docs/Phase64/P64.D_Async_Short_Circuit.md)与[C# 捕获赋值](Docs/Phase64/P64.D_Captured_Assignment.md)。
 上述机器验证不替代真实输入、视觉、设备和完整长稳验收；[Android 边界](Docs/Phase64/P64.D_Android_Readiness.md)单独保留。

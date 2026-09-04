@@ -1413,6 +1413,7 @@ public:
 		ActiveCaller = Caller;
 		FAvidScriptVmStaticCallResult StaticResult;
 		FString FailureDetails;
+		FString FailureCategory;
 		const bool bSucceeded = InvokeAvidScriptVmStaticHostImport(
 			*HostContext.Import,
 			HostContext.Signature,
@@ -1420,7 +1421,8 @@ public:
 			HostDispatcher,
 			*this,
 			StaticResult,
-			FailureDetails);
+			FailureDetails,
+			&FailureCategory);
 		ActiveCaller = PreviousCaller;
 		if (!bSucceeded)
 		{
@@ -1429,7 +1431,10 @@ public:
 				UTF8_TO_TCHAR(HostContext.Import->ImportName),
 				FailureDetails.IsEmpty()
 					? TEXT("Wasmtime static host import adapter rejected the call.")
-					: MoveTemp(FailureDetails));
+					: MoveTemp(FailureDetails),
+				FailureCategory.IsEmpty()
+					? FString(TEXT("host_import_failed"))
+					: MoveTemp(FailureCategory));
 			return false;
 		}
 
@@ -1560,7 +1565,10 @@ public:
 					? bHasPreparedTarget
 						? TEXT("Wasmtime prepared dynamic host target rejected the call.")
 						: TEXT("Wasmtime dynamic host dispatcher rejected the call.")
-					: MoveTemp(Result.Details));
+					: MoveTemp(Result.Details),
+				Result.ErrorCategory.IsEmpty()
+					? FString(TEXT("host_import_failed"))
+					: MoveTemp(Result.ErrorCategory));
 			return false;
 		}
 
@@ -1598,17 +1606,7 @@ public:
 		}
 		const EAvidScriptVmTypedHostStatus Status =
 			TypedHostDispatcher->DispatchEmptyI32(HostContext.BindingOrdinal, OutValue);
-		if (Status == EAvidScriptVmTypedHostStatus::Succeeded)
-		{
-			return 0;
-		}
-		RecordPendingHostFailure(
-			HostContext.ModuleName,
-			HostContext.ImportName,
-			Status == EAvidScriptVmTypedHostStatus::FallbackRequired
-				? TEXT("The typed host import requires semantic fallback, but its dedicated ABI cannot fall back in place.")
-				: TEXT("The typed host dispatcher rejected the call."));
-		return 1;
+		return CompleteTypedInvocation(HostContext, Status);
 	}
 
 	int32 InvokeTypedI32Pair(
@@ -1635,17 +1633,7 @@ public:
 				Left,
 				Right,
 				OutValue);
-		if (Status == EAvidScriptVmTypedHostStatus::Succeeded)
-		{
-			return 0;
-		}
-		RecordPendingHostFailure(
-			HostContext.ModuleName,
-			HostContext.ImportName,
-			Status == EAvidScriptVmTypedHostStatus::FallbackRequired
-				? TEXT("The typed host import requires semantic fallback, but its dedicated ABI cannot fall back in place.")
-				: TEXT("The typed host dispatcher rejected the call."));
-		return 1;
+		return CompleteTypedInvocation(HostContext, Status);
 	}
 
 	int32 InvokeTypedSelfI32Pair(
@@ -2325,6 +2313,24 @@ private:
 		{
 			return 0;
 		}
+		FAvidScriptVmTypedHostFailure Failure;
+		if (TypedHostDispatcher != nullptr
+			&& TypedHostDispatcher->ConsumeTypedHostFailure(
+				HostContext.ModuleName,
+				HostContext.ImportName,
+				Failure))
+		{
+			RecordPendingHostFailure(
+				HostContext.ModuleName,
+				HostContext.ImportName,
+				Failure.Details.IsEmpty()
+					? TEXT("The typed host dispatcher rejected the call.")
+					: MoveTemp(Failure.Details),
+				Failure.Category.IsEmpty()
+					? FString(TEXT("host_import_failed"))
+					: MoveTemp(Failure.Category));
+			return 1;
+		}
 		RecordPendingHostFailure(
 			HostContext.ModuleName,
 			HostContext.ImportName,
@@ -2362,12 +2368,12 @@ private:
 		const FString& ModuleName,
 		const FString& ImportName,
 		FString Details,
-		const TCHAR* Category = TEXT("host_import_failed"))
+		FString Category = TEXT("host_import_failed"))
 	{
 		bHasPendingHostFailure = true;
 		PendingHostImportModuleName = ModuleName;
 		PendingHostImportName = ImportName;
-		PendingHostFailureCategory = Category;
+		PendingHostFailureCategory = MoveTemp(Category);
 		PendingHostFailureDetails = MoveTemp(Details);
 	}
 

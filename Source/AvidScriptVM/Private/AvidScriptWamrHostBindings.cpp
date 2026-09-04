@@ -49,11 +49,16 @@ void SetException(wasm_exec_env_t ExecEnv, const char* Details)
 	}
 }
 
-bool Fail(wasm_exec_env_t ExecEnv, IAvidScriptWamrHostBridge* Bridge, const char* ImportName, const FString& Details)
+bool Fail(
+	wasm_exec_env_t ExecEnv,
+	IAvidScriptWamrHostBridge* Bridge,
+	const char* ImportName,
+	const FString& Details,
+	const FString& Category = TEXT("host_import_failed"))
 {
 	if (Bridge != nullptr)
 	{
-		Bridge->RecordHostImportFailure(ImportName, Details);
+		Bridge->RecordHostImportFailure(ImportName, Category, Details);
 	}
 	SetException(ExecEnv, "avidscript_host_import_failed");
 	return false;
@@ -76,7 +81,14 @@ bool Dispatch(
 		const FString Details = OutResult.Details.IsEmpty()
 			? FString::Printf(TEXT("Host dispatcher rejected avidscript.%s."), ANSI_TO_TCHAR(ImportName))
 			: OutResult.Details;
-		return Fail(ExecEnv, Bridge, ImportName, Details);
+		return Fail(
+			ExecEnv,
+			Bridge,
+			ImportName,
+			Details,
+			OutResult.ErrorCategory.IsEmpty()
+				? FString(TEXT("host_import_failed"))
+				: OutResult.ErrorCategory);
 	}
 
 	return true;

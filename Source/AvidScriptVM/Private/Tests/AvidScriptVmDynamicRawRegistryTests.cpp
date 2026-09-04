@@ -66,6 +66,13 @@ public:
 		LastArgumentCount = Call.Arguments.Num();
 		LastInput = Call.Arguments.IsEmpty() ? 0 : static_cast<int32>(Call.Arguments[0]);
 		bSawGuestMemory = Call.GuestMemory != nullptr;
+		if (bReject)
+		{
+			OutResult = FAvidScriptDynamicHostCallResult();
+			OutResult.ErrorCategory = RejectCategory;
+			OutResult.Details = RejectDetails;
+			return false;
+		}
 		OutResult.bSucceeded = true;
 		OutResult.ReturnValue = LastInput + 1;
 		if (BackendToUnload != nullptr)
@@ -85,6 +92,9 @@ public:
 	int32 LastInput = 0;
 	bool bSawGuestMemory = false;
 	bool bRequestedUnload = false;
+	bool bReject = false;
+	FString RejectCategory = TEXT("binding_test_rejected");
+	FString RejectDetails = TEXT("The test dispatcher rejected the dynamic binding.");
 };
 
 bool CallBeginPlay(
@@ -136,6 +146,14 @@ bool FAvidScriptVmDynamicRawRegistrySmokeTest::RunTest(const FString& Parameters
 	TestEqual(TEXT("Raw callback receives one argument"), SecondDispatcher.LastArgumentCount, 1);
 	TestEqual(TEXT("Raw callback preserves the i32 argument"), SecondDispatcher.LastInput, 41);
 	TestTrue(TEXT("Dynamic call exposes language-neutral guest memory"), SecondDispatcher.bSawGuestMemory);
+	SecondDispatcher.bReject = true;
+	TestFalse(TEXT("WAMR surfaces a structured dynamic host rejection"), CallBeginPlay(*SecondBackend, Error));
+	TestEqual(TEXT("WAMR preserves the dynamic failure category"), Error.Category, SecondDispatcher.RejectCategory);
+	TestEqual(TEXT("WAMR preserves the dynamic failure details"), Error.Details, SecondDispatcher.RejectDetails);
+	TestEqual(TEXT("WAMR preserves the dynamic import module"), Error.ImportModuleName, FString(TEXT("avidscript")));
+	TestEqual(TEXT("WAMR preserves the dynamic import name"), Error.ImportName, FString(DynamicImportName));
+	SecondDispatcher.bReject = false;
+	TestTrue(TEXT("WAMR clears the previous failure before the next call"), CallBeginPlay(*SecondBackend, Error));
 	return true;
 }
 

@@ -13,8 +13,12 @@ public:
 		const FAvidScriptWamrRawImportAttachment& Attachment,
 		TConstArrayView<uint64> Arguments,
 		int64& OutReturnValue,
+		FString& OutFailureCategory,
 		FString& OutFailureDetails) = 0;
-	virtual void RecordHostImportFailure(const char* ImportName, const FString& Details) = 0;
+	virtual void RecordHostImportFailure(
+		const char* ImportName,
+		const FString& Category,
+		const FString& Details) = 0;
 };
 
 bool RegisterAvidScriptWamrHostBindings();

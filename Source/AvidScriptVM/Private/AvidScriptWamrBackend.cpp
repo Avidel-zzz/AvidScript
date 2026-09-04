@@ -560,6 +560,7 @@ public:
 		bHostCallBudgetExceeded = false;
 		CurrentHostCallCount = 0;
 		PendingHostImportName.Reset();
+		PendingHostFailureCategory.Reset();
 		PendingHostImportDetails.Reset();
 #if !AVIDSCRIPT_WITH_WAMR
 		SetVmError(OutError, TEXT("backend_unavailable"), TEXT("WAMR artifacts are unavailable for this target."));
@@ -622,6 +623,7 @@ public:
 		{
 			Exception = GetWamrException(ModuleInstance);
 			CaptureAvidScriptWamrCallStack(ExecEnv, StackFrames);
+			wasm_runtime_clear_exception(ModuleInstance);
 		}
 
 		--ActiveCallDepth;
@@ -646,7 +648,9 @@ public:
 				OutError.Reset();
 				OutError.Category = bHostCallBudgetExceeded
 					? TEXT("host_call_budget_exhausted")
-					: TEXT("host_import_failed");
+					: PendingHostFailureCategory.IsEmpty()
+						? TEXT("host_import_failed")
+						: PendingHostFailureCategory;
 				OutError.ImportModuleName = TEXT("avidscript");
 				OutError.ImportName = PendingHostImportName;
 				OutError.Details = PendingHostImportDetails;
@@ -708,11 +712,13 @@ public:
 		OutResult = FAvidScriptHostCallResult();
 		if (!TryConsumeHostCallBudget())
 		{
+			OutResult.ErrorCategory = TEXT("host_call_budget_exhausted");
 			OutResult.Details = TEXT("The guest exceeded the per-entry host-call budget.");
 			return false;
 		}
 		if (HostDispatcher == nullptr)
 		{
+			OutResult.ErrorCategory = TEXT("host_import_failed");
 			OutResult.Details = TEXT("No host dispatcher is attached to the VM instance.");
 			return false;
 		}
@@ -723,23 +729,28 @@ public:
 		const FAvidScriptWamrRawImportAttachment& Attachment,
 		TConstArrayView<uint64> Arguments,
 		int64& OutReturnValue,
+		FString& OutFailureCategory,
 		FString& OutFailureDetails) override
 	{
 		OutReturnValue = 0;
+		OutFailureCategory.Reset();
 		OutFailureDetails.Reset();
 		if (!TryConsumeHostCallBudget())
 		{
+			OutFailureCategory = TEXT("host_call_budget_exhausted");
 			OutFailureDetails = TEXT("The guest exceeded the per-entry host-call budget.");
 			return false;
 		}
 		const uint32* Ordinal = DynamicOrdinals.Find(&Attachment);
 		if (Ordinal == nullptr)
 		{
+			OutFailureCategory = TEXT("dynamic_host_attachment_invalid");
 			OutFailureDetails = TEXT("The raw import is not attached to this VM binding package.");
 			return false;
 		}
 		if (HostDispatcher == nullptr)
 		{
+			OutFailureCategory = TEXT("host_import_failed");
 			OutFailureDetails = TEXT("No host dispatcher is attached to the VM instance.");
 			return false;
 		}
@@ -750,6 +761,9 @@ public:
 		FAvidScriptDynamicHostCallResult Result;
 		if (!HostDispatcher->DispatchDynamicHostCall(Call, Result) || !Result.bSucceeded)
 		{
+			OutFailureCategory = Result.ErrorCategory.IsEmpty()
+				? TEXT("host_import_failed")
+				: Result.ErrorCategory;
 			OutFailureDetails = Result.Details.IsEmpty()
 				? FString::Printf(TEXT("Dynamic host dispatcher rejected ordinal %u."), *Ordinal)
 				: Result.Details;
@@ -955,10 +969,14 @@ public:
 		#endif
 	}
 
-	void RecordHostImportFailure(const char* ImportName, const FString& Details) override
+	void RecordHostImportFailure(
+		const char* ImportName,
+		const FString& Category,
+		const FString& Details) override
 	{
 		bHasPendingHostImportFailure = true;
 		PendingHostImportName = UTF8_TO_TCHAR(ImportName);
+		PendingHostFailureCategory = Category;
 		PendingHostImportDetails = Details;
 	}
 
@@ -1049,6 +1067,7 @@ private:
 	uint32 MaxHostCallsPerEntry = 0;
 	uint32 CurrentHostCallCount = 0;
 	FString PendingHostImportName;
+	FString PendingHostFailureCategory;
 	FString PendingHostImportDetails;
 
 #if AVIDSCRIPT_WITH_WAMR

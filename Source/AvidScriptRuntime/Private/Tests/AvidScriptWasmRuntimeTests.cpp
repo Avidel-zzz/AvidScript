@@ -525,6 +525,98 @@ void DestroySmokeWorld(UWorld*& World)
 } // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptTypedHostFailureLifecycleTest,
+	"AvidScript.Runtime.TypedHostFailureLifecycle",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptTypedHostFailureLifecycleTest::RunTest(
+	const FString& Parameters)
+{
+	FAvidScriptWasmRuntimeInstance Runtime;
+	FAvidScriptVmTypedHostFailure Failure;
+
+	Runtime.BeginTypedCallbackEpochForTesting();
+	const uint64 OuterEpoch = Runtime.GetActiveCallbackEpochForTesting();
+	Runtime.BeginTypedCallbackEpochForTesting();
+	const uint64 InnerEpoch = Runtime.GetActiveCallbackEpochForTesting();
+	TestTrue(TEXT("Nested callback receives a distinct epoch"), InnerEpoch != OuterEpoch);
+	Runtime.SetPendingHostImportFailure(
+		TEXT("avidscript"),
+		TEXT("inner_import"),
+		TEXT("inner rejection"),
+		TEXT("binding_inner_rejected"));
+	TestTrue(
+		TEXT("Inner callback consumes its own failure"),
+		Runtime.ConsumeTypedHostFailure(
+			TEXT("avidscript"),
+			TEXT("inner_import"),
+			Failure));
+	TestEqual(
+		TEXT("Inner category is preserved"),
+		Failure.Category,
+		FString(TEXT("binding_inner_rejected")));
+	TestFalse(
+		TEXT("Inner failure is one-shot"),
+		Runtime.ConsumeTypedHostFailure(
+			TEXT("avidscript"),
+			TEXT("inner_import"),
+			Failure));
+	Runtime.EndTypedCallbackEpochForTesting();
+	TestEqual(
+		TEXT("Ending the nested callback restores the outer epoch"),
+		Runtime.GetActiveCallbackEpochForTesting(),
+		OuterEpoch);
+
+	Runtime.SetPendingHostImportFailure(
+		TEXT("avidscript"),
+		TEXT("outer_import"),
+		TEXT("outer rejection"),
+		TEXT("binding_outer_rejected"));
+	TestTrue(
+		TEXT("Outer callback consumes its own failure after reentry"),
+		Runtime.ConsumeTypedHostFailure(
+			TEXT("avidscript"),
+			TEXT("outer_import"),
+			Failure));
+	TestEqual(
+		TEXT("Outer details are preserved"),
+		Failure.Details,
+		FString(TEXT("outer rejection")));
+
+	Runtime.SetPendingHostImportFailure(
+		TEXT("avidscript"),
+		TEXT("expected_import"),
+		TEXT("identity rejection"));
+	TestFalse(
+		TEXT("Import identity mismatch rejects the pending failure"),
+		Runtime.ConsumeTypedHostFailure(
+			TEXT("avidscript"),
+			TEXT("other_import"),
+			Failure));
+	TestFalse(
+		TEXT("Identity mismatch clears the stale failure"),
+		Runtime.ConsumeTypedHostFailure(
+			TEXT("avidscript"),
+			TEXT("expected_import"),
+			Failure));
+
+	Runtime.SetPendingHostImportFailure(
+		TEXT("avidscript"),
+		TEXT("old_callback_import"),
+		TEXT("old callback rejection"));
+	Runtime.EndTypedCallbackEpochForTesting();
+	Runtime.BeginTypedCallbackEpochForTesting();
+	TestFalse(
+		TEXT("A later callback cannot consume an older epoch"),
+		Runtime.ConsumeTypedHostFailure(
+			TEXT("avidscript"),
+			TEXT("old_callback_import"),
+			Failure));
+	Runtime.EndTypedCallbackEpochForTesting();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptTypedOwnerImportsTest,
 	"AvidScript.Runtime.TypedOwnerImports",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

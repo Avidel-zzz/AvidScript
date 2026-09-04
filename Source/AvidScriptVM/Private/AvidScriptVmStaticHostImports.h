@@ -38,4 +38,5 @@ bool InvokeAvidScriptVmStaticHostImport(
 	IAvidScriptHostDispatcher* HostDispatcher,
 	IAvidScriptVmGuestMemory& GuestMemory,
 	FAvidScriptVmStaticCallResult& OutResult,
-	FString& OutFailureDetails);
+	FString& OutFailureDetails,
+	FString* OutFailureCategory = nullptr);

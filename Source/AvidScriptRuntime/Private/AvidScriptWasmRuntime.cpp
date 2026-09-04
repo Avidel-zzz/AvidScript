@@ -111,6 +111,36 @@ constexpr int32 AvidScriptTimerHeapCompactionThreshold = 64;
 constexpr int32 AvidScriptDataBridgeBudgetCheckStride = 32;
 constexpr uint32 AvidScriptMaximumAsyncObjectPathUtf8Bytes = 1024;
 
+FString ExtractAvidScriptFailureCategory(
+	const FString& Details,
+	const TCHAR* FallbackCategory)
+{
+	int32 SeparatorIndex = INDEX_NONE;
+	if (Details.FindChar(TEXT(':'), SeparatorIndex)
+		&& SeparatorIndex > 0
+		&& SeparatorIndex <= 64)
+	{
+		const FString Candidate = Details.Left(SeparatorIndex);
+		bool bValidCategory = FChar::IsLower(Candidate[0]);
+		bool bHasSeparator = false;
+		for (const TCHAR Character : Candidate)
+		{
+			bHasSeparator |= Character == TEXT('_');
+			if ((!FChar::IsLower(Character) && !FChar::IsDigit(Character))
+				&& Character != TEXT('_'))
+			{
+				bValidCategory = false;
+				break;
+			}
+		}
+		if (bValidCategory && bHasSeparator)
+		{
+			return Candidate;
+		}
+	}
+	return FallbackCategory;
+}
+
 bool DecodeAvidScriptUtf8ValueReference(
 	const uint32 ValueReference,
 	IAvidScriptVmGuestMemory* GuestMemory,
@@ -388,7 +418,8 @@ void SetFailureFromVmError(
 		NextAction = TEXT("skip this script instance and report the guest ABI mismatch");
 	}
 	else if (Category == TEXT("host_import_failed")
-		|| Category == TEXT("host_call_budget_exhausted"))
+		|| Category == TEXT("host_call_budget_exhausted")
+		|| !Error.ImportName.IsEmpty())
 	{
 		NextAction = TEXT("stop this script instance and surface the host import failure");
 	}
@@ -5086,21 +5117,51 @@ int32 FAvidScriptWasmRuntimeInstance::HandleHostFailI32Import(int32 Input)
 	return 0;
 }
 
+void FAvidScriptWasmRuntimeInstance::ClearPendingHostImportFailure()
+{
+	bHasPendingHostImportFailure = false;
+	PendingHostImportCallbackEpoch = 0;
+	PendingHostImportModuleName.Reset();
+	PendingHostImportName.Reset();
+	PendingHostImportErrorCategory.Reset();
+	PendingHostImportDetails.Reset();
+}
+
 void FAvidScriptWasmRuntimeInstance::SetPendingHostImportFailure(
 	const FString& ImportModuleName,
 	const FString& ImportName,
-	const FString& Details)
+	const FString& Details,
+	const TCHAR* ErrorCategory)
 {
 	bHasPendingHostImportFailure = true;
+	PendingHostImportCallbackEpoch = FusedCallbackFrameStack.IsEmpty()
+		? 0
+		: FusedCallbackFrameStack.Last().CallbackEpoch;
 	PendingHostImportModuleName = ImportModuleName;
 	PendingHostImportName = ImportName;
+	const TCHAR* RequestedCategory =
+		ErrorCategory != nullptr && ErrorCategory[0] != 0
+			? ErrorCategory
+			: TEXT("host_import_failed");
+	PendingHostImportErrorCategory = FCString::Strcmp(
+		RequestedCategory,
+		TEXT("host_import_failed")) == 0
+			? ExtractAvidScriptFailureCategory(Details, RequestedCategory)
+			: FString(RequestedCategory);
 	PendingHostImportDetails = Details;
+	const FString CategoryPrefix = PendingHostImportErrorCategory + TEXT(":");
+	if (PendingHostImportDetails.StartsWith(CategoryPrefix))
+	{
+		PendingHostImportDetails.RightChopInline(CategoryPrefix.Len());
+		PendingHostImportDetails.TrimStartInline();
+	}
 }
 
 bool FAvidScriptWasmRuntimeInstance::ConsumePendingHostImportFailure(
 	FString& OutImportModuleName,
 	FString& OutImportName,
-	FString& OutDetails)
+	FString& OutDetails,
+	FString* OutErrorCategory)
 {
 	if (!bHasPendingHostImportFailure)
 	{
@@ -5110,11 +5171,39 @@ bool FAvidScriptWasmRuntimeInstance::ConsumePendingHostImportFailure(
 	OutImportModuleName = PendingHostImportModuleName;
 	OutImportName = PendingHostImportName;
 	OutDetails = PendingHostImportDetails;
-	bHasPendingHostImportFailure = false;
-	PendingHostImportModuleName.Empty();
-	PendingHostImportName.Empty();
-	PendingHostImportDetails.Empty();
+	if (OutErrorCategory != nullptr)
+	{
+		*OutErrorCategory = PendingHostImportErrorCategory;
+	}
+	ClearPendingHostImportFailure();
 	return true;
+}
+
+bool FAvidScriptWasmRuntimeInstance::ConsumeTypedHostFailure(
+	const FString& ExpectedModuleName,
+	const FString& ExpectedImportName,
+	FAvidScriptVmTypedHostFailure& OutFailure)
+{
+	OutFailure.Reset();
+	if (!bHasPendingHostImportFailure)
+	{
+		return false;
+	}
+
+	const uint64 ActiveCallbackEpoch = FusedCallbackFrameStack.IsEmpty()
+		? 0
+		: FusedCallbackFrameStack.Last().CallbackEpoch;
+	const bool bMatchesActiveCall = ActiveCallbackEpoch != 0
+		&& PendingHostImportCallbackEpoch == ActiveCallbackEpoch
+		&& PendingHostImportModuleName == ExpectedModuleName
+		&& PendingHostImportName == ExpectedImportName;
+	if (bMatchesActiveCall)
+	{
+		OutFailure.Category = PendingHostImportErrorCategory;
+		OutFailure.Details = PendingHostImportDetails;
+	}
+	ClearPendingHostImportFailure();
+	return bMatchesActiveCall;
 }
 
 void FAvidScriptWasmRuntimeInstance::BeginTypedCallbackEpoch()
@@ -5377,7 +5466,8 @@ FAvidScriptWasmRuntimeInstance::ResolvePreparedReflectionCallMode(
 		SetPendingHostImportFailure(
 			Call.Binding.TypedHostImport.ModuleName,
 			Call.Binding.TypedHostImport.ImportName,
-			TEXT("The prepared reflection receiver or call cell is unavailable."));
+			TEXT("The prepared reflection receiver or call cell is unavailable."),
+			TEXT("typed_host_context_invalid"));
 		return false;
 	}
 	const FAvidScriptObjectHandle ReceiverHandle{
@@ -5392,12 +5482,17 @@ FAvidScriptWasmRuntimeInstance::ResolvePreparedReflectionCallMode(
 			BindingInvocationContext, OutReceiver, ReceiverError);
 	if (!bReceiverResolved || OutReceiver == nullptr)
 	{
+		const FString FailureDetails = ReceiverError.IsEmpty()
+			? TEXT("The prepared reflection receiver is unavailable.")
+			: ReceiverError;
+		const FString FailureCategory = ExtractAvidScriptFailureCategory(
+			FailureDetails,
+			TEXT("binding_target_invalid"));
 		SetPendingHostImportFailure(
 			Call.Binding.TypedHostImport.ModuleName,
 			Call.Binding.TypedHostImport.ImportName,
-			ReceiverError.IsEmpty()
-				? TEXT("The prepared reflection receiver is unavailable.")
-				: ReceiverError);
+			FailureDetails,
+			*FailureCategory);
 		return false;
 	}
 
@@ -5439,7 +5534,8 @@ FAvidScriptWasmRuntimeInstance::ResolvePreparedReflectionCallMode(
 			SetPendingHostImportFailure(
 				Call.Binding.TypedHostImport.ModuleName,
 				Call.Binding.TypedHostImport.ImportName,
-				TEXT("The qualified prepared reflection native guard rejected the receiver."));
+				TEXT("The qualified prepared reflection native guard rejected the receiver."),
+				TEXT("binding_prepared_native_guard_rejected"));
 			return false;
 		}
 		if (bOutUseNative)
@@ -5454,7 +5550,8 @@ FAvidScriptWasmRuntimeInstance::ResolvePreparedReflectionCallMode(
 		SetPendingHostImportFailure(
 			Call.Binding.TypedHostImport.ModuleName,
 			Call.Binding.TypedHostImport.ImportName,
-			TEXT("The prepared reflection receiver is incompatible with the call cell."));
+			TEXT("The prepared reflection receiver is incompatible with the call cell."),
+			TEXT("binding_target_type_mismatch"));
 		return false;
 	}
 	return true;
@@ -5582,9 +5679,10 @@ FAvidScriptWasmRuntimeInstance::
 		SetPendingHostImportFailure(
 			Call.Binding.TypedHostImport.ModuleName,
 			Call.Binding.TypedHostImport.ImportName,
+			ErrorDetails,
 			ErrorCategory.IsEmpty()
-				? ErrorDetails
-				: ErrorCategory + TEXT(": ") + ErrorDetails);
+				? TEXT("host_import_failed")
+				: *ErrorCategory);
 		return EAvidScriptVmTypedHostStatus::Rejected;
 	}
 
@@ -5650,12 +5748,18 @@ FAvidScriptWasmRuntimeInstance::
 {
 	++HostImportCallCount;
 	OutStatus = 0;
-	const auto Reject = [this, &Call](const FString& Details)
+	const auto Reject = [this, &Call](
+		const FString& Details,
+		const FString& Category = FString())
 	{
+		const FString EffectiveCategory = Category.IsEmpty()
+			? ExtractAvidScriptFailureCategory(Details, TEXT("host_import_failed"))
+			: Category;
 		SetPendingHostImportFailure(
 			Call.Binding.TypedHostImport.ModuleName,
 			Call.Binding.TypedHostImport.ImportName,
-			Details);
+			Details,
+			*EffectiveCategory);
 		return EAvidScriptVmTypedHostStatus::Rejected;
 	};
 
@@ -5819,12 +5923,18 @@ FAvidScriptWasmRuntimeInstance::
 {
 	++HostImportCallCount;
 	OutStatus = 0;
-	const auto Reject = [this, &Call](const FString& Details)
+	const auto Reject = [this, &Call](
+		const FString& Details,
+		const FString& Category = FString())
 	{
+		const FString EffectiveCategory = Category.IsEmpty()
+			? ExtractAvidScriptFailureCategory(Details, TEXT("host_import_failed"))
+			: Category;
 		SetPendingHostImportFailure(
 			Call.Binding.TypedHostImport.ModuleName,
 			Call.Binding.TypedHostImport.ImportName,
-			Details);
+			Details,
+			*EffectiveCategory);
 		return EAvidScriptVmTypedHostStatus::Rejected;
 	};
 	if (GuestAddress < 0
@@ -5887,10 +5997,7 @@ FAvidScriptWasmRuntimeInstance::
 			ErrorCategory,
 			ErrorDetails))
 	{
-		return Reject(
-			ErrorCategory.IsEmpty()
-				? ErrorDetails
-				: ErrorCategory + TEXT(": ") + ErrorDetails);
+		return Reject(ErrorDetails, ErrorCategory);
 	}
 
 	StoreAvidScriptLittleEndianF32(
@@ -5954,12 +6061,18 @@ FAvidScriptWasmRuntimeInstance::
 {
 	++HostImportCallCount;
 	OutStatus = 0;
-	const auto Reject = [this, &Call](const FString& Details)
+	const auto Reject = [this, &Call](
+		const FString& Details,
+		const FString& Category = FString())
 	{
+		const FString EffectiveCategory = Category.IsEmpty()
+			? ExtractAvidScriptFailureCategory(Details, TEXT("host_import_failed"))
+			: Category;
 		SetPendingHostImportFailure(
 			Call.Binding.TypedHostImport.ModuleName,
 			Call.Binding.TypedHostImport.ImportName,
-			Details);
+			Details,
+			*EffectiveCategory);
 		return EAvidScriptVmTypedHostStatus::Rejected;
 	};
 	if (GuestAddress < 0)
@@ -6046,10 +6159,7 @@ FAvidScriptWasmRuntimeInstance::
 			ErrorCategory,
 			ErrorDetails))
 	{
-		return Reject(
-			ErrorCategory.IsEmpty()
-				? ErrorDetails
-				: ErrorCategory + TEXT(": ") + ErrorDetails);
+		return Reject(ErrorDetails, ErrorCategory);
 	}
 
 	FAvidScriptObjectHandle OutputHandle;
@@ -6913,6 +7023,7 @@ bool FAvidScriptWasmRuntimeInstance::InvokePreparedDynamicHost(
 	if (Call == nullptr || Call->Runtime == nullptr)
 	{
 		OutResult = FAvidScriptDynamicHostCallResult();
+		OutResult.ErrorCategory = TEXT("prepared_dynamic_context_invalid");
 		OutResult.Details =
 			TEXT("prepared_dynamic_context_invalid: the Runtime call context is unavailable.");
 		return false;
@@ -6971,6 +7082,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDynamicHost(
 		|| Call.Binding.ExpectedClass == nullptr
 		|| Call.Binding.Invoke == nullptr)
 	{
+		OutResult.ErrorCategory = TEXT("prepared_dynamic_context_stale");
 		OutResult.Details =
 			TEXT("prepared_dynamic_context_stale: the prepared binding package is no longer active.");
 		return false;
@@ -6979,6 +7091,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDynamicHost(
 		|| BindingInvocationScratch.Num()
 			< Call.Binding.RequiredScratchSize)
 	{
+		OutResult.ErrorCategory = TEXT("binding_frame_mismatch");
 		OutResult.Details =
 			TEXT("binding_frame_mismatch: arguments, guest memory, or scratch do not match the prepared call.");
 		return false;
@@ -6995,6 +7108,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDynamicHost(
 			|| Arguments[0] > MAX_uint32
 			|| Arguments[1] > MAX_uint32)
 		{
+			OutResult.ErrorCategory = TEXT("binding_target_invalid");
 			OutResult.Details =
 				TEXT("binding_target_invalid: the prepared receiver handle is outside the 32-bit ABI.");
 			return false;
@@ -7014,6 +7128,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDynamicHost(
 				Call.Binding.ExpectedClass,
 				Receiver))
 			{
+				OutResult.ErrorCategory = TEXT("binding_target_invalid");
 				OutResult.Details =
 					TEXT("binding_target_invalid: the prepared Self receiver is unavailable.");
 				return false;
@@ -7024,11 +7139,15 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDynamicHost(
 				{ Slot, Generation }, Call.Binding.ExpectedClass,
 				BindingInvocationContext, Receiver, OutResult.Details))
 		{
+			OutResult.ErrorCategory = ExtractAvidScriptFailureCategory(
+				OutResult.Details,
+				TEXT("binding_target_invalid"));
 			return false;
 		}
 	}
 	if (Receiver == nullptr)
 	{
+		OutResult.ErrorCategory = TEXT("binding_target_invalid");
 		OutResult.Details =
 			TEXT("binding_target_invalid: the prepared receiver is null.");
 		return false;
@@ -7083,6 +7202,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchDynamicHostCall(
 	if (!BindingPackage.IsValid())
 	{
 		OutResult = FAvidScriptDynamicHostCallResult();
+		OutResult.ErrorCategory = TEXT("binding_package_missing");
 		OutResult.Details = TEXT("No reflected binding package is attached to this Runtime instance.");
 		RecordTiming();
 		return false;
@@ -7123,8 +7243,13 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 		{
 			FString ImportModuleName;
 			FString ImportName;
-			if (!ConsumePendingHostImportFailure(ImportModuleName, ImportName, OutResult.Details))
+			if (!ConsumePendingHostImportFailure(
+					ImportModuleName,
+					ImportName,
+					OutResult.Details,
+					&OutResult.ErrorCategory))
 			{
+				OutResult.ErrorCategory = TEXT("host_import_failed");
 				OutResult.Details = TEXT("The Runtime host dispatcher rejected the binding call.");
 			}
 		}
@@ -7472,6 +7597,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 		return Finish(ReturnValue, ReturnValue != 0);
 	}
 	default:
+		OutResult.ErrorCategory = TEXT("host_import_unknown");
 		OutResult.Details = TEXT("The VM requested an unknown AvidScript host binding id.");
 		return false;
 	}
@@ -7481,10 +7607,7 @@ void FAvidScriptWasmRuntimeInstance::ResetHostImportState()
 	HostImportCallCount = 0;
 	LastHostImportInput = 0;
 	LastHostImportResult = 0;
-	bHasPendingHostImportFailure = false;
-	PendingHostImportModuleName.Empty();
-	PendingHostImportName.Empty();
-	PendingHostImportDetails.Empty();
+	ClearPendingHostImportFailure();
 	ActiveDelegateOutputTransaction = nullptr;
 	ActiveDelegateOutputToken = 0;
 }

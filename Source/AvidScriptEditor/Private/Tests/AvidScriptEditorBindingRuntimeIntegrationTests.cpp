@@ -6184,9 +6184,13 @@ bool FAvidScriptEditorPreparedReflectionPropertyRuntimeTest::RunTest(
 		0ull);
 	Runtime.Unload();
 
+	AddExpectedErrorPlain(
+		TEXT("Failed to activate EncounterSubsystem: generated type instance activation requires an installed GameThread package"),
+		EAutomationExpectedErrorFlags::Contains,
+		1);
 	UWorld* World = nullptr;
 	if (!TestTrue(TEXT("Non-Self property host world is created"),
-			CreateAvidScriptBindingRuntimeIntegrationWorld(World)))
+			CreateAvidScriptBindingRuntimeIntegrationWorld(World, false)))
 	{
 		return false;
 	}
@@ -6227,15 +6231,19 @@ bool FAvidScriptEditorPreparedReflectionPropertyRuntimeTest::RunTest(
 		const FAvidScriptWasmSmokeResult& Failure, const FString& Label,
 		const FAvidScriptBindingHostImportModel& Import, const TCHAR* Category)
 	{
-		TestEqual(*FString::Printf(TEXT("%s reports a VM host failure"), *Label),
-			Failure.ErrorCategory, FString(TEXT("host_import_failed")));
+		TestEqual(*FString::Printf(TEXT("%s preserves the binding category"), *Label),
+			Failure.ErrorCategory, FString(Category));
+		TestEqual(*FString::Printf(TEXT("%s preserves the VM import module"), *Label),
+			Failure.ImportModuleName, Import.Module);
+		TestEqual(*FString::Printf(TEXT("%s preserves the VM import name"), *Label),
+			Failure.ImportName, Import.Name);
+		TestTrue(*FString::Printf(TEXT("%s surfaces the denial details"), *Label),
+			Failure.ErrorMessage.Contains(Category));
 		FString ModuleName;
 		FString ImportName;
 		FString Details;
-		TestTrue(*FString::Printf(TEXT("%s retains the Runtime denial"), *Label),
+		TestFalse(*FString::Printf(TEXT("%s consumes the Runtime denial exactly once"), *Label),
 			Instance.ConsumePendingHostImportFailure(ModuleName, ImportName, Details));
-		TestTrue(*FString::Printf(TEXT("%s identifies the denied import and cause"), *Label),
-			ModuleName == Import.Module && ImportName == Import.Name && Details.Contains(Category));
 	};
 	TArray<FAvidScriptPreparedReflectionBinding> PropertyBindings;
 	FString BindingError;
