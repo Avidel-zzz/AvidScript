@@ -87,10 +87,18 @@ no-clean 构建 22+4 动作通过，Binding 1/1、Wasmtime 14/14 通过；D08 �
 估算保留 24,629,664 字节，整个 Editor 进程仍增长 Physical 322.965 MiB、Virtual 82.109 MiB。
 因此 D07 仍为 Fixing，不把具体产品修复扩大表述为整个进程无泄漏。
 
+架构 v15 的[包内 World 长稳](P64.D_Packaged_World_Soak.md)把同一玩法迁入有界 observer 的真实
+Development/Shipping Game。Development 同一进程运行 3602.566 秒，完成 1173/1173 次切图、
+5866/5866 动作与 1173 次 cleanup/GC；UObject 恒 35,580、Session 恒 1、backend live 恒 2、VM cache
+恒 0。Physical 在第 50 轮一次性增加约 73 MiB 后平台化，第三轮到终点为 +76.16 MiB；Virtual 为
++4.25 MiB。Shipping fresh receipt 25/25，实际 3 轮、16/16 动作和最终新 World 读回通过。产品层
+参数帧与 backend 历史保留已修复，Editor/全历史探针开销、分配器驻留和包内资源已完成分层，D07
+据此标记 Verified；该结论不等于整个进程零增长。
+
 ## 仍需完成
 
-P64.D 依架构 v14 继续补齐剩余 Editor/探针/分配器与包内内存归因、UI 人工重启读档与 Shipping
-视觉、网络/重载持续时长，以及 Android toolchain/UBT/APK。
+P64.D 依架构 v15 继续补齐 UI 人工重启读档与 Shipping 视觉、网络/重载持续时长，以及 Android
+toolchain/UBT/APK。
 人工游玩和真实设备验收独立保留。P58 类型、iOS、发布工程及性能领先等总目标缺口不会随本阶段编号自动关闭。
 
 ## 流程修正
@@ -100,6 +108,8 @@ P64.D 依架构 v14 继续补齐剩余 Editor/探针/分配器与包内内存归
 - 包归档遵守 ProjectRoot 边界，放入项目 Saved；仓库外临时目录用于报告，不能直接用作 ArchiveRoot。
 - Shipping 剥离 source diagnostics 是预期行为，通过 canonical WASM、发布包与回执绑定身份，不为测试重新暴露诊断。
 - Generated Type pointer 不含平台配置，须关联 catalog 的 module/package variant，不从相邻 JSON 猜测字段。
+- Shipping BuildCookRun 前须通过受控 HeadlessRelease 发布当前 Generated Type Shipping 变体，并验证
+  pointer 在 catalog 中唯一匹配；验证结束恢复已备份的 Development pointer，不能等 UAT 完成后才发现身份漂移。
 - Automation 使用实际 Queue Empty 与 TestExit 日志，不从提前 Quit 的退出码推断队列完成。
 - 内存归因过程中发生一次临时 PowerShell 汇总语法错误：`foreach` 语句的结果应先赋给变量再进管道；
   子代理工具也不能跨版本猜参数名。本批均在读取/协调层修正，没有改变被测候选或重跑 UE。

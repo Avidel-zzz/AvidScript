@@ -680,6 +680,14 @@
       "prevention": "报告字段须标明并按实际采样时刻验证。World 里程碑在新 World Ready、最终 Load 前采样，borrowed_entries 为 7；根资源在最终 Load 后为 8。公共不变量单独比较，时刻相关字段分别断言，并用真实包内流程覆盖。",
       "source": "Build/AvidScriptUiSavePackagedReport.ps1",
       "last_observed": "2026-09-05 P64.D 首次 3 轮包内 World 原生通过，但 validator 错把 Ready sample borrowed=7 与 Loaded root borrowed=8 要求相等"
+    },
+    {
+      "id": "shipping-build-preflights-generated-type-variant",
+      "tags": ["workflow", "packaging", "generated-types", "shipping"],
+      "summary": "Shipping 的 Generated Type pointer 若仍选择 Development package，BuildCookRun 会在昂贵 UAT 完成后才由 receipt validator 拒绝。",
+      "prevention": "Shipping 打包前先执行受控 BuildCSharpScriptTypes -HeadlessRelease -PackageConfiguration Shipping，并验证 current.json 的 module/package 在 catalog 中恰有一个 Win64/x86_64/Shipping 变体；备份并在验证后恢复 Development pointer，不降低 receipt 门禁。",
+      "source": "Docs/Phase64/P64.D_Packaged_World_Soak.md",
+      "last_observed": "2026-09-05 P64.D 首次 Shipping World 打包在 receipt_validation 以 GENERATED_TYPE_PACKAGE_MISMATCH 拒绝，受控重发后新目录构建通过"
     }
   ]
 }

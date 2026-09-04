@@ -116,8 +116,8 @@
       "evidence": "Docs/Phase64/P64.D_World_Soak.md：3601.889秒/877次切图通过；相对第三轮Physical +306.316MiB、Virtual +72.574MiB，UObject恒52523；探针保留周期JSON，增长来源未分层测量。",
       "deferral_reason": "流程正确性、旧对象回收与有界Session资源已验证；内存趋势不能直接等价为泄漏或无泄漏，保留到集中归因，不为通过而更改基线。",
       "remediation": "区分探针历史记录、UE/VM缓存、分配器与真实存活分配，取得同口径趋势后处理增长来源；保持一般Binding、Session与后端边界，不为测试关闭安全检查。",
-      "status": "Fixing",
-      "resolution_evidence": "",
+      "status": "Verified",
+      "resolution_evidence": "Docs/Phase64/P64.D_Packaged_World_Soak.md：Development 包内同一进程 3602.566 秒完成 1173/1173 World、5866/5866 动作、1173 cleanup/GC，UObject/Session/backend/cache 全程有界；cycle3→1173 Physical +76.16MiB（cycle50 一次性驻留后平台化）、Virtual +4.25MiB。Shipping fresh receipt 25/25 且实际 3/3 World、16/16 动作通过；已知 Binding 帧与 backend 历史保留已修复，Editor/探针/分配器与产品包内趋势已分层。",
       "target_phase": null,
       "transfer_reason": ""
     },
@@ -200,6 +200,6 @@
     }
   ],
   "next_action": "debt-update -Phase 64 -DebtId P64-D03-OriginalGameplayAcceptance -Status Verified -Evidence <text>",
-  "revision": 40,
-  "updated_at_utc": "2026-09-04T19:33:49.1667112+00:00"
+  "revision": 41,
+  "updated_at_utc": "2026-09-04T21:43:44.2561539+00:00"
 }
