@@ -507,7 +507,10 @@ AVIDSCRIPTVM_API TUniquePtr<class IAvidScriptVmBackend> CreateAvidScriptVmBacken
 class AVIDSCRIPTVM_API IAvidScriptVmBackend
 {
 public:
-	virtual ~IAvidScriptVmBackend() = default;
+	IAvidScriptVmBackend();
+	virtual ~IAvidScriptVmBackend();
+	IAvidScriptVmBackend(const IAvidScriptVmBackend&) = delete;
+	IAvidScriptVmBackend& operator=(const IAvidScriptVmBackend&) = delete;
 
 	virtual const FAvidScriptVmBackendInfo& GetBackendInfo() const = 0;
 	virtual bool Load(

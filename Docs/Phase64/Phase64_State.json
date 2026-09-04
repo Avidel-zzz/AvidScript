@@ -8,9 +8,9 @@
   "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase64/P64.0_Production_Gameplay_Architecture.md",
-    "version": 10,
-    "sha256": "d8e49c1edbcdb1a519eff1fd6b9656cfed0dd86d0a9ce2aec6f4ca25c7f2e9ac",
-    "revision_reason": "保留完整原始目标；冻结独立opt-in包内UI验证插件、Component只读值诊断与正式Cook身份链；不向Runtime加入UMG或开放Session指针。"
+    "version": 11,
+    "sha256": "e173c1170a467bef8e450e795a945cbbffa89376fda2de4ec49512bfcaa24a99",
+    "revision_reason": "Add backend-neutral cold-path memory diagnostics and per-cycle observer footprint attribution; retain full gameplay, long-run, platform and release requirements."
   },
   "documents": {
     "plan": "Docs/Phase64/P64.0_Implementation_Plan.md",
@@ -116,7 +116,7 @@
       "evidence": "Docs/Phase64/P64.D_World_Soak.md：3601.889秒/877次切图通过；相对第三轮Physical +306.316MiB、Virtual +72.574MiB，UObject恒52523；探针保留周期JSON，增长来源未分层测量。",
       "deferral_reason": "流程正确性、旧对象回收与有界Session资源已验证；内存趋势不能直接等价为泄漏或无泄漏，保留到集中归因，不为通过而更改基线。",
       "remediation": "区分探针历史记录、UE/VM缓存、分配器与真实存活分配，取得同口径趋势后处理增长来源；保持一般Binding、Session与后端边界，不为测试关闭安全检查。",
-      "status": "Open",
+      "status": "Fixing",
       "resolution_evidence": "",
       "target_phase": null,
       "transfer_reason": ""
@@ -187,6 +187,6 @@
     }
   ],
   "next_action": "debt-update -Phase 64 -DebtId P64-D03-OriginalGameplayAcceptance -Status Verified -Evidence <text>",
-  "revision": 31,
-  "updated_at_utc": "2026-09-04T14:49:43.2844239+00:00"
+  "revision": 33,
+  "updated_at_utc": "2026-09-04T15:25:54.0449697+00:00"
 }

@@ -75,5 +75,7 @@ private:
 	TSharedRef<FJsonObject> MemorySummary = MakeShared<FJsonObject>();
 	uint64 PeakPhysical = 0;
 	uint64 PeakVirtual = 0;
+	uint64 RetainedCycleJsonBytes = 0;
+	int64 RetainedActionCount = 0;
 };
 }

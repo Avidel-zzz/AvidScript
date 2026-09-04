@@ -83,7 +83,12 @@ function New-UiSaveWorldReportFixture {
                 events_before = $Events; events_after = $Events }
             gc = [ordered]@{ world_collected = $true; host_collected = $true; component_collected = $true; widget_collected = $true
                 saved_object_collected = $true; new_world_identity = $true; new_host_identity = $true; new_component_identity = $true
-                physical_bytes = (4GB + $Number); virtual_bytes = (8GB + $Number); uobject_count = 12345; active_sessions = 1 } }
+                physical_bytes = (4GB + $Number); virtual_bytes = (8GB + $Number); uobject_count = 12345; active_sessions = 1
+                attribution = [ordered]@{ schema_version = 1; backend_created = ($Number + 1); backend_destroyed = $Number; backend_live = 1
+                    artifact_cache_entries = 1; artifact_cache_capacity = 32; artifact_cache_allocated_bytes = 2048
+                    attestation_entries = 1; attestation_capacity = 32; attestation_allocated_bytes = 512
+                    observer_retained_cycles = $Number; observer_retained_actions = ($Number * 5 - 1)
+                    observer_json_estimated_bytes = ($Number * 4096); observer_estimate_kind = 'ue_json_memory_footprint' } } }
     }
     [IO.File]::WriteAllBytes($SavePath, $Content)
     $Elapsed = [Math]::Max($Seconds, $Count * 3) + 2
@@ -201,7 +206,23 @@ Invoke-UiSaveWorldCase 'maximum bounded budget' {
     }
 }
 
+Invoke-UiSaveWorldCase 'backend growth remains measured evidence not an automatic no-leak claim' {
+    $Result = Invoke-UiSaveWorldFixture -Mutate {
+        param($R)
+        ++$R.world_lifecycle.cycles[1].gc.attribution.backend_created
+        ++$R.world_lifecycle.cycles[1].gc.attribution.backend_live
+    }
+    Assert-UiSaveWorldContract $Result.summary.succeeded $Result.summary.message
+    Assert-UiSaveWorldContract ($Result.summary.evidence.world_lifecycle.cycles[1].gc.attribution.backend_live -eq 2) 'Growth evidence was discarded.'
+}
+
 $Faults = [ordered]@{
+    'missing attribution is not zero' = { param($R) $R.world_lifecycle.cycles[0].gc.Remove('attribution') }
+    'attribution byte string' = { param($R) $R.world_lifecycle.cycles[0].gc.attribution.artifact_cache_allocated_bytes = '2048' }
+    'unbalanced backend lifetime counts' = { param($R) ++$R.world_lifecycle.cycles[0].gc.attribution.backend_live }
+    'cache entries exceed capacity' = { param($R) $R.world_lifecycle.cycles[0].gc.attribution.attestation_entries = 33 }
+    'observer history count differs' = { param($R) ++$R.world_lifecycle.cycles[0].gc.attribution.observer_retained_actions }
+    'lifetime counters went backwards' = { param($R) $R.world_lifecycle.cycles[1].gc.attribution.backend_created = 1; $R.world_lifecycle.cycles[1].gc.attribution.backend_destroyed = 0 }
     'failed report despite exit zero' = { param($R) $R.succeeded = $false; $R.failure_category = 'fixture_native_failure' }
     'wrong package' = { param($R) $R.runtime.package_id = 'a' * 64 }
     'wrong runtime snapshot' = { param($R) $R.runtime_snapshot_phase = 'before_teardown' }

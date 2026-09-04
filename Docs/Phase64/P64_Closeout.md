@@ -60,9 +60,15 @@ Shipping 通过隔离 UserDir 的标准 Engine.ini 选择样例地图；不修�
 打包后 Generated Type 已恢复为 Development，canonical Editor no-clean 恢复仅执行 1 项元数据动作，
 10.51 秒通过，引擎/工程/插件三份 Editor 模块 BuildId 一致。
 
+架构 v11 的[内存归因小节](P64.D_Memory_Attribution.md)新增 backend 生命周期、两张缓存表和探针 JSON
+占用的冷路径快照。100 次切图、501/501 动作、VM 诊断 6/6、World 合同 53/53 通过，no-clean UBT
+22 动作、39.42 秒通过。后端存活数恒为 2，缓存 entry/bytes 为 0；第 50～100 轮进程提交量仍增加
+5.188 MiB，JSON 估算增加 1.075 MiB，D07 保持 Fixing，继续测量 UE Trace、分配器与原生资源。
+本轮不是完整长稳或性能 Gate，不扩充历史全量基线。
+
 ## 仍需完成
 
-P64.D 依架构 v10 继续补齐内存归因、UI 人工重启读档与 Shipping 视觉、网络/重载持续时长，以及 Android toolchain/UBT/APK。
+P64.D 依架构 v11 继续补齐内存归因、UI 人工重启读档与 Shipping 视觉、网络/重载持续时长，以及 Android toolchain/UBT/APK。
 人工游玩和真实设备验收独立保留。P58 类型、iOS、发布工程及性能领先等总目标缺口不会随本阶段编号自动关闭。
 
 ## 流程修正
@@ -73,3 +79,5 @@ P64.D 依架构 v10 继续补齐内存归因、UI 人工重启读档与 Shipping
 - Shipping 剥离 source diagnostics 是预期行为，通过 canonical WASM、发布包与回执绑定身份，不为测试重新暴露诊断。
 - Generated Type pointer 不含平台配置，须关联 catalog 的 module/package variant，不从相邻 JSON 猜测字段。
 - Automation 使用实际 Queue Empty 与 TestExit 日志，不从提前 Quit 的退出码推断队列完成。
+- 内存归因过程中发生一次临时 PowerShell 汇总语法错误：`foreach` 语句的结果应先赋给变量再进管道；
+  子代理工具也不能跨版本猜参数名。本批均在读取/协调层修正，没有改变被测候选或重跑 UE。

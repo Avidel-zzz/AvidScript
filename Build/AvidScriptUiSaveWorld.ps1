@@ -86,10 +86,38 @@ function Assert-AvidScriptUiSaveWorldMemory {
     }
 }
 
+function Assert-AvidScriptUiSaveWorldAttribution {
+    param([object]$Cycle, [object]$Previous, [long]$RetainedActions)
+    $Attribution = $Cycle.gc.attribution
+    Assert-AvidScriptUiSaveWorldEqual $Attribution.schema_version 1 'attribution.schema_version'
+    Assert-AvidScriptUiSaveWorldEqual $Attribution.observer_estimate_kind 'ue_json_memory_footprint' 'attribution.observer_estimate_kind'
+    Assert-AvidScriptUiSaveWorldEqual $Attribution.observer_retained_cycles $Cycle.cycle 'attribution.observer_retained_cycles'
+    Assert-AvidScriptUiSaveWorldEqual $Attribution.observer_retained_actions $RetainedActions 'attribution.observer_retained_actions'
+    foreach ($Field in @('backend_created', 'backend_destroyed', 'backend_live', 'artifact_cache_entries',
+            'artifact_cache_capacity', 'artifact_cache_allocated_bytes', 'attestation_entries', 'attestation_capacity',
+            'attestation_allocated_bytes', 'observer_json_estimated_bytes')) {
+        Assert-AvidScriptUiSaveWorldNumber $Attribution.$Field "attribution.$Field" 0 9007199254740991 -Integer
+    }
+    Assert-AvidScriptUiSaveWorldNumber $Attribution.backend_live 'attribution.backend_live' 1 -Integer
+    Assert-AvidScriptUiSaveWorldEqual ($Attribution.backend_created - $Attribution.backend_destroyed) $Attribution.backend_live 'attribution.backend_balance'
+    foreach ($Cache in @('artifact_cache', 'attestation')) {
+        Assert-AvidScriptUiSaveWorldNumber $Attribution."${Cache}_capacity" "attribution.${Cache}_capacity" 1 -Integer
+        Assert-AvidScriptUiSaveWorldNumber $Attribution."${Cache}_entries" "attribution.${Cache}_entries" 0 $Attribution."${Cache}_capacity" -Integer
+    }
+    Assert-AvidScriptUiSaveWorldNumber $Attribution.observer_json_estimated_bytes 'attribution.observer_json_estimated_bytes' 1 -Integer
+    if ($null -ne $Previous) {
+        foreach ($Field in @('backend_created', 'backend_destroyed', 'observer_json_estimated_bytes')) {
+            Assert-AvidScriptUiSaveWorldNumber $Attribution.$Field "attribution.$Field monotonic" $Previous.$Field -Integer
+        }
+    }
+}
+
 function Assert-AvidScriptUiSaveWorldCycles {
     param([object]$World)
     $PreviousHash = ''
     $PreviousFrame = -1L
+    $PreviousAttribution = $null
+    $RetainedActions = 0L
     $Backend = $World.cycles[0].resources.backend
     for ($Index = 0; $Index -lt $World.cycles.Count; ++$Index) {
         $Cycle = $World.cycles[$Index]
@@ -125,6 +153,9 @@ function Assert-AvidScriptUiSaveWorldCycles {
         if ($Number -gt 1) { $Steps += ,@('load', [string]($Number - 1), 'Loaded') }
         $Steps += @(@('collect', [string]$Number, 'Collected'), @('save', [string]$Number, 'Saved'), @('gc', [string]$Number, 'Saved'))
         $PreviousFrame = Assert-AvidScriptUiSaveWorldActions $Cycle.actions $Steps $PreviousHash $Cycle.save_sha256 $PreviousFrame
+        $RetainedActions += $Cycle.actions.Count
+        Assert-AvidScriptUiSaveWorldAttribution $Cycle $PreviousAttribution $RetainedActions
+        $PreviousAttribution = $Cycle.gc.attribution
         $PreviousHash = $Cycle.save_sha256
     }
     [void](Assert-AvidScriptUiSaveWorldActions $World.final_actions @(@('ready', '0', 'Ready'),

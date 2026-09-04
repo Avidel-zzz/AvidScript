@@ -3,6 +3,7 @@
 
 #include "AvidScriptComponent.h"
 #include "AvidScriptHash.h"
+#include "AvidScriptVmDiagnostics.h"
 #include "AvidScriptWorldSubsystem.h"
 #include "Blueprint/UserWidget.h"
 #include "Components/Button.h"
@@ -344,6 +345,32 @@ void FUiSaveWorld::HandleWorldCleanup(UWorld* CleanedWorld, bool bSessionEnded, 
 
 void FUiSaveWorld::AddMemorySample(FJsonObject& Gc)
 {
+	const FAvidScriptVmMemorySnapshot Vm = CaptureAvidScriptVmMemorySnapshot();
+	const TSharedRef<FJsonObject> Attribution = MakeShared<FJsonObject>();
+	Attribution->SetNumberField(TEXT("schema_version"), 1);
+	Attribution->SetNumberField(TEXT("backend_created"), static_cast<double>(Vm.BackendCreatedCount));
+	Attribution->SetNumberField(TEXT("backend_destroyed"), static_cast<double>(Vm.BackendDestroyedCount));
+	Attribution->SetNumberField(TEXT("backend_live"), static_cast<double>(Vm.BackendLiveCount));
+	Attribution->SetNumberField(TEXT("artifact_cache_entries"), Vm.ArtifactCacheEntries);
+	Attribution->SetNumberField(TEXT("artifact_cache_capacity"), Vm.ArtifactCacheCapacity);
+	Attribution->SetNumberField(TEXT("artifact_cache_allocated_bytes"), static_cast<double>(Vm.ArtifactCacheAllocatedBytes));
+	Attribution->SetNumberField(TEXT("attestation_entries"), Vm.AttestationEntries);
+	Attribution->SetNumberField(TEXT("attestation_capacity"), Vm.AttestationCapacity);
+	Attribution->SetNumberField(TEXT("attestation_allocated_bytes"), static_cast<double>(Vm.AttestationAllocatedBytes));
+	RetainedActionCount += Actions.Num();
+	Attribution->SetNumberField(TEXT("observer_retained_cycles"), CompletedCycles);
+	Attribution->SetNumberField(TEXT("observer_retained_actions"), static_cast<double>(RetainedActionCount));
+	Attribution->SetStringField(TEXT("observer_estimate_kind"), TEXT("ue_json_memory_footprint"));
+	Attribution->SetNumberField(TEXT("observer_json_estimated_bytes"), 0);
+	Gc.SetObjectField(TEXT("attribution"), Attribution);
+	for (const TCHAR* Field : { TEXT("physical_bytes"), TEXT("virtual_bytes"), TEXT("uobject_count") })
+	{
+		Gc.SetNumberField(Field, 0);
+	}
+	// Completed cycles are immutable after this boundary. Do not walk the growing history on every sample.
+	RetainedCycleJsonBytes += Cycles.Last()->GetMemoryFootprint();
+	Attribution->SetNumberField(TEXT("observer_json_estimated_bytes"),
+		static_cast<double>(RetainedCycleJsonBytes + Cycles.GetAllocatedSize() + Actions.GetAllocatedSize()));
 	const FPlatformMemoryStats Memory = FPlatformMemory::GetStats();
 	Gc.SetNumberField(TEXT("physical_bytes"), static_cast<double>(Memory.UsedPhysical));
 	Gc.SetNumberField(TEXT("virtual_bytes"), static_cast<double>(Memory.UsedVirtual));

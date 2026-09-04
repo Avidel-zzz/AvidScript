@@ -1,6 +1,8 @@
 #include "AvidScriptVmArtifact.h"
 
 #include "AvidScriptHash.h"
+#include "AvidScriptVmDiagnostics.h"
+#include "AvidScriptVmDiagnosticsInternal.h"
 #include "AvidScriptWasmtimeApi.h"
 #include "AvidScriptWasmtimeRuntimeSupport.h"
 
@@ -142,6 +144,38 @@ FString MakeArtifactCacheKey(
 		*RuntimeInfo.TargetTriple);
 }
 } // namespace
+
+void AvidScriptVmDiagnosticsInternal::CaptureArtifactMemory(
+	FAvidScriptVmMemorySnapshot& OutSnapshot)
+{
+	FScopeLock Lock(&GArtifactCompilerCriticalSection);
+	OutSnapshot.ArtifactCacheEntries = GArtifactCache.Num();
+	OutSnapshot.ArtifactCacheCapacity = ArtifactCacheCapacity;
+	OutSnapshot.AttestationEntries = GAttestationRegistry.Num();
+	OutSnapshot.AttestationCapacity = AttestationRegistryCapacity;
+	OutSnapshot.ArtifactCacheAllocatedBytes = GArtifactCache.GetAllocatedSize();
+	for (const FAvidScriptVmArtifactCacheEntry& Entry : GArtifactCache)
+	{
+		const FAvidScriptVmOwnedArtifact& Artifact = Entry.Artifact;
+		OutSnapshot.ArtifactCacheAllocatedBytes += Entry.Key.GetAllocatedSize();
+		OutSnapshot.ArtifactCacheAllocatedBytes += Artifact.ExecutionBytes.GetAllocatedSize();
+		OutSnapshot.ArtifactCacheAllocatedBytes += Artifact.CanonicalWasmBytes.GetAllocatedSize();
+		OutSnapshot.ArtifactCacheAllocatedBytes += Artifact.ExecutionIdentity.GetAllocatedSize();
+		OutSnapshot.ArtifactCacheAllocatedBytes += Artifact.CanonicalWasmIdentity.GetAllocatedSize();
+		OutSnapshot.ArtifactCacheAllocatedBytes += Artifact.CompilerBuildIdentity.GetAllocatedSize();
+		OutSnapshot.ArtifactCacheAllocatedBytes += Artifact.TargetTriple.GetAllocatedSize();
+		OutSnapshot.ArtifactCacheAllocatedBytes += Artifact.AttestationId.GetAllocatedSize();
+	}
+	OutSnapshot.AttestationAllocatedBytes = GAttestationRegistry.GetAllocatedSize();
+	for (const FAvidScriptVmArtifactAttestation& Attestation : GAttestationRegistry)
+	{
+		OutSnapshot.AttestationAllocatedBytes += Attestation.Id.GetAllocatedSize();
+		OutSnapshot.AttestationAllocatedBytes += Attestation.ExecutionIdentity.GetAllocatedSize();
+		OutSnapshot.AttestationAllocatedBytes += Attestation.CanonicalWasmIdentity.GetAllocatedSize();
+		OutSnapshot.AttestationAllocatedBytes += Attestation.CompilerBuildIdentity.GetAllocatedSize();
+		OutSnapshot.AttestationAllocatedBytes += Attestation.TargetTriple.GetAllocatedSize();
+	}
+}
 
 bool CompileAvidScriptVmArtifact(
 	const FAvidScriptVmArtifactCompileRequest& Request,
