@@ -48,7 +48,7 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 [项目 API](Samples/CSharp/TypedProjectApi/README.md) · [联机](Samples/CSharp/NetworkTopology/README.md)。
 
 **近期交付：** [Development/Shipping 包内 UI/存档](Docs/Phase64/P64.D_Packaged_UI.md)、一小时切图及
-[VM/引擎内存诊断](Docs/Phase64/P64.D_Memory_Attribution.md)；内存增长仍在归因，不宣称无泄漏。
+[VM/引擎内存诊断与分配栈](Docs/Phase64/P64.D_Native_Allocation_Tracing.md)；内存保留问题仍在修复，不宣称无泄漏。
 完整记录见 [P64 交付](Docs/Phase64/P64_Closeout.md)，类型范围见 [P58 验收](Docs/Phase58/P58.4_Centralized_Gate_Report.md)。
 实现与验收分别记录，限制见[当前边界](#当前边界)。
 
@@ -161,7 +161,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 | [存档与异常流程](Docs/Phase64/P64.D_UI_Save_Edges.md) | 五个独立进程 **31/31** 动作；覆盖保存、重启读取、缺档、GC、读取失败、写锁与组件退出 |
 | [Development/Shipping 包内 UI](Docs/Phase64/P64.D_Packaged_UI.md) | Wasmtime 45 AOT，各两个实际 Game 进程 **5/5 + 2/2** 动作，回执 **28/28、25/25**；包内 runner **29/29**，Component 专项 **10/10** |
 | [World 连续运行](Docs/Phase64/P64.D_World_Soak.md) | **3601.889 秒、877 次切图、4386/4386 动作**；旧对象逐轮回收，UObject 数稳定；合同 **46/46**，进程内存增长待归因，不代表无泄漏 |
-| [内存归因](Docs/Phase64/P64.D_Memory_Attribution.md) | 显式 LLM 下 **100 次切图、501/501 动作**；后端对象、Trace 内存与 FName 容量有界，第 50～100 轮提交量仍增 **3.11 MiB**，继续定位原生分配，不代表无泄漏 |
+| [内存归因与分配栈](Docs/Phase64/P64.D_Native_Allocation_Tracing.md) | VM/Trace/FName/LLM 快照、GC 书签与 Insights 查询；**50 次切图、251/251 动作、合同 188/188**；长期重载与字符串参数保留待修复，不代表无泄漏 |
 
 编译器专项见 [async 短路求值](Docs/Phase64/P64.D_Async_Short_Circuit.md)与[C# 捕获赋值](Docs/Phase64/P64.D_Captured_Assignment.md)。
 上述机器验证不替代真实输入、视觉、设备和完整长稳验收；[Android 边界](Docs/Phase64/P64.D_Android_Readiness.md)单独保留。

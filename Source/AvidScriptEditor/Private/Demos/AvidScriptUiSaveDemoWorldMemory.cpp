@@ -4,6 +4,7 @@
 #include "CoreGlobals.h"
 #include "HAL/LowLevelMemTracker.h"
 #include "HAL/PlatformMemory.h"
+#include "ProfilingDebugging/MiscTrace.h"
 #include "Trace/Trace.h"
 #include "UObject/NameTypes.h"
 #include "UObject/UObjectArray.h"
@@ -128,5 +129,6 @@ void FUiSaveWorld::AddMemorySample(FJsonObject& Gc)
 	MemorySummary->SetNumberField(TEXT("final_virtual_bytes"), static_cast<double>(Memory.UsedVirtual));
 	MemorySummary->SetNumberField(TEXT("peak_physical_bytes"), static_cast<double>(PeakPhysical));
 	MemorySummary->SetNumberField(TEXT("peak_virtual_bytes"), static_cast<double>(PeakVirtual));
+	TRACE_BOOKMARK(TEXT("AvidScript.WorldGC.%d"), CompletedCycles);
 }
 }

@@ -14,6 +14,7 @@ param(
     [ValidateRange(2, 1000)][int]$WorldCycles = 10,
     [ValidateRange(0, 21600)][int]$SoakSeconds = 0,
     [switch]$MeasureLlm,
+    [switch]$TraceMemory,
     [string]$DotNetPath = (Join-Path $env:USERPROFILE '.dotnet/dotnet.exe'),
     [ValidateRange(10, 41630)][int]$TimeoutSeconds = 1200
 )
@@ -707,6 +708,7 @@ function Invoke-AvidScriptUiSaveVerifyReload {
 function Invoke-AvidScriptUiSaveDemo {
     if ($ReloadWithSaveLoad -and $Mode -ine 'VerifyReload') { throw 'ReloadWithSaveLoad requires VerifyReload mode.' }
     if ($MeasureLlm -and $Mode -ine 'VerifyWorld') { throw 'MeasureLlm requires VerifyWorld mode.' }
+    if ($TraceMemory -and $Mode -ine 'VerifyWorld') { throw 'TraceMemory requires VerifyWorld mode.' }
     if ($Mode -in @('Verify', 'VerifyReload', 'VerifyWorld') -and $ExpectedPackageId -notmatch '\A[0-9a-fA-F]{64}\z') { throw 'Verify requires ExpectedPackageId (64hex).' }
     $Context = Get-AvidScriptUiSaveContext
     if ($Mode -ieq 'VerifyReload') { $ReloadArtifacts = Get-AvidScriptUiSaveReloadArtifacts $Context }

@@ -305,7 +305,7 @@ function Invoke-AvidScriptUiSaveVerifyWorld {
         gameplay_acceptance = 'editor_world_synthetic_probe_only'; physical_click_verified = $false; visual_verified = $false
         packaged_verified = $false; world_lifecycle_verified = $false; long_run_verified = $false
         world_cycles = $WorldCycles; soak_seconds = $SoakSeconds; timeout_seconds = $ProcessBudget
-        llm_requested = [bool]$MeasureLlm; message = '' }
+        llm_requested = [bool]$MeasureLlm; memory_trace_requested = [bool]$TraceMemory; memory_trace = $null; message = '' }
     try {
         New-AvidScriptUiSaveDirectory $UserRoot
         $WorldRoot = Join-Path $UserRoot 'world'
@@ -318,12 +318,18 @@ function Invoke-AvidScriptUiSaveVerifyWorld {
             Assert-AvidScriptUiSaveSafePath $Path
             if (Test-Path -LiteralPath $Path) { throw 'World report/log must be new.' }
         }
+        $TracePath = Join-Path $RunRoot 'world.memory.utrace'
+        if ($TraceMemory) {
+            Assert-AvidScriptUiSaveSafePath $TracePath
+            if (Test-Path -LiteralPath $TracePath) { throw 'World memory trace must be new.' }
+        }
         $Arguments = @($Context.project, '/AvidScript/Demos/UiSave/L_UiSave',
                 '-game', '-ExecCmds=Module Load AvidScriptEditor', '-AvidScriptScenario=ui_save_demo', '-AvidScriptUiSaveProbe=world',
                 "-AvidScriptUiSaveReport=$($Summary.probe_report_path)", "-AvidScriptUiSaveExpectedPackage=$($Summary.package_id)",
                 "-AvidScriptUiSaveWorldCycles=$WorldCycles", "-AvidScriptUiSaveSoakSeconds=$SoakSeconds", "-UserDir=$WorldRoot",
                 '-unattended', '-nullrhi', '-nosound', '-nop4', '-nosplash', '-stdout', '-FullStdOutLogOutput', "-abslog=$($Summary.editor_log)")
         if ($MeasureLlm) { $Arguments += @('-llm', '-AvidScriptUiSaveRequireLlm') }
+        if ($TraceMemory) { $Arguments += @('-trace=memory,bookmark', "-tracefile=$TracePath") }
         $Process = Invoke-AvidScriptUiSaveTool -Executable $Context.editor -ProcessTimeoutSeconds $ProcessBudget `
             -LogPath (Join-Path $RunRoot 'world.process.log') -Arguments $Arguments
         $Summary.evidence = Resolve-AvidScriptUiSaveWorldReport $Summary.probe_report_path $WorldRoot $Summary.package_id $WorldCycles $SoakSeconds
@@ -331,6 +337,14 @@ function Invoke-AvidScriptUiSaveVerifyWorld {
             foreach ($Cycle in $Summary.evidence.world_lifecycle.cycles) {
                 Assert-AvidScriptUiSaveWorldEqual $Cycle.gc.attribution.engine_memory.llm.enabled $true "cycle $($Cycle.cycle) requested llm.enabled"
             }
+        }
+        if ($TraceMemory) {
+            if (-not (Test-Path -LiteralPath $TracePath -PathType Leaf) -or (Get-Item -LiteralPath $TracePath).Length -eq 0) {
+                throw 'Requested World memory trace is missing or empty.'
+            }
+            $Summary.memory_trace = [ordered]@{ path = $TracePath; bytes = (Get-Item -LiteralPath $TracePath).Length
+                sha256 = (Get-AvidScriptBindingSha256Hex $TracePath); analyzed = $false
+                bookmark_prefix = 'AvidScript.WorldGC.' }
         }
         Assert-AvidScriptUiSaveWorldNumber $Process.elapsed_ms 'process.elapsed_ms' 0
         if ($Summary.evidence.elapsed_seconds -gt ($Process.elapsed_ms / 1000 + 1)) { throw 'World elapsed exceeds the measured child process duration.' }

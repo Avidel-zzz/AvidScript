@@ -8,9 +8,9 @@
   "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase64/P64.0_Production_Gameplay_Architecture.md",
-    "version": 12,
-    "sha256": "56fd547536acbde75efd93d6b73e1504d59c757f3becca193c961546b464eb61",
-    "revision_reason": "补充Editor私有Trace/FName快照与显式LLM归因合同；缺失数值为null，不强制刷新/trim，不将诊断运行等同无观测开销基准，保留完整原始目标。"
+    "version": 13,
+    "sha256": "5db8c3c5047388ace51ac3f5586560f2e4f32185332a3fc5095d7f8f36031b43",
+    "revision_reason": "复用UE Memory Trace与GC书签获取原生分配栈；采集与离线查询独立验收，保留reserve/commit及Windows堆覆盖限制，不改引擎和系统注册表。"
   },
   "documents": {
     "plan": "Docs/Phase64/P64.0_Implementation_Plan.md",
@@ -122,6 +122,19 @@
       "transfer_reason": ""
     },
     {
+      "id": "P64-D08-BackendReloadRetention",
+      "severity": "Important",
+      "found_batch": "P64.D",
+      "scope": "Wasmtime backend长期重用时的导出记录与历史身份保留",
+      "evidence": "Docs/Phase64/P64.D_Native_Allocation_Tracing.md：ResolveExport/PerformUnload/AdvanceBackendInstanceIdentity源码证明ExportEntries与OwnedBackendInstanceIdentities跨卸载增长；当前World增长贡献未证明。",
+      "deferral_reason": "本批trace候选已冻结；该问题不阻塞分配栈采集，修复需保护prepared-call失效检查并集中验证。",
+      "remediation": "在下一集中VM修复批使用有界owner/代际和导出记录所有权，保持stale/foreign拒绝语义与旧prepared-call安全，增加聚焦长期复用回归。",
+      "status": "Open",
+      "resolution_evidence": "",
+      "target_phase": null,
+      "transfer_reason": ""
+    },
+    {
       "id": "P64-R01-Integration",
       "severity": "Critical",
       "found_batch": "P64.D",
@@ -187,6 +200,6 @@
     }
   ],
   "next_action": "debt-update -Phase 64 -DebtId P64-D03-OriginalGameplayAcceptance -Status Verified -Evidence <text>",
-  "revision": 34,
-  "updated_at_utc": "2026-09-04T15:31:12.3208782+00:00"
+  "revision": 36,
+  "updated_at_utc": "2026-09-04T17:28:27.4518354+00:00"
 }

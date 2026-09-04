@@ -619,6 +619,19 @@
       "prevention": "类型、缺字段、null 和数值边界矩阵构造最小有效报告，经真实 JSON 往返后直接调用生产校验函数；CLI 参数、进程和文件证据仅保留必要端到端覆盖。记录总数、通过数和耗时；中断且无完整回执不计通过。仅测试组织或文档变化且原生输入哈希未变时，不重复 UE 构建和运行。",
       "source": "Docs/Phase64/P64.D_Memory_Attribution.md",
       "last_observed": "2026-09-05 P64 引擎归因字段矩阵过度使用文件系统集成 fixture"
+    },
+    {
+      "id": "insights-analysis-requires-export-and-symbol-evidence",
+      "tags": [
+        "performance",
+        "trace",
+        "verification",
+        "tools"
+      ],
+      "summary": "Unreal Insights 的 AutoQuit 在分析未启动时也可能返回零；有调用栈也不等于符号完整。",
+      "prevention": "含空格 trace 路径优先使用源码支持的首位置参数，避免进程包装对整个 key=value 的引用与 FParse 字符缓冲区解析不一致。必须核对书签、每次成功导出的记录数、实际 CSV 行数和关闭日志；符号覆盖同时识别 !Unknown 与地址回退，保留未覆盖边界。仅离线分析失败时复用已完成且哈希不变的 trace，不重新采集 UE。",
+      "source": "Docs/Phase64/P64.D_Native_Allocation_Tracing.md",
+      "last_observed": "2026-09-05 P64 Insights 零退出码但未启动分析，以及临时汇总漏计 Unknown"
     }
   ]
 }

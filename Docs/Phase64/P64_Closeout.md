@@ -72,9 +72,15 @@ Trace 内存与 FName 容量全程不增长；第 50～100 轮进程提交量增
 0.125 MiB。no-clean UBT 4 动作、15.93 秒、World 合同 178/178 通过；继续定位原生堆/JIT 分配与分配器保留空间，
 不把 LLM 诊断开销当成性能退化，也不把已跟踪总量平稳当成无泄漏证明，D07 保持 Fixing。
 
+架构 v13 的[原生分配追踪](P64.D_Native_Allocation_Tracing.md)新增可选 Memory Trace 与逐轮 GC 书签。
+真实 50 次切图、251/251 动作、World 合同 188/188 通过；Insights 四组增长/释放查询完成。
+下一步优先检查反射 FString 参数帧每轮 7 项/208 字节保留，以及登记为 D08 的 backend 旧导出/身份
+无界保留；Blueprint 引脚延迟删除与编辑器工具开销另行区分。未把原始预留空间、符号不全或工具
+exit 0 当成泄漏/无泄漏证明，不关闭 D07。
+
 ## 仍需完成
 
-P64.D 依架构 v12 继续补齐内存归因、UI 人工重启读档与 Shipping 视觉、网络/重载持续时长，以及 Android toolchain/UBT/APK。
+P64.D 依架构 v13 继续补齐内存归因与保留问题修复、UI 人工重启读档与 Shipping 视觉、网络/重载持续时长，以及 Android toolchain/UBT/APK。
 人工游玩和真实设备验收独立保留。P58 类型、iOS、发布工程及性能领先等总目标缺口不会随本阶段编号自动关闭。
 
 ## 流程修正

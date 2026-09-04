@@ -156,7 +156,7 @@ function New-UiSaveWorldReportFixture {
 
 function Invoke-UiSaveWorldFixture {
     param([int]$Count = 2, [int]$Seconds = 0, [scriptblock]$Mutate, [string]$Fault = '', [int]$ExplicitTimeout = 0,
-        [int]$CompletedCount = 0, [switch]$MeasureLlm)
+        [int]$CompletedCount = 0, [switch]$MeasureLlm, [switch]$TraceMemory)
     $CaseRoot = Join-Path $FixtureRoot ([Guid]::NewGuid().ToString('N'))
     New-AvidScriptUiSaveDirectory $CaseRoot
     $Mode = 'VerifyWorld'
@@ -172,6 +172,17 @@ function Invoke-UiSaveWorldFixture {
     $Calls = [Collections.Generic.List[object]]::new()
     if ($Fault -ceq 'existing root') { New-AvidScriptUiSaveDirectory $VerifyUserRoot }
     if ($Fault -ceq 'project root') { $VerifyUserRoot = Join-Path (Split-Path -Parent $Context.project) 'User Data' }
+    if ($Fault -ceq 'existing trace') {
+        $NewDirectory = ${function:New-AvidScriptUiSaveDirectory}
+        function New-AvidScriptUiSaveDirectory {
+            param([string]$Path)
+            & $NewDirectory $Path
+            # Seed the real RunRoot before the World runner reaches its launch guard.
+            if (Test-AvidScriptUiSaveSamePath (Split-Path -Parent $Path) $Context.output_root) {
+                [IO.File]::WriteAllText((Join-Path $Path 'world.memory.utrace'), 'existing trace sentinel')
+            }
+        }
+    }
     function Get-AvidScriptUiSaveContext { return $Context }
     function Invoke-AvidScriptAndroidProcess {
         param($Executable, $Arguments, $WorkingDirectory, $TimeoutSeconds, $Environment)
@@ -186,6 +197,22 @@ function Invoke-UiSaveWorldFixture {
             Assert-UiSaveWorldContract (@($Arguments | Where-Object { $_ -ceq $Argument }).Count -eq $ExpectedCount) "Conditional native argument differs: $Argument"
         }
         $ReportPath = ($Arguments | Where-Object { $_.StartsWith('-AvidScriptUiSaveReport=') }).Substring(24)
+        $TraceFlags = @($Arguments | Where-Object { $_ -like '-trace=*' })
+        $TraceFiles = @($Arguments | Where-Object { $_ -like '-tracefile=*' })
+        $ExpectedTraceCount = if ($TraceMemory) { 1 } else { 0 }
+        Assert-UiSaveWorldContract ($TraceFlags.Count -eq $ExpectedTraceCount -and
+            $TraceFiles.Count -eq $ExpectedTraceCount) 'Conditional trace arguments differ.'
+        if ($TraceMemory) {
+            $TracePath = Join-Path (Split-Path -Parent $ReportPath) 'world.memory.utrace'
+            Assert-UiSaveWorldContract ($TraceFlags[0] -ceq '-trace=memory,bookmark' -and
+                $TraceFiles[0] -ceq "-tracefile=$TracePath") 'Trace channels or unique RunRoot output differ.'
+            Assert-UiSaveWorldContract (-not (Test-Path -LiteralPath $TracePath)) 'World trace path was reused.'
+            if ($Fault -cne 'missing trace') {
+                $TraceBytes = [Text.Encoding]::UTF8.GetBytes('fixture world memory trace')
+                if ($Fault -ceq 'empty trace') { $TraceBytes = [byte[]]::new(0) }
+                [IO.File]::WriteAllBytes($TracePath, $TraceBytes)
+            }
+        }
         $UserRoot = ($Arguments | Where-Object { $_.StartsWith('-UserDir=') }).Substring(9)
         Assert-UiSaveWorldContract (Test-AvidScriptUiSaveSamePath $UserRoot (Join-Path $VerifyUserRoot 'world')) 'World UserDir was not isolated.'
         Assert-UiSaveWorldContract (@(Get-ChildItem -LiteralPath $UserRoot -Force).Count -eq 0) 'World UserDir was not fresh.'
@@ -206,6 +233,9 @@ function Invoke-UiSaveWorldFixture {
     }
     $Summary = Invoke-AvidScriptUiSaveDemo
     Assert-UiSaveWorldContract ($Summary.llm_requested -is [bool] -and $Summary.llm_requested -eq [bool]$MeasureLlm) 'LLM request was not recorded as a boolean.'
+    Assert-UiSaveWorldContract ($Summary.memory_trace_requested -is [bool] -and
+        $Summary.memory_trace_requested -eq [bool]$TraceMemory) 'Trace request was not recorded as a boolean.'
+    if (-not $TraceMemory) { Assert-UiSaveWorldContract ($null -eq $Summary.memory_trace) 'Unrequested trace evidence was claimed.' }
     return [pscustomobject]@{ summary = $Summary; calls = $Calls }
 }
 
@@ -216,6 +246,10 @@ Invoke-UiSaveWorldCase 'default ten travels and int64 memory' {
     Assert-UiSaveWorldContract ($Result.summary.evidence.world_lifecycle.activated_worlds -eq 11) 'Final World was not activated.'
     Assert-UiSaveWorldContract (-not $Result.summary.long_run_verified -and -not $Result.summary.packaged_verified -and
         -not $Result.summary.physical_click_verified -and -not $Result.summary.visual_verified) 'Unsupported acceptance was claimed.'
+    $Receipt = Get-Content -Raw -LiteralPath $Result.summary.report_path | ConvertFrom-Json -Depth 32
+    Assert-UiSaveWorldContract ($Receipt.memory_trace_requested -is [bool] -and -not $Receipt.memory_trace_requested -and
+        $null -eq $Receipt.memory_trace -and
+        @(Get-ChildItem -LiteralPath $Result.summary.evidence_root -Filter '*.utrace' -File).Count -eq 0) 'Default receipt enabled memory tracing.'
 }
 Invoke-UiSaveWorldCase 'minimum two travels no warmup baseline' {
     $Result = Invoke-UiSaveWorldFixture
@@ -256,6 +290,60 @@ Invoke-UiSaveWorldCase 'backend growth remains measured evidence not an automati
     }
     Assert-UiSaveWorldContract $Result.summary.succeeded $Result.summary.message
     Assert-UiSaveWorldContract ($Result.summary.evidence.world_lifecycle.cycles[1].gc.attribution.backend_live -eq 2) 'Growth evidence was discarded.'
+}
+
+Invoke-UiSaveWorldCase 'public TraceMemory parameter is a switch' {
+    $Entry = Get-Command (Join-Path (Split-Path -Parent $PSScriptRoot) 'InvokeAvidScriptUiSaveDemo.ps1')
+    Assert-UiSaveWorldContract ($Entry.Parameters.ContainsKey('TraceMemory') -and
+        $Entry.Parameters['TraceMemory'].ParameterType -eq [Management.Automation.SwitchParameter]) 'Public TraceMemory switch is missing.'
+}
+foreach ($OtherMode in @('Prepare', 'Publish', 'Play', 'Verify', 'VerifyReload')) {
+    Invoke-UiSaveWorldCase "TraceMemory rejects $OtherMode before context lookup" {
+        $Mode = $OtherMode
+        $TraceMemory = $true
+        function Get-AvidScriptUiSaveContext { throw 'Unexpected context lookup.' }
+        $Message = ''
+        try { [void](Invoke-AvidScriptUiSaveDemo) } catch { $Message = $_.Exception.Message }
+        Assert-UiSaveWorldContract ($Message -match 'TraceMemory.*VerifyWorld') "TraceMemory mode guard failed: $Message"
+    }
+}
+Invoke-UiSaveWorldCase 'requested memory trace retains actual bytes and hash without analysis claims' {
+    $Result = Invoke-UiSaveWorldFixture -TraceMemory
+    Assert-UiSaveWorldContract $Result.summary.succeeded $Result.summary.message
+    Assert-UiSaveWorldContract ($Result.summary.memory_trace_requested -and $Result.calls.Count -eq 1) 'Trace request did not launch once.'
+    $TracePath = Join-Path $Result.summary.evidence_root 'world.memory.utrace'
+    $TraceFile = Get-Item -LiteralPath $TracePath
+    $TraceHash = (Get-FileHash -LiteralPath $TracePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $Receipt = Get-Content -Raw -LiteralPath $Result.summary.report_path | ConvertFrom-Json -Depth 32
+    Assert-UiSaveWorldContract ($Receipt.succeeded -and $Receipt.memory_trace_requested -is [bool] -and
+        $Receipt.memory_trace_requested -and $TraceFile.Length -gt 0 -and
+        @(Get-ChildItem -LiteralPath $Result.summary.evidence_root -Filter '*.utrace' -File).Count -eq 1) 'Trace receipt or unique file is missing.'
+    foreach ($Trace in @($Result.summary.memory_trace, $Receipt.memory_trace)) {
+        Assert-UiSaveWorldContract ((Test-AvidScriptUiSaveSamePath $Trace.path $TracePath) -and
+            $Trace.bytes -eq $TraceFile.Length -and $Trace.sha256 -ceq $TraceHash -and
+            $Trace.analyzed -is [bool] -and -not $Trace.analyzed -and
+            $Trace.bookmark_prefix -ceq 'AvidScript.WorldGC.') 'Trace receipt differs from the actual file or claims analysis.'
+    }
+}
+foreach ($TraceFault in @('missing trace', 'empty trace', 'existing trace')) {
+    Invoke-UiSaveWorldCase "requested memory trace rejects $TraceFault" {
+        $Result = Invoke-UiSaveWorldFixture -TraceMemory -Fault $TraceFault
+        $ExpectedMessage = if ($TraceFault -ceq 'existing trace') { 'World memory trace must be new.' } else { 'Requested World memory trace is missing or empty.' }
+        $ExpectedCalls = if ($TraceFault -ceq 'existing trace') { 0 } else { 1 }
+        $Receipt = Get-Content -Raw -LiteralPath $Result.summary.report_path | ConvertFrom-Json -Depth 32
+        foreach ($Summary in @($Result.summary, $Receipt)) {
+            Assert-UiSaveWorldContract (-not $Summary.succeeded -and $Summary.status -ceq 'failed' -and
+                -not $Summary.world_lifecycle_verified -and $Summary.memory_trace_requested -and
+                $null -eq $Summary.memory_trace -and $Summary.message -ceq $ExpectedMessage) "Accepted invalid trace evidence: $TraceFault"
+        }
+        Assert-UiSaveWorldContract ($Result.calls.Count -eq $ExpectedCalls) 'Trace rejection occurred at the wrong process boundary.'
+        $TracePath = Join-Path $Result.summary.evidence_root 'world.memory.utrace'
+        switch ($TraceFault) {
+            'missing trace' { Assert-UiSaveWorldContract (-not (Test-Path -LiteralPath $TracePath)) 'Missing trace was synthesized.' }
+            'empty trace' { Assert-UiSaveWorldContract ((Get-Item -LiteralPath $TracePath).Length -eq 0) 'Empty trace fixture differs.' }
+            'existing trace' { Assert-UiSaveWorldContract ([IO.File]::ReadAllText($TracePath) -ceq 'existing trace sentinel') 'Existing trace was overwritten.' }
+        }
+    }
 }
 
 Invoke-UiSaveWorldCase 'public MeasureLlm parameter is a switch' {
