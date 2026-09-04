@@ -66,9 +66,15 @@ Shipping 通过隔离 UserDir 的标准 Engine.ini 选择样例地图；不修�
 5.188 MiB，JSON 估算增加 1.075 MiB，D07 保持 Fixing，继续测量 UE Trace、分配器与原生资源。
 本轮不是完整长稳或性能 Gate，不扩充历史全量基线。
 
+架构 v12 在同一[内存归因小节](P64.D_Memory_Attribution.md)补充 Editor 私有 Trace/FName 与显式 LLM
+快照。默认 3 次切图、16/16 动作通过；LLM 运行 413.850 秒、100 次切图、501/501 动作通过。
+Trace 内存与 FName 容量全程不增长；第 50～100 轮进程提交量增 3.109 MiB，LLM Platform 仅增
+0.125 MiB。no-clean UBT 4 动作、15.93 秒、World 合同 178/178 通过；继续定位原生堆/JIT 分配与分配器保留空间，
+不把 LLM 诊断开销当成性能退化，也不把已跟踪总量平稳当成无泄漏证明，D07 保持 Fixing。
+
 ## 仍需完成
 
-P64.D 依架构 v11 继续补齐内存归因、UI 人工重启读档与 Shipping 视觉、网络/重载持续时长，以及 Android toolchain/UBT/APK。
+P64.D 依架构 v12 继续补齐内存归因、UI 人工重启读档与 Shipping 视觉、网络/重载持续时长，以及 Android toolchain/UBT/APK。
 人工游玩和真实设备验收独立保留。P58 类型、iOS、发布工程及性能领先等总目标缺口不会随本阶段编号自动关闭。
 
 ## 流程修正
@@ -81,3 +87,5 @@ P64.D 依架构 v11 继续补齐内存归因、UI 人工重启读档与 Shipping
 - Automation 使用实际 Queue Empty 与 TestExit 日志，不从提前 Quit 的退出码推断队列完成。
 - 内存归因过程中发生一次临时 PowerShell 汇总语法错误：`foreach` 语句的结果应先赋给变量再进管道；
   子代理工具也不能跨版本猜参数名。本批均在读取/协调层修正，没有改变被测候选或重跑 UE。
+- 引擎字段校验矩阵不逐项创建完整文件系统 fixture；纯报告校验直接调用生产验证函数，保留必要
+  端到端路径。中断且无结束回执的合同运行不能计为通过，测试组织调整不触发无关 UE 重跑。

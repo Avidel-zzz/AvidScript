@@ -3,7 +3,6 @@
 
 #include "AvidScriptComponent.h"
 #include "AvidScriptHash.h"
-#include "AvidScriptVmDiagnostics.h"
 #include "AvidScriptWorldSubsystem.h"
 #include "Blueprint/UserWidget.h"
 #include "Components/Button.h"
@@ -14,7 +13,7 @@
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
 #include "HAL/FileManager.h"
-#include "HAL/PlatformMemory.h"
+#include "HAL/LowLevelMemTracker.h"
 #include "HAL/PlatformTime.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/CommandLine.h"
@@ -73,6 +72,10 @@ FUiSaveWorld::~FUiSaveWorld()
 bool FUiSaveWorld::Initialize(FString& Error)
 {
 	Started = StageStarted = FPlatformTime::Seconds();
+	if (FParse::Param(FCommandLine::Get(), TEXT("AvidScriptUiSaveRequireLlm")) && !LLM_IS_ENABLED())
+	{
+		Error = TEXT("world_llm_requested_but_unavailable"); return false;
+	}
 	if (!ReadWorldProbeOption(TEXT("AvidScriptUiSaveWorldCycles="), RequestedCycles, 2, 1000)
 		|| !ReadWorldProbeOption(TEXT("AvidScriptUiSaveSoakSeconds="), SoakSeconds, 0, 21600))
 	{
@@ -341,52 +344,6 @@ void FUiSaveWorld::HandleWorldCleanup(UWorld* CleanedWorld, bool bSessionEnded, 
 	Cleanup->SetNumberField(TEXT("events_after"), Stats.EventCallbackCount);
 	if (Stats.EventCallbackCount != Before) { Failure = TEXT("world_teardown_dispatched_unexpected_event"); }
 	++CleanupCount;
-}
-
-void FUiSaveWorld::AddMemorySample(FJsonObject& Gc)
-{
-	const FAvidScriptVmMemorySnapshot Vm = CaptureAvidScriptVmMemorySnapshot();
-	const TSharedRef<FJsonObject> Attribution = MakeShared<FJsonObject>();
-	Attribution->SetNumberField(TEXT("schema_version"), 1);
-	Attribution->SetNumberField(TEXT("backend_created"), static_cast<double>(Vm.BackendCreatedCount));
-	Attribution->SetNumberField(TEXT("backend_destroyed"), static_cast<double>(Vm.BackendDestroyedCount));
-	Attribution->SetNumberField(TEXT("backend_live"), static_cast<double>(Vm.BackendLiveCount));
-	Attribution->SetNumberField(TEXT("artifact_cache_entries"), Vm.ArtifactCacheEntries);
-	Attribution->SetNumberField(TEXT("artifact_cache_capacity"), Vm.ArtifactCacheCapacity);
-	Attribution->SetNumberField(TEXT("artifact_cache_allocated_bytes"), static_cast<double>(Vm.ArtifactCacheAllocatedBytes));
-	Attribution->SetNumberField(TEXT("attestation_entries"), Vm.AttestationEntries);
-	Attribution->SetNumberField(TEXT("attestation_capacity"), Vm.AttestationCapacity);
-	Attribution->SetNumberField(TEXT("attestation_allocated_bytes"), static_cast<double>(Vm.AttestationAllocatedBytes));
-	RetainedActionCount += Actions.Num();
-	Attribution->SetNumberField(TEXT("observer_retained_cycles"), CompletedCycles);
-	Attribution->SetNumberField(TEXT("observer_retained_actions"), static_cast<double>(RetainedActionCount));
-	Attribution->SetStringField(TEXT("observer_estimate_kind"), TEXT("ue_json_memory_footprint"));
-	Attribution->SetNumberField(TEXT("observer_json_estimated_bytes"), 0);
-	Gc.SetObjectField(TEXT("attribution"), Attribution);
-	for (const TCHAR* Field : { TEXT("physical_bytes"), TEXT("virtual_bytes"), TEXT("uobject_count") })
-	{
-		Gc.SetNumberField(Field, 0);
-	}
-	// Completed cycles are immutable after this boundary. Do not walk the growing history on every sample.
-	RetainedCycleJsonBytes += Cycles.Last()->GetMemoryFootprint();
-	Attribution->SetNumberField(TEXT("observer_json_estimated_bytes"),
-		static_cast<double>(RetainedCycleJsonBytes + Cycles.GetAllocatedSize() + Actions.GetAllocatedSize()));
-	const FPlatformMemoryStats Memory = FPlatformMemory::GetStats();
-	Gc.SetNumberField(TEXT("physical_bytes"), static_cast<double>(Memory.UsedPhysical));
-	Gc.SetNumberField(TEXT("virtual_bytes"), static_cast<double>(Memory.UsedVirtual));
-	Gc.SetNumberField(TEXT("uobject_count"), GUObjectArray.GetObjectArrayNumMinusAvailable());
-	PeakPhysical = FMath::Max(PeakPhysical, static_cast<uint64>(Memory.UsedPhysical));
-	PeakVirtual = FMath::Max(PeakVirtual, static_cast<uint64>(Memory.UsedVirtual));
-	if (CompletedCycles == 3)
-	{
-		MemorySummary->SetBoolField(TEXT("baseline_available"), true);
-		MemorySummary->SetNumberField(TEXT("baseline_physical_bytes"), static_cast<double>(Memory.UsedPhysical));
-		MemorySummary->SetNumberField(TEXT("baseline_virtual_bytes"), static_cast<double>(Memory.UsedVirtual));
-	}
-	MemorySummary->SetNumberField(TEXT("final_physical_bytes"), static_cast<double>(Memory.UsedPhysical));
-	MemorySummary->SetNumberField(TEXT("final_virtual_bytes"), static_cast<double>(Memory.UsedVirtual));
-	MemorySummary->SetNumberField(TEXT("peak_physical_bytes"), static_cast<double>(PeakPhysical));
-	MemorySummary->SetNumberField(TEXT("peak_virtual_bytes"), static_cast<double>(PeakVirtual));
 }
 
 EWorldProbeResult FUiSaveWorld::Tick(FString& Error)

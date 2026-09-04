@@ -606,6 +606,19 @@
       "prevention": "Runtime 报告实际解析的 PackageId，runner 在安装前校验预期身份并在结果中精确比较；旧 OBB 或旧模块即使产生新 Run ID 也不得通过。玩法验收还须检查最终状态，不把事件送达数视为玩法完成；延迟事件以实际派发时刻计算间隔。",
       "source": "Docs/Phase64/P64_Integration_Review.md",
       "last_observed": "2026-09-04 P64 Android install-r 可保留同版本旧 OBB，需包身份校验"
+    },
+    {
+      "id": "field-matrices-use-in-memory-contract-validation",
+      "tags": [
+        "verification",
+        "workflow",
+        "contracts",
+        "performance"
+      ],
+      "summary": "纯字段拒绝矩阵逐项创建完整工程和文件系统 fixture，会把廉价校验放大成串行等待。",
+      "prevention": "类型、缺字段、null 和数值边界矩阵构造最小有效报告，经真实 JSON 往返后直接调用生产校验函数；CLI 参数、进程和文件证据仅保留必要端到端覆盖。记录总数、通过数和耗时；中断且无完整回执不计通过。仅测试组织或文档变化且原生输入哈希未变时，不重复 UE 构建和运行。",
+      "source": "Docs/Phase64/P64.D_Memory_Attribution.md",
+      "last_observed": "2026-09-05 P64 引擎归因字段矩阵过度使用文件系统集成 fixture"
     }
   ]
 }

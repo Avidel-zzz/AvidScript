@@ -33,6 +33,7 @@ public class AvidScriptEditor : ModuleRules
 				"UMG",
 				"UMGEditor",
 				"ToolMenus",
+				"TraceLog",
 				"Slate",
 				"SlateCore",
 				"LevelEditor",

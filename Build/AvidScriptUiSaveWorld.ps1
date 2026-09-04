@@ -86,6 +86,44 @@ function Assert-AvidScriptUiSaveWorldMemory {
     }
 }
 
+function Assert-AvidScriptUiSaveWorldEngineMemory {
+    param([object]$EngineMemory, [object]$Previous)
+    if ($EngineMemory -isnot [pscustomobject]) { throw 'World engine_memory must be an object.' }
+    Assert-AvidScriptUiSaveWorldEqual $EngineMemory.schema_version 1 'engine_memory.schema_version'
+    if ($EngineMemory.allocator_name -isnot [string] -or [string]::IsNullOrWhiteSpace($EngineMemory.allocator_name)) {
+        throw 'World engine_memory.allocator_name must be a nonempty string.'
+    }
+    Assert-AvidScriptUiSaveWorldNumber $EngineMemory.sample_frame 'engine_memory.sample_frame' 0 -Integer
+    if ($null -ne $Previous -and $EngineMemory.sample_frame -le $Previous.sample_frame) {
+        throw 'World engine_memory.sample_frame must increase each cycle.'
+    }
+    Assert-AvidScriptUiSaveWorldEqual $EngineMemory.sample_consistency 'owner_snapshots_not_atomic' 'engine_memory.sample_consistency'
+    foreach ($Owner in @('trace', 'names', 'llm')) {
+        if ($EngineMemory.$Owner -isnot [pscustomobject]) { throw "World engine_memory.$Owner must be an object." }
+    }
+    $Trace = $EngineMemory.trace
+    if ($Trace.available -isnot [bool]) { throw 'World engine_memory.trace.available must be a boolean.' }
+    foreach ($Field in @('memory_used_bytes', 'block_pool_bytes', 'fixed_buffer_bytes', 'shared_buffer_bytes',
+            'important_cache_allocated_bytes', 'important_cache_used_bytes', 'thread_registry_bytes')) {
+        if ($Trace.available) {
+            Assert-AvidScriptUiSaveWorldNumber $Trace.$Field "engine_memory.trace.$Field" 0 9007199254740991 -Integer
+        } elseif ($null -ne $Trace.$Field) { throw "World engine_memory.trace.$Field must be null when unavailable." }
+    }
+    foreach ($Field in @('entry_bytes', 'table_bytes', 'ansi_count', 'wide_count')) {
+        Assert-AvidScriptUiSaveWorldNumber $EngineMemory.names.$Field "engine_memory.names.$Field" 0 -Integer
+    }
+    $Llm = $EngineMemory.llm
+    if ($Llm.enabled -isnot [bool]) { throw 'World engine_memory.llm.enabled must be a boolean.' }
+    Assert-AvidScriptUiSaveWorldEqual $Llm.sample_origin 'live_totals_and_aggregated_tags' 'engine_memory.llm.sample_origin'
+    # Owners are independent snapshots; do not infer totals or Used/Allocated relationships.
+    foreach ($Field in @('default_total_bytes', 'platform_total_bytes', 'platform_fmalloc_bytes', 'platform_overhead_bytes',
+            'default_fmalloc_unused_bytes', 'default_uobject_bytes', 'default_fname_bytes', 'default_untagged_bytes', 'default_engine_misc_bytes')) {
+        if ($Llm.enabled) {
+            Assert-AvidScriptUiSaveWorldNumber $Llm.$Field "engine_memory.llm.$Field" -9007199254740991 9007199254740991 -Integer
+        } elseif ($null -ne $Llm.$Field) { throw "World engine_memory.llm.$Field must be null when disabled." }
+    }
+}
+
 function Assert-AvidScriptUiSaveWorldAttribution {
     param([object]$Cycle, [object]$Previous, [long]$RetainedActions)
     $Attribution = $Cycle.gc.attribution
@@ -110,6 +148,8 @@ function Assert-AvidScriptUiSaveWorldAttribution {
             Assert-AvidScriptUiSaveWorldNumber $Attribution.$Field "attribution.$Field monotonic" $Previous.$Field -Integer
         }
     }
+    $PreviousEngineMemory = if ($null -ne $Previous) { $Previous.engine_memory } else { $null }
+    Assert-AvidScriptUiSaveWorldEngineMemory $Attribution.engine_memory $PreviousEngineMemory
 }
 
 function Assert-AvidScriptUiSaveWorldCycles {
@@ -264,7 +304,8 @@ function Invoke-AvidScriptUiSaveVerifyWorld {
         process_mode = 'editor_binary_game'; input_kind = 'synthetic_ue_button_onclicked_broadcast'
         gameplay_acceptance = 'editor_world_synthetic_probe_only'; physical_click_verified = $false; visual_verified = $false
         packaged_verified = $false; world_lifecycle_verified = $false; long_run_verified = $false
-        world_cycles = $WorldCycles; soak_seconds = $SoakSeconds; timeout_seconds = $ProcessBudget; message = '' }
+        world_cycles = $WorldCycles; soak_seconds = $SoakSeconds; timeout_seconds = $ProcessBudget
+        llm_requested = [bool]$MeasureLlm; message = '' }
     try {
         New-AvidScriptUiSaveDirectory $UserRoot
         $WorldRoot = Join-Path $UserRoot 'world'
@@ -277,13 +318,20 @@ function Invoke-AvidScriptUiSaveVerifyWorld {
             Assert-AvidScriptUiSaveSafePath $Path
             if (Test-Path -LiteralPath $Path) { throw 'World report/log must be new.' }
         }
-        $Process = Invoke-AvidScriptUiSaveTool -Executable $Context.editor -ProcessTimeoutSeconds $ProcessBudget `
-            -LogPath (Join-Path $RunRoot 'world.process.log') -Arguments @($Context.project, '/AvidScript/Demos/UiSave/L_UiSave',
+        $Arguments = @($Context.project, '/AvidScript/Demos/UiSave/L_UiSave',
                 '-game', '-ExecCmds=Module Load AvidScriptEditor', '-AvidScriptScenario=ui_save_demo', '-AvidScriptUiSaveProbe=world',
                 "-AvidScriptUiSaveReport=$($Summary.probe_report_path)", "-AvidScriptUiSaveExpectedPackage=$($Summary.package_id)",
                 "-AvidScriptUiSaveWorldCycles=$WorldCycles", "-AvidScriptUiSaveSoakSeconds=$SoakSeconds", "-UserDir=$WorldRoot",
                 '-unattended', '-nullrhi', '-nosound', '-nop4', '-nosplash', '-stdout', '-FullStdOutLogOutput', "-abslog=$($Summary.editor_log)")
+        if ($MeasureLlm) { $Arguments += @('-llm', '-AvidScriptUiSaveRequireLlm') }
+        $Process = Invoke-AvidScriptUiSaveTool -Executable $Context.editor -ProcessTimeoutSeconds $ProcessBudget `
+            -LogPath (Join-Path $RunRoot 'world.process.log') -Arguments $Arguments
         $Summary.evidence = Resolve-AvidScriptUiSaveWorldReport $Summary.probe_report_path $WorldRoot $Summary.package_id $WorldCycles $SoakSeconds
+        if ($MeasureLlm) {
+            foreach ($Cycle in $Summary.evidence.world_lifecycle.cycles) {
+                Assert-AvidScriptUiSaveWorldEqual $Cycle.gc.attribution.engine_memory.llm.enabled $true "cycle $($Cycle.cycle) requested llm.enabled"
+            }
+        }
         Assert-AvidScriptUiSaveWorldNumber $Process.elapsed_ms 'process.elapsed_ms' 0
         if ($Summary.evidence.elapsed_seconds -gt ($Process.elapsed_ms / 1000 + 1)) { throw 'World elapsed exceeds the measured child process duration.' }
         $Summary.probe_report_sha256 = Get-AvidScriptBindingSha256Hex $Summary.probe_report_path

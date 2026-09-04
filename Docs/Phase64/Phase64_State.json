@@ -8,9 +8,9 @@
   "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase64/P64.0_Production_Gameplay_Architecture.md",
-    "version": 11,
-    "sha256": "e173c1170a467bef8e450e795a945cbbffa89376fda2de4ec49512bfcaa24a99",
-    "revision_reason": "Add backend-neutral cold-path memory diagnostics and per-cycle observer footprint attribution; retain full gameplay, long-run, platform and release requirements."
+    "version": 12,
+    "sha256": "56fd547536acbde75efd93d6b73e1504d59c757f3becca193c961546b464eb61",
+    "revision_reason": "补充Editor私有Trace/FName快照与显式LLM归因合同；缺失数值为null，不强制刷新/trim，不将诊断运行等同无观测开销基准，保留完整原始目标。"
   },
   "documents": {
     "plan": "Docs/Phase64/P64.0_Implementation_Plan.md",
@@ -187,6 +187,6 @@
     }
   ],
   "next_action": "debt-update -Phase 64 -DebtId P64-D03-OriginalGameplayAcceptance -Status Verified -Evidence <text>",
-  "revision": 33,
-  "updated_at_utc": "2026-09-04T15:25:54.0449697+00:00"
+  "revision": 34,
+  "updated_at_utc": "2026-09-04T15:31:12.3208782+00:00"
 }
