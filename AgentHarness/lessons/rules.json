@@ -640,6 +640,14 @@
       "prevention": "Unreal Insights 等 GUI 工具只允许单一受控进程包装并等待确定退出，禁止直接调用后立刻启动第二份分析。昂贵运行完成后先独立校验报告 succeeded、关闭日志与哈希；展示代码只读取 schema 已知字段，尾部显示失败不得覆盖原生证据或触发整段重跑。",
       "source": "Docs/Phase64/P64.D_Invocation_Lifetime.md",
       "last_observed": "2026-09-05 P64 离线分析曾重叠启动且未导出 CSV；一小时运行成功后显示层读取错误字段返回 1"
+    },
+    {
+      "id": "phase-architecture-revision-passes-explicit-version",
+      "tags": ["workflow", "phase", "architecture"],
+      "summary": "只在架构正文写新版本号不会告诉 PhaseWorkflow 目标版本，省略 Version 会被递增门禁拒绝。",
+      "prevention": "执行 architecture-revise 前读取当前 state.architecture.version，并显式传入更大的 -Version；失败后先确认 revision 与文件哈希未变化，再重试，禁止手改状态 JSON。",
+      "source": "Docs/Phase64/P64.D_Packaged_World_Soak.md",
+      "last_observed": "2026-09-05 P64 v15 首次 architecture-revise 省略 Version，被 ASPW1106 拒绝且未改状态"
     }
   ]
 }

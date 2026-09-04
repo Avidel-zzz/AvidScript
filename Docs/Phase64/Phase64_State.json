@@ -8,9 +8,9 @@
   "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase64/P64.0_Production_Gameplay_Architecture.md",
-    "version": 14,
-    "sha256": "9e5064f4f263de088c7e3856c2526ec5480650d8984ab6167c2f4321a260f619",
-    "revision_reason": "冷路径缓存调用帧析构属性；稳定backend owner与不回绕代际；prepared target显式共享生命周期，卸载释放导出表且旧调用先判失效，保持Guest ABI与完整长稳目标。"
+    "version": 15,
+    "sha256": "0f071c4dffec9b010b880a0eed5d2a51c84e02cbd652115b12b13a6f32637f93",
+    "revision_reason": "新增包内 World 长稳与有界观测合同：Validation 独立 probe、固定里程碑样本、滚动证据链及 Development/Shipping AOT 归因，不改变 Runtime ABI 和人工 Gate"
   },
   "documents": {
     "plan": "Docs/Phase64/P64.0_Implementation_Plan.md",
@@ -200,6 +200,6 @@
     }
   ],
   "next_action": "debt-update -Phase 64 -DebtId P64-D03-OriginalGameplayAcceptance -Status Verified -Evidence <text>",
-  "revision": 39,
-  "updated_at_utc": "2026-09-04T18:14:17.7099580+00:00"
+  "revision": 40,
+  "updated_at_utc": "2026-09-04T19:33:49.1667112+00:00"
 }
