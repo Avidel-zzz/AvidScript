@@ -55,7 +55,8 @@ World 合同 46/46、原 UI 合同 118/118、原存档五进程 31/31 动作通�
 架构 v10 的[包内 UI 小节](P64.D_Packaged_UI.md)已在 Development/Shipping 归档 Game 中各完成两个进程
 5/5 写入、2/2 读取动作，回执分别 28/28、25/25，实际执行 Wasmtime 45 AOT。独立验证插件不进入主 Runtime
 依赖方向；Component 只读诊断专项及既有回归 10/10 通过。2026-09-04 用户反馈首轮真实界面、
-按钮及保存/Reset/Load 操作无问题；人工跨重启读档、Shipping 视觉仍待验收，不关闭 D03。
+按钮及保存/Reset/Load 操作无问题；2026-09-05 同一 UserRoot 的第二个 Development Game 进程人工读档
+也反馈无问题，正常退出且无 AvidScript/Fatal 错误。Shipping 视觉仍待验收，不关闭 D03。
 Shipping 通过隔离 UserDir 的标准 Engine.ini 选择样例地图；不修改工程/包默认配置或引擎 Shipping 宏。
 打包后 Generated Type 已恢复为 Development，canonical Editor no-clean 恢复仅执行 1 项元数据动作，
 10.51 秒通过，引擎/工程/插件三份 Editor 模块 BuildId 一致。
@@ -104,7 +105,7 @@ RepNotify 与客户端确认均完成，Runtime 保持加载且无脚本错误�
 
 ## 仍需完成
 
-P64.D 依架构 v15 继续补齐 UI 人工重启读档与 Shipping 视觉、网络/重载持续时长，以及 Android
+P64.D 依架构 v15 继续补齐 Shipping 视觉，并收口已记录的网络/重载持续时长；Android
 toolchain/UBT/APK。
 人工游玩和真实设备验收独立保留。P58 类型、iOS、发布工程及性能领先等总目标缺口不会随本阶段编号自动关闭。
 
