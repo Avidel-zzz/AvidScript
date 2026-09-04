@@ -21,7 +21,7 @@
       "summary": "概念名称不能当作真实文件路径。",
       "prevention": "先用 rg --files 建立索引，再对索引中的字面路径读取；通配符只放在 rg -g 参数，所有 -g 选项必须位于 -- 终止符之前。",
       "source": "legacy:1931",
-      "last_observed": "2026-09-02 P61.C4c (再次把 AvidScriptRuntimeSession*.h 作为直接路径、猜错 Session 源文件位置，并把 -g 放到 -- 之后；已恢复为索引、字面路径和正确选项顺序)"
+      "last_observed": "2026-09-05 P64.D (未先索引便猜测 Build/AvidScriptAndroidRuntime.ps1；检索虽从 Build 范围找到真实 Android/AvidScriptAndroidProcess.ps1，后续只使用已确认路径)"
     },
     {
       "id": "one-command-one-evidence-domain",
@@ -29,7 +29,7 @@
       "summary": "一个 shell 调用只承担一个逻辑动作或证据域。",
       "prevention": "调度前拒绝用分号、&& 或 || 串联独立动作；多文件读取使用并行工具或逐项调用。",
       "source": "legacy:1672",
-      "last_observed": "2026-09-01 P61.C2b2 (staged 隐私扫描脚本仍用分号串联多个 PowerShell 语句；扫描通过且无文件副作用，后续扫描改用独立脚本或单表达式入口)"
+      "last_observed": "2026-09-05 P64.D (恢复后把 git status 与独立 rg 检索用分号串在同一调用；无文件副作用，已恢复为一次调用一个证据域)"
     },
     {
       "id": "callback-kind-validation-uses-named-branches",
@@ -90,7 +90,7 @@
       "summary": "仓库 .NET 工具链由 global.json 固定为 8.0.416。",
       "prevention": "从插件 cwd 使用 %USERPROFILE%/.dotnet/dotnet.exe，先验证 --version；ProcessStartInfo 子进程也必须显式设置插件根 WorkingDirectory，否则项目根会绕过 global.json 选择其他已安装 SDK。临时 cache 放在仓库外。",
       "source": "legacy:2091",
-      "last_observed": "2026-09-04 P64.C 单入口 Generated Type 发布从项目根启动而选中 10.0.301，改为插件根后 Shipping BuildCookRun 与包内探针通过"
+      "last_observed": "2026-09-05 P64.D 打包前错误探测 PATH 中仅含 9.0.306 的系统 host；构建未启动，后续直接固定 %USERPROFILE%/.dotnet/dotnet.exe 8.0.416"
     },
     {
       "id": "no-clean-canonical-build",
@@ -648,6 +648,38 @@
       "prevention": "执行 architecture-revise 前读取当前 state.architecture.version，并显式传入更大的 -Version；失败后先确认 revision 与文件哈希未变化，再重试，禁止手改状态 JSON。",
       "source": "Docs/Phase64/P64.D_Packaged_World_Soak.md",
       "last_observed": "2026-09-05 P64 v15 首次 architecture-revise 省略 Version，被 ASPW1106 拒绝且未改状态"
+    },
+    {
+      "id": "specialized-subagent-role-does-not-use-full-history-fork",
+      "tags": ["workflow", "agents", "parallelism"],
+      "summary": "专用 worker/explorer 角色与完整历史 fork 不能同时请求，错误组合会让整组并行派发原子失败。",
+      "prevention": "使用专用 agent_type 时发送自包含任务描述并省略 fork_context；只有继承父 agent 类型时才使用完整历史 fork。并行派发后核对每个 agent_id，失败时不得假定部分任务已创建。",
+      "source": "Docs/Phase64/P64.D_Packaged_World_Soak.md",
+      "last_observed": "2026-09-05 P64 v15 首次并行派发把 worker/explorer 与 fork_context=true 组合，协调器拒绝且未创建 agent"
+    },
+    {
+      "id": "dynamic-ufunctions-owned-by-disregard-classes-must-be-rooted",
+      "tags": ["runtime", "delegates", "gc", "unreal"],
+      "summary": "永久或 Disregard-for-GC 的原生 UClass 不能在运行期函数表中引用普通可回收 UFunction。",
+      "prevention": "运行期复制并加入永久类 FuncMap 的动态 UFunction 必须先取得与类表一致的 root 生命周期，既有函数也要修复 root 状态；按稳定签名复用并设置唯一函数硬上限。回归必须在真实绑定后执行 verifying CollectGarbage，再验证函数可查找且委托仍可广播；禁止关闭 GC verifier。",
+      "source": "Source/AvidScriptRuntime/Private/Delegate/AvidScriptDelegateBridge.cpp",
+      "last_observed": "2026-09-05 P64 人工可视包在 GC verifier 中因 AvidScriptDelegateBridge 类引用非 root AvidDelegate 函数而崩溃"
+    },
+    {
+      "id": "tool-call-literals-come-from-readback",
+      "tags": ["workflow", "tools", "paths"],
+      "summary": "长字面参数在派发前若未从工具回读结果复制，容易混入无关编辑文本。",
+      "prevention": "长路径和身份值只从刚刚的结构化输出或文件回读中复制；派发前逐项复核参数，不在工具调用 JSON 内临时改写长字面量。失败的只读调用不得重解释为文件缺失证据。",
+      "source": "AgentHarness/policies/repository.md",
+      "last_observed": "2026-09-05 P64.D 读取两个候选 package.json 时第二个路径混入编辑文本；命令只读且无文件副作用"
+    },
+    {
+      "id": "cross-phase-snapshots-encode-observation-time",
+      "tags": ["verification", "lifecycle", "reports", "resources"],
+      "summary": "不同生命周期时刻的资源快照不能仅因同属最终报告就要求逐字段相等。",
+      "prevention": "报告字段须标明并按实际采样时刻验证。World 里程碑在新 World Ready、最终 Load 前采样，borrowed_entries 为 7；根资源在最终 Load 后为 8。公共不变量单独比较，时刻相关字段分别断言，并用真实包内流程覆盖。",
+      "source": "Build/AvidScriptUiSavePackagedReport.ps1",
+      "last_observed": "2026-09-05 P64.D 首次 3 轮包内 World 原生通过，但 validator 错把 Ready sample borrowed=7 与 Loaded root borrowed=8 要求相等"
     }
   ]
 }

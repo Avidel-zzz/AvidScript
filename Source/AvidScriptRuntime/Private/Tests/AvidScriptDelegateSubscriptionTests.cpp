@@ -6,6 +6,8 @@
 #include "Tests/AvidScriptDelegateSubscriptionTestTypes.h"
 
 #include "Misc/AutomationTest.h"
+#include "UObject/GarbageCollection.h"
+#include "UObject/StrongObjectPtr.h"
 #include "UObject/UnrealType.h"
 
 namespace
@@ -166,8 +168,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FAvidScriptDelegateBridgeLifecycleTest::RunTest(const FString& Parameters)
 {
-	UAvidScriptRuntimeDelegateTestObject* const Source =
-		NewObject<UAvidScriptRuntimeDelegateTestObject>();
+	TStrongObjectPtr<UAvidScriptRuntimeDelegateTestObject> Source(
+		NewObject<UAvidScriptRuntimeDelegateTestObject>());
 	FMulticastDelegateProperty* const Property =
 		FindFProperty<FMulticastDelegateProperty>(
 			Source->GetClass(),
@@ -204,7 +206,7 @@ bool FAvidScriptDelegateBridgeLifecycleTest::RunTest(const FString& Parameters)
 	TestTrue(
 		TEXT("Prepared subscription accepts a compatible source"),
 		Session.PrepareDelegateSubscriptionsForTesting(
-			Source,
+			Source.Get(),
 			MakeArrayView(&Event, 1),
 			Error));
 	Session.CommitDelegateSubscriptionsForTesting();
@@ -212,8 +214,33 @@ bool FAvidScriptDelegateBridgeLifecycleTest::RunTest(const FString& Parameters)
 		TEXT("Commit activates one subscription"),
 		Session.GetDelegateSubscriptionCountForTesting(),
 		1);
+	const FName BridgeFunctionName(
+		*FString::Printf(
+			TEXT("AvidDelegate_%s"),
+			*Event.StableId.Left(16)));
+	UFunction* const BridgeFunctionBeforeGc =
+		UAvidScriptDelegateBridge::StaticClass()->FindFunctionByName(
+			BridgeFunctionName,
+			EIncludeSuperFlag::ExcludeSuper);
+	TestNotNull(
+		TEXT("Prepared subscription installs its dynamic bridge function"),
+		BridgeFunctionBeforeGc);
+	if (BridgeFunctionBeforeGc == nullptr)
+	{
+		return false;
+	}
+	TestTrue(
+		TEXT("Permanent bridge class only references a rooted dynamic function"),
+		BridgeFunctionBeforeGc->IsRooted());
+	CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS, true);
+	TestEqual(
+		TEXT("Dynamic bridge function survives a verifying GC"),
+		UAvidScriptDelegateBridge::StaticClass()->FindFunctionByName(
+			BridgeFunctionName,
+			EIncludeSuperFlag::ExcludeSuper),
+		BridgeFunctionBeforeGc);
 
-	Source->Broadcast(Source, 17, 2.5f);
+	Source->Broadcast(Source.Get(), 17, 2.5f);
 	TestEqual(
 		TEXT("Real UE multicast broadcast invokes one prepared guest export"),
 		Session.GetLiveEventCallbackCount(),
@@ -230,7 +257,7 @@ bool FAvidScriptDelegateBridgeLifecycleTest::RunTest(const FString& Parameters)
 		TEXT("Catalog preparation does not mutate the active subscription"),
 		Session.GetDelegateSubscriptionCountForTesting(),
 		1);
-	Source->Broadcast(Source, 18, 2.75f);
+	Source->Broadcast(Source.Get(), 18, 2.75f);
 	TestEqual(
 		TEXT("The preserved active subscription still reaches the guest"),
 		Session.GetLiveEventCallbackCount(),
@@ -250,7 +277,7 @@ bool FAvidScriptDelegateBridgeLifecycleTest::RunTest(const FString& Parameters)
 			Error.IsEmpty() ? TEXT("<none>") : *Error),
 		bPreparedReplacement);
 	Session.CommitDelegateSubscriptionsForTesting();
-	Source->Broadcast(Source, 19, 3.0f);
+	Source->Broadcast(Source.Get(), 19, 3.0f);
 	TestEqual(
 		TEXT("Commit removes the previous source subscription"),
 		Session.GetLiveEventCallbackCount(),

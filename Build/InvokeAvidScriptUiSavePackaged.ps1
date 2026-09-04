@@ -4,12 +4,17 @@
 校验正式 BuildCookRun 结果，并在两个真实 Game 进程中验证 UI 写档与读回。
 .EXAMPLE
 pwsh -NoProfile -File Build/InvokeAvidScriptUiSavePackaged.ps1 -BuildResultPath <build-result.json>
+.EXAMPLE
+pwsh -NoProfile -File Build/InvokeAvidScriptUiSavePackaged.ps1 -Mode VerifyWorld -BuildResultPath <build-result.json> -WorldCycles 10
 #>
 [CmdletBinding()]
 param(
+    [ValidateSet('Verify', 'VerifyWorld')][string]$Mode = 'Verify',
     [string]$BuildResultPath = '',
     [string]$UserRoot = '',
-    [ValidateRange(100, 600)][int]$TimeoutSeconds = 120
+    [ValidateRange(100, 600)][int]$TimeoutSeconds = 120,
+    [ValidateRange(2, 1000)][int]$WorldCycles = 10,
+    [ValidateRange(0, 21600)][int]$SoakSeconds = 0
 )
 
 Set-StrictMode -Version Latest
@@ -84,6 +89,54 @@ function New-AvidScriptPackagedUiStartupConfig {
     try { $File.Write($Bytes, 0, $Bytes.Length) } finally { $File.Dispose() }
     return [pscustomobject]@{ mode = 'isolated_generated_engine_ini'; config_writes_disabled = $true; path = $Path
         sha256 = (Get-AvidScriptBindingSha256Hex $Path); map = '/AvidScript/Demos/UiSave/L_UiSave' }
+}
+
+function Get-AvidScriptPackagedUiWorldBudget {
+    param([ValidateRange(2, 1000)][int]$Cycles, [ValidateRange(0, 21600)][int]$Seconds)
+    return $Seconds + [Math]::Max(120, $Cycles * 20)
+}
+
+function Get-AvidScriptPackagedUiWorldProcessBudget {
+    param([ValidateRange(100, 600)][int]$RequestedTimeout,
+        [ValidateRange(2, 1000)][int]$Cycles, [ValidateRange(0, 21600)][int]$Seconds)
+    return [Math]::Max($RequestedTimeout, (Get-AvidScriptPackagedUiWorldBudget $Cycles $Seconds) + 30)
+}
+
+function New-AvidScriptPackagedUiWorldArguments {
+    param([object]$Build, [object]$Context, [string]$UserRoot, [string]$LogPath,
+        [string]$ReportPath, [string]$RunId, [ValidateRange(2, 1000)][int]$WorldCycles,
+        [ValidateRange(0, 21600)][int]$SoakSeconds)
+    return @($Build.target_name, '/AvidScript/Demos/UiSave/L_UiSave', '-game', '-unattended', '-nullrhi',
+        '-nosplash', '-nosound', '-stdout', '-FullStdOutLogOutput', '-nowrite', '-EnablePlugins=AvidScriptValidation',
+        '-AvidScriptScenario=ui_save_demo', "-UserDir=$UserRoot", "-abslog=$LogPath",
+        '-AvidScriptUiSavePackagedProbe=world', "-AvidScriptUiSaveReport=$ReportPath",
+        "-AvidScriptUiSaveExpectedPackage=$($Context.package_id)", "-AvidScriptUiSaveRunId=$RunId",
+        "-AvidScriptUiSaveWorldCycles=$WorldCycles", "-AvidScriptUiSaveSoakSeconds=$SoakSeconds")
+}
+
+function Invoke-AvidScriptPackagedUiReceiptValidation {
+    param([object]$Context, [string]$EvidenceRoot, [string]$Label, [int]$TimeoutSeconds)
+    if ($Label -cnotmatch '\A(?:before|after)\z') { throw 'Receipt validation label is invalid.' }
+    $Build = $Context.build
+    $LogPath = Join-Path $EvidenceRoot "receipt-$Label.log"
+    $ReportPath = Join-Path $EvidenceRoot "receipt-$Label.json"
+    foreach ($Path in @($LogPath, $ReportPath)) {
+        Assert-AvidScriptUiSaveSafePath $Path
+        if (Test-Path -LiteralPath $Path) { throw "Receipt evidence must be new: $Path" }
+    }
+    $Process = Invoke-AvidScriptAndroidProcess -Executable (Join-Path $PSHOME 'pwsh.exe') `
+        -Arguments @('-NoProfile', '-NonInteractive', '-File', (Join-Path $PackagedUiBuildRoot 'TestAvidScriptPackageReceipt.ps1'),
+            '-ReceiptPath', $Build.receipt_path, '-ProjectRoot', $PackagedUiProjectRoot, '-PluginRoot', $PackagedUiPluginRoot,
+            '-Configuration', $Build.configuration) -WorkingDirectory $PackagedUiPluginRoot -TimeoutSeconds $TimeoutSeconds
+    [IO.File]::WriteAllText($LogPath, $Process.stdout + "`n" + $Process.stderr)
+    if ($Process.exit_code -ne 0 -or $Process.stderr.Trim()) { throw "Current package receipt validation failed; see $LogPath" }
+    [IO.File]::WriteAllText($ReportPath, $Process.stdout)
+    $Report = Read-AvidScriptPackagedUiJson $ReportPath
+    Assert-AvidScriptPackagedUiEqual $Report.result 'avidscript_package_receipt_valid' "$Label receipt result"
+    Assert-AvidScriptPackagedUiEqual $Report.configuration $Build.configuration "$Label receipt configuration"
+    Assert-AvidScriptPackagedUiEqual $Report.target_name $Build.target_name "$Label receipt target"
+    return [pscustomobject]@{ report_path = $ReportPath; report_sha256 = (Get-AvidScriptBindingSha256Hex $ReportPath)
+        log_path = $LogPath; process_id = $Process.process_id }
 }
 
 function Invoke-AvidScriptPackagedUiVerification {
@@ -162,9 +215,89 @@ function Invoke-AvidScriptPackagedUiVerification {
     return [pscustomobject]$Summary
 }
 
+function Invoke-AvidScriptPackagedUiWorldVerification {
+    param([string]$BuildResultPath, [string]$UserRoot, [int]$TimeoutSeconds,
+        [ValidateRange(2, 1000)][int]$WorldCycles, [ValidateRange(0, 21600)][int]$SoakSeconds)
+    $Context = Get-AvidScriptPackagedUiContext $BuildResultPath
+    $Build = $Context.build
+    $RunId = [Guid]::NewGuid().ToString('N')
+    if (-not $UserRoot) { $UserRoot = Join-Path ([IO.Path]::GetTempPath()) "AvidScriptPackagedUiWorld/$RunId" }
+    Assert-AvidScriptUiSaveUserRoot $UserRoot $Context
+    $UserRoot = [IO.Path]::GetFullPath($UserRoot)
+    New-AvidScriptUiSaveDirectory $UserRoot
+    $EvidenceRoot = Join-Path $UserRoot 'Saved/AvidScript/PackagedUiWorld'
+    New-AvidScriptUiSaveDirectory $EvidenceRoot
+    $SummaryPath = Join-Path $EvidenceRoot 'verify-world.json'
+    $ProbeReportPath = Join-Path $EvidenceRoot "world-$RunId.json"
+    $LogPath = Join-Path $EvidenceRoot "world-$RunId.log"
+    $ProcessLogPath = Join-Path $EvidenceRoot "world-$RunId.process.log"
+    $NativeBudget = Get-AvidScriptPackagedUiWorldBudget $WorldCycles $SoakSeconds
+    $ProcessBudget = Get-AvidScriptPackagedUiWorldProcessBudget $TimeoutSeconds $WorldCycles $SoakSeconds
+    $Summary = [ordered]@{ schema_version = 1; result = 'avidscript_packaged_ui_world_failed'; succeeded = $false
+        mode = 'verifyworld'; run_id = $RunId; configuration = $Build.configuration; package_id = $Context.package_id
+        instrumented_package = $true; process_mode = 'packaged_game'; headless = $true
+        physical_click_verified = $false; visual_verified = $false; world_lifecycle_verified = $false; long_run_verified = $false
+        world_cycles = $WorldCycles; soak_seconds = $SoakSeconds; native_timeout_seconds = $NativeBudget
+        timeout_seconds = $ProcessBudget; build_result_path = $Context.build_path
+        build_result_sha256 = (Get-AvidScriptBindingSha256Hex $Context.build_path)
+        executable = $Context.executable; executable_sha256 = (Get-AvidScriptBindingSha256Hex $Context.executable)
+        receipt_sha256 = (Get-AvidScriptBindingSha256Hex $Build.receipt_path); user_root = $UserRoot
+        report_path = $SummaryPath; probe_report_path = $ProbeReportPath; log_path = $LogPath
+        receipt_validations = @(); probe = $null; error = '' }
+    try {
+        $SavePath = Join-Path $UserRoot 'Saved/SaveGames/AvidScript_UiSaveDemo_v1.sav'
+        Assert-AvidScriptUiSaveSaveDirectory $SavePath
+        if (Test-Path -LiteralPath $SavePath) { throw 'Packaged World verification must start without a save.' }
+        foreach ($Path in @($SummaryPath, $ProbeReportPath, $LogPath, $ProcessLogPath)) {
+            Assert-AvidScriptUiSaveSafePath $Path
+            if (Test-Path -LiteralPath $Path) { throw 'Packaged World report/log must be new.' }
+        }
+        $Summary.startup_config = New-AvidScriptPackagedUiStartupConfig $UserRoot
+        $Summary.receipt_validations += Invoke-AvidScriptPackagedUiReceiptValidation $Context $EvidenceRoot 'before' $TimeoutSeconds
+        Assert-AvidScriptPackagedUiEqual (Get-AvidScriptBindingSha256Hex $Summary.startup_config.path) $Summary.startup_config.sha256 'unchanged startup config before world probe'
+        $Arguments = @(New-AvidScriptPackagedUiWorldArguments $Build $Context $UserRoot $LogPath $ProbeReportPath $RunId `
+            $WorldCycles $SoakSeconds)
+        $LaunchedUtc = [DateTimeOffset]::UtcNow
+        $Process = Invoke-AvidScriptAndroidProcess -Executable $Context.executable -Arguments $Arguments `
+            -WorkingDirectory $Context.package_root -TimeoutSeconds $ProcessBudget
+        $ExitedUtc = [DateTimeOffset]::UtcNow
+        [IO.File]::WriteAllText($ProcessLogPath, $Process.stdout + "`n" + $Process.stderr)
+        if ($Process.exit_code -ne 0) { throw "Packaged world failed with exit $($Process.exit_code); see $LogPath" }
+        $Report = Resolve-AvidScriptPackagedUiWorldReport -ReportPath $ProbeReportPath -Configuration $Build.configuration `
+            -RunId $RunId -UserRoot $UserRoot -PackageId $Context.package_id -WorldCycles $WorldCycles `
+            -SoakSeconds $SoakSeconds -NativeBudget $NativeBudget -ProcessId $Process.process_id `
+            -LaunchedUtc $LaunchedUtc -ExitedUtc $ExitedUtc
+        $ContextAfter = Get-AvidScriptPackagedUiContext $BuildResultPath
+        Assert-AvidScriptPackagedUiEqual $ContextAfter.package_id $Context.package_id 'unchanged package identity after world probe'
+        if (-not (Test-AvidScriptUiSaveSamePath $ContextAfter.executable $Context.executable)) { throw 'Packaged executable path changed during World verification.' }
+        Assert-AvidScriptPackagedUiEqual (Get-AvidScriptBindingSha256Hex $Context.build_path) $Summary.build_result_sha256 'unchanged build result'
+        Assert-AvidScriptPackagedUiEqual (Get-AvidScriptBindingSha256Hex $Context.executable) $Summary.executable_sha256 'unchanged game executable'
+        Assert-AvidScriptPackagedUiEqual (Get-AvidScriptBindingSha256Hex $Build.receipt_path) $Summary.receipt_sha256 'unchanged receipt'
+        Assert-AvidScriptPackagedUiEqual (Get-AvidScriptBindingSha256Hex $Summary.startup_config.path) $Summary.startup_config.sha256 'unchanged startup config after world probe'
+        $Summary.receipt_validations += Invoke-AvidScriptPackagedUiReceiptValidation $ContextAfter $EvidenceRoot 'after' $TimeoutSeconds
+        $Summary.probe = [pscustomobject]@{ mode = 'world'; run_id = $RunId; process_id = $Process.process_id
+            exit_code = $Process.exit_code; report_path = $ProbeReportPath
+            report_sha256 = (Get-AvidScriptBindingSha256Hex $ProbeReportPath); completed_cycles = $Report.world_lifecycle.completed_cycles
+            sample_count = $Report.world_lifecycle.observer.sample_count; evidence_chain_sha256 = $Report.world_lifecycle.evidence_chain_sha256
+            backend = $Report.backend }
+        $Summary.save_file_sha256 = $Report.save_file_sha256
+        $Summary.world_lifecycle_verified = $true
+        $Summary.long_run_verified = $Report.long_run_verified
+        $Summary.result = 'avidscript_packaged_ui_world_passed'
+        $Summary.succeeded = $true
+    } catch { $Summary.error = $_.Exception.Message }
+    Write-AvidScriptUiSaveNewJson $SummaryPath $Summary
+    return [pscustomobject]$Summary
+}
+
 if ($MyInvocation.InvocationName -eq '.') { return }
 try {
-    $Summary = Invoke-AvidScriptPackagedUiVerification -BuildResultPath $BuildResultPath -UserRoot $UserRoot -TimeoutSeconds $TimeoutSeconds
+    $Summary = if ($Mode -eq 'VerifyWorld') {
+        Invoke-AvidScriptPackagedUiWorldVerification -BuildResultPath $BuildResultPath -UserRoot $UserRoot `
+            -TimeoutSeconds $TimeoutSeconds -WorldCycles $WorldCycles -SoakSeconds $SoakSeconds
+    } else {
+        Invoke-AvidScriptPackagedUiVerification -BuildResultPath $BuildResultPath -UserRoot $UserRoot -TimeoutSeconds $TimeoutSeconds
+    }
     [Console]::Out.WriteLine(($Summary | ConvertTo-Json -Depth 32 -Compress))
     if (-not $Summary.succeeded) { exit 1 }
     exit 0

@@ -1,4 +1,5 @@
 #include "AvidScriptUiSavePackagedProbe.h"
+#include "AvidScriptUiSavePackagedWorldProbe.h"
 
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
@@ -15,7 +16,14 @@ public:
 		{
 			return;
 		}
-		Probe = MakeUnique<AvidScript::Validation::FUiSavePackagedProbe>();
+		if (Mode == TEXT("world"))
+		{
+			Probe = MakeUnique<AvidScript::Validation::FUiSavePackagedWorldProbe>();
+		}
+		else
+		{
+			Probe = MakeUnique<AvidScript::Validation::FUiSavePackagedProbe>();
+		}
 		Probe->Start();
 	}
 
@@ -25,7 +33,7 @@ public:
 	}
 
 private:
-	TUniquePtr<AvidScript::Validation::FUiSavePackagedProbe> Probe;
+	TUniquePtr<AvidScript::Validation::IUiSavePackagedProbe> Probe;
 };
 
 IMPLEMENT_MODULE(FAvidScriptValidationModule, AvidScriptValidation)

@@ -2,15 +2,16 @@
 
 #include "AvidScriptValidationObservation.h"
 #include "AvidScriptValidationPaths.h"
+#include "AvidScriptValidationProbe.h"
 #include "Containers/Ticker.h"
 
 namespace AvidScript::Validation
 {
-class FUiSavePackagedProbe
+class FUiSavePackagedProbe final : public IUiSavePackagedProbe
 {
 public:
-	~FUiSavePackagedProbe();
-	void Start();
+	~FUiSavePackagedProbe() override;
+	void Start() override;
 
 private:
 	struct FStep

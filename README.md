@@ -47,7 +47,8 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 [UI/存档](Samples/CSharp/UiSaveDemo/README.md)（[源码](Samples/CSharp/UiSaveDemo/UiSaveDemoScript.cs)）·
 [项目 API](Samples/CSharp/TypedProjectApi/README.md) · [联机](Samples/CSharp/NetworkTopology/README.md)。
 
-**近期交付：** [Development/Shipping 包内 UI/存档](Docs/Phase64/P64.D_Packaged_UI.md)、两次一小时切图、
+**近期交付：** [Development/Shipping 包内 UI/存档](Docs/Phase64/P64.D_Packaged_UI.md)、
+[包内 World 生命周期门槛](Docs/Phase64/P64.D_Packaged_World_Soak.md)、两次 Editor 一小时切图、
 [分配栈诊断](Docs/Phase64/P64.D_Native_Allocation_Tracing.md)与[调用生命周期修复](Docs/Phase64/P64.D_Invocation_Lifetime.md)。
 已知字符串参数帧逐轮保留已归零；整个 Editor 进程的剩余增长仍在归因，不宣称无泄漏。
 完整记录见 [P64 交付](Docs/Phase64/P64_Closeout.md)，类型范围见 [P58 验收](Docs/Phase58/P58.4_Centralized_Gate_Report.md)。
@@ -161,6 +162,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 | [存取与正文重载](Docs/Phase64/P64.D_Save_Reload_Ownership.md) | **165/165** 动作、runner **118/118**、生命周期 **18/18**；GC 后资源有界，纯 UI 重载 **84/84** 回归通过 |
 | [存档与异常流程](Docs/Phase64/P64.D_UI_Save_Edges.md) | 五个独立进程 **31/31** 动作；覆盖保存、重启读取、缺档、GC、读取失败、写锁与组件退出 |
 | [Development/Shipping 包内 UI](Docs/Phase64/P64.D_Packaged_UI.md) | Wasmtime 45 AOT，各两个实际 Game 进程 **5/5 + 2/2** 动作，回执 **28/28、25/25**；包内 runner **29/29**，Component 专项 **10/10** |
+| [包内 World 生命周期](Docs/Phase64/P64.D_Packaged_World_Soak.md) | Development AOT **3/50/100** 轮均通过；100 轮 **501/501** 动作，UObject、backend live 与 VM cache 全部里程碑稳定；动态 Delegate `UFunction` 的 GC Fatal 已修复并有 verifying GC 回归 |
 | [World 连续运行](Docs/Phase64/P64.D_World_Soak.md) | 修复前后两次各 **约 3601 秒、877 次切图、4386/4386 动作**；旧对象逐轮回收，Session/backend live/UObject 有界；剩余进程增长待归因 |
 | [内存归因与分配栈](Docs/Phase64/P64.D_Native_Allocation_Tracing.md) | VM/Trace/FName/LLM 快照、GC 书签与 Insights 四组查询；修复后 `SetUtf8Value` 两窗口均 **0 项/0 字节**，不等于整个进程无泄漏 |
 | [调用生命周期修复](Docs/Phase64/P64.D_Invocation_Lifetime.md) | 原生 UFunction 非平凡帧统一析构；Wasmtime 重载历史改为调用者按需持有；Binding **1/1**、Wasmtime **14/14**，修复后一小时 **877/877** 轮通过 |

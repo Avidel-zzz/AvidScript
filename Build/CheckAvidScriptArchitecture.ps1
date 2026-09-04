@@ -4846,7 +4846,8 @@ foreach ($RequiredZeroFrameInvocationContract in @(
     'bHasFrameStorage = Program->FrameSize > 0',
     'Frame = bHasFrameStorage',
     'Program->Function->InitializeStruct(Frame)',
-    'Program->Function->DestroyStruct(Frame)'
+    'for (FProperty* Property : Program->FrameDestructorProperties)',
+    'Property->DestroyValue_InContainer(Frame)'
 )) {
     if (-not $BindingPreparedInvocationSource.Contains($RequiredZeroFrameInvocationContract)) {
         Add-Violation "prepared zero-frame ProcessEvent safety is missing $RequiredZeroFrameInvocationContract"

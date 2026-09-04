@@ -2,9 +2,13 @@
 
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
+#include "UObject/UObjectHash.h"
 
 namespace
 {
+constexpr int32 AvidScriptMaximumUniqueDelegateBridgeFunctions = 4096;
+constexpr const TCHAR* AvidScriptDelegateBridgeFunctionPrefix = TEXT("AvidDelegate_");
+
 bool IsLowerSha256(const FString& Value)
 {
 	if (Value.Len() != 64)
@@ -56,6 +60,27 @@ bool HaveCompatibleDelegateParameters(
 	}
 	return !RightParameter
 		|| !RightParameter->HasAnyPropertyFlags(CPF_Parm);
+}
+
+int32 CountUniqueDelegateBridgeFunctions(const UClass& BridgeClass)
+{
+	TArray<UObject*> ClassObjects;
+	GetObjectsWithOuter(
+		&BridgeClass,
+		ClassObjects,
+		EGetObjectsFlags::None);
+	int32 Count = 0;
+	for (const UObject* ClassObject : ClassObjects)
+	{
+		if (ClassObject != nullptr
+			&& ClassObject->IsA<UFunction>()
+			&& ClassObject->GetName().StartsWith(
+				AvidScriptDelegateBridgeFunctionPrefix))
+		{
+			++Count;
+		}
+	}
+	return Count;
 }
 } // namespace
 
@@ -113,7 +138,8 @@ bool PrepareAvidScriptDelegateBridgeFunction(
 	UClass* const BridgeClass = UAvidScriptDelegateBridge::StaticClass();
 	const FName FunctionName(
 		*FString::Printf(
-			TEXT("AvidDelegate_%s"),
+			TEXT("%s%s"),
+			AvidScriptDelegateBridgeFunctionPrefix,
 			*StableId.Left(16)));
 	if (UFunction* Existing = BridgeClass->FindFunctionByName(
 		FunctionName,
@@ -127,8 +153,18 @@ bool PrepareAvidScriptDelegateBridgeFunction(
 			OutError = TEXT("delegate_bridge_signature_collision");
 			return false;
 		}
+		if (!Existing->IsRooted())
+		{
+			Existing->AddToRoot();
+		}
 		OutFunction = Existing;
 		return true;
+	}
+	if (CountUniqueDelegateBridgeFunctions(*BridgeClass)
+		>= AvidScriptMaximumUniqueDelegateBridgeFunctions)
+	{
+		OutError = TEXT("delegate_bridge_function_limit_reached");
+		return false;
 	}
 
 	UObject* const Duplicate = StaticDuplicateObject(
@@ -144,6 +180,9 @@ bool PrepareAvidScriptDelegateBridgeFunction(
 		return false;
 	}
 	Function->FunctionFlags &= ~(FUNC_Delegate | FUNC_MulticastDelegate);
+	// Native classes can live in the Disregard-for-GC set. Any runtime function
+	// referenced by their function map must therefore be in the root set first.
+	Function->AddToRoot();
 	BridgeClass->AddFunctionToFunctionMap(Function, FunctionName);
 	OutFunction = Function;
 	return true;
