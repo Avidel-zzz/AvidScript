@@ -1,0 +1,20 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "0.1.0",
+  "FriendlyName": "AvidScript Validation",
+  "Description": "Explicitly enabled instrumentation for packaged AvidScript acceptance.",
+  "Category": "Testing",
+  "EnabledByDefault": false,
+  "CanContainContent": false,
+  "SupportedTargetPlatforms": [ "Win64" ],
+  "Modules": [
+    {
+      "Name": "AvidScriptValidation",
+      "Type": "Runtime",
+      "LoadingPhase": "Default",
+      "PlatformAllowList": [ "Win64" ]
+    }
+  ],
+  "Plugins": [ { "Name": "AvidScript", "Enabled": true } ]
+}

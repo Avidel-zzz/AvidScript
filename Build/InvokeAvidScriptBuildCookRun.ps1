@@ -16,6 +16,8 @@ param(
     [int]$PackagedOracleTimeoutSeconds = 120,
     [ValidateSet('Legacy', 'None')]
     [string]$PackagedOracleMode = 'Legacy',
+    [string[]]$CookMaps = @(),
+    [string[]]$EnablePlugins = @(),
     [string]$EngineRoot = 'C:\UnrealEngine'
 )
 
@@ -37,6 +39,30 @@ function Throw-AvidScriptBuildCookRunError {
     $Exception = [System.InvalidOperationException]::new($Message)
     $Exception.Data['category'] = $Category
     throw $Exception
+}
+
+function Assert-AvidScriptBuildCookRunCookSelection {
+    param([string[]]$CookMaps = @(), [string[]]$EnablePlugins = @())
+
+    foreach ($Selection in @(
+            @{ Name = 'CookMaps'; Values = $CookMaps; Pattern = '\A/[A-Za-z0-9_]+(?:/[A-Za-z0-9_]+)+\z'; Category = 'cook_maps_invalid' },
+            @{ Name = 'EnablePlugins'; Values = $EnablePlugins; Pattern = '\A[A-Za-z][A-Za-z0-9_]*\z'; Category = 'enable_plugins_invalid' })) {
+        if ($null -eq $Selection.Values) {
+            Throw-AvidScriptBuildCookRunError -Category $Selection.Category `
+                -Message "$($Selection.Name) must be an array, not null. Omit it or use an empty array for defaults."
+        }
+        $Seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($Value in $Selection.Values) {
+            if ([string]::IsNullOrEmpty($Value) -or $Value -cnotmatch $Selection.Pattern) {
+                Throw-AvidScriptBuildCookRunError -Category $Selection.Category `
+                    -Message "$($Selection.Name) contains an invalid value: '$Value'."
+            }
+            if (-not $Seen.Add($Value)) {
+                Throw-AvidScriptBuildCookRunError -Category $Selection.Category `
+                    -Message "$($Selection.Name) contains a case-insensitive duplicate: '$Value'."
+            }
+        }
+    }
 }
 
 function Test-AvidScriptBuildCookRunPathUnderRoot {
@@ -547,10 +573,17 @@ function New-AvidScriptBuildCookRunUatArguments {
         [Parameter(Mandatory = $true)][string]$TargetName,
         [ValidateSet('Development', 'Shipping')]
         [Parameter(Mandatory = $true)][string]$Configuration,
-        [Parameter(Mandatory = $true)][string]$ArchiveRoot
+        [Parameter(Mandatory = $true)][string]$ArchiveRoot,
+        [string[]]$CookMaps = @(),
+        [string[]]$EnablePlugins = @()
     )
 
-    return @(
+    Assert-AvidScriptBuildCookRunCookSelection -CookMaps $CookMaps -EnablePlugins $EnablePlugins
+    $CookerOptions = '-SkipZenStore -AvidScriptSuppressGeneratedTypeExecution'
+    if ($EnablePlugins.Count -gt 0) {
+        $CookerOptions += " -EnablePlugins=$($EnablePlugins -join ',')"
+    }
+    $Arguments = @(
         'BuildCookRun',
         '-nop4',
         '-unattended',
@@ -566,8 +599,13 @@ function New-AvidScriptBuildCookRunUatArguments {
         '-pak',
         '-archive',
         "-archivedirectory=$ArchiveRoot",
-        '-AdditionalCookerOptions=-SkipZenStore -AvidScriptSuppressGeneratedTypeExecution'
+        "-AdditionalCookerOptions=$CookerOptions"
     )
+    if ($CookMaps.Count -gt 0) { $Arguments += "-map=$($CookMaps -join '+')" }
+    if ($EnablePlugins.Count -gt 0) {
+        $Arguments += "-ubtargs=-EnablePlugin=$($EnablePlugins -join '+') -WaitMutex -NoHotReloadFromIDE"
+    }
+    return $Arguments
 }
 
 function Invoke-AvidScriptBuildCookRunUatStep {
@@ -576,9 +614,12 @@ function Invoke-AvidScriptBuildCookRunUatStep {
         [Parameter(Mandatory = $true)][object]$EngineContext,
         [ValidateSet('Development', 'Shipping')]
         [Parameter(Mandatory = $true)][string]$Configuration,
-        [Parameter(Mandatory = $true)][string]$ArchiveRoot
+        [Parameter(Mandatory = $true)][string]$ArchiveRoot,
+        [string[]]$CookMaps = @(),
+        [string[]]$EnablePlugins = @()
     )
 
+    Assert-AvidScriptBuildCookRunCookSelection -CookMaps $CookMaps -EnablePlugins $EnablePlugins
     $LogRoot = Join-Path `
         $ProjectContext.ProjectRoot `
         'Saved/AvidScript/BuildCookRunLogs'
@@ -604,7 +645,9 @@ function Invoke-AvidScriptBuildCookRunUatStep {
         -ProjectFile $ProjectContext.ProjectFile `
         -TargetName $ProjectContext.TargetName `
         -Configuration $Configuration `
-        -ArchiveRoot $ArchiveRoot
+        -ArchiveRoot $ArchiveRoot `
+        -CookMaps $CookMaps `
+        -EnablePlugins $EnablePlugins
     $ProcessArguments = @(
         '/d',
         '/s',
@@ -626,6 +669,8 @@ function Invoke-AvidScriptBuildCookRunUatStep {
         ExitCode = $ProcessResult.ExitCode
         LogPath = $UatLog
         Arguments = $UatArguments
+        CookMaps = @($CookMaps)
+        EnablePlugins = @($EnablePlugins)
     }
 }
 
@@ -933,10 +978,13 @@ function Invoke-AvidScriptBuildCookRun {
         [Parameter(Mandatory = $true)][int]$PackagedOracleTimeoutSeconds,
         [ValidateSet('Legacy', 'None')]
         [Parameter(Mandatory = $true)][string]$PackagedOracleMode,
+        [string[]]$CookMaps = @(),
+        [string[]]$EnablePlugins = @(),
         [Parameter(Mandatory = $true)][string]$EngineRoot
     )
 
     $script:AvidScriptBuildCookRunStep = 'validation'
+    Assert-AvidScriptBuildCookRunCookSelection -CookMaps $CookMaps -EnablePlugins $EnablePlugins
     $ProjectContext = Get-AvidScriptBuildCookRunProjectContext `
         -ProjectRoot $AvidScriptBuildCookRunProjectRoot
     $EngineContext = Get-AvidScriptBuildCookRunEngineContext `
@@ -965,7 +1013,9 @@ function Invoke-AvidScriptBuildCookRun {
         -ProjectContext $ProjectContext `
         -EngineContext $EngineContext `
         -Configuration $Configuration `
-        -ArchiveRoot $ResolvedArchiveRoot
+        -ArchiveRoot $ResolvedArchiveRoot `
+        -CookMaps $CookMaps `
+        -EnablePlugins $EnablePlugins
 
     $script:AvidScriptBuildCookRunStep = 'receipt_selection'
     $SelectedReceipt = Get-AvidScriptBuildCookRunGameReceipt `
@@ -1004,6 +1054,8 @@ function Invoke-AvidScriptBuildCookRun {
         receipt_path = $SelectedReceipt.Path
         receipt_freshness = $SelectedReceipt.Freshness
         packaged_oracle_mode = $PackagedOracleMode
+        cook_maps = @($CookMaps)
+        enable_plugins = @($EnablePlugins)
         release = $ReleaseResult
         receipt_validation = $ReceiptResult
         packaged_oracle = $OracleResult
@@ -1029,6 +1081,8 @@ try {
         -ArchiveRoot $ArchiveRoot `
         -PackagedOracleTimeoutSeconds $PackagedOracleTimeoutSeconds `
         -PackagedOracleMode $PackagedOracleMode `
+        -CookMaps $CookMaps `
+        -EnablePlugins $EnablePlugins `
         -EngineRoot $EngineRoot
     [Console]::Out.WriteLine(($Summary | ConvertTo-Json -Depth 32 -Compress))
     exit 0
@@ -1048,6 +1102,8 @@ catch {
         step = $script:AvidScriptBuildCookRunStep
         configuration = $Configuration
         packaged_oracle_mode = $PackagedOracleMode
+        cook_maps = @($CookMaps)
+        enable_plugins = @($EnablePlugins)
         archive_root = $ArchiveRoot
         uat_log = $script:AvidScriptBuildCookRunUatLog
         message = $_.Exception.Message

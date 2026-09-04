@@ -71,6 +71,7 @@ function Invoke-AvidScriptAndroidProcess {
         }
         return [pscustomobject]@{
             exit_code = $Process.ExitCode
+            process_id = $Process.Id
             stdout = $StdoutTask.GetAwaiter().GetResult()
             stderr = $StderrTask.GetAwaiter().GetResult()
             elapsed_ms = $Clock.Elapsed.TotalMilliseconds

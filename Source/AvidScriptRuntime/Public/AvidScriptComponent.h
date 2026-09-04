@@ -59,6 +59,9 @@ public:
 	UAvidScriptComponent();
 
 	const FAvidScriptComponentRuntimeStats& GetRuntimeStats() const { return RuntimeStats; }
+	bool CaptureRuntimeDiagnostics(
+		FAvidScriptRuntimeSessionSnapshot& OutSession,
+		FAvidScriptVmBackendInfo& OutBackend) const;
 	void SetScriptModuleId(FName InModuleId);
 	FName GetScriptModuleId() const;
 	void SetScriptManifestPath(const FString& InScriptManifestPath);

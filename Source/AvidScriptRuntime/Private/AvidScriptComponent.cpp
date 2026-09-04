@@ -96,6 +96,27 @@ FAvidScriptRuntimeSession* UAvidScriptComponent::GetRuntimeSessionForEditorDebug
 }
 #endif
 
+bool UAvidScriptComponent::CaptureRuntimeDiagnostics(
+	FAvidScriptRuntimeSessionSnapshot& OutSession,
+	FAvidScriptVmBackendInfo& OutBackend) const
+{
+	OutSession = FAvidScriptRuntimeSessionSnapshot();
+	OutBackend = FAvidScriptVmBackendInfo();
+	if (!IsInGameThread() || !RuntimeSession || RuntimeSession->IsOperationActive() || !RuntimeSession->IsLiveLoaded())
+	{
+		return false;
+	}
+
+	FAvidScriptWasmSmokeResult Live;
+	if (!RuntimeSession->CaptureLiveSnapshot(Live))
+	{
+		return false;
+	}
+	OutSession = RuntimeSession->GetSnapshot();
+	OutBackend = MoveTemp(Live.BackendInfo);
+	return true;
+}
+
 void UAvidScriptComponent::SetScriptManifestPath(const FString& InScriptManifestPath)
 {
 	ScriptManifestFile.FilePath = InScriptManifestPath;

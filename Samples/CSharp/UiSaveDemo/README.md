@@ -124,5 +124,23 @@ Collect、Save；最终新 World 再次 Load。省略 SoakSeconds 时只执行�
 一小时实跑完成 **877 次切图、4386/4386 动作**，旧 World/对象和 Session 清理通过，最终恢复 877 分。
 进程内存有增长，归因未完成，不表示无泄漏。见 [World 与持续运行报告](../../../Docs/Phase64/P64.D_World_Soak.md)。
 
-包内 UI、网络/热重载持续时长、真实输入和视觉验收仍保留。
+### 打包运行
+
+Development/Shipping 归档 Game 均使用 Wasmtime 45 AOT，各完成两个进程的 **5/5 写入 + 2/2 读取**动作，
+正式包回执分别为 **28/28、25/25**。独立 `AvidScriptValidation` 插件只负责包内观察和合成按钮事件，
+主 Runtime 不依赖 UMG 或验证插件；未传探针参数时不会自动操作、写报告或退出。
+
+按[包内操作说明](../../../Docs/Phase64/P64.D_Packaged_UI.md)挂接验证插件并执行正式 BuildCookRun，
+显式选择本样例地图及插件，再将本次构建 JSON 交给验收入口：
+
+```powershell
+pwsh -NoProfile -File Build/InvokeAvidScriptUiSavePackaged.ps1 -BuildResultPath <本次构建结果.json>
+```
+
+runner 在全新 UserDir 中生成 `Saved/Config/Windows/Engine.ini` 选择样例地图，使用 `-nowrite`
+禁止引擎配置写回；SaveGame 仍正常落盘。Shipping 默认忽略命令行地图覆盖，因此不能只传地图参数。
+不会改写原工程或归档包的默认启动地图；正式游戏应在自己的项目设置中配置启动地图。
+
+2026-09-04 用户反馈 Development 包的界面、真实按钮点击及 Save/Reset/Load 操作无问题。
+人工跨重启读档、Shipping 视觉和网络/热重载持续时长仍待验收；这些与合成事件报告分别记录。
 [异常流程](../../../Docs/Phase64/P64.D_UI_Save_Edges.md)的空文件分支不代表任意损坏文件均可安全解析。

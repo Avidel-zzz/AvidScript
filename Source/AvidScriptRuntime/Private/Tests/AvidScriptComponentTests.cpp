@@ -4,6 +4,7 @@
 
 #include "AvidScriptObjectRegistryTestTypes.h"
 #include "AvidScriptVmArtifact.h"
+#include "Async/Async.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "HAL/FileManager.h"
@@ -241,6 +242,60 @@ bool BeginComponentWorld(UWorld* World)
 	return true;
 }
 } // namespace
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptComponentRuntimeDiagnosticsTest,
+	"AvidScript.Component.RuntimeDiagnosticsSnapshot",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptComponentRuntimeDiagnosticsTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = nullptr;
+	if (!CreateComponentWorld(World)) { AddError(TEXT("Diagnostics world creation failed")); return false; }
+	TestTrue(TEXT("Diagnostics world begins play"), BeginComponentWorld(World));
+	AActor* Actor = World->SpawnActor<AAvidScriptActorBindingTestActor>();
+	UAvidScriptComponent* Component = Actor ? AddAvidScriptComponent(Actor) : nullptr;
+	if (!Component) { AddError(TEXT("Diagnostics component creation failed")); DestroyComponentWorld(World); return false; }
+
+	FAvidScriptRuntimeSessionSnapshot Snapshot;
+	FAvidScriptVmBackendInfo Backend;
+	const int32 TicksBefore = Component->GetRuntimeStats().TickCallCount;
+	TestTrue(TEXT("Active component exposes a copied snapshot"), Component->CaptureRuntimeDiagnostics(Snapshot, Backend));
+	TestTrue(TEXT("Snapshot observes active runtime"), Snapshot.bHasActiveRuntime);
+	TestFalse(TEXT("Actual backend identity is not empty"), Backend.StableBackendId.IsEmpty());
+	TestEqual(TEXT("Capture does not enter Guest Tick"), Component->GetRuntimeStats().TickCallCount, TicksBefore);
+
+	TestTrue(TEXT("Off-thread capture rejects and clears outputs"), Async(EAsyncExecution::Thread, [Component]()
+	{
+		FAvidScriptRuntimeSessionSnapshot OtherSnapshot;
+		FAvidScriptVmBackendInfo OtherBackend;
+		OtherSnapshot.bHasActiveRuntime = true;
+		OtherBackend.StableBackendId = TEXT("stale");
+		return !Component->CaptureRuntimeDiagnostics(OtherSnapshot, OtherBackend)
+			&& !OtherSnapshot.bHasActiveRuntime && OtherBackend.StableBackendId.IsEmpty();
+	}).Get());
+
+	FAvidScriptRuntimeSession* Session = Component->GetRuntimeSessionForTesting();
+	bool bReentrantCaptureRejected = false;
+	if (Session)
+	{
+		Session->SetLiveExecutionObserverForTesting([&]()
+		{
+			bReentrantCaptureRejected = !Component->CaptureRuntimeDiagnostics(Snapshot, Backend)
+				&& !Snapshot.bHasActiveRuntime && Backend.StableBackendId.IsEmpty();
+		});
+		Component->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+		Session->SetLiveExecutionObserverForTesting(TFunction<void()>());
+	}
+	TestTrue(TEXT("Active Guest capture is rejected without stale data"), bReentrantCaptureRejected);
+	TestTrue(TEXT("Snapshot is available again after Guest returns"), Component->CaptureRuntimeDiagnostics(Snapshot, Backend));
+	TestTrue(TEXT("Diagnostics world ends play"), World->EndPlay(EEndPlayReason::Quit));
+	TestFalse(TEXT("Stopped component rejects capture"), Component->CaptureRuntimeDiagnostics(Snapshot, Backend));
+	TestFalse(TEXT("Stopped capture clears runtime state"), Snapshot.bHasActiveRuntime);
+	TestTrue(TEXT("Stopped capture clears backend identity"), Backend.StableBackendId.IsEmpty());
+	DestroyComponentWorld(World);
+	return true;
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptComponentReentrantReleaseTest,

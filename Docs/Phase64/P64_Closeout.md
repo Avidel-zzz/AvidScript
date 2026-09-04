@@ -52,14 +52,23 @@ GC 完成后清理失效 borrowed lease，活跃调用与候选准备期延迟�
 World 合同 46/46、原 UI 合同 118/118、原存档五进程 31/31 动作通过。进程内存相对第三轮预热基线增长，
 已登记 `P64-D07-WorldSoakMemoryAttribution`，不宣称无泄漏或完整长稳 Gate 已通过。
 
+架构 v10 的[包内 UI 小节](P64.D_Packaged_UI.md)已在 Development/Shipping 归档 Game 中各完成两个进程
+5/5 写入、2/2 读取动作，回执分别 28/28、25/25，实际执行 Wasmtime 45 AOT。独立验证插件不进入主 Runtime
+依赖方向；Component 只读诊断专项及既有回归 10/10 通过。2026-09-04 用户反馈首轮真实界面、
+按钮及保存/Reset/Load 操作无问题；人工跨重启读档、Shipping 视觉仍待验收，不关闭 D03。
+Shipping 通过隔离 UserDir 的标准 Engine.ini 选择样例地图；不修改工程/包默认配置或引擎 Shipping 宏。
+打包后 Generated Type 已恢复为 Development，canonical Editor no-clean 恢复仅执行 1 项元数据动作，
+10.51 秒通过，引擎/工程/插件三份 Editor 模块 BuildId 一致。
+
 ## 仍需完成
 
-P64.D 依架构 v9 继续补齐内存归因、UI 真实输入/视觉、包内 UI、网络/重载持续时长，以及 Android toolchain/UBT/APK。
+P64.D 依架构 v10 继续补齐内存归因、UI 人工重启读档与 Shipping 视觉、网络/重载持续时长，以及 Android toolchain/UBT/APK。
 人工游玩和真实设备验收独立保留。P58 类型、iOS、发布工程及性能领先等总目标缺口不会随本阶段编号自动关闭。
 
 ## 流程修正
 
 - 阶段静态检查应覆盖完整阶段 Diff，而非只检查最后一个提交；四处多余 EOF 空行已集中整理。
+  包内 UI 小节另在暂存检查发现公共脚本 EOF 空行；新增文件必须纳入 `git diff --cached --check`，不能只依赖未暂存 Diff。
 - 包归档遵守 ProjectRoot 边界，放入项目 Saved；仓库外临时目录用于报告，不能直接用作 ArchiveRoot。
 - Shipping 剥离 source diagnostics 是预期行为，通过 canonical WASM、发布包与回执绑定身份，不为测试重新暴露诊断。
 - Generated Type pointer 不含平台配置，须关联 catalog 的 module/package variant，不从相邻 JSON 猜测字段。

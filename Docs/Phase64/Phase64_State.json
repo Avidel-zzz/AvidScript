@@ -8,9 +8,9 @@
   "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase64/P64.0_Production_Gameplay_Architecture.md",
-    "version": 9,
-    "sha256": "e01f10e8f98604472f7b3194c789af2cc56e2af4c26479455b47c91daf91f80c",
-    "revision_reason": "保留全部原始目标；冻结真实OpenLevel世界重建、C#存档恢复与每轮GC观测，独立World控制器和有界持续时长模式，不替代包内或人工验收"
+    "version": 10,
+    "sha256": "d8e49c1edbcdb1a519eff1fd6b9656cfed0dd86d0a9ce2aec6f4ca25c7f2e9ac",
+    "revision_reason": "保留完整原始目标；冻结独立opt-in包内UI验证插件、Component只读值诊断与正式Cook身份链；不向Runtime加入UMG或开放Session指针。"
   },
   "documents": {
     "plan": "Docs/Phase64/P64.0_Implementation_Plan.md",
@@ -187,6 +187,6 @@
     }
   ],
   "next_action": "debt-update -Phase 64 -DebtId P64-D03-OriginalGameplayAcceptance -Status Verified -Evidence <text>",
-  "revision": 29,
-  "updated_at_utc": "2026-09-04T01:01:45.0206161+00:00"
+  "revision": 31,
+  "updated_at_utc": "2026-09-04T14:49:43.2844239+00:00"
 }

@@ -96,6 +96,63 @@ function Write-BuildCookRunReceiptFixture {
     return $ReceiptPath
 }
 
+function Invoke-BuildCookRunSelectionFixture {
+    param([hashtable]$Selection = @{})
+
+    $FakeRoot = Join-Path $FixtureRoot ([Guid]::NewGuid().ToString('N'))
+    $Observed = [pscustomobject]@{
+        Calls = [System.Collections.Generic.List[string]]::new()
+        Arguments = @()
+        Summary = $null
+        ErrorCategory = ''
+        ErrorMessage = ''
+        ErrorStep = ''
+    }
+    function Get-AvidScriptBuildCookRunProjectContext {
+        $Observed.Calls.Add('context')
+        return [pscustomobject]@{
+            ProjectRoot = $FakeRoot
+            ProjectFile = Join-Path $FakeRoot 'Game.uproject'
+            PluginRoot = Join-Path $FakeRoot 'Plugins/AvidScript'
+            TargetName = 'Game'
+        }
+    }
+    function Get-AvidScriptBuildCookRunEngineContext {
+        return [pscustomobject]@{ RunUatPath = 'fixture-RunUAT.bat' }
+    }
+    function Invoke-AvidScriptBuildCookRunReleaseStep {
+        $Observed.Calls.Add('release')
+        return [pscustomobject]@{ status = 'ok' }
+    }
+    # Keep the real UAT step and argument builder; intercept only the external process.
+    function Invoke-AvidScriptBuildCookRunProcess {
+        param($Executable, $Arguments, $WorkingDirectory, $OutputLogPath)
+        $Observed.Calls.Add('uat')
+        $Observed.Arguments = @($Arguments)
+        return [pscustomobject]@{ ExitCode = 0; Stdout = ''; Stderr = '' }
+    }
+    function Get-AvidScriptBuildCookRunGameReceipt {
+        return [pscustomobject]@{ Path = 'fixture.target'; Freshness = 'fresh' }
+    }
+    function Invoke-AvidScriptBuildCookRunReceiptStep {
+        $Observed.Calls.Add('receipt')
+        return [pscustomobject]@{ status = 'ok' }
+    }
+    try {
+        $Observed.Summary = Invoke-AvidScriptBuildCookRun @Selection `
+            -SourcePath fixture -CSharpProjectPath fixture -ModuleId fixture `
+            -ArtifactStem fixture -OutputRoot fixture -DotNetPath fixture `
+            -Configuration Development -ArchiveRoot (Join-Path $FakeRoot 'Saved/Archive') `
+            -PackagedOracleTimeoutSeconds 120 -PackagedOracleMode None -EngineRoot fixture
+    }
+    catch {
+        $Observed.ErrorCategory = [string]$_.Exception.Data['category']
+        $Observed.ErrorMessage = $_.Exception.Message
+        $Observed.ErrorStep = $script:AvidScriptBuildCookRunStep
+    }
+    return $Observed
+}
+
 try {
     if (-not (Test-Path -LiteralPath $RunnerPath -PathType Leaf)) {
         throw "BuildCookRun runner is missing: $RunnerPath"
@@ -131,8 +188,10 @@ try {
             'ArtifactStem',
             'BindingPackagePath',
             'Configuration',
+            'CookMaps',
             'CSharpProjectPath',
             'DotNetPath',
+            'EnablePlugins',
             'EngineRoot',
             'GeneratedTypeManifestPath',
             'ModuleId',
@@ -154,6 +213,8 @@ try {
                 "[string]`$EngineRoot = 'C:\UnrealEngine'",
                 "[string]`$PackagedOracleMode = 'Legacy'",
                 "[string]`$GeneratedTypeManifestPath = ''",
+                '[string[]]$CookMaps = @()',
+                '[string[]]$EnablePlugins = @()',
                 '[Parameter(Mandatory = $true)][string]$ArchiveRoot')) {
             Assert-BuildCookRunContract `
                 ($RunnerSource.Contains($RequiredToken)) `
@@ -252,6 +313,129 @@ try {
         Assert-BuildCookRunContract `
             ($Arguments -ccontains '-skipbuildeditor') `
             'Shipping unexpectedly rebuilds the Editor target.'
+    }
+
+    Invoke-BuildCookRunContractCase 'empty cook selections preserve arguments and JSON arrays' {
+        $Base = @{ ProjectFile = 'C:\Project\Game.uproject'; TargetName = 'Game';
+            Configuration = 'Development'; ArchiveRoot = 'C:\Project\Saved\Archive' }
+        $DefaultArguments = @(New-AvidScriptBuildCookRunUatArguments @Base)
+        $EmptyArguments = @(New-AvidScriptBuildCookRunUatArguments @Base -CookMaps @() -EnablePlugins @())
+        Assert-BuildCookRunContract (($DefaultArguments -join '|') -ceq ($EmptyArguments -join '|')) `
+            'Explicit empty selections changed the default UAT arguments.'
+        Assert-BuildCookRunContract ($DefaultArguments.Count -eq 16 -and
+            @($DefaultArguments | Where-Object { $_ -match 'map=|ubtargs=|EnablePlugin|WaitMutex|NoHotReloadFromIDE' }).Count -eq 0) `
+            'Default arguments acquired opt-in map/plugin switches.'
+        foreach ($Selection in @(@{}, @{ CookMaps = @(); EnablePlugins = @() })) {
+            $Observed = Invoke-BuildCookRunSelectionFixture -Selection $Selection
+            Assert-BuildCookRunContract ($Observed.ErrorMessage -ceq '') "Fixture failed: $($Observed.ErrorMessage)"
+            $Json = $Observed.Summary | ConvertTo-Json -Depth 8 -Compress | ConvertFrom-Json
+            Assert-BuildCookRunContract ($Json.cook_maps -is [array] -and $Json.cook_maps.Count -eq 0 -and
+                $Json.enable_plugins -is [array] -and $Json.enable_plugins.Count -eq 0) `
+                'Default result selections must serialize as empty arrays.'
+        }
+    }
+
+    Invoke-BuildCookRunContractCase 'map and plugin selections reach UAT and final result' {
+        $Maps = @('/AvidScript/Demos/UiSave/L_UiSave', '/Game/Maps/Test_2')
+        $Plugins = @('AvidScriptValidation', 'Second_Plugin2')
+        $Observed = Invoke-BuildCookRunSelectionFixture -Selection @{ CookMaps = $Maps; EnablePlugins = $Plugins }
+        Assert-BuildCookRunContract ($Observed.ErrorMessage -ceq '') "Fixture failed: $($Observed.ErrorMessage)"
+        Assert-BuildCookRunContract (($Observed.Calls -join '|') -ceq 'context|release|uat|receipt') `
+            'Selections changed the Release/UAT/receipt sequence.'
+        foreach ($Expected in @(
+                '-map=/AvidScript/Demos/UiSave/L_UiSave+/Game/Maps/Test_2',
+                '-ubtargs=-EnablePlugin=AvidScriptValidation+Second_Plugin2 -WaitMutex -NoHotReloadFromIDE',
+                '-AdditionalCookerOptions=-SkipZenStore -AvidScriptSuppressGeneratedTypeExecution -EnablePlugins=AvidScriptValidation,Second_Plugin2',
+                '-skipbuildeditor')) {
+            Assert-BuildCookRunContract ($Observed.Arguments -ccontains $Expected) "Missing UAT argument: $Expected"
+        }
+        foreach ($Prefix in @('-map=', '-ubtargs=', '-AdditionalCookerOptions=')) {
+            Assert-BuildCookRunContract (@($Observed.Arguments | Where-Object { $_.StartsWith($Prefix) }).Count -eq 1) `
+                "Expected exactly one $Prefix argument."
+        }
+        Assert-BuildCookRunContract (@($Observed.Arguments | Where-Object {
+                $_ -match '^-(?:EnablePlugins?|Plugin|ForeignPlugin|WaitMutex|NoHotReloadFromIDE)(?:=|$)|UniqueBuildEnvironment'
+            }).Count -eq 0) 'Plugin switches leaked to UAT top level or changed the build environment.'
+        $Json = $Observed.Summary | ConvertTo-Json -Depth 8 -Compress | ConvertFrom-Json
+        Assert-BuildCookRunContract ($Json.cook_maps -is [array] -and $Json.enable_plugins -is [array] -and
+            ($Json.cook_maps -join '|') -ceq ($Maps -join '|') -and
+            ($Json.enable_plugins -join '|') -ceq ($Plugins -join '|')) `
+            'Final JSON lost the selected map/plugin arrays, order, or case.'
+        $Commands = @($RunnerAst.FindAll({ param($Node)
+                $Node -is [System.Management.Automation.Language.CommandAst] -and
+                    $Node.GetCommandName() -ceq 'Invoke-AvidScriptBuildCookRun'
+            }, $true))
+        Assert-BuildCookRunContract ($Commands.Count -eq 1) 'Expected one top-level runner invocation.'
+        foreach ($Name in @('CookMaps', 'EnablePlugins')) {
+            Assert-BuildCookRunContract ($Commands[0].Extent.Text.Contains("-$Name `$$Name")) `
+                "Top-level script does not forward $Name."
+        }
+    }
+
+    Invoke-BuildCookRunContractCase 'map-only and plugin-only switches stay independent' {
+        $Base = @{ ProjectFile = 'C:\Project\Game.uproject'; TargetName = 'Game';
+            Configuration = 'Shipping'; ArchiveRoot = 'C:\Project\Saved\Archive' }
+        $MapOnly = @(New-AvidScriptBuildCookRunUatArguments @Base -CookMaps '/Game/Test')
+        Assert-BuildCookRunContract ($MapOnly -ccontains '-map=/Game/Test' -and
+            $MapOnly -ccontains '-AdditionalCookerOptions=-SkipZenStore -AvidScriptSuppressGeneratedTypeExecution' -and
+            @($MapOnly | Where-Object { $_ -match 'ubtargs|EnablePlugin|WaitMutex|NoHotReloadFromIDE' }).Count -eq 0) `
+            'Map-only selection added plugin/build flags.'
+        $PluginOnly = @(New-AvidScriptBuildCookRunUatArguments @Base -EnablePlugins 'AvidScriptValidation')
+        Assert-BuildCookRunContract (@($PluginOnly | Where-Object { $_ -match '^-map=' }).Count -eq 0 -and
+            $PluginOnly -ccontains '-ubtargs=-EnablePlugin=AvidScriptValidation -WaitMutex -NoHotReloadFromIDE') `
+            'Plugin-only selection added a map or lost UBT flags.'
+    }
+
+    foreach ($InvalidGroup in @(
+            @{ Name = 'null cook selection arrays'; Option = 'CookMaps'; Values = @($null); Category = 'cook_maps_invalid' },
+            @{ Name = 'null plugin selection arrays'; Option = 'EnablePlugins'; Values = @($null); Category = 'enable_plugins_invalid' },
+            @{ Name = 'empty and malformed maps'; Option = 'CookMaps';
+                Values = @('', ' ', '/Game', 'Game/Map', '/Game/Map/', '/Game//Map', '/Game/../Map', '/Game/Map.umap', '/Game\Map');
+                Category = 'cook_maps_invalid' },
+            @{ Name = 'empty and malformed plugins'; Option = 'EnablePlugins';
+                Values = @('', ' ', '1Plugin', '_Plugin', 'A-B', 'A/B'); Category = 'enable_plugins_invalid' },
+            @{ Name = 'map delimiter and command injection'; Option = 'CookMaps';
+                Values = @('/Game/A+/Game/B', '/Game/A,/Game/B', '/Game/A -clean', '/Game/A"', '/Game/A;echo', '/Game/A&echo', '/Game/A|echo', "/Game/A`n");
+                Category = 'cook_maps_invalid' },
+            @{ Name = 'plugin delimiter and command injection'; Option = 'EnablePlugins';
+                Values = @('A+B', 'A,B', 'A -clean', 'A"', 'A;echo', 'A&echo', 'A|echo', "A`n"); Category = 'enable_plugins_invalid' },
+            @{ Name = 'duplicate and null map entries'; Option = 'CookMaps';
+                Values = @(@('/Game/A', '/game/a'), @('/Game/A', $null)); Category = 'cook_maps_invalid' },
+            @{ Name = 'duplicate and null plugin entries'; Option = 'EnablePlugins';
+                Values = @(@('Plugin', 'plugin'), @('Plugin', $null)); Category = 'enable_plugins_invalid' })) {
+        Invoke-BuildCookRunContractCase $InvalidGroup.Name {
+            foreach ($InvalidValue in $InvalidGroup.Values) {
+                $Selection = @{ ($InvalidGroup.Option) = $InvalidValue }
+                $Observed = Invoke-BuildCookRunSelectionFixture -Selection $Selection
+                Assert-BuildCookRunContract ($Observed.ErrorCategory -ceq $InvalidGroup.Category -and
+                    $Observed.ErrorStep -ceq 'validation' -and $Observed.Calls.Count -eq 0) `
+                    "Invalid $($InvalidGroup.Option) reached context/Release/UAT: $($Observed.ErrorMessage)"
+            }
+        }
+    }
+
+    Invoke-BuildCookRunContractCase 'direct UAT entry points reject invalid selections before side effects' {
+        $UnusedRoot = Join-Path $FixtureRoot 'InvalidDirectUat'
+        foreach ($Option in @('CookMaps', 'EnablePlugins')) {
+            $Selection = @{ $Option = 'invalid;injection' }
+            $ExpectedCategory = if ($Option -ceq 'CookMaps') { 'cook_maps_invalid' } else { 'enable_plugins_invalid' }
+            foreach ($Entry in @('arguments', 'step')) {
+                $Rejected = $false
+                try {
+                    if ($Entry -ceq 'arguments') {
+                        New-AvidScriptBuildCookRunUatArguments @Selection -ProjectFile fixture -TargetName Game `
+                            -Configuration Development -ArchiveRoot fixture | Out-Null
+                    }
+                    else {
+                        Invoke-AvidScriptBuildCookRunUatStep @Selection -ProjectContext ([pscustomobject]@{ ProjectRoot = $UnusedRoot }) `
+                            -EngineContext ([pscustomobject]@{}) -Configuration Development -ArchiveRoot fixture | Out-Null
+                    }
+                }
+                catch { $Rejected = $_.Exception.Data['category'] -ceq $ExpectedCategory }
+                Assert-BuildCookRunContract $Rejected "Direct UAT $Entry accepted invalid $Option."
+                Assert-BuildCookRunContract (-not (Test-Path -LiteralPath $UnusedRoot)) 'Invalid UAT input created directories/logs.'
+            }
+        }
     }
 
     Invoke-BuildCookRunContractCase 'ProcessStartInfo and JSON output' {
@@ -578,6 +762,10 @@ try {
             'no_clean',
             'zen_workaround',
             'development_shipping',
+            'cook_selection_defaults_and_forwarding',
+            'nested_ubt_and_cooker_plugin_options',
+            'cook_selection_json_arrays',
+            'cook_selection_fail_closed_before_release_uat',
             'argument_list',
             'single_line_json',
             'archive_safety',
