@@ -8,9 +8,9 @@
   "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase64/P64.0_Production_Gameplay_Architecture.md",
-    "version": 15,
-    "sha256": "0f071c4dffec9b010b880a0eed5d2a51c84e02cbd652115b12b13a6f32637f93",
-    "revision_reason": "新增包内 World 长稳与有界观测合同：Validation 独立 probe、固定里程碑样本、滚动证据链及 Development/Shipping AOT 归因，不改变 Runtime ABI 和人工 Gate"
+    "version": 16,
+    "sha256": "6712c8f3b0040ad0b033c9f66a8e0b13d8c59c104f2160e3ea800eb73720900a",
+    "revision_reason": "冻结 typed Host 结构化失败传递、VM 元数据 import 身份、callback epoch 一次性消费及 Wasmtime/WAMR 双后端诊断合同；不改变 Guest ABI 和成功热路径"
   },
   "documents": {
     "plan": "Docs/Phase64/P64.0_Implementation_Plan.md",
@@ -200,6 +200,6 @@
     }
   ],
   "next_action": "debt-update -Phase 64 -DebtId P64-D03-OriginalGameplayAcceptance -Status Verified -Evidence <text>",
-  "revision": 41,
-  "updated_at_utc": "2026-09-04T21:43:44.2561539+00:00"
+  "revision": 42,
+  "updated_at_utc": "2026-09-04T21:55:59.9745259+00:00"
 }

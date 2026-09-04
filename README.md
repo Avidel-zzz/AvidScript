@@ -146,7 +146,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 - **C# 子集**：无完整 .NET Runtime、任意 awaiter 或异常系统；暂不支持 `event +=`、lambda/closure，使用显式 bind/subscribe 与 `ExecuteX/BroadcastX`。
 - **重载与隔离**：方法体可热重载；UI 样例通过 `NextTickAsync` 在候选提交后初始化。准备期无可回滚适配的反射写入仍被拒绝，不承诺回滚任意外部副作用。反射结构变更需增量 UBT 并重启 Editor；WASM 隔离不是原生 DLL 进程沙箱。
 - **玩法与平台**：UI 包使用独立验证插件和隔离启动配置，Development/Shipping 均通过跨进程自动存取；Development 首轮人工界面/按钮反馈无问题，人工重启读档、Shipping 视觉及网络/重载长稳仍待验收。任意损坏存档不在现有保证内；两次一小时切图均通过，但剩余 Editor/探针/分配器内存增长、Android UBT/APK/真机及 iOS 仍未验收。
-- **诊断与性能**：typed Host 的具体拒绝原因尚未统一透传到 VM 错误；纯执行 P50/P95 领先门禁未关闭，也未完成同口径 UnLua/AngelScript 矩阵。
+- **诊断与性能**：[typed Host 结构化诊断合同](Docs/Phase64/P64.D_Typed_Host_Diagnostics.md)已冻结，产品透传与双后端/重入验证尚未完成；纯执行 P50/P95 领先门禁未关闭，也未完成同口径 UnLua/AngelScript 矩阵。
 
 下一步补齐人工重启读档与 Shipping 视觉、内存归因、网络/重载长稳及移动构建/设备证据；
 随后推进安装、升级、兼容和诊断等发布工程，不以阶段编号代替实际验收。
