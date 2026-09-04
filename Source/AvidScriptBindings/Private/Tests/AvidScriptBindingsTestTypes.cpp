@@ -1,5 +1,26 @@
 #include "AvidScriptBindingsTestTypes.h"
 
+TFunction<void(const FAvidScriptBindingsLifetimeValue&, bool)>
+	FAvidScriptBindingsLifetimeValue::LifetimeObserver;
+
+FAvidScriptBindingsLifetimeValue::FAvidScriptBindingsLifetimeValue()
+	: OwnedStrings(MakeShared<TArray<FString>>())
+{
+	OwnedStrings->Add(FString::ChrN(64, TEXT('x')));
+	if (LifetimeObserver)
+	{
+		LifetimeObserver(*this, true);
+	}
+}
+
+FAvidScriptBindingsLifetimeValue::~FAvidScriptBindingsLifetimeValue()
+{
+	if (LifetimeObserver)
+	{
+		LifetimeObserver(*this, false);
+	}
+}
+
 int32 UAvidScriptBindingsInterfaceImplementer::TransformInterfaceValue_Implementation(
 	const int32 Value)
 {
@@ -78,4 +99,20 @@ TArray<int32> UAvidScriptBindingsTestObject::IntArrayRoundtrip(
 	OutValue = Input;
 	InOut.Append(Input);
 	return InOut;
+}
+
+FAvidScriptBindingsLifetimeValue UAvidScriptBindingsTestObject::FrameLifetimeRoundtrip(
+	const FAvidScriptBindingsLifetimeValue& Input,
+	FAvidScriptBindingsLifetimeValue& InOut,
+	FAvidScriptBindingsLifetimeValue& OutValue)
+{
+	++FrameLifetimeInvocationCount;
+	InOut.bEnabled = Input.bEnabled;
+	OutValue = InOut;
+	FAvidScriptBindingsLifetimeValue Result = Input;
+	if (bRejectFrameLifetimeOutput)
+	{
+		Result.Target = this;
+	}
+	return Result;
 }

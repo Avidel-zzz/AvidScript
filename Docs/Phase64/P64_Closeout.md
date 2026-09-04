@@ -78,6 +78,11 @@ Trace 内存与 FName 容量全程不增长；第 50～100 轮进程提交量增
 无界保留；Blueprint 引脚延迟删除与编辑器工具开销另行区分。未把原始预留空间、符号不全或工具
 exit 0 当成泄漏/无泄漏证明，不关闭 D07。
 
+架构 v14 的[调用生命周期修复](P64.D_Invocation_Lifetime.md)已修复原生 UFunction 参数帧可能漏析构，
+并把 Wasmtime 重载导出条目改为调用者按需持有，不再由 backend 永久保存全部历史身份/条目。
+no-clean 构建 22+4 动作通过，Binding 1/1、Wasmtime 14/14 通过；D08 可关闭。修复后 50 轮 trace
+采集完成，但本次离线查询没有生成 CSV，因此 D07 仍为 Fixing，不宣称字符串净保留已经归零。
+
 ## 仍需完成
 
 P64.D 依架构 v13 继续补齐内存归因与保留问题修复、UI 人工重启读档与 Shipping 视觉、网络/重载持续时长，以及 Android toolchain/UBT/APK。

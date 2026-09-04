@@ -91,6 +91,24 @@ struct FAvidScriptBindingsRecursiveStruct
 	FAvidScriptBindingsNestedStruct Nested;
 };
 
+USTRUCT(BlueprintType)
+struct FAvidScriptBindingsLifetimeValue
+{
+	GENERATED_BODY()
+
+	FAvidScriptBindingsLifetimeValue();
+	~FAvidScriptBindingsLifetimeValue();
+
+	UPROPERTY(BlueprintReadWrite, Category = "AvidScript|Tests")
+	bool bEnabled = false;
+
+	UPROPERTY(BlueprintReadWrite, Category = "AvidScript|Tests")
+	TObjectPtr<UObject> Target;
+
+	TSharedPtr<TArray<FString>> OwnedStrings;
+	static TFunction<void(const FAvidScriptBindingsLifetimeValue&, bool)> LifetimeObserver;
+};
+
 UINTERFACE(BlueprintType)
 class UAvidScriptBindingsCallableInterface : public UInterface
 {
@@ -213,6 +231,15 @@ public:
 		const TArray<int32>& Input,
 		UPARAM(ref) TArray<int32>& InOut,
 		TArray<int32>& OutValue) const;
+
+	UFUNCTION(BlueprintCallable, Category = "AvidScript|Tests")
+	FAvidScriptBindingsLifetimeValue FrameLifetimeRoundtrip(
+		const FAvidScriptBindingsLifetimeValue& Input,
+		UPARAM(ref) FAvidScriptBindingsLifetimeValue& InOut,
+		FAvidScriptBindingsLifetimeValue& OutValue);
+
+	int32 FrameLifetimeInvocationCount = 0;
+	bool bRejectFrameLifetimeOutput = false;
 };
 
 UCLASS()

@@ -173,6 +173,7 @@ struct FInvocationCodecProgram
 	int32 RequiredScratchSize = 0;
 	int32 ExpectedArgumentCount = 0;
 	int32 CallbackIdArgumentOffset = INDEX_NONE;
+	TArray<FProperty*> FrameDestructorProperties;
 	TArray<FValueCodecProgram> Parameters;
 	FValueCodecProgram ReturnValue;
 	FFastPathPlan FastPath;

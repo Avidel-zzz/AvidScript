@@ -11,6 +11,10 @@ struct FPreparedDynamicInvocationCell
 	uint32 BindingOrdinal = MAX_uint32;
 };
 
+bool PrepareInvocationFrameLifecycle(
+	FInvocationCodecProgram& Program,
+	FString& OutDetails);
+
 bool InvokePreparedDynamicReflection(
 	const void* InvocationCell,
 	UObject& Receiver,

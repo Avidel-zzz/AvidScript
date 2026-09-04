@@ -244,6 +244,8 @@ struct FAvidScriptVmPreparedExportCall
 	FAvidScriptVmPreparedExportInvoke InvokeFunction = nullptr;
 	uint32 ParameterCellCount = 0;
 	uint32 ResultCellCount = 0;
+	// Optional target ownership; Call never copies this reference on the hot path.
+	TSharedPtr<void> TargetLifetime;
 
 	bool IsValid() const
 	{

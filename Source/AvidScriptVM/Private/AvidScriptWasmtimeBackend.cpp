@@ -28,12 +28,11 @@ uint64 GNextWasmtimeInstanceIdentity = 1ull << 63;
 uint64 AllocateWasmtimeInstanceIdentity()
 {
 	FScopeLock Lock(&GWasmtimeIdentityCriticalSection);
-	const uint64 Identity = GNextWasmtimeInstanceIdentity++;
 	if (GNextWasmtimeInstanceIdentity == 0)
 	{
-		GNextWasmtimeInstanceIdentity = 1ull << 63;
+		return 0;
 	}
-	return Identity;
+	return GNextWasmtimeInstanceIdentity++;
 }
 
 double MeasureWasmtimeElapsedMs(double StartSeconds)
@@ -398,7 +397,6 @@ struct FAvidScriptWasmtimeTypedHostContext
 
 struct FAvidScriptWasmtimeExportEntry
 {
-	FString Name;
 	AvidScriptWasmtimeFunction* Function = nullptr;
 	AvidScriptWasmtimePreparedCallShape PreparedCallShape =
 		AVIDSCRIPT_WASMTIME_PREPARED_CALL_GENERIC;
@@ -414,8 +412,8 @@ public:
 	explicit FAvidScriptWasmtimeBackend(
 		EAvidScriptVmArtifactFormat ArtifactFormat)
 		: BackendInfo(MakeWasmtimeBackendInfo(ArtifactFormat))
+		, BackendInstanceIdentity(AllocateWasmtimeInstanceIdentity())
 	{
-		AdvanceBackendInstanceIdentity();
 	}
 
 	~FAvidScriptWasmtimeBackend() override
@@ -466,6 +464,14 @@ public:
 		}
 		Unload();
 		LoadMetrics = FAvidScriptVmLoadMetrics();
+		if (BackendInstanceIdentity == 0 || bExportGenerationExhausted)
+		{
+			SetWasmtimeError(
+				OutError,
+				TEXT("export_identity_exhausted"),
+				TEXT("The Wasmtime export owner or generation cannot be reused."));
+			return false;
+		}
 
 #if !AVIDSCRIPT_WITH_WASMTIME
 		SetWasmtimeError(OutError, TEXT("backend_unavailable"), TEXT("Wasmtime is unavailable for this target."));
@@ -920,9 +926,8 @@ public:
 			return false;
 		}
 
-		TUniquePtr<FAvidScriptWasmtimeExportEntry> Entry =
-			MakeUnique<FAvidScriptWasmtimeExportEntry>();
-		Entry->Name = ExportName;
+		TSharedPtr<FAvidScriptWasmtimeExportEntry> Entry =
+			MakeShared<FAvidScriptWasmtimeExportEntry>();
 		Entry->Function = Function;
 		Entry->PreparedCallShape =
 			avidscript_wasmtime_function_prepared_call_shape(Function);
@@ -1072,6 +1077,7 @@ public:
 
 		OutCall.Owner = this;
 		OutCall.Target = Entry;
+		OutCall.TargetLifetime = ExportEntries[Handle.Slot - 1];
 		OutCall.InvokeFunction =
 			Entry->PreparedCallShape
 				== AVIDSCRIPT_WASMTIME_PREPARED_CALL_I32_I32_TO_I32
@@ -1106,13 +1112,15 @@ public:
 		}
 		if (Handle.BackendInstanceIdentity != BackendInstanceIdentity)
 		{
-			const bool bStale = OwnedBackendInstanceIdentities.Contains(Handle.BackendInstanceIdentity);
 			SetWasmtimeError(
 				OutError,
-				bStale ? TEXT("stale_export") : TEXT("foreign_export"),
-				bStale
-					? TEXT("The export handle belongs to an unloaded VM instance.")
-					: TEXT("The export handle belongs to a different VM backend instance."));
+				TEXT("foreign_export"),
+				TEXT("The export handle belongs to a different VM backend instance."));
+			return false;
+		}
+		if (Handle.Generation != ExportGeneration || bExportGenerationExhausted)
+		{
+			SetWasmtimeError(OutError, TEXT("stale_export"), TEXT("The export handle belongs to an unloaded VM instance."));
 			return false;
 		}
 #if !AVIDSCRIPT_WITH_WASMTIME
@@ -1954,6 +1962,16 @@ private:
 			}
 			return false;
 		}
+		// The caller owns Entry, but the backend may already have been destroyed.
+		if (Entry->Function == nullptr)
+		{
+			SetWasmtimeError(OutError, TEXT("stale_export"), TEXT("The prepared Wasmtime export is no longer active."));
+			if (OutResult != nullptr)
+			{
+				*OutResult = FAvidScriptVmCallResult();
+			}
+			return false;
+		}
 		return Backend->CallPreparedExport(
 			*Entry,
 			Frame,
@@ -1978,6 +1996,15 @@ private:
 			OutError.Category = TEXT("prepared_export_invalid");
 			OutError.Details =
 				TEXT("The prepared Wasmtime export target is invalid.");
+			if (OutResult != nullptr)
+			{
+				*OutResult = FAvidScriptVmCallResult();
+			}
+			return false;
+		}
+		if (Entry->Function == nullptr)
+		{
+			SetWasmtimeError(OutError, TEXT("stale_export"), TEXT("The prepared Wasmtime export is no longer active."));
 			if (OutResult != nullptr)
 			{
 				*OutResult = FAvidScriptVmCallResult();
@@ -3520,22 +3547,26 @@ private:
 		FAvidScriptWasmtimeEpochWatchdog::Get().Unregister(
 			EpochWatchdogToken);
 		EpochWatchdogToken = 0;
-		for (const TPair<FString, uint32>& ActiveExport :
-			ExportNameToIndex)
+		for (const TSharedPtr<FAvidScriptWasmtimeExportEntry>& Entry : ExportEntries)
 		{
-			if (ExportEntries.IsValidIndex(
-					static_cast<int32>(ActiveExport.Value)))
+			if (Entry->Function != nullptr)
 			{
-				FAvidScriptWasmtimeExportEntry* Entry =
-					ExportEntries[ActiveExport.Value].Get();
-				if (Entry != nullptr && Entry->Function != nullptr)
-				{
-					avidscript_wasmtime_function_delete(
-						Entry->Function);
-					Entry->Function = nullptr;
-				}
+				avidscript_wasmtime_function_delete(Entry->Function);
+				Entry->Function = nullptr;
 			}
 		}
+		if (!ExportEntries.IsEmpty())
+		{
+			if (ExportGeneration == MAX_uint32)
+			{
+				bExportGenerationExhausted = true;
+			}
+			else
+			{
+				++ExportGeneration;
+			}
+		}
+		ExportEntries.Reset();
 		if (Instance != nullptr)
 		{
 			avidscript_wasmtime_instance_delete(Instance);
@@ -3568,11 +3599,6 @@ private:
 		}
 #endif
 		ExportNameToIndex.Reset();
-		++ExportGeneration;
-		if (ExportGeneration == 0)
-		{
-			++ExportGeneration;
-		}
 		ExportLookupCount = 0;
 		ModuleId.Reset();
 		HostDispatcher = nullptr;
@@ -3580,24 +3606,17 @@ private:
 		ExecutionBudget = FAvidScriptVmLoadConfig::FExecutionBudget();
 		CurrentHostCallCount = 0;
 		bUnloadDeferred = false;
-		AdvanceBackendInstanceIdentity();
-	}
-
-	void AdvanceBackendInstanceIdentity()
-	{
-		BackendInstanceIdentity = AllocateWasmtimeInstanceIdentity();
-		OwnedBackendInstanceIdentities.Add(BackendInstanceIdentity);
 	}
 
 	FAvidScriptVmBackendInfo BackendInfo;
-	uint64 BackendInstanceIdentity = 0;
-	TSet<uint64> OwnedBackendInstanceIdentities;
+	const uint64 BackendInstanceIdentity;
 	FString ModuleId;
 	IAvidScriptHostDispatcher* HostDispatcher = nullptr;
 	IAvidScriptVmTypedHostDispatcher* TypedHostDispatcher = nullptr;
 	FAvidScriptVmLoadMetrics LoadMetrics;
 	TMap<FString, uint32> ExportNameToIndex;
 	uint32 ExportGeneration = 1;
+	bool bExportGenerationExhausted = false;
 	uint32 ExportLookupCount = 0;
 	int32 ActiveCallDepth = 0;
 	bool bUnloadDeferred = false;
@@ -3621,7 +3640,7 @@ private:
 	TArray<TUniquePtr<FAvidScriptWasmtimeDynamicHostContext>> DynamicHostContexts;
 	TArray<TUniquePtr<FAvidScriptWasmtimeTypedHostContext>> TypedHostContexts;
 	TSet<FString> TypedImportIdentityKeys;
-	TArray<TUniquePtr<FAvidScriptWasmtimeExportEntry>> ExportEntries;
+	TArray<TSharedPtr<FAvidScriptWasmtimeExportEntry>> ExportEntries;
 #endif
 };
 } // namespace

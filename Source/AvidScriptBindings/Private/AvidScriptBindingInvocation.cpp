@@ -5245,6 +5245,21 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		return false;
 	}
 
+	for (FAvidScriptRuntimeBindingInvocationPlan& Plan : Package->Impl->Plans)
+	{
+		FString FrameDetails;
+		if (!UE::AvidScript::BindingPrivate::PrepareInvocationFrameLifecycle(
+				Plan, FrameDetails))
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_frame_lifecycle_invalid"),
+				Plan.DebugPath,
+				FrameDetails);
+			return false;
+		}
+	}
+
 	for (int32 PlanIndex = 0; PlanIndex < Model.Bindings.Num(); ++PlanIndex)
 	{
 		const FAvidScriptRuntimeBindingInvocationPlan& Plan =

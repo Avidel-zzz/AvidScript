@@ -148,6 +148,30 @@ TArray<uint8> BuildWasmtimeLifecycleFixture()
 	return Module;
 }
 
+TArray<uint8> BuildWasmtimeReloadLifetimeFixture()
+{
+	TArray<uint8> Module = MakeWasmtimeModule();
+	const TArray<uint8> Types = {
+		2, 0x60, 0, 0, 0x60, 2, 0x7f, 0x7f, 1, 0x7f
+	};
+	AppendWasmtimeSection(Module, 1, Types);
+	const TArray<uint8> Functions = { 2, 0, 1 };
+	AppendWasmtimeSection(Module, 3, Functions);
+	TArray<uint8> Exports;
+	AppendWasmtimeU32Leb(Exports, 2);
+	AppendWasmtimeString(Exports, "empty");
+	Exports.Append({ 0, 0 });
+	AppendWasmtimeString(Exports, "sum");
+	Exports.Append({ 0, 1 });
+	AppendWasmtimeSection(Module, 7, Exports);
+	// Empty body and i32.add(local.get 0, local.get 1), exercising both call targets.
+	const TArray<uint8> Code = {
+		2, 2, 0, 0x0b, 7, 0, 0x20, 0, 0x20, 1, 0x6a, 0x0b
+	};
+	AppendWasmtimeSection(Module, 10, Code);
+	return Module;
+}
+
 TArray<uint8> BuildWasmtimeExecutionBudgetFixture()
 {
 	TArray<uint8> Module = MakeWasmtimeModule();
@@ -1412,6 +1436,110 @@ bool FAvidScriptVmWasmtimeLifecycleTest::RunTest(const FString& Parameters)
 	const uint8 Malformed[] = { 0x00, 0x61, 0x73, 0x6d };
 	TestFalse(TEXT("malformed WASM rejects"), Backend->Load(MakeArrayView(Malformed), TEXT("wasmtime_malformed"), Config, Error));
 	TestFalse(TEXT("malformed WASM reports details"), Error.Details.IsEmpty());
+	return true;
+#endif
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmWasmtimeReloadLifetimeTest,
+	"AvidScript.VM.Wasmtime.ReloadLifetime",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmWasmtimeReloadLifetimeTest::RunTest(const FString& Parameters)
+{
+#if !AVIDSCRIPT_WITH_WASMTIME
+	return true;
+#else
+	FAvidScriptVmError Error;
+	FAvidScriptVmLoadConfig Config;
+	TUniquePtr<IAvidScriptVmBackend> Backend = CreateWasmtimeBackendForTest(Error);
+	TUniquePtr<IAvidScriptVmBackend> Foreign = CreateWasmtimeBackendForTest(Error);
+	if (!TestNotNull(TEXT("reload backend"), Backend.Get())
+		|| !TestNotNull(TEXT("foreign backend"), Foreign.Get()))
+	{
+		return false;
+	}
+	const TArray<uint8> Bytecode = BuildWasmtimeReloadLifetimeFixture();
+	FAvidScriptVmExportHandle FirstHandle;
+	FAvidScriptVmPreparedExportCall FirstCalls[2];
+	FAvidScriptVmCallFrame Frames[2];
+	Frames[1].CellCount = 2;
+	Frames[1].Cells[0] = 19;
+	Frames[1].Cells[1] = 23;
+	const TCHAR* Names[] = { TEXT("empty"), TEXT("sum") };
+	for (int32 Cycle = 0; Cycle < 32; ++Cycle)
+	{
+		if (!LoadWasmtimeTestModule(*this, *Backend, Bytecode, Config, Error))
+		{
+			return false;
+		}
+		for (int32 Shape = 0; Shape < 2; ++Shape)
+		{
+			FAvidScriptVmExportHandle Handle;
+			FAvidScriptVmPreparedExportCall Call;
+			if (!TestTrue(TEXT("resolve reload export"), Backend->ResolveExport(Names[Shape], Handle, Error))
+				|| !TestTrue(TEXT("prepare reload export"), Backend->PrepareExportCall(Handle, Call, Error)))
+			{
+				return false;
+			}
+			TestEqual(TEXT("slots are reused, not appended across reloads"), Handle.Slot, static_cast<uint32>(Shape + 1));
+			TestEqual(TEXT("one generation per invalidated export table"), Handle.Generation, static_cast<uint32>(Cycle + 1));
+			TestTrue(TEXT("prepared target has explicit ownership"), Call.TargetLifetime.IsValid());
+			FAvidScriptVmCallResult Result;
+			TestTrue(TEXT("current prepared target calls"), Call.Call(Frames[Shape], Error, &Result));
+			TestEqual(TEXT("result shape preserved"), Result.CellCount, static_cast<uint32>(Shape));
+			if (Shape == 1) { TestEqual(TEXT("specialized sum result"), Result.Cells[0], 42u); }
+			if (Cycle == 0)
+			{
+				FirstCalls[Shape] = Call;
+				if (Shape == 0) { FirstHandle = Handle; }
+			}
+			else
+			{
+				TestEqual(TEXT("backend owner stays stable across reloads"), Handle.BackendInstanceIdentity, FirstHandle.BackendInstanceIdentity);
+				TestFalse(TEXT("first prepared target stays stale after slot reuse"), FirstCalls[Shape].Call(Frames[Shape], Error, &Result));
+				TestEqual(TEXT("old prepared category"), Error.Category, FString(TEXT("stale_export")));
+				TestEqual(TEXT("stale result cleared"), Result.CellCount, 0u);
+			}
+		}
+		if (Cycle > 0)
+		{
+			TestFalse(TEXT("first handle cannot alias reused slot"), Backend->Call(FirstHandle, Frames[0], Error));
+			TestEqual(TEXT("old handle category"), Error.Category, FString(TEXT("stale_export")));
+		}
+		FAvidScriptVmExportHandle Handle;
+		FAvidScriptVmPreparedExportCall Calls[2];
+		TWeakPtr<void> Lifetimes[2];
+		for (int32 Shape = 0; Shape < 2; ++Shape)
+		{
+			TestTrue(TEXT("resolve for release observation"), Backend->ResolveExport(Names[Shape], Handle, Error));
+			TestTrue(TEXT("prepare for release observation"), Backend->PrepareExportCall(Handle, Calls[Shape], Error));
+			Lifetimes[Shape] = Calls[Shape].TargetLifetime;
+		}
+		Backend->Unload();
+		for (int32 Shape = 0; Shape < 2; ++Shape)
+		{
+			TestTrue(TEXT("caller keeps only the invalid target alive"), Lifetimes[Shape].IsValid());
+			FAvidScriptVmPreparedExportCall Copy = Calls[Shape];
+			Calls[Shape] = {};
+			TestFalse(TEXT("copied target rejects after unload"), Copy.Call(Frames[Shape], Error));
+			TestEqual(TEXT("unloaded target category"), Error.Category, FString(TEXT("stale_export")));
+			Copy = {};
+			if (Cycle > 0) { TestFalse(TEXT("last caller releases old entry immediately"), Lifetimes[Shape].IsValid()); }
+		}
+		for (int32 EmptyUnload = 0; EmptyUnload < 16; ++EmptyUnload) { Backend->Unload(); }
+	}
+	TestFalse(TEXT("foreign owner rejected independently of generation"), Foreign->Call(FirstHandle, Frames[0], Error));
+	TestEqual(TEXT("foreign owner category"), Error.Category, FString(TEXT("foreign_export")));
+	Backend.Reset();
+	for (int32 Shape = 0; Shape < 2; ++Shape)
+	{
+		const TWeakPtr<void> Lifetime = FirstCalls[Shape].TargetLifetime;
+		TestFalse(TEXT("stale call rejects before accessing destroyed backend"), FirstCalls[Shape].Call(Frames[Shape], Error));
+		TestEqual(TEXT("destroyed backend category"), Error.Category, FString(TEXT("stale_export")));
+		FirstCalls[Shape] = {};
+		TestFalse(TEXT("no backend history keeps final target alive"), Lifetime.IsValid());
+	}
 	return true;
 #endif
 }

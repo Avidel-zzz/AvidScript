@@ -287,6 +287,44 @@ struct FGuestOutputTarget
 };
 } // namespace
 
+bool PrepareInvocationFrameLifecycle(
+	FInvocationCodecProgram& Program,
+	FString& OutDetails)
+{
+	Program.FrameDestructorProperties.Reset();
+	OutDetails.Reset();
+	if (Program.Function == nullptr)
+	{
+		return true;
+	}
+	if (Program.FrameSize != Program.Function->GetStructureSize())
+	{
+		OutDetails = TEXT("The cached invocation frame must cover the complete UFunction structure.");
+		return false;
+	}
+
+	// Match InitializeStruct's full PropertyLink, not CPF_Parm or DestructorLink:
+	// native-owned functions can omit destructor links despite owning frame values.
+	for (FProperty* Property = Program.Function->PropertyLink;
+		Property != nullptr;
+		Property = Property->PropertyLinkNext)
+	{
+		if (!Property->IsInContainer(Program.FrameSize))
+		{
+			Program.FrameDestructorProperties.Reset();
+			OutDetails = FString::Printf(
+				TEXT("Initialized field %s falls outside the cached invocation frame."),
+				*Property->GetPathName());
+			return false;
+		}
+		if (!Property->HasAnyPropertyFlags(CPF_NoDestructor))
+		{
+			Program.FrameDestructorProperties.Add(Property);
+		}
+	}
+	return true;
+}
+
 bool InvokePreparedDynamicReflection(
 	const void* InvocationCell,
 	UObject& Receiver,
@@ -860,7 +898,10 @@ bool InvokePreparedDynamicReflection(
 	{
 		if (bHasFrameStorage)
 		{
-			Program->Function->DestroyStruct(Frame);
+			for (FProperty* Property : Program->FrameDestructorProperties)
+			{
+				Property->DestroyValue_InContainer(Frame);
+			}
 		}
 	};
 

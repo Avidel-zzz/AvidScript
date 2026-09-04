@@ -242,6 +242,44 @@ FValueCodecProgram MakeInterfaceCodec(
 	return Program;
 }
 
+FValueCodecProgram MakeLifetimeStructCodec(
+	FProperty* Property,
+	const EValueCodecDirection Direction,
+	const int32 ArgumentOffset)
+{
+	FValueCodecProgram Program;
+	Program.Property = Property;
+	Program.StructType = CastFieldChecked<FStructProperty>(Property)->Struct;
+	Program.Direction = Direction;
+	Program.Kind = EValueCodecKind::StructWire;
+	Program.ArgumentOffset = ArgumentOffset;
+	Program.ArgumentWidth = 1;
+	Program.GuestStorageSize = 12;
+	Program.WireSize = 12;
+	Program.WireAlignment = 4;
+	Program.Name = Property->GetName();
+
+	FValueCodecProgram& Enabled = Program.Children.AddDefaulted_GetRef();
+	Enabled.Property = FindFProperty<FProperty>(Program.StructType, TEXT("bEnabled"));
+	Enabled.Kind = EValueCodecKind::Bool;
+	Enabled.WireOffset = 0;
+	Enabled.WireSize = 4;
+	Enabled.WireAlignment = 4;
+	Enabled.GuestStorageSize = 4;
+	Enabled.Name = TEXT("bEnabled");
+
+	FValueCodecProgram& Target = Program.Children.AddDefaulted_GetRef();
+	Target.Property = FindFProperty<FProperty>(Program.StructType, TEXT("Target"));
+	Target.ObjectClass = UObject::StaticClass();
+	Target.Kind = EValueCodecKind::Object;
+	Target.WireOffset = 4;
+	Target.WireSize = 8;
+	Target.WireAlignment = 4;
+	Target.GuestStorageSize = 8;
+	Target.Name = TEXT("Target");
+	return Program;
+}
+
 double CalculateAvidScriptBoundaryBenchmarkPercentile(
 	TArray<double> Samples,
 	const double Quantile)
@@ -556,6 +594,12 @@ bool FAvidScriptRecursiveStructCodecBoundaryTest::RunTest(const FString& Paramet
 	Program.Parameters.Add(MakeRecursiveStructCodec(ParametersByOrder[1], EValueCodecDirection::Ref, 3));
 	Program.Parameters.Add(MakeRecursiveStructCodec(ParametersByOrder[2], EValueCodecDirection::Out, 4));
 	Program.ReturnValue = MakeRecursiveStructCodec(ParametersByOrder[3], EValueCodecDirection::Return, 5);
+	FString LifecycleDetails;
+	if (!PrepareInvocationFrameLifecycle(Program, LifecycleDetails))
+	{
+		AddError(LifecycleDetails);
+		return false;
+	}
 	FPreparedDynamicInvocationCell Cell{ &Program, 0 };
 
 	FAvidScriptBoundaryGuestMemory GuestMemory;
@@ -826,6 +870,12 @@ bool FAvidScriptArrayValueBindingBoundaryTest::RunTest(
 	Program.Parameters.Add(MakeIntArrayCodec(InOutProperty, EValueCodecDirection::Ref, 3));
 	Program.Parameters.Add(MakeIntArrayCodec(OutProperty, EValueCodecDirection::Out, 4));
 	Program.ReturnValue = MakeIntArrayCodec(ReturnProperty, EValueCodecDirection::Return, 5);
+	FString LifecycleDetails;
+	if (!PrepareInvocationFrameLifecycle(Program, LifecycleDetails))
+	{
+		AddError(LifecycleDetails);
+		return false;
+	}
 	FPreparedDynamicInvocationCell Cell{ &Program, 0 };
 
 	FAvidScriptBoundaryGuestMemory GuestMemory;
@@ -1146,6 +1196,12 @@ bool FAvidScriptInterfaceInteropBoundaryTest::RunTest(const FString& Parameters)
 		ReturnProperty,
 		EValueCodecDirection::Return,
 		3);
+	FString LifecycleDetails;
+	if (!PrepareInvocationFrameLifecycle(FunctionProgram, LifecycleDetails))
+	{
+		AddError(LifecycleDetails);
+		return false;
+	}
 	FPreparedDynamicInvocationCell FunctionCell{ &FunctionProgram, 0 };
 	TArray<uint8> FunctionScratch;
 	FunctionScratch.SetNumZeroed(FunctionProgram.RequiredScratchSize);
@@ -1298,6 +1354,172 @@ bool FAvidScriptInterfaceInteropBoundaryTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptPreparedInvocationFrameLifetimeTest,
+	"AvidScript.Bindings.PreparedDynamic.InvocationFrameLifetime",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptPreparedInvocationFrameLifetimeTest::RunTest(
+	const FString& Parameters)
+{
+	UClass* ExpectedClass = UAvidScriptBindingsTestObject::StaticClass();
+	UFunction* Function = ExpectedClass->FindFunctionByName(
+		GET_FUNCTION_NAME_CHECKED(
+			UAvidScriptBindingsTestObject,
+			FrameLifetimeRoundtrip));
+	if (!TestNotNull(TEXT("Lifetime fixture function reflects"), Function))
+	{
+		return false;
+	}
+	FProperty* InputProperty = FindFProperty<FProperty>(Function, TEXT("Input"));
+	FProperty* InOutProperty = FindFProperty<FProperty>(Function, TEXT("InOut"));
+	FProperty* OutProperty = FindFProperty<FProperty>(Function, TEXT("OutValue"));
+	FProperty* ReturnProperty = Function->GetReturnProperty();
+	if (!TestNotNull(TEXT("Lifetime input reflects"), InputProperty)
+		|| !TestNotNull(TEXT("Lifetime ref input reflects"), InOutProperty)
+		|| !TestNotNull(TEXT("Lifetime output reflects"), OutProperty)
+		|| !TestNotNull(TEXT("Lifetime return reflects"), ReturnProperty))
+	{
+		return false;
+	}
+
+	FInvocationCodecProgram Program;
+	Program.OwnerClass = ExpectedClass;
+	Program.Function = Function;
+	Program.DebugPath = Function->GetPathName();
+	Program.FrameSize = Function->GetStructureSize();
+	Program.FrameAlignment = FMath::Max(1, Function->GetMinAlignment());
+	Program.RequiredScratchSize = Program.FrameSize + Program.FrameAlignment - 1;
+	Program.ExpectedArgumentCount = 6;
+	Program.bRequiresGuestMemory = true;
+	Program.Parameters.Add(MakeLifetimeStructCodec(InputProperty, EValueCodecDirection::ConstRef, 2));
+	Program.Parameters.Add(MakeLifetimeStructCodec(InOutProperty, EValueCodecDirection::Ref, 3));
+	Program.Parameters.Add(MakeLifetimeStructCodec(OutProperty, EValueCodecDirection::Out, 4));
+	Program.ReturnValue = MakeLifetimeStructCodec(ReturnProperty, EValueCodecDirection::Return, 5);
+	FString PrepareDetails;
+	if (!TestTrue(
+			TEXT("Cold preparation caches the complete frame destruction plan"),
+			PrepareInvocationFrameLifecycle(Program, PrepareDetails)))
+	{
+		AddError(PrepareDetails);
+		return false;
+	}
+	TestEqual(
+		TEXT("Every non-trivial frame field has one cached destructor"),
+		Program.FrameDestructorProperties.Num(),
+		4);
+	TestNull(
+		TEXT("Native UFunction does not provide the required destructor chain"),
+		Function->DestructorLink);
+
+	FPreparedDynamicInvocationCell Cell{ &Program, 0 };
+	FAvidScriptBoundaryGuestMemory GuestMemory;
+	TArray<uint8> Scratch;
+	Scratch.SetNumZeroed(Program.RequiredScratchSize);
+	const UPTRINT ScratchAddress = reinterpret_cast<UPTRINT>(Scratch.GetData());
+	const UPTRINT FrameBegin = Align(
+		ScratchAddress,
+		static_cast<UPTRINT>(Program.FrameAlignment));
+	const UPTRINT FrameEnd = FrameBegin + Program.FrameSize;
+	TSet<const FAvidScriptBindingsLifetimeValue*> Constructed;
+	TSet<const FAvidScriptBindingsLifetimeValue*> Destroyed;
+	TArray<TWeakPtr<TArray<FString>>> Resources;
+	bool bDuplicateConstruction = false;
+	bool bDuplicateOrForeignDestruction = false;
+	FAvidScriptBindingsLifetimeValue::LifetimeObserver =
+		[&](const FAvidScriptBindingsLifetimeValue& Value, const bool bConstructing)
+	{
+		const UPTRINT Address = reinterpret_cast<UPTRINT>(&Value);
+		if (Address < FrameBegin || Address >= FrameEnd)
+		{
+			return;
+		}
+		if (bConstructing)
+		{
+			bDuplicateConstruction |= Constructed.Contains(&Value);
+			Constructed.Add(&Value);
+			Resources.Add(Value.OwnedStrings);
+		}
+		else
+		{
+			bDuplicateOrForeignDestruction |=
+				!Constructed.Contains(&Value) || Destroyed.Contains(&Value);
+			Destroyed.Add(&Value);
+		}
+	};
+	ON_SCOPE_EXIT
+	{
+		FAvidScriptBindingsLifetimeValue::LifetimeObserver = {};
+	};
+
+	const auto StoreWire = [&GuestMemory](
+		const uint32 Address,
+		const uint32 Enabled,
+		const uint32 ObjectSlot = 0,
+		const uint32 ObjectGeneration = 0)
+	{
+		FMemory::Memzero(GuestMemory.Bytes.GetData() + Address, 12);
+		FMemory::Memcpy(GuestMemory.Bytes.GetData() + Address, &Enabled, 4);
+		FMemory::Memcpy(GuestMemory.Bytes.GetData() + Address + 4, &ObjectSlot, 4);
+		FMemory::Memcpy(GuestMemory.Bytes.GetData() + Address + 8, &ObjectGeneration, 4);
+	};
+	StoreWire(32, 1);
+	StoreWire(64, 0);
+	const auto ResetObservation = [&]()
+	{
+		Constructed.Reset();
+		Destroyed.Reset();
+		Resources.Reset();
+		bDuplicateConstruction = false;
+		bDuplicateOrForeignDestruction = false;
+	};
+	const auto TestCleanup = [&]()
+	{
+		TestEqual(TEXT("Frame constructs each owned value once"), Constructed.Num(), 4);
+		TestEqual(TEXT("Frame destroys each owned value once"), Destroyed.Num(), 4);
+		TestFalse(TEXT("Frame construction has no duplicate ownership"), bDuplicateConstruction);
+		TestFalse(TEXT("Frame destruction is exact and owned"), bDuplicateOrForeignDestruction);
+		for (const TWeakPtr<TArray<FString>>& Resource : Resources)
+		{
+			TestFalse(TEXT("Frame releases its owned FString container resource"), Resource.IsValid());
+		}
+	};
+
+	UAvidScriptBindingsTestObject* Receiver = NewObject<UAvidScriptBindingsTestObject>();
+	FAvidScriptBindingInvocationContext Context;
+	FAvidScriptDynamicHostCallResult Result;
+	const uint64 SuccessArguments[] = { 0, 0, 32, 64, 96, 112 };
+	TestTrue(
+		TEXT("Non-trivial frame succeeds"),
+		InvokePreparedDynamicReflection(
+			&Cell, *Receiver, SuccessArguments, &GuestMemory, Context, Scratch, Result));
+	TestEqual(TEXT("Successful frame invokes native code once"), Receiver->FrameLifetimeInvocationCount, 1);
+	TestCleanup();
+
+	ResetObservation();
+	StoreWire(64, 0, 1, 1);
+	TestFalse(
+		TEXT("Late ref decode failure rejects the invocation"),
+		InvokePreparedDynamicReflection(
+			&Cell, *Receiver, SuccessArguments, &GuestMemory, Context, Scratch, Result));
+	TestEqual(TEXT("Decode failure occurs before native code"), Receiver->FrameLifetimeInvocationCount, 1);
+	TestCleanup();
+
+	ResetObservation();
+	StoreWire(64, 0);
+	Receiver->bRejectFrameLifetimeOutput = true;
+	TestFalse(
+		TEXT("Late return encoding failure rejects the invocation"),
+		InvokePreparedDynamicReflection(
+			&Cell, *Receiver, SuccessArguments, &GuestMemory, Context, Scratch, Result));
+	TestEqual(TEXT("Encoding failure occurs after native code"), Receiver->FrameLifetimeInvocationCount, 2);
+	TestTrue(
+		TEXT("Late return failure reports output encoding"),
+		Result.Details.Contains(TEXT("binding_return_write_failed")));
+	TestCleanup();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptUtf8ValueBindingBoundaryTest,
 	"AvidScript.Bindings.Utf8ValueHeap.CrossInvocation",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -1345,6 +1567,12 @@ bool FAvidScriptUtf8ValueBindingBoundaryTest::RunTest(
 	Program.Parameters.Add(MakeUtf8Codec(InOutStringProperty, EValueCodecDirection::Ref, 5, EValueCodecKind::String));
 	Program.Parameters.Add(MakeUtf8Codec(OutNameProperty, EValueCodecDirection::Out, 6, EValueCodecKind::Name));
 	Program.ReturnValue = MakeUtf8Codec(ReturnProperty, EValueCodecDirection::Return, 7, EValueCodecKind::String);
+	FString LifecycleDetails;
+	if (!PrepareInvocationFrameLifecycle(Program, LifecycleDetails))
+	{
+		AddError(LifecycleDetails);
+		return false;
+	}
 	FPreparedDynamicInvocationCell Cell{ &Program, 0 };
 
 	FAvidScriptBoundaryGuestMemory GuestMemory;
