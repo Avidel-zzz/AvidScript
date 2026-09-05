@@ -5,7 +5,7 @@
     "goal": "交付可直接启动的 C# 游戏纵向切片、数据驱动 Runtime 挂载层，以及 Android arm64 构建与设备就绪 Gate",
     "start_commit": "e036d0765a16fa177e73935905e160065a62eb96"
   },
-  "declared_stage": "implementing",
+  "declared_stage": "gate_ready",
   "architecture": {
     "path": "Docs/Phase64/P64.0_Production_Gameplay_Architecture.md",
     "version": 16,
@@ -162,9 +162,9 @@
     }
   ],
   "review": {
-    "completed": false,
-    "evidence": "reopened: 集中静态检查发现四处 EOF 空行；原始 P64 目标中的 UI、存档与长时间运行验收尚未落地，Android UBT/APK 也未完成。保留 9e08cdc 的技术回归与打包历史证据，重开最后批次补齐真实游戏验证，不以工具就绪替代原始目标。",
-    "completed_at_utc": null
+    "completed": true,
+    "evidence": "Docs/Phase64/P64_Integration_Review.md：最终集中审查覆盖 9e08cdc..8e01d33 的 D 实现及完整 Phase 范围，未发现新 Blocker/Critical；完整 diff check、23,352 新增行隐私扫描 0 命中；clean detached commit e94599a 架构检查通过，后续仅债务/批次/审查文档提交。",
+    "completed_at_utc": "2026-09-05T20:19:02.6190053+00:00"
   },
   "budgets": {
     "ubt": 3,
@@ -177,11 +177,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "",
-    "source_tree": "",
-    "state_sha256": "",
-    "review_evidence": "",
-    "at_utc": null
+    "source_commit": "8e01d33e21b42bfa86af370c274b7602d609d89c",
+    "source_tree": "b68c334730cf35ac14ddfe17c2dfdd72c4e14466",
+    "state_sha256": "2925c6678119e1a73187443e3c5bd497340bbd6d1f70dcfe874f1bdf08e9ddfb",
+    "review_evidence": "Docs/Phase64/P64_Integration_Review.md：最终集中审查覆盖 9e08cdc..8e01d33 的 D 实现及完整 Phase 范围，未发现新 Blocker/Critical；完整 diff check、23,352 新增行隐私扫描 0 命中；clean detached commit e94599a 架构检查通过，后续仅债务/批次/审查文档提交。",
+    "at_utc": "2026-09-05T20:19:02.6190053+00:00"
   },
   "gate": {
     "report_path": "",
@@ -212,7 +212,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "freeze -Phase 64 -ReviewEvidence <text>",
-  "revision": 47,
-  "updated_at_utc": "2026-09-05T20:13:28.6831222+00:00"
+  "next_action": "attest -Phase 64 -GateReportPath <path>",
+  "revision": 48,
+  "updated_at_utc": "2026-09-05T20:19:02.6243826+00:00"
 }
