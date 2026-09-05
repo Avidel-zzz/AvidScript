@@ -1351,11 +1351,12 @@ bool FAvidScriptEditorCSharpTypedProjectApiTest::RunTest(const FString& Paramete
 		TickResult.ErrorMessage.Contains(TEXT("generation_mismatch"), ESearchCase::CaseSensitive));
 	TestEqual(TEXT("Stale checked cast cannot execute the projectile function"), StaleProjectile->ActivationCount, 0);
 	TestEqual(TEXT("Stale checked cast fails before later gameplay mutation"), Owner->GameplayValue, 16.0f);
-	TestTrue(TEXT("Stale checked cast does not destroy the projectile"), IsValid(StaleProjectile));
+	TestTrue(
+		TEXT("Faulted Session quarantines its spawned projectile"),
+		!IsValid(StaleProjectile) || StaleProjectile->IsActorBeingDestroyed());
 	TestTrue(TEXT("Stale checked cast preserves the unrelated sentinel"), IsValid(Sentinel));
 	StaleSession.UnloadLive();
-	StaleProjectile->Destroy();
-	TestEqual(TEXT("Manual stale-case cleanup leaves only the owner handle"), Registry.GetLiveHandleCount(), 1);
+	TestEqual(TEXT("Fault cleanup leaves only the owner handle"), Registry.GetLiveHandleCount(), 1);
 
 	return true;
 }

@@ -182,8 +182,12 @@ internal static class UeTypeGeneratorTests
             "generated shells should always publish host activation and teardown hooks");
         int initializeStart = sourceText.IndexOf("void UEncounterWorld::Initialize", StringComparison.Ordinal);
         int initializeSuper = sourceText.IndexOf("Super::Initialize", initializeStart, StringComparison.Ordinal);
+        int initializePackageGuard = sourceText.IndexOf("HasInstalledPackage", initializeStart, StringComparison.Ordinal);
         int initializeHost = sourceText.IndexOf("BeginInstance", initializeStart, StringComparison.Ordinal);
         int initializeDispatch = sourceText.IndexOf("FAvidScriptGeneratedTypeDispatcher::Invoke", initializeStart, StringComparison.Ordinal);
+        int profileInitializeStart = sourceText.IndexOf("void UProfileStore::Initialize", StringComparison.Ordinal);
+        int profilePackageGuard = sourceText.IndexOf("HasInstalledPackage", profileInitializeStart, StringComparison.Ordinal);
+        int profileInitializeHost = sourceText.IndexOf("BeginInstance", profileInitializeStart, StringComparison.Ordinal);
         int deinitializeStart = sourceText.IndexOf("void UProfileStore::Deinitialize", StringComparison.Ordinal);
         int deinitializeDispatch = sourceText.IndexOf("FAvidScriptGeneratedTypeDispatcher::Invoke", deinitializeStart, StringComparison.Ordinal);
         int deinitializeHost = sourceText.IndexOf("EndInstance", deinitializeStart, StringComparison.Ordinal);
@@ -191,11 +195,16 @@ internal static class UeTypeGeneratorTests
         Assert(sourceText.Contains("AvidScriptGeneratedTypeRuntimeHost.h", StringComparison.Ordinal)
             && initializeStart >= 0
             && initializeSuper < initializeHost
+            && initializeSuper < initializePackageGuard
+            && initializePackageGuard < initializeHost
             && initializeHost < initializeDispatch
+            && profileInitializeStart >= 0
+            && profileInitializeStart < profilePackageGuard
+            && profilePackageGuard < profileInitializeHost
             && deinitializeStart >= 0
             && deinitializeDispatch < deinitializeHost
             && deinitializeHost < deinitializeSuper,
-            "native lifecycle should activate before canonical dispatch and tear down after it");
+            "native lifecycle should keep automatic world subsystems dormant without a package, activate before canonical dispatch, and tear down after it");
     }
 
     private static void FunctionDefaultsEnterMetadataManifestAndFingerprint()

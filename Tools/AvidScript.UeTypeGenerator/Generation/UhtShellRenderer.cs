@@ -354,8 +354,17 @@ internal static class UhtShellRenderer
 
     private static void AppendBeginInstance(StringBuilder output, UeTypeManifestEntry type)
     {
+        output.AppendLine("    FAvidScriptGeneratedTypeRuntimeHost& AvidScriptRuntimeHost =");
+        output.AppendLine("        FAvidScriptGeneratedTypeRuntimeHost::Get();");
+        if (type.Kind is "world_subsystem" or "game_instance_subsystem")
+        {
+            output.AppendLine("    if (!AvidScriptRuntimeHost.HasInstalledPackage())");
+            output.AppendLine("    {");
+            output.AppendLine("        return;");
+            output.AppendLine("    }");
+        }
         output.AppendLine("    FString AvidScriptRuntimeError;");
-        output.AppendLine("    if (!FAvidScriptGeneratedTypeRuntimeHost::Get().BeginInstance(");
+        output.AppendLine("    if (!AvidScriptRuntimeHost.BeginInstance(");
         output.AppendLine("        *this,");
         output.Append("        ").Append(type.TypeOrdinal).AppendLine("u,");
         output.AppendLine("        AvidScriptRuntimeError))");

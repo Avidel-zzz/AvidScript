@@ -836,6 +836,11 @@ bool FAvidScriptGeneratedTypeRuntimeHost::ClearPackage(FString& OutError)
 	return true;
 }
 
+bool FAvidScriptGeneratedTypeRuntimeHost::HasInstalledPackage() const
+{
+	return Impl && Impl->bStarted && Impl->Package.IsSet();
+}
+
 bool FAvidScriptGeneratedTypeRuntimeHost::BeginInstance(
 	UObject& Receiver,
 	const uint32 TypeOrdinal,

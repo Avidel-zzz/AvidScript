@@ -418,6 +418,9 @@ bool FAvidScriptGeneratedTypeRuntimeHostTest::RunTest(const FString& Parameters)
 		Host->Shutdown();
 	};
 	TestFalse(
+		TEXT("Fresh Runtime host reports no installed generated package"),
+		Host->HasInstalledPackage());
+	TestFalse(
 		TEXT("Generated package descriptor rejects a Runtime manifest hash mismatch"),
 		Host->InstallPackageFromDescriptorFile(DescriptorPath, Error));
 	TestTrue(
@@ -435,6 +438,9 @@ bool FAvidScriptGeneratedTypeRuntimeHostTest::RunTest(const FString& Parameters)
 		AddError(Error);
 		return true;
 	}
+	TestTrue(
+		TEXT("Runtime host reports the verified generated package"),
+		Host->HasInstalledPackage());
 
 	TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> Receiver(
 		NewObject<UAvidScriptGeneratedTypeSessionTestObject>());
@@ -643,6 +649,7 @@ bool FAvidScriptGeneratedTypeRuntimeHostTest::RunTest(const FString& Parameters)
 		TEXT("Repeated native Super-chain teardown is idempotent"),
 		Host->EndInstance(*Receiver, Error));
 	TestTrue(TEXT("Inactive package can be cleared"), Host->ClearPackage(Error));
+	TestFalse(TEXT("Cleared Runtime host reports no generated package"), Host->HasInstalledPackage());
 	return true;
 }
 

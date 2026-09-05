@@ -51,6 +51,7 @@ public:
 		FAvidScriptGeneratedTypePackageReloadResult& OutResult,
 		FString& OutError);
 	bool ClearPackage(FString& OutError);
+	bool HasInstalledPackage() const;
 
 	bool BeginInstance(UObject& Receiver, uint32 TypeOrdinal, FString& OutError);
 	bool EndInstance(UObject& Receiver, FString& OutError);

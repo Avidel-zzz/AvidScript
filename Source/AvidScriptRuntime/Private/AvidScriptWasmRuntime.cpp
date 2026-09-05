@@ -2478,6 +2478,15 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 	FMemory::Memcpy(&EventArgs[7], &Event.VectorValue.Z, sizeof(float));
 
 	const double EventStartSeconds = FPlatformTime::Seconds();
+	const TConstArrayView<FAvidScriptObjectHandle> PreviousScopedCapabilities =
+		BindingInvocationContext.ScopedObjectCapabilities;
+	TArray<FAvidScriptObjectHandle, TInlineAllocator<4>> CallbackCapabilities;
+	CallbackCapabilities.Append(PreviousScopedCapabilities);
+	if (Event.ObjectHandle.IsValid())
+	{
+		CallbackCapabilities.AddUnique(Event.ObjectHandle);
+	}
+	BindingInvocationContext.ScopedObjectCapabilities = CallbackCapabilities;
 	BeginTypedCallbackEpoch();
 	FAvidScriptVmError EventError;
 	const bool bGameplayEventCalled = bHotFailureOnly
@@ -2498,6 +2507,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 			DebugMap.Get(),
 			OutResult);
 	EndTypedCallbackEpoch();
+	BindingInvocationContext.ScopedObjectCapabilities = PreviousScopedCapabilities;
 	if (!bGameplayEventCalled)
 	{
 		Metrics.EventCallbackCallMs = MeasureElapsedMs(EventStartSeconds);
