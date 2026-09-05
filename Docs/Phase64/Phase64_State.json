@@ -37,9 +37,9 @@
     },
     {
       "id": "P64.D",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "P64.D 自动 UI/跨进程存档、正文重载、存取穿插重载、World 一小时长稳、Shipping 短兼容、当前候选多进程网络、内存归因及 typed Host 诊断均已按对应中文文档验证；Android、人工玩法与 Shipping UI 视觉作为 P65 独立债务保留。",
+      "completed_at_utc": "2026-09-05T20:13:28.6810101+00:00"
     }
   ],
   "debt": [
@@ -212,7 +212,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "batch-complete -Phase 64 -BatchId P64.D -Evidence <text>",
-  "revision": 46,
-  "updated_at_utc": "2026-09-05T20:12:48.1330502+00:00"
+  "next_action": "freeze -Phase 64 -ReviewEvidence <text>",
+  "revision": 47,
+  "updated_at_utc": "2026-09-05T20:13:28.6831222+00:00"
 }
