@@ -83,6 +83,12 @@ PickupRush 实际加载的包为 `42fd8cdd9d934524c7017f793c535ecec64f5ffe7d6311
 `RulesError`/exit 8 拒绝半生成状态。该结论只关闭本次构建阻塞，最终集中审查与完整 Gate 将针对新的
 冻结提交重新执行，不能复用旧候选的通过数字。
 
+补充修复后再次集中审查 `e036d07..f53c810`：共 204 个文件、23,517 行新增、769 行删除，完整
+`git diff --check` 通过；新增行敏感信息扫描 0 命中。detached clean worktree 在 commit
+`f53c810effab9ddabaf5f9caf6e915b6f9731ccb`、tree `5b1c5afd2893d16936a6eb212e6675ff51145f35`
+上执行架构检查通过。未发现新的 Blocker/Critical；本轮没有重复复审已冻结的功能批次，只检查 Gate
+失败修复、其增量失效边界及与完整 Phase 的集成关系。
+
 ## 防复发
 
 生命周期测试至少覆盖一个真实引擎启动顺序；跨执行边界的队列必须参与所属事务；
