@@ -78,7 +78,9 @@ PickupRush 实际加载的包为 `42fd8cdd9d934524c7017f793c535ecec64f5ffe7d6311
 正式重开，修复见 [干净安装生成模块](P64.D_Clean_Checkout_Build.md)。
 
 修复后的 `65e0689` 已在无生成产物和有生成产物两种环境分别完成 39/39 与 8/8 UBT actions；
-架构检查在 clean candidate 通过。该结论只关闭本次构建阻塞，最终集中审查与完整 Gate 将针对新的
+架构检查在 clean candidate 通过。复审进一步发现首次 clean makefile 不会观察尚未登记的头文件出现，
+现已把两个生成路径无条件登记为外部依赖；clean 后只创建头文件会使 UBT 失效 makefile，并以
+`RulesError`/exit 8 拒绝半生成状态。该结论只关闭本次构建阻塞，最终集中审查与完整 Gate 将针对新的
 冻结提交重新执行，不能复用旧候选的通过数字。
 
 ## 防复发

@@ -43,6 +43,8 @@ public class AvidScriptGenerated : ModuleRules
 			ModuleDirectory,
 			"Private",
 			"AvidScriptGeneratedTypes.cpp");
+		ExternalDependencies.Add(GeneratedHeader);
+		ExternalDependencies.Add(GeneratedSource);
 		bool bHasGeneratedHeader = File.Exists(GeneratedHeader);
 		bool bHasGeneratedSource = File.Exists(GeneratedSource);
 		if (bHasGeneratedHeader != bHasGeneratedSource)
@@ -54,11 +56,6 @@ public class AvidScriptGenerated : ModuleRules
 		bool bHasGeneratedTypes = bHasGeneratedHeader && bHasGeneratedSource;
 		PrivateDefinitions.Add(
 			$"AVIDSCRIPT_WITH_GENERATED_TYPES={(bHasGeneratedTypes ? 1 : 0)}");
-		if (bHasGeneratedTypes)
-		{
-			ExternalDependencies.Add(GeneratedHeader);
-			ExternalDependencies.Add(GeneratedSource);
-		}
 	}
 
 	private void StageGeneratedTypeCookPackage(ReadOnlyTargetRules Target)
