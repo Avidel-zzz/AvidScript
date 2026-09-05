@@ -77,8 +77,8 @@
       "evidence": "Docs/Phase64/P64.0_Production_Gameplay_Architecture.md v2；9e08cdc 仅证明技术回归和 PC PickupRush，不覆盖这些原始目标。",
       "deferral_reason": "集中补全最后实现批次，完成前禁止 freeze/close；不能仅沿用历史转移状态。",
       "remediation": "按 D.UI、D.Save、D.Soak、D.Android 落地并取得真实运行证据，保持现有通用 Binding/Session 架构。",
-      "status": "Fixing",
-      "resolution_evidence": "",
+      "status": "Verified",
+      "resolution_evidence": "Docs/Phase64/P64.D_Packaged_UI.md、P64.D_UI_Reload.md、P64.D_Save_Reload_Ownership.md、P64.D_Packaged_World_Soak.md 与 P64_Closeout.md：Development/Shipping 自动双进程 UI 存取通过；UI 正文重载 20 轮 84/84、存取穿插重载 20 轮 165/165（33.11 秒）；Development 包内 World 3602.566 秒 1173/1173、Shipping 3/3；当前候选网络两拓扑 2/2、约 103.835 秒。Android 最低 Gate 由 P64-D01 转入 P65，人工 Shipping UI 由 P64-D09 转入 P65，均未被本项冒充通过。",
       "target_phase": null,
       "transfer_reason": ""
     },
@@ -133,6 +133,19 @@
       "resolution_evidence": "架构v14：稳定backend owner+不回绕generation，prepared TargetLifetime按持有者保留，Unload清空ExportEntries并去除历史identity集合；no-clean UBT 22+4动作通过，Wasmtime 14/14含32轮重载、512空卸载、旧/foreign/prepared/destroyed-backend拒绝与weak释放。",
       "target_phase": null,
       "transfer_reason": ""
+    },
+    {
+      "id": "P64-D09-ManualUiShippingVisual",
+      "severity": "Important",
+      "found_batch": "P64.D",
+      "scope": "Shipping UI 布局、物理点击、Save/Reset/Load 与同一 UserRoot 新进程可见读回",
+      "evidence": "Docs/Phase64/P64.D_Packaged_UI.md：Shipping 自动双进程 write/read 已通过；人工窗口启动后未产生 Save 证据即退出，按用户要求不再中断自动推进。",
+      "deferral_reason": "人工视觉和物理输入不能由自动探针替代，且用户明确要求当前阶段不等待人工验收。",
+      "remediation": "P65 正式 Release 候选使用 fresh Shipping receipt、隔离 UserRoot 完成两进程人工视觉与存档读回清单。",
+      "status": "Transferred",
+      "resolution_evidence": "Docs/Phase64/P64.D_Packaged_UI.md：fresh Shipping 包已能启动 UI，自动跨进程 write/read 已通过；人工 Save/视觉轮次明确未执行。",
+      "target_phase": 65,
+      "transfer_reason": "用户要求当前阶段不中断等待人工验收；该项保留为发布候选的人工作业 Gate，不以自动结果代替。"
     },
     {
       "id": "P64-R01-Integration",
@@ -199,7 +212,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "debt-update -Phase 64 -DebtId P64-D03-OriginalGameplayAcceptance -Status Verified -Evidence <text>",
-  "revision": 43,
-  "updated_at_utc": "2026-09-04T22:20:15.5681332+00:00"
+  "next_action": "batch-complete -Phase 64 -BatchId P64.D -Evidence <text>",
+  "revision": 46,
+  "updated_at_utc": "2026-09-05T20:12:48.1330502+00:00"
 }

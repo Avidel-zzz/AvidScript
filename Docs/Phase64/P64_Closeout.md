@@ -105,9 +105,10 @@ RepNotify 与客户端确认均完成，Runtime 保持加载且无脚本错误�
 
 ## 仍需完成
 
-P64.D 依架构 v15 继续补齐 Shipping 视觉，并收口已记录的网络/重载持续时长；Android
-toolchain/UBT/APK。
-人工游玩和真实设备验收独立保留。P58 类型、iOS、发布工程及性能领先等总目标缺口不会随本阶段编号自动关闭。
+P64.D 的自动 UI、跨进程存档、真实样例重载、网络闭环与包内一小时 World 长稳均已有独立时长和机器可读证据。
+Shipping 人工 UI 轮次因用户要求不中断自动推进而明确记为未执行，转入 `P64-D09-ManualUiShippingVisual`；
+Android toolchain/UBT/APK 继续由 `P64-D01-AndroidDevice` 转入 P65。人工游玩和真实设备验收独立保留。
+P58 类型、iOS、发布工程及性能领先等总目标缺口不会随本阶段编号自动关闭。
 
 ## 流程修正
 
