@@ -134,3 +134,11 @@ P58 类型、iOS、发布工程及性能领先等总目标缺口不会随本阶�
 - 临时 PowerShell 证据命令也必须使用明确 token 边界：变量后接冒号写成 `${id}:`，Git 范围先构造
   `$range = "${base}..HEAD"` 再传给 git；删除临时 worktree 前以实际命名根（本轮为 `C:\tmp`）核对
   绝对路径，不能假定它一定属于 `[IO.Path]::GetTempPath()`。
+- 首轮完整 Gate 在 clean detached UBT 暴露 ignored `AvidScriptGeneratedTypes.h` 硬依赖并正确失败。
+  项目生成头/源必须成对启用；完全缺失是合法首次安装，部分存在则 fail-closed。修复后无生成产物
+  39/39 actions、已有生成产物 8/8 actions 均通过，详见
+  [干净安装生成模块修复](P64.D_Clean_Checkout_Build.md)，但仍需对新冻结提交重跑完整 Gate。
+- 汇总 .NET 测试时不能用子进程尾部的 `5/5` 代替顶层套件计数；离线解析器必须精确匹配 suite 名称，
+  本轮纠正后六套实际为 300/300，未因此重跑测试。PowerShell `foreach` 输出进管道前先物化为数组；
+  Windows 下 `rg` 不接收 shell 风格路径通配符，应传目录并使用 `-g '*.md'`。不同证据域不通过命令
+  分隔符塞进同一临时命令，避免退出码和输出归属混淆。

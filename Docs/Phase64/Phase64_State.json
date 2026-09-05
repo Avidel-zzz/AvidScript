@@ -8,9 +8,9 @@
   "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase64/P64.0_Production_Gameplay_Architecture.md",
-    "version": 16,
-    "sha256": "6712c8f3b0040ad0b033c9f66a8e0b13d8c59c104f2160e3ea800eb73720900a",
-    "revision_reason": "冻结 typed Host 结构化失败传递、VM 元数据 import 身份、callback epoch 一次性消费及 Wasmtime/WAMR 双后端诊断合同；不改变 Guest ABI 和成功热路径"
+    "version": 17,
+    "sha256": "fcaca39a87b36277f4d384c19bf90aabef0dcff1d63bdf5c92ee9f7a857626f1",
+    "revision_reason": "完整 Gate 的 clean detached UBT 证明生成模块错误依赖本地 ignored UHT shell；v17 明确首次安装可编译、生成头源成对启用、部分生成 fail-closed 的模块合同。"
   },
   "documents": {
     "plan": "Docs/Phase64/P64.0_Implementation_Plan.md",
@@ -148,6 +148,19 @@
       "transfer_reason": "用户要求当前阶段不中断等待人工验收；该项保留为发布候选的人工作业 Gate，不以自动结果代替。"
     },
     {
+      "id": "P64-D10-CleanCheckoutGeneratedModule",
+      "severity": "Critical",
+      "found_batch": "P64.D",
+      "scope": "AvidScriptGenerated 在无项目生成头/源的 clean checkout 中必须可编译，部分生成必须拒绝。",
+      "evidence": "ba3dd46 clean detached UE5.8 UBT 因缺少 AvidScriptGeneratedTypes.h 失败，日志见仓库外 P64Gate。",
+      "deferral_reason": "完整 Gate 首次覆盖无 ignored 生成物的候选后才暴露。",
+      "remediation": "由 Build.cs 统一定义 AVIDSCRIPT_WITH_GENERATED_TYPES，守卫项目专属测试并对半生成状态 fail-closed；双路径 UBT 验证。",
+      "status": "Verified",
+      "resolution_evidence": "Docs/Phase64/P64.D_Clean_Checkout_Build.md：候选 65e0689 clean detached 架构通过；无生成类型 UE5.8 Editor UBT 39/39 actions、已有生成类型 no-clean UBT 8/8 actions 均成功。",
+      "target_phase": null,
+      "transfer_reason": ""
+    },
+    {
       "id": "P64-R01-Integration",
       "severity": "Critical",
       "found_batch": "P64.D",
@@ -213,6 +226,6 @@
     }
   ],
   "next_action": "batch-complete -Phase 64 -BatchId P64.D -Evidence <text>",
-  "revision": 49,
-  "updated_at_utc": "2026-09-05T20:47:35.4904899+00:00"
+  "revision": 52,
+  "updated_at_utc": "2026-09-05T20:55:45.6611848+00:00"
 }

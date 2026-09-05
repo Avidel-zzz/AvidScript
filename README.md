@@ -28,7 +28,7 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 
 ## 现在可以做什么
 
-更新于 **2026-09-05**。已跑通 **C# → WASM → UE 事件与 API → Win64 打包运行**，
+更新于 **2026-09-06**。已跑通 **C# → WASM → UE 事件与 API → Win64 打包运行**，
 可开始尝试小型玩法 Demo，不需要 `.avid`。**P64 仍在实施中，不是完整 UE/.NET 替代层。**
 
 | 能力 | 已实现内容 |
@@ -40,7 +40,7 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 | 异步与委托 | 受控 `async/await`、Delay/NextTick、异步加载、Latent、AsyncAction；单播/多播、受支持签名的 `return/ref/out`、独立 UObject 订阅与回调来源查询 |
 | Blueprint 与联机 | callable/event 双向交互；Server/Client/NetMulticast RPC、属性复制与 RepNotify，dedicated/listen 多进程验证 |
 | 热重载与生命周期 | 方法体替换、持久字段迁移、失败候选回滚；存取可穿插重载，退出时取消异步并解绑事件；ObjectHandle 与 Session 隔离 |
-| 构建与发布 | Wasmtime 45 Win64 JIT/AOT、WAMR 兼容后端；内容寻址模块、Generated Type 预编译、Development/Shipping BuildCookRun；Android arm64 交叉 AOT |
+| 构建与发布 | Wasmtime 45 Win64 JIT/AOT、WAMR 兼容后端；内容寻址模块、Generated Type 预编译、Development/Shipping BuildCookRun；未生成项目类型的 clean checkout 可直接编译，部分生成事务 fail-closed；Android arm64 交叉 AOT |
 | IDE 与诊断 | 增量缓存、persistent Worker、`.slnx`/WASI 工作区；源码映射、跨层栈、受控断点/步进与只读变量；typed Host 错误保留具体分类、原因和 import 身份；UE Trace 和 Profiler 导出 |
 
 直接看 C# 样例：[收集玩法](Samples/CSharp/PickupRush/README.md) ·
@@ -51,6 +51,7 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 [包内 World 生命周期门槛](Docs/Phase64/P64.D_Packaged_World_Soak.md)、两次 Editor 一小时切图、
 [分配栈诊断](Docs/Phase64/P64.D_Native_Allocation_Tracing.md)、[调用生命周期修复](Docs/Phase64/P64.D_Invocation_Lifetime.md)
 与[类型化 Host 结构化诊断](Docs/Phase64/P64.D_Typed_Host_Diagnostics.md)。
+首次安装的[干净生成模块构建](Docs/Phase64/P64.D_Clean_Checkout_Build.md)也已完成定点修复与双路径 UBT。
 已知字符串参数帧逐轮保留已归零；整个 Editor 进程的剩余增长仍在归因，不宣称无泄漏。
 完整记录见 [P64 交付](Docs/Phase64/P64_Closeout.md)，类型范围见 [P58 验收](Docs/Phase58/P58.4_Centralized_Gate_Report.md)。
 实现与验收分别记录，限制见[当前边界](#当前边界)。
@@ -168,6 +169,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 | [内存归因与分配栈](Docs/Phase64/P64.D_Native_Allocation_Tracing.md) | VM/Trace/FName/LLM 快照、GC 书签与 Insights 四组查询；`SetUtf8Value` 两窗口 **0 项/0 字节**，结合包内稳态验证 D07，但不宣称整个进程零增长 |
 | [调用生命周期修复](Docs/Phase64/P64.D_Invocation_Lifetime.md) | 原生 UFunction 非平凡帧统一析构；Wasmtime 重载历史改为调用者按需持有；Binding **1/1**、Wasmtime **14/14**，修复后一小时 **877/877** 轮通过 |
 | [类型化 Host 结构化诊断](Docs/Phase64/P64.D_Typed_Host_Diagnostics.md) | Wasmtime typed 与 WAMR dynamic 实际 WASM、Runtime epoch/重入和 Reflection 拒绝共 **4/4** 通过；no-clean Editor UBT 成功 |
+| [干净安装生成模块](Docs/Phase64/P64.D_Clean_Checkout_Build.md) | 无项目生成头/源的 clean candidate **39/39 actions**，已有真实生成类型 **8/8 actions**；均为 UE5.8 Editor UBT 成功，完整 Gate 待新候选重跑 |
 
 编译器专项见 [async 短路求值](Docs/Phase64/P64.D_Async_Short_Circuit.md)与[C# 捕获赋值](Docs/Phase64/P64.D_Captured_Assignment.md)。
 上述机器验证不替代真实输入、视觉、设备和完整长稳验收；[Android 边界](Docs/Phase64/P64.D_Android_Readiness.md)单独保留。

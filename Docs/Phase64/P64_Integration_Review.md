@@ -71,6 +71,16 @@ PickupRush 实际加载的包为 `42fd8cdd9d934524c7017f793c535ecec64f5ffe7d6311
 冻结候选后统一运行完整 AvidScript Automation、固定 .NET、PowerShell 合同、UE5.8 no-clean Editor UBT
 与干净架构 Gate。阶段 Gate 只验证冻结提交，不读取主工作树三项保护改动。
 
+## Gate 重开补充（2026-09-06）
+
+首轮冻结候选 `ba3dd46` 的静态、固定 .NET 与 PowerShell 合同已经完成，但 clean detached UE5.8 UBT
+暴露 `AvidScriptGeneratedTypes.h` 未跟踪依赖并失败，故未生成 Gate report、未签署阶段。Phase 64 已
+正式重开，修复见 [干净安装生成模块](P64.D_Clean_Checkout_Build.md)。
+
+修复后的 `65e0689` 已在无生成产物和有生成产物两种环境分别完成 39/39 与 8/8 UBT actions；
+架构检查在 clean candidate 通过。该结论只关闭本次构建阻塞，最终集中审查与完整 Gate 将针对新的
+冻结提交重新执行，不能复用旧候选的通过数字。
+
 ## 防复发
 
 生命周期测试至少覆盖一个真实引擎启动顺序；跨执行边界的队列必须参与所属事务；
