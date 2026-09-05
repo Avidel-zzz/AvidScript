@@ -46,7 +46,7 @@ function Invoke-ActorLifecycleFixtureBuild {
         -OutputRoot $OutputRoot `
         -Configuration $Configuration `
         -DebugInstrumentation $DebugInstrumentation `
-        -CompilerWorkerMode auto 2>&1)
+        -CompilerWorkerMode disabled 2>&1)
     $BuildExitCode = $LASTEXITCODE
     if ($BuildExitCode -ne 0) {
         $Diagnostic = ($BuildOutput | Select-Object -Last 20 | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine

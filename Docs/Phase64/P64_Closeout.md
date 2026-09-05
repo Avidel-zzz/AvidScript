@@ -112,6 +112,10 @@ fixture 准备入口。UeTypeGenerator 5/5、no-clean UBT 14/14 actions 和聚�
 详见[完整 Automation 隔离恢复](P64.D_Full_Automation_Recovery.md)。正式全量数字等待新冻结候选 Gate，
 不沿用本段聚焦结果或旧候选的部分成功数。
 
+首个恢复候选 `4f28c34` 继续暴露 fixture 包装器的进程退出问题：后台 compiler worker 继承重定向句柄，
+导致报告已成功写出但父进程不退出。该候选在完整 Gate 完成前废弃，入口改为非持久 compiler 模式；
+新的 Gate 必须同时验证制品、报告和自然 exit 0。
+
 ## 保留边界
 
 P64.D 的自动 UI、跨进程存档、真实样例重载、网络闭环与包内一小时 World 长稳均已有独立时长和机器可读证据。
