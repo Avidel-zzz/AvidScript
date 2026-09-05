@@ -32,6 +32,15 @@ public:
 		return false;
 	}
 
+	bool AdoptSpawnedActor(
+		FAvidScriptObjectRegistry&,
+		AActor&,
+		const FAvidScriptObjectHandle&,
+		FAvidScriptObjectHandleResult&) override
+	{
+		return false;
+	}
+
 	bool Release(
 		const FAvidScriptObjectHandle&,
 		FAvidScriptObjectRegistry&,

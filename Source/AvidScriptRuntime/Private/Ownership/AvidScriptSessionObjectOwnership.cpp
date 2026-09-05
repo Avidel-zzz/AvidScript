@@ -10,6 +10,34 @@ bool FAvidScriptSessionObjectOwnership::Adopt(
 	const EAvidScriptObjectFactoryKind Kind,
 	FAvidScriptObjectHandleResult& OutResult)
 {
+	const EOwnedObjectKind OwnedKind =
+		Kind == EAvidScriptObjectFactoryKind::ActorComponent
+			? EOwnedObjectKind::ActorComponent
+			: EOwnedObjectKind::NewObject;
+	return AdoptInternal(Registry, Object, Handle, OwnedKind, OutResult);
+}
+
+bool FAvidScriptSessionObjectOwnership::AdoptSpawnedActor(
+	FAvidScriptObjectRegistry& Registry,
+	AActor& Actor,
+	const FAvidScriptObjectHandle& Handle,
+	FAvidScriptObjectHandleResult& OutResult)
+{
+	return AdoptInternal(
+		Registry,
+		Actor,
+		Handle,
+		EOwnedObjectKind::SpawnedActor,
+		OutResult);
+}
+
+bool FAvidScriptSessionObjectOwnership::AdoptInternal(
+	FAvidScriptObjectRegistry& Registry,
+	UObject& Object,
+	const FAvidScriptObjectHandle& Handle,
+	const EOwnedObjectKind Kind,
+	FAvidScriptObjectHandleResult& OutResult)
+{
 	if (!IsValid(&Object))
 	{
 		SetFailure(
@@ -55,9 +83,13 @@ bool FAvidScriptSessionObjectOwnership::Adopt(
 
 	UActorComponent* const Component = Cast<UActorComponent>(&Object);
 	AActor* const ComponentOwner = Component != nullptr ? Component->GetOwner() : nullptr;
-	const bool bKindMatches = Kind == EAvidScriptObjectFactoryKind::ActorComponent
-		? Component != nullptr && IsValid(ComponentOwner)
-		: Component == nullptr && !Object.IsA<AActor>();
+	const bool bKindMatches =
+		(Kind == EOwnedObjectKind::ActorComponent
+			&& Component != nullptr && IsValid(ComponentOwner))
+		|| (Kind == EOwnedObjectKind::NewObject
+			&& Component == nullptr && !Object.IsA<AActor>())
+		|| (Kind == EOwnedObjectKind::SpawnedActor
+			&& Object.IsA<AActor>());
 	if (!bKindMatches)
 	{
 		SetFailure(
@@ -86,7 +118,7 @@ bool FAvidScriptSessionObjectOwnership::Adopt(
 	OwnedObject.ObjectKey = ObjectKey;
 	OwnedObject.Object = &Object;
 	OwnedObject.ComponentOwner = ComponentOwner;
-	OwnedObject.StrongObject = Kind == EAvidScriptObjectFactoryKind::NewObject
+	OwnedObject.StrongObject = Kind == EOwnedObjectKind::NewObject
 		? &Object
 		: nullptr;
 	OwnedObject.Handle = Handle;
@@ -132,6 +164,22 @@ bool FAvidScriptSessionObjectOwnership::Release(
 	}
 
 	const FOwnedObject OwnedObject = OwnedObjects[*OwnedObjectIndex];
+	if (OwnedObject.Kind == EOwnedObjectKind::SpawnedActor)
+	{
+		AActor* const Actor = Cast<AActor>(OwnedObject.Object.Get());
+		if (IsValid(Actor)
+			&& !Actor->IsActorBeingDestroyed()
+			&& !Actor->Destroy())
+		{
+			SetFailure(
+				OutResult,
+				Handle,
+				Actor,
+				TEXT("ownership_actor_destroy_failed"),
+				TEXT("retry only while the session-owned Actor remains live"));
+			return false;
+		}
+	}
 	if (!Registry.ReleaseHandle(OwnedObject.Handle, OutResult, false))
 	{
 		return false;
@@ -139,7 +187,7 @@ bool FAvidScriptSessionObjectOwnership::Release(
 
 	RemoveAt(*OwnedObjectIndex);
 	ResetBoundRegistryIfEmpty();
-	DestroyOwnedComponent(OwnedObject);
+	DestroyOwnedObject(OwnedObject);
 	return true;
 }
 
@@ -256,7 +304,7 @@ void FAvidScriptSessionObjectOwnership::Cleanup(FAvidScriptObjectRegistry& Regis
 		FOwnedObject& OwnedObject = CleanupObjects[OwnedObjectIndex];
 		FAvidScriptObjectHandleResult ReleaseResult;
 		Registry.ReleaseHandle(OwnedObject.Handle, ReleaseResult, false);
-		DestroyOwnedComponent(OwnedObject);
+		DestroyOwnedObject(OwnedObject);
 		OwnedObject.StrongObject = nullptr;
 	}
 	for (int32 BorrowedIndex = CleanupBorrowedObjects.Num() - 1;
@@ -352,7 +400,7 @@ void FAvidScriptSessionObjectOwnership::AddReferencedObjects(FReferenceCollector
 {
 	for (FOwnedObject& OwnedObject : OwnedObjects)
 	{
-		if (OwnedObject.Kind == EAvidScriptObjectFactoryKind::NewObject
+		if (OwnedObject.Kind == EOwnedObjectKind::NewObject
 			&& OwnedObject.StrongObject != nullptr)
 		{
 			Collector.AddReferencedObject(OwnedObject.StrongObject);
@@ -389,9 +437,19 @@ void FAvidScriptSessionObjectOwnership::SetFailure(
 		NextAction);
 }
 
-void FAvidScriptSessionObjectOwnership::DestroyOwnedComponent(const FOwnedObject& OwnedObject)
+void FAvidScriptSessionObjectOwnership::DestroyOwnedObject(
+	const FOwnedObject& OwnedObject)
 {
-	if (OwnedObject.Kind != EAvidScriptObjectFactoryKind::ActorComponent)
+	if (OwnedObject.Kind == EOwnedObjectKind::SpawnedActor)
+	{
+		AActor* const Actor = Cast<AActor>(OwnedObject.Object.Get());
+		if (IsValid(Actor) && !Actor->IsActorBeingDestroyed())
+		{
+			Actor->Destroy();
+		}
+		return;
+	}
+	if (OwnedObject.Kind != EOwnedObjectKind::ActorComponent)
 	{
 		return;
 	}

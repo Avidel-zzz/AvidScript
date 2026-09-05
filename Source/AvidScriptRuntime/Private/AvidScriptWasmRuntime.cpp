@@ -2158,6 +2158,9 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEvent(
 	const double EventStartSeconds = FPlatformTime::Seconds();
 	ActiveDelegateOutputTransaction = OutputTransaction.Get();
 	ActiveDelegateOutputToken = OutputTransactionToken;
+	const TConstArrayView<FAvidScriptObjectHandle> PreviousScopedCapabilities =
+		BindingInvocationContext.ScopedObjectCapabilities;
+	BindingInvocationContext.ScopedObjectCapabilities = BorrowedHandles;
 	BeginTypedCallbackEpoch();
 	FAvidScriptVmError EventError;
 	bool bCalled = InvokeVmExport(
@@ -2168,6 +2171,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEvent(
 		Frame.Cells,
 		EventError);
 	EndTypedCallbackEpoch();
+	BindingInvocationContext.ScopedObjectCapabilities = PreviousScopedCapabilities;
 	ActiveDelegateOutputTransaction = nullptr;
 	ActiveDelegateOutputToken = 0;
 	if (bCalled && OutputTransaction.IsValid())

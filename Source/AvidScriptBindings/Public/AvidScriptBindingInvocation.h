@@ -104,6 +104,7 @@ struct FAvidScriptBindingInvocationContext
 {
 	FAvidScriptObjectRegistry* ObjectRegistry = nullptr;
 	IAvidScriptObjectOwnershipDomain* ObjectOwnership = nullptr;
+	TConstArrayView<FAvidScriptObjectHandle> ScopedObjectCapabilities;
 	FAvidScriptUtf8ValueHeap* Utf8ValueHeap = nullptr;
 	FAvidScriptArrayValueHeap* ArrayValueHeap = nullptr;
 	FAvidScriptCompositeValueHeap* CompositeValueHeap = nullptr;

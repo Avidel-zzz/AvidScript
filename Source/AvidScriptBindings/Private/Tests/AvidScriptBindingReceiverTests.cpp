@@ -18,6 +18,8 @@ class FAvidScriptReceiverTestOwnership final : public IAvidScriptObjectOwnership
 public:
 	bool Adopt(FAvidScriptObjectRegistry&, UObject&, const FAvidScriptObjectHandle&,
 		EAvidScriptObjectFactoryKind, FAvidScriptObjectHandleResult&) override { return false; }
+	bool AdoptSpawnedActor(FAvidScriptObjectRegistry&, AActor&,
+		const FAvidScriptObjectHandle&, FAvidScriptObjectHandleResult&) override { return false; }
 	bool Borrow(FAvidScriptObjectRegistry&, UObject&, FAvidScriptObjectHandleResult&) override { return false; }
 	bool Release(const FAvidScriptObjectHandle&, FAvidScriptObjectRegistry&,
 		FAvidScriptObjectHandleResult&) override { return false; }
@@ -105,6 +107,13 @@ bool FAvidScriptBindingReceiverCapabilitiesTest::RunTest(const FString& Paramete
 
 	Context.ObjectOwnership = nullptr;
 	CheckAvidScriptReceiver(*this, TEXT("Missing domain"), OwnedHandle, UAvidScriptBindingsTestObject::StaticClass(), Context, nullptr,
+		TEXT("binding_receiver_capability_denied"));
+	Context.ScopedObjectCapabilities = MakeArrayView(&OwnedHandle, 1);
+	CheckAvidScriptReceiver(*this, TEXT("Scoped callback capability"), OwnedHandle,
+		UAvidScriptBindingsTestObject::StaticClass(), Context, OwnedObject);
+	Context.ScopedObjectCapabilities = {};
+	CheckAvidScriptReceiver(*this, TEXT("Expired callback capability"), OwnedHandle,
+		UAvidScriptBindingsTestObject::StaticClass(), Context, nullptr,
 		TEXT("binding_receiver_capability_denied"));
 	Context.OwnerHandle = OwnedHandle;
 	CheckAvidScriptReceiver(*this, TEXT("Owner without domain"), OwnedHandle, UAvidScriptBindingsTestObject::StaticClass(), Context, OwnedObject);

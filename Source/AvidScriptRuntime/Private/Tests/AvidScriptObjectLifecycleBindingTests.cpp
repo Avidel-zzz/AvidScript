@@ -3,6 +3,7 @@
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptBindingInvocation.h"
 #include "AvidScriptObjectLifecycleBinding.h"
+#include "Ownership/AvidScriptSessionObjectOwnership.h"
 
 #include "Dom/JsonObject.h"
 #include "Engine/Engine.h"
@@ -420,6 +421,53 @@ bool FAvidScriptObjectLifecycleBindingTest::RunTest(const FString& Parameters)
 	TestTrue(
 		TEXT("DestroyActor accepts the current reused generation"),
 		DispatchLifecycle(*Package, DestroyOrdinal, SecondDestroyArguments, nullptr, Context, Result));
+
+	FAvidScriptSessionObjectOwnership Ownership;
+	FAvidScriptBindingInvocationContext OwnedContext = Context;
+	OwnedContext.ObjectOwnership = &Ownership;
+	constexpr uint32 OwnedHandleAddress = 80;
+	const uint64 OwnedSpawnArguments[] = { 0, TransformAddress, OwnedHandleAddress };
+	TestTrue(
+		TEXT("Session SpawnActor adopts the returned Actor capability"),
+		DispatchLifecycle(
+			*Package,
+			SpawnOrdinal,
+			OwnedSpawnArguments,
+			&GuestMemory,
+			OwnedContext,
+			Result));
+	const FAvidScriptObjectHandle OwnedHandle{
+		GuestMemory.ReadValue<uint32>(OwnedHandleAddress),
+		GuestMemory.ReadValue<uint32>(OwnedHandleAddress + sizeof(uint32))
+	};
+	AActor* OwnedActor = Registry.ResolveObject<AActor>(OwnedHandle, ResolveResult, false);
+	TestTrue(
+		TEXT("Session-owned Actor is an authorized receiver"),
+		OwnedActor != nullptr && Ownership.HasCapability(OwnedHandle, OwnedActor));
+	const uint64 OwnedIsAArguments[] = {
+		OwnedHandle.Slot, OwnedHandle.Generation, 0
+	};
+	TestTrue(
+		TEXT("Session-owned Actor supports capability-checked IsA"),
+		DispatchLifecycle(
+			*Package,
+			IsAOrdinal,
+			OwnedIsAArguments,
+			nullptr,
+			OwnedContext,
+			Result));
+	TestTrue(
+		TEXT("Session-owned Actor releases through DestroyActor"),
+		DispatchLifecycle(
+			*Package,
+			DestroyOrdinal,
+			MakeArrayView(OwnedIsAArguments, 2),
+			nullptr,
+			OwnedContext,
+			Result));
+	TestFalse(
+		TEXT("Destroyed Actor capability is revoked"),
+		Ownership.HasCapability(OwnedHandle));
 	return true;
 }
 

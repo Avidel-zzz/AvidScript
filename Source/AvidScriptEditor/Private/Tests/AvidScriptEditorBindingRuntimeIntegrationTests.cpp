@@ -312,6 +312,11 @@ public:
 	{
 		return false;
 	}
+	bool AdoptSpawnedActor(FAvidScriptObjectRegistry&, AActor&,
+		const FAvidScriptObjectHandle&, FAvidScriptObjectHandleResult&) override
+	{
+		return false;
+	}
 	bool Borrow(FAvidScriptObjectRegistry&, UObject&, FAvidScriptObjectHandleResult&) override
 	{
 		return false;
@@ -1374,9 +1379,9 @@ bool AcceptAvidScriptGeneratedBindingLifecycleBuild(
 			OutManifest,
 			RootlessReloadResult));
 	Test.TestEqual(
-		*FString::Printf(TEXT("%s null receiver surfaces a host import failure"), *BuildLabel),
+		*FString::Printf(TEXT("%s null receiver preserves the binding target category"), *BuildLabel),
 		RootlessReloadResult.ErrorCategory,
-		FString(TEXT("host_import_failed")));
+		FString(TEXT("binding_target_invalid")));
 	Test.TestTrue(
 		*FString::Printf(TEXT("%s null receiver identifies the generated import"), *BuildLabel),
 		RootlessReloadResult.RuntimeResult.ImportName.StartsWith(
@@ -6184,10 +6189,6 @@ bool FAvidScriptEditorPreparedReflectionPropertyRuntimeTest::RunTest(
 		0ull);
 	Runtime.Unload();
 
-	AddExpectedErrorPlain(
-		TEXT("Failed to activate EncounterSubsystem: generated type instance activation requires an installed GameThread package"),
-		EAutomationExpectedErrorFlags::Contains,
-		1);
 	UWorld* World = nullptr;
 	if (!TestTrue(TEXT("Non-Self property host world is created"),
 			CreateAvidScriptBindingRuntimeIntegrationWorld(World, false)))

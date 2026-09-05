@@ -104,6 +104,7 @@ class FAvidScriptBoundaryOwnership final : public IAvidScriptObjectOwnershipDoma
 {
 public:
 	bool Adopt(FAvidScriptObjectRegistry&, UObject&, const FAvidScriptObjectHandle&, EAvidScriptObjectFactoryKind, FAvidScriptObjectHandleResult&) override { return false; }
+	bool AdoptSpawnedActor(FAvidScriptObjectRegistry&, AActor&, const FAvidScriptObjectHandle&, FAvidScriptObjectHandleResult&) override { return false; }
 	bool Borrow(FAvidScriptObjectRegistry& Registry, UObject& Object, FAvidScriptObjectHandleResult& OutResult) override
 	{
 		++BorrowCount;

@@ -5,6 +5,7 @@
 
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformProcess.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
@@ -509,7 +510,7 @@ bool FAvidScriptModulePackageResolverTest::RunTest(const FString& Parameters)
 {
 	static_cast<void>(Parameters);
 	const FString TestRoot = FPaths::Combine(
-		FPaths::ProjectSavedDir(),
+		FPlatformProcess::UserTempDir(),
 		TEXT("AvidScriptTests/ModulePackageResolver"),
 		FGuid::NewGuid().ToString(EGuidFormats::Digits));
 	ON_SCOPE_EXIT

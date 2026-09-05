@@ -1002,6 +1002,7 @@ bool FAvidScriptRuntimePreparedDynamicPackageTest::RunTest(
 		0
 	};
 	FAvidScriptDynamicHostCallResult CallResult;
+	Runtime.BeginTypedCallbackEpochForTesting();
 	const bool bPreparedCallSucceeded = PreparedTarget.Invoke(
 		PreparedTarget.Context,
 		MakeArrayView(Arguments),
@@ -1047,6 +1048,7 @@ bool FAvidScriptRuntimePreparedDynamicPackageTest::RunTest(
 		TEXT("Rejected prepared Runtime target is never replayed through fallback"),
 		Instrumentation.PreparedDynamicFallbackCount,
 		uint64(0));
+	Runtime.EndTypedCallbackEpochForTesting();
 
 	Runtime.SetBindingPackageForTesting(
 		TSharedPtr<const FAvidScriptBindingPackage>());

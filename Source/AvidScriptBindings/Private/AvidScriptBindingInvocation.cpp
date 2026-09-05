@@ -2700,12 +2700,39 @@ bool DispatchAvidScriptObjectLifecycle(
 				RegisterResult.ErrorMessage);
 			return false;
 		}
-
-		if (!WriteAvidScriptLifecycleHandle(Call.Arguments[2], Handle, *Call.GuestMemory, Details))
+		if (Context.ObjectOwnership != nullptr
+			&& !Context.ObjectOwnership->AdoptSpawnedActor(
+				*Context.ObjectRegistry,
+				*Actor,
+				Handle,
+				RegisterResult))
 		{
 			FAvidScriptObjectHandleResult ReleaseResult;
 			Context.ObjectRegistry->ReleaseHandle(Handle, ReleaseResult, false);
 			Actor->Destroy();
+			SetAvidScriptBindingDispatchFailure(
+				OutResult,
+				RegisterResult.ErrorCategory.IsEmpty()
+					? TEXT("binding_spawn_ownership_failed")
+					: *RegisterResult.ErrorCategory,
+				Plan.DebugPath,
+				RegisterResult.ErrorMessage);
+			return false;
+		}
+
+		if (!WriteAvidScriptLifecycleHandle(Call.Arguments[2], Handle, *Call.GuestMemory, Details))
+		{
+			FAvidScriptObjectHandleResult ReleaseResult;
+			if (Context.ObjectOwnership != nullptr)
+			{
+				Context.ObjectOwnership->Release(
+					Handle, *Context.ObjectRegistry, ReleaseResult);
+			}
+			else
+			{
+				Context.ObjectRegistry->ReleaseHandle(Handle, ReleaseResult, false);
+				Actor->Destroy();
+			}
 			SetAvidScriptBindingDispatchFailure(
 				OutResult,
 				TEXT("binding_guest_write_failed"),
@@ -2752,6 +2779,17 @@ bool DispatchAvidScriptObjectLifecycle(
 			TEXT("The Actor handle belongs to a different World than the active Runtime Session."));
 		return false;
 	}
+	if (Handle != Context.OwnerHandle
+		&& Context.ObjectOwnership != nullptr
+		&& !Context.ObjectOwnership->HasCapability(Handle, Actor))
+	{
+		SetAvidScriptBindingDispatchFailure(
+			OutResult,
+			TEXT("binding_receiver_capability_denied"),
+			Plan.DebugPath,
+			TEXT("The Actor handle has no capability in the active Runtime Session."));
+		return false;
+	}
 
 	if (Plan.Kind == EAvidScriptBindingInvocationKind::ObjectDestroyActor)
 	{
@@ -2764,7 +2802,32 @@ bool DispatchAvidScriptObjectLifecycle(
 				TEXT("Destroying the Runtime owner requires a deferred component shutdown path."));
 			return false;
 		}
-		if (!Actor->Destroy())
+		if (Context.ObjectOwnership != nullptr
+			&& !Context.ObjectOwnership->Owns(Handle, Actor))
+		{
+			SetAvidScriptBindingDispatchFailure(
+				OutResult,
+				TEXT("binding_destroy_capability_denied"),
+				Plan.DebugPath,
+				TEXT("DestroyActor accepts only Actors spawned and owned by the active Runtime Session."));
+			return false;
+		}
+
+		FAvidScriptObjectHandleResult ReleaseResult;
+		if (Context.ObjectOwnership != nullptr)
+		{
+			if (!Context.ObjectOwnership->Release(
+					Handle, *Context.ObjectRegistry, ReleaseResult))
+			{
+				SetAvidScriptBindingDispatchFailure(
+					OutResult,
+					TEXT("binding_handle_release_failed"),
+					Plan.DebugPath,
+					ReleaseResult.ErrorMessage);
+				return false;
+			}
+		}
+		else if (!Actor->Destroy())
 		{
 			SetAvidScriptBindingDispatchFailure(
 				OutResult,
@@ -2774,8 +2837,7 @@ bool DispatchAvidScriptObjectLifecycle(
 			return false;
 		}
 
-		FAvidScriptObjectHandleResult ReleaseResult;
-		if (!Context.ObjectRegistry->ReleaseHandle(Handle, ReleaseResult, false))
+		else if (!Context.ObjectRegistry->ReleaseHandle(Handle, ReleaseResult, false))
 		{
 			SetAvidScriptBindingDispatchFailure(
 				OutResult,

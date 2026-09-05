@@ -44,7 +44,10 @@ bool ResolveAvidScriptBindingReceiver(
 		OutDetails = TEXT("binding_receiver_world_mismatch: the receiver belongs to a different world.");
 		return false;
 	}
+	const bool bScopedCapability =
+		Context.ScopedObjectCapabilities.Contains(Handle);
 	if (Handle != Context.OwnerHandle
+		&& !bScopedCapability
 		&& (Context.ObjectOwnership == nullptr
 			|| !Context.ObjectOwnership->HasCapability(Handle, Object)))
 	{

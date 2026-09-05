@@ -161,6 +161,19 @@
       "transfer_reason": ""
     },
     {
+      "id": "P64-D11-FullAutomationIsolation",
+      "severity": "Critical",
+      "found_batch": "P64.D",
+      "scope": "Phase 64 exact-candidate full AvidScript Automation reports 451/461 Success with ten failures across CSharp fixture preparation, typed callback capability epochs, installed-package isolation, and resolver fixture setup.",
+      "evidence": "cb808b9 candidate log C:\\tmp\\AvidScript\\P64Gate\\cb808b9-20260906-001\\automation-full.log; strict parser counted 461 performed, 451 success, 10 fail.",
+      "deferral_reason": "The failures were discovered only by the exact-candidate full Automation gate after clean and generated publication paths passed.",
+      "remediation": "Repair shared fixture and runtime-test entry contracts, prepare required CSharp guests, rerun focused static/build evidence, then execute one concentrated full exact-candidate Gate.",
+      "status": "Open",
+      "resolution_evidence": "",
+      "target_phase": null,
+      "transfer_reason": ""
+    },
+    {
       "id": "P64-R01-Integration",
       "severity": "Critical",
       "found_batch": "P64.D",
@@ -225,7 +238,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "batch-complete -Phase 64 -BatchId P64.D -Evidence <text>",
-  "revision": 56,
-  "updated_at_utc": "2026-09-05T21:45:24.8433488+00:00"
+  "next_action": "debt-update -Phase 64 -DebtId P64-D11-FullAutomationIsolation -Status Verified -Evidence <text>",
+  "revision": 57,
+  "updated_at_utc": "2026-09-05T21:48:52.6541821+00:00"
 }

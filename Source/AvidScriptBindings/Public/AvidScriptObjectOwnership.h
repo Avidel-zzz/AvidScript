@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 
 class UObject;
+class AActor;
 class FAvidScriptObjectRegistry;
 struct FAvidScriptObjectHandle;
 struct FAvidScriptObjectHandleResult;
@@ -19,6 +20,11 @@ public:
 		UObject& Object,
 		const FAvidScriptObjectHandle& Handle,
 		EAvidScriptObjectFactoryKind Kind,
+		FAvidScriptObjectHandleResult& OutResult) = 0;
+	virtual bool AdoptSpawnedActor(
+		FAvidScriptObjectRegistry& Registry,
+		AActor& Actor,
+		const FAvidScriptObjectHandle& Handle,
 		FAvidScriptObjectHandleResult& OutResult) = 0;
 	virtual bool Borrow(
 		FAvidScriptObjectRegistry& Registry,

@@ -22,6 +22,11 @@ public:
 		const FAvidScriptObjectHandle& Handle,
 		EAvidScriptObjectFactoryKind Kind,
 		FAvidScriptObjectHandleResult& OutResult) override;
+	virtual bool AdoptSpawnedActor(
+		FAvidScriptObjectRegistry& Registry,
+		AActor& Actor,
+		const FAvidScriptObjectHandle& Handle,
+		FAvidScriptObjectHandleResult& OutResult) override;
 	virtual bool Borrow(
 		FAvidScriptObjectRegistry& Registry,
 		UObject& Object,
@@ -50,6 +55,13 @@ public:
 		FString& OutError);
 
 private:
+	enum class EOwnedObjectKind : uint8
+	{
+		NewObject,
+		ActorComponent,
+		SpawnedActor
+	};
+
 	struct FOwnedObject
 	{
 		TObjectKey<UObject> ObjectKey;
@@ -57,7 +69,7 @@ private:
 		TWeakObjectPtr<AActor> ComponentOwner;
 		TObjectPtr<UObject> StrongObject;
 		FAvidScriptObjectHandle Handle;
-		EAvidScriptObjectFactoryKind Kind = EAvidScriptObjectFactoryKind::NewObject;
+		EOwnedObjectKind Kind = EOwnedObjectKind::NewObject;
 	};
 	struct FBorrowedObject
 	{
@@ -71,7 +83,13 @@ private:
 		const UObject* Object,
 		const TCHAR* ErrorCategory,
 		const TCHAR* NextAction);
-	static void DestroyOwnedComponent(const FOwnedObject& OwnedObject);
+	bool AdoptInternal(
+		FAvidScriptObjectRegistry& Registry,
+		UObject& Object,
+		const FAvidScriptObjectHandle& Handle,
+		EOwnedObjectKind Kind,
+		FAvidScriptObjectHandleResult& OutResult);
+	static void DestroyOwnedObject(const FOwnedObject& OwnedObject);
 	void RemoveAt(int32 OwnedObjectIndex);
 	void RemoveBorrowedAt(int32 BorrowedObjectIndex);
 	void ResetBoundRegistryIfEmpty();
