@@ -156,7 +156,7 @@
       "deferral_reason": "完整 Gate 首次覆盖无 ignored 生成物的候选后才暴露。",
       "remediation": "由 Build.cs 统一定义 AVIDSCRIPT_WITH_GENERATED_TYPES，守卫项目专属测试并对半生成状态 fail-closed；双路径 UBT 验证。",
       "status": "Verified",
-      "resolution_evidence": "Docs/Phase64/P64.D_Clean_Checkout_Build.md：候选 65e0689 clean detached 架构通过；无生成类型 UE5.8 Editor UBT 39/39 actions、已有生成类型 no-clean UBT 8/8 actions 均成功。",
+      "resolution_evidence": "Docs/Phase64/P64.D_Clean_Checkout_Build.md：无生成类型 clean UBT 39/39、已有生成类型 UBT 8/8 通过；两个未创建路径无条件纳入 ExternalDependencies，clean 后单独出现头文件会使 makefile 失效并以 RulesError/native exit 8 拒绝。",
       "target_phase": null,
       "transfer_reason": ""
     },
@@ -226,6 +226,6 @@
     }
   ],
   "next_action": "freeze -Phase 64 -ReviewEvidence <text>",
-  "revision": 53,
-  "updated_at_utc": "2026-09-05T20:58:22.0134371+00:00"
+  "revision": 54,
+  "updated_at_utc": "2026-09-05T21:02:24.2425254+00:00"
 }
