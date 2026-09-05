@@ -50,11 +50,26 @@ PickupRush 实际加载的包为 `42fd8cdd9d934524c7017f793c535ecec64f5ffe7d6311
 此前失败探针和构建仍保留：非法 fixture package/module ID、测试误用私有 API，以及 schema/AOT
 冷启动问题均不能计为通过。它们属于 Critical 集成问题的定点修复，不以此冒充一次完整 Gate。
 
+## 最终集中审查（2026-09-06）
+
+冻结前对 `9e08cdc..e94599a` 的后续 P64.D 实现只执行一次阶段级集中审查，并结合完整 Phase
+`e036d07..e94599a` 的格式、隐私和架构预检。审查覆盖 VM 导出条目所有权与 generation、typed Host
+失败的一次性消费、反射参数帧析构、非 Self receiver capability/World 边界、GC 后 borrowed 句柄压缩、
+委托回调来源、C# async 短路重写、UI 存档对象所有权、Shipping package/receipt 身份和验证报告边界。
+未发现新的 Blocker/Critical；已知人工与移动端缺口均已显式转入 P65，未冒充通过。
+
+- 完整 Phase 共 200 个文件、23,352 行新增、767 行删除；`git diff --check` 通过。
+- 仅扫描新增行的本机绝对路径、私钥、API key、access token、client secret 与 password 模式，
+  23,352 行中命中 0。
+- detached clean worktree 在 commit `e94599ad33aaf1d8bfb1c6e4761d5ceb9640c32a`、tree
+  `91c361ff20585484a1d919c3fd78e2d2687fa235` 上执行架构检查通过；主工作树唯一偏差仍是已登记保护文件。
+- D03 的自动 UI、双进程存档、正文/存取重载、网络和一小时 World 证据已闭环；D01、D02、D09
+  分别保留 Android/设备、人工玩法和 Shipping UI 人工验收。
+
 ## 阶段 Gate 待办
 
-冻结候选后统一运行完整 AvidScript Automation、固定 .NET、受影响 PowerShell 合同与架构 Gate。
-既有 Win64 Development/Shipping 证据属于修复前版本，不能自动视作修正版打包验收。
-Android APK/真机、人工游玩，以及原始目标中的 UI、存档和长时间运行验收仍未完成。
+冻结候选后统一运行完整 AvidScript Automation、固定 .NET、PowerShell 合同、UE5.8 no-clean Editor UBT
+与干净架构 Gate。阶段 Gate 只验证冻结提交，不读取主工作树三项保护改动。
 
 ## 防复发
 

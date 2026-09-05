@@ -131,3 +131,6 @@ P58 类型、iOS、发布工程及性能领先等总目标缺口不会随本阶�
 - 重放旧的 UI reload 命令前必须从当前 catalog/runtime snapshot 取得 PackageId，并核对启动正文 SHA
   与 baseline 制品；不能照抄旧文档中的身份。身份或正文漂移时探针应在零轮 fail-closed，随后重新生成
   同源 C# 制品，而不是替换 expected 值后反复试跑。
+- 临时 PowerShell 证据命令也必须使用明确 token 边界：变量后接冒号写成 `${id}:`，Git 范围先构造
+  `$range = "${base}..HEAD"` 再传给 git；删除临时 worktree 前以实际命名根（本轮为 `C:\tmp`）核对
+  绝对路径，不能假定它一定属于 `[IO.Path]::GetTempPath()`。
