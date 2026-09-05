@@ -103,6 +103,15 @@ RepNotify 与客户端确认均完成，Runtime 保持加载且无脚本错误�
 `cf98b6c6fc85a75f8a51b2cec4768c4195d6a3b3bf446d240c94f1f586837085`。这是当前提交的有界网络回归，
 不宣称一小时网络长稳或替代物理输入验收。
 
+## 完整 Automation 隔离恢复
+
+首次完整 Gate 候选 `cb808b9` 实际执行 461 项、451 项成功、10 项失败，因此该候选保持失败且不用于
+attestation。修复批使未安装 package 的自动 Subsystem 静默休眠，限定 GameplayEvent UObject handle
+只在回调窗口授权，并按 Session fault 合同回收其拥有的 Actor；同时新增固定 SDK 的 Release/Debug
+fixture 准备入口。UeTypeGenerator 5/5、no-clean UBT 14/14 actions 和聚焦 Automation 10/10 通过。
+详见[完整 Automation 隔离恢复](P64.D_Full_Automation_Recovery.md)。正式全量数字等待新冻结候选 Gate，
+不沿用本段聚焦结果或旧候选的部分成功数。
+
 ## 保留边界
 
 P64.D 的自动 UI、跨进程存档、真实样例重载、网络闭环与包内一小时 World 长稳均已有独立时长和机器可读证据。
