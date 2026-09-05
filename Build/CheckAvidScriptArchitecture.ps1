@@ -630,6 +630,16 @@ foreach ($ForbiddenGeneratedDependency in @('AvidScriptEditor', 'AvidScriptVM', 
         Add-Violation "AvidScriptGenerated must not depend directly on $ForbiddenGeneratedDependency"
     }
 }
+foreach ($RequiredGeneratedAvailabilityContract in @(
+    'ConfigureGeneratedTypeCompilation',
+    'bHasGeneratedHeader != bHasGeneratedSource',
+    'AVIDSCRIPT_WITH_GENERATED_TYPES=',
+    'ExternalDependencies.Add(GeneratedHeader)',
+    'ExternalDependencies.Add(GeneratedSource)')) {
+    if (-not $GeneratedBuild.Contains($RequiredGeneratedAvailabilityContract)) {
+        Add-Violation "AvidScriptGenerated clean-checkout contract is missing $RequiredGeneratedAvailabilityContract"
+    }
+}
 $GeneratedDispatcherHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/ScriptTypes/AvidScriptGeneratedTypeDispatcher.h'
 $GeneratedDispatcherSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/ScriptTypes/AvidScriptGeneratedTypeDispatcher.cpp'
 $GeneratedTypeRouterHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/ScriptTypes/AvidScriptGeneratedTypeRouter.h'
@@ -663,6 +673,14 @@ $SemanticUeRuntimeContractSource = Read-RequiredFile 'Tools/AvidScript.CSharpSem
 $CSharpUePropertyPlanSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpUePropertyAccessPlan.cs'
 $CSharpGuestLowererSourceForUeTypes = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpGuestLowerer.cs'
 $UeTypeManifestSource = Read-RequiredFile 'Tools/AvidScript.UeTypeGenerator/Model/UeTypeGenerationManifest.cs'
+foreach ($GeneratedTypeOptionalTestSource in @(
+    $GeneratedTypeRuntimeTestsSource,
+    $GeneratedTypeNetworkHarnessSource)) {
+    if (-not $GeneratedTypeOptionalTestSource.Contains(
+            '#if WITH_DEV_AUTOMATION_TESTS && AVIDSCRIPT_WITH_GENERATED_TYPES')) {
+        Add-Violation 'project-specific generated type tests must be disabled in a clean checkout'
+    }
+}
 foreach ($RequiredGeneratedDispatchContract in @(
     'IAvidScriptGeneratedTypeDispatchTarget',
     'FAvidScriptGeneratedTypeDispatcher',

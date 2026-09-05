@@ -29,7 +29,36 @@ public class AvidScriptGenerated : ModuleRules
 			}
 		);
 
+		ConfigureGeneratedTypeCompilation();
 		StageGeneratedTypeCookPackage(Target);
+	}
+
+	private void ConfigureGeneratedTypeCompilation()
+	{
+		string GeneratedHeader = Path.Combine(
+			ModuleDirectory,
+			"Public",
+			"AvidScriptGeneratedTypes.h");
+		string GeneratedSource = Path.Combine(
+			ModuleDirectory,
+			"Private",
+			"AvidScriptGeneratedTypes.cpp");
+		bool bHasGeneratedHeader = File.Exists(GeneratedHeader);
+		bool bHasGeneratedSource = File.Exists(GeneratedSource);
+		if (bHasGeneratedHeader != bHasGeneratedSource)
+		{
+			throw new BuildException(
+				"AvidScript generated type header and source must be generated together.");
+		}
+
+		bool bHasGeneratedTypes = bHasGeneratedHeader && bHasGeneratedSource;
+		PrivateDefinitions.Add(
+			$"AVIDSCRIPT_WITH_GENERATED_TYPES={(bHasGeneratedTypes ? 1 : 0)}");
+		if (bHasGeneratedTypes)
+		{
+			ExternalDependencies.Add(GeneratedHeader);
+			ExternalDependencies.Add(GeneratedSource);
+		}
 	}
 
 	private void StageGeneratedTypeCookPackage(ReadOnlyTargetRules Target)

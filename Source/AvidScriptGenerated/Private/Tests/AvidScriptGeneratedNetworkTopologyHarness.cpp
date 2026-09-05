@@ -1,6 +1,6 @@
 #include "Tests/AvidScriptGeneratedNetworkTopologyHarness.h"
 
-#if WITH_DEV_AUTOMATION_TESTS
+#if WITH_DEV_AUTOMATION_TESTS && AVIDSCRIPT_WITH_GENERATED_TYPES
 
 #include "AvidScriptGeneratedTypes.h"
 
