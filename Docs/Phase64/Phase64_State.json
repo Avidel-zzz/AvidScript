@@ -5,7 +5,7 @@
     "goal": "交付可直接启动的 C# 游戏纵向切片、数据驱动 Runtime 挂载层，以及 Android arm64 构建与设备就绪 Gate",
     "start_commit": "e036d0765a16fa177e73935905e160065a62eb96"
   },
-  "declared_stage": "gate_ready",
+  "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase64/P64.0_Production_Gameplay_Architecture.md",
     "version": 16,
@@ -37,9 +37,9 @@
     },
     {
       "id": "P64.D",
-      "status": "Completed",
-      "evidence": "P64.D 自动 UI/跨进程存档、正文重载、存取穿插重载、World 一小时长稳、Shipping 短兼容、当前候选多进程网络、内存归因及 typed Host 诊断均已按对应中文文档验证；Android、人工玩法与 Shipping UI 视觉作为 P65 独立债务保留。",
-      "completed_at_utc": "2026-09-05T20:13:28.6810101+00:00"
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
     }
   ],
   "debt": [
@@ -162,9 +162,9 @@
     }
   ],
   "review": {
-    "completed": true,
-    "evidence": "Docs/Phase64/P64_Integration_Review.md：最终集中审查覆盖 9e08cdc..8e01d33 的 D 实现及完整 Phase 范围，未发现新 Blocker/Critical；完整 diff check、23,352 新增行隐私扫描 0 命中；clean detached commit e94599a 架构检查通过，后续仅债务/批次/审查文档提交。",
-    "completed_at_utc": "2026-09-05T20:19:02.6190053+00:00"
+    "completed": false,
+    "evidence": "reopened: 完整 Gate 在 clean detached checkout 的 UE5.8 UBT 中发现 AvidScriptGenerated 模块硬依赖 Git ignored 的 AvidScriptGeneratedTypes.h；干净安装无法构建。保留失败日志，修复无生成包时的可复现编译合同后重新冻结并运行完整 Gate。",
+    "completed_at_utc": null
   },
   "budgets": {
     "ubt": 3,
@@ -177,11 +177,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "8e01d33e21b42bfa86af370c274b7602d609d89c",
-    "source_tree": "b68c334730cf35ac14ddfe17c2dfdd72c4e14466",
-    "state_sha256": "2925c6678119e1a73187443e3c5bd497340bbd6d1f70dcfe874f1bdf08e9ddfb",
-    "review_evidence": "Docs/Phase64/P64_Integration_Review.md：最终集中审查覆盖 9e08cdc..8e01d33 的 D 实现及完整 Phase 范围，未发现新 Blocker/Critical；完整 diff check、23,352 新增行隐私扫描 0 命中；clean detached commit e94599a 架构检查通过，后续仅债务/批次/审查文档提交。",
-    "at_utc": "2026-09-05T20:19:02.6190053+00:00"
+    "source_commit": "",
+    "source_tree": "",
+    "state_sha256": "",
+    "review_evidence": "",
+    "at_utc": null
   },
   "gate": {
     "report_path": "",
@@ -212,7 +212,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "attest -Phase 64 -GateReportPath <path>",
-  "revision": 48,
-  "updated_at_utc": "2026-09-05T20:19:02.6243826+00:00"
+  "next_action": "batch-complete -Phase 64 -BatchId P64.D -Evidence <text>",
+  "revision": 49,
+  "updated_at_utc": "2026-09-05T20:47:35.4904899+00:00"
 }
