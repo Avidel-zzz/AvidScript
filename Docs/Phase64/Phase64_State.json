@@ -5,7 +5,7 @@
     "goal": "交付可直接启动的 C# 游戏纵向切片、数据驱动 Runtime 挂载层，以及 Android arm64 构建与设备就绪 Gate",
     "start_commit": "e036d0765a16fa177e73935905e160065a62eb96"
   },
-  "declared_stage": "gate_ready",
+  "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase64/P64.0_Production_Gameplay_Architecture.md",
     "version": 17,
@@ -37,9 +37,9 @@
     },
     {
       "id": "P64.D",
-      "status": "Completed",
-      "evidence": "P64.D 自动 UI/存档、重载、World 长稳、Development/Shipping 包内运行、多进程网络、内存归因与 typed Host 诊断均已完成；首轮完整 Gate 暴露的 clean checkout 生成模块 Critical 已按 Docs/Phase64/P64.D_Clean_Checkout_Build.md 修复并以无/有生成产物双路径 UBT 验证。Android、人工玩法与 Shipping UI 视觉保留为 P65 独立债务。",
-      "completed_at_utc": "2026-09-05T20:58:22.0114184+00:00"
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
     }
   ],
   "debt": [
@@ -175,9 +175,9 @@
     }
   ],
   "review": {
-    "completed": true,
-    "evidence": "Docs/Phase64/P64_Integration_Review.md：补充集中审查覆盖 e036d07..f53c810，204 files、+23517/-769，完整 diff check 与新增行敏感扫描通过；clean commit f53c810 架构通过，生成模块 clean/已有/半生成三路径已验证，未发现新 Blocker/Critical。其后仅提交本审查文档。",
-    "completed_at_utc": "2026-09-05T21:04:24.7182309+00:00"
+    "completed": false,
+    "evidence": "reopened: 修复后完整 Gate 在正式 Generated Type 包环境完成 461 项 Automation，其中 451 Success、10 Fail。失败暴露旧 host_import_failed 断言、receiver capability fixture、已安装 Generated package 隔离及缺失预构建制品等集成合同漂移；保留日志并集中修复后重新冻结。",
+    "completed_at_utc": null
   },
   "budgets": {
     "ubt": 3,
@@ -190,11 +190,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "d602fd95ec26e55668537f42d10b2ffc632313e1",
-    "source_tree": "d4b207390e44cbe3e855dc93b250d58bf0b12e01",
-    "state_sha256": "566418aa12c6d58007a32d2fb180af98fdd4253b0a80cb377019ee358e03d1c5",
-    "review_evidence": "Docs/Phase64/P64_Integration_Review.md：补充集中审查覆盖 e036d07..f53c810，204 files、+23517/-769，完整 diff check 与新增行敏感扫描通过；clean commit f53c810 架构通过，生成模块 clean/已有/半生成三路径已验证，未发现新 Blocker/Critical。其后仅提交本审查文档。",
-    "at_utc": "2026-09-05T21:04:24.7182309+00:00"
+    "source_commit": "",
+    "source_tree": "",
+    "state_sha256": "",
+    "review_evidence": "",
+    "at_utc": null
   },
   "gate": {
     "report_path": "",
@@ -225,7 +225,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "attest -Phase 64 -GateReportPath <path>",
-  "revision": 55,
-  "updated_at_utc": "2026-09-05T21:04:24.7237415+00:00"
+  "next_action": "batch-complete -Phase 64 -BatchId P64.D -Evidence <text>",
+  "revision": 56,
+  "updated_at_utc": "2026-09-05T21:45:24.8433488+00:00"
 }
