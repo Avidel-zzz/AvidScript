@@ -39,6 +39,12 @@ Assert-True ($CandidateScriptText.Contains('source did not stabilize after the b
 Assert-True ($CandidateScriptText.Contains("'-Profile=`"{0}`"'")) 'candidate freezer must preserve hyphenated profile paths through UE command-line parsing'
 Assert-True ($CandidateScriptText.Contains('Assert-SidecarBenchmarkProjectProvenance')) 'candidate freezer must revalidate project provenance after artifact preparation'
 Assert-True ($CandidateScriptText.Contains('identical_wasm_compiler_profile')) 'candidate freezer must preserve the identical-WASM compiler profile'
+Assert-True ($CandidateScriptText.Contains('Publish-AvidScriptModuleReleasePackage')) 'candidate freezer must publish prepared C# artifacts through the release package contract'
+Assert-True ($CandidateScriptText.Contains('package_catalog_sha256')) 'candidate freezer must freeze the published package catalog identity'
+$CandidateSchema = Get-Content -LiteralPath $CandidateSchemaPath -Raw | ConvertFrom-Json -Depth 64
+foreach ($Field in @('package_id', 'package_descriptor_path', 'package_descriptor_sha256', 'package_catalog_path', 'package_catalog_sha256')) {
+    Assert-True (@($CandidateSchema.'$defs'.artifact.required) -ccontains $Field) "candidate artifact schema must require $Field"
+}
 
 $InputIds = @($Protocol.tracked_inputs | ForEach-Object { [string]$_.id })
 Assert-True ($InputIds.Count -eq (@($InputIds | Sort-Object -Unique)).Count) 'tracked input ids must be unique'

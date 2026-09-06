@@ -132,7 +132,7 @@
     "artifact": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["module_id", "artifact_stem", "profile_path", "manifest_path", "manifest_sha256", "report_path", "report_sha256", "commandlet_log_path", "generated_build_count"],
+      "required": ["module_id", "artifact_stem", "profile_path", "manifest_path", "manifest_sha256", "report_path", "report_sha256", "commandlet_log_path", "generated_build_count", "package_id", "package_descriptor_path", "package_descriptor_sha256", "package_catalog_path", "package_catalog_sha256"],
       "properties": {
         "module_id": { "type": "string", "minLength": 1 },
         "artifact_stem": { "type": "string", "minLength": 1 },
@@ -142,7 +142,12 @@
         "report_path": { "type": "string", "minLength": 1 },
         "report_sha256": { "$ref": "#/$defs/sha256" },
         "commandlet_log_path": { "type": "string", "minLength": 1 },
-        "generated_build_count": { "type": "integer", "minimum": 0, "maximum": 1 }
+        "generated_build_count": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "package_id": { "$ref": "#/$defs/sha256" },
+        "package_descriptor_path": { "type": "string", "minLength": 1 },
+        "package_descriptor_sha256": { "$ref": "#/$defs/sha256" },
+        "package_catalog_path": { "type": "string", "minLength": 1 },
+        "package_catalog_sha256": { "$ref": "#/$defs/sha256" }
       }
     }
   }

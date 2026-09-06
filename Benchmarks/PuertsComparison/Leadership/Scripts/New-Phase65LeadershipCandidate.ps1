@@ -25,6 +25,7 @@ $ComparisonRoot = Split-Path -Parent $LeadershipRoot
 $RunnerPluginRoot = Split-Path -Parent (Split-Path -Parent $ComparisonRoot)
 $CommonPath = Join-Path $ComparisonRoot 'Scripts/PuertsBenchmarkSidecar.Common.ps1'
 . $CommonPath
+. (Join-Path $RunnerPluginRoot 'Build/AvidScriptModuleReleasePackage.ps1')
 
 function Resolve-RequiredPath {
     param(
@@ -199,13 +200,35 @@ function Invoke-LeadershipProjectPreparation {
     )
     $Artifacts = @(
         foreach ($ProfilePath in $Profiles) {
-            Invoke-LeadershipProfilePreparation `
+            $Prepared = Invoke-LeadershipProfilePreparation `
                 -EditorExecutable $EditorExecutable `
                 -EngineRoot $EngineRoot `
                 -ProjectPath $ProjectPath `
                 -ProjectRoot $ProjectRoot `
                 -ProfileRelativePath $ProfilePath `
                 -AllowGeneratedBuildHandshake $true
+            $Published = Publish-AvidScriptModuleReleasePackage `
+                -RuntimeManifestPath ([string]$Prepared.manifest_path) `
+                -ProjectRoot $ProjectRoot `
+                -ModuleId ([string]$Prepared.module_id) `
+                -Configuration Development `
+                -TargetPlatform Win64
+            [pscustomobject][ordered]@{
+                module_id = [string]$Prepared.module_id
+                artifact_stem = [string]$Prepared.artifact_stem
+                profile_path = [string]$Prepared.profile_path
+                manifest_path = [string]$Prepared.manifest_path
+                manifest_sha256 = [string]$Prepared.manifest_sha256
+                report_path = [string]$Prepared.report_path
+                report_sha256 = [string]$Prepared.report_sha256
+                commandlet_log_path = [string]$Prepared.commandlet_log_path
+                generated_build_count = [int]$Prepared.generated_build_count
+                package_id = [string]$Published.PackageId
+                package_descriptor_path = [string]$Published.DescriptorPath
+                package_descriptor_sha256 = [string]$Published.DescriptorSha256
+                package_catalog_path = [string]$Published.CatalogPath
+                package_catalog_sha256 = Get-SidecarFileSha256 -Path ([string]$Published.CatalogPath)
+            }
         }
     )
     return [pscustomobject][ordered]@{
