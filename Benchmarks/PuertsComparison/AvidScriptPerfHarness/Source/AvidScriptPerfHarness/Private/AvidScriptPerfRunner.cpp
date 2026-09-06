@@ -42,6 +42,19 @@ namespace
 	constexpr int32 PerfRunnerResultSchemaVersion = 2;
 	constexpr float PerfRunnerTickDeltaSeconds = 1.0f / 60.0f;
 
+#if WITH_DEV_AUTOMATION_TESTS
+	FAvidScriptVmLoadConfig::FExecutionBudget MakePerfRunnerExecutionBudget()
+	{
+		FAvidScriptVmLoadConfig::FExecutionBudget Budget;
+		Budget.FuelPerEntry = UINT64_C(4) << 30;
+		Budget.EpochDeadlineTicks = 1;
+		Budget.EpochTimeoutMilliseconds = 100;
+		Budget.MaxLinearMemoryBytes = UINT64_C(64) << 20;
+		Budget.MaxHostCallsPerEntry = MAX_uint32;
+		return Budget;
+	}
+#endif
+
 	void AppendCanonicalJsonString(
 		const FString& Value,
 		FString& OutCanonical)
@@ -675,6 +688,8 @@ namespace
 			Session.SetHostContext(HostContext);
 #if WITH_DEV_AUTOMATION_TESTS
 			Session.SetBackendSelectionForTesting(BackendSelection);
+			Session.SetExecutionBudgetForTesting(
+				MakePerfRunnerExecutionBudget());
 #else
 			OutError = TEXT("AvidScript benchmark backend selection requires WITH_DEV_AUTOMATION_TESTS");
 			return false;

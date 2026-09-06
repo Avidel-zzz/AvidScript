@@ -189,6 +189,19 @@ FAvidScriptRuntimeSession::~FAvidScriptRuntimeSession()
 		ClearError.IsEmpty() ? TEXT("unknown") : *ClearError);
 }
 
+FAvidScriptVmLoadConfig::FExecutionBudget
+FAvidScriptRuntimeSession::ResolveExecutionBudget(
+	const FAvidScriptVmBackendSelection& Selection) const
+{
+#if WITH_DEV_AUTOMATION_TESTS
+	if (ExecutionBudgetOverrideForTesting.IsSet())
+	{
+		return ExecutionBudgetOverrideForTesting.GetValue();
+	}
+#endif
+	return MakeSessionExecutionBudget(Selection);
+}
+
 void FAvidScriptRuntimeSession::SuspendForApplicationLifecycle(
 	const uint64 Generation)
 {
@@ -438,7 +451,7 @@ bool FAvidScriptRuntimeSession::LoadEmbeddedSmoke(FAvidScriptWasmReloadResult& O
 	FAvidScriptWasmSmokeResult RuntimeResult;
 	FString BudgetError;
 	if (!CandidateRuntime->ConfigureExecutionBudget(
-			MakeSessionExecutionBudget(BackendSelection),
+			ResolveExecutionBudget(BackendSelection),
 			BudgetError))
 	{
 		SetReloadFailure(
@@ -1977,7 +1990,7 @@ bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 	FString SupplementalImportError;
 	FString BudgetError;
 	if (!CandidateRuntime->ConfigureExecutionBudget(
-			MakeSessionExecutionBudget(Artifact.BackendSelection),
+			ResolveExecutionBudget(Artifact.BackendSelection),
 			BudgetError))
 	{
 		SetReloadFailure(

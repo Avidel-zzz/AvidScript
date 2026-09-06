@@ -22,9 +22,15 @@ $invokeText = Get-Content -LiteralPath (
     Join-Path $toolsRoot 'Invoke-Phase54GameplayBenchmark.ps1') -Raw
 $harnessRoot = Split-Path -Parent $toolsRoot
 $comparisonRoot = Split-Path -Parent $harnessRoot
+$benchmarksRoot = Split-Path -Parent $comparisonRoot
+$pluginRoot = Split-Path -Parent $benchmarksRoot
 . (Join-Path $comparisonRoot 'Scripts\PuertsBenchmarkSidecar.Common.ps1')
 $runnerText = Get-Content -LiteralPath (
     Join-Path $harnessRoot 'Source\AvidScriptPerfHarness\Private\AvidScriptPerfRunner.cpp') -Raw
+$runtimeSessionHeaderText = Get-Content -LiteralPath (
+    Join-Path $pluginRoot 'Source\AvidScriptRuntime\Public\AvidScriptRuntimeSession.h') -Raw
+$runtimeSessionSourceText = Get-Content -LiteralPath (
+    Join-Path $pluginRoot 'Source\AvidScriptRuntime\Private\Session\AvidScriptRuntimeSession.cpp') -Raw
 $gameplaySourceText = Get-Content -LiteralPath (
     Join-Path $harnessRoot 'Source\AvidScriptPerfHarness\Private\AvidScriptGameplayFrameBenchmark.cpp') -Raw
 $nativePropertyBatch = [regex]::Match(
@@ -180,6 +186,23 @@ Assert-True (
     [int]$gameplayFormal.calibration.maximum_iterations -gt
         [int]$gameplayDiagnostic.calibration.maximum_iterations) `
     'Gameplay formal profile 必须允许 native small frame 达到 5 ms 计时下限。'
+Assert-True (
+    $runtimeSessionHeaderText.Contains('SetExecutionBudgetForTesting') -and
+    $runtimeSessionHeaderText.Contains('ExecutionBudgetOverrideForTesting') -and
+    $runtimeSessionSourceText.Contains('ResolveExecutionBudget(') -and
+    $runtimeSessionSourceText.Contains('return MakeSessionExecutionBudget(Selection);')) `
+    'Runtime Session 必须只通过加载前测试覆盖注入 benchmark 预算，并保留生产预算解析路径。'
+Assert-True (
+    $runtimeSessionSourceText.Contains('Budget.FuelPerEntry = 50000000;') -and
+    $runtimeSessionSourceText.Contains('Budget.EpochTimeoutMilliseconds = 100;') -and
+    $runnerText.Contains('MakePerfRunnerExecutionBudget') -and
+    $runnerText.Contains('Budget.FuelPerEntry = UINT64_C(4) << 30;') -and
+    $runnerText.Contains('Budget.EpochDeadlineTicks = 1;') -and
+    $runnerText.Contains('Budget.EpochTimeoutMilliseconds = 100;') -and
+    $runnerText.Contains('Budget.MaxLinearMemoryBytes = UINT64_C(64) << 20;') -and
+    $runnerText.Contains('Budget.MaxHostCallsPerEntry = MAX_uint32;') -and
+    $runnerText.Contains('Session.SetExecutionBudgetForTesting(')) `
+    '正式 benchmark 可提高 fuel/Host-call 上限，但不得关闭 epoch 与线性内存边界或改变生产默认值。'
 Assert-True (
     $runnerText.Contains('GetExpectedDataOrientedHostCallCount') -and
     $runnerText.Contains('Observation.HostImportCallCount != ExpectedHostImportCallCount')) `

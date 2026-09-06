@@ -164,6 +164,12 @@ public:
 		check(!LiveRuntime);
 		BackendSelection = InBackendSelection;
 	}
+	void SetExecutionBudgetForTesting(
+		const FAvidScriptVmLoadConfig::FExecutionBudget& InExecutionBudget)
+	{
+		check(!LiveRuntime);
+		ExecutionBudgetOverrideForTesting = InExecutionBudget;
+	}
 	void SetCandidateBeginPlayObserverForTesting(TFunction<void()> InObserver)
 	{
 		CandidateBeginPlayObserverForTesting =
@@ -231,6 +237,8 @@ private:
 		const FAvidScriptRuntimeArtifact& Artifact,
 		TUniquePtr<FAvidScriptWasmRuntimeInstance>& OutRuntime,
 		FAvidScriptWasmReloadResult& OutResult) const;
+	FAvidScriptVmLoadConfig::FExecutionBudget ResolveExecutionBudget(
+		const FAvidScriptVmBackendSelection& Selection) const;
 	bool ValidateExpectedOwner(
 		const FAvidScriptWasmReloadManifest& Manifest,
 		FAvidScriptWasmReloadResult& OutResult) const;
@@ -292,6 +300,8 @@ private:
 	bool bApplicationSuspended = false;
 	bool bLifecycleInvalidated = false;
 #if WITH_DEV_AUTOMATION_TESTS
+	TOptional<FAvidScriptVmLoadConfig::FExecutionBudget>
+		ExecutionBudgetOverrideForTesting;
 	TFunction<void(IAvidScriptBindingHostEffectJournal*)>
 		CandidateBeginPlayObserverForTesting;
 	TFunction<void()> LiveExecutionObserverForTesting;

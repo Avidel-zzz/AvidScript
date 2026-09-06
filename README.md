@@ -181,6 +181,9 @@ Win64 Shipping BuildCookRun 与 fresh receipt 通过；Android 仍为 3/19。Rel
 插件，Generated Type 使用配置专属 overlay，不改写 `.uproject` 或源码 `current.json`。详见
 [P65.C3 发布 Gate](Docs/Phase65/P65.C3_Win64_Shipping_Release_Gate.md)。
 
+P65.D 已完成可复现性能候选装配、Wasmtime/Puerts 实物身份对齐和 gameplay correctness oracle 修正。
+正式 5 进程矩阵正在重跑；基准专用的有界执行预算已加入，但不改变生产 Session 的各项默认预算。
+
 ## 验证
 
 完整回归与后续专项分别记录，**不累加成当前全量通过数**：
