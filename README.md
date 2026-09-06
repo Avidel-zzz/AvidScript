@@ -28,7 +28,7 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 
 ## 现在可以做什么
 
-更新于 **2026-09-06**。已跑通 **C# → WASM → UE 事件与 API → Win64 打包运行**，
+更新于 **2026-09-07**。已跑通 **C# → WASM → UE 事件与 API → Win64 打包运行**，
 可开始尝试小型玩法 Demo，不需要 `.avid`。**P64 正式 Gate 与 P65.C Shipping 发布 Gate 已完成；
 当前仍不是完整 UE/.NET 替代层。**
 
@@ -186,6 +186,12 @@ UE 交互 workload 相对 Puerts 为 Semantic **0.60x**、small **0.38x**、dens
 Wasmtime/V8 P50/P95 为 **1.128x/1.189x**，完整 callback 为 **831.86 ns（Puerts 的 5.67x）**。
 因此 UE 交互领先已形成证据，但完整性能领导力仍未关闭；下一批集中优化 guest-entry containment 与
 callback 成功路径。详见 [P65.D3 正式性能基线](Docs/Phase65/P65.D3_Formal_Performance_Baseline.md)。
+
+P65.D4-D6 已加入专用 Wasmtime event thunk、低竞争 epoch watchdog 和 callback 成功路径惰性观测。
+最新 clean candidate 单进程诊断中，三个 AvidScript lane 的 callback P50/P95 均低于对应 Puerts lane；
+generated S1 的 callback P50 比率为 **`0.886x / 0.913x`**，gameplay small/dense 相对 Puerts static
+为 **`0.196x / 0.182x`**。该结果仍是诊断证据，正式 5 进程 Gate 完成前不改写 P65.D3 结论。
+详见 [P65.D7 性能诊断](Docs/Phase65/P65.D7_Clean_Candidate_Performance_Diagnostic.md)。
 
 ## 验证
 
