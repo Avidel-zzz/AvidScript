@@ -25,9 +25,9 @@
     },
     {
       "id": "P65.B",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "Docs/Phase65/P65.B1_Compatibility_Doctor.md 与 P65.B2_Redacted_Support_Bundle.md；Doctor contracts 5/5、support contracts 4/4、release contracts 22/22；真实 UE5.8 Doctor 23 passed/18 warning/0 blocked；真实脱敏 bundle inventory/readback/privacy 通过。",
+      "completed_at_utc": "2026-09-06T03:46:07.7913169+00:00"
     },
     {
       "id": "P65.C",
@@ -148,6 +148,6 @@
     }
   ],
   "next_action": "debt-update -Phase 65 -DebtId P65-D01-AndroidDevice -Status Verified -Evidence <text>",
-  "revision": 7,
-  "updated_at_utc": "2026-09-06T03:23:54.6237959+00:00"
+  "revision": 8,
+  "updated_at_utc": "2026-09-06T03:46:07.7934501+00:00"
 }

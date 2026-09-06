@@ -167,6 +167,10 @@ Binding、Generated Type、项目 Target 与 Android toolchain，并输出稳定
 当前工程的 Win64 开发链全部通过、**0 blocked**；warning 为源码 checkout 无安装 receipt 与 Android `3/19`
 及其未满足子项，不影响 PC 开发，但不会被写成已完成的分发或移动端证据。
 
+P65.B2 已完成脱敏 support bundle：一次命令执行 Doctor 并原子发布带 Schema/inventory/SHA-256 的支持包，
+路径替换为中性占位符，默认不收集日志。显式日志仅接受 `.log/.txt`，每份限制为 64 KiB/200 行；源码、
+WASM、PDB、Guest IR、环境与原始日志不进入包。当前真实 bundle 隐私扫描和 readback 通过。
+
 ## 验证
 
 完整回归与后续专项分别记录，**不累加成当前全量通过数**：

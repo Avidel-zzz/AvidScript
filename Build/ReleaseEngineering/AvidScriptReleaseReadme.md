@@ -48,6 +48,18 @@ pwsh -NoProfile -File Build/InvokeAvidScriptCompatibilityDoctor.ps1 `
 报告使用稳定 JSON code/status/remediation，并区分 blocked、warning 与 not-run，不会把缺失 Android
 工具链或未执行设备测试写成通过。
 
+需要提交问题材料时，可在插件目录一次完成诊断和脱敏导出：
+
+```powershell
+pwsh -NoProfile -File Build/ExportAvidScriptSupportBundle.ps1 `
+  -ProjectRoot "C:\Path\To\YourProject" `
+  -EngineRoot "C:\Path\To\UnrealEngine" `
+  -OutputRoot "C:\Path\Outside\TheProject\AvidScriptSupport"
+```
+
+默认不包含日志；可用 `-LogPath` 显式添加最多 8 份 `.log/.txt`，每份仅保留脱敏后的 64 KiB/200 行尾部。
+不要把原始项目、源码、WASM、PDB 或凭据当作日志传入。
+
 ## 边界
 
 当前为 `0.1.0` 开发者预览。Android UBT/APK/真机、iOS、Shipping 人工视觉与完整 C#/.NET 兼容层
