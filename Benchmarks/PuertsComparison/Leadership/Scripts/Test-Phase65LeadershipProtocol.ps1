@@ -42,8 +42,11 @@ Assert-True ($CandidateScriptText.Contains('identical_wasm_compiler_profile')) '
 Assert-True ($CandidateScriptText.Contains('Publish-AvidScriptModuleReleasePackage')) 'candidate freezer must publish prepared C# artifacts through the release package contract'
 Assert-True ($CandidateScriptText.Contains('package_catalog_sha256')) 'candidate freezer must freeze the published package catalog identity'
 $CandidateSchema = Get-Content -LiteralPath $CandidateSchemaPath -Raw | ConvertFrom-Json -Depth 64
-foreach ($Field in @('package_id', 'package_descriptor_path', 'package_descriptor_sha256', 'package_catalog_path', 'package_catalog_sha256')) {
+foreach ($Field in @('package_id', 'package_descriptor_path', 'package_descriptor_sha256')) {
     Assert-True (@($CandidateSchema.'$defs'.artifact.required) -ccontains $Field) "candidate artifact schema must require $Field"
+}
+foreach ($Field in @('package_catalog_path', 'package_catalog_sha256')) {
+    Assert-True (@($CandidateSchema.properties.benchmark_project.required) -ccontains $Field) "candidate benchmark project schema must require $Field"
 }
 
 $InputIds = @($Protocol.tracked_inputs | ForEach-Object { [string]$_.id })

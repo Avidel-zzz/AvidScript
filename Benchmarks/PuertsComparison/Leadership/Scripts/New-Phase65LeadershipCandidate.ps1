@@ -198,6 +198,7 @@ function Invoke-LeadershipProjectPreparation {
         'Plugins/AvidScriptPerfHarness/Content/CSharp/AvidScriptPerfWorkload.csharp-profile.json',
         'Plugins/AvidScriptPerfHarness/Content/CSharp/AvidScriptPerfWorkload.data-oriented.csharp-profile.json'
     )
+    $PackageCatalogPath = ''
     $Artifacts = @(
         foreach ($ProfilePath in $Profiles) {
             $Prepared = Invoke-LeadershipProfilePreparation `
@@ -226,14 +227,20 @@ function Invoke-LeadershipProjectPreparation {
                 package_id = [string]$Published.PackageId
                 package_descriptor_path = [string]$Published.DescriptorPath
                 package_descriptor_sha256 = [string]$Published.DescriptorSha256
-                package_catalog_path = [string]$Published.CatalogPath
-                package_catalog_sha256 = Get-SidecarFileSha256 -Path ([string]$Published.CatalogPath)
+            }
+            if ([string]::IsNullOrWhiteSpace($PackageCatalogPath)) {
+                $PackageCatalogPath = [string]$Published.CatalogPath
+            }
+            elseif ($PackageCatalogPath -cne [string]$Published.CatalogPath) {
+                throw 'ASP65L2017 prepared artifacts were published to different package catalogs'
             }
         }
     )
     return [pscustomobject][ordered]@{
         build = $Build
         artifacts = $Artifacts
+        package_catalog_path = $PackageCatalogPath
+        package_catalog_sha256 = Get-SidecarFileSha256 -Path $PackageCatalogPath
     }
 }
 
@@ -444,6 +451,8 @@ $Candidate = [ordered]@{
         build_log_path = [string]$Preparation.build.log_path
         build_log_sha256 = [string]$Preparation.build.log_sha256
         source_stabilization_passes = $StabilizationPasses
+        package_catalog_path = [string]$Preparation.package_catalog_path
+        package_catalog_sha256 = [string]$Preparation.package_catalog_sha256
         artifacts = @($Preparation.artifacts)
     }
     matrices = $Matrices

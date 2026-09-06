@@ -704,6 +704,14 @@
       "prevention": "需要传递 Boolean、ScriptBlock 或其他 PowerShell 强类型参数时，从已固定为 PowerShell 7 的 Harness shell 内直接调用脚本并使用 `-Name:$false` 等 typed 语法；只有纯字符串参数才使用 `pwsh -File` 跨进程入口。正式 benchmark 启动前先读取 param block，参数绑定失败不得复用为有效 attempt。",
       "source": "Docs/Phase65/P65.D8_Formal_Performance_Retest.md",
       "last_observed": "2026-09-07 P65.D8 controlled suite 两次通过子 pwsh 传递 AvidScriptDirty 时分别把 false 和 0 绑定为 String；均在创建样本前退出，改为同进程 `-AvidScriptDirty:$false` 后正式套件完成"
+    },
+    {
+      "id": "aggregate-identities-freeze-after-final-mutation",
+      "tags": ["workflow", "benchmark", "provenance", "hash"],
+      "summary": "会被多步骤持续改写的聚合文件不能在每个中间步骤记录成最终身份。",
+      "prevention": "catalog、inventory 与 aggregate 等共享文件只在全部生产者成功结束后计算一次最终摘要，并把身份放在共同父证据上；验证摘要对应的当前文件字节后再冻结候选，禁止给子项复制已过期的中间态 hash。",
+      "source": "Benchmarks/PuertsComparison/Leadership/Scripts/New-Phase65LeadershipCandidate.ps1",
+      "last_observed": "2026-09-07 P65.D10 首版候选在三次 module publication 后为前两个 artifact 保留了已过期的中间 catalog SHA；真实冻结运行发现后改为 project 级最终快照"
     }
   ]
 }
