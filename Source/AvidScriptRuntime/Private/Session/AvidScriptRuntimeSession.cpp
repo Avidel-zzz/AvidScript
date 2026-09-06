@@ -141,13 +141,25 @@ void SetSessionFaultedFailure(
 }
 
 FAvidScriptVmLoadConfig::FExecutionBudget MakeSessionExecutionBudget(
-	const FAvidScriptVmBackendSelection& Selection)
+	const FAvidScriptVmBackendSelection& Selection,
+	const EAvidScriptVmArtifactTrust ArtifactTrust)
 {
 	FAvidScriptVmLoadConfig::FExecutionBudget Budget;
 	Budget.MaxHostCallsPerEntry = 100000;
 	if (Selection.BackendKind == EAvidScriptVmBackendKind::Wasmtime)
 	{
-		Budget.FuelPerEntry = 50000000;
+		const bool bUseVerifiedPackageFastContainment =
+#if PLATFORM_WINDOWS
+			ArtifactTrust == EAvidScriptVmArtifactTrust::VerifiedPackage
+			&& Selection.ExecutionMode == EAvidScriptVmExecutionMode::Aot
+			&& Selection.ArtifactFormat ==
+				EAvidScriptVmArtifactFormat::WasmtimeSerialized;
+#else
+			false;
+#endif
+		Budget.FuelPerEntry = bUseVerifiedPackageFastContainment
+			? 0
+			: 50000000;
 		Budget.EpochDeadlineTicks = 1;
 		Budget.EpochTimeoutMilliseconds = 100;
 		Budget.MaxLinearMemoryBytes = UINT64_C(64) << 20;
@@ -191,7 +203,8 @@ FAvidScriptRuntimeSession::~FAvidScriptRuntimeSession()
 
 FAvidScriptVmLoadConfig::FExecutionBudget
 FAvidScriptRuntimeSession::ResolveExecutionBudget(
-	const FAvidScriptVmBackendSelection& Selection) const
+	const FAvidScriptVmBackendSelection& Selection,
+	const EAvidScriptVmArtifactTrust ArtifactTrust) const
 {
 #if WITH_DEV_AUTOMATION_TESTS
 	if (ExecutionBudgetOverrideForTesting.IsSet())
@@ -199,7 +212,7 @@ FAvidScriptRuntimeSession::ResolveExecutionBudget(
 		return ExecutionBudgetOverrideForTesting.GetValue();
 	}
 #endif
-	return MakeSessionExecutionBudget(Selection);
+	return MakeSessionExecutionBudget(Selection, ArtifactTrust);
 }
 
 void FAvidScriptRuntimeSession::SuspendForApplicationLifecycle(
@@ -1990,7 +2003,9 @@ bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 	FString SupplementalImportError;
 	FString BudgetError;
 	if (!CandidateRuntime->ConfigureExecutionBudget(
-			ResolveExecutionBudget(Artifact.BackendSelection),
+			ResolveExecutionBudget(
+				Artifact.BackendSelection,
+				Artifact.ArtifactTrust),
 			BudgetError))
 	{
 		SetReloadFailure(

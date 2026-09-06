@@ -598,18 +598,25 @@ bool FAvidScriptRuntimeSessionPrecompiledArtifactTest::RunTest(
 		EAvidScriptVmArtifactFormat::WasmtimeSerialized;
 	Artifact.bUsesPrecompiledArtifact = true;
 
-	FAvidScriptRuntimeSession Session;
+	FAvidScriptRuntimeSession AttestedSession;
 	FAvidScriptWasmReloadResult LoadResult;
 	if (!TestTrue(
-			TEXT("Session loads the verified precompiled artifact"),
-			Session.LoadInitialArtifact(Artifact, LoadResult)))
+			TEXT("Session loads the attested precompiled artifact"),
+			AttestedSession.LoadInitialArtifact(Artifact, LoadResult)))
 	{
 		AddError(LoadResult.ErrorCategory + TEXT(": ") + LoadResult.ErrorMessage);
 		return false;
 	}
-	TestTrue(TEXT("Session activates the precompiled runtime"), Session.IsLiveLoaded());
 	TestTrue(
-		TEXT("Precompiled session invokes BeginPlay"),
+		TEXT("Attested Session activates the precompiled runtime"),
+		AttestedSession.IsLiveLoaded());
+	TestEqual(
+		TEXT("Attested development artifact keeps per-entry fuel"),
+		AttestedSession.GetLiveRuntimeForTesting()
+			->GetExecutionBudgetForTesting().FuelPerEntry,
+		UINT64_C(50000000));
+	TestTrue(
+		TEXT("Attested precompiled Session invokes BeginPlay"),
 		LoadResult.RuntimeResult.bBeginPlayCalled);
 	TestEqual(
 		TEXT("Session runtime reports Wasmtime serialized format"),
@@ -621,8 +628,56 @@ bool FAvidScriptRuntimeSessionPrecompiledArtifactTest::RunTest(
 		EAvidScriptVmExecutionMode::Aot);
 	FAvidScriptWasmSmokeResult StopResult;
 	TestTrue(
-		TEXT("Precompiled session stops cleanly"),
-		Session.StopAndUnload(StopResult));
+		TEXT("Attested precompiled Session stops cleanly"),
+		AttestedSession.StopAndUnload(StopResult));
+
+	Artifact.ArtifactTrust = EAvidScriptVmArtifactTrust::VerifiedPackage;
+	FAvidScriptRuntimeSession VerifiedPackageSession;
+	if (!TestTrue(
+			TEXT("Session loads the verified package artifact"),
+			VerifiedPackageSession.LoadInitialArtifact(Artifact, LoadResult)))
+	{
+		AddError(LoadResult.ErrorCategory + TEXT(": ") + LoadResult.ErrorMessage);
+		return false;
+	}
+	const FAvidScriptVmLoadConfig::FExecutionBudget& VerifiedBudget =
+		VerifiedPackageSession.GetLiveRuntimeForTesting()
+			->GetExecutionBudgetForTesting();
+#if PLATFORM_WINDOWS
+	TestEqual(
+		TEXT("Verified Win64 package omits per-entry fuel"),
+		VerifiedBudget.FuelPerEntry,
+		UINT64_C(0));
+#else
+	TestEqual(
+		TEXT("Unverified platform keeps per-entry fuel"),
+		VerifiedBudget.FuelPerEntry,
+		UINT64_C(50000000));
+#endif
+	TestEqual(
+		TEXT("Verified package preserves epoch deadline"),
+		VerifiedBudget.EpochDeadlineTicks,
+		UINT64_C(1));
+	TestEqual(
+		TEXT("Verified package preserves wall-time watchdog"),
+		VerifiedBudget.EpochTimeoutMilliseconds,
+		100u);
+	TestEqual(
+		TEXT("Verified package preserves linear-memory limit"),
+		VerifiedBudget.MaxLinearMemoryBytes,
+		UINT64_C(64) << 20);
+	TestEqual(
+		TEXT("Verified package preserves Host-call limit"),
+		VerifiedBudget.MaxHostCallsPerEntry,
+		100000u);
+	TestTrue(
+		TEXT("Verified package keeps the serialized compiler identity"),
+		LoadResult.RuntimeResult.BackendInfo.RuntimeBuildIdentity.Contains(
+			TEXT("profile=cranelift-speed-x86_64-v3-contained-v3"),
+			ESearchCase::CaseSensitive));
+	TestTrue(
+		TEXT("Verified package Session stops cleanly"),
+		VerifiedPackageSession.StopAndUnload(StopResult));
 	return true;
 }
 

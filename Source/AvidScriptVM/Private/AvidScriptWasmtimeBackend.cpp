@@ -2114,7 +2114,9 @@ private:
 			return true;
 		}
 		CurrentHostCallCount = 0;
-		if (bFuelConsumptionEnabled)
+		if (bFuelConsumptionEnabled
+			&& (!bFuelBudgetInitialized
+				|| ExecutionBudget.FuelPerEntry > 0))
 		{
 			const uint64 Fuel = ExecutionBudget.FuelPerEntry > 0
 				? ExecutionBudget.FuelPerEntry
@@ -2137,6 +2139,7 @@ private:
 						: Details);
 				return false;
 			}
+			bFuelBudgetInitialized = true;
 		}
 		const uint64 EpochDeadline = ExecutionBudget.EpochDeadlineTicks > 0
 			? ExecutionBudget.EpochDeadlineTicks
@@ -3768,6 +3771,7 @@ private:
 		ExecutionBudget = FAvidScriptVmLoadConfig::FExecutionBudget();
 		CurrentHostCallCount = 0;
 		bFuelConsumptionEnabled = true;
+		bFuelBudgetInitialized = false;
 		bUnloadDeferred = false;
 	}
 
@@ -3791,6 +3795,7 @@ private:
 	FAvidScriptVmLoadConfig::FExecutionBudget ExecutionBudget;
 	uint32 CurrentHostCallCount = 0;
 	bool bFuelConsumptionEnabled = true;
+	bool bFuelBudgetInitialized = false;
 
 #if AVIDSCRIPT_WITH_WASMTIME
 	AvidScriptWasmtimeEngine* Engine = nullptr;

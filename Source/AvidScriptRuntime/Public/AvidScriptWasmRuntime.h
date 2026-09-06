@@ -351,6 +351,11 @@ public:
 	{
 		return RecordGeneratedStatus(Status);
 	}
+	const FAvidScriptVmLoadConfig::FExecutionBudget&
+	GetExecutionBudgetForTesting() const
+	{
+		return ExecutionBudget;
+	}
 #endif
 
 	bool IsLoaded() const;

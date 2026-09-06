@@ -238,7 +238,9 @@ private:
 		TUniquePtr<FAvidScriptWasmRuntimeInstance>& OutRuntime,
 		FAvidScriptWasmReloadResult& OutResult) const;
 	FAvidScriptVmLoadConfig::FExecutionBudget ResolveExecutionBudget(
-		const FAvidScriptVmBackendSelection& Selection) const;
+		const FAvidScriptVmBackendSelection& Selection,
+		EAvidScriptVmArtifactTrust ArtifactTrust =
+			EAvidScriptVmArtifactTrust::Untrusted) const;
 	bool ValidateExpectedOwner(
 		const FAvidScriptWasmReloadManifest& Manifest,
 		FAvidScriptWasmReloadResult& OutResult) const;
