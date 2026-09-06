@@ -728,6 +728,14 @@
       "prevention": "恢复后先用 `rg --files` 和精确 `-g` 模式从当前仓库索引解析脚本，再调用验证入口；摘要只用于确定意图和候选名称，不作为文件存在性的证据。",
       "source": "AgentHarness/policies/repository.md",
       "last_observed": "2026-09-07 P65.D10 首次补充验证沿用摘要中的 Phase54 契约路径而失败；索引确认真实入口位于 AvidScriptPerfHarness/Tools"
+    },
+    {
+      "id": "uproject-identity-is-not-directory-name",
+      "tags": ["unreal", "workflow", "release", "sidecar"],
+      "summary": "隔离 worktree、sidecar 与 CI 目录名不保证等于 Unreal 项目文件名。",
+      "prevention": "发布工具从项目根枚举并要求恰好一个 `.uproject`，或由调用方显式传入已验证路径；禁止通过项目目录 basename 拼接 `.uproject`。候选冻结必须实际经过任意名称 sidecar 发布。",
+      "source": "Build/InvokeAvidScriptRelease.ps1",
+      "last_observed": "2026-09-07 P65.D10 Generated Type headless release 在时间戳 sidecar 中错误查找同名 uproject，改为唯一项目文件解析"
     }
   ]
 }

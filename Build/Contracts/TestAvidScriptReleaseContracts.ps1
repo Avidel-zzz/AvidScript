@@ -166,6 +166,10 @@ try {
                 throw "Commandlet schema token is missing: $RequiredToken"
             }
         }
+        if (-not $RunnerSource.Contains("Get-ChildItem -LiteralPath `$ProjectRoot -Filter '*.uproject' -File") -or
+            -not $RunnerSource.Contains('Project root must contain exactly one .uproject file')) {
+            throw 'Release runner must resolve a unique project file without assuming the directory name.'
+        }
         $Arguments = @(New-AvidScriptReleaseCommandletArguments `
                 -SourcePath 'C:\Project\Source\Module.cs' `
                 -CSharpProjectPath 'C:\Project\Source\Module.csproj' `

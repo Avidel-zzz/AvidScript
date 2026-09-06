@@ -427,9 +427,14 @@ function Invoke-AvidScriptRelease {
         -Path (Join-Path $NormalizedEngineRoot 'Engine/Binaries/Win64/UnrealEditor-Cmd.exe') `
         -Label 'UE5.8 Editor-Cmd'
 
-    $ProjectName = Split-Path -Leaf $ProjectRoot
+    $ProjectFiles = @(Get-ChildItem -LiteralPath $ProjectRoot -Filter '*.uproject' -File)
+    if ($ProjectFiles.Count -ne 1) {
+        Throw-AvidScriptReleaseError `
+            -Category 'project_identity_invalid' `
+            -Message "Project root must contain exactly one .uproject file: $ProjectRoot"
+    }
     $ProjectFile = Resolve-AvidScriptReleaseProjectPath `
-        -Path (Join-Path $ProjectRoot "$ProjectName.uproject") `
+        -Path $ProjectFiles[0].FullName `
         -ProjectRoot $ProjectRoot `
         -Label 'Project file' `
         -PathType Leaf
