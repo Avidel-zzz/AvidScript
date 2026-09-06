@@ -134,8 +134,8 @@ function Assert-AvidScriptPluginReleaseBinaryPrivacy {
 
     $BinaryExtensions = @('.a', '.dll', '.dylib', '.exe', '.lib', '.node', '.pdb', '.so', '.wasm')
     $Needles = @(
-        'C:\Users\',
-        'C:/Users/',
+        [string]::Concat('C:', [char]92, 'Users', [char]92),
+        [string]::Concat('C:', '/', 'Users', '/'),
         '/Users/',
         '/home/')
     foreach ($File in @(Get-ChildItem -LiteralPath $PayloadPluginRoot -File -Force -Recurse)) {
