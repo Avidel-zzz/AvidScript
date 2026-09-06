@@ -53,6 +53,9 @@ Assert-True ($PackagedHostScriptText.Contains("'-build'") -and
 $CandidateScriptText = Get-Content -LiteralPath $CandidateScriptPath -Raw
 Assert-True ($CandidateScriptText.Contains('source did not stabilize after the bounded two-pass preparation')) 'candidate freezer must fail closed after two source-stabilization passes'
 Assert-True ($CandidateScriptText.Contains("'-Profile=`"{0}`"'")) 'candidate freezer must preserve hyphenated profile paths through UE command-line parsing'
+Assert-True ($CandidateScriptText.Contains('BuildCSharpScriptTypes.ps1') -and
+    $CandidateScriptText.Contains('avidscript_phase65_benchmark_generated_types') -and
+    $CandidateScriptText.Contains('Generated Type package is not a unique Win64 Development catalog variant')) 'candidate freezer must publish and freeze the packaged-target Generated Type prerequisite'
 Assert-True ($CandidateScriptText.Contains('Assert-SidecarBenchmarkProjectProvenance')) 'candidate freezer must revalidate project provenance after artifact preparation'
 Assert-True ($CandidateScriptText.Contains('identical_wasm_compiler_profile')) 'candidate freezer must preserve the identical-WASM compiler profile'
 Assert-True ($CandidateScriptText.Contains('Publish-AvidScriptModuleReleasePackage')) 'candidate freezer must publish prepared C# artifacts through the release package contract'

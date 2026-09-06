@@ -430,6 +430,7 @@ function Invoke-ProcessRequest {
             '-nullrhi',
             '-nosplash',
             '-nosound',
+            '-AvidScriptSuppressGeneratedTypeExecution',
             "-abslog=$hostLogPath",
             "-AvidScriptPerfRequest=$RequestPath",
             "-AvidScriptPerfResult=$ResultPath",

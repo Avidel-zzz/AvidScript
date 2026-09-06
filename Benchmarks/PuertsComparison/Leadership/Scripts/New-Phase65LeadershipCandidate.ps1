@@ -179,6 +179,107 @@ function Invoke-LeadershipProfilePreparation {
     }
 }
 
+function Invoke-LeadershipGeneratedTypePublication {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [Parameter(Mandatory = $true)][string]$PackageCatalogPath,
+        [Parameter(Mandatory = $true)][object[]]$Artifacts
+    )
+
+    $GeneratedLane = @($Artifacts | Where-Object {
+            [string]$_.module_id -ceq 'csharp_profile_phase54_6_generated_s1'
+        })
+    if ($GeneratedLane.Count -ne 1) {
+        throw 'ASP65L2018 generated S1 artifact is not unique'
+    }
+    $Report = Get-Content -LiteralPath ([string]$GeneratedLane[0].report_path) -Raw |
+        ConvertFrom-Json -Depth 64
+    $DotNetPath = Resolve-RequiredPath `
+        -Path ([string]$Report.toolchain.dotnet) `
+        -PathType Leaf `
+        -Label 'Generated Type .NET host'
+    $SourceId = [string]$Report.source.file
+    $SourcePath = Resolve-RequiredPath `
+        -Path (Join-Path $ProjectRoot $SourceId) `
+        -PathType Leaf `
+        -Label 'Generated Type source'
+    $CSharpProjectPath = Resolve-RequiredPath `
+        -Path (Join-Path $ProjectRoot ([string]$Report.source.project)) `
+        -PathType Leaf `
+        -Label 'Generated Type C# project'
+    $BindingPackagePath = Resolve-RequiredPath `
+        -Path (Join-Path $ProjectRoot ([string]$Report.binding_package.manifest_file)) `
+        -PathType Leaf `
+        -Label 'Generated Type binding package'
+    $GeneratorPath = Resolve-RequiredPath `
+        -Path (Join-Path $ProjectRoot 'Plugins/AvidScript/Build/BuildCSharpScriptTypes.ps1') `
+        -PathType Leaf `
+        -Label 'Generated Type builder'
+    $RuntimeModuleId = 'avidscript_phase65_benchmark_generated_types'
+    Push-Location -LiteralPath (Join-Path $ProjectRoot 'Plugins/AvidScript')
+    try {
+        $Output = @(& $GeneratorPath `
+                -DotNetPath $DotNetPath `
+                -SourcePath $SourcePath `
+                -SourceId $SourceId `
+                -BindingPackageManifestPath $BindingPackagePath `
+                -ProjectPath $CSharpProjectPath `
+                -RuntimeModuleId $RuntimeModuleId `
+                -PackageConfiguration Development `
+                -TargetPlatform Win64 `
+                -HeadlessRelease 2>&1)
+        $ExitCode = $LASTEXITCODE
+    }
+    finally {
+        Pop-Location
+    }
+    if ($ExitCode -ne 0) {
+        $Tail = [string]::Join([Environment]::NewLine, @($Output | Select-Object -Last 80))
+        throw "ASP65L2018 Generated Type publication failed: exit=$ExitCode`n$Tail"
+    }
+
+    $CurrentPath = Resolve-RequiredPath `
+        -Path (Join-Path $ProjectRoot 'Plugins/AvidScript/Content/AvidScriptGenerated/current.json') `
+        -PathType Leaf `
+        -Label 'Generated Type current pointer'
+    $Current = Get-Content -LiteralPath $CurrentPath -Raw | ConvertFrom-Json -Depth 32
+    if ([string]$Current.module_id -cne $RuntimeModuleId -or
+        [string]$Current.package_id -cnotmatch '^[0-9a-f]{64}$' -or
+        [string]$Current.generation_key_sha256 -cnotmatch '^[0-9a-f]{64}$') {
+        throw 'ASP65L2018 Generated Type current pointer has an unexpected identity'
+    }
+    $Catalog = Get-Content -LiteralPath $PackageCatalogPath -Raw | ConvertFrom-Json -Depth 64
+    $MatchingVariants = @($Catalog.modules |
+            Where-Object { [string]$_.module_id -ceq $RuntimeModuleId } |
+            ForEach-Object { $_.variants } |
+            Where-Object {
+                [string]$_.platform -ceq 'win64' -and
+                [string]$_.architecture -ceq 'x86_64' -and
+                [string]$_.configuration -ceq 'development' -and
+                [string]$_.package_id -ceq [string]$Current.package_id
+            })
+    if ($MatchingVariants.Count -ne 1) {
+        throw 'ASP65L2018 Generated Type package is not a unique Win64 Development catalog variant'
+    }
+    $DescriptorPath = Resolve-RequiredPath `
+        -Path (Join-Path (Split-Path -Parent $PackageCatalogPath) ([string]$MatchingVariants[0].descriptor_file)) `
+        -PathType Leaf `
+        -Label 'Generated Type runtime package descriptor'
+    if ((Get-SidecarFileSha256 -Path $DescriptorPath) -cne
+        [string]$MatchingVariants[0].descriptor_sha256) {
+        throw 'ASP65L2018 Generated Type runtime package descriptor identity drifted'
+    }
+    return [pscustomobject][ordered]@{
+        module_id = $RuntimeModuleId
+        package_id = [string]$Current.package_id
+        generation_key_sha256 = [string]$Current.generation_key_sha256
+        current_path = $CurrentPath
+        current_sha256 = Get-SidecarFileSha256 -Path $CurrentPath
+        descriptor_path = $DescriptorPath
+        descriptor_sha256 = [string]$MatchingVariants[0].descriptor_sha256
+    }
+}
+
 function Invoke-LeadershipProjectPreparation {
     param(
         [Parameter(Mandatory = $true)][string]$EditorExecutable,
@@ -236,9 +337,14 @@ function Invoke-LeadershipProjectPreparation {
             }
         }
     )
+    $GeneratedType = Invoke-LeadershipGeneratedTypePublication `
+        -ProjectRoot $ProjectRoot `
+        -PackageCatalogPath $PackageCatalogPath `
+        -Artifacts $Artifacts
     return [pscustomobject][ordered]@{
         build = $Build
         artifacts = $Artifacts
+        generated_type = $GeneratedType
         package_catalog_path = $PackageCatalogPath
         package_catalog_sha256 = Get-SidecarFileSha256 -Path $PackageCatalogPath
     }
@@ -393,7 +499,7 @@ $CpuModel = [string]::Join(' + ', $CpuNames)
 if ([string]::IsNullOrWhiteSpace($CpuModel)) {
     throw 'ASP65L2009 CPU identity is unavailable'
 }
-$CandidateIdPayload = [Text.UTF8Encoding]::new($false).GetBytes("$Commit`n$Tree`n$($EditorIdentity.sha256)`n$($WasmtimeEvidence.installed_content_sha256)`n$($PuertsContent.content_sha256)`n")
+$CandidateIdPayload = [Text.UTF8Encoding]::new($false).GetBytes("$Commit`n$Tree`n$($EditorIdentity.sha256)`n$($WasmtimeEvidence.installed_content_sha256)`n$($PuertsContent.content_sha256)`n$($Preparation.package_catalog_sha256)`n")
 $CandidateId = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($CandidateIdPayload)).ToLowerInvariant().Substring(0, 20)
 $Matrices = @(
     [ordered]@{ id = 'ue_micro_six_lane'; status = 'ready'; reason = '六 lane micro profile 与三种 AvidScript binding artifact 已构建并冻结。' },
@@ -402,7 +508,7 @@ $Matrices = @(
     [ordered]@{ id = 'angelscript_same_semantics'; status = 'blocked'; reason = [string]$Protocol.competitors.angelscript.reason }
 )
 $Candidate = [ordered]@{
-    schema_version = 2
+    schema_version = 3
     candidate_id = $CandidateId
     created_utc = [DateTimeOffset]::UtcNow.ToString('o')
     protocol = [ordered]@{
@@ -453,6 +559,7 @@ $Candidate = [ordered]@{
         source_stabilization_passes = $StabilizationPasses
         package_catalog_path = [string]$Preparation.package_catalog_path
         package_catalog_sha256 = [string]$Preparation.package_catalog_sha256
+        generated_type = $Preparation.generated_type
         artifacts = @($Preparation.artifacts)
     }
     matrices = $Matrices
@@ -460,7 +567,7 @@ $Candidate = [ordered]@{
 }
 $CandidateJson = (($Candidate | ConvertTo-Json -Depth 64) -replace "`r`n", "`n") + "`n"
 if (-not ($CandidateJson | Test-Json -SchemaFile $CandidateSchemaPath)) {
-    throw 'ASP65L2010 generated leadership candidate does not satisfy schema v2'
+    throw 'ASP65L2010 generated leadership candidate does not satisfy schema v3'
 }
 $CandidatePath = Join-Path $BenchmarkProjectRoot 'phase65-leadership-candidate.json'
 if (Test-Path -LiteralPath $CandidatePath) {
