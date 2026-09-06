@@ -252,6 +252,16 @@ try {
     Assert-True ($CachedArchiveInstall.ExitCode -eq 0) "existing valid cache was not used atomically: $($CachedArchiveInstall.Text)"
     Assert-True ((Get-FileHash -LiteralPath $ArchivePath -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $TestLock.backend.sha256) 'existing valid cache archive was overwritten'
 
+    $RecoveredCacheRoot = Join-Path $FixtureRoot 'recovered-source-cache'
+    New-TestSourceCache $RecoveredCacheRoot $SeedBare
+    Copy-Item -LiteralPath $ArchivePath -Destination (Join-Path $RecoveredCacheRoot $TestLock.backend.asset_name)
+    Remove-Item -LiteralPath (Join-Path $RecoveredCacheRoot 'puerts-upstream.git/HEAD') -Force
+    $RecoveredProject = New-TestProject $FixtureRoot 'recovered-source-cache-project'
+    $RecoveredInstall = Invoke-Installer Install $RecoveredProject $RecoveredCacheRoot $TestLockPath
+    Assert-True ($RecoveredInstall.ExitCode -eq 0) "interrupted source cache did not recover: $($RecoveredInstall.Text)"
+    Assert-True (Test-Path -LiteralPath (Join-Path $RecoveredCacheRoot 'puerts-upstream.git/HEAD') -PathType Leaf) 'recovered source cache is missing HEAD'
+    Assert-True (@(Get-ChildItem -LiteralPath $RecoveredCacheRoot -Directory -Filter 'puerts-upstream.partial-*.git').Count -eq 0) 'source cache recovery left a partial clone directory'
+
     $SourceProject = New-TestProject $FixtureRoot 'source-tamper'
     Assert-True ((Invoke-Installer Install $SourceProject $CacheRoot $TestLockPath).ExitCode -eq 0) 'source-tamper fixture install failed'
     Add-Content -LiteralPath (Join-Path $SourceProject 'Plugins/Puerts/Source/JsEnv/JsEnv.h') -Value 'tampered source'
@@ -342,4 +352,4 @@ finally {
     }
 }
 
-Write-Output 'Puerts dependency contracts passed: parser=1 schema=1 happy=1 download_publish=1 cache_preserved=1 source_tamper=1 backend_tamper=1 nested_tamper=2 marker_tamper=1 legacy_remove=1 reparse_rejected=3 projectroot_normalized=1 atomic_download=1'
+Write-Output 'Puerts dependency contracts passed: parser=1 schema=1 happy=1 download_publish=1 cache_preserved=1 source_cache_recovery=1 source_tamper=1 backend_tamper=1 nested_tamper=2 marker_tamper=1 legacy_remove=1 reparse_rejected=3 projectroot_normalized=1 atomic_download=1'

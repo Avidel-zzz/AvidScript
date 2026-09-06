@@ -289,11 +289,45 @@ function Initialize-SourceCache {
     )
 
     $SourceRoot = Join-Path $Root 'puerts-upstream.git'
-    if (-not (Test-Path -LiteralPath (Join-Path $SourceRoot 'HEAD') -PathType Leaf)) {
+    $HeadPath = Join-Path $SourceRoot 'HEAD'
+    if (-not (Test-Path -LiteralPath $HeadPath -PathType Leaf)) {
         New-Item -ItemType Directory -Force -Path $Root | Out-Null
-        $CloneOutput = & git clone --filter=blob:none --bare $Lock.source.repository_url $SourceRoot 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            throw "ASP53D1400 unable to clone official Puerts source`n$($CloneOutput -join [Environment]::NewLine)"
+        if (Test-Path -LiteralPath $SourceRoot) {
+            if (-not (Test-Path -LiteralPath $SourceRoot -PathType Container) -or
+                (Test-IsReparsePoint $SourceRoot)) {
+                throw 'ASP53D1404 refusing to repair a non-directory or reparse-point Puerts source cache'
+            }
+
+            $InitOutput = & git -C $SourceRoot init --bare 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                throw "ASP53D1400 unable to repair official Puerts source cache`n$($InitOutput -join [Environment]::NewLine)"
+            }
+
+            & git -C $SourceRoot remote get-url origin 2>$null | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                Invoke-GitChecked $SourceRoot @(
+                    'remote', 'add', 'origin', [string]$Lock.source.repository_url) | Out-Null
+            }
+        }
+        else {
+            $StagedSourceRoot = Join-Path $Root (
+                'puerts-upstream.partial-{0}.git' -f [Guid]::NewGuid().ToString('N'))
+            try {
+                $CloneOutput = & git clone --filter=blob:none --bare `
+                    $Lock.source.repository_url $StagedSourceRoot 2>&1
+                if ($LASTEXITCODE -ne 0) {
+                    throw "ASP53D1400 unable to clone official Puerts source`n$($CloneOutput -join [Environment]::NewLine)"
+                }
+                if (-not (Test-Path -LiteralPath (Join-Path $StagedSourceRoot 'HEAD') -PathType Leaf)) {
+                    throw 'ASP53D1400 cloned Puerts source cache is missing its bare repository HEAD'
+                }
+                Move-Item -LiteralPath $StagedSourceRoot -Destination $SourceRoot
+            }
+            finally {
+                if (Test-Path -LiteralPath $StagedSourceRoot -PathType Container) {
+                    Remove-Item -LiteralPath $StagedSourceRoot -Recurse -Force
+                }
+            }
         }
     }
 
