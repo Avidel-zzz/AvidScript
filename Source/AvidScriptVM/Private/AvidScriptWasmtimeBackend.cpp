@@ -1133,11 +1133,14 @@ public:
 		{
 			*OutResult = FAvidScriptVmCallResult();
 		}
-		bHasPendingHostFailure = false;
-		PendingHostImportModuleName.Reset();
-		PendingHostImportName.Reset();
-		PendingHostFailureCategory.Reset();
-		PendingHostFailureDetails.Reset();
+		if (bHasPendingHostFailure)
+		{
+			bHasPendingHostFailure = false;
+			PendingHostImportModuleName.Reset();
+			PendingHostImportName.Reset();
+			PendingHostFailureCategory.Reset();
+			PendingHostFailureDetails.Reset();
+		}
 		if (Frame.CellCount > FAvidScriptVmCallFrame::MaxCells)
 		{
 			SetWasmtimeError(OutError, TEXT("invalid_arguments"), TEXT("VM call frame exceeds its fixed cell capacity."));
@@ -2087,11 +2090,14 @@ private:
 		{
 			*OutResult = FAvidScriptVmCallResult();
 		}
-		bHasPendingHostFailure = false;
-		PendingHostImportModuleName.Reset();
-		PendingHostImportName.Reset();
-		PendingHostFailureCategory.Reset();
-		PendingHostFailureDetails.Reset();
+		if (bHasPendingHostFailure)
+		{
+			bHasPendingHostFailure = false;
+			PendingHostImportModuleName.Reset();
+			PendingHostImportName.Reset();
+			PendingHostFailureCategory.Reset();
+			PendingHostFailureDetails.Reset();
+		}
 	}
 
 	bool ResetExecutionBudget(FAvidScriptVmError& OutError)
@@ -2328,6 +2334,25 @@ private:
 		const bool bCallFailed =
 			CallStatus != AVIDSCRIPT_WASMTIME_CALL_SUCCESS;
 		const bool bUnloadRequestedDuringCall = bUnloadDeferred;
+		if (!bCallFailed
+			&& CallFailure == nullptr
+			&& !bUnloadRequestedDuringCall
+			&& ResultCellCount == Entry.ResultCellCount)
+		{
+			--ActiveCallDepth;
+			if (OutResult != nullptr)
+			{
+				if (ResultCellCount > 0)
+				{
+					FMemory::Memcpy(
+						OutResult->Cells,
+						ResultCells,
+						ResultCellCount * sizeof(uint32));
+				}
+				OutResult->CellCount = static_cast<uint32>(ResultCellCount);
+			}
+			return true;
+		}
 		FString FailureDetails;
 		TArray<FAvidScriptVmStackFrame> StackFrames;
 		bool bWasTrap = false;

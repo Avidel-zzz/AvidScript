@@ -109,6 +109,7 @@ constexpr double AvidScriptMinimumMeasuredMs = 0.0001;
 constexpr int32 AvidScriptMaximumPendingTimers = 1024;
 constexpr int32 AvidScriptTimerHeapCompactionThreshold = 64;
 constexpr int32 AvidScriptDataBridgeBudgetCheckStride = 32;
+constexpr int32 AvidScriptHotCallbackMetricSampleMask = 255;
 constexpr uint32 AvidScriptMaximumAsyncObjectPathUtf8Bytes = 1024;
 
 FString ExtractAvidScriptFailureCategory(
@@ -1830,7 +1831,11 @@ bool FAvidScriptWasmRuntimeInstance::DispatchEvent(
 	static_assert(sizeof(EventArgs[1]) == sizeof(Value), "VM f32 argument must fit in one cell.");
 	FMemory::Memcpy(&EventArgs[1], &Value, sizeof(Value));
 
-	const double EventStartSeconds = FPlatformTime::Seconds();
+	const bool bMeasureCallback = !bHotFailureOnly
+		|| (EventCallbackCount & AvidScriptHotCallbackMetricSampleMask) == 0;
+	const double EventStartSeconds = bMeasureCallback
+		? FPlatformTime::Seconds()
+		: 0.0;
 	BeginTypedCallbackEpoch();
 	FAvidScriptVmError EventError;
 	const bool bEventCalled = bHotFailureOnly
@@ -1853,7 +1858,10 @@ bool FAvidScriptWasmRuntimeInstance::DispatchEvent(
 	EndTypedCallbackEpoch();
 	if (!bEventCalled)
 	{
-		Metrics.EventCallbackCallMs = MeasureElapsedMs(EventStartSeconds);
+		if (bMeasureCallback)
+		{
+			Metrics.EventCallbackCallMs = MeasureElapsedMs(EventStartSeconds);
+		}
 		if (bHotFailureOnly)
 		{
 			CaptureSnapshot(OutResult);
@@ -1871,7 +1879,10 @@ bool FAvidScriptWasmRuntimeInstance::DispatchEvent(
 		return false;
 	}
 
-	Metrics.EventCallbackCallMs = MeasureElapsedMs(EventStartSeconds);
+	if (bMeasureCallback)
+	{
+		Metrics.EventCallbackCallMs = MeasureElapsedMs(EventStartSeconds);
+	}
 	++EventCallbackCount;
 	LastEventId = EventId;
 	LastEventValue = Value;
