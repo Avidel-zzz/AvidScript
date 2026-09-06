@@ -25,6 +25,11 @@ $comparisonRoot = Split-Path -Parent $harnessRoot
 . (Join-Path $comparisonRoot 'Scripts\PuertsBenchmarkSidecar.Common.ps1')
 $runnerText = Get-Content -LiteralPath (
     Join-Path $harnessRoot 'Source\AvidScriptPerfHarness\Private\AvidScriptPerfRunner.cpp') -Raw
+$gameplaySourceText = Get-Content -LiteralPath (
+    Join-Path $harnessRoot 'Source\AvidScriptPerfHarness\Private\AvidScriptGameplayFrameBenchmark.cpp') -Raw
+$nativePropertyBatch = [regex]::Match(
+    $gameplaySourceText,
+    '(?s)uint32 RunPropertyBatch4\(.*?(?=\r?\n\s*uint32 RunVector\()').Value
 $runnerAdaptiveMatrix = [regex]::Match(
     $runnerText,
     '(?s)uint64 GetExpectedAdaptiveNativeHitCount\(.*?(?=\r?\n\s*uint64 GetExpectedFusedGeneratedHitCount\()').Value
@@ -140,6 +145,10 @@ Assert-True ($generatedCSharpProfile.binding_profile.package_name -ceq
     $dataCSharpProfile.binding_profile.package_name -and
     $generatedCSharpProfile.binding_profile.package_name.Length -le 40) `
     'Generated S1 与 data-oriented profile 必须共享适合 Windows 短路径工程的稳定 binding package identity。'
+Assert-True ($nativePropertyBatch.Length -gt 0 -and
+    @([regex]::Matches($nativePropertyBatch, 'Fixture\.ScalarValue\s*=')).Count -eq 4 -and
+    -not $nativePropertyBatch.Contains('NativeSetScalar')) `
+    'Native gameplay oracle 的属性写入必须是直接 C++ 字段赋值，不能污染 fixture function-call 合同。'
 Assert-True ($invokeText.Contains('puerts_reflection_script_sha256') -and
     $invokeText.Contains('puerts_runtime_sha256') -and
     $invokeText.Contains('editor_executable_sha256') -and

@@ -78,10 +78,10 @@ namespace
 			AdvanceProperty(Accumulator1, Token2, Value2);
 		const uint32 Accumulator3 =
 			AdvanceProperty(Accumulator2, Token3, Value3);
-		Fixture.NativeSetScalar(static_cast<int32>(Value0));
-		Fixture.NativeSetScalar(static_cast<int32>(Value1));
-		Fixture.NativeSetScalar(static_cast<int32>(Value2));
-		Fixture.NativeSetScalar(static_cast<int32>(Value3));
+		Fixture.ScalarValue = static_cast<int32>(Value0);
+		Fixture.ScalarValue = static_cast<int32>(Value1);
+		Fixture.ScalarValue = static_cast<int32>(Value2);
+		Fixture.ScalarValue = static_cast<int32>(Value3);
 		return Accumulator3;
 	}
 
