@@ -403,6 +403,8 @@ $Candidate = [ordered]@{
         dll_sha256 = [string]$WasmtimeEvidence.dll_sha256
         installed_content_sha256 = [string]$WasmtimeEvidence.installed_content_sha256
         compiler_profile = [string]$WasmtimeEvidence.compiler_profile
+        identical_wasm_compiler_profile =
+            [string]$WasmtimeLock.fuel_free_compiler_profile.id
     }
     puerts = [ordered]@{
         root = $ResolvedPuertsPluginPath

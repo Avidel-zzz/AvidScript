@@ -38,6 +38,7 @@ $CandidateScriptText = Get-Content -LiteralPath $CandidateScriptPath -Raw
 Assert-True ($CandidateScriptText.Contains('source did not stabilize after the bounded two-pass preparation')) 'candidate freezer must fail closed after two source-stabilization passes'
 Assert-True ($CandidateScriptText.Contains("'-Profile=`"{0}`"'")) 'candidate freezer must preserve hyphenated profile paths through UE command-line parsing'
 Assert-True ($CandidateScriptText.Contains('Assert-SidecarBenchmarkProjectProvenance')) 'candidate freezer must revalidate project provenance after artifact preparation'
+Assert-True ($CandidateScriptText.Contains('identical_wasm_compiler_profile')) 'candidate freezer must preserve the identical-WASM compiler profile'
 
 $InputIds = @($Protocol.tracked_inputs | ForEach-Object { [string]$_.id })
 Assert-True ($InputIds.Count -eq (@($InputIds | Sort-Object -Unique)).Count) 'tracked input ids must be unique'

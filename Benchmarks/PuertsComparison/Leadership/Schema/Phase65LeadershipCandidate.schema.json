@@ -58,12 +58,13 @@
     "wasmtime": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["root", "dll_sha256", "installed_content_sha256", "compiler_profile"],
+      "required": ["root", "dll_sha256", "installed_content_sha256", "compiler_profile", "identical_wasm_compiler_profile"],
       "properties": {
         "root": { "type": "string", "minLength": 1 },
         "dll_sha256": { "$ref": "#/$defs/sha256" },
         "installed_content_sha256": { "$ref": "#/$defs/sha256" },
-        "compiler_profile": { "type": "string", "minLength": 1 }
+        "compiler_profile": { "const": "cranelift-speed-x86_64-v3-contained-v3" },
+        "identical_wasm_compiler_profile": { "const": "cranelift-speed-x86_64-v3-fuel-free-v1" }
       }
     },
     "puerts": {
