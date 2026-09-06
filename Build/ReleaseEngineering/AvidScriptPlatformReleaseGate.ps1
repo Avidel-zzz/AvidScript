@@ -217,7 +217,7 @@ function Invoke-AvidScriptPlatformReleaseScriptJson {
 function Invoke-AvidScriptPlatformReleaseStep {
     param(
         [Parameter(Mandatory = $true)][string]$Step,
-        [Parameter(Mandatory = $true)]$Input,
+        [Parameter(Mandatory = $true)]$StepInput,
         [Parameter(Mandatory = $true)][string]$WorkingDirectory,
         [ValidateRange(1, 7200)][int]$TimeoutSeconds
     )
@@ -226,7 +226,7 @@ function Invoke-AvidScriptPlatformReleaseStep {
     [System.IO.Directory]::CreateDirectory($InputRoot) | Out-Null
     $InputPath = Join-Path $InputRoot ("$PID-$([guid]::NewGuid().ToString('N')).json")
     try {
-        Write-AvidScriptPluginReleaseJson $InputPath $Input
+        Write-AvidScriptPluginReleaseJson $InputPath $StepInput
         return Invoke-AvidScriptPlatformReleaseScriptJson `
             -ScriptPath (Join-Path $script:AvidScriptPlatformReleaseGateRoot 'AvidScriptPlatformReleaseGateStep.ps1') `
             -Arguments @('-Step', $Step, '-InputPath', $InputPath) `

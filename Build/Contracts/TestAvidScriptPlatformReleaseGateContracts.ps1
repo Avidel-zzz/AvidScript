@@ -194,6 +194,7 @@ try {
 
     Invoke-PlatformGateContract 'empty optional paths and child stderr diagnostics' {
         $StepSource = [System.IO.File]::ReadAllText($StepScript)
+        $GateSource = [System.IO.File]::ReadAllText($GateModule)
         foreach ($RequiredToken in @(
                 '$StepInput = Get-Content',
                 "if (-not [string]::IsNullOrWhiteSpace(`$OptionalPath.Value))",
@@ -204,6 +205,9 @@ try {
         }
         if ($StepSource.Contains('$Input = Get-Content')) {
             throw 'Step input shadows the PowerShell automatic $input enumerator.'
+        }
+        if ($GateSource.Contains('[Parameter(Mandatory = $true)]$Input')) {
+            throw 'Gate step parameter shadows the PowerShell automatic $input enumerator.'
         }
         $ChildPath = Join-Path $Root 'stderr-only-child.ps1'
         [System.IO.File]::WriteAllText(
