@@ -7,6 +7,8 @@ $ComparisonRoot = Split-Path -Parent $LeadershipRoot
 $PluginRoot = Split-Path -Parent (Split-Path -Parent $ComparisonRoot)
 $ProtocolPath = Join-Path $LeadershipRoot 'Config/Phase65LeadershipProtocol.json'
 $SchemaPath = Join-Path $LeadershipRoot 'Schema/Phase65LeadershipProtocol.schema.json'
+$CandidateSchemaPath = Join-Path $LeadershipRoot 'Schema/Phase65LeadershipCandidate.schema.json'
+$CandidateScriptPath = Join-Path $LeadershipRoot 'Scripts/New-Phase65LeadershipCandidate.ps1'
 
 function Assert-True {
     param([Parameter(Mandatory = $true)][bool]$Condition, [Parameter(Mandatory = $true)][string]$Message)
@@ -27,6 +29,11 @@ function Get-NormalizedTextSha256 {
 $ProtocolRaw = Get-Content -LiteralPath $ProtocolPath -Raw
 Assert-True ($ProtocolRaw | Test-Json -SchemaFile $SchemaPath) 'leadership protocol does not satisfy schema v1'
 $Protocol = $ProtocolRaw | ConvertFrom-Json -Depth 64
+$ParserErrors = $null
+$Tokens = $null
+[void][Management.Automation.Language.Parser]::ParseFile($CandidateScriptPath, [ref]$Tokens, [ref]$ParserErrors)
+Assert-True (@($ParserErrors).Count -eq 0) 'leadership candidate freezer has parser errors'
+Assert-True ((Get-Content -LiteralPath $CandidateSchemaPath -Raw) | Test-Json) 'leadership candidate schema is not valid JSON'
 
 $InputIds = @($Protocol.tracked_inputs | ForEach-Object { [string]$_.id })
 Assert-True ($InputIds.Count -eq (@($InputIds | Sort-Object -Unique)).Count) 'tracked input ids must be unique'
@@ -64,4 +71,4 @@ $MatrixIds = @($Protocol.matrices | ForEach-Object { [string]$_.id })
 Assert-True ([string]::Join('|', $MatrixIds) -ceq 'ue_gameplay_crossing|identical_wasm_execution|angelscript_same_semantics') 'required matrix order drifted'
 Assert-True ([string]$Protocol.competitors.angelscript.availability -ceq 'not_frozen') 'AngelScript must remain explicitly blocked until its dependency and adapter are frozen'
 
-Write-Output 'Phase 65 leadership protocol contracts passed: schema=1 tracked_inputs=5 gameplay_lanes=5 gameplay_workloads=10 identical_wasm_kernels=12 competitors=4 matrices=3 claims_fail_closed=1'
+Write-Output 'Phase 65 leadership protocol contracts passed: schema=2 scripts=1 tracked_inputs=5 gameplay_lanes=5 gameplay_workloads=10 identical_wasm_kernels=12 competitors=4 matrices=3 claims_fail_closed=1'

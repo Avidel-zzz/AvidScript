@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://avidscript.dev/schema/phase65-leadership-candidate-v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "candidate_id",
+    "created_utc",
+    "protocol",
+    "candidate",
+    "engine",
+    "host",
+    "puerts",
+    "benchmark_project",
+    "matrices",
+    "complete_leadership_claim_ready"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "candidate_id": { "type": "string", "pattern": "^[0-9a-f]{20}$" },
+    "created_utc": { "type": "string", "format": "date-time" },
+    "protocol": { "$ref": "#/$defs/identity" },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root", "commit", "tree", "clean"],
+      "properties": {
+        "root": { "type": "string", "minLength": 1 },
+        "commit": { "$ref": "#/$defs/sha1" },
+        "tree": { "$ref": "#/$defs/sha1" },
+        "clean": { "const": true }
+      }
+    },
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root", "version", "editor_executable", "editor_sha256", "build_id"],
+      "properties": {
+        "root": { "type": "string", "minLength": 1 },
+        "version": { "const": "5.8.0" },
+        "editor_executable": { "type": "string", "minLength": 1 },
+        "editor_sha256": { "$ref": "#/$defs/sha256" },
+        "build_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cpu", "logical_processors", "os"],
+      "properties": {
+        "cpu": { "type": "string", "minLength": 1 },
+        "logical_processors": { "type": "integer", "minimum": 1 },
+        "os": { "type": "string", "minLength": 1 }
+      }
+    },
+    "puerts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root", "source_commit", "backend_sha256", "installed_content_sha256", "installed_file_count"],
+      "properties": {
+        "root": { "type": "string", "minLength": 1 },
+        "source_commit": { "$ref": "#/$defs/sha1" },
+        "backend_sha256": { "$ref": "#/$defs/sha256" },
+        "installed_content_sha256": { "$ref": "#/$defs/sha256" },
+        "installed_file_count": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "benchmark_project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root", "project_path", "marker_sha256"],
+      "properties": {
+        "root": { "type": "string", "minLength": 1 },
+        "project_path": { "type": "string", "minLength": 1 },
+        "marker_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "matrices": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "reason"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "status": { "enum": ["ready_after_build", "blocked"] },
+          "reason": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "complete_leadership_claim_ready": { "type": "boolean" }
+  },
+  "$defs": {
+    "sha1": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "sha256"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    }
+  }
+}
