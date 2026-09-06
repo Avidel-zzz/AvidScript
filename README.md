@@ -181,8 +181,11 @@ Win64 Shipping BuildCookRun 与 fresh receipt 通过；Android 仍为 3/19。Rel
 插件，Generated Type 使用配置专属 overlay，不改写 `.uproject` 或源码 `current.json`。详见
 [P65.C3 发布 Gate](Docs/Phase65/P65.C3_Win64_Shipping_Release_Gate.md)。
 
-P65.D 已完成可复现性能候选装配、Wasmtime/Puerts 实物身份对齐和 gameplay correctness oracle 修正。
-正式 5 进程矩阵正在重跑；基准专用的有界执行预算已加入，但不改变生产 Session 的各项默认预算。
+P65.D 已完成 clean candidate 的正式 5 进程基线：18 项统一性能 Gate 中 **14 项通过、4 项失败**。
+UE 交互 workload 相对 Puerts 为 Semantic **0.60x**、small **0.38x**、dense **0.52x**；纯执行
+Wasmtime/V8 P50/P95 为 **1.128x/1.189x**，完整 callback 为 **831.86 ns（Puerts 的 5.67x）**。
+因此 UE 交互领先已形成证据，但完整性能领导力仍未关闭；下一批集中优化 guest-entry containment 与
+callback 成功路径。详见 [P65.D3 正式性能基线](Docs/Phase65/P65.D3_Formal_Performance_Baseline.md)。
 
 ## 验证
 
