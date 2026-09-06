@@ -37,6 +37,17 @@ pwsh -NoProfile -File Build/InstallWasmtimeDependency.ps1 -Mode Verify -Platform
 `-Mode Plan`，安装后使用 `-Mode Verify`；安装器不会修改 `.uproject`、系统环境变量、游戏资产或
 项目 `Saved/AvidScript` 数据。
 
+安装后可从插件目录运行只读 Compatibility Doctor：
+
+```powershell
+pwsh -NoProfile -File Build/InvokeAvidScriptCompatibilityDoctor.ps1 `
+  -ProjectRoot "C:\Path\To\YourProject" `
+  -EngineRoot "C:\Path\To\UnrealEngine"
+```
+
+报告使用稳定 JSON code/status/remediation，并区分 blocked、warning 与 not-run，不会把缺失 Android
+工具链或未执行设备测试写成通过。
+
 ## 边界
 
 当前为 `0.1.0` 开发者预览。Android UBT/APK/真机、iOS、Shipping 人工视觉与完整 C#/.NET 兼容层

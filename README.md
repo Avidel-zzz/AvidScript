@@ -162,6 +162,11 @@ smoke。发布输入固定到 Git commit 与 allowlist，package/receipt 由 Sch
 支持 `Plan / Install / Upgrade / Repair / NoOp / Verify`、项目锁和失败回滚；相同输入重复发布得到相同
 release identity。公开离线二进制包仍受中性构建与路径脱敏 Gate 阻断，不包含在当前 source profile。
 
+P65.B1 已提供只读 Compatibility Doctor：统一检查 UE5.8、.NET/PowerShell/VS、插件 receipt、Wasmtime、
+Binding、Generated Type、项目 Target 与 Android toolchain，并输出稳定 JSON code/status/remediation。
+当前工程的 Win64 开发链全部通过、**0 blocked**；warning 为源码 checkout 无安装 receipt 与 Android `3/19`
+及其未满足子项，不影响 PC 开发，但不会被写成已完成的分发或移动端证据。
+
 ## 验证
 
 完整回归与后续专项分别记录，**不累加成当前全量通过数**：
