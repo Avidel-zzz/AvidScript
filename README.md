@@ -11,8 +11,8 @@
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 Validated" src="https://img.shields.io/badge/Platform-Win64%20Validated-0078D4?logo=windows&logoColor=white">
   <img alt="Android arm64 Cross-AOT" src="https://img.shields.io/badge/Android%20arm64-Cross--AOT-3DDC84?logo=android&logoColor=white">
-  <img alt="Phase 64 Active" src="https://img.shields.io/badge/Status-Phase%2064%20Active-2B6CB0">
-  <img alt="Automation Baseline 439/439" src="https://img.shields.io/badge/Baseline-439%2F439-26A269">
+  <img alt="Phase 65 Active" src="https://img.shields.io/badge/Status-Phase%2065%20Active-2B6CB0">
+  <img alt="Automation Baseline 461/461" src="https://img.shields.io/badge/Baseline-461%2F461-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
 
@@ -29,7 +29,8 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 ## 现在可以做什么
 
 更新于 **2026-09-06**。已跑通 **C# → WASM → UE 事件与 API → Win64 打包运行**，
-可开始尝试小型玩法 Demo，不需要 `.avid`。**P64 仍在实施中，不是完整 UE/.NET 替代层。**
+可开始尝试小型玩法 Demo，不需要 `.avid`。**P64 正式 Gate 已完成，P65 正在推进发布工程；
+当前仍不是完整 UE/.NET 替代层。**
 
 | 能力 | 已实现内容 |
 | --- | --- |
@@ -53,7 +54,8 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 与[类型化 Host 结构化诊断](Docs/Phase64/P64.D_Typed_Host_Diagnostics.md)。
 首次安装的[干净生成模块构建](Docs/Phase64/P64.D_Clean_Checkout_Build.md)也已完成定点修复与双路径 UBT。
 [完整 Automation 隔离恢复](Docs/Phase64/P64.D_Full_Automation_Recovery.md)修正了无 package Subsystem、
-GameplayEvent 对象授权和故障 Session 所有权合同，聚焦矩阵 **10/10** 通过；完整新候选 Gate 仍待执行。
+GameplayEvent 对象授权和故障 Session 所有权合同；正式候选完整 Automation **461/461**、.NET **300/300**、
+PowerShell contracts **16/16** 与三条 clean/generated UBT 路径全部通过。
 已知字符串参数帧逐轮保留已归零；整个 Editor 进程的剩余增长仍在归因，不宣称无泄漏。
 完整记录见 [P64 交付](Docs/Phase64/P64_Closeout.md)，类型范围见 [P58 验收](Docs/Phase58/P58.4_Centralized_Gate_Report.md)。
 实现与验收分别记录，限制见[当前边界](#当前边界)。
@@ -152,8 +154,8 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 - **玩法与平台**：UI 包使用独立验证插件和隔离启动配置，Development/Shipping 均通过跨进程自动存取；Development 人工界面、按钮和同一 UserRoot 新进程读档均反馈无问题。Shipping 人工视觉按用户要求不阻塞当前推进，明确转入发布候选验收，不能视为通过。任意损坏存档不在现有保证内；Development 包内一小时切图与当前候选 2/2 多进程网络拓扑通过，UI 重载另有 20 轮有界证据，但不宣称一小时网络/重载长稳；Android UBT/APK/真机及 iOS 仍未验收。
 - **诊断与性能**：typed Host 拒绝已在 Wasmtime 保留具体 category/details/import，WAMR semantic/dynamic 路径同样保留分类；尚无完整 C# 异常系统。纯执行 P50/P95 领先门禁未关闭，也未完成同口径 UnLua/AngelScript 矩阵。
 
-下一步进入发布工程：安装、升级、兼容、诊断和正式 Release；Shipping 人工视觉与移动设备证据
-作为发布候选 Gate 保留，不以自动报告或阶段编号替代。
+P65 正在推进发布工程：可重复发布包、原子安装/升级、兼容诊断、Android Gate 和当前版本性能领导力。
+Shipping 人工视觉与移动设备证据仍作为独立发布候选 Gate，不以自动报告或阶段编号替代。
 
 ## 验证
 
@@ -161,7 +163,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 
 | 范围 | 已归档证据 |
 | --- | --- |
-| [完整技术基线](Docs/Phase64/P64_Closeout.md)，候选 `9e08cdc` | Automation **439/439**、.NET **284/284**；10 组 PowerShell 合同、干净候选架构检查和 no-clean Editor UBT 通过 |
+| [Phase 64 正式 Gate](Docs/Phase64/P64_Gate_Summary.json)，候选 `cca81ec` | Automation **461/461**、.NET **300/300**、PowerShell contracts **16/16**；12 项 Gate 检查及 clean/generated/published 三条 UE5.8 UBT 路径通过 |
 | [PickupRush](Samples/CSharp/PickupRush/README.md) | Editor / Win64 Development / Shipping 均为 **5/5** 事件与胜利状态；包回执 **21/21 / 19/19** |
 | [存取与正文重载](Docs/Phase64/P64.D_Save_Reload_Ownership.md) | **165/165** 动作、runner **118/118**、生命周期 **18/18**；GC 后资源有界，纯 UI 重载 **84/84** 回归通过 |
 | [存档与异常流程](Docs/Phase64/P64.D_UI_Save_Edges.md) | 五个独立进程 **31/31** 动作；覆盖保存、重启读取、缺档、GC、读取失败、写锁与组件退出 |
@@ -171,8 +173,8 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 | [内存归因与分配栈](Docs/Phase64/P64.D_Native_Allocation_Tracing.md) | VM/Trace/FName/LLM 快照、GC 书签与 Insights 四组查询；`SetUtf8Value` 两窗口 **0 项/0 字节**，结合包内稳态验证 D07，但不宣称整个进程零增长 |
 | [调用生命周期修复](Docs/Phase64/P64.D_Invocation_Lifetime.md) | 原生 UFunction 非平凡帧统一析构；Wasmtime 重载历史改为调用者按需持有；Binding **1/1**、Wasmtime **14/14**，修复后一小时 **877/877** 轮通过 |
 | [类型化 Host 结构化诊断](Docs/Phase64/P64.D_Typed_Host_Diagnostics.md) | Wasmtime typed 与 WAMR dynamic 实际 WASM、Runtime epoch/重入和 Reflection 拒绝共 **4/4** 通过；no-clean Editor UBT 成功 |
-| [干净安装生成模块](Docs/Phase64/P64.D_Clean_Checkout_Build.md) | 无项目生成头/源的 clean candidate **39/39 actions**，已有真实生成类型 **8/8 actions**；均为 UE5.8 Editor UBT 成功，完整 Gate 待新候选重跑 |
-| [完整 Automation 隔离恢复](Docs/Phase64/P64.D_Full_Automation_Recovery.md) | UeTypeGenerator **5/5**、no-clean UBT **14/14 actions**、聚焦 Automation **10/10**；失败候选不复用，正式全量数字待新候选 Gate |
+| [干净安装生成模块](Docs/Phase64/P64.D_Clean_Checkout_Build.md) | 无项目生成头/源的 clean candidate **39/39 actions**，已有真实生成类型 **8/8 actions**；最终 Gate 又完成 clean/generated **35/35 + 35/35** 与发布后 **5/5** |
+| [完整 Automation 隔离恢复](Docs/Phase64/P64.D_Full_Automation_Recovery.md) | UeTypeGenerator **5/5**、聚焦 Automation **10/10**；修复进入正式候选后完整 Automation **461/461**、零失败 |
 
 编译器专项见 [async 短路求值](Docs/Phase64/P64.D_Async_Short_Circuit.md)与[C# 捕获赋值](Docs/Phase64/P64.D_Captured_Assignment.md)。
 上述机器验证不替代真实输入、视觉、设备和完整长稳验收；[Android 边界](Docs/Phase64/P64.D_Android_Readiness.md)单独保留。

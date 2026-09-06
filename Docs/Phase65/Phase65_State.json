@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "phase": {
+    "id": 65,
+    "goal": "交付可分发、可安装、可升级、可诊断并具有当前跨框架性能证据的 AvidScript 开发者预览 Release Candidate",
+    "start_commit": "ad8738b6ae41fc66e18d6b8ad252380df5932313"
+  },
+  "declared_stage": "implementing",
+  "architecture": {
+    "path": "Docs/Phase65/P65.0_Release_Engineering_Architecture.md",
+    "version": 1,
+    "sha256": "2e60e4c29ef81846aba5259b6eb2787ce6835aeacdafd36b6d346d3f09e0a18a",
+    "revision_reason": "initial architecture freeze"
+  },
+  "documents": {
+    "plan": "Docs/Phase65/P65.0_Implementation_Plan.md",
+    "closeout": "Docs/Phase65/P65_Closeout.md"
+  },
+  "batches": [
+    {
+      "id": "P65.A",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    },
+    {
+      "id": "P65.B",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    },
+    {
+      "id": "P65.C",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    },
+    {
+      "id": "P65.D",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    }
+  ],
+  "debt": [
+    {
+      "id": "P65-D01-AndroidDevice",
+      "severity": "Important",
+      "found_batch": "P65.C",
+      "scope": "Android SDK、arm64 UBT、APK/AAB、安装与设备生命周期",
+      "evidence": "Phase 64 P64-D01 已转入；当前主机 preflight 为 3/19，通过项不包含 SDK/ADB。",
+      "deferral_reason": "必须在 P65.C 以真实可用层级执行，不能用交叉 AOT 冒充 Android 构建或真机。",
+      "remediation": "完成受控 toolchain 探测与可用层 Gate；有设备时安装、启动、后台恢复与重启读回，无设备时明确 not_run。",
+      "status": "Open",
+      "resolution_evidence": "",
+      "target_phase": null,
+      "transfer_reason": ""
+    },
+    {
+      "id": "P65-D02-ManualReleaseAcceptance",
+      "severity": "Normal",
+      "found_batch": "P65.C",
+      "scope": "Shipping UI、物理输入、手柄与 Android 真机体验",
+      "evidence": "Phase 64 P64-D02/P64-D09 已转入；用户要求自动推进且不在中途等待人工验收。",
+      "deferral_reason": "人工视觉和物理输入不能由自动进程替代，但不阻塞产品代码与自动 Gate 的连续实现。",
+      "remediation": "发布候选提供稳定验收清单和同源 receipt；由人工在 Shipping 与设备上完成后单独记录。",
+      "status": "Open",
+      "resolution_evidence": "",
+      "target_phase": null,
+      "transfer_reason": ""
+    },
+    {
+      "id": "P65-D03-ControlledLeadership",
+      "severity": "Important",
+      "found_batch": "P65.D",
+      "scope": "当前 AvidScript 与 Puerts、AngelScript 的同语义性能领导力",
+      "evidence": "P57 归档纯执行 P50/P95 几何均值为 0.9800x/1.0006x，未达到 0.95x；尚无完整 AngelScript 同口径矩阵。",
+      "deferral_reason": "必须在功能与 Release identity 冻结后统一重测，旧 micro 数据不能代表当前版本。",
+      "remediation": "冻结 correctness/workload/runtime，执行当前多进程矩阵；定位并优化红项，逐 lane 发布可审计 aggregate 与诚实结论。",
+      "status": "Open",
+      "resolution_evidence": "",
+      "target_phase": null,
+      "transfer_reason": ""
+    }
+  ],
+  "review": {
+    "completed": false,
+    "evidence": "",
+    "completed_at_utc": null
+  },
+  "budgets": {
+    "ubt": 3,
+    "automation": 2,
+    "full_gate": 2
+  },
+  "invocations": {
+    "ubt": 0,
+    "automation": 0,
+    "full_gate": 0
+  },
+  "freeze": {
+    "source_commit": "",
+    "source_tree": "",
+    "state_sha256": "",
+    "review_evidence": "",
+    "at_utc": null
+  },
+  "gate": {
+    "report_path": "",
+    "report_sha256": "",
+    "run_id": "",
+    "verified_commit": "",
+    "verified_tree": "",
+    "attestation_parent": "",
+    "attested_at_utc": null
+  },
+  "protected_dirty": [
+    {
+      "path": "Docs/AvidScript_Technical_Status.md",
+      "status": "??",
+      "worktree_sha256": "3025ef2e274d0373168eea28a25bef6bd1a86a19e887d76ee51c6804d51698c2",
+      "head_blob_sha256": ""
+    },
+    {
+      "path": "Docs/Phase42/P42.0_Reflection_Binding_Generator_Architecture.md",
+      "status": " M",
+      "worktree_sha256": "569cf61960108edd6a4865da796ddf465b2ab6e6cf440dc2ae280b84f94d6655",
+      "head_blob_sha256": "5881954e78c9759dafb336484adf7dcd9d064122599e9b93337c69067b08c1cf"
+    },
+    {
+      "path": "Source/AvidScriptRuntime/Public/AvidScriptWasmReloadTypes.h",
+      "status": " M",
+      "worktree_sha256": "384b6e093dc8568e666dc0335b575383e473ecf00448c1d5c461a852b38edfed",
+      "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
+    }
+  ],
+  "next_action": "debt-update -Phase 65 -DebtId P65-D01-AndroidDevice -Status Verified -Evidence <text>",
+  "revision": 4,
+  "updated_at_utc": "2026-09-06T02:39:46.6055449+00:00"
+}
