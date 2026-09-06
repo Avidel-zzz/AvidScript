@@ -19,9 +19,9 @@
   "batches": [
     {
       "id": "P65.A",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "Docs/Phase65/P65.A_Deterministic_Release_And_Atomic_Install.md；实现提交 4f196fc；PowerShell contracts 22/22；同一 commit 连续发布 identity/manifest/inventory 一致；仓库外 Plan/Install/Verify/NoOp 通过，0 warning。",
+      "completed_at_utc": "2026-09-06T03:23:54.6217040+00:00"
     },
     {
       "id": "P65.B",
@@ -148,6 +148,6 @@
     }
   ],
   "next_action": "debt-update -Phase 65 -DebtId P65-D01-AndroidDevice -Status Verified -Evidence <text>",
-  "revision": 6,
-  "updated_at_utc": "2026-09-06T03:06:18.6902413+00:00"
+  "revision": 7,
+  "updated_at_utc": "2026-09-06T03:23:54.6237959+00:00"
 }

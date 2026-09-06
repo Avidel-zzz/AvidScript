@@ -157,10 +157,10 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 P65 正在推进发布工程：可重复发布包、原子安装/升级、兼容诊断、Android Gate 和当前版本性能领导力。
 Shipping 人工视觉与移动设备证据仍作为独立发布候选 Gate，不以自动报告或阶段编号替代。
 
-P65.A 的 thin source 发布器与原子安装器已完成实现并通过 **22/22** 轻量合同：发布输入固定到 Git commit
-与 allowlist，package/receipt 由 Schema、inventory 和 SHA-256 约束，支持
-`Plan / Install / Upgrade / Repair / NoOp / Verify`、项目锁和失败回滚。当前实现提交后还需执行一次仓库外
-的生产发布与合成项目安装 smoke，完成后再把 P65.A 标记为关闭；公开离线二进制包仍受路径脱敏 Gate 阻断。
+P65.A 已完成：thin source 发布器与原子安装器通过 **22/22** 轻量合同及真实 commit-based 发布/安装
+smoke。发布输入固定到 Git commit 与 allowlist，package/receipt 由 Schema、inventory 和 SHA-256 约束，
+支持 `Plan / Install / Upgrade / Repair / NoOp / Verify`、项目锁和失败回滚；相同输入重复发布得到相同
+release identity。公开离线二进制包仍受中性构建与路径脱敏 Gate 阻断，不包含在当前 source profile。
 
 ## 验证
 
