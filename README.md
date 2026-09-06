@@ -177,7 +177,8 @@ lock、Git tree、payload inventory 一同参与 `release_id`。项目实际 `pa
 
 P65.C2 已提供统一平台 Release Gate：固定报告 release、项目产物、Win64 Shipping、Android toolchain/arm64/
 APK/device 与人工体验 8 层独立状态。当前真实 `Inspect` 为 **2 passed / 0 failed / 1 blocked / 5 not_run**；
-Android 仍为 3/19，未执行层保持透明，Gate 合同 **7/7** 通过。
+Android 仍为 3/19，未执行层保持透明，Gate 合同 **7/7** 通过。`Execute` 可仅在当前 UBT/Cooker 子进程
+禁用冲突的可选插件，不改写项目配置。
 
 ## 验证
 

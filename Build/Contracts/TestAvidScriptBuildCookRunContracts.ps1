@@ -190,6 +190,7 @@ try {
             'Configuration',
             'CookMaps',
             'CSharpProjectPath',
+            'DisablePlugins',
             'DotNetPath',
             'EnablePlugins',
             'EngineRoot',
@@ -215,6 +216,7 @@ try {
                 "[string]`$GeneratedTypeManifestPath = ''",
                 '[string[]]$CookMaps = @()',
                 '[string[]]$EnablePlugins = @()',
+                '[string[]]$DisablePlugins = @()',
                 '[Parameter(Mandatory = $true)][string]$ArchiveRoot')) {
             Assert-BuildCookRunContract `
                 ($RunnerSource.Contains($RequiredToken)) `
@@ -319,18 +321,22 @@ try {
         $Base = @{ ProjectFile = 'C:\Project\Game.uproject'; TargetName = 'Game';
             Configuration = 'Development'; ArchiveRoot = 'C:\Project\Saved\Archive' }
         $DefaultArguments = @(New-AvidScriptBuildCookRunUatArguments @Base)
-        $EmptyArguments = @(New-AvidScriptBuildCookRunUatArguments @Base -CookMaps @() -EnablePlugins @())
+        $EmptyArguments = @(New-AvidScriptBuildCookRunUatArguments @Base `
+                -CookMaps @() -EnablePlugins @() -DisablePlugins @())
         Assert-BuildCookRunContract (($DefaultArguments -join '|') -ceq ($EmptyArguments -join '|')) `
             'Explicit empty selections changed the default UAT arguments.'
         Assert-BuildCookRunContract ($DefaultArguments.Count -eq 16 -and
             @($DefaultArguments | Where-Object { $_ -match 'map=|ubtargs=|EnablePlugin|WaitMutex|NoHotReloadFromIDE' }).Count -eq 0) `
             'Default arguments acquired opt-in map/plugin switches.'
-        foreach ($Selection in @(@{}, @{ CookMaps = @(); EnablePlugins = @() })) {
+        foreach ($Selection in @(
+                @{},
+                @{ CookMaps = @(); EnablePlugins = @(); DisablePlugins = @() })) {
             $Observed = Invoke-BuildCookRunSelectionFixture -Selection $Selection
             Assert-BuildCookRunContract ($Observed.ErrorMessage -ceq '') "Fixture failed: $($Observed.ErrorMessage)"
             $Json = $Observed.Summary | ConvertTo-Json -Depth 8 -Compress | ConvertFrom-Json
             Assert-BuildCookRunContract ($Json.cook_maps -is [array] -and $Json.cook_maps.Count -eq 0 -and
-                $Json.enable_plugins -is [array] -and $Json.enable_plugins.Count -eq 0) `
+                $Json.enable_plugins -is [array] -and $Json.enable_plugins.Count -eq 0 -and
+                $Json.disable_plugins -is [array] -and $Json.disable_plugins.Count -eq 0) `
                 'Default result selections must serialize as empty arrays.'
         }
     }
@@ -338,14 +344,19 @@ try {
     Invoke-BuildCookRunContractCase 'map and plugin selections reach UAT and final result' {
         $Maps = @('/AvidScript/Demos/UiSave/L_UiSave', '/Game/Maps/Test_2')
         $Plugins = @('AvidScriptValidation', 'Second_Plugin2')
-        $Observed = Invoke-BuildCookRunSelectionFixture -Selection @{ CookMaps = $Maps; EnablePlugins = $Plugins }
+        $Disabled = @('Puerts', 'Optional_Plugin2')
+        $Observed = Invoke-BuildCookRunSelectionFixture -Selection @{
+            CookMaps = $Maps
+            EnablePlugins = $Plugins
+            DisablePlugins = $Disabled
+        }
         Assert-BuildCookRunContract ($Observed.ErrorMessage -ceq '') "Fixture failed: $($Observed.ErrorMessage)"
         Assert-BuildCookRunContract (($Observed.Calls -join '|') -ceq 'context|release|uat|receipt') `
             'Selections changed the Release/UAT/receipt sequence.'
         foreach ($Expected in @(
                 '-map=/AvidScript/Demos/UiSave/L_UiSave+/Game/Maps/Test_2',
-                '-ubtargs=-EnablePlugin=AvidScriptValidation+Second_Plugin2 -WaitMutex -NoHotReloadFromIDE',
-                '-AdditionalCookerOptions=-SkipZenStore -AvidScriptSuppressGeneratedTypeExecution -EnablePlugins=AvidScriptValidation,Second_Plugin2',
+                '-ubtargs=-EnablePlugin=AvidScriptValidation+Second_Plugin2 -DisablePlugin=Puerts+Optional_Plugin2 -WaitMutex -NoHotReloadFromIDE',
+                '-AdditionalCookerOptions=-SkipZenStore -AvidScriptSuppressGeneratedTypeExecution -EnablePlugins=AvidScriptValidation,Second_Plugin2 -DisablePlugins=Puerts,Optional_Plugin2',
                 '-skipbuildeditor')) {
             Assert-BuildCookRunContract ($Observed.Arguments -ccontains $Expected) "Missing UAT argument: $Expected"
         }
@@ -354,19 +365,21 @@ try {
                 "Expected exactly one $Prefix argument."
         }
         Assert-BuildCookRunContract (@($Observed.Arguments | Where-Object {
-                $_ -match '^-(?:EnablePlugins?|Plugin|ForeignPlugin|WaitMutex|NoHotReloadFromIDE)(?:=|$)|UniqueBuildEnvironment'
+                $_ -match '^-(?:EnablePlugins?|DisablePlugins?|Plugin|ForeignPlugin|WaitMutex|NoHotReloadFromIDE)(?:=|$)|UniqueBuildEnvironment'
             }).Count -eq 0) 'Plugin switches leaked to UAT top level or changed the build environment.'
         $Json = $Observed.Summary | ConvertTo-Json -Depth 8 -Compress | ConvertFrom-Json
-        Assert-BuildCookRunContract ($Json.cook_maps -is [array] -and $Json.enable_plugins -is [array] -and
+        Assert-BuildCookRunContract ($Json.cook_maps -is [array] -and
+            $Json.enable_plugins -is [array] -and $Json.disable_plugins -is [array] -and
             ($Json.cook_maps -join '|') -ceq ($Maps -join '|') -and
-            ($Json.enable_plugins -join '|') -ceq ($Plugins -join '|')) `
+            ($Json.enable_plugins -join '|') -ceq ($Plugins -join '|') -and
+            ($Json.disable_plugins -join '|') -ceq ($Disabled -join '|')) `
             'Final JSON lost the selected map/plugin arrays, order, or case.'
         $Commands = @($RunnerAst.FindAll({ param($Node)
                 $Node -is [System.Management.Automation.Language.CommandAst] -and
                     $Node.GetCommandName() -ceq 'Invoke-AvidScriptBuildCookRun'
             }, $true))
         Assert-BuildCookRunContract ($Commands.Count -eq 1) 'Expected one top-level runner invocation.'
-        foreach ($Name in @('CookMaps', 'EnablePlugins')) {
+        foreach ($Name in @('CookMaps', 'EnablePlugins', 'DisablePlugins')) {
             Assert-BuildCookRunContract ($Commands[0].Extent.Text.Contains("-$Name `$$Name")) `
                 "Top-level script does not forward $Name."
         }
@@ -384,25 +397,37 @@ try {
         Assert-BuildCookRunContract (@($PluginOnly | Where-Object { $_ -match '^-map=' }).Count -eq 0 -and
             $PluginOnly -ccontains '-ubtargs=-EnablePlugin=AvidScriptValidation -WaitMutex -NoHotReloadFromIDE') `
             'Plugin-only selection added a map or lost UBT flags.'
+        $DisableOnly = @(New-AvidScriptBuildCookRunUatArguments @Base -DisablePlugins 'Puerts')
+        Assert-BuildCookRunContract (@($DisableOnly | Where-Object { $_ -match '^-map=' }).Count -eq 0 -and
+            $DisableOnly -ccontains '-ubtargs=-DisablePlugin=Puerts -WaitMutex -NoHotReloadFromIDE' -and
+            $DisableOnly -ccontains '-AdditionalCookerOptions=-SkipZenStore -AvidScriptSuppressGeneratedTypeExecution -DisablePlugins=Puerts') `
+            'Disable-only selection added a map or lost Cooker/UBT flags.'
     }
 
     foreach ($InvalidGroup in @(
             @{ Name = 'null cook selection arrays'; Option = 'CookMaps'; Values = @($null); Category = 'cook_maps_invalid' },
             @{ Name = 'null plugin selection arrays'; Option = 'EnablePlugins'; Values = @($null); Category = 'enable_plugins_invalid' },
+            @{ Name = 'null disabled plugin arrays'; Option = 'DisablePlugins'; Values = @($null); Category = 'disable_plugins_invalid' },
             @{ Name = 'empty and malformed maps'; Option = 'CookMaps';
                 Values = @('', ' ', '/Game', 'Game/Map', '/Game/Map/', '/Game//Map', '/Game/../Map', '/Game/Map.umap', '/Game\Map');
                 Category = 'cook_maps_invalid' },
             @{ Name = 'empty and malformed plugins'; Option = 'EnablePlugins';
                 Values = @('', ' ', '1Plugin', '_Plugin', 'A-B', 'A/B'); Category = 'enable_plugins_invalid' },
+            @{ Name = 'empty and malformed disabled plugins'; Option = 'DisablePlugins';
+                Values = @('', ' ', '1Plugin', '_Plugin', 'A-B', 'A/B'); Category = 'disable_plugins_invalid' },
             @{ Name = 'map delimiter and command injection'; Option = 'CookMaps';
                 Values = @('/Game/A+/Game/B', '/Game/A,/Game/B', '/Game/A -clean', '/Game/A"', '/Game/A;echo', '/Game/A&echo', '/Game/A|echo', "/Game/A`n");
                 Category = 'cook_maps_invalid' },
             @{ Name = 'plugin delimiter and command injection'; Option = 'EnablePlugins';
                 Values = @('A+B', 'A,B', 'A -clean', 'A"', 'A;echo', 'A&echo', 'A|echo', "A`n"); Category = 'enable_plugins_invalid' },
+            @{ Name = 'disabled plugin delimiter and command injection'; Option = 'DisablePlugins';
+                Values = @('A+B', 'A,B', 'A -clean', 'A"', 'A;echo', 'A&echo', 'A|echo', "A`n"); Category = 'disable_plugins_invalid' },
             @{ Name = 'duplicate and null map entries'; Option = 'CookMaps';
                 Values = @(@('/Game/A', '/game/a'), @('/Game/A', $null)); Category = 'cook_maps_invalid' },
             @{ Name = 'duplicate and null plugin entries'; Option = 'EnablePlugins';
-                Values = @(@('Plugin', 'plugin'), @('Plugin', $null)); Category = 'enable_plugins_invalid' })) {
+                Values = @(@('Plugin', 'plugin'), @('Plugin', $null)); Category = 'enable_plugins_invalid' },
+            @{ Name = 'duplicate and null disabled plugin entries'; Option = 'DisablePlugins';
+                Values = @(@('Plugin', 'plugin'), @('Plugin', $null)); Category = 'disable_plugins_invalid' })) {
         Invoke-BuildCookRunContractCase $InvalidGroup.Name {
             foreach ($InvalidValue in $InvalidGroup.Values) {
                 $Selection = @{ ($InvalidGroup.Option) = $InvalidValue }
@@ -414,11 +439,27 @@ try {
         }
     }
 
+    Invoke-BuildCookRunContractCase 'enable and disable conflict fails before side effects' {
+        $Observed = Invoke-BuildCookRunSelectionFixture -Selection @{
+            EnablePlugins = @('Puerts')
+            DisablePlugins = @('puerts')
+        }
+        Assert-BuildCookRunContract (
+            $Observed.ErrorCategory -ceq 'plugin_selection_conflict' -and
+            $Observed.ErrorStep -ceq 'validation' -and
+            $Observed.Calls.Count -eq 0) `
+            'Conflicting plugin selection reached project context or build side effects.'
+    }
+
     Invoke-BuildCookRunContractCase 'direct UAT entry points reject invalid selections before side effects' {
         $UnusedRoot = Join-Path $FixtureRoot 'InvalidDirectUat'
-        foreach ($Option in @('CookMaps', 'EnablePlugins')) {
+        foreach ($Option in @('CookMaps', 'EnablePlugins', 'DisablePlugins')) {
             $Selection = @{ $Option = 'invalid;injection' }
-            $ExpectedCategory = if ($Option -ceq 'CookMaps') { 'cook_maps_invalid' } else { 'enable_plugins_invalid' }
+            $ExpectedCategory = switch ($Option) {
+                'CookMaps' { 'cook_maps_invalid' }
+                'EnablePlugins' { 'enable_plugins_invalid' }
+                default { 'disable_plugins_invalid' }
+            }
             foreach ($Entry in @('arguments', 'step')) {
                 $Rejected = $false
                 try {

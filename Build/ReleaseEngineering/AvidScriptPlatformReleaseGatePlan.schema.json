@@ -33,6 +33,11 @@
           "type": "array",
           "uniqueItems": true,
           "items": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*$" }
+        },
+        "disable_plugins": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*$" }
         }
       }
     },

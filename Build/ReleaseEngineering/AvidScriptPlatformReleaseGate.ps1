@@ -459,6 +459,7 @@ function Invoke-AvidScriptPlatformReleaseWin64 {
         packaged_oracle_mode = [string](Get-AvidScriptPlatformReleaseOptionalProperty $Plan 'packaged_oracle_mode' 'None')
         cook_maps = @((Get-AvidScriptPlatformReleaseOptionalProperty $Plan 'cook_maps' @()))
         enable_plugins = @((Get-AvidScriptPlatformReleaseOptionalProperty $Plan 'enable_plugins' @()))
+        disable_plugins = @((Get-AvidScriptPlatformReleaseOptionalProperty $Plan 'disable_plugins' @()))
         engine_root = $EngineRoot
     }
     $Child = Invoke-AvidScriptPlatformReleaseStep `

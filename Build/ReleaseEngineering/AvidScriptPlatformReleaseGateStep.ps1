@@ -28,6 +28,7 @@ switch ($Step) {
             PackagedOracleMode = [string]$Input.packaged_oracle_mode
             CookMaps = @($Input.cook_maps)
             EnablePlugins = @($Input.enable_plugins)
+            DisablePlugins = @($Input.disable_plugins)
             EngineRoot = [string]$Input.engine_root
         }
         & (Join-Path $BuildRoot 'InvokeAvidScriptBuildCookRun.ps1') @Parameters
