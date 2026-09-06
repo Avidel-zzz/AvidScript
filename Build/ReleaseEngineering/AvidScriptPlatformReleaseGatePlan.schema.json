@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://avidscript.dev/schemas/platform-release-gate-plan-v1.json",
+  "title": "AvidScript Platform Release Gate Plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "win64", "android"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "win64": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "configuration": { "enum": ["Development", "Shipping"] },
+        "source_path": { "type": "string", "minLength": 1 },
+        "csharp_project_path": { "type": "string", "minLength": 1 },
+        "module_id": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]{0,63}$" },
+        "artifact_stem": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$" },
+        "output_root": { "type": "string", "minLength": 1 },
+        "archive_root": { "type": "string", "minLength": 1 },
+        "binding_package_path": { "type": "string" },
+        "runtime_binding_package_path": { "type": "string" },
+        "generated_type_manifest_path": { "type": "string" },
+        "packaged_oracle_mode": { "enum": ["Legacy", "None"] },
+        "cook_maps": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^/[A-Za-z0-9_]+(?:/[A-Za-z0-9_]+)+$" }
+        },
+        "enable_plugins": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*$" }
+        }
+      }
+    },
+    "android": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "device"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "configuration": { "enum": ["Development", "Shipping"] },
+        "archive_root": { "type": "string", "minLength": 1 },
+        "sdk_root": { "type": "string" },
+        "ndk_root": { "type": "string" },
+        "java_home": { "type": "string" },
+        "device": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "device_id": { "type": "string" },
+            "scenario_id": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]{0,63}$" },
+            "module_id": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]{0,63}$" },
+            "map": { "type": "string", "pattern": "^/Game/[A-Za-z0-9_/]+$" },
+            "event_ids": { "type": "string", "pattern": "^[0-9]+(?:,[0-9]+){0,63}$" },
+            "expected_package_id": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          }
+        }
+      }
+    }
+  }
+}

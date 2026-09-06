@@ -49,6 +49,19 @@ pwsh -NoProfile -File Build/InvokeAvidScriptCompatibilityDoctor.ps1 `
 报告使用稳定 JSON code/status/remediation，并区分 blocked、warning 与 not-run，不会把缺失 Android
 工具链或未执行设备测试写成通过。
 
+发布候选可使用同一 `release.json` 运行分层平台 Gate：
+
+```powershell
+pwsh -NoProfile -File Build/InvokeAvidScriptPlatformReleaseGate.ps1 `
+  -PackageRoot "C:\Path\To\AvidScript-Release" `
+  -Mode Inspect `
+  -ProjectRoot "C:\Path\To\YourProject" `
+  -EngineRoot "C:\Path\To\UnrealEngine"
+```
+
+`Inspect` 不启动构建或设备任务；`Execute` 仅执行显式计划文件启用的层。Shipping 视觉与物理输入始终保留为
+独立人工 Gate。
+
 需要提交问题材料时，可在插件目录一次完成诊断和脱敏导出：
 
 ```powershell
