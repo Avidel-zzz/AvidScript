@@ -1,7 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$EditorExecutable,
+    [string]$EditorExecutable = '',
 
     [Parameter(Mandatory = $true)]
     [string]$ProjectPath,
@@ -13,7 +12,9 @@ param(
     [string]$RequestTemplatePath,
 
     [Parameter(Mandatory = $true)]
-    [string]$OutputDirectory
+    [string]$OutputDirectory,
+
+    [string]$PackagedGameExecutable = ''
 )
 
 Set-StrictMode -Version Latest
@@ -195,7 +196,8 @@ function Resolve-RequestTemplateIdentity {
         [pscustomobject]$Template,
         [pscustomobject]$Profile,
         [string]$ProjectRoot,
-        [string]$EditorPath,
+        [string]$HostExecutablePath,
+        [bool]$IsMonolithicHost,
         [pscustomobject]$SemanticPackage,
         [pscustomobject]$GeneratedPackage,
         [pscustomobject]$DataPackage
@@ -205,12 +207,16 @@ function Resolve-RequestTemplateIdentity {
     $harnessRoot = Join-Path $ProjectRoot 'Plugins\AvidScriptPerfHarness'
     $puertsRoot = Join-Path $ProjectRoot 'Plugins\Puerts'
     $puertsMarkerPath = Join-Path $puertsRoot '.avidscript-puerts-install.json'
-    $puertsRuntimePath = Join-Path $puertsRoot 'Binaries\Win64\UnrealEditor-JsEnv.dll'
+    $puertsRuntimePath = $IsMonolithicHost ?
+        $HostExecutablePath :
+        (Join-Path $puertsRoot 'Binaries\Win64\UnrealEditor-JsEnv.dll')
     $reflectionScriptPath = Join-Path $harnessRoot 'Content\JavaScript\reflection.js'
     $staticScriptPath = Join-Path $harnessRoot 'Content\JavaScript\static.js'
     $wasmtimeRuntimePath = Join-Path $avidscriptRoot 'Binaries\Win64\wasmtime.dll'
-    $harnessModulePath = Join-Path $harnessRoot (
-        'Binaries\Win64\UnrealEditor-AvidScriptPerfHarness.dll')
+    $harnessModulePath = $IsMonolithicHost ?
+        $HostExecutablePath :
+        (Join-Path $harnessRoot (
+            'Binaries\Win64\UnrealEditor-AvidScriptPerfHarness.dll'))
 
     $puertsMarker = Read-JsonFile -Path $puertsMarkerPath
     $avidscriptCommit = Get-GitText -Repository $avidscriptRoot -Arguments @('rev-parse', 'HEAD')
@@ -224,7 +230,7 @@ function Resolve-RequestTemplateIdentity {
         throw 'Formal Phase54 evidence requires a clean AvidScript candidate.'
     }
 
-    $editorSha256 = Get-SidecarFileSha256 -Path $EditorPath
+    $editorSha256 = Get-SidecarFileSha256 -Path $HostExecutablePath
     $puertsRuntimeSha256 = Get-SidecarFileSha256 -Path $puertsRuntimePath
     $reflectionScriptSha256 = Get-SidecarFileSha256 -Path $reflectionScriptPath
     $staticScriptSha256 = Get-SidecarFileSha256 -Path $staticScriptPath
@@ -232,8 +238,11 @@ function Resolve-RequestTemplateIdentity {
     $harnessModuleSha256 = Get-SidecarFileSha256 -Path $harnessModulePath
 
     if ($Profile.evidence_class -ceq 'formal') {
+        if ($IsMonolithicHost) {
+            throw 'Formal packaged benchmark requires a separately frozen Phase65 protocol.'
+        }
         Assert-SidecarFormalEditorExecutable `
-            -EditorExecutable $EditorPath `
+            -EditorExecutable $HostExecutablePath `
             -UeVersion '5.8.0' | Out-Null
         Assert-SidecarBenchmarkProjectProvenance `
             -ProjectPath (Join-Path $projectRoot 'AvidTPSTemplate.uproject') `
@@ -315,6 +324,9 @@ function Resolve-RequestTemplateIdentity {
     $Template.lane_catalog_sha256 = $catalogSha256
     $Template.provenance.ue_version = '5.8.0'
     $Template.provenance.editor_executable_sha256 = $editorSha256
+    $Template.provenance | Add-Member -NotePropertyName execution_host -NotePropertyValue (
+        $IsMonolithicHost ? 'packaged_game' : 'editor_commandlet') -Force
+    $Template.provenance | Add-Member -NotePropertyName host_executable_sha256 -NotePropertyValue $editorSha256 -Force
     $Template.provenance.harness_module_sha256 = $harnessModuleSha256
     $Template.provenance.avidscript_commit = $avidscriptCommit
     $Template.provenance.avidscript_tree_sha = $avidscriptTree
@@ -402,15 +414,28 @@ function Invoke-ProcessRequest {
         throw 'Phase54 benchmark request failed schema validation.'
     }
     Write-NewJsonFile -Value $Request -Path $RequestPath
-    & $EditorExecutable `
-        $ProjectPath `
-        '-run=AvidScriptPerfRun' `
-        "-AvidScriptPerfRequest=$RequestPath" `
-        "-AvidScriptPerfResult=$ResultPath" `
-        '-unattended' `
-        '-nop4' `
-        '-nullrhi' `
-        '-nosplash'
+    if ($usePackagedGame) {
+        & $resolvedHostExecutable `
+            '-unattended' `
+            '-nop4' `
+            '-nullrhi' `
+            '-nosplash' `
+            '-nosound' `
+            "-AvidScriptPerfRequest=$RequestPath" `
+            "-AvidScriptPerfResult=$ResultPath" `
+            '-ExecCmds=AvidScript.PerformanceComparison.Run'
+    }
+    else {
+        & $resolvedHostExecutable `
+            $ProjectPath `
+            '-run=AvidScriptPerfRun' `
+            "-AvidScriptPerfRequest=$RequestPath" `
+            "-AvidScriptPerfResult=$ResultPath" `
+            '-unattended' `
+            '-nop4' `
+            '-nullrhi' `
+            '-nosplash'
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "AvidScriptPerfRun failed with exit code $LASTEXITCODE."
     }
@@ -447,7 +472,12 @@ function Invoke-ProcessRequest {
     }
 }
 
-$resolvedEditor = (Resolve-Path -LiteralPath $EditorExecutable).Path
+$usePackagedGame = -not [string]::IsNullOrWhiteSpace($PackagedGameExecutable)
+if (-not $usePackagedGame -and [string]::IsNullOrWhiteSpace($EditorExecutable)) {
+    throw 'EditorExecutable is required unless PackagedGameExecutable is provided.'
+}
+$resolvedHostExecutable = (Resolve-Path -LiteralPath (
+    $usePackagedGame ? $PackagedGameExecutable : $EditorExecutable)).Path
 $resolvedProject = (Resolve-Path -LiteralPath $ProjectPath).Path
 $projectRoot = Split-Path -Parent $resolvedProject
 $resolvedOutput = [IO.Path]::GetFullPath($OutputDirectory)
@@ -459,6 +489,17 @@ if (@(Get-ChildItem -LiteralPath $resolvedOutput -Force).Count -ne 0) {
 }
 
 $profile = Read-JsonFile -Path $ProfilePath
+$publishedArtifactCount = @($profile.avidscript_artifacts.PSObject.Properties.Value |
+    Where-Object {
+        $_.PSObject.Properties.Name -ccontains 'artifact_load_policy' -and
+        [string]$_.artifact_load_policy -ceq 'published_package'
+    }).Count
+if ($usePackagedGame -and $publishedArtifactCount -ne 3) {
+    throw 'Packaged Game benchmark requires all three AvidScript lanes to use published packages.'
+}
+if (-not $usePackagedGame -and $publishedArtifactCount -ne 0) {
+    throw 'Published-package benchmark must run through PackagedGameExecutable.'
+}
 $template = Read-JsonFile -Path $RequestTemplatePath
 $expectedWorkloads = @($profile.workloads).Count -eq $gameplayWorkloads.Count ?
     $gameplayWorkloads :
@@ -502,7 +543,8 @@ $template = Resolve-RequestTemplateIdentity `
     -Template $template `
     -Profile $profile `
     -ProjectRoot $projectRoot `
-    -EditorPath $resolvedEditor `
+    -HostExecutablePath $resolvedHostExecutable `
+    -IsMonolithicHost $usePackagedGame `
     -SemanticPackage $semanticPackage `
     -GeneratedPackage $generatedPackage `
     -DataPackage $dataPackage

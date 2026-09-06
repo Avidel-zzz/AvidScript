@@ -187,11 +187,16 @@ Assert-True ($invokeText.Contains('puerts_reflection_script_sha256') -and
     'Runner 编排必须从实物计算 JS、Puerts、Editor 与 Wasmtime 身份。'
 Assert-True ($invokeText.Contains('Assert-SidecarBenchmarkProjectProvenance') -and
     $invokeText.Contains('Assert-SidecarPuertsProvenance') -and
-    $invokeText.Contains('$harnessModulePath = Join-Path $harnessRoot') -and
+    $invokeText.Contains('$harnessModulePath = $IsMonolithicHost') -and
+    $invokeText.Contains('$HostExecutablePath') -and
     $invokeText.Contains('UnrealEditor-AvidScriptPerfHarness.dll') -and
     $invokeText.Contains('requires the tracked profile and request template bytes') -and
     $invokeText.Contains('Get-SidecarWasmtimeCompilerIdentity')) `
     'Formal 六通道必须锁定项目、Puerts、Harness DLL、profile/template 与真实 Wasmtime build identity。'
+Assert-True ($invokeText.Contains('[string]$PackagedGameExecutable') -and
+    $invokeText.Contains("'-ExecCmds=AvidScript.PerformanceComparison.Run'") -and
+    $invokeText.Contains("execution_host -NotePropertyValue")) `
+    '发布包 benchmark 必须通过 monolithic Game host 启动并记录实际执行载体。'
 Assert-True ($invokeText.Contains('Get-SidecarLaneIdentitySha256') -and
     $invokeText.Contains('Get-SidecarLaneCatalogSha256')) `
     '实物身份变化后必须重新计算 canonical lane catalog。'
