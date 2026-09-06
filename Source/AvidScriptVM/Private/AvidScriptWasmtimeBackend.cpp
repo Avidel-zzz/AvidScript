@@ -639,7 +639,9 @@ public:
 				BackendInfo,
 				CompilerProfile,
 				DllLoadError,
-				&CompilerProfileErrorCategory))
+				&CompilerProfileErrorCategory,
+				FString(),
+				bSerialized || ExecutionBudget.FuelPerEntry > 0))
 		{
 			LoadMetrics.RuntimeInitMs = MeasureWasmtimeElapsedMs(RuntimeInitStart);
 			SetWasmtimeError(
@@ -704,6 +706,7 @@ public:
 		}
 		Engine = avidscript_wasmtime_engine_new_with_profile(
 			&CompilerProfile);
+		bFuelConsumptionEnabled = CompilerProfile.bConsumeFuel;
 		LoadMetrics.RuntimeInitMs = MeasureWasmtimeElapsedMs(RuntimeInitStart);
 		if (Engine == nullptr)
 		{
@@ -2111,26 +2114,29 @@ private:
 			return true;
 		}
 		CurrentHostCallCount = 0;
-		const uint64 Fuel = ExecutionBudget.FuelPerEntry > 0
-			? ExecutionBudget.FuelPerEntry
-			: MAX_uint64;
-		AvidScriptWasmtimeFailure* FuelFailure =
-			avidscript_wasmtime_store_set_fuel(Store, Fuel);
-		if (FuelFailure != nullptr)
+		if (bFuelConsumptionEnabled)
 		{
-			TArray<FAvidScriptVmStackFrame> Frames;
-			bool bWasTrap = false;
-			const FString Details = ConsumeWasmtimeFailure(
-				FuelFailure,
-				Frames,
-				bWasTrap);
-			SetWasmtimeError(
-				OutError,
-				TEXT("execution_budget_unavailable"),
-				Details.IsEmpty()
-					? TEXT("Wasmtime rejected the per-entry fuel budget.")
-					: Details);
-			return false;
+			const uint64 Fuel = ExecutionBudget.FuelPerEntry > 0
+				? ExecutionBudget.FuelPerEntry
+				: MAX_uint64;
+			AvidScriptWasmtimeFailure* FuelFailure =
+				avidscript_wasmtime_store_set_fuel(Store, Fuel);
+			if (FuelFailure != nullptr)
+			{
+				TArray<FAvidScriptVmStackFrame> Frames;
+				bool bWasTrap = false;
+				const FString Details = ConsumeWasmtimeFailure(
+					FuelFailure,
+					Frames,
+					bWasTrap);
+				SetWasmtimeError(
+					OutError,
+					TEXT("execution_budget_unavailable"),
+					Details.IsEmpty()
+						? TEXT("Wasmtime rejected the per-entry fuel budget.")
+						: Details);
+				return false;
+			}
 		}
 		const uint64 EpochDeadline = ExecutionBudget.EpochDeadlineTicks > 0
 			? ExecutionBudget.EpochDeadlineTicks
@@ -3761,6 +3767,7 @@ private:
 		TypedHostDispatcher = nullptr;
 		ExecutionBudget = FAvidScriptVmLoadConfig::FExecutionBudget();
 		CurrentHostCallCount = 0;
+		bFuelConsumptionEnabled = true;
 		bUnloadDeferred = false;
 	}
 
@@ -3783,6 +3790,7 @@ private:
 	FString PendingHostFailureDetails;
 	FAvidScriptVmLoadConfig::FExecutionBudget ExecutionBudget;
 	uint32 CurrentHostCallCount = 0;
+	bool bFuelConsumptionEnabled = true;
 
 #if AVIDSCRIPT_WITH_WASMTIME
 	AvidScriptWasmtimeEngine* Engine = nullptr;

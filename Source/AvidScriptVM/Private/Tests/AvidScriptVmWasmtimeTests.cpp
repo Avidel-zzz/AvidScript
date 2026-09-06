@@ -971,6 +971,24 @@ bool FAvidScriptVmWasmtimeCompilerProfileTest::RunTest(
 	TestTrue(
 		TEXT("epoch interruption is compiled in"),
 		DeclaredProfile.EngineProfile.bEpochInterruption);
+	const FAvidScriptWasmtimeCompilerProfile* FuelFreeProfile =
+		FindAvidScriptWasmtimeCompilerProfile(
+			TEXT("x86_64-pc-windows-msvc"),
+			false);
+	if (!TestNotNull(TEXT("fuel-free compiler profile is declared"), FuelFreeProfile))
+	{
+		return false;
+	}
+	TestEqual(
+		TEXT("fuel-free compiler profile id"),
+		FuelFreeProfile->Id,
+		FString(TEXT("cranelift-speed-x86_64-v3-fuel-free-v1")));
+	TestFalse(
+		TEXT("fuel-free profile omits fuel instrumentation"),
+		FuelFreeProfile->EngineProfile.bConsumeFuel);
+	TestTrue(
+		TEXT("fuel-free profile preserves epoch interruption"),
+		FuelFreeProfile->EngineProfile.bEpochInterruption);
 	const FAvidScriptWasmtimeCompilerProfile* AndroidProfile =
 		FindAvidScriptWasmtimeCompilerProfile(TEXT("aarch64-linux-android"));
 	if (!TestNotNull(TEXT("Android compiler profile is declared"), AndroidProfile))
@@ -1285,10 +1303,10 @@ bool FAvidScriptVmWasmtimeLifecycleTest::RunTest(const FString& Parameters)
 		FString::Printf(
 			TEXT("wasmtime-v45.0.0+avidscript.1;strategy=cranelift;")
 			TEXT("opt=speed;regalloc=backtracking;inlining=all;")
-			TEXT("profile=cranelift-speed-x86_64-v3-contained-v3;")
+			TEXT("profile=cranelift-speed-x86_64-v3-fuel-free-v1;")
 			TEXT("target=x86_64-pc-windows-msvc;cpu=x86-64-v3;")
 			TEXT("wasm32_memory=4g_fixed;memory_may_move=0;")
-			TEXT("max_wasm_stack=2m;fuel=on;epoch_interruption=on;")
+			TEXT("max_wasm_stack=2m;fuel=off;epoch_interruption=on;")
 			TEXT("spectre=on;nan_canonicalization=off;parallel_compilation=on;")
 			TEXT("wasm_gc=on;gc_collector=drc;")
 			TEXT("runtime_profile=fastest-runtime;runtime_artifact_sha256=%s"),
@@ -1573,6 +1591,7 @@ bool FAvidScriptVmWasmtimePrecompiledArtifactTest::RunTest(
 
 	const TArray<uint8> Bytecode = BuildWasmtimeLifecycleFixture();
 	FAvidScriptVmLoadConfig Config;
+	Config.ExecutionBudget.FuelPerEntry = 1024;
 	if (!LoadWasmtimeTestModule(
 		*this,
 		*JitBackend,

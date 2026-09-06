@@ -78,6 +78,9 @@ Assert-True ([string]$PuertsLock.backend.sha256 -ceq [string]$Protocol.competito
 $WasmtimeLock = Get-Content -LiteralPath (Join-Path $PluginRoot 'Source/ThirdParty/Wasmtime/PerformanceToolchain/WasmtimePerformanceToolchain.lock.json') -Raw | ConvertFrom-Json -Depth 32
 Assert-True ([string]$WasmtimeLock.upstream.version -ceq 'v45.0.0') 'Wasmtime version differs from protocol'
 Assert-True ([string]$WasmtimeLock.compiler_profile.id -ceq [string]$Protocol.competitors.avidscript.compiler_profile) 'Wasmtime compiler profile differs from protocol'
+Assert-True ([string]$WasmtimeLock.fuel_free_compiler_profile.id -ceq [string]$Protocol.competitors.avidscript.identical_wasm_compiler_profile) 'Wasmtime identical-WASM compiler profile differs from protocol'
+Assert-True (-not [bool]$WasmtimeLock.fuel_free_compiler_profile.consume_fuel) 'identical-WASM compiler profile must remain fuel-free'
+Assert-True ([bool]$WasmtimeLock.fuel_free_compiler_profile.epoch_interruption) 'identical-WASM compiler profile must preserve epoch interruption'
 
 $MatrixIds = @($Protocol.matrices | ForEach-Object { [string]$_.id })
 Assert-True ([string]::Join('|', $MatrixIds) -ceq 'ue_micro_six_lane|ue_gameplay_six_lane|identical_wasm_execution|angelscript_same_semantics') 'required matrix order drifted'

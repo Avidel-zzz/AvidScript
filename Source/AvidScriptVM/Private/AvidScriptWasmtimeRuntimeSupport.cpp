@@ -212,7 +212,8 @@ bool ResolveAvidScriptWasmtimeCompilerProfile(
 	AvidScriptWasmtimeEngineProfile& OutProfile,
 	FString& OutError,
 	FString* OutErrorCategory,
-	const FString& RequestedTargetTriple)
+	const FString& RequestedTargetTriple,
+	const bool bConsumeFuel)
 {
 	OutError.Reset();
 	OutProfile = {};
@@ -240,7 +241,9 @@ bool ResolveAvidScriptWasmtimeCompilerProfile(
 	return false;
 #else
 	const FAvidScriptWasmtimeCompilerProfile* CompilerProfile =
-		FindAvidScriptWasmtimeCompilerProfile(EffectiveTargetTriple);
+		FindAvidScriptWasmtimeCompilerProfile(
+			EffectiveTargetTriple,
+			bConsumeFuel);
 	if (CompilerProfile == nullptr)
 	{
 		if (OutErrorCategory != nullptr)

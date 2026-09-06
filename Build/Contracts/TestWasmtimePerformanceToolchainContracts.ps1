@@ -85,6 +85,29 @@ Assert-True ([bool]$Lock.compiler_profile.epoch_interruption) `
     'epoch interruption must remain enabled'
 Assert-True ([string]$Lock.compiler_profile.gc_collector -ceq 'drc') `
     'Wasm GC collector contract drifted'
+Assert-True ([string]$Lock.fuel_free_compiler_profile.id -ceq 'cranelift-speed-x86_64-v3-fuel-free-v1') `
+    'fuel-free compiler profile id drifted'
+Assert-True (-not [bool]$Lock.fuel_free_compiler_profile.consume_fuel) `
+    'fuel-free compiler profile must not instrument fuel'
+Assert-True ([bool]$Lock.fuel_free_compiler_profile.epoch_interruption) `
+    'fuel-free compiler profile must preserve epoch interruption'
+foreach ($Field in @(
+    'strategy',
+    'optimization',
+    'register_allocator',
+    'inlining',
+    'cpu',
+    'wasm32_memory_reservation_bytes',
+    'max_wasm_stack_bytes',
+    'memory_may_move',
+    'spectre_mitigation',
+    'nan_canonicalization',
+    'wasm_gc',
+    'epoch_interruption',
+    'gc_collector')) {
+    Assert-True ($Lock.fuel_free_compiler_profile.$Field -ceq $Lock.compiler_profile.$Field) `
+        "fuel-free compiler profile drifted from containment profile: $Field"
+}
 
 $PatchSha256 = Get-CanonicalTextSha256 -Path $PatchPath
 Assert-True ($PatchSha256 -ceq [string]$Lock.patch.canonical_sha256) `
@@ -171,7 +194,8 @@ foreach ($IdentityField in @(
     'gc_collector=drc',
     'runtime_profile=fastest-runtime',
     'max_wasm_stack=2m',
-    'fuel=on',
+    'fuel=%s',
+    'bConsumeFuel ? TEXT("on") : TEXT("off")',
     'epoch_interruption=on')) {
     Assert-True $ProfileText.Contains($IdentityField) `
         "compiler identity lacks field: $IdentityField"

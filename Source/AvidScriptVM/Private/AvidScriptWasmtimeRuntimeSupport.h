@@ -15,4 +15,5 @@ bool ResolveAvidScriptWasmtimeCompilerProfile(
 	AvidScriptWasmtimeEngineProfile& OutProfile,
 	FString& OutError,
 	FString* OutErrorCategory = nullptr,
-	const FString& RequestedTargetTriple = FString());
+	const FString& RequestedTargetTriple = FString(),
+	bool bConsumeFuel = true);

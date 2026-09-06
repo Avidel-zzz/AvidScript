@@ -42,7 +42,7 @@
       "additionalProperties": false,
       "required": ["avidscript", "puerts", "angelscript", "native"],
       "properties": {
-        "avidscript": { "$ref": "#/$defs/namedObject" },
+        "avidscript": { "$ref": "#/$defs/avidscriptCompetitor" },
         "puerts": { "$ref": "#/$defs/namedObject" },
         "angelscript": {
           "type": "object",
@@ -108,6 +108,18 @@
       "type": "object",
       "minProperties": 2,
       "additionalProperties": { "type": ["string", "number", "boolean"] }
+    },
+    "avidscriptCompetitor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runtime", "runtime_version", "backend", "compiler_profile", "identical_wasm_compiler_profile"],
+      "properties": {
+        "runtime": { "const": "Wasmtime" },
+        "runtime_version": { "const": "45.0.0" },
+        "backend": { "const": "Cranelift JIT" },
+        "compiler_profile": { "const": "cranelift-speed-x86_64-v3-contained-v3" },
+        "identical_wasm_compiler_profile": { "const": "cranelift-speed-x86_64-v3-fuel-free-v1" }
+      }
     },
     "matrix": {
       "type": "object",

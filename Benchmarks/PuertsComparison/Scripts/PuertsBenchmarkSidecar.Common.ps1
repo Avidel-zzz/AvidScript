@@ -595,7 +595,8 @@ function Test-SidecarProfile {
 
 function Get-SidecarWasmtimeCompilerIdentity {
     param(
-        [Parameter(Mandatory = $true)][string]$DllSha256
+        [Parameter(Mandatory = $true)][string]$DllSha256,
+        [switch]$DisableFuel
     )
 
     $SourcePluginRoot = [System.IO.Path]::GetFullPath(
@@ -604,10 +605,16 @@ function Get-SidecarWasmtimeCompilerIdentity {
         'Source/ThirdParty/Wasmtime/PerformanceToolchain/' +
         'WasmtimePerformanceToolchain.lock.json')
     $Lock = Read-SidecarJson -Path $LockPath -Code 'ASP57S2057'
-    $Profile = $Lock.compiler_profile
+    $Profile = $DisableFuel.IsPresent ?
+        $Lock.fuel_free_compiler_profile :
+        $Lock.compiler_profile
+    $ExpectedProfileId = $DisableFuel.IsPresent ?
+        'cranelift-speed-x86_64-v3-fuel-free-v1' :
+        'cranelift-speed-x86_64-v3-contained-v3'
+    $ExpectedFuel = -not $DisableFuel.IsPresent
     if ([string]$Lock.upstream.version -cne 'v45.0.0' -or
         [int]$Lock.patch.api_revision -ne 1 -or
-        [string]$Profile.id -cne 'cranelift-speed-x86_64-v3-contained-v3' -or
+        [string]$Profile.id -cne $ExpectedProfileId -or
         [string]$Profile.strategy -cne 'cranelift' -or
         [string]$Profile.optimization -cne 'speed' -or
         [string]$Profile.register_allocator -cne 'backtracking' -or
@@ -619,7 +626,7 @@ function Get-SidecarWasmtimeCompilerIdentity {
         -not [bool]$Profile.spectre_mitigation -or
         [bool]$Profile.nan_canonicalization -or
         -not [bool]$Profile.wasm_gc -or
-        -not [bool]$Profile.consume_fuel -or
+        [bool]$Profile.consume_fuel -ne $ExpectedFuel -or
         -not [bool]$Profile.epoch_interruption -or
         [string]$Profile.gc_collector -cne 'drc' -or
         [string]$Lock.rust.build_profile -cne 'fastest-runtime' -or
@@ -631,10 +638,10 @@ function Get-SidecarWasmtimeCompilerIdentity {
     return (
         'wasmtime-v45.0.0+avidscript.1;strategy=cranelift;' +
         'opt=speed;regalloc=backtracking;inlining=all;' +
-        'profile=cranelift-speed-x86_64-v3-contained-v3;' +
+        "profile=$ExpectedProfileId;" +
         'target=x86_64-pc-windows-msvc;' +
         'cpu=x86-64-v3;wasm32_memory=4g_fixed;memory_may_move=0;' +
-        'max_wasm_stack=2m;fuel=on;epoch_interruption=on;' +
+        "max_wasm_stack=2m;fuel=$($ExpectedFuel ? 'on' : 'off');epoch_interruption=on;" +
         'spectre=on;nan_canonicalization=off;parallel_compilation=on;' +
         'wasm_gc=on;gc_collector=drc;' +
         "runtime_profile=fastest-runtime;runtime_artifact_sha256=$DllSha256")
@@ -685,7 +692,8 @@ function Get-SidecarAvidScriptRuntimeIdentity {
             "static_lib_sha256=$WamrSha256")
         wasmtime_dll_sha256 = $WasmtimeSha256
         wasmtime_runtime_build_identity = Get-SidecarWasmtimeCompilerIdentity `
-            -DllSha256 $WasmtimeSha256
+            -DllSha256 $WasmtimeSha256 `
+            -DisableFuel
     }
 }
 

@@ -45,7 +45,7 @@
     {
       "id": "wasmtime_toolchain",
       "relative_path": "Source/ThirdParty/Wasmtime/PerformanceToolchain/WasmtimePerformanceToolchain.lock.json",
-      "sha256": "4777318d476a523c39ce875fde7b0130b6e95fafbd0204054c1b1b0183fda01f"
+      "sha256": "bdec1bdafbccccb26abfa763ac247db208e4f694bb7dab1f7dd4ed7d9943be4d"
     }
   ],
   "competitors": {
@@ -53,7 +53,8 @@
       "runtime": "Wasmtime",
       "runtime_version": "45.0.0",
       "backend": "Cranelift JIT",
-      "compiler_profile": "cranelift-speed-x86_64-v3-contained-v3"
+      "compiler_profile": "cranelift-speed-x86_64-v3-contained-v3",
+      "identical_wasm_compiler_profile": "cranelift-speed-x86_64-v3-fuel-free-v1"
     },
     "puerts": {
       "source_commit": "1977328c84661024be10a9e73640a74b278a7659",

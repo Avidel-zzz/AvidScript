@@ -120,6 +120,20 @@ $expectedWasmtimeIdentity =
 Assert-True ((Get-SidecarWasmtimeCompilerIdentity -DllSha256 $identityFixtureSha) -ceq
     $expectedWasmtimeIdentity) `
     'PowerShell runner 与 C++ backend 必须生成完全相同的 Wasmtime compiler identity。'
+$expectedFuelFreeWasmtimeIdentity =
+    'wasmtime-v45.0.0+avidscript.1;strategy=cranelift;' +
+    'opt=speed;regalloc=backtracking;inlining=all;' +
+    'profile=cranelift-speed-x86_64-v3-fuel-free-v1;' +
+    'target=x86_64-pc-windows-msvc;cpu=x86-64-v3;' +
+    'wasm32_memory=4g_fixed;memory_may_move=0;' +
+    'max_wasm_stack=2m;fuel=off;epoch_interruption=on;' +
+    'spectre=on;nan_canonicalization=off;parallel_compilation=on;' +
+    'wasm_gc=on;gc_collector=drc;runtime_profile=fastest-runtime;' +
+    "runtime_artifact_sha256=$identityFixtureSha"
+Assert-True ((Get-SidecarWasmtimeCompilerIdentity `
+        -DllSha256 $identityFixtureSha `
+        -DisableFuel) -ceq $expectedFuelFreeWasmtimeIdentity) `
+    '无 fuel 预算的 runner 与 C++ backend 必须生成完全相同的 fuel-free identity。'
 
 Assert-True $evaluatorText.Contains('p95_ratio') `
     'Gameplay Gate 必须输出跨进程 P95 ratio。'
