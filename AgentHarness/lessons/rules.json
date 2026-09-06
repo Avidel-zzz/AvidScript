@@ -21,7 +21,7 @@
       "summary": "概念名称不能当作真实文件路径。",
       "prevention": "先用 rg --files 建立索引，再对索引中的字面路径读取；通配符只放在 rg -g 参数，所有 -g 选项必须位于 -- 终止符之前。",
       "source": "legacy:1931",
-      "last_observed": "2026-09-07 P65.D (对不存在的 ThirdParty 根和 Source/AvidScript* 路径直接执行 rg；均为只读失败，随后恢复为 rg --files 索引与 -g 文件过滤)"
+      "last_observed": "2026-09-07 P65.D9 (先对 RuntimeSupport.* 使用 Windows 无效字面通配，再猜测不存在的 AvidScriptVmArtifactCompiler.h；均为只读失败，随后通过 rg --files 定位 RuntimeSupport.cpp/.h 与 AvidScriptVmArtifact.h)"
     },
     {
       "id": "one-command-one-evidence-domain",
