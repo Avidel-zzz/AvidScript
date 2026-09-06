@@ -245,6 +245,19 @@ function Get-AvidScriptBuildCookRunRequiredProperty {
     return $Property.Value
 }
 
+function Get-AvidScriptBuildCookRunOptionalProperty {
+    param(
+        [AllowNull()]$Value,
+        [Parameter(Mandatory = $true)][string]$Name,
+        $Default = ''
+    )
+
+    if ($null -ne $Value -and $Value.PSObject.Properties.Name -ccontains $Name) {
+        return $Value.$Name
+    }
+    return $Default
+}
+
 function Get-AvidScriptBuildCookRunProjectContext {
     param([Parameter(Mandatory = $true)][string]$ProjectRoot)
 
@@ -357,7 +370,8 @@ function Invoke-AvidScriptBuildCookRunProcess {
         [Parameter(Mandatory = $true)][string]$Executable,
         [Parameter(Mandatory = $true)][string[]]$Arguments,
         [Parameter(Mandatory = $true)][string]$WorkingDirectory,
-        [string]$OutputLogPath = ''
+        [string]$OutputLogPath = '',
+        [hashtable]$EnvironmentVariables = @{}
     )
 
     $StartInfo = [System.Diagnostics.ProcessStartInfo]::new()
@@ -369,6 +383,15 @@ function Invoke-AvidScriptBuildCookRunProcess {
     $StartInfo.RedirectStandardError = $true
     foreach ($Argument in $Arguments) {
         [void]$StartInfo.ArgumentList.Add($Argument)
+    }
+    foreach ($Name in $EnvironmentVariables.Keys) {
+        if ([string]$Name -cnotmatch '\A[A-Z][A-Z0-9_]*\z' -or
+            [string]::IsNullOrWhiteSpace([string]$EnvironmentVariables[$Name])) {
+            Throw-AvidScriptBuildCookRunError `
+                -Category 'process_environment_invalid' `
+                -Message "Process environment override is invalid: '$Name'."
+        }
+        $StartInfo.Environment[[string]$Name] = [string]$EnvironmentVariables[$Name]
     }
 
     $Process = [System.Diagnostics.Process]::new()
@@ -420,6 +443,85 @@ function Invoke-AvidScriptBuildCookRunProcess {
                 [System.Text.UTF8Encoding]::new($false))
         }
         $Process.Dispose()
+    }
+}
+
+function Publish-AvidScriptBuildCookRunGeneratedTypeOverlay {
+    param(
+        [Parameter(Mandatory = $true)][object]$ProjectContext,
+        [Parameter(Mandatory = $true)][string]$OutputRoot,
+        [ValidateSet('Development', 'Shipping')]
+        [Parameter(Mandatory = $true)][string]$Configuration
+    )
+
+    $DescriptorPath = Join-Path `
+        $ProjectContext.PluginRoot `
+        'Source/AvidScriptGenerated/AvidScriptGeneratedPackage.json'
+    if (-not (Test-Path -LiteralPath $DescriptorPath -PathType Leaf)) {
+        return $null
+    }
+    $ResolvedOutputRoot = if ([System.IO.Path]::IsPathRooted($OutputRoot)) {
+        [System.IO.Path]::GetFullPath($OutputRoot)
+    }
+    else {
+        [System.IO.Path]::GetFullPath((Join-Path $ProjectContext.ProjectRoot $OutputRoot))
+    }
+    if (-not (Test-AvidScriptBuildCookRunPathUnderRoot `
+            -Path $ResolvedOutputRoot `
+            -Root $ProjectContext.ProjectRoot)) {
+        Throw-AvidScriptBuildCookRunError `
+            -Category 'generated_type_overlay_invalid' `
+            -Message 'Generated Type overlay output must remain inside ProjectRoot.'
+    }
+    $OverlayRoot = Join-Path $ResolvedOutputRoot 'GeneratedTypeCook'
+    $PublisherPath = Join-Path `
+        $AvidScriptBuildCookRunScriptRoot `
+        'PublishAvidScriptGeneratedTypeCookPackage.ps1'
+    $PowerShellPath = Join-Path $PSHOME 'pwsh.exe'
+    foreach ($RequiredFile in @($PublisherPath, $PowerShellPath)) {
+        if (-not (Test-Path -LiteralPath $RequiredFile -PathType Leaf)) {
+            Throw-AvidScriptBuildCookRunError `
+                -Category 'generated_type_overlay_dependency_missing' `
+                -Message "Generated Type overlay dependency is missing: $RequiredFile"
+        }
+    }
+    $ProcessResult = Invoke-AvidScriptBuildCookRunProcess `
+        -Executable $PowerShellPath `
+        -Arguments @(
+            '-NoLogo', '-NoProfile', '-NonInteractive', '-File', $PublisherPath,
+            '-PackageDescriptorPath', $DescriptorPath,
+            '-ProjectRoot', $ProjectContext.ProjectRoot,
+            '-OutputRoot', $OverlayRoot,
+            '-Configuration', $Configuration,
+            '-TargetPlatform', 'Win64') `
+        -WorkingDirectory $ProjectContext.ProjectRoot
+    try {
+        $Payload = ConvertFrom-AvidScriptBuildCookRunJsonText `
+            -Text $ProcessResult.Stdout `
+            -Label 'Generated Type overlay publisher stdout' `
+            -RequireSingleLine
+    }
+    catch {
+        Throw-AvidScriptBuildCookRunError `
+            -Category 'generated_type_overlay_output_invalid' `
+            -Message $_.Exception.Message
+    }
+    if ($ProcessResult.ExitCode -ne 0 -or
+        [string]$Payload.status -cne 'ok' -or
+        [string]$Payload.result -cne 'avidscript_generated_type_cook_package_published' -or
+        [string]$Payload.configuration -cne $Configuration.ToLowerInvariant() -or
+        [string]$Payload.platform -cne 'win64' -or
+        [string]$Payload.output_root -cne $OverlayRoot) {
+        Throw-AvidScriptBuildCookRunError `
+            -Category 'generated_type_overlay_failed' `
+            -Message ([string](Get-AvidScriptBuildCookRunOptionalProperty `
+                    $Payload 'message' 'Generated Type overlay publication failed.'))
+    }
+    return [pscustomobject][ordered]@{
+        Root = $OverlayRoot
+        ModuleId = [string]$Payload.module_id
+        PackageId = [string]$Payload.package_id
+        GeneratedTypePackageId = [string]$Payload.generated_type_package_id
     }
 }
 
@@ -655,7 +757,8 @@ function Invoke-AvidScriptBuildCookRunUatStep {
         [Parameter(Mandatory = $true)][string]$ArchiveRoot,
         [string[]]$CookMaps = @(),
         [string[]]$EnablePlugins = @(),
-        [string[]]$DisablePlugins = @()
+        [string[]]$DisablePlugins = @(),
+        [string]$GeneratedTypeCookRoot = ''
     )
 
     Assert-AvidScriptBuildCookRunCookSelection `
@@ -697,11 +800,18 @@ function Invoke-AvidScriptBuildCookRunUatStep {
         '/c',
         $EngineContext.RunUatPath) + $UatArguments
     $StartedUtc = [System.DateTime]::UtcNow
-    $ProcessResult = Invoke-AvidScriptBuildCookRunProcess `
-        -Executable $CmdPath `
-        -Arguments $ProcessArguments `
-        -WorkingDirectory $ProjectContext.ProjectRoot `
-        -OutputLogPath $UatLog
+    $ProcessParameters = @{
+        Executable = $CmdPath
+        Arguments = $ProcessArguments
+        WorkingDirectory = $ProjectContext.ProjectRoot
+        OutputLogPath = $UatLog
+    }
+    if (-not [string]::IsNullOrWhiteSpace($GeneratedTypeCookRoot)) {
+        $ProcessParameters.EnvironmentVariables = @{
+            AVIDSCRIPT_GENERATED_TYPE_COOK_ROOT = $GeneratedTypeCookRoot
+        }
+    }
+    $ProcessResult = Invoke-AvidScriptBuildCookRunProcess @ProcessParameters
     if ($ProcessResult.ExitCode -ne 0) {
         Throw-AvidScriptBuildCookRunError `
             -Category 'uat_failed' `
@@ -715,6 +825,7 @@ function Invoke-AvidScriptBuildCookRunUatStep {
         CookMaps = @($CookMaps)
         EnablePlugins = @($EnablePlugins)
         DisablePlugins = @($DisablePlugins)
+        GeneratedTypeCookRoot = $GeneratedTypeCookRoot
     }
 }
 
@@ -850,7 +961,8 @@ function Invoke-AvidScriptBuildCookRunReceiptStep {
         [Parameter(Mandatory = $true)][object]$ProjectContext,
         [Parameter(Mandatory = $true)][string]$ReceiptPath,
         [ValidateSet('Development', 'Shipping')]
-        [Parameter(Mandatory = $true)][string]$Configuration
+        [Parameter(Mandatory = $true)][string]$Configuration,
+        [string]$GeneratedTypeCookRoot = ''
     )
 
     $ValidatorPath = Join-Path `
@@ -879,6 +991,9 @@ function Invoke-AvidScriptBuildCookRunReceiptStep {
         $ProjectContext.PluginRoot,
         '-Configuration',
         $Configuration)
+    if (-not [string]::IsNullOrWhiteSpace($GeneratedTypeCookRoot)) {
+        $Arguments += @('-GeneratedTypeCookRoot', $GeneratedTypeCookRoot)
+    }
     $ProcessResult = Invoke-AvidScriptBuildCookRunProcess `
         -Executable $PowerShellPath `
         -Arguments $Arguments `
@@ -1057,6 +1172,18 @@ function Invoke-AvidScriptBuildCookRun {
         -Configuration $Configuration `
         -DisablePlugins $DisablePlugins
 
+    $script:AvidScriptBuildCookRunStep = 'generated_type_overlay'
+    $GeneratedTypeOverlay = Publish-AvidScriptBuildCookRunGeneratedTypeOverlay `
+        -ProjectContext $ProjectContext `
+        -OutputRoot $OutputRoot `
+        -Configuration $Configuration
+    $GeneratedTypeCookRoot = if ($null -eq $GeneratedTypeOverlay) {
+        ''
+    }
+    else {
+        [string]$GeneratedTypeOverlay.Root
+    }
+
     $script:AvidScriptBuildCookRunStep = 'uat'
     $UatResult = Invoke-AvidScriptBuildCookRunUatStep `
         -ProjectContext $ProjectContext `
@@ -1065,7 +1192,8 @@ function Invoke-AvidScriptBuildCookRun {
         -ArchiveRoot $ResolvedArchiveRoot `
         -CookMaps $CookMaps `
         -EnablePlugins $EnablePlugins `
-        -DisablePlugins $DisablePlugins
+        -DisablePlugins $DisablePlugins `
+        -GeneratedTypeCookRoot $GeneratedTypeCookRoot
 
     $script:AvidScriptBuildCookRunStep = 'receipt_selection'
     $SelectedReceipt = Get-AvidScriptBuildCookRunGameReceipt `
@@ -1079,7 +1207,8 @@ function Invoke-AvidScriptBuildCookRun {
     $ReceiptResult = Invoke-AvidScriptBuildCookRunReceiptStep `
         -ProjectContext $ProjectContext `
         -ReceiptPath $SelectedReceipt.Path `
-        -Configuration $Configuration
+        -Configuration $Configuration `
+        -GeneratedTypeCookRoot $GeneratedTypeCookRoot
 
     $OracleResult = $null
     if ($PackagedOracleMode -ceq 'Legacy') {
@@ -1107,6 +1236,7 @@ function Invoke-AvidScriptBuildCookRun {
         cook_maps = @($CookMaps)
         enable_plugins = @($EnablePlugins)
         disable_plugins = @($DisablePlugins)
+        generated_type_overlay = $GeneratedTypeOverlay
         release = $ReleaseResult
         receipt_validation = $ReceiptResult
         packaged_oracle = $OracleResult

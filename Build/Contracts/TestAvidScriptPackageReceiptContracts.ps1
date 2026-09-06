@@ -258,19 +258,22 @@ function Write-FixtureReceipt {
 function Invoke-ReceiptValidator {
     param(
         [Parameter(Mandatory = $true)][object]$Fixture,
-        [string]$Configuration = $Fixture.Configuration
+        [string]$Configuration = $Fixture.Configuration,
+        [string]$GeneratedTypeCookRoot = ''
     )
 
-    $Output = & $PowerShellPath `
-        -NoProfile `
-        -NonInteractive `
-        -ExecutionPolicy Bypass `
-        -File $ValidatorPath `
-        -ReceiptPath $Fixture.ReceiptPath `
-        -ProjectRoot $Fixture.ProjectRoot `
-        -PluginRoot $Fixture.PluginRoot `
-        -Configuration $Configuration `
-        -TargetPlatform $Fixture.TargetPlatform 2>&1
+    $Arguments = @(
+        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+        '-File', $ValidatorPath,
+        '-ReceiptPath', $Fixture.ReceiptPath,
+        '-ProjectRoot', $Fixture.ProjectRoot,
+        '-PluginRoot', $Fixture.PluginRoot,
+        '-Configuration', $Configuration,
+        '-TargetPlatform', $Fixture.TargetPlatform)
+    if (-not [string]::IsNullOrWhiteSpace($GeneratedTypeCookRoot)) {
+        $Arguments += @('-GeneratedTypeCookRoot', $GeneratedTypeCookRoot)
+    }
+    $Output = & $PowerShellPath @Arguments 2>&1
     $ExitCode = $LASTEXITCODE
     $Text = @($Output | ForEach-Object { $_.ToString() }) -join [System.Environment]::NewLine
     try {
@@ -327,6 +330,22 @@ try {
         Assert-ContractCondition ([int]$Result.Summary.expected_dependency_count -eq 13) 'Unexpected exact dependency count.'
         Assert-ContractCondition ([int]$Result.Summary.ufs_dependency_count -eq 11) 'Unexpected UFS dependency count.'
         Assert-ContractCondition ([int]$Result.Summary.non_ufs_dependency_count -eq 2) 'Unexpected NonUFS dependency count.'
+    }
+
+    Invoke-ContractCase 'configuration-specific Generated Type overlay' {
+        $Fixture = New-PackageReceiptFixture -Name 'GeneratedTypeOverlay' -Configuration Shipping
+        $SourceRoot = Join-Path $Fixture.PluginRoot 'Content/AvidScriptGenerated'
+        $OverlayRoot = Join-Path $Fixture.ProjectRoot 'Saved/AvidScript/GeneratedTypeOverlay'
+        Copy-Item -LiteralPath $SourceRoot -Destination $OverlayRoot -Recurse
+        $PluginPointerPath = Join-Path $SourceRoot 'current.json'
+        $PluginPointer = Get-Content -LiteralPath $PluginPointerPath -Raw | ConvertFrom-Json
+        $PluginPointer.package_id = 'f' * 64
+        Write-FixtureJson -Path $PluginPointerPath -Value $PluginPointer
+        $Result = Invoke-ReceiptValidator `
+            -Fixture $Fixture `
+            -GeneratedTypeCookRoot $OverlayRoot
+        Assert-ContractCondition ($Result.ExitCode -eq 0) `
+            "Receipt validator did not select the isolated Generated Type overlay: $($Result.Raw)"
     }
 
     Invoke-ContractCase 'foreign-platform catalog module is ignored' {
@@ -494,6 +513,7 @@ try {
         total = $Total
         coverage = @(
             'positive',
+            'generated_type_configuration_overlay',
             'foreign_platform_variant',
             'android_arm64_static_dependency',
             'android_static_hash_drift',

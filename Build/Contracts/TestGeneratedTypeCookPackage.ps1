@@ -114,6 +114,23 @@ function Get-TestBuilderIdentityGuard {
 }
 
 try {
+    Invoke-ContractTest -Name 'configuration-specific UBT staging overlay contract' -Body {
+        $BuildRulePath = Join-Path `
+            (Split-Path -Parent $BuildRoot) `
+            'Source/AvidScriptGenerated/AvidScriptGenerated.Build.cs'
+        $BuildRule = [System.IO.File]::ReadAllText($BuildRulePath)
+        foreach ($Token in @(
+                'AVIDSCRIPT_GENERATED_TYPE_COOK_ROOT',
+                'ProjectRoot, "Saved", "AvidScript"',
+                '"$(PluginDir)/Content/AvidScriptGenerated/{RelativeTargetPath}"',
+                'CurrentDescriptor,',
+                'TypeManifestPath,')) {
+            if (-not $BuildRule.Contains($Token)) {
+                throw "Generated Type UBT overlay token is missing: $Token"
+            }
+        }
+    }
+
     $ProjectRoot = Join-Path $Root 'Project'
     $SourceRoot = Join-Path $ProjectRoot 'Source'
     $RuntimeRoot = Join-Path $ProjectRoot 'Saved\Runtime'

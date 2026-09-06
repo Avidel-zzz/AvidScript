@@ -242,7 +242,7 @@ try {
         }
     }
 
-    Invoke-BuildCookRunContractCase 'release before UAT before receipt before oracle' {
+    Invoke-BuildCookRunContractCase 'release and overlay before UAT before receipt before oracle' {
         $InvokeFunction = Get-BuildCookRunFunctionAst `
             -Ast $RunnerAst `
             -Name 'Invoke-AvidScriptBuildCookRun'
@@ -253,6 +253,9 @@ try {
         $UatIndex = $InvokeText.IndexOf(
             'Invoke-AvidScriptBuildCookRunUatStep',
             [System.StringComparison]::Ordinal)
+        $OverlayIndex = $InvokeText.IndexOf(
+            'Publish-AvidScriptBuildCookRunGeneratedTypeOverlay',
+            [System.StringComparison]::Ordinal)
         $ReceiptIndex = $InvokeText.IndexOf(
             'Invoke-AvidScriptBuildCookRunReceiptStep',
             [System.StringComparison]::Ordinal)
@@ -261,10 +264,11 @@ try {
             [System.StringComparison]::Ordinal)
         Assert-BuildCookRunContract `
             ($ReleaseIndex -ge 0 -and
-                $UatIndex -gt $ReleaseIndex -and
+                $OverlayIndex -gt $ReleaseIndex -and
+                $UatIndex -gt $OverlayIndex -and
                 $ReceiptIndex -gt $UatIndex -and
                 $OracleIndex -gt $ReceiptIndex) `
-            'Orchestration order is not release -> UAT -> receipt validator -> packaged oracle.'
+            'Orchestration order is not release -> Generated Type overlay -> UAT -> receipt validator -> packaged oracle.'
     }
 
     Invoke-BuildCookRunContractCase 'Development UAT no-clean Zen contract' {
@@ -491,6 +495,8 @@ try {
         foreach ($RequiredToken in @(
                 '[System.Diagnostics.ProcessStartInfo]::new()',
                 'ArgumentList.Add($Argument)',
+                'AVIDSCRIPT_GENERATED_TYPE_COOK_ROOT',
+                'PublishAvidScriptGeneratedTypeCookPackage.ps1',
                 "[Guid]::NewGuid().ToString('N')",
                 'OutputLogPath',
                 'avidscript_build_cook_run_succeeded',

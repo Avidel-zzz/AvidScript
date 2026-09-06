@@ -7,7 +7,8 @@ param(
     [ValidateSet('Development', 'Shipping')]
     [string]$Configuration,
     [ValidateSet('Win64', 'Android')]
-    [string]$TargetPlatform = 'Win64'
+    [string]$TargetPlatform = 'Win64',
+    [string]$GeneratedTypeCookRoot = ''
 )
 
 Set-StrictMode -Version Latest
@@ -502,7 +503,27 @@ try {
             "Module catalog has no $TargetPlatform/$ExpectedArchitecture/$ExpectedConfiguration/Wasmtime variant."
     }
 
-    $GeneratedRoot = Join-Path $ResolvedPluginRoot 'Content/AvidScriptGenerated'
+    $GeneratedRoot = if ([string]::IsNullOrWhiteSpace($GeneratedTypeCookRoot)) {
+        Join-Path $ResolvedPluginRoot 'Content/AvidScriptGenerated'
+    }
+    else {
+        $ResolvedGeneratedRoot = [System.IO.Path]::GetFullPath($GeneratedTypeCookRoot).TrimEnd(
+            [System.IO.Path]::DirectorySeparatorChar,
+            [System.IO.Path]::AltDirectorySeparatorChar)
+        $AllowedGeneratedRoot = [System.IO.Path]::GetFullPath(
+            (Join-Path $ResolvedProjectRoot 'Saved/AvidScript')).TrimEnd(
+                [System.IO.Path]::DirectorySeparatorChar,
+                [System.IO.Path]::AltDirectorySeparatorChar)
+        if (-not $ResolvedGeneratedRoot.StartsWith(
+                $AllowedGeneratedRoot + [System.IO.Path]::DirectorySeparatorChar,
+                [System.StringComparison]::OrdinalIgnoreCase) -or
+            -not (Test-Path -LiteralPath $ResolvedGeneratedRoot -PathType Container)) {
+            Throw-ReceiptValidationFailure `
+                'GENERATED_TYPE_ROOT_INVALID' `
+                'GeneratedTypeCookRoot must be a directory below ProjectRoot/Saved/AvidScript.'
+        }
+        $ResolvedGeneratedRoot
+    }
     $GeneratedCurrentPath = Join-Path $GeneratedRoot 'current.json'
     $GeneratedCurrent = Read-StrictJsonObject -Path $GeneratedCurrentPath -Label 'Generated Type current.json'
     if ([long](Get-RequiredPropertyValue $GeneratedCurrent 'schema_version' 'Generated Type current.json') -ne 2) {

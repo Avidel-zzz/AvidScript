@@ -61,7 +61,7 @@ public class AvidScriptGenerated : ModuleRules
 	private void StageGeneratedTypeCookPackage(ReadOnlyTargetRules Target)
 	{
 		string PluginRoot = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", ".."));
-		string GeneratedRoot = Path.Combine(PluginRoot, "Content", "AvidScriptGenerated");
+		string GeneratedRoot = ResolveGeneratedTypeCookRoot(PluginRoot, out bool bUsesOverride);
 		string CurrentDescriptor = Path.Combine(GeneratedRoot, "current.json");
 		if (!File.Exists(CurrentDescriptor))
 		{
@@ -96,7 +96,7 @@ public class AvidScriptGenerated : ModuleRules
 
 		if (SchemaVersion == 2)
 		{
-			StageGeneratedTypeV2(Document, GeneratedRoot, CurrentDescriptor);
+			StageGeneratedTypeV2(Document, GeneratedRoot, CurrentDescriptor, bUsesOverride);
 			return;
 		}
 		if (Target.Type != TargetType.Editor)
@@ -104,13 +104,44 @@ public class AvidScriptGenerated : ModuleRules
 			throw new BuildException(
 				"AvidScript packaged targets require Generated Type Cook pointer schema v2.");
 		}
-		StageGeneratedTypeV1(Document, GeneratedRoot, CurrentDescriptor);
+		StageGeneratedTypeV1(Document, GeneratedRoot, CurrentDescriptor, bUsesOverride);
+	}
+
+	private static string ResolveGeneratedTypeCookRoot(string PluginRoot, out bool bUsesOverride)
+	{
+		string DefaultRoot = Path.Combine(PluginRoot, "Content", "AvidScriptGenerated");
+		string OverrideRoot = Environment.GetEnvironmentVariable(
+			"AVIDSCRIPT_GENERATED_TYPE_COOK_ROOT");
+		if (String.IsNullOrWhiteSpace(OverrideRoot))
+		{
+			bUsesOverride = false;
+			return DefaultRoot;
+		}
+		if (!Path.IsPathRooted(OverrideRoot))
+		{
+			throw new BuildException(
+				"AvidScript Generated Type Cook override must be an absolute path.");
+		}
+		string ProjectRoot = Path.GetFullPath(Path.Combine(PluginRoot, "..", ".."));
+		string AllowedRoot = Path.GetFullPath(Path.Combine(ProjectRoot, "Saved", "AvidScript"))
+			.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+			+ Path.DirectorySeparatorChar;
+		string ResolvedOverride = Path.GetFullPath(OverrideRoot);
+		if (!ResolvedOverride.StartsWith(AllowedRoot, StringComparison.OrdinalIgnoreCase)
+			|| !Directory.Exists(ResolvedOverride))
+		{
+			throw new BuildException(
+				"AvidScript Generated Type Cook override must exist below ProjectRoot/Saved/AvidScript.");
+		}
+		bUsesOverride = true;
+		return ResolvedOverride;
 	}
 
 	private void StageGeneratedTypeV2(
 		JsonObject Document,
 		string GeneratedRoot,
-		string CurrentDescriptor)
+		string CurrentDescriptor,
+		bool bUsesOverride)
 	{
 		if (!Document.TryGetStringField("module_id", out string ModuleId)
 			|| !Document.TryGetStringField("package_id", out string PackageId)
@@ -145,14 +176,21 @@ public class AvidScriptGenerated : ModuleRules
 
 		ExternalDependencies.Add(CurrentDescriptor);
 		ExternalDependencies.Add(TypeManifestPath);
-		RuntimeDependencies.Add(CurrentDescriptor, StagedFileType.UFS);
-		RuntimeDependencies.Add(TypeManifestPath, StagedFileType.UFS);
+		AddGeneratedRuntimeDependency(
+			"current.json",
+			CurrentDescriptor,
+			bUsesOverride);
+		AddGeneratedRuntimeDependency(
+			TypeManifestFile.Replace('\\', '/'),
+			TypeManifestPath,
+			bUsesOverride);
 	}
 
 	private void StageGeneratedTypeV1(
 		JsonObject Document,
 		string GeneratedRoot,
-		string CurrentDescriptor)
+		string CurrentDescriptor,
+		bool bUsesOverride)
 	{
 		if (!Document.TryGetStringField("package_id", out string PackageId)
 			|| !IsLowercaseSha256(PackageId))
@@ -197,12 +235,31 @@ public class AvidScriptGenerated : ModuleRules
 		}
 
 		ExternalDependencies.Add(CurrentDescriptor);
-		RuntimeDependencies.Add(CurrentDescriptor, StagedFileType.UFS);
+		AddGeneratedRuntimeDependency("current.json", CurrentDescriptor, bUsesOverride);
 		for (int Index = 0; Index < BundleFiles.Length; ++Index)
 		{
 			ExternalDependencies.Add(BundleFiles[Index]);
-			RuntimeDependencies.Add(BundleFiles[Index], StagedFileType.UFS);
+			AddGeneratedRuntimeDependency(
+				$"{PackageId}/{RelativeBundleFiles[Index]}",
+				BundleFiles[Index],
+				bUsesOverride);
 		}
+	}
+
+	private void AddGeneratedRuntimeDependency(
+		string RelativeTargetPath,
+		string SourcePath,
+		bool bUsesOverride)
+	{
+		if (bUsesOverride)
+		{
+			RuntimeDependencies.Add(
+				$"$(PluginDir)/Content/AvidScriptGenerated/{RelativeTargetPath}",
+				SourcePath,
+				StagedFileType.UFS);
+			return;
+		}
+		RuntimeDependencies.Add(SourcePath, StagedFileType.UFS);
 	}
 
 	private static string ResolveGeneratedPath(
