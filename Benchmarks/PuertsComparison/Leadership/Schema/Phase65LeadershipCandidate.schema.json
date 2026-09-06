@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://avidscript.dev/schema/phase65-leadership-candidate-v1.json",
+  "$id": "https://avidscript.dev/schema/phase65-leadership-candidate-v2.json",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -18,7 +18,7 @@
     "complete_leadership_claim_ready"
   ],
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": { "const": 2 },
     "candidate_id": { "type": "string", "pattern": "^[0-9a-f]{20}$" },
     "created_utc": { "type": "string", "format": "date-time" },
     "protocol": { "$ref": "#/$defs/identity" },
@@ -81,11 +81,21 @@
     "benchmark_project": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["root", "project_path", "marker_sha256"],
+      "required": ["root", "project_path", "marker_sha256", "build_target", "build_log_path", "build_log_sha256", "source_stabilization_passes", "artifacts"],
       "properties": {
         "root": { "type": "string", "minLength": 1 },
         "project_path": { "type": "string", "minLength": 1 },
-        "marker_sha256": { "$ref": "#/$defs/sha256" }
+        "marker_sha256": { "$ref": "#/$defs/sha256" },
+        "build_target": { "type": "string", "minLength": 1 },
+        "build_log_path": { "type": "string", "minLength": 1 },
+        "build_log_sha256": { "$ref": "#/$defs/sha256" },
+        "source_stabilization_passes": { "type": "integer", "minimum": 1, "maximum": 2 },
+        "artifacts": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": { "$ref": "#/$defs/artifact" }
+        }
       }
     },
     "matrices": {
@@ -98,7 +108,7 @@
         "required": ["id", "status", "reason"],
         "properties": {
           "id": { "type": "string", "minLength": 1 },
-          "status": { "enum": ["ready_after_build", "blocked"] },
+          "status": { "enum": ["ready", "blocked"] },
           "reason": { "type": "string", "minLength": 1 }
         }
       }
@@ -116,6 +126,22 @@
         "id": { "type": "string", "minLength": 1 },
         "path": { "type": "string", "minLength": 1 },
         "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["module_id", "artifact_stem", "profile_path", "manifest_path", "manifest_sha256", "report_path", "report_sha256", "commandlet_log_path", "generated_build_count"],
+      "properties": {
+        "module_id": { "type": "string", "minLength": 1 },
+        "artifact_stem": { "type": "string", "minLength": 1 },
+        "profile_path": { "type": "string", "minLength": 1 },
+        "manifest_path": { "type": "string", "minLength": 1 },
+        "manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "report_path": { "type": "string", "minLength": 1 },
+        "report_sha256": { "$ref": "#/$defs/sha256" },
+        "commandlet_log_path": { "type": "string", "minLength": 1 },
+        "generated_build_count": { "type": "integer", "minimum": 0, "maximum": 1 }
       }
     }
   }

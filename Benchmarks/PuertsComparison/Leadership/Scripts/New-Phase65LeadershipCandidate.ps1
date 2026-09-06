@@ -61,6 +61,168 @@ function Invoke-GitValue {
     return ([string]@($Output)[0]).Trim().ToLowerInvariant()
 }
 
+function New-LeadershipBenchmarkProject {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceProjectPath,
+        [Parameter(Mandatory = $true)][string]$CandidateRoot,
+        [Parameter(Mandatory = $true)][string]$PuertsPluginPath,
+        [Parameter(Mandatory = $true)][string]$OutputRoot,
+        [Parameter(Mandatory = $true)][string]$Commit,
+        [Parameter(Mandatory = $true)][string]$Tree
+    )
+
+    $ProjectResultText = & (Join-Path $ComparisonRoot 'Scripts/New-PuertsBenchmarkProject.ps1') `
+        -SourceProjectPath $SourceProjectPath `
+        -AvidScriptPluginPath $CandidateRoot `
+        -PuertsPluginPath $PuertsPluginPath `
+        -HarnessPluginPath (Join-Path $CandidateRoot 'Benchmarks/PuertsComparison/AvidScriptPerfHarness') `
+        -OutputRoot $OutputRoot `
+        -ExpectedAvidScriptCommit $Commit `
+        -ExpectedAvidScriptTree $Tree
+    if ($LASTEXITCODE -ne 0) {
+        throw 'ASP65L2008 benchmark project creation failed'
+    }
+
+    $ProjectResult = ($ProjectResultText -join "`n") | ConvertFrom-Json
+    $ProjectPath = Resolve-RequiredPath -Path ([string]$ProjectResult.project_path) -PathType Leaf -Label 'generated benchmark project'
+    return [pscustomobject][ordered]@{
+        project_path = $ProjectPath
+        project_root = Split-Path -Parent $ProjectPath
+    }
+}
+
+function Invoke-LeadershipEditorBuild {
+    param(
+        [Parameter(Mandatory = $true)][string]$EngineRoot,
+        [Parameter(Mandatory = $true)][string]$ProjectPath,
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [Parameter(Mandatory = $true)][string]$PassId
+    )
+
+    $BuildScript = Resolve-RequiredPath -Path (Join-Path $EngineRoot 'Engine/Build/BatchFiles/Build.bat') -PathType Leaf -Label 'UE Build.bat'
+    $Target = '{0}Editor' -f [IO.Path]::GetFileNameWithoutExtension($ProjectPath)
+    $LogRoot = Join-Path $ProjectRoot 'Saved/Logs/Phase65Leadership'
+    New-Item -ItemType Directory -Force -Path $LogRoot | Out-Null
+    $LogPath = Join-Path $LogRoot ("build-$PassId-$([Guid]::NewGuid().ToString('N')).log")
+    $Output = @(& $BuildScript $Target Win64 Development "-Project=$ProjectPath" -WaitMutex -NoHotReloadFromIDE "-log=$LogPath" 2>&1)
+    $ExitCode = $LASTEXITCODE
+    if ($ExitCode -ne 0) {
+        $Tail = [string]::Join([Environment]::NewLine, @($Output | Select-Object -Last 80))
+        throw "ASP65L2014 UE Editor build failed: pass=$PassId exit=$ExitCode log=$LogPath`n$Tail"
+    }
+    if (-not (Test-Path -LiteralPath $LogPath -PathType Leaf)) {
+        throw "ASP65L2014 UE Editor build did not produce its evidence log: $LogPath"
+    }
+
+    return [pscustomobject][ordered]@{
+        target = $Target
+        log_path = $LogPath
+        log_sha256 = Get-SidecarFileSha256 -Path $LogPath
+    }
+}
+
+function Invoke-LeadershipProfilePreparation {
+    param(
+        [Parameter(Mandatory = $true)][string]$EditorExecutable,
+        [Parameter(Mandatory = $true)][string]$EngineRoot,
+        [Parameter(Mandatory = $true)][string]$ProjectPath,
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [Parameter(Mandatory = $true)][string]$ProfileRelativePath,
+        [Parameter(Mandatory = $true)][bool]$AllowGeneratedBuildHandshake
+    )
+
+    $ProfilePath = Resolve-RequiredPath -Path (Join-Path $ProjectRoot $ProfileRelativePath) -PathType Leaf -Label "C# artifact profile $ProfileRelativePath"
+    $Profile = Get-Content -LiteralPath $ProfilePath -Raw | ConvertFrom-Json -Depth 64
+    $LogRoot = Join-Path $ProjectRoot 'Saved/Logs/Phase65Leadership'
+    New-Item -ItemType Directory -Force -Path $LogRoot | Out-Null
+    $NormalizedProfilePath = $ProfileRelativePath.Replace('\', '/')
+    $ProfileArgument = '-Profile="{0}"' -f $NormalizedProfilePath
+    $GeneratedBuildCount = 0
+    $Attempt = 0
+    $LogPath = $null
+
+    while ($true) {
+        $Attempt++
+        $LogPath = Join-Path $LogRoot ("prepare-$([string]$Profile.artifact_stem)-attempt$Attempt-$([Guid]::NewGuid().ToString('N')).log")
+        $Output = @(& $EditorExecutable $ProjectPath -run=AvidScriptPerfPrepare $ProfileArgument -unattended -nop4 -nullrhi -nosplash "-abslog=$LogPath" 2>&1)
+        $ExitCode = $LASTEXITCODE
+        if ($ExitCode -eq 0) {
+            break
+        }
+        if ($ExitCode -eq 4 -and $AllowGeneratedBuildHandshake -and $GeneratedBuildCount -eq 0) {
+            $GeneratedBuildCount++
+            $null = Invoke-LeadershipEditorBuild `
+                -EngineRoot $EngineRoot `
+                -ProjectPath $ProjectPath `
+                -ProjectRoot $ProjectRoot `
+                -PassId 'generated-binding-handshake'
+            continue
+        }
+
+        $Tail = [string]::Join([Environment]::NewLine, @($Output | Select-Object -Last 80))
+        throw "ASP65L2015 C# artifact preparation failed: profile=$NormalizedProfilePath attempt=$Attempt exit=$ExitCode log=$LogPath`n$Tail"
+    }
+
+    $ManifestPath = Resolve-RequiredPath -Path (Join-Path $ProjectRoot ([string]$Profile.manifest_path)) -PathType Leaf -Label "prepared manifest $($Profile.artifact_stem)"
+    $ReportPath = Resolve-RequiredPath -Path (Join-Path $ProjectRoot ([string]$Profile.report_path)) -PathType Leaf -Label "prepared report $($Profile.artifact_stem)"
+    return [pscustomobject][ordered]@{
+        module_id = [string]$Profile.module_id
+        artifact_stem = [string]$Profile.artifact_stem
+        profile_path = $NormalizedProfilePath
+        manifest_path = $ManifestPath
+        manifest_sha256 = Get-SidecarFileSha256 -Path $ManifestPath
+        report_path = $ReportPath
+        report_sha256 = Get-SidecarFileSha256 -Path $ReportPath
+        commandlet_log_path = $LogPath
+        generated_build_count = $GeneratedBuildCount
+    }
+}
+
+function Invoke-LeadershipProjectPreparation {
+    param(
+        [Parameter(Mandatory = $true)][string]$EditorExecutable,
+        [Parameter(Mandatory = $true)][string]$EngineRoot,
+        [Parameter(Mandatory = $true)][string]$ProjectPath,
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [Parameter(Mandatory = $true)][string]$PassId
+    )
+
+    $Build = Invoke-LeadershipEditorBuild `
+        -EngineRoot $EngineRoot `
+        -ProjectPath $ProjectPath `
+        -ProjectRoot $ProjectRoot `
+        -PassId $PassId
+    $Profiles = @(
+        'Plugins/AvidScriptPerfHarness/Content/CSharp/AvidScriptPerfWorkload.semantic.csharp-profile.json',
+        'Plugins/AvidScriptPerfHarness/Content/CSharp/AvidScriptPerfWorkload.csharp-profile.json',
+        'Plugins/AvidScriptPerfHarness/Content/CSharp/AvidScriptPerfWorkload.data-oriented.csharp-profile.json'
+    )
+    $Artifacts = @(
+        foreach ($ProfilePath in $Profiles) {
+            Invoke-LeadershipProfilePreparation `
+                -EditorExecutable $EditorExecutable `
+                -EngineRoot $EngineRoot `
+                -ProjectPath $ProjectPath `
+                -ProjectRoot $ProjectRoot `
+                -ProfileRelativePath $ProfilePath `
+                -AllowGeneratedBuildHandshake $true
+        }
+    )
+    return [pscustomobject][ordered]@{
+        build = $Build
+        artifacts = $Artifacts
+    }
+}
+
+function Test-LeadershipProjectSourceStable {
+    param([Parameter(Mandatory = $true)][string]$ProjectRoot)
+
+    $Marker = Read-SidecarJson -Path (Join-Path $ProjectRoot 'benchmark-project.json') -Code 'ASP65L2016'
+    $SourcePath = Resolve-SidecarCanonicalDirectory -Path (Join-Path $ProjectRoot 'Source') -Code 'ASP65L2016' -Label 'benchmark project source' -RequireJunction
+    $Actual = Get-SidecarDirectoryContentDigest -Path $SourcePath
+    return ([string]$Actual.content_sha256 -ceq [string]$Marker.source.content_sha256 -and [int]$Actual.file_count -eq [int]$Marker.source.file_count)
+}
+
 $ResolvedCandidateRoot = Resolve-RequiredPath -Path $CandidateRoot -PathType Container -Label 'CandidateRoot'
 $ResolvedRunnerPluginRoot = Resolve-RequiredPath -Path $RunnerPluginRoot -PathType Container -Label 'runner plugin root'
 if ($ResolvedCandidateRoot -ine $ResolvedRunnerPluginRoot) {
@@ -152,20 +314,45 @@ if ([string]$PuertsMarker.source_commit_sha -cne [string]$Protocol.competitors.p
     throw 'ASP65L2007 installed Puerts identity differs from the frozen protocol or managed marker'
 }
 
-$ProjectResultText = & (Join-Path $ComparisonRoot 'Scripts/New-PuertsBenchmarkProject.ps1') `
+$Project = New-LeadershipBenchmarkProject `
     -SourceProjectPath $ResolvedSourceProjectPath `
-    -AvidScriptPluginPath $ResolvedCandidateRoot `
+    -CandidateRoot $ResolvedCandidateRoot `
     -PuertsPluginPath $ResolvedPuertsPluginPath `
-    -HarnessPluginPath (Join-Path $ResolvedCandidateRoot 'Benchmarks/PuertsComparison/AvidScriptPerfHarness') `
     -OutputRoot $ResolvedOutputRoot `
-    -ExpectedAvidScriptCommit $Commit `
-    -ExpectedAvidScriptTree $Tree
-if ($LASTEXITCODE -ne 0) {
-    throw 'ASP65L2008 benchmark project creation failed'
+    -Commit $Commit `
+    -Tree $Tree
+$Preparation = Invoke-LeadershipProjectPreparation `
+    -EditorExecutable $EditorExecutable `
+    -EngineRoot $ResolvedEngineRoot `
+    -ProjectPath $Project.project_path `
+    -ProjectRoot $Project.project_root `
+    -PassId 'initial'
+$StabilizationPasses = 1
+if (-not (Test-LeadershipProjectSourceStable -ProjectRoot $Project.project_root)) {
+    $Project = New-LeadershipBenchmarkProject `
+        -SourceProjectPath $ResolvedSourceProjectPath `
+        -CandidateRoot $ResolvedCandidateRoot `
+        -PuertsPluginPath $ResolvedPuertsPluginPath `
+        -OutputRoot $ResolvedOutputRoot `
+        -Commit $Commit `
+        -Tree $Tree
+    $Preparation = Invoke-LeadershipProjectPreparation `
+        -EditorExecutable $EditorExecutable `
+        -EngineRoot $ResolvedEngineRoot `
+        -ProjectPath $Project.project_path `
+        -ProjectRoot $Project.project_root `
+        -PassId 'stabilized'
+    $StabilizationPasses++
 }
-$ProjectResult = ($ProjectResultText -join "`n") | ConvertFrom-Json
-$BenchmarkProjectPath = Resolve-RequiredPath -Path ([string]$ProjectResult.project_path) -PathType Leaf -Label 'generated benchmark project'
-$BenchmarkProjectRoot = Split-Path -Parent $BenchmarkProjectPath
+$BenchmarkProjectPath = $Project.project_path
+$BenchmarkProjectRoot = $Project.project_root
+if (-not (Test-LeadershipProjectSourceStable -ProjectRoot $BenchmarkProjectRoot)) {
+    throw 'ASP65L2016 generated project source did not stabilize after the bounded two-pass preparation'
+}
+$null = Assert-SidecarBenchmarkProjectProvenance `
+    -ProjectPath $BenchmarkProjectPath `
+    -AvidScriptCommit $Commit `
+    -AvidScriptTreeSha $Tree
 Assert-SidecarPuertsProvenance `
     -ProjectPath $BenchmarkProjectPath `
     -PuertsCommit ([string]$Protocol.competitors.puerts.source_commit) `
@@ -179,13 +366,13 @@ if ([string]::IsNullOrWhiteSpace($CpuModel)) {
 $CandidateIdPayload = [Text.UTF8Encoding]::new($false).GetBytes("$Commit`n$Tree`n$($EditorIdentity.sha256)`n$($WasmtimeEvidence.installed_content_sha256)`n$($PuertsContent.content_sha256)`n")
 $CandidateId = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($CandidateIdPayload)).ToLowerInvariant().Substring(0, 20)
 $Matrices = @(
-    [ordered]@{ id = 'ue_micro_six_lane'; status = 'ready_after_build'; reason = '六 lane micro profile 与三种 AvidScript binding mode 已冻结，等待统一构建。' },
-    [ordered]@{ id = 'ue_gameplay_six_lane'; status = 'ready_after_build'; reason = 'small/dense gameplay frame 与 data-oriented lane 已冻结，等待统一构建。' },
-    [ordered]@{ id = 'identical_wasm_execution'; status = 'ready_after_build'; reason = '同 WASM suite 和 Cranelift/V8 身份已冻结，等待统一构建。' },
+    [ordered]@{ id = 'ue_micro_six_lane'; status = 'ready'; reason = '六 lane micro profile 与三种 AvidScript binding artifact 已构建并冻结。' },
+    [ordered]@{ id = 'ue_gameplay_six_lane'; status = 'ready'; reason = 'small/dense gameplay frame 与 data-oriented artifact 已构建并冻结。' },
+    [ordered]@{ id = 'identical_wasm_execution'; status = 'ready'; reason = '同 WASM suite、Cranelift/V8 身份与 UE 候选环境已冻结。' },
     [ordered]@{ id = 'angelscript_same_semantics'; status = 'blocked'; reason = [string]$Protocol.competitors.angelscript.reason }
 )
 $Candidate = [ordered]@{
-    schema_version = 1
+    schema_version = 2
     candidate_id = $CandidateId
     created_utc = [DateTimeOffset]::UtcNow.ToString('o')
     protocol = [ordered]@{
@@ -228,13 +415,18 @@ $Candidate = [ordered]@{
         root = $BenchmarkProjectRoot
         project_path = $BenchmarkProjectPath
         marker_sha256 = Get-SidecarFileSha256 -Path (Join-Path $BenchmarkProjectRoot 'benchmark-project.json')
+        build_target = [string]$Preparation.build.target
+        build_log_path = [string]$Preparation.build.log_path
+        build_log_sha256 = [string]$Preparation.build.log_sha256
+        source_stabilization_passes = $StabilizationPasses
+        artifacts = @($Preparation.artifacts)
     }
     matrices = $Matrices
     complete_leadership_claim_ready = $false
 }
 $CandidateJson = (($Candidate | ConvertTo-Json -Depth 64) -replace "`r`n", "`n") + "`n"
 if (-not ($CandidateJson | Test-Json -SchemaFile $CandidateSchemaPath)) {
-    throw 'ASP65L2010 generated leadership candidate does not satisfy schema v1'
+    throw 'ASP65L2010 generated leadership candidate does not satisfy schema v2'
 }
 $CandidatePath = Join-Path $BenchmarkProjectRoot 'phase65-leadership-candidate.json'
 if (Test-Path -LiteralPath $CandidatePath) {

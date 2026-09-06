@@ -34,6 +34,10 @@ $Tokens = $null
 [void][Management.Automation.Language.Parser]::ParseFile($CandidateScriptPath, [ref]$Tokens, [ref]$ParserErrors)
 Assert-True (@($ParserErrors).Count -eq 0) 'leadership candidate freezer has parser errors'
 Assert-True ((Get-Content -LiteralPath $CandidateSchemaPath -Raw) | Test-Json) 'leadership candidate schema is not valid JSON'
+$CandidateScriptText = Get-Content -LiteralPath $CandidateScriptPath -Raw
+Assert-True ($CandidateScriptText.Contains('source did not stabilize after the bounded two-pass preparation')) 'candidate freezer must fail closed after two source-stabilization passes'
+Assert-True ($CandidateScriptText.Contains("'-Profile=`"{0}`"'")) 'candidate freezer must preserve hyphenated profile paths through UE command-line parsing'
+Assert-True ($CandidateScriptText.Contains('Assert-SidecarBenchmarkProjectProvenance')) 'candidate freezer must revalidate project provenance after artifact preparation'
 
 $InputIds = @($Protocol.tracked_inputs | ForEach-Object { [string]$_.id })
 Assert-True ($InputIds.Count -eq (@($InputIds | Sort-Object -Unique)).Count) 'tracked input ids must be unique'
@@ -79,4 +83,4 @@ $MatrixIds = @($Protocol.matrices | ForEach-Object { [string]$_.id })
 Assert-True ([string]::Join('|', $MatrixIds) -ceq 'ue_micro_six_lane|ue_gameplay_six_lane|identical_wasm_execution|angelscript_same_semantics') 'required matrix order drifted'
 Assert-True ([string]$Protocol.competitors.angelscript.availability -ceq 'not_frozen') 'AngelScript must remain explicitly blocked until its dependency and adapter are frozen'
 
-Write-Output 'Phase 65 leadership protocol contracts passed: schema=2 scripts=1 tracked_inputs=7 ue_lanes=6 micro_workloads=10 gameplay_workloads=2 identical_wasm_kernels=12 competitors=4 matrices=4 claims_fail_closed=1'
+Write-Output 'Phase 65 leadership protocol contracts passed: schema=2 scripts=1 tracked_inputs=7 ue_lanes=6 micro_workloads=10 gameplay_workloads=2 identical_wasm_kernels=12 competitors=4 matrices=4 bounded_source_stabilization=1 claims_fail_closed=1'
