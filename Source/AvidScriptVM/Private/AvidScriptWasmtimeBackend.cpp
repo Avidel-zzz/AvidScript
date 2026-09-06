@@ -1078,11 +1078,18 @@ public:
 		OutCall.Owner = this;
 		OutCall.Target = Entry;
 		OutCall.TargetLifetime = ExportEntries[Handle.Slot - 1];
-		OutCall.InvokeFunction =
-			Entry->PreparedCallShape
-				== AVIDSCRIPT_WASMTIME_PREPARED_CALL_I32_I32_TO_I32
-			? &InvokePreparedI32I32ToI32ExportCall
-			: &InvokePreparedExportCall;
+		switch (Entry->PreparedCallShape)
+		{
+		case AVIDSCRIPT_WASMTIME_PREPARED_CALL_I32_I32_TO_I32:
+			OutCall.InvokeFunction = &InvokePreparedI32I32ToI32ExportCall;
+			break;
+		case AVIDSCRIPT_WASMTIME_PREPARED_CALL_I32_F32_TO_VOID:
+			OutCall.InvokeFunction = &InvokePreparedI32F32ToVoidExportCall;
+			break;
+		default:
+			OutCall.InvokeFunction = &InvokePreparedExportCall;
+			break;
+		}
 		OutCall.ParameterCellCount = Entry->CellCount;
 		OutCall.ResultCellCount = Entry->ResultCellCount;
 		return true;
@@ -2006,6 +2013,45 @@ private:
 			OutResult);
 	}
 
+	static bool InvokePreparedI32F32ToVoidExportCall(
+		void* Owner,
+		void* Target,
+		const FAvidScriptVmCallFrame& Frame,
+		FAvidScriptVmError& OutError,
+		FAvidScriptVmCallResult* OutResult)
+	{
+		FAvidScriptWasmtimeBackend* Backend =
+			static_cast<FAvidScriptWasmtimeBackend*>(Owner);
+		FAvidScriptWasmtimeExportEntry* Entry =
+			static_cast<FAvidScriptWasmtimeExportEntry*>(Target);
+		if (Backend == nullptr || Entry == nullptr)
+		{
+			OutError.Reset();
+			OutError.Category = TEXT("prepared_export_invalid");
+			OutError.Details =
+				TEXT("The prepared Wasmtime export target is invalid.");
+			if (OutResult != nullptr)
+			{
+				*OutResult = FAvidScriptVmCallResult();
+			}
+			return false;
+		}
+		if (Entry->Function == nullptr)
+		{
+			SetWasmtimeError(OutError, TEXT("stale_export"), TEXT("The prepared Wasmtime export is no longer active."));
+			if (OutResult != nullptr)
+			{
+				*OutResult = FAvidScriptVmCallResult();
+			}
+			return false;
+		}
+		return Backend->CallPreparedI32F32ToVoidExport(
+			*Entry,
+			Frame,
+			OutError,
+			OutResult);
+	}
+
 	void ResetCallState(
 		FAvidScriptVmError& OutError,
 		FAvidScriptVmCallResult* OutResult)
@@ -2146,6 +2192,60 @@ private:
 			CallFailure,
 			&ResultCell,
 			CallStatus == AVIDSCRIPT_WASMTIME_CALL_SUCCESS ? 1 : 0,
+			OutError,
+			OutResult);
+	}
+
+	bool CallPreparedI32F32ToVoidExport(
+		const FAvidScriptWasmtimeExportEntry& Entry,
+		const FAvidScriptVmCallFrame& Frame,
+		FAvidScriptVmError& OutError,
+		FAvidScriptVmCallResult* OutResult)
+	{
+		ResetCallState(OutError, OutResult);
+		if (!IsLoaded()
+			|| Entry.Generation != ExportGeneration
+			|| Entry.Function == nullptr)
+		{
+			SetWasmtimeError(
+				OutError,
+				TEXT("stale_export"),
+				TEXT("The prepared Wasmtime export is no longer active."));
+			return false;
+		}
+		if (!ResetExecutionBudget(OutError))
+		{
+			return false;
+		}
+
+		const bool bArmWatchdog = ActiveCallDepth == 0;
+		if (bArmWatchdog)
+		{
+			FAvidScriptWasmtimeEpochWatchdog::Get().Arm(
+				EpochWatchdogToken);
+		}
+		++ActiveCallDepth;
+		float Second = 0.0f;
+		FMemory::Memcpy(&Second, &Frame.Cells[1], sizeof(Second));
+		AvidScriptWasmtimeFailure* CallFailure = nullptr;
+		const AvidScriptWasmtimeCallStatus CallStatus =
+			avidscript_wasmtime_function_call_i32_f32_to_void_prepared_unchecked(
+				Store,
+				Entry.Function,
+				static_cast<int32>(Frame.Cells[0]),
+				Second,
+				&CallFailure);
+		if (bArmWatchdog)
+		{
+			FAvidScriptWasmtimeEpochWatchdog::Get().Disarm(
+				EpochWatchdogToken);
+		}
+		return CompleteResolvedExportCall(
+			Entry,
+			CallStatus,
+			CallFailure,
+			nullptr,
+			0,
 			OutError,
 			OutResult);
 	}

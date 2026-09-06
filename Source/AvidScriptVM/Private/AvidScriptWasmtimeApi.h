@@ -104,7 +104,8 @@ typedef enum AvidScriptWasmtimeTrapCode
 typedef enum AvidScriptWasmtimePreparedCallShape
 {
 	AVIDSCRIPT_WASMTIME_PREPARED_CALL_GENERIC = 0,
-	AVIDSCRIPT_WASMTIME_PREPARED_CALL_I32_I32_TO_I32 = 1
+	AVIDSCRIPT_WASMTIME_PREPARED_CALL_I32_I32_TO_I32 = 1,
+	AVIDSCRIPT_WASMTIME_PREPARED_CALL_I32_F32_TO_VOID = 2
 } AvidScriptWasmtimePreparedCallShape;
 
 typedef enum AvidScriptWasmtimeValueKind
@@ -249,6 +250,12 @@ AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_i32_i32_to_i32_pr
 	int32_t first,
 	int32_t second,
 	int32_t* out_result,
+	AvidScriptWasmtimeFailure** out_failure);
+AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_i32_f32_to_void_prepared_unchecked(
+	AvidScriptWasmtimeStore* store,
+	AvidScriptWasmtimeFunction* function,
+	int32_t first,
+	float second,
 	AvidScriptWasmtimeFailure** out_failure);
 
 bool avidscript_wasmtime_memory_data(

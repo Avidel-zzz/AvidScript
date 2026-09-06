@@ -908,6 +908,14 @@ AvidScriptWasmtimePreparedCallShape avidscript_wasmtime_function_prepared_call_s
 	{
 		return AVIDSCRIPT_WASMTIME_PREPARED_CALL_I32_I32_TO_I32;
 	}
+	if (function != NULL
+		&& function->parameter_count == 2
+		&& function->result_count == 0
+		&& function->parameter_kinds[0] == WASM_I32
+		&& function->parameter_kinds[1] == WASM_F32)
+	{
+		return AVIDSCRIPT_WASMTIME_PREPARED_CALL_I32_F32_TO_VOID;
+	}
 	return AVIDSCRIPT_WASMTIME_PREPARED_CALL_GENERIC;
 }
 
@@ -1248,6 +1256,34 @@ AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_i32_i32_to_i32_pr
 		return AVIDSCRIPT_WASMTIME_CALL_RUNTIME_FAILURE;
 	}
 	*out_result = values[0].i32;
+	return AVIDSCRIPT_WASMTIME_CALL_SUCCESS;
+}
+
+AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_i32_f32_to_void_prepared_unchecked(
+	AvidScriptWasmtimeStore* store,
+	AvidScriptWasmtimeFunction* function,
+	int32_t first,
+	float second,
+	AvidScriptWasmtimeFailure** out_failure)
+{
+	wasmtime_val_raw_t values[2];
+	wasm_trap_t* trap = NULL;
+	wasmtime_error_t* error;
+
+	*out_failure = NULL;
+	values[0].i32 = first;
+	values[1].f32 = second;
+	error = wasmtime_func_call_unchecked(
+		store->context,
+		&function->value,
+		values,
+		2,
+		&trap);
+	if (error != NULL || trap != NULL)
+	{
+		*out_failure = avidscript_wasmtime_failure_new(error, trap);
+		return AVIDSCRIPT_WASMTIME_CALL_RUNTIME_FAILURE;
+	}
 	return AVIDSCRIPT_WASMTIME_CALL_SUCCESS;
 }
 
