@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "batch": "P65.D9",
+  "candidate": {
+    "id": "9d1e3e3450f9beee67d5",
+    "commit": "770f1242173aa4a21041e106ae64fd8bf00bc85f",
+    "tree_sha": "84427327fa6a742bc9132319772877e384784ccb",
+    "manifest_sha256": "9fdb5393f9c247c9540d92f37b7d3643fcc994301f1490e8ac403cf1ddbdd32a",
+    "clean": true
+  },
+  "compiler_profiles": {
+    "contained": "cranelift-speed-x86_64-v3-contained-v3",
+    "fuel_free": "cranelift-speed-x86_64-v3-fuel-free-v1",
+    "fuel_free_epoch_interruption": true,
+    "serialized_artifacts_require_contained": true
+  },
+  "profiles": {
+    "kernel_count": 12,
+    "processes_per_kernel": 5,
+    "calibration_processes_per_kernel": 1,
+    "warmups_per_process": 5,
+    "timed_samples_per_unit": 30
+  },
+  "evidence": {
+    "protocol_sha256": "310189bfe19d31d9388be31158afe36dfc9a51d24c81838c2146aeb475a57041",
+    "controlled_aggregate_sha256": "f1fed6b62591900bdcb78fef89795f95644ab440b640b9eec33a6f71126c8ed7",
+    "automation_log_sha256": "385862cfbeb14ed016d21a7d3c0aaa9f3eb0e37b95df5d7b122fdb5ea92ecb14",
+    "candidate_build_log_sha256": "72d48067276e720d5cd26acbe469de4d77b85b05eea7327c0fe34306690a1945"
+  },
+  "validation": {
+    "wasmtime_automation_found": 14,
+    "wasmtime_automation_succeeded": 14,
+    "toolchain_contract_assertions": 70,
+    "architecture_gate_passed": true,
+    "correctness_failures": 0,
+    "fallback_used": false
+  },
+  "metrics": {
+    "wasmtime_over_v8_p50_geomean": 1.106460240440551,
+    "wasmtime_over_v8_p95_geomean": 1.1293472566429534,
+    "mad_geomean": 1.16079840369099,
+    "p50_kernel_win_rate": 0.5833333333333334,
+    "p95_kernel_win_rate": 0.3333333333333333,
+    "p50_change_from_p65_d8_percent": -1.7160199216291,
+    "p95_change_from_p65_d8_percent": -3.27501613313633
+  },
+  "kernel_p50_ratios": {
+    "data_branch": 1.1178299447344213,
+    "hashing": 0.9694132366562137,
+    "internal_call": 0.9596088908715342,
+    "mixed_gameplay": 1.3278811841516283,
+    "parallel_integer": 0.9993256517456407,
+    "predictable_branch": 1.0131428183687745,
+    "random_memory": 0.972064672065635,
+    "scalar_float": 2.0480403569192513,
+    "sequential_memory": 0.9836487042369395,
+    "serial_integer": 0.9626119260811583,
+    "simd128": 1.3055217120854603,
+    "small_struct": 0.9785991839906742
+  },
+  "leadership_passed": false,
+  "phase65_d_completed": false
+}

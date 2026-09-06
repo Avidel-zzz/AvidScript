@@ -108,7 +108,7 @@ Wasmtime 45 Cranelift JIT 对冻结版本的 Puerts V8，同机 5 个进程、�
 见 [P57 原始证据](Docs/Phase57/P57.11B1_Recursive_Fixed_Struct_Codec_Evidence.json)。
 
 - **游戏逻辑：** P56 Small/Dense gameplay 与 Lifecycle callback 的 P50 比率为 **`0.469x / 0.513x / 0.391x`**，各自对照路径与范围见[报告](Docs/Phase56/P56.5_Fused_Call_Frame_Implementation_Report.md)。
-- **纯执行：** 12-kernel 相同 WASM 对照的 P50/P95 几何均值为 **`0.9800x / 1.0006x`**，未达到 `<= 0.95x` 目标；不是 C# 对 JavaScript 的完整游戏比较。见[执行层报告](Docs/Phase57/P57.13_Cranelift_Speed_Profile.md)。
+- **纯执行：** 当前 P65.D9 正式 12-kernel 相同 WASM 对照的 P50/P95 几何均值为 **`1.1065x / 1.1293x`**，P50/P95 胜率为 **`58.3% / 33.3%`**，仍未达到 `<= 0.95x` 与 `>= 60%` 目标；不是 C# 对 JavaScript 的完整游戏比较。见[D9 报告](Docs/Phase65/P65.D9_Demand_Driven_Fuel_Profile.md)。
 - **比较边界：** 尚无同口径 UnLua/AngelScript 排行榜；不宣称全场景领先。其他数据见[容器](Docs/Phase57/P57.11D_Compiler_Managed_Array_Region.md)、[UE 原生对照](Docs/Phase60/P60.D_Performance_And_Gate.md)与[增量构建](Docs/Phase61/P61.E_Integration_Gate.md)。
 
 ## 快速开始
@@ -198,6 +198,13 @@ generated S1 的 callback P50 比率为 **`0.886x / 0.913x`**，gameplay small/d
 统一 Gate 为 **12/18**。因此诊断方向成立，完整领导力仍未关闭；下一步是由 verified cooked package
 驱动的高性能 containment 层，而不是 benchmark 专用关闭安全机制。详见
 [P65.D8 正式复测](Docs/Phase65/P65.D8_Formal_Performance_Retest.md)。
+
+P65.D9 已按真实执行预算拆分 Wasmtime compiler profile：配置 fuel 或加载 serialized package 时继续使用
+严格 containment；原始 WASM 且未请求 fuel 时免除 fuel 插桩，并保留 epoch、Host-call 和内存边界。
+正式 identical-WASM P50/P95 相对 D8 改善 **`1.72% / 3.28%`**，但当前仍为
+**`1.1065x / 1.1293x`**，未通过领先门禁。下一步聚焦浮点、SIMD 与 mixed gameplay 的 Cranelift
+生成质量，以及 verified package callback 的安全快层。详见
+[P65.D9 按需 Fuel 配置](Docs/Phase65/P65.D9_Demand_Driven_Fuel_Profile.md)。
 
 ## 验证
 
