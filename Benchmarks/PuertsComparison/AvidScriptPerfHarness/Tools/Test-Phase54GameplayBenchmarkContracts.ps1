@@ -73,6 +73,9 @@ $phase56GameplayFormal = Get-Content -LiteralPath (
 $phase56GameplayDiagnostic = Get-Content -LiteralPath (
     Join-Path $profileRoot 'Phase56Gameplay.diagnostic.json') -Raw |
     ConvertFrom-Json -Depth 100
+$phase65VerifiedPackageDiagnostic = Get-Content -LiteralPath (
+    Join-Path $profileRoot 'Phase65VerifiedPackageMicro.diagnostic.json') -Raw |
+    ConvertFrom-Json -Depth 100
 $phase56GateSchema = Get-Content -LiteralPath (
     Join-Path $profileRoot 'Phase56GateResult.schema.json') -Raw |
     ConvertFrom-Json -Depth 100
@@ -165,6 +168,14 @@ Assert-True ($generatedCSharpProfile.binding_profile.package_name -ceq
     $dataCSharpProfile.binding_profile.package_name -and
     $generatedCSharpProfile.binding_profile.package_name.Length -le 40) `
     'Generated S1 与 data-oriented profile 必须共享适合 Windows 短路径工程的稳定 binding package identity。'
+Assert-True (@($phase65VerifiedPackageDiagnostic.avidscript_artifacts.PSObject.Properties.Value |
+        Where-Object { [string]$_.artifact_load_policy -cne 'published_package' }).Count -eq 0) `
+    'Phase65 verified-package diagnostic 的三条 AvidScript lane 必须全部走发布包加载。'
+Assert-True ($invokeText.Contains('Get-PublishedModulePackage') -and
+    $invokeText.Contains("artifact_trust = 'verified_package'") -and
+    $runnerText.Contains('LoadPublishedModule') -and
+    $runnerText.Contains('LoadInitialArtifact')) `
+    'Verified-package benchmark 必须复用生产 catalog/package loader 与 Session artifact 入口。'
 Assert-True ($nativePropertyBatch.Length -gt 0 -and
     @([regex]::Matches($nativePropertyBatch, 'Fixture\.ScalarValue\s*=')).Count -eq 4 -and
     -not $nativePropertyBatch.Contains('NativeSetScalar')) `
@@ -204,10 +215,12 @@ Assert-True (
     $runtimeSessionHeaderText.Contains('SetExecutionBudgetForTesting') -and
     $runtimeSessionHeaderText.Contains('ExecutionBudgetOverrideForTesting') -and
     $runtimeSessionSourceText.Contains('ResolveExecutionBudget(') -and
-    $runtimeSessionSourceText.Contains('return MakeSessionExecutionBudget(Selection);')) `
+    $runtimeSessionSourceText.Contains('return MakeSessionExecutionBudget(Selection, ArtifactTrust);')) `
     'Runtime Session 必须只通过加载前测试覆盖注入 benchmark 预算，并保留生产预算解析路径。'
 Assert-True (
-    $runtimeSessionSourceText.Contains('Budget.FuelPerEntry = 50000000;') -and
+    $runtimeSessionSourceText.Contains('bUseVerifiedPackageFastContainment') -and
+    $runtimeSessionSourceText.Contains('? 0') -and
+    $runtimeSessionSourceText.Contains(': 50000000;') -and
     $runtimeSessionSourceText.Contains('Budget.EpochTimeoutMilliseconds = 100;') -and
     $runnerText.Contains('MakePerfRunnerExecutionBudget') -and
     $runnerText.Contains('Budget.FuelPerEntry = UINT64_C(4) << 30;') -and

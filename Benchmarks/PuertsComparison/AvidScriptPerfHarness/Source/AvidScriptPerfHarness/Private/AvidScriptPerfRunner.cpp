@@ -3,6 +3,7 @@
 #include "AvidScriptGameplayFrameBenchmark.h"
 #include "AvidScriptPerfFixture.h"
 #include "AvidScriptObjectRegistry.h"
+#include "AvidScriptRuntimeArtifact.h"
 #include "AvidScriptRuntimeSession.h"
 #include "AvidScriptWasmReloadTypes.h"
 #include "AvidScriptWasmRuntime.h"
@@ -630,11 +631,21 @@ namespace
 			const FString& ExpectedRuntimeBuildIdentity,
 			const FString& ExpectedRuntimeArtifactSha256,
 			const FString& ManifestRelativePath,
+			const FString& ArtifactLoadPolicy,
+			const FString& ModuleId,
+			const FString& ExpectedPackageId,
+			const FString& ExpectedArtifactTrust,
 			const bool bCaptureFusedTiming,
 			AAvidScriptPerfFixture& SharedFixture,
 			FString& OutError)
 		{
-			if (ManifestRelativePath.IsEmpty() ||
+			const bool bUsesPublishedPackage = ArtifactLoadPolicy.Equals(
+				TEXT("published_package"),
+				ESearchCase::CaseSensitive);
+			if ((!bUsesPublishedPackage && !ArtifactLoadPolicy.Equals(
+					TEXT("runtime_manifest"),
+					ESearchCase::CaseSensitive)) ||
+				ManifestRelativePath.IsEmpty() ||
 				FPaths::IsRelative(ManifestRelativePath) == false ||
 				ManifestRelativePath.Contains(TEXT("..")))
 			{
@@ -642,20 +653,45 @@ namespace
 					"AvidScript benchmark manifest_relative_path must be a safe Saved-relative path");
 				return false;
 			}
-			const FString ManifestPath = FPaths::Combine(
-				FPaths::ProjectSavedDir(),
-				ManifestRelativePath);
-			FAvidScriptWasmReloadManifestLoadResult LoadResult;
-			if (!FAvidScriptWasmReloadManifestLoader::LoadFromFile(
-				ManifestPath,
-				Manifest,
-				Bytecode,
-				LoadResult))
+			FAvidScriptRuntimeArtifact RuntimeArtifact;
+			FAvidScriptRuntimeArtifactLoadResult ArtifactLoadResult;
+			if (bUsesPublishedPackage)
 			{
-				OutError = FString::Printf(
-					TEXT("AvidScript benchmark manifest load failed: %s"),
-					*LoadResult.ErrorMessage);
-				return false;
+				if (ModuleId.IsEmpty() || ExpectedPackageId.IsEmpty() ||
+					!ExpectedArtifactTrust.Equals(
+						TEXT("verified_package"),
+						ESearchCase::CaseSensitive) ||
+					!FAvidScriptRuntimeArtifactLoader::LoadPublishedModule(
+						FName(*ModuleId),
+						ExpectedPackageId,
+						RuntimeArtifact,
+						ArtifactLoadResult))
+				{
+					OutError = FString::Printf(
+						TEXT("AvidScript benchmark published package load failed: %s"),
+						*ArtifactLoadResult.CanonicalResult.ErrorMessage);
+					return false;
+				}
+				Manifest = RuntimeArtifact.Manifest;
+				Bytecode = RuntimeArtifact.VmArtifact.CanonicalWasmBytes;
+			}
+			else
+			{
+				const FString ManifestPath = FPaths::Combine(
+					FPaths::ProjectSavedDir(),
+					ManifestRelativePath);
+				FAvidScriptWasmReloadManifestLoadResult ManifestLoadResult;
+				if (!FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+						ManifestPath,
+						Manifest,
+						Bytecode,
+						ManifestLoadResult))
+				{
+					OutError = FString::Printf(
+						TEXT("AvidScript benchmark manifest load failed: %s"),
+						*ManifestLoadResult.ErrorMessage);
+					return false;
+				}
 			}
 
 			ResultSlot = Manifest.StateMigration.Slots.FindByPredicate(
@@ -697,20 +733,29 @@ namespace
 					: EAvidScriptDynamicHostCallTimingPolicy::Disabled;
 			Session.SetHostContext(HostContext);
 #if WITH_DEV_AUTOMATION_TESTS
-			Session.SetBackendSelectionForTesting(BackendSelection);
-			Session.SetExecutionBudgetForTesting(
-				MakePerfRunnerExecutionBudget());
+			if (!bUsesPublishedPackage)
+			{
+				Session.SetBackendSelectionForTesting(BackendSelection);
+				Session.SetExecutionBudgetForTesting(
+					MakePerfRunnerExecutionBudget());
+			}
 #else
-			OutError = TEXT("AvidScript benchmark backend selection requires WITH_DEV_AUTOMATION_TESTS");
-			return false;
+			if (!bUsesPublishedPackage)
+			{
+				OutError = TEXT("AvidScript runtime-manifest benchmark requires WITH_DEV_AUTOMATION_TESTS");
+				return false;
+			}
 #endif
 
 			FAvidScriptWasmReloadResult ReloadResult;
-			if (!Session.LoadInitialModule(
+			const bool bLoaded = bUsesPublishedPackage
+				? Session.LoadInitialArtifact(RuntimeArtifact, ReloadResult)
+				: Session.LoadInitialModule(
 					Bytecode.GetData(),
 					Bytecode.Num(),
 					Manifest,
-					ReloadResult))
+					ReloadResult);
+			if (!bLoaded)
 			{
 				OutError = FString::Printf(
 					TEXT("AvidScript benchmark runtime initialization failed: %s"),
@@ -786,17 +831,29 @@ namespace
 					? TEXT("interpreter")
 					: Actual.ExecutionMode == EAvidScriptVmExecutionMode::Jit
 						? TEXT("jit")
-						: TEXT("unsupported");
+						: Actual.ExecutionMode == EAvidScriptVmExecutionMode::Aot
+							? TEXT("aot")
+							: TEXT("unsupported");
 			const FString ActualArtifactFormat =
 				Actual.ArtifactFormat == EAvidScriptVmArtifactFormat::WasmBytecode
 					? TEXT("wasm_bytecode")
-					: TEXT("unsupported");
+					: Actual.ArtifactFormat ==
+						EAvidScriptVmArtifactFormat::WasmtimeSerialized
+						? TEXT("wasmtime_serialized")
+						: TEXT("unsupported");
+			const FString ActualArtifactSha256 = bUsesPublishedPackage
+				? RuntimeArtifact.VmArtifact.ExecutionIdentity
+				: Manifest.WasmSha256;
+			const FAvidScriptVmBackendSelection& EffectiveSelection =
+				bUsesPublishedPackage
+					? RuntimeArtifact.BackendSelection
+					: BackendSelection;
 			if (!Actual.StableBackendId.Equals(ExpectedBackendId, ESearchCase::CaseSensitive) ||
 				!Actual.RuntimeVersion.Equals(ExpectedRuntimeVersion, ESearchCase::CaseSensitive) ||
 				!ActualExecutionMode.Equals(ExpectedExecutionMode, ESearchCase::CaseSensitive) ||
 				!ActualArtifactFormat.Equals(ExpectedArtifactFormat, ESearchCase::CaseSensitive) ||
 				(!ExpectedArtifactSha256.IsEmpty() &&
-				 !Manifest.WasmSha256.Equals(ExpectedArtifactSha256, ESearchCase::CaseSensitive)) ||
+				 !ActualArtifactSha256.Equals(ExpectedArtifactSha256, ESearchCase::CaseSensitive)) ||
 				(!ExpectedSourceWasmSha256.IsEmpty() &&
 				 !Manifest.WasmSha256.Equals(ExpectedSourceWasmSha256, ESearchCase::CaseSensitive)) ||
 				!Actual.TargetTriple.Equals(ExpectedTargetTriple, ESearchCase::CaseSensitive) ||
@@ -810,7 +867,13 @@ namespace
 					 ESearchCase::CaseSensitive)) ||
 				Actual.RuntimeBuildIdentity.IsEmpty() ||
 				Actual.RuntimeArtifactSha256.IsEmpty() ||
-				BackendSelection.bAllowFallback)
+				EffectiveSelection.bAllowFallback ||
+				(bUsesPublishedPackage &&
+				 (!ArtifactLoadResult.bVerifiedPublishedPackage ||
+				  ArtifactLoadResult.bFellBackToJit ||
+				  ArtifactLoadResult.PackageId != ExpectedPackageId ||
+				  RuntimeArtifact.ArtifactTrust !=
+					EAvidScriptVmArtifactTrust::VerifiedPackage)))
 			{
 				OutError = FString::Printf(
 					TEXT("AvidScript benchmark backend provenance mismatch: ")
@@ -830,7 +893,7 @@ namespace
 					*Actual.TargetTriple,
 					*Actual.RuntimeBuildIdentity,
 					*Actual.RuntimeArtifactSha256,
-					BackendSelection.bAllowFallback ? TEXT("true") : TEXT("false"));
+					EffectiveSelection.bAllowFallback ? TEXT("true") : TEXT("false"));
 				Session.UnloadLive();
 				return false;
 			}
@@ -842,8 +905,16 @@ namespace
 			BackendInfoJson->SetStringField(TEXT("runtime_version"), Actual.RuntimeVersion);
 			BackendInfoJson->SetStringField(TEXT("execution_mode"), ActualExecutionMode);
 			BackendInfoJson->SetStringField(TEXT("artifact_format"), ActualArtifactFormat);
-			BackendInfoJson->SetStringField(TEXT("artifact_sha256"), Manifest.WasmSha256);
+			BackendInfoJson->SetStringField(TEXT("artifact_sha256"), ActualArtifactSha256);
 			BackendInfoJson->SetStringField(TEXT("source_wasm_sha256"), Manifest.WasmSha256);
+			BackendInfoJson->SetStringField(TEXT("artifact_load_policy"), ArtifactLoadPolicy);
+			BackendInfoJson->SetStringField(TEXT("artifact_trust"), ExpectedArtifactTrust);
+			BackendInfoJson->SetStringField(
+				TEXT("module_id"),
+				bUsesPublishedPackage ? ModuleId : Manifest.ModuleId);
+			BackendInfoJson->SetStringField(
+				TEXT("package_id"),
+				bUsesPublishedPackage ? ArtifactLoadResult.PackageId : FString());
 			BackendInfoJson->SetStringField(
 				TEXT("binding_package_name"),
 				Manifest.BindingPackageName);
@@ -860,7 +931,9 @@ namespace
 			BackendInfoJson->SetBoolField(TEXT("fallback_used"), false);
 			BackendInfoJson->SetNumberField(
 				TEXT("execution_artifact_size_bytes"),
-				Bytecode.Num());
+				bUsesPublishedPackage
+					? RuntimeArtifact.VmArtifact.ExecutionBytes.Num()
+					: Bytecode.Num());
 			BackendInfoJson->SetStringField(
 				TEXT("generated_code_size_status"),
 				TEXT("runtime_not_exposed"));
@@ -1761,6 +1834,10 @@ namespace
 		FString RuntimeBuildIdentity;
 		FString RuntimeArtifactSha256;
 		FString ManifestRelativePath;
+		FString ArtifactLoadPolicy = TEXT("runtime_manifest");
+		FString ModuleId;
+		FString ExpectedPackageId;
+		FString ExpectedArtifactTrust = TEXT("untrusted");
 		TSharedPtr<FJsonObject> Json;
 	};
 
@@ -2353,6 +2430,24 @@ namespace
 			{
 				return false;
 			}
+			if (IsAvidScriptPerfLane(Entry.Lane))
+			{
+				EntryJson->TryGetStringField(
+					TEXT("artifact_load_policy"),
+					Entry.ArtifactLoadPolicy);
+				if (Entry.ArtifactLoadPolicy.Equals(
+						TEXT("published_package"),
+						ESearchCase::CaseSensitive) &&
+					(!TryGetRequiredString(
+						EntryJson, TEXT("module_id"), Entry.ModuleId, OutError) ||
+					 !TryGetRequiredString(
+						EntryJson, TEXT("expected_package_id"), Entry.ExpectedPackageId, OutError) ||
+					 !TryGetRequiredString(
+						EntryJson, TEXT("artifact_trust"), Entry.ExpectedArtifactTrust, OutError)))
+				{
+					return false;
+				}
+			}
 			FString ComputedLaneIdentitySha256;
 			if (!GetCanonicalLaneIdentitySha256(
 					EntryJson,
@@ -2382,9 +2477,38 @@ namespace
 		const FPerfLaneCatalogEntry& DataEntry =
 			OutRequest.LaneCatalog[static_cast<int32>(
 				EAvidScriptPerfLane::AvidScriptWasmtimeDataOriented)];
-		if (!SemanticEntry.BackendId.Equals(TEXT("wasmtime.cranelift.jit"), ESearchCase::CaseSensitive) ||
-			!GeneratedEntry.BackendId.Equals(TEXT("wasmtime.cranelift.jit"), ESearchCase::CaseSensitive) ||
-			!DataEntry.BackendId.Equals(TEXT("wasmtime.cranelift.jit"), ESearchCase::CaseSensitive) ||
+		auto HasValidWasmtimeExecutionContract = [](const FPerfLaneCatalogEntry& Entry)
+		{
+			const bool bPublishedPackage = Entry.ArtifactLoadPolicy.Equals(
+				TEXT("published_package"),
+				ESearchCase::CaseSensitive);
+			return bPublishedPackage
+				? Entry.BackendId.Equals(
+						TEXT("wasmtime.cranelift.precompiled"),
+						ESearchCase::CaseSensitive) &&
+					Entry.ExecutionMode.Equals(TEXT("aot"), ESearchCase::CaseSensitive) &&
+					Entry.ArtifactFormat.Equals(
+						TEXT("wasmtime_serialized"),
+						ESearchCase::CaseSensitive) &&
+					Entry.ExpectedArtifactTrust.Equals(
+						TEXT("verified_package"),
+						ESearchCase::CaseSensitive) &&
+					!Entry.ModuleId.IsEmpty() &&
+					!Entry.ExpectedPackageId.IsEmpty()
+				: Entry.ArtifactLoadPolicy.Equals(
+						TEXT("runtime_manifest"),
+						ESearchCase::CaseSensitive) &&
+					Entry.BackendId.Equals(
+						TEXT("wasmtime.cranelift.jit"),
+						ESearchCase::CaseSensitive) &&
+					Entry.ExecutionMode.Equals(TEXT("jit"), ESearchCase::CaseSensitive) &&
+					Entry.ArtifactFormat.Equals(
+						TEXT("wasm_bytecode"),
+						ESearchCase::CaseSensitive);
+		};
+		if (!HasValidWasmtimeExecutionContract(SemanticEntry) ||
+			!HasValidWasmtimeExecutionContract(GeneratedEntry) ||
+			!HasValidWasmtimeExecutionContract(DataEntry) ||
 			!SemanticEntry.BindingInvocationMode.Equals(TEXT("adaptive_semantic"), ESearchCase::CaseSensitive) ||
 			!GeneratedEntry.BindingInvocationMode.Equals(TEXT("generated_native_s1"), ESearchCase::CaseSensitive) ||
 			!DataEntry.BindingInvocationMode.Equals(TEXT("data_command_buffer"), ESearchCase::CaseSensitive) ||
@@ -4163,6 +4287,10 @@ bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
 			SemanticCatalog.RuntimeBuildIdentity,
 			SemanticCatalog.RuntimeArtifactSha256,
 			SemanticCatalog.ManifestRelativePath,
+			SemanticCatalog.ArtifactLoadPolicy,
+			SemanticCatalog.ModuleId,
+			SemanticCatalog.ExpectedPackageId,
+			SemanticCatalog.ExpectedArtifactTrust,
 			!Request.bUseHotCallbackResults,
 			*Fixture,
 			OutError))
@@ -4186,6 +4314,10 @@ bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
 			GeneratedCatalog.RuntimeBuildIdentity,
 			GeneratedCatalog.RuntimeArtifactSha256,
 			GeneratedCatalog.ManifestRelativePath,
+			GeneratedCatalog.ArtifactLoadPolicy,
+			GeneratedCatalog.ModuleId,
+			GeneratedCatalog.ExpectedPackageId,
+			GeneratedCatalog.ExpectedArtifactTrust,
 			!Request.bUseHotCallbackResults,
 			*Fixture,
 			OutError))
@@ -4209,6 +4341,10 @@ bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
 			DataCatalog.RuntimeBuildIdentity,
 			DataCatalog.RuntimeArtifactSha256,
 			DataCatalog.ManifestRelativePath,
+			DataCatalog.ArtifactLoadPolicy,
+			DataCatalog.ModuleId,
+			DataCatalog.ExpectedPackageId,
+			DataCatalog.ExpectedArtifactTrust,
 			!Request.bUseHotCallbackResults,
 			*Fixture,
 			OutError))
@@ -4510,6 +4646,10 @@ bool FAvidScriptPerfRunner::RunFiveLaneCorrectnessSmoke(
 			FString(),
 			TEXT("AvidScriptCSharpGuest/Profiles/profile_phase54_6_semantic/")
 				TEXT("profile_phase54_6_semantic.avidscript.json"),
+			TEXT("runtime_manifest"),
+			FString(),
+			FString(),
+			TEXT("untrusted"),
 			false,
 			*Fixture,
 			Error))
@@ -4532,6 +4672,10 @@ bool FAvidScriptPerfRunner::RunFiveLaneCorrectnessSmoke(
 			FString(),
 			TEXT("AvidScriptCSharpGuest/Profiles/profile_phase54_6_generated_s1/")
 				TEXT("profile_phase54_6_generated_s1.avidscript.json"),
+			TEXT("runtime_manifest"),
+			FString(),
+			FString(),
+			TEXT("untrusted"),
 			false,
 			*Fixture,
 			Error))

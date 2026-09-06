@@ -114,12 +114,66 @@ function Get-ManifestBindingPackage {
         throw "Manifest WASM identity mismatch: $manifestPath"
     }
     return [pscustomobject]@{
+        module_id = [string]$manifest.module_id
         name = [string]$package.package_name
         hash = [string]$package.package_hash
         manifest_path = $manifestPath
         manifest_sha256 = Get-SidecarFileSha256 -Path $manifestPath
         wasm_path = $wasmPath
         wasm_sha256 = $actualWasmSha256
+    }
+}
+
+function Get-PublishedModulePackage {
+    param(
+        [string]$ProjectRoot,
+        [string]$ModuleId
+    )
+
+    $modulesRoot = Join-Path $ProjectRoot 'Content/AvidScript/Modules'
+    $catalogPath = Join-Path $modulesRoot 'catalog.json'
+    $catalog = Read-JsonFile -Path $catalogPath
+    $module = @($catalog.modules | Where-Object {
+        [string]$_.module_id -ceq $ModuleId
+    })
+    if ($module.Count -ne 1) {
+        throw "Published package catalog must contain exactly one module: $ModuleId"
+    }
+    $variant = @($module[0].variants | Where-Object {
+        [string]$_.platform -ceq 'win64' -and
+        [string]$_.architecture -ceq 'x86_64' -and
+        [string]$_.configuration -ceq 'development' -and
+        [string]$_.backend -ceq 'wasmtime' -and
+        [string]$_.format -ceq 'wasmtime_serialized_v1'
+    })
+    if ($variant.Count -ne 1) {
+        throw "Published package catalog has no unique Win64 Development variant: $ModuleId"
+    }
+    $descriptorPath = Resolve-SidecarChildPath `
+        -Root $modulesRoot `
+        -RelativePath ([string]$variant[0].descriptor_file)
+    $descriptorSha256 = Get-SidecarFileSha256 -Path $descriptorPath
+    if ($descriptorSha256 -cne [string]$variant[0].descriptor_sha256) {
+        throw "Published package descriptor identity mismatch: $ModuleId"
+    }
+    $descriptor = Read-JsonFile -Path $descriptorPath
+    if ([string]$descriptor.package_id -cne [string]$variant[0].package_id -or
+        [string]$descriptor.module_id -cne $ModuleId -or
+        [string]$descriptor.execution.backend -cne 'wasmtime' -or
+        [string]$descriptor.execution.format -cne 'wasmtime_serialized_v1' -or
+        [string]::IsNullOrWhiteSpace([string]$descriptor.artifacts.precompiled.sha256)) {
+        throw "Published package descriptor contract mismatch: $ModuleId"
+    }
+    return [pscustomobject]@{
+        module_id = $ModuleId
+        package_id = [string]$descriptor.package_id
+        descriptor_path = $descriptorPath
+        descriptor_sha256 = $descriptorSha256
+        precompiled_sha256 = [string]$descriptor.artifacts.precompiled.sha256
+        canonical_wasm_sha256 = [string]$descriptor.artifacts.canonical_wasm.sha256
+        compiler_build_identity = [string]$descriptor.execution.compiler_build_identity
+        catalog_path = $catalogPath
+        catalog_sha256 = Get-SidecarFileSha256 -Path $catalogPath
     }
 }
 
@@ -222,6 +276,36 @@ function Resolve-RequestTemplateIdentity {
             -DllSha256 $wasmtimeRuntimeSha256
         $entry.runtime_artifact_sha256 = $wasmtimeRuntimeSha256
         $entry.manifest_relative_path = [string]$artifact.manifest_relative_path
+        $loadPolicy = if ($artifact.PSObject.Properties.Name -ccontains
+            'artifact_load_policy') {
+            [string]$artifact.artifact_load_policy
+        }
+        else {
+            'runtime_manifest'
+        }
+        if ($loadPolicy -ceq 'published_package') {
+            $published = Get-PublishedModulePackage `
+                -ProjectRoot $ProjectRoot `
+                -ModuleId ([string]$package.module_id)
+            if ($published.canonical_wasm_sha256 -cne $package.wasm_sha256 -or
+                $published.compiler_build_identity -cne $entry.runtime_build_identity) {
+                throw "Published package execution identity mismatch: $($package.module_id)"
+            }
+            $entry.execution_tier = 'aot'
+            $entry.execution_artifact_format = 'wasmtime_serialized'
+            $entry.execution_artifact_sha256 = $published.precompiled_sha256
+            $entry.backend_id = 'wasmtime.cranelift.precompiled'
+            $entry.execution_mode = 'aot'
+            $entry.artifact_load_policy = 'published_package'
+            $entry.artifact_trust = 'verified_package'
+            $entry.module_id = $published.module_id
+            $entry.expected_package_id = $published.package_id
+            $entry.package_descriptor_sha256 = $published.descriptor_sha256
+            $entry.package_catalog_sha256 = $published.catalog_sha256
+        }
+        elseif ($loadPolicy -cne 'runtime_manifest') {
+            throw "Unsupported AvidScript artifact load policy: $loadPolicy"
+        }
     }
 
     foreach ($entry in $catalog) {
