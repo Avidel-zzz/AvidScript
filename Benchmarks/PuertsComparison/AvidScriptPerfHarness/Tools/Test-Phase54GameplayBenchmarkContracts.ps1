@@ -195,8 +195,11 @@ Assert-True ($invokeText.Contains('Assert-SidecarBenchmarkProjectProvenance') -a
     'Formal 六通道必须锁定项目、Puerts、Harness DLL、profile/template 与真实 Wasmtime build identity。'
 Assert-True ($invokeText.Contains('[string]$PackagedGameExecutable') -and
     $invokeText.Contains("'-ExecCmds=AvidScript.PerformanceComparison.Run'") -and
+    $invokeText.Contains('[int]$PackagedGameTimeoutSeconds = 300') -and
+    $invokeText.Contains('$hostProcess.Kill($true)') -and
+    $invokeText.Contains('"-abslog=$hostLogPath"') -and
     $invokeText.Contains("execution_host -NotePropertyValue")) `
-    '发布包 benchmark 必须通过 monolithic Game host 启动并记录实际执行载体。'
+    '发布包 benchmark 必须通过有界 monolithic Game host 启动、记录日志与实际执行载体。'
 Assert-True ($invokeText.Contains('Get-SidecarLaneIdentitySha256') -and
     $invokeText.Contains('Get-SidecarLaneCatalogSha256')) `
     '实物身份变化后必须重新计算 canonical lane catalog。'

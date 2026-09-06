@@ -14,7 +14,10 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$OutputDirectory,
 
-    [string]$PackagedGameExecutable = ''
+    [string]$PackagedGameExecutable = '',
+
+    [ValidateRange(30, 1800)]
+    [int]$PackagedGameTimeoutSeconds = 300
 )
 
 Set-StrictMode -Version Latest
@@ -415,15 +418,37 @@ function Invoke-ProcessRequest {
     }
     Write-NewJsonFile -Value $Request -Path $RequestPath
     if ($usePackagedGame) {
-        & $resolvedHostExecutable `
-            '-unattended' `
-            '-nop4' `
-            '-nullrhi' `
-            '-nosplash' `
-            '-nosound' `
-            "-AvidScriptPerfRequest=$RequestPath" `
-            "-AvidScriptPerfResult=$ResultPath" `
-            '-ExecCmds=AvidScript.PerformanceComparison.Run'
+        $hostLogPath = "$ResultPath.host.log"
+        $startInfo = [Diagnostics.ProcessStartInfo]::new()
+        $startInfo.FileName = $resolvedHostExecutable
+        $startInfo.WorkingDirectory = Split-Path -Parent $resolvedHostExecutable
+        $startInfo.UseShellExecute = $false
+        $startInfo.CreateNoWindow = $true
+        foreach ($argument in @(
+            '-unattended',
+            '-nop4',
+            '-nullrhi',
+            '-nosplash',
+            '-nosound',
+            "-abslog=$hostLogPath",
+            "-AvidScriptPerfRequest=$RequestPath",
+            "-AvidScriptPerfResult=$ResultPath",
+            '-ExecCmds=AvidScript.PerformanceComparison.Run')) {
+            [void]$startInfo.ArgumentList.Add($argument)
+        }
+        $hostProcess = [Diagnostics.Process]::new()
+        $hostProcess.StartInfo = $startInfo
+        if (-not $hostProcess.Start()) {
+            throw 'Packaged AvidScriptPerfRun process did not start.'
+        }
+        if (-not $hostProcess.WaitForExit($PackagedGameTimeoutSeconds * 1000)) {
+            $hostProcess.Kill($true)
+            $hostProcess.WaitForExit()
+            throw "Packaged AvidScriptPerfRun exceeded $PackagedGameTimeoutSeconds seconds: $hostLogPath"
+        }
+        if ($hostProcess.ExitCode -ne 0) {
+            throw "Packaged AvidScriptPerfRun failed with exit code $($hostProcess.ExitCode): $hostLogPath"
+        }
     }
     else {
         & $resolvedHostExecutable `
@@ -436,7 +461,7 @@ function Invoke-ProcessRequest {
             '-nullrhi' `
             '-nosplash'
     }
-    if ($LASTEXITCODE -ne 0) {
+    if (-not $usePackagedGame -and $LASTEXITCODE -ne 0) {
         throw "AvidScriptPerfRun failed with exit code $LASTEXITCODE."
     }
     if (-not (Test-Path -LiteralPath $ResultPath -PathType Leaf)) {
