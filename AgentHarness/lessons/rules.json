@@ -696,6 +696,14 @@
       "prevention": "修改重复的计时、错误或收尾语句时，patch context 必须包含函数签名或唯一局部锚点；编辑后用 git diff --function-context 核对每个 hunk 的函数归属，再进入编译。首次编译失败后只撤销本轮误命中，不回退文件中的既有改动。",
       "source": "Docs/Phase65/P65.D6_Lazy_Hot_Callback_Observability.md",
       "last_observed": "2026-09-07 P65.D6 callback 采样补丁误命中 delegate 起始段与 gameplay 收尾段；增量编译在未声明变量处 fail closed，按函数归属修正后构建及 20 项 Automation 通过"
+    },
+    {
+      "id": "typed-powershell-parameters-stay-in-process",
+      "tags": ["powershell", "workflow", "benchmark", "cli"],
+      "summary": "通过子 pwsh 的 native argv 调用脚本时，Boolean 等强类型 PowerShell 参数会退化成字符串并在参数绑定前失败。",
+      "prevention": "需要传递 Boolean、ScriptBlock 或其他 PowerShell 强类型参数时，从已固定为 PowerShell 7 的 Harness shell 内直接调用脚本并使用 `-Name:$false` 等 typed 语法；只有纯字符串参数才使用 `pwsh -File` 跨进程入口。正式 benchmark 启动前先读取 param block，参数绑定失败不得复用为有效 attempt。",
+      "source": "Docs/Phase65/P65.D8_Formal_Performance_Retest.md",
+      "last_observed": "2026-09-07 P65.D8 controlled suite 两次通过子 pwsh 传递 AvidScriptDirty 时分别把 false 和 0 绑定为 String；均在创建样本前退出，改为同进程 `-AvidScriptDirty:$false` 后正式套件完成"
     }
   ]
 }
