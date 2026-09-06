@@ -21,7 +21,7 @@
       "summary": "概念名称不能当作真实文件路径。",
       "prevention": "先用 rg --files 建立索引，再对索引中的字面路径读取；通配符只放在 rg -g 参数，所有 -g 选项必须位于 -- 终止符之前。",
       "source": "legacy:1931",
-      "last_observed": "2026-09-05 P64.D (未先索引便猜测 Build/AvidScriptAndroidRuntime.ps1；检索虽从 Build 范围找到真实 Android/AvidScriptAndroidProcess.ps1，后续只使用已确认路径)"
+      "last_observed": "2026-09-07 P65.D (对不存在的 ThirdParty 根和 Source/AvidScript* 路径直接执行 rg；均为只读失败，随后恢复为 rg --files 索引与 -g 文件过滤)"
     },
     {
       "id": "one-command-one-evidence-domain",
@@ -688,6 +688,14 @@
       "prevention": "Shipping 打包前先执行受控 BuildCSharpScriptTypes -HeadlessRelease -PackageConfiguration Shipping，并验证 current.json 的 module/package 在 catalog 中恰有一个 Win64/x86_64/Shipping 变体；备份并在验证后恢复 Development pointer，不降低 receipt 门禁。",
       "source": "Docs/Phase64/P64.D_Packaged_World_Soak.md",
       "last_observed": "2026-09-05 P64.D 首次 Shipping World 打包在 receipt_validation 以 GENERATED_TYPE_PACKAGE_MISMATCH 拒绝，受控重发后新目录构建通过"
+    },
+    {
+      "id": "repeated-patch-text-requires-function-ownership-review",
+      "tags": ["workflow", "patch", "review", "cpp"],
+      "summary": "只按重复语句应用补丁，可能把多个 hunk 分别写入不同函数并在局部 diff 中漏检。",
+      "prevention": "修改重复的计时、错误或收尾语句时，patch context 必须包含函数签名或唯一局部锚点；编辑后用 git diff --function-context 核对每个 hunk 的函数归属，再进入编译。首次编译失败后只撤销本轮误命中，不回退文件中的既有改动。",
+      "source": "Docs/Phase65/P65.D6_Lazy_Hot_Callback_Observability.md",
+      "last_observed": "2026-09-07 P65.D6 callback 采样补丁误命中 delegate 起始段与 gameplay 收尾段；增量编译在未声明变量处 fail closed，按函数归属修正后构建及 20 项 Automation 通过"
     }
   ]
 }
