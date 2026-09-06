@@ -7,6 +7,7 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformProcess.h"
 #include "HAL/PlatformProperties.h"
 #include "HAL/PlatformTime.h"
 #include "Interfaces/IPluginManager.h"
@@ -39,6 +40,16 @@ namespace
 	const FString ElementLane(TEXT("avidscript_wasmtime_element"));
 	const FString BulkLane(TEXT("avidscript_wasmtime_bulk"));
 	const FString CompilerRegionLane(TEXT("avidscript_wasmtime_compiler_region"));
+
+	FString GetPhase57ArrayModuleArtifactPath(const FName ModuleName)
+	{
+#if IS_MONOLITHIC
+		(void)ModuleName;
+		return FPlatformProcess::ExecutablePath();
+#else
+		return FModuleManager::Get().GetModuleFilename(ModuleName);
+#endif
+	}
 
 	uint32 Phase57ArrayMix(const uint32 Value)
 	{
@@ -595,7 +606,7 @@ bool FAvidScriptPerfArrayRunner::RunFromFiles(
 	}
 	const FString ScriptRoot = FPaths::Combine(HarnessPlugin->GetContentDir(), TEXT("JavaScript"));
 	const FString ScriptPath = FPaths::Combine(ScriptRoot, TEXT("phase57_array_reflection.js"));
-	const FString PuertsRuntimePath = FModuleManager::Get().GetModuleFilename(TEXT("JsEnv"));
+	const FString PuertsRuntimePath = GetPhase57ArrayModuleArtifactPath(TEXT("JsEnv"));
 	FString ActualScriptSha256;
 	FString ActualPuertsRuntimeSha256;
 	FString ActualWasmSha256;

@@ -1,5 +1,6 @@
 #include "AvidScriptPerfPrepareCommandlet.h"
 
+#if WITH_EDITOR
 #include "AvidScriptEditorCSharpBuildService.h"
 #include "AvidScriptEditorCSharpProfileService.h"
 #include "Interfaces/IPluginManager.h"
@@ -29,6 +30,7 @@ namespace
 		return Details;
 	}
 }
+#endif
 
 UAvidScriptPerfPrepareCommandlet::UAvidScriptPerfPrepareCommandlet()
 {
@@ -41,6 +43,7 @@ UAvidScriptPerfPrepareCommandlet::UAvidScriptPerfPrepareCommandlet()
 
 int32 UAvidScriptPerfPrepareCommandlet::Main(const FString& Params)
 {
+#if WITH_EDITOR
 	FString ProfilePath;
 	FParse::Value(*Params, TEXT("Profile="), ProfilePath);
 	if (ProfilePath.IsEmpty())
@@ -104,4 +107,12 @@ int32 UAvidScriptPerfPrepareCommandlet::Main(const FString& Params)
 		*BuildResult.ManifestPath,
 		*BuildResult.ReportPath);
 	return 0;
+#else
+	(void)Params;
+	UE_LOG(
+		LogTemp,
+		Error,
+		TEXT("ASP53P1004 C# benchmark artifact preparation is Editor-only"));
+	return 5;
+#endif
 }

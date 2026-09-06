@@ -17,7 +17,6 @@ public class AvidScriptPerfHarness : ModuleRules
         PrivateDependencyModuleNames.AddRange(new[]
         {
             "AvidScriptBindings",
-            "AvidScriptEditor",
             "AvidScriptRuntime",
             "AvidScriptVM",
             "Json",
@@ -26,6 +25,11 @@ public class AvidScriptPerfHarness : ModuleRules
             "Projects",
             "SSL"
         });
+
+        if (Target.bBuildEditor)
+        {
+            PrivateDependencyModuleNames.Add("AvidScriptEditor");
+        }
 
         AddEngineThirdPartyPrivateStaticDependencies(Target, "OpenSSL");
     }

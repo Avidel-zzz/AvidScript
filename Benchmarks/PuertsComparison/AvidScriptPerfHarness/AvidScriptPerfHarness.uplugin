@@ -12,7 +12,7 @@
   "Modules": [
     {
       "Name": "AvidScriptPerfHarness",
-      "Type": "Editor",
+      "Type": "Runtime",
       "LoadingPhase": "Default"
     }
   ],

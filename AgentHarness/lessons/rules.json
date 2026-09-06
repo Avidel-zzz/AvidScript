@@ -712,6 +712,14 @@
       "prevention": "catalog、inventory 与 aggregate 等共享文件只在全部生产者成功结束后计算一次最终摘要，并把身份放在共同父证据上；验证摘要对应的当前文件字节后再冻结候选，禁止给子项复制已过期的中间态 hash。",
       "source": "Benchmarks/PuertsComparison/Leadership/Scripts/New-Phase65LeadershipCandidate.ps1",
       "last_observed": "2026-09-07 P65.D10 首版候选在三次 module publication 后为前两个 artifact 保留了已过期的中间 catalog SHA；真实冻结运行发现后改为 project 级最终快照"
+    },
+    {
+      "id": "monolithic-runtime-identity-is-the-executable",
+      "tags": ["unreal", "runtime", "benchmark", "provenance"],
+      "summary": "UE monolithic Game 构建没有可由 ModuleManager 查询的独立模块文件，运行时身份不能照搬 Editor DLL 路径。",
+      "prevention": "性能与发布取证通过 IS_MONOLITHIC 分流：模块化 Editor 哈希实际模块 DLL，monolithic Game 哈希当前 executable；新增 Runtime plugin 后必须同时编译 Editor 与 Game target，不能用 Editor 构建代替包体兼容性。",
+      "source": "Benchmarks/PuertsComparison/AvidScriptPerfHarness/Source/AvidScriptPerfHarness/Private/AvidScriptPerfRunner.cpp",
+      "last_observed": "2026-09-07 P65.D10 Harness 首次 Game target 编译在 GetModuleFilename 处失败；改用 monolithic executable identity 后非 Editor Development target 通过"
     }
   ]
 }

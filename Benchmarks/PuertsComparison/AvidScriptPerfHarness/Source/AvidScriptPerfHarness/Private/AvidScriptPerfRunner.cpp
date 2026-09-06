@@ -42,6 +42,16 @@ namespace
 	constexpr int32 PerfRunnerResultSchemaVersion = 2;
 	constexpr float PerfRunnerTickDeltaSeconds = 1.0f / 60.0f;
 
+	FString GetPerfModuleArtifactPath(const FName ModuleName)
+	{
+#if IS_MONOLITHIC
+		(void)ModuleName;
+		return FPlatformProcess::ExecutablePath();
+#else
+		return FModuleManager::Get().GetModuleFilename(ModuleName);
+#endif
+	}
+
 #if WITH_DEV_AUTOMATION_TESTS
 	FAvidScriptVmLoadConfig::FExecutionBudget MakePerfRunnerExecutionBudget()
 	{
@@ -461,7 +471,7 @@ namespace
 			}
 
 			const FString RuntimeModulePath =
-				FModuleManager::Get().GetModuleFilename(TEXT("JsEnv"));
+				GetPerfModuleArtifactPath(TEXT("JsEnv"));
 			FString ActualRuntimeArtifactSha256;
 			if (RuntimeModulePath.IsEmpty() ||
 				!GetPerfFileSha256(
@@ -520,7 +530,7 @@ namespace
 				TEXT("JavaScript"),
 				ModuleName);
 			const FString RuntimeModulePath =
-				FModuleManager::Get().GetModuleFilename(TEXT("JsEnv"));
+				GetPerfModuleArtifactPath(TEXT("JsEnv"));
 			if (RuntimeModulePath.IsEmpty() ||
 				!GetPerfFileSha256(ScriptPath, ScriptSha256, OutError) ||
 				!GetPerfFileSha256(
