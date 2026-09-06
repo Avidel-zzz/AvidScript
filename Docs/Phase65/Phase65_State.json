@@ -31,9 +31,9 @@
     },
     {
       "id": "P65.C",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "P65.C1-C3 complete: release artifact producer identity, layered platform Gate, Win64 Shipping BuildCookRun and fresh receipt passed in report 30073ea2f6684ccbb6d036a840a9a9de; Android remains 3/19 blocked and manual layer not_run.",
+      "completed_at_utc": "2026-09-06T05:09:52.9602500+00:00"
     },
     {
       "id": "P65.D",
@@ -148,6 +148,6 @@
     }
   ],
   "next_action": "debt-update -Phase 65 -DebtId P65-D01-AndroidDevice -Status Verified -Evidence <text>",
-  "revision": 8,
-  "updated_at_utc": "2026-09-06T03:46:07.7934501+00:00"
+  "revision": 9,
+  "updated_at_utc": "2026-09-06T05:09:52.9623068+00:00"
 }
