@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "profile": "source-developer",
+  "publisher_version": "65.1.0",
+  "include": [
+    "AvidScript.uplugin",
+    "LICENSE",
+    "global.json",
+    "Bindings",
+    "Build",
+    "Content",
+    "Samples",
+    "Source",
+    "Templates",
+    "Tools"
+  ],
+  "exclude": [
+    "Build/Contracts",
+    "Build/PhaseWorkflow",
+    "Build/InvokeAgentHarness.ps1",
+    "Build/InvokePhaseWorkflow.ps1",
+    "Source/ThirdParty/WAMR/upstream/tests",
+    "Source/ThirdParty/WAMR/upstream/test-tools",
+    "Tools/*.Tests"
+  ],
+  "generated": {
+    "readme_source": "Build/ReleaseEngineering/AvidScriptReleaseReadme.md",
+    "readme_destination": "README.md"
+  },
+  "targets": [
+    "Android-arm64",
+    "Win64"
+  ],
+  "contracts": {
+    "module_abi": 1,
+    "binding_descriptor_max": 23,
+    "semantic_schema": 20,
+    "guest_ir_schema": 2
+  },
+  "dependencies": [
+    {
+      "id": "wasmtime-android-arm64",
+      "version": "v45.0.0",
+      "identity_path": "Source/ThirdParty/Wasmtime/WasmtimeAndroidDependency.lock.json"
+    },
+    {
+      "id": "wasmtime-win64",
+      "version": "avidscript-wasmtime-v45.0.0-patchset.2-win64-multiarch",
+      "identity_path": "Source/ThirdParty/Wasmtime/PerformanceToolchain/WasmtimePerformanceToolchain.lock.json"
+    }
+  ]
+}

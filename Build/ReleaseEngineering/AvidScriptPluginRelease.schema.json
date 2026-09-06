@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://avidscript.dev/schemas/plugin-release-v1.json",
+  "title": "AvidScript Plugin Release",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "format",
+    "release_id",
+    "version",
+    "channel",
+    "profile",
+    "publisher",
+    "source",
+    "compatibility",
+    "targets",
+    "contracts",
+    "dependencies",
+    "payload",
+    "signature"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "format": { "const": "avidscript.plugin.release" },
+    "release_id": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "channel": { "const": "preview" },
+    "profile": { "const": "source-developer" },
+    "publisher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "AvidScript.PluginRelease" },
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "tree", "committed_at_utc"],
+      "properties": {
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "tree": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "committed_at_utc": { "type": "string", "format": "date-time" }
+      }
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unreal_min", "unreal_max_exclusive", "dotnet_sdk", "powershell_min"],
+      "properties": {
+        "unreal_min": { "const": "5.8.0" },
+        "unreal_max_exclusive": { "const": "5.9.0" },
+        "dotnet_sdk": { "const": "8.0.416" },
+        "powershell_min": { "type": "string" }
+      }
+    },
+    "targets": {
+      "type": "array",
+      "prefixItems": [
+        { "const": "Android-arm64" },
+        { "const": "Win64" }
+      ],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "contracts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["module_abi", "binding_descriptor_max", "semantic_schema", "guest_ir_schema"],
+      "properties": {
+        "module_abi": { "const": 1 },
+        "binding_descriptor_max": { "const": 23 },
+        "semantic_schema": { "const": 20 },
+        "guest_ir_schema": { "const": 2 }
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "version", "mode", "identity_path", "identity_sha256"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+          "version": { "type": "string" },
+          "mode": { "const": "external" },
+          "identity_path": { "type": "string" },
+          "identity_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root", "inventory_sha256", "file_count", "total_bytes", "files"],
+      "properties": {
+        "root": { "const": "payload" },
+        "inventory_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "file_count": { "type": "integer", "minimum": 1 },
+        "total_bytes": { "type": "integer", "minimum": 1 },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "length", "sha256", "role"],
+            "properties": {
+              "path": { "type": "string" },
+              "length": { "type": "integer", "minimum": 0 },
+              "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "role": {
+                "enum": [
+                  "metadata",
+                  "native_source",
+                  "managed_source",
+                  "third_party",
+                  "tooling",
+                  "content",
+                  "documentation"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "signature": { "type": "null" }
+  }
+}

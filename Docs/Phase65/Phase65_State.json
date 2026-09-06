@@ -8,9 +8,9 @@
   "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase65/P65.0_Release_Engineering_Architecture.md",
-    "version": 1,
-    "sha256": "2e60e4c29ef81846aba5259b6eb2787ce6835aeacdafd36b6d346d3f09e0a18a",
-    "revision_reason": "initial architecture freeze"
+    "version": 2,
+    "sha256": "60465b7080f71ae8323238ce9eb77735050ff5ceb452ad2a8be46bb547e6691a",
+    "revision_reason": "发布安全审计发现当前 Wasmtime 性能 DLL 内嵌本机用户路径；v2 改为 commit-owned allowlist 的 thin source profile，禁止混装 ignored 二进制，离线 profile 等待中性重建与二进制隐私 Gate。"
   },
   "documents": {
     "plan": "Docs/Phase65/P65.0_Implementation_Plan.md",
@@ -81,6 +81,19 @@
       "resolution_evidence": "",
       "target_phase": null,
       "transfer_reason": ""
+    },
+    {
+      "id": "P65-D04-PublicBinaryPrivacy",
+      "severity": "Important",
+      "found_batch": "P65.A",
+      "scope": "公开离线发布包中的 Wasmtime 性能二进制路径脱敏与依赖 provenance",
+      "evidence": "P65.A 分发审计：当前 v45.0.0-avidscript.2 DLL 的二进制字符串包含本机用户/Cargo 构建路径；managed receipt 只证明内容身份，不证明隐私安全。",
+      "deferral_reason": "thin source profile 可安全交付，但 offline binary profile 必须在中性根重建并通过字节扫描后才能启用。",
+      "remediation": "从锁定 commit/patch 在中性 CI 路径重建，完整 remap source/Cargo/temp 路径，复核许可证与 receipt，并对所有二进制执行用户名/home/build-root 扫描。",
+      "status": "Open",
+      "resolution_evidence": "",
+      "target_phase": null,
+      "transfer_reason": ""
     }
   ],
   "review": {
@@ -135,6 +148,6 @@
     }
   ],
   "next_action": "debt-update -Phase 65 -DebtId P65-D01-AndroidDevice -Status Verified -Evidence <text>",
-  "revision": 4,
-  "updated_at_utc": "2026-09-06T02:39:46.6055449+00:00"
+  "revision": 6,
+  "updated_at_utc": "2026-09-06T03:06:18.6902413+00:00"
 }
