@@ -136,6 +136,11 @@ bool ParseAvidScriptReleaseArguments(
 		{
 			continue;
 		}
+		// Consumed by the engine plugin manager before the commandlet runs.
+		if (ParameterName.Equals(TEXT("disableplugins"), ESearchCase::IgnoreCase))
+		{
+			continue;
+		}
 		const FString* CanonicalName =
 			FindAvidScriptReleaseCanonicalParameter(ParameterName);
 		if (CanonicalName == nullptr)

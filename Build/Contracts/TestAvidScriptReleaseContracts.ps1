@@ -156,6 +156,7 @@ try {
                 'TEXT("AvidScriptTargetPlatform")',
                 'TEXT("avidscriptsuppressgeneratedtypeexecution")',
                 'ParameterName.Equals(TEXT("run"), ESearchCase::IgnoreCase)',
+                'ParameterName.Equals(TEXT("disableplugins"), ESearchCase::IgnoreCase)',
                 'TEXT("AvidScriptRelease")',
                 'TEXT("argument_missing")',
                 'TEXT("argument_unknown")',
