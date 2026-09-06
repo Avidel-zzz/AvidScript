@@ -33,7 +33,7 @@ $Root = Join-Path `
     ([System.IO.Path]::GetTempPath()) `
     ("AvidScriptReleaseContract_$PID`_$([Guid]::NewGuid().ToString('N'))")
 $Passed = 0
-$Total = 6
+$Total = 7
 $Failure = $null
 
 function Invoke-ReleaseContractTest {
@@ -124,6 +124,7 @@ try {
             'BindingPackagePath',
             'Configuration',
             'CSharpProjectPath',
+            'DisablePlugins',
             'DotNetPath',
             'EngineRoot',
             'GeneratedTypeManifestPath',
@@ -175,6 +176,7 @@ try {
                 -BindingPackagePath 'C:\Project\Saved\Bindings\package.json' `
                 -RuntimeBindingPackagePath 'C:\Project\Saved\Bindings\runtime.json' `
                 -GeneratedTypeManifestPath 'C:\Project\Saved\Generated\types.json' `
+                -DisablePlugins @('Puerts', 'Optional_Plugin2') `
                 -AbsLog 'C:\Project\Saved\Logs\release.log')
         foreach ($ExpectedArgument in @(
                 '-run=AvidScriptRelease',
@@ -182,6 +184,7 @@ try {
                 '-ArtifactStem=contract_artifact',
                 '-AvidScriptTargetPlatform=Android',
                 '-GeneratedTypeManifestPath=C:\Project\Saved\Generated\types.json',
+                '-DisablePlugins=Puerts,Optional_Plugin2',
                 '-AvidScriptSuppressGeneratedTypeExecution',
                 '-unattended',
                 '-nullrhi')) {
@@ -210,6 +213,25 @@ try {
                     $BuildInvokerSource.Contains($RequiredBuildToken) -or
                     $BuildPipelineSource.Contains($RequiredBuildToken))) {
                 throw "Generated Type release plumbing is missing: $RequiredBuildToken"
+            }
+        }
+    }
+
+    Invoke-ReleaseContractTest -Name 'disabled plugin selection validation' -Body {
+        $Parsed = @(ConvertFrom-AvidScriptReleasePluginSelection 'Puerts,Optional_Plugin2')
+        if (($Parsed -join '|') -cne 'Puerts|Optional_Plugin2') {
+            throw 'Valid disabled plugin selection lost order or case.'
+        }
+        foreach ($Invalid in @('Puerts,puerts', 'Puerts;echo', 'Puerts,,Other')) {
+            $Rejected = $false
+            try {
+                ConvertFrom-AvidScriptReleasePluginSelection $Invalid | Out-Null
+            }
+            catch {
+                $Rejected = [string]$_.Exception.Data['category'] -ceq 'disable_plugins_invalid'
+            }
+            if (-not $Rejected) {
+                throw "Invalid disabled plugin selection was accepted: $Invalid"
             }
         }
     }

@@ -11,7 +11,7 @@ $ReportSchema = Join-Path $BuildRoot 'ReleaseEngineering/AvidScriptPlatformRelea
 $Root = Join-Path 'C:\tmp\AvidScript\P65PlatformGateContracts' (
     "$PID-$([guid]::NewGuid().ToString('N'))")
 $Passed = 0
-$Total = 7
+$Total = 8
 
 function Invoke-PlatformGateContract {
     param(
@@ -189,6 +189,36 @@ try {
         }
         if (-not $Rejected) {
             throw 'multiple JSON lines were accepted from a child process.'
+        }
+    }
+
+    Invoke-PlatformGateContract 'empty optional paths and child stderr diagnostics' {
+        $StepSource = [System.IO.File]::ReadAllText($StepScript)
+        foreach ($RequiredToken in @(
+                "if (-not [string]::IsNullOrWhiteSpace(`$OptionalPath.Value))",
+                "`$Parameters[`$OptionalPath.Name] = `$OptionalPath.Value")) {
+            if (-not $StepSource.Contains($RequiredToken)) {
+                throw "Win64 step does not omit empty optional paths: $RequiredToken"
+            }
+        }
+        $ChildPath = Join-Path $Root 'stderr-only-child.ps1'
+        [System.IO.File]::WriteAllText(
+            $ChildPath,
+            "[Console]::Error.WriteLine('fixture-child-error')`nexit 1`n",
+            [System.Text.UTF8Encoding]::new($false))
+        $Rejected = $false
+        try {
+            Invoke-AvidScriptPlatformReleaseScriptJson `
+                -ScriptPath $ChildPath `
+                -WorkingDirectory $Root `
+                -TimeoutSeconds 10 | Out-Null
+        }
+        catch {
+            $Rejected = [string]$_.Exception.Data['category'] -ceq 'child_output_invalid' -and
+                $_.Exception.Message.Contains('fixture-child-error')
+        }
+        if (-not $Rejected) {
+            throw 'stderr-only child failure was not preserved by the Gate.'
         }
     }
 

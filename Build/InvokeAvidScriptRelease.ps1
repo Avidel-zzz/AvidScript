@@ -9,6 +9,7 @@ param(
     [string]$BindingPackagePath = '',
     [string]$RuntimeBindingPackagePath = '',
     [string]$GeneratedTypeManifestPath = '',
+    [string]$DisablePlugins = '',
     [ValidateSet('Development', 'Shipping')][string]$Configuration = 'Development',
     [ValidateSet('Win64', 'Android')][string]$TargetPlatform = 'Win64',
     [string]$EngineRoot = 'C:\UnrealEngine'
@@ -29,6 +30,41 @@ function Throw-AvidScriptReleaseError {
     $Exception = [System.InvalidOperationException]::new($Message)
     $Exception.Data['category'] = $Category
     throw $Exception
+}
+
+function ConvertFrom-AvidScriptReleasePluginSelection {
+    param([AllowEmptyString()][string]$Value = '')
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return [string[]]@()
+    }
+    $Plugins = @($Value.Split(','))
+    Assert-AvidScriptReleaseDisabledPlugins $Plugins
+    return [string[]]$Plugins
+}
+
+function Assert-AvidScriptReleaseDisabledPlugins {
+    param([string[]]$Plugins = @())
+
+    if ($null -eq $Plugins) {
+        Throw-AvidScriptReleaseError `
+            -Category 'disable_plugins_invalid' `
+            -Message 'DisablePlugins must not be null.'
+    }
+    $Seen = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($Plugin in $Plugins) {
+        if ($Plugin -cnotmatch '\A[A-Za-z][A-Za-z0-9_]*\z') {
+            Throw-AvidScriptReleaseError `
+                -Category 'disable_plugins_invalid' `
+                -Message "DisablePlugins contains an invalid value: '$Plugin'."
+        }
+        if (-not $Seen.Add($Plugin)) {
+            Throw-AvidScriptReleaseError `
+                -Category 'disable_plugins_invalid' `
+                -Message "DisablePlugins contains a case-insensitive duplicate: '$Plugin'."
+        }
+    }
 }
 
 function Test-AvidScriptReleasePathUnderRoot {
@@ -189,7 +225,8 @@ function New-AvidScriptReleaseCommandletArguments {
         [Parameter(Mandatory = $true)][string]$AbsLog,
         [string]$BindingPackagePath = '',
         [string]$RuntimeBindingPackagePath = '',
-        [string]$GeneratedTypeManifestPath = ''
+        [string]$GeneratedTypeManifestPath = '',
+        [string[]]$DisablePlugins = @()
     )
 
     $Arguments = [System.Collections.Generic.List[string]]::new()
@@ -212,6 +249,9 @@ function New-AvidScriptReleaseCommandletArguments {
     }
     if (-not [string]::IsNullOrWhiteSpace($GeneratedTypeManifestPath)) {
         $Arguments.Add("-GeneratedTypeManifestPath=$GeneratedTypeManifestPath")
+    }
+    if ($DisablePlugins.Count -gt 0) {
+        $Arguments.Add("-DisablePlugins=$($DisablePlugins -join ',')")
     }
     foreach ($Argument in @(
             "-abslog=$AbsLog",
@@ -285,6 +325,7 @@ function Invoke-AvidScriptRelease {
         [string]$BindingPackagePath,
         [string]$RuntimeBindingPackagePath,
         [string]$GeneratedTypeManifestPath,
+        [string[]]$DisablePlugins = @(),
         [ValidateSet('Development', 'Shipping')]
         [Parameter(Mandatory = $true)][string]$Configuration,
         [ValidateSet('Win64', 'Android')]
@@ -302,6 +343,7 @@ function Invoke-AvidScriptRelease {
             -Category 'artifact_stem_invalid' `
             -Message 'ArtifactStem does not match the release command schema.'
     }
+    Assert-AvidScriptReleaseDisabledPlugins $DisablePlugins
 
     $ProjectRoot = Resolve-AvidScriptReleaseProjectPath `
         -Path $AvidScriptReleaseProjectRoot `
@@ -452,6 +494,7 @@ function Invoke-AvidScriptRelease {
         -BindingPackagePath $NormalizedBindingPackagePath `
         -RuntimeBindingPackagePath $NormalizedRuntimeBindingPackagePath `
         -GeneratedTypeManifestPath $NormalizedGeneratedTypeManifestPath `
+        -DisablePlugins $DisablePlugins `
         -AbsLog $AbsLog
     $EditorResult = Invoke-AvidScriptReleaseProcess `
         -Executable $EditorCmdPath `
@@ -519,6 +562,7 @@ function Invoke-AvidScriptRelease {
         runtime_manifest_path = $RuntimeManifestPath
         precompiled_artifact_path = $PrecompiledArtifactPath
         generated_type_manifest_path = $NormalizedGeneratedTypeManifestPath
+        disable_plugins = @($DisablePlugins)
         package_root = [string]$Package.PackageRoot
         descriptor_path = [string]$Package.DescriptorPath
         catalog_path = [string]$Package.CatalogPath
@@ -532,6 +576,7 @@ if ($MyInvocation.InvocationName -eq '.') {
 }
 
 try {
+    $NormalizedDisablePlugins = ConvertFrom-AvidScriptReleasePluginSelection $DisablePlugins
     $Summary = Invoke-AvidScriptRelease `
         -SourcePath $SourcePath `
         -CSharpProjectPath $CSharpProjectPath `
@@ -542,6 +587,7 @@ try {
         -BindingPackagePath $BindingPackagePath `
         -RuntimeBindingPackagePath $RuntimeBindingPackagePath `
         -GeneratedTypeManifestPath $GeneratedTypeManifestPath `
+        -DisablePlugins $NormalizedDisablePlugins `
         -Configuration $Configuration `
         -TargetPlatform $TargetPlatform `
         -EngineRoot $EngineRoot

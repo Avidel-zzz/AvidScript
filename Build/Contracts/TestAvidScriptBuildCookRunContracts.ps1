@@ -360,6 +360,14 @@ try {
                 '-skipbuildeditor')) {
             Assert-BuildCookRunContract ($Observed.Arguments -ccontains $Expected) "Missing UAT argument: $Expected"
         }
+        $ReleaseArguments = @(New-AvidScriptBuildCookRunReleaseArguments `
+                -ReleaseScriptPath fixture -SourcePath fixture -CSharpProjectPath fixture `
+                -ModuleId fixture -ArtifactStem fixture -OutputRoot fixture -DotNetPath fixture `
+                -Configuration Shipping -EngineRoot fixture -DisablePlugins $Disabled)
+        $DisableIndex = [array]::IndexOf($ReleaseArguments, '-DisablePlugins')
+        Assert-BuildCookRunContract ($DisableIndex -ge 0 -and
+            $ReleaseArguments[$DisableIndex + 1] -ceq 'Puerts,Optional_Plugin2') `
+            'Disabled plugins did not reach the Release child as one validated CSV argument.'
         foreach ($Prefix in @('-map=', '-ubtargs=', '-AdditionalCookerOptions=')) {
             Assert-BuildCookRunContract (@($Observed.Arguments | Where-Object { $_.StartsWith($Prefix) }).Count -eq 1) `
                 "Expected exactly one $Prefix argument."

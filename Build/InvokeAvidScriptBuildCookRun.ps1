@@ -436,7 +436,8 @@ function New-AvidScriptBuildCookRunReleaseArguments {
         [string]$RuntimeBindingPackagePath = '',
         [string]$GeneratedTypeManifestPath = '',
         [Parameter(Mandatory = $true)][string]$Configuration,
-        [Parameter(Mandatory = $true)][string]$EngineRoot
+        [Parameter(Mandatory = $true)][string]$EngineRoot,
+        [string[]]$DisablePlugins = @()
     )
 
     $Arguments = [System.Collections.Generic.List[string]]::new()
@@ -473,6 +474,10 @@ function New-AvidScriptBuildCookRunReleaseArguments {
         $Arguments.Add('-GeneratedTypeManifestPath')
         $Arguments.Add($GeneratedTypeManifestPath)
     }
+    if ($DisablePlugins.Count -gt 0) {
+        $Arguments.Add('-DisablePlugins')
+        $Arguments.Add(($DisablePlugins -join ','))
+    }
     foreach ($Argument in @(
             '-Configuration',
             $Configuration,
@@ -496,7 +501,8 @@ function Invoke-AvidScriptBuildCookRunReleaseStep {
         [string]$BindingPackagePath = '',
         [string]$RuntimeBindingPackagePath = '',
         [string]$GeneratedTypeManifestPath = '',
-        [Parameter(Mandatory = $true)][string]$Configuration
+        [Parameter(Mandatory = $true)][string]$Configuration,
+        [string[]]$DisablePlugins = @()
     )
 
     $ReleaseScriptPath = Join-Path `
@@ -522,7 +528,8 @@ function Invoke-AvidScriptBuildCookRunReleaseStep {
         -RuntimeBindingPackagePath $RuntimeBindingPackagePath `
         -GeneratedTypeManifestPath $GeneratedTypeManifestPath `
         -Configuration $Configuration `
-        -EngineRoot $EngineContext.EngineRoot
+        -EngineRoot $EngineContext.EngineRoot `
+        -DisablePlugins $DisablePlugins
     $ProcessResult = Invoke-AvidScriptBuildCookRunProcess `
         -Executable $PowerShellPath `
         -Arguments $Arguments `
@@ -1047,7 +1054,8 @@ function Invoke-AvidScriptBuildCookRun {
         -BindingPackagePath $BindingPackagePath `
         -RuntimeBindingPackagePath $RuntimeBindingPackagePath `
         -GeneratedTypeManifestPath $GeneratedTypeManifestPath `
-        -Configuration $Configuration
+        -Configuration $Configuration `
+        -DisablePlugins $DisablePlugins
 
     $script:AvidScriptBuildCookRunStep = 'uat'
     $UatResult = Invoke-AvidScriptBuildCookRunUatStep `

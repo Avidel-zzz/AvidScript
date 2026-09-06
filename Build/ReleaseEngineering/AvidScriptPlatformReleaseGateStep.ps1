@@ -20,9 +20,6 @@ switch ($Step) {
             ArtifactStem = [string]$Input.artifact_stem
             OutputRoot = [string]$Input.output_root
             DotNetPath = [string]$Input.dotnet_path
-            BindingPackagePath = [string]$Input.binding_package_path
-            RuntimeBindingPackagePath = [string]$Input.runtime_binding_package_path
-            GeneratedTypeManifestPath = [string]$Input.generated_type_manifest_path
             Configuration = [string]$Input.configuration
             ArchiveRoot = [string]$Input.archive_root
             PackagedOracleMode = [string]$Input.packaged_oracle_mode
@@ -30,6 +27,14 @@ switch ($Step) {
             EnablePlugins = @($Input.enable_plugins)
             DisablePlugins = @($Input.disable_plugins)
             EngineRoot = [string]$Input.engine_root
+        }
+        foreach ($OptionalPath in @(
+                @{ Name = 'BindingPackagePath'; Value = [string]$Input.binding_package_path },
+                @{ Name = 'RuntimeBindingPackagePath'; Value = [string]$Input.runtime_binding_package_path },
+                @{ Name = 'GeneratedTypeManifestPath'; Value = [string]$Input.generated_type_manifest_path })) {
+            if (-not [string]::IsNullOrWhiteSpace($OptionalPath.Value)) {
+                $Parameters[$OptionalPath.Name] = $OptionalPath.Value
+            }
         }
         & (Join-Path $BuildRoot 'InvokeAvidScriptBuildCookRun.ps1') @Parameters
     }

@@ -157,10 +157,15 @@ function Get-AvidScriptPlatformReleasePlan {
 
 function ConvertFrom-AvidScriptPlatformReleaseChildJson {
     param(
-        [Parameter(Mandatory = $true)][string]$Text,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text,
         [Parameter(Mandatory = $true)][string]$Label
     )
 
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        Throw-AvidScriptPlatformReleaseGateError `
+            'child_output_invalid' `
+            "$Label did not emit JSON."
+    }
     $Lines = @($Text -split '\r?\n' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     if ($Lines.Count -ne 1) {
         Throw-AvidScriptPlatformReleaseGateError 'child_output_invalid' "$Label did not emit exactly one JSON line."
@@ -187,6 +192,19 @@ function Invoke-AvidScriptPlatformReleaseScriptJson {
         -Arguments (@('-NoLogo', '-NoProfile', '-NonInteractive', '-File', $ScriptPath) + $Arguments) `
         -WorkingDirectory $WorkingDirectory `
         -TimeoutSeconds $TimeoutSeconds
+    if ([string]::IsNullOrWhiteSpace([string]$Process.stdout)) {
+        $Detail = ([string]$Process.stderr).Trim()
+        if ($Detail.Length -gt 2000) {
+            $Detail = $Detail.Substring(0, 2000)
+        }
+        $Message = if ([string]::IsNullOrWhiteSpace($Detail)) {
+            'Platform release child did not emit JSON.'
+        }
+        else {
+            "Platform release child did not emit JSON. stderr: $Detail"
+        }
+        Throw-AvidScriptPlatformReleaseGateError 'child_output_invalid' $Message
+    }
     $Payload = ConvertFrom-AvidScriptPlatformReleaseChildJson $Process.stdout 'platform release child'
     return [pscustomobject]@{
         ExitCode = [int]$Process.exit_code
