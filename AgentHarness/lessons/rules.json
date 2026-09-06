@@ -363,9 +363,9 @@
       "id": "architecture-allowlists-move-with-reviewed-surfaces",
       "tags": ["architecture", "gate", "allowlist", "hash"],
       "summary": "严格架构 allowlist 若不随已审阅公共表面同步，会把历史能力长期误报为当前提交回归。",
-      "prevention": "每个改变 static host、generated facade、registry 或 reviewed helper closure 的批次都在同批更新精确 multiset、注册输入和 canonical hash；提交后必须在 detached clean tree 跑 Gate，并用上一基线对照区分历史漂移与新增违规。",
+      "prevention": "每个改变 static host、generated facade、registry 或 reviewed helper closure 的批次都在同批更新精确 multiset、注册输入和 canonical hash；架构 Gate 只在提交后的 detached clean candidate 运行，主工作树即使只有 protected dirty 也不得启动；再用上一基线对照区分历史漂移与新增违规。",
       "source": "observed:2026-08-31-P60.B1G",
-      "last_observed": "2026-08-31 P60.B1G (b280553 与 f8a4c7d 同报 20 类历史差异；刷新 checker 后工作树仅剩 clean-tree 拒绝)"
+      "last_observed": "2026-09-07 P65.D9 在含 protected dirty 的主工作树提前运行架构 Gate，被 clean-tree evidence 合同拒绝；产品代码、增量构建与 14/14 Wasmtime Automation 均未失败"
     },
     {
       "id": "dotnet-shared-obj-test-runners-run-serially",
