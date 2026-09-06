@@ -576,7 +576,8 @@ if ($MyInvocation.InvocationName -eq '.') {
 }
 
 try {
-    $NormalizedDisablePlugins = ConvertFrom-AvidScriptReleasePluginSelection $DisablePlugins
+    [string[]]$NormalizedDisablePlugins = @(
+        ConvertFrom-AvidScriptReleasePluginSelection $DisablePlugins)
     $Summary = Invoke-AvidScriptRelease `
         -SourcePath $SourcePath `
         -CSharpProjectPath $CSharpProjectPath `

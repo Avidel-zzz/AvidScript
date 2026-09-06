@@ -219,6 +219,13 @@ try {
     }
 
     Invoke-ReleaseContractTest -Name 'disabled plugin selection validation' -Body {
+        [string[]]$ParsedEmpty = @(
+            ConvertFrom-AvidScriptReleasePluginSelection '')
+        if ($null -eq $ParsedEmpty -or $ParsedEmpty.Count -ne 0 -or
+            -not $RunnerSource.Contains('[string[]]$NormalizedDisablePlugins = @(')) {
+            throw 'Empty disabled plugin selection must remain a non-null string array at the release boundary.'
+        }
+        Assert-AvidScriptReleaseDisabledPlugins $ParsedEmpty
         $Parsed = @(ConvertFrom-AvidScriptReleasePluginSelection 'Puerts,Optional_Plugin2')
         if (($Parsed -join '|') -cne 'Puerts|Optional_Plugin2') {
             throw 'Valid disabled plugin selection lost order or case.'
