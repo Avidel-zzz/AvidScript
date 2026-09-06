@@ -143,7 +143,8 @@ if ([string]::IsNullOrWhiteSpace($CpuModel)) {
 $CandidateIdPayload = [Text.UTF8Encoding]::new($false).GetBytes("$Commit`n$Tree`n$($EditorIdentity.sha256)`n$($PuertsContent.content_sha256)`n")
 $CandidateId = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($CandidateIdPayload)).ToLowerInvariant().Substring(0, 20)
 $Matrices = @(
-    [ordered]@{ id = 'ue_gameplay_crossing'; status = 'ready_after_build'; reason = '候选、Puerts、UE 与 profile 身份已冻结，等待统一构建。' },
+    [ordered]@{ id = 'ue_micro_six_lane'; status = 'ready_after_build'; reason = '六 lane micro profile 与三种 AvidScript binding mode 已冻结，等待统一构建。' },
+    [ordered]@{ id = 'ue_gameplay_six_lane'; status = 'ready_after_build'; reason = 'small/dense gameplay frame 与 data-oriented lane 已冻结，等待统一构建。' },
     [ordered]@{ id = 'identical_wasm_execution'; status = 'ready_after_build'; reason = '同 WASM suite 和 Cranelift/V8 身份已冻结，等待统一构建。' },
     [ordered]@{ id = 'angelscript_same_semantics'; status = 'blocked'; reason = [string]$Protocol.competitors.angelscript.reason }
 )

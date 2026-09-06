@@ -13,9 +13,19 @@
   },
   "tracked_inputs": [
     {
+      "id": "ue_micro_profile",
+      "relative_path": "Benchmarks/PuertsComparison/Profiles/Phase56Micro.formal.json",
+      "sha256": "639d3b9e4c7c762e217cc466b454dee1a1296c3cbef41d20e0927d1a3199b8b2"
+    },
+    {
       "id": "ue_gameplay_profile",
-      "relative_path": "Benchmarks/PuertsComparison/Config/BenchmarkProfile.json",
-      "sha256": "6ab8c859ab0560dd9a0fff130873111f0f4f4224d979d3b70e612337d6343705"
+      "relative_path": "Benchmarks/PuertsComparison/Profiles/Phase56Gameplay.formal.json",
+      "sha256": "40dc9844991ea82a933d23361e9428f9a7fa7806a646c390de182b263558c743"
+    },
+    {
+      "id": "ue_six_lane_request",
+      "relative_path": "Benchmarks/PuertsComparison/Profiles/Phase54SixLaneRequest.template.json",
+      "sha256": "635407bfb3f9b47897d825cbc53ca2c776efb3b16742c25d11a30fdb845721cf"
     },
     {
       "id": "identical_wasm_profile",
@@ -63,14 +73,24 @@
   },
   "matrices": [
     {
-      "id": "ue_gameplay_crossing",
-      "runner": "Benchmarks/PuertsComparison/Scripts/Invoke-PuertsBenchmarkProcesses.ps1",
-      "profile_input_id": "ue_gameplay_profile",
+      "id": "ue_micro_six_lane",
+      "runner": "Benchmarks/PuertsComparison/AvidScriptPerfHarness/Tools/Invoke-Phase54GameplayBenchmark.ps1",
+      "profile_input_id": "ue_micro_profile",
       "required": true,
       "process_runs": 5,
       "warmup_samples": 5,
       "timed_samples": 30,
       "workload_count": 10
+    },
+    {
+      "id": "ue_gameplay_six_lane",
+      "runner": "Benchmarks/PuertsComparison/AvidScriptPerfHarness/Tools/Invoke-Phase54GameplayBenchmark.ps1",
+      "profile_input_id": "ue_gameplay_profile",
+      "required": true,
+      "process_runs": 5,
+      "warmup_samples": 5,
+      "timed_samples": 30,
+      "workload_count": 2
     },
     {
       "id": "identical_wasm_execution",

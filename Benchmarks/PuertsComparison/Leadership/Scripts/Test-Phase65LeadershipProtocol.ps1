@@ -43,12 +43,20 @@ foreach ($Input in @($Protocol.tracked_inputs)) {
     Assert-True ((Get-NormalizedTextSha256 -Path $Path) -ceq [string]$Input.sha256) "tracked input identity drifted: $($Input.id)"
 }
 
-$GameplayProfile = Get-Content -LiteralPath (Join-Path $ComparisonRoot 'Config/BenchmarkProfile.json') -Raw | ConvertFrom-Json -Depth 64
-$ExpectedGameplayLanes = @('native_cpp', 'puerts_v8_reflection', 'puerts_v8_static', 'avidscript_wasmtime_adaptive_semantic', 'avidscript_wasmtime_native_direct')
-$ExpectedGameplayWorkloads = @('callback_empty', 'callback_tick', 'pure_integer', 'scalar_noop', 'scalar_add_int32', 'property_get_set', 'vector_value', 'vector_ref_out', 'object_roundtrip', 'batch_scalar')
-Assert-True ([string]::Join('|', @($GameplayProfile.lanes)) -ceq [string]::Join('|', $ExpectedGameplayLanes)) 'five-lane gameplay order drifted'
+$ProfilesRoot = Join-Path $ComparisonRoot 'Profiles'
+$MicroProfile = Get-Content -LiteralPath (Join-Path $ProfilesRoot 'Phase56Micro.formal.json') -Raw | ConvertFrom-Json -Depth 64
+$GameplayProfile = Get-Content -LiteralPath (Join-Path $ProfilesRoot 'Phase56Gameplay.formal.json') -Raw | ConvertFrom-Json -Depth 64
+$ExpectedSixLanes = @('native_cpp', 'puerts_v8_reflection', 'puerts_v8_static', 'avidscript_wasmtime_adaptive_semantic', 'avidscript_wasmtime_generated_s1', 'avidscript_wasmtime_data_oriented')
+$ExpectedMicroWorkloads = @('callback_empty', 'callback_tick', 'pure_integer', 'scalar_noop', 'scalar_add_int32', 'property_get_set', 'vector_value', 'vector_ref_out', 'object_roundtrip', 'batch_scalar')
+$ExpectedGameplayWorkloads = @('gameplay_frame_small', 'gameplay_frame_dense')
+foreach ($Profile in @($MicroProfile, $GameplayProfile)) {
+    Assert-True ([string]::Join('|', @($Profile.lanes)) -ceq [string]::Join('|', $ExpectedSixLanes)) "six-lane order drifted: $($Profile.profile_id)"
+    Assert-True ([int]$Profile.process_runs -eq 5 -and [int]$Profile.warmup_samples -eq 5 -and [int]$Profile.timed_samples -eq 30) "sampling contract drifted: $($Profile.profile_id)"
+}
+Assert-True ([string]::Join('|', @($MicroProfile.workloads)) -ceq [string]::Join('|', $ExpectedMicroWorkloads)) 'micro workload order drifted'
 Assert-True ([string]::Join('|', @($GameplayProfile.workloads)) -ceq [string]::Join('|', $ExpectedGameplayWorkloads)) 'gameplay workload order drifted'
-Assert-True ([int]$GameplayProfile.process_runs -eq 5 -and [int]$GameplayProfile.warmup_samples -eq 5 -and [int]$GameplayProfile.timed_samples -eq 30) 'gameplay sampling contract drifted'
+Assert-True ([double]$GameplayProfile.gates.semantic_vs_puerts_reflection.maximum -eq 0.8) 'semantic leadership gate drifted'
+Assert-True ([double]$GameplayProfile.gates.small_vs_best_puerts.maximum -eq 0.7 -and [double]$GameplayProfile.gates.dense_vs_best_puerts.maximum -eq 0.7) 'gameplay leadership gates drifted'
 
 $ControlledRoot = Join-Path $ComparisonRoot 'ControlledRuntime'
 $SuiteProfile = Get-Content -LiteralPath (Join-Path $ControlledRoot 'Config/ControlledRuntimeSuiteProfile.json') -Raw | ConvertFrom-Json -Depth 64
@@ -68,7 +76,7 @@ Assert-True ([string]$WasmtimeLock.upstream.version -ceq 'v45.0.0') 'Wasmtime ve
 Assert-True ([string]$WasmtimeLock.compiler_profile.id -ceq [string]$Protocol.competitors.avidscript.compiler_profile) 'Wasmtime compiler profile differs from protocol'
 
 $MatrixIds = @($Protocol.matrices | ForEach-Object { [string]$_.id })
-Assert-True ([string]::Join('|', $MatrixIds) -ceq 'ue_gameplay_crossing|identical_wasm_execution|angelscript_same_semantics') 'required matrix order drifted'
+Assert-True ([string]::Join('|', $MatrixIds) -ceq 'ue_micro_six_lane|ue_gameplay_six_lane|identical_wasm_execution|angelscript_same_semantics') 'required matrix order drifted'
 Assert-True ([string]$Protocol.competitors.angelscript.availability -ceq 'not_frozen') 'AngelScript must remain explicitly blocked until its dependency and adapter are frozen'
 
-Write-Output 'Phase 65 leadership protocol contracts passed: schema=2 scripts=1 tracked_inputs=5 gameplay_lanes=5 gameplay_workloads=10 identical_wasm_kernels=12 competitors=4 matrices=3 claims_fail_closed=1'
+Write-Output 'Phase 65 leadership protocol contracts passed: schema=2 scripts=1 tracked_inputs=7 ue_lanes=6 micro_workloads=10 gameplay_workloads=2 identical_wasm_kernels=12 competitors=4 matrices=4 claims_fail_closed=1'
