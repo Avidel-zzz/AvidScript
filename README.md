@@ -29,7 +29,7 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 ## 现在可以做什么
 
 更新于 **2026-09-06**。已跑通 **C# → WASM → UE 事件与 API → Win64 打包运行**，
-可开始尝试小型玩法 Demo，不需要 `.avid`。**P64 正式 Gate 已完成，P65 正在推进发布工程；
+可开始尝试小型玩法 Demo，不需要 `.avid`。**P64 正式 Gate 与 P65.C Shipping 发布 Gate 已完成；
 当前仍不是完整 UE/.NET 替代层。**
 
 | 能力 | 已实现内容 |
@@ -41,7 +41,7 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 | 异步与委托 | 受控 `async/await`、Delay/NextTick、异步加载、Latent、AsyncAction；单播/多播、受支持签名的 `return/ref/out`、独立 UObject 订阅与回调来源查询 |
 | Blueprint 与联机 | callable/event 双向交互；Server/Client/NetMulticast RPC、属性复制与 RepNotify，dedicated/listen 多进程验证 |
 | 热重载与生命周期 | 方法体替换、持久字段迁移、失败候选回滚；存取可穿插重载，退出时取消异步并解绑事件；ObjectHandle 与 Session 隔离 |
-| 构建与发布 | Wasmtime 45 Win64 JIT/AOT、WAMR 兼容后端；内容寻址模块、Generated Type 预编译、Development/Shipping BuildCookRun；未生成项目类型的 clean checkout 可直接编译，部分生成事务 fail-closed；Android arm64 交叉 AOT |
+| 构建与发布 | Wasmtime 45 Win64 JIT/AOT、WAMR 兼容后端；内容寻址模块、Generated Type 配置隔离、Development/Shipping BuildCookRun；可重复 source package、原子安装/修复、兼容诊断与分层 Release Gate；Android arm64 交叉 AOT |
 | IDE 与诊断 | 增量缓存、persistent Worker、`.slnx`/WASI 工作区；源码映射、跨层栈、受控断点/步进与只读变量；typed Host 错误保留具体分类、原因和 import 身份；UE Trace 和 Profiler 导出 |
 
 直接看 C# 样例：[收集玩法](Samples/CSharp/PickupRush/README.md) ·
@@ -154,7 +154,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 - **玩法与平台**：UI 包使用独立验证插件和隔离启动配置，Development/Shipping 均通过跨进程自动存取；Development 人工界面、按钮和同一 UserRoot 新进程读档均反馈无问题。Shipping 人工视觉按用户要求不阻塞当前推进，明确转入发布候选验收，不能视为通过。任意损坏存档不在现有保证内；Development 包内一小时切图与当前候选 2/2 多进程网络拓扑通过，UI 重载另有 20 轮有界证据，但不宣称一小时网络/重载长稳；Android UBT/APK/真机及 iOS 仍未验收。
 - **诊断与性能**：typed Host 拒绝已在 Wasmtime 保留具体 category/details/import，WAMR semantic/dynamic 路径同样保留分类；尚无完整 C# 异常系统。纯执行 P50/P95 领先门禁未关闭，也未完成同口径 UnLua/AngelScript 矩阵。
 
-P65 正在推进发布工程：可重复发布包、原子安装/升级、兼容诊断、Android Gate 和当前版本性能领导力。
+P65.A-C 已完成发布工程主链：可重复发布包、原子安装/升级、兼容诊断与分层平台 Gate；下一批进入性能领导力。
 Shipping 人工视觉与移动设备证据仍作为独立发布候选 Gate，不以自动报告或阶段编号替代。
 
 P65.A 已完成：thin source 发布器与原子安装器当前通过 **24/24** 轻量合同及真实 commit-based 发布/安装
@@ -175,10 +175,11 @@ P65.C1 已把 Generated Type 与模块包生产器身份纳入同一个 `release
 lock、Git tree、payload inventory 一同参与 `release_id`。项目实际 `package_id`、模块 catalog 与平台 receipt
 将在分层 Release Gate 中绑定，避免把项目私有产物写死到通用插件发布包。
 
-P65.C2 已提供统一平台 Release Gate：固定报告 release、项目产物、Win64 Shipping、Android toolchain/arm64/
-APK/device 与人工体验 8 层独立状态。当前真实 `Inspect` 为 **2 passed / 0 failed / 1 blocked / 5 not_run**；
-Android 仍为 3/19，未执行层保持透明，Gate 合同 **7/7** 通过。`Execute` 可仅在当前 UBT/Cooker 子进程
-禁用冲突的可选插件，不改写项目配置。
+P65.C 已提供统一平台 Release Gate：固定报告 release、项目产物、Win64 Shipping、Android toolchain/arm64/
+APK/device 与人工体验 8 层独立状态。最终真实 `Execute` 为 **3 passed / 0 failed / 1 blocked / 4 not_run**，
+Win64 Shipping BuildCookRun 与 fresh receipt 通过；Android 仍为 3/19。Release/UBT/Cooker 可按本次运行隔离可选
+插件，Generated Type 使用配置专属 overlay，不改写 `.uproject` 或源码 `current.json`。详见
+[P65.C3 发布 Gate](Docs/Phase65/P65.C3_Win64_Shipping_Release_Gate.md)。
 
 ## 验证
 
