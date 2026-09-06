@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://avidscript.dev/schema/phase65-leadership-protocol-v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "protocol_id",
+    "hash_algorithm",
+    "host",
+    "tracked_inputs",
+    "competitors",
+    "matrices",
+    "gates"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "protocol_id": { "const": "phase65.win64.performance-leadership.v1" },
+    "hash_algorithm": { "const": "normalized_utf8_lf_sha256_v1" },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "architecture", "target", "configuration", "ue_version", "editor_relative_path", "null_rhi"],
+      "properties": {
+        "platform": { "const": "Win64" },
+        "architecture": { "const": "x86_64" },
+        "target": { "type": "string", "minLength": 1 },
+        "configuration": { "const": "Development" },
+        "ue_version": { "const": "5.8.0" },
+        "editor_relative_path": { "const": "Engine/Binaries/Win64/UnrealEditor-Cmd.exe" },
+        "null_rhi": { "const": true }
+      }
+    },
+    "tracked_inputs": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": { "$ref": "#/$defs/trackedInput" }
+    },
+    "competitors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["avidscript", "puerts", "angelscript", "native"],
+      "properties": {
+        "avidscript": { "$ref": "#/$defs/namedObject" },
+        "puerts": { "$ref": "#/$defs/namedObject" },
+        "angelscript": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["availability", "required_for_complete_claim", "reason"],
+          "properties": {
+            "availability": { "enum": ["not_frozen", "frozen"] },
+            "required_for_complete_claim": { "const": true },
+            "reason": { "type": "string", "minLength": 1 }
+          }
+        },
+        "native": { "$ref": "#/$defs/namedObject" }
+      }
+    },
+    "matrices": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": { "$ref": "#/$defs/matrix" }
+    },
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["correctness_failures", "fallback_used", "identical_wasm", "ue_adaptive_semantic", "complete_leadership_claim_requires_all_required_matrices"],
+      "properties": {
+        "correctness_failures": { "const": 0 },
+        "fallback_used": { "const": false },
+        "identical_wasm": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["maximum_geometric_mean_ratio", "maximum_mad_geometric_mean_ratio", "minimum_kernel_win_rate"],
+          "properties": {
+            "maximum_geometric_mean_ratio": { "const": 0.95 },
+            "maximum_mad_geometric_mean_ratio": { "const": 1.25 },
+            "minimum_kernel_win_rate": { "const": 0.6 }
+          }
+        },
+        "ue_adaptive_semantic": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["maximum_ratio_to_puerts_reflection"],
+          "properties": {
+            "maximum_ratio_to_puerts_reflection": { "const": 0.8 }
+          }
+        },
+        "complete_leadership_claim_requires_all_required_matrices": { "const": true }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "trackedInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "relative_path", "sha256"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "relative_path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "namedObject": {
+      "type": "object",
+      "minProperties": 2,
+      "additionalProperties": { "type": ["string", "number", "boolean"] }
+    },
+    "matrix": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "runner", "profile_input_id", "required", "process_runs", "warmup_samples", "timed_samples", "workload_count"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "runner": { "type": ["string", "null"] },
+        "profile_input_id": { "type": ["string", "null"] },
+        "required": { "const": true },
+        "process_runs": { "type": "integer", "minimum": 0 },
+        "warmup_samples": { "type": "integer", "minimum": 0 },
+        "timed_samples": { "type": "integer", "minimum": 0 },
+        "workload_count": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

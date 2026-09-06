@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "protocol_id": "phase65.win64.performance-leadership.v1",
+  "hash_algorithm": "normalized_utf8_lf_sha256_v1",
+  "host": {
+    "platform": "Win64",
+    "architecture": "x86_64",
+    "target": "AvidTPSTemplateEditor",
+    "configuration": "Development",
+    "ue_version": "5.8.0",
+    "editor_relative_path": "Engine/Binaries/Win64/UnrealEditor-Cmd.exe",
+    "null_rhi": true
+  },
+  "tracked_inputs": [
+    {
+      "id": "ue_gameplay_profile",
+      "relative_path": "Benchmarks/PuertsComparison/Config/BenchmarkProfile.json",
+      "sha256": "6ab8c859ab0560dd9a0fff130873111f0f4f4224d979d3b70e612337d6343705"
+    },
+    {
+      "id": "identical_wasm_profile",
+      "relative_path": "Benchmarks/PuertsComparison/ControlledRuntime/Config/ControlledRuntimeSuiteProfile.json",
+      "sha256": "bc2b1d07b4d4ddc91e7c9135731bf6370f02193a33d54a5819168f4ee6b728fc"
+    },
+    {
+      "id": "identical_wasm_contract",
+      "relative_path": "Benchmarks/PuertsComparison/ControlledRuntime/Kernel/phase54_suite.contract.json",
+      "sha256": "7338e1cf4078456a9a63b9ddf2b6fabbeb9cd61823b9a37d1cd0bde1653ac94d"
+    },
+    {
+      "id": "puerts_dependency",
+      "relative_path": "Benchmarks/PuertsComparison/Config/PuertsDependency.lock.json",
+      "sha256": "bb873524a5d179b4a486fe407901a0437a4067a4adc7a719d72afadf625d64c0"
+    },
+    {
+      "id": "wasmtime_toolchain",
+      "relative_path": "Source/ThirdParty/Wasmtime/PerformanceToolchain/WasmtimePerformanceToolchain.lock.json",
+      "sha256": "4777318d476a523c39ce875fde7b0130b6e95fafbd0204054c1b1b0183fda01f"
+    }
+  ],
+  "competitors": {
+    "avidscript": {
+      "runtime": "Wasmtime",
+      "runtime_version": "45.0.0",
+      "backend": "Cranelift JIT",
+      "compiler_profile": "cranelift-speed-x86_64-v3-contained-v3"
+    },
+    "puerts": {
+      "source_commit": "1977328c84661024be10a9e73640a74b278a7659",
+      "runtime": "V8",
+      "runtime_version": "9.4.146.24",
+      "backend_sha256": "0ab80673f6bf59cf7f3f80ff17f254975f811813c4637ba2d85d6455fd1e4e24"
+    },
+    "angelscript": {
+      "availability": "not_frozen",
+      "required_for_complete_claim": true,
+      "reason": "尚未建立固定提交、UE5.8 构建身份和同语义 workload adapter。"
+    },
+    "native": {
+      "runtime": "Unreal Engine native C++",
+      "purpose": "定位绝对成本，不作为脚本框架胜负声明。"
+    }
+  },
+  "matrices": [
+    {
+      "id": "ue_gameplay_crossing",
+      "runner": "Benchmarks/PuertsComparison/Scripts/Invoke-PuertsBenchmarkProcesses.ps1",
+      "profile_input_id": "ue_gameplay_profile",
+      "required": true,
+      "process_runs": 5,
+      "warmup_samples": 5,
+      "timed_samples": 30,
+      "workload_count": 10
+    },
+    {
+      "id": "identical_wasm_execution",
+      "runner": "Benchmarks/PuertsComparison/ControlledRuntime/Scripts/Invoke-ControlledRuntimeSuite.ps1",
+      "profile_input_id": "identical_wasm_profile",
+      "required": true,
+      "process_runs": 5,
+      "warmup_samples": 5,
+      "timed_samples": 30,
+      "workload_count": 12
+    },
+    {
+      "id": "angelscript_same_semantics",
+      "runner": null,
+      "profile_input_id": null,
+      "required": true,
+      "process_runs": 0,
+      "warmup_samples": 0,
+      "timed_samples": 0,
+      "workload_count": 0
+    }
+  ],
+  "gates": {
+    "correctness_failures": 0,
+    "fallback_used": false,
+    "identical_wasm": {
+      "maximum_geometric_mean_ratio": 0.95,
+      "maximum_mad_geometric_mean_ratio": 1.25,
+      "minimum_kernel_win_rate": 0.6
+    },
+    "ue_adaptive_semantic": {
+      "maximum_ratio_to_puerts_reflection": 0.8
+    },
+    "complete_leadership_claim_requires_all_required_matrices": true
+  }
+}
