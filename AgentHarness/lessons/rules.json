@@ -720,6 +720,14 @@
       "prevention": "性能与发布取证通过 IS_MONOLITHIC 分流：模块化 Editor 哈希实际模块 DLL，monolithic Game 哈希当前 executable；新增 Runtime plugin 后必须同时编译 Editor 与 Game target，不能用 Editor 构建代替包体兼容性。",
       "source": "Benchmarks/PuertsComparison/AvidScriptPerfHarness/Source/AvidScriptPerfHarness/Private/AvidScriptPerfRunner.cpp",
       "last_observed": "2026-09-07 P65.D10 Harness 首次 Game target 编译在 GetModuleFilename 处失败；改用 monolithic executable identity 后非 Editor Development target 通过"
+    },
+    {
+      "id": "resume-summary-paths-require-index-resolution",
+      "tags": ["workflow", "resume", "paths", "verification"],
+      "summary": "恢复摘要中的脚本路径可能因目录重构或简写而漂移，不能直接作为可执行入口。",
+      "prevention": "恢复后先用 `rg --files` 和精确 `-g` 模式从当前仓库索引解析脚本，再调用验证入口；摘要只用于确定意图和候选名称，不作为文件存在性的证据。",
+      "source": "AgentHarness/policies/repository.md",
+      "last_observed": "2026-09-07 P65.D10 首次补充验证沿用摘要中的 Phase54 契约路径而失败；索引确认真实入口位于 AvidScriptPerfHarness/Tools"
     }
   ]
 }

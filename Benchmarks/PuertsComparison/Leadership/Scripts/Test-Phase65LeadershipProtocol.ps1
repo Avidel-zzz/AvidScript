@@ -9,6 +9,8 @@ $ProtocolPath = Join-Path $LeadershipRoot 'Config/Phase65LeadershipProtocol.json
 $SchemaPath = Join-Path $LeadershipRoot 'Schema/Phase65LeadershipProtocol.schema.json'
 $CandidateSchemaPath = Join-Path $LeadershipRoot 'Schema/Phase65LeadershipCandidate.schema.json'
 $CandidateScriptPath = Join-Path $LeadershipRoot 'Scripts/New-Phase65LeadershipCandidate.ps1'
+$PackagedHostSchemaPath = Join-Path $LeadershipRoot 'Schema/Phase65PackagedBenchmarkHost.schema.json'
+$PackagedHostScriptPath = Join-Path $LeadershipRoot 'Scripts/New-Phase65PackagedBenchmarkHost.ps1'
 
 function Assert-True {
     param([Parameter(Mandatory = $true)][bool]$Condition, [Parameter(Mandatory = $true)][string]$Message)
@@ -34,6 +36,20 @@ $Tokens = $null
 [void][Management.Automation.Language.Parser]::ParseFile($CandidateScriptPath, [ref]$Tokens, [ref]$ParserErrors)
 Assert-True (@($ParserErrors).Count -eq 0) 'leadership candidate freezer has parser errors'
 Assert-True ((Get-Content -LiteralPath $CandidateSchemaPath -Raw) | Test-Json) 'leadership candidate schema is not valid JSON'
+$PackagedHostParserErrors = $null
+$PackagedHostTokens = $null
+[void][Management.Automation.Language.Parser]::ParseFile($PackagedHostScriptPath, [ref]$PackagedHostTokens, [ref]$PackagedHostParserErrors)
+Assert-True (@($PackagedHostParserErrors).Count -eq 0) 'packaged benchmark host producer has parser errors'
+Assert-True ((Get-Content -LiteralPath $PackagedHostSchemaPath -Raw) | Test-Json) 'packaged benchmark host schema is not valid JSON'
+$PackagedHostScriptText = Get-Content -LiteralPath $PackagedHostScriptPath -Raw
+Assert-True ($PackagedHostScriptText.Contains("'-build'") -and
+    $PackagedHostScriptText.Contains("'-cook'") -and
+    $PackagedHostScriptText.Contains("'-stage'") -and
+    $PackagedHostScriptText.Contains("'-pak'") -and
+    $PackagedHostScriptText.Contains('Assert-SidecarBenchmarkProjectProvenance') -and
+    $PackagedHostScriptText.Contains('archive_content_sha256') -and
+    $PackagedHostScriptText.Contains('package_catalog_sha256') -and
+    $PackagedHostScriptText.Contains('executable_sha256')) 'packaged host must freeze BuildCookRun and artifact identities'
 $CandidateScriptText = Get-Content -LiteralPath $CandidateScriptPath -Raw
 Assert-True ($CandidateScriptText.Contains('source did not stabilize after the bounded two-pass preparation')) 'candidate freezer must fail closed after two source-stabilization passes'
 Assert-True ($CandidateScriptText.Contains("'-Profile=`"{0}`"'")) 'candidate freezer must preserve hyphenated profile paths through UE command-line parsing'
