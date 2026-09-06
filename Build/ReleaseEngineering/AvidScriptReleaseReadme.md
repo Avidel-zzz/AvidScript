@@ -9,6 +9,7 @@ UE Runtime 不托管 CLR；Win64 使用 Wasmtime，移动端遵守平台 JIT 限
 - 由 Reflection/Profile 生成 `UFUNCTION`、`UPROPERTY`、Blueprint、网络与常用 UE 类型 facade。
 - C# 定义 Actor、Component、World/GameInstance Subsystem，并生成对应 UE 类型。
 - Win64 Development/Shipping 发布、热重载、UMG/SaveGame、RPC/RepNotify 与多进程网络闭环。
+- `release.json` 同时绑定 Win64/Android 依赖 lock、Generated Type 与模块包生产器身份。
 
 ## 安装
 

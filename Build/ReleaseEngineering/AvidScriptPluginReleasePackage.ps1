@@ -358,6 +358,7 @@ function Get-AvidScriptPluginReleaseId {
         compatibility = $Manifest.compatibility
         targets = @($Manifest.targets)
         contracts = $Manifest.contracts
+        artifact_contracts = @($Manifest.artifact_contracts)
         dependencies = @($Manifest.dependencies)
         payload = [ordered]@{
             root = [string]$Manifest.payload.root
@@ -412,7 +413,7 @@ function Assert-AvidScriptPluginReleaseManifest {
         -Required @(
             'schema_version', 'format', 'release_id', 'version', 'channel', 'profile',
             'publisher', 'source', 'compatibility', 'targets', 'contracts',
-            'dependencies', 'payload', 'signature') `
+            'artifact_contracts', 'dependencies', 'payload', 'signature') `
         -Label 'release manifest'
     if ([int]$Manifest.schema_version -ne 1 -or
         [string]$Manifest.format -cne 'avidscript.plugin.release' -or
@@ -477,6 +478,29 @@ function Assert-AvidScriptPluginReleaseManifest {
         [int]$Manifest.contracts.semantic_schema -ne 20 -or
         [int]$Manifest.contracts.guest_ir_schema -ne 2) {
         Throw-AvidScriptPluginReleaseError 'ASRE1210' 'compatibility_invalid' 'release contract identity drifted.'
+    }
+    $ArtifactContractIds = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::Ordinal)
+    foreach ($ArtifactContract in @($Manifest.artifact_contracts)) {
+        Assert-AvidScriptPluginReleaseObjectShape `
+            -Value $ArtifactContract `
+            -Required @('id', 'producer_path', 'producer_sha256') `
+            -Label 'release artifact contract'
+        if ([string]$ArtifactContract.id -notmatch '^[a-z0-9][a-z0-9._-]{0,63}$' -or
+            -not $ArtifactContractIds.Add([string]$ArtifactContract.id)) {
+            Throw-AvidScriptPluginReleaseError 'ASRE1222' 'artifact_contract_invalid' 'release artifact contract identity is invalid or duplicated.'
+        }
+        Normalize-AvidScriptPluginReleaseRelativePath `
+            ([string]$ArtifactContract.producer_path) `
+            'artifact contract producer path' | Out-Null
+        Assert-AvidScriptPluginReleaseSha256 `
+            ([string]$ArtifactContract.producer_sha256) `
+            'artifact contract producer hash'
+    }
+    foreach ($RequiredId in @('generated-type-package', 'module-release-package')) {
+        if (-not $ArtifactContractIds.Contains($RequiredId)) {
+            Throw-AvidScriptPluginReleaseError 'ASRE1223' 'artifact_contract_invalid' "release artifact contract is missing: $RequiredId"
+        }
     }
     $DependencyIds = [System.Collections.Generic.HashSet[string]]::new(
         [System.StringComparer]::Ordinal)
@@ -569,6 +593,14 @@ function Resolve-AvidScriptPluginReleasePackage {
             Throw-AvidScriptPluginReleaseError 'ASRE1221' 'dependency_invalid' "release dependency identity differs: $($Dependency.id)"
         }
     }
+    foreach ($ArtifactContract in @($Manifest.artifact_contracts)) {
+        $ProducerPath = Join-Path $PayloadRoot ([string]$ArtifactContract.producer_path)
+        if (-not (Test-Path -LiteralPath $ProducerPath -PathType Leaf) -or
+            (Get-AvidScriptPluginReleaseSha256 $ProducerPath) -cne
+            [string]$ArtifactContract.producer_sha256) {
+            Throw-AvidScriptPluginReleaseError 'ASRE1224' 'artifact_contract_invalid' "release artifact producer identity differs: $($ArtifactContract.id)"
+        }
+    }
     return [pscustomobject][ordered]@{
         Root = $PackageRoot
         ManifestPath = $ManifestPath
@@ -612,8 +644,9 @@ function Publish-AvidScriptPluginReleasePackage {
         [Parameter(Mandatory = $true)][string]$Commit,
         [Parameter(Mandatory = $true)][string]$Tree,
         [Parameter(Mandatory = $true)][string]$CommittedAtUtc,
+        [Parameter(Mandatory = $true)][object[]]$ArtifactContracts,
         [Parameter(Mandatory = $true)][object[]]$Dependencies,
-        [string]$PublisherVersion = '65.1.0',
+        [string]$PublisherVersion = '65.2.0',
         [string[]]$Targets = @('Android-arm64', 'Win64'),
         $Contracts = $null
     )
@@ -629,6 +662,7 @@ function Publish-AvidScriptPluginReleasePackage {
         Throw-AvidScriptPluginReleaseError 'ASRE1302' 'path_invalid' 'output root must not be inside the payload source.'
     }
     [System.IO.Directory]::CreateDirectory($OutputRoot) | Out-Null
+    $SortedArtifactContracts = @($ArtifactContracts | Sort-Object id -CaseSensitive)
     $SortedDependencies = @($Dependencies | Sort-Object id -CaseSensitive)
     $StagingRoot = Join-Path $OutputRoot ('.avidscript-release-stage-' + [guid]::NewGuid().ToString('N'))
     try {
@@ -668,6 +702,7 @@ function Publish-AvidScriptPluginReleasePackage {
             }
             targets = @($Targets | Sort-Object -CaseSensitive)
             contracts = $Contracts
+            artifact_contracts = $SortedArtifactContracts
             dependencies = $SortedDependencies
             payload = [pscustomobject][ordered]@{
                 root = 'payload'

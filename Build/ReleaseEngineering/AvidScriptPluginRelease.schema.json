@@ -16,6 +16,7 @@
     "compatibility",
     "targets",
     "contracts",
+    "artifact_contracts",
     "dependencies",
     "payload",
     "signature"
@@ -76,6 +77,20 @@
         "binding_descriptor_max": { "const": 23 },
         "semantic_schema": { "const": 20 },
         "guest_ir_schema": { "const": 2 }
+      }
+    },
+    "artifact_contracts": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "producer_path", "producer_sha256"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+          "producer_path": { "type": "string" },
+          "producer_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
       }
     },
     "dependencies": {

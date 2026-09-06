@@ -13,6 +13,7 @@
     "generated",
     "targets",
     "contracts",
+    "artifact_contracts",
     "dependencies"
   ],
   "properties": {
@@ -69,6 +70,32 @@
         "semantic_schema": { "const": 20 },
         "guest_ir_schema": { "const": 2 }
       }
+    },
+    "artifact_contracts": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "producer_path"],
+          "properties": {
+            "id": { "const": "generated-type-package" },
+            "producer_path": { "const": "Build/AvidScriptGeneratedTypeCookPackage.ps1" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "producer_path"],
+          "properties": {
+            "id": { "const": "module-release-package" },
+            "producer_path": { "const": "Build/AvidScriptModuleReleasePackage.ps1" }
+          }
+        }
+      ],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
     },
     "dependencies": {
       "type": "array",

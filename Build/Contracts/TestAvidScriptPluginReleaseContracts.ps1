@@ -15,7 +15,7 @@ $SourceFilesProfile = Join-Path $BuildRoot 'ReleaseEngineering/AvidScriptSourceR
 $Root = Join-Path 'C:\tmp\AvidScript\P65Contracts' (
     "$PID-$([guid]::NewGuid().ToString('N'))")
 $Passed = 0
-$Total = 22
+$Total = 24
 
 function Invoke-PluginReleaseContract {
     param(
@@ -52,6 +52,10 @@ function New-PluginReleaseFixture {
         "{`"FileVersion`":3,`"VersionName`":`"$Version`"}")
     [System.IO.File]::WriteAllText((Join-Path $PayloadPlugin 'LICENSE'), 'MIT')
     [System.IO.File]::WriteAllText((Join-Path $PayloadPlugin 'Build/marker.txt'), $Marker)
+    $GeneratedTypeProducer = Join-Path $PayloadPlugin 'Build/AvidScriptGeneratedTypeCookPackage.ps1'
+    $ModuleReleaseProducer = Join-Path $PayloadPlugin 'Build/AvidScriptModuleReleasePackage.ps1'
+    [System.IO.File]::WriteAllText($GeneratedTypeProducer, "# generated type $Marker")
+    [System.IO.File]::WriteAllText($ModuleReleaseProducer, "# module release $Marker")
     [System.IO.File]::WriteAllText($DependencyReceipt, '{"managed":true}')
     $Dependency = [pscustomobject][ordered]@{
         id = 'test-runtime'
@@ -60,6 +64,17 @@ function New-PluginReleaseFixture {
         identity_path = 'AvidScript/Source/ThirdParty/TestRuntime/.managed.json'
         identity_sha256 = Get-AvidScriptPluginReleaseSha256 $DependencyReceipt
     }
+    $ArtifactContracts = @(
+        [pscustomobject][ordered]@{
+            id = 'generated-type-package'
+            producer_path = 'AvidScript/Build/AvidScriptGeneratedTypeCookPackage.ps1'
+            producer_sha256 = Get-AvidScriptPluginReleaseSha256 $GeneratedTypeProducer
+        },
+        [pscustomobject][ordered]@{
+            id = 'module-release-package'
+            producer_path = 'AvidScript/Build/AvidScriptModuleReleasePackage.ps1'
+            producer_sha256 = Get-AvidScriptPluginReleaseSha256 $ModuleReleaseProducer
+        })
     return Publish-AvidScriptPluginReleasePackage `
         -PayloadSourceRoot $PayloadRoot `
         -OutputRoot (Join-Path $FixtureRoot 'output') `
@@ -68,6 +83,7 @@ function New-PluginReleaseFixture {
         -Commit ('a' * 40) `
         -Tree ('b' * 40) `
         -CommittedAtUtc '2026-09-06T00:00:00.0000000+00:00' `
+        -ArtifactContracts $ArtifactContracts `
         -Dependencies @($Dependency)
 }
 
@@ -157,8 +173,38 @@ try {
         $SchemaValid = (Get-Content -LiteralPath $Readback.ManifestPath -Raw) |
             Test-Json -SchemaFile $ReleaseSchema
         if ([string]$Readback.Manifest.release_id -cne [string]$Package.Manifest.release_id -or
-            [int]$Readback.Manifest.payload.file_count -ne 4 -or -not $SchemaValid) {
+            [int]$Readback.Manifest.payload.file_count -ne 6 -or -not $SchemaValid) {
             throw 'package readback identity differs.'
+        }
+    }
+
+    Invoke-PluginReleaseContract 'artifact contract identity' {
+        $Package = New-PluginReleaseFixture 'ArtifactIdentity' '0.1.0'
+        $Contracts = @($Package.Manifest.artifact_contracts)
+        if ($Contracts.Count -ne 2 -or
+            [string]$Contracts[0].id -cne 'generated-type-package' -or
+            [string]$Contracts[1].id -cne 'module-release-package' -or
+            @($Contracts | Where-Object { [string]$_.producer_sha256 -notmatch '^[0-9a-f]{64}$' }).Count -ne 0) {
+            throw 'release manifest did not bind the expected artifact producer identities.'
+        }
+    }
+
+    Invoke-PluginReleaseContract 'artifact producer mismatch rejection' {
+        $Package = New-PluginReleaseFixture 'ArtifactMismatch' '0.1.0'
+        $Manifest = Get-Content -LiteralPath $Package.ManifestPath -Raw |
+            ConvertFrom-Json -Depth 64 -DateKind String
+        $Manifest.artifact_contracts[0].producer_sha256 = 'f' * 64
+        $Manifest.release_id = Get-AvidScriptPluginReleaseId $Manifest
+        Write-AvidScriptPluginReleaseJson $Package.ManifestPath $Manifest
+        $Rejected = $false
+        try {
+            Resolve-AvidScriptPluginReleasePackage $Package.Root | Out-Null
+        }
+        catch {
+            $Rejected = [string]$_.Exception.Data['category'] -ceq 'artifact_contract_invalid'
+        }
+        if (-not $Rejected) {
+            throw 'artifact producer identity mismatch was accepted.'
         }
     }
 
@@ -172,6 +218,7 @@ try {
             -Commit ('a' * 40) `
             -Tree ('b' * 40) `
             -CommittedAtUtc '2026-09-06T00:00:00.0000000+00:00' `
+            -ArtifactContracts @($First.Manifest.artifact_contracts) `
             -Dependencies @($First.Manifest.dependencies)
         if ($Winner.Root -cne $First.Root -or
             $Winner.ManifestSha256 -cne $First.ManifestSha256) {
@@ -479,6 +526,7 @@ try {
         }
         foreach ($Token in @(
                 'wasmtime-win64', 'wasmtime-android-arm64',
+                'generated-type-package', 'module-release-package',
                 'Source/ThirdParty/WAMR/upstream/tests', 'Tools/*.Tests')) {
             if (-not $ReleaseFiles.Contains($Token)) {
                 throw "release allowlist token is missing: $Token"

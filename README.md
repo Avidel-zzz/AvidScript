@@ -157,7 +157,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 P65 正在推进发布工程：可重复发布包、原子安装/升级、兼容诊断、Android Gate 和当前版本性能领导力。
 Shipping 人工视觉与移动设备证据仍作为独立发布候选 Gate，不以自动报告或阶段编号替代。
 
-P65.A 已完成：thin source 发布器与原子安装器通过 **22/22** 轻量合同及真实 commit-based 发布/安装
+P65.A 已完成：thin source 发布器与原子安装器当前通过 **24/24** 轻量合同及真实 commit-based 发布/安装
 smoke。发布输入固定到 Git commit 与 allowlist，package/receipt 由 Schema、inventory 和 SHA-256 约束，
 支持 `Plan / Install / Upgrade / Repair / NoOp / Verify`、项目锁和失败回滚；相同输入重复发布得到相同
 release identity。公开离线二进制包仍受中性构建与路径脱敏 Gate 阻断，不包含在当前 source profile。
@@ -170,6 +170,10 @@ Binding、Generated Type、项目 Target 与 Android toolchain，并输出稳定
 P65.B2 已完成脱敏 support bundle：一次命令执行 Doctor 并原子发布带 Schema/inventory/SHA-256 的支持包，
 路径替换为中性占位符，默认不收集日志。显式日志仅接受 `.log/.txt`，每份限制为 64 KiB/200 行；源码、
 WASM、PDB、Guest IR、环境与原始日志不进入包。当前真实 bundle 隐私扫描和 readback 通过。
+
+P65.C1 已把 Generated Type 与模块包生产器身份纳入同一个 `release.json`：生产器 SHA-256 与两端 Wasmtime
+lock、Git tree、payload inventory 一同参与 `release_id`。项目实际 `package_id`、模块 catalog 与平台 receipt
+将在分层 Release Gate 中绑定，避免把项目私有产物写死到通用插件发布包。
 
 ## 验证
 

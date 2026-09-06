@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "profile": "source-developer",
-  "publisher_version": "65.1.0",
+  "publisher_version": "65.2.0",
   "include": [
     "AvidScript.uplugin",
     "LICENSE",
@@ -37,6 +37,16 @@
     "semantic_schema": 20,
     "guest_ir_schema": 2
   },
+  "artifact_contracts": [
+    {
+      "id": "generated-type-package",
+      "producer_path": "Build/AvidScriptGeneratedTypeCookPackage.ps1"
+    },
+    {
+      "id": "module-release-package",
+      "producer_path": "Build/AvidScriptModuleReleasePackage.ps1"
+    }
+  ],
   "dependencies": [
     {
       "id": "wasmtime-android-arm64",

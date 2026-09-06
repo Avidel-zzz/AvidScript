@@ -158,7 +158,7 @@ function Assert-AvidScriptSourceReleaseProfile {
         -Value $Profile `
         -Required @(
             'schema_version', 'profile', 'publisher_version', 'include', 'exclude',
-            'generated', 'targets', 'contracts', 'dependencies') `
+            'generated', 'targets', 'contracts', 'artifact_contracts', 'dependencies') `
         -Label 'source release file profile'
     if ([int]$Profile.schema_version -ne 1 -or
         [string]$Profile.profile -cne 'source-developer' -or
@@ -203,6 +203,37 @@ function Assert-AvidScriptSourceReleaseProfile {
             'Source/ThirdParty/WAMR/upstream/test-tools', 'Tools/*.Tests')) {
         if (-not $ExcludeNames.Contains($RequiredExclusion)) {
             Throw-AvidScriptPluginReleaseError 'ASRE2013' 'profile_invalid' "source release exclusion is missing: $RequiredExclusion"
+        }
+    }
+
+    $ArtifactContractIds = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::Ordinal)
+    foreach ($ArtifactContract in @($Profile.artifact_contracts)) {
+        if (-not $ArtifactContractIds.Add([string]$ArtifactContract.id)) {
+            Throw-AvidScriptPluginReleaseError 'ASRE2020' 'profile_invalid' 'source release artifact contract ids must be unique.'
+        }
+        $ProducerPath = Normalize-AvidScriptPluginReleaseRelativePath `
+            ([string]$ArtifactContract.producer_path) `
+            'source release artifact contract producer'
+        if (-not $ProducerPath.StartsWith('Build/', [System.StringComparison]::Ordinal)) {
+            Throw-AvidScriptPluginReleaseError 'ASRE2021' 'profile_invalid' 'artifact contract producer must remain under Build.'
+        }
+    }
+    foreach ($RequiredArtifactContract in @(
+            [pscustomobject]@{
+                id = 'generated-type-package'
+                producer_path = 'Build/AvidScriptGeneratedTypeCookPackage.ps1'
+            },
+            [pscustomobject]@{
+                id = 'module-release-package'
+                producer_path = 'Build/AvidScriptModuleReleasePackage.ps1'
+            })) {
+        $Match = @($Profile.artifact_contracts | Where-Object {
+                [string]$_.id -ceq [string]$RequiredArtifactContract.id -and
+                [string]$_.producer_path -ceq [string]$RequiredArtifactContract.producer_path
+            })
+        if ($Match.Count -ne 1) {
+            Throw-AvidScriptPluginReleaseError 'ASRE2022' 'profile_invalid' "source release artifact contract is missing or drifted: $($RequiredArtifactContract.id)"
         }
     }
 
@@ -321,6 +352,22 @@ try {
             })
     }
 
+    $ArtifactContracts = [System.Collections.Generic.List[object]]::new()
+    foreach ($ArtifactContract in @($ReleaseFiles.artifact_contracts | Sort-Object id -CaseSensitive)) {
+        $ProducerRelative = Normalize-AvidScriptPluginReleaseRelativePath `
+            ([string]$ArtifactContract.producer_path) `
+            'artifact contract producer path'
+        $ProducerPath = Join-Path $PayloadPluginRoot $ProducerRelative
+        if (-not (Test-Path -LiteralPath $ProducerPath -PathType Leaf)) {
+            Throw-AvidScriptPluginReleaseError 'ASRE2023' 'artifact_contract_missing' "artifact contract producer is missing from selected commit: $ProducerRelative"
+        }
+        $ArtifactContracts.Add([pscustomobject][ordered]@{
+                id = [string]$ArtifactContract.id
+                producer_path = "AvidScript/$ProducerRelative"
+                producer_sha256 = Get-AvidScriptPluginReleaseSha256 $ProducerPath
+            })
+    }
+
     Assert-AvidScriptPluginReleasePrivacy $PayloadPluginRoot
     Assert-AvidScriptPluginReleaseBinaryPrivacy $PayloadPluginRoot
     $Package = Publish-AvidScriptPluginReleasePackage `
@@ -331,6 +378,7 @@ try {
         -Commit $VerifiedCommit `
         -Tree $VerifiedTree `
         -CommittedAtUtc $CommittedAtUtc `
+        -ArtifactContracts @($ArtifactContracts) `
         -Dependencies @($Dependencies) `
         -PublisherVersion ([string]$ReleaseFiles.publisher_version) `
         -Targets @($ReleaseFiles.targets) `
