@@ -5,7 +5,7 @@
     "goal": "交付可直接启动的 C# 游戏纵向切片、数据驱动 Runtime 挂载层，以及 Android arm64 构建与设备就绪 Gate",
     "start_commit": "e036d0765a16fa177e73935905e160065a62eb96"
   },
-  "declared_stage": "gate_ready",
+  "declared_stage": "gate_attested",
   "architecture": {
     "path": "Docs/Phase64/P64.0_Production_Gameplay_Architecture.md",
     "version": 17,
@@ -211,9 +211,9 @@
     "full_gate": 2
   },
   "invocations": {
-    "ubt": 0,
-    "automation": 0,
-    "full_gate": 0
+    "ubt": 3,
+    "automation": 1,
+    "full_gate": 1
   },
   "freeze": {
     "source_commit": "a5d80c1c83df0c3c92e683786fb3cad81e55fd7b",
@@ -223,13 +223,13 @@
     "at_utc": "2026-09-05T23:05:02.7667460+00:00"
   },
   "gate": {
-    "report_path": "",
-    "report_sha256": "",
-    "run_id": "",
-    "verified_commit": "",
-    "verified_tree": "",
-    "attestation_parent": "",
-    "attested_at_utc": null
+    "report_path": "C:\\tmp\\AvidScript\\P64Gate\\cca81ec-20260906-001\\gate-report.json",
+    "report_sha256": "9cc2c66acc3fab940c057657b07963e8af41385590873cf0565aec0c217a8193",
+    "run_id": "P64-cca81ec-20260906-001",
+    "verified_commit": "cca81ecd11c841aad267acdd8287861e6c66326a",
+    "verified_tree": "7b96763284bf10e44570369f4f1e9ce753e15926",
+    "attestation_parent": "cca81ecd11c841aad267acdd8287861e6c66326a",
+    "attested_at_utc": "2026-09-06T02:32:50.1014813+00:00"
   },
   "protected_dirty": [
     {
@@ -251,7 +251,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "attest -Phase 64 -GateReportPath <path>",
-  "revision": 65,
-  "updated_at_utc": "2026-09-05T23:05:02.7720174+00:00"
+  "next_action": "close -Phase 64",
+  "revision": 66,
+  "updated_at_utc": "2026-09-06T02:32:50.1030351+00:00"
 }

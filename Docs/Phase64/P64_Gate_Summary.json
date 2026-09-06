@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "phase_id": 64,
+  "run_id": "P64-cca81ec-20260906-001",
+  "status": "attested",
+  "verified": {
+    "commit": "cca81ecd11c841aad267acdd8287861e6c66326a",
+    "tree": "7b96763284bf10e44570369f4f1e9ce753e15926",
+    "state_sha256": "4207eb96896e38453de68faad3c53fde39279fae12e1e6864cd317f3ba7f8075"
+  },
+  "gate_report_sha256": "9cc2c66acc3fab940c057657b07963e8af41385590873cf0565aec0c217a8193",
+  "checks": {
+    "required_checks_12_of_12": true,
+    "architecture_clean": true,
+    "phase_whitespace_clean": true,
+    "candidate_impact_analysis": true,
+    "harness_audit": true,
+    "dotnet_300_of_300": true,
+    "powershell_contracts_16_of_16": true,
+    "automation_fixtures": true,
+    "generated_type_publication": true,
+    "ubt_clean_35_of_35": true,
+    "ubt_generated_35_of_35": true,
+    "ubt_generated_published_5_of_5": true,
+    "automation_461_of_461": true,
+    "formal_evidence_valid": true
+  },
+  "platform_scope": {
+    "ue_version": "5.8-source",
+    "win64_development": true,
+    "win64_shipping_package": true,
+    "android_arm64_cross_aot": true,
+    "android_ubt": false,
+    "android_apk": false,
+    "android_device": false,
+    "ios_aot": false
+  },
+  "transferred_boundaries": [
+    "Android SDK, UBT, APK, install and device lifecycle validation move to Phase 65",
+    "Shipping UI physical interaction and cross-process visual readback move to Phase 65",
+    "real gameplay, controller and long-running acceptance remain explicit human gates"
+  ],
+  "human_acceptance": {
+    "real_gameplay": false,
+    "controller_input": false,
+    "shipping_ui_visual": false,
+    "mobile_device_install": false,
+    "automation_does_not_impersonate_human_acceptance": true
+  },
+  "invocations": {
+    "ubt": 3,
+    "automation": 1,
+    "full_gate": 1,
+    "budget_exception_recorded": false
+  },
+  "attested_at_utc": "2026-09-06T02:32:50.1014813+00:00"
+}

@@ -1,6 +1,6 @@
 # Phase 64 收尾记录
 
-状态：P64.A-D 实施完成，待集中审查、冻结与完整 Gate
+状态：P64.A-D 实施完成，正式 Gate 已验证并 attested
 
 ## 目标交付
 
@@ -116,6 +116,28 @@ fixture 准备入口。UeTypeGenerator 5/5、no-clean UBT 14/14 actions 和聚�
 导致报告已成功写出但父进程不退出。该候选在完整 Gate 完成前废弃，入口改为非持久 compiler 模式；
 新的 Gate 必须同时验证制品、报告和自然 exit 0。
 
+## 正式 Gate 结果
+
+正式候选为 `cca81ecd11c841aad267acdd8287861e6c66326a`，tree 为
+`7b96763284bf10e44570369f4f1e9ce753e15926`。外部 Gate run
+`P64-cca81ec-20260906-001` 的 12 项必需检查全部通过，报告 SHA-256 为
+`9cc2c66acc3fab940c057657b07963e8af41385590873cf0565aec0c217a8193`。
+
+- 六套 .NET 测试合计 300/300：Frontend 7、Semantic 98、Guest 140、Guest IR 35、
+  UE Type Generator 5、WASM Backend 15。
+- 16/16 PowerShell contracts 通过，覆盖 Wasmtime 依赖与性能工具链、Generated Type、发布包、
+  BuildCookRun、Android runner/toolchain、UI/Save、PhaseWorkflow 与 AgentHarness。
+- UE5.8 源码引擎的 clean 无项目生成物 UBT 为 35/35 actions；生成物首次编译为 35/35 actions；
+  发布 Generated Type 后增量 UBT 为 5/5 actions，三次均 `Result: Succeeded`。
+- 完整 `AvidScript` Automation 找到并完成 461 项，461/461 Success、0 Fail、461 个唯一路径；
+  Queue Empty、TestExit、request exit status 0 与进程 exit 0 全部成立。
+- 架构、阶段提交范围 whitespace、候选影响分析与 Harness audit 均通过；两个 detached 候选工作树
+  的 tracked 状态保持干净，基础候选与生成物候选相互隔离。
+
+测试期间机器休眠导致日志 wall-clock 出现约三小时空档，该空档不计作构建或测试耗时，也不据此判断
+进程挂起。恢复后两个长任务均继续运行并自然退出。Gate 不包含 Android SDK/UBT/APK/真机、Shipping
+人工 UI、物理输入或真实游玩验收，这些边界按既有 debt 转入 Phase 65。
+
 ## 保留边界
 
 P64.D 的自动 UI、跨进程存档、真实样例重载、网络闭环与包内一小时 World 长稳均已有独立时长和机器可读证据。
@@ -156,3 +178,9 @@ P58 类型、iOS、发布工程及性能领先等总目标缺口不会随本阶�
   本轮纠正后六套实际为 300/300，未因此重跑测试。PowerShell `foreach` 输出进管道前先物化为数组；
   Windows 下 `rg` 不接收 shell 风格路径通配符，应传目录并使用 `-g '*.md'`。不同证据域不通过命令
   分隔符塞进同一临时命令，避免退出码和输出归属混淆。
+- fresh .NET 套件共享 project reference 的 `obj` 目录，阶段 Gate 中必须按依赖拓扑串行构建；并行 clean
+  会制造文件竞争，不代表产品代码失败。独立 PowerShell contracts 与 UE 构建可在资源允许时并行。
+- Generated Type 的首次 `HeadlessRelease` 必须在生成源完成且 UBT/UHT 已发布对应 Editor 二进制后运行；
+  不能让旧 Editor 二进制直接消费新 UHT 类型。发布完成后再做一次 no-clean UBT 固化最终模块身份。
+- fixture 报告写出不等于包装进程完成。正式入口固定 `CompilerWorkerMode disabled`，Gate 同时要求报告通过、
+  两套制品存在且父进程自然 exit 0，防止持久 worker 继承 stdout/stderr 句柄造成假完成。
