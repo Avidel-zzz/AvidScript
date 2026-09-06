@@ -22,6 +22,7 @@ $invokeText = Get-Content -LiteralPath (
     Join-Path $toolsRoot 'Invoke-Phase54GameplayBenchmark.ps1') -Raw
 $harnessRoot = Split-Path -Parent $toolsRoot
 $comparisonRoot = Split-Path -Parent $harnessRoot
+. (Join-Path $comparisonRoot 'Scripts\PuertsBenchmarkSidecar.Common.ps1')
 $runnerText = Get-Content -LiteralPath (
     Join-Path $harnessRoot 'Source\AvidScriptPerfHarness\Private\AvidScriptPerfRunner.cpp') -Raw
 $runnerAdaptiveMatrix = [regex]::Match(
@@ -94,6 +95,20 @@ $generatedCSharpProfile = Get-Content -LiteralPath (
 $dataCSharpProfile = Get-Content -LiteralPath (
     Join-Path $csharpProfileRoot 'AvidScriptPerfWorkload.data-oriented.csharp-profile.json') -Raw |
     ConvertFrom-Json -Depth 100
+$identityFixtureSha = 'a' * 64
+$expectedWasmtimeIdentity =
+    'wasmtime-v45.0.0+avidscript.1;strategy=cranelift;' +
+    'opt=speed;regalloc=backtracking;inlining=all;' +
+    'profile=cranelift-speed-x86_64-v3-contained-v3;' +
+    'target=x86_64-pc-windows-msvc;cpu=x86-64-v3;' +
+    'wasm32_memory=4g_fixed;memory_may_move=0;' +
+    'max_wasm_stack=2m;fuel=on;epoch_interruption=on;' +
+    'spectre=on;nan_canonicalization=off;parallel_compilation=on;' +
+    'wasm_gc=on;gc_collector=drc;runtime_profile=fastest-runtime;' +
+    "runtime_artifact_sha256=$identityFixtureSha"
+Assert-True ((Get-SidecarWasmtimeCompilerIdentity -DllSha256 $identityFixtureSha) -ceq
+    $expectedWasmtimeIdentity) `
+    'PowerShell runner 与 C++ backend 必须生成完全相同的 Wasmtime compiler identity。'
 
 Assert-True $evaluatorText.Contains('p95_ratio') `
     'Gameplay Gate 必须输出跨进程 P95 ratio。'

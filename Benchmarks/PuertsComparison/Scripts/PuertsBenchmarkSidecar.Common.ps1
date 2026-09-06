@@ -607,16 +607,20 @@ function Get-SidecarWasmtimeCompilerIdentity {
     $Profile = $Lock.compiler_profile
     if ([string]$Lock.upstream.version -cne 'v45.0.0' -or
         [int]$Lock.patch.api_revision -ne 1 -or
+        [string]$Profile.id -cne 'cranelift-speed-x86_64-v3-contained-v3' -or
         [string]$Profile.strategy -cne 'cranelift' -or
         [string]$Profile.optimization -cne 'speed' -or
         [string]$Profile.register_allocator -cne 'backtracking' -or
         [string]$Profile.inlining -cne 'all' -or
         [string]$Profile.cpu -cne 'x86-64-v3' -or
         [uint64]$Profile.wasm32_memory_reservation_bytes -ne [uint64]4294967296 -or
+        [uint64]$Profile.max_wasm_stack_bytes -ne [uint64]2097152 -or
         [bool]$Profile.memory_may_move -or
         -not [bool]$Profile.spectre_mitigation -or
         [bool]$Profile.nan_canonicalization -or
         -not [bool]$Profile.wasm_gc -or
+        -not [bool]$Profile.consume_fuel -or
+        -not [bool]$Profile.epoch_interruption -or
         [string]$Profile.gc_collector -cne 'drc' -or
         [string]$Lock.rust.build_profile -cne 'fastest-runtime' -or
         -not (@($Lock.rust.features) -contains 'parallel-compilation') -or
@@ -627,10 +631,13 @@ function Get-SidecarWasmtimeCompilerIdentity {
     return (
         'wasmtime-v45.0.0+avidscript.1;strategy=cranelift;' +
         'opt=speed;regalloc=backtracking;inlining=all;' +
+        'profile=cranelift-speed-x86_64-v3-contained-v3;' +
+        'target=x86_64-pc-windows-msvc;' +
         'cpu=x86-64-v3;wasm32_memory=4g_fixed;memory_may_move=0;' +
+        'max_wasm_stack=2m;fuel=on;epoch_interruption=on;' +
         'spectre=on;nan_canonicalization=off;parallel_compilation=on;' +
         'wasm_gc=on;gc_collector=drc;' +
-        "runtime_profile=fastest-runtime;dll_sha256=$DllSha256")
+        "runtime_profile=fastest-runtime;runtime_artifact_sha256=$DllSha256")
 }
 
 function Get-SidecarAvidScriptRuntimeIdentity {
