@@ -207,6 +207,15 @@ foreach ($preparedWorkload in @(
     Assert-True ($evaluatorAdaptiveMatrix.Contains($preparedWorkload)) `
         "统一 Gate adaptive native oracle 必须覆盖 $preparedWorkload。"
 }
+Assert-True ($runnerAdaptiveMatrix.Contains(
+        'return GetExpectedLogicalOperationCount(Workload, Iterations);') -and
+    $evaluatorAdaptiveMatrix.Contains(
+        '[uint64]$WorkloadContract.logical_operations_per_frame') -and
+    -not $evaluatorAdaptiveMatrix.Contains('$scalarPropertyOperationsPerFrame')) `
+    'Gameplay adaptive oracle 必须把当前已准备的 scalar/property/vector/object/event 全部计为 native hit。'
+Assert-True ($runnerText.Contains('expected_adaptive_native=%llu') -and
+    $runnerText.Contains('expected_adaptive_fallback=%llu')) `
+    'Correctness 日志必须同时输出 adaptive native/fallback 的实际值与期望值。'
 Assert-True ($evaluatorText.Contains('exact zero-based process_run sequence') -and
     $evaluatorText.Contains('share one non-empty run_id') -and
     $evaluatorText.Contains('distinct lowercase SHA-256 request identities') -and

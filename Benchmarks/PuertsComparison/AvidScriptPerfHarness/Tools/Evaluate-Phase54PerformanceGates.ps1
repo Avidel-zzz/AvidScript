@@ -112,14 +112,8 @@ function Get-ExpectedAdaptiveNativeHits {
     )
 
     if ($Workload -in @('gameplay_frame_small', 'gameplay_frame_dense')) {
-        [uint64]$scalarPropertyOperationsPerFrame =
-            [uint64]$WorkloadContract.logical_entities_per_frame *
-            [uint64]$WorkloadContract.scalar_property_operations_per_entity
-        [uint64]$eventOperationsPerFrame =
-            [uint64]$WorkloadContract.event_operations_per_frame
-        return $Iterations * (
-            $scalarPropertyOperationsPerFrame +
-            $eventOperationsPerFrame)
+        return $Iterations *
+            [uint64]$WorkloadContract.logical_operations_per_frame
     }
     if ($Workload -ceq 'property_get_set') {
         return $Iterations * 2u

@@ -1598,12 +1598,7 @@ namespace
 	{
 		if (FAvidScriptGameplayFrameBenchmark::IsGameplayWorkload(Workload))
 		{
-			const FAvidScriptGameplayFrameCounts Counts =
-				FAvidScriptGameplayFrameBenchmark::GetCounts(
-					Workload,
-					Iterations);
-			return Counts.ScalarPropertyCount
-				+ Counts.EventCount;
+			return GetExpectedLogicalOperationCount(Workload, Iterations);
 		}
 		switch (Workload)
 		{
@@ -3423,7 +3418,8 @@ namespace
 				TEXT("prepared_dynamic_hit=%llu ")
 				TEXT("prepared_dynamic_fallback=%llu ")
 				TEXT("prepared_dynamic_reject=%llu ")
-				TEXT("adaptive_native=%llu adaptive_fallback=%llu ")
+				TEXT("adaptive_native=%llu expected_adaptive_native=%llu ")
+				TEXT("adaptive_fallback=%llu expected_adaptive_fallback=%llu ")
 				TEXT("adaptive_guard_reject=%llu ")
 				TEXT("data_generated_expected=%llu data_commands=%llu ")
 				TEXT("data_commands_expected=%llu data_crossings=%llu ")
@@ -3453,7 +3449,9 @@ namespace
 				Observation.PreparedDynamicFallbackCount,
 				Observation.PreparedDynamicRejectCount,
 				Observation.AdaptiveNativeHitCount,
+				ExpectedAdaptiveNativeHitCount,
 				Observation.AdaptiveProcessEventFallbackCount,
+				ExpectedAdaptiveFallbackCount,
 				Observation.AdaptiveGuardRejectCount,
 				ExpectedDataGeneratedS1HitCount,
 				Observation.DataLaneCommandCount,
