@@ -13,6 +13,9 @@ param(
     [string]$EngineRoot,
 
     [Parameter(Mandatory = $true)]
+    [string]$WasmtimeInstallSource,
+
+    [Parameter(Mandatory = $true)]
     [string]$OutputRoot
 )
 
@@ -66,6 +69,7 @@ if ($ResolvedCandidateRoot -ine $ResolvedRunnerPluginRoot) {
 $ResolvedSourceProjectPath = Resolve-RequiredPath -Path $SourceProjectPath -PathType Leaf -Label 'SourceProjectPath'
 $ResolvedPuertsPluginPath = Resolve-RequiredPath -Path $PuertsPluginPath -PathType Container -Label 'PuertsPluginPath'
 $ResolvedEngineRoot = Resolve-RequiredPath -Path $EngineRoot -PathType Container -Label 'EngineRoot'
+$ResolvedWasmtimeInstallSource = Resolve-RequiredPath -Path $WasmtimeInstallSource -PathType Container -Label 'WasmtimeInstallSource'
 $ResolvedOutputRoot = [IO.Path]::GetFullPath($OutputRoot)
 
 $GitTopLevel = Invoke-GitValue -Root $ResolvedCandidateRoot -Arguments @('rev-parse', '--show-toplevel')
@@ -93,6 +97,38 @@ foreach ($Input in @($Protocol.tracked_inputs)) {
         throw "ASP65L2006 tracked leadership input drifted: $($Input.id)"
     }
 }
+
+$WasmtimeLockPath = Join-Path $ResolvedCandidateRoot 'Source/ThirdParty/Wasmtime/PerformanceToolchain/WasmtimePerformanceToolchain.lock.json'
+$WasmtimeLock = Get-Content -LiteralPath $WasmtimeLockPath -Raw | ConvertFrom-Json -Depth 32
+$WasmtimeDestination = [IO.Path]::GetFullPath((Join-Path $ResolvedCandidateRoot ([string]$WasmtimeLock.install.relative_path)))
+$SourceMarkerPath = Join-Path $ResolvedWasmtimeInstallSource ([string]$WasmtimeLock.install.managed_marker_name)
+$SourceMarker = Get-Content -LiteralPath (Resolve-RequiredPath -Path $SourceMarkerPath -PathType Leaf -Label 'Wasmtime source marker') -Raw | ConvertFrom-Json -Depth 32
+if ([string]$SourceMarker.toolchain_id -cne [string]$WasmtimeLock.toolchain_id -or
+    [string]$SourceMarker.compiler_profile -cne [string]$WasmtimeLock.compiler_profile.id -or
+    [string]$SourceMarker.patch_sha256 -cne [string]$WasmtimeLock.patch.canonical_sha256) {
+    throw 'ASP65L2012 Wasmtime install source does not match the frozen toolchain lock'
+}
+if (-not (Test-Path -LiteralPath $WasmtimeDestination -PathType Container)) {
+    $WasmtimeParent = Split-Path -Parent $WasmtimeDestination
+    New-Item -ItemType Directory -Force -Path $WasmtimeParent | Out-Null
+    $PublishPath = "$WasmtimeDestination.publish-$([Guid]::NewGuid().ToString('N'))"
+    try {
+        Copy-Item -LiteralPath $ResolvedWasmtimeInstallSource -Destination $PublishPath -Recurse
+        [IO.Directory]::Move($PublishPath, $WasmtimeDestination)
+    }
+    finally {
+        if (Test-Path -LiteralPath $PublishPath -PathType Container) {
+            Remove-Item -LiteralPath $PublishPath -Recurse -Force
+        }
+    }
+}
+$WasmtimeVerifyText = & (Join-Path $ResolvedCandidateRoot 'Build/BuildAvidScriptWasmtimePerformanceToolchain.ps1') `
+    -Mode Verify `
+    -RepositoryRoot $ResolvedCandidateRoot
+if ($LASTEXITCODE -ne 0) {
+    throw 'ASP65L2013 copied Wasmtime performance toolchain failed candidate verification'
+}
+$WasmtimeEvidence = (($WasmtimeVerifyText -join "`n") | ConvertFrom-Json).evidence
 
 $EditorExecutable = Resolve-RequiredPath `
     -Path (Join-Path $ResolvedEngineRoot ([string]$Protocol.host.editor_relative_path)) `
@@ -140,7 +176,7 @@ $CpuModel = [string]::Join(' + ', $CpuNames)
 if ([string]::IsNullOrWhiteSpace($CpuModel)) {
     throw 'ASP65L2009 CPU identity is unavailable'
 }
-$CandidateIdPayload = [Text.UTF8Encoding]::new($false).GetBytes("$Commit`n$Tree`n$($EditorIdentity.sha256)`n$($PuertsContent.content_sha256)`n")
+$CandidateIdPayload = [Text.UTF8Encoding]::new($false).GetBytes("$Commit`n$Tree`n$($EditorIdentity.sha256)`n$($WasmtimeEvidence.installed_content_sha256)`n$($PuertsContent.content_sha256)`n")
 $CandidateId = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($CandidateIdPayload)).ToLowerInvariant().Substring(0, 20)
 $Matrices = @(
     [ordered]@{ id = 'ue_micro_six_lane'; status = 'ready_after_build'; reason = '六 lane micro profile 与三种 AvidScript binding mode 已冻结，等待统一构建。' },
@@ -174,6 +210,12 @@ $Candidate = [ordered]@{
         cpu = $CpuModel
         logical_processors = [Environment]::ProcessorCount
         os = [Runtime.InteropServices.RuntimeInformation]::OSDescription
+    }
+    wasmtime = [ordered]@{
+        root = [string]$WasmtimeEvidence.install_path
+        dll_sha256 = [string]$WasmtimeEvidence.dll_sha256
+        installed_content_sha256 = [string]$WasmtimeEvidence.installed_content_sha256
+        compiler_profile = [string]$WasmtimeEvidence.compiler_profile
     }
     puerts = [ordered]@{
         root = $ResolvedPuertsPluginPath
