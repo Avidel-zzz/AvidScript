@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "candidate": {
+    "id": "49373cca83c660855875",
+    "commit": "e25beed1b5bbc27ca61a0aecb8bf083600b24136",
+    "tree_sha": "a35f0ee1ffda24e46501342ae8bd2521dd8b3117",
+    "manifest_sha256": "7b6b3f41a31b9a6dccc8e5dd5c6c75fdfe10c39b9fc6d8bd366bb977e97ae990",
+    "clean": true
+  },
+  "profiles": {
+    "processes": 5,
+    "calibration_processes": 1,
+    "warmups_per_process": 5,
+    "timed_samples_per_unit": 30
+  },
+  "evidence": {
+    "controlled_aggregate_sha256": "618d3ffccd9bcbed86a9056b90786bc9847b6da33cae3d56287b974d8c53a909",
+    "physical_aggregate_sha256": "6683a3de2c427c5db2f906ded94b9e61be1b1c9455e2c0ed681a4eeb57dfdf6f",
+    "unified_gate_result_sha256": "8ada12d8275784c22f7147f66c05611f23348faaaa41f23ce02436252739ec0e"
+  },
+  "gate_summary": {
+    "total": 18,
+    "passed": 12,
+    "failed": 6,
+    "failed_gate_ids": [
+      "wasmtime_v8_geo_ratio",
+      "kernel_win_rate",
+      "s1_scalar_ns",
+      "s1_property_ns",
+      "callback_ns",
+      "callback_vs_puerts"
+    ]
+  },
+  "metrics": {
+    "wasmtime_over_v8_p50_geomean": 1.125778829427,
+    "wasmtime_over_v8_p95_geomean": 1.16758588266857,
+    "p50_kernel_win_rate": 0.583333333333333,
+    "p95_kernel_win_rate": 0.25,
+    "callback_ns": 494.3125,
+    "callback_over_puerts": 1.9123265148218,
+    "semantic_over_puerts_reflection": 0.715419409008423,
+    "small_over_best_puerts": 0.257979701802601,
+    "dense_over_best_puerts": 0.351639443703058,
+    "s1_scalar_ns": 28.285546875,
+    "s1_property_ns": 51.40390625,
+    "prepared_export_over_generic_p50": 0.879686975825018,
+    "typed_empty_net_p50_ns": 7.855
+  },
+  "correctness_valid": true,
+  "fallback_used": false,
+  "leadership_passed": false
+}

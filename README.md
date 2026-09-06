@@ -193,6 +193,12 @@ generated S1 的 callback P50 比率为 **`0.886x / 0.913x`**，gameplay small/d
 为 **`0.196x / 0.182x`**。该结果仍是诊断证据，正式 5 进程 Gate 完成前不改写 P65.D3 结论。
 详见 [P65.D7 性能诊断](Docs/Phase65/P65.D7_Clean_Candidate_Performance_Diagnostic.md)。
 
+同一优化候选的正式 5 进程复测已完成：callback 降至 **`494.31 ns`**，较 P65.D3 下降约
+**`40.6%`**；UE gameplay 继续领先，但 identical-WASM P50/P95 仍为 **`1.126x / 1.168x`**，
+统一 Gate 为 **12/18**。因此诊断方向成立，完整领导力仍未关闭；下一步是由 verified cooked package
+驱动的高性能 containment 层，而不是 benchmark 专用关闭安全机制。详见
+[P65.D8 正式复测](Docs/Phase65/P65.D8_Formal_Performance_Retest.md)。
+
 ## 验证
 
 完整回归与后续专项分别记录，**不累加成当前全量通过数**：
