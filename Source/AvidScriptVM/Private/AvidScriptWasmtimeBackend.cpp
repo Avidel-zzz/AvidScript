@@ -16,6 +16,8 @@
 #include "HAL/RunnableThread.h"
 #include "Misc/ScopeLock.h"
 
+#include <atomic>
+
 #ifndef AVIDSCRIPT_WITH_WASMTIME
 #define AVIDSCRIPT_WITH_WASMTIME 0
 #endif
@@ -87,6 +89,16 @@ FAvidScriptVmBackendInfo MakeWasmtimeBackendInfo(
 }
 
 #if AVIDSCRIPT_WITH_WASMTIME
+struct FAvidScriptWasmtimeEpochWatchdogEntry final
+{
+	AvidScriptWasmtimeEngine* Engine = nullptr;
+	uint64 TimeoutCycles = 0;
+	std::atomic<uint64> DeadlineCycles{0};
+};
+
+using FAvidScriptWasmtimeEpochWatchdogEntryPtr =
+	TSharedPtr<FAvidScriptWasmtimeEpochWatchdogEntry, ESPMode::ThreadSafe>;
+
 class FAvidScriptWasmtimeEpochWatchdog final : public FRunnable
 {
 public:
@@ -101,20 +113,20 @@ public:
 		Shutdown();
 	}
 
-	uint64 Register(
+	FAvidScriptWasmtimeEpochWatchdogEntryPtr Register(
 		AvidScriptWasmtimeEngine* Engine,
 		const uint32 TimeoutMilliseconds)
 	{
 		if (Engine == nullptr || TimeoutMilliseconds == 0)
 		{
-			return 0;
+			return nullptr;
 		}
-		uint64 Token = 0;
+		FAvidScriptWasmtimeEpochWatchdogEntryPtr Entry;
 		{
 			FScopeLock Lock(&CriticalSection);
 			if (bStopping)
 			{
-				return 0;
+				return nullptr;
 			}
 			if (WakeEvent == nullptr)
 			{
@@ -122,7 +134,7 @@ public:
 			}
 			if (WakeEvent == nullptr)
 			{
-				return 0;
+				return nullptr;
 			}
 			if (Thread == nullptr)
 			{
@@ -131,69 +143,78 @@ public:
 					TEXT("AvidScriptWasmtimeEpochWatchdog"));
 				if (Thread == nullptr)
 				{
-					return 0;
+					return nullptr;
 				}
 			}
-			Token = NextToken++;
-			if (NextToken == 0)
+			Entry = MakeShared<
+				FAvidScriptWasmtimeEpochWatchdogEntry,
+				ESPMode::ThreadSafe>();
+			Entry->Engine = Engine;
+			const double RequestedCycles =
+				(static_cast<double>(TimeoutMilliseconds) / 1000.0)
+				/ FPlatformTime::GetSecondsPerCycle64();
+			Entry->TimeoutCycles = static_cast<uint64>(RequestedCycles);
+			if (Entry->TimeoutCycles == 0)
 			{
-				NextToken = 1;
+				Entry->TimeoutCycles = 1;
 			}
-			FEntry& Entry = Entries.Add(Token);
-			Entry.Engine = Engine;
-			Entry.TimeoutMilliseconds = TimeoutMilliseconds;
+			else if (static_cast<double>(Entry->TimeoutCycles) < RequestedCycles)
+			{
+				++Entry->TimeoutCycles;
+			}
+			Entries.Add(Entry);
 		}
 		WakeEvent->Trigger();
-		return Token;
+		return Entry;
 	}
 
-	void Arm(const uint64 Token)
+	void Arm(const FAvidScriptWasmtimeEpochWatchdogEntryPtr& Entry)
 	{
-		if (Token == 0)
+		if (!Entry.IsValid())
+		{
+			return;
+		}
+		const uint64 NowCycles = FPlatformTime::Cycles64();
+		uint64 DeadlineCycles =
+			MAX_uint64 - NowCycles < Entry->TimeoutCycles
+				? MAX_uint64
+				: NowCycles + Entry->TimeoutCycles;
+		const uint64 PreviousDeadline =
+			Entry->DeadlineCycles.load(std::memory_order_relaxed);
+		if (DeadlineCycles == PreviousDeadline)
+		{
+			DeadlineCycles = DeadlineCycles == MAX_uint64
+				? MAX_uint64 - 1
+				: DeadlineCycles + 1;
+		}
+		Entry->DeadlineCycles.store(
+			DeadlineCycles,
+			std::memory_order_release);
+		WakeEvent->Trigger();
+	}
+
+	void Disarm(const FAvidScriptWasmtimeEpochWatchdogEntryPtr& Entry)
+	{
+		if (!Entry.IsValid())
+		{
+			return;
+		}
+		Entry->DeadlineCycles.store(0, std::memory_order_release);
+	}
+
+	void Unregister(FAvidScriptWasmtimeEpochWatchdogEntryPtr& Entry)
+	{
+		if (!Entry.IsValid())
 		{
 			return;
 		}
 		{
 			FScopeLock Lock(&CriticalSection);
-			FEntry* const Entry = Entries.Find(Token);
-			if (Entry == nullptr || bStopping)
-			{
-				return;
-			}
-			Entry->DeadlineSeconds = FPlatformTime::Seconds()
-				+ static_cast<double>(Entry->TimeoutMilliseconds) / 1000.0;
-			Entry->bArmed = true;
+			Entry->DeadlineCycles.store(0, std::memory_order_release);
+			Entries.RemoveSingleSwap(Entry, EAllowShrinking::No);
 		}
 		WakeEvent->Trigger();
-	}
-
-	void Disarm(const uint64 Token)
-	{
-		if (Token == 0)
-		{
-			return;
-		}
-		{
-			FScopeLock Lock(&CriticalSection);
-			if (FEntry* const Entry = Entries.Find(Token))
-			{
-				Entry->bArmed = false;
-			}
-		}
-		WakeEvent->Trigger();
-	}
-
-	void Unregister(const uint64 Token)
-	{
-		if (Token == 0)
-		{
-			return;
-		}
-		{
-			FScopeLock Lock(&CriticalSection);
-			Entries.Remove(Token);
-		}
-		WakeEvent->Trigger();
+		Entry.Reset();
 	}
 
 	uint32 Run() override
@@ -207,23 +228,33 @@ public:
 				{
 					return 0;
 				}
-				const double NowSeconds = FPlatformTime::Seconds();
-				for (TPair<uint64, FEntry>& Pair : Entries)
+				const uint64 NowCycles = FPlatformTime::Cycles64();
+				const double MillisecondsPerCycle =
+					FPlatformTime::GetSecondsPerCycle64() * 1000.0;
+				for (const FAvidScriptWasmtimeEpochWatchdogEntryPtr& Entry : Entries)
 				{
-					FEntry& Entry = Pair.Value;
-					if (!Entry.bArmed)
+					uint64 DeadlineCycles = Entry->DeadlineCycles.load(
+						std::memory_order_acquire);
+					if (DeadlineCycles == 0)
 					{
+						continue;
+					}
+					if (DeadlineCycles <= NowCycles)
+					{
+						if (Entry->DeadlineCycles.compare_exchange_strong(
+								DeadlineCycles,
+								0,
+								std::memory_order_acq_rel,
+								std::memory_order_acquire))
+						{
+							avidscript_wasmtime_engine_increment_epoch(
+								Entry->Engine);
+						}
 						continue;
 					}
 					const double RemainingMilliseconds =
-						(Entry.DeadlineSeconds - NowSeconds) * 1000.0;
-					if (RemainingMilliseconds <= 0.0)
-					{
-						Entry.bArmed = false;
-						avidscript_wasmtime_engine_increment_epoch(
-							Entry.Engine);
-						continue;
-					}
+						static_cast<double>(DeadlineCycles - NowCycles)
+						* MillisecondsPerCycle;
 					WaitMilliseconds = FMath::Min(
 						WaitMilliseconds,
 						static_cast<uint32>(FMath::Max(
@@ -236,14 +267,6 @@ public:
 	}
 
 private:
-	struct FEntry
-	{
-		AvidScriptWasmtimeEngine* Engine = nullptr;
-		uint32 TimeoutMilliseconds = 0;
-		double DeadlineSeconds = 0.0;
-		bool bArmed = false;
-	};
-
 	FAvidScriptWasmtimeEpochWatchdog() = default;
 
 	void Shutdown()
@@ -251,6 +274,10 @@ private:
 		{
 			FScopeLock Lock(&CriticalSection);
 			bStopping = true;
+			for (const FAvidScriptWasmtimeEpochWatchdogEntryPtr& Entry : Entries)
+			{
+				Entry->DeadlineCycles.store(0, std::memory_order_release);
+			}
 			Entries.Reset();
 		}
 		if (WakeEvent != nullptr)
@@ -271,10 +298,9 @@ private:
 	}
 
 	FCriticalSection CriticalSection;
-	TMap<uint64, FEntry> Entries;
+	TArray<FAvidScriptWasmtimeEpochWatchdogEntryPtr> Entries;
 	FRunnableThread* Thread = nullptr;
 	FEvent* WakeEvent = nullptr;
-	uint64 NextToken = 1;
 	bool bStopping = false;
 };
 
@@ -724,11 +750,11 @@ public:
 		}
 		if (ExecutionBudget.EpochTimeoutMilliseconds > 0)
 		{
-			EpochWatchdogToken =
+			EpochWatchdogEntry =
 				FAvidScriptWasmtimeEpochWatchdog::Get().Register(
 					Engine,
 					ExecutionBudget.EpochTimeoutMilliseconds);
-			if (EpochWatchdogToken == 0)
+			if (!EpochWatchdogEntry.IsValid())
 			{
 				SetWasmtimeError(
 					OutError,
@@ -784,13 +810,13 @@ public:
 			return false;
 		}
 
-		FAvidScriptWasmtimeEpochWatchdog::Get().Arm(EpochWatchdogToken);
+		FAvidScriptWasmtimeEpochWatchdog::Get().Arm(EpochWatchdogEntry);
 		AvidScriptWasmtimeFailure* InstantiateFailure = avidscript_wasmtime_linker_instantiate(
 			Linker,
 			Store,
 			Module,
 			&Instance);
-		FAvidScriptWasmtimeEpochWatchdog::Get().Disarm(EpochWatchdogToken);
+		FAvidScriptWasmtimeEpochWatchdog::Get().Disarm(EpochWatchdogEntry);
 		LoadMetrics.ModuleInstantiateMs = MeasureWasmtimeElapsedMs(InstantiateStart);
 		if (InstantiateFailure != nullptr || Instance == nullptr)
 		{
@@ -2167,7 +2193,7 @@ private:
 		if (bArmWatchdog)
 		{
 			FAvidScriptWasmtimeEpochWatchdog::Get().Arm(
-				EpochWatchdogToken);
+				EpochWatchdogEntry);
 		}
 		++ActiveCallDepth;
 		int32 Result = 0;
@@ -2183,7 +2209,7 @@ private:
 		if (bArmWatchdog)
 		{
 			FAvidScriptWasmtimeEpochWatchdog::Get().Disarm(
-				EpochWatchdogToken);
+				EpochWatchdogEntry);
 		}
 		const uint32 ResultCell = static_cast<uint32>(Result);
 		return CompleteResolvedExportCall(
@@ -2222,7 +2248,7 @@ private:
 		if (bArmWatchdog)
 		{
 			FAvidScriptWasmtimeEpochWatchdog::Get().Arm(
-				EpochWatchdogToken);
+				EpochWatchdogEntry);
 		}
 		++ActiveCallDepth;
 		float Second = 0.0f;
@@ -2238,7 +2264,7 @@ private:
 		if (bArmWatchdog)
 		{
 			FAvidScriptWasmtimeEpochWatchdog::Get().Disarm(
-				EpochWatchdogToken);
+				EpochWatchdogEntry);
 		}
 		return CompleteResolvedExportCall(
 			Entry,
@@ -2260,7 +2286,7 @@ private:
 		if (bArmWatchdog)
 		{
 			FAvidScriptWasmtimeEpochWatchdog::Get().Arm(
-				EpochWatchdogToken);
+				EpochWatchdogEntry);
 		}
 		++ActiveCallDepth;
 		uint32 ResultCells[FAvidScriptVmCallResult::MaxCells] = {};
@@ -2278,7 +2304,7 @@ private:
 		if (bArmWatchdog)
 		{
 			FAvidScriptWasmtimeEpochWatchdog::Get().Disarm(
-				EpochWatchdogToken);
+				EpochWatchdogEntry);
 		}
 		return CompleteResolvedExportCall(
 			Entry,
@@ -3651,8 +3677,7 @@ private:
 	{
 #if AVIDSCRIPT_WITH_WASMTIME
 		FAvidScriptWasmtimeEpochWatchdog::Get().Unregister(
-			EpochWatchdogToken);
-		EpochWatchdogToken = 0;
+			EpochWatchdogEntry);
 		for (const TSharedPtr<FAvidScriptWasmtimeExportEntry>& Entry : ExportEntries)
 		{
 			if (Entry->Function != nullptr)
@@ -3736,7 +3761,7 @@ private:
 
 #if AVIDSCRIPT_WITH_WASMTIME
 	AvidScriptWasmtimeEngine* Engine = nullptr;
-	uint64 EpochWatchdogToken = 0;
+	FAvidScriptWasmtimeEpochWatchdogEntryPtr EpochWatchdogEntry;
 	AvidScriptWasmtimeStore* Store = nullptr;
 	AvidScriptWasmtimeLinker* Linker = nullptr;
 	AvidScriptWasmtimeModule* Module = nullptr;
