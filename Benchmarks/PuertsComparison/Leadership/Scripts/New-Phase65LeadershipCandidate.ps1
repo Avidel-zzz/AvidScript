@@ -198,7 +198,7 @@ function Invoke-LeadershipGeneratedTypePublication {
         -Path ([string]$Report.toolchain.dotnet) `
         -PathType Leaf `
         -Label 'Generated Type .NET host'
-    $SourceId = [string]$Report.source.file
+    $SourceId = 'Plugins/AvidScript/Samples/CSharp/ScriptDefinedTypes/ScriptDefinedTypes.cs'
     $SourcePath = Resolve-RequiredPath `
         -Path (Join-Path $ProjectRoot $SourceId) `
         -PathType Leaf `

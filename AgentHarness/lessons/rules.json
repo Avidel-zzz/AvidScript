@@ -736,6 +736,14 @@
       "prevention": "发布工具从项目根枚举并要求恰好一个 `.uproject`，或由调用方显式传入已验证路径；禁止通过项目目录 basename 拼接 `.uproject`。候选冻结必须实际经过任意名称 sidecar 发布。",
       "source": "Build/InvokeAvidScriptRelease.ps1",
       "last_observed": "2026-09-07 P65.D10 Generated Type headless release 在时间戳 sidecar 中错误查找同名 uproject，改为唯一项目文件解析"
+    },
+    {
+      "id": "generated-type-preflight-uses-declaration-source",
+      "tags": ["unreal", "csharp", "generated-types", "packaging"],
+      "summary": "普通 C# workload 即使可编译为 WASM，也不能替代包含 UE 类型声明的 Generated Type 输入。",
+      "prevention": "packaged-target 前置发布使用已审计的 ScriptDefinedTypes 源或明确含 UCLASS/USTRUCT/UENUM 的产品源；runtime benchmark 源与 Generated Type 声明源分别冻结。先通过 schema 20/1.22 类型声明门禁，再发布 current pointer。",
+      "source": "Benchmarks/PuertsComparison/Leadership/Scripts/New-Phase65LeadershipCandidate.ps1",
+      "last_observed": "2026-09-07 P65.D10 candidate v3 首次误用 AvidScriptPerfWorkload.cs，语义阶段因无 UE type declarations fail closed"
     }
   ]
 }
