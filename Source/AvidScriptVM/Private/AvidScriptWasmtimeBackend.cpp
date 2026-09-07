@@ -89,11 +89,33 @@ FAvidScriptVmBackendInfo MakeWasmtimeBackendInfo(
 }
 
 #if AVIDSCRIPT_WITH_WASMTIME
+struct FAvidScriptWasmtimeEpochWatchdogSignal final
+{
+	FAvidScriptWasmtimeEpochWatchdogSignal()
+		: Event(FPlatformProcess::GetSynchEventFromPool(false))
+	{
+	}
+
+	~FAvidScriptWasmtimeEpochWatchdogSignal()
+	{
+		if (Event != nullptr)
+		{
+			FPlatformProcess::ReturnSynchEventToPool(Event);
+		}
+	}
+
+	FEvent* Event = nullptr;
+};
+
+using FAvidScriptWasmtimeEpochWatchdogSignalPtr =
+	TSharedPtr<FAvidScriptWasmtimeEpochWatchdogSignal, ESPMode::ThreadSafe>;
+
 struct FAvidScriptWasmtimeEpochWatchdogEntry final
 {
 	AvidScriptWasmtimeEngine* Engine = nullptr;
 	uint64 TimeoutCycles = 0;
 	std::atomic<uint64> DeadlineCycles{0};
+	FAvidScriptWasmtimeEpochWatchdogSignalPtr Signal;
 };
 
 using FAvidScriptWasmtimeEpochWatchdogEntryPtr =
@@ -128,12 +150,15 @@ public:
 			{
 				return nullptr;
 			}
-			if (WakeEvent == nullptr)
+			if (!Signal.IsValid())
 			{
-				WakeEvent = FPlatformProcess::GetSynchEventFromPool(false);
+				Signal = MakeShared<
+					FAvidScriptWasmtimeEpochWatchdogSignal,
+					ESPMode::ThreadSafe>();
 			}
-			if (WakeEvent == nullptr)
+			if (!Signal.IsValid() || Signal->Event == nullptr)
 			{
+				Signal.Reset();
 				return nullptr;
 			}
 			if (Thread == nullptr)
@@ -150,6 +175,7 @@ public:
 				FAvidScriptWasmtimeEpochWatchdogEntry,
 				ESPMode::ThreadSafe>();
 			Entry->Engine = Engine;
+			Entry->Signal = Signal;
 			const double RequestedCycles =
 				(static_cast<double>(TimeoutMilliseconds) / 1000.0)
 				/ FPlatformTime::GetSecondsPerCycle64();
@@ -163,14 +189,16 @@ public:
 				++Entry->TimeoutCycles;
 			}
 			Entries.Add(Entry);
-			WakeEvent->Trigger();
+			Entry->Signal->Event->Trigger();
 		}
 		return Entry;
 	}
 
 	void Arm(const FAvidScriptWasmtimeEpochWatchdogEntryPtr& Entry)
 	{
-		if (!Entry.IsValid())
+		if (!Entry.IsValid()
+			|| !Entry->Signal.IsValid()
+			|| Entry->Signal->Event == nullptr)
 		{
 			return;
 		}
@@ -178,13 +206,6 @@ public:
 		{
 			return;
 		}
-		ActiveArmCalls.fetch_add(1, std::memory_order_acq_rel);
-		if (bStopping.load(std::memory_order_acquire))
-		{
-			ActiveArmCalls.fetch_sub(1, std::memory_order_release);
-			return;
-		}
-
 		const uint64 NowCycles = FPlatformTime::Cycles64();
 		uint64 DeadlineCycles =
 			MAX_uint64 - NowCycles < Entry->TimeoutCycles
@@ -203,9 +224,8 @@ public:
 			std::memory_order_release);
 		if (TryPublishEarlierWake(DeadlineCycles))
 		{
-			WakeEvent->Trigger();
+			Entry->Signal->Event->Trigger();
 		}
-		ActiveArmCalls.fetch_sub(1, std::memory_order_release);
 	}
 
 	void Disarm(const FAvidScriptWasmtimeEpochWatchdogEntryPtr& Entry)
@@ -227,9 +247,9 @@ public:
 			FScopeLock Lock(&CriticalSection);
 			Entry->DeadlineCycles.store(0, std::memory_order_release);
 			Entries.RemoveSingleSwap(Entry, EAllowShrinking::No);
-			if (WakeEvent != nullptr)
+			if (Entry->Signal.IsValid() && Entry->Signal->Event != nullptr)
 			{
-				WakeEvent->Trigger();
+				Entry->Signal->Event->Trigger();
 			}
 		}
 		Entry.Reset();
@@ -282,7 +302,7 @@ public:
 							FMath::CeilToInt(RemainingMilliseconds))));
 				}
 			}
-			WakeEvent->Wait(WaitMilliseconds);
+			Signal->Event->Wait(WaitMilliseconds);
 		}
 	}
 
@@ -318,9 +338,9 @@ private:
 				Entry->DeadlineCycles.store(0, std::memory_order_release);
 			}
 			Entries.Reset();
-			if (WakeEvent != nullptr)
+			if (Signal.IsValid() && Signal->Event != nullptr)
 			{
-				WakeEvent->Trigger();
+				Signal->Event->Trigger();
 			}
 		}
 		if (Thread != nullptr)
@@ -329,24 +349,14 @@ private:
 			delete Thread;
 			Thread = nullptr;
 		}
-		// Arm may have observed the live event immediately before shutdown.
-		while (ActiveArmCalls.load(std::memory_order_acquire) != 0)
-		{
-			FPlatformProcess::YieldThread();
-		}
-		if (WakeEvent != nullptr)
-		{
-			FPlatformProcess::ReturnSynchEventToPool(WakeEvent);
-			WakeEvent = nullptr;
-		}
+		Signal.Reset();
 	}
 
 	FCriticalSection CriticalSection;
 	TArray<FAvidScriptWasmtimeEpochWatchdogEntryPtr> Entries;
 	FRunnableThread* Thread = nullptr;
-	FEvent* WakeEvent = nullptr;
+	FAvidScriptWasmtimeEpochWatchdogSignalPtr Signal;
 	std::atomic<uint64> NextWakeCycles{0};
-	std::atomic<uint32> ActiveArmCalls{0};
 	std::atomic<bool> bStopping{false};
 };
 
