@@ -1855,7 +1855,8 @@ FString MakeAvidScriptRuntimeExpectedSignature(const FAvidScriptBindingFunctionM
 			return TEXT("(iiii)i");
 		}
 		if (Binding.GeneratedShape == TEXT("property_i32_get_set")
-			|| Binding.GeneratedShape == TEXT("vector_value"))
+			|| Binding.GeneratedShape == TEXT("vector_value")
+			|| Binding.GeneratedShape == TEXT("vector_ref_out"))
 		{
 			return TEXT("(iii)i");
 		}

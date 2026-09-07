@@ -800,6 +800,14 @@
       "prevention": "修改 helper 签名前先定位参数类型声明顺序；若 helper 只需要一个已计算判定，传入具名 bool 或前置稳定基础类型，避免为局部 oracle 移动领域枚举。C++ 改动必须经 no-clean UBT 后再形成可冻结候选。",
       "source": "Benchmarks/PuertsComparison/AvidScriptPerfHarness/Source/AvidScriptPerfHarness/Private/AvidScriptPerfRunner.cpp",
       "last_observed": "2026-09-07 P65.D10 首版 lane-aware prepared-dynamic oracle 在后置 EAvidScriptPerfLane 声明前引用该类型，sidecar no-clean UBT 拒绝"
+    },
+    {
+      "id": "generated-shapes-update-all-consumers-atomically",
+      "tags": ["bindings", "generated", "abi", "workflow"],
+      "summary": "Generated binding shape 是跨 Descriptor、C#、Runtime、VM 与测试替身的封闭协议，单模块编译不能证明消费者完整。",
+      "prevention": "新增 shape 前先用现有 shape 标识枚举全部消费者，并一次更新 parser、canonical descriptor、C# expected ABI/facade、Runtime expected ABI/plan、generated source、registry、VM linker 与所有 IAvidScriptVmTypedHostDispatcher 实现；主工程与 PerfHarness sidecar 都必须增量编译。",
+      "source": "Source/AvidScriptCore/Public/AvidScriptGeneratedBindingTypes.h",
+      "last_observed": "2026-09-07 P65.D11 首轮遗漏 PerfHarness dispatcher override，第二轮遗漏 Runtime expected-signature 矩阵，分别被 sidecar compile 与 artifact preparation fail-closed 捕获"
     }
   ]
 }
