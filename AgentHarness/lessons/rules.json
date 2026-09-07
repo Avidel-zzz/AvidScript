@@ -331,9 +331,9 @@
       "id": "ue-automation-one-runtests-command-per-process",
       "tags": ["ue", "automation", "verification", "evidence"],
       "summary": "一个 ExecCmds 中重复写 Automation RunTests 不会可靠地形成两个测试队列。",
-      "prevention": "聚焦 Automation 每个进程只传一个 Automation RunTests 过滤器；需要组合测试时使用共同前缀，或分别启动并为每次运行分配唯一 abslog。必须从日志核对 Found、Test Completed 与 tests performed，不能只看退出码。",
+      "prevention": "聚焦 Automation 每个进程只传一个 Automation RunTests 过滤器；过滤器必须先从 IMPLEMENT_*_AUTOMATION_TEST 注册字符串或已归档清单解析，禁止按类名猜测。需要组合测试时使用共同前缀，或分别启动并为每次运行分配唯一 abslog。必须从日志核对 Found、Test Completed 与 tests performed，不能只看退出码。",
       "source": "observed:2026-08-31-P60.A1",
-      "last_observed": "2026-08-31 P60.A1 首次 ExecCmds 的第二个 Automation RunTests 被识别为 Unknown Automation command，只有第一条实际执行；随后用独立进程和唯一日志补齐 1/1 Success"
+      "last_observed": "2026-09-08 P65.D18 首次把源码注册的 AvidScript.Runtime.Profiling 猜成 Profiler，进程以 0 tests 退出；从注册字符串解析后用唯一日志补齐 3/3 Success。此前 2026-08-31 P60.A1 也出现过同进程重复 RunTests 丢失第二队列"
     },
     {
       "id": "apply-patch-context-must-exclude-new-helper-body",
