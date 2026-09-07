@@ -28,6 +28,7 @@
         ],
         "native_direct_functions": [],
         "generated_native_functions": [
+          "ReflectNoOp",
           "ReflectAddInt32",
           "ReflectVectorValue",
           "ReflectObjectRoundtrip",

@@ -131,6 +131,13 @@ bool FAvidScriptEditorGeneratedBindingDeterminismTest::RunTest(
 		EAvidScriptGeneratedReceiverMode::StableBorrow;
 	ObjectBinding.FunctionName = TEXT("GeneratedObject");
 	Package.Bindings.Add(ObjectBinding);
+	FAvidScriptGeneratedBindingIr UnaryBinding = MakeGeneratedBinding(
+		TEXT('8'),
+		TEXT("8888888888888888"));
+	UnaryBinding.Shape = EAvidScriptGeneratedBindingShape::I32ToI32;
+	UnaryBinding.AbiSignature = TEXT("(iii)i");
+	UnaryBinding.FunctionName = TEXT("GeneratedUnary");
+	Package.Bindings.Add(UnaryBinding);
 
 	FAvidScriptEditorGeneratedBindingResult FirstResult;
 	TestTrue(
@@ -185,6 +192,8 @@ bool FAvidScriptEditorGeneratedBindingDeterminismTest::RunTest(
 				TEXT("int32& OutValue"))
 			&& SecondContents[2].Contains(
 				TEXT("int32 Value"))
+			&& SecondContents[2].Contains(
+				TEXT("OutValue = TypedReceiver->GeneratedUnary(Value);"))
 			&& SecondContents[2].Contains(TEXT("static_cast<")));
 	TestFalse(
 		TEXT("Generated call sites never use checked casts"),

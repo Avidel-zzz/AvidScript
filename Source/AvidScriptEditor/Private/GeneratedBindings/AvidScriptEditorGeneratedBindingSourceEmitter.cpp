@@ -111,6 +111,8 @@ const TCHAR* ShapeToken(const EAvidScriptGeneratedBindingShape Shape)
 {
 	switch (Shape)
 	{
+	case EAvidScriptGeneratedBindingShape::I32ToI32:
+		return TEXT("EAvidScriptGeneratedBindingShape::I32ToI32");
 	case EAvidScriptGeneratedBindingShape::I32PairToI32:
 		return TEXT("EAvidScriptGeneratedBindingShape::I32PairToI32");
 	case EAvidScriptGeneratedBindingShape::PropertyI32GetSet:
@@ -140,6 +142,8 @@ const TCHAR* ShapeManifestToken(
 {
 	switch (Shape)
 	{
+	case EAvidScriptGeneratedBindingShape::I32ToI32:
+		return TEXT("i32_to_i32");
 	case EAvidScriptGeneratedBindingShape::I32PairToI32:
 		return TEXT("i32_pair_to_i32");
 	case EAvidScriptGeneratedBindingShape::PropertyI32GetSet:
@@ -212,6 +216,22 @@ FString RenderTypedCallSite(
 	const FString UeFunction = Binding.FunctionName;
 	switch (Binding.Shape)
 	{
+	case EAvidScriptGeneratedBindingShape::I32ToI32:
+		return FString::Printf(
+			TEXT("static EAvidScriptVmTypedHostStatus %s(UObject& Receiver, int32 Value, int32& OutValue)\n")
+			TEXT("{\n")
+			TEXT("\t%s* TypedReceiver = Cast<%s>(&Receiver);\n")
+			TEXT("\tif (TypedReceiver == nullptr)\n")
+			TEXT("\t{\n")
+			TEXT("\t\treturn EAvidScriptVmTypedHostStatus::Rejected;\n")
+			TEXT("\t}\n")
+			TEXT("\tOutValue = TypedReceiver->%s(Value);\n")
+			TEXT("\treturn EAvidScriptVmTypedHostStatus::Succeeded;\n")
+			TEXT("}\n\n"),
+			*FunctionName,
+			*OwnerType,
+			*OwnerType,
+			*UeFunction);
 	case EAvidScriptGeneratedBindingShape::I32PairToI32:
 		return FString::Printf(
 			TEXT("static EAvidScriptVmTypedHostStatus %s(UObject& Receiver, int32 Left, int32 Right, int32& OutValue)\n")
@@ -331,6 +351,18 @@ FString RenderPreparedTypedCallSite(
 	const FString UeFunction = Binding.FunctionName;
 	switch (Binding.Shape)
 	{
+	case EAvidScriptGeneratedBindingShape::I32ToI32:
+		return FString::Printf(
+			TEXT("static EAvidScriptVmTypedHostStatus %s(UObject& Receiver, int32 Value, int32& OutValue)\n")
+			TEXT("{\n")
+			TEXT("\t%s* TypedReceiver = static_cast<%s*>(&Receiver);\n")
+			TEXT("\tOutValue = TypedReceiver->%s(Value);\n")
+			TEXT("\treturn EAvidScriptVmTypedHostStatus::Succeeded;\n")
+			TEXT("}\n\n"),
+			*FunctionName,
+			*OwnerType,
+			*OwnerType,
+			*UeFunction);
 	case EAvidScriptGeneratedBindingShape::I32PairToI32:
 		return FString::Printf(
 			TEXT("static EAvidScriptVmTypedHostStatus %s(UObject& Receiver, int32 Left, int32 Right, int32& OutValue)\n")
@@ -445,8 +477,16 @@ FString RenderPrivateCpp(
 				== EAvidScriptGeneratedBindingShape::PropertyI32Set
 			? PreparedCallSite
 			: FString(TEXT("nullptr"));
+		const FString I32Call = Binding.Shape
+				== EAvidScriptGeneratedBindingShape::I32ToI32
+			? CallSite
+			: FString(TEXT("nullptr"));
+		const FString PreparedI32Call = Binding.Shape
+				== EAvidScriptGeneratedBindingShape::I32ToI32
+			? PreparedCallSite
+			: FString(TEXT("nullptr"));
 		Result += FString::Printf(
-			TEXT("\t{ TEXT(\"%s\"), TEXT(\"%s\"), TEXT(\"%s\"), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s },\n"),
+			TEXT("\t{ TEXT(\"%s\"), TEXT(\"%s\"), TEXT(\"%s\"), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s },\n"),
 			*EscapeCppString(Binding.StableId),
 			*EscapeCppString(Package.PackageHash),
 			*EscapeCppString(Binding.DescriptorIdentity),
@@ -460,7 +500,9 @@ FString RenderPrivateCpp(
 			*StableObjectCall,
 			*PreparedI32PairCall,
 			*PreparedPropertyI32GetCall,
-			*PreparedPropertyI32SetCall);
+			*PreparedPropertyI32SetCall,
+			*I32Call,
+			*PreparedI32Call);
 	}
 	Result += TEXT("};\n} // namespace\n\n");
 	Result +=
@@ -665,6 +707,8 @@ const TCHAR* ExpectedGeneratedAbiSignature(
 {
 	switch (Shape)
 	{
+	case EAvidScriptGeneratedBindingShape::I32ToI32:
+		return TEXT("(iii)i");
 	case EAvidScriptGeneratedBindingShape::I32PairToI32:
 		return TEXT("(iiii)i");
 	case EAvidScriptGeneratedBindingShape::PropertyI32GetSet:

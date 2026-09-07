@@ -533,6 +533,18 @@ private:
 		TConstArrayView<uint64> Arguments,
 		IAvidScriptVmGuestMemory& GuestMemory,
 		FAvidScriptDynamicHostCallResult& OutResult);
+	static EAvidScriptVmTypedHostStatus InvokePreparedSelfI32(
+		void* Context,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 Value,
+		int32& OutValue);
+	EAvidScriptVmTypedHostStatus DispatchPreparedSelfI32(
+		FAvidScriptPreparedGeneratedHostCall& Call,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 Value,
+		int32& OutValue);
 	static EAvidScriptVmTypedHostStatus InvokePreparedSelfI32Pair(
 		void* Context,
 		int32 SelfSlot,

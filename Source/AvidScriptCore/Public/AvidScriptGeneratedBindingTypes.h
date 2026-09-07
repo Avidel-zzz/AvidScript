@@ -6,6 +6,7 @@
 
 enum class EAvidScriptGeneratedBindingShape : uint8
 {
+	I32ToI32,
 	I32PairToI32,
 	PropertyI32GetSet,
 	PropertyI32Get,

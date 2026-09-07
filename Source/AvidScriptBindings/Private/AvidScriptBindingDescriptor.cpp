@@ -2130,7 +2130,8 @@ bool IsAvidScriptBindingLowerHex(const FString& Value)
 
 bool IsAvidScriptGeneratedShape(const FString& Value)
 {
-	return Value == TEXT("i32_pair_to_i32")
+	return Value == TEXT("i32_to_i32")
+		|| Value == TEXT("i32_pair_to_i32")
 		|| Value == TEXT("property_i32_get_set")
 		|| Value == TEXT("property_i32_get")
 		|| Value == TEXT("property_i32_set")

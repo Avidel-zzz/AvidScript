@@ -470,6 +470,65 @@ bool FAvidScriptEditorBindingDescriptorGeneratedNativeTest::RunTest(
 			TEXT("return AvidScriptNative.Invoke0000(this.Slot, this.Generation"))
 			&& !PairReferenceSource.Contains(TEXT("out __returnValue")));
 
+	FAvidScriptBindingSelectionProfile UnaryProfile;
+	UnaryProfile.PackageName = TEXT("avidscript.generated.unary.descriptor");
+	FAvidScriptReflectedClassSelection UnaryRule;
+	UnaryRule.OwnerClassPath = OwnerPath;
+	UnaryRule.IncludeFunctions.Add(TEXT("GeneratedI32Unary"));
+	UnaryRule.GeneratedNativeFunctions.Add(TEXT("GeneratedI32Unary"));
+	UnaryProfile.Classes.Add(MoveTemp(UnaryRule));
+
+	FString UnaryDescriptorJson;
+	FAvidScriptBindingSelectionResolveResult UnarySelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult UnaryGenerateResult;
+	TestTrue(
+		TEXT("Eligible int32 unary function generates an S1 descriptor"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+			UnaryProfile,
+			UnaryDescriptorJson,
+			UnarySelectionResult,
+			UnaryGenerateResult));
+	FAvidScriptBindingPackageModel UnaryPackage;
+	TestTrue(
+		TEXT("Generated unary descriptor satisfies parser contract"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			UnaryDescriptorJson,
+			UnaryPackage,
+			ErrorCategory,
+			ErrorSource));
+	if (UnaryPackage.Bindings.Num() == 1)
+	{
+		const FAvidScriptBindingFunctionModel& UnaryBinding =
+			UnaryPackage.Bindings[0];
+		TestEqual(
+			TEXT("Unary int32 shape is explicit"),
+			UnaryBinding.GeneratedShape,
+			FString(TEXT("i32_to_i32")));
+		TestEqual(
+			TEXT("Unary int32 uses the direct-return ABI"),
+			UnaryBinding.HostImport.Signature,
+			FString(TEXT("(iii)i")));
+	}
+	else
+	{
+		AddError(TEXT("Expected exactly one generated unary int32 binding."));
+	}
+	FString UnaryReferenceSource;
+	FString UnaryManifestJson;
+	FAvidScriptCSharpBindingEmitResult UnaryEmitResult;
+	TestTrue(
+		TEXT("Generated unary survives C# facade rendering"),
+		FAvidScriptEditorCSharpBindingEmitter::Emit(
+			UnaryDescriptorJson,
+			UnaryReferenceSource,
+			UnaryManifestJson,
+			UnaryEmitResult));
+	TestTrue(
+		TEXT("Generated unary facade returns the typed host result directly"),
+		UnaryReferenceSource.Contains(
+			TEXT("return AvidScriptNative.Invoke0000(this.Slot, this.Generation"))
+			&& !UnaryReferenceSource.Contains(TEXT("out __returnValue")));
+
 	FAvidScriptBindingSelectionProfile VectorProfile;
 	VectorProfile.PackageName = TEXT("avidscript.generated.vector.descriptor");
 	FAvidScriptReflectedClassSelection VectorRule;

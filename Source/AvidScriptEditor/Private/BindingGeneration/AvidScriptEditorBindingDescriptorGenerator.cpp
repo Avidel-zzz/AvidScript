@@ -272,6 +272,14 @@ bool ResolveGeneratedFunctionShape(
 
 	const FString& ReturnType = Projection.ReturnValue.Type.CanonicalType;
 	if (ReturnType == TEXT("scalar:i32")
+		&& Projection.Parameters.Num() == 1
+		&& Projection.Parameters[0].Type.CanonicalType == TEXT("scalar:i32"))
+	{
+		OutShape = TEXT("i32_to_i32");
+		OutReceiverMode = TEXT("self_bound");
+		return true;
+	}
+	if (ReturnType == TEXT("scalar:i32")
 		&& Projection.Parameters.Num() == 2
 		&& Projection.Parameters[0].Type.CanonicalType == TEXT("scalar:i32")
 		&& Projection.Parameters[1].Type.CanonicalType == TEXT("scalar:i32"))
@@ -303,6 +311,10 @@ bool ResolveGeneratedFunctionShape(
 
 FString MakeGeneratedFunctionAbiSignature(const FString& Shape)
 {
+	if (Shape == TEXT("i32_to_i32"))
+	{
+		return TEXT("(iii)i");
+	}
 	if (Shape == TEXT("i32_pair_to_i32"))
 	{
 		return TEXT("(iiii)i");

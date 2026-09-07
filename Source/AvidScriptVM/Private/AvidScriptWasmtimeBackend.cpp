@@ -2707,6 +2707,36 @@ private:
 			*OutValue);
 	}
 
+	static int32 TypedSelfI32Callback(
+		void* Environment,
+		const int32 SelfSlot,
+		const int32 SelfGeneration,
+		const int32 Value,
+		int32* OutValue)
+	{
+		FAvidScriptWasmtimeTypedHostContext* HostContext =
+			static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
+		if (HostContext == nullptr
+			|| OutValue == nullptr
+			|| HostContext->PreparedTarget.SelfI32 == nullptr
+			|| HostContext->PreparedTarget.Context == nullptr)
+		{
+			return 1;
+		}
+		if (!ConsumePreparedTypedHostCall(*HostContext))
+		{
+			return 1;
+		}
+		const EAvidScriptVmTypedHostStatus Status =
+			HostContext->PreparedTarget.SelfI32(
+				HostContext->PreparedTarget.Context,
+				SelfSlot,
+				SelfGeneration,
+				Value,
+				*OutValue);
+		return CompletePreparedTypedInvocation(*HostContext, Status);
+	}
+
 	static int32 TypedSelfI32PairGuestResultCallback(
 		void* Environment,
 		const int32 SelfSlot,
@@ -3167,6 +3197,9 @@ private:
 			case EAvidScriptVmTypedHostShape::I32PairToI32:
 				ExpectedSignature = TEXT("(ii)i");
 				break;
+			case EAvidScriptVmTypedHostShape::SelfI32ToI32:
+				ExpectedSignature = TEXT("(iii)i");
+				break;
 			case EAvidScriptVmTypedHostShape::SelfI32PairToI32:
 				ExpectedSignature = TEXT("(iiii)i");
 				break;
@@ -3241,7 +3274,8 @@ private:
 				return false;
 			}
 			const int32 PreparedFunctionCount =
-				(Import.PreparedTarget.SelfI32Pair != nullptr ? 1 : 0)
+				(Import.PreparedTarget.SelfI32 != nullptr ? 1 : 0)
+				+ (Import.PreparedTarget.SelfI32Pair != nullptr ? 1 : 0)
 				+ (Import.PreparedTarget.SelfI32PairGuestResult != nullptr
 					? 1
 					: 0)
@@ -3265,7 +3299,8 @@ private:
 			const bool bHasPreparedContext =
 				Import.PreparedTarget.Context != nullptr;
 			const bool bRequiresPreparedTarget =
-				Import.Shape
+				Import.Shape == EAvidScriptVmTypedHostShape::SelfI32ToI32
+				|| Import.Shape
 					== EAvidScriptVmTypedHostShape::SelfI32PairToGuestI32
 				|| Import.Shape
 					== EAvidScriptVmTypedHostShape::SelfF32TripleToGuestVector
@@ -3369,6 +3404,16 @@ private:
 					ImportNameUtf8.Get(),
 					static_cast<size_t>(ImportNameUtf8.Length()),
 					&TypedI32PairCallback,
+					HostContextPointer);
+				break;
+			case EAvidScriptVmTypedHostShape::SelfI32ToI32:
+				DefineFailure = avidscript_wasmtime_linker_define_self_i32(
+					Linker,
+					ModuleNameUtf8.Get(),
+					static_cast<size_t>(ModuleNameUtf8.Length()),
+					ImportNameUtf8.Get(),
+					static_cast<size_t>(ImportNameUtf8.Length()),
+					&TypedSelfI32Callback,
 					HostContextPointer);
 				break;
 			case EAvidScriptVmTypedHostShape::SelfI32PairToI32:

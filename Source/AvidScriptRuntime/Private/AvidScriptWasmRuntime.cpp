@@ -21,6 +21,7 @@ struct FAvidScriptPreparedGeneratedHostCall
 {
 	FAvidScriptWasmRuntimeInstance* Runtime = nullptr;
 	FAvidScriptPreparedGeneratedBinding Binding;
+	FAvidScriptGeneratedI32Call I32Call = nullptr;
 	FAvidScriptGeneratedI32PairCall I32PairCall = nullptr;
 	FAvidScriptGeneratedPropertyI32GetCall PropertyI32GetCall = nullptr;
 	FAvidScriptGeneratedPropertyI32SetCall PropertyI32SetCall = nullptr;
@@ -673,6 +674,8 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 			return false;
 		}
 		if (Import.Shape
+				!= EAvidScriptVmTypedHostShape::SelfI32ToI32
+			&& Import.Shape
 				!= EAvidScriptVmTypedHostShape::SelfI32PairToI32
 			&& Import.Shape
 				!= EAvidScriptVmTypedHostShape::SelfPropertyI32Get
@@ -681,6 +684,11 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 		{
 			continue;
 		}
+		const bool bUnaryScalarShapeMatches =
+			Import.Shape == EAvidScriptVmTypedHostShape::SelfI32ToI32
+			&& Binding.Entry->Shape
+				== EAvidScriptGeneratedBindingShape::I32ToI32
+			&& Binding.Entry->I32Call != nullptr;
 		const bool bScalarShapeMatches =
 			Import.Shape == EAvidScriptVmTypedHostShape::SelfI32PairToI32
 			&& Binding.Entry->Shape
@@ -698,7 +706,8 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 			&& Binding.Entry->PropertyI32SetCall != nullptr;
 		if (Binding.Entry->ReceiverMode
 				!= EAvidScriptGeneratedReceiverMode::SelfBound
-			|| (!bScalarShapeMatches
+			|| (!bUnaryScalarShapeMatches
+				&& !bScalarShapeMatches
 				&& !bPropertyGetShapeMatches
 				&& !bPropertySetShapeMatches))
 		{
@@ -716,6 +725,14 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 		Import.PreparedTarget.Context = Call.Get();
 		switch (Import.Shape)
 		{
+		case EAvidScriptVmTypedHostShape::SelfI32ToI32:
+			Call->I32Call =
+				Binding.Entry->PreparedI32Call != nullptr
+				? Binding.Entry->PreparedI32Call
+				: Binding.Entry->I32Call;
+			Import.PreparedTarget.SelfI32 =
+				&FAvidScriptWasmRuntimeInstance::InvokePreparedSelfI32;
+			break;
 		case EAvidScriptVmTypedHostShape::SelfI32PairToI32:
 			Call->I32PairCall =
 				Binding.Entry->PreparedI32PairCall != nullptr
@@ -5413,6 +5430,55 @@ FAvidScriptWasmRuntimeInstance::RecordGeneratedStatus(
 		++Instrumentation->GeneratedNativeS1RejectCount;
 	}
 	return EAvidScriptVmTypedHostStatus::Rejected;
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::InvokePreparedSelfI32(
+	void* Context,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	const int32 Value,
+	int32& OutValue)
+{
+	FAvidScriptPreparedGeneratedHostCall* Call =
+		static_cast<FAvidScriptPreparedGeneratedHostCall*>(Context);
+	if (Call == nullptr || Call->Runtime == nullptr)
+	{
+		OutValue = 0;
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+	return Call->Runtime->DispatchPreparedSelfI32(
+		*Call,
+		SelfSlot,
+		SelfGeneration,
+		Value,
+		OutValue);
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::DispatchPreparedSelfI32(
+	FAvidScriptPreparedGeneratedHostCall& Call,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	const int32 Value,
+	int32& OutValue)
+{
+	OutValue = 0;
+	if (Call.I32Call == nullptr)
+	{
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+
+	UObject* Receiver = nullptr;
+	if (!TryResolveFusedCallbackReceiver(
+			SelfSlot,
+			SelfGeneration,
+			Receiver)
+		|| !PrepareFusedGeneratedHostEffect(Call, *Receiver))
+	{
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+	return RecordGeneratedStatus(Call.I32Call(*Receiver, Value, OutValue));
 }
 
 EAvidScriptVmTypedHostStatus

@@ -6,6 +6,11 @@
 
 class UObject;
 
+using FAvidScriptGeneratedI32Call = EAvidScriptVmTypedHostStatus (*)(
+	UObject& Receiver,
+	int32 Value,
+	int32& OutValue);
+
 using FAvidScriptGeneratedI32PairCall = EAvidScriptVmTypedHostStatus (*)(
 	UObject& Receiver,
 	int32 Left,
@@ -57,6 +62,8 @@ struct FAvidScriptGeneratedBindingEntry
 		PreparedPropertyI32GetCall = nullptr;
 	FAvidScriptGeneratedPropertyI32SetCall
 		PreparedPropertyI32SetCall = nullptr;
+	FAvidScriptGeneratedI32Call I32Call = nullptr;
+	FAvidScriptGeneratedI32Call PreparedI32Call = nullptr;
 };
 
 struct FAvidScriptGeneratedBindingPackageState;

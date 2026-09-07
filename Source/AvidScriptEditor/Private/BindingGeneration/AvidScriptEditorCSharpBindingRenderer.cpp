@@ -659,6 +659,10 @@ FString MakeExpectedAbiSignature(const FAvidScriptBindingFunctionModel& Binding)
 {
 	if (Binding.DispatchMode == TEXT("generated_native_s1"))
 	{
+		if (Binding.GeneratedShape == TEXT("i32_to_i32"))
+		{
+			return TEXT("(iii)i");
+		}
 		if (Binding.GeneratedShape == TEXT("i32_pair_to_i32"))
 		{
 			return TEXT("(iiii)i");
@@ -734,9 +738,10 @@ bool RenderMethod(
 		OutErrorCategory = TEXT("unsupported_csharp_type");
 		return false;
 	}
-	const bool bGeneratedI32Pair =
+	const bool bGeneratedI32Return =
 		Binding.DispatchMode == TEXT("generated_native_s1")
-		&& Binding.GeneratedShape == TEXT("i32_pair_to_i32");
+		&& (Binding.GeneratedShape == TEXT("i32_to_i32")
+			|| Binding.GeneratedShape == TEXT("i32_pair_to_i32"));
 	const bool bGeneratedVectorValue =
 		Binding.DispatchMode == TEXT("generated_native_s1")
 		&& Binding.GeneratedShape == TEXT("vector_value");
@@ -1039,7 +1044,7 @@ bool RenderMethod(
 	}
 
 	if (Binding.ReturnValue.CanonicalType != TEXT("void")
-		&& !bGeneratedI32Pair
+		&& !bGeneratedI32Return
 		&& !bGeneratedVectorValue)
 	{
 		FString StorageType;
@@ -1066,7 +1071,7 @@ bool RenderMethod(
 	{
 		OutMethod.MethodLines.Add(TEXT("        ") + Line);
 	}
-	if (bGeneratedI32Pair)
+	if (bGeneratedI32Return)
 	{
 		OutMethod.MethodLines.Add(FString::Printf(
 			TEXT("        return AvidScriptNative.%s(%s);"),
@@ -1089,7 +1094,7 @@ bool RenderMethod(
 		OutMethod.MethodLines.Add(TEXT("        return __vectorValue.Result;"));
 	}
 	else if (Binding.ReturnValue.CanonicalType != TEXT("void")
-		&& !bGeneratedI32Pair)
+		&& !bGeneratedI32Return)
 	{
 		OutMethod.MethodLines.Add(TEXT("        return ") + ConvertFromStorage(Binding.ReturnValue, TEXT("__returnValue")) + TEXT(";"));
 	}

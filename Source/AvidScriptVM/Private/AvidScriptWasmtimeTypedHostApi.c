@@ -22,6 +22,12 @@ typedef struct AvidScriptWasmtimeSelfI32PairBridge
 	void* environment;
 } AvidScriptWasmtimeSelfI32PairBridge;
 
+typedef struct AvidScriptWasmtimeSelfI32Bridge
+{
+	AvidScriptWasmtimeSelfI32Callback callback;
+	void* environment;
+} AvidScriptWasmtimeSelfI32Bridge;
+
 typedef struct AvidScriptWasmtimeSelfI32PairGuestResultBridge
 {
 	AvidScriptWasmtimeSelfI32PairGuestResultCallback callback;
@@ -208,6 +214,25 @@ static wasm_trap_t* avidscript_wasmtime_self_i32_pair_guest_result_trampoline(
 			&status) != 0)
 		return avidscript_wasmtime_typed_host_failed();
 	args_and_results[0].i32 = status;
+	return NULL;
+}
+
+static wasm_trap_t* avidscript_wasmtime_self_i32_trampoline(
+	void* environment,
+	wasmtime_caller_t* caller,
+	wasmtime_val_raw_t* args_and_results,
+	size_t count)
+{
+	AvidScriptWasmtimeSelfI32Bridge* bridge = (AvidScriptWasmtimeSelfI32Bridge*)environment;
+	int32_t value = 0;
+	(void)caller;
+	if (bridge == NULL || bridge->callback == NULL || args_and_results == NULL)
+		return avidscript_wasmtime_typed_bridge_unavailable();
+	if (count != 3)
+		return avidscript_wasmtime_typed_raw_arity_invalid();
+	if (bridge->callback(bridge->environment, args_and_results[0].i32, args_and_results[1].i32, args_and_results[2].i32, &value) != 0)
+		return avidscript_wasmtime_typed_host_failed();
+	args_and_results[0].i32 = value;
 	return NULL;
 }
 
@@ -479,6 +504,23 @@ AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_i32_pair_guest
 		avidscript_wasmtime_self_i32_pair_guest_result_trampoline,
 		bridge,
 		"Could not allocate the typed self-i32-pair guest-result function type.");
+}
+
+AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_i32(
+	AvidScriptWasmtimeLinker* linker,
+	const char* module_name,
+	size_t module_name_size,
+	const char* import_name,
+	size_t import_name_size,
+	AvidScriptWasmtimeSelfI32Callback callback,
+	void* environment)
+{
+	AvidScriptWasmtimeSelfI32Bridge* bridge = (AvidScriptWasmtimeSelfI32Bridge*)calloc(1, sizeof(*bridge));
+	if (bridge == NULL)
+		return avidscript_wasmtime_local_failure("Could not allocate the typed self-i32 bridge.");
+	bridge->callback = callback;
+	bridge->environment = environment;
+	return avidscript_wasmtime_linker_define_typed_i32(linker, module_name, module_name_size, import_name, import_name_size, 3, avidscript_wasmtime_self_i32_trampoline, bridge, "Could not allocate the typed self-i32 function type.");
 }
 
 AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_f32_triple_guest_vector(

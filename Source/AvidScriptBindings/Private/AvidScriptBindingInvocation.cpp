@@ -56,6 +56,13 @@ bool TryParseAvidScriptGeneratedShape(
 	EAvidScriptVmTypedHostShape& OutVmShape,
 	FString& OutSignature)
 {
+	if (Shape == TEXT("i32_to_i32"))
+	{
+		OutGeneratedShape = EAvidScriptGeneratedBindingShape::I32ToI32;
+		OutVmShape = EAvidScriptVmTypedHostShape::SelfI32ToI32;
+		OutSignature = TEXT("(iii)i");
+		return true;
+	}
 	if (Shape == TEXT("i32_pair_to_i32"))
 	{
 		OutGeneratedShape = EAvidScriptGeneratedBindingShape::I32PairToI32;
@@ -1832,6 +1839,10 @@ FString MakeAvidScriptRuntimeExpectedSignature(const FAvidScriptBindingFunctionM
 {
 	if (Binding.DispatchMode == TEXT("generated_native_s1"))
 	{
+		if (Binding.GeneratedShape == TEXT("i32_to_i32"))
+		{
+			return TEXT("(iii)i");
+		}
 		if (Binding.GeneratedShape == TEXT("i32_pair_to_i32"))
 		{
 			return TEXT("(iiii)i");

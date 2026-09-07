@@ -484,6 +484,32 @@ struct FPreparedSelfI32PairContext
 	int32 Bias = 0;
 };
 
+struct FPreparedSelfI32Context
+{
+	int32 CallCount = 0;
+	int32 LastValue = 0;
+	int32 Bias = 0;
+};
+
+EAvidScriptVmTypedHostStatus InvokePreparedSelfI32ForTest(
+	void* Context,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	const int32 Value,
+	int32& OutValue)
+{
+	FPreparedSelfI32Context* Prepared =
+		static_cast<FPreparedSelfI32Context*>(Context);
+	if (Prepared == nullptr)
+	{
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+	++Prepared->CallCount;
+	Prepared->LastValue = Value;
+	OutValue = SelfSlot + SelfGeneration + Value + Prepared->Bias;
+	return EAvidScriptVmTypedHostStatus::Succeeded;
+}
+
 EAvidScriptVmTypedHostStatus InvokePreparedSelfI32PairForTest(
 	void* Context,
 	const int32 SelfSlot,
@@ -868,6 +894,46 @@ bool FAvidScriptVmWasmtimeTypedHostTest::RunTest(const FString& Parameters)
 		TEXT("prepared target bypasses the virtual dispatcher"),
 		PreparedFallbackDispatcher.SelfI32PairCalls,
 		0);
+
+	FAvidScriptVmError PreparedUnaryError;
+	TUniquePtr<IAvidScriptVmBackend> PreparedUnaryBackend =
+		CreateTypedWasmtimeBackend(PreparedUnaryError);
+	FPreparedSelfI32Context PreparedUnaryContext;
+	PreparedUnaryContext.Bias = 5;
+	FAvidScriptVmBindingPackage PreparedUnaryPackage =
+		MakeTypedBindingPackage(TEXT("(iii)i"));
+	TArray<FAvidScriptVmTypedHostImport> PreparedUnaryImports = {
+		MakeTypedImport(
+			EAvidScriptVmTypedHostShape::SelfI32ToI32,
+			TEXT("(iii)i"))
+	};
+	PreparedUnaryImports[0].PreparedTarget.Context = &PreparedUnaryContext;
+	PreparedUnaryImports[0].PreparedTarget.SelfI32 =
+		&InvokePreparedSelfI32ForTest;
+	FAvidScriptVmLoadConfig PreparedUnaryConfig;
+	PreparedUnaryConfig.BindingPackage = &PreparedUnaryPackage;
+	PreparedUnaryConfig.TypedHostDispatcher = &PreparedFallbackDispatcher;
+	PreparedUnaryConfig.TypedHostImports = PreparedUnaryImports;
+	TestTrue(
+		TEXT("prepared unary int32 fixture loads"),
+		PreparedUnaryBackend->Load(
+			BuildTypedHostFixture(TArray<int32>{2, 3, 4}),
+			TEXT("typed_prepared_unary_i32"),
+			PreparedUnaryConfig,
+			PreparedUnaryError));
+	ResolveAndCallTypedRun(
+		*this,
+		*PreparedUnaryBackend,
+		14,
+		PreparedUnaryError);
+	TestEqual(
+		TEXT("prepared unary int32 target is called exactly once"),
+		PreparedUnaryContext.CallCount,
+		1);
+	TestEqual(
+		TEXT("prepared unary int32 forwards its value"),
+		PreparedUnaryContext.LastValue,
+		4);
 
 	FAvidScriptVmError PreparedBudgetError;
 	TUniquePtr<IAvidScriptVmBackend> PreparedBudgetBackend =

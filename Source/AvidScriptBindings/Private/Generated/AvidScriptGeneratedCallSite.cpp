@@ -6,7 +6,8 @@ bool IsAvidScriptGeneratedCallSiteValid(
 	const FAvidScriptGeneratedBindingEntry& Entry)
 {
 	const int32 PointerCount =
-		(Entry.I32PairCall != nullptr ? 1 : 0)
+		(Entry.I32Call != nullptr ? 1 : 0)
+		+ (Entry.I32PairCall != nullptr ? 1 : 0)
 		+ (Entry.PropertyI32Call != nullptr ? 1 : 0)
 		+ (Entry.PropertyI32GetCall != nullptr ? 1 : 0)
 		+ (Entry.PropertyI32SetCall != nullptr ? 1 : 0)
@@ -16,7 +17,9 @@ bool IsAvidScriptGeneratedCallSiteValid(
 	{
 		return false;
 	}
-	if ((Entry.PreparedI32PairCall != nullptr
+	if ((Entry.PreparedI32Call != nullptr
+			&& Entry.I32Call == nullptr)
+		|| (Entry.PreparedI32PairCall != nullptr
 			&& Entry.I32PairCall == nullptr)
 		|| (Entry.PreparedPropertyI32GetCall != nullptr
 			&& Entry.PropertyI32GetCall == nullptr)
@@ -28,30 +31,41 @@ bool IsAvidScriptGeneratedCallSiteValid(
 
 	switch (Entry.Shape)
 	{
+	case EAvidScriptGeneratedBindingShape::I32ToI32:
+		return Entry.I32Call != nullptr
+			&& Entry.PreparedI32PairCall == nullptr
+			&& Entry.PreparedPropertyI32GetCall == nullptr
+			&& Entry.PreparedPropertyI32SetCall == nullptr;
 	case EAvidScriptGeneratedBindingShape::I32PairToI32:
 		return Entry.I32PairCall != nullptr
+			&& Entry.PreparedI32Call == nullptr
 			&& Entry.PreparedPropertyI32GetCall == nullptr
 			&& Entry.PreparedPropertyI32SetCall == nullptr;
 	case EAvidScriptGeneratedBindingShape::PropertyI32GetSet:
 		return Entry.PropertyI32Call != nullptr
+			&& Entry.PreparedI32Call == nullptr
 			&& Entry.PreparedI32PairCall == nullptr
 			&& Entry.PreparedPropertyI32GetCall == nullptr
 			&& Entry.PreparedPropertyI32SetCall == nullptr;
 	case EAvidScriptGeneratedBindingShape::PropertyI32Get:
 		return Entry.PropertyI32GetCall != nullptr
+			&& Entry.PreparedI32Call == nullptr
 			&& Entry.PreparedI32PairCall == nullptr
 			&& Entry.PreparedPropertyI32SetCall == nullptr;
 	case EAvidScriptGeneratedBindingShape::PropertyI32Set:
 		return Entry.PropertyI32SetCall != nullptr
+			&& Entry.PreparedI32Call == nullptr
 			&& Entry.PreparedI32PairCall == nullptr
 			&& Entry.PreparedPropertyI32GetCall == nullptr;
 	case EAvidScriptGeneratedBindingShape::VectorValue:
 		return Entry.VectorValueCall != nullptr
+			&& Entry.PreparedI32Call == nullptr
 			&& Entry.PreparedI32PairCall == nullptr
 			&& Entry.PreparedPropertyI32GetCall == nullptr
 			&& Entry.PreparedPropertyI32SetCall == nullptr;
 	case EAvidScriptGeneratedBindingShape::StableObjectRoundtrip:
 		return Entry.ObjectRoundtripCall != nullptr
+			&& Entry.PreparedI32Call == nullptr
 			&& Entry.PreparedI32PairCall == nullptr
 			&& Entry.PreparedPropertyI32GetCall == nullptr
 			&& Entry.PreparedPropertyI32SetCall == nullptr;

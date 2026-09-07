@@ -69,6 +69,11 @@ bool TryParseShape(
 	const FString& Value,
 	EAvidScriptGeneratedBindingShape& OutShape)
 {
+	if (Value == TEXT("i32_to_i32"))
+	{
+		OutShape = EAvidScriptGeneratedBindingShape::I32ToI32;
+		return true;
+	}
 	if (Value == TEXT("i32_pair_to_i32"))
 	{
 		OutShape = EAvidScriptGeneratedBindingShape::I32PairToI32;

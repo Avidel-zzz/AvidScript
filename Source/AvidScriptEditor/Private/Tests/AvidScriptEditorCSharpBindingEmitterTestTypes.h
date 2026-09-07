@@ -342,6 +342,12 @@ public:
 	}
 
 	UFUNCTION(BlueprintPure)
+	int32 GeneratedI32Unary(int32 Value) const
+	{
+		return Value;
+	}
+
+	UFUNCTION(BlueprintPure)
 	FVector GeneratedVectorValue(const FVector& Value) const
 	{
 		return Value;
