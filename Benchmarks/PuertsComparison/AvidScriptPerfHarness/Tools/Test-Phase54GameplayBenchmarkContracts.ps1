@@ -328,6 +328,8 @@ foreach ($preparedWorkload in @(
     Assert-True ($evaluatorAdaptiveMatrix.Contains($preparedWorkload)) `
         "统一 Gate adaptive native oracle 必须覆盖 $preparedWorkload。"
 }
+Assert-True ($runnerFusedMatrix.Contains('ObjectRoundtrip')) `
+    'Runner fused generated oracle 必须覆盖 packed object roundtrip。'
 Assert-True ($runnerAdaptiveMatrix.Contains(
         'return GetExpectedLogicalOperationCount(Workload, Iterations);') -and
     $evaluatorAdaptiveMatrix.Contains(

@@ -1748,6 +1748,7 @@ namespace
 		case EAvidScriptPerfWorkload::ScalarAddInt32:
 		case EAvidScriptPerfWorkload::BatchScalar:
 		case EAvidScriptPerfWorkload::VectorRefOut:
+		case EAvidScriptPerfWorkload::ObjectRoundtrip:
 			return static_cast<uint64>(Iterations);
 		case EAvidScriptPerfWorkload::PropertyGetSet:
 			return static_cast<uint64>(Iterations) * 2u;
