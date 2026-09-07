@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "phase": "P65.D21",
+  "evidence_class": "formal",
+  "performance_gate_result": "improved_not_met",
+  "runtime_evidence": {
+    "commit": "9335ae665715d8b95cf2987b1c116285dc04b87c",
+    "tree": "3884e9ec730318e1e7411a4480826ac0a497550c",
+    "candidate_id": "d80489800683b02b6b52",
+    "candidate_manifest_sha256": "cbca1eda95096b1a2c335fe6800d662774707049b7df03a950056d8ad9de9de5",
+    "packaged_host_producer_commit": "74eda44307d8bd0b41d3a3e78726f40923e71e2f",
+    "packaged_host_manifest_sha256": "27e405054e328eccfccc108d917a140872af385b8a9b97837d37018bc9db917a",
+    "archive_content_sha256": "ad7de658927eeb17af10f6eb7beef0bfa3151d239c0651914795d0c72341f07d",
+    "archive_file_count": 43,
+    "launcher_sha256": "15dedb74256d4daaa117f718719ebd797c0a7bf442ac444420cbc0322da2620f",
+    "runtime_executable_sha256": "e3a5a0d4f987c52278b1a2a83fe61addf259b3c264245f4e57c8a54fcb9458ca",
+    "uat_log_sha256": "8c950495185a6343d6e63793a0521ff91dd264b658f0d7799c702e9538e2f845",
+    "pak_sha256": "da26f4fcb29ca2c294805fe7fed844c2487e670a1482d99d0b615d55096b94e8",
+    "automation_log_sha256": "eab2012fcda57630ed4e9011b685340149eb99cb4dc695033811046912e8c0a2",
+    "architecture_checker_sha256": "a2c10ef70aa4908c23fc59fcb2bf405210f1dcfbfd29c23d027ee07132a214d5"
+  },
+  "verification": {
+    "editor_build_actions_succeeded": 37,
+    "editor_build_actions_total": 37,
+    "automation_tests_succeeded": 20,
+    "automation_tests_total": 20,
+    "diagnostic_correct_samples": 600,
+    "diagnostic_total_samples": 600,
+    "formal_correct_samples": 9000,
+    "formal_total_samples": 9000
+  },
+  "competitor": {
+    "name": "Puerts V8",
+    "commit": "1977328c84661024be10a9e73640a74b278a7659"
+  },
+  "profile": {
+    "id": "phase65.verified-package-micro-formal-v1",
+    "sha256": "1f10ef3d34d8784789a2d2594ec1fe7704268305b0eae356aec398263dba15ba",
+    "process_runs": 5,
+    "warmup_samples": 5,
+    "timed_samples": 30,
+    "correct_samples": 9000,
+    "total_samples": 9000,
+    "fallback_samples": 0,
+    "execution_host": "packaged_game"
+  },
+  "callback_empty": {
+    "adaptive_semantic_p50_ns": 108.865625,
+    "adaptive_semantic_p95_ns": 112.7703125,
+    "data_oriented_p50_ns": 109.253125,
+    "data_oriented_p95_ns": 113.846875,
+    "generated_s1_p50_ns": 108.078125,
+    "generated_s1_p95_ns": 112.0953125,
+    "puerts_reflection_p50_ns": 104.478125,
+    "puerts_reflection_p95_ns": 108.7203125,
+    "puerts_static_p50_ns": 104.771875,
+    "puerts_static_p95_ns": 107.7484375,
+    "generated_s1_p50_ratio_to_puerts_static": 1.0315566558296299,
+    "generated_s1_p95_ratio_to_puerts_static": 1.0403428123957714,
+    "generated_delta_from_d20_p50_percent": -0.279683985929291,
+    "generated_delta_from_d20_p95_percent": -15.252855775932328
+  },
+  "callback_tick": {
+    "adaptive_semantic_p50_ns": 108.93125,
+    "adaptive_semantic_p95_ns": 115.5015625,
+    "data_oriented_p50_ns": 109.8234375,
+    "data_oriented_p95_ns": 113.865625,
+    "generated_s1_p50_ns": 111.0359375,
+    "generated_s1_p95_ns": 117.271875,
+    "puerts_reflection_p50_ns": 117.3609375,
+    "puerts_reflection_p95_ns": 121.365625,
+    "puerts_static_p50_ns": 117.0703125,
+    "puerts_static_p95_ns": 122.2484375,
+    "generated_s1_p50_ratio_to_puerts_static": 0.9484551217884551,
+    "generated_s1_p95_ratio_to_puerts_static": 0.9592914019862216,
+    "generated_delta_from_d20_p50_percent": -15.58810253486328,
+    "generated_delta_from_d20_p95_percent": -15.252591404891502
+  },
+  "ten_workload_summary": {
+    "generated_s1_p50_geometric_mean_ratio": 0.6692374379376015,
+    "generated_s1_p95_geometric_mean_ratio": 0.6668832008130635,
+    "generated_s1_p50_wins": 7,
+    "generated_s1_p95_wins": 7,
+    "data_oriented_p50_geometric_mean_ratio": 0.6702718061295804,
+    "data_oriented_p95_geometric_mean_ratio": 0.6675907175967262,
+    "data_oriented_p50_wins": 7,
+    "data_oriented_p95_wins": 7,
+    "workload_count": 10,
+    "callback_gate_passed": false,
+    "controlled_leadership_claim_ready": false
+  },
+  "packaged_host_hardening": {
+    "uat_false_success_detected": true,
+    "debug_symbols_excluded": true,
+    "iostore_pairs_verified": true,
+    "invalid_attempt_used_as_evidence": false
+  },
+  "raw_result_sha256": [
+    "937b8d8a76b45095cf2d5f33a63b327d7138a9904e2968f2278ead246f666c7d",
+    "8755a391093b8878ef5ca4eb365e7e7bb8a1260f0a4b86c81d52cbb46051b968",
+    "c77fc44387fe60ccf47ab81753e4b32dd8596101672e90cca8fbc9b3208ef0a8",
+    "b4d58b92d8ba376be2b6923f36d9ae4b975fbd8960fddf43ff55f1c54503aa92",
+    "37d2bdfba28d72f19d8b9db77a7fa2601fede278a38cd2d12e437e898e3bfc9f"
+  ],
+  "open_debt": [
+    "P65-D01-AndroidDevice",
+    "P65-D02-ManualReleaseAcceptance",
+    "P65-D03-ControlledLeadership",
+    "P65-D04-PublicBinaryPrivacy",
+    "angelscript_same_semantics"
+  ]
+}
