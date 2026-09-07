@@ -147,7 +147,7 @@ function Invoke-LeadershipProfilePreparation {
     while ($true) {
         $Attempt++
         $LogPath = Join-Path $LogRoot ("prepare-$([string]$Profile.artifact_stem)-attempt$Attempt-$([Guid]::NewGuid().ToString('N')).log")
-        $Output = @(& $EditorExecutable $ProjectPath -run=AvidScriptPerfPrepare $ProfileArgument -unattended -nop4 -nullrhi -nosplash "-abslog=$LogPath" 2>&1)
+        $Output = @(& $EditorExecutable $ProjectPath -run=AvidScriptPerfPrepare $ProfileArgument -AvidScriptSuppressGeneratedTypeExecution -unattended -nop4 -nullrhi -nosplash "-abslog=$LogPath" 2>&1)
         $ExitCode = $LASTEXITCODE
         if ($ExitCode -eq 0) {
             break

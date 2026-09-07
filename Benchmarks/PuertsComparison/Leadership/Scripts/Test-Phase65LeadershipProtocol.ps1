@@ -57,6 +57,7 @@ Assert-True ($PackagedHostScriptText.Contains("'-build'") -and
 $CandidateScriptText = Get-Content -LiteralPath $CandidateScriptPath -Raw
 Assert-True ($CandidateScriptText.Contains('source did not stabilize after the bounded two-pass preparation')) 'candidate freezer must fail closed after two source-stabilization passes'
 Assert-True ($CandidateScriptText.Contains("'-Profile=`"{0}`"'")) 'candidate freezer must preserve hyphenated profile paths through UE command-line parsing'
+Assert-True ($CandidateScriptText.Contains('-AvidScriptSuppressGeneratedTypeExecution')) 'candidate freezer must suppress Generated Type package startup before the release catalog exists'
 Assert-True ($CandidateScriptText.Contains('BuildCSharpScriptTypes.ps1') -and
     $CandidateScriptText.Contains('avidscript_phase65_benchmark_generated_types') -and
     $CandidateScriptText.Contains('Generated Type package is not a unique Win64 Development catalog variant')) 'candidate freezer must publish and freeze the packaged-target Generated Type prerequisite'
