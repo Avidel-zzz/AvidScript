@@ -46,7 +46,10 @@ Assert-True ($PackagedHostScriptText.Contains("'-build'") -and
     $PackagedHostScriptText.Contains("'-cook'") -and
     $PackagedHostScriptText.Contains("'-stage'") -and
     $PackagedHostScriptText.Contains("'-pak'") -and
+    $PackagedHostScriptText.Contains("'-nodebuginfo'") -and
     $PackagedHostScriptText.Contains('$FinalizeExistingArchive') -and
+    $PackagedHostScriptText.Contains('SafeCopyFile Exception') -and
+    $PackagedHostScriptText.Contains("[IO.Path]::ChangeExtension(`$containerToc.FullName, '.ucas')") -and
     $PackagedHostScriptText.Contains("Windows/`$target.exe") -and
     $PackagedHostScriptText.Contains('Assert-SidecarBenchmarkProjectProvenance') -and
     $PackagedHostScriptText.Contains('Assert-GeneratedTypeIdentity') -and

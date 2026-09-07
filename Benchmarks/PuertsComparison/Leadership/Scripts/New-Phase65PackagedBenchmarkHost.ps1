@@ -26,6 +26,29 @@ function Resolve-RequiredPath {
     return $resolved
 }
 
+function Assert-CompletedBuildCookRunArchive {
+    param(
+        [Parameter(Mandatory = $true)][string]$UatOutput,
+        [Parameter(Mandatory = $true)][string]$ArchiveRoot
+    )
+
+    if ($UatOutput.Contains('SafeCopyFile Exception') -or
+        $UatOutput.Contains('Failed to copy ')) {
+        throw 'ASP65H2006 BuildCookRun reported an archive copy failure despite its success exit code'
+    }
+    $containerTocs = @(Get-ChildItem -LiteralPath $ArchiveRoot -Filter '*.utoc' -File -Recurse)
+    if ($containerTocs.Count -eq 0) {
+        throw 'ASP65H2006 packaged host contains no IoStore container table'
+    }
+    foreach ($containerToc in $containerTocs) {
+        $containerDataPath = [IO.Path]::ChangeExtension($containerToc.FullName, '.ucas')
+        if (-not (Test-Path -LiteralPath $containerDataPath -PathType Leaf) -or
+            (Get-Item -LiteralPath $containerDataPath).Length -le 0) {
+            throw "ASP65H2006 packaged host container data is missing or empty: $containerDataPath"
+        }
+    }
+}
+
 function Assert-GeneratedTypeIdentity {
     param(
         [Parameter(Mandatory = $true)]$Candidate,
@@ -125,6 +148,7 @@ else {
         "-target=$target",
         '-targetplatform=Win64',
         '-clientconfig=Development',
+        '-nodebuginfo',
         '-build',
         '-skipbuildeditor',
         '-cook',
@@ -166,6 +190,9 @@ else {
         throw "ASP65H2005 BuildCookRun failed with exit code $($process.ExitCode): $uatLogPath`n$tail"
     }
 }
+[void](Assert-CompletedBuildCookRunArchive `
+    -UatOutput $uatOutput `
+    -ArchiveRoot $archiveRoot)
 $executablePath = Resolve-RequiredPath `
     -Path (Join-Path $archiveRoot "Windows/$target.exe") `
     -PathType Leaf `
