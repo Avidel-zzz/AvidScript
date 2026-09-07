@@ -1695,7 +1695,12 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 
 	CollectDueTimers(DeltaSeconds);
 	Metrics.TimerCallbackCallMs = 0.0;
-	Metrics.TickCallMs = 0.0;
+	const bool bMeasureTick = !bHotFailureOnly
+		|| (TickCallCount & AvidScriptHotCallbackMetricSampleMask) == 0;
+	if (bMeasureTick)
+	{
+		Metrics.TickCallMs = 0.0;
+	}
 
 	const bool bHasGuestTick = TickExport.Handle.IsValid();
 	if (bHasGuestTick)
@@ -1704,7 +1709,9 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 		static_assert(sizeof(TickArgs[0]) == sizeof(DeltaSeconds), "VM f32 argument must fit in one cell.");
 		FMemory::Memcpy(&TickArgs[0], &DeltaSeconds, sizeof(DeltaSeconds));
 
-		const double TickStartSeconds = FPlatformTime::Seconds();
+		const double TickStartSeconds = bMeasureTick
+			? FPlatformTime::Seconds()
+			: 0.0;
 		BeginTypedCallbackEpoch();
 		FAvidScriptVmError TickError;
 		const bool bTickCalled = bHotFailureOnly
@@ -1727,7 +1734,10 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 		EndTypedCallbackEpoch();
 		if (!bTickCalled)
 		{
-			Metrics.TickCallMs = MeasureElapsedMs(TickStartSeconds);
+			if (bMeasureTick)
+			{
+				Metrics.TickCallMs = MeasureElapsedMs(TickStartSeconds);
+			}
 			if (bHotFailureOnly)
 			{
 				CaptureSnapshot(OutResult);
@@ -1747,7 +1757,10 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 			return false;
 		}
 
-		Metrics.TickCallMs = MeasureElapsedMs(TickStartSeconds);
+		if (bMeasureTick)
+		{
+			Metrics.TickCallMs = MeasureElapsedMs(TickStartSeconds);
+		}
 		++TickCallCount;
 	}
 	if (!bHotFailureOnly)
