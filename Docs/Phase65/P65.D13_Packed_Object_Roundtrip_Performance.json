@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "phase": "P65.D13",
+  "evidence_class": "formal",
+  "runtime_evidence": {
+    "implementation_commit": "d4dc09a12b54aa275fc1e62e8d2248eb50e48197",
+    "commit": "32d7befd5fc29623e1aa1920c065fe833aeea841",
+    "tree": "d4e1ef90c23d3d24df61ae776be4fac2cd701846",
+    "candidate_id": "99a9d9dd7516e5dfee3d",
+    "candidate_manifest_sha256": "8cee18da0db6e57618665d1e471ec0f3aa4340d0cd2556c75dd50f0033e053c2",
+    "packaged_host_manifest_sha256": "57198e64e614d6561d17ab64b994588908500b6fe984f9075a34a2421378a19b",
+    "archive_content_sha256": "5f498cc2939faefca4845887665cdca1fe5ed15d07064a4937006e5538f7407c",
+    "archive_file_count": 50,
+    "launcher_sha256": "15dedb74256d4daaa117f718719ebd797c0a7bf442ac444420cbc0322da2620f",
+    "runtime_executable_sha256": "b128add33a62f618972d842cb55f07d15beb85fb95ae118d5d01bf6586ae9bc6",
+    "uat_log_sha256": "25226450c32a02219941c0ed3351240c4e4f0690a21a3b2f3a41d53fa5d37e24",
+    "pak_sha256": "49f06a6d93787e65bd5484056aad8c22254e2eae6a2bb4a8208f3f4e94307460"
+  },
+  "competitor": {
+    "name": "Puerts V8",
+    "commit": "1977328c84661024be10a9e73640a74b278a7659"
+  },
+  "profile": {
+    "id": "phase65.verified-package-micro-formal-v1",
+    "sha256": "1f10ef3d34d8784789a2d2594ec1fe7704268305b0eae356aec398263dba15ba",
+    "process_runs": 5,
+    "warmup_samples": 5,
+    "timed_samples": 30,
+    "correct_samples": 9000,
+    "total_samples": 9000,
+    "execution_host": "packaged_game"
+  },
+  "object_roundtrip": {
+    "generated_s1_p50_ns": 51.88359375,
+    "generated_s1_p95_ns": 54.91875,
+    "data_oriented_p50_ns": 51.95703125,
+    "data_oriented_p95_ns": 54.65078125,
+    "adaptive_semantic_p50_ns": 94.6390625,
+    "adaptive_semantic_p95_ns": 98.25,
+    "puerts_reflection_p50_ns": 112.8921875,
+    "puerts_reflection_p95_ns": 120.875,
+    "puerts_static_p50_ns": 45.56953125,
+    "puerts_static_p95_ns": 47.746875,
+    "generated_s1_p50_ratio_to_puerts_static": 1.1385588643727822,
+    "generated_s1_p95_ratio_to_puerts_static": 1.1502061653249558,
+    "generated_s1_p50_ratio_to_puerts_reflection": 0.45958533445903865,
+    "data_oriented_p50_ratio_to_puerts_static": 1.1401704126592263,
+    "generated_s1_p50_speedup_from_d11": 2.8474198551444787,
+    "data_oriented_p50_speedup_from_d11": 2.812269754153823,
+    "generated_s1_p50_reduction_percent": 64.8804865150714,
+    "generated_s1_total_hits": 19200000,
+    "semantic_total_hits": 0,
+    "generated_s1_fallback_total": 0,
+    "generated_s1_reject_total": 0
+  },
+  "ten_workload_summary": {
+    "generated_s1_p50_geometric_mean_ratio": 0.7787198497377741,
+    "generated_s1_p95_geometric_mean_ratio": 0.7858491216088834,
+    "generated_s1_p50_wins": 6,
+    "generated_s1_p95_wins": 6,
+    "data_oriented_p50_geometric_mean_ratio": 0.7830894404323583,
+    "data_oriented_p95_geometric_mean_ratio": 0.787797627581339,
+    "data_oriented_p50_wins": 6,
+    "data_oriented_p95_wins": 6,
+    "workload_count": 10,
+    "ue_micro_aggregate_faster_than_best_puerts": true,
+    "controlled_leadership_claim_ready": false
+  },
+  "baseline": {
+    "phase": "P65.D11",
+    "candidate_id": "2a7f6ab653e64dc525ee",
+    "generated_s1_object_roundtrip_p50_ns": 147.734375,
+    "data_oriented_object_roundtrip_p50_ns": 146.1171875,
+    "generated_s1_p50_geometric_mean_ratio": 0.8100722411875741,
+    "generated_s1_p95_geometric_mean_ratio": 0.8701157833270847,
+    "generated_s1_p50_wins": 6,
+    "generated_s1_p95_wins": 6
+  },
+  "raw_result_sha256": [
+    "51f1450358e86fd8742b972e1408c233463a28cf7e8af1e2c40127c7527da1d1",
+    "1f82282f6ac12e8b6b30e433306282a250f96e1fcbb81ed3ff5cdf34caebc7f3",
+    "2277d0d7f635ed53bdbe33f1cbb21ca9d1a5b1103ca38ad76ab4f8054d8ef6be",
+    "44de3a26e38e0551310c90ebc1ff1a9325483ad180946e9190c5e2a8b10dcf85",
+    "ff40785bbbc17346874010e630d8c941fa2f0688a8d5ec89cafe0049b86c517d"
+  ],
+  "open_debt": [
+    "P65-D01-AndroidDevice",
+    "P65-D02-ManualReleaseAcceptance",
+    "P65-D03-ControlledLeadership",
+    "P65-D04-PublicBinaryPrivacy",
+    "angelscript_same_semantics"
+  ]
+}
