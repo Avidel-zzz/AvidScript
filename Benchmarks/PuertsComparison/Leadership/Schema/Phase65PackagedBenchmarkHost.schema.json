@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://avidscript.dev/schema/phase65-packaged-benchmark-host-v1.json",
+  "$id": "https://avidscript.dev/schema/phase65-packaged-benchmark-host-v2.json",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -20,10 +20,12 @@
     "archive_file_count",
     "executable_path",
     "executable_sha256",
+    "runtime_executable_path",
+    "runtime_executable_sha256",
     "pak_files"
   ],
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": { "const": 2 },
     "created_utc": { "type": "string", "format": "date-time" },
     "candidate_id": { "type": "string", "pattern": "^[0-9a-f]{20}$" },
     "candidate_manifest_sha256": { "$ref": "#/$defs/sha256" },
@@ -39,6 +41,8 @@
     "archive_file_count": { "type": "integer", "minimum": 1 },
     "executable_path": { "type": "string", "minLength": 1 },
     "executable_sha256": { "$ref": "#/$defs/sha256" },
+    "runtime_executable_path": { "type": "string", "minLength": 1 },
+    "runtime_executable_sha256": { "$ref": "#/$defs/sha256" },
     "pak_files": {
       "type": "array",
       "minItems": 1,

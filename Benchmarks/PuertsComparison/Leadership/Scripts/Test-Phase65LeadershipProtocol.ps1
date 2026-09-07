@@ -52,7 +52,8 @@ Assert-True ($PackagedHostScriptText.Contains("'-build'") -and
     $PackagedHostScriptText.Contains('Assert-GeneratedTypeIdentity') -and
     $PackagedHostScriptText.Contains('archive_content_sha256') -and
     $PackagedHostScriptText.Contains('package_catalog_sha256') -and
-    $PackagedHostScriptText.Contains('executable_sha256')) 'packaged host must freeze BuildCookRun and artifact identities'
+    $PackagedHostScriptText.Contains('executable_sha256') -and
+    $PackagedHostScriptText.Contains('runtime_executable_sha256')) 'packaged host must freeze BuildCookRun and artifact identities'
 $CandidateScriptText = Get-Content -LiteralPath $CandidateScriptPath -Raw
 Assert-True ($CandidateScriptText.Contains('source did not stabilize after the bounded two-pass preparation')) 'candidate freezer must fail closed after two source-stabilization passes'
 Assert-True ($CandidateScriptText.Contains("'-Profile=`"{0}`"'")) 'candidate freezer must preserve hyphenated profile paths through UE command-line parsing'

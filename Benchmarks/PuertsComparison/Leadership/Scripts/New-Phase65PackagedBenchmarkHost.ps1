@@ -170,6 +170,10 @@ $executablePath = Resolve-RequiredPath `
     -Path (Join-Path $archiveRoot "Windows/$target.exe") `
     -PathType Leaf `
     -Label 'packaged host launcher'
+$runtimeExecutablePath = Resolve-RequiredPath `
+    -Path (Join-Path $archiveRoot "Windows/$target/Binaries/Win64/$target.exe") `
+    -PathType Leaf `
+    -Label 'packaged host runtime executable'
 $pakFiles = @(Get-ChildItem -LiteralPath $archiveRoot -Filter '*.pak' -File -Recurse |
     Sort-Object FullName)
 if ($pakFiles.Count -eq 0) {
@@ -186,7 +190,7 @@ if ((Get-SidecarFileSha256 -Path $catalogPath) -cne
 }
 $archiveDigest = Get-SidecarDirectoryContentDigest -Path $archiveRoot
 $HostManifest = [ordered]@{
-    schema_version = 1
+    schema_version = 2
     created_utc = [DateTimeOffset]::UtcNow.ToString('o')
     candidate_id = [string]$candidate.candidate_id
     candidate_manifest_sha256 = Get-SidecarFileSha256 -Path $candidatePath
@@ -202,6 +206,8 @@ $HostManifest = [ordered]@{
     archive_file_count = [int]$archiveDigest.file_count
     executable_path = $executablePath
     executable_sha256 = Get-SidecarFileSha256 -Path $executablePath
+    runtime_executable_path = $runtimeExecutablePath
+    runtime_executable_sha256 = Get-SidecarFileSha256 -Path $runtimeExecutablePath
     pak_files = @($pakFiles | ForEach-Object {
         [ordered]@{
             path = $_.FullName
@@ -212,9 +218,12 @@ $HostManifest = [ordered]@{
 }
 $hostJson = (($HostManifest | ConvertTo-Json -Depth 32) -replace "`r`n", "`n") + "`n"
 if (-not ($hostJson | Test-Json -SchemaFile $hostSchemaPath)) {
-    throw 'ASP65H2008 packaged host result does not satisfy schema v1'
+    throw 'ASP65H2008 packaged host result does not satisfy schema v2'
 }
-$hostPath = Join-Path $resolvedOutput 'phase65-packaged-benchmark-host.json'
+$hostPath = Join-Path $resolvedOutput 'phase65-packaged-benchmark-host-v2.json'
+if (Test-Path -LiteralPath $hostPath) {
+    throw "ASP65H2008 refusing to overwrite packaged host manifest: $hostPath"
+}
 [IO.File]::WriteAllText($hostPath, $hostJson, [Text.UTF8Encoding]::new($false))
 [pscustomobject][ordered]@{
     result = 'phase65_packaged_benchmark_host_ready'
@@ -222,5 +231,7 @@ $hostPath = Join-Path $resolvedOutput 'phase65-packaged-benchmark-host.json'
     host_sha256 = Get-SidecarFileSha256 -Path $hostPath
     executable_path = $executablePath
     executable_sha256 = [string]$HostManifest.executable_sha256
+    runtime_executable_path = $runtimeExecutablePath
+    runtime_executable_sha256 = [string]$HostManifest.runtime_executable_sha256
     pak_count = $pakFiles.Count
 }

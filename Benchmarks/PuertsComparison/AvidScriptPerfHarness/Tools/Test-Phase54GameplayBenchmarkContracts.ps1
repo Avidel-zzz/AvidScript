@@ -172,7 +172,7 @@ Assert-True (@($phase65VerifiedPackageDiagnostic.avidscript_artifacts.PSObject.P
         Where-Object { [string]$_.artifact_load_policy -cne 'published_package' }).Count -eq 0) `
     'Phase65 verified-package diagnostic 的三条 AvidScript lane 必须全部走发布包加载。'
 Assert-True ($invokeText.Contains('Get-PublishedModulePackage') -and
-    $invokeText.Contains("artifact_trust = 'verified_package'") -and
+    $invokeText.Contains('Add-Member -NotePropertyName artifact_trust') -and
     $runnerText.Contains('LoadPublishedModule') -and
     $runnerText.Contains('LoadInitialArtifact')) `
     'Verified-package benchmark 必须复用生产 catalog/package loader 与 Session artifact 入口。'
@@ -194,6 +194,9 @@ Assert-True ($invokeText.Contains('Assert-SidecarBenchmarkProjectProvenance') -a
     $invokeText.Contains('Get-SidecarWasmtimeCompilerIdentity')) `
     'Formal 六通道必须锁定项目、Puerts、Harness DLL、profile/template 与真实 Wasmtime build identity。'
 Assert-True ($invokeText.Contains('[string]$PackagedGameExecutable') -and
+    $invokeText.Contains("'/Engine/Maps/Entry'") -and
+    $invokeText.Contains('$resolvedHostIdentityExecutable') -and
+    $invokeText.Contains('"$hostTarget/Binaries/Win64/$hostTarget.exe"') -and
     $invokeText.Contains("'-ExecCmds=AvidScript.PerformanceComparison.Run'") -and
     $invokeText.Contains('[int]$PackagedGameTimeoutSeconds = 300') -and
     $invokeText.Contains('$hostProcess.Kill($true)') -and
@@ -201,6 +204,10 @@ Assert-True ($invokeText.Contains('[string]$PackagedGameExecutable') -and
     $invokeText.Contains("'-AvidScriptSuppressGeneratedTypeExecution'") -and
     $invokeText.Contains("execution_host -NotePropertyValue")) `
     '发布包 benchmark 必须通过有界 monolithic Game host 启动、记录日志与实际执行载体。'
+Assert-True ($invokeText.Contains('Add-Member -NotePropertyName artifact_load_policy') -and
+    $invokeText.Contains('Add-Member -NotePropertyName expected_package_id') -and
+    $invokeText.Contains('Add-Member -NotePropertyName package_catalog_sha256')) `
+    '发布包 provenance 必须在 StrictMode 下显式扩展 lane catalog shape。'
 Assert-True ($invokeText.Contains('Get-SidecarLaneIdentitySha256') -and
     $invokeText.Contains('Get-SidecarLaneCatalogSha256')) `
     '实物身份变化后必须重新计算 canonical lane catalog。'

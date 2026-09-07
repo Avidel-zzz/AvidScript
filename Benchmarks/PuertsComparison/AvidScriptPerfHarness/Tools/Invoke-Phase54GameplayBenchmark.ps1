@@ -308,12 +308,18 @@ function Resolve-RequestTemplateIdentity {
             $entry.execution_artifact_sha256 = $published.precompiled_sha256
             $entry.backend_id = 'wasmtime.cranelift.precompiled'
             $entry.execution_mode = 'aot'
-            $entry.artifact_load_policy = 'published_package'
-            $entry.artifact_trust = 'verified_package'
-            $entry.module_id = $published.module_id
-            $entry.expected_package_id = $published.package_id
-            $entry.package_descriptor_sha256 = $published.descriptor_sha256
-            $entry.package_catalog_sha256 = $published.catalog_sha256
+            $entry | Add-Member -NotePropertyName artifact_load_policy `
+                -NotePropertyValue 'published_package' -Force
+            $entry | Add-Member -NotePropertyName artifact_trust `
+                -NotePropertyValue 'verified_package' -Force
+            $entry | Add-Member -NotePropertyName module_id `
+                -NotePropertyValue $published.module_id -Force
+            $entry | Add-Member -NotePropertyName expected_package_id `
+                -NotePropertyValue $published.package_id -Force
+            $entry | Add-Member -NotePropertyName package_descriptor_sha256 `
+                -NotePropertyValue $published.descriptor_sha256 -Force
+            $entry | Add-Member -NotePropertyName package_catalog_sha256 `
+                -NotePropertyValue $published.catalog_sha256 -Force
         }
         elseif ($loadPolicy -cne 'runtime_manifest') {
             throw "Unsupported AvidScript artifact load policy: $loadPolicy"
@@ -425,6 +431,7 @@ function Invoke-ProcessRequest {
         $startInfo.UseShellExecute = $false
         $startInfo.CreateNoWindow = $true
         foreach ($argument in @(
+            '/Engine/Maps/Entry',
             '-unattended',
             '-nop4',
             '-nullrhi',
@@ -504,6 +511,14 @@ if (-not $usePackagedGame -and [string]::IsNullOrWhiteSpace($EditorExecutable)) 
 }
 $resolvedHostExecutable = (Resolve-Path -LiteralPath (
     $usePackagedGame ? $PackagedGameExecutable : $EditorExecutable)).Path
+$resolvedHostIdentityExecutable = $resolvedHostExecutable
+if ($usePackagedGame) {
+    $hostTarget = [IO.Path]::GetFileNameWithoutExtension($resolvedHostExecutable)
+    $runtimeExecutablePath = Join-Path `
+        (Split-Path -Parent $resolvedHostExecutable) `
+        "$hostTarget/Binaries/Win64/$hostTarget.exe"
+    $resolvedHostIdentityExecutable = (Resolve-Path -LiteralPath $runtimeExecutablePath).Path
+}
 $resolvedProject = (Resolve-Path -LiteralPath $ProjectPath).Path
 $projectRoot = Split-Path -Parent $resolvedProject
 $resolvedOutput = [IO.Path]::GetFullPath($OutputDirectory)
@@ -569,7 +584,7 @@ $template = Resolve-RequestTemplateIdentity `
     -Template $template `
     -Profile $profile `
     -ProjectRoot $projectRoot `
-    -HostExecutablePath $resolvedHostExecutable `
+    -HostExecutablePath $resolvedHostIdentityExecutable `
     -IsMonolithicHost $usePackagedGame `
     -SemanticPackage $semanticPackage `
     -GeneratedPackage $generatedPackage `
