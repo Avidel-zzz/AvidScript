@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "phase": "P65.D11",
+  "evidence_class": "formal",
+  "runtime_evidence": {
+    "commit": "884443a1e1d65e116304f928451f178a56f56a7a",
+    "tree": "6659b6a8dc2aaf391a553671213495e9d6bcb9a3",
+    "candidate_id": "2a7f6ab653e64dc525ee",
+    "candidate_manifest_sha256": "d606df06ea2d016f5fea8f5de7d70a5dcd636b09660d4240f8ec4a92d63d5587",
+    "packaged_host_manifest_sha256": "da159b6db68959104fe41350403b5b7cc0aa06519f7d3992a556ea5fd536f68e",
+    "archive_content_sha256": "0c135f7fccb0c1f283f3d5297607bd2c30a9b00c8f07b7e9c5e3839a25412de9",
+    "archive_file_count": 50,
+    "launcher_sha256": "15dedb74256d4daaa117f718719ebd797c0a7bf442ac444420cbc0322da2620f",
+    "runtime_executable_sha256": "e7e79c77f008c1ef0468cb664312f05f4c808505b14a9973e4f3dc0d91dd2631",
+    "pak_sha256": "7f54349a5cdebb33d03a4954f4b1302d67d6a829e527da43ef263904b2d2f7e2"
+  },
+  "competitor": {
+    "name": "Puerts V8",
+    "commit": "1977328c84661024be10a9e73640a74b278a7659"
+  },
+  "profile": {
+    "id": "phase65.verified-package-micro-formal-v1",
+    "sha256": "b9dde7af7208c08669113083ce351f903e901f9580cb730aa6e705c6a8f99693",
+    "process_runs": 5,
+    "warmup_samples": 5,
+    "timed_samples": 30,
+    "correct_samples": 9000,
+    "total_samples": 9000,
+    "execution_host": "packaged_game"
+  },
+  "vector_ref_out": {
+    "generated_s1_p50_ns": 103.64375,
+    "generated_s1_p95_ns": 111.34375,
+    "data_oriented_p50_ns": 103.565625,
+    "data_oriented_p95_ns": 117.6484375,
+    "puerts_reflection_p50_ns": 792.0,
+    "puerts_reflection_p95_ns": 928.6875,
+    "puerts_static_p50_ns": 717.5125,
+    "puerts_static_p95_ns": 845.75,
+    "generated_s1_p50_ratio_to_best_puerts": 0.14444870298426854,
+    "generated_s1_p95_ratio_to_best_puerts": 0.13165090156665682,
+    "data_oriented_p50_ratio_to_best_puerts": 0.14433981986376543,
+    "data_oriented_p95_ratio_to_best_puerts": 0.13910545373928465,
+    "generated_s1_p50_speedup_from_d10": 9.905204124706025,
+    "data_oriented_p50_speedup_from_d10": 9.82070547056516,
+    "generated_s1_total_hits": 9600000,
+    "semantic_total_hits": 0,
+    "generated_s1_fallback_total": 0,
+    "generated_s1_reject_total": 0
+  },
+  "ten_workload_summary": {
+    "generated_s1_p50_geometric_mean_ratio": 0.8100722411875741,
+    "generated_s1_p95_geometric_mean_ratio": 0.8701157833270847,
+    "generated_s1_p50_wins": 6,
+    "generated_s1_p95_wins": 6,
+    "data_oriented_p50_geometric_mean_ratio": 0.8095510990985317,
+    "data_oriented_p95_geometric_mean_ratio": 0.9043699450676527,
+    "data_oriented_p50_wins": 6,
+    "data_oriented_p95_wins": 6,
+    "workload_count": 10,
+    "ue_micro_aggregate_faster_than_best_puerts": true,
+    "controlled_leadership_claim_ready": false
+  },
+  "baseline": {
+    "phase": "P65.D10",
+    "candidate_id": "f12ef47c926985d555f0",
+    "generated_s1_vector_ref_out_p50_ns": 1026.6125,
+    "data_oriented_vector_ref_out_p50_ns": 1017.0875,
+    "generated_s1_p50_geometric_mean_ratio": 1.004291604163992,
+    "generated_s1_p95_geometric_mean_ratio": 1.1186075548651089,
+    "generated_s1_p50_wins": 5,
+    "generated_s1_p95_wins": 5
+  },
+  "raw_result_sha256": [
+    "a242ee227f6ea1ab4cb9616928c5da71828ec44f27c04abfde7d2ff45f4605aa",
+    "169785009eb16198f07d0a03c61ba8281012d34fefd4e3e209eb3c26d02669bb",
+    "41d7d36896cac18f9d51c30938671411e27d15f716608422de3d17cf0d42a8a4",
+    "e95788677bb180eb9d1e4823b9e04a9a6f0a6f6a4c29a2276ed16c9caeae75c1",
+    "678e557835cd320456db2d146cd854afe39ed72850707b60565570072151dbf8"
+  ],
+  "open_debt": [
+    "P65-D01-AndroidDevice",
+    "P65-D02-ManualReleaseAcceptance",
+    "P65-D03-ControlledLeadership",
+    "P65-D04-PublicBinaryPrivacy",
+    "angelscript_same_semantics"
+  ]
+}
