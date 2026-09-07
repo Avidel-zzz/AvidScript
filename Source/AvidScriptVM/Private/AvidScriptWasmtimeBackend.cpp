@@ -174,23 +174,39 @@ public:
 		{
 			return;
 		}
-		const uint64 NowCycles = FPlatformTime::Cycles64();
-		uint64 DeadlineCycles =
-			MAX_uint64 - NowCycles < Entry->TimeoutCycles
-				? MAX_uint64
-				: NowCycles + Entry->TimeoutCycles;
-		const uint64 PreviousDeadline =
-			Entry->DeadlineCycles.load(std::memory_order_relaxed);
-		if (DeadlineCycles == PreviousDeadline)
+		bool bWakeThread = false;
 		{
-			DeadlineCycles = DeadlineCycles == MAX_uint64
-				? MAX_uint64 - 1
-				: DeadlineCycles + 1;
+			FScopeLock Lock(&CriticalSection);
+			if (bStopping)
+			{
+				return;
+			}
+			const uint64 NowCycles = FPlatformTime::Cycles64();
+			uint64 DeadlineCycles =
+				MAX_uint64 - NowCycles < Entry->TimeoutCycles
+					? MAX_uint64
+					: NowCycles + Entry->TimeoutCycles;
+			const uint64 PreviousDeadline =
+				Entry->DeadlineCycles.load(std::memory_order_relaxed);
+			if (DeadlineCycles == PreviousDeadline)
+			{
+				DeadlineCycles = DeadlineCycles == MAX_uint64
+					? MAX_uint64 - 1
+					: DeadlineCycles + 1;
+			}
+			Entry->DeadlineCycles.store(
+				DeadlineCycles,
+				std::memory_order_release);
+			if (NextWakeCycles == 0 || DeadlineCycles < NextWakeCycles)
+			{
+				NextWakeCycles = DeadlineCycles;
+				bWakeThread = true;
+			}
 		}
-		Entry->DeadlineCycles.store(
-			DeadlineCycles,
-			std::memory_order_release);
-		WakeEvent->Trigger();
+		if (bWakeThread)
+		{
+			WakeEvent->Trigger();
+		}
 	}
 
 	void Disarm(const FAvidScriptWasmtimeEpochWatchdogEntryPtr& Entry)
@@ -231,6 +247,7 @@ public:
 				const uint64 NowCycles = FPlatformTime::Cycles64();
 				const double MillisecondsPerCycle =
 					FPlatformTime::GetSecondsPerCycle64() * 1000.0;
+				NextWakeCycles = 0;
 				for (const FAvidScriptWasmtimeEpochWatchdogEntryPtr& Entry : Entries)
 				{
 					uint64 DeadlineCycles = Entry->DeadlineCycles.load(
@@ -255,6 +272,9 @@ public:
 					const double RemainingMilliseconds =
 						static_cast<double>(DeadlineCycles - NowCycles)
 						* MillisecondsPerCycle;
+					NextWakeCycles = NextWakeCycles == 0
+						? DeadlineCycles
+						: FMath::Min(NextWakeCycles, DeadlineCycles);
 					WaitMilliseconds = FMath::Min(
 						WaitMilliseconds,
 						static_cast<uint32>(FMath::Max(
@@ -274,6 +294,7 @@ private:
 		{
 			FScopeLock Lock(&CriticalSection);
 			bStopping = true;
+			NextWakeCycles = 0;
 			for (const FAvidScriptWasmtimeEpochWatchdogEntryPtr& Entry : Entries)
 			{
 				Entry->DeadlineCycles.store(0, std::memory_order_release);
@@ -301,6 +322,7 @@ private:
 	TArray<FAvidScriptWasmtimeEpochWatchdogEntryPtr> Entries;
 	FRunnableThread* Thread = nullptr;
 	FEvent* WakeEvent = nullptr;
+	uint64 NextWakeCycles = 0;
 	bool bStopping = false;
 };
 
