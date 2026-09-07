@@ -615,6 +615,11 @@ bool FAvidScriptRuntimeSessionPrecompiledArtifactTest::RunTest(
 		AttestedSession.GetLiveRuntimeForTesting()
 			->GetExecutionBudgetForTesting().FuelPerEntry,
 		UINT64_C(50000000));
+	TestEqual(
+		TEXT("Attested development artifact keeps the Host-call limit"),
+		AttestedSession.GetLiveRuntimeForTesting()
+			->GetExecutionBudgetForTesting().MaxHostCallsPerEntry,
+		100000u);
 	TestTrue(
 		TEXT("Attested precompiled Session invokes BeginPlay"),
 		LoadResult.RuntimeResult.bBeginPlayCalled);
@@ -648,11 +653,19 @@ bool FAvidScriptRuntimeSessionPrecompiledArtifactTest::RunTest(
 		TEXT("Verified Win64 package omits per-entry fuel"),
 		VerifiedBudget.FuelPerEntry,
 		UINT64_C(0));
+	TestEqual(
+		TEXT("Verified Win64 package omits the per-entry Host-call counter"),
+		VerifiedBudget.MaxHostCallsPerEntry,
+		0u);
 #else
 	TestEqual(
 		TEXT("Unverified platform keeps per-entry fuel"),
 		VerifiedBudget.FuelPerEntry,
 		UINT64_C(50000000));
+	TestEqual(
+		TEXT("Unverified platform keeps the Host-call limit"),
+		VerifiedBudget.MaxHostCallsPerEntry,
+		100000u);
 #endif
 	TestEqual(
 		TEXT("Verified package preserves epoch deadline"),
@@ -666,10 +679,6 @@ bool FAvidScriptRuntimeSessionPrecompiledArtifactTest::RunTest(
 		TEXT("Verified package preserves linear-memory limit"),
 		VerifiedBudget.MaxLinearMemoryBytes,
 		UINT64_C(64) << 20);
-	TestEqual(
-		TEXT("Verified package preserves Host-call limit"),
-		VerifiedBudget.MaxHostCallsPerEntry,
-		100000u);
 	TestTrue(
 		TEXT("Verified package keeps the serialized compiler identity"),
 		LoadResult.RuntimeResult.BackendInfo.RuntimeBuildIdentity.Contains(

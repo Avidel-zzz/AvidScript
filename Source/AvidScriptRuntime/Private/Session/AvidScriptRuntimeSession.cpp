@@ -157,6 +157,9 @@ FAvidScriptVmLoadConfig::FExecutionBudget MakeSessionExecutionBudget(
 #else
 			false;
 #endif
+		Budget.MaxHostCallsPerEntry = bUseVerifiedPackageFastContainment
+			? 0
+			: 100000;
 		Budget.FuelPerEntry = bUseVerifiedPackageFastContainment
 			? 0
 			: 50000000;
