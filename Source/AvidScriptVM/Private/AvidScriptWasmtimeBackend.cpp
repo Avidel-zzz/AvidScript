@@ -2157,15 +2157,8 @@ private:
 			OutResult);
 	}
 
-	void ResetCallState(
-		FAvidScriptVmError& OutError,
-		FAvidScriptVmCallResult* OutResult)
+	FORCEINLINE void ResetPendingHostFailure()
 	{
-		OutError.Reset();
-		if (OutResult != nullptr)
-		{
-			*OutResult = FAvidScriptVmCallResult();
-		}
 		if (bHasPendingHostFailure)
 		{
 			bHasPendingHostFailure = false;
@@ -2245,17 +2238,7 @@ private:
 		FAvidScriptVmError& OutError,
 		FAvidScriptVmCallResult* OutResult)
 	{
-		ResetCallState(OutError, OutResult);
-		if (!IsLoaded()
-			|| Entry.Generation != ExportGeneration
-			|| Entry.Function == nullptr)
-		{
-			SetWasmtimeError(
-				OutError,
-				TEXT("stale_export"),
-				TEXT("The prepared Wasmtime export is no longer active."));
-			return false;
-		}
+		ResetPendingHostFailure();
 		if (bResetExecutionBudgetPerEntry
 			&& !ResetExecutionBudget(OutError))
 		{
@@ -2270,17 +2253,7 @@ private:
 		FAvidScriptVmError& OutError,
 		FAvidScriptVmCallResult* OutResult)
 	{
-		ResetCallState(OutError, OutResult);
-		if (!IsLoaded()
-			|| Entry.Generation != ExportGeneration
-			|| Entry.Function == nullptr)
-		{
-			SetWasmtimeError(
-				OutError,
-				TEXT("stale_export"),
-				TEXT("The prepared Wasmtime export is no longer active."));
-			return false;
-		}
+		ResetPendingHostFailure();
 		if (bResetExecutionBudgetPerEntry
 			&& !ResetExecutionBudget(OutError))
 		{
@@ -2326,17 +2299,7 @@ private:
 		FAvidScriptVmError& OutError,
 		FAvidScriptVmCallResult* OutResult)
 	{
-		ResetCallState(OutError, OutResult);
-		if (!IsLoaded()
-			|| Entry.Generation != ExportGeneration
-			|| Entry.Function == nullptr)
-		{
-			SetWasmtimeError(
-				OutError,
-				TEXT("stale_export"),
-				TEXT("The prepared Wasmtime export is no longer active."));
-			return false;
-		}
+		ResetPendingHostFailure();
 		if (bResetExecutionBudgetPerEntry
 			&& !ResetExecutionBudget(OutError))
 		{

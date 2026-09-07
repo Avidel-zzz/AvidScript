@@ -285,6 +285,12 @@ struct FAvidScriptVmPreparedExportCall
 			}
 			return false;
 		}
+		OutError.Reset();
+		if (OutResult != nullptr)
+		{
+			*OutResult = FAvidScriptVmCallResult();
+		}
+		// InvokeFunction is the low-level prepared path and expects clean outputs.
 		return InvokeFunction(Owner, Target, Frame, OutError, OutResult);
 	}
 };
