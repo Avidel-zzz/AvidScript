@@ -803,6 +803,14 @@
       "last_observed": "2026-09-07 P65.D10 重启 candidate freezer 时把 v45.0.0 手误为 v45..0；脚本在写入前拒绝"
     },
     {
+      "id": "candidate-freezer-runs-from-candidate-worktree",
+      "tags": ["workflow", "benchmark", "candidate", "worktree"],
+      "summary": "Phase 65 候选冻结器会校验运行脚本所属仓库与 CandidateRoot 必须是同一 worktree。",
+      "prevention": "冻结候选前先把干净候选 worktree checkout 到精确实现提交，再以该 worktree 为工作目录调用其中的 New-Phase65LeadershipCandidate.ps1；不得从主工作树脚本跨目录冻结。",
+      "source": "Benchmarks/PuertsComparison/Leadership/Scripts/New-Phase65LeadershipCandidate.ps1",
+      "last_observed": "2026-09-08 P65.D24 首次冻结从主工作树启动，ASP65L2002 在创建输出前拒绝；改为从 candidate-d4dc09a1 启动"
+    },
+    {
       "id": "cpp-helper-signatures-use-visible-types",
       "tags": ["cpp", "build", "types", "workflow"],
       "summary": "匿名命名空间中的前置 helper 不能在签名里引用文件后部才声明的内部枚举。",
