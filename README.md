@@ -91,7 +91,7 @@ flowchart LR
 ## 性能摘要
 
 **指定 UE 交互路径已领先冻结版本的 Puerts；纯执行层尚未全面领先。**
-以下为 **P57 归档基准，未对当前 P64 重测**：UE5.8 Win64 Development、Intel Core Ultra 7 265K，
+以下图表为 **P57 归档基准**，当前 P65 数据见图表后的最新摘要：UE5.8 Win64 Development、Intel Core Ultra 7 265K，
 Wasmtime 45 Cranelift JIT 对冻结版本的 Puerts V8，同机 5 个进程、每进程 5 次预热、每单元 30 次采样。
 比率为 AvidScript / Puerts，越低越好。
 
@@ -111,7 +111,7 @@ Wasmtime 45 Cranelift JIT 对冻结版本的 Puerts V8，同机 5 个进程、�
 - **纯执行：** 当前 P65.D9 正式 12-kernel 相同 WASM 对照的 P50/P95 几何均值为 **`1.1065x / 1.1293x`**，P50/P95 胜率为 **`58.3% / 33.3%`**，仍未达到 `<= 0.95x` 与 `>= 60%` 目标；不是 C# 对 JavaScript 的完整游戏比较。见[D9 报告](Docs/Phase65/P65.D9_Demand_Driven_Fuel_Profile.md)。
 - **最新 UE crossing：** P65.D10 将通用 `int32 -> int32` generated S1 降至 **`18.17 ns`**，相对 Puerts static 为 **`0.829x`**；十项 micro P50 几何均值已从 `1.440x` 改善到 `1.004x`，但仍未形成全面领先。见[D10 报告](Docs/Phase65/P65.D10_Generated_Unary_I32_Performance.md)。
 - **最新 generated typed 路径：** FVector ref/out 已达到 `103.64 ns`（Puerts static 的 `0.144x`）；P65.D13 又将 UObject roundtrip 从 `147.73 ns` 降至 **`51.88 ns`**，已领先 Puerts reflection，但仍是 Puerts static 的 `1.139x`。十项 UE micro 的 P50/P95 几何均值为 **`0.779x / 0.786x`**。见[D11](Docs/Phase65/P65.D11_Generated_Vector_RefOut_Performance.md)与[D13](Docs/Phase65/P65.D13_Packed_Object_Roundtrip_Performance.md)。
-- **最新 callback：** P65.D14-D17 已移除 watchdog 锁、直通休眠 Tick 子系统并惰性内联 profiler scope；最新正式 generated callback_empty/tick 为 **`121.52 ns / 146.70 ns`**，同轮是 Puerts static 的 `1.125x / 1.128x`。D16 曾测得 Tick `1.101x`，跨轮仍有频率波动，单项领先门禁未关闭。见[D17 报告](Docs/Phase65/P65.D17_Lazy_Inline_Profiler_Scope.md)。
+- **最新 callback：** P65.D14-D18 已移除 watchdog 锁、直通休眠 Tick 子系统并压缩 profiler 禁用态；最新正式 generated callback_empty/tick 为 **`121.38 ns / 148.14 ns`**，同轮是 Puerts static 的 `1.147x / 1.158x`。Profiler 微调未形成稳定收益，已停止该方向并转入 Wasmtime prepared-entry 包装层。见[D18 报告](Docs/Phase65/P65.D18_Inline_Profiler_Capture_Predicate.md)。
 - **比较边界：** 尚无同口径 UnLua/AngelScript 排行榜；不宣称全场景领先。其他数据见[容器](Docs/Phase57/P57.11D_Compiler_Managed_Array_Region.md)、[UE 原生对照](Docs/Phase60/P60.D_Performance_And_Gate.md)与[增量构建](Docs/Phase61/P61.E_Integration_Gate.md)。
 
 ## 快速开始
@@ -224,12 +224,12 @@ P50/P95 几何均值为 **`0.779x / 0.786x`**、胜项 `6/10`。callback、pure 
 [P65.D11](Docs/Phase65/P65.D11_Generated_Vector_RefOut_Performance.md)与
 [P65.D13](Docs/Phase65/P65.D13_Packed_Object_Roundtrip_Performance.md)。
 
-P65.D14-D17 已移除共享 epoch watchdog 的顶层全局锁、采样热 Tick 指标、直通休眠子系统，并让
-profiler scope 在关闭时只保留一个指针状态。最新正式 5 进程的 generated callback_empty/tick 为
-**`121.52 ns / 146.70 ns`**，十项聚合为 **`0.735x / 0.755x`**；同轮 callback P50 仍是 Puerts
-static 的 `1.125x / 1.128x`。跨候选绝对值存在明显频率漂移，P65-D03 不关闭。详见
-[P65.D16](Docs/Phase65/P65.D16_Dormant_Tick_Subsystem_Bypass.md)与
-[P65.D17](Docs/Phase65/P65.D17_Lazy_Inline_Profiler_Scope.md)。
+P65.D14-D18 已移除共享 epoch watchdog 的顶层全局锁、采样热 Tick 指标、直通休眠子系统，并让
+profiler scope 在关闭时保持内联惰性路径。最新正式 5 进程的 generated callback_empty/tick 为
+**`121.38 ns / 148.14 ns`**，十项 P50/P95 几何均值为 **`0.735x / 0.750x`**；同轮 callback P50
+仍是 Puerts static 的 `1.147x / 1.158x`。Profiler 方向连续两轮无稳定收益，P65-D03 不关闭，
+后续改做 prepared export wrapper 与 runtime entry state。详见
+[P65.D18](Docs/Phase65/P65.D18_Inline_Profiler_Capture_Predicate.md)。
 
 ## 验证
 

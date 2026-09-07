@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "phase": "P65.D18",
+  "evidence_class": "formal",
+  "performance_gate_result": "not_met",
+  "runtime_evidence": {
+    "commit": "7664f3148afd6d07f333b67c77d47051bda2c135",
+    "tree": "e8262d7ce213218b58b6b55832c47f83bf9ca745",
+    "candidate_id": "6802e842ceb590506834",
+    "candidate_manifest_sha256": "c95ffcb3ff12b21aa1cec262513c36ad1188282d9b39dea603de9ed80573daa0",
+    "packaged_host_manifest_sha256": "523a65761fab9a963c2669081423b664be4bd68a96c1933f0d0908f5417f7a81",
+    "archive_content_sha256": "1161e2a4a8646d1541fc3dd7484c027c1023cf1a1dfc72cabae225819e8cba62",
+    "archive_file_count": 50,
+    "launcher_sha256": "15dedb74256d4daaa117f718719ebd797c0a7bf442ac444420cbc0322da2620f",
+    "runtime_executable_sha256": "3793bddeb819acc7aa1cbfa92e90fc7375a6542b880b491826fd0f1cbb75577e",
+    "uat_log_sha256": "52387305c1466284c6b33c7f86cdd6948c7586b1cde6556c5cced49eb9c4b518",
+    "pak_sha256": "ede5112466703e2435767daed72d17e4f66bfe185b5268b00eb1267963249034",
+    "architecture_checker_sha256": "a2c10ef70aa4908c23fc59fcb2bf405210f1dcfbfd29c23d027ee07132a214d5"
+  },
+  "competitor": {
+    "name": "Puerts V8",
+    "commit": "1977328c84661024be10a9e73640a74b278a7659"
+  },
+  "profile": {
+    "id": "phase65.verified-package-micro-formal-v1",
+    "sha256": "1f10ef3d34d8784789a2d2594ec1fe7704268305b0eae356aec398263dba15ba",
+    "process_runs": 5,
+    "warmup_samples": 5,
+    "timed_samples": 30,
+    "correct_samples": 9000,
+    "total_samples": 9000,
+    "fallback_samples": 0,
+    "execution_host": "packaged_game"
+  },
+  "callback_empty": {
+    "adaptive_semantic_p50_ns": 120.215625,
+    "adaptive_semantic_p95_ns": 149.471875,
+    "data_oriented_p50_ns": 120.634375,
+    "data_oriented_p95_ns": 148.8875,
+    "generated_s1_p50_ns": 121.384375,
+    "generated_s1_p95_ns": 150.7578125,
+    "puerts_reflection_p50_ns": 108.1453125,
+    "puerts_reflection_p95_ns": 118.23125,
+    "puerts_static_p50_ns": 105.8640625,
+    "puerts_static_p95_ns": 118.775,
+    "generated_s1_p50_ratio_to_puerts_static": 1.14660605434446,
+    "generated_s1_p95_ratio_to_puerts_static": 1.2692722584719,
+    "generated_delta_from_d17_p50_percent": -0.11186401450374861,
+    "generated_delta_from_d17_p95_percent": -0.6957524109467816
+  },
+  "callback_tick": {
+    "adaptive_semantic_p50_ns": 146.7328125,
+    "adaptive_semantic_p95_ns": 154.478125,
+    "data_oriented_p50_ns": 147.6703125,
+    "data_oriented_p95_ns": 156.4875,
+    "generated_s1_p50_ns": 148.140625,
+    "generated_s1_p95_ns": 155.9609375,
+    "puerts_reflection_p50_ns": 128.53125,
+    "puerts_reflection_p95_ns": 134.9359375,
+    "puerts_static_p50_ns": 127.925,
+    "puerts_static_p95_ns": 134.7171875,
+    "generated_s1_p50_ratio_to_puerts_static": 1.15802716435411,
+    "generated_s1_p95_ratio_to_puerts_static": 1.157691460119,
+    "generated_delta_from_d17_p50_percent": 0.9820211315610061,
+    "generated_delta_from_d17_p95_percent": 0.06516290726816809
+  },
+  "ten_workload_summary": {
+    "generated_s1_p50_geometric_mean_ratio": 0.734822357,
+    "generated_s1_p95_geometric_mean_ratio": 0.749707287,
+    "generated_s1_p50_wins": 6,
+    "generated_s1_p95_wins": 6,
+    "data_oriented_p50_geometric_mean_ratio": 0.731649363,
+    "data_oriented_p95_geometric_mean_ratio": 0.745995154,
+    "data_oriented_p50_wins": 6,
+    "data_oriented_p95_wins": 6,
+    "workload_count": 10,
+    "controlled_leadership_claim_ready": false
+  },
+  "decision": {
+    "profiler_optimization_stopped": true,
+    "reason": "D17-D18 did not show a stable callback improvement",
+    "next_focus": "wasmtime_prepared_export_wrapper_and_runtime_entry_state"
+  },
+  "raw_result_sha256": [
+    "ae623f226e4cbe24bdbc53329f6492f81ef484d8260a28a73f362767ee09ea81",
+    "20f458577ebe40278576dedd5430e55f35e937cd4e39ab125bbb2c9e290e8242",
+    "c004d8a6d0d61767a7ad9986511cc7e061f90eb7455beaf958640d84441bf5aa",
+    "64099ab15ab37a418a36c8da4fbecd9d21f90a44613f665e77ba501082d0f25a",
+    "9bc3818e03fea071b2202a9af9e7565902c3e88438bac61a13031417d711a6e2"
+  ],
+  "open_debt": [
+    "P65-D01-AndroidDevice",
+    "P65-D02-ManualReleaseAcceptance",
+    "P65-D03-ControlledLeadership",
+    "P65-D04-PublicBinaryPrivacy",
+    "angelscript_same_semantics"
+  ]
+}
