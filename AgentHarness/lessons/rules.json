@@ -341,7 +341,7 @@
       "summary": "同一补丁先新增 helper 再用宽泛首个匹配替换调用点，可能误改 helper 自身。",
       "prevention": "新增 helper 后，替换调用点必须带函数名或上下文锚点；补丁完成立即用 rg 列出全部调用和分支，并检查新 helper 本体，再进入构建。",
       "source": "observed:2026-08-31-P60.A1",
-      "last_observed": "2026-08-31 P60.A1 宽泛替换一度把 SetObjectValue 的 object 分支改成递归调用；2026-09-01 P60.C1a 非唯一 Context 锚点又把 WritePolicy 写入既有 RPC 用例，均由补丁后立即定点回读发现"
+      "last_observed": "2026-08-31 P60.A1 宽泛替换一度把 SetObjectValue 的 object 分支改成递归调用；2026-09-01 P60.C1a 非唯一 Context 锚点又把 WritePolicy 写入既有 RPC 用例；2026-09-07 P65.D10 宽泛 switch 锚点一度把 ScalarNoOp 加到 adaptive-native 表而非 generated-S1 表，均由补丁后立即定点回读发现"
     },
     {
       "id": "powershell-quote-git-revisions-with-braces",

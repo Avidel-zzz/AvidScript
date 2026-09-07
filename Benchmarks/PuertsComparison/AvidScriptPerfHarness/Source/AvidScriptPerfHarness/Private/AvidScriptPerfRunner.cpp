@@ -1646,6 +1646,7 @@ namespace
 		}
 		switch (Workload)
 		{
+		case EAvidScriptPerfWorkload::ScalarNoOp:
 		case EAvidScriptPerfWorkload::ScalarAddInt32:
 		case EAvidScriptPerfWorkload::VectorValue:
 		case EAvidScriptPerfWorkload::ObjectRoundtrip:
@@ -1706,12 +1707,16 @@ namespace
 
 	uint64 GetExpectedPreparedDynamicHitCount(
 		const EAvidScriptPerfWorkload Workload,
-		const int32 Iterations)
+		const int32 Iterations,
+		const EAvidScriptPerfLane Lane)
 	{
 		check(Iterations > 0);
 		switch (Workload)
 		{
 		case EAvidScriptPerfWorkload::ScalarNoOp:
+			return Lane == EAvidScriptPerfLane::AvidScriptWasmtimeSemantic
+				? static_cast<uint64>(Iterations)
+				: 0;
 		case EAvidScriptPerfWorkload::VectorRefOut:
 			return static_cast<uint64>(Iterations);
 		default:
@@ -1736,6 +1741,7 @@ namespace
 	{
 		switch (Workload)
 		{
+		case EAvidScriptPerfWorkload::ScalarNoOp:
 		case EAvidScriptPerfWorkload::ScalarAddInt32:
 		case EAvidScriptPerfWorkload::BatchScalar:
 			return static_cast<uint64>(Iterations);
@@ -3420,7 +3426,10 @@ namespace
 		const uint64 ExpectedAdaptiveNativeHitCount =
 			GetExpectedAdaptiveNativeHitCount(Workload, Iterations);
 		const uint64 ExpectedPreparedDynamicHitCount =
-			GetExpectedPreparedDynamicHitCount(Workload, Iterations);
+			GetExpectedPreparedDynamicHitCount(
+				Workload,
+				Iterations,
+				Observation.Lane);
 		const uint64 ExpectedPreparedReflectionReceiverHitCount =
 			GetExpectedPreparedReflectionReceiverHitCount(
 				Workload,

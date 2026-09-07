@@ -41,6 +41,15 @@ $nativePropertyBatch = [regex]::Match(
 $runnerAdaptiveMatrix = [regex]::Match(
     $runnerText,
     '(?s)uint64 GetExpectedAdaptiveNativeHitCount\(.*?(?=\r?\n\s*uint64 GetExpectedFusedGeneratedHitCount\()').Value
+$runnerGeneratedMatrix = [regex]::Match(
+    $runnerText,
+    '(?s)uint64 GetExpectedGeneratedS1HitCount\(.*?(?=\r?\n\s*uint64 GetExpectedSemanticHitCount\()').Value
+$runnerPreparedDynamicMatrix = [regex]::Match(
+    $runnerText,
+    '(?s)uint64 GetExpectedPreparedDynamicHitCount\(.*?(?=\r?\n\s*uint64 GetExpectedPreparedReflectionReceiverHitCount\()').Value
+$runnerFusedMatrix = [regex]::Match(
+    $runnerText,
+    '(?s)uint64 GetExpectedFusedGeneratedHitCount\(.*?(?=\r?\n\s*uint64 GetExpectedPropertyWriteCount\()').Value
 $evaluatorAdaptiveMatrix = [regex]::Match(
     $evaluatorText,
     '(?s)function Get-ExpectedAdaptiveNativeHits \{.*?(?=\r?\nfunction New-GateResult \{)').Value
@@ -173,6 +182,12 @@ Assert-True ($generatedCSharpProfile.binding_profile.package_name -ceq
     $dataCSharpProfile.binding_profile.package_name -and
     $generatedCSharpProfile.binding_profile.package_name.Length -le 40) `
     'Generated S1 与 data-oriented profile 必须共享适合 Windows 短路径工程的稳定 binding package identity。'
+Assert-True (@($generatedCSharpProfile.binding_profile.classes[0].generated_native_functions) -ccontains 'ReflectNoOp' -and
+    @($dataCSharpProfile.binding_profile.classes[0].generated_native_functions) -ccontains 'ReflectNoOp' -and
+    $runnerGeneratedMatrix.Contains('EAvidScriptPerfWorkload::ScalarNoOp') -and
+    $runnerFusedMatrix.Contains('EAvidScriptPerfWorkload::ScalarNoOp') -and
+    $runnerPreparedDynamicMatrix.Contains('EAvidScriptPerfLane::AvidScriptWasmtimeSemantic')) `
+    'ScalarNoOp 的 generated/data profile、S1、fused 与 lane-aware prepared-dynamic oracle 必须同步。'
 Assert-True (@($phase65VerifiedPackageDiagnostic.avidscript_artifacts.PSObject.Properties.Value |
         Where-Object { [string]$_.artifact_load_policy -cne 'published_package' }).Count -eq 0) `
     'Phase65 verified-package diagnostic 的三条 AvidScript lane 必须全部走发布包加载。'
