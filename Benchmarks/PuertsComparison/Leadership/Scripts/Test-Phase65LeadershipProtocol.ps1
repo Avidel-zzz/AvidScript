@@ -61,6 +61,10 @@ Assert-True ($CandidateScriptText.Contains('BuildCSharpScriptTypes.ps1') -and
     $CandidateScriptText.Contains('avidscript_phase65_benchmark_generated_types') -and
     $CandidateScriptText.Contains('Generated Type package is not a unique Win64 Development catalog variant')) 'candidate freezer must publish and freeze the packaged-target Generated Type prerequisite'
 Assert-True ($CandidateScriptText.Contains('Assert-SidecarBenchmarkProjectProvenance')) 'candidate freezer must revalidate project provenance after artifact preparation'
+Assert-True ($CandidateScriptText.Contains('ExistingBenchmarkProjectPath') -and
+    $CandidateScriptText.Contains('existing benchmark marker is not anchored by a frozen Phase65 candidate') -and
+    $CandidateScriptText.Contains('previous_candidate_sha256') -and
+    $CandidateScriptText.Contains('cached benchmark project source changed during candidate refresh')) 'candidate freezer must validate and chain cached-project refreshes'
 Assert-True ($CandidateScriptText.Contains('identical_wasm_compiler_profile')) 'candidate freezer must preserve the identical-WASM compiler profile'
 Assert-True ($CandidateScriptText.Contains('Publish-AvidScriptModuleReleasePackage')) 'candidate freezer must publish prepared C# artifacts through the release package contract'
 Assert-True ($CandidateScriptText.Contains('package_catalog_sha256')) 'candidate freezer must freeze the published package catalog identity'

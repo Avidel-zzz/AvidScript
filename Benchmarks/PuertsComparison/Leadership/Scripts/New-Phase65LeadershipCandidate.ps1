@@ -16,7 +16,9 @@ param(
     [string]$WasmtimeInstallSource,
 
     [Parameter(Mandatory = $true)]
-    [string]$OutputRoot
+    [string]$OutputRoot,
+
+    [string]$ExistingBenchmarkProjectPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -359,6 +361,151 @@ function Test-LeadershipProjectSourceStable {
     return ([string]$Actual.content_sha256 -ceq [string]$Marker.source.content_sha256 -and [int]$Actual.file_count -eq [int]$Marker.source.file_count)
 }
 
+function Open-ExistingLeadershipBenchmarkProject {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectPath,
+        [Parameter(Mandatory = $true)][string]$CandidateRoot,
+        [Parameter(Mandatory = $true)][string]$PuertsPluginPath,
+        [Parameter(Mandatory = $true)][string]$Commit,
+        [Parameter(Mandatory = $true)][string]$Tree,
+        [Parameter(Mandatory = $true)][string]$CandidateSchemaPath
+    )
+
+    $ResolvedProjectPath = Resolve-RequiredPath -Path $ProjectPath -PathType Leaf -Label 'ExistingBenchmarkProjectPath'
+    $ProjectRoot = Split-Path -Parent $ResolvedProjectPath
+    $MarkerPath = Resolve-RequiredPath -Path (Join-Path $ProjectRoot 'benchmark-project.json') -PathType Leaf -Label 'existing benchmark project marker'
+    $Marker = Read-SidecarJson -Path $MarkerPath -Code 'ASP65L2019'
+    if ([int]$Marker.schema_version -ne 2 -or
+        [string]$Marker.project_filename -cne [IO.Path]::GetFileName($ResolvedProjectPath)) {
+        throw 'ASP65L2019 existing benchmark project marker identity is invalid'
+    }
+
+    $JunctionContracts = @(
+        [pscustomobject]@{ Name = 'Source'; RelativePath = 'Source'; RequiredTarget = '' },
+        [pscustomobject]@{ Name = 'Config'; RelativePath = 'Config'; RequiredTarget = '' },
+        [pscustomobject]@{ Name = 'AvidScript'; RelativePath = 'Plugins/AvidScript'; RequiredTarget = $CandidateRoot },
+        [pscustomobject]@{ Name = 'Puerts'; RelativePath = 'Plugins/Puerts'; RequiredTarget = $PuertsPluginPath },
+        [pscustomobject]@{ Name = 'AvidScriptPerfHarness'; RelativePath = 'Plugins/AvidScriptPerfHarness'; RequiredTarget = (Join-Path $CandidateRoot 'Benchmarks/PuertsComparison/AvidScriptPerfHarness') }
+    )
+    $ActualJunctions = [ordered]@{}
+    foreach ($Contract in $JunctionContracts) {
+        $RecordedTarget = [IO.Path]::GetFullPath([string]$Marker.junctions.($Contract.Name))
+        $ActualTarget = Resolve-SidecarCanonicalDirectory `
+            -Path (Join-Path $ProjectRoot $Contract.RelativePath) `
+            -Code 'ASP65L2019' `
+            -Label "existing project junction $($Contract.Name)" `
+            -RequireJunction
+        if ($ActualTarget -ine $RecordedTarget -or
+            (-not [string]::IsNullOrWhiteSpace($Contract.RequiredTarget) -and
+                $ActualTarget -ine [IO.Path]::GetFullPath($Contract.RequiredTarget))) {
+            throw "ASP65L2019 existing project junction identity changed: $($Contract.Name)"
+        }
+        $ActualJunctions[$Contract.Name] = $ActualTarget
+    }
+
+    foreach ($Contract in @(
+            [pscustomobject]@{ Name = 'source'; Path = $ActualJunctions.Source },
+            [pscustomobject]@{ Name = 'config'; Path = $ActualJunctions.Config })) {
+        $Recorded = $Marker.($Contract.Name)
+        $ActualDigest = Get-SidecarDirectoryContentDigest -Path $Contract.Path
+        if ([string]$Recorded.canonical_path -ine $Contract.Path -or
+            [string]$Recorded.content_sha256 -cne [string]$ActualDigest.content_sha256 -or
+            [int]$Recorded.file_count -ne [int]$ActualDigest.file_count) {
+            throw "ASP65L2019 existing project $($Contract.Name) content changed after its last freeze"
+        }
+    }
+
+    $MarkerSha256 = Get-SidecarFileSha256 -Path $MarkerPath
+    $MatchingCandidates = @(
+        Get-ChildItem -LiteralPath $ProjectRoot -Filter 'phase65-leadership-candidate*.json' -File |
+            ForEach-Object {
+                $Raw = Get-Content -LiteralPath $_.FullName -Raw
+                if (-not ($Raw | Test-Json -SchemaFile $CandidateSchemaPath)) {
+                    return
+                }
+                $Manifest = $Raw | ConvertFrom-Json -Depth 64
+                if ([string]$Manifest.candidate.commit -ceq [string]$Marker.candidate_commit -and
+                    [string]$Manifest.candidate.tree -ceq [string]$Marker.candidate_tree -and
+                    [string]$Manifest.candidate.root -ieq $CandidateRoot -and
+                    [string]$Manifest.benchmark_project.project_path -ieq $ResolvedProjectPath -and
+                    [string]$Manifest.benchmark_project.marker_sha256 -ceq $MarkerSha256) {
+                    [pscustomobject]@{
+                        Path = $_.FullName
+                        Sha256 = Get-SidecarFileSha256 -Path $_.FullName
+                        CandidateId = [string]$Manifest.candidate_id
+                        CreatedUtc = [DateTimeOffset]::Parse([string]$Manifest.created_utc)
+                    }
+                }
+            } |
+            Sort-Object CreatedUtc -Descending
+    )
+
+    $MarkerMatchesRequestedCandidate =
+        [string]$Marker.candidate_commit -ceq $Commit -and
+        [string]$Marker.candidate_tree -ceq $Tree
+    if ($MatchingCandidates.Count -eq 0 -and -not $MarkerMatchesRequestedCandidate) {
+        throw 'ASP65L2020 existing benchmark marker is not anchored by a frozen Phase65 candidate'
+    }
+    if ($MatchingCandidates.Count -eq 0) {
+        $Refresh = $Marker.refresh
+        $PreviousPath = [string]$Refresh.previous_candidate_path
+        if ($null -eq $Refresh -or
+            -not (Test-Path -LiteralPath $PreviousPath -PathType Leaf) -or
+            (Get-SidecarFileSha256 -Path $PreviousPath) -cne [string]$Refresh.previous_candidate_sha256) {
+            throw 'ASP65L2020 interrupted candidate refresh has no valid predecessor chain'
+        }
+    }
+
+    $Predecessor = $MatchingCandidates | Select-Object -First 1
+    return [pscustomobject][ordered]@{
+        project_path = $ResolvedProjectPath
+        project_root = $ProjectRoot
+        marker = $Marker
+        marker_path = $MarkerPath
+        marker_matches_requested_candidate = $MarkerMatchesRequestedCandidate
+        predecessor = $Predecessor
+    }
+}
+
+function Update-ExistingLeadershipBenchmarkMarker {
+    param(
+        [Parameter(Mandatory = $true)][pscustomobject]$ProjectState,
+        [Parameter(Mandatory = $true)][string]$Commit,
+        [Parameter(Mandatory = $true)][string]$Tree
+    )
+
+    if ($ProjectState.marker_matches_requested_candidate) {
+        return
+    }
+    $Marker = $ProjectState.marker
+    $Refresh = [ordered]@{
+        refreshed_utc = [DateTimeOffset]::UtcNow.ToString('o')
+        previous_candidate_id = [string]$ProjectState.predecessor.CandidateId
+        previous_candidate_path = [string]$ProjectState.predecessor.Path
+        previous_candidate_sha256 = [string]$ProjectState.predecessor.Sha256
+        previous_marker_sha256 = Get-SidecarFileSha256 -Path $ProjectState.marker_path
+    }
+    $Marker.candidate_commit = $Commit
+    $Marker.candidate_tree = $Tree
+    if ($null -eq $Marker.PSObject.Properties['refresh']) {
+        $Marker | Add-Member -NotePropertyName refresh -NotePropertyValue $Refresh
+    }
+    else {
+        $Marker.refresh = $Refresh
+    }
+    $MarkerJson = (($Marker | ConvertTo-Json -Depth 32) -replace "`r`n", "`n") + "`n"
+    $TemporaryPath = "$($ProjectState.marker_path).refresh-$([Guid]::NewGuid().ToString('N'))"
+    try {
+        [IO.File]::WriteAllText($TemporaryPath, $MarkerJson, [Text.UTF8Encoding]::new($false))
+        [IO.File]::Move($TemporaryPath, $ProjectState.marker_path, $true)
+    }
+    finally {
+        if (Test-Path -LiteralPath $TemporaryPath -PathType Leaf) {
+            Remove-Item -LiteralPath $TemporaryPath -Force
+        }
+    }
+}
+
 $ResolvedCandidateRoot = Resolve-RequiredPath -Path $CandidateRoot -PathType Container -Label 'CandidateRoot'
 $ResolvedRunnerPluginRoot = Resolve-RequiredPath -Path $RunnerPluginRoot -PathType Container -Label 'runner plugin root'
 if ($ResolvedCandidateRoot -ine $ResolvedRunnerPluginRoot) {
@@ -450,13 +597,30 @@ if ([string]$PuertsMarker.source_commit_sha -cne [string]$Protocol.competitors.p
     throw 'ASP65L2007 installed Puerts identity differs from the frozen protocol or managed marker'
 }
 
-$Project = New-LeadershipBenchmarkProject `
-    -SourceProjectPath $ResolvedSourceProjectPath `
-    -CandidateRoot $ResolvedCandidateRoot `
-    -PuertsPluginPath $ResolvedPuertsPluginPath `
-    -OutputRoot $ResolvedOutputRoot `
-    -Commit $Commit `
-    -Tree $Tree
+$UseExistingBenchmarkProject = -not [string]::IsNullOrWhiteSpace($ExistingBenchmarkProjectPath)
+$ExistingProjectState = $null
+if ($UseExistingBenchmarkProject) {
+    $ExistingProjectState = Open-ExistingLeadershipBenchmarkProject `
+        -ProjectPath $ExistingBenchmarkProjectPath `
+        -CandidateRoot $ResolvedCandidateRoot `
+        -PuertsPluginPath $ResolvedPuertsPluginPath `
+        -Commit $Commit `
+        -Tree $Tree `
+        -CandidateSchemaPath $CandidateSchemaPath
+    $Project = [pscustomobject][ordered]@{
+        project_path = [string]$ExistingProjectState.project_path
+        project_root = [string]$ExistingProjectState.project_root
+    }
+}
+else {
+    $Project = New-LeadershipBenchmarkProject `
+        -SourceProjectPath $ResolvedSourceProjectPath `
+        -CandidateRoot $ResolvedCandidateRoot `
+        -PuertsPluginPath $ResolvedPuertsPluginPath `
+        -OutputRoot $ResolvedOutputRoot `
+        -Commit $Commit `
+        -Tree $Tree
+}
 $Preparation = Invoke-LeadershipProjectPreparation `
     -EditorExecutable $EditorExecutable `
     -EngineRoot $ResolvedEngineRoot `
@@ -465,6 +629,9 @@ $Preparation = Invoke-LeadershipProjectPreparation `
     -PassId 'initial'
 $StabilizationPasses = 1
 if (-not (Test-LeadershipProjectSourceStable -ProjectRoot $Project.project_root)) {
+    if ($UseExistingBenchmarkProject) {
+        throw 'ASP65L2021 cached benchmark project source changed during candidate refresh'
+    }
     $Project = New-LeadershipBenchmarkProject `
         -SourceProjectPath $ResolvedSourceProjectPath `
         -CandidateRoot $ResolvedCandidateRoot `
@@ -484,6 +651,12 @@ $BenchmarkProjectPath = $Project.project_path
 $BenchmarkProjectRoot = $Project.project_root
 if (-not (Test-LeadershipProjectSourceStable -ProjectRoot $BenchmarkProjectRoot)) {
     throw 'ASP65L2016 generated project source did not stabilize after the bounded two-pass preparation'
+}
+if ($UseExistingBenchmarkProject) {
+    Update-ExistingLeadershipBenchmarkMarker `
+        -ProjectState $ExistingProjectState `
+        -Commit $Commit `
+        -Tree $Tree
 }
 $null = Assert-SidecarBenchmarkProjectProvenance `
     -ProjectPath $BenchmarkProjectPath `
@@ -569,7 +742,15 @@ $CandidateJson = (($Candidate | ConvertTo-Json -Depth 64) -replace "`r`n", "`n")
 if (-not ($CandidateJson | Test-Json -SchemaFile $CandidateSchemaPath)) {
     throw 'ASP65L2010 generated leadership candidate does not satisfy schema v3'
 }
-$CandidatePath = Join-Path $BenchmarkProjectRoot 'phase65-leadership-candidate.json'
+$CandidateFileName = if ($UseExistingBenchmarkProject) {
+    'phase65-leadership-candidate-{0}-{1}.json' -f `
+        $CandidateId, `
+        [DateTimeOffset]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')
+}
+else {
+    'phase65-leadership-candidate.json'
+}
+$CandidatePath = Join-Path $BenchmarkProjectRoot $CandidateFileName
 if (Test-Path -LiteralPath $CandidatePath) {
     throw "ASP65L2011 refusing to overwrite leadership candidate manifest: $CandidatePath"
 }
