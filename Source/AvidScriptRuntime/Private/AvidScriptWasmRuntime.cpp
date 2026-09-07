@@ -6578,18 +6578,36 @@ FAvidScriptWasmRuntimeInstance::DispatchPreparedStableObjectRoundtrip(
 		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
 	}
 
-	UObject* Receiver = ResolveStableBorrow(
-		SelfSlot,
-		SelfGeneration,
-		Call.Binding.ExpectedClass);
-	if (Receiver == nullptr)
-	{
-		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
-	}
 	const FAvidScriptObjectHandle ReceiverHandle{
 		static_cast<uint32>(SelfSlot),
 		static_cast<uint32>(SelfGeneration)
 	};
+	UObject* Receiver = nullptr;
+	if (ReceiverHandle == HostContext.OwnerHandle)
+	{
+		if (!TryResolveFusedCallbackReceiver(
+				SelfSlot,
+				SelfGeneration,
+				Receiver)
+			|| (Call.Binding.ExpectedClass != nullptr
+				&& !Receiver->IsA(Call.Binding.ExpectedClass)))
+		{
+			return RecordGeneratedStatus(
+				EAvidScriptVmTypedHostStatus::Rejected);
+		}
+	}
+	else
+	{
+		Receiver = ResolveStableBorrow(
+			SelfSlot,
+			SelfGeneration,
+			Call.Binding.ExpectedClass);
+		if (Receiver == nullptr)
+		{
+			return RecordGeneratedStatus(
+				EAvidScriptVmTypedHostStatus::Rejected);
+		}
+	}
 	const FAvidScriptObjectHandle InputHandle{
 		static_cast<uint32>(ObjectSlot),
 		static_cast<uint32>(ObjectGeneration)
