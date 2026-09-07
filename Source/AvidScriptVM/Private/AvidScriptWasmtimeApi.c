@@ -1241,7 +1241,6 @@ AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_i32_i32_to_i32_pr
 	wasm_trap_t* trap = NULL;
 	wasmtime_error_t* error;
 
-	*out_failure = NULL;
 	values[0].i32 = first;
 	values[1].i32 = second;
 	error = wasmtime_func_call_unchecked(
@@ -1269,7 +1268,6 @@ AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_i32_f32_to_void_p
 	wasm_trap_t* trap = NULL;
 	wasmtime_error_t* error;
 
-	*out_failure = NULL;
 	values[0].i32 = first;
 	values[1].f32 = second;
 	error = wasmtime_func_call_unchecked(
