@@ -130,6 +130,12 @@ Assert-True ([double]$maximumReconstructionError.Maximum -eq 2.0) (
 
 $microContract = [pscustomobject]@{}
 Assert-True ((Get-ExpectedFusedGeneratedHits `
+        -Workload 'scalar_noop' `
+        -Iterations 10 `
+        -WorkloadContract $microContract `
+        -DataLane $false) -eq 10) (
+    'unary scalar calls must all use the fused typed-host path')
+Assert-True ((Get-ExpectedFusedGeneratedHits `
         -Workload 'scalar_add_int32' `
         -Iterations 10 `
         -WorkloadContract $microContract `

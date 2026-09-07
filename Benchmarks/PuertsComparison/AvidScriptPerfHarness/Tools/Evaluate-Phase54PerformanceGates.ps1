@@ -67,6 +67,7 @@ function Get-ExpectedGeneratedHits {
         return $LogicalOperationCount
     }
     if ($Workload -in @(
+        'scalar_noop',
         'scalar_add_int32',
         'vector_value',
         'object_roundtrip',
@@ -119,6 +120,7 @@ function Get-ExpectedAdaptiveNativeHits {
         return $Iterations * 2u
     }
     if ($Workload -in @(
+        'scalar_noop',
         'scalar_add_int32',
         'vector_value',
         'object_roundtrip',

@@ -53,6 +53,9 @@ $runnerFusedMatrix = [regex]::Match(
 $evaluatorAdaptiveMatrix = [regex]::Match(
     $evaluatorText,
     '(?s)function Get-ExpectedAdaptiveNativeHits \{.*?(?=\r?\nfunction New-GateResult \{)').Value
+$evaluatorGeneratedMatrix = [regex]::Match(
+    $evaluatorText,
+    '(?s)function Get-ExpectedGeneratedHits \{.*?(?=\r?\nfunction Get-ExpectedSemanticHits \{)').Value
 $profileRoot = Join-Path $comparisonRoot 'Profiles'
 $requestTemplate = Get-Content -LiteralPath (
     Join-Path $profileRoot 'Phase54SixLaneRequest.template.json') -Raw |
@@ -187,7 +190,9 @@ Assert-True (@($generatedCSharpProfile.binding_profile.classes[0].generated_nati
     $runnerGeneratedMatrix.Contains('EAvidScriptPerfWorkload::ScalarNoOp') -and
     $runnerFusedMatrix.Contains('EAvidScriptPerfWorkload::ScalarNoOp') -and
     $runnerPreparedDynamicMatrix.Contains('const bool bSemanticLane') -and
-    $runnerText.Contains('bAdaptiveLane || bStrictSemanticLane')) `
+    $runnerText.Contains('bAdaptiveLane || bStrictSemanticLane') -and
+    $evaluatorGeneratedMatrix.Contains("'scalar_noop'") -and
+    $phase56EvidenceText.Contains("'scalar_noop', 'scalar_add_int32'")) `
     'ScalarNoOp 的 generated/data profile、S1、fused 与 lane-aware prepared-dynamic oracle 必须同步。'
 Assert-True (@($phase65VerifiedPackageDiagnostic.avidscript_artifacts.PSObject.Properties.Value |
         Where-Object { [string]$_.artifact_load_policy -cne 'published_package' }).Count -eq 0) `
