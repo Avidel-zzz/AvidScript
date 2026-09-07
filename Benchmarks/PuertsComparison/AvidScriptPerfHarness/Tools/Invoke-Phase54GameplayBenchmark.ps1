@@ -16,6 +16,10 @@ param(
 
     [string]$PackagedGameExecutable = '',
 
+    [string]$PackagedHostManifestPath = '',
+
+    [string]$CandidateManifestPath = '',
+
     [ValidateRange(30, 1800)]
     [int]$PackagedGameTimeoutSeconds = 300
 )
@@ -125,6 +129,89 @@ function Get-ManifestBindingPackage {
         manifest_sha256 = Get-SidecarFileSha256 -Path $manifestPath
         wasm_path = $wasmPath
         wasm_sha256 = $actualWasmSha256
+    }
+}
+
+function Assert-Phase65PackagedFormalHost {
+    param(
+        [Parameter(Mandatory = $true)][string]$HostManifestPath,
+        [Parameter(Mandatory = $true)][string]$CandidateManifestPath,
+        [Parameter(Mandatory = $true)][string]$PackagedGameExecutable,
+        [Parameter(Mandatory = $true)][string]$RuntimeExecutable,
+        [Parameter(Mandatory = $true)][string]$ProjectPath
+    )
+
+    $leadershipRoot = Join-Path $comparisonRoot 'Leadership'
+    $hostSchemaPath = Join-Path $leadershipRoot 'Schema/Phase65PackagedBenchmarkHost.schema.json'
+    $candidateSchemaPath = Join-Path $leadershipRoot 'Schema/Phase65LeadershipCandidate.schema.json'
+    $resolvedHostManifest = (Resolve-Path -LiteralPath $HostManifestPath).Path
+    $resolvedCandidateManifest = (Resolve-Path -LiteralPath $CandidateManifestPath).Path
+    $hostRaw = Get-Content -LiteralPath $resolvedHostManifest -Raw
+    $candidateRaw = Get-Content -LiteralPath $resolvedCandidateManifest -Raw
+    if (-not ($hostRaw | Test-Json -SchemaFile $hostSchemaPath)) {
+        throw 'Phase65 packaged host manifest does not satisfy schema v2.'
+    }
+    if (-not ($candidateRaw | Test-Json -SchemaFile $candidateSchemaPath)) {
+        throw 'Phase65 candidate manifest does not satisfy schema v3.'
+    }
+    $hostManifest = $hostRaw | ConvertFrom-Json -Depth 64
+    $candidate = $candidateRaw | ConvertFrom-Json -Depth 64
+    $resolvedOuterExecutable = (Resolve-Path -LiteralPath $PackagedGameExecutable).Path
+    $resolvedRuntimeExecutable = (Resolve-Path -LiteralPath $RuntimeExecutable).Path
+    $resolvedProject = (Resolve-Path -LiteralPath $ProjectPath).Path
+    $archiveRoot = (Resolve-Path -LiteralPath ([string]$hostManifest.archive_root)).Path
+    $candidateSha256 = Get-SidecarFileSha256 -Path $resolvedCandidateManifest
+
+    if ([string]$hostManifest.candidate_id -cne [string]$candidate.candidate_id -or
+        [string]$hostManifest.candidate_manifest_sha256 -cne $candidateSha256 -or
+        [string]$hostManifest.candidate_commit -cne [string]$candidate.candidate.commit -or
+        [string]$hostManifest.candidate_tree -cne [string]$candidate.candidate.tree -or
+        [string]$hostManifest.package_catalog_sha256 -cne [string]$candidate.benchmark_project.package_catalog_sha256 -or
+        [string]$candidate.benchmark_project.project_path -ine $resolvedProject -or
+        [string]$hostManifest.executable_path -ine $resolvedOuterExecutable -or
+        [string]$hostManifest.runtime_executable_path -ine $resolvedRuntimeExecutable) {
+        throw 'Phase65 packaged host, candidate, project, and executable identities disagree.'
+    }
+    if ((Get-SidecarFileSha256 -Path $resolvedOuterExecutable) -cne [string]$hostManifest.executable_sha256 -or
+        (Get-SidecarFileSha256 -Path $resolvedRuntimeExecutable) -cne [string]$hostManifest.runtime_executable_sha256 -or
+        (Get-SidecarFileSha256 -Path ([string]$hostManifest.uat_log_path)) -cne [string]$hostManifest.uat_log_sha256 -or
+        (Get-SidecarFileSha256 -Path ([string]$candidate.benchmark_project.package_catalog_path)) -cne [string]$hostManifest.package_catalog_sha256 -or
+        (Get-SidecarFileSha256 -Path (Join-Path (Split-Path -Parent $resolvedProject) 'benchmark-project.json')) -cne [string]$candidate.benchmark_project.marker_sha256) {
+        throw 'Phase65 packaged host executable, UAT, catalog, or marker content drifted.'
+    }
+
+    $archiveDigest = Get-SidecarDirectoryContentDigest -Path $archiveRoot
+    if ([string]$archiveDigest.content_sha256 -cne [string]$hostManifest.archive_content_sha256 -or
+        [int]$archiveDigest.file_count -ne [int]$hostManifest.archive_file_count) {
+        throw 'Phase65 packaged archive content differs from the frozen host manifest.'
+    }
+    $actualPakFiles = @(Get-ChildItem -LiteralPath $archiveRoot -Filter '*.pak' -File -Recurse)
+    if ($actualPakFiles.Count -ne @($hostManifest.pak_files).Count) {
+        throw 'Phase65 packaged archive Pak count differs from the frozen host manifest.'
+    }
+    foreach ($pak in @($hostManifest.pak_files)) {
+        $pakPath = (Resolve-Path -LiteralPath ([string]$pak.path)).Path
+        if (-not $pakPath.StartsWith($archiveRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -or
+            (Get-SidecarFileSha256 -Path $pakPath) -cne [string]$pak.sha256 -or
+            (Get-Item -LiteralPath $pakPath).Length -ne [int64]$pak.size_bytes) {
+            throw "Phase65 packaged Pak identity drifted: $pakPath"
+        }
+    }
+
+    Assert-SidecarBenchmarkProjectProvenance `
+        -ProjectPath $resolvedProject `
+        -AvidScriptCommit ([string]$candidate.candidate.commit) `
+        -AvidScriptTreeSha ([string]$candidate.candidate.tree) | Out-Null
+    Assert-SidecarPuertsProvenance `
+        -ProjectPath $resolvedProject `
+        -PuertsCommit ([string]$candidate.puerts.source_commit) `
+        -PuertsBackendSha256 ([string]$candidate.puerts.backend_sha256)
+
+    return [pscustomobject][ordered]@{
+        host_manifest_sha256 = Get-SidecarFileSha256 -Path $resolvedHostManifest
+        candidate_manifest_sha256 = $candidateSha256
+        archive_content_sha256 = [string]$hostManifest.archive_content_sha256
+        candidate_id = [string]$candidate.candidate_id
     }
 }
 
@@ -242,11 +329,16 @@ function Resolve-RequestTemplateIdentity {
 
     if ($Profile.evidence_class -ceq 'formal') {
         if ($IsMonolithicHost) {
-            throw 'Formal packaged benchmark requires a separately frozen Phase65 protocol.'
+            if ([string]$Profile.profile_id -cne
+                'phase65.verified-package-micro-formal-v1') {
+                throw 'Formal packaged benchmark requires the tracked Phase65 verified-package profile.'
+            }
         }
-        Assert-SidecarFormalEditorExecutable `
-            -EditorExecutable $HostExecutablePath `
-            -UeVersion '5.8.0' | Out-Null
+        else {
+            Assert-SidecarFormalEditorExecutable `
+                -EditorExecutable $HostExecutablePath `
+                -UeVersion '5.8.0' | Out-Null
+        }
         Assert-SidecarBenchmarkProjectProvenance `
             -ProjectPath (Join-Path $projectRoot 'AvidTPSTemplate.uproject') `
             -AvidScriptCommit $avidscriptCommit `
@@ -530,6 +622,19 @@ if (@(Get-ChildItem -LiteralPath $resolvedOutput -Force).Count -ne 0) {
 }
 
 $profile = Read-JsonFile -Path $ProfilePath
+$packagedFormalEvidence = $null
+if ($usePackagedGame -and $profile.evidence_class -ceq 'formal') {
+    if ([string]::IsNullOrWhiteSpace($PackagedHostManifestPath) -or
+        [string]::IsNullOrWhiteSpace($CandidateManifestPath)) {
+        throw 'Formal packaged benchmark requires packaged-host and candidate manifests.'
+    }
+    $packagedFormalEvidence = Assert-Phase65PackagedFormalHost `
+        -HostManifestPath $PackagedHostManifestPath `
+        -CandidateManifestPath $CandidateManifestPath `
+        -PackagedGameExecutable $resolvedHostExecutable `
+        -RuntimeExecutable $resolvedHostIdentityExecutable `
+        -ProjectPath $resolvedProject
+}
 $publishedArtifactCount = @($profile.avidscript_artifacts.PSObject.Properties.Value |
     Where-Object {
         $_.PSObject.Properties.Name -ccontains 'artifact_load_policy' -and
@@ -552,13 +657,22 @@ Assert-ExactSequence `
     -Expected $expectedLanes `
     -Label 'request template lane catalog'
 if ($profile.evidence_class -ceq 'formal') {
-    $profilePrefix = [string]$profile.profile_id -clike 'phase56.*' ?
-        'Phase56' :
-        'Phase54'
-    $canonicalProfileName = @($profile.workloads).Count -eq
-        $gameplayWorkloads.Count ?
-        "$profilePrefix`Gameplay.formal.json" :
-        "$profilePrefix`Micro.formal.json"
+    if ([string]$profile.profile_id -clike 'phase65.*') {
+        if (@($profile.workloads).Count -ne $microWorkloads.Count -or
+            -not $usePackagedGame) {
+            throw 'Phase65 formal profile is valid only for the packaged micro matrix.'
+        }
+        $canonicalProfileName = 'Phase65VerifiedPackageMicro.formal.json'
+    }
+    else {
+        $profilePrefix = [string]$profile.profile_id -clike 'phase56.*' ?
+            'Phase56' :
+            'Phase54'
+        $canonicalProfileName = @($profile.workloads).Count -eq
+            $gameplayWorkloads.Count ?
+            "$profilePrefix`Gameplay.formal.json" :
+            "$profilePrefix`Micro.formal.json"
+    }
     $canonicalProfilePath = Join-Path $schemaRoot $canonicalProfileName
     $canonicalTemplatePath = Join-Path $schemaRoot (
         'Phase54SixLaneRequest.template.json')
@@ -589,6 +703,12 @@ $template = Resolve-RequestTemplateIdentity `
     -SemanticPackage $semanticPackage `
     -GeneratedPackage $generatedPackage `
     -DataPackage $dataPackage
+if ($null -ne $packagedFormalEvidence) {
+    $template.provenance | Add-Member -NotePropertyName packaged_host_manifest_sha256 -NotePropertyValue ([string]$packagedFormalEvidence.host_manifest_sha256) -Force
+    $template.provenance | Add-Member -NotePropertyName candidate_manifest_sha256 -NotePropertyValue ([string]$packagedFormalEvidence.candidate_manifest_sha256) -Force
+    $template.provenance | Add-Member -NotePropertyName packaged_archive_content_sha256 -NotePropertyValue ([string]$packagedFormalEvidence.archive_content_sha256) -Force
+    $template.provenance | Add-Member -NotePropertyName phase65_candidate_id -NotePropertyValue ([string]$packagedFormalEvidence.candidate_id) -Force
+}
 foreach ($lane in @($profile.avidscript_artifacts.PSObject.Properties.Name)) {
     $catalogEntry = @($template.lane_catalog | Where-Object {
         $_.lane_id -ceq $lane

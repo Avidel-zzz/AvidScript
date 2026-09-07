@@ -78,6 +78,9 @@ $phase56GameplayDiagnostic = Get-Content -LiteralPath (
 $phase65VerifiedPackageDiagnostic = Get-Content -LiteralPath (
     Join-Path $profileRoot 'Phase65VerifiedPackageMicro.diagnostic.json') -Raw |
     ConvertFrom-Json -Depth 100
+$phase65VerifiedPackageFormal = Get-Content -LiteralPath (
+    Join-Path $profileRoot 'Phase65VerifiedPackageMicro.formal.json') -Raw |
+    ConvertFrom-Json -Depth 100
 $phase56GateSchema = Get-Content -LiteralPath (
     Join-Path $profileRoot 'Phase56GateResult.schema.json') -Raw |
     ConvertFrom-Json -Depth 100
@@ -173,6 +176,13 @@ Assert-True ($generatedCSharpProfile.binding_profile.package_name -ceq
 Assert-True (@($phase65VerifiedPackageDiagnostic.avidscript_artifacts.PSObject.Properties.Value |
         Where-Object { [string]$_.artifact_load_policy -cne 'published_package' }).Count -eq 0) `
     'Phase65 verified-package diagnostic 的三条 AvidScript lane 必须全部走发布包加载。'
+Assert-True ([string]$phase65VerifiedPackageFormal.evidence_class -ceq 'formal' -and
+    [int]$phase65VerifiedPackageFormal.process_runs -eq 5 -and
+    [int]$phase65VerifiedPackageFormal.warmup_samples -eq 5 -and
+    [int]$phase65VerifiedPackageFormal.timed_samples -eq 30 -and
+    @($phase65VerifiedPackageFormal.avidscript_artifacts.PSObject.Properties.Value |
+        Where-Object { [string]$_.artifact_load_policy -cne 'published_package' }).Count -eq 0) `
+    'Phase65 verified-package formal 必须锁定 5x30 样本并全部走发布包加载。'
 Assert-True ($invokeText.Contains('Get-PublishedModulePackage') -and
     $invokeText.Contains('Add-Member -NotePropertyName artifact_trust') -and
     $runnerText.Contains('LoadPublishedModule') -and
@@ -205,6 +215,10 @@ Assert-True ($invokeText.Contains('Assert-SidecarBenchmarkProjectProvenance') -a
     $invokeText.Contains('Get-SidecarWasmtimeCompilerIdentity')) `
     'Formal 六通道必须锁定项目、Puerts、Harness DLL、profile/template 与真实 Wasmtime build identity。'
 Assert-True ($invokeText.Contains('[string]$PackagedGameExecutable') -and
+    $invokeText.Contains('[string]$PackagedHostManifestPath') -and
+    $invokeText.Contains('[string]$CandidateManifestPath') -and
+    $invokeText.Contains('Assert-Phase65PackagedFormalHost') -and
+    $invokeText.Contains('packaged_archive_content_sha256') -and
     $invokeText.Contains("'/Engine/Maps/Entry'") -and
     $invokeText.Contains('$resolvedHostIdentityExecutable') -and
     $invokeText.Contains('"$hostTarget/Binaries/Win64/$hostTarget.exe"') -and
@@ -214,7 +228,7 @@ Assert-True ($invokeText.Contains('[string]$PackagedGameExecutable') -and
     $invokeText.Contains('"-abslog=$hostLogPath"') -and
     $invokeText.Contains("'-AvidScriptSuppressGeneratedTypeExecution'") -and
     $invokeText.Contains("execution_host -NotePropertyValue")) `
-    '发布包 benchmark 必须通过有界 monolithic Game host 启动、记录日志与实际执行载体。'
+    '发布包 benchmark 必须通过有界 monolithic Game host 启动，并冻结候选、Archive、Pak 与实际执行载体。'
 Assert-True ($invokeText.Contains('Add-Member -NotePropertyName artifact_load_policy') -and
     $invokeText.Contains('Add-Member -NotePropertyName expected_package_id') -and
     $invokeText.Contains('Add-Member -NotePropertyName package_catalog_sha256')) `
