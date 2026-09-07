@@ -768,6 +768,14 @@
       "prevention": "host manifest 同时冻结 launcher 与 runtime executable；runner 启动 launcher，但 Native、Puerts 和 monolithic Harness provenance 必须使用内层 runtime executable SHA。首轮 package diagnostic 必须验证 C++ 自报 identity 与请求一致。",
       "source": "Benchmarks/PuertsComparison/AvidScriptPerfHarness/Tools/Invoke-Phase54GameplayBenchmark.ps1",
       "last_observed": "2026-09-07 P65.D10 首次 Entry-map package run 以 ASP53C2002 拒绝 launcher SHA 与实际 runtime EXE SHA 不一致"
+    },
+    {
+      "id": "pak-files-are-not-proven-by-physical-directory-existence",
+      "tags": ["unreal", "packaging", "puerts", "filesystem"],
+      "summary": "UFS 文件进入 Pak/IoStore 后可由 UE platform file 读取，但宿主物理目录可以不存在。",
+      "prevention": "非资产脚本通过 Build.cs RuntimeDependencies 以 UFS 明确发布；运行时对具体文件使用 FFileHelper/IPlatformFile 读取并校验哈希，不用 `FPaths::DirectoryExists` 判断虚拟目录。只发布 benchmark 实际需要的脚本。",
+      "source": "Benchmarks/PuertsComparison/AvidScriptPerfHarness/Source/AvidScriptPerfHarness/Private/AvidScriptPerfRunner.cpp",
+      "last_observed": "2026-09-07 P65.D10 package diagnostic 通过 runtime identity 后，在物理 Plugin Content 目录检查处拒绝 Pak 内脚本"
     }
   ]
 }

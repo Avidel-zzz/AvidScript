@@ -27,6 +27,8 @@ $pluginRoot = Split-Path -Parent $benchmarksRoot
 . (Join-Path $comparisonRoot 'Scripts\PuertsBenchmarkSidecar.Common.ps1')
 $runnerText = Get-Content -LiteralPath (
     Join-Path $harnessRoot 'Source\AvidScriptPerfHarness\Private\AvidScriptPerfRunner.cpp') -Raw
+$harnessBuildRulesText = Get-Content -LiteralPath (
+    Join-Path $harnessRoot 'Source\AvidScriptPerfHarness\AvidScriptPerfHarness.Build.cs') -Raw
 $runtimeSessionHeaderText = Get-Content -LiteralPath (
     Join-Path $pluginRoot 'Source\AvidScriptRuntime\Public\AvidScriptRuntimeSession.h') -Raw
 $runtimeSessionSourceText = Get-Content -LiteralPath (
@@ -176,6 +178,11 @@ Assert-True ($invokeText.Contains('Get-PublishedModulePackage') -and
     $runnerText.Contains('LoadPublishedModule') -and
     $runnerText.Contains('LoadInitialArtifact')) `
     'Verified-package benchmark 必须复用生产 catalog/package loader 与 Session artifact 入口。'
+Assert-True ($harnessBuildRulesText.Contains('RuntimeDependencies.Add(ScriptPath, StagedFileType.UFS)') -and
+    $harnessBuildRulesText.Contains('"reflection.js", "static.js"') -and
+    -not $runnerText.Contains('FPaths::DirectoryExists(ScriptRoot)') -and
+    $runnerText.Contains('FFileHelper::LoadFileToArray(Content, *Path)')) `
+    'Puerts benchmark workload 必须作为 UFS 发布，并通过 Pak-aware 文件读取而非物理目录探测。'
 Assert-True ($nativePropertyBatch.Length -gt 0 -and
     @([regex]::Matches($nativePropertyBatch, 'Fixture\.ScalarValue\s*=')).Count -eq 4 -and
     -not $nativePropertyBatch.Contains('NativeSetScalar')) `

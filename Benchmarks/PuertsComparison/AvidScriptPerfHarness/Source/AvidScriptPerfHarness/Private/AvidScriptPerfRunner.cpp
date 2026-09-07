@@ -444,14 +444,6 @@ namespace
 
 			const FString ScriptRoot = FPaths::Combine(Plugin->GetContentDir(), TEXT("JavaScript"));
 			const FString RuntimeRoot = FPaths::Combine(PuertsPlugin->GetContentDir(), TEXT("JavaScript"));
-			if (!FPaths::DirectoryExists(ScriptRoot) || !FPaths::DirectoryExists(RuntimeRoot))
-			{
-				OutError = FString::Printf(
-					TEXT("Puerts workload/runtime root is missing: workload=%s runtime=%s"),
-					*ScriptRoot,
-					*RuntimeRoot);
-				return false;
-			}
 
 			const FString ScriptPath = FPaths::Combine(ScriptRoot, ModuleName);
 			FString ActualScriptSha256;
