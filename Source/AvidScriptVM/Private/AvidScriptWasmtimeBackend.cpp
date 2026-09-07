@@ -1918,8 +1918,20 @@ public:
 			RecordPendingHostFailure(HostContext.ModuleName, HostContext.ImportName, TEXT("The typed host dispatcher is unavailable."));
 			return 1;
 		}
-		const EAvidScriptVmTypedHostStatus Status = TypedHostDispatcher->DispatchSelfVectorValue(
-			HostContext.BindingOrdinal, SelfSlot, SelfGeneration, GuestAddress, OutValue);
+		const EAvidScriptVmTypedHostStatus Status =
+			HostContext.Shape == EAvidScriptVmTypedHostShape::SelfVectorRefOut
+			? TypedHostDispatcher->DispatchSelfVectorRefOut(
+				HostContext.BindingOrdinal,
+				SelfSlot,
+				SelfGeneration,
+				GuestAddress,
+				OutValue)
+			: TypedHostDispatcher->DispatchSelfVectorValue(
+				HostContext.BindingOrdinal,
+				SelfSlot,
+				SelfGeneration,
+				GuestAddress,
+				OutValue);
 		return CompleteTypedInvocation(HostContext, Status);
 	}
 
@@ -3211,6 +3223,7 @@ private:
 				break;
 			case EAvidScriptVmTypedHostShape::SelfPropertyI32GetSet:
 			case EAvidScriptVmTypedHostShape::SelfVectorValue:
+			case EAvidScriptVmTypedHostShape::SelfVectorRefOut:
 				ExpectedSignature = TEXT("(iii)i");
 				break;
 			case EAvidScriptVmTypedHostShape::SelfPropertyI32Get:
@@ -3559,6 +3572,7 @@ private:
 					HostContextPointer);
 				break;
 			case EAvidScriptVmTypedHostShape::SelfVectorValue:
+			case EAvidScriptVmTypedHostShape::SelfVectorRefOut:
 				DefineFailure = avidscript_wasmtime_linker_define_self_vector_value(
 					Linker,
 					ModuleNameUtf8.Get(),

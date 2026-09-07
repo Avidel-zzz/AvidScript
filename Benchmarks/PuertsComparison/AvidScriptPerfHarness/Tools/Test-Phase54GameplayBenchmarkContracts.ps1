@@ -186,7 +186,9 @@ Assert-True ($generatedCSharpProfile.binding_profile.package_name -ceq
     $generatedCSharpProfile.binding_profile.package_name.Length -le 40) `
     'Generated S1 与 data-oriented profile 必须共享适合 Windows 短路径工程的稳定 binding package identity。'
 Assert-True (@($generatedCSharpProfile.binding_profile.classes[0].generated_native_functions) -ccontains 'ReflectNoOp' -and
+    @($generatedCSharpProfile.binding_profile.classes[0].generated_native_functions) -ccontains 'ReflectVectorRefOut' -and
     @($dataCSharpProfile.binding_profile.classes[0].generated_native_functions) -ccontains 'ReflectNoOp' -and
+    @($dataCSharpProfile.binding_profile.classes[0].generated_native_functions) -ccontains 'ReflectVectorRefOut' -and
     $runnerGeneratedMatrix.Contains('EAvidScriptPerfWorkload::ScalarNoOp') -and
     $runnerFusedMatrix.Contains('EAvidScriptPerfWorkload::ScalarNoOp') -and
     $runnerPreparedDynamicMatrix.Contains('const bool bSemanticLane') -and

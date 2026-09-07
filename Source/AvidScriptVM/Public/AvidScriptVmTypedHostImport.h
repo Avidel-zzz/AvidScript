@@ -21,6 +21,7 @@ enum class EAvidScriptVmTypedHostShape : uint8
 	PackedSelfPropertyF64Get,
 	PackedSelfPropertyF64Set,
 	SelfVectorValue,
+	SelfVectorRefOut,
 	StableObjectRoundtrip,
 	CommandBufferSubmit,
 	SelfI32PairToGuestI32,
@@ -208,6 +209,7 @@ struct AVIDSCRIPTVM_API FAvidScriptVmPreparedTypedHostTarget
 			return SelfF32TripleGuestVector != nullptr;
 		case EAvidScriptVmTypedHostShape::SelfPropertyI32GetSet:
 		case EAvidScriptVmTypedHostShape::SelfVectorValue:
+		case EAvidScriptVmTypedHostShape::SelfVectorRefOut:
 			return SelfGuestAddress != nullptr;
 		case EAvidScriptVmTypedHostShape::StableObjectRoundtrip:
 			return StableObjectRoundtrip != nullptr;
@@ -299,6 +301,13 @@ public:
 		int32& OutValue) = 0;
 
 	virtual EAvidScriptVmTypedHostStatus DispatchSelfVectorValue(
+		uint32 BindingOrdinal,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 GuestAddress,
+		int32& OutValue) = 0;
+
+	virtual EAvidScriptVmTypedHostStatus DispatchSelfVectorRefOut(
 		uint32 BindingOrdinal,
 		int32 SelfSlot,
 		int32 SelfGeneration,

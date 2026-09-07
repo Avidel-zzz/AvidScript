@@ -99,6 +99,11 @@ bool TryParseShape(
 		OutShape = EAvidScriptGeneratedBindingShape::VectorValue;
 		return true;
 	}
+	if (Value == TEXT("vector_ref_out"))
+	{
+		OutShape = EAvidScriptGeneratedBindingShape::VectorRefOut;
+		return true;
+	}
 	if (Value == TEXT("stable_object_roundtrip"))
 	{
 		OutShape = EAvidScriptGeneratedBindingShape::StableObjectRoundtrip;

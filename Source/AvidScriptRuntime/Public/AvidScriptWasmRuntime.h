@@ -499,6 +499,12 @@ public:
 		int32 SelfGeneration,
 		int32 GuestAddress,
 		int32& OutValue) override;
+	EAvidScriptVmTypedHostStatus DispatchSelfVectorRefOut(
+		uint32 BindingOrdinal,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 GuestAddress,
+		int32& OutValue) override;
 	EAvidScriptVmTypedHostStatus DispatchStableObjectRoundtrip(
 		uint32 BindingOrdinal,
 		int32 SelfSlot,
@@ -660,6 +666,18 @@ private:
 		int32 SelfSlot,
 		int32 SelfGeneration,
 		int32 Value);
+	static EAvidScriptVmTypedHostStatus InvokePreparedSelfVectorRefOut(
+		void* Context,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 GuestAddress,
+		int32& OutValue);
+	EAvidScriptVmTypedHostStatus DispatchPreparedSelfVectorRefOut(
+		FAvidScriptPreparedGeneratedHostCall& Call,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 GuestAddress,
+		int32& OutValue);
 	bool TryResolveFusedCallbackReceiver(
 		int32 SelfSlot,
 		int32 SelfGeneration,

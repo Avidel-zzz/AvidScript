@@ -98,6 +98,13 @@ bool TryParseAvidScriptGeneratedShape(
 		OutSignature = TEXT("(iii)i");
 		return true;
 	}
+	if (Shape == TEXT("vector_ref_out"))
+	{
+		OutGeneratedShape = EAvidScriptGeneratedBindingShape::VectorRefOut;
+		OutVmShape = EAvidScriptVmTypedHostShape::SelfVectorRefOut;
+		OutSignature = TEXT("(iii)i");
+		return true;
+	}
 	if (Shape == TEXT("stable_object_roundtrip"))
 	{
 		OutGeneratedShape =
@@ -3295,6 +3302,11 @@ FAvidScriptBindingPackage::MakeGeneratedPlanForTesting(
 	case EAvidScriptGeneratedBindingShape::VectorValue:
 		Plan.TypedHostImport.Shape =
 			EAvidScriptVmTypedHostShape::SelfVectorValue;
+		Plan.TypedHostImport.Signature = TEXT("(iii)i");
+		break;
+	case EAvidScriptGeneratedBindingShape::VectorRefOut:
+		Plan.TypedHostImport.Shape =
+			EAvidScriptVmTypedHostShape::SelfVectorRefOut;
 		Plan.TypedHostImport.Signature = TEXT("(iii)i");
 		break;
 	case EAvidScriptGeneratedBindingShape::StableObjectRoundtrip:

@@ -12,6 +12,7 @@ enum class EAvidScriptGeneratedBindingShape : uint8
 	PropertyI32Get,
 	PropertyI32Set,
 	VectorValue,
+	VectorRefOut,
 	StableObjectRoundtrip
 };
 

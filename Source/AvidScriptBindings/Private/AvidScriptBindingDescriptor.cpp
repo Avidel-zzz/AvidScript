@@ -2136,6 +2136,7 @@ bool IsAvidScriptGeneratedShape(const FString& Value)
 		|| Value == TEXT("property_i32_get")
 		|| Value == TEXT("property_i32_set")
 		|| Value == TEXT("vector_value")
+		|| Value == TEXT("vector_ref_out")
 		|| Value == TEXT("stable_object_roundtrip");
 }
 

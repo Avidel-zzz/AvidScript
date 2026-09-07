@@ -418,6 +418,21 @@ public:
 		return Status;
 	}
 
+	EAvidScriptVmTypedHostStatus DispatchSelfVectorRefOut(
+		uint32 BindingOrdinal,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 GuestAddress,
+		int32& OutValue) override
+	{
+		return DispatchSelfVectorValue(
+			BindingOrdinal,
+			SelfSlot,
+			SelfGeneration,
+			GuestAddress,
+			OutValue);
+	}
+
 	EAvidScriptVmTypedHostStatus DispatchStableObjectRoundtrip(
 		uint32 BindingOrdinal,
 		int32 SelfSlot,

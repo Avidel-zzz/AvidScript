@@ -123,6 +123,8 @@ const TCHAR* ShapeToken(const EAvidScriptGeneratedBindingShape Shape)
 		return TEXT("EAvidScriptGeneratedBindingShape::PropertyI32Set");
 	case EAvidScriptGeneratedBindingShape::VectorValue:
 		return TEXT("EAvidScriptGeneratedBindingShape::VectorValue");
+	case EAvidScriptGeneratedBindingShape::VectorRefOut:
+		return TEXT("EAvidScriptGeneratedBindingShape::VectorRefOut");
 	case EAvidScriptGeneratedBindingShape::StableObjectRoundtrip:
 		return TEXT("EAvidScriptGeneratedBindingShape::StableObjectRoundtrip");
 	default:
@@ -154,6 +156,8 @@ const TCHAR* ShapeManifestToken(
 		return TEXT("property_i32_set");
 	case EAvidScriptGeneratedBindingShape::VectorValue:
 		return TEXT("vector_value");
+	case EAvidScriptGeneratedBindingShape::VectorRefOut:
+		return TEXT("vector_ref_out");
 	case EAvidScriptGeneratedBindingShape::StableObjectRoundtrip:
 		return TEXT("stable_object_roundtrip");
 	default:
@@ -258,6 +262,22 @@ FString RenderTypedCallSite(
 			TEXT("\t\treturn EAvidScriptVmTypedHostStatus::Rejected;\n")
 			TEXT("\t}\n")
 			TEXT("\tOutValue = TypedReceiver->%s(InValue);\n")
+			TEXT("\treturn EAvidScriptVmTypedHostStatus::Succeeded;\n")
+			TEXT("}\n\n"),
+			*FunctionName,
+			*OwnerType,
+			*OwnerType,
+			*UeFunction);
+	case EAvidScriptGeneratedBindingShape::VectorRefOut:
+		return FString::Printf(
+			TEXT("static EAvidScriptVmTypedHostStatus %s(UObject& Receiver, FVector& InOutValue, FVector& OutValue)\n")
+			TEXT("{\n")
+			TEXT("\t%s* TypedReceiver = Cast<%s>(&Receiver);\n")
+			TEXT("\tif (TypedReceiver == nullptr)\n")
+			TEXT("\t{\n")
+			TEXT("\t\treturn EAvidScriptVmTypedHostStatus::Rejected;\n")
+			TEXT("\t}\n")
+			TEXT("\tTypedReceiver->%s(InOutValue, OutValue);\n")
 			TEXT("\treturn EAvidScriptVmTypedHostStatus::Succeeded;\n")
 			TEXT("}\n\n"),
 			*FunctionName,
@@ -375,6 +395,18 @@ FString RenderPreparedTypedCallSite(
 			*OwnerType,
 			*OwnerType,
 			*UeFunction);
+	case EAvidScriptGeneratedBindingShape::VectorRefOut:
+		return FString::Printf(
+			TEXT("static EAvidScriptVmTypedHostStatus %s(UObject& Receiver, FVector& InOutValue, FVector& OutValue)\n")
+			TEXT("{\n")
+			TEXT("\t%s* TypedReceiver = static_cast<%s*>(&Receiver);\n")
+			TEXT("\tTypedReceiver->%s(InOutValue, OutValue);\n")
+			TEXT("\treturn EAvidScriptVmTypedHostStatus::Succeeded;\n")
+			TEXT("}\n\n"),
+			*FunctionName,
+			*OwnerType,
+			*OwnerType,
+			*UeFunction);
 	case EAvidScriptGeneratedBindingShape::PropertyI32Get:
 		return FString::Printf(
 			TEXT("static EAvidScriptVmTypedHostStatus %s(UObject& Receiver, int32& OutValue)\n")
@@ -485,8 +517,16 @@ FString RenderPrivateCpp(
 				== EAvidScriptGeneratedBindingShape::I32ToI32
 			? PreparedCallSite
 			: FString(TEXT("nullptr"));
+		const FString VectorRefOutCall = Binding.Shape
+				== EAvidScriptGeneratedBindingShape::VectorRefOut
+			? CallSite
+			: FString(TEXT("nullptr"));
+		const FString PreparedVectorRefOutCall = Binding.Shape
+				== EAvidScriptGeneratedBindingShape::VectorRefOut
+			? PreparedCallSite
+			: FString(TEXT("nullptr"));
 		Result += FString::Printf(
-			TEXT("\t{ TEXT(\"%s\"), TEXT(\"%s\"), TEXT(\"%s\"), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s },\n"),
+			TEXT("\t{ TEXT(\"%s\"), TEXT(\"%s\"), TEXT(\"%s\"), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s },\n"),
 			*EscapeCppString(Binding.StableId),
 			*EscapeCppString(Package.PackageHash),
 			*EscapeCppString(Binding.DescriptorIdentity),
@@ -502,7 +542,9 @@ FString RenderPrivateCpp(
 			*PreparedPropertyI32GetCall,
 			*PreparedPropertyI32SetCall,
 			*I32Call,
-			*PreparedI32Call);
+			*PreparedI32Call,
+			*VectorRefOutCall,
+			*PreparedVectorRefOutCall);
 	}
 	Result += TEXT("};\n} // namespace\n\n");
 	Result +=
@@ -714,6 +756,7 @@ const TCHAR* ExpectedGeneratedAbiSignature(
 	case EAvidScriptGeneratedBindingShape::PropertyI32GetSet:
 	case EAvidScriptGeneratedBindingShape::PropertyI32Set:
 	case EAvidScriptGeneratedBindingShape::VectorValue:
+	case EAvidScriptGeneratedBindingShape::VectorRefOut:
 		return TEXT("(iii)i");
 	case EAvidScriptGeneratedBindingShape::PropertyI32Get:
 		return TEXT("(ii)i");

@@ -12,6 +12,7 @@ bool IsAvidScriptGeneratedCallSiteValid(
 		+ (Entry.PropertyI32GetCall != nullptr ? 1 : 0)
 		+ (Entry.PropertyI32SetCall != nullptr ? 1 : 0)
 		+ (Entry.VectorValueCall != nullptr ? 1 : 0)
+		+ (Entry.VectorRefOutCall != nullptr ? 1 : 0)
 		+ (Entry.ObjectRoundtripCall != nullptr ? 1 : 0);
 	if (PointerCount != 1)
 	{
@@ -24,7 +25,9 @@ bool IsAvidScriptGeneratedCallSiteValid(
 		|| (Entry.PreparedPropertyI32GetCall != nullptr
 			&& Entry.PropertyI32GetCall == nullptr)
 		|| (Entry.PreparedPropertyI32SetCall != nullptr
-			&& Entry.PropertyI32SetCall == nullptr))
+			&& Entry.PropertyI32SetCall == nullptr)
+		|| (Entry.PreparedVectorRefOutCall != nullptr
+			&& Entry.VectorRefOutCall == nullptr))
 	{
 		return false;
 	}
@@ -59,6 +62,13 @@ bool IsAvidScriptGeneratedCallSiteValid(
 			&& Entry.PreparedPropertyI32GetCall == nullptr;
 	case EAvidScriptGeneratedBindingShape::VectorValue:
 		return Entry.VectorValueCall != nullptr
+			&& Entry.PreparedI32Call == nullptr
+			&& Entry.PreparedI32PairCall == nullptr
+			&& Entry.PreparedPropertyI32GetCall == nullptr
+			&& Entry.PreparedPropertyI32SetCall == nullptr
+			&& Entry.PreparedVectorRefOutCall == nullptr;
+	case EAvidScriptGeneratedBindingShape::VectorRefOut:
+		return Entry.VectorRefOutCall != nullptr
 			&& Entry.PreparedI32Call == nullptr
 			&& Entry.PreparedI32PairCall == nullptr
 			&& Entry.PreparedPropertyI32GetCall == nullptr

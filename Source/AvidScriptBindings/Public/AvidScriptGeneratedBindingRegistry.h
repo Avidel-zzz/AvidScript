@@ -37,6 +37,11 @@ using FAvidScriptGeneratedVectorValueCall = EAvidScriptVmTypedHostStatus (*)(
 	const FVector& InValue,
 	FVector& OutValue);
 
+using FAvidScriptGeneratedVectorRefOutCall = EAvidScriptVmTypedHostStatus (*)(
+	UObject& Receiver,
+	FVector& InOutValue,
+	FVector& OutValue);
+
 using FAvidScriptGeneratedObjectRoundtripCall = EAvidScriptVmTypedHostStatus (*)(
 	UObject& Receiver,
 	UObject* InValue,
@@ -64,6 +69,8 @@ struct FAvidScriptGeneratedBindingEntry
 		PreparedPropertyI32SetCall = nullptr;
 	FAvidScriptGeneratedI32Call I32Call = nullptr;
 	FAvidScriptGeneratedI32Call PreparedI32Call = nullptr;
+	FAvidScriptGeneratedVectorRefOutCall VectorRefOutCall = nullptr;
+	FAvidScriptGeneratedVectorRefOutCall PreparedVectorRefOutCall = nullptr;
 };
 
 struct FAvidScriptGeneratedBindingPackageState;

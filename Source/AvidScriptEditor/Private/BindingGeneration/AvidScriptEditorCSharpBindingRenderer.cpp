@@ -668,7 +668,8 @@ FString MakeExpectedAbiSignature(const FAvidScriptBindingFunctionModel& Binding)
 			return TEXT("(iiii)i");
 		}
 		if (Binding.GeneratedShape == TEXT("property_i32_get_set")
-			|| Binding.GeneratedShape == TEXT("vector_value"))
+			|| Binding.GeneratedShape == TEXT("vector_value")
+			|| Binding.GeneratedShape == TEXT("vector_ref_out"))
 		{
 			return TEXT("(iii)i");
 		}
@@ -745,6 +746,9 @@ bool RenderMethod(
 	const bool bGeneratedVectorValue =
 		Binding.DispatchMode == TEXT("generated_native_s1")
 		&& Binding.GeneratedShape == TEXT("vector_value");
+	const bool bGeneratedVectorRefOut =
+		Binding.DispatchMode == TEXT("generated_native_s1")
+		&& Binding.GeneratedShape == TEXT("vector_ref_out");
 	const bool bLatent =
 		Binding.DispatchMode == TEXT("latent_process_event");
 	const bool bProviderLatent =
@@ -863,6 +867,44 @@ bool RenderMethod(
 		}
 		PublicParameters.Add(PublicDeclaration);
 		SignatureParameterTypes.Add(Modifier + PublicType);
+
+		if (bGeneratedVectorRefOut)
+		{
+			const bool bValidShape = Binding.Parameters.Num() == 2
+				&& Binding.Parameters[0].Direction == TEXT("ref")
+				&& Binding.Parameters[1].Direction == TEXT("out")
+				&& Binding.Parameters[0].CanonicalType
+					== TEXT("struct:/Script/CoreUObject.Vector")
+				&& Binding.Parameters[1].CanonicalType
+					== TEXT("struct:/Script/CoreUObject.Vector")
+				&& PublicType == TEXT("FVector");
+			if (!bValidShape)
+			{
+				OutErrorCategory = TEXT("descriptor_contract_invalid");
+				OutErrorSource = Binding.CanonicalIdentity;
+				return false;
+			}
+			if (ParameterIndex == 0)
+			{
+				NativeParameters.Add(
+					TEXT("ref FAvidScriptVectorRefOutBuffer value"));
+				NativeArguments.Add(TEXT("ref __vectorRefOut"));
+				BeforeCall.Add(
+					TEXT("FAvidScriptVectorRefOutBuffer __vectorRefOut = new(")
+					+ PublicName + TEXT(");"));
+			}
+			else
+			{
+				const FString InOutName =
+					FAvidScriptEditorCSharpSyntax::MakeIdentifier(
+						Binding.Parameters[0].Name);
+				AfterCall.Add(
+					InOutName + TEXT(" = __vectorRefOut.InOutResult;"));
+				AfterCall.Add(
+					PublicName + TEXT(" = __vectorRefOut.OutResult;"));
+			}
+			continue;
+		}
 
 		if (bGeneratedVectorValue)
 		{
@@ -1452,6 +1494,38 @@ void AppendGeneratedVectorValueBuffer(TArray<FString>& Lines)
 		TEXT(""),
 		TEXT("    internal FVector Result"),
 		TEXT("        => new(OutputX, OutputY, OutputZ);"),
+		TEXT("}"),
+		TEXT("")
+	});
+}
+
+void AppendGeneratedVectorRefOutBuffer(TArray<FString>& Lines)
+{
+	Lines.Append({
+		TEXT("[StructLayout(LayoutKind.Sequential)]"),
+		TEXT("internal struct FAvidScriptVectorRefOutBuffer"),
+		TEXT("{"),
+		TEXT("    internal float InOutX;"),
+		TEXT("    internal float InOutY;"),
+		TEXT("    internal float InOutZ;"),
+		TEXT("    internal float OutX;"),
+		TEXT("    internal float OutY;"),
+		TEXT("    internal float OutZ;"),
+		TEXT(""),
+		TEXT("    internal FAvidScriptVectorRefOutBuffer(FVector value)"),
+		TEXT("    {"),
+		TEXT("        InOutX = value.X;"),
+		TEXT("        InOutY = value.Y;"),
+		TEXT("        InOutZ = value.Z;"),
+		TEXT("        OutX = 0.0f;"),
+		TEXT("        OutY = 0.0f;"),
+		TEXT("        OutZ = 0.0f;"),
+		TEXT("    }"),
+		TEXT(""),
+		TEXT("    internal FVector InOutResult"),
+		TEXT("        => new(InOutX, InOutY, InOutZ);"),
+		TEXT("    internal FVector OutResult"),
+		TEXT("        => new(OutX, OutY, OutZ);"),
 		TEXT("}"),
 		TEXT("")
 	});
@@ -3009,6 +3083,13 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 				return Binding.DispatchMode == TEXT("generated_native_s1")
 					&& Binding.GeneratedShape == TEXT("vector_value");
 			});
+	const bool bNeedsGeneratedVectorRefOutBuffer =
+		Package.Bindings.ContainsByPredicate(
+			[](const FAvidScriptBindingFunctionModel& Binding)
+			{
+				return Binding.DispatchMode == TEXT("generated_native_s1")
+					&& Binding.GeneratedShape == TEXT("vector_ref_out");
+			});
 	for (const FAvidScriptBindingTypeModel& Type : Package.Types)
 	{
 		bNeedsVector |= Type.CppType == TEXT("FVector");
@@ -3102,6 +3183,10 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 	if (bNeedsGeneratedVectorValueBuffer)
 	{
 		AppendGeneratedVectorValueBuffer(Lines);
+	}
+	if (bNeedsGeneratedVectorRefOutBuffer)
+	{
+		AppendGeneratedVectorRefOutBuffer(Lines);
 	}
 	AppendInputEvent(Lines);
 	if (bNeedsRotator) { AppendRotator(Lines); }

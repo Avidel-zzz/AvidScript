@@ -353,6 +353,15 @@ public:
 		return Value;
 	}
 
+	UFUNCTION(BlueprintCallable)
+	void GeneratedVectorRefOut(
+		UPARAM(ref) FVector& InOutValue,
+		FVector& OutValue) const
+	{
+		OutValue = InOutValue + FVector(4.0, 5.0, 6.0);
+		InOutValue += FVector(1.0, 2.0, 3.0);
+	}
+
 	UFUNCTION(BlueprintCallable, meta = (CPP_Default_bEnabled = "false", CPP_Default_Mode = "Primary"))
 	void OptionalProjection(bool bEnabled, EAvidScriptCSharpEmitterTestMode Mode)
 	{

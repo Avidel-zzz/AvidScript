@@ -25,6 +25,7 @@ struct FAvidScriptPreparedGeneratedHostCall
 	FAvidScriptGeneratedI32PairCall I32PairCall = nullptr;
 	FAvidScriptGeneratedPropertyI32GetCall PropertyI32GetCall = nullptr;
 	FAvidScriptGeneratedPropertyI32SetCall PropertyI32SetCall = nullptr;
+	FAvidScriptGeneratedVectorRefOutCall VectorRefOutCall = nullptr;
 	uint64 PreparedCallbackEpoch = 0;
 	uint64 PreparedReloadEpoch = 0;
 	EAvidScriptPreparedHostEffectMode EffectMode =
@@ -680,7 +681,9 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 			&& Import.Shape
 				!= EAvidScriptVmTypedHostShape::SelfPropertyI32Get
 			&& Import.Shape
-				!= EAvidScriptVmTypedHostShape::SelfPropertyI32Set)
+				!= EAvidScriptVmTypedHostShape::SelfPropertyI32Set
+			&& Import.Shape
+				!= EAvidScriptVmTypedHostShape::SelfVectorRefOut)
 		{
 			continue;
 		}
@@ -704,12 +707,18 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 			&& Binding.Entry->Shape
 				== EAvidScriptGeneratedBindingShape::PropertyI32Set
 			&& Binding.Entry->PropertyI32SetCall != nullptr;
+		const bool bVectorRefOutShapeMatches =
+			Import.Shape == EAvidScriptVmTypedHostShape::SelfVectorRefOut
+			&& Binding.Entry->Shape
+				== EAvidScriptGeneratedBindingShape::VectorRefOut
+			&& Binding.Entry->VectorRefOutCall != nullptr;
 		if (Binding.Entry->ReceiverMode
 				!= EAvidScriptGeneratedReceiverMode::SelfBound
 			|| (!bUnaryScalarShapeMatches
 				&& !bScalarShapeMatches
 				&& !bPropertyGetShapeMatches
-				&& !bPropertySetShapeMatches))
+				&& !bPropertySetShapeMatches
+				&& !bVectorRefOutShapeMatches))
 		{
 			TypedHostImports.Reset();
 			PreparedGeneratedHostCalls.Reset();
@@ -758,6 +767,15 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 			Import.PreparedTarget.SelfPropertyI32Set =
 				&FAvidScriptWasmRuntimeInstance::
 					InvokePreparedSelfPropertyI32Set;
+			break;
+		case EAvidScriptVmTypedHostShape::SelfVectorRefOut:
+			Call->VectorRefOutCall =
+				Binding.Entry->PreparedVectorRefOutCall != nullptr
+				? Binding.Entry->PreparedVectorRefOutCall
+				: Binding.Entry->VectorRefOutCall;
+			Import.PreparedTarget.SelfGuestAddress =
+				&FAvidScriptWasmRuntimeInstance::
+					InvokePreparedSelfVectorRefOut;
 			break;
 		default:
 			checkNoEntry();
@@ -6398,6 +6416,88 @@ FAvidScriptWasmRuntimeInstance::DispatchPreparedSelfPropertyI32Set(
 		Call.PropertyI32SetCall(*Receiver, Value));
 }
 
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::InvokePreparedSelfVectorRefOut(
+	void* Context,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	const int32 GuestAddress,
+	int32& OutValue)
+{
+	FAvidScriptPreparedGeneratedHostCall* Call =
+		static_cast<FAvidScriptPreparedGeneratedHostCall*>(Context);
+	if (Call == nullptr || Call->Runtime == nullptr)
+	{
+		OutValue = 0;
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+	return Call->Runtime->DispatchPreparedSelfVectorRefOut(
+		*Call,
+		SelfSlot,
+		SelfGeneration,
+		GuestAddress,
+		OutValue);
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::DispatchPreparedSelfVectorRefOut(
+	FAvidScriptPreparedGeneratedHostCall& Call,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	const int32 GuestAddress,
+	int32& OutValue)
+{
+	OutValue = 0;
+	if (Call.VectorRefOutCall == nullptr
+		|| GuestAddress < 0
+		|| VmBackend == nullptr
+		|| VmBackend->GetGuestMemory() == nullptr)
+	{
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+
+	UObject* Receiver = nullptr;
+	if (!TryResolveFusedCallbackReceiver(
+			SelfSlot,
+			SelfGeneration,
+			Receiver)
+		|| !PrepareFusedGeneratedHostEffect(Call, *Receiver))
+	{
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+
+	FString Error;
+	TArrayView<uint8> Buffer;
+	if (!VmBackend->GetGuestMemory()->BorrowMutableBytes(
+			static_cast<uint32>(GuestAddress),
+			24,
+			4,
+			Buffer,
+			Error))
+	{
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+	FVector InOutValue(
+		LoadAvidScriptLittleEndianF32(Buffer, 0),
+		LoadAvidScriptLittleEndianF32(Buffer, 4),
+		LoadAvidScriptLittleEndianF32(Buffer, 8));
+	FVector Output = FVector::ZeroVector;
+	const EAvidScriptVmTypedHostStatus Status =
+		Call.VectorRefOutCall(*Receiver, InOutValue, Output);
+	if (Status != EAvidScriptVmTypedHostStatus::Succeeded)
+	{
+		return RecordGeneratedStatus(Status);
+	}
+	StoreAvidScriptLittleEndianF32(Buffer, 0, static_cast<float>(InOutValue.X));
+	StoreAvidScriptLittleEndianF32(Buffer, 4, static_cast<float>(InOutValue.Y));
+	StoreAvidScriptLittleEndianF32(Buffer, 8, static_cast<float>(InOutValue.Z));
+	StoreAvidScriptLittleEndianF32(Buffer, 12, static_cast<float>(Output.X));
+	StoreAvidScriptLittleEndianF32(Buffer, 16, static_cast<float>(Output.Y));
+	StoreAvidScriptLittleEndianF32(Buffer, 20, static_cast<float>(Output.Z));
+	OutValue = 1;
+	return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Succeeded);
+}
+
 bool FAvidScriptWasmRuntimeInstance::TryResolveFusedCallbackReceiver(
 	const int32 SelfSlot,
 	const int32 SelfGeneration,
@@ -6859,6 +6959,85 @@ FAvidScriptWasmRuntimeInstance::DispatchSelfVectorValue(
 			20,
 			static_cast<float>(Output.Z));
 	}
+	OutValue = 1;
+	return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Succeeded);
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::DispatchSelfVectorRefOut(
+	const uint32 BindingOrdinal,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	const int32 GuestAddress,
+	int32& OutValue)
+{
+	OutValue = 0;
+	const FAvidScriptGeneratedBindingEntry* Entry = nullptr;
+	UClass* ExpectedClass = nullptr;
+	bool bPropertyWrite = false;
+	bool bRequiresWriteAccess = false;
+	UObject* Receiver = nullptr;
+	if (!BindingPackage.IsValid()
+		|| !BindingPackage->TryGetGeneratedBinding(
+			BindingOrdinal,
+			Entry,
+			ExpectedClass,
+			bPropertyWrite,
+			bRequiresWriteAccess)
+		|| Entry->Shape != EAvidScriptGeneratedBindingShape::VectorRefOut
+		|| Entry->ReceiverMode != EAvidScriptGeneratedReceiverMode::SelfBound
+		|| Entry->VectorRefOutCall == nullptr
+		|| (bRequiresWriteAccess
+			&& HostContext.ActorWritePolicy
+				!= EAvidScriptActorWritePolicy::AllowWrites)
+		|| !ResolveSelfCapability(
+			SelfSlot,
+			SelfGeneration,
+			ExpectedClass,
+			Receiver)
+		|| GuestAddress < 0
+		|| VmBackend == nullptr
+		|| VmBackend->GetGuestMemory() == nullptr)
+	{
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+
+	FString Error;
+	TArrayView<uint8> Buffer;
+	if (!VmBackend->GetGuestMemory()->BorrowMutableBytes(
+			static_cast<uint32>(GuestAddress),
+			24,
+			4,
+			Buffer,
+			Error))
+	{
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+	FVector InOutValue(
+		LoadAvidScriptLittleEndianF32(Buffer, 0),
+		LoadAvidScriptLittleEndianF32(Buffer, 4),
+		LoadAvidScriptLittleEndianF32(Buffer, 8));
+	if (!BindingPackage->PrepareGeneratedHostEffect(
+			BindingOrdinal,
+			HostContext.OwnerHandle,
+			*Receiver,
+			BindingInvocationContext))
+	{
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+	FVector Output = FVector::ZeroVector;
+	const EAvidScriptVmTypedHostStatus Status =
+		Entry->VectorRefOutCall(*Receiver, InOutValue, Output);
+	if (Status != EAvidScriptVmTypedHostStatus::Succeeded)
+	{
+		return RecordGeneratedStatus(Status);
+	}
+	StoreAvidScriptLittleEndianF32(Buffer, 0, static_cast<float>(InOutValue.X));
+	StoreAvidScriptLittleEndianF32(Buffer, 4, static_cast<float>(InOutValue.Y));
+	StoreAvidScriptLittleEndianF32(Buffer, 8, static_cast<float>(InOutValue.Z));
+	StoreAvidScriptLittleEndianF32(Buffer, 12, static_cast<float>(Output.X));
+	StoreAvidScriptLittleEndianF32(Buffer, 16, static_cast<float>(Output.Y));
+	StoreAvidScriptLittleEndianF32(Buffer, 20, static_cast<float>(Output.Z));
 	OutValue = 1;
 	return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Succeeded);
 }

@@ -260,9 +260,20 @@ bool ResolveGeneratedFunctionShape(
 		OutCategory = TEXT("generated_native_callable_unsupported");
 		return false;
 	}
+	const FString& ReturnType = Projection.ReturnValue.Type.CanonicalType;
+	const bool bVectorRefOutShape =
+		ReturnType == TEXT("void")
+		&& Projection.Parameters.Num() == 2
+		&& Projection.Parameters[0].Type.CanonicalType
+			== TEXT("struct:/Script/CoreUObject.Vector")
+		&& Projection.Parameters[0].Direction == TEXT("ref")
+		&& Projection.Parameters[1].Type.CanonicalType
+			== TEXT("struct:/Script/CoreUObject.Vector")
+		&& Projection.Parameters[1].Direction == TEXT("out");
 	for (const FAvidScriptProjectedBindingValue& Parameter : Projection.Parameters)
 	{
-		if (Parameter.Direction != TEXT("value")
+		if (!bVectorRefOutShape
+			&& Parameter.Direction != TEXT("value")
 			&& Parameter.Direction != TEXT("const_ref"))
 		{
 			OutCategory = TEXT("generated_native_reference_direction_unsupported");
@@ -270,7 +281,12 @@ bool ResolveGeneratedFunctionShape(
 		}
 	}
 
-	const FString& ReturnType = Projection.ReturnValue.Type.CanonicalType;
+	if (bVectorRefOutShape)
+	{
+		OutShape = TEXT("vector_ref_out");
+		OutReceiverMode = TEXT("self_bound");
+		return true;
+	}
 	if (ReturnType == TEXT("scalar:i32")
 		&& Projection.Parameters.Num() == 1
 		&& Projection.Parameters[0].Type.CanonicalType == TEXT("scalar:i32"))
@@ -320,6 +336,10 @@ FString MakeGeneratedFunctionAbiSignature(const FString& Shape)
 		return TEXT("(iiii)i");
 	}
 	if (Shape == TEXT("vector_value"))
+	{
+		return TEXT("(iii)i");
+	}
+	if (Shape == TEXT("vector_ref_out"))
 	{
 		return TEXT("(iii)i");
 	}

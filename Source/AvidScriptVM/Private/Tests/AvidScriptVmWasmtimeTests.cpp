@@ -869,6 +869,16 @@ public:
 		return EAvidScriptVmTypedHostStatus::Rejected;
 	}
 
+	EAvidScriptVmTypedHostStatus DispatchSelfVectorRefOut(
+		uint32,
+		int32,
+		int32,
+		int32,
+		int32&) override
+	{
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+
 	EAvidScriptVmTypedHostStatus DispatchStableObjectRoundtrip(
 		uint32,
 		int32,

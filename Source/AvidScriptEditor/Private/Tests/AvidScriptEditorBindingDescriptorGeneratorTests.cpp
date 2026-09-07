@@ -596,6 +596,70 @@ bool FAvidScriptEditorBindingDescriptorGeneratedNativeTest::RunTest(
 			TEXT("ref FAvidScriptVectorValueBuffer value"))
 			&& VectorReferenceSource.Contains(
 				TEXT("return __vectorValue.Result;")));
+
+	FAvidScriptBindingSelectionProfile VectorRefOutProfile;
+	VectorRefOutProfile.PackageName =
+		TEXT("avidscript.generated.vector_ref_out.descriptor");
+	FAvidScriptReflectedClassSelection VectorRefOutRule;
+	VectorRefOutRule.OwnerClassPath = OwnerPath;
+	VectorRefOutRule.IncludeFunctions.Add(TEXT("GeneratedVectorRefOut"));
+	VectorRefOutRule.GeneratedNativeFunctions.Add(
+		TEXT("GeneratedVectorRefOut"));
+	VectorRefOutProfile.Classes.Add(MoveTemp(VectorRefOutRule));
+
+	FString VectorRefOutDescriptorJson;
+	FAvidScriptBindingSelectionResolveResult VectorRefOutSelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult VectorRefOutGenerateResult;
+	TestTrue(
+		TEXT("Eligible FVector ref/out function generates an S1 descriptor"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+			VectorRefOutProfile,
+			VectorRefOutDescriptorJson,
+			VectorRefOutSelectionResult,
+			VectorRefOutGenerateResult));
+	FAvidScriptBindingPackageModel VectorRefOutPackage;
+	TestTrue(
+		TEXT("Generated FVector ref/out descriptor satisfies parser contract"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			VectorRefOutDescriptorJson,
+			VectorRefOutPackage,
+			ErrorCategory,
+			ErrorSource));
+	if (VectorRefOutPackage.Bindings.Num() == 1)
+	{
+		const FAvidScriptBindingFunctionModel& VectorRefOutBinding =
+			VectorRefOutPackage.Bindings[0];
+		TestEqual(
+			TEXT("FVector ref/out shape is explicit"),
+			VectorRefOutBinding.GeneratedShape,
+			FString(TEXT("vector_ref_out")));
+		TestEqual(
+			TEXT("FVector ref/out uses one guest buffer"),
+			VectorRefOutBinding.HostImport.Signature,
+			FString(TEXT("(iii)i")));
+	}
+	else
+	{
+		AddError(TEXT("Expected exactly one generated FVector ref/out binding."));
+	}
+	FString VectorRefOutReferenceSource;
+	FString VectorRefOutManifestJson;
+	FAvidScriptCSharpBindingEmitResult VectorRefOutEmitResult;
+	TestTrue(
+		TEXT("Generated FVector ref/out survives C# facade rendering"),
+		FAvidScriptEditorCSharpBindingEmitter::Emit(
+			VectorRefOutDescriptorJson,
+			VectorRefOutReferenceSource,
+			VectorRefOutManifestJson,
+			VectorRefOutEmitResult));
+	TestTrue(
+		TEXT("Generated FVector ref/out facade uses one in-place buffer"),
+		VectorRefOutReferenceSource.Contains(
+			TEXT("ref FAvidScriptVectorRefOutBuffer value"))
+			&& VectorRefOutReferenceSource.Contains(
+				TEXT("InOutValue = __vectorRefOut.InOutResult;"))
+			&& VectorRefOutReferenceSource.Contains(
+				TEXT("OutValue = __vectorRefOut.OutResult;")));
 	return true;
 }
 
