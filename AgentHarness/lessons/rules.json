@@ -323,10 +323,10 @@
     {
       "id": "nested-pwsh-array-arguments-use-delimited-string",
       "tags": ["powershell", "phase", "workflow", "cli"],
-      "summary": "从 PowerShell 启动子 pwsh 脚本时，数组参数不能依赖调用端逗号表达式保持边界。",
-      "prevention": "对 InvokePhaseWorkflow.ps1 的 BatchId 等支持内部 Split 的参数，跨子 pwsh 统一传一个逗号分隔字符串；执行前读取脚本参数归一化逻辑，不把当前 shell 的数组语法当成 native argv 合同。",
+      "summary": "从 PowerShell 启动子 pwsh 脚本时，不能把调用端数组或其他 shell 的续行语法当成 native argv 合同。",
+      "prevention": "跨子 pwsh 调用统一先物化参数数组并一次性传入；禁止用反斜杠续行，纯 PowerShell 续行只用反引号或 splatting。对支持内部 Split 的 BatchId 等参数传一个逗号分隔字符串，并给子进程加 -NonInteractive，使缺失必填参数直接失败而不等待提示。执行前读取脚本参数归一化逻辑。",
       "source": "observed:2026-08-31-P60.Start",
-      "last_observed": "2026-08-31 P60 start 首次把四个 BatchId 作为调用端逗号数组传给子 pwsh，子进程收到异常值并以 ASPW1010 拒绝；改为单个逗号分隔字符串后成功"
+      "last_observed": "2026-09-08 P65.D22 误用类 Unix 反斜杠续行，子 pwsh 因缺失必填参数等待提示；中止后改为一次性参数数组与 -NonInteractive。此前 P60 start 也曾把调用端逗号数组误当作 native argv"
     },
     {
       "id": "ue-automation-one-runtests-command-per-process",
