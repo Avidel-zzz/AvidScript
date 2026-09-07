@@ -316,7 +316,7 @@ bool ResolveGeneratedFunctionShape(
 		&& ReturnType == TEXT("object:/Script/CoreUObject.Object")
 		&& Projection.Parameters[0].Type.CanonicalType == ReturnType)
 	{
-		OutShape = TEXT("stable_object_roundtrip");
+		OutShape = TEXT("packed_stable_object_roundtrip");
 		OutReceiverMode = TEXT("stable_borrow");
 		return true;
 	}
@@ -346,6 +346,10 @@ FString MakeGeneratedFunctionAbiSignature(const FString& Shape)
 	if (Shape == TEXT("stable_object_roundtrip"))
 	{
 		return TEXT("(iiiii)i");
+	}
+	if (Shape == TEXT("packed_stable_object_roundtrip"))
+	{
+		return TEXT("(II)I");
 	}
 	return FString();
 }

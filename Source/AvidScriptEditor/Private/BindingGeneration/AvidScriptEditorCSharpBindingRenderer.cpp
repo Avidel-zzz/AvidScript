@@ -685,6 +685,10 @@ FString MakeExpectedAbiSignature(const FAvidScriptBindingFunctionModel& Binding)
 		{
 			return TEXT("(iiiii)i");
 		}
+		if (Binding.GeneratedShape == TEXT("packed_stable_object_roundtrip"))
+		{
+			return TEXT("(II)I");
+		}
 	}
 
 	FString Parameters;
@@ -749,6 +753,9 @@ bool RenderMethod(
 	const bool bGeneratedVectorRefOut =
 		Binding.DispatchMode == TEXT("generated_native_s1")
 		&& Binding.GeneratedShape == TEXT("vector_ref_out");
+	const bool bPackedStableObjectRoundtrip =
+		Binding.DispatchMode == TEXT("generated_native_s1")
+		&& Binding.GeneratedShape == TEXT("packed_stable_object_roundtrip");
 	const bool bLatent =
 		Binding.DispatchMode == TEXT("latent_process_event");
 	const bool bProviderLatent =
@@ -756,6 +763,18 @@ bool RenderMethod(
 	const bool bAsyncAction =
 		Binding.DispatchMode == TEXT("blueprint_async_action")
 		&& Binding.AsyncAction.IsEnabled();
+	if (bPackedStableObjectRoundtrip
+		&& (Binding.bStatic
+			|| Binding.Parameters.Num() != 1
+			|| Binding.Parameters[0].Kind != TEXT("object_handle")
+			|| Binding.Parameters[0].Direction == TEXT("ref")
+			|| Binding.Parameters[0].Direction == TEXT("out")
+			|| Binding.ReturnValue.Kind != TEXT("object_handle")))
+	{
+		OutErrorCategory = TEXT("descriptor_contract_invalid");
+		OutErrorSource = Binding.CanonicalIdentity;
+		return false;
+	}
 	FString LatentPayloadCSharpType;
 	if (bProviderLatent || bAsyncAction)
 	{
@@ -925,6 +944,16 @@ bool RenderMethod(
 			continue;
 		}
 
+		if (bPackedStableObjectRoundtrip)
+		{
+			NativeParameters.Add(TEXT("long p0Handle"));
+			NativeArguments.Add(
+				TEXT("((long)(uint)") + PublicName
+				+ TEXT(".AvidScriptSlot | ((long)(uint)") + PublicName
+				+ TEXT(".AvidScriptGeneration << 32))"));
+			continue;
+		}
+
 		if (Parameter.Direction == TEXT("ref") || Parameter.Direction == TEXT("out"))
 		{
 			FString StorageType;
@@ -1005,10 +1034,20 @@ bool RenderMethod(
 
 	if (!Binding.bStatic)
 	{
-		NativeParameters.Insert(TEXT("int selfGeneration"), 0);
-		NativeParameters.Insert(TEXT("int selfSlot"), 0);
-		NativeArguments.Insert(TEXT("this.Generation"), 0);
-		NativeArguments.Insert(TEXT("this.Slot"), 0);
+		if (bPackedStableObjectRoundtrip)
+		{
+			NativeParameters.Insert(TEXT("long selfHandle"), 0);
+			NativeArguments.Insert(
+				TEXT("((long)(uint)this.Slot | ((long)(uint)this.Generation << 32))"),
+				0);
+		}
+		else
+		{
+			NativeParameters.Insert(TEXT("int selfGeneration"), 0);
+			NativeParameters.Insert(TEXT("int selfSlot"), 0);
+			NativeArguments.Insert(TEXT("this.Generation"), 0);
+			NativeArguments.Insert(TEXT("this.Slot"), 0);
+		}
 	}
 	if (bLatent)
 	{
@@ -1087,7 +1126,8 @@ bool RenderMethod(
 
 	if (Binding.ReturnValue.CanonicalType != TEXT("void")
 		&& !bGeneratedI32Return
-		&& !bGeneratedVectorValue)
+		&& !bGeneratedVectorValue
+		&& !bPackedStableObjectRoundtrip)
 	{
 		FString StorageType;
 		if (!ResolveStorageType(Binding.ReturnValue, TypesByCanonical, TypesById, StorageType, OutErrorSource))
@@ -1120,6 +1160,13 @@ bool RenderMethod(
 			*MakeNativeMethodName(Binding.Ordinal),
 			*FString::Join(NativeArguments, TEXT(", "))));
 	}
+	else if (bPackedStableObjectRoundtrip)
+	{
+		OutMethod.MethodLines.Add(FString::Printf(
+			TEXT("        long __packedReturnValue = AvidScriptNative.%s(%s);"),
+			*MakeNativeMethodName(Binding.Ordinal),
+			*FString::Join(NativeArguments, TEXT(", "))));
+	}
 	else
 	{
 		OutMethod.MethodLines.Add(FString::Printf(
@@ -1135,6 +1182,17 @@ bool RenderMethod(
 	{
 		OutMethod.MethodLines.Add(TEXT("        return __vectorValue.Result;"));
 	}
+	else if (bPackedStableObjectRoundtrip)
+	{
+		OutMethod.MethodLines.Append({
+			TEXT("        FAvidScriptObjectHandle __returnValue = new("),
+			TEXT("            unchecked((int)(uint)__packedReturnValue),"),
+			TEXT("            unchecked((int)(uint)((ulong)__packedReturnValue >> 32)));"),
+			TEXT("        return ")
+				+ ConvertFromStorage(Binding.ReturnValue, TEXT("__returnValue"))
+				+ TEXT(";")
+		});
+	}
 	else if (Binding.ReturnValue.CanonicalType != TEXT("void")
 		&& !bGeneratedI32Return)
 	{
@@ -1147,7 +1205,8 @@ bool RenderMethod(
 		*EscapeCSharpString(Binding.HostImport.Module),
 		*EscapeCSharpString(Binding.HostImport.Name)));
 	OutMethod.NativeLines.Add(FString::Printf(
-		TEXT("    internal static extern int %s(%s);"),
+		TEXT("    internal static extern %s %s(%s);"),
+		bPackedStableObjectRoundtrip ? TEXT("long") : TEXT("int"),
 		*MakeNativeMethodName(Binding.Ordinal),
 		*FString::Join(NativeParameters, TEXT(", "))));
 	OutMethod.SignatureKey = MethodName + TEXT("(") + FString::Join(SignatureParameterTypes, TEXT(",")) + TEXT(")");

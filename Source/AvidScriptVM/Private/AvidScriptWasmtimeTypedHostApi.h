@@ -122,6 +122,12 @@ typedef int32_t (*AvidScriptWasmtimeStableObjectRoundtripCallback)(
 	int32_t guest_address,
 	int32_t* out_value);
 
+typedef int32_t (*AvidScriptWasmtimePackedStableObjectRoundtripCallback)(
+	void* environment,
+	int64_t packed_self,
+	int64_t packed_object,
+	int64_t* out_packed_object);
+
 AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_empty_i32(
 	AvidScriptWasmtimeLinker* linker,
 	const char* module_name,
@@ -291,6 +297,15 @@ AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_stable_object_round
 	const char* import_name,
 	size_t import_name_size,
 	AvidScriptWasmtimeStableObjectRoundtripCallback callback,
+	void* environment);
+
+AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_packed_stable_object_roundtrip(
+	AvidScriptWasmtimeLinker* linker,
+	const char* module_name,
+	size_t module_name_size,
+	const char* import_name,
+	size_t import_name_size,
+	AvidScriptWasmtimePackedStableObjectRoundtripCallback callback,
 	void* environment);
 
 AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_command_buffer_submit(

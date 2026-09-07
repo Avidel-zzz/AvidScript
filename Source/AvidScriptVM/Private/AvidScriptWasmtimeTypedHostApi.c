@@ -112,6 +112,12 @@ typedef struct AvidScriptWasmtimeStableObjectRoundtripBridge
 	void* environment;
 } AvidScriptWasmtimeStableObjectRoundtripBridge;
 
+typedef struct AvidScriptWasmtimePackedStableObjectRoundtripBridge
+{
+	AvidScriptWasmtimePackedStableObjectRoundtripCallback callback;
+	void* environment;
+} AvidScriptWasmtimePackedStableObjectRoundtripBridge;
+
 typedef char avidscript_wasmtime_raw_value_must_be_16_bytes[
 	(sizeof(wasmtime_val_raw_t) == 16) ? 1 : -1];
 
@@ -641,6 +647,30 @@ static wasm_trap_t* avidscript_wasmtime_packed_self_property_i32_get_trampoline(
 	if (bridge->callback(bridge->environment, args_and_results[0].i64, &value) != 0)
 		return avidscript_wasmtime_typed_host_failed();
 	args_and_results[0].i32 = value;
+	return NULL;
+}
+
+static wasm_trap_t* avidscript_wasmtime_packed_stable_object_roundtrip_trampoline(
+	void* environment,
+	wasmtime_caller_t* caller,
+	wasmtime_val_raw_t* args_and_results,
+	size_t count)
+{
+	AvidScriptWasmtimePackedStableObjectRoundtripBridge* bridge =
+		(AvidScriptWasmtimePackedStableObjectRoundtripBridge*)environment;
+	int64_t value = 0;
+	(void)caller;
+	if (bridge == NULL || bridge->callback == NULL || args_and_results == NULL)
+		return avidscript_wasmtime_typed_bridge_unavailable();
+	if (count != 2)
+		return avidscript_wasmtime_typed_raw_arity_invalid();
+	if (bridge->callback(
+			bridge->environment,
+			args_and_results[0].i64,
+			args_and_results[1].i64,
+			&value) != 0)
+		return avidscript_wasmtime_typed_host_failed();
+	args_and_results[0].i64 = value;
 	return NULL;
 }
 
@@ -1179,6 +1209,59 @@ AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_stable_object_round
 	bridge->callback = callback;
 	bridge->environment = environment;
 	return avidscript_wasmtime_linker_define_typed_i32(linker, module_name, module_name_size, import_name, import_name_size, 5, avidscript_wasmtime_stable_object_roundtrip_trampoline, bridge, "Could not allocate the typed stable-object function type.");
+}
+
+AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_packed_stable_object_roundtrip(
+	AvidScriptWasmtimeLinker* linker,
+	const char* module_name,
+	size_t module_name_size,
+	const char* import_name,
+	size_t import_name_size,
+	AvidScriptWasmtimePackedStableObjectRoundtripCallback callback,
+	void* environment)
+{
+	AvidScriptWasmtimePackedStableObjectRoundtripBridge* bridge =
+		(AvidScriptWasmtimePackedStableObjectRoundtripBridge*)calloc(
+			1,
+			sizeof(*bridge));
+	wasm_valtype_vec_t parameters;
+	wasm_valtype_vec_t results;
+	wasm_functype_t* function_type;
+	wasmtime_error_t* error;
+	if (bridge == NULL)
+		return avidscript_wasmtime_local_failure(
+			"Could not allocate the typed packed stable-object bridge.");
+	bridge->callback = callback;
+	bridge->environment = environment;
+	wasm_valtype_vec_new_uninitialized(&parameters, 2);
+	parameters.data[0] = wasm_valtype_new_i64();
+	parameters.data[1] = wasm_valtype_new_i64();
+	wasm_valtype_vec_new_uninitialized(&results, 1);
+	results.data[0] = wasm_valtype_new_i64();
+	function_type = wasm_functype_new(&parameters, &results);
+	if (function_type == NULL)
+	{
+		free(bridge);
+		return avidscript_wasmtime_local_failure(
+			"Could not allocate the typed packed stable-object function type.");
+	}
+	error = wasmtime_linker_define_func_unchecked(
+		linker->value,
+		module_name,
+		module_name_size,
+		import_name,
+		import_name_size,
+		function_type,
+		avidscript_wasmtime_packed_stable_object_roundtrip_trampoline,
+		bridge,
+		avidscript_wasmtime_typed_bridge_delete);
+	wasm_functype_delete(function_type);
+	if (error != NULL)
+	{
+		free(bridge);
+		return avidscript_wasmtime_failure_new(error, NULL);
+	}
+	return NULL;
 }
 
 AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_command_buffer_submit(

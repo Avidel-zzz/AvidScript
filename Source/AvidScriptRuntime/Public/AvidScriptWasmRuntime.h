@@ -694,6 +694,22 @@ private:
 		int32 ObjectGeneration,
 		int32 GuestAddress,
 		int32& OutValue);
+	static EAvidScriptVmTypedHostStatus
+		InvokePreparedPackedStableObjectRoundtrip(
+			void* Context,
+			int64 PackedSelf,
+			int64 PackedObject,
+			int64& OutPackedObject);
+	EAvidScriptVmTypedHostStatus DispatchPreparedPackedStableObjectRoundtrip(
+		FAvidScriptPreparedGeneratedHostCall& Call,
+		int64 PackedSelf,
+		int64 PackedObject,
+		int64& OutPackedObject);
+	EAvidScriptVmTypedHostStatus DispatchPreparedObjectRoundtripCore(
+		FAvidScriptPreparedGeneratedHostCall& Call,
+		const FAvidScriptObjectHandle& ReceiverHandle,
+		const FAvidScriptObjectHandle& InputHandle,
+		FAvidScriptObjectHandle& OutHandle);
 	bool TryResolveFusedCallbackReceiver(
 		int32 SelfSlot,
 		int32 SelfGeneration,

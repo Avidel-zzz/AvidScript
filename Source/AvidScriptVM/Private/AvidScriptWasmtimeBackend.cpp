@@ -3142,6 +3142,33 @@ private:
 			*OutValue);
 	}
 
+	static int32 TypedPackedStableObjectRoundtripCallback(
+		void* Environment,
+		const int64 PackedSelf,
+		const int64 PackedObject,
+		int64* OutPackedObject)
+	{
+		FAvidScriptWasmtimeTypedHostContext* HostContext =
+			static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
+		if (HostContext == nullptr || OutPackedObject == nullptr
+			|| HostContext->PreparedTarget.Context == nullptr
+			|| HostContext->PreparedTarget.PackedStableObjectRoundtrip == nullptr)
+		{
+			return 1;
+		}
+		if (!ConsumePreparedTypedHostCall(*HostContext))
+		{
+			return 1;
+		}
+		const EAvidScriptVmTypedHostStatus Status =
+			HostContext->PreparedTarget.PackedStableObjectRoundtrip(
+			HostContext->PreparedTarget.Context,
+			PackedSelf,
+			PackedObject,
+			*OutPackedObject);
+		return CompletePreparedTypedInvocation(*HostContext, Status);
+	}
+
 	static int32 TypedCommandBufferSubmitCallback(
 		void* Environment,
 		int32 GuestAddress,
@@ -3259,6 +3286,9 @@ private:
 			case EAvidScriptVmTypedHostShape::StableObjectRoundtrip:
 				ExpectedSignature = TEXT("(iiiii)i");
 				break;
+			case EAvidScriptVmTypedHostShape::PackedStableObjectRoundtrip:
+				ExpectedSignature = TEXT("(II)I");
+				break;
 			case EAvidScriptVmTypedHostShape::CommandBufferSubmit:
 				ExpectedSignature = TEXT("(ii)i");
 				break;
@@ -3299,6 +3329,9 @@ private:
 				+ (Import.PreparedTarget.StableObjectRoundtrip != nullptr
 					? 1
 					: 0)
+				+ (Import.PreparedTarget.PackedStableObjectRoundtrip != nullptr
+					? 1
+					: 0)
 				+ (Import.PreparedTarget.SelfPropertyI32Get != nullptr ? 1 : 0)
 				+ (Import.PreparedTarget.SelfPropertyI32Set != nullptr ? 1 : 0)
 				+ (Import.PreparedTarget.PackedSelfPropertyI32Get != nullptr ? 1 : 0)
@@ -3320,7 +3353,9 @@ private:
 				|| Import.Shape
 					== EAvidScriptVmTypedHostShape::SelfPropertyI32Get
 				|| Import.Shape
-					== EAvidScriptVmTypedHostShape::SelfPropertyI32Set;
+					== EAvidScriptVmTypedHostShape::SelfPropertyI32Set
+				|| Import.Shape
+					== EAvidScriptVmTypedHostShape::PackedStableObjectRoundtrip;
 			const bool bRequiresSupplementalPreparedTarget =
 				Import.Shape == EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Get
 				|| Import.Shape == EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Set
@@ -3591,6 +3626,17 @@ private:
 					static_cast<size_t>(ImportNameUtf8.Length()),
 					&TypedStableObjectRoundtripCallback,
 					HostContextPointer);
+				break;
+			case EAvidScriptVmTypedHostShape::PackedStableObjectRoundtrip:
+				DefineFailure =
+					avidscript_wasmtime_linker_define_packed_stable_object_roundtrip(
+						Linker,
+						ModuleNameUtf8.Get(),
+						static_cast<size_t>(ModuleNameUtf8.Length()),
+						ImportNameUtf8.Get(),
+						static_cast<size_t>(ImportNameUtf8.Length()),
+						&TypedPackedStableObjectRoundtripCallback,
+						HostContextPointer);
 				break;
 			case EAvidScriptVmTypedHostShape::CommandBufferSubmit:
 				DefineFailure = avidscript_wasmtime_linker_define_command_buffer_submit(

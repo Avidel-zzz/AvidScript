@@ -13,7 +13,8 @@ enum class EAvidScriptGeneratedBindingShape : uint8
 	PropertyI32Set,
 	VectorValue,
 	VectorRefOut,
-	StableObjectRoundtrip
+	StableObjectRoundtrip,
+	PackedStableObjectRoundtrip
 };
 
 enum class EAvidScriptGeneratedReceiverMode : uint8

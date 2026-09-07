@@ -45,6 +45,24 @@ void AppendTypedI32Leb(TArray<uint8>& Bytes, int32 Value)
 	}
 }
 
+void AppendTypedI64Leb(TArray<uint8>& Bytes, int64 Value)
+{
+	bool bMore = true;
+	while (bMore)
+	{
+		uint8 Byte = static_cast<uint8>(Value & 0x7f);
+		Value >>= 7;
+		const bool bSignBitSet = (Byte & 0x40) != 0;
+		bMore = !((Value == 0 && !bSignBitSet)
+			|| (Value == -1 && bSignBitSet));
+		if (bMore)
+		{
+			Byte |= 0x80;
+		}
+		Bytes.Add(Byte);
+	}
+}
+
 void AppendTypedString(TArray<uint8>& Bytes, const char* Value)
 {
 	const int32 Length = FCStringAnsi::Strlen(Value);
@@ -66,6 +84,12 @@ void AppendTypedI32Const(TArray<uint8>& Bytes, int32 Value)
 {
 	Bytes.Add(0x41);
 	AppendTypedI32Leb(Bytes, Value);
+}
+
+void AppendTypedI64Const(TArray<uint8>& Bytes, int64 Value)
+{
+	Bytes.Add(0x42);
+	AppendTypedI64Leb(Bytes, Value);
 }
 
 void AppendTypedF32Const(TArray<uint8>& Bytes, const float Value)
@@ -204,6 +228,70 @@ TArray<uint8> BuildTypedHostFixture(
 	Code.Append(Body);
 	AppendTypedSection(Module, 10, Code);
 	return Module;
+}
+
+TArray<uint8> BuildTypedPackedStableObjectRoundtripFixture(
+	const int64 PackedSelf,
+	const int64 PackedObject)
+{
+	TArray<uint8> Module;
+	const uint8 Header[] = {
+		0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00
+	};
+	Module.Append(Header, UE_ARRAY_COUNT(Header));
+
+	TArray<uint8> Types;
+	AppendTypedU32Leb(Types, 2);
+	const uint8 ImportType[] = {
+		0x60, 0x02, 0x7e, 0x7e, 0x01, 0x7e
+	};
+	Types.Append(ImportType, UE_ARRAY_COUNT(ImportType));
+	const uint8 ExportType[] = { 0x60, 0x00, 0x01, 0x7e };
+	Types.Append(ExportType, UE_ARRAY_COUNT(ExportType));
+	AppendTypedSection(Module, 1, Types);
+
+	TArray<uint8> Imports;
+	AppendTypedU32Leb(Imports, 1);
+	AppendTypedString(Imports, "avidscript");
+	AppendTypedString(Imports, "avid_s1_1111111111111111");
+	Imports.Add(0x00);
+	AppendTypedU32Leb(Imports, 0);
+	AppendTypedSection(Module, 2, Imports);
+
+	TArray<uint8> Functions;
+	AppendTypedU32Leb(Functions, 1);
+	AppendTypedU32Leb(Functions, 1);
+	AppendTypedSection(Module, 3, Functions);
+
+	TArray<uint8> Exports;
+	AppendTypedU32Leb(Exports, 1);
+	AppendTypedString(Exports, "run");
+	Exports.Add(0x00);
+	AppendTypedU32Leb(Exports, 1);
+	AppendTypedSection(Module, 7, Exports);
+
+	TArray<uint8> Body;
+	Body.Add(0x00);
+	AppendTypedI64Const(Body, PackedSelf);
+	AppendTypedI64Const(Body, PackedObject);
+	Body.Add(0x10);
+	AppendTypedU32Leb(Body, 0);
+	Body.Add(0x0b);
+	TArray<uint8> Code;
+	AppendTypedU32Leb(Code, 1);
+	AppendTypedU32Leb(Code, static_cast<uint32>(Body.Num()));
+	Code.Append(Body);
+	AppendTypedSection(Module, 10, Code);
+	return Module;
+}
+
+int64 PackTypedObjectHandleForTest(
+	const uint32 Slot,
+	const uint32 Generation)
+{
+	return static_cast<int64>(
+		static_cast<uint64>(Slot)
+		| (static_cast<uint64>(Generation) << 32));
 }
 
 TArray<uint8> BuildTypedF32TripleGuestVectorFixture(
@@ -648,6 +736,34 @@ EAvidScriptVmTypedHostStatus InvokePreparedStableObjectRoundtripForTest(
 	return EAvidScriptVmTypedHostStatus::Succeeded;
 }
 
+struct FPreparedPackedStableObjectRoundtripContext
+{
+	int32 CallCount = 0;
+	int64 LastPackedSelf = 0;
+	int64 LastPackedObject = 0;
+	int64 PackedResult = 0;
+};
+
+EAvidScriptVmTypedHostStatus
+InvokePreparedPackedStableObjectRoundtripForTest(
+	void* Context,
+	const int64 PackedSelf,
+	const int64 PackedObject,
+	int64& OutPackedObject)
+{
+	FPreparedPackedStableObjectRoundtripContext* Prepared =
+		static_cast<FPreparedPackedStableObjectRoundtripContext*>(Context);
+	if (Prepared == nullptr)
+	{
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+	++Prepared->CallCount;
+	Prepared->LastPackedSelf = PackedSelf;
+	Prepared->LastPackedObject = PackedObject;
+	OutPackedObject = Prepared->PackedResult;
+	return EAvidScriptVmTypedHostStatus::Succeeded;
+}
+
 struct FPreparedPropertyI32Context
 {
 	int32 GetCallCount = 0;
@@ -710,6 +826,43 @@ bool ResolveAndCallTypedRun(
 	Test.TestEqual(TEXT("typed run result"), static_cast<int32>(Result.Cells[0]), Expected);
 	return true;
 }
+
+bool ResolveAndCallPackedTypedRun(
+	FAutomationTestBase& Test,
+	IAvidScriptVmBackend& Backend,
+	const uint64 Expected,
+	FAvidScriptVmError& OutError)
+{
+	FAvidScriptVmExportHandle Handle;
+	if (!Test.TestTrue(
+			TEXT("packed typed run resolves"),
+			Backend.ResolveExport(TEXT("run"), Handle, OutError)))
+	{
+		return false;
+	}
+	FAvidScriptVmCallFrame Frame;
+	FAvidScriptVmCallResult Result;
+	if (!Test.TestTrue(
+			TEXT("packed typed run succeeds"),
+			Backend.Call(Handle, Frame, OutError, &Result)))
+	{
+		return false;
+	}
+	Test.TestEqual(
+		TEXT("packed typed run returns two cells"),
+		Result.CellCount,
+		2u);
+	if (Result.CellCount == 2)
+	{
+		const uint64 Actual = static_cast<uint64>(Result.Cells[0])
+			| (static_cast<uint64>(Result.Cells[1]) << 32);
+		Test.TestEqual(
+			TEXT("packed typed run preserves all handle bits"),
+			Actual,
+			Expected);
+	}
+	return true;
+}
 } // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -763,6 +916,24 @@ bool FAvidScriptVmWasmtimeTypedHostTest::RunTest(const FString& Parameters)
 		TEXT("combined property rejects a stable-object target"),
 		PreparedStableTargetContract.IsBoundForShape(
 			EAvidScriptVmTypedHostShape::SelfPropertyI32GetSet));
+	FPreparedPackedStableObjectRoundtripContext
+		PreparedPackedStableContractContext;
+	FAvidScriptVmPreparedTypedHostTarget PreparedPackedStableTargetContract;
+	PreparedPackedStableTargetContract.Context =
+		&PreparedPackedStableContractContext;
+	PreparedPackedStableTargetContract.PackedStableObjectRoundtrip =
+		&InvokePreparedPackedStableObjectRoundtripForTest;
+	TestTrue(
+		TEXT("complete packed stable-object target reports a callable"),
+		PreparedPackedStableTargetContract.HasAnyTarget());
+	TestTrue(
+		TEXT("packed stable object binds its prepared target"),
+		PreparedPackedStableTargetContract.IsBoundForShape(
+			EAvidScriptVmTypedHostShape::PackedStableObjectRoundtrip));
+	TestFalse(
+		TEXT("legacy stable object rejects a packed prepared target"),
+		PreparedPackedStableTargetContract.IsBoundForShape(
+			EAvidScriptVmTypedHostShape::StableObjectRoundtrip));
 	FPreparedSelfF32TripleGuestVectorContext PreparedVectorContractContext;
 	FAvidScriptVmPreparedTypedHostTarget PreparedVectorTargetContract;
 	PreparedVectorTargetContract.Context = &PreparedVectorContractContext;
@@ -1173,6 +1344,150 @@ bool FAvidScriptVmWasmtimeTypedHostTest::RunTest(const FString& Parameters)
 	TestEqual(
 		TEXT("prepared stable-object target bypasses the dispatcher"),
 		PreparedStableFallbackDispatcher.StableObjectCalls,
+		0);
+
+	const int64 PackedSelf = PackTypedObjectHandleForTest(17, 3);
+	const int64 PackedObject = PackTypedObjectHandleForTest(41, 7);
+	const int64 PackedResult = PackTypedObjectHandleForTest(73, 11);
+	const TArray<uint8> PackedObjectFixture =
+		BuildTypedPackedStableObjectRoundtripFixture(
+			PackedSelf,
+			PackedObject);
+	FAvidScriptVmError PreparedPackedError;
+	TUniquePtr<IAvidScriptVmBackend> PreparedPackedBackend =
+		CreateTypedWasmtimeBackend(PreparedPackedError);
+	FTypedHostDispatcher PreparedPackedFallbackDispatcher;
+	FPreparedPackedStableObjectRoundtripContext PreparedPackedContext;
+	PreparedPackedContext.PackedResult = PackedResult;
+	FAvidScriptVmBindingPackage PreparedPackedPackage =
+		MakeTypedBindingPackage(TEXT("(II)I"));
+	TArray<FAvidScriptVmTypedHostImport> PreparedPackedImports = {
+		MakeTypedImport(
+			EAvidScriptVmTypedHostShape::PackedStableObjectRoundtrip,
+			TEXT("(II)I"))
+	};
+	PreparedPackedImports[0].PreparedTarget.Context =
+		&PreparedPackedContext;
+	PreparedPackedImports[0].PreparedTarget.PackedStableObjectRoundtrip =
+		&InvokePreparedPackedStableObjectRoundtripForTest;
+	FAvidScriptVmLoadConfig PreparedPackedConfig;
+	PreparedPackedConfig.BindingPackage = &PreparedPackedPackage;
+	PreparedPackedConfig.TypedHostDispatcher =
+		&PreparedPackedFallbackDispatcher;
+	PreparedPackedConfig.TypedHostImports = PreparedPackedImports;
+	TestTrue(
+		TEXT("prepared packed stable-object fixture loads"),
+		PreparedPackedBackend->Load(
+			PackedObjectFixture,
+			TEXT("typed_prepared_packed_stable_object"),
+			PreparedPackedConfig,
+			PreparedPackedError));
+	ResolveAndCallPackedTypedRun(
+		*this,
+		*PreparedPackedBackend,
+		static_cast<uint64>(PackedResult),
+		PreparedPackedError);
+	TestEqual(
+		TEXT("prepared packed stable-object target is called once"),
+		PreparedPackedContext.CallCount,
+		1);
+	TestEqual(
+		TEXT("prepared packed stable-object target receives self"),
+		PreparedPackedContext.LastPackedSelf,
+		PackedSelf);
+	TestEqual(
+		TEXT("prepared packed stable-object target receives object"),
+		PreparedPackedContext.LastPackedObject,
+		PackedObject);
+
+	FAvidScriptVmError PackedSignatureError;
+	TUniquePtr<IAvidScriptVmBackend> PackedSignatureBackend =
+		CreateTypedWasmtimeBackend(PackedSignatureError);
+	FAvidScriptVmBindingPackage PackedSignaturePackage =
+		MakeTypedBindingPackage(TEXT("(iiiii)i"));
+	TArray<FAvidScriptVmTypedHostImport> PackedSignatureImports = {
+		MakeTypedImport(
+			EAvidScriptVmTypedHostShape::PackedStableObjectRoundtrip,
+			TEXT("(iiiii)i"))
+	};
+	PackedSignatureImports[0].PreparedTarget =
+		PreparedPackedImports[0].PreparedTarget;
+	FAvidScriptVmLoadConfig PackedSignatureConfig;
+	PackedSignatureConfig.BindingPackage = &PackedSignaturePackage;
+	PackedSignatureConfig.TypedHostDispatcher =
+		&PreparedPackedFallbackDispatcher;
+	PackedSignatureConfig.TypedHostImports = PackedSignatureImports;
+	TestFalse(
+		TEXT("packed stable-object signature mismatch rejects load"),
+		PackedSignatureBackend->Load(
+			PackedObjectFixture,
+			TEXT("typed_packed_stable_object_signature_mismatch"),
+			PackedSignatureConfig,
+			PackedSignatureError));
+	TestEqual(
+		TEXT("packed stable-object signature mismatch category"),
+		PackedSignatureError.Category,
+		FString(TEXT("typed_host_contract_invalid")));
+
+	FAvidScriptVmError PackedMissingTargetError;
+	TUniquePtr<IAvidScriptVmBackend> PackedMissingTargetBackend =
+		CreateTypedWasmtimeBackend(PackedMissingTargetError);
+	TArray<FAvidScriptVmTypedHostImport> PackedMissingTargetImports = {
+		MakeTypedImport(
+			EAvidScriptVmTypedHostShape::PackedStableObjectRoundtrip,
+			TEXT("(II)I"))
+	};
+	FAvidScriptVmLoadConfig PackedMissingTargetConfig;
+	PackedMissingTargetConfig.BindingPackage = &PreparedPackedPackage;
+	PackedMissingTargetConfig.TypedHostDispatcher =
+		&PreparedPackedFallbackDispatcher;
+	PackedMissingTargetConfig.TypedHostImports =
+		PackedMissingTargetImports;
+	TestFalse(
+		TEXT("packed stable-object missing prepared target rejects load"),
+		PackedMissingTargetBackend->Load(
+			PackedObjectFixture,
+			TEXT("typed_packed_stable_object_missing_target"),
+			PackedMissingTargetConfig,
+			PackedMissingTargetError));
+	TestEqual(
+		TEXT("packed stable-object missing target category"),
+		PackedMissingTargetError.Category,
+		FString(TEXT("typed_host_prepared_target_invalid")));
+
+	FAvidScriptVmError PackedMismatchedTargetError;
+	TUniquePtr<IAvidScriptVmBackend> PackedMismatchedTargetBackend =
+		CreateTypedWasmtimeBackend(PackedMismatchedTargetError);
+	FPreparedStableObjectRoundtripContext PackedMismatchedContext;
+	TArray<FAvidScriptVmTypedHostImport> PackedMismatchedTargetImports = {
+		MakeTypedImport(
+			EAvidScriptVmTypedHostShape::PackedStableObjectRoundtrip,
+			TEXT("(II)I"))
+	};
+	PackedMismatchedTargetImports[0].PreparedTarget.Context =
+		&PackedMismatchedContext;
+	PackedMismatchedTargetImports[0].PreparedTarget.StableObjectRoundtrip =
+		&InvokePreparedStableObjectRoundtripForTest;
+	FAvidScriptVmLoadConfig PackedMismatchedTargetConfig;
+	PackedMismatchedTargetConfig.BindingPackage = &PreparedPackedPackage;
+	PackedMismatchedTargetConfig.TypedHostDispatcher =
+		&PreparedPackedFallbackDispatcher;
+	PackedMismatchedTargetConfig.TypedHostImports =
+		PackedMismatchedTargetImports;
+	TestFalse(
+		TEXT("packed stable-object mismatched prepared target rejects load"),
+		PackedMismatchedTargetBackend->Load(
+			PackedObjectFixture,
+			TEXT("typed_packed_stable_object_mismatched_target"),
+			PackedMismatchedTargetConfig,
+			PackedMismatchedTargetError));
+	TestEqual(
+		TEXT("packed stable-object mismatched target category"),
+		PackedMismatchedTargetError.Category,
+		FString(TEXT("typed_host_prepared_target_invalid")));
+	TestEqual(
+		TEXT("mismatched legacy target is never called"),
+		PackedMismatchedContext.CallCount,
 		0);
 
 	FAvidScriptVmError ShapeMismatchError;

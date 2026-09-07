@@ -76,6 +76,7 @@ bool IsAvidScriptGeneratedCallSiteValid(
 			&& Entry.PreparedPropertyI32GetCall == nullptr
 			&& Entry.PreparedPropertyI32SetCall == nullptr;
 	case EAvidScriptGeneratedBindingShape::StableObjectRoundtrip:
+	case EAvidScriptGeneratedBindingShape::PackedStableObjectRoundtrip:
 		return Entry.ObjectRoundtripCall != nullptr
 			&& Entry.PreparedI32Call == nullptr
 			&& Entry.PreparedI32PairCall == nullptr

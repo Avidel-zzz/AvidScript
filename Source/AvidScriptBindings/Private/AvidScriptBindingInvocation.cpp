@@ -113,6 +113,15 @@ bool TryParseAvidScriptGeneratedShape(
 		OutSignature = TEXT("(iiiii)i");
 		return true;
 	}
+	if (Shape == TEXT("packed_stable_object_roundtrip"))
+	{
+		OutGeneratedShape =
+			EAvidScriptGeneratedBindingShape::PackedStableObjectRoundtrip;
+		OutVmShape =
+			EAvidScriptVmTypedHostShape::PackedStableObjectRoundtrip;
+		OutSignature = TEXT("(II)I");
+		return true;
+	}
 	return false;
 }
 
@@ -1872,6 +1881,10 @@ FString MakeAvidScriptRuntimeExpectedSignature(const FAvidScriptBindingFunctionM
 		{
 			return TEXT("(iiiii)i");
 		}
+		if (Binding.GeneratedShape == TEXT("packed_stable_object_roundtrip"))
+		{
+			return TEXT("(II)I");
+		}
 	}
 
 	FString Parameters;
@@ -3314,6 +3327,11 @@ FAvidScriptBindingPackage::MakeGeneratedPlanForTesting(
 		Plan.TypedHostImport.Shape =
 			EAvidScriptVmTypedHostShape::StableObjectRoundtrip;
 		Plan.TypedHostImport.Signature = TEXT("(iiiii)i");
+		break;
+	case EAvidScriptGeneratedBindingShape::PackedStableObjectRoundtrip:
+		Plan.TypedHostImport.Shape =
+			EAvidScriptVmTypedHostShape::PackedStableObjectRoundtrip;
+		Plan.TypedHostImport.Signature = TEXT("(II)I");
 		break;
 	default:
 		return nullptr;

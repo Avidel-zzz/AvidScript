@@ -109,6 +109,12 @@ bool TryParseShape(
 		OutShape = EAvidScriptGeneratedBindingShape::StableObjectRoundtrip;
 		return true;
 	}
+	if (Value == TEXT("packed_stable_object_roundtrip"))
+	{
+		OutShape =
+			EAvidScriptGeneratedBindingShape::PackedStableObjectRoundtrip;
+		return true;
+	}
 	return false;
 }
 

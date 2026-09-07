@@ -127,6 +127,8 @@ const TCHAR* ShapeToken(const EAvidScriptGeneratedBindingShape Shape)
 		return TEXT("EAvidScriptGeneratedBindingShape::VectorRefOut");
 	case EAvidScriptGeneratedBindingShape::StableObjectRoundtrip:
 		return TEXT("EAvidScriptGeneratedBindingShape::StableObjectRoundtrip");
+	case EAvidScriptGeneratedBindingShape::PackedStableObjectRoundtrip:
+		return TEXT("EAvidScriptGeneratedBindingShape::PackedStableObjectRoundtrip");
 	default:
 		return TEXT("EAvidScriptGeneratedBindingShape::I32PairToI32");
 	}
@@ -160,6 +162,8 @@ const TCHAR* ShapeManifestToken(
 		return TEXT("vector_ref_out");
 	case EAvidScriptGeneratedBindingShape::StableObjectRoundtrip:
 		return TEXT("stable_object_roundtrip");
+	case EAvidScriptGeneratedBindingShape::PackedStableObjectRoundtrip:
+		return TEXT("packed_stable_object_roundtrip");
 	default:
 		return TEXT("invalid");
 	}
@@ -285,6 +289,7 @@ FString RenderTypedCallSite(
 			*OwnerType,
 			*UeFunction);
 	case EAvidScriptGeneratedBindingShape::StableObjectRoundtrip:
+	case EAvidScriptGeneratedBindingShape::PackedStableObjectRoundtrip:
 		return FString::Printf(
 			TEXT("static EAvidScriptVmTypedHostStatus %s(UObject& Receiver, UObject* InValue, UObject*& OutValue)\n")
 			TEXT("{\n")
@@ -408,6 +413,7 @@ FString RenderPreparedTypedCallSite(
 			*OwnerType,
 			*UeFunction);
 	case EAvidScriptGeneratedBindingShape::StableObjectRoundtrip:
+	case EAvidScriptGeneratedBindingShape::PackedStableObjectRoundtrip:
 		return FString::Printf(
 			TEXT("static EAvidScriptVmTypedHostStatus %s(UObject& Receiver, UObject* InValue, UObject*& OutValue)\n")
 			TEXT("{\n")
@@ -505,8 +511,12 @@ FString RenderPrivateCpp(
 				== EAvidScriptGeneratedBindingShape::VectorValue
 			? CallSite
 			: FString(TEXT("nullptr"));
-		const FString StableObjectCall = Binding.Shape
+		const bool bStableObjectShape =
+			Binding.Shape
 				== EAvidScriptGeneratedBindingShape::StableObjectRoundtrip
+			|| Binding.Shape
+				== EAvidScriptGeneratedBindingShape::PackedStableObjectRoundtrip;
+		const FString StableObjectCall = bStableObjectShape
 			? CallSite
 			: FString(TEXT("nullptr"));
 		const FString PreparedI32PairCall = Binding.Shape
@@ -537,8 +547,7 @@ FString RenderPrivateCpp(
 				== EAvidScriptGeneratedBindingShape::VectorRefOut
 			? PreparedCallSite
 			: FString(TEXT("nullptr"));
-		const FString PreparedStableObjectCall = Binding.Shape
-				== EAvidScriptGeneratedBindingShape::StableObjectRoundtrip
+		const FString PreparedStableObjectCall = bStableObjectShape
 			? PreparedCallSite
 			: FString(TEXT("nullptr"));
 		Result += FString::Printf(
@@ -779,6 +788,8 @@ const TCHAR* ExpectedGeneratedAbiSignature(
 		return TEXT("(ii)i");
 	case EAvidScriptGeneratedBindingShape::StableObjectRoundtrip:
 		return TEXT("(iiiii)i");
+	case EAvidScriptGeneratedBindingShape::PackedStableObjectRoundtrip:
+		return TEXT("(II)I");
 	default:
 		return TEXT("");
 	}

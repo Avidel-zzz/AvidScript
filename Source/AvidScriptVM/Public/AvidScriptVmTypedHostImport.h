@@ -25,7 +25,8 @@ enum class EAvidScriptVmTypedHostShape : uint8
 	StableObjectRoundtrip,
 	CommandBufferSubmit,
 	SelfI32PairToGuestI32,
-	SelfF32TripleToGuestVector
+	SelfF32TripleToGuestVector,
+	PackedStableObjectRoundtrip
 };
 
 enum class EAvidScriptVmTypedHostStatus : uint8
@@ -97,6 +98,13 @@ using FAvidScriptVmPreparedStableObjectRoundtripTarget =
 		int32 ObjectGeneration,
 		int32 GuestAddress,
 		int32& OutValue);
+
+using FAvidScriptVmPreparedPackedStableObjectRoundtripTarget =
+	EAvidScriptVmTypedHostStatus (*)(
+		void* Context,
+		int64 PackedSelf,
+		int64 PackedObject,
+		int64& OutPackedObject);
 
 using FAvidScriptVmPreparedSelfPropertyI32GetTarget =
 	EAvidScriptVmTypedHostStatus (*)(
@@ -180,6 +188,8 @@ struct AVIDSCRIPTVM_API FAvidScriptVmPreparedTypedHostTarget
 	FAvidScriptVmPreparedSelfGuestAddressTarget SelfGuestAddress = nullptr;
 	FAvidScriptVmPreparedStableObjectRoundtripTarget StableObjectRoundtrip =
 		nullptr;
+	FAvidScriptVmPreparedPackedStableObjectRoundtripTarget
+		PackedStableObjectRoundtrip = nullptr;
 	FAvidScriptVmPreparedSelfPropertyI32GetTarget SelfPropertyI32Get = nullptr;
 	FAvidScriptVmPreparedSelfPropertyI32SetTarget SelfPropertyI32Set = nullptr;
 	FAvidScriptVmPreparedPackedSelfPropertyI32GetTarget PackedSelfPropertyI32Get = nullptr;
@@ -213,6 +223,8 @@ struct AVIDSCRIPTVM_API FAvidScriptVmPreparedTypedHostTarget
 			return SelfGuestAddress != nullptr;
 		case EAvidScriptVmTypedHostShape::StableObjectRoundtrip:
 			return StableObjectRoundtrip != nullptr;
+		case EAvidScriptVmTypedHostShape::PackedStableObjectRoundtrip:
+			return PackedStableObjectRoundtrip != nullptr;
 		case EAvidScriptVmTypedHostShape::SelfPropertyI32Get:
 			return SelfPropertyI32Get != nullptr;
 		case EAvidScriptVmTypedHostShape::SelfPropertyI32Set:
@@ -246,6 +258,7 @@ struct AVIDSCRIPTVM_API FAvidScriptVmPreparedTypedHostTarget
 			|| SelfF32TripleGuestVector != nullptr
 			|| SelfGuestAddress != nullptr
 			|| StableObjectRoundtrip != nullptr
+			|| PackedStableObjectRoundtrip != nullptr
 			|| SelfPropertyI32Get != nullptr
 			|| SelfPropertyI32Set != nullptr
 			|| PackedSelfPropertyI32Get != nullptr

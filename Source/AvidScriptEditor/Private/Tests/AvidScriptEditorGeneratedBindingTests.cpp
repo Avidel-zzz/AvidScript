@@ -220,6 +220,144 @@ bool FAvidScriptEditorGeneratedBindingDeterminismTest::RunTest(
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorGeneratedBindingPackedObjectFacadeTest,
+	"AvidScript.Editor.GeneratedBindings.PackedObjectFacade",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorGeneratedBindingPackedObjectFacadeTest::RunTest(
+	const FString& Parameters)
+{
+	const FString TestClassPath =
+		TEXT("/Script/AvidScriptBindings.AvidScriptBindingsTestObject");
+	FAvidScriptBindingSelectionProfile Profile;
+	Profile.PackageName = TEXT("avidscript.generated.packed_object_facade");
+	FAvidScriptReflectedClassSelection Rule;
+	Rule.OwnerClassPath = TestClassPath;
+	Rule.IncludeFunctions.Add(TEXT("FastPathObjectRoundtrip"));
+	Rule.GeneratedNativeFunctions.Add(TEXT("FastPathObjectRoundtrip"));
+	Profile.Classes.Add(MoveTemp(Rule));
+
+	FString DescriptorJson;
+	FAvidScriptBindingSelectionResolveResult SelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+			TEXT("Generated object descriptor provides the facade fixture"),
+			FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+				Profile,
+				DescriptorJson,
+				SelectionResult,
+				GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Package;
+	FString ErrorCategory;
+	FString ErrorSource;
+	if (!TestTrue(
+			TEXT("Packed object descriptor satisfies the shared parser"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				DescriptorJson,
+				Package,
+				ErrorCategory,
+				ErrorSource))
+		|| !TestEqual(
+			TEXT("Packed object descriptor has one binding"),
+			Package.Bindings.Num(),
+			1))
+	{
+		AddError(ErrorCategory + TEXT(": ") + ErrorSource);
+		return false;
+	}
+	TestEqual(
+		TEXT("Generated object descriptor selects the packed ABI"),
+		Package.Bindings[0].GeneratedShape,
+		FString(TEXT("packed_stable_object_roundtrip")));
+	TestEqual(
+		TEXT("Generated object descriptor publishes the packed signature"),
+		Package.Bindings[0].HostImport.Signature,
+		FString(TEXT("(II)I")));
+
+	FAvidScriptBindingPackageModel PackedPackage = Package;
+	PackedPackage.Bindings[0].GeneratedShape =
+		TEXT("packed_stable_object_roundtrip");
+	PackedPackage.Bindings[0].HostImport.Signature = TEXT("(II)I");
+	const FAvidScriptBindingFunctionModel& Binding =
+		PackedPackage.Bindings[0];
+
+	FString PackedSource;
+	if (!TestTrue(
+			TEXT("Packed object descriptor reaches the C# facade"),
+			FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
+				PackedPackage,
+				FAvidScriptHash::Sha256HexUtf8(
+					TEXT("packed:") + DescriptorJson),
+				PackedSource,
+				ErrorCategory,
+				ErrorSource)))
+	{
+		AddError(ErrorCategory + TEXT(": ") + ErrorSource);
+		return false;
+	}
+
+	const FString NativeMethod = FString::Printf(
+		TEXT("Invoke%04d"),
+		Binding.Ordinal);
+	TestTrue(
+		TEXT("Packed facade declares an i64 DllImport contract"),
+		PackedSource.Contains(FString::Printf(
+			TEXT("[DllImport(\"%s\", EntryPoint = \"%s\")]"),
+			*Binding.HostImport.Module,
+			*Binding.HostImport.Name))
+			&& PackedSource.Contains(FString::Printf(
+				TEXT("internal static extern long %s(long selfHandle, long p0Handle);"),
+				*NativeMethod)));
+	TestTrue(
+		TEXT("Packed facade combines self and object handle cells"),
+		PackedSource.Contains(
+			TEXT("((long)(uint)this.Slot | ((long)(uint)this.Generation << 32))"))
+			&& PackedSource.Contains(
+				TEXT("((long)(uint)value.AvidScriptSlot | ((long)(uint)value.AvidScriptGeneration << 32))")));
+	TestTrue(
+		TEXT("Packed facade decodes the returned public object wrapper"),
+		PackedSource.Contains(
+			TEXT("public UObject FastPathObjectRoundtrip(UObject value)"))
+			&& PackedSource.Contains(FString::Printf(
+				TEXT("long __packedReturnValue = AvidScriptNative.%s("),
+				*NativeMethod))
+			&& PackedSource.Contains(
+				TEXT("unchecked((int)(uint)__packedReturnValue)"))
+			&& PackedSource.Contains(
+				TEXT("unchecked((int)(uint)((ulong)__packedReturnValue >> 32))"))
+			&& PackedSource.Contains(
+				TEXT("return new UObject(__returnValue.Slot, __returnValue.Generation);")));
+
+	FAvidScriptBindingPackageModel LegacyPackage = Package;
+	LegacyPackage.Bindings[0].GeneratedShape =
+		TEXT("stable_object_roundtrip");
+	LegacyPackage.Bindings[0].HostImport.Signature = TEXT("(iiiii)i");
+	FString LegacySource;
+	TestTrue(
+		TEXT("Legacy object descriptor remains renderable"),
+		FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
+			LegacyPackage,
+			TEXT("legacy-stable-object-roundtrip"),
+			LegacySource,
+			ErrorCategory,
+			ErrorSource));
+	TestTrue(
+		TEXT("Legacy object facade keeps split handles and out return storage"),
+		LegacySource.Contains(FString::Printf(
+			TEXT("internal static extern int %s(int selfSlot, int selfGeneration, int p0Slot, int p0Generation, out FAvidScriptObjectHandle returnValue);"),
+			*NativeMethod))
+			&& LegacySource.Contains(
+				TEXT("this.Slot, this.Generation, value.AvidScriptSlot, value.AvidScriptGeneration, out __returnValue")));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorGeneratedBindingIdentityAndInputTest,
 	"AvidScript.Editor.GeneratedBindings.IdentityAndInputValidation",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
