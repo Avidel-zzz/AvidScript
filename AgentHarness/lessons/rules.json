@@ -21,7 +21,7 @@
       "summary": "概念名称不能当作真实文件路径。",
       "prevention": "先用 rg --files 建立索引，再对索引中的字面路径读取；通配符只放在 rg -g 参数，所有 -g 选项必须位于 -- 终止符之前。",
       "source": "legacy:1931",
-      "last_observed": "2026-09-07 P65.D9 (先对 RuntimeSupport.* 使用 Windows 无效字面通配，再猜测不存在的 AvidScriptVmArtifactCompiler.h；均为只读失败，随后通过 rg --files 定位 RuntimeSupport.cpp/.h 与 AvidScriptVmArtifact.h)"
+      "last_observed": "2026-09-08 P65.D23 再次把 P65.D*.json/md 作为 Windows 字面路径传给 rg 并只读失败；改为目录参数配合 -g 后成功。此前 P65.D9 已发生无效通配路径与概念路径猜测"
     },
     {
       "id": "one-command-one-evidence-domain",
