@@ -1708,13 +1708,13 @@ namespace
 	uint64 GetExpectedPreparedDynamicHitCount(
 		const EAvidScriptPerfWorkload Workload,
 		const int32 Iterations,
-		const EAvidScriptPerfLane Lane)
+		const bool bSemanticLane)
 	{
 		check(Iterations > 0);
 		switch (Workload)
 		{
 		case EAvidScriptPerfWorkload::ScalarNoOp:
-			return Lane == EAvidScriptPerfLane::AvidScriptWasmtimeSemantic
+			return bSemanticLane
 				? static_cast<uint64>(Iterations)
 				: 0;
 		case EAvidScriptPerfWorkload::VectorRefOut:
@@ -3429,7 +3429,7 @@ namespace
 			GetExpectedPreparedDynamicHitCount(
 				Workload,
 				Iterations,
-				Observation.Lane);
+				bAdaptiveLane || bStrictSemanticLane);
 		const uint64 ExpectedPreparedReflectionReceiverHitCount =
 			GetExpectedPreparedReflectionReceiverHitCount(
 				Workload,

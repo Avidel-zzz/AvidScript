@@ -792,6 +792,14 @@
       "prevention": "Wasmtime 等版本化工具链路径从当前 lock 的 install.relative_path 或已验证 candidate manifest 解析；调用正式脚本时不手输版本目录名，并让路径门禁在任何输出创建前 fail closed。",
       "source": "Source/ThirdParty/Wasmtime/PerformanceToolchain/WasmtimePerformanceToolchain.lock.json",
       "last_observed": "2026-09-07 P65.D10 重启 candidate freezer 时把 v45.0.0 手误为 v45..0；脚本在写入前拒绝"
+    },
+    {
+      "id": "cpp-helper-signatures-use-visible-types",
+      "tags": ["cpp", "build", "types", "workflow"],
+      "summary": "匿名命名空间中的前置 helper 不能在签名里引用文件后部才声明的内部枚举。",
+      "prevention": "修改 helper 签名前先定位参数类型声明顺序；若 helper 只需要一个已计算判定，传入具名 bool 或前置稳定基础类型，避免为局部 oracle 移动领域枚举。C++ 改动必须经 no-clean UBT 后再形成可冻结候选。",
+      "source": "Benchmarks/PuertsComparison/AvidScriptPerfHarness/Source/AvidScriptPerfHarness/Private/AvidScriptPerfRunner.cpp",
+      "last_observed": "2026-09-07 P65.D10 首版 lane-aware prepared-dynamic oracle 在后置 EAvidScriptPerfLane 声明前引用该类型，sidecar no-clean UBT 拒绝"
     }
   ]
 }

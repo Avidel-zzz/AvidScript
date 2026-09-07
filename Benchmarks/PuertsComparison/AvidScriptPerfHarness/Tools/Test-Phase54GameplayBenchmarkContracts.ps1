@@ -186,7 +186,8 @@ Assert-True (@($generatedCSharpProfile.binding_profile.classes[0].generated_nati
     @($dataCSharpProfile.binding_profile.classes[0].generated_native_functions) -ccontains 'ReflectNoOp' -and
     $runnerGeneratedMatrix.Contains('EAvidScriptPerfWorkload::ScalarNoOp') -and
     $runnerFusedMatrix.Contains('EAvidScriptPerfWorkload::ScalarNoOp') -and
-    $runnerPreparedDynamicMatrix.Contains('EAvidScriptPerfLane::AvidScriptWasmtimeSemantic')) `
+    $runnerPreparedDynamicMatrix.Contains('const bool bSemanticLane') -and
+    $runnerText.Contains('bAdaptiveLane || bStrictSemanticLane')) `
     'ScalarNoOp 的 generated/data profile、S1、fused 与 lane-aware prepared-dynamic oracle 必须同步。'
 Assert-True (@($phase65VerifiedPackageDiagnostic.avidscript_artifacts.PSObject.Properties.Value |
         Where-Object { [string]$_.artifact_load_policy -cne 'published_package' }).Count -eq 0) `
