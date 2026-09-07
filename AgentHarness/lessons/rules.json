@@ -784,6 +784,14 @@
       "prevention": "每个基准进程使用证据目录下的独立 `-UserDir`；正式运行在首个进程前和全部进程后分别复验 host manifest、archive digest 与 Pak identity。诊断和正式矩阵不要共享未重定向的可写 package。",
       "source": "Benchmarks/PuertsComparison/AvidScriptPerfHarness/Tools/Invoke-Phase54GameplayBenchmark.ps1",
       "last_observed": "2026-09-07 P65.D10 先运行 diagnostic 后，CrashReportClient 配置写入 archive，正式 host 摘要复验按设计失败"
+    },
+    {
+      "id": "versioned-toolchain-paths-come-from-locks",
+      "tags": ["workflow", "toolchain", "paths", "benchmark"],
+      "summary": "手输带版本号的工具链目录容易产生合法外观但不存在的路径。",
+      "prevention": "Wasmtime 等版本化工具链路径从当前 lock 的 install.relative_path 或已验证 candidate manifest 解析；调用正式脚本时不手输版本目录名，并让路径门禁在任何输出创建前 fail closed。",
+      "source": "Source/ThirdParty/Wasmtime/PerformanceToolchain/WasmtimePerformanceToolchain.lock.json",
+      "last_observed": "2026-09-07 P65.D10 重启 candidate freezer 时把 v45.0.0 手误为 v45..0；脚本在写入前拒绝"
     }
   ]
 }
