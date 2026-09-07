@@ -773,7 +773,7 @@
       "id": "pak-files-are-not-proven-by-physical-directory-existence",
       "tags": ["unreal", "packaging", "puerts", "filesystem"],
       "summary": "UFS 文件进入 Pak/IoStore 后可由 UE platform file 读取，但宿主物理目录可以不存在。",
-      "prevention": "非资产脚本通过 Build.cs RuntimeDependencies 以 UFS 明确发布；运行时对具体文件使用 FFileHelper/IPlatformFile 读取并校验哈希，不用 `FPaths::DirectoryExists` 判断虚拟目录。只发布 benchmark 实际需要的脚本。",
+      "prevention": "非资产脚本通过 Build.cs RuntimeDependencies 以 UFS 明确发布；运行时对具体文件使用 FFileHelper/IPlatformFile 读取并校验哈希，不用 `FPaths::DirectoryExists` 判断虚拟目录。发布 benchmark workload 与受锁定 Puerts 的 runtime bootstrap 子目录，不携带 PuertsEditor、ffi 或测试资源。",
       "source": "Benchmarks/PuertsComparison/AvidScriptPerfHarness/Source/AvidScriptPerfHarness/Private/AvidScriptPerfRunner.cpp",
       "last_observed": "2026-09-07 P65.D10 package diagnostic 通过 runtime identity 后，在物理 Plugin Content 目录检查处拒绝 Pak 内脚本"
     }

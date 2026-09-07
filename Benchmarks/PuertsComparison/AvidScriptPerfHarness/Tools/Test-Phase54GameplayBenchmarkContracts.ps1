@@ -180,6 +180,10 @@ Assert-True ($invokeText.Contains('Get-PublishedModulePackage') -and
     'Verified-package benchmark 必须复用生产 catalog/package loader 与 Session artifact 入口。'
 Assert-True ($harnessBuildRulesText.Contains('RuntimeDependencies.Add(ScriptPath, StagedFileType.UFS)') -and
     $harnessBuildRulesText.Contains('"reflection.js", "static.js"') -and
+    $harnessBuildRulesText.Contains('"JavaScript",') -and
+    $harnessBuildRulesText.Contains('"puerts"') -and
+    $harnessBuildRulesText.Contains('System.IO.SearchOption.TopDirectoryOnly') -and
+    $harnessBuildRulesText.Contains('System.Array.Sort(PuertsRuntimeScripts, System.StringComparer.Ordinal)') -and
     -not $runnerText.Contains('FPaths::DirectoryExists(ScriptRoot)') -and
     $runnerText.Contains('FFileHelper::LoadFileToArray(Content, *Path)')) `
     'Puerts benchmark workload 必须作为 UFS 发布，并通过 Pak-aware 文件读取而非物理目录探测。'

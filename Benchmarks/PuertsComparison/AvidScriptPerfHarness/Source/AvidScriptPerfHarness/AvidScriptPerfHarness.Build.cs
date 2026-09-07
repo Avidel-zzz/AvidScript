@@ -46,6 +46,32 @@ public class AvidScriptPerfHarness : ModuleRules
             RuntimeDependencies.Add(ScriptPath, StagedFileType.UFS);
         }
 
+        if (Target.ProjectFile == null)
+        {
+            throw new BuildException("AvidScriptPerfHarness requires a project target to stage Puerts scripts.");
+        }
+        string PuertsRuntimeRoot = System.IO.Path.Combine(
+            Target.ProjectFile.Directory.FullName,
+            "Plugins",
+            "Puerts",
+            "Content",
+            "JavaScript",
+            "puerts");
+        if (!System.IO.Directory.Exists(PuertsRuntimeRoot))
+        {
+            throw new BuildException($"Puerts runtime script root is missing: {PuertsRuntimeRoot}");
+        }
+        string[] PuertsRuntimeScripts = System.IO.Directory.GetFiles(
+            PuertsRuntimeRoot,
+            "*.js",
+            System.IO.SearchOption.TopDirectoryOnly);
+        System.Array.Sort(PuertsRuntimeScripts, System.StringComparer.Ordinal);
+        foreach (string ScriptPath in PuertsRuntimeScripts)
+        {
+            ExternalDependencies.Add(ScriptPath);
+            RuntimeDependencies.Add(ScriptPath, StagedFileType.UFS);
+        }
+
         AddEngineThirdPartyPrivateStaticDependencies(Target, "OpenSSL");
     }
 }
