@@ -21,7 +21,7 @@
       "summary": "概念名称不能当作真实文件路径。",
       "prevention": "先用 rg --files 建立索引，再对索引中的字面路径读取；通配符只放在 rg -g 参数，所有 -g 选项必须位于 -- 终止符之前。",
       "source": "legacy:1931",
-      "last_observed": "2026-09-08 P65.D26 凭类型名猜测 CSharpGuestDebugTagger 位于 Lowering，未先从索引确认其真实 Diagnostics 路径，导致只读失败；随后使用 rg 返回的精确路径成功。此前 P65.D23/P65.D9 已发生同类路径猜测"
+      "last_observed": "2026-09-08 P65.D26 先凭类型名猜错 CSharpGuestDebugTagger 目录，随后又照恢复摘要猜错 D22 文档名；两次均为无副作用只读失败，均改用 rg --files 返回的精确路径。此前 P65.D23/P65.D9 已发生同类路径猜测"
     },
     {
       "id": "one-command-one-evidence-domain",
@@ -454,7 +454,7 @@
       "summary": "恢复任务后，首个仓库动作仍必须是 Harness bootstrap。",
       "prevention": "每次恢复或上下文切换后，先从插件根执行 bootstrap，再读取 Git、README 或产品代码；不能因为已有摘要而跳过。",
       "source": "observed:2026-09-01-P60.C2c3",
-      "last_observed": "2026-09-01 P60.C2c3 恢复时先检查了 Git 与 README，随后发现顺序错误并在继续产品编辑前补跑 bootstrap"
+      "last_observed": "2026-09-08 P65.D26 上下文压缩恢复后先读取 Git、磁盘与产品代码，候选链路恢复时才补跑 bootstrap；后续以本次 Harness 输出为唯一 Phase 状态。此前 P60.C2c3 已发生同类顺序错误"
     },
     {
       "id": "blueprint-reinstance-evidence-is-behavioral",
