@@ -6726,9 +6726,7 @@ FAvidScriptWasmRuntimeInstance::DispatchPreparedObjectRoundtripCore(
 		if (!TryResolveFusedCallbackReceiver(
 				static_cast<int32>(ReceiverHandle.Slot),
 				static_cast<int32>(ReceiverHandle.Generation),
-				Receiver)
-			|| (Call.Binding.ExpectedClass != nullptr
-				&& !Receiver->IsA(Call.Binding.ExpectedClass)))
+				Receiver))
 		{
 			return RecordGeneratedStatus(
 				EAvidScriptVmTypedHostStatus::Rejected);
