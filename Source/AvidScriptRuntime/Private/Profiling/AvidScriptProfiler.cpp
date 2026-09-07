@@ -44,12 +44,6 @@ void FAvidScriptProfilerEventBuffer::SetBufferEnabled(const bool bEnabled)
 	}
 }
 
-bool FAvidScriptProfilerEventBuffer::IsCaptureEnabled() const
-{
-	return bBufferEnabled
-		|| UE_TRACE_CHANNELEXPR_IS_ENABLED(AvidScriptProfilerChannel);
-}
-
 void FAvidScriptProfilerEventBuffer::Reset()
 {
 	check(IsInGameThread());

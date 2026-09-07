@@ -2,6 +2,9 @@
 
 #include "CoreMinimal.h"
 #include "HAL/PlatformTime.h"
+#include "Trace/Trace.h"
+
+UE_TRACE_CHANNEL_EXTERN(AvidScriptProfilerChannel, AVIDSCRIPTRUNTIME_API);
 
 enum class EAvidScriptProfilerEventKind : uint8
 {
@@ -64,7 +67,11 @@ public:
 
 	void SetBufferEnabled(bool bEnabled);
 	bool IsBufferEnabled() const { return bBufferEnabled; }
-	bool IsCaptureEnabled() const;
+	FORCEINLINE bool IsCaptureEnabled() const
+	{
+		return bBufferEnabled
+			|| UE_TRACE_CHANNELEXPR_IS_ENABLED(AvidScriptProfilerChannel);
+	}
 	void Reset();
 
 	void Record(
