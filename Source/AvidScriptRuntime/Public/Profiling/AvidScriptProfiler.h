@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HAL/PlatformTime.h"
 
 enum class EAvidScriptProfilerEventKind : uint8
 {
@@ -97,31 +98,70 @@ private:
 class AVIDSCRIPTRUNTIME_API FAvidScriptProfilerScope
 {
 public:
-	FAvidScriptProfilerScope(
+	FORCEINLINE FAvidScriptProfilerScope(
 		FAvidScriptProfilerEventBuffer* InBuffer,
-		EAvidScriptProfilerEventKind InKind,
-		uint32 InOperationId,
-		uint64 InEpoch = 0,
-		uint64 InProbeId = 0,
-		uint64 InCorrelationId = 0,
-		int64 InValue = 0);
-	~FAvidScriptProfilerScope();
+		const EAvidScriptProfilerEventKind InKind,
+		const uint32 InOperationId,
+		const uint64 InEpoch = 0,
+		const uint64 InProbeId = 0,
+		const uint64 InCorrelationId = 0,
+		const int64 InValue = 0)
+		: Buffer(InBuffer)
+	{
+		if (Buffer == nullptr || !Buffer->IsCaptureEnabled())
+		{
+			Buffer = nullptr;
+			return;
+		}
+		Epoch = InEpoch;
+		ProbeId = InProbeId;
+		CorrelationId = InCorrelationId;
+		Value = InValue;
+		OperationId = InOperationId;
+		Kind = InKind;
+		bSucceeded = true;
+		StartCycles = FPlatformTime::Cycles64();
+	}
+
+	FORCEINLINE ~FAvidScriptProfilerScope()
+	{
+		if (Buffer == nullptr)
+		{
+			return;
+		}
+		const uint64 EndCycles = FPlatformTime::Cycles64();
+		Buffer->Record(
+			Kind,
+			OperationId,
+			StartCycles,
+			EndCycles - StartCycles,
+			Epoch,
+			ProbeId,
+			CorrelationId,
+			Value,
+			bSucceeded);
+	}
 
 	FAvidScriptProfilerScope(const FAvidScriptProfilerScope&) = delete;
 	FAvidScriptProfilerScope& operator=(const FAvidScriptProfilerScope&) = delete;
 
-	void SetSucceeded(bool bInSucceeded) { bSucceeded = bInSucceeded; }
-	bool IsCapturing() const { return bCapturing; }
+	FORCEINLINE void SetSucceeded(const bool bInSucceeded)
+	{
+		if (Buffer != nullptr)
+		{
+			bSucceeded = bInSucceeded;
+		}
+	}
+	bool IsCapturing() const { return Buffer != nullptr; }
 
 private:
 	FAvidScriptProfilerEventBuffer* Buffer = nullptr;
-	uint64 StartCycles = 0;
-	uint64 Epoch = 0;
-	uint64 ProbeId = 0;
-	uint64 CorrelationId = 0;
-	int64 Value = 0;
-	uint32 OperationId = 0;
-	EAvidScriptProfilerEventKind Kind = EAvidScriptProfilerEventKind::GuestCall;
-	bool bSucceeded = true;
-	bool bCapturing = false;
+	uint64 StartCycles;
+	uint64 Epoch;
+	uint64 ProbeId;
+	uint64 CorrelationId;
+	int64 Value;
+	uint32 OperationId;
+	EAvidScriptProfilerEventKind Kind;
+	bool bSucceeded;
 };
