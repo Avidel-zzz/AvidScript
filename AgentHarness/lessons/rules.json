@@ -29,7 +29,7 @@
       "summary": "一个 shell 调用只承担一个逻辑动作或证据域。",
       "prevention": "调度前拒绝用分号、&& 或 || 串联独立动作；多文件读取使用并行工具或逐项调用。",
       "source": "legacy:1672",
-      "last_observed": "2026-09-07 P65.D10 (把 gameplay contract 与 lessons JSON 解析放进同一 shell 调用；无文件副作用，后续恢复为每个验证域独立调用)"
+      "last_observed": "2026-09-08 P65.D24 恢复检查时再次用分号串联 Git 状态、日志、分支、远端和路径搜索；无文件副作用，后续恢复为每个验证域独立调用。执行前必须检查 shell 字符串不含独立命令分隔符"
     },
     {
       "id": "callback-kind-validation-uses-named-branches",
