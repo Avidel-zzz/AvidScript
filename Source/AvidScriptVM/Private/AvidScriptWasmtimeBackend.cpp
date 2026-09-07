@@ -2281,12 +2281,12 @@ private:
 			EpochWatchdog->DisarmRegistered(*EpochWatchdogEntryRaw);
 		}
 		const uint32 ResultCell = static_cast<uint32>(Result);
-		return CompleteSpecializedResolvedExportCall(
+		return CompleteResolvedExportCall(
 			Entry,
 			CallStatus,
 			CallFailure,
 			&ResultCell,
-			1,
+			CallStatus == AVIDSCRIPT_WASMTIME_CALL_SUCCESS ? 1 : 0,
 			OutError,
 			OutResult);
 	}
@@ -2324,48 +2324,12 @@ private:
 		{
 			EpochWatchdog->DisarmRegistered(*EpochWatchdogEntryRaw);
 		}
-		return CompleteSpecializedResolvedExportCall(
+		return CompleteResolvedExportCall(
 			Entry,
 			CallStatus,
 			CallFailure,
 			nullptr,
 			0,
-			OutError,
-			OutResult);
-	}
-
-	FORCEINLINE bool CompleteSpecializedResolvedExportCall(
-		const FAvidScriptWasmtimeExportEntry& Entry,
-		const AvidScriptWasmtimeCallStatus CallStatus,
-		AvidScriptWasmtimeFailure* CallFailure,
-		const uint32* ResultCells,
-		const uint32 SuccessResultCellCount,
-		FAvidScriptVmError& OutError,
-		FAvidScriptVmCallResult* OutResult)
-	{
-		const bool bUnloadRequestedDuringCall = bUnloadDeferred;
-		if (CallStatus == AVIDSCRIPT_WASMTIME_CALL_SUCCESS
-			&& !bUnloadRequestedDuringCall)
-		{
-			--ActiveCallDepth;
-			if (OutResult != nullptr)
-			{
-				if (SuccessResultCellCount == 1)
-				{
-					OutResult->Cells[0] = ResultCells[0];
-				}
-				OutResult->CellCount = SuccessResultCellCount;
-			}
-			return true;
-		}
-		return CompleteResolvedExportCallSlow(
-			Entry,
-			CallStatus,
-			CallFailure,
-			ResultCells,
-			CallStatus == AVIDSCRIPT_WASMTIME_CALL_SUCCESS
-				? SuccessResultCellCount
-				: 0,
 			OutError,
 			OutResult);
 	}
