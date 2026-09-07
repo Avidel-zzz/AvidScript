@@ -28,7 +28,7 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 
 ## 现在可以做什么
 
-更新于 **2026-09-07**。已跑通 **C# → WASM → UE 事件与 API → Win64 打包运行**，
+更新于 **2026-09-08**。已跑通 **C# → WASM → UE 事件与 API → Win64 打包运行**，
 可开始尝试小型玩法 Demo，不需要 `.avid`。**P64 正式 Gate 与 P65.C Shipping 发布 Gate 已完成；
 当前仍不是完整 UE/.NET 替代层。**
 
@@ -111,7 +111,7 @@ Wasmtime 45 Cranelift JIT 对冻结版本的 Puerts V8，同机 5 个进程、�
 - **纯执行：** 当前 P65.D9 正式 12-kernel 相同 WASM 对照的 P50/P95 几何均值为 **`1.1065x / 1.1293x`**，P50/P95 胜率为 **`58.3% / 33.3%`**，仍未达到 `<= 0.95x` 与 `>= 60%` 目标；不是 C# 对 JavaScript 的完整游戏比较。见[D9 报告](Docs/Phase65/P65.D9_Demand_Driven_Fuel_Profile.md)。
 - **最新 UE crossing：** P65.D10 将通用 `int32 -> int32` generated S1 降至 **`18.17 ns`**，相对 Puerts static 为 **`0.829x`**；十项 micro P50 几何均值已从 `1.440x` 改善到 `1.004x`，但仍未形成全面领先。见[D10 报告](Docs/Phase65/P65.D10_Generated_Unary_I32_Performance.md)。
 - **最新 generated typed 路径：** FVector ref/out 已达到 `103.64 ns`（Puerts static 的 `0.144x`）；P65.D13 又将 UObject roundtrip 从 `147.73 ns` 降至 **`51.88 ns`**，已领先 Puerts reflection，但仍是 Puerts static 的 `1.139x`。十项 UE micro 的 P50/P95 几何均值为 **`0.779x / 0.786x`**。见[D11](Docs/Phase65/P65.D11_Generated_Vector_RefOut_Performance.md)与[D13](Docs/Phase65/P65.D13_Packed_Object_Roundtrip_Performance.md)。
-- **最新 callback：** P65.D19 将 Runtime/VM 重复错误清理、无需逐 entry 重置的 budget 和冷诊断完成态移出成功路径；正式 generated callback_empty/tick 降至 **`112.99 ns / 137.11 ns`**，较 D18 提速约 `6.9% / 7.4%`，同轮为 Puerts static 的 `1.068x / 1.061x`。见[D19 报告](Docs/Phase65/P65.D19_Prepared_Entry_State_Fast_Path.md)。
+- **最新 callback：** P65.D20 将公开 PreparedCall 输出初始化与 Runtime 内部低层调用分层，并移除 Wasmtime prepared member 的重复状态检查；正式 generated callback_empty/tick 降至 **`108.38 ns / 131.54 ns`**，较 D19 再提速约 `4.1% / 4.1%`，同轮为 Puerts static 的 `1.035x / 1.018x`。见[D20 报告](Docs/Phase65/P65.D20_Prepared_Call_Contract_Fast_Path.md)。
 - **比较边界：** 尚无同口径 UnLua/AngelScript 排行榜；不宣称全场景领先。其他数据见[容器](Docs/Phase57/P57.11D_Compiler_Managed_Array_Region.md)、[UE 原生对照](Docs/Phase60/P60.D_Performance_And_Gate.md)与[增量构建](Docs/Phase61/P61.E_Integration_Gate.md)。
 
 ## 快速开始
@@ -224,11 +224,11 @@ P50/P95 几何均值为 **`0.779x / 0.786x`**、胜项 `6/10`。callback、pure 
 [P65.D11](Docs/Phase65/P65.D11_Generated_Vector_RefOut_Performance.md)与
 [P65.D13](Docs/Phase65/P65.D13_Packed_Object_Roundtrip_Performance.md)。
 
-P65.D19 已将 Runtime/VM 重复错误清理、加载后不需逐 entry 重置的 budget，以及大段失败诊断代码
-移出 prepared export 成功路径。最新正式 5 进程的 generated callback_empty/tick 为
-**`112.99 ns / 137.11 ns`**，十项 P50/P95 几何均值为 **`0.733x / 0.737x`**；同轮 callback P50
-改善到 Puerts static 的 `1.068x / 1.061x`。该方向有效，但 callback 尚差约 `6%`，P65-D03 不关闭。
-详见 [P65.D19](Docs/Phase65/P65.D19_Prepared_Entry_State_Fast_Path.md)。
+P65.D20 已将公开 PreparedCall 的输出初始化与 Runtime 内部低层调用分层，并让 Wasmtime prepared
+member 信任 static thunk 的生命周期哨兵。最新正式 5 进程的 generated callback_empty/tick 为
+**`108.38 ns / 131.54 ns`**，十项 P50/P95 几何均值为 **`0.712x / 0.723x`**；同轮 callback P50
+改善到 Puerts static 的 `1.035x / 1.018x`。方向继续有效，但 callback P95 与其余性能债仍未全部关闭，
+P65-D03 保持未验证。详见 [P65.D20](Docs/Phase65/P65.D20_Prepared_Call_Contract_Fast_Path.md)。
 
 ## 验证
 
