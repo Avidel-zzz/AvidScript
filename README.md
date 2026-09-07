@@ -111,7 +111,7 @@ Wasmtime 45 Cranelift JIT 对冻结版本的 Puerts V8，同机 5 个进程、�
 - **纯执行：** 当前 P65.D9 正式 12-kernel 相同 WASM 对照的 P50/P95 几何均值为 **`1.1065x / 1.1293x`**，P50/P95 胜率为 **`58.3% / 33.3%`**，仍未达到 `<= 0.95x` 与 `>= 60%` 目标；不是 C# 对 JavaScript 的完整游戏比较。见[D9 报告](Docs/Phase65/P65.D9_Demand_Driven_Fuel_Profile.md)。
 - **最新 UE crossing：** P65.D10 将通用 `int32 -> int32` generated S1 降至 **`18.17 ns`**，相对 Puerts static 为 **`0.829x`**；十项 micro P50 几何均值已从 `1.440x` 改善到 `1.004x`，但仍未形成全面领先。见[D10 报告](Docs/Phase65/P65.D10_Generated_Unary_I32_Performance.md)。
 - **最新 generated typed 路径：** FVector ref/out 已达到 `103.64 ns`（Puerts static 的 `0.144x`）；P65.D13 又将 UObject roundtrip 从 `147.73 ns` 降至 **`51.88 ns`**，已领先 Puerts reflection，但仍是 Puerts static 的 `1.139x`。十项 UE micro 的 P50/P95 几何均值为 **`0.779x / 0.786x`**。见[D11](Docs/Phase65/P65.D11_Generated_Vector_RefOut_Performance.md)与[D13](Docs/Phase65/P65.D13_Packed_Object_Roundtrip_Performance.md)。
-- **最新 callback：** P65.D14-D15 依次移除 watchdog 全局锁并采样热 Tick 指标；generated callback_empty/tick 为 **`144.29 ns / 174.10 ns`**，十项聚合为 **`0.751x / 0.752x`**。Tick 较 D14 再快 `15.8%`，但 callback 单项仍是 Puerts static 的 `1.258x / 1.331x`。见[D15 报告](Docs/Phase65/P65.D15_Sampled_Hot_Tick_Metrics.md)。
+- **最新 callback：** P65.D14-D16 已移除 watchdog 锁、采样热 Tick 指标并直通休眠子系统；generated callback_empty/tick 为 **`128.82 ns / 140.19 ns`**，十项聚合为 **`0.686x / 0.732x`**。Tick 较 D15 再快 `19.5%`，与 Puerts static 的 P50 差距收敛到 `1.101x`。见[D16 报告](Docs/Phase65/P65.D16_Dormant_Tick_Subsystem_Bypass.md)。
 - **比较边界：** 尚无同口径 UnLua/AngelScript 排行榜；不宣称全场景领先。其他数据见[容器](Docs/Phase57/P57.11D_Compiler_Managed_Array_Region.md)、[UE 原生对照](Docs/Phase60/P60.D_Performance_And_Gate.md)与[增量构建](Docs/Phase61/P61.E_Integration_Gate.md)。
 
 ## 快速开始
@@ -224,11 +224,12 @@ P50/P95 几何均值为 **`0.779x / 0.786x`**、胜项 `6/10`。callback、pure 
 [P65.D11](Docs/Phase65/P65.D11_Generated_Vector_RefOut_Performance.md)与
 [P65.D13](Docs/Phase65/P65.D13_Packed_Object_Roundtrip_Performance.md)。
 
-P65.D14-D15 已移除共享 epoch watchdog 的顶层全局锁，并把热 Tick 诊断指标改为 `1/256` 采样。
-正式 5 进程结果中，generated callback_empty/tick 为 **`144.29 ns / 174.10 ns`**，十项聚合达到
-**`0.751x / 0.752x`**；其余八项最大回退低于 `1.55%`。callback 单项仍未领先 Puerts static，
-P65-D03 不关闭。详见 [P65.D14](Docs/Phase65/P65.D14_Lock_Free_Epoch_Watchdog_Arm.md)与
-[P65.D15](Docs/Phase65/P65.D15_Sampled_Hot_Tick_Metrics.md)。
+P65.D14-D16 已移除共享 epoch watchdog 的顶层全局锁、采样热 Tick 指标，并让休眠的 continuation、
+inbound 与 timer 子系统直接通过。正式 5 进程结果中，generated callback_empty/tick 为
+**`128.82 ns / 140.19 ns`**，十项聚合达到 **`0.686x / 0.732x`**；Tick 的 5 个进程内 P50 比率
+均为 Puerts static 的 `1.10x–1.12x`。callback 单项尚未全面领先，P65-D03 不关闭。详见
+[P65.D15](Docs/Phase65/P65.D15_Sampled_Hot_Tick_Metrics.md)与
+[P65.D16](Docs/Phase65/P65.D16_Dormant_Tick_Subsystem_Bypass.md)。
 
 ## 验证
 
