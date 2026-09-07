@@ -46,7 +46,10 @@ Assert-True ($PackagedHostScriptText.Contains("'-build'") -and
     $PackagedHostScriptText.Contains("'-cook'") -and
     $PackagedHostScriptText.Contains("'-stage'") -and
     $PackagedHostScriptText.Contains("'-pak'") -and
+    $PackagedHostScriptText.Contains('$FinalizeExistingArchive') -and
+    $PackagedHostScriptText.Contains("Windows/`$target.exe") -and
     $PackagedHostScriptText.Contains('Assert-SidecarBenchmarkProjectProvenance') -and
+    $PackagedHostScriptText.Contains('Assert-GeneratedTypeIdentity') -and
     $PackagedHostScriptText.Contains('archive_content_sha256') -and
     $PackagedHostScriptText.Contains('package_catalog_sha256') -and
     $PackagedHostScriptText.Contains('executable_sha256')) 'packaged host must freeze BuildCookRun and artifact identities'

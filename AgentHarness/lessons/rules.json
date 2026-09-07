@@ -744,6 +744,22 @@
       "prevention": "packaged-target 前置发布使用已审计的 ScriptDefinedTypes 源或明确含 UCLASS/USTRUCT/UENUM 的产品源；runtime benchmark 源与 Generated Type 声明源分别冻结。先通过 schema 20/1.22 类型声明门禁，再发布 current pointer。",
       "source": "Benchmarks/PuertsComparison/Leadership/Scripts/New-Phase65LeadershipCandidate.ps1",
       "last_observed": "2026-09-07 P65.D10 candidate v3 首次误用 AvidScriptPerfWorkload.cs，语义阶段因无 UE type declarations fail closed"
+    },
+    {
+      "id": "packaged-launcher-and-inner-binary-are-distinct",
+      "tags": ["unreal", "packaging", "workflow", "benchmark"],
+      "summary": "Windows staged archive 同时包含根启动器与 Binaries/Win64 内层同名 EXE，递归按文件名要求唯一会误拒绝成功包。",
+      "prevention": "用户启动入口按 `<archive>/Windows/<Project>.exe` 的固定布局解析，内层二进制由完整 archive digest 覆盖；昂贵 UAT 成功后允许只读复验日志和产物并幂等生成 host manifest，禁止为后处理规则错误重跑 BuildCookRun。",
+      "source": "Benchmarks/PuertsComparison/Leadership/Scripts/New-Phase65PackagedBenchmarkHost.ps1",
+      "last_observed": "2026-09-07 P65.D10 首次完整 BuildCookRun 3h35m51s 成功后，递归 EXE 唯一性规则误拒绝外层 launcher 与内层 target"
+    },
+    {
+      "id": "powershell-automatic-variables-are-reserved-case-insensitively",
+      "tags": ["powershell", "workflow", "scripts"],
+      "summary": "PowerShell 变量名大小写不敏感，`$host` 会命中只读自动变量 `$Host`。",
+      "prevention": "脚本局部状态使用带领域后缀的名称，如 HostManifest、ProcessHost 或 RuntimeHost；新增脚本的真实成功路径必须至少执行一次，解析器与静态 token 契约不能替代运行时自动变量检查。",
+      "source": "Benchmarks/PuertsComparison/Leadership/Scripts/New-Phase65PackagedBenchmarkHost.ps1",
+      "last_observed": "2026-09-07 P65.D10 packaged host finalization 首次到达 JSON 生成路径时因 `$host` 只读而失败，改名为 HostManifest"
     }
   ]
 }

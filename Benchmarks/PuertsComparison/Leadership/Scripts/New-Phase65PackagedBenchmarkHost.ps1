@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory = $true)][string]$CandidateManifestPath,
     [Parameter(Mandatory = $true)][string]$EngineRoot,
-    [Parameter(Mandatory = $true)][string]$OutputRoot
+    [Parameter(Mandatory = $true)][string]$OutputRoot,
+    [switch]$FinalizeExistingArchive
 )
 
 Set-StrictMode -Version Latest
@@ -23,6 +24,33 @@ function Resolve-RequiredPath {
         throw "ASP65H2000 $Label is missing or has the wrong type: $resolved"
     }
     return $resolved
+}
+
+function Assert-GeneratedTypeIdentity {
+    param(
+        [Parameter(Mandatory = $true)]$Candidate,
+        [Parameter(Mandatory = $true)][string]$ProjectRoot
+    )
+
+    $ExpectedCurrentPath = [IO.Path]::GetFullPath(
+        (Join-Path $ProjectRoot 'Plugins/AvidScript/Content/AvidScriptGenerated/current.json'))
+    $CurrentPath = Resolve-RequiredPath `
+        -Path ([string]$Candidate.benchmark_project.generated_type.current_path) `
+        -PathType Leaf `
+        -Label 'Generated Type current pointer'
+    if ($CurrentPath -ine $ExpectedCurrentPath -or
+        (Get-SidecarFileSha256 -Path $CurrentPath) -cne
+            [string]$Candidate.benchmark_project.generated_type.current_sha256) {
+        throw 'ASP65H2002 Generated Type current pointer identity drifted'
+    }
+    $DescriptorPath = Resolve-RequiredPath `
+        -Path ([string]$Candidate.benchmark_project.generated_type.descriptor_path) `
+        -PathType Leaf `
+        -Label 'Generated Type runtime package descriptor'
+    if ((Get-SidecarFileSha256 -Path $DescriptorPath) -cne
+        [string]$Candidate.benchmark_project.generated_type.descriptor_sha256) {
+        throw 'ASP65H2002 Generated Type runtime package descriptor identity drifted'
+    }
 }
 
 $candidatePath = Resolve-RequiredPath -Path $CandidateManifestPath -PathType Leaf -Label 'candidate manifest'
@@ -67,68 +95,81 @@ if ((Get-SidecarFileSha256 -Path $markerPath) -cne [string]$candidate.benchmark_
     -ProjectPath $projectPath `
     -AvidScriptCommit ([string]$candidate.candidate.commit) `
     -AvidScriptTreeSha ([string]$candidate.candidate.tree))
+[void](Assert-GeneratedTypeIdentity -Candidate $candidate -ProjectRoot $projectRoot)
 $resolvedOutput = [IO.Path]::GetFullPath($OutputRoot)
-if (Test-Path -LiteralPath $resolvedOutput) {
+if ((Test-Path -LiteralPath $resolvedOutput) -and -not $FinalizeExistingArchive) {
     throw "ASP65H2003 refusing to overwrite packaged-host output: $resolvedOutput"
 }
-[void][IO.Directory]::CreateDirectory($resolvedOutput)
 $archiveRoot = Join-Path $resolvedOutput 'archive'
-[void][IO.Directory]::CreateDirectory($archiveRoot)
 $uatLogPath = Join-Path $resolvedOutput 'build-cook-run.log'
 $target = [IO.Path]::GetFileNameWithoutExtension($projectPath)
-$uatArguments = @(
-    'BuildCookRun',
-    '-nop4',
-    '-unattended',
-    '-utf8output',
-    "-project=$projectPath",
-    "-target=$target",
-    '-targetplatform=Win64',
-    '-clientconfig=Development',
-    '-build',
-    '-skipbuildeditor',
-    '-cook',
-    '-stage',
-    '-pak',
-    '-archive',
-    "-archivedirectory=$archiveRoot",
-    '-AdditionalCookerOptions=-SkipZenStore -AvidScriptSuppressGeneratedTypeExecution -EnablePlugins=AvidScriptPerfHarness,Puerts',
-    '-ubtargs=-EnablePlugin=AvidScriptPerfHarness+Puerts -WaitMutex -NoHotReloadFromIDE'
-)
-$startInfo = [Diagnostics.ProcessStartInfo]::new()
-$startInfo.FileName = Join-Path $env:SystemRoot 'System32/cmd.exe'
-$startInfo.WorkingDirectory = $projectRoot
-$startInfo.UseShellExecute = $false
-$startInfo.CreateNoWindow = $true
-$startInfo.RedirectStandardOutput = $true
-$startInfo.RedirectStandardError = $true
-foreach ($argument in @('/d', '/s', '/c', $runUatPath) + $uatArguments) {
-    [void]$startInfo.ArgumentList.Add($argument)
+if ($FinalizeExistingArchive) {
+    $null = Resolve-RequiredPath -Path $resolvedOutput -PathType Container -Label 'packaged-host output'
+    $null = Resolve-RequiredPath -Path $archiveRoot -PathType Container -Label 'completed archive'
+    $null = Resolve-RequiredPath -Path $uatLogPath -PathType Leaf -Label 'completed UAT log'
+    $uatOutput = Get-Content -LiteralPath $uatLogPath -Raw
+    if (-not $uatOutput.Contains('BUILD SUCCESSFUL') -or
+        -not $uatOutput.Contains('AutomationTool exiting with ExitCode=0')) {
+        throw 'ASP65H2005 existing archive has no successful BuildCookRun evidence'
+    }
 }
-$process = [Diagnostics.Process]::new()
-$process.StartInfo = $startInfo
-if (-not $process.Start()) {
-    throw 'ASP65H2004 RunUAT process did not start'
+else {
+    [void][IO.Directory]::CreateDirectory($resolvedOutput)
+    [void][IO.Directory]::CreateDirectory($archiveRoot)
+    $uatArguments = @(
+        'BuildCookRun',
+        '-nop4',
+        '-unattended',
+        '-utf8output',
+        "-project=$projectPath",
+        "-target=$target",
+        '-targetplatform=Win64',
+        '-clientconfig=Development',
+        '-build',
+        '-skipbuildeditor',
+        '-cook',
+        '-stage',
+        '-pak',
+        '-archive',
+        "-archivedirectory=$archiveRoot",
+        '-AdditionalCookerOptions=-SkipZenStore -AvidScriptSuppressGeneratedTypeExecution -EnablePlugins=AvidScriptPerfHarness,Puerts',
+        '-ubtargs=-EnablePlugin=AvidScriptPerfHarness+Puerts -WaitMutex -NoHotReloadFromIDE'
+    )
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = Join-Path $env:SystemRoot 'System32/cmd.exe'
+    $startInfo.WorkingDirectory = $projectRoot
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in @('/d', '/s', '/c', $runUatPath) + $uatArguments) {
+        [void]$startInfo.ArgumentList.Add($argument)
+    }
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    if (-not $process.Start()) {
+        throw 'ASP65H2004 RunUAT process did not start'
+    }
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    $uatOutput = $stdoutTask.GetAwaiter().GetResult()
+    $uatError = $stderrTask.GetAwaiter().GetResult()
+    if (-not [string]::IsNullOrWhiteSpace($uatError)) {
+        $uatOutput += [Environment]::NewLine + $uatError
+    }
+    [IO.File]::WriteAllText($uatLogPath, $uatOutput, [Text.UTF8Encoding]::new($false))
+    if ($process.ExitCode -ne 0) {
+        $tail = [string]::Join(
+            [Environment]::NewLine,
+            @($uatOutput -split '\r?\n' | Select-Object -Last 80))
+        throw "ASP65H2005 BuildCookRun failed with exit code $($process.ExitCode): $uatLogPath`n$tail"
+    }
 }
-$stdoutTask = $process.StandardOutput.ReadToEndAsync()
-$stderrTask = $process.StandardError.ReadToEndAsync()
-$process.WaitForExit()
-$uatOutput = $stdoutTask.GetAwaiter().GetResult()
-$uatError = $stderrTask.GetAwaiter().GetResult()
-if (-not [string]::IsNullOrWhiteSpace($uatError)) {
-    $uatOutput += [Environment]::NewLine + $uatError
-}
-[IO.File]::WriteAllText($uatLogPath, $uatOutput, [Text.UTF8Encoding]::new($false))
-if ($process.ExitCode -ne 0) {
-    $tail = [string]::Join(
-        [Environment]::NewLine,
-        @($uatOutput -split '\r?\n' | Select-Object -Last 80))
-    throw "ASP65H2005 BuildCookRun failed with exit code $($process.ExitCode): $uatLogPath`n$tail"
-}
-$executables = @(Get-ChildItem -LiteralPath $archiveRoot -Filter "$target.exe" -File -Recurse)
-if ($executables.Count -ne 1) {
-    throw "ASP65H2006 packaged host must contain exactly one $target.exe"
-}
+$executablePath = Resolve-RequiredPath `
+    -Path (Join-Path $archiveRoot "Windows/$target.exe") `
+    -PathType Leaf `
+    -Label 'packaged host launcher'
 $pakFiles = @(Get-ChildItem -LiteralPath $archiveRoot -Filter '*.pak' -File -Recurse |
     Sort-Object FullName)
 if ($pakFiles.Count -eq 0) {
@@ -138,12 +179,13 @@ if ($pakFiles.Count -eq 0) {
     -ProjectPath $projectPath `
     -AvidScriptCommit ([string]$candidate.candidate.commit) `
     -AvidScriptTreeSha ([string]$candidate.candidate.tree))
+[void](Assert-GeneratedTypeIdentity -Candidate $candidate -ProjectRoot $projectRoot)
 if ((Get-SidecarFileSha256 -Path $catalogPath) -cne
     [string]$candidate.benchmark_project.package_catalog_sha256) {
     throw 'ASP65H2007 BuildCookRun changed the frozen package catalog'
 }
 $archiveDigest = Get-SidecarDirectoryContentDigest -Path $archiveRoot
-$host = [ordered]@{
+$HostManifest = [ordered]@{
     schema_version = 1
     created_utc = [DateTimeOffset]::UtcNow.ToString('o')
     candidate_id = [string]$candidate.candidate_id
@@ -158,8 +200,8 @@ $host = [ordered]@{
     archive_root = $archiveRoot
     archive_content_sha256 = [string]$archiveDigest.content_sha256
     archive_file_count = [int]$archiveDigest.file_count
-    executable_path = $executables[0].FullName
-    executable_sha256 = Get-SidecarFileSha256 -Path $executables[0].FullName
+    executable_path = $executablePath
+    executable_sha256 = Get-SidecarFileSha256 -Path $executablePath
     pak_files = @($pakFiles | ForEach-Object {
         [ordered]@{
             path = $_.FullName
@@ -168,7 +210,7 @@ $host = [ordered]@{
         }
     })
 }
-$hostJson = (($host | ConvertTo-Json -Depth 32) -replace "`r`n", "`n") + "`n"
+$hostJson = (($HostManifest | ConvertTo-Json -Depth 32) -replace "`r`n", "`n") + "`n"
 if (-not ($hostJson | Test-Json -SchemaFile $hostSchemaPath)) {
     throw 'ASP65H2008 packaged host result does not satisfy schema v1'
 }
@@ -178,7 +220,7 @@ $hostPath = Join-Path $resolvedOutput 'phase65-packaged-benchmark-host.json'
     result = 'phase65_packaged_benchmark_host_ready'
     host_path = $hostPath
     host_sha256 = Get-SidecarFileSha256 -Path $hostPath
-    executable_path = $executables[0].FullName
-    executable_sha256 = [string]$host.executable_sha256
+    executable_path = $executablePath
+    executable_sha256 = [string]$HostManifest.executable_sha256
     pak_count = $pakFiles.Count
 }
