@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "phase": "P65.D24",
+  "evidence_class": "diagnostic",
+  "performance_gate_result": "rejected_diagnostic_regression",
+  "candidate": {
+    "implementation_commit": "44a1f38a5519eefaea6f13d0fd62b75353531069",
+    "tree": "08270928a1c1acecbd959deb8f5a03316b71cb13",
+    "candidate_id": "462c1bfd882473056745",
+    "candidate_manifest_sha256": "1544f04ad7fc9cdd3fca3b08e63cb047e13870b43e8f20f5229b391ba86a533b",
+    "packaged_host_manifest_sha256": "34e5bede054adf7064e30bc2c0c1bcb640514ee89ce897e81d1a5bb56bc1fab1",
+    "archive_content_sha256": "bbda8ccb73340393e2b1e0472bd6c961672aaf8c3defb2130cc660f888f8b418",
+    "runtime_executable_sha256": "d0155a91e01e2541f99c84b68ab9e89c8a7361fc1385c2ec73f66fb025986520",
+    "uat_log_sha256": "14531d2de1489ad345108fce69b1cffb96137402a31859426319fa803a71d402",
+    "pak_sha256": "a4b74ba555d1952feed01679d192809711cb7fa111a8b36072485841120df50f",
+    "diagnostic_profile_sha256": "7a475dd7965110ebff2d2336f86a14233ae6f1125bcc1b7366f753e6c81aa1f6",
+    "diagnostic_request_sha256": "ce19e33700dfd8e3593fae031c0726b9f5f4f1416eed833bece7f6731f655069",
+    "diagnostic_result_sha256": "ffe8cc596483877978656a2b09489490e7200a37183a5100bd90cbee3fda5e21",
+    "automation_log_sha256": "66140f646e162b22762f39e2e46724e0a1405cc1640e62daa49ecd429e67663a",
+    "architecture_checker_sha256": "a2c10ef70aa4908c23fc59fcb2bf405210f1dcfbfd29c23d027ee07132a214d5"
+  },
+  "verification": {
+    "editor_build_actions_succeeded": 52,
+    "editor_build_actions_total": 52,
+    "automation_tests_succeeded": 19,
+    "automation_tests_total": 19,
+    "diagnostic_correct_samples": 600,
+    "diagnostic_total_samples": 600,
+    "diagnostic_fallback_samples": 0,
+    "diagnostic_reject_samples": 0,
+    "formal_run_performed": false
+  },
+  "object_roundtrip": {
+    "d22_generated_s1_p50_ns": 37.8671875,
+    "d22_puerts_static_p50_ns": 36.28125,
+    "d22_generated_s1_p50_ratio_to_puerts_static": 1.04371231696813,
+    "d24_generated_s1_p50_ns": 38.5234375,
+    "d24_puerts_static_p50_ns": 36.216796875,
+    "d24_generated_s1_p50_ratio_to_puerts_static": 1.06368980208165,
+    "generated_absolute_delta_fraction": 0.0173303074066433,
+    "ratio_delta_points": 0.0199774851135173
+  },
+  "disposition": {
+    "retained": false,
+    "revert_commit": "c1c95367e961a084dd6c14d4f3f4874763d77e48",
+    "effective_runtime_baseline": "P65.D22",
+    "next_candidate": "remove_redundant_owner_type_check_only"
+  }
+}
