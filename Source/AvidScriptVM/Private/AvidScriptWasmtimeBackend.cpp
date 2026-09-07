@@ -194,47 +194,39 @@ public:
 		return Entry;
 	}
 
-	void Arm(const FAvidScriptWasmtimeEpochWatchdogEntryPtr& Entry)
+	FORCEINLINE void ArmRegistered(
+		FAvidScriptWasmtimeEpochWatchdogEntry& Entry)
 	{
-		if (!Entry.IsValid()
-			|| !Entry->Signal.IsValid()
-			|| Entry->Signal->Event == nullptr)
-		{
-			return;
-		}
 		if (bStopping.load(std::memory_order_acquire))
 		{
 			return;
 		}
 		const uint64 NowCycles = FPlatformTime::Cycles64();
 		uint64 DeadlineCycles =
-			MAX_uint64 - NowCycles < Entry->TimeoutCycles
+			MAX_uint64 - NowCycles < Entry.TimeoutCycles
 				? MAX_uint64
-				: NowCycles + Entry->TimeoutCycles;
+				: NowCycles + Entry.TimeoutCycles;
 		const uint64 PreviousDeadline =
-			Entry->DeadlineCycles.load(std::memory_order_relaxed);
+			Entry.DeadlineCycles.load(std::memory_order_relaxed);
 		if (DeadlineCycles == PreviousDeadline)
 		{
 			DeadlineCycles = DeadlineCycles == MAX_uint64
 				? MAX_uint64 - 1
 				: DeadlineCycles + 1;
 		}
-		Entry->DeadlineCycles.store(
+		Entry.DeadlineCycles.store(
 			DeadlineCycles,
 			std::memory_order_release);
 		if (TryPublishEarlierWake(DeadlineCycles))
 		{
-			Entry->Signal->Event->Trigger();
+			Entry.Signal->Event->Trigger();
 		}
 	}
 
-	void Disarm(const FAvidScriptWasmtimeEpochWatchdogEntryPtr& Entry)
+	FORCEINLINE void DisarmRegistered(
+		FAvidScriptWasmtimeEpochWatchdogEntry& Entry)
 	{
-		if (!Entry.IsValid())
-		{
-			return;
-		}
-		Entry->DeadlineCycles.store(0, std::memory_order_release);
+		Entry.DeadlineCycles.store(0, std::memory_order_release);
 	}
 
 	void Unregister(FAvidScriptWasmtimeEpochWatchdogEntryPtr& Entry)
@@ -809,8 +801,9 @@ public:
 		}
 		if (ExecutionBudget.EpochTimeoutMilliseconds > 0)
 		{
+			EpochWatchdog = &FAvidScriptWasmtimeEpochWatchdog::Get();
 			EpochWatchdogEntry =
-				FAvidScriptWasmtimeEpochWatchdog::Get().Register(
+				EpochWatchdog->Register(
 					Engine,
 					ExecutionBudget.EpochTimeoutMilliseconds);
 			if (!EpochWatchdogEntry.IsValid())
@@ -822,6 +815,7 @@ public:
 				PerformUnload();
 				return false;
 			}
+			EpochWatchdogEntryRaw = EpochWatchdogEntry.Get();
 		}
 		if (ExecutionBudget.MaxLinearMemoryBytes > 0
 			&& !avidscript_wasmtime_store_set_limits(
@@ -873,13 +867,19 @@ public:
 			return false;
 		}
 
-		FAvidScriptWasmtimeEpochWatchdog::Get().Arm(EpochWatchdogEntry);
+		if (EpochWatchdogEntryRaw != nullptr)
+		{
+			EpochWatchdog->ArmRegistered(*EpochWatchdogEntryRaw);
+		}
 		AvidScriptWasmtimeFailure* InstantiateFailure = avidscript_wasmtime_linker_instantiate(
 			Linker,
 			Store,
 			Module,
 			&Instance);
-		FAvidScriptWasmtimeEpochWatchdog::Get().Disarm(EpochWatchdogEntry);
+		if (EpochWatchdogEntryRaw != nullptr)
+		{
+			EpochWatchdog->DisarmRegistered(*EpochWatchdogEntryRaw);
+		}
 		LoadMetrics.ModuleInstantiateMs = MeasureWasmtimeElapsedMs(InstantiateStart);
 		if (InstantiateFailure != nullptr || Instance == nullptr)
 		{
@@ -2260,11 +2260,11 @@ private:
 			return false;
 		}
 
-		const bool bArmWatchdog = ActiveCallDepth == 0;
+		const bool bArmWatchdog =
+			ActiveCallDepth == 0 && EpochWatchdogEntryRaw != nullptr;
 		if (bArmWatchdog)
 		{
-			FAvidScriptWasmtimeEpochWatchdog::Get().Arm(
-				EpochWatchdogEntry);
+			EpochWatchdog->ArmRegistered(*EpochWatchdogEntryRaw);
 		}
 		++ActiveCallDepth;
 		int32 Result = 0;
@@ -2279,8 +2279,7 @@ private:
 				&CallFailure);
 		if (bArmWatchdog)
 		{
-			FAvidScriptWasmtimeEpochWatchdog::Get().Disarm(
-				EpochWatchdogEntry);
+			EpochWatchdog->DisarmRegistered(*EpochWatchdogEntryRaw);
 		}
 		const uint32 ResultCell = static_cast<uint32>(Result);
 		return CompleteResolvedExportCall(
@@ -2306,11 +2305,11 @@ private:
 			return false;
 		}
 
-		const bool bArmWatchdog = ActiveCallDepth == 0;
+		const bool bArmWatchdog =
+			ActiveCallDepth == 0 && EpochWatchdogEntryRaw != nullptr;
 		if (bArmWatchdog)
 		{
-			FAvidScriptWasmtimeEpochWatchdog::Get().Arm(
-				EpochWatchdogEntry);
+			EpochWatchdog->ArmRegistered(*EpochWatchdogEntryRaw);
 		}
 		++ActiveCallDepth;
 		float Second = 0.0f;
@@ -2325,8 +2324,7 @@ private:
 				&CallFailure);
 		if (bArmWatchdog)
 		{
-			FAvidScriptWasmtimeEpochWatchdog::Get().Disarm(
-				EpochWatchdogEntry);
+			EpochWatchdog->DisarmRegistered(*EpochWatchdogEntryRaw);
 		}
 		return CompleteResolvedExportCall(
 			Entry,
@@ -2344,11 +2342,11 @@ private:
 		FAvidScriptVmError& OutError,
 		FAvidScriptVmCallResult* OutResult)
 	{
-		const bool bArmWatchdog = ActiveCallDepth == 0;
+		const bool bArmWatchdog =
+			ActiveCallDepth == 0 && EpochWatchdogEntryRaw != nullptr;
 		if (bArmWatchdog)
 		{
-			FAvidScriptWasmtimeEpochWatchdog::Get().Arm(
-				EpochWatchdogEntry);
+			EpochWatchdog->ArmRegistered(*EpochWatchdogEntryRaw);
 		}
 		++ActiveCallDepth;
 		uint32 ResultCells[FAvidScriptVmCallResult::MaxCells] = {};
@@ -2365,8 +2363,7 @@ private:
 				&CallFailure);
 		if (bArmWatchdog)
 		{
-			FAvidScriptWasmtimeEpochWatchdog::Get().Disarm(
-				EpochWatchdogEntry);
+			EpochWatchdog->DisarmRegistered(*EpochWatchdogEntryRaw);
 		}
 		return CompleteResolvedExportCall(
 			Entry,
@@ -3872,8 +3869,12 @@ private:
 	void PerformUnload()
 	{
 #if AVIDSCRIPT_WITH_WASMTIME
-		FAvidScriptWasmtimeEpochWatchdog::Get().Unregister(
-			EpochWatchdogEntry);
+		EpochWatchdogEntryRaw = nullptr;
+		if (EpochWatchdog != nullptr)
+		{
+			EpochWatchdog->Unregister(EpochWatchdogEntry);
+			EpochWatchdog = nullptr;
+		}
 		for (const TSharedPtr<FAvidScriptWasmtimeExportEntry>& Entry : ExportEntries)
 		{
 			if (Entry->Function != nullptr)
@@ -3965,7 +3966,9 @@ private:
 
 #if AVIDSCRIPT_WITH_WASMTIME
 	AvidScriptWasmtimeEngine* Engine = nullptr;
+	FAvidScriptWasmtimeEpochWatchdog* EpochWatchdog = nullptr;
 	FAvidScriptWasmtimeEpochWatchdogEntryPtr EpochWatchdogEntry;
+	FAvidScriptWasmtimeEpochWatchdogEntry* EpochWatchdogEntryRaw = nullptr;
 	AvidScriptWasmtimeStore* Store = nullptr;
 	AvidScriptWasmtimeLinker* Linker = nullptr;
 	AvidScriptWasmtimeModule* Module = nullptr;
