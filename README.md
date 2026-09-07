@@ -111,6 +111,7 @@ Wasmtime 45 Cranelift JIT 对冻结版本的 Puerts V8，同机 5 个进程、�
 - **纯执行：** 当前 P65.D9 正式 12-kernel 相同 WASM 对照的 P50/P95 几何均值为 **`1.1065x / 1.1293x`**，P50/P95 胜率为 **`58.3% / 33.3%`**，仍未达到 `<= 0.95x` 与 `>= 60%` 目标；不是 C# 对 JavaScript 的完整游戏比较。见[D9 报告](Docs/Phase65/P65.D9_Demand_Driven_Fuel_Profile.md)。
 - **最新 UE crossing：** P65.D10 将通用 `int32 -> int32` generated S1 降至 **`18.17 ns`**，相对 Puerts static 为 **`0.829x`**；十项 micro P50 几何均值已从 `1.440x` 改善到 `1.004x`，但仍未形成全面领先。见[D10 报告](Docs/Phase65/P65.D10_Generated_Unary_I32_Performance.md)。
 - **最新 generated typed 路径：** FVector ref/out 已达到 `103.64 ns`（Puerts static 的 `0.144x`）；P65.D13 又将 UObject roundtrip 从 `147.73 ns` 降至 **`51.88 ns`**，已领先 Puerts reflection，但仍是 Puerts static 的 `1.139x`。十项 UE micro 的 P50/P95 几何均值为 **`0.779x / 0.786x`**。见[D11](Docs/Phase65/P65.D11_Generated_Vector_RefOut_Performance.md)与[D13](Docs/Phase65/P65.D13_Packed_Object_Roundtrip_Performance.md)。
+- **最新 callback：** P65.D14 取消顶层 Guest entry 的 watchdog 全局锁后，generated callback_empty/tick 降至 **`144.83 ns / 206.88 ns`**，较 D13 改善 `8.6% / 7.1%`；十项聚合为 **`0.766x / 0.765x`**，但 callback 单项仍是 Puerts static 的 `1.270x / 1.552x`。见[D14 报告](Docs/Phase65/P65.D14_Lock_Free_Epoch_Watchdog_Arm.md)。
 - **比较边界：** 尚无同口径 UnLua/AngelScript 排行榜；不宣称全场景领先。其他数据见[容器](Docs/Phase57/P57.11D_Compiler_Managed_Array_Region.md)、[UE 原生对照](Docs/Phase60/P60.D_Performance_And_Gate.md)与[增量构建](Docs/Phase61/P61.E_Integration_Gate.md)。
 
 ## 快速开始
@@ -222,6 +223,12 @@ P50/P95 几何均值为 **`0.779x / 0.786x`**、胜项 `6/10`。callback、pure 
 与 AngelScript 同语义矩阵仍未全部关闭，P65-D03 保持未验证。详见
 [P65.D11](Docs/Phase65/P65.D11_Generated_Vector_RefOut_Performance.md)与
 [P65.D13](Docs/Phase65/P65.D13_Packed_Object_Roundtrip_Performance.md)。
+
+P65.D14 将共享 epoch watchdog 的 `Arm` 改为 deadline release-store 与 CAS-min，顶层 Guest entry
+不再获取全局锁；wake signal 由 entry 共享持有，关停无需给每次调用增加引用计数。正式 5 进程结果中，
+generated callback_empty/tick 分别改善到 **`144.83 ns / 206.88 ns`**，十项聚合达到
+**`0.766x / 0.765x`**。callback 单项仍未领先 Puerts static，P65-D03 不关闭。详见
+[P65.D14 Lock-Free Epoch Watchdog](Docs/Phase65/P65.D14_Lock_Free_Epoch_Watchdog_Arm.md)。
 
 ## 验证
 

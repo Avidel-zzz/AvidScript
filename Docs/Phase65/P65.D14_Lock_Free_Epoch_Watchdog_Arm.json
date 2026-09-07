@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "phase": "P65.D14",
+  "evidence_class": "formal",
+  "runtime_evidence": {
+    "commit": "4d210ea3a2cba2ea18e2319da5008efadcdd2042",
+    "tree": "f58e80cc8b6b5624f19eda1bb1fe43c353cd1111",
+    "candidate_id": "461fb9db382261151ab8",
+    "candidate_manifest_sha256": "be81e9cac32fc2fef2b373ba502ef4d42537ef972c2c87d841e3b83693f09d30",
+    "packaged_host_manifest_sha256": "090cab5caa25d6bed1059d0610801b614483baf841136584c926b0e5cc8d9d83",
+    "archive_content_sha256": "333af9afc80ea8b578ee003b8e3bb2d6cf3fc6337dcc8e41d04c888b120644b7",
+    "archive_file_count": 50,
+    "launcher_sha256": "15dedb74256d4daaa117f718719ebd797c0a7bf442ac444420cbc0322da2620f",
+    "runtime_executable_sha256": "cdbaa2be205217639f7737f1e3e65fbd137344c7a95447cbeef50c18ed8f88d1",
+    "uat_log_sha256": "a5cc470f3899abd888caa8477d599bc072b2de6902a25418dead3d2722db4555",
+    "pak_sha256": "d355e9161b7a4528c287f51883ec404518f12c83abdaa4fa878c7c46f7e1bb3b",
+    "architecture_checker_sha256": "a2c10ef70aa4908c23fc59fcb2bf405210f1dcfbfd29c23d027ee07132a214d5"
+  },
+  "competitor": {
+    "name": "Puerts V8",
+    "commit": "1977328c84661024be10a9e73640a74b278a7659"
+  },
+  "profile": {
+    "id": "phase65.verified-package-micro-formal-v1",
+    "sha256": "1f10ef3d34d8784789a2d2594ec1fe7704268305b0eae356aec398263dba15ba",
+    "process_runs": 5,
+    "warmup_samples": 5,
+    "timed_samples": 30,
+    "correct_samples": 9000,
+    "total_samples": 9000,
+    "fallback_samples": 0,
+    "execution_host": "packaged_game"
+  },
+  "callback_empty": {
+    "adaptive_semantic_p50_ns": 142.775,
+    "adaptive_semantic_p95_ns": 151.7515625,
+    "data_oriented_p50_ns": 142.69375,
+    "data_oriented_p95_ns": 151.5,
+    "generated_s1_p50_ns": 144.83125,
+    "generated_s1_p95_ns": 151.6921875,
+    "puerts_reflection_p50_ns": 115.0734375,
+    "puerts_reflection_p95_ns": 120.625,
+    "puerts_static_p50_ns": 114.028125,
+    "puerts_static_p95_ns": 119.1359375,
+    "generated_s1_p50_ratio_to_puerts_static": 1.270136205431774,
+    "generated_s1_p95_ratio_to_puerts_static": 1.2732697679908718,
+    "generated_s1_improvement_from_d13_percent": 8.638227408926035
+  },
+  "callback_tick": {
+    "adaptive_semantic_p50_ns": 205.596875,
+    "adaptive_semantic_p95_ns": 214.6875,
+    "data_oriented_p50_ns": 207.5,
+    "data_oriented_p95_ns": 216.796875,
+    "generated_s1_p50_ns": 206.884375,
+    "generated_s1_p95_ns": 217.4,
+    "puerts_reflection_p50_ns": 133.6921875,
+    "puerts_reflection_p95_ns": 137.2453125,
+    "puerts_static_p50_ns": 133.309375,
+    "puerts_static_p95_ns": 137.0859375,
+    "generated_s1_p50_ratio_to_puerts_static": 1.551911671628496,
+    "generated_s1_p95_ratio_to_puerts_static": 1.5858665298911496,
+    "generated_s1_improvement_from_d13_percent": 7.0587244317782964
+  },
+  "ten_workload_summary": {
+    "generated_s1_p50_geometric_mean_ratio": 0.7662549740902441,
+    "generated_s1_p95_geometric_mean_ratio": 0.7647737930805858,
+    "generated_s1_p50_wins": 6,
+    "generated_s1_p95_wins": 6,
+    "data_oriented_p50_geometric_mean_ratio": 0.7667791622494328,
+    "data_oriented_p95_geometric_mean_ratio": 0.7695144876084498,
+    "data_oriented_p50_wins": 6,
+    "data_oriented_p95_wins": 6,
+    "maximum_non_callback_generated_p50_regression_percent": 2.496866438166223,
+    "maximum_non_callback_generated_p95_regression_percent": 2.224086839226347,
+    "workload_count": 10,
+    "controlled_leadership_claim_ready": false
+  },
+  "raw_result_sha256": [
+    "9ebad17c6c9fe29e234dff46de9783bf1321f96d917207fca04b613243b8d512",
+    "4fe7cf8265b4f3b4bb6f952fd9147f73552fc16d66f762e8eac20bc47cee8364",
+    "685890902c8c8f207fdd3ee71932334f0d6f856a3eba1469b35e53219321711e",
+    "32f3c3bddbae1d37919588ee764d7b594896ba6f16c26d334e6848fc5fa27793",
+    "0ce58858c5276317e3334c4580dedb109be0c2e209dda8219514b05392df9e61"
+  ],
+  "open_debt": [
+    "P65-D01-AndroidDevice",
+    "P65-D02-ManualReleaseAcceptance",
+    "P65-D03-ControlledLeadership",
+    "P65-D04-PublicBinaryPrivacy",
+    "angelscript_same_semantics"
+  ]
+}
