@@ -226,6 +226,9 @@ Assert-True ($invokeText.Contains('[string]$PackagedGameExecutable') -and
     $invokeText.Contains('[int]$PackagedGameTimeoutSeconds = 300') -and
     $invokeText.Contains('$hostProcess.Kill($true)') -and
     $invokeText.Contains('"-abslog=$hostLogPath"') -and
+    $invokeText.Contains('"-UserDir=$userDirectory"') -and
+    $invokeText.Contains('$postRunEvidence = Assert-Phase65PackagedFormalHost') -and
+    $invokeText.Contains('packaged archive identity changed during the formal benchmark') -and
     $invokeText.Contains("'-AvidScriptSuppressGeneratedTypeExecution'") -and
     $invokeText.Contains("execution_host -NotePropertyValue")) `
     '发布包 benchmark 必须通过有界 monolithic Game host 启动，并冻结候选、Archive、Pak 与实际执行载体。'

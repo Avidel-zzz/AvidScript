@@ -517,6 +517,8 @@ function Invoke-ProcessRequest {
     Write-NewJsonFile -Value $Request -Path $RequestPath
     if ($usePackagedGame) {
         $hostLogPath = "$ResultPath.host.log"
+        $userDirectory = "$ResultPath.user"
+        New-Item -ItemType Directory -Path $userDirectory | Out-Null
         $startInfo = [Diagnostics.ProcessStartInfo]::new()
         $startInfo.FileName = $resolvedHostExecutable
         $startInfo.WorkingDirectory = Split-Path -Parent $resolvedHostExecutable
@@ -530,6 +532,7 @@ function Invoke-ProcessRequest {
             '-nosplash',
             '-nosound',
             '-AvidScriptSuppressGeneratedTypeExecution',
+            "-UserDir=$userDirectory",
             "-abslog=$hostLogPath",
             "-AvidScriptPerfRequest=$RequestPath",
             "-AvidScriptPerfResult=$ResultPath",
@@ -780,6 +783,19 @@ for ($processRun = 0; $processRun -lt [int]$profile.process_runs; ++$processRun)
         -Request $request `
         -RequestPath $requestPath `
         -ResultPath $resultPath
+}
+
+if ($null -ne $packagedFormalEvidence) {
+    $postRunEvidence = Assert-Phase65PackagedFormalHost `
+        -HostManifestPath $PackagedHostManifestPath `
+        -CandidateManifestPath $CandidateManifestPath `
+        -PackagedGameExecutable $resolvedHostExecutable `
+        -RuntimeExecutable $resolvedHostIdentityExecutable `
+        -ProjectPath $resolvedProject
+    if ([string]$postRunEvidence.archive_content_sha256 -cne
+        [string]$packagedFormalEvidence.archive_content_sha256) {
+        throw 'Phase65 packaged archive identity changed during the formal benchmark.'
+    }
 }
 
 [pscustomobject]@{

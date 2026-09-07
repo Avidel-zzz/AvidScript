@@ -29,7 +29,7 @@
       "summary": "一个 shell 调用只承担一个逻辑动作或证据域。",
       "prevention": "调度前拒绝用分号、&& 或 || 串联独立动作；多文件读取使用并行工具或逐项调用。",
       "source": "legacy:1672",
-      "last_observed": "2026-09-05 P64.D (恢复后把 git status 与独立 rg 检索用分号串在同一调用；无文件副作用，已恢复为一次调用一个证据域)"
+      "last_observed": "2026-09-07 P65.D10 (把 gameplay contract 与 lessons JSON 解析放进同一 shell 调用；无文件副作用，后续恢复为每个验证域独立调用)"
     },
     {
       "id": "callback-kind-validation-uses-named-branches",
@@ -776,6 +776,14 @@
       "prevention": "非资产脚本通过 Build.cs RuntimeDependencies 以 UFS 明确发布；运行时对具体文件使用 FFileHelper/IPlatformFile 读取并校验哈希，不用 `FPaths::DirectoryExists` 判断虚拟目录。发布 benchmark workload 与受锁定 Puerts 的 runtime bootstrap 子目录，不携带 PuertsEditor、ffi 或测试资源。",
       "source": "Benchmarks/PuertsComparison/AvidScriptPerfHarness/Source/AvidScriptPerfHarness/Private/AvidScriptPerfRunner.cpp",
       "last_observed": "2026-09-07 P65.D10 package diagnostic 通过 runtime identity 后，在物理 Plugin Content 目录检查处拒绝 Pak 内脚本"
+    },
+    {
+      "id": "packaged-benchmark-host-must-remain-immutable",
+      "tags": ["unreal", "packaging", "benchmark", "provenance"],
+      "summary": "Packaged Game 即使使用外部 abslog，仍可能默认向 archive 内的 Saved/Config 写入运行时状态。",
+      "prevention": "每个基准进程使用证据目录下的独立 `-UserDir`；正式运行在首个进程前和全部进程后分别复验 host manifest、archive digest 与 Pak identity。诊断和正式矩阵不要共享未重定向的可写 package。",
+      "source": "Benchmarks/PuertsComparison/AvidScriptPerfHarness/Tools/Invoke-Phase54GameplayBenchmark.ps1",
+      "last_observed": "2026-09-07 P65.D10 先运行 diagnostic 后，CrashReportClient 配置写入 archive，正式 host 摘要复验按设计失败"
     }
   ]
 }
