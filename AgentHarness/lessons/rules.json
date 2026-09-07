@@ -21,7 +21,7 @@
       "summary": "概念名称不能当作真实文件路径。",
       "prevention": "先用 rg --files 建立索引，再对索引中的字面路径读取；通配符只放在 rg -g 参数，所有 -g 选项必须位于 -- 终止符之前。",
       "source": "legacy:1931",
-      "last_observed": "2026-09-08 P65.D23 再次把 P65.D*.json/md 作为 Windows 字面路径传给 rg 并只读失败；改为目录参数配合 -g 后成功。此前 P65.D9 已发生无效通配路径与概念路径猜测"
+      "last_observed": "2026-09-08 P65.D26 凭类型名猜测 CSharpGuestDebugTagger 位于 Lowering，未先从索引确认其真实 Diagnostics 路径，导致只读失败；随后使用 rg 返回的精确路径成功。此前 P65.D23/P65.D9 已发生同类路径猜测"
     },
     {
       "id": "one-command-one-evidence-domain",
@@ -119,9 +119,9 @@
       "id": "search-output-is-scoped-before-execution",
       "tags": ["rg", "search", "context"],
       "summary": "跨模块宽检索会产生截断输出，既浪费上下文也可能掩盖真正残留引用。",
-      "prevention": "先按文件或模块冻结检索范围，优先 rg -F 和精确标识符；预估命中较多时分文件检查或限制输出，禁止一次倾倒整个仓库。",
+      "prevention": "先按文件或模块冻结检索范围，优先 rg -F 和精确标识符；必须使用正则时先以单文件简单表达式验证 shell 转义。预估命中较多时分文件检查或限制输出，禁止一次倾倒整个仓库。",
       "source": "observed:2026-08-31-P60.B1",
-      "last_observed": "2026-08-31 P60.B1 (一次 multicast 分类宽检索输出被截断，随后改为逐文件固定字符串审查)"
+      "last_observed": "2026-09-08 P65.D26 在 PowerShell 参数中提交含引号分组的 rg 表达式，转义后成为未闭合正则；改用 rg -F 的单一模式和定点源码读取。此前 P60.B1 还发生过宽检索截断"
     },
     {
       "id": "structured-artifacts-use-parsers",
