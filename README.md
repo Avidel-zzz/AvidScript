@@ -111,7 +111,7 @@ Wasmtime 45 Cranelift JIT 对冻结版本的 Puerts V8，同机 5 个进程、�
 - **纯执行：** 当前 P65.D9 正式 12-kernel 相同 WASM 对照的 P50/P95 几何均值为 **`1.1065x / 1.1293x`**，P50/P95 胜率为 **`58.3% / 33.3%`**，仍未达到 `<= 0.95x` 与 `>= 60%` 目标；不是 C# 对 JavaScript 的完整游戏比较。见[D9 报告](Docs/Phase65/P65.D9_Demand_Driven_Fuel_Profile.md)。
 - **最新 UE crossing：** P65.D10 将通用 `int32 -> int32` generated S1 降至 **`18.17 ns`**，相对 Puerts static 为 **`0.829x`**；十项 micro P50 几何均值已从 `1.440x` 改善到 `1.004x`，但仍未形成全面领先。见[D10 报告](Docs/Phase65/P65.D10_Generated_Unary_I32_Performance.md)。
 - **最新 generated typed 路径：** FVector ref/out 已达到 `103.64 ns`（Puerts static 的 `0.144x`）；P65.D13 又将 UObject roundtrip 从 `147.73 ns` 降至 **`51.88 ns`**，已领先 Puerts reflection，但仍是 Puerts static 的 `1.139x`。十项 UE micro 的 P50/P95 几何均值为 **`0.779x / 0.786x`**。见[D11](Docs/Phase65/P65.D11_Generated_Vector_RefOut_Performance.md)与[D13](Docs/Phase65/P65.D13_Packed_Object_Roundtrip_Performance.md)。
-- **最新 callback：** P65.D21 将成功注册后的 epoch watchdog 不变量固化为热路径；正式 generated callback_empty/tick 为 **`108.08 ns / 111.04 ns`**，同轮为 Puerts static 的 `1.032x / 0.948x`，十项 P50/P95 几何均值为 `0.669x / 0.667x`。Tick 已领先，empty 仍慢约 `3.2%`。见[D21 报告](Docs/Phase65/P65.D21_Registered_Epoch_Watchdog_Fast_Path.md)。
+- **最新 callback：** P65.D22 将解析期 Wasmtime context 绑定到 prepared function；正式 generated callback_empty/tick 为 **`103.67 ns / 108.31 ns`**，同轮为 Puerts static 的 `1.001x / 0.947x`，十项 P50/P95 几何均值为 `0.665x / 0.655x`。Tick 已领先，empty P50 仅差约 `0.11%`。见[D22 报告](Docs/Phase65/P65.D22_Bound_Wasmtime_Context_Fast_Path.md)。
 - **比较边界：** 尚无同口径 UnLua/AngelScript 排行榜；不宣称全场景领先。其他数据见[容器](Docs/Phase57/P57.11D_Compiler_Managed_Array_Region.md)、[UE 原生对照](Docs/Phase60/P60.D_Performance_And_Gate.md)与[增量构建](Docs/Phase61/P61.E_Integration_Gate.md)。
 
 ## 快速开始
@@ -224,11 +224,12 @@ P50/P95 几何均值为 **`0.779x / 0.786x`**、胜项 `6/10`。callback、pure 
 [P65.D11](Docs/Phase65/P65.D11_Generated_Vector_RefOut_Performance.md)与
 [P65.D13](Docs/Phase65/P65.D13_Packed_Object_Roundtrip_Performance.md)。
 
-P65.D21 已让 Wasmtime prepared export 直接使用注册期冻结的 watchdog/entry 地址，保留 epoch timeout、
-shutdown 与卸载合同。最新正式 5 进程的 generated callback_empty/tick 为 **`108.08 ns / 111.04 ns`**，
-同轮 P50/P95 比率分别为 `1.032x / 1.040x` 与 **`0.948x / 0.959x`**；十项几何均值为
-**`0.669x / 0.667x`**、胜项 `7/10`。Tick 已领先，但 empty、pure integer 和部分 object 路径仍未全部关闭，
-P65-D03 保持未验证。详见 [P65.D21](Docs/Phase65/P65.D21_Registered_Epoch_Watchdog_Fast_Path.md)。
+P65.D22 已让 specialized prepared wrapper 直接使用 export 解析期绑定的 Wasmtime context，保留 epoch
+timeout、trap、reload lifetime 与卸载合同。最新正式 5 进程的 generated callback_empty/tick 为
+**`103.67 ns / 108.31 ns`**，同轮 P50/P95 比率分别为 `1.001x / 1.009x` 与
+**`0.947x / 0.960x`**；十项几何均值为 **`0.665x / 0.655x`**、胜项 `7/10`。empty 已接近持平，
+但 pure integer、object roundtrip 和 AngelScript 同语义矩阵仍未全部关闭，P65-D03 保持未验证。
+详见 [P65.D22](Docs/Phase65/P65.D22_Bound_Wasmtime_Context_Fast_Path.md)。
 
 ## 验证
 
