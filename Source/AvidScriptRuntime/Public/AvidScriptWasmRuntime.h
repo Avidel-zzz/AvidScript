@@ -705,14 +705,10 @@ private:
 		int64 PackedSelf,
 		int64 PackedObject,
 		int64& OutPackedObject);
-	FORCEINLINE EAvidScriptVmTypedHostStatus
-	DispatchPreparedObjectRoundtripCore(
+	EAvidScriptVmTypedHostStatus DispatchPreparedObjectRoundtripCore(
 		FAvidScriptPreparedGeneratedHostCall& Call,
 		const FAvidScriptObjectHandle& ReceiverHandle,
 		const FAvidScriptObjectHandle& InputHandle,
-		FAvidScriptObjectHandle& OutHandle);
-	bool TryAcquirePreparedObjectRoundtripOutput(
-		UObject& OutputObject,
 		FAvidScriptObjectHandle& OutHandle);
 	bool TryResolveFusedCallbackReceiver(
 		int32 SelfSlot,
