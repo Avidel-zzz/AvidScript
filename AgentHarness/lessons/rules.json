@@ -728,7 +728,7 @@
       "summary": "恢复摘要中的脚本路径可能因目录重构或简写而漂移，不能直接作为可执行入口。",
       "prevention": "恢复后先用 `rg --files` 和精确 `-g` 模式从当前仓库索引解析脚本，再调用验证入口；摘要只用于确定意图和候选名称，不作为文件存在性的证据。",
       "source": "AgentHarness/policies/repository.md",
-      "last_observed": "2026-09-07 P65.D10 首次补充验证沿用摘要中的 Phase54 契约路径而失败；索引确认真实入口位于 AvidScriptPerfHarness/Tools"
+      "last_observed": "2026-09-08 P65.D22 再次直接采用恢复摘要中的 Phase54 benchmark 简写路径并只读失败；随即通过 rg --files 定位 AvidScriptPerfHarness/Tools。此前 P65.D10 已发生同类路径漂移"
     },
     {
       "id": "uproject-identity-is-not-directory-name",
