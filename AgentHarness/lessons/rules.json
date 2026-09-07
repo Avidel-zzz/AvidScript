@@ -103,8 +103,9 @@
       "id": "automation-template-is-fixed",
       "tags": ["ue", "automation", "logs"],
       "summary": "Automation 启动模板、唯一 abslog 和结果计数不能临场拼接。",
-      "prevention": "使用受控模板；同时核对完整测试数、失败数、队列结束、进程退出码和唯一日志。",
-      "source": "legacy:2076"
+      "prevention": "使用受控模板和全新的唯一 abslog；日志清理与 Editor 启动必须是独立操作，不得为了复用路径把删除命令和启动命令组合；同时核对完整测试数、失败数、队列结束、进程退出码和唯一日志。",
+      "source": "legacy:2076",
+      "last_observed": "2026-09-08 P65.D21 把旧日志删除与 Editor 启动组合后被命令策略在进程创建前拒绝；改用新的唯一 abslog 并单独启动后 20/20 Success"
     },
     {
       "id": "preserve-wait-session-id",
@@ -355,9 +356,9 @@
       "id": "phase-mutations-use-phase-workflow-entry",
       "tags": ["phase", "harness", "workflow", "cli"],
       "summary": "Harness bootstrap 输出的 next_action 是 PhaseWorkflow 子命令，不是 Harness 自身的 Command。",
-      "prevention": "bootstrap/context/verify/lesson-query/audit 调用 InvokeAgentHarness.ps1；batch-complete、freeze、gate 等状态 mutation 调用 InvokePhaseWorkflow.ps1，并在执行前核对入口 ValidateSet。",
+      "prevention": "bootstrap/context/verify/lesson-query/audit 调用 InvokeAgentHarness.ps1；batch-complete、freeze、gate 等状态 mutation 调用 InvokePhaseWorkflow.ps1。Command、Profile 和状态动作均先读取对应入口 ValidateSet，架构证据使用提交后的 detached clean candidate 与 CheckAvidScriptArchitecture.ps1。",
       "source": "observed:2026-08-31-P60.A2",
-      "last_observed": "2026-08-31 P60.A2 首次把 batch-complete 传给只支持五个只读命令的 Harness，ValidateSet 拒绝；改用 InvokePhaseWorkflow.ps1 后 revision 2 成功"
+      "last_observed": "2026-09-08 P65.D21 把不存在的 Architecture 值传给 Harness verify Profile，ValidateSet 在验证前拒绝；此前 P60.A2 也曾把状态 mutation 传给错误入口"
     },
     {
       "id": "architecture-allowlists-move-with-reviewed-surfaces",
@@ -365,7 +366,7 @@
       "summary": "严格架构 allowlist 若不随已审阅公共表面同步，会把历史能力长期误报为当前提交回归。",
       "prevention": "每个改变 static host、generated facade、registry 或 reviewed helper closure 的批次都在同批更新精确 multiset、注册输入和 canonical hash；架构 Gate 只在提交后的 detached clean candidate 运行，主工作树即使只有 protected dirty 也不得启动；再用上一基线对照区分历史漂移与新增违规。",
       "source": "observed:2026-08-31-P60.B1G",
-      "last_observed": "2026-09-07 P65.D9 在含 protected dirty 的主工作树提前运行架构 Gate，被 clean-tree evidence 合同拒绝；产品代码、增量构建与 14/14 Wasmtime Automation 均未失败"
+      "last_observed": "2026-09-08 P65.D21 再次在含 protected dirty 的主工作树启动 Gate，被 tree-bound evidence 拒绝；同一提交随后在 detached clean candidate 通过。此前 P65.D9 已发生同类复发"
     },
     {
       "id": "dotnet-shared-obj-test-runners-run-serially",
