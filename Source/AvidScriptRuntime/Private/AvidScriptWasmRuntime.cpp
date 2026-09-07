@@ -6707,14 +6707,13 @@ FAvidScriptWasmRuntimeInstance::DispatchPreparedPackedStableObjectRoundtrip(
 	return Status;
 }
 
-EAvidScriptVmTypedHostStatus
+FORCEINLINE EAvidScriptVmTypedHostStatus
 FAvidScriptWasmRuntimeInstance::DispatchPreparedObjectRoundtripCore(
 	FAvidScriptPreparedGeneratedHostCall& Call,
 	const FAvidScriptObjectHandle& ReceiverHandle,
 	const FAvidScriptObjectHandle& InputHandle,
 	FAvidScriptObjectHandle& OutHandle)
 {
-	OutHandle = FAvidScriptObjectHandle();
 	if (Call.ObjectRoundtripCall == nullptr)
 	{
 		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
@@ -6726,9 +6725,7 @@ FAvidScriptWasmRuntimeInstance::DispatchPreparedObjectRoundtripCore(
 		if (!TryResolveFusedCallbackReceiver(
 				static_cast<int32>(ReceiverHandle.Slot),
 				static_cast<int32>(ReceiverHandle.Generation),
-				Receiver)
-			|| (Call.Binding.ExpectedClass != nullptr
-				&& !Receiver->IsA(Call.Binding.ExpectedClass)))
+				Receiver))
 		{
 			return RecordGeneratedStatus(
 				EAvidScriptVmTypedHostStatus::Rejected);
@@ -6784,33 +6781,9 @@ FAvidScriptWasmRuntimeInstance::DispatchPreparedObjectRoundtripCore(
 	}
 	else if (OutputObject != nullptr)
 	{
-		if (HostContext.World.IsStale()
-			|| (HostContext.World.Get() != nullptr
-				&& OutputObject->GetWorld() != HostContext.World.Get())
-			|| HostContext.ObjectRegistry == nullptr)
-		{
-			return RecordGeneratedStatus(
-				EAvidScriptVmTypedHostStatus::Rejected);
-		}
-		FAvidScriptObjectHandleResult HandleResult;
-		if (HostContext.ObjectOwnership != nullptr)
-		{
-			if (HostContext.ObjectOwnership->Borrow(
-					*HostContext.ObjectRegistry,
-					*OutputObject,
-					HandleResult))
-			{
-				OutHandle = HandleResult.Handle;
-			}
-		}
-		else
-		{
-			OutHandle = HostContext.ObjectRegistry->AcquireBorrowedObject(
-				OutputObject,
-				HandleResult,
-				false);
-		}
-		if (!OutHandle.IsValid())
+		if (!TryAcquirePreparedObjectRoundtripOutput(
+				*OutputObject,
+				OutHandle))
 		{
 			return RecordGeneratedStatus(
 				EAvidScriptVmTypedHostStatus::Rejected);
@@ -6818,6 +6791,40 @@ FAvidScriptWasmRuntimeInstance::DispatchPreparedObjectRoundtripCore(
 	}
 
 	return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Succeeded);
+}
+
+bool FAvidScriptWasmRuntimeInstance::
+TryAcquirePreparedObjectRoundtripOutput(
+	UObject& OutputObject,
+	FAvidScriptObjectHandle& OutHandle)
+{
+	if (HostContext.World.IsStale()
+		|| (HostContext.World.Get() != nullptr
+			&& OutputObject.GetWorld() != HostContext.World.Get())
+		|| HostContext.ObjectRegistry == nullptr)
+	{
+		return false;
+	}
+
+	FAvidScriptObjectHandleResult HandleResult;
+	if (HostContext.ObjectOwnership != nullptr)
+	{
+		if (HostContext.ObjectOwnership->Borrow(
+				*HostContext.ObjectRegistry,
+				OutputObject,
+				HandleResult))
+		{
+			OutHandle = HandleResult.Handle;
+		}
+	}
+	else
+	{
+		OutHandle = HostContext.ObjectRegistry->AcquireBorrowedObject(
+			&OutputObject,
+			HandleResult,
+			false);
+	}
+	return OutHandle.IsValid();
 }
 
 bool FAvidScriptWasmRuntimeInstance::TryResolveFusedCallbackReceiver(
