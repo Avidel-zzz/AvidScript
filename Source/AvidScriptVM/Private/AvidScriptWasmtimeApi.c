@@ -788,6 +788,7 @@ int avidscript_wasmtime_instance_resolve_event_export(
 		return 4;
 	}
 	function->value = item.of.func;
+	function->context = store->context;
 	function->parameter_count = (uint32_t)parameters->size;
 	function->result_count = (uint32_t)results->size;
 	for (parameter_index = 0; parameter_index < parameters->size; ++parameter_index)
@@ -1230,7 +1231,6 @@ AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_event_prepared(
 }
 
 AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_i32_i32_to_i32_prepared_unchecked(
-	AvidScriptWasmtimeStore* store,
 	AvidScriptWasmtimeFunction* function,
 	int32_t first,
 	int32_t second,
@@ -1245,7 +1245,7 @@ AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_i32_i32_to_i32_pr
 	values[0].i32 = first;
 	values[1].i32 = second;
 	error = wasmtime_func_call_unchecked(
-		store->context,
+		function->context,
 		&function->value,
 		values,
 		2,
@@ -1260,7 +1260,6 @@ AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_i32_i32_to_i32_pr
 }
 
 AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_i32_f32_to_void_prepared_unchecked(
-	AvidScriptWasmtimeStore* store,
 	AvidScriptWasmtimeFunction* function,
 	int32_t first,
 	float second,
@@ -1274,7 +1273,7 @@ AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_i32_f32_to_void_p
 	values[0].i32 = first;
 	values[1].f32 = second;
 	error = wasmtime_func_call_unchecked(
-		store->context,
+		function->context,
 		&function->value,
 		values,
 		2,

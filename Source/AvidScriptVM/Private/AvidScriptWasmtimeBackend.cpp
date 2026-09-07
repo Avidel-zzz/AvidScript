@@ -2271,7 +2271,6 @@ private:
 		AvidScriptWasmtimeFailure* CallFailure = nullptr;
 		const AvidScriptWasmtimeCallStatus CallStatus =
 			avidscript_wasmtime_function_call_i32_i32_to_i32_prepared_unchecked(
-				Store,
 				Entry.Function,
 				static_cast<int32>(Frame.Cells[0]),
 				static_cast<int32>(Frame.Cells[1]),
@@ -2317,7 +2316,6 @@ private:
 		AvidScriptWasmtimeFailure* CallFailure = nullptr;
 		const AvidScriptWasmtimeCallStatus CallStatus =
 			avidscript_wasmtime_function_call_i32_f32_to_void_prepared_unchecked(
-				Store,
 				Entry.Function,
 				static_cast<int32>(Frame.Cells[0]),
 				Second,

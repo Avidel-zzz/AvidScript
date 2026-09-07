@@ -38,6 +38,7 @@ struct AvidScriptWasmtimeInstance
 struct AvidScriptWasmtimeFunction
 {
 	wasmtime_func_t value;
+	wasmtime_context_t* context;
 	uint32_t parameter_count;
 	uint32_t cell_count;
 	uint32_t result_count;

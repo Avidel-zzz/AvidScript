@@ -245,14 +245,12 @@ AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_event_prepared(
 	size_t* out_result_cell_count,
 	AvidScriptWasmtimeFailure** out_failure);
 AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_i32_i32_to_i32_prepared_unchecked(
-	AvidScriptWasmtimeStore* store,
 	AvidScriptWasmtimeFunction* function,
 	int32_t first,
 	int32_t second,
 	int32_t* out_result,
 	AvidScriptWasmtimeFailure** out_failure);
 AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_i32_f32_to_void_prepared_unchecked(
-	AvidScriptWasmtimeStore* store,
 	AvidScriptWasmtimeFunction* function,
 	int32_t first,
 	float second,
