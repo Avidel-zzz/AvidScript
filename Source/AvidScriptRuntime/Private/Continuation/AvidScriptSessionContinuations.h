@@ -116,6 +116,7 @@ public:
 	void Teardown();
 
 	void DrainReady(TArray<FAvidScriptContinuationCompletion>& OutCompletions);
+	bool NeedsTickPump() const;
 	bool FinalizeDispatched(int64 Token, bool bSucceeded);
 	int32 GetActiveCount() const;
 	int32 GetPreparedCount() const;

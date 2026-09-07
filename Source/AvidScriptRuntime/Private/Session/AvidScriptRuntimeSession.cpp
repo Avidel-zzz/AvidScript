@@ -885,6 +885,7 @@ bool FAvidScriptRuntimeSession::Tick(float DeltaSeconds, FAvidScriptWasmSmokeRes
 		return false;
 	}
 	bool bSucceeded = false;
+	bool bDebugExecutionSuspended = false;
 	{
 		TGuardValue<int32> GuestCallGuard(ActiveGuestCallDepth, ActiveGuestCallDepth + 1);
 #if WITH_DEV_AUTOMATION_TESTS
@@ -896,13 +897,22 @@ bool FAvidScriptRuntimeSession::Tick(float DeltaSeconds, FAvidScriptWasmSmokeRes
 		}
 #endif
 		bSucceeded = Scheduler->Tick(DeltaSeconds, OutResult);
-		if (bSucceeded && !IsDebugExecutionSuspended())
+		if (bSucceeded)
 		{
-			bSucceeded = PumpReadyContinuations(OutResult);
+			bDebugExecutionSuspended = IsDebugExecutionSuspended();
+			if (!bDebugExecutionSuspended && Continuations->NeedsTickPump())
+			{
+				bSucceeded = PumpReadyContinuations(OutResult);
+				if (bSucceeded)
+				{
+					bDebugExecutionSuspended = IsDebugExecutionSuspended();
+				}
+			}
 		}
 	}
 	const bool bCompleted = bSucceeded
-		&& (IsDebugExecutionSuspended()
+		&& (bDebugExecutionSuspended
+			|| !InboundHandlers->NeedsDeferredPump()
 			|| InboundHandlers->PumpDeferred(OutResult));
 	if (!bCompleted)
 	{
@@ -942,6 +952,7 @@ bool FAvidScriptRuntimeSession::TickLive(float DeltaSeconds, FAvidScriptWasmSmok
 		return false;
 	}
 	bool bSucceeded = false;
+	bool bDebugExecutionSuspended = false;
 	{
 		TGuardValue<int32> GuestCallGuard(
 			ActiveGuestCallDepth,
@@ -958,13 +969,22 @@ bool FAvidScriptRuntimeSession::TickLive(float DeltaSeconds, FAvidScriptWasmSmok
 			DeltaSeconds,
 			OutResult,
 			EAvidScriptWasmResultDetail::FailureOnly);
-		if (bSucceeded && !IsDebugExecutionSuspended())
+		if (bSucceeded)
 		{
-			bSucceeded = PumpReadyContinuations(OutResult);
+			bDebugExecutionSuspended = IsDebugExecutionSuspended();
+			if (!bDebugExecutionSuspended && Continuations->NeedsTickPump())
+			{
+				bSucceeded = PumpReadyContinuations(OutResult);
+				if (bSucceeded)
+				{
+					bDebugExecutionSuspended = IsDebugExecutionSuspended();
+				}
+			}
 		}
 	}
 	const bool bCompleted = bSucceeded
-		&& (IsDebugExecutionSuspended()
+		&& (bDebugExecutionSuspended
+			|| !InboundHandlers->NeedsDeferredPump()
 			|| InboundHandlers->PumpDeferred(OutResult));
 	if (!bCompleted)
 	{
@@ -992,6 +1012,7 @@ bool FAvidScriptRuntimeSession::TickHot(
 		return false;
 	}
 	bool bSucceeded = false;
+	bool bDebugExecutionSuspended = false;
 	{
 		TGuardValue<int32> GuestCallGuard(
 			ActiveGuestCallDepth,
@@ -1005,13 +1026,22 @@ bool FAvidScriptRuntimeSession::TickHot(
 		}
 #endif
 		bSucceeded = Scheduler->TickHot(DeltaSeconds, OutFailure);
-		if (bSucceeded && !IsDebugExecutionSuspended())
+		if (bSucceeded)
 		{
-			bSucceeded = PumpReadyContinuations(OutFailure);
+			bDebugExecutionSuspended = IsDebugExecutionSuspended();
+			if (!bDebugExecutionSuspended && Continuations->NeedsTickPump())
+			{
+				bSucceeded = PumpReadyContinuations(OutFailure);
+				if (bSucceeded)
+				{
+					bDebugExecutionSuspended = IsDebugExecutionSuspended();
+				}
+			}
 		}
 	}
 	const bool bCompleted = bSucceeded
-		&& (IsDebugExecutionSuspended()
+		&& (bDebugExecutionSuspended
+			|| !InboundHandlers->NeedsDeferredPump()
 			|| InboundHandlers->PumpDeferred(OutFailure));
 	if (!bCompleted)
 	{

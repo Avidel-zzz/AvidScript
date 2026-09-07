@@ -646,6 +646,11 @@ void FAvidScriptSessionContinuations::DrainReady(
 	}
 }
 
+bool FAvidScriptSessionContinuations::NeedsTickPump() const
+{
+	return ActiveEntryCount > 0 || !RetiredLatentProxies.IsEmpty();
+}
+
 bool FAvidScriptSessionContinuations::FinalizeDispatched(
 	const int64 Token,
 	const bool bSucceeded)

@@ -218,6 +218,12 @@ int32 FAvidScriptSessionInboundHandlers::NumDeferred() const
 	return Impl->Deferred.Num();
 }
 
+bool FAvidScriptSessionInboundHandlers::NeedsDeferredPump() const
+{
+	return !Impl->PendingFailureCategory.IsEmpty()
+		|| (Impl->bDispatchEnabled && !Impl->Deferred.IsEmpty());
+}
+
 EAvidScriptInboundFunctionDispatch
 FAvidScriptSessionInboundHandlers::HandleAvidScriptInboundFunction(
 	const uint32 HandlerOrdinal,

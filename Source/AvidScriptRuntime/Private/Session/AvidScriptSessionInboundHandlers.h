@@ -27,6 +27,7 @@ public:
 	void UnbindActive();
 	void SetDispatchEnabled(bool bEnabled);
 	bool PumpDeferred(FAvidScriptWasmSmokeResult& OutResult);
+	bool NeedsDeferredPump() const;
 	int32 NumActive() const;
 	int32 NumPrepared() const;
 	int32 NumDeferred() const;

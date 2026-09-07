@@ -1779,28 +1779,31 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 		return true;
 	}
 
-	FAvidScriptVmError TimerError;
-	if (!ExecuteDueTimerCallbacks(TimerError))
+	if (!DueTimerScratch.IsEmpty())
 	{
-		if (bHotFailureOnly)
+		FAvidScriptVmError TimerError;
+		if (!ExecuteDueTimerCallbacks(TimerError))
 		{
-			CaptureSnapshot(OutResult);
+			if (bHotFailureOnly)
+			{
+				CaptureSnapshot(OutResult);
+			}
+			SetFailureFromVmError(
+				OutResult,
+				ModuleId,
+				AvidScriptTimerExportName,
+				TimerError,
+				DebugMap.Get());
+			OutResult.ModuleId = ModuleId;
+			OutResult.BackendInfo = ActiveBackendInfo;
+			OutResult.Metrics = Metrics;
+			OutResult.bTickCalled = bHasGuestTick;
+			OutResult.TickCallCount = TickCallCount;
+			CopyObservableStateToResult(OutResult);
+			FAvidScriptLifecycleTransitionResult LifecycleResult;
+			LifecycleState.MarkFaulted(LifecycleResult);
+			return false;
 		}
-		SetFailureFromVmError(
-			OutResult,
-			ModuleId,
-			AvidScriptTimerExportName,
-			TimerError,
-			DebugMap.Get());
-		OutResult.ModuleId = ModuleId;
-		OutResult.BackendInfo = ActiveBackendInfo;
-		OutResult.Metrics = Metrics;
-		OutResult.bTickCalled = bHasGuestTick;
-		OutResult.TickCallCount = TickCallCount;
-		CopyObservableStateToResult(OutResult);
-		FAvidScriptLifecycleTransitionResult LifecycleResult;
-		LifecycleState.MarkFaulted(LifecycleResult);
-		return false;
 	}
 
 	if (!bHotFailureOnly)
@@ -5071,6 +5074,10 @@ void FAvidScriptWasmRuntimeInstance::CollectDueTimers(float DeltaSeconds)
 		? static_cast<double>(DeltaSeconds)
 		: 0.0;
 	TimerClockSeconds += SafeDeltaSeconds;
+	if (TimerHeap.IsEmpty())
+	{
+		return;
+	}
 
 	const FAvidScriptTimerDeadlineLess DeadlineLess;
 	while (!TimerHeap.IsEmpty() && TimerHeap[0].DueTimeSeconds <= TimerClockSeconds)
