@@ -825,6 +825,14 @@
       "prevention": "修改相邻 switch 或数组矩阵时，把函数名纳入 apply_patch 上下文；落盘后按函数边界读取 git diff，并在构建前运行对应合同测试，禁止只凭补丁成功消息判断命中位置。",
       "source": "Benchmarks/PuertsComparison/AvidScriptPerfHarness/Source/AvidScriptPerfHarness/Private/AvidScriptPerfRunner.cpp",
       "last_observed": "2026-09-07 P65.D11 首版 VectorRefOut oracle 补丁命中相邻 operation/adaptive 矩阵并产生重复 case，合同测试前的函数级复读完成修正，未进入提交或候选"
+    },
+    {
+      "id": "uat-success-requires-complete-archive",
+      "tags": ["ue", "uat", "packaging", "benchmark", "disk"],
+      "summary": "AutomationTool 可能在归档复制失败后仍返回成功并输出 BUILD SUCCESSFUL。",
+      "prevention": "发布 packaged evidence 前同时检查进程退出码、UAT 复制失败文本和最终容器闭包；每个 .utoc 必须存在同目录、同名且非空的 .ucas。性能宿主使用 -nodebuginfo，避免归档不参与运行的巨型 PDB。",
+      "source": "Benchmarks/PuertsComparison/Leadership/Scripts/New-Phase65PackagedBenchmarkHost.ps1",
+      "last_observed": "2026-09-08 P65.D21 磁盘空间不足使 UAT 无法复制 AvidTPSTemplate-Windows.ucas，但仍以 ExitCode=0 和 BUILD SUCCESSFUL 结束；旧 producer 发布了不可启动的 49 文件 host，首次 calibration 在 Pak 挂载前断言"
     }
   ]
 }
