@@ -759,7 +759,7 @@
       "summary": "PowerShell 变量名大小写不敏感，`$host` 会命中只读自动变量 `$Host`。",
       "prevention": "脚本局部状态使用带领域后缀的名称，如 HostManifest、ProcessHost 或 RuntimeHost；新增脚本的真实成功路径必须至少执行一次，解析器与静态 token 契约不能替代运行时自动变量检查。",
       "source": "Benchmarks/PuertsComparison/Leadership/Scripts/New-Phase65PackagedBenchmarkHost.ps1",
-      "last_observed": "2026-09-07 P65.D10 packaged host finalization 首次到达 JSON 生成路径时因 `$host` 只读而失败，改名为 HostManifest"
+      "last_observed": "2026-09-08 P65.D18 证据摘要命令再次将 `$host` 用作本地路径变量并命中只读自动变量；已改用 HostManifestPath，后续 PowerShell 命令同样必须遵守领域后缀命名"
     },
     {
       "id": "packaged-launcher-is-not-runtime-identity",
