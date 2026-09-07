@@ -538,9 +538,9 @@ bool InvokeVmExport(
 	const uint32* Args,
 	FAvidScriptVmError& OutError)
 {
-	OutError = FAvidScriptVmError();
 	if (Backend == nullptr)
 	{
+		OutError.Reset();
 		OutError.Category = TEXT("backend_unavailable");
 		OutError.Details = TEXT("No VM backend is attached to the runtime instance.");
 		return false;
@@ -548,6 +548,7 @@ bool InvokeVmExport(
 
 	if (ArgCount > FAvidScriptVmCallFrame::MaxCells)
 	{
+		OutError.Reset();
 		OutError.Category = TEXT("invalid_arguments");
 		OutError.Details = TEXT("The runtime call exceeds the VM fixed cell capacity.");
 		return false;

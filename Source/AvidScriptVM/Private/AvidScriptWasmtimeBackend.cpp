@@ -840,6 +840,10 @@ public:
 			PerformUnload();
 			return false;
 		}
+		bResetExecutionBudgetPerEntry =
+			ExecutionBudget.MaxHostCallsPerEntry > 0
+			|| (bFuelConsumptionEnabled && ExecutionBudget.FuelPerEntry > 0)
+			|| !ExecutionBudget.bEpochInterruptionIsTerminal;
 
 		const double InstantiateStart = FPlatformTime::Seconds();
 		Linker = avidscript_wasmtime_linker_new(Engine);
@@ -1251,7 +1255,8 @@ public:
 			SetWasmtimeError(OutError, TEXT("invalid_arguments"), TEXT("VM call frame does not match the cached export signature."));
 			return false;
 		}
-		if (!ResetExecutionBudget(OutError))
+		if (bResetExecutionBudgetPerEntry
+			&& !ResetExecutionBudget(OutError))
 		{
 			return false;
 		}
@@ -2181,7 +2186,10 @@ private:
 		{
 			return true;
 		}
-		CurrentHostCallCount = 0;
+		if (ExecutionBudget.MaxHostCallsPerEntry > 0)
+		{
+			CurrentHostCallCount = 0;
+		}
 		if (bFuelConsumptionEnabled
 			&& (!bFuelBudgetInitialized
 				|| ExecutionBudget.FuelPerEntry > 0))
@@ -2248,7 +2256,8 @@ private:
 				TEXT("The prepared Wasmtime export is no longer active."));
 			return false;
 		}
-		if (!ResetExecutionBudget(OutError))
+		if (bResetExecutionBudgetPerEntry
+			&& !ResetExecutionBudget(OutError))
 		{
 			return false;
 		}
@@ -2272,7 +2281,8 @@ private:
 				TEXT("The prepared Wasmtime export is no longer active."));
 			return false;
 		}
-		if (!ResetExecutionBudget(OutError))
+		if (bResetExecutionBudgetPerEntry
+			&& !ResetExecutionBudget(OutError))
 		{
 			return false;
 		}
@@ -2327,7 +2337,8 @@ private:
 				TEXT("The prepared Wasmtime export is no longer active."));
 			return false;
 		}
-		if (!ResetExecutionBudget(OutError))
+		if (bResetExecutionBudgetPerEntry
+			&& !ResetExecutionBudget(OutError))
 		{
 			return false;
 		}
@@ -2404,7 +2415,7 @@ private:
 			OutResult);
 	}
 
-	bool CompleteResolvedExportCall(
+	FORCEINLINE bool CompleteResolvedExportCall(
 		const FAvidScriptWasmtimeExportEntry& Entry,
 		const AvidScriptWasmtimeCallStatus CallStatus,
 		AvidScriptWasmtimeFailure* CallFailure,
@@ -2435,6 +2446,28 @@ private:
 			}
 			return true;
 		}
+		return CompleteResolvedExportCallSlow(
+			Entry,
+			CallStatus,
+			CallFailure,
+			ResultCells,
+			ResultCellCount,
+			OutError,
+			OutResult);
+	}
+
+	FORCENOINLINE bool CompleteResolvedExportCallSlow(
+		const FAvidScriptWasmtimeExportEntry& Entry,
+		const AvidScriptWasmtimeCallStatus CallStatus,
+		AvidScriptWasmtimeFailure* CallFailure,
+		const uint32* ResultCells,
+		const size_t ResultCellCount,
+		FAvidScriptVmError& OutError,
+		FAvidScriptVmCallResult* OutResult)
+	{
+		const bool bCallFailed =
+			CallStatus != AVIDSCRIPT_WASMTIME_CALL_SUCCESS;
+		const bool bUnloadRequestedDuringCall = bUnloadDeferred;
 		FString FailureDetails;
 		TArray<FAvidScriptVmStackFrame> StackFrames;
 		bool bWasTrap = false;
@@ -3939,6 +3972,7 @@ private:
 		bFuelConsumptionEnabled = true;
 		bFuelBudgetInitialized = false;
 		bEpochDeadlineInitialized = false;
+		bResetExecutionBudgetPerEntry = true;
 		bUnloadDeferred = false;
 	}
 
@@ -3964,6 +3998,7 @@ private:
 	bool bFuelConsumptionEnabled = true;
 	bool bFuelBudgetInitialized = false;
 	bool bEpochDeadlineInitialized = false;
+	bool bResetExecutionBudgetPerEntry = true;
 
 #if AVIDSCRIPT_WITH_WASMTIME
 	AvidScriptWasmtimeEngine* Engine = nullptr;
