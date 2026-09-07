@@ -71,6 +71,7 @@ struct FAvidScriptGeneratedBindingEntry
 	FAvidScriptGeneratedI32Call PreparedI32Call = nullptr;
 	FAvidScriptGeneratedVectorRefOutCall VectorRefOutCall = nullptr;
 	FAvidScriptGeneratedVectorRefOutCall PreparedVectorRefOutCall = nullptr;
+	FAvidScriptGeneratedObjectRoundtripCall PreparedObjectRoundtripCall = nullptr;
 };
 
 struct FAvidScriptGeneratedBindingPackageState;

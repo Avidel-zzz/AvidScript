@@ -205,6 +205,10 @@ bool FAvidScriptEditorGeneratedBindingDeterminismTest::RunTest(
 			&& SecondContents[2].Contains(
 				TEXT("TypedReceiver->GeneratedVectorRefOut(InOutValue, OutValue);"))
 			&& SecondContents[2].Contains(
+				TEXT("OutValue = TypedReceiver->GeneratedObject(InValue);"))
+			&& SecondContents[2].Contains(
+				TEXT("&InvokePreparedGenerated_0004"))
+			&& SecondContents[2].Contains(
 				TEXT("&InvokePreparedGenerated_0008"))
 			&& SecondContents[2].Contains(TEXT("static_cast<")));
 	TestFalse(

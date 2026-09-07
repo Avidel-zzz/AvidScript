@@ -407,6 +407,18 @@ FString RenderPreparedTypedCallSite(
 			*OwnerType,
 			*OwnerType,
 			*UeFunction);
+	case EAvidScriptGeneratedBindingShape::StableObjectRoundtrip:
+		return FString::Printf(
+			TEXT("static EAvidScriptVmTypedHostStatus %s(UObject& Receiver, UObject* InValue, UObject*& OutValue)\n")
+			TEXT("{\n")
+			TEXT("\t%s* TypedReceiver = static_cast<%s*>(&Receiver);\n")
+			TEXT("\tOutValue = TypedReceiver->%s(InValue);\n")
+			TEXT("\treturn EAvidScriptVmTypedHostStatus::Succeeded;\n")
+			TEXT("}\n\n"),
+			*FunctionName,
+			*OwnerType,
+			*OwnerType,
+			*UeFunction);
 	case EAvidScriptGeneratedBindingShape::PropertyI32Get:
 		return FString::Printf(
 			TEXT("static EAvidScriptVmTypedHostStatus %s(UObject& Receiver, int32& OutValue)\n")
@@ -525,8 +537,12 @@ FString RenderPrivateCpp(
 				== EAvidScriptGeneratedBindingShape::VectorRefOut
 			? PreparedCallSite
 			: FString(TEXT("nullptr"));
+		const FString PreparedStableObjectCall = Binding.Shape
+				== EAvidScriptGeneratedBindingShape::StableObjectRoundtrip
+			? PreparedCallSite
+			: FString(TEXT("nullptr"));
 		Result += FString::Printf(
-			TEXT("\t{ TEXT(\"%s\"), TEXT(\"%s\"), TEXT(\"%s\"), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s },\n"),
+			TEXT("\t{ TEXT(\"%s\"), TEXT(\"%s\"), TEXT(\"%s\"), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s },\n"),
 			*EscapeCppString(Binding.StableId),
 			*EscapeCppString(Package.PackageHash),
 			*EscapeCppString(Binding.DescriptorIdentity),
@@ -544,7 +560,8 @@ FString RenderPrivateCpp(
 			*I32Call,
 			*PreparedI32Call,
 			*VectorRefOutCall,
-			*PreparedVectorRefOutCall);
+			*PreparedVectorRefOutCall,
+			*PreparedStableObjectCall);
 	}
 	Result += TEXT("};\n} // namespace\n\n");
 	Result +=

@@ -27,7 +27,9 @@ bool IsAvidScriptGeneratedCallSiteValid(
 		|| (Entry.PreparedPropertyI32SetCall != nullptr
 			&& Entry.PropertyI32SetCall == nullptr)
 		|| (Entry.PreparedVectorRefOutCall != nullptr
-			&& Entry.VectorRefOutCall == nullptr))
+			&& Entry.VectorRefOutCall == nullptr)
+		|| (Entry.PreparedObjectRoundtripCall != nullptr
+			&& Entry.ObjectRoundtripCall == nullptr))
 	{
 		return false;
 	}
@@ -78,7 +80,8 @@ bool IsAvidScriptGeneratedCallSiteValid(
 			&& Entry.PreparedI32Call == nullptr
 			&& Entry.PreparedI32PairCall == nullptr
 			&& Entry.PreparedPropertyI32GetCall == nullptr
-			&& Entry.PreparedPropertyI32SetCall == nullptr;
+			&& Entry.PreparedPropertyI32SetCall == nullptr
+			&& Entry.PreparedVectorRefOutCall == nullptr;
 	default:
 		return false;
 	}

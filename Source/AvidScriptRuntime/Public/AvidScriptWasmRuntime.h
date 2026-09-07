@@ -678,6 +678,22 @@ private:
 		int32 SelfGeneration,
 		int32 GuestAddress,
 		int32& OutValue);
+	static EAvidScriptVmTypedHostStatus InvokePreparedStableObjectRoundtrip(
+		void* Context,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 ObjectSlot,
+		int32 ObjectGeneration,
+		int32 GuestAddress,
+		int32& OutValue);
+	EAvidScriptVmTypedHostStatus DispatchPreparedStableObjectRoundtrip(
+		FAvidScriptPreparedGeneratedHostCall& Call,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 ObjectSlot,
+		int32 ObjectGeneration,
+		int32 GuestAddress,
+		int32& OutValue);
 	bool TryResolveFusedCallbackReceiver(
 		int32 SelfSlot,
 		int32 SelfGeneration,
