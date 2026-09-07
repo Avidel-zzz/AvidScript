@@ -178,7 +178,11 @@ function Get-ExpectedFusedGeneratedHits {
         [bool]$DataLane
     )
 
-    if ($Workload -in @('scalar_noop', 'scalar_add_int32', 'batch_scalar')) {
+    if ($Workload -in @(
+        'scalar_noop',
+        'scalar_add_int32',
+        'vector_ref_out',
+        'batch_scalar')) {
         return $Iterations
     }
     if ($Workload -ceq 'property_get_set') {

@@ -1649,6 +1649,7 @@ namespace
 		case EAvidScriptPerfWorkload::ScalarNoOp:
 		case EAvidScriptPerfWorkload::ScalarAddInt32:
 		case EAvidScriptPerfWorkload::VectorValue:
+		case EAvidScriptPerfWorkload::VectorRefOut:
 		case EAvidScriptPerfWorkload::ObjectRoundtrip:
 		case EAvidScriptPerfWorkload::BatchScalar:
 			return static_cast<uint64>(Iterations);
@@ -1718,7 +1719,9 @@ namespace
 				? static_cast<uint64>(Iterations)
 				: 0;
 		case EAvidScriptPerfWorkload::VectorRefOut:
-			return static_cast<uint64>(Iterations);
+			return bSemanticLane
+				? static_cast<uint64>(Iterations)
+				: 0;
 		default:
 			// Other benchmark reflection shapes have narrower prepared typed imports.
 			return 0;
@@ -1744,6 +1747,7 @@ namespace
 		case EAvidScriptPerfWorkload::ScalarNoOp:
 		case EAvidScriptPerfWorkload::ScalarAddInt32:
 		case EAvidScriptPerfWorkload::BatchScalar:
+		case EAvidScriptPerfWorkload::VectorRefOut:
 			return static_cast<uint64>(Iterations);
 		case EAvidScriptPerfWorkload::PropertyGetSet:
 			return static_cast<uint64>(Iterations) * 2u;

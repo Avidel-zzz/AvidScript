@@ -154,6 +154,12 @@ Assert-True ((Get-ExpectedFusedGeneratedHits `
         -DataLane $false) -eq 10) (
     'batch scalar calls share the fused i32-pair typed-host shape')
 Assert-True ((Get-ExpectedFusedGeneratedHits `
+        -Workload 'vector_ref_out' `
+        -Iterations 10 `
+        -WorkloadContract $microContract `
+        -DataLane $false) -eq 10) (
+    'generated vector ref/out calls must all use the fused typed-host path')
+Assert-True ((Get-ExpectedFusedGeneratedHits `
         -Workload 'vector_value' `
         -Iterations 10 `
         -WorkloadContract $microContract `

@@ -70,6 +70,7 @@ function Get-ExpectedGeneratedHits {
         'scalar_noop',
         'scalar_add_int32',
         'vector_value',
+        'vector_ref_out',
         'object_roundtrip',
         'batch_scalar')) {
         return $Iterations

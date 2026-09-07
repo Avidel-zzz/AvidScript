@@ -808,6 +808,14 @@
       "prevention": "新增 shape 前先用现有 shape 标识枚举全部消费者，并一次更新 parser、canonical descriptor、C# expected ABI/facade、Runtime expected ABI/plan、generated source、registry、VM linker 与所有 IAvidScriptVmTypedHostDispatcher 实现；主工程与 PerfHarness sidecar 都必须增量编译。",
       "source": "Source/AvidScriptCore/Public/AvidScriptGeneratedBindingTypes.h",
       "last_observed": "2026-09-07 P65.D11 首轮遗漏 PerfHarness dispatcher override，第二轮遗漏 Runtime expected-signature 矩阵，分别被 sidecar compile 与 artifact preparation fail-closed 捕获"
+    },
+    {
+      "id": "similar-matrices-require-function-scoped-patches",
+      "tags": ["cpp", "powershell", "benchmark", "editing", "workflow"],
+      "summary": "相邻 oracle 函数包含高度相似的 workload 列表，只有 case 片段的补丁可能命中错误矩阵并引入重复 case。",
+      "prevention": "修改相邻 switch 或数组矩阵时，把函数名纳入 apply_patch 上下文；落盘后按函数边界读取 git diff，并在构建前运行对应合同测试，禁止只凭补丁成功消息判断命中位置。",
+      "source": "Benchmarks/PuertsComparison/AvidScriptPerfHarness/Source/AvidScriptPerfHarness/Private/AvidScriptPerfRunner.cpp",
+      "last_observed": "2026-09-07 P65.D11 首版 VectorRefOut oracle 补丁命中相邻 operation/adaptive 矩阵并产生重复 case，合同测试前的函数级复读完成修正，未进入提交或候选"
     }
   ]
 }

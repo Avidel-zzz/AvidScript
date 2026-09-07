@@ -190,12 +190,16 @@ Assert-True (@($generatedCSharpProfile.binding_profile.classes[0].generated_nati
     @($dataCSharpProfile.binding_profile.classes[0].generated_native_functions) -ccontains 'ReflectNoOp' -and
     @($dataCSharpProfile.binding_profile.classes[0].generated_native_functions) -ccontains 'ReflectVectorRefOut' -and
     $runnerGeneratedMatrix.Contains('EAvidScriptPerfWorkload::ScalarNoOp') -and
+    $runnerGeneratedMatrix.Contains('EAvidScriptPerfWorkload::VectorRefOut') -and
     $runnerFusedMatrix.Contains('EAvidScriptPerfWorkload::ScalarNoOp') -and
+    $runnerFusedMatrix.Contains('EAvidScriptPerfWorkload::VectorRefOut') -and
     $runnerPreparedDynamicMatrix.Contains('const bool bSemanticLane') -and
     $runnerText.Contains('bAdaptiveLane || bStrictSemanticLane') -and
     $evaluatorGeneratedMatrix.Contains("'scalar_noop'") -and
-    $phase56EvidenceText.Contains("'scalar_noop', 'scalar_add_int32'")) `
-    'ScalarNoOp 的 generated/data profile、S1、fused 与 lane-aware prepared-dynamic oracle 必须同步。'
+    $evaluatorGeneratedMatrix.Contains("'vector_ref_out'") -and
+    $phase56EvidenceText.Contains("'scalar_noop'") -and
+    $phase56EvidenceText.Contains("'vector_ref_out'")) `
+    'ScalarNoOp 与 FVector ref/out 的 generated/data profile、S1、fused 与 lane-aware prepared-dynamic oracle 必须同步。'
 Assert-True (@($phase65VerifiedPackageDiagnostic.avidscript_artifacts.PSObject.Properties.Value |
         Where-Object { [string]$_.artifact_load_policy -cne 'published_package' }).Count -eq 0) `
     'Phase65 verified-package diagnostic 的三条 AvidScript lane 必须全部走发布包加载。'
