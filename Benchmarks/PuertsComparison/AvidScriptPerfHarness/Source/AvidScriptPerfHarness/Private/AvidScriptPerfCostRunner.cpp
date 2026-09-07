@@ -249,6 +249,7 @@ namespace
 		EAvidScriptVmTypedHostStatus DispatchSelfI32PairToI32(uint32, int32, int32, int32, int32, int32&) override { return EAvidScriptVmTypedHostStatus::Rejected; }
 		EAvidScriptVmTypedHostStatus DispatchSelfPropertyI32GetSet(uint32, int32, int32, int32, int32&) override { return EAvidScriptVmTypedHostStatus::Rejected; }
 		EAvidScriptVmTypedHostStatus DispatchSelfVectorValue(uint32, int32, int32, int32, int32&) override { return EAvidScriptVmTypedHostStatus::Rejected; }
+		EAvidScriptVmTypedHostStatus DispatchSelfVectorRefOut(uint32, int32, int32, int32, int32&) override { return EAvidScriptVmTypedHostStatus::Rejected; }
 		EAvidScriptVmTypedHostStatus DispatchStableObjectRoundtrip(uint32, int32, int32, int32, int32, int32, int32&) override { return EAvidScriptVmTypedHostStatus::Rejected; }
 		EAvidScriptVmTypedHostStatus DispatchCommandBufferSubmit(uint32, int32, int32, int32&) override { return EAvidScriptVmTypedHostStatus::Rejected; }
 	};
