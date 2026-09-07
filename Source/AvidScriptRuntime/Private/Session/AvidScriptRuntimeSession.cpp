@@ -165,6 +165,8 @@ FAvidScriptVmLoadConfig::FExecutionBudget MakeSessionExecutionBudget(
 			: 50000000;
 		Budget.EpochDeadlineTicks = 1;
 		Budget.EpochTimeoutMilliseconds = 100;
+		Budget.bEpochInterruptionIsTerminal =
+			bUseVerifiedPackageFastContainment;
 		Budget.MaxLinearMemoryBytes = UINT64_C(64) << 20;
 	}
 	return Budget;

@@ -620,6 +620,10 @@ bool FAvidScriptRuntimeSessionPrecompiledArtifactTest::RunTest(
 		AttestedSession.GetLiveRuntimeForTesting()
 			->GetExecutionBudgetForTesting().MaxHostCallsPerEntry,
 		100000u);
+	TestFalse(
+		TEXT("Attested development artifact resets epoch containment per entry"),
+		AttestedSession.GetLiveRuntimeForTesting()
+			->GetExecutionBudgetForTesting().bEpochInterruptionIsTerminal);
 	TestTrue(
 		TEXT("Attested precompiled Session invokes BeginPlay"),
 		LoadResult.RuntimeResult.bBeginPlayCalled);
@@ -657,6 +661,9 @@ bool FAvidScriptRuntimeSessionPrecompiledArtifactTest::RunTest(
 		TEXT("Verified Win64 package omits the per-entry Host-call counter"),
 		VerifiedBudget.MaxHostCallsPerEntry,
 		0u);
+	TestTrue(
+		TEXT("Verified Win64 package treats epoch interruption as terminal"),
+		VerifiedBudget.bEpochInterruptionIsTerminal);
 #else
 	TestEqual(
 		TEXT("Unverified platform keeps per-entry fuel"),
@@ -666,6 +673,9 @@ bool FAvidScriptRuntimeSessionPrecompiledArtifactTest::RunTest(
 		TEXT("Unverified platform keeps the Host-call limit"),
 		VerifiedBudget.MaxHostCallsPerEntry,
 		100000u);
+	TestFalse(
+		TEXT("Unverified platform resets epoch containment per entry"),
+		VerifiedBudget.bEpochInterruptionIsTerminal);
 #endif
 	TestEqual(
 		TEXT("Verified package preserves epoch deadline"),

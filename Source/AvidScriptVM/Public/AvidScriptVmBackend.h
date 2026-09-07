@@ -480,6 +480,7 @@ struct FAvidScriptVmLoadConfig
 		uint64 FuelPerEntry = 0;
 		uint64 EpochDeadlineTicks = 0;
 		uint32 EpochTimeoutMilliseconds = 0;
+		bool bEpochInterruptionIsTerminal = false;
 		uint64 MaxLinearMemoryBytes = 0;
 		uint32 MaxHostCallsPerEntry = 0;
 

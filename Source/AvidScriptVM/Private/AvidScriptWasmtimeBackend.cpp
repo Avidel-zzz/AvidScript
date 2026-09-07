@@ -2141,18 +2141,23 @@ private:
 			}
 			bFuelBudgetInitialized = true;
 		}
-		const uint64 EpochDeadline = ExecutionBudget.EpochDeadlineTicks > 0
-			? ExecutionBudget.EpochDeadlineTicks
-			: MAX_uint64;
-		if (!avidscript_wasmtime_store_set_epoch_deadline(
-			Store,
-			EpochDeadline))
+		if (!bEpochDeadlineInitialized
+			|| !ExecutionBudget.bEpochInterruptionIsTerminal)
 		{
-			SetWasmtimeError(
-				OutError,
-				TEXT("execution_budget_unavailable"),
-				TEXT("Wasmtime rejected the epoch deadline."));
-			return false;
+			const uint64 EpochDeadline = ExecutionBudget.EpochDeadlineTicks > 0
+				? ExecutionBudget.EpochDeadlineTicks
+				: MAX_uint64;
+			if (!avidscript_wasmtime_store_set_epoch_deadline(
+				Store,
+				EpochDeadline))
+			{
+				SetWasmtimeError(
+					OutError,
+					TEXT("execution_budget_unavailable"),
+					TEXT("Wasmtime rejected the epoch deadline."));
+				return false;
+			}
+			bEpochDeadlineInitialized = true;
 		}
 		return true;
 #endif
@@ -3772,6 +3777,7 @@ private:
 		CurrentHostCallCount = 0;
 		bFuelConsumptionEnabled = true;
 		bFuelBudgetInitialized = false;
+		bEpochDeadlineInitialized = false;
 		bUnloadDeferred = false;
 	}
 
@@ -3796,6 +3802,7 @@ private:
 	uint32 CurrentHostCallCount = 0;
 	bool bFuelConsumptionEnabled = true;
 	bool bFuelBudgetInitialized = false;
+	bool bEpochDeadlineInitialized = false;
 
 #if AVIDSCRIPT_WITH_WASMTIME
 	AvidScriptWasmtimeEngine* Engine = nullptr;
