@@ -213,7 +213,8 @@ bool ResolveAvidScriptWasmtimeCompilerProfile(
 	FString& OutError,
 	FString* OutErrorCategory,
 	const FString& RequestedTargetTriple,
-	const bool bConsumeFuel)
+	const bool bConsumeFuel,
+	const bool bEpochInterruption)
 {
 	OutError.Reset();
 	OutProfile = {};
@@ -243,7 +244,8 @@ bool ResolveAvidScriptWasmtimeCompilerProfile(
 	const FAvidScriptWasmtimeCompilerProfile* CompilerProfile =
 		FindAvidScriptWasmtimeCompilerProfile(
 			EffectiveTargetTriple,
-			bConsumeFuel);
+			bConsumeFuel,
+			bEpochInterruption);
 	if (CompilerProfile == nullptr)
 	{
 		if (OutErrorCategory != nullptr)
@@ -352,8 +354,16 @@ bool ResolveAvidScriptWasmtimeCompilerProfileForArtifact(
 	FString FirstResolutionError;
 	FString FirstResolutionErrorCategory;
 	bool bResolvedAnyProfile = false;
-	const bool CandidateFuelModes[] = {false, true};
-	for (const bool bConsumeFuel : CandidateFuelModes)
+	struct FCandidateMode
+	{
+		bool bConsumeFuel;
+		bool bEpochInterruption;
+	};
+	const FCandidateMode CandidateModes[] = {
+		{false, false},
+		{false, true},
+		{true, true}};
+	for (const FCandidateMode& CandidateMode : CandidateModes)
 	{
 		FAvidScriptVmBackendInfo CandidateInfo = InOutInfo;
 		AvidScriptWasmtimeEngineProfile CandidateProfile = {};
@@ -365,7 +375,8 @@ bool ResolveAvidScriptWasmtimeCompilerProfileForArtifact(
 				CandidateError,
 				&CandidateErrorCategory,
 				TargetTriple,
-				bConsumeFuel))
+				CandidateMode.bConsumeFuel,
+				CandidateMode.bEpochInterruption))
 		{
 			if (FirstResolutionError.IsEmpty())
 			{

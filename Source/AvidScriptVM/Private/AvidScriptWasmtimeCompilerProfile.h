@@ -17,7 +17,8 @@ GetAvidScriptWasmtimeCompilerProfile();
 const FAvidScriptWasmtimeCompilerProfile*
 FindAvidScriptWasmtimeCompilerProfile(
 	const FString& TargetTriple,
-	bool bConsumeFuel = true);
+	bool bConsumeFuel = true,
+	bool bEpochInterruption = true);
 
 bool ValidateAvidScriptWasmtimeCompilerCpuProfile(FString& OutError);
 

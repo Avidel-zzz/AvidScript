@@ -999,6 +999,36 @@ bool FAvidScriptVmWasmtimeCompilerProfileTest::RunTest(
 	TestTrue(
 		TEXT("fuel-free profile preserves epoch interruption"),
 		FuelFreeProfile->EngineProfile.bEpochInterruption);
+	const FAvidScriptWasmtimeCompilerProfile* TrustedCooperativeProfile =
+		FindAvidScriptWasmtimeCompilerProfile(
+			TEXT("x86_64-pc-windows-msvc"),
+			false,
+			false);
+	if (!TestNotNull(
+		TEXT("trusted cooperative compiler profile is declared"),
+		TrustedCooperativeProfile))
+	{
+		return false;
+	}
+	TestEqual(
+		TEXT("trusted cooperative compiler profile id"),
+		TrustedCooperativeProfile->Id,
+		FString(TEXT("cranelift-speed-x86_64-v3-trusted-cooperative-v1")));
+	TestFalse(
+		TEXT("trusted cooperative profile omits fuel instrumentation"),
+		TrustedCooperativeProfile->EngineProfile.bConsumeFuel);
+	TestFalse(
+		TEXT("trusted cooperative profile omits epoch instrumentation"),
+		TrustedCooperativeProfile->EngineProfile.bEpochInterruption);
+	TestTrue(
+		TEXT("trusted cooperative profile preserves Spectre mitigation"),
+		TrustedCooperativeProfile->EngineProfile.bSpectreMitigation);
+	TestNull(
+		TEXT("fuel and epoch cannot both be omitted through a fuel profile"),
+		FindAvidScriptWasmtimeCompilerProfile(
+			TEXT("x86_64-pc-windows-msvc"),
+			true,
+			false));
 	const FAvidScriptWasmtimeCompilerProfile* AndroidProfile =
 		FindAvidScriptWasmtimeCompilerProfile(TEXT("aarch64-linux-android"));
 	if (!TestNotNull(TEXT("Android compiler profile is declared"), AndroidProfile))
@@ -1013,6 +1043,12 @@ bool FAvidScriptVmWasmtimeCompilerProfileTest::RunTest(
 		TEXT("Android engine target profile"),
 		AndroidProfile->EngineProfile.TargetProfile,
 		AVIDSCRIPT_WASMTIME_ENGINE_TARGET_AARCH64_ANDROID);
+	TestNull(
+		TEXT("Android trusted cooperative profile is not declared"),
+		FindAvidScriptWasmtimeCompilerProfile(
+			TEXT("aarch64-linux-android"),
+			false,
+			false));
 	TestNull(
 		TEXT("unknown targets fail closed"),
 		FindAvidScriptWasmtimeCompilerProfile(TEXT("unknown-target")));
@@ -1903,6 +1939,82 @@ bool FAvidScriptVmWasmtimeArtifactCompilerTest::RunTest(
 			LoadError));
 	TestEqual(
 		TEXT("fuel-free budget mismatch category"),
+		LoadError.Category,
+		FString(TEXT("artifact_budget_mismatch")));
+
+	FAvidScriptVmArtifactCompileRequest TrustedRequest = FuelFreeRequest;
+	TrustedRequest.bEpochInterruption = false;
+	FAvidScriptVmArtifactCompileResult TrustedResult;
+	if (!TestTrue(
+		TEXT("trusted cooperative artifact compiles with a distinct profile"),
+		CompileAvidScriptVmArtifact(TrustedRequest, TrustedResult)))
+	{
+		AddError(
+			TrustedResult.Error.Category
+			+ TEXT(": ")
+			+ TrustedResult.Error.Details);
+		return false;
+	}
+	TestFalse(
+		TEXT("trusted cooperative profile participates in the cache key"),
+		TrustedResult.bCacheHit);
+	TestTrue(
+		TEXT("trusted cooperative artifact identity omits epoch instrumentation"),
+		TrustedResult.Artifact.CompilerBuildIdentity.Contains(
+			TEXT(";epoch_interruption=off;"),
+			ESearchCase::CaseSensitive));
+	TestNotEqual(
+		TEXT("epoch and trusted cooperative artifacts have distinct identities"),
+		TrustedResult.Artifact.CompilerBuildIdentity,
+		FuelFreeResult.Artifact.CompilerBuildIdentity);
+
+	TUniquePtr<IAvidScriptVmBackend> TrustedBackend =
+		CreateWasmtimePrecompiledBackendForTest(LoadError);
+	if (!TestNotNull(
+		TEXT("trusted cooperative precompiled backend is created"),
+		TrustedBackend.Get()))
+	{
+		return false;
+	}
+	FAvidScriptVmLoadConfig TrustedConfig;
+	if (!TestTrue(
+		TEXT("verified trusted cooperative artifact loads without epoch budget"),
+		TrustedBackend->LoadArtifact(
+			TrustedResult.Artifact.MakeView(
+				EAvidScriptVmArtifactTrust::VerifiedPackage),
+			TEXT("wasmtime_artifact_compiler_trusted_cooperative"),
+			TrustedConfig,
+			LoadError)))
+	{
+		AddError(LoadError.Category + TEXT(": ") + LoadError.Details);
+		return false;
+	}
+	TestEqual(
+		TEXT("runtime resolves trusted cooperative compiler identity"),
+		TrustedBackend->GetBackendInfo().RuntimeBuildIdentity,
+		TrustedResult.Artifact.CompilerBuildIdentity);
+
+	TUniquePtr<IAvidScriptVmBackend> EpochBudgetBackend =
+		CreateWasmtimePrecompiledBackendForTest(LoadError);
+	if (!TestNotNull(
+		TEXT("epoch-budget precompiled backend is created"),
+		EpochBudgetBackend.Get()))
+	{
+		return false;
+	}
+	FAvidScriptVmLoadConfig EpochBudgetConfig;
+	EpochBudgetConfig.ExecutionBudget.EpochDeadlineTicks = 1;
+	EpochBudgetConfig.ExecutionBudget.EpochTimeoutMilliseconds = 100;
+	TestFalse(
+		TEXT("trusted cooperative artifact rejects an epoch timeout budget"),
+		EpochBudgetBackend->LoadArtifact(
+			TrustedResult.Artifact.MakeView(
+				EAvidScriptVmArtifactTrust::VerifiedPackage),
+			TEXT("wasmtime_artifact_compiler_epoch_mismatch"),
+			EpochBudgetConfig,
+			LoadError));
+	TestEqual(
+		TEXT("trusted cooperative epoch mismatch category"),
 		LoadError.Category,
 		FString(TEXT("artifact_budget_mismatch")));
 

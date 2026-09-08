@@ -40,6 +40,7 @@ struct FAvidScriptVmArtifactCompileRequest
 	TArrayView<const uint8> CanonicalWasmBytes;
 	FString TargetTriple;
 	bool bConsumeFuel = true;
+	bool bEpochInterruption = true;
 };
 
 struct FAvidScriptVmArtifactCompileResult

@@ -16,7 +16,8 @@ bool ResolveAvidScriptWasmtimeCompilerProfile(
 	FString& OutError,
 	FString* OutErrorCategory = nullptr,
 	const FString& RequestedTargetTriple = FString(),
-	bool bConsumeFuel = true);
+	bool bConsumeFuel = true,
+	bool bEpochInterruption = true);
 
 bool ResolveAvidScriptWasmtimeCompilerProfileForArtifact(
 	FAvidScriptVmBackendInfo& InOutInfo,

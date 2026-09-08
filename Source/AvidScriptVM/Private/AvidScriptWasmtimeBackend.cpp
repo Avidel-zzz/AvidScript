@@ -696,7 +696,8 @@ public:
 				DllLoadError,
 				&CompilerProfileErrorCategory,
 				FString(),
-				ExecutionBudget.FuelPerEntry > 0);
+				ExecutionBudget.FuelPerEntry > 0,
+				true);
 		if (!bCompilerProfileResolved)
 		{
 			LoadMetrics.RuntimeInitMs = MeasureWasmtimeElapsedMs(RuntimeInitStart);
@@ -716,6 +717,27 @@ public:
 				OutError,
 				TEXT("artifact_budget_mismatch"),
 				TEXT("The serialized module omits fuel instrumentation required by the execution budget."));
+			return false;
+		}
+		if (ExecutionBudget.EpochTimeoutMilliseconds > 0
+			&& !CompilerProfile.bEpochInterruption)
+		{
+			LoadMetrics.RuntimeInitMs = MeasureWasmtimeElapsedMs(RuntimeInitStart);
+			SetWasmtimeError(
+				OutError,
+				TEXT("artifact_budget_mismatch"),
+				TEXT("The serialized module omits epoch instrumentation required by the execution budget."));
+			return false;
+		}
+		if (!CompilerProfile.bEpochInterruption
+			&& (!bSerialized
+				|| Artifact.Trust != EAvidScriptVmArtifactTrust::VerifiedPackage))
+		{
+			LoadMetrics.RuntimeInitMs = MeasureWasmtimeElapsedMs(RuntimeInitStart);
+			SetWasmtimeError(
+				OutError,
+				TEXT("artifact_containment_mismatch"),
+				TEXT("The trusted cooperative profile requires a verified serialized package."));
 			return false;
 		}
 	#elif PLATFORM_ANDROID && PLATFORM_CPU_ARM_FAMILY

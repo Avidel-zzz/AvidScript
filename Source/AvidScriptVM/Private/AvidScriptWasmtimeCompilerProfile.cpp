@@ -49,6 +49,15 @@ FAvidScriptWasmtimeCompilerProfile MakeWin64FuelFreeCompilerProfile()
 	return Profile;
 }
 
+FAvidScriptWasmtimeCompilerProfile MakeWin64TrustedCooperativeCompilerProfile()
+{
+	FAvidScriptWasmtimeCompilerProfile Profile =
+		MakeWin64FuelFreeCompilerProfile();
+	Profile.Id = TEXT("cranelift-speed-x86_64-v3-trusted-cooperative-v1");
+	Profile.EngineProfile.bEpochInterruption = false;
+	return Profile;
+}
+
 FAvidScriptWasmtimeCompilerProfile MakeAndroidCompilerProfile()
 {
 	FAvidScriptWasmtimeCompilerProfile Profile = MakeWin64CompilerProfile();
@@ -81,22 +90,32 @@ GetAvidScriptWasmtimeCompilerProfile()
 const FAvidScriptWasmtimeCompilerProfile*
 FindAvidScriptWasmtimeCompilerProfile(
 	const FString& TargetTriple,
-	const bool bConsumeFuel)
+	const bool bConsumeFuel,
+	const bool bEpochInterruption)
 {
 	static const FAvidScriptWasmtimeCompilerProfile AndroidProfile =
 		MakeAndroidCompilerProfile();
 	static const FAvidScriptWasmtimeCompilerProfile Win64FuelFreeProfile =
 		MakeWin64FuelFreeCompilerProfile();
+	static const FAvidScriptWasmtimeCompilerProfile
+		Win64TrustedCooperativeProfile =
+			MakeWin64TrustedCooperativeCompilerProfile();
 	if (TargetTriple.IsEmpty()
 		|| TargetTriple == TEXT("x86_64-pc-windows-msvc"))
 	{
+		if (!bEpochInterruption)
+		{
+			return bConsumeFuel
+				? nullptr
+				: &Win64TrustedCooperativeProfile;
+		}
 		return bConsumeFuel
 			? &GetAvidScriptWasmtimeCompilerProfile()
 			: &Win64FuelFreeProfile;
 	}
 	if (TargetTriple == AndroidProfile.TargetTriple)
 	{
-		return &AndroidProfile;
+		return bEpochInterruption ? &AndroidProfile : nullptr;
 	}
 	return nullptr;
 }
@@ -180,7 +199,7 @@ FString BuildAvidScriptWasmtimeCompilerIdentity(
 		TEXT("opt=speed;regalloc=backtracking;inlining=all;")
 		TEXT("profile=%s;target=%s;cpu=%s;")
 		TEXT("wasm32_memory=4g_fixed;memory_may_move=0;")
-		TEXT("max_wasm_stack=2m;fuel=%s;epoch_interruption=on;")
+		TEXT("max_wasm_stack=2m;fuel=%s;epoch_interruption=%s;")
 		TEXT("spectre=on;nan_canonicalization=off;parallel_compilation=on;")
 		TEXT("wasm_gc=on;gc_collector=drc;")
 		TEXT("runtime_profile=fastest-runtime;runtime_artifact_sha256=%s"),
@@ -189,5 +208,6 @@ FString BuildAvidScriptWasmtimeCompilerIdentity(
 		*CompilerProfile.TargetTriple,
 		*CompilerProfile.CpuProfile,
 		CompilerProfile.EngineProfile.bConsumeFuel ? TEXT("on") : TEXT("off"),
+		CompilerProfile.EngineProfile.bEpochInterruption ? TEXT("on") : TEXT("off"),
 		*RuntimeArtifactSha256);
 }
