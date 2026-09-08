@@ -841,7 +841,7 @@
       "summary": "Gameplay benchmark runner 要求调用方提供已经存在的唯一输出目录，不会自动创建目录。",
       "prevention": "每次 diagnostic 或 formal 调用前先断言目标路径不存在，再创建唯一空目录并把该精确路径传给 `-OutputDirectory`；禁止复用旧目录。`OutputDirectory must already exist` 是零样本的前置条件拒绝，不能计作产品或性能失败。",
       "source": "Benchmarks/PuertsComparison/AvidScriptPerfHarness/Tools/Invoke-Phase54GameplayBenchmark.ps1",
-      "last_observed": "2026-09-08 P65.D20 首次 diagnostic 漏建输出目录，runner 在启动 packaged host 前 fail closed；创建唯一空目录后正常执行"
+      "last_observed": "2026-09-08 P65.D30 已选对 schema v1 runner 后仍漏建唯一输出目录，runner 在启动 Editor 前以零样本拒绝；P65.D20 已发生同类错误，后续 runner 调用清单必须把不存在断言与目录创建列为前置步骤"
     },
     {
       "id": "versioned-toolchain-paths-come-from-locks",
