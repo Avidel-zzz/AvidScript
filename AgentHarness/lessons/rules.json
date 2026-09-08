@@ -154,7 +154,7 @@
       "summary": "跨模块宽检索会产生截断输出，既浪费上下文也可能掩盖真正残留引用。",
       "prevention": "先按文件或模块冻结检索范围，优先 rg -F 和精确标识符；必须使用正则时先以单文件简单表达式验证 shell 转义。预估命中较多时分文件检查或限制输出，普通源码阅读默认使用 20-40 行切片，并根据剩余上下文预算继续缩小；禁止一次倾倒整个仓库或在上下文临界时依赖固定行数。",
       "source": "observed:2026-08-31-P60.B1",
-      "last_observed": "2026-09-08 P65.D30 跨 AvidScriptVM 与 Wasmtime PerformanceToolchain 宽搜编译选项再次触发上下文压缩；编译配置调查必须先用文件索引锁定实现文件，再逐文件检索且每次最多读取 20-25 行。此前 source emitter 的 101 行读取、P65.D29 完整 Gate validity 与跨大型 JSON 搜索，以及 P65.D28 至 P60.B1 已多次触发同类问题"
+      "last_observed": "2026-09-08 P65.D31 用双引号拼接含 | 的 rg 正则，PowerShell 将其拆成管道并报错；无文件副作用。含 shell 元字符的 rg pattern 必须使用 PowerShell 单引号，优先拆成多个 -F 查询。此前 D30 宽搜编译选项与 source emitter 大切片已触发上下文压缩"
     },
     {
       "id": "rg-leading-hyphen-pattern-uses-double-dash",
