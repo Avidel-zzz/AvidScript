@@ -407,7 +407,7 @@
       "summary": "Harness bootstrap 输出的 next_action 是 PhaseWorkflow 子命令，不是 Harness 自身的 Command。",
       "prevention": "bootstrap/context/verify/lesson-query/audit 调用 InvokeAgentHarness.ps1；batch-complete、freeze、gate 等状态 mutation 调用 InvokePhaseWorkflow.ps1。Command、Profile 和状态动作均先读取对应入口 ValidateSet，架构证据使用提交后的 detached clean candidate 与 CheckAvidScriptArchitecture.ps1。",
       "source": "observed:2026-08-31-P60.A2",
-      "last_observed": "2026-09-08 P65.D21 把不存在的 Architecture 值传给 Harness verify Profile，ValidateSet 在验证前拒绝；此前 P60.A2 也曾把状态 mutation 传给错误入口"
+      "last_observed": "2026-09-08 P65.D30 在产品代码尚未提交且另有 protected dirty 文件时直接运行 CheckAvidScriptArchitecture，证据树一致性按设计失败；应先精确提交产品批次，再从该提交的 detached clean candidate 运行。此前 P65.D21 与 P60.A2 发生过同类入口或时机错误"
     },
     {
       "id": "architecture-allowlists-move-with-reviewed-surfaces",
