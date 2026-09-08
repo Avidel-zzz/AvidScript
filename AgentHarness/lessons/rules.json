@@ -29,7 +29,7 @@
       "summary": "一个 shell 调用只承担一个逻辑动作或证据域。",
       "prevention": "调度前拒绝用分号、&& 或 || 串联独立动作；多文件读取使用并行工具或逐项调用。",
       "source": "legacy:1672",
-      "last_observed": "2026-09-08 P65.D24 恢复检查时再次用分号串联 Git 状态、日志、分支、远端和路径搜索；无文件副作用，后续恢复为每个验证域独立调用。执行前必须检查 shell 字符串不含独立命令分隔符"
+      "last_observed": "2026-09-08 P65.D28 lessons 校验时再次用分号串联 JSON 解析、diff 检查、diff 展示与 Git 状态；无文件副作用，后续恢复为每个验证域独立调用。此前 P65.D24 也发生同类复发；调度前必须检查 shell 字符串不含独立命令分隔符"
     },
     {
       "id": "callback-kind-validation-uses-named-branches",
@@ -129,7 +129,7 @@
       "summary": "跨模块宽检索会产生截断输出，既浪费上下文也可能掩盖真正残留引用。",
       "prevention": "先按文件或模块冻结检索范围，优先 rg -F 和精确标识符；必须使用正则时先以单文件简单表达式验证 shell 转义。预估命中较多时分文件检查或限制输出，禁止一次倾倒整个仓库。",
       "source": "observed:2026-08-31-P60.B1",
-      "last_observed": "2026-09-08 P65.D27 对单一大类使用 git diff --function-context，函数上下文扩展到约 1600 行并被截断；后续改用普通 hunk diff 与定点回读。此前 P65.D26 发生正则转义失败，P60.B1 发生宽检索截断"
+      "last_observed": "2026-09-08 P65.D28 将 Wasmtime 配置、运行时和 Phase 文档的多域检索并行倾倒，输出超出上下文并被截断；后续按单文件、固定标识符逐项读取。此前 P65.D27 的 function-context diff、P65.D26 的正则转义与 P60.B1 的宽检索也触发过同类问题"
     },
     {
       "id": "structured-artifacts-use-parsers",
