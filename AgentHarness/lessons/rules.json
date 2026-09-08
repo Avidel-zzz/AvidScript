@@ -29,7 +29,7 @@
       "summary": "一个 shell 调用只承担一个逻辑动作或证据域。",
       "prevention": "调度前拒绝用分号、&& 或 || 串联独立动作；多文件读取使用并行工具或逐项调用。",
       "source": "legacy:1672",
-      "last_observed": "2026-09-08 P65.D29 核对干净候选时用分号串联 status、commit 与 tree 三个 Git 查询；结果正确且无副作用，但仍应拆成单动作调用。此前 P65.D28 lessons 校验与 P65.D24 已发生同类复发；调度前必须检查 shell 字符串不含独立命令分隔符"
+      "last_observed": "2026-09-08 P65.D31 提交检索教训时仍用分号串联 git add 与 git commit；提交成功且无副作用，但这是继 P65.D29 后的再次复发。此后 staging、commit、push 必须各自使用独立 shell 调用"
     },
     {
       "id": "callback-kind-validation-uses-named-branches",
