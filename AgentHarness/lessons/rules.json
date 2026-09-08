@@ -21,7 +21,7 @@
       "summary": "概念名称不能当作真实文件路径。",
       "prevention": "每次跨文件查询前先用 rg --files 建立索引，并仅以本次索引实际返回的字面路径构造命令；不得依据同名 .cpp 推测存在配套头文件。通配符只放在 rg -g 参数，所有 -g 选项必须位于 -- 终止符之前。",
       "source": "legacy:1931",
-      "last_observed": "2026-09-08 P65.D30 刚更新规则后又推测 AvidScriptWasmtimeBackend.cpp 存在配套 Public 头，索引确认该实现只有 Private cpp；同批次还误判 ObjectRegistry 模块。无文件副作用，今后每条多路径命令都必须完全来自本次索引结果"
+      "last_observed": "2026-09-08 P65.D31 artifact 索引命令夹带未验证的 Source/AvidScript 路径并收到 path-not-found；无文件副作用。多根检索必须先分别由 rg --files 证明每个根存在，不能让部分真实路径掩盖一个猜测路径。此前 P65.D30 已误猜配套 Public 头和 ObjectRegistry 模块"
     },
     {
       "id": "one-command-one-evidence-domain",
