@@ -74,8 +74,9 @@
       "id": "protected-dirty-is-immutable",
       "tags": ["git", "dirty", "safety"],
       "summary": "Phase 起点记录的用户 dirty 文件不是当前任务的修复材料。",
-      "prevention": "bootstrap 比对 Phase state 中 protected_dirty 的状态与 SHA-256；漂移时停止写入并报告。",
-      "source": "legacy:1966"
+      "prevention": "bootstrap 比对 Phase state 中 protected_dirty 的状态与 SHA-256；漂移时停止写入并报告。主工作树执行 diff、格式或静态检查时必须显式列出本批路径，禁止让已知 protected dirty 进入验证范围。",
+      "source": "legacy:1966",
+      "last_observed": "2026-09-08 P65.D31 已知存在 3 个 protected dirty 时仍执行全仓 git diff --check，只命中两个用户文件的尾空格；未修改这些文件，后续改为本批显式路径检查"
     },
     {
       "id": "pinned-powershell-seven",
