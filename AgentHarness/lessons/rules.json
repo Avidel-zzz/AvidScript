@@ -873,7 +873,7 @@
       "summary": "PowerShell 命令正确并不代表外层 JavaScript 工具调用字符串可解析。",
       "prevention": "含 PowerShell 单引号、脚本块或多行表达式的 exec_command 参数使用 JavaScript 模板字符串，并在调用前检查外层引号成对；工具层 SyntaxError 只记录为无副作用包装失败，不算被测命令结果。",
       "source": "observed:2026-09-08-P65.D28",
-      "last_observed": "2026-09-08 P65.D28 登记规则后，读取 formal provenance 时立即再次在 JavaScript 单引号字符串内嵌 PowerShell 单引号，工具以 SyntaxError 拒绝且命令未执行；同批 raw SHA 查询使用模板字符串成功，后续所有含 PowerShell 单引号的 cmd 强制使用模板字符串"
+      "last_observed": "2026-09-08 P65.D28 第三次在 JavaScript 单引号 cmd 内嵌 PowerShell 单引号，本次位于 Select-Object 计算属性，工具以 SyntaxError 拒绝且命令未执行；后续简单哈希禁止使用计算属性，复杂命令只用 JavaScript 模板字符串。此前同批 formal provenance 已复发一次"
     }
   ]
 }
