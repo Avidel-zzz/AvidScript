@@ -382,9 +382,9 @@
       "id": "apply-patch-anchors-use-current-minimal-context",
       "tags": ["editing", "patch", "workflow"],
       "summary": "包含可变相邻字段的宽补丁锚点容易因工作树已演进而拒绝应用。",
-      "prevention": "应用补丁前定点回读当前 20 行以内上下文；新增相邻条目时优先只锚定稳定 ID 或声明行，避免把 tags、历史日期等无关可变字段复制进 expected context。补丁拒绝后先确认文件未变，再缩小锚点，禁止盲目重试。",
+      "prevention": "应用补丁前定点回读当前 20 行以内上下文；新增相邻条目时优先只锚定稳定 ID 或声明行，避免把 tags、历史日期等无关可变字段复制进 expected context。跨文件批次按 wrapper、参数、验证、manifest 等职责拆成独立小补丁，避免一个长条件行让整批原子拒绝。补丁拒绝后先确认文件未变，再缩小锚点，禁止盲目重试。",
       "source": "observed:2026-09-08-P65.D29",
-      "last_observed": "2026-09-08 P65.D29 插入 benchmark 日志规则时沿用旧 tags 锚点，apply_patch verification failed；文件未变，定点回读后以相邻 rule id 最小锚点成功应用"
+      "last_observed": "2026-09-08 P65.D31 C3.4 将 wrapper 与主构建脚本的十余处修改放入一个补丁，其中一条长失败条件换行不匹配，导致整包原子拒绝；确认两文件未变后改为按职责分组的小补丁"
     },
     {
       "id": "apply-patch-context-must-exclude-new-helper-body",
