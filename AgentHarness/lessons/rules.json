@@ -914,6 +914,14 @@
       "prevention": "含 PowerShell 单引号、脚本块或多行表达式的 exec_command 参数使用 JavaScript 模板字符串，并在调用前检查外层引号成对；工具层 SyntaxError 只记录为无副作用包装失败，不算被测命令结果。",
       "source": "observed:2026-09-08-P65.D28",
       "last_observed": "2026-09-08 P65.D28 第三次在 JavaScript 单引号 cmd 内嵌 PowerShell 单引号，本次位于 Select-Object 计算属性，工具以 SyntaxError 拒绝且命令未执行；后续简单哈希禁止使用计算属性，复杂命令只用 JavaScript 模板字符串。此前同批 formal provenance 已复发一次"
+    },
+    {
+      "id": "benchmark-project-descriptor-enables-harness",
+      "tags": ["benchmark", "project", "harness", "workflow"],
+      "summary": "存在 PerfHarness 插件目录不代表 benchmark project 会构建并加载该插件。",
+      "prevention": "创建轻量 diagnostic project 时复用已验证 benchmark project 的 .uproject 描述符和插件启用集合；构建后先断言 UnrealEditor-AvidScriptPerfHarness.dll 存在，再创建唯一结果目录并启动 runner。普通游戏模板的 .uproject 不能替代 benchmark 描述符。",
+      "source": "observed:2026-09-08-P65.D30",
+      "last_observed": "2026-09-08 P65.D30 轻量 diagnostic project 复制普通 AvidTPSTemplate.uproject，虽挂载 PerfHarness junction，但 UBT 未构建 Harness；runner 在样本前以缺失 DLL 拒绝，目录不计为有效 attempt"
     }
   ]
 }
