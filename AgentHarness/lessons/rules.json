@@ -287,7 +287,7 @@
       "summary": "PowerShell 的 foreach 语句不能作为裸表达式直接接到管道。",
       "prevention": "汇总多层循环证据时先用 $Rows = @(foreach (...) { ... }) 物化结果，再单独执行 $Rows | Format-Table 或 ConvertTo-Json。",
       "source": "observed:2026-08-31-P59.D6b",
-      "last_observed": "2026-09-08 P65.D21 在 formal 对比汇总中再次把 foreach 语句直接接 Format-Table，产生 empty pipe parser error；改为先收集 $rows 后完成只读汇总。此前 P59.D6b 已发生同类错误"
+      "last_observed": "2026-09-08 P65.D29 在候选工具链路径探测中再次把 foreach 语句直接接 Format-Table，产生 empty pipe parser error；改为 @(foreach (...) { ... }) 后完成只读检查。此前 P65.D21 与 P59.D6b 已发生同类错误"
     },
     {
       "id": "ubt-rules-json-use-epicgames-core",
