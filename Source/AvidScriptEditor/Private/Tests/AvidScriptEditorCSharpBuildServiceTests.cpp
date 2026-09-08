@@ -698,11 +698,26 @@ bool FAvidScriptEditorCSharpBuildServiceZeroBindingProfileTest::RunTest(const FS
 	Config.CompilationCacheRoot = NormalizeAvidScriptCSharpBuildTestPath(FPaths::Combine(
 		FPaths::ProjectSavedDir(),
 		TEXT("AvidScript/Tests/P61/A1/ZeroBinding/CSharpCompilationCache/v1")));
+	Config.bEnableCooperativeSafepoints = true;
+	Config.CooperativeSafepointInterval = 64;
 	IFileManager::Get().DeleteDirectory(*Config.SemanticCacheRoot, false, true);
 	IFileManager::Get().DeleteDirectory(*Config.CompilationCacheRoot, false, true);
 
 	FAvidScriptEditorCSharpBuildResult BuildResult;
-	TestTrue(TEXT("Zero-binding custom C# profile builds"), FAvidScriptEditorCSharpBuildService::BuildProfile(Config, BuildResult));
+	if (!TestTrue(
+		TEXT("Zero-binding custom C# profile builds"),
+		FAvidScriptEditorCSharpBuildService::BuildProfile(
+			Config,
+			BuildResult)))
+	{
+		AddError(
+			BuildResult.ErrorCategory
+			+ TEXT(": ")
+			+ BuildResult.ErrorMessage
+			+ TEXT(" | next: ")
+			+ BuildResult.NextAction);
+		return false;
+	}
 	TestEqual(TEXT("Zero-binding profile performs bootstrap and final builds"), BuildResult.BuildInvocationCount, 2);
 	TestEqual(TEXT("Zero-binding profile runs Frontend once"), BuildResult.FrontendInvocationCount, 1);
 	TestEqual(TEXT("Zero-binding profile runs Semantic once"), BuildResult.SemanticInvocationCount, 1);
@@ -711,12 +726,59 @@ bool FAvidScriptEditorCSharpBuildServiceZeroBindingProfileTest::RunTest(const FS
 	TestEqual(TEXT("Cold zero-binding profile records a cache miss"), BuildResult.SemanticCacheLookup, FString(TEXT("miss")));
 	TestTrue(TEXT("Zero-binding profile keeps authorization package"), FPaths::FileExists(BuildResult.AuthorizationBindingPackagePath));
 	TestTrue(TEXT("Zero-binding profile omits runtime package path"), BuildResult.BindingPackagePath.IsEmpty());
+	TestTrue(
+		TEXT("Zero-binding profile publishes cooperative safepoints"),
+		BuildResult.bVmArtifactCooperativeSafepoints);
+	TestEqual(
+		TEXT("Zero-binding profile preserves the safepoint interval"),
+		BuildResult.VmArtifactSafepointInterval,
+		64u);
+	TestEqual(
+		TEXT("Zero-binding profile records the safepoint receipt identity"),
+		BuildResult.VmArtifactSafepointReceiptSha256.Len(),
+		64);
+	TestEqual(
+		TEXT("Zero-binding profile records the safepoint site identity"),
+		BuildResult.VmArtifactSafepointSiteSha256.Len(),
+		64);
+	TestTrue(
+		TEXT("Zero-binding profile selects epoch-free Wasmtime codegen"),
+		BuildResult.VmArtifactCompilerBuildIdentity.Contains(
+			TEXT(";epoch_interruption=off;"),
+			ESearchCase::CaseSensitive));
 
 	TSharedPtr<FJsonObject> ManifestObject;
 	TestTrue(TEXT("Zero-binding manifest is valid JSON"), LoadAvidScriptCSharpBuildTestJsonObject(Config.ManifestPath, ManifestObject));
 	if (ManifestObject.IsValid())
 	{
 		TestFalse(TEXT("Zero-binding manifest omits binding_package"), ManifestObject->HasField(TEXT("binding_package")));
+		const TSharedPtr<FJsonObject>* ExecutionObject = nullptr;
+		if (TestTrue(
+			TEXT("Zero-binding manifest contains execution provenance"),
+			ManifestObject->TryGetObjectField(
+				TEXT("execution"),
+				ExecutionObject))
+			&& ExecutionObject != nullptr
+			&& ExecutionObject->IsValid())
+		{
+			const TSharedPtr<FJsonObject>* SafepointObject = nullptr;
+			if (TestTrue(
+				TEXT("Zero-binding execution contains safepoint provenance"),
+				(*ExecutionObject)->TryGetObjectField(
+					TEXT("cooperative_safepoints"),
+					SafepointObject))
+				&& SafepointObject != nullptr
+				&& SafepointObject->IsValid())
+			{
+				TestTrue(
+					TEXT("Zero-binding execution enables cooperative safepoints"),
+					(*SafepointObject)->GetBoolField(TEXT("enabled")));
+				TestEqual(
+					TEXT("Zero-binding execution safepoint identity matches the build result"),
+					(*SafepointObject)->GetStringField(TEXT("site_sha256")),
+					BuildResult.VmArtifactSafepointSiteSha256);
+			}
+		}
 	}
 	return true;
 }

@@ -102,6 +102,7 @@ struct FAvidScriptEditorCSharpBuildResult
 	bool bReusedAuthorizationBindingPackage = false;
 	bool bVmArtifactPublished = false;
 	bool bVmArtifactCacheHit = false;
+	bool bVmArtifactCooperativeSafepoints = false;
 	double VmArtifactCompileMs = 0.0;
 	FString VmArtifactPath;
 	FString VmArtifactFormat;
@@ -110,6 +111,10 @@ struct FAvidScriptEditorCSharpBuildResult
 	FString VmArtifactCompilerBuildIdentity;
 	FString VmArtifactTargetTriple;
 	FString VmArtifactAttestationId;
+	FString VmArtifactSafepointReceiptSha256;
+	FString VmArtifactSafepointSiteSha256;
+	uint32 VmArtifactSafepointInterval = 0;
+	uint32 VmArtifactSafepointSiteCount = 0;
 	FString VmArtifactPolicy;
 	FString VmArtifactRequestedBackend;
 	FString VmArtifactSelectedBackend;

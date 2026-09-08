@@ -1,4 +1,5 @@
 #include "CSharpBuild/AvidScriptEditorVmArtifactPublisher.h"
+#include "CSharpBuild/AvidScriptEditorCooperativeSafepointReceiptReader.h"
 
 #include "AvidScriptHash.h"
 #include "AvidScriptVmArtifact.h"
@@ -33,6 +34,7 @@ void ResetVmArtifactResult(
 {
 	OutResult.bVmArtifactPublished = false;
 	OutResult.bVmArtifactCacheHit = false;
+	OutResult.bVmArtifactCooperativeSafepoints = false;
 	OutResult.VmArtifactCompileMs = 0.0;
 	OutResult.VmArtifactPath =
 		FAvidScriptEditorVmArtifactPublisher::MakeArtifactPath(Config);
@@ -42,6 +44,10 @@ void ResetVmArtifactResult(
 	OutResult.VmArtifactCompilerBuildIdentity.Reset();
 	OutResult.VmArtifactTargetTriple.Reset();
 	OutResult.VmArtifactAttestationId.Reset();
+	OutResult.VmArtifactSafepointReceiptSha256.Reset();
+	OutResult.VmArtifactSafepointSiteSha256.Reset();
+	OutResult.VmArtifactSafepointInterval = 0;
+	OutResult.VmArtifactSafepointSiteCount = 0;
 	OutResult.VmArtifactPolicy =
 		GetVmArtifactPolicyName(Config.VmArtifactPolicy);
 	OutResult.VmArtifactRequestedBackend =
@@ -307,6 +313,33 @@ bool FAvidScriptEditorVmArtifactPublisher::Publish(
 		return true;
 	}
 
+	FAvidScriptEditorCooperativeSafepointMetadata SafepointMetadata;
+	FString SafepointErrorCategory;
+	if (!LoadAvidScriptEditorCooperativeSafepointMetadata(
+			ManifestObject.ToSharedRef(),
+			Config.OutputRoot,
+			CanonicalSha256,
+			SafepointMetadata,
+			SafepointErrorCategory,
+			Error))
+	{
+		SetVmArtifactFailure(
+			OutResult,
+			SafepointErrorCategory,
+			Error,
+			TEXT("rebuild the C# manifest and safepoint receipt in one transaction"));
+		return false;
+	}
+	if (Config.bEnableCooperativeSafepoints != SafepointMetadata.bEnabled)
+	{
+		SetVmArtifactFailure(
+			OutResult,
+			TEXT("vm_artifact_safepoint_manifest_invalid"),
+			TEXT("The cooperative safepoint manifest state differs from the requested C# build mode."),
+			TEXT("rebuild the C# output with matching cooperative safepoint settings"));
+		return false;
+	}
+
 	FAvidScriptVmArtifactCompileRequest CompileRequest;
 	CompileRequest.Selection.BackendKind =
 		EAvidScriptVmBackendKind::Wasmtime;
@@ -317,6 +350,9 @@ bool FAvidScriptEditorVmArtifactPublisher::Publish(
 	CompileRequest.TargetTriple = Config.VmArtifactTargetTriple;
 	CompileRequest.CanonicalWasmBytes = CanonicalWasmBytes;
 	CompileRequest.bConsumeFuel = false;
+	CompileRequest.bEpochInterruption = !SafepointMetadata.bEnabled;
+	CompileRequest.CooperativeSafepointReceipt =
+		SafepointMetadata.VmReceipt;
 	FAvidScriptVmArtifactCompileResult CompileResult;
 	if (!CompileAvidScriptVmArtifact(CompileRequest, CompileResult))
 	{
@@ -392,6 +428,41 @@ bool FAvidScriptEditorVmArtifactPublisher::Publish(
 	ExecutionObject->SetStringField(
 		TEXT("fallback"),
 		TEXT("wasmtime_jit"));
+	TSharedRef<FJsonObject> SafepointExecutionObject =
+		MakeShared<FJsonObject>();
+	SafepointExecutionObject->SetBoolField(
+		TEXT("enabled"),
+		SafepointMetadata.bEnabled);
+	if (SafepointMetadata.bEnabled)
+	{
+		SafepointExecutionObject->SetStringField(
+			TEXT("receipt_sha256"),
+			SafepointMetadata.ReceiptSha256);
+		SafepointExecutionObject->SetStringField(
+			TEXT("guest_ir_sha256"),
+			SafepointMetadata.VmReceipt.GuestIrIdentity);
+		SafepointExecutionObject->SetNumberField(
+			TEXT("proof_schema_version"),
+			SafepointMetadata.VmReceipt.ProofSchemaVersion);
+		SafepointExecutionObject->SetNumberField(
+			TEXT("poll_interval"),
+			SafepointMetadata.VmReceipt.PollInterval);
+		SafepointExecutionObject->SetNumberField(
+			TEXT("loop_poll_blocks"),
+			SafepointMetadata.VmReceipt.LoopPollBlockCount);
+		SafepointExecutionObject->SetNumberField(
+			TEXT("recursive_functions"),
+			SafepointMetadata.VmReceipt.RecursiveFunctionCount);
+		SafepointExecutionObject->SetNumberField(
+			TEXT("site_count"),
+			SafepointMetadata.VmReceipt.SiteCount);
+		SafepointExecutionObject->SetStringField(
+			TEXT("site_sha256"),
+			SafepointMetadata.VmReceipt.SiteSha256);
+	}
+	ExecutionObject->SetObjectField(
+		TEXT("cooperative_safepoints"),
+		SafepointExecutionObject);
 	ManifestObject->SetObjectField(TEXT("execution"), ExecutionObject);
 	if (!WriteManifestAtomic(
 			Config.ManifestPath,
@@ -417,6 +488,16 @@ bool FAvidScriptEditorVmArtifactPublisher::Publish(
 		CompileResult.Artifact.CompilerBuildIdentity;
 	OutResult.VmArtifactTargetTriple = CompileResult.Artifact.TargetTriple;
 	OutResult.VmArtifactAttestationId = CompileResult.Artifact.AttestationId;
+	OutResult.bVmArtifactCooperativeSafepoints =
+		SafepointMetadata.bEnabled;
+	OutResult.VmArtifactSafepointReceiptSha256 =
+		SafepointMetadata.ReceiptSha256;
+	OutResult.VmArtifactSafepointSiteSha256 =
+		SafepointMetadata.VmReceipt.SiteSha256;
+	OutResult.VmArtifactSafepointInterval =
+		SafepointMetadata.VmReceipt.PollInterval;
+	OutResult.VmArtifactSafepointSiteCount =
+		SafepointMetadata.VmReceipt.SiteCount;
 	OutResult.VmArtifactSelectedBackend =
 		TEXT("wasmtime.cranelift.precompiled");
 	return true;
