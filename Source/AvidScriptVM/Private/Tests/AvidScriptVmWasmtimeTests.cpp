@@ -1824,6 +1824,87 @@ bool FAvidScriptVmWasmtimeArtifactCompilerTest::RunTest(
 		AuthorizeAvidScriptVmArtifact(
 			FirstResult.Artifact.AttestationId,
 			FirstResult.Artifact));
+	TestTrue(
+		TEXT("default artifact retains strict fuel instrumentation"),
+		FirstResult.Artifact.CompilerBuildIdentity.Contains(
+			TEXT(";fuel=on;"),
+			ESearchCase::CaseSensitive));
+
+	FAvidScriptVmArtifactCompileRequest FuelFreeRequest = Request;
+	FuelFreeRequest.bConsumeFuel = false;
+	FAvidScriptVmArtifactCompileResult FuelFreeResult;
+	if (!TestTrue(
+			TEXT("verified package artifact compiles without fuel instrumentation"),
+			CompileAvidScriptVmArtifact(FuelFreeRequest, FuelFreeResult)))
+	{
+		AddError(
+			FuelFreeResult.Error.Category
+			+ TEXT(": ")
+			+ FuelFreeResult.Error.Details);
+		return false;
+	}
+	TestFalse(
+		TEXT("fuel profile participates in the artifact cache key"),
+		FuelFreeResult.bCacheHit);
+	TestTrue(
+		TEXT("fuel-free artifact identity is explicit"),
+		FuelFreeResult.Artifact.CompilerBuildIdentity.Contains(
+			TEXT(";fuel=off;"),
+			ESearchCase::CaseSensitive));
+	TestNotEqual(
+		TEXT("strict and fuel-free artifacts have distinct compiler identities"),
+		FuelFreeResult.Artifact.CompilerBuildIdentity,
+		FirstResult.Artifact.CompilerBuildIdentity);
+
+	FAvidScriptVmError LoadError;
+	TUniquePtr<IAvidScriptVmBackend> FuelFreeBackend =
+		CreateWasmtimePrecompiledBackendForTest(LoadError);
+	if (!TestNotNull(
+			TEXT("fuel-free precompiled backend is created"),
+			FuelFreeBackend.Get()))
+	{
+		return false;
+	}
+	FAvidScriptVmLoadConfig FuelFreeConfig;
+	if (!TestTrue(
+			TEXT("fuel-free serialized artifact loads with a fuel-free budget"),
+			FuelFreeBackend->LoadArtifact(
+				FuelFreeResult.Artifact.MakeView(
+					EAvidScriptVmArtifactTrust::VerifiedPackage),
+				TEXT("wasmtime_artifact_compiler_fuel_free"),
+				FuelFreeConfig,
+				LoadError)))
+	{
+		AddError(LoadError.Category + TEXT(": ") + LoadError.Details);
+		return false;
+	}
+	TestEqual(
+		TEXT("runtime selects the artifact compiler profile"),
+		FuelFreeBackend->GetBackendInfo().RuntimeBuildIdentity,
+		FuelFreeResult.Artifact.CompilerBuildIdentity);
+
+	TUniquePtr<IAvidScriptVmBackend> FuelBudgetBackend =
+		CreateWasmtimePrecompiledBackendForTest(LoadError);
+	if (!TestNotNull(
+			TEXT("fuel-budget precompiled backend is created"),
+			FuelBudgetBackend.Get()))
+	{
+		return false;
+	}
+	FAvidScriptVmLoadConfig FuelBudgetConfig;
+	FuelBudgetConfig.ExecutionBudget.FuelPerEntry = 1024;
+	TestFalse(
+		TEXT("fuel-free artifact rejects a non-zero fuel budget"),
+		FuelBudgetBackend->LoadArtifact(
+			FuelFreeResult.Artifact.MakeView(
+				EAvidScriptVmArtifactTrust::VerifiedPackage),
+			TEXT("wasmtime_artifact_compiler_fuel_mismatch"),
+			FuelBudgetConfig,
+			LoadError));
+	TestEqual(
+		TEXT("fuel-free budget mismatch category"),
+		LoadError.Category,
+		FString(TEXT("artifact_budget_mismatch")));
 
 	FAvidScriptVmArtifactCompileResult CachedResult;
 	if (!TestTrue(

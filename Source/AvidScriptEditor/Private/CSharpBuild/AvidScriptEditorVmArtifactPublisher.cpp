@@ -316,6 +316,7 @@ bool FAvidScriptEditorVmArtifactPublisher::Publish(
 		EAvidScriptVmArtifactFormat::WasmtimeSerialized;
 	CompileRequest.TargetTriple = Config.VmArtifactTargetTriple;
 	CompileRequest.CanonicalWasmBytes = CanonicalWasmBytes;
+	CompileRequest.bConsumeFuel = false;
 	FAvidScriptVmArtifactCompileResult CompileResult;
 	if (!CompileAvidScriptVmArtifact(CompileRequest, CompileResult))
 	{

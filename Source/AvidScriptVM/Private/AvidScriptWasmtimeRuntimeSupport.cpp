@@ -324,3 +324,80 @@ bool ResolveAvidScriptWasmtimeCompilerProfile(
 	return true;
 #endif
 }
+
+bool ResolveAvidScriptWasmtimeCompilerProfileForArtifact(
+	FAvidScriptVmBackendInfo& InOutInfo,
+	AvidScriptWasmtimeEngineProfile& OutProfile,
+	const FString& CompilerBuildIdentity,
+	FString& OutError,
+	FString* OutErrorCategory)
+{
+	OutError.Reset();
+	OutProfile = {};
+	if (OutErrorCategory != nullptr)
+	{
+		OutErrorCategory->Reset();
+	}
+	if (CompilerBuildIdentity.IsEmpty())
+	{
+		if (OutErrorCategory != nullptr)
+		{
+			*OutErrorCategory = TEXT("artifact_compiler_mismatch");
+		}
+		OutError = TEXT("The serialized module compiler identity is empty.");
+		return false;
+	}
+
+	const FString TargetTriple = InOutInfo.TargetTriple;
+	FString FirstResolutionError;
+	FString FirstResolutionErrorCategory;
+	bool bResolvedAnyProfile = false;
+	const bool CandidateFuelModes[] = {false, true};
+	for (const bool bConsumeFuel : CandidateFuelModes)
+	{
+		FAvidScriptVmBackendInfo CandidateInfo = InOutInfo;
+		AvidScriptWasmtimeEngineProfile CandidateProfile = {};
+		FString CandidateError;
+		FString CandidateErrorCategory;
+		if (!ResolveAvidScriptWasmtimeCompilerProfile(
+				CandidateInfo,
+				CandidateProfile,
+				CandidateError,
+				&CandidateErrorCategory,
+				TargetTriple,
+				bConsumeFuel))
+		{
+			if (FirstResolutionError.IsEmpty())
+			{
+				FirstResolutionError = MoveTemp(CandidateError);
+				FirstResolutionErrorCategory =
+					MoveTemp(CandidateErrorCategory);
+			}
+			continue;
+		}
+		bResolvedAnyProfile = true;
+		if (CandidateInfo.RuntimeBuildIdentity == CompilerBuildIdentity)
+		{
+			InOutInfo = MoveTemp(CandidateInfo);
+			OutProfile = CandidateProfile;
+			return true;
+		}
+	}
+
+	if (!bResolvedAnyProfile)
+	{
+		if (OutErrorCategory != nullptr)
+		{
+			*OutErrorCategory = MoveTemp(FirstResolutionErrorCategory);
+		}
+		OutError = MoveTemp(FirstResolutionError);
+		return false;
+	}
+	if (OutErrorCategory != nullptr)
+	{
+		*OutErrorCategory = TEXT("artifact_compiler_mismatch");
+	}
+	OutError = TEXT(
+		"The serialized module compiler identity does not match a supported Wasmtime profile.");
+	return false;
+}

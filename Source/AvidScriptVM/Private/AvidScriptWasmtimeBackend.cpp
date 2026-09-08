@@ -683,13 +683,21 @@ public:
 #if PLATFORM_WINDOWS
 		FString DllLoadError;
 		FString CompilerProfileErrorCategory;
-		if (!ResolveAvidScriptWasmtimeCompilerProfile(
+		const bool bCompilerProfileResolved = bSerialized
+			? ResolveAvidScriptWasmtimeCompilerProfileForArtifact(
+				BackendInfo,
+				CompilerProfile,
+				Artifact.CompilerBuildIdentity,
+				DllLoadError,
+				&CompilerProfileErrorCategory)
+			: ResolveAvidScriptWasmtimeCompilerProfile(
 				BackendInfo,
 				CompilerProfile,
 				DllLoadError,
 				&CompilerProfileErrorCategory,
 				FString(),
-				bSerialized || ExecutionBudget.FuelPerEntry > 0))
+				ExecutionBudget.FuelPerEntry > 0);
+		if (!bCompilerProfileResolved)
 		{
 			LoadMetrics.RuntimeInitMs = MeasureWasmtimeElapsedMs(RuntimeInitStart);
 			SetWasmtimeError(
@@ -698,6 +706,16 @@ public:
 					? TEXT("runtime_init_failed")
 					: *CompilerProfileErrorCategory,
 				DllLoadError);
+			return false;
+		}
+		if (ExecutionBudget.FuelPerEntry > 0
+			&& !CompilerProfile.bConsumeFuel)
+		{
+			LoadMetrics.RuntimeInitMs = MeasureWasmtimeElapsedMs(RuntimeInitStart);
+			SetWasmtimeError(
+				OutError,
+				TEXT("artifact_budget_mismatch"),
+				TEXT("The serialized module omits fuel instrumentation required by the execution budget."));
 			return false;
 		}
 	#elif PLATFORM_ANDROID && PLATFORM_CPU_ARM_FAMILY

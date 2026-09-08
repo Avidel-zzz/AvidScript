@@ -232,7 +232,8 @@ bool CompileAvidScriptVmArtifact(
 			CompilerProfile,
 			RuntimeIdentityError,
 			&CompilerProfileErrorCategory,
-			Request.TargetTriple))
+			Request.TargetTriple,
+			Request.bConsumeFuel))
 	{
 		SetCompileError(
 			OutResult,

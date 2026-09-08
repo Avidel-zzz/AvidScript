@@ -460,7 +460,9 @@ if ($DynamicDispatcherCalls -ne 1) {
 if ($WasmtimeBackendSource.Contains('AVIDSCRIPT_WASMTIME_DLL_SHA256') -or
     $WasmtimeBackendSource.Contains('EnsureWasmtimeDllLoaded') -or
     -not $WasmtimeBackendSource.Contains('ResolveAvidScriptWasmtimeCompilerProfile') -or
+    -not $WasmtimeBackendSource.Contains('ResolveAvidScriptWasmtimeCompilerProfileForArtifact') -or
     -not $WasmtimeArtifactCompilerSource.Contains('ResolveAvidScriptWasmtimeCompilerProfile') -or
+    -not $WasmtimeArtifactCompilerSource.Contains('Request.bConsumeFuel') -or
     -not $WasmtimeRuntimeSupportSource.Contains('FPlatformProcess::GetDllExport') -or
     -not $WasmtimeRuntimeSupportSource.Contains('BuildAvidScriptWasmtimeCompilerIdentity') -or
     -not $WasmtimeCompilerProfileSource.Contains('wasmtime-v%s+avidscript.1')) {
@@ -1001,6 +1003,7 @@ $EditorCSharpBuildPipelineSource = Read-RequiredFile 'Source/AvidScriptEditor/Pr
 $CSharpGuestBuildScript = Read-RequiredFile 'Build/BuildCSharpActorLifecycle.ps1'
 foreach ($RequiredEditorArtifactContract in @(
     'CompileAvidScriptVmArtifact',
+    'CompileRequest.bConsumeFuel = false',
     'wasmtime_serialized_v1',
     'canonical_sha256',
     'compiler_build_identity',

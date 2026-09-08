@@ -39,6 +39,7 @@ struct FAvidScriptVmArtifactCompileRequest
 	FAvidScriptVmBackendSelection Selection;
 	TArrayView<const uint8> CanonicalWasmBytes;
 	FString TargetTriple;
+	bool bConsumeFuel = true;
 };
 
 struct FAvidScriptVmArtifactCompileResult
