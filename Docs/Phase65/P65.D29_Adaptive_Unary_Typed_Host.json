@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "phase": "P65.D29",
+  "evidence_class": "formal_editor",
+  "implementation": {
+    "adaptive_reflection_commit": "3290da29",
+    "typed_host_commit": "653f9537",
+    "gameplay_oracle_commit": "199fa2f9",
+    "gate_evaluator_commit": "8fa891a1",
+    "signature_family": "SelfI32ToGuestI32",
+    "wasm_signature": "(iiii)i"
+  },
+  "candidate": {
+    "id": "17f2efb66eff64bef745",
+    "manifest_sha256": "0246e2d9f3505acc1c4c67c43d81026febaa17de389422fa91f9328d500ec20c",
+    "commit": "199fa2f92ba004a9fdd5470f6278d31eb1c2c3ac",
+    "tree": "fe96068222803d051e5ada0416de66cb2eefe9b3",
+    "clean": true,
+    "architecture_checker_sha256": "118da462639d987bc0f0d56235bd1c45e9b2595ed9ef7688fd310bdce9c09a82"
+  },
+  "verification": {
+    "editor_incremental_build_actions": 8,
+    "typed_thunk_automation_success": 1,
+    "typed_thunk_automation_total": 1,
+    "micro": {
+      "process_runs": 5,
+      "warmup_samples": 5,
+      "timed_samples": 30,
+      "correct_samples": 9000,
+      "total_samples": 9000,
+      "scalar_noop_adaptive_native_hits": 19200000,
+      "scalar_noop_process_event_fallbacks": 0,
+      "vector_ref_out_process_event_fallbacks": 600000
+    },
+    "gameplay": {
+      "process_runs": 5,
+      "warmup_samples": 5,
+      "timed_samples": 30,
+      "correct_samples": 1800,
+      "total_samples": 1800,
+      "fallback_count": 0,
+      "reject_count": 0
+    },
+    "excluded_attempts": [
+      {
+        "kind": "physical_cost",
+        "process_run": 4,
+        "exit_code": -1073741819,
+        "classification": "ue_static_mesh_async_postload_host_race_before_workload"
+      }
+    ]
+  },
+  "unified_gate": {
+    "passed": 14,
+    "total": 18,
+    "overall_pass": false,
+    "passed_metrics": {
+      "semantic_vs_puerts_reflection": 0.7382449501975406,
+      "s1_vs_puerts_static": 0.7962534715690939,
+      "callback_vs_puerts": 0.4569982624333224,
+      "small_vs_best_puerts": 0.2251883173402392,
+      "dense_vs_best_puerts": 0.3101926163723917,
+      "typed_empty_net_ns": 8.161999999999999,
+      "prepared_export_ratio": 0.8444669421751678,
+      "fused_fast_hit_ratio": 0.9999950657894737,
+      "journal_slow_path_count": 0
+    },
+    "failed_metrics": {
+      "wasmtime_v8_p95_geometric_mean_ratio": 1.1305817799948508,
+      "kernel_p95_win_rate": 0.3333333333333333,
+      "generated_scalar_ns": 28.110546875,
+      "generated_property_ns": 51.83671875
+    }
+  },
+  "micro_p50_ns": {
+    "scalar_noop": {
+      "adaptive_semantic": 74.86484375,
+      "puerts_reflection": 98.190625,
+      "generated_s1": 27.5671875,
+      "puerts_static": 32.021484375
+    },
+    "scalar_add_int32": {
+      "adaptive_semantic": 82.91875,
+      "puerts_reflection": 112.31875,
+      "generated_s1": 28.110546875,
+      "puerts_static": 35.303515625
+    },
+    "property_get_set": {
+      "adaptive_semantic": 112.1046875,
+      "puerts_reflection": 112.56875,
+      "generated_s1": 51.83671875,
+      "puerts_static": 72.67109375
+    }
+  },
+  "gameplay_p50_ns_per_operation": {
+    "small_generated_s1": 52.4745843349359,
+    "small_best_puerts": 233.0253405448718,
+    "dense_data_oriented": 125.24192116477273,
+    "dense_best_puerts": 403.75532670454544
+  },
+  "controlled_runtime": {
+    "kernel_count": 12,
+    "p50_geometric_mean_ratio": 1.1055118691696,
+    "p95_geometric_mean_ratio": 1.1305817799948508,
+    "p50_win_rate": 0.583333333333333,
+    "p95_win_rate": 0.333333333333333,
+    "largest_p95_gaps": {
+      "scalar_float": 2.095772142353021,
+      "simd128": 1.3336501995266812,
+      "mixed_gameplay": 1.3288649788669529,
+      "data_branch": 1.136661845257944
+    },
+    "correctness_failures": 0,
+    "fallback_used": false
+  },
+  "physical_cost": {
+    "typed_empty_p50_ns": 8.161999999999999,
+    "typed_empty_p95_ns": 10.135,
+    "prepared_export_over_generic_p50": 0.844466942175168,
+    "max_reconstruction_error_ratio": 0.0248000000000005
+  },
+  "evidence_sha256": {
+    "unified_gate": "af45b1a4ad04c647e2b9a2d46c6ed9dd99a158811136da1a1fb3d69c533f2cc1",
+    "controlled_aggregate": "c9a3257f3409cec2566e3d41449068d251b4d65906c87ba3ffe424589ffc4830",
+    "physical_aggregate": "6e373b25fb07df2a1755c72afd467d01bba6c9bd28264107e7d8aed0cd3dc2fb",
+    "micro_process_results": [
+      "f525ce820c0a34853f02880ca38e0944337dc7b08f3c4b987916ce12d8391eb6",
+      "ed7b8e9b608cecfcf5695b72de327e05fb80e3efa36d24cd4223698066a3e61c",
+      "5c6153d85c3c8f64c69afa6cfe569f837099bfd366e0b73dca08cba0b9e7f5fd",
+      "efeaf66c08b512d2b37d17c4764458af613bffce15717352426f2e7ba71aab21",
+      "6291cbc294cb0ee0be3a8debdd11dc3bdfa58345f4c7d2ffec7435021a641e18"
+    ],
+    "gameplay_process_results": [
+      "1a888580f77717c574a6c2d659943e389394bc4745524a73783c9dcd22d6e37c",
+      "ca7a2bae5c7b78f5683185a9e05837b1b9d55ab2f67734bec1dc4f61715142a6",
+      "20769c79b8087153773aff6bfb63d39d1b4f8aaffaca00394f83b88ab1ccb94a",
+      "8f7697a6846e72ec79b3cc5e5216042a0a294c5efad47989a0d2385b6fdbc4d6",
+      "48a340fcc565e9225269c88a3d1d11b07217f5d31a219625b50507b72b7e07d1"
+    ]
+  },
+  "open_debt": [
+    "P65-D03-ControlledLeadership",
+    "generated_scalar_absolute_latency",
+    "generated_property_absolute_latency",
+    "angelscript_same_semantics"
+  ]
+}
