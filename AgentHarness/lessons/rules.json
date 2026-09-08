@@ -359,7 +359,7 @@
       "summary": "PowerShell 会把未引用的 Git revision 花括号解释为自身语法。",
       "prevention": "调用 git rev-parse 等命令时，把 HEAD^{tree}、HEAD^{commit} 一类 revision 写成单引号参数；同时分别核对 commit 与 tree 输出。",
       "source": "observed:2026-08-31-P60.A2",
-      "last_observed": "2026-08-31 P60.A2 首次未引用 HEAD^{tree}，PowerShell 改写参数并导致 git rev-parse 失败；加单引号后正确取得 tree SHA"
+      "last_observed": "2026-09-08 P65.D28 验证修正后的 D9 提交标识时，再次把 9971fb33^{commit} 作为未引用参数传给 PowerShell，导致 git rev-parse 失败；无文件副作用，随即改为整体单引号。此前 P60.A2 已发生同类问题"
     },
     {
       "id": "phase-mutations-use-phase-workflow-entry",
@@ -850,6 +850,14 @@
       "prevention": "发布 packaged evidence 前同时检查进程退出码、UAT 复制失败文本和最终容器闭包；每个 .utoc 必须存在同目录、同名且非空的 .ucas。性能宿主使用 -nodebuginfo，避免归档不参与运行的巨型 PDB。",
       "source": "Benchmarks/PuertsComparison/Leadership/Scripts/New-Phase65PackagedBenchmarkHost.ps1",
       "last_observed": "2026-09-08 P65.D21 磁盘空间不足使 UAT 无法复制 AvidTPSTemplate-Windows.ucas，但仍以 ExitCode=0 和 BUILD SUCCESSFUL 结束；旧 producer 发布了不可启动的 49 文件 host，首次 calibration 在 Pak 挂载前断言"
+    },
+    {
+      "id": "documented-git-evidence-must-resolve",
+      "tags": ["git", "docs", "evidence"],
+      "summary": "人工抄写的提交缩写可能只错一个字符，却会让可追溯证据看起来不存在。",
+      "prevention": "写入 Phase 文档、README 或证据 JSON 前，先用 git rev-parse --verify 解析每个 commit/tree 标识，再从命令输出填入文档；审计历史时先以 git log --all -- <path> 复核，不凭近似哈希判断历史丢失。",
+      "source": "Docs/Phase65/P65.D9_Demand_Driven_Fuel_Profile.md",
+      "last_observed": "2026-09-08 P65.D28 审计发现 D9 文档把真实实现提交 9971fb33 记录成 9971fb3c，导致 git show 误报 unknown revision；已由路径历史定位并修正"
     }
   ]
 }
