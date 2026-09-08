@@ -168,40 +168,40 @@ Assert-True ((Get-ExpectedFusedGeneratedHits `
 
 $smallGameplayContract = [pscustomobject]@{
     logical_entities_per_frame = 1
-    scalar_property_operations_per_entity = 64
+    logical_operations_per_frame = 78
+    vector_operations_per_entity = 8
     property_write_operations_per_frame = 32
-    event_operations_per_frame = 2
 }
 Assert-True ((Get-ExpectedFusedGeneratedHits `
         -Workload 'gameplay_frame_small' `
         -Iterations 3 `
         -WorkloadContract $smallGameplayContract `
-        -DataLane $false) -eq 198) (
-    'generated gameplay must fuse scalar, property, and event operations')
+        -DataLane $false) -eq 210) (
+    'generated gameplay must fuse every non-vector operation')
 Assert-True ((Get-ExpectedFusedGeneratedHits `
         -Workload 'gameplay_frame_small' `
         -Iterations 3 `
         -WorkloadContract $smallGameplayContract `
-        -DataLane $true) -eq 102) (
+        -DataLane $true) -eq 114) (
     'data gameplay must exclude command-buffered property writes from fused calls')
 
 $denseGameplayContract = [pscustomobject]@{
     logical_entities_per_frame = 1024
-    scalar_property_operations_per_entity = 8
+    logical_operations_per_frame = 11264
+    vector_operations_per_entity = 2
     property_write_operations_per_frame = 4096
-    event_operations_per_frame = 512
 }
 Assert-True ((Get-ExpectedFusedGeneratedHits `
         -Workload 'gameplay_frame_dense' `
         -Iterations 2 `
         -WorkloadContract $denseGameplayContract `
-        -DataLane $false) -eq 17408) (
-    'dense generated gameplay must include its alternating event calls')
+        -DataLane $false) -eq 18432) (
+    'dense generated gameplay must include object and event calls')
 Assert-True ((Get-ExpectedFusedGeneratedHits `
         -Workload 'gameplay_frame_dense' `
         -Iterations 2 `
         -WorkloadContract $denseGameplayContract `
-        -DataLane $true) -eq 9216) (
+        -DataLane $true) -eq 10240) (
     'dense data gameplay fused count must exclude property commands exactly')
 
 $dynamicGeneratedSample = [pscustomobject]@{

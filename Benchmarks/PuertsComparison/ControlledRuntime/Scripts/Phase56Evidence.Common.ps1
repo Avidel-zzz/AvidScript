@@ -189,14 +189,14 @@ function Get-ExpectedFusedGeneratedHits {
         return $Iterations * 2u
     }
     if ($Workload -in @('gameplay_frame_small', 'gameplay_frame_dense')) {
-        [uint64]$scalarPropertyCount =
+        [uint64]$logicalOperationCount =
+            $Iterations *
+            [uint64]$WorkloadContract.logical_operations_per_frame
+        [uint64]$vectorCount =
             $Iterations *
             [uint64]$WorkloadContract.logical_entities_per_frame *
-            [uint64]$WorkloadContract.scalar_property_operations_per_entity
-        [uint64]$eventCount =
-            $Iterations *
-            [uint64]$WorkloadContract.event_operations_per_frame
-        [uint64]$typedShapeCount = $scalarPropertyCount + $eventCount
+            [uint64]$WorkloadContract.vector_operations_per_entity
+        [uint64]$typedShapeCount = $logicalOperationCount - $vectorCount
         if ($DataLane) {
             return $typedShapeCount -
                 ($Iterations *
