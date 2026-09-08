@@ -135,8 +135,9 @@
       "id": "structured-artifacts-use-parsers",
       "tags": ["json", "schema", "artifacts"],
       "summary": "结构化状态和证据由解析器读写，不能靠文本替换。",
-      "prevention": "JSON 使用 ConvertFrom-Json/ConvertTo-Json 或领域 parser；写回后执行 schema 与原子性检查。",
-      "source": "legacy:archive"
+      "prevention": "JSON 使用 ConvertFrom-Json/ConvertTo-Json 或领域 parser；陌生 artifact 先单独列出当前层属性，再在后续调用访问已确认字段，禁止在同一探针中边发现结构边猜测下一层。写回后执行 schema 与原子性检查。",
+      "source": "legacy:archive",
+      "last_observed": "2026-09-08 P65.D26 首次读取 benchmark result 时先列出根属性，却在同一命令继续索引不存在的 results 数组；该只读探针部分失败，随后按已确认的 samples 属性逐层读取"
     },
     {
       "id": "generated-ue-api-not-handwritten",
