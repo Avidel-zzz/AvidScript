@@ -82,6 +82,8 @@ internal sealed class WasmFunctionCompiler
 
         foreach (GuestBasicBlock block in function.Blocks)
         {
+            WasmBlockStackificationPlan stackification =
+                WasmBlockStackificationPlan.Create(block, IsStackifiableScalarValue);
             WriteLocalGet(body, pcLocalIndex);
             body.WriteByte(0x41);
             body.WriteS32(blockIndices[block.Id]);
@@ -94,9 +96,23 @@ internal sealed class WasmFunctionCompiler
                 ++instructionIndex)
             {
                 GuestInstruction instruction = block.Instructions[instructionIndex];
-                instructionOffsets.Add(new WasmFunctionInstructionOffset(
-                    GuestDebugIdentity.Instruction(function.Id, block.Id, instructionIndex),
-                    body.Count));
+                if (stackification.IsDeferred(instructionIndex))
+                {
+                    continue;
+                }
+                if (stackification.TryGetExpression(
+                    instructionIndex,
+                    out WasmStackifiedExpression? expression))
+                {
+                    CompileStackifiedExpression(
+                        body,
+                        block,
+                        expression,
+                        instructionOffsets);
+                    continue;
+                }
+
+                AddInstructionOffset(instructionOffsets, block, instructionIndex, body.Count);
                 CompileInstruction(body, instruction);
             }
 
@@ -242,6 +258,177 @@ internal sealed class WasmFunctionCompiler
         }
     }
 
+    private void CompileStackifiedExpression(
+        WasmBinaryWriter body,
+        GuestBasicBlock block,
+        WasmStackifiedExpression expression,
+        ICollection<WasmFunctionInstructionOffset> instructionOffsets)
+    {
+        GuestInstruction root = block.Instructions[expression.RootInstructionIndex];
+        if (root.Op == "local_store")
+        {
+            string targetId = root.TargetId!;
+            GuestType targetType = GetValueType(targetId);
+            if (frame.HasSlot(targetId))
+            {
+                WriteFrameAddress(body, targetId);
+            }
+            CompileStackifiedOperand(
+                body,
+                block,
+                root.OperandIds[0],
+                expression,
+                instructionOffsets);
+            AddInstructionOffset(
+                instructionOffsets,
+                block,
+                expression.RootInstructionIndex,
+                body.Count);
+            if (frame.HasSlot(targetId))
+            {
+                WasmMemoryEmitter.WriteStore(body, targetType);
+            }
+            else
+            {
+                WriteLocalSet(body, localIndices[targetId]);
+            }
+            return;
+        }
+
+        CompileStackifiedValue(
+            body,
+            block,
+            expression.RootInstructionIndex,
+            expression,
+            instructionOffsets);
+        WriteResult(body, root);
+    }
+
+    private void CompileStackifiedOperand(
+        WasmBinaryWriter body,
+        GuestBasicBlock block,
+        string operandId,
+        WasmStackifiedExpression expression,
+        ICollection<WasmFunctionInstructionOffset> instructionOffsets)
+    {
+        if (expression.ProducerIndicesByResultId.TryGetValue(
+            operandId,
+            out int producerIndex))
+        {
+            CompileStackifiedValue(
+                body,
+                block,
+                producerIndex,
+                expression,
+                instructionOffsets);
+            return;
+        }
+        WriteLocalGet(body, localIndices[operandId]);
+    }
+
+    private void CompileStackifiedValue(
+        WasmBinaryWriter body,
+        GuestBasicBlock block,
+        int instructionIndex,
+        WasmStackifiedExpression expression,
+        ICollection<WasmFunctionInstructionOffset> instructionOffsets)
+    {
+        GuestInstruction instruction = block.Instructions[instructionIndex];
+        switch (instruction.Op)
+        {
+            case "constant":
+                AddInstructionOffset(instructionOffsets, block, instructionIndex, body.Count);
+                WriteScalarConstantValue(
+                    body,
+                    instruction.Constant!,
+                    GetValueType(instruction.ResultId!));
+                return;
+            case "local_load":
+                AddInstructionOffset(instructionOffsets, block, instructionIndex, body.Count);
+                WriteScalarLocalLoadValue(body, instruction.TargetId!);
+                return;
+            case "copy":
+                CompileStackifiedOperand(
+                    body,
+                    block,
+                    instruction.OperandIds[0],
+                    expression,
+                    instructionOffsets);
+                AddInstructionOffset(instructionOffsets, block, instructionIndex, body.Count);
+                return;
+            case "binary":
+                CompileStackifiedOperand(
+                    body,
+                    block,
+                    instruction.OperandIds[0],
+                    expression,
+                    instructionOffsets);
+                CompileStackifiedOperand(
+                    body,
+                    block,
+                    instruction.OperandIds[1],
+                    expression,
+                    instructionOffsets);
+                AddInstructionOffset(instructionOffsets, block, instructionIndex, body.Count);
+                body.WriteByte(ResolveBinaryOpcode(
+                    GetValueType(instruction.OperandIds[0]).Storage,
+                    instruction.OperatorKind!));
+                return;
+            case "convert":
+                string operandId = instruction.OperandIds[0];
+                CompileStackifiedOperand(
+                    body,
+                    block,
+                    operandId,
+                    expression,
+                    instructionOffsets);
+                AddInstructionOffset(instructionOffsets, block, instructionIndex, body.Count);
+                GuestType sourceType = GetValueType(operandId);
+                GuestType targetType = GetValueType(instruction.ResultId!);
+                if (!string.Equals(sourceType.Storage, targetType.Storage, StringComparison.Ordinal))
+                {
+                    body.WriteByte(ResolveConversionOpcode(sourceType.Storage, targetType.Storage));
+                }
+                return;
+            default:
+                throw new InvalidOperationException(
+                    $"Instruction '{instruction.Op}' is not a stackifiable scalar producer.");
+        }
+    }
+
+    private void WriteScalarLocalLoadValue(WasmBinaryWriter body, string targetId)
+    {
+        GuestType type = GetValueType(targetId);
+        if (frame.HasSlot(targetId))
+        {
+            WriteFrameAddress(body, targetId);
+            WasmMemoryEmitter.WriteLoad(body, type);
+        }
+        else
+        {
+            WriteLocalGet(body, localIndices[targetId]);
+        }
+    }
+
+    private bool IsStackifiableScalarValue(string valueId)
+    {
+        return registers.TryGetValue(valueId, out GuestRegister? register)
+            && moduleLayout.Types.TryGetValue(register.TypeId, out GuestType? type)
+            && !moduleLayout.IsMemoryType(type.Id)
+            && type.Storage is "i32" or "i64" or "f32" or "f64";
+    }
+
+    private void AddInstructionOffset(
+        ICollection<WasmFunctionInstructionOffset> instructionOffsets,
+        GuestBasicBlock block,
+        int instructionIndex,
+        int functionOffset)
+    {
+        instructionOffsets.Add(new WasmFunctionInstructionOffset(
+            GuestDebugIdentity.Instruction(function.Id, block.Id, instructionIndex),
+            functionOffset));
+    }
+
     private void CompileInstruction(
         WasmBinaryWriter body,
         GuestInstruction instruction)
@@ -339,6 +526,15 @@ internal sealed class WasmFunctionCompiler
             return;
         }
 
+        WriteScalarConstantValue(body, constant, targetType);
+        WriteResult(body, instruction);
+    }
+
+    private static void WriteScalarConstantValue(
+        WasmBinaryWriter body,
+        GuestConstant constant,
+        GuestType targetType)
+    {
         switch (targetType.Storage)
         {
             case "i32":
@@ -369,8 +565,6 @@ internal sealed class WasmFunctionCompiler
                 throw new NotSupportedException(
                     $"Constant storage '{targetType.Storage}' is not scalar.");
         }
-
-        WriteResult(body, instruction);
     }
 
     private void CompileCopy(WasmBinaryWriter body, GuestInstruction instruction)
@@ -453,13 +647,12 @@ internal sealed class WasmFunctionCompiler
         }
         else if (frame.HasSlot(targetId))
         {
-            WriteFrameAddress(body, targetId);
-            WasmMemoryEmitter.WriteLoad(body, type);
+            WriteScalarLocalLoadValue(body, targetId);
             WriteResult(body, instruction);
         }
         else
         {
-            WriteLocalGet(body, localIndices[targetId]);
+            WriteScalarLocalLoadValue(body, targetId);
             WriteResult(body, instruction);
         }
     }
