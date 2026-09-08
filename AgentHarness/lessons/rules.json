@@ -858,6 +858,14 @@
       "prevention": "写入 Phase 文档、README 或证据 JSON 前，先用 git rev-parse --verify 解析每个 commit/tree 标识，再从命令输出填入文档；审计历史时先以 git log --all -- <path> 复核，不凭近似哈希判断历史丢失。",
       "source": "Docs/Phase65/P65.D9_Demand_Driven_Fuel_Profile.md",
       "last_observed": "2026-09-08 P65.D28 审计发现 D9 文档把真实实现提交 9971fb33 记录成 9971fb3c，导致 git show 误报 unknown revision；已由路径历史定位并修正"
+    },
+    {
+      "id": "benchmark-runner-profile-schema-must-match",
+      "tags": ["benchmark", "schema", "workflow"],
+      "summary": "文件名相关不代表 benchmark runner 与 profile schema 兼容，错误配对会在启动引擎前失败。",
+      "prevention": "调用 benchmark runner 前同时读取 runner 的 profile validator 与目标 profile schema_version，并从上一份成功运行的 metadata 或 host log 复用真实入口；禁止只凭 Phase 或文件名配对脚本。参数校验失败的目录不得计为有效 attempt。",
+      "source": "Benchmarks/PuertsComparison/Scripts/PuertsBenchmarkSidecar.Common.ps1",
+      "last_observed": "2026-09-08 P65.D28 把 schema v1 的 Phase65 packaged diagnostic profile 传给只接受 schema v2 的通用 Invoke-PuertsBenchmarkProcesses runner；引擎未启动，随后改为从 D27 成功证据反查真实入口"
     }
   ]
 }
