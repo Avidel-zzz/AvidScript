@@ -903,9 +903,9 @@
       "id": "benchmark-runner-profile-schema-must-match",
       "tags": ["benchmark", "schema", "workflow"],
       "summary": "文件名相关不代表 benchmark runner 或 evaluator 与 profile schema 兼容，错误配对会在启动或汇总前失败。",
-      "prevention": "调用 benchmark runner 或 evaluator 前同时读取工具的 profile validator、必需属性与目标 profile schema_version，并从上一份成功运行的 metadata、host log 或报告脚本复用真实入口；禁止只凭 Phase 或文件名配对工具。参数校验失败的目录不得计为有效 attempt。",
+      "prevention": "调用 benchmark runner 或 evaluator 前先读取目标 profile 的 schema_version，再检索哪个入口显式接受该版本，并从上一份成功运行的 metadata、host log 或报告脚本复用真实入口；未完成这两步不得启动。禁止只凭 Phase 或文件名配对工具，参数校验失败的目录不得计为有效 attempt。",
       "source": "Benchmarks/PuertsComparison/Scripts/PuertsBenchmarkSidecar.Common.ps1",
-      "last_observed": "2026-09-08 P65.D29 先把 schema v1 Phase56Micro.formal 传给 schema v2 sidecar runner，随后又把 micro-only profile 传给要求 profile.gates 的 gameplay evaluator；两次均在产出前失败，formal raw 样本不受影响。此前 P65.D28 已发生同类入口错误"
+      "last_observed": "2026-09-08 P65.D30 再次把 schema v1 Phase56Micro.diagnostic 传给只接受 schema v2 的 Invoke-PuertsBenchmarkProcesses，ASP54S2004 在产出前拒绝；后续必须先以 schema_version 反查入口。P65.D29 与 P65.D28 已发生同类错误"
     },
     {
       "id": "tool-wrapper-strings-are-syntax-checked",
