@@ -8,7 +8,55 @@ internal static class WasmArtifactInspectionReportTests
     public static int Run()
     {
         PublishedArtifactInspectionReadsActualExports();
-        return 1;
+        CooperativeSafepointReceiptBindsCompilerInputs();
+        return 2;
+    }
+
+    private static void CooperativeSafepointReceiptBindsCompilerInputs()
+    {
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            "AvidScriptSafepointReceipt",
+            Guid.NewGuid().ToString("N"));
+        string reportPath = Path.Combine(root, "sample.safepoints.json");
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            byte[] guestIrBytes = { 1, 2, 3, 4 };
+            byte[] wasmBytes = CreateExportedFunctionModule();
+            WasmCooperativeSafepointAttestation attestation = new(
+                2,
+                64,
+                2,
+                1,
+                3,
+                new string('a', 64),
+                true);
+            WasmCooperativeSafepointAttestationReport.WriteJson(
+                reportPath,
+                guestIrBytes,
+                wasmBytes,
+                attestation);
+
+            using JsonDocument document = JsonDocument.Parse(
+                File.ReadAllBytes(reportPath));
+            JsonElement rootElement = document.RootElement;
+            JsonElement proof = rootElement.GetProperty("proof");
+            Assert(rootElement.GetProperty("schema_version").GetInt32() == 1
+                && rootElement.GetProperty("guest_ir_sha256").GetString()?.Length == 64
+                && rootElement.GetProperty("wasm_sha256").GetString()?.Length == 64,
+                "safepoint receipt should bind both compiler input and output");
+            Assert(proof.GetProperty("schema_version").GetInt32() == 2
+                && proof.GetProperty("site_count").GetInt32() == 3
+                && proof.GetProperty("site_sha256").GetString() == new string('a', 64)
+                && proof.GetProperty("verified").GetBoolean(),
+                "safepoint receipt should preserve the verified schema 2 identity");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     private static void PublishedArtifactInspectionReadsActualExports()

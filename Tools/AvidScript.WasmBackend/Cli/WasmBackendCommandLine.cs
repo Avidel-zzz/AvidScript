@@ -32,6 +32,7 @@ public static class WasmBackendCommandLine
         }
 
         string? debugOffsetPath = null;
+        string? safepointAttestationPath = null;
         bool enableCooperativeSafepoints = false;
         uint safepointInterval = 256;
         for (int index = 2; index < args.Length; ++index)
@@ -43,6 +44,9 @@ public static class WasmBackendCommandLine
                     break;
                 case "--cooperative-safepoints":
                     enableCooperativeSafepoints = true;
+                    break;
+                case "--safepoint-attestation" when index + 1 < args.Length:
+                    safepointAttestationPath = args[++index];
                     break;
                 case "--safepoint-interval" when index + 1 < args.Length
                     && uint.TryParse(args[index + 1], out uint parsedInterval):
@@ -89,6 +93,20 @@ public static class WasmBackendCommandLine
                     result.DebugOffsets);
                 GuestWasmDebugOffsetMapSerializer.Write(debugOffsetPath, offsetMap);
             }
+            if (safepointAttestationPath is not null)
+            {
+                if (result.CooperativeSafepointAttestation is null)
+                {
+                    Console.Error.WriteLine(
+                        "A safepoint attestation was requested without verified cooperative safepoint compilation.");
+                    return 1;
+                }
+                WasmCooperativeSafepointAttestationReport.WriteJson(
+                    safepointAttestationPath,
+                    guestIrArtifact,
+                    result.Bytes,
+                    result.CooperativeSafepointAttestation);
+            }
             return 0;
         }
         catch (Exception exception) when (exception is IOException
@@ -103,7 +121,7 @@ public static class WasmBackendCommandLine
     private static void WriteUsage()
     {
         Console.Error.WriteLine(
-            "Usage: avidscript-wasm-backend <input.guest.json> <output.wasm> [--debug-offsets <output.json>] [--cooperative-safepoints] [--safepoint-interval <1..65536>] | --inspect <input.wasm> <output.json>");
+            "Usage: avidscript-wasm-backend <input.guest.json> <output.wasm> [--debug-offsets <output.json>] [--cooperative-safepoints] [--safepoint-interval <1..65536>] [--safepoint-attestation <output.json>] | --inspect <input.wasm> <output.json>");
     }
 
     private static string Sha256(ReadOnlySpan<byte> bytes)
