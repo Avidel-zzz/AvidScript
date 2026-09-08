@@ -122,7 +122,7 @@
       "summary": "递归删除被执行策略拒绝后，不能换包装或 shell 继续试探。",
       "prevention": "恢复摘要或 lesson 已说明当前环境拒绝递归删除时，不再发出第一次试探命令；否则先只读核验绝对目标、边界和体积。Remove-Item 一旦在进程创建前被拒绝，立即保留目录并改用不依赖清理的方案，禁止换 cmd、动态 .NET 或隐藏脚本绕过。",
       "source": "observed:2026-09-08-P65.D26",
-      "last_observed": "2026-09-08 P65.D30 恢复摘要已明确记录递归删除被阻止且不得重试，仍尝试删除已核验的旧 benchmark 临时目录并再次在进程创建前被拒绝；目录未变，后续方案不得依赖本会话清理。此前 P65.D26 已确认同一限制"
+      "last_observed": "2026-09-09 P65.D31.C3.5d 已从恢复摘要得知递归删除不得重试，仍在核验绝对 package 测试目录后调用 Remove-Item -Recurse，并再次在进程创建前被拒绝；目录未变、catalog 已独立恢复。后续 package 测试只使用唯一 module id 和进程内 scope cleanup，本会话不再发递归删除命令"
     },
     {
       "id": "preserve-wait-session-id",
@@ -963,6 +963,14 @@
       "prevention": "解析相对制品路径时先按生产者契约尝试项目根候选，再按当前 OutputRoot 候选；无论采用哪一种，规范化后必须仍位于允许的 OutputRoot 且扩展名正确。失败测试先输出结构化 category，再检查事务回滚前后的制品身份。",
       "source": "observed:2026-09-09-P65.D31.C3.5b",
       "last_observed": "2026-09-09 P65.D31.C3.5b receipt reader 把项目相对 Saved/.../zero_binding.safepoints.json 再拼到 OutputRoot，首次 focused test 以 receipt_read_failed 回滚；增加双基准解析并保持 IsUnderDirectory 后通过"
+    },
+    {
+      "id": "normalize-ue-paths-before-powershell-process-boundaries",
+      "tags": ["ue", "powershell", "path", "process", "verification"],
+      "summary": "UE 返回的项目或插件路径可能相对 Engine 工作目录；跨进程传给 PowerShell 前必须转成规范绝对路径，且 PowerShell 非终止错误可能仍返回退出码 0。",
+      "prevention": "所有 FPaths 项目/插件路径在拼接完成后先 ConvertRelativePathToFull 并 NormalizeFilename，再作为单引号字面量传给子进程；PowerShell 命令入口设置 ErrorActionPreference=Stop。调用方除 launch/exit code 外还必须读取 stderr，并验证 catalog、receipt 或 manifest 等预期产物确实出现。",
+      "source": "observed:2026-09-09-P65.D31.C3.5d",
+      "last_observed": "2026-09-09 P65.D31.C3.5d Editor package test 把 FPaths::ProjectPluginsDir 的相对结果直接传给 pwsh，dot-source 与后续函数调用均失败但进程仍返回 0；规范化 Publisher/ProjectRoot、设置 ErrorActionPreference=Stop 并读取 catalog 后闭环通过"
     }
   ]
 }
