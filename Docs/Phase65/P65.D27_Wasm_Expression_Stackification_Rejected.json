@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "phase": "P65.D27",
+  "evidence_class": "diagnostic_rejected",
+  "performance_gate_result": "rejected",
+  "candidate": {
+    "implementation_commit": "e62c62e36732f0273cf6e3489007a7c3597878bd",
+    "candidate_tree": "7fe086f268c2afad39921b3ab0b0bdb79d1f1d7f",
+    "candidate_id": "d5959e20d26d326f1d6f",
+    "candidate_manifest_sha256": "83671401afebcc8b4f84d27df71e1607f90a6236849da0f4272b6c9b0dd9d6bb",
+    "packaged_host_manifest_sha256": "763d74cbcb9283cc0c03d48baac82e356c43115a7dcb75de02bddba470e24469",
+    "archive_content_sha256": "bde36dac5eb1d034d9faaa4ca219201c14a6bc44edb401adc59bef8af255991c",
+    "archive_file_count": 43,
+    "launcher_sha256": "15dedb74256d4daaa117f718719ebd797c0a7bf442ac444420cbc0322da2620f",
+    "runtime_executable_sha256": "fba1936e36c230f4ad7089590e4917cf64d0c648c9dc236fc8276782f2f56941",
+    "uat_log_sha256": "54462579ba9c776e0ccf2c6025c68d72036c2e65f6defcd32859d6e780e21484",
+    "pak_sha256": "86757e0a4d940ee461c1d05ddea4b1c9eb891e9669c631fcd79e254c0591e5a2",
+    "generated_s1_wasm_sha256": "08ee404e942d61869336ec3f583e9c764598cccff0ac9a116bcb7c73fa647d6b",
+    "generated_s1_wasm_size_bytes": 15600,
+    "revert_commit": "379f6eca056e9acbf0a41f025b8c862c67dc01b7"
+  },
+  "verification": {
+    "managed_tests_succeeded": 17,
+    "managed_tests_total": 17,
+    "editor_build_actions_succeeded": 5,
+    "editor_build_actions_total": 5,
+    "editor_build_log_sha256": "41c49ae0b29050984082b721b4c9fe0688b8600285cfe11d2c1e6e6bcb83cad4",
+    "architecture_checker_sha256": "a2c10ef70aa4908c23fc59fcb2bf405210f1dcfbfd29c23d027ee07132a214d5",
+    "diagnostic_correct_samples": 600,
+    "diagnostic_total_samples": 600,
+    "generated_fallback_samples": 0,
+    "generated_reject_samples": 0,
+    "formal_run_performed": false
+  },
+  "diagnostic": {
+    "profile_sha256": "0f402a3ff4c507cc562f23b8d5dc3d9ef2cc26da0b52ea757b27233224dbc596",
+    "request_sha256": "ba3da2fd1ef73113142f1cadcea2fc695ac246870998c653dafcc50dc4bf0519",
+    "result_sha256": "5716fad3abdc48024b837459c15f44aa3ecbf0029afcaadd5210bd0f24b3367e",
+    "pure_integer_generated_s1_p50_ns": 1.942138671875,
+    "pure_integer_generated_s1_p95_ns": 2.0908203125,
+    "pure_integer_puerts_static_p50_ns": 0.97784423828125,
+    "pure_integer_puerts_static_p95_ns": 1.1527099609375,
+    "pure_integer_p50_ratio": 1.98614318706697,
+    "pure_integer_p95_ratio": 1.8138303505242,
+    "callback_empty_p50_ratio": 1.03275888837137,
+    "callback_empty_p95_ratio": 0.873600716433186,
+    "callback_tick_p50_ratio": 0.927457951593053,
+    "callback_tick_p95_ratio": 0.884843255680184,
+    "object_roundtrip_p50_ratio": 1.09922657760591,
+    "object_roundtrip_p95_ratio": 1.11542521109771
+  },
+  "disposition": {
+    "retained": false,
+    "readme_baseline": "P65.D22",
+    "open_debt": "P65-D03-ControlledLeadership",
+    "next_focus": "wasmtime_profile_and_internal_call_codegen_audit"
+  }
+}
