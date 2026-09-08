@@ -132,6 +132,14 @@
       "last_observed": "2026-09-08 P65.D29 在上下文已接近上限时读取候选脚本 91 行仍触发压缩；恢复后应先评估当前上下文余量，并改用 20-40 行切片。此前同批次完整 required_imports 输出、跨大型 JSON 搜索，以及 P65.D28 多域检索、P65.D27 function-context diff、P65.D26 正则转义和 P60.B1 宽检索也触发过同类问题"
     },
     {
+      "id": "rg-leading-hyphen-pattern-uses-double-dash",
+      "tags": ["rg", "search", "powershell"],
+      "summary": "以连字符开头的 rg 检索模式会被解析为命令选项。",
+      "prevention": "检索 `-Name` 一类字面量时使用 `rg -F -- '-Name' <paths>`，由 `--` 明确结束选项；不要依赖引号阻止 native 参数解析。",
+      "source": "observed:2026-09-08-P65.D29",
+      "last_observed": "2026-09-08 P65.D29 定位 -WasmSha256 调用时漏写 --，rg 报 unrecognized flag；该只读探针无副作用"
+    },
+    {
       "id": "structured-artifacts-use-parsers",
       "tags": ["json", "schema", "artifacts"],
       "summary": "结构化状态和证据由解析器读写，不能靠文本替换。",
