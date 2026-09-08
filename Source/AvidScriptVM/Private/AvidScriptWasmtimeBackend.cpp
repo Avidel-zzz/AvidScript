@@ -2793,7 +2793,8 @@ private:
 			*OutValue);
 	}
 
-	static int32 TypedSelfI32Callback(
+	template <bool bMeterHostCalls>
+	static int32 TypedPreparedSelfI32Callback(
 		void* Environment,
 		const int32 SelfSlot,
 		const int32 SelfGeneration,
@@ -2802,16 +2803,23 @@ private:
 	{
 		FAvidScriptWasmtimeTypedHostContext* HostContext =
 			static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
-		if (HostContext == nullptr
-			|| OutValue == nullptr
-			|| HostContext->PreparedTarget.SelfI32 == nullptr
-			|| HostContext->PreparedTarget.Context == nullptr)
+		if constexpr (bMeterHostCalls)
 		{
-			return 1;
+			if (HostContext == nullptr
+				|| OutValue == nullptr
+				|| HostContext->PreparedTarget.SelfI32 == nullptr
+				|| HostContext->PreparedTarget.Context == nullptr
+				|| !ConsumePreparedTypedHostCall(*HostContext))
+			{
+				return 1;
+			}
 		}
-		if (!ConsumePreparedTypedHostCall(*HostContext))
+		else
 		{
-			return 1;
+			checkSlow(HostContext != nullptr);
+			checkSlow(OutValue != nullptr);
+			checkSlow(HostContext->PreparedTarget.SelfI32 != nullptr);
+			checkSlow(HostContext->PreparedTarget.Context != nullptr);
 		}
 		const EAvidScriptVmTypedHostStatus Status =
 			HostContext->PreparedTarget.SelfI32(
@@ -2920,6 +2928,7 @@ private:
 			*HostContext, SelfSlot, SelfGeneration, GuestAddress, *OutValue);
 	}
 
+	template <bool bPreparedUnmetered>
 	static int32 TypedSelfPropertyI32GetCallback(
 		void* Environment,
 		const int32 SelfSlot,
@@ -2928,26 +2937,42 @@ private:
 	{
 		FAvidScriptWasmtimeTypedHostContext* HostContext =
 			static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
-		if (HostContext == nullptr || OutValue == nullptr)
+		if constexpr (!bPreparedUnmetered)
 		{
-			return 1;
+			if (HostContext == nullptr || OutValue == nullptr)
+			{
+				return 1;
+			}
+		}
+		else
+		{
+			checkSlow(HostContext != nullptr);
+			checkSlow(OutValue != nullptr);
 		}
 		const FAvidScriptVmPreparedSelfPropertyI32GetTarget Target =
 			HostContext->PreparedTarget.SelfPropertyI32Get;
-		if (Target == nullptr
-			|| HostContext->PreparedTarget.Context == nullptr)
+		if constexpr (!bPreparedUnmetered)
 		{
-			return HostContext->Backend != nullptr
-				? HostContext->Backend->InvokeTypedSelfPropertyI32Get(
-					*HostContext,
-					SelfSlot,
-					SelfGeneration,
-					*OutValue)
-				: 1;
+			if (Target == nullptr
+				|| HostContext->PreparedTarget.Context == nullptr)
+			{
+				return HostContext->Backend != nullptr
+					? HostContext->Backend->InvokeTypedSelfPropertyI32Get(
+						*HostContext,
+						SelfSlot,
+						SelfGeneration,
+						*OutValue)
+					: 1;
+			}
+			if (!ConsumePreparedTypedHostCall(*HostContext))
+			{
+				return 1;
+			}
 		}
-		if (!ConsumePreparedTypedHostCall(*HostContext))
+		else
 		{
-			return 1;
+			checkSlow(Target != nullptr);
+			checkSlow(HostContext->PreparedTarget.Context != nullptr);
 		}
 		const EAvidScriptVmTypedHostStatus Status = Target(
 			HostContext->PreparedTarget.Context,
@@ -2957,6 +2982,7 @@ private:
 		return CompletePreparedTypedInvocation(*HostContext, Status);
 	}
 
+	template <bool bPreparedUnmetered>
 	static int32 TypedSelfPropertyI32SetCallback(
 		void* Environment,
 		const int32 SelfSlot,
@@ -2966,28 +2992,44 @@ private:
 	{
 		FAvidScriptWasmtimeTypedHostContext* HostContext =
 			static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
-		if (HostContext == nullptr || OutValue == nullptr)
+		if constexpr (!bPreparedUnmetered)
 		{
-			return 1;
+			if (HostContext == nullptr || OutValue == nullptr)
+			{
+				return 1;
+			}
+			*OutValue = 0;
 		}
-		*OutValue = 0;
+		else
+		{
+			checkSlow(HostContext != nullptr);
+			checkSlow(OutValue != nullptr);
+		}
 		const FAvidScriptVmPreparedSelfPropertyI32SetTarget Target =
 			HostContext->PreparedTarget.SelfPropertyI32Set;
-		if (Target == nullptr
-			|| HostContext->PreparedTarget.Context == nullptr)
+		if constexpr (!bPreparedUnmetered)
 		{
-			return HostContext->Backend != nullptr
-				? HostContext->Backend->InvokeTypedSelfPropertyI32Set(
-					*HostContext,
-					SelfSlot,
-					SelfGeneration,
-					Value,
-					*OutValue)
-				: 1;
+			if (Target == nullptr
+				|| HostContext->PreparedTarget.Context == nullptr)
+			{
+				return HostContext->Backend != nullptr
+					? HostContext->Backend->InvokeTypedSelfPropertyI32Set(
+						*HostContext,
+						SelfSlot,
+						SelfGeneration,
+						Value,
+						*OutValue)
+					: 1;
+			}
+			if (!ConsumePreparedTypedHostCall(*HostContext))
+			{
+				return 1;
+			}
 		}
-		if (!ConsumePreparedTypedHostCall(*HostContext))
+		else
 		{
-			return 1;
+			checkSlow(Target != nullptr);
+			checkSlow(HostContext->PreparedTarget.Context != nullptr);
 		}
 		const EAvidScriptVmTypedHostStatus Status = Target(
 			HostContext->PreparedTarget.Context,
@@ -3568,7 +3610,11 @@ private:
 					static_cast<size_t>(ModuleNameUtf8.Length()),
 					ImportNameUtf8.Get(),
 					static_cast<size_t>(ImportNameUtf8.Length()),
-					&TypedSelfI32Callback,
+					ExecutionBudget.MaxHostCallsPerEntry == 0
+						&& HostContextPointer->PreparedTarget.SelfI32 != nullptr
+						&& HostContextPointer->PreparedTarget.Context != nullptr
+						? &TypedPreparedSelfI32Callback<false>
+						: &TypedPreparedSelfI32Callback<true>,
 					HostContextPointer);
 				break;
 			case EAvidScriptVmTypedHostShape::SelfI32PairToI32:
@@ -3631,7 +3677,11 @@ private:
 					static_cast<size_t>(ModuleNameUtf8.Length()),
 					ImportNameUtf8.Get(),
 					static_cast<size_t>(ImportNameUtf8.Length()),
-					&TypedSelfPropertyI32GetCallback,
+					ExecutionBudget.MaxHostCallsPerEntry == 0
+						&& HostContextPointer->PreparedTarget.SelfPropertyI32Get != nullptr
+						&& HostContextPointer->PreparedTarget.Context != nullptr
+						? &TypedSelfPropertyI32GetCallback<true>
+						: &TypedSelfPropertyI32GetCallback<false>,
 					HostContextPointer);
 				break;
 			case EAvidScriptVmTypedHostShape::SelfPropertyI32Set:
@@ -3641,7 +3691,11 @@ private:
 					static_cast<size_t>(ModuleNameUtf8.Length()),
 					ImportNameUtf8.Get(),
 					static_cast<size_t>(ImportNameUtf8.Length()),
-					&TypedSelfPropertyI32SetCallback,
+					ExecutionBudget.MaxHostCallsPerEntry == 0
+						&& HostContextPointer->PreparedTarget.SelfPropertyI32Set != nullptr
+						&& HostContextPointer->PreparedTarget.Context != nullptr
+						? &TypedSelfPropertyI32SetCallback<true>
+						: &TypedSelfPropertyI32SetCallback<false>,
 					HostContextPointer);
 				break;
 			case EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Get:
