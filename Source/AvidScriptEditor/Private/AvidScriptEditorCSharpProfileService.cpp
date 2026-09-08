@@ -708,6 +708,8 @@ bool SerializeAvidScriptCSharpProfileTemplate(
 		MakeAvidScriptCSharpProfileTemplateStoredPath(TemplateResult.BuildScriptPath));
 	Object->SetStringField(TEXT("configuration"), TemplateResult.Configuration);
 	Object->SetStringField(TEXT("data_lane_fusion"), TEXT("enabled"));
+	Object->SetStringField(TEXT("cooperative_safepoints"), TEXT("enabled"));
+	Object->SetNumberField(TEXT("cooperative_safepoint_interval"), 1024.0);
 
 	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutJsonText);
 	return FJsonSerializer::Serialize(Object, Writer);
@@ -1001,6 +1003,55 @@ bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 				OutResult);
 			return false;
 		}
+	}
+
+	if (ProfileObject->HasField(TEXT("cooperative_safepoints")))
+	{
+		FString CooperativeSafepoints;
+		if (!TryGetAvidScriptCSharpProfileStringField(
+				ProfileObject,
+				TEXT("cooperative_safepoints"),
+				CooperativeSafepoints)
+			|| (!CooperativeSafepoints.Equals(
+					TEXT("enabled"),
+					ESearchCase::IgnoreCase)
+				&& !CooperativeSafepoints.Equals(
+					TEXT("disabled"),
+					ESearchCase::IgnoreCase)))
+		{
+			SetAvidScriptCSharpProfileFailure(
+				TEXT("cooperative_safepoints_invalid"),
+				TEXT("C# profile cooperative_safepoints must be enabled or disabled."),
+				TEXT("set cooperative_safepoints to enabled or disabled"),
+				OutResult);
+			return false;
+		}
+		Config.bEnableCooperativeSafepoints = CooperativeSafepoints.Equals(
+			TEXT("enabled"),
+			ESearchCase::IgnoreCase);
+	}
+
+	if (ProfileObject->HasField(TEXT("cooperative_safepoint_interval")))
+	{
+		double IntervalNumber = 0.0;
+		if (!ProfileObject->TryGetNumberField(
+				TEXT("cooperative_safepoint_interval"),
+				IntervalNumber)
+			|| !FMath::IsFinite(IntervalNumber)
+			|| IntervalNumber < 1.0
+			|| IntervalNumber > 65536.0
+			|| static_cast<double>(static_cast<uint32>(IntervalNumber))
+				!= IntervalNumber)
+		{
+			SetAvidScriptCSharpProfileFailure(
+				TEXT("cooperative_safepoint_interval_invalid"),
+				TEXT("C# profile cooperative_safepoint_interval must be an integer from 1 through 65536."),
+				TEXT("set cooperative_safepoint_interval to an integer such as 1024"),
+				OutResult);
+			return false;
+		}
+		Config.CooperativeSafepointInterval =
+			static_cast<uint32>(IntervalNumber);
 	}
 
 	OutResult.ResolvedBindingSelection =

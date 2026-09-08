@@ -183,6 +183,8 @@ bool FAvidScriptEditorCSharpProfileServiceDefaultTemplateTest::RunTest(const FSt
 	TestEqual(TEXT("Generated template uses schema version 2"), LoadResult.SchemaVersion, 2);
 	TestTrue(TEXT("Generated template defaults to EngineGameplay"), LoadResult.bUsesEngineGameplayBindingProfile);
 	TestTrue(TEXT("Generated template enables data-lane fusion"), LoadResult.BuildConfig.bEnableDataLaneFusion);
+	TestTrue(TEXT("Generated template enables cooperative safepoints"), LoadResult.BuildConfig.bEnableCooperativeSafepoints);
+	TestEqual(TEXT("Generated template uses the balanced safepoint interval"), LoadResult.BuildConfig.CooperativeSafepointInterval, 1024u);
 	TestEqual(TEXT("Generated default C# profile source"), LoadResult.BuildConfig.SourcePath, FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleSourcePath());
 	TestEqual(TEXT("Generated default C# profile project"), LoadResult.BuildConfig.ProjectPath, FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleProjectPath());
 	TestEqual(TEXT("Generated default C# profile module"), LoadResult.BuildConfig.ModuleId, FString(TEXT("csharp_profile_actor_lifecycle")));
@@ -199,6 +201,9 @@ bool FAvidScriptEditorCSharpProfileServiceDefaultTemplateTest::RunTest(const FSt
 		TestTrue(
 			TEXT("Schema v2 template audits the default data-lane fusion mode"),
 			TemplateText.Contains(TEXT("\"data_lane_fusion\": \"enabled\"")));
+		TestTrue(
+			TEXT("Schema v2 template audits cooperative safepoints"),
+			TemplateText.Contains(TEXT("\"cooperative_safepoints\": \"enabled\"")));
 	}
 	TestEqual(TEXT("Generated default C# profile artifact"), LoadResult.BuildConfig.ArtifactStem, FString(TEXT("profile_actor_lifecycle")));
 	TestTrue(TEXT("Generated default C# profile output root uses profile folder"), LoadResult.BuildConfig.OutputRoot.EndsWith(TEXT("Saved/AvidScriptCSharpGuest/Profiles/profile_actor_lifecycle")));
