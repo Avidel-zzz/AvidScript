@@ -111,9 +111,9 @@
       "id": "destructive-policy-rejection-is-final",
       "tags": ["filesystem", "cleanup", "safety", "workflow"],
       "summary": "递归删除被执行策略拒绝后，不能换包装或 shell 继续试探。",
-      "prevention": "先只读核验绝对目标、边界和体积；若 Remove-Item 在进程创建前被策略拒绝，视为当前环境禁止该清理，保留目录并改用磁盘预算或新的唯一输出路径。禁止改用 cmd、动态 .NET 删除或隐藏脚本绕过。",
+      "prevention": "恢复摘要或 lesson 已说明当前环境拒绝递归删除时，不再发出第一次试探命令；否则先只读核验绝对目标、边界和体积。Remove-Item 一旦在进程创建前被拒绝，立即保留目录并改用不依赖清理的方案，禁止换 cmd、动态 .NET 或隐藏脚本绕过。",
       "source": "observed:2026-09-08-P65.D26",
-      "last_observed": "2026-09-08 P65.D26 已核验的 D24/D25 临时目录在批量循环和单一字面路径两种 Remove-Item 形式下均被策略拒绝；全部目录未变，停止删除并按现有磁盘预算继续"
+      "last_observed": "2026-09-08 P65.D30 恢复摘要已明确记录递归删除被阻止且不得重试，仍尝试删除已核验的旧 benchmark 临时目录并再次在进程创建前被拒绝；目录未变，后续方案不得依赖本会话清理。此前 P65.D26 已确认同一限制"
     },
     {
       "id": "preserve-wait-session-id",
