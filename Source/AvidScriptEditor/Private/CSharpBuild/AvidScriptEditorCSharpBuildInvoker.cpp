@@ -195,6 +195,14 @@ FString BuildAvidScriptCSharpBuildInvocationParameters(const FAvidScriptEditorCS
 	{
 		Arguments.Add(TEXT("-DisableCompilationCache"));
 	}
+	if (Config.bEnableCooperativeSafepoints)
+	{
+		Arguments.Add(TEXT("-CooperativeSafepoints"));
+		AddAvidScriptCSharpBuildInvocationValueArgument(
+			Arguments,
+			TEXT("-SafepointInterval"),
+			FString::Printf(TEXT("%u"), Config.CooperativeSafepointInterval));
+	}
 	return FString::Join(Arguments, TEXT(" "));
 }
 

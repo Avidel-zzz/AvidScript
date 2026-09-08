@@ -421,6 +421,17 @@ static bool PrepareAvidScriptCSharpBuildPipeline(
 	{
 		NormalizedConfig.Configuration = TEXT("Release");
 	}
+	if (NormalizedConfig.bEnableCooperativeSafepoints
+		&& (NormalizedConfig.CooperativeSafepointInterval == 0
+			|| NormalizedConfig.CooperativeSafepointInterval > 65536))
+	{
+		SetAvidScriptCSharpBuildPipelineFailure(
+			TEXT("cooperative_safepoint_config_invalid"),
+			TEXT("The cooperative safepoint interval must be between 1 and 65536."),
+			TEXT("choose a bounded cooperative safepoint interval and retry"),
+			OutResult);
+		return false;
+	}
 
 	NormalizeAvidScriptCSharpBuildPipelinePath(NormalizedConfig.BuildScriptPath);
 	NormalizeAvidScriptCSharpBuildPipelinePath(NormalizedConfig.SourcePath);

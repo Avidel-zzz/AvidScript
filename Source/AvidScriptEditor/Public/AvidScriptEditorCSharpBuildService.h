@@ -34,7 +34,9 @@ struct FAvidScriptEditorCSharpBuildConfig
 	FString VmArtifactTargetTriple = TEXT("x86_64-pc-windows-msvc");
 	EAvidScriptEditorVmArtifactPolicy VmArtifactPolicy =
 		EAvidScriptEditorVmArtifactPolicy::PreferPrecompiled;
+	uint32 CooperativeSafepointInterval = 1024;
 	bool bEnableDataLaneFusion = true;
+	bool bEnableCooperativeSafepoints = false;
 	bool bOmitRuntimeBindingPackage = false;
 	bool bAllowGeneratedTypeImports = false;
 	bool bDisableSemanticCache = false;
