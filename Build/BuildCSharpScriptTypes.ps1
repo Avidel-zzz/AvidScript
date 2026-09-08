@@ -245,10 +245,13 @@ if (-not $SkipRuntimePackage) {
                 -RuntimeBindingPackagePath $BindingPackageManifestPath `
                 -GeneratedTypeManifestPath $GeneratedManifestPath `
                 -TargetPlatform $TargetPlatform `
-                -Configuration $PackageConfiguration)
+                -Configuration $PackageConfiguration 2>&1)
         $ReleaseExitCode = $LASTEXITCODE
         if ($ReleaseExitCode -ne 0) {
-            throw "Headless Generated Type Runtime release failed with exit code $ReleaseExitCode."
+            $ReleaseTail = [string]::Join(
+                [Environment]::NewLine,
+                @($ReleaseOutput | Select-Object -Last 20))
+            throw "Headless Generated Type Runtime release failed with exit code $ReleaseExitCode.`n$ReleaseTail"
         }
         try {
             $ReleaseSummary = $ReleaseOutput |

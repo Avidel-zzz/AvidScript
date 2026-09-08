@@ -435,6 +435,7 @@ try {
                 '-GeneratedTypeManifestPath $GeneratedManifestPath',
                 '-TargetPlatform $TargetPlatform',
                 '-Configuration $PackageConfiguration',
+                '$ReleaseOutput | Select-Object -Last 20',
                 '"wasmtime_precompiled"')) {
             if (-not $ScriptTypeBuilderSource.Contains($RequiredToken)) {
                 throw "Generated Type headless release route is missing: $RequiredToken"
