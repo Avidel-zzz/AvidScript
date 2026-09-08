@@ -1,6 +1,7 @@
 #include "Packages/AvidScriptModulePackageSchema.h"
 
 #include "AvidScriptHash.h"
+#include "Packages/AvidScriptRuntimeCooperativeSafepointProvenance.h"
 
 #include "Dom/JsonObject.h"
 #include "Misc/FileHelper.h"
@@ -112,6 +113,46 @@ bool IsValidExecutionContract(const FDocument& Package)
 			&& Package.Policy == TEXT("require_precompiled");
 	}
 	return false;
+}
+
+bool ValidateShippingRuntimeProvenance(
+	const FJsonObject& Root,
+	const FJsonObject& Execution,
+	const FDocument& Package)
+{
+	if (Root.HasField(TEXT("source"))
+		|| Root.HasField(TEXT("semantic"))
+		|| Root.HasField(TEXT("debug"))
+		|| Root.HasField(TEXT("debug_map")))
+	{
+		return false;
+	}
+
+	if (!Execution.HasField(TEXT("cooperative_safepoints")))
+	{
+		return !Root.HasField(TEXT("guest_ir"));
+	}
+
+	FAvidScriptRuntimeCooperativeSafepointProvenance Provenance;
+	FString ProvenanceError;
+	const TSharedPtr<FJsonObject>* GuestIr = nullptr;
+	FString GuestIrModuleId;
+	FString GuestIrSha256;
+	return ParseAvidScriptRuntimeCooperativeSafepointProvenance(
+			Root,
+			Execution,
+			Package.CompilerBuildIdentity,
+			Provenance,
+			ProvenanceError)
+		&& Provenance.bEnabled
+		&& Root.TryGetObjectField(TEXT("guest_ir"), GuestIr)
+		&& GuestIr != nullptr
+		&& GuestIr->IsValid()
+		&& HasExactFields(**GuestIr, { TEXT("module_id"), TEXT("sha256") })
+		&& (*GuestIr)->TryGetStringField(TEXT("module_id"), GuestIrModuleId)
+		&& GuestIrModuleId == Package.ModuleId
+		&& (*GuestIr)->TryGetStringField(TEXT("sha256"), GuestIrSha256)
+		&& GuestIrSha256 == Provenance.GuestIrSha256;
 }
 } // namespace
 
@@ -554,9 +595,10 @@ bool ValidateRuntimeManifest(
 	}
 	if (Package.Configuration == TEXT("shipping"))
 	{
-		return !Root->HasField(TEXT("source"))
-			&& !Root->HasField(TEXT("guest_ir"))
-			&& !Root->HasField(TEXT("debug_map"));
+		return ValidateShippingRuntimeProvenance(
+			*Root,
+			**Execution,
+			Package);
 	}
 	if (Package.DebugMap.IsSet())
 	{

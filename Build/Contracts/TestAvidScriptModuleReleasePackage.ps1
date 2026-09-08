@@ -297,6 +297,43 @@ try {
         }
     }
 
+    Invoke-ReleaseContract 'Shipping keeps only compact cooperative provenance' {
+        $Fixture = New-ReleaseFixture `
+            -Name 'ShippingCooperativeProvenance' `
+            -CooperativeSafepoints
+        $Published = Publish-AvidScriptModuleReleasePackage `
+            -RuntimeManifestPath $Fixture.RuntimeManifestPath `
+            -ProjectRoot $Fixture.ProjectRoot `
+            -Configuration Shipping
+        $Runtime = Get-Content -Raw -LiteralPath (
+            Join-Path $Published.PackageRoot 'runtime.avidscript.json') | ConvertFrom-Json -Depth 32
+        $GuestIrProperties = @($Runtime.guest_ir.PSObject.Properties.Name | Sort-Object)
+        if ([string]::Join(',', $GuestIrProperties) -cne 'module_id,sha256' -or
+            [string]$Runtime.guest_ir.module_id -cne 'fixture.module' -or
+            [string]$Runtime.execution.cooperative_safepoints.guest_ir_sha256 -cne
+                [string]$Runtime.guest_ir.sha256 -or
+            $Runtime.PSObject.Properties.Name -ccontains 'source' -or
+            $Runtime.PSObject.Properties.Name -ccontains 'semantic' -or
+            $Runtime.PSObject.Properties.Name -ccontains 'debug' -or
+            $Runtime.PSObject.Properties.Name -ccontains 'debug_map' -or
+            $Published.FileCount -ne 6) {
+            throw 'Shipping cooperative package did not retain only its compact proof.'
+        }
+    }
+
+    Invoke-ReleaseContract 'cooperative Guest IR module drift is rejected' {
+        $Fixture = New-ReleaseFixture `
+            -Name 'CooperativeModuleDrift' `
+            -CooperativeSafepoints
+        $Fixture.RuntimeManifest.guest_ir.module_id = 'different.module'
+        Write-TestJson -Path $Fixture.RuntimeManifestPath -Value $Fixture.RuntimeManifest
+        Assert-ReleaseRejected -Pattern 'provenance is inconsistent' -Body {
+            Publish-AvidScriptModuleReleasePackage `
+                -RuntimeManifestPath $Fixture.RuntimeManifestPath `
+                -ProjectRoot $Fixture.ProjectRoot | Out-Null
+        }
+    }
+
     Invoke-ReleaseContract 'catalog schema and ordinal ordering' {
         $Fixture = New-ReleaseFixture -Name 'CatalogZ' -ModuleId 'zeta.module'
         $First = Publish-AvidScriptModuleReleasePackage `

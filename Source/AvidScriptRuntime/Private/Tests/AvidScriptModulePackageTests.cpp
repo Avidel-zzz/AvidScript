@@ -51,6 +51,7 @@ TSharedRef<FJsonObject> MakeFileEntry(
 
 FString MakePackageIdentity(
 	const FString& ModuleId,
+	const FString& CompilerBuildIdentity,
 	const FString& RuntimeManifestSha256,
 	const FString& WasmSha256,
 	const FString& PrecompiledSha256,
@@ -67,7 +68,7 @@ FString MakePackageIdentity(
 		TEXT("wasmtime"),
 		TEXT("wasmtime_serialized_v1"),
 		TEXT("require_precompiled"),
-		TEXT("wasmtime-test-build"),
+		CompilerBuildIdentity,
 		TEXT("x86_64-pc-windows-msvc"),
 		TEXT("x86-64-v3"),
 		RuntimeManifestSha256,
@@ -84,7 +85,8 @@ bool WriteShippingFixture(
 	const FString& ModuleId,
 	FString& OutCatalogPath,
 	FString& OutPackageRoot,
-	const bool bUseLegacyCatalog = false)
+	const bool bUseLegacyCatalog = false,
+	const bool bCooperativeSafepoints = false)
 {
 	const FString StagingRoot = FPaths::Combine(Root, TEXT("staging"));
 	const FString BindingRoot = FPaths::Combine(StagingRoot, TEXT("bindings"));
@@ -124,6 +126,9 @@ bool WriteShippingFixture(
 	const FString PrecompiledSha256 = HashFile(PrecompiledPath);
 	const FString BindingManifestSha256 = HashFile(BindingManifestPath);
 	const FString BindingDescriptorSha256 = HashFile(BindingDescriptorPath);
+	const FString CompilerBuildIdentity = bCooperativeSafepoints
+		? TEXT("wasmtime-test-build;epoch_interruption=off;")
+		: TEXT("wasmtime-test-build");
 
 	TSharedRef<FJsonObject> RuntimeManifest = MakeShared<FJsonObject>();
 	RuntimeManifest->SetNumberField(TEXT("schema_version"), 1);
@@ -140,7 +145,7 @@ bool WriteShippingFixture(
 	Execution->SetStringField(TEXT("canonical_sha256"), WasmSha256);
 	Execution->SetStringField(
 		TEXT("compiler_build_identity"),
-		TEXT("wasmtime-test-build"));
+		CompilerBuildIdentity);
 	Execution->SetStringField(
 		TEXT("target_triple"),
 		TEXT("x86_64-pc-windows-msvc"));
@@ -149,6 +154,30 @@ bool WriteShippingFixture(
 		TEXT("00000000000000000000000000000000"));
 	Execution->SetStringField(TEXT("policy"), TEXT("require_precompiled"));
 	Execution->SetStringField(TEXT("fallback"), TEXT("wasmtime_jit"));
+	if (bCooperativeSafepoints)
+	{
+		const FString GuestIrSha256 = FString::ChrN(64, TEXT('b'));
+		TSharedRef<FJsonObject> Cooperative = MakeShared<FJsonObject>();
+		Cooperative->SetBoolField(TEXT("enabled"), true);
+		Cooperative->SetStringField(
+			TEXT("receipt_sha256"),
+			FString::ChrN(64, TEXT('9')));
+		Cooperative->SetStringField(TEXT("guest_ir_sha256"), GuestIrSha256);
+		Cooperative->SetNumberField(TEXT("proof_schema_version"), 2);
+		Cooperative->SetNumberField(TEXT("poll_interval"), 1024);
+		Cooperative->SetNumberField(TEXT("loop_poll_blocks"), 1);
+		Cooperative->SetNumberField(TEXT("recursive_functions"), 1);
+		Cooperative->SetNumberField(TEXT("site_count"), 2);
+		Cooperative->SetStringField(
+			TEXT("site_sha256"),
+			FString::ChrN(64, TEXT('a')));
+		Execution->SetObjectField(TEXT("cooperative_safepoints"), Cooperative);
+
+		TSharedRef<FJsonObject> GuestIr = MakeShared<FJsonObject>();
+		GuestIr->SetStringField(TEXT("module_id"), ModuleId);
+		GuestIr->SetStringField(TEXT("sha256"), GuestIrSha256);
+		RuntimeManifest->SetObjectField(TEXT("guest_ir"), GuestIr);
+	}
 	RuntimeManifest->SetObjectField(TEXT("execution"), Execution);
 	TSharedRef<FJsonObject> BindingPackage = MakeShared<FJsonObject>();
 	BindingPackage->SetStringField(
@@ -180,6 +209,7 @@ bool WriteShippingFixture(
 	const FString RuntimeManifestSha256 = HashFile(RuntimeManifestPath);
 	const FString PackageId = MakePackageIdentity(
 		ModuleId,
+		CompilerBuildIdentity,
 		RuntimeManifestSha256,
 		WasmSha256,
 		PrecompiledSha256,
@@ -235,7 +265,7 @@ bool WriteShippingFixture(
 	PackageExecution->SetStringField(TEXT("policy"), TEXT("require_precompiled"));
 	PackageExecution->SetStringField(
 		TEXT("compiler_build_identity"),
-		TEXT("wasmtime-test-build"));
+		CompilerBuildIdentity);
 	PackageExecution->SetStringField(
 		TEXT("target_triple"),
 		TEXT("x86_64-pc-windows-msvc"));
@@ -645,6 +675,29 @@ bool FAvidScriptModulePackageResolverTest::RunTest(const FString& Parameters)
 		FAvidScriptModulePackageResolver::ResolveModuleFromCatalogFile(
 			LegacyCatalogPath,
 			TEXT("legacy_lifecycle"),
+			ShippingContext,
+			Package,
+			Result));
+
+	const FString CooperativeRoot = FPaths::Combine(
+		TestRoot,
+		TEXT("Cooperative"));
+	FString CooperativeCatalogPath;
+	FString CooperativePackageRoot;
+	TestTrue(
+		TEXT("Cooperative Shipping fixture writes"),
+		WriteShippingFixture(
+			CooperativeRoot,
+			TEXT("cooperative_lifecycle"),
+			CooperativeCatalogPath,
+			CooperativePackageRoot,
+			false,
+			true));
+	TestTrue(
+		TEXT("Cooperative Shipping package resolves"),
+		FAvidScriptModulePackageResolver::ResolveModuleFromCatalogFile(
+			CooperativeCatalogPath,
+			TEXT("cooperative_lifecycle"),
 			ShippingContext,
 			Package,
 			Result));
