@@ -135,9 +135,9 @@
       "id": "rg-leading-hyphen-pattern-uses-double-dash",
       "tags": ["rg", "search", "powershell"],
       "summary": "以连字符开头的 rg 检索模式会被解析为命令选项。",
-      "prevention": "检索 `-Name` 一类字面量时使用 `rg -F -- '-Name' <paths>`，由 `--` 明确结束选项；不要依赖引号阻止 native 参数解析。",
+      "prevention": "检索 `-Name` 一类字面量时使用 `rg -F -g '*.ext' -- '-Name' <paths>`，所有选项和 glob 必须位于 `--` 前，由 `--` 明确结束选项；不要依赖引号阻止 native 参数解析。",
       "source": "observed:2026-09-08-P65.D29",
-      "last_observed": "2026-09-08 P65.D29 定位 -WasmSha256 调用时漏写 --，rg 报 unrecognized flag；该只读探针无副作用"
+      "last_observed": "2026-09-08 P65.D29 定位 -WasmSha256 调用时先漏写 --，随后又把 -g 放在 -- 后而被解析成路径；两个只读探针均无副作用，最终固定所有选项在前、模式与路径在后"
     },
     {
       "id": "structured-artifacts-use-parsers",
