@@ -1694,6 +1694,7 @@ namespace
 		}
 		switch (Workload)
 		{
+		case EAvidScriptPerfWorkload::ScalarNoOp:
 		case EAvidScriptPerfWorkload::ScalarAddInt32:
 		case EAvidScriptPerfWorkload::VectorValue:
 		case EAvidScriptPerfWorkload::ObjectRoundtrip:
@@ -1732,9 +1733,22 @@ namespace
 		const EAvidScriptPerfWorkload Workload,
 		const int32 Iterations)
 	{
-		return FAvidScriptGameplayFrameBenchmark::IsGameplayWorkload(Workload)
-			? GetExpectedLogicalOperationCount(Workload, Iterations)
-			: GetExpectedAdaptiveNativeHitCount(Workload, Iterations);
+		if (FAvidScriptGameplayFrameBenchmark::IsGameplayWorkload(Workload))
+		{
+			return GetExpectedLogicalOperationCount(Workload, Iterations);
+		}
+		switch (Workload)
+		{
+		case EAvidScriptPerfWorkload::ScalarAddInt32:
+		case EAvidScriptPerfWorkload::VectorValue:
+		case EAvidScriptPerfWorkload::ObjectRoundtrip:
+		case EAvidScriptPerfWorkload::BatchScalar:
+			return static_cast<uint64>(Iterations);
+		case EAvidScriptPerfWorkload::PropertyGetSet:
+			return static_cast<uint64>(Iterations) * 2u;
+		default:
+			return 0;
+		}
 	}
 
 	uint64 GetExpectedFusedGeneratedHitCount(
