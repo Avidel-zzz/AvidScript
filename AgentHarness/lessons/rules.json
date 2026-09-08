@@ -394,6 +394,14 @@
       "last_observed": "2026-09-08 P65.D28 验证修正后的 D9 提交标识时，再次把 9971fb33^{commit} 作为未引用参数传给 PowerShell，导致 git rev-parse 失败；无文件副作用，随即改为整体单引号。此前 P60.A2 已发生同类问题"
     },
     {
+      "id": "open-debt-progress-does-not-use-noop-status-update",
+      "tags": ["phase", "debt", "workflow"],
+      "summary": "PhaseWorkflow 的 Open 到 Open debt-update 不刷新原始 evidence，只增加状态 revision。",
+      "prevention": "开放债务的阶段性进展写入对应 Phase 报告和机器摘要；仅当 debt 状态真实改变时调用 debt-update，并把最终证据写入 resolution_evidence。调用后必须定点比较 debt 对象，若只改 revision/time 则撤销本次无意义 churn。",
+      "source": "observed:2026-09-08-P65.D29",
+      "last_observed": "2026-09-08 P65.D29 尝试以 Open 状态刷新 P65-D03 evidence，PhaseWorkflow 只把 revision 9 增到 10；定点回读发现 debt 内容未变，随后撤销 revision/time"
+    },
+    {
       "id": "phase-mutations-use-phase-workflow-entry",
       "tags": ["phase", "harness", "workflow", "cli"],
       "summary": "Harness bootstrap 输出的 next_action 是 PhaseWorkflow 子命令，不是 Harness 自身的 Command。",
