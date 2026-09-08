@@ -713,7 +713,7 @@
       "summary": "通过子 pwsh 的 native argv 调用脚本时，Boolean 等强类型 PowerShell 参数会退化成字符串并在参数绑定前失败。",
       "prevention": "需要传递 Boolean、ScriptBlock 或其他 PowerShell 强类型参数时，从已固定为 PowerShell 7 的 Harness shell 内直接调用脚本并使用 `-Name:$false` 等 typed 语法；只有纯字符串参数才使用 `pwsh -File` 跨进程入口。正式 benchmark 启动前先读取 param block，脚本未声明时不得猜测 -Help 等通用开关；参数绑定失败不得复用为有效 attempt。",
       "source": "Docs/Phase65/P65.D8_Formal_Performance_Retest.md",
-      "last_observed": "2026-09-08 P65.D26 未先读取两个候选脚本的 param block，猜测其支持 -Help 并在参数绑定阶段无副作用退出；随后改为读取已索引脚本。此前 P65.D8 发生过跨进程 Boolean 参数退化"
+      "last_observed": "2026-09-08 P65.D28 虽已读取 benchmark 脚本 param block，仍通过子 pwsh -File 传递 AvidScriptDirty Boolean，参数在创建输出前退化为字符串并失败；后续改为当前 PowerShell 7 进程内直接调用。此前 P65.D26 猜测 -Help，P65.D8 发生过同类 Boolean 退化"
     },
     {
       "id": "aggregate-identities-freeze-after-final-mutation",
