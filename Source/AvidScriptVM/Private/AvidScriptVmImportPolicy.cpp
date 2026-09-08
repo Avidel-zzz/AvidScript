@@ -13,6 +13,15 @@ FString MakeAvidScriptVmImportIdentityKey(const FString& ModuleName, const FStri
 		+ ImportName;
 }
 
+bool IsAvidScriptVmInternalSafepointImport(
+	const FAvidScriptWasmModuleLayout& Layout,
+	const FAvidScriptWasmFunctionImport& Import)
+{
+	return Layout.CooperativeSafepointProof.bPresent
+		&& Import.ModuleName == TEXT("avidscript")
+		&& Import.ImportName == TEXT("avid_cooperative_safepoint_poll");
+}
+
 bool SetAvidScriptVmImportPolicyError(
 	FAvidScriptVmError& OutError,
 	const FString& Category,
@@ -47,11 +56,19 @@ bool ValidateAvidScriptVmImportContract(
 	if (bEnforceExpectedImports)
 	{
 		TMap<FString, int32> ActualImportCounts;
+		int32 ActualManifestImportCount = 0;
 		for (const FAvidScriptWasmFunctionImport& ActualImport : ActualLayout.FunctionImports)
 		{
+			if (IsAvidScriptVmInternalSafepointImport(
+					ActualLayout,
+					ActualImport))
+			{
+				continue;
+			}
 			++ActualImportCounts.FindOrAdd(MakeAvidScriptVmImportIdentityKey(
 				ActualImport.ModuleName,
-				ActualImport.ImportName));
+					ActualImport.ImportName));
+			++ActualManifestImportCount;
 		}
 
 		TMap<FString, int32> ExpectedImportCounts;
@@ -64,7 +81,7 @@ bool ValidateAvidScriptVmImportContract(
 
 		bool bIdentitiesMatch =
 			ActualImportCounts.Num() == ExpectedImportCounts.Num()
-			&& ActualLayout.FunctionImports.Num() == ExpectedImports.Num();
+			&& ActualManifestImportCount == ExpectedImports.Num();
 		if (bIdentitiesMatch)
 		{
 			for (const TPair<FString, int32>& Pair : ActualImportCounts)
@@ -85,7 +102,7 @@ bool ValidateAvidScriptVmImportContract(
 				FString::Printf(
 					TEXT("script manifest imports=%d differ from WASM function imports=%d"),
 					ExpectedImports.Num(),
-					ActualLayout.FunctionImports.Num()));
+					ActualManifestImportCount));
 		}
 	}
 

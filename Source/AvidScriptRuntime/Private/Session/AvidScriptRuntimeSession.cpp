@@ -142,7 +142,8 @@ void SetSessionFaultedFailure(
 
 FAvidScriptVmLoadConfig::FExecutionBudget MakeSessionExecutionBudget(
 	const FAvidScriptVmBackendSelection& Selection,
-	const EAvidScriptVmArtifactTrust ArtifactTrust)
+	const EAvidScriptVmArtifactTrust ArtifactTrust,
+	const bool bCooperativeSafepointProofVerified)
 {
 	FAvidScriptVmLoadConfig::FExecutionBudget Budget;
 	Budget.MaxHostCallsPerEntry = 100000;
@@ -157,16 +158,23 @@ FAvidScriptVmLoadConfig::FExecutionBudget MakeSessionExecutionBudget(
 #else
 			false;
 #endif
+		const bool bUseCooperativeContainment =
+			bUseVerifiedPackageFastContainment
+			&& bCooperativeSafepointProofVerified;
 		Budget.MaxHostCallsPerEntry = bUseVerifiedPackageFastContainment
 			? 0
 			: 100000;
 		Budget.FuelPerEntry = bUseVerifiedPackageFastContainment
 			? 0
 			: 50000000;
-		Budget.EpochDeadlineTicks = 1;
-		Budget.EpochTimeoutMilliseconds = 100;
+		Budget.EpochDeadlineTicks = bUseCooperativeContainment ? 0 : 1;
+		Budget.EpochTimeoutMilliseconds =
+			bUseCooperativeContainment ? 0 : 100;
+		Budget.CooperativeTimeoutMilliseconds =
+			bUseCooperativeContainment ? 100 : 0;
 		Budget.bEpochInterruptionIsTerminal =
-			bUseVerifiedPackageFastContainment;
+			bUseVerifiedPackageFastContainment
+			&& !bUseCooperativeContainment;
 		Budget.MaxLinearMemoryBytes = UINT64_C(64) << 20;
 	}
 	return Budget;
@@ -209,7 +217,8 @@ FAvidScriptRuntimeSession::~FAvidScriptRuntimeSession()
 FAvidScriptVmLoadConfig::FExecutionBudget
 FAvidScriptRuntimeSession::ResolveExecutionBudget(
 	const FAvidScriptVmBackendSelection& Selection,
-	const EAvidScriptVmArtifactTrust ArtifactTrust) const
+	const EAvidScriptVmArtifactTrust ArtifactTrust,
+	const bool bCooperativeSafepointProofVerified) const
 {
 #if WITH_DEV_AUTOMATION_TESTS
 	if (ExecutionBudgetOverrideForTesting.IsSet())
@@ -217,7 +226,10 @@ FAvidScriptRuntimeSession::ResolveExecutionBudget(
 		return ExecutionBudgetOverrideForTesting.GetValue();
 	}
 #endif
-	return MakeSessionExecutionBudget(Selection, ArtifactTrust);
+	return MakeSessionExecutionBudget(
+		Selection,
+		ArtifactTrust,
+		bCooperativeSafepointProofVerified);
 }
 
 void FAvidScriptRuntimeSession::SuspendForApplicationLifecycle(
@@ -2040,7 +2052,8 @@ bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 	if (!CandidateRuntime->ConfigureExecutionBudget(
 			ResolveExecutionBudget(
 				Artifact.BackendSelection,
-				Artifact.ArtifactTrust),
+				Artifact.ArtifactTrust,
+				Artifact.VmArtifact.bCooperativeSafepointProofVerified),
 			BudgetError))
 	{
 		SetReloadFailure(

@@ -4,6 +4,9 @@
 #include "AvidScriptEditorCSharpBindingEmitter.h"
 #include "AvidScriptEditorCSharpBindingEmitterTestTypes.h"
 #include "AvidScriptHash.h"
+#include "AvidScriptRuntimeArtifact.h"
+#include "AvidScriptRuntimeSession.h"
+#include "AvidScriptWasmRuntime.h"
 #include "CSharpBuild/AvidScriptEditorCSharpBuildInvoker.h"
 #include "CSharpBuild/AvidScriptEditorVmArtifactPublisher.h"
 
@@ -780,6 +783,64 @@ bool FAvidScriptEditorCSharpBuildServiceZeroBindingProfileTest::RunTest(const FS
 			}
 		}
 	}
+
+	FAvidScriptRuntimeArtifact RuntimeArtifact;
+	FAvidScriptRuntimeArtifactLoadResult RuntimeArtifactResult;
+	if (!TestTrue(
+		TEXT("Zero-binding cooperative artifact reloads from its published manifest"),
+		FAvidScriptRuntimeArtifactLoader::LoadFromFile(
+			Config.ManifestPath,
+			RuntimeArtifact,
+			RuntimeArtifactResult)))
+	{
+		AddError(RuntimeArtifactResult.CanonicalResult.ErrorMessage);
+		return false;
+	}
+	TestTrue(
+		TEXT("Zero-binding runtime artifact preserves verified safepoints"),
+		RuntimeArtifact.VmArtifact.bCooperativeSafepointProofVerified);
+	TestEqual(
+		TEXT("Zero-binding runtime artifact preserves the site identity"),
+		RuntimeArtifact.VmArtifact.CooperativeSafepointSiteSha256,
+		BuildResult.VmArtifactSafepointSiteSha256);
+	RuntimeArtifact.ArtifactTrust =
+		EAvidScriptVmArtifactTrust::VerifiedPackage;
+	FAvidScriptRuntimeSession RuntimeSession;
+	FAvidScriptWasmReloadResult RuntimeLoadResult;
+	if (!TestTrue(
+		TEXT("Verified cooperative C# artifact enters a Runtime Session"),
+		RuntimeSession.LoadInitialArtifact(
+			RuntimeArtifact,
+			RuntimeLoadResult)))
+	{
+		AddError(
+			RuntimeLoadResult.ErrorCategory
+			+ TEXT(": ")
+			+ RuntimeLoadResult.ErrorMessage);
+		return false;
+	}
+	TestTrue(
+		TEXT("Verified cooperative C# artifact reaches BeginPlay"),
+		RuntimeLoadResult.RuntimeResult.bBeginPlayCalled);
+	const FAvidScriptVmLoadConfig::FExecutionBudget& RuntimeBudget =
+		RuntimeSession.GetLiveRuntimeForTesting()
+			->GetExecutionBudgetForTesting();
+	TestEqual(
+		TEXT("Verified cooperative Session disables epoch ticks"),
+		RuntimeBudget.EpochDeadlineTicks,
+		UINT64_C(0));
+	TestEqual(
+		TEXT("Verified cooperative Session disables the epoch watchdog"),
+		RuntimeBudget.EpochTimeoutMilliseconds,
+		0u);
+	TestEqual(
+		TEXT("Verified cooperative Session enables its wall-clock deadline"),
+		RuntimeBudget.CooperativeTimeoutMilliseconds,
+		100u);
+	FAvidScriptWasmSmokeResult RuntimeStopResult;
+	TestTrue(
+		TEXT("Verified cooperative C# Session stops cleanly"),
+		RuntimeSession.StopAndUnload(RuntimeStopResult));
 	return true;
 }
 

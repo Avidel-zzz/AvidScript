@@ -1106,16 +1106,20 @@ bool LoadManifestDebugMap(
 		return false;
 	}
 
+	const int32 ManifestVisibleImportCount =
+		static_cast<int32>(WasmLayout.ImportedFunctionCount)
+		- (WasmLayout.CooperativeSafepointProof.bPresent ? 1 : 0);
 	if (DebugImportedFunctionCount != static_cast<int32>(WasmLayout.ImportedFunctionCount)
 		|| DebugDefinedFunctionCount != static_cast<int32>(WasmLayout.DefinedFunctionCount)
-		|| Manifest.RequiredImports.Num() != static_cast<int32>(WasmLayout.ImportedFunctionCount))
+		|| Manifest.RequiredImports.Num() != ManifestVisibleImportCount)
 	{
 		SetManifestLoadFailure(
 			OutResult,
 			TEXT("debug_map_wasm_layout_mismatch"),
 			FString::Printf(
-				TEXT("manifest_imports=%d debug_imports=%d wasm_imports=%u debug_defined=%d wasm_defined=%u"),
+				TEXT("manifest_imports=%d manifest_visible_wasm_imports=%d debug_imports=%d wasm_imports=%u debug_defined=%d wasm_defined=%u"),
 				Manifest.RequiredImports.Num(),
+				ManifestVisibleImportCount,
 				DebugImportedFunctionCount,
 				WasmLayout.ImportedFunctionCount,
 				DebugDefinedFunctionCount,

@@ -2,6 +2,7 @@
 
 #include "AvidScriptHash.h"
 #include "Packages/AvidScriptModulePackageSchema.h"
+#include "Packages/AvidScriptRuntimeCooperativeSafepointProvenance.h"
 
 #include "Dom/JsonObject.h"
 #include "Misc/FileHelper.h"
@@ -361,6 +362,22 @@ static bool LoadRuntimeArtifactFromFile(
 			TEXT("rebuild the manifest with the current Editor publisher"));
 		return false;
 	}
+	FAvidScriptRuntimeCooperativeSafepointProvenance SafepointProvenance;
+	FString SafepointProvenanceError;
+	if (!ParseAvidScriptRuntimeCooperativeSafepointProvenance(
+			*RootObject,
+			ExecutionObject,
+			CompilerBuildIdentity,
+			SafepointProvenance,
+			SafepointProvenanceError))
+	{
+		SetArtifactLoadFailure(
+			OutResult,
+			TEXT("execution_safepoint_provenance_invalid"),
+			SafepointProvenanceError,
+			TEXT("republish the module manifest and Wasmtime artifact in one transaction"));
+		return false;
+	}
 	OutResult.ExecutionPolicy = Policy;
 	if (!ResolveExecutionPath(
 			CanonicalManifestPath,
@@ -467,6 +484,10 @@ static bool LoadRuntimeArtifactFromFile(
 	VmArtifact.CompilerBuildIdentity = CompilerBuildIdentity;
 	VmArtifact.TargetTriple = TargetTriple;
 	VmArtifact.AttestationId = AttestationId;
+	VmArtifact.bCooperativeSafepointProofVerified =
+		SafepointProvenance.bEnabled;
+	VmArtifact.CooperativeSafepointSiteSha256 =
+		SafepointProvenance.SiteSha256;
 	if (!bUsePersistentPackageTrust
 		&& !AuthorizeAvidScriptVmArtifact(AttestationId, VmArtifact))
 	{

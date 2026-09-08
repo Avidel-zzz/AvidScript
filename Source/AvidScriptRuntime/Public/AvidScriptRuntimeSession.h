@@ -240,7 +240,8 @@ private:
 	FAvidScriptVmLoadConfig::FExecutionBudget ResolveExecutionBudget(
 		const FAvidScriptVmBackendSelection& Selection,
 		EAvidScriptVmArtifactTrust ArtifactTrust =
-			EAvidScriptVmArtifactTrust::Untrusted) const;
+			EAvidScriptVmArtifactTrust::Untrusted,
+		bool bCooperativeSafepointProofVerified = false) const;
 	bool ValidateExpectedOwner(
 		const FAvidScriptWasmReloadManifest& Manifest,
 		FAvidScriptWasmReloadResult& OutResult) const;
