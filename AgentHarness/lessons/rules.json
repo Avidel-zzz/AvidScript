@@ -389,9 +389,9 @@
       "id": "powershell-quote-git-revisions-with-braces",
       "tags": ["powershell", "git", "evidence"],
       "summary": "PowerShell 会把未引用的 Git revision 花括号解释为自身语法。",
-      "prevention": "调用 git rev-parse 等命令时，把 HEAD^{tree}、HEAD^{commit} 一类 revision 写成单引号参数；同时分别核对 commit 与 tree 输出。",
+      "prevention": "PowerShell 中固定使用 `git rev-parse 'HEAD^{tree}'`、`git rev-parse 'ref^{commit}'` 模板，花括号 revision 不允许临时手拼；同时分别核对 commit 与 tree 输出。",
       "source": "observed:2026-08-31-P60.A2",
-      "last_observed": "2026-09-08 P65.D28 验证修正后的 D9 提交标识时，再次把 9971fb33^{commit} 作为未引用参数传给 PowerShell，导致 git rev-parse 失败；无文件副作用，随即改为整体单引号。此前 P60.A2 已发生同类问题"
+      "last_observed": "2026-09-08 P65.D30 为 diagnostic benchmark 取 tree 时再次使用未引用 HEAD^{tree}，PowerShell 将其拆成 encoded command，git 失败且无文件副作用；此前 P65.D28 与 P60.A2 已发生同类问题"
     },
     {
       "id": "open-debt-progress-does-not-use-noop-status-update",
