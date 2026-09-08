@@ -72,7 +72,8 @@ FAvidScriptVmBackendInfo MakeWasmtimeBackendInfo(
 		| EAvidScriptVmCapability::ExecutionFuel
 		| EAvidScriptVmCapability::EpochInterruption
 		| EAvidScriptVmCapability::StoreLimiter
-		| EAvidScriptVmCapability::HostCallBudget;
+		| EAvidScriptVmCapability::HostCallBudget
+		| EAvidScriptVmCapability::CooperativeSafepointInterruption;
 	if (ArtifactFormat == EAvidScriptVmArtifactFormat::WasmtimeSerialized)
 	{
 		Info.Capabilities |= EAvidScriptVmCapability::Aot
@@ -709,6 +710,15 @@ public:
 				DllLoadError);
 			return false;
 		}
+		if (Config.ExecutionBudget.EpochTimeoutMilliseconds > 0
+			&& Config.ExecutionBudget.CooperativeTimeoutMilliseconds > 0)
+		{
+			SetWasmtimeError(
+				OutError,
+				TEXT("invalid_config"),
+				TEXT("Epoch and cooperative wall-clock deadlines are mutually exclusive."));
+			return false;
+		}
 		if (ExecutionBudget.FuelPerEntry > 0
 			&& !CompilerProfile.bConsumeFuel)
 		{
@@ -796,6 +806,28 @@ public:
 			TEXT("Wasmtime is unsupported on this runtime platform."));
 		return false;
 #endif
+		if (!CompilerProfile.bEpochInterruption
+			&& ExecutionBudget.CooperativeTimeoutMilliseconds == 0)
+		{
+			LoadMetrics.RuntimeInitMs = MeasureWasmtimeElapsedMs(RuntimeInitStart);
+			SetWasmtimeError(
+				OutError,
+				TEXT("artifact_budget_mismatch"),
+				TEXT("The trusted cooperative profile requires a non-zero cooperative deadline."));
+			return false;
+		}
+		if (CompilerProfile.bEpochInterruption
+			&& ExecutionBudget.CooperativeTimeoutMilliseconds > 0)
+		{
+			LoadMetrics.RuntimeInitMs = MeasureWasmtimeElapsedMs(RuntimeInitStart);
+			SetWasmtimeError(
+				OutError,
+				TEXT("artifact_budget_mismatch"),
+				TEXT("The cooperative deadline requires an epoch-free compiler profile."));
+			return false;
+		}
+		bCooperativeSafepointMode = !CompilerProfile.bEpochInterruption;
+		InitializeWasmtimeCooperativeDeadlineBudget();
 		if (bSerialized
 			&& Artifact.CompilerBuildIdentity != BackendInfo.RuntimeBuildIdentity)
 		{
@@ -921,19 +953,13 @@ public:
 			return false;
 		}
 
-		if (EpochWatchdogEntryRaw != nullptr)
-		{
-			EpochWatchdog->ArmRegistered(*EpochWatchdogEntryRaw);
-		}
+		ArmWasmtimeExecutionGuards();
 		AvidScriptWasmtimeFailure* InstantiateFailure = avidscript_wasmtime_linker_instantiate(
 			Linker,
 			Store,
 			Module,
 			&Instance);
-		if (EpochWatchdogEntryRaw != nullptr)
-		{
-			EpochWatchdog->DisarmRegistered(*EpochWatchdogEntryRaw);
-		}
+		DisarmWasmtimeExecutionGuards();
 		LoadMetrics.ModuleInstantiateMs = MeasureWasmtimeElapsedMs(InstantiateStart);
 		if (InstantiateFailure != nullptr || Instance == nullptr)
 		{
@@ -966,7 +992,30 @@ public:
 			TEXT("Wasmtime is unavailable for this target."));
 		return false;
 #else
-		if (!IsLoaded() || ExecutionBudget.EpochDeadlineTicks == 0)
+		if (!IsLoaded())
+		{
+			SetWasmtimeError(
+				OutError,
+				TEXT("interrupt_unavailable"),
+				TEXT("Interruption requires a loaded VM instance."));
+			return false;
+		}
+		if (bCooperativeSafepointMode)
+		{
+			if (CooperativeDeadlineCycles.load(std::memory_order_acquire) == 0)
+			{
+				SetWasmtimeError(
+					OutError,
+					TEXT("interrupt_unavailable"),
+					TEXT("No cooperative guest entry is currently active."));
+				return false;
+			}
+			bCooperativeInterruptRequested.store(
+				true,
+				std::memory_order_release);
+			return true;
+		}
+		if (ExecutionBudget.EpochDeadlineTicks == 0)
 		{
 			SetWasmtimeError(
 				OutError,
@@ -1518,15 +1567,42 @@ public:
 		if (HostContext.Import->BindingId ==
 			EAvidScriptHostBindingId::CooperativeSafepointPoll)
 		{
-			if (ArgumentCount == 0 && ResultCount == 0)
+			if (ArgumentCount != 0 || ResultCount != 0)
+			{
+				RecordPendingHostFailure(
+					TEXT("avidscript"),
+					UTF8_TO_TCHAR(HostContext.Import->ImportName),
+					TEXT("The cooperative safepoint poll ABI must be empty."));
+				return false;
+			}
+			if (!bCooperativeSafepointMode)
 			{
 				return true;
 			}
-			RecordPendingHostFailure(
-				TEXT("avidscript"),
-				UTF8_TO_TCHAR(HostContext.Import->ImportName),
-				TEXT("The cooperative safepoint poll ABI must be empty."));
-			return false;
+			if (bCooperativeInterruptRequested.load(std::memory_order_acquire))
+			{
+				RecordPendingHostFailure(
+					TEXT("avidscript"),
+					UTF8_TO_TCHAR(HostContext.Import->ImportName),
+					TEXT("The cooperative guest entry was interrupted."),
+					TEXT("execution_interrupted"));
+				return false;
+			}
+			const uint64 DeadlineCycles =
+				CooperativeDeadlineCycles.load(std::memory_order_acquire);
+			if (DeadlineCycles == 0
+				|| FPlatformTime::Cycles64() >= DeadlineCycles)
+			{
+				RecordPendingHostFailure(
+					TEXT("avidscript"),
+					UTF8_TO_TCHAR(HostContext.Import->ImportName),
+					DeadlineCycles == 0
+						? TEXT("The cooperative guest entry has no armed deadline.")
+						: TEXT("The cooperative guest entry exceeded its wall-clock deadline."),
+					TEXT("cooperative_deadline_exceeded"));
+				return false;
+			}
+			return true;
 		}
 		if (!TryConsumeHostCallBudget(
 			TEXT("avidscript"),
@@ -2267,6 +2343,64 @@ private:
 		}
 	}
 
+	void InitializeWasmtimeCooperativeDeadlineBudget()
+	{
+		CooperativeTimeoutCycles = 0;
+		if (!bCooperativeSafepointMode
+			|| ExecutionBudget.CooperativeTimeoutMilliseconds == 0)
+		{
+			return;
+		}
+		const double RequestedCycles =
+			(static_cast<double>(
+				ExecutionBudget.CooperativeTimeoutMilliseconds) / 1000.0)
+			/ FPlatformTime::GetSecondsPerCycle64();
+		CooperativeTimeoutCycles = static_cast<uint64>(RequestedCycles);
+		if (CooperativeTimeoutCycles == 0)
+		{
+			CooperativeTimeoutCycles = 1;
+		}
+		else if (static_cast<double>(CooperativeTimeoutCycles) < RequestedCycles)
+		{
+			++CooperativeTimeoutCycles;
+		}
+	}
+
+	FORCEINLINE void ArmWasmtimeExecutionGuards()
+	{
+		if (EpochWatchdogEntryRaw != nullptr)
+		{
+			EpochWatchdog->ArmRegistered(*EpochWatchdogEntryRaw);
+		}
+		if (CooperativeTimeoutCycles == 0)
+		{
+			return;
+		}
+		bCooperativeInterruptRequested.store(
+			false,
+			std::memory_order_release);
+		const uint64 NowCycles = FPlatformTime::Cycles64();
+		const uint64 DeadlineCycles =
+			MAX_uint64 - NowCycles < CooperativeTimeoutCycles
+				? MAX_uint64
+				: NowCycles + CooperativeTimeoutCycles;
+		CooperativeDeadlineCycles.store(
+			DeadlineCycles,
+			std::memory_order_release);
+	}
+
+	FORCEINLINE void DisarmWasmtimeExecutionGuards()
+	{
+		if (EpochWatchdogEntryRaw != nullptr)
+		{
+			EpochWatchdog->DisarmRegistered(*EpochWatchdogEntryRaw);
+		}
+		CooperativeDeadlineCycles.store(0, std::memory_order_release);
+		bCooperativeInterruptRequested.store(
+			false,
+			std::memory_order_release);
+	}
+
 	bool ResetExecutionBudget(FAvidScriptVmError& OutError)
 	{
 #if !AVIDSCRIPT_WITH_WASMTIME
@@ -2358,11 +2492,10 @@ private:
 			return false;
 		}
 
-		const bool bArmWatchdog =
-			ActiveCallDepth == 0 && EpochWatchdogEntryRaw != nullptr;
-		if (bArmWatchdog)
+		const bool bArmExecutionGuards = ActiveCallDepth == 0;
+		if (bArmExecutionGuards)
 		{
-			EpochWatchdog->ArmRegistered(*EpochWatchdogEntryRaw);
+			ArmWasmtimeExecutionGuards();
 		}
 		++ActiveCallDepth;
 		int32 Result = 0;
@@ -2374,9 +2507,9 @@ private:
 				static_cast<int32>(Frame.Cells[1]),
 				&Result,
 				&CallFailure);
-		if (bArmWatchdog)
+		if (bArmExecutionGuards)
 		{
-			EpochWatchdog->DisarmRegistered(*EpochWatchdogEntryRaw);
+			DisarmWasmtimeExecutionGuards();
 		}
 		const uint32 ResultCell = static_cast<uint32>(Result);
 		return CompleteResolvedExportCall(
@@ -2402,11 +2535,10 @@ private:
 			return false;
 		}
 
-		const bool bArmWatchdog =
-			ActiveCallDepth == 0 && EpochWatchdogEntryRaw != nullptr;
-		if (bArmWatchdog)
+		const bool bArmExecutionGuards = ActiveCallDepth == 0;
+		if (bArmExecutionGuards)
 		{
-			EpochWatchdog->ArmRegistered(*EpochWatchdogEntryRaw);
+			ArmWasmtimeExecutionGuards();
 		}
 		++ActiveCallDepth;
 		float Second = 0.0f;
@@ -2418,9 +2550,9 @@ private:
 				static_cast<int32>(Frame.Cells[0]),
 				Second,
 				&CallFailure);
-		if (bArmWatchdog)
+		if (bArmExecutionGuards)
 		{
-			EpochWatchdog->DisarmRegistered(*EpochWatchdogEntryRaw);
+			DisarmWasmtimeExecutionGuards();
 		}
 		return CompleteResolvedExportCall(
 			Entry,
@@ -2438,11 +2570,10 @@ private:
 		FAvidScriptVmError& OutError,
 		FAvidScriptVmCallResult* OutResult)
 	{
-		const bool bArmWatchdog =
-			ActiveCallDepth == 0 && EpochWatchdogEntryRaw != nullptr;
-		if (bArmWatchdog)
+		const bool bArmExecutionGuards = ActiveCallDepth == 0;
+		if (bArmExecutionGuards)
 		{
-			EpochWatchdog->ArmRegistered(*EpochWatchdogEntryRaw);
+			ArmWasmtimeExecutionGuards();
 		}
 		++ActiveCallDepth;
 		uint32 ResultCells[FAvidScriptVmCallResult::MaxCells] = {};
@@ -2457,9 +2588,9 @@ private:
 				FAvidScriptVmCallResult::MaxCells,
 				&ResultCellCount,
 				&CallFailure);
-		if (bArmWatchdog)
+		if (bArmExecutionGuards)
 		{
-			EpochWatchdog->DisarmRegistered(*EpochWatchdogEntryRaw);
+			DisarmWasmtimeExecutionGuards();
 		}
 		return CompleteResolvedExportCall(
 			Entry,
@@ -4205,6 +4336,12 @@ private:
 		bFuelConsumptionEnabled = true;
 		bFuelBudgetInitialized = false;
 		bEpochDeadlineInitialized = false;
+		bCooperativeSafepointMode = false;
+		CooperativeTimeoutCycles = 0;
+		CooperativeDeadlineCycles.store(0, std::memory_order_release);
+		bCooperativeInterruptRequested.store(
+			false,
+			std::memory_order_release);
 		bResetExecutionBudgetPerEntry = true;
 		bUnloadDeferred = false;
 	}
@@ -4231,6 +4368,10 @@ private:
 	bool bFuelConsumptionEnabled = true;
 	bool bFuelBudgetInitialized = false;
 	bool bEpochDeadlineInitialized = false;
+	bool bCooperativeSafepointMode = false;
+	uint64 CooperativeTimeoutCycles = 0;
+	std::atomic<uint64> CooperativeDeadlineCycles{0};
+	std::atomic<bool> bCooperativeInterruptRequested{false};
 	bool bResetExecutionBudgetPerEntry = true;
 
 #if AVIDSCRIPT_WITH_WASMTIME

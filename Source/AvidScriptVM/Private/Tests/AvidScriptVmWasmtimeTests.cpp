@@ -168,10 +168,10 @@ TArray<uint8> BuildWasmtimeCooperativeSafepointFixture()
 		"mode=bounded_counter_v1\n"
 		"poll_interval=64\n"
 		"import=avidscript.avid_cooperative_safepoint_poll\n"
-		"loop_poll_blocks=0\n"
+		"loop_poll_blocks=1\n"
 		"recursive_functions=0\n"
-		"site_count=0\n"
-		"site_sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n"
+		"site_count=1\n"
+		"site_sha256=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n"
 		"coverage=cfg_feedback_edges_and_recursive_entries\n"
 		"guest_ir=2/1.1");
 	AppendWasmtimeSection(Module, 0, ProofSection);
@@ -185,6 +185,35 @@ TArray<uint8> BuildWasmtimeCooperativeSafepointFixture()
 	Imports.Add(0x00);
 	AppendWasmtimeU32Leb(Imports, 0);
 	AppendWasmtimeSection(Module, 2, Imports);
+
+	const TArray<uint8> Functions = { 2, 0, 0 };
+	AppendWasmtimeSection(Module, 3, Functions);
+	TArray<uint8> Exports;
+	AppendWasmtimeU32Leb(Exports, 2);
+	AppendWasmtimeString(Exports, "avid_safe");
+	Exports.Add(0x00);
+	AppendWasmtimeU32Leb(Exports, 1);
+	AppendWasmtimeString(Exports, "avid_spin");
+	Exports.Add(0x00);
+	AppendWasmtimeU32Leb(Exports, 2);
+	AppendWasmtimeSection(Module, 7, Exports);
+
+	TArray<uint8> Code;
+	AppendWasmtimeU32Leb(Code, 2);
+	const TArray<uint8> SafeBody = { 0x00, 0x0b };
+	AppendWasmtimeU32Leb(Code, static_cast<uint32>(SafeBody.Num()));
+	Code.Append(SafeBody);
+	const TArray<uint8> SpinBody = {
+		0x00,
+		0x03, 0x40,
+		0x10, 0x00,
+		0x0c, 0x00,
+		0x0b,
+		0x0b
+	};
+	AppendWasmtimeU32Leb(Code, static_cast<uint32>(SpinBody.Num()));
+	Code.Append(SpinBody);
+	AppendWasmtimeSection(Module, 10, Code);
 	return Module;
 }
 
@@ -1241,7 +1270,8 @@ bool FAvidScriptVmWasmtimeExecutionBudgetTest::RunTest(
 		EAvidScriptVmCapability::ExecutionFuel
 		| EAvidScriptVmCapability::EpochInterruption
 		| EAvidScriptVmCapability::StoreLimiter
-		| EAvidScriptVmCapability::HostCallBudget;
+		| EAvidScriptVmCapability::HostCallBudget
+		| EAvidScriptVmCapability::CooperativeSafepointInterruption;
 	TestTrue(
 		TEXT("containment capabilities are explicit"),
 		EnumHasAllFlags(Backend->GetBackendInfo().Capabilities, RequiredCapabilities));
@@ -2022,6 +2052,7 @@ bool FAvidScriptVmWasmtimeArtifactCompilerTest::RunTest(
 		return false;
 	}
 	FAvidScriptVmLoadConfig TrustedConfig;
+	TrustedConfig.ExecutionBudget.CooperativeTimeoutMilliseconds = 20;
 	TestFalse(
 		TEXT("verified package trust cannot replace structural safepoint proof"),
 		UnverifiedTrustedBackend->LoadArtifact(
@@ -2046,8 +2077,10 @@ bool FAvidScriptVmWasmtimeArtifactCompilerTest::RunTest(
 		FAvidScriptHash::Sha256Hex(CooperativeBytecode);
 	VerifiedTrustedRequest.CooperativeSafepointReceipt.ProofSchemaVersion = 2;
 	VerifiedTrustedRequest.CooperativeSafepointReceipt.PollInterval = 64;
+	VerifiedTrustedRequest.CooperativeSafepointReceipt.LoopPollBlockCount = 1;
+	VerifiedTrustedRequest.CooperativeSafepointReceipt.SiteCount = 1;
 	VerifiedTrustedRequest.CooperativeSafepointReceipt.SiteSha256 =
-		TEXT("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+		TEXT("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
 	VerifiedTrustedRequest.CooperativeSafepointReceipt.bVerified = true;
 	FAvidScriptVmArtifactCompileResult VerifiedTrustedResult;
 	if (!TestTrue(
@@ -2069,6 +2102,26 @@ bool FAvidScriptVmWasmtimeArtifactCompilerTest::RunTest(
 		TEXT("trusted cooperative artifact binds the site identity"),
 		VerifiedTrustedResult.Artifact.CooperativeSafepointSiteSha256,
 		VerifiedTrustedRequest.CooperativeSafepointReceipt.SiteSha256);
+	TUniquePtr<IAvidScriptVmBackend> MissingDeadlineBackend =
+		CreateWasmtimePrecompiledBackendForTest(LoadError);
+	if (!TestNotNull(
+		TEXT("cooperative backend without a deadline is created"),
+		MissingDeadlineBackend.Get()))
+	{
+		return false;
+	}
+	TestFalse(
+		TEXT("trusted cooperative artifact requires a deadline"),
+		MissingDeadlineBackend->LoadArtifact(
+			VerifiedTrustedResult.Artifact.MakeView(
+				EAvidScriptVmArtifactTrust::VerifiedPackage),
+			TEXT("wasmtime_artifact_compiler_missing_cooperative_deadline"),
+			FAvidScriptVmLoadConfig(),
+			LoadError));
+	TestEqual(
+		TEXT("missing cooperative deadline has a stable category"),
+		LoadError.Category,
+		FString(TEXT("artifact_budget_mismatch")));
 	TUniquePtr<IAvidScriptVmBackend> VerifiedTrustedBackend =
 		CreateWasmtimePrecompiledBackendForTest(LoadError);
 	if (!TestNotNull(
@@ -2089,6 +2142,49 @@ bool FAvidScriptVmWasmtimeArtifactCompilerTest::RunTest(
 		AddError(LoadError.Category + TEXT(": ") + LoadError.Details);
 		return false;
 	}
+	FAvidScriptVmExportHandle CooperativeSafeHandle;
+	FAvidScriptVmExportHandle CooperativeSpinHandle;
+	TestTrue(
+		TEXT("cooperative safe export resolves"),
+		VerifiedTrustedBackend->ResolveExport(
+			TEXT("avid_safe"),
+			CooperativeSafeHandle,
+			LoadError));
+	TestTrue(
+		TEXT("cooperative spin export resolves"),
+		VerifiedTrustedBackend->ResolveExport(
+			TEXT("avid_spin"),
+			CooperativeSpinHandle,
+			LoadError));
+	const FAvidScriptVmCallFrame EmptyCooperativeFrame;
+	TestTrue(
+		TEXT("cooperative safe export executes before timeout"),
+		VerifiedTrustedBackend->Call(
+			CooperativeSafeHandle,
+			EmptyCooperativeFrame,
+			LoadError));
+	const double CooperativeStartSeconds = FPlatformTime::Seconds();
+	TestFalse(
+		TEXT("cooperative poll interrupts an infinite loop"),
+		VerifiedTrustedBackend->Call(
+			CooperativeSpinHandle,
+			EmptyCooperativeFrame,
+			LoadError));
+	const double CooperativeElapsedSeconds =
+		FPlatformTime::Seconds() - CooperativeStartSeconds;
+	TestEqual(
+		TEXT("cooperative timeout has a stable category"),
+		LoadError.Category,
+		FString(TEXT("cooperative_deadline_exceeded")));
+	TestTrue(
+		TEXT("cooperative deadline returns within a bounded interval"),
+		CooperativeElapsedSeconds < 2.0);
+	TestTrue(
+		TEXT("cooperative deadline resets for the next entry"),
+		VerifiedTrustedBackend->Call(
+			CooperativeSafeHandle,
+			EmptyCooperativeFrame,
+			LoadError));
 
 	FAvidScriptVmArtifactCompileResult CachedResult;
 	if (!TestTrue(
