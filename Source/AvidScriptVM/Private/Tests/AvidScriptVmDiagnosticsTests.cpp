@@ -87,6 +87,23 @@ void AppendDiagnosticSection(TArray<uint8>& Module, uint8 SectionId, const TArra
 	Module.Append(Payload);
 }
 
+void AppendDiagnosticAscii(TArray<uint8>& Bytes, const char* Value)
+{
+	const int32 Length = FCStringAnsi::Strlen(Value);
+	for (int32 Index = 0; Index < Length; ++Index)
+	{
+		Bytes.Add(static_cast<uint8>(Value[Index]));
+	}
+}
+
+void AppendDiagnosticSafepointSection(TArray<uint8>& Module, const char* ProofPayload)
+{
+	TArray<uint8> Section;
+	AppendDiagnosticString(Section, "avidscript.safepoints");
+	AppendDiagnosticAscii(Section, ProofPayload);
+	AppendDiagnosticSection(Module, 0, Section);
+}
+
 TArray<uint8> BuildDiagnosticTrapFixture()
 {
 	TArray<uint8> Module;
@@ -159,6 +176,35 @@ TArray<uint8> BuildDiagnosticImportFixture()
 	Imports.Add(0x00);
 	AppendDiagnosticU32Leb(Imports, 0);
 	AppendDiagnosticSection(Module, 2, Imports);
+	return Module;
+}
+
+TArray<uint8> BuildDiagnosticSafepointFixture(
+	const char* ProofPayload,
+	bool bIncludePollImport,
+	bool bDuplicateProof = false)
+{
+	TArray<uint8> Module;
+	const uint8 Header[] = { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 };
+	Module.Append(Header, UE_ARRAY_COUNT(Header));
+	if (ProofPayload != nullptr)
+	{
+		AppendDiagnosticSafepointSection(Module, ProofPayload);
+		if (bDuplicateProof)
+		{
+			AppendDiagnosticSafepointSection(Module, ProofPayload);
+		}
+	}
+	if (bIncludePollImport)
+	{
+		TArray<uint8> Imports;
+		AppendDiagnosticU32Leb(Imports, 1);
+		AppendDiagnosticString(Imports, "avidscript");
+		AppendDiagnosticString(Imports, "avid_cooperative_safepoint_poll");
+		Imports.Add(0x00);
+		AppendDiagnosticU32Leb(Imports, 0);
+		AppendDiagnosticSection(Module, 2, Imports);
+	}
 	return Module;
 }
 }
@@ -250,6 +296,83 @@ bool FAvidScriptVmModuleLayoutTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("repeated function import module is retained"), Layout.FunctionImports[2].ModuleName, FString(TEXT("avidscript")));
 		TestEqual(TEXT("repeated function import is retained"), Layout.FunctionImports[2].ImportName, FString(TEXT("same")));
 	}
+
+	constexpr const char* ValidSafepointProof =
+		"schema=1\n"
+		"mode=bounded_counter_v1\n"
+		"poll_interval=64\n"
+		"import=avidscript.avid_cooperative_safepoint_poll\n"
+		"loop_poll_blocks=2\n"
+		"recursive_functions=1\n"
+		"coverage=cfg_feedback_edges_and_recursive_entries\n"
+		"guest_ir=1/1.0";
+	const TArray<uint8> SafepointBytecode = BuildDiagnosticSafepointFixture(
+		ValidSafepointProof,
+		true);
+	TestTrue(
+		TEXT("cooperative safepoint proof is parsed with its internal import"),
+		InspectAvidScriptWasmModuleLayout(MakeArrayView(SafepointBytecode), Layout, Error));
+	TestTrue(
+		TEXT("cooperative safepoint proof is retained"),
+		Layout.CooperativeSafepointProof.bPresent);
+	TestEqual(
+		TEXT("cooperative safepoint interval"),
+		Layout.CooperativeSafepointProof.PollInterval,
+		64u);
+	TestEqual(
+		TEXT("cooperative loop proof count"),
+		Layout.CooperativeSafepointProof.LoopPollBlockCount,
+		2u);
+	TestEqual(
+		TEXT("cooperative recursion proof count"),
+		Layout.CooperativeSafepointProof.RecursiveFunctionCount,
+		1u);
+	TestEqual(
+		TEXT("cooperative Guest IR identity"),
+		Layout.CooperativeSafepointProof.GuestIrIdentity,
+		FString(TEXT("1/1.0")));
+
+	const TArray<uint8> MissingImportBytecode =
+		BuildDiagnosticSafepointFixture(ValidSafepointProof, false);
+	TestFalse(
+		TEXT("proof without the internal poll import is rejected"),
+		InspectAvidScriptWasmModuleLayout(
+			MakeArrayView(MissingImportBytecode),
+			Layout,
+			Error));
+	const TArray<uint8> DuplicateProofBytecode =
+		BuildDiagnosticSafepointFixture(ValidSafepointProof, true, true);
+	TestFalse(
+		TEXT("duplicate proof sections are rejected"),
+		InspectAvidScriptWasmModuleLayout(
+			MakeArrayView(DuplicateProofBytecode),
+			Layout,
+			Error));
+	const char* InvalidIntervalProof =
+		"schema=1\n"
+		"mode=bounded_counter_v1\n"
+		"poll_interval=0\n"
+		"import=avidscript.avid_cooperative_safepoint_poll\n"
+		"loop_poll_blocks=2\n"
+		"recursive_functions=1\n"
+		"coverage=cfg_feedback_edges_and_recursive_entries\n"
+		"guest_ir=1/1.0";
+	const TArray<uint8> InvalidIntervalBytecode =
+		BuildDiagnosticSafepointFixture(InvalidIntervalProof, true);
+	TestFalse(
+		TEXT("out-of-range safepoint intervals are rejected"),
+		InspectAvidScriptWasmModuleLayout(
+			MakeArrayView(InvalidIntervalBytecode),
+			Layout,
+			Error));
+	const TArray<uint8> MissingProofBytecode =
+		BuildDiagnosticSafepointFixture(nullptr, true);
+	TestFalse(
+		TEXT("internal poll import without proof is rejected"),
+		InspectAvidScriptWasmModuleLayout(
+			MakeArrayView(MissingProofBytecode),
+			Layout,
+			Error));
 	return true;
 }
 

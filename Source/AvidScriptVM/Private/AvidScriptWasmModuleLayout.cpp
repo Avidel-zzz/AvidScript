@@ -6,6 +6,10 @@ namespace
 {
 constexpr uint32 MaxWasmLayoutItems = 65536;
 constexpr uint32 MaxWasmLayoutNameBytes = 1024 * 1024;
+constexpr int32 MaxWasmSafepointProofBytes = 4096;
+constexpr TCHAR CooperativeSafepointSectionName[] = TEXT("avidscript.safepoints");
+constexpr TCHAR CooperativeSafepointImportModule[] = TEXT("avidscript");
+constexpr TCHAR CooperativeSafepointImportName[] = TEXT("avid_cooperative_safepoint_poll");
 
 class FAvidScriptWasmLayoutReader
 {
@@ -83,15 +87,19 @@ public:
 		return false;
 	}
 
-	bool ReadName(FString& OutName)
+	bool ReadName(FString& OutName, bool bAllowEmpty = false)
 	{
 		uint32 ByteCount = 0;
 		if (!ReadU32Leb(ByteCount)
-			|| ByteCount == 0
 			|| ByteCount > MaxWasmLayoutNameBytes
 			|| static_cast<uint64>(ByteCount) > static_cast<uint64>(Remaining()))
 		{
 			return false;
+		}
+		if (ByteCount == 0)
+		{
+			OutName.Reset();
+			return bAllowEmpty;
 		}
 
 		for (uint32 ByteIndex = 0; ByteIndex < ByteCount; ++ByteIndex)
@@ -110,6 +118,28 @@ public:
 		}
 		OutName = FString(Converted.Length(), Converted.Get());
 		Offset += static_cast<int32>(ByteCount);
+		return true;
+	}
+
+	bool ReadRemainingAscii(FString& OutValue, int32 MaxByteCount)
+	{
+		const int32 ByteCount = Remaining();
+		if (ByteCount <= 0 || ByteCount > MaxByteCount)
+		{
+			return false;
+		}
+		OutValue.Reset(ByteCount);
+		for (int32 ByteIndex = 0; ByteIndex < ByteCount; ++ByteIndex)
+		{
+			const uint8 Byte = Bytes[Offset + ByteIndex];
+			if (Byte != '\n' && (Byte < 0x20 || Byte > 0x7e))
+			{
+				OutValue.Reset();
+				return false;
+			}
+			OutValue.AppendChar(static_cast<TCHAR>(Byte));
+		}
+		Offset += ByteCount;
 		return true;
 	}
 
@@ -292,6 +322,121 @@ bool ParseWasmExportSection(
 	}
 	return Reader.IsAtEnd();
 }
+
+bool ParseBoundedUnsignedField(
+	const FString& Line,
+	const TCHAR* Prefix,
+	uint32 Minimum,
+	uint32 Maximum,
+	uint32& OutValue)
+{
+	if (!Line.StartsWith(Prefix, ESearchCase::CaseSensitive))
+	{
+		return false;
+	}
+	const FString ValueText = Line.Mid(FCString::Strlen(Prefix));
+	if (ValueText.IsEmpty())
+	{
+		return false;
+	}
+	uint64 Value = 0;
+	for (const TCHAR Character : ValueText)
+	{
+		if (Character < TEXT('0') || Character > TEXT('9'))
+		{
+			return false;
+		}
+		Value = Value * 10 + static_cast<uint64>(Character - TEXT('0'));
+		if (Value > Maximum)
+		{
+			return false;
+		}
+	}
+	if (Value < Minimum)
+	{
+		return false;
+	}
+	OutValue = static_cast<uint32>(Value);
+	return true;
+}
+
+bool IsValidGuestIrIdentity(const FString& Identity)
+{
+	if (Identity.IsEmpty() || Identity.Len() > 64)
+	{
+		return false;
+	}
+	int32 SlashCount = 0;
+	for (const TCHAR Character : Identity)
+	{
+		const bool bAllowed = FChar::IsAlnum(Character)
+			|| Character == TEXT('.')
+			|| Character == TEXT('_')
+			|| Character == TEXT('-')
+			|| Character == TEXT('/');
+		if (!bAllowed)
+		{
+			return false;
+		}
+		SlashCount += Character == TEXT('/') ? 1 : 0;
+	}
+	return SlashCount == 1
+		&& !Identity.StartsWith(TEXT("/"))
+		&& !Identity.EndsWith(TEXT("/"));
+}
+
+bool ParseWasmCustomSection(
+	FAvidScriptWasmLayoutReader& Reader,
+	FAvidScriptWasmCooperativeSafepointProof& OutProof)
+{
+	FString SectionName;
+	if (!Reader.ReadName(SectionName, true))
+	{
+		return false;
+	}
+	if (SectionName != CooperativeSafepointSectionName)
+	{
+		return true;
+	}
+	if (OutProof.bPresent)
+	{
+		return false;
+	}
+
+	FString Payload;
+	if (!Reader.ReadRemainingAscii(Payload, MaxWasmSafepointProofBytes))
+	{
+		return false;
+	}
+	TArray<FString> Lines;
+	Payload.ParseIntoArrayLines(Lines, false);
+	if (Lines.Num() != 8
+		|| !ParseBoundedUnsignedField(Lines[0], TEXT("schema="), 1, 1, OutProof.SchemaVersion)
+		|| Lines[1] != TEXT("mode=bounded_counter_v1")
+		|| !ParseBoundedUnsignedField(
+			Lines[2], TEXT("poll_interval="), 1, 65536, OutProof.PollInterval)
+		|| Lines[3] != TEXT("import=avidscript.avid_cooperative_safepoint_poll")
+		|| !ParseBoundedUnsignedField(
+			Lines[4], TEXT("loop_poll_blocks="), 0, MaxWasmLayoutItems,
+			OutProof.LoopPollBlockCount)
+		|| !ParseBoundedUnsignedField(
+			Lines[5], TEXT("recursive_functions="), 0, MaxWasmLayoutItems,
+			OutProof.RecursiveFunctionCount)
+		|| Lines[6] != TEXT("coverage=cfg_feedback_edges_and_recursive_entries")
+		|| !Lines[7].StartsWith(TEXT("guest_ir="), ESearchCase::CaseSensitive))
+	{
+		return false;
+	}
+	OutProof.Mode = TEXT("bounded_counter_v1");
+	OutProof.GuestIrIdentity = Lines[7].Mid(FCString::Strlen(TEXT("guest_ir=")));
+	if (!IsValidGuestIrIdentity(OutProof.GuestIrIdentity))
+	{
+		OutProof = FAvidScriptWasmCooperativeSafepointProof();
+		return false;
+	}
+	OutProof.bPresent = true;
+	return Reader.IsAtEnd();
+}
 }
 
 bool InspectAvidScriptWasmModuleLayout(
@@ -345,6 +490,11 @@ bool InspectAvidScriptWasmModuleLayout(
 		bool bParsed = true;
 		switch (SectionId)
 		{
+		case 0:
+			bParsed = ParseWasmCustomSection(
+				SectionReader,
+				OutLayout.CooperativeSafepointProof);
+			break;
 		case 2:
 			if (bHasImportSection)
 			{
@@ -402,6 +552,22 @@ bool InspectAvidScriptWasmModuleLayout(
 	if (!bHasExportSection)
 	{
 		OutLayout.FunctionExports.Reset();
+	}
+	int32 CooperativePollImportCount = 0;
+	for (const FAvidScriptWasmFunctionImport& FunctionImport : OutLayout.FunctionImports)
+	{
+		if (FunctionImport.ModuleName == CooperativeSafepointImportModule
+			&& FunctionImport.ImportName == CooperativeSafepointImportName)
+		{
+			++CooperativePollImportCount;
+		}
+	}
+	if (OutLayout.CooperativeSafepointProof.bPresent
+		? CooperativePollImportCount != 1
+		: CooperativePollImportCount != 0)
+	{
+		OutError = TEXT("WASM cooperative safepoint proof and poll import are inconsistent");
+		return false;
 	}
 
 	const uint64 FunctionIndexLimit =
