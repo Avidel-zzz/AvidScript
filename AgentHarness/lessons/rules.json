@@ -939,6 +939,14 @@
       "prevention": "性能样本只使用 candidate freezer 原子装配并验证过的 project；磁盘不足或 frozen junction 身份不匹配时暂停采样，继续非采样工作，不手工组合旧 generated package、项目模块与新 Runtime。失败壳不得用于性能结论。",
       "source": "observed:2026-09-08-P65.D30",
       "last_observed": "2026-09-08 P65.D30 两个手工 diagnostic 壳先后因 generated_binding_unavailable 和初始化 Exit 1 在 workload 前失败；共享缓存虽节省空间，但无法证明生成注册表、manifest 与候选 DLL 同源"
+    },
+    {
+      "id": "implicit-wasm-imports-shift-debug-index-space",
+      "tags": ["wasm", "debug-map", "compiler", "indices"],
+      "summary": "Backend 注入隐式 function import 时，所有定义函数的 WASM index 与 Debug Map import 基数都会整体后移。",
+      "prevention": "隐式 function import 数必须作为显式 compiler option 同时传入 Debug Map projector 和 WASM backend；offset map、finalized debug map、manifest count 与结构检查统一使用 public imports + implicit imports，禁止在 finalize 后补偏移。",
+      "source": "observed:2026-09-09-P65.D31.C3.4",
+      "last_observed": "2026-09-09 P65.D31 C3.4 首次 cooperative build 在 ASDEBUG2001 fail-closed；原因是 backend 注入 poll import 后 offset map 为 public+1，而 Guest projector 仍使用 public import 数。显式传递 implicit-function-import-count 后 cooperative 与默认构建均通过"
     }
   ]
 }
