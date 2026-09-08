@@ -590,6 +590,7 @@ struct FPreparedSelfI32PairContext
 struct FPreparedSelfI32Context
 {
 	int32 CallCount = 0;
+	int32 DirectCallCount = 0;
 	int32 LastValue = 0;
 	int32 Bias = 0;
 };
@@ -611,6 +612,25 @@ EAvidScriptVmTypedHostStatus InvokePreparedSelfI32ForTest(
 	Prepared->LastValue = Value;
 	OutValue = SelfSlot + SelfGeneration + Value + Prepared->Bias;
 	return EAvidScriptVmTypedHostStatus::Succeeded;
+}
+
+int32 InvokePreparedDirectSelfI32ForTest(
+	void* Context,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	const int32 Value,
+	int32* OutValue)
+{
+	FPreparedSelfI32Context* Prepared =
+		static_cast<FPreparedSelfI32Context*>(Context);
+	if (Prepared == nullptr || OutValue == nullptr)
+	{
+		return static_cast<int32>(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+	++Prepared->DirectCallCount;
+	Prepared->LastValue = Value;
+	*OutValue = SelfSlot + SelfGeneration + Value + Prepared->Bias;
+	return static_cast<int32>(EAvidScriptVmTypedHostStatus::Succeeded);
 }
 
 EAvidScriptVmTypedHostStatus InvokePreparedSelfI32PairForTest(
@@ -1096,6 +1116,8 @@ bool FAvidScriptVmWasmtimeTypedHostTest::RunTest(const FString& Parameters)
 	PreparedUnaryImports[0].PreparedTarget.Context = &PreparedUnaryContext;
 	PreparedUnaryImports[0].PreparedTarget.SelfI32 =
 		&InvokePreparedSelfI32ForTest;
+	PreparedUnaryImports[0].PreparedTarget.DirectSelfI32 =
+		&InvokePreparedDirectSelfI32ForTest;
 	FAvidScriptVmLoadConfig PreparedUnaryConfig;
 	PreparedUnaryConfig.BindingPackage = &PreparedUnaryPackage;
 	PreparedUnaryConfig.TypedHostDispatcher = &PreparedFallbackDispatcher;
@@ -1113,8 +1135,12 @@ bool FAvidScriptVmWasmtimeTypedHostTest::RunTest(const FString& Parameters)
 		14,
 		PreparedUnaryError);
 	TestEqual(
-		TEXT("prepared unary int32 target is called exactly once"),
+		TEXT("prepared unary int32 legacy target stays off the direct path"),
 		PreparedUnaryContext.CallCount,
+		0);
+	TestEqual(
+		TEXT("prepared unary int32 direct target is called exactly once"),
+		PreparedUnaryContext.DirectCallCount,
 		1);
 	TestEqual(
 		TEXT("prepared unary int32 forwards its value"),

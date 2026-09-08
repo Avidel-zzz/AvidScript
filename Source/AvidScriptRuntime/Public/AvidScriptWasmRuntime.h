@@ -545,6 +545,12 @@ private:
 		int32 SelfGeneration,
 		int32 Value,
 		int32& OutValue);
+	static int32 InvokePreparedDirectSelfI32(
+		void* Context,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 Value,
+		int32* OutValue);
 	EAvidScriptVmTypedHostStatus DispatchPreparedSelfI32(
 		FAvidScriptPreparedGeneratedHostCall& Call,
 		int32 SelfSlot,
@@ -667,6 +673,11 @@ private:
 		int32 SelfSlot,
 		int32 SelfGeneration,
 		int32& OutValue);
+	static int32 InvokePreparedDirectSelfPropertyI32Get(
+		void* Context,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32* OutValue);
 	EAvidScriptVmTypedHostStatus DispatchPreparedSelfPropertyI32Get(
 		FAvidScriptPreparedGeneratedHostCall& Call,
 		int32 SelfSlot,
@@ -677,6 +688,12 @@ private:
 		int32 SelfSlot,
 		int32 SelfGeneration,
 		int32 Value);
+	static int32 InvokePreparedDirectSelfPropertyI32Set(
+		void* Context,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 Value,
+		int32* OutValue);
 	EAvidScriptVmTypedHostStatus DispatchPreparedSelfPropertyI32Set(
 		FAvidScriptPreparedGeneratedHostCall& Call,
 		int32 SelfSlot,

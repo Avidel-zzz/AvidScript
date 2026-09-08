@@ -74,6 +74,10 @@ typedef int32_t (*AvidScriptWasmtimeSelfI32Callback)(
 	int32_t value,
 	int32_t* out_value);
 
+typedef int32_t (*AvidScriptWasmtimeTypedFailureCallback)(
+	void* environment,
+	int32_t status);
+
 typedef int32_t (*AvidScriptWasmtimeSelfPropertyF32GetCallback)(
 	void* environment,
 	int64_t packed_self,
@@ -172,6 +176,17 @@ AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_i32(
 	AvidScriptWasmtimeSelfI32Callback callback,
 	void* environment);
 
+AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_direct_self_i32(
+	AvidScriptWasmtimeLinker* linker,
+	const char* module_name,
+	size_t module_name_size,
+	const char* import_name,
+	size_t import_name_size,
+	AvidScriptWasmtimeSelfI32Callback callback,
+	void* environment,
+	AvidScriptWasmtimeTypedFailureCallback failure_callback,
+	void* failure_environment);
+
 AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_i32_pair_guest_result(
 	AvidScriptWasmtimeLinker* linker,
 	const char* module_name,
@@ -208,6 +223,17 @@ AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_property_i32_g
 	AvidScriptWasmtimeSelfPropertyI32GetCallback callback,
 	void* environment);
 
+AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_direct_self_property_i32_get(
+	AvidScriptWasmtimeLinker* linker,
+	const char* module_name,
+	size_t module_name_size,
+	const char* import_name,
+	size_t import_name_size,
+	AvidScriptWasmtimeSelfPropertyI32GetCallback callback,
+	void* environment,
+	AvidScriptWasmtimeTypedFailureCallback failure_callback,
+	void* failure_environment);
+
 AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_property_i32_set(
 	AvidScriptWasmtimeLinker* linker,
 	const char* module_name,
@@ -216,6 +242,17 @@ AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_property_i32_s
 	size_t import_name_size,
 	AvidScriptWasmtimeSelfPropertyI32SetCallback callback,
 	void* environment);
+
+AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_direct_self_property_i32_set(
+	AvidScriptWasmtimeLinker* linker,
+	const char* module_name,
+	size_t module_name_size,
+	const char* import_name,
+	size_t import_name_size,
+	AvidScriptWasmtimeSelfPropertyI32SetCallback callback,
+	void* environment,
+	AvidScriptWasmtimeTypedFailureCallback failure_callback,
+	void* failure_environment);
 
 AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_property_f32_get(
 	AvidScriptWasmtimeLinker* linker,

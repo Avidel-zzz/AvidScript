@@ -2628,6 +2628,27 @@ private:
 			: 1;
 	}
 
+	static int32 ReportDirectTypedInvocationFailure(
+		void* Environment,
+		const int32 Status)
+	{
+		FAvidScriptWasmtimeTypedHostContext* HostContext =
+			static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
+		if (HostContext == nullptr || HostContext->Backend == nullptr)
+		{
+			return 1;
+		}
+		const EAvidScriptVmTypedHostStatus TypedStatus =
+			Status
+				== static_cast<int32>(
+					EAvidScriptVmTypedHostStatus::FallbackRequired)
+			? EAvidScriptVmTypedHostStatus::FallbackRequired
+			: EAvidScriptVmTypedHostStatus::Rejected;
+		return HostContext->Backend->CompleteTypedInvocation(
+			*HostContext,
+			TypedStatus);
+	}
+
 	static FORCEINLINE bool ConsumePreparedTypedHostCall(
 		FAvidScriptWasmtimeTypedHostContext& HostContext)
 	{
@@ -3604,18 +3625,36 @@ private:
 					HostContextPointer);
 				break;
 			case EAvidScriptVmTypedHostShape::SelfI32ToI32:
-				DefineFailure = avidscript_wasmtime_linker_define_self_i32(
-					Linker,
-					ModuleNameUtf8.Get(),
-					static_cast<size_t>(ModuleNameUtf8.Length()),
-					ImportNameUtf8.Get(),
-					static_cast<size_t>(ImportNameUtf8.Length()),
-					ExecutionBudget.MaxHostCallsPerEntry == 0
-						&& HostContextPointer->PreparedTarget.SelfI32 != nullptr
-						&& HostContextPointer->PreparedTarget.Context != nullptr
-						? &TypedPreparedSelfI32Callback<false>
-						: &TypedPreparedSelfI32Callback<true>,
-					HostContextPointer);
+				if (ExecutionBudget.MaxHostCallsPerEntry == 0
+					&& HostContextPointer->PreparedTarget.DirectSelfI32 != nullptr
+					&& HostContextPointer->PreparedTarget.Context != nullptr)
+				{
+					DefineFailure = avidscript_wasmtime_linker_define_direct_self_i32(
+						Linker,
+						ModuleNameUtf8.Get(),
+						static_cast<size_t>(ModuleNameUtf8.Length()),
+						ImportNameUtf8.Get(),
+						static_cast<size_t>(ImportNameUtf8.Length()),
+						HostContextPointer->PreparedTarget.DirectSelfI32,
+						HostContextPointer->PreparedTarget.Context,
+						&ReportDirectTypedInvocationFailure,
+						HostContextPointer);
+				}
+				else
+				{
+					DefineFailure = avidscript_wasmtime_linker_define_self_i32(
+						Linker,
+						ModuleNameUtf8.Get(),
+						static_cast<size_t>(ModuleNameUtf8.Length()),
+						ImportNameUtf8.Get(),
+						static_cast<size_t>(ImportNameUtf8.Length()),
+						ExecutionBudget.MaxHostCallsPerEntry == 0
+							&& HostContextPointer->PreparedTarget.SelfI32 != nullptr
+							&& HostContextPointer->PreparedTarget.Context != nullptr
+							? &TypedPreparedSelfI32Callback<false>
+							: &TypedPreparedSelfI32Callback<true>,
+						HostContextPointer);
+				}
 				break;
 			case EAvidScriptVmTypedHostShape::SelfI32PairToI32:
 				DefineFailure = avidscript_wasmtime_linker_define_self_i32_pair(
@@ -3671,32 +3710,68 @@ private:
 					HostContextPointer);
 				break;
 			case EAvidScriptVmTypedHostShape::SelfPropertyI32Get:
-				DefineFailure = avidscript_wasmtime_linker_define_self_property_i32_get(
-					Linker,
-					ModuleNameUtf8.Get(),
-					static_cast<size_t>(ModuleNameUtf8.Length()),
-					ImportNameUtf8.Get(),
-					static_cast<size_t>(ImportNameUtf8.Length()),
-					ExecutionBudget.MaxHostCallsPerEntry == 0
-						&& HostContextPointer->PreparedTarget.SelfPropertyI32Get != nullptr
-						&& HostContextPointer->PreparedTarget.Context != nullptr
-						? &TypedSelfPropertyI32GetCallback<true>
-						: &TypedSelfPropertyI32GetCallback<false>,
-					HostContextPointer);
+				if (ExecutionBudget.MaxHostCallsPerEntry == 0
+					&& HostContextPointer->PreparedTarget.DirectSelfPropertyI32Get != nullptr
+					&& HostContextPointer->PreparedTarget.Context != nullptr)
+				{
+					DefineFailure = avidscript_wasmtime_linker_define_direct_self_property_i32_get(
+						Linker,
+						ModuleNameUtf8.Get(),
+						static_cast<size_t>(ModuleNameUtf8.Length()),
+						ImportNameUtf8.Get(),
+						static_cast<size_t>(ImportNameUtf8.Length()),
+						HostContextPointer->PreparedTarget.DirectSelfPropertyI32Get,
+						HostContextPointer->PreparedTarget.Context,
+						&ReportDirectTypedInvocationFailure,
+						HostContextPointer);
+				}
+				else
+				{
+					DefineFailure = avidscript_wasmtime_linker_define_self_property_i32_get(
+						Linker,
+						ModuleNameUtf8.Get(),
+						static_cast<size_t>(ModuleNameUtf8.Length()),
+						ImportNameUtf8.Get(),
+						static_cast<size_t>(ImportNameUtf8.Length()),
+						ExecutionBudget.MaxHostCallsPerEntry == 0
+							&& HostContextPointer->PreparedTarget.SelfPropertyI32Get != nullptr
+							&& HostContextPointer->PreparedTarget.Context != nullptr
+							? &TypedSelfPropertyI32GetCallback<true>
+							: &TypedSelfPropertyI32GetCallback<false>,
+						HostContextPointer);
+				}
 				break;
 			case EAvidScriptVmTypedHostShape::SelfPropertyI32Set:
-				DefineFailure = avidscript_wasmtime_linker_define_self_property_i32_set(
-					Linker,
-					ModuleNameUtf8.Get(),
-					static_cast<size_t>(ModuleNameUtf8.Length()),
-					ImportNameUtf8.Get(),
-					static_cast<size_t>(ImportNameUtf8.Length()),
-					ExecutionBudget.MaxHostCallsPerEntry == 0
-						&& HostContextPointer->PreparedTarget.SelfPropertyI32Set != nullptr
-						&& HostContextPointer->PreparedTarget.Context != nullptr
-						? &TypedSelfPropertyI32SetCallback<true>
-						: &TypedSelfPropertyI32SetCallback<false>,
-					HostContextPointer);
+				if (ExecutionBudget.MaxHostCallsPerEntry == 0
+					&& HostContextPointer->PreparedTarget.DirectSelfPropertyI32Set != nullptr
+					&& HostContextPointer->PreparedTarget.Context != nullptr)
+				{
+					DefineFailure = avidscript_wasmtime_linker_define_direct_self_property_i32_set(
+						Linker,
+						ModuleNameUtf8.Get(),
+						static_cast<size_t>(ModuleNameUtf8.Length()),
+						ImportNameUtf8.Get(),
+						static_cast<size_t>(ImportNameUtf8.Length()),
+						HostContextPointer->PreparedTarget.DirectSelfPropertyI32Set,
+						HostContextPointer->PreparedTarget.Context,
+						&ReportDirectTypedInvocationFailure,
+						HostContextPointer);
+				}
+				else
+				{
+					DefineFailure = avidscript_wasmtime_linker_define_self_property_i32_set(
+						Linker,
+						ModuleNameUtf8.Get(),
+						static_cast<size_t>(ModuleNameUtf8.Length()),
+						ImportNameUtf8.Get(),
+						static_cast<size_t>(ImportNameUtf8.Length()),
+						ExecutionBudget.MaxHostCallsPerEntry == 0
+							&& HostContextPointer->PreparedTarget.SelfPropertyI32Set != nullptr
+							&& HostContextPointer->PreparedTarget.Context != nullptr
+							? &TypedSelfPropertyI32SetCallback<true>
+							: &TypedSelfPropertyI32SetCallback<false>,
+						HostContextPointer);
+				}
 				break;
 			case EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Get:
 				DefineFailure = avidscript_wasmtime_linker_define_packed_self_property_i32_get(

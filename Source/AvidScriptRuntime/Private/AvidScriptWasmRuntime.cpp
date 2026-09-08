@@ -782,6 +782,8 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 				: Binding.Entry->I32Call;
 			Import.PreparedTarget.SelfI32 =
 				&FAvidScriptWasmRuntimeInstance::InvokePreparedSelfI32;
+			Import.PreparedTarget.DirectSelfI32 =
+				&FAvidScriptWasmRuntimeInstance::InvokePreparedDirectSelfI32;
 			break;
 		case EAvidScriptVmTypedHostShape::SelfI32PairToI32:
 			Call->I32PairCall =
@@ -799,6 +801,9 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 			Import.PreparedTarget.SelfPropertyI32Get =
 				&FAvidScriptWasmRuntimeInstance::
 					InvokePreparedSelfPropertyI32Get;
+			Import.PreparedTarget.DirectSelfPropertyI32Get =
+				&FAvidScriptWasmRuntimeInstance::
+					InvokePreparedDirectSelfPropertyI32Get;
 			break;
 		case EAvidScriptVmTypedHostShape::SelfPropertyI32Set:
 			Call->PropertyI32SetCall =
@@ -808,6 +813,9 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 			Import.PreparedTarget.SelfPropertyI32Set =
 				&FAvidScriptWasmRuntimeInstance::
 					InvokePreparedSelfPropertyI32Set;
+			Import.PreparedTarget.DirectSelfPropertyI32Set =
+				&FAvidScriptWasmRuntimeInstance::
+					InvokePreparedDirectSelfPropertyI32Set;
 			break;
 		case EAvidScriptVmTypedHostShape::SelfVectorRefOut:
 			Call->VectorRefOutCall =
@@ -5563,6 +5571,27 @@ FAvidScriptWasmRuntimeInstance::InvokePreparedSelfI32(
 		OutValue);
 }
 
+int32 FAvidScriptWasmRuntimeInstance::InvokePreparedDirectSelfI32(
+	void* Context,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	const int32 Value,
+	int32* OutValue)
+{
+	FAvidScriptPreparedGeneratedHostCall* Call =
+		static_cast<FAvidScriptPreparedGeneratedHostCall*>(Context);
+	if (Call == nullptr || Call->Runtime == nullptr || OutValue == nullptr)
+	{
+		return static_cast<int32>(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+	return static_cast<int32>(Call->Runtime->DispatchPreparedSelfI32(
+		*Call,
+		SelfSlot,
+		SelfGeneration,
+		Value,
+		*OutValue));
+}
+
 EAvidScriptVmTypedHostStatus
 FAvidScriptWasmRuntimeInstance::DispatchPreparedSelfI32(
 	FAvidScriptPreparedGeneratedHostCall& Call,
@@ -6548,6 +6577,26 @@ FAvidScriptWasmRuntimeInstance::InvokePreparedSelfPropertyI32Get(
 		OutValue);
 }
 
+int32 FAvidScriptWasmRuntimeInstance::InvokePreparedDirectSelfPropertyI32Get(
+	void* Context,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	int32* OutValue)
+{
+	FAvidScriptPreparedGeneratedHostCall* Call =
+		static_cast<FAvidScriptPreparedGeneratedHostCall*>(Context);
+	if (Call == nullptr || Call->Runtime == nullptr || OutValue == nullptr)
+	{
+		return static_cast<int32>(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+	return static_cast<int32>(
+		Call->Runtime->DispatchPreparedSelfPropertyI32Get(
+			*Call,
+			SelfSlot,
+			SelfGeneration,
+			*OutValue));
+}
+
 EAvidScriptVmTypedHostStatus
 FAvidScriptWasmRuntimeInstance::DispatchPreparedSelfPropertyI32Get(
 	FAvidScriptPreparedGeneratedHostCall& Call,
@@ -6592,6 +6641,29 @@ FAvidScriptWasmRuntimeInstance::InvokePreparedSelfPropertyI32Set(
 		SelfSlot,
 		SelfGeneration,
 		Value);
+}
+
+int32 FAvidScriptWasmRuntimeInstance::InvokePreparedDirectSelfPropertyI32Set(
+	void* Context,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	const int32 Value,
+	int32* OutValue)
+{
+	FAvidScriptPreparedGeneratedHostCall* Call =
+		static_cast<FAvidScriptPreparedGeneratedHostCall*>(Context);
+	if (Call == nullptr || Call->Runtime == nullptr || OutValue == nullptr)
+	{
+		return static_cast<int32>(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+	const EAvidScriptVmTypedHostStatus Status =
+		Call->Runtime->DispatchPreparedSelfPropertyI32Set(
+			*Call,
+			SelfSlot,
+			SelfGeneration,
+			Value);
+	*OutValue = Status == EAvidScriptVmTypedHostStatus::Succeeded ? 1 : 0;
+	return static_cast<int32>(Status);
 }
 
 EAvidScriptVmTypedHostStatus

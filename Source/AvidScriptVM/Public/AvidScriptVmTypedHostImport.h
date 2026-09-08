@@ -130,6 +130,21 @@ using FAvidScriptVmPreparedSelfPropertyI32SetTarget =
 		int32 SelfGeneration,
 		int32 Value);
 
+using FAvidScriptVmDirectSelfPropertyI32GetTarget =
+	int32 (*)(
+		void* Context,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32* OutValue);
+
+using FAvidScriptVmDirectSelfPropertyI32SetTarget =
+	int32 (*)(
+		void* Context,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 Value,
+		int32* OutValue);
+
 using FAvidScriptVmPreparedPackedSelfPropertyF32GetTarget =
 	EAvidScriptVmTypedHostStatus (*)(
 		void* Context,
@@ -155,6 +170,14 @@ using FAvidScriptVmPreparedSelfI32Target =
 		int32 SelfGeneration,
 		int32 Value,
 		int32& OutValue);
+
+using FAvidScriptVmDirectSelfI32Target =
+	int32 (*)(
+		void* Context,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 Value,
+		int32* OutValue);
 
 using FAvidScriptVmPreparedPackedSelfPropertyI32SetTarget =
 	EAvidScriptVmTypedHostStatus (*)(
@@ -190,6 +213,7 @@ struct AVIDSCRIPTVM_API FAvidScriptVmPreparedTypedHostTarget
 {
 	void* Context = nullptr;
 	FAvidScriptVmPreparedSelfI32Target SelfI32 = nullptr;
+	FAvidScriptVmDirectSelfI32Target DirectSelfI32 = nullptr;
 	FAvidScriptVmPreparedSelfI32PairTarget SelfI32Pair = nullptr;
 	FAvidScriptVmPreparedSelfI32GuestResultTarget
 		SelfI32GuestResult = nullptr;
@@ -204,6 +228,8 @@ struct AVIDSCRIPTVM_API FAvidScriptVmPreparedTypedHostTarget
 		PackedStableObjectRoundtrip = nullptr;
 	FAvidScriptVmPreparedSelfPropertyI32GetTarget SelfPropertyI32Get = nullptr;
 	FAvidScriptVmPreparedSelfPropertyI32SetTarget SelfPropertyI32Set = nullptr;
+	FAvidScriptVmDirectSelfPropertyI32GetTarget DirectSelfPropertyI32Get = nullptr;
+	FAvidScriptVmDirectSelfPropertyI32SetTarget DirectSelfPropertyI32Set = nullptr;
 	FAvidScriptVmPreparedPackedSelfPropertyI32GetTarget PackedSelfPropertyI32Get = nullptr;
 	FAvidScriptVmPreparedPackedSelfPropertyI32SetTarget PackedSelfPropertyI32Set = nullptr;
 	FAvidScriptVmPreparedPackedSelfPropertyI64GetTarget PackedSelfPropertyI64Get = nullptr;
