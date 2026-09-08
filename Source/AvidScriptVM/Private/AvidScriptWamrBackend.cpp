@@ -206,12 +206,13 @@ public:
 		if (Config.ExecutionBudget.FuelPerEntry > 0
 			|| Config.ExecutionBudget.EpochDeadlineTicks > 0
 			|| Config.ExecutionBudget.EpochTimeoutMilliseconds > 0
+			|| Config.ExecutionBudget.CooperativeTimeoutMilliseconds > 0
 			|| Config.ExecutionBudget.MaxLinearMemoryBytes > 0)
 		{
 			SetVmError(
 				OutError,
 				TEXT("execution_budget_unsupported"),
-				TEXT("This WAMR build does not provide verified fuel, epoch, or linear-memory budget enforcement."));
+				TEXT("This WAMR build does not provide verified fuel, epoch, cooperative deadline, or linear-memory budget enforcement."));
 			return false;
 		}
 		MaxHostCallsPerEntry = Config.ExecutionBudget.MaxHostCallsPerEntry;

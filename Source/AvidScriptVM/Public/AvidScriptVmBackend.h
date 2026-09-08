@@ -43,7 +43,8 @@ enum class EAvidScriptVmCapability : uint32
 	ExecutionFuel = 1 << 7,
 	EpochInterruption = 1 << 8,
 	StoreLimiter = 1 << 9,
-	HostCallBudget = 1 << 10
+	HostCallBudget = 1 << 10,
+	CooperativeSafepointInterruption = 1 << 11
 };
 ENUM_CLASS_FLAGS(EAvidScriptVmCapability);
 
@@ -489,6 +490,7 @@ struct FAvidScriptVmLoadConfig
 		uint64 FuelPerEntry = 0;
 		uint64 EpochDeadlineTicks = 0;
 		uint32 EpochTimeoutMilliseconds = 0;
+		uint32 CooperativeTimeoutMilliseconds = 0;
 		bool bEpochInterruptionIsTerminal = false;
 		uint64 MaxLinearMemoryBytes = 0;
 		uint32 MaxHostCallsPerEntry = 0;
@@ -498,6 +500,7 @@ struct FAvidScriptVmLoadConfig
 			return FuelPerEntry > 0
 				|| EpochDeadlineTicks > 0
 				|| EpochTimeoutMilliseconds > 0
+				|| CooperativeTimeoutMilliseconds > 0
 				|| MaxLinearMemoryBytes > 0
 				|| MaxHostCallsPerEntry > 0;
 		}
