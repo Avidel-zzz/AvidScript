@@ -25,7 +25,6 @@ internal static class Program
                 throw new ArgumentException("Supported arguments: --delegate-events, --captured-assignments; omit arguments for the full suite.");
             }
             int count = CSharpGuestLoweringTests.Run()
-                + CSharpGuestInliningTests.Run()
                 + CSharpGuestOperationTests.Run()
                 + CSharpGuestAdvancedTests.Run()
                 + CSharpGuestFlowTests.Run()

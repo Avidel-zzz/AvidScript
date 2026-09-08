@@ -12,8 +12,7 @@ public static class CSharpGuestLowerer
         SemanticDocument document,
         string semanticSha256,
         bool enableDataLaneFusion = true,
-        bool enableDebugInstrumentation = false,
-        bool enableLeafFunctionInlining = true)
+        bool enableDebugInstrumentation = false)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(semanticSha256);
@@ -136,13 +135,6 @@ public static class CSharpGuestLowerer
         if (diagnostics.Count != 0)
         {
             return Failure(diagnostics);
-        }
-
-        if (enableLeafFunctionInlining && !enableDebugInstrumentation)
-        {
-            CSharpLeafFunctionInliningResult inlining =
-                CSharpLeafFunctionInliningPass.Run(moduleTypes, functions);
-            functions = inlining.Functions.ToList();
         }
 
         if (enableDebugInstrumentation)
