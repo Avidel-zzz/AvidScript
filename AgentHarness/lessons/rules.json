@@ -971,6 +971,14 @@
       "prevention": "所有 FPaths 项目/插件路径在拼接完成后先 ConvertRelativePathToFull 并 NormalizeFilename，再作为单引号字面量传给子进程；PowerShell 命令入口设置 ErrorActionPreference=Stop。调用方除 launch/exit code 外还必须读取 stderr，并验证 catalog、receipt 或 manifest 等预期产物确实出现。",
       "source": "observed:2026-09-09-P65.D31.C3.5d",
       "last_observed": "2026-09-09 P65.D31.C3.5d Editor package test 把 FPaths::ProjectPluginsDir 的相对结果直接传给 pwsh，dot-source 与后续函数调用均失败但进程仍返回 0；规范化 Publisher/ProjectRoot、设置 ErrorActionPreference=Stop 并读取 catalog 后闭环通过"
+    },
+    {
+      "id": "guest-ir-identity-is-not-runtime-module-id",
+      "tags": ["guest-ir", "manifest", "provenance", "shipping", "security"],
+      "summary": "Guest IR module_id 是编译器源身份，不等于发布 Runtime module_id；cooperative 信任锚是受证明约束的 Guest IR SHA-256。",
+      "prevention": "跨编译、发布与 Runtime schema 设计身份约束前，先回读真实编译产物并区分 source identity、guest module identity 与 runtime module identity。Shipping 仅保留执行所需的最小哈希证明，禁止把诊断身份字符串误作授权条件或无必要带入发布包。",
+      "source": "observed:2026-09-09-P65.D31.C3.9",
+      "last_observed": "2026-09-09 P65.D31.C3.9 发布器错误要求 guest_ir.module_id 等于 avidscript.ui_save_demo，但实际编译器身份为 csharp:Plugins/AvidScript/Samples/CSharp/UiSaveDemo/UiSaveDemoScript.cs；改为 Shipping 只保留 sha256 并与 cooperative proof 交叉校验"
     }
   ]
 }
