@@ -21,7 +21,7 @@
       "summary": "概念名称不能当作真实文件路径。",
       "prevention": "每次跨文件查询前先用 rg --files 建立索引，并仅以本次索引实际返回的字面路径构造命令；不得依据同名 .cpp 推测存在配套头文件。通配符只放在 rg -g 参数，所有 -g 选项必须位于 -- 终止符之前。",
       "source": "legacy:1931",
-      "last_observed": "2026-09-08 P65.D31 根据类型名再次猜测不存在的 AvidScriptVmImportContract.cpp，另一真实路径的命中掩盖了 path-not-found；无文件副作用。任何多文件命令的每个字面路径都必须来自当轮索引，禁止凭类名推断实现文件。此前同批还猜错 Source/AvidScript 根"
+      "last_observed": "2026-09-08 P65.D31 为寻找 wasm-tools 直接猜测插件根存在 ThirdParty，rg 立即报 path-not-found 且无文件副作用。工具与依赖目录也必须先从插件根文件索引获得，不能因为 UE 插件常见布局而推断"
     },
     {
       "id": "one-command-one-evidence-domain",
