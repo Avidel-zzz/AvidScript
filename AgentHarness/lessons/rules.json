@@ -839,9 +839,9 @@
       "id": "similar-matrices-require-function-scoped-patches",
       "tags": ["cpp", "powershell", "benchmark", "editing", "workflow"],
       "summary": "相邻 oracle 函数包含高度相似的 workload 列表，只有 case 片段的补丁可能命中错误矩阵并引入重复 case。",
-      "prevention": "修改相邻 switch 或数组矩阵时，把函数名纳入 apply_patch 上下文；落盘后按函数边界读取 git diff，并在构建前运行对应合同测试，禁止只凭补丁成功消息判断命中位置。",
+      "prevention": "修改相邻 switch、数组矩阵或函数指针别名时，把函数名或完整声明纳入 apply_patch 上下文；落盘后按函数或声明边界读取 git diff，并在构建前运行对应合同测试，禁止只凭补丁成功消息判断命中位置。",
       "source": "Benchmarks/PuertsComparison/AvidScriptPerfHarness/Source/AvidScriptPerfHarness/Private/AvidScriptPerfRunner.cpp",
-      "last_observed": "2026-09-07 P65.D11 首版 VectorRefOut oracle 补丁命中相邻 operation/adaptive 矩阵并产生重复 case，合同测试前的函数级复读完成修正，未进入提交或候选"
+      "last_observed": "2026-09-08 P65.D29b 首版 prepared reflection 函数指针补丁只锚定 VectorCall 别名起始行，短暂重复声明体；声明级复读后修正，未进入提交。此前 P65.D11 的 VectorRefOut oracle 补丁也命中过相邻矩阵"
     },
     {
       "id": "uat-success-requires-complete-archive",
