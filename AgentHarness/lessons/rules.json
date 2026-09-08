@@ -153,7 +153,7 @@
       "summary": "以连字符开头的 rg 检索模式会被解析为命令选项。",
       "prevention": "固定使用 `rg [options including -g] [pattern] [paths]` 顺序；仅当 pattern 以连字符开头时改为 `rg [options] -- [pattern] [paths]`。所有选项必须在 pattern 和 `--` 前，不要在路径后追加选项，也不要依赖引号阻止 native 参数解析。",
       "source": "observed:2026-09-08-P65.D29",
-      "last_observed": "2026-09-08 P65.D29 定位 runner 参数时连续三次手拼错误：先漏写 --，再把 -g 放在 -- 后，随后又把 -g 放在路径后；探针均无副作用。后续只能套用固定顺序模板，非前导连字符模式不加 --"
+      "last_observed": "2026-09-08 P65.D30 搜索 Phase 文档时又把 -g 放在 -- 后，导致 -g 与 *.md 被当作路径；无文件副作用。固定先写全部 options，再写普通 pattern 与 paths；普通 pattern 禁止加入 --，以减少可错位置"
     },
     {
       "id": "structured-artifacts-use-parsers",
