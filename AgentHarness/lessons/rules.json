@@ -592,7 +592,7 @@
       "summary": "新增 C++ 源文件会重排 unity 分组，从而暴露间接 include 或同一聚合翻译单元内的 helper 符号碰撞。",
       "prevention": "新增 .cpp 后执行 no-clean UBT；若出现未知类型，检查直接 include；若匿名命名空间 helper 发生遮蔽或重载碰撞，使用模块唯一名称或显式全局限定。只做最小修复，不清理 Editor Target，也不把 unity 偶然可编译当作契约。",
       "source": "observed:2026-09-01-P61.B2",
-      "last_observed": "2026-09-02 P61.D2a 新增 Profiler 模型后与 unity 内既有 LexToString/GetTypeHash 发生遮蔽；改为显式全局哈希和唯一数字格式化后 no-clean UBT 通过。此前 P61.B2 也暴露过间接 include 缺失"
+      "last_observed": "2026-09-09 P65.D31.C3.5a ArtifactCompiler 新增通用 IsLowercaseSha256，与同一 VM unity 单元内 ModuleLayout helper 重定义；改为职责限定 IsArtifactReceiptLowercaseSha256 后 no-clean UBT 通过。此前 P61.D2a/P61.B2 也暴露过同类问题"
     },
     {
       "id": "truncated-agent-spawn-output-does-not-authorize-duplicate",
