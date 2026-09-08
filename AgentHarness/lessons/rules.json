@@ -27,9 +27,9 @@
       "id": "one-command-one-evidence-domain",
       "tags": ["shell", "powershell", "evidence"],
       "summary": "一个 shell 调用只承担一个逻辑动作或证据域。",
-      "prevention": "调度前拒绝用分号、&& 或 || 串联独立动作；多文件读取使用并行工具或逐项调用。",
+      "prevention": "调度前拒绝用分号、&& 或 || 串联独立动作；PowerShell 中先赋变量再连续输出多个查询也必须改为一个 Select-Object 表达式或拆成调用。多文件读取使用并行工具或逐项调用。",
       "source": "legacy:1672",
-      "last_observed": "2026-09-08 P65.D31 提交检索教训时仍用分号串联 git add 与 git commit；提交成功且无副作用，但这是继 P65.D29 后的再次复发。此后 staging、commit、push 必须各自使用独立 shell 调用"
+      "last_observed": "2026-09-08 P65.D31 C3.4 读取失败报告时用分号串联 JSON 赋值、result 查询和 diagnostics 查询；只读且无文件副作用，但再次复发。报告读取必须使用单一 pipeline 投影或分两次调用"
     },
     {
       "id": "callback-kind-validation-uses-named-branches",
