@@ -27,6 +27,7 @@ struct FAvidScriptBindingTypeModel;
 enum class EAvidScriptBindingFastPathKind : uint8
 {
 	None,
+	ScalarI32ToI32,
 	ScalarI32PairToI32,
 	VectorValueToVector,
 	ObjectToObject

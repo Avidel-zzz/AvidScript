@@ -42,6 +42,12 @@ int32 UAvidScriptBindingsTestObject::FastPathMaxInt32(
 	return FMath::Max(Left, Right);
 }
 
+int32 UAvidScriptBindingsTestObject::FastPathNoOpInt32(
+	const int32 Value) const
+{
+	return Value;
+}
+
 float UAvidScriptBindingsTestObject::ReflectionFallbackAddFloat(
 	const float Left,
 	const float Right) const

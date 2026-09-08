@@ -165,6 +165,9 @@ public:
 	int32 FastPathMaxInt32(int32 Left, int32 Right) const;
 
 	UFUNCTION(BlueprintPure, Category = "AvidScript|Tests")
+	int32 FastPathNoOpInt32(int32 Value) const;
+
+	UFUNCTION(BlueprintPure, Category = "AvidScript|Tests")
 	float ReflectionFallbackAddFloat(float Left, float Right) const;
 
 	UFUNCTION(BlueprintPure, Category = "AvidScript|Tests")

@@ -4834,12 +4834,13 @@ bool FAvidScriptEditorBindingRuntimeTypedThunkTest::RunTest(const FString& Param
 	const TArray<FAvidScriptReflectedFunctionSelection> Selections = {
 		{ TestClassPath, TEXT("FastPathAddInt32") },
 		{ TestClassPath, TEXT("FastPathMaxInt32") },
+		{ TestClassPath, TEXT("FastPathNoOpInt32") },
 		{ TestClassPath, TEXT("ReflectionFallbackAddFloat") }
 	};
 	FString DescriptorJson;
 	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
 	if (!TestTrue(
-		TEXT("Typed thunk test descriptor generates from three real UFUNCTIONs"),
+		TEXT("Typed thunk test descriptor generates from four real UFUNCTIONs"),
 		FAvidScriptEditorBindingDescriptorGenerator::Generate(
 			TEXT("avidscript.test.typed_thunk"),
 			Selections,
@@ -4881,9 +4882,9 @@ bool FAvidScriptEditorBindingRuntimeTypedThunkTest::RunTest(const FString& Param
 	const FAvidScriptBindingPackageInstrumentation LoadInstrumentation =
 		Package->GetInstrumentation();
 	TestEqual(
-		TEXT("Two different int32 UFUNCTIONs bind typed thunk plans"),
+		TEXT("Unary and pair int32 UFUNCTIONs bind typed thunk plans"),
 		LoadInstrumentation.TypedThunkPlanCount,
-		2ull);
+		3ull);
 	TestEqual(
 		TEXT("Unsupported float shape retains one reflection fallback plan"),
 		LoadInstrumentation.ReflectionFallbackPlanCount,
@@ -4902,10 +4903,13 @@ bool FAvidScriptEditorBindingRuntimeTypedThunkTest::RunTest(const FString& Param
 		FindBinding(TEXT("FastPathAddInt32"));
 	const FAvidScriptBindingFunctionModel* MaxBinding =
 		FindBinding(TEXT("FastPathMaxInt32"));
+	const FAvidScriptBindingFunctionModel* NoOpBinding =
+		FindBinding(TEXT("FastPathNoOpInt32"));
 	const FAvidScriptBindingFunctionModel* FloatBinding =
 		FindBinding(TEXT("ReflectionFallbackAddFloat"));
 	if (!TestNotNull(TEXT("Add binding is present"), AddBinding)
 		|| !TestNotNull(TEXT("Max binding is present"), MaxBinding)
+		|| !TestNotNull(TEXT("No-op binding is present"), NoOpBinding)
 		|| !TestNotNull(TEXT("Float fallback binding is present"), FloatBinding))
 	{
 		return false;
@@ -4915,6 +4919,8 @@ bool FAvidScriptEditorBindingRuntimeTypedThunkTest::RunTest(const FString& Param
 		EAvidScriptBindingFastPathKind::None;
 	EAvidScriptBindingFastPathKind MaxFastPath =
 		EAvidScriptBindingFastPathKind::None;
+	EAvidScriptBindingFastPathKind NoOpFastPath =
+		EAvidScriptBindingFastPathKind::None;
 	EAvidScriptBindingFastPathKind FloatFastPath =
 		EAvidScriptBindingFastPathKind::ScalarI32PairToI32;
 	TestTrue(
@@ -4923,6 +4929,9 @@ bool FAvidScriptEditorBindingRuntimeTypedThunkTest::RunTest(const FString& Param
 	TestTrue(
 		TEXT("Max ordinal exposes fast path diagnostics"),
 		Package->TryGetFastPathKind(MaxBinding->Ordinal, MaxFastPath));
+	TestTrue(
+		TEXT("No-op ordinal exposes fast path diagnostics"),
+		Package->TryGetFastPathKind(NoOpBinding->Ordinal, NoOpFastPath));
 	TestTrue(
 		TEXT("Float ordinal exposes fallback diagnostics"),
 		Package->TryGetFastPathKind(FloatBinding->Ordinal, FloatFastPath));
@@ -4934,6 +4943,10 @@ bool FAvidScriptEditorBindingRuntimeTypedThunkTest::RunTest(const FString& Param
 		TEXT("Int32 pair uses the scalar pair thunk"),
 		AddFastPath,
 		EAvidScriptBindingFastPathKind::ScalarI32PairToI32);
+	TestEqual(
+		TEXT("Unary int32 uses the scalar unary thunk"),
+		NoOpFastPath,
+		EAvidScriptBindingFastPathKind::ScalarI32ToI32);
 	TestEqual(
 		TEXT("Float shape remains on reflection fallback"),
 		FloatFastPath,
@@ -5012,7 +5025,36 @@ bool FAvidScriptEditorBindingRuntimeTypedThunkTest::RunTest(const FString& Param
 		GuestMemory.ReadValue<int32>(MaxResultAddress),
 		29);
 
-	constexpr uint32 FloatResultAddress = 72;
+	constexpr uint32 NoOpResultAddress = 72;
+	const uint64 NoOpArguments[] = {
+		Handle.Slot,
+		Handle.Generation,
+		37,
+		NoOpResultAddress
+	};
+	FAvidScriptBindingInvocationInstrumentation InvocationInstrumentation;
+	Context.InvocationInstrumentation = &InvocationInstrumentation;
+	Context.InvocationPolicy =
+		EAvidScriptBindingInvocationPolicy::AdaptiveSemantic;
+	TestTrue(
+		TEXT("Unary int32 executes through adaptive prepared native dispatch"),
+		Dispatch(NoOpBinding->Ordinal, MakeArrayView(NoOpArguments)));
+	TestEqual(
+		TEXT("Unary int32 preserves the reflected return value"),
+		GuestMemory.ReadValue<int32>(NoOpResultAddress),
+		37);
+	TestEqual(
+		TEXT("Unary int32 records one adaptive native hit"),
+		InvocationInstrumentation.AdaptivePreparedNativeHitCount,
+		1ull);
+	TestEqual(
+		TEXT("Unary int32 does not fall back to ProcessEvent"),
+		InvocationInstrumentation.AdaptiveProcessEventFallbackCount,
+		0ull);
+	Context.InvocationPolicy =
+		EAvidScriptBindingInvocationPolicy::SemanticProcessEvent;
+
+	constexpr uint32 FloatResultAddress = 76;
 	const uint64 FloatArguments[] = {
 		Handle.Slot,
 		Handle.Generation,
@@ -5028,7 +5070,7 @@ bool FAvidScriptEditorBindingRuntimeTypedThunkTest::RunTest(const FString& Param
 		GuestMemory.ReadValue<float>(FloatResultAddress),
 		3.75f);
 
-	constexpr uint32 StaleResultAddress = 76;
+	constexpr uint32 StaleResultAddress = 80;
 	const int32 StaleSentinel = 0x12345678;
 	GuestMemory.WriteValue(StaleResultAddress, StaleSentinel);
 	const uint64 StaleArguments[] = {

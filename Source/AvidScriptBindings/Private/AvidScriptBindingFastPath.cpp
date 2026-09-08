@@ -100,10 +100,11 @@ bool IsQualifiedNativeDirectInt32Property(
 	return true;
 }
 
-bool PrepareScalarI32PairFrame(
+bool PrepareScalarI32Frame(
 	const FFastPathPlan& Plan,
 	const FAvidScriptDynamicHostCall& Call,
 	TArray<uint8>& InvocationScratch,
+	const int32 ParameterCount,
 	uint8*& OutFrame,
 	FString& OutErrorCategory,
 	FString& OutErrorDetails)
@@ -126,7 +127,9 @@ bool PrepareScalarI32PairFrame(
 
 	OutFrame = reinterpret_cast<uint8*>(FrameAddress);
 	FMemory::Memzero(OutFrame, Plan.FrameSize);
-	for (int32 ParameterIndex = 0; ParameterIndex < 2; ++ParameterIndex)
+	for (int32 ParameterIndex = 0;
+		ParameterIndex < ParameterCount;
+		++ParameterIndex)
 	{
 		const int32 Value = static_cast<int32>(
 			static_cast<uint32>(Call.Arguments[2 + ParameterIndex]));
@@ -168,7 +171,7 @@ bool WriteScalarI32Return(
 	return true;
 }
 
-bool DispatchSemanticScalarI32PairToI32(
+bool DispatchSemanticScalarI32ToI32(
 	const FFastPathPlan& Plan,
 	UObject& Target,
 	const FAvidScriptDynamicHostCall& Call,
@@ -177,10 +180,15 @@ bool DispatchSemanticScalarI32PairToI32(
 	FString& OutErrorDetails)
 {
 	uint8* Frame = nullptr;
-	if (!PrepareScalarI32PairFrame(
+	const int32 ParameterCount = Plan.Kind
+		== EAvidScriptBindingFastPathKind::ScalarI32ToI32
+		? 1
+		: 2;
+	if (!PrepareScalarI32Frame(
 			Plan,
 			Call,
 			InvocationScratch,
+			ParameterCount,
 			Frame,
 			OutErrorCategory,
 			OutErrorDetails))
@@ -197,7 +205,7 @@ bool DispatchSemanticScalarI32PairToI32(
 		OutErrorDetails);
 }
 
-bool DispatchNativeDirectScalarI32PairToI32(
+bool DispatchNativeDirectScalarI32ToI32(
 	const FFastPathPlan& Plan,
 	UObject& Target,
 	const FAvidScriptDynamicHostCall& Call,
@@ -206,10 +214,15 @@ bool DispatchNativeDirectScalarI32PairToI32(
 	FString& OutErrorDetails)
 {
 	uint8* Frame = nullptr;
-	if (!PrepareScalarI32PairFrame(
+	const int32 ParameterCount = Plan.Kind
+		== EAvidScriptBindingFastPathKind::ScalarI32ToI32
+		? 1
+		: 2;
+	if (!PrepareScalarI32Frame(
 			Plan,
 			Call,
 			InvocationScratch,
+			ParameterCount,
 			Frame,
 			OutErrorCategory,
 			OutErrorDetails))
@@ -699,7 +712,15 @@ bool TryBuildFastPath(
 	Candidate.FrameSize = Spec.FrameSize;
 	Candidate.FrameAlignment = Spec.FrameAlignment;
 	Candidate.ReturnGuestArgumentOffset = Spec.ReturnValue.ArgumentOffset;
-	const bool bScalarShape =
+	const bool bScalarUnaryShape =
+		Spec.ExpectedArgumentCount == 4
+		&& Spec.Parameters.Num() == 1
+		&& Spec.Parameters[0].Kind == EFastPathValueKind::Int32
+		&& Spec.Parameters[0].bIsInput
+		&& Spec.Parameters[0].ArgumentOffset == 2
+		&& Spec.ReturnValue.Kind == EFastPathValueKind::Int32
+		&& Spec.ReturnValue.ArgumentOffset == 3;
+	const bool bScalarPairShape =
 		Spec.ExpectedArgumentCount == 5
 		&& Spec.Parameters.Num() == 2
 		&& Spec.ReturnValue.Kind == EFastPathValueKind::Int32
@@ -720,12 +741,16 @@ bool TryBuildFastPath(
 		&& Spec.Parameters[0].ArgumentOffset == 2
 		&& Spec.ReturnValue.Kind == EFastPathValueKind::Object
 		&& Spec.ReturnValue.ArgumentOffset == 4;
-	if (bScalarShape)
+	if (bScalarUnaryShape || bScalarPairShape)
 	{
 		Candidate.Kind =
-			EAvidScriptBindingFastPathKind::ScalarI32PairToI32;
-		Candidate.SemanticThunk = &DispatchSemanticScalarI32PairToI32;
-		for (int32 ParameterIndex = 0; ParameterIndex < 2; ++ParameterIndex)
+			bScalarUnaryShape
+				? EAvidScriptBindingFastPathKind::ScalarI32ToI32
+				: EAvidScriptBindingFastPathKind::ScalarI32PairToI32;
+		Candidate.SemanticThunk = &DispatchSemanticScalarI32ToI32;
+		for (int32 ParameterIndex = 0;
+			ParameterIndex < Spec.Parameters.Num();
+			++ParameterIndex)
 		{
 			const FFastPathValueSpec& Parameter =
 				Spec.Parameters[ParameterIndex];
@@ -801,11 +826,11 @@ bool TryBuildFastPath(
 	}
 
 	const bool bBroadNativeFieldLayout =
-		!bScalarShape
+		!bScalarPairShape
 		&& Spec.Function->ChildProperties == Spec.Parameters[0].Property
 		&& Spec.Parameters[0].Property->Next == Spec.ReturnValue.Property
 		&& Spec.ReturnValue.Property->Next == nullptr;
-	const bool bQualifiedNative = bScalarShape
+	const bool bQualifiedNative = bScalarPairShape
 		? IsQualifiedNativeDirectFunction(*Spec.Function)
 		: bBroadNativeFieldLayout
 		&& IsPreparedNativeFunctionBase(
@@ -818,10 +843,10 @@ bool TryBuildFastPath(
 		Candidate.bAdaptiveNativeEligible = true;
 		Candidate.NativeDirectOwnerClass = Spec.Function->GetOwnerClass();
 		Candidate.NativeFunction = Spec.Function->GetNativeFunc();
-		if (bScalarShape)
+		if (bScalarUnaryShape || bScalarPairShape)
 		{
 			Candidate.NativeDirectThunk =
-				&DispatchNativeDirectScalarI32PairToI32;
+				&DispatchNativeDirectScalarI32ToI32;
 		}
 		for (int32 ParameterIndex = 0;
 			ParameterIndex < Spec.Parameters.Num();
