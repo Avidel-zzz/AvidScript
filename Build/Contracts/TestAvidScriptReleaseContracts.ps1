@@ -164,7 +164,9 @@ try {
                 'TEXT("AvidScriptRelease")',
                 'TEXT("argument_missing")',
                 'TEXT("argument_unknown")',
-                'TEXT("argument_duplicate")')) {
+                'TEXT("argument_duplicate")',
+                '(*Safepoints)->Values.Num() == 1',
+                '&& !bEnabled;')) {
             if (-not ($HeaderSource.Contains($RequiredToken) -or
                     $CommandletSource.Contains($RequiredToken))) {
                 throw "Commandlet schema token is missing: $RequiredToken"

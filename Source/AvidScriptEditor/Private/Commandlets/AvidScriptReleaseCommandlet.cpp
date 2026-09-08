@@ -319,7 +319,19 @@ bool ValidateAvidScriptReleaseManifest(
 	}
 	if (!bExpectCooperativeSafepoints)
 	{
-		return !(*Execution)->HasField(TEXT("cooperative_safepoints"));
+		if (!(*Execution)->HasField(TEXT("cooperative_safepoints")))
+		{
+			return true;
+		}
+		bool bEnabled = true;
+		return (*Execution)->TryGetObjectField(
+				TEXT("cooperative_safepoints"),
+				Safepoints)
+			&& Safepoints != nullptr
+			&& Safepoints->IsValid()
+			&& (*Safepoints)->Values.Num() == 1
+			&& (*Safepoints)->TryGetBoolField(TEXT("enabled"), bEnabled)
+			&& !bEnabled;
 	}
 	bool bEnabled = false;
 	int32 PollInterval = 0;
