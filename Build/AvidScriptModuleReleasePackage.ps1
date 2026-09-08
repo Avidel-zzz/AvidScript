@@ -894,7 +894,12 @@ function Publish-AvidScriptModuleReleasePackage {
             'compiler_build_identity',
             'target_triple',
             'policy') `
-        -Optional @('backend', 'cpu_features', 'attestation_id', 'fallback')
+        -Optional @(
+            'backend',
+            'cpu_features',
+            'attestation_id',
+            'fallback',
+            'cooperative_safepoints')
     Assert-AvidScriptModuleReleaseObjectShape `
         -Value $RuntimeManifest.binding_package `
         -Label 'Runtime manifest.binding_package' `
@@ -923,6 +928,64 @@ function Publish-AvidScriptModuleReleasePackage {
     }
     if ([string]$RuntimeManifest.execution.canonical_sha256 -cne [string]$RuntimeManifest.wasm.sha256) {
         throw 'Runtime manifest execution canonical_sha256 does not match wasm.sha256.'
+    }
+    $HasCooperativeSafepoints =
+        $RuntimeManifest.execution.PSObject.Properties.Name -ccontains 'cooperative_safepoints'
+    $EpochInterruptionDisabled =
+        [string]$RuntimeManifest.execution.compiler_build_identity -clike '*;epoch_interruption=off;*'
+    if ($HasCooperativeSafepoints) {
+        $CooperativeSafepoints = $RuntimeManifest.execution.cooperative_safepoints
+        Assert-AvidScriptModuleReleaseObjectShape `
+            -Value $CooperativeSafepoints `
+            -Label 'Runtime manifest.execution.cooperative_safepoints' `
+            -Required @(
+                'enabled',
+                'receipt_sha256',
+                'guest_ir_sha256',
+                'proof_schema_version',
+                'poll_interval',
+                'loop_poll_blocks',
+                'recursive_functions',
+                'site_count',
+                'site_sha256')
+        Assert-AvidScriptModuleReleaseObjectShape `
+            -Value $RuntimeManifest.guest_ir `
+            -Label 'Runtime manifest.guest_ir cooperative provenance' `
+            -Required @('module_id', 'sha256') `
+            -Optional @('file', 'schema_version', 'version')
+        foreach ($HashProperty in @('receipt_sha256', 'guest_ir_sha256', 'site_sha256')) {
+            Assert-AvidScriptModuleReleaseSha256 `
+                -Value ([string]$CooperativeSafepoints.$HashProperty) `
+                -Label "Runtime manifest.execution.cooperative_safepoints.$HashProperty"
+        }
+        Assert-AvidScriptModuleReleaseSha256 `
+            -Value ([string]$RuntimeManifest.guest_ir.sha256) `
+            -Label 'Runtime manifest.guest_ir.sha256'
+        $LoopPollBlocks = [int64]$CooperativeSafepoints.loop_poll_blocks
+        $RecursiveFunctions = [int64]$CooperativeSafepoints.recursive_functions
+        $SiteCount = [int64]$CooperativeSafepoints.site_count
+        if ($CooperativeSafepoints.enabled -isnot [bool] -or
+            -not [bool]$CooperativeSafepoints.enabled -or
+            -not $EpochInterruptionDisabled -or
+            -not (Test-AvidScriptModuleReleaseJsonInteger $CooperativeSafepoints.proof_schema_version) -or
+            [int64]$CooperativeSafepoints.proof_schema_version -ne 2 -or
+            -not (Test-AvidScriptModuleReleaseJsonInteger $CooperativeSafepoints.poll_interval) -or
+            [int64]$CooperativeSafepoints.poll_interval -lt 1 -or
+            [int64]$CooperativeSafepoints.poll_interval -gt 65536 -or
+            -not (Test-AvidScriptModuleReleaseJsonInteger $CooperativeSafepoints.loop_poll_blocks) -or
+            $LoopPollBlocks -lt 0 -or
+            -not (Test-AvidScriptModuleReleaseJsonInteger $CooperativeSafepoints.recursive_functions) -or
+            $RecursiveFunctions -lt 0 -or
+            -not (Test-AvidScriptModuleReleaseJsonInteger $CooperativeSafepoints.site_count) -or
+            $SiteCount -lt 0 -or
+            $SiteCount -ne ($LoopPollBlocks + $RecursiveFunctions) -or
+            [string]$CooperativeSafepoints.guest_ir_sha256 -cne
+                [string]$RuntimeManifest.guest_ir.sha256) {
+            throw 'Runtime manifest cooperative safepoint provenance is inconsistent.'
+        }
+    }
+    elseif ($EpochInterruptionDisabled) {
+        throw 'Epoch-free Runtime manifests require cooperative safepoint provenance.'
     }
     $ConfigurationValue = $Configuration.ToLowerInvariant()
     $Policy = if ($TargetPlatform -ieq 'Android' -or
@@ -1114,6 +1177,11 @@ function Publish-AvidScriptModuleReleasePackage {
         cpu_features = $CpuFeatures
         policy = $Policy
     }
+    if ($HasCooperativeSafepoints) {
+        $ReleaseRuntimeManifest.execution | Add-Member `
+            -NotePropertyName cooperative_safepoints `
+            -NotePropertyValue (Copy-AvidScriptModuleReleaseJsonObject $CooperativeSafepoints)
+    }
     if ($Policy -ceq 'prefer_precompiled') {
         $ReleaseRuntimeManifest.execution | Add-Member `
             -NotePropertyName attestation_id `
@@ -1129,6 +1197,14 @@ function Publish-AvidScriptModuleReleasePackage {
     Remove-AvidScriptModuleReleaseProperty $ReleaseBindingPackage 'reference_source_file'
     Remove-AvidScriptModuleReleaseProperty $ReleaseBindingPackage 'reference_source_sha256'
     $ReleaseRuntimeManifest.binding_package = $ReleaseBindingPackage
+    if ($HasCooperativeSafepoints -and -not $IncludeDebugMap) {
+        $ReleaseRuntimeManifest | Add-Member `
+            -NotePropertyName guest_ir `
+            -NotePropertyValue ([pscustomobject][ordered]@{
+            module_id = [string]$RuntimeManifest.guest_ir.module_id
+            sha256 = [string]$RuntimeManifest.guest_ir.sha256
+        })
+    }
     if ($IncludeDebugMap) {
         Assert-AvidScriptModuleReleaseObjectShape `
             -Value $RuntimeManifest.source `

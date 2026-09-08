@@ -25,7 +25,8 @@ function New-ReleaseFixture {
         [Parameter(Mandatory = $true)][string]$Name,
         [string]$ModuleId = 'fixture.module',
         [ValidateSet('Win64', 'Android')][string]$TargetPlatform = 'Win64',
-        [string]$Policy = ''
+        [string]$Policy = '',
+        [switch]$CooperativeSafepoints
     )
 
     $TargetTriple = if ($TargetPlatform -ieq 'Android') {
@@ -143,6 +144,22 @@ function New-ReleaseFixture {
         required_exports = @('avid_on_begin_play')
         required_imports = @()
     }
+    if ($CooperativeSafepoints) {
+        $RuntimeManifest.execution.compiler_build_identity =
+            'wasmtime-fixture-build;epoch_interruption=off;'
+        $RuntimeManifest.execution.cooperative_safepoints = [ordered]@{
+            enabled = $true
+            receipt_sha256 = ('9' * 64)
+            guest_ir_sha256 = ('b' * 64)
+            proof_schema_version = 2
+            poll_interval = 64
+            loop_poll_blocks = 0
+            recursive_functions = 0
+            site_count = 0
+            site_sha256 =
+                'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+        }
+    }
     Write-TestJson -Path $RuntimeManifestPath -Value $RuntimeManifest
     return [pscustomobject]@{
         ProjectRoot = $ProjectRoot
@@ -257,6 +274,26 @@ try {
             [string]$Descriptor.minimum_runtime_version -cne '0.1.0' -or
             [string]$Descriptor.execution.cpu_features -cne 'x86-64-v3') {
             throw 'Package identity payload or frozen compatibility fields are wrong.'
+        }
+    }
+
+    Invoke-ReleaseContract 'cooperative provenance survives release publication' {
+        $Fixture = New-ReleaseFixture `
+            -Name 'CooperativeProvenance' `
+            -CooperativeSafepoints
+        $Published = Publish-AvidScriptModuleReleasePackage `
+            -RuntimeManifestPath $Fixture.RuntimeManifestPath `
+            -ProjectRoot $Fixture.ProjectRoot `
+            -Configuration Development
+        $RuntimePath = Join-Path $Published.PackageRoot 'runtime.avidscript.json'
+        $Runtime = Get-Content -Raw -LiteralPath $RuntimePath | ConvertFrom-Json -Depth 32
+        if (-not [bool]$Runtime.execution.cooperative_safepoints.enabled -or
+            [int64]$Runtime.execution.cooperative_safepoints.proof_schema_version -ne 2 -or
+            [string]$Runtime.execution.cooperative_safepoints.guest_ir_sha256 -cne
+                [string]$Runtime.guest_ir.sha256 -or
+            [string]$Runtime.execution.compiler_build_identity -cnotlike
+                '*;epoch_interruption=off;*') {
+            throw 'Release publication dropped or changed cooperative provenance.'
         }
     }
 
