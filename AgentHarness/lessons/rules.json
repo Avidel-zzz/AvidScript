@@ -375,7 +375,7 @@
       "summary": "严格架构 allowlist 若不随已审阅公共表面同步，会把历史能力长期误报为当前提交回归。",
       "prevention": "每个改变 static host、generated facade、registry 或 reviewed helper closure 的批次都在同批更新精确 multiset、注册输入和 canonical hash；架构 Gate 只在提交后的 detached clean candidate 运行，主工作树即使只有 protected dirty 也不得启动；再用上一基线对照区分历史漂移与新增违规。",
       "source": "observed:2026-08-31-P60.B1G",
-      "last_observed": "2026-09-08 P65.D21 再次在含 protected dirty 的主工作树启动 Gate，被 tree-bound evidence 拒绝；同一提交随后在 detached clean candidate 通过。此前 P65.D9 已发生同类复发"
+      "last_observed": "2026-09-08 P65.D29 再次在产品代码尚未提交且含 protected dirty 的主工作树启动 Gate，被 tree-bound evidence 拒绝；必须先提交产品批次，再在 detached clean candidate 运行正式 Gate。此前 P65.D21 与 P65.D9 已发生同类复发"
     },
     {
       "id": "dotnet-shared-obj-test-runners-run-serially",
