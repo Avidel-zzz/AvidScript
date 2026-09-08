@@ -947,6 +947,22 @@
       "prevention": "隐式 function import 数必须作为显式 compiler option 同时传入 Debug Map projector 和 WASM backend；offset map、finalized debug map、manifest count 与结构检查统一使用 public imports + implicit imports，禁止在 finalize 后补偏移。",
       "source": "observed:2026-09-09-P65.D31.C3.4",
       "last_observed": "2026-09-09 P65.D31 C3.4 首次 cooperative build 在 ASDEBUG2001 fail-closed；原因是 backend 注入 poll import 后 offset map 为 public+1，而 Guest projector 仍使用 public import 数。显式传递 implicit-function-import-count 后 cooperative 与默认构建均通过"
+    },
+    {
+      "id": "movetemp-requires-mutable-source",
+      "tags": ["cpp", "ownership", "build"],
+      "summary": "UE MoveTemp 不能接受 const 对象；只读局部值必须复制，或在创建时保持可移动所有权。",
+      "prevention": "写入结果对象前先检查源局部变量是否为 const；const FString/容器使用赋值复制，只有生命周期结束且非 const 的独占值才使用 MoveTemp。新增 ownership 转移后由 no-clean Unity Build 验证 UnrealTemplate 静态断言。",
+      "source": "observed:2026-09-09-P65.D31.C3.5b",
+      "last_observed": "2026-09-09 P65.D31.C3.5b receipt reader 将 const ObservedReceiptSha256 传给 MoveTemp，UE C2338 fail-closed；改为普通 FString 赋值后继续增量构建"
+    },
+    {
+      "id": "manifest-relative-paths-need-declared-base",
+      "tags": ["manifest", "path", "security", "editor"],
+      "summary": "构建 manifest 的相对制品路径可能以项目根为基准，也可能只含 OutputRoot 内文件名；消费者不能默认一种基准。",
+      "prevention": "解析相对制品路径时先按生产者契约尝试项目根候选，再按当前 OutputRoot 候选；无论采用哪一种，规范化后必须仍位于允许的 OutputRoot 且扩展名正确。失败测试先输出结构化 category，再检查事务回滚前后的制品身份。",
+      "source": "observed:2026-09-09-P65.D31.C3.5b",
+      "last_observed": "2026-09-09 P65.D31.C3.5b receipt reader 把项目相对 Saved/.../zero_binding.safepoints.json 再拼到 OutputRoot，首次 focused test 以 receipt_read_failed 回滚；增加双基准解析并保持 IsUnderDirectory 后通过"
     }
   ]
 }
