@@ -944,9 +944,9 @@
       "id": "implicit-wasm-imports-shift-debug-index-space",
       "tags": ["wasm", "debug-map", "compiler", "indices"],
       "summary": "Backend 注入隐式 function import 时，所有定义函数的 WASM index 与 Debug Map import 基数都会整体后移。",
-      "prevention": "隐式 function import 数必须作为显式 compiler option 同时传入 Debug Map projector 和 WASM backend；offset map、finalized debug map、manifest count 与结构检查统一使用 public imports + implicit imports，禁止在 finalize 后补偏移。",
+      "prevention": "显式定义三个计数空间：manifest 只记录用户导入，Debug Map 与 WASM layout 记录用户导入加内部导入，编译器 option 单独携带 internal import count。任何校验必须声明自己比较的空间；offset map 和 finalized debug map 使用完整 layout，运行时 import policy 对已验证内部 poll import 从用户 multiset 中排除，禁止用同一个含义模糊的 import_count 横跨三层。",
       "source": "observed:2026-09-09-P65.D31.C3.4",
-      "last_observed": "2026-09-09 P65.D31 C3.4 首次 cooperative build 在 ASDEBUG2001 fail-closed；原因是 backend 注入 poll import 后 offset map 为 public+1，而 Guest projector 仍使用 public import 数。显式传递 implicit-function-import-count 后 cooperative 与默认构建均通过"
+      "last_observed": "2026-09-09 P65.D31.C3.5c 运行时先把内部 poll 算作 manifest 用户导入而触发 manifest_wasm_import_mismatch；排除后 Debug Map gate 又把 manifest 数与完整 WASM 数比较而触发 debug_map_wasm_layout_mismatch。改为 manifest=user imports、debug/WASM=all imports，且 verified proof 明确增加一个 internal import 后端到端通过"
     },
     {
       "id": "movetemp-requires-mutable-source",
