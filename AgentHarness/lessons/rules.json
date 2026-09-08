@@ -19,9 +19,9 @@
       "id": "index-paths-before-read",
       "tags": ["path", "rg", "discovery"],
       "summary": "概念名称不能当作真实文件路径。",
-      "prevention": "先用 rg --files 建立索引，再对索引中的字面路径读取；通配符只放在 rg -g 参数，所有 -g 选项必须位于 -- 终止符之前。",
+      "prevention": "每次跨文件查询前先用 rg --files 建立索引，并仅以本次索引实际返回的字面路径构造命令；不得依据同名 .cpp 推测存在配套头文件。通配符只放在 rg -g 参数，所有 -g 选项必须位于 -- 终止符之前。",
       "source": "legacy:1931",
-      "last_observed": "2026-09-08 P65.D30 猜测 ObjectRegistry 位于 Runtime 模块，实际索引返回 AvidScriptBindings；无文件副作用。此前 P65.D29、P65.D28、P65.D26、P65.D23 与 P65.D9 已发生同类路径猜测，后续只读索引返回路径"
+      "last_observed": "2026-09-08 P65.D30 刚更新规则后又推测 AvidScriptWasmtimeBackend.cpp 存在配套 Public 头，索引确认该实现只有 Private cpp；同批次还误判 ObjectRegistry 模块。无文件副作用，今后每条多路径命令都必须完全来自本次索引结果"
     },
     {
       "id": "one-command-one-evidence-domain",
