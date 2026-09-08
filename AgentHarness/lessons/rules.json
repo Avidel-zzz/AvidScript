@@ -124,6 +124,14 @@
       "last_observed": "2026-08-31 P60.B1 (Guest test 超过首次 yield；完整保留 session_id 后等待到 118/118 最终结果)"
     },
     {
+      "id": "long-benchmark-console-output-is-redirected",
+      "tags": ["benchmark", "logging", "context"],
+      "summary": "多进程 UE benchmark 的完整启动日志会重复占用大量代理上下文。",
+      "prevention": "启动正式 benchmark 前把 stdout/stderr 重定向到输出目录之外的唯一日志，交互通道仅保留可等待 session id；完成后读取 runner 摘要、结果 JSON 和必要错误行。若流程包含 persistent worker，仍须按 worker shutdown 规则确认日志句柄释放。",
+      "source": "observed:2026-09-08-P65.D29",
+      "last_observed": "2026-09-08 P65.D29 micro formal 的 calibration 与 5 个 Editor 进程各自输出完整 UE 启动日志，多次产生约 9k-11k token 截断；采样成功但上下文被无效占用"
+    },
+    {
       "id": "search-output-is-scoped-before-execution",
       "tags": ["rg", "search", "context"],
       "summary": "跨模块宽检索会产生截断输出，既浪费上下文也可能掩盖真正残留引用。",
