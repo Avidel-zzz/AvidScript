@@ -1091,6 +1091,11 @@ int32_t EventIsCurrentSource(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Gene
 		: 0;
 }
 
+void CooperativeSafepointPoll(wasm_exec_env_t ExecEnv)
+{
+	static_cast<void>(ExecEnv);
+}
+
 int32_t EventUnsubscribe(wasm_exec_env_t ExecEnv, int64_t SubscriptionToken)
 {
 	FAvidScriptHostCall Call;
@@ -1271,6 +1276,7 @@ void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 	case EAvidScriptHostBindingId::EventSubscribe: return reinterpret_cast<void*>(EventSubscribe);
 	case EAvidScriptHostBindingId::EventUnsubscribe: return reinterpret_cast<void*>(EventUnsubscribe);
 	case EAvidScriptHostBindingId::EventIsCurrentSource: return reinterpret_cast<void*>(EventIsCurrentSource);
+	case EAvidScriptHostBindingId::CooperativeSafepointPoll: return reinterpret_cast<void*>(CooperativeSafepointPoll);
 	case EAvidScriptHostBindingId::DelegateOutputWrite: return reinterpret_cast<void*>(DelegateOutputWrite);
 	case EAvidScriptHostBindingId::DataLaneGetEpoch: return reinterpret_cast<void*>(DataLaneGetEpoch);
 	case EAvidScriptHostBindingId::DataLaneSubmit: return reinterpret_cast<void*>(DataLaneSubmit);

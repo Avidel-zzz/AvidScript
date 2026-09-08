@@ -8281,6 +8281,8 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 		const int32 Value = HandleEventIsCurrentSourceImport(Call.IntArgs[0], Call.IntArgs[1]);
 		return Finish(Value, true);
 	}
+	case EAvidScriptHostBindingId::CooperativeSafepointPoll:
+		return true;
 	case EAvidScriptHostBindingId::DelegateOutputWrite:
 	{
 		const int32 Value = HandleDelegateOutputWriteImport(

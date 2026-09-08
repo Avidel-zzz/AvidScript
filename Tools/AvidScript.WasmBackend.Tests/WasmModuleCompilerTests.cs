@@ -9,6 +9,7 @@ internal static class WasmModuleCompilerTests
     {
         MinimalModuleHasCanonicalSectionsAndProvenance();
         CompilationIsByteDeterministic();
+        CooperativeSafepointsCoverCyclesWithoutChangingDefault();
         InvalidGuestIrIsRejected();
         ImportsAndCallsUseStableFunctionIndices();
         TypedOwnerImportUsesExactI64Signature();
@@ -17,7 +18,7 @@ internal static class WasmModuleCompilerTests
         StateStructPointersAndSRetUseLinearMemory();
         HeapAtPageBoundaryStillReservesRuntimeStack();
         DispatchMetadataDoesNotChangeBinaryImportShape();
-        return 10;
+        return 11;
     }
 
     private static void MinimalModuleHasCanonicalSectionsAndProvenance()
@@ -46,6 +47,90 @@ internal static class WasmModuleCompilerTests
         byte[] second = WasmModuleCompiler.Compile(module).Bytes;
 
         Assert(first.SequenceEqual(second), "same Guest IR should produce identical WASM bytes");
+    }
+
+    private static void CooperativeSafepointsCoverCyclesWithoutChangingDefault()
+    {
+        GuestModule module = CreateMinimalModule();
+        GuestFunction loopFunction = new(
+            "function:loop",
+            Array.Empty<GuestRegister>(),
+            Array.Empty<GuestRegister>(),
+            "type:int32",
+            "block:loop",
+            new[]
+            {
+                new GuestBasicBlock(
+                    "block:loop",
+                    Array.Empty<GuestInstruction>(),
+                    new GuestTerminator(
+                        "branch",
+                        null,
+                        "block:loop",
+                        null,
+                        null)),
+            });
+        GuestFunction recursiveFunction = new(
+            "function:recursive",
+            Array.Empty<GuestRegister>(),
+            Array.Empty<GuestRegister>(),
+            "type:void",
+            "block:recursive",
+            new[]
+            {
+                new GuestBasicBlock(
+                    "block:recursive",
+                    new[]
+                    {
+                        new GuestInstruction(
+                            "call",
+                            null,
+                            Array.Empty<string>(),
+                            "function:recursive",
+                            null,
+                            null),
+                    },
+                    new GuestTerminator("return", null, null, null, null)),
+            });
+        module = module with
+        {
+            Functions = new[] { loopFunction, recursiveFunction },
+            Exports = new[] { new GuestExport("guest_loop", loopFunction.Id) },
+        };
+
+        WasmCompilationOptions options = new(true, 64);
+        WasmCompilationResult first = WasmModuleCompiler.Compile(module, options);
+        WasmCompilationResult second = WasmModuleCompiler.Compile(module, options);
+        Assert(first.Succeeded && first.Bytes.SequenceEqual(second.Bytes),
+            "cooperative safepoint compilation should be deterministic");
+
+        WasmArtifactInfo info = WasmArtifactInspector.Inspect(first.Bytes);
+        Assert(info.Imports.Count == 1
+            && info.Imports[0].Module == "avidscript"
+            && info.Imports[0].Name == "avid_cooperative_safepoint_poll"
+            && info.Imports[0].Kind == 0,
+            "cooperative modules should declare the internal poll import");
+        Assert(info.Exports.Single(item => item.Name == "guest_loop").Index == 1,
+            "implicit cooperative import should participate in function indices");
+        string proof = info.CustomSections.Single(
+            item => item.Name == "avidscript.safepoints").PayloadText;
+        Assert(proof.Contains("schema=1", StringComparison.Ordinal)
+            && proof.Contains("mode=bounded_counter_v1", StringComparison.Ordinal)
+            && proof.Contains("poll_interval=64", StringComparison.Ordinal)
+            && proof.Contains("loop_poll_blocks=1", StringComparison.Ordinal)
+            && proof.Contains("recursive_functions=1", StringComparison.Ordinal)
+            && proof.Contains(
+                "coverage=cfg_feedback_edges_and_recursive_entries",
+                StringComparison.Ordinal),
+            "cooperative proof should describe bounded CFG coverage");
+
+        WasmCompilationResult defaultResult = WasmModuleCompiler.Compile(module);
+        WasmArtifactInfo defaultInfo = WasmArtifactInspector.Inspect(defaultResult.Bytes);
+        Assert(defaultResult.Succeeded
+            && defaultInfo.Imports.Count == 0
+            && defaultInfo.CustomSections.All(
+                item => item.Name != "avidscript.safepoints"),
+            "default compilation should retain the legacy epoch-only binary shape");
     }
 
     private static void InvalidGuestIrIsRejected()

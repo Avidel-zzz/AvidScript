@@ -1501,6 +1501,19 @@ public:
 		AvidScriptWasmtimeValue* Results,
 		size_t ResultCount)
 	{
+		if (HostContext.Import->BindingId ==
+			EAvidScriptHostBindingId::CooperativeSafepointPoll)
+		{
+			if (ArgumentCount == 0 && ResultCount == 0)
+			{
+				return true;
+			}
+			RecordPendingHostFailure(
+				TEXT("avidscript"),
+				UTF8_TO_TCHAR(HostContext.Import->ImportName),
+				TEXT("The cooperative safepoint poll ABI must be empty."));
+			return false;
+		}
 		if (!TryConsumeHostCallBudget(
 			TEXT("avidscript"),
 			UTF8_TO_TCHAR(HostContext.Import->ImportName)))

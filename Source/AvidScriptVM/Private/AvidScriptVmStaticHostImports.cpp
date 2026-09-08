@@ -62,11 +62,12 @@ const FAvidScriptVmStaticHostImport GStaticHostImports[] = {
 	{ EAvidScriptHostBindingId::DebugProbe, "avid_debug_probe", "(I)i", false },
 	{ EAvidScriptHostBindingId::DebugSuspend, "avid_debug_suspend", "(Iiii)I", false },
 	{ EAvidScriptHostBindingId::DebugFrameRead, "avid_debug_frame_read", "(Iii)i", false },
-	{ EAvidScriptHostBindingId::EventIsCurrentSource, "event_is_current_source", "(ii)i", true }
+	{ EAvidScriptHostBindingId::EventIsCurrentSource, "event_is_current_source", "(ii)i", true },
+	{ EAvidScriptHostBindingId::CooperativeSafepointPoll, "avid_cooperative_safepoint_poll", "()", false }
 };
 
 static_assert(
-	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::EventIsCurrentSource),
+	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::CooperativeSafepointPoll),
 	"Static host catalog must remain dense and ordered by binding id.");
 
 bool FailStaticCall(FString& OutFailureDetails, const TCHAR* Details)
@@ -314,6 +315,7 @@ bool InvokeAvidScriptVmStaticHostImport(
 	case EAvidScriptHostBindingId::OwnerGetHandle:
 	case EAvidScriptHostBindingId::DataLaneGetEpoch:
 	case EAvidScriptHostBindingId::ContinuationCancelSourceCreate:
+	case EAvidScriptHostBindingId::CooperativeSafepointPoll:
 		break;
 	case EAvidScriptHostBindingId::DataLaneSubmit:
 	{

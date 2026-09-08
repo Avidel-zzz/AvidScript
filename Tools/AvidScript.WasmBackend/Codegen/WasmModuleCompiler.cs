@@ -14,7 +14,9 @@ public static class WasmModuleCompiler
         0x01, 0x00, 0x00, 0x00,
     };
 
-    public static WasmCompilationResult Compile(GuestModule module)
+    public static WasmCompilationResult Compile(
+        GuestModule module,
+        WasmCompilationOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(module);
         GuestValidationResult validation = GuestModuleValidator.Validate(module);
@@ -33,7 +35,11 @@ public static class WasmModuleCompiler
 
         try
         {
-            (byte[] bytes, IReadOnlyList<GuestWasmDebugOffset> offsets) = CompileValidated(module);
+            WasmCompilationOptions effectiveOptions = options ?? new WasmCompilationOptions();
+            WasmCooperativeSafepointPlan safepointPlan =
+                WasmCooperativeSafepointPlan.Create(module, effectiveOptions);
+            (byte[] bytes, IReadOnlyList<GuestWasmDebugOffset> offsets) =
+                CompileValidated(module, safepointPlan);
             return new WasmCompilationResult(
                 true,
                 bytes,
@@ -56,22 +62,50 @@ public static class WasmModuleCompiler
     }
 
     private static (byte[] Bytes, IReadOnlyList<GuestWasmDebugOffset> DebugOffsets) CompileValidated(
-        GuestModule module)
+        GuestModule module,
+        WasmCooperativeSafepointPlan safepointPlan)
     {
-        WasmModuleLayout layout = WasmModuleLayout.Create(module);
+        WasmModuleLayout layout = WasmModuleLayout.Create(module, safepointPlan);
         WasmBinaryWriter writer = new();
         List<GuestWasmDebugOffset> debugOffsets = new();
         writer.WriteBytes(Header);
         WriteProvenanceSection(writer, module);
+        WriteSafepointProofSection(writer, module, safepointPlan);
         WriteTypeSection(writer, layout);
-        WriteImportSection(writer, module, layout);
+        WriteImportSection(writer, module, layout, safepointPlan);
         WriteFunctionSection(writer, module, layout);
         WriteMemorySection(writer, module, layout);
-        WriteStackPointerGlobalSection(writer, module);
+        WriteGlobalSection(writer, module, safepointPlan);
         WriteExportSection(writer, module, layout);
-        WriteCodeSection(writer, module, layout, debugOffsets);
+        WriteCodeSection(writer, module, layout, safepointPlan, debugOffsets);
         WriteDataSection(writer, module, layout);
         return (writer.ToArray(), debugOffsets);
+    }
+
+    private static void WriteSafepointProofSection(
+        WasmBinaryWriter writer,
+        GuestModule module,
+        WasmCooperativeSafepointPlan safepointPlan)
+    {
+        if (!safepointPlan.Enabled)
+        {
+            return;
+        }
+        writer.WriteSection(0, section =>
+        {
+            section.WriteName("avidscript.safepoints");
+            string payload = string.Join(
+                (char)10,
+                "schema=1",
+                "mode=bounded_counter_v1",
+                $"poll_interval={safepointPlan.Interval}",
+                $"import={WasmCooperativeSafepointPlan.ImportModule}.{WasmCooperativeSafepointPlan.ImportName}",
+                $"loop_poll_blocks={safepointPlan.LoopPollCount}",
+                $"recursive_functions={safepointPlan.RecursiveFunctionCount}",
+                "coverage=cfg_feedback_edges_and_recursive_entries",
+                $"guest_ir={module.SchemaVersion}/{module.IrVersion}");
+            section.WriteBytes(Encoding.UTF8.GetBytes(payload));
+        });
     }
 
     private static void WriteProvenanceSection(WasmBinaryWriter writer, GuestModule module)
@@ -123,16 +157,26 @@ public static class WasmModuleCompiler
     private static void WriteImportSection(
         WasmBinaryWriter writer,
         GuestModule module,
-        WasmModuleLayout layout)
+        WasmModuleLayout layout,
+        WasmCooperativeSafepointPlan safepointPlan)
     {
-        if (module.Imports.Count == 0)
+        if (module.Imports.Count == 0 && !safepointPlan.Enabled)
         {
             return;
         }
 
         writer.WriteSection(2, section =>
         {
-            section.WriteU32(checked((uint)module.Imports.Count));
+            section.WriteU32(checked(
+                (uint)module.Imports.Count + (safepointPlan.Enabled ? 1u : 0u)));
+            if (safepointPlan.Enabled)
+            {
+                section.WriteName(WasmCooperativeSafepointPlan.ImportModule);
+                section.WriteName(WasmCooperativeSafepointPlan.ImportName);
+                section.WriteByte(0x00);
+                section.WriteU32(
+                    layout.TypeIndices[WasmCooperativeSafepointPlan.ImportId]);
+            }
             foreach (GuestImport import in module.Imports)
             {
                 section.WriteName(import.Module);
@@ -181,16 +225,27 @@ public static class WasmModuleCompiler
         });
     }
 
-    private static void WriteStackPointerGlobalSection(WasmBinaryWriter writer, GuestModule module)
+    private static void WriteGlobalSection(
+        WasmBinaryWriter writer,
+        GuestModule module,
+        WasmCooperativeSafepointPlan safepointPlan)
     {
         writer.WriteSection(6, section =>
         {
-            section.WriteU32(1);
+            section.WriteU32(safepointPlan.Enabled ? 2u : 1u);
             section.WriteByte((byte)WasmValueType.I32);
             section.WriteByte(0x01);
             section.WriteByte(0x41);
             section.WriteS32(module.MemoryLayout.HeapStart);
             section.WriteByte(0x0b);
+            if (safepointPlan.Enabled)
+            {
+                section.WriteByte((byte)WasmValueType.I32);
+                section.WriteByte(0x01);
+                section.WriteByte(0x41);
+                section.WriteS32(checked((int)safepointPlan.Interval));
+                section.WriteByte(0x0b);
+            }
         });
     }
 
@@ -218,6 +273,7 @@ public static class WasmModuleCompiler
         WasmBinaryWriter writer,
         GuestModule module,
         WasmModuleLayout layout,
+        WasmCooperativeSafepointPlan safepointPlan,
         ICollection<GuestWasmDebugOffset> debugOffsets)
     {
         writer.WriteSection(10, section =>
@@ -226,7 +282,11 @@ public static class WasmModuleCompiler
             foreach (GuestFunction function in module.Functions)
             {
                 WasmFunctionCompilationResult body =
-                    new WasmFunctionCompiler(module, function, layout).Compile();
+                    new WasmFunctionCompiler(
+                        module,
+                        function,
+                        layout,
+                        safepointPlan).Compile();
                 int functionIndex = checked((int)layout.FunctionIndices[function.Id]);
                 foreach (WasmFunctionInstructionOffset offset in body.InstructionOffsets)
                 {

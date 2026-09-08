@@ -15,6 +15,7 @@ internal sealed class WasmFunctionCompiler
     private readonly GuestModule module;
     private readonly GuestFunction function;
     private readonly WasmModuleLayout moduleLayout;
+    private readonly WasmCooperativeSafepointPlan safepointPlan;
     private readonly WasmFunctionFrameLayout frame;
     private readonly bool hasArrayAccess;
     private readonly bool hasArrayRegion;
@@ -40,11 +41,13 @@ internal sealed class WasmFunctionCompiler
     public WasmFunctionCompiler(
         GuestModule module,
         GuestFunction function,
-        WasmModuleLayout moduleLayout)
+        WasmModuleLayout moduleLayout,
+        WasmCooperativeSafepointPlan safepointPlan)
     {
         this.module = module;
         this.function = function;
         this.moduleLayout = moduleLayout;
+        this.safepointPlan = safepointPlan;
         frame = WasmFunctionFrameLayout.Create(function, moduleLayout);
         GuestInstruction[] arrayInstructions = function.Blocks
             .SelectMany(block => block.Instructions)
@@ -70,6 +73,10 @@ internal sealed class WasmFunctionCompiler
         List<WasmFunctionInstructionOffset> instructionOffsets = new();
         WriteLocals(body);
         WriteFramePrologue(body);
+        if (safepointPlan.PollAtFunctionEntry(function.Id))
+        {
+            WriteCooperativeSafepointPoll(body);
+        }
         Dictionary<string, int> blockIndices = function.Blocks
             .Select((block, index) => (block.Id, Index: index))
             .ToDictionary(item => item.Id, item => item.Index, StringComparer.Ordinal);
@@ -100,6 +107,10 @@ internal sealed class WasmFunctionCompiler
                 CompileInstruction(body, instruction);
             }
 
+            if (safepointPlan.PollBeforeTerminator(function.Id, block.Id))
+            {
+                WriteCooperativeSafepointPoll(body);
+            }
             instructionOffsets.Add(new WasmFunctionInstructionOffset(
                 GuestDebugIdentity.Terminator(function.Id, block.Id),
                 body.Count));
@@ -112,6 +123,26 @@ internal sealed class WasmFunctionCompiler
         body.WriteByte(0x00);
         body.WriteByte(0x0b);
         return new WasmFunctionCompilationResult(body.ToArray(), instructionOffsets);
+    }
+
+    private void WriteCooperativeSafepointPoll(WasmBinaryWriter body)
+    {
+        WriteGlobalGet(body, WasmCooperativeSafepointPlan.CounterGlobalIndex);
+        body.WriteByte(0x41);
+        body.WriteS32(1);
+        body.WriteByte(0x6b);
+        WriteGlobalSet(body, WasmCooperativeSafepointPlan.CounterGlobalIndex);
+        WriteGlobalGet(body, WasmCooperativeSafepointPlan.CounterGlobalIndex);
+        body.WriteByte(0x45);
+        body.WriteByte(0x04);
+        body.WriteByte(0x40);
+        body.WriteByte(0x10);
+        body.WriteU32(moduleLayout.FunctionIndices[
+            WasmCooperativeSafepointPlan.ImportId]);
+        body.WriteByte(0x41);
+        body.WriteS32(checked((int)safepointPlan.Interval));
+        WriteGlobalSet(body, WasmCooperativeSafepointPlan.CounterGlobalIndex);
+        body.WriteByte(0x0b);
     }
 
     private void WriteLocals(WasmBinaryWriter body)

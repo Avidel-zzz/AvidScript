@@ -174,7 +174,8 @@ enum class EAvidScriptHostBindingId : uint16
 	DebugProbe,
 	DebugSuspend,
 	DebugFrameRead,
-	EventIsCurrentSource
+	EventIsCurrentSource,
+	CooperativeSafepointPoll
 };
 
 struct FAvidScriptVmStackFrame

@@ -585,6 +585,9 @@ bool FAvidScriptVmEventSubscriptionImportContractTest::RunTest(
 	const FAvidScriptVmStaticHostImport& IsCurrentSource =
 		GetAvidScriptVmStaticHostImport(
 			EAvidScriptHostBindingId::EventIsCurrentSource);
+	const FAvidScriptVmStaticHostImport& CooperativeSafepointPoll =
+		GetAvidScriptVmStaticHostImport(
+			EAvidScriptHostBindingId::CooperativeSafepointPoll);
 	TestEqual(
 		TEXT("Event subscribe uses the generated facade import name"),
 		FString(UTF8_TO_TCHAR(Subscribe.ImportName)),
@@ -617,6 +620,21 @@ bool FAvidScriptVmEventSubscriptionImportContractTest::RunTest(
 		TEXT("Sender query is available through generated facade env imports"),
 		IsCurrentSource.bSupportsEnvCompatibility
 			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("event_is_current_source")));
+	TestEqual(
+		TEXT("Cooperative safepoint poll appends after public event imports"),
+		static_cast<uint16>(EAvidScriptHostBindingId::CooperativeSafepointPoll),
+		static_cast<uint16>(EAvidScriptHostBindingId::EventIsCurrentSource) + 1);
+	TestEqual(
+		TEXT("Cooperative safepoint poll uses the internal import name"),
+		FString(UTF8_TO_TCHAR(CooperativeSafepointPoll.ImportName)),
+		FString(TEXT("avid_cooperative_safepoint_poll")));
+	TestEqual(
+		TEXT("Cooperative safepoint poll has an empty ABI"),
+		FString(UTF8_TO_TCHAR(CooperativeSafepointPoll.Signature)),
+		FString(TEXT("()")));
+	TestFalse(
+		TEXT("Cooperative safepoint poll is not exposed through env compatibility"),
+		CooperativeSafepointPoll.bSupportsEnvCompatibility);
 	return true;
 }
 

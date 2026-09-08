@@ -31,7 +31,9 @@ internal sealed class WasmModuleLayout
 
     public uint ImportedFunctionCount { get; }
 
-    public static WasmModuleLayout Create(GuestModule module)
+    public static WasmModuleLayout Create(
+        GuestModule module,
+        WasmCooperativeSafepointPlan? safepointPlan = null)
     {
         Dictionary<string, GuestType> types = module.Types.ToDictionary(
             type => type.Id,
@@ -42,6 +44,18 @@ internal sealed class WasmModuleLayout
         Dictionary<string, uint> functionIndices = new(StringComparer.Ordinal);
 
         uint functionIndex = 0;
+        if (safepointPlan?.Enabled == true)
+        {
+            WasmFunctionSignature signature = new(
+                Array.Empty<WasmValueType>(),
+                null);
+            typeIndices.Add(
+                WasmCooperativeSafepointPlan.ImportId,
+                AddSignature(signature, signatures, signatureIndices));
+            functionIndices.Add(
+                WasmCooperativeSafepointPlan.ImportId,
+                functionIndex++);
+        }
         foreach (GuestImport import in module.Imports)
         {
             WasmFunctionSignature signature = CreateSignature(
