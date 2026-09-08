@@ -129,7 +129,7 @@
       "summary": "跨模块宽检索会产生截断输出，既浪费上下文也可能掩盖真正残留引用。",
       "prevention": "先按文件或模块冻结检索范围，优先 rg -F 和精确标识符；必须使用正则时先以单文件简单表达式验证 shell 转义。预估命中较多时分文件检查或限制输出，禁止一次倾倒整个仓库。",
       "source": "observed:2026-08-31-P60.B1",
-      "last_observed": "2026-09-08 P65.D29 直接输出 semantic manifest 的完整 required_imports 清单，结果超出上下文；后续结构化清单必须先按签名计数或按目标签名、序号精确筛选，只返回必要字段。此前 P65.D28 的多域检索、P65.D27 的 function-context diff、P65.D26 的正则转义与 P60.B1 的宽检索也触发过同类问题"
+      "last_observed": "2026-09-08 P65.D29 先直接输出 semantic manifest 的完整 required_imports，随后又用精确 ReflectNoOp 符号跨多个大型生成 JSON 搜索，两次结果均超出上下文；结构化产物必须先锁定单个文件与字段，再用解析器按 ID 筛选并只返回必要属性。此前 P65.D28 的多域检索、P65.D27 的 function-context diff、P65.D26 的正则转义与 P60.B1 的宽检索也触发过同类问题"
     },
     {
       "id": "structured-artifacts-use-parsers",
