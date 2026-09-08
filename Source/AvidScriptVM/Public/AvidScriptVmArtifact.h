@@ -13,6 +13,7 @@ struct FAvidScriptVmOwnedArtifact
 	FString CompilerBuildIdentity;
 	FString TargetTriple;
 	FString AttestationId;
+	bool bCooperativeSafepointProofVerified = false;
 
 	FAvidScriptVmArtifactView MakeView(
 		EAvidScriptVmArtifactTrust Trust) const
@@ -30,6 +31,8 @@ struct FAvidScriptVmOwnedArtifact
 		View.CompilerBuildIdentity = CompilerBuildIdentity;
 		View.TargetTriple = TargetTriple;
 		View.Trust = Trust;
+		View.bCooperativeSafepointProofVerified =
+			bCooperativeSafepointProofVerified;
 		return View;
 	}
 };

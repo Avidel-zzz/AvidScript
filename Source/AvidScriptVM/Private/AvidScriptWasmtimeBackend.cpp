@@ -740,6 +740,17 @@ public:
 				TEXT("The trusted cooperative profile requires a verified serialized package."));
 			return false;
 		}
+		if (!CompilerProfile.bEpochInterruption
+			&& (!Artifact.bCooperativeSafepointProofVerified
+				|| !ModuleLayout.CooperativeSafepointProof.bPresent))
+		{
+			LoadMetrics.RuntimeInitMs = MeasureWasmtimeElapsedMs(RuntimeInitStart);
+			SetWasmtimeError(
+				OutError,
+				TEXT("artifact_safepoint_proof_invalid"),
+				TEXT("The trusted cooperative profile requires an independently verified canonical WASM safepoint proof."));
+			return false;
+		}
 	#elif PLATFORM_ANDROID && PLATFORM_CPU_ARM_FAMILY
 		if (!bSerialized)
 		{

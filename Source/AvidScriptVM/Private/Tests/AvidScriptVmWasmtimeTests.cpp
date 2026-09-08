@@ -1945,78 +1945,55 @@ bool FAvidScriptVmWasmtimeArtifactCompilerTest::RunTest(
 	FAvidScriptVmArtifactCompileRequest TrustedRequest = FuelFreeRequest;
 	TrustedRequest.bEpochInterruption = false;
 	FAvidScriptVmArtifactCompileResult TrustedResult;
-	if (!TestTrue(
-		TEXT("trusted cooperative artifact compiles with a distinct profile"),
-		CompileAvidScriptVmArtifact(TrustedRequest, TrustedResult)))
+	TestFalse(
+		TEXT("trusted cooperative compilation stays closed before structural verification"),
+		CompileAvidScriptVmArtifact(TrustedRequest, TrustedResult));
+	TestEqual(
+		TEXT("trusted cooperative compile rejection category"),
+		TrustedResult.Error.Category,
+		FString(TEXT("cooperative_safepoint_verifier_required")));
+	TestFalse(
+		TEXT("rejected artifact cannot claim a verified safepoint proof"),
+		TrustedResult.Artifact.bCooperativeSafepointProofVerified);
+
+	const FAvidScriptWasmtimeCompilerProfile* TrustedProfile =
+		FindAvidScriptWasmtimeCompilerProfile(
+			FuelFreeResult.Artifact.TargetTriple,
+			false,
+			false);
+	if (!TestNotNull(
+		TEXT("trusted cooperative profile remains resolvable for verification"),
+		TrustedProfile))
 	{
-		AddError(
-			TrustedResult.Error.Category
-			+ TEXT(": ")
-			+ TrustedResult.Error.Details);
 		return false;
 	}
-	TestFalse(
-		TEXT("trusted cooperative profile participates in the cache key"),
-		TrustedResult.bCacheHit);
-	TestTrue(
-		TEXT("trusted cooperative artifact identity omits epoch instrumentation"),
-		TrustedResult.Artifact.CompilerBuildIdentity.Contains(
-			TEXT(";epoch_interruption=off;"),
-			ESearchCase::CaseSensitive));
-	TestNotEqual(
-		TEXT("epoch and trusted cooperative artifacts have distinct identities"),
-		TrustedResult.Artifact.CompilerBuildIdentity,
-		FuelFreeResult.Artifact.CompilerBuildIdentity);
-
-	TUniquePtr<IAvidScriptVmBackend> TrustedBackend =
+	FAvidScriptVmOwnedArtifact UnverifiedTrustedArtifact = FuelFreeResult.Artifact;
+	UnverifiedTrustedArtifact.CompilerBuildIdentity =
+		BuildAvidScriptWasmtimeCompilerIdentity(
+			FuelFreeBackend->GetBackendInfo().RuntimeVersion,
+			FuelFreeBackend->GetBackendInfo().RuntimeArtifactSha256,
+			*TrustedProfile);
+	TUniquePtr<IAvidScriptVmBackend> UnverifiedTrustedBackend =
 		CreateWasmtimePrecompiledBackendForTest(LoadError);
 	if (!TestNotNull(
-		TEXT("trusted cooperative precompiled backend is created"),
-		TrustedBackend.Get()))
+		TEXT("unverified trusted cooperative backend is created"),
+		UnverifiedTrustedBackend.Get()))
 	{
 		return false;
 	}
 	FAvidScriptVmLoadConfig TrustedConfig;
-	if (!TestTrue(
-		TEXT("verified trusted cooperative artifact loads without epoch budget"),
-		TrustedBackend->LoadArtifact(
-			TrustedResult.Artifact.MakeView(
-				EAvidScriptVmArtifactTrust::VerifiedPackage),
-			TEXT("wasmtime_artifact_compiler_trusted_cooperative"),
-			TrustedConfig,
-			LoadError)))
-	{
-		AddError(LoadError.Category + TEXT(": ") + LoadError.Details);
-		return false;
-	}
-	TestEqual(
-		TEXT("runtime resolves trusted cooperative compiler identity"),
-		TrustedBackend->GetBackendInfo().RuntimeBuildIdentity,
-		TrustedResult.Artifact.CompilerBuildIdentity);
-
-	TUniquePtr<IAvidScriptVmBackend> EpochBudgetBackend =
-		CreateWasmtimePrecompiledBackendForTest(LoadError);
-	if (!TestNotNull(
-		TEXT("epoch-budget precompiled backend is created"),
-		EpochBudgetBackend.Get()))
-	{
-		return false;
-	}
-	FAvidScriptVmLoadConfig EpochBudgetConfig;
-	EpochBudgetConfig.ExecutionBudget.EpochDeadlineTicks = 1;
-	EpochBudgetConfig.ExecutionBudget.EpochTimeoutMilliseconds = 100;
 	TestFalse(
-		TEXT("trusted cooperative artifact rejects an epoch timeout budget"),
-		EpochBudgetBackend->LoadArtifact(
-			TrustedResult.Artifact.MakeView(
+		TEXT("verified package trust cannot replace structural safepoint proof"),
+		UnverifiedTrustedBackend->LoadArtifact(
+			UnverifiedTrustedArtifact.MakeView(
 				EAvidScriptVmArtifactTrust::VerifiedPackage),
-			TEXT("wasmtime_artifact_compiler_epoch_mismatch"),
-			EpochBudgetConfig,
+			TEXT("wasmtime_artifact_compiler_unverified_cooperative"),
+			TrustedConfig,
 			LoadError));
 	TestEqual(
-		TEXT("trusted cooperative epoch mismatch category"),
+		TEXT("unverified cooperative artifact rejection category"),
 		LoadError.Category,
-		FString(TEXT("artifact_budget_mismatch")));
+		FString(TEXT("artifact_safepoint_proof_invalid")));
 
 	FAvidScriptVmArtifactCompileResult CachedResult;
 	if (!TestTrue(

@@ -37,6 +37,7 @@ struct FAvidScriptVmArtifactAttestation
 	FString TargetTriple;
 	EAvidScriptVmArtifactFormat ArtifactFormat =
 		EAvidScriptVmArtifactFormat::WasmBytecode;
+	bool bCooperativeSafepointProofVerified = false;
 	uint64 LastAccess = 0;
 };
 
@@ -87,6 +88,8 @@ FString RegisterArtifactAttestationLocked(
 	Attestation.CompilerBuildIdentity = Artifact.CompilerBuildIdentity;
 	Attestation.TargetTriple = Artifact.TargetTriple;
 	Attestation.ArtifactFormat = Artifact.ArtifactFormat;
+	Attestation.bCooperativeSafepointProofVerified =
+		Artifact.bCooperativeSafepointProofVerified;
 	Attestation.LastAccess = NextArtifactAccessSequence();
 	return Attestation.Id;
 }
@@ -201,6 +204,15 @@ bool CompileAvidScriptVmArtifact(
 			OutResult,
 			TEXT("invalid_artifact"),
 			TEXT("Canonical WASM bytes must be present."),
+			StartSeconds);
+		return false;
+	}
+	if (!Request.bEpochInterruption)
+	{
+		SetCompileError(
+			OutResult,
+			TEXT("cooperative_safepoint_verifier_required"),
+			TEXT("Epoch-free artifact compilation remains disabled until the canonical WASM safepoint structure is independently verified."),
 			StartSeconds);
 		return false;
 	}
@@ -390,7 +402,9 @@ bool AuthorizeAvidScriptVmArtifact(
 				&& Attestation.CompilerBuildIdentity ==
 					Artifact.CompilerBuildIdentity
 				&& Attestation.TargetTriple == Artifact.TargetTriple
-				&& Attestation.ArtifactFormat == Artifact.ArtifactFormat;
+				&& Attestation.ArtifactFormat == Artifact.ArtifactFormat
+				&& Attestation.bCooperativeSafepointProofVerified ==
+					Artifact.bCooperativeSafepointProofVerified;
 			if (bAuthorized)
 			{
 				Attestation.LastAccess = NextArtifactAccessSequence();
