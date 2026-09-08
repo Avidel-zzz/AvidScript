@@ -331,6 +331,41 @@ bool FAvidScriptVmModuleLayoutTest::RunTest(const FString& Parameters)
 		TEXT("cooperative Guest IR identity"),
 		Layout.CooperativeSafepointProof.GuestIrIdentity,
 		FString(TEXT("1/1.0")));
+	TestFalse(
+		TEXT("schema 1 proof has no structural site identity"),
+		Layout.CooperativeSafepointProof.bHasSiteIdentity);
+
+	constexpr const char* ValidSafepointProofV2 =
+		"schema=2\n"
+		"mode=bounded_counter_v1\n"
+		"poll_interval=64\n"
+		"import=avidscript.avid_cooperative_safepoint_poll\n"
+		"loop_poll_blocks=2\n"
+		"recursive_functions=1\n"
+		"site_count=3\n"
+		"site_sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n"
+		"coverage=cfg_feedback_edges_and_recursive_entries\n"
+		"guest_ir=1/1.0";
+	const TArray<uint8> SafepointV2Bytecode = BuildDiagnosticSafepointFixture(
+		ValidSafepointProofV2,
+		true);
+	TestTrue(
+		TEXT("schema 2 cooperative safepoint proof is parsed"),
+		InspectAvidScriptWasmModuleLayout(
+			MakeArrayView(SafepointV2Bytecode),
+			Layout,
+			Error));
+	TestTrue(
+		TEXT("schema 2 proof retains structural site identity"),
+		Layout.CooperativeSafepointProof.bHasSiteIdentity);
+	TestEqual(
+		TEXT("schema 2 site count matches loop and recursion sites"),
+		Layout.CooperativeSafepointProof.SiteCount,
+		3u);
+	TestEqual(
+		TEXT("schema 2 site hash is retained"),
+		Layout.CooperativeSafepointProof.SiteSha256,
+		FString(TEXT("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")));
 
 	const TArray<uint8> MissingImportBytecode =
 		BuildDiagnosticSafepointFixture(ValidSafepointProof, false);

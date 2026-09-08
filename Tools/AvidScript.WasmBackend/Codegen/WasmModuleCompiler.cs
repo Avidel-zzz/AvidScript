@@ -38,13 +38,15 @@ public static class WasmModuleCompiler
             WasmCompilationOptions effectiveOptions = options ?? new WasmCompilationOptions();
             WasmCooperativeSafepointPlan safepointPlan =
                 WasmCooperativeSafepointPlan.Create(module, effectiveOptions);
-            (byte[] bytes, IReadOnlyList<GuestWasmDebugOffset> offsets) =
+            (byte[] bytes, IReadOnlyList<GuestWasmDebugOffset> offsets,
+                WasmCooperativeSafepointAttestation? attestation) =
                 CompileValidated(module, safepointPlan);
             return new WasmCompilationResult(
                 true,
                 bytes,
                 offsets,
-                Array.Empty<WasmDiagnostic>());
+                Array.Empty<WasmDiagnostic>(),
+                attestation);
         }
         catch (Exception exception) when (exception is NotSupportedException
             or InvalidOperationException
@@ -61,7 +63,10 @@ public static class WasmModuleCompiler
         }
     }
 
-    private static (byte[] Bytes, IReadOnlyList<GuestWasmDebugOffset> DebugOffsets) CompileValidated(
+    private static (
+        byte[] Bytes,
+        IReadOnlyList<GuestWasmDebugOffset> DebugOffsets,
+        WasmCooperativeSafepointAttestation? Attestation) CompileValidated(
         GuestModule module,
         WasmCooperativeSafepointPlan safepointPlan)
     {
@@ -77,9 +82,17 @@ public static class WasmModuleCompiler
         WriteMemorySection(writer, module, layout);
         WriteGlobalSection(writer, module, safepointPlan);
         WriteExportSection(writer, module, layout);
-        WriteCodeSection(writer, module, layout, safepointPlan, debugOffsets);
+        int emittedSafepointCount = WriteCodeSection(
+            writer,
+            module,
+            layout,
+            safepointPlan,
+            debugOffsets);
         WriteDataSection(writer, module, layout);
-        return (writer.ToArray(), debugOffsets);
+        return (
+            writer.ToArray(),
+            debugOffsets,
+            safepointPlan.CreateAttestation(emittedSafepointCount));
     }
 
     private static void WriteSafepointProofSection(
@@ -96,12 +109,14 @@ public static class WasmModuleCompiler
             section.WriteName("avidscript.safepoints");
             string payload = string.Join(
                 (char)10,
-                "schema=1",
+                "schema=2",
                 "mode=bounded_counter_v1",
                 $"poll_interval={safepointPlan.Interval}",
                 $"import={WasmCooperativeSafepointPlan.ImportModule}.{WasmCooperativeSafepointPlan.ImportName}",
                 $"loop_poll_blocks={safepointPlan.LoopPollCount}",
                 $"recursive_functions={safepointPlan.RecursiveFunctionCount}",
+                $"site_count={safepointPlan.SiteCount}",
+                $"site_sha256={safepointPlan.SiteSha256}",
                 "coverage=cfg_feedback_edges_and_recursive_entries",
                 $"guest_ir={module.SchemaVersion}/{module.IrVersion}");
             section.WriteBytes(Encoding.UTF8.GetBytes(payload));
@@ -269,13 +284,14 @@ public static class WasmModuleCompiler
         });
     }
 
-    private static void WriteCodeSection(
+    private static int WriteCodeSection(
         WasmBinaryWriter writer,
         GuestModule module,
         WasmModuleLayout layout,
         WasmCooperativeSafepointPlan safepointPlan,
         ICollection<GuestWasmDebugOffset> debugOffsets)
     {
+        int emittedSafepointCount = 0;
         writer.WriteSection(10, section =>
         {
             section.WriteU32(checked((uint)module.Functions.Count));
@@ -287,6 +303,8 @@ public static class WasmModuleCompiler
                         function,
                         layout,
                         safepointPlan).Compile();
+                emittedSafepointCount = checked(
+                    emittedSafepointCount + body.CooperativeSafepointCount);
                 int functionIndex = checked((int)layout.FunctionIndices[function.Id]);
                 foreach (WasmFunctionInstructionOffset offset in body.InstructionOffsets)
                 {
@@ -299,6 +317,7 @@ public static class WasmModuleCompiler
                 section.WriteBytes(body.Bytes);
             }
         });
+        return emittedSafepointCount;
     }
 
     private static void WriteDataSection(

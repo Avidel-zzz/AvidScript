@@ -385,6 +385,23 @@ bool IsValidGuestIrIdentity(const FString& Identity)
 		&& !Identity.EndsWith(TEXT("/"));
 }
 
+bool IsLowercaseSha256(const FString& Value)
+{
+	if (Value.Len() != 64)
+	{
+		return false;
+	}
+	for (const TCHAR Character : Value)
+	{
+		if (!((Character >= TEXT('0') && Character <= TEXT('9'))
+			|| (Character >= TEXT('a') && Character <= TEXT('f'))))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
 bool ParseWasmCustomSection(
 	FAvidScriptWasmLayoutReader& Reader,
 	FAvidScriptWasmCooperativeSafepointProof& OutProof)
@@ -410,8 +427,16 @@ bool ParseWasmCustomSection(
 	}
 	TArray<FString> Lines;
 	Payload.ParseIntoArrayLines(Lines, false);
-	if (Lines.Num() != 8
-		|| !ParseBoundedUnsignedField(Lines[0], TEXT("schema="), 1, 1, OutProof.SchemaVersion)
+	if (Lines.IsEmpty()
+		|| !ParseBoundedUnsignedField(Lines[0], TEXT("schema="), 1, 2, OutProof.SchemaVersion))
+	{
+		return false;
+	}
+	const bool bHasSiteIdentity = OutProof.SchemaVersion == 2;
+	const int32 ExpectedLineCount = bHasSiteIdentity ? 10 : 8;
+	const int32 CoverageLineIndex = bHasSiteIdentity ? 8 : 6;
+	const int32 GuestIrLineIndex = bHasSiteIdentity ? 9 : 7;
+	if (Lines.Num() != ExpectedLineCount
 		|| Lines[1] != TEXT("mode=bounded_counter_v1")
 		|| !ParseBoundedUnsignedField(
 			Lines[2], TEXT("poll_interval="), 1, 65536, OutProof.PollInterval)
@@ -422,18 +447,43 @@ bool ParseWasmCustomSection(
 		|| !ParseBoundedUnsignedField(
 			Lines[5], TEXT("recursive_functions="), 0, MaxWasmLayoutItems,
 			OutProof.RecursiveFunctionCount)
-		|| Lines[6] != TEXT("coverage=cfg_feedback_edges_and_recursive_entries")
-		|| !Lines[7].StartsWith(TEXT("guest_ir="), ESearchCase::CaseSensitive))
+		|| Lines[CoverageLineIndex] !=
+			TEXT("coverage=cfg_feedback_edges_and_recursive_entries")
+		|| !Lines[GuestIrLineIndex].StartsWith(
+			TEXT("guest_ir="), ESearchCase::CaseSensitive))
 	{
 		return false;
 	}
+	if (bHasSiteIdentity)
+	{
+		if (!ParseBoundedUnsignedField(
+				Lines[6], TEXT("site_count="), 0, MaxWasmLayoutItems,
+				OutProof.SiteCount)
+			|| !Lines[7].StartsWith(
+				TEXT("site_sha256="), ESearchCase::CaseSensitive))
+		{
+			return false;
+		}
+		OutProof.SiteSha256 = Lines[7].Mid(
+			FCString::Strlen(TEXT("site_sha256=")));
+		const uint64 DeclaredSiteCount =
+			static_cast<uint64>(OutProof.LoopPollBlockCount)
+			+ static_cast<uint64>(OutProof.RecursiveFunctionCount);
+		if (DeclaredSiteCount != OutProof.SiteCount
+			|| !IsLowercaseSha256(OutProof.SiteSha256))
+		{
+			return false;
+		}
+	}
 	OutProof.Mode = TEXT("bounded_counter_v1");
-	OutProof.GuestIrIdentity = Lines[7].Mid(FCString::Strlen(TEXT("guest_ir=")));
+	OutProof.GuestIrIdentity = Lines[GuestIrLineIndex].Mid(
+		FCString::Strlen(TEXT("guest_ir=")));
 	if (!IsValidGuestIrIdentity(OutProof.GuestIrIdentity))
 	{
 		OutProof = FAvidScriptWasmCooperativeSafepointProof();
 		return false;
 	}
+	OutProof.bHasSiteIdentity = bHasSiteIdentity;
 	OutProof.bPresent = true;
 	return Reader.IsAtEnd();
 }

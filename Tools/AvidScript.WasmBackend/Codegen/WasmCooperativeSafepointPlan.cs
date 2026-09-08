@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using AvidScript.GuestIr;
 
 namespace AvidScript.WasmBackend;
@@ -18,6 +20,7 @@ internal sealed class WasmCooperativeSafepointPlan
 
     private readonly IReadOnlyDictionary<string, IReadOnlySet<string>> loopPollBlocks;
     private readonly IReadOnlySet<string> recursiveFunctions;
+    private readonly IReadOnlyList<string> siteIdentities;
 
     private WasmCooperativeSafepointPlan(
         bool enabled,
@@ -31,6 +34,16 @@ internal sealed class WasmCooperativeSafepointPlan
         recursiveFunctions = inRecursiveFunctions;
         LoopPollCount = loopPollBlocks.Values.Sum(blocks => blocks.Count);
         RecursiveFunctionCount = recursiveFunctions.Count;
+        siteIdentities = loopPollBlocks
+            .SelectMany(pair => pair.Value.Select(
+                blockId => $"edge:{pair.Key}:{blockId}"))
+            .Concat(recursiveFunctions.Select(
+                functionId => $"entry:{functionId}"))
+            .OrderBy(identity => identity, StringComparer.Ordinal)
+            .ToArray();
+        SiteSha256 = Convert.ToHexString(SHA256.HashData(
+            Encoding.UTF8.GetBytes(string.Join('\n', siteIdentities))))
+            .ToLowerInvariant();
     }
 
     public bool Enabled { get; }
@@ -40,6 +53,32 @@ internal sealed class WasmCooperativeSafepointPlan
     public int LoopPollCount { get; }
 
     public int RecursiveFunctionCount { get; }
+
+    public int SiteCount => siteIdentities.Count;
+
+    public string SiteSha256 { get; }
+
+    public WasmCooperativeSafepointAttestation? CreateAttestation(
+        int emittedPollCount)
+    {
+        if (!Enabled)
+        {
+            return null;
+        }
+        if (emittedPollCount != SiteCount)
+        {
+            throw new InvalidOperationException(
+                $"Cooperative safepoint emission count differs from the plan: planned={SiteCount} emitted={emittedPollCount}.");
+        }
+        return new WasmCooperativeSafepointAttestation(
+            2,
+            Interval,
+            LoopPollCount,
+            RecursiveFunctionCount,
+            SiteCount,
+            SiteSha256,
+            true);
+    }
 
     public static WasmCooperativeSafepointPlan Create(
         GuestModule module,

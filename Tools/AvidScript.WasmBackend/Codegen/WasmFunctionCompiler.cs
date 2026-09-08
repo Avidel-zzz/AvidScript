@@ -71,11 +71,13 @@ internal sealed class WasmFunctionCompiler
     {
         WasmBinaryWriter body = new();
         List<WasmFunctionInstructionOffset> instructionOffsets = new();
+        int cooperativeSafepointCount = 0;
         WriteLocals(body);
         WriteFramePrologue(body);
         if (safepointPlan.PollAtFunctionEntry(function.Id))
         {
             WriteCooperativeSafepointPoll(body);
+            ++cooperativeSafepointCount;
         }
         Dictionary<string, int> blockIndices = function.Blocks
             .Select((block, index) => (block.Id, Index: index))
@@ -110,6 +112,7 @@ internal sealed class WasmFunctionCompiler
             if (safepointPlan.PollBeforeTerminator(function.Id, block.Id))
             {
                 WriteCooperativeSafepointPoll(body);
+                ++cooperativeSafepointCount;
             }
             instructionOffsets.Add(new WasmFunctionInstructionOffset(
                 GuestDebugIdentity.Terminator(function.Id, block.Id),
@@ -122,7 +125,10 @@ internal sealed class WasmFunctionCompiler
         body.WriteByte(0x0b);
         body.WriteByte(0x00);
         body.WriteByte(0x0b);
-        return new WasmFunctionCompilationResult(body.ToArray(), instructionOffsets);
+        return new WasmFunctionCompilationResult(
+            body.ToArray(),
+            instructionOffsets,
+            cooperativeSafepointCount);
     }
 
     private void WriteCooperativeSafepointPoll(WasmBinaryWriter body)

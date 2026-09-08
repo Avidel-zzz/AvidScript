@@ -114,19 +114,33 @@ internal static class WasmModuleCompilerTests
             "implicit cooperative import should participate in function indices");
         string proof = info.CustomSections.Single(
             item => item.Name == "avidscript.safepoints").PayloadText;
-        Assert(proof.Contains("schema=1", StringComparison.Ordinal)
+        Assert(proof.Contains("schema=2", StringComparison.Ordinal)
             && proof.Contains("mode=bounded_counter_v1", StringComparison.Ordinal)
             && proof.Contains("poll_interval=64", StringComparison.Ordinal)
             && proof.Contains("loop_poll_blocks=1", StringComparison.Ordinal)
             && proof.Contains("recursive_functions=1", StringComparison.Ordinal)
+            && proof.Contains("site_count=2", StringComparison.Ordinal)
+            && proof.Contains("site_sha256=", StringComparison.Ordinal)
             && proof.Contains(
                 "coverage=cfg_feedback_edges_and_recursive_entries",
                 StringComparison.Ordinal),
             "cooperative proof should describe bounded CFG coverage");
+        WasmCooperativeSafepointAttestation? attestation =
+            first.CooperativeSafepointAttestation;
+        Assert(attestation is not null
+            && attestation.Verified
+            && attestation.SchemaVersion == 2
+            && attestation.SiteCount == 2
+            && attestation.SiteSha256.Length == 64
+            && proof.Contains(
+                $"site_sha256={attestation.SiteSha256}",
+                StringComparison.Ordinal),
+            "cooperative compilation should attest the emitted site plan");
 
         WasmCompilationResult defaultResult = WasmModuleCompiler.Compile(module);
         WasmArtifactInfo defaultInfo = WasmArtifactInspector.Inspect(defaultResult.Bytes);
         Assert(defaultResult.Succeeded
+            && defaultResult.CooperativeSafepointAttestation is null
             && defaultInfo.Imports.Count == 0
             && defaultInfo.CustomSections.All(
                 item => item.Name != "avidscript.safepoints"),
