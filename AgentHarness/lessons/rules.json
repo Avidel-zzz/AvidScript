@@ -392,7 +392,7 @@
       "summary": "同一补丁先新增 helper 再用宽泛首个匹配替换调用点，可能误改 helper 自身。",
       "prevention": "新增 helper 或修改重复代码块时，每个实例使用独立补丁，并让同一 hunk 包含可验证的相邻类型或分支特征；只有 `@@` 标题提示不算唯一上下文。补丁完成立即用 rg 或定点回读列出全部调用和分支，检查目标与非目标实例后再进入构建。",
       "source": "observed:2026-08-31-P60.A1",
-      "last_observed": "2026-09-08 P65.D23 两个相似 prepared wrapper 的宽泛 hunk 先命中第二个实例；定点回读后按相邻 i32/f32 特征拆分修正，未进入构建。此前 P60.A1、P60.C1a 与 P65.D10 已发生同类非唯一锚点问题"
+      "last_observed": "2026-09-09 P65.D31.C3.6 新增 execution guard helper 后，宽泛 disarm 替换误命中 helper 本体并形成自递归；构建前由 rg 定点回读发现并改回显式 watchdog disarm。此前 P65.D23/P60.A1/P60.C1a/P65.D10 已发生同类非唯一锚点问题"
     },
     {
       "id": "powershell-quote-git-revisions-with-braces",
