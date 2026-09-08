@@ -132,6 +132,14 @@
       "last_observed": "2026-09-08 P65.D29 micro formal 的 calibration 与 5 个 Editor 进程各自输出完整 UE 启动日志，多次产生约 9k-11k token 截断；采样成功但上下文被无效占用"
     },
     {
+      "id": "benchmark-host-crash-is-classified-before-retry",
+      "tags": ["benchmark", "crash", "evidence"],
+      "summary": "正式 benchmark 的宿主启动崩溃不能直接归因为被测插件，也不能拼接部分成功进程。",
+      "prevention": "保留失败 attempt，先从唯一进程日志核对是否进入 workload、是否存在 AvidScript/VM 栈帧及 exit code；宿主启动或 teardown 的外部栈可用完全相同参数创建一个新的 immutable attempt 重试。任何失败 attempt 的部分样本不得与重试结果拼接。",
+      "source": "observed:2026-09-08-P65.D29",
+      "last_observed": "2026-09-08 P65.D29 physical formal 第 5 个 Editor 以 0xC0000005 退出；日志显示 151 个 UStaticMesh async PostLoad/Chaos cooking data-race 错误，未进入 AvidScript workload，前 4 个结果保留但不计为正式证据"
+    },
+    {
       "id": "search-output-is-scoped-before-execution",
       "tags": ["rg", "search", "context"],
       "summary": "跨模块宽检索会产生截断输出，既浪费上下文也可能掩盖真正残留引用。",
