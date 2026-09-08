@@ -241,7 +241,8 @@ private:
 		const FAvidScriptVmBackendSelection& Selection,
 		EAvidScriptVmArtifactTrust ArtifactTrust =
 			EAvidScriptVmArtifactTrust::Untrusted,
-		bool bCooperativeSafepointProofVerified = false) const;
+		bool bCooperativeSafepointProofVerified = false,
+		bool bSerializedArtifactProcessAuthorized = false) const;
 	bool ValidateExpectedOwner(
 		const FAvidScriptWasmReloadManifest& Manifest,
 		FAvidScriptWasmReloadResult& OutResult) const;

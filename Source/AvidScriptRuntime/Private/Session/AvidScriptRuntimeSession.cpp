@@ -143,7 +143,8 @@ void SetSessionFaultedFailure(
 FAvidScriptVmLoadConfig::FExecutionBudget MakeSessionExecutionBudget(
 	const FAvidScriptVmBackendSelection& Selection,
 	const EAvidScriptVmArtifactTrust ArtifactTrust,
-	const bool bCooperativeSafepointProofVerified)
+	const bool bCooperativeSafepointProofVerified,
+	const bool bSerializedArtifactProcessAuthorized)
 {
 	FAvidScriptVmLoadConfig::FExecutionBudget Budget;
 	Budget.MaxHostCallsPerEntry = 100000;
@@ -159,12 +160,19 @@ FAvidScriptVmLoadConfig::FExecutionBudget MakeSessionExecutionBudget(
 			false;
 #endif
 		const bool bUseCooperativeContainment =
+			bCooperativeSafepointProofVerified
+			&& Selection.ExecutionMode == EAvidScriptVmExecutionMode::Aot
+			&& Selection.ArtifactFormat ==
+				EAvidScriptVmArtifactFormat::WasmtimeSerialized
+			&& (bUseVerifiedPackageFastContainment
+				|| bSerializedArtifactProcessAuthorized);
+		const bool bUseFastContainment =
 			bUseVerifiedPackageFastContainment
-			&& bCooperativeSafepointProofVerified;
-		Budget.MaxHostCallsPerEntry = bUseVerifiedPackageFastContainment
+			|| bUseCooperativeContainment;
+		Budget.MaxHostCallsPerEntry = bUseFastContainment
 			? 0
 			: 100000;
-		Budget.FuelPerEntry = bUseVerifiedPackageFastContainment
+		Budget.FuelPerEntry = bUseFastContainment
 			? 0
 			: 50000000;
 		Budget.EpochDeadlineTicks = bUseCooperativeContainment ? 0 : 1;
@@ -218,7 +226,8 @@ FAvidScriptVmLoadConfig::FExecutionBudget
 FAvidScriptRuntimeSession::ResolveExecutionBudget(
 	const FAvidScriptVmBackendSelection& Selection,
 	const EAvidScriptVmArtifactTrust ArtifactTrust,
-	const bool bCooperativeSafepointProofVerified) const
+	const bool bCooperativeSafepointProofVerified,
+	const bool bSerializedArtifactProcessAuthorized) const
 {
 #if WITH_DEV_AUTOMATION_TESTS
 	if (ExecutionBudgetOverrideForTesting.IsSet())
@@ -229,7 +238,8 @@ FAvidScriptRuntimeSession::ResolveExecutionBudget(
 	return MakeSessionExecutionBudget(
 		Selection,
 		ArtifactTrust,
-		bCooperativeSafepointProofVerified);
+		bCooperativeSafepointProofVerified,
+		bSerializedArtifactProcessAuthorized);
 }
 
 void FAvidScriptRuntimeSession::SuspendForApplicationLifecycle(
@@ -2049,11 +2059,20 @@ bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 	FAvidScriptWasmSmokeResult RuntimeResult;
 	FString SupplementalImportError;
 	FString BudgetError;
+	const bool bSerializedArtifactProcessAuthorized =
+		Artifact.ArtifactTrust != EAvidScriptVmArtifactTrust::VerifiedPackage
+		&& Artifact.VmArtifact.bCooperativeSafepointProofVerified
+		&& Artifact.VmArtifact.ArtifactFormat ==
+			EAvidScriptVmArtifactFormat::WasmtimeSerialized
+		&& AuthorizeAvidScriptVmArtifact(
+			Artifact.VmArtifact.AttestationId,
+			Artifact.VmArtifact);
 	if (!CandidateRuntime->ConfigureExecutionBudget(
 			ResolveExecutionBudget(
 				Artifact.BackendSelection,
 				Artifact.ArtifactTrust,
-				Artifact.VmArtifact.bCooperativeSafepointProofVerified),
+				Artifact.VmArtifact.bCooperativeSafepointProofVerified,
+				bSerializedArtifactProcessAuthorized),
 			BudgetError))
 	{
 		SetReloadFailure(

@@ -4,16 +4,24 @@
 #include "AvidScriptEditorCSharpBindingEmitter.h"
 #include "AvidScriptEditorCSharpBindingEmitterTestTypes.h"
 #include "AvidScriptHash.h"
+#include "AvidScriptObjectRegistry.h"
 #include "AvidScriptRuntimeArtifact.h"
 #include "AvidScriptRuntimeSession.h"
 #include "AvidScriptWasmRuntime.h"
 #include "CSharpBuild/AvidScriptEditorCSharpBuildInvoker.h"
 #include "CSharpBuild/AvidScriptEditorVmArtifactPublisher.h"
+#include "Packages/AvidScriptModulePackage.h"
 
 #include "Dom/JsonObject.h"
+#include "Components/SceneComponent.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformProcess.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 
@@ -36,6 +44,60 @@ bool LoadAvidScriptCSharpBuildTestJsonObject(const FString& Path, TSharedPtr<FJs
 
 	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonText);
 	return FJsonSerializer::Deserialize(Reader, OutObject) && OutObject.IsValid();
+}
+
+FString QuoteAvidScriptPowerShellLiteral(FString Value)
+{
+	Value.ReplaceInline(TEXT("'"), TEXT("''"), ESearchCase::CaseSensitive);
+	return TEXT("'") + Value + TEXT("'");
+}
+
+bool CreateAvidScriptCSharpPackageTestOwner(
+	UWorld*& OutWorld,
+	AActor*& OutOwner)
+{
+	OutWorld = nullptr;
+	OutOwner = nullptr;
+	if (GEngine == nullptr)
+	{
+		return false;
+	}
+
+	const FName WorldName(*(
+		TEXT("AvidScriptCSharpPackageWorld_")
+		+ FGuid::NewGuid().ToString(EGuidFormats::Digits)));
+	OutWorld = UWorld::CreateWorld(EWorldType::Game, false, WorldName);
+	if (OutWorld == nullptr)
+	{
+		return false;
+	}
+	FWorldContext& WorldContext =
+		GEngine->CreateNewWorldContext(EWorldType::Game);
+	WorldContext.SetCurrentWorld(OutWorld);
+	OutOwner = OutWorld->SpawnActor<AActor>();
+	if (OutOwner == nullptr)
+	{
+		return false;
+	}
+	USceneComponent* const RootComponent =
+		NewObject<USceneComponent>(OutOwner, TEXT("AvidScriptRoot"));
+	OutOwner->SetRootComponent(RootComponent);
+	RootComponent->RegisterComponent();
+	return true;
+}
+
+void DestroyAvidScriptCSharpPackageTestOwner(UWorld*& World)
+{
+	if (World == nullptr)
+	{
+		return;
+	}
+	if (GEngine != nullptr)
+	{
+		GEngine->DestroyWorldContext(World);
+	}
+	World->DestroyWorld(false);
+	World = nullptr;
 }
 
 FString MakeAvidScriptZeroBindingLifecycleSource()
@@ -186,7 +248,8 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 	Config.BuildScriptPath = FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleBuildScriptPath();
 	Config.ProjectPath = FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleProjectPath();
 	Config.SourcePath = SourcePath;
-	Config.ModuleId = TEXT("csharp_custom_mover");
+	Config.ModuleId = TEXT("test_cooperative_")
+		+ FGuid::NewGuid().ToString(EGuidFormats::Digits).ToLower();
 	Config.ArtifactStem = TEXT("custom_mover");
 	Config.OutputRoot = NormalizeAvidScriptCSharpBuildTestPath(FPaths::Combine(
 		FPaths::ProjectSavedDir(),
@@ -200,6 +263,8 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 	Config.CompilationCacheRoot = NormalizeAvidScriptCSharpBuildTestPath(FPaths::Combine(
 		FPaths::ProjectSavedDir(),
 		TEXT("AvidScript/Tests/P61/A1/CustomMover/CSharpCompilationCache/v1")));
+	Config.bEnableCooperativeSafepoints = true;
+	Config.CooperativeSafepointInterval = 64;
 	IFileManager::Get().DeleteDirectory(*Config.SemanticCacheRoot, false, true);
 	IFileManager::Get().DeleteDirectory(*Config.CompilationCacheRoot, false, true);
 
@@ -218,8 +283,8 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 	TestEqual(TEXT("Cold custom C# profile records a cache miss"), BuildResult.SemanticCacheLookup, FString(TEXT("miss")));
 	TestFalse(TEXT("Cold custom C# profile records a semantic cache key"), BuildResult.SemanticCacheKey.IsEmpty());
 	TestTrue(TEXT("Cold custom C# profile publishes a semantic cache entry"), BuildResult.bSemanticCachePublished);
-	TestEqual(TEXT("Cold custom C# profile records a compilation cache miss"), BuildResult.CompilationCacheLookup, FString(TEXT("miss")));
-	TestTrue(TEXT("Cold custom C# profile publishes a compilation cache entry"), BuildResult.bCompilationCachePublished);
+	TestEqual(TEXT("Cooperative custom C# profile bypasses the compilation cache"), BuildResult.CompilationCacheLookup, FString(TEXT("disabled")));
+	TestFalse(TEXT("Cooperative custom C# profile does not publish a compilation cache entry"), BuildResult.bCompilationCachePublished);
 	TestTrue(
 		TEXT("Custom C# profile records an authorization binding package manifest"),
 		FPaths::FileExists(BuildResult.AuthorizationBindingPackagePath));
@@ -257,6 +322,14 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 		TEXT("Custom C# profile selects the precompiled backend"),
 		BuildResult.VmArtifactSelectedBackend,
 		FString(TEXT("wasmtime.cranelift.precompiled")));
+	TestTrue(
+		TEXT("Custom C# profile publishes cooperative safepoints"),
+		BuildResult.bVmArtifactCooperativeSafepoints);
+	TestTrue(
+		TEXT("Custom C# profile selects epoch-free Wasmtime codegen"),
+		BuildResult.VmArtifactCompilerBuildIdentity.Contains(
+			TEXT(";epoch_interruption=off;"),
+			ESearchCase::CaseSensitive));
 
 	TSharedPtr<FJsonObject> ReportObject;
 	TestTrue(TEXT("Custom C# profile report is valid JSON"), LoadAvidScriptCSharpBuildTestJsonObject(Config.ReportPath, ReportObject));
@@ -364,6 +437,204 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 				7);
 		}
 	}
+
+	const FString CatalogPath =
+		FAvidScriptModulePackageResolver::GetDefaultCatalogPath();
+	const bool bHadCatalog = FPaths::FileExists(CatalogPath);
+	TArray<uint8> CatalogBackup;
+	if (bHadCatalog
+		&& !TestTrue(
+			TEXT("Existing module catalog can be backed up"),
+			FFileHelper::LoadFileToArray(CatalogBackup, *CatalogPath)))
+	{
+		return false;
+	}
+	const FString ModuleRoot = FPaths::Combine(
+		FPaths::GetPath(CatalogPath),
+		Config.ModuleId);
+	ON_SCOPE_EXIT
+	{
+		IFileManager::Get().DeleteDirectory(*ModuleRoot, false, true);
+		if (bHadCatalog)
+		{
+			FFileHelper::SaveArrayToFile(CatalogBackup, *CatalogPath);
+		}
+		else
+		{
+			IFileManager::Get().Delete(*CatalogPath);
+		}
+	};
+
+	const FString PublisherScript = NormalizeAvidScriptCSharpBuildTestPath(FPaths::Combine(
+		FPaths::ProjectPluginsDir(),
+		TEXT("AvidScript/Build/AvidScriptModuleReleasePackage.ps1")));
+	const FString ProjectRoot =
+		NormalizeAvidScriptCSharpBuildTestPath(FPaths::ProjectDir());
+	const FString PublishCommand = FString::Printf(
+		TEXT("& { $ErrorActionPreference = 'Stop'; . %s; ")
+		TEXT("Publish-AvidScriptModuleReleasePackage ")
+		TEXT("-RuntimeManifestPath %s -ProjectRoot %s -ModuleId %s ")
+		TEXT("-Configuration Development -TargetPlatform Win64 | ConvertTo-Json -Compress }"),
+		*QuoteAvidScriptPowerShellLiteral(PublisherScript),
+		*QuoteAvidScriptPowerShellLiteral(Config.ManifestPath),
+		*QuoteAvidScriptPowerShellLiteral(ProjectRoot),
+		*QuoteAvidScriptPowerShellLiteral(Config.ModuleId));
+	const FString PublishArguments =
+		TEXT("-NoProfile -Command \"") + PublishCommand + TEXT("\"");
+	int32 PublishExitCode = INDEX_NONE;
+	FString PublishStdout;
+	FString PublishStderr;
+	const bool bPublishLaunched = FPlatformProcess::ExecProcess(
+		TEXT("pwsh.exe"),
+		*PublishArguments,
+		&PublishExitCode,
+		&PublishStdout,
+		&PublishStderr,
+		*FPaths::GetPath(PublisherScript));
+	if (!TestTrue(
+			TEXT("Cooperative C# package publisher launches"),
+			bPublishLaunched)
+		|| !TestEqual(
+			TEXT("Cooperative C# package publication succeeds"),
+			PublishExitCode,
+			0))
+	{
+		AddError(PublishStdout + TEXT("\n") + PublishStderr);
+		return false;
+	}
+	FString PublishedCatalogText;
+	if (!TestTrue(
+			TEXT("Published module catalog can be read"),
+			FFileHelper::LoadFileToString(PublishedCatalogText, *CatalogPath))
+		|| !TestTrue(
+			TEXT("Published module catalog contains the cooperative module"),
+			PublishedCatalogText.Contains(
+				Config.ModuleId,
+				ESearchCase::CaseSensitive)))
+	{
+		AddError(
+			TEXT("publisher stdout: ")
+			+ PublishStdout
+			+ TEXT("\npublisher stderr: ")
+			+ PublishStderr
+			+ TEXT("\ncatalog: ")
+			+ PublishedCatalogText.Left(2048));
+		return false;
+	}
+
+	FAvidScriptResolvedModulePackage ResolvedPackage;
+	FAvidScriptModuleResolveResult ResolveResult;
+	if (!TestTrue(
+		TEXT("Cooperative C# package resolves from the default catalog"),
+		FAvidScriptModulePackageResolver::ResolveModule(
+			FName(*Config.ModuleId),
+			ResolvedPackage,
+			ResolveResult)))
+	{
+		AddError(
+			ResolveResult.ErrorCategory
+			+ TEXT(": ")
+			+ ResolveResult.ErrorMessage);
+		return false;
+	}
+	TestEqual(
+		TEXT("Editor keeps the mutable default catalog in the development trust domain"),
+		ResolvedPackage.TrustDomain,
+		EAvidScriptModulePackageTrustDomain::DevelopmentCatalog);
+
+	FAvidScriptRuntimeArtifact PublishedArtifact;
+	FAvidScriptRuntimeArtifactLoadResult PublishedLoadResult;
+	if (!TestTrue(
+		TEXT("Cooperative C# package loads through the published module path"),
+		FAvidScriptRuntimeArtifactLoader::LoadPublishedModule(
+			FName(*Config.ModuleId),
+			ResolvedPackage.PackageId,
+			PublishedArtifact,
+			PublishedLoadResult)))
+	{
+		AddError(
+			PublishedLoadResult.CanonicalResult.ErrorCategory
+			+ TEXT(": ")
+			+ PublishedLoadResult.CanonicalResult.ErrorMessage);
+		return false;
+	}
+	TestEqual(
+		TEXT("Editor does not grant persistent trust to a mutable package"),
+		PublishedArtifact.ArtifactTrust,
+		EAvidScriptVmArtifactTrust::Untrusted);
+	TestFalse(
+		TEXT("Process-attested Editor package does not need JIT fallback"),
+		PublishedLoadResult.bFellBackToJit);
+	TestTrue(
+		TEXT("Process-attested Editor package preserves cooperative proof"),
+		PublishedArtifact.VmArtifact.bCooperativeSafepointProofVerified);
+
+	UWorld* OwnerWorld = nullptr;
+	AActor* OwnerActor = nullptr;
+	if (!TestTrue(
+		TEXT("Published package owner fixture is created"),
+		CreateAvidScriptCSharpPackageTestOwner(OwnerWorld, OwnerActor)))
+	{
+		DestroyAvidScriptCSharpPackageTestOwner(OwnerWorld);
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyAvidScriptCSharpPackageTestOwner(OwnerWorld);
+	};
+	FAvidScriptObjectRegistry OwnerRegistry;
+	FAvidScriptObjectHandleResult OwnerRegisterResult;
+	const FAvidScriptObjectHandle OwnerHandle = OwnerRegistry.RegisterObject(
+		OwnerActor,
+		OwnerRegisterResult,
+		false);
+	if (!TestTrue(
+		TEXT("Published package Actor owner registers"),
+		OwnerRegisterResult.bSucceeded))
+	{
+		AddError(OwnerRegisterResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptRuntimeSession PublishedSession;
+	FAvidScriptWasmHostContext PublishedHostContext;
+	PublishedHostContext.ObjectRegistry = &OwnerRegistry;
+	PublishedHostContext.OwnerHandle = OwnerHandle;
+	PublishedHostContext.World = OwnerWorld;
+	PublishedHostContext.ActorWritePolicy =
+		EAvidScriptActorWritePolicy::AllowWrites;
+	PublishedSession.SetHostContext(PublishedHostContext);
+	FAvidScriptWasmReloadResult PublishedSessionResult;
+	if (!TestTrue(
+		TEXT("Published cooperative C# package enters a Runtime Session"),
+		PublishedSession.LoadInitialArtifact(
+			PublishedArtifact,
+			PublishedSessionResult)))
+	{
+		AddError(
+			PublishedSessionResult.ErrorCategory
+			+ TEXT(": ")
+			+ PublishedSessionResult.ErrorMessage);
+		return false;
+	}
+	TestTrue(
+		TEXT("Published cooperative C# package reaches BeginPlay"),
+		PublishedSessionResult.RuntimeResult.bBeginPlayCalled);
+	const FAvidScriptVmLoadConfig::FExecutionBudget& PublishedBudget =
+		PublishedSession.GetLiveRuntimeForTesting()
+			->GetExecutionBudgetForTesting();
+	TestEqual(
+		TEXT("Process-attested cooperative package disables epoch ticks"),
+		PublishedBudget.EpochDeadlineTicks,
+		UINT64_C(0));
+	TestEqual(
+		TEXT("Process-attested cooperative package enables its deadline"),
+		PublishedBudget.CooperativeTimeoutMilliseconds,
+		100u);
+	FAvidScriptWasmSmokeResult PublishedStopResult;
+	TestTrue(
+		TEXT("Published cooperative C# package stops cleanly"),
+		PublishedSession.StopAndUnload(PublishedStopResult));
 
 	FAvidScriptCSharpBindingEmitResult ExplicitPackage;
 	if (!TestTrue(
