@@ -14,6 +14,7 @@ struct FAvidScriptVmOwnedArtifact
 	FString TargetTriple;
 	FString AttestationId;
 	bool bCooperativeSafepointProofVerified = false;
+	FString CooperativeSafepointSiteSha256;
 
 	FAvidScriptVmArtifactView MakeView(
 		EAvidScriptVmArtifactTrust Trust) const
@@ -33,8 +34,24 @@ struct FAvidScriptVmOwnedArtifact
 		View.Trust = Trust;
 		View.bCooperativeSafepointProofVerified =
 			bCooperativeSafepointProofVerified;
+		View.CooperativeSafepointSiteSha256 =
+			CooperativeSafepointSiteSha256;
 		return View;
 	}
+};
+
+struct FAvidScriptVmCooperativeSafepointReceipt
+{
+	int32 ReceiptSchemaVersion = 0;
+	FString GuestIrIdentity;
+	FString CanonicalWasmIdentity;
+	int32 ProofSchemaVersion = 0;
+	uint32 PollInterval = 0;
+	uint32 LoopPollBlockCount = 0;
+	uint32 RecursiveFunctionCount = 0;
+	uint32 SiteCount = 0;
+	FString SiteSha256;
+	bool bVerified = false;
 };
 
 struct FAvidScriptVmArtifactCompileRequest
@@ -44,6 +61,7 @@ struct FAvidScriptVmArtifactCompileRequest
 	FString TargetTriple;
 	bool bConsumeFuel = true;
 	bool bEpochInterruption = true;
+	FAvidScriptVmCooperativeSafepointReceipt CooperativeSafepointReceipt;
 };
 
 struct FAvidScriptVmArtifactCompileResult

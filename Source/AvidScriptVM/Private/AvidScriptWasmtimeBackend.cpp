@@ -742,7 +742,10 @@ public:
 		}
 		if (!CompilerProfile.bEpochInterruption
 			&& (!Artifact.bCooperativeSafepointProofVerified
-				|| !ModuleLayout.CooperativeSafepointProof.bPresent))
+				|| !ModuleLayout.CooperativeSafepointProof.bPresent
+				|| !ModuleLayout.CooperativeSafepointProof.bHasSiteIdentity
+				|| Artifact.CooperativeSafepointSiteSha256 !=
+					ModuleLayout.CooperativeSafepointProof.SiteSha256))
 		{
 			LoadMetrics.RuntimeInitMs = MeasureWasmtimeElapsedMs(RuntimeInitStart);
 			SetWasmtimeError(

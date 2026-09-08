@@ -63,6 +63,15 @@ void AppendWasmtimeString(TArray<uint8>& Bytes, const char* Value)
 	}
 }
 
+void AppendWasmtimeAscii(TArray<uint8>& Bytes, const char* Value)
+{
+	const int32 Length = FCStringAnsi::Strlen(Value);
+	for (int32 Index = 0; Index < Length; ++Index)
+	{
+		Bytes.Add(static_cast<uint8>(Value[Index]));
+	}
+}
+
 void AppendWasmtimeSection(TArray<uint8>& Module, uint8 SectionId, const TArray<uint8>& Payload)
 {
 	Module.Add(SectionId);
@@ -145,6 +154,37 @@ TArray<uint8> BuildWasmtimeLifecycleFixture()
 	AppendWasmtimeU32Leb(Code, static_cast<uint32>(GrowBody.Num()));
 	Code.Append(GrowBody);
 	AppendWasmtimeSection(Module, 10, Code);
+	return Module;
+}
+
+TArray<uint8> BuildWasmtimeCooperativeSafepointFixture()
+{
+	TArray<uint8> Module = MakeWasmtimeModule();
+	TArray<uint8> ProofSection;
+	AppendWasmtimeString(ProofSection, "avidscript.safepoints");
+	AppendWasmtimeAscii(
+		ProofSection,
+		"schema=2\n"
+		"mode=bounded_counter_v1\n"
+		"poll_interval=64\n"
+		"import=avidscript.avid_cooperative_safepoint_poll\n"
+		"loop_poll_blocks=0\n"
+		"recursive_functions=0\n"
+		"site_count=0\n"
+		"site_sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n"
+		"coverage=cfg_feedback_edges_and_recursive_entries\n"
+		"guest_ir=2/1.1");
+	AppendWasmtimeSection(Module, 0, ProofSection);
+
+	const TArray<uint8> Types = { 1, 0x60, 0, 0 };
+	AppendWasmtimeSection(Module, 1, Types);
+	TArray<uint8> Imports;
+	AppendWasmtimeU32Leb(Imports, 1);
+	AppendWasmtimeString(Imports, "avidscript");
+	AppendWasmtimeString(Imports, "avid_cooperative_safepoint_poll");
+	Imports.Add(0x00);
+	AppendWasmtimeU32Leb(Imports, 0);
+	AppendWasmtimeSection(Module, 2, Imports);
 	return Module;
 }
 
@@ -1951,7 +1991,7 @@ bool FAvidScriptVmWasmtimeArtifactCompilerTest::RunTest(
 	TestEqual(
 		TEXT("trusted cooperative compile rejection category"),
 		TrustedResult.Error.Category,
-		FString(TEXT("cooperative_safepoint_verifier_required")));
+		FString(TEXT("cooperative_safepoint_proof_invalid")));
 	TestFalse(
 		TEXT("rejected artifact cannot claim a verified safepoint proof"),
 		TrustedResult.Artifact.bCooperativeSafepointProofVerified);
@@ -1994,6 +2034,61 @@ bool FAvidScriptVmWasmtimeArtifactCompilerTest::RunTest(
 		TEXT("unverified cooperative artifact rejection category"),
 		LoadError.Category,
 		FString(TEXT("artifact_safepoint_proof_invalid")));
+
+	const TArray<uint8> CooperativeBytecode =
+		BuildWasmtimeCooperativeSafepointFixture();
+	FAvidScriptVmArtifactCompileRequest VerifiedTrustedRequest = TrustedRequest;
+	VerifiedTrustedRequest.CanonicalWasmBytes = CooperativeBytecode;
+	VerifiedTrustedRequest.CooperativeSafepointReceipt.ReceiptSchemaVersion = 1;
+	VerifiedTrustedRequest.CooperativeSafepointReceipt.GuestIrIdentity =
+		FString::ChrN(64, TEXT('b'));
+	VerifiedTrustedRequest.CooperativeSafepointReceipt.CanonicalWasmIdentity =
+		FAvidScriptHash::Sha256Hex(CooperativeBytecode);
+	VerifiedTrustedRequest.CooperativeSafepointReceipt.ProofSchemaVersion = 2;
+	VerifiedTrustedRequest.CooperativeSafepointReceipt.PollInterval = 64;
+	VerifiedTrustedRequest.CooperativeSafepointReceipt.SiteSha256 =
+		TEXT("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+	VerifiedTrustedRequest.CooperativeSafepointReceipt.bVerified = true;
+	FAvidScriptVmArtifactCompileResult VerifiedTrustedResult;
+	if (!TestTrue(
+		TEXT("matching schema 2 receipt enables trusted cooperative compilation"),
+		CompileAvidScriptVmArtifact(
+			VerifiedTrustedRequest,
+			VerifiedTrustedResult)))
+	{
+		AddError(
+			VerifiedTrustedResult.Error.Category
+			+ TEXT(": ")
+			+ VerifiedTrustedResult.Error.Details);
+		return false;
+	}
+	TestTrue(
+		TEXT("trusted cooperative artifact carries verified proof state"),
+		VerifiedTrustedResult.Artifact.bCooperativeSafepointProofVerified);
+	TestEqual(
+		TEXT("trusted cooperative artifact binds the site identity"),
+		VerifiedTrustedResult.Artifact.CooperativeSafepointSiteSha256,
+		VerifiedTrustedRequest.CooperativeSafepointReceipt.SiteSha256);
+	TUniquePtr<IAvidScriptVmBackend> VerifiedTrustedBackend =
+		CreateWasmtimePrecompiledBackendForTest(LoadError);
+	if (!TestNotNull(
+		TEXT("verified trusted cooperative backend is created"),
+		VerifiedTrustedBackend.Get()))
+	{
+		return false;
+	}
+	if (!TestTrue(
+		TEXT("verified schema 2 artifact loads with the trusted profile"),
+		VerifiedTrustedBackend->LoadArtifact(
+			VerifiedTrustedResult.Artifact.MakeView(
+				EAvidScriptVmArtifactTrust::VerifiedPackage),
+			TEXT("wasmtime_artifact_compiler_verified_cooperative"),
+			TrustedConfig,
+			LoadError)))
+	{
+		AddError(LoadError.Category + TEXT(": ") + LoadError.Details);
+		return false;
+	}
 
 	FAvidScriptVmArtifactCompileResult CachedResult;
 	if (!TestTrue(

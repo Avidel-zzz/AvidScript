@@ -86,6 +86,7 @@ struct FAvidScriptVmArtifactView
 	FString TargetTriple;
 	EAvidScriptVmArtifactTrust Trust = EAvidScriptVmArtifactTrust::Untrusted;
 	bool bCooperativeSafepointProofVerified = false;
+	FString CooperativeSafepointSiteSha256;
 
 	static FAvidScriptVmArtifactView FromWasmBytecode(
 		TArrayView<const uint8> WasmBytes,

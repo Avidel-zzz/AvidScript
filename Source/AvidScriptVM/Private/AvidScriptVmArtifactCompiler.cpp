@@ -5,6 +5,7 @@
 #include "AvidScriptVmDiagnosticsInternal.h"
 #include "AvidScriptWasmtimeApi.h"
 #include "AvidScriptWasmtimeRuntimeSupport.h"
+#include "AvidScriptWasmModuleLayout.h"
 
 #include "Containers/StringConv.h"
 #include "HAL/CriticalSection.h"
@@ -38,6 +39,7 @@ struct FAvidScriptVmArtifactAttestation
 	EAvidScriptVmArtifactFormat ArtifactFormat =
 		EAvidScriptVmArtifactFormat::WasmBytecode;
 	bool bCooperativeSafepointProofVerified = false;
+	FString CooperativeSafepointSiteSha256;
 	uint64 LastAccess = 0;
 };
 
@@ -90,6 +92,8 @@ FString RegisterArtifactAttestationLocked(
 	Attestation.ArtifactFormat = Artifact.ArtifactFormat;
 	Attestation.bCooperativeSafepointProofVerified =
 		Artifact.bCooperativeSafepointProofVerified;
+	Attestation.CooperativeSafepointSiteSha256 =
+		Artifact.CooperativeSafepointSiteSha256;
 	Attestation.LastAccess = NextArtifactAccessSequence();
 	return Attestation.Id;
 }
@@ -146,6 +150,75 @@ FString MakeArtifactCacheKey(
 		*RuntimeInfo.RuntimeBuildIdentity,
 		*RuntimeInfo.TargetTriple);
 }
+
+bool IsArtifactReceiptLowercaseSha256(const FString& Value)
+{
+	if (Value.Len() != 64)
+	{
+		return false;
+	}
+	for (const TCHAR Character : Value)
+	{
+		if (!((Character >= TEXT('0') && Character <= TEXT('9'))
+			|| (Character >= TEXT('a') && Character <= TEXT('f'))))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+bool ValidateCooperativeSafepointReceipt(
+	const FAvidScriptVmArtifactCompileRequest& Request,
+	const FString& CanonicalIdentity,
+	FString& OutError)
+{
+	const FAvidScriptVmCooperativeSafepointReceipt& Receipt =
+		Request.CooperativeSafepointReceipt;
+	FAvidScriptWasmModuleLayout Layout;
+	if (Receipt.ReceiptSchemaVersion != 1
+		|| !Receipt.bVerified
+		|| !IsArtifactReceiptLowercaseSha256(Receipt.GuestIrIdentity)
+		|| Receipt.CanonicalWasmIdentity != CanonicalIdentity
+		|| Receipt.ProofSchemaVersion != 2
+		|| Receipt.PollInterval == 0
+		|| Receipt.PollInterval > 65536
+		|| !IsArtifactReceiptLowercaseSha256(Receipt.SiteSha256)
+		|| static_cast<uint64>(Receipt.LoopPollBlockCount)
+			+ static_cast<uint64>(Receipt.RecursiveFunctionCount)
+			!= Receipt.SiteCount)
+	{
+		OutError = TEXT("The cooperative safepoint receipt has an invalid identity or schema.");
+		return false;
+	}
+
+	FString LayoutError;
+	if (!InspectAvidScriptWasmModuleLayout(
+			Request.CanonicalWasmBytes,
+			Layout,
+			LayoutError))
+	{
+		OutError = FString::Printf(
+			TEXT("The cooperative canonical WASM layout is invalid: %s"),
+			*LayoutError);
+		return false;
+	}
+	const FAvidScriptWasmCooperativeSafepointProof& Proof =
+		Layout.CooperativeSafepointProof;
+	if (!Proof.bPresent
+		|| !Proof.bHasSiteIdentity
+		|| Proof.SchemaVersion != static_cast<uint32>(Receipt.ProofSchemaVersion)
+		|| Proof.PollInterval != Receipt.PollInterval
+		|| Proof.LoopPollBlockCount != Receipt.LoopPollBlockCount
+		|| Proof.RecursiveFunctionCount != Receipt.RecursiveFunctionCount
+		|| Proof.SiteCount != Receipt.SiteCount
+		|| Proof.SiteSha256 != Receipt.SiteSha256)
+	{
+		OutError = TEXT("The cooperative safepoint receipt differs from the canonical WASM proof.");
+		return false;
+	}
+	return true;
+}
 } // namespace
 
 void AvidScriptVmDiagnosticsInternal::CaptureArtifactMemory(
@@ -168,6 +241,8 @@ void AvidScriptVmDiagnosticsInternal::CaptureArtifactMemory(
 		OutSnapshot.ArtifactCacheAllocatedBytes += Artifact.CompilerBuildIdentity.GetAllocatedSize();
 		OutSnapshot.ArtifactCacheAllocatedBytes += Artifact.TargetTriple.GetAllocatedSize();
 		OutSnapshot.ArtifactCacheAllocatedBytes += Artifact.AttestationId.GetAllocatedSize();
+		OutSnapshot.ArtifactCacheAllocatedBytes +=
+			Artifact.CooperativeSafepointSiteSha256.GetAllocatedSize();
 	}
 	OutSnapshot.AttestationAllocatedBytes = GAttestationRegistry.GetAllocatedSize();
 	for (const FAvidScriptVmArtifactAttestation& Attestation : GAttestationRegistry)
@@ -177,6 +252,8 @@ void AvidScriptVmDiagnosticsInternal::CaptureArtifactMemory(
 		OutSnapshot.AttestationAllocatedBytes += Attestation.CanonicalWasmIdentity.GetAllocatedSize();
 		OutSnapshot.AttestationAllocatedBytes += Attestation.CompilerBuildIdentity.GetAllocatedSize();
 		OutSnapshot.AttestationAllocatedBytes += Attestation.TargetTriple.GetAllocatedSize();
+		OutSnapshot.AttestationAllocatedBytes +=
+			Attestation.CooperativeSafepointSiteSha256.GetAllocatedSize();
 	}
 }
 
@@ -204,15 +281,6 @@ bool CompileAvidScriptVmArtifact(
 			OutResult,
 			TEXT("invalid_artifact"),
 			TEXT("Canonical WASM bytes must be present."),
-			StartSeconds);
-		return false;
-	}
-	if (!Request.bEpochInterruption)
-	{
-		SetCompileError(
-			OutResult,
-			TEXT("cooperative_safepoint_verifier_required"),
-			TEXT("Epoch-free artifact compilation remains disabled until the canonical WASM safepoint structure is independently verified."),
 			StartSeconds);
 		return false;
 	}
@@ -260,6 +328,22 @@ bool CompileAvidScriptVmArtifact(
 
 	const FString CanonicalIdentity =
 		FAvidScriptHash::Sha256Hex(Request.CanonicalWasmBytes);
+	FString CooperativeSafepointError;
+	const bool bCooperativeSafepointProofVerified =
+		!Request.bEpochInterruption
+		&& ValidateCooperativeSafepointReceipt(
+			Request,
+			CanonicalIdentity,
+			CooperativeSafepointError);
+	if (!Request.bEpochInterruption && !bCooperativeSafepointProofVerified)
+	{
+		SetCompileError(
+			OutResult,
+			TEXT("cooperative_safepoint_proof_invalid"),
+			CooperativeSafepointError,
+			StartSeconds);
+		return false;
+	}
 	const FString CacheKey = MakeArtifactCacheKey(
 		Request,
 		CanonicalIdentity,
@@ -336,6 +420,12 @@ bool CompileAvidScriptVmArtifact(
 	CompiledArtifact.CanonicalWasmIdentity = CanonicalIdentity;
 	CompiledArtifact.CompilerBuildIdentity = RuntimeInfo.RuntimeBuildIdentity;
 	CompiledArtifact.TargetTriple = RuntimeInfo.TargetTriple;
+	CompiledArtifact.bCooperativeSafepointProofVerified =
+		bCooperativeSafepointProofVerified;
+	CompiledArtifact.CooperativeSafepointSiteSha256 =
+		bCooperativeSafepointProofVerified
+			? Request.CooperativeSafepointReceipt.SiteSha256
+			: FString();
 
 	avidscript_wasmtime_serialized_bytes_delete(SerializedBytes);
 	avidscript_wasmtime_engine_delete(Engine);
@@ -404,7 +494,9 @@ bool AuthorizeAvidScriptVmArtifact(
 				&& Attestation.TargetTriple == Artifact.TargetTriple
 				&& Attestation.ArtifactFormat == Artifact.ArtifactFormat
 				&& Attestation.bCooperativeSafepointProofVerified ==
-					Artifact.bCooperativeSafepointProofVerified;
+					Artifact.bCooperativeSafepointProofVerified
+				&& Attestation.CooperativeSafepointSiteSha256 ==
+					Artifact.CooperativeSafepointSiteSha256;
 			if (bAuthorized)
 			{
 				Attestation.LastAccess = NextArtifactAccessSequence();
