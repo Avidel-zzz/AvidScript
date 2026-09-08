@@ -28,27 +28,28 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 
 ## 现在可以做什么
 
-更新于 **2026-09-08**。已跑通 **C# → WASM → UE 事件与 API → Win64 打包运行**，
+更新于 **2026-09-09**。已跑通 **C# → WASM → UE 事件与 API → Win64 打包运行**，
 可开始尝试小型玩法 Demo，不需要 `.avid`。**P64 正式 Gate 与 P65.C Shipping 发布 Gate 已完成；
 当前仍不是完整 UE/.NET 替代层。**
 
 | 能力 | 已实现内容 |
 | --- | --- |
-| C# 游戏逻辑 | `BeginPlay/Tick/EndPlay`、Timer、Overlap、Gameplay Event；事件型脚本可省略 Tick，Startup Scenario 自动挂载与回滚 |
+| C# 游戏逻辑 | `BeginPlay/Tick/EndPlay`、Timer、Overlap、Gameplay Event；事件型脚本可省略 Tick，Startup Scenario 自动挂载与回滚；cooperative Wasmtime AOT 已在实际 Shipping Game 闭环 |
 | UE API 与类型 | 从 Reflection/Profile 生成项目 `UFUNCTION/UPROPERTY`、Interface 和 Blueprint 接口；支持 `UObject/AActor`、`FVector/FTransform`、固定 `USTRUCT`、`FText` 与受支持的递归容器、Set/Map |
 | C# 定义 UE 类型 | Actor、Component、World/GameInstance Subsystem，含继承、override、属性、函数与默认参数 |
 | UI 与存档 | C# 驱动 UMG 按钮/文本、SaveGame 跨进程读回、存取失败保护；切图后恢复存档。Development/Shipping 包内 AOT 存取已通过，Development 样例已有人工界面/点击反馈 |
 | 异步与委托 | 受控 `async/await`、Delay/NextTick、异步加载、Latent、AsyncAction；单播/多播、受支持签名的 `return/ref/out`、独立 UObject 订阅与回调来源查询 |
 | Blueprint 与联机 | callable/event 双向交互；Server/Client/NetMulticast RPC、属性复制与 RepNotify，dedicated/listen 多进程验证 |
 | 热重载与生命周期 | 方法体替换、持久字段迁移、失败候选回滚；存取可穿插重载，退出时取消异步并解绑事件；ObjectHandle 与 Session 隔离 |
-| 构建与发布 | Wasmtime 45 Win64 JIT/AOT、WAMR 兼容后端；内容寻址模块、Generated Type 配置隔离、Development/Shipping BuildCookRun；可重复 source package、原子安装/修复、兼容诊断与分层 Release Gate；Android arm64 交叉 AOT |
+| 构建与发布 | Wasmtime 45 Win64 JIT/AOT、WAMR 兼容后端；内容寻址模块、Generated Type 配置隔离、Development/Shipping BuildCookRun；Win64 cooperative 安全点编译、证明与 CookedPackage 信任闭环；可重复 source package、原子安装/修复、兼容诊断与分层 Release Gate；Android arm64 交叉 AOT |
 | IDE 与诊断 | 增量缓存、persistent Worker、`.slnx`/WASI 工作区；源码映射、跨层栈、受控断点/步进与只读变量；typed Host 错误保留具体分类、原因和 import 身份；UE Trace 和 Profiler 导出 |
 
 直接看 C# 样例：[收集玩法](Samples/CSharp/PickupRush/README.md) ·
 [UI/存档](Samples/CSharp/UiSaveDemo/README.md)（[源码](Samples/CSharp/UiSaveDemo/UiSaveDemoScript.cs)）·
 [项目 API](Samples/CSharp/TypedProjectApi/README.md) · [联机](Samples/CSharp/NetworkTopology/README.md)。
 
-**近期交付：** [Development/Shipping 包内 UI/存档](Docs/Phase64/P64.D_Packaged_UI.md)、
+**近期交付：** [Win64 Shipping cooperative C# 闭环](Docs/Phase65/P65.D31_Wasmtime_Codegen_Attribution.md)、
+[Development/Shipping 包内 UI/存档](Docs/Phase64/P64.D_Packaged_UI.md)、
 [包内 World 生命周期门槛](Docs/Phase64/P64.D_Packaged_World_Soak.md)、两次 Editor 一小时切图、
 [分配栈诊断](Docs/Phase64/P64.D_Native_Allocation_Tracing.md)、[调用生命周期修复](Docs/Phase64/P64.D_Invocation_Lifetime.md)
 与[类型化 Host 结构化诊断](Docs/Phase64/P64.D_Typed_Host_Diagnostics.md)。
