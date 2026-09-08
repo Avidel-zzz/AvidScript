@@ -593,6 +593,8 @@ struct FPreparedSelfI32Context
 	int32 DirectCallCount = 0;
 	int32 LastValue = 0;
 	int32 Bias = 0;
+	EAvidScriptVmTypedHostStatus DirectStatus =
+		EAvidScriptVmTypedHostStatus::Succeeded;
 };
 
 EAvidScriptVmTypedHostStatus InvokePreparedSelfI32ForTest(
@@ -629,6 +631,10 @@ int32 InvokePreparedDirectSelfI32ForTest(
 	}
 	++Prepared->DirectCallCount;
 	Prepared->LastValue = Value;
+	if (Prepared->DirectStatus != EAvidScriptVmTypedHostStatus::Succeeded)
+	{
+		return static_cast<int32>(Prepared->DirectStatus);
+	}
 	*OutValue = SelfSlot + SelfGeneration + Value + Prepared->Bias;
 	return static_cast<int32>(EAvidScriptVmTypedHostStatus::Succeeded);
 }
@@ -1146,6 +1152,48 @@ bool FAvidScriptVmWasmtimeTypedHostTest::RunTest(const FString& Parameters)
 		TEXT("prepared unary int32 forwards its value"),
 		PreparedUnaryContext.LastValue,
 		4);
+
+	FAvidScriptVmError DirectRejectedError;
+	TUniquePtr<IAvidScriptVmBackend> DirectRejectedBackend =
+		CreateTypedWasmtimeBackend(DirectRejectedError);
+	FPreparedSelfI32Context DirectRejectedContext;
+	DirectRejectedContext.DirectStatus =
+		EAvidScriptVmTypedHostStatus::Rejected;
+	TArray<FAvidScriptVmTypedHostImport> DirectRejectedImports =
+		PreparedUnaryImports;
+	DirectRejectedImports[0].PreparedTarget.Context =
+		&DirectRejectedContext;
+	FAvidScriptVmLoadConfig DirectRejectedConfig = PreparedUnaryConfig;
+	DirectRejectedConfig.TypedHostImports = DirectRejectedImports;
+	TestTrue(
+		TEXT("direct rejection fixture loads"),
+		DirectRejectedBackend->Load(
+			BuildTypedHostFixture(TArray<int32>{2, 3, 4}),
+			TEXT("typed_prepared_direct_rejected"),
+			DirectRejectedConfig,
+			DirectRejectedError));
+	FAvidScriptVmExportHandle DirectRejectedHandle;
+	TestTrue(
+		TEXT("direct rejection export resolves"),
+		DirectRejectedBackend->ResolveExport(
+			TEXT("run"),
+			DirectRejectedHandle,
+			DirectRejectedError));
+	FAvidScriptVmCallFrame DirectRejectedFrame;
+	TestFalse(
+		TEXT("direct rejection returns through the backend reporter"),
+		DirectRejectedBackend->Call(
+			DirectRejectedHandle,
+			DirectRejectedFrame,
+			DirectRejectedError));
+	TestEqual(
+		TEXT("direct rejection keeps the stable error category"),
+		DirectRejectedError.Category,
+		FString(TEXT("host_import_failed")));
+	TestEqual(
+		TEXT("direct rejection reaches the direct target once"),
+		DirectRejectedContext.DirectCallCount,
+		1);
 
 	FAvidScriptVmError PreparedBudgetError;
 	TUniquePtr<IAvidScriptVmBackend> PreparedBudgetBackend =
