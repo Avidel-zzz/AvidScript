@@ -189,6 +189,8 @@ try {
             'BindingPackagePath',
             'Configuration',
             'CookMaps',
+            'CooperativeSafepointInterval',
+            'CooperativeSafepoints',
             'CSharpProjectPath',
             'DisablePlugins',
             'DotNetPath',
@@ -214,6 +216,8 @@ try {
                 "[string]`$EngineRoot = 'C:\UnrealEngine'",
                 "[string]`$PackagedOracleMode = 'Legacy'",
                 "[string]`$GeneratedTypeManifestPath = ''",
+                '[switch]$CooperativeSafepoints',
+                '[uint32]$CooperativeSafepointInterval = 1024',
                 '[string[]]$CookMaps = @()',
                 '[string[]]$EnablePlugins = @()',
                 '[string[]]$DisablePlugins = @()',
@@ -367,11 +371,20 @@ try {
         $ReleaseArguments = @(New-AvidScriptBuildCookRunReleaseArguments `
                 -ReleaseScriptPath fixture -SourcePath fixture -CSharpProjectPath fixture `
                 -ModuleId fixture -ArtifactStem fixture -OutputRoot fixture -DotNetPath fixture `
+                -CooperativeSafepoints -CooperativeSafepointInterval 2048 `
                 -Configuration Shipping -EngineRoot fixture -DisablePlugins $Disabled)
         $DisableIndex = [array]::IndexOf($ReleaseArguments, '-DisablePlugins')
         Assert-BuildCookRunContract ($DisableIndex -ge 0 -and
             $ReleaseArguments[$DisableIndex + 1] -ceq 'Puerts,Optional_Plugin2') `
             'Disabled plugins did not reach the Release child as one validated CSV argument.'
+        $SafepointIndex = [array]::IndexOf(
+            $ReleaseArguments,
+            '-CooperativeSafepointInterval')
+        Assert-BuildCookRunContract `
+            ($ReleaseArguments -ccontains '-CooperativeSafepoints' -and
+                $SafepointIndex -ge 0 -and
+                $ReleaseArguments[$SafepointIndex + 1] -ceq '2048') `
+            'Cooperative C# compilation did not reach the Release child.'
         foreach ($Prefix in @('-map=', '-ubtargs=', '-AdditionalCookerOptions=')) {
             Assert-BuildCookRunContract (@($Observed.Arguments | Where-Object { $_.StartsWith($Prefix) }).Count -eq 1) `
                 "Expected exactly one $Prefix argument."

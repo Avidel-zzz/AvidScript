@@ -9,6 +9,9 @@ param(
     [string]$BindingPackagePath = '',
     [string]$RuntimeBindingPackagePath = '',
     [string]$GeneratedTypeManifestPath = '',
+    [switch]$CooperativeSafepoints,
+    [ValidateRange(1, 65536)]
+    [uint32]$CooperativeSafepointInterval = 1024,
     [ValidateSet('Development', 'Shipping')]
     [string]$Configuration = 'Development',
     [Parameter(Mandatory = $true)][string]$ArchiveRoot,
@@ -537,6 +540,9 @@ function New-AvidScriptBuildCookRunReleaseArguments {
         [string]$BindingPackagePath = '',
         [string]$RuntimeBindingPackagePath = '',
         [string]$GeneratedTypeManifestPath = '',
+        [switch]$CooperativeSafepoints,
+        [ValidateRange(1, 65536)]
+        [uint32]$CooperativeSafepointInterval = 1024,
         [Parameter(Mandatory = $true)][string]$Configuration,
         [Parameter(Mandatory = $true)][string]$EngineRoot,
         [string[]]$DisablePlugins = @()
@@ -576,6 +582,12 @@ function New-AvidScriptBuildCookRunReleaseArguments {
         $Arguments.Add('-GeneratedTypeManifestPath')
         $Arguments.Add($GeneratedTypeManifestPath)
     }
+    if ($CooperativeSafepoints) {
+        $Arguments.Add('-CooperativeSafepoints')
+        $Arguments.Add('-CooperativeSafepointInterval')
+        $Arguments.Add($CooperativeSafepointInterval.ToString(
+                [System.Globalization.CultureInfo]::InvariantCulture))
+    }
     if ($DisablePlugins.Count -gt 0) {
         $Arguments.Add('-DisablePlugins')
         $Arguments.Add(($DisablePlugins -join ','))
@@ -603,6 +615,9 @@ function Invoke-AvidScriptBuildCookRunReleaseStep {
         [string]$BindingPackagePath = '',
         [string]$RuntimeBindingPackagePath = '',
         [string]$GeneratedTypeManifestPath = '',
+        [switch]$CooperativeSafepoints,
+        [ValidateRange(1, 65536)]
+        [uint32]$CooperativeSafepointInterval = 1024,
         [Parameter(Mandatory = $true)][string]$Configuration,
         [string[]]$DisablePlugins = @()
     )
@@ -629,6 +644,8 @@ function Invoke-AvidScriptBuildCookRunReleaseStep {
         -BindingPackagePath $BindingPackagePath `
         -RuntimeBindingPackagePath $RuntimeBindingPackagePath `
         -GeneratedTypeManifestPath $GeneratedTypeManifestPath `
+        -CooperativeSafepoints:$CooperativeSafepoints `
+        -CooperativeSafepointInterval $CooperativeSafepointInterval `
         -Configuration $Configuration `
         -EngineRoot $EngineContext.EngineRoot `
         -DisablePlugins $DisablePlugins
@@ -1130,6 +1147,9 @@ function Invoke-AvidScriptBuildCookRun {
         [string]$BindingPackagePath = '',
         [string]$RuntimeBindingPackagePath = '',
         [string]$GeneratedTypeManifestPath = '',
+        [switch]$CooperativeSafepoints,
+        [ValidateRange(1, 65536)]
+        [uint32]$CooperativeSafepointInterval = 1024,
         [ValidateSet('Development', 'Shipping')]
         [Parameter(Mandatory = $true)][string]$Configuration,
         [Parameter(Mandatory = $true)][string]$ArchiveRoot,
@@ -1169,6 +1189,8 @@ function Invoke-AvidScriptBuildCookRun {
         -BindingPackagePath $BindingPackagePath `
         -RuntimeBindingPackagePath $RuntimeBindingPackagePath `
         -GeneratedTypeManifestPath $GeneratedTypeManifestPath `
+        -CooperativeSafepoints:$CooperativeSafepoints `
+        -CooperativeSafepointInterval $CooperativeSafepointInterval `
         -Configuration $Configuration `
         -DisablePlugins $DisablePlugins
 
@@ -1258,6 +1280,8 @@ try {
         -BindingPackagePath $BindingPackagePath `
         -RuntimeBindingPackagePath $RuntimeBindingPackagePath `
         -GeneratedTypeManifestPath $GeneratedTypeManifestPath `
+        -CooperativeSafepoints:$CooperativeSafepoints `
+        -CooperativeSafepointInterval $CooperativeSafepointInterval `
         -Configuration $Configuration `
         -ArchiveRoot $ArchiveRoot `
         -PackagedOracleTimeoutSeconds $PackagedOracleTimeoutSeconds `
