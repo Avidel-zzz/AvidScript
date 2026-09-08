@@ -26,7 +26,8 @@ function New-ReleaseFixture {
         [string]$ModuleId = 'fixture.module',
         [ValidateSet('Win64', 'Android')][string]$TargetPlatform = 'Win64',
         [string]$Policy = '',
-        [switch]$CooperativeSafepoints
+        [switch]$CooperativeSafepoints,
+        [switch]$ExplicitDisabledSafepoints
     )
 
     $TargetTriple = if ($TargetPlatform -ieq 'Android') {
@@ -158,6 +159,11 @@ function New-ReleaseFixture {
             site_count = 0
             site_sha256 =
                 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+        }
+    }
+    elseif ($ExplicitDisabledSafepoints) {
+        $RuntimeManifest.execution.cooperative_safepoints = [ordered]@{
+            enabled = $false
         }
     }
     Write-TestJson -Path $RuntimeManifestPath -Value $RuntimeManifest
@@ -294,6 +300,35 @@ try {
             [string]$Runtime.execution.compiler_build_identity -cnotlike
                 '*;epoch_interruption=off;*') {
             throw 'Release publication dropped or changed cooperative provenance.'
+        }
+    }
+
+    Invoke-ReleaseContract 'explicit disabled safepoints publish as ordinary epoch package' {
+        $Fixture = New-ReleaseFixture `
+            -Name 'ExplicitDisabledSafepoints' `
+            -ExplicitDisabledSafepoints
+        $Published = Publish-AvidScriptModuleReleasePackage `
+            -RuntimeManifestPath $Fixture.RuntimeManifestPath `
+            -ProjectRoot $Fixture.ProjectRoot `
+            -Configuration Development
+        $Runtime = Get-Content -Raw -LiteralPath (
+            Join-Path $Published.PackageRoot 'runtime.avidscript.json') | ConvertFrom-Json -Depth 32
+        if ($Runtime.execution.PSObject.Properties.Name -ccontains 'cooperative_safepoints' -or
+            [string]$Runtime.execution.compiler_build_identity -clike '*;epoch_interruption=off;*') {
+            throw 'Explicit disabled safepoints changed the ordinary epoch package contract.'
+        }
+    }
+
+    Invoke-ReleaseContract 'disabled safepoints with proof fields are rejected' {
+        $Fixture = New-ReleaseFixture `
+            -Name 'DisabledSafepointsWithProof' `
+            -ExplicitDisabledSafepoints
+        $Fixture.RuntimeManifest.execution.cooperative_safepoints.receipt_sha256 = ('9' * 64)
+        Write-TestJson -Path $Fixture.RuntimeManifestPath -Value $Fixture.RuntimeManifest
+        Assert-ReleaseRejected -Pattern 'must contain only enabled=false' -Body {
+            Publish-AvidScriptModuleReleasePackage `
+                -RuntimeManifestPath $Fixture.RuntimeManifestPath `
+                -ProjectRoot $Fixture.ProjectRoot | Out-Null
         }
     }
 

@@ -929,12 +929,37 @@ function Publish-AvidScriptModuleReleasePackage {
     if ([string]$RuntimeManifest.execution.canonical_sha256 -cne [string]$RuntimeManifest.wasm.sha256) {
         throw 'Runtime manifest execution canonical_sha256 does not match wasm.sha256.'
     }
-    $HasCooperativeSafepoints =
+    $CooperativeSafepointFieldPresent =
         $RuntimeManifest.execution.PSObject.Properties.Name -ccontains 'cooperative_safepoints'
+    $HasCooperativeSafepoints = $false
+    $CooperativeSafepoints = $null
     $EpochInterruptionDisabled =
         [string]$RuntimeManifest.execution.compiler_build_identity -clike '*;epoch_interruption=off;*'
-    if ($HasCooperativeSafepoints) {
+    if ($CooperativeSafepointFieldPresent) {
         $CooperativeSafepoints = $RuntimeManifest.execution.cooperative_safepoints
+        Assert-AvidScriptModuleReleaseObjectShape `
+            -Value $CooperativeSafepoints `
+            -Label 'Runtime manifest.execution.cooperative_safepoints' `
+            -Required @('enabled') `
+            -Optional @(
+                'receipt_sha256',
+                'guest_ir_sha256',
+                'proof_schema_version',
+                'poll_interval',
+                'loop_poll_blocks',
+                'recursive_functions',
+                'site_count',
+                'site_sha256')
+        if ($CooperativeSafepoints.enabled -isnot [bool]) {
+            throw 'Runtime manifest cooperative safepoint enabled state must be boolean.'
+        }
+        $HasCooperativeSafepoints = [bool]$CooperativeSafepoints.enabled
+        if (-not $HasCooperativeSafepoints -and
+            @($CooperativeSafepoints.PSObject.Properties).Count -ne 1) {
+            throw 'Disabled Runtime manifest cooperative safepoints must contain only enabled=false.'
+        }
+    }
+    if ($HasCooperativeSafepoints) {
         Assert-AvidScriptModuleReleaseObjectShape `
             -Value $CooperativeSafepoints `
             -Label 'Runtime manifest.execution.cooperative_safepoints' `
@@ -964,9 +989,7 @@ function Publish-AvidScriptModuleReleasePackage {
         $LoopPollBlocks = [int64]$CooperativeSafepoints.loop_poll_blocks
         $RecursiveFunctions = [int64]$CooperativeSafepoints.recursive_functions
         $SiteCount = [int64]$CooperativeSafepoints.site_count
-        if ($CooperativeSafepoints.enabled -isnot [bool] -or
-            -not [bool]$CooperativeSafepoints.enabled -or
-            -not $EpochInterruptionDisabled -or
+        if (-not $EpochInterruptionDisabled -or
             -not (Test-AvidScriptModuleReleaseJsonInteger $CooperativeSafepoints.proof_schema_version) -or
             [int64]$CooperativeSafepoints.proof_schema_version -ne 2 -or
             -not (Test-AvidScriptModuleReleaseJsonInteger $CooperativeSafepoints.poll_interval) -or
