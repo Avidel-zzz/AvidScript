@@ -86,6 +86,14 @@
       "source": "legacy:2247"
     },
     {
+      "id": "behavior-coverage-freezes-before-native-build",
+      "tags": ["build", "tests", "workflow"],
+      "summary": "原生构建前必须先冻结本批行为覆盖，避免因漏测而重复完整增量构建。",
+      "prevention": "在首次 UBT 前对照架构冻结逐项确认 success、拒绝路径和 identity/cache 行为是否已有测试；测试源码与产品源码一并完成后再执行批次唯一 no-clean 构建。只有首次构建暴露编译问题时才允许修复后重建。",
+      "source": "observed:2026-09-08-P65.D31",
+      "last_observed": "2026-09-08 P65.D31.C1 在 19/19 构建通过后才发现缺少 serialized identity 解析和 epoch-budget mismatch 行为覆盖，导致需要第二次构建"
+    },
+    {
       "id": "pinned-dotnet-sdk",
       "tags": ["dotnet", "sdk", "toolchain"],
       "summary": "仓库 .NET 工具链由 global.json 固定为 8.0.416。",
