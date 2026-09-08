@@ -123,6 +123,8 @@ try {
             'ArtifactStem',
             'BindingPackagePath',
             'Configuration',
+            'CooperativeSafepointInterval',
+            'CooperativeSafepoints',
             'CSharpProjectPath',
             'DisablePlugins',
             'DotNetPath',
@@ -153,7 +155,9 @@ try {
                 'TEXT("BindingPackagePath")',
                 'TEXT("RuntimeBindingPackagePath")',
                 'TEXT("GeneratedTypeManifestPath")',
+                'TEXT("AvidScriptCooperativeSafepointInterval")',
                 'TEXT("AvidScriptTargetPlatform")',
+                'TEXT("avidscriptcooperativesafepoints")',
                 'TEXT("avidscriptsuppressgeneratedtypeexecution")',
                 'ParameterName.Equals(TEXT("run"), ESearchCase::IgnoreCase)',
                 'ParameterName.Equals(TEXT("disableplugins"), ESearchCase::IgnoreCase)',
@@ -195,6 +199,24 @@ try {
                 '-nullrhi')) {
             if ($Arguments -cnotcontains $ExpectedArgument) {
                 throw "Commandlet argument is missing: $ExpectedArgument"
+            }
+        }
+        $CooperativeArguments = @(New-AvidScriptReleaseCommandletArguments `
+                -SourcePath 'C:\Project\Source\Module.cs' `
+                -CSharpProjectPath 'C:\Project\Source\Module.csproj' `
+                -ModuleId 'contract_module' `
+                -ArtifactStem 'contract_artifact' `
+                -OutputRoot 'C:\Project\Saved\Release' `
+                -DotNetPath 'C:\DotNet\dotnet.exe' `
+                -TargetPlatform 'Win64' `
+                -CooperativeSafepoints `
+                -CooperativeSafepointInterval 2048 `
+                -AbsLog 'C:\Project\Saved\Logs\cooperative-release.log')
+        foreach ($ExpectedArgument in @(
+                '-AvidScriptCooperativeSafepoints',
+                '-AvidScriptCooperativeSafepointInterval=2048')) {
+            if ($CooperativeArguments -cnotcontains $ExpectedArgument) {
+                throw "Cooperative commandlet argument is missing: $ExpectedArgument"
             }
         }
         foreach ($RequiredIsolationToken in @(

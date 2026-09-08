@@ -29,6 +29,8 @@ struct FAvidScriptReleaseArguments
 	FString RuntimeBindingPackagePath;
 	FString GeneratedTypeManifestPath;
 	FString TargetPlatform = TEXT("Win64");
+	uint32 CooperativeSafepointInterval = 1024;
+	bool bCooperativeSafepoints = false;
 };
 
 int32 FailAvidScriptRelease(
@@ -51,6 +53,7 @@ int32 FailAvidScriptRelease(
 bool IsAvidScriptReleaseGlobalSwitch(const FString& SwitchName)
 {
 	static const TSet<FString> AllowedSwitches = {
+		TEXT("avidscriptcooperativesafepoints"),
 		TEXT("avidscriptsuppressgeneratedtypeexecution"),
 		TEXT("fullstdoutlogoutput"),
 		TEXT("nop4"),
@@ -75,6 +78,7 @@ const FString* FindAvidScriptReleaseCanonicalParameter(
 		{ TEXT("outputroot"), TEXT("OutputRoot") },
 		{ TEXT("runtimebindingpackagepath"), TEXT("RuntimeBindingPackagePath") },
 		{ TEXT("sourcepath"), TEXT("SourcePath") },
+		{ TEXT("avidscriptcooperativesafepointinterval"), TEXT("AvidScriptCooperativeSafepointInterval") },
 		{ TEXT("avidscripttargetplatform"), TEXT("AvidScriptTargetPlatform") }
 	};
 	return AllowedParameters.Find(ParameterName.ToLower());
@@ -209,6 +213,27 @@ bool ParseAvidScriptReleaseArguments(
 	Values.RemoveAndCopyValue(
 		TEXT("AvidScriptTargetPlatform"),
 		OutArguments.TargetPlatform);
+	OutArguments.bCooperativeSafepoints = Switches.ContainsByPredicate(
+		[](const FString& Switch)
+		{
+			return Switch.Equals(
+				TEXT("AvidScriptCooperativeSafepoints"),
+				ESearchCase::IgnoreCase);
+		});
+	FString CooperativeSafepointInterval;
+	if (Values.RemoveAndCopyValue(
+			TEXT("AvidScriptCooperativeSafepointInterval"),
+			CooperativeSafepointInterval)
+		&& (!LexTryParseString(
+				OutArguments.CooperativeSafepointInterval,
+				*CooperativeSafepointInterval)
+			|| OutArguments.CooperativeSafepointInterval == 0
+			|| OutArguments.CooperativeSafepointInterval > 65536))
+	{
+		OutCategory = TEXT("argument_invalid");
+		OutMessage = TEXT("AvidScriptCooperativeSafepointInterval must be an integer from 1 through 65536.");
+		return false;
+	}
 	return true;
 }
 
@@ -248,7 +273,9 @@ bool ValidateAvidScriptReleaseManifest(
 	const FString& ManifestPath,
 	const FString& ModuleId,
 	const FString& ArtifactFile,
-	const FString& TargetTriple)
+	const FString& TargetTriple,
+	const bool bExpectCooperativeSafepoints,
+	const uint32 CooperativeSafepointInterval)
 {
 	FString ManifestJson;
 	if (!FFileHelper::LoadFileToString(ManifestJson, *ManifestPath))
@@ -269,7 +296,9 @@ bool ValidateAvidScriptReleaseManifest(
 	FString Policy;
 	FString File;
 	FString ManifestTargetTriple;
-	return Manifest->TryGetStringField(TEXT("module_id"), ManifestModuleId)
+	const TSharedPtr<FJsonObject>* Safepoints = nullptr;
+	const bool bManifestValid =
+		Manifest->TryGetStringField(TEXT("module_id"), ManifestModuleId)
 		&& ManifestModuleId == ModuleId
 		&& Manifest->TryGetObjectField(TEXT("execution"), Execution)
 		&& Execution != nullptr
@@ -284,6 +313,27 @@ bool ValidateAvidScriptReleaseManifest(
 			TEXT("target_triple"),
 			ManifestTargetTriple)
 		&& ManifestTargetTriple == TargetTriple;
+	if (!bManifestValid)
+	{
+		return false;
+	}
+	if (!bExpectCooperativeSafepoints)
+	{
+		return !(*Execution)->HasField(TEXT("cooperative_safepoints"));
+	}
+	bool bEnabled = false;
+	int32 PollInterval = 0;
+	return (*Execution)->TryGetObjectField(
+			TEXT("cooperative_safepoints"),
+			Safepoints)
+		&& Safepoints != nullptr
+		&& Safepoints->IsValid()
+		&& (*Safepoints)->TryGetBoolField(TEXT("enabled"), bEnabled)
+		&& bEnabled
+		&& (*Safepoints)->TryGetNumberField(
+			TEXT("poll_interval"),
+			PollInterval)
+		&& PollInterval == static_cast<int32>(CooperativeSafepointInterval);
 }
 } // namespace
 
@@ -350,6 +400,14 @@ int32 UAvidScriptReleaseCommandlet::Main(const FString& Params)
 		return FailAvidScriptRelease(
 			TEXT("argument_invalid"),
 			TEXT("TargetPlatform must be Win64 or Android."),
+			AvidScriptReleaseArgumentFailure);
+	}
+	if (Arguments.bCooperativeSafepoints
+		&& Arguments.TargetPlatform != TEXT("Win64"))
+	{
+		return FailAvidScriptRelease(
+			TEXT("argument_invalid"),
+			TEXT("Cooperative safepoint release is currently supported only for Win64."),
 			AvidScriptReleaseArgumentFailure);
 	}
 
@@ -484,6 +542,10 @@ int32 UAvidScriptReleaseCommandlet::Main(const FString& Params)
 	Config.VmArtifactTargetTriple = TargetTriple;
 	Config.VmArtifactPolicy =
 		EAvidScriptEditorVmArtifactPolicy::RequirePrecompiled;
+	Config.bEnableCooperativeSafepoints =
+		Arguments.bCooperativeSafepoints;
+	Config.CooperativeSafepointInterval =
+		Arguments.CooperativeSafepointInterval;
 
 	FAvidScriptEditorCSharpBuildResult BuildResult;
 	if (!FAvidScriptEditorCSharpBuildService::BuildProfile(
@@ -522,6 +584,8 @@ int32 UAvidScriptReleaseCommandlet::Main(const FString& Params)
 		|| BuildResult.VmArtifactFormat != TEXT("wasmtime_serialized_v1")
 		|| BuildResult.VmArtifactPolicy != TEXT("require_precompiled")
 		|| BuildResult.VmArtifactTargetTriple != TargetTriple
+		|| BuildResult.bVmArtifactCooperativeSafepoints
+			!= Arguments.bCooperativeSafepoints
 		|| !BuildResult.VmArtifactPath.Equals(
 			ExpectedArtifactPath,
 			ESearchCase::IgnoreCase)
@@ -536,7 +600,9 @@ int32 UAvidScriptReleaseCommandlet::Main(const FString& Params)
 			ExpectedManifestPath,
 			Arguments.ModuleId,
 			ArtifactFile,
-			TargetTriple))
+			TargetTriple,
+			Arguments.bCooperativeSafepoints,
+			Arguments.CooperativeSafepointInterval))
 	{
 		return FailAvidScriptRelease(
 			TEXT("manifest_contract_invalid"),

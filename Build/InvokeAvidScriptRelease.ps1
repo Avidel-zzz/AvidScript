@@ -10,6 +10,8 @@ param(
     [string]$RuntimeBindingPackagePath = '',
     [string]$GeneratedTypeManifestPath = '',
     [string]$DisablePlugins = '',
+    [switch]$CooperativeSafepoints,
+    [ValidateRange(1, 65536)][uint32]$CooperativeSafepointInterval = 1024,
     [ValidateSet('Development', 'Shipping')][string]$Configuration = 'Development',
     [ValidateSet('Win64', 'Android')][string]$TargetPlatform = 'Win64',
     [string]$EngineRoot = 'C:\UnrealEngine'
@@ -226,7 +228,9 @@ function New-AvidScriptReleaseCommandletArguments {
         [string]$BindingPackagePath = '',
         [string]$RuntimeBindingPackagePath = '',
         [string]$GeneratedTypeManifestPath = '',
-        [string[]]$DisablePlugins = @()
+        [string[]]$DisablePlugins = @(),
+        [switch]$CooperativeSafepoints,
+        [ValidateRange(1, 65536)][uint32]$CooperativeSafepointInterval = 1024
     )
 
     $Arguments = [System.Collections.Generic.List[string]]::new()
@@ -252,6 +256,11 @@ function New-AvidScriptReleaseCommandletArguments {
     }
     if ($DisablePlugins.Count -gt 0) {
         $Arguments.Add("-DisablePlugins=$($DisablePlugins -join ',')")
+    }
+    if ($CooperativeSafepoints) {
+        $Arguments.Add('-AvidScriptCooperativeSafepoints')
+        $Arguments.Add(
+            "-AvidScriptCooperativeSafepointInterval=$CooperativeSafepointInterval")
     }
     foreach ($Argument in @(
             "-abslog=$AbsLog",
@@ -326,6 +335,8 @@ function Invoke-AvidScriptRelease {
         [string]$RuntimeBindingPackagePath,
         [string]$GeneratedTypeManifestPath,
         [string[]]$DisablePlugins = @(),
+        [switch]$CooperativeSafepoints,
+        [ValidateRange(1, 65536)][uint32]$CooperativeSafepointInterval = 1024,
         [ValidateSet('Development', 'Shipping')]
         [Parameter(Mandatory = $true)][string]$Configuration,
         [ValidateSet('Win64', 'Android')]
@@ -500,6 +511,8 @@ function Invoke-AvidScriptRelease {
         -RuntimeBindingPackagePath $NormalizedRuntimeBindingPackagePath `
         -GeneratedTypeManifestPath $NormalizedGeneratedTypeManifestPath `
         -DisablePlugins $DisablePlugins `
+        -CooperativeSafepoints:$CooperativeSafepoints `
+        -CooperativeSafepointInterval $CooperativeSafepointInterval `
         -AbsLog $AbsLog
     $EditorResult = Invoke-AvidScriptReleaseProcess `
         -Executable $EditorCmdPath `
@@ -568,6 +581,8 @@ function Invoke-AvidScriptRelease {
         precompiled_artifact_path = $PrecompiledArtifactPath
         generated_type_manifest_path = $NormalizedGeneratedTypeManifestPath
         disable_plugins = @($DisablePlugins)
+        cooperative_safepoints = [bool]$CooperativeSafepoints
+        cooperative_safepoint_interval = $CooperativeSafepointInterval
         package_root = [string]$Package.PackageRoot
         descriptor_path = [string]$Package.DescriptorPath
         catalog_path = [string]$Package.CatalogPath
@@ -594,6 +609,8 @@ try {
         -RuntimeBindingPackagePath $RuntimeBindingPackagePath `
         -GeneratedTypeManifestPath $GeneratedTypeManifestPath `
         -DisablePlugins $NormalizedDisablePlugins `
+        -CooperativeSafepoints:$CooperativeSafepoints `
+        -CooperativeSafepointInterval $CooperativeSafepointInterval `
         -Configuration $Configuration `
         -TargetPlatform $TargetPlatform `
         -EngineRoot $EngineRoot
