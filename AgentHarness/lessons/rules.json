@@ -150,11 +150,11 @@
     },
     {
       "id": "search-output-is-scoped-before-execution",
-      "tags": ["rg", "search", "context"],
-      "summary": "跨模块宽检索会产生截断输出，既浪费上下文也可能掩盖真正残留引用。",
-      "prevention": "先按文件或单个模块根冻结检索范围，优先 rg -F 和精确标识符；不得把 Build、Source、Tests 等多个根合并为一次文件列表搜索。必须使用正则时先以单文件简单表达式验证 shell 转义。预估命中较多时逐根检查并限制到 20 条以内，普通源码阅读默认使用 20-40 行切片，并根据剩余上下文预算继续缩小；禁止一次倾倒整个仓库或在上下文临界时依赖固定行数。",
+      "tags": ["rg", "git", "search", "context"],
+      "summary": "跨模块宽检索或无边界清单会产生截断输出，既浪费上下文也可能掩盖真正残留引用。",
+      "prevention": "先按文件或单个模块根冻结检索范围，优先 rg -F 和精确标识符；不得把 Build、Source、Tests 等多个根合并为一次文件列表搜索。Git worktree、branch 等历史清单也必须先按已知路径或文本过滤，再限制到 20 条以内。必须使用正则时先以单文件简单表达式验证 shell 转义。普通源码阅读默认使用 20-40 行切片，并根据剩余上下文预算继续缩小；禁止一次倾倒整个仓库或在上下文临界时依赖固定行数。",
       "source": "observed:2026-08-31-P60.B1",
-      "last_observed": "2026-09-08 P65.D31 对精确标识符执行跨 Build、Source、Tests 的 rg -l 文件列表搜索，即使附带 Select-Object 上限仍产生超量输出并触发上下文压缩；后续必须逐根搜索且每次限制到 20 条以内"
+      "last_observed": "2026-09-08 P65.D31 未过滤即运行 git worktree list --porcelain，历史候选过多导致 396 行输出被截断；已知候选应直接核对其路径，未知候选才使用字符串过滤后的有限清单"
     },
     {
       "id": "rg-leading-hyphen-pattern-uses-double-dash",
