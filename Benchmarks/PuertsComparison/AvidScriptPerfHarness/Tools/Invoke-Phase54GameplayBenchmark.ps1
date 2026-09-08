@@ -388,6 +388,9 @@ function Resolve-RequestTemplateIdentity {
             'runtime_manifest'
         }
         if ($loadPolicy -ceq 'published_package') {
+            $entry.runtime_build_identity = Get-SidecarWasmtimeCompilerIdentity `
+                -DllSha256 $wasmtimeRuntimeSha256 `
+                -DisableFuel
             $published = Get-PublishedModulePackage `
                 -ProjectRoot $ProjectRoot `
                 -ModuleId ([string]$package.module_id)
