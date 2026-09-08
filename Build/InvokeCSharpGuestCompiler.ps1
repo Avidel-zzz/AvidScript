@@ -11,7 +11,11 @@ param(
     [ValidateSet("enabled", "disabled")]
     [string]$DataLaneFusion = "enabled",
     [ValidateSet("enabled", "disabled")]
-    [string]$DebugInstrumentation = "disabled"
+    [string]$DebugInstrumentation = "disabled",
+    [switch]$CooperativeSafepoints,
+    [ValidateRange(1, 65536)]
+    [int]$SafepointInterval = 256,
+    [string]$SafepointAttestationPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,6 +32,9 @@ $NuGetDirectory = Join-Path $AppData "NuGet"
 $NuGetConfig = Join-Path $NuGetDirectory "NuGet.Config"
 $Utf8 = [System.Text.UTF8Encoding]::new($false)
 $DebugOffsetPath = "$DebugMapPath.offsets.json"
+if ($CooperativeSafepoints -and [string]::IsNullOrWhiteSpace($SafepointAttestationPath)) {
+    $SafepointAttestationPath = "$WasmPath.safepoints.json"
+}
 
 foreach ($RequiredFile in @($DotNetPath, $SemanticPath, $GuestProject, $BackendProject)) {
     if (-not (Test-Path -LiteralPath $RequiredFile -PathType Leaf)) {
@@ -48,7 +55,11 @@ foreach ($Directory in @(
     New-Item -ItemType Directory -Force -Path $Directory | Out-Null
 }
 
-foreach ($StaleArtifact in @($GuestIrPath, $DebugMapPath, $DebugOffsetPath, $StateSchemaPath, $WasmPath, $InspectionPath)) {
+$StaleArtifacts = @($GuestIrPath, $DebugMapPath, $DebugOffsetPath, $StateSchemaPath, $WasmPath, $InspectionPath)
+if ($CooperativeSafepoints) {
+    $StaleArtifacts += $SafepointAttestationPath
+}
+foreach ($StaleArtifact in $StaleArtifacts) {
     if (Test-Path -LiteralPath $StaleArtifact -PathType Leaf) {
         Remove-Item -LiteralPath $StaleArtifact -Force
     }
@@ -85,20 +96,39 @@ try {
         }
     }
 
-    & $DotNetPath $GuestDll `
-        --semantic $SemanticPath `
-        --output $GuestIrPath `
-        --state-schema $StateSchemaPath `
-        --debug-map $DebugMapPath `
-        --frontend-artifact-sha256 $FrontendArtifactSha256 `
-        --data-lane-fusion $DataLaneFusion `
-        --debug-instrumentation $DebugInstrumentation
+    $GuestArguments = @(
+        $GuestDll,
+        "--semantic", $SemanticPath,
+        "--output", $GuestIrPath,
+        "--state-schema", $StateSchemaPath,
+        "--debug-map", $DebugMapPath,
+        "--frontend-artifact-sha256", $FrontendArtifactSha256,
+        "--data-lane-fusion", $DataLaneFusion,
+        "--debug-instrumentation", $DebugInstrumentation)
+    if ($CooperativeSafepoints) {
+        $GuestArguments += @("--implicit-function-import-count", "1")
+    }
+    & $DotNetPath @GuestArguments
     if ($LASTEXITCODE -ne 0) {
         $ExitCode = $LASTEXITCODE
         throw "C# semantic to Guest IR lowering failed with exit code $ExitCode."
     }
 
-    & $DotNetPath $BackendDll $GuestIrPath $WasmPath --debug-offsets $DebugOffsetPath
+    $BackendArguments = @(
+        $BackendDll,
+        $GuestIrPath,
+        $WasmPath,
+        "--debug-offsets",
+        $DebugOffsetPath)
+    if ($CooperativeSafepoints) {
+        $BackendArguments += @(
+            "--cooperative-safepoints",
+            "--safepoint-interval",
+            $SafepointInterval.ToString([System.Globalization.CultureInfo]::InvariantCulture),
+            "--safepoint-attestation",
+            $SafepointAttestationPath)
+    }
+    & $DotNetPath @BackendArguments
     $ExitCode = $LASTEXITCODE
     if ($ExitCode -ne 0 -and (Test-Path -LiteralPath $WasmPath -PathType Leaf)) {
         Remove-Item -LiteralPath $WasmPath -Force
@@ -118,13 +148,21 @@ finally {
 }
 
 if ($ExitCode -ne 0) {
-    foreach ($FailedArtifact in @($DebugMapPath, $WasmPath, $InspectionPath)) {
+    $FailedArtifacts = @($DebugMapPath, $WasmPath, $InspectionPath)
+    if ($CooperativeSafepoints) {
+        $FailedArtifacts += $SafepointAttestationPath
+    }
+    foreach ($FailedArtifact in $FailedArtifacts) {
         Remove-Item -LiteralPath $FailedArtifact -Force -ErrorAction SilentlyContinue
     }
 }
 
 if ($ExitCode -eq 0) {
-    foreach ($Artifact in @($GuestIrPath, $DebugMapPath, $StateSchemaPath, $WasmPath, $InspectionPath)) {
+    $ExpectedArtifacts = @($GuestIrPath, $DebugMapPath, $StateSchemaPath, $WasmPath, $InspectionPath)
+    if ($CooperativeSafepoints) {
+        $ExpectedArtifacts += $SafepointAttestationPath
+    }
+    foreach ($Artifact in $ExpectedArtifacts) {
         if (-not (Test-Path -LiteralPath $Artifact -PathType Leaf)) {
             throw "Formal C# guest compiler did not publish expected artifact: $Artifact"
         }

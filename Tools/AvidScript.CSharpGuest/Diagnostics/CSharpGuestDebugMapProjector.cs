@@ -25,12 +25,21 @@ public static class CSharpGuestDebugMapProjector
         SemanticDocument document,
         GuestModule module,
         string guestIrSha256,
-        string frontendArtifactSha256)
+        string frontendArtifactSha256,
+        int implicitFunctionImportCount = 0)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(module);
         ArgumentNullException.ThrowIfNull(guestIrSha256);
         ArgumentNullException.ThrowIfNull(frontendArtifactSha256);
+        if (implicitFunctionImportCount is < 0 or > 16)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(implicitFunctionImportCount));
+        }
+
+        int importedFunctionCount = checked(
+            module.Imports.Count + implicitFunctionImportCount);
 
         string sourceId = NormalizeSourceId(document.Source.SourceId);
         if (!IsSha256(document.Source.Sha256)
@@ -74,7 +83,7 @@ public static class CSharpGuestDebugMapProjector
                 continue;
             }
 
-            int functionIndex = checked(module.Imports.Count + ordinal);
+            int functionIndex = checked(importedFunctionCount + ordinal);
             if (asyncResumeTargets.TryGetValue(function.Id, out AsyncResumeDebugTarget? resumeTarget))
             {
                 AddAsyncResumeFunction(
@@ -129,7 +138,7 @@ public static class CSharpGuestDebugMapProjector
             2,
             "2.0",
             module.ModuleId,
-            module.Imports.Count,
+            importedFunctionCount,
             module.Functions.Count,
             new CSharpGuestDebugSource(sourceId, document.Source.Sha256),
             new CSharpGuestDebugProvenance(

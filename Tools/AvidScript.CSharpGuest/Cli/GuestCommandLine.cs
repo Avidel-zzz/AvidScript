@@ -34,6 +34,8 @@ public static class GuestCommandLine
             options.TryGetValue("--frontend-artifact-sha256", out string? frontendArtifactSha256);
             bool dataLaneFusionEnabled = ParseDataLaneFusion(options);
             bool debugInstrumentationEnabled = ParseDebugInstrumentation(options);
+            int implicitFunctionImportCount =
+                ParseImplicitFunctionImportCount(options);
             if ((debugMapPath is null) != (frontendArtifactSha256 is null))
             {
                 throw new ArgumentException(
@@ -88,7 +90,8 @@ public static class GuestCommandLine
                     document,
                     result.Module,
                     guestIrSha256,
-                    frontendArtifactSha256!);
+                    frontendArtifactSha256!,
+                    implicitFunctionImportCount);
                 CSharpGuestDebugMapSerializer.Write(debugMapPath, debugMap);
             }
             return 0;
@@ -125,10 +128,11 @@ public static class GuestCommandLine
             && args.Length != 8
             && args.Length != 10
             && args.Length != 12
-            && args.Length != 14)
+            && args.Length != 14
+            && args.Length != 16)
         {
             throw new ArgumentException(
-                "Usage: --semantic <path> --output <path> [--state-schema <path>] [--debug-map <path> --frontend-artifact-sha256 <sha256>] [--data-lane-fusion enabled|disabled] [--debug-instrumentation enabled|disabled] | --finalize-debug-map <path> --offset-map <path>");
+                "Usage: --semantic <path> --output <path> [--state-schema <path>] [--debug-map <path> --frontend-artifact-sha256 <sha256>] [--data-lane-fusion enabled|disabled] [--debug-instrumentation enabled|disabled] [--implicit-function-import-count <0..16>] | --finalize-debug-map <path> --offset-map <path>");
         }
 
         Dictionary<string, string> options = new(StringComparer.Ordinal);
@@ -142,7 +146,8 @@ public static class GuestCommandLine
                     && name != "--debug-map"
                     && name != "--frontend-artifact-sha256"
                     && name != "--data-lane-fusion"
-                    && name != "--debug-instrumentation")
+                    && name != "--debug-instrumentation"
+                    && name != "--implicit-function-import-count")
                 || string.IsNullOrWhiteSpace(value)
                 || !options.TryAdd(name, value))
             {
@@ -186,6 +191,23 @@ public static class GuestCommandLine
         }
 
         throw new ArgumentException("--debug-instrumentation must be enabled or disabled.");
+    }
+
+    private static int ParseImplicitFunctionImportCount(
+        IReadOnlyDictionary<string, string> options)
+    {
+        if (!options.TryGetValue(
+                "--implicit-function-import-count",
+                out string? value))
+        {
+            return 0;
+        }
+        if (int.TryParse(value, out int count) && count is >= 0 and <= 16)
+        {
+            return count;
+        }
+        throw new ArgumentException(
+            "--implicit-function-import-count must be in the range 0..16.");
     }
 
     private static void DeletePublishedArtifacts(params string?[] paths)

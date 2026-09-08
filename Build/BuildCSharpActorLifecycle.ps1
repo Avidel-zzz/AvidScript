@@ -23,6 +23,9 @@ param(
     [string]$GeneratedTypeManifestPath = "",
     [switch]$DisableSemanticCache,
     [switch]$DisableCompilationCache,
+    [switch]$CooperativeSafepoints,
+    [ValidateRange(1, 65536)]
+    [int]$SafepointInterval = 256,
     [ValidateSet("auto", "required", "disabled")]
     [string]$CompilerWorkerMode = "auto",
     [ValidateRange(1, 300)]
@@ -56,6 +59,8 @@ $ResolvedDebugInstrumentation = if ($DebugInstrumentation -ceq "auto") {
 else {
     $DebugInstrumentation
 }
+$CompilationCacheDisabledForBuild =
+    [bool]$DisableCompilationCache -or [bool]$CooperativeSafepoints
 
 if ([string]::IsNullOrWhiteSpace($CompilationCacheRoot)) {
     $CompilationCacheRoot = Join-Path $ProjectRoot "Saved\AvidScript\CSharpCompilationCache\v1"
@@ -175,7 +180,8 @@ function Remove-LoadableArtifacts {
         $GuestIrArtifactPath,
         $DebugMapArtifactPath,
         $StateSchemaArtifactPath,
-        $WasmArtifactPath)) {
+        $WasmArtifactPath,
+        $SafepointAttestationPath)) {
         if (Test-Path -LiteralPath $Artifact -PathType Leaf) {
             Remove-Item -LiteralPath $Artifact -Force
         }
@@ -997,6 +1003,7 @@ $DebugMapArtifactPath = Join-Path $OutputRoot "$ArtifactStem.csharp.debug.json"
 $StateSchemaArtifactPath = Join-Path $OutputRoot "$ArtifactStem.state.json"
 $WasmArtifactPath = Join-Path $OutputRoot "$ArtifactStem.wasm"
 $WasmInspectionArtifactPath = Join-Path $OutputRoot "$ArtifactStem.wasm.inspect.json"
+$SafepointAttestationPath = Join-Path $OutputRoot "$ArtifactStem.safepoints.json"
 $LegacyAdapterWasmPath = Join-Path $OutputRoot "$ArtifactStem.csharp_adapter.wasm"
 $LegacyDotNetWasmPath = Join-Path $OutputRoot "$ArtifactStem.dotnet.wasm"
 $FrontendModel = $null
@@ -1006,6 +1013,7 @@ $DebugMapModel = $null
 $StateSchemaModel = $null
 $StateSchemaArtifactExists = $false
 $WasmInspectionModel = $null
+$SafepointAttestationModel = $null
 $SelectedScriptTypeName = ""
 $RequiredExports = @()
 $RequiredImports = @()
@@ -1044,7 +1052,7 @@ $SemanticCache = [ordered]@{
 }
 $CompilationCache = [ordered]@{
     schema_version = 1
-    enabled = -not [bool]$DisableCompilationCache
+    enabled = -not $CompilationCacheDisabledForBuild
     key = ""
     toolchain_fingerprint = ""
     lookup = "disabled"
@@ -1105,6 +1113,7 @@ foreach ($Artifact in @(
     $StateSchemaArtifactPath,
     $WasmArtifactPath,
     $WasmInspectionArtifactPath,
+    $SafepointAttestationPath,
     $LegacyAdapterWasmPath,
     $LegacyDotNetWasmPath)) {
     if (Test-Path -LiteralPath $Artifact -PathType Leaf) {
@@ -1422,7 +1431,7 @@ $FrontendArtifactSha256 = Get-Sha256Hex $FrontendArtifactPath
 $SemanticSha256 = Get-Sha256Hex $SemanticArtifactPath
 $CompilationCacheContext = $null
 $CompilationCacheHit = $false
-if (-not $DisableCompilationCache) {
+if (-not $CompilationCacheDisabledForBuild) {
     try {
         $CompilationCacheContext = Get-AvidScriptCSharpCompilationCacheContext `
             -PluginRoot $PluginRoot `
@@ -1502,7 +1511,7 @@ if (-not $CompilationCacheHit) {
     ++$ToolInvocations.guest_ir
     ++$ToolInvocations.wasm_backend
     $GuestWorkerInvocation = $null
-    if ($CompilerWorker.guest_stage_enabled) {
+    if ($CompilerWorker.guest_stage_enabled -and -not $CooperativeSafepoints) {
         $GuestWorkerInvocation = Invoke-BuildCompilerWorkerStage `
             -Stage "guest" `
             -Fields @{
@@ -1541,6 +1550,15 @@ if (-not $CompilationCacheHit) {
             "-Configuration", $Configuration,
             "-DataLaneFusion", $DataLaneFusion,
             "-DebugInstrumentation", $ResolvedDebugInstrumentation)
+        if ($CooperativeSafepoints) {
+            $CompilerArguments += @(
+                "-CooperativeSafepoints",
+                "-SafepointInterval",
+                $SafepointInterval.ToString(
+                    [System.Globalization.CultureInfo]::InvariantCulture),
+                "-SafepointAttestationPath",
+                $SafepointAttestationPath)
+        }
         $CompilerInvocation = Invoke-AvidScriptPowerShell -Arguments $CompilerArguments
         $CompilerOutput = @($CompilerInvocation.Output)
         $CompilerExitCode = [int]$CompilerInvocation.ExitCode
@@ -1579,9 +1597,25 @@ if (Test-Path -LiteralPath $WasmInspectionArtifactPath -PathType Leaf) {
         $Diagnostics += [ordered]@{ code = "wasm_inspection_invalid"; severity = "error"; message = $_.Exception.Message; file = $SourceId }
     }
 }
+if ($CooperativeSafepoints -and
+    (Test-Path -LiteralPath $SafepointAttestationPath -PathType Leaf)) {
+    try {
+        $SafepointAttestationModel =
+            Get-Content -Raw -LiteralPath $SafepointAttestationPath | ConvertFrom-Json
+    }
+    catch {
+        $Diagnostics += [ordered]@{
+            code = "safepoint_attestation_invalid"
+            severity = "error"
+            message = $_.Exception.Message
+            file = $SourceId
+        }
+    }
+}
 $GuestIrSucceeded = $null -ne $GuestIrModel -and [bool]$GuestIrModel.succeeded
 $DebugMapPublished = $null -ne $DebugMapModel -and (Test-Path -LiteralPath $DebugMapArtifactPath -PathType Leaf)
 if ($CompilerExitCode -ne 0 -or -not $GuestIrSucceeded -or -not $DebugMapPublished -or -not $StateSchemaArtifactExists -or $null -eq $WasmInspectionModel -or
+    ($CooperativeSafepoints -and $null -eq $SafepointAttestationModel) -or
     -not (Test-Path -LiteralPath $WasmArtifactPath -PathType Leaf)) {
     Remove-LoadableArtifacts
     $FailureResult = if (-not $GuestIrSucceeded) { "guest_ir_failed" } elseif (-not $DebugMapPublished) { "debug_map_failed" } else { "wasm_backend_failed" }
@@ -1600,6 +1634,38 @@ $GuestIrSha256 = Get-Sha256Hex $GuestIrArtifactPath
 $DebugMapSha256 = Get-Sha256Hex $DebugMapArtifactPath
 $StateSchemaSha256 = Get-Sha256Hex $StateSchemaArtifactPath
 $WasmSha256 = Get-Sha256Hex $WasmArtifactPath
+if ($CooperativeSafepoints) {
+    $AttestedSiteCount = -1
+    $AttestedLoopPollBlocks = -1
+    $AttestedRecursiveFunctions = -1
+    $AttestationValid =
+        [int]$SafepointAttestationModel.schema_version -eq 1 -and
+        [string]$SafepointAttestationModel.guest_ir_sha256 -ceq $GuestIrSha256 -and
+        [string]$SafepointAttestationModel.wasm_sha256 -ceq $WasmSha256 -and
+        [int]$SafepointAttestationModel.proof.schema_version -eq 2 -and
+        [bool]$SafepointAttestationModel.proof.verified -and
+        [int]$SafepointAttestationModel.proof.poll_interval -eq $SafepointInterval -and
+        (Try-GetJsonInt32 -Value $SafepointAttestationModel.proof.site_count -ParsedValue ([ref]$AttestedSiteCount)) -and
+        (Try-GetJsonInt32 -Value $SafepointAttestationModel.proof.loop_poll_blocks -ParsedValue ([ref]$AttestedLoopPollBlocks)) -and
+        (Try-GetJsonInt32 -Value $SafepointAttestationModel.proof.recursive_functions -ParsedValue ([ref]$AttestedRecursiveFunctions)) -and
+        $AttestedSiteCount -ge 0 -and
+        $AttestedLoopPollBlocks -ge 0 -and
+        $AttestedRecursiveFunctions -ge 0 -and
+        $AttestedSiteCount -eq ($AttestedLoopPollBlocks + $AttestedRecursiveFunctions) -and
+        [string]$SafepointAttestationModel.proof.site_sha256 -cmatch '^[0-9a-f]{64}$'
+    if (-not $AttestationValid) {
+        Remove-LoadableArtifacts
+        $Diagnostics += [ordered]@{
+            code = "ASBI4701"
+            severity = "error"
+            message = "Cooperative safepoint receipt does not match the current Guest IR and WASM transaction."
+            file = Convert-ToProjectRelativePath $SafepointAttestationPath
+        }
+        Write-BuildReport -Result "safepoint_attestation_invalid" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics
+        Write-Output "[AvidScript][CSharp][Build] result=safepoint_attestation_invalid report=$ReportPath"
+        exit 1
+    }
+}
 $RequiredExports = @($GuestIrModel.exports | ForEach-Object { [string]$_.name })
 try {
     $UsedObjectTypeOrdinals = @(
@@ -1742,13 +1808,15 @@ $GuestContractValid = [int]$GuestIrModel.schema_version -eq 2 -and
     [string]$GuestIrModel.provenance.source_sha256 -eq [string]$FrontendModel.source.sha256
 $DebugImportedFunctionCount = -1
 $DebugDefinedFunctionCount = -1
+$ExpectedDebugImportedFunctionCount =
+    @($GuestIrModel.imports).Count + $(if ($CooperativeSafepoints) { 1 } else { 0 })
 $DebugIndexSpaceValid = (Try-GetJsonInt32 -Value $DebugMapModel.imported_function_count -ParsedValue ([ref]$DebugImportedFunctionCount)) -and
     (Try-GetJsonInt32 -Value $DebugMapModel.defined_function_count -ParsedValue ([ref]$DebugDefinedFunctionCount)) -and
     $DebugImportedFunctionCount -ge 0 -and
     $DebugDefinedFunctionCount -gt 0 -and
     $DebugDefinedFunctionCount -le 65536 -and
     $DebugImportedFunctionCount -le ([int]::MaxValue - $DebugDefinedFunctionCount) -and
-    $DebugImportedFunctionCount -eq @($GuestIrModel.imports).Count -and
+    $DebugImportedFunctionCount -eq $ExpectedDebugImportedFunctionCount -and
     $DebugDefinedFunctionCount -eq @($GuestIrModel.functions).Count
 $DebugSchemaVersion = if ($null -eq $DebugMapModel) { 0 } else { [int]$DebugMapModel.schema_version }
 $DebugVersionValid = ($DebugSchemaVersion -eq 1 -and [string]$DebugMapModel.debug_version -eq "1.0") -or
@@ -2024,6 +2092,21 @@ $Manifest = [ordered]@{
     compilation = [ordered]@{
         data_lane_fusion = $DataLaneFusion
         debug_instrumentation = $ResolvedDebugInstrumentation
+        cooperative_safepoints = if ($CooperativeSafepoints) {
+            [ordered]@{
+                enabled = $true
+                receipt_file = Convert-ToProjectRelativePath $SafepointAttestationPath
+                receipt_sha256 = Get-Sha256Hex $SafepointAttestationPath
+                schema_version = [int]$SafepointAttestationModel.proof.schema_version
+                poll_interval = [int]$SafepointAttestationModel.proof.poll_interval
+                site_count = [int]$SafepointAttestationModel.proof.site_count
+                site_sha256 = [string]$SafepointAttestationModel.proof.site_sha256
+                verified = [bool]$SafepointAttestationModel.proof.verified
+            }
+        }
+        else {
+            [ordered]@{ enabled = $false }
+        }
     }
     binding_package = if ($null -eq $BindingPackageInfo) { $null } else {
         [ordered]@{
@@ -2080,7 +2163,7 @@ try {
     Write-JsonAtomic -Path $ManifestPath -Value $Manifest
     $ShouldPublishCompilationCache = $null -ne $CompilationCacheContext -and
         -not $CompilationCacheHit -and
-        -not $DisableCompilationCache
+        -not $CompilationCacheDisabledForBuild
     if ($ShouldPublishCompilationCache) {
         try {
             $CompilationPublication = Publish-AvidScriptCSharpCompilationCacheEntry `
