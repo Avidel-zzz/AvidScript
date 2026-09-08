@@ -181,6 +181,13 @@ Assert-True ($semanticCSharpProfile.data_lane_fusion -ceq 'disabled' -and
     $generatedCSharpProfile.data_lane_fusion -ceq 'disabled' -and
     $dataCSharpProfile.data_lane_fusion -ceq 'enabled') `
     'Semantic、generated S1 与 data-oriented C# profile 必须显式锁定各自 data lane fusion 模式。'
+Assert-True ($semanticCSharpProfile.cooperative_safepoints -ceq 'enabled' -and
+    $generatedCSharpProfile.cooperative_safepoints -ceq 'enabled' -and
+    $dataCSharpProfile.cooperative_safepoints -ceq 'enabled' -and
+    [int]$semanticCSharpProfile.cooperative_safepoint_interval -eq 1024 -and
+    [int]$generatedCSharpProfile.cooperative_safepoint_interval -eq 1024 -and
+    [int]$dataCSharpProfile.cooperative_safepoint_interval -eq 1024) `
+    '三条正式 C# 性能 lane 必须锁定相同的 cooperative safepoint profile。'
 Assert-True ($generatedCSharpProfile.binding_profile.package_name -ceq
     $dataCSharpProfile.binding_profile.package_name -and
     $generatedCSharpProfile.binding_profile.package_name.Length -le 40) `
@@ -287,13 +294,22 @@ Assert-True (
     $runtimeSessionHeaderText.Contains('SetExecutionBudgetForTesting') -and
     $runtimeSessionHeaderText.Contains('ExecutionBudgetOverrideForTesting') -and
     $runtimeSessionSourceText.Contains('ResolveExecutionBudget(') -and
-    $runtimeSessionSourceText.Contains('return MakeSessionExecutionBudget(Selection, ArtifactTrust);')) `
+    $runtimeSessionSourceText.Contains('return MakeSessionExecutionBudget(') -and
+    $runtimeSessionSourceText.Contains('bCooperativeSafepointProofVerified,') -and
+    $runtimeSessionSourceText.Contains('bSerializedArtifactProcessAuthorized);')) `
     'Runtime Session 必须只通过加载前测试覆盖注入 benchmark 预算，并保留生产预算解析路径。'
 Assert-True (
     $runtimeSessionSourceText.Contains('bUseVerifiedPackageFastContainment') -and
+    $runtimeSessionSourceText.Contains('bUseCooperativeContainment') -and
     $runtimeSessionSourceText.Contains('? 0') -and
     $runtimeSessionSourceText.Contains(': 50000000;') -and
-    $runtimeSessionSourceText.Contains('Budget.EpochTimeoutMilliseconds = 100;') -and
+    $runtimeSessionSourceText.Contains(
+        'Budget.EpochDeadlineTicks = bUseCooperativeContainment ? 0 : 1;') -and
+    $runtimeSessionSourceText.Contains(
+        'bUseCooperativeContainment ? 0 : 100;') -and
+    $runtimeSessionSourceText.Contains('Budget.CooperativeTimeoutMilliseconds =') -and
+    $runtimeSessionSourceText.Contains(
+        'bUseCooperativeContainment ? 100 : 0;') -and
     $runnerText.Contains('MakePerfRunnerExecutionBudget') -and
     $runnerText.Contains('Budget.FuelPerEntry = UINT64_C(4) << 30;') -and
     $runnerText.Contains('Budget.EpochDeadlineTicks = 1;') -and
@@ -301,7 +317,7 @@ Assert-True (
     $runnerText.Contains('Budget.MaxLinearMemoryBytes = UINT64_C(64) << 20;') -and
     $runnerText.Contains('Budget.MaxHostCallsPerEntry = MAX_uint32;') -and
     $runnerText.Contains('Session.SetExecutionBudgetForTesting(')) `
-    '正式 benchmark 可提高 fuel/Host-call 上限，但不得关闭 epoch 与线性内存边界或改变生产默认值。'
+    '发布包 benchmark 必须使用受证明的生产 cooperative 预算；非发布测试覆盖仍须保留 epoch 与线性内存边界。'
 Assert-True (
     $runnerText.Contains('GetExpectedDataOrientedHostCallCount') -and
     $runnerText.Contains('Observation.HostImportCallCount != ExpectedHostImportCallCount')) `

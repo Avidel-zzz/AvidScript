@@ -11,6 +11,8 @@
   "build_script_path": "Plugins/AvidScript/Build/BuildCSharpActorLifecycle.ps1",
   "configuration": "Release",
   "data_lane_fusion": "enabled",
+  "cooperative_safepoints": "enabled",
+  "cooperative_safepoint_interval": 1024,
   "binding_profile": {
     "package_name": "avidscript.benchmark.p54_6.s1",
     "self_class_path": "/Script/AvidScriptPerfHarness.AvidScriptPerfFixture",
