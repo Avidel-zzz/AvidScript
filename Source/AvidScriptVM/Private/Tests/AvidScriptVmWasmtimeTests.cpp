@@ -8,6 +8,8 @@
 #include "AvidScriptWasmtimeCompilerProfile.h"
 #include "AvidScriptWasmtimeRuntimeSupport.h"
 
+#include "Async/Async.h"
+#include "HAL/PlatformProcess.h"
 #include "Misc/AutomationTest.h"
 
 #ifndef AVIDSCRIPT_WITH_WASMTIME
@@ -2185,6 +2187,74 @@ bool FAvidScriptVmWasmtimeArtifactCompilerTest::RunTest(
 			CooperativeSafeHandle,
 			EmptyCooperativeFrame,
 			LoadError));
+
+	TUniquePtr<IAvidScriptVmBackend> CooperativeInterruptBackend =
+		CreateWasmtimePrecompiledBackendForTest(LoadError);
+	if (!TestNotNull(
+		TEXT("cooperative interrupt backend is created"),
+		CooperativeInterruptBackend.Get()))
+	{
+		return false;
+	}
+	FAvidScriptVmLoadConfig CooperativeInterruptConfig;
+	CooperativeInterruptConfig.ExecutionBudget.CooperativeTimeoutMilliseconds =
+		2000;
+	if (!TestTrue(
+		TEXT("cooperative interrupt backend loads"),
+		CooperativeInterruptBackend->LoadArtifact(
+			VerifiedTrustedResult.Artifact.MakeView(
+				EAvidScriptVmArtifactTrust::VerifiedPackage),
+			TEXT("wasmtime_artifact_compiler_cooperative_interrupt"),
+			CooperativeInterruptConfig,
+			LoadError)))
+	{
+		AddError(LoadError.Category + TEXT(": ") + LoadError.Details);
+		return false;
+	}
+	FAvidScriptVmExportHandle CooperativeInterruptSpinHandle;
+	TestTrue(
+		TEXT("cooperative interrupt spin export resolves"),
+		CooperativeInterruptBackend->ResolveExport(
+			TEXT("avid_spin"),
+			CooperativeInterruptSpinHandle,
+			LoadError));
+	FAvidScriptVmError CooperativeCallError;
+	TFuture<bool> CooperativeCall = Async(
+		EAsyncExecution::Thread,
+		[&CooperativeInterruptBackend,
+			CooperativeInterruptSpinHandle,
+			&EmptyCooperativeFrame,
+			&CooperativeCallError]()
+		{
+			return CooperativeInterruptBackend->Call(
+				CooperativeInterruptSpinHandle,
+				EmptyCooperativeFrame,
+				CooperativeCallError);
+		});
+	bool bInterruptRequested = false;
+	FAvidScriptVmError InterruptRequestError;
+	const double InterruptRequestDeadline = FPlatformTime::Seconds() + 1.0;
+	while (!bInterruptRequested
+		&& FPlatformTime::Seconds() < InterruptRequestDeadline)
+	{
+		bInterruptRequested =
+			CooperativeInterruptBackend->RequestInterrupt(
+				InterruptRequestError);
+		if (!bInterruptRequested)
+		{
+			FPlatformProcess::SleepNoStats(0.001f);
+		}
+	}
+	TestTrue(
+		TEXT("active cooperative entry accepts an interrupt request"),
+		bInterruptRequested);
+	TestFalse(
+		TEXT("cooperative interrupt stops the active guest call"),
+		CooperativeCall.Get());
+	TestEqual(
+		TEXT("cooperative interrupt has the standard stable category"),
+		CooperativeCallError.Category,
+		FString(TEXT("execution_interrupted")));
 
 	FAvidScriptVmArtifactCompileResult CachedResult;
 	if (!TestTrue(
