@@ -331,6 +331,9 @@ foreach ($preparedWorkload in @(
 }
 Assert-True ($runnerFusedMatrix.Contains('ObjectRoundtrip')) `
     'Runner fused generated oracle 必须覆盖 packed object roundtrip。'
+Assert-True ($runnerFusedMatrix.Contains(
+        'Counts.ScalarPropertyCount + Counts.ObjectCount + Counts.EventCount')) `
+    'Gameplay fused generated oracle 必须计入 packed object 操作。'
 Assert-True ($runnerAdaptiveMatrix.Contains(
         'return GetExpectedLogicalOperationCount(Workload, Iterations);') -and
     $evaluatorAdaptiveMatrix.Contains(

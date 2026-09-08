@@ -1771,7 +1771,7 @@ namespace
 					Workload,
 					Iterations);
 			const uint64 TypedShapeCount =
-				Counts.ScalarPropertyCount + Counts.EventCount;
+				Counts.ScalarPropertyCount + Counts.ObjectCount + Counts.EventCount;
 			return bDataLane
 				? TypedShapeCount - Counts.PropertyWriteCount
 				: TypedShapeCount;
