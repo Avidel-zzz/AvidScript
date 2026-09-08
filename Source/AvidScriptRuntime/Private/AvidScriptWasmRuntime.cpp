@@ -860,7 +860,9 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 	for (const FAvidScriptPreparedReflectionBinding& Binding
 		: ReflectionBindings)
 	{
-		const bool bScalar = Binding.TypedHostImport.Shape
+		const bool bScalarUnary = Binding.TypedHostImport.Shape
+			== EAvidScriptVmTypedHostShape::SelfI32ToGuestI32;
+		const bool bScalarPair = Binding.TypedHostImport.Shape
 			== EAvidScriptVmTypedHostShape::SelfI32PairToGuestI32;
 		const bool bProperty = Binding.TypedHostImport.Shape
 			== EAvidScriptVmTypedHostShape::SelfPropertyI32GetSet;
@@ -869,7 +871,10 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 		const bool bObject = Binding.TypedHostImport.Shape
 			== EAvidScriptVmTypedHostShape::StableObjectRoundtrip;
 		const bool bShapeTargetMatches =
-			(bScalar
+			(bScalarUnary
+				&& Binding.NativeGuard != nullptr
+				&& Binding.I32Call != nullptr)
+			|| (bScalarPair
 				&& Binding.NativeGuard != nullptr
 				&& Binding.I32PairCall != nullptr)
 			|| (bProperty
@@ -904,7 +909,13 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 		FAvidScriptVmTypedHostImport& Import =
 			TypedHostImports.Add_GetRef(Binding.TypedHostImport);
 		Import.PreparedTarget.Context = Call.Get();
-		if (bScalar)
+		if (bScalarUnary)
+		{
+			Import.PreparedTarget.SelfI32GuestResult =
+				&FAvidScriptWasmRuntimeInstance::
+					InvokePreparedReflectionSelfI32GuestResult;
+		}
+		else if (bScalarPair)
 		{
 			Import.PreparedTarget.SelfI32PairGuestResult =
 				&FAvidScriptWasmRuntimeInstance::
@@ -5780,6 +5791,119 @@ void FAvidScriptWasmRuntimeInstance::RecordPreparedReflectionInvocation(
 	{
 		++Instrumentation->RequestedNativeDirectFallbackCount;
 	}
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::
+	InvokePreparedReflectionSelfI32GuestResult(
+		void* Context,
+		const int32 SelfSlot,
+		const int32 SelfGeneration,
+		const int32 Value,
+		const int32 GuestAddress,
+		int32& OutStatus)
+{
+	FAvidScriptPreparedReflectionHostCall* Call =
+		static_cast<FAvidScriptPreparedReflectionHostCall*>(Context);
+	if (Call == nullptr || Call->Runtime == nullptr)
+	{
+		OutStatus = 0;
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+	return Call->Runtime->DispatchPreparedReflectionSelfI32GuestResult(
+		*Call,
+		SelfSlot,
+		SelfGeneration,
+		Value,
+		GuestAddress,
+		OutStatus);
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::
+	DispatchPreparedReflectionSelfI32GuestResult(
+		FAvidScriptPreparedReflectionHostCall& Call,
+		const int32 SelfSlot,
+		const int32 SelfGeneration,
+		const int32 Value,
+		const int32 GuestAddress,
+		int32& OutStatus)
+{
+	++HostImportCallCount;
+	OutStatus = 0;
+	if (GuestAddress < 0)
+	{
+		SetPendingHostImportFailure(
+			Call.Binding.TypedHostImport.ModuleName,
+			Call.Binding.TypedHostImport.ImportName,
+			TEXT("The prepared reflection receiver or call-site is unavailable."));
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+
+	bool bUseNative = false;
+	bool bAdaptiveGuardRejected = false;
+	EAvidScriptBindingInvocationMode ActualMode =
+		EAvidScriptBindingInvocationMode::SemanticProcessEvent;
+	UObject* Receiver = nullptr;
+	if (!ResolvePreparedReflectionCallMode(
+			Call,
+			SelfSlot,
+			SelfGeneration,
+			Receiver,
+			bUseNative,
+			ActualMode,
+			bAdaptiveGuardRejected))
+	{
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+
+	int32 ReturnValue = 0;
+	FString ErrorCategory;
+	FString ErrorDetails;
+	if (!Call.Binding.I32Call(
+			Call.Binding.ImmutablePlanIdentity,
+			*Receiver,
+			Value,
+			bUseNative,
+			ReturnValue,
+			ErrorCategory,
+			ErrorDetails))
+	{
+		SetPendingHostImportFailure(
+			Call.Binding.TypedHostImport.ModuleName,
+			Call.Binding.TypedHostImport.ImportName,
+			ErrorDetails,
+			ErrorCategory.IsEmpty()
+				? TEXT("host_import_failed")
+				: *ErrorCategory);
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+
+	IAvidScriptVmGuestMemory* GuestMemory =
+		VmBackend ? VmBackend->GetGuestMemory() : nullptr;
+	FString MemoryError;
+	if (GuestMemory == nullptr
+		|| !GuestMemory->WriteBytes(
+			static_cast<uint32>(GuestAddress),
+			MakeArrayView(
+				reinterpret_cast<const uint8*>(&ReturnValue),
+				sizeof(ReturnValue)),
+			MemoryError))
+	{
+		SetPendingHostImportFailure(
+			Call.Binding.TypedHostImport.ModuleName,
+			Call.Binding.TypedHostImport.ImportName,
+			MemoryError.IsEmpty()
+				? FString(TEXT("The prepared reflection return write failed."))
+				: MoveTemp(MemoryError));
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+
+	OutStatus = 1;
+	RecordPreparedReflectionInvocation(
+		ActualMode,
+		bAdaptiveGuardRejected);
+	return EAvidScriptVmTypedHostStatus::Succeeded;
 }
 
 EAvidScriptVmTypedHostStatus

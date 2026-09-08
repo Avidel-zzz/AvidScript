@@ -12,6 +12,7 @@ namespace UE::AvidScript::BindingPrivate
 namespace
 {
 constexpr int32 ScalarI32PairFrameSize = 3 * sizeof(int32);
+constexpr int32 ScalarI32FrameSize = 2 * sizeof(int32);
 constexpr int32 PreparedTrivialFrameCapacity = 128;
 
 bool HasEditorClassGenerator(const UClass& Class)
@@ -539,6 +540,60 @@ bool InvokePreparedScalarFrame(
 	return true;
 }
 
+bool InvokePreparedScalarUnaryFrame(
+	const FFastPathPlan& Plan,
+	UObject& Target,
+	const int32 Value,
+	const bool bNative,
+	int32& OutValue,
+	FString& OutErrorCategory,
+	FString& OutErrorDetails)
+{
+	alignas(int32) uint8 Frame[ScalarI32FrameSize] = {};
+	FMemory::Memcpy(
+		Frame + Plan.ParameterFrameOffsets[0],
+		&Value,
+		sizeof(Value));
+	if (bNative)
+	{
+		FFrame Stack(
+			&Target,
+			Plan.Function,
+			Frame,
+			nullptr,
+			Plan.Function->ChildProperties);
+		Stack.Code = nullptr;
+		checkSlow(
+			!Plan.Function->GetOwnerClass()->IsChildOf(
+				UInterface::StaticClass()));
+		FNativeFuncPtr NativeFunction = Plan.NativeFunction;
+		checkSlow(NativeFunction != nullptr);
+		TGuardValue<UFunction*> NativeFunctionGuard(
+			Stack.CurrentNativeFunction,
+			Plan.Function);
+		NativeFunction(
+			&Target,
+			Stack,
+			Frame + Plan.ReturnFrameOffset);
+		if (Stack.bAbortingExecution)
+		{
+			OutErrorCategory = TEXT("binding_adaptive_native_aborted");
+			OutErrorDetails =
+				TEXT("The prepared native UFUNCTION invocation aborted execution.");
+			return false;
+		}
+	}
+	else
+	{
+		Target.ProcessEvent(Plan.Function, Frame);
+	}
+	FMemory::Memcpy(
+		&OutValue,
+		Frame + Plan.ReturnFrameOffset,
+		sizeof(OutValue));
+	return true;
+}
+
 bool InvokePreparedTrivialFrame(
 	const FFastPathPlan& Plan,
 	UObject& Target,
@@ -1019,6 +1074,36 @@ bool ValidatePreparedNativeCallCell(
 	return Plan.Kind != EAvidScriptBindingFastPathKind::None
 		&& Plan.bAdaptiveNativeEligible
 		&& CanInvokePreparedNative(Plan, Target, nullptr, nullptr);
+}
+
+bool InvokePreparedScalarI32CallCell(
+	const FFastPathPlan& Plan,
+	UObject& Target,
+	const int32 Value,
+	const bool bUseNative,
+	int32& OutValue,
+	FString& OutErrorCategory,
+	FString& OutErrorDetails)
+{
+	OutValue = 0;
+	if (Plan.Kind != EAvidScriptBindingFastPathKind::ScalarI32ToI32
+		|| Plan.Function == nullptr
+		|| (bUseNative && !Plan.bAdaptiveNativeEligible))
+	{
+		OutErrorCategory = TEXT("binding_prepared_shape_mismatch");
+		OutErrorDetails =
+			TEXT("The prepared reflection call cell is not an int32 unary function.");
+		return false;
+	}
+
+	return InvokePreparedScalarUnaryFrame(
+		Plan,
+		Target,
+		Value,
+		bUseNative,
+		OutValue,
+		OutErrorCategory,
+		OutErrorDetails);
 }
 
 bool InvokePreparedScalarI32PairCallCell(

@@ -101,6 +101,15 @@ bool InvokePreparedScalarI32PairToI32(
 	FString& OutErrorCategory,
 	FString& OutErrorDetails);
 
+bool InvokePreparedScalarI32CallCell(
+	const FFastPathPlan& Plan,
+	UObject& Target,
+	int32 Value,
+	bool bUseNative,
+	int32& OutValue,
+	FString& OutErrorCategory,
+	FString& OutErrorDetails);
+
 bool ValidatePreparedNativeCallCell(
 	const FFastPathPlan& Plan,
 	UObject& Target);

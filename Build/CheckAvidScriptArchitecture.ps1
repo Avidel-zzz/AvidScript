@@ -4666,6 +4666,7 @@ $VmBackendContractSource = Read-RequiredFile 'Source/AvidScriptVM/Public/AvidScr
 $WamrBackendSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWamrBackend.cpp'
 foreach ($PreparedReflectionContract in @(
     'FAvidScriptPreparedReflectionNativeGuard',
+    'FAvidScriptPreparedReflectionI32Call',
     'FAvidScriptPreparedReflectionVectorCall',
     'FAvidScriptPreparedReflectionObjectCall',
     'FAvidScriptPreparedReflectionPropertyI32Get',
@@ -4676,6 +4677,7 @@ foreach ($PreparedReflectionContract in @(
     }
 }
 foreach ($PreparedShapeContract in @(
+    'SelfI32ToGuestI32',
     'SelfI32PairToGuestI32',
     'SelfF32TripleToGuestVector',
     'SelfPropertyI32GetSet',
@@ -4723,6 +4725,7 @@ $PreparedReflectionRuntimeSlice = Get-SourceSlice `
     -EndToken 'FAvidScriptWasmRuntimeInstance::InvokePreparedSelfPropertyI32Get(' `
     -Description 'prepared reflection Runtime hot path'
 foreach ($RequiredPreparedRuntimeContract in @(
+    'Call.Binding.I32Call(',
     'Call.Binding.I32PairCall(',
     'Call.Binding.PropertyI32Get(',
     'Call.Binding.PropertyI32Set(',
@@ -4745,6 +4748,7 @@ foreach ($ForbiddenPreparedRuntimeLookup in @(
     }
 }
 foreach ($RequiredPreparedBindingContract in @(
+    'InvokePreparedScalarI32CallCell',
     'InvokePreparedScalarI32PairCallCell',
     'InvokePreparedVectorCallCell',
     'InvokePreparedObjectCallCell',

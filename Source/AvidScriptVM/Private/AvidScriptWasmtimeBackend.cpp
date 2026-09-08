@@ -1788,6 +1788,37 @@ public:
 		return CompleteTypedInvocation(HostContext, Status);
 	}
 
+	int32 InvokeTypedSelfI32GuestResult(
+		FAvidScriptWasmtimeTypedHostContext& HostContext,
+		const int32 SelfSlot,
+		const int32 SelfGeneration,
+		const int32 Value,
+		const int32 GuestAddress,
+		int32& OutStatus)
+	{
+		if (!TryConsumeHostCallBudget(HostContext.ModuleName, HostContext.ImportName))
+		{
+			return 1;
+		}
+		if (!HostContext.PreparedTarget.IsBoundForShape(HostContext.Shape))
+		{
+			RecordPendingHostFailure(
+				HostContext.ModuleName,
+				HostContext.ImportName,
+				TEXT("The typed unary guest-result import has no prepared target."));
+			return 1;
+		}
+		const EAvidScriptVmTypedHostStatus Status =
+			HostContext.PreparedTarget.SelfI32GuestResult(
+				HostContext.PreparedTarget.Context,
+				SelfSlot,
+				SelfGeneration,
+				Value,
+				GuestAddress,
+				OutStatus);
+		return CompleteTypedInvocation(HostContext, Status);
+	}
+
 	int32 InvokeTypedSelfI32PairGuestResult(
 		FAvidScriptWasmtimeTypedHostContext& HostContext,
 		const int32 SelfSlot,
@@ -2792,6 +2823,31 @@ private:
 		return CompletePreparedTypedInvocation(*HostContext, Status);
 	}
 
+	static int32 TypedSelfI32GuestResultCallback(
+		void* Environment,
+		const int32 SelfSlot,
+		const int32 SelfGeneration,
+		const int32 Value,
+		const int32 GuestAddress,
+		int32* OutStatus)
+	{
+		FAvidScriptWasmtimeTypedHostContext* HostContext =
+			static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
+		if (HostContext == nullptr
+			|| HostContext->Backend == nullptr
+			|| OutStatus == nullptr)
+		{
+			return 1;
+		}
+		return HostContext->Backend->InvokeTypedSelfI32GuestResult(
+			*HostContext,
+			SelfSlot,
+			SelfGeneration,
+			Value,
+			GuestAddress,
+			*OutStatus);
+	}
+
 	static int32 TypedSelfI32PairGuestResultCallback(
 		void* Environment,
 		const int32 SelfSlot,
@@ -3285,6 +3341,9 @@ private:
 			case EAvidScriptVmTypedHostShape::SelfI32PairToI32:
 				ExpectedSignature = TEXT("(iiii)i");
 				break;
+			case EAvidScriptVmTypedHostShape::SelfI32ToGuestI32:
+				ExpectedSignature = TEXT("(iiii)i");
+				break;
 			case EAvidScriptVmTypedHostShape::SelfI32PairToGuestI32:
 				ExpectedSignature = TEXT("(iiiii)i");
 				break;
@@ -3362,6 +3421,9 @@ private:
 			const int32 PreparedFunctionCount =
 				(Import.PreparedTarget.SelfI32 != nullptr ? 1 : 0)
 				+ (Import.PreparedTarget.SelfI32Pair != nullptr ? 1 : 0)
+				+ (Import.PreparedTarget.SelfI32GuestResult != nullptr
+					? 1
+					: 0)
 				+ (Import.PreparedTarget.SelfI32PairGuestResult != nullptr
 					? 1
 					: 0)
@@ -3389,6 +3451,8 @@ private:
 				Import.PreparedTarget.Context != nullptr;
 			const bool bRequiresPreparedTarget =
 				Import.Shape == EAvidScriptVmTypedHostShape::SelfI32ToI32
+				|| Import.Shape
+					== EAvidScriptVmTypedHostShape::SelfI32ToGuestI32
 				|| Import.Shape
 					== EAvidScriptVmTypedHostShape::SelfI32PairToGuestI32
 				|| Import.Shape
@@ -3516,6 +3580,17 @@ private:
 					static_cast<size_t>(ImportNameUtf8.Length()),
 					&TypedSelfI32PairCallback,
 					HostContextPointer);
+				break;
+			case EAvidScriptVmTypedHostShape::SelfI32ToGuestI32:
+				DefineFailure =
+					avidscript_wasmtime_linker_define_self_i32_guest_result(
+						Linker,
+						ModuleNameUtf8.Get(),
+						static_cast<size_t>(ModuleNameUtf8.Length()),
+						ImportNameUtf8.Get(),
+						static_cast<size_t>(ImportNameUtf8.Length()),
+						&TypedSelfI32GuestResultCallback,
+						HostContextPointer);
 				break;
 			case EAvidScriptVmTypedHostShape::SelfI32PairToGuestI32:
 				DefineFailure =

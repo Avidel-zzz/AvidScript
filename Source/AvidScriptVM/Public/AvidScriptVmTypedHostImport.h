@@ -24,6 +24,7 @@ enum class EAvidScriptVmTypedHostShape : uint8
 	SelfVectorRefOut,
 	StableObjectRoundtrip,
 	CommandBufferSubmit,
+	SelfI32ToGuestI32,
 	SelfI32PairToGuestI32,
 	SelfF32TripleToGuestVector,
 	PackedStableObjectRoundtrip
@@ -67,6 +68,15 @@ using FAvidScriptVmPreparedSelfI32PairGuestResultTarget =
 		int32 SelfGeneration,
 		int32 Left,
 		int32 Right,
+		int32 GuestAddress,
+		int32& OutStatus);
+
+using FAvidScriptVmPreparedSelfI32GuestResultTarget =
+	EAvidScriptVmTypedHostStatus (*)(
+		void* Context,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 Value,
 		int32 GuestAddress,
 		int32& OutStatus);
 
@@ -181,6 +191,8 @@ struct AVIDSCRIPTVM_API FAvidScriptVmPreparedTypedHostTarget
 	void* Context = nullptr;
 	FAvidScriptVmPreparedSelfI32Target SelfI32 = nullptr;
 	FAvidScriptVmPreparedSelfI32PairTarget SelfI32Pair = nullptr;
+	FAvidScriptVmPreparedSelfI32GuestResultTarget
+		SelfI32GuestResult = nullptr;
 	FAvidScriptVmPreparedSelfI32PairGuestResultTarget
 		SelfI32PairGuestResult = nullptr;
 	FAvidScriptVmPreparedSelfF32TripleGuestVectorTarget
@@ -213,6 +225,8 @@ struct AVIDSCRIPTVM_API FAvidScriptVmPreparedTypedHostTarget
 			return SelfI32 != nullptr;
 		case EAvidScriptVmTypedHostShape::SelfI32PairToI32:
 			return SelfI32Pair != nullptr;
+		case EAvidScriptVmTypedHostShape::SelfI32ToGuestI32:
+			return SelfI32GuestResult != nullptr;
 		case EAvidScriptVmTypedHostShape::SelfI32PairToGuestI32:
 			return SelfI32PairGuestResult != nullptr;
 		case EAvidScriptVmTypedHostShape::SelfF32TripleToGuestVector:
@@ -254,6 +268,7 @@ struct AVIDSCRIPTVM_API FAvidScriptVmPreparedTypedHostTarget
 	{
 		return SelfI32 != nullptr
 			|| SelfI32Pair != nullptr
+			|| SelfI32GuestResult != nullptr
 			|| SelfI32PairGuestResult != nullptr
 			|| SelfF32TripleGuestVector != nullptr
 			|| SelfGuestAddress != nullptr

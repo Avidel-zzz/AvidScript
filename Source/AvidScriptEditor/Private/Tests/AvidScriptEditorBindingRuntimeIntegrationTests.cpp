@@ -4952,6 +4952,42 @@ bool FAvidScriptEditorBindingRuntimeTypedThunkTest::RunTest(const FString& Param
 		FloatFastPath,
 		EAvidScriptBindingFastPathKind::None);
 
+	TArray<FAvidScriptPreparedReflectionBinding> PreparedBindings;
+	FString PreparedBindingError;
+	if (!TestTrue(
+			TEXT("Typed thunk package publishes prepared reflection imports"),
+			Package->BuildPreparedReflectionBindings(
+				PreparedBindings,
+				PreparedBindingError)))
+	{
+		AddError(PreparedBindingError);
+		return false;
+	}
+	TestEqual(
+		TEXT("Unary and pair scalar functions publish prepared imports"),
+		PreparedBindings.Num(),
+		3);
+	const FAvidScriptPreparedReflectionBinding* PreparedNoOp =
+		PreparedBindings.FindByPredicate(
+			[NoOpBinding](
+				const FAvidScriptPreparedReflectionBinding& Binding)
+			{
+				return Binding.BindingOrdinal == NoOpBinding->Ordinal;
+			});
+	if (!TestNotNull(
+			TEXT("Unary scalar prepared import is present"),
+			PreparedNoOp))
+	{
+		return false;
+	}
+	TestEqual(
+		TEXT("Unary scalar prepared import uses the fixed guest-result ABI"),
+		PreparedNoOp->TypedHostImport.Shape,
+		EAvidScriptVmTypedHostShape::SelfI32ToGuestI32);
+	TestTrue(
+		TEXT("Unary scalar prepared import owns an immutable call cell"),
+		PreparedNoOp->I32Call != nullptr);
+
 	UClass* TestClass = LoadObject<UClass>(nullptr, *TestClassPath);
 	if (!TestNotNull(TEXT("Typed thunk test class loads"), TestClass))
 	{

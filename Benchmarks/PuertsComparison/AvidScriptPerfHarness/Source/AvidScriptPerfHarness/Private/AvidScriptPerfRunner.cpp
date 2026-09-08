@@ -1715,10 +1715,6 @@ namespace
 		check(Iterations > 0);
 		switch (Workload)
 		{
-		case EAvidScriptPerfWorkload::ScalarNoOp:
-			return bSemanticLane
-				? static_cast<uint64>(Iterations)
-				: 0;
 		case EAvidScriptPerfWorkload::VectorRefOut:
 			return bSemanticLane
 				? static_cast<uint64>(Iterations)
@@ -1739,6 +1735,7 @@ namespace
 		}
 		switch (Workload)
 		{
+		case EAvidScriptPerfWorkload::ScalarNoOp:
 		case EAvidScriptPerfWorkload::ScalarAddInt32:
 		case EAvidScriptPerfWorkload::VectorValue:
 		case EAvidScriptPerfWorkload::ObjectRoundtrip:

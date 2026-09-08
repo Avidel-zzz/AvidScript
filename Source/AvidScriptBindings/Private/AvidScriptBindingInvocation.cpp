@@ -293,6 +293,33 @@ bool ValidateAvidScriptPreparedReflectionPropertyGuard(
 			Receiver);
 }
 
+bool InvokeAvidScriptPreparedReflectionI32Call(
+	const void* InvocationCell,
+	UObject& Receiver,
+	const int32 Value,
+	const bool bUseNative,
+	int32& OutValue,
+	FString& OutErrorCategory,
+	FString& OutErrorDetails)
+{
+	const auto* Plan = static_cast<const
+		FAvidScriptRuntimeBindingInvocationPlan*>(InvocationCell);
+	if (Plan == nullptr)
+	{
+		OutErrorCategory = TEXT("binding_prepared_identity_mismatch");
+		OutErrorDetails = TEXT("The prepared reflection call cell is unavailable.");
+		return false;
+	}
+	return UE::AvidScript::BindingPrivate::InvokePreparedScalarI32CallCell(
+		Plan->FastPath,
+		Receiver,
+		Value,
+		bUseNative,
+		OutValue,
+		OutErrorCategory,
+		OutErrorDetails);
+}
+
 bool InvokeAvidScriptPreparedReflectionI32PairCall(
 	const void* InvocationCell,
 	UObject& Receiver,
@@ -5707,7 +5734,9 @@ bool FAvidScriptBindingPackage::BuildPreparedReflectionBindings(
 		{
 			continue;
 		}
-		const bool bScalar = Plan.FastPath.Kind
+		const bool bScalarUnary = Plan.FastPath.Kind
+			== EAvidScriptBindingFastPathKind::ScalarI32ToI32;
+		const bool bScalarPair = Plan.FastPath.Kind
 			== EAvidScriptBindingFastPathKind::ScalarI32PairToI32;
 		const bool bVector = Plan.FastPath.Kind
 			== EAvidScriptBindingFastPathKind::VectorValueToVector;
@@ -5725,7 +5754,8 @@ bool FAvidScriptBindingPackage::BuildPreparedReflectionBindings(
 			&& Plan.Parameters.Num() == 1
 			&& Plan.Parameters[0].Kind
 				== EAvidScriptRuntimeBindingKind::Int32;
-		if (!bScalar
+		if (!bScalarUnary
+			&& !bScalarPair
 			&& !bVector
 			&& !bObject
 			&& !bPropertyRead
@@ -5735,7 +5765,9 @@ bool FAvidScriptBindingPackage::BuildPreparedReflectionBindings(
 		}
 		const FAvidScriptVmDynamicImport& DynamicImport =
 			Impl->VmPackage.Imports[PlanIndex];
-		const TCHAR* ExpectedSignature = bVector
+		const TCHAR* ExpectedSignature = bScalarUnary
+			? TEXT("(iiii)i")
+			: bVector
 			? TEXT("(iifffi)i")
 			: (bPropertyRead || bPropertyWrite)
 				? TEXT("(iii)i")
@@ -5775,7 +5807,16 @@ bool FAvidScriptBindingPackage::BuildPreparedReflectionBindings(
 			DynamicImport.ImportName;
 		Binding.TypedHostImport.Signature =
 			DynamicImport.Signature;
-		if (bScalar)
+		if (bScalarUnary)
+		{
+			Binding.NativeGuard =
+				&ValidateAvidScriptPreparedReflectionNativeGuard;
+			Binding.I32Call =
+				&InvokeAvidScriptPreparedReflectionI32Call;
+			Binding.TypedHostImport.Shape =
+				EAvidScriptVmTypedHostShape::SelfI32ToGuestI32;
+		}
+		else if (bScalarPair)
 		{
 			Binding.NativeGuard =
 				&ValidateAvidScriptPreparedReflectionNativeGuard;

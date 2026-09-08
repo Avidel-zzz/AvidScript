@@ -566,6 +566,22 @@ private:
 		int32 Right,
 		int32& OutValue);
 	static EAvidScriptVmTypedHostStatus
+		InvokePreparedReflectionSelfI32GuestResult(
+			void* Context,
+			int32 SelfSlot,
+			int32 SelfGeneration,
+			int32 Value,
+			int32 GuestAddress,
+			int32& OutStatus);
+	EAvidScriptVmTypedHostStatus
+		DispatchPreparedReflectionSelfI32GuestResult(
+			FAvidScriptPreparedReflectionHostCall& Call,
+			int32 SelfSlot,
+			int32 SelfGeneration,
+			int32 Value,
+			int32 GuestAddress,
+			int32& OutStatus);
+	static EAvidScriptVmTypedHostStatus
 		InvokePreparedReflectionSelfI32PairGuestResult(
 			void* Context,
 			int32 SelfSlot,

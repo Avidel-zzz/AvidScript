@@ -158,6 +158,16 @@ using FAvidScriptPreparedReflectionVectorCall =
 		FString& OutErrorCategory,
 		FString& OutErrorDetails);
 
+using FAvidScriptPreparedReflectionI32Call =
+	bool (*)(
+		const void* InvocationCell,
+		UObject& Receiver,
+		int32 Value,
+		bool bUseNative,
+		int32& OutValue,
+		FString& OutErrorCategory,
+		FString& OutErrorDetails);
+
 using FAvidScriptPreparedReflectionObjectCall =
 	bool (*)(
 		const void* InvocationCell,
@@ -181,6 +191,7 @@ struct FAvidScriptPreparedReflectionBinding
 	UClass* ExpectedClass = nullptr;
 	const void* ImmutablePlanIdentity = nullptr;
 	FAvidScriptPreparedReflectionNativeGuard NativeGuard = nullptr;
+	FAvidScriptPreparedReflectionI32Call I32Call = nullptr;
 	FAvidScriptPreparedReflectionI32PairCall I32PairCall = nullptr;
 	FAvidScriptPreparedReflectionVectorCall VectorCall = nullptr;
 	FAvidScriptPreparedReflectionObjectCall ObjectCall = nullptr;
