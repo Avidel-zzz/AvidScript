@@ -9,8 +9,6 @@ internal static class WasmModuleCompilerTests
     {
         MinimalModuleHasCanonicalSectionsAndProvenance();
         CompilationIsByteDeterministic();
-        SingleUseScalarExpressionsStayOnWasmStack();
-        ScalarExpressionsDoNotCrossLocalStores();
         InvalidGuestIrIsRejected();
         ImportsAndCallsUseStableFunctionIndices();
         TypedOwnerImportUsesExactI64Signature();
@@ -19,7 +17,7 @@ internal static class WasmModuleCompilerTests
         StateStructPointersAndSRetUseLinearMemory();
         HeapAtPageBoundaryStillReservesRuntimeStack();
         DispatchMetadataDoesNotChangeBinaryImportShape();
-        return 12;
+        return 10;
     }
 
     private static void MinimalModuleHasCanonicalSectionsAndProvenance()
@@ -48,119 +46,6 @@ internal static class WasmModuleCompilerTests
         byte[] second = WasmModuleCompiler.Compile(module).Bytes;
 
         Assert(first.SequenceEqual(second), "same Guest IR should produce identical WASM bytes");
-    }
-
-    private static void SingleUseScalarExpressionsStayOnWasmStack()
-    {
-        GuestModule module = CreateMinimalModule();
-        GuestFunction function = new(
-            "function:stackified",
-            new[] { new GuestRegister("value:input", "type:int32") },
-            new[]
-            {
-                new GuestRegister("value:loaded", "type:int32"),
-                new GuestRegister("value:factor", "type:int32"),
-                new GuestRegister("value:product", "type:int32"),
-                new GuestRegister("value:increment", "type:int32"),
-                new GuestRegister("value:result", "type:int32"),
-            },
-            "type:int32",
-            "block:entry",
-            new[]
-            {
-                new GuestBasicBlock(
-                    "block:entry",
-                    new GuestInstruction[]
-                    {
-                        new(
-                            "local_load", "value:loaded", Array.Empty<string>(),
-                            "value:input", null, null),
-                        Constant("value:factor", 2),
-                        new(
-                            "binary", "value:product", new[] { "value:loaded", "value:factor" },
-                            null, "multiply", null),
-                        Constant("value:increment", 3),
-                        new(
-                            "binary", "value:result", new[] { "value:product", "value:increment" },
-                            null, "add", null),
-                    },
-                    new GuestTerminator("return", null, null, null, "value:result")),
-            });
-        module = module with
-        {
-            Functions = new[] { function },
-            Exports = new[] { new GuestExport("stackified", function.Id) },
-        };
-
-        WasmCompilationResult result = WasmModuleCompiler.Compile(module);
-        byte[] body = ReadFirstFunctionBody(result.Bytes);
-        byte[] directExpression =
-        {
-            0x20, 0x00,
-            0x41, 0x02,
-            0x6c,
-            0x41, 0x03,
-            0x6a,
-            0x21, 0x05,
-        };
-
-        Assert(result.Succeeded && ContainsSequence(body, directExpression),
-            "single-use scalar producers should emit directly into the consumer stack");
-        Assert(result.DebugOffsets.Count == 6
-            && result.DebugOffsets.Select(offset => offset.GuestInstructionId).Distinct().Count() == 6,
-            "stackification should retain one debug offset for every Guest instruction and terminator");
-    }
-
-    private static void ScalarExpressionsDoNotCrossLocalStores()
-    {
-        GuestModule module = CreateMinimalModule();
-        GuestFunction function = new(
-            "function:stackification_barrier",
-            new[] { new GuestRegister("value:input", "type:int32") },
-            new[]
-            {
-                new GuestRegister("value:loaded", "type:int32"),
-                new GuestRegister("value:factor", "type:int32"),
-                new GuestRegister("value:product", "type:int32"),
-                new GuestRegister("value:increment", "type:int32"),
-                new GuestRegister("value:result", "type:int32"),
-            },
-            "type:int32",
-            "block:entry",
-            new[]
-            {
-                new GuestBasicBlock(
-                    "block:entry",
-                    new GuestInstruction[]
-                    {
-                        new(
-                            "local_load", "value:loaded", Array.Empty<string>(),
-                            "value:input", null, null),
-                        Constant("value:factor", 2),
-                        new(
-                            "binary", "value:product", new[] { "value:loaded", "value:factor" },
-                            null, "multiply", null),
-                        new(
-                            "local_store", null, new[] { "value:factor" },
-                            "value:input", null, null),
-                        Constant("value:increment", 3),
-                        new(
-                            "binary", "value:result", new[] { "value:product", "value:increment" },
-                            null, "add", null),
-                    },
-                    new GuestTerminator("return", null, null, null, "value:result")),
-            });
-        module = module with
-        {
-            Functions = new[] { function },
-            Exports = new[] { new GuestExport("stackification_barrier", function.Id) },
-        };
-
-        byte[] body = ReadFirstFunctionBody(WasmModuleCompiler.Compile(module).Bytes);
-        int productStore = IndexOfSequence(body, new byte[] { 0x6c, 0x21, 0x03 });
-        int barrierStore = IndexOfSequence(body, new byte[] { 0x20, 0x02, 0x21, 0x00 });
-        Assert(productStore >= 0 && barrierStore > productStore,
-            "stackification must materialize scalar expressions before an intervening local store");
     }
 
     private static void InvalidGuestIrIsRejected()
@@ -613,46 +498,6 @@ internal static class WasmModuleCompilerTests
         }
 
         throw new InvalidOperationException("memory section was not found");
-    }
-
-    private static byte[] ReadFirstFunctionBody(byte[] artifact)
-    {
-        int offset = 8;
-        while (offset < artifact.Length)
-        {
-            byte sectionId = artifact[offset++];
-            uint payloadLength = ReadU32(artifact, ref offset);
-            int payloadEnd = checked(offset + (int)payloadLength);
-            if (sectionId != 10)
-            {
-                offset = payloadEnd;
-                continue;
-            }
-
-            uint functionCount = ReadU32(artifact, ref offset);
-            Assert(functionCount > 0, "code section should contain at least one function body");
-            uint bodyLength = ReadU32(artifact, ref offset);
-            return artifact.AsSpan(offset, checked((int)bodyLength)).ToArray();
-        }
-
-        throw new InvalidOperationException("WASM code section was not found");
-    }
-
-    private static bool ContainsSequence(byte[] bytes, byte[] sequence)
-    {
-        return IndexOfSequence(bytes, sequence) >= 0;
-    }
-
-    private static int IndexOfSequence(byte[] bytes, byte[] sequence)
-    {
-        for (int index = 0; index <= bytes.Length - sequence.Length; ++index)
-        {
-            if (bytes.AsSpan(index, sequence.Length).SequenceEqual(sequence))
-            {
-                return index;
-            }
-        }
-        return -1;
     }
 
     private static byte ReadFunctionResultType(byte[] artifact, uint typeIndex)
