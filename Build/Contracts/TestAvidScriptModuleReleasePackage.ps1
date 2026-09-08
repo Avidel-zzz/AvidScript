@@ -308,8 +308,7 @@ try {
         $Runtime = Get-Content -Raw -LiteralPath (
             Join-Path $Published.PackageRoot 'runtime.avidscript.json') | ConvertFrom-Json -Depth 32
         $GuestIrProperties = @($Runtime.guest_ir.PSObject.Properties.Name | Sort-Object)
-        if ([string]::Join(',', $GuestIrProperties) -cne 'module_id,sha256' -or
-            [string]$Runtime.guest_ir.module_id -cne 'fixture.module' -or
+        if ([string]::Join(',', $GuestIrProperties) -cne 'sha256' -or
             [string]$Runtime.execution.cooperative_safepoints.guest_ir_sha256 -cne
                 [string]$Runtime.guest_ir.sha256 -or
             $Runtime.PSObject.Properties.Name -ccontains 'source' -or
@@ -321,11 +320,11 @@ try {
         }
     }
 
-    Invoke-ReleaseContract 'cooperative Guest IR module drift is rejected' {
+    Invoke-ReleaseContract 'cooperative Guest IR hash drift is rejected' {
         $Fixture = New-ReleaseFixture `
-            -Name 'CooperativeModuleDrift' `
+            -Name 'CooperativeGuestIrHashDrift' `
             -CooperativeSafepoints
-        $Fixture.RuntimeManifest.guest_ir.module_id = 'different.module'
+        $Fixture.RuntimeManifest.execution.cooperative_safepoints.guest_ir_sha256 = ('8' * 64)
         Write-TestJson -Path $Fixture.RuntimeManifestPath -Value $Fixture.RuntimeManifest
         Assert-ReleaseRejected -Pattern 'provenance is inconsistent' -Body {
             Publish-AvidScriptModuleReleasePackage `

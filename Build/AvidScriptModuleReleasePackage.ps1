@@ -979,7 +979,6 @@ function Publish-AvidScriptModuleReleasePackage {
             -not (Test-AvidScriptModuleReleaseJsonInteger $CooperativeSafepoints.site_count) -or
             $SiteCount -lt 0 -or
             $SiteCount -ne ($LoopPollBlocks + $RecursiveFunctions) -or
-            [string]$RuntimeManifest.guest_ir.module_id -cne $ModuleId -or
             [string]$CooperativeSafepoints.guest_ir_sha256 -cne
                 [string]$RuntimeManifest.guest_ir.sha256) {
             throw 'Runtime manifest cooperative safepoint provenance is inconsistent.'
@@ -1202,7 +1201,6 @@ function Publish-AvidScriptModuleReleasePackage {
         $ReleaseRuntimeManifest | Add-Member `
             -NotePropertyName guest_ir `
             -NotePropertyValue ([pscustomobject][ordered]@{
-            module_id = [string]$RuntimeManifest.guest_ir.module_id
             sha256 = [string]$RuntimeManifest.guest_ir.sha256
         })
     }

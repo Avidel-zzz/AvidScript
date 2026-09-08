@@ -136,7 +136,6 @@ bool ValidateShippingRuntimeProvenance(
 	FAvidScriptRuntimeCooperativeSafepointProvenance Provenance;
 	FString ProvenanceError;
 	const TSharedPtr<FJsonObject>* GuestIr = nullptr;
-	FString GuestIrModuleId;
 	FString GuestIrSha256;
 	return ParseAvidScriptRuntimeCooperativeSafepointProvenance(
 			Root,
@@ -148,9 +147,7 @@ bool ValidateShippingRuntimeProvenance(
 		&& Root.TryGetObjectField(TEXT("guest_ir"), GuestIr)
 		&& GuestIr != nullptr
 		&& GuestIr->IsValid()
-		&& HasExactFields(**GuestIr, { TEXT("module_id"), TEXT("sha256") })
-		&& (*GuestIr)->TryGetStringField(TEXT("module_id"), GuestIrModuleId)
-		&& GuestIrModuleId == Package.ModuleId
+		&& HasExactFields(**GuestIr, { TEXT("sha256") })
 		&& (*GuestIr)->TryGetStringField(TEXT("sha256"), GuestIrSha256)
 		&& GuestIrSha256 == Provenance.GuestIrSha256;
 }

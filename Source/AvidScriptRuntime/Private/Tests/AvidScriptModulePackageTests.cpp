@@ -174,7 +174,6 @@ bool WriteShippingFixture(
 		Execution->SetObjectField(TEXT("cooperative_safepoints"), Cooperative);
 
 		TSharedRef<FJsonObject> GuestIr = MakeShared<FJsonObject>();
-		GuestIr->SetStringField(TEXT("module_id"), ModuleId);
 		GuestIr->SetStringField(TEXT("sha256"), GuestIrSha256);
 		RuntimeManifest->SetObjectField(TEXT("guest_ir"), GuestIr);
 	}
