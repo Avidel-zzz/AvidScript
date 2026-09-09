@@ -1003,7 +1003,8 @@ $EditorCSharpBuildPipelineSource = Read-RequiredFile 'Source/AvidScriptEditor/Pr
 $CSharpGuestBuildScript = Read-RequiredFile 'Build/BuildCSharpActorLifecycle.ps1'
 foreach ($RequiredEditorArtifactContract in @(
     'CompileAvidScriptVmArtifact',
-    'CompileRequest.bConsumeFuel = false',
+    'CompileRequest.bConsumeFuel = !SafepointMetadata.bEnabled',
+    'CompileRequest.bEpochInterruption = !SafepointMetadata.bEnabled',
     'wasmtime_serialized_v1',
     'canonical_sha256',
     'compiler_build_identity',

@@ -1112,6 +1112,45 @@ bool FAvidScriptEditorCSharpBuildServiceZeroBindingProfileTest::RunTest(const FS
 	TestTrue(
 		TEXT("Verified cooperative C# Session stops cleanly"),
 		RuntimeSession.StopAndUnload(RuntimeStopResult));
+
+	// 同一前端样本还必须覆盖默认的非协作式编辑器加载路径。
+	Config.bEnableCooperativeSafepoints = false;
+	Config.bDisableCompilationCache = true;
+	if (!TestTrue(
+		TEXT("Ordinary C# profile builds without cooperative safepoints"),
+		FAvidScriptEditorCSharpBuildService::BuildProfile(Config, BuildResult)))
+	{
+		AddError(BuildResult.ErrorMessage);
+		return false;
+	}
+	if (!TestTrue(
+		TEXT("Ordinary C# artifact reloads from its manifest"),
+		FAvidScriptRuntimeArtifactLoader::LoadFromFile(
+			Config.ManifestPath, RuntimeArtifact, RuntimeArtifactResult)))
+	{
+		AddError(RuntimeArtifactResult.CanonicalResult.ErrorMessage);
+		return false;
+	}
+	TestTrue(TEXT("Ordinary C# artifact retains AOT execution"),
+		RuntimeArtifact.bUsesPrecompiledArtifact);
+	TestFalse(TEXT("Ordinary C# artifact has no cooperative proof"),
+		RuntimeArtifact.VmArtifact.bCooperativeSafepointProofVerified);
+	TestEqual(TEXT("Ordinary editor artifact has no persistent package trust"),
+		RuntimeArtifact.ArtifactTrust, EAvidScriptVmArtifactTrust::Untrusted);
+	if (!TestTrue(
+		TEXT("Ordinary precompiled C# artifact enters a Runtime Session"),
+		RuntimeSession.LoadInitialArtifact(RuntimeArtifact, RuntimeLoadResult)))
+	{
+		AddError(RuntimeLoadResult.ErrorMessage);
+		return false;
+	}
+	const FAvidScriptVmLoadConfig::FExecutionBudget& OrdinaryBudget =
+		RuntimeSession.GetLiveRuntimeForTesting()->GetExecutionBudgetForTesting();
+	TestTrue(TEXT("Ordinary Session retains its fuel budget"), OrdinaryBudget.FuelPerEntry > 0);
+	TestTrue(TEXT("Ordinary Session retains its epoch deadline"), OrdinaryBudget.EpochTimeoutMilliseconds > 0);
+	TestEqual(TEXT("Ordinary Session has no cooperative deadline"), OrdinaryBudget.CooperativeTimeoutMilliseconds, 0u);
+	TestTrue(TEXT("Ordinary precompiled C# Session ticks"), RuntimeSession.TickLive(0.01f, RuntimeStopResult));
+	TestTrue(TEXT("Ordinary precompiled C# Session stops cleanly"), RuntimeSession.StopAndUnload(RuntimeStopResult));
 	return true;
 }
 

@@ -61,6 +61,11 @@ PowerShell contracts **16/16** 与三条 clean/generated UBT 路径全部通过�
 完整记录见 [P64 交付](Docs/Phase64/P64_Closeout.md)，类型范围见 [P58 验收](Docs/Phase58/P58.4_Centralized_Gate_Report.md)。
 实现与验收分别记录，限制见[当前边界](#当前边界)。
 
+Windows 最新回归正在收口：普通编辑器 AOT 已修正 fuel 插桩与 Session 预算不一致的问题，
+no-clean 构建与聚焦回归 `9/9` 通过。隔离工程首次完整回归为 `457/467`，
+当前修复与复验见 [D31.C8](Docs/Phase65/P65.D31_Wasmtime_Codegen_Attribution.md#d31c8-普通编辑器-aot-预算一致性)。
+该轮结果不替换上述 P64 归档基线；Android 与 Mac 实机验收暂缓。
+
 ## 架构
 
 ```mermaid

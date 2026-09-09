@@ -349,7 +349,8 @@ bool FAvidScriptEditorVmArtifactPublisher::Publish(
 		EAvidScriptVmArtifactFormat::WasmtimeSerialized;
 	CompileRequest.TargetTriple = Config.VmArtifactTargetTriple;
 	CompileRequest.CanonicalWasmBytes = CanonicalWasmBytes;
-	CompileRequest.bConsumeFuel = false;
+	// 普通编辑器产物保留 Session 所需的 fuel；只有已验证安全点的产物使用协作式预算。
+	CompileRequest.bConsumeFuel = !SafepointMetadata.bEnabled;
 	CompileRequest.bEpochInterruption = !SafepointMetadata.bEnabled;
 	CompileRequest.CooperativeSafepointReceipt =
 		SafepointMetadata.VmReceipt;
