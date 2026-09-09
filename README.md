@@ -28,7 +28,7 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 
 ## 现在可以做什么
 
-更新于 **2026-09-09**。已跑通 **C# → WASM → UE 事件与 API → Win64 打包运行**，
+更新于 **2026-09-10**。已跑通 **C# → WASM → UE 事件与 API → Win64 打包运行**，
 可开始尝试小型玩法 Demo，不需要 `.avid`。**P64 正式 Gate 与 P65.C Shipping 发布 Gate 已完成；
 当前仍不是完整 UE/.NET 替代层。**
 
@@ -61,10 +61,11 @@ PowerShell contracts **16/16** 与三条 clean/generated UBT 路径全部通过�
 完整记录见 [P64 交付](Docs/Phase64/P64_Closeout.md)，类型范围见 [P58 验收](Docs/Phase58/P58.4_Centralized_Gate_Report.md)。
 实现与验收分别记录，限制见[当前边界](#当前边界)。
 
-Windows 最新回归正在收口：普通编辑器 AOT 已修正 fuel 插桩与 Session 预算不一致的问题，
-no-clean 构建与聚焦回归 `9/9` 通过。隔离工程首次完整回归为 `457/467`，
-当前修复与复验见 [D31.C8](Docs/Phase65/P65.D31_Wasmtime_Codegen_Attribution.md#d31c8-普通编辑器-aot-预算一致性)。
-该轮结果不替换上述 P64 归档基线；Android 与 Mac 实机验收暂缓。
+Windows 最新回归 **465/465** 通过，.NET 六组 runner **302/302** 通过；修正了普通编辑器 AOT
+fuel 配置、隔离工程样本路径和 correctness 探针的 gameplay 分帧。详情见
+[D31.C8/C9](Docs/Phase65/P65.D31_Wasmtime_Codegen_Attribution.md#d31c8-普通编辑器-aot-预算一致性)。
+两项依赖 Android target runtime 的交叉测试未选入，Android/Mac 实机验收暂缓；正式性能整组复测
+与公开二进制发布检查仍待完成，P64 归档基线保持独立记录。
 
 ## 架构
 

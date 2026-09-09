@@ -4,6 +4,7 @@ param(
     [string]$Configuration = "Release",
     [string]$SourcePath = "",
     [string]$ProjectPath = "",
+    [string]$ProjectRoot = "",
     [string]$ModuleId = "",
     [string]$ArtifactStem = "",
     [string]$ReportPath = "",
@@ -38,7 +39,10 @@ $ErrorActionPreference = "Stop"
 $BuildDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PluginRoot = Split-Path -Parent $BuildDir
 $ProjectPluginsDir = Split-Path -Parent $PluginRoot
-$ProjectRoot = Split-Path -Parent $ProjectPluginsDir
+if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+    $ProjectRoot = Split-Path -Parent $ProjectPluginsDir
+}
+$ProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
 $DefaultProjectPath = Join-Path $PluginRoot "Samples\CSharp\ActorLifecycle\AvidScript.ActorLifecycle.csproj"
 $DefaultSourcePath = Join-Path $PluginRoot "Samples\CSharp\ActorLifecycle\ActorLifecycleScript.cs"
 $DefaultModuleId = "csharp_actor_lifecycle"

@@ -24,6 +24,8 @@ struct FAvidScriptPerfSmokeResult
 	bool bSucceeded = false;
 	int32 WorkloadCount = 0;
 	int32 IterationsPerWorkload = 0;
+	int32 GameplayFramesPerLane = 0;
+	int32 ValidatedObservationCount = 0;
 	uint32 NativeChecksum = 0;
 	uint32 PuertsReflectionChecksum = 0;
 	uint32 PuertsStaticChecksum = 0;

@@ -24,6 +24,10 @@ bool FAvidScriptPerfFiveLaneCorrectnessTest::RunTest(const FString& Parameters)
 		TEXT("workload count"),
 		Result.WorkloadCount,
 		static_cast<int32>(EAvidScriptPerfWorkload::Count));
+	TestEqual(TEXT("Both gameplay workloads retain all 64 frames per lane"),
+		Result.GameplayFramesPerLane, 128);
+	TestEqual(TEXT("All five lanes validate ten micro workloads and 128 gameplay frames"),
+		Result.ValidatedObservationCount, 690);
 	TestEqual(
 		TEXT("reflection aggregate matches native"),
 		Result.PuertsReflectionChecksum,
@@ -33,7 +37,7 @@ bool FAvidScriptPerfFiveLaneCorrectnessTest::RunTest(const FString& Parameters)
 		Result.PuertsStaticChecksum,
 		Result.NativeChecksum);
 	TestEqual(
-		TEXT("AvidScript WAMR aggregate matches native"),
+		TEXT("AvidScript Wasmtime semantic aggregate matches native"),
 		Result.AvidScriptWasmtimeSemanticChecksum,
 		Result.NativeChecksum);
 	TestEqual(
@@ -41,7 +45,7 @@ bool FAvidScriptPerfFiveLaneCorrectnessTest::RunTest(const FString& Parameters)
 		Result.AvidScriptWasmtimeNativeDirectChecksum,
 		Result.NativeChecksum);
 	TestTrue(
-		TEXT("AvidScript WAMR lane records host calls"),
+		TEXT("AvidScript Wasmtime semantic lane records host calls"),
 		Result.AvidScriptWasmtimeSemanticHostCallCount > 0);
 	TestTrue(
 		TEXT("AvidScript Wasmtime lane records host calls"),

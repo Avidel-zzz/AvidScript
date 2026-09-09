@@ -4715,73 +4715,90 @@ bool FAvidScriptPerfRunner::RunFiveLaneCorrectnessSmoke(
 	for (int32 WorkloadIndex = 0; WorkloadIndex < WorkloadCount; ++WorkloadIndex)
 	{
 		const EAvidScriptPerfWorkload Workload = static_cast<EAvidScriptPerfWorkload>(WorkloadIndex);
-		const uint32 WorkloadSeed = MakePerfRunnerWorkloadSeed(Seed, WorkloadIndex);
-		const FPerfOracle Oracle = RunNativeOracle(
-			*Fixture,
-			Workload,
-			IterationsPerWorkload,
-			WorkloadSeed);
-		for (int32 LaneIndex = 0;
-			LaneIndex < SmokeLaneCount;
-			++LaneIndex)
+		const bool bGameplay = FAvidScriptGameplayFrameBenchmark::IsGameplayWorkload(Workload);
+		const int32 EntryCount = bGameplay ? IterationsPerWorkload : 1;
+		const int32 EntryIterations = bGameplay ? 1 : IterationsPerWorkload;
+		const uint32 BaseSeed = MakePerfRunnerWorkloadSeed(Seed, WorkloadIndex);
+		// 正确性探针保留全部帧，每帧单独进入 guest，遵守实际运行时的每次调用预算。
+		for (int32 EntryIndex = 0; EntryIndex < EntryCount; ++EntryIndex)
 		{
-			const EAvidScriptPerfLane Lane =
-				static_cast<EAvidScriptPerfLane>(LaneIndex);
-			FPerfLaneObservation Observation;
-			if (!RunPerfLane(
-					*Fixture,
-					Reflection,
-					Static,
-					AvidScript,
-					Lane,
-					Workload,
-					IterationsPerWorkload,
-					WorkloadSeed,
-					true,
-					false,
-					Observation,
-					Error) ||
-				!ValidatePerfObservation(
-					Observation,
-					Oracle,
-					Workload,
-					IterationsPerWorkload,
-					0.25,
-					Error))
+			const uint32 WorkloadSeed = EntryIndex == 0
+				? BaseSeed
+				: PerfRunnerMix(BaseSeed ^ static_cast<uint32>(EntryIndex)) & PerfRunnerExactSeedMask;
+			if (bGameplay)
 			{
-				OutResult.Error = MoveTemp(Error);
-				return false;
+				++OutResult.GameplayFramesPerLane;
 			}
-
-			switch (Lane)
+			const FPerfOracle Oracle = RunNativeOracle(
+				*Fixture,
+				Workload,
+				EntryIterations,
+				WorkloadSeed);
+			for (int32 LaneIndex = 0;
+				LaneIndex < SmokeLaneCount;
+				++LaneIndex)
 			{
-			case EAvidScriptPerfLane::NativeCpp:
-				NativeAggregate = PerfRunnerMix(
-					NativeAggregate ^ Observation.Checksum);
-				break;
-			case EAvidScriptPerfLane::PuertsV8Reflection:
-				ReflectionAggregate = PerfRunnerMix(
-					ReflectionAggregate ^ Observation.Checksum);
-				break;
-			case EAvidScriptPerfLane::PuertsV8Static:
-				StaticAggregate = PerfRunnerMix(
-					StaticAggregate ^ Observation.Checksum);
-				break;
-			case EAvidScriptPerfLane::AvidScriptWasmtimeSemantic:
-				AvidScriptWasmtimeSemanticAggregate = PerfRunnerMix(
-					AvidScriptWasmtimeSemanticAggregate ^ Observation.Checksum);
-				AvidScriptWasmtimeSemanticHostCallCount += static_cast<uint64>(
-					Observation.HostImportCallCount);
-				break;
-			case EAvidScriptPerfLane::AvidScriptWasmtimeGeneratedS1:
-				AvidScriptWasmtimeNativeDirectAggregate = PerfRunnerMix(
-					AvidScriptWasmtimeNativeDirectAggregate ^ Observation.Checksum);
-				AvidScriptWasmtimeNativeDirectHostCallCount += static_cast<uint64>(
-					Observation.HostImportCallCount);
-				break;
-			default:
-				checkNoEntry();
-				break;
+				const EAvidScriptPerfLane Lane =
+					static_cast<EAvidScriptPerfLane>(LaneIndex);
+				FPerfLaneObservation Observation;
+				if (!RunPerfLane(
+						*Fixture,
+						Reflection,
+						Static,
+						AvidScript,
+						Lane,
+						Workload,
+						EntryIterations,
+						WorkloadSeed,
+						true,
+						false,
+						Observation,
+						Error) ||
+					!ValidatePerfObservation(
+						Observation,
+						Oracle,
+						Workload,
+						EntryIterations,
+						0.25,
+						Error))
+				{
+					OutResult.Error = FString::Printf(
+						TEXT("Correctness workload=%d lane=%d entry=%d: %s"),
+						WorkloadIndex, LaneIndex, EntryIndex, *Error);
+					return false;
+				}
+
+				++OutResult.ValidatedObservationCount;
+				switch (Lane)
+				{
+				case EAvidScriptPerfLane::NativeCpp:
+					NativeAggregate = PerfRunnerMix(
+						NativeAggregate ^ Observation.Checksum);
+					break;
+				case EAvidScriptPerfLane::PuertsV8Reflection:
+					ReflectionAggregate = PerfRunnerMix(
+						ReflectionAggregate ^ Observation.Checksum);
+					break;
+				case EAvidScriptPerfLane::PuertsV8Static:
+					StaticAggregate = PerfRunnerMix(
+						StaticAggregate ^ Observation.Checksum);
+					break;
+				case EAvidScriptPerfLane::AvidScriptWasmtimeSemantic:
+					AvidScriptWasmtimeSemanticAggregate = PerfRunnerMix(
+						AvidScriptWasmtimeSemanticAggregate ^ Observation.Checksum);
+					AvidScriptWasmtimeSemanticHostCallCount += static_cast<uint64>(
+						Observation.HostImportCallCount);
+					break;
+				case EAvidScriptPerfLane::AvidScriptWasmtimeGeneratedS1:
+					AvidScriptWasmtimeNativeDirectAggregate = PerfRunnerMix(
+						AvidScriptWasmtimeNativeDirectAggregate ^ Observation.Checksum);
+					AvidScriptWasmtimeNativeDirectHostCallCount += static_cast<uint64>(
+						Observation.HostImportCallCount);
+					break;
+				default:
+					checkNoEntry();
+					break;
+				}
 			}
 		}
 	}

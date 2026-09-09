@@ -12,7 +12,10 @@ if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
 }
 $ProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
 $DotNetPath = [System.IO.Path]::GetFullPath($DotNetPath)
-$BuildScript = Join-Path $PSScriptRoot 'BuildCSharpActorLifecycle.ps1'
+$BuildScript = Join-Path $ProjectRoot 'Plugins\AvidScript\Build\BuildCSharpActorLifecycle.ps1'
+$FixtureSampleRoot = Join-Path $ProjectRoot 'Plugins\AvidScript\Samples\CSharp\ActorLifecycle'
+$FixtureSourcePath = Join-Path $FixtureSampleRoot 'ActorLifecycleScript.cs'
+$FixtureProjectPath = Join-Path $FixtureSampleRoot 'AvidScript.ActorLifecycle.csproj'
 $ReleaseRoot = Join-Path $ProjectRoot 'Saved\AvidScriptCSharpGuest\ActorLifecycle'
 $DebugRoot = Join-Path $ProjectRoot 'Saved\AvidScriptCSharpGuest\DebuggerPIE'
 if ([string]::IsNullOrWhiteSpace($ReportPath)) {
@@ -20,7 +23,7 @@ if ([string]::IsNullOrWhiteSpace($ReportPath)) {
 }
 $ReportPath = [System.IO.Path]::GetFullPath($ReportPath)
 
-foreach ($RequiredFile in @($DotNetPath, $BuildScript)) {
+foreach ($RequiredFile in @($DotNetPath, $BuildScript, $FixtureSourcePath, $FixtureProjectPath)) {
     if (-not [System.IO.File]::Exists($RequiredFile)) {
         throw "Required Automation fixture input is missing: $RequiredFile"
     }
@@ -43,6 +46,7 @@ function Invoke-ActorLifecycleFixtureBuild {
 
     $BuildOutput = @(& $BuildScript `
         -DotNetPath $DotNetPath `
+        -ProjectRoot $ProjectRoot `
         -OutputRoot $OutputRoot `
         -Configuration $Configuration `
         -DebugInstrumentation $DebugInstrumentation `
@@ -67,6 +71,22 @@ function Invoke-ActorLifecycleFixtureBuild {
         [string]$BuildReport.result -cne 'direct_abi_built' -or
         [string]$BuildReport.compilation.debug_instrumentation -cne $DebugInstrumentation) {
         throw "$Configuration ActorLifecycle fixture report is inconsistent: $BuildReportPath"
+    }
+
+    $Manifest = Get-Content -Raw -LiteralPath $ManifestPath | ConvertFrom-Json
+    $ResolvedWasm = [System.IO.Path]::GetFullPath(
+        (Join-Path $ProjectRoot ([string]$Manifest.wasm.file)))
+    if (-not $ResolvedWasm.Equals($WasmPath, [StringComparison]::OrdinalIgnoreCase) -or
+        [string]$Manifest.wasm.sha256 -cne
+            (Get-FileHash -Algorithm SHA256 -LiteralPath $WasmPath).Hash.ToLowerInvariant()) {
+        throw "$Configuration ActorLifecycle manifest does not resolve the published WASM from its project root."
+    }
+    $DebugMapPath = [System.IO.Path]::GetFullPath(
+        (Join-Path $ProjectRoot ([string]$Manifest.debug_map.file)))
+    if (-not [System.IO.File]::Exists($DebugMapPath) -or
+        [string]$Manifest.debug_map.sha256 -cne
+            (Get-FileHash -Algorithm SHA256 -LiteralPath $DebugMapPath).Hash.ToLowerInvariant()) {
+        throw "$Configuration ActorLifecycle manifest does not resolve its verified debug map."
     }
 
     return [ordered]@{
