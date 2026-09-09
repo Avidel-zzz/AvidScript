@@ -68,6 +68,10 @@ bool FAvidScriptRuntimeApplicationLifecycleTest::RunTest(
 	TestTrue(
 		TEXT("Suspended Tick is an expected no-op"),
 		Session.Tick(1.0f / 60.0f, SuppressedTick));
+	TestEqual(
+		TEXT("Suspended entry materializes the complete export name"),
+		SuppressedTick.ExportName,
+		FString(TEXT("avid_on_tick")));
 	const FAvidScriptRuntimeSessionSnapshot AfterSuppressedTick =
 		Session.GetSnapshot();
 	TestEqual(

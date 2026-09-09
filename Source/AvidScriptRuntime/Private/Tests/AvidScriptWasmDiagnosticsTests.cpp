@@ -901,6 +901,10 @@ bool FAvidScriptWasmDiagnosticRuntimeIntegrationTest::RunTest(const FString& Par
 		TEXT("Repeated guest entry has a stable category"),
 		ReentryResult.ErrorCategory,
 		FString(TEXT("session_faulted")));
+	TestEqual(
+		TEXT("Rejected entry materializes the complete export name"),
+		ReentryResult.ExportName,
+		FString(TEXT("avid_on_tick")));
 	const FAvidScriptRuntimeSessionSnapshot RejectedSnapshot =
 		TickTrapSession.GetSnapshot();
 	TestEqual(

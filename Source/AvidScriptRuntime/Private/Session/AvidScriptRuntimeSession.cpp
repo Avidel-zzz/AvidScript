@@ -342,7 +342,7 @@ bool FAvidScriptRuntimeSession::InvalidateForWorldTeardown(UWorld& World)
 }
 
 bool FAvidScriptRuntimeSession::SuppressApplicationLifecycleEntry(
-	const FString& ExportName,
+	const FStringView ExportName,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
 	if (!bApplicationSuspended)
@@ -353,7 +353,7 @@ bool FAvidScriptRuntimeSession::SuppressApplicationLifecycleEntry(
 	++SuppressedLifecycleEntryCount;
 	OutResult = FAvidScriptWasmSmokeResult();
 	OutResult.ModuleId = GetLiveModuleId();
-	OutResult.ExportName = ExportName;
+	OutResult.ExportName = FString(ExportName.Len(), ExportName.GetData());
 	const FAvidScriptWasmHotSnapshot Snapshot = GetLiveHotSnapshot();
 	OutResult.bModuleLoaded = Snapshot.bRuntimeLoaded;
 	OutResult.bBeginPlayCalled = Snapshot.bBeginPlayCalled;
@@ -1110,7 +1110,7 @@ bool FAvidScriptRuntimeSession::PumpReadyContinuations(
 }
 
 bool FAvidScriptRuntimeSession::CanEnterGuest(
-	const FString& ExportName,
+	const FStringView ExportName,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
 	PrunePendingBorrowedHandles();
@@ -1118,7 +1118,7 @@ bool FAvidScriptRuntimeSession::CanEnterGuest(
 	{
 		OutResult = FAvidScriptWasmSmokeResult();
 		OutResult.ModuleId = GetLiveModuleId();
-		OutResult.ExportName = ExportName;
+		OutResult.ExportName = FString(ExportName.Len(), ExportName.GetData());
 		OutResult.ErrorCategory = bApplicationSuspended
 			? TEXT("application_suspended")
 			: TEXT("lifecycle_invalidated");
@@ -1128,7 +1128,7 @@ bool FAvidScriptRuntimeSession::CanEnterGuest(
 		OutResult.ErrorMessage = FString::Printf(
 			TEXT("AvidScript guest entry rejected | module=%s | export=%s | category=%s"),
 			OutResult.ModuleId.IsEmpty() ? TEXT("<none>") : *OutResult.ModuleId,
-			ExportName.IsEmpty() ? TEXT("<none>") : *ExportName,
+			OutResult.ExportName.IsEmpty() ? TEXT("<none>") : *OutResult.ExportName,
 			*OutResult.ErrorCategory);
 		return false;
 	}
@@ -1138,7 +1138,7 @@ bool FAvidScriptRuntimeSession::CanEnterGuest(
 		++SuppressedFaultDiagnosticCount;
 		SetSessionFaultedFailure(
 			FaultedModuleId,
-			ExportName,
+			FString(ExportName.Len(), ExportName.GetData()),
 			FaultCategory,
 			OutResult);
 		return false;
@@ -1147,7 +1147,7 @@ bool FAvidScriptRuntimeSession::CanEnterGuest(
 	{
 		SetSessionExecutionFailure(
 			GetLiveModuleId(),
-			ExportName,
+			FString(ExportName.Len(), ExportName.GetData()),
 			TEXT("guest entry was requested while another guest call or Runtime mutation is active"),
 			OutResult);
 		return false;
@@ -1156,7 +1156,7 @@ bool FAvidScriptRuntimeSession::CanEnterGuest(
 	{
 		SetSessionDebugSuspendedFailure(
 			GetLiveModuleId(),
-			ExportName,
+			FString(ExportName.Len(), ExportName.GetData()),
 			OutResult);
 		return false;
 	}

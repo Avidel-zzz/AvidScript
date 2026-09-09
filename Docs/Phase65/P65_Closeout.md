@@ -16,7 +16,8 @@
 - P65.B：已完成。
 - P65.C：已完成，Win64 Shipping Gate 通过；Android 工具链与设备层保持真实阻塞/未运行。
 - P65.D：实施中。D31 已完成 cooperative C# Shipping 功能链，C4 已恢复包内 benchmark
-  身份接线并完成 `9000/9000` 正确样本；复核发现 Game 宿主沿用 Editor 标签，已修正并需重新冻结采样。
+  身份接线与宿主标签均已修复，clean candidate `c6f7b177` 完成正式微基准 `9000/9000` 正确样本。
+  C5 去除 Session 入口临时字符串，Editor 构建与聚焦 Automation `7/7` 通过，优化后的性能仍待验证。
   Windows 正式性能矩阵、集中回归与 Release Candidate 尚未完成；按用户安排暂缓 Android/Mac 实机验收。
 
 实现和验证证据随完整批次追加；自动化不替代人工视觉、输入或设备验收。

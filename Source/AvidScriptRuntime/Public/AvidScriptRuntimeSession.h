@@ -3,6 +3,7 @@
 #include "AvidScriptGameplayEvent.h"
 #include "AvidScriptDebug.h"
 #include "AvidScriptWasmReloadTypes.h"
+#include "Containers/StringView.h"
 #include "Profiling/AvidScriptProfiler.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeRouter.h"
 
@@ -223,7 +224,7 @@ private:
 	void PrunePendingBorrowedHandles();
 	bool InvalidateForWorldTeardown(UWorld& World);
 	bool SuppressApplicationLifecycleEntry(
-		const FString& ExportName,
+		FStringView ExportName,
 		FAvidScriptWasmSmokeResult& OutResult);
 	bool IsSuspendedContextCurrent(uint64 Generation) const;
 	void AbortRuntimeForLifecycleInvalidation();
@@ -257,7 +258,7 @@ private:
 		FString& OutError) const;
 	bool PumpReadyContinuations(FAvidScriptWasmSmokeResult& OutResult);
 	bool CanEnterGuest(
-		const FString& ExportName,
+		FStringView ExportName,
 		FAvidScriptWasmSmokeResult& OutResult);
 	void QuarantineFaultedRuntime(
 		const FAvidScriptWasmSmokeResult& Failure);
