@@ -27,6 +27,26 @@ Assert-True (Test-Path -LiteralPath $commonPath -PathType Leaf) (
     'Phase56 evidence common contract is missing')
 . $commonPath
 
+& {
+    $shootoutPath = Join-Path $PSScriptRoot 'Invoke-ControlledRuntimeShootout.ps1'
+    $shootoutAst = [Management.Automation.Language.Parser]::ParseFile($shootoutPath, [ref]$null, [ref]$null)
+    $AttemptId = 'fixture'
+    $isSuiteRun = $true
+    $KernelId = 'data_branch'
+    $AttemptPath = $PSScriptRoot
+    $AggregatePath = $commonPath
+    $MergeResult = [pscustomobject]@{pc_default_gate = 'fixture_gate'}
+    $SuiteProfileSha256 = 'a' * 64
+    $AvidScriptRuntimeIdentity = [pscustomobject]@{
+        wasmtime_runtime_build_identity = 'fixture_runtime_identity'
+    }
+    $result = & ([scriptblock]::Create($shootoutAst.EndBlock.Statements[-1].Extent.Text))
+    Assert-True ($result.result -ceq 'controlled_runtime_shootout_complete' -and
+        $result.wasmtime_runtime_build_identity -ceq $AvidScriptRuntimeIdentity.wasmtime_runtime_build_identity -and
+        $result.aggregate_sha256 -ceq (Get-FileHash -LiteralPath $AggregatePath -Algorithm SHA256).Hash.ToLowerInvariant()) (
+        'shootout return contract must preserve runtime identity under strict mode')
+}
+
 $formalProfile = [pscustomobject]@{
     profile_id = 'phase56.physical-formal'
     evidence_class = 'formal'

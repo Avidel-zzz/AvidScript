@@ -241,12 +241,14 @@ semantic / Puerts reflection 为 **`0.738x`**，Small/Dense gameplay 为 **`0.22
 
 P65.D31.C4 修复编译身份和 Game/Editor 标签后，clean candidate `c6f7b177` 的 Win64 包正式
 微基准 `9000/9000` 样本正确；generated scalar/property 为 `17.19/29.89 ns`，empty callback 为
-`103.61 ns`，其相对 Puerts 优势仍未达标。C5 已去除 Session 入口的临时字符串构造，后续验证实际收益。
+`103.61 ns`，其相对 Puerts 优势仍未达标。C5 随后去除 Session 入口的临时字符串构造，改善结果见下文。
 目前优先收尾 Windows，Android/Mac 实机验收暂缓；上述 D29 完整 Gate 结论保持不变。见
 [D31 验证记录](Docs/Phase65/P65.D31_Wasmtime_Codegen_Attribution.md)。
 
-Windows 发布工具已补齐超长路径的备用数据流检查，并支持 UE5.8 的两种合法 Game 归档布局；
-发布合同 `26/26` 通过，优化版本的正式矩阵与当前源码预览包安装仍在验证。
+Windows 发布工具已补齐超长路径的备用数据流检查，并支持 UE5.8 的两种合法 Game 归档布局。
+`9ef177ed` 的正式微基准与玩法样本分别为 `9000/9000`、`1800/1800` 正确，优化后的 empty callback
+为 `47.26 ns`（Puerts static `103.06 ns`）；完整 18 项 Gate 仍待汇总。源码预览包已通过重复确定性
+发布、全新工程安装、完整核验和 NoOp；发布合同 `26/26` 通过。
 
 ## 验证
 

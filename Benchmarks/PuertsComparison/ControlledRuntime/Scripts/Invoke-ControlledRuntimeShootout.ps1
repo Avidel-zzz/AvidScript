@@ -400,5 +400,5 @@ $AttemptJson = $Attempt | ConvertTo-Json -Depth 16
     aggregate_sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $AggregatePath).Hash.ToLowerInvariant()
     pc_default_gate = [string]$MergeResult.pc_default_gate
     suite_profile_sha256 = $SuiteProfileSha256
-    wasmtime_runtime_build_identity = [string]$AvidScriptRuntimeIdentity.WasmtimeRuntimeBuildIdentity
+    wasmtime_runtime_build_identity = [string]$AvidScriptRuntimeIdentity.wasmtime_runtime_build_identity
 }
