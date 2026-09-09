@@ -127,6 +127,40 @@ $dataCSharpProfile = Get-Content -LiteralPath (
     Join-Path $csharpProfileRoot 'AvidScriptPerfWorkload.data-oriented.csharp-profile.json') -Raw |
     ConvertFrom-Json -Depth 100
 $identityFixtureSha = 'a' * 64
+$runnerAst = [Management.Automation.Language.Parser]::ParseInput(
+    $invokeText, [ref]$null, [ref]$null)
+$nativeHostFunction = $runnerAst.Find({
+    param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -ceq 'Set-NativeHostIdentity'
+}, $true)
+Assert-True ($null -ne $nativeHostFunction) 'runner 必须按真实宿主设置 native lane 身份。'
+. ([scriptblock]::Create($nativeHostFunction.Extent.Text))
+$nativeHostFixture = $requestTemplate.lane_catalog[0] |
+    ConvertTo-Json -Depth 100 | ConvertFrom-Json
+$harnessFixtureSha = 'b' * 64
+Set-NativeHostIdentity -Entry $nativeHostFixture -IsMonolithicHost $true `
+    -HostSha256 $identityFixtureSha -HarnessSha256 $identityFixtureSha
+Assert-True (
+    ($nativeHostFixture.compiler_flags -join '|') -ceq 'Development|WITH_EDITOR=0' -and
+    $nativeHostFixture.runtime_build_config -ceq 'Development Game NullRHI' -and
+    $nativeHostFixture.runtime_build_identity -ceq
+        "ue58-game=$identityFixtureSha;harness=$identityFixtureSha" -and
+    $nativeHostFixture.runtime_artifact_sha256 -ceq $identityFixtureSha -and
+    $nativeHostFixture.execution_artifact_sha256 -ceq $identityFixtureSha
+) '独立 Game 必须覆盖 Editor 模板标签，并把 native 代码绑定到单体可执行文件。'
+$gameLaneHash = Get-SidecarLaneIdentitySha256 -Entry $nativeHostFixture
+Set-NativeHostIdentity -Entry $nativeHostFixture -IsMonolithicHost $false `
+    -HostSha256 $identityFixtureSha -HarnessSha256 $harnessFixtureSha
+Assert-True (
+    ($nativeHostFixture.compiler_flags -join '|') -ceq 'Development|WITH_EDITOR=1' -and
+    $nativeHostFixture.runtime_build_config -ceq 'Development Editor NullRHI' -and
+    $nativeHostFixture.runtime_build_identity -ceq
+        "ue58-editor=$identityFixtureSha;harness=$harnessFixtureSha" -and
+    $nativeHostFixture.runtime_artifact_sha256 -ceq $identityFixtureSha -and
+    $nativeHostFixture.execution_artifact_sha256 -ceq $harnessFixtureSha -and
+    (Get-SidecarLaneIdentitySha256 -Entry $nativeHostFixture) -cne $gameLaneHash
+) 'Editor 必须恢复模块身份，且不同宿主不能复用同一 lane identity。'
 $expectedWasmtimeIdentity =
     'wasmtime-v45.0.0+avidscript.1;strategy=cranelift;' +
     'opt=speed;regalloc=backtracking;inlining=all;' +

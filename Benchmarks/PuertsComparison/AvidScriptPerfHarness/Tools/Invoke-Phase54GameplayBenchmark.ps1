@@ -281,6 +281,28 @@ function Get-GitText {
     return ([string]$output[-1]).Trim()
 }
 
+function Set-NativeHostIdentity {
+    param(
+        [pscustomobject]$Entry,
+        [bool]$IsMonolithicHost,
+        [string]$HostSha256,
+        [string]$HarnessSha256
+    )
+
+    $Entry.execution_artifact_sha256 = $HarnessSha256
+    $Entry.runtime_artifact_sha256 = $HostSha256
+    if ($IsMonolithicHost) {
+        $Entry.compiler_flags = @('Development', 'WITH_EDITOR=0')
+        $Entry.runtime_build_config = 'Development Game NullRHI'
+        $Entry.runtime_build_identity = "ue58-game=$HostSha256;harness=$HarnessSha256"
+    }
+    else {
+        $Entry.compiler_flags = @('Development', 'WITH_EDITOR=1')
+        $Entry.runtime_build_config = 'Development Editor NullRHI'
+        $Entry.runtime_build_identity = "ue58-editor=$HostSha256;harness=$HarnessSha256"
+    }
+}
+
 function Resolve-RequestTemplateIdentity {
     param(
         [pscustomobject]$Template,
@@ -350,10 +372,9 @@ function Resolve-RequestTemplateIdentity {
     }
 
     $catalog = @($Template.lane_catalog)
-    $catalog[0].execution_artifact_sha256 = $harnessModuleSha256
-    $catalog[0].runtime_build_identity =
-        "ue58-editor=$editorSha256;harness=$harnessModuleSha256"
-    $catalog[0].runtime_artifact_sha256 = $editorSha256
+    Set-NativeHostIdentity -Entry $catalog[0] `
+        -IsMonolithicHost $IsMonolithicHost `
+        -HostSha256 $editorSha256 -HarnessSha256 $harnessModuleSha256
 
     foreach ($index in 1, 2) {
         $catalog[$index].runtime_version = [string]$puertsMarker.source_commit_sha

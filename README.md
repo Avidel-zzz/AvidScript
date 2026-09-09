@@ -239,8 +239,9 @@ semantic / Puerts reflection 为 **`0.738x`**，Small/Dense gameplay 为 **`0.22
 当前 `18` 项性能门禁通过 `14` 项，执行层总体与 generated scalar/property 绝对时延仍待优化。详见
 [P65.D29](Docs/Phase65/P65.D29_Adaptive_Unary_Typed_Host.md)。
 
-P65.D31.C4 已补齐包内 benchmark 的 cooperative 编译身份校验，实际 Win64 包通过校准与
-`600/600` 短样本。新候选的五进程正式矩阵仍待执行，尚不替换上述 D29 性能数据。见
+P65.D31.C4 已补齐包内 benchmark 的 cooperative 编译身份校验，实际 Win64 包的五进程
+`9000/9000` 样本正确；原始结果中的 Game/Editor 标签已修正，需以新候选重新采样后形成正式证据。
+目前优先收尾 Windows，Android/Mac 实机验收暂缓；尚不替换上述 D29 性能数据。见
 [D31 验证记录](Docs/Phase65/P65.D31_Wasmtime_Codegen_Attribution.md)。
 
 ## 验证
