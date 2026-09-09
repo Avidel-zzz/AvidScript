@@ -263,7 +263,16 @@ function Assert-AvidScriptPluginReleaseOrdinaryTree {
             Throw-AvidScriptPluginReleaseError 'ASRE1104' 'reparse_point' "$Label contains a reparse point: $($Item.FullName)"
         }
         if (-not $Item.PSIsContainer) {
-            $AlternateStreams = @(Get-Item -LiteralPath $Item.FullName -Stream * |
+            $StreamPath = $Item.FullName
+            if (-not $StreamPath.StartsWith('\\?\', [StringComparison]::Ordinal)) {
+                $StreamPath = if ($StreamPath.StartsWith('\\', [StringComparison]::Ordinal)) {
+                    '\\?\UNC\' + $StreamPath.Substring(2)
+                }
+                else {
+                    '\\?\' + $StreamPath
+                }
+            }
+            $AlternateStreams = @(Get-Item -LiteralPath $StreamPath -Stream * |
                 Where-Object { $_.Stream -cne ':$DATA' })
             if ($AlternateStreams.Count -gt 0) {
                 Throw-AvidScriptPluginReleaseError 'ASRE1106' 'alternate_data_stream' "$Label contains alternate data streams: $($Item.FullName)"

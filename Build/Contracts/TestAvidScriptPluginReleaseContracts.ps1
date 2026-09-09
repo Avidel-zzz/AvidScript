@@ -15,7 +15,7 @@ $SourceFilesProfile = Join-Path $BuildRoot 'ReleaseEngineering/AvidScriptSourceR
 $Root = Join-Path 'C:\tmp\AvidScript\P65Contracts' (
     "$PID-$([guid]::NewGuid().ToString('N'))")
 $Passed = 0
-$Total = 24
+$Total = 26
 
 function Invoke-PluginReleaseContract {
     param(
@@ -496,6 +496,30 @@ try {
             $Verify.result -cne 'passed') {
             throw 'post-commit cleanup failure rolled back or hid recovery material.'
         }
+    }
+
+    Invoke-PluginReleaseContract 'ordinary tree supports long Windows paths' {
+        $LongRoot = Join-Path $Root 'LongOrdinary'
+        $LongDirectory = Join-Path (Join-Path $LongRoot ('a' * 100)) ('b' * 100)
+        [void][IO.Directory]::CreateDirectory($LongDirectory)
+        $LongFile = Join-Path $LongDirectory 'fixture.txt'
+        if ($LongFile.Length -le 260) { throw 'Fixture does not cross MAX_PATH.' }
+        [IO.File]::WriteAllText($LongFile, 'ordinary file')
+        Assert-AvidScriptPluginReleaseOrdinaryTree $LongRoot 'long-path fixture'
+    }
+
+    Invoke-PluginReleaseContract 'long Windows path still rejects alternate streams' {
+        $LongRoot = Join-Path $Root 'LongAlternateStream'
+        $LongDirectory = Join-Path (Join-Path $LongRoot ('a' * 100)) ('b' * 100)
+        [void][IO.Directory]::CreateDirectory($LongDirectory)
+        $LongFile = Join-Path $LongDirectory 'fixture.txt'
+        if ($LongFile.Length -le 260) { throw 'Fixture does not cross MAX_PATH.' }
+        [IO.File]::WriteAllText($LongFile, 'ordinary file')
+        [IO.File]::WriteAllText(('\\?\' + $LongFile + ':hidden'), 'undeclared content')
+        $Rejected = $false
+        try { Assert-AvidScriptPluginReleaseOrdinaryTree $LongRoot 'long-path ADS fixture' }
+        catch { $Rejected = $_.Exception.Message.StartsWith('ASRE1106 ') }
+        if (-not $Rejected) { throw 'Long-path ADS was not rejected with the stable code.' }
     }
 
     Invoke-PluginReleaseContract 'public CLI and privacy boundary' {

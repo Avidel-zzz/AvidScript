@@ -42,6 +42,50 @@ $PackagedHostTokens = $null
 Assert-True (@($PackagedHostParserErrors).Count -eq 0) 'packaged benchmark host producer has parser errors'
 Assert-True ((Get-Content -LiteralPath $PackagedHostSchemaPath -Raw) | Test-Json) 'packaged benchmark host schema is not valid JSON'
 $PackagedHostScriptText = Get-Content -LiteralPath $PackagedHostScriptPath -Raw
+$HostAst = [Management.Automation.Language.Parser]::ParseInput($PackagedHostScriptText, [ref]$null, [ref]$null)
+$LayoutFunction = $HostAst.Find({ param($Node)
+    $Node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+        $Node.Name -ceq 'Resolve-PackagedGameRoot'
+}, $true)
+Assert-True ($null -ne $LayoutFunction) 'packaged host must resolve both UE archive layouts'
+. ([scriptblock]::Create($LayoutFunction.Extent.Text))
+$LayoutFixtureParent = 'C:\tmp\AvidScript\P65HostContracts'
+$LayoutFixtureRoot = Join-Path $LayoutFixtureParent ([guid]::NewGuid().ToString('N'))
+try {
+    foreach ($Case in @('flat', 'nested', 'ambiguous', 'partial')) {
+        $Archive = Join-Path $LayoutFixtureRoot $Case
+        [void][IO.Directory]::CreateDirectory($Archive)
+        foreach ($Subdirectory in @('', 'Windows')) {
+            $ShouldWrite = $Case -eq 'ambiguous' -or
+                ($Case -eq 'flat' -and $Subdirectory -eq '') -or
+                ($Case -eq 'nested' -and $Subdirectory -eq 'Windows')
+            if ($ShouldWrite) {
+                $Game = Join-Path $Archive $Subdirectory
+                [void][IO.Directory]::CreateDirectory((Join-Path $Game 'Fixture/Binaries/Win64'))
+                [IO.File]::WriteAllText((Join-Path $Game 'Fixture.exe'), 'launcher')
+                [IO.File]::WriteAllText((Join-Path $Game 'Fixture/Binaries/Win64/Fixture.exe'), 'runtime')
+            }
+        }
+        if ($Case -eq 'partial') { [IO.File]::WriteAllText((Join-Path $Archive 'Fixture.exe'), 'launcher only') }
+        if ($Case -in @('flat', 'nested')) {
+            $Expected = if ($Case -eq 'flat') { $Archive } else { Join-Path $Archive 'Windows' }
+            Assert-True ((Resolve-PackagedGameRoot $Archive 'Fixture') -ceq $Expected) "archive layout rejected: $Case"
+        }
+        else {
+            $Rejected = $false
+            try { Resolve-PackagedGameRoot $Archive 'Fixture' | Out-Null }
+            catch { $Rejected = $_.Exception.Message.StartsWith('ASP65H2009 ') }
+            Assert-True $Rejected "archive layout must fail closed: $Case"
+        }
+    }
+}
+finally {
+    $ResolvedFixtureRoot = [IO.Path]::GetFullPath($LayoutFixtureRoot)
+    if (-not $ResolvedFixtureRoot.StartsWith($LayoutFixtureParent + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Host layout fixture escaped its owned root.'
+    }
+    if (Test-Path -LiteralPath $ResolvedFixtureRoot) { Remove-Item -LiteralPath $ResolvedFixtureRoot -Recurse -Force }
+}
 Assert-True ($PackagedHostScriptText.Contains("'-build'") -and
     $PackagedHostScriptText.Contains("'-cook'") -and
     $PackagedHostScriptText.Contains("'-stage'") -and
@@ -50,7 +94,7 @@ Assert-True ($PackagedHostScriptText.Contains("'-build'") -and
     $PackagedHostScriptText.Contains('$FinalizeExistingArchive') -and
     $PackagedHostScriptText.Contains('SafeCopyFile Exception') -and
     $PackagedHostScriptText.Contains("[IO.Path]::ChangeExtension(`$containerToc.FullName, '.ucas')") -and
-    $PackagedHostScriptText.Contains("Windows/`$target.exe") -and
+    $PackagedHostScriptText.Contains('Resolve-PackagedGameRoot') -and
     $PackagedHostScriptText.Contains('Assert-SidecarBenchmarkProjectProvenance') -and
     $PackagedHostScriptText.Contains('Assert-GeneratedTypeIdentity') -and
     $PackagedHostScriptText.Contains('archive_content_sha256') -and

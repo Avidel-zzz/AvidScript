@@ -245,6 +245,9 @@ P65.D31.C4 修复编译身份和 Game/Editor 标签后，clean candidate `c6f7b1
 目前优先收尾 Windows，Android/Mac 实机验收暂缓；上述 D29 完整 Gate 结论保持不变。见
 [D31 验证记录](Docs/Phase65/P65.D31_Wasmtime_Codegen_Attribution.md)。
 
+Windows 发布工具已补齐超长路径的备用数据流检查，并支持 UE5.8 的两种合法 Game 归档布局；
+发布合同 `26/26` 通过，优化版本的正式矩阵与当前源码预览包安装仍在验证。
+
 ## 验证
 
 完整回归与后续专项分别记录，**不累加成当前全量通过数**：

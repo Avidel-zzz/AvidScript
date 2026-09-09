@@ -26,6 +26,20 @@ function Resolve-RequiredPath {
     return $resolved
 }
 
+function Resolve-PackagedGameRoot {
+    param([string]$ArchiveRoot, [string]$Target)
+
+    # UE5.8 omits the Windows suffix when an ancestor starts with Windows/Win64.
+    $gameRoots = @(@($ArchiveRoot, (Join-Path $ArchiveRoot 'Windows')) | Where-Object {
+        (Test-Path -LiteralPath (Join-Path $_ "$Target.exe") -PathType Leaf) -and
+        (Test-Path -LiteralPath (Join-Path $_ "$Target/Binaries/Win64/$Target.exe") -PathType Leaf)
+    })
+    if ($gameRoots.Count -ne 1) {
+        throw 'ASP65H2009 archive must contain exactly one complete Win64 Game layout'
+    }
+    return $gameRoots[0]
+}
+
 function Assert-CompletedBuildCookRunArchive {
     param(
         [Parameter(Mandatory = $true)][string]$UatOutput,
@@ -193,12 +207,13 @@ else {
 [void](Assert-CompletedBuildCookRunArchive `
     -UatOutput $uatOutput `
     -ArchiveRoot $archiveRoot)
+$gameRoot = Resolve-PackagedGameRoot -ArchiveRoot $archiveRoot -Target $target
 $executablePath = Resolve-RequiredPath `
-    -Path (Join-Path $archiveRoot "Windows/$target.exe") `
+    -Path (Join-Path $gameRoot "$target.exe") `
     -PathType Leaf `
     -Label 'packaged host launcher'
 $runtimeExecutablePath = Resolve-RequiredPath `
-    -Path (Join-Path $archiveRoot "Windows/$target/Binaries/Win64/$target.exe") `
+    -Path (Join-Path $gameRoot "$target/Binaries/Win64/$target.exe") `
     -PathType Leaf `
     -Label 'packaged host runtime executable'
 $pakFiles = @(Get-ChildItem -LiteralPath $archiveRoot -Filter '*.pak' -File -Recurse |
