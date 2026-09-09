@@ -159,7 +159,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 - **玩法与平台**：UI 包使用独立验证插件和隔离启动配置，Development/Shipping 均通过跨进程自动存取；Development 人工界面、按钮和同一 UserRoot 新进程读档均反馈无问题。Shipping 人工视觉按用户要求不阻塞当前推进，明确转入发布候选验收，不能视为通过。任意损坏存档不在现有保证内；Development 包内一小时切图与当前候选 2/2 多进程网络拓扑通过，UI 重载另有 20 轮有界证据，但不宣称一小时网络/重载长稳；Android UBT/APK/真机及 iOS 仍未验收。
 - **诊断与性能**：typed Host 拒绝已在 Wasmtime 保留具体 category/details/import，WAMR semantic/dynamic 路径同样保留分类；尚无完整 C# 异常系统。纯执行 P50/P95 领先门禁未关闭，也未完成同口径 UnLua/AngelScript 矩阵。
 
-P65.A-C 已完成发布工程主链：可重复发布包、原子安装/升级、兼容诊断与分层平台 Gate；下一批进入性能领导力。
+P65.A-C 已完成发布工程主链：可重复发布包、原子安装/升级、兼容诊断与分层平台 Gate；P65.D 正在推进性能领导力。
 Shipping 人工视觉与移动设备证据仍作为独立发布候选 Gate，不以自动报告或阶段编号替代。
 
 P65.A 已完成：thin source 发布器与原子安装器当前通过 **24/24** 轻量合同及真实 commit-based 发布/安装
@@ -238,6 +238,10 @@ P65.D29 已把 adaptive semantic 的通用 `int32 F(int32)` 接入固定 typed-h
 semantic / Puerts reflection 为 **`0.738x`**，Small/Dense gameplay 为 **`0.225x / 0.310x`**。
 当前 `18` 项性能门禁通过 `14` 项，执行层总体与 generated scalar/property 绝对时延仍待优化。详见
 [P65.D29](Docs/Phase65/P65.D29_Adaptive_Unary_Typed_Host.md)。
+
+P65.D31.C4 已补齐包内 benchmark 的 cooperative 编译身份校验，实际 Win64 包通过校准与
+`600/600` 短样本。新候选的五进程正式矩阵仍待执行，尚不替换上述 D29 性能数据。见
+[D31 验证记录](Docs/Phase65/P65.D31_Wasmtime_Codegen_Attribution.md)。
 
 ## 验证
 

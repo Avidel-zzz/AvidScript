@@ -155,6 +155,52 @@ Assert-True ((Get-SidecarWasmtimeCompilerIdentity `
         -DisableFuel) -ceq $expectedFuelFreeWasmtimeIdentity) `
     '无 fuel 预算的 runner 与 C++ backend 必须生成完全相同的 fuel-free identity。'
 
+$expectedCooperativeWasmtimeIdentity =
+    'wasmtime-v45.0.0+avidscript.1;strategy=cranelift;' +
+    'opt=speed;regalloc=backtracking;inlining=all;' +
+    'profile=cranelift-speed-x86_64-v3-trusted-cooperative-v1;' +
+    'target=x86_64-pc-windows-msvc;cpu=x86-64-v3;' +
+    'wasm32_memory=4g_fixed;memory_may_move=0;' +
+    'max_wasm_stack=2m;fuel=off;epoch_interruption=off;' +
+    'spectre=on;nan_canonicalization=off;parallel_compilation=on;' +
+    'wasm_gc=on;gc_collector=drc;runtime_profile=fastest-runtime;' +
+    "runtime_artifact_sha256=$identityFixtureSha"
+Assert-True ((Get-SidecarWasmtimeCompilerIdentity `
+        -DllSha256 $identityFixtureSha `
+        -TrustedCooperative) -ceq $expectedCooperativeWasmtimeIdentity) `
+    '正式 cooperative 包必须同时匹配 compiler profile、fuel、epoch 与 DLL 身份。'
+$ambiguousIdentityRejected = $false
+try {
+    Get-SidecarWasmtimeCompilerIdentity -DllSha256 $identityFixtureSha `
+        -DisableFuel -TrustedCooperative | Out-Null
+}
+catch {
+    $ambiguousIdentityRejected = $_.Exception.Message.StartsWith('ASP57S2057 ')
+}
+Assert-True $ambiguousIdentityRejected '不同 compiler identity 模式不能混用。'
+$profileLockPath = Join-Path $pluginRoot (
+    'Source/ThirdParty/Wasmtime/PerformanceToolchain/WasmtimePerformanceToolchain.lock.json')
+$profileLockText = Get-Content -LiteralPath $profileLockPath -Raw
+foreach ($mutation in @(
+    @{ field = 'epoch_interruption'; value = $true },
+    @{ field = 'consume_fuel'; value = $true },
+    @{ field = 'spectre_mitigation'; value = $false },
+    @{ field = 'id'; value = 'cranelift-speed-x86_64-v3-fuel-free-v1' }
+)) {
+    & {
+        $profileFixture = $profileLockText | ConvertFrom-Json
+        $profileFixture.trusted_cooperative_compiler_profile.($mutation.field) = $mutation.value
+        function Read-SidecarJson { param($Path, $Code) return $profileFixture }
+        $rejected = $false
+        try { Get-SidecarWasmtimeCompilerIdentity -DllSha256 $identityFixtureSha -TrustedCooperative | Out-Null }
+        catch { $rejected = $_.Exception.Message.StartsWith('ASP57S2057 ') }
+        Assert-True $rejected "cooperative identity 必须拒绝锁定字段漂移：$($mutation.field)"
+    }
+}
+Assert-True ($invokeText.Contains('-TrustedCooperative') -and
+    $invokeText.Contains('$published.compiler_build_identity -cne $entry.runtime_build_identity')) `
+    '包内 runner 必须从受控配置推导 cooperative 身份，并继续严格比较发布包身份。'
+
 Assert-True $evaluatorText.Contains('p95_ratio') `
     'Gameplay Gate 必须输出跨进程 P95 ratio。'
 Assert-True $evaluatorText.Contains('two_mad_separated') `
@@ -247,7 +293,7 @@ Assert-True ($invokeText.Contains('Assert-SidecarBenchmarkProjectProvenance') -a
     $invokeText.Contains('UnrealEditor-AvidScriptPerfHarness.dll') -and
     $invokeText.Contains('requires the tracked profile and request template bytes') -and
     $invokeText.Contains('Get-SidecarWasmtimeCompilerIdentity') -and
-    $invokeText.Contains('-DisableFuel')) `
+    $invokeText.Contains('-TrustedCooperative')) `
     'Formal 六通道必须锁定项目、Puerts、Harness DLL、profile/template 与真实 Wasmtime build identity。'
 Assert-True ($invokeText.Contains('[string]$PackagedGameExecutable') -and
     $invokeText.Contains('[string]$PackagedHostManifestPath') -and
@@ -508,4 +554,4 @@ Assert-True (
     $evaluatorText.Contains('Performance gates failed closed')) `
     'Phase56 evaluator 必须在写出完整报告后以 overall verdict 和非零退出码拒绝失败 Gate。'
 
-Write-Output 'Phase54/56 gameplay benchmark contracts passed: lanes=6 phase56_profiling_gates=7.'
+Write-Output 'Phase54/56 gameplay benchmark contracts passed: lanes=6 phase56_profiling_gates=7 compiler_identity_cases=8.'

@@ -15,6 +15,7 @@
 - P65.A：已完成。
 - P65.B：已完成。
 - P65.C：已完成，Win64 Shipping Gate 通过；Android 工具链与设备层保持真实阻塞/未运行。
-- P65.D：下一批，当前版本性能领导力与 Release Candidate。
+- P65.D：实施中。D31 已完成 cooperative C# Shipping 功能链，C4 已恢复包内 benchmark
+  身份接线并通过校准及 `600/600` 短样本；新候选五进程性能矩阵、集中回归与 Release Candidate 尚未完成。
 
 实现和验证证据随完整批次追加；自动化不替代人工视觉、输入或设备验收。

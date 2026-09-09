@@ -596,22 +596,28 @@ function Test-SidecarProfile {
 function Get-SidecarWasmtimeCompilerIdentity {
     param(
         [Parameter(Mandatory = $true)][string]$DllSha256,
-        [switch]$DisableFuel
+        [switch]$DisableFuel,
+        [switch]$TrustedCooperative
     )
 
+    if ($DisableFuel -and $TrustedCooperative) {
+        throw 'ASP57S2057 select either fuel-free or trusted-cooperative compiler identity'
+    }
     $SourcePluginRoot = [System.IO.Path]::GetFullPath(
         (Join-Path $PSScriptRoot '../../..'))
     $LockPath = Join-Path $SourcePluginRoot (
         'Source/ThirdParty/Wasmtime/PerformanceToolchain/' +
         'WasmtimePerformanceToolchain.lock.json')
     $Lock = Read-SidecarJson -Path $LockPath -Code 'ASP57S2057'
-    $Profile = $DisableFuel.IsPresent ?
-        $Lock.fuel_free_compiler_profile :
-        $Lock.compiler_profile
-    $ExpectedProfileId = $DisableFuel.IsPresent ?
-        'cranelift-speed-x86_64-v3-fuel-free-v1' :
-        'cranelift-speed-x86_64-v3-contained-v3'
-    $ExpectedFuel = -not $DisableFuel.IsPresent
+    $Profile = $TrustedCooperative.IsPresent ?
+        $Lock.trusted_cooperative_compiler_profile :
+        ($DisableFuel.IsPresent ? $Lock.fuel_free_compiler_profile : $Lock.compiler_profile)
+    $ExpectedProfileId = $TrustedCooperative.IsPresent ?
+        'cranelift-speed-x86_64-v3-trusted-cooperative-v1' :
+        ($DisableFuel.IsPresent ? 'cranelift-speed-x86_64-v3-fuel-free-v1' :
+            'cranelift-speed-x86_64-v3-contained-v3')
+    $ExpectedFuel = -not ($DisableFuel.IsPresent -or $TrustedCooperative.IsPresent)
+    $ExpectedEpoch = -not $TrustedCooperative.IsPresent
     if ([string]$Lock.upstream.version -cne 'v45.0.0' -or
         [int]$Lock.patch.api_revision -ne 1 -or
         [string]$Profile.id -cne $ExpectedProfileId -or
@@ -627,7 +633,7 @@ function Get-SidecarWasmtimeCompilerIdentity {
         [bool]$Profile.nan_canonicalization -or
         -not [bool]$Profile.wasm_gc -or
         [bool]$Profile.consume_fuel -ne $ExpectedFuel -or
-        -not [bool]$Profile.epoch_interruption -or
+        [bool]$Profile.epoch_interruption -ne $ExpectedEpoch -or
         [string]$Profile.gc_collector -cne 'drc' -or
         [string]$Lock.rust.build_profile -cne 'fastest-runtime' -or
         -not (@($Lock.rust.features) -contains 'parallel-compilation') -or
@@ -641,7 +647,8 @@ function Get-SidecarWasmtimeCompilerIdentity {
         "profile=$ExpectedProfileId;" +
         'target=x86_64-pc-windows-msvc;' +
         'cpu=x86-64-v3;wasm32_memory=4g_fixed;memory_may_move=0;' +
-        "max_wasm_stack=2m;fuel=$($ExpectedFuel ? 'on' : 'off');epoch_interruption=on;" +
+        "max_wasm_stack=2m;fuel=$($ExpectedFuel ? 'on' : 'off');" +
+        "epoch_interruption=$($ExpectedEpoch ? 'on' : 'off');" +
         'spectre=on;nan_canonicalization=off;parallel_compilation=on;' +
         'wasm_gc=on;gc_collector=drc;' +
         "runtime_profile=fastest-runtime;runtime_artifact_sha256=$DllSha256")
