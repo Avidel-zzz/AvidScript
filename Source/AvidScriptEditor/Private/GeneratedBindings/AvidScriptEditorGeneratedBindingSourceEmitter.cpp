@@ -752,13 +752,26 @@ bool AddGeneratedModuleToProject(
 	return ValidateJson(OutUpdated);
 }
 
-bool SaveDeterministicFile(const FString& Path, const FString& Contents)
+bool SaveDeterministicFile(
+	const FString& Path,
+	const FString& Contents,
+	FString& OutFailedPath)
 {
-	IFileManager::Get().MakeDirectory(*FPaths::GetPath(Path), true);
-	return FFileHelper::SaveStringToFile(
+	const FString Directory = FPaths::GetPath(Path);
+	if (!IFileManager::Get().MakeDirectory(*Directory, true))
+	{
+		OutFailedPath = Directory;
+		return false;
+	}
+	if (!FFileHelper::SaveStringToFile(
 		Contents,
 		*Path,
-		FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+		FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+	{
+		OutFailedPath = Path;
+		return false;
+	}
+	return true;
 }
 
 bool DoesGeneratedFileMatch(
@@ -965,31 +978,37 @@ bool FAvidScriptEditorGeneratedBindingSourceEmitter::Emit(
 		EGuidFormats::Digits);
 	const FString StageDirectory =
 		ProjectRoot / TEXT("Source")
-		/ (TEXT(".AvidScriptGeneratedBindings.stage-") + TransactionId);
+		/ (TEXT(".asgb-s-") + TransactionId);
 	const FString BackupDirectory =
-		OutputDirectory + TEXT(".backup-") + TransactionId;
+		ProjectRoot / TEXT("Source")
+		/ (TEXT(".asgb-b-") + TransactionId);
 	const FString ProjectStage =
 		FullProjectFile + TEXT(".stage-") + TransactionId;
 	const FString ProjectBackup =
 		FullProjectFile + TEXT(".backup-") + TransactionId;
 
+	FString FailedStagePath;
 	const bool bStageWritten =
 		SaveDeterministicFile(
 			StageDirectory / TEXT("AvidScriptGeneratedBindings.Build.cs"),
-			BuildCs)
+			BuildCs,
+			FailedStagePath)
 		&& SaveDeterministicFile(
 			StageDirectory / TEXT("Public")
 				/ TEXT("AvidScriptGeneratedBindings.h"),
-			PublicHeader)
+			PublicHeader,
+			FailedStagePath)
 		&& SaveDeterministicFile(
 			StageDirectory / TEXT("Private")
 				/ TEXT("AvidScriptGeneratedBindings.cpp"),
-			PrivateCpp)
+			PrivateCpp,
+			FailedStagePath)
 		&& SaveDeterministicFile(
 			StageDirectory / TEXT("Private")
 				/ TEXT("generated-bindings.manifest.json"),
-			Manifest)
-		&& SaveDeterministicFile(ProjectStage, UpdatedProjectJson);
+			Manifest,
+			FailedStagePath)
+		&& SaveDeterministicFile(ProjectStage, UpdatedProjectJson, FailedStagePath);
 	if (!bStageWritten)
 	{
 		IFileManager::Get().DeleteDirectory(*StageDirectory, false, true);
@@ -997,7 +1016,7 @@ bool FAvidScriptEditorGeneratedBindingSourceEmitter::Emit(
 		SetEmitterFailure(
 			OutResult,
 			TEXT("generated_stage_write_failed"),
-			StageDirectory);
+			FailedStagePath);
 		return false;
 	}
 

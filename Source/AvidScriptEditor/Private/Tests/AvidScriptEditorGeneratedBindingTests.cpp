@@ -12,6 +12,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 
 namespace
 {
@@ -74,12 +75,19 @@ bool FAvidScriptEditorGeneratedBindingDeterminismTest::RunTest(
 		/ (TEXT("GeneratedBindings-")
 			+ FGuid::NewGuid().ToString(EGuidFormats::Digits));
 	IFileManager::Get().MakeDirectory(*TestRoot, true);
+	ON_SCOPE_EXIT
+	{
+		IFileManager::Get().DeleteDirectory(*TestRoot, false, true);
+	};
 	const FString ProjectFile = TestRoot / TEXT("GeneratedBindings.uproject");
-	TestTrue(
+	if (!TestTrue(
 		TEXT("Temporary project descriptor is written"),
 		FFileHelper::SaveStringToFile(
 			TEXT("{\n  \"FileVersion\": 3,\n  \"Modules\": []\n}\n"),
-			*ProjectFile));
+			*ProjectFile)))
+	{
+		return false;
+	}
 
 	FAvidScriptGeneratedBindingPackageIr Package;
 	Package.PackageName = TEXT("avidscript.generated.tests");
@@ -148,32 +156,46 @@ bool FAvidScriptEditorGeneratedBindingDeterminismTest::RunTest(
 	Package.Bindings.Add(VectorRefOutBinding);
 
 	FAvidScriptEditorGeneratedBindingResult FirstResult;
-	TestTrue(
+	if (!TestTrue(
 		TEXT("First deterministic emission succeeds"),
 		FAvidScriptEditorGeneratedBindingService::EmitProjectModule(
 			ProjectFile,
 			Package,
-			FirstResult));
+			FirstResult)))
+	{
+		AddError(FirstResult.ErrorMessage);
+		return false;
+	}
 	TArray<FString> FirstContents;
-	TestTrue(
+	if (!TestTrue(
 		TEXT("First artifact set is readable"),
-		ReadGeneratedArtifacts(TestRoot, FirstContents));
+		ReadGeneratedArtifacts(TestRoot, FirstContents)))
+	{
+		return false;
+	}
 
 	Algo::Reverse(Package.Bindings);
 	FAvidScriptEditorGeneratedBindingResult SecondResult;
-	TestTrue(
+	if (!TestTrue(
 		TEXT("Reordered emission succeeds"),
 		FAvidScriptEditorGeneratedBindingService::EmitProjectModule(
 			ProjectFile,
 			Package,
-			SecondResult));
+			SecondResult)))
+	{
+		AddError(SecondResult.ErrorMessage);
+		return false;
+	}
 	TestTrue(
 		TEXT("Byte-identical generated module is reused"),
 		SecondResult.bReusedExistingModule);
 	TArray<FString> SecondContents;
-	TestTrue(
+	if (!TestTrue(
 		TEXT("Second artifact set is readable"),
-		ReadGeneratedArtifacts(TestRoot, SecondContents));
+		ReadGeneratedArtifacts(TestRoot, SecondContents)))
+	{
+		return false;
+	}
 	TestTrue(
 		TEXT("Input ordering does not alter emitted bytes"),
 		SecondContents == FirstContents);
@@ -215,7 +237,6 @@ bool FAvidScriptEditorGeneratedBindingDeterminismTest::RunTest(
 		TEXT("Generated call sites never use checked casts"),
 		SecondContents[2].Contains(TEXT("CastChecked")));
 
-	IFileManager::Get().DeleteDirectory(*TestRoot, false, true);
 	return true;
 }
 
@@ -354,6 +375,107 @@ bool FAvidScriptEditorGeneratedBindingPackedObjectFacadeTest::RunTest(
 			&& LegacySource.Contains(
 				TEXT("this.Slot, this.Generation, value.AvidScriptSlot, value.AvidScriptGeneration, out __returnValue")));
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorGeneratedBindingTransactionPathTest,
+	"AvidScript.Editor.GeneratedBindings.DeepProjectTransaction",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorGeneratedBindingTransactionPathTest::RunTest(
+	const FString& Parameters)
+{
+	FString TestRoot = FPaths::ConvertRelativePathToFull(
+		FPaths::ProjectSavedDir() / TEXT("AvidScriptTests")
+		/ FGuid::NewGuid().ToString(EGuidFormats::Digits));
+	// The old staging name put Public/Private at the Win32 directory boundary.
+	if (TestRoot.Len() < 167)
+	{
+		TestRoot += FString::ChrN(167 - TestRoot.Len(), TEXT('x'));
+	}
+	ON_SCOPE_EXIT
+	{
+		IFileManager::Get().DeleteDirectory(*TestRoot, false, true);
+	};
+	if (!TestTrue(TEXT("Deep project root is created"),
+		IFileManager::Get().MakeDirectory(*TestRoot, true)))
+	{
+		return false;
+	}
+	const FString ProjectFile = TestRoot / TEXT("GeneratedBindings.uproject");
+	const FString OriginalProject = TEXT("{\"FileVersion\":3,\"Modules\":[]}");
+	if (!TestTrue(TEXT("Deep project descriptor is written"),
+		FFileHelper::SaveStringToFile(OriginalProject, *ProjectFile)))
+	{
+		return false;
+	}
+	FAvidScriptGeneratedBindingPackageIr Package;
+	Package.PackageName = TEXT("avidscript.generated.deep_project");
+	Package.PackageHash = FString::ChrN(64, TEXT('a'));
+	Package.Bindings.Add(MakeGeneratedBinding(TEXT('1'), TEXT("1111111111111111")));
+	FAvidScriptEditorGeneratedBindingResult Result;
+	if (!TestTrue(TEXT("Deep project initial emission succeeds"),
+		FAvidScriptEditorGeneratedBindingService::EmitProjectModule(
+			ProjectFile, Package, Result)))
+	{
+		AddError(Result.ErrorMessage);
+		return false;
+	}
+	TArray<FString> FirstContents;
+	if (!TestTrue(TEXT("Deep project initial artifacts are readable"),
+		ReadGeneratedArtifacts(TestRoot, FirstContents)))
+	{
+		return false;
+	}
+	Package.PackageHash = FString::ChrN(64, TEXT('b'));
+	Package.Bindings[0].FunctionName = TEXT("ReplacementPair");
+	if (!TestTrue(TEXT("Deep project replacement emission succeeds"),
+		FAvidScriptEditorGeneratedBindingService::EmitProjectModule(
+			ProjectFile, Package, Result)))
+	{
+		AddError(Result.ErrorMessage);
+		return false;
+	}
+	TestFalse(TEXT("Changed package is replaced instead of reused"),
+		Result.bReusedExistingModule);
+	TArray<FString> ReplacementContents;
+	if (!TestTrue(TEXT("Deep project replacement artifacts are readable"),
+		ReadGeneratedArtifacts(TestRoot, ReplacementContents)))
+	{
+		return false;
+	}
+	TestTrue(TEXT("Replacement publishes new source and manifest"),
+		ReplacementContents[2].Contains(TEXT("ReplacementPair"))
+			&& ReplacementContents[2] != FirstContents[2]
+			&& ReplacementContents[3] != FirstContents[3]);
+	TArray<FString> LeftoverTransactions;
+	IFileManager::Get().FindFiles(LeftoverTransactions,
+		*(TestRoot / TEXT("Source/.asgb-*")), false, true);
+	TestEqual(TEXT("Published transaction leaves no stage or backup directory"),
+		LeftoverTransactions.Num(), 0);
+
+	const FString RejectedRoot = TestRoot / TEXT("Rejected");
+	const FString RejectedProject = RejectedRoot / TEXT("Rejected.uproject");
+	if (!TestTrue(TEXT("Rejected project fixture is created"),
+		IFileManager::Get().MakeDirectory(*RejectedRoot, true)
+			&& FFileHelper::SaveStringToFile(OriginalProject, *RejectedProject)
+			&& FFileHelper::SaveStringToFile(TEXT("source-directory-blocker"),
+				*(RejectedRoot / TEXT("Source")))))
+	{
+		return false;
+	}
+	TestFalse(TEXT("Unwritable stage fails without publishing"),
+		FAvidScriptEditorGeneratedBindingService::EmitProjectModule(
+			RejectedProject, Package, Result));
+	TestEqual(TEXT("Stage failure keeps its stable category"),
+		Result.ErrorCategory, FString(TEXT("generated_stage_write_failed")));
+	TestTrue(TEXT("Stage failure identifies the failed directory"),
+		Result.ErrorSource.StartsWith(RejectedRoot / TEXT("Source/")));
+	FString PreservedProject;
+	TestTrue(TEXT("Stage failure preserves the original project descriptor"),
+		FFileHelper::LoadFileToString(PreservedProject, *RejectedProject)
+			&& PreservedProject == OriginalProject);
 	return true;
 }
 

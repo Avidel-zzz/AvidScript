@@ -1323,12 +1323,16 @@ bool FAvidScriptEditorCSharpProfileServiceGeneratedNativePropertyTest::RunTest(
 		FFileHelper::SaveStringToFile(
 			TEXT("{\"FileVersion\":3,\"Modules\":[]}"),
 			*ProjectFile));
-	TestTrue(
+	if (!TestTrue(
 		TEXT("Schema v7 generated property IR reaches source"),
 		FAvidScriptEditorGeneratedBindingService::EmitProjectModule(
 			ProjectFile,
 			GeneratedPackage,
-			GeneratedResult));
+			GeneratedResult)))
+	{
+		AddError(GeneratedResult.ErrorMessage);
+		return false;
+	}
 	FString GeneratedSource;
 	TestTrue(
 		TEXT("Schema v7 generated property source is readable"),
