@@ -1,0 +1,260 @@
+{
+  "type": "object",
+  "$id": "https://avidscript.dev/schema/wasmtime-notices/v1",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "scope": {
+      "const": "win64-wasmtime-build-notices"
+    },
+    "package_count": {
+      "maximum": 512,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "toolchain_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_archive_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "patch_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "cargo_lock_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "artifact_log_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "runtime": {
+      "properties": {
+        "wasmtime.dll": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "wasmtime.lib": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "wasmtime.dll.lib": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "wasmtime.dll",
+        "wasmtime.lib",
+        "wasmtime.dll.lib"
+      ],
+      "type": "object"
+    },
+    "packages": {
+      "items": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^(wasmtime|crates-io):[^\\x00-\\x1f\\\\]+"
+          },
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "license_expression": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "wasmtime",
+                  "crates-io"
+                ]
+              },
+              "identity": {
+                "type": "string",
+                "minLength": 1
+              },
+              "checksum": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "identity",
+              "checksum"
+            ],
+            "type": "object",
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "kind": {
+                      "const": "crates-io"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "checksum": {
+                      "type": "string"
+                    },
+                    "identity": {
+                      "pattern": "^https://crates\\.io/crates/[A-Za-z0-9_-]+/[^\\s]+$"
+                    }
+                  }
+                },
+                "else": {
+                  "properties": {
+                    "checksum": {
+                      "type": "null"
+                    },
+                    "identity": {
+                      "pattern": "^[0-9a-f]{40}$"
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "features": {
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true,
+            "type": "array"
+          },
+          "notices": {
+            "items": {
+              "properties": {
+                "origin_path": {
+                  "type": "string",
+                  "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\x00-\\x1f\\\\:]+$"
+                },
+                "path": {
+                  "type": "string",
+                  "pattern": "^texts/[0-9a-f]{64}\\.(txt|html)$"
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "length": {
+                  "maximum": 16777216,
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "origin_path",
+                "path",
+                "sha256",
+                "length"
+              ],
+              "type": "object"
+            },
+            "minItems": 1,
+            "maxItems": 128,
+            "type": "array"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "version",
+          "license_expression",
+          "source",
+          "features",
+          "notices"
+        ],
+        "type": "object"
+      },
+      "minItems": 1,
+      "maxItems": 512,
+      "type": "array"
+    },
+    "rust": {
+      "properties": {
+        "toolchain": {
+          "type": "string",
+          "minLength": 1
+        },
+        "notices": {
+          "items": {
+            "properties": {
+              "origin_path": {
+                "type": "string",
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\x00-\\x1f\\\\:]+$"
+              },
+              "path": {
+                "type": "string",
+                "pattern": "^texts/[0-9a-f]{64}\\.(txt|html)$"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "length": {
+                "maximum": 16777216,
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "origin_path",
+              "path",
+              "sha256",
+              "length"
+            ],
+            "type": "object"
+          },
+          "minItems": 1,
+          "maxItems": 128,
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "toolchain",
+        "notices"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "required": [
+    "schema_version",
+    "scope",
+    "package_count",
+    "toolchain_id",
+    "source_archive_sha256",
+    "patch_sha256",
+    "cargo_lock_sha256",
+    "artifact_log_sha256",
+    "runtime",
+    "packages",
+    "rust"
+  ]
+}

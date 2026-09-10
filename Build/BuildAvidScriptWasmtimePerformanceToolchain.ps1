@@ -184,12 +184,14 @@ function Invoke-NativeTool {
         [Parameter(Mandatory = $true)][string]$Executable,
         [Parameter(Mandatory = $true)][string[]]$Arguments,
         [Parameter(Mandatory = $true)][string]$WorkingDirectory,
-        [Parameter(Mandatory = $true)][string]$Code
+        [Parameter(Mandatory = $true)][string]$Code,
+        [string]$CapturePath = ''
     )
 
     Push-Location $WorkingDirectory
     try {
-        & $Executable @Arguments
+        if ([string]::IsNullOrWhiteSpace($CapturePath)) { & $Executable @Arguments }
+        else { & $Executable @Arguments 2>&1 | Tee-Object -FilePath $CapturePath }
         if ($LASTEXITCODE -ne 0) {
             throw "$Code native tool failed with exit code $LASTEXITCODE"
         }
@@ -423,12 +425,13 @@ $CMakeArguments = @(
     '-S', (Join-Path $SourceRoot 'crates/c-api'),
     '-B', $BuildRoot
 ) + @($Lock.rust.cmake_arguments) + @("-DCMAKE_INSTALL_PREFIX=$StagingRoot")
-if ($NeutralBuild) { $CMakeArguments += '-DWASMTIME_USER_CARGO_BUILD_OPTIONS=--locked' }
+if ($NeutralBuild) { $CMakeArguments += '-DWASMTIME_USER_CARGO_BUILD_OPTIONS=--locked;--message-format=json' }
 Invoke-NativeTool -Executable 'cmake' -Arguments $CMakeArguments `
     -WorkingDirectory $SourceRoot -Code 'ASP57W1704'
+$BuildCapturePath = if ($NeutralBuild) { Join-Path $CacheRoot 'cargo-build-messages.log' } else { '' }
 Invoke-NativeTool -Executable 'cmake' `
     -Arguments @('--build', $BuildRoot, '--config', 'Release', '--parallel', '8') `
-    -WorkingDirectory $SourceRoot -Code 'ASP57W1705'
+    -WorkingDirectory $SourceRoot -Code 'ASP57W1705' -CapturePath $BuildCapturePath
 Invoke-NativeTool -Executable 'cmake' `
     -Arguments @('--install', $BuildRoot, '--config', 'Release') `
     -WorkingDirectory $SourceRoot -Code 'ASP57W1706'
@@ -437,6 +440,13 @@ if ($NeutralBuild -and (Get-FileSha256 -Path $CargoLockPath) -cne $CargoLockBefo
 }
 Copy-Item -LiteralPath (Join-Path $SourceRoot 'LICENSE') `
     -Destination (Join-Path $StagingRoot ([string]$Lock.layout.license_relative_path))
+if ($NeutralBuild) {
+    . (Join-Path $ScriptRoot 'ReleaseEngineering/AvidScriptWasmtimeNotices.ps1')
+    $RustSysroot = (& rustc --print sysroot | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) { throw 'ASWN1005 pinned Rust sysroot is unavailable' }
+    [void](Export-AvidScriptWasmtimeNotices -ArtifactLog $BuildCapturePath -SourceRoot $SourceRoot `
+        -CargoHome $env:CARGO_HOME -RustSysroot $RustSysroot -StagingRoot $StagingRoot -Lock $Lock)
+}
 $StagedDll = Join-Path $StagingRoot ([string]$Lock.layout.dll_relative_path)
 Assert-Export -DllPath $StagedDll -Symbol ([string]$Lock.patch.export_symbol)
 Assert-Export -DllPath $StagedDll -Symbol ([string]$Lock.patch.precompile_export_symbol)

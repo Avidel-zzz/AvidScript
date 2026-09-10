@@ -72,6 +72,7 @@ fuel 配置、隔离工程样本路径和 correctness 探针的 gameplay 分帧�
 修复已补齐 schema 与行为合同；`5bafc180` clean candidate 原生构建、五进程 **1050/1050**
 样本与三项受影响门槛均通过。Android/Mac 实机验收暂缓，
 [公开二进制路径脱敏](Docs/Phase65/P65.D32_Win64_Public_Binary_Privacy.md)已完成中性 Wasmtime 重建与完整隐私扫描（117 文件、0 命中）；传递依赖许可证、新 DLL 的 UE 集成和公开离线包 Gate 尚未完成，主工程运行库保持原身份。
+实际构建包的声明收集器已实现（94 包与独立依赖图一致，另含 Rust 标准库声明）；包含声明的完整中性构建尚待验证。
 
 ## 架构
 
