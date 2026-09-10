@@ -6,6 +6,7 @@
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/FileHelper.h"
+#include "Misc/Guid.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
@@ -16,9 +17,16 @@ THIRD_PARTY_INCLUDES_END
 
 namespace
 {
-	constexpr int32 CostSchemaVersion = 2;
+	constexpr int32 CostRequestSchemaVersion = 2;
+	constexpr int32 CostResultSchemaVersion = 3;
 	constexpr int32 EmptyOrdinal = 0;
 	constexpr int32 PairOrdinal = 1;
+
+	const FString& GetPhysicalCostProcessInstanceId()
+	{
+		static const FString InstanceId = FGuid::NewGuid().ToString(EGuidFormats::Digits).ToLower();
+		return InstanceId;
+	}
 
 	struct FCostRequest
 	{
@@ -110,7 +118,7 @@ namespace
 		double SchemaVersion = 0.0;
 		bool CandidateClean = false;
 		if (!Json->TryGetNumberField(TEXT("schema_version"), SchemaVersion)
-			|| SchemaVersion != CostSchemaVersion
+			|| SchemaVersion != CostRequestSchemaVersion
 			|| !Json->TryGetBoolField(TEXT("candidate_clean"), CandidateClean)
 			|| !CandidateClean
 			|| !ReadString(TEXT("attempt_id"), OutRequest.AttemptId)
@@ -584,7 +592,8 @@ bool FAvidScriptPerfCostRunner::RunFromFiles(
 
 	const FAvidScriptVmBackendInfo& BackendInfo = TypedBackend->GetBackendInfo();
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
-	Result->SetNumberField(TEXT("schema_version"), CostSchemaVersion);
+	Result->SetNumberField(TEXT("schema_version"), CostResultSchemaVersion);
+	Result->SetStringField(TEXT("process_instance_id"), GetPhysicalCostProcessInstanceId());
 	Result->SetStringField(TEXT("benchmark_kind"), TEXT("physical_crossing_cost_ladder"));
 	Result->SetStringField(TEXT("attempt_id"), Request.AttemptId);
 	Result->SetStringField(TEXT("request_sha256"), RequestSha256);

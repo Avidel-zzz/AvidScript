@@ -25,46 +25,108 @@
     "cost_deltas",
     "correctness_failures",
     "fallback_used",
-    "result_sha256"
+    "result_sha256",
+    "timed_pids",
+    "timed_process_instance_ids"
   ],
   "properties": {
-    "schema_version": { "const": 2 },
-    "benchmark_kind": { "const": "physical_crossing_cost_ladder" },
-    "attempt_id": { "type": "string", "format": "uuid" },
-    "profile_id": { "type": "string", "minLength": 1 },
-    "evidence_class": { "enum": ["diagnostic", "formal"] },
-    "profile_sha256": { "$ref": "#/$defs/sha256" },
+    "schema_version": {
+      "const": 3
+    },
+    "benchmark_kind": {
+      "const": "physical_crossing_cost_ladder"
+    },
+    "attempt_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "profile_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evidence_class": {
+      "enum": [
+        "diagnostic",
+        "formal"
+      ]
+    },
+    "profile_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
     "candidate": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["commit", "tree_sha", "clean"],
+      "required": [
+        "commit",
+        "tree_sha",
+        "clean"
+      ],
       "properties": {
-        "commit": { "$ref": "#/$defs/commit" },
-        "tree_sha": { "$ref": "#/$defs/commit" },
-        "clean": { "const": true }
+        "commit": {
+          "$ref": "#/$defs/commit"
+        },
+        "tree_sha": {
+          "$ref": "#/$defs/commit"
+        },
+        "clean": {
+          "const": true
+        }
       }
     },
-    "engine_executable_sha256": { "$ref": "#/$defs/sha256" },
-    "kernel_wasm_sha256": { "$ref": "#/$defs/sha256" },
+    "engine_executable_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "kernel_wasm_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
     "runtime": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "version", "build_identity", "artifact_sha256"],
+      "required": [
+        "id",
+        "version",
+        "build_identity",
+        "artifact_sha256"
+      ],
       "properties": {
-        "id": { "const": "wasmtime.cranelift.jit" },
-        "version": { "type": "string", "minLength": 1 },
-        "build_identity": { "type": "string", "minLength": 1 },
-        "artifact_sha256": { "$ref": "#/$defs/sha256" }
+        "id": {
+          "const": "wasmtime.cranelift.jit"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "build_identity": {
+          "type": "string",
+          "minLength": 1
+        },
+        "artifact_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
       }
     },
-    "process_runs": { "type": "integer", "minimum": 1 },
-    "warmup_samples_per_stage_per_process": { "type": "integer", "minimum": 1 },
-    "timed_samples_per_stage_per_process": { "type": "integer", "minimum": 1 },
-    "observation_count": { "type": "integer", "minimum": 7 },
+    "process_runs": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "warmup_samples_per_stage_per_process": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "timed_samples_per_stage_per_process": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "observation_count": {
+      "type": "integer",
+      "minimum": 7
+    },
     "process_metrics": {
       "type": "array",
       "minItems": 7,
-      "items": { "$ref": "#/$defs/metric" }
+      "items": {
+        "$ref": "#/$defs/metric"
+      }
     },
     "cross_process_metrics": {
       "type": "array",
@@ -83,31 +145,58 @@
           "process_mad_median_ns_per_iteration"
         ],
         "properties": {
-          "stage": { "type": "string", "minLength": 1 },
-          "process_count": { "type": "integer", "minimum": 1 },
-          "process_p50_median_ns_per_iteration": { "type": "number", "minimum": 0 },
-          "process_p50_p95_ns_per_iteration": { "type": "number", "minimum": 0 },
-          "process_p95_median_ns_per_iteration": { "type": "number", "minimum": 0 },
-          "process_p95_p95_ns_per_iteration": { "type": "number", "minimum": 0 },
-          "process_mad_median_ns_per_iteration": { "type": "number", "minimum": 0 }
+          "stage": {
+            "type": "string",
+            "minLength": 1
+          },
+          "process_count": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "process_p50_median_ns_per_iteration": {
+            "type": "number",
+            "minimum": 0
+          },
+          "process_p50_p95_ns_per_iteration": {
+            "type": "number",
+            "minimum": 0
+          },
+          "process_p95_median_ns_per_iteration": {
+            "type": "number",
+            "minimum": 0
+          },
+          "process_p95_p95_ns_per_iteration": {
+            "type": "number",
+            "minimum": 0
+          },
+          "process_mad_median_ns_per_iteration": {
+            "type": "number",
+            "minimum": 0
+          }
         }
       }
     },
     "paired_process_costs": {
       "type": "array",
       "minItems": 4,
-      "items": { "$ref": "#/$defs/paired_process_cost" }
+      "items": {
+        "$ref": "#/$defs/paired_process_cost"
+      }
     },
     "paired_cost_metrics": {
       "type": "array",
       "minItems": 4,
       "maxItems": 4,
-      "items": { "$ref": "#/$defs/paired_cost_metric" }
+      "items": {
+        "$ref": "#/$defs/paired_cost_metric"
+      }
     },
     "full_crossing_reconstructions": {
       "type": "array",
       "minItems": 3,
-      "items": { "$ref": "#/$defs/full_crossing_reconstruction" }
+      "items": {
+        "$ref": "#/$defs/full_crossing_reconstruction"
+      }
     },
     "cost_deltas": {
       "type": "object",
@@ -121,36 +210,109 @@
         "max_reconstruction_error_ratio"
       ],
       "properties": {
-        "prepared_export_over_generic_p50": { "type": "number", "minimum": 0 },
-        "prepared_export_savings_p50_ns": { "type": "number" },
-        "typed_empty_net_p50_ns": { "type": "number" },
-        "generic_minus_typed_empty_p50_ns": { "type": "number" },
-        "typed_i32_pair_minus_typed_empty_p50_ns": { "type": "number" },
-        "max_reconstruction_error_ratio": { "type": "number", "minimum": 0 }
+        "prepared_export_over_generic_p50": {
+          "type": "number",
+          "minimum": 0
+        },
+        "prepared_export_savings_p50_ns": {
+          "type": "number"
+        },
+        "typed_empty_net_p50_ns": {
+          "type": "number"
+        },
+        "generic_minus_typed_empty_p50_ns": {
+          "type": "number"
+        },
+        "typed_i32_pair_minus_typed_empty_p50_ns": {
+          "type": "number"
+        },
+        "max_reconstruction_error_ratio": {
+          "type": "number",
+          "minimum": 0
+        }
       }
     },
-    "correctness_failures": { "const": 0 },
-    "fallback_used": { "const": false },
+    "correctness_failures": {
+      "const": 0
+    },
+    "fallback_used": {
+      "const": false
+    },
     "result_sha256": {
       "type": "array",
       "minItems": 1,
-      "items": { "$ref": "#/$defs/sha256" }
+      "items": {
+        "$ref": "#/$defs/sha256"
+      }
+    },
+    "timed_pids": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": {
+        "minimum": 1,
+        "type": "integer"
+      }
+    },
+    "timed_process_instance_ids": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{32}$",
+        "not": {
+          "const": "00000000000000000000000000000000"
+        }
+      }
     }
   },
   "$defs": {
-    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
     "metric": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["process_run", "stage", "sample_count", "p50_ns_per_iteration", "p95_ns_per_iteration", "mad_ns_per_iteration"],
+      "required": [
+        "process_run",
+        "stage",
+        "sample_count",
+        "p50_ns_per_iteration",
+        "p95_ns_per_iteration",
+        "mad_ns_per_iteration"
+      ],
       "properties": {
-        "process_run": { "type": "integer", "minimum": 0 },
-        "stage": { "type": "string", "minLength": 1 },
-        "sample_count": { "type": "integer", "minimum": 1 },
-        "p50_ns_per_iteration": { "type": "number", "minimum": 0 },
-        "p95_ns_per_iteration": { "type": "number", "minimum": 0 },
-        "mad_ns_per_iteration": { "type": "number", "minimum": 0 }
+        "process_run": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stage": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sample_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "p50_ns_per_iteration": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p95_ns_per_iteration": {
+          "type": "number",
+          "minimum": 0
+        },
+        "mad_ns_per_iteration": {
+          "type": "number",
+          "minimum": 0
+        }
       }
     },
     "paired_process_cost": {
@@ -170,17 +332,48 @@
         "reconstruction_error_ratio"
       ],
       "properties": {
-        "process_run": { "type": "integer", "minimum": 0 },
-        "pair": { "type": "string", "minLength": 1 },
-        "observed_stage": { "type": "string", "minLength": 1 },
-        "baseline_stage": { "type": "string", "minLength": 1 },
-        "sample_count": { "type": "integer", "minimum": 1 },
-        "observed_p50_ns_per_iteration": { "type": "number", "minimum": 0 },
-        "baseline_p50_ns_per_iteration": { "type": "number", "minimum": 0 },
-        "paired_delta_p50_ns_per_iteration": { "type": "number" },
-        "paired_ratio": { "type": "number", "minimum": 0 },
-        "reconstructed_p50_ns_per_iteration": { "type": "number" },
-        "reconstruction_error_ratio": { "type": "number", "minimum": 0 }
+        "process_run": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pair": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observed_stage": {
+          "type": "string",
+          "minLength": 1
+        },
+        "baseline_stage": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sample_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "observed_p50_ns_per_iteration": {
+          "type": "number",
+          "minimum": 0
+        },
+        "baseline_p50_ns_per_iteration": {
+          "type": "number",
+          "minimum": 0
+        },
+        "paired_delta_p50_ns_per_iteration": {
+          "type": "number"
+        },
+        "paired_ratio": {
+          "type": "number",
+          "minimum": 0
+        },
+        "reconstructed_p50_ns_per_iteration": {
+          "type": "number"
+        },
+        "reconstruction_error_ratio": {
+          "type": "number",
+          "minimum": 0
+        }
       }
     },
     "paired_cost_metric": {
@@ -197,14 +390,36 @@
         "reconstruction_error_p95_ratio"
       ],
       "properties": {
-        "pair": { "type": "string", "minLength": 1 },
-        "process_count": { "type": "integer", "minimum": 1 },
-        "paired_delta_p50_median_ns_per_iteration": { "type": "number" },
-        "paired_delta_p95_ns_per_iteration": { "type": "number" },
-        "paired_ratio_p50": { "type": "number", "minimum": 0 },
-        "paired_ratio_p95": { "type": "number", "minimum": 0 },
-        "reconstruction_error_p50_ratio": { "type": "number", "minimum": 0 },
-        "reconstruction_error_p95_ratio": { "type": "number", "minimum": 0 }
+        "pair": {
+          "type": "string",
+          "minLength": 1
+        },
+        "process_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "paired_delta_p50_median_ns_per_iteration": {
+          "type": "number"
+        },
+        "paired_delta_p95_ns_per_iteration": {
+          "type": "number"
+        },
+        "paired_ratio_p50": {
+          "type": "number",
+          "minimum": 0
+        },
+        "paired_ratio_p95": {
+          "type": "number",
+          "minimum": 0
+        },
+        "reconstruction_error_p50_ratio": {
+          "type": "number",
+          "minimum": 0
+        },
+        "reconstruction_error_p95_ratio": {
+          "type": "number",
+          "minimum": 0
+        }
       }
     },
     "full_crossing_reconstruction": {
@@ -224,7 +439,10 @@
         "within_budget"
       ],
       "properties": {
-        "process_run": { "type": "integer", "minimum": 0 },
+        "process_run": {
+          "type": "integer",
+          "minimum": 0
+        },
         "target_stage": {
           "enum": [
             "typed_empty_import",
@@ -232,23 +450,47 @@
             "typed_i32_pair_import"
           ]
         },
-        "baseline_stage": { "const": "guest_loop_baseline" },
-        "observed_p50_ns_per_iteration": { "type": "number", "minimum": 0 },
-        "baseline_p50_ns_per_iteration": { "type": "number", "minimum": 0 },
+        "baseline_stage": {
+          "const": "guest_loop_baseline"
+        },
+        "observed_p50_ns_per_iteration": {
+          "type": "number",
+          "minimum": 0
+        },
+        "baseline_p50_ns_per_iteration": {
+          "type": "number",
+          "minimum": 0
+        },
         "increments": {
           "type": "array",
           "minItems": 1,
           "maxItems": 2,
           "items": {
             "type": "object",
-            "required": ["pair", "paired_delta_p50_ns_per_iteration"]
+            "required": [
+              "pair",
+              "paired_delta_p50_ns_per_iteration"
+            ]
           }
         },
-        "reconstructed_p50_ns_per_iteration": { "type": "number" },
-        "absolute_error_ns": { "type": "number", "minimum": 0 },
-        "allowed_error_ns": { "type": "number", "minimum": 5 },
-        "normalized_budget_ratio": { "type": "number", "minimum": 0 },
-        "within_budget": { "type": "boolean" }
+        "reconstructed_p50_ns_per_iteration": {
+          "type": "number"
+        },
+        "absolute_error_ns": {
+          "type": "number",
+          "minimum": 0
+        },
+        "allowed_error_ns": {
+          "type": "number",
+          "minimum": 5
+        },
+        "normalized_budget_ratio": {
+          "type": "number",
+          "minimum": 0
+        },
+        "within_budget": {
+          "type": "boolean"
+        }
       }
     }
   }

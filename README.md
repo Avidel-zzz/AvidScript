@@ -61,13 +61,15 @@ PowerShell contracts **16/16** 与三条 clean/generated UBT 路径全部通过�
 完整记录见 [P64 交付](Docs/Phase64/P64_Closeout.md)，类型范围见 [P58 验收](Docs/Phase58/P58.4_Centralized_Gate_Report.md)。
 实现与验收分别记录，限制见[当前边界](#当前边界)。
 
-Windows 最新回归 **465/465** 通过，.NET 六组 runner **302/302** 通过；修正了普通编辑器 AOT
+Windows 最新 clean candidate 回归 **467/467** 通过，.NET 六组 runner **302/302** 通过；修正了普通编辑器 AOT
 fuel 配置、隔离工程样本路径和 correctness 探针的 gameplay 分帧。详情见
 [D31.C8/C9](Docs/Phase65/P65.D31_Wasmtime_Codegen_Attribution.md#d31c8-普通编辑器-aot-预算一致性)。
 原先两个混合平台用例已拆开，Windows 断言独立保留；恢复主工程 Development 生成类型包身份后，
-两个 Windows 用例与八项 GeneratedTypes 定向测试 **10/10** 通过。该结果与旧全量计数分别记录。
-正式性能采样在第九个纯执行 kernel 遇到 Windows PID 复用误拒绝，已改用进程生命周期内固定的
-实例身份并补齐行为合同；新候选整组复测仍待完成。Android/Mac 实机验收暂缓，
+两个 Windows 用例与八项 GeneratedTypes 定向测试 **10/10** 通过；随后 `7707d5c6` 完整 Windows
+选择清单逐项通过，包含拆分后保留的 Windows 断言。Android 两项另列为未执行，不计入通过数。
+正式性能采样的 Windows PID 复用误拒绝已改用进程生命周期内固定的实例身份；`7707d5c6`
+完整矩阵有效，**18 项门槛通过 16 项**，剩余两项为纯执行总体比率与胜率。PhysicalCost 入口同类
+修复已补齐 schema 与行为合同，原生增量构建通过，独立运行验证待完成。Android/Mac 实机验收暂缓，
 [公开二进制路径脱敏](Docs/Phase65/P65.D32_Win64_Public_Binary_Privacy.md)仍处于实施方案阶段。
 
 ## 架构
@@ -118,11 +120,11 @@ Wasmtime 45 Cranelift JIT 对冻结版本的 Puerts V8，同机 5 个进程、�
 见 [P57 原始证据](Docs/Phase57/P57.11B1_Recursive_Fixed_Struct_Codec_Evidence.json)。
 
 - **游戏逻辑：** P56 Small/Dense gameplay 与 Lifecycle callback 的 P50 比率为 **`0.469x / 0.513x / 0.391x`**，各自对照路径与范围见[报告](Docs/Phase56/P56.5_Fused_Call_Frame_Implementation_Report.md)。
-- **纯执行：** 当前 P65.D29 正式 12-kernel 相同 WASM 对照的 P50/P95 几何均值为 **`1.106x / 1.131x`**，P50/P95 胜率为 **`58.3% / 33.3%`**，仍未达到 `<= 0.95x` 与 `>= 60%` 目标；主要差距在 scalar-float、SIMD 和 mixed-gameplay。
+- **纯执行：** P65.D31.C11 正式 12-kernel 相同 WASM 对照的 P50/P95 几何均值为 **`1.102x / 1.239x`**，P50/P95 胜率为 **`50.0% / 8.33%`**，仍未达到 `<= 0.95x` 与 `>= 60%` 目标；高 P95 样本全部保留，未宣称总体领先。
 - **最新 UE crossing：** P65.D10 将通用 `int32 -> int32` generated S1 降至 **`18.17 ns`**，相对 Puerts static 为 **`0.829x`**；十项 micro P50 几何均值已从 `1.440x` 改善到 `1.004x`，但仍未形成全面领先。见[D10 报告](Docs/Phase65/P65.D10_Generated_Unary_I32_Performance.md)。
 - **最新 generated typed 路径：** FVector ref/out 已达到 `103.64 ns`（Puerts static 的 `0.144x`）；P65.D13 又将 UObject roundtrip 从 `147.73 ns` 降至 **`51.88 ns`**，已领先 Puerts reflection，但仍是 Puerts static 的 `1.139x`。十项 UE micro 的 P50/P95 几何均值为 **`0.779x / 0.786x`**。见[D11](Docs/Phase65/P65.D11_Generated_Vector_RefOut_Performance.md)与[D13](Docs/Phase65/P65.D13_Packed_Object_Roundtrip_Performance.md)。
 - **最新 packaged 性能：** P65.D28 让 verified AOT package 使用 fuel-free Cranelift profile，同时保留 epoch watchdog 与签名边界。generated S1 十项 P50/P95 几何均值为 **`0.590x / 0.592x`**，胜项 **`8/10 / 8/10`**；对象 roundtrip 为 **`0.773x / 0.750x`**。`pure_integer` 与 `callback_empty` 仍未领先，semantic lane 仍待优化。见[D28 报告](Docs/Phase65/P65.D28_Verified_Package_Fuel_Free_Artifacts.md)。
-- **最新 adaptive semantic：** P65.D29 以通用 unary typed-host 将 semantic / Puerts reflection 聚合比率降至 **`0.738x`**；`scalar_noop` 为 **`74.865 ns / 98.191 ns`**。Small/Dense gameplay 为最佳 Puerts 的 **`0.225x / 0.310x`**，统一 Gate 通过 **`14/18`**。见[D29 报告](Docs/Phase65/P65.D29_Adaptive_Unary_Typed_Host.md)。
+- **最新完整矩阵：** P65.D31.C11 的 semantic / Puerts reflection 为 **`0.619x`**，Small/Dense gameplay 为最佳 Puerts 的 **`0.226x / 0.303x`**；generated scalar/property 为 **`22.16 / 39.63 ns`**，empty callback 为 **`50.03 ns`**。统一 Gate 通过 **`16/18`**，见[D31.C11](Docs/Phase65/P65.D31_Wasmtime_Codegen_Attribution.md#d31c11-当前-windows-全量与完整性能矩阵)。
 - **比较边界：** 尚无同口径 UnLua/AngelScript 排行榜；不宣称全场景领先。其他数据见[容器](Docs/Phase57/P57.11D_Compiler_Managed_Array_Region.md)、[UE 原生对照](Docs/Phase60/P60.D_Performance_And_Gate.md)与[增量构建](Docs/Phase61/P61.E_Integration_Gate.md)。
 
 ## 快速开始
@@ -245,13 +247,14 @@ P65.D28 已把 verified packaged artifact 的 compiler profile 与真实 Session
 
 P65.D29 已把 adaptive semantic 的通用 `int32 F(int32)` 接入固定 typed-host ABI；正式 Editor Gate 中
 semantic / Puerts reflection 为 **`0.738x`**，Small/Dense gameplay 为 **`0.225x / 0.310x`**。
-当前 `18` 项性能门禁通过 `14` 项，执行层总体与 generated scalar/property 绝对时延仍待优化。详见
+该轮 `18` 项性能门禁通过 `14` 项；后续 D31.C11 已将 scalar/property 两项转为通过，当前为
+`16/18`，执行层总体比率和胜率仍未达标。D29 历史结果详见
 [P65.D29](Docs/Phase65/P65.D29_Adaptive_Unary_Typed_Host.md)。
 
 P65.D31.C4 修复编译身份和 Game/Editor 标签后，clean candidate `c6f7b177` 的 Win64 包正式
 微基准 `9000/9000` 样本正确；generated scalar/property 为 `17.19/29.89 ns`，empty callback 为
 `103.61 ns`，其相对 Puerts 优势仍未达标。C5 随后去除 Session 入口的临时字符串构造，改善结果见下文。
-目前优先收尾 Windows，Android/Mac 实机验收暂缓；上述 D29 完整 Gate 结论保持不变。见
+目前优先收尾 Windows，Android/Mac 实机验收暂缓；完整 Gate 已由 D31.C11 更新为 `16/18`。见
 [D31 验证记录](Docs/Phase65/P65.D31_Wasmtime_Codegen_Attribution.md)。
 
 Windows 发布工具已补齐超长路径的备用数据流检查，并支持 UE5.8 的两种合法 Game 归档布局。

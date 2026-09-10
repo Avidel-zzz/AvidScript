@@ -276,9 +276,7 @@ for ($processRun = 0; $processRun -lt [int]$profile.process_runs; ++$processRun)
     $results += $result
     $resultPaths += $resultPath
 }
-if (@($results.pid | Select-Object -Unique).Count -ne [int]$profile.process_runs) {
-    throw 'ASP54L4716 physical cost timed processes are not fresh and unique'
-}
+Assert-PhysicalCostProcessInstances -Results $results -ExpectedProcessCount ([int]$profile.process_runs)
 
 $processMetrics = @()
 foreach ($result in $results) {
@@ -524,7 +522,7 @@ foreach ($result in $results) {
 }
 $first = $results[0]
 $aggregate = [ordered]@{
-    schema_version = 2
+    schema_version = 3
     benchmark_kind = 'physical_crossing_cost_ladder'
     attempt_id = $attemptId
     profile_id = [string]$profile.profile_id
@@ -544,6 +542,8 @@ $aggregate = [ordered]@{
         artifact_sha256 = [string]$first.runtime_artifact_sha256
     }
     process_runs = [int]$profile.process_runs
+    timed_pids = @($results | ForEach-Object { [int]$_.pid })
+    timed_process_instance_ids = @($results | ForEach-Object { [string]$_.process_instance_id })
     warmup_samples_per_stage_per_process = [int]$profile.warmup_samples
     timed_samples_per_stage_per_process = [int]$profile.timed_samples
     observation_count = @($results.samples).Count

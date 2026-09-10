@@ -27,6 +27,87 @@ Assert-True (Test-Path -LiteralPath $commonPath -PathType Leaf) (
     'Phase56 evidence common contract is missing')
 . $commonPath
 
+$physicalInstances = @(0..4 | ForEach-Object {
+    [pscustomobject]@{ pid = 1234; process_instance_id = [Guid]::NewGuid().ToString('N') }
+})
+Assert-PhysicalCostProcessInstances -Results $physicalInstances -ExpectedProcessCount 5
+$identityNegativeCases = @('missing', 'zero', 'uppercase', 'malformed', 'number', 'duplicate', 'count', 'empty', 'null')
+foreach ($case in $identityNegativeCases) {
+    $instances = @($physicalInstances | ForEach-Object { $_.PSObject.Copy() })
+    switch ($case) {
+        'missing' { $instances[0].PSObject.Properties.Remove('process_instance_id') }
+        'zero' { $instances[0].process_instance_id = '0' * 32 }
+        'uppercase' { $instances[0].process_instance_id = 'A' * 32 }
+        'malformed' { $instances[0].process_instance_id = 'g' * 32 }
+        'number' { $instances[0].process_instance_id = 1234 }
+        'duplicate' {
+            $instances[0].pid = 5678
+            $instances[0].process_instance_id = $instances[1].process_instance_id
+        }
+        'count' { $instances = @($instances | Select-Object -First 4) }
+        'empty' { $instances = @() }
+        'null' { $instances[0] = $null }
+    }
+    $rejected = $false
+    try { Assert-PhysicalCostProcessInstances -Results $instances -ExpectedProcessCount 5 }
+    catch { $rejected = $_.Exception.Message.Contains('ASP54L4716') }
+    Assert-True $rejected "physical process identity must reject $case"
+}
+
+$physicalResultSchema = Join-Path $controlledRoot 'Schema/PhysicalCostResult.schema.json'
+$physicalFixture = [ordered]@{
+    schema_version = 3
+    benchmark_kind = 'physical_crossing_cost_ladder'
+    attempt_id = [Guid]::NewGuid().ToString()
+    request_sha256 = 'a' * 64
+    profile_sha256 = 'b' * 64
+    candidate_commit = 'c' * 40
+    candidate_tree_sha = 'd' * 40
+    candidate_clean = $true
+    engine_executable_sha256 = 'e' * 64
+    process_run = 0
+    pid = 1234
+    process_instance_id = $physicalInstances[0].process_instance_id
+    kernel_wasm_sha256 = 'f' * 64
+    runtime_id = 'wasmtime.cranelift.jit'
+    runtime_version = '45.0.0'
+    runtime_build_identity = 'fixture'
+    runtime_artifact_sha256 = 'a' * 64
+    fallback_used = $false
+    correctness_failures = 0
+    samples = @(0..6 | ForEach-Object {
+        [ordered]@{
+            stage = @('native_no_op', 'guest_loop_baseline', 'generic_export', 'prepared_export',
+                'typed_empty_import', 'generic_empty_import', 'typed_i32_pair_import')[$_]
+            sample_index = 0; stage_position = $_; iterations = 1; seed = 1
+            duration_ns = 1.0; ns_per_iteration = 1.0; checksum = 1; expected_checksum = 1
+            correct = $true; host_import_count = 0; export_call_count = 0
+        }
+    })
+}
+Assert-True (($physicalFixture | ConvertTo-Json -Depth 30) |
+    Test-Json -SchemaFile $physicalResultSchema -ErrorAction SilentlyContinue) 'physical schema 3 fixture must pass'
+foreach ($case in @('legacy', 'missing', 'zero')) {
+    $invalid = $physicalFixture | ConvertTo-Json -Depth 30 | ConvertFrom-Json -AsHashtable
+    switch ($case) {
+        'legacy' { $invalid.schema_version = 2 }
+        'missing' { $invalid.Remove('process_instance_id') }
+        'zero' { $invalid.process_instance_id = '0' * 32 }
+    }
+    Assert-True (-not (($invalid | ConvertTo-Json -Depth 30) |
+        Test-Json -SchemaFile $physicalResultSchema -ErrorAction SilentlyContinue)) "physical schema must reject $case"
+}
+$aggregateSchema = Get-Content -LiteralPath (Join-Path $controlledRoot 'Schema/PhysicalCostAggregate.schema.json') -Raw |
+    ConvertFrom-Json -Depth 100
+$instanceArraySchema = $aggregateSchema.properties.timed_process_instance_ids | ConvertTo-Json -Depth 20
+Assert-True ((ConvertTo-Json -InputObject @($physicalInstances.process_instance_id)) |
+    Test-Json -Schema $instanceArraySchema -ErrorAction SilentlyContinue) 'distinct aggregate instances must pass'
+Assert-True (-not ((ConvertTo-Json -InputObject @($physicalInstances[0].process_instance_id, $physicalInstances[0].process_instance_id)) |
+    Test-Json -Schema $instanceArraySchema -ErrorAction SilentlyContinue)) 'duplicate aggregate instances must fail'
+$pidArraySchema = $aggregateSchema.properties.timed_pids | ConvertTo-Json -Depth 20
+Assert-True ((ConvertTo-Json -InputObject @(1234, 1234)) |
+    Test-Json -Schema $pidArraySchema -ErrorAction SilentlyContinue) 'diagnostic PIDs may be reused'
+
 & {
     $shootoutPath = Join-Path $PSScriptRoot 'Invoke-ControlledRuntimeShootout.ps1'
     $shootoutAst = [Management.Automation.Language.Parser]::ParseFile($shootoutPath, [ref]$null, [ref]$null)
@@ -60,6 +141,8 @@ $formalAggregate = [pscustomobject]@{
     evidence_class = $formalProfile.evidence_class
     profile_sha256 = $formalProfileSha256
     process_runs = $formalProfile.process_runs
+    timed_pids = @($physicalInstances.pid)
+    timed_process_instance_ids = @($physicalInstances.process_instance_id)
     warmup_samples_per_stage_per_process = $formalProfile.warmup_samples
     timed_samples_per_stage_per_process = $formalProfile.timed_samples
 }
@@ -67,6 +150,18 @@ Assert-PhysicalCostAggregateIdentity `
     -Aggregate $formalAggregate `
     -ExpectedProfile $formalProfile `
     -ExpectedProfileSha256 $formalProfileSha256
+
+foreach ($field in @('timed_pids', 'timed_process_instance_ids')) {
+    $shortAggregate = $formalAggregate.PSObject.Copy()
+    $shortAggregate.$field = @($formalAggregate.$field | Select-Object -First 4)
+    $rejected = $false
+    try {
+        Assert-PhysicalCostAggregateIdentity -Aggregate $shortAggregate -ExpectedProfile $formalProfile `
+            -ExpectedProfileSha256 $formalAggregate.profile_sha256
+    }
+    catch { $rejected = $_.Exception.Message.Contains('ASP56E5603') }
+    Assert-True $rejected "physical aggregate must bind $field count to the formal profile"
+}
 
 $diagnosticAggregate = $formalAggregate.PSObject.Copy()
 $diagnosticAggregate.profile_id = 'phase56.physical-diagnostic'
@@ -282,8 +377,9 @@ $evaluatorText = Get-Content -LiteralPath $evaluatorPath -Raw
 Assert-True ($physicalOrchestratorText.Contains(
         'Get-PairedRatioAggregate') -and
     $physicalOrchestratorText.Contains(
-        'New-FullCrossingReconstruction')) (
-    'physical aggregate must use the tested paired ratio and full reconstruction helpers')
+        'New-FullCrossingReconstruction') -and
+    $physicalOrchestratorText.Contains('Assert-PhysicalCostProcessInstances')) (
+    'physical aggregate must use the tested process identity, paired ratio and reconstruction helpers')
 Assert-True ($evaluatorText.Contains(
         'Assert-PhysicalCostAggregateIdentity') -and
     $evaluatorText.Contains(
@@ -304,4 +400,6 @@ Assert-True ($writeIndex -ge 0 -and $failIndex -gt $writeIndex) (
     paired_ratio = 'same_process_then_cross_process'
     reconstruction = 'full_increment_chain_max_5ns_or_10pct'
     overall = 'invalid_fail_not_measured_fail_closed'
+    process_identity = 'pid_reuse_accepted_instance_reuse_rejected'
+    process_identity_negative_cases = $identityNegativeCases.Count
 }

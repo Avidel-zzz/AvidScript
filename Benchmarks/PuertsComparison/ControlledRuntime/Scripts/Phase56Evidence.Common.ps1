@@ -1,5 +1,33 @@
 Set-StrictMode -Version Latest
 
+function Assert-PhysicalCostProcessInstances {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [AllowNull()]
+        [object[]]$Results,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateRange(1, 100)]
+        [int]$ExpectedProcessCount
+    )
+
+    if ($null -eq $Results -or $Results.Count -ne $ExpectedProcessCount) {
+        throw 'ASP54L4716 physical cost process instance count differs'
+    }
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($result in $Results) {
+        if ($null -eq $result -or
+            $result.PSObject.Properties.Name -cnotcontains 'process_instance_id' -or
+            $result.process_instance_id -isnot [string] -or
+            $result.process_instance_id -cnotmatch '^[0-9a-f]{32}$' -or
+            $result.process_instance_id -ceq '00000000000000000000000000000000' -or
+            -not $seen.Add($result.process_instance_id)) {
+            throw 'ASP54L4716 physical cost process instance identity is invalid or reused'
+        }
+    }
+}
+
 function Get-Phase56NearestRank {
     param(
         [Parameter(Mandatory = $true)]
@@ -37,6 +65,8 @@ function Assert-PhysicalCostAggregateIdentity {
         'evidence_class',
         'profile_sha256',
         'process_runs',
+        'timed_pids',
+        'timed_process_instance_ids',
         'warmup_samples_per_stage_per_process',
         'timed_samples_per_stage_per_process'
     )
@@ -51,6 +81,8 @@ function Assert-PhysicalCostAggregateIdentity {
             [string]$ExpectedProfile.evidence_class -or
         [string]$Aggregate.profile_sha256 -cne $ExpectedProfileSha256 -or
         [int]$Aggregate.process_runs -ne [int]$ExpectedProfile.process_runs -or
+        @($Aggregate.timed_pids).Count -ne [int]$ExpectedProfile.process_runs -or
+        @($Aggregate.timed_process_instance_ids).Count -ne [int]$ExpectedProfile.process_runs -or
         [int]$Aggregate.warmup_samples_per_stage_per_process -ne
             [int]$ExpectedProfile.warmup_samples -or
         [int]$Aggregate.timed_samples_per_stage_per_process -ne
