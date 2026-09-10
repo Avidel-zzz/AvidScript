@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://avidscript.dev/schema/binary-privacy-report/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "policy_id",
+    "passed",
+    "inventory_verified",
+    "error_code",
+    "scanner_sha256",
+    "policy_sha256",
+    "rule_ids",
+    "file_count",
+    "byte_count",
+    "files"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "policy_id": {
+      "const": "win64-private-paths-v1"
+    },
+    "passed": {
+      "type": "boolean"
+    },
+    "inventory_verified": {
+      "type": "boolean"
+    },
+    "error_code": {
+      "enum": [
+        null,
+        "ASBP1001",
+        "ASBP1002",
+        "ASBP1004",
+        "ASBP1006"
+      ]
+    },
+    "scanner_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "policy_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "rule_ids": {
+      "items": {
+        "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+        "type": "string"
+      },
+      "maxItems": 256,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "file_count": {
+      "maximum": 16384,
+      "type": "integer",
+      "minimum": 0
+    },
+    "byte_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "files": {
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "index",
+          "path",
+          "length",
+          "sha256",
+          "name_rule_ids",
+          "content_hits"
+        ],
+        "properties": {
+          "index": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "path": {
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\x00-\\x1f\\\\:]+$",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "length": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "name_rule_ids": {
+            "items": {
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+              "type": "string"
+            },
+            "maxItems": 256,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "content_hits": {
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "rule_id",
+                "matched_views"
+              ],
+              "properties": {
+                "matched_views": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "rule_id": {
+                  "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+                  "type": "string"
+                }
+              }
+            },
+            "maxItems": 256,
+            "type": "array"
+          }
+        }
+      },
+      "maxItems": 16384,
+      "type": "array"
+    }
+  },
+  "allOf": [
+    {
+      "else": {
+        "properties": {
+          "error_code": {
+            "type": "string"
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "passed": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "file_count": {
+            "minimum": 1
+          },
+          "error_code": {
+            "type": "null"
+          },
+          "inventory_verified": {
+            "const": true
+          },
+          "files": {
+            "items": {
+              "properties": {
+                "name_rule_ids": {
+                  "maxItems": 0
+                },
+                "content_hits": {
+                  "maxItems": 0
+                },
+                "path": {
+                  "type": "string"
+                }
+              }
+            },
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ]
+}
