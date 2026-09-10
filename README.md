@@ -61,7 +61,7 @@ PowerShell contracts **16/16** 与三条 clean/generated UBT 路径全部通过�
 完整记录见 [P64 交付](Docs/Phase64/P64_Closeout.md)，类型范围见 [P58 验收](Docs/Phase58/P58.4_Centralized_Gate_Report.md)。
 实现与验收分别记录，限制见[当前边界](#当前边界)。
 
-Windows 最新 clean candidate 回归 **467/467** 通过，.NET 六组 runner **302/302** 通过；修正了普通编辑器 AOT
+D31 的历史 Windows clean candidate 回归 **467/467** 通过，.NET 六组 runner **302/302** 通过；修正了普通编辑器 AOT
 fuel 配置、隔离工程样本路径和 correctness 探针的 gameplay 分帧。详情见
 [D31.C8/C9](Docs/Phase65/P65.D31_Wasmtime_Codegen_Attribution.md#d31c8-普通编辑器-aot-预算一致性)。
 原先两个混合平台用例已拆开，Windows 断言独立保留；恢复主工程 Development 生成类型包身份后，
@@ -71,8 +71,8 @@ fuel 配置、隔离工程样本路径和 correctness 探针的 gameplay 分帧�
 完整矩阵有效，**18 项门槛通过 16 项**，剩余两项为纯执行总体比率与胜率。PhysicalCost 入口同类
 修复已补齐 schema 与行为合同；`5bafc180` clean candidate 原生构建、五进程 **1050/1050**
 样本与三项受影响门槛均通过。Android/Mac 实机验收暂缓，
-[公开二进制路径脱敏](Docs/Phase65/P65.D32_Win64_Public_Binary_Privacy.md)已完成包含依赖声明的全新中性 Wasmtime 构建：94 包与独立依赖图一致，另含 Rust 标准库声明，176 文件完整隐私扫描 0 命中。新 DLL 的 UE 集成和公开离线包 Gate 尚未完成，主工程运行库保持原身份。
-新 DLL 集成中发现的生成绑定事务目录过长与失败后测试越界已修复，深路径生成/替换/失败保护等定向回归 **8/8**；完整 Windows 选择集扩为 468 项，仍待冻结候选验证。
+[公开二进制路径脱敏](Docs/Phase65/P65.D32_Win64_Public_Binary_Privacy.md)已完成包含依赖声明的全新中性 Wasmtime 构建：94 包与独立依赖图一致，另含 Rust 标准库声明，176 文件完整隐私扫描 0 命中。新 DLL 在 `663f773b` 干净候选的 Win64 Editor 回归 **468/468** 通过，运行前后冻结文件与运行库身份一致；该 DLL 的 Shipping 与公开离线包 Gate 尚未完成，主工程运行库保持原身份。
+新 DLL 集成中发现的生成绑定事务目录过长与失败后测试越界已修复，覆盖深路径生成、替换和失败保护。同一提交的源码包两次发布身份、清单一致，全新目录 Plan/Install/Verify/NoOp 全部通过、零警告；此项为源码安装证据。
 
 ## 架构
 
