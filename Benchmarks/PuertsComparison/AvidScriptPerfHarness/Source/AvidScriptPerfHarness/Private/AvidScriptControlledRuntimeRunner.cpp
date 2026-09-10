@@ -14,6 +14,7 @@
 #include "JSModuleLoader.h"
 #include "JsEnv.h"
 #include "Misc/FileHelper.h"
+#include "Misc/Guid.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "Serialization/JsonSerializer.h"
@@ -27,6 +28,7 @@ THIRD_PARTY_INCLUDES_END
 namespace
 {
 	constexpr int32 ControlledRuntimeSchemaVersion = 1;
+	constexpr int32 ControlledRuntimeResultSchemaVersion = 2;
 	constexpr uint32 ControlledRuntimeMixConstant = 0x6d2b79f5u;
 	constexpr uint32 ControlledRuntimeMultiplier = 1664525u;
 	constexpr uint32 ControlledRuntimeIncrement = 1013904223u;
@@ -36,6 +38,13 @@ namespace
 	constexpr int32 ControlledRuntimeCalibrationConfirmationSamples = 3;
 	constexpr const TCHAR* ControlledRuntimeLaneScheduleId =
 		TEXT("round_robin_process_sample_v1");
+
+	const FString& GetControlledRuntimeProcessInstanceId()
+	{
+		// PID 可在进程退出后复用；同一进程的所有请求必须共享此身份。
+		static const FString InstanceId = FGuid::NewGuid().ToString(EGuidFormats::Digits).ToLower();
+		return InstanceId;
+	}
 
 	enum class EControlledRuntimeLane : uint8
 	{
@@ -1068,7 +1077,8 @@ bool FAvidScriptControlledRuntimeRunner::RunFromFiles(
 	}
 
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
-	Result->SetNumberField(TEXT("schema_version"), ControlledRuntimeSchemaVersion);
+	Result->SetNumberField(TEXT("schema_version"), ControlledRuntimeResultSchemaVersion);
+	Result->SetStringField(TEXT("process_instance_id"), GetControlledRuntimeProcessInstanceId());
 	Result->SetStringField(TEXT("benchmark_kind"), TEXT("identical_wasm_kernel"));
 	Result->SetStringField(TEXT("mode"), Request.Mode);
 	Result->SetNumberField(TEXT("request_seed"), Request.Seed);

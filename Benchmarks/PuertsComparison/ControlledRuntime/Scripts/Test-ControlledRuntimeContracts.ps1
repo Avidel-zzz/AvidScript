@@ -638,7 +638,7 @@ try {
         }
     }
     $CalibrationResult = [ordered]@{
-        schema_version = 1
+        schema_version = 2
         benchmark_kind = 'identical_wasm_kernel'
         mode = 'calibration'
         request_seed = [int]$Profile.seed
@@ -655,6 +655,7 @@ try {
         engine_executable_sha256 = $EngineSha256
         process_run = -1
         pid = 49000
+        process_instance_id = [Guid]::NewGuid().ToString('N')
         kernel_wasm_sha256 = $KernelDigest
         timing_boundary = 'single_cached_export_call'
         compile_in_timed_region = $false
@@ -745,7 +746,7 @@ try {
             )
         }
         $FixtureResult = [ordered]@{
-            schema_version = 1
+            schema_version = 2
             benchmark_kind = 'identical_wasm_kernel'
             mode = 'timed'
             request_seed = [int]$Profile.seed
@@ -762,6 +763,7 @@ try {
             engine_executable_sha256 = $EngineSha256
             process_run = $ProcessRun
             pid = 50000 + $ProcessRun
+            process_instance_id = [Guid]::NewGuid().ToString('N')
             kernel_wasm_sha256 = $KernelDigest
             timing_boundary = 'single_cached_export_call'
             compile_in_timed_region = $false
@@ -800,7 +802,7 @@ try {
     Assert-True (
         ([System.IO.File]::ReadAllText($AggregatePath) |
             Test-Json -SchemaFile $AggregateSchemaPath)) (
-        'fixture aggregate must match schema v1')
+        'fixture aggregate must match schema v2')
     $Aggregate = Get-Content -LiteralPath $AggregatePath -Raw |
         ConvertFrom-Json
     Assert-True (@($Aggregate.process_metrics).Count -eq 20) (
@@ -818,6 +820,69 @@ try {
     Assert-True ([string]$MergeResult.pc_default_gate -ceq
         'wasmtime_pc_default_rejected') (
         'paired P95 must reject one slow/four fast process evidence')
+
+    # 同一数值 PID 的不同进程仍合法；真实进程实例重复必须拒绝。
+    $ReusedPidPaths = @()
+    for ($ProcessRun = 0; $ProcessRun -lt 5; ++$ProcessRun) {
+        $ReusedPidResult = Get-Content -LiteralPath $TimedPaths[$ProcessRun] -Raw |
+            ConvertFrom-Json
+        $ReusedPidResult.pid = [int]$CalibrationResult.pid
+        $ReusedPidPath = Join-Path $FixtureRoot "pid-reuse-$ProcessRun.result.json"
+        Write-JsonFile -Value $ReusedPidResult -Path $ReusedPidPath
+        $ReusedPidPaths += $ReusedPidPath
+    }
+    $ReusedPidAggregatePath = Join-Path $FixtureRoot 'pid-reuse.aggregate.json'
+    $ReusedPidMerge = & $MergerPath -ResultPaths $ReusedPidPaths `
+        -RequestPaths $TimedRequestPaths -CalibrationResultPath $CalibrationResultPath `
+        -CalibrationRequestPath $CalibrationRequestPath -ProfilePath $FixtureProfilePath `
+        -OutputPath $ReusedPidAggregatePath
+    $ReusedPidAggregate = Get-Content -LiteralPath $ReusedPidAggregatePath -Raw | ConvertFrom-Json
+    Assert-True (@($ReusedPidAggregate.timed_process_instance_ids | Select-Object -Unique).Count -eq 5) (
+        'PID reuse must preserve five distinct timed process instances')
+    Assert-True ($ReusedPidMerge.pc_default_gate -ceq $MergeResult.pc_default_gate -and
+        $ReusedPidAggregate.paired_ratios.wasmtime_over_v8_cross_process_p95 -eq $CrossProcessP95) (
+        'PID reuse must not change statistics or performance rejection')
+
+    foreach ($InvalidIdentity in @('missing', 'zero', 'legacy', 'calibration_reuse')) {
+        $IdentityResult = Get-Content -LiteralPath $TimedPaths[0] -Raw | ConvertFrom-Json
+        $ExpectedIdentityCode = 'ASP54R4102'
+        switch ($InvalidIdentity) {
+            'missing' { $IdentityResult.PSObject.Properties.Remove('process_instance_id') }
+            'zero' { $IdentityResult.process_instance_id = '00000000000000000000000000000000' }
+            'legacy' { $IdentityResult.schema_version = 1 }
+            'calibration_reuse' {
+                $IdentityResult.process_instance_id = $CalibrationResult.process_instance_id
+                $ExpectedIdentityCode = 'ASP54R4123'
+            }
+        }
+        $IdentityPath = Join-Path $FixtureRoot "rejected-$InvalidIdentity.result.json"
+        Write-JsonFile -Value $IdentityResult -Path $IdentityPath
+        $IdentityRejected = $false
+        try {
+            & $ValidatorPath -ResultPath $IdentityPath -RequestPath $TimedRequestPaths[0] `
+                -ProfilePath $FixtureProfilePath -CalibrationResultPath $CalibrationResultPath | Out-Null
+        }
+        catch {
+            $IdentityRejected = $_.Exception.Message.Contains($ExpectedIdentityCode)
+        }
+        Assert-True $IdentityRejected "invalid process identity must fail closed: $InvalidIdentity"
+    }
+    $DuplicateInstanceResult = Get-Content -LiteralPath $TimedPaths[0] -Raw | ConvertFrom-Json
+    $OtherInstanceResult = Get-Content -LiteralPath $TimedPaths[1] -Raw | ConvertFrom-Json
+    $DuplicateInstanceResult.process_instance_id = $OtherInstanceResult.process_instance_id
+    $DuplicateInstancePath = Join-Path $FixtureRoot 'rejected-instance-reuse.result.json'
+    Write-JsonFile -Value $DuplicateInstanceResult -Path $DuplicateInstancePath
+    $InstanceReuseRejected = $false
+    try {
+        & $MergerPath -ResultPaths (@($DuplicateInstancePath) + @($TimedPaths[1..4])) `
+            -RequestPaths $TimedRequestPaths -CalibrationResultPath $CalibrationResultPath `
+            -CalibrationRequestPath $CalibrationRequestPath -ProfilePath $FixtureProfilePath `
+            -OutputPath (Join-Path $FixtureRoot 'rejected-instance-reuse.aggregate.json') | Out-Null
+    }
+    catch {
+        $InstanceReuseRejected = $_.Exception.Message.Contains('ASP54M4202')
+    }
+    Assert-True $InstanceReuseRejected 'reused timed process instance must fail despite different PIDs'
 
     $SeedMutationRequest = Get-Content `
         -LiteralPath $TimedRequestPaths[0] `
@@ -949,7 +1014,12 @@ try {
 }
 finally {
     if (Test-Path -LiteralPath $FixtureRoot) {
-        Remove-Item -LiteralPath $FixtureRoot -Recurse -Force
+        $ResolvedFixtureRoot = [System.IO.Path]::GetFullPath($FixtureRoot)
+        $ResolvedTemporaryRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
+        Assert-True ($ResolvedFixtureRoot.StartsWith($ResolvedTemporaryRoot, [StringComparison]::OrdinalIgnoreCase) -and
+            [System.IO.Path]::GetFileName($ResolvedFixtureRoot) -match '^AvidScriptControlledRuntimeContracts-[0-9a-f]{32}$') (
+            'refusing to remove a fixture outside the owned temporary root')
+        Remove-Item -LiteralPath $ResolvedFixtureRoot -Recurse -Force
     }
 }
 

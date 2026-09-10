@@ -64,8 +64,11 @@ PowerShell contracts **16/16** 与三条 clean/generated UBT 路径全部通过�
 Windows 最新回归 **465/465** 通过，.NET 六组 runner **302/302** 通过；修正了普通编辑器 AOT
 fuel 配置、隔离工程样本路径和 correctness 探针的 gameplay 分帧。详情见
 [D31.C8/C9](Docs/Phase65/P65.D31_Wasmtime_Codegen_Attribution.md#d31c8-普通编辑器-aot-预算一致性)。
-两项依赖 Android target runtime 的交叉测试未选入，Android/Mac 实机验收暂缓；正式性能整组复测
-与公开二进制发布检查仍待完成，P64 归档基线保持独立记录。
+原先两个混合平台用例已拆开，Windows 断言独立保留；恢复主工程 Development 生成类型包身份后，
+两个 Windows 用例与八项 GeneratedTypes 定向测试 **10/10** 通过。该结果与旧全量计数分别记录。
+正式性能采样在第九个纯执行 kernel 遇到 Windows PID 复用误拒绝，已改用进程生命周期内固定的
+实例身份并补齐行为合同；新候选整组复测仍待完成。Android/Mac 实机验收暂缓，
+[公开二进制路径脱敏](Docs/Phase65/P65.D32_Win64_Public_Binary_Privacy.md)仍处于实施方案阶段。
 
 ## 架构
 

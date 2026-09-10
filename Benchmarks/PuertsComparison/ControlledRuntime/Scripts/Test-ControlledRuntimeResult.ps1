@@ -35,8 +35,8 @@ foreach ($RequiredPath in @(
 
 $ResultText = [System.IO.File]::ReadAllText($ResolvedResultPath)
 $RequestText = [System.IO.File]::ReadAllText($ResolvedRequestPath)
-if (-not ($ResultText | Test-Json -SchemaFile $SchemaPath)) {
-    throw 'ASP54R4102 controlled runtime result does not match schema v1'
+if (-not ($ResultText | Test-Json -SchemaFile $SchemaPath -ErrorAction SilentlyContinue)) {
+    throw 'ASP54R4102 controlled runtime result does not match schema v2'
 }
 if (-not ($RequestText | Test-Json -SchemaFile $RequestSchemaPath)) {
     throw 'ASP54R4103 controlled runtime request does not match schema v1'
@@ -261,11 +261,14 @@ else {
         [string]$Request.calibration_sha256 -cne $CalibrationSha256) {
         throw 'ASP54R4122 timed result is not bound to frozen calibration bytes'
     }
-    $Calibration = Get-Content -LiteralPath $ResolvedCalibrationPath -Raw |
-        ConvertFrom-Json
+    $CalibrationText = [System.IO.File]::ReadAllText($ResolvedCalibrationPath)
+    if (-not ($CalibrationText | Test-Json -SchemaFile $SchemaPath -ErrorAction SilentlyContinue)) {
+        throw 'ASP54R4123 calibration result does not match schema v2'
+    }
+    $Calibration = $CalibrationText | ConvertFrom-Json
     if ([string]$Calibration.attempt_id -cne [string]$Result.attempt_id -or
-        [int]$Calibration.pid -eq [int]$Result.pid) {
-        throw 'ASP54R4123 calibration attempt mismatch or PID reuse'
+        [string]$Calibration.process_instance_id -ceq [string]$Result.process_instance_id) {
+        throw 'ASP54R4123 calibration attempt mismatch or process instance reuse'
     }
 
     $TimedSamples = [int]$Profile.timed_samples

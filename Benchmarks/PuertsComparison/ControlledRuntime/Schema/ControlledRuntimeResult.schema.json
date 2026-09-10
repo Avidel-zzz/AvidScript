@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://avidscript.dev/schema/controlled-runtime-result-v1.json",
+  "$id": "https://avidscript.dev/schema/controlled-runtime-result-v2.json",
   "title": "AvidScript Controlled Runtime Process Result",
   "type": "object",
   "additionalProperties": false,
@@ -31,13 +31,25 @@
     "lane_identities",
     "calibration",
     "samples",
-    "correctness_failures"
+    "correctness_failures",
+    "process_instance_id"
   ],
   "properties": {
-    "schema_version": { "const": 1 },
-    "benchmark_kind": { "const": "identical_wasm_kernel" },
-    "mode": { "enum": ["calibration", "timed"] },
-    "request_seed": { "type": "integer" },
+    "schema_version": {
+      "const": 2
+    },
+    "benchmark_kind": {
+      "const": "identical_wasm_kernel"
+    },
+    "mode": {
+      "enum": [
+        "calibration",
+        "timed"
+      ]
+    },
+    "request_seed": {
+      "type": "integer"
+    },
     "attempt_id": {
       "type": "string",
       "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
@@ -62,32 +74,62 @@
       "type": "string",
       "pattern": "^[0-9a-f]{40}$"
     },
-    "candidate_clean": { "const": true },
-    "engine_version": { "type": "string", "minLength": 1 },
-    "engine_build_id": { "type": "string", "minLength": 1 },
+    "candidate_clean": {
+      "const": true
+    },
+    "engine_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "engine_build_id": {
+      "type": "string",
+      "minLength": 1
+    },
     "engine_executable_sha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
-    "process_run": { "type": "integer", "minimum": -1 },
-    "pid": { "type": "integer", "minimum": 1 },
+    "process_run": {
+      "type": "integer",
+      "minimum": -1
+    },
+    "pid": {
+      "type": "integer",
+      "minimum": 1
+    },
     "kernel_wasm_sha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
-    "timing_boundary": { "const": "single_cached_export_call" },
-    "compile_in_timed_region": { "const": false },
-    "instantiate_in_timed_region": { "const": false },
-    "export_lookup_in_timed_region": { "const": false },
-    "fallback_used": { "const": false },
-    "lane_schedule_id": { "const": "round_robin_process_sample_v1" },
+    "timing_boundary": {
+      "const": "single_cached_export_call"
+    },
+    "compile_in_timed_region": {
+      "const": false
+    },
+    "instantiate_in_timed_region": {
+      "const": false
+    },
+    "export_lookup_in_timed_region": {
+      "const": false
+    },
+    "fallback_used": {
+      "const": false
+    },
+    "lane_schedule_id": {
+      "const": "round_robin_process_sample_v1"
+    },
     "warmup_lane_orders": {
       "type": "array",
-      "items": { "$ref": "#/$defs/laneOrder" }
+      "items": {
+        "$ref": "#/$defs/laneOrder"
+      }
     },
     "timed_lane_orders": {
       "type": "array",
-      "items": { "$ref": "#/$defs/laneOrder" }
+      "items": {
+        "$ref": "#/$defs/laneOrder"
+      }
     },
     "iterations": {
       "type": "object",
@@ -99,7 +141,10 @@
         "native_cpp_reference"
       ],
       "properties": {
-        "puerts_v8_wasm_jit": { "type": "integer", "minimum": 1 },
+        "puerts_v8_wasm_jit": {
+          "type": "integer",
+          "minimum": 1
+        },
         "avidscript_wasmtime_cranelift_jit": {
           "type": "integer",
           "minimum": 1
@@ -108,7 +153,10 @@
           "type": "integer",
           "minimum": 1
         },
-        "native_cpp_reference": { "type": "integer", "minimum": 1 }
+        "native_cpp_reference": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     },
     "lane_identities": {
@@ -116,38 +164,85 @@
       "minItems": 4,
       "maxItems": 4,
       "prefixItems": [
-        { "$ref": "#/$defs/puertsLane" },
-        { "$ref": "#/$defs/wasmtimeLane" },
-        { "$ref": "#/$defs/wamrLane" },
-        { "$ref": "#/$defs/nativeLane" }
+        {
+          "$ref": "#/$defs/puertsLane"
+        },
+        {
+          "$ref": "#/$defs/wasmtimeLane"
+        },
+        {
+          "$ref": "#/$defs/wamrLane"
+        },
+        {
+          "$ref": "#/$defs/nativeLane"
+        }
       ],
       "items": false
     },
-    "calibration": { "type": "object" },
+    "calibration": {
+      "type": "object"
+    },
     "samples": {
       "type": "array",
-      "items": { "$ref": "#/$defs/sample" }
+      "items": {
+        "$ref": "#/$defs/sample"
+      }
     },
-    "correctness_failures": { "const": 0 }
+    "correctness_failures": {
+      "const": 0
+    },
+    "process_instance_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$",
+      "not": {
+        "const": "00000000000000000000000000000000"
+      }
+    }
   },
   "allOf": [
     {
-      "if": { "properties": { "mode": { "const": "calibration" } } },
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "calibration"
+          }
+        }
+      },
       "then": {
         "properties": {
-          "process_run": { "const": -1 },
-          "calibration_sha256": { "const": "not_applicable" },
-          "samples": { "maxItems": 0 }
+          "process_run": {
+            "const": -1
+          },
+          "calibration_sha256": {
+            "const": "not_applicable"
+          },
+          "samples": {
+            "maxItems": 0
+          }
         }
       }
     },
     {
-      "if": { "properties": { "mode": { "const": "timed" } } },
-      "then": {
-        "required": ["warmup_lane_orders", "timed_lane_orders", "iterations"],
+      "if": {
         "properties": {
-          "process_run": { "minimum": 0 },
-          "calibration_sha256": { "pattern": "^[0-9a-f]{64}$" }
+          "mode": {
+            "const": "timed"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "warmup_lane_orders",
+          "timed_lane_orders",
+          "iterations"
+        ],
+        "properties": {
+          "process_run": {
+            "minimum": 0
+          },
+          "calibration_sha256": {
+            "pattern": "^[0-9a-f]{64}$"
+          }
         }
       }
     }
@@ -186,7 +281,9 @@
         "fallback_used"
       ],
       "properties": {
-        "wasm_workload_kind": { "const": "identical_wasm_kernel" },
+        "wasm_workload_kind": {
+          "const": "identical_wasm_kernel"
+        },
         "source_wasm_sha256": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
@@ -195,12 +292,16 @@
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
         },
-        "fallback_used": { "const": false }
+        "fallback_used": {
+          "const": false
+        }
       }
     },
     "puertsLane": {
       "allOf": [
-        { "$ref": "#/$defs/laneBase" },
+        {
+          "$ref": "#/$defs/laneBase"
+        },
         {
           "required": [
             "adapter_proof_id",
@@ -208,11 +309,21 @@
             "adapter_artifact_wasm_sha256"
           ],
           "properties": {
-            "lane_id": { "const": "puerts_v8_wasm_jit" },
-            "runtime_id": { "const": "v8.webassembly.tiered_jit" },
-            "adapter_id": { "const": "puerts_webassembly_module_instance" },
-            "execution_tier": { "const": "tiered_jit" },
-            "compiler_identity": { "const": "v8.webassembly.tiered_jit" },
+            "lane_id": {
+              "const": "puerts_v8_wasm_jit"
+            },
+            "runtime_id": {
+              "const": "v8.webassembly.tiered_jit"
+            },
+            "adapter_id": {
+              "const": "puerts_webassembly_module_instance"
+            },
+            "execution_tier": {
+              "const": "tiered_jit"
+            },
+            "compiler_identity": {
+              "const": "v8.webassembly.tiered_jit"
+            },
             "adapter_proof_id": {
               "const": "webassembly.module_instance.cached_export.v1"
             },
@@ -230,37 +341,63 @@
     },
     "wasmtimeLane": {
       "allOf": [
-        { "$ref": "#/$defs/laneBase" },
+        {
+          "$ref": "#/$defs/laneBase"
+        },
         {
           "properties": {
-            "lane_id": { "const": "avidscript_wasmtime_cranelift_jit" },
-            "runtime_id": { "const": "wasmtime.cranelift.jit" },
-            "execution_tier": { "const": "jit" },
-            "compiler_identity": { "const": "cranelift" }
+            "lane_id": {
+              "const": "avidscript_wasmtime_cranelift_jit"
+            },
+            "runtime_id": {
+              "const": "wasmtime.cranelift.jit"
+            },
+            "execution_tier": {
+              "const": "jit"
+            },
+            "compiler_identity": {
+              "const": "cranelift"
+            }
           }
         }
       ]
     },
     "wamrLane": {
       "allOf": [
-        { "$ref": "#/$defs/laneBase" },
+        {
+          "$ref": "#/$defs/laneBase"
+        },
         {
           "properties": {
-            "lane_id": { "const": "avidscript_wamr_interpreter" },
-            "runtime_id": { "const": "wamr.interpreter" },
-            "execution_tier": { "const": "interpreter" }
+            "lane_id": {
+              "const": "avidscript_wamr_interpreter"
+            },
+            "runtime_id": {
+              "const": "wamr.interpreter"
+            },
+            "execution_tier": {
+              "const": "interpreter"
+            }
           }
         }
       ]
     },
     "nativeLane": {
       "allOf": [
-        { "$ref": "#/$defs/laneBase" },
+        {
+          "$ref": "#/$defs/laneBase"
+        },
         {
           "properties": {
-            "lane_id": { "const": "native_cpp_reference" },
-            "runtime_id": { "const": "unreal_engine_native" },
-            "execution_tier": { "const": "native" }
+            "lane_id": {
+              "const": "native_cpp_reference"
+            },
+            "runtime_id": {
+              "const": "unreal_engine_native"
+            },
+            "execution_tier": {
+              "const": "native"
+            }
           }
         }
       ]
@@ -291,17 +428,47 @@
             "native_cpp_reference"
           ]
         },
-        "sample_index": { "type": "integer", "minimum": 0 },
-        "lane_position": { "type": "integer", "minimum": 0, "maximum": 3 },
-        "lane_rotation": { "type": "integer", "minimum": 0, "maximum": 3 },
-        "iterations": { "type": "integer", "minimum": 1 },
-        "seed": { "type": "integer" },
-        "duration_ns": { "type": "number", "exclusiveMinimum": 0 },
-        "ns_per_iteration": { "type": "number", "exclusiveMinimum": 0 },
-        "result": { "type": "integer" },
-        "expected": { "type": "integer" },
-        "correct": { "const": true },
-        "host_crossing_count": { "const": 1 }
+        "sample_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lane_position": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "lane_rotation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "iterations": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "seed": {
+          "type": "integer"
+        },
+        "duration_ns": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "ns_per_iteration": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "result": {
+          "type": "integer"
+        },
+        "expected": {
+          "type": "integer"
+        },
+        "correct": {
+          "const": true
+        },
+        "host_crossing_count": {
+          "const": 1
+        }
       }
     }
   }

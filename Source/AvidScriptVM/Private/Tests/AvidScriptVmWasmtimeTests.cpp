@@ -1214,7 +1214,24 @@ bool FAvidScriptVmWasmtimeCompilerProfileTest::RunTest(
 	TestNull(
 		TEXT("profile without the verified extension fails closed"),
 		avidscript_wasmtime_engine_new_with_profile(&ResolvedProfile));
+	return true;
+#endif
+}
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmWasmtimeAndroidCompilerProfileTest,
+	"AvidScript.VM.Wasmtime.Android.CompilerProfile",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmWasmtimeAndroidCompilerProfileTest::RunTest(
+	const FString& Parameters)
+{
+#if !AVIDSCRIPT_WITH_WASMTIME
+	AddError(TEXT("Android cross-compiler acceptance requires the Wasmtime toolchain"));
+	return false;
+#else
+	FString Error;
+	FString ErrorCategory;
 	FAvidScriptVmBackendInfo AndroidRuntimeInfo;
 	AndroidRuntimeInfo.Kind = EAvidScriptVmBackendKind::Wasmtime;
 	AndroidRuntimeInfo.ExecutionMode = EAvidScriptVmExecutionMode::Aot;
@@ -1242,7 +1259,7 @@ bool FAvidScriptVmWasmtimeCompilerProfileTest::RunTest(
 		AndroidRuntimeInfo.RuntimeBuildIdentity.Contains(
 			TEXT("target=aarch64-linux-android;cpu=arm64-v8a"),
 			ESearchCase::CaseSensitive));
-	Engine = avidscript_wasmtime_engine_new_with_profile(
+	AvidScriptWasmtimeEngine* Engine = avidscript_wasmtime_engine_new_with_profile(
 		&AndroidResolvedProfile);
 	TestNotNull(TEXT("Android cross-compiler engine is created"), Engine);
 	avidscript_wasmtime_engine_delete(Engine);
@@ -2329,6 +2346,35 @@ bool FAvidScriptVmWasmtimeArtifactCompilerTest::RunTest(
 			CachedResult.Artifact.AttestationId,
 			MutatedArtifact));
 
+	return true;
+#endif
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmWasmtimeAndroidArtifactCompilerTest,
+	"AvidScript.VM.Wasmtime.Android.ArtifactCompiler",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmWasmtimeAndroidArtifactCompilerTest::RunTest(
+	const FString& Parameters)
+{
+#if !AVIDSCRIPT_WITH_WASMTIME
+	AddError(TEXT("Android cross-compiler acceptance requires the Wasmtime toolchain"));
+	return false;
+#else
+	const TArray<uint8> Bytecode = BuildWasmtimeLifecycleFixture();
+	FAvidScriptVmArtifactCompileRequest Request;
+	Request.Selection.BackendKind = EAvidScriptVmBackendKind::Wasmtime;
+	Request.Selection.ExecutionMode = EAvidScriptVmExecutionMode::Aot;
+	Request.Selection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmtimeSerialized;
+	Request.CanonicalWasmBytes = Bytecode;
+	FAvidScriptVmArtifactCompileResult FirstResult;
+	if (!TestTrue(TEXT("Win64 comparison artifact compiles"),
+		CompileAvidScriptVmArtifact(Request, FirstResult)))
+	{
+		AddError(FirstResult.Error.Category + TEXT(": ") + FirstResult.Error.Details);
+		return false;
+	}
 	FAvidScriptVmArtifactCompileRequest AndroidRequest = Request;
 	AndroidRequest.TargetTriple = TEXT("aarch64-linux-android");
 	FAvidScriptVmArtifactCompileResult AndroidResult;

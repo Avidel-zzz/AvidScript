@@ -117,10 +117,11 @@ for ($Index = 0; $Index -lt $ExpectedProcessRuns; ++$Index) {
 }
 
 $Pids = @($Results | ForEach-Object { [int]$_.pid })
-$AllPids = @([int]$Calibration.pid) + $Pids
-if (@($AllPids | Select-Object -Unique).Count -ne
+$ProcessInstanceIds = @($Results | ForEach-Object { [string]$_.process_instance_id })
+$AllProcessInstanceIds = @([string]$Calibration.process_instance_id) + $ProcessInstanceIds
+if (@($AllProcessInstanceIds | Select-Object -Unique).Count -ne
     $ExpectedProcessRuns + 1) {
-    throw 'ASP54M4202 calibration/timed process PIDs are not fresh and unique'
+    throw 'ASP54M4202 calibration/timed process instances are not fresh and unique'
 }
 $ProcessRuns = @(
     $Results |
@@ -304,7 +305,7 @@ else {
 }
 
 $Aggregate = [ordered]@{
-    schema_version = 1
+    schema_version = 2
     benchmark_kind = 'identical_wasm_kernel'
     attempt_id = $ExpectedAttemptId
     profile_sha256 = $ProfileSha256
@@ -327,6 +328,8 @@ $Aggregate = [ordered]@{
         -Value @($Calibration.lane_identities)
     calibration_pid = [int]$Calibration.pid
     timed_pids = $Pids
+    calibration_process_instance_id = [string]$Calibration.process_instance_id
+    timed_process_instance_ids = $ProcessInstanceIds
     process_runs = $ExpectedProcessRuns
     timed_samples_per_lane_per_process = $TimedSamples
     observation_count = $AllSamples.Count
@@ -355,7 +358,7 @@ $Aggregate = [ordered]@{
 }
 $AggregateJson = $Aggregate | ConvertTo-Json -Depth 32
 if (-not ($AggregateJson | Test-Json -SchemaFile $AggregateSchemaPath)) {
-    throw 'ASP54M4210 generated aggregate does not match schema v1'
+    throw 'ASP54M4210 generated aggregate does not match schema v2'
 }
 [System.IO.File]::WriteAllText(
     [System.IO.Path]::GetFullPath($OutputPath),
