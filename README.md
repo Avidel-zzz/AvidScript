@@ -69,7 +69,8 @@ fuel 配置、隔离工程样本路径和 correctness 探针的 gameplay 分帧�
 选择清单逐项通过，包含拆分后保留的 Windows 断言。Android 两项另列为未执行，不计入通过数。
 正式性能采样的 Windows PID 复用误拒绝已改用进程生命周期内固定的实例身份；`7707d5c6`
 完整矩阵有效，**18 项门槛通过 16 项**，剩余两项为纯执行总体比率与胜率。PhysicalCost 入口同类
-修复已补齐 schema 与行为合同，原生增量构建通过，独立运行验证待完成。Android/Mac 实机验收暂缓，
+修复已补齐 schema 与行为合同；`5bafc180` clean candidate 原生构建、五进程 **1050/1050**
+样本与三项受影响门槛均通过。Android/Mac 实机验收暂缓，
 [公开二进制路径脱敏](Docs/Phase65/P65.D32_Win64_Public_Binary_Privacy.md)仍处于实施方案阶段。
 
 ## 架构
