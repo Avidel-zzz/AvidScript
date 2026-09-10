@@ -229,11 +229,20 @@ function Get-PreparedSource {
     if (-not (Test-Path -LiteralPath $SourceRoot -PathType Container)) {
         throw 'ASP57W1302 source archive root is missing after extraction'
     }
+    # Git may check out the patch as CRLF on Windows; upstream archive sources are LF.
+    # Apply exactly the canonical bytes authorized by the lock, without changing the tracked patch.
+    $CanonicalPatchPath = Join-Path $PreparedRoot 'avidscript-locked.patch'
+    $PatchText = [System.IO.File]::ReadAllText($PatchPath).TrimStart([char]0xFEFF)
+    [System.IO.File]::WriteAllText($CanonicalPatchPath,
+        $PatchText.Replace("`r`n", "`n").Replace("`r", "`n"), [System.Text.UTF8Encoding]::new($false))
+    if ((Get-FileSha256 -Path $CanonicalPatchPath) -cne $PatchSha256) {
+        throw 'ASP57W1305 canonical patch bytes differ from the lock'
+    }
     Invoke-NativeTool -Executable 'git' `
-        -Arguments @('apply', '--check', '--unidiff-zero', '--whitespace=nowarn', $PatchPath) `
+        -Arguments @('apply', '--check', '--unidiff-zero', '--whitespace=nowarn', $CanonicalPatchPath) `
         -WorkingDirectory $SourceRoot -Code 'ASP57W1303'
     Invoke-NativeTool -Executable 'git' `
-        -Arguments @('apply', '--unidiff-zero', '--whitespace=nowarn', $PatchPath) `
+        -Arguments @('apply', '--unidiff-zero', '--whitespace=nowarn', $CanonicalPatchPath) `
         -WorkingDirectory $SourceRoot -Code 'ASP57W1304'
     Write-Utf8Json -Value ([ordered]@{
         source_sha256 = [string]$Lock.upstream.source_archive.sha256
