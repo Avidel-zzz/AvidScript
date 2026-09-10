@@ -71,7 +71,7 @@ fuel 配置、隔离工程样本路径和 correctness 探针的 gameplay 分帧�
 完整矩阵有效，**18 项门槛通过 16 项**，剩余两项为纯执行总体比率与胜率。PhysicalCost 入口同类
 修复已补齐 schema 与行为合同；`5bafc180` clean candidate 原生构建、五进程 **1050/1050**
 样本与三项受影响门槛均通过。Android/Mac 实机验收暂缓，
-[公开二进制路径脱敏](Docs/Phase65/P65.D32_Win64_Public_Binary_Privacy.md)已实现完整文件集合的只读隐私扫描；现有 Wasmtime 的 DLL/静态库仍检出私人路径，中性重建和公开离线包 Gate 尚未完成。
+[公开二进制路径脱敏](Docs/Phase65/P65.D32_Win64_Public_Binary_Privacy.md)已实现完整文件集合的只读隐私扫描及显式中性构建入口；现有 Wasmtime 的 DLL/静态库仍检出私人路径，中性重建实测和公开离线包 Gate 尚未完成。
 
 ## 架构
 

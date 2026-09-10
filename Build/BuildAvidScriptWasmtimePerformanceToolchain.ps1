@@ -6,7 +6,8 @@ param(
     [string]$RepositoryRoot = '',
     [string]$CacheRoot = '',
     [string]$LockPath = '',
-    [string]$SourceArchiveOverride = ''
+    [string]$SourceArchiveOverride = '',
+    [switch]$NeutralBuild
 )
 
 $ErrorActionPreference = 'Stop'
@@ -329,6 +330,7 @@ function Test-ManagedInstall {
 $Resolved = Read-PerformanceToolchainLock
 $Lock = $Resolved.Lock
 $Paths = Get-ManagedPaths -Lock $Lock
+if ($NeutralBuild -and $Mode -ne 'Build') { throw 'ASNB1001 NeutralBuild is valid only in Build mode' }
 if ($Mode -eq 'ValidateLock') {
     [pscustomobject]@{
         result = 'wasmtime_performance_toolchain_lock_valid'
@@ -363,6 +365,17 @@ foreach ($CommandName in @('cmake', 'git', 'rustc', 'cargo')) {
         throw "ASP57W1701 required build tool is unavailable: $CommandName"
     }
 }
+. (Join-Path $ScriptRoot 'ReleaseEngineering/AvidScriptNeutralWasmtimeBuild.ps1')
+$NeutralCacheLock = $null
+if ($NeutralBuild) {
+    Assert-AvidScriptNeutralBuildInputs -RepositoryRoot $RepositoryRoot -CacheRoot $CacheRoot -InstallPath $Paths.InstallPath
+    [void][IO.Directory]::CreateDirectory($CacheRoot)
+    $NeutralCacheLock = [IO.FileStream]::new((Join-Path $CacheRoot '.neutral-build.lock'),
+        [IO.FileMode]::CreateNew, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    Write-Utf8Json -Value @{policy_id='win64-neutral-wasmtime-v1'} -Path (Join-Path $CacheRoot '.avidscript-neutral-cache.json')
+}
+$SavedBuildEnvironment = Save-AvidScriptWasmtimeEnvironment
+try {
 $env:RUSTUP_TOOLCHAIN = [string]$Lock.rust.toolchain
 $RustVersion = & rustc --version
 if ($LASTEXITCODE -ne 0 -or $RustVersion -notmatch '^rustc 1\.93\.0 ') {
@@ -378,6 +391,13 @@ $CargoTargetRoot = Join-Path $CacheRoot 'cargo-target'
 $StagingRoot = Join-Path $CacheRoot "staging/$($Lock.toolchain_id)"
 $env:CARGO_TARGET_DIR = $CargoTargetRoot.Replace([System.IO.Path]::DirectorySeparatorChar, '/')
 $env:SOURCE_DATE_EPOCH = [string]$Lock.rust.source_date_epoch
+if ($NeutralBuild) {
+    $NeutralPrivatePaths = @(Set-AvidScriptNeutralWasmtimeEnvironment -RepositoryRoot $RepositoryRoot -CacheRoot $CacheRoot `
+        -SourceRoot $SourceRoot -CargoTargetRoot $CargoTargetRoot)
+    Test-AvidScriptNeutralRustFlags -CacheRoot $CacheRoot
+    $CargoLockPath = Join-Path $SourceRoot 'Cargo.lock'
+    $CargoLockBefore = Get-FileSha256 -Path $CargoLockPath
+}
 foreach ($OwnedPath in @($BuildRoot, $StagingRoot)) {
     $OwnedParent = Split-Path -Parent $OwnedPath
     New-Item -ItemType Directory -Force -Path $OwnedParent | Out-Null
@@ -394,6 +414,7 @@ $CMakeArguments = @(
     '-S', (Join-Path $SourceRoot 'crates/c-api'),
     '-B', $BuildRoot
 ) + @($Lock.rust.cmake_arguments) + @("-DCMAKE_INSTALL_PREFIX=$StagingRoot")
+if ($NeutralBuild) { $CMakeArguments += '-DWASMTIME_USER_CARGO_BUILD_OPTIONS=--locked' }
 Invoke-NativeTool -Executable 'cmake' -Arguments $CMakeArguments `
     -WorkingDirectory $SourceRoot -Code 'ASP57W1704'
 Invoke-NativeTool -Executable 'cmake' `
@@ -402,6 +423,9 @@ Invoke-NativeTool -Executable 'cmake' `
 Invoke-NativeTool -Executable 'cmake' `
     -Arguments @('--install', $BuildRoot, '--config', 'Release') `
     -WorkingDirectory $SourceRoot -Code 'ASP57W1706'
+if ($NeutralBuild -and (Get-FileSha256 -Path $CargoLockPath) -cne $CargoLockBefore) {
+    throw 'ASNB1004 locked Cargo dependency graph changed during build'
+}
 Copy-Item -LiteralPath (Join-Path $SourceRoot 'LICENSE') `
     -Destination (Join-Path $StagingRoot ([string]$Lock.layout.license_relative_path))
 $StagedDll = Join-Path $StagingRoot ([string]$Lock.layout.dll_relative_path)
@@ -426,7 +450,17 @@ New-Item -ItemType Directory -Force -Path $Paths.InstalledRoot | Out-Null
 $PublishPath = "$($Paths.InstallPath).publish-$([Guid]::NewGuid().ToString('N'))"
 Assert-PathWithin -Root $Paths.InstalledRoot -Path $PublishPath -Code 'ASP57W1707'
 Copy-Item -LiteralPath $StagingRoot -Destination $PublishPath -Recurse
-if (Test-Path -LiteralPath $Paths.InstallPath) {
+if ($NeutralBuild) {
+    $PublishPaths = [pscustomobject]@{InstallPath=$PublishPath; MarkerPath=(Join-Path $PublishPath $MarkerName)}
+    [void](Test-ManagedInstall -Lock $Lock -Paths $PublishPaths -PatchSha256 $Resolved.PatchSha256)
+    $PrivacyReportRoot = Join-Path $CacheRoot 'reports'
+    [void][IO.Directory]::CreateDirectory($PrivacyReportRoot)
+    $PrivacyReportPath = Join-Path $PrivacyReportRoot ('binary-privacy-' + [Guid]::NewGuid().ToString('N') + '.json')
+    [void](Invoke-AvidScriptBinaryPrivacyScan -Root $PublishPath -ReportPath $PrivacyReportPath -PrivatePath $NeutralPrivatePaths)
+    # A concurrent publisher cannot authorize replacement of an existing install.
+    if (Test-Path -LiteralPath $Paths.InstallPath) { throw 'ASNB1003 neutral install destination appeared during build' }
+}
+if (-not $NeutralBuild -and (Test-Path -LiteralPath $Paths.InstallPath)) {
     Assert-PathWithin -Root $Paths.InstalledRoot -Path $Paths.InstallPath -Code 'ASP57W1708'
     Remove-Item -LiteralPath $Paths.InstallPath -Recurse -Force
 }
@@ -437,3 +471,8 @@ $Result = Test-ManagedInstall -Lock $Lock -Paths $Paths -PatchSha256 $Resolved.P
     rustc = $RustVersion
     evidence = $Result
 } | ConvertTo-Json -Depth 6
+}
+finally {
+    Restore-AvidScriptWasmtimeEnvironment -Values $SavedBuildEnvironment
+    if ($null -ne $NeutralCacheLock) { $NeutralCacheLock.Dispose() }
+}
