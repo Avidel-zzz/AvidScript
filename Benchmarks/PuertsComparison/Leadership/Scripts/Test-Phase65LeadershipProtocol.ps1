@@ -154,6 +154,91 @@ Assert-True ($null -ne $PreparationFunction) 'candidate freezer must expose proj
     catch { $Rejected = $_.Exception.Message.StartsWith('ASP65L2014 ') }
     Assert-True $Rejected 'candidate preparation must reject a failed post-publication Editor build'
 } $PreparationFunction.Extent.Text
+$PublicationFunction = $CandidateAst.Find({ param($Node)
+    $Node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+        $Node.Name -ceq 'Invoke-LeadershipGeneratedTypePublication'
+}, $true)
+Assert-True ($null -ne $PublicationFunction) 'candidate freezer must expose Generated Type publication'
+& {
+    param([string]$PublicationText)
+    . ([scriptblock]::Create($PublicationText))
+    function Resolve-RequiredPath {
+        param($Path, $PathType, $Label)
+        Assert-True (Test-Path -LiteralPath $Path -PathType $PathType) "missing publication fixture: $Label"
+        return $Path
+    }
+    function Get-SidecarFileSha256 {
+        param($Path)
+        return (Get-FileHash -LiteralPath $Path).Hash.ToLowerInvariant()
+    }
+    $Parent = 'C:\tmp\AvidScript\P65TypeProcessContracts'
+    $Fixture = Join-Path $Parent ([guid]::NewGuid().ToString('N'))
+    $EnvironmentNames = @('DOTNET_CLI_HOME', 'APPDATA', 'LOCALAPPDATA', 'NUGET_PACKAGES',
+        'DOTNET_CLI_TELEMETRY_OPTOUT', 'DOTNET_SKIP_FIRST_TIME_EXPERIENCE')
+    $Before = @{}
+    foreach ($Name in $EnvironmentNames) { $Before[$Name] = [Environment]::GetEnvironmentVariable($Name, 'Process') }
+    try {
+        $Builder = Join-Path $Fixture 'Plugins/AvidScript/Build/BuildCSharpScriptTypes.ps1'
+        $Source = 'Plugins/AvidScript/Samples/CSharp/ScriptDefinedTypes/ScriptDefinedTypes.cs'
+        $CurrentPath = Join-Path $Fixture 'Plugins/AvidScript/Content/AvidScriptGenerated/current.json'
+        foreach ($Path in @($Builder, (Join-Path $Fixture $Source), $CurrentPath)) {
+            [void][IO.Directory]::CreateDirectory((Split-Path -Parent $Path))
+        }
+        [IO.File]::WriteAllText((Join-Path $Fixture $Source), '// fixture')
+        [IO.File]::WriteAllText((Join-Path $Fixture 'fixture.csproj'), '<Project />')
+        [IO.File]::WriteAllText((Join-Path $Fixture 'package.json'), '{}')
+        $ModuleId = 'avidscript_phase65_benchmark_generated_types'
+        @{ module_id=$ModuleId; package_id=('a' * 64); generation_key_sha256=('b' * 64) } |
+            ConvertTo-Json | Set-Content -LiteralPath $CurrentPath
+        @{ modules=@(@{ module_id=$ModuleId; variants=@(@{platform='win64'; architecture='x86_64';
+            configuration='development'; package_id=('a' * 64); descriptor_file='package.json';
+            descriptor_sha256=(Get-SidecarFileSha256 (Join-Path $Fixture 'package.json'))}) }) } |
+            ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Fixture 'catalog.json')
+        @{ toolchain=@{dotnet=(Join-Path $PSHOME 'pwsh.exe')}; source=@{project='fixture.csproj'};
+            binding_package=@{manifest_file='package.json'} } |
+            ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Fixture 'report.json')
+        [IO.File]::WriteAllText($Builder, @'
+param($DotNetPath, $SourcePath, $SourceId, $BindingPackageManifestPath, $ProjectPath,
+    $RuntimeModuleId, $PackageConfiguration, $TargetPlatform, [switch]$HeadlessRelease)
+foreach ($Name in @('DOTNET_CLI_HOME', 'APPDATA', 'LOCALAPPDATA', 'NUGET_PACKAGES',
+    'DOTNET_CLI_TELEMETRY_OPTOUT', 'DOTNET_SKIP_FIRST_TIME_EXPERIENCE')) {
+    [Environment]::SetEnvironmentVariable($Name, 'isolated-type-generator-fixture', 'Process')
+}
+[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'executed.txt'), 'generator-executed')
+exit ([int][IO.File]::ReadAllText((Join-Path $PSScriptRoot 'exit-code.txt')))
+'@)
+        foreach ($Exit in @(0, 7)) {
+            [IO.File]::WriteAllText((Join-Path (Split-Path -Parent $Builder) 'exit-code.txt'), [string]$Exit)
+            $LocationBefore = $PWD.Path
+            $Rejected = $false
+            try {
+                $Published = Invoke-LeadershipGeneratedTypePublication -ProjectRoot $Fixture `
+                    -PackageCatalogPath (Join-Path $Fixture 'catalog.json') `
+                    -Artifacts @(@{module_id='csharp_profile_phase54_6_generated_s1'; report_path=(Join-Path $Fixture 'report.json')})
+                Assert-True ($Published.package_id -ceq ('a' * 64)) 'publication must return the verified package identity'
+            }
+            catch {
+                if (-not $_.Exception.Message.Contains('Generated Type publication failed: exit=7')) { throw }
+                $Rejected = $true
+            }
+            Assert-True ($Rejected -eq ($Exit -ne 0)) 'Generated Type child exit code must reach the caller'
+            Assert-True (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $Builder) 'executed.txt')) 'generator fixture must execute'
+            Assert-True ($PWD.Path -ceq $LocationBefore) 'publication must restore the caller location'
+            foreach ($Name in $EnvironmentNames) {
+                Assert-True ([Environment]::GetEnvironmentVariable($Name, 'Process') -ceq $Before[$Name]) `
+                    "Generated Type publication leaked $Name into the next UE build (exit=$Exit)"
+            }
+        }
+    }
+    finally {
+        foreach ($Name in $EnvironmentNames) { [Environment]::SetEnvironmentVariable($Name, $Before[$Name], 'Process') }
+        $Resolved = [IO.Path]::GetFullPath($Fixture)
+        if (-not $Resolved.StartsWith($Parent + '\', [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Generated Type process fixture escaped its owned root.'
+        }
+        if (Test-Path -LiteralPath $Resolved) { Remove-Item -LiteralPath $Resolved -Recurse -Force }
+    }
+} $PublicationFunction.Extent.Text
 Assert-True ($CandidateScriptText.Contains('source did not stabilize after the bounded two-pass preparation')) 'candidate freezer must fail closed after two source-stabilization passes'
 Assert-True ($CandidateScriptText.Contains("'-Profile=`"{0}`"'")) 'candidate freezer must preserve hyphenated profile paths through UE command-line parsing'
 Assert-True ($CandidateScriptText.Contains('-AvidScriptSuppressGeneratedTypeExecution')) 'candidate freezer must suppress Generated Type package startup before the release catalog exists'
@@ -223,4 +308,4 @@ $MatrixIds = @($Protocol.matrices | ForEach-Object { [string]$_.id })
 Assert-True ([string]::Join('|', $MatrixIds) -ceq 'ue_micro_six_lane|ue_gameplay_six_lane|identical_wasm_execution|angelscript_same_semantics') 'required matrix order drifted'
 Assert-True ([string]$Protocol.competitors.angelscript.availability -ceq 'not_frozen') 'AngelScript must remain explicitly blocked until its dependency and adapter are frozen'
 
-Write-Output 'Phase 65 leadership protocol contracts passed: schema=2 scripts=1 tracked_inputs=7 ue_lanes=6 micro_workloads=10 gameplay_workloads=2 identical_wasm_kernels=12 competitors=4 matrices=4 bounded_source_stabilization=1 generated_type_editor_closure=2 claims_fail_closed=1'
+Write-Output 'Phase 65 leadership protocol contracts passed: schema=2 scripts=1 tracked_inputs=7 ue_lanes=6 micro_workloads=10 gameplay_workloads=2 identical_wasm_kernels=12 competitors=4 matrices=4 bounded_source_stabilization=1 generated_type_editor_closure=2 generated_type_process_isolation=2 claims_fail_closed=1'

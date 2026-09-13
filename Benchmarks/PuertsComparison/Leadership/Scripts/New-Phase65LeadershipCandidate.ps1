@@ -220,7 +220,7 @@ function Invoke-LeadershipGeneratedTypePublication {
     $RuntimeModuleId = 'avidscript_phase65_benchmark_generated_types'
     Push-Location -LiteralPath (Join-Path $ProjectRoot 'Plugins/AvidScript')
     try {
-        $Output = @(& $GeneratorPath `
+        $Output = @(& pwsh -NoProfile -NonInteractive -File $GeneratorPath `
                 -DotNetPath $DotNetPath `
                 -SourcePath $SourcePath `
                 -SourceId $SourceId `
