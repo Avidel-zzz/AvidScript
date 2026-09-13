@@ -1,0 +1,346 @@
+{
+  "schema_version": 1,
+  "phase": "P65.D35",
+  "evidence_class": "diagnostic_not_adopted",
+  "production_changed": false,
+  "formal_gate_run": false,
+  "baseline_source_commit": "8c032e9fd9f0afe23c3b18a15057aa7a90d8774c",
+  "baseline_runtime": {
+    "exe_sha256": "EE2E1CC22AB152CFE1FB063932BEB083A7F512E92090ADEC749683690635C3DE",
+    "dll_sha256": "82616C0C06FB605B6EA6DD15933F64FFE888E57CB612B0A2596E4999C60870A3"
+  },
+  "candidate_runtime": {
+    "exe_sha256": "02A3DAA7511554CAC6E917D4845DA4096E6E09863F968106F56ADE210EBD9647",
+    "dll_sha256": "B811625F8F8FEF50395149CE902C706528C0475D12D907A027276A576C79276A"
+  },
+  "candidate_changes": [
+    {
+      "path": "cranelift/codegen/src/machinst/lower.rs",
+      "baseline_sha256": "e225371cac1f4c646b812d81aafbbf3e665599674a40a5c0486bf2737b0f2a0b",
+      "sha256": "bd454f3d804ae3e969ef293aa8a73d6ec5691788b19a103ebe5f4b1f77ae0cc5"
+    },
+    {
+      "path": "crates/cranelift/src/func_environ.rs",
+      "baseline_sha256": "9e508cfe410c45797c1f985e4007865862f6cbe46bf2dc181c9a4d4b3abe1333",
+      "sha256": "364c5efb5bb3621e05371525c7d9196a8d089129b00299eb97fc6a8172bc470c"
+    }
+  ],
+  "protocol": {
+    "seed": 1397313,
+    "profiles_per_process": 4,
+    "warmup_samples": 5,
+    "timed_samples_per_profile": 30,
+    "aggregation": "geometric mean of paired ratios, then equal-weight geometric mean across kernels; diagnostic only",
+    "kernels": 12,
+    "paired_rounds": 3,
+    "fixed_iterations": 8192000,
+    "processes": 72
+  },
+  "verification": {
+    "x64_candidate_failures": 1,
+    "raw_report_identity_and_metrics_verified": 72,
+    "shared_directory_failure_lists_match": 9,
+    "x64_files": 181,
+    "float_split_functions": 10,
+    "i128_load_store_exit_both": -1073741819,
+    "float_split_difference": "brif_cond_rhs: one memory compare replaces load plus register compare",
+    "epoch_off_control_artifacts_identical": 24,
+    "upstream_full_suite_passed": false,
+    "float_split_candidate_passed": 9,
+    "x64_baseline_failures": 0,
+    "float_split_baseline_passed": 10,
+    "epoch_semantics_passed": 17,
+    "branch_memory_semantics_passed": 42,
+    "branch_filetests_passed": 4
+  },
+  "diagnostic": {
+    "p95_kernel_wins": 7,
+    "p50_geometric_mean_ratio": 0.9989658331646583,
+    "kernels": [
+      {
+        "kernel": "data_branch",
+        "p50_geo": 1.0036683587402495,
+        "p95_geo": 0.995103656226604,
+        "paired": [
+          {
+            "p50": 1.0015577299883192,
+            "p95": 0.9919890423251737
+          },
+          {
+            "p50": 1.007874967629271,
+            "p95": 0.9954955652634906
+          },
+          {
+            "p50": 1.0015855559421527,
+            "p95": 0.9978350645205998
+          }
+        ]
+      },
+      {
+        "kernel": "hashing",
+        "p50_geo": 0.9718319715048971,
+        "p95_geo": 0.9798470280186564,
+        "paired": [
+          {
+            "p50": 0.9682644215949708,
+            "p95": 0.994306962109383
+          },
+          {
+            "p50": 0.972397784680555,
+            "p95": 0.9780519355323245
+          },
+          {
+            "p50": 0.9748450985202043,
+            "p95": 0.9673696144955688
+          }
+        ]
+      },
+      {
+        "kernel": "internal_call",
+        "p50_geo": 1.0300995344002764,
+        "p95_geo": 1.0308607637385099,
+        "paired": [
+          {
+            "p50": 1.0396329709909766,
+            "p95": 1.0290855813587192
+          },
+          {
+            "p50": 1.0266178041209426,
+            "p95": 1.0290135381881937
+          },
+          {
+            "p50": 1.02411502210721,
+            "p95": 1.0344927421092114
+          }
+        ]
+      },
+      {
+        "kernel": "mixed_gameplay",
+        "p50_geo": 0.9862056137996438,
+        "p95_geo": 0.9843023291938063,
+        "paired": [
+          {
+            "p50": 0.9990425993489924,
+            "p95": 0.9985722106857488
+          },
+          {
+            "p50": 0.9694441724399617,
+            "p95": 0.9657691861420511
+          },
+          {
+            "p50": 0.9903657204390762,
+            "p95": 0.9888552368039568
+          }
+        ]
+      },
+      {
+        "kernel": "parallel_integer",
+        "p50_geo": 1.004720898618603,
+        "p95_geo": 1.0097728663714598,
+        "paired": [
+          {
+            "p50": 1.0024185618481283,
+            "p95": 1.0142950897250096
+          },
+          {
+            "p50": 1.0078695878246329,
+            "p95": 1.005470941236609
+          },
+          {
+            "p50": 1.0038824617210858,
+            "p95": 1.009571874150055
+          }
+        ]
+      },
+      {
+        "kernel": "predictable_branch",
+        "p50_geo": 0.999377746973888,
+        "p95_geo": 1.011186699501715,
+        "paired": [
+          {
+            "p50": 0.9927869729440563,
+            "p95": 1.0239923914555482
+          },
+          {
+            "p50": 1.002205541851174,
+            "p95": 1.0064823662783395
+          },
+          {
+            "p50": 1.0031737390562474,
+            "p95": 1.0032083667784126
+          }
+        ]
+      },
+      {
+        "kernel": "random_memory",
+        "p50_geo": 0.9803140798359127,
+        "p95_geo": 0.9834295196814857,
+        "paired": [
+          {
+            "p50": 0.9804219204582608,
+            "p95": 0.9935177837550411
+          },
+          {
+            "p50": 0.9802340572266057,
+            "p95": 0.9770099941013874
+          },
+          {
+            "p50": 0.9802862714147138,
+            "p95": 0.9798397855988835
+          }
+        ]
+      },
+      {
+        "kernel": "scalar_float",
+        "p50_geo": 0.9954211797704839,
+        "p95_geo": 0.9760331426467378,
+        "paired": [
+          {
+            "p50": 1.001130129278489,
+            "p95": 0.963217825346164
+          },
+          {
+            "p50": 0.9941042720631796,
+            "p95": 0.9992043097713368
+          },
+          {
+            "p50": 0.9910559181928424,
+            "p95": 0.9660839909740322
+          }
+        ]
+      },
+      {
+        "kernel": "sequential_memory",
+        "p50_geo": 1.000881313004852,
+        "p95_geo": 0.987607162789306,
+        "paired": [
+          {
+            "p50": 1.000268264984022,
+            "p95": 0.9516812693023526
+          },
+          {
+            "p50": 1.0020425506902793,
+            "p95": 1.0143361607804455
+          },
+          {
+            "p50": 1.0003341339128209,
+            "p95": 0.9978821709944544
+          }
+        ]
+      },
+      {
+        "kernel": "serial_integer",
+        "p50_geo": 1.0080563837898595,
+        "p95_geo": 1.0034975237771544,
+        "paired": [
+          {
+            "p50": 1.0103958575285268,
+            "p95": 1.0095848578728228
+          },
+          {
+            "p50": 1.015471313338222,
+            "p95": 1.0106309420300692
+          },
+          {
+            "p50": 0.9983785840237687,
+            "p95": 0.9904065333016256
+          }
+        ]
+      },
+      {
+        "kernel": "simd128",
+        "p50_geo": 1.0023991607615483,
+        "p95_geo": 0.996108426370391,
+        "paired": [
+          {
+            "p50": 0.9984577065709754,
+            "p95": 0.9676397589638203
+          },
+          {
+            "p50": 1.0036642965472415,
+            "p95": 1.0038757794446296
+          },
+          {
+            "p50": 1.005087645067222,
+            "p95": 1.017480655463544
+          }
+        ]
+      },
+      {
+        "kernel": "small_struct",
+        "p50_geo": 1.0058291358477176,
+        "p95_geo": 1.0010014754106282,
+        "paired": [
+          {
+            "p50": 1.008318654337595,
+            "p95": 1.0321494958704482
+          },
+          {
+            "p50": 1.0027763807686407,
+            "p95": 0.9671371899212603
+          },
+          {
+            "p50": 1.006400252382854,
+            "p95": 1.0047857430656004
+          }
+        ]
+      }
+    ],
+    "p50_kernel_wins": 5,
+    "p95_geometric_mean_ratio": 0.9964487963450406
+  },
+  "disposition": {
+    "adopted": false,
+    "next": "Inspect remaining generated-code cost using paired artifacts; retain production patchset.3 and unchanged leadership thresholds",
+    "current_formal_gates_total": 18,
+    "current_formal_gates_passed": 16,
+    "open_debt": "P65-D03-ControlledLeadership",
+    "reason": "Near-neutral aggregate result with internal_call regression does not justify generic compiler change"
+  },
+  "evidence": [
+    {
+      "name": "diagnostic-closure-v3.json",
+      "sha256": "4e339a474fad7f0e50b35b65f2db9c97e9d026aa8ddd181c3bf5082579b80650"
+    },
+    {
+      "name": "paired-v3/aggregate.json",
+      "sha256": "314293533bd932c0b0d6dfc8a521214f7fe230f33e28758837a14b7e0324ebe6"
+    },
+    {
+      "name": "paired-v3-summary.json",
+      "sha256": "ce8133e8d3d0e534ec673d938a4cbb888ac4e98e074567907927407338b99b41"
+    },
+    {
+      "name": "v3-semantics-proof.json",
+      "sha256": "d8d864c2041e71c886e566c0184233d30b69fb4211c28c8caf80c1e8c28b7e0e"
+    },
+    {
+      "name": "source-inventory.v3.json",
+      "sha256": "6b4490b28060a7cfc200db9b5ee9951e83a9164f32a56e1723e336a71a1997b6"
+    },
+    {
+      "name": "capi-v3-proof.json",
+      "sha256": "84862e1ad1f8f5a55dc658048ef40577aa13da86101c309d416b6f6339b5a34d"
+    },
+    {
+      "name": "filetests-comparison.json",
+      "sha256": "93bff41ec07ec4b6da9474e7fe08a40d90312fb84f22fe3b7b382f580b4db600"
+    },
+    {
+      "name": "float-split-results.json",
+      "sha256": "ca44600009de25a8a900a646548026757c7aeea07b0f29b5fc531ad93438476a"
+    },
+    {
+      "name": "epoch-off-controls-v3.json",
+      "sha256": "53dae7ee87069ee3a46ac5a8a961a34017808fd92183891ed323031565f54dfd"
+    },
+    {
+      "name": "scalar-fused-native-v3-disassembly.txt",
+      "sha256": "9ab9f010b1f056cf51525559d77862c2cac68520cd2533c680865e3391d2fb9b"
+    },
+    {
+      "name": "Run-Paired-Probe-v3.ps1",
+      "sha256": "21f3244a6262a8aa1b113485a13b09e038d56340012d6dc76979958bac0921e8"
+    }
+  ]
+}

@@ -192,6 +192,7 @@ Shipping 准备的 NuGet 环境隔离已通过行为合同与真实候选发布/
 同源 Shipping Release/Cook/归档与包内运行已通过：回执 **78/78**，61 个归档 NonUFS 文件逐项哈希一致，含完整 59 个声明文件；BeginPlay/EndPlay、549 次 Tick、Timer、事件、continuation 和故障 Session 隔离后 World 继续运行均有实际证据，主工程 Editor 已恢复。
 同源完整 Windows Automation **468/468**、零失败，测试清单、进程退出与主工程恢复均核验通过。首轮 460/468 的 Generated Types 失败源于 Shipping 发布后 Editor/Cook 指针不一致；重新发布 Development 包并重编译后完整重跑通过，保留首轮失败证据。两项 Android 主机编译器测试另列未执行。
 正式纯执行尾部诊断保留原门槛与全部样本，后续优先定位 hashing、scalar_float 和 SIMD；两项性能门禁及 AngelScript 同口径矩阵仍未完成。
+[D35 epoch 读取融合诊断](Docs/Phase65/P65.D35_Epoch_Load_Fusion_Diagnostic.md)通过 17/17 中断恢复与 42/42 内存顺序检查；72 个配对进程相对当前运行库 P50/P95 为 0.998966x/0.996449x，整体接近持平且 internal_call 回退，未纳入生产，不改变正式 16/18 结论。
 Shipping 人工视觉与移动设备证据仍作为独立发布候选 Gate，不以自动报告或阶段编号替代。
 
 P65.A 已完成：thin source 发布器与原子安装器当前通过 **24/24** 轻量合同及真实 commit-based 发布/安装
