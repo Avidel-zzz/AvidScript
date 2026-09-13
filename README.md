@@ -71,11 +71,11 @@ fuel 配置、隔离工程样本路径和 correctness 探针的 gameplay 分帧�
 完整矩阵有效，**18 项门槛通过 16 项**，剩余两项为纯执行总体比率与胜率。PhysicalCost 入口同类
 修复已补齐 schema 与行为合同；`5bafc180` clean candidate 原生构建、五进程 **1050/1050**
 样本与三项受影响门槛均通过。Android/Mac 实机验收暂缓，
-[公开二进制路径脱敏](Docs/Phase65/P65.D32_Win64_Public_Binary_Privacy.md)已完成包含依赖声明的全新中性 Wasmtime 构建：94 包与独立依赖图一致，另含 Rust 标准库声明，176 文件完整隐私扫描 0 命中。新 DLL 在 `663f773b` 干净候选的 Win64 Editor 回归 **468/468** 通过，运行前后冻结文件与运行库身份一致；该 DLL 的 Shipping 与公开离线包 Gate 尚未完成，主工程运行库保持原身份。
+[公开二进制路径脱敏](Docs/Phase65/P65.D32_Win64_Public_Binary_Privacy.md)已完成包含依赖声明的全新中性 Wasmtime 构建：94 包与独立依赖图一致，另含 Rust 标准库声明，176 文件完整隐私扫描 0 命中。新 DLL 在 `663f773b` 干净候选的 Win64 Editor 回归 **468/468** 通过，运行前后冻结文件与运行库身份一致；在 `e5d7650a` 完成 Shipping 生命周期与故障隔离闭环，公开离线包 Gate 尚未完成，主工程运行库保持原身份。
 新 DLL 集成中发现的生成绑定事务目录过长与失败后测试越界已修复，覆盖深路径生成、替换和失败保护。同一提交的源码包两次发布身份、清单一致，全新目录 Plan/Install/Verify/NoOp 全部通过、零警告；此项为源码安装证据。
-Win64 游戏打包现要求并校验完整 Wasmtime 声明集合，实际 UBT 已复制 59 文件且逐项哈希一致；staging 行为合同 **27/27**，工具链合同 **70/70**。架构检查已区分声明哈希校验与静态链接，并增加 6 项合同及实际导入库链接断言。新 DLL 的 Shipping 构建与运行继续验证中。
+Win64 游戏打包现要求并校验完整 Wasmtime 声明集合，实际 UBT 已复制 59 文件且逐项哈希一致；staging 行为合同 **27/27**，工具链合同 **70/70**。架构检查已区分声明哈希校验与静态链接，并增加 6 项合同及实际导入库链接断言。
 默认 ActorLifecycle 构建已修复显式 binding package 被忽略的问题，保留绑定身份、import 校验与缓存合同；不改变无包调用和自定义源码的生成引用流程。
-新 DLL 的 Shipping 编译、Cook、归档已成功；声明回执合同 **24/24**、实际依赖 **78/78**。包内 ActorLifecycle BeginPlay 仍有 Guest trap，运行 Gate 保持未完成，正在定位。
+新 DLL 的 Shipping Release、Cook、归档、回执与包内运行已通过；声明回执合同 **24/24**、最终依赖 **84/84**。修复四处被 Shipping `check` 省略的 continuation 令牌解码，聚焦 Automation **16/16**；包内确认 Timer、continuation、EndPlay，以及故障 Session 隔离后 World 继续运行。公开离线安装、长期运行与性能领导力仍分别验收。
 
 ## 架构
 
