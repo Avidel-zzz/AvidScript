@@ -125,7 +125,7 @@ Wasmtime 45 Cranelift JIT 对冻结版本的 Puerts V8，同机 5 个进程、�
 见 [P57 原始证据](Docs/Phase57/P57.11B1_Recursive_Fixed_Struct_Codec_Evidence.json)。
 
 - **游戏逻辑：** P56 Small/Dense gameplay 与 Lifecycle callback 的 P50 比率为 **`0.469x / 0.513x / 0.391x`**，各自对照路径与范围见[报告](Docs/Phase56/P56.5_Fused_Call_Frame_Implementation_Report.md)。
-- **纯执行：** P65.D31.C11 正式 12-kernel 相同 WASM 对照的 P50/P95 几何均值为 **`1.102x / 1.239x`**，P50/P95 胜率为 **`50.0% / 8.33%`**，仍未达到 `<= 0.95x` 与 `>= 60%` 目标；高 P95 样本全部保留，未宣称总体领先。
+- **纯执行：** [P65.D34](Docs/Phase65/P65.D34_Production_Epoch_Runtime.md) 的 `6188ebe3` 正式 12-kernel 相同 WASM 对照，P50/P95 几何均值为 **`0.9814x / 1.0495x`**，P50/P95 胜率为 **`83.33% / 8.33%`**，仍未达到 `<= 0.95x` 与 `>= 60%` 的完整目标；高 P95 样本全部保留，未宣称总体领先。
 - **最新 UE crossing：** P65.D10 将通用 `int32 -> int32` generated S1 降至 **`18.17 ns`**，相对 Puerts static 为 **`0.829x`**；十项 micro P50 几何均值已从 `1.440x` 改善到 `1.004x`，但仍未形成全面领先。见[D10 报告](Docs/Phase65/P65.D10_Generated_Unary_I32_Performance.md)。
 - **最新 generated typed 路径：** FVector ref/out 已达到 `103.64 ns`（Puerts static 的 `0.144x`）；P65.D13 又将 UObject roundtrip 从 `147.73 ns` 降至 **`51.88 ns`**，已领先 Puerts reflection，但仍是 Puerts static 的 `1.139x`。十项 UE micro 的 P50/P95 几何均值为 **`0.779x / 0.786x`**。见[D11](Docs/Phase65/P65.D11_Generated_Vector_RefOut_Performance.md)与[D13](Docs/Phase65/P65.D13_Packed_Object_Roundtrip_Performance.md)。
 - **最新 packaged 性能：** P65.D28 让 verified AOT package 使用 fuel-free Cranelift profile，同时保留 epoch watchdog 与签名边界。generated S1 十项 P50/P95 几何均值为 **`0.590x / 0.592x`**，胜项 **`8/10 / 8/10`**；对象 roundtrip 为 **`0.773x / 0.750x`**。`pure_integer` 与 `callback_empty` 仍未领先，semantic lane 仍待优化。见[D28 报告](Docs/Phase65/P65.D28_Verified_Package_Fuel_Free_Artifacts.md)。
@@ -188,6 +188,8 @@ P95 胜率仍未达标。真实离线包替换两轮成功、第三轮目录改�
 修复候选 `f8159f76` 的新离线包两次发布身份一致，包内安装器三轮真实替换 **21/21、0 warning**，
 干净架构检查通过；新 DLL 的 Shipping 与完整跨框架性能领导力仍待完成。
 Shipping 准备的 NuGet 环境隔离已通过行为合同与真实候选发布/重编译验证；BuildCookRun 现读取唯一 `.uproject` 识别工程，支持目录名不同并拒绝歧义，合同 33/33。真实 Shipping 回归继续推进。
+最新 `8c032e9f` 离线包两次发布身份一致，实际 `.3 → .3` 发布替换 **7/7** 通过；两次目录改名均重试两次后恢复，保留 **2 条 warning**，完整 inventory 校验通过。
+正式纯执行尾部诊断保留原门槛与全部样本，后续优先定位 hashing、scalar_float 和 SIMD；同源 Shipping 验收尚未完成。
 Shipping 人工视觉与移动设备证据仍作为独立发布候选 Gate，不以自动报告或阶段编号替代。
 
 P65.A 已完成：thin source 发布器与原子安装器当前通过 **24/24** 轻量合同及真实 commit-based 发布/安装
