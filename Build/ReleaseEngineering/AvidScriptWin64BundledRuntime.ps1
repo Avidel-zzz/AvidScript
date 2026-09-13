@@ -1,6 +1,22 @@
 # Loaded by the trusted release resolver, never from the package being inspected.
 . (Join-Path $PSScriptRoot 'AvidScriptWasmtimeNotices.ps1')
 
+function Get-AvidScriptWin64RuntimeRelativePath {
+    param([Parameter(Mandatory)][string]$ToolchainId)
+
+    # Explicit compatibility list lets the current installer verify an older
+    # offline package during upgrade without accepting package-selected paths.
+    switch -CaseSensitive ($ToolchainId) {
+        'avidscript-wasmtime-v45.0.0-patchset.2-win64-multiarch' {
+            return 'Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.2'
+        }
+        'avidscript-wasmtime-v45.0.0-patchset.3-win64-multiarch' {
+            return 'Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.3'
+        }
+        default { throw 'ASWB1001 unsupported Win64 runtime toolchain' }
+    }
+}
+
 function Get-AvidScriptWin64BundleIdentity {
     param(
         [Parameter(Mandatory)][string]$PluginRoot,
@@ -15,7 +31,7 @@ function Get-AvidScriptWin64BundleIdentity {
         -SchemaPath (Join-Path $script:AvidScriptPluginReleaseModuleRoot '../../Source/ThirdParty/Wasmtime/PerformanceToolchain/WasmtimePerformanceToolchain.schema.json') `
         -Label 'bundled runtime source lock'
     # Fixed layout is part of this profile, not an arbitrary path supplied by a package.
-    $runtimeRelative = 'Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.2'
+    $runtimeRelative = Get-AvidScriptWin64RuntimeRelativePath $lock.toolchain_id
     $markerName = '.avidscript-wasmtime-performance-managed.json'
     $patchRelative = 'Source/ThirdParty/Wasmtime/PerformanceToolchain/avidscript-wasmtime-v45-inlining.patch'
     if ($lock.platform -cne 'Win64' -or $lock.install.relative_path -cne $runtimeRelative -or
@@ -82,12 +98,13 @@ function Get-AvidScriptWin64BundleIdentity {
 function Assert-AvidScriptWin64BundledDependency {
     param([Parameter(Mandatory)][string]$PayloadRoot, [Parameter(Mandatory)]$Dependency)
     $expectedLock = 'AvidScript/Source/ThirdParty/Wasmtime/PerformanceToolchain/WasmtimePerformanceToolchain.lock.json'
-    $expectedRoot = 'AvidScript/Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.2'
     if ($Dependency.id -cne 'wasmtime-win64' -or $Dependency.mode -cne 'bundled' -or
-        $Dependency.identity_path -cne $expectedLock -or $Dependency.bundle.root -cne $expectedRoot) {
+        $Dependency.identity_path -cne $expectedLock) {
         throw 'ASWB1001 unsupported bundled dependency'
     }
     $lock = Read-AvidScriptPluginReleaseJsonObject (Join-Path $PayloadRoot $expectedLock) 'bundled dependency lock'
+    $expectedRoot = 'AvidScript/' + (Get-AvidScriptWin64RuntimeRelativePath $lock.toolchain_id)
+    if ($Dependency.bundle.root -cne $expectedRoot) { throw 'ASWB1001 bundled root differs from its toolchain' }
     if ($Dependency.version -cne $lock.toolchain_id) { throw 'ASWB1002 bundled dependency version differs' }
     $actual = Get-AvidScriptWin64BundleIdentity -PluginRoot (Join-Path $PayloadRoot 'AvidScript') `
         -RuntimeRoot (Join-Path $PayloadRoot $expectedRoot)

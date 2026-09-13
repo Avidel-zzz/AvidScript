@@ -145,7 +145,14 @@ $PatchedFiles = @(
         $PatchText,
         '(?m)^diff --git a/(?<path>\S+) b/[^\r\n]+\r?$') |
         ForEach-Object { $_.Groups['path'].Value })
-Assert-True ($PatchedFiles.Count -eq 4) 'patch must touch exactly four upstream C API files'
+$ExpectedPatchFiles = @(
+    'crates/c-api/src/config.rs', 'crates/c-api/include/wasmtime/config.h',
+    'crates/c-api/src/module.rs', 'crates/c-api/include/wasmtime/module.h',
+    'crates/cranelift/src/lib.rs', 'crates/cranelift/src/func_environ.rs',
+    'crates/cranelift/src/compiler.rs')
+Assert-True ($PatchedFiles.Count -eq 7 -and
+    @(Compare-Object ($PatchedFiles | Sort-Object) ($ExpectedPatchFiles | Sort-Object)).Count -eq 0) `
+    'patch must touch only the four C API and three epoch compiler files'
 Assert-True ($PatchedFiles -contains 'crates/c-api/src/config.rs') `
     'patch must own the Rust C API implementation'
 Assert-True ($PatchedFiles -contains 'crates/c-api/include/wasmtime/config.h') `
@@ -186,7 +193,7 @@ Assert-True $GitIgnore.Contains('Source/ThirdParty/Wasmtime/installed/') `
     'generated Wasmtime managed layouts must remain ignored'
 
 $BuildRulesText = Get-Content -LiteralPath $BuildRulesPath -Raw
-Assert-True $BuildRulesText.Contains('v45.0.0-avidscript.2') `
+Assert-True $BuildRulesText.Contains('v45.0.0-avidscript.3') `
     'UBT rules do not prefer the performance managed layout'
 Assert-True (
     [Array]::IndexOf($Lock.rust.features, 'all-arch') -ge 0 -and

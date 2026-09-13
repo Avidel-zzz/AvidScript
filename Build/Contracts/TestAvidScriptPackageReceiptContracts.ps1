@@ -172,7 +172,7 @@ function New-PackageReceiptFixture {
     $InstallRelativePath = if ($Android) {
         'Source/ThirdParty/Wasmtime/installed/Android/arm64/v45.0.0'
     } else {
-        'Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.2'
+        'Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.3'
     }
     $WasmtimeRoot = Join-Path $PluginRoot $InstallRelativePath
     $BinaryRelativePath = if ($Android) { 'lib/libwasmtime.a' } else { 'lib/wasmtime.dll' }

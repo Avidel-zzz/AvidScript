@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "toolchain_id": "avidscript-wasmtime-v45.0.0-patchset.2-win64-multiarch",
+  "toolchain_id": "avidscript-wasmtime-v45.0.0-patchset.3-win64-multiarch",
   "platform": "Win64",
   "upstream": {
     "version": "v45.0.0",
@@ -15,7 +15,7 @@
   },
   "patch": {
     "relative_path": "Source/ThirdParty/Wasmtime/PerformanceToolchain/avidscript-wasmtime-v45-inlining.patch",
-    "canonical_sha256": "f65bb04acf87f1b518c839f8863bcc5195c675546dbbcf55482d9ee24f17fad0",
+    "canonical_sha256": "1635067d97b9af7fdc4c1cf85c5b4b0b0d9141a86ad1c1401c624484d2170b1c",
     "export_symbol": "avidscript_wasmtime_config_compiler_inlining_set",
     "precompile_export_symbol": "avidscript_wasmtime_engine_precompile_module",
     "api_revision": 1
@@ -52,7 +52,7 @@
     "source_date_epoch": 1779385346
   },
   "install": {
-    "relative_path": "Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.2",
+    "relative_path": "Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.3",
     "managed_marker_name": ".avidscript-wasmtime-performance-managed.json"
   },
   "layout": {

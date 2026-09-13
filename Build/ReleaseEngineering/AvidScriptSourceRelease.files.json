@@ -55,7 +55,7 @@
     },
     {
       "id": "wasmtime-win64",
-      "version": "avidscript-wasmtime-v45.0.0-patchset.2-win64-multiarch",
+      "version": "avidscript-wasmtime-v45.0.0-patchset.3-win64-multiarch",
       "identity_path": "Source/ThirdParty/Wasmtime/PerformanceToolchain/WasmtimePerformanceToolchain.lock.json"
     }
   ]

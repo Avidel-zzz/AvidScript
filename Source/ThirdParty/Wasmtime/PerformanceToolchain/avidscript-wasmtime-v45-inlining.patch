@@ -84,3 +84,96 @@ diff --git a/crates/c-api/src/module.rs b/crates/c-api/src/module.rs
 +    })
 +}
 +
+diff --git a/crates/cranelift/src/lib.rs b/crates/cranelift/src/lib.rs
+index 8c0a2da9..5e6b15f8 100644
+--- a/crates/cranelift/src/lib.rs
++++ b/crates/cranelift/src/lib.rs
+@@ -314,6 +314,7 @@ fn mach_reloc_to_reloc(
+ /// Helper structure for creating a `Signature` for all builtins.
+ struct BuiltinFunctionSignatures {
+     pointer_type: ir::Type,
++    preserve_epoch_registers: bool,
+ 
+     host_call_conv: CallConv,
+     wasm_call_conv: CallConv,
+@@ -324,6 +325,10 @@ impl BuiltinFunctionSignatures {
+     fn new(compiler: &Compiler) -> Self {
+         Self {
+             pointer_type: compiler.isa().pointer_type(),
++            preserve_epoch_registers: compiler.isa().triple().architecture
++                == target_lexicon::Architecture::X86_64
++                && compiler.isa().triple().operating_system
++                    == target_lexicon::OperatingSystem::Windows,
+             host_call_conv: CallConv::triple_default(compiler.isa().triple()),
+             wasm_call_conv: wasm_call_conv(compiler.isa(), compiler.tunables()),
+             argument_extension: compiler.isa().default_argument_extension(),
+@@ -407,6 +412,19 @@ impl BuiltinFunctionSignatures {
+         unreachable!();
+     }
+ 
++    // This internal trampoline ABI is shared by its caller and generated body.
++    // The host libcall keeps its original ABI and trap-sentinel return value.
++    fn trampoline_signature(&self, builtin: BuiltinFunctionIndex) -> Signature {
++        if self.preserve_epoch_registers && builtin == BuiltinFunctionIndex::new_epoch() {
++            return Signature {
++                params: vec![self.pointer()],
++                returns: vec![],
++                call_conv: CallConv::PreserveAll,
++            };
++        }
++        self.wasm_signature(builtin)
++    }
++
+     fn host_signature(&self, builtin: BuiltinFunctionIndex) -> Signature {
+         let mut sig = self.wasm_signature(builtin);
+         sig.call_conv = self.host_call_conv;
+diff --git a/crates/cranelift/src/func_environ.rs b/crates/cranelift/src/func_environ.rs
+index 83b85384..603e11e5 100644
+--- a/crates/cranelift/src/func_environ.rs
++++ b/crates/cranelift/src/func_environ.rs
+@@ -68,7 +68,7 @@ impl BuiltinFunctions {
+         if let Some(f) = cache {
+             return *f;
+         }
+-        let signature = func.import_signature(self.types.wasm_signature(builtin));
++        let signature = func.import_signature(self.types.trampoline_signature(builtin));
+         let key = FuncKey::WasmToBuiltinTrampoline(builtin);
+         let (namespace, index) = key.into_raw_parts();
+         let name = ir::ExternalName::User(
+@@ -735,10 +735,20 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
+ 
+         let new_epoch = self.builtin_functions.new_epoch(builder.func);
+         let vmctx = self.vmctx_val(&mut builder.cursor());
+-        // new_epoch() returns the new deadline, so we don't have to
+-        // reload it.
++        // The Win64 preserving trampoline has no return registers. The host
++        // libcall updates the store before returning, so reload only here on
++        // the cold path. Other targets retain their existing trampoline ABI.
+         let call = builder.ins().call(new_epoch, &[vmctx]);
+-        let new_deadline = *builder.func.dfg.inst_results(call).first().unwrap();
++        let new_deadline = if self.builtin_functions.types.preserve_epoch_registers {
++            builder.ins().load(
++                ir::types::I64,
++                ir::MemFlags::trusted(),
++                vmstore_ctx,
++                ir::immediates::Offset32::new(self.offsets.ptr.vmstore_context_epoch_deadline() as i32),
++            )
++        } else {
++            *builder.func.dfg.inst_results(call).first().unwrap()
++        };
+         builder.def_var(self.epoch_deadline_var, new_deadline);
+         builder.ins().jump(continuation_block, &[]);
+         builder.seal_block(continuation_block);
+diff --git a/crates/cranelift/src/compiler.rs b/crates/cranelift/src/compiler.rs
+index 9b7e6bed..66e09ee8 100644
+--- a/crates/cranelift/src/compiler.rs
++++ b/crates/cranelift/src/compiler.rs
+@@ -748,7 +748,7 @@ impl wasmtime_environ::Compiler for Compiler {
+         let sigs = BuiltinFunctionSignatures::new(self);
+ 
+         let (builtin_func_index, wasm_sig) = match key {
+-            FuncKey::WasmToBuiltinTrampoline(builtin) => (builtin, sigs.wasm_signature(builtin)),
++            FuncKey::WasmToBuiltinTrampoline(builtin) => (builtin, sigs.trampoline_signature(builtin)),
+             FuncKey::PatchableToBuiltinTrampoline(builtin) => {
+                 let mut sig = sigs.wasm_signature(builtin);
+                 // Patchable functions cannot return anything. We

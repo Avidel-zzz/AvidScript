@@ -18,7 +18,7 @@ public class Wasmtime : ModuleRules
 			ModuleDirectory,
 			"installed",
 			"Win64",
-			"v45.0.0-avidscript.2");
+			"v45.0.0-avidscript.3");
 		string OfficialInstallRoot = Path.Combine(
 			ModuleDirectory,
 			"installed",

@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param()
+param([string]$LegacyPackageRoot = '')
 $ErrorActionPreference = 'Stop'
 $PluginRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 . (Join-Path $PluginRoot 'Build/ReleaseEngineering/AvidScriptPluginReleasePackage.ps1')
@@ -7,7 +7,7 @@ $PluginRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 . (Join-Path $PluginRoot 'Build/ReleaseEngineering/AvidScriptWin64BundledRuntime.ps1')
 $FixtureBase = Join-Path ([IO.Path]::GetPathRoot([IO.Path]::GetTempPath())) 'tmp'
 $FixtureRoot = Join-Path $FixtureBase ('awb-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
-$RuntimeRelative = 'Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.2'
+$RuntimeRelative = 'Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.3'
 $LockRelative = 'Source/ThirdParty/Wasmtime/PerformanceToolchain/WasmtimePerformanceToolchain.lock.json'
 $MarkerName = '.avidscript-wasmtime-performance-managed.json'
 $Passed = 0
@@ -119,6 +119,33 @@ try {
         $repeat = Invoke-AvidScriptPluginInstallTransaction $Package.Root $Project Apply
         if ($apply.action -cne 'Install' -or $verify.result -cne 'passed' -or $repeat.action -cne 'NoOp') { throw 'installation contract failed' }
     }
+    Test-Case 'current toolchain cannot select the legacy install layout' {
+        $payload = Copy-Fixture 'mixed-layout'
+        $path = Join-Path $payload "AvidScript/$LockRelative"
+        $lock = Read-AvidScriptPluginReleaseJsonObject $path 'fixture lock'
+        $lock.install.relative_path = 'Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.2'
+        Write-AvidScriptPluginReleaseJson $path $lock
+        Expect-Rejected { Get-FixtureDependency $payload } 'ASRE1008|ASWB1001'
+    }
+    Test-Case 'unknown toolchain cannot choose an arbitrary directory' {
+        Expect-Rejected { Get-AvidScriptWin64RuntimeRelativePath 'unknown-toolchain' } 'ASWB1001'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($LegacyPackageRoot)) {
+        Test-Case 'published patchset 2 offline package remains verifiable and replaceable' {
+            $legacy = Resolve-AvidScriptPluginReleasePackage $LegacyPackageRoot
+            if (@($legacy.Manifest.dependencies | Where-Object version -CEQ 'avidscript-wasmtime-v45.0.0-patchset.2-win64-multiarch').Count -ne 1) {
+                throw 'Expected an actual patchset 2 package'
+            }
+            $legacyProject = Join-Path $FixtureRoot 'legacy-project'
+            Write-FixtureText (Join-Path $legacyProject 'fixture.uproject') '{}'
+            $install = Invoke-AvidScriptPluginInstallTransaction $LegacyPackageRoot $legacyProject Apply
+            $replace = Invoke-AvidScriptPluginInstallTransaction $Package.Root $legacyProject Apply
+            $verify = Invoke-AvidScriptPluginInstallTransaction $Package.Root $legacyProject Verify
+            if ($install.action -cne 'Install' -or $replace.action -notin @('Repair','Upgrade') -or $verify.result -cne 'passed') {
+                throw 'Legacy package replacement failed'
+            }
+        }
+    }
     Test-Case 'installed DLL tampering rejected' {
         [IO.File]::AppendAllText((Join-Path $Project "Plugins/AvidScript/$RuntimeRelative/lib/wasmtime.dll"), 'tampered')
         Expect-Rejected { Invoke-AvidScriptPluginInstallTransaction $Package.Root $Project Verify } 'ASRI'
@@ -185,8 +212,9 @@ try {
             Expect-Rejected { Assert-AvidScriptPluginReleaseJsonSchema $path (Join-Path $PluginRoot 'Build/ReleaseEngineering/AvidScriptPluginRelease.schema.json') 'fixture manifest' } 'ASRE'
         }
     }
-    if ($Passed -ne 18) { throw "unexpected contract count $Passed/18" }
-    Write-Output "Win64 bundled runtime contracts: $Passed/18 passed"
+    $expectedCount = if ([string]::IsNullOrWhiteSpace($LegacyPackageRoot)) { 20 } else { 21 }
+    if ($Passed -ne $expectedCount) { throw "unexpected contract count $Passed/$expectedCount" }
+    Write-Output "Win64 bundled runtime contracts: $Passed/$expectedCount passed"
 }
 finally {
     if (Test-Path -LiteralPath $FixtureRoot) {

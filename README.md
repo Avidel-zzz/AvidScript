@@ -178,7 +178,10 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 P65.A-C 已完成发布工程主链：可重复发布包、原子安装/升级、兼容诊断与分层平台 Gate；P65.D 正在推进性能领导力。
 公开二进制隐私/来源债务 P65-D04 已按 D32.A-H 证据关闭；P65-D03 保持未完成，
 [D33 原生代码实验](Docs/Phase65/P65.D33_Native_Codegen_Inspection.md)已实现隔离 Win64 epoch 寄存器保留补丁，
-强制慢路径/中断恢复合同 17/17、12 kernel 原生诊断通过；尚未纳入生产运行库，不改变现有正式性能结论。
+强制慢路径/中断恢复合同 17/17、12 kernel 原生诊断通过；不改变现有正式性能结论。
+[D34 运行库候选](Docs/Phase65/P65.D34_Production_Epoch_Runtime.md)已纳入 patchset.3，
+176 文件隐私扫描、Editor 构建与 Wasmtime 16/16 回归通过，保留 `.2` 离线包的校验与替换兼容；
+新 DLL 的 Shipping 与正式性能矩阵仍待完成。
 Shipping 人工视觉与移动设备证据仍作为独立发布候选 Gate，不以自动报告或阶段编号替代。
 
 P65.A 已完成：thin source 发布器与原子安装器当前通过 **24/24** 轻量合同及真实 commit-based 发布/安装

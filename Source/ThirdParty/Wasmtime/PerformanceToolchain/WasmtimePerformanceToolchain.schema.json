@@ -18,7 +18,7 @@
   ],
   "properties": {
     "schema_version": { "const": 1 },
-    "toolchain_id": { "const": "avidscript-wasmtime-v45.0.0-patchset.2-win64-multiarch" },
+    "toolchain_id": { "enum": ["avidscript-wasmtime-v45.0.0-patchset.2-win64-multiarch", "avidscript-wasmtime-v45.0.0-patchset.3-win64-multiarch"] },
     "platform": { "const": "Win64" },
     "upstream": {
       "type": "object",
@@ -80,7 +80,7 @@
       "additionalProperties": false,
       "required": ["relative_path", "managed_marker_name"],
       "properties": {
-        "relative_path": { "const": "Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.2" },
+        "relative_path": { "enum": ["Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.2", "Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.3"] },
         "managed_marker_name": { "const": ".avidscript-wasmtime-performance-managed.json" }
       }
     },
@@ -170,5 +170,27 @@
         "tracked_file": { "const": "Source/ThirdParty/Wasmtime/LICENSE.txt" }
       }
     }
-  }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "toolchain_id": { "const": "avidscript-wasmtime-v45.0.0-patchset.2-win64-multiarch" },
+        "install": {
+          "properties": {
+            "relative_path": { "const": "Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.2" }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "toolchain_id": { "const": "avidscript-wasmtime-v45.0.0-patchset.3-win64-multiarch" },
+        "install": {
+          "properties": {
+            "relative_path": { "const": "Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.3" }
+          }
+        }
+      }
+    }
+  ]
 }

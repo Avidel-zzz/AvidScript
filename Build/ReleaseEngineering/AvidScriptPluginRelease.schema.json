@@ -227,7 +227,10 @@
           "bundle": {
             "properties": {
               "root": {
-                "const": "AvidScript/Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.2"
+                "enum": [
+                  "AvidScript/Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.2",
+                  "AvidScript/Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.3"
+                ]
               },
               "notices_sha256": {
                 "type": "string",
