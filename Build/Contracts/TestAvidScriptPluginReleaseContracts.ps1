@@ -15,7 +15,34 @@ $SourceFilesProfile = Join-Path $BuildRoot 'ReleaseEngineering/AvidScriptSourceR
 $Root = Join-Path 'C:\tmp\AvidScript\P65Contracts' (
     "$PID-$([guid]::NewGuid().ToString('N'))")
 $Passed = 0
-$Total = 26
+$Total = 28
+
+Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Threading.Tasks;
+using Microsoft.Win32.SafeHandles;
+
+public sealed class AvidScriptInstallDirectoryLease : IDisposable
+{
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern SafeFileHandle CreateFileW(string path, uint access,
+        uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+    private readonly SafeFileHandle handle;
+    public AvidScriptInstallDirectoryLease(string path)
+    {
+        // A directory or child file lease allows inventory reads but denies rename.
+        handle = CreateFileW(path, 0x80000000, 3, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero);
+        if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+    }
+    public Task ReleaseAfter(int milliseconds)
+    {
+        return Task.Run(async () => { await Task.Delay(milliseconds); Dispose(); });
+    }
+    public void Dispose() { handle.Dispose(); }
+}
+'@
 
 function Invoke-PluginReleaseContract {
     param(
@@ -323,6 +350,63 @@ try {
         $Verify = Invoke-AvidScriptPluginInstallTransaction $New.Root $Project Verify
         if ($Upgrade.action -cne 'Upgrade' -or $Verify.result -cne 'passed') {
             throw 'upgrade did not commit the new release.'
+        }
+    }
+
+    Invoke-PluginReleaseContract 'upgrade recovers from transient staging directory lease' {
+        $Old = New-PluginReleaseFixture 'LeaseOld' '0.1.0' 'old'
+        $New = New-PluginReleaseFixture 'LeaseNew' '0.2.0' 'new'
+        $Project = New-PluginReleaseProject 'LeaseProject'
+        Invoke-AvidScriptPluginInstallTransaction $Old.Root $Project Apply | Out-Null
+        $OriginalCopy = (Get-Command Copy-AvidScriptPluginReleasePayload).ScriptBlock
+        $script:InstallMoveLease = $null
+        $script:InstallMoveRelease = $null
+        function Copy-AvidScriptPluginReleasePayload {
+            param($SourceRoot, $DestinationRoot)
+            & $OriginalCopy $SourceRoot $DestinationRoot
+            $script:InstallMoveLease = [AvidScriptInstallDirectoryLease]::new(
+                (Join-Path $DestinationRoot 'Build/marker.txt'))
+            $script:InstallMoveRelease = $script:InstallMoveLease.ReleaseAfter(750)
+        }
+        try {
+            $Upgrade = Invoke-AvidScriptPluginInstallTransaction $New.Root $Project Apply
+            $Verify = Invoke-AvidScriptPluginInstallTransaction $New.Root $Project Verify
+            if ($Upgrade.action -cne 'Upgrade' -or $Verify.result -cne 'passed' -or
+                @($Upgrade.warnings | Where-Object { $_ -like 'directory move recovered*' }).Count -ne 1) {
+                throw 'transient lease did not recover through the real upgrade transaction.'
+            }
+        }
+        finally {
+            if ($null -ne $script:InstallMoveLease) { $script:InstallMoveLease.Dispose() }
+            if ($null -ne $script:InstallMoveRelease) { $null = $script:InstallMoveRelease.GetAwaiter().GetResult() }
+        }
+    }
+
+    Invoke-PluginReleaseContract 'persistent target directory lease preserves installed release' {
+        $Old = New-PluginReleaseFixture 'PersistentLeaseOld' '0.1.0' 'old'
+        $New = New-PluginReleaseFixture 'PersistentLeaseNew' '0.2.0' 'new'
+        $Project = New-PluginReleaseProject 'PersistentLeaseProject'
+        Invoke-AvidScriptPluginInstallTransaction $Old.Root $Project Apply | Out-Null
+        $Lease = [AvidScriptInstallDirectoryLease]::new((Join-Path $Project 'Plugins/AvidScript'))
+        $Timer = [Diagnostics.Stopwatch]::StartNew()
+        $Rejected = $false
+        try {
+            try { Invoke-AvidScriptPluginInstallTransaction $New.Root $Project Apply | Out-Null }
+            catch {
+                $Failure = $_.Exception.GetBaseException()
+                $Rejected = ($Failure -is [IO.IOException] -or $Failure -is [UnauthorizedAccessException]) -and
+                    ($Failure.HResult -band 0xffff) -in @(5, 32, 33)
+            }
+        }
+        finally { $Lease.Dispose() }
+        if (-not $Rejected -or $Timer.Elapsed.TotalSeconds -gt 15) {
+            throw 'persistent lease did not fail with its original error within the bounded retry window.'
+        }
+        $Verify = Invoke-AvidScriptPluginInstallTransaction $Old.Root $Project Verify
+        $Residual = @(Get-ChildItem -LiteralPath (Join-Path $Project 'Plugins') -Force |
+            Where-Object { $_.Name -like '.AvidScript.stage.*' -or $_.Name -like '.AvidScript.backup.*' })
+        if ($Verify.result -cne 'passed' -or $Residual.Count -ne 0) {
+            throw 'persistent lease changed the old release or left transaction materials behind.'
         }
     }
 

@@ -299,6 +299,45 @@ function Assert-AvidScriptPluginInstallWorkingPath {
     }
 }
 
+function Move-AvidScriptPluginInstallDirectory {
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$Destination,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()]
+        [System.Collections.Generic.List[string]]$Warnings
+    )
+
+    $Timer = [System.Diagnostics.Stopwatch]::StartNew()
+    $Retries = 0
+    do {
+        try {
+            [System.IO.Directory]::Move($Source, $Destination)
+            if ($Retries -gt 0) {
+                $Warnings.Add("directory move recovered after $Retries retries: $Source -> $Destination")
+            }
+            return
+        }
+        catch {
+            $Failure = $_.Exception.GetBaseException()
+            $Win32Error = $Failure.HResult -band 0xffff
+            # Windows directory handles may temporarily deny rename. Do not retry
+            # other failures, overwrite a destination, or bypass access controls.
+            if (-not $IsWindows -or
+                ($Failure -isnot [System.IO.IOException] -and
+                    $Failure -isnot [System.UnauthorizedAccessException]) -or
+                $Win32Error -notin @(5, 32, 33) -or
+                -not [System.IO.Directory]::Exists($Source) -or
+                [System.IO.Directory]::Exists($Destination) -or
+                [System.IO.File]::Exists($Destination) -or
+                $Timer.ElapsedMilliseconds -ge 3000) {
+                throw
+            }
+            $Retries++
+            Start-Sleep -Milliseconds ([Math]::Max(0, [Math]::Min(100, 3000 - $Timer.ElapsedMilliseconds)))
+        }
+    } while ($true)
+}
+
 function Invoke-AvidScriptPluginInstallTransaction {
     param(
         [Parameter(Mandatory = $true)][string]$PackageRoot,
@@ -393,12 +432,12 @@ function Invoke-AvidScriptPluginInstallTransaction {
             throw 'ASRI_TEST injected failure after staging.'
         }
         if (Test-Path -LiteralPath $Target.PluginRoot) {
-            [System.IO.Directory]::Move($Target.PluginRoot, $Backup)
+            Move-AvidScriptPluginInstallDirectory $Target.PluginRoot $Backup $Warnings
         }
         if ($FaultPoint -ceq 'AfterBackup') {
             throw 'ASRI_TEST injected failure after backup.'
         }
-        [System.IO.Directory]::Move($Staging, $Target.PluginRoot)
+        Move-AvidScriptPluginInstallDirectory $Staging $Target.PluginRoot $Warnings
         if ($FaultPoint -ceq 'BeforeReadback') {
             throw 'ASRI_TEST injected failure before readback.'
         }
@@ -447,7 +486,7 @@ function Invoke-AvidScriptPluginInstallTransaction {
                     if (Test-Path -LiteralPath $Target.PluginRoot) {
                         Remove-Item -LiteralPath $Target.PluginRoot -Recurse -Force
                     }
-                    [System.IO.Directory]::Move($Backup, $Target.PluginRoot)
+                    Move-AvidScriptPluginInstallDirectory $Backup $Target.PluginRoot $Warnings
                 }
                 elseif ((Test-Path -LiteralPath $Target.PluginRoot) -and
                     $Plan.action -ceq 'Install') {
