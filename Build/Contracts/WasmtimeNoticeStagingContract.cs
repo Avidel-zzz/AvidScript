@@ -148,6 +148,9 @@ internal static class NoticeStagingContract
         Run("complete_deduplicated_nonufs_inventory", fixture =>
         {
             Wasmtime rules = Build(fixture.Root);
+            Assert(rules.PublicAdditionalLibraries.Count == 1 &&
+                Path.GetFileName(rules.PublicAdditionalLibraries[0]) == "wasmtime.dll.lib",
+                "Win64 must link only the DLL import library");
             var notices = rules.RuntimeDependencies.Where(item => item.Destination.Contains("wasmtime.notices/")).ToArray();
             Assert(notices.Length == 2, "expected exactly manifest plus deduplicated notice text");
             foreach (var notice in notices)

@@ -48,6 +48,24 @@ function Get-SourceSlice {
     return $Source.Substring($StartIndex, $EndIndex - $StartIndex)
 }
 
+function Test-AvidScriptWasmtimeStaticLinkageViolation {
+    param([string]$Source)
+
+    # Only the bounded notice verifier may name the static archive for hashing.
+    # Keep the original conservative literal guard everywhere else, and prohibit
+    # the verifier itself from accessing the link list.
+    $Start = $Source.IndexOf('private void StageWin64Notices(', [StringComparison]::Ordinal)
+    $End = if ($Start -ge 0) {
+        $Source.IndexOf('private static void AssertUniqueNoticeJsonProperties(', $Start, [StringComparison]::Ordinal)
+    } else { -1 }
+    if ($Start -ge 0 -and $End -gt $Start) {
+        $Verifier = $Source.Substring($Start, $End - $Start)
+        if ($Verifier -match '\bPublicAdditionalLibraries\b') { return $true }
+        $Source = $Source.Remove($Start, $End - $Start)
+    }
+    return $Source -match '"wasmtime\.lib"'
+}
+
 function Test-RequiredTokenSequence {
     param(
         [string]$Source,
@@ -354,7 +372,7 @@ foreach ($RequiredWasmtimeBuildContract in @(
         Add-Violation "Wasmtime external module is missing $RequiredWasmtimeBuildContract"
     }
 }
-if ($WasmtimeBuild -match '"wasmtime\.lib"') {
+if (Test-AvidScriptWasmtimeStaticLinkageViolation $WasmtimeBuild) {
     Add-Violation 'Wasmtime external module must not link the static wasmtime.lib'
 }
 foreach ($RequiredWasmtimeLockIdentity in @(

@@ -11,6 +11,33 @@ $testRoot = Join-Path ([IO.Path]::GetFullPath($OutputRoot)) ('notice-staging-' +
 [void][IO.Directory]::CreateDirectory($testRoot)
 $buildRules = Join-Path $pluginRoot 'Source/ThirdParty/Wasmtime/Wasmtime.Build.cs'
 $contract = Join-Path $PSScriptRoot 'WasmtimeNoticeStagingContract.cs'
+$guardName = 'Test-AvidScriptWasmtimeStaticLinkageViolation'
+$parseErrors = $null
+$tokens = $null
+$checkerAst = [Management.Automation.Language.Parser]::ParseFile(
+    (Join-Path $pluginRoot 'Build/CheckAvidScriptArchitecture.ps1'), [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count -ne 0) { throw 'Architecture checker parse failed.' }
+$guard = $checkerAst.Find({ param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq $guardName
+}, $false)
+if ($null -eq $guard) { throw 'Static linkage guard missing.' }
+. ([scriptblock]::Create($guard.Extent.Text))
+$rulesSource = [IO.File]::ReadAllText($buildRules)
+$guardCases = @(
+    @{ Name = 'notice_hashing_allowed'; Source = $rulesSource; Rejected = $false }
+    @{ Name = 'constructor_static_link_rejected'; Source = $rulesSource.Replace('PublicAdditionalLibraries.Add(ImportLibraryPath);', 'PublicAdditionalLibraries.Add("wasmtime.lib");'); Rejected = $true }
+    @{ Name = 'notice_verifier_link_access_rejected'; Source = $rulesSource.Replace('string Root = Path.Combine(InstallRoot, "notices");', 'PublicAdditionalLibraries.Add("wasmtime.lib"); string Root = Path.Combine(InstallRoot, "notices");'); Rejected = $true }
+    @{ Name = 'other_helper_static_link_rejected'; Source = $rulesSource + ' private void Link() { PublicAdditionalLibraries.Add("wasmtime.lib"); }'; Rejected = $true }
+    @{ Name = 'legacy_static_link_rejected'; Source = 'PublicAdditionalLibraries.Add("wasmtime.lib");'; Rejected = $true }
+    @{ Name = 'unrecognized_verifier_bounds_rejected'; Source = $rulesSource.Replace('private static void AssertUniqueNoticeJsonProperties(', 'private static void ChangedVerifierBoundary('); Rejected = $true }
+)
+foreach ($case in $guardCases) {
+    if ((Test-AvidScriptWasmtimeStaticLinkageViolation $case.Source) -ne $case.Rejected) {
+        throw "Static linkage guard contract failed: $($case.Name)"
+    }
+    Write-Host "PASS $($case.Name)"
+}
+Write-Host "Wasmtime static linkage guard contracts: $($guardCases.Count)/$($guardCases.Count)"
 $project = @"
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><EnableDefaultCompileItems>false</EnableDefaultCompileItems><ImplicitUsings>disable</ImplicitUsings><Nullable>disable</Nullable></PropertyGroup>
