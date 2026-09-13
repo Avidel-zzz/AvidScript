@@ -343,6 +343,12 @@ function Invoke-LeadershipProjectPreparation {
         -ProjectRoot $ProjectRoot `
         -PackageCatalogPath $PackageCatalogPath `
         -Artifacts $Artifacts
+    # Publication writes native types after the initial build; freeze their Editor binary too.
+    $Build = Invoke-LeadershipEditorBuild `
+        -EngineRoot $EngineRoot `
+        -ProjectPath $ProjectPath `
+        -ProjectRoot $ProjectRoot `
+        -PassId "$PassId-generated-types"
     return [pscustomobject][ordered]@{
         build = $Build
         artifacts = $Artifacts

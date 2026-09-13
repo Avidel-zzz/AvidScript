@@ -102,6 +102,58 @@ Assert-True ($PackagedHostScriptText.Contains("'-build'") -and
     $PackagedHostScriptText.Contains('executable_sha256') -and
     $PackagedHostScriptText.Contains('runtime_executable_sha256')) 'packaged host must freeze BuildCookRun and artifact identities'
 $CandidateScriptText = Get-Content -LiteralPath $CandidateScriptPath -Raw
+$CandidateAst = [Management.Automation.Language.Parser]::ParseInput($CandidateScriptText, [ref]$null, [ref]$null)
+$PreparationFunction = $CandidateAst.Find({ param($Node)
+    $Node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+        $Node.Name -ceq 'Invoke-LeadershipProjectPreparation'
+}, $true)
+Assert-True ($null -ne $PreparationFunction) 'candidate freezer must expose project preparation'
+& {
+    param([string]$PreparationText)
+    . ([scriptblock]::Create($PreparationText))
+    $State = [pscustomobject]@{ Published = $false; FailFinalBuild = $false }
+    function Invoke-LeadershipEditorBuild {
+        param($EngineRoot, $ProjectPath, $ProjectRoot, $PassId)
+        if ($State.Published -and $State.FailFinalBuild) {
+            throw 'ASP65L2014 simulated post-publication build failure'
+        }
+        return [pscustomobject]@{ generated_types_compiled = $State.Published; log_path = "$PassId.log" }
+    }
+    function Invoke-LeadershipProfilePreparation {
+        param($EditorExecutable, $EngineRoot, $ProjectPath, $ProjectRoot, $ProfileRelativePath, $AllowGeneratedBuildHandshake)
+        return [pscustomobject]@{
+            manifest_path = 'manifest.json'; module_id = 'module'; artifact_stem = 'artifact'
+            profile_path = $ProfileRelativePath; manifest_sha256 = 'manifest-hash'
+            report_path = 'report.json'; report_sha256 = 'report-hash'
+            commandlet_log_path = 'prepare.log'; generated_build_count = 0
+        }
+    }
+    function Publish-AvidScriptModuleReleasePackage {
+        param($RuntimeManifestPath, $ProjectRoot, $ModuleId, $Configuration, $TargetPlatform)
+        return [pscustomobject]@{
+            PackageId = 'package'; DescriptorPath = 'package.json'
+            DescriptorSha256 = 'package-hash'; CatalogPath = 'catalog.json'
+        }
+    }
+    function Invoke-LeadershipGeneratedTypePublication {
+        param($ProjectRoot, $PackageCatalogPath, $Artifacts)
+        $State.Published = $true
+        return [pscustomobject]@{ package_id = 'generated-types' }
+    }
+    function Get-SidecarFileSha256 { param($Path) return 'catalog-hash' }
+    $Arguments = @{
+        EditorExecutable = 'editor'; EngineRoot = 'engine'; ProjectPath = 'project.uproject'
+        ProjectRoot = 'project'; PassId = 'initial'
+    }
+    $Prepared = Invoke-LeadershipProjectPreparation @Arguments
+    Assert-True ([bool]$Prepared.build.generated_types_compiled) 'frozen Editor build evidence must include the newly published Generated Types'
+    $State.Published = $false
+    $State.FailFinalBuild = $true
+    $Rejected = $false
+    try { $null = Invoke-LeadershipProjectPreparation @Arguments }
+    catch { $Rejected = $_.Exception.Message.StartsWith('ASP65L2014 ') }
+    Assert-True $Rejected 'candidate preparation must reject a failed post-publication Editor build'
+} $PreparationFunction.Extent.Text
 Assert-True ($CandidateScriptText.Contains('source did not stabilize after the bounded two-pass preparation')) 'candidate freezer must fail closed after two source-stabilization passes'
 Assert-True ($CandidateScriptText.Contains("'-Profile=`"{0}`"'")) 'candidate freezer must preserve hyphenated profile paths through UE command-line parsing'
 Assert-True ($CandidateScriptText.Contains('-AvidScriptSuppressGeneratedTypeExecution')) 'candidate freezer must suppress Generated Type package startup before the release catalog exists'
@@ -171,4 +223,4 @@ $MatrixIds = @($Protocol.matrices | ForEach-Object { [string]$_.id })
 Assert-True ([string]::Join('|', $MatrixIds) -ceq 'ue_micro_six_lane|ue_gameplay_six_lane|identical_wasm_execution|angelscript_same_semantics') 'required matrix order drifted'
 Assert-True ([string]$Protocol.competitors.angelscript.availability -ceq 'not_frozen') 'AngelScript must remain explicitly blocked until its dependency and adapter are frozen'
 
-Write-Output 'Phase 65 leadership protocol contracts passed: schema=2 scripts=1 tracked_inputs=7 ue_lanes=6 micro_workloads=10 gameplay_workloads=2 identical_wasm_kernels=12 competitors=4 matrices=4 bounded_source_stabilization=1 claims_fail_closed=1'
+Write-Output 'Phase 65 leadership protocol contracts passed: schema=2 scripts=1 tracked_inputs=7 ue_lanes=6 micro_workloads=10 gameplay_workloads=2 identical_wasm_kernels=12 competitors=4 matrices=4 bounded_source_stabilization=1 generated_type_editor_closure=2 claims_fail_closed=1'

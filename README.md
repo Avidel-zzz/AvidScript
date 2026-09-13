@@ -181,6 +181,7 @@ P65.A-C 已完成发布工程主链：可重复发布包、原子安装/升级�
 强制慢路径/中断恢复合同 17/17、12 kernel 原生诊断通过；不改变现有正式性能结论。
 [D34 运行库候选](Docs/Phase65/P65.D34_Production_Epoch_Runtime.md)已纳入 patchset.3，
 176 文件隐私扫描、Editor 构建与 Wasmtime 16/16 回归通过，保留 `.2` 离线包的校验与替换兼容；
+冻结器已补齐 Generated Type 发布后的 Editor 重编译，干净候选 packaged micro 9000/9000、gameplay 1800/1800 正确性通过；
 新 DLL 的 Shipping 与正式性能矩阵仍待完成。
 Shipping 人工视觉与移动设备证据仍作为独立发布候选 Gate，不以自动报告或阶段编号替代。
 
