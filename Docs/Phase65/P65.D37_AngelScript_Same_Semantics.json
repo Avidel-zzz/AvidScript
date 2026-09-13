@@ -1,0 +1,255 @@
+{
+  "schema_version": 1,
+  "phase": "P65.D37",
+  "status": "editor_same_semantics_correctness_verified",
+  "source_commit": "8c032e9fd9f0afe23c3b18a15057aa7a90d8774c",
+  "angelscript": {
+    "source_commit": "f347f57f05e992976b6c2be6612303b7e8099502",
+    "upstream_engine_version": "5.8.2",
+    "local_port_engine_version": "5.8.0",
+    "upstream_binary_identity_claimed": false
+  },
+  "build": {
+    "target": "As36BenchmarkEditor",
+    "platform": "Win64",
+    "configuration": "Development",
+    "isolated_physical_harness": true,
+    "exit_code": 0,
+    "maximum_parallel_actions": 4,
+    "build_id": "beef47a6-f663-426a-acb5-f2c9e3f95bed",
+    "existing_puerts_deprecation_warnings": true
+  },
+  "correctness": {
+    "mode": "UE Editor AngelScript VM",
+    "exit_code": 0,
+    "cases": 264,
+    "micro_cases": 240,
+    "gameplay_cases": 24,
+    "rejection_controls": 17,
+    "float64_refout_object_identity": true,
+    "per_actor_callback_state": true,
+    "independent_native_call_schedule": true,
+    "native_oracle_block_verbatim": true,
+    "source_binary_hashes_stable": true,
+    "report_sha256": "efeca251abb8208b430a7771a43064e320935a033b09fb61bd1a4a774cb6d5eb",
+    "log_sha256": "4c17c3d22a17459d96c68dd3a9290d8f1adb86ee750535b413b2069d69a4fa9c"
+  },
+  "portable_tooling": {
+    "installed_files": 8,
+    "validation_contracts": "27/27",
+    "installation_contracts": "9/9",
+    "actual_editor_rerun_passed": true,
+    "scope": "explicit isolated project; unchanged original fixture; no production dependency addition",
+    "detached_worktree_execution_verified": true
+  },
+  "corrections": [
+    "AngelScript uint literals, reference equality and const value parameters",
+    "Full return allocation bounded by GetStructureSize with ReturnValueOffset; input remains bounded by ParmsSize",
+    "Unique native oracle namespace for Unity Build"
+  ],
+  "artifacts": [
+    {
+      "name": "As36BenchmarkEditor-AngelscriptCode.dll",
+      "sha256": "87be3088288ac6cebb433025bb3daa6cf53b414f9db82613ec52371fbf76f363"
+    },
+    {
+      "name": "As36BenchmarkEditor-AngelscriptEditor.dll",
+      "sha256": "8da988fc2929abe89f9ee6fad58167184bc8096a90dd63f258bc87064b19b6b1"
+    },
+    {
+      "name": "As36BenchmarkEditor-AngelscriptLoader.dll",
+      "sha256": "fa2b73dde04cf46b4196c263218cc2906e40b09d1805cf6cfa2b692f78ace7a7"
+    },
+    {
+      "name": "As36BenchmarkEditor-AvidScriptBindings.dll",
+      "sha256": "db44ff762790f6b35e2980a218dc2234acb64679c27bc3d3ad502cf23dbf9b85"
+    },
+    {
+      "name": "As36BenchmarkEditor-AvidScriptCore.dll",
+      "sha256": "28b0af4f4c58d7a214ac811dc86bd51ba4a9695612406239362144b1e560e9e6"
+    },
+    {
+      "name": "As36BenchmarkEditor-AvidScriptEditor.dll",
+      "sha256": "559170e2f1a0e0c158cb3da3390c999a768fb6ff30e71aa335e2310f4816781b"
+    },
+    {
+      "name": "As36BenchmarkEditor-AvidScriptGenerated.dll",
+      "sha256": "4a5024fb3c535ad7c5ef925c490b573f706b66810d96b3803054397576114f7d"
+    },
+    {
+      "name": "As36BenchmarkEditor-AvidScriptPerfHarness.dll",
+      "sha256": "d9698ce831d9f344b306422442167a450f6d11165650120e6a43c12a6e9aa816"
+    },
+    {
+      "name": "As36BenchmarkEditor-AvidScriptRuntime.dll",
+      "sha256": "5d03d6599124481c074867ba12ecd8f887cf60d907f18578dbe988439f2afc2a"
+    },
+    {
+      "name": "As36BenchmarkEditor-AvidScriptVM.dll",
+      "sha256": "3e58bedbe62187f16847f577133fc16c86ab0417b0313334179243d2512dc231"
+    },
+    {
+      "name": "As36BenchmarkEditor-Cmd.exe",
+      "sha256": "c5f4ee1452b24cb4359ba19a87567967d44c24c364496797e81cf224d8141b0a"
+    },
+    {
+      "name": "As36BenchmarkEditor-JsEnv.dll",
+      "sha256": "eedf7b907b89114f85ef7e31d01bf5a688efeb8de163221498223475301333a9"
+    },
+    {
+      "name": "As36BenchmarkEditor.modules",
+      "sha256": "0787ec1cab887f646c155bfa3f6d5bdf87fd9577fa691b4cab2bb44c673202ea"
+    },
+    {
+      "name": "As36BenchmarkEditor.target",
+      "sha256": "17bffc5055dbd16481c824f9c0d30651647be2e9586d9340c0a00ab783fe4633"
+    }
+  ],
+  "remaining": {
+    "formal_protocol_availability": "not_frozen",
+    "formal_timing_complete": false,
+    "packaged_generated_native_verified": false,
+    "reload_and_wrong_signature_controls_complete": false,
+    "other_frameworks_same_engine_formal_matrix_complete": false,
+    "production_changed": false,
+    "production_performance_gates": "16/18",
+    "manual_release_acceptance_complete": false,
+    "android_mac_acceptance": "deferred by user"
+  },
+  "external_evidence": {
+    "root_label": "as36-engine",
+    "files": [
+      {
+        "relative_path": "harness-stage.json",
+        "sha256": "3fbe994f7a251e27f08501c6693756a154bd100160db14f0ae3fc98408cc8b07"
+      },
+      {
+        "relative_path": "harness-action-boundary.json",
+        "sha256": "5caecc394e5191d506514047c59bce20f497247821fd7b86bc5a04420e2cc877"
+      },
+      {
+        "relative_path": "harness-build-run.json",
+        "sha256": "99efb40d0ff5fc2e386db906b26729864eacf193c8db1ce8255582c358523aca"
+      },
+      {
+        "relative_path": "harness-build-ubt.log",
+        "sha256": "ca0f382a626772f9e4401445bad9006cdc0eb41014147ea831b7c6eaf605f915"
+      },
+      {
+        "relative_path": "harness-return-layout-run.json",
+        "sha256": "39d2ecedda4f632549df24256358a7697e5335d9a17a012c04fbd01733726f01"
+      },
+      {
+        "relative_path": "harness-portable-adapter-run.json",
+        "sha256": "19c591020cc5605632f918b819b37ba18b9a3be9e4727a34e4ebf47a0142aa59"
+      },
+      {
+        "relative_path": "harness-portable-adapter-ubt.log",
+        "sha256": "7f9630ea9db32f27cd52d4a5aa2467541037e3b855c1fc60deec43cd90ae90c0"
+      },
+      {
+        "relative_path": "validation-20260913T183054Z-f074f033/run.json",
+        "sha256": "68617414c211b0eae2c01279e2ddf01cc495b274636b080b7c1f24461b35048e"
+      },
+      {
+        "relative_path": "validation-20260913T183054Z-f074f033/correctness.json",
+        "sha256": "efeca251abb8208b430a7771a43064e320935a033b09fb61bd1a4a774cb6d5eb"
+      },
+      {
+        "relative_path": "validation-20260913T183054Z-f074f033/validation.log",
+        "sha256": "8b8f75f982643e828b117ee8cb2f0332a6e40260a048dcde5cb4275ce12dea43"
+      },
+      {
+        "relative_path": "validation-20260913T180756Z-82e2ce29/run.json",
+        "sha256": "674eec267f6ac9c165364ba72ca38aefe6a7e0e3ed36ba9082f0226639799640"
+      },
+      {
+        "relative_path": "validation-20260913T181052Z-2baee831/run.json",
+        "sha256": "db64d19c3190a5f14b0d2fc5ef0f181b3bcf58c140dacf7e00d2659ab85cdbf0"
+      },
+      {
+        "relative_path": "validation-20260913T181405Z-36465b91/run.json",
+        "sha256": "51717584ee92a38c1430fc08bd2ba3a367416030d995bdcb34318b5186f6998b"
+      },
+      {
+        "relative_path": "validation-20260913T182023Z-2e1d57e4/run.json",
+        "sha256": "8de0ee38ddbc45a744431c8ac5e9552be0e96e6056cf4db725e2b16e3b2bcb4e"
+      },
+      {
+        "sha256": "5879839416af18b135444bf8e76899694a88115edb751a751307221289a4ea79",
+        "relative_path": "portable-validation-contracts.log"
+      },
+      {
+        "sha256": "f41efadde9133f8e20dafdee6c5fc3886a4d9d7ed4fefe19aece80446f4e30e4",
+        "relative_path": "portable-install-contracts.log"
+      },
+      {
+        "sha256": "60d17125a05dc8fb6e94c93a202f5b48ad6292e63b80de5aed317231f69656f1",
+        "relative_path": "harness-d37-final-run.json"
+      },
+      {
+        "sha256": "fc99c29675ddb0e9db218df9be263aba6692df0a725674103c18c7b85a11da7f",
+        "relative_path": "harness-d37-final-ubt.log"
+      },
+      {
+        "sha256": "e029d4d7056b7ae928a50e5ecd3bcd7057de6531d2a8001ce73c5f769ff440bc",
+        "relative_path": "validation-20260913T183721Z-26aa5094/run.json"
+      },
+      {
+        "sha256": "efeca251abb8208b430a7771a43064e320935a033b09fb61bd1a4a774cb6d5eb",
+        "relative_path": "validation-20260913T183721Z-26aa5094/correctness.json"
+      },
+      {
+        "sha256": "4230930f9ddfbb7dd77d8553ce9092116dfe6037341ce3082423769b4e19fc10",
+        "relative_path": "validation-20260913T183721Z-26aa5094/validation.log"
+      },
+      {
+        "sha256": "30a0faa380fa53dac00fc54d19140463362205629b8c022451b1d8b7e795e628",
+        "relative_path": "d37-final-install-contracts.log"
+      },
+      {
+        "relative_path": "validation-20260913T184016Z-6e109eb6/run.json",
+        "sha256": "21b11f5023d90b9360e3bfa8782f258a928a8606426609e1601e6b00778cb07b"
+      },
+      {
+        "relative_path": "validation-20260913T184016Z-6e109eb6/correctness.json",
+        "sha256": "efeca251abb8208b430a7771a43064e320935a033b09fb61bd1a4a774cb6d5eb"
+      },
+      {
+        "relative_path": "validation-20260913T184016Z-6e109eb6/validation.log",
+        "sha256": "5abf78e2287138c344f8000f33bbd002130601dbc1055fb8699507f77b1f6a5f"
+      },
+      {
+        "relative_path": "validation-20260913T184235Z-5fe65ff7/run.json",
+        "sha256": "64ba3cf0bc59cd42c9d46f296c94fefbe56ee369e4c07014ac250e3fe7e67a08"
+      },
+      {
+        "relative_path": "validation-20260913T184235Z-5fe65ff7/correctness.json",
+        "sha256": "efeca251abb8208b430a7771a43064e320935a033b09fb61bd1a4a774cb6d5eb"
+      },
+      {
+        "relative_path": "validation-20260913T184235Z-5fe65ff7/validation.log",
+        "sha256": "4c17c3d22a17459d96c68dd3a9290d8f1adb86ee750535b413b2069d69a4fa9c"
+      },
+      {
+        "relative_path": "d37-canonical-install-contracts.log",
+        "sha256": "c480d2d517ea004cecc0eac74892db41a28feaf5477504cf9a537dbbdfffc58e"
+      },
+      {
+        "relative_path": "d37-canonical-architecture.log",
+        "sha256": "7bcf961aec2ffca691cdc5e85fc0bc93ab666d1714732e9c689a9f91d9818f5c"
+      },
+      {
+        "relative_path": "d37-clean-validation-contracts.log",
+        "sha256": "5879839416af18b135444bf8e76899694a88115edb751a751307221289a4ea79"
+      }
+    ]
+  },
+  "clean_architecture": {
+    "snapshot_commit": "fbe34f614c41e68419817620da44d5b328327e70",
+    "snapshot_tree": "ad25aed787f59214bdd056d4c9f637573de8f6c0",
+    "passed": true,
+    "protected_local_changes_excluded": true,
+    "subsequent_change": "D37 evidence JSON only"
+  }
+}

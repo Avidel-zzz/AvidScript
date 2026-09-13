@@ -1,0 +1,177 @@
+{
+  "schema_version": 1,
+  "status": "editor_correctness_verified_not_timed",
+  "source_commit": "8c032e9fd9f0afe23c3b18a15057aa7a90d8774c",
+  "script_sha256": "f83f29b59b4218c272e9f53c0ac025a18c0974037bb8b4b2ba4f060ba96648e8",
+  "inputs": [
+    {
+      "path": "Source/AvidScriptPerfHarness/Public/AvidScriptPerfFixture.h",
+      "sha256": "2cf2421e33a64c4a6d09c3fe9cc73f55f054998f40fa49ca8bd9ee04caef7edf"
+    },
+    {
+      "path": "Source/AvidScriptPerfHarness/Private/AvidScriptPerfFixture.cpp",
+      "sha256": "e73d729c80f1fde299fbce29acd5d1c1c619f6a871137826867e394eccd0cb72"
+    },
+    {
+      "path": "Source/AvidScriptPerfHarness/Private/AvidScriptGameplayFrameBenchmark.cpp",
+      "sha256": "cba423e1f0ef2f34cb4152f06613be42d04640bc9a616f0551f2ac54cbaccffa"
+    },
+    {
+      "path": "Content/CSharp/AvidScriptPerfWorkload.cs",
+      "sha256": "88a7d512dcd99858bdec2c7b3b37f14e2744a70752b1b22c378158dd3f1fa7da"
+    }
+  ],
+  "fixture": "AAvidScriptPerfFixture",
+  "driver": "AAs36LeadershipDriver",
+  "production_entry": "cached UFunction and ProcessEvent on an actor; raw asIScriptContext execution is not the callback comparison",
+  "modes": [
+    "UE Editor AngelScript VM",
+    "UE packaged generated native code"
+  ],
+  "formal_protocol_changed": false,
+  "micro_ids": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+  ],
+  "gameplay_ids": [
+    10,
+    11
+  ],
+  "small_per_frame": {
+    "logical_property_writes": 32,
+    "scalar_native_calls": 32,
+    "event_native_calls": 2,
+    "entities": 1,
+    "vector_native_calls": 8,
+    "object_native_calls": 4
+  },
+  "dense_per_frame": {
+    "logical_property_writes": 4096,
+    "scalar_native_calls": 4096,
+    "event_native_calls": 512,
+    "entities": 1024,
+    "vector_native_calls": 2048,
+    "object_native_calls": 512
+  },
+  "validation_required": [
+    "Host rejects invalid workload ids and iteration ranges before timing",
+    "Actor and fixture both belong to the measured World; per-instance callback state",
+    "Byte-identical unmodified native fixture implementation in each lane",
+    "u32 wraparound and signed result bits agree for seeds including high bits",
+    "FVector uses native 64-bit X/Y/Z; ref/out returns both vectors",
+    "Object roundtrip preserves exact UObject identity",
+    "Observable native call counters agree; property write counts are logical schedule counts, not observed stores",
+    "Final ScalarValue and result/callback checksums read back after each case/frame",
+    "Entry methods and reflected parameter offsets/types validated once outside timing",
+    "Compare against native oracle and other frameworks rebuilt in the same isolated engine configuration",
+    "Run each execution mode separately and record actual precompiled/generated-code usage"
+  ],
+  "native_bridge": {
+    "files": [
+      {
+        "path": "Native/As36FrozenNativeOracle.inl",
+        "sha256": "bf5feca77abcb80c57046d8b75f7198b1c749295d28262202788baaa5a044275",
+        "base_sha256": "261fed40523781baa082170be2b2e130639fb51efce4c64aa37a9745ec3f50df"
+      },
+      {
+        "path": "Native/As36LeadershipBridge.cpp",
+        "sha256": "413828558bb1cfb7e81802342a3e8a022829ee9114443f46f8b1eb7f40955291",
+        "base_sha256": "ef3bf622287bcaab45785de3f1f0bcab7067786ad73a58b09838641ba73887b0"
+      },
+      {
+        "path": "Native/As36LeadershipBridge.h",
+        "sha256": "dc32f0f624d660b5641cf11c955b3a7c887ab6d2084db8ce7922dcb8d733cac8",
+        "base_sha256": "bd570296718eceff0e3fdfbc8d0eda637027ce8a056591fa96343bc07d49348c"
+      },
+      {
+        "path": "Native/As36LeadershipValidateCommandlet.cpp",
+        "sha256": "4b0fcfb4605724a08a1acd26fb4eea4d1dd93ac1e7f071e361369e6be6143a4d",
+        "base_sha256": "13fa3554dc4644d54c468dce51669241f7916a3c36752168e59b88c6e439c40a"
+      },
+      {
+        "path": "Native/As36LeadershipValidateCommandlet.h",
+        "sha256": "049df15298d5352d823045b0cf3fed4691a3b5cc071b54a9084575bfe67d7d3c",
+        "base_sha256": "049df15298d5352d823045b0cf3fed4691a3b5cc071b54a9084575bfe67d7d3c"
+      }
+    ],
+    "fixture_dependency": "Original fixture depends on Puerts FJsObject and UEDataBinding; full harness needed",
+    "status": "editor_runtime_verified",
+    "runtime_validation_required": false,
+    "callback_readback": "outside timing; cached UASFunction ProcessEvent for callback loop"
+  },
+  "correctness_entry": {
+    "seeds_u32": [
+      0,
+      1,
+      1397313,
+      2147483647,
+      2147483648,
+      4294967295
+    ],
+    "verifies": [
+      "checksum",
+      "final ScalarValue",
+      "13 native call counters",
+      "float64 FVector precision",
+      "ref/out",
+      "object and null identity",
+      "per-actor callback state"
+    ],
+    "gameplay_frames": [
+      1,
+      2
+    ],
+    "commandlet": "As36LeadershipValidate",
+    "native_oracle_proof": "native-oracle-proof.json",
+    "status": "passed_264_cases_17_rejections",
+    "planned_rejection_controls": 17,
+    "micro_iterations": [
+      1,
+      2,
+      17,
+      257
+    ],
+    "mode": "Editor VM only",
+    "planned_cases": 264,
+    "remaining_controls": [
+      "actual reload cache invalidation",
+      "wrong reflected signature"
+    ]
+  },
+  "dialect_corrections": [
+    "uint(value) instead of unsupported unsigned literal suffix",
+    "UObject implicit-reference equality uses == pointer comparison",
+    "value parameters are const; use local uint accumulator in frame helpers"
+  ],
+  "angelscript_source_commit": "f347f57f05e992976b6c2be6612303b7e8099502",
+  "engine_mode": "isolated UE5.8.0 port; upstream source from UE5.8.2; Editor VM",
+  "remaining": [
+    "actual reload cache invalidation control",
+    "wrong reflected signature control",
+    "formal same-engine timing matrix",
+    "packaged generated native code identity and validation"
+  ],
+  "integration_files": [
+    {
+      "base_sha256": "634e4db0814cca2814899b69bcfaa1852f17325f7f0cb7e34caba81acf107891",
+      "path": "Integration/AvidScriptPerfHarness.Build.cs",
+      "sha256": "2aa2613c479c1b1021a58390ca91e5f184fc9207597cddf954efb09e6dc355ea",
+      "destination": "Source/AvidScriptPerfHarness/AvidScriptPerfHarness.Build.cs"
+    },
+    {
+      "base_sha256": "e7baa64ade89ede7faefb042d3a36a0c91cc86dccaf85789fd3633ec292f26bd",
+      "path": "Integration/AvidScriptPerfHarness.uplugin",
+      "sha256": "5652cd2e3471a72f4c2e0b57c78222fd877c1d34473e2fd0d6ce822fdb604249",
+      "destination": "AvidScriptPerfHarness.uplugin"
+    }
+  ],
+  "script_base_sha256": "6f5c279b7a07a21e39e443b8be81a5d086f7686a10b7e78ca86a444325f9872e"
+}

@@ -1,0 +1,9 @@
+{
+  "block_copied_verbatim": true,
+  "status": "compiled_and_verified_264_cases",
+  "source_commit": "8c032e9fd9f0afe23c3b18a15057aa7a90d8774c",
+  "source_path": "Benchmarks/PuertsComparison/AvidScriptPerfHarness/Source/AvidScriptPerfHarness/Private/AvidScriptPerfRunner.cpp",
+  "output_path": "Native/As36FrozenNativeOracle.inl",
+  "source_sha256": "41368496c534aa05788a00c97fd4c9fb07330da32552fde9369b26add2c9d482",
+  "output_sha256": "bf5feca77abcb80c57046d8b75f7198b1c749295d28262202788baaa5a044275"
+}
