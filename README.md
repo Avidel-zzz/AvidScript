@@ -190,7 +190,8 @@ P95 胜率仍未达标。真实离线包替换两轮成功、第三轮目录改�
 Shipping 准备的 NuGet 环境隔离已通过行为合同与真实候选发布/重编译验证；BuildCookRun 现读取唯一 `.uproject` 识别工程，支持目录名不同并拒绝歧义，合同 33/33。
 最新 `8c032e9f` 离线包两次发布身份一致，实际 `.3 → .3` 发布替换 **7/7** 通过；两次目录改名均重试两次后恢复，保留 **2 条 warning**，完整 inventory 校验通过。
 同源 Shipping Release/Cook/归档与包内运行已通过：回执 **78/78**，61 个归档 NonUFS 文件逐项哈希一致，含完整 59 个声明文件；BeginPlay/EndPlay、549 次 Tick、Timer、事件、continuation 和故障 Session 隔离后 World 继续运行均有实际证据，主工程 Editor 已恢复。
-正式纯执行尾部诊断保留原门槛与全部样本，后续优先定位 hashing、scalar_float 和 SIMD；同源完整 Windows Automation 回归继续推进。
+同源完整 Windows Automation **468/468**、零失败，测试清单、进程退出与主工程恢复均核验通过。首轮 460/468 的 Generated Types 失败源于 Shipping 发布后 Editor/Cook 指针不一致；重新发布 Development 包并重编译后完整重跑通过，保留首轮失败证据。两项 Android 主机编译器测试另列未执行。
+正式纯执行尾部诊断保留原门槛与全部样本，后续优先定位 hashing、scalar_float 和 SIMD；两项性能门禁及 AngelScript 同口径矩阵仍未完成。
 Shipping 人工视觉与移动设备证据仍作为独立发布候选 Gate，不以自动报告或阶段编号替代。
 
 P65.A 已完成：thin source 发布器与原子安装器当前通过 **24/24** 轻量合同及真实 commit-based 发布/安装
