@@ -3,6 +3,8 @@ param(
     [Parameter(Mandatory = $true)][string]$OutputRoot,
     [string]$Version = '',
     [ValidateSet('preview')][string]$Channel = 'preview',
+    [ValidateSet('source-developer', 'win64-offline')][string]$Profile = 'source-developer',
+    [string]$Win64RuntimeRoot = '',
     [string]$Commit = 'HEAD',
     [string]$PluginRoot = ''
 )
@@ -15,6 +17,9 @@ if ([string]::IsNullOrWhiteSpace($PluginRoot)) {
 $PluginRoot = [System.IO.Path]::GetFullPath($PluginRoot)
 $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
 . (Join-Path $ScriptRoot 'ReleaseEngineering\AvidScriptPluginReleasePackage.ps1')
+if (($Profile -ceq 'win64-offline') -ne (-not [string]::IsNullOrWhiteSpace($Win64RuntimeRoot))) {
+    throw 'ASWB1001 Win64RuntimeRoot is required only for the win64-offline profile'
+}
 
 function Invoke-AvidScriptPluginReleaseGit {
     param(
@@ -316,6 +321,14 @@ try {
     }
     Invoke-AvidScriptPluginReleaseGit @($ArchiveArguments) | Out-Null
     Expand-Archive -LiteralPath $ArchivePath -DestinationPath $PayloadPluginRoot
+    if ($Profile -ceq 'win64-offline') {
+        $SelectedSchema = Read-AvidScriptPluginReleaseJsonObject `
+            (Join-Path $PayloadPluginRoot 'Build/ReleaseEngineering/AvidScriptPluginRelease.schema.json') 'selected release schema'
+        if ('win64-offline' -cnotin @($SelectedSchema.properties.profile.enum) -or
+            -not (Test-Path -LiteralPath (Join-Path $PayloadPluginRoot 'Build/ReleaseEngineering/AvidScriptWin64BundledRuntime.ps1') -PathType Leaf)) {
+            throw 'ASWB1006 selected source commit does not support offline package installation'
+        }
+    }
     $ReadmeSource = Join-Path $PayloadPluginRoot ([string]$ReleaseFiles.generated.readme_source)
     $ReadmeDestination = Join-Path $PayloadPluginRoot ([string]$ReleaseFiles.generated.readme_destination)
     if (-not (Test-Path -LiteralPath $ReadmeSource -PathType Leaf)) {
@@ -336,6 +349,7 @@ try {
 
     $Dependencies = [System.Collections.Generic.List[object]]::new()
     foreach ($Dependency in @($ReleaseFiles.dependencies | Sort-Object id -CaseSensitive)) {
+        if ($Profile -ceq 'win64-offline' -and $Dependency.id -cne 'wasmtime-win64') { continue }
         $IdentityRelative = Normalize-AvidScriptPluginReleaseRelativePath `
             ([string]$Dependency.identity_path) `
             'dependency identity path'
@@ -343,13 +357,35 @@ try {
         if (-not (Test-Path -LiteralPath $IdentityPath -PathType Leaf)) {
             Throw-AvidScriptPluginReleaseError 'ASRE2018' 'dependency_missing' "dependency identity is missing from selected commit: $IdentityRelative"
         }
-        $Dependencies.Add([pscustomobject][ordered]@{
+        $ReleaseDependency = [pscustomobject][ordered]@{
                 id = [string]$Dependency.id
                 version = [string]$Dependency.version
                 mode = 'external'
                 identity_path = "AvidScript/$IdentityRelative"
                 identity_sha256 = Get-AvidScriptPluginReleaseSha256 $IdentityPath
-            })
+            }
+        if ($Profile -ceq 'win64-offline') {
+            . (Join-Path $ScriptRoot 'ReleaseEngineering/AvidScriptWin64BundledRuntime.ps1')
+            $Win64RuntimeRoot = [IO.Path]::GetFullPath($Win64RuntimeRoot)
+            $SourceBundle = Get-AvidScriptWin64BundleIdentity -PluginRoot $PayloadPluginRoot -RuntimeRoot $Win64RuntimeRoot
+            $RuntimeDestination = Join-Path $PayloadRoot $SourceBundle.root
+            if (Test-Path -LiteralPath $RuntimeDestination) { throw 'ASWB1001 source archive already contains the bundled runtime destination' }
+            Copy-AvidScriptPluginReleasePayload $Win64RuntimeRoot $RuntimeDestination
+            $StagedBundle = Get-AvidScriptWin64BundleIdentity -PluginRoot $PayloadPluginRoot -RuntimeRoot $RuntimeDestination
+            if ((Get-AvidScriptPluginReleaseBytesSha256 (ConvertTo-AvidScriptPluginReleaseCanonicalJsonBytes $SourceBundle)) -cne
+                (Get-AvidScriptPluginReleaseBytesSha256 (ConvertTo-AvidScriptPluginReleaseCanonicalJsonBytes $StagedBundle))) {
+                throw 'ASWB1004 runtime changed while preparing the release'
+            }
+            # Scan the actual copied payload. Reports stay outside it and do not alter package identity.
+            $null = Invoke-AvidScriptBinaryPrivacyScan -Root $RuntimeDestination `
+                -ReportPath (Join-Path $PreparationRoot 'wasmtime-privacy.json')
+            $null = Invoke-AvidScriptBinaryPrivacyScan -Root (Join-Path $PayloadPluginRoot 'Source/ThirdParty/WAMR/lib/Win64/Release') `
+                -ReportPath (Join-Path $PreparationRoot 'wamr-privacy.json')
+            $ReleaseDependency.mode = 'bundled'
+            $ReleaseDependency | Add-Member -NotePropertyName bundle -NotePropertyValue $StagedBundle
+            Assert-AvidScriptWin64BundledDependency -PayloadRoot $PayloadRoot -Dependency $ReleaseDependency
+        }
+        $Dependencies.Add($ReleaseDependency)
     }
 
     $ArtifactContracts = [System.Collections.Generic.List[object]]::new()
@@ -375,13 +411,14 @@ try {
         -OutputRoot $OutputRoot `
         -Version $Version `
         -Channel $Channel `
+        -Profile $Profile `
         -Commit $VerifiedCommit `
         -Tree $VerifiedTree `
         -CommittedAtUtc $CommittedAtUtc `
         -ArtifactContracts @($ArtifactContracts) `
         -Dependencies @($Dependencies) `
-        -PublisherVersion ([string]$ReleaseFiles.publisher_version) `
-        -Targets @($ReleaseFiles.targets) `
+        -PublisherVersion $(if ($Profile -ceq 'win64-offline') { '65.3.0' } else { [string]$ReleaseFiles.publisher_version }) `
+        -Targets $(if ($Profile -ceq 'win64-offline') { @('Win64') } else { @($ReleaseFiles.targets) }) `
         -Contracts $ReleaseFiles.contracts
     [pscustomobject][ordered]@{
         schema_version = 1

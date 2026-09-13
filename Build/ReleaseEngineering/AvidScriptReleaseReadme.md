@@ -9,11 +9,14 @@ UE Runtime 不托管 CLR；Win64 使用 Wasmtime，移动端遵守平台 JIT 限
 - 由 Reflection/Profile 生成 `UFUNCTION`、`UPROPERTY`、Blueprint、网络与常用 UE 类型 facade。
 - C# 定义 Actor、Component、World/GameInstance Subsystem，并生成对应 UE 类型。
 - Win64 Development/Shipping 发布、热重载、UMG/SaveGame、RPC/RepNotify 与多进程网络闭环。
-- `release.json` 同时绑定 Win64/Android 依赖 lock、Generated Type 与模块包生产器身份。
+- `release.json` 绑定所选平台的依赖 lock、Generated Type 与模块包生产器身份。
 
 ## 安装
 
-此包是 thin source developer profile，不包含本机构建的第三方二进制。先将包安装到 UE 项目：
+以 `release.json.profile` 为准：`source-developer` 是需要另行准备 Wasmtime 的源码包；
+`win64-offline` 是包含 Win64 Wasmtime headers、DLL/import library、完整声明及 WAMR 静态库的源码包。
+后者安装和 UE 编译时无需下载这些运行库，但不包含 UE、Visual Studio、.NET SDK 或 NuGet 缓存；
+这些工具链和 C# 构建依赖仍需预先准备。先将包安装到 UE 项目：
 
 ```powershell
 pwsh -NoProfile -File .\payload\AvidScript\Build\InstallAvidScriptPluginRelease.ps1 `
@@ -22,13 +25,14 @@ pwsh -NoProfile -File .\payload\AvidScript\Build\InstallAvidScriptPluginRelease.
   -Mode Apply
 ```
 
-安装后在插件目录准备 Win64 Wasmtime 性能工具链：
+安装后可在插件目录验证 Win64 Wasmtime 性能工具链：
 
 ```powershell
 pwsh -NoProfile -File Build/BuildAvidScriptWasmtimePerformanceToolchain.ps1 -Mode Verify
 ```
 
-若本机尚未安装，按同一脚本的 `Build` 模式从锁定源码构建。Android 依赖使用：
+`win64-offline` 已携带运行库，不需要运行 `Build`。`source-developer` 若缺少运行库，按同一脚本的
+`Build` 模式从锁定源码构建。Android 仅属于源码包的独立平台范围，依赖使用：
 
 ```powershell
 pwsh -NoProfile -File Build/InstallWasmtimeDependency.ps1 -Mode Verify -Platform AndroidArm64
@@ -37,6 +41,10 @@ pwsh -NoProfile -File Build/InstallWasmtimeDependency.ps1 -Mode Verify -Platform
 源码版 UE5.8 根目录与固定 .NET SDK 要求见 `global.json` 和发布包 `release.json`。安装前可先使用
 `-Mode Plan`，安装后使用 `-Mode Verify`；安装器不会修改 `.uproject`、系统环境变量、游戏资产或
 项目 `Saved/AvidScript` 数据。
+
+离线包使用 release schema v2；源码包继续使用 v1。安装器在写入前重新核对包文件清单、来源锁文件、
+运行库 managed marker、全部内容哈希及声明与 DLL 的绑定，缺失或篡改会拒绝安装。
+当前 preview 不提供数字签名；内容身份和完整性校验不等同于发布者身份认证。
 
 安装后可从插件目录运行只读 Compatibility Doctor：
 

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://avidscript.dev/schemas/plugin-release-v1.json",
+  "$id": "https://avidscript.dev/schemas/plugin-release-v1-v2.json",
   "title": "AvidScript Plugin Release",
   "type": "object",
   "additionalProperties": false,
@@ -22,61 +22,147 @@
     "signature"
   ],
   "properties": {
-    "schema_version": { "const": 1 },
-    "format": { "const": "avidscript.plugin.release" },
-    "release_id": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
-    "channel": { "const": "preview" },
-    "profile": { "const": "source-developer" },
+    "schema_version": {
+      "enum": [
+        1,
+        2
+      ]
+    },
+    "format": {
+      "const": "avidscript.plugin.release"
+    },
+    "release_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "channel": {
+      "const": "preview"
+    },
+    "profile": {
+      "enum": [
+        "source-developer",
+        "win64-offline"
+      ]
+    },
     "publisher": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version"],
+      "required": [
+        "name",
+        "version"
+      ],
       "properties": {
-        "name": { "const": "AvidScript.PluginRelease" },
-        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" }
+        "name": {
+          "const": "AvidScript.PluginRelease"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        }
       }
     },
     "source": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["commit", "tree", "committed_at_utc"],
+      "required": [
+        "commit",
+        "tree",
+        "committed_at_utc"
+      ],
       "properties": {
-        "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-        "tree": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-        "committed_at_utc": { "type": "string", "format": "date-time" }
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "tree": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "committed_at_utc": {
+          "type": "string",
+          "format": "date-time"
+        }
       }
     },
     "compatibility": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["unreal_min", "unreal_max_exclusive", "dotnet_sdk", "powershell_min"],
+      "required": [
+        "unreal_min",
+        "unreal_max_exclusive",
+        "dotnet_sdk",
+        "powershell_min"
+      ],
       "properties": {
-        "unreal_min": { "const": "5.8.0" },
-        "unreal_max_exclusive": { "const": "5.9.0" },
-        "dotnet_sdk": { "const": "8.0.416" },
-        "powershell_min": { "type": "string" }
+        "unreal_min": {
+          "const": "5.8.0"
+        },
+        "unreal_max_exclusive": {
+          "const": "5.9.0"
+        },
+        "dotnet_sdk": {
+          "const": "8.0.416"
+        },
+        "powershell_min": {
+          "type": "string"
+        }
       }
     },
     "targets": {
-      "type": "array",
-      "prefixItems": [
-        { "const": "Android-arm64" },
-        { "const": "Win64" }
-      ],
-      "items": false,
-      "minItems": 2,
-      "maxItems": 2
+      "oneOf": [
+        {
+          "type": "array",
+          "prefixItems": [
+            {
+              "const": "Android-arm64"
+            },
+            {
+              "const": "Win64"
+            }
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "prefixItems": [
+            {
+              "const": "Win64"
+            }
+          ],
+          "minItems": 1,
+          "maxItems": 1,
+          "type": "array",
+          "items": false
+        }
+      ]
     },
     "contracts": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["module_abi", "binding_descriptor_max", "semantic_schema", "guest_ir_schema"],
+      "required": [
+        "module_abi",
+        "binding_descriptor_max",
+        "semantic_schema",
+        "guest_ir_schema"
+      ],
       "properties": {
-        "module_abi": { "const": 1 },
-        "binding_descriptor_max": { "const": 23 },
-        "semantic_schema": { "const": 20 },
-        "guest_ir_schema": { "const": 2 }
+        "module_abi": {
+          "const": 1
+        },
+        "binding_descriptor_max": {
+          "const": 23
+        },
+        "semantic_schema": {
+          "const": 20
+        },
+        "guest_ir_schema": {
+          "const": 2
+        }
       }
     },
     "artifact_contracts": {
@@ -85,11 +171,23 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "producer_path", "producer_sha256"],
+        "required": [
+          "id",
+          "producer_path",
+          "producer_sha256"
+        ],
         "properties": {
-          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
-          "producer_path": { "type": "string" },
-          "producer_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+          },
+          "producer_path": {
+            "type": "string"
+          },
+          "producer_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
         }
       }
     },
@@ -98,35 +196,144 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "version", "mode", "identity_path", "identity_sha256"],
+        "required": [
+          "id",
+          "version",
+          "mode",
+          "identity_path",
+          "identity_sha256"
+        ],
         "properties": {
-          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
-          "version": { "type": "string" },
-          "mode": { "const": "external" },
-          "identity_path": { "type": "string" },
-          "identity_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
-        }
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+          },
+          "version": {
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "external",
+              "bundled"
+            ]
+          },
+          "identity_path": {
+            "type": "string"
+          },
+          "identity_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "bundle": {
+            "properties": {
+              "root": {
+                "const": "AvidScript/Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.2"
+              },
+              "notices_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "installed_content_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "marker_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "root",
+              "marker_sha256",
+              "installed_content_sha256",
+              "notices_sha256"
+            ],
+            "type": "object"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "mode": {
+                  "const": "bundled"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "bundle"
+              ],
+              "properties": {
+                "id": {
+                  "const": "wasmtime-win64"
+                },
+                "identity_path": {
+                  "const": "AvidScript/Source/ThirdParty/Wasmtime/PerformanceToolchain/WasmtimePerformanceToolchain.lock.json"
+                }
+              }
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "bundle"
+                ]
+              }
+            }
+          }
+        ]
       }
     },
     "payload": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["root", "inventory_sha256", "file_count", "total_bytes", "files"],
+      "required": [
+        "root",
+        "inventory_sha256",
+        "file_count",
+        "total_bytes",
+        "files"
+      ],
       "properties": {
-        "root": { "const": "payload" },
-        "inventory_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "file_count": { "type": "integer", "minimum": 1 },
-        "total_bytes": { "type": "integer", "minimum": 1 },
+        "root": {
+          "const": "payload"
+        },
+        "inventory_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "file_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "total_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
         "files": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["path", "length", "sha256", "role"],
+            "required": [
+              "path",
+              "length",
+              "sha256",
+              "role"
+            ],
             "properties": {
-              "path": { "type": "string" },
-              "length": { "type": "integer", "minimum": 0 },
-              "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "path": {
+                "type": "string"
+              },
+              "length": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
               "role": {
                 "enum": [
                   "metadata",
@@ -143,6 +350,78 @@
         }
       }
     },
-    "signature": { "type": "null" }
-  }
+    "signature": {
+      "type": "null"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "profile": {
+            "const": "win64-offline"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "dependencies": {
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "properties": {
+                "mode": {
+                  "const": "bundled"
+                }
+              }
+            }
+          },
+          "targets": {
+            "prefixItems": [
+              {
+                "const": "Win64"
+              }
+            ],
+            "minItems": 1,
+            "maxItems": 1,
+            "type": "array",
+            "items": false
+          },
+          "schema_version": {
+            "const": 2
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "dependencies": {
+            "items": {
+              "properties": {
+                "mode": {
+                  "const": "external"
+                }
+              }
+            }
+          },
+          "targets": {
+            "type": "array",
+            "prefixItems": [
+              {
+                "const": "Android-arm64"
+              },
+              {
+                "const": "Win64"
+              }
+            ],
+            "items": false,
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "schema_version": {
+            "const": 1
+          }
+        }
+      }
+    }
+  ]
 }

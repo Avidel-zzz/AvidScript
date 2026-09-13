@@ -525,7 +525,7 @@ try {
     Invoke-PluginReleaseContract 'public CLI and privacy boundary' {
         $PublisherParameters = @(Get-ScriptParameterNames $PublisherPath)
         $InstallerParameters = @(Get-ScriptParameterNames $InstallerPath)
-        $ExpectedPublisher = @('Channel', 'Commit', 'OutputRoot', 'PluginRoot', 'Version')
+        $ExpectedPublisher = @('Channel', 'Commit', 'OutputRoot', 'PluginRoot', 'Profile', 'Version', 'Win64RuntimeRoot')
         $ExpectedInstaller = @(
             'AllowDowngrade', 'LockTimeoutSeconds', 'Mode', 'PackageRoot',
             'ProjectRoot', 'ReportPath')

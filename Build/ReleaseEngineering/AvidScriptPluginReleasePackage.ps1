@@ -424,9 +424,10 @@ function Assert-AvidScriptPluginReleaseManifest {
             'publisher', 'source', 'compatibility', 'targets', 'contracts',
             'artifact_contracts', 'dependencies', 'payload', 'signature') `
         -Label 'release manifest'
-    if ([int]$Manifest.schema_version -ne 1 -or
-        [string]$Manifest.format -cne 'avidscript.plugin.release' -or
-        [string]$Manifest.profile -cne 'source-developer') {
+    $IsBundledWin64 = [string]$Manifest.profile -ceq 'win64-offline'
+    $HeaderValid = if ($IsBundledWin64) { [int]$Manifest.schema_version -eq 2 }
+        else { [int]$Manifest.schema_version -eq 1 -and [string]$Manifest.profile -ceq 'source-developer' }
+    if (-not $HeaderValid -or [string]$Manifest.format -cne 'avidscript.plugin.release') {
         Throw-AvidScriptPluginReleaseError 'ASRE1202' 'schema_invalid' 'release manifest header is unsupported.'
     }
     if ([string]$Manifest.version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$' -or
@@ -472,8 +473,9 @@ function Assert-AvidScriptPluginReleaseManifest {
         Throw-AvidScriptPluginReleaseError 'ASRE1208' 'compatibility_invalid' 'release compatibility identity drifted.'
     }
     $Targets = @($Manifest.targets)
-    if ($Targets.Count -ne 2 -or $Targets[0] -cne 'Android-arm64' -or
-        $Targets[1] -cne 'Win64') {
+    $TargetsValid = if ($IsBundledWin64) { $Targets.Count -eq 1 -and $Targets[0] -ceq 'Win64' }
+        else { $Targets.Count -eq 2 -and $Targets[0] -ceq 'Android-arm64' -and $Targets[1] -ceq 'Win64' }
+    if (-not $TargetsValid) {
         Throw-AvidScriptPluginReleaseError 'ASRE1209' 'compatibility_invalid' 'release target set is invalid.'
     }
     Assert-AvidScriptPluginReleaseObjectShape `
@@ -514,19 +516,34 @@ function Assert-AvidScriptPluginReleaseManifest {
     $DependencyIds = [System.Collections.Generic.HashSet[string]]::new(
         [System.StringComparer]::Ordinal)
     foreach ($Dependency in @($Manifest.dependencies)) {
+        $RequiredDependencyFields = @('id', 'version', 'mode', 'identity_path', 'identity_sha256')
+        if ($IsBundledWin64) { $RequiredDependencyFields += 'bundle' }
         Assert-AvidScriptPluginReleaseObjectShape `
             -Value $Dependency `
-            -Required @('id', 'version', 'mode', 'identity_path', 'identity_sha256') `
+            -Required $RequiredDependencyFields `
             -Label 'release dependency'
         if ([string]$Dependency.id -notmatch '^[a-z0-9][a-z0-9._-]{0,63}$' -or
             -not $DependencyIds.Add([string]$Dependency.id)) {
             Throw-AvidScriptPluginReleaseError 'ASRE1211' 'dependency_invalid' 'release dependency identity is invalid or duplicated.'
         }
-        if ([string]$Dependency.mode -cne 'external') {
-            Throw-AvidScriptPluginReleaseError 'ASRE1212' 'dependency_invalid' 'schema v1 only permits external thin-package dependencies.'
+        if ($IsBundledWin64) {
+            if ($Dependency.mode -cne 'bundled' -or $Dependency.id -cne 'wasmtime-win64') {
+                Throw-AvidScriptPluginReleaseError 'ASRE1212' 'dependency_invalid' 'Win64 offline requires its bundled Wasmtime dependency.'
+            }
+            Assert-AvidScriptPluginReleaseObjectShape -Value $Dependency.bundle `
+                -Required @('root', 'marker_sha256', 'installed_content_sha256', 'notices_sha256') -Label 'bundled runtime identity'
+            foreach ($Name in @('marker_sha256', 'installed_content_sha256', 'notices_sha256')) {
+                Assert-AvidScriptPluginReleaseSha256 $Dependency.bundle.$Name 'bundled runtime identity hash'
+            }
+        }
+        elseif ([string]$Dependency.mode -cne 'external') {
+            Throw-AvidScriptPluginReleaseError 'ASRE1212' 'dependency_invalid' 'source developer profile only permits external dependencies.'
         }
         Normalize-AvidScriptPluginReleaseRelativePath ([string]$Dependency.identity_path) 'dependency identity path' | Out-Null
         Assert-AvidScriptPluginReleaseSha256 ([string]$Dependency.identity_sha256) 'dependency identity hash'
+    }
+    if ($IsBundledWin64 -and ($DependencyIds.Count -ne 1 -or -not $DependencyIds.Contains('wasmtime-win64'))) {
+        Throw-AvidScriptPluginReleaseError 'ASRE1212' 'dependency_invalid' 'Win64 offline dependency set is incomplete.'
     }
     Assert-AvidScriptPluginReleaseObjectShape `
         -Value $Manifest.payload `
@@ -601,6 +618,10 @@ function Resolve-AvidScriptPluginReleasePackage {
             (Get-AvidScriptPluginReleaseSha256 $IdentityPath) -cne [string]$Dependency.identity_sha256) {
             Throw-AvidScriptPluginReleaseError 'ASRE1221' 'dependency_invalid' "release dependency identity differs: $($Dependency.id)"
         }
+        if ($Dependency.mode -ceq 'bundled') {
+            . (Join-Path $script:AvidScriptPluginReleaseModuleRoot 'AvidScriptWin64BundledRuntime.ps1')
+            Assert-AvidScriptWin64BundledDependency -PayloadRoot $PayloadRoot -Dependency $Dependency
+        }
     }
     foreach ($ArtifactContract in @($Manifest.artifact_contracts)) {
         $ProducerPath = Join-Path $PayloadRoot ([string]$ArtifactContract.producer_path)
@@ -650,6 +671,7 @@ function Publish-AvidScriptPluginReleasePackage {
         [Parameter(Mandatory = $true)][string]$OutputRoot,
         [Parameter(Mandatory = $true)][string]$Version,
         [ValidateSet('preview')][string]$Channel = 'preview',
+        [ValidateSet('source-developer', 'win64-offline')][string]$Profile = 'source-developer',
         [Parameter(Mandatory = $true)][string]$Commit,
         [Parameter(Mandatory = $true)][string]$Tree,
         [Parameter(Mandatory = $true)][string]$CommittedAtUtc,
@@ -688,12 +710,12 @@ function Publish-AvidScriptPluginReleasePackage {
             }
         }
         $Manifest = [pscustomobject][ordered]@{
-            schema_version = 1
+            schema_version = if ($Profile -ceq 'win64-offline') { 2 } else { 1 }
             format = 'avidscript.plugin.release'
             release_id = ''
             version = $Version
             channel = $Channel
-            profile = 'source-developer'
+            profile = $Profile
             publisher = [pscustomobject][ordered]@{
                 name = 'AvidScript.PluginRelease'
                 version = $PublisherVersion
@@ -723,8 +745,9 @@ function Publish-AvidScriptPluginReleasePackage {
             signature = $null
         }
         $Manifest.release_id = Get-AvidScriptPluginReleaseId $Manifest
+        $ProfileLabel = if ($Profile -ceq 'win64-offline') { 'win64-offline' } else { 'source' }
         $FinalRoot = Join-Path $OutputRoot (
-            "AvidScript-$Version-source-$($Manifest.release_id.Substring(0, 20))")
+            "AvidScript-$Version-$ProfileLabel-$($Manifest.release_id.Substring(0, 20))")
         Write-AvidScriptPluginReleaseJson (Join-Path $StagingRoot 'release.json') $Manifest
         Resolve-AvidScriptPluginReleasePackage $StagingRoot | Out-Null
         $PublishLock = Enter-AvidScriptPluginReleasePublishLock `
