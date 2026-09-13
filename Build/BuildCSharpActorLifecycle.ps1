@@ -721,7 +721,7 @@ function Write-BuildReport {
             -PackageInfo $BindingAuthorizationInfo `
             -UsedImports $UsedAuthorizationBindingImports `
             -UsedObjectTypeOrdinals $UsedObjectTypeOrdinals `
-            -Required (-not $IsDefaultSource) `
+            -Required $UsesBindingPackage `
             -ExplicitEmpty
         binding_package = New-BindingPackageReportValue `
             -PackageInfo $BindingPackageInfo `
@@ -817,6 +817,9 @@ $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
 $IsDefaultSource = $SourcePath.Equals(
     [System.IO.Path]::GetFullPath($DefaultSourcePath),
     [System.StringComparison]::OrdinalIgnoreCase)
+$UsesBindingPackage = -not $IsDefaultSource -or
+    -not [string]::IsNullOrWhiteSpace($BindingPackagePath) -or
+    -not [string]::IsNullOrWhiteSpace($RuntimeBindingPackagePath)
 if ([string]::IsNullOrWhiteSpace($ReportPath)) { $ReportPath = Join-Path $OutputRoot "$ArtifactStem.csharp.report.json" }
 if ([string]::IsNullOrWhiteSpace($ManifestPath)) { $ManifestPath = Join-Path $OutputRoot "$ArtifactStem.avidscript.json" }
 $ReportPath = [System.IO.Path]::GetFullPath($ReportPath)
@@ -1126,7 +1129,7 @@ foreach ($Artifact in @(
 }
 
 $SourceId = Convert-ToProjectRelativePath $SourcePath
-if (-not $IsDefaultSource) {
+if ($UsesBindingPackage) {
     if ([string]::IsNullOrWhiteSpace($BindingPackagePath)) {
         $Diagnostics += [ordered]@{
             code = "ASBI4201"
@@ -1374,6 +1377,9 @@ elseif (-not $SemanticCacheHit) {
         frontend_path = $FrontendArtifactPath
         output_path = $SemanticArtifactPath
     }
+    # The default sample owns its static ABI declarations; injecting the generated
+    # facade would duplicate those symbols. Its explicit package is still validated
+    # against emitted imports and retained in the runtime manifest below.
     if (-not $IsDefaultSource) {
         $SemanticWorkerFields.executable_reference_source_path =
             $BindingAuthorizationInfo.ReferenceSourcePath
@@ -1694,7 +1700,7 @@ $ObservedExports = @($WasmInspectionModel.exports | Where-Object { [int]$_.kind 
 $RequiredImports = @($GuestIrModel.imports | ForEach-Object {
     [ordered]@{ module = [string]$_.module; name = [string]$_.name }
 })
-if (-not $IsDefaultSource) {
+if ($UsesBindingPackage) {
     $AuthorizationValidation = Test-BindingPackageImports `
         -PackageInfo $BindingAuthorizationInfo `
         -GuestImports @($GuestIrModel.imports) `
