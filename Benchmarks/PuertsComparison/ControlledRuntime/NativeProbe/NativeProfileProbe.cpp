@@ -25,6 +25,7 @@ using FClock = std::chrono::steady_clock;
 struct FOptions
 {
     std::filesystem::path KernelPath;
+    std::filesystem::path ArtifactRoot;
     int Samples = 30;
     int WarmupSamples = 5;
     double MinimumSampleMilliseconds = 5.0;
@@ -133,6 +134,10 @@ FOptions ParseOptions(const int ArgumentCount, char** Arguments)
         {
             Options.KernelPath = std::filesystem::path(Value);
         }
+        else if (Argument == "--artifact-root")
+        {
+            Options.ArtifactRoot = std::filesystem::absolute(std::filesystem::path(Value));
+        }
         else if (Argument == "--samples")
         {
             Options.Samples = ParsePositiveInt(Value, "samples");
@@ -175,6 +180,10 @@ FOptions ParseOptions(const int ArgumentCount, char** Arguments)
         || Options.MinimumIterations > Options.MaximumIterations)
     {
         throw std::runtime_error("iteration bounds are invalid");
+    }
+    if (!Options.ArtifactRoot.empty() && std::filesystem::exists(Options.ArtifactRoot))
+    {
+        throw std::runtime_error("artifact root already exists; refusing to overwrite evidence");
     }
     return Options;
 }
@@ -325,6 +334,27 @@ public:
     }
 
     const FProfileDefinition Definition;
+
+    void SaveArtifact(const std::filesystem::path& Root) const
+    {
+        uint8_t* Bytes = nullptr;
+        size_t Size = 0;
+        AvidScriptWasmtimeFailure* Failure = avidscript_wasmtime_module_serialize(Module, &Bytes, &Size);
+        const std::unique_ptr<uint8_t, decltype(&avidscript_wasmtime_serialized_bytes_delete)> Owner(
+            Bytes, &avidscript_wasmtime_serialized_bytes_delete);
+        if (Failure != nullptr || Bytes == nullptr || Size == 0)
+        {
+            throw std::runtime_error(DescribeFailure(Failure));
+        }
+        const std::filesystem::path Path = Root / (std::string(Definition.Id) + ".cwasm");
+        std::ofstream Output(Path, std::ios::binary);
+        Output.write(reinterpret_cast<const char*>(Bytes), static_cast<std::streamsize>(Size));
+        Output.close();
+        if (!Output)
+        {
+            throw std::runtime_error("unable to write serialized diagnostic artifact");
+        }
+    }
 
 private:
     AvidScriptWasmtimeEngine* Engine = nullptr;
@@ -486,6 +516,19 @@ int main(const int ArgumentCount, char** Arguments)
             }
         }
 
+        // Export the measured module after all timing and correctness checks have finished.
+        if (!Options.ArtifactRoot.empty())
+        {
+            std::filesystem::create_directories(Options.ArtifactRoot.parent_path());
+            if (!std::filesystem::create_directory(Options.ArtifactRoot))
+            {
+                throw std::runtime_error("artifact root collision");
+            }
+            for (const auto& Profile : Profiles)
+            {
+                Profile->SaveArtifact(Options.ArtifactRoot);
+            }
+        }
         WriteResult(Options, Iterations, Results);
         return EXIT_SUCCESS;
     }

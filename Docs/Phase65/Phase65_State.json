@@ -77,7 +77,7 @@
       "evidence": "P57 归档纯执行 P50/P95 几何均值为 0.9800x/1.0006x，未达到 0.95x；尚无完整 AngelScript 同口径矩阵。",
       "deferral_reason": "必须在功能与 Release identity 冻结后统一重测，旧 micro 数据不能代表当前版本。",
       "remediation": "冻结 correctness/workload/runtime，执行当前多进程矩阵；定位并优化红项，逐 lane 发布可审计 aggregate 与诚实结论。",
-      "status": "Open",
+      "status": "Fixing",
       "resolution_evidence": "",
       "target_phase": null,
       "transfer_reason": ""
@@ -90,8 +90,8 @@
       "evidence": "P65.A 分发审计：当前 v45.0.0-avidscript.2 DLL 的二进制字符串包含本机用户/Cargo 构建路径；managed receipt 只证明内容身份，不证明隐私安全。",
       "deferral_reason": "thin source profile 可安全交付，但 offline binary profile 必须在中性根重建并通过字节扫描后才能启用。",
       "remediation": "从锁定 commit/patch 在中性 CI 路径重建，完整 remap source/Cargo/temp 路径，复核许可证与 receipt，并对所有二进制执行用户名/home/build-root 扫描。",
-      "status": "Open",
-      "resolution_evidence": "",
+      "status": "Verified",
+      "resolution_evidence": "实现 82bb7938；Docs/Phase65/P65.D32_Win64_Public_Binary_Privacy.md D32.A-H：中性 Wasmtime DLL 27b944b8ad2efacd1903e6fd9792c9cb6f5af6261d8497a02f9e72888ec8eaf3，176 文件完整隐私扫描零命中、94 包及 Rust 声明、WAMR 静态库扫描通过；离线候选 f0730d62 的两次发布 release/manifest/inventory 身份一致（2063 文件/59874017 字节），包内安装器 Plan/Install/Verify/NoOp、全新 UE5.8 Editor 编译及固定英文环境启动/退出通过；合同 18/18 与 26/26。来源/marker/声明/运行库内容在发布和安装两端验证；signature=null，不宣称签名认证。",
       "target_phase": null,
       "transfer_reason": ""
     }
@@ -148,6 +148,6 @@
     }
   ],
   "next_action": "debt-update -Phase 65 -DebtId P65-D01-AndroidDevice -Status Verified -Evidence <text>",
-  "revision": 9,
-  "updated_at_utc": "2026-09-06T05:09:52.9623068+00:00"
+  "revision": 11,
+  "updated_at_utc": "2026-09-13T10:03:55.4848344+00:00"
 }

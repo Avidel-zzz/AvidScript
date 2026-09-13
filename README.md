@@ -176,6 +176,9 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 - **诊断与性能**：typed Host 拒绝已在 Wasmtime 保留具体 category/details/import，WAMR semantic/dynamic 路径同样保留分类；尚无完整 C# 异常系统。纯执行 P50/P95 领先门禁未关闭，也未完成同口径 UnLua/AngelScript 矩阵。
 
 P65.A-C 已完成发布工程主链：可重复发布包、原子安装/升级、兼容诊断与分层平台 Gate；P65.D 正在推进性能领导力。
+公开二进制隐私/来源债务 P65-D04 已按 D32.A-H 证据关闭；P65-D03 保持未完成，
+[D33 原生代码定位](Docs/Phase65/P65.D33_Native_Codegen_Inspection.md)提供采样后导出与反汇编证据，
+下一步验证保留 epoch 检查的慢路径寄存器保存；不改变现有正式性能结论。
 Shipping 人工视觉与移动设备证据仍作为独立发布候选 Gate，不以自动报告或阶段编号替代。
 
 P65.A 已完成：thin source 发布器与原子安装器当前通过 **24/24** 轻量合同及真实 commit-based 发布/安装
