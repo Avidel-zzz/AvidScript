@@ -228,6 +228,30 @@ try {
         }
     }
 
+    Invoke-BuildCookRunContractCase 'project identity comes from its uproject file' {
+        $ProjectRoot = Join-Path $FixtureRoot 'DirectoryWithAnotherName'
+        [void][IO.Directory]::CreateDirectory((Join-Path $ProjectRoot 'Source'))
+        $ProjectFile = Join-Path $ProjectRoot 'Game.uproject'
+        [IO.File]::WriteAllText($ProjectFile, '{}')
+        [IO.File]::WriteAllText((Join-Path $ProjectRoot 'Source/Game.Target.cs'), 'Type = TargetType.Game;')
+        $AvidScriptBuildCookRunPluginRoot = Join-Path $ProjectRoot 'Plugins/AvidScript'
+        $Context = Get-AvidScriptBuildCookRunProjectContext -ProjectRoot $ProjectRoot
+        Assert-BuildCookRunContract ($Context.ProjectFile -ceq $ProjectFile -and $Context.TargetName -ceq 'Game') `
+            'A legitimate project in a differently named directory was rejected or mapped to another target.'
+    }
+
+    Invoke-BuildCookRunContractCase 'ambiguous project identity is rejected' {
+        $ProjectRoot = Join-Path $FixtureRoot 'Game'
+        [void][IO.Directory]::CreateDirectory((Join-Path $ProjectRoot 'Source'))
+        foreach ($Name in @('Game', 'Other')) { [IO.File]::WriteAllText((Join-Path $ProjectRoot "$Name.uproject"), '{}') }
+        [IO.File]::WriteAllText((Join-Path $ProjectRoot 'Source/Game.Target.cs'), 'Type = TargetType.Game;')
+        $AvidScriptBuildCookRunPluginRoot = Join-Path $ProjectRoot 'Plugins/AvidScript'
+        $Rejected = $false
+        try { $null = Get-AvidScriptBuildCookRunProjectContext -ProjectRoot $ProjectRoot }
+        catch { $Rejected = $_.Exception.Data['category'] -ceq 'project_identity_invalid' }
+        Assert-BuildCookRunContract $Rejected 'Two uproject files must not silently select the one matching the folder.'
+    }
+
     Invoke-BuildCookRunContractCase 'fixed UE5.8 source engine' {
         $EngineFunction = Get-BuildCookRunFunctionAst `
             -Ast $RunnerAst `
@@ -837,6 +861,7 @@ try {
             'argument_list',
             'single_line_json',
             'archive_safety',
+            'project_file_identity_and_ambiguity',
             'receipt_exact_stale_ambiguous',
             'receipt_validator_handoff',
             'packaged_oracle_configuration_binary',
@@ -857,8 +882,14 @@ catch {
     exit 1
 }
 finally {
-    if (Test-Path -LiteralPath $FixtureRoot -PathType Container) {
-        Remove-Item -LiteralPath $FixtureRoot -Recurse -Force
+    $ResolvedFixtureRoot = [IO.Path]::GetFullPath($FixtureRoot)
+    $FixtureParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+    if (-not $ResolvedFixtureRoot.StartsWith($FixtureParent, [StringComparison]::OrdinalIgnoreCase) -or
+        -not [IO.Path]::GetFileName($ResolvedFixtureRoot).StartsWith('AvidScriptBuildCookRunContract_', [StringComparison]::Ordinal)) {
+        throw 'BuildCookRun fixture escaped its owned temporary root.'
+    }
+    if (Test-Path -LiteralPath $ResolvedFixtureRoot -PathType Container) {
+        Remove-Item -LiteralPath $ResolvedFixtureRoot -Recurse -Force
     }
 }
 

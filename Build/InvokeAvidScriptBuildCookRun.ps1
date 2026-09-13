@@ -283,14 +283,20 @@ function Get-AvidScriptBuildCookRunProjectContext {
             -Message 'Runner must reside at ProjectRoot/Plugins/AvidScript/Build.'
     }
 
-    $TargetName = Split-Path -Leaf $FullProjectRoot
-    $ProjectFile = Join-Path $FullProjectRoot "$TargetName.uproject"
-    $GameTargetFile = Join-Path $FullProjectRoot "Source/$TargetName.Target.cs"
-    if (-not (Test-Path -LiteralPath $ProjectFile -PathType Leaf)) {
+    $ProjectFiles = @(Get-ChildItem -LiteralPath $FullProjectRoot -Filter '*.uproject' -File)
+    if ($ProjectFiles.Count -eq 0) {
         Throw-AvidScriptBuildCookRunError `
             -Category 'project_file_missing' `
-            -Message "Project file is missing: $ProjectFile"
+            -Message "No .uproject file exists in ProjectRoot: $FullProjectRoot"
     }
+    if ($ProjectFiles.Count -ne 1) {
+        Throw-AvidScriptBuildCookRunError `
+            -Category 'project_identity_invalid' `
+            -Message "ProjectRoot must contain exactly one .uproject file: $FullProjectRoot"
+    }
+    $ProjectFile = $ProjectFiles[0].FullName
+    $TargetName = [System.IO.Path]::GetFileNameWithoutExtension($ProjectFile)
+    $GameTargetFile = Join-Path $FullProjectRoot "Source/$TargetName.Target.cs"
     if (-not (Test-Path -LiteralPath $GameTargetFile -PathType Leaf)) {
         Throw-AvidScriptBuildCookRunError `
             -Category 'game_target_missing' `
