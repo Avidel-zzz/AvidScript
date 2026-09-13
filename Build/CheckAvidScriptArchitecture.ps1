@@ -2291,6 +2291,9 @@ $SceneComponentBindingHeader = Read-RequiredFile 'Source/AvidScriptBindings/Publ
 $WasmRuntimeSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptWasmRuntime.cpp'
 $ContinuationOwnerHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Continuation/AvidScriptSessionContinuations.h'
 $ContinuationOwnerSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Continuation/AvidScriptSessionContinuations.cpp'
+if ($ContinuationOwnerSource -match '\bcheck(?:f|Slow)?\s*\(\s*UnpackToken\s*\(') {
+    Add-Violation 'continuation token decoding must execute in Shipping; check macros cannot own its output assignments'
+}
 $ContinuationResultCodecHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Continuation/AvidScriptContinuationResultCodec.h'
 $ContinuationResultCodecSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Continuation/AvidScriptContinuationResultCodec.cpp'
 $AsyncObjectLoaderSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Continuation/AvidScriptAsyncObjectLoader.cpp'

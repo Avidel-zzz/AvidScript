@@ -802,7 +802,7 @@ int64 FAvidScriptSessionContinuations::ScheduleDelay(
 
 	uint32 SlotIndex = 0;
 	uint32 Generation = 0;
-	check(UnpackToken(Token, SlotIndex, Generation));
+	verify(UnpackToken(Token, SlotIndex, Generation));
 	FEntry& StoredEntry = Slots[SlotIndex].Entry.GetValue();
 	const TWeakPtr<FAvidScriptSessionContinuations> WeakOwner(AsShared());
 	FTimerDelegate Completion = FTimerDelegate::CreateLambda([WeakOwner, Token]()
@@ -882,7 +882,7 @@ int64 FAvidScriptSessionContinuations::ScheduleObjectLoad(
 
 	uint32 SlotIndex = 0;
 	uint32 Generation = 0;
-	check(UnpackToken(Token, SlotIndex, Generation));
+	verify(UnpackToken(Token, SlotIndex, Generation));
 	const TWeakPtr<FAvidScriptSessionContinuations> WeakOwner(AsShared());
 	TSharedPtr<IAvidScriptAsyncObjectLoadHandle> LoadHandle =
 		AsyncObjectLoader->RequestAsyncLoad(
@@ -1285,7 +1285,7 @@ bool FAvidScriptSessionContinuations::BeginLatentWithCompletion(
 
 	uint32 SlotIndex = 0;
 	uint32 Generation = 0;
-	check(UnpackToken(Token, SlotIndex, Generation));
+	verify(UnpackToken(Token, SlotIndex, Generation));
 	check(Slots.IsValidIndex(static_cast<int32>(SlotIndex)));
 	FSlot& Slot = Slots[SlotIndex];
 	check(Slot.Generation == Generation && Slot.Entry.IsSet());
@@ -1445,7 +1445,7 @@ int64 FAvidScriptSessionContinuations::BeginAsyncAction(
 
 	uint32 SlotIndex = 0;
 	uint32 Generation = 0;
-	check(UnpackToken(Token, SlotIndex, Generation));
+	verify(UnpackToken(Token, SlotIndex, Generation));
 	check(Slots.IsValidIndex(static_cast<int32>(SlotIndex)));
 	FEntry& Stored = Slots[SlotIndex].Entry.GetValue();
 #if WITH_EDITOR

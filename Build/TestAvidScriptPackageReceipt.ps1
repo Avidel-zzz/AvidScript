@@ -616,6 +616,46 @@ try {
             -SourcePath $WasmtimeDllPath `
             -ExpectedSha256 $ManagedDllSha256 `
             -Owner 'wasmtime:dll'
+        try {
+            . (Join-Path $PSScriptRoot 'ReleaseEngineering/AvidScriptWasmtimeNotices.ps1')
+            # Isolated UE projects may mount the plugin itself through a junction.
+            # Validate the ordinary notice tree at its physical plugin location;
+            # nested links remain forbidden by the shared notice validator.
+            $PluginDirectory = Get-Item -LiteralPath $ResolvedPluginRoot
+            $PhysicalPluginRoot = if (($PluginDirectory.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                $PluginDirectory.ResolveLinkTarget($true).FullName
+            } else { $ResolvedPluginRoot }
+            $NoticeRoot = Join-Path $PhysicalPluginRoot "$InstallRelativePath/notices"
+            $NoticeManifestPath = Join-Path $NoticeRoot 'manifest.json'
+            $null = Read-StrictJsonObject -Path $NoticeManifestPath -Label 'Wasmtime notices'
+            $NoticeManifestHash = Get-FileSha256 $NoticeManifestPath
+            $Notices = Test-AvidScriptWasmtimeNotices -BundleRoot $NoticeRoot
+            if ((Get-FileSha256 $NoticeManifestPath) -cne $NoticeManifestHash) {
+                throw 'Notice manifest changed during validation.'
+            }
+            foreach ($Library in @('wasmtime.dll', 'wasmtime.dll.lib', 'wasmtime.lib')) {
+                $LibraryPath = Resolve-ContainedSourceFile -Root $PhysicalPluginRoot `
+                    -RelativePath "$InstallRelativePath/lib/$Library" -Label "Wasmtime notice runtime $Library"
+                if ((Get-FileSha256 $LibraryPath) -cne [string]$Notices.runtime.$Library) {
+                    throw "Notice runtime identity differs: $Library"
+                }
+            }
+            Add-ExpectedDependency -Dependencies $ExpectedDependencies `
+                -TargetPath "$PluginTargetRoot/Binaries/Win64/wasmtime.notices/manifest.json" `
+                -Type NonUFS -SourcePath $NoticeManifestPath -ExpectedSha256 $NoticeManifestHash -Owner 'wasmtime:notices'
+            $NoticeReferences = @($Notices.packages | ForEach-Object notices) + @($Notices.rust.notices)
+            foreach ($Notice in @($NoticeReferences | Sort-Object path -Unique)) {
+                if ([IO.Path]::GetFileNameWithoutExtension($Notice.path) -cne $Notice.sha256) {
+                    throw 'Notice file name differs from its content identity.'
+                }
+                Add-ExpectedDependency -Dependencies $ExpectedDependencies `
+                    -TargetPath "$PluginTargetRoot/Binaries/Win64/wasmtime.notices/$($Notice.path)" `
+                    -Type NonUFS -SourcePath (Join-Path $NoticeRoot $Notice.path) `
+                    -ExpectedSha256 $Notice.sha256 -Owner 'wasmtime:notices'
+            }
+        } catch {
+            Throw-ReceiptValidationFailure 'WASMTIME_NOTICES_INVALID' "Wasmtime notice validation failed: $($_.Exception.Message)"
+        }
     }
     Add-ExpectedDependency `
         -Dependencies $ExpectedDependencies `

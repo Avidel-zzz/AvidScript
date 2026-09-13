@@ -8,8 +8,9 @@ $PluginRoot = [System.IO.Path]::GetFullPath(
     (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)))
 $ValidatorPath = Join-Path $PluginRoot 'Build/TestAvidScriptPackageReceipt.ps1'
 $PowerShellPath = (Get-Process -Id $PID).Path
-$FixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) (
-    "AvidScriptPackageReceiptContracts_$PID`_$([Guid]::NewGuid().ToString('N'))")
+# Content-addressed notice names must also fit native Windows path APIs.
+$FixtureBase = Join-Path ([IO.Path]::GetPathRoot([IO.Path]::GetTempPath())) 'tmp'
+$FixtureRoot = Join-Path $FixtureBase ('asrc-' + [Guid]::NewGuid().ToString('N').Substring(0, 12))
 $Utf8 = [System.Text.UTF8Encoding]::new($false)
 $Passed = 0
 $Total = 0
@@ -178,6 +179,29 @@ function New-PackageReceiptFixture {
     $WasmtimeDllPath = Join-Path $WasmtimeRoot $BinaryRelativePath
     Write-FixtureBytes -Path $WasmtimeDllPath -Bytes ([byte[]](0x4d, 0x5a, 0x46, 0x49, 0x58, 0x54, 0x55, 0x52, 0x45))
     Write-FixtureBytes -Path (Join-Path $WasmtimeRoot 'LICENSE') -Bytes ([System.Text.Encoding]::UTF8.GetBytes("fixture license`n"))
+    $NoticeFiles = @()
+    if (-not $Android) {
+        $RuntimeHashes = [ordered]@{ 'wasmtime.dll' = Get-FixtureSha256 $WasmtimeDllPath }
+        foreach ($Library in @('wasmtime.dll.lib', 'wasmtime.lib')) {
+            $LibraryPath = Join-Path $WasmtimeRoot "lib/$Library"
+            Write-FixtureBytes $LibraryPath ([Text.Encoding]::UTF8.GetBytes($Library))
+            $RuntimeHashes[$Library] = Get-FixtureSha256 $LibraryPath
+        }
+        $TextBytes = [Text.Encoding]::UTF8.GetBytes('fixture dependency notice')
+        $TextHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($TextBytes)).ToLowerInvariant()
+        $TextRelative = "texts/$TextHash.txt"
+        Write-FixtureBytes (Join-Path $WasmtimeRoot "notices/$TextRelative") $TextBytes
+        $Notice = [ordered]@{ origin_path = 'LICENSE'; path = $TextRelative; sha256 = $TextHash; length = $TextBytes.Length }
+        Write-FixtureJson (Join-Path $WasmtimeRoot 'notices/manifest.json') ([ordered]@{
+            schema_version = 1; scope = 'win64-wasmtime-build-notices'; package_count = 1; toolchain_id = 'fixture'
+            source_archive_sha256 = 'a' * 64; patch_sha256 = 'b' * 64; cargo_lock_sha256 = 'c' * 64; artifact_log_sha256 = 'd' * 64
+            runtime = $RuntimeHashes
+            packages = @([ordered]@{ id = 'wasmtime:fixture@1'; name = 'fixture'; version = '1'; license_expression = 'MIT'
+                source = [ordered]@{ kind = 'wasmtime'; identity = 'e' * 40; checksum = $null }; features = @(); notices = @($Notice) })
+            rust = [ordered]@{ toolchain = 'fixture'; notices = @($Notice) }
+        })
+        $NoticeFiles = @('manifest.json', $TextRelative)
+    }
     $MarkerName = if ($Android) { '.avidscript-wasmtime-managed.json' } else { '.avidscript-wasmtime-performance-managed.json' }
     Write-FixtureJson `
         -Path (Join-Path $WasmtimeRoot $MarkerName) `
@@ -218,6 +242,9 @@ function New-PackageReceiptFixture {
     $RuntimeDependencies.Add([ordered]@{ Path = "`$(PluginDir)/Content/AvidScriptGenerated/$TypeManifestRelative"; Type = 'UFS' })
     if (-not $Android) {
         $RuntimeDependencies.Add([ordered]@{ Path = '$(ProjectDir)/Plugins/AvidScript/Binaries/Win64/wasmtime.dll'; Type = 'NonUFS' })
+        foreach ($NoticeFile in $NoticeFiles) {
+            $RuntimeDependencies.Add([ordered]@{ Path = "`$(PluginDir)/Binaries/Win64/wasmtime.notices/$NoticeFile"; Type = 'NonUFS' })
+        }
     }
     $RuntimeDependencies.Add([ordered]@{ Path = "`$(PluginDir)/Binaries/$TargetPlatform/wasmtime.LICENSE.txt"; Type = 'NonUFS' })
     $RuntimeDependencies.Add([ordered]@{ Path = '$(EngineDir)/Content/Slate/Fonts/Roboto-Regular.ttf'; Type = 'UFS' })
@@ -239,6 +266,7 @@ function New-PackageReceiptFixture {
         TargetPlatform = $TargetPlatform
         PackageRoot = $PackageRoot
         WasmtimeDllPath = $WasmtimeDllPath
+        NoticeRoot = Join-Path $WasmtimeRoot 'notices'
     }
 }
 
@@ -327,9 +355,9 @@ try {
         $Result = Invoke-ReceiptValidator -Fixture $Fixture
         Assert-ContractCondition ($Result.ExitCode -eq 0) "Valid receipt was rejected: $($Result.Raw)"
         Assert-ContractCondition ([string]$Result.Summary.status -ceq 'ok') 'Success summary status is not ok.'
-        Assert-ContractCondition ([int]$Result.Summary.expected_dependency_count -eq 13) 'Unexpected exact dependency count.'
+        Assert-ContractCondition ([int]$Result.Summary.expected_dependency_count -eq 15) 'Unexpected exact dependency count.'
         Assert-ContractCondition ([int]$Result.Summary.ufs_dependency_count -eq 11) 'Unexpected UFS dependency count.'
-        Assert-ContractCondition ([int]$Result.Summary.non_ufs_dependency_count -eq 2) 'Unexpected NonUFS dependency count.'
+        Assert-ContractCondition ([int]$Result.Summary.non_ufs_dependency_count -eq 4) 'Unexpected NonUFS dependency count.'
     }
 
     Invoke-ContractCase 'configuration-specific Generated Type overlay' {
@@ -368,7 +396,7 @@ try {
         Write-FixtureJson -Path $Fixture.CatalogPath -Value $Catalog
         $Result = Invoke-ReceiptValidator -Fixture $Fixture
         Assert-ContractCondition ($Result.ExitCode -eq 0) "Foreign-platform module was rejected: $($Result.Raw)"
-        Assert-ContractCondition ([int]$Result.Summary.expected_dependency_count -eq 13) 'Foreign-platform module changed staged dependency count.'
+        Assert-ContractCondition ([int]$Result.Summary.expected_dependency_count -eq 15) 'Foreign-platform module changed staged dependency count.'
         Assert-ContractCondition ([int]$Result.Summary.module_count -eq 1) 'Foreign-platform module inflated the selected module count.'
     }
 
@@ -416,7 +444,7 @@ try {
         Write-FixtureReceipt -Fixture $Fixture -Receipt $Receipt
         $Result = Invoke-ReceiptValidator -Fixture $Fixture
         Assert-ContractCondition ($Result.ExitCode -eq 0) "Startup scenario dependency was rejected: $($Result.Raw)"
-        Assert-ContractCondition ([int]$Result.Summary.expected_dependency_count -eq 14) 'Startup scenario expected dependency count is invalid.'
+        Assert-ContractCondition ([int]$Result.Summary.expected_dependency_count -eq 16) 'Startup scenario expected dependency count is invalid.'
     }
 
     Invoke-ContractCase 'missing staged dependency rejected' {
@@ -502,6 +530,58 @@ try {
             -ErrorCode 'RECEIPT_CONFIGURATION_MISMATCH'
     }
 
+    Invoke-ContractCase 'missing notice dependency rejected' {
+        $Fixture = New-PackageReceiptFixture -Name 'MissingNoticeDependency'
+        $Receipt = Read-FixtureReceipt $Fixture
+        $Receipt.RuntimeDependencies = @($Receipt.RuntimeDependencies | Where-Object { $_.Path -notlike '*/wasmtime.notices/manifest.json' })
+        Write-FixtureReceipt $Fixture $Receipt
+        Assert-ValidatorRejected $Fixture -ErrorCode 'MISSING_DEPENDENCY'
+    }
+    Invoke-ContractCase 'extra notice dependency rejected' {
+        $Fixture = New-PackageReceiptFixture -Name 'ExtraNoticeDependency'
+        $Receipt = Read-FixtureReceipt $Fixture
+        $Receipt.RuntimeDependencies += [pscustomobject]@{ Path = '$(PluginDir)/Binaries/Win64/wasmtime.notices/extra.txt'; Type = 'NonUFS' }
+        Write-FixtureReceipt $Fixture $Receipt
+        Assert-ValidatorRejected $Fixture -ErrorCode 'EXTRA_DEPENDENCY'
+    }
+    Invoke-ContractCase 'notice dependency requires NonUFS' {
+        $Fixture = New-PackageReceiptFixture -Name 'NoticeWrongType'
+        $Receipt = Read-FixtureReceipt $Fixture
+        ($Receipt.RuntimeDependencies | Where-Object { $_.Path -like '*/wasmtime.notices/manifest.json' }).Type = 'UFS'
+        Write-FixtureReceipt $Fixture $Receipt
+        Assert-ValidatorRejected $Fixture -ErrorCode 'DEPENDENCY_TYPE_MISMATCH'
+    }
+    Invoke-ContractCase 'missing notice manifest rejected' {
+        $Fixture = New-PackageReceiptFixture -Name 'MissingNoticeManifest'
+        Rename-Item -LiteralPath (Join-Path $Fixture.NoticeRoot 'manifest.json') -NewName 'omitted.json'
+        Assert-ValidatorRejected $Fixture -ErrorCode 'WASMTIME_NOTICES_INVALID'
+    }
+    Invoke-ContractCase 'tampered notice source rejected' {
+        $Fixture = New-PackageReceiptFixture -Name 'NoticeContentDrift'
+        $Text = Get-ChildItem -LiteralPath (Join-Path $Fixture.NoticeRoot 'texts') -File | Select-Object -First 1
+        [IO.File]::AppendAllText($Text.FullName, 'drift')
+        Assert-ValidatorRejected $Fixture -ErrorCode 'WASMTIME_NOTICES_INVALID'
+    }
+    Invoke-ContractCase 'unreferenced notice source rejected' {
+        $Fixture = New-PackageReceiptFixture -Name 'ExtraNoticeSource'
+        Write-FixtureBytes (Join-Path $Fixture.NoticeRoot 'extra.txt') ([byte[]]@(1))
+        Assert-ValidatorRejected $Fixture -ErrorCode 'WASMTIME_NOTICES_INVALID'
+    }
+    Invoke-ContractCase 'notice runtime identity mismatch rejected' {
+        $Fixture = New-PackageReceiptFixture -Name 'NoticeRuntimeDrift'
+        $Path = Join-Path $Fixture.NoticeRoot 'manifest.json'
+        $Manifest = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $Manifest.runtime.'wasmtime.dll.lib' = 'f' * 64
+        Write-FixtureJson $Path $Manifest
+        Assert-ValidatorRejected $Fixture -ErrorCode 'WASMTIME_NOTICES_INVALID'
+    }
+    Invoke-ContractCase 'duplicate notice JSON key rejected' {
+        $Fixture = New-PackageReceiptFixture -Name 'DuplicateNoticeKey'
+        $Path = Join-Path $Fixture.NoticeRoot 'manifest.json'
+        $Json = [IO.File]::ReadAllText($Path)
+        [IO.File]::WriteAllText($Path, $Json.Insert($Json.IndexOf('{') + 1, '"schema_version":1,'))
+        Assert-ValidatorRejected $Fixture -ErrorCode 'WASMTIME_NOTICES_INVALID'
+    }
     if ($Failures.Count -gt 0) {
         throw "Package receipt contracts failed ($Passed/$Total): $($Failures -join ' | ')"
     }
@@ -526,12 +606,18 @@ try {
             'source_hash_drift',
             'missing_source',
             'wasmtime_marker_hash_drift',
+            'wasmtime_notice_inventory_hashes_nonufs',
             'shipping_development_mismatch'
         )
     } | ConvertTo-Json -Depth 4 -Compress
 }
 finally {
     if (Test-Path -LiteralPath $FixtureRoot -PathType Container) {
+        $ResolvedFixture = [IO.Path]::GetFullPath($FixtureRoot)
+        if (-not $ResolvedFixture.StartsWith([IO.Path]::GetFullPath($FixtureBase) + [IO.Path]::DirectorySeparatorChar,
+                [StringComparison]::OrdinalIgnoreCase) -or (Split-Path -Leaf $ResolvedFixture) -cnotmatch '^asrc-[0-9a-f]{12}$') {
+            throw 'Refusing cleanup outside the receipt fixture root.'
+        }
         Remove-Item -LiteralPath $FixtureRoot -Recurse -Force
     }
 }

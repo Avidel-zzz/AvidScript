@@ -75,6 +75,7 @@ fuel 配置、隔离工程样本路径和 correctness 探针的 gameplay 分帧�
 新 DLL 集成中发现的生成绑定事务目录过长与失败后测试越界已修复，覆盖深路径生成、替换和失败保护。同一提交的源码包两次发布身份、清单一致，全新目录 Plan/Install/Verify/NoOp 全部通过、零警告；此项为源码安装证据。
 Win64 游戏打包现要求并校验完整 Wasmtime 声明集合，实际 UBT 已复制 59 文件且逐项哈希一致；staging 行为合同 **27/27**，工具链合同 **70/70**。架构检查已区分声明哈希校验与静态链接，并增加 6 项合同及实际导入库链接断言。新 DLL 的 Shipping 构建与运行继续验证中。
 默认 ActorLifecycle 构建已修复显式 binding package 被忽略的问题，保留绑定身份、import 校验与缓存合同；不改变无包调用和自定义源码的生成引用流程。
+新 DLL 的 Shipping 编译、Cook、归档已成功；声明回执合同 **24/24**、实际依赖 **78/78**。包内 ActorLifecycle BeginPlay 仍有 Guest trap，运行 Gate 保持未完成，正在定位。
 
 ## 架构
 
