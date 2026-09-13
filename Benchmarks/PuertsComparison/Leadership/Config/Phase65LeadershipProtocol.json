@@ -45,7 +45,7 @@
     {
       "id": "wasmtime_toolchain",
       "relative_path": "Source/ThirdParty/Wasmtime/PerformanceToolchain/WasmtimePerformanceToolchain.lock.json",
-      "sha256": "c26959b37b10819320a5f069dd379ca51c86b80f3f75c730427c13e88892ac83"
+      "sha256": "412549435789ee68e8a56a4ac1981a90bb0b53fb71be45117b0e29e00c05677c"
     }
   ],
   "competitors": {
