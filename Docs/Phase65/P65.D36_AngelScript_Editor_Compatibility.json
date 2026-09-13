@@ -1,0 +1,172 @@
+{
+  "schema_version": 1,
+  "phase": "P65.D36",
+  "status": "isolated_editor_compatibility_verified",
+  "angelscript": {
+    "source_commit": "f347f57f05e992976b6c2be6612303b7e8099502",
+    "upstream_engine_version": "5.8.2",
+    "local_port_engine_version": "5.8.0",
+    "upstream_engine_binary_identity_claimed": false,
+    "hook_source_files": 107,
+    "plugin_source_files_verified": 403,
+    "enabled_plugins": [
+      "Angelscript"
+    ],
+    "additional_copied_plugins_not_exercised": [
+      "AngelscriptGAS",
+      "AngelscriptEnhancedInput"
+    ]
+  },
+  "build": {
+    "target": "As36BenchmarkEditor",
+    "platform": "Win64",
+    "configuration": "Development",
+    "isolated_source_engine": true,
+    "debug_info": "None",
+    "maximum_parallel_actions": 4,
+    "ubt_uht_build": "succeeded",
+    "native_build_exit_code": 0,
+    "final_incremental_actions": 4,
+    "final_build_seconds": 52.29,
+    "build_id": "beef47a6-f663-426a-acb5-f2c9e3f95bed",
+    "pch_recovery": {
+      "cause": "RTTI PCH producer killed for low memory during first20thread attempt; retained partial PCH later caused C1852",
+      "method": "rerun exact exported compiler action; no cleanup",
+      "before_bytes": 13500503,
+      "after_bytes": 2580021248,
+      "before_sha256": "f2d7f8c5c98e1a89e7a91a64b3ba855c88f37ceb9af9637c7a3b1c141a3329d3",
+      "after_sha256": "89f0f43563ea43481c9188c5e1c9b0c1b602838a9ec28a8976e8512fbfe4f0eb"
+    }
+  },
+  "runtime_smoke": {
+    "mode": "UE Editor AngelScript VM",
+    "exit_code": 0,
+    "completed": 2,
+    "passed": 2,
+    "failed": 0,
+    "tests": [
+      "As36Smoke_Test.Test_As36CompiledFunction",
+      "As36Smoke_Test.Test_As36NativeVectorBinding"
+    ],
+    "log_sha256": "5f53ec0112807cdd6c475caaf242743c3ca3073739f71c8c2ec80775cef26345",
+    "source_and_binary_hashes_stable": true,
+    "shared_hook_files_and_editor_executable_unchanged": true,
+    "initial_script_attempt": "failed: global function was not visible across script modules; fixed by putting it in a namespace",
+    "zero_test_success_accepted": false,
+    "parser_controls": 11
+  },
+  "artifacts": [
+    {
+      "name": "As36BenchmarkEditor-Cmd.exe",
+      "sha256": "c5f4ee1452b24cb4359ba19a87567967d44c24c364496797e81cf224d8141b0a"
+    },
+    {
+      "name": "As36BenchmarkEditor-AngelscriptCode.dll",
+      "sha256": "87be3088288ac6cebb433025bb3daa6cf53b414f9db82613ec52371fbf76f363"
+    },
+    {
+      "name": "As36BenchmarkEditor-AngelscriptEditor.dll",
+      "sha256": "8da988fc2929abe89f9ee6fad58167184bc8096a90dd63f258bc87064b19b6b1"
+    },
+    {
+      "name": "As36BenchmarkEditor-AngelscriptLoader.dll",
+      "sha256": "fa2b73dde04cf46b4196c263218cc2906e40b09d1805cf6cfa2b692f78ace7a7"
+    },
+    {
+      "name": "As36BenchmarkEditor-As36Benchmark.dll",
+      "sha256": "323c6e17abc39c35d17c9568a63406cd10edc8bf2bbc7581f51838089760da74"
+    },
+    {
+      "name": "As36BenchmarkEditor.modules",
+      "sha256": "c09fc334cabf2955e56b61ea9584278d768bfc951e812cf66cd46cbcb0b7f5b2"
+    },
+    {
+      "name": "As36BenchmarkEditor.target",
+      "sha256": "391c541bbb01df29b0c680a92f62c126bf81cc59b85f6c618fba9a7f6feb30ad"
+    },
+    {
+      "name": "As36Smoke_Test.as",
+      "sha256": "4ad036872843486a7e2d0a091f794befa397fea0ecd6a6ac42ab5e6953afac84"
+    },
+    {
+      "name": "As36Smoke.as",
+      "sha256": "fcc445de894d8c4fba3c7ec2aa01a6fa9c8c88e39c0e00b1871dcc0f4f4fb87f"
+    }
+  ],
+  "remaining": {
+    "full_angelscript_matrix_complete": false,
+    "formal_dependency_availability": "not_frozen",
+    "draft_correctness_cases": 264,
+    "draft_rejection_controls": 17,
+    "draft_compiled": false,
+    "draft_executed": false,
+    "draft_timed": false,
+    "packaged_native_code_verified": false,
+    "all_frameworks_rebuilt_on_same_engine": false,
+    "production_runtime_changed": false,
+    "formal_performance_gates": "16/18",
+    "manual_release_acceptance_complete": false,
+    "android_mac_acceptance": "deferred by user"
+  },
+  "external_evidence": {
+    "root_label": "as36-engine",
+    "files": [
+      {
+        "relative_path": "source-prebuild-proof.json",
+        "sha256": "25c34a6c10f997a80c23bb9c541d47e9598b4827d8bac74bfe4fc22c11e77d1a"
+      },
+      {
+        "relative_path": "plugin-source-verification.json",
+        "sha256": "f96ea89768fdcda4b6a1d6db4d989ece9d21947fd1173df37d6787a2f0593d50"
+      },
+      {
+        "relative_path": "action-boundary-proof.json",
+        "sha256": "9004fbdb736b0b0e7b71e59f57b9c63f226664984ee35b980904ce251ed0baaf"
+      },
+      {
+        "relative_path": "bounded-build-run.json",
+        "sha256": "880c481b5700c43ff7e2b7f2199d7ace300a776db5714704fd58af4d7cac4445"
+      },
+      {
+        "relative_path": "editor-bounded-ubt.log",
+        "sha256": "878c443f60fef2025a1849f29b90f7de640764be1daacd1d12aeadc92fe38f5b"
+      },
+      {
+        "relative_path": "pch-rebuild.json",
+        "sha256": "972e5777b812b7c906499d465185f71334fe239376c8bb02adbb8fccd64523bc"
+      },
+      {
+        "relative_path": "resumed-build-run.json",
+        "sha256": "3add1910da4b7d7d80d87c3f259553ce7c3518696bd0a335aa55af26980d0eb0"
+      },
+      {
+        "relative_path": "editor-resumed-ubt.log",
+        "sha256": "34eb32a73b1a71ad51fdacdfeecabbb3fc5bd0a1ac9f6d9507f35c8986cec286"
+      },
+      {
+        "relative_path": "puerts-input-verification.json",
+        "sha256": "c2d38654ccc3ad38a03eb6dc213ff814257b637fd28130b4bca72209c34a7757"
+      },
+      {
+        "relative_path": "smoke-parser-controls.json",
+        "sha256": "ce73117ac74862fdad6e8d274e0c7e7100515b1efa1179e19ae8a2cec9b94b24"
+      },
+      {
+        "relative_path": "smoke-20260913T174550Z-d4303f0b/result.json",
+        "sha256": "1538f142b59289a0d3437a24eea2fd628769bcb41dbd2241bb9b5a655eb6a47d"
+      },
+      {
+        "relative_path": "smoke-20260913T174550Z-d4303f0b/smoke.log",
+        "sha256": "260244532f31a02c19cba27da49928ebb1b8ee83e860304918497a658420a8c9"
+      },
+      {
+        "relative_path": "smoke-20260913T174725Z-21cd8f63/result.json",
+        "sha256": "3fa4bdef9c23c156a8aff30cd75aaad41b205a72cc1f16f860efa6c87831345c"
+      },
+      {
+        "relative_path": "smoke-20260913T174725Z-21cd8f63/smoke.log",
+        "sha256": "5f53ec0112807cdd6c475caaf242743c3ca3073739f71c8c2ec80775cef26345"
+      }
+    ]
+  }
+}
