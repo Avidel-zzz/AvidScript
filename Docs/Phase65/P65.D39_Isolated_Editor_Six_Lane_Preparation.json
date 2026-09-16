@@ -1,0 +1,127 @@
+{
+  "schema_version": 1,
+  "phase": "P65.D39",
+  "status": "isolated_editor_preparation_and_diagnostics_verified",
+  "source_commit": "8c032e9fd9f0afe23c3b18a15057aa7a90d8774c",
+  "adapter_commit": "4a747c02d892845daaab25b866596e35113b5561",
+  "production_payload_files_verified": 2063,
+  "native_build": {
+    "passed": true,
+    "actions": 5,
+    "boundary_paths": 15,
+    "run_sha256": "284e25ec97f85e05d76e3a351b65772e794f078762713dd698c7ee16178015ab",
+    "boundary_sha256": "f5bfce3d74110a0cba436d4b6f33037c6052876d0fdffb3b6ed1d76d719065e2"
+  },
+  "profiles": [
+    {
+      "lane": "semantic",
+      "passed": true,
+      "run_file": "d39-prepare-semantic-20260916T162843Z-552d0ec9.json",
+      "run_sha256": "9f09aee179ad6ec089544b9d381498ee324ac9dd2ad0e74a0b99529e36b4d627",
+      "log_sha256": "5f2220ccb74f9bbdb62c72ebb9fa96abe4cecb0b01bb099c631cc5e9ca56540d",
+      "artifact_sha256": [
+        "7866130ec417d8f0185129553eb86aa752bdb938e4721ece11c1522c60b2e835",
+        "d9d8e517451255a55489a79a7793896fb58a141240ef3df87e0a4fc713398c33"
+      ]
+    },
+    {
+      "lane": "generated",
+      "passed": true,
+      "run_file": "d39-prepare-generated-20260916T163342Z-3344e96c.json",
+      "run_sha256": "c5f15246e81ee1ed456f7593c2309dd56311463b50a10c75b57c8c8f98b5acba",
+      "log_sha256": "0c73dff86ee26f8c2499113112c35f0b74be3b374b9c3bf0b199bf6b41a53365",
+      "artifact_sha256": [
+        "47900565afbd39ece694b7f511d0590847a5063378deff6cf46602242f50abf8",
+        "c72a4f6aec04ec60cf18788b6a198e07ddbc845ddcae4202915a0a9aa544ee1c"
+      ]
+    },
+    {
+      "lane": "data",
+      "passed": true,
+      "run_file": "d39-prepare-data-20260916T163409Z-2c6a2c85.json",
+      "run_sha256": "f1dec23bfa8b61fbb9ed6ab896a31e380f69e5350cf3c53841541203d7e175f5",
+      "log_sha256": "4dc4e623a190c32ae7b449ecb727854cfb54d853e7c1770b11b19d67c4e2df24",
+      "artifact_sha256": [
+        "dd96e99641a9eaca3cc680258407c6916e38c7e9836db9423c9e8a99a5bf5c34",
+        "2911e2e2faa71e5f27f1fa843d1789bb1e10752d5e66b6e44c92c84032055591"
+      ]
+    }
+  ],
+  "suites": [
+    {
+      "suite": "micro",
+      "directory": "d39-micro-probe-20260916T163632Z-529c9666",
+      "passed": true,
+      "processes": 2,
+      "timed_samples": 300,
+      "sample_tuples_unique": 300,
+      "lane_count": 6,
+      "workload_count": 10,
+      "process_runs": 1,
+      "warmup_samples": 1,
+      "timed_samples_per_cell": 5,
+      "run_sha256": "1ecc5dbc3e86dc2058bb67850d22cd5ce4c913150fe6ea1fe86ad9645f700f28",
+      "calibration_result_sha256": "509445f8cfffb3e9698ccb38337292da61047c4979f76f34967946f99d5b97d2",
+      "timed_result_sha256": "f6d43912a28c35381ccf82b61ed2ed6058e41c5aa01dc4522f9c0cad8ac8393f",
+      "timed_request_sha256": "e5b8ef11f956d3a4483c235f8583eeed4c179123d0954dbe2982da2f77a8ee37",
+      "input_count": 79
+    },
+    {
+      "suite": "gameplay",
+      "directory": "d39-gameplay-probe-20260916T163729Z-fe8b8840",
+      "passed": true,
+      "processes": 2,
+      "timed_samples": 60,
+      "sample_tuples_unique": 60,
+      "lane_count": 6,
+      "workload_count": 2,
+      "process_runs": 1,
+      "warmup_samples": 1,
+      "timed_samples_per_cell": 5,
+      "run_sha256": "73ce3dc030fa5e35874a0892741e1525c14fdf2271d0e3c6ccbda5ebe1506111",
+      "calibration_result_sha256": "1f02288177e6edd7abd8815b763ce27aac3acdf295caa3446d61265c651883df",
+      "timed_result_sha256": "c511acd656b7885cf52d9d6320c530a3d8437baf86b3e0e67370746796992909",
+      "timed_request_sha256": "3ab48d2852da87d9534ebd8cae4a0ba21a09717987085e3375538162cdc94cb3",
+      "input_count": 79
+    }
+  ],
+  "diagnostic_runner_sha256": "501b40018435ea07dc7ff53c14a570fcf79050ad7b4483c623a6988038d5dfcb",
+  "preparation_runner_sha256": "2209b86dfbac26ca9398a66c32f2743927384b765d6ecb149ebd9ad760a51ff9",
+  "verifier_sha256": "04649d50e6b420fea208d2135ebaac987cd60e35fd3dc91e032f626056252e68",
+  "gameplay_evaluator": {
+    "validity_passed": true,
+    "overall_performance_passed": false,
+    "unmeasured_gates": [
+      "wasmtime_v8_geo_ratio",
+      "kernel_win_rate",
+      "semantic_vs_puerts_reflection",
+      "s1_scalar_ns",
+      "s1_vs_puerts_static",
+      "s1_property_ns",
+      "callback_ns",
+      "callback_vs_puerts",
+      "vector_vs_phase54_baseline",
+      "prepared_export_ratio",
+      "physical_reconstruction_error_ratio",
+      "typed_empty_net_ns",
+      "fused_fast_hit_ratio",
+      "fused_revalidate_per_callback",
+      "direct_effect_prepare_count",
+      "journal_slow_path_count"
+    ],
+    "sha256": "a7a266a983fbcaf1cae83f0aac3c8cd240f6898e3f313643e2c4d04526582605"
+  },
+  "micro_evaluator": "Existing evaluator requires gates absent from diagnostic micro profile; independent exact sample/checksum/call-count verification passed, no gate pass claimed.",
+  "semantic_preparation_note": "First wrapper expected a success log line only emitted for failures and returned false; native exit zero, unique ready/completion markers and successful report verified independently without overwriting original attempt.",
+  "formal_cross_framework_complete": false,
+  "packaged_angelscript_native_complete": false,
+  "production_performance_gates": "16/18 unchanged",
+  "d38_inputs_archived": 59,
+  "d38_archive_inventory_sha256": "b37c6507b33b2ed2901e49fff4183e250401df28e246553e75d2b49600e0bcc5",
+  "remaining": [
+    "Portable formal runner must validate physical installed payload and project-specific Editor/module identity instead of legacy junction/UnrealEditor assumptions.",
+    "Freeze final source/runtime/generated-binding identities and rerun both full six-lane suites and AngelScript five-process suites on that same configuration.",
+    "Packaged AngelScript generated native execution, remaining rejection/reload controls, performance optimization and Windows manual release acceptance."
+  ],
+  "mobile_acceptance": "Android/Mac deferred by user"
+}

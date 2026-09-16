@@ -196,6 +196,7 @@ Shipping 准备的 NuGet 环境隔离已通过行为合同与真实候选发布/
 [D36 AngelScript 隔离 Editor 兼容性](Docs/Phase65/P65.D36_AngelScript_Editor_Compatibility.md)已完成固定源码在独立 UE5.8.0 环境的编译，并实际通过 2/2 脚本执行与 FVector 调用测试；完整同语义矩阵和 packaged native code 尚未验证，正式性能结论保持未完成。
 [D37 AngelScript 同语义适配器](Docs/Phase65/P65.D37_AngelScript_Same_Semantics.md)进一步完成完整 harness 编译、264/264 正确性用例与 17/17 拒绝检查；可移植安装/验证入口通过 9/9、27/27 合同及实际 Editor 重跑。正式计时与 packaged generated native code 仍待完成，不改变生产性能门禁 16/18。
 [D38 AngelScript 计时宿主](Docs/Phase65/P65.D38_AngelScript_Timing_Host.md)已完成固定版本的 Native/Editor VM 每套 5 进程配对采样：327 个校准、600 个预热、3,600 个计时样本逐项验证通过，未删除异常值；验证器合同 34/34 通过。同一隔离引擎的其他框架矩阵与 packaged generated native code 仍待完成，不宣称完整跨框架领先。
+[D39 隔离 Editor 六路径准备](Docs/Phase65/P65.D39_Isolated_Editor_Six_Lane_Preparation.md)已生成三套 C# 产物、编译生成绑定模块，并实际通过 Native/Puerts/AvidScript 六路径诊断的 300 个 micro 与 60 个 gameplay 计时样本校验。正式 runner 的物理安装/独立 target 身份支持、最终配置下的双方正式重跑和 packaged AS 原生执行仍待完成；生产性能门禁保持 16/18。
 Shipping 人工视觉与移动设备证据仍作为独立发布候选 Gate，不以自动报告或阶段编号替代。
 
 P65.A 已完成：thin source 发布器与原子安装器当前通过 **24/24** 轻量合同及真实 commit-based 发布/安装
