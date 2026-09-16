@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "phase": "P65.D38",
-  "status": "timing_host_single_process_verified",
+  "status": "controlled_editor_timing_five_processes_verified",
   "source": {
     "base_commit": "8da84de382204059b7f9f4c194c5a8f910628783",
     "diagnostic_adapter_had_uncommitted_changes": true,
@@ -116,7 +116,7 @@
     "working_set_delta_is_allocation_count": false
   },
   "remaining": {
-    "five_process_measurements_verified": false,
+    "five_process_measurements_verified": true,
     "all_frameworks_same_engine_matrix_complete": false,
     "packaged_generated_native_verified": false,
     "formal_protocol_availability": "not_frozen",
@@ -211,6 +211,158 @@
       {
         "relative_path": "d38-clean-timing-contracts.log",
         "sha256": "d6edbd294d389561cee42e54e8acb34b95713792b7f1ab2a291a257d2b2ec157"
+      },
+      {
+        "sha256": "a3dfe0875a75f776974c7cadaa6174dd74daca0b96e5dd953deb52f7e3768d6e",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/run.json"
+      },
+      {
+        "sha256": "5e355dc77ee7200e82cc91b081179a96412bb57ae6584eb7674eee79fabca4d9",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/summary.json"
+      },
+      {
+        "sha256": "957b46a396a4090b54c656fe334195738953354c634a95dd3b733458d9e676f2",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/micro-calibration--1-8fd4deb65be4497e8562d420a13429f1.request.json"
+      },
+      {
+        "sha256": "b89c3485cd4e0ddfbe0106c57eefe14c98831489367ee1e1cd60594c93f6f200",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/micro-calibration--1-8fd4deb65be4497e8562d420a13429f1.result.json"
+      },
+      {
+        "sha256": "924ee510f79ad78687b99ec7af17c02c7366fce465fbbeb3ae2d8c4565954c12",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/micro-calibration--1-8fd4deb65be4497e8562d420a13429f1.log"
+      },
+      {
+        "sha256": "472ad0ddf15f0b758adb04297ff800ea4e869368f82fbd51960a0e23a08fccee",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/micro-measure-0-1f3268647815443e8344abb7055d1904.request.json"
+      },
+      {
+        "sha256": "390f5db076c1a7845df5fb8bcb9d0b0adecf4d082eada7fc86587466959d0656",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/micro-measure-0-1f3268647815443e8344abb7055d1904.result.json"
+      },
+      {
+        "sha256": "353736e2eab3495de77483102a45791a52d74309d09c2e7e4989eee6b8459ff6",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/micro-measure-0-1f3268647815443e8344abb7055d1904.log"
+      },
+      {
+        "sha256": "55bb0f449cd70349f5dd15a61d005572cb23b30053d9c5a9a5bcd7868f668f27",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/micro-measure-1-aa7a2fac638b4a6f863f34e4717ab074.request.json"
+      },
+      {
+        "sha256": "a56a53884adaf76a1e7965bfc0e4771cec62809fc6f20062dd1ed877b12c1779",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/micro-measure-1-aa7a2fac638b4a6f863f34e4717ab074.result.json"
+      },
+      {
+        "sha256": "e54c7c4ac7bb021b530651f0bec23f9b4d18ddeed6ed3d09973754908af8779a",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/micro-measure-1-aa7a2fac638b4a6f863f34e4717ab074.log"
+      },
+      {
+        "sha256": "1f789435099a437f5e089204a4f2d3bb0a457fd74b78b833bf888037b6f42e83",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/micro-measure-2-210ab9ba406c4807964195a72de16623.request.json"
+      },
+      {
+        "sha256": "ea6a8cda0eaae3a26e375ef532dabc0fe2380da3f79f25350a2ce7f044d24264",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/micro-measure-2-210ab9ba406c4807964195a72de16623.result.json"
+      },
+      {
+        "sha256": "6f9793c06dfc95526ced011655160c869b6b05de0fcd1016e35db117e65b3d84",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/micro-measure-2-210ab9ba406c4807964195a72de16623.log"
+      },
+      {
+        "sha256": "a5dbcd9df119eab012d8dabaf2c26272ccba4b1f8a1858a3e837586961dfb09d",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/micro-measure-3-4d0dd97783ef4dc39373491ccf4ca749.request.json"
+      },
+      {
+        "sha256": "32014db4ef40a547afda2625daf7d60c50d7f4565e02774b9e6b8bf7574f9e3a",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/micro-measure-3-4d0dd97783ef4dc39373491ccf4ca749.result.json"
+      },
+      {
+        "sha256": "8013e4d23eff443f3f770baff67f090bde779e320494c5ce1add33f8c4b059e2",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/micro-measure-3-4d0dd97783ef4dc39373491ccf4ca749.log"
+      },
+      {
+        "sha256": "bf67d9e8de063b6dcc6fb3b9494949ade19eaf771d223eb0d1b92310990c4f68",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/micro-measure-4-ac34c95d39dd4118a658ac7c9df83418.request.json"
+      },
+      {
+        "sha256": "85a9b2f9cf920423e1032eebd4e2903e1b48a17b9a65d1d9980fcb96e46e64bc",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/micro-measure-4-ac34c95d39dd4118a658ac7c9df83418.result.json"
+      },
+      {
+        "sha256": "5bb1c925ce3c99cb3c2b84c570ad17133071f10154b7f8429d15ed554d76229c",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/micro-measure-4-ac34c95d39dd4118a658ac7c9df83418.log"
+      },
+      {
+        "sha256": "738167c97e28fbaee2be9d41f0ab6f09d9d99d8543f4c51d628e11fce2ca6af5",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/gameplay-calibration--1-1f8a8e81c2004eb1889148b804b03b5f.request.json"
+      },
+      {
+        "sha256": "9800d1c4dbf6d4a22882996be728ad2794e5c87d8ecf637fb8e12ef131bda0bc",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/gameplay-calibration--1-1f8a8e81c2004eb1889148b804b03b5f.result.json"
+      },
+      {
+        "sha256": "74df22b4d016507ca38b22bbaa2adfcd28a653df5d96a691f68803891158269d",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/gameplay-calibration--1-1f8a8e81c2004eb1889148b804b03b5f.log"
+      },
+      {
+        "sha256": "400704b0693355359e4a096f9e6a3ad96c9ee8aecbd73a68468a3ebe42c397c3",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/gameplay-measure-0-5425dd7e4d1e4096903d34020b429643.request.json"
+      },
+      {
+        "sha256": "249d812426c31f4029c184cc9eb8243bfee15c3f174039cc58128c4dc07b35c5",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/gameplay-measure-0-5425dd7e4d1e4096903d34020b429643.result.json"
+      },
+      {
+        "sha256": "43a282d2da8f6d4f353e5495ae6bdbff76d0f141fe659f06db26ee0416577c9e",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/gameplay-measure-0-5425dd7e4d1e4096903d34020b429643.log"
+      },
+      {
+        "sha256": "fceb60967148d7916993dd8a52d455e3afe2df9141672473fbad06865df6bc4d",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/gameplay-measure-1-b9a24e6064e540f2a0cbbb412948a16d.request.json"
+      },
+      {
+        "sha256": "bfb9fd936cbfb26751e9a3bd8d5cbed1498bc4f600110fbadf9f2364cd49c976",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/gameplay-measure-1-b9a24e6064e540f2a0cbbb412948a16d.result.json"
+      },
+      {
+        "sha256": "9b90160cadf3fa49cb4bc32d832d58e1c6f3770fdf4d8f047d607753398d41e8",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/gameplay-measure-1-b9a24e6064e540f2a0cbbb412948a16d.log"
+      },
+      {
+        "sha256": "52edb3e26cad5787cbabb20383d9bc895a49a9847fcc6e7aee2db7be409d9b2f",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/gameplay-measure-2-f8a7b88b0adc4cc8a475211e2c3a73fe.request.json"
+      },
+      {
+        "sha256": "11cf92f052e6c27f04b6b4ab4e8e90eb86a94a4182e5f531a3a2d6df9893fdba",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/gameplay-measure-2-f8a7b88b0adc4cc8a475211e2c3a73fe.result.json"
+      },
+      {
+        "sha256": "8bdd66457e3e0a127f531c97d7dda8882c6434b062043a3d0860eacc430b6c6d",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/gameplay-measure-2-f8a7b88b0adc4cc8a475211e2c3a73fe.log"
+      },
+      {
+        "sha256": "e1189d0d0e7269e8ad80dbf27fadd732fc5a8d929d2b5c63ce01a8000bfe4cbe",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/gameplay-measure-3-add78b23ac6440f3a0ba11f62b7c5d28.request.json"
+      },
+      {
+        "sha256": "fa72450364021117e748866c7809db6044bc09e521a61d352bf4db9a06f8fe27",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/gameplay-measure-3-add78b23ac6440f3a0ba11f62b7c5d28.result.json"
+      },
+      {
+        "sha256": "069cd042fc5a570c19369390491b473f89de6e212dfff459a85f4b4ca52b52fd",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/gameplay-measure-3-add78b23ac6440f3a0ba11f62b7c5d28.log"
+      },
+      {
+        "sha256": "d0a350c00ff6c6a94590130a4df86915e807eb3b24bb467e9c54156a8dd1c8d0",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/gameplay-measure-4-18353f83f099448a80492990e0d1c7a0.request.json"
+      },
+      {
+        "sha256": "ad9833297759e18e26bdd63c5fe33c9cb3543f07dd8d73041b204bad4652a41a",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/gameplay-measure-4-18353f83f099448a80492990e0d1c7a0.result.json"
+      },
+      {
+        "sha256": "125829177797c51f151e8545be165181c263ca9710e4313528711b71e5dc9234",
+        "relative_path": "timing-20260916T161251Z-7bcfa303/gameplay-measure-4-18353f83f099448a80492990e0d1c7a0.log"
       }
     ]
   },
@@ -219,5 +371,648 @@
     "snapshot_tree": "5f5b827c18182112a86ba11e187f6fa69d962c04",
     "passed": true,
     "subsequent_change": "D38 evidence JSON only"
+  },
+  "five_process_run": {
+    "classification": "controlled_editor_vm_timing_no_cross_framework_claim",
+    "source_commit": "4a747c02d892845daaab25b866596e35113b5561",
+    "adapter_source_clean": true,
+    "execution_mode": "editor_vm",
+    "process_runs_per_suite": 5,
+    "processes": 12,
+    "calibration_samples": 327,
+    "warmup_samples": 600,
+    "timed_samples": 3600,
+    "all_samples_verified": true,
+    "outliers_removed": false,
+    "all_runtime_inputs_stable": true,
+    "timed_samples_below_calibration_threshold": 0.0,
+    "statistics": [
+      {
+        "workload": "callback_empty",
+        "lane": "native_cpp",
+        "unit": "ns_per_iteration",
+        "process_count": 5,
+        "median_process_p50": 1.0295166015625,
+        "maximum_process_p95": 1.18140869140625,
+        "samples_below_calibration_threshold": 0.0
+      },
+      {
+        "workload": "callback_empty",
+        "lane": "angelscript_editor_vm",
+        "unit": "ns_per_iteration",
+        "process_count": 5,
+        "median_process_p50": 375.7125,
+        "maximum_process_p95": 400.06875,
+        "samples_below_calibration_threshold": 0.0
+      },
+      {
+        "workload": "callback_tick",
+        "lane": "native_cpp",
+        "unit": "ns_per_iteration",
+        "process_count": 5,
+        "median_process_p50": 1.0462158203125,
+        "maximum_process_p95": 1.19896240234375,
+        "samples_below_calibration_threshold": 0.0
+      },
+      {
+        "workload": "callback_tick",
+        "lane": "angelscript_editor_vm",
+        "unit": "ns_per_iteration",
+        "process_count": 5,
+        "median_process_p50": 364.925,
+        "maximum_process_p95": 388.3062499999999,
+        "samples_below_calibration_threshold": 0.0
+      },
+      {
+        "workload": "pure_integer",
+        "lane": "native_cpp",
+        "unit": "ns_per_iteration",
+        "process_count": 5,
+        "median_process_p50": 0.9666259765625,
+        "maximum_process_p95": 1.00609130859375,
+        "samples_below_calibration_threshold": 0.0
+      },
+      {
+        "workload": "pure_integer",
+        "lane": "angelscript_editor_vm",
+        "unit": "ns_per_iteration",
+        "process_count": 5,
+        "median_process_p50": 17.185742187499997,
+        "maximum_process_p95": 17.765625,
+        "samples_below_calibration_threshold": 0.0
+      },
+      {
+        "workload": "scalar_noop",
+        "lane": "native_cpp",
+        "unit": "ns_per_iteration",
+        "process_count": 5,
+        "median_process_p50": 1.7447021484374998,
+        "maximum_process_p95": 1.81884765625,
+        "samples_below_calibration_threshold": 0.0
+      },
+      {
+        "workload": "scalar_noop",
+        "lane": "angelscript_editor_vm",
+        "unit": "ns_per_iteration",
+        "process_count": 5,
+        "median_process_p50": 22.408984375,
+        "maximum_process_p95": 23.1046875,
+        "samples_below_calibration_threshold": 0.0
+      },
+      {
+        "workload": "scalar_add_int32",
+        "lane": "native_cpp",
+        "unit": "ns_per_iteration",
+        "process_count": 5,
+        "median_process_p50": 1.7469482421875,
+        "maximum_process_p95": 1.8339111328125,
+        "samples_below_calibration_threshold": 0.0
+      },
+      {
+        "workload": "scalar_add_int32",
+        "lane": "angelscript_editor_vm",
+        "unit": "ns_per_iteration",
+        "process_count": 5,
+        "median_process_p50": 23.030859375,
+        "maximum_process_p95": 25.241796875,
+        "samples_below_calibration_threshold": 0.0
+      },
+      {
+        "workload": "property_get_set",
+        "lane": "native_cpp",
+        "unit": "ns_per_iteration",
+        "process_count": 5,
+        "median_process_p50": 0.96968994140625,
+        "maximum_process_p95": 1.00181884765625,
+        "samples_below_calibration_threshold": 0.0
+      },
+      {
+        "workload": "property_get_set",
+        "lane": "angelscript_editor_vm",
+        "unit": "ns_per_iteration",
+        "process_count": 5,
+        "median_process_p50": 21.431640625,
+        "maximum_process_p95": 23.269140624999995,
+        "samples_below_calibration_threshold": 0.0
+      },
+      {
+        "workload": "vector_value",
+        "lane": "native_cpp",
+        "unit": "ns_per_iteration",
+        "process_count": 5,
+        "median_process_p50": 1.345654296875,
+        "maximum_process_p95": 1.4127197265625,
+        "samples_below_calibration_threshold": 0.0
+      },
+      {
+        "workload": "vector_value",
+        "lane": "angelscript_editor_vm",
+        "unit": "ns_per_iteration",
+        "process_count": 5,
+        "median_process_p50": 86.73437499999999,
+        "maximum_process_p95": 93.81093749999998,
+        "samples_below_calibration_threshold": 0.0
+      },
+      {
+        "workload": "vector_ref_out",
+        "lane": "native_cpp",
+        "unit": "ns_per_iteration",
+        "process_count": 5,
+        "median_process_p50": 1.8903564453125,
+        "maximum_process_p95": 1.9474853515625,
+        "samples_below_calibration_threshold": 0.0
+      },
+      {
+        "workload": "vector_ref_out",
+        "lane": "angelscript_editor_vm",
+        "unit": "ns_per_iteration",
+        "process_count": 5,
+        "median_process_p50": 79.78593749999999,
+        "maximum_process_p95": 84.303125,
+        "samples_below_calibration_threshold": 0.0
+      },
+      {
+        "workload": "object_roundtrip",
+        "lane": "native_cpp",
+        "unit": "ns_per_iteration",
+        "process_count": 5,
+        "median_process_p50": 1.7496337890624998,
+        "maximum_process_p95": 1.8009521484375,
+        "samples_below_calibration_threshold": 0.0
+      },
+      {
+        "workload": "object_roundtrip",
+        "lane": "angelscript_editor_vm",
+        "unit": "ns_per_iteration",
+        "process_count": 5,
+        "median_process_p50": 27.97890625,
+        "maximum_process_p95": 29.40078125,
+        "samples_below_calibration_threshold": 0.0
+      },
+      {
+        "workload": "batch_scalar",
+        "lane": "native_cpp",
+        "unit": "ns_per_iteration",
+        "process_count": 5,
+        "median_process_p50": 7.5684570312499995,
+        "maximum_process_p95": 7.82509765625,
+        "samples_below_calibration_threshold": 0.0
+      },
+      {
+        "workload": "batch_scalar",
+        "lane": "angelscript_editor_vm",
+        "unit": "ns_per_iteration",
+        "process_count": 5,
+        "median_process_p50": 24.70859375,
+        "maximum_process_p95": 26.183984375,
+        "samples_below_calibration_threshold": 0.0
+      },
+      {
+        "workload": "gameplay_frame_small",
+        "lane": "native_cpp",
+        "unit": "ns_per_frame",
+        "process_count": 5,
+        "median_process_p50": 51.71508789062499,
+        "maximum_process_p95": 55.29937744140625,
+        "samples_below_calibration_threshold": 0.0
+      },
+      {
+        "workload": "gameplay_frame_small",
+        "lane": "angelscript_editor_vm",
+        "unit": "ns_per_frame",
+        "process_count": 5,
+        "median_process_p50": 5331.054687499999,
+        "maximum_process_p95": 5596.777343749999,
+        "samples_below_calibration_threshold": 0.0
+      },
+      {
+        "workload": "gameplay_frame_dense",
+        "lane": "native_cpp",
+        "unit": "ns_per_frame",
+        "process_count": 5,
+        "median_process_p50": 7737.597656249999,
+        "maximum_process_p95": 8209.5703125,
+        "samples_below_calibration_threshold": 0.0
+      },
+      {
+        "workload": "gameplay_frame_dense",
+        "lane": "angelscript_editor_vm",
+        "unit": "ns_per_frame",
+        "process_count": 5,
+        "median_process_p50": 848100.0,
+        "maximum_process_p95": 925187.5,
+        "samples_below_calibration_threshold": 0.0
+      }
+    ],
+    "native_reference_ratios": [
+      {
+        "workload": "callback_empty",
+        "numerator": "angelscript_editor_vm",
+        "denominator": "native_cpp",
+        "median_paired_p50_ratio": 364.9406910289549,
+        "maximum_paired_p95_ratio": 354.158357771261,
+        "paired_processes": [
+          {
+            "process_run": 0,
+            "p50_ratio": 362.37058277414127,
+            "p95_ratio": 353.62366968425704
+          },
+          {
+            "process_run": 1,
+            "p50_ratio": 368.575208513086,
+            "p95_ratio": 354.158357771261
+          },
+          {
+            "process_run": 2,
+            "p50_ratio": 357.71018764578236,
+            "p95_ratio": 338.63704652772753
+          },
+          {
+            "process_run": 3,
+            "p50_ratio": 380.73121499058107,
+            "p95_ratio": 351.7653229032401
+          },
+          {
+            "process_run": 4,
+            "p50_ratio": 364.9406910289549,
+            "p95_ratio": 348.11806478314855
+          }
+        ]
+      },
+      {
+        "workload": "callback_tick",
+        "numerator": "angelscript_editor_vm",
+        "denominator": "native_cpp",
+        "median_paired_p50_ratio": 351.81555550369865,
+        "maximum_paired_p95_ratio": 337.6755305032748,
+        "paired_processes": [
+          {
+            "process_run": 0,
+            "p50_ratio": 351.81555550369865,
+            "p95_ratio": 325.80561267942085
+          },
+          {
+            "process_run": 1,
+            "p50_ratio": 354.77375866324894,
+            "p95_ratio": 334.95219787261306
+          },
+          {
+            "process_run": 2,
+            "p50_ratio": 342.37062546325336,
+            "p95_ratio": 320.6574695323715
+          },
+          {
+            "process_run": 3,
+            "p50_ratio": 354.08462975968007,
+            "p95_ratio": 336.74662688400866
+          },
+          {
+            "process_run": 4,
+            "p50_ratio": 340.59358959735374,
+            "p95_ratio": 337.6755305032748
+          }
+        ]
+      },
+      {
+        "workload": "pure_integer",
+        "numerator": "angelscript_editor_vm",
+        "denominator": "native_cpp",
+        "median_paired_p50_ratio": 17.717083043450764,
+        "maximum_paired_p95_ratio": 18.069578604951456,
+        "paired_processes": [
+          {
+            "process_run": 0,
+            "p50_ratio": 17.778113131618,
+            "p95_ratio": 17.7442405985333
+          },
+          {
+            "process_run": 1,
+            "p50_ratio": 17.679593826363302,
+            "p95_ratio": 17.63350837091493
+          },
+          {
+            "process_run": 2,
+            "p50_ratio": 17.77910236657995,
+            "p95_ratio": 17.781092193152492
+          },
+          {
+            "process_run": 3,
+            "p50_ratio": 17.717083043450764,
+            "p95_ratio": 18.069578604951456
+          },
+          {
+            "process_run": 4,
+            "p50_ratio": 17.61465146701551,
+            "p95_ratio": 17.591865953238937
+          }
+        ]
+      },
+      {
+        "workload": "scalar_noop",
+        "numerator": "angelscript_editor_vm",
+        "denominator": "native_cpp",
+        "median_paired_p50_ratio": 12.84401718371745,
+        "maximum_paired_p95_ratio": 12.929231105524892,
+        "paired_processes": [
+          {
+            "process_run": 0,
+            "p50_ratio": 12.84401718371745,
+            "p95_ratio": 12.640644295302014
+          },
+          {
+            "process_run": 1,
+            "p50_ratio": 12.826243873667655,
+            "p95_ratio": 12.637572293665373
+          },
+          {
+            "process_run": 2,
+            "p50_ratio": 12.792330309490964,
+            "p95_ratio": 12.929231105524892
+          },
+          {
+            "process_run": 3,
+            "p50_ratio": 12.852797286120806,
+            "p95_ratio": 12.75836512859927
+          },
+          {
+            "process_run": 4,
+            "p50_ratio": 12.87702867047821,
+            "p95_ratio": 12.692694198887608
+          }
+        ]
+      },
+      {
+        "workload": "scalar_add_int32",
+        "numerator": "angelscript_editor_vm",
+        "denominator": "native_cpp",
+        "median_paired_p50_ratio": 13.20386406282577,
+        "maximum_paired_p95_ratio": 13.839019218745753,
+        "paired_processes": [
+          {
+            "process_run": 0,
+            "p50_ratio": 13.18348123820837,
+            "p95_ratio": 13.839019218745753
+          },
+          {
+            "process_run": 1,
+            "p50_ratio": 13.2179765827666,
+            "p95_ratio": 13.301752516767063
+          },
+          {
+            "process_run": 2,
+            "p50_ratio": 13.20386406282577,
+            "p95_ratio": 13.071955522292315
+          },
+          {
+            "process_run": 3,
+            "p50_ratio": 13.18866233475241,
+            "p95_ratio": 13.266178366663924
+          },
+          {
+            "process_run": 4,
+            "p50_ratio": 13.237846810528813,
+            "p95_ratio": 13.763914959330112
+          }
+        ]
+      },
+      {
+        "workload": "property_get_set",
+        "numerator": "angelscript_editor_vm",
+        "denominator": "native_cpp",
+        "median_paired_p50_ratio": 22.090138151438133,
+        "maximum_paired_p95_ratio": 23.5081825693391,
+        "paired_processes": [
+          {
+            "process_run": 0,
+            "p50_ratio": 22.12651535178821,
+            "p95_ratio": 22.13742886862877
+          },
+          {
+            "process_run": 1,
+            "p50_ratio": 22.02020202020202,
+            "p95_ratio": 21.949397323352336
+          },
+          {
+            "process_run": 2,
+            "p50_ratio": 22.090138151438133,
+            "p95_ratio": 23.5081825693391
+          },
+          {
+            "process_run": 3,
+            "p50_ratio": 22.13576792068175,
+            "p95_ratio": 21.499567437156536
+          },
+          {
+            "process_run": 4,
+            "p50_ratio": 21.89005509710553,
+            "p95_ratio": 22.246197286845497
+          }
+        ]
+      },
+      {
+        "workload": "vector_value",
+        "numerator": "angelscript_editor_vm",
+        "denominator": "native_cpp",
+        "median_paired_p50_ratio": 64.47038276815601,
+        "maximum_paired_p95_ratio": 66.92728127775939,
+        "paired_processes": [
+          {
+            "process_run": 0,
+            "p50_ratio": 64.42820202166327,
+            "p95_ratio": 63.83409660416487
+          },
+          {
+            "process_run": 1,
+            "p50_ratio": 64.47038276815601,
+            "p95_ratio": 64.54518773041268
+          },
+          {
+            "process_run": 2,
+            "p50_ratio": 64.78609528647627,
+            "p95_ratio": 66.92728127775939
+          },
+          {
+            "process_run": 3,
+            "p50_ratio": 64.705465827174,
+            "p95_ratio": 66.86760543193951
+          },
+          {
+            "process_run": 4,
+            "p50_ratio": 64.12823336161303,
+            "p95_ratio": 65.63414250511195
+          }
+        ]
+      },
+      {
+        "workload": "vector_ref_out",
+        "numerator": "angelscript_editor_vm",
+        "denominator": "native_cpp",
+        "median_paired_p50_ratio": 42.091299981976874,
+        "maximum_paired_p95_ratio": 43.76053125158412,
+        "paired_processes": [
+          {
+            "process_run": 0,
+            "p50_ratio": 42.07924225563521,
+            "p95_ratio": 41.962108958685974
+          },
+          {
+            "process_run": 1,
+            "p50_ratio": 41.9862455557574,
+            "p95_ratio": 40.96869711291353
+          },
+          {
+            "process_run": 2,
+            "p50_ratio": 42.20682173345904,
+            "p95_ratio": 43.76053125158412
+          },
+          {
+            "process_run": 3,
+            "p50_ratio": 42.21072984609039,
+            "p95_ratio": 43.24803582950621
+          },
+          {
+            "process_run": 4,
+            "p50_ratio": 42.091299981976874,
+            "p95_ratio": 42.80871233495091
+          }
+        ]
+      },
+      {
+        "workload": "object_roundtrip",
+        "numerator": "angelscript_editor_vm",
+        "denominator": "native_cpp",
+        "median_paired_p50_ratio": 15.991292820763276,
+        "maximum_paired_p95_ratio": 16.325131834017924,
+        "paired_processes": [
+          {
+            "process_run": 0,
+            "p50_ratio": 15.85772762473725,
+            "p95_ratio": 16.1983039791259
+          },
+          {
+            "process_run": 1,
+            "p50_ratio": 15.986070350347541,
+            "p95_ratio": 15.931316345283484
+          },
+          {
+            "process_run": 2,
+            "p50_ratio": 16.067648084839185,
+            "p95_ratio": 16.325131834017924
+          },
+          {
+            "process_run": 3,
+            "p50_ratio": 16.02999566294053,
+            "p95_ratio": 15.995854300481392
+          },
+          {
+            "process_run": 4,
+            "p50_ratio": 15.991292820763276,
+            "p95_ratio": 16.259109311740893
+          }
+        ]
+      },
+      {
+        "workload": "batch_scalar",
+        "numerator": "angelscript_editor_vm",
+        "denominator": "native_cpp",
+        "median_paired_p50_ratio": 3.2638002059732236,
+        "maximum_paired_p95_ratio": 3.346154326149085,
+        "paired_processes": [
+          {
+            "process_run": 0,
+            "p50_ratio": 3.2580720213013468,
+            "p95_ratio": 3.256226457879288
+          },
+          {
+            "process_run": 1,
+            "p50_ratio": 3.2713775874375446,
+            "p95_ratio": 3.284665796245358
+          },
+          {
+            "process_run": 2,
+            "p50_ratio": 3.264680455736055,
+            "p95_ratio": 3.346154326149085
+          },
+          {
+            "process_run": 3,
+            "p50_ratio": 3.2638002059732236,
+            "p95_ratio": 3.2535557747780373
+          },
+          {
+            "process_run": 4,
+            "p50_ratio": 3.241829396258285,
+            "p95_ratio": 3.3127499999999994
+          }
+        ]
+      },
+      {
+        "workload": "gameplay_frame_small",
+        "numerator": "angelscript_editor_vm",
+        "denominator": "native_cpp",
+        "median_paired_p50_ratio": 103.27318183847493,
+        "maximum_paired_p95_ratio": 105.54868085474274,
+        "paired_processes": [
+          {
+            "process_run": 0,
+            "p50_ratio": 103.0850938274519,
+            "p95_ratio": 105.54868085474274
+          },
+          {
+            "process_run": 1,
+            "p50_ratio": 103.27318183847493,
+            "p95_ratio": 103.28360108159696
+          },
+          {
+            "process_run": 2,
+            "p50_ratio": 103.16743125883609,
+            "p95_ratio": 101.20868629452828
+          },
+          {
+            "process_run": 3,
+            "p50_ratio": 103.49845980302834,
+            "p95_ratio": 103.62663573217141
+          },
+          {
+            "process_run": 4,
+            "p50_ratio": 103.31587966205244,
+            "p95_ratio": 105.02822486587358
+          }
+        ]
+      },
+      {
+        "workload": "gameplay_frame_dense",
+        "numerator": "angelscript_editor_vm",
+        "denominator": "native_cpp",
+        "median_paired_p50_ratio": 109.67234970198717,
+        "maximum_paired_p95_ratio": 112.69621487878571,
+        "paired_processes": [
+          {
+            "process_run": 0,
+            "p50_ratio": 109.67234970198717,
+            "p95_ratio": 109.577216087653
+          },
+          {
+            "process_run": 1,
+            "p50_ratio": 109.29278027585511,
+            "p95_ratio": 108.90430161264764
+          },
+          {
+            "process_run": 2,
+            "p50_ratio": 109.91044482673877,
+            "p95_ratio": 112.69621487878571
+          },
+          {
+            "process_run": 3,
+            "p50_ratio": 108.89523304683655,
+            "p95_ratio": 106.11616373875768
+          },
+          {
+            "process_run": 4,
+            "p50_ratio": 109.78224430202131,
+            "p95_ratio": 109.00052402598193
+          }
+        ]
+      }
+    ]
   }
 }
