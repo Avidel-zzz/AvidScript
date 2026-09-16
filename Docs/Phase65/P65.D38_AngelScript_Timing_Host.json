@@ -1,0 +1,223 @@
+{
+  "schema_version": 1,
+  "phase": "P65.D38",
+  "status": "timing_host_single_process_verified",
+  "source": {
+    "base_commit": "8da84de382204059b7f9f4c194c5a8f910628783",
+    "diagnostic_adapter_had_uncommitted_changes": true,
+    "inputs": [
+      {
+        "path": "Native/As36FrozenNativeOracle.inl",
+        "sha256": "bf5feca77abcb80c57046d8b75f7198b1c749295d28262202788baaa5a044275"
+      },
+      {
+        "path": "Native/As36LeadershipBridge.cpp",
+        "sha256": "413828558bb1cfb7e81802342a3e8a022829ee9114443f46f8b1eb7f40955291"
+      },
+      {
+        "path": "Native/As36LeadershipBridge.h",
+        "sha256": "dc32f0f624d660b5641cf11c955b3a7c887ab6d2084db8ce7922dcb8d733cac8"
+      },
+      {
+        "path": "Native/As36LeadershipValidateCommandlet.cpp",
+        "sha256": "4b0fcfb4605724a08a1acd26fb4eea4d1dd93ac1e7f071e361369e6be6143a4d"
+      },
+      {
+        "path": "Native/As36LeadershipValidateCommandlet.h",
+        "sha256": "049df15298d5352d823045b0cf3fed4691a3b5cc071b54a9084575bfe67d7d3c"
+      },
+      {
+        "path": "Native/As38LeadershipTimingCommandlet.cpp",
+        "sha256": "977acd1dc93be22692393d516de527986185fd208d13a8795c3e69012337efdc"
+      },
+      {
+        "path": "Native/As38LeadershipTimingCommandlet.h",
+        "sha256": "c2e3f5f10ebde1edfb5242e9457fa9162f3ec888ccaf6dabefbd9602507f6e22"
+      },
+      {
+        "path": "Scripts/AngelScriptTiming.psm1",
+        "sha256": "114410e0821592d3a99ffaa5ef29ce4238c9d07fdf2b1166825834f5360a0398"
+      },
+      {
+        "path": "Scripts/AngelScriptValidation.psm1",
+        "sha256": "89e310921dbcba2f0837a926f8b53d3d234bcc737cde9ae33f58c04335f5ae0c"
+      },
+      {
+        "path": "Scripts/Install-AngelScriptAdapter.ps1",
+        "sha256": "293104ac742b6b81bcf78abfe049db4e56c8e046f4ad44844c6dbc4a71ce9a44"
+      },
+      {
+        "path": "Scripts/Invoke-AngelScriptTiming.ps1",
+        "sha256": "ec19dc21f47c460e712305c286de72cd91b9960271aaded4ca40c235370751f9"
+      },
+      {
+        "path": "Scripts/Invoke-AngelScriptValidation.ps1",
+        "sha256": "7bdb3a6ece78a4dcadd7516afd78275db41fd79efc173e85b40606acd5b0ee7b"
+      },
+      {
+        "path": "Scripts/Summarize-AngelScriptTiming.ps1",
+        "sha256": "53ea07a2a3c8d3ac26fb9ed4216431d65fbd1294b929aed12e3da44a5d60d4ce"
+      },
+      {
+        "path": "Scripts/Test-AngelScriptInstallContracts.ps1",
+        "sha256": "f22b08e4fa94aa85cd6eaab61faeba0d77b904e76493b5dbb27061768b3f758d"
+      },
+      {
+        "path": "Scripts/Test-AngelScriptTimingContracts.ps1",
+        "sha256": "93e40046fb78b37c7f5d4c90fd1da91b4ddd5a9b06351287f4ca9f1bed0c1c85"
+      },
+      {
+        "path": "Scripts/Test-AngelScriptValidationContracts.ps1",
+        "sha256": "0bd289d140b0cc5e40b98b632d5fca1e14af8c4204a416170fbd9fc2851ef0f1"
+      }
+    ]
+  },
+  "build": {
+    "exit_code": 0,
+    "isolated_engine": "UE5.8.0 AS port",
+    "angelscript_source_commit": "f347f57f05e992976b6c2be6612303b7e8099502",
+    "target": "As36BenchmarkEditor",
+    "platform": "Win64",
+    "configuration": "Development",
+    "action_boundary_verified": true
+  },
+  "first_run": {
+    "classification": "single_process_diagnostic",
+    "execution_mode": "editor_vm",
+    "process_runs_per_suite": 1,
+    "calibration_processes": 2,
+    "measurement_processes": 2,
+    "calibration_samples": 327,
+    "warmup_samples": 120,
+    "timed_samples": 720,
+    "all_samples_verified": true,
+    "outliers_removed": false,
+    "static_jit_transpiled_code_loaded": false,
+    "validation_contracts": "34/34",
+    "installation_contracts": "9/9",
+    "existing_correctness_regression": "264/264 cases and 17/17 rejections",
+    "process_affinity": "fffff",
+    "process_priority": "Normal"
+  },
+  "protocol": {
+    "minimum_sample_milliseconds": 5,
+    "calibration_confirmation_samples": 3,
+    "warmups_per_workload_lane": 5,
+    "timed_per_workload_lane": 30,
+    "seed": 1397313,
+    "lane_order": "alternating by process/workload/sample index",
+    "supported_process_runs": [
+      1,
+      5
+    ],
+    "percentile": "nearest_rank",
+    "p50_aggregate": "median of process P50",
+    "p95_aggregate": "maximum process P95, maximum paired process ratio",
+    "working_set_delta_is_allocation_count": false
+  },
+  "remaining": {
+    "five_process_measurements_verified": false,
+    "all_frameworks_same_engine_matrix_complete": false,
+    "packaged_generated_native_verified": false,
+    "formal_protocol_availability": "not_frozen",
+    "production_performance_gates": "16/18",
+    "performance_leadership_claimed": false,
+    "manual_release_acceptance_complete": false,
+    "android_mac_acceptance": "deferred by user"
+  },
+  "external_evidence": {
+    "root_label": "as36-engine",
+    "files": [
+      {
+        "relative_path": "d38-timing-build-run.json",
+        "sha256": "7d7ad38516b8994ebbf1aaf3ed1501bd033cebf8391082f938dd57460dff8df5"
+      },
+      {
+        "relative_path": "d38-timing-build-ubt.log",
+        "sha256": "4312ccdc99874b015c444eef7364a8e5866e6f79bf136ae4e3c7f800d784ead0"
+      },
+      {
+        "relative_path": "d38-timing-boundary.json",
+        "sha256": "2e0d040b0a7c32031725053a07cefc62ed3c40c1823273f1c0adaede813a64d5"
+      },
+      {
+        "relative_path": "timing-20260916T160149Z-fcd0b0f0/run.json",
+        "sha256": "bb8b7d48d2668020f39f0d4a87c3ff2f7e42cd8587d5a03708c61d0ea6c67d8b"
+      },
+      {
+        "relative_path": "timing-20260916T160149Z-fcd0b0f0/summary.json",
+        "sha256": "590cb8d8cd6a29da0e3b6946ec7b948c0d58314a8b584076fa7ce5f9e30aef42"
+      },
+      {
+        "relative_path": "validation-20260916T160848Z-140fd23e/run.json",
+        "sha256": "2077f537ffa8b967cc5cee5ddeb82f9e8bf21da367416d6ede04cebf0d266c22"
+      },
+      {
+        "relative_path": "validation-20260916T160848Z-140fd23e/correctness.json",
+        "sha256": "efeca251abb8208b430a7771a43064e320935a033b09fb61bd1a4a774cb6d5eb"
+      },
+      {
+        "relative_path": "timing-20260916T160149Z-fcd0b0f0/micro-calibration--1-68f6899271ec49b2833e30c5a5ae378a.request.json",
+        "sha256": "b9d21824d2d515015894ebe849ed7d1629b4e7ccbda064a0de1e89d34a8bf448"
+      },
+      {
+        "relative_path": "timing-20260916T160149Z-fcd0b0f0/micro-calibration--1-68f6899271ec49b2833e30c5a5ae378a.result.json",
+        "sha256": "27713e640a25a31c94f6549ef0bb231b1aba3a0664f17ba3b033a7b55efcfd2d"
+      },
+      {
+        "relative_path": "timing-20260916T160149Z-fcd0b0f0/micro-calibration--1-68f6899271ec49b2833e30c5a5ae378a.log",
+        "sha256": "69924a2d43ad526e820d0bd0ca1a84cee4da84ac7bed925fa64f861532514b39"
+      },
+      {
+        "relative_path": "timing-20260916T160149Z-fcd0b0f0/micro-measure-0-c8bb25cf310c44daab806820215e0c6a.request.json",
+        "sha256": "9e10437aaa3144ab4d28cd8eefe59aaaa9af9f2805dbd8fc9b911d43b7d443d8"
+      },
+      {
+        "relative_path": "timing-20260916T160149Z-fcd0b0f0/micro-measure-0-c8bb25cf310c44daab806820215e0c6a.result.json",
+        "sha256": "08917cc04bbd54483470c1f520e4c016a5b864eb2f452535708d71077fd97a43"
+      },
+      {
+        "relative_path": "timing-20260916T160149Z-fcd0b0f0/micro-measure-0-c8bb25cf310c44daab806820215e0c6a.log",
+        "sha256": "099178004f477ab864679a09bc2bed0b7f4c8f0969a9ad062d07515a04fdaffb"
+      },
+      {
+        "relative_path": "timing-20260916T160149Z-fcd0b0f0/gameplay-calibration--1-619d756e981b4f08958c229752ceb62b.request.json",
+        "sha256": "7b6432912e54f9a12208b8086c5e13a69c4bb87580fcde552d74fe616be853f9"
+      },
+      {
+        "relative_path": "timing-20260916T160149Z-fcd0b0f0/gameplay-calibration--1-619d756e981b4f08958c229752ceb62b.result.json",
+        "sha256": "802f0c74160beecf35b60723c65c9b5a6964c6349e7238b6b8479cad92ce006a"
+      },
+      {
+        "relative_path": "timing-20260916T160149Z-fcd0b0f0/gameplay-calibration--1-619d756e981b4f08958c229752ceb62b.log",
+        "sha256": "ee258db476c06a1baba327abdfa1745ff8034ca4213e698c6b55c38b7e46d33d"
+      },
+      {
+        "relative_path": "timing-20260916T160149Z-fcd0b0f0/gameplay-measure-0-72faa83212fc4f829d00e211fa4a8672.request.json",
+        "sha256": "af2e4f8d11f5b57d41f378f05afd6aefa1cff5c3941619732ccf9d63b4193949"
+      },
+      {
+        "relative_path": "timing-20260916T160149Z-fcd0b0f0/gameplay-measure-0-72faa83212fc4f829d00e211fa4a8672.result.json",
+        "sha256": "9e39e6f441da619e03678dcbb85851196e1c421e687cc3827e5cb40b991e3f67"
+      },
+      {
+        "relative_path": "timing-20260916T160149Z-fcd0b0f0/gameplay-measure-0-72faa83212fc4f829d00e211fa4a8672.log",
+        "sha256": "e8890cf79d3b9edf7d17062da9384806f28c1d68bd0492130699d84327566d8a"
+      },
+      {
+        "relative_path": "d38-clean-architecture.log",
+        "sha256": "48047265bdd989e3fc240fdf7ab6d64de4a80af75bc0826090a34691614d1051"
+      },
+      {
+        "relative_path": "d38-clean-timing-contracts.log",
+        "sha256": "d6edbd294d389561cee42e54e8acb34b95713792b7f1ab2a291a257d2b2ec157"
+      }
+    ]
+  },
+  "clean_architecture": {
+    "snapshot_commit": "3b2b72a673e84e80531b9cdb91f5365684772a65",
+    "snapshot_tree": "5f5b827c18182112a86ba11e187f6fa69d962c04",
+    "passed": true,
+    "subsequent_change": "D38 evidence JSON only"
+  }
+}

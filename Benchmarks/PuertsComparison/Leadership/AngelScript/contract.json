@@ -100,6 +100,16 @@
         "path": "Native/As36LeadershipValidateCommandlet.h",
         "sha256": "049df15298d5352d823045b0cf3fed4691a3b5cc071b54a9084575bfe67d7d3c",
         "base_sha256": "049df15298d5352d823045b0cf3fed4691a3b5cc071b54a9084575bfe67d7d3c"
+      },
+      {
+        "base_sha256": "",
+        "sha256": "c2e3f5f10ebde1edfb5242e9457fa9162f3ec888ccaf6dabefbd9602507f6e22",
+        "path": "Native/As38LeadershipTimingCommandlet.h"
+      },
+      {
+        "base_sha256": "",
+        "sha256": "977acd1dc93be22692393d516de527986185fd208d13a8795c3e69012337efdc",
+        "path": "Native/As38LeadershipTimingCommandlet.cpp"
       }
     ],
     "fixture_dependency": "Original fixture depends on Puerts FJsObject and UEDataBinding; full harness needed",
@@ -173,5 +183,25 @@
       "destination": "AvidScriptPerfHarness.uplugin"
     }
   ],
-  "script_base_sha256": "6f5c279b7a07a21e39e443b8be81a5d086f7686a10b7e78ca86a444325f9872e"
+  "script_base_sha256": "6f5c279b7a07a21e39e443b8be81a5d086f7686a10b7e78ca86a444325f9872e",
+  "timing_entry": {
+    "status": "compiled_and_runtime_verified",
+    "commandlet": "As38LeadershipTiming",
+    "execution_mode": "editor_vm",
+    "lanes": [
+      "native_cpp",
+      "angelscript_editor_vm"
+    ],
+    "minimum_sample_milliseconds": 5,
+    "confirmation_samples": 3,
+    "warmup_samples": 5,
+    "timed_samples": 30,
+    "process_runs": [
+      1,
+      5
+    ],
+    "seed": 1397313,
+    "seed_contract": "MakePerfRunnerSampleSeed; workload index in suite; mask 0x007fffff",
+    "formal_cross_framework_claim": false
+  }
 }

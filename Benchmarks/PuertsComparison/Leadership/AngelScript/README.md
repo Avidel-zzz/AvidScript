@@ -11,7 +11,7 @@
 
 ## 接入和执行
 
-前提是按 [D36](../../../../Docs/Phase65/P65.D36_AngelScript_Editor_Compatibility.md) 建好隔离引擎，并在独立工程中物理安装冻结的 AvidScript、Puerts 和完整 AvidScriptPerfHarness。安装器不下载或重建引擎，也不复制整个第三方依赖；它验证已有 workload 和依赖，再安装本目录的 8 个文件。
+前提是按 [D36](../../../../Docs/Phase65/P65.D36_AngelScript_Editor_Compatibility.md) 建好隔离引擎，并在独立工程中物理安装冻结的 AvidScript、Puerts 和完整 AvidScriptPerfHarness。安装器不下载或重建引擎，也不复制整个第三方依赖；它验证已有 workload 和依赖，再安装本目录的 10 个文件（D38 新增计时 Commandlet）。
 
 从本目录执行，路径由调用方提供：
 
@@ -55,3 +55,7 @@ $ProjectFile = Join-Path $env:AS_PROJECT 'As36Benchmark.uproject'
 宿主拥有 World、actor、fixture，并保证同步样本期间不发起 GC、reload 或 teardown。实际热重载缓存失效与错误反射签名的额外拒绝用例仍待补充。当前入口明确只支持 Editor VM；必须另外证明 packaged generated native code 确实被使用，再单独验证和计时。
 
 正式 protocol 的 AngelScript 仍为 `not_frozen`。后续需在同一隔离引擎/构建配置下重跑其他框架，固定每组 5 进程、5 次 warmup、30 个计时样本与统计口径，不能直接用主引擎历史计时进行排名。
+
+## 校准和计时
+
+[D38](../../../../Docs/Phase65/P65.D38_AngelScript_Timing_Host.md) 提供 `Invoke-AngelScriptTiming.ps1`，在独立校准进程中确认 5 ms 样本长度，然后以冻结迭代数运行每组 1 或 5 个测量进程。每项 workload/lane 保留 5 次预热、30 次计时，交替 Native/AngelScript 的先后顺序。`Summarize-AngelScriptTiming.ps1` 校验全部原始数据并按进程计算 P50/P95；不会把单进程诊断或 Native 参照冒充完整跨框架排名。

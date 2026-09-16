@@ -195,6 +195,7 @@ Shipping 准备的 NuGet 环境隔离已通过行为合同与真实候选发布/
 [D35 epoch 读取融合诊断](Docs/Phase65/P65.D35_Epoch_Load_Fusion_Diagnostic.md)通过 17/17 中断恢复与 42/42 内存顺序检查；72 个配对进程相对当前运行库 P50/P95 为 0.998966x/0.996449x，整体接近持平且 internal_call 回退，未纳入生产，不改变正式 16/18 结论。
 [D36 AngelScript 隔离 Editor 兼容性](Docs/Phase65/P65.D36_AngelScript_Editor_Compatibility.md)已完成固定源码在独立 UE5.8.0 环境的编译，并实际通过 2/2 脚本执行与 FVector 调用测试；完整同语义矩阵和 packaged native code 尚未验证，正式性能结论保持未完成。
 [D37 AngelScript 同语义适配器](Docs/Phase65/P65.D37_AngelScript_Same_Semantics.md)进一步完成完整 harness 编译、264/264 正确性用例与 17/17 拒绝检查；可移植安装/验证入口通过 9/9、27/27 合同及实际 Editor 重跑。正式计时与 packaged generated native code 仍待完成，不改变生产性能门禁 16/18。
+[D38 AngelScript 计时宿主](Docs/Phase65/P65.D38_AngelScript_Timing_Host.md)已跑通独立校准、冻结迭代数和 Native/Editor VM 配对采样；首轮 327 个校准、120 个预热、720 个计时样本通过逐项验证，验证器合同 34/34 通过。该单进程诊断不代表完整跨框架性能结论。
 Shipping 人工视觉与移动设备证据仍作为独立发布候选 Gate，不以自动报告或阶段编号替代。
 
 P65.A 已完成：thin source 发布器与原子安装器当前通过 **24/24** 轻量合同及真实 commit-based 发布/安装

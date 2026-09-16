@@ -4,7 +4,8 @@ param(
     [Parameter(Mandatory)][string]$Executable,
     [Parameter(Mandatory)][string]$BuildEvidence,
     [Parameter(Mandatory)][string]$OutputRoot,
-    [ValidateRange(30, 1800)][int]$TimeoutSeconds = 600
+    [ValidateRange(30, 1800)][int]$TimeoutSeconds = 600,
+    [switch]$PrepareOnly
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -62,6 +63,10 @@ foreach ($Module in @('AngelscriptCode', 'AngelscriptEditor', 'AngelscriptLoader
 $Files += @(Get-ChildItem -LiteralPath (Join-Path $Harness 'Source/AvidScriptPerfHarness') -File -Recurse |
     Where-Object { $_.Extension -in @('.h', '.cpp', '.inl', '.cs') } | ForEach-Object FullName)
 $Before = @($Files | Sort-Object -Unique | ForEach-Object { [pscustomobject]@{ path = $_; sha256 = Get-As36Sha256 $_ } })
+if ($PrepareOnly) {
+    [pscustomobject]@{ inputs = $Before; build_id = $Manifest.BuildId; project_root = $ProjectRoot; executable = $Executable }
+    return
+}
 $RunRoot = Join-Path $OutputRoot ('validation-' + [DateTimeOffset]::UtcNow.ToString('yyyyMMddTHHmmssZ') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 $null = New-Item -ItemType Directory -Path $RunRoot
 $Log = Join-Path $RunRoot 'validation.log'
