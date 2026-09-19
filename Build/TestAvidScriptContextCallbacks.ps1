@@ -1,4 +1,4 @@
-param([string]$EngineRoot = 'C:\UnrealEngine')
+param([string]$EngineRoot = 'C:\UnrealEngine', [switch]$IncludeInstanceLifecycle, [string]$SuitePrefix)
 $ErrorActionPreference = 'Stop'
 $PluginRoot = Split-Path -Parent $PSScriptRoot
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $PluginRoot)
@@ -9,15 +9,28 @@ $Suites = @(
     @{ Prefix = 'AvidScript.Runtime.Continuation'; Count = 10 },
     @{ Prefix = 'AvidScript.Runtime.DelegateSubscription'; Count = 5 }
 )
+if ($IncludeInstanceLifecycle) {
+    $Suites += @(
+        @{ Prefix = 'AvidScript.Runtime.Timer'; Count = 6 },
+        @{ Prefix = 'AvidScript.Architecture.RuntimeLifecycle'; Count = 1 },
+        @{ Prefix = 'AvidScript.Architecture.Session'; Count = 10 },
+        @{ Prefix = 'AvidScript.Runtime.Session'; Filter = 'AvidScript.Runtime.Session.'; Count = 4 }
+    )
+}
+if ($SuitePrefix) {
+    $Suites = @($Suites | Where-Object { $_.Prefix -ceq $SuitePrefix })
+    if ($Suites.Count -ne 1) { throw "Unknown or disabled callback suite: $SuitePrefix" }
+}
 foreach ($Suite in $Suites) {
     $RunId = [DateTimeOffset]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')
     $TestName = $Suite.Prefix
+    $TestFilter = if ($Suite.Filter) { $Suite.Filter } else { $TestName }
     $LogPath = Join-Path $ProjectRoot "Saved/Logs/AvidScript_Callbacks_$($TestName.Split('.')[-1])_$RunId.log"
-    & (Join-Path $EngineRoot 'Engine/Binaries/Win64/UnrealEditor-Cmd.exe') $ProjectPath -unattended -nop4 -NullRHI -nosplash "-ExecCmds=Automation RunTests $TestName;Quit" '-TestExit=Automation Test Queue Empty' "-abslog=$LogPath"
+    & (Join-Path $EngineRoot 'Engine/Binaries/Win64/UnrealEditor-Cmd.exe') $ProjectPath -unattended -nop4 -NullRHI -nosplash "-ExecCmds=Automation RunTests $TestFilter;Quit" '-TestExit=Automation Test Queue Empty' "-abslog=$LogPath"
     if ($LASTEXITCODE -ne 0) { throw "Callback Automation exited with $LASTEXITCODE. Log: $LogPath" }
     $Log = Get-Content -Raw -LiteralPath $LogPath
     $EscapedPrefix = [regex]::Escape($TestName)
-    $Found = [regex]::Matches($Log, "Found $($Suite.Count) automation tests based on '$EscapedPrefix'").Count
+    $Found = [regex]::Matches($Log, "Found $($Suite.Count) automation tests based on '$([regex]::Escape($TestFilter))'").Count
     $Passed = [regex]::Matches($Log, "Test Completed\. Result=\{Success\} Name=\{([^}]+)\} Path=\{$EscapedPrefix\.\1\}")
     $Failed = [regex]::Matches($Log, 'Test Completed\. Result=\{Fail\}').Count
     $Complete = [regex]::Matches($Log, '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*\*').Count

@@ -1020,7 +1020,7 @@ void FAvidScriptWasmRuntimeInstance::RecordPreparedVmFailure(
 		Error,
 		DebugMap.Get());
 	FAvidScriptLifecycleTransitionResult LifecycleResult;
-	LifecycleState.MarkFaulted(LifecycleResult);
+	GetInstanceState().LifecycleState.MarkFaulted(LifecycleResult);
 }
 
 bool FAvidScriptWasmRuntimeInstance::BuildPreparedDynamicHostImports(
@@ -1386,7 +1386,7 @@ bool FAvidScriptWasmRuntimeInstance::LoadArtifactView(
 	OutResult.bModuleLoaded = true;
 	OutResult.bModuleInstantiated = true;
 	FAvidScriptLifecycleTransitionResult LifecycleResult;
-	if (!LifecycleState.TryTransition(EAvidScriptLifecycleState::Loaded, LifecycleResult))
+	if (!GetInstanceState().LifecycleState.TryTransition(EAvidScriptLifecycleState::Loaded, LifecycleResult))
 	{
 		SetFailure(OutResult, ModuleId, TEXT("<lifecycle>"), TEXT("invalid_state"), TEXT("The runtime lifecycle rejected the Loaded transition"), TEXT("unload the session and create a fresh runtime instance"));
 		Unload();
@@ -1402,9 +1402,9 @@ bool FAvidScriptWasmRuntimeInstance::ValidateRequiredExports(
 	OutResult.bRuntimeInitialized = IsLoaded();
 	OutResult.bModuleLoaded = IsLoaded();
 	OutResult.bModuleInstantiated = IsLoaded();
-	OutResult.bBeginPlayCalled = bHasBegunPlay;
-	OutResult.bEndPlayCalled = bHasEndedPlay;
-	OutResult.TickCallCount = TickCallCount;
+	OutResult.bBeginPlayCalled = GetInstanceState().bHasBegunPlay;
+	OutResult.bEndPlayCalled = GetInstanceState().bHasEndedPlay;
+	OutResult.TickCallCount = GetInstanceState().TickCallCount;
 	CopyHostImportStateToResult(OutResult);
 
 	if (!IsLoaded())
@@ -1543,11 +1543,16 @@ bool FAvidScriptWasmRuntimeInstance::PrepareNamedExportCall(
 bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutResult)
 {
 	if (RejectActiveContextMutation(TEXT("module BeginPlay"), &OutResult)) return false;
+	return BeginPlayInternal(OutResult);
+}
+
+bool FAvidScriptWasmRuntimeInstance::BeginPlayInternal(FAvidScriptWasmSmokeResult& OutResult)
+{
 	PrepareResult(OutResult, ModuleId, ActiveBackendInfo, Metrics);
 	OutResult.bRuntimeInitialized = IsLoaded();
 	OutResult.bModuleLoaded = IsLoaded();
 	OutResult.bModuleInstantiated = IsLoaded();
-	OutResult.bEndPlayCalled = bHasEndedPlay;
+	OutResult.bEndPlayCalled = GetInstanceState().bHasEndedPlay;
 	CopyObservableStateToResult(OutResult);
 
 	if (!IsLoaded())
@@ -1562,7 +1567,7 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 		return false;
 	}
 
-	if (LifecycleState.GetState() != EAvidScriptLifecycleState::Loaded)
+	if (GetInstanceState().LifecycleState.GetState() != EAvidScriptLifecycleState::Loaded)
 	{
 		SetFailure(
 			OutResult,
@@ -1575,7 +1580,7 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 	}
 
 	FAvidScriptLifecycleTransitionResult LifecycleResult;
-	if (!LifecycleState.TryTransition(EAvidScriptLifecycleState::Starting, LifecycleResult))
+	if (!GetInstanceState().LifecycleState.TryTransition(EAvidScriptLifecycleState::Starting, LifecycleResult))
 	{
 		SetFailure(
 			OutResult,
@@ -1604,20 +1609,20 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 		Metrics.BeginPlayCallMs = MeasureElapsedMs(BeginPlayStartSeconds);
 		OutResult.Metrics = Metrics;
 		CopyObservableStateToResult(OutResult);
-		LifecycleState.MarkFaulted(LifecycleResult);
+		GetInstanceState().LifecycleState.MarkFaulted(LifecycleResult);
 		return false;
 	}
 
 	Metrics.BeginPlayCallMs = MeasureElapsedMs(BeginPlayStartSeconds);
-	bHasBegunPlay = true;
-	bHasEndedPlay = false;
-	bEndPlayAttempted = false;
-	bEndPlaySucceeded = false;
-	CachedEndPlayResult = FAvidScriptWasmSmokeResult();
-	LifecycleState.TryTransition(EAvidScriptLifecycleState::Running, LifecycleResult);
+	GetInstanceState().bHasBegunPlay = true;
+	GetInstanceState().bHasEndedPlay = false;
+	GetInstanceState().bEndPlayAttempted = false;
+	GetInstanceState().bEndPlaySucceeded = false;
+	GetInstanceState().CachedEndPlayResult = FAvidScriptWasmSmokeResult();
+	GetInstanceState().LifecycleState.TryTransition(EAvidScriptLifecycleState::Running, LifecycleResult);
 	OutResult.Metrics = Metrics;
 	OutResult.bBeginPlayCalled = true;
-	OutResult.TickCallCount = TickCallCount;
+	OutResult.TickCallCount = GetInstanceState().TickCallCount;
 	CopyObservableStateToResult(OutResult);
 	return true;
 }
@@ -1646,6 +1651,12 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 	const EAvidScriptWasmResultDetail ResultDetail)
 {
 	if (RejectActiveContextMutation(TEXT("module Tick"), &OutResult)) return false;
+	return TickInternal(DeltaSeconds, OutResult, ResultDetail);
+}
+
+bool FAvidScriptWasmRuntimeInstance::TickInternal(
+	float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult, const EAvidScriptWasmResultDetail ResultDetail)
+{
 	const bool bFullSnapshot =
 		ResultDetail == EAvidScriptWasmResultDetail::FullSnapshot;
 	const bool bHotFailureOnly =
@@ -1674,8 +1685,8 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 		OutResult.bRuntimeInitialized = IsLoaded();
 		OutResult.bModuleLoaded = IsLoaded();
 		OutResult.bModuleInstantiated = IsLoaded();
-		OutResult.bBeginPlayCalled = bHasBegunPlay;
-		OutResult.bEndPlayCalled = bHasEndedPlay;
+		OutResult.bBeginPlayCalled = GetInstanceState().bHasBegunPlay;
+		OutResult.bEndPlayCalled = GetInstanceState().bHasEndedPlay;
 	}
 
 	if (!IsLoaded())
@@ -1698,7 +1709,7 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 		return false;
 	}
 
-	if (LifecycleState.GetState() != EAvidScriptLifecycleState::Running)
+	if (GetInstanceState().LifecycleState.GetState() != EAvidScriptLifecycleState::Running)
 	{
 		if (!bFullSnapshot)
 		{
@@ -1706,8 +1717,8 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 			OutResult.bRuntimeInitialized = IsLoaded();
 			OutResult.bModuleLoaded = IsLoaded();
 			OutResult.bModuleInstantiated = IsLoaded();
-			OutResult.bBeginPlayCalled = bHasBegunPlay;
-			OutResult.bEndPlayCalled = bHasEndedPlay;
+			OutResult.bBeginPlayCalled = GetInstanceState().bHasBegunPlay;
+			OutResult.bEndPlayCalled = GetInstanceState().bHasEndedPlay;
 		}
 		SetFailure(
 			OutResult,
@@ -1723,7 +1734,7 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 	CollectDueTimers(DeltaSeconds);
 	Metrics.TimerCallbackCallMs = 0.0;
 	const bool bMeasureTick = !bHotFailureOnly
-		|| (TickCallCount & AvidScriptHotCallbackMetricSampleMask) == 0;
+		|| (GetInstanceState().TickCallCount & AvidScriptHotCallbackMetricSampleMask) == 0;
 	if (bMeasureTick)
 	{
 		Metrics.TickCallMs = 0.0;
@@ -1741,7 +1752,7 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 			: 0.0;
 		BeginTypedCallbackEpoch();
 		FAvidScriptVmError TickError;
-		const bool bTickCalled = bHotFailureOnly
+		bool bTickCalled = bHotFailureOnly
 			? InvokeVmExport(
 				VmBackend.Get(),
 				TickExport,
@@ -1759,6 +1770,12 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 				DebugMap.Get(),
 				OutResult);
 		EndTypedCallbackEpoch();
+		if (bTickCalled && !ValidateContextCallbackCommit(TickError))
+		{
+			bTickCalled = false;
+			if (!bHotFailureOnly)
+				SetFailureFromVmError(OutResult, ModuleId, AvidScriptTickExportName, TickError, DebugMap.Get());
+		}
 		if (!bTickCalled)
 		{
 			if (bMeasureTick)
@@ -1780,7 +1797,7 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 			OutResult.Metrics = Metrics;
 			CopyObservableStateToResult(OutResult);
 			FAvidScriptLifecycleTransitionResult LifecycleResult;
-			LifecycleState.MarkFaulted(LifecycleResult);
+			GetInstanceState().LifecycleState.MarkFaulted(LifecycleResult);
 			return false;
 		}
 
@@ -1788,13 +1805,13 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 		{
 			Metrics.TickCallMs = MeasureElapsedMs(TickStartSeconds);
 		}
-		++TickCallCount;
+		++GetInstanceState().TickCallCount;
 	}
 	if (!bHotFailureOnly)
 	{
 		OutResult.Metrics = Metrics;
 		OutResult.bTickCalled = bHasGuestTick;
-		OutResult.TickCallCount = TickCallCount;
+		OutResult.TickCallCount = GetInstanceState().TickCallCount;
 	}
 	if (IsDebugExecutionSuspended())
 	{
@@ -1806,7 +1823,7 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 		return true;
 	}
 
-	if (!DueTimerScratch.IsEmpty())
+	if (!GetInstanceState().DueTimerScratch.IsEmpty())
 	{
 		FAvidScriptVmError TimerError;
 		if (!ExecuteDueTimerCallbacks(TimerError))
@@ -1825,10 +1842,10 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 			OutResult.BackendInfo = ActiveBackendInfo;
 			OutResult.Metrics = Metrics;
 			OutResult.bTickCalled = bHasGuestTick;
-			OutResult.TickCallCount = TickCallCount;
+			OutResult.TickCallCount = GetInstanceState().TickCallCount;
 			CopyObservableStateToResult(OutResult);
 			FAvidScriptLifecycleTransitionResult LifecycleResult;
-			LifecycleState.MarkFaulted(LifecycleResult);
+			GetInstanceState().LifecycleState.MarkFaulted(LifecycleResult);
 			return false;
 		}
 	}
@@ -1932,7 +1949,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchEvent(
 		CaptureSnapshot(OutResult);
 	}
 
-	if (!IsLoaded() || !bHasBegunPlay || bEndPlayAttempted)
+	if (!IsLoaded() || !GetInstanceState().bHasBegunPlay || GetInstanceState().bEndPlayAttempted)
 	{
 		if (bHotFailureOnly)
 		{
@@ -1969,7 +1986,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchEvent(
 	FMemory::Memcpy(&EventArgs[1], &Value, sizeof(Value));
 
 	const bool bMeasureCallback = !bHotFailureOnly
-		|| (EventCallbackCount & AvidScriptHotCallbackMetricSampleMask) == 0;
+		|| (GetInstanceState().EventCallbackCount & AvidScriptHotCallbackMetricSampleMask) == 0;
 	const double EventStartSeconds = bMeasureCallback
 		? FPlatformTime::Seconds()
 		: 0.0;
@@ -2012,7 +2029,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchEvent(
 		OutResult.Metrics = Metrics;
 		CopyObservableStateToResult(OutResult);
 		FAvidScriptLifecycleTransitionResult LifecycleResult;
-		LifecycleState.MarkFaulted(LifecycleResult);
+		GetInstanceState().LifecycleState.MarkFaulted(LifecycleResult);
 		return false;
 	}
 
@@ -2020,9 +2037,9 @@ bool FAvidScriptWasmRuntimeInstance::DispatchEvent(
 	{
 		Metrics.EventCallbackCallMs = MeasureElapsedMs(EventStartSeconds);
 	}
-	++EventCallbackCount;
-	LastEventId = EventId;
-	LastEventValue = Value;
+	++GetInstanceState().EventCallbackCount;
+	GetInstanceState().LastEventId = EventId;
+	GetInstanceState().LastEventValue = Value;
 	if (!bHotFailureOnly)
 	{
 		OutResult.Metrics = Metrics;
@@ -2188,7 +2205,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEventInternal(
 	FAvidScriptWasmSmokeResult& OutResult, const FAvidScriptVmPreparedExportCall* ScopedCall)
 {
 	CaptureSnapshot(OutResult);
-	if (!IsLoaded() || !bHasBegunPlay || bEndPlayAttempted)
+	if (!IsLoaded() || !GetInstanceState().bHasBegunPlay || GetInstanceState().bEndPlayAttempted)
 	{
 		SetFailure(
 			OutResult,
@@ -2353,11 +2370,11 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEventInternal(
 		OutResult.Metrics = Metrics;
 		CopyObservableStateToResult(OutResult);
 		FAvidScriptLifecycleTransitionResult LifecycleResult;
-		LifecycleState.MarkFaulted(LifecycleResult);
+		GetInstanceState().LifecycleState.MarkFaulted(LifecycleResult);
 		return false;
 	}
 
-	++EventCallbackCount;
+	++GetInstanceState().EventCallbackCount;
 	OutResult.Metrics = Metrics;
 	CopyObservableStateToResult(OutResult);
 	return true;
@@ -2380,7 +2397,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchContinuationInternal(
 	const FString& ExportName = bUseV2
 		? AvidScriptContinuationV2ExportName
 		: AvidScriptContinuationExportName;
-	if (!IsLoaded() || !bHasBegunPlay || bEndPlayAttempted)
+	if (!IsLoaded() || !GetInstanceState().bHasBegunPlay || GetInstanceState().bEndPlayAttempted)
 	{
 		SetFailure(
 			OutResult,
@@ -2460,7 +2477,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchContinuationInternal(
 			Error,
 			DebugMap.Get());
 		FAvidScriptLifecycleTransitionResult LifecycleResult;
-		LifecycleState.MarkFaulted(LifecycleResult);
+		GetInstanceState().LifecycleState.MarkFaulted(LifecycleResult);
 		return false;
 	}
 	return true;
@@ -2473,7 +2490,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchDebugResume(
 {
 	if (RejectActiveContextMutation(TEXT("unscoped debug resume"), &OutResult)) return false;
 	CaptureSnapshot(OutResult);
-	if (!IsLoaded() || !bHasBegunPlay || bEndPlayAttempted
+	if (!IsLoaded() || !GetInstanceState().bHasBegunPlay || GetInstanceState().bEndPlayAttempted
 		|| !DebugResumeExport.Handle.IsValid()
 		|| SuspensionToken <= 0
 		|| ResumeRoute == 0)
@@ -2511,7 +2528,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchDebugResume(
 			Error,
 			DebugMap.Get());
 		FAvidScriptLifecycleTransitionResult LifecycleResult;
-		LifecycleState.MarkFaulted(LifecycleResult);
+		GetInstanceState().LifecycleState.MarkFaulted(LifecycleResult);
 		return false;
 	}
 	return true;
@@ -2531,7 +2548,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 		CaptureSnapshot(OutResult);
 	}
 
-	if (!IsLoaded() || !bHasBegunPlay || bEndPlayAttempted)
+	if (!IsLoaded() || !GetInstanceState().bHasBegunPlay || GetInstanceState().bEndPlayAttempted)
 	{
 		if (bHotFailureOnly)
 		{
@@ -2593,7 +2610,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 			}
 			SetFailureFromVmError(OutResult, ModuleId, ExportName, ResolveError, DebugMap.Get());
 			FAvidScriptLifecycleTransitionResult LifecycleResult;
-			LifecycleState.MarkFaulted(LifecycleResult);
+			GetInstanceState().LifecycleState.MarkFaulted(LifecycleResult);
 			return false;
 		}
 		if (Handle.IsValid())
@@ -2616,7 +2633,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 					ResolveError,
 					DebugMap.Get());
 				FAvidScriptLifecycleTransitionResult LifecycleResult;
-				LifecycleState.MarkFaulted(LifecycleResult);
+				GetInstanceState().LifecycleState.MarkFaulted(LifecycleResult);
 				return false;
 			}
 		}
@@ -2688,14 +2705,14 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 		OutResult.Metrics = Metrics;
 		CopyObservableStateToResult(OutResult);
 		FAvidScriptLifecycleTransitionResult LifecycleResult;
-		LifecycleState.MarkFaulted(LifecycleResult);
+		GetInstanceState().LifecycleState.MarkFaulted(LifecycleResult);
 		return false;
 	}
 
 	Metrics.EventCallbackCallMs = MeasureElapsedMs(EventStartSeconds);
-	++EventCallbackCount;
-	LastEventId = EventTypeValue;
-	LastEventValue = Event.VectorValue.X;
+	++GetInstanceState().EventCallbackCount;
+	GetInstanceState().LastEventId = EventTypeValue;
+	GetInstanceState().LastEventValue = Event.VectorValue.X;
 	if (!bHotFailureOnly)
 	{
 		OutResult.Metrics = Metrics;
@@ -2707,13 +2724,18 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResult)
 {
 	if (RejectActiveContextMutation(TEXT("module EndPlay"), &OutResult)) return false;
+	return EndPlayInternal(OutResult);
+}
+
+bool FAvidScriptWasmRuntimeInstance::EndPlayInternal(FAvidScriptWasmSmokeResult& OutResult)
+{
 	PrepareResult(OutResult, ModuleId, ActiveBackendInfo, Metrics);
 	OutResult.bRuntimeInitialized = IsLoaded();
 	OutResult.bModuleLoaded = IsLoaded();
 	OutResult.bModuleInstantiated = IsLoaded();
-	OutResult.bBeginPlayCalled = bHasBegunPlay;
-	OutResult.bEndPlayCalled = bHasEndedPlay;
-	OutResult.TickCallCount = TickCallCount;
+	OutResult.bBeginPlayCalled = GetInstanceState().bHasBegunPlay;
+	OutResult.bEndPlayCalled = GetInstanceState().bHasEndedPlay;
+	OutResult.TickCallCount = GetInstanceState().TickCallCount;
 	CopyObservableStateToResult(OutResult);
 
 	if (!IsLoaded())
@@ -2728,13 +2750,13 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 		return false;
 	}
 
-	if (bEndPlayAttempted)
+	if (GetInstanceState().bEndPlayAttempted)
 	{
-		OutResult = CachedEndPlayResult;
-		return bEndPlaySucceeded;
+		OutResult = GetInstanceState().CachedEndPlayResult;
+		return GetInstanceState().bEndPlaySucceeded;
 	}
 
-	if (LifecycleState.GetState() != EAvidScriptLifecycleState::Running)
+	if (GetInstanceState().LifecycleState.GetState() != EAvidScriptLifecycleState::Running)
 	{
 		SetFailure(
 			OutResult,
@@ -2747,7 +2769,7 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 	}
 
 	FAvidScriptLifecycleTransitionResult LifecycleResult;
-	if (!LifecycleState.TryTransition(EAvidScriptLifecycleState::Stopping, LifecycleResult))
+	if (!GetInstanceState().LifecycleState.TryTransition(EAvidScriptLifecycleState::Stopping, LifecycleResult))
 	{
 		SetFailure(
 			OutResult,
@@ -2759,7 +2781,7 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 		return false;
 	}
 
-	bEndPlayAttempted = true;
+	GetInstanceState().bEndPlayAttempted = true;
 	FAvidScriptVmError EndPlayResolveError;
 	if (!EndPlayExport.Handle.IsValid())
 	{
@@ -2772,11 +2794,11 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 			Metrics.EndPlayCallMs = 0.0;
 			OutResult.Metrics = Metrics;
 			CopyObservableStateToResult(OutResult);
-			bEndPlaySucceeded = true;
-			LifecycleState.TryTransition(
+			GetInstanceState().bEndPlaySucceeded = true;
+			GetInstanceState().LifecycleState.TryTransition(
 				EAvidScriptLifecycleState::Stopped,
 				LifecycleResult);
-			CachedEndPlayResult = OutResult;
+			GetInstanceState().CachedEndPlayResult = OutResult;
 			return true;
 		}
 		if (!AvidScriptWasmRuntimePrivate::CacheResolvedVmExport(
@@ -2795,9 +2817,9 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 			Metrics.EndPlayCallMs = 0.0;
 			OutResult.Metrics = Metrics;
 			CopyObservableStateToResult(OutResult);
-			LifecycleState.MarkFaulted(LifecycleResult);
-			bEndPlaySucceeded = false;
-			CachedEndPlayResult = OutResult;
+			GetInstanceState().LifecycleState.MarkFaulted(LifecycleResult);
+			GetInstanceState().bEndPlaySucceeded = false;
+			GetInstanceState().CachedEndPlayResult = OutResult;
 			return false;
 		}
 	}
@@ -2818,26 +2840,26 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 	{
 		Metrics.EndPlayCallMs = MeasureElapsedMs(EndPlayStartSeconds);
 		OutResult.Metrics = Metrics;
-		OutResult.bBeginPlayCalled = bHasBegunPlay;
+		OutResult.bBeginPlayCalled = GetInstanceState().bHasBegunPlay;
 		OutResult.bEndPlayCalled = false;
-		OutResult.TickCallCount = TickCallCount;
+		OutResult.TickCallCount = GetInstanceState().TickCallCount;
 		CopyObservableStateToResult(OutResult);
-		bEndPlaySucceeded = false;
-		LifecycleState.MarkFaulted(LifecycleResult);
-		CachedEndPlayResult = OutResult;
+		GetInstanceState().bEndPlaySucceeded = false;
+		GetInstanceState().LifecycleState.MarkFaulted(LifecycleResult);
+		GetInstanceState().CachedEndPlayResult = OutResult;
 		return false;
 	}
 
 	Metrics.EndPlayCallMs = MeasureElapsedMs(EndPlayStartSeconds);
-	bHasEndedPlay = true;
-	bEndPlaySucceeded = true;
-	LifecycleState.TryTransition(EAvidScriptLifecycleState::Stopped, LifecycleResult);
+	GetInstanceState().bHasEndedPlay = true;
+	GetInstanceState().bEndPlaySucceeded = true;
+	GetInstanceState().LifecycleState.TryTransition(EAvidScriptLifecycleState::Stopped, LifecycleResult);
 	OutResult.Metrics = Metrics;
-	OutResult.bBeginPlayCalled = bHasBegunPlay;
+	OutResult.bBeginPlayCalled = GetInstanceState().bHasBegunPlay;
 	OutResult.bEndPlayCalled = true;
-	OutResult.TickCallCount = TickCallCount;
+	OutResult.TickCallCount = GetInstanceState().TickCallCount;
 	CopyObservableStateToResult(OutResult);
-	CachedEndPlayResult = OutResult;
+	GetInstanceState().CachedEndPlayResult = OutResult;
 	return true;
 }
 
@@ -2850,23 +2872,34 @@ void FAvidScriptWasmRuntimeInstance::Unload()
 void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResult)
 {
 	if (RejectActiveContextMutation(TEXT("unload"), &OutResult)) return;
+	for (const auto& Entry : InstanceExecutionStates)
+	{
+		if (const auto State = Entry.Pin())
+		{
+			State->bRetired = true;
+			State->ActiveTimers.Reset(); State->TimerHeap.Reset(); State->DueTimerScratch.Reset();
+			State->LifecycleScopeCall = {};
+			State->LifecycleState.Reset();
+		}
+	}
+	InstanceExecutionStates.Reset();
 	ContextCallCodeIdentity.Reset();
 	const FString PreviousModuleId = ModuleId;
 	const bool bWasRuntimeInitialized = IsLoaded();
 	const bool bWasModuleLoaded = IsLoaded();
 	const bool bWasModuleInstantiated = IsLoaded();
-	const bool bHadBegunPlay = bHasBegunPlay;
-	const bool bHadEndedPlay = bHasEndedPlay;
-	const int32 PreviousTickCallCount = TickCallCount;
-	const int32 PreviousTimerCallbackCount = TimerCallbackCount;
-	const int32 PreviousLastTimerCallbackId = LastTimerCallbackId;
-	const int32 PreviousLastTimerHandle = LastTimerHandle;
-	const int32 PreviousEventCallbackCount = EventCallbackCount;
-	const int32 PreviousLastEventId = LastEventId;
-	const float PreviousLastEventValue = LastEventValue;
-	const int32 PreviousHostImportCallCount = HostImportCallCount;
-	const int32 PreviousHostImportInput = LastHostImportInput;
-	const int32 PreviousHostImportResult = LastHostImportResult;
+	const bool bHadBegunPlay = GetInstanceState().bHasBegunPlay;
+	const bool bHadEndedPlay = GetInstanceState().bHasEndedPlay;
+	const int32 PreviousTickCallCount = GetInstanceState().TickCallCount;
+	const int32 PreviousTimerCallbackCount = GetInstanceState().TimerCallbackCount;
+	const int32 PreviousLastTimerCallbackId = GetInstanceState().LastTimerCallbackId;
+	const int32 PreviousLastTimerHandle = GetInstanceState().LastTimerHandle;
+	const int32 PreviousEventCallbackCount = GetInstanceState().EventCallbackCount;
+	const int32 PreviousLastEventId = GetInstanceState().LastEventId;
+	const float PreviousLastEventValue = GetInstanceState().LastEventValue;
+	const int32 PreviousHostImportCallCount = GetInstanceState().HostImportCallCount;
+	const int32 PreviousHostImportInput = GetInstanceState().LastHostImportInput;
+	const int32 PreviousHostImportResult = GetInstanceState().LastHostImportResult;
 	const bool bHadResources = bWasRuntimeInitialized || bWasModuleLoaded || bWasModuleInstantiated;
 	const double UnloadStartSeconds = FPlatformTime::Seconds();
 	ActiveDelegateOutputTransaction = nullptr;
@@ -2913,16 +2946,16 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 #endif
 	bGameplayEventExportLookupAttempted = false;
 	ModuleId.Empty();
-	bHasBegunPlay = false;
-	bHasEndedPlay = false;
-	bEndPlayAttempted = false;
-	bEndPlaySucceeded = false;
-	CachedEndPlayResult = FAvidScriptWasmSmokeResult();
-	TickCallCount = 0;
+	GetInstanceState().bHasBegunPlay = false;
+	GetInstanceState().bHasEndedPlay = false;
+	GetInstanceState().bEndPlayAttempted = false;
+	GetInstanceState().bEndPlaySucceeded = false;
+	GetInstanceState().CachedEndPlayResult = FAvidScriptWasmSmokeResult();
+	GetInstanceState().TickCallCount = 0;
 	ResetTimerState();
 	ResetEventState();
 	ResetHostImportState();
-	LifecycleState.Reset();
+	GetInstanceState().LifecycleState.Reset();
 
 	Metrics.UnloadMs = bHadResources ? MeasureElapsedMs(UnloadStartSeconds) : 0.0;
 	PrepareResult(OutResult, PreviousModuleId, ActiveBackendInfo, Metrics);
@@ -2955,6 +2988,9 @@ bool FAvidScriptWasmRuntimeInstance::IsLoaded() const
 void FAvidScriptWasmRuntimeInstance::SetHostContext(const FAvidScriptWasmHostContext& InHostContext)
 {
 	if (RejectActiveContextMutation(TEXT("set context"))) return;
+	// Instance state is selected only by the checked contextual entry points.
+	// Keeping the base context neutral prevents unscoped calls from using it.
+	if (InHostContext.InstanceExecutionState) return;
 	ApplyHostContext(InHostContext);
 }
 
@@ -2991,9 +3027,9 @@ void FAvidScriptWasmRuntimeInstance::ClearHostContext()
 int32 FAvidScriptWasmRuntimeInstance::HandleOwnerGetSlotImport()
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = 0;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = 0;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 
 	if (HostContext.ObjectRegistry == nullptr || !HostContext.OwnerHandle.IsValid())
 	{
@@ -3019,17 +3055,17 @@ int32 FAvidScriptWasmRuntimeInstance::HandleOwnerGetSlotImport()
 		return 0;
 	}
 
-	LastHostImportResult = static_cast<int32>(HostContext.OwnerHandle.Slot);
+	GetInstanceState().LastHostImportResult = static_cast<int32>(HostContext.OwnerHandle.Slot);
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
-	return LastHostImportResult;
+	return GetInstanceState().LastHostImportResult;
 }
 
 int32 FAvidScriptWasmRuntimeInstance::HandleOwnerGetGenerationImport()
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = 0;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = 0;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 
 	if (HostContext.ObjectRegistry == nullptr || !HostContext.OwnerHandle.IsValid())
 	{
@@ -3055,17 +3091,17 @@ int32 FAvidScriptWasmRuntimeInstance::HandleOwnerGetGenerationImport()
 		return 0;
 	}
 
-	LastHostImportResult = static_cast<int32>(HostContext.OwnerHandle.Generation);
+	GetInstanceState().LastHostImportResult = static_cast<int32>(HostContext.OwnerHandle.Generation);
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
-	return LastHostImportResult;
+	return GetInstanceState().LastHostImportResult;
 }
 
 int64 FAvidScriptWasmRuntimeInstance::HandleOwnerGetHandleImport()
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = 0;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = 0;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 
 	const FAvidScriptObjectHandle OwnerHandle = HostContext.OwnerHandle;
 	if (!OwnerHandle.IsValid())
@@ -3091,7 +3127,7 @@ int64 FAvidScriptWasmRuntimeInstance::HandleOwnerGetHandleImport()
 
 	const uint64 PackedHandle = static_cast<uint64>(OwnerHandle.Slot)
 		| (static_cast<uint64>(OwnerHandle.Generation) << 32);
-	LastHostImportResult = static_cast<int32>(OwnerHandle.Slot);
+	GetInstanceState().LastHostImportResult = static_cast<int32>(OwnerHandle.Slot);
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return static_cast<int64>(PackedHandle);
 }
@@ -3099,9 +3135,9 @@ int64 FAvidScriptWasmRuntimeInstance::HandleOwnerGetHandleImport()
 int64 FAvidScriptWasmRuntimeInstance::HandleDataLaneGetEpochImport()
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = 0;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = 0;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 	++DataBridgeMetrics.BoundaryCrossings;
 	if (!IsInGameThread()
 		|| FusedCallbackFrameStack.IsEmpty()
@@ -3118,7 +3154,7 @@ int64 FAvidScriptWasmRuntimeInstance::HandleDataLaneGetEpochImport()
 
 	const uint64 Epoch =
 		FusedCallbackFrameStack.Last().CallbackEpoch;
-	LastHostImportResult = static_cast<int32>(Epoch);
+	GetInstanceState().LastHostImportResult = static_cast<int32>(Epoch);
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return static_cast<int64>(Epoch);
 }
@@ -3126,9 +3162,9 @@ int64 FAvidScriptWasmRuntimeInstance::HandleDataLaneGetEpochImport()
 int32 FAvidScriptWasmRuntimeInstance::HandleValueArrayLengthImport(const int32 Token)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Token;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Token;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 
 	FAvidScriptArrayValueView Value;
 	FString Error;
@@ -3142,7 +3178,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueArrayLengthImport(const int32 T
 		return 0;
 	}
 
-	LastHostImportResult = Value.ElementCount;
+	GetInstanceState().LastHostImportResult = Value.ElementCount;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return Value.ElementCount;
 }
@@ -3153,9 +3189,9 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueArrayLoadImport(
 	const TArrayView<uint8> OutBytes)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Token;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Token;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 
 	FString Error;
 	if (!ArrayValueHeap.ReadElement(
@@ -3172,7 +3208,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueArrayLoadImport(
 		return 0;
 	}
 
-	LastHostImportResult = 1;
+	GetInstanceState().LastHostImportResult = 1;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return 1;
 }
@@ -3183,9 +3219,9 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueArrayStoreImport(
 	const TConstArrayView<uint8> Bytes)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Token;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Token;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 
 	FString Error;
 	if (!ArrayValueHeap.WriteElement(
@@ -3202,7 +3238,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueArrayStoreImport(
 		return 0;
 	}
 
-	LastHostImportResult = 1;
+	GetInstanceState().LastHostImportResult = 1;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return 1;
 }
@@ -3216,9 +3252,9 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueArrayRangeImport(
 	const int32 ElementCount)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Token;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Token;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 	const TCHAR* ImportName = bReadFromCapability
 		? TEXT("avid_value_array_read_range")
 		: TEXT("avid_value_array_write_range");
@@ -3345,7 +3381,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueArrayRangeImport(
 		}
 	}
 
-	LastHostImportResult = 1;
+	GetInstanceState().LastHostImportResult = 1;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return 1;
 }
@@ -3353,14 +3389,14 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueArrayRangeImport(
 int32 FAvidScriptWasmRuntimeInstance::HandleValueReleaseImport(const int32 Token)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Token;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Token;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 
 	// Guest-owned linear arrays do not require host cleanup.
 	if (Token >= 0)
 	{
-		LastHostImportResult = 1;
+		GetInstanceState().LastHostImportResult = 1;
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 		return 1;
 	}
@@ -3384,7 +3420,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueReleaseImport(const int32 Token
 		return 0;
 	}
 
-	LastHostImportResult = 1;
+	GetInstanceState().LastHostImportResult = 1;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return 1;
 }
@@ -3392,9 +3428,9 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueReleaseImport(const int32 Token
 int32 FAvidScriptWasmRuntimeInstance::HandleValueTextToStringImport(const int32 Token)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Token;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Token;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 
 	FAvidScriptCompositeValueView Value;
 	FString Error;
@@ -3459,18 +3495,18 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueTextToStringImport(const int32 
 		return 0;
 	}
 
-	LastHostImportResult = static_cast<int32>(ResultToken);
+	GetInstanceState().LastHostImportResult = static_cast<int32>(ResultToken);
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
-	return LastHostImportResult;
+	return GetInstanceState().LastHostImportResult;
 }
 
 int32 FAvidScriptWasmRuntimeInstance::HandleValueContainerCountImport(
 	const int32 Token)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Token;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Token;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 	FString Error;
 	int32 Count = 0;
 	if (!IsInGameThread()
@@ -3491,7 +3527,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueContainerCountImport(
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 		return 0;
 	}
-	LastHostImportResult = Count;
+	GetInstanceState().LastHostImportResult = Count;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return Count;
 }
@@ -3502,9 +3538,9 @@ int32 FAvidScriptWasmRuntimeInstance::HandleDelegateOutputWriteImport(
 	const uint32 GuestAddress)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = TransactionToken;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = TransactionToken;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 	IAvidScriptVmGuestMemory* GuestMemory = VmBackend == nullptr
 		? nullptr
 		: VmBackend->GetGuestMemory();
@@ -3533,7 +3569,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleDelegateOutputWriteImport(
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 		return 0;
 	}
-	LastHostImportResult = 1;
+	GetInstanceState().LastHostImportResult = 1;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return 1;
 }
@@ -3546,9 +3582,9 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueContainerAccessImport(
 	const uint32 GuestAddress)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Token;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Token;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 	const TCHAR* ImportName = bRead
 		? TEXT("avid_value_container_read")
 		: TEXT("avid_value_container_write");
@@ -3591,7 +3627,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueContainerAccessImport(
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 		return 0;
 	}
-	LastHostImportResult = 1;
+	GetInstanceState().LastHostImportResult = 1;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return 1;
 }
@@ -3601,9 +3637,9 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueContainerResizeImport(
 	const int32 NewCount)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Token;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Token;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 	FString Error;
 	if (!IsInGameThread()
 		|| Token >= 0
@@ -3623,7 +3659,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueContainerResizeImport(
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 		return 0;
 	}
-	LastHostImportResult = 1;
+	GetInstanceState().LastHostImportResult = 1;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return 1;
 }
@@ -3632,9 +3668,9 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueContainerClearImport(
 	const int32 Token)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Token;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Token;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 	FString Error;
 	if (!IsInGameThread()
 		|| Token >= 0
@@ -3653,7 +3689,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueContainerClearImport(
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 		return 0;
 	}
-	LastHostImportResult = 1;
+	GetInstanceState().LastHostImportResult = 1;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return 1;
 }
@@ -3663,9 +3699,9 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueContainerFindImport(
 	const uint32 GuestAddress)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Token;
-	LastHostImportResult = -1;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Token;
+	GetInstanceState().LastHostImportResult = -1;
+	++GetInstanceState().HostImportCallCount;
 	IAvidScriptVmGuestMemory* GuestMemory = VmBackend == nullptr
 		? nullptr
 		: VmBackend->GetGuestMemory();
@@ -3694,7 +3730,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueContainerFindImport(
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 		return -1;
 	}
-	LastHostImportResult = FoundIndex;
+	GetInstanceState().LastHostImportResult = FoundIndex;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return FoundIndex;
 }
@@ -3705,9 +3741,9 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueContainerUpsertImport(
 	const uint32 ValueAddress)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Token;
-	LastHostImportResult = -1;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Token;
+	GetInstanceState().LastHostImportResult = -1;
+	++GetInstanceState().HostImportCallCount;
 	IAvidScriptVmGuestMemory* GuestMemory = VmBackend == nullptr
 		? nullptr
 		: VmBackend->GetGuestMemory();
@@ -3737,7 +3773,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueContainerUpsertImport(
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 		return -1;
 	}
-	LastHostImportResult = MutationResult;
+	GetInstanceState().LastHostImportResult = MutationResult;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return MutationResult;
 }
@@ -3747,9 +3783,9 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueContainerRemoveImport(
 	const uint32 KeyAddress)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Token;
-	LastHostImportResult = -1;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Token;
+	GetInstanceState().LastHostImportResult = -1;
+	++GetInstanceState().HostImportCallCount;
 	IAvidScriptVmGuestMemory* GuestMemory = VmBackend == nullptr
 		? nullptr
 		: VmBackend->GetGuestMemory();
@@ -3777,18 +3813,18 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueContainerRemoveImport(
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 		return -1;
 	}
-	LastHostImportResult = bRemoved ? 1 : 0;
+	GetInstanceState().LastHostImportResult = bRemoved ? 1 : 0;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
-	return LastHostImportResult;
+	return GetInstanceState().LastHostImportResult;
 }
 
 int32 FAvidScriptWasmRuntimeInstance::HandleDataLaneSubmitImport(
 	const TConstArrayView<uint8> Bytes)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Bytes.Num();
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Bytes.Num();
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 	++DataBridgeMetrics.BoundaryCrossings;
 	++DataBridgeMetrics.SubmittedBuffers;
 	DataBridgeMetrics.SubmittedBytes += static_cast<uint64>(Bytes.Num());
@@ -4005,7 +4041,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleDataLaneSubmitImport(
 	}
 
 	DataBridgeMetrics.AppliedCommands += static_cast<uint64>(AppliedCount);
-	LastHostImportResult = AppliedCount;
+	GetInstanceState().LastHostImportResult = AppliedCount;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return AppliedCount;
 }
@@ -4013,9 +4049,9 @@ int32 FAvidScriptWasmRuntimeInstance::HandleDataLaneSubmitImport(
 int32 FAvidScriptWasmRuntimeInstance::HandleActorGetLocationImport(int32 Slot, int32 Generation, FVector& OutLocation)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Slot;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Slot;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 	OutLocation = FVector::ZeroVector;
 
 	if (HostContext.ObjectRegistry == nullptr)
@@ -4059,7 +4095,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorGetLocationImport(int32 Slot, i
 		return 0;
 	}
 
-	LastHostImportResult = 1;
+	GetInstanceState().LastHostImportResult = 1;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return 1;
 }
@@ -4067,9 +4103,9 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorGetLocationImport(int32 Slot, i
 int32 FAvidScriptWasmRuntimeInstance::HandleActorSetLocationImport(int32 Slot, int32 Generation, const FVector& Location)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Slot;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Slot;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 
 	if (HostContext.ObjectRegistry == nullptr)
 	{
@@ -4115,7 +4151,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorSetLocationImport(int32 Slot, i
 		return 0;
 	}
 
-	LastHostImportResult = 1;
+	GetInstanceState().LastHostImportResult = 1;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return 1;
 }
@@ -4123,9 +4159,9 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorSetLocationImport(int32 Slot, i
 int32 FAvidScriptWasmRuntimeInstance::HandleActorAddLocationOffsetImport(int32 Slot, int32 Generation, const FVector& Offset)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Slot;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Slot;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 
 	if (HostContext.ObjectRegistry == nullptr)
 	{
@@ -4171,7 +4207,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorAddLocationOffsetImport(int32 S
 		return 0;
 	}
 
-	LastHostImportResult = 1;
+	GetInstanceState().LastHostImportResult = 1;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return 1;
 }
@@ -4179,9 +4215,9 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorAddLocationOffsetImport(int32 S
 int32 FAvidScriptWasmRuntimeInstance::HandleActorGetRotationImport(int32 Slot, int32 Generation, FRotator& OutRotation)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Slot;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Slot;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 	OutRotation = FRotator::ZeroRotator;
 
 	if (HostContext.ObjectRegistry == nullptr)
@@ -4226,7 +4262,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorGetRotationImport(int32 Slot, i
 		return 0;
 	}
 
-	LastHostImportResult = 1;
+	GetInstanceState().LastHostImportResult = 1;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return 1;
 }
@@ -4234,9 +4270,9 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorGetRotationImport(int32 Slot, i
 int32 FAvidScriptWasmRuntimeInstance::HandleActorSetRotationImport(int32 Slot, int32 Generation, const FRotator& Rotation)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Slot;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Slot;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 
 	if (HostContext.ObjectRegistry == nullptr)
 	{
@@ -4282,7 +4318,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorSetRotationImport(int32 Slot, i
 		return 0;
 	}
 
-	LastHostImportResult = 1;
+	GetInstanceState().LastHostImportResult = 1;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return 1;
 }
@@ -4290,9 +4326,9 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorSetRotationImport(int32 Slot, i
 int32 FAvidScriptWasmRuntimeInstance::HandleActorGetScaleImport(int32 Slot, int32 Generation, FVector& OutScale3D)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Slot;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Slot;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 	OutScale3D = FVector::ZeroVector;
 
 	if (HostContext.ObjectRegistry == nullptr)
@@ -4326,7 +4362,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorGetScaleImport(int32 Slot, int3
 		return 0;
 	}
 
-	LastHostImportResult = 1;
+	GetInstanceState().LastHostImportResult = 1;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return 1;
 }
@@ -4334,9 +4370,9 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorGetScaleImport(int32 Slot, int3
 int32 FAvidScriptWasmRuntimeInstance::HandleActorSetScaleImport(int32 Slot, int32 Generation, const FVector& Scale3D)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Slot;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Slot;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 
 	if (HostContext.ObjectRegistry == nullptr)
 	{
@@ -4371,7 +4407,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorSetScaleImport(int32 Slot, int3
 		return 0;
 	}
 
-	LastHostImportResult = 1;
+	GetInstanceState().LastHostImportResult = 1;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return 1;
 }
@@ -4385,9 +4421,9 @@ bool FAvidScriptWasmRuntimeInstance::HandleActorGetTransformBatchImport(
 	constexpr int32 InputCellsPerTransform = 2;
 	constexpr int32 OutputFloatsPerTransform = 9;
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = RequestedCount;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = RequestedCount;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 	OutProcessedCount = 0;
 
 	const int64 ExpectedInputCellCount = static_cast<int64>(RequestedCount) * InputCellsPerTransform;
@@ -4491,7 +4527,7 @@ bool FAvidScriptWasmRuntimeInstance::HandleActorGetTransformBatchImport(
 		TransformBatchOutputScratch.GetData(),
 		TransformBatchOutputScratch.Num() * sizeof(float));
 	OutProcessedCount = RequestedCount;
-	LastHostImportResult = OutProcessedCount;
+	GetInstanceState().LastHostImportResult = OutProcessedCount;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return true;
 }
@@ -4502,9 +4538,9 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorGetRootComponentImport(
 	FAvidScriptObjectHandle& OutComponentHandle)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Slot;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Slot;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 	OutComponentHandle = FAvidScriptObjectHandle();
 
 	if (HostContext.ObjectRegistry == nullptr)
@@ -4545,7 +4581,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorGetRootComponentImport(
 		return 0;
 	}
 
-	LastHostImportResult = 1;
+	GetInstanceState().LastHostImportResult = 1;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return 1;
 }
@@ -4556,9 +4592,9 @@ int32 FAvidScriptWasmRuntimeInstance::HandleSceneComponentGetWorldLocationImport
 	FVector& OutWorldLocation)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Slot;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Slot;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 	OutWorldLocation = FVector::ZeroVector;
 
 	if (HostContext.ObjectRegistry == nullptr)
@@ -4589,7 +4625,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleSceneComponentGetWorldLocationImport
 		return 0;
 	}
 
-	LastHostImportResult = 1;
+	GetInstanceState().LastHostImportResult = 1;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return 1;
 }
@@ -4600,9 +4636,9 @@ int32 FAvidScriptWasmRuntimeInstance::HandleSceneComponentSetWorldLocationImport
 	const FVector& WorldLocation)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Slot;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Slot;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 
 	if (HostContext.ObjectRegistry == nullptr)
 	{
@@ -4634,26 +4670,27 @@ int32 FAvidScriptWasmRuntimeInstance::HandleSceneComponentSetWorldLocationImport
 		return 0;
 	}
 
-	LastHostImportResult = 1;
+	GetInstanceState().LastHostImportResult = 1;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return 1;
 }
 
 int32 FAvidScriptWasmRuntimeInstance::HandleTimerSetOnceImport(float DelaySeconds, int32 CallbackId)
 {
-	// Legacy timers are module-owned; contextual execution must use the target's
-	// continuation host until legacy timer entries carry an instance identity.
-	if (RejectActiveContextMutation(TEXT("module timer scheduling"))) return 0;
+	// Contextual timers require a bound per-owner state. Legacy callers continue
+	// using the default state; a context without an explicit state stays rejected.
+	if (!HostContext.InstanceExecutionState && RejectActiveContextMutation(TEXT("module timer scheduling"))) return 0;
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = CallbackId;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = CallbackId;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 
 	if (!IsLoaded()
 		|| !FMath::IsFinite(DelaySeconds)
+		|| (HostContext.InstanceExecutionState && GetInstanceState().bEndPlayAttempted)
 		|| DelaySeconds < 0.0f
 		|| CallbackId < 0
-		|| ActiveTimers.Num() >= AvidScriptMaximumPendingTimers)
+		|| GetInstanceState().ActiveTimers.Num() >= AvidScriptMaximumPendingTimers)
 	{
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 		return 0;
@@ -4669,32 +4706,32 @@ int32 FAvidScriptWasmRuntimeInstance::HandleTimerSetOnceImport(float DelaySecond
 	const FAvidScriptWasmTimerEntry Timer{
 		TimerHandle,
 		CallbackId,
-		TimerClockSeconds + static_cast<double>(DelaySeconds)
+		GetInstanceState().TimerClockSeconds + static_cast<double>(DelaySeconds)
 	};
-	ActiveTimers.Add(TimerHandle, Timer);
-	TimerHeap.HeapPush(Timer, FAvidScriptTimerDeadlineLess());
-	LastHostImportResult = TimerHandle;
+	GetInstanceState().ActiveTimers.Add(TimerHandle, Timer);
+	GetInstanceState().TimerHeap.HeapPush(Timer, FAvidScriptTimerDeadlineLess());
+	GetInstanceState().LastHostImportResult = TimerHandle;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return TimerHandle;
 }
 
 int32 FAvidScriptWasmRuntimeInstance::HandleTimerCancelImport(int32 TimerHandle)
 {
-	if (RejectActiveContextMutation(TEXT("module timer cancellation"))) return 0;
+	if (!HostContext.InstanceExecutionState && RejectActiveContextMutation(TEXT("module timer cancellation"))) return 0;
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = TimerHandle;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = TimerHandle;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 
-	if (ActiveTimers.Remove(TimerHandle) > 0)
+	if (GetInstanceState().ActiveTimers.Remove(TimerHandle) > 0)
 	{
-		++StaleTimerHeapEntryCount;
-		LastHostImportResult = 1;
+		++GetInstanceState().StaleTimerHeapEntryCount;
+		GetInstanceState().LastHostImportResult = 1;
 		CompactTimerHeapIfNeeded();
 	}
 
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
-	return LastHostImportResult;
+	return GetInstanceState().LastHostImportResult;
 }
 
 int64 FAvidScriptWasmRuntimeInstance::HandleContinuationDelayImport(
@@ -4702,14 +4739,14 @@ int64 FAvidScriptWasmRuntimeInstance::HandleContinuationDelayImport(
 	const int32 CallbackId)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = CallbackId;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = CallbackId;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 
 	const int64 Token = HostContext.Continuations != nullptr
 		? HostContext.Continuations->ScheduleDelay(DelaySeconds, CallbackId)
 		: 0;
-	LastHostImportResult = Token != 0 ? 1 : 0;
+	GetInstanceState().LastHostImportResult = Token != 0 ? 1 : 0;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return Token;
 }
@@ -4719,9 +4756,9 @@ int64 FAvidScriptWasmRuntimeInstance::HandleContinuationLoadObjectImport(
 	const int32 CallbackId)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = CallbackId;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = CallbackId;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 
 	FString ObjectPath;
 	FString DecodeError;
@@ -4764,7 +4801,7 @@ int64 FAvidScriptWasmRuntimeInstance::HandleContinuationLoadObjectImport(
 			SoftObjectPath.ToString(),
 			CallbackId)
 		: 0;
-	LastHostImportResult = Token != 0 ? 1 : 0;
+	GetInstanceState().LastHostImportResult = Token != 0 ? 1 : 0;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return Token;
 }
@@ -4773,25 +4810,25 @@ int32 FAvidScriptWasmRuntimeInstance::HandleContinuationCancelImport(
 	const int64 ContinuationToken)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = 0;
-	LastHostImportResult = HostContext.Continuations != nullptr
+	GetInstanceState().LastHostImportInput = 0;
+	GetInstanceState().LastHostImportResult = HostContext.Continuations != nullptr
 		&& HostContext.Continuations->Cancel(ContinuationToken)
 		? 1
 		: 0;
-	++HostImportCallCount;
+	++GetInstanceState().HostImportCallCount;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
-	return LastHostImportResult;
+	return GetInstanceState().LastHostImportResult;
 }
 
 int64 FAvidScriptWasmRuntimeInstance::HandleContinuationCancelSourceCreateImport()
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = 0;
+	GetInstanceState().LastHostImportInput = 0;
 	const int64 Token = HostContext.Continuations != nullptr
 		? HostContext.Continuations->CreateCancellationSource()
 		: 0;
-	LastHostImportResult = Token != 0 ? 1 : 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportResult = Token != 0 ? 1 : 0;
+	++GetInstanceState().HostImportCallCount;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return Token;
 }
@@ -4800,28 +4837,28 @@ int32 FAvidScriptWasmRuntimeInstance::HandleContinuationCancelSourceCancelImport
 	const int64 SourceToken)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = 0;
-	LastHostImportResult = HostContext.Continuations != nullptr
+	GetInstanceState().LastHostImportInput = 0;
+	GetInstanceState().LastHostImportResult = HostContext.Continuations != nullptr
 		&& HostContext.Continuations->CancelCancellationSource(SourceToken)
 		? 1
 		: 0;
-	++HostImportCallCount;
+	++GetInstanceState().HostImportCallCount;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
-	return LastHostImportResult;
+	return GetInstanceState().LastHostImportResult;
 }
 
 int32 FAvidScriptWasmRuntimeInstance::HandleContinuationCancelSourceReleaseImport(
 	const int64 SourceToken)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = 0;
-	LastHostImportResult = HostContext.Continuations != nullptr
+	GetInstanceState().LastHostImportInput = 0;
+	GetInstanceState().LastHostImportResult = HostContext.Continuations != nullptr
 		&& HostContext.Continuations->ReleaseCancellationSource(SourceToken)
 		? 1
 		: 0;
-	++HostImportCallCount;
+	++GetInstanceState().HostImportCallCount;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
-	return LastHostImportResult;
+	return GetInstanceState().LastHostImportResult;
 }
 
 int32 FAvidScriptWasmRuntimeInstance::HandleContinuationBindCancelImport(
@@ -4829,16 +4866,16 @@ int32 FAvidScriptWasmRuntimeInstance::HandleContinuationBindCancelImport(
 	const int64 ContinuationToken)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = 0;
-	LastHostImportResult = HostContext.Continuations != nullptr
+	GetInstanceState().LastHostImportInput = 0;
+	GetInstanceState().LastHostImportResult = HostContext.Continuations != nullptr
 		&& HostContext.Continuations->BindCancellationSource(
 			SourceToken,
 			ContinuationToken)
 		? 1
 		: 0;
-	++HostImportCallCount;
+	++GetInstanceState().HostImportCallCount;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
-	return LastHostImportResult;
+	return GetInstanceState().LastHostImportResult;
 }
 
 int32 FAvidScriptWasmRuntimeInstance::HandleContinuationStateStoreImport(
@@ -4846,14 +4883,14 @@ int32 FAvidScriptWasmRuntimeInstance::HandleContinuationStateStoreImport(
 	const TConstArrayView<uint8> StateBytes)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = StateBytes.Num();
-	LastHostImportResult = HostContext.Continuations != nullptr
+	GetInstanceState().LastHostImportInput = StateBytes.Num();
+	GetInstanceState().LastHostImportResult = HostContext.Continuations != nullptr
 		&& HostContext.Continuations->StoreState(ContinuationToken, StateBytes)
 		? 1
 		: 0;
-	++HostImportCallCount;
+	++GetInstanceState().HostImportCallCount;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
-	return LastHostImportResult;
+	return GetInstanceState().LastHostImportResult;
 }
 
 int32 FAvidScriptWasmRuntimeInstance::HandleContinuationStateReadImport(
@@ -4861,8 +4898,8 @@ int32 FAvidScriptWasmRuntimeInstance::HandleContinuationStateReadImport(
 	const TArrayView<uint8> OutStateBytes)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = OutStateBytes.Num();
-	LastHostImportResult = bContinuationDispatchActive
+	GetInstanceState().LastHostImportInput = OutStateBytes.Num();
+	GetInstanceState().LastHostImportResult = bContinuationDispatchActive
 		&& !bContinuationStateConsumed
 		&& ContinuationToken == ActiveContinuationToken
 		&& HostContext.Continuations != nullptr
@@ -4871,13 +4908,13 @@ int32 FAvidScriptWasmRuntimeInstance::HandleContinuationStateReadImport(
 			OutStateBytes)
 		? 1
 		: 0;
-	if (LastHostImportResult != 0)
+	if (GetInstanceState().LastHostImportResult != 0)
 	{
 		bContinuationStateConsumed = true;
 	}
-	++HostImportCallCount;
+	++GetInstanceState().HostImportCallCount;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
-	return LastHostImportResult;
+	return GetInstanceState().LastHostImportResult;
 }
 
 int32 FAvidScriptWasmRuntimeInstance::HandleContinuationResultReadImport(
@@ -4887,9 +4924,9 @@ int32 FAvidScriptWasmRuntimeInstance::HandleContinuationResultReadImport(
 	TArrayView<uint8> OutBytes)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = BindingOrdinal;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = BindingOrdinal;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 	const auto Fail = [this, HostImportStartSeconds](const FString& Details)
 	{
 		SetPendingHostImportFailure(
@@ -4929,7 +4966,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleContinuationResultReadImport(
 		}
 		FMemory::Memzero(OutBytes.GetData(), OutBytes.Num());
 		bContinuationResultConsumed = true;
-		LastHostImportResult = 1;
+		GetInstanceState().LastHostImportResult = 1;
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 		return 1;
 	}
@@ -4972,7 +5009,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleContinuationResultReadImport(
 			: CodecError);
 	}
 
-	LastHostImportResult = 1;
+	GetInstanceState().LastHostImportResult = 1;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return 1;
 }
@@ -4983,9 +5020,9 @@ int64 FAvidScriptWasmRuntimeInstance::HandleEventSubscribeImport(
 	const int32 EventOrdinal)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = EventOrdinal;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = EventOrdinal;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 
 	const auto Fail = [this, HostImportStartSeconds, Slot, Generation, EventOrdinal](const FString& Details)
 	{
@@ -5059,7 +5096,7 @@ int64 FAvidScriptWasmRuntimeInstance::HandleEventSubscribeImport(
 				: SubscribeError);
 	}
 
-	LastHostImportResult = 1;
+	GetInstanceState().LastHostImportResult = 1;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	UE_LOG(LogAvidScriptWasmRuntime, Verbose,
 		TEXT("AvidScript event subscription accepted | token=%lld | slot=%d | generation=%d | event=%d"),
@@ -5071,9 +5108,9 @@ int32 FAvidScriptWasmRuntimeInstance::HandleEventUnsubscribeImport(
 	const int64 SubscriptionToken)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = SubscriptionToken;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = SubscriptionToken;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 	if (!IsLoaded() || HostContext.EventSubscriptions == nullptr)
 	{
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
@@ -5089,7 +5126,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleEventUnsubscribeImport(
 		return 0;
 	}
 
-	LastHostImportResult = 1;
+	GetInstanceState().LastHostImportResult = 1;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return 1;
 }
@@ -5103,13 +5140,13 @@ int32 FAvidScriptWasmRuntimeInstance::HandleEventIsCurrentSourceImport(
 		return 0;
 	}
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Slot;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Slot;
+	++GetInstanceState().HostImportCallCount;
 	const auto Finish = [this, HostImportStartSeconds](const bool bMatches)
 	{
-		LastHostImportResult = bMatches ? 1 : 0;
+		GetInstanceState().LastHostImportResult = bMatches ? 1 : 0;
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
-		return LastHostImportResult;
+		return GetInstanceState().LastHostImportResult;
 	};
 	if (!IsLoaded() || Slot <= 0 || Generation <= 0
 		|| HostContext.ObjectRegistry == nullptr || HostContext.EventSubscriptions == nullptr
@@ -5134,34 +5171,34 @@ int32 FAvidScriptWasmRuntimeInstance::HandleEventIsCurrentSourceImport(
 
 void FAvidScriptWasmRuntimeInstance::CollectDueTimers(float DeltaSeconds)
 {
-	DueTimerScratch.Reset();
+	GetInstanceState().DueTimerScratch.Reset();
 	const double SafeDeltaSeconds = FMath::IsFinite(DeltaSeconds) && DeltaSeconds > 0.0f
 		? static_cast<double>(DeltaSeconds)
 		: 0.0;
-	TimerClockSeconds += SafeDeltaSeconds;
-	if (TimerHeap.IsEmpty())
+	GetInstanceState().TimerClockSeconds += SafeDeltaSeconds;
+	if (GetInstanceState().TimerHeap.IsEmpty())
 	{
 		return;
 	}
 
 	const FAvidScriptTimerDeadlineLess DeadlineLess;
-	while (!TimerHeap.IsEmpty() && TimerHeap[0].DueTimeSeconds <= TimerClockSeconds)
+	while (!GetInstanceState().TimerHeap.IsEmpty() && GetInstanceState().TimerHeap[0].DueTimeSeconds <= GetInstanceState().TimerClockSeconds)
 	{
 		FAvidScriptWasmTimerEntry HeapTimer;
-		TimerHeap.HeapPop(HeapTimer, DeadlineLess, EAllowShrinking::No);
+		GetInstanceState().TimerHeap.HeapPop(HeapTimer, DeadlineLess, EAllowShrinking::No);
 
-		const FAvidScriptWasmTimerEntry* ActiveTimer = ActiveTimers.Find(HeapTimer.Handle);
+		const FAvidScriptWasmTimerEntry* ActiveTimer = GetInstanceState().ActiveTimers.Find(HeapTimer.Handle);
 		const bool bIsActiveEntry = ActiveTimer != nullptr
 			&& ActiveTimer->DueTimeSeconds == HeapTimer.DueTimeSeconds
 			&& ActiveTimer->CallbackId == HeapTimer.CallbackId;
 		if (!bIsActiveEntry)
 		{
-			StaleTimerHeapEntryCount = FMath::Max(0, StaleTimerHeapEntryCount - 1);
+			GetInstanceState().StaleTimerHeapEntryCount = FMath::Max(0, GetInstanceState().StaleTimerHeapEntryCount - 1);
 			continue;
 		}
 
-		DueTimerScratch.Add(*ActiveTimer);
-		ActiveTimers.Remove(HeapTimer.Handle);
+		GetInstanceState().DueTimerScratch.Add(*ActiveTimer);
+		GetInstanceState().ActiveTimers.Remove(HeapTimer.Handle);
 	}
 
 	CompactTimerHeapIfNeeded();
@@ -5171,9 +5208,9 @@ bool FAvidScriptWasmRuntimeInstance::ExecuteDueTimerCallbacks(
 	FAvidScriptVmError& OutError)
 {
 	OutError = FAvidScriptVmError();
-	for (int32 TimerIndex = 0; TimerIndex < DueTimerScratch.Num(); ++TimerIndex)
+	for (int32 TimerIndex = 0; TimerIndex < GetInstanceState().DueTimerScratch.Num(); ++TimerIndex)
 	{
-		const FAvidScriptWasmTimerEntry& Timer = DueTimerScratch[TimerIndex];
+		const FAvidScriptWasmTimerEntry& Timer = GetInstanceState().DueTimerScratch[TimerIndex];
 		uint32 TimerArgs[2] = {
 			static_cast<uint32>(Timer.CallbackId),
 			static_cast<uint32>(Timer.Handle)
@@ -5188,16 +5225,16 @@ bool FAvidScriptWasmRuntimeInstance::ExecuteDueTimerCallbacks(
 			TimerArgs,
 			OutError);
 		EndTypedCallbackEpoch();
-		if (!bTimerCalled)
+		if (!bTimerCalled || !ValidateContextCallbackCommit(OutError))
 		{
 			Metrics.TimerCallbackCallMs += MeasureElapsedMs(CallbackStartSeconds);
 			return false;
 		}
 
 		Metrics.TimerCallbackCallMs += MeasureElapsedMs(CallbackStartSeconds);
-		++TimerCallbackCount;
-		LastTimerCallbackId = Timer.CallbackId;
-		LastTimerHandle = Timer.Handle;
+		++GetInstanceState().TimerCallbackCount;
+		GetInstanceState().LastTimerCallbackId = Timer.CallbackId;
+		GetInstanceState().LastTimerHandle = Timer.Handle;
 		if (IsDebugExecutionSuspended())
 		{
 			RequeueDueTimerCallbacks(TimerIndex + 1);
@@ -5212,12 +5249,12 @@ void FAvidScriptWasmRuntimeInstance::RequeueDueTimerCallbacks(
 {
 	const FAvidScriptTimerDeadlineLess DeadlineLess;
 	for (int32 TimerIndex = FMath::Max(0, FirstTimerIndex);
-		TimerIndex < DueTimerScratch.Num();
+		TimerIndex < GetInstanceState().DueTimerScratch.Num();
 		++TimerIndex)
 	{
-		const FAvidScriptWasmTimerEntry& Timer = DueTimerScratch[TimerIndex];
-		ActiveTimers.Add(Timer.Handle, Timer);
-		TimerHeap.HeapPush(Timer, DeadlineLess);
+		const FAvidScriptWasmTimerEntry& Timer = GetInstanceState().DueTimerScratch[TimerIndex];
+		GetInstanceState().ActiveTimers.Add(Timer.Handle, Timer);
+		GetInstanceState().TimerHeap.HeapPush(Timer, DeadlineLess);
 	}
 }
 
@@ -5231,9 +5268,9 @@ int32 FAvidScriptWasmRuntimeInstance::AllocateTimerHandle()
 {
 	for (int32 Attempt = 0; Attempt <= AvidScriptMaximumPendingTimers; ++Attempt)
 	{
-		const int32 Candidate = NextTimerHandle;
-		NextTimerHandle = NextTimerHandle == MAX_int32 ? 1 : NextTimerHandle + 1;
-		if (Candidate > 0 && !ActiveTimers.Contains(Candidate))
+		const int32 Candidate = GetInstanceState().NextTimerHandle;
+		GetInstanceState().NextTimerHandle = GetInstanceState().NextTimerHandle == MAX_int32 ? 1 : GetInstanceState().NextTimerHandle + 1;
+		if (Candidate > 0 && !GetInstanceState().ActiveTimers.Contains(Candidate))
 		{
 			return Candidate;
 		}
@@ -5243,75 +5280,75 @@ int32 FAvidScriptWasmRuntimeInstance::AllocateTimerHandle()
 
 void FAvidScriptWasmRuntimeInstance::CompactTimerHeapIfNeeded()
 {
-	const bool bHasEnoughStaleEntries = StaleTimerHeapEntryCount >= AvidScriptTimerHeapCompactionThreshold;
-	const bool bStaleEntriesDominate = StaleTimerHeapEntryCount > ActiveTimers.Num();
-	const bool bHeapExceedsBound = TimerHeap.Num() > AvidScriptMaximumPendingTimers * 2;
+	const bool bHasEnoughStaleEntries = GetInstanceState().StaleTimerHeapEntryCount >= AvidScriptTimerHeapCompactionThreshold;
+	const bool bStaleEntriesDominate = GetInstanceState().StaleTimerHeapEntryCount > GetInstanceState().ActiveTimers.Num();
+	const bool bHeapExceedsBound = GetInstanceState().TimerHeap.Num() > AvidScriptMaximumPendingTimers * 2;
 	if (!bHasEnoughStaleEntries || (!bStaleEntriesDominate && !bHeapExceedsBound))
 	{
 		return;
 	}
 
-	TimerHeap.Reset(ActiveTimers.Num());
-	for (const TPair<int32, FAvidScriptWasmTimerEntry>& TimerPair : ActiveTimers)
+	GetInstanceState().TimerHeap.Reset(GetInstanceState().ActiveTimers.Num());
+	for (const TPair<int32, FAvidScriptWasmTimerEntry>& TimerPair : GetInstanceState().ActiveTimers)
 	{
-		TimerHeap.Add(TimerPair.Value);
+		GetInstanceState().TimerHeap.Add(TimerPair.Value);
 	}
-	TimerHeap.Heapify(FAvidScriptTimerDeadlineLess());
-	StaleTimerHeapEntryCount = 0;
+	GetInstanceState().TimerHeap.Heapify(FAvidScriptTimerDeadlineLess());
+	GetInstanceState().StaleTimerHeapEntryCount = 0;
 }
 
 void FAvidScriptWasmRuntimeInstance::ResetTimerState()
 {
-	ActiveTimers.Reset();
-	TimerHeap.Reset();
-	DueTimerScratch.Reset();
-	TimerClockSeconds = 0.0;
-	StaleTimerHeapEntryCount = 0;
-	NextTimerHandle = 1;
-	TimerCallbackCount = 0;
-	LastTimerCallbackId = 0;
-	LastTimerHandle = 0;
+	GetInstanceState().ActiveTimers.Reset();
+	GetInstanceState().TimerHeap.Reset();
+	GetInstanceState().DueTimerScratch.Reset();
+	GetInstanceState().TimerClockSeconds = 0.0;
+	GetInstanceState().StaleTimerHeapEntryCount = 0;
+	GetInstanceState().NextTimerHandle = 1;
+	GetInstanceState().TimerCallbackCount = 0;
+	GetInstanceState().LastTimerCallbackId = 0;
+	GetInstanceState().LastTimerHandle = 0;
 }
 
 void FAvidScriptWasmRuntimeInstance::CopyTimerStateToResult(FAvidScriptWasmSmokeResult& OutResult) const
 {
-	OutResult.bTimerCallbackCalled = TimerCallbackCount > 0;
-	OutResult.TimerCallbackCount = TimerCallbackCount;
-	OutResult.LastTimerCallbackId = LastTimerCallbackId;
-	OutResult.LastTimerHandle = LastTimerHandle;
+	OutResult.bTimerCallbackCalled = GetInstanceState().TimerCallbackCount > 0;
+	OutResult.TimerCallbackCount = GetInstanceState().TimerCallbackCount;
+	OutResult.LastTimerCallbackId = GetInstanceState().LastTimerCallbackId;
+	OutResult.LastTimerHandle = GetInstanceState().LastTimerHandle;
 }
 
 void FAvidScriptWasmRuntimeInstance::ResetEventState()
 {
-	EventCallbackCount = 0;
-	LastEventId = 0;
-	LastEventValue = 0.0f;
+	GetInstanceState().EventCallbackCount = 0;
+	GetInstanceState().LastEventId = 0;
+	GetInstanceState().LastEventValue = 0.0f;
 }
 
 void FAvidScriptWasmRuntimeInstance::CopyEventStateToResult(FAvidScriptWasmSmokeResult& OutResult) const
 {
-	OutResult.bEventCallbackCalled = EventCallbackCount > 0;
-	OutResult.EventCallbackCount = EventCallbackCount;
-	OutResult.LastEventId = LastEventId;
-	OutResult.LastEventValue = LastEventValue;
+	OutResult.bEventCallbackCalled = GetInstanceState().EventCallbackCount > 0;
+	OutResult.EventCallbackCount = GetInstanceState().EventCallbackCount;
+	OutResult.LastEventId = GetInstanceState().LastEventId;
+	OutResult.LastEventValue = GetInstanceState().LastEventValue;
 }
 
 int32 FAvidScriptWasmRuntimeInstance::HandleHostAddI32Import(int32 Input)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Input;
-	LastHostImportResult = Input + 1;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Input;
+	GetInstanceState().LastHostImportResult = Input + 1;
+	++GetInstanceState().HostImportCallCount;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
-	return LastHostImportResult;
+	return GetInstanceState().LastHostImportResult;
 }
 
 int32 FAvidScriptWasmRuntimeInstance::HandleHostFailI32Import(int32 Input)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
-	LastHostImportInput = Input;
-	LastHostImportResult = 0;
-	++HostImportCallCount;
+	GetInstanceState().LastHostImportInput = Input;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
 	SetPendingHostImportFailure(
 		TEXT("avidscript"),
 		TEXT("host_fail_i32"),
@@ -5567,7 +5604,7 @@ EAvidScriptVmTypedHostStatus
 FAvidScriptWasmRuntimeInstance::RecordGeneratedStatus(
 	const EAvidScriptVmTypedHostStatus Status)
 {
-	++HostImportCallCount;
+	++GetInstanceState().HostImportCallCount;
 	FAvidScriptBindingInvocationInstrumentation* Instrumentation =
 		BindingInvocationContext.InvocationInstrumentation;
 	if (Status == EAvidScriptVmTypedHostStatus::Succeeded)
@@ -5903,7 +5940,7 @@ FAvidScriptWasmRuntimeInstance::
 		const int32 GuestAddress,
 		int32& OutStatus)
 {
-	++HostImportCallCount;
+	++GetInstanceState().HostImportCallCount;
 	OutStatus = 0;
 	if (GuestAddress < 0)
 	{
@@ -6021,7 +6058,7 @@ FAvidScriptWasmRuntimeInstance::
 		const int32 GuestAddress,
 		int32& OutStatus)
 {
-	++HostImportCallCount;
+	++GetInstanceState().HostImportCallCount;
 	OutStatus = 0;
 	if (GuestAddress < 0)
 	{
@@ -6132,7 +6169,7 @@ FAvidScriptWasmRuntimeInstance::
 		const int32 GuestAddressOrValue,
 		int32& OutStatus)
 {
-	++HostImportCallCount;
+	++GetInstanceState().HostImportCallCount;
 	OutStatus = 0;
 	const auto Reject = [this, &Call](
 		const FString& Details,
@@ -6307,7 +6344,7 @@ FAvidScriptWasmRuntimeInstance::
 		const int32 GuestAddress,
 		int32& OutStatus)
 {
-	++HostImportCallCount;
+	++GetInstanceState().HostImportCallCount;
 	OutStatus = 0;
 	const auto Reject = [this, &Call](
 		const FString& Details,
@@ -6445,7 +6482,7 @@ FAvidScriptWasmRuntimeInstance::
 		const int32 GuestAddress,
 		int32& OutStatus)
 {
-	++HostImportCallCount;
+	++GetInstanceState().HostImportCallCount;
 	OutStatus = 0;
 	const auto Reject = [this, &Call](
 		const FString& Details,
@@ -7818,7 +7855,7 @@ FAvidScriptWasmRuntimeInstance::DispatchCommandBufferSubmit(
 			Bytes,
 			Error))
 	{
-		++HostImportCallCount;
+		++GetInstanceState().HostImportCallCount;
 		++DataBridgeMetrics.RejectedBuffers;
 		return EAvidScriptVmTypedHostStatus::Rejected;
 	}
@@ -7889,9 +7926,9 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDynamicHost(
 		}
 	};
 
-	++HostImportCallCount;
-	LastHostImportInput = static_cast<int32>(Call.Binding.BindingOrdinal);
-	LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
+	GetInstanceState().LastHostImportInput = static_cast<int32>(Call.Binding.BindingOrdinal);
+	GetInstanceState().LastHostImportResult = 0;
 	OutResult = FAvidScriptDynamicHostCallResult();
 	if (!BindingPackage.IsValid()
 		|| Call.Package.Get() != BindingPackage.Get()
@@ -7979,7 +8016,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDynamicHost(
 		BindingInvocationScratch,
 		OutResult);
 	bPreparedSucceeded = bSucceeded && OutResult.bSucceeded;
-	LastHostImportResult = OutResult.ReturnValue;
+	GetInstanceState().LastHostImportResult = OutResult.ReturnValue;
 	return bPreparedSucceeded;
 }
 
@@ -8013,9 +8050,9 @@ bool FAvidScriptWasmRuntimeInstance::DispatchDynamicHostCall(
 			++Metrics.TimedDynamicHostCallCount;
 		}
 	};
-	++HostImportCallCount;
-	LastHostImportInput = static_cast<int32>(Call.BindingOrdinal);
-	LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
+	GetInstanceState().LastHostImportInput = static_cast<int32>(Call.BindingOrdinal);
+	GetInstanceState().LastHostImportResult = 0;
 	if (!BindingPackage.IsValid())
 	{
 		OutResult = FAvidScriptDynamicHostCallResult();
@@ -8030,7 +8067,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchDynamicHostCall(
 		BindingInvocationContext,
 		BindingInvocationScratch,
 		OutResult);
-	LastHostImportResult = OutResult.ReturnValue;
+	GetInstanceState().LastHostImportResult = OutResult.ReturnValue;
 	RecordTiming();
 	ProfileScope.SetSucceeded(bSucceeded);
 	return bSucceeded;
@@ -8429,9 +8466,9 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 }
 void FAvidScriptWasmRuntimeInstance::ResetHostImportState()
 {
-	HostImportCallCount = 0;
-	LastHostImportInput = 0;
-	LastHostImportResult = 0;
+	GetInstanceState().HostImportCallCount = 0;
+	GetInstanceState().LastHostImportInput = 0;
+	GetInstanceState().LastHostImportResult = 0;
 	ClearPendingHostImportFailure();
 	ActiveDelegateOutputTransaction = nullptr;
 	ActiveDelegateOutputToken = 0;
@@ -8439,9 +8476,9 @@ void FAvidScriptWasmRuntimeInstance::ResetHostImportState()
 
 void FAvidScriptWasmRuntimeInstance::CopyHostImportStateToResult(FAvidScriptWasmSmokeResult& OutResult) const
 {
-	OutResult.HostImportCallCount = HostImportCallCount;
-	OutResult.LastHostImportInput = LastHostImportInput;
-	OutResult.LastHostImportResult = LastHostImportResult;
+	OutResult.HostImportCallCount = GetInstanceState().HostImportCallCount;
+	OutResult.LastHostImportInput = GetInstanceState().LastHostImportInput;
+	OutResult.LastHostImportResult = GetInstanceState().LastHostImportResult;
 	OutResult.Metrics = Metrics;
 	OutResult.DataBridgeMetrics = DataBridgeMetrics;
 	OutResult.BindingInstrumentation =
@@ -8457,9 +8494,9 @@ void FAvidScriptWasmRuntimeInstance::CaptureSnapshot(
 	OutResult.bRuntimeInitialized = IsLoaded();
 	OutResult.bModuleLoaded = IsLoaded();
 	OutResult.bModuleInstantiated = IsLoaded();
-	OutResult.bBeginPlayCalled = bHasBegunPlay;
-	OutResult.bEndPlayCalled = bHasEndedPlay;
-	OutResult.TickCallCount = TickCallCount;
+	OutResult.bBeginPlayCalled = GetInstanceState().bHasBegunPlay;
+	OutResult.bEndPlayCalled = GetInstanceState().bHasEndedPlay;
+	OutResult.TickCallCount = GetInstanceState().TickCallCount;
 	CopyObservableStateToResult(OutResult);
 }
 
@@ -8468,15 +8505,15 @@ FAvidScriptWasmRuntimeInstance::GetHotSnapshot() const
 {
 	FAvidScriptWasmHotSnapshot Snapshot;
 	Snapshot.bRuntimeLoaded = IsLoaded();
-	Snapshot.bBeginPlayCalled = bHasBegunPlay;
-	Snapshot.bEndPlayCalled = bHasEndedPlay;
-	Snapshot.TickCallCount = TickCallCount;
-	Snapshot.TimerCallbackCount = TimerCallbackCount;
-	Snapshot.LastTimerCallbackId = LastTimerCallbackId;
-	Snapshot.LastTimerHandle = LastTimerHandle;
-	Snapshot.EventCallbackCount = EventCallbackCount;
-	Snapshot.LastEventId = LastEventId;
-	Snapshot.LastEventValue = LastEventValue;
+	Snapshot.bBeginPlayCalled = GetInstanceState().bHasBegunPlay;
+	Snapshot.bEndPlayCalled = GetInstanceState().bHasEndedPlay;
+	Snapshot.TickCallCount = GetInstanceState().TickCallCount;
+	Snapshot.TimerCallbackCount = GetInstanceState().TimerCallbackCount;
+	Snapshot.LastTimerCallbackId = GetInstanceState().LastTimerCallbackId;
+	Snapshot.LastTimerHandle = GetInstanceState().LastTimerHandle;
+	Snapshot.EventCallbackCount = GetInstanceState().EventCallbackCount;
+	Snapshot.LastEventId = GetInstanceState().LastEventId;
+	Snapshot.LastEventValue = GetInstanceState().LastEventValue;
 	Snapshot.Metrics = Metrics;
 	return Snapshot;
 }

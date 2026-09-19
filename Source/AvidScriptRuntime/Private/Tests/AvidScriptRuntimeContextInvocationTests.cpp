@@ -520,4 +520,175 @@ bool FAvidScriptContextCallbacksTest::RunTest(const FString& Parameters)
 	return AvidScriptContextCallbackTests::Run(*this, EAvidScriptVmBackendKind::Wasmtime)
 		&& AvidScriptContextCallbackTests::Run(*this, EAvidScriptVmBackendKind::Wamr);
 }
+
+namespace AvidScriptInstanceExecutionTests
+{
+TArray<uint8> BuildFixture()
+{
+	using namespace AvidScriptContextInvocationTests;
+	TArray<uint8> Module{0, 0x61, 0x73, 0x6d, 1, 0, 0, 0};
+	Section(Module, 1, {7, 0x60, 1, 0x7e, 1, 0x7f, 0x60, 2, 0x7d, 0x7f, 1, 0x7f,
+		0x60, 1, 0x7f, 1, 0x7f, 0x60, 0, 0, 0x60, 1, 0x7d, 0, 0x60, 2, 0x7f, 0x7f, 0, 0x60, 0, 1, 0x7f});
+	TArray<uint8> Imports{3};
+	Name(Imports, "avidscript"); Name(Imports, "instance_probe"); Imports.Append({0, 0});
+	Name(Imports, "avidscript"); Name(Imports, "timer_set_once"); Imports.Append({0, 1});
+	Name(Imports, "avidscript"); Name(Imports, "timer_cancel"); Imports.Append({0, 2});
+	Section(Module, 2, Imports);
+	Section(Module, 3, {7, 3, 4, 3, 5, 6, 6, 2});
+	Section(Module, 6, {1, 0x7f, 1, 0x41, 0, 0x0b});
+	TArray<uint8> Exports{7};
+	for (const auto& Item : {TPair<const char*, uint8>{"avid_on_begin_play", 3}, {"avid_on_tick", 4},
+		{"avid_on_end_play", 5}, {"avid_on_timer", 6}, {"schedule", 7}, {"get_shared", 8}, {"cancel", 9}})
+	{
+		Name(Exports, Item.Key); Exports.Append({0, Item.Value});
+	}
+	Section(Module, 7, Exports);
+	const TArray<uint8> Begin{0, 0x23, 0, 0x41, 1, 0x6a, 0x24, 0,
+		0x43, 0xcd, 0xcc, 0xcc, 0x3d, 0x41, 17, 0x10, 1, 0x1a, 0x42, 1, 0x10, 0, 0x1a, 0x0b},
+		Tick{0, 0x42, 2, 0x10, 0, 0x1a, 0x0b}, End{0, 0x42, 3, 0x10, 0, 0x1a, 0x0b},
+		Timer{0, 0x23, 0, 0x41, 1, 0x6a, 0x24, 0, 0x42, 4, 0x10, 0, 0x1a, 0x0b},
+		Schedule{0, 0x43, 0xcd, 0xcc, 0xcc, 0x3d, 0x41, 17, 0x10, 1, 0x0b},
+		Get{0, 0x23, 0, 0x0b}, Cancel{0, 0x20, 0, 0x10, 2, 0x0b};
+	TArray<uint8> Code{7};
+	for (const auto* Body : {&Begin, &Tick, &End, &Timer, &Schedule, &Get, &Cancel}) { U32(Code, Body->Num()); Code.Append(*Body); }
+	Section(Module, 10, Code);
+	return Module;
+}
+
+struct FProbe
+{
+	FAutomationTestBase& Test;
+	FAvidScriptWasmRuntimeInstance& Runtime;
+	FAvidScriptWasmHostContext A, B;
+	int32 Calls[2][4] = {};
+	bool bRejectActiveEnd = false;
+	static EAvidScriptVmTypedHostStatus Observe(void* Opaque, int64 Phase, int32& Result)
+	{
+		auto& P = *static_cast<FProbe*>(Opaque);
+		Result = 1;
+		const int32 Owner = P.Runtime.HandleOwnerGetSlotImport();
+		const int32 Index = Owner == static_cast<int32>(P.A.OwnerHandle.Slot) ? 0 : 1;
+		P.Test.TestEqual(TEXT("instance callback uses its owner"), Owner,
+			static_cast<int32>(Index == 0 ? P.A.OwnerHandle.Slot : P.B.OwnerHandle.Slot));
+		if (Phase < 1 || Phase > 4) return EAvidScriptVmTypedHostStatus::Rejected;
+		++P.Calls[Index][Phase - 1];
+		if (Phase == 2 && Index == 0)
+		{
+			FString RetirementError;
+			P.Test.TestFalse(TEXT("active instance state cannot retire"), P.Runtime.RetireInstanceExecutionState(P.A.InstanceExecutionState, RetirementError));
+			FAvidScriptWasmSmokeResult Nested;
+			if (P.bRejectActiveEnd)
+				P.Test.TestFalse(TEXT("active A cannot EndPlay inside its Tick"), P.Runtime.EndPlayInContext(P.A, Nested));
+			else
+				P.Test.TestTrue(TEXT("A Tick may synchronously Tick idle B"), P.Runtime.TickInContext(P.B, 0.05f, Nested));
+			P.Test.TestEqual(TEXT("A restored after nested lifecycle"), P.Runtime.HandleOwnerGetSlotImport(), Owner);
+		}
+		return EAvidScriptVmTypedHostStatus::Succeeded; // deliberately ignore a rejected nested lifecycle
+	}
+};
+
+bool Run(FAutomationTestBase& Test, EAvidScriptVmBackendKind Backend)
+{
+	for (bool bFailure : {false, true})
+	{
+		Test.AddInfo(FString::Printf(TEXT("instance lifecycle backend=%d nestedFailure=%d"), static_cast<int32>(Backend), bFailure));
+		UWorld* World = UWorld::CreateWorld(EWorldType::Game, false, TEXT("AvidScriptInstanceExecution"));
+		if (!World || !GEngine) return false;
+		GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+		World->InitializeActorsForPlay(FURL());
+		ON_SCOPE_EXIT { GEngine->DestroyWorldContext(World); World->DestroyWorld(false); };
+		AActor* A = World->SpawnActor<AActor>(); AActor* B = World->SpawnActor<AActor>();
+		if (!A || !B) return false;
+		FAvidScriptObjectRegistry Objects;
+		FAvidScriptObjectHandleResult HandleResult;
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime ? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		FAvidScriptWasmRuntimeInstance Runtime(Selection);
+		FProbe Probe{Test, Runtime}; Probe.bRejectActiveEnd = bFailure;
+		Probe.A.World = World; Probe.A.ObjectRegistry = &Objects;
+		Probe.A.OwnerHandle = Objects.RegisterObject(A, HandleResult, false);
+		Probe.B = Probe.A; Probe.B.OwnerHandle = Objects.RegisterObject(B, HandleResult, false);
+		Runtime.SetHostContext(Probe.A);
+		FAvidScriptVmTypedHostImport Import;
+		Import.StableId = TEXT("instance_probe"); Import.ModuleName = TEXT("avidscript"); Import.ImportName = TEXT("instance_probe");
+		Import.Signature = TEXT("(I)i"); Import.Shape = EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Get;
+		Import.bSupplementalRuntimeAuthority = true; Import.PreparedTarget.Context = &Probe;
+		Import.PreparedTarget.PackedSelfPropertyI32Get = &FProbe::Observe;
+		FString Error;
+		FAvidScriptWasmSmokeResult Result;
+		const auto Wasm = BuildFixture();
+		if (!Runtime.SetSupplementalTypedHostImports({&Import, 1}, Error)
+			|| !Runtime.LoadModule(Wasm.GetData(), Wasm.Num(), TEXT("instance_lifecycle"), Result)
+			|| !Runtime.ValidateRequiredExports({TEXT("avid_on_begin_play"), TEXT("avid_on_tick"), TEXT("avid_on_end_play"), TEXT("avid_on_timer")}, Result)
+			|| !Runtime.CreateInstanceExecutionState(Probe.A, Probe.A.InstanceExecutionState, Error)
+			|| !Runtime.CreateInstanceExecutionState(Probe.B, Probe.B.InstanceExecutionState, Error)) { Test.AddError(Error + Result.ErrorMessage); return false; }
+		if (!Runtime.BeginPlayInContext(Probe.A, Result) || !Runtime.BeginPlayInContext(Probe.B, Result)) { Test.AddError(Result.ErrorMessage); return false; }
+		Test.TestEqual(TEXT("module default lifecycle remains Loaded"), Runtime.GetLifecycleState(), EAvidScriptLifecycleState::Loaded);
+		Test.TestEqual(TEXT("each BeginPlay runs once for A"), Probe.Calls[0][0], 1);
+		Test.TestEqual(TEXT("each BeginPlay runs once for B"), Probe.Calls[1][0], 1);
+		Test.TestFalse(TEXT("double BeginPlay rejected"), Runtime.BeginPlayInContext(Probe.B, Result));
+		Test.TestEqual(TEXT("rejected duplicate does not stop B"), Probe.B.InstanceExecutionState->GetLifecycleState(), EAvidScriptLifecycleState::Running);
+		Test.TestEqual(TEXT("A initial pending timer"), Probe.A.InstanceExecutionState->GetPendingTimerCount(), 1);
+		Test.TestEqual(TEXT("B initial pending timer"), Probe.B.InstanceExecutionState->GetPendingTimerCount(), 1);
+		Test.TestEqual(TEXT("A Tick follows complete nested chain"), Runtime.TickInContext(Probe.A, 0.2f, Result), !bFailure);
+		if (bFailure)
+		{
+			Test.TestEqual(TEXT("failed Tick never dispatches A due timer"), Probe.Calls[0][3], 0);
+			Test.TestEqual(TEXT("failed A state recorded"), Probe.A.InstanceExecutionState->GetLifecycleState(), EAvidScriptLifecycleState::Faulted);
+			Test.TestEqual(TEXT("nested error propagated"), Result.ErrorCategory, FString(TEXT("context_instance_lifecycle")));
+		}
+		else
+		{
+			Test.TestEqual(TEXT("A timer fired"), Probe.Calls[0][3], 1);
+			Test.TestEqual(TEXT("B clock advanced only by its nested Tick"), Probe.Calls[1][3], 0);
+			Test.TestEqual(TEXT("nested B has independent tick count"), Probe.B.InstanceExecutionState->GetTickCallCount(), 1);
+			Test.TestEqual(TEXT("A has independent tick count"), Probe.A.InstanceExecutionState->GetTickCallCount(), 1);
+			FAvidScriptContextualExportCall Schedule, Get, Cancel;
+			if (!Runtime.PrepareContextualExportCall(TEXT("schedule"), Schedule, Error)
+				|| !Runtime.PrepareContextualExportCall(TEXT("get_shared"), Get, Error)
+				|| !Runtime.PrepareContextualExportCall(TEXT("cancel"), Cancel, Error)) { Test.AddError(Error); return false; }
+			FAvidScriptVmError Failure;
+			FAvidScriptVmCallResult Value;
+			Test.TestTrue(TEXT("schedule A before ending"), Runtime.InvokeInContext(Schedule, Probe.A, {}, Failure, &Value));
+			Test.TestTrue(TEXT("A EndPlay succeeds"), Runtime.EndPlayInContext(Probe.A, Result));
+			Test.TestTrue(TEXT("A EndPlay is idempotent"), Runtime.EndPlayInContext(Probe.A, Result));
+			Test.TestEqual(TEXT("A guest EndPlay runs once"), Probe.Calls[0][2], 1);
+			Test.TestEqual(TEXT("A timers cancelled"), Probe.A.InstanceExecutionState->GetPendingTimerCount(), 0);
+			Test.TestEqual(TEXT("B timer retained"), Probe.B.InstanceExecutionState->GetPendingTimerCount(), 1);
+			Test.TestTrue(TEXT("B runs after A stops"), Runtime.TickInContext(Probe.B, 0.06f, Result));
+			Test.TestEqual(TEXT("B timer uses B owner"), Probe.Calls[1][3], 1);
+			Test.TestTrue(TEXT("B can read shared globals"), Runtime.InvokeInContext(Get, Probe.B, {}, Failure, &Value));
+			Test.TestEqual(TEXT("one VM retained both BeginPlay and Timer effects"), Value.Cells[0], 4u);
+			Test.TestFalse(TEXT("stopped A cannot enter ordinary code"), Runtime.InvokeInContext(Get, Probe.A, {}, Failure, &Value));
+			auto WrongOwner = Probe.A; WrongOwner.InstanceExecutionState = Probe.B.InstanceExecutionState;
+			Test.TestFalse(TEXT("B execution state cannot authorize A"), Runtime.InvokeInContext(Get, WrongOwner, {}, Failure, &Value));
+			Test.TestEqual(TEXT("wrong owner leaves B running"), Probe.B.InstanceExecutionState->GetLifecycleState(), EAvidScriptLifecycleState::Running);
+			Test.TestTrue(TEXT("A state retires without unloading VM"), Runtime.RetireInstanceExecutionState(Probe.A.InstanceExecutionState, Error));
+			Test.TestTrue(TEXT("A handle released"), Objects.ReleaseHandle(Probe.A.OwnerHandle, HandleResult, false));
+			Test.TestTrue(TEXT("B survives retired original owner"), Runtime.InvokeInContext(Schedule, Probe.B, {}, Failure, &Value));
+			FAvidScriptVmCallFrame CancelFrame; CancelFrame.CellCount = 1; CancelFrame.Cells[0] = Value.Cells[0];
+			Test.TestTrue(TEXT("B cancels its timer"), Runtime.InvokeInContext(Cancel, Probe.B, CancelFrame, Failure, &Value));
+			Test.TestEqual(TEXT("B cancellation succeeds"), Value.Cells[0], 1u);
+			Test.TestEqual(TEXT("B cancellation affects only B queue"), Probe.B.InstanceExecutionState->GetPendingTimerCount(), 0);
+			Test.TestTrue(TEXT("pending timer before module unload"), Runtime.InvokeInContext(Schedule, Probe.B, {}, Failure, &Value));
+		}
+		Runtime.Unload();
+		Test.TestTrue(TEXT("module unload retires A"), Probe.A.InstanceExecutionState->IsRetired());
+		Test.TestTrue(TEXT("module unload retires B"), Probe.B.InstanceExecutionState->IsRetired());
+		Test.TestEqual(TEXT("module unload clears all instance timers"), Probe.B.InstanceExecutionState->GetPendingTimerCount(), 0);
+		if (!Runtime.LoadModule(Wasm.GetData(), Wasm.Num(), TEXT("replacement"), Result)) return false;
+		Test.TestFalse(TEXT("old instance lifecycle cannot enter replacement VM"), Runtime.BeginPlayInContext(Probe.B, Result));
+	}
+	return true;
+}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptInstanceExecutionStateTest,
+	"AvidScript.Runtime.GeneratedTypes.SharedInstanceLifecycle", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FAvidScriptInstanceExecutionStateTest::RunTest(const FString& Parameters)
+{
+	return AvidScriptInstanceExecutionTests::Run(*this, EAvidScriptVmBackendKind::Wasmtime)
+		&& AvidScriptInstanceExecutionTests::Run(*this, EAvidScriptVmBackendKind::Wamr);
+}
 #endif

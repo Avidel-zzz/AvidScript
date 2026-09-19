@@ -60,6 +60,8 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 
 [实例上下文回调](Docs/Phase66/P66.B_Contextual_Callbacks.md)已把 continuation/委托的 owner 切换、状态消费和失败传播接入生成 Session，并覆盖加载、重载、停止及 A 取消后 B 的 Timer 继续运行。Windows 构建、C# receiver 16/16、GeneratedTypes 12/12、continuation 10/10 与委托订阅 5/5 通过。生产 Host 共享执行域、完整跨对象调用与 C# event/await 持久根仍待完成，P66.B 保持进行中。
 
+[实例执行状态分离](Docs/Phase66/P66.B_Instance_Execution_State.md)进一步将生命周期和旧 Timer 队列从 VM/堆中分离；双后端验证 A/B 独立 Tick、EndPlay 取消、共享 global 保留及旧代码状态失效。Windows 构建、C# receiver 16/16、GeneratedTypes 13/13、六组生命周期与回调回归 36/36 通过。生产 Host 共享所有权、包级 reload、完整方法路由与持久根仍待连接，P66.B 继续进行。
+
 ## 现在可以做什么
 
 更新于 **2026-09-10**。已跑通 **C# → WASM → UE 事件与 API → Win64 打包运行**，

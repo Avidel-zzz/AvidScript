@@ -117,9 +117,12 @@ struct FAvidScriptWasmHotSnapshot
 	FAvidScriptWasmRuntimeMetrics Metrics;
 };
 
+class FAvidScriptWasmInstanceExecutionState;
+
 struct FAvidScriptWasmHostContext
 {
 	TWeakPtr<IAvidScriptGeneratedTypeAuthority> GeneratedTypeAuthority;
+	TSharedPtr<FAvidScriptWasmInstanceExecutionState> InstanceExecutionState;
 	FAvidScriptObjectRegistry* ObjectRegistry = nullptr;
 	IAvidScriptObjectOwnershipDomain* ObjectOwnership = nullptr;
 	FAvidScriptObjectHandle OwnerHandle;
@@ -188,6 +191,53 @@ private:
 	FString ExportName;
 };
 
+// Per-owner execution state. VM memory, code and the managed heap remain Runtime-owned.
+// Identity and mutation are private: native callers obtain states from the Runtime.
+class AVIDSCRIPTRUNTIME_API FAvidScriptWasmInstanceExecutionState
+{
+public:
+    ~FAvidScriptWasmInstanceExecutionState() = default;
+    EAvidScriptLifecycleState GetLifecycleState() const { return LifecycleState.GetState(); }
+    int32 GetPendingTimerCount() const { return ActiveTimers.Num(); }
+    int32 GetTickCallCount() const { return TickCallCount; }
+    int32 GetTimerCallbackCount() const { return TimerCallbackCount; }
+    bool IsRetired() const { return bRetired; }
+private:
+    friend class FAvidScriptWasmRuntimeInstance;
+    FAvidScriptWasmInstanceExecutionState() = default;
+    FAvidScriptWasmInstanceExecutionState(const FAvidScriptWasmInstanceExecutionState&) = delete;
+    FAvidScriptWasmInstanceExecutionState& operator=(const FAvidScriptWasmInstanceExecutionState&) = delete;
+    TSharedPtr<const uint8> CodeIdentity;
+    FAvidScriptContextualExportCall LifecycleScopeCall;
+    FAvidScriptObjectRegistry* ObjectRegistry = nullptr;
+    FAvidScriptObjectHandle OwnerHandle;
+    TWeakObjectPtr<UWorld> World;
+    uint32 ActiveCalls = 0;
+    bool bRetired = false;
+	bool bHasBegunPlay = false;
+	bool bHasEndedPlay = false;
+	bool bEndPlayAttempted = false;
+	bool bEndPlaySucceeded = false;
+	int32 TickCallCount = 0;
+	int32 NextTimerHandle = 1;
+	int32 TimerCallbackCount = 0;
+	int32 LastTimerCallbackId = 0;
+	int32 LastTimerHandle = 0;
+	TMap<int32, FAvidScriptWasmTimerEntry> ActiveTimers;
+	TArray<FAvidScriptWasmTimerEntry> TimerHeap;
+	TArray<FAvidScriptWasmTimerEntry> DueTimerScratch;
+	double TimerClockSeconds = 0.0;
+	int32 StaleTimerHeapEntryCount = 0;
+	int32 EventCallbackCount = 0;
+	int32 LastEventId = 0;
+	float LastEventValue = 0.0f;
+	int32 HostImportCallCount = 0;
+	int32 LastHostImportInput = 0;
+	int32 LastHostImportResult = 0;
+	FAvidScriptWasmSmokeResult CachedEndPlayResult;
+	FAvidScriptLifecycleStateMachine LifecycleState;
+};
+
 class AVIDSCRIPTRUNTIME_API FAvidScriptWasmRuntimeInstance
 	: public IAvidScriptHostDispatcher
 	, public IAvidScriptVmTypedHostDispatcher
@@ -236,6 +286,14 @@ public:
 	// Call after ValidateRequiredExports; returns an empty call when no continuation
 	// export was validated. The prepared entry follows that validation's V2/V1 choice.
 	bool PrepareContextualContinuationCall(FAvidScriptContextualExportCall& OutCall, FString& OutError);
+	// Create an owner-bound state after validating module exports. These lifecycle
+	// calls affect only that state; they never unload the shared VM or heap.
+	bool CreateInstanceExecutionState(const FAvidScriptWasmHostContext& Context,
+		TSharedPtr<FAvidScriptWasmInstanceExecutionState>& OutState, FString& OutError);
+	bool BeginPlayInContext(const FAvidScriptWasmHostContext& Context, FAvidScriptWasmSmokeResult& OutResult);
+	bool TickInContext(const FAvidScriptWasmHostContext& Context, float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult);
+	bool EndPlayInContext(const FAvidScriptWasmHostContext& Context, FAvidScriptWasmSmokeResult& OutResult);
+	bool RetireInstanceExecutionState(const TSharedPtr<FAvidScriptWasmInstanceExecutionState>& State, FString& OutError);
 	bool InvokeInContext(
 		const FAvidScriptContextualExportCall& Call, const FAvidScriptWasmHostContext& Context,
 		const FAvidScriptVmCallFrame& Frame, FAvidScriptVmError& OutError,
@@ -368,7 +426,7 @@ public:
 			OutObject);
 	}
 	uint64 GetReloadEpochForTesting() const { return ReloadEpoch; }
-	int32 GetHostImportCallCountForTesting() const { return HostImportCallCount; }
+	int32 GetHostImportCallCountForTesting() const { return GetInstanceState().HostImportCallCount; }
 	FAvidScriptUtf8ValueHeap& GetUtf8ValueHeapForTesting()
 	{
 		return Utf8ValueHeap;
@@ -403,12 +461,12 @@ public:
 	{
 		return ActiveBackendInfo;
 	}
-	EAvidScriptLifecycleState GetLifecycleState() const { return LifecycleState.GetState(); }
-	bool HasBegunPlay() const { return bHasBegunPlay; }
-	int32 GetTickCallCount() const { return TickCallCount; }
-	int32 GetPendingTimerCount() const { return ActiveTimers.Num(); }
-	int32 GetTimerCallbackCount() const { return TimerCallbackCount; }
-	int32 GetEventCallbackCount() const { return EventCallbackCount; }
+	EAvidScriptLifecycleState GetLifecycleState() const { return GetInstanceState().LifecycleState.GetState(); }
+	bool HasBegunPlay() const { return GetInstanceState().bHasBegunPlay; }
+	int32 GetTickCallCount() const { return GetInstanceState().TickCallCount; }
+	int32 GetPendingTimerCount() const { return GetInstanceState().ActiveTimers.Num(); }
+	int32 GetTimerCallbackCount() const { return GetInstanceState().TimerCallbackCount; }
+	int32 GetEventCallbackCount() const { return GetInstanceState().EventCallbackCount; }
 	const FString& GetModuleId() const { return ModuleId; }
 	const FAvidScriptWasmRuntimeMetrics& GetMetrics() const { return Metrics; }
 	const FAvidScriptDataBridgeMetrics& GetDataBridgeMetrics() const { return DataBridgeMetrics; }
@@ -564,6 +622,15 @@ public:
 
 
 private:
+	enum class EInstanceLifecycleOperation : uint8 { Begin, Tick, End };
+	bool BeginPlayInternal(FAvidScriptWasmSmokeResult& OutResult);
+	bool TickInternal(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult, EAvidScriptWasmResultDetail ResultDetail);
+	bool EndPlayInternal(FAvidScriptWasmSmokeResult& OutResult);
+	bool ValidateInstanceExecutionState(const FAvidScriptWasmHostContext& Context) const;
+	bool InvokeInstanceLifecycle(const FAvidScriptWasmHostContext& Context, EInstanceLifecycleOperation Operation,
+		float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult);
+	void RecordContextualFailure(const FAvidScriptWasmHostContext& Context, const FString& ExportName,
+		const FAvidScriptVmError& Error, FAvidScriptWasmSmokeResult& OutResult);
 	bool InvokeContextOperation(
 		const FAvidScriptContextualExportCall& Call, const FAvidScriptWasmHostContext& Context,
 		TFunctionRef<bool(FAvidScriptVmError&)> Operation, FAvidScriptVmError& OutError);
@@ -848,6 +915,11 @@ private:
 		TArray<FAvidScriptPreparedDelegateEvent>& InOutEvents,
 		FString& OutError);
 
+    FAvidScriptWasmInstanceExecutionState DefaultInstanceState;
+    FAvidScriptWasmInstanceExecutionState* ActiveInstanceState = &DefaultInstanceState;
+    TArray<TWeakPtr<FAvidScriptWasmInstanceExecutionState>> InstanceExecutionStates;
+    FAvidScriptWasmInstanceExecutionState& GetInstanceState() { return *ActiveInstanceState; }
+    const FAvidScriptWasmInstanceExecutionState& GetInstanceState() const { return *ActiveInstanceState; }
 	TUniquePtr<IAvidScriptVmBackend> VmBackend;
 	TSharedPtr<const uint8> ContextCallCodeIdentity;
 	uint32 ContextInvocationDepth = 0;
@@ -872,32 +944,12 @@ private:
 	TMap<FString, FAvidScriptCachedVmExport> DelegateEventExports;
 
 	bool bGameplayEventExportLookupAttempted = false;
-	bool bHasBegunPlay = false;
 #if WITH_DEV_AUTOMATION_TESTS
 	FAvidScriptCachedVmExport TestingI32PairExport;
 	FString TestingI32PairExportName;
 	int32 StateWriteAttemptCount = 0;
 	TArray<int32> StateWriteFailureAttempts;
 #endif
-	bool bHasEndedPlay = false;
-	bool bEndPlayAttempted = false;
-	bool bEndPlaySucceeded = false;
-	int32 TickCallCount = 0;
-	int32 NextTimerHandle = 1;
-	int32 TimerCallbackCount = 0;
-	int32 LastTimerCallbackId = 0;
-	int32 LastTimerHandle = 0;
-	TMap<int32, FAvidScriptWasmTimerEntry> ActiveTimers;
-	TArray<FAvidScriptWasmTimerEntry> TimerHeap;
-	TArray<FAvidScriptWasmTimerEntry> DueTimerScratch;
-	double TimerClockSeconds = 0.0;
-	int32 StaleTimerHeapEntryCount = 0;
-	int32 EventCallbackCount = 0;
-	int32 LastEventId = 0;
-	float LastEventValue = 0.0f;
-	int32 HostImportCallCount = 0;
-	int32 LastHostImportInput = 0;
-	int32 LastHostImportResult = 0;
 	bool bHasPendingHostImportFailure = false;
 	uint64 PendingHostImportCallbackEpoch = 0;
 	FString PendingHostImportModuleName;
@@ -918,7 +970,6 @@ private:
 	FAvidScriptContinuationResultCodecTransaction*
 		ActiveContinuationResultTransaction = nullptr;
 	FString ModuleId;
-	FAvidScriptWasmSmokeResult CachedEndPlayResult;
 	FAvidScriptWasmHostContext HostContext;
 	FAvidScriptArrayValueHeap ArrayValueHeap;
 	FAvidScriptUtf8ValueHeap Utf8ValueHeap;
@@ -940,7 +991,6 @@ private:
 	TArray<FAvidScriptObjectHandle> TransformBatchHandleScratch;
 	TArray<FAvidScriptActorTransformSnapshot> TransformBatchSnapshotScratch;
 	TArray<float> TransformBatchOutputScratch;
-	FAvidScriptLifecycleStateMachine LifecycleState;
 	FAvidScriptWasmRuntimeMetrics Metrics;
 	FAvidScriptSelfCapability SelfCapability;
 	FAvidScriptDataBridgeBudget DataBridgeBudget;
