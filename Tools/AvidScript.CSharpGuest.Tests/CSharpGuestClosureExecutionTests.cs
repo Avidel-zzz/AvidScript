@@ -103,13 +103,11 @@ internal static class CSharpGuestClosureExecutionTests
             string rejectedSource = "using System; public struct Cell { public int Value; public void Mutate() { Value++; } } "
                 + "public struct Outer { public Cell Child; } public static class Script { static void Touch(ref int n) { n++; } public static int Run() { " + body + " } }";
             CSharpGuestLoweringResult rejected = CSharpGuestLowerer.Lower(CSharpGuestLexicalCaptureTests.Analyze(rejectedSource), new string('a', 64));
-            bool unsupported = body.Contains("read == null", StringComparison.Ordinal);
-            Require(unsupported ? !rejected.Succeeded && rejected.Diagnostics.Any(item => item.Code == "ASCG1024")
-                    : rejected.Succeeded && WasmModuleCompiler.Compile(rejected.Module!).Succeeded,
+            Require(rejected.Succeeded && WasmModuleCompiler.Compile(rejected.Module!).Succeeded,
                 "shared borrow capability must match its declared boundary: " + body + " | " + string.Join(" | ", rejected.Diagnostics.Select(item => item.Message)));
             count++;
         }
-        return count + CSharpGuestBorrowedReferenceTests.Run();
+        return count + CSharpGuestBorrowedReferenceTests.Run() + CSharpGuestDelegateIdentityTests.Run();
     }
     private static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
 }

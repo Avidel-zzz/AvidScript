@@ -96,7 +96,7 @@ internal static class CSharpGuestBorrowedReferenceTests
         return 8;
     }
 
-    private static int Reference(string source)
+    internal static int Reference(string source)
     {
         var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator)
             .Select(path => MetadataReference.CreateFromFile(path));

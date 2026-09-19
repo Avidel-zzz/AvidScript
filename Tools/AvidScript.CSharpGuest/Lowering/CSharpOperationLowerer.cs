@@ -404,11 +404,10 @@ internal static class CSharpOperationLowerer
         }
 
         bool shortCircuit = operation.OperatorKind is "logical_and" or "logical_or";
-        if (context.Document.ClosureEnvironments.Count != 0 && operation.Children.Any(child =>
+        if (operation.Children.Any(child =>
                 context.Document.DelegateTypes.Any(signature => signature.TypeId == child.TypeId)))
         {
-            context.Add("ASCG1024", "Closure delegate comparison and combination require callable and environment identity semantics.");
-            return null;
+            return CSharpDelegateIdentityLowerer.Lower(context, operation, blockOrdinal, instructions);
         }
         if (shortCircuit && (operation.TypeId != "type:bool"
             || operation.Children[0].TypeId != "type:bool"

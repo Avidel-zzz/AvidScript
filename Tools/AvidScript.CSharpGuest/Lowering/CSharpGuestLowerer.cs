@@ -54,6 +54,7 @@ public static class CSharpGuestLowerer
             dataPool,
             diagnostics).ToList();
         functions.AddRange(CSharpClosureDelegateLowerer.BuildThunks(document, functions));
+        functions.AddRange(CSharpDelegateIdentityLowerer.Build(document, functions));
         if (document.ClosureEnvironments.Count != 0)
             imports = imports.Append(new GuestImport(CSharpClosureLayout.HeapImport, GuestManagedHeap.ImportModule, GuestManagedHeap.ImportName,
                 Enumerable.Repeat(CSharpGuestIds.AddressTypeId, 4).ToArray(), CSharpGuestIds.AddressTypeId)).ToArray();
