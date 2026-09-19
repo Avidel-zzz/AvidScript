@@ -33,12 +33,12 @@ bool FAvidScriptWasmRuntimeInstance::PrepareContextualContinuationCall(FAvidScri
 	return true;
 }
 
-bool FAvidScriptWasmRuntimeInstance::ValidateInvocationContext(const FAvidScriptWasmHostContext& Context) const
+bool FAvidScriptWasmRuntimeInstance::ValidateInvocationContext(const FAvidScriptWasmHostContext& Context, bool bAllowSuspended) const
 {
 	if (!IsInGameThread() || Context.ObjectRegistry == nullptr || !Context.OwnerHandle.IsValid()
 		|| !ValidateInstanceExecutionState(Context)
 		|| Context.World.IsStale() || (Context.World.IsValid() && Context.World->bIsTearingDown)
-		|| (Context.DebugProbes != nullptr && Context.DebugProbes->IsExecutionSuspended())) return false;
+		|| (!bAllowSuspended && Context.DebugProbes != nullptr && Context.DebugProbes->IsExecutionSuspended())) return false;
 	FAvidScriptObjectHandleResult Result;
 	UObject* Owner = Context.ObjectRegistry->ResolveObject(Context.OwnerHandle, Result, false);
 	return Owner != nullptr && Owner->GetWorld() == Context.World.Get()
@@ -90,7 +90,7 @@ bool FAvidScriptWasmRuntimeInstance::InvokeInContext(
 
 bool FAvidScriptWasmRuntimeInstance::InvokeContextOperation(
 	const FAvidScriptContextualExportCall& Prepared, const FAvidScriptWasmHostContext& Context,
-	TFunctionRef<bool(FAvidScriptVmError&)> Operation, FAvidScriptVmError& OutError)
+	TFunctionRef<bool(FAvidScriptVmError&)> Operation, FAvidScriptVmError& OutError, bool bResumeSuspended)
 {
 	OutError.Reset();
 	if (!IsInGameThread())
@@ -122,7 +122,7 @@ bool FAvidScriptWasmRuntimeInstance::InvokeContextOperation(
 		return Reject(TEXT("context_invocation_budget"), TEXT("contextual invocation depth or entry budget exhausted"));
 	if (bRoot && ManagedHeapInvocationDepth != 0)
 		return Reject(TEXT("context_invocation_unscoped"), TEXT("cannot reenter an export that has no instance context scope"));
-	if ((!bRoot && !ValidateInvocationContext(HostContext)) || !ValidateInvocationContext(Context)
+	if ((!bRoot && !ValidateInvocationContext(HostContext)) || !ValidateInvocationContext(Context, bResumeSuspended)
 		|| Context.ObjectRegistry != HostContext.ObjectRegistry || Context.World != HostContext.World
 		|| Context.HostEffectJournal != HostContext.HostEffectJournal)
 		return Reject(TEXT("context_invocation_authority"), TEXT("owner, registry, World or effect transaction does not match the execution domain"));
@@ -171,7 +171,7 @@ bool FAvidScriptWasmRuntimeInstance::InvokeContextOperation(
 		if (OutError.Category.IsEmpty()) OutError.Category = TEXT("context_invocation_failed");
 		LatchContextInvocationFailure(OutError);
 	}
-	else if (!ValidateInvocationContext(Context))
+	else if (!ValidateInvocationContext(Context, true))
 	{
 		OutError.Category = TEXT("context_invocation_retired");
 		OutError.Details = TEXT("target owner or World retired before the invocation returned");
@@ -193,7 +193,7 @@ bool FAvidScriptWasmRuntimeInstance::ValidateContextCallbackCommit(FAvidScriptVm
 		OutError = ContextInvocationFailure;
 		return false;
 	}
-	if (!ValidateInvocationContext(HostContext))
+	if (!ValidateInvocationContext(HostContext, true))
 	{
 		OutError.Category = TEXT("context_invocation_retired");
 		OutError.Details = TEXT("callback owner retired before output or result commit");
@@ -216,6 +216,12 @@ bool FAvidScriptWasmRuntimeInstance::DispatchContinuationInContext(
 	FAvidScriptVmError Error;
 	const bool bSucceeded = InvokeContextOperation(Prepared, Context, [&](FAvidScriptVmError& Failure)
 	{
+		if (Context.InstanceExecutionState && GetLifecycleState() != EAvidScriptLifecycleState::Running)
+		{
+			Failure.Category = TEXT("context_instance_not_running");
+			Failure.Details = TEXT("continuation requires a running instance");
+			return false;
+		}
 		const TCHAR* ExpectedExport = ContinuationV2Export.Handle.IsValid() ? TEXT("avid_on_continuation_v2") : TEXT("avid_on_continuation");
 		if (Prepared.ExportName != ExpectedExport || Context.Continuations == nullptr)
 		{
@@ -246,6 +252,12 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEventInContext(
 	FAvidScriptVmError Error;
 	const bool bSucceeded = InvokeContextOperation(Prepared, Context, [&](FAvidScriptVmError& Failure)
 	{
+		if (Context.InstanceExecutionState && GetLifecycleState() != EAvidScriptLifecycleState::Running)
+		{
+			Failure.Category = TEXT("context_instance_not_running");
+			Failure.Details = TEXT("delegate callback requires a running instance");
+			return false;
+		}
 		if (Prepared.ExportName != Event.ExportName)
 		{
 			Failure.Category = TEXT("context_callback_contract");
@@ -310,6 +322,11 @@ bool FAvidScriptWasmRuntimeInstance::CreateInstanceExecutionState(
 void FAvidScriptWasmRuntimeInstance::RecordContextualFailure(const FAvidScriptWasmHostContext& Context,
 	const FString& ExportName, const FAvidScriptVmError& Error, FAvidScriptWasmSmokeResult& OutResult)
 {
+	if (!IsInGameThread())
+	{
+		OutResult = {}; OutResult.ErrorCategory = TEXT("context_invocation_thread");
+		return;
+	}
 	if (!Context.InstanceExecutionState)
 	{
 		RecordPreparedVmFailure(ExportName, Error, OutResult);
@@ -330,12 +347,14 @@ void FAvidScriptWasmRuntimeInstance::RecordContextualFailure(const FAvidScriptWa
 }
 
 bool FAvidScriptWasmRuntimeInstance::InvokeInstanceLifecycle(const FAvidScriptWasmHostContext& Context,
-	const EInstanceLifecycleOperation Operation, const float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult)
+	const EInstanceLifecycleOperation Operation, const float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult,
+	const EAvidScriptWasmResultDetail ResultDetail)
 {
-	OutResult = {};
+	if (ResultDetail != EAvidScriptWasmResultDetail::HotFailureOnly) OutResult = {};
 	if (!IsInGameThread() || !Context.InstanceExecutionState || !ValidateInstanceExecutionState(Context)
 		|| Context.InstanceExecutionState->ActiveCalls != 0)
 	{
+		OutResult = {};
 		OutResult.ErrorCategory = TEXT("context_instance_lifecycle");
 		OutResult.ErrorMessage = TEXT("instance lifecycle requires an idle state belonging to this owner and code generation");
 		if (IsInGameThread() && ContextInvocationDepth != 0)
@@ -347,14 +366,17 @@ bool FAvidScriptWasmRuntimeInstance::InvokeInstanceLifecycle(const FAvidScriptWa
 		return false;
 	}
 	FAvidScriptVmError Error;
+	bool bEntered = false;
+	bool bOperationSucceeded = false;
 	const bool bSucceeded = InvokeContextOperation(Context.InstanceExecutionState->LifecycleScopeCall, Context,
 		[&](FAvidScriptVmError& Failure)
 		{
+			bEntered = true;
 			bool bCalled = false;
 			switch (Operation)
 			{
 			case EInstanceLifecycleOperation::Begin: bCalled = BeginPlayInternal(OutResult); break;
-			case EInstanceLifecycleOperation::Tick: bCalled = TickInternal(DeltaSeconds, OutResult, EAvidScriptWasmResultDetail::FullSnapshot); break;
+			case EInstanceLifecycleOperation::Tick: bCalled = TickInternal(DeltaSeconds, OutResult, ResultDetail); break;
 			case EInstanceLifecycleOperation::End:
 				bCalled = EndPlayInternal(OutResult);
 				GetInstanceState().ActiveTimers.Reset(); GetInstanceState().TimerHeap.Reset(); GetInstanceState().DueTimerScratch.Reset();
@@ -362,13 +384,14 @@ bool FAvidScriptWasmRuntimeInstance::InvokeInstanceLifecycle(const FAvidScriptWa
 				break;
 			}
 			if (!bCalled) { Failure.Category = OutResult.ErrorCategory; Failure.Details = OutResult.ErrorMessage; }
+			bOperationSucceeded = bCalled;
 			return bCalled;
 		}, Error);
 	if (!bSucceeded)
 	{
 		const TCHAR* ExportName = Operation == EInstanceLifecycleOperation::Begin ? TEXT("avid_on_begin_play")
 			: Operation == EInstanceLifecycleOperation::Tick ? TEXT("avid_on_tick") : TEXT("avid_on_end_play");
-		if (OutResult.ErrorCategory.IsEmpty()) RecordContextualFailure(Context, ExportName, Error, OutResult);
+		if (!bEntered || bOperationSucceeded) RecordContextualFailure(Context, ExportName, Error, OutResult);
 		if (Operation == EInstanceLifecycleOperation::End && ValidateInstanceExecutionState(Context))
 		{
 			Context.InstanceExecutionState->bEndPlaySucceeded = false;
@@ -383,9 +406,10 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlayInContext(const FAvidScriptWasmHos
 	return InvokeInstanceLifecycle(Context, EInstanceLifecycleOperation::Begin, 0.0f, OutResult);
 }
 
-bool FAvidScriptWasmRuntimeInstance::TickInContext(const FAvidScriptWasmHostContext& Context, float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult)
+bool FAvidScriptWasmRuntimeInstance::TickInContext(const FAvidScriptWasmHostContext& Context, float DeltaSeconds,
+	FAvidScriptWasmSmokeResult& OutResult, EAvidScriptWasmResultDetail ResultDetail)
 {
-	return InvokeInstanceLifecycle(Context, EInstanceLifecycleOperation::Tick, DeltaSeconds, OutResult);
+	return InvokeInstanceLifecycle(Context, EInstanceLifecycleOperation::Tick, DeltaSeconds, OutResult, ResultDetail);
 }
 
 bool FAvidScriptWasmRuntimeInstance::EndPlayInContext(const FAvidScriptWasmHostContext& Context, FAvidScriptWasmSmokeResult& OutResult)
@@ -406,4 +430,75 @@ bool FAvidScriptWasmRuntimeInstance::RetireInstanceExecutionState(
 	State->ActiveTimers.Reset(); State->TimerHeap.Reset(); State->DueTimerScratch.Reset();
 	State->StaleTimerHeapEntryCount = 0;
 	return true;
+}
+
+bool FAvidScriptWasmRuntimeInstance::InvokeInstanceCallback(const FAvidScriptWasmHostContext& Context,
+	const FString& ExportName, TFunctionRef<bool()> Operation, FAvidScriptWasmSmokeResult& OutResult, bool bResumeSuspended)
+{
+	if (!IsInGameThread() || !Context.InstanceExecutionState)
+	{
+		OutResult = {}; OutResult.ErrorCategory = TEXT("context_instance_callback");
+		OutResult.ErrorMessage = TEXT("instance callback requires the Game Thread and an explicit state");
+		return false;
+	}
+	FAvidScriptVmError Error;
+	bool bEntered = false, bOperationSucceeded = false;
+	const bool bSucceeded = InvokeContextOperation(Context.InstanceExecutionState->LifecycleScopeCall, Context,
+		[&](FAvidScriptVmError& Failure)
+		{
+			if (GetLifecycleState() != EAvidScriptLifecycleState::Running)
+			{
+				Failure.Category = TEXT("context_instance_not_running");
+				Failure.Details = TEXT("instance callback requires a running owner");
+				return false;
+			}
+			bEntered = true;
+			bOperationSucceeded = Operation();
+			if (!bOperationSucceeded) { Failure.Category = OutResult.ErrorCategory; Failure.Details = OutResult.ErrorMessage; }
+			return bOperationSucceeded;
+		}, Error, bResumeSuspended);
+	if (!bSucceeded && (!bEntered || bOperationSucceeded)) RecordContextualFailure(Context, ExportName, Error, OutResult);
+	return bSucceeded;
+}
+
+bool FAvidScriptWasmRuntimeInstance::DispatchEventInContext(const FAvidScriptWasmHostContext& Context,
+	int32 EventId, float Value, FAvidScriptWasmSmokeResult& OutResult, EAvidScriptWasmResultDetail Detail)
+{
+	return InvokeInstanceCallback(Context, TEXT("avid_on_event"),
+		[&] { return DispatchEventInternal(EventId, Value, OutResult, Detail); }, OutResult);
+}
+
+bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEventInContext(const FAvidScriptWasmHostContext& Context,
+	const FAvidScriptGameplayEvent& Event, FAvidScriptWasmSmokeResult& OutResult, EAvidScriptWasmResultDetail Detail)
+{
+	return InvokeInstanceCallback(Context, TEXT("avid_on_gameplay_event"),
+		[&] { return DispatchGameplayEventInternal(Event, OutResult, Detail); }, OutResult);
+}
+
+bool FAvidScriptWasmRuntimeInstance::DispatchDebugResumeInContext(const FAvidScriptWasmHostContext& Context,
+	int64 Token, uint32 Route, FAvidScriptWasmSmokeResult& OutResult)
+{
+	return InvokeInstanceCallback(Context, TEXT("avid_on_debug_resume"),
+		[&] { return DispatchDebugResumeInternal(Token, Route, OutResult); }, OutResult, true);
+}
+
+bool FAvidScriptWasmRuntimeInstance::CaptureSnapshotInContext(const FAvidScriptWasmHostContext& Context, FAvidScriptWasmSmokeResult& OutResult)
+{
+	if (!IsInGameThread() || !Context.InstanceExecutionState || !ValidateInstanceExecutionState(Context))
+	{
+		OutResult = {}; OutResult.ErrorCategory = TEXT("context_instance_snapshot");
+		return false;
+	}
+	TGuardValue<FAvidScriptWasmInstanceExecutionState*> Guard(ActiveInstanceState, Context.InstanceExecutionState.Get());
+	CaptureSnapshot(OutResult);
+	OutResult.BindingInstrumentation = Context.BindingInvocationInstrumentation
+		? *Context.BindingInvocationInstrumentation : FAvidScriptBindingInvocationInstrumentation();
+	return true;
+}
+
+FAvidScriptWasmHotSnapshot FAvidScriptWasmRuntimeInstance::GetHotSnapshotInContext(const FAvidScriptWasmHostContext& Context)
+{
+	if (!IsInGameThread() || !Context.InstanceExecutionState || !ValidateInstanceExecutionState(Context)) return {};
+	TGuardValue<FAvidScriptWasmInstanceExecutionState*> Guard(ActiveInstanceState, Context.InstanceExecutionState.Get());
+	return GetHotSnapshot();
 }

@@ -5161,7 +5161,9 @@ foreach ($RequiredSessionHostEffectContract in @(
     'CandidateHostContext.HostEffectJournal = &HostEffectTransaction.GetValue()',
     'HostEffectTransaction->Rollback(',
     'HostEffectTransaction->Commit(',
-    'CandidateRuntime->SetHostContext(HostContext)',
+    'SetRuntimeBaseContext(*CandidateRuntime, HostContext)',
+    'SetRuntimeBaseContext(*CandidateRuntime, CandidateHostContext)',
+    'Base.HostEffectJournal = Context.HostEffectJournal',
     'HostContext.HostEffectJournal = nullptr'
 )) {
     if (-not $RuntimeSessionSource.Contains($RequiredSessionHostEffectContract)) {

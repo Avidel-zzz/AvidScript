@@ -30,7 +30,7 @@ private:
 
 EGeneratedCallShape ResolveCallShape(
 	const FAvidScriptGeneratedMemberPlan& Member,
-	const FAvidScriptVmPreparedExportCall& Call)
+	const FAvidScriptContextualExportCall& Call)
 {
 	if (Member.Kind != EAvidScriptGeneratedMemberKind::Function)
 	{
@@ -38,15 +38,15 @@ EGeneratedCallShape ResolveCallShape(
 	}
 	if (Member.Function == nullptr)
 	{
-		if (!Member.bLifecycle || Call.ResultCellCount != 0)
+		if (!Member.bLifecycle || Call.GetResultCellCount() != 0)
 		{
 			return EGeneratedCallShape::Unsupported;
 		}
-		if (Call.ParameterCellCount == 2)
+		if (Call.GetParameterCellCount() == 2)
 		{
 			return EGeneratedCallShape::ReceiverVoid;
 		}
-		return Call.ParameterCellCount == 3
+		return Call.GetParameterCellCount() == 3
 			? EGeneratedCallShape::ReceiverF32Void
 			: EGeneratedCallShape::Unsupported;
 	}
@@ -71,18 +71,18 @@ EGeneratedCallShape ResolveCallShape(
 	}
 
 	if (InputCount == 0 && ReturnProperty == nullptr
-		&& Call.ParameterCellCount == 2 && Call.ResultCellCount == 0)
+		&& Call.GetParameterCellCount() == 2 && Call.GetResultCellCount() == 0)
 	{
 		return EGeneratedCallShape::ReceiverVoid;
 	}
 	if (InputCount == 0 && CastField<FIntProperty>(ReturnProperty) != nullptr
-		&& Call.ParameterCellCount == 2 && Call.ResultCellCount == 1)
+		&& Call.GetParameterCellCount() == 2 && Call.GetResultCellCount() == 1)
 	{
 		return EGeneratedCallShape::ReceiverI32;
 	}
 	if (InputCount == 1 && CastField<FFloatProperty>(InputProperty) != nullptr
 		&& ReturnProperty == nullptr
-		&& Call.ParameterCellCount == 3 && Call.ResultCellCount == 0)
+		&& Call.GetParameterCellCount() == 3 && Call.GetResultCellCount() == 0)
 	{
 		return EGeneratedCallShape::ReceiverF32Void;
 	}
@@ -195,6 +195,8 @@ bool FAvidScriptRuntimeSession::ClearGeneratedTypeInstance(FString& OutError)
 		OutError = TEXT("generated type instance router rejected registration teardown");
 		return false;
 	}
+	if (LiveRuntime && HostContext.InstanceExecutionState && !HostContext.InstanceExecutionState->IsRetired()
+		&& !LiveRuntime->RetireInstanceExecutionState(HostContext.InstanceExecutionState, OutError)) return false;
 	HostContext.GeneratedTypeAuthority.Reset();
 	GeneratedTypeInstance.Reset();
 	return true;
@@ -254,9 +256,9 @@ bool FAvidScriptRuntimeSession::PrepareGeneratedTypeExports(
 			{
 				continue;
 			}
-			FAvidScriptVmPreparedExportCall& Call = Route.Calls[Member.MemberOrdinal];
+			FAvidScriptContextualExportCall& Call = Route.Calls[Member.MemberOrdinal];
 			FString PrepareError;
-			if (!Runtime.PrepareNamedExportCall(Member.ExportName, Call, PrepareError))
+			if (!Runtime.PrepareContextualExportCall(Member.ExportName, Call, PrepareError))
 			{
 				OutError = FString::Printf(
 					TEXT("stable_member_id=%s; export=%s; %s"),
@@ -266,7 +268,7 @@ bool FAvidScriptRuntimeSession::PrepareGeneratedTypeExports(
 				OutRoutes.Reset();
 				return false;
 			}
-			if (Call.ParameterCellCount < 2)
+			if (Call.GetParameterCellCount() < 2)
 			{
 				OutError = FString::Printf(
 					TEXT("generated export '%s' omits the packed ObjectHandle receiver"),
@@ -319,7 +321,7 @@ bool FAvidScriptRuntimeSession::InvokeGeneratedTypeMember(
 		return false;
 	}
 
-	const FAvidScriptVmPreparedExportCall& Call = Route.Calls[MemberOrdinal];
+	const FAvidScriptContextualExportCall& Call = Route.Calls[MemberOrdinal];
 	const EGeneratedCallShape Shape = static_cast<EGeneratedCallShape>(
 		Route.CallShapes[MemberOrdinal]);
 	if (!Call.IsValid() || Shape == EGeneratedCallShape::Unsupported)
@@ -358,7 +360,7 @@ bool FAvidScriptRuntimeSession::InvokeGeneratedTypeMember(
 		TGuardValue<int32> GuestCallGuard(
 			ActiveGuestCallDepth,
 			ActiveGuestCallDepth + 1);
-		bCalled = Call.Call(
+		bCalled = LiveRuntime->InvokeInContext(Call, HostContext,
 			Frame,
 			Error,
 			Shape == EGeneratedCallShape::ReceiverI32
@@ -371,7 +373,7 @@ bool FAvidScriptRuntimeSession::InvokeGeneratedTypeMember(
 	if (!bCalled)
 	{
 		FAvidScriptWasmSmokeResult Failure;
-		LiveRuntime->RecordPreparedVmFailure(
+		LiveRuntime->RecordContextualFailure(HostContext,
 			ExportName,
 			Error,
 			Failure);

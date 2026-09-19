@@ -14,7 +14,7 @@ class FAvidScriptRuntimeSession;
 struct FAvidScriptGeneratedPreparedTypeRoute
 {
 	bool bEnabled = false;
-	TArray<FAvidScriptVmPreparedExportCall> Calls;
+	TArray<FAvidScriptContextualExportCall> Calls;
 	TArray<uint8> CallShapes;
 };
 

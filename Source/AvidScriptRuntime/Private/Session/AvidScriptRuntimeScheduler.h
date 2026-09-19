@@ -5,7 +5,7 @@
 class FAvidScriptRuntimeScheduler
 {
 public:
-	void Attach(FAvidScriptWasmRuntimeInstance& Runtime);
+	void Attach(FAvidScriptWasmRuntimeInstance& Runtime, const FAvidScriptWasmHostContext* InstanceContext = nullptr);
 	void Detach();
 
 	bool Tick(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult);
@@ -17,6 +17,7 @@ public:
 	bool IsAttached() const { return ActiveRuntime != nullptr; }
 	bool IsAttachedTo(const FAvidScriptWasmRuntimeInstance* Runtime) const { return ActiveRuntime == Runtime; }
 	FAvidScriptWasmRuntimeInstance* GetActiveRuntime() const { return ActiveRuntime; }
+	const FAvidScriptWasmHostContext* GetInstanceContext() const { return ActiveInstanceContext; }
 	EAvidScriptLifecycleState GetLifecycleState() const;
 	FString GetModuleId() const;
 	int32 GetTickCallCount() const;
@@ -26,4 +27,6 @@ public:
 
 private:
 	FAvidScriptWasmRuntimeInstance* ActiveRuntime = nullptr;
+	// Session owns this stable context object and detaches before destruction.
+	const FAvidScriptWasmHostContext* ActiveInstanceContext = nullptr;
 };

@@ -30,7 +30,9 @@ bool FAvidScriptRuntimeEventRouter::Dispatch(
 		return false;
 	}
 
-	return Runtime->DispatchEvent(EventId, Value, OutResult);
+	return Scheduler.GetInstanceContext()
+		? Runtime->DispatchEventInContext(*Scheduler.GetInstanceContext(), EventId, Value, OutResult)
+		: Runtime->DispatchEvent(EventId, Value, OutResult);
 }
 
 bool FAvidScriptRuntimeEventRouter::Dispatch(
@@ -43,7 +45,9 @@ bool FAvidScriptRuntimeEventRouter::Dispatch(
 		SetEventRouterStateFailure(Scheduler, TEXT("avid_on_gameplay_event"), OutResult);
 		return false;
 	}
-	return Runtime->DispatchGameplayEvent(Event, OutResult);
+	return Scheduler.GetInstanceContext()
+		? Runtime->DispatchGameplayEventInContext(*Scheduler.GetInstanceContext(), Event, OutResult)
+		: Runtime->DispatchGameplayEvent(Event, OutResult);
 }
 
 bool FAvidScriptRuntimeEventRouter::DispatchHot(
@@ -60,7 +64,9 @@ bool FAvidScriptRuntimeEventRouter::DispatchHot(
 			OutFailure);
 		return false;
 	}
-	return Runtime->DispatchEventHot(EventId, Value, OutFailure);
+	return Scheduler.GetInstanceContext()
+		? Runtime->DispatchEventInContext(*Scheduler.GetInstanceContext(), EventId, Value, OutFailure, EAvidScriptWasmResultDetail::HotFailureOnly)
+		: Runtime->DispatchEventHot(EventId, Value, OutFailure);
 }
 
 bool FAvidScriptRuntimeEventRouter::DispatchHot(
@@ -76,7 +82,9 @@ bool FAvidScriptRuntimeEventRouter::DispatchHot(
 			OutFailure);
 		return false;
 	}
-	return Runtime->DispatchGameplayEventHot(Event, OutFailure);
+	return Scheduler.GetInstanceContext()
+		? Runtime->DispatchGameplayEventInContext(*Scheduler.GetInstanceContext(), Event, OutFailure, EAvidScriptWasmResultDetail::HotFailureOnly)
+		: Runtime->DispatchGameplayEventHot(Event, OutFailure);
 }
 
 bool FAvidScriptRuntimeEventRouter::Dispatch(

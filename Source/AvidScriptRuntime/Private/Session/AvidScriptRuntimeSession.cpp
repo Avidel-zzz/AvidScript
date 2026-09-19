@@ -281,7 +281,7 @@ bool FAvidScriptRuntimeSession::ResumeFromApplicationLifecycle(
 	bApplicationSuspended = false;
 	ResetSuspendedContext();
 	if (LiveRuntime
-		&& LiveRuntime->GetLifecycleState() == EAvidScriptLifecycleState::Running)
+		&& GetLiveLifecycleState() == EAvidScriptLifecycleState::Running)
 	{
 		DelegateSubscriptions->SetDispatchEnabled(true);
 		InboundHandlers->SetDispatchEnabled(true);
@@ -512,7 +512,7 @@ bool FAvidScriptRuntimeSession::LoadEmbeddedSmoke(FAvidScriptWasmReloadResult& O
 		return false;
 	}
 
-	CandidateRuntime->SetHostContext(HostContext);
+	SetRuntimeBaseContext(*CandidateRuntime, HostContext);
 	if (!ActivateValidatedRuntime(CandidateRuntime, Manifest, false, OutResult))
 	{
 		OutResult.ActiveModuleId = GetLiveModuleId();
@@ -729,6 +729,21 @@ bool FAvidScriptRuntimeSession::ReloadArtifact(
 	ProfileScope.SetSucceeded(true);
 	return true;
 }
+void FAvidScriptRuntimeSession::SetRuntimeBaseContext(
+	FAvidScriptWasmRuntimeInstance& Runtime, const FAvidScriptWasmHostContext& Context) const
+{
+	if (GeneratedTypeInstance || Context.InstanceExecutionState)
+	{
+		// No instance-owned endpoint may survive in a shared module's base context.
+		FAvidScriptWasmHostContext Base;
+		Base.ObjectRegistry = Context.ObjectRegistry;
+		Base.World = Context.World;
+		Base.HostEffectJournal = Context.HostEffectJournal;
+		Runtime.SetHostContext(Base);
+	}
+	else Runtime.SetHostContext(Context);
+}
+
 void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext& InHostContext)
 {
 	PrunePendingBorrowedHandles();
@@ -752,6 +767,7 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 	}
 	TGuardValue<bool> MutationGuard(bMutationInProgress, true);
 	FAvidScriptWasmHostContext NextHostContext = InHostContext;
+	NextHostContext.InstanceExecutionState = HostContext.InstanceExecutionState;
 	NextHostContext.GeneratedTypeAuthority = GeneratedTypeInstance
 		? GeneratedTypeInstance->Authority : TWeakPtr<IAvidScriptGeneratedTypeAuthority>();
 	NextHostContext.ObjectOwnership = ObjectOwnership.Get();
@@ -781,6 +797,12 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 		HostContext.ObjectRegistry != NextHostContext.ObjectRegistry
 		|| HostContext.OwnerHandle != NextHostContext.OwnerHandle
 		|| HostContext.World != NextHostContext.World;
+	if (HostContext.InstanceExecutionState && bDelegateSourceChanged)
+	{
+		UE_LOG(LogAvidScriptRuntimeSession, Warning,
+			TEXT("Generated Session context rebinding requires stopping its owner-bound execution state first."));
+		return;
+	}
 	if (bDelegateSourceChanged)
 	{
 		DelegateSubscriptions->UnbindActive();
@@ -819,10 +841,10 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 	HostContext = MoveTemp(NextHostContext);
 	if (LiveRuntime)
 	{
-		LiveRuntime->SetHostContext(HostContext);
+		SetRuntimeBaseContext(*LiveRuntime, HostContext);
 		Continuations->ReleaseRetiredEndpoint();
 		if (bDelegateSourceChanged
-			&& LiveRuntime->GetLifecycleState()
+			&& GetLiveLifecycleState()
 				== EAvidScriptLifecycleState::Running)
 		{
 			TArray<FAvidScriptPreparedDelegateEvent> Events;
@@ -880,6 +902,11 @@ void FAvidScriptRuntimeSession::ClearHostContext()
 		return;
 	}
 	TGuardValue<bool> MutationGuard(bMutationInProgress, true);
+	if (LiveRuntime && HostContext.InstanceExecutionState && !HostContext.InstanceExecutionState->IsRetired())
+	{
+		FString RetireError;
+		if (!LiveRuntime->RetireInstanceExecutionState(HostContext.InstanceExecutionState, RetireError)) return;
+	}
 	DelegateSubscriptions->UnbindActive();
 	DelegateSubscriptions->DiscardPrepared();
 	InboundHandlers->UnbindActive();
@@ -895,7 +922,7 @@ void FAvidScriptRuntimeSession::ClearHostContext()
 	bBorrowedHandlePrunePending = false;
 	if (LiveRuntime)
 	{
-		LiveRuntime->SetHostContext(HostContext);
+		SetRuntimeBaseContext(*LiveRuntime, HostContext);
 		Continuations->ReleaseRetiredEndpoint();
 	}
 }
@@ -1103,9 +1130,10 @@ bool FAvidScriptRuntimeSession::PumpReadyContinuations(
 		{
 			Continuations->Teardown();
 			HostContext.Continuations = nullptr;
+			HostContext.LatentHost = nullptr;
 			if (LiveRuntime)
 			{
-				LiveRuntime->SetHostContext(HostContext);
+				SetRuntimeBaseContext(*LiveRuntime, HostContext);
 			}
 			Continuations->ReleaseRetiredEndpoint();
 			return false;
@@ -1120,6 +1148,13 @@ bool FAvidScriptRuntimeSession::CanEnterGuest(
 	FAvidScriptWasmSmokeResult& OutResult)
 {
 	PrunePendingBorrowedHandles();
+	if (LiveRuntime && ((GeneratedTypeInstance && !HostContext.InstanceExecutionState)
+		|| (HostContext.InstanceExecutionState && HostContext.InstanceExecutionState->IsRetired())))
+	{
+		SetSessionExecutionFailure(GetLiveModuleId(), FString(ExportName.Len(), ExportName.GetData()),
+			TEXT("generated instance execution state is missing or retired"), OutResult);
+		return false;
+	}
 	if (bApplicationSuspended || bLifecycleInvalidated)
 	{
 		OutResult = FAvidScriptWasmSmokeResult();
@@ -1173,7 +1208,7 @@ void FAvidScriptRuntimeSession::QuarantineFaultedRuntime(
 	const FAvidScriptWasmSmokeResult& Failure)
 {
 	if (!LiveRuntime
-		|| LiveRuntime->GetLifecycleState() !=
+		|| GetLiveLifecycleState() !=
 			EAvidScriptLifecycleState::Faulted)
 	{
 		return;
@@ -1408,6 +1443,7 @@ bool FAvidScriptRuntimeSession::CaptureLiveSnapshot(
 			OutResult);
 		return false;
 	}
+	if (HostContext.InstanceExecutionState) return LiveRuntime->CaptureSnapshotInContext(HostContext, OutResult);
 	LiveRuntime->CaptureSnapshot(OutResult);
 	return true;
 }
@@ -1450,10 +1486,12 @@ bool FAvidScriptRuntimeSession::EndPlayLive(FAvidScriptWasmSmokeResult& OutResul
 		TGuardValue<int32> GuestCallGuard(
 			ActiveGuestCallDepth,
 			ActiveGuestCallDepth + 1);
-		bSucceeded = LiveRuntime->EndPlay(OutResult);
+		bSucceeded = HostContext.InstanceExecutionState
+			? LiveRuntime->EndPlayInContext(HostContext, OutResult) : LiveRuntime->EndPlay(OutResult);
 	}
 	HostContext.Continuations = nullptr;
-	LiveRuntime->SetHostContext(HostContext);
+	HostContext.LatentHost = nullptr;
+	SetRuntimeBaseContext(*LiveRuntime, HostContext);
 	Continuations->ReleaseRetiredEndpoint();
 	if (!bSucceeded)
 	{
@@ -1501,8 +1539,12 @@ bool FAvidScriptRuntimeSession::StopAndUnload(FAvidScriptWasmSmokeResult& OutRes
 	Scheduler->Detach();
 	if (LiveRuntime)
 	{
-		if (LiveRuntime->GetLifecycleState() == EAvidScriptLifecycleState::Running &&
-			!LiveRuntime->EndPlay(EndPlayFailure))
+		const auto& State = HostContext.InstanceExecutionState;
+		const bool bRunning = State
+			? !State->IsRetired() && State->GetLifecycleState() == EAvidScriptLifecycleState::Running
+			: LiveRuntime->GetLifecycleState() == EAvidScriptLifecycleState::Running;
+		if (bRunning && !(State ? LiveRuntime->EndPlayInContext(HostContext, EndPlayFailure)
+			: LiveRuntime->EndPlay(EndPlayFailure)))
 		{
 			bSucceeded = false;
 		}
@@ -1525,6 +1567,8 @@ bool FAvidScriptRuntimeSession::StopAndUnload(FAvidScriptWasmSmokeResult& OutRes
 	}
 	Continuations->ReleaseRetiredEndpoint();
 	HostContext.Continuations = nullptr;
+	HostContext.LatentHost = nullptr;
+	HostContext.InstanceExecutionState.Reset();
 	if (HostContext.ObjectRegistry != nullptr)
 	{
 		ObjectOwnership->Cleanup(*HostContext.ObjectRegistry);
@@ -1692,7 +1736,10 @@ bool FAvidScriptRuntimeSession::ResumeDebugExecution(
 		TGuardValue<int32> GuestCallGuard(
 			ActiveGuestCallDepth,
 			ActiveGuestCallDepth + 1);
-		bDispatched = LiveRuntime->DispatchDebugResume(
+		bDispatched = HostContext.InstanceExecutionState
+			? LiveRuntime->DispatchDebugResumeInContext(HostContext, PausedSnapshot.SuspensionToken,
+				PausedSnapshot.ResumeRoute, OutResult)
+			: LiveRuntime->DispatchDebugResume(
 			PausedSnapshot.SuspensionToken,
 			PausedSnapshot.ResumeRoute,
 			OutResult);
@@ -1812,7 +1859,7 @@ FAvidScriptWasmHotSnapshot
 FAvidScriptRuntimeSession::GetLiveHotSnapshot() const
 {
 	return LiveRuntime
-		? LiveRuntime->GetHotSnapshot()
+		? (HostContext.InstanceExecutionState ? LiveRuntime->GetHotSnapshotInContext(HostContext) : LiveRuntime->GetHotSnapshot())
 		: FAvidScriptWasmHotSnapshot();
 }
 
@@ -2137,7 +2184,7 @@ bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 		return false;
 	}
 
-	CandidateRuntime->SetHostContext(HostContext);
+	SetRuntimeBaseContext(*CandidateRuntime, HostContext);
 	OutResult.RuntimeResult = RuntimeResult;
 	OutRuntime = MoveTemp(CandidateRuntime);
 	return true;
@@ -2360,10 +2407,22 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 			ObjectOwnership.Get(),
 			HostContext.OwnerHandle);
 	FAvidScriptWasmHostContext CandidateHostContext = HostContext;
+	CandidateHostContext.InstanceExecutionState.Reset();
 	CandidateHostContext.DebugProbes = nullptr;
 	CandidateHostContext.Continuations = &PreparedContinuationHost;
 	CandidateHostContext.LatentHost = &PreparedContinuationHost;
-	CandidateRuntime->SetHostContext(CandidateHostContext);
+	SetRuntimeBaseContext(*CandidateRuntime, CandidateHostContext);
+
+	if (GeneratedTypeInstance && !CandidateRuntime->CreateInstanceExecutionState(
+		CandidateHostContext, CandidateHostContext.InstanceExecutionState, GeneratedTypePrepareError))
+	{
+		Continuations->DiscardPrepared();
+		DiscardPreparedCallbacks();
+		SetReloadFailure(OutResult, TEXT("<instance_state>"), TEXT("instance_execution_state_prepare_failed"),
+			GeneratedTypePrepareError, TEXT("bind a live owner in the Runtime World and registry"));
+		CandidateRuntime->Unload();
+		return false;
+	}
 
 	TOptional<FAvidScriptHostEffectTransaction> HostEffectTransaction;
 	if (bUseHostEffectTransaction)
@@ -2371,7 +2430,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 		HostEffectTransaction.Emplace();
 		OutResult.bHostEffectTransactionAttempted = true;
 		CandidateHostContext.HostEffectJournal = &HostEffectTransaction.GetValue();
-		CandidateRuntime->SetHostContext(CandidateHostContext);
+		SetRuntimeBaseContext(*CandidateRuntime, CandidateHostContext);
 	}
 
 	FAvidScriptWasmSmokeResult BeginPlayResult;
@@ -2386,7 +2445,10 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 				: nullptr);
 	}
 #endif
-	if (!CandidateRuntime->BeginPlay(BeginPlayResult))
+	const bool bBegan = CandidateHostContext.InstanceExecutionState
+		? CandidateRuntime->BeginPlayInContext(CandidateHostContext, BeginPlayResult)
+		: CandidateRuntime->BeginPlay(BeginPlayResult);
+	if (!bBegan)
 	{
 		CopyRuntimeFailure(BeginPlayResult, OutResult);
 		bool bHostEffectsRolledBack = true;
@@ -2408,7 +2470,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 			bUseHostEffectTransaction
 			&& bHostEffectsRolledBack
 			&& bBorrowedHandlesRolledBack;
-		CandidateRuntime->SetHostContext(HostContext);
+		SetRuntimeBaseContext(*CandidateRuntime, HostContext);
 		Continuations->DiscardPrepared();
 		DiscardPreparedCallbacks();
 		CandidateRuntime->Unload();
@@ -2454,7 +2516,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 				? InboundCommitError
 				: ContinuationCommitError,
 			TEXT("keep the previous Runtime active and discard candidate callback state"));
-		CandidateRuntime->SetHostContext(HostContext);
+		SetRuntimeBaseContext(*CandidateRuntime, HostContext);
 		Continuations->DiscardPrepared();
 		DiscardPreparedCallbacks();
 		CandidateRuntime->Unload();
@@ -2474,7 +2536,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 				TEXT("host_effect_transaction_invalid_state"),
 				CommitResult.ErrorDetails,
 				TEXT("keep the previous runtime active and report the candidate transaction state"));
-			CandidateRuntime->SetHostContext(HostContext);
+			SetRuntimeBaseContext(*CandidateRuntime, HostContext);
 			Continuations->DiscardPrepared();
 			DiscardPreparedCallbacks();
 			CandidateRuntime->Unload();
@@ -2483,7 +2545,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 		OutResult.bHostEffectTransactionCommitted = true;
 		CopyHostEffectResult(CommitResult, OutResult);
 		CandidateHostContext.HostEffectJournal = nullptr;
-		CandidateRuntime->SetHostContext(CandidateHostContext);
+		SetRuntimeBaseContext(*CandidateRuntime, CandidateHostContext);
 	}
 	Continuations->CommitPrepared();
 
@@ -2503,7 +2565,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 	Debugger->OnRuntimeGenerationChanged();
 	CandidateHostContext.DebugProbes = Debugger.Get();
 	CandidateHostContext.Profiler = Profiler.Get();
-	CandidateRuntime->SetHostContext(CandidateHostContext);
+	SetRuntimeBaseContext(*CandidateRuntime, CandidateHostContext);
 	OutResult.RuntimeResult = BeginPlayResult;
 	LiveRuntime = MoveTemp(CandidateRuntime);
 	++GeneratedExecutionGeneration;
@@ -2513,11 +2575,13 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 		GeneratedTypeInstance->ContinuationCall = MoveTemp(CandidateContinuationCall);
 		GeneratedTypeInstance->DelegateCalls = MoveTemp(CandidateDelegateCalls);
 	}
-	Scheduler->Attach(*LiveRuntime);
 	LiveManifest = Manifest;
+	HostContext.InstanceExecutionState = CandidateHostContext.InstanceExecutionState;
 	HostContext.Continuations = CandidateHostContext.Continuations;
+	HostContext.LatentHost = CandidateHostContext.LatentHost;
 	HostContext.DebugProbes = Debugger.Get();
 	HostContext.Profiler = Profiler.Get();
+	Scheduler->Attach(*LiveRuntime, HostContext.InstanceExecutionState ? &HostContext : nullptr);
 	DelegateSubscriptions->CommitPrepared();
 	DelegateSubscriptions->SetDispatchEnabled(true);
 	InboundCommitError.Reset();

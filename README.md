@@ -62,6 +62,8 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 
 [实例执行状态分离](Docs/Phase66/P66.B_Instance_Execution_State.md)进一步将生命周期和旧 Timer 队列从 VM/堆中分离；双后端验证 A/B 独立 Tick、EndPlay 取消、共享 global 保留及旧代码状态失效。Windows 构建、C# receiver 16/16、GeneratedTypes 13/13、六组生命周期与回调回归 36/36 通过。生产 Host 共享所有权、包级 reload、完整方法路由与持久根仍待连接，P66.B 继续进行。
 
+[生成 Session 实例状态接入](Docs/Phase66/P66.B_Generated_Session_Execution_State.md)统一生产成员、Tick、事件、调试恢复、快照与故障隔离使用的实例状态，热重载使旧状态退休。Windows 构建、C# receiver 16/16、GeneratedTypes 14/14、生命周期/回调回归 36/36 通过；双后端新增 Timer、事件与调试暂停/恢复验证。生产 Host 仍是每实例独立 VM，共享执行域及包级事务继续推进。
+
 ## 现在可以做什么
 
 更新于 **2026-09-10**。已跑通 **C# → WASM → UE 事件与 API → Win64 打包运行**，

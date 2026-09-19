@@ -264,6 +264,7 @@ private:
 		FAvidScriptWasmRuntimeInstance& Runtime,
 		TArray<FAvidScriptGeneratedPreparedTypeRoute>& OutRoutes,
 		FString& OutError) const;
+	void SetRuntimeBaseContext(FAvidScriptWasmRuntimeInstance& Runtime, const FAvidScriptWasmHostContext& Context) const;
 	bool PumpReadyContinuations(FAvidScriptWasmSmokeResult& OutResult);
 	bool CanEnterGuest(
 		FStringView ExportName,

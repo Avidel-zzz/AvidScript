@@ -48,9 +48,14 @@ void AppendWasmSection(
 	const uint8 SectionId,
 	const TConstArrayView<uint8> Payload)
 {
-	check(Payload.Num() < 128);
 	Module.Add(SectionId);
-	Module.Add(static_cast<uint8>(Payload.Num()));
+	uint32 Size = static_cast<uint32>(Payload.Num());
+	do
+	{
+		const uint8 Byte = static_cast<uint8>(Size & 0x7f);
+		Size >>= 7;
+		Module.Add(Byte | (Size ? 0x80 : 0));
+	} while (Size);
 	Module.Append(Payload.GetData(), Payload.Num());
 }
 
@@ -372,9 +377,20 @@ bool FAvidScriptGeneratedCSharpSharedBindingsTest::RunTest(const FString& Parame
 		};
 		if (!Load(SessionA, *A, Types) || !Load(SessionB, *B, Types) || !Load(SessionC, *C, OtherTypes)) return false;
 		const auto ContextA = SessionA.GetTestSnapshot().HostContext;
-		const auto ContextB = SessionB.GetTestSnapshot().HostContext;
-		const auto ContextC = SessionC.GetTestSnapshot().HostContext;
+		auto ContextB = SessionB.GetTestSnapshot().HostContext;
+		auto ContextC = SessionC.GetTestSnapshot().HostContext;
 		auto* Runtime = SessionA.GetLiveRuntimeForTesting();
+		// Native sharing probe: production Sessions still own separate VMs. A state
+		// from another VM must never be reused even when the receiver ABI matches.
+		for (auto* Context : {&ContextB, &ContextC})
+		{
+			Context->InstanceExecutionState.Reset();
+			if (!TestTrue(TEXT("prepare peer state in carrier Runtime"), Runtime->CreateInstanceExecutionState(
+				*Context, Context->InstanceExecutionState, Error))) { AddError(Error); return false; }
+			FAvidScriptWasmSmokeResult Begin;
+			if (!TestTrue(TEXT("begin peer state in carrier Runtime"), Runtime->BeginPlayInContext(*Context, Begin)))
+			{ AddError(Begin.ErrorMessage); return false; }
+		}
 		FAvidScriptContextualExportCall Entry;
 		if (!TestTrue(TEXT("prepare compiled shared entry"), Runtime->PrepareContextualExportCall(Metadata->GetStringField(TEXT("export_name")), Entry, Error))) return false;
 		auto Invoke = [&](const FAvidScriptWasmHostContext& Context, const FAvidScriptObjectHandle& Self, bool bExpected, int32 ExpectedValue)
@@ -477,7 +493,7 @@ bool FAvidScriptGeneratedReceiverAuthorityTest::RunTest(const FString& Parameter
 			if (Case == TEXT("world-normalized") && !TestNotNull(TEXT("Other World fixture"), OtherWorld)) return false;
 			UObject* ReceiverOuter = World ? static_cast<UObject*>(World) : GetTransientPackage();
 			TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> Receiver(NewObject<UAvidScriptGeneratedTypeSessionTestObject>(ReceiverOuter));
-			TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> Other(NewObject<UAvidScriptGeneratedTypeSessionTestObject>());
+			TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> Other(NewObject<UAvidScriptGeneratedTypeSessionTestObject>(ReceiverOuter));
 			FAvidScriptObjectHandleResult HandleResult;
 			const auto Handle = Objects.RegisterObject(Receiver.Get(), HandleResult, false);
 			const auto Foreign = Objects.RegisterObject(Other.Get(), HandleResult, false);
@@ -509,7 +525,7 @@ bool FAvidScriptGeneratedReceiverAuthorityTest::RunTest(const FString& Parameter
 			const TArray<uint8> Module = BuildModule(Case == TEXT("foreign"), Case == TEXT("unknown-type"), Case == TEXT("wrong-signature"));
 			FAvidScriptWasmReloadResult Load;
 			const bool bLoaded = Session.LoadInitialModule(Module.GetData(), Module.Num(), Manifest, Load);
-			if (Case == TEXT("unknown-type") || Case == TEXT("wrong-signature"))
+			if (Case == TEXT("unknown-type") || Case == TEXT("wrong-signature") || Case == TEXT("registry-missing"))
 			{
 				TestFalse(TEXT("Unknown or ABI-mismatched receiver import cannot load"), bLoaded);
 				TestFalse(TEXT("Invalid import has a diagnostic"), Load.ErrorMessage.IsEmpty());
@@ -526,10 +542,12 @@ bool FAvidScriptGeneratedReceiverAuthorityTest::RunTest(const FString& Parameter
 				TestTrue(TEXT("Rebound registry reproduces numeric handle"), ReboundHandle == Handle);
 				Context.ObjectRegistry = &ReboundObjects;
 				Session.SetHostContext(Context);
+				TestTrue(TEXT("live execution state rejects registry rebinding"), Session.GetTestSnapshot().HostContext.ObjectRegistry == &Objects);
+				Context.ObjectRegistry = &Objects;
 			}
 			int32 Result = -1;
 			const bool bCalled = FAvidScriptGeneratedTypeDispatcher::Invoke(Receiver.Get(), 0, 0, {}, &Result);
-			const bool bExpectedLive = Case == TEXT("live") || Case == TEXT("world-normalized");
+			const bool bExpectedLive = Case == TEXT("live") || Case == TEXT("world-normalized") || Case == TEXT("registry-rebound");
 			TestEqual(TEXT("Only live current authority executes"), bCalled, bExpectedLive);
 			if (bExpectedLive)
 			{
@@ -592,8 +610,14 @@ bool FAvidScriptGeneratedTypeSessionTest::RunTest(const FString& Parameters)
 
 	TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> Receiver(
 		NewObject<UAvidScriptGeneratedTypeSessionTestObject>());
-	const FAvidScriptObjectHandle ReceiverHandle{ 17, 5 };
+	FAvidScriptObjectRegistry Objects;
+	FAvidScriptObjectHandleResult HandleResult;
+	const auto ReceiverHandle = Objects.RegisterObject(Receiver.Get(), HandleResult, false);
+	FAvidScriptWasmHostContext Context;
+	Context.ObjectRegistry = &Objects;
+	Context.OwnerHandle = ReceiverHandle;
 	FAvidScriptRuntimeSession Session;
+	Session.SetHostContext(Context);
 	TestTrue(
 		TEXT("Session owns the generated receiver route"),
 		Session.ConfigureGeneratedTypeInstance(
@@ -641,7 +665,7 @@ bool FAvidScriptGeneratedTypeSessionTest::RunTest(const FString& Parameters)
 			0,
 			TConstArrayView<FAvidScriptGeneratedCallArgument>(),
 			&ScriptResult));
-	TestEqual(TEXT("Packed ObjectHandle low cell reaches C# this"), ScriptResult, 17);
+	TestEqual(TEXT("Packed ObjectHandle low cell reaches C# this"), ScriptResult, static_cast<int32>(ReceiverHandle.Slot));
 	const uint64 InitialGeneration = Session.GetGeneratedExecutionGeneration();
 	TestTrue(TEXT("Loaded Session has a nonzero execution generation"), InitialGeneration != 0);
 
@@ -658,7 +682,7 @@ bool FAvidScriptGeneratedTypeSessionTest::RunTest(const FString& Parameters)
 			0,
 			TConstArrayView<FAvidScriptGeneratedCallArgument>(),
 			&ScriptResult));
-	TestEqual(TEXT("Reloaded export preserves receiver identity"), ScriptResult, 17);
+	TestEqual(TEXT("Reloaded export preserves receiver identity"), ScriptResult, static_cast<int32>(ReceiverHandle.Slot));
 	TestEqual(TEXT("Committed reload advances execution generation"), Session.GetGeneratedExecutionGeneration(), InitialGeneration + 1);
 
 	FAvidScriptWasmSmokeResult StopResult;
@@ -677,6 +701,7 @@ bool FAvidScriptGeneratedTypeSessionTest::RunTest(const FString& Parameters)
 		Session.ClearGeneratedTypeInstance(Error));
 
 	FAvidScriptRuntimeSession TrapSession;
+	TrapSession.SetHostContext(Context);
 	TestTrue(
 		TEXT("Trap Session owns the generated receiver route"),
 		TrapSession.ConfigureGeneratedTypeInstance(
@@ -1308,6 +1333,10 @@ bool FAvidScriptGeneratedContextContinuationTest::RunTest(const FString& Paramet
 		if (!Session.LoadInitialModule(Wasm.GetData(), Wasm.Num(), Manifest, Loaded)) { AddError(Loaded.ErrorMessage); return false; }
 		for (int32 Generation = 0; Generation < 2; ++Generation)
 		{
+			const auto State = Session.GetTestSnapshot().HostContext.InstanceExecutionState;
+			if (!TestTrue(TEXT("production Session owns an explicit execution state"), State.IsValid())) return false;
+			TestTrue(TEXT("instance lifecycle is Running"), Session.GetSnapshot().LifecycleState == EAvidScriptLifecycleState::Running);
+			TestTrue(TEXT("Runtime default lifecycle remains Loaded"), Session.GetLiveRuntimeForTesting()->GetLifecycleState() == EAvidScriptLifecycleState::Loaded);
 			World->Tick(LEVELTICK_All, 0); ++GFrameCounter; World->Tick(LEVELTICK_All, 0.02f); ++GFrameCounter;
 			FAvidScriptWasmSmokeResult TickResult;
 			if (!TestTrue(TEXT("generated Session pumps contextual continuation"), Session.TickLive(0.001f, TickResult))) { AddError(TickResult.ErrorMessage); return false; }
@@ -1315,11 +1344,150 @@ bool FAvidScriptGeneratedContextContinuationTest::RunTest(const FString& Paramet
 			TestTrue(TEXT("generated route observes callback state"), FAvidScriptGeneratedTypeDispatcher::Invoke(Owner.Get(), 0, 0, {}, &Value));
 			TestEqual(TEXT("callback executed exactly once in the owner context"), Value, 1000 + static_cast<int32>(Context.OwnerHandle.Slot));
 			TestEqual(TEXT("continuation entry finalized"), Session.GetLivePendingContinuationCount(), 0);
+			TestEqual(TEXT("Session reports the selected state's tick count"), Session.GetLiveTickCallCount(), 1);
+			TestEqual(TEXT("default Runtime tick count remains zero"), Session.GetLiveRuntimeForTesting()->GetTickCallCount(), 0);
+			FAvidScriptWasmSmokeResult Snapshot;
+			TestTrue(TEXT("full snapshot selects the instance"), Session.CaptureLiveSnapshot(Snapshot));
+			TestEqual(TEXT("full snapshot has instance tick count"), Snapshot.TickCallCount, 1);
+			TestEqual(TEXT("hot snapshot has instance tick count"), Session.GetLiveHotSnapshot().TickCallCount, 1);
 			if (Generation == 0 && !Session.ReloadModule(Wasm.GetData(), Wasm.Num(), Manifest, Loaded)) { AddError(Loaded.ErrorMessage); return false; }
+			if (Generation == 0)
+			{
+				TestTrue(TEXT("reload retires old instance state"), State->IsRetired());
+				TestTrue(TEXT("reload publishes a distinct state"), State != Session.GetTestSnapshot().HostContext.InstanceExecutionState);
+			}
 		}
+		const auto FinalState = Session.GetTestSnapshot().HostContext.InstanceExecutionState;
 		FAvidScriptWasmSmokeResult Stop;
 		TestTrue(TEXT("generated callback Session stops"), Session.StopAndUnload(Stop));
+		TestTrue(TEXT("stop retires retained execution state"), FinalState->IsRetired());
 		TestTrue(TEXT("generated callback registration clears"), Session.ClearGeneratedTypeInstance(Error));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptGeneratedSessionExecutionEntriesTest,
+	"AvidScript.Runtime.GeneratedTypes.SessionExecutionEntries",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptGeneratedSessionExecutionEntriesTest::RunTest(const FString& Parameters)
+{
+	// Real VM exports exercise Session scheduling, debug suspension and event entry.
+	TArray<uint8> Wasm{0, 0x61, 0x73, 0x6d, 1, 0, 0, 0};
+	AppendWasmSection(Wasm, 1, {10,
+		0x60, 0, 0, // 0: lifecycle
+		0x60, 1, 0x7e, 1, 0x7f, // 1: receiver / debug probe
+		0x60, 1, 0x7d, 0, // 2: Tick
+		0x60, 2, 0x7f, 0x7d, 0, // 3: event
+		0x60, 4, 0x7e, 0x7f, 0x7f, 0x7f, 1, 0x7e, // 4: debug suspend
+		0x60, 3, 0x7e, 0x7f, 0x7f, 1, 0x7f, // 5: frame read
+		0x60, 2, 0x7e, 0x7f, 0, // 6: debug resume
+		0x60, 2, 0x7f, 0x7f, 0, // 7: timer
+		0x60, 2, 0x7d, 0x7f, 1, 0x7f, // 8: timer set once
+		0x60, 8, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7d, 0x7d, 0x7d, 0}); // 9: gameplay event
+	TArray<uint8> Imports{4};
+	auto Import = [&](const char* Name, uint8 Type)
+	{
+		const char* Namespace = "avidscript";
+		for (const char* Text : {Namespace, Name})
+		{
+			const int32 Length = FCStringAnsi::Strlen(Text);
+			Imports.Add(static_cast<uint8>(Length)); Imports.Append(reinterpret_cast<const uint8*>(Text), Length);
+		}
+		Imports.Append({0, Type});
+	};
+	Import("avid_debug_probe", 1); Import("avid_debug_suspend", 4);
+	Import("avid_debug_frame_read", 5); Import("timer_set_once", 8);
+	AppendWasmSection(Wasm, 2, Imports);
+	AppendWasmSection(Wasm, 3, {8, 0, 1, 2, 3, 6, 7, 9, 0});
+	AppendWasmSection(Wasm, 5, {1, 0, 1});
+	AppendWasmSection(Wasm, 6, {1, 0x7f, 1, 0x41, 0, 0x0b});
+	TArray<uint8> Exports{9};
+	AppendWasmExport(Exports, "avid_on_begin_play", 4);
+	AppendWasmExport(Exports, "avid_ue_0123456789abcdef0123456789abcdef", 5);
+	AppendWasmExport(Exports, "avid_on_tick", 6);
+	AppendWasmExport(Exports, "avid_on_event", 7);
+	AppendWasmExport(Exports, "avid_on_debug_resume", 8);
+	AppendWasmExport(Exports, "avid_on_timer", 9);
+	AppendWasmExport(Exports, "avid_on_gameplay_event", 10);
+	AppendWasmExport(Exports, "avid_on_end_play", 11);
+	Exports.Append({6, 'm', 'e', 'm', 'o', 'r', 'y', 2, 0});
+	AppendWasmSection(Wasm, 7, Exports);
+	const TArray<uint8> Begin{0, 0x43, 0, 0, 0, 0, 0x41, 7, 0x10, 3, 0x1a, 0x0b};
+	const TArray<uint8> Get{0, 0x23, 0, 0x0b};
+	// On a requested pause, commit one byte at non-null memory[16], route 1, then return.
+	const TArray<uint8> Tick{0, 0x42, 1, 0x10, 0, 0x04, 0x40,
+		0x42, 1, 0x41, 1, 0x41, 16, 0x41, 1, 0x10, 1, 0x1a, 0x0b, 0x0b};
+	const TArray<uint8> Increment{0, 0x23, 0, 0x41, 1, 0x6a, 0x24, 0, 0x0b};
+	const TArray<uint8> Resume{0, 0x20, 0, 0x41, 16, 0x41, 1, 0x10, 2, 0x1a,
+		0x23, 0, 0x41, 10, 0x6a, 0x24, 0, 0x0b};
+	TArray<uint8> Code{8};
+	for (const auto* Body : {&Begin, &Get, &Tick, &Increment, &Resume, &Increment, &Increment, &Increment})
+	{
+		Code.Add(static_cast<uint8>(Body->Num())); Code.Append(*Body);
+	}
+	AppendWasmSection(Wasm, 10, Code);
+	TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot> Registry;
+	FString Error;
+	if (!FAvidScriptGeneratedTypeRegistry::BuildFromJson(BuildGeneratedTypeSessionManifest(), Registry, Error)) return false;
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	{
+		FAvidScriptObjectRegistry Objects;
+		TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> Owner(NewObject<UAvidScriptGeneratedTypeSessionTestObject>());
+		FAvidScriptObjectHandleResult HandleResult;
+		FAvidScriptWasmHostContext Context;
+		Context.ObjectRegistry = &Objects;
+		Context.OwnerHandle = Objects.RegisterObject(Owner.Get(), HandleResult, false);
+		FAvidScriptRuntimeSession Session;
+		Session.SetHostContext(Context);
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime ? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		Session.SetBackendSelectionForTesting(Selection);
+		if (!Session.ConfigureGeneratedTypeInstance(*Owner, Context.OwnerHandle, 0, Registry, Error)) return false;
+		FAvidScriptWasmReloadManifest Manifest;
+		Manifest.ModuleId = TEXT("generated_session_entries"); Manifest.Language = TEXT("wasm");
+		Manifest.AbiVersion = FAvidScriptWasmReloadManifest::SupportedAbiVersion;
+		Manifest.RequiredExports = {TEXT("avid_on_begin_play"), TEXT("avid_on_tick"), TEXT("avid_on_debug_resume")};
+		for (const TCHAR* Name : {TEXT("avid_debug_probe"), TEXT("avid_debug_suspend"), TEXT("avid_debug_frame_read"), TEXT("timer_set_once")})
+			Manifest.RequiredImports.Add({TEXT("avidscript"), Name});
+		FAvidScriptWasmReloadResult Load;
+		if (!Session.LoadInitialModule(Wasm.GetData(), Wasm.Num(), Manifest, Load)) { AddError(Load.ErrorMessage); return false; }
+		const auto State = Session.GetTestSnapshot().HostContext.InstanceExecutionState;
+		TestEqual(TEXT("BeginPlay schedules an instance Timer"), Session.GetLivePendingTimerCount(), 1);
+		FAvidScriptWasmSmokeResult Result;
+		TestTrue(TEXT("Tick dispatches the instance Timer"), Session.Tick(0.01f, Result));
+		TestEqual(TEXT("Timer belongs to instance state"), Session.GetLiveTimerCallbackCount(), 1);
+		TestEqual(TEXT("Timer consumes its queue"), Session.GetLivePendingTimerCount(), 0);
+		TestTrue(TEXT("ordinary event uses instance state"), Session.DispatchEvent(7, 2.0f, Result));
+		FAvidScriptGameplayEvent Event; Event.Type = EAvidScriptGameplayEventType::Input;
+		TestTrue(TEXT("typed gameplay event uses instance state"), Session.DispatchGameplayEventLive(Event, Result));
+		Result.ErrorMessage = TEXT("hot-success-sentinel");
+		TestTrue(TEXT("hot ordinary event succeeds"), Session.DispatchEventHot(8, 3.0f, Result));
+		TestTrue(TEXT("hot typed event succeeds"), Session.DispatchGameplayEventHot(Event, Result));
+		TestTrue(TEXT("hot Tick succeeds"), Session.TickHot(0.01f, Result));
+		TestEqual(TEXT("hot success does not overwrite failure output"), Result.ErrorMessage, FString(TEXT("hot-success-sentinel")));
+		TestEqual(TEXT("event count is per instance"), Session.GetLiveEventCallbackCount(), 4);
+		TestTrue(TEXT("attach generated Session debugger"), Session.AttachDebugger({}));
+		TestTrue(TEXT("request pause"), Session.RequestDebugPause());
+		if (!TestTrue(TEXT("contextual Tick returns a valid suspension"), Session.Tick(0.01f, Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		TestTrue(TEXT("generated Session is paused"), Session.GetDebugSnapshot().State == EAvidScriptDebugSessionState::Paused);
+		TestFalse(TEXT("pause is not a Runtime fault"), Session.GetSnapshot().bFaultQuarantined);
+		TestFalse(TEXT("paused Session rejects ordinary entry"), Session.DispatchEvent(9, 0.0f, Result));
+		TestEqual(TEXT("paused rejection is explicit"), Result.ErrorCategory, FString(TEXT("debug_execution_suspended")));
+		TestTrue(TEXT("contextual resume consumes suspended frame"), Session.ContinueDebugExecution(Result));
+		TestTrue(TEXT("resume returns to Running"), Session.GetDebugSnapshot().State == EAvidScriptDebugSessionState::Running);
+		int32 Value = 0;
+		TestTrue(TEXT("generated member sees event and resume writes"), FAvidScriptGeneratedTypeDispatcher::Invoke(Owner.Get(), 0, 0, {}, &Value));
+		TestEqual(TEXT("one timer plus four events plus resume"), Value, 15);
+		TestTrue(TEXT("instance EndPlay succeeds"), Session.EndPlayLive(Result));
+		TestTrue(TEXT("EndPlay result reports selected lifecycle"), Result.bEndPlayCalled);
+		TestTrue(TEXT("repeated EndPlay succeeds"), Session.EndPlayLive(Result));
+		TestTrue(TEXT("EndPlay runs once"), State->GetLifecycleState() == EAvidScriptLifecycleState::Stopped);
+		TestTrue(TEXT("stop after EndPlay succeeds"), Session.StopAndUnload(Result));
+		TestTrue(TEXT("stop retires explicit state"), State->IsRetired());
+		TestTrue(TEXT("execution fixture registration clears"), Session.ClearGeneratedTypeInstance(Error));
 	}
 	return true;
 }

@@ -1942,6 +1942,12 @@ bool FAvidScriptWasmRuntimeInstance::DispatchEvent(
 	const EAvidScriptWasmResultDetail ResultDetail)
 {
 	if (RejectActiveContextMutation(TEXT("unscoped event"), &OutResult)) return false;
+	return DispatchEventInternal(EventId, Value, OutResult, ResultDetail);
+}
+
+bool FAvidScriptWasmRuntimeInstance::DispatchEventInternal(
+	int32 EventId, float Value, FAvidScriptWasmSmokeResult& OutResult, const EAvidScriptWasmResultDetail ResultDetail)
+{
 	const bool bHotFailureOnly =
 		ResultDetail == EAvidScriptWasmResultDetail::HotFailureOnly;
 	if (!bHotFailureOnly)
@@ -2489,6 +2495,12 @@ bool FAvidScriptWasmRuntimeInstance::DispatchDebugResume(
 	FAvidScriptWasmSmokeResult& OutResult)
 {
 	if (RejectActiveContextMutation(TEXT("unscoped debug resume"), &OutResult)) return false;
+	return DispatchDebugResumeInternal(SuspensionToken, ResumeRoute, OutResult);
+}
+
+bool FAvidScriptWasmRuntimeInstance::DispatchDebugResumeInternal(
+	int64 SuspensionToken, uint32 ResumeRoute, FAvidScriptWasmSmokeResult& OutResult)
+{
 	CaptureSnapshot(OutResult);
 	if (!IsLoaded() || !GetInstanceState().bHasBegunPlay || GetInstanceState().bEndPlayAttempted
 		|| !DebugResumeExport.Handle.IsValid()
@@ -2540,6 +2552,12 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 	const EAvidScriptWasmResultDetail ResultDetail)
 {
 	if (RejectActiveContextMutation(TEXT("unscoped gameplay event"), &OutResult)) return false;
+	return DispatchGameplayEventInternal(Event, OutResult, ResultDetail);
+}
+
+bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEventInternal(
+	const FAvidScriptGameplayEvent& Event, FAvidScriptWasmSmokeResult& OutResult, const EAvidScriptWasmResultDetail ResultDetail)
+{
 	const FString& ExportName = AvidScriptGameplayEventExportName;
 	const bool bHotFailureOnly =
 		ResultDetail == EAvidScriptWasmResultDetail::HotFailureOnly;

@@ -15,14 +15,16 @@ void SetSchedulerStateFailure(
 }
 } // namespace
 
-void FAvidScriptRuntimeScheduler::Attach(FAvidScriptWasmRuntimeInstance& Runtime)
+void FAvidScriptRuntimeScheduler::Attach(FAvidScriptWasmRuntimeInstance& Runtime, const FAvidScriptWasmHostContext* InstanceContext)
 {
 	ActiveRuntime = &Runtime;
+	ActiveInstanceContext = InstanceContext;
 }
 
 void FAvidScriptRuntimeScheduler::Detach()
 {
 	ActiveRuntime = nullptr;
+	ActiveInstanceContext = nullptr;
 }
 
 bool FAvidScriptRuntimeScheduler::Tick(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult)
@@ -42,7 +44,9 @@ bool FAvidScriptRuntimeScheduler::TickHot(
 		SetSchedulerStateFailure(ActiveRuntime, OutFailure);
 		return false;
 	}
-	return ActiveRuntime->TickHot(DeltaSeconds, OutFailure);
+	return ActiveInstanceContext
+		? ActiveRuntime->TickInContext(*ActiveInstanceContext, DeltaSeconds, OutFailure, EAvidScriptWasmResultDetail::HotFailureOnly)
+		: ActiveRuntime->TickHot(DeltaSeconds, OutFailure);
 }
 
 bool FAvidScriptRuntimeScheduler::Tick(
@@ -56,6 +60,7 @@ bool FAvidScriptRuntimeScheduler::Tick(
 		return false;
 	}
 
+	if (ActiveInstanceContext) return ActiveRuntime->TickInContext(*ActiveInstanceContext, DeltaSeconds, OutResult, ResultDetail);
 	return ActiveRuntime->Tick(
 		DeltaSeconds,
 		OutResult,
@@ -64,6 +69,12 @@ bool FAvidScriptRuntimeScheduler::Tick(
 
 EAvidScriptLifecycleState FAvidScriptRuntimeScheduler::GetLifecycleState() const
 {
+	if (ActiveInstanceContext)
+	{
+		const auto& State = ActiveInstanceContext->InstanceExecutionState;
+		return !State ? EAvidScriptLifecycleState::Empty
+			: State->IsRetired() ? EAvidScriptLifecycleState::Stopped : State->GetLifecycleState();
+	}
 	return ActiveRuntime != nullptr ? ActiveRuntime->GetLifecycleState() : EAvidScriptLifecycleState::Empty;
 }
 
@@ -74,20 +85,24 @@ FString FAvidScriptRuntimeScheduler::GetModuleId() const
 
 int32 FAvidScriptRuntimeScheduler::GetTickCallCount() const
 {
+	if (ActiveInstanceContext) return ActiveInstanceContext->InstanceExecutionState ? ActiveInstanceContext->InstanceExecutionState->GetTickCallCount() : 0;
 	return ActiveRuntime != nullptr ? ActiveRuntime->GetTickCallCount() : 0;
 }
 
 int32 FAvidScriptRuntimeScheduler::GetPendingTimerCount() const
 {
+	if (ActiveInstanceContext) return ActiveInstanceContext->InstanceExecutionState ? ActiveInstanceContext->InstanceExecutionState->GetPendingTimerCount() : 0;
 	return ActiveRuntime != nullptr ? ActiveRuntime->GetPendingTimerCount() : 0;
 }
 
 int32 FAvidScriptRuntimeScheduler::GetTimerCallbackCount() const
 {
+	if (ActiveInstanceContext) return ActiveInstanceContext->InstanceExecutionState ? ActiveInstanceContext->InstanceExecutionState->GetTimerCallbackCount() : 0;
 	return ActiveRuntime != nullptr ? ActiveRuntime->GetTimerCallbackCount() : 0;
 }
 
 int32 FAvidScriptRuntimeScheduler::GetEventCallbackCount() const
 {
+	if (ActiveInstanceContext) return ActiveInstanceContext->InstanceExecutionState ? ActiveInstanceContext->InstanceExecutionState->GetEventCallbackCount() : 0;
 	return ActiveRuntime != nullptr ? ActiveRuntime->GetEventCallbackCount() : 0;
 }

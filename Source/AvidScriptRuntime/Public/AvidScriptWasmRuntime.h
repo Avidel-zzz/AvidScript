@@ -184,6 +184,8 @@ struct FAvidScriptCachedVmExport
 struct FAvidScriptContextualExportCall
 {
 	bool IsValid() const { return CodeIdentity.IsValid() && Call.IsValid(); }
+	uint32 GetParameterCellCount() const { return Call.ParameterCellCount; }
+	uint32 GetResultCellCount() const { return Call.ResultCellCount; }
 private:
 	friend class FAvidScriptWasmRuntimeInstance;
 	TSharedPtr<const uint8> CodeIdentity;
@@ -201,6 +203,7 @@ public:
     int32 GetPendingTimerCount() const { return ActiveTimers.Num(); }
     int32 GetTickCallCount() const { return TickCallCount; }
     int32 GetTimerCallbackCount() const { return TimerCallbackCount; }
+    int32 GetEventCallbackCount() const { return EventCallbackCount; }
     bool IsRetired() const { return bRetired; }
 private:
     friend class FAvidScriptWasmRuntimeInstance;
@@ -291,9 +294,19 @@ public:
 	bool CreateInstanceExecutionState(const FAvidScriptWasmHostContext& Context,
 		TSharedPtr<FAvidScriptWasmInstanceExecutionState>& OutState, FString& OutError);
 	bool BeginPlayInContext(const FAvidScriptWasmHostContext& Context, FAvidScriptWasmSmokeResult& OutResult);
-	bool TickInContext(const FAvidScriptWasmHostContext& Context, float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult);
+	bool TickInContext(const FAvidScriptWasmHostContext& Context, float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult,
+		EAvidScriptWasmResultDetail ResultDetail = EAvidScriptWasmResultDetail::FullSnapshot);
 	bool EndPlayInContext(const FAvidScriptWasmHostContext& Context, FAvidScriptWasmSmokeResult& OutResult);
 	bool RetireInstanceExecutionState(const TSharedPtr<FAvidScriptWasmInstanceExecutionState>& State, FString& OutError);
+	bool DispatchEventInContext(const FAvidScriptWasmHostContext& Context, int32 EventId, float Value,
+		FAvidScriptWasmSmokeResult& OutResult, EAvidScriptWasmResultDetail Detail = EAvidScriptWasmResultDetail::FullSnapshot);
+	bool DispatchGameplayEventInContext(const FAvidScriptWasmHostContext& Context, const FAvidScriptGameplayEvent& Event,
+		FAvidScriptWasmSmokeResult& OutResult, EAvidScriptWasmResultDetail Detail = EAvidScriptWasmResultDetail::FullSnapshot);
+	bool DispatchDebugResumeInContext(const FAvidScriptWasmHostContext& Context, int64 Token, uint32 Route, FAvidScriptWasmSmokeResult& OutResult);
+	bool CaptureSnapshotInContext(const FAvidScriptWasmHostContext& Context, FAvidScriptWasmSmokeResult& OutResult);
+	FAvidScriptWasmHotSnapshot GetHotSnapshotInContext(const FAvidScriptWasmHostContext& Context);
+	void RecordContextualFailure(const FAvidScriptWasmHostContext& Context, const FString& ExportName,
+		const FAvidScriptVmError& Error, FAvidScriptWasmSmokeResult& OutResult);
 	bool InvokeInContext(
 		const FAvidScriptContextualExportCall& Call, const FAvidScriptWasmHostContext& Context,
 		const FAvidScriptVmCallFrame& Frame, FAvidScriptVmError& OutError,
@@ -626,14 +639,18 @@ private:
 	bool BeginPlayInternal(FAvidScriptWasmSmokeResult& OutResult);
 	bool TickInternal(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult, EAvidScriptWasmResultDetail ResultDetail);
 	bool EndPlayInternal(FAvidScriptWasmSmokeResult& OutResult);
+	bool DispatchEventInternal(int32 EventId, float Value, FAvidScriptWasmSmokeResult& OutResult, EAvidScriptWasmResultDetail Detail);
+	bool DispatchGameplayEventInternal(const FAvidScriptGameplayEvent& Event, FAvidScriptWasmSmokeResult& OutResult, EAvidScriptWasmResultDetail Detail);
+	bool DispatchDebugResumeInternal(int64 Token, uint32 Route, FAvidScriptWasmSmokeResult& OutResult);
+	bool InvokeInstanceCallback(const FAvidScriptWasmHostContext& Context, const FString& ExportName,
+		TFunctionRef<bool()> Operation, FAvidScriptWasmSmokeResult& OutResult, bool bResumeSuspended = false);
 	bool ValidateInstanceExecutionState(const FAvidScriptWasmHostContext& Context) const;
 	bool InvokeInstanceLifecycle(const FAvidScriptWasmHostContext& Context, EInstanceLifecycleOperation Operation,
-		float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult);
-	void RecordContextualFailure(const FAvidScriptWasmHostContext& Context, const FString& ExportName,
-		const FAvidScriptVmError& Error, FAvidScriptWasmSmokeResult& OutResult);
+		float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult,
+		EAvidScriptWasmResultDetail ResultDetail = EAvidScriptWasmResultDetail::FullSnapshot);
 	bool InvokeContextOperation(
 		const FAvidScriptContextualExportCall& Call, const FAvidScriptWasmHostContext& Context,
-		TFunctionRef<bool(FAvidScriptVmError&)> Operation, FAvidScriptVmError& OutError);
+		TFunctionRef<bool(FAvidScriptVmError&)> Operation, FAvidScriptVmError& OutError, bool bResumeSuspended = false);
 	bool DispatchContinuationInternal(
 		const FAvidScriptContinuationCompletion& Completion, FAvidScriptWasmSmokeResult& OutResult,
 		const FAvidScriptVmPreparedExportCall* ScopedCall);
@@ -643,7 +660,7 @@ private:
 	bool ValidateContextCallbackCommit(FAvidScriptVmError& OutError) const;
 	void ApplyHostContext(const FAvidScriptWasmHostContext& Context);
 	bool RejectActiveContextMutation(const TCHAR* Operation, FAvidScriptWasmSmokeResult* OutResult = nullptr);
-	bool ValidateInvocationContext(const FAvidScriptWasmHostContext& Context) const;
+	bool ValidateInvocationContext(const FAvidScriptWasmHostContext& Context, bool bAllowSuspended = false) const;
 	void LatchContextInvocationFailure(const FAvidScriptVmError& Error);
 	bool LoadArtifactView(
 		const FAvidScriptVmArtifactView& Artifact,
