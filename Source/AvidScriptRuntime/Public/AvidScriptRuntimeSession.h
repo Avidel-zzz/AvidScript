@@ -229,6 +229,14 @@ private:
 	friend class FAvidScriptRuntimeLifecycleCoordinator;
 	friend class FAvidScriptGeneratedTypeRuntimeHost;
 	friend class FAvidScriptRuntimeExecutionDomain;
+	friend class FGeneratedSessionAuthority;
+#if WITH_DEV_AUTOMATION_TESTS
+	friend class FAvidScriptProductionInstanceEntryTest;
+#endif
+	bool InvokeGeneratedInstanceExport(FAvidScriptWasmRuntimeInstance& SourceRuntime,
+		const FAvidScriptObjectHandle& Target, const FAvidScriptContextualExportCall& Call,
+		const FAvidScriptVmCallFrame& Frame, FAvidScriptVmError& OutError,
+		FAvidScriptVmCallResult* OutResult);
 	bool LoadGeneratedDomainArtifact(const FAvidScriptRuntimeArtifact& Artifact,
 		const TSharedPtr<FAvidScriptRuntimeExecutionDomain>& Domain, FAvidScriptWasmReloadResult& OutResult);
 	bool ReloadArtifactInternal(const FAvidScriptRuntimeArtifact& Artifact, FAvidScriptWasmReloadResult& OutResult, bool bDeferCommit,

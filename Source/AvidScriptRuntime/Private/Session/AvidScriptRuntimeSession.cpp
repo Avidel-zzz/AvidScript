@@ -67,7 +67,9 @@ bool FAvidScriptRuntimeExecutionDomain::HasActiveCalls() const
 void FAvidScriptRuntimeExecutionDomain::Attach(FAvidScriptRuntimeSession& Session)
 {
 	check(IsInGameThread() && !bFaulted && !Members.Contains(&Session));
+	check(Session.HostContext.OwnerHandle.IsValid() && !MembersByHandle.Contains(Session.HostContext.OwnerHandle.ToUInt64()));
 	Members.Add(&Session);
+	MembersByHandle.Add(Session.HostContext.OwnerHandle.ToUInt64(), &Session);
 }
 
 void FAvidScriptRuntimeExecutionDomain::Detach(FAvidScriptRuntimeSession& Session)
@@ -75,7 +77,49 @@ void FAvidScriptRuntimeExecutionDomain::Detach(FAvidScriptRuntimeSession& Sessio
 	check(IsInGameThread() && !HasActiveCalls());
 	const int32 Removed = Members.RemoveSingle(&Session);
 	check(Removed == 1);
+	const int32 RemovedHandle = MembersByHandle.Remove(Session.HostContext.OwnerHandle.ToUInt64());
+	check(RemovedHandle == 1);
 	if (Members.IsEmpty()) Runtime->Unload();
+}
+
+bool FAvidScriptRuntimeExecutionDomain::Invoke(FAvidScriptRuntimeSession& Source,
+	const FAvidScriptObjectHandle& TargetHandle, const FAvidScriptContextualExportCall& Call,
+	const FAvidScriptVmCallFrame& Frame, FAvidScriptVmError& OutError, FAvidScriptVmCallResult* OutResult)
+{
+	OutError.Reset();
+	if (OutResult) *OutResult = {};
+	const auto Reject = [&](const TCHAR* Category, const TCHAR* Details)
+	{
+		OutError.Category = Category; OutError.Details = Details; return false;
+	};
+	if (!IsInGameThread() || bFaulted || !HasActiveCalls() || Source.LiveDomain.Get() != this
+		|| MembersByHandle.FindRef(Source.HostContext.OwnerHandle.ToUInt64()) != &Source)
+		return Reject(TEXT("generated_invocation_domain"), TEXT("source is not active in this published execution domain"));
+	FAvidScriptRuntimeSession* Target = MembersByHandle.FindRef(TargetHandle.ToUInt64());
+	if (!Target || Target->LiveDomain.Get() != this || Target->LiveRuntime != Runtime)
+		return Reject(TEXT("generated_invocation_target"), TEXT("target handle is not a live member of the source execution domain"));
+	const auto CanInvoke = [](const FAvidScriptRuntimeSession& Session)
+	{
+		return !Session.bMutationInProgress && !Session.bPackageReloadBarrier && !Session.PreparedActivation
+			&& !Session.bApplicationSuspended && !Session.bLifecycleInvalidated && !Session.bFaultQuarantined
+			&& !Session.IsDebugExecutionSuspended() && Session.GeneratedTypeInstance
+			&& Session.GeneratedTypeInstance->Registration.IsValid()
+			&& Session.GetLiveLifecycleState() == EAvidScriptLifecycleState::Running;
+	};
+	if (!CanInvoke(Source) || !CanInvoke(*Target))
+		return Reject(TEXT("generated_invocation_state"), TEXT("source or target is mutating, suspended, retired or faulted"));
+	bool bCalled;
+	{
+		TGuardValue<int32> CallGuard(Target->ActiveGuestCallDepth, Target->ActiveGuestCallDepth + 1);
+		bCalled = Runtime->InvokeInContext(Call, Target->HostContext, Frame, OutError, OutResult);
+	}
+	if (!bCalled)
+	{
+		FAvidScriptWasmSmokeResult Failure;
+		Runtime->RecordContextualFailure(Target->HostContext, Call.GetExportName(), OutError, Failure);
+		Poison(Failure); // Runtime still owns an outer invocation; cleanup waits for it.
+	}
+	return bCalled;
 }
 
 void FAvidScriptRuntimeExecutionDomain::Poison(const FAvidScriptWasmSmokeResult& Failure)

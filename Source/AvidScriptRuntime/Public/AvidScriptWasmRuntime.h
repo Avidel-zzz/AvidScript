@@ -186,6 +186,7 @@ struct FAvidScriptContextualExportCall
 	bool IsValid() const { return CodeIdentity.IsValid() && Call.IsValid(); }
 	uint32 GetParameterCellCount() const { return Call.ParameterCellCount; }
 	uint32 GetResultCellCount() const { return Call.ResultCellCount; }
+	const FString& GetExportName() const { return ExportName; }
 private:
 	friend class FAvidScriptWasmRuntimeInstance;
 	TSharedPtr<const uint8> CodeIdentity;
@@ -311,6 +312,12 @@ public:
 		const FAvidScriptContextualExportCall& Call, const FAvidScriptWasmHostContext& Context,
 		const FAvidScriptVmCallFrame& Frame, FAvidScriptVmError& OutError,
 		FAvidScriptVmCallResult* OutResult = nullptr);
+	// Native routing primitive for an active generated instance. The prepared
+	// code and all pointers/tokens must belong to this same execution domain.
+	// Language method selection and signature marshalling happen before this call.
+	bool InvokeGeneratedInstanceExport(const FAvidScriptObjectHandle& Target,
+		const FAvidScriptContextualExportCall& Call, const FAvidScriptVmCallFrame& Frame,
+		FAvidScriptVmError& OutError, FAvidScriptVmCallResult* OutResult = nullptr);
 	bool SetSupplementalTypedHostImports(
 		TConstArrayView<FAvidScriptVmTypedHostImport> Imports,
 		FString& OutError);

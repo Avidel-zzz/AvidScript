@@ -1,5 +1,9 @@
 #if WITH_DEV_AUTOMATION_TESTS
 #include "AvidScriptWasmRuntime.h"
+#include "AvidScriptRuntimeSession.h"
+#include "AvidScriptRuntimeArtifact.h"
+#include "ScriptTypes/AvidScriptGeneratedTypeRegistry.h"
+#include "Session/AvidScriptRuntimeExecutionDomain.h"
 #include "AvidScriptManagedHeapAbi.h"
 #include "Memory/AvidScriptManagedHeap.h"
 #include "Tests/AvidScriptGeneratedTypeSessionTestTypes.h"
@@ -47,34 +51,48 @@ void CopyToken(TArray<uint8>& Out, int32 Source, int32 Destination)
 // Runtime/heap ABI probe, deliberately not a claim of C# cross-instance lowering.
 // Both reference arguments point to memory[560]; one heap object at token[528]
 // is rooted separately by A, B and nested A. Every entry forces collection.
-TArray<uint8> BuildFixture()
+TArray<uint8> BuildFixture(bool bProduction = false)
 {
 	using namespace AvidScript::Managed;
 	TArray<uint8> Module{0, 0x61, 0x73, 0x6d, 1, 0, 0, 0};
-	Section(Module, 1, {5, 0x60, 4, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f,
-		0x60, 1, 0x7e, 1, 0x7f, 0x60, 0, 1, 0x7f, 0x60, 0, 0, 0x60, 1, 0x7f, 1, 0x7f});
+	TArray<uint8> Types{5, 0x60, 4, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f,
+		0x60, 1, 0x7e, 1, 0x7f, 0x60, 0, 1, 0x7f, 0x60, 0, 0};
+	if (bProduction) Types.Append({0x60, 6, 0x7f, 0x7e, 0x7f, 0x7f, 0x7c, 0x7f, 1, 0x7f});
+	else Types.Append({0x60, 1, 0x7f, 1, 0x7f});
+	Section(Module, 1, Types);
 	TArray<uint8> Imports{3};
 	for (const auto& Item : {TPair<const char*, uint8>{Abi::ImportName, 0}, {"context_reenter", 1}, {"owner_get_slot", 2}})
 	{
 		Name(Imports, "avidscript"); Name(Imports, Item.Key); Imports.Append({0, Item.Value});
 	}
-	Section(Module, 2, Imports); Section(Module, 3, {4, 3, 4, 2, 2});
-	Section(Module, 5, {1, 1, 1, 1}); Section(Module, 6, {1, 0x7f, 1, 0x41, 0, 0x0b});
-	TArray<uint8> Exports{5};
+	Section(Module, 2, Imports);
+	Section(Module, 3, bProduction ? TArray<uint8>{5, 3, 4, 2, 2, 1} : TArray<uint8>{4, 3, 4, 2, 2});
+	Section(Module, 5, {1, 1, 1, 1});
+	Section(Module, 6, bProduction ? TArray<uint8>{2, 0x7f, 1, 0x41, 0, 0x0b, 0x7f, 1, 0x41, 0, 0x0b}
+		: TArray<uint8>{1, 0x7f, 1, 0x41, 0, 0x0b});
+	TArray<uint8> Exports{static_cast<uint8>(bProduction ? 6 : 5)};
 	Name(Exports, "memory"); Exports.Append({2, 0});
 	for (const auto& Item : {TPair<const char*, uint8>{"avid_on_begin_play", 3}, {"step", 4}, {"trap", 5}, {"count", 6}})
 	{
 		Name(Exports, Item.Key); Exports.Append({0, Item.Value});
 	}
+	if (bProduction) { Name(Exports, "avid_ue_0123456789abcdef0123456789abcdef"); Exports.Append({0, 7}); }
 	Section(Module, 7, Exports);
-	TArray<uint8> Init{0}; HeapCall(Init, 64, 24); Init.Add(0x0b);
+	TArray<uint8> Init{0};
+	if (bProduction) Init.Append({0x23, 1, 0x45, 0x04, 0x40});
+	HeapCall(Init, 64, 24);
+	if (bProduction) Init.Append({0x41, 1, 0x24, 1, 0x0b});
+	Init.Add(0x0b);
 	TArray<uint8> Step{0};
 	// Only the root creates the shared object; nested entries root that same token.
 	Step.Append({0x20, 0, 0x41, 2, 0x46, 0x04, 0x40});
 	Constant(Step, 528); Step.Append({0x42, 0, 0x37, 0, 0});
 	Constant(Step, 560); Constant(Step, 0); Step.Append({0x36, 0, 0, 0x0b});
 	HeapCall(Step, 96, 8, 512, 8);
-	CopyToken(Step, 512, 120); CopyToken(Step, 528, 128); HeapCall(Step, 112, 24, 520, 8);
+	CopyToken(Step, 512, 120);
+	if (bProduction) { Constant(Step, 128); Step.Append({0x20, 1, 0x37, 0, 0}); }
+	else CopyToken(Step, 528, 128);
+	HeapCall(Step, 112, 24, 520, 8);
 	Step.Append({0x20, 0, 0x41, 2, 0x46, 0x04, 0x40});
 	CopyToken(Step, 520, 156); HeapCall(Step, 144, 20, 528, 8); Step.Add(0x0b);
 	CopyToken(Step, 528, 184); CopyToken(Step, 528, 216);
@@ -82,10 +100,18 @@ TArray<uint8> BuildFixture()
 	Constant(Step, 236); Constant(Step, 536); Step.Append({0x28, 0, 0, 0x41, 1, 0x6a, 0x36, 0, 0});
 	HeapCall(Step, 208, 32);
 	// Read and write through the two aliased pointer values, not independent copies.
-	for (int32 Pointer : {544, 548})
+	for (int32 Index = 0; Index < 2; ++Index)
 	{
-		Constant(Step, Pointer); Step.Append({0x28, 0, 0});
-		Constant(Step, Pointer); Step.Append({0x28, 0, 0, 0x28, 0, 0, 0x41, 1, 0x6a, 0x36, 0, 0});
+		for (int32 Read = 0; Read < 2; ++Read)
+			if (bProduction) Step.Append({0x20, static_cast<uint8>(2 + Index)});
+			else { Constant(Step, 544 + 4 * Index); Step.Append({0x28, 0, 0}); }
+		Step.Append({0x28, 0, 0, 0x41, 1, 0x6a, 0x36, 0, 0});
+	}
+	if (bProduction)
+	{
+		// The same full eight-cell frame crosses every owner transition.
+		Step.Append({0x20, 4, 0x44, 0, 0, 0, 0, 0, 0, 0x29, 0x40, 0x62, 0x04, 0x40, 0, 0x0b});
+		Step.Append({0x20, 5, 0x41, 0xcd, 0, 0x47, 0x04, 0x40, 0, 0x0b});
 	}
 	Step.Append({0x23, 0, 0x41, 1, 0x6a, 0x24, 0});
 	auto RecordOwner = [&](int32 Address)
@@ -99,9 +125,16 @@ TArray<uint8> BuildFixture()
 	HeapCall(Step, 248, 8); HeapCall(Step, 176, 28, 536, 4);
 	Constant(Step, 536); Step.Append({0x28, 0, 0, 0x0b});
 	const TArray<uint8> Trap{0, 0, 0x0b}, Count{0, 0x23, 0, 0x0b};
-	TArray<uint8> Code{4};
+	TArray<uint8> Code{static_cast<uint8>(bProduction ? 5 : 4)};
 	const TArray<uint8>* Bodies[] = {&Init, &Step, &Trap, &Count};
 	for (const auto* Body : Bodies) { U32(Code, Body->Num()); Code.Append(*Body); }
+	if (bProduction)
+	{
+		TArray<uint8> Root{0, 0x41, 2, 0x42, 0};
+		Constant(Root, 560); Constant(Root, 560);
+		Root.Append({0x44, 0, 0, 0, 0, 0, 0, 0x29, 0x40}); Constant(Root, 77);
+		Root.Append({0x10, 4, 0x0b}); U32(Code, Root.Num()); Code.Append(Root);
+	}
 	Section(Module, 10, Code);
 	TArray<uint8> Memory; Memory.SetNumZeroed(552);
 	auto Put = [&](int32 Address, uint32 Value)
@@ -131,7 +164,7 @@ public:
 	int32 Unsubscribes = 0;
 };
 
-enum class EScenario { Normal, Trap, Unload, Mutate, ForeignRegistry, ForeignCode, World, Retire, Timer, Depth, Entries };
+enum class EScenario { Normal, Trap, Unload, Mutate, ForeignRegistry, ForeignCode, World, Retire, Timer, Depth, Entries, Frame, Suspended };
 struct FProbe
 {
 	FAutomationTestBase& Test;
@@ -141,12 +174,17 @@ struct FProbe
 	EScenario Scenario = EScenario::Normal;
 	int32 Calls = 0;
 	TWeakObjectPtr<UWorld> WrongWorld;
+	bool bProduction = false;
+	FAvidScriptObjectHandle OtherTarget;
+	FAvidScriptRuntimeSession* SourceSession = nullptr;
+	FAvidScriptRuntimeSession* PeerSession = nullptr;
+	uint32 WritesBeforeFailure = 0;
 
 	static EAvidScriptVmTypedHostStatus Reenter(void* Context, int64 Remaining, int32& Value)
 	{
 		auto& Self = *static_cast<FProbe*>(Context);
 		const uint32 ParentSlot = static_cast<uint32>(Self.Runtime.HandleOwnerGetSlotImport());
-		Self.Test.TestTrue(TEXT("subscription import uses current instance"), Self.Runtime.HandleEventUnsubscribeImport(1) == 1);
+		if (!Self.bProduction) Self.Test.TestTrue(TEXT("subscription import uses current instance"), Self.Runtime.HandleEventUnsubscribeImport(1) == 1);
 		if (++Self.Calls > 70) return EAvidScriptVmTypedHostStatus::Rejected;
 		FAvidScriptWasmHostContext Target = Remaining == 1 ? Self.B : Self.A;
 		FAvidScriptVmCallFrame Frame; Frame.CellCount = 1; Frame.Cells[0] = static_cast<uint32>(Remaining);
@@ -156,6 +194,17 @@ struct FProbe
 		if (Self.Scenario == EScenario::ForeignCode) Entry = &Self.OtherCode;
 		if (Self.Scenario == EScenario::World) Target.World = Self.WrongWorld;
 		if (Self.Scenario == EScenario::Depth) Frame.Cells[0] = 1;
+		if (Self.bProduction)
+		{
+			TArray<uint8> Token; Token.SetNumZeroed(8); FString ReadError;
+			Self.Test.TestTrue(TEXT("pass original managed object token"), Self.Runtime.ReadStateBytes(528, Token, ReadError));
+			Frame.CellCount = 8;
+			FMemory::Memcpy(&Frame.Cells[1], Token.GetData(), 8);
+			Frame.Cells[3] = 560; Frame.Cells[4] = 560;
+			const double Mixed = 12.5; FMemory::Memcpy(&Frame.Cells[5], &Mixed, 8); Frame.Cells[7] = 77;
+			if (Entry == &Self.Trap) Frame = {};
+			if (Self.Scenario == EScenario::Frame) --Frame.CellCount;
+		}
 		if (Self.Scenario == EScenario::Unload)
 		{
 			FAvidScriptWasmSmokeResult Result;
@@ -166,6 +215,13 @@ struct FProbe
 		}
 		if (Self.Scenario == EScenario::Mutate)
 		{
+			if (Self.bProduction)
+			{
+				FAvidScriptWasmSmokeResult Rejected; FString ClearError;
+				Self.Test.TestFalse(TEXT("nested owner cannot stop source"), Self.SourceSession->StopAndUnload(Rejected));
+				Self.Test.TestFalse(TEXT("nested owner cannot stop peer"), Self.PeerSession->StopAndUnload(Rejected));
+				Self.Test.TestFalse(TEXT("nested owner cannot retire target registration"), Self.PeerSession->ClearGeneratedTypeInstance(ClearError));
+			}
 			Self.Runtime.SetHostContext(Self.B);
 			Self.Runtime.ClearHostContext();
 			FAvidScriptWasmSmokeResult Rejected;
@@ -187,17 +243,30 @@ struct FProbe
 		}
 		FAvidScriptVmError Error;
 		FAvidScriptVmCallResult Result;
+		auto Invoke = [&]()
+		{
+			return Self.bProduction
+				? Self.Runtime.InvokeGeneratedInstanceExport(Self.Scenario == EScenario::World ? Self.OtherTarget : Target.OwnerHandle,
+					*Entry, Frame, Error, &Result)
+				: Self.Runtime.InvokeInContext(*Entry, Target, Frame, Error, &Result);
+		};
 		if (Self.Scenario == EScenario::Entries)
 		{
 			Frame.Cells[0] = 0;
 			int32 Succeeded = 0;
 			for (int32 I = 0; I < 4096; ++I)
-				if (Self.Runtime.InvokeInContext(Self.Step, Target, Frame, Error, &Result)) ++Succeeded;
+				if (Invoke()) ++Succeeded;
 			Self.Test.TestEqual(TEXT("sequential calls consume the same root entry budget"), Succeeded, 4095);
 			return EAvidScriptVmTypedHostStatus::Succeeded;
 		}
 		const uint32 Frames = Self.Runtime.GetManagedHeapForTesting()->GetStats().ActiveFrames;
-		const bool bCalled = Self.Runtime.InvokeInContext(*Entry, Target, Frame, Error, &Result);
+		const bool bCalled = Invoke();
+		if (Self.bProduction && !bCalled)
+		{
+			TArray<uint8> Bytes; Bytes.SetNumZeroed(4); FString ReadError;
+			Self.Test.TestTrue(TEXT("inner failure retains shared memory until outer exit"), Self.Runtime.ReadStateBytes(560, Bytes, ReadError));
+			FMemory::Memcpy(&Self.WritesBeforeFailure, Bytes.GetData(), 4);
+		}
 		Self.Test.TestEqual(TEXT("nested invocation never unwinds the outer heap roots"), Self.Runtime.GetManagedHeapForTesting()->GetStats().ActiveFrames, Frames);
 		Self.Test.TestEqual(TEXT("target context returns to parent"), Self.Runtime.HandleOwnerGetSlotImport(), static_cast<int32>(ParentSlot));
 		Value = bCalled ? static_cast<int32>(Result.Cells[0]) : 0;
@@ -690,5 +759,124 @@ bool FAvidScriptInstanceExecutionStateTest::RunTest(const FString& Parameters)
 {
 	return AvidScriptInstanceExecutionTests::Run(*this, EAvidScriptVmBackendKind::Wasmtime)
 		&& AvidScriptInstanceExecutionTests::Run(*this, EAvidScriptVmBackendKind::Wamr);
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptProductionInstanceEntryTest,
+	"AvidScript.Runtime.GeneratedTypes.ProductionInstanceEntry", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FAvidScriptProductionInstanceEntryTest::RunTest(const FString& Parameters)
+{
+	using namespace AvidScriptContextInvocationTests;
+	const FString Json = FString::Printf(TEXT(R"JSON({
+"schema_version":6,"generator_version":"1.8","module_name":"AvidScriptRuntime",
+"generation_key_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+"types":[{"type_ordinal":0,"stable_type_id":"type:production-entry","engine_name":"AvidScriptGeneratedTypeSessionTestObject",
+"class_path":"%s","properties":[],"functions":[{"member_ordinal":0,"stable_member_id":"function:entry",
+"native_name":"GetScriptValue","export_name":"avid_ue_0123456789abcdef0123456789abcdef","flags":[]}]}]})JSON"),
+		*UAvidScriptGeneratedTypeSessionTestObject::StaticClass()->GetPathName());
+	TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot> Types; FString Error;
+	if (!FAvidScriptGeneratedTypeRegistry::BuildFromJson(Json, Types, Error)) { AddError(Error); return false; }
+	const auto Wasm = BuildFixture(true);
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	for (const auto Scenario : {EScenario::Normal, EScenario::Trap, EScenario::Mutate, EScenario::ForeignCode,
+		EScenario::World, EScenario::Retire, EScenario::Depth, EScenario::Entries, EScenario::Frame, EScenario::Suspended})
+	{
+		AddInfo(FString::Printf(TEXT("production entry backend=%d scenario=%d"), static_cast<int32>(Backend), static_cast<int32>(Scenario)));
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime ? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		auto Runtime = MakeShared<FAvidScriptWasmRuntimeInstance>(Selection);
+		FAvidScriptWasmRuntimeInstance OtherRuntime(Selection);
+		FAvidScriptObjectRegistry Registry;
+		TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> A(NewObject<UAvidScriptGeneratedTypeSessionTestObject>()), B(NewObject<UAvidScriptGeneratedTypeSessionTestObject>());
+		TStrongObjectPtr<UWorld> OtherWorld(NewObject<UWorld>());
+		TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> Other(NewObject<UAvidScriptGeneratedTypeSessionTestObject>(OtherWorld.Get()));
+		FAvidScriptObjectHandleResult HandleResult;
+		FProbe Probe{*this, *Runtime}; Probe.bProduction = true; Probe.Scenario = Scenario;
+		Probe.A.ObjectRegistry = &Registry; Probe.A.OwnerHandle = Registry.RegisterObject(A.Get(), HandleResult, false);
+		Probe.B = Probe.A; Probe.B.OwnerHandle = Registry.RegisterObject(B.Get(), HandleResult, false);
+		Probe.OtherTarget = Registry.RegisterObject(Other.Get(), HandleResult, false);
+		FAvidScriptRuntimeSession SA, SB;
+		SA.SetHostContext(Probe.A); SB.SetHostContext(Probe.B);
+		ON_SCOPE_EXIT { FAvidScriptWasmSmokeResult Stopped; SA.StopAndUnload(Stopped); SB.StopAndUnload(Stopped); };
+		if (!SA.ConfigureGeneratedTypeInstance(*A, Probe.A.OwnerHandle, 0, Types, Error)
+			|| !SB.ConfigureGeneratedTypeInstance(*B, Probe.B.OwnerHandle, 0, Types, Error)) { AddError(Error); return false; }
+		Probe.SourceSession = &SA; Probe.PeerSession = &SB;
+		Runtime->SetHostContext(Probe.A);
+		FAvidScriptVmTypedHostImport Import;
+		Import.StableId = TEXT("production_instance_probe"); Import.ModuleName = TEXT("avidscript"); Import.ImportName = TEXT("context_reenter");
+		Import.Signature = TEXT("(I)i"); Import.Shape = EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Get;
+		Import.bSupplementalRuntimeAuthority = true; Import.PreparedTarget.Context = &Probe;
+		Import.PreparedTarget.PackedSelfPropertyI32Get = &FProbe::Reenter;
+		FAvidScriptWasmSmokeResult Loaded;
+		if (!Runtime->SetSupplementalTypedHostImports({&Import, 1}, Error)
+			|| !Runtime->LoadModule(Wasm.GetData(), Wasm.Num(), TEXT("production_instance_entry"), Loaded)
+			|| !Runtime->ValidateRequiredExports({TEXT("avid_on_begin_play")}, Loaded))
+		{ AddError(Error + Loaded.ErrorMessage); return false; }
+		FAvidScriptWasmReloadManifest Manifest;
+		Manifest.ModuleId = TEXT("production_instance_entry"); Manifest.Language = TEXT("wasm");
+		Manifest.AbiVersion = FAvidScriptWasmReloadManifest::SupportedAbiVersion;
+		Manifest.RequiredExports = {TEXT("avid_on_begin_play")};
+		const auto Artifact = FAvidScriptRuntimeArtifact::FromCanonicalWasm(Manifest, Wasm, Selection);
+		// Inject only the native probe import before load. All instance activation,
+		// prepared native entry, nested authority selection and cleanup use production paths.
+		auto Domain = MakeShared<FAvidScriptRuntimeExecutionDomain>(Runtime, Probe.A, Types);
+		FAvidScriptWasmReloadResult Joined;
+		if (!SA.LoadGeneratedDomainArtifact(Artifact, Domain, Joined) || !SB.LoadGeneratedDomainArtifact(Artifact, Domain, Joined))
+		{ AddError(Joined.ErrorMessage); return false; }
+		Probe.A = SA.HostContext; Probe.B = SB.HostContext;
+		if (!Runtime->PrepareContextualExportCall(TEXT("step"), Probe.Step, Error)
+			|| !Runtime->PrepareContextualExportCall(TEXT("trap"), Probe.Trap, Error)) { AddError(Error); return false; }
+		if (Scenario == EScenario::ForeignCode)
+		{
+			if (!OtherRuntime.SetSupplementalTypedHostImports({&Import, 1}, Error)
+				|| !OtherRuntime.LoadModule(Wasm.GetData(), Wasm.Num(), TEXT("foreign_instance_entry"), Loaded)
+				|| !OtherRuntime.PrepareContextualExportCall(TEXT("step"), Probe.OtherCode, Error)) return false;
+		}
+		FAvidScriptVmError Rejected; FAvidScriptVmCallResult NoResult;
+		TestFalse(TEXT("instance route cannot start without an active caller"), Runtime->InvokeGeneratedInstanceExport(Probe.B.OwnerHandle, Probe.Step, {}, Rejected, &NoResult));
+		TestEqual(TEXT("idle route rejection has source category"), Rejected.Category, FString(TEXT("generated_invocation_source")));
+		if (Scenario == EScenario::Suspended) SB.SuspendForApplicationLifecycle(1);
+		int32 Value = -1;
+		const bool bCalled = FAvidScriptGeneratedTypeDispatcher::Invoke(A.Get(), 0, 0, {}, &Value);
+		TestEqual(TEXT("production call succeeds only for the authorized complete chain"), bCalled, Scenario == EScenario::Normal);
+		TestFalse(TEXT("outer chain has fully returned"), Runtime->IsContextInvocationActive());
+		if (Scenario == EScenario::Normal)
+		{
+			TestEqual(TEXT("production A observes shared object after B and nested A"), Value, 3);
+			TestEqual(TEXT("exactly two owner switches"), Probe.Calls, 2);
+			TArray<uint8> Bytes; Bytes.SetNumZeroed(44);
+			if (!TestTrue(TEXT("inspect same-domain alias and context results"), Runtime->ReadStateBytes(560, Bytes, Error))) return false;
+			auto Read = [&](int32 Offset) { uint32 V; FMemory::Memcpy(&V, Bytes.GetData() + Offset, 4); return V; };
+			TestEqual(TEXT("two argument pointers preserve one location across all entries"), Read(0), 6u);
+			for (int32 Depth = 0; Depth < 3; ++Depth)
+			{
+				uint32 Slot = Depth == 1 ? Probe.B.OwnerHandle.Slot : Probe.A.OwnerHandle.Slot;
+				TestEqual(TEXT("selected Session supplies owner imports"), Read(16 + Depth * 4), Slot);
+				TestEqual(TEXT("nested return restores calling Session"), Read(32 + Depth * 4), Slot);
+			}
+			auto* Heap = Runtime->GetManagedHeapForTesting();
+			TestEqual(TEXT("production chain releases all frames"), Heap->GetStats().ActiveFrames, 0u);
+			TestEqual(TEXT("production chain releases all roots"), Heap->GetStats().LiveRoots, 0u);
+			TestTrue(TEXT("unrooted object is collectable"), Heap->Collect() == AvidScript::Managed::EHeapError::Ok);
+			TestEqual(TEXT("no leaked object after production dispatch"), Heap->GetStats().LiveObjects, 0u);
+		}
+		else
+		{
+			TestTrue(TEXT("nested failure quarantines both Sessions"), SA.GetSnapshot().bFaultQuarantined && SB.GetSnapshot().bFaultQuarantined);
+			TestFalse(TEXT("outermost return unloads the failed shared VM"), Runtime->IsLoaded());
+			TestTrue(TEXT("fault cleanup retires both instance states"), Probe.A.InstanceExecutionState->IsRetired() && Probe.B.InstanceExecutionState->IsRetired());
+			TestFalse(TEXT("fault diagnostic is retained"), SA.GetSnapshot().FaultCategory.IsEmpty());
+			const TCHAR* Expected = Scenario == EScenario::ForeignCode ? TEXT("context_invocation_code")
+				: Scenario == EScenario::World ? TEXT("generated_invocation_target")
+				: Scenario == EScenario::Suspended ? TEXT("generated_invocation_state")
+				: Scenario == EScenario::Depth || Scenario == EScenario::Entries ? TEXT("context_invocation_budget")
+				: Scenario == EScenario::Frame ? TEXT("invalid_arguments")
+				: Scenario == EScenario::Mutate ? TEXT("context_invocation_mutation") : nullptr;
+			if (Expected) TestEqual(TEXT("root retains original nested failure category"), SA.GetSnapshot().FaultCategory, FString(Expected));
+			if (Scenario == EScenario::Trap) TestEqual(TEXT("writes before nested trap retain alias order"), Probe.WritesBeforeFailure, 4u);
+			TestFalse(TEXT("failed domain rejects peer entry"), FAvidScriptGeneratedTypeDispatcher::Invoke(B.Get(), 0, 0, {}, &Value));
+		}
+	}
+	return true;
 }
 #endif

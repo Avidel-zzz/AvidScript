@@ -20,6 +20,9 @@ public:
 	bool HasActiveCalls() const;
 	void Attach(FAvidScriptRuntimeSession& Session);
 	void Detach(FAvidScriptRuntimeSession& Session);
+	bool Invoke(FAvidScriptRuntimeSession& Source, const FAvidScriptObjectHandle& Target,
+		const FAvidScriptContextualExportCall& Call, const FAvidScriptVmCallFrame& Frame,
+		FAvidScriptVmError& OutError, FAvidScriptVmCallResult* OutResult);
 	void Poison(const FAvidScriptWasmSmokeResult& Failure);
 	void DrainFault();
 	bool IsFaulted() const { return bFaulted; }
@@ -31,6 +34,7 @@ private:
 	FAvidScriptObjectRegistry* Registry = nullptr;
 	TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot> Types;
 	TArray<FAvidScriptRuntimeSession*> Members;
+	TMap<uint64, FAvidScriptRuntimeSession*> MembersByHandle;
 	FAvidScriptWasmSmokeResult RootFailure;
 	bool bFaulted = false;
 	bool bDraining = false;

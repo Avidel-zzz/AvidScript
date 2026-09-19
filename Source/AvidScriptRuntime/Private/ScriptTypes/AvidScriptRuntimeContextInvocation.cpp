@@ -1,4 +1,5 @@
 #include "AvidScriptWasmRuntime.h"
+#include "ScriptTypes/AvidScriptGeneratedTypeAuthority.h"
 #include "Engine/World.h"
 #include "Misc/ScopeExit.h"
 
@@ -86,6 +87,28 @@ bool FAvidScriptWasmRuntimeInstance::InvokeInContext(
 		}, OutError);
 	if (!bSucceeded && OutResult) *OutResult = {};
 	return bSucceeded;
+}
+
+bool FAvidScriptWasmRuntimeInstance::InvokeGeneratedInstanceExport(const FAvidScriptObjectHandle& Target,
+	const FAvidScriptContextualExportCall& Call, const FAvidScriptVmCallFrame& Frame,
+	FAvidScriptVmError& OutError, FAvidScriptVmCallResult* OutResult)
+{
+	OutError.Reset();
+	if (OutResult) *OutResult = {};
+	if (!IsInGameThread()) { OutError.Category = TEXT("context_invocation_thread"); return false; }
+	if (!ContextInvocationFailure.Category.IsEmpty()) { OutError = ContextInvocationFailure; return false; }
+	const auto Authority = HostContext.GeneratedTypeAuthority.Pin();
+	if (!ContextInvocationDepth || !ValidateInvocationContext(HostContext)
+		|| GetLifecycleState() != EAvidScriptLifecycleState::Running || !Authority)
+	{
+		OutError.Category = TEXT("generated_invocation_source");
+		OutError.Details = TEXT("instance routing requires an active running generated owner context");
+	}
+	else if (Authority->InvokeInstanceExport(*this, Target, Call, Frame, OutError, OutResult)) return true;
+	if (OutError.Category.IsEmpty()) OutError.Category = TEXT("generated_invocation_rejected");
+	if (ContextInvocationDepth) LatchContextInvocationFailure(OutError);
+	if (OutResult) *OutResult = {};
+	return false;
 }
 
 bool FAvidScriptWasmRuntimeInstance::InvokeContextOperation(

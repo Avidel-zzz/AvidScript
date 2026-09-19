@@ -3,6 +3,7 @@
 
 #include "ScriptTypes/AvidScriptGeneratedTypeRegistry.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeSessionPrivate.h"
+#include "Session/AvidScriptRuntimeExecutionDomain.h"
 #include "UObject/UnrealType.h"
 
 namespace
@@ -14,20 +15,30 @@ enum class EGeneratedCallShape : uint8
 	ReceiverI32,
 	ReceiverF32Void,
 };
+}
 
 class FGeneratedSessionAuthority final : public IAvidScriptGeneratedTypeAuthority
 {
 public:
-	explicit FGeneratedSessionAuthority(const FAvidScriptRuntimeSession& InSession) : Session(InSession) {}
+	explicit FGeneratedSessionAuthority(FAvidScriptRuntimeSession& InSession) : Session(InSession) {}
 	UObject* ResolveGeneratedTypeReceiver(int64 PackedSelf, uint32 TypeOrdinal,
 		const FAvidScriptGeneratedTypeRegistrySnapshot& Registry) const override
 	{
 		return Session.ResolveGeneratedTypeReceiver(PackedSelf, TypeOrdinal, Registry);
 	}
+	bool InvokeInstanceExport(FAvidScriptWasmRuntimeInstance& SourceRuntime,
+		const FAvidScriptObjectHandle& Target, const FAvidScriptContextualExportCall& Call,
+		const FAvidScriptVmCallFrame& Frame, FAvidScriptVmError& OutError,
+		FAvidScriptVmCallResult* OutResult) override
+	{
+		return Session.InvokeGeneratedInstanceExport(SourceRuntime, Target, Call, Frame, OutError, OutResult);
+	}
 private:
-	const FAvidScriptRuntimeSession& Session;
+	FAvidScriptRuntimeSession& Session;
 };
 
+namespace
+{
 EGeneratedCallShape ResolveCallShape(
 	const FAvidScriptGeneratedMemberPlan& Member,
 	const FAvidScriptContextualExportCall& Call)
@@ -88,6 +99,21 @@ EGeneratedCallShape ResolveCallShape(
 	}
 	return EGeneratedCallShape::Unsupported;
 }
+}
+
+bool FAvidScriptRuntimeSession::InvokeGeneratedInstanceExport(FAvidScriptWasmRuntimeInstance& SourceRuntime,
+	const FAvidScriptObjectHandle& Target, const FAvidScriptContextualExportCall& Call,
+	const FAvidScriptVmCallFrame& Frame, FAvidScriptVmError& OutError, FAvidScriptVmCallResult* OutResult)
+{
+	if (!IsInGameThread() || !LiveDomain || LiveRuntime.Get() != &SourceRuntime)
+	{
+		OutError.Category = TEXT("generated_invocation_domain");
+		OutError.Details = TEXT("source instance has no matching published execution domain");
+		return false;
+	}
+	// Retain the domain while nested failure marks members for deferred cleanup.
+	auto Domain = LiveDomain;
+	return Domain->Invoke(*this, Target, Call, Frame, OutError, OutResult);
 }
 
 bool FAvidScriptRuntimeSession::ConfigureGeneratedTypeInstance(

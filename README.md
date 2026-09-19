@@ -28,7 +28,7 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 
 当前开发主线转向 [P66-P69 开发体验路线](Docs/Phase66/P66.0_Developer_Experience_Architecture.md)：
 语言一致性、结构热重载、完整调试和 Windows 真实玩法验证。P65 未完成的性能、发布与移动端债务继续保留。
-[与 Unreal AngelScript / Puerts 的成熟度评估](Docs/Phase66/P66_Developer_Leadership_Assessment.md)已于 2026-09-20 按 `f32b3fc6` 与工作树源码、官方资料更新：生产共享执行域、持久事件/await、结构热重载与完整调试仍有缺口；本次为文档与源码复核，无新增运行测试或竞品计时，不宣称成熟或全面领先。
+[与 Unreal AngelScript / Puerts 的成熟度评估](Docs/Phase66/P66_Developer_Leadership_Assessment.md)已于 2026-09-20 按 `cd7b1172` 与源码、官方资料更新：生产共享执行域已经交付，完整跨对象语言派发、持久事件/await、结构热重载与完整调试仍有缺口；该评估为文档与源码复核，无新增运行测试或竞品计时，不宣称成熟或全面领先。
 [P66.A 静态局部函数](Docs/Phase66/P66.A_Lexical_Functions.md)已支持独立作用域、嵌套、递归及直接调用；
 [P66.B 直接调用捕获](Docs/Phase66/P66.B_Direct_Capture_Results.md)进一步支持外层变量共享读写及跨 await 保存。
 [委托签名合同](Docs/Phase66/P66.B_Delegate_Signature_Contract.md)已覆盖封闭泛型身份、引用参数及产物校验，为后续委托执行提供类型依据。
@@ -67,6 +67,8 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 [全包准备后发布](Docs/Phase66/P66.B_Package_Prepared_Reload.md)使 body-only reload 在所有候选准备、复核成功后才替换原 VM；失败逆序还原，保留原 global、实例状态及代码代次，无法还原则停止全包。Windows 构建、C# receiver 16/16、GeneratedTypes 15/15、生命周期与回调回归 36/36 通过。准备期间的原生副作用并非完全不可见；生产共享 VM、完整方法路由及持久 event/await 根仍待完成，P66.B 保持进行中。
 
 [生产共享执行域](Docs/Phase66/P66.B_Production_Execution_Domain.md)已将同包、同 World/registry 的生成实例接入同一 VM/堆/静态状态；实例独立取消，最后 owner 退出才卸载，初始化或执行失败停止整个域。包重载按域准备和迁移候选，并保留生成绑定的类型身份。Windows 构建、C# receiver 16/16、GeneratedTypes 16/16、生命周期/回调回归 36/36 通过，含真实 C#、强制 GC、Timer、World 隔离及重载后加入新对象。完整 C# 跨对象方法、同步 A→B→A、持久 event/await 和调试仍待完成，P66.B 保持进行中。
+
+[生产实例上下文入口](Docs/Phase66/P66.B_Production_Method_Entry.md)进一步连接同域目标 Session 的受检同步调用，保留原始帧、堆 token 与引用位置，并延迟到外层调用退出后清理故障。Windows 构建、C# receiver 16/16、GeneratedTypes 17/17、生命周期/回调回归 36/36 通过，含双后端 A→B→A、混合参数、共享对象、ref 位置别名、GC 与错误展开。该入口是原生 prepared route 的基础，完整 C# 方法目录、参数 ABI、virtual/interface 和持久根仍在推进。
 
 ## 现在可以做什么
 
