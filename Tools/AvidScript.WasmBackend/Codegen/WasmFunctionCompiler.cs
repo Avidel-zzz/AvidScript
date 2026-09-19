@@ -294,11 +294,19 @@ internal sealed partial class WasmFunctionCompiler
         WasmBinaryWriter body,
         GuestInstruction instruction)
     {
+        RefreshBorrowedSlots(body);
         if (instruction.Op is "call" or "call_indirect" or "managed_new" or "managed_collect"
             or "array_load" or "array_store" or "array_length" or "array_region_load" or "array_region_store")
             FlushManagedRoots(body);
         switch (instruction.Op)
         {
+            case "borrow_address":
+            case "borrow_managed":
+            case "borrow_field":
+            case "borrow_load":
+            case "borrow_store":
+                CompileBorrowedInstruction(body, instruction);
+                break;
             case "managed_new":
             case "managed_cast":
             case "managed_get":
@@ -1166,6 +1174,7 @@ internal sealed partial class WasmFunctionCompiler
         GuestTerminator terminator,
         IReadOnlyDictionary<string, int> blockIndices)
     {
+        RefreshBorrowedSlots(body);
         switch (terminator.Kind)
         {
             case "branch":
@@ -1339,6 +1348,22 @@ internal sealed partial class WasmFunctionCompiler
     private void WriteResult(WasmBinaryWriter body, GuestInstruction instruction)
     {
         WriteLocalSet(body, localIndices[instruction.ResultId!]);
+        StoreBorrowedSlot(body, instruction.ResultId!);
+    }
+
+    private void StoreBorrowedSlot(WasmBinaryWriter body, string id)
+    {
+        if (!frame.BorrowedAddressTargets.Contains(id) || IsMemoryValue(id)) return;
+        WriteFrameAddress(body, id); WriteLocalGet(body, localIndices[id]); WasmMemoryEmitter.WriteStore(body, GetValueType(id));
+    }
+
+    private void RefreshBorrowedSlots(WasmBinaryWriter body)
+    {
+        foreach (string id in frame.BorrowedAddressTargets.OrderBy(id => id, StringComparer.Ordinal))
+        {
+            if (IsMemoryValue(id)) continue;
+            WriteFrameAddress(body, id); WasmMemoryEmitter.WriteLoad(body, GetValueType(id)); WriteLocalSet(body, localIndices[id]);
+        }
     }
 
     private static void WriteI32Constant(WasmBinaryWriter body, int value)

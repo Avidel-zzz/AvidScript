@@ -42,13 +42,13 @@ if ($RuntimeAutomation) {
     & $EditorExe $ProjectPath -unattended -nop4 -NullRHI -nosplash "-ExecCmds=Automation RunTests $TestName;Quit" '-TestExit=Automation Test Queue Empty' "-abslog=$LogPath"
     if ($LASTEXITCODE -ne 0) { throw "Managed heap Automation exited with $LASTEXITCODE. Log: $LogPath" }
     $Log = Get-Content -Raw -LiteralPath $LogPath
-    $Found = [regex]::Matches($Log, "Found 4 automation tests based on '$([regex]::Escape($TestName))'").Count
-    $Success = [regex]::Matches($Log, 'Test Completed\. Result=\{Success\} Name=\{(Ownership|HostAbi|GeneratedGuest|CSharpClosures)\} Path=\{AvidScript\.Runtime\.ManagedHeap\.\1\}').Count
+    $Found = [regex]::Matches($Log, "Found 5 automation tests based on '$([regex]::Escape($TestName))'").Count
+    $Success = [regex]::Matches($Log, 'Test Completed\. Result=\{Success\} Name=\{(Ownership|HostAbi|GeneratedGuest|CSharpClosures|BorrowedReferences)\} Path=\{AvidScript\.Runtime\.ManagedHeap\.\1\}').Count
     $Failed = [regex]::Matches($Log, 'Test Completed\. Result=\{Fail\}').Count
     $Complete = [regex]::Matches($Log, '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*\*').Count
     $Exit = [regex]::Matches($Log, 'RequestExitWithStatus\(1, 0,').Count
-    if ($Found -ne 1 -or $Success -ne 4 -or $Failed -ne 0 -or $Complete -ne 1 -or $Exit -lt 1) {
+    if ($Found -ne 1 -or $Success -ne 5 -or $Failed -ne 0 -or $Complete -ne 1 -or $Exit -lt 1) {
         throw "Managed heap Automation evidence incomplete: found=$Found passed=$Success failed=$Failed complete=$Complete exit=$Exit log=$LogPath"
     }
-    Write-Output "AvidScript.ManagedHeap.RuntimeAutomation: 4/4 passed; log=$LogPath"
+    Write-Output "AvidScript.ManagedHeap.RuntimeAutomation: 5/5 passed; log=$LogPath"
 }

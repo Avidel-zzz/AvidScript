@@ -20,7 +20,7 @@ public static class GuestManagedHeap
         {
             if (!seen.Add(current) || !types.TryGetValue(current, out GuestType? type)) continue;
             if (type.Kind == "managed_ref") return true;
-            if (type.Kind == "struct") foreach (GuestField field in type.Fields) pending.Push(field.TypeId);
+            if (type.Kind is "struct" or "borrowed_ref") foreach (GuestField field in type.Fields) pending.Push(field.TypeId);
         }
         return false;
     }
@@ -34,7 +34,7 @@ public static class GuestManagedHeap
             if (entry.Depth > 128 || result.Count + pending.Count > MaxObjectBytes)
                 throw new InvalidOperationException("Managed aggregate nesting or leaf count exceeds its bounded layout contract.");
             GuestType type = types[entry.Id];
-            if (type.Kind == "struct")
+            if (type.Kind is "struct" or "borrowed_ref")
             {
                 foreach (GuestField field in type.Fields.Reverse())
                     pending.Push((field.TypeId, checked(entry.Offset + field.Offset), entry.Depth + 1));

@@ -85,6 +85,7 @@ internal sealed class GuestTypeLayoutResolver
                 "composite_ref" => LayoutCompositeValueCapability(declaration),
                 "function_ref" => LayoutFunctionReference(declaration),
                 "managed_ref" => LayoutManagedReference(declaration),
+                "borrowed_ref" => LayoutBorrowedReference(declaration),
                 _ => InvalidShape(declaration, $"unsupported kind '{declaration.Kind}'"),
             };
         }
@@ -106,6 +107,20 @@ internal sealed class GuestTypeLayoutResolver
 
         layouts[typeId] = layout;
         return layout;
+    }
+
+    private GuestType? LayoutBorrowedReference(GuestType declaration)
+    {
+        if (declaration.Storage != "memory" || declaration.UnderlyingTypeId is not null
+            || declaration.ElementTypeId is not { } element || !declarations.TryGetValue(element, out GuestType? pointee)
+            || pointee.Kind is "void" or "borrowed_ref" || declaration.Fields.Count != 3
+            || !declaration.Fields.Select(field => field.Id).SequenceEqual(new[] { "owner", "offset", "address" })
+            || !declarations.TryGetValue(declaration.Fields[0].TypeId, out GuestType? owner)
+            || owner.Kind != "managed_ref" || owner.ElementTypeId is not null
+            || declaration.Fields.Skip(1).Any(field => !declarations.TryGetValue(field.TypeId, out GuestType? scalar)
+                || scalar.Kind != "scalar" || scalar.Storage != "i32" || scalar.Size != 4 || scalar.Alignment != 4))
+            return InvalidShape(declaration, "borrowed reference requires an erased owner, two i32 offsets and a value pointee");
+        return LayoutStruct(declaration);
     }
 
     private GuestType? LayoutVoid(GuestType declaration)

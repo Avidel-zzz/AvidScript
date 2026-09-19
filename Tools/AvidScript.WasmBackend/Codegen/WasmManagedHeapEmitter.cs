@@ -7,7 +7,7 @@ namespace AvidScript.WasmBackend;
 
 internal sealed partial class WasmFunctionCompiler
 {
-    private sealed record ManagedRoot(string RegisterId, int Offset, bool Aggregate, uint LocalIndex);
+    private sealed record ManagedRoot(string RegisterId, int Offset, bool Aggregate, uint LocalIndex, bool BorrowedPointee = false);
     private readonly List<ManagedRoot> managedRoots = new();
     private uint managedFrameLocal;
     private bool HasManagedScope => frame.ManagedScratchOffset.HasValue;
@@ -24,6 +24,12 @@ internal sealed partial class WasmFunctionCompiler
                 managedRoots.Add(new(value.Id, leaf.Offset, moduleLayout.IsMemoryType(value.TypeId), next++));
                 locals.Add(WasmValueType.I64);
             }
+            GuestType type = moduleLayout.Types[value.TypeId];
+            if (type.Kind == GuestBorrowedReference.Kind)
+                foreach (GuestManagedLeaf leaf in GuestManagedHeap.Leaves(moduleLayout.Types, type.ElementTypeId!).Where(item => item.Type.Kind == "managed_ref"))
+                {
+                    managedRoots.Add(new(value.Id, leaf.Offset, true, next++, true)); locals.Add(WasmValueType.I64);
+                }
         }
     }
 
@@ -42,6 +48,9 @@ internal sealed partial class WasmFunctionCompiler
         foreach (GuestRegister local in function.Locals.Where(value => moduleLayout.IsMemoryType(value.TypeId)
                      && GuestManagedHeap.ContainsReferences(moduleLayout.Types, value.TypeId)))
             WasmMemoryEmitter.WriteZero(body, writer => WriteLocalGet(writer, localIndices[local.Id]), moduleLayout.Types[local.TypeId].Size);
+
+        foreach (GuestRegister local in function.Locals.Where(value => frame.BorrowedAddressTargets.Contains(value.Id) && !IsMemoryValue(value.Id)))
+        { WriteFrameAddress(body, local.Id); WriteLocalGet(body, localIndices[local.Id]); WasmMemoryEmitter.WriteStore(body, GetValueType(local.Id)); }
 
         ManagedHeader(body, GuestManagedHeapCommand.PushFrame); ManagedPacketCall(body, 8, 8); ManagedLoadToken(body, managedFrameLocal);
         foreach (ManagedRoot root in managedRoots)
@@ -66,6 +75,18 @@ internal sealed partial class WasmFunctionCompiler
 
     private void WriteManagedRootValue(WasmBinaryWriter body, ManagedRoot root)
     {
+        if (root.BorrowedPointee)
+        {
+            WriteBorrowOwner(body, root.RegisterId); body.WriteByte(0x50); // owner == null
+            WriteBorrowI32(body, root.RegisterId, GuestBorrowedReference.AddressOffset); body.WriteByte(0x45); body.WriteByte(0x45);
+            body.WriteByte(0x71); body.WriteByte(0x04); body.WriteByte(0x7e); // if (result i64)
+            WriteBorrowI32(body, root.RegisterId, GuestBorrowedReference.AddressOffset);
+            WriteI32Constant(body, root.Offset); body.WriteByte(0x6a); body.WriteByte(0x29); body.WriteU32(0); body.WriteU32(0);
+            body.WriteByte(0x05); body.WriteByte(0x42); body.WriteS64(0); body.WriteByte(0x0b);
+            return;
+        }
+        if (!root.Aggregate && frame.BorrowedAddressTargets.Contains(root.RegisterId))
+        { WriteFrameAddress(body, root.RegisterId); WasmMemoryEmitter.WriteLoad(body, GetValueType(root.RegisterId)); return; }
         WriteLocalGet(body, localIndices[root.RegisterId]);
         if (!root.Aggregate) return;
         WriteI32Constant(body, root.Offset); body.WriteByte(0x6a);
@@ -96,7 +117,7 @@ internal sealed partial class WasmFunctionCompiler
                 ManagedStoreI32(body, 16, expected); ManagedStoreI32(body, 20, 0); ManagedStoreI32(body, 24, 0);
                 ManagedPacketCall(body, 28, 0); body.WriteByte(0x0b);
             }
-            WriteLocalGet(body, localIndices[source]); WriteLocalSet(body, localIndices[instruction.ResultId!]); return;
+            WriteLocalGet(body, localIndices[source]); WriteResult(body, instruction); return;
         }
         if (instruction.Op == "managed_collect") { ManagedHeader(body, GuestManagedHeapCommand.Collect); ManagedPacketCall(body, 8, 0); return; }
         if (instruction.Op == "managed_new")
@@ -104,7 +125,7 @@ internal sealed partial class WasmFunctionCompiler
             ManagedRoot root = managedRoots.Single(item => item.RegisterId == instruction.ResultId && !item.Aggregate);
             ManagedHeader(body, GuestManagedHeapCommand.Allocate); ManagedStoreI32(body, 8, moduleLayout.ManagedHeap.TypeOrdinals[GetValueType(instruction.ResultId!).Id]);
             ManagedStoreToken(body, 12, writer => WriteLocalGet(writer, root.LocalIndex));
-            ManagedPacketCall(body, 20, 8); ManagedLoadToken(body, localIndices[instruction.ResultId!]); return;
+            ManagedPacketCall(body, 20, 8); ManagedLoadToken(body, localIndices[instruction.ResultId!]); StoreBorrowedSlot(body, instruction.ResultId!); return;
         }
         string owner = instruction.OperandIds[0];
         GuestType reference = GetValueType(owner);
@@ -148,7 +169,7 @@ internal sealed partial class WasmFunctionCompiler
                 if (aggregate) { WriteLocalGet(body, localIndices[value]); WriteI32Constant(body, leaf.Offset); body.WriteByte(0x6a); }
                 ManagedScratchAddress(body, 48); WasmMemoryEmitter.WriteLoad(body, leaf.Type);
                 if (aggregate) WasmMemoryEmitter.WriteStore(body, leaf.Type);
-                else WriteLocalSet(body, localIndices[value]);
+                else { WriteLocalSet(body, localIndices[value]); StoreBorrowedSlot(body, value); }
             }
         }
     }

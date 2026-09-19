@@ -40,6 +40,7 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 [Guest 受追踪引用与自动根插桩](Docs/Phase66/P66.B_Guest_Managed_References.md)已支持类型化对象字段、递归/间接调用及含引用的值参数/返回。
 [C# 共享与逃逸闭包执行](Docs/Phase66/P66.B_CSharp_Closure_Execution.md)进一步连接同步捕获 lambda、局部函数方法组、共享 cell、嵌套/递归委托和循环作用域，采用 IR 5/1.4 的受检类型擦除引用；Semantic 174/174、Guest 216/216、IR 35/35、WASM 88/88、原生堆 13/13、UE 增量构建与双后端 Automation 4/4 通过，包含强制回收和错误转换后的清理。
 捕获值的普通 ref/out 与内部可变引用、绑定实例委托、delegate/event 组合、跨 await 持久根和后续开发体验阶段仍未完成，P66.B 保持进行中。
+[内部引用 IR 6/1.5](Docs/Phase66/P66.B_Borrowed_Reference_Contract.md)已验证栈/堆别名、嵌套字段、间接调用和回收根；Guest 216/216、IR 35/35、WASM 112/112、原生堆 13/13、双后端 Automation 5/5 通过。C# 捕获值的普通 ref/out 前端接入仍待完成。
 
 ## 现在可以做什么
 

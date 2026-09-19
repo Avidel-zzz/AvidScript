@@ -16,9 +16,16 @@ internal static class GuestInstructionValidator
         GuestRegister? result = ResolveResult(context, function, instruction, values, localIds, assignedValues);
         GuestRegister?[] operands = ResolveOperands(context, function, instruction, values);
         GuestManagedHeapValidator.ValidateInstruction(context, function, instruction, result, operands, values);
+        GuestBorrowedReferenceValidator.ValidateInstruction(context, function, instruction, result, operands, values);
 
         switch (instruction.Op)
         {
+            case "borrow_address":
+            case "borrow_managed":
+            case "borrow_field":
+            case "borrow_load":
+            case "borrow_store":
+                break;
             case "managed_new":
             case "managed_cast":
             case "managed_get":

@@ -25,6 +25,7 @@ internal sealed class WasmFunctionFrameLayout
 
     public int? ArrayElementScratchOffset { get; }
     public int? ManagedScratchOffset { get; }
+    public IReadOnlySet<string> BorrowedAddressTargets { get; private init; } = new HashSet<string>();
 
     public static WasmFunctionFrameLayout Create(
         GuestFunction function,
@@ -32,10 +33,7 @@ internal sealed class WasmFunctionFrameLayout
     {
         HashSet<string> addressTargets = function.Blocks
             .SelectMany(block => block.Instructions)
-            .Where(instruction => string.Equals(
-                instruction.Op,
-                "address_of",
-                StringComparison.Ordinal))
+            .Where(instruction => instruction.Op is "address_of" or "borrow_address")
             .Select(instruction => instruction.TargetId!)
             .ToHashSet(StringComparer.Ordinal);
         Dictionary<string, int> offsets = new(StringComparer.Ordinal);
@@ -89,7 +87,11 @@ internal sealed class WasmFunctionFrameLayout
             cursor = checked(managedScratchOffset.Value + 64);
         }
         int frameSize = cursor == 0 ? 0 : AlignUp(cursor, 16);
-        return new WasmFunctionFrameLayout(offsets, arrayElementScratchOffset, managedScratchOffset, frameSize);
+        return new WasmFunctionFrameLayout(offsets, arrayElementScratchOffset, managedScratchOffset, frameSize)
+        {
+            BorrowedAddressTargets = function.Blocks.SelectMany(block => block.Instructions)
+                .Where(instruction => instruction.Op == "borrow_address").Select(instruction => instruction.TargetId!).ToHashSet(StringComparer.Ordinal),
+        };
     }
 
     public bool HasSlot(string valueId)
