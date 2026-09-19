@@ -107,7 +107,8 @@ internal static class CSharpGuestClosureExecutionTests
                 "shared borrow capability must match its declared boundary: " + body + " | " + string.Join(" | ", rejected.Diagnostics.Select(item => item.Message)));
             count++;
         }
-        return count + CSharpGuestBorrowedReferenceTests.Run() + CSharpGuestDelegateIdentityTests.Run() + CSharpGuestDelegateListTests.Run();
+        return count + CSharpGuestBorrowedReferenceTests.Run() + CSharpGuestDelegateIdentityTests.Run()
+            + CSharpGuestDelegateListTests.Run() + CSharpGuestBoundDelegateTests.Run();
     }
     private static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
 }

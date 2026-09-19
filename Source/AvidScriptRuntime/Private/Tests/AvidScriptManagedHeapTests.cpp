@@ -336,7 +336,9 @@ bool FAvidScriptManagedHeapCSharpClosuresTest::RunTest(const FString& Parameters
 			FString(TEXT("csharp-delegate-identity.wasm")), FString(TEXT("csharp-delegate-identity-stress.wasm")),
 			FString(TEXT("csharp-delegate-identity-static.wasm")),
 			FString(TEXT("csharp-delegate-list.wasm")), FString(TEXT("csharp-delegate-list-stress.wasm")),
-			FString(TEXT("csharp-delegate-list-static.wasm")), FString(TEXT("csharp-delegate-list-static-stress.wasm"))})
+			FString(TEXT("csharp-delegate-list-static.wasm")), FString(TEXT("csharp-delegate-list-static-stress.wasm")),
+			FString(TEXT("csharp-bound-delegate.wasm")), FString(TEXT("csharp-bound-delegate-stress.wasm")),
+			FString(TEXT("csharp-bound-delegate-plain.wasm")), FString(TEXT("csharp-bound-delegate-plain-stress.wasm"))})
 		{
 			TArray<uint8> Wasm;
 			if (!TestTrue(TEXT("Load current CSharp closure fixture"), FFileHelper::LoadFileToArray(Wasm, *FPaths::Combine(Directory, File)))) return false;
@@ -353,7 +355,10 @@ bool FAvidScriptManagedHeapCSharpClosuresTest::RunTest(const FString& Parameters
 			const bool bStaticIdentity = File == TEXT("csharp-delegate-identity-static.wasm");
 			const bool bDelegateList = File.Contains(TEXT("delegate-list"));
 			const bool bStaticList = File.Contains(TEXT("delegate-list-static"));
-			const uint32 Expected = bStaticIdentity || bStaticList ? 7u : bDelegateList ? 65535u : File.Contains(TEXT("identity")) ? 8191u : 1147395u;
+			const bool bBoundDelegate = File.Contains(TEXT("bound-delegate"));
+			const bool bPlainBoundDelegate = File.Contains(TEXT("bound-delegate-plain"));
+			const uint32 Expected = bPlainBoundDelegate ? 650u : bBoundDelegate ? 4095u
+				: bStaticIdentity || bStaticList ? 7u : bDelegateList ? 65535u : File.Contains(TEXT("identity")) ? 8191u : 1147395u;
 			TestEqual(TEXT("CSharp closure execution and callable/environment equality match reference results"),
 				uint32(Value[0]) | (uint32(Value[1]) << 8) | (uint32(Value[2]) << 16) | (uint32(Value[3]) << 24), Expected);
 			FHeap* Heap = Runtime.GetManagedHeapForTesting();
@@ -367,7 +372,8 @@ bool FAvidScriptManagedHeapCSharpClosuresTest::RunTest(const FString& Parameters
 			}
 			if (!TestNotNull(TEXT("CSharp module owns heap"), Heap)) return false;
 			const auto Stats = Heap->GetStats();
-			TestTrue(TEXT("Closures and lists use actual managed allocations"), Stats.Allocations >= (bStaticList ? 2u : 16u));
+			const uint64 MinimumAllocations = bPlainBoundDelegate ? 1u : bBoundDelegate ? 12u : bStaticList ? 2u : 16u;
+			TestTrue(TEXT("Closures, lists and bound values use actual managed allocations"), Stats.Allocations >= MinimumAllocations);
 			if (File.Contains(TEXT("stress")))
 				TestTrue(TEXT("Every allocation followed by collection"), Stats.Collections >= Stats.Allocations);
 			TestEqual(TEXT("CSharp frames unwind"), Stats.ActiveFrames, 0u);

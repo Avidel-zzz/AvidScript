@@ -106,6 +106,8 @@ internal static class CSharpTypeLowerer
             return Failure(diagnostics);
         }
 
+        if (rawTypes.Any(type => type.Fields.Any(field => field.Id.StartsWith("$empty:", StringComparison.Ordinal))))
+            AddTypeIfMissing(rawTypes, Scalar("type:uint8", "i32", 1, 1));
         CSharpClosureLayout.AddTypes(document, rawTypes);
         CSharpBorrowedReferences.AddTypes(document, rawTypes);
         GuestTypeLayoutResult layout = GuestDataLayout.ComputeTypes(rawTypes);
@@ -451,6 +453,8 @@ internal static class CSharpTypeLowerer
             .ThenBy(symbol => symbol.Id, StringComparer.Ordinal)
             .Select(symbol => new GuestField(symbol.Id, symbol.Name, symbol.TypeId!, 0))
             .ToArray();
+        // A fieldless value still occupies addressable storage, including when boxed.
+        if (fields.Length == 0) fields = new[] { new GuestField("$empty:" + type.Id, "$storage", "type:uint8", 0) };
         return new GuestType(type.Id, "struct", "memory", fields, null, null, 0, 1);
     }
 

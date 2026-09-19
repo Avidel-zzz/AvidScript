@@ -135,15 +135,16 @@ internal static class CSharpGuestManagedDelegateTests
             "using System; using System.Runtime.InteropServices; public static class Script { [UnmanagedCallersOnly(EntryPoint=\"run\")] public static int Run(int n) { int Read() => n; Func<int> callback = Read; return callback(); } }"), new string('f', 64));
         Require(captured.Succeeded && WasmModuleCompiler.Compile(captured.Module!).Succeeded,
             "capturing method groups compile with traced shared environments: " + string.Join(" | ", captured.Diagnostics.Select(item => item.Message)));
-        foreach (string rejectedSource in new[]
+        foreach ((bool Supported, string Source) test in new[]
         {
-            "using System; using System.Runtime.InteropServices; public struct Counter { public int Value; public int Read() => Value; } public static class Script { [UnmanagedCallersOnly(EntryPoint=\"run\")] public static int Run(int n) { Counter value = new Counter(); value.Value = n; Func<int> callback = value.Read; return callback(); } }",
-            "using System; using System.Runtime.InteropServices; public static class Script { [DllImport(\"env\", EntryPoint=\"sink\")] public static extern void Sink(Func<int,int> callback); static int Identity(int n) => n; [UnmanagedCallersOnly(EntryPoint=\"run\")] public static int Run(int n) { Sink(Identity); return n; } }",
+            (true, "using System; using System.Runtime.InteropServices; public struct Counter { public int Value; public int Read() => Value; } public static class Script { [UnmanagedCallersOnly(EntryPoint=\"run\")] public static int Run(int n) { Counter value = new Counter(); value.Value = n; Func<int> callback = value.Read; return callback(); } }"),
+            (false, "using System; using System.Runtime.InteropServices; public static class Script { [DllImport(\"env\", EntryPoint=\"sink\")] public static extern void Sink(Func<int,int> callback); static int Identity(int n) => n; [UnmanagedCallersOnly(EntryPoint=\"run\")] public static int Run(int n) { Sink(Identity); return n; } }"),
         })
         {
-            CSharpGuestLoweringResult rejected = CSharpGuestLowerer.Lower(CSharpGuestLexicalCaptureTests.Analyze(rejectedSource), new string('f', 64));
-            Require(!rejected.Succeeded && rejected.Diagnostics.Any(item => item.Code is "ASCG1024" or "ASCG1003"),
-                "bound receivers and host crossings must fail explicitly until implemented");
+            CSharpGuestLoweringResult caseResult = CSharpGuestLowerer.Lower(CSharpGuestLexicalCaptureTests.Analyze(test.Source), new string('f', 64));
+            Require(test.Supported ? caseResult.Succeeded && WasmModuleCompiler.Compile(caseResult.Module!).Succeeded
+                    : !caseResult.Succeeded && caseResult.Diagnostics.Any(item => item.Code is "ASCG1024" or "ASCG1003"),
+                "bound struct receivers compile while unsupported Host delegate crossings remain rejected");
         }
         string? root = Environment.GetEnvironmentVariable("AVIDSCRIPT_LOCAL_FUNCTION_WASM_DIR");
         if (!string.IsNullOrWhiteSpace(root))
