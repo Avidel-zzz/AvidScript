@@ -110,6 +110,8 @@ public:
 	bool EndPlayLive(FAvidScriptWasmSmokeResult& OutResult);
 	void SetHostContext(const FAvidScriptWasmHostContext& InHostContext);
 	void ClearHostContext();
+	// Validates the current generated instance authority without entering Guest code.
+	bool ValidateGeneratedTypeReceiver(int64 PackedSelf, uint32 TypeOrdinal) const;
 	void UnloadLive();
 	bool ConfigureGeneratedTypeInstance(
 		UObject& Receiver,

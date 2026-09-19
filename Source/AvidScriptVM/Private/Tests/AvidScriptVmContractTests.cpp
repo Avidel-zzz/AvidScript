@@ -909,18 +909,17 @@ bool FAvidScriptWamrBackendSmokeTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("two unique WAMR lookups"), Backend->GetExportLookupCount(), 2u);
 	TestEqual(TEXT("cached tick slot"), CachedTickHandle.Slot, TickHandle.Slot);
 	FAvidScriptVmPreparedExportCall PreparedTick;
-	TestFalse(
-		TEXT("WAMR explicitly declines prepared export calls"),
+	TestTrue(
+		TEXT("WAMR prepares a validated generic export adapter"),
 		Backend->PrepareExportCall(TickHandle, PreparedTick, Error));
-	TestFalse(
-		TEXT("WAMR leaves no partial prepared target"),
+	TestTrue(
+		TEXT("WAMR retains the prepared handle"),
 		PreparedTick.IsValid());
-	TestEqual(
-		TEXT("WAMR prepared fallback category is stable"),
-		Error.Category,
-		FString(TEXT("prepared_export_unsupported")));
+	TestEqual(TEXT("Prepared tick parameter ABI"), PreparedTick.ParameterCellCount, 1u);
+	TestEqual(TEXT("Prepared tick result ABI"), PreparedTick.ResultCellCount, 0u);
 
 	FAvidScriptVmCallFrame EmptyFrame;
+	TestFalse(TEXT("Prepared tick rejects wrong frame size"), PreparedTick.Call(EmptyFrame, Error));
 	FAvidScriptVmCallResult VoidResult;
 	TestTrue(
 		TEXT("begin export calls with result sink"),
@@ -934,9 +933,12 @@ bool FAvidScriptWamrBackendSmokeTest::RunTest(const FString& Parameters)
 	TickFrame.CellCount = 1;
 	FMemory::Memcpy(&TickFrame.Cells[0], &DeltaSeconds, sizeof(float));
 	TestTrue(TEXT("tick export calls"), Backend->Call(TickHandle, TickFrame, Error));
+	TestTrue(TEXT("prepared tick uses validated Call"), PreparedTick.Call(TickFrame, Error));
 
 	Backend->Unload();
 	TestFalse(TEXT("backend reports unloaded"), Backend->IsLoaded());
+	TestFalse(TEXT("unloaded prepared handle stays safely rejected"), PreparedTick.Call(TickFrame, Error));
+	TestEqual(TEXT("Prepared stale handle category"), Error.Category, FString(TEXT("stale_export")));
 	TestFalse(TEXT("old export handle is rejected"), Backend->Call(TickHandle, TickFrame, Error));
 	TestEqual(TEXT("old handle category"), Error.Category, FString(TEXT("stale_export")));
 	return true;

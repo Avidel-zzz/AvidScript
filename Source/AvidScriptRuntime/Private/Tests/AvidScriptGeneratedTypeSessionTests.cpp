@@ -10,6 +10,7 @@
 #include "ScriptTypes/AvidScriptGeneratedTypeRuntimeHost.h"
 
 #include "Dom/JsonObject.h"
+#include "Engine/World.h"
 #include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
@@ -192,6 +193,159 @@ FString BuildPackageDescriptorFixture(
 		*TypeManifestSha256,
 		*RuntimeManifestSha256);
 }
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptGeneratedReceiverAuthorityTest,
+	"AvidScript.Runtime.GeneratedTypes.ReceiverAuthority",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptGeneratedReceiverAuthorityTest::RunTest(const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	// The fixture enters the actual supplemental import through each VM backend.
+	// Its generated export has the same packed receiver signature as C# UClass methods.
+	auto BuildModule = [](const bool bForeignHandle, const bool bUnknownOrdinal, const bool bWrongSignature)
+	{
+		TArray<uint8> Module = {0, 0x61, 0x73, 0x6d, 1, 0, 0, 0};
+		const TArray<uint8> Types = {3, 0x60, 0, 0, 0x60, 1, 0x7e, 1, static_cast<uint8>(bWrongSignature ? 0x7e : 0x7f), 0x60, 1, 0x7e, 1, 0x7f};
+		AppendWasmSection(Module, 1, Types);
+		TArray<uint8> Imports = {1};
+		auto Name = [&Imports](const ANSICHAR* Text)
+		{
+			const int32 Length = FCStringAnsi::Strlen(Text);
+			Imports.Add(static_cast<uint8>(Length));
+			Imports.Append(reinterpret_cast<const uint8*>(Text), Length);
+		};
+		Name("avidscript");
+		Name(bUnknownOrdinal ? "avid_ue_receiver_1_require_v1" : "avid_ue_receiver_0_require_v1");
+		Imports.Append({0, 1});
+		AppendWasmSection(Module, 2, Imports);
+		const TArray<uint8> Functions = {2, 0, 2};
+		AppendWasmSection(Module, 3, Functions);
+		TArray<uint8> Exports = {2};
+		AppendWasmExport(Exports, "avid_on_begin_play", 1);
+		AppendWasmExport(Exports, "avid_ue_0123456789abcdef0123456789abcdef", 2);
+		AppendWasmSection(Module, 7, Exports);
+		TArray<uint8> Body = {0, 0x20, 0};
+		if (bForeignHandle) Body.Append({0x42, 1, 0x7c}); // i64.add: next live registry slot, same generation
+		Body.Append({0x10, 0});
+		if (bWrongSignature) Body.Add(0xa7); // i32.wrap_i64 keeps the export signature valid
+		Body.Add(0x0b);
+		TArray<uint8> Code = {2, 2, 0, 0x0b, static_cast<uint8>(Body.Num())};
+		Code.Append(Body);
+		AppendWasmSection(Module, 10, Code);
+		return Module;
+	};
+	TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot> Types;
+	FString Error;
+	if (!TestTrue(TEXT("Receiver authority type plan"), FAvidScriptGeneratedTypeRegistry::BuildFromJson(
+		BuildGeneratedTypeSessionManifest(), Types, Error))) { AddError(Error); return false; }
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	{
+		for (const FString Case : {TEXT("live"), TEXT("foreign"), TEXT("stale"), TEXT("registry-missing"),
+			TEXT("registry-rebound"), TEXT("destroyed"), TEXT("unknown-type"), TEXT("wrong-signature"), TEXT("world-normalized"), TEXT("world-teardown")})
+		{
+			AddInfo(FString::Printf(TEXT("Receiver authority backend=%d case=%s"), static_cast<int32>(Backend), *Case));
+			FAvidScriptObjectRegistry Objects;
+			FAvidScriptObjectRegistry ReboundObjects;
+			UWorld* World = Case.StartsWith(TEXT("world-")) ? UWorld::CreateWorld(EWorldType::Game, false) : nullptr;
+			UWorld* OtherWorld = Case == TEXT("world-normalized") ? UWorld::CreateWorld(EWorldType::Game, false) : nullptr;
+			ON_SCOPE_EXIT { if (OtherWorld) OtherWorld->DestroyWorld(false); if (World) World->DestroyWorld(false); };
+			if (Case.StartsWith(TEXT("world-")) && !TestNotNull(TEXT("Receiver World fixture"), World)) return false;
+			if (Case == TEXT("world-normalized") && !TestNotNull(TEXT("Other World fixture"), OtherWorld)) return false;
+			UObject* ReceiverOuter = World ? static_cast<UObject*>(World) : GetTransientPackage();
+			TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> Receiver(NewObject<UAvidScriptGeneratedTypeSessionTestObject>(ReceiverOuter));
+			TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> Other(NewObject<UAvidScriptGeneratedTypeSessionTestObject>());
+			FAvidScriptObjectHandleResult HandleResult;
+			const auto Handle = Objects.RegisterObject(Receiver.Get(), HandleResult, false);
+			const auto Foreign = Objects.RegisterObject(Other.Get(), HandleResult, false);
+			if (!TestTrue(TEXT("Two live handles"), Handle.IsValid() && Foreign.IsValid())) return false;
+			TestEqual(TEXT("Foreign fixture preserves generation"), Foreign.Generation, Handle.Generation);
+			TestEqual(TEXT("Foreign fixture uses next slot"), Foreign.Slot, Handle.Slot + 1);
+			FAvidScriptRuntimeSession Session;
+			FAvidScriptWasmHostContext Context;
+			Context.ObjectRegistry = Case == TEXT("registry-missing") ? nullptr : &Objects;
+			Context.OwnerHandle = Handle;
+			Context.World = OtherWorld ? OtherWorld : World;
+			Session.SetHostContext(Context);
+			if (!TestTrue(TEXT("Configure receiver authority"), Session.ConfigureGeneratedTypeInstance(*Receiver, Handle, 0, Types, Error)))
+			{ AddError(Error); return false; }
+			TestFalse(TEXT("Another receiver is not this Session"), Session.ValidateGeneratedTypeReceiver(static_cast<int64>(Foreign.ToUInt64()), 0));
+			TestFalse(TEXT("Unknown type ordinal rejected"), Session.ValidateGeneratedTypeReceiver(static_cast<int64>(Handle.ToUInt64()), 1));
+			TestFalse(TEXT("Forged generation rejected"), Session.ValidateGeneratedTypeReceiver(static_cast<int64>(Handle.ToUInt64() ^ (1ULL << 32)), 0));
+			FAvidScriptVmBackendSelection Selection;
+			Selection.BackendKind = Backend;
+			Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime ? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+			Session.SetBackendSelectionForTesting(Selection);
+			FAvidScriptWasmReloadManifest Manifest;
+			Manifest.ModuleId = TEXT("generated_receiver_authority");
+			Manifest.AbiVersion = FAvidScriptWasmReloadManifest::SupportedAbiVersion;
+			Manifest.Language = TEXT("wasm");
+			Manifest.RequiredExports = {TEXT("avid_on_begin_play")};
+			Manifest.RequiredImports = {{TEXT("avidscript"), Case == TEXT("unknown-type")
+				? TEXT("avid_ue_receiver_1_require_v1") : TEXT("avid_ue_receiver_0_require_v1")}};
+			const TArray<uint8> Module = BuildModule(Case == TEXT("foreign"), Case == TEXT("unknown-type"), Case == TEXT("wrong-signature"));
+			FAvidScriptWasmReloadResult Load;
+			const bool bLoaded = Session.LoadInitialModule(Module.GetData(), Module.Num(), Manifest, Load);
+			if (Case == TEXT("unknown-type") || Case == TEXT("wrong-signature"))
+			{
+				TestFalse(TEXT("Unknown or ABI-mismatched receiver import cannot load"), bLoaded);
+				TestFalse(TEXT("Invalid import has a diagnostic"), Load.ErrorMessage.IsEmpty());
+				TestTrue(TEXT("Rejected receiver route released"), Session.ClearGeneratedTypeInstance(Error));
+				continue;
+			}
+			if (!TestTrue(TEXT("Load receiver guard WASM"), bLoaded)) { AddError(Load.ErrorMessage); return false; }
+			if (Case == TEXT("stale")) TestTrue(TEXT("Retire receiver generation"), Objects.ReleaseHandle(Handle, HandleResult, false));
+			if (Case == TEXT("destroyed")) Receiver->MarkAsGarbage();
+			if (Case == TEXT("world-teardown")) World->bIsTearingDown = true;
+			if (Case == TEXT("registry-rebound"))
+			{
+				const auto ReboundHandle = ReboundObjects.RegisterObject(Other.Get(), HandleResult, false);
+				TestTrue(TEXT("Rebound registry reproduces numeric handle"), ReboundHandle == Handle);
+				Context.ObjectRegistry = &ReboundObjects;
+				Session.SetHostContext(Context);
+			}
+			int32 Result = -1;
+			const bool bCalled = FAvidScriptGeneratedTypeDispatcher::Invoke(Receiver.Get(), 0, 0, {}, &Result);
+			const bool bExpectedLive = Case == TEXT("live") || Case == TEXT("world-normalized");
+			TestEqual(TEXT("Only live current authority executes"), bCalled, bExpectedLive);
+			if (bExpectedLive)
+			{
+				TestEqual(TEXT("Host guard succeeds"), Result, 1);
+				FAvidScriptRuntimeSession Peer;
+				FAvidScriptWasmHostContext PeerContext = Context;
+				PeerContext.OwnerHandle = Foreign;
+				Peer.SetHostContext(PeerContext);
+				TestTrue(TEXT("Peer owns a distinct receiver"), Peer.ConfigureGeneratedTypeInstance(*Other, Foreign, 0, Types, Error));
+				Peer.SetBackendSelectionForTesting(Selection);
+				FAvidScriptWasmReloadResult PeerLoad;
+				TestTrue(TEXT("Two Sessions share only the native ABI stub"), Peer.LoadInitialModule(Module.GetData(), Module.Num(), Manifest, PeerLoad));
+				int32 PeerResult = -1;
+				TestTrue(TEXT("Peer dispatch uses its own context"), FAvidScriptGeneratedTypeDispatcher::Invoke(Other.Get(), 0, 0, {}, &PeerResult));
+				TestEqual(TEXT("Peer guard result"), PeerResult, 1);
+				FAvidScriptWasmReloadResult Reload;
+				TestTrue(TEXT("Guard authority survives body reload"), Session.ReloadModule(Module.GetData(), Module.Num(), Manifest, Reload));
+				Result = -1;
+				TestTrue(TEXT("Reloaded guard executes"), FAvidScriptGeneratedTypeDispatcher::Invoke(Receiver.Get(), 0, 0, {}, &Result));
+				TestEqual(TEXT("Reloaded guard retains identity"), Result, 1);
+				FAvidScriptWasmSmokeResult PeerStop;
+				Peer.StopAndUnload(PeerStop);
+				TestTrue(TEXT("Peer route released independently"), Peer.ClearGeneratedTypeInstance(Error));
+			}
+			else if (Case != TEXT("destroyed"))
+			{
+				TestTrue(TEXT("Rejected guard quarantines Session"), Session.GetSnapshot().bFaultQuarantined);
+				TestFalse(TEXT("Rejected guard unloads VM"), Session.GetSnapshot().bHasActiveRuntime);
+			}
+			FAvidScriptWasmSmokeResult Stop;
+			Session.StopAndUnload(Stop);
+			TestFalse(TEXT("Stopped route cannot reenter"), FAvidScriptGeneratedTypeDispatcher::Invoke(Receiver.Get(), 0, 0, {}, &Result));
+			TestTrue(TEXT("Receiver route released"), Session.ClearGeneratedTypeInstance(Error));
+			TestFalse(TEXT("Released authority cannot validate"), Session.ValidateGeneratedTypeReceiver(static_cast<int64>(Handle.ToUInt64()), 0));
+		}
+	}
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(

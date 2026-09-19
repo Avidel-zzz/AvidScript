@@ -1987,7 +1987,7 @@ bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 	if (GeneratedTypeInstance)
 	{
 		for (const FAvidScriptVmTypedHostImport& Import
-			: GeneratedTypeInstance->PropertyImports)
+			: GeneratedTypeInstance->HostImports)
 		{
 			if (Manifest.RequiredImports.ContainsByPredicate(
 				[&Import](const FAvidScriptWasmRequiredImport& RequiredImport)

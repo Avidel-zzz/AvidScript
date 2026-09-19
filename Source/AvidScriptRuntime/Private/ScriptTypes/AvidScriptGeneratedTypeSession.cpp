@@ -1,4 +1,5 @@
 #include "AvidScriptRuntimeSession.h"
+#include "Engine/World.h"
 
 #include "ScriptTypes/AvidScriptGeneratedTypeRegistry.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeSessionPrivate.h"
@@ -13,6 +14,16 @@ enum class EGeneratedCallShape : uint8
 	ReceiverI32,
 	ReceiverF32Void,
 };
+
+EAvidScriptVmTypedHostStatus RequireGeneratedReceiver(void* OpaqueContext, const int64 PackedSelf, int32& OutValid)
+{
+	OutValid = 0;
+	const auto* Context = static_cast<const FAvidScriptGeneratedReceiverHostContext*>(OpaqueContext);
+	if (Context == nullptr || Context->Session == nullptr
+		|| !Context->Session->ValidateGeneratedTypeReceiver(PackedSelf, Context->TypeOrdinal)) return EAvidScriptVmTypedHostStatus::Rejected;
+	OutValid = 1;
+	return EAvidScriptVmTypedHostStatus::Succeeded;
+}
 
 bool ResolveGeneratedPropertyReceiver(
 	FAvidScriptGeneratedPropertyHostContext& Context,
@@ -385,6 +396,20 @@ bool FAvidScriptRuntimeSession::ConfigureGeneratedTypeInstance(
 	State->TypeOrdinal = TypeOrdinal;
 	for (const FAvidScriptGeneratedTypePlan& RegistryType : Registry->GetTypes())
 	{
+		TUniquePtr<FAvidScriptGeneratedReceiverHostContext> ReceiverContext = MakeUnique<FAvidScriptGeneratedReceiverHostContext>();
+		ReceiverContext->Session = this;
+		ReceiverContext->TypeOrdinal = RegistryType.TypeOrdinal;
+		FAvidScriptVmTypedHostImport ReceiverImport;
+		ReceiverImport.StableId = RegistryType.StableTypeId + TEXT(":receiver:require:v1");
+		ReceiverImport.ModuleName = TEXT("avidscript");
+		ReceiverImport.ImportName = FString::Printf(TEXT("avid_ue_receiver_%u_require_v1"), RegistryType.TypeOrdinal);
+		ReceiverImport.Signature = TEXT("(I)i");
+		ReceiverImport.Shape = EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Get;
+		ReceiverImport.bSupplementalRuntimeAuthority = true;
+		ReceiverImport.PreparedTarget.Context = ReceiverContext.Get();
+		ReceiverImport.PreparedTarget.PackedSelfPropertyI32Get = &RequireGeneratedReceiver;
+		State->ReceiverContexts.Add(MoveTemp(ReceiverContext));
+		State->HostImports.Add(MoveTemp(ReceiverImport));
 		for (const FAvidScriptGeneratedMemberPlan& Member : RegistryType.Members)
 		{
 			if (Member.Kind != EAvidScriptGeneratedMemberKind::Property)
@@ -410,7 +435,7 @@ bool FAvidScriptRuntimeSession::ConfigureGeneratedTypeInstance(
 			State->PropertyContexts.Add(MoveTemp(Context));
 			if (!Member.GetterImportName.IsEmpty())
 			{
-				State->PropertyImports.Add(MakeGeneratedScalarPropertyImport(
+				State->HostImports.Add(MakeGeneratedScalarPropertyImport(
 					Member,
 					Member.GetterImportName,
 					false,
@@ -418,7 +443,7 @@ bool FAvidScriptRuntimeSession::ConfigureGeneratedTypeInstance(
 			}
 			if (!Member.SetterImportName.IsEmpty())
 			{
-				State->PropertyImports.Add(MakeGeneratedScalarPropertyImport(
+				State->HostImports.Add(MakeGeneratedScalarPropertyImport(
 					Member,
 					Member.SetterImportName,
 					true,
@@ -437,6 +462,24 @@ bool FAvidScriptRuntimeSession::ConfigureGeneratedTypeInstance(
 	}
 	GeneratedTypeInstance = MoveTemp(State);
 	return true;
+}
+
+bool FAvidScriptRuntimeSession::ValidateGeneratedTypeReceiver(const int64 PackedSelf, const uint32 TypeOrdinal) const
+{
+	if (!IsInGameThread() || bApplicationSuspended || bLifecycleInvalidated || bFaultQuarantined
+		|| !GeneratedTypeInstance || !GeneratedTypeInstance->Registration.IsValid()
+		|| !GeneratedTypeInstance->Registry.IsValid() || HostContext.ObjectRegistry == nullptr) return false;
+	const FAvidScriptObjectHandle& Handle = GeneratedTypeInstance->ReceiverHandle;
+	if (!Handle.IsValid() || Handle.ToUInt64() != static_cast<uint64>(PackedSelf)
+		|| HostContext.OwnerHandle != Handle) return false;
+	const FAvidScriptGeneratedTypePlan* Type = GeneratedTypeInstance->Registry->FindTypeByOrdinal(TypeOrdinal);
+	UObject* Receiver = GeneratedTypeInstance->Receiver.Get();
+	if (Type == nullptr || Type->Class == nullptr || Receiver == nullptr || !Receiver->IsA(Type->Class)
+		|| Receiver->HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject | RF_BeginDestroyed | RF_FinishDestroyed)) return false;
+	if (const UWorld* World = Receiver->GetWorld(); World != nullptr
+		&& (World != HostContext.World.Get() || World->bIsTearingDown)) return false;
+	FAvidScriptObjectHandleResult ResolveResult;
+	return HostContext.ObjectRegistry->ResolveObject(Handle, ResolveResult, false) == Receiver;
 }
 
 bool FAvidScriptRuntimeSession::ClearGeneratedTypeInstance(FString& OutError)

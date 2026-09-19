@@ -6,6 +6,13 @@
 class FAvidScriptGeneratedTypeRegistrySnapshot;
 class FProperty;
 class UClass;
+class FAvidScriptRuntimeSession;
+
+struct FAvidScriptGeneratedReceiverHostContext
+{
+	const FAvidScriptRuntimeSession* Session = nullptr;
+	uint32 TypeOrdinal = 0;
+};
 
 using FAvidScriptGeneratedPropertyI32Read = bool (*)(FProperty&, UObject&, int32&);
 using FAvidScriptGeneratedPropertyI32Write = bool (*)(FProperty&, UObject&, int32);
@@ -47,6 +54,7 @@ struct FAvidScriptRuntimeGeneratedTypeInstanceState
 	uint32 TypeOrdinal = 0;
 	FAvidScriptGeneratedTypeInstanceRegistration Registration;
 	TArray<TUniquePtr<FAvidScriptGeneratedPropertyHostContext>> PropertyContexts;
-	TArray<FAvidScriptVmTypedHostImport> PropertyImports;
+	TArray<TUniquePtr<FAvidScriptGeneratedReceiverHostContext>> ReceiverContexts;
+	TArray<FAvidScriptVmTypedHostImport> HostImports;
 	TArray<FAvidScriptGeneratedPreparedTypeRoute> PreparedTypeRoutes;
 };

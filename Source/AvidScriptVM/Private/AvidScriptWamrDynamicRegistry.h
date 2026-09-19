@@ -33,6 +33,11 @@ bool AcquireAvidScriptWamrDynamicImports(
 	TArray<FAvidScriptWamrDynamicRegistration>& OutRegistrations,
 	FAvidScriptVmError& OutError);
 
+bool AcquireAvidScriptWamrSupplementalImports(
+	TConstArrayView<FAvidScriptVmTypedHostImport> Imports,
+	TArray<FAvidScriptWamrDynamicRegistration>& OutRegistrations,
+	FAvidScriptVmError& OutError);
+
 class FAvidScriptWamrNativeRegistryScope
 {
 public:

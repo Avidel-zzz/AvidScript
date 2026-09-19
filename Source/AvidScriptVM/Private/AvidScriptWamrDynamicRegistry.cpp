@@ -260,16 +260,12 @@ bool ValidateAvidScriptVmBindingPackage(
 	return true;
 }
 
-bool AcquireAvidScriptWamrDynamicImports(
-	const FAvidScriptVmBindingPackage& Package,
+static bool AcquireWamrValidatedImports(
+	TConstArrayView<FAvidScriptVmDynamicImport> Imports,
 	TArray<FAvidScriptWamrDynamicRegistration>& OutRegistrations,
 	FAvidScriptVmError& OutError)
 {
 	OutRegistrations.Reset();
-	if (!ValidateAvidScriptVmBindingPackage(Package, OutError))
-	{
-		return false;
-	}
 #if !AVIDSCRIPT_WITH_WAMR
 	SetDynamicRegistryError(
 		OutError,
@@ -278,7 +274,7 @@ bool AcquireAvidScriptWamrDynamicImports(
 	return false;
 #else
 	FScopeLock Lock(&GDynamicRegistryCriticalSection);
-	for (const FAvidScriptVmDynamicImport& Import : Package.Imports)
+	for (const FAvidScriptVmDynamicImport& Import : Imports)
 	{
 		const FString Key = MakeAvidScriptDynamicRegistryKey(Import.ModuleName, Import.ImportName);
 		if (TUniquePtr<FAvidScriptWamrDynamicRegistryEntry>* ExistingValue = GDynamicRegistry.Find(Key))
@@ -346,6 +342,51 @@ bool AcquireAvidScriptWamrDynamicImports(
 	}
 	return true;
 #endif
+}
+
+bool AcquireAvidScriptWamrDynamicImports(
+	const FAvidScriptVmBindingPackage& Package,
+	TArray<FAvidScriptWamrDynamicRegistration>& OutRegistrations,
+	FAvidScriptVmError& OutError)
+{
+	OutRegistrations.Reset();
+	return ValidateAvidScriptVmBindingPackage(Package, OutError)
+		&& AcquireWamrValidatedImports(Package.Imports, OutRegistrations, OutError);
+}
+
+bool AcquireAvidScriptWamrSupplementalImports(
+	TConstArrayView<FAvidScriptVmTypedHostImport> Imports,
+	TArray<FAvidScriptWamrDynamicRegistration>& OutRegistrations,
+	FAvidScriptVmError& OutError)
+{
+	OutRegistrations.Reset();
+	TArray<FAvidScriptVmDynamicImport> RawImports;
+	TSet<FString> Identities;
+	for (const FAvidScriptVmTypedHostImport& Import : Imports)
+	{
+		const FString Identity = MakeAvidScriptDynamicRegistryKey(Import.ModuleName, Import.ImportName);
+		if (!Import.bSupplementalRuntimeAuthority || Import.BindingOrdinal != MAX_uint32
+			|| Import.StableId.IsEmpty() || Import.ModuleName != TEXT("avidscript")
+			|| !IsAvidScriptDynamicSafeToken(Import.ImportName) || Identities.Contains(Identity)
+			|| IsAvidScriptVmStaticHostImport(Import.ModuleName, Import.ImportName)
+			|| Import.Shape != EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Get
+			|| Import.Signature != TEXT("(I)i") || !Import.PreparedTarget.IsBoundForShape(Import.Shape))
+		{
+			SetDynamicRegistryError(OutError, TEXT("supplemental_import_unsupported"),
+				TEXT("WAMR supplemental imports require a unique prepared packed-i64-to-i32 runtime capability."),
+				Import.ModuleName, Import.ImportName);
+			return false;
+		}
+		Identities.Add(Identity);
+		FAvidScriptVmDynamicImport& Raw = RawImports.AddDefaulted_GetRef();
+		// The global registry owns only the ABI stub. Context and authority remain per VM.
+		Raw.StableId = TEXT("supplemental:") + Identity + TEXT(":") + Import.Signature;
+		Raw.ModuleName = Import.ModuleName;
+		Raw.ImportName = Import.ImportName;
+		Raw.Signature = Import.Signature;
+		Raw.Ordinal = static_cast<uint32>(RawImports.Num() - 1);
+	}
+	return AcquireWamrValidatedImports(RawImports, OutRegistrations, OutError);
 }
 
 FAvidScriptWamrNativeRegistryScope::FAvidScriptWamrNativeRegistryScope()

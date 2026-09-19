@@ -235,12 +235,17 @@ public:
 			SetVmError(OutError, TEXT("wasm_layout_invalid"), LayoutError);
 			return false;
 		}
+		for (const FAvidScriptVmTypedHostImport& Import : Config.TypedHostImports)
+		{
+			if (Import.bSupplementalRuntimeAuthority) SupplementalTypedImports.Add(Import);
+		}
 		if (!ValidateAvidScriptVmImportContract(
 			ModuleLayout,
 			Config.BindingPackage,
 			TConstArrayView<FAvidScriptVmExpectedImport>(),
 			false,
-			OutError))
+			OutError,
+			SupplementalTypedImports))
 		{
 			return false;
 		}
@@ -272,6 +277,16 @@ public:
 			}
 		}
 
+		if (!SupplementalTypedImports.IsEmpty())
+		{
+			if (!AcquireAvidScriptWamrSupplementalImports(SupplementalTypedImports, SupplementalRegistrations, OutError))
+			{
+				Unload();
+				return false;
+			}
+			for (const FAvidScriptWamrDynamicRegistration& Registration : SupplementalRegistrations)
+				SupplementalOrdinals.Add(Registration.Attachment, Registration.Ordinal);
+		}
 		ModuleId = InModuleId;
 		HostDispatcher = Config.HostDispatcher;
 		const bool bUsesManagedHeap = ModuleLayout.FunctionImports.ContainsByPredicate([](const auto& Import)
@@ -548,13 +563,60 @@ public:
 		FAvidScriptVmPreparedExportCall& OutCall,
 		FAvidScriptVmError& OutError) override
 	{
-		static_cast<void>(Handle);
 		OutCall = FAvidScriptVmPreparedExportCall();
 		OutError.Reset();
-		OutError.Category = TEXT("prepared_export_unsupported");
-		OutError.Details =
-			TEXT("The WAMR backend uses the validated generic Call path.");
+#if !AVIDSCRIPT_WITH_WAMR
+		static_cast<void>(Handle);
+		SetVmError(OutError, TEXT("backend_unavailable"), TEXT("WAMR artifacts are unavailable for this target."));
 		return false;
+#else
+		if (!IsLoaded() || Handle.BackendInstanceIdentity != BackendInstanceIdentity)
+		{
+			SetVmError(OutError, TEXT("stale_export"), TEXT("The export cannot be prepared for this WAMR instance."));
+			return false;
+		}
+		void* FunctionValue = nullptr;
+		if (!ExportTable.TryGet(Handle, FunctionValue, OutError)) return false;
+		if (!FunctionValue || Handle.Slot == 0 || Handle.Slot > static_cast<uint32>(ExportResultCellCounts.Num()))
+		{
+			SetVmError(OutError, TEXT("invalid_export"), TEXT("The WAMR export has no validated result ABI."));
+			return false;
+		}
+		const auto Function = static_cast<wasm_function_inst_t>(FunctionValue);
+		const uint32 Count = wasm_func_get_param_count(Function, ModuleInstance);
+		if (Count > FAvidScriptVmCallFrame::MaxCells)
+		{
+			SetVmError(OutError, TEXT("invalid_export"), TEXT("The WAMR export exceeds fixed parameter capacity."));
+			return false;
+		}
+		wasm_valkind_t Kinds[FAvidScriptVmCallFrame::MaxCells]{};
+		if (Count) wasm_func_get_param_types(Function, ModuleInstance, Kinds);
+		uint32 Cells = 0;
+		for (uint32 Index = 0; Index < Count; ++Index)
+		{
+			if (Kinds[Index] == WASM_I64 || Kinds[Index] == WASM_F64) Cells += 2;
+			else if (Kinds[Index] == WASM_I32 || Kinds[Index] == WASM_F32) ++Cells;
+			else { SetVmError(OutError, TEXT("invalid_export"), TEXT("WAMR prepared exports require numeric core ABI parameters.")); return false; }
+		}
+		if (Cells > FAvidScriptVmCallFrame::MaxCells)
+		{
+			SetVmError(OutError, TEXT("invalid_export"), TEXT("The WAMR export exceeds fixed parameter cell capacity."));
+			return false;
+		}
+		TSharedPtr<FAvidScriptVmExportHandle> Target = MakeShared<FAvidScriptVmExportHandle>(Handle);
+		OutCall.Owner = this;
+		OutCall.Target = Target.Get();
+		OutCall.TargetLifetime = Target;
+		OutCall.ParameterCellCount = Cells;
+		OutCall.ResultCellCount = ExportResultCellCounts[Handle.Slot - 1];
+		OutCall.InvokeFunction = [](void* Owner, void* OpaqueHandle, const FAvidScriptVmCallFrame& Frame,
+			FAvidScriptVmError& Error, FAvidScriptVmCallResult* Result)
+		{
+			// Keep generic Call's generation fences, budgets, traps and invocation roots.
+			return static_cast<FAvidScriptWamrBackend*>(Owner)->Call(*static_cast<FAvidScriptVmExportHandle*>(OpaqueHandle), Frame, Error, Result);
+		};
+		return true;
+#endif
 	}
 
 	bool Call(
@@ -756,6 +818,23 @@ public:
 			return false;
 		}
 		const uint32* Ordinal = DynamicOrdinals.Find(&Attachment);
+		if (const uint32* Supplemental = SupplementalOrdinals.Find(&Attachment))
+		{
+			if (SupplementalTypedImports.IsValidIndex(static_cast<int32>(*Supplemental)) && Arguments.Num() == 1)
+			{
+				const auto& Import = SupplementalTypedImports[*Supplemental];
+				int32 Value = 0;
+				if (Import.PreparedTarget.PackedSelfPropertyI32Get(Import.PreparedTarget.Context,
+					static_cast<int64>(Arguments[0]), Value) == EAvidScriptVmTypedHostStatus::Succeeded)
+				{
+					OutReturnValue = Value;
+					return true;
+				}
+			}
+			OutFailureCategory = TEXT("host_import_failed");
+			OutFailureDetails = TEXT("The supplemental typed host capability rejected the call.");
+			return false;
+		}
 		if (Ordinal == nullptr)
 		{
 			OutFailureCategory = TEXT("dynamic_host_attachment_invalid");
@@ -1033,6 +1112,8 @@ private:
 		}
 
 		ReleaseAvidScriptWamrDynamicImports(DynamicRegistrations);
+		ReleaseAvidScriptWamrDynamicImports(SupplementalRegistrations);
+		SupplementalOrdinals.Reset();
 		DynamicOrdinals.Reset();
 		AttachedBindingPackage = FAvidScriptVmBindingPackage();
 
@@ -1044,6 +1125,7 @@ private:
 #endif
 
 		ExportTable.Reset();
+		SupplementalTypedImports.Reset();
 		ExportResultCellCounts.Reset();
 		ModuleBuffer.Reset();
 		ModuleId.Reset();
@@ -1072,6 +1154,9 @@ private:
 	FAvidScriptVmBindingPackage AttachedBindingPackage;
 	TArray<FAvidScriptWamrDynamicRegistration> DynamicRegistrations;
 	TMap<const FAvidScriptWamrRawImportAttachment*, uint32> DynamicOrdinals;
+	TArray<FAvidScriptVmTypedHostImport> SupplementalTypedImports;
+	TArray<FAvidScriptWamrDynamicRegistration> SupplementalRegistrations;
+	TMap<const FAvidScriptWamrRawImportAttachment*, uint32> SupplementalOrdinals;
 	FAvidScriptVmExportTable ExportTable;
 	TArray<uint32> ExportResultCellCounts;
 	FAvidScriptVmLoadMetrics LoadMetrics;
