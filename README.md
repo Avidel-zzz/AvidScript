@@ -28,7 +28,7 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 
 当前开发主线转向 [P66-P69 开发体验路线](Docs/Phase66/P66.0_Developer_Experience_Architecture.md)：
 语言一致性、结构热重载、完整调试和 Windows 真实玩法验证。P65 未完成的性能、发布与移动端债务继续保留。
-[与 Unreal AngelScript / Puerts 的成熟度评估](Docs/Phase66/P66_Developer_Leadership_Assessment.md)已于 2026-09-20 按 `cd7b1172` 与源码、官方资料更新：生产共享执行域已经交付，完整跨对象语言派发、持久事件/await、结构热重载与完整调试仍有缺口；该评估为文档与源码复核，无新增运行测试或竞品计时，不宣称成熟或全面领先。
+[与 Unreal AngelScript / Puerts 的成熟度评估](Docs/Phase66/P66_Developer_Leadership_Assessment.md)已于 2026-09-20 按 `d0a33857` 与源码、官方资料更新：生产共享执行域及原生受检重入已经交付，完整跨对象语言派发、持久事件/await、结构热重载与完整调试仍有缺口；以真实 Windows 开发工作流验证成熟度，暂不进入成熟版收尾。该评估为文档与源码复核，无新增运行测试或竞品计时，不宣称成熟或全面领先。
 [P66.A 静态局部函数](Docs/Phase66/P66.A_Lexical_Functions.md)已支持独立作用域、嵌套、递归及直接调用；
 [P66.B 直接调用捕获](Docs/Phase66/P66.B_Direct_Capture_Results.md)进一步支持外层变量共享读写及跨 await 保存。
 [委托签名合同](Docs/Phase66/P66.B_Delegate_Signature_Contract.md)已覆盖封闭泛型身份、引用参数及产物校验，为后续委托执行提供类型依据。
