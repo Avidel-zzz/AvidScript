@@ -39,8 +39,9 @@ internal static class SemanticExecutableBodyResolver
                 {
                     continue;
                 }
+                if (method.MethodKind == MethodKind.AnonymousFunction && !SemanticLambdaPolicy.IsSupported(method)) continue;
 
-                while (method.MethodKind != MethodKind.LocalFunction && operation.Parent is { } parent)
+                while (!IsLexicalMethod(method) && operation.Parent is { } parent)
                 {
                     operation = parent;
                 }
@@ -52,17 +53,21 @@ internal static class SemanticExecutableBodyResolver
         return bodies;
     }
 
-    private static bool IsExecutableDeclaration(SyntaxNode node)
+    internal static bool IsLexicalMethod(IMethodSymbol method) =>
+        method.MethodKind is MethodKind.LocalFunction or MethodKind.AnonymousFunction;
+
+    internal static bool IsExecutableDeclaration(SyntaxNode node)
     {
-        return node is BaseMethodDeclarationSyntax or AccessorDeclarationSyntax or LocalFunctionStatementSyntax ||
+        return node is BaseMethodDeclarationSyntax or AccessorDeclarationSyntax or LocalFunctionStatementSyntax or AnonymousFunctionExpressionSyntax ||
             node is PropertyDeclarationSyntax { ExpressionBody: not null } ||
             node is IndexerDeclarationSyntax { ExpressionBody: not null };
     }
 
-    private static IMethodSymbol? GetMethodSymbol(SyntaxNode declaration, SemanticModel semanticModel)
+    internal static IMethodSymbol? GetMethodSymbol(SyntaxNode declaration, SemanticModel semanticModel)
     {
         return declaration switch
         {
+            AnonymousFunctionExpressionSyntax lambda => (semanticModel.GetOperation(lambda) as IAnonymousFunctionOperation)?.Symbol,
             PropertyDeclarationSyntax property =>
                 (semanticModel.GetDeclaredSymbol(property) as IPropertySymbol)?.GetMethod,
             IndexerDeclarationSyntax indexer =>
@@ -71,7 +76,7 @@ internal static class SemanticExecutableBodyResolver
         };
     }
 
-    private static IOperation? GetOperation(SyntaxNode declaration, SemanticModel semanticModel)
+    internal static IOperation? GetOperation(SyntaxNode declaration, SemanticModel semanticModel)
     {
         return declaration switch
         {

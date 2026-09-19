@@ -96,6 +96,9 @@ internal static class SemanticCallableProjector
         SyntaxNode root,
         SemanticModel semanticModel)
     {
+        foreach (AnonymousFunctionExpressionSyntax lambda in root.DescendantNodes().OfType<AnonymousFunctionExpressionSyntax>())
+            if (SemanticExecutableBodyResolver.GetMethodSymbol(lambda, semanticModel) is { } method) yield return method;
+
         foreach (LocalFunctionStatementSyntax declaration in root.DescendantNodes()
             .OfType<LocalFunctionStatementSyntax>())
         {
@@ -182,11 +185,11 @@ internal static class SemanticCallableProjector
             return null;
         }
 
-        if (method.MethodKind == MethodKind.LocalFunction)
+        if (SemanticExecutableBodyResolver.IsLexicalMethod(method))
         {
             diagnostics.Add(CreateDiagnostic(
                 "ASCS5010",
-                "Local functions have lexical identity and cannot declare WASM exports. Export the containing member instead.",
+                "Lexical functions cannot declare WASM exports. Export the containing member instead.",
                 method,
                 unit));
             return null;

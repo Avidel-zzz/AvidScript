@@ -53,8 +53,8 @@ internal static class SemanticContinuationTests
 
         Assert(document.Succeeded
             && document.SchemaVersion == 21
-            && document.SemanticVersion == "1.24",
-            "valid continuations should publish semantic schema v21 / version 1.24");
+            && document.SemanticVersion == "1.25",
+            "valid continuations should publish semantic schema v21 / version 1.25");
         Assert(callbacks.Select(callback => callback.CallbackId).SequenceEqual(new[] { 1, 2, 3 })
             && callbacks.Select(callback => callback.Name)
                 .SequenceEqual(new[] { "ResumeSpawnHandler", "ResumeSecond", "ResumeObjectLoad" })
@@ -239,7 +239,8 @@ internal static class SemanticContinuationTests
                 [AvidContinuation(1)]
                 public static void WithLambda()
                 {
-                    Action callback = () => { };
+                    int captured = 0;
+                    Action callback = () => { captured += 1; };
                     callback();
                 }
 
@@ -256,7 +257,7 @@ internal static class SemanticContinuationTests
         Assert(!document.Succeeded
             && document.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCS4001")
             && document.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCS3002"),
-            "continuation handlers must not enable lambda, closure, or async lowering");
+            "continuation handlers must not enable capturing closures or unsupported async lowering");
     }
 
     private static SemanticDocument Analyze(string source, string sourceId)

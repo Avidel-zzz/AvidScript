@@ -10,11 +10,12 @@ internal static class SemanticLocalFunctionPolicy
     {
         return method.MethodKind == MethodKind.LocalFunction
             && !method.IsAsync && !method.IsExtern && method.Arity == 0
-            && method.ContainingSymbol is IMethodSymbol { IsImplicitlyDeclared: false };
+            && method.ContainingSymbol is IMethodSymbol owner
+            && (!owner.IsImplicitlyDeclared || owner.MethodKind == MethodKind.AnonymousFunction);
     }
 
     public const string DiagnosticCode = "ASCS4010";
     public const string DiagnosticMessage =
         "Local functions currently require synchronous, non-generic declarations with a managed body inside a member; " +
-        "async local functions, generic local functions, and escaping delegates are not yet supported.";
+        "async and generic local functions are not yet supported.";
 }

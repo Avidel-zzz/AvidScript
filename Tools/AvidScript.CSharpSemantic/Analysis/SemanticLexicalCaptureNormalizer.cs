@@ -13,8 +13,8 @@ internal sealed record SemanticLexicalCaptureProjection(
     IReadOnlyList<SemanticAsyncMethod> AsyncMethods,
     IReadOnlyList<SemanticDiagnostic> Diagnostics);
 
-// Direct lexical calls do not escape their activation. Explicit ref parameters
-// preserve shared mutable cells, including aliases with ordinary ref arguments.
+// Direct local calls preserve shared cells through explicit ref parameters.
+// Lambda captures are diagnosed until an owned escaping environment is available.
 internal static class SemanticLexicalCaptureNormalizer
 {
     private sealed record Capture(string Id, string Owner, string Name, string TypeId,
@@ -29,7 +29,7 @@ internal static class SemanticLexicalCaptureNormalizer
         IReadOnlyList<SemanticAsyncMethod> asyncMethods)
     {
         Dictionary<string, SemanticExecutableBody> lexical = SemanticExecutableBodyResolver.Resolve(context)
-            .Where(body => body.Method.MethodKind == MethodKind.LocalFunction)
+            .Where(body => SemanticExecutableBodyResolver.IsLexicalMethod(body.Method))
             .ToDictionary(body => SemanticSymbolProjector.GetSymbolId(body.Method), StringComparer.Ordinal);
         if (lexical.Count == 0 || context.Compilation.GetDiagnostics().Any(item => item.Severity == DiagnosticSeverity.Error))
         {
@@ -37,6 +37,14 @@ internal static class SemanticLexicalCaptureNormalizer
         }
 
         Dictionary<string, SemanticSymbol> symbolsById = symbols.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        // Accessor value parameters and omitted anonymous-method parameters have no
+        // ParameterSyntax. They still have lexical ownership and can be captured.
+        foreach (SemanticCallable callable in callables)
+            foreach (SemanticCallableParameter parameter in callable.Parameters)
+                if (!symbolsById.ContainsKey(parameter.SymbolId))
+                    symbolsById.Add(parameter.SymbolId, new(parameter.SymbolId, "parameter", parameter.Name,
+                        callable.MethodSymbolId, parameter.TypeId, $"{parameter.Name}:{parameter.TypeId}", false, "notapplicable",
+                        symbolsById.GetValueOrDefault(callable.MethodSymbolId)?.Span ?? SemanticSpanFactory.Empty));
         Dictionary<string, SemanticMethodBody> bodies = methods.ToDictionary(item => item.MethodSymbolId, StringComparer.Ordinal);
         Dictionary<string, Capture> captures = new(StringComparer.Ordinal);
         Dictionary<string, SortedSet<string>> required = lexical.Keys.ToDictionary(
@@ -45,7 +53,7 @@ internal static class SemanticLexicalCaptureNormalizer
         foreach ((string id, SemanticExecutableBody body) in lexical)
         {
             SemanticOperation[] operations = Enumerate(bodies[id].Root).ToArray();
-            calls[id] = operations.Where(op => op.Kind == "invocation" && op.SymbolId is not null
+            calls[id] = operations.Where(op => (op.Kind is "invocation" or "method_reference") && op.SymbolId is not null
                     && lexical.ContainsKey(op.SymbolId))
                 .Select(op => op.SymbolId!).Distinct(StringComparer.Ordinal).ToArray();
             foreach (SemanticOperation operation in operations)
@@ -62,7 +70,7 @@ internal static class SemanticLexicalCaptureNormalizer
                 else if (operation.Kind == "instance_reference")
                 {
                     IMethodSymbol receiverOwner = body.Method;
-                    while (receiverOwner.MethodKind == MethodKind.LocalFunction)
+                    while (SemanticExecutableBodyResolver.IsLexicalMethod(receiverOwner))
                         receiverOwner = (IMethodSymbol)receiverOwner.ContainingSymbol;
                     string ownerId = SemanticSymbolProjector.GetSymbolId(receiverOwner);
                     string captureId = "receiver:" + ownerId;
@@ -85,7 +93,7 @@ internal static class SemanticLexicalCaptureNormalizer
         } while (changed);
 
         Dictionary<string, Dictionary<string, SemanticCallableParameter>> parameters = new(StringComparer.Ordinal);
-        List<SemanticSymbol> resultSymbols = symbols.Select(symbol => lexical.ContainsKey(symbol.Id)
+        List<SemanticSymbol> resultSymbols = symbolsById.Values.Select(symbol => lexical.ContainsKey(symbol.Id)
             ? symbol with { IsStatic = true } : symbol).ToList();
         SemanticCallable[] resultCallables = callables.Select(callable =>
         {
@@ -151,6 +159,11 @@ internal static class SemanticLexicalCaptureNormalizer
             }).ToArray(),
         }).ToArray();
         List<SemanticDiagnostic> diagnostics = new();
+        foreach ((string id, SemanticExecutableBody body) in lexical)
+            if (body.Method.MethodKind == MethodKind.AnonymousFunction && required[id].Count != 0)
+                diagnostics.Add(new(SemanticLambdaPolicy.DiagnosticCode, "error",
+                    "This lambda captures activation state and requires a managed closure environment, which is not yet implemented.",
+                    SemanticSpanFactory.Create(body.Unit.SourceText, body.Declaration.Span)));
         SemanticAsyncMethod[] resultAsync = asyncMethods.Select(method =>
         {
             SemanticAsyncSegment[] segments = method.Segments.Select(segment => segment with

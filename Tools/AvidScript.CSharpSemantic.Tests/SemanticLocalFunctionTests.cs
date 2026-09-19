@@ -59,7 +59,7 @@ internal static class SemanticLocalFunctionTests
 
         foreach (string declaration in new[]
         {
-            "static System.Func<int> Local() => () => 1;",
+            "static System.Func<int> Local() { int captured = 1; return () => captured; }",
             "static T Local<T>(T x) => x;",
             "static async System.Threading.Tasks.Task Local() { await System.Threading.Tasks.Task.Delay(1); }",
             "static extern int Local();",

@@ -25,8 +25,12 @@ internal static class SemanticOperationProjector
         {
             methods.Add(new SemanticMethodBody(
                 SemanticSymbolProjector.GetSymbolId(body.Method),
-                ProjectOperation(body.Operation is ILocalFunctionOperation localFunction
-                    ? localFunction.Body! : body.Operation, body.Unit, typeRegistry, diagnostics)));
+                ProjectOperation(body.Operation switch
+                {
+                    ILocalFunctionOperation localFunction => localFunction.Body!,
+                    IAnonymousFunctionOperation lambda => lambda.Body,
+                    _ => body.Operation,
+                }, body.Unit, typeRegistry, diagnostics)));
         }
 
         return new SemanticOperationProjection(
@@ -99,7 +103,8 @@ internal static class SemanticOperationProjector
             ProjectOutputConversion(operation),
             GetCaptureId(operation, captureRegistry),
             span,
-            operation.ChildOperations
+            (operation is IAnonymousFunctionOperation or IFlowAnonymousFunctionOperation
+                ? Enumerable.Empty<IOperation>() : operation.ChildOperations)
                 .Where(child => child is not ILocalFunctionOperation)
                 .Select(child => ProjectOperation(child, unit, typeRegistry, diagnostics, captureRegistry))
                 .ToArray());
@@ -127,6 +132,7 @@ internal static class SemanticOperationProjector
             IPropertyReferenceOperation => ("property_reference", true),
             IEventReferenceOperation => ("event_reference", true),
             IMethodReferenceOperation => ("method_reference", true),
+            IAnonymousFunctionOperation or IFlowAnonymousFunctionOperation => ("method_reference", true),
             IDelegateCreationOperation => ("delegate_creation", true),
             IInvocationOperation => ("invocation", true),
             IAwaitOperation => ("await", true),
@@ -310,6 +316,8 @@ internal static class SemanticOperationProjector
             IInvocationOperation invocation => invocation.TargetMethod,
             IObjectCreationOperation creation => creation.Constructor,
             IArgumentOperation argument => argument.Parameter,
+            IAnonymousFunctionOperation lambda => lambda.Symbol,
+            IFlowAnonymousFunctionOperation lambda => lambda.Symbol,
             IVariableDeclaratorOperation variable => variable.Symbol,
             IInstanceReferenceOperation instanceReference when instanceReference.Type is INamedTypeSymbol type => type,
             _ => null,

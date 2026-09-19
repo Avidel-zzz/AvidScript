@@ -12,10 +12,12 @@ internal static class CSharpManagedDelegateLowerer
         int blockOrdinal, List<GuestInstruction> instructions)
     {
         SemanticDelegateType? signature = context.Document.DelegateTypes.FirstOrDefault(item => item.TypeId == operation.TypeId);
-        if (context.Document.SemanticVersion != SemanticContract.CurrentSemanticVersion || signature is null
+        if (!SupportsDelegates(context.Document) || signature is null
             || signature.ReturnRefKind != "none" || operation.Children.Count != 1
             || operation.Children[0] is not { Kind: "method_reference", IsSupported: true, Children.Count: 0 } target
             || !context.TryGetCallTarget(target.SymbolId, out SemanticCallable callable, out string targetId)
+            || (callable.MethodSymbolId.Contains(":lambda:", StringComparison.Ordinal)
+                && context.Document.SemanticVersion != SemanticContract.CurrentSemanticVersion)
             || !callable.IsStatic || callable.IsConstructor || !callable.HasBody || callable.Import is not null
             || callable.ReturnTypeId != signature.ReturnTypeId
             || !callable.Parameters.Select(parameter => (parameter.TypeId, parameter.RefKind))
@@ -36,7 +38,7 @@ internal static class CSharpManagedDelegateLowerer
         result = null;
         SemanticDelegateType? signature = context.Document.DelegateTypes.FirstOrDefault(item => item.InvokeMethodSymbolId == operation.SymbolId);
         if (signature is null) return false;
-        if (context.Document.SemanticVersion != SemanticContract.CurrentSemanticVersion
+        if (!SupportsDelegates(context.Document)
             || signature.ReturnRefKind != "none" || operation.TypeId != signature.ReturnTypeId
             || operation.Children.Count != signature.Parameters.Count + 1
             || operation.Children[0].TypeId != signature.TypeId)
@@ -98,6 +100,9 @@ internal static class CSharpManagedDelegateLowerer
 
     public static bool ContainsReference(string typeId, IReadOnlyDictionary<string, GuestType> types)
         => ContainsReference(typeId, types, new HashSet<string>(StringComparer.Ordinal));
+
+    private static bool SupportsDelegates(SemanticDocument document) => document.SemanticVersion == "1.24"
+        || document.SemanticVersion == SemanticContract.CurrentSemanticVersion;
 
     private static bool ContainsReference(string typeId, IReadOnlyDictionary<string, GuestType> types, HashSet<string> visited)
     {

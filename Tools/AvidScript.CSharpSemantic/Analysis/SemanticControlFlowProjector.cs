@@ -161,14 +161,12 @@ internal static class SemanticControlFlowProjector
         SemanticExecutableBody body,
         SemanticModel semanticModel)
     {
-        if (body.Method.MethodKind == MethodKind.LocalFunction)
+        if (SemanticExecutableBodyResolver.IsLexicalMethod(body.Method))
         {
-            SyntaxNode ownerDeclaration = body.Declaration.Ancestors().First(node =>
-                node is BaseMethodDeclarationSyntax or AccessorDeclarationSyntax
-                    or LocalFunctionStatementSyntax);
-            IMethodSymbol ownerMethod = (IMethodSymbol)semanticModel.GetDeclaredSymbol(ownerDeclaration)!;
-            IOperation ownerOperation = semanticModel.GetOperation(ownerDeclaration)!;
-            while (ownerMethod.MethodKind != MethodKind.LocalFunction
+            SyntaxNode ownerDeclaration = body.Declaration.Ancestors().First(SemanticExecutableBodyResolver.IsExecutableDeclaration);
+            IMethodSymbol ownerMethod = SemanticExecutableBodyResolver.GetMethodSymbol(ownerDeclaration, semanticModel)!;
+            IOperation ownerOperation = SemanticExecutableBodyResolver.GetOperation(ownerDeclaration, semanticModel)!;
+            while (!SemanticExecutableBodyResolver.IsLexicalMethod(ownerMethod)
                 && ownerOperation.Parent is { } parent)
             {
                 ownerOperation = parent;
@@ -176,7 +174,13 @@ internal static class SemanticControlFlowProjector
             ControlFlowGraph ownerGraph = CreateGraph(
                 new SemanticExecutableBody(ownerDeclaration, ownerMethod, ownerOperation, body.Unit),
                 semanticModel);
-            return ownerGraph.GetLocalFunctionControlFlowGraph(body.Method);
+            if (body.Method.MethodKind == MethodKind.LocalFunction)
+                return ownerGraph.GetLocalFunctionControlFlowGraph(body.Method);
+            IFlowAnonymousFunctionOperation lambda = ownerGraph.Blocks
+                .SelectMany(block => block.BranchValue is { } branch ? block.Operations.Append(branch) : block.Operations)
+                .SelectMany(Descendants).OfType<IFlowAnonymousFunctionOperation>()
+                .Single(operation => SymbolEqualityComparer.Default.Equals(operation.Symbol, body.Method));
+            return ownerGraph.GetAnonymousFunctionControlFlowGraph(lambda);
         }
         return body.Operation switch
         {
@@ -185,6 +189,13 @@ internal static class SemanticControlFlowProjector
             IBlockOperation block when block.Parent is null => ControlFlowGraph.Create(block),
             _ => CreateSyntaxGraph(body.Declaration, semanticModel),
         };
+    }
+
+    private static IEnumerable<IOperation> Descendants(IOperation operation)
+    {
+        yield return operation;
+        foreach (IOperation child in operation.ChildOperations)
+            foreach (IOperation descendant in Descendants(child)) yield return descendant;
     }
 
     private static ControlFlowGraph CreateSyntaxGraph(

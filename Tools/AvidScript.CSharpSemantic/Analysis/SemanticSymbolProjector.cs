@@ -74,6 +74,14 @@ internal static class SemanticSymbolProjector
             }
         }
 
+        foreach (AnonymousFunctionExpressionSyntax lambda in root.DescendantNodes().OfType<AnonymousFunctionExpressionSyntax>())
+            if (SemanticExecutableBodyResolver.GetMethodSymbol(lambda, semanticModel) is { } lambdaMethod)
+            {
+                AddSymbol(symbols, lambdaMethod, lambda, sourceText, typeRegistry, isExecutableReferenceSource);
+                foreach (IParameterSymbol parameter in lambdaMethod.Parameters.Where(parameter => parameter.DeclaringSyntaxReferences.Length == 0))
+                    AddSymbol(symbols, parameter, lambda, sourceText, typeRegistry, isExecutableReferenceSource);
+            }
+
         foreach (LocalFunctionStatementSyntax declaration in root.DescendantNodes()
             .OfType<LocalFunctionStatementSyntax>())
         {
@@ -307,20 +315,27 @@ internal static class SemanticSymbolProjector
                 parameters);
         }
         IMethodSymbol definition = method.OriginalDefinition;
+        if (definition.MethodKind == MethodKind.AnonymousFunction)
+        {
+            SyntaxNode declaration = definition.DeclaringSyntaxReferences.Single().GetSyntax();
+            SyntaxNode owner = declaration.Ancestors().FirstOrDefault(SemanticExecutableBodyResolver.IsExecutableDeclaration)
+                ?? declaration.SyntaxTree.GetRoot();
+            int ordinal = owner.DescendantNodes().OfType<AnonymousFunctionExpressionSyntax>()
+                .Where(lambda => (lambda.Ancestors().FirstOrDefault(SemanticExecutableBodyResolver.IsExecutableDeclaration)
+                    ?? lambda.SyntaxTree.GetRoot()) == owner)
+                .TakeWhile(lambda => lambda.SpanStart != declaration.SpanStart).Count();
+            return $"{GetSymbolId(definition.ContainingSymbol)}:lambda:{ordinal}";
+        }
         if (definition.MethodKind == MethodKind.LocalFunction)
         {
             SyntaxNode declaration = definition.DeclaringSyntaxReferences.Single().GetSyntax();
             // Same-named functions in sibling blocks are legal C#. Their ordinal
             // within the lexical owner is independent of whitespace/source offsets.
-            SyntaxNode owner = declaration.Ancestors().FirstOrDefault(node =>
-                node is BaseMethodDeclarationSyntax or AccessorDeclarationSyntax
-                    or LocalFunctionStatementSyntax) ?? declaration.SyntaxTree.GetRoot();
+            SyntaxNode owner = declaration.Ancestors().FirstOrDefault(SemanticExecutableBodyResolver.IsExecutableDeclaration) ?? declaration.SyntaxTree.GetRoot();
             int ordinal = owner.DescendantNodes()
                 .OfType<LocalFunctionStatementSyntax>()
                 .Where(local => local.Identifier.ValueText == definition.Name
-                    && (local.Ancestors().FirstOrDefault(node =>
-                        node is BaseMethodDeclarationSyntax or AccessorDeclarationSyntax
-                            or LocalFunctionStatementSyntax) ?? local.SyntaxTree.GetRoot()) == owner)
+                    && (local.Ancestors().FirstOrDefault(SemanticExecutableBodyResolver.IsExecutableDeclaration) ?? local.SyntaxTree.GetRoot()) == owner)
                 .TakeWhile(local => local.SpanStart != declaration.SpanStart)
                 .Count();
             return $"{GetSymbolId(definition.ContainingSymbol)}:local:{GetMethodSignature(definition)}:scope:{ordinal}";

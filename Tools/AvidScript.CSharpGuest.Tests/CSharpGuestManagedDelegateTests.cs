@@ -92,6 +92,9 @@ internal static class CSharpGuestManagedDelegateTests
             "debug instrumentation must retain indirect target contracts");
         Require(!CSharpGuestLowerer.Lower(document with { SemanticVersion = "1.23" }, new string('f', 64)).Succeeded,
             "old semantic versions must not smuggle new delegate operations");
+        CSharpGuestLoweringResult previous = CSharpGuestLowerer.Lower(document with { SemanticVersion = "1.24" }, new string('f', 64));
+        Require(previous.Succeeded && WasmModuleCompiler.Compile(previous.Module!).Succeeded,
+            "semantic 1.24 static method groups must remain executable");
         foreach (bool wrongType in new[] { false, true })
         {
             SemanticOperation Rewrite(SemanticOperation operation)
@@ -145,7 +148,7 @@ internal static class CSharpGuestManagedDelegateTests
             Directory.CreateDirectory(root);
             File.WriteAllBytes(Path.Combine(root, "managed-delegates.wasm"), compiled.Bytes);
         }
-        return 13;
+        return 14;
     }
 
     private static void Require(bool condition, string message)

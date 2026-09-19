@@ -3,5 +3,5 @@ namespace AvidScript.CSharpSemantic;
 public static class SemanticContract
 {
     public const int CurrentSchemaVersion = 21;
-    public const string CurrentSemanticVersion = "1.24";
+    public const string CurrentSemanticVersion = "1.25";
 }

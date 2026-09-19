@@ -20,7 +20,7 @@ internal static class SemanticDelegateEventTests
         ReturnContractsProjectTypedHandlers();
         InvalidHandlersFailClosed();
         MalformedAndDuplicateContractsFailClosed();
-        DelegateSyntaxRemainsUnsupported();
+        NoncapturingLambdaInEventHandlerIsSupported();
         return 6;
     }
 
@@ -111,7 +111,7 @@ internal static class SemanticDelegateEventTests
             candidate => candidate.SubscriptionId == SignalId);
         Assert(document.Succeeded
             && document.SchemaVersion == 21
-            && document.SemanticVersion == "1.24"
+            && document.SemanticVersion == "1.25"
             && document.DelegateEventCallbacks.Count == 2,
             "valid delegate event contracts should publish semantic schema v21");
         Assert(callback.SubscriptionId == SignalId
@@ -190,7 +190,7 @@ internal static class SemanticDelegateEventTests
             "malformed and duplicate generated contracts should fail closed");
     }
 
-    private static void DelegateSyntaxRemainsUnsupported()
+    private static void NoncapturingLambdaInEventHandlerIsSupported()
     {
         const string source = """
             using AvidScript;
@@ -211,9 +211,9 @@ internal static class SemanticDelegateEventTests
             $"[AvidEventContract(\"{SignalId}\", \"global::AvidScript.AActor;global::AvidScript.Payload;global::AvidScript.SignalKind\")]\n" +
             $"public const string OnSignal = \"{SignalId}\";"));
 
-        Assert(!document.Succeeded
-            && document.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCS4001"),
-            "AvidEvent support must not enable delegates, lambdas, or closures");
+        Assert(document.Succeeded
+            && document.Callables.Any(callable => callable.MethodSymbolId.Contains(":lambda:", StringComparison.Ordinal)),
+            "AvidEvent handlers may use synchronous noncapturing lambdas");
     }
 
     private static SemanticDocument Analyze(string source, string generatedSource)

@@ -924,7 +924,7 @@ function Publish-AvidScriptCSharpSemanticCacheEntry {
             }
             semantic = [ordered]@{
                 schema_version = 21
-                version = "1.24"
+                version = "1.25"
                 succeeded = $true
                 source_sha256 = [string]$Prepared.SemanticModel.source.sha256
                 frontend_sha256 = [string]$Prepared.SemanticModel.source.frontend_sha256

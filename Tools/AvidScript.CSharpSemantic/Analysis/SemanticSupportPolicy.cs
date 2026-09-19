@@ -31,11 +31,11 @@ internal static class SemanticSupportPolicy
                     SemanticLocalFunctionPolicy.DiagnosticMessage);
         }
 
-        if (operation is IAnonymousFunctionOperation)
+        if (operation is IAnonymousFunctionOperation lambda && !SemanticLambdaPolicy.IsSupported(lambda.Symbol))
         {
             return Unsupported(
                 "ASCS4001",
-                "Lambda and closure semantics are not supported by the current AvidScript semantic profile.");
+                SemanticLambdaPolicy.DiagnosticMessage);
         }
 
         if (operation is IDynamicInvocationOperation or IDynamicMemberReferenceOperation or
@@ -74,9 +74,11 @@ internal static class SemanticSupportPolicy
             foreach (AnonymousFunctionExpressionSyntax lambda in root.DescendantNodes()
                 .OfType<AnonymousFunctionExpressionSyntax>())
             {
+                if (SemanticExecutableBodyResolver.GetMethodSymbol(lambda, semanticModel) is { } method
+                    && SemanticLambdaPolicy.IsSupported(method)) continue;
                 diagnostics.Add(CreateDiagnostic(
                     "ASCS4001",
-                    "Lambda and closure syntax is not supported by the current AvidScript semantic profile.",
+                    SemanticLambdaPolicy.DiagnosticMessage,
                     unit,
                     lambda.Span));
             }
