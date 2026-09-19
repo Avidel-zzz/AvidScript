@@ -330,7 +330,8 @@ internal static class SemanticSymbolProjector
 
     private static string GetParameterId(IParameterSymbol parameter)
     {
-        IParameterSymbol definition = parameter.OriginalDefinition;
+        IParameterSymbol definition = parameter.ContainingSymbol is IMethodSymbol { MethodKind: MethodKind.DelegateInvoke }
+            ? parameter : parameter.OriginalDefinition;
         return $"symbol:parameter:{GetSymbolId(definition.ContainingSymbol)}:{definition.Ordinal}:{definition.Name}:{SemanticTypeRegistry.GetCanonicalName(definition.Type)}";
     }
     private static string GetPropertyId(IPropertySymbol property)

@@ -65,6 +65,7 @@ internal static class CSharpOperationLowerer
             "compound_assignment" => LowerCompoundAssignment(context, operation, blockOrdinal, instructions),
             "conversion" => LowerConversion(context, operation, blockOrdinal, instructions),
             "declaration_expression" => LowerAddress(context, operation, blockOrdinal, instructions),
+            "delegate_creation" => CSharpManagedDelegateLowerer.LowerCreation(context, operation, blockOrdinal, instructions),
             "default_value" => LowerDefaultValue(context, operation, blockOrdinal, instructions),
             "field_reference" => LowerFieldLoad(context, operation, blockOrdinal, instructions),
             "flow_capture" => LowerFlowCapture(context, operation, blockOrdinal, instructions),
@@ -795,6 +796,10 @@ internal static class CSharpOperationLowerer
         {
             return Malformed(context, operation, blockOrdinal);
         }
+
+        if (operation.Constant is { Kind: "null" } && context.TryGetGuestType(operation.TypeId, out GuestType nullType)
+            && nullType.Kind == "function_ref")
+            return LowerLiteral(context, operation, blockOrdinal, instructions);
 
         GuestRegister? operand = LowerValue(context, operation.Children[0], blockOrdinal, instructions);
         if (operand is null)

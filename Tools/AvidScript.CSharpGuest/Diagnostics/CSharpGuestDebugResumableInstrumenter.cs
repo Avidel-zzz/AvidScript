@@ -29,7 +29,7 @@ internal static class CSharpGuestDebugResumableInstrumenter
         HashSet<string> guestCallTargets = functions
             .SelectMany(function => function.Blocks)
             .SelectMany(block => block.Instructions)
-            .Where(instruction => instruction.Op == "call"
+            .Where(instruction => (instruction.Op is "call" or "function_ref")
                 && instruction.TargetId is not null)
             .Select(instruction => instruction.TargetId!)
             .ToHashSet(StringComparer.Ordinal);

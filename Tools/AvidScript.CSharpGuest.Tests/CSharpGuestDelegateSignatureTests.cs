@@ -60,7 +60,10 @@ internal static class CSharpGuestDelegateSignatureTests
         CSharpGuestLoweringResult previous = CSharpGuestLowerer.Lower(legacy, new string('e', 64));
         Require(previous.Succeeded && WasmModuleCompiler.Compile(previous.Module!).Succeeded,
             "schema 20/1.22 CFG async artifacts must remain consumable");
-        return 11;
+        CSharpGuestLoweringResult previousSignatures = CSharpGuestLowerer.Lower(asyncCurrent with { SemanticVersion = "1.23" }, new string('e', 64));
+        Require(previousSignatures.Succeeded && WasmModuleCompiler.Compile(previousSignatures.Module!).Succeeded,
+            "schema 21/1.23 CFG async artifacts must remain consumable");
+        return 12;
     }
 
     private static void Require(bool condition, string message)

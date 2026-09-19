@@ -145,7 +145,7 @@ $FrontendModel = [ordered]@{
 Write-JsonFile -Path $SeedFrontendPath -Value $FrontendModel
 $SemanticModel = [ordered]@{
     schema_version = 21
-    semantic_version = "1.23"
+    semantic_version = "1.24"
     succeeded = $true
     source = [ordered]@{
         source_id = $SourceId
@@ -194,7 +194,7 @@ $SeedReport = [ordered]@{
     }
     semantic = [ordered]@{
         schema_version = 21
-        version = "1.23"
+        version = "1.24"
         succeeded = $true
         source_sha256 = $SourceSha256
         frontend_sha256 = $SourceSha256

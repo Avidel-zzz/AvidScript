@@ -21,17 +21,25 @@ internal static class SemanticDelegateTypeTests
         FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
         SemanticDocument document = SemanticAnalyzer.Analyze(source, sourceId, frontend.Source.Sha256);
         Require(document.Succeeded, string.Join(" | ", document.Diagnostics.Select(item => item.Message)));
-        Require(document.SchemaVersion == 21 && document.SemanticVersion == "1.23"
+        Require(document.SchemaVersion == 21 && document.SemanticVersion == "1.24"
             && SemanticDelegateContractValidator.IsValid(document), "delegate signatures require the versioned schema-21 contract");
         SemanticDelegateType[] functions = document.DelegateTypes.Where(type => type.TypeId.Contains("System.Func<")).ToArray();
         Require(functions.Length == 2 && functions.Select(type => type.InvokeMethodSymbolId).Distinct().Count() == 2,
             "closed generic Invoke identities must not collapse to the generic definition");
         foreach (SemanticDelegateType function in functions)
+        {
             Require(document.ControlFlowGraphs.SelectMany(graph => graph.Blocks)
                 .Where(block => block.BranchValue is not null)
                 .SelectMany(block => Descendants(block.BranchValue!))
                 .Any(operation => operation.Kind == "invocation" && operation.SymbolId == function.InvokeMethodSymbolId),
                 "bound invocation identity must exactly match the closed signature descriptor");
+            Require(document.ControlFlowGraphs.SelectMany(graph => graph.Blocks)
+                .Where(block => block.BranchValue is not null).SelectMany(block => Descendants(block.BranchValue!))
+                .Where(operation => operation.Kind == "invocation" && operation.SymbolId == function.InvokeMethodSymbolId)
+                .SelectMany(operation => operation.Children.Where(child => child.Kind == "argument"))
+                .All(argument => argument.SymbolId?.StartsWith("symbol:parameter:" + function.InvokeMethodSymbolId + ":0:", StringComparison.Ordinal) == true),
+                "delegate arguments must retain closed Invoke parameter identities");
+        }
         SemanticDelegateType recursive = document.DelegateTypes.Single(type => type.TypeId == "type:global::Recursive");
         Require(recursive.ReturnTypeId == recursive.TypeId, "recursive delegate signatures must terminate and retain nominal identity");
         SemanticDelegateType modify = document.DelegateTypes.Single(type => type.TypeId == "type:global::Modify");
@@ -44,7 +52,7 @@ internal static class SemanticDelegateTypeTests
         Require(SemanticDelegateContractValidator.IsValid(roundTrip)
             && serialized.SequenceEqual(SemanticSerializer.Serialize(roundTrip)),
             "signature serialization must be deterministic and complete");
-        return 5;
+        return 6;
     }
 
     private static System.Collections.Generic.IEnumerable<SemanticOperation> Descendants(SemanticOperation operation)

@@ -127,6 +127,7 @@ internal static class SemanticOperationProjector
             IPropertyReferenceOperation => ("property_reference", true),
             IEventReferenceOperation => ("event_reference", true),
             IMethodReferenceOperation => ("method_reference", true),
+            IDelegateCreationOperation => ("delegate_creation", true),
             IInvocationOperation => ("invocation", true),
             IAwaitOperation => ("await", true),
             IObjectCreationOperation => ("object_creation", true),

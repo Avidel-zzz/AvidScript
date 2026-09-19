@@ -13,6 +13,8 @@ internal static class CSharpCallOperationLowerer
         int blockOrdinal,
         List<GuestInstruction> instructions)
     {
+        if (CSharpManagedDelegateLowerer.TryLowerInvocation(context, operation, blockOrdinal, instructions, out GuestRegister? delegateResult))
+            return delegateResult;
         if (!context.TryGetCallTarget(operation.SymbolId, out SemanticCallable callable, out string targetId))
         {
             context.Add("ASCG1005", $"Block {blockOrdinal} call target '{operation.SymbolId}' is not an import or Guest function.");
@@ -318,7 +320,7 @@ internal static class CSharpCallOperationLowerer
         return true;
     }
 
-    private static bool TryLowerArguments(
+    internal static bool TryLowerArguments(
         CSharpFunctionLoweringContext context,
         IReadOnlyList<SemanticCallableParameter> parameters,
         IReadOnlyList<SemanticOperation> arguments,

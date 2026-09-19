@@ -156,10 +156,10 @@ if ($LASTEXITCODE -ne 0) {
 
 $Semantic = Get-Content -Raw -LiteralPath $SemanticPath | ConvertFrom-Json
 if ([int]$Semantic.schema_version -ne 21 -or
-    [string]$Semantic.semantic_version -cne "1.23" -or
+    [string]$Semantic.semantic_version -cne "1.24" -or
     -not [bool]$Semantic.succeeded -or
     @($Semantic.ue_type_declarations).Count -eq 0) {
-    throw "Semantic artifact must be a successful schema 21/1.23 document with UE type declarations."
+    throw "Semantic artifact must be a successful schema 21/1.24 document with UE type declarations."
 }
 
 $ToolHome = Join-Path $env:TEMP "AvidScriptUeTypeGenerator"

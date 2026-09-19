@@ -34,6 +34,13 @@ public static class CSharpGuestLowerer
             type => type.Id,
             StringComparer.Ordinal);
         IReadOnlyList<GuestType> moduleTypes = typeResult.Types;
+        foreach (SemanticCallable root in document.Callables.Where(callable =>
+            document.Reachability?.RootCallableIds.Contains(callable.MethodSymbolId) == true || callable.Export is not null))
+        {
+            if (CSharpManagedDelegateLowerer.ContainsReference(root.ReturnTypeId, guestTypes)
+                || root.Parameters.Any(parameter => CSharpManagedDelegateLowerer.ContainsReference(parameter.TypeId, guestTypes)))
+                Add(diagnostics, "ASCG1024", $"Entrypoint '{root.MethodSymbolId}' cannot expose module-local delegate references to the host.");
+        }
         IReadOnlySet<string>? reachableCallableIds = GetReachableCallableIds(document);
         GuestGlobal[] globals = LowerGlobals(document, guestTypes, diagnostics);
         GuestImport[] imports = LowerImports(document, reachableCallableIds, guestTypes, diagnostics);
@@ -192,7 +199,10 @@ public static class CSharpGuestLowerer
             layout.DataSegments,
             functions,
             exports,
-            Array.Empty<GuestDiagnostic>());
+            Array.Empty<GuestDiagnostic>())
+        {
+            FunctionReferences = CSharpManagedDelegateLowerer.BuildContracts(document, moduleTypes, functions),
+        };
         GuestValidationResult validation = GuestModuleValidator.Validate(module);
         if (!validation.Succeeded)
         {
@@ -253,7 +263,8 @@ public static class CSharpGuestLowerer
                 Add(diagnostics, "ASCG1003", $"Static field '{symbol.Id}' has no Guest value type.");
                 continue;
             }
-            if (guestTypes[symbol.TypeId].Kind is "factory_ref" or "object_type_ref" or "composite_ref")
+            if (guestTypes[symbol.TypeId].Kind is "factory_ref" or "object_type_ref" or "composite_ref"
+                || CSharpManagedDelegateLowerer.ContainsReference(symbol.TypeId, guestTypes))
             {
                 Add(diagnostics, "ASCG1003", $"Static field '{symbol.Id}' cannot store a session-bound capability.");
                 continue;
@@ -304,7 +315,10 @@ public static class CSharpGuestLowerer
                     .Concat(parameterTypeIds)
                     .ToArray();
             }
-            if (!guestTypes.ContainsKey(callable.ReturnTypeId)
+            if (CSharpManagedDelegateLowerer.ContainsReference(callable.ReturnTypeId, guestTypes)
+                || (!callable.IsStatic && CSharpManagedDelegateLowerer.ContainsReference(callable.ContainingTypeId, guestTypes))
+                || callable.Parameters.Any(parameter => CSharpManagedDelegateLowerer.ContainsReference(parameter.TypeId, guestTypes))
+                || !guestTypes.ContainsKey(callable.ReturnTypeId)
                 || parameterTypeIds.Any(typeId => !guestTypes.ContainsKey(typeId)))
             {
                 Add(diagnostics, "ASCG1003", $"Import '{callable.MethodSymbolId}' has unsupported ABI types.");
@@ -740,7 +754,7 @@ public static class CSharpGuestLowerer
         HashSet<string> guestCallTargets = functions
             .SelectMany(function => function.Blocks)
             .SelectMany(block => block.Instructions)
-            .Where(instruction => instruction.Op == "call" && instruction.TargetId is not null)
+            .Where(instruction => (instruction.Op is "call" or "function_ref") && instruction.TargetId is not null)
             .Select(instruction => instruction.TargetId!)
             .ToHashSet(StringComparer.Ordinal);
         return document.Callables

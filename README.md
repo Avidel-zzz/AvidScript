@@ -31,8 +31,8 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 [P66.A 静态局部函数](Docs/Phase66/P66.A_Lexical_Functions.md)已支持独立作用域、嵌套、递归及直接调用；
 [P66.B 直接调用捕获](Docs/Phase66/P66.B_Direct_Capture_Results.md)进一步支持外层变量共享读写及跨 await 保存。
 [委托签名合同](Docs/Phase66/P66.B_Delegate_Signature_Contract.md)已覆盖封闭泛型身份、引用参数及产物校验，为后续委托执行提供类型依据。
-[Guest 间接调用](Docs/Phase66/P66.B_Indirect_Call_Results.md)已实现函数引用、名义签名检查和递归取消轮询，并通过真实 WASM 执行；C# 委托语法尚待接入。
-lambda、逃逸委托、泛型/异步局部函数和后续开发体验阶段仍未完成。
+[Guest 间接调用](Docs/Phase66/P66.B_Indirect_Call_Results.md)已实现函数引用、名义签名检查和递归取消轮询；[C# 静态方法组](Docs/Phase66/P66.B_CSharp_Method_Group_Results.md)已能构造委托、传参/返回并执行，含 ref/out、命名与默认参数。
+lambda、逃逸捕获环境、绑定实例委托、泛型/异步局部函数和后续开发体验阶段仍未完成。
 
 ## 现在可以做什么
 
@@ -178,7 +178,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 ## 当前边界
 
 - **UE 类型**：由 Profile 与 ABI/codec 决定生成范围，并非所有 UE API 自动可用。复合容器内强 UObject 引用仍拒绝，平面 `TArray<UObject*>` 可用；Set/Map key 受确定性编码限制，soft/weak 的脚本侧解析易用接口待补齐。
-- **C# 子集**：支持成员内同步、非泛型局部函数及直接调用的变量捕获；无完整 .NET Runtime、任意 awaiter 或异常系统；暂不支持逃逸闭包、`event +=`、lambda，使用显式 bind/subscribe 与 `ExecuteX/BroadcastX`。
+- **C# 子集**：支持成员内同步、非泛型局部函数、直接调用的变量捕获，以及 Guest 内静态方法组委托调用；无完整 .NET Runtime、任意 awaiter 或异常系统；暂不支持逃逸闭包、`event +=`、lambda，UE 委托/事件仍使用显式 bind/subscribe 与 `ExecuteX/BroadcastX`。
 - **重载与隔离**：方法体可热重载；UI 样例通过 `NextTickAsync` 在候选提交后初始化。准备期无可回滚适配的反射写入仍被拒绝，不承诺回滚任意外部副作用。反射结构变更需增量 UBT 并重启 Editor；WASM 隔离不是原生 DLL 进程沙箱。
 - **玩法与平台**：UI 包使用独立验证插件和隔离启动配置，Development/Shipping 均通过跨进程自动存取；Development 人工界面、按钮和同一 UserRoot 新进程读档均反馈无问题。Shipping 人工视觉按用户要求不阻塞当前推进，明确转入发布候选验收，不能视为通过。任意损坏存档不在现有保证内；Development 包内一小时切图与当前候选 2/2 多进程网络拓扑通过，UI 重载另有 20 轮有界证据，但不宣称一小时网络/重载长稳；Android UBT/APK/真机及 iOS 仍未验收。
 - **诊断与性能**：typed Host 拒绝已在 Wasmtime 保留具体 category/details/import，WAMR semantic/dynamic 路径同样保留分类；尚无完整 C# 异常系统。纯执行 P50/P95 领先门禁未关闭，也未完成同口径 UnLua/AngelScript 矩阵。

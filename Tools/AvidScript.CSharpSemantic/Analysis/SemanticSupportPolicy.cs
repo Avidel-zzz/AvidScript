@@ -31,11 +31,11 @@ internal static class SemanticSupportPolicy
                     SemanticLocalFunctionPolicy.DiagnosticMessage);
         }
 
-        if (operation is IAnonymousFunctionOperation or IDelegateCreationOperation)
+        if (operation is IAnonymousFunctionOperation)
         {
             return Unsupported(
                 "ASCS4001",
-                "Lambda, delegate, and closure semantics are not supported by the current AvidScript semantic profile.");
+                "Lambda and closure semantics are not supported by the current AvidScript semantic profile.");
         }
 
         if (operation is IDynamicInvocationOperation or IDynamicMemberReferenceOperation or

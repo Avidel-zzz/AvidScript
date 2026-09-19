@@ -246,7 +246,8 @@ internal static class GuestInstructionValidator
             return;
         }
         if (context.Types.TryGetValue(operands[0]!.TypeId, out GuestType? operandType)
-            && IsNominalOrdinal(operandType))
+            && IsNominalOrdinal(operandType)
+            && !(operandType.Kind == "function_ref" && instruction.OperatorKind is "equals" or "not_equals"))
         {
             AddTypeMismatch(context, function, instruction);
             return;

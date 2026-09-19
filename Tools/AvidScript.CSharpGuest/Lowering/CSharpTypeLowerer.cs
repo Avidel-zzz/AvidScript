@@ -250,6 +250,9 @@ internal static class CSharpTypeLowerer
             return intrinsic;
         }
 
+        if (type.Kind == "delegate")
+            return new GuestType(type.Id, "function_ref", "i32", Array.Empty<GuestField>(), null, null, 4, 4);
+
         if (ueTypeIds.Contains(type.Id))
         {
             if (type.Kind != "class" || type.IsValueType)

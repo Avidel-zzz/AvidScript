@@ -6,6 +6,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--managed-delegates")
+            {
+                int focusedCount = CSharpGuestManagedDelegateTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.ManagedDelegates: {focusedCount}/{focusedCount} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--lexical-captures")
             {
                 int focusedCount = CSharpGuestLocalFunctionTests.Run() + CSharpGuestLexicalCaptureTests.Run();
@@ -54,7 +60,8 @@ internal static class Program
                 + CSharpGuestUeTypeTests.Run()
                 + CSharpGuestLocalFunctionTests.Run()
                 + CSharpGuestLexicalCaptureTests.Run()
-                + CSharpGuestDelegateSignatureTests.Run();
+                + CSharpGuestDelegateSignatureTests.Run()
+                + CSharpGuestManagedDelegateTests.Run();
             Console.WriteLine($"AvidScript.CSharpGuest.Tests: {count}/{count} passed");
             return 0;
         }
