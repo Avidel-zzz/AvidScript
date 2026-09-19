@@ -4,6 +4,7 @@
 
 struct FAvidScriptRuntimeArtifact;
 class FAvidScriptGeneratedTypeRegistrySnapshot;
+class FAvidScriptRuntimeSession;
 class UObject;
 
 enum class EAvidScriptGeneratedTypePackageReloadDisposition : uint8
@@ -61,12 +62,14 @@ public:
 #if WITH_DEV_AUTOMATION_TESTS
 	static TUniquePtr<FAvidScriptGeneratedTypeRuntimeHost> CreateIsolatedForTesting();
 	void SetReloadFailureAfterInstanceCountForTesting(int32 InstanceCount);
+	FAvidScriptRuntimeSession* GetInstanceSessionForTesting(const UObject& Receiver) const;
 #endif
 
 private:
 	FAvidScriptGeneratedTypeRuntimeHost();
 	FAvidScriptGeneratedTypeRuntimeHost(const FAvidScriptGeneratedTypeRuntimeHost&) = delete;
 	FAvidScriptGeneratedTypeRuntimeHost& operator=(const FAvidScriptGeneratedTypeRuntimeHost&) = delete;
+	bool CanMutateInstances(FString& OutError) const;
 	bool LoadPackageFromDescriptorFile(
 		const FString& DescriptorPath,
 		TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot>& OutRegistry,

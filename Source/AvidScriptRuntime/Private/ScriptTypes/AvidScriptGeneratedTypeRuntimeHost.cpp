@@ -152,6 +152,13 @@ bool TeardownInstance(
 	bool bSucceeded = true;
 	if (Instance.Session)
 	{
+		FAvidScriptGeneratedInvocation ActiveInvocation;
+		if (Instance.Session->IsOperationActive()
+			|| FAvidScriptGeneratedTypeRouter::Get().GetActiveInvocation(ActiveInvocation))
+		{
+			OutError = TEXT("generated type teardown requires the active invocation to return");
+			return false;
+		}
 		if (Instance.Session->IsLiveLoaded())
 		{
 			FAvidScriptWasmSmokeResult StopResult;
@@ -166,11 +173,13 @@ bool TeardownInstance(
 		FString ClearError;
 		if (!Instance.Session->ClearGeneratedTypeInstance(ClearError))
 		{
-			bSucceeded = false;
 			if (OutError.IsEmpty())
 			{
 				OutError = ClearError;
 			}
+			// The Router still owns a pointer to this Session. Never free it after
+			// a rejected unregister, even when stopping the VM already succeeded.
+			return false;
 		}
 		Instance.Session.Reset();
 	}
@@ -280,6 +289,8 @@ bool AreBodyOnlyCompatibleRegistries(
 struct FAvidScriptGeneratedTypeRuntimeHost::FImpl
 {
 	bool bStarted = false;
+	bool bMutationInProgress = false;
+	bool bTeardownPending = false;
 	TOptional<FGeneratedTypeRuntimePackage> Package;
 	FAvidScriptObjectRegistry ObjectRegistry;
 	TMap<FObjectKey, TUniquePtr<FGeneratedTypeRuntimeInstance>> Instances;
@@ -322,7 +333,38 @@ void FAvidScriptGeneratedTypeRuntimeHost::SetReloadFailureAfterInstanceCountForT
 	check(Impl && Impl->bStarted && IsInGameThread());
 	Impl->ReloadFailureAfterInstanceCountForTesting = InstanceCount;
 }
+
+FAvidScriptRuntimeSession* FAvidScriptGeneratedTypeRuntimeHost::GetInstanceSessionForTesting(const UObject& Receiver) const
+{
+	if (!Impl || !IsInGameThread()) return nullptr;
+	const auto* Instance = Impl->Instances.Find(FObjectKey(&Receiver));
+	return Instance && Instance->IsValid() ? (*Instance)->Session.Get() : nullptr;
+}
 #endif
+
+bool FAvidScriptGeneratedTypeRuntimeHost::CanMutateInstances(FString& OutError) const
+{
+	if (!Impl || !Impl->bStarted || !IsInGameThread())
+	{
+		OutError = TEXT("generated type mutation requires a started GameThread host");
+		return false;
+	}
+	FAvidScriptGeneratedInvocation ActiveInvocation;
+	if (Impl->bMutationInProgress || FAvidScriptGeneratedTypeRouter::Get().GetActiveInvocation(ActiveInvocation))
+	{
+		OutError = TEXT("generated type mutation rejected during an active invocation or host transaction");
+		return false;
+	}
+	for (const auto& Pair : Impl->Instances)
+	{
+		if (Pair.Value && Pair.Value->Session && Pair.Value->Session->IsOperationActive())
+		{
+			OutError = TEXT("generated type mutation rejected during an active Session operation");
+			return false;
+		}
+	}
+	return true;
+}
 
 FAvidScriptGeneratedTypeRuntimeHost::FAvidScriptGeneratedTypeRuntimeHost() = default;
 
@@ -352,16 +394,27 @@ void FAvidScriptGeneratedTypeRuntimeHost::Shutdown()
 	{
 		return;
 	}
-	check(IsInGameThread());
-	for (TPair<FObjectKey, TUniquePtr<FGeneratedTypeRuntimeInstance>>& Pair : Impl->Instances)
+	FString GuardError;
+	if (!CanMutateInstances(GuardError))
 	{
-		FString Error;
-		ensureMsgf(
-			TeardownInstance(*Pair.Value, Impl->ObjectRegistry, Error),
-			TEXT("Generated type Runtime host shutdown failed: %s"),
-			Error.IsEmpty() ? TEXT("unknown") : *Error);
+		UE_LOG(LogAvidScriptGeneratedTypeRuntimeHost, Warning, TEXT("%s"), *GuardError);
+		return;
 	}
-	Impl->Instances.Reset();
+	{
+		TGuardValue<bool> MutationGuard(Impl->bMutationInProgress, true);
+		for (auto Iterator = Impl->Instances.CreateIterator(); Iterator; ++Iterator)
+		{
+			FString Error;
+			if (!TeardownInstance(*Iterator.Value(), Impl->ObjectRegistry, Error))
+				UE_LOG(LogAvidScriptGeneratedTypeRuntimeHost, Warning, TEXT("Generated host teardown: %s"), *Error);
+			if (!Iterator.Value()->Session && !Iterator.Value()->ReceiverHandle.IsValid()) Iterator.RemoveCurrent();
+		}
+	}
+	if (!Impl->Instances.IsEmpty())
+	{
+		Impl->bTeardownPending = true;
+		return;
+	}
 	Impl->ObjectRegistry.Reset();
 	Impl->Package.Reset();
 	Impl.Reset();
@@ -373,11 +426,8 @@ bool FAvidScriptGeneratedTypeRuntimeHost::InstallPackage(
 	FString& OutError)
 {
 	OutError.Reset();
-	if (!Impl || !Impl->bStarted || !IsInGameThread())
-	{
-		OutError = TEXT("generated type package installation requires a started GameThread host");
-		return false;
-	}
+	if (!CanMutateInstances(OutError)) return false;
+	TGuardValue<bool> MutationGuard(Impl->bMutationInProgress, true);
 	if (!Impl->Instances.IsEmpty())
 	{
 		OutError = TEXT("generated type package replacement requires zero active instances");
@@ -389,6 +439,7 @@ bool FAvidScriptGeneratedTypeRuntimeHost::InstallPackage(
 	}
 
 	Impl->Package.Emplace(FGeneratedTypeRuntimePackage{ Registry, Artifact });
+	Impl->bTeardownPending = false;
 	return true;
 }
 
@@ -400,7 +451,14 @@ bool FAvidScriptGeneratedTypeRuntimeHost::ReloadPackage(
 {
 	OutResult = FAvidScriptGeneratedTypePackageReloadResult();
 	OutError.Reset();
-	if (!Impl || !Impl->bStarted || !IsInGameThread() || !Impl->Package.IsSet())
+	if (!CanMutateInstances(OutError)) return false;
+	if (Impl->bTeardownPending)
+	{
+		OutError = TEXT("generated type reload requires pending instance teardown to complete");
+		return false;
+	}
+	TGuardValue<bool> MutationGuard(Impl->bMutationInProgress, true);
+	if (!Impl->Package.IsSet())
 	{
 		OutError = TEXT("generated type package reload requires an installed GameThread package");
 		return false;
@@ -484,13 +542,16 @@ bool FAvidScriptGeneratedTypeRuntimeHost::ReloadPackage(
 		OutResult.bRollbackPreservedLivePackage = bRollbackSucceeded;
 		if (!bRollbackSucceeded)
 		{
-			for (TPair<FObjectKey, TUniquePtr<FGeneratedTypeRuntimeInstance>>& Pair : Impl->Instances)
+			Impl->bTeardownPending = true;
+			for (auto Iterator = Impl->Instances.CreateIterator(); Iterator; ++Iterator)
 			{
 				FString TeardownError;
-				TeardownInstance(*Pair.Value, Impl->ObjectRegistry, TeardownError);
+				TeardownInstance(*Iterator.Value(), Impl->ObjectRegistry, TeardownError);
+				if (!Iterator.Value()->Session && !Iterator.Value()->ReceiverHandle.IsValid()) Iterator.RemoveCurrent();
 			}
-			Impl->Instances.Reset();
-			OutError += TEXT("; all generated type Sessions were torn down fail-closed");
+			OutError += Impl->Instances.IsEmpty()
+				? TEXT("; all generated type Sessions were torn down fail-closed")
+				: TEXT("; generated type teardown remains pending without releasing registered Sessions");
 		}
 		return false;
 	}
@@ -822,17 +883,15 @@ bool FAvidScriptGeneratedTypeRuntimeHost::ReloadPackageFromDescriptorFile(
 bool FAvidScriptGeneratedTypeRuntimeHost::ClearPackage(FString& OutError)
 {
 	OutError.Reset();
-	if (!Impl || !Impl->bStarted || !IsInGameThread())
-	{
-		OutError = TEXT("generated type package clear requires a started GameThread host");
-		return false;
-	}
+	if (!CanMutateInstances(OutError)) return false;
+	TGuardValue<bool> MutationGuard(Impl->bMutationInProgress, true);
 	if (!Impl->Instances.IsEmpty())
 	{
 		OutError = TEXT("generated type package clear requires zero active instances");
 		return false;
 	}
 	Impl->Package.Reset();
+	Impl->bTeardownPending = false;
 	return true;
 }
 
@@ -851,7 +910,14 @@ bool FAvidScriptGeneratedTypeRuntimeHost::BeginInstance(
 	{
 		return true;
 	}
-	if (!Impl || !Impl->bStarted || !IsInGameThread() || !Impl->Package.IsSet())
+	if (!CanMutateInstances(OutError)) return false;
+	if (Impl->bTeardownPending)
+	{
+		OutError = TEXT("generated type activation requires pending instance teardown to complete");
+		return false;
+	}
+	TGuardValue<bool> MutationGuard(Impl->bMutationInProgress, true);
+	if (!Impl->Package.IsSet())
 	{
 		OutError = TEXT("generated type instance activation requires an installed GameThread package");
 		return false;
@@ -948,11 +1014,8 @@ bool FAvidScriptGeneratedTypeRuntimeHost::EndInstance(UObject& Receiver, FString
 	{
 		return true;
 	}
-	if (!Impl || !Impl->bStarted || !IsInGameThread())
-	{
-		OutError = TEXT("generated type instance teardown requires a started GameThread host");
-		return false;
-	}
+	if (!CanMutateInstances(OutError)) return false;
+	TGuardValue<bool> MutationGuard(Impl->bMutationInProgress, true);
 
 	const FObjectKey ReceiverKey(&Receiver);
 	TUniquePtr<FGeneratedTypeRuntimeInstance>* const Found =
@@ -961,9 +1024,9 @@ bool FAvidScriptGeneratedTypeRuntimeHost::EndInstance(UObject& Receiver, FString
 	{
 		return true;
 	}
-	TUniquePtr<FGeneratedTypeRuntimeInstance> Instance = MoveTemp(*Found);
-	Impl->Instances.Remove(ReceiverKey);
-	return TeardownInstance(*Instance, Impl->ObjectRegistry, OutError);
+	const bool bSucceeded = TeardownInstance(**Found, Impl->ObjectRegistry, OutError);
+	if (!(*Found)->Session && !(*Found)->ReceiverHandle.IsValid()) Impl->Instances.Remove(ReceiverKey);
+	return bSucceeded;
 }
 
 bool FAvidScriptGeneratedTypeRuntimeHost::IsInstanceActive(const UObject& Receiver) const

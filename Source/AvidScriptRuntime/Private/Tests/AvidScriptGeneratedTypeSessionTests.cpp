@@ -29,6 +29,19 @@ constexpr TCHAR GeneratedExportName[] =
 constexpr TCHAR GeneratedTypeGenerationKey[] =
 	TEXT("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 
+class FGeneratedHostMutationProbe final : public IAvidScriptGeneratedTypeInstance
+{
+public:
+	uint64 GetGeneratedExecutionGeneration() const override { return 1; }
+	bool InvokeGeneratedTypeMember(UObject&, const FAvidScriptObjectHandle&, uint32, uint32,
+		TConstArrayView<FAvidScriptGeneratedCallArgument>, void*) override
+	{
+		if (Callback) Callback();
+		return true;
+	}
+	TFunction<void()> Callback;
+};
+
 void AppendWasmSection(
 	TArray<uint8>& Module,
 	const uint8 SectionId,
@@ -726,6 +739,63 @@ bool FAvidScriptGeneratedTypeRuntimeHostTest::RunTest(const FString& Parameters)
 			&ScriptResult));
 	TestTrue(TEXT("Runtime-owned packed handle reaches the guest"), ScriptResult > 0);
 
+	FAvidScriptRuntimeSession* const OwnedSession = Host->GetInstanceSessionForTesting(*Receiver);
+	if (!TestNotNull(TEXT("Host exposes its test Session"), OwnedSession)) return false;
+	const uint64 OriginalGeneration = OwnedSession->GetGeneratedExecutionGeneration();
+	TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> ReentrantReceiver(NewObject<UAvidScriptGeneratedTypeSessionTestObject>());
+	bool bObservedLiveExecution = false;
+	OwnedSession->SetLiveExecutionObserverForTesting([&]()
+	{
+		bObservedLiveExecution = true;
+		FString RejectedError;
+		TestFalse(TEXT("active Guest cannot destroy its owning Session"), Host->EndInstance(*Receiver, RejectedError));
+		TestFalse(TEXT("active Guest cannot mutate the instance map"), Host->BeginInstance(*ReentrantReceiver, 0, RejectedError));
+		TestFalse(TEXT("active Guest cannot clear the package"), Host->ClearPackage(RejectedError));
+		FAvidScriptGeneratedTypePackageReloadResult RejectedReload;
+		TestFalse(TEXT("active Guest cannot start package replacement"),
+			Host->ReloadPackageFromDescriptorFile(DescriptorPath, RejectedReload, RejectedError));
+		Host->Shutdown();
+		TestTrue(TEXT("rejected shutdown preserves package and current Session"), Host->HasInstalledPackage()
+			&& Host->GetInstanceSessionForTesting(*Receiver) == OwnedSession && OwnedSession->IsLiveLoaded());
+		TestEqual(TEXT("rejected mutations preserve receiver handle"), Host->GetRegisteredHandleCount(), 1);
+	});
+	FAvidScriptWasmSmokeResult ReentrantTick;
+	TestTrue(TEXT("outer Guest entry survives rejected Host mutations"), OwnedSession->Tick(0.016f, ReentrantTick));
+	TestTrue(TEXT("live execution observer ran"), bObservedLiveExecution);
+	TestEqual(TEXT("rejected mutations do not advance code generation"), OwnedSession->GetGeneratedExecutionGeneration(), OriginalGeneration);
+	TestEqual(TEXT("rejected mutations leave one owned instance"), Host->GetActiveInstanceCount(), 1);
+
+	// Router activity can belong to another target while this Host's Session is idle.
+	FGeneratedHostMutationProbe Probe;
+	FAvidScriptGeneratedTypeInstanceRegistration ProbeRegistration;
+	FAvidScriptGeneratedTypeRouter& Router = FAvidScriptGeneratedTypeRouter::Get();
+	TestTrue(TEXT("native callback route registers"), Router.RegisterInstance(*ReentrantReceiver, {71, 9}, Probe, ProbeRegistration));
+	Probe.Callback = [&]()
+	{
+		FString RejectedError;
+		TestFalse(TEXT("foreign active route cannot tear down an idle peer Session"), Host->EndInstance(*Receiver, RejectedError));
+		Host->Shutdown();
+		TestTrue(TEXT("foreign route rejection retains ownership"), Host->GetInstanceSessionForTesting(*Receiver) == OwnedSession);
+	};
+	TestTrue(TEXT("native callback completes without destroying the peer"),
+		FAvidScriptGeneratedTypeDispatcher::Invoke(ReentrantReceiver.Get(), 0, 0, {}, nullptr));
+	ReentrantReceiver->MarkAsGarbage();
+	TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> PruneTrigger(NewObject<UAvidScriptGeneratedTypeSessionTestObject>());
+	FAvidScriptGeneratedTypeInstanceRegistration PruneRegistration;
+	TestTrue(TEXT("new registration prunes a dead receiver route"), Router.RegisterInstance(*PruneTrigger, {72, 9}, Probe, PruneRegistration));
+	TestTrue(TEXT("already-pruned registration teardown is idempotent"), ProbeRegistration.Reset());
+	TestTrue(TEXT("prune trigger route tears down"), PruneRegistration.Reset());
+	bool bObservedReload = false;
+	OwnedSession->SetCandidateBeginPlayObserverForTesting([&]()
+	{
+		bObservedReload = true;
+		FString RejectedError;
+		TestFalse(TEXT("candidate callback cannot remove a map entry during reload"), Host->EndInstance(*Receiver, RejectedError));
+		TestTrue(TEXT("Host transaction owns the mutation boundary"), RejectedError.Contains(TEXT("host transaction")));
+		Host->Shutdown();
+		TestTrue(TEXT("candidate callback preserves the original Session identity"), Host->GetInstanceSessionForTesting(*Receiver) == OwnedSession);
+	});
+
 	const TArray<uint8> BodyOnlyModule = BuildGeneratedTypeSessionModule(37);
 	TestTrue(
 		TEXT("Body-only candidate WASM writes"),
@@ -767,6 +837,7 @@ bool FAvidScriptGeneratedTypeRuntimeHostTest::RunTest(const FString& Parameters)
 			== EAvidScriptGeneratedTypePackageReloadDisposition::BodyOnlyApplied);
 	TestEqual(TEXT("Body-only reload sees one active Session"), BodyOnlyResult.CandidateInstanceCount, 1);
 	TestEqual(TEXT("Body-only reload commits one active Session"), BodyOnlyResult.ReloadedInstanceCount, 1);
+	TestTrue(TEXT("reload mutation callback ran"), bObservedReload);
 	ScriptResult = 0;
 	TestTrue(
 		TEXT("Body-only package keeps the generated route live"),

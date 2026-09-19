@@ -186,8 +186,13 @@ bool FAvidScriptGeneratedTypeRouter::UnregisterInstance(
 	}
 
 	const FGeneratedTypeInstanceRoute* Route = Impl->Routes.Find(Registration.ReceiverKey);
-	if (Route == nullptr
-		|| Route->Instance != Registration.Instance
+	if (Route == nullptr)
+	{
+		// A dead UObject route may already have been pruned during registration.
+		Registration.Invalidate();
+		return true;
+	}
+	if (Route->Instance != Registration.Instance
 		|| Route->Serial != Registration.Serial)
 	{
 		return false;
