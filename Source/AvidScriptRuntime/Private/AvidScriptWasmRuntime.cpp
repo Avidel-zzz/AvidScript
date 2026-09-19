@@ -1248,6 +1248,7 @@ bool FAvidScriptWasmRuntimeInstance::LoadArtifactView(
 	const TSharedPtr<const FAvidScriptWasmDebugMap>& InDebugMap,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
+	if (RejectActiveContextMutation(TEXT("load"), &OutResult)) return false;
 	Unload();
 	Metrics = FAvidScriptWasmRuntimeMetrics();
 	DataBridgeMetrics = FAvidScriptDataBridgeMetrics();
@@ -1541,6 +1542,7 @@ bool FAvidScriptWasmRuntimeInstance::PrepareNamedExportCall(
 
 bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutResult)
 {
+	if (RejectActiveContextMutation(TEXT("module BeginPlay"), &OutResult)) return false;
 	PrepareResult(OutResult, ModuleId, ActiveBackendInfo, Metrics);
 	OutResult.bRuntimeInitialized = IsLoaded();
 	OutResult.bModuleLoaded = IsLoaded();
@@ -1643,6 +1645,7 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 	FAvidScriptWasmSmokeResult& OutResult,
 	const EAvidScriptWasmResultDetail ResultDetail)
 {
+	if (RejectActiveContextMutation(TEXT("module Tick"), &OutResult)) return false;
 	const bool bFullSnapshot =
 		ResultDetail == EAvidScriptWasmResultDetail::FullSnapshot;
 	const bool bHotFailureOnly =
@@ -1921,6 +1924,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchEvent(
 	FAvidScriptWasmSmokeResult& OutResult,
 	const EAvidScriptWasmResultDetail ResultDetail)
 {
+	if (RejectActiveContextMutation(TEXT("unscoped event"), &OutResult)) return false;
 	const bool bHotFailureOnly =
 		ResultDetail == EAvidScriptWasmResultDetail::HotFailureOnly;
 	if (!bHotFailureOnly)
@@ -2175,6 +2179,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEvent(
 	void* NativeParameters,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
+	if (RejectActiveContextMutation(TEXT("unscoped delegate event"), &OutResult)) return false;
 	CaptureSnapshot(OutResult);
 	if (!IsLoaded() || !bHasBegunPlay || bEndPlayAttempted)
 	{
@@ -2357,6 +2362,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchContinuation(
 	const FAvidScriptContinuationCompletion& Completion,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
+	if (RejectActiveContextMutation(TEXT("unscoped continuation"), &OutResult)) return false;
 	CaptureSnapshot(OutResult);
 	const bool bUseV2 = ContinuationV2Export.Handle.IsValid();
 	const FString& ExportName = bUseV2
@@ -2453,6 +2459,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchDebugResume(
 	const uint32 ResumeRoute,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
+	if (RejectActiveContextMutation(TEXT("unscoped debug resume"), &OutResult)) return false;
 	CaptureSnapshot(OutResult);
 	if (!IsLoaded() || !bHasBegunPlay || bEndPlayAttempted
 		|| !DebugResumeExport.Handle.IsValid()
@@ -2503,6 +2510,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 	FAvidScriptWasmSmokeResult& OutResult,
 	const EAvidScriptWasmResultDetail ResultDetail)
 {
+	if (RejectActiveContextMutation(TEXT("unscoped gameplay event"), &OutResult)) return false;
 	const FString& ExportName = AvidScriptGameplayEventExportName;
 	const bool bHotFailureOnly =
 		ResultDetail == EAvidScriptWasmResultDetail::HotFailureOnly;
@@ -2686,6 +2694,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 
 bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResult)
 {
+	if (RejectActiveContextMutation(TEXT("module EndPlay"), &OutResult)) return false;
 	PrepareResult(OutResult, ModuleId, ActiveBackendInfo, Metrics);
 	OutResult.bRuntimeInitialized = IsLoaded();
 	OutResult.bModuleLoaded = IsLoaded();
@@ -2828,6 +2837,8 @@ void FAvidScriptWasmRuntimeInstance::Unload()
 
 void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResult)
 {
+	if (RejectActiveContextMutation(TEXT("unload"), &OutResult)) return;
+	ContextCallCodeIdentity.Reset();
 	const FString PreviousModuleId = ModuleId;
 	const bool bWasRuntimeInitialized = IsLoaded();
 	const bool bWasModuleLoaded = IsLoaded();
@@ -2931,6 +2942,12 @@ bool FAvidScriptWasmRuntimeInstance::IsLoaded() const
 
 void FAvidScriptWasmRuntimeInstance::SetHostContext(const FAvidScriptWasmHostContext& InHostContext)
 {
+	if (RejectActiveContextMutation(TEXT("set context"))) return;
+	ApplyHostContext(InHostContext);
+}
+
+void FAvidScriptWasmRuntimeInstance::ApplyHostContext(const FAvidScriptWasmHostContext& InHostContext)
+{
 	InvalidateSelfCapability();
 	HostContext = InHostContext;
 	BindingInvocationContext.ObjectRegistry = HostContext.ObjectRegistry;
@@ -2950,6 +2967,7 @@ void FAvidScriptWasmRuntimeInstance::SetHostContext(const FAvidScriptWasmHostCon
 
 void FAvidScriptWasmRuntimeInstance::ClearHostContext()
 {
+	if (RejectActiveContextMutation(TEXT("clear context"))) return;
 	InvalidateSelfCapability();
 	HostContext = FAvidScriptWasmHostContext();
 	BindingInvocationContext = FAvidScriptBindingInvocationContext();
@@ -4611,6 +4629,9 @@ int32 FAvidScriptWasmRuntimeInstance::HandleSceneComponentSetWorldLocationImport
 
 int32 FAvidScriptWasmRuntimeInstance::HandleTimerSetOnceImport(float DelaySeconds, int32 CallbackId)
 {
+	// Legacy timers are module-owned; contextual execution must use the target's
+	// continuation host until legacy timer entries carry an instance identity.
+	if (RejectActiveContextMutation(TEXT("module timer scheduling"))) return 0;
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
 	LastHostImportInput = CallbackId;
 	LastHostImportResult = 0;
@@ -4647,6 +4668,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleTimerSetOnceImport(float DelaySecond
 
 int32 FAvidScriptWasmRuntimeInstance::HandleTimerCancelImport(int32 TimerHandle)
 {
+	if (RejectActiveContextMutation(TEXT("module timer cancellation"))) return 0;
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
 	LastHostImportInput = TimerHandle;
 	LastHostImportResult = 0;

@@ -55,6 +55,7 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 [共享执行域的 VM 重入探针](Docs/Phase66/P66.B_Vm_Reentrant_Execution.md)已通过双后端 Automation 2/2，覆盖共享内存/global、嵌套预算、trap 和延迟卸载，并修复 WAMR 嵌套入口重置预算的问题；已有 WAMR 回归 6/6 通过。该证据属于 VM 层，真实 receiver、托管对象与 ref/out 跨实例执行仍待接入。
 [生成实例调用链](Docs/Phase66/P66.B_Generated_Invocation_Chain.md)已接入 Router 的源/目标身份、代码代次、父调用、深度/整链入口预算及失败传播；C# receiver 10/10、GeneratedTypes Automation 8/8 通过。原生链与 VM 探针仍未组成完整 C# 跨实例执行，Session 重入保护、共享执行域和持久根继续推进。
 [生成实例 Host 的重入销毁保护](Docs/Phase66/P66.B_Generated_Host_Lifecycle.md)修复 teardown 被拒绝后仍释放 Session 的所有权问题；活动调用与包事务中的变更会明确拒绝，失败清理保留实例。Windows 构建、C# receiver 10/10 与 GeneratedTypes 8/8 通过；调用者仍须空闲时重试，不宣称已实现自动延迟销毁或共享执行域。
+[共享 Runtime 的上下文入口](Docs/Phase66/P66.B_Runtime_Context_Invocation.md)已提供有界同步重入、目标 owner/服务切换、代码身份校验与返回恢复；双后端 Runtime/ABI 探针验证 A→B→A 共享托管对象、地址别名、强制 GC 和失败清理。Windows 构建、C# receiver 10/10、GeneratedTypes 9/9 通过。生成实例 Host 仍使用独立 Session/VM，普通 C# 跨实例调用及持久事件/await 尚未连接。
 
 ## 现在可以做什么
 
@@ -200,7 +201,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 ## 当前边界
 
 - **UE 类型**：由 Profile 与 ABI/codec 决定生成范围，并非所有 UE API 自动可用。复合容器内强 UObject 引用仍拒绝，平面 `TArray<UObject*>` 可用；Set/Map key 受确定性编码限制，soft/weak 的脚本侧解析易用接口待补齐。
-- **C# 子集**：支持成员内同步、非泛型局部函数、直接调用的变量捕获，以及 Guest 内静态/捕获局部方法组、同步 lambda/匿名方法和共享逃逸闭包；捕获值可作为内部 ref/out 实参，结构体字段与方法保持共享写入，结构体实例委托绑定独立副本，委托支持 `==/!=` 和同步组合/移除。受支持的普通引用类已有构造、共享字段、实例委托及 this 捕获；继承/虚派发、字段初始化、自动属性、UE 对象实例委托、跨 await 委托和 `event +=` 仍未支持。无完整 .NET Runtime、任意 awaiter 或异常系统；内部借用不能进入 Host 或持久状态；UE 委托/事件仍使用显式 bind/subscribe 与 `ExecuteX/BroadcastX`。
+- **C# 子集**：支持成员内同步、非泛型局部函数、直接调用的变量捕获，以及 Guest 内静态/捕获局部方法组、同步 lambda/匿名方法和共享逃逸闭包；捕获值可作为内部 ref/out 实参，结构体字段与方法保持共享写入，结构体实例委托绑定独立副本，委托支持 `==/!=` 和同步组合/移除。受支持的普通引用类已有构造、共享字段、实例委托及 this 捕获，当前 Session owner 的 UE 实例委托与 this 捕获也已连接；继承/虚派发、字段初始化、自动属性、跨 Session UE 实例调用、跨 await 委托和 `event +=` 仍未支持。无完整 .NET Runtime、任意 awaiter 或异常系统；内部借用不能进入 Host 或持久状态；UE 委托/事件仍使用显式 bind/subscribe 与 `ExecuteX/BroadcastX`。
 - **重载与隔离**：方法体可热重载；UI 样例通过 `NextTickAsync` 在候选提交后初始化。准备期无可回滚适配的反射写入仍被拒绝，不承诺回滚任意外部副作用。反射结构变更需增量 UBT 并重启 Editor；WASM 隔离不是原生 DLL 进程沙箱。
 - **玩法与平台**：UI 包使用独立验证插件和隔离启动配置，Development/Shipping 均通过跨进程自动存取；Development 人工界面、按钮和同一 UserRoot 新进程读档均反馈无问题。Shipping 人工视觉按用户要求不阻塞当前推进，明确转入发布候选验收，不能视为通过。任意损坏存档不在现有保证内；Development 包内一小时切图与当前候选 2/2 多进程网络拓扑通过，UI 重载另有 20 轮有界证据，但不宣称一小时网络/重载长稳；Android UBT/APK/真机及 iOS 仍未验收。
 - **诊断与性能**：typed Host 拒绝已在 Wasmtime 保留具体 category/details/import，WAMR semantic/dynamic 路径同样保留分类；尚无完整 C# 异常系统。纯执行 P50/P95 领先门禁未关闭，也未完成同口径 UnLua/AngelScript 矩阵。

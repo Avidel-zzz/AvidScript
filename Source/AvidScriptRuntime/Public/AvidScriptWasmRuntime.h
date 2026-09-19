@@ -172,6 +172,17 @@ struct FAvidScriptCachedVmExport
 	FAvidScriptVmPreparedExportCall PreparedCall;
 };
 
+// A prepared export belongs to one loaded Runtime code generation. Native callers
+// supply the validated instance context; this does not authorize Guest routing.
+struct FAvidScriptContextualExportCall
+{
+	bool IsValid() const { return CodeIdentity.IsValid() && Call.IsValid(); }
+private:
+	friend class FAvidScriptWasmRuntimeInstance;
+	TSharedPtr<const uint8> CodeIdentity;
+	FAvidScriptVmPreparedExportCall Call;
+};
+
 class AVIDSCRIPTRUNTIME_API FAvidScriptWasmRuntimeInstance
 	: public IAvidScriptHostDispatcher
 	, public IAvidScriptVmTypedHostDispatcher
@@ -215,6 +226,12 @@ public:
 		const FString& ExportName,
 		FAvidScriptVmPreparedExportCall& OutCall,
 		FString& OutError);
+	bool PrepareContextualExportCall(
+		const FString& ExportName, FAvidScriptContextualExportCall& OutCall, FString& OutError);
+	bool InvokeInContext(
+		const FAvidScriptContextualExportCall& Call, const FAvidScriptWasmHostContext& Context,
+		const FAvidScriptVmCallFrame& Frame, FAvidScriptVmError& OutError,
+		FAvidScriptVmCallResult* OutResult = nullptr);
 	bool SetSupplementalTypedHostImports(
 		TConstArrayView<FAvidScriptVmTypedHostImport> Imports,
 		FString& OutError);
@@ -527,6 +544,10 @@ public:
 
 
 private:
+	void ApplyHostContext(const FAvidScriptWasmHostContext& Context);
+	bool RejectActiveContextMutation(const TCHAR* Operation, FAvidScriptWasmSmokeResult* OutResult = nullptr);
+	bool ValidateInvocationContext(const FAvidScriptWasmHostContext& Context) const;
+	void LatchContextInvocationFailure(const FAvidScriptVmError& Error);
 	bool LoadArtifactView(
 		const FAvidScriptVmArtifactView& Artifact,
 		const FString& InModuleId,
@@ -798,6 +819,10 @@ private:
 		FString& OutError);
 
 	TUniquePtr<IAvidScriptVmBackend> VmBackend;
+	TSharedPtr<const uint8> ContextCallCodeIdentity;
+	uint32 ContextInvocationDepth = 0;
+	uint32 ContextInvocationEntries = 0;
+	FAvidScriptVmError ContextInvocationFailure;
 	TUniquePtr<AvidScript::Managed::FHeap> ManagedHeap;
 	uint32 ManagedHeapFrameFloor = 0;
 	uint32 ManagedHeapInvocationDepth = 0;
