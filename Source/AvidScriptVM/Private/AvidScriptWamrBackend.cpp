@@ -825,17 +825,8 @@ public:
 		const uint32* Ordinal = DynamicOrdinals.Find(&Attachment);
 		if (const uint32* Supplemental = SupplementalOrdinals.Find(&Attachment))
 		{
-			if (SupplementalTypedImports.IsValidIndex(static_cast<int32>(*Supplemental)) && Arguments.Num() == 1)
-			{
-				const auto& Import = SupplementalTypedImports[*Supplemental];
-				int32 Value = 0;
-				if (Import.PreparedTarget.PackedSelfPropertyI32Get(Import.PreparedTarget.Context,
-					static_cast<int64>(Arguments[0]), Value) == EAvidScriptVmTypedHostStatus::Succeeded)
-				{
-					OutReturnValue = Value;
-					return true;
-				}
-			}
+			if (SupplementalTypedImports.IsValidIndex(static_cast<int32>(*Supplemental))
+				&& DispatchAvidScriptWamrSupplementalImport(SupplementalTypedImports[*Supplemental], Arguments, OutReturnValue)) return true;
 			OutFailureCategory = TEXT("host_import_failed");
 			OutFailureDetails = TEXT("The supplemental typed host capability rejected the call.");
 			return false;

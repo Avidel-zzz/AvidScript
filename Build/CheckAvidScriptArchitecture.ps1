@@ -669,6 +669,7 @@ $GeneratedTypeRegistrySource = Read-RequiredFile 'Source/AvidScriptRuntime/Priva
 $GeneratedTypeSessionHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptRuntimeSession.h'
 $GeneratedTypeSessionSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Session/AvidScriptRuntimeSession.cpp'
 $GeneratedTypeSessionDispatchSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/ScriptTypes/AvidScriptGeneratedTypeSession.cpp'
+$GeneratedTypeHostBindingsSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/ScriptTypes/AvidScriptGeneratedTypeHostBindings.cpp'
 $GeneratedTypeWasmRuntimeHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptWasmRuntime.h'
 $RuntimeModuleSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptRuntimeModule.cpp'
 $CSharpScriptTypeBuildSource = Read-RequiredFile 'Build/BuildCSharpScriptTypes.ps1'
@@ -751,13 +752,7 @@ foreach ($RequiredGeneratedTypeSessionContract in @(
     'PrepareNamedExportCall',
     'ReceiverHandle.Slot',
     'ReceiverHandle.Generation',
-    'FAvidScriptVmPreparedExportCall',
-    'FGeneratedPropertyCodecDescriptor',
-    'TryConfigureGeneratedScalarCodec',
-    'PackedSelfPropertyI32Get',
-    'PackedSelfPropertyI64Get',
-    'PackedSelfPropertyF32Get',
-    'PackedSelfPropertyF64Get')) {
+    'FAvidScriptVmPreparedExportCall')) {
     if (-not $GeneratedTypeSessionHeader.Contains($RequiredGeneratedTypeSessionContract) -and
         -not $GeneratedTypeSessionSource.Contains($RequiredGeneratedTypeSessionContract) -and
         -not $GeneratedTypeSessionDispatchSource.Contains($RequiredGeneratedTypeSessionContract) -and
@@ -765,8 +760,22 @@ foreach ($RequiredGeneratedTypeSessionContract in @(
         Add-Violation "generated type Session dispatch is missing $RequiredGeneratedTypeSessionContract"
     }
 }
+foreach ($RequiredGeneratedTypeBindingContract in @(
+    'ConfigureGeneratedTypeHostBindings',
+    'GeneratedTypeAuthority.Pin()',
+    'ResolveGeneratedTypeReceiver',
+    'FGeneratedPropertyCodecDescriptor',
+    'TryConfigureGeneratedScalarCodec',
+    'PackedSelfPropertyI32Get',
+    'PackedSelfPropertyI64Get',
+    'PackedSelfPropertyF32Get',
+    'PackedSelfPropertyF64Get')) {
+    if (-not $GeneratedTypeHostBindingsSource.Contains($RequiredGeneratedTypeBindingContract)) {
+        Add-Violation "Runtime-owned generated binding is missing $RequiredGeneratedTypeBindingContract"
+    }
+}
 $GeneratedScalarHotPath = Get-SourceSlice `
-    -Source $GeneratedTypeSessionDispatchSource `
+    -Source $GeneratedTypeHostBindingsSource `
     -StartToken 'template <typename ValueType, auto ReadMember>' `
     -EndToken 'FAvidScriptVmTypedHostImport MakeGeneratedScalarPropertyImport' `
     -Description 'generated scalar property hot path'

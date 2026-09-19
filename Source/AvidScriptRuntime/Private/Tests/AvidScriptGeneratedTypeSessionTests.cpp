@@ -310,6 +310,116 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	"AvidScript.Runtime.GeneratedTypes.ReceiverAuthority",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptGeneratedCSharpSharedBindingsTest,
+	"AvidScript.Runtime.GeneratedTypes.CSharpSharedBindings",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptGeneratedCSharpSharedBindingsTest::RunTest(const FString& Parameters)
+{
+	const FString Directory = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("AvidScriptManagedHeapTests/GuestFixtures"));
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	for (const bool bStress : {false, true})
+	{
+		AddInfo(FString::Printf(TEXT("CSharp shared bindings backend=%d stress=%d"), static_cast<int32>(Backend), bStress));
+		TArray<uint8> Wasm;
+		FString MetadataText;
+		if (!FFileHelper::LoadFileToArray(Wasm, *FPaths::Combine(Directory,
+			bStress ? TEXT("csharp-ue-shared-bindings-stress.wasm") : TEXT("csharp-ue-shared-bindings.wasm")))
+			|| !FFileHelper::LoadFileToString(MetadataText, *FPaths::Combine(Directory, TEXT("csharp-ue-shared-bindings.json")))) return false;
+		TSharedPtr<FJsonObject> Metadata, RegistryJson;
+		if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(MetadataText), Metadata)
+			|| !FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(BuildGeneratedTypeSessionManifest()), RegistryJson)) return false;
+		const auto TypeJson = RegistryJson->GetArrayField(TEXT("types"))[0]->AsObject();
+		TypeJson->SetStringField(TEXT("stable_type_id"), Metadata->GetStringField(TEXT("type_id")));
+		TypeJson->SetArrayField(TEXT("properties"), Metadata->GetArrayField(TEXT("properties")));
+		const auto FunctionJson = TypeJson->GetArrayField(TEXT("functions"))[0]->AsObject();
+		FunctionJson->SetNumberField(TEXT("member_ordinal"), Metadata->GetNumberField(TEXT("member_ordinal")));
+		FunctionJson->SetStringField(TEXT("stable_member_id"), Metadata->GetStringField(TEXT("method_id")));
+		FunctionJson->SetStringField(TEXT("export_name"), Metadata->GetStringField(TEXT("export_name")));
+		FString RegistryText, Error;
+		if (!FJsonSerializer::Serialize(RegistryJson.ToSharedRef(), TJsonWriterFactory<>::Create(&RegistryText))) return false;
+		TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot> Types, OtherTypes;
+		if (!FAvidScriptGeneratedTypeRegistry::BuildFromJson(RegistryText, Types, Error)
+			|| !FAvidScriptGeneratedTypeRegistry::BuildFromJson(RegistryText, OtherTypes, Error)) { AddError(Error); return false; }
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime ? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		FAvidScriptWasmReloadManifest Manifest;
+		Manifest.ModuleId = TEXT("csharp_shared_bindings"); Manifest.Language = TEXT("csharp");
+		Manifest.AbiVersion = FAvidScriptWasmReloadManifest::SupportedAbiVersion;
+		Manifest.RequiredExports = {TEXT("avid_on_begin_play")};
+		for (const auto& Import : Metadata->GetArrayField(TEXT("imports")))
+			Manifest.RequiredImports.Add({Import->AsObject()->GetStringField(TEXT("module")), Import->AsObject()->GetStringField(TEXT("name"))});
+		FAvidScriptObjectRegistry Objects;
+		TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> A(NewObject<UAvidScriptGeneratedTypeSessionTestObject>()),
+			B(NewObject<UAvidScriptGeneratedTypeSessionTestObject>()), C(NewObject<UAvidScriptGeneratedTypeSessionTestObject>());
+		A->Value = 10; B->Value = 20; C->Value = 1000;
+		FAvidScriptRuntimeSession SessionA, SessionB, SessionC;
+		auto Load = [&](FAvidScriptRuntimeSession& Session, UObject& Receiver, const TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot>& Registry)
+		{
+			FAvidScriptObjectHandleResult HandleResult;
+			FAvidScriptWasmHostContext Context;
+			Context.ObjectRegistry = &Objects;
+			Context.OwnerHandle = Objects.RegisterObject(&Receiver, HandleResult, false);
+			Session.SetHostContext(Context);
+			Session.SetBackendSelectionForTesting(Selection);
+			if (!Session.ConfigureGeneratedTypeInstance(Receiver, Context.OwnerHandle, 0, Registry, Error)) { AddError(Error); return false; }
+			FAvidScriptWasmReloadResult Result;
+			if (!Session.LoadInitialModule(Wasm.GetData(), Wasm.Num(), Manifest, Result)) { AddError(Result.ErrorMessage); return false; }
+			return true;
+		};
+		if (!Load(SessionA, *A, Types) || !Load(SessionB, *B, Types) || !Load(SessionC, *C, OtherTypes)) return false;
+		const auto ContextA = SessionA.GetTestSnapshot().HostContext;
+		const auto ContextB = SessionB.GetTestSnapshot().HostContext;
+		const auto ContextC = SessionC.GetTestSnapshot().HostContext;
+		auto* Runtime = SessionA.GetLiveRuntimeForTesting();
+		FAvidScriptContextualExportCall Entry;
+		if (!TestTrue(TEXT("prepare compiled shared entry"), Runtime->PrepareContextualExportCall(Metadata->GetStringField(TEXT("export_name")), Entry, Error))) return false;
+		auto Invoke = [&](const FAvidScriptWasmHostContext& Context, const FAvidScriptObjectHandle& Self, bool bExpected, int32 ExpectedValue)
+		{
+			FAvidScriptVmCallFrame Frame;
+			Frame.CellCount = 2; Frame.Cells[0] = Self.Slot; Frame.Cells[1] = Self.Generation;
+			FAvidScriptVmError Failure;
+			FAvidScriptVmCallResult Result;
+			const bool bCalled = Runtime->InvokeInContext(Entry, Context, Frame, Failure, &Result);
+			TestEqual(*FString::Printf(TEXT("compiled receiver authority: %s"), *Failure.Details), bCalled, bExpected);
+			if (bExpected) TestEqual(TEXT("shared static state and selected UObject property match .NET"), static_cast<int32>(Result.Cells[0]), ExpectedValue);
+			else TestFalse(TEXT("rejection has a diagnostic"), Failure.Category.IsEmpty());
+		};
+		Invoke(ContextA, ContextA.OwnerHandle, true, 1111);
+		Invoke(ContextB, ContextB.OwnerHandle, true, 2222);
+		Invoke(ContextA, ContextA.OwnerHandle, true, 1414);
+		TestEqual(TEXT("A property is independent"), A->Value, 14);
+		TestEqual(TEXT("B property is independent"), B->Value, 22);
+		Invoke(ContextB, ContextA.OwnerHandle, false, 0);
+		Invoke(ContextC, ContextC.OwnerHandle, false, 0);
+		TestEqual(TEXT("same-class foreign registry snapshot cannot authorize this package"), C->Value, 1000);
+		TestTrue(TEXT("retire the original generated registration while Runtime remains loaded"), SessionA.ClearGeneratedTypeInstance(Error));
+		TestFalse(TEXT("retained original context does not retain its authority"), ContextA.GeneratedTypeAuthority.IsValid());
+		Invoke(ContextA, ContextA.OwnerHandle, false, 0);
+		Invoke(ContextB, ContextB.OwnerHandle, true, 2626);
+		TestEqual(TEXT("Runtime-owned property bindings survive original registration teardown"), B->Value, 26);
+		FAvidScriptWasmSmokeResult Stop;
+		TestTrue(TEXT("peer Session stops"), SessionB.StopAndUnload(Stop));
+		Invoke(ContextB, ContextB.OwnerHandle, false, 0);
+		TestTrue(TEXT("peer registration clears"), SessionB.ClearGeneratedTypeInstance(Error));
+		TestFalse(TEXT("retained peer context authority expires"), ContextB.GeneratedTypeAuthority.IsValid());
+		Invoke(ContextB, ContextB.OwnerHandle, false, 0);
+		TestTrue(TEXT("peer stop does not destroy the independently retained Runtime"), Runtime->IsLoaded());
+		auto* Heap = Runtime->GetManagedHeapForTesting();
+		TestEqual(TEXT("compiled captures leave no active frame"), Heap->GetStats().ActiveFrames, 0u);
+		TestEqual(TEXT("compiled captures leave no roots"), Heap->GetStats().LiveRoots, 0u);
+		if (bStress) TestTrue(TEXT("compiled receiver captures survived forced collection"), Heap->GetStats().Collections >= Heap->GetStats().Allocations);
+		TestTrue(TEXT("shared Runtime detached captures collect"), Heap->Collect() == AvidScript::Managed::EHeapError::Ok);
+		TestEqual(TEXT("no detached captured receivers remain"), Heap->GetStats().LiveObjects, 0u);
+		TestTrue(TEXT("carrier Session stops"), SessionA.StopAndUnload(Stop));
+		TestTrue(TEXT("foreign Session stops"), SessionC.StopAndUnload(Stop));
+		TestTrue(TEXT("foreign registration clears"), SessionC.ClearGeneratedTypeInstance(Error));
+	}
+	return true;
+}
+
 bool FAvidScriptGeneratedReceiverAuthorityTest::RunTest(const FString& Parameters)
 {
 	static_cast<void>(Parameters);

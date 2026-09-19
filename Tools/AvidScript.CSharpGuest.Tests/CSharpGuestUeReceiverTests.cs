@@ -68,6 +68,25 @@ internal static class CSharpGuestUeReceiverTests
             }
             """;
         Compile(fault, "csharp-ue-receiver-null", false);
+        const string shared = """
+            using System;
+            using AvidScript;
+            [UClass] public partial class ReceiverActor : AvidActor {
+                public static int Count;
+                [UProperty] public int Value;
+                private int Read() => Value;
+                [UFunction] public int GetScriptValue() {
+                    Func<int> read = () => Read();
+                    Value += ++Count;
+                    return Value * 100 + read();
+                }
+            }
+            """;
+        Check(CSharpGuestBorrowedReferenceTests.Reference(shared + Facade
+            + "public static class Script { public static int Run() { ReceiverActor a = new ReceiverActor(), b = new ReceiverActor(); "
+            + "a.Value = 10; b.Value = 20; return a.GetScriptValue() + b.GetScriptValue() + a.GetScriptValue(); } }") == 4747,
+            "two ordinary instances share static state while captures read the correct receiver");
+        Compile(shared, "csharp-ue-shared-bindings", true);
         return count;
 
         void Compile(string text, string name, bool stress)
@@ -92,10 +111,20 @@ internal static class CSharpGuestUeReceiverTests
                 Directory.CreateDirectory(directory);
                 File.WriteAllBytes(Path.Combine(directory, name + ".wasm"), wasm.Bytes);
                 SemanticUeFunctionDeclaration entry = document.UeTypeDeclarations.Single().Functions.Single();
+                var declaration = document.UeTypeDeclarations.Single();
+                var ordinals = SemanticUeTypeRuntimeContract.BuildMemberOrdinals(declaration);
                 File.WriteAllText(Path.Combine(directory, name + ".json"), JsonSerializer.Serialize(new {
                     type_id = document.UeTypeDeclarations.Single().TypeId,
                     method_id = entry.MethodSymbolId,
+                    member_ordinal = ordinals[entry.MethodSymbolId],
                     export_name = SemanticUeTypeRuntimeContract.GetFunctionExportName(entry.MethodSymbolId),
+                    properties = SemanticUeTypeRuntimeContract.BuildPropertyPlans(document).Select(plan => new {
+                        member_ordinal = plan.MemberOrdinal,
+                        stable_member_id = plan.PropertySymbolId,
+                        name = declaration.Properties.Single(property => property.SymbolId == plan.PropertySymbolId).Name,
+                        getter_import_name = plan.GetterImportName,
+                        setter_import_name = plan.SetterImportName
+                    }).ToArray(),
                     imports = module.Imports.Select(import => new { module = import.Module, name = import.Name }).ToArray()
                 }));
             }
@@ -116,6 +145,7 @@ internal static class CSharpGuestUeReceiverTests
         namespace AvidScript {
             [System.AttributeUsage(System.AttributeTargets.Class)] public sealed class UClassAttribute : System.Attribute { }
             [System.AttributeUsage(System.AttributeTargets.Method)] public sealed class UFunctionAttribute : System.Attribute { }
+            [System.AttributeUsage(System.AttributeTargets.Field | System.AttributeTargets.Property)] public sealed class UPropertyAttribute : System.Attribute { }
             public abstract class AvidActor { }
         }
         """;

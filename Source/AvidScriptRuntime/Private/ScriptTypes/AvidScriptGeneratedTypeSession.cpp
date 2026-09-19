@@ -15,275 +15,18 @@ enum class EGeneratedCallShape : uint8
 	ReceiverF32Void,
 };
 
-EAvidScriptVmTypedHostStatus RequireGeneratedReceiver(void* OpaqueContext, const int64 PackedSelf, int32& OutValid)
+class FGeneratedSessionAuthority final : public IAvidScriptGeneratedTypeAuthority
 {
-	OutValid = 0;
-	const auto* Context = static_cast<const FAvidScriptGeneratedReceiverHostContext*>(OpaqueContext);
-	if (Context == nullptr || Context->Session == nullptr
-		|| !Context->Session->ValidateGeneratedTypeReceiver(PackedSelf, Context->TypeOrdinal)) return EAvidScriptVmTypedHostStatus::Rejected;
-	OutValid = 1;
-	return EAvidScriptVmTypedHostStatus::Succeeded;
-}
-
-bool ResolveGeneratedPropertyReceiver(
-	FAvidScriptGeneratedPropertyHostContext& Context,
-	const int64 PackedSelf,
-	UObject*& OutReceiver)
-{
-	OutReceiver = nullptr;
-	const uint64 PackedBits = static_cast<uint64>(PackedSelf);
-	const uint32 SelfSlot = static_cast<uint32>(PackedBits);
-	const uint32 SelfGeneration = static_cast<uint32>(PackedBits >> 32);
-	if (!IsInGameThread()
-		|| SelfSlot != Context.ReceiverHandle.Slot
-		|| SelfGeneration != Context.ReceiverHandle.Generation
-		|| Context.ExpectedClass == nullptr || Context.Property == nullptr)
+public:
+	explicit FGeneratedSessionAuthority(const FAvidScriptRuntimeSession& InSession) : Session(InSession) {}
+	UObject* ResolveGeneratedTypeReceiver(int64 PackedSelf, uint32 TypeOrdinal,
+		const FAvidScriptGeneratedTypeRegistrySnapshot& Registry) const override
 	{
-		return false;
+		return Session.ResolveGeneratedTypeReceiver(PackedSelf, TypeOrdinal, Registry);
 	}
-	UObject* const Receiver = Context.Receiver.Get();
-	if (Receiver == nullptr || !Receiver->IsA(Context.ExpectedClass)
-		|| Receiver->HasAnyFlags(
-			RF_ClassDefaultObject | RF_ArchetypeObject
-			| RF_BeginDestroyed | RF_FinishDestroyed))
-	{
-		return false;
-	}
-	OutReceiver = Receiver;
-	return true;
-}
-
-template <typename PropertyType>
-bool MatchesGeneratedPropertyCodec(FProperty& Property)
-{
-	return CastField<PropertyType>(&Property) != nullptr;
-}
-
-bool ReadGeneratedBoolProperty(FProperty& Property, UObject& Receiver, int32& OutValue)
-{
-	OutValue = static_cast<FBoolProperty&>(Property).GetPropertyValue_InContainer(&Receiver)
-		? 1
-		: 0;
-	return true;
-}
-
-bool WriteGeneratedBoolProperty(FProperty& Property, UObject& Receiver, const int32 Value)
-{
-	if (Value != 0 && Value != 1)
-	{
-		return false;
-	}
-	static_cast<FBoolProperty&>(Property).SetPropertyValue_InContainer(
-		&Receiver,
-		Value != 0);
-	return true;
-}
-
-template <typename PropertyType, typename ValueType>
-bool ReadGeneratedScalarProperty(
-	FProperty& Property,
-	UObject& Receiver,
-	ValueType& OutValue)
-{
-	OutValue = static_cast<PropertyType&>(Property).GetPropertyValue_InContainer(&Receiver);
-	return true;
-}
-
-template <typename PropertyType, typename ValueType>
-bool WriteGeneratedScalarProperty(
-	FProperty& Property,
-	UObject& Receiver,
-	const ValueType Value)
-{
-	static_cast<PropertyType&>(Property).SetPropertyValue_InContainer(&Receiver, Value);
-	return true;
-}
-
-void ConfigureGeneratedBoolCodec(FAvidScriptGeneratedPropertyHostContext& Context)
-{
-	Context.ReadI32 = &ReadGeneratedBoolProperty;
-	Context.WriteI32 = &WriteGeneratedBoolProperty;
-}
-
-template <typename PropertyType, typename ValueType>
-void ConfigureGeneratedI32Codec(FAvidScriptGeneratedPropertyHostContext& Context)
-{
-	Context.ReadI32 = &ReadGeneratedScalarProperty<PropertyType, ValueType>;
-	Context.WriteI32 = &WriteGeneratedScalarProperty<PropertyType, ValueType>;
-}
-
-template <typename PropertyType, typename ValueType>
-void ConfigureGeneratedI64Codec(FAvidScriptGeneratedPropertyHostContext& Context)
-{
-	Context.ReadI64 = &ReadGeneratedScalarProperty<PropertyType, ValueType>;
-	Context.WriteI64 = &WriteGeneratedScalarProperty<PropertyType, ValueType>;
-}
-
-template <typename PropertyType, typename ValueType>
-void ConfigureGeneratedF32Codec(FAvidScriptGeneratedPropertyHostContext& Context)
-{
-	Context.ReadF32 = &ReadGeneratedScalarProperty<PropertyType, ValueType>;
-	Context.WriteF32 = &WriteGeneratedScalarProperty<PropertyType, ValueType>;
-}
-
-template <typename PropertyType, typename ValueType>
-void ConfigureGeneratedF64Codec(FAvidScriptGeneratedPropertyHostContext& Context)
-{
-	Context.ReadF64 = &ReadGeneratedScalarProperty<PropertyType, ValueType>;
-	Context.WriteF64 = &WriteGeneratedScalarProperty<PropertyType, ValueType>;
-}
-
-struct FGeneratedPropertyCodecDescriptor
-{
-	bool (*Matches)(FProperty& Property) = nullptr;
-	void (*Configure)(FAvidScriptGeneratedPropertyHostContext& Context) = nullptr;
+private:
+	const FAvidScriptRuntimeSession& Session;
 };
-
-bool TryConfigureGeneratedScalarCodec(
-	FProperty& Property,
-	FAvidScriptGeneratedPropertyHostContext& Context)
-{
-	static const FGeneratedPropertyCodecDescriptor Codecs[] = {
-		{ &MatchesGeneratedPropertyCodec<FBoolProperty>, &ConfigureGeneratedBoolCodec },
-		{ &MatchesGeneratedPropertyCodec<FIntProperty>, &ConfigureGeneratedI32Codec<FIntProperty, int32> },
-		{ &MatchesGeneratedPropertyCodec<FInt64Property>, &ConfigureGeneratedI64Codec<FInt64Property, int64> },
-		{ &MatchesGeneratedPropertyCodec<FFloatProperty>, &ConfigureGeneratedF32Codec<FFloatProperty, float> },
-		{ &MatchesGeneratedPropertyCodec<FDoubleProperty>, &ConfigureGeneratedF64Codec<FDoubleProperty, double> },
-	};
-	for (const FGeneratedPropertyCodecDescriptor& Codec : Codecs)
-	{
-		if (Codec.Matches(Property))
-		{
-			Codec.Configure(Context);
-			return true;
-		}
-	}
-	return false;
-}
-
-template <typename ValueType, auto ReadMember>
-EAvidScriptVmTypedHostStatus GetGeneratedScalarProperty(
-	void* OpaqueContext,
-	const int64 PackedSelf,
-	ValueType& OutValue)
-{
-	FAvidScriptGeneratedPropertyHostContext* const Context =
-		static_cast<FAvidScriptGeneratedPropertyHostContext*>(OpaqueContext);
-	UObject* Receiver = nullptr;
-	if (Context == nullptr || Context->*ReadMember == nullptr
-		|| !ResolveGeneratedPropertyReceiver(*Context, PackedSelf, Receiver))
-	{
-		return EAvidScriptVmTypedHostStatus::Rejected;
-	}
-	const auto Read = Context->*ReadMember;
-	return Read(*Context->Property, *Receiver, OutValue)
-		? EAvidScriptVmTypedHostStatus::Succeeded
-		: EAvidScriptVmTypedHostStatus::Rejected;
-}
-
-template <typename ValueType, auto WriteMember>
-EAvidScriptVmTypedHostStatus SetGeneratedScalarProperty(
-	void* OpaqueContext,
-	const int64 PackedSelf,
-	const ValueType Value)
-{
-	FAvidScriptGeneratedPropertyHostContext* const Context =
-		static_cast<FAvidScriptGeneratedPropertyHostContext*>(OpaqueContext);
-	UObject* Receiver = nullptr;
-	if (Context == nullptr || Context->*WriteMember == nullptr
-		|| !ResolveGeneratedPropertyReceiver(*Context, PackedSelf, Receiver))
-	{
-		return EAvidScriptVmTypedHostStatus::Rejected;
-	}
-	const auto Write = Context->*WriteMember;
-	return Write(*Context->Property, *Receiver, Value)
-		? EAvidScriptVmTypedHostStatus::Succeeded
-		: EAvidScriptVmTypedHostStatus::Rejected;
-}
-
-FAvidScriptVmTypedHostImport MakeGeneratedScalarPropertyImport(
-	const FAvidScriptGeneratedMemberPlan& Member,
-	const FString& ImportName,
-	const bool bWrite,
-	FAvidScriptGeneratedPropertyHostContext& Context)
-{
-	FAvidScriptVmTypedHostImport Import;
-	Import.StableId = Member.StableMemberId
-		+ (bWrite ? TEXT(":set") : TEXT(":get"));
-	Import.ModuleName = TEXT("avidscript");
-	Import.ImportName = ImportName;
-	Import.bSupplementalRuntimeAuthority = true;
-	Import.PreparedTarget.Context = &Context;
-	if (Context.ReadI32 != nullptr)
-	{
-		Import.Signature = bWrite ? TEXT("(Ii)") : TEXT("(I)i");
-		Import.Shape = bWrite
-			? EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Set
-			: EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Get;
-		if (bWrite)
-		{
-			Import.PreparedTarget.PackedSelfPropertyI32Set =
-				&SetGeneratedScalarProperty<int32, &FAvidScriptGeneratedPropertyHostContext::WriteI32>;
-		}
-		else
-		{
-			Import.PreparedTarget.PackedSelfPropertyI32Get =
-				&GetGeneratedScalarProperty<int32, &FAvidScriptGeneratedPropertyHostContext::ReadI32>;
-		}
-	}
-	else if (Context.ReadI64 != nullptr)
-	{
-		Import.Signature = bWrite ? TEXT("(II)") : TEXT("(I)I");
-		Import.Shape = bWrite
-			? EAvidScriptVmTypedHostShape::PackedSelfPropertyI64Set
-			: EAvidScriptVmTypedHostShape::PackedSelfPropertyI64Get;
-		if (bWrite)
-		{
-			Import.PreparedTarget.PackedSelfPropertyI64Set =
-				&SetGeneratedScalarProperty<int64, &FAvidScriptGeneratedPropertyHostContext::WriteI64>;
-		}
-		else
-		{
-			Import.PreparedTarget.PackedSelfPropertyI64Get =
-				&GetGeneratedScalarProperty<int64, &FAvidScriptGeneratedPropertyHostContext::ReadI64>;
-		}
-	}
-	else if (Context.ReadF32 != nullptr)
-	{
-		Import.Signature = bWrite ? TEXT("(If)") : TEXT("(I)f");
-		Import.Shape = bWrite
-			? EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Set
-			: EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Get;
-		if (bWrite)
-		{
-			Import.PreparedTarget.PackedSelfPropertyF32Set =
-				&SetGeneratedScalarProperty<float, &FAvidScriptGeneratedPropertyHostContext::WriteF32>;
-		}
-		else
-		{
-			Import.PreparedTarget.PackedSelfPropertyF32Get =
-				&GetGeneratedScalarProperty<float, &FAvidScriptGeneratedPropertyHostContext::ReadF32>;
-		}
-	}
-	else
-	{
-		Import.Signature = bWrite ? TEXT("(Id)") : TEXT("(I)d");
-		Import.Shape = bWrite
-			? EAvidScriptVmTypedHostShape::PackedSelfPropertyF64Set
-			: EAvidScriptVmTypedHostShape::PackedSelfPropertyF64Get;
-		if (bWrite)
-		{
-			Import.PreparedTarget.PackedSelfPropertyF64Set =
-				&SetGeneratedScalarProperty<double, &FAvidScriptGeneratedPropertyHostContext::WriteF64>;
-		}
-		else
-		{
-			Import.PreparedTarget.PackedSelfPropertyF64Get =
-				&GetGeneratedScalarProperty<double, &FAvidScriptGeneratedPropertyHostContext::ReadF64>;
-		}
-	}
-	return Import;
-}
 
 EGeneratedCallShape ResolveCallShape(
 	const FAvidScriptGeneratedMemberPlan& Member,
@@ -394,63 +137,7 @@ bool FAvidScriptRuntimeSession::ConfigureGeneratedTypeInstance(
 	State->Receiver = &Receiver;
 	State->ReceiverHandle = ReceiverHandle;
 	State->TypeOrdinal = TypeOrdinal;
-	for (const FAvidScriptGeneratedTypePlan& RegistryType : Registry->GetTypes())
-	{
-		TUniquePtr<FAvidScriptGeneratedReceiverHostContext> ReceiverContext = MakeUnique<FAvidScriptGeneratedReceiverHostContext>();
-		ReceiverContext->Session = this;
-		ReceiverContext->TypeOrdinal = RegistryType.TypeOrdinal;
-		FAvidScriptVmTypedHostImport ReceiverImport;
-		ReceiverImport.StableId = RegistryType.StableTypeId + TEXT(":receiver:require:v1");
-		ReceiverImport.ModuleName = TEXT("avidscript");
-		ReceiverImport.ImportName = FString::Printf(TEXT("avid_ue_receiver_%u_require_v1"), RegistryType.TypeOrdinal);
-		ReceiverImport.Signature = TEXT("(I)i");
-		ReceiverImport.Shape = EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Get;
-		ReceiverImport.bSupplementalRuntimeAuthority = true;
-		ReceiverImport.PreparedTarget.Context = ReceiverContext.Get();
-		ReceiverImport.PreparedTarget.PackedSelfPropertyI32Get = &RequireGeneratedReceiver;
-		State->ReceiverContexts.Add(MoveTemp(ReceiverContext));
-		State->HostImports.Add(MoveTemp(ReceiverImport));
-		for (const FAvidScriptGeneratedMemberPlan& Member : RegistryType.Members)
-		{
-			if (Member.Kind != EAvidScriptGeneratedMemberKind::Property)
-			{
-				continue;
-			}
-			TUniquePtr<FAvidScriptGeneratedPropertyHostContext> Context =
-				MakeUnique<FAvidScriptGeneratedPropertyHostContext>();
-			Context->Receiver = &Receiver;
-			Context->ReceiverHandle = ReceiverHandle;
-			Context->ExpectedClass = RegistryType.Class;
-			Context->Property = Member.Property;
-			if (Context->Property == nullptr
-				|| !TryConfigureGeneratedScalarCodec(*Context->Property, *Context))
-			{
-				OutError = FString::Printf(
-					TEXT("generated property '%s' has no prepared scalar codec"),
-					*Member.StableMemberId);
-				return false;
-			}
-			FAvidScriptGeneratedPropertyHostContext* const ContextPointer =
-				Context.Get();
-			State->PropertyContexts.Add(MoveTemp(Context));
-			if (!Member.GetterImportName.IsEmpty())
-			{
-				State->HostImports.Add(MakeGeneratedScalarPropertyImport(
-					Member,
-					Member.GetterImportName,
-					false,
-					*ContextPointer));
-			}
-			if (!Member.SetterImportName.IsEmpty())
-			{
-				State->HostImports.Add(MakeGeneratedScalarPropertyImport(
-					Member,
-					Member.SetterImportName,
-					true,
-					*ContextPointer));
-			}
-		}
-	}
+	State->Authority = MakeShared<FGeneratedSessionAuthority>(*this);
 	if (!FAvidScriptGeneratedTypeRouter::Get().RegisterInstance(
 		Receiver,
 		ReceiverHandle,
@@ -461,25 +148,34 @@ bool FAvidScriptRuntimeSession::ConfigureGeneratedTypeInstance(
 		return false;
 	}
 	GeneratedTypeInstance = MoveTemp(State);
+	HostContext.GeneratedTypeAuthority = GeneratedTypeInstance->Authority;
 	return true;
 }
 
 bool FAvidScriptRuntimeSession::ValidateGeneratedTypeReceiver(const int64 PackedSelf, const uint32 TypeOrdinal) const
 {
+	return GeneratedTypeInstance && GeneratedTypeInstance->Registry
+		&& ResolveGeneratedTypeReceiver(PackedSelf, TypeOrdinal, *GeneratedTypeInstance->Registry) != nullptr;
+}
+
+UObject* FAvidScriptRuntimeSession::ResolveGeneratedTypeReceiver(
+	const int64 PackedSelf, const uint32 TypeOrdinal, const FAvidScriptGeneratedTypeRegistrySnapshot& Registry) const
+{
 	if (!IsInGameThread() || bApplicationSuspended || bLifecycleInvalidated || bFaultQuarantined
 		|| !GeneratedTypeInstance || !GeneratedTypeInstance->Registration.IsValid()
-		|| !GeneratedTypeInstance->Registry.IsValid() || HostContext.ObjectRegistry == nullptr) return false;
+		|| GeneratedTypeInstance->Registry.Get() != &Registry || HostContext.ObjectRegistry == nullptr
+		|| (!LiveRuntime && !bMutationInProgress)) return nullptr;
 	const FAvidScriptObjectHandle& Handle = GeneratedTypeInstance->ReceiverHandle;
 	if (!Handle.IsValid() || Handle.ToUInt64() != static_cast<uint64>(PackedSelf)
-		|| HostContext.OwnerHandle != Handle) return false;
+		|| HostContext.OwnerHandle != Handle) return nullptr;
 	const FAvidScriptGeneratedTypePlan* Type = GeneratedTypeInstance->Registry->FindTypeByOrdinal(TypeOrdinal);
 	UObject* Receiver = GeneratedTypeInstance->Receiver.Get();
 	if (Type == nullptr || Type->Class == nullptr || Receiver == nullptr || !Receiver->IsA(Type->Class)
-		|| Receiver->HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject | RF_BeginDestroyed | RF_FinishDestroyed)) return false;
+		|| Receiver->HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject | RF_BeginDestroyed | RF_FinishDestroyed)) return nullptr;
 	if (const UWorld* World = Receiver->GetWorld(); World != nullptr
-		&& (World != HostContext.World.Get() || World->bIsTearingDown)) return false;
+		&& (World != HostContext.World.Get() || World->bIsTearingDown)) return nullptr;
 	FAvidScriptObjectHandleResult ResolveResult;
-	return HostContext.ObjectRegistry->ResolveObject(Handle, ResolveResult, false) == Receiver;
+	return HostContext.ObjectRegistry->ResolveObject(Handle, ResolveResult, false) == Receiver ? Receiver : nullptr;
 }
 
 bool FAvidScriptRuntimeSession::ClearGeneratedTypeInstance(FString& OutError)
@@ -499,6 +195,7 @@ bool FAvidScriptRuntimeSession::ClearGeneratedTypeInstance(FString& OutError)
 		OutError = TEXT("generated type instance router rejected registration teardown");
 		return false;
 	}
+	HostContext.GeneratedTypeAuthority.Reset();
 	GeneratedTypeInstance.Reset();
 	return true;
 }

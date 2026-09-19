@@ -5,7 +5,10 @@
 enum class EAvidScriptWamrRawResultKind : uint8
 {
 	I32,
-	I64
+	I64,
+	Void,
+	F32,
+	F64
 };
 
 struct FAvidScriptWamrRawImportAttachment
@@ -37,6 +40,11 @@ bool AcquireAvidScriptWamrSupplementalImports(
 	TConstArrayView<FAvidScriptVmTypedHostImport> Imports,
 	TArray<FAvidScriptWamrDynamicRegistration>& OutRegistrations,
 	FAvidScriptVmError& OutError);
+
+bool DispatchAvidScriptWamrSupplementalImport(
+	const FAvidScriptVmTypedHostImport& Import,
+	TConstArrayView<uint64> Arguments,
+	int64& OutResultBits);
 
 class FAvidScriptWamrNativeRegistryScope
 {

@@ -112,6 +112,8 @@ public:
 	void ClearHostContext();
 	// Validates the current generated instance authority without entering Guest code.
 	bool ValidateGeneratedTypeReceiver(int64 PackedSelf, uint32 TypeOrdinal) const;
+	UObject* ResolveGeneratedTypeReceiver(
+		int64 PackedSelf, uint32 TypeOrdinal, const FAvidScriptGeneratedTypeRegistrySnapshot& Registry) const;
 	uint64 GetGeneratedExecutionGeneration() const override
 	{
 		return GeneratedExecutionGeneration;

@@ -56,6 +56,7 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 [生成实例调用链](Docs/Phase66/P66.B_Generated_Invocation_Chain.md)已接入 Router 的源/目标身份、代码代次、父调用、深度/整链入口预算及失败传播；C# receiver 10/10、GeneratedTypes Automation 8/8 通过。原生链与 VM 探针仍未组成完整 C# 跨实例执行，Session 重入保护、共享执行域和持久根继续推进。
 [生成实例 Host 的重入销毁保护](Docs/Phase66/P66.B_Generated_Host_Lifecycle.md)修复 teardown 被拒绝后仍释放 Session 的所有权问题；活动调用与包事务中的变更会明确拒绝，失败清理保留实例。Windows 构建、C# receiver 10/10 与 GeneratedTypes 8/8 通过；调用者仍须空闲时重试，不宣称已实现自动延迟销毁或共享执行域。
 [共享 Runtime 的上下文入口](Docs/Phase66/P66.B_Runtime_Context_Invocation.md)已提供有界同步重入、目标 owner/服务切换、代码身份校验与返回恢复；双后端 Runtime/ABI 探针验证 A→B→A 共享托管对象、地址别名、强制 GC 和失败清理。Windows 构建、C# receiver 10/10、GeneratedTypes 9/9 通过。生成实例 Host 仍使用独立 Session/VM，普通 C# 跨实例调用及持久事件/await 尚未连接。
+[Runtime 持有生成绑定](Docs/Phase66/P66.B_Runtime_Owned_Generated_Bindings.md)进一步使 receiver/属性 import 使用当前实例的弱权限，绑定不随首个注册注销而释放；真实 C# WASM 在双后端共享静态状态并读写各实例 UE 属性。WAMR 补齐 scalar getter/void setter 及 f64 签名适配；Windows 编译、C# receiver 16/16、GeneratedTypes 10/10、WAMR registry 4/4 通过。生产 Host 的共享 VM、完整跨对象路由与持久 event/await 仍待实现，P66.B 保持进行中。
 
 ## 现在可以做什么
 

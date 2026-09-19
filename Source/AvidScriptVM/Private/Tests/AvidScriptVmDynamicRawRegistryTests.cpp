@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AvidScriptVmBackend.h"
+#include "AvidScriptVmResultFixtureBuilder.h"
 
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
@@ -288,6 +289,162 @@ bool FAvidScriptVmDynamicRawRegistryFailureTest::RunTest(const FString& Paramete
 		TEXT("dynamic_raw_after_release"),
 		ConflictConfig,
 		Error));
+	return true;
+}
+
+namespace
+{
+struct FSupplementalScalarTestState
+{
+	uint64 Bits = 0;
+	int32 Calls = 0;
+	bool bReject = false;
+};
+
+template <typename ValueType>
+EAvidScriptVmTypedHostStatus ReadSupplementalScalar(void* Context, int64 Self, ValueType& OutValue)
+{
+	auto& State = *static_cast<FSupplementalScalarTestState*>(Context);
+	++State.Calls;
+	if (State.bReject || Self != 0x1234567887654321LL) return EAvidScriptVmTypedHostStatus::Rejected;
+	using BitsType = std::conditional_t<sizeof(ValueType) == 4, uint32, uint64>;
+	const BitsType Bits = static_cast<BitsType>(State.Bits);
+	FMemory::Memcpy(&OutValue, &Bits, sizeof(OutValue));
+	return EAvidScriptVmTypedHostStatus::Succeeded;
+}
+
+template <typename ValueType>
+EAvidScriptVmTypedHostStatus WriteSupplementalScalar(void* Context, int64 Self, ValueType Value)
+{
+	auto& State = *static_cast<FSupplementalScalarTestState*>(Context);
+	++State.Calls;
+	if (State.bReject || Self != 0x1234567887654321LL) return EAvidScriptVmTypedHostStatus::Rejected;
+	using BitsType = std::conditional_t<sizeof(ValueType) == 4, uint32, uint64>;
+	BitsType Bits = 0;
+	FMemory::Memcpy(&Bits, &Value, sizeof(Value));
+	State.Bits = Bits;
+	return EAvidScriptVmTypedHostStatus::Succeeded;
+}
+
+TArray<uint8> BuildSupplementalScalarFixture(AvidScriptVmResultFixture::EValueKind Kind)
+{
+	using namespace AvidScriptVmResultFixture;
+	const uint8 Type = static_cast<uint8>(Kind);
+	TArray<uint8> Module = {0, 0x61, 0x73, 0x6d, 1, 0, 0, 0};
+	// Imports get(self)->scalar, set(self,scalar)->void; exported wrappers preserve bits.
+	AppendSection(Module, 1, {2, 0x60, 1, 0x7e, 1, Type, 0x60, 2, 0x7e, Type, 0});
+	TArray<uint8> Imports = {2};
+	AppendString(Imports, "avidscript"); AppendString(Imports, "avid_test_scalar_get"); Imports.Append({0, 0});
+	AppendString(Imports, "avidscript"); AppendString(Imports, "avid_test_scalar_set"); Imports.Append({0, 1});
+	AppendSection(Module, 2, Imports);
+	AppendSection(Module, 3, {2, 0, 1});
+	TArray<uint8> Exports = {2};
+	AppendString(Exports, "read"); Exports.Append({0, 2});
+	AppendString(Exports, "write"); Exports.Append({0, 3});
+	AppendSection(Module, 7, Exports);
+	AppendSection(Module, 10, {2, 6, 0, 0x20, 0, 0x10, 0, 0x0b, 8, 0, 0x20, 0, 0x20, 1, 0x10, 1, 0x0b});
+	return Module;
+}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmSupplementalScalarsTest,
+	"AvidScript.Architecture.VM.DynamicRawRegistrySupplementalScalars",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmSupplementalScalarsTest::RunTest(const FString& Parameters)
+{
+	using namespace AvidScriptVmResultFixture;
+	for (const EValueKind Kind : {EValueKind::I32, EValueKind::I64, EValueKind::F32, EValueKind::F64})
+	{
+		AddInfo(FString::Printf(TEXT("WAMR supplemental scalar kind=0x%x"), static_cast<uint8>(Kind)));
+		FSupplementalScalarTestState State, PeerState;
+		TArray<FAvidScriptVmTypedHostImport> Imports;
+		Imports.SetNum(2);
+		for (int32 Index = 0; Index < 2; ++Index)
+		{
+			auto& Import = Imports[Index];
+			Import.StableId = FString::Printf(TEXT("supplemental-test-%d"), Index);
+			Import.ModuleName = TEXT("avidscript");
+			Import.ImportName = Index == 0 ? TEXT("avid_test_scalar_get") : TEXT("avid_test_scalar_set");
+			Import.bSupplementalRuntimeAuthority = true;
+			Import.PreparedTarget.Context = &State;
+		}
+		bool bWide = false;
+		switch (Kind)
+		{
+		case EValueKind::I32:
+			Imports[0].Signature = TEXT("(I)i"); Imports[1].Signature = TEXT("(Ii)");
+			Imports[0].Shape = EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Get; Imports[1].Shape = EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Set;
+			Imports[0].PreparedTarget.PackedSelfPropertyI32Get = &ReadSupplementalScalar<int32>; Imports[1].PreparedTarget.PackedSelfPropertyI32Set = &WriteSupplementalScalar<int32>; break;
+		case EValueKind::I64:
+			bWide = true;
+			Imports[0].Signature = TEXT("(I)I"); Imports[1].Signature = TEXT("(II)");
+			Imports[0].Shape = EAvidScriptVmTypedHostShape::PackedSelfPropertyI64Get; Imports[1].Shape = EAvidScriptVmTypedHostShape::PackedSelfPropertyI64Set;
+			Imports[0].PreparedTarget.PackedSelfPropertyI64Get = &ReadSupplementalScalar<int64>; Imports[1].PreparedTarget.PackedSelfPropertyI64Set = &WriteSupplementalScalar<int64>; break;
+		case EValueKind::F32:
+			Imports[0].Signature = TEXT("(I)f"); Imports[1].Signature = TEXT("(If)");
+			Imports[0].Shape = EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Get; Imports[1].Shape = EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Set;
+			Imports[0].PreparedTarget.PackedSelfPropertyF32Get = &ReadSupplementalScalar<float>; Imports[1].PreparedTarget.PackedSelfPropertyF32Set = &WriteSupplementalScalar<float>; break;
+		case EValueKind::F64:
+			bWide = true;
+			Imports[0].Signature = TEXT("(I)d"); Imports[1].Signature = TEXT("(Id)");
+			Imports[0].Shape = EAvidScriptVmTypedHostShape::PackedSelfPropertyF64Get; Imports[1].Shape = EAvidScriptVmTypedHostShape::PackedSelfPropertyF64Set;
+			Imports[0].PreparedTarget.PackedSelfPropertyF64Get = &ReadSupplementalScalar<double>; Imports[1].PreparedTarget.PackedSelfPropertyF64Set = &WriteSupplementalScalar<double>; break;
+		default: return false;
+		}
+		FAvidScriptVmLoadConfig Config;
+		Config.TypedHostImports = Imports;
+		const auto Wasm = BuildSupplementalScalarFixture(Kind);
+		auto Backend = CreateAvidScriptWamrBackend();
+		FAvidScriptVmError Error;
+		if (!TestTrue(TEXT("scalar imports load"), Backend->Load(Wasm, TEXT("supplemental_scalars"), Config, Error))) { AddError(Error.Details); return false; }
+		FAvidScriptVmExportHandle Read, Write;
+		if (!Backend->ResolveExport(TEXT("read"), Read, Error) || !Backend->ResolveExport(TEXT("write"), Write, Error)) return false;
+		for (uint64 Bits : {0ULL, 0x8000000080000000ULL, 0xFEDCBA98DEADBEEFULL, 0x7ff812347fc12345ULL})
+		{
+			if (!bWide) Bits = static_cast<uint32>(Bits);
+			FAvidScriptVmCallFrame Frame;
+			Frame.Cells[0] = 0x87654321; Frame.Cells[1] = 0x12345678;
+			Frame.Cells[2] = static_cast<uint32>(Bits); Frame.Cells[3] = static_cast<uint32>(Bits >> 32);
+			Frame.CellCount = bWide ? 4 : 3;
+			if (!TestTrue(TEXT("scalar setter executes void import"), Backend->Call(Write, Frame, Error))) { AddError(Error.Category + TEXT(": ") + Error.Details); return false; }
+			TestEqual(TEXT("setter preserves scalar bit pattern"), State.Bits, Bits);
+			Frame.CellCount = 2;
+			FAvidScriptVmCallResult Result;
+			if (!TestTrue(TEXT("scalar getter executes"), Backend->Call(Read, Frame, Error, &Result))) { AddError(Error.Category + TEXT(": ") + Error.Details); return false; }
+			const uint64 Actual = static_cast<uint64>(Result.Cells[0]) | (bWide ? static_cast<uint64>(Result.Cells[1]) << 32 : 0);
+			TestEqual(TEXT("getter preserves scalar bit pattern"), Actual, Bits);
+		}
+		// Global stubs never confer a capability on another VM, nor retain its context.
+		auto PeerImports = Imports;
+		for (auto& Import : PeerImports) Import.PreparedTarget.Context = &PeerState;
+		FAvidScriptVmLoadConfig PeerConfig;
+		PeerConfig.TypedHostImports = PeerImports;
+		auto Peer = CreateAvidScriptWamrBackend();
+		TestTrue(TEXT("peer shares stubs with independent context"), Peer->Load(Wasm, TEXT("supplemental_peer"), PeerConfig, Error));
+		FAvidScriptVmExportHandle PeerRead;
+		TestTrue(TEXT("peer export resolves"), Peer->ResolveExport(TEXT("read"), PeerRead, Error));
+		FAvidScriptVmCallFrame Frame;
+		Frame.CellCount = 2; Frame.Cells[0] = 0x87654321; Frame.Cells[1] = 0x12345678;
+		State.bReject = true;
+		TestFalse(TEXT("getter rejection becomes a VM failure"), Backend->Call(Read, Frame, Error));
+		TestEqual(TEXT("rejection category"), Error.Category, FString(TEXT("host_import_failed")));
+		Frame.CellCount = bWide ? 4 : 3;
+		TestFalse(TEXT("setter rejection becomes a VM failure"), Backend->Call(Write, Frame, Error));
+		Backend->Unload();
+		Frame.CellCount = 2;
+		TestTrue(TEXT("peer survives originating VM unload"), Peer->Call(PeerRead, Frame, Error));
+		TestEqual(TEXT("peer has its own target"), PeerState.Calls, 1);
+		auto Unauthorized = CreateAvidScriptWamrBackend();
+		TestFalse(TEXT("warmed scalar stubs cannot authorize missing imports"), Unauthorized->Load(Wasm, TEXT("supplemental_missing"), FAvidScriptVmLoadConfig(), Error));
+		auto WrongImports = Imports;
+		WrongImports[1].Signature = TEXT("(I)i");
+		FAvidScriptVmLoadConfig WrongConfig;
+		WrongConfig.TypedHostImports = WrongImports;
+		TestFalse(TEXT("shape and signature mismatch rejected before stub reuse"), Unauthorized->Load(Wasm, TEXT("supplemental_wrong_shape"), WrongConfig, Error));
+		TestEqual(TEXT("shape rejection category"), Error.Category, FString(TEXT("supplemental_import_unsupported")));
+	}
 	return true;
 }
 

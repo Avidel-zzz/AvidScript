@@ -750,6 +750,8 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 	}
 	TGuardValue<bool> MutationGuard(bMutationInProgress, true);
 	FAvidScriptWasmHostContext NextHostContext = InHostContext;
+	NextHostContext.GeneratedTypeAuthority = GeneratedTypeInstance
+		? GeneratedTypeInstance->Authority : TWeakPtr<IAvidScriptGeneratedTypeAuthority>();
 	NextHostContext.ObjectOwnership = ObjectOwnership.Get();
 	NextHostContext.HostEffectJournal = nullptr;
 	NextHostContext.EventSubscriptions = DelegateSubscriptions.Get();
@@ -1983,11 +1985,20 @@ bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 	FAvidScriptWasmReloadResult& OutResult) const
 {
 	const FAvidScriptWasmReloadManifest& Manifest = Artifact.Manifest;
+	TUniquePtr<FAvidScriptWasmRuntimeInstance> CandidateRuntime =
+		MakeUnique<FAvidScriptWasmRuntimeInstance>(Artifact.BackendSelection);
 	TArray<FAvidScriptVmTypedHostImport> GeneratedPropertyImports;
 	if (GeneratedTypeInstance)
 	{
-		for (const FAvidScriptVmTypedHostImport& Import
-			: GeneratedTypeInstance->HostImports)
+		TArray<FAvidScriptVmTypedHostImport> AvailableImports;
+		FString BindingError;
+		if (!CandidateRuntime->ConfigureGeneratedTypeHostBindings(GeneratedTypeInstance->Registry, AvailableImports, BindingError))
+		{
+			SetReloadFailure(OutResult, TEXT("<generated-properties>"), TEXT("generated_property_import_invalid"),
+				BindingError, TEXT("rebuild the generated type package from the current registry"));
+			return false;
+		}
+		for (const FAvidScriptVmTypedHostImport& Import : AvailableImports)
 		{
 			if (Manifest.RequiredImports.ContainsByPredicate(
 				[&Import](const FAvidScriptWasmRequiredImport& RequiredImport)
@@ -2054,8 +2065,6 @@ bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 		return false;
 	}
 
-	TUniquePtr<FAvidScriptWasmRuntimeInstance> CandidateRuntime =
-		MakeUnique<FAvidScriptWasmRuntimeInstance>(Artifact.BackendSelection);
 	FAvidScriptWasmSmokeResult RuntimeResult;
 	FString SupplementalImportError;
 	FString BudgetError;

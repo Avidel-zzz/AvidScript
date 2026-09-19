@@ -20,6 +20,9 @@
 class FAvidScriptWasmDebugMap;
 class FAvidScriptProfilerEventBuffer;
 class UWorld;
+class IAvidScriptGeneratedTypeAuthority;
+class FAvidScriptGeneratedTypeRegistrySnapshot;
+struct FAvidScriptGeneratedTypeHostBindings;
 namespace AvidScript::Managed { class FHeap; }
 
 class AVIDSCRIPTRUNTIME_API IAvidScriptEventSubscriptionHost
@@ -116,6 +119,7 @@ struct FAvidScriptWasmHotSnapshot
 
 struct FAvidScriptWasmHostContext
 {
+	TWeakPtr<IAvidScriptGeneratedTypeAuthority> GeneratedTypeAuthority;
 	FAvidScriptObjectRegistry* ObjectRegistry = nullptr;
 	IAvidScriptObjectOwnershipDomain* ObjectOwnership = nullptr;
 	FAvidScriptObjectHandle OwnerHandle;
@@ -235,6 +239,11 @@ public:
 	bool SetSupplementalTypedHostImports(
 		TConstArrayView<FAvidScriptVmTypedHostImport> Imports,
 		FString& OutError);
+	bool ConfigureGeneratedTypeHostBindings(
+		const TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot>& Registry,
+		TArray<FAvidScriptVmTypedHostImport>& OutImports, FString& OutError);
+	UObject* ResolveGeneratedTypeReceiver(
+		int64 PackedSelf, uint32 TypeOrdinal, const FAvidScriptGeneratedTypeRegistrySnapshot& Registry) const;
 	bool ConfigureExecutionBudget(
 		const FAvidScriptVmLoadConfig::FExecutionBudget& InBudget,
 		FString& OutError);
@@ -897,6 +906,7 @@ private:
 	TSharedPtr<const FAvidScriptBindingPackage> BindingPackage;
 	TSharedPtr<const FAvidScriptWasmDebugMap> DebugMap;
 	TArray<FAvidScriptVmTypedHostImport> SupplementalTypedHostImports;
+	TSharedPtr<FAvidScriptGeneratedTypeHostBindings> GeneratedTypeHostBindings;
 	TArray<FAvidScriptVmTypedHostImport> TypedHostImports;
 	TArray<TUniquePtr<FAvidScriptPreparedGeneratedHostCall>>
 		PreparedGeneratedHostCalls;

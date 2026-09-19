@@ -70,27 +70,51 @@ bool IsAvidScriptDynamicSafeToken(const FString& Value)
 bool ParseAvidScriptRawSignature(
 	const FString& Signature,
 	uint32& OutParameterCount,
-	EAvidScriptWamrRawResultKind& OutResultKind)
+	EAvidScriptWamrRawResultKind& OutResultKind,
+	const bool bAllowScalarOrVoid = false)
 {
 	OutParameterCount = 0;
 	OutResultKind = EAvidScriptWamrRawResultKind::I32;
 	FAvidScriptVmAbiSignature ParsedSignature;
 	FString ParseError;
-	if (!ParseAvidScriptVmAbiSignature(Signature, ParsedSignature, ParseError)
-		|| !ParsedSignature.bHasResult)
+	// Prepared scalar imports use 'd' for f64, while the generic ABI parser uses 'F'.
+	const FString AbiSignature = bAllowScalarOrVoid ? Signature.Replace(TEXT("d"), TEXT("F")) : Signature;
+	if (!ParseAvidScriptVmAbiSignature(AbiSignature, ParsedSignature, ParseError))
 	{
 		return false;
 	}
-	if (ParsedSignature.Result != EAvidScriptVmValueKind::I32
-		&& ParsedSignature.Result != EAvidScriptVmValueKind::I64)
+	if (!bAllowScalarOrVoid && (!ParsedSignature.bHasResult
+		|| (ParsedSignature.Result != EAvidScriptVmValueKind::I32
+			&& ParsedSignature.Result != EAvidScriptVmValueKind::I64)))
 	{
 		return false;
 	}
 	OutParameterCount = static_cast<uint32>(ParsedSignature.Parameters.Num());
-	OutResultKind = ParsedSignature.Result == EAvidScriptVmValueKind::I64
-		? EAvidScriptWamrRawResultKind::I64
-		: EAvidScriptWamrRawResultKind::I32;
-	return true;
+	if (!ParsedSignature.bHasResult) { OutResultKind = EAvidScriptWamrRawResultKind::Void; return true; }
+	switch (ParsedSignature.Result)
+	{
+	case EAvidScriptVmValueKind::I32: OutResultKind = EAvidScriptWamrRawResultKind::I32; return true;
+	case EAvidScriptVmValueKind::I64: OutResultKind = EAvidScriptWamrRawResultKind::I64; return true;
+	case EAvidScriptVmValueKind::F32: OutResultKind = EAvidScriptWamrRawResultKind::F32; return true;
+	case EAvidScriptVmValueKind::F64: OutResultKind = EAvidScriptWamrRawResultKind::F64; return true;
+	default: return false;
+	}
+}
+
+const TCHAR* GetWamrSupplementalSignature(const EAvidScriptVmTypedHostShape Shape)
+{
+	switch (Shape)
+	{
+	case EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Get: return TEXT("(I)i");
+	case EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Set: return TEXT("(Ii)");
+	case EAvidScriptVmTypedHostShape::PackedSelfPropertyI64Get: return TEXT("(I)I");
+	case EAvidScriptVmTypedHostShape::PackedSelfPropertyI64Set: return TEXT("(II)");
+	case EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Get: return TEXT("(I)f");
+	case EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Set: return TEXT("(If)");
+	case EAvidScriptVmTypedHostShape::PackedSelfPropertyF64Get: return TEXT("(I)d");
+	case EAvidScriptVmTypedHostShape::PackedSelfPropertyF64Set: return TEXT("(Id)");
+	default: return nullptr;
+	}
 }
 
 FString MakeAvidScriptDynamicRegistryKey(const FString& ModuleName, const FString& ImportName)
@@ -176,14 +200,16 @@ void InvokeAvidScriptDynamicRawImport(wasm_exec_env_t ExecEnv, uint64* Arguments
 		SetDynamicRawException(ExecEnv);
 		ReturnValue = 0;
 	}
-	if (Attachment != nullptr
-		&& Attachment->ResultKind == EAvidScriptWamrRawResultKind::I64)
+	if (Attachment == nullptr || Attachment->ResultKind == EAvidScriptWamrRawResultKind::Void) return;
+	if (Attachment->ResultKind == EAvidScriptWamrRawResultKind::I64
+		|| Attachment->ResultKind == EAvidScriptWamrRawResultKind::F64)
 	{
-		*reinterpret_cast<int64*>(Arguments) = ReturnValue;
+		FMemory::Memcpy(Arguments, &ReturnValue, sizeof(ReturnValue));
 	}
 	else
 	{
-		*reinterpret_cast<int32*>(Arguments) = static_cast<int32>(ReturnValue);
+		const uint32 LowBits = static_cast<uint32>(ReturnValue);
+		FMemory::Memcpy(Arguments, &LowBits, sizeof(LowBits));
 	}
 }
 
@@ -309,10 +335,12 @@ static bool AcquireWamrValidatedImports(
 		ParseAvidScriptRawSignature(
 			Import.Signature,
 			Entry->Attachment.ParameterCount,
-			Entry->Attachment.ResultKind);
+			Entry->Attachment.ResultKind, true);
 		CopyAvidScriptDynamicUtf8(Import.ModuleName, Entry->ModuleNameUtf8);
 		CopyAvidScriptDynamicUtf8(Import.ImportName, Entry->ImportNameUtf8);
-		CopyAvidScriptDynamicUtf8(Import.Signature, Entry->SignatureUtf8);
+		// Prepared scalar imports spell f64 'd'; WAMR's native registry spells it 'F'.
+		// Keep the canonical signature in Attachment for identity/contract checks.
+		CopyAvidScriptDynamicUtf8(Import.Signature.Replace(TEXT("d"), TEXT("F")), Entry->SignatureUtf8);
 		Entry->Symbol.symbol = Entry->ImportNameUtf8.GetData();
 		Entry->Symbol.func_ptr = reinterpret_cast<void*>(InvokeAvidScriptDynamicRawImport);
 		Entry->Symbol.signature = Entry->SignatureUtf8.GetData();
@@ -365,15 +393,16 @@ bool AcquireAvidScriptWamrSupplementalImports(
 	for (const FAvidScriptVmTypedHostImport& Import : Imports)
 	{
 		const FString Identity = MakeAvidScriptDynamicRegistryKey(Import.ModuleName, Import.ImportName);
+		const TCHAR* ExpectedSignature = GetWamrSupplementalSignature(Import.Shape);
 		if (!Import.bSupplementalRuntimeAuthority || Import.BindingOrdinal != MAX_uint32
 			|| Import.StableId.IsEmpty() || Import.ModuleName != TEXT("avidscript")
 			|| !IsAvidScriptDynamicSafeToken(Import.ImportName) || Identities.Contains(Identity)
 			|| IsAvidScriptVmStaticHostImport(Import.ModuleName, Import.ImportName)
-			|| Import.Shape != EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Get
-			|| Import.Signature != TEXT("(I)i") || !Import.PreparedTarget.IsBoundForShape(Import.Shape))
+			|| ExpectedSignature == nullptr || Import.Signature != ExpectedSignature
+			|| !Import.PreparedTarget.IsBoundForShape(Import.Shape))
 		{
 			SetDynamicRegistryError(OutError, TEXT("supplemental_import_unsupported"),
-				TEXT("WAMR supplemental imports require a unique prepared packed-i64-to-i32 runtime capability."),
+				TEXT("WAMR supplemental imports require a unique prepared packed-receiver scalar capability with an exact signature."),
 				Import.ModuleName, Import.ImportName);
 			return false;
 		}
@@ -387,6 +416,62 @@ bool AcquireAvidScriptWamrSupplementalImports(
 		Raw.Ordinal = static_cast<uint32>(RawImports.Num() - 1);
 	}
 	return AcquireWamrValidatedImports(RawImports, OutRegistrations, OutError);
+}
+
+template <typename ValueType>
+static bool InvokeWamrSupplementalGetter(
+	EAvidScriptVmTypedHostStatus (*Target)(void*, int64, ValueType&),
+	void* Context, TConstArrayView<uint64> Arguments, int64& OutResultBits)
+{
+	if (Arguments.Num() != 1 || Target == nullptr) return false;
+	ValueType Value{};
+	if (Target(Context, static_cast<int64>(Arguments[0]), Value) != EAvidScriptVmTypedHostStatus::Succeeded) return false;
+	using BitsType = std::conditional_t<sizeof(ValueType) == 4, uint32, uint64>;
+	BitsType Bits = 0;
+	FMemory::Memcpy(&Bits, &Value, sizeof(Value));
+	OutResultBits = static_cast<int64>(static_cast<uint64>(Bits));
+	return true;
+}
+
+template <typename ValueType>
+static bool InvokeWamrSupplementalSetter(
+	EAvidScriptVmTypedHostStatus (*Target)(void*, int64, ValueType),
+	void* Context, TConstArrayView<uint64> Arguments)
+{
+	if (Arguments.Num() != 2 || Target == nullptr) return false;
+	using BitsType = std::conditional_t<sizeof(ValueType) == 4, uint32, uint64>;
+	const BitsType Bits = static_cast<BitsType>(Arguments[1]);
+	ValueType Value{};
+	FMemory::Memcpy(&Value, &Bits, sizeof(Value));
+	return Target(Context, static_cast<int64>(Arguments[0]), Value) == EAvidScriptVmTypedHostStatus::Succeeded;
+}
+
+bool DispatchAvidScriptWamrSupplementalImport(
+	const FAvidScriptVmTypedHostImport& Import, TConstArrayView<uint64> Arguments, int64& OutResultBits)
+{
+	OutResultBits = 0;
+	const auto& Target = Import.PreparedTarget;
+	if (Target.Context == nullptr) return false;
+	switch (Import.Shape)
+	{
+	case EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Get:
+		return InvokeWamrSupplementalGetter(Target.PackedSelfPropertyI32Get, Target.Context, Arguments, OutResultBits);
+	case EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Set:
+		return InvokeWamrSupplementalSetter(Target.PackedSelfPropertyI32Set, Target.Context, Arguments);
+	case EAvidScriptVmTypedHostShape::PackedSelfPropertyI64Get:
+		return InvokeWamrSupplementalGetter(Target.PackedSelfPropertyI64Get, Target.Context, Arguments, OutResultBits);
+	case EAvidScriptVmTypedHostShape::PackedSelfPropertyI64Set:
+		return InvokeWamrSupplementalSetter(Target.PackedSelfPropertyI64Set, Target.Context, Arguments);
+	case EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Get:
+		return InvokeWamrSupplementalGetter(Target.PackedSelfPropertyF32Get, Target.Context, Arguments, OutResultBits);
+	case EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Set:
+		return InvokeWamrSupplementalSetter(Target.PackedSelfPropertyF32Set, Target.Context, Arguments);
+	case EAvidScriptVmTypedHostShape::PackedSelfPropertyF64Get:
+		return InvokeWamrSupplementalGetter(Target.PackedSelfPropertyF64Get, Target.Context, Arguments, OutResultBits);
+	case EAvidScriptVmTypedHostShape::PackedSelfPropertyF64Set:
+		return InvokeWamrSupplementalSetter(Target.PackedSelfPropertyF64Set, Target.Context, Arguments);
+	default: return false;
+	}
 }
 
 FAvidScriptWamrNativeRegistryScope::FAvidScriptWamrNativeRegistryScope()
