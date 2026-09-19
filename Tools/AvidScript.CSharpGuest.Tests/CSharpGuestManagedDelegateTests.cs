@@ -90,9 +90,9 @@ internal static class CSharpGuestManagedDelegateTests
         CSharpGuestLoweringResult debug = CSharpGuestLowerer.Lower(document, new string('f', 64), enableDebugInstrumentation: true);
         Require(debug.Succeeded && WasmModuleCompiler.Compile(debug.Module!).Succeeded,
             "debug instrumentation must retain indirect target contracts");
-        Require(!CSharpGuestLowerer.Lower(document with { SemanticVersion = "1.23" }, new string('f', 64)).Succeeded,
+        Require(!CSharpGuestLowerer.Lower(document with { SchemaVersion = 21, SemanticVersion = "1.23" }, new string('f', 64)).Succeeded,
             "old semantic versions must not smuggle new delegate operations");
-        CSharpGuestLoweringResult previous = CSharpGuestLowerer.Lower(document with { SemanticVersion = "1.24" }, new string('f', 64));
+        CSharpGuestLoweringResult previous = CSharpGuestLowerer.Lower(document with { SchemaVersion = 21, SemanticVersion = "1.24" }, new string('f', 64));
         Require(previous.Succeeded && WasmModuleCompiler.Compile(previous.Module!).Succeeded,
             "semantic 1.24 static method groups must remain executable");
         foreach (bool wrongType in new[] { false, true })

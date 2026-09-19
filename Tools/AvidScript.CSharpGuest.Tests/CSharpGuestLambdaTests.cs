@@ -65,8 +65,11 @@ internal static class CSharpGuestLambdaTests
             "lambda lowering must produce deterministic executable WASM");
         Require(WasmModuleCompiler.Compile(result.Module!, new(true, 4)).CooperativeSafepointAttestation is { RecursiveFunctionCount: 2, Verified: true },
             "lambda-mediated recursion must participate in cooperative polling");
-        Require(!CSharpGuestLowerer.Lower(document with { SemanticVersion = "1.24" }, new string('b', 64)).Succeeded,
+        Require(!CSharpGuestLowerer.Lower(document with { SchemaVersion = 21, SemanticVersion = "1.24" }, new string('b', 64)).Succeeded,
             "lambda callables must not execute under an older semantic version");
+        CSharpGuestLoweringResult previous = CSharpGuestLowerer.Lower(document with { SchemaVersion = 21, SemanticVersion = "1.25" }, new string('b', 64));
+        Require(previous.Succeeded && WasmModuleCompiler.Compile(previous.Module!).Succeeded,
+            "schema 21/1.25 noncapturing lambdas must remain executable");
         CSharpGuestLoweringResult debug = CSharpGuestLowerer.Lower(document, new string('b', 64), enableDebugInstrumentation: true);
         Require(debug.Succeeded && WasmModuleCompiler.Compile(debug.Module!).Succeeded,
             "lambda functions must retain a valid signature under debug instrumentation");
@@ -114,7 +117,7 @@ internal static class CSharpGuestLambdaTests
             Directory.CreateDirectory(root);
             File.WriteAllBytes(Path.Combine(root, "lambdas.wasm"), compiled.Bytes);
         }
-        return 15;
+        return 16;
     }
 
     private static void Require(bool condition, string message)

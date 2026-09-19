@@ -68,7 +68,8 @@ internal static class Program
                 + CSharpGuestLexicalCaptureTests.Run()
                 + CSharpGuestDelegateSignatureTests.Run()
                 + CSharpGuestManagedDelegateTests.Run()
-                + CSharpGuestLambdaTests.Run();
+                + CSharpGuestLambdaTests.Run()
+                + CSharpGuestClosureContractTests.Run();
             Console.WriteLine($"AvidScript.CSharpGuest.Tests: {count}/{count} passed");
             return 0;
         }

@@ -11,15 +11,16 @@ internal sealed record SemanticLexicalCaptureProjection(
     IReadOnlyList<SemanticMethodBody> Methods,
     IReadOnlyList<SemanticControlFlowGraph> Graphs,
     IReadOnlyList<SemanticAsyncMethod> AsyncMethods,
-    IReadOnlyList<SemanticDiagnostic> Diagnostics);
+    IReadOnlyList<SemanticDiagnostic> Diagnostics)
+{
+    public SemanticClosureProjection Closures { get; init; } = new(
+        Array.Empty<SemanticClosureEnvironment>(), Array.Empty<SemanticClosureBinding>(), Array.Empty<SemanticDiagnostic>());
+}
 
 // Direct local calls preserve shared cells through explicit ref parameters.
 // Lambda captures are diagnosed until an owned escaping environment is available.
 internal static class SemanticLexicalCaptureNormalizer
 {
-    private sealed record Capture(string Id, string Owner, string Name, string TypeId,
-        string Kind, SemanticSpan Span, bool IsReceiver = false);
-
     public static SemanticLexicalCaptureProjection Normalize(
         SemanticCompilationContext context,
         IReadOnlyList<SemanticSymbol> symbols,
@@ -46,7 +47,7 @@ internal static class SemanticLexicalCaptureNormalizer
                         callable.MethodSymbolId, parameter.TypeId, $"{parameter.Name}:{parameter.TypeId}", false, "notapplicable",
                         symbolsById.GetValueOrDefault(callable.MethodSymbolId)?.Span ?? SemanticSpanFactory.Empty));
         Dictionary<string, SemanticMethodBody> bodies = methods.ToDictionary(item => item.MethodSymbolId, StringComparer.Ordinal);
-        Dictionary<string, Capture> captures = new(StringComparer.Ordinal);
+        Dictionary<string, SemanticLexicalCapture> captures = new(StringComparer.Ordinal);
         Dictionary<string, SortedSet<string>> required = lexical.Keys.ToDictionary(
             id => id, _ => new SortedSet<string>(StringComparer.Ordinal), StringComparer.Ordinal);
         Dictionary<string, string[]> calls = new(StringComparer.Ordinal);
@@ -92,6 +93,7 @@ internal static class SemanticLexicalCaptureNormalizer
                             changed |= required[id].Add(captureId);
         } while (changed);
 
+        SemanticClosureProjection closures = SemanticClosurePlanner.Project(context, captures, required, methods);
         Dictionary<string, Dictionary<string, SemanticCallableParameter>> parameters = new(StringComparer.Ordinal);
         List<SemanticSymbol> resultSymbols = symbolsById.Values.Select(symbol => lexical.ContainsKey(symbol.Id)
             ? symbol with { IsStatic = true } : symbol).ToList();
@@ -101,7 +103,7 @@ internal static class SemanticLexicalCaptureNormalizer
             Dictionary<string, SemanticCallableParameter> environment = new(StringComparer.Ordinal);
             foreach (string id in ids)
             {
-                Capture capture = captures[id];
+                SemanticLexicalCapture capture = captures[id];
                 int ordinal = callable.Parameters.Count + environment.Count;
                 string parameterId = $"symbol:parameter:{callable.MethodSymbolId}:capture:{id}";
                 SemanticCallableParameter parameter = new(ordinal, parameterId, capture.Name,
@@ -134,7 +136,7 @@ internal static class SemanticLexicalCaptureNormalizer
                 List<SemanticOperation> arguments = children.ToList();
                 foreach ((string id, SemanticCallableParameter targetParameter) in targetEnvironment)
                 {
-                    Capture capture = captures[id];
+                    SemanticLexicalCapture capture = captures[id];
                     SemanticOperation value = new(capture.Kind, true, null, false, false, false, false,
                         capture.TypeId, capture.IsReceiver ? null : capture.Id, Array.Empty<string>(),
                         null, null, null, null, null, operation.Span, Array.Empty<SemanticOperation>());
@@ -158,7 +160,7 @@ internal static class SemanticLexicalCaptureNormalizer
                 BranchValue = block.BranchValue is null ? null : Rewrite(block.BranchValue, graph.MethodSymbolId),
             }).ToArray(),
         }).ToArray();
-        List<SemanticDiagnostic> diagnostics = new();
+        List<SemanticDiagnostic> diagnostics = new(closures.Diagnostics);
         foreach ((string id, SemanticExecutableBody body) in lexical)
             if (body.Method.MethodKind == MethodKind.AnonymousFunction && required[id].Count != 0)
                 diagnostics.Add(new(SemanticLambdaPolicy.DiagnosticCode, "error",
@@ -184,7 +186,7 @@ internal static class SemanticLexicalCaptureNormalizer
             return method with { Segments = framed };
         }).ToArray();
         return new(resultSymbols.OrderBy(symbol => symbol.Id, StringComparer.Ordinal).ToArray(),
-            resultCallables, resultMethods, resultGraphs, resultAsync, diagnostics);
+            resultCallables, resultMethods, resultGraphs, resultAsync, diagnostics) { Closures = closures };
     }
 
     private static IEnumerable<SemanticOperation> Enumerate(SemanticOperation operation)

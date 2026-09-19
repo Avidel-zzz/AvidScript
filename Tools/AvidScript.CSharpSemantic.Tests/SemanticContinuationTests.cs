@@ -52,9 +52,9 @@ internal static class SemanticContinuationTests
         SemanticContinuationCallback[] callbacks = document.ContinuationCallbacks.ToArray();
 
         Assert(document.Succeeded
-            && document.SchemaVersion == 21
-            && document.SemanticVersion == "1.25",
-            "valid continuations should publish semantic schema v21 / version 1.25");
+            && document.SchemaVersion == 22
+            && document.SemanticVersion == "1.26",
+            "valid continuations should publish semantic schema v22 / version 1.26");
         Assert(callbacks.Select(callback => callback.CallbackId).SequenceEqual(new[] { 1, 2, 3 })
             && callbacks.Select(callback => callback.Name)
                 .SequenceEqual(new[] { "ResumeSpawnHandler", "ResumeSecond", "ResumeObjectLoad" })

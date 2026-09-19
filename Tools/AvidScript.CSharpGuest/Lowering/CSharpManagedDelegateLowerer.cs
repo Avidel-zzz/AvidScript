@@ -17,6 +17,7 @@ internal static class CSharpManagedDelegateLowerer
             || operation.Children[0] is not { Kind: "method_reference", IsSupported: true, Children.Count: 0 } target
             || !context.TryGetCallTarget(target.SymbolId, out SemanticCallable callable, out string targetId)
             || (callable.MethodSymbolId.Contains(":lambda:", StringComparison.Ordinal)
+                && context.Document.SemanticVersion is not "1.25"
                 && context.Document.SemanticVersion != SemanticContract.CurrentSemanticVersion)
             || !callable.IsStatic || callable.IsConstructor || !callable.HasBody || callable.Import is not null
             || callable.ReturnTypeId != signature.ReturnTypeId
@@ -101,7 +102,7 @@ internal static class CSharpManagedDelegateLowerer
     public static bool ContainsReference(string typeId, IReadOnlyDictionary<string, GuestType> types)
         => ContainsReference(typeId, types, new HashSet<string>(StringComparer.Ordinal));
 
-    private static bool SupportsDelegates(SemanticDocument document) => document.SemanticVersion == "1.24"
+    private static bool SupportsDelegates(SemanticDocument document) => document.SemanticVersion is "1.24" or "1.25"
         || document.SemanticVersion == SemanticContract.CurrentSemanticVersion;
 
     private static bool ContainsReference(string typeId, IReadOnlyDictionary<string, GuestType> types, HashSet<string> visited)

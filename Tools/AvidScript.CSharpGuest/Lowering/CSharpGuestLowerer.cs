@@ -240,6 +240,9 @@ public static class CSharpGuestLowerer
             Add(diagnostics, "ASCG1001", "Semantic artifact is failed, unsupported, or has invalid provenance.");
         }
 
+        if (document.ClosureEnvironments.Count != 0)
+            Add(diagnostics, "ASCG1024", "Closure environment allocation and lifetime lowering are not yet implemented.");
+
         if (document.ControlFlowGraphs
             .GroupBy(graph => graph.MethodSymbolId, StringComparer.Ordinal)
             .Any(group => group.Count() != 1))

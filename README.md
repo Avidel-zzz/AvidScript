@@ -33,6 +33,7 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 [委托签名合同](Docs/Phase66/P66.B_Delegate_Signature_Contract.md)已覆盖封闭泛型身份、引用参数及产物校验，为后续委托执行提供类型依据。
 [Guest 间接调用](Docs/Phase66/P66.B_Indirect_Call_Results.md)已实现函数引用、名义签名检查和递归取消轮询；[C# 静态方法组](Docs/Phase66/P66.B_CSharp_Method_Group_Results.md)已能构造委托、传参/返回并执行，含 ref/out、命名与默认参数。
 [同步无捕获 lambda 与匿名方法](Docs/Phase66/P66.B_Lambda_Results.md)已具有独立 callable/CFG，并能在 Guest 内传递、返回和执行。
+[捕获环境分析](Docs/Phase66/P66.B_Closure_Plan_Results.md)已输出版本化的共享 cell、作用域与绑定合同；Semantic 152/152、Guest 198/198 通过，堆与逃逸执行尚未接入。
 共享/逃逸捕获环境、绑定实例委托、泛型/异步局部函数和后续开发体验阶段仍未完成。
 
 ## 现在可以做什么
