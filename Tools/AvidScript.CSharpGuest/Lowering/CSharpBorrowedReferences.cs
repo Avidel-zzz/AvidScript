@@ -18,10 +18,14 @@ internal static class CSharpBorrowedReferences
         Enabled(context.Document) && callable.Import is null && !callable.IsStatic
         && context.TryGetGuestType(callable.ContainingTypeId, out GuestType type) && type.Kind == "struct";
 
+    public static bool IsField(CSharpFunctionLoweringContext context, SemanticOperation operation) => Enabled(context.Document)
+        && operation.Kind == "field_reference" && operation.Children.Count == 1 && !context.IsUeProperty(operation.SymbolId)
+        && context.TryGetGuestType(operation.Children[0].TypeId, out GuestType owner) && owner.Kind is "struct" or "managed_ref";
+
     public static void AddTypes(SemanticDocument document, List<GuestType> types)
     {
         if (!Enabled(document)) return;
-        foreach (GuestType type in types.Where(type => type.Kind != "void" && type.Kind != "managed_ref").ToArray())
+        foreach (GuestType type in types.Where(type => type.Kind != "void").ToArray())
             types.Add(GuestBorrowedReference.Declare(Type(type.Id), type.Id, CSharpClosureLayout.ObjectType, CSharpGuestIds.AddressTypeId));
     }
 
@@ -44,6 +48,15 @@ internal static class CSharpBorrowedReferences
         }
         if (operation.Kind == "field_reference" && operation.Children.Count == 1 && !context.IsUeProperty(operation.SymbolId))
         {
+            if (CSharpReferenceObjects.IsField(context, operation))
+            {
+                GuestRegister? ownerObject = CSharpOperationLowerer.LowerValue(context, operation.Children[0], block, instructions);
+                GuestRegister? borrowed = context.CreateTemporary(Type(operation.TypeId!), block);
+                if (ownerObject is null || borrowed is null) return null;
+                CSharpReferenceObjects.Require(ownerObject, instructions);
+                instructions.Add(new("borrow_managed", borrowed.Id, new[] { ownerObject.Id }, operation.SymbolId, null, null));
+                return borrowed;
+            }
             GuestRegister? owner = Address(context, operation.Children[0], block, instructions);
             GuestRegister? reference = context.CreateTemporary(Type(operation.TypeId!), block);
             if (owner is null || reference is null) return null;
@@ -84,7 +97,7 @@ internal static class CSharpBorrowedReferences
         if (operation.Kind != "field_reference" || operation.Children.Count != 1) return false;
         bool writableConstruction = context.Callable.IsConstructor && operation.Children[0].Kind == "instance_reference";
         return (!writableConstruction && context.Document.Symbols.Any(symbol => symbol.Id == operation.SymbolId && symbol.IsReadonly))
-            || ReadonlyStorage(context, operation.Children[0]);
+            || (!CSharpReferenceObjects.IsField(context, operation) && ReadonlyStorage(context, operation.Children[0]));
     }
 
     public static GuestRegister? Read(CSharpFunctionLoweringContext context, GuestRegister reference, string type, int block, List<GuestInstruction> instructions)

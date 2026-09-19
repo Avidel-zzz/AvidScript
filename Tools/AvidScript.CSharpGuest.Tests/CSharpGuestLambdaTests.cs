@@ -96,15 +96,16 @@ internal static class CSharpGuestLambdaTests
         foreach ((string captured, string expectedCode) in new[]
         {
             ("using System; public class Script { int value; public int Run() { Func<int> callback = () => value; return callback(); } }", "ASCG1024"),
-            ("using System; public class Script { int field; public int Value { set { Func<int> callback = () => value; field = callback(); } } }", "ASCG1004"),
+            ("using System; public class Script { int field; public int Value { set { Func<int> callback = () => value; field = callback(); } } }", "supported"),
         })
         {
             var frontend = AvidScript.CSharpFrontend.FrontendAnalyzer.Analyze(captured, "Scripts/ReceiverLambda.cs");
             SemanticDocument rejected = SemanticAnalyzer.Analyze(captured, "Scripts/ReceiverLambda.cs", frontend.Source.Sha256);
             CSharpGuestLoweringResult receiverResult = CSharpGuestLowerer.Lower(rejected, new string('b', 64));
             Require(rejected.Succeeded && rejected.ClosureEnvironments.All(environment => environment.Allocation is not null)
-                && !receiverResult.Succeeded && receiverResult.Diagnostics.Any(item => item.Code == expectedCode),
-                "captured receiver identity and ordinary class instances remain unsupported");
+                && (expectedCode == "supported" ? receiverResult.Succeeded && WasmModuleCompiler.Compile(receiverResult.Module!).Succeeded
+                    : !receiverResult.Succeeded && receiverResult.Diagnostics.Any(item => item.Code == expectedCode)),
+                "class accessors support captured value parameters while captured-this lifetime remains unsupported");
         }
         foreach (string unsupported in new[]
         {

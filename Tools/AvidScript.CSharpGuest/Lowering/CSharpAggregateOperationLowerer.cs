@@ -153,7 +153,7 @@ internal static class CSharpAggregateOperationLowerer
         }
 
         instructions.Add(new GuestInstruction(
-            "field_load",
+            receiverType?.Kind == "managed_ref" ? "managed_get" : "field_load",
             result.Id,
             new[] { aggregate.Id },
             operation.SymbolId,
@@ -176,7 +176,7 @@ internal static class CSharpAggregateOperationLowerer
         }
 
         if (CSharpBorrowedReferences.Enabled(context.Document)
-            && context.TryGetGuestType(target.Children[0].TypeId, out GuestType ownerType) && ownerType.Kind == "struct")
+            && context.TryGetGuestType(target.Children[0].TypeId, out GuestType ownerType) && ownerType.Kind is "struct" or "managed_ref")
         {
             GuestRegister? reference = CSharpBorrowedReferences.Address(context, target, blockOrdinal, instructions);
             if (reference is null) return false;

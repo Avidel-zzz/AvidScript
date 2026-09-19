@@ -101,7 +101,7 @@ internal static class CSharpGuestBoundDelegateTests
             """;
         count += Check(plain, "csharp-bound-delegate-plain", 650, false);
         foreach (string unsupported in new[] {
-            "using System; public sealed class Receiver { public int Read() => 1; } public static class Script { public static int Run() { Receiver value = new Receiver(); Func<int> read = value.Read; return read(); } }",
+            "using System; public class Receiver { public virtual int Read() => 1; } public static class Script { public static int Run() { Receiver value = new Receiver(); Func<int> read = value.Read; return read(); } }",
             "using System; public struct Receiver { public int[] Values; public int Read() => Values[0]; } public static class Script { public static int Run() { Receiver value = new Receiver(); Func<int> read = value.Read; return read(); } }"
         })
         {

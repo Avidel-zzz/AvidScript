@@ -53,6 +53,7 @@ public static class CSharpGuestLowerer
             guestTypes,
             dataPool,
             diagnostics).ToList();
+        CSharpReferenceObjects.AddGuards(document, functions);
         functions.AddRange(CSharpClosureDelegateLowerer.BuildThunks(document, functions));
         functions.AddRange(CSharpDelegateComposition.Build(document));
         functions.AddRange(CSharpDelegateIdentityLowerer.Build(document, functions));

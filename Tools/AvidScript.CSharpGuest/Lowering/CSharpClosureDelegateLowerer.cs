@@ -83,7 +83,7 @@ internal static class CSharpClosureDelegateLowerer
                     }
                 }
                 List<string> arguments = parameters.Skip(1).Select(parameter => parameter.Id).ToList();
-                if (!callable.IsStatic) arguments.Insert(0, CSharpBoundDelegateLowerer.ThunkReceiver(callable, locals, instructions));
+                if (!callable.IsStatic) arguments.Insert(0, CSharpBoundDelegateLowerer.ThunkReceiver(document, callable, locals, instructions));
                 foreach (SemanticCallableParameter parameter in callable.Parameters)
                     if (CSharpClosureLayout.CapturedParameter(document, parameter.SymbolId) is { } capture)
                         arguments.Add(environmentValues[capture.Environment.Id]);

@@ -79,6 +79,8 @@ internal static class SemanticCallableProjector
                     optimization);
                 if (!callables.TryAdd(methodId, callable))
                 {
+                    if (method.MethodKind == MethodKind.Constructor && !hasBody
+                        && (method.IsImplicitlyDeclared || method.ContainingType.SpecialType == SpecialType.System_Object)) continue;
                     throw new InvalidOperationException($"Duplicate semantic callable id: {methodId}");
                 }
             }
@@ -96,6 +98,16 @@ internal static class SemanticCallableProjector
         SyntaxNode root,
         SemanticModel semanticModel)
     {
+        bool hasReferenceClass = false;
+        foreach (TypeDeclarationSyntax declaration in root.DescendantNodes().OfType<TypeDeclarationSyntax>())
+        {
+            if (semanticModel.GetDeclaredSymbol(declaration) is not INamedTypeSymbol { TypeKind: TypeKind.Class, IsStatic: false } type) continue;
+            hasReferenceClass = true;
+            foreach (IMethodSymbol constructor in type.InstanceConstructors.Where(ctor => ctor.IsImplicitlyDeclared && ctor.Parameters.Length == 0))
+                yield return constructor;
+        }
+        if (hasReferenceClass)
+            yield return semanticModel.Compilation.GetSpecialType(SpecialType.System_Object).InstanceConstructors.Single(ctor => ctor.Parameters.Length == 0);
         foreach (AnonymousFunctionExpressionSyntax lambda in root.DescendantNodes().OfType<AnonymousFunctionExpressionSyntax>())
             if (SemanticExecutableBodyResolver.GetMethodSymbol(lambda, semanticModel) is { } method) yield return method;
 

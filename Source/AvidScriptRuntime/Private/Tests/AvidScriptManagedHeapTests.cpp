@@ -338,7 +338,12 @@ bool FAvidScriptManagedHeapCSharpClosuresTest::RunTest(const FString& Parameters
 			FString(TEXT("csharp-delegate-list.wasm")), FString(TEXT("csharp-delegate-list-stress.wasm")),
 			FString(TEXT("csharp-delegate-list-static.wasm")), FString(TEXT("csharp-delegate-list-static-stress.wasm")),
 			FString(TEXT("csharp-bound-delegate.wasm")), FString(TEXT("csharp-bound-delegate-stress.wasm")),
-			FString(TEXT("csharp-bound-delegate-plain.wasm")), FString(TEXT("csharp-bound-delegate-plain-stress.wasm"))})
+			FString(TEXT("csharp-bound-delegate-plain.wasm")), FString(TEXT("csharp-bound-delegate-plain-stress.wasm")),
+			FString(TEXT("csharp-reference-object.wasm")), FString(TEXT("csharp-reference-object-stress.wasm")),
+			FString(TEXT("csharp-reference-object-fault-method.wasm")), FString(TEXT("csharp-reference-object-fault-bind.wasm")),
+			FString(TEXT("csharp-reference-object-fault-field.wasm")), FString(TEXT("csharp-reference-object-fault-compound.wasm")),
+			FString(TEXT("csharp-reference-object-fault-borrow.wasm")), FString(TEXT("csharp-reference-object-fault-nested.wasm")),
+			FString(TEXT("csharp-reference-object-fault-cast.wasm"))})
 		{
 			TArray<uint8> Wasm;
 			if (!TestTrue(TEXT("Load current CSharp closure fixture"), FFileHelper::LoadFileToArray(Wasm, *FPaths::Combine(Directory, File)))) return false;
@@ -348,8 +353,11 @@ bool FAvidScriptManagedHeapCSharpClosuresTest::RunTest(const FString& Parameters
 			FAvidScriptWasmRuntimeInstance Runtime(Selection); FAvidScriptWasmSmokeResult Result;
 			if (!TestTrue(TEXT("CSharp closures load"), Runtime.LoadModule(Wasm.GetData(), Wasm.Num(), File, Result)))
 			{ AddError(Result.ErrorMessage); return false; }
-			if (!TestTrue(TEXT("CSharp closures execute"), Runtime.BeginPlay(Result)))
+			const bool bReferenceObject = File.Contains(TEXT("reference-object"));
+			const bool bReferenceFault = bReferenceObject && File.Contains(TEXT("-fault-"));
+			if (!TestEqual(TEXT("CSharp object/closure execution or expected failure"), Runtime.BeginPlay(Result), !bReferenceFault))
 			{ AddError(Result.ErrorMessage); return false; }
+			if (bReferenceFault) TestFalse(TEXT("Reference failure is diagnostic"), Result.ErrorMessage.IsEmpty());
 			uint8 Value[4]{}; FString Error;
 			if (!TestTrue(TEXT("Read CSharp closure result"), Runtime.ReadStateBytes(16, MakeArrayView(Value), Error))) return false;
 			const bool bStaticIdentity = File == TEXT("csharp-delegate-identity-static.wasm");
@@ -357,7 +365,8 @@ bool FAvidScriptManagedHeapCSharpClosuresTest::RunTest(const FString& Parameters
 			const bool bStaticList = File.Contains(TEXT("delegate-list-static"));
 			const bool bBoundDelegate = File.Contains(TEXT("bound-delegate"));
 			const bool bPlainBoundDelegate = File.Contains(TEXT("bound-delegate-plain"));
-			const uint32 Expected = bPlainBoundDelegate ? 650u : bBoundDelegate ? 4095u
+			const uint32 Expected = bReferenceFault ? (File.EndsWith(TEXT("-method.wasm")) || File.EndsWith(TEXT("-field.wasm")) ? 1u : 0u)
+				: bReferenceObject ? 32767u : bPlainBoundDelegate ? 650u : bBoundDelegate ? 4095u
 				: bStaticIdentity || bStaticList ? 7u : bDelegateList ? 65535u : File.Contains(TEXT("identity")) ? 8191u : 1147395u;
 			TestEqual(TEXT("CSharp closure execution and callable/environment equality match reference results"),
 				uint32(Value[0]) | (uint32(Value[1]) << 8) | (uint32(Value[2]) << 16) | (uint32(Value[3]) << 24), Expected);
@@ -372,7 +381,8 @@ bool FAvidScriptManagedHeapCSharpClosuresTest::RunTest(const FString& Parameters
 			}
 			if (!TestNotNull(TEXT("CSharp module owns heap"), Heap)) return false;
 			const auto Stats = Heap->GetStats();
-			const uint64 MinimumAllocations = bPlainBoundDelegate ? 1u : bBoundDelegate ? 12u : bStaticList ? 2u : 16u;
+			const uint64 MinimumAllocations = bReferenceFault ? (File.EndsWith(TEXT("-cast.wasm")) ? 1u : 0u)
+				: bReferenceObject ? 8u : bPlainBoundDelegate ? 1u : bBoundDelegate ? 12u : bStaticList ? 2u : 16u;
 			TestTrue(TEXT("Closures, lists and bound values use actual managed allocations"), Stats.Allocations >= MinimumAllocations);
 			if (File.Contains(TEXT("stress")))
 				TestTrue(TEXT("Every allocation followed by collection"), Stats.Collections >= Stats.Allocations);

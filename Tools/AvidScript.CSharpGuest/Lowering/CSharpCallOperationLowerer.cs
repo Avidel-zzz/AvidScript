@@ -13,6 +13,7 @@ internal static class CSharpCallOperationLowerer
         int blockOrdinal,
         List<GuestInstruction> instructions)
     {
+        if (CSharpReferenceObjectCreation.IsRootInitializer(context, operation)) return null;
         if (CSharpManagedDelegateLowerer.TryLowerInvocation(context, operation, blockOrdinal, instructions, out GuestRegister? delegateResult))
             return delegateResult;
         if (!context.TryGetCallTarget(operation.SymbolId, out SemanticCallable callable, out string targetId))
@@ -222,6 +223,8 @@ internal static class CSharpCallOperationLowerer
             return classReference;
         }
 
+        if (CSharpReferenceObjects.Types(context.Document).Contains(operation.TypeId ?? ""))
+            return CSharpReferenceObjectCreation.Lower(context, operation, blockOrdinal, instructions);
         if (!context.TryGetCallTarget(operation.SymbolId, out SemanticCallable constructor, out string targetId)
             || !constructor.IsConstructor
             || constructor.IsStatic)

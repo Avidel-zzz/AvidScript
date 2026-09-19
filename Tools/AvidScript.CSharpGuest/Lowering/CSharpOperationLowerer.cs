@@ -248,6 +248,22 @@ internal static class CSharpOperationLowerer
         }
 
         SemanticOperation target = operation.Children[0];
+        if (CSharpReferenceObjects.IsField(context, target))
+        {
+            GuestRegister? receiver = LowerValue(context, target.Children[0], blockOrdinal, instructions);
+            GuestRegister? assigned = receiver is null ? null : LowerValue(context, operation.Children[1], blockOrdinal, instructions);
+            if (receiver is null || assigned is null) return null;
+            instructions.Add(new("managed_set", null, new[] { receiver.Id, assigned.Id }, target.SymbolId, null, null));
+            return assigned;
+        }
+        if (CSharpBorrowedReferences.IsField(context, target))
+        {
+            GuestRegister? location = CSharpBorrowedReferences.Address(context, target, blockOrdinal, instructions);
+            GuestRegister? assigned = location is null ? null : LowerValue(context, operation.Children[1], blockOrdinal, instructions);
+            if (location is null || assigned is null) return null;
+            instructions.Add(new("borrow_store", null, new[] { location.Id, assigned.Id }, assigned.TypeId, null, null));
+            return assigned;
+        }
         if (target.Kind == "array_element_reference")
         {
             if (!TryLowerArrayElementOperands(
@@ -357,7 +373,7 @@ internal static class CSharpOperationLowerer
                 blockOrdinal,
                 instructions);
         }
-        else if (delegateAssignment)
+        else if (delegateAssignment || CSharpBorrowedReferences.IsField(context, target))
         {
             delegateStorage = CSharpBorrowedReferences.Address(context, target, blockOrdinal, instructions);
             if (delegateStorage is null) return null;
@@ -394,6 +410,11 @@ internal static class CSharpOperationLowerer
             null,
             operation.OperatorKind,
             null));
+        if (delegateStorage is not null)
+        {
+            instructions.Add(new("borrow_store", null, new[] { delegateStorage.Id, result.Id }, result.TypeId, null, null));
+            return result;
+        }
         if (propertyReceiver is not null)
         {
             return CSharpCallOperationLowerer.LowerPropertySetter(
@@ -601,6 +622,7 @@ internal static class CSharpOperationLowerer
         SemanticOperation target = operation.Children[0];
         GuestRegister? propertyReceiver = null;
         GuestRegister? previous;
+        GuestRegister? fieldStorage = null;
         if (target.Kind == "property_reference")
         {
             propertyReceiver = CSharpCallOperationLowerer.LowerPropertyReceiver(
@@ -617,10 +639,12 @@ internal static class CSharpOperationLowerer
                     blockOrdinal,
                     instructions);
         }
-        else
+        else if (CSharpBorrowedReferences.IsField(context, target))
         {
-            previous = LowerValue(context, target, blockOrdinal, instructions);
+            fieldStorage = CSharpBorrowedReferences.Address(context, target, blockOrdinal, instructions);
+            previous = fieldStorage is null ? null : CSharpBorrowedReferences.Read(context, fieldStorage, operation.TypeId!, blockOrdinal, instructions);
         }
+        else previous = LowerValue(context, target, blockOrdinal, instructions);
 
         if (previous is null)
         {
@@ -670,6 +694,11 @@ internal static class CSharpOperationLowerer
             return null;
         }
 
+        if (fieldStorage is not null)
+        {
+            instructions.Add(new("borrow_store", null, new[] { fieldStorage.Id, next.Id }, next.TypeId, null, null));
+            return operation.IsPostfix ? previous : next;
+        }
         bool stored = propertyReceiver is not null
             ? CSharpCallOperationLowerer.LowerPropertySetter(
                 context,
@@ -825,7 +854,7 @@ internal static class CSharpOperationLowerer
         }
 
         if (operation.Constant is { Kind: "null" } && context.TryGetGuestType(operation.TypeId, out GuestType nullType)
-            && (nullType.Kind == "function_ref" || context.Document.DelegateTypes.Any(signature => signature.TypeId == nullType.Id)))
+            && (nullType.Kind is "function_ref" or "managed_ref" || context.Document.DelegateTypes.Any(signature => signature.TypeId == nullType.Id)))
             return LowerLiteral(context, operation, blockOrdinal, instructions);
 
         GuestRegister? operand = LowerValue(context, operation.Children[0], blockOrdinal, instructions);
@@ -908,8 +937,10 @@ internal static class CSharpOperationLowerer
             return result;
         }
 
+        bool managedCast = context.TryGetGuestType(operand.TypeId, out GuestType sourceType) && sourceType.Kind == "managed_ref"
+            && context.TryGetGuestType(result.TypeId, out GuestType targetType) && targetType.Kind == "managed_ref";
         instructions.Add(new GuestInstruction(
-            "convert", result.Id, new[] { operand.Id }, null, null, null));
+            managedCast ? "managed_cast" : "convert", result.Id, new[] { operand.Id }, null, null, null));
         return result;
     }
 

@@ -53,12 +53,10 @@ internal static class CSharpGuestClassContractTests
             }
             """);
         Check(referenceObject.Succeeded && SemanticClassContractValidator.IsValid(referenceObject), "reference object facts are valid semantic output");
-        CSharpGuestLoweringResult unsupported = CSharpGuestLowerer.Lower(referenceObject, new string('a', 64));
-        Check(!unsupported.Succeeded && unsupported.Module is null
-            && unsupported.Diagnostics.Any(item => item.Code is "ASCG1003" or "ASCG1004" or "ASCG1005")
-            && unsupported.Diagnostics.All(item => item.Code is not ("ASCG1001" or "ASCG1006")),
-            "class analysis alone must not enable incomplete allocation or constructor execution: "
-                + string.Join(" | ", unsupported.Diagnostics.Select(item => item.Code + ": " + item.Message)));
+        CSharpGuestLoweringResult referenceResult = CSharpGuestLowerer.Lower(referenceObject, new string('a', 64));
+        Check(referenceResult.Succeeded && referenceResult.Module is not null,
+            "ordinary default construction now executes through the versioned class contract: "
+                + string.Join(" | ", referenceResult.Diagnostics.Select(item => item.Code + ": " + item.Message)));
         return count;
 
         void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); count++; }

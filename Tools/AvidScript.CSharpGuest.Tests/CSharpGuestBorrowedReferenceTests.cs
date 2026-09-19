@@ -96,7 +96,7 @@ internal static class CSharpGuestBorrowedReferenceTests
         return 8;
     }
 
-    internal static int Reference(string source)
+    internal static int Reference(string source, Type? expectedFailure = null)
     {
         var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator)
             .Select(path => MetadataReference.CreateFromFile(path));
@@ -107,7 +107,18 @@ internal static class CSharpGuestBorrowedReferenceTests
         Require(result.Success, string.Join(" | ", result.Diagnostics));
         bytes.Position = 0;
         AssemblyLoadContext context = new("borrowed-reference-oracle", isCollectible: true);
-        try { return (int)context.LoadFromStream(bytes).GetType("Script")!.GetMethod("Run")!.Invoke(null, null)!; }
+        try
+        {
+            Type script = context.LoadFromStream(bytes).GetType("Script")!;
+            try
+            {
+                int value = (int)script.GetMethod("Run")!.Invoke(null, null)!;
+                Require(expectedFailure is null, "reference execution was expected to fail");
+                return value;
+            }
+            catch (System.Reflection.TargetInvocationException exception) when (expectedFailure is not null && exception.InnerException?.GetType() == expectedFailure)
+            { return (int)script.GetField("Result")!.GetValue(null)!; }
+        }
         finally { context.Unload(); }
     }
     private static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }

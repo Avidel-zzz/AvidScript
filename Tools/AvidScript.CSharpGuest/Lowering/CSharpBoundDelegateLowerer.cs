@@ -19,6 +19,7 @@ internal static class CSharpBoundDelegateLowerer
     {
         var callables = document.Callables.ToDictionary(callable => callable.MethodSymbolId, StringComparer.Ordinal);
         var structs = document.Types.Where(type => type.Kind == "struct" && type.IsValueType).Select(type => type.Id).ToHashSet(StringComparer.Ordinal);
+        structs.UnionWith(CSharpReferenceObjects.Types(document));
         HashSet<string> used = new(StringComparer.Ordinal);
         Stack<SemanticOperation> pending = new(document.Methods.Select(method => method.Root));
         foreach (SemanticBasicBlock block in document.ControlFlowGraphs.SelectMany(graph => graph.Blocks))
@@ -39,7 +40,8 @@ internal static class CSharpBoundDelegateLowerer
 
     public static void AddTypes(SemanticDocument document, List<GuestType> types)
     {
-        foreach (SemanticCallable callable in document.Callables.Where(callable => Methods(document).Contains(callable.MethodSymbolId))
+        foreach (SemanticCallable callable in document.Callables.Where(callable => Methods(document).Contains(callable.MethodSymbolId)
+                     && !CSharpReferenceObjects.Types(document).Contains(callable.ContainingTypeId))
                      .OrderBy(callable => callable.MethodSymbolId, StringComparer.Ordinal))
         {
             string box = Box(callable.MethodSymbolId), payload = CSharpClosureLayout.Payload(box);
@@ -53,10 +55,17 @@ internal static class CSharpBoundDelegateLowerer
     {
         if (target.Children.Count != 1 || target.Children[0].TypeId != callable.ContainingTypeId
             || !Methods(context.Document).Contains(callable.MethodSymbolId)
-            || !context.TryGetGuestType(callable.ContainingTypeId, out GuestType type) || type.Kind != "struct")
-        { context.Add("ASCG1024", "Bound delegate receiver requires a supported exact Guest struct instance method."); return null; }
+            || !context.TryGetGuestType(callable.ContainingTypeId, out GuestType type) || type.Kind is not ("struct" or "managed_ref"))
+        { context.Add("ASCG1024", "Bound delegate receiver requires a supported exact Guest value or reference instance method."); return null; }
         GuestRegister? receiver = CSharpOperationLowerer.LowerValue(context, target.Children[0], block, instructions);
         if (receiver is null) return null;
+        if (type.Kind == "managed_ref")
+        {
+            CSharpReferenceObjects.Require(receiver, instructions);
+            GuestRegister reference = context.CreateTemporary(CSharpClosureLayout.ObjectType, block)!;
+            instructions.Add(new("managed_cast", reference.Id, new[] { receiver.Id }, null, null, null));
+            return reference;
+        }
         GuestRegister box = context.CreateTemporary(CSharpClosureLayout.Reference(Box(callable.MethodSymbolId)), block)!;
         GuestRegister erased = context.CreateTemporary(CSharpClosureLayout.ObjectType, block)!;
         instructions.Add(new("managed_new", box.Id, Array.Empty<string>(), null, null, null));
@@ -65,8 +74,14 @@ internal static class CSharpBoundDelegateLowerer
         return erased;
     }
 
-    public static string ThunkReceiver(SemanticCallable callable, List<GuestRegister> locals, List<GuestInstruction> instructions)
+    public static string ThunkReceiver(SemanticDocument document, SemanticCallable callable, List<GuestRegister> locals, List<GuestInstruction> instructions)
     {
+        if (CSharpReferenceObjects.Types(document).Contains(callable.ContainingTypeId))
+        {
+            locals.Add(new("receiver:object", callable.ContainingTypeId));
+            instructions.Add(new("managed_cast", "receiver:object", new[] { "context" }, null, null, null));
+            return "receiver:object";
+        }
         locals.Add(new("receiver:box", CSharpClosureLayout.Reference(Box(callable.MethodSymbolId))));
         locals.Add(new("receiver:borrow", CSharpBorrowedReferences.Type(callable.ContainingTypeId)));
         instructions.Add(new("managed_cast", "receiver:box", new[] { "context" }, null, null, null));
