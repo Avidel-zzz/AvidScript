@@ -4,6 +4,8 @@
 #include "AvidScriptHash.h"
 #include "AvidScriptRuntimeArtifact.h"
 #include "AvidScriptRuntimeSession.h"
+#include "AvidScriptWasmRuntime.h"
+#include "Memory/AvidScriptManagedHeap.h"
 #include "AvidScriptVmArtifact.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeDispatcher.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeRegistry.h"
@@ -193,6 +195,101 @@ FString BuildPackageDescriptorFixture(
 		*TypeManifestSha256,
 		*RuntimeManifestSha256);
 }
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptGeneratedCSharpReceiverTest,
+	"AvidScript.Runtime.GeneratedTypes.CSharpReceiver",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptGeneratedCSharpReceiverTest::RunTest(const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	const FString Directory = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("AvidScriptManagedHeapTests/GuestFixtures"));
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	{
+		for (const FString File : {TEXT("csharp-ue-receiver"), TEXT("csharp-ue-receiver-stress"), TEXT("csharp-ue-receiver-null")})
+		{
+			const bool bNull = File.EndsWith(TEXT("-null"));
+			AddInfo(FString::Printf(TEXT("CSharp UE receiver backend=%d fixture=%s"), static_cast<int32>(Backend), *File));
+			TArray<uint8> Wasm;
+			FString MetadataText;
+			if (!TestTrue(TEXT("Read current CSharp WASM"), FFileHelper::LoadFileToArray(Wasm, *FPaths::Combine(Directory, File + TEXT(".wasm"))))) return false;
+			if (!TestTrue(TEXT("Read compiler receiver metadata"), FFileHelper::LoadFileToString(MetadataText,
+				*FPaths::Combine(Directory, bNull ? TEXT("csharp-ue-receiver-null.json") : TEXT("csharp-ue-receiver.json"))))) return false;
+			TSharedPtr<FJsonObject> Metadata;
+			if (!TestTrue(TEXT("Parse compiler metadata"), FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(MetadataText), Metadata)) || !Metadata) return false;
+			TSharedPtr<FJsonObject> RegistryJson;
+			if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(BuildGeneratedTypeSessionManifest()), RegistryJson) || !RegistryJson) return false;
+			// Bind the compiled C# entry to the existing reflected native test class.
+			const TSharedPtr<FJsonObject> TypeJson = RegistryJson->GetArrayField(TEXT("types"))[0]->AsObject();
+			TypeJson->SetStringField(TEXT("stable_type_id"), Metadata->GetStringField(TEXT("type_id")));
+			const TSharedPtr<FJsonObject> FunctionJson = TypeJson->GetArrayField(TEXT("functions"))[0]->AsObject();
+			FunctionJson->SetStringField(TEXT("stable_member_id"), Metadata->GetStringField(TEXT("method_id")));
+			FunctionJson->SetStringField(TEXT("export_name"), Metadata->GetStringField(TEXT("export_name")));
+			FString RegistryText;
+			if (!FJsonSerializer::Serialize(RegistryJson.ToSharedRef(), TJsonWriterFactory<>::Create(&RegistryText))) return false;
+			TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot> Types;
+			FString Error;
+			if (!TestTrue(TEXT("Registry accepts the compiled entry ABI"), FAvidScriptGeneratedTypeRegistry::BuildFromJson(RegistryText, Types, Error))) { AddError(Error); return false; }
+			FAvidScriptObjectRegistry Objects;
+			TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> Receiver(NewObject<UAvidScriptGeneratedTypeSessionTestObject>());
+			FAvidScriptObjectHandleResult HandleResult;
+			const auto Handle = Objects.RegisterObject(Receiver.Get(), HandleResult, false);
+			if (!TestTrue(TEXT("Owner handle registers"), Handle.IsValid())) return false;
+			FAvidScriptRuntimeSession Session;
+			FAvidScriptWasmHostContext Context;
+			Context.ObjectRegistry = &Objects;
+			Context.OwnerHandle = Handle;
+			Session.SetHostContext(Context);
+			if (!TestTrue(TEXT("Configure compiled CSharp owner"), Session.ConfigureGeneratedTypeInstance(*Receiver, Handle, 0, Types, Error))) { AddError(Error); return false; }
+			FAvidScriptVmBackendSelection Selection;
+			Selection.BackendKind = Backend;
+			Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime ? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+			Session.SetBackendSelectionForTesting(Selection);
+			FAvidScriptWasmReloadManifest Manifest;
+			Manifest.ModuleId = TEXT("csharp_ue_receiver");
+			Manifest.AbiVersion = FAvidScriptWasmReloadManifest::SupportedAbiVersion;
+			Manifest.Language = TEXT("csharp");
+			Manifest.RequiredExports = {TEXT("avid_on_begin_play")};
+			for (const auto& Import : Metadata->GetArrayField(TEXT("imports")))
+				Manifest.RequiredImports.Add({Import->AsObject()->GetStringField(TEXT("module")), Import->AsObject()->GetStringField(TEXT("name"))});
+			FAvidScriptWasmReloadResult Load;
+			if (!TestTrue(TEXT("Load compiler-produced receiver module"), Session.LoadInitialModule(Wasm.GetData(), Wasm.Num(), Manifest, Load))) { AddError(Load.ErrorMessage); return false; }
+			int32 Result = -1;
+			const bool bCalled = FAvidScriptGeneratedTypeDispatcher::Invoke(Receiver.Get(), 0, 0, {}, &Result);
+			if (!TestEqual(TEXT("Receiver execution or null binding rejection"), bCalled, !bNull)) return false;
+			if (bNull)
+			{
+				TestTrue(TEXT("Null receiver binding quarantines the Session"), Session.GetSnapshot().bFaultQuarantined);
+				TestFalse(TEXT("Faulted module is unloaded"), Session.GetSnapshot().bHasActiveRuntime);
+			}
+			else
+			{
+				TestEqual(TEXT("UE delegates and captures match .NET result"), Result, 511);
+				auto* Runtime = Session.GetLiveRuntimeForTesting();
+				if (!TestNotNull(TEXT("Receiver runtime remains live"), Runtime)) return false;
+				auto* Heap = Runtime->GetManagedHeapForTesting();
+				if (!TestNotNull(TEXT("Receiver contexts use managed heap"), Heap)) return false;
+				TestTrue(TEXT("Repeated receiver bindings allocated contexts"), Heap->GetStats().Allocations >= 64);
+				if (File.EndsWith(TEXT("-stress"))) TestTrue(TEXT("Receiver contexts survive collection at every allocation"), Heap->GetStats().Collections >= Heap->GetStats().Allocations);
+				TestEqual(TEXT("Receiver invocation frames unwind"), Heap->GetStats().ActiveFrames, 0u);
+				TestEqual(TEXT("Receiver invocation roots unwind"), Heap->GetStats().LiveRoots, 0u);
+				TestTrue(TEXT("Detached receiver contexts collect"), Heap->Collect() == AvidScript::Managed::EHeapError::Ok);
+				TestEqual(TEXT("Receiver boxes and captured environments released"), Heap->GetStats().LiveObjects, 0u);
+				FAvidScriptWasmReloadResult Reload;
+				if (!TestTrue(TEXT("CSharp receiver module body reloads"), Session.ReloadModule(Wasm.GetData(), Wasm.Num(), Manifest, Reload))) { AddError(Reload.ErrorMessage); return false; }
+				TestTrue(TEXT("Reloaded receiver executes"), FAvidScriptGeneratedTypeDispatcher::Invoke(Receiver.Get(), 0, 0, {}, &Result));
+				TestEqual(TEXT("Reloaded result preserves delegate semantics"), Result, 511);
+				TestTrue(TEXT("Retire owner handle"), Objects.ReleaseHandle(Handle, HandleResult, false));
+				TestFalse(TEXT("Compiled receiver cannot execute after owner retirement"), FAvidScriptGeneratedTypeDispatcher::Invoke(Receiver.Get(), 0, 0, {}, &Result));
+			}
+			FAvidScriptWasmSmokeResult Stop;
+			Session.StopAndUnload(Stop);
+			TestTrue(TEXT("Compiled receiver route releases"), Session.ClearGeneratedTypeInstance(Error));
+		}
+	}
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(

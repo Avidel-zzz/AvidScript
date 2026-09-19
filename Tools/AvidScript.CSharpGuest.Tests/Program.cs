@@ -6,6 +6,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--ue-receivers")
+            {
+                int focusedCount = CSharpGuestUeReceiverTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.UeReceivers: {focusedCount}/{focusedCount} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--reference-objects")
             {
                 int focusedCount = CSharpGuestReferenceObjectTests.Run();
@@ -82,7 +88,7 @@ internal static class Program
                 + CSharpGuestManagedDelegateTests.Run()
                 + CSharpGuestLambdaTests.Run()
                 + CSharpGuestClosureContractTests.Run() + CSharpGuestClosureExecutionTests.Run()
-                + CSharpGuestClassContractTests.Run() + CSharpGuestDispatchContractTests.Run();
+                + CSharpGuestClassContractTests.Run() + CSharpGuestDispatchContractTests.Run() + CSharpGuestUeReceiverTests.Run();
             Console.WriteLine($"AvidScript.CSharpGuest.Tests: {count}/{count} passed");
             return 0;
         }

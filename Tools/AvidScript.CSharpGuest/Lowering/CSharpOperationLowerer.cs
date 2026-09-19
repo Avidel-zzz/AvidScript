@@ -444,6 +444,7 @@ internal static class CSharpOperationLowerer
         }
 
         bool shortCircuit = operation.OperatorKind is "logical_and" or "logical_or";
+        if (CSharpUeReceivers.TryEquality(context, operation, blockOrdinal, instructions, out GuestRegister? ueEquality)) return ueEquality;
         if (operation.Children.Any(child =>
                 context.Document.DelegateTypes.Any(signature => signature.TypeId == child.TypeId)))
         {
@@ -854,7 +855,8 @@ internal static class CSharpOperationLowerer
         }
 
         if (operation.Constant is { Kind: "null" } && context.TryGetGuestType(operation.TypeId, out GuestType nullType)
-            && (nullType.Kind is "function_ref" or "managed_ref" || context.Document.DelegateTypes.Any(signature => signature.TypeId == nullType.Id)))
+            && (nullType.Kind is "function_ref" or "managed_ref" || CSharpUeReceivers.IsType(context.Document, nullType.Id)
+                || context.Document.DelegateTypes.Any(signature => signature.TypeId == nullType.Id)))
             return LowerLiteral(context, operation, blockOrdinal, instructions);
 
         GuestRegister? operand = LowerValue(context, operation.Children[0], blockOrdinal, instructions);

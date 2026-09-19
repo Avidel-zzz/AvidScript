@@ -54,6 +54,8 @@ internal static class CSharpTypeLowerer
         }
         if (document.UeTypeDeclarations.Count != 0)
         {
+            AddTypeIfMissing(rawTypes, Scalar("type:int32", "i32", 4, 4));
+            AddTypeIfMissing(rawTypes, Scalar("type:uint64", "i64", 8, 8));
             AddTypeIfMissing(rawTypes, new GuestType(
                 CSharpGuestIds.VoidTypeId,
                 "void",

@@ -54,6 +54,7 @@ public static class CSharpGuestLowerer
             dataPool,
             diagnostics).ToList();
         CSharpReferenceObjects.AddGuards(document, functions);
+        CSharpUeReceivers.AddGuards(document, functions);
         functions.AddRange(CSharpClosureDelegateLowerer.BuildThunks(document, functions));
         functions.AddRange(CSharpDelegateComposition.Build(document));
         functions.AddRange(CSharpDelegateIdentityLowerer.Build(document, functions));
@@ -66,6 +67,7 @@ public static class CSharpGuestLowerer
             dataPool,
             diagnostics);
         functions.AddRange(asyncMethods.Functions);
+        imports = CSharpUeReceivers.AppendImports(document, imports, functions);
         imports = AppendUePropertyImports(
             document,
             imports,
@@ -250,8 +252,9 @@ public static class CSharpGuestLowerer
         }
 
         if (document.ClosureEnvironments.Any(environment => environment.Allocation is null
-            || environment.Cells.Any(cell => cell.Kind == "receiver" && !CSharpReferenceObjects.Types(document).Contains(cell.TypeId))))
-            Add(diagnostics, "ASCG1024", "Closure execution requires synchronous allocation metadata and supported source reference receivers; UE receivers and async roots are not yet connected.");
+            || environment.Cells.Any(cell => cell.Kind == "receiver" && !CSharpReferenceObjects.Types(document).Contains(cell.TypeId)
+                && !CSharpUeReceivers.IsType(document, cell.TypeId))))
+            Add(diagnostics, "ASCG1024", "Closure execution requires synchronous allocation metadata and supported source reference or UE receivers; persistent async roots are not yet connected.");
 
         if (document.ControlFlowGraphs
             .GroupBy(graph => graph.MethodSymbolId, StringComparer.Ordinal)

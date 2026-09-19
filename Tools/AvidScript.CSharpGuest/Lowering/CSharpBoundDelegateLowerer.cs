@@ -20,6 +20,7 @@ internal static class CSharpBoundDelegateLowerer
         var callables = document.Callables.ToDictionary(callable => callable.MethodSymbolId, StringComparer.Ordinal);
         var structs = document.Types.Where(type => type.Kind == "struct" && type.IsValueType).Select(type => type.Id).ToHashSet(StringComparer.Ordinal);
         structs.UnionWith(CSharpReferenceObjects.Types(document));
+        structs.UnionWith(document.UeTypeDeclarations.Where(type => CSharpUeReceivers.IsType(document, type.TypeId)).Select(type => type.TypeId));
         HashSet<string> used = new(StringComparer.Ordinal);
         Stack<SemanticOperation> pending = new(document.Methods.Select(method => method.Root));
         foreach (SemanticBasicBlock block in document.ControlFlowGraphs.SelectMany(graph => graph.Blocks))
@@ -56,10 +57,12 @@ internal static class CSharpBoundDelegateLowerer
         if (target.Dispatch?.Kind is "virtual" or "interface"
             || target.Children.Count != 1 || target.Children[0].TypeId != callable.ContainingTypeId
             || !Methods(context.Document).Contains(callable.MethodSymbolId)
-            || !context.TryGetGuestType(callable.ContainingTypeId, out GuestType type) || type.Kind is not ("struct" or "managed_ref"))
+            || !context.TryGetGuestType(callable.ContainingTypeId, out GuestType type)
+            || type.Kind is not ("struct" or "managed_ref") && !CSharpUeReceivers.IsType(context.Document, type.Id))
         { context.Add("ASCG1024", "Bound delegate receiver requires a supported exact Guest value or reference instance method."); return null; }
         GuestRegister? receiver = CSharpOperationLowerer.LowerValue(context, target.Children[0], block, instructions);
         if (receiver is null) return null;
+        if (CSharpUeReceivers.IsType(context.Document, type.Id)) CSharpUeReceivers.Require(context, receiver, block, instructions);
         if (type.Kind == "managed_ref")
         {
             CSharpReferenceObjects.Require(receiver, instructions);
@@ -77,6 +80,14 @@ internal static class CSharpBoundDelegateLowerer
 
     public static string ThunkReceiver(SemanticDocument document, SemanticCallable callable, List<GuestRegister> locals, List<GuestInstruction> instructions)
     {
+        if (CSharpUeReceivers.IsType(document, callable.ContainingTypeId))
+        {
+            locals.Add(new("receiver:box", CSharpClosureLayout.Reference(Box(callable.MethodSymbolId))));
+            locals.Add(new("receiver:ue", callable.ContainingTypeId));
+            instructions.Add(new("managed_cast", "receiver:box", new[] { "context" }, null, null, null));
+            instructions.Add(new("managed_get", "receiver:ue", new[] { "receiver:box" }, ReceiverField, null, null));
+            return "receiver:ue";
+        }
         if (CSharpReferenceObjects.Types(document).Contains(callable.ContainingTypeId))
         {
             locals.Add(new("receiver:object", callable.ContainingTypeId));

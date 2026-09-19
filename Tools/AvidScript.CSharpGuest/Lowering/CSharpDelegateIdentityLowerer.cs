@@ -58,7 +58,8 @@ internal static class CSharpDelegateIdentityLowerer
             blocks.Add(Block("entry", new[] { Field(a, "a", CSharpClosureLayout.TargetField), Field(b, "b", CSharpClosureLayout.TargetField), Eq(same, a, b) }, Branch(same, "context", "false")));
             string ca = Local("context:a", CSharpClosureLayout.ObjectType), cb = Local("context:b", CSharpClosureLayout.ObjectType), sameContext = Local("same:context", Bool);
             var targets = document.Callables.Select(callable => (Callable: callable, Thunk: CSharpClosureLayout.Thunk(callable.MethodSymbolId, signature.TypeId)))
-                .Where(item => existing.Contains(item.Thunk) && CSharpClosureLayout.Environments(document, item.Callable.MethodSymbolId).Count > 0)
+                .Where(item => existing.Contains(item.Thunk) && (CSharpClosureLayout.Environments(document, item.Callable.MethodSymbolId).Count > 0
+                    || !item.Callable.IsStatic && CSharpUeReceivers.IsType(document, item.Callable.ContainingTypeId)))
                 .OrderBy(item => item.Thunk, StringComparer.Ordinal).ToArray();
             blocks.Add(Block("context", new[] { Field(ca, "a", CSharpClosureLayout.ContextField), Field(cb, "b", CSharpClosureLayout.ContextField), Eq(sameContext, ca, cb) },
                 Branch(sameContext, "true", targets.Length == 0 ? "false" : "case:0")));
@@ -68,6 +69,17 @@ internal static class CSharpDelegateIdentityLowerer
                 string candidate = Local(prefix + ":target", functionType), matches = Local(prefix + ":matches", Bool);
                 blocks.Add(Block(prefix, new[] { new GuestInstruction("function_ref", candidate, Array.Empty<string>(), target.Thunk, null, null), Eq(matches, a, candidate) },
                     Branch(matches, prefix + ":cast", i + 1 < targets.Length ? "case:" + (i + 1) : "false")));
+                if (!target.Callable.IsStatic && CSharpUeReceivers.IsType(document, target.Callable.ContainingTypeId))
+                {
+                    string boxType = CSharpClosureLayout.Reference(CSharpBoundDelegateLowerer.Box(target.Callable.MethodSymbolId));
+                    string boxA = Local(prefix + ":box:a", boxType), boxB = Local(prefix + ":box:b", boxType);
+                    string receiverA = Local(prefix + ":receiver:a", target.Callable.ContainingTypeId), receiverB = Local(prefix + ":receiver:b", target.Callable.ContainingTypeId);
+                    string equal = Local(prefix + ":same", Bool);
+                    blocks.Add(Block(prefix + ":cast", new[] { Cast(boxA, ca), Cast(boxB, cb),
+                        Get(receiverA, boxA, CSharpBoundDelegateLowerer.ReceiverField), Get(receiverB, boxB, CSharpBoundDelegateLowerer.ReceiverField),
+                        Eq(equal, receiverA, receiverB) }, Branch(equal, "true", "false")));
+                    continue;
+                }
                 string bindingType = CSharpClosureLayout.Reference(CSharpClosureLayout.Binding(target.Callable.MethodSymbolId));
                 string ba = Local(prefix + ":a", bindingType), bb = Local(prefix + ":b", bindingType);
                 blocks.Add(Block(prefix + ":cast", new[] { Cast(ba, ca), Cast(bb, cb) }, new("branch", null, prefix + ":env:0", null, null)));
