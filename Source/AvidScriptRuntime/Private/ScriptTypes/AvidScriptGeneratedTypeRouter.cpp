@@ -2,6 +2,10 @@
 
 namespace
 {
+// GameThread-only, never recycled by Router shutdown/startup.
+uint64 GGeneratedRegistrationSerial = 0;
+uint64 GGeneratedInvocationSerial = 0;
+
 struct FGeneratedTypeInstanceRoute
 {
 	FAvidScriptObjectHandle ReceiverHandle;
@@ -13,7 +17,9 @@ struct FGeneratedTypeInstanceRoute
 struct FAvidScriptGeneratedTypeRouter::FImpl
 {
 	TMap<FObjectKey, FGeneratedTypeInstanceRoute> Routes;
-	uint64 NextSerial = 1;
+	TArray<FAvidScriptGeneratedInvocation> InvocationStack;
+	uint32 ChainEntries = 0;
+	EAvidScriptGeneratedInvocationFailure ChainFailure = EAvidScriptGeneratedInvocationFailure::None;
 	int32 ActiveDispatchDepth = 0;
 	bool bInstalled = false;
 };
@@ -92,6 +98,7 @@ bool FAvidScriptGeneratedTypeRouter::Startup()
 	}
 
 	Impl = MakeUnique<FImpl>();
+	Impl->InvocationStack.Reserve(MaxInvocationDepth);
 	Impl->bInstalled = FAvidScriptGeneratedTypeDispatcher::Install(*this);
 	if (!Impl->bInstalled)
 	{
@@ -148,11 +155,11 @@ bool FAvidScriptGeneratedTypeRouter::RegisterInstance(
 		return false;
 	}
 
-	uint64 Serial = Impl->NextSerial++;
-	if (Serial == 0)
+	if (GGeneratedRegistrationSerial == MAX_uint64)
 	{
-		Serial = Impl->NextSerial++;
+		return false;
 	}
+	const uint64 Serial = ++GGeneratedRegistrationSerial;
 	Impl->Routes.Add(ReceiverKey, FGeneratedTypeInstanceRoute{ ReceiverHandle, &Instance, Serial });
 	OutRegistration.ReceiverKey = ReceiverKey;
 	OutRegistration.Instance = &Instance;
@@ -199,17 +206,61 @@ bool FAvidScriptGeneratedTypeRouter::InvokeGeneratedTypeMember(
 {
 	if (!Impl
 		|| !Impl->bInstalled
-		|| !IsInGameThread()
-		|| Receiver.HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject | RF_BeginDestroyed | RF_FinishDestroyed))
+		|| !IsInGameThread())
 	{
 		return false;
+	}
+	if (Impl->InvocationStack.IsEmpty())
+	{
+		Impl->ChainEntries = 0;
+		Impl->ChainFailure = EAvidScriptGeneratedInvocationFailure::None;
+	}
+	const auto Fail = [this](EAvidScriptGeneratedInvocationFailure Failure)
+	{
+		if (Impl->ChainFailure == EAvidScriptGeneratedInvocationFailure::None)
+		{
+			Impl->ChainFailure = Failure;
+		}
+		return false;
+	};
+	if (Impl->ChainFailure != EAvidScriptGeneratedInvocationFailure::None) return false;
+	if (!IsValid(&Receiver)
+		|| Receiver.HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject | RF_BeginDestroyed | RF_FinishDestroyed))
+	{
+		return Fail(EAvidScriptGeneratedInvocationFailure::InvalidReceiver);
 	}
 
 	FGeneratedTypeInstanceRoute* Route = Impl->Routes.Find(FObjectKey(&Receiver));
 	if (Route == nullptr || Route->Instance == nullptr || !Route->ReceiverHandle.IsValid())
 	{
-		return false;
+		return Fail(EAvidScriptGeneratedInvocationFailure::UnregisteredReceiver);
 	}
+	const uint64 Generation = Route->Instance->GetGeneratedExecutionGeneration();
+	if (Generation == 0) return Fail(EAvidScriptGeneratedInvocationFailure::InvalidGeneration);
+	if (Impl->InvocationStack.Num() >= static_cast<int32>(MaxInvocationDepth))
+		return Fail(EAvidScriptGeneratedInvocationFailure::DepthLimit);
+	if (Impl->ChainEntries >= MaxInvocationsPerChain)
+		return Fail(EAvidScriptGeneratedInvocationFailure::EntryLimit);
+	if (GGeneratedInvocationSerial == MAX_uint64)
+		return Fail(EAvidScriptGeneratedInvocationFailure::IdentityExhausted);
+
+	FAvidScriptGeneratedInvocation Invocation;
+	Invocation.InvocationId = ++GGeneratedInvocationSerial;
+	Invocation.RootInvocationId = Impl->InvocationStack.IsEmpty()
+		? Invocation.InvocationId : Impl->InvocationStack[0].InvocationId;
+	if (!Impl->InvocationStack.IsEmpty())
+	{
+		Invocation.ParentInvocationId = Impl->InvocationStack.Last().InvocationId;
+		Invocation.SourceRegistrationId = Impl->InvocationStack.Last().TargetRegistrationId;
+	}
+	Invocation.TargetRegistrationId = Route->Serial;
+	Invocation.ExecutionGeneration = Generation;
+	Invocation.ReceiverHandle = Route->ReceiverHandle;
+	Invocation.TypeOrdinal = TypeOrdinal;
+	Invocation.MemberOrdinal = MemberOrdinal;
+	Invocation.Depth = static_cast<uint32>(Impl->InvocationStack.Num()) + 1;
+	Impl->InvocationStack.Add(Invocation);
+	++Impl->ChainEntries;
 
 	++Impl->ActiveDispatchDepth;
 	const bool bInvoked = Route->Instance->InvokeGeneratedTypeMember(
@@ -219,8 +270,25 @@ bool FAvidScriptGeneratedTypeRouter::InvokeGeneratedTypeMember(
 		MemberOrdinal,
 		Arguments,
 		Result);
+	if (!bInvoked) Fail(EAvidScriptGeneratedInvocationFailure::TargetFailure);
+	if (Route->Instance->GetGeneratedExecutionGeneration() != Generation)
+		Fail(EAvidScriptGeneratedInvocationFailure::GenerationChanged);
 	--Impl->ActiveDispatchDepth;
-	return bInvoked;
+	Impl->InvocationStack.Pop(EAllowShrinking::No);
+	return bInvoked && Impl->ChainFailure == EAvidScriptGeneratedInvocationFailure::None;
+}
+
+bool FAvidScriptGeneratedTypeRouter::GetActiveInvocation(FAvidScriptGeneratedInvocation& OutInvocation) const
+{
+	OutInvocation = {};
+	if (!IsInGameThread() || !Impl || Impl->InvocationStack.IsEmpty()) return false;
+	OutInvocation = Impl->InvocationStack.Last();
+	return true;
+}
+
+EAvidScriptGeneratedInvocationFailure FAvidScriptGeneratedTypeRouter::GetInvocationFailure() const
+{
+	return IsInGameThread() && Impl ? Impl->ChainFailure : EAvidScriptGeneratedInvocationFailure::None;
 }
 
 #if WITH_DEV_AUTOMATION_TESTS

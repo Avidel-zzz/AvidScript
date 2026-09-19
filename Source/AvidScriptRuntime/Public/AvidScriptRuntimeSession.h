@@ -112,6 +112,10 @@ public:
 	void ClearHostContext();
 	// Validates the current generated instance authority without entering Guest code.
 	bool ValidateGeneratedTypeReceiver(int64 PackedSelf, uint32 TypeOrdinal) const;
+	uint64 GetGeneratedExecutionGeneration() const override
+	{
+		return GeneratedExecutionGeneration;
+	}
 	void UnloadLive();
 	bool ConfigureGeneratedTypeInstance(
 		UObject& Receiver,
@@ -286,6 +290,7 @@ private:
 	int32 SuccessfulReloadCount = 0;
 	int32 RejectedReloadCount = 0;
 	int32 ActiveGuestCallDepth = 0;
+	uint64 GeneratedExecutionGeneration = 0;
 	bool bMutationInProgress = false;
 	bool bBorrowedHandlePrunePending = false;
 	bool bFaultQuarantined = false;

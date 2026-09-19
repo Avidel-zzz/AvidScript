@@ -6,10 +6,36 @@
 
 class FAvidScriptGeneratedTypeRouter;
 
+enum class EAvidScriptGeneratedInvocationFailure : uint8
+{
+	None, InvalidReceiver, UnregisteredReceiver, InvalidGeneration,
+	DepthLimit, EntryLimit, IdentityExhausted, TargetFailure, GenerationChanged
+};
+
+// Native call-chain identity, not a Guest capability or a cross-domain ABI.
+struct FAvidScriptGeneratedInvocation
+{
+	uint64 InvocationId = 0;
+	uint64 RootInvocationId = 0;
+	uint64 ParentInvocationId = 0;
+	uint64 SourceRegistrationId = 0;
+	uint64 TargetRegistrationId = 0;
+	uint64 ExecutionGeneration = 0;
+	FAvidScriptObjectHandle ReceiverHandle;
+	uint32 TypeOrdinal = 0;
+	uint32 MemberOrdinal = 0;
+	uint32 Depth = 0;
+};
+
 class AVIDSCRIPTRUNTIME_API IAvidScriptGeneratedTypeInstance
 {
 public:
 	virtual ~IAvidScriptGeneratedTypeInstance() = default;
+
+	// Zero means no code generation has been published. Retired targets keep the
+	// last generation for rejection diagnostics; this is not entry authorization.
+	// Successful code replacement advances it even if a VM address is reused.
+	virtual uint64 GetGeneratedExecutionGeneration() const = 0;
 
 	virtual bool InvokeGeneratedTypeMember(
 		UObject& Receiver,
@@ -54,6 +80,10 @@ class AVIDSCRIPTRUNTIME_API FAvidScriptGeneratedTypeRouter final
 {
 public:
 	static FAvidScriptGeneratedTypeRouter& Get();
+	static constexpr uint32 MaxInvocationDepth = 64;
+	static constexpr uint32 MaxInvocationsPerChain = 4096;
+	bool GetActiveInvocation(FAvidScriptGeneratedInvocation& OutInvocation) const;
+	EAvidScriptGeneratedInvocationFailure GetInvocationFailure() const;
 
 	bool Startup();
 	void Shutdown();

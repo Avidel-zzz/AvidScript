@@ -11,6 +11,7 @@ namespace
 class FGeneratedTypeInstance final : public IAvidScriptGeneratedTypeInstance
 {
 public:
+	uint64 GetGeneratedExecutionGeneration() const override { return 1; }
 	bool InvokeGeneratedTypeMember(
 		UObject& Receiver,
 		const FAvidScriptObjectHandle& ReceiverHandle,

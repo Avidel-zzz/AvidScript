@@ -2191,6 +2191,12 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 	bool bUseHostEffectTransaction,
 	FAvidScriptWasmReloadResult& OutResult)
 {
+	if (GeneratedExecutionGeneration == MAX_uint64)
+	{
+		SetReloadFailure(OutResult, TEXT("<runtime>"), TEXT("execution_generation_exhausted"),
+			TEXT("Session execution generation cannot be reused"), TEXT("create a new Session"));
+		return false;
+	}
 	if (!CandidateRuntime)
 	{
 		SetReloadFailure(
@@ -2454,6 +2460,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 	CandidateRuntime->SetHostContext(CandidateHostContext);
 	OutResult.RuntimeResult = BeginPlayResult;
 	LiveRuntime = MoveTemp(CandidateRuntime);
+	++GeneratedExecutionGeneration;
 	if (GeneratedTypeInstance)
 	{
 		GeneratedTypeInstance->PreparedTypeRoutes = MoveTemp(CandidateGeneratedTypeRoutes);

@@ -518,6 +518,8 @@ bool FAvidScriptGeneratedTypeSessionTest::RunTest(const FString& Parameters)
 			TConstArrayView<FAvidScriptGeneratedCallArgument>(),
 			&ScriptResult));
 	TestEqual(TEXT("Packed ObjectHandle low cell reaches C# this"), ScriptResult, 17);
+	const uint64 InitialGeneration = Session.GetGeneratedExecutionGeneration();
+	TestTrue(TEXT("Loaded Session has a nonzero execution generation"), InitialGeneration != 0);
 
 	FAvidScriptWasmReloadResult ReloadResult;
 	TestTrue(
@@ -533,9 +535,11 @@ bool FAvidScriptGeneratedTypeSessionTest::RunTest(const FString& Parameters)
 			TConstArrayView<FAvidScriptGeneratedCallArgument>(),
 			&ScriptResult));
 	TestEqual(TEXT("Reloaded export preserves receiver identity"), ScriptResult, 17);
+	TestEqual(TEXT("Committed reload advances execution generation"), Session.GetGeneratedExecutionGeneration(), InitialGeneration + 1);
 
 	FAvidScriptWasmSmokeResult StopResult;
 	TestTrue(TEXT("Session unload succeeds"), Session.StopAndUnload(StopResult));
+	TestEqual(TEXT("Unloaded code retains its last identity for rejection diagnostics"), Session.GetGeneratedExecutionGeneration(), InitialGeneration + 1);
 	TestFalse(
 		TEXT("Unloaded Session fences generated dispatch"),
 		FAvidScriptGeneratedTypeDispatcher::Invoke(
