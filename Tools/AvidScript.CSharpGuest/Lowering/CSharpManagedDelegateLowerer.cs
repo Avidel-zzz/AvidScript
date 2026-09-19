@@ -72,7 +72,7 @@ internal static class CSharpManagedDelegateLowerer
                 return true;
             }
             if (!CSharpCallOperationLowerer.TryLowerArguments(context, new[] { parameters[ordinal] }, new[] { argument },
-                blockOrdinal, instructions, out List<string> lowered)) return true;
+                blockOrdinal, instructions, out List<string> lowered, CSharpBorrowedReferences.Enabled(context.Document))) return true;
             arguments[ordinal] = lowered[0];
         }
         if (signature.ReturnTypeId != CSharpGuestIds.VoidTypeId)
@@ -110,7 +110,7 @@ internal static class CSharpManagedDelegateLowerer
             .OrderBy(signature => signature.TypeId, StringComparer.Ordinal)
             .Select(signature => new GuestFunctionReference(FunctionType(signature),
                 (closures ? new[] { CSharpClosureLayout.ObjectType } : Array.Empty<string>())
-                    .Concat(signature.Parameters.Select(parameter => parameter.RefKind == "none" ? parameter.TypeId : CSharpGuestIds.AddressTypeId)).ToArray(),
+                    .Concat(signature.Parameters.Select(parameter => CSharpBorrowedReferences.Parameter(document, parameter.TypeId, parameter.RefKind))).ToArray(),
                 signature.ReturnTypeId, targets[FunctionType(signature)].ToArray())).ToArray();
     }
 

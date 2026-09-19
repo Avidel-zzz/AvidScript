@@ -74,7 +74,7 @@ internal static class CSharpOperationLowerer
             "increment_or_decrement" => LowerIncrementOrDecrement(
                 context, operation, blockOrdinal, instructions),
             "instance_reference" => CSharpAggregateOperationLowerer.LowerInstance(
-                context, operation, blockOrdinal),
+                context, operation, blockOrdinal, instructions),
             "invocation" => CSharpCallOperationLowerer.LowerInvocation(
                 context, operation, blockOrdinal, instructions),
             "literal" => LowerLiteral(context, operation, blockOrdinal, instructions),
@@ -939,8 +939,10 @@ internal static class CSharpOperationLowerer
         CSharpFunctionLoweringContext context,
         SemanticOperation operation,
         int blockOrdinal,
-        List<GuestInstruction> instructions)
+        List<GuestInstruction> instructions,
+        bool borrowed = false)
     {
+        if (borrowed) return CSharpBorrowedReferences.Address(context, operation, blockOrdinal, instructions);
         SemanticOperation target = operation.Kind is "argument" or "declaration_expression"
             && operation.Children.Count == 1
                 ? operation.Children[0]
@@ -992,6 +994,8 @@ internal static class CSharpOperationLowerer
     {
         if (storageIsAddress)
         {
+            if (CSharpBorrowedReferences.IsBorrowed(context, storage))
+            { context.Add("ASCG1024", "A traced Guest reference cannot cross a raw Host ABI boundary."); return null; }
             return storage;
         }
 
@@ -1159,7 +1163,7 @@ internal static class CSharpOperationLowerer
             && parameter.RefKind != "none";
         instructions.Add(indirect
             ? new GuestInstruction(
-                "indirect_load", result.Id, new[] { storage.Id }, operation.TypeId, null, null)
+                CSharpBorrowedReferences.IsBorrowed(context, storage) ? "borrow_load" : "indirect_load", result.Id, new[] { storage.Id }, operation.TypeId, null, null)
             : new GuestInstruction(
                 "local_load", result.Id, Array.Empty<string>(), storage.Id, null, null));
         return result;
@@ -1234,7 +1238,7 @@ internal static class CSharpOperationLowerer
                 && parameter.RefKind != "none";
             instructions.Add(indirect
                 ? new GuestInstruction(
-                    "indirect_store",
+                    CSharpBorrowedReferences.IsBorrowed(context, storage) ? "borrow_store" : "indirect_store",
                     null,
                     new[] { storage.Id, value.Id },
                     target.TypeId,

@@ -123,6 +123,10 @@ internal static class CSharpCallOperationLowerer
             return null;
         }
 
+        if ((context.TryGetPropertyGetter(operation.SymbolId, out SemanticCallable accessor, out _)
+                || context.TryGetPropertySetter(operation.SymbolId, out accessor, out _))
+            && CSharpBorrowedReferences.BorrowedReceiver(context, accessor))
+            return CSharpBorrowedReferences.Receiver(context, operation.Children[0], blockOrdinal, instructions, accessor);
         if (context.ClosureCells.RejectValueReceiverBorrow(operation.Children[0])) return null;
         return CSharpOperationLowerer.LowerValue(
             context,
@@ -242,12 +246,15 @@ internal static class CSharpCallOperationLowerer
                 operation.Children,
                 blockOrdinal,
                 instructions,
-                out List<string> arguments))
+                out List<string> arguments, CSharpBorrowedReferences.Enabled(context.Document)))
         {
             return null;
         }
 
-        arguments.Insert(0, instance.Id);
+        GuestRegister? constructorReceiver = CSharpBorrowedReferences.BorrowedReceiver(context, constructor)
+            ? CSharpBorrowedReferences.Storage(context, instance, blockOrdinal, instructions) : instance;
+        if (constructorReceiver is null) return null;
+        arguments.Insert(0, constructorReceiver.Id);
         CSharpOperationLowerer.EmitCall(
             context,
             constructor,
@@ -276,8 +283,11 @@ internal static class CSharpCallOperationLowerer
                 return false;
             }
 
-            if (context.ClosureCells.RejectValueReceiverBorrow(children[0])) return false;
-            GuestRegister? receiver = CSharpOperationLowerer.LowerValue(
+            bool borrowedReceiver = CSharpBorrowedReferences.BorrowedReceiver(context, callable);
+            if (!borrowedReceiver && context.ClosureCells.RejectValueReceiverBorrow(children[0])) return false;
+            GuestRegister? receiver = borrowedReceiver
+                ? CSharpBorrowedReferences.Receiver(context, children[0], blockOrdinal, instructions, callable)
+                : CSharpOperationLowerer.LowerValue(
                 context,
                 children[0],
                 blockOrdinal,
@@ -313,7 +323,7 @@ internal static class CSharpCallOperationLowerer
                 arguments,
                 blockOrdinal,
                 instructions,
-                out List<string> loweredArguments))
+                out List<string> loweredArguments, callable.Import is null && CSharpBorrowedReferences.Enabled(context.Document)))
         {
             return false;
         }
@@ -328,7 +338,8 @@ internal static class CSharpCallOperationLowerer
         IReadOnlyList<SemanticOperation> arguments,
         int blockOrdinal,
         List<GuestInstruction> instructions,
-        out List<string> operands)
+        out List<string> operands,
+        bool borrowed = false)
     {
         operands = new List<string>();
         if (parameters.Count != arguments.Count)
@@ -351,7 +362,7 @@ internal static class CSharpCallOperationLowerer
                 : argument;
             GuestRegister? operand = parameters[index].RefKind == "none"
                 ? CSharpOperationLowerer.LowerValue(context, value, blockOrdinal, instructions)
-                : CSharpOperationLowerer.LowerAddress(context, value, blockOrdinal, instructions);
+                : CSharpOperationLowerer.LowerAddress(context, value, blockOrdinal, instructions, borrowed);
             if (operand is null)
             {
                 return false;

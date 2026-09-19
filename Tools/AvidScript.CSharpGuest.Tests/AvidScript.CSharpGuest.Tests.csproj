@@ -13,5 +13,13 @@
     <ProjectReference Include="../AvidScript.CSharpSemantic/AvidScript.CSharpSemantic.csproj" />
     <ProjectReference Include="../AvidScript.GuestIr/AvidScript.GuestIr.csproj" />
     <ProjectReference Include="../AvidScript.WasmBackend/AvidScript.WasmBackend.csproj" />
+    <Reference Include="Microsoft.CodeAnalysis">
+      <HintPath>$(MSBuildSDKsPath)/../Roslyn/bincore/Microsoft.CodeAnalysis.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Microsoft.CodeAnalysis.CSharp">
+      <HintPath>$(MSBuildSDKsPath)/../Roslyn/bincore/Microsoft.CodeAnalysis.CSharp.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
 </Project>

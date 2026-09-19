@@ -229,7 +229,7 @@ internal static class SemanticSymbolProjector
             SemanticSpanFactory.Create(sourceText, syntax.Span))
         {
             IsConst = symbol is IFieldSymbol constField && constField.IsConst,
-            IsReadonly = symbol is IFieldSymbol readonlyField && readonlyField.IsReadOnly,
+            IsReadonly = symbol is IFieldSymbol { IsReadOnly: true } or IMethodSymbol { IsReadOnly: true },
             IsExecutableReferenceSource = isExecutableReferenceSource,
         };
         if (!symbols.TryAdd(id, projected))

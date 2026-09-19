@@ -32,7 +32,10 @@ internal sealed class CSharpClosureCells
     public bool RequiresManagedAddress(SemanticOperation operation) => RequiresManagedAddress(operation, new(StringComparer.Ordinal));
     private bool RequiresManagedAddress(SemanticOperation operation, HashSet<string> visited)
     {
-        if (operation.Kind is "local_reference" or "parameter_reference") return Has(operation.SymbolId);
+        if (operation.Kind is "local_reference" or "parameter_reference") return Has(operation.SymbolId)
+            || (context.TryGetStorage(operation.SymbolId, out GuestRegister storage) && CSharpBorrowedReferences.IsBorrowed(context, storage));
+        if (operation.Kind == "instance_reference" && context.ThisRegister is { } instance)
+            return CSharpBorrowedReferences.IsBorrowed(context, instance);
         if (operation.Kind == "flow_capture_reference" && operation.CaptureId is { } capture
             && visited.Add(capture) && context.TryGetCaptureTarget(capture, out SemanticOperation source))
             return RequiresManagedAddress(source, visited);
@@ -48,6 +51,14 @@ internal sealed class CSharpClosureCells
         return true;
     }
     public GuestRegister? Environment(string id) => environments.GetValueOrDefault(id);
+    public bool TryAddress(string? symbol, string? type, int block, List<GuestInstruction> instructions, out GuestRegister? reference)
+    {
+        reference = null;
+        if (symbol is null || !cells.TryGetValue(symbol, out var cell)) return false;
+        reference = context.CreateTemporary(CSharpBorrowedReferences.Type(type!), block);
+        if (reference is not null) instructions.Add(new("borrow_managed", reference.Id, new[] { cell.Environment.Id }, cell.Field, null, null));
+        return true;
+    }
     public bool TryLoad(string? symbol, string? type, int block, List<GuestInstruction> instructions, out GuestRegister? value)
     {
         value = null;

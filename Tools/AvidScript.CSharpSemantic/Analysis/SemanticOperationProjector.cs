@@ -73,7 +73,7 @@ internal static class SemanticOperationProjector
             hasStableProjection);
         ITypeSymbol? type = operation.Type;
         string? typeId = type is null ? null : typeRegistry.Register(type);
-        string? symbolId = GetReferencedSymbol(operation) is { } symbol
+        string? symbolId = kind != "default_value" && GetReferencedSymbol(operation) is { } symbol
             ? SemanticSymbolProjector.GetSymbolId(symbol)
             : null;
         SemanticSpan span = SemanticSpanFactory.Create(unit.SourceText, operation.Syntax.Span);
@@ -140,6 +140,8 @@ internal static class SemanticOperationProjector
             IDelegateCreationOperation => ("delegate_creation", true),
             IInvocationOperation => ("invocation", true),
             IAwaitOperation => ("await", true),
+            IObjectCreationOperation { Constructor: { IsImplicitlyDeclared: true, ContainingType.TypeKind: TypeKind.Struct }, Arguments.Length: 0, Initializer: null }
+                => ("default_value", true),
             IObjectCreationOperation => ("object_creation", true),
             IReturnOperation => ("return", true),
             IBinaryOperation binary => ("binary", IsKnownOperatorKind(binary)),

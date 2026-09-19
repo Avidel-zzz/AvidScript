@@ -55,7 +55,7 @@ internal static class CSharpClosureDelegateLowerer
                 if (!targets.Contains(id)) continue;
                 List<GuestRegister> parameters = new() { new("context", CSharpClosureLayout.ObjectType) };
                 parameters.AddRange(signature.Parameters.Select(parameter => new GuestRegister("argument:" + parameter.Ordinal,
-                    parameter.RefKind == "none" ? parameter.TypeId : CSharpGuestIds.AddressTypeId)));
+                    CSharpBorrowedReferences.Parameter(document, parameter.TypeId, parameter.RefKind))));
                 List<GuestRegister> locals = new(); List<GuestInstruction> instructions = new();
                 Dictionary<string, string> environmentValues = new(StringComparer.Ordinal);
                 IReadOnlyList<SemanticClosureEnvironment> environments = CSharpClosureLayout.Environments(document, callable.MethodSymbolId);

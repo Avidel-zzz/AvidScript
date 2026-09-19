@@ -60,7 +60,8 @@ internal static class CSharpClosureLayout
         return null;
     }
     public static string ParameterType(SemanticDocument document, SemanticCallableParameter parameter) =>
-        CapturedParameter(document, parameter.SymbolId) is { } capture ? Reference(capture.Environment.Id) : CSharpAbiTypeMapper.ParameterType(parameter);
+        CapturedParameter(document, parameter.SymbolId) is { } capture ? Reference(capture.Environment.Id)
+            : CSharpBorrowedReferences.Parameter(document, parameter.TypeId, parameter.RefKind);
     private static GuestType Struct(string id, GuestField[] fields) => new(id, "struct", "memory", fields, null, null, 0, 1);
     private static GuestField Field(string id, string type) => new(id, id, type, 0);
 }

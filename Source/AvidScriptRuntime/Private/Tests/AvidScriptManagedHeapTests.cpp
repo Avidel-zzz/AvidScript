@@ -373,7 +373,8 @@ bool FAvidScriptManagedHeapBorrowedReferencesTest::RunTest(const FString& Parame
 	const FString Directory = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("AvidScriptManagedHeapTests/GuestFixtures"));
 	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
 	{
-		for (const FString File : {FString(TEXT("borrowed.wasm")), FString(TEXT("borrowed-trap.wasm"))})
+		for (const FString File : {FString(TEXT("borrowed.wasm")), FString(TEXT("borrowed-trap.wasm")),
+			FString(TEXT("csharp-borrowed.wasm")), FString(TEXT("csharp-borrowed-stress.wasm"))})
 		{
 			TArray<uint8> Wasm;
 			if (!TestTrue(TEXT("Load current borrowed reference fixture"), FFileHelper::LoadFileToArray(Wasm, *FPaths::Combine(Directory, File)))) return false;
@@ -384,15 +385,19 @@ bool FAvidScriptManagedHeapBorrowedReferencesTest::RunTest(const FString& Parame
 			if (!TestTrue(TEXT("Borrowed references load"), Runtime.LoadModule(Wasm.GetData(), Wasm.Num(), File, Result)))
 			{ AddError(Result.ErrorMessage); return false; }
 			const bool bTrap = File == TEXT("borrowed-trap.wasm");
+			const bool bCSharp = File.StartsWith(TEXT("csharp-"));
 			if (!TestEqual(TEXT("Borrowed references execute"), Runtime.BeginPlay(Result), !bTrap))
 			{ AddError(Result.ErrorMessage); return false; }
 			uint8 Value[4]{}; FString Error;
 			if (!TestTrue(TEXT("Read borrowed reference result"), Runtime.ReadStateBytes(16, MakeArrayView(Value), Error))) return false;
 			TestEqual(TEXT("Aliased writes, reentrant reads, nested fields and ref updates survive callee collection"),
-				uint32(Value[0]) | (uint32(Value[1]) << 8) | (uint32(Value[2]) << 16) | (uint32(Value[3]) << 24), 223u);
+                uint32(Value[0]) | (uint32(Value[1]) << 8) | (uint32(Value[2]) << 16) | (uint32(Value[3]) << 24), bCSharp ? 111897u : 223u);
 			FHeap* Heap = Runtime.GetManagedHeapForTesting();
 			if (!TestNotNull(TEXT("Borrowed module owns heap"), Heap)) return false;
-			TestTrue(TEXT("Borrowed fixture actually allocates and collects"), Heap->GetStats().Allocations >= 3 && Heap->GetStats().Collections >= 4);
+			TestTrue(TEXT("Borrowed fixture actually allocates"), Heap->GetStats().Allocations >= 3);
+			if (!bCSharp) TestTrue(TEXT("IR borrowed fixture actually collects"), Heap->GetStats().Collections >= 4);
+			if (File.Contains(TEXT("stress"))) TestTrue(TEXT("CSharp borrowed references survive collection after every allocation"),
+				Heap->GetStats().Collections >= Heap->GetStats().Allocations);
 			TestEqual(TEXT("Borrowed frames unwind"), Heap->GetStats().ActiveFrames, 0u);
 			TestEqual(TEXT("Borrowed roots unwind"), Heap->GetStats().LiveRoots, 0u);
 			TestTrue(TEXT("Collect after borrowed invocation"), Heap->Collect() == EHeapError::Ok);

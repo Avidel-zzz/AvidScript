@@ -107,6 +107,7 @@ internal static class CSharpTypeLowerer
         }
 
         CSharpClosureLayout.AddTypes(document, rawTypes);
+        CSharpBorrowedReferences.AddTypes(document, rawTypes);
         GuestTypeLayoutResult layout = GuestDataLayout.ComputeTypes(rawTypes);
         if (!layout.Succeeded)
         {

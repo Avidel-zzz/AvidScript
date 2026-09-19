@@ -175,6 +175,14 @@ internal static class CSharpAggregateOperationLowerer
             return false;
         }
 
+        if (CSharpBorrowedReferences.Enabled(context.Document)
+            && context.TryGetGuestType(target.Children[0].TypeId, out GuestType ownerType) && ownerType.Kind == "struct")
+        {
+            GuestRegister? reference = CSharpBorrowedReferences.Address(context, target, blockOrdinal, instructions);
+            if (reference is null) return false;
+            instructions.Add(new("borrow_store", null, new[] { reference.Id, value.Id }, value.TypeId, null, null));
+            return true;
+        }
         if (context.ClosureCells.RejectValueReceiverBorrow(target.Children[0])) return false;
 
         GuestRegister? aggregate = CSharpOperationLowerer.LowerValue(
@@ -200,14 +208,17 @@ internal static class CSharpAggregateOperationLowerer
     public static GuestRegister? LowerInstance(
         CSharpFunctionLoweringContext context,
         SemanticOperation operation,
-        int blockOrdinal)
+        int blockOrdinal,
+        List<GuestInstruction> instructions)
     {
         if (operation.Children.Count != 0 || context.ThisRegister is null)
         {
             return Malformed(context, operation, blockOrdinal);
         }
 
-        return context.ThisRegister;
+        return CSharpBorrowedReferences.IsBorrowed(context, context.ThisRegister)
+            ? CSharpBorrowedReferences.Read(context, context.ThisRegister, operation.TypeId!, blockOrdinal, instructions)
+            : context.ThisRegister;
     }
 
     public static GuestRegister? LowerFieldPath(

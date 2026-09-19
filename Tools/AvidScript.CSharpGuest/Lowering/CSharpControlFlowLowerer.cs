@@ -94,7 +94,8 @@ internal static class CSharpControlFlowLowerer
 
             parameters.Add(new GuestRegister(
                 CSharpGuestIds.This(callable.MethodSymbolId),
-                callable.ContainingTypeId));
+                CSharpBorrowedReferences.Enabled(document) && guestTypes[callable.ContainingTypeId].Kind == "struct"
+                    ? CSharpBorrowedReferences.Type(callable.ContainingTypeId) : callable.ContainingTypeId));
         }
 
         foreach (SemanticCallableParameter parameter in callable.Parameters.OrderBy(item => item.Ordinal))
