@@ -52,9 +52,9 @@ internal static class SemanticContinuationTests
         SemanticContinuationCallback[] callbacks = document.ContinuationCallbacks.ToArray();
 
         Assert(document.Succeeded
-            && document.SchemaVersion == 22
-            && document.SemanticVersion == "1.26",
-            "valid continuations should publish semantic schema v22 / version 1.26");
+            && document.SchemaVersion == 23
+            && document.SemanticVersion == "1.27",
+            "valid continuations should publish semantic schema v23 / version 1.27");
         Assert(callbacks.Select(callback => callback.CallbackId).SequenceEqual(new[] { 1, 2, 3 })
             && callbacks.Select(callback => callback.Name)
                 .SequenceEqual(new[] { "ResumeSpawnHandler", "ResumeSecond", "ResumeObjectLoad" })
@@ -255,9 +255,9 @@ internal static class SemanticContinuationTests
         SemanticDocument document = Analyze(source, "Scripts/UnsupportedContinuationFlow.cs");
 
         Assert(!document.Succeeded
-            && document.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCS4001")
+            && document.ClosureEnvironments.Any(environment => environment.Allocation is not null)
             && document.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCS3002"),
-            "continuation handlers must not enable capturing closures or unsupported async lowering");
+            "closure analysis must not enable unsupported async continuation handlers");
     }
 
     private static SemanticDocument Analyze(string source, string sourceId)

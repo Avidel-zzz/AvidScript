@@ -93,7 +93,10 @@ internal static class SemanticClosurePlanner
             .Select(pair => new SemanticClosureBinding(pair.Key, targets.Contains(pair.Key),
                 pair.Value.Where(heapCells.Contains).ToArray()))
             .Where(binding => binding.CellSymbolIds.Count != 0).ToArray();
-        return new(environments.Values.OrderBy(environment => environment.Id, StringComparer.Ordinal).ToArray(), bindings, diagnostics);
+        IReadOnlyList<SemanticClosureEnvironment> allocated = SemanticClosureAllocationProjector.Project(
+            context, owners, environments.Values.OrderBy(environment => environment.Id, StringComparer.Ordinal).ToArray(), diagnostics);
+        return diagnostics.Count == 0 ? new(allocated, bindings, diagnostics)
+            : new(Array.Empty<SemanticClosureEnvironment>(), Array.Empty<SemanticClosureBinding>(), diagnostics);
 
         void Reject(SemanticLexicalCapture capture) => diagnostics.Add(new("ASCS4004", "error",
             $"Escaping capture '{capture.Name}' has an allocation scope that is not yet supported.", capture.Span));

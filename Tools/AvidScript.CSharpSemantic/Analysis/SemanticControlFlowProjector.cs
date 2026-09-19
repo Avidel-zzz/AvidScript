@@ -157,7 +157,7 @@ internal static class SemanticControlFlowProjector
         }
     }
 
-    private static ControlFlowGraph CreateGraph(
+    internal static ControlFlowGraph CreateGraph(
         SemanticExecutableBody body,
         SemanticModel semanticModel)
     {

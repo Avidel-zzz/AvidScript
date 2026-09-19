@@ -12,7 +12,8 @@ internal static class Program
                 SemanticCliTests.Run() + SemanticStateContractTests.Run() +
                 SemanticDelegateEventTests.Run() + SemanticContinuationTests.Run() +
                 SemanticAsyncTests.Run() + SemanticUeTypeDeclarationTests.Run() +
-                SemanticCompilerWorkspaceTests.Run() + SemanticLocalFunctionTests.Run() + SemanticDelegateTypeTests.Run() + SemanticClosureTests.Run();
+                SemanticCompilerWorkspaceTests.Run() + SemanticLocalFunctionTests.Run() + SemanticDelegateTypeTests.Run() + SemanticClosureTests.Run()
+                + SemanticClosureAllocationTests.Run();
             Console.WriteLine($"AvidScript.CSharpSemantic.Tests: {count}/{count} passed");
             return 0;
         }

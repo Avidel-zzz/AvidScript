@@ -13,8 +13,22 @@ public sealed record SemanticClosureEnvironment(
     [property: JsonPropertyOrder(4)] SemanticSpan Span,
     [property: JsonPropertyOrder(5)] IReadOnlyList<SemanticClosureCell> Cells)
 {
+    [JsonPropertyOrder(6)]
+    public SemanticClosureAllocation? Allocation { get; init; }
+
     public static string GetId(string owner, string kind, int ordinal) => $"closure:{owner}:{kind}:{ordinal}";
 }
+
+// Inclusive Roslyn lifetime region. Allocate only on incoming edges, not on loop
+// backedges that remain within this region. A null source denotes function entry.
+public sealed record SemanticClosureAllocation(
+    [property: JsonPropertyOrder(0)] int FirstBlockOrdinal,
+    [property: JsonPropertyOrder(1)] int LastBlockOrdinal,
+    [property: JsonPropertyOrder(2)] IReadOnlyList<SemanticClosureEntry> Entries);
+
+public sealed record SemanticClosureEntry(
+    [property: JsonPropertyOrder(0)] int? SourceBlockOrdinal,
+    [property: JsonPropertyOrder(1)] int DestinationBlockOrdinal);
 
 public sealed record SemanticClosureCell(
     [property: JsonPropertyOrder(0)] string SymbolId,

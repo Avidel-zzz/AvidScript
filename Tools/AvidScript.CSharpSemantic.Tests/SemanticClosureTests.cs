@@ -21,9 +21,9 @@ internal static class SemanticClosureTests
             }
             """;
         SemanticDocument document = Analyze(source);
-        Check(document.SchemaVersion == 22 && document.SemanticVersion == "1.26"
-            && !document.Succeeded && document.Diagnostics.Any(item => item.Code == "ASCS4001"),
-            "environment analysis must not silently enable unimplemented closure execution");
+        Check(document.SchemaVersion == 23 && document.SemanticVersion == "1.27"
+            && document.Succeeded && document.ControlFlowGraphs.Count != 0,
+            "captured lambda analysis must publish executable CFGs and allocation metadata for Guest lowering");
         Check(SemanticClosureContractValidator.IsValid(document), "shared plan contract");
         SemanticClosureEnvironment environment = document.ClosureEnvironments.Single();
         Check(environment.ScopeKind == "activation" && environment.Cells.Count == 2,

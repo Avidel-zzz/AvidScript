@@ -9,7 +9,7 @@ internal static class SemanticInstanceStateTests
     public static int Run()
     {
         InstanceStateSharesContainingTypeIdentity();
-        LambdaAndClosureFailClosed();
+        LambdaAndClosureHaveAllocationPlans();
         DynamicDispatchFailsClosed();
         UnsafeCodeFailsClosed();
         DocumentLevelPolicyErrorsClearAllGraphs();
@@ -48,8 +48,8 @@ internal static class SemanticInstanceStateTests
         const string readId = "symbol:method:global::Game.Counter.Read():int32";
 
         Assert(document.Succeeded, "supported instance state should pass semantic analysis");
-        Assert(document.SchemaVersion == 22 && document.SemanticVersion == "1.26",
-            "current artifacts should use schema v22 / semantic version 1.26");
+        Assert(document.SchemaVersion == 23 && document.SemanticVersion == "1.27",
+            "current artifacts should use schema v23 / semantic version 1.27");
         SemanticSymbol field = document.Symbols.Single(symbol => symbol.Id == fieldId);
         Assert(!field.IsStatic && field.ContainingSymbolId == typeSymbolId,
             "instance fields should retain their containing type identity");
@@ -86,7 +86,7 @@ internal static class SemanticInstanceStateTests
             "every supported instance executable body should expose a CFG");
     }
 
-    private static void LambdaAndClosureFailClosed()
+    private static void LambdaAndClosureHaveAllocationPlans()
     {
         const string source = """
             using System;
@@ -101,7 +101,9 @@ internal static class SemanticInstanceStateTests
             """;
         SemanticDocument document = Analyze(source, "Scripts/Closure.cs");
 
-        AssertFailsClosed(document, "ASCS4001", "lambda/closure");
+        Assert(document.Succeeded && SemanticClosureContractValidator.IsValid(document)
+            && document.ClosureEnvironments.Single().Allocation is not null,
+            "captured lambdas should retain CFGs and an explicit activation allocation plan");
 
         const string localFunctionSource =
             "class Script { int Run() { int Local() => 1; return Local(); } }";

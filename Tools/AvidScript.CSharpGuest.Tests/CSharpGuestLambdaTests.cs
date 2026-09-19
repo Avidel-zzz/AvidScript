@@ -70,6 +70,9 @@ internal static class CSharpGuestLambdaTests
         CSharpGuestLoweringResult previous = CSharpGuestLowerer.Lower(document with { SchemaVersion = 21, SemanticVersion = "1.25" }, new string('b', 64));
         Require(previous.Succeeded && WasmModuleCompiler.Compile(previous.Module!).Succeeded,
             "schema 21/1.25 noncapturing lambdas must remain executable");
+        CSharpGuestLoweringResult previousClosureSchema = CSharpGuestLowerer.Lower(document with { SchemaVersion = 22, SemanticVersion = "1.26" }, new string('b', 64));
+        Require(previousClosureSchema.Succeeded && WasmModuleCompiler.Compile(previousClosureSchema.Module!).Succeeded,
+            "schema 22/1.26 noncapturing lambdas must remain executable");
         CSharpGuestLoweringResult debug = CSharpGuestLowerer.Lower(document, new string('b', 64), enableDebugInstrumentation: true);
         Require(debug.Succeeded && WasmModuleCompiler.Compile(debug.Module!).Succeeded,
             "lambda functions must retain a valid signature under debug instrumentation");
@@ -84,9 +87,10 @@ internal static class CSharpGuestLambdaTests
             string captured = "using System; public static class Script { public static int Run(int n) { " + body + " } }";
             var frontend = AvidScript.CSharpFrontend.FrontendAnalyzer.Analyze(captured, "Scripts/CapturedLambda.cs");
             SemanticDocument rejected = SemanticAnalyzer.Analyze(captured, "Scripts/CapturedLambda.cs", frontend.Source.Sha256);
-            Require(!rejected.Succeeded && rejected.ControlFlowGraphs.Count == 0
-                && rejected.Diagnostics.Any(item => item.Code == "ASCS4001" && item.Message.Contains("environment", StringComparison.Ordinal)),
-                "direct, transitive and nested captures need explicit environment diagnostics");
+            Require(rejected.Succeeded && rejected.ControlFlowGraphs.Count != 0
+                && rejected.ClosureEnvironments.All(environment => environment.Allocation is not null)
+                && CSharpGuestLowerer.Lower(rejected, new string('b', 64)).Diagnostics.Any(item => item.Code == "ASCG1024"),
+                "direct, transitive and nested captures need allocation plans and a Guest execution guard until lowering is connected");
         }
         foreach (string captured in new[]
         {
@@ -96,8 +100,9 @@ internal static class CSharpGuestLambdaTests
         {
             var frontend = AvidScript.CSharpFrontend.FrontendAnalyzer.Analyze(captured, "Scripts/ReceiverLambda.cs");
             SemanticDocument rejected = SemanticAnalyzer.Analyze(captured, "Scripts/ReceiverLambda.cs", frontend.Source.Sha256);
-            Require(!rejected.Succeeded && rejected.Diagnostics.Any(item => item.Code == "ASCS4001"
-                && item.Message.Contains("environment", StringComparison.Ordinal)), "receiver and implicit setter parameters must be recognized as captures");
+            Require(rejected.Succeeded && rejected.ClosureEnvironments.All(environment => environment.Allocation is not null)
+                && CSharpGuestLowerer.Lower(rejected, new string('b', 64)).Diagnostics.Any(item => item.Code == "ASCG1024"),
+                "receiver and implicit setter captures need complete plans before Guest execution");
         }
         foreach (string unsupported in new[]
         {
@@ -117,7 +122,7 @@ internal static class CSharpGuestLambdaTests
             Directory.CreateDirectory(root);
             File.WriteAllBytes(Path.Combine(root, "lambdas.wasm"), compiled.Bytes);
         }
-        return 16;
+        return 17;
     }
 
     private static void Require(bool condition, string message)

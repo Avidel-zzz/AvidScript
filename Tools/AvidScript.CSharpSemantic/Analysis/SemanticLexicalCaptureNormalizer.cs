@@ -161,11 +161,6 @@ internal static class SemanticLexicalCaptureNormalizer
             }).ToArray(),
         }).ToArray();
         List<SemanticDiagnostic> diagnostics = new(closures.Diagnostics);
-        foreach ((string id, SemanticExecutableBody body) in lexical)
-            if (body.Method.MethodKind == MethodKind.AnonymousFunction && required[id].Count != 0)
-                diagnostics.Add(new(SemanticLambdaPolicy.DiagnosticCode, "error",
-                    "This lambda captures activation state and requires a managed closure environment, which is not yet implemented.",
-                    SemanticSpanFactory.Create(body.Unit.SourceText, body.Declaration.Span)));
         SemanticAsyncMethod[] resultAsync = asyncMethods.Select(method =>
         {
             SemanticAsyncSegment[] segments = method.Segments.Select(segment => segment with

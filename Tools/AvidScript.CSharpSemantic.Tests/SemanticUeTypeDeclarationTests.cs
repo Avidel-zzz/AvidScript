@@ -66,8 +66,8 @@ internal static class SemanticUeTypeDeclarationTests
         SemanticUeTypeDeclaration elite = FindType(document, "global::Game.EliteHero");
 
         Assert(document.Succeeded, "valid script-defined Actor inheritance should analyze successfully");
-        Assert(document.SchemaVersion == 22 && document.SemanticVersion == "1.26",
-            "UE type declarations should publish schema 22 / semantic 1.26");
+        Assert(document.SchemaVersion == 23 && document.SemanticVersion == "1.27",
+            "UE type declarations should publish schema 23 / semantic 1.27");
         Assert(hero.EngineName == "Hero" && hero.Kind == "actor",
             "Actor declarations should preserve the stable UE reflection name and actor kind");
         Assert(hero.Flags.SequenceEqual(new[] { "blueprintable", "blueprint_type" }),
