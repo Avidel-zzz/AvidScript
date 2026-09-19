@@ -125,6 +125,8 @@ internal sealed class CSharpClosureCells
             foreach (SemanticClosureCell cell in environment.Cells.Where(cell => cell.Kind == "parameter"))
                 if (context.TryGetStorage(cell.SymbolId, out GuestRegister parameter))
                     instructions.Add(new("managed_set", null, new[] { allocated.Id, parameter.Id }, cell.SymbolId, null, null));
+            foreach (SemanticClosureCell cell in environment.Cells.Where(cell => cell.Kind == "receiver"))
+                instructions.Add(new("managed_set", null, new[] { allocated.Id, context.ThisRegister!.Id }, cell.SymbolId, null, null));
         }
     }
 }

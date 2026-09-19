@@ -95,7 +95,7 @@ internal static class CSharpGuestLambdaTests
         }
         foreach ((string captured, string expectedCode) in new[]
         {
-            ("using System; public class Script { int value; public int Run() { Func<int> callback = () => value; return callback(); } }", "ASCG1024"),
+            ("using System; public class Script { int value; public int Run() { Func<int> callback = () => value; return callback(); } }", "supported"),
             ("using System; public class Script { int field; public int Value { set { Func<int> callback = () => value; field = callback(); } } }", "supported"),
         })
         {
@@ -105,7 +105,7 @@ internal static class CSharpGuestLambdaTests
             Require(rejected.Succeeded && rejected.ClosureEnvironments.All(environment => environment.Allocation is not null)
                 && (expectedCode == "supported" ? receiverResult.Succeeded && WasmModuleCompiler.Compile(receiverResult.Module!).Succeeded
                     : !receiverResult.Succeeded && receiverResult.Diagnostics.Any(item => item.Code == expectedCode)),
-                "class accessors support captured value parameters while captured-this lifetime remains unsupported");
+                "class methods and accessors support traced receiver and value parameter captures");
         }
         foreach (string unsupported in new[]
         {

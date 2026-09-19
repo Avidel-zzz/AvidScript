@@ -128,12 +128,11 @@ internal static class CSharpGuestReferenceObjectTests
         count++;
         foreach (string sourceBoundary in new[] {
             "using System.Runtime.InteropServices; public class Node { public int Value; } public static class Script { [DllImport(\"env\")] static extern int Host(Node node); public static int Run() => Host(new Node()); }",
-            "public class Node { public int Value; } public static class Script { public static Node Current; public static int Run() { Current = new Node(); return Current.Value; } }",
-            "using System; public class Node { public int Value; public Func<int> Bind() => () => Value; } public static class Script { public static int Run() { Node node = new Node(); return node.Bind()(); } }"
+            "public class Node { public int Value; } public static class Script { public static Node Current; public static int Run() { Current = new Node(); return Current.Value; } }"
         })
         {
             var rejected = CSharpGuestLowerer.Lower(CSharpGuestLexicalCaptureTests.Analyze(sourceBoundary), new string('c', 64));
-            Require(!rejected.Succeeded && rejected.Module is null, "Host, persistent state or unconnected captured-this lifetime must fail closed");
+            Require(!rejected.Succeeded && rejected.Module is null, "Host and persistent state lifetime must fail closed");
             count++;
         }
         var asyncBoundary = CSharpGuestContinuationTests.Analyze("""

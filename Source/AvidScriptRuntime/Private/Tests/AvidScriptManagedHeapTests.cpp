@@ -343,7 +343,9 @@ bool FAvidScriptManagedHeapCSharpClosuresTest::RunTest(const FString& Parameters
 			FString(TEXT("csharp-reference-object-fault-method.wasm")), FString(TEXT("csharp-reference-object-fault-bind.wasm")),
 			FString(TEXT("csharp-reference-object-fault-field.wasm")), FString(TEXT("csharp-reference-object-fault-compound.wasm")),
 			FString(TEXT("csharp-reference-object-fault-borrow.wasm")), FString(TEXT("csharp-reference-object-fault-nested.wasm")),
-			FString(TEXT("csharp-reference-object-fault-cast.wasm"))})
+			FString(TEXT("csharp-reference-object-fault-cast.wasm")),
+			FString(TEXT("csharp-receiver-capture.wasm")), FString(TEXT("csharp-receiver-capture-stress.wasm")),
+			FString(TEXT("csharp-receiver-capture-fault.wasm"))})
 		{
 			TArray<uint8> Wasm;
 			if (!TestTrue(TEXT("Load current CSharp closure fixture"), FFileHelper::LoadFileToArray(Wasm, *FPaths::Combine(Directory, File)))) return false;
@@ -354,7 +356,8 @@ bool FAvidScriptManagedHeapCSharpClosuresTest::RunTest(const FString& Parameters
 			if (!TestTrue(TEXT("CSharp closures load"), Runtime.LoadModule(Wasm.GetData(), Wasm.Num(), File, Result)))
 			{ AddError(Result.ErrorMessage); return false; }
 			const bool bReferenceObject = File.Contains(TEXT("reference-object"));
-			const bool bReferenceFault = bReferenceObject && File.Contains(TEXT("-fault-"));
+			const bool bReceiverCapture = File.Contains(TEXT("receiver-capture"));
+			const bool bReferenceFault = (bReferenceObject || bReceiverCapture) && File.Contains(TEXT("-fault"));
 			if (!TestEqual(TEXT("CSharp object/closure execution or expected failure"), Runtime.BeginPlay(Result), !bReferenceFault))
 			{ AddError(Result.ErrorMessage); return false; }
 			if (bReferenceFault) TestFalse(TEXT("Reference failure is diagnostic"), Result.ErrorMessage.IsEmpty());
@@ -365,8 +368,8 @@ bool FAvidScriptManagedHeapCSharpClosuresTest::RunTest(const FString& Parameters
 			const bool bStaticList = File.Contains(TEXT("delegate-list-static"));
 			const bool bBoundDelegate = File.Contains(TEXT("bound-delegate"));
 			const bool bPlainBoundDelegate = File.Contains(TEXT("bound-delegate-plain"));
-			const uint32 Expected = bReferenceFault ? (File.EndsWith(TEXT("-method.wasm")) || File.EndsWith(TEXT("-field.wasm")) ? 1u : 0u)
-				: bReferenceObject ? 32767u : bPlainBoundDelegate ? 650u : bBoundDelegate ? 4095u
+			const uint32 Expected = bReferenceFault ? (bReceiverCapture ? 7u : File.EndsWith(TEXT("-method.wasm")) || File.EndsWith(TEXT("-field.wasm")) ? 1u : 0u)
+				: bReferenceObject ? 32767u : bReceiverCapture ? 8191u : bPlainBoundDelegate ? 650u : bBoundDelegate ? 4095u
 				: bStaticIdentity || bStaticList ? 7u : bDelegateList ? 65535u : File.Contains(TEXT("identity")) ? 8191u : 1147395u;
 			TestEqual(TEXT("CSharp closure execution and callable/environment equality match reference results"),
 				uint32(Value[0]) | (uint32(Value[1]) << 8) | (uint32(Value[2]) << 16) | (uint32(Value[3]) << 24), Expected);
@@ -381,7 +384,7 @@ bool FAvidScriptManagedHeapCSharpClosuresTest::RunTest(const FString& Parameters
 			}
 			if (!TestNotNull(TEXT("CSharp module owns heap"), Heap)) return false;
 			const auto Stats = Heap->GetStats();
-			const uint64 MinimumAllocations = bReferenceFault ? (File.EndsWith(TEXT("-cast.wasm")) ? 1u : 0u)
+			const uint64 MinimumAllocations = bReferenceFault ? (bReceiverCapture ? 3u : File.EndsWith(TEXT("-cast.wasm")) ? 1u : 0u)
 				: bReferenceObject ? 8u : bPlainBoundDelegate ? 1u : bBoundDelegate ? 12u : bStaticList ? 2u : 16u;
 			TestTrue(TEXT("Closures, lists and bound values use actual managed allocations"), Stats.Allocations >= MinimumAllocations);
 			if (File.Contains(TEXT("stress")))

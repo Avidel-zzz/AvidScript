@@ -108,7 +108,8 @@ internal static class CSharpGuestClosureExecutionTests
             count++;
         }
         return count + CSharpGuestBorrowedReferenceTests.Run() + CSharpGuestDelegateIdentityTests.Run()
-            + CSharpGuestDelegateListTests.Run() + CSharpGuestBoundDelegateTests.Run() + CSharpGuestReferenceObjectTests.Run();
+            + CSharpGuestDelegateListTests.Run() + CSharpGuestBoundDelegateTests.Run() + CSharpGuestReferenceObjectTests.Run()
+            + CSharpGuestReceiverCaptureTests.Run();
     }
     private static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
 }

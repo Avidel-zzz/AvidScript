@@ -249,8 +249,9 @@ public static class CSharpGuestLowerer
             Add(diagnostics, "ASCG1001", "Semantic artifact is failed, unsupported, or has invalid provenance.");
         }
 
-        if (document.ClosureEnvironments.Any(environment => environment.Allocation is null || environment.Cells.Any(cell => cell.Kind == "receiver")))
-            Add(diagnostics, "ASCG1024", "Closure execution requires synchronous allocation metadata; captured instance identity and async roots are not yet connected.");
+        if (document.ClosureEnvironments.Any(environment => environment.Allocation is null
+            || environment.Cells.Any(cell => cell.Kind == "receiver" && !CSharpReferenceObjects.Types(document).Contains(cell.TypeId))))
+            Add(diagnostics, "ASCG1024", "Closure execution requires synchronous allocation metadata and supported source reference receivers; UE receivers and async roots are not yet connected.");
 
         if (document.ControlFlowGraphs
             .GroupBy(graph => graph.MethodSymbolId, StringComparer.Ordinal)

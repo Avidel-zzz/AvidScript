@@ -45,7 +45,8 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 [不可变委托调用列表](Docs/Phase66/P66.B_Delegate_Lists.md)已接通同步 `+/-/+=/-=`、顺序/重复项、列表相等、最后连续匹配移除、最后返回值及共享 ref/out；调用期间修改委托变量保留当前快照。该组 Guest 246/246、双后端 Automation 5/5 通过，正常/强制回收结果与 .NET 一致；语言 event 和跨 await 仍待完成，长列表成本尚需优化。
 [结构体实例方法委托](Docs/Phase66/P66.B_Bound_Value_Delegates.md)已接通 receiver 的独立装箱副本、复制委托共享身份、ref/out、组合/移除及闭包字段保活。空结构体使用一字节内部存储；Guest 262/262、双后端 Automation 5/5 通过，正常/强制回收结果与 .NET 一致。普通引用类由后续对象执行组连接，UE 对象实例委托仍待完成。
 [普通引用类语义合同](Docs/Phase66/P66.B_Reference_Class_Contract.md)新增 Semantic 24/1.28 的类继承、构造、初始化和隐式存储事实及输入校验，并修复 partial 类型重复声明的分析异常；旧 23/1.27 闭包、lambda 与 async 仍兼容。Semantic 219/219、Guest 273/273 通过；本组尚未启用普通引用对象或引用类实例委托。
-[普通引用对象执行](Docs/Phase66/P66.B_Reference_Object_Execution.md)进一步连接受支持类的构造、共享字段、ref/out、object 视图、循环引用和同步实例委托；结构体绑定仍使用独立副本。Semantic 219/219、Guest 311/311、双后端 Automation 5/5 通过，含强制回收和 7 类故障的副作用顺序。捕获 this、持久事件、跨 await/调试暂停根及更广的类语义仍待完成。
+[普通引用对象执行](Docs/Phase66/P66.B_Reference_Object_Execution.md)进一步连接受支持类的构造、共享字段、ref/out、object 视图、循环引用和同步实例委托；结构体绑定仍使用独立副本。Semantic 219/219、Guest 311/311、双后端 Automation 5/5 通过，含强制回收和 7 类故障的副作用顺序。普通引用类的 this 捕获由后续组连接，持久事件、跨 await/调试暂停根及更广的类语义仍待完成。
+[普通引用对象的 this 捕获](Docs/Phase66/P66.B_Receiver_Capture.md)连接构造、属性、局部函数及嵌套闭包，保持原对象身份并支持闭包/对象循环回收。仅含 receiver 的环境按原对象比较，混合捕获保留 activation 身份；Guest 320/320、闭包 106/106、双后端 Automation 5/5 通过，覆盖强制回收与故障后的根清理。UE receiver 与跨 await/事件生命周期仍待连接。
 
 ## 现在可以做什么
 
@@ -191,7 +192,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 ## 当前边界
 
 - **UE 类型**：由 Profile 与 ABI/codec 决定生成范围，并非所有 UE API 自动可用。复合容器内强 UObject 引用仍拒绝，平面 `TArray<UObject*>` 可用；Set/Map key 受确定性编码限制，soft/weak 的脚本侧解析易用接口待补齐。
-- **C# 子集**：支持成员内同步、非泛型局部函数、直接调用的变量捕获，以及 Guest 内静态/捕获局部方法组、同步 lambda/匿名方法和共享逃逸闭包；捕获值可作为内部 ref/out 实参，结构体字段与方法保持共享写入，结构体实例委托绑定独立副本，委托支持 `==/!=` 和同步组合/移除。受支持的普通引用类已有构造、共享字段和实例委托；继承/虚派发、字段初始化、自动属性、捕获 this、UE 对象实例委托、跨 await 委托和 `event +=` 仍未支持。无完整 .NET Runtime、任意 awaiter 或异常系统；内部借用不能进入 Host 或持久状态；UE 委托/事件仍使用显式 bind/subscribe 与 `ExecuteX/BroadcastX`。
+- **C# 子集**：支持成员内同步、非泛型局部函数、直接调用的变量捕获，以及 Guest 内静态/捕获局部方法组、同步 lambda/匿名方法和共享逃逸闭包；捕获值可作为内部 ref/out 实参，结构体字段与方法保持共享写入，结构体实例委托绑定独立副本，委托支持 `==/!=` 和同步组合/移除。受支持的普通引用类已有构造、共享字段、实例委托及 this 捕获；继承/虚派发、字段初始化、自动属性、UE 对象实例委托、跨 await 委托和 `event +=` 仍未支持。无完整 .NET Runtime、任意 awaiter 或异常系统；内部借用不能进入 Host 或持久状态；UE 委托/事件仍使用显式 bind/subscribe 与 `ExecuteX/BroadcastX`。
 - **重载与隔离**：方法体可热重载；UI 样例通过 `NextTickAsync` 在候选提交后初始化。准备期无可回滚适配的反射写入仍被拒绝，不承诺回滚任意外部副作用。反射结构变更需增量 UBT 并重启 Editor；WASM 隔离不是原生 DLL 进程沙箱。
 - **玩法与平台**：UI 包使用独立验证插件和隔离启动配置，Development/Shipping 均通过跨进程自动存取；Development 人工界面、按钮和同一 UserRoot 新进程读档均反馈无问题。Shipping 人工视觉按用户要求不阻塞当前推进，明确转入发布候选验收，不能视为通过。任意损坏存档不在现有保证内；Development 包内一小时切图与当前候选 2/2 多进程网络拓扑通过，UI 重载另有 20 轮有界证据，但不宣称一小时网络/重载长稳；Android UBT/APK/真机及 iOS 仍未验收。
 - **诊断与性能**：typed Host 拒绝已在 Wasmtime 保留具体 category/details/import，WAMR semantic/dynamic 路径同样保留分类；尚无完整 C# 异常系统。纯执行 P50/P95 领先门禁未关闭，也未完成同口径 UnLua/AngelScript 矩阵。

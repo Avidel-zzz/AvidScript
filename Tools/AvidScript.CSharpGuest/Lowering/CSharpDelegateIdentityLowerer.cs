@@ -78,7 +78,18 @@ internal static class CSharpDelegateIdentityLowerer
                     string ea = Local(envPrefix + ":a", CSharpClosureLayout.Reference(environment.Id));
                     string eb = Local(envPrefix + ":b", CSharpClosureLayout.Reference(environment.Id));
                     string equal = Local(envPrefix + ":same", Bool);
-                    blocks.Add(Block(envPrefix, new[] { Get(ea, ba, environment.Id), Get(eb, bb, environment.Id), Eq(equal, ea, eb) },
+                    List<GuestInstruction> compare = new() { Get(ea, ba, environment.Id), Get(eb, bb, environment.Id) };
+                    // A receiver-only environment represents the original object identity.
+                    // Environments with mutable captured locals retain activation identity.
+                    if (environment.Cells.Count == 1 && environment.Cells[0].Kind == "receiver")
+                    {
+                        SemanticClosureCell receiver = environment.Cells[0];
+                        string ra = Local(envPrefix + ":receiver:a", receiver.TypeId), rb = Local(envPrefix + ":receiver:b", receiver.TypeId);
+                        compare.Add(Get(ra, ea, receiver.SymbolId)); compare.Add(Get(rb, eb, receiver.SymbolId));
+                        compare.Add(Eq(equal, ra, rb));
+                    }
+                    else compare.Add(Eq(equal, ea, eb));
+                    blocks.Add(Block(envPrefix, compare.ToArray(),
                         Branch(equal, j + 1 < environments.Count ? prefix + ":env:" + (j + 1) : "true", "false")));
                 }
             }
