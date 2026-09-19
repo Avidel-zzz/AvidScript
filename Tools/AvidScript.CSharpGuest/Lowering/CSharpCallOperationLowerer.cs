@@ -123,6 +123,7 @@ internal static class CSharpCallOperationLowerer
             return null;
         }
 
+        if (context.ClosureCells.RejectValueReceiverBorrow(operation.Children[0])) return null;
         return CSharpOperationLowerer.LowerValue(
             context,
             operation.Children[0],
@@ -275,6 +276,7 @@ internal static class CSharpCallOperationLowerer
                 return false;
             }
 
+            if (context.ClosureCells.RejectValueReceiverBorrow(children[0])) return false;
             GuestRegister? receiver = CSharpOperationLowerer.LowerValue(
                 context,
                 children[0],
@@ -337,6 +339,12 @@ internal static class CSharpCallOperationLowerer
 
         for (int index = 0; index < parameters.Count; ++index)
         {
+            if (CSharpClosureLayout.CapturedParameter(context.Document, parameters[index].SymbolId) is { } captured)
+            {
+                GuestRegister? environment = context.ClosureCells.Environment(captured.Environment.Id);
+                if (environment is null) { context.Add("ASCG1024", "Direct captured call cannot resolve its shared environment."); return false; }
+                operands.Add(environment.Id); continue;
+            }
             SemanticOperation argument = arguments[index];
             SemanticOperation value = argument.Kind == "argument" && argument.Children.Count == 1
                 ? argument.Children[0]

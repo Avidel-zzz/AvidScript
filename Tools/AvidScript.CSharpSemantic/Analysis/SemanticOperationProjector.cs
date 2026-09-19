@@ -103,7 +103,11 @@ internal static class SemanticOperationProjector
             ProjectOutputConversion(operation),
             GetCaptureId(operation, captureRegistry),
             span,
+            // Roslyn attaches an implicit containing-type receiver to a non-static
+            // local method group, even inside a static owner. Its real captures are
+            // taken from the local function body; this is not a bound object receiver.
             (operation is IAnonymousFunctionOperation or IFlowAnonymousFunctionOperation
+                or IMethodReferenceOperation { Method.MethodKind: MethodKind.LocalFunction }
                 ? Enumerable.Empty<IOperation>() : operation.ChildOperations)
                 .Where(child => child is not ILocalFunctionOperation)
                 .Select(child => ProjectOperation(child, unit, typeRegistry, diagnostics, captureRegistry))

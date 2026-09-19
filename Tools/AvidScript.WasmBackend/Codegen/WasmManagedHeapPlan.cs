@@ -18,10 +18,12 @@ internal sealed class WasmManagedHeapPlan
 
     public static WasmManagedHeapPlan Create(GuestModule module, IReadOnlyDictionary<string, GuestType> types, bool cooperative)
     {
-        GuestType[] references = module.Types.Where(type => type.Kind == "managed_ref").OrderBy(type => type.Id, StringComparer.Ordinal).ToArray();
+        GuestType[] references = module.Types.Where(type => type.Kind == "managed_ref" && type.ElementTypeId is not null).OrderBy(type => type.Id, StringComparer.Ordinal).ToArray();
         WasmManagedHeapPlan plan = new() { StackStart = module.MemoryLayout.HeapStart, InitializedGlobalIndex = cooperative ? 2u : 1u };
         if (references.Length == 0) return plan;
         for (int index = 0; index < references.Length; ++index) plan.TypeOrdinals.Add(references[index].Id, index + 1);
+        foreach (GuestType erased in module.Types.Where(type => type.Kind == "managed_ref" && type.ElementTypeId is null))
+            plan.TypeOrdinals.Add(erased.Id, 0);
         List<byte> bytes = new();
         void U32(uint value)
         {

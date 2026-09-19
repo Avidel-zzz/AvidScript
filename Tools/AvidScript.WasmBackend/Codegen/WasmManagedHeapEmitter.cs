@@ -81,6 +81,23 @@ internal sealed partial class WasmFunctionCompiler
 
     private void CompileManagedInstruction(WasmBinaryWriter body, GuestInstruction instruction)
     {
+        if (instruction.Op == "managed_cast")
+        {
+            string source = instruction.OperandIds[0];
+            int expected = moduleLayout.ManagedHeap.TypeOrdinals[GetValueType(instruction.ResultId!).Id];
+            // A typed downcast validates owner/generation and the actual object layout.
+            // Null propagates without dereferencing; erasure never exposes an address.
+            if (expected != 0)
+            {
+                WriteLocalGet(body, localIndices[source]); body.WriteByte(0x50); body.WriteByte(0x45);
+                body.WriteByte(0x04); body.WriteByte(0x40);
+                ManagedHeader(body, GuestManagedHeapCommand.ReadBytes);
+                ManagedStoreToken(body, 8, writer => WriteLocalGet(writer, localIndices[source]));
+                ManagedStoreI32(body, 16, expected); ManagedStoreI32(body, 20, 0); ManagedStoreI32(body, 24, 0);
+                ManagedPacketCall(body, 28, 0); body.WriteByte(0x0b);
+            }
+            WriteLocalGet(body, localIndices[source]); WriteLocalSet(body, localIndices[instruction.ResultId!]); return;
+        }
         if (instruction.Op == "managed_collect") { ManagedHeader(body, GuestManagedHeapCommand.Collect); ManagedPacketCall(body, 8, 0); return; }
         if (instruction.Op == "managed_new")
         {

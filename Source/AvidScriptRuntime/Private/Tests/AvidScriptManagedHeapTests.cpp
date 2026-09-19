@@ -276,7 +276,8 @@ bool FAvidScriptManagedHeapGeneratedGuestTest::RunTest(const FString& Parameters
 	const FString Directory = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("AvidScriptManagedHeapTests/GuestFixtures"));
 	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
 	{
-		for (const FString File : {FString(TEXT("managed.wasm")), FString(TEXT("managed-trap.wasm")), FString(TEXT("managed-cooperative.wasm"))})
+		for (const FString File : {FString(TEXT("managed.wasm")), FString(TEXT("managed-trap.wasm")), FString(TEXT("managed-cooperative.wasm")),
+			FString(TEXT("managed-erased.wasm")), FString(TEXT("managed-erased-wrong.wasm"))})
 		{
 			if (Backend == EAvidScriptVmBackendKind::Wamr && File == TEXT("managed-cooperative.wasm")) continue;
 			TArray<uint8> Wasm;
@@ -288,9 +289,21 @@ bool FAvidScriptManagedHeapGeneratedGuestTest::RunTest(const FString& Parameters
 			FAvidScriptWasmRuntimeInstance Runtime(Selection); FAvidScriptWasmSmokeResult Result;
 			if (!TestTrue(TEXT("Generated Guest loads"), Runtime.LoadModule(Wasm.GetData(), Wasm.Num(), File, Result)))
 			{ AddError(Result.ErrorMessage); return false; }
-			const bool bTrap = File == TEXT("managed-trap.wasm");
+			const bool bWrongCast = File == TEXT("managed-erased-wrong.wasm");
+			const bool bTrap = File == TEXT("managed-trap.wasm") || bWrongCast;
 			const bool bExecuted = Runtime.BeginPlay(Result);
 			if (!TestEqual(TEXT("Generated program outcome"), bExecuted, !bTrap)) { AddError(Result.ErrorMessage); return false; }
+			if (bWrongCast)
+			{
+				TestEqual(TEXT("Wrong downcast reports managed type rejection"), Result.ErrorCategory, FString(TEXT("managed_heap_rejected")));
+				FHeap* RejectedHeap = Runtime.GetManagedHeapForTesting();
+				if (!TestNotNull(TEXT("Rejected cast retains diagnostic heap"), RejectedHeap)) return false;
+				TestEqual(TEXT("Rejected cast unwinds frames"), RejectedHeap->GetStats().ActiveFrames, 0u);
+				TestEqual(TEXT("Rejected cast unwinds roots"), RejectedHeap->GetStats().LiveRoots, 0u);
+				TestTrue(TEXT("Rejected cast graph collects"), RejectedHeap->Collect() == EHeapError::Ok);
+				TestEqual(TEXT("Rejected cast leaves no objects"), RejectedHeap->GetStats().LiveObjects, 0u);
+				continue;
+			}
 			uint8 Value[4]{}; FString Error;
 			TestTrue(TEXT("Read generated program result"), Runtime.ReadStateBytes(16, MakeArrayView(Value), Error));
 			TestEqual(TEXT("Reference/aggregate return, recursive/indirect calls and value-copy parameters survive GC"),
@@ -304,6 +317,47 @@ bool FAvidScriptManagedHeapGeneratedGuestTest::RunTest(const FString& Parameters
 			TestEqual(TEXT("All generated roots unwind"), Stats.LiveRoots, 0u);
 			TestTrue(TEXT("Post-invocation cycle collection"), Heap->Collect() == EHeapError::Ok);
 			TestEqual(TEXT("Escaped/shared graph and self-cycle reclaimed"), Heap->GetStats().LiveObjects, 0u);
+		}
+	}
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptManagedHeapCSharpClosuresTest,
+	"AvidScript.Runtime.ManagedHeap.CSharpClosures",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptManagedHeapCSharpClosuresTest::RunTest(const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	using namespace AvidScript::Managed;
+	const FString Directory = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("AvidScriptManagedHeapTests/GuestFixtures"));
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	{
+		for (const FString File : {FString(TEXT("csharp-closures.wasm")), FString(TEXT("csharp-closures-stress.wasm"))})
+		{
+			TArray<uint8> Wasm;
+			if (!TestTrue(TEXT("Load current CSharp closure fixture"), FFileHelper::LoadFileToArray(Wasm, *FPaths::Combine(Directory, File)))) return false;
+			FAvidScriptVmBackendSelection Selection;
+			Selection.BackendKind = Backend;
+			Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime ? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+			FAvidScriptWasmRuntimeInstance Runtime(Selection); FAvidScriptWasmSmokeResult Result;
+			if (!TestTrue(TEXT("CSharp closures load"), Runtime.LoadModule(Wasm.GetData(), Wasm.Num(), File, Result)))
+			{ AddError(Result.ErrorMessage); return false; }
+			if (!TestTrue(TEXT("CSharp closures execute"), Runtime.BeginPlay(Result)))
+			{ AddError(Result.ErrorMessage); return false; }
+			uint8 Value[4]{}; FString Error;
+			if (!TestTrue(TEXT("Read CSharp closure result"), Runtime.ReadStateBytes(16, MakeArrayView(Value), Error))) return false;
+			TestEqual(TEXT("Shared mutation, escaping activation, per-iteration cells and nested factories"),
+				uint32(Value[0]) | (uint32(Value[1]) << 8) | (uint32(Value[2]) << 16) | (uint32(Value[3]) << 24), 1147395u);
+			FHeap* Heap = Runtime.GetManagedHeapForTesting();
+			if (!TestNotNull(TEXT("CSharp module owns heap"), Heap)) return false;
+			const auto Stats = Heap->GetStats();
+			TestTrue(TEXT("Closures use actual managed allocations"), Stats.Allocations >= 16);
+			if (File == TEXT("csharp-closures-stress.wasm"))
+				TestTrue(TEXT("Every allocation followed by collection"), Stats.Collections >= Stats.Allocations);
+			TestEqual(TEXT("CSharp frames unwind"), Stats.ActiveFrames, 0u);
+			TestEqual(TEXT("CSharp roots unwind"), Stats.LiveRoots, 0u);
+			TestTrue(TEXT("Collect detached closure graphs"), Heap->Collect() == EHeapError::Ok);
+			TestEqual(TEXT("All closure environments reclaimed"), Heap->GetStats().LiveObjects, 0u);
 		}
 	}
 	return true;

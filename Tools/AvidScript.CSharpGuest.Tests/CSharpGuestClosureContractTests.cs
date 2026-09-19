@@ -19,9 +19,10 @@ internal static class CSharpGuestClosureContractTests
                 }
             }
             """);
-        CSharpGuestLoweringResult pending = CSharpGuestLowerer.Lower(document, new string('a', 64));
-        Require(!pending.Succeeded && pending.Module is null && pending.Diagnostics.Any(item => item.Code == "ASCG1024"),
-            "a valid closure plan must not silently fall back to stack addresses");
+        CSharpGuestLoweringResult lowered = CSharpGuestLowerer.Lower(document, new string('a', 64));
+        Require(lowered.Succeeded && lowered.Module!.Types.Any(type => type.Kind == "managed_ref")
+            && AvidScript.WasmBackend.WasmModuleCompiler.Compile(lowered.Module).Succeeded,
+            "a valid closure plan must compile with traced heap environments");
         SemanticClosureEnvironment environment = document.ClosureEnvironments.Single();
         foreach (SemanticDocument malformed in new[]
         {

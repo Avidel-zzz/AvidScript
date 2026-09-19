@@ -89,20 +89,22 @@ internal static class CSharpGuestLambdaTests
             SemanticDocument rejected = SemanticAnalyzer.Analyze(captured, "Scripts/CapturedLambda.cs", frontend.Source.Sha256);
             Require(rejected.Succeeded && rejected.ControlFlowGraphs.Count != 0
                 && rejected.ClosureEnvironments.All(environment => environment.Allocation is not null)
-                && CSharpGuestLowerer.Lower(rejected, new string('b', 64)).Diagnostics.Any(item => item.Code == "ASCG1024"),
-                "direct, transitive and nested captures need allocation plans and a Guest execution guard until lowering is connected");
+                && CSharpGuestLowerer.Lower(rejected, new string('b', 64)) is { Succeeded: true, Module: { } closureModule }
+                && WasmModuleCompiler.Compile(closureModule).Succeeded,
+                "direct, transitive and nested captures must compile with traced environments");
         }
-        foreach (string captured in new[]
+        foreach ((string captured, string expectedCode) in new[]
         {
-            "using System; public class Script { int value; public int Run() { Func<int> callback = () => value; return callback(); } }",
-            "using System; public class Script { int field; public int Value { set { Func<int> callback = () => value; field = callback(); } } }",
+            ("using System; public class Script { int value; public int Run() { Func<int> callback = () => value; return callback(); } }", "ASCG1024"),
+            ("using System; public class Script { int field; public int Value { set { Func<int> callback = () => value; field = callback(); } } }", "ASCG1004"),
         })
         {
             var frontend = AvidScript.CSharpFrontend.FrontendAnalyzer.Analyze(captured, "Scripts/ReceiverLambda.cs");
             SemanticDocument rejected = SemanticAnalyzer.Analyze(captured, "Scripts/ReceiverLambda.cs", frontend.Source.Sha256);
+            CSharpGuestLoweringResult receiverResult = CSharpGuestLowerer.Lower(rejected, new string('b', 64));
             Require(rejected.Succeeded && rejected.ClosureEnvironments.All(environment => environment.Allocation is not null)
-                && CSharpGuestLowerer.Lower(rejected, new string('b', 64)).Diagnostics.Any(item => item.Code == "ASCG1024"),
-                "receiver and implicit setter captures need complete plans before Guest execution");
+                && !receiverResult.Succeeded && receiverResult.Diagnostics.Any(item => item.Code == expectedCode),
+                "captured receiver identity and ordinary class instances remain unsupported");
         }
         foreach (string unsupported in new[]
         {

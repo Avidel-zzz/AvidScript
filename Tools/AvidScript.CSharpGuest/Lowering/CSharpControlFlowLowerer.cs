@@ -17,7 +17,7 @@ internal static class CSharpControlFlowLowerer
         List<GuestDiagnostic> diagnostics)
     {
         int functionDiagnosticStart = diagnostics.Count;
-        List<GuestRegister> parameters = LowerParameters(callable, guestTypes, diagnostics);
+        List<GuestRegister> parameters = LowerParameters(document, callable, guestTypes, diagnostics);
         if (diagnostics.Count != functionDiagnosticStart)
         {
             return null;
@@ -66,6 +66,7 @@ internal static class CSharpControlFlowLowerer
         {
             return null;
         }
+        if (!context.ClosureCells.InsertAllocations(graph, blocks)) return null;
         return new GuestFunction(
             CSharpGuestIds.Function(callable.MethodSymbolId),
             parameters,
@@ -76,6 +77,7 @@ internal static class CSharpControlFlowLowerer
     }
 
     private static List<GuestRegister> LowerParameters(
+        SemanticDocument document,
         SemanticCallable callable,
         IReadOnlyDictionary<string, GuestType> guestTypes,
         List<GuestDiagnostic> diagnostics)
@@ -97,7 +99,7 @@ internal static class CSharpControlFlowLowerer
 
         foreach (SemanticCallableParameter parameter in callable.Parameters.OrderBy(item => item.Ordinal))
         {
-            string typeId = CSharpAbiTypeMapper.ParameterType(parameter);
+            string typeId = CSharpClosureLayout.ParameterType(document, parameter);
             if (!guestTypes.ContainsKey(typeId))
             {
                 Add(diagnostics, "ASCG1004", callable.MethodSymbolId,

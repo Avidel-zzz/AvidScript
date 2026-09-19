@@ -19,6 +19,8 @@ public static class CSharpGuestLowerer
 
         List<GuestDiagnostic> diagnostics = new();
         ValidateInput(document, semanticSha256, diagnostics);
+        if (document.ClosureEnvironments is { Count: > 0 } && enableDebugInstrumentation)
+            Add(diagnostics, "ASCG1024", "Debug pause frames require persistent managed roots before captured closures can be instrumented.");
         if (diagnostics.Count != 0)
         {
             return Failure(diagnostics);
@@ -51,6 +53,10 @@ public static class CSharpGuestLowerer
             guestTypes,
             dataPool,
             diagnostics).ToList();
+        functions.AddRange(CSharpClosureDelegateLowerer.BuildThunks(document, functions));
+        if (document.ClosureEnvironments.Count != 0)
+            imports = imports.Append(new GuestImport(CSharpClosureLayout.HeapImport, GuestManagedHeap.ImportModule, GuestManagedHeap.ImportName,
+                Enumerable.Repeat(CSharpGuestIds.AddressTypeId, 4).ToArray(), CSharpGuestIds.AddressTypeId)).ToArray();
         CSharpAsyncLoweringResult asyncMethods = CSharpAsyncLowerer.Lower(
             document,
             guestTypes,
@@ -240,8 +246,8 @@ public static class CSharpGuestLowerer
             Add(diagnostics, "ASCG1001", "Semantic artifact is failed, unsupported, or has invalid provenance.");
         }
 
-        if (document.ClosureEnvironments.Count != 0)
-            Add(diagnostics, "ASCG1024", "Closure environment allocation and lifetime lowering are not yet implemented.");
+        if (document.ClosureEnvironments.Any(environment => environment.Allocation is null || environment.Cells.Any(cell => cell.Kind == "receiver")))
+            Add(diagnostics, "ASCG1024", "Closure execution requires synchronous allocation metadata; captured instance identity and async roots are not yet connected.");
 
         if (document.ControlFlowGraphs
             .GroupBy(graph => graph.MethodSymbolId, StringComparer.Ordinal)

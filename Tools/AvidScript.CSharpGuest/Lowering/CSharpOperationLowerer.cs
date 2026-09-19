@@ -15,6 +15,7 @@ internal static class CSharpOperationLowerer
         int blockOrdinal,
         List<GuestInstruction> instructions)
     {
+        if (context.ClosureCells.TryStore(symbolId, value, instructions)) return true;
         if (!context.TryGetStorage(symbolId, out GuestRegister storage)
             || !string.Equals(storage.TypeId, value.TypeId, StringComparison.Ordinal)
             || !context.TryGetGuestType(storage.TypeId, out GuestType type))
@@ -403,6 +404,12 @@ internal static class CSharpOperationLowerer
         }
 
         bool shortCircuit = operation.OperatorKind is "logical_and" or "logical_or";
+        if (context.Document.ClosureEnvironments.Count != 0 && operation.Children.Any(child =>
+                context.Document.DelegateTypes.Any(signature => signature.TypeId == child.TypeId)))
+        {
+            context.Add("ASCG1024", "Closure delegate comparison and combination require callable and environment identity semantics.");
+            return null;
+        }
         if (shortCircuit && (operation.TypeId != "type:bool"
             || operation.Children[0].TypeId != "type:bool"
             || operation.Children[1].TypeId != "type:bool"
@@ -798,7 +805,7 @@ internal static class CSharpOperationLowerer
         }
 
         if (operation.Constant is { Kind: "null" } && context.TryGetGuestType(operation.TypeId, out GuestType nullType)
-            && nullType.Kind == "function_ref")
+            && (nullType.Kind == "function_ref" || context.Document.DelegateTypes.Any(signature => signature.TypeId == nullType.Id)))
             return LowerLiteral(context, operation, blockOrdinal, instructions);
 
         GuestRegister? operand = LowerValue(context, operation.Children[0], blockOrdinal, instructions);
@@ -938,6 +945,12 @@ internal static class CSharpOperationLowerer
             && operation.Children.Count == 1
                 ? operation.Children[0]
                 : operation;
+        if (target.Kind == "flow_capture_reference" && context.TryGetCaptureTarget(target.CaptureId, out SemanticOperation capturedCell)) target = capturedCell;
+        if (context.ClosureCells.RequiresManagedAddress(target))
+        {
+            context.Add("ASCG1024", "A captured cell requires a managed ref adapter before it can be passed as an ordinary ref/out argument.");
+            return null;
+        }
         if (target.Kind == "flow_capture_reference"
             && context.TryGetCaptureAddressTarget(
                 target.CaptureId,
@@ -1128,6 +1141,7 @@ internal static class CSharpOperationLowerer
         int blockOrdinal,
         List<GuestInstruction> instructions)
     {
+        if (context.ClosureCells.TryLoad(operation.SymbolId, operation.TypeId, blockOrdinal, instructions, out GuestRegister? captured)) return captured;
         if (!context.TryGetStorage(operation.SymbolId, out GuestRegister storage))
         {
             context.Add("ASCG1004", $"Block {blockOrdinal} local '{operation.SymbolId}' has no storage slot.");
@@ -1211,6 +1225,7 @@ internal static class CSharpOperationLowerer
         int blockOrdinal,
         List<GuestInstruction> instructions)
     {
+        if (target.Kind is "local_reference" or "parameter_reference" && context.ClosureCells.TryStore(target.SymbolId, value, instructions)) return true;
         if (target.Kind is "local_reference" or "parameter_reference"
             && context.TryGetStorage(target.SymbolId, out GuestRegister storage))
         {

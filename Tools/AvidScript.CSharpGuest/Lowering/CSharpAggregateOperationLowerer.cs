@@ -175,6 +175,8 @@ internal static class CSharpAggregateOperationLowerer
             return false;
         }
 
+        if (context.ClosureCells.RejectValueReceiverBorrow(target.Children[0])) return false;
+
         GuestRegister? aggregate = CSharpOperationLowerer.LowerValue(
             context,
             target.Children[0],

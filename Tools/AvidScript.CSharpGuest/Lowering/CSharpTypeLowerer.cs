@@ -106,6 +106,7 @@ internal static class CSharpTypeLowerer
             return Failure(diagnostics);
         }
 
+        CSharpClosureLayout.AddTypes(document, rawTypes);
         GuestTypeLayoutResult layout = GuestDataLayout.ComputeTypes(rawTypes);
         if (!layout.Succeeded)
         {

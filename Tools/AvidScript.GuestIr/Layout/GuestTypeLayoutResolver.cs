@@ -236,8 +236,8 @@ internal sealed class GuestTypeLayoutResolver
     private GuestType? LayoutManagedReference(GuestType declaration)
     {
         if (declaration.Fields.Count != 0 || declaration.UnderlyingTypeId is not null
-            || declaration.ElementTypeId is null || !declarations.TryGetValue(declaration.ElementTypeId, out GuestType? payload)
-            || payload.Kind != "struct") return InvalidShape(declaration, "managed reference requires a struct payload");
+            || (declaration.ElementTypeId is not null && (!declarations.TryGetValue(declaration.ElementTypeId, out GuestType? payload)
+                || payload.Kind != "struct"))) return InvalidShape(declaration, "managed reference requires a struct payload or erased shape");
         return declaration with { Storage = "i64", Size = 8, Alignment = 8 };
     }
 

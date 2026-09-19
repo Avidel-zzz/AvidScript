@@ -300,6 +300,7 @@ internal sealed partial class WasmFunctionCompiler
         switch (instruction.Op)
         {
             case "managed_new":
+            case "managed_cast":
             case "managed_get":
             case "managed_set":
             case "managed_collect":

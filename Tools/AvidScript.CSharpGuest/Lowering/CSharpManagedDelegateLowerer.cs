@@ -11,6 +11,7 @@ internal static class CSharpManagedDelegateLowerer
     public static GuestRegister? LowerCreation(CSharpFunctionLoweringContext context, SemanticOperation operation,
         int blockOrdinal, List<GuestInstruction> instructions)
     {
+        if (context.Document.ClosureEnvironments.Count != 0) return CSharpClosureDelegateLowerer.Create(context, operation, blockOrdinal, instructions);
         SemanticDelegateType? signature = context.Document.DelegateTypes.FirstOrDefault(item => item.TypeId == operation.TypeId);
         if (!SupportsDelegates(context.Document) || signature is null
             || signature.ReturnRefKind != "none" || operation.Children.Count != 1
@@ -49,6 +50,7 @@ internal static class CSharpManagedDelegateLowerer
             return true;
         }
         GuestRegister? receiver = CSharpOperationLowerer.LowerValue(context, operation.Children[0], blockOrdinal, instructions);
+        if (receiver is null) return true;
         SemanticCallableParameter[] parameters = signature.Parameters.Select(parameter => new SemanticCallableParameter(
             parameter.Ordinal, $"{signature.InvokeMethodSymbolId}:parameter:{parameter.Ordinal}", $"arg{parameter.Ordinal}", parameter.TypeId, parameter.RefKind)).ToArray();
         if (receiver is null) return true;
@@ -78,7 +80,16 @@ internal static class CSharpManagedDelegateLowerer
             result = context.CreateTemporary(signature.ReturnTypeId, blockOrdinal);
             if (result is null) return true;
         }
-        instructions.Add(new("call_indirect", result?.Id, new[] { receiver.Id }.Concat(arguments).ToArray(), signature.TypeId, null, null));
+        if (context.Document.ClosureEnvironments.Count != 0)
+        {
+            GuestRegister? target = context.CreateTemporary(CSharpClosureLayout.FunctionType(signature.TypeId), blockOrdinal);
+            GuestRegister? environment = context.CreateTemporary(CSharpClosureLayout.ObjectType, blockOrdinal);
+            if (target is null || environment is null) return true;
+            instructions.Add(new("field_load", target.Id, new[] { receiver.Id }, CSharpClosureLayout.TargetField, null, null));
+            instructions.Add(new("field_load", environment.Id, new[] { receiver.Id }, CSharpClosureLayout.ContextField, null, null));
+            instructions.Add(new("call_indirect", result?.Id, new[] { target.Id, environment.Id }.Concat(arguments).ToArray(), target.TypeId, null, null));
+        }
+        else instructions.Add(new("call_indirect", result?.Id, new[] { receiver.Id }.Concat(arguments).ToArray(), signature.TypeId, null, null));
         return true;
     }
 
@@ -93,11 +104,14 @@ internal static class CSharpManagedDelegateLowerer
             foreach (GuestInstruction instruction in function.Blocks.SelectMany(block => block.Instructions).Where(item => item.Op == "function_ref"))
                 targets[registers[instruction.ResultId!].TypeId].Add(instruction.TargetId!);
         }
-        return document.DelegateTypes.Where(signature => targets.ContainsKey(signature.TypeId))
+        bool closures = document.ClosureEnvironments.Count != 0;
+        string FunctionType(SemanticDelegateType signature) => closures ? CSharpClosureLayout.FunctionType(signature.TypeId) : signature.TypeId;
+        return document.DelegateTypes.Where(signature => targets.ContainsKey(FunctionType(signature)))
             .OrderBy(signature => signature.TypeId, StringComparer.Ordinal)
-            .Select(signature => new GuestFunctionReference(signature.TypeId,
-                signature.Parameters.Select(parameter => parameter.RefKind == "none" ? parameter.TypeId : CSharpGuestIds.AddressTypeId).ToArray(),
-                signature.ReturnTypeId, targets[signature.TypeId].ToArray())).ToArray();
+            .Select(signature => new GuestFunctionReference(FunctionType(signature),
+                (closures ? new[] { CSharpClosureLayout.ObjectType } : Array.Empty<string>())
+                    .Concat(signature.Parameters.Select(parameter => parameter.RefKind == "none" ? parameter.TypeId : CSharpGuestIds.AddressTypeId)).ToArray(),
+                signature.ReturnTypeId, targets[FunctionType(signature)].ToArray())).ToArray();
     }
 
     public static bool ContainsReference(string typeId, IReadOnlyDictionary<string, GuestType> types)
@@ -109,7 +123,7 @@ internal static class CSharpManagedDelegateLowerer
     private static bool ContainsReference(string typeId, IReadOnlyDictionary<string, GuestType> types, HashSet<string> visited)
     {
         if (!visited.Add(typeId) || !types.TryGetValue(typeId, out GuestType? type)) return false;
-        return type.Kind == "function_ref" || type.Fields.Any(field => ContainsReference(field.TypeId, types, visited))
+        return type.Kind is "function_ref" or "managed_ref" || type.Fields.Any(field => ContainsReference(field.TypeId, types, visited))
             || (type.ElementTypeId is { } element && ContainsReference(element, types, visited));
     }
 }

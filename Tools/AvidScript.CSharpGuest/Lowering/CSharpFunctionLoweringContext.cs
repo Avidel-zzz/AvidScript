@@ -88,9 +88,11 @@ internal sealed class CSharpFunctionLoweringContext
         {
             globalBySymbol.TryAdd(symbol.Id, CSharpGuestIds.Global(symbol.Id));
         }
+        ClosureCells = new(this);
     }
 
     public SemanticDocument Document { get; }
+    public CSharpClosureCells ClosureCells { get; }
 
     public SemanticCallable Callable { get; }
 
@@ -427,6 +429,7 @@ internal sealed class CSharpFunctionLoweringContext
         out GuestConstant constant)
     {
         string kind = semanticConstant.Kind;
+        if (kind == "null" && Document.ClosureEnvironments.Count != 0 && Document.DelegateTypes.Any(signature => signature.TypeId == typeId)) kind = "zero";
         if (typeId is not null
             && guestTypes.TryGetValue(typeId, out GuestType? type)
             && type.Kind == "enum"

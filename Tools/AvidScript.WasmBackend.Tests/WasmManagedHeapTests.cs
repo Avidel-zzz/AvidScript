@@ -25,7 +25,7 @@ internal static class WasmManagedHeapTests
         GuestModule[] invalid =
         {
             module with { SchemaVersion = 3, IrVersion = "1.2" },
-            module with { SchemaVersion = 5, IrVersion = "1.4" },
+            module with { SchemaVersion = 6, IrVersion = "1.5" },
             module with { Imports = Array.Empty<GuestImport>() },
             module with { Imports = new[] { module.Imports[0] with { ParameterTypeIds = new[] { I } } } },
             module with { Imports = new[] { module.Imports[0] with { Module = "env" } } },
@@ -58,15 +58,69 @@ internal static class WasmManagedHeapTests
             ? function with { Blocks = new[] { function.Blocks[0] with { Terminator = new("trap", null, null, null, null) } } } : function).ToArray() };
         WasmCompilationResult trapCompiled = WasmModuleCompiler.Compile(trap);
         Require(trapCompiled.Succeeded, "trap fixture must compile");
+        GuestModule erased = WithErasedCasts(module, false);
+        GuestModule wrongCast = WithErasedCasts(module, true);
+        Require(GuestModuleValidator.Validate(erased).Succeeded, string.Join(" | ", GuestModuleValidator.Validate(erased).Diagnostics.Select(item => item.Message)));
+        WasmCompilationResult erasedCompiled = WasmModuleCompiler.Compile(erased);
+        WasmCompilationResult wrongCompiled = WasmModuleCompiler.Compile(wrongCast);
+        Require(erasedCompiled.Succeeded && wrongCompiled.Succeeded, "checked casts compile: "
+            + string.Join(" | ", erasedCompiled.Diagnostics.Concat(wrongCompiled.Diagnostics).Select(item => item.Message)));
+        Require(GuestIrSerializer.Serialize(erased).SequenceEqual(GuestIrSerializer.Serialize(GuestIrSerializer.Deserialize(GuestIrSerializer.Serialize(erased)))),
+            "erased shape and cast op round trip");
+        GuestModule[] invalidCasts =
+        {
+            erased with { SchemaVersion = 4, IrVersion = "1.3" },
+            ReplaceMake(erased, Op("managed_new", "erased")),
+            ReplaceMake(erased, Op("managed_cast", "erased", new[] { "n" })),
+            ReplaceMake(erased, Op("managed_cast", "n", new[] { "obj" })),
+            ReplaceMake(erased, Op("managed_cast", "obj")),
+            ReplaceMake(erased, Op("managed_cast", "obj", new[] { "erased" }, "forged")),
+            ReplaceMake(erased, Op("managed_get", "n", new[] { "erased" }, "number")),
+        };
+        foreach (GuestModule invalidCast in invalidCasts)
+            Require(!GuestModuleValidator.Validate(invalidCast).Succeeded && !WasmModuleCompiler.Compile(invalidCast).Succeeded,
+                "erased allocation, scalar conversion, untyped access and downgraded casts must fail closed");
         string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_MANAGED_HEAP_WASM_DIR");
         if (!string.IsNullOrWhiteSpace(output))
         {
             Directory.CreateDirectory(output); File.WriteAllBytes(Path.Combine(output, "managed.wasm"), compiled.Bytes);
             File.WriteAllBytes(Path.Combine(output, "managed-trap.wasm"), trapCompiled.Bytes);
             File.WriteAllBytes(Path.Combine(output, "managed-cooperative.wasm"), cooperative.Bytes);
+            File.WriteAllBytes(Path.Combine(output, "managed-erased.wasm"), erasedCompiled.Bytes);
+            File.WriteAllBytes(Path.Combine(output, "managed-erased-wrong.wasm"), wrongCompiled.Bytes);
             File.WriteAllBytes(Path.Combine(output, "managed.guest-ir.json"), json);
         }
-        return invalid.Length + 4;
+        return invalid.Length + 4 + invalidCasts.Length + 2;
+    }
+
+    private static GuestModule WithErasedCasts(GuestModule module, bool wrong)
+    {
+        const string erased = "type:erased", other = "type:other_ref";
+        return module with
+        {
+            SchemaVersion = 5, IrVersion = "1.4",
+            Types = module.Types.Concat(new[]
+            {
+                new GuestType(erased, "managed_ref", "i64", Array.Empty<GuestField>(), null, null, 8, 8),
+                new GuestType(other, "managed_ref", "i64", Array.Empty<GuestField>(), Node, null, 8, 8),
+            }).ToArray(),
+            Functions = module.Functions.Select(function => function.Id != "make" ? function : function with
+            {
+                Locals = function.Locals.Concat(new[] { Reg("erased", erased), Reg("checked", R), Reg("wrong", other),
+                    Reg("emptyErased", erased), Reg("emptyTyped", R) }).ToArray(),
+                Blocks = new[] { function.Blocks[0] with { Instructions = new[]
+                {
+                    new GuestInstruction("constant", "emptyErased", Array.Empty<string>(), null, null, new("null", null)),
+                    Op("managed_cast", "emptyTyped", new[] { "emptyErased" }), // null must not dereference
+                    Op("managed_new", "obj"), Op("managed_set", null, new[] { "obj", "n" }, "number"),
+                    Op("managed_cast", "erased", new[] { "obj" }),
+                    Op("local_store", null, new[] { "emptyTyped" }, "obj"),
+                    Op("managed_collect"), // only the erased reference keeps the object alive
+                    Op("managed_cast", wrong ? "wrong" : "checked", new[] { "erased" }),
+                    Op("local_store", null, new[] { wrong ? "emptyTyped" : "checked" }, "obj"),
+                } } },
+            }).ToArray(),
+        };
     }
 
     private static void CheckNativeWireContract()

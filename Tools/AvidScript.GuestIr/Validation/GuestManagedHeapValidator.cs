@@ -13,6 +13,9 @@ internal static class GuestManagedHeapValidator
         if (references.Length == 0) return;
         if (module.SchemaVersion < 4 || references.Length > GuestManagedHeap.MaxLayouts)
             Add(context, "Managed references require Guest IR 4/1.3 and a bounded layout table.");
+        if (references.Any(type => type.ElementTypeId is null)
+            && (module.SchemaVersion < 5 || references.All(type => type.ElementTypeId is null)))
+            Add(context, "Erased managed references require Guest IR 5/1.4 and at least one concrete heap layout.");
         GuestImport[] imports = module.Imports.Where(import => import.Module == GuestManagedHeap.ImportModule
             && import.Name == GuestManagedHeap.ImportName).ToArray();
         bool IsI32(string id) => context.Types.TryGetValue(id, out GuestType? type) && type.Kind == "scalar" && type.Storage == "i32" && type.Size == 4;
@@ -22,7 +25,8 @@ internal static class GuestManagedHeapValidator
         int totalReferences = 0;
         foreach (GuestType reference in references)
         {
-            if (reference.ElementTypeId is null || !context.Types.TryGetValue(reference.ElementTypeId, out GuestType? payload)
+            if (reference.ElementTypeId is null) continue;
+            if (!context.Types.TryGetValue(reference.ElementTypeId, out GuestType? payload)
                 || payload.Kind != "struct" || payload.Size <= 0 || payload.Size > GuestManagedHeap.MaxObjectBytes)
             { Add(context, $"Managed reference '{reference.Id}' requires a nonempty bounded struct payload."); continue; }
             try
@@ -63,7 +67,13 @@ internal static class GuestManagedHeapValidator
             && instruction.Constant is null && instruction.OperatorKind is null;
         if (instruction.Op == "managed_new")
             valid &= result is not null && context.Types.TryGetValue(result.TypeId, out GuestType? allocated)
-                && allocated.Kind == "managed_ref" && operands.Count == 0 && instruction.TargetId is null;
+                && allocated.Kind == "managed_ref" && allocated.ElementTypeId is not null && operands.Count == 0 && instruction.TargetId is null;
+        else if (instruction.Op == "managed_cast")
+            valid &= context.Module.SchemaVersion >= 5 && result is not null
+                && context.Types.TryGetValue(result.TypeId, out GuestType? castType) && castType.Kind == "managed_ref"
+                && operands.Count == 1 && operands[0] is { } source
+                && context.Types.TryGetValue(source.TypeId, out GuestType? sourceType) && sourceType.Kind == "managed_ref"
+                && instruction.TargetId is null;
         else if (instruction.Op == "managed_collect")
             valid &= result is null && operands.Count == 0 && instruction.TargetId is null;
         else if (instruction.Op is "managed_get" or "managed_set")
