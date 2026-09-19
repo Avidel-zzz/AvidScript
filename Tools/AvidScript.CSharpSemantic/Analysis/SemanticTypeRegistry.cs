@@ -10,6 +10,7 @@ internal sealed class SemanticTypeRegistry
     private readonly Dictionary<string, SemanticType> types = new(StringComparer.Ordinal);
     private readonly Dictionary<string, SemanticTypeShape> shapes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, SemanticDelegateType> delegateTypes = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SemanticClassType> classTypes = new(StringComparer.Ordinal);
 
     public string Register(ITypeSymbol type)
     {
@@ -53,6 +54,8 @@ internal sealed class SemanticTypeRegistry
                 null,
                 Register(named.TypeArguments[0])));
         }
+        if (type is INamedTypeSymbol { TypeKind: TypeKind.Class } classType && GetKind(type) == "class")
+            classTypes.Add(id, SemanticClassTypeProjector.Project(classType, id, this));
         return id;
     }
 
@@ -68,6 +71,9 @@ internal sealed class SemanticTypeRegistry
 
     public IReadOnlyList<SemanticDelegateType> BuildDelegateTypes() =>
         delegateTypes.Values.OrderBy(type => type.TypeId, StringComparer.Ordinal).ToArray();
+
+    public IReadOnlyList<SemanticClassType> BuildClassTypes() =>
+        classTypes.Values.OrderBy(type => type.TypeId, StringComparer.Ordinal).ToArray();
 
     internal static string GetDelegateRefKind(RefKind kind) => kind switch
     {

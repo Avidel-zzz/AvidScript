@@ -30,10 +30,10 @@ internal static class CSharpGuestClosureContractTests
             document with { ClosureEnvironments = new[] { environment with { Id = "forged" } } },
             document with { ClosureBindings = Array.Empty<SemanticClosureBinding>() },
             document with { ClosureBindings = null! },
-            document with { SchemaVersion = 21, SemanticVersion = "1.25" },
+            document with { SchemaVersion = 21, SemanticVersion = "1.25", ClassTypes = Array.Empty<SemanticClassType>() },
             document with { ClosureEnvironments = new[] { environment with { Allocation = null } } },
             document with { ClosureEnvironments = new[] { environment with { Allocation = environment.Allocation! with { Entries = Array.Empty<SemanticClosureEntry>() } } } },
-            document with { SchemaVersion = 22, SemanticVersion = "1.26" },
+            document with { SchemaVersion = 22, SemanticVersion = "1.26", ClassTypes = Array.Empty<SemanticClassType>() },
         })
         {
             CSharpGuestLoweringResult rejected = CSharpGuestLowerer.Lower(malformed, new string('a', 64));
@@ -41,6 +41,7 @@ internal static class CSharpGuestClosureContractTests
                 "stripped, forged or downgraded environments must fail before lowering");
         }
         SemanticDocument legacy = document with { SchemaVersion = 22, SemanticVersion = "1.26",
+            ClassTypes = Array.Empty<SemanticClassType>(),
             ClosureEnvironments = new[] { environment with { Allocation = null } } };
         Require(CSharpGuestLowerer.Lower(legacy, new string('a', 64)).Diagnostics.Any(item => item.Code == "ASCG1024"),
             "legacy capture plans remain readable but cannot execute with missing allocation metadata");

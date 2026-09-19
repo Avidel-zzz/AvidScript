@@ -44,6 +44,7 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 [委托身份与相等](Docs/Phase66/P66.B_Delegate_Identity.md)进一步支持单目标委托的 `==`/`!=`，按方法和捕获环境身份比较；该组 Guest 232/232、双后端 Automation 5/5 通过。
 [不可变委托调用列表](Docs/Phase66/P66.B_Delegate_Lists.md)已接通同步 `+/-/+=/-=`、顺序/重复项、列表相等、最后连续匹配移除、最后返回值及共享 ref/out；调用期间修改委托变量保留当前快照。该组 Guest 246/246、双后端 Automation 5/5 通过，正常/强制回收结果与 .NET 一致；语言 event 和跨 await 仍待完成，长列表成本尚需优化。
 [结构体实例方法委托](Docs/Phase66/P66.B_Bound_Value_Delegates.md)已接通 receiver 的独立装箱副本、复制委托共享身份、ref/out、组合/移除及闭包字段保活。空结构体使用一字节内部存储；Guest 262/262、双后端 Automation 5/5 通过，正常/强制回收结果与 .NET 一致。一般引用类和 UE 对象实例委托仍待连接。
+[普通引用类语义合同](Docs/Phase66/P66.B_Reference_Class_Contract.md)新增 Semantic 24/1.28 的类继承、构造、初始化和隐式存储事实及输入校验，并修复 partial 类型重复声明的分析异常；旧 23/1.27 闭包、lambda 与 async 仍兼容。Semantic 219/219、Guest 273/273 通过；本组尚未启用普通引用对象或引用类实例委托。
 
 ## 现在可以做什么
 

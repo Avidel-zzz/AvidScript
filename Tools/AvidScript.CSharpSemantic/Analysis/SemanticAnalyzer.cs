@@ -177,6 +177,7 @@ public static class SemanticAnalyzer
             AsyncMethods = asyncProjection.Methods,
             UeTypeDeclarations = ueTypeProjection.Declarations,
             DelegateTypes = typeRegistry.BuildDelegateTypes(),
+            ClassTypes = typeRegistry.BuildClassTypes(),
             ClosureEnvironments = lexicalCaptures.Closures.Environments,
             ClosureBindings = lexicalCaptures.Closures.Bindings,
         };

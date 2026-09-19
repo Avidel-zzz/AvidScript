@@ -32,7 +32,7 @@ internal static class CSharpGuestDelegateSignatureTests
             validMetadata with { DelegateTypes = new[] { signature with { Parameters = new[] { parameters[0] with { RefKind = "out" } } } } },
             validMetadata with { DelegateTypes = new[] { signature with { Parameters = null! } } },
             validMetadata with { DelegateTypes = null! },
-            validMetadata with { SchemaVersion = 20, SemanticVersion = "1.22" },
+            validMetadata with { SchemaVersion = 20, SemanticVersion = "1.22", ClassTypes = Array.Empty<SemanticClassType>() },
         };
         foreach (SemanticDocument document in invalid)
         {
@@ -56,14 +56,18 @@ internal static class CSharpGuestDelegateSignatureTests
             }
             """, "Scripts/PreviousDelegateContract.cs");
         SemanticDocument legacy = asyncCurrent with
-            { SchemaVersion = 20, SemanticVersion = "1.22", DelegateTypes = Array.Empty<SemanticDelegateType>() };
+            { SchemaVersion = 20, SemanticVersion = "1.22", DelegateTypes = Array.Empty<SemanticDelegateType>(), ClassTypes = Array.Empty<SemanticClassType>() };
         CSharpGuestLoweringResult previous = CSharpGuestLowerer.Lower(legacy, new string('e', 64));
         Require(previous.Succeeded && WasmModuleCompiler.Compile(previous.Module!).Succeeded,
             "schema 20/1.22 CFG async artifacts must remain consumable");
-        CSharpGuestLoweringResult previousSignatures = CSharpGuestLowerer.Lower(asyncCurrent with { SchemaVersion = 21, SemanticVersion = "1.23" }, new string('e', 64));
+        CSharpGuestLoweringResult previousSignatures = CSharpGuestLowerer.Lower(asyncCurrent with { SchemaVersion = 21, SemanticVersion = "1.23", ClassTypes = Array.Empty<SemanticClassType>() }, new string('e', 64));
         Require(previousSignatures.Succeeded && WasmModuleCompiler.Compile(previousSignatures.Module!).Succeeded,
             "schema 21/1.23 CFG async artifacts must remain consumable");
-        return 12;
+        CSharpGuestLoweringResult previousClasses = CSharpGuestLowerer.Lower(asyncCurrent with {
+            SchemaVersion = 23, SemanticVersion = "1.27", ClassTypes = Array.Empty<SemanticClassType>() }, new string('e', 64));
+        Require(previousClasses.Succeeded && WasmModuleCompiler.Compile(previousClasses.Module!).Succeeded,
+            "schema 23/1.27 retains structured async flow and precise continuation state");
+        return 13;
     }
 
     private static void Require(bool condition, string message)

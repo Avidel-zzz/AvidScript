@@ -21,7 +21,7 @@ internal static class SemanticClosureTests
             }
             """;
         SemanticDocument document = Analyze(source);
-        Check(document.SchemaVersion == 23 && document.SemanticVersion == "1.27"
+        Check(document.SchemaVersion == 24 && document.SemanticVersion == "1.28"
             && document.Succeeded && document.ControlFlowGraphs.Count != 0,
             "captured lambda analysis must publish executable CFGs and allocation metadata for Guest lowering");
         Check(SemanticClosureContractValidator.IsValid(document), "shared plan contract");

@@ -65,12 +65,12 @@ internal static class CSharpGuestLambdaTests
             "lambda lowering must produce deterministic executable WASM");
         Require(WasmModuleCompiler.Compile(result.Module!, new(true, 4)).CooperativeSafepointAttestation is { RecursiveFunctionCount: 2, Verified: true },
             "lambda-mediated recursion must participate in cooperative polling");
-        Require(!CSharpGuestLowerer.Lower(document with { SchemaVersion = 21, SemanticVersion = "1.24" }, new string('b', 64)).Succeeded,
+        Require(!CSharpGuestLowerer.Lower(document with { SchemaVersion = 21, SemanticVersion = "1.24", ClassTypes = Array.Empty<SemanticClassType>() }, new string('b', 64)).Succeeded,
             "lambda callables must not execute under an older semantic version");
-        CSharpGuestLoweringResult previous = CSharpGuestLowerer.Lower(document with { SchemaVersion = 21, SemanticVersion = "1.25" }, new string('b', 64));
+        CSharpGuestLoweringResult previous = CSharpGuestLowerer.Lower(document with { SchemaVersion = 21, SemanticVersion = "1.25", ClassTypes = Array.Empty<SemanticClassType>() }, new string('b', 64));
         Require(previous.Succeeded && WasmModuleCompiler.Compile(previous.Module!).Succeeded,
             "schema 21/1.25 noncapturing lambdas must remain executable");
-        CSharpGuestLoweringResult previousClosureSchema = CSharpGuestLowerer.Lower(document with { SchemaVersion = 22, SemanticVersion = "1.26" }, new string('b', 64));
+        CSharpGuestLoweringResult previousClosureSchema = CSharpGuestLowerer.Lower(document with { SchemaVersion = 22, SemanticVersion = "1.26", ClassTypes = Array.Empty<SemanticClassType>() }, new string('b', 64));
         Require(previousClosureSchema.Succeeded && WasmModuleCompiler.Compile(previousClosureSchema.Module!).Succeeded,
             "schema 22/1.26 noncapturing lambdas must remain executable");
         CSharpGuestLoweringResult debug = CSharpGuestLowerer.Lower(document, new string('b', 64), enableDebugInstrumentation: true);

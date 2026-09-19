@@ -54,4 +54,8 @@ public sealed record SemanticDocument(
     [JsonPropertyOrder(21)]
     public IReadOnlyList<SemanticClosureBinding> ClosureBindings { get; init; } =
         Array.Empty<SemanticClosureBinding>();
+
+    [JsonPropertyOrder(22)]
+    public IReadOnlyList<SemanticClassType> ClassTypes { get; init; } =
+        Array.Empty<SemanticClassType>();
 }

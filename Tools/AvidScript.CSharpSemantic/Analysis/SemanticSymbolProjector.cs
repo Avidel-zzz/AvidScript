@@ -239,6 +239,16 @@ internal static class SemanticSymbolProjector
                 return;
             }
 
+            // A partial type has one Roslyn identity and several declaration spans.
+            if (symbol is INamedTypeSymbol { DeclaringSyntaxReferences.Length: > 1 } partialType
+                && partialType.DeclaringSyntaxReferences.All(reference => reference.GetSyntax() is TypeDeclarationSyntax declaration
+                    && declaration.Modifiers.Any(token => token.RawKind == (int)Microsoft.CodeAnalysis.CSharp.SyntaxKind.PartialKeyword))
+                && projected with { Span = symbols[id].Span, IsExecutableReferenceSource = symbols[id].IsExecutableReferenceSource } == symbols[id])
+            {
+                if (symbols[id].IsExecutableReferenceSource && !isExecutableReferenceSource) symbols[id] = projected;
+                return;
+            }
+
             throw new InvalidOperationException($"Duplicate stable semantic symbol id: {id}");
         }
     }

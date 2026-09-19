@@ -265,8 +265,8 @@ internal static class CSharpGuestContinuationTests
             block.Id.EndsWith(":result_rejected", StringComparison.Ordinal));
 
         Assert(result.Succeeded
-            && document.SchemaVersion == 23
-            && document.SemanticVersion == "1.27"
+            && document.SchemaVersion == 24
+            && document.SemanticVersion == "1.28"
             && guard.Terminator.Kind == "branch_if"
             && guard.Terminator.TargetBlockId == guardReturn.Id
             && guard.Terminator.FalseTargetBlockId == continuation.Id
@@ -288,6 +288,7 @@ internal static class CSharpGuestContinuationTests
         SemanticDocument legacy = document with
         {
             SchemaVersion = 13,
+            ClassTypes = Array.Empty<SemanticClassType>(),
             SemanticVersion = "1.13",
             DelegateTypes = Array.Empty<SemanticDelegateType>(),
         };
@@ -718,8 +719,8 @@ internal static class CSharpGuestContinuationTests
             .ToArray();
 
         Assert(result.Succeeded
-            && document.SchemaVersion == 23
-            && document.SemanticVersion == "1.27"
+            && document.SchemaVersion == 24
+            && document.SemanticVersion == "1.28"
             && asyncMethod.Lowering == "reentrant_zero_heap_cps"
             && callbackIds.SequenceEqual(new[]
             {
@@ -1048,7 +1049,7 @@ internal static class CSharpGuestContinuationTests
 
         Assert(first.Succeeded
             && second.Succeeded
-            && document.SemanticVersion == "1.27"
+            && document.SemanticVersion == "1.28"
             && frame.Slots.Select(slot => slot.SymbolId)
                 .SequenceEqual(new[] { countId })
             && frame.Slots.All(slot => slot.SymbolId != overwrittenId),
@@ -1460,6 +1461,7 @@ internal static class CSharpGuestContinuationTests
         SemanticDocument schemaTen = current with
         {
             SchemaVersion = 10,
+            ClassTypes = Array.Empty<SemanticClassType>(),
             SemanticVersion = "1.10",
             DelegateTypes = Array.Empty<SemanticDelegateType>(),
         };
@@ -1546,6 +1548,7 @@ internal static class CSharpGuestContinuationTests
         SemanticDocument legacyObjectPayload = tamperedPayload with
         {
             SchemaVersion = 10,
+            ClassTypes = Array.Empty<SemanticClassType>(),
             SemanticVersion = "1.10",
             DelegateTypes = Array.Empty<SemanticDelegateType>(),
         };

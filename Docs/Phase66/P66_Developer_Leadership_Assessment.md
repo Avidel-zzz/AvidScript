@@ -6,7 +6,7 @@
 
 **AvidScript 是已有可运行链路的开发者预览，尚不是成熟、全面领先的脚本框架。** UE Binding、Session、WASM 执行与 Win64 打包已有较强基础；普通语言组合、结构修改的编辑循环、完整调试和长期项目使用仍有实质缺口。P66.A 已完成，P66.B 尚未完成，P66.C/D 与 P67–P69 仍待推进。
 
-当前已交付：[共享与逃逸闭包](P66.B_CSharp_Closure_Execution.md)、[C# 共享引用](P66.B_CSharp_Borrowed_References.md)和[单目标委托身份](P66.B_Delegate_Identity.md)。普通同步捕获值 ref/out、结构体内部写入及引用委托转发不再列为未实现；跨 await 委托、事件持久根与完整调试仍未完成，成熟度结论不变。
+2026-09-20 实现增量：在 [共享与逃逸闭包](P66.B_CSharp_Closure_Execution.md)、[C# 共享引用](P66.B_CSharp_Borrowed_References.md)和[单目标委托身份](P66.B_Delegate_Identity.md)之上，已交付[组合/移除](P66.B_Delegate_Lists.md)与[结构体实例委托](P66.B_Bound_Value_Delegates.md)。[普通引用类合同](P66.B_Reference_Class_Contract.md)补齐构造、继承与初始化分析，但普通引用对象执行仍未启用。以下竞品资料与旧探针保持原复核日期；新增能力以各组报告为依据，不把历史测试数当作最新完整 Gate。
 
 本次阅读当前源码、阶段状态及既有报告，并执行一次固定 SDK 8.0.416 的定向探针：
 
@@ -16,7 +16,7 @@
 
 本次结果：退出码 0，`AvidScript.CSharpGuest.Tests.Closures: 29/29 passed`。该聚焦 runner 包含 .NET 参考结果与 Guest 编译/产物断言；本次未重新运行 UE 中的 WASM。最新交付报告记录完整 Guest 232/232、WASM backend 112/112、原生堆 13/13、UE 双后端 Automation 5/5 及 no-clean UBT 通过，见[委托身份报告](P66.B_Delegate_Identity.md)。这些是已提交组的历史执行证据，本次没有重跑 UE、Shipping 或性能矩阵，也不将它们当作当前完整 Phase Gate。
 
-当前状态必须分三层阅读：同步闭包、内部引用 IR 6/1.5 及 C# 适配已交付；单目标委托可比较但尚不能组合/移除；绑定实例、持久事件、跨 await 委托和完整调试尚未连接。底层 opcode、UE 事件桥接与普通 C# 语言表达分别验收。
+当前状态必须分三层阅读：同步闭包、内部引用 IR 6/1.5、委托比较/组合/移除与结构体绑定已交付；普通引用类有分析合同但尚无对象执行；引用类/UE 对象实例绑定、持久事件、跨 await 委托和完整调试尚未连接。底层 opcode、UE 事件桥接与普通 C# 语言表达分别验收。
 
 ## 竞品基线
 
@@ -55,7 +55,7 @@
 
 **五、托管对象成本需单独预算。** 当前受追踪对象经 Host ABI 访问，不能把早期标量微基准成绩外推为闭包密集玩法的速度。需要分别记录分配量、保活、回收暂停、Host crossing 和尾延迟，再决定优化对象布局或批处理。
 
-代码与本地证据：[语言入口及明确拒绝](../../Tools/AvidScript.CSharpGuest/Lowering/CSharpGuestLowerer.cs)、[委托组合拒绝](../../Tools/AvidScript.CSharpGuest/Lowering/CSharpDelegateIdentityLowerer.cs)、[结构修改要求重启](../../Source/AvidScriptEditor/Private/GeneratedTypes/AvidScriptEditorGeneratedTypeReloadPolicy.cpp)、[堆操作 Host 调用](../../Tools/AvidScript.WasmBackend/Codegen/WasmManagedHeapEmitter.cs)、[调试 Gate 范围](../Phase61/P61.E_Integration_Gate.md)、[当前实现边界](../../README.md#当前边界)。本次直接核对这些源码中的条件和路径，没有把历史文档的已修复缺口继续作为 blocker。
+代码与本地证据：[语言入口及明确拒绝](../../Tools/AvidScript.CSharpGuest/Lowering/CSharpGuestLowerer.cs)、[委托组合实现](../../Tools/AvidScript.CSharpGuest/Lowering/CSharpDelegateComposition.cs)、[结构修改要求重启](../../Source/AvidScriptEditor/Private/GeneratedTypes/AvidScriptEditorGeneratedTypeReloadPolicy.cpp)、[堆操作 Host 调用](../../Tools/AvidScript.WasmBackend/Codegen/WasmManagedHeapEmitter.cs)、[调试 Gate 范围](../Phase61/P61.E_Integration_Gate.md)、[当前实现边界](../../README.md#当前边界)。历史文档中的已修复缺口不继续作为 blocker。
 
 ## 设计判定与投入边界
 
@@ -109,7 +109,7 @@ P68 应共享语言帧与根合同，提供内部函数、闭包及 await 的可
 
 保留已经冻结的 P66–P69 顺序，不重新解释已完成批次：
 
-1. **P66：完成日常语言语义。** 同步共享/逃逸闭包、内部 C# 引用与单目标委托相等已交付；接下来打通组合/移除、绑定实例/事件、跨 await 生命周期、集合和错误清理。测试同时包含真实 WASM 和与 .NET 参考结果的语义对照。
+1. **P66：完成日常语言语义。** 同步共享/逃逸闭包、内部 C# 引用、委托比较/组合/移除和结构体实例绑定已交付；接下来打通普通引用对象、引用类/UE 实例委托、持久事件、跨 await 生命周期、集合和错误清理。执行能力测试同时包含真实 WASM 和与 .NET 参考结果的语义对照。
 2. **P67：证明结构修改的编辑循环。** 先做 UE 原型，再决定实现；同时覆盖 Blueprint、GC、复制及 Cook，不能只测试裸脚本类。
 3. **P68：补齐真实调试。** 内部函数、返回值、异步链、闭包、reload 后断点与变量，使用真实 IDE 工作流验收。
 4. **P69：用真实 Windows 玩法决定成熟度。** 同一套技能、UI、存档和网络任务，比较首次实现、需求修改和故障定位；找未参与框架实现的开发者试用。

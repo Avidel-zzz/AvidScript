@@ -68,7 +68,7 @@ internal static class SemanticClosureAllocationTests
         Require(!SemanticClosureContractValidator.IsValid(document with { SchemaVersion = 22, SemanticVersion = "1.26" }), "allocation metadata cannot be smuggled into a legacy contract");
         Require(SemanticClosureContractValidator.IsValid(document with { SchemaVersion = 22, SemanticVersion = "1.26",
             ClosureEnvironments = document.ClosureEnvironments.Select(item => item with { Allocation = null }).ToArray() }), "legacy environment analysis remains readable without claiming allocation support");
-        Require(!SemanticClosureContractValidator.IsValid(document with { SchemaVersion = 24, SemanticVersion = "1.28" }), "future allocation contract must fail closed");
+        Require(!SemanticClosureContractValidator.IsValid(document with { SchemaVersion = SemanticContract.CurrentSchemaVersion + 1 }), "future allocation contract must fail closed");
         Require(!SemanticClosureContractValidator.IsValid(Replace(document, loop, loop with { Allocation = plan with { Entries = null! } })
             with { Succeeded = false, ControlFlowGraphs = Array.Empty<SemanticControlFlowGraph>() }),
             "failed analysis still validates allocation metadata shape even when executable graphs are withheld");
