@@ -2,11 +2,11 @@
 
 ## 结论与证据边界
 
-核对日期：2026-09-19。本次复核基线提交：`3205683c`；工作树另含 P66.B borrowed reference 的进行中实现，尚未作为完整 C# 能力交付。本报告是设计与实现差距评估，不修改 Phase 完成状态，不作为 Release Gate。
+核对日期：2026-09-19。本次复核产品基线提交：`f1b217e4`；Harness 确认 P66 implementing、P66.A 完成、P66.B 进行中，7 项 protected dirty 基线保持一致。本报告是设计与实现差距评估，不修改 Phase 完成状态，不作为 Release Gate。
 
 **AvidScript 是已有可运行链路的开发者预览，尚不是成熟、全面领先的脚本框架。** UE Binding、Session、WASM 执行与 Win64 打包已有较强基础；普通语言组合、结构修改的编辑循环、完整调试和长期项目使用仍有实质缺口。P66.A 已完成，P66.B 尚未完成，P66.C/D 与 P67–P69 仍待推进。
 
-后续实现更新：[C# 共享引用](P66.B_CSharp_Borrowed_References.md)已连接同步捕获值 ref/out、结构体内部写入及引用委托转发；下文关于该缺口的记录对应上述评估基线。跨 await、事件持久根与完整调试仍未完成，成熟度结论不变。
+当前已交付：[共享与逃逸闭包](P66.B_CSharp_Closure_Execution.md)、[C# 共享引用](P66.B_CSharp_Borrowed_References.md)和[单目标委托身份](P66.B_Delegate_Identity.md)。普通同步捕获值 ref/out、结构体内部写入及引用委托转发不再列为未实现；跨 await 委托、事件持久根与完整调试仍未完成，成熟度结论不变。
 
 本次阅读当前源码、阶段状态及既有报告，并执行一次固定 SDK 8.0.416 的定向探针：
 
@@ -14,9 +14,9 @@
 & "$env:USERPROFILE/.dotnet/dotnet.exe" run --project Tools/AvidScript.CSharpGuest.Tests --configuration Release -- --closures
 ```
 
-本次结果：退出码 0，`AvidScript.CSharpGuest.Tests.Closures: 13/13 passed`。上一版报告记录的 `NullReferenceException` 已在 `3205683c` 修复，不能继续列为当前 blocker。该提交已有同步共享/逃逸闭包、循环作用域和强制回收的双后端执行证据，见[闭包执行报告](P66.B_CSharp_Closure_Execution.md)。这些是已提交版本的历史运行证据；本次仅复跑聚焦编译器用例，没有重跑当前工作树的 UE、Shipping 或性能矩阵。
+本次结果：退出码 0，`AvidScript.CSharpGuest.Tests.Closures: 29/29 passed`。该聚焦 runner 包含 .NET 参考结果与 Guest 编译/产物断言；本次未重新运行 UE 中的 WASM。最新交付报告记录完整 Guest 232/232、WASM backend 112/112、原生堆 13/13、UE 双后端 Automation 5/5 及 no-clean UBT 通过，见[委托身份报告](P66.B_Delegate_Identity.md)。这些是已提交组的历史执行证据，本次没有重跑 UE、Shipping 或性能矩阵，也不将它们当作当前完整 Phase Gate。
 
-当前状态必须分三层阅读：同步闭包已交付；内部引用 IR/backend 正在实现；捕获 cell 的普通 C# `ref/out`、跨 await 委托和完整调试尚未连接。源码仍明确拒绝这些组合，不能把底层 opcode 的存在解释为用户已经能使用。
+当前状态必须分三层阅读：同步闭包、内部引用 IR 6/1.5 及 C# 适配已交付；单目标委托可比较但尚不能组合/移除；绑定实例、持久事件、跨 await 委托和完整调试尚未连接。底层 opcode、UE 事件桥接与普通 C# 语言表达分别验收。
 
 ## 竞品基线
 
@@ -30,7 +30,7 @@
 | UE 使用 | Actor/Component、Blueprint 子类、网络、测试框架 | UE API 类型声明、反射与静态绑定、Blueprint 集成 | 已覆盖大量 UE 路径，但要验证自然写法的组合，而非只验证单项桥接 |
 | 产品成熟度 | 官方有已发布大型游戏与长期团队使用证据 | 有现成运行时、工具、文档与集成方案；本报告不据此虚构规模数据 | Demo、自动化与 Win64 包可用，缺少独立开发者长期完整项目证据 |
 
-来源：[AngelScript 概览](https://angelscript.hazelight.se/)、[开发状态及限制](https://angelscript.hazelight.se/project/development-status/)、[安装与引擎修改](https://angelscript.hazelight.se/getting-started/installation/)、[Puerts 仓库](https://github.com/Tencent/puerts)、[UE 使用手册](https://puerts.github.io/en/docs/puerts/unreal/manual/)、[调试](https://puerts.github.io/en/docs/puerts/unreal/vscode_debug/)、[Mixin](https://puerts.github.io/en/docs/puerts/unreal/mixin/)。本日重新检索官方资料；AngelScript 页面直连超时的部分使用搜索返回的官方页面摘录，其抓取时间早于本日，不作为当前版本实测。正式实验须另冻结 commit 与配置。
+来源：[AngelScript 概览](https://angelscript.hazelight.se/)、[安装与引擎修改](https://angelscript.hazelight.se/getting-started/installation/)、[预编译与转 C++](https://angelscript.hazelight.se/cpp-bindings/precompiled-data/)、[Puerts 仓库](https://github.com/Tencent/puerts)、[UE 使用手册](https://puerts.github.io/en/docs/puerts/unreal/manual/)、[调试](https://puerts.github.io/en/docs/puerts/unreal/vscode_debug/)、[自动绑定模式](https://puerts.github.io/en/docs/puerts/unreal/uclass_extends/)。本日重新读取上述官方页面；AngelScript development-status 页面超时，不用其未取得内容补充结论。这是官方能力说明，不是本机竞品体验实测；正式实验须另冻结 commit 与配置。
 
 不能把 AngelScript 的热重载描述扩大为“PIE 内任意结构变更无条件成功”；其官方首页明确区分非结构变更。也不能把 Puerts 的 Unity 多语言特性、全部 npm 包或所有运行时环境直接算作 UE 能力。
 
@@ -47,7 +47,7 @@
 
 **一、语言承诺与实现负担。** 当前实际上同时维护了 C# 子集编译器、受追踪对象系统和 UE 框架。Roslyn 解决语义读取，未替代执行语义、库、异常和调试实现。应发布可机器校验的语言/库支持合同：支持的普通写法保持 C# 语义，不支持的组合在源码位置明确报错。不得用持续改写样例掩盖缺口，也不承诺任意 NuGet。
 
-**二、同一对象跨越多个生命周期。** 闭包环境、UE 订阅、await continuation、调试暂停帧和热重载状态必须共享明确的身份与保活规则。当前源码仍拒绝捕获 receiver、未接通的 async roots、捕获 cell 的普通 ref/out 适配，以及闭包 debug instrumentation。只补同步 lambda 无法完成这一层。
+**二、同一对象跨越多个生命周期。** 闭包环境、UE 订阅、await continuation、调试暂停帧和热重载状态必须共享明确的身份与保活规则。共享引用已连接同步调用，当前源码仍拒绝捕获 receiver、未接通的 async roots，以及闭包 debug instrumentation。只补同步 lambda 无法完成这一层。
 
 **三、结构热重载决定编辑体验上限。** 当前生成反射类型的方式仍依赖原生构建。P67 应先做最小原型：新增属性/函数、修改默认值、Blueprint 子类实例、GC、复制和 Cook；比较动态类型重建与稳定原生外壳。原型失败时公开必须退出 PIE/重启的边界，不靠 UI 隐藏重建成本。
 
@@ -55,7 +55,19 @@
 
 **五、托管对象成本需单独预算。** 当前受追踪对象经 Host ABI 访问，不能把早期标量微基准成绩外推为闭包密集玩法的速度。需要分别记录分配量、保活、回收暂停、Host crossing 和尾延迟，再决定优化对象布局或批处理。
 
-代码与本地证据：[语言入口及明确拒绝](../../Tools/AvidScript.CSharpGuest/Lowering/CSharpGuestLowerer.cs)、[ref/out 边界](../../Tools/AvidScript.CSharpGuest/Lowering/CSharpOperationLowerer.cs)、[调试 Gate 范围](../Phase61/P61.E_Integration_Gate.md)、[当前实现边界](../../README.md#当前边界)、[闭包分配合同](P66.B_Closure_Allocation_Results.md)。
+代码与本地证据：[语言入口及明确拒绝](../../Tools/AvidScript.CSharpGuest/Lowering/CSharpGuestLowerer.cs)、[委托组合拒绝](../../Tools/AvidScript.CSharpGuest/Lowering/CSharpDelegateIdentityLowerer.cs)、[结构修改要求重启](../../Source/AvidScriptEditor/Private/GeneratedTypes/AvidScriptEditorGeneratedTypeReloadPolicy.cpp)、[堆操作 Host 调用](../../Tools/AvidScript.WasmBackend/Codegen/WasmManagedHeapEmitter.cs)、[调试 Gate 范围](../Phase61/P61.E_Integration_Gate.md)、[当前实现边界](../../README.md#当前边界)。本次直接核对这些源码中的条件和路径，没有把历史文档的已修复缺口继续作为 blocker。
+
+## 设计判定与投入边界
+
+建议保留现有分层，集中补强跨功能合同。版本化 IR、受检 ObjectHandle、Session 与 prepared binding 已有实际用途；没有证据支持此时替换 VM 或推倒绑定系统。最大的产品风险是继续扩展语言表面时，各功能仍有独立的保活、暂停与迁移规则，最终让开发者承担组合成本。
+
+需要区分两种目标：**成熟**要求普通玩法可自然表达、失败可定位、安装到 Shipping 可重复；**开发领先**还要求完成同一需求和定位同一故障时更省时间。WASM、C# 语法和单项速度优势都不能独自满足后者。
+
+P66 后续以完整生命周期用例牵引：同一捕获值被多个回调读写，委托组合/退订，任务挂起后 owner 销毁，重载成功或失败，最终不重复执行、不悬空、不永久保活。先冻结身份、持久根及版本处理策略，再沿当前批次实现。语言兼容测试应继续采用同一 C# 源码的 .NET 参考语义，明确不支持的标准库与组合，避免用专用样例绕开限制。
+
+P67 的动态反射原型是关键决策点。若新增反射字段仍必须重启，应该先验证是否能改变这个约束，再扩大编辑器功能投入；不能把生成 C++ 外壳与增量编译包装成结构热重载。稳定外壳或动态类型都须保留 Blueprint 子类、GC、复制与 Cook 行为，其成本目前未知。
+
+P68 应共享语言帧与根合同，提供内部函数、闭包及 await 的可检查状态。P69 再将它们交付为连续的玩法修改体验。受控重现、AI 修改预检与状态撤回可以成为后续差异化方向，但在副作用和迁移边界被证明之前，均属于待验证设想。
 
 ## “跨时代”应落实为怎样的体验
 
@@ -97,7 +109,7 @@
 
 保留已经冻结的 P66–P69 顺序，不重新解释已完成批次：
 
-1. **P66：完成日常语言语义。** 同步共享/逃逸闭包已交付；接下来把内部引用连接到普通 C# `ref/out`，随后打通实例/委托/事件、跨 await 生命周期、集合和错误清理。测试同时包含真实 WASM 和与 .NET 参考结果的语义对照。
+1. **P66：完成日常语言语义。** 同步共享/逃逸闭包、内部 C# 引用与单目标委托相等已交付；接下来打通组合/移除、绑定实例/事件、跨 await 生命周期、集合和错误清理。测试同时包含真实 WASM 和与 .NET 参考结果的语义对照。
 2. **P67：证明结构修改的编辑循环。** 先做 UE 原型，再决定实现；同时覆盖 Blueprint、GC、复制及 Cook，不能只测试裸脚本类。
 3. **P68：补齐真实调试。** 内部函数、返回值、异步链、闭包、reload 后断点与变量，使用真实 IDE 工作流验收。
 4. **P69：用真实 Windows 玩法决定成熟度。** 同一套技能、UI、存档和网络任务，比较首次实现、需求修改和故障定位；找未参与框架实现的开发者试用。
