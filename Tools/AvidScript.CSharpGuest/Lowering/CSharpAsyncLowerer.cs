@@ -735,10 +735,16 @@ internal static class CSharpAsyncLowerer
                 Add(context.Diagnostics, $"Async state slot '{slot.SymbolId}' has no live suspend storage.");
                 return false;
             }
+            // address_of promotes a local into frame memory. Its register is not
+            // authoritative after a ref call; suspend must read the live cell.
+            GuestRegister? value = context.CreateTemporary(slot.TypeId, blockOrdinal);
+            if (value is null) return false;
+            instructions.Add(new GuestInstruction(
+                "local_load", value.Id, Array.Empty<string>(), storage.Id, null, null));
             instructions.Add(new GuestInstruction(
                 "field_store",
                 null,
-                new[] { frameStorage.Id, storage.Id },
+                new[] { frameStorage.Id, value.Id },
                 frameType.Fields[index].Id,
                 null,
                 null));

@@ -101,7 +101,16 @@ public static class SemanticAnalyzer
             context,
             typeRegistry,
             asyncProjection.ControlledMethodSymbolIds);
+        SemanticLexicalCaptureProjection lexicalCaptures = SemanticLexicalCaptureNormalizer.Normalize(
+            context, symbols, callableProjection.Callables, operationProjection.Methods,
+            controlFlowProjection.Graphs, asyncProjection.Methods);
+        symbols = lexicalCaptures.Symbols;
+        callableProjection = callableProjection with { Callables = lexicalCaptures.Callables };
+        operationProjection = operationProjection with { Methods = lexicalCaptures.Methods };
+        controlFlowProjection = controlFlowProjection with { Graphs = lexicalCaptures.Graphs };
+        asyncProjection = asyncProjection with { Methods = lexicalCaptures.AsyncMethods };
         IReadOnlyList<SemanticDiagnostic> supportDiagnostics = supportProjection.Diagnostics
+            .Concat(lexicalCaptures.Diagnostics)
             .Concat(operationProjection.Diagnostics)
             .Concat(asyncProjection.Diagnostics)
             .Concat(callableProjection.Diagnostics)

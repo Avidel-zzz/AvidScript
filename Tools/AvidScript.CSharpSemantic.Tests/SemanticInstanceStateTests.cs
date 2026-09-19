@@ -108,7 +108,7 @@ internal static class SemanticInstanceStateTests
         SemanticDocument localFunctionDocument = Analyze(
             localFunctionSource,
             "Scripts/LocalFunction.cs");
-        AssertFailsClosed(localFunctionDocument, "ASCS4010", "a non-static local function");
+        Assert(localFunctionDocument.Succeeded, "a non-capturing local function should not require static syntax");
     }
 
     private static void DynamicDispatchFailsClosed()

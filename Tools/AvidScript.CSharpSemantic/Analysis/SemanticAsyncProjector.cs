@@ -952,7 +952,7 @@ internal static class SemanticAsyncProjector
             && named.ContainingNamespace.ToDisplayString() == "System.Threading.Tasks";
     }
 
-    private static bool TryAttachStateFrames(
+    internal static bool TryAttachStateFrames(
         IReadOnlyList<SemanticAsyncSegment> segments,
         ICollection<SemanticDiagnostic> diagnostics,
         bool isControlFlow,

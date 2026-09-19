@@ -6,6 +6,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--lexical-captures")
+            {
+                int focusedCount = CSharpGuestLocalFunctionTests.Run() + CSharpGuestLexicalCaptureTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.LexicalCaptures: {focusedCount}/{focusedCount} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--delegate-events")
             {
                 int focusedCount = CSharpGuestDelegateEventTests.Run();
@@ -22,7 +28,7 @@ internal static class Program
             }
             if (args.Length != 0)
             {
-                throw new ArgumentException("Supported arguments: --delegate-events, --captured-assignments; omit arguments for the full suite.");
+                throw new ArgumentException("Supported arguments: --delegate-events, --captured-assignments, --lexical-captures; omit arguments for the full suite.");
             }
             int count = CSharpGuestLoweringTests.Run()
                 + CSharpGuestOperationTests.Run()
@@ -46,7 +52,8 @@ internal static class Program
                 + CSharpGuestContinuationTests.Run()
                 + CSharpGuestShortCircuitTests.Run()
                 + CSharpGuestUeTypeTests.Run()
-                + CSharpGuestLocalFunctionTests.Run();
+                + CSharpGuestLocalFunctionTests.Run()
+                + CSharpGuestLexicalCaptureTests.Run();
             Console.WriteLine($"AvidScript.CSharpGuest.Tests: {count}/{count} passed");
             return 0;
         }
