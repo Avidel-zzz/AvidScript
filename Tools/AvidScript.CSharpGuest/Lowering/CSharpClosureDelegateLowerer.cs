@@ -44,7 +44,7 @@ internal static class CSharpClosureDelegateLowerer
 
     public static IReadOnlyList<GuestFunction> BuildThunks(SemanticDocument document, IReadOnlyList<GuestFunction> functions)
     {
-        if (document.ClosureEnvironments.Count == 0) return Array.Empty<GuestFunction>();
+        if (!CSharpClosureLayout.UsesManagedDelegates(document)) return Array.Empty<GuestFunction>();
         HashSet<string> targets = functions.SelectMany(function => function.Blocks).SelectMany(block => block.Instructions)
             .Where(instruction => instruction.Op == "function_ref").Select(instruction => instruction.TargetId!).ToHashSet(StringComparer.Ordinal);
         List<GuestFunction> thunks = new();

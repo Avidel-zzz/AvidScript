@@ -8,7 +8,7 @@ namespace AvidScript.CSharpGuest;
 
 internal static class CSharpBorrowedReferences
 {
-    public static bool Enabled(SemanticDocument document) => document.ClosureEnvironments.Count != 0;
+    public static bool Enabled(SemanticDocument document) => CSharpClosureLayout.UsesManagedDelegates(document);
     public static string Type(string pointee) => "type:$borrow:" + pointee;
     public static string Parameter(SemanticDocument document, string type, string refKind) => refKind == "none" ? type
         : Enabled(document) ? Type(type) : CSharpGuestIds.AddressTypeId;

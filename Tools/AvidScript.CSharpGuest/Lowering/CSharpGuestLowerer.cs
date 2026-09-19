@@ -19,8 +19,8 @@ public static class CSharpGuestLowerer
 
         List<GuestDiagnostic> diagnostics = new();
         ValidateInput(document, semanticSha256, diagnostics);
-        if (document.ClosureEnvironments is { Count: > 0 } && enableDebugInstrumentation)
-            Add(diagnostics, "ASCG1024", "Debug pause frames require persistent managed roots before captured closures can be instrumented.");
+        if (diagnostics.Count == 0 && enableDebugInstrumentation && CSharpClosureLayout.UsesManagedDelegates(document))
+            Add(diagnostics, "ASCG1024", "Debug pause frames require persistent managed roots before captured closures or delegate lists can be instrumented.");
         if (diagnostics.Count != 0)
         {
             return Failure(diagnostics);
@@ -54,8 +54,9 @@ public static class CSharpGuestLowerer
             dataPool,
             diagnostics).ToList();
         functions.AddRange(CSharpClosureDelegateLowerer.BuildThunks(document, functions));
+        functions.AddRange(CSharpDelegateComposition.Build(document));
         functions.AddRange(CSharpDelegateIdentityLowerer.Build(document, functions));
-        if (document.ClosureEnvironments.Count != 0)
+        if (CSharpClosureLayout.UsesManagedDelegates(document))
             imports = imports.Append(new GuestImport(CSharpClosureLayout.HeapImport, GuestManagedHeap.ImportModule, GuestManagedHeap.ImportName,
                 Enumerable.Repeat(CSharpGuestIds.AddressTypeId, 4).ToArray(), CSharpGuestIds.AddressTypeId)).ToArray();
         CSharpAsyncLoweringResult asyncMethods = CSharpAsyncLowerer.Lower(

@@ -9,23 +9,25 @@ namespace AvidScript.CSharpGuest;
 internal static class CSharpDelegateIdentityLowerer
 {
     private const string Bool = "type:bool";
-    private static string Function(string type) => "function:$delegate:equals:" + type;
+    public static string Function(string type) => "function:$delegate:equals:" + type;
 
     public static GuestRegister? Lower(CSharpFunctionLoweringContext context, SemanticOperation operation, int block,
         List<GuestInstruction> instructions)
     {
         if (operation.OperatorKind is not ("equals" or "not_equals") || operation.TypeId != Bool || operation.Children.Count != 2
             || operation.Children[0].TypeId != operation.Children[1].TypeId)
-        { context.Add("ASCG1024", "Delegate operations require matching nominal signatures; combination is not connected yet."); return null; }
+        { context.Add("ASCG1024", "Delegate comparison requires matching nominal signatures and equality operators."); return null; }
         GuestRegister? left = CSharpOperationLowerer.LowerValue(context, operation.Children[0], block, instructions);
         GuestRegister? right = CSharpOperationLowerer.LowerValue(context, operation.Children[1], block, instructions);
         GuestRegister? result = context.CreateTemporary(Bool, block);
         if (left is null || right is null || result is null) return null;
-        if (context.Document.ClosureEnvironments.Count == 0)
+        if (!CSharpClosureLayout.UsesManagedDelegates(context.Document))
             instructions.Add(new("binary", result.Id, new[] { left.Id, right.Id }, null, operation.OperatorKind, null));
         else
         {
-            instructions.Add(new("call", result.Id, new[] { left.Id, right.Id }, Function(left.TypeId), null, null));
+            string comparison = CSharpDelegateComposition.Signatures(context.Document).Contains(left.TypeId)
+                ? CSharpDelegateComposition.Function(left.TypeId, "equals") : Function(left.TypeId);
+            instructions.Add(new("call", result.Id, new[] { left.Id, right.Id }, comparison, null, null));
             if (operation.OperatorKind == "not_equals")
             {
                 GuestRegister zero = context.CreateTemporary(Bool, block)!;
@@ -40,7 +42,7 @@ internal static class CSharpDelegateIdentityLowerer
 
     public static IReadOnlyList<GuestFunction> Build(SemanticDocument document, IReadOnlyList<GuestFunction> functions)
     {
-        if (document.ClosureEnvironments.Count == 0) return Array.Empty<GuestFunction>();
+        if (!CSharpClosureLayout.UsesManagedDelegates(document)) return Array.Empty<GuestFunction>();
         HashSet<string> calls = functions.SelectMany(function => function.Blocks).SelectMany(block => block.Instructions)
             .Where(instruction => instruction.Op == "call").Select(instruction => instruction.TargetId!).ToHashSet(StringComparer.Ordinal);
         HashSet<string> existing = functions.Select(function => function.Id).ToHashSet(StringComparer.Ordinal);

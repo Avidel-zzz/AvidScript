@@ -16,10 +16,12 @@ internal static class CSharpClosureLayout
     public static string FunctionType(string signature) => signature + ":$closure:function";
     public static string Binding(string method) => "$closure:binding:" + method;
     public static string Thunk(string method, string signature) => CSharpGuestIds.Function(method) + ":$closure:thunk:" + signature;
+    public static bool UsesManagedDelegates(SemanticDocument document) => document.ClosureEnvironments.Count != 0
+        || CSharpDelegateComposition.Signatures(document).Count != 0;
 
     public static void AddTypes(SemanticDocument document, List<GuestType> types)
     {
-        if (document.ClosureEnvironments.Count == 0) return;
+        if (!UsesManagedDelegates(document)) return;
         types.Add(new(ObjectType, "managed_ref", "i64", Array.Empty<GuestField>(), null, null, 8, 8));
         foreach (SemanticDelegateType signature in document.DelegateTypes)
         {
@@ -33,6 +35,7 @@ internal static class CSharpClosureLayout
         foreach (SemanticClosureBinding binding in document.ClosureBindings.Where(binding => binding.IsDelegateTarget))
             AddEnvironment(Binding(binding.MethodSymbolId), Environments(document, binding.MethodSymbolId)
                 .Select(environment => Field(environment.Id, Reference(environment.Id))).ToArray());
+        CSharpDelegateComposition.AddTypes(document, types);
         void AddEnvironment(string id, GuestField[] fields)
         {
             types.Add(Struct(Payload(id), fields));

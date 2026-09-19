@@ -335,6 +335,8 @@ internal static class CSharpOperationLowerer
 
         SemanticOperation target = operation.Children[0];
         GuestRegister? propertyReceiver = null;
+        GuestRegister? delegateStorage = null;
+        bool delegateAssignment = context.Document.DelegateTypes.Any(signature => signature.TypeId == operation.TypeId);
         GuestRegister? left;
         if (target.Kind == "property_reference")
         {
@@ -355,6 +357,14 @@ internal static class CSharpOperationLowerer
                 blockOrdinal,
                 instructions);
         }
+        else if (delegateAssignment)
+        {
+            delegateStorage = CSharpBorrowedReferences.Address(context, target, blockOrdinal, instructions);
+            if (delegateStorage is null) return null;
+            left = context.CreateTemporary(operation.TypeId, blockOrdinal);
+            if (left is null) return null;
+            instructions.Add(new("borrow_load", left.Id, new[] { delegateStorage.Id }, left.TypeId, null, null));
+        }
         else
         {
             left = LowerValue(context, target, blockOrdinal, instructions);
@@ -368,7 +378,16 @@ internal static class CSharpOperationLowerer
             return null;
         }
 
-        instructions.Add(new GuestInstruction(
+        if (delegateAssignment)
+        {
+            if (!CSharpDelegateComposition.Emit(context, operation.OperatorKind, left, right, result, instructions)) return null;
+            if (delegateStorage is not null)
+            {
+                instructions.Add(new("borrow_store", null, new[] { delegateStorage.Id, result.Id }, result.TypeId, null, null));
+                return result;
+            }
+        }
+        else instructions.Add(new GuestInstruction(
             "binary",
             result.Id,
             new[] { left.Id, right.Id },
@@ -407,7 +426,9 @@ internal static class CSharpOperationLowerer
         if (operation.Children.Any(child =>
                 context.Document.DelegateTypes.Any(signature => signature.TypeId == child.TypeId)))
         {
-            return CSharpDelegateIdentityLowerer.Lower(context, operation, blockOrdinal, instructions);
+            return operation.OperatorKind is "add" or "subtract"
+                ? CSharpDelegateComposition.Lower(context, operation, blockOrdinal, instructions)
+                : CSharpDelegateIdentityLowerer.Lower(context, operation, blockOrdinal, instructions);
         }
         if (shortCircuit && (operation.TypeId != "type:bool"
             || operation.Children[0].TypeId != "type:bool"

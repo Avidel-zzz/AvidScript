@@ -334,7 +334,9 @@ bool FAvidScriptManagedHeapCSharpClosuresTest::RunTest(const FString& Parameters
 	{
 		for (const FString File : {FString(TEXT("csharp-closures.wasm")), FString(TEXT("csharp-closures-stress.wasm")),
 			FString(TEXT("csharp-delegate-identity.wasm")), FString(TEXT("csharp-delegate-identity-stress.wasm")),
-			FString(TEXT("csharp-delegate-identity-static.wasm"))})
+			FString(TEXT("csharp-delegate-identity-static.wasm")),
+			FString(TEXT("csharp-delegate-list.wasm")), FString(TEXT("csharp-delegate-list-stress.wasm")),
+			FString(TEXT("csharp-delegate-list-static.wasm")), FString(TEXT("csharp-delegate-list-static-stress.wasm"))})
 		{
 			TArray<uint8> Wasm;
 			if (!TestTrue(TEXT("Load current CSharp closure fixture"), FFileHelper::LoadFileToArray(Wasm, *FPaths::Combine(Directory, File)))) return false;
@@ -349,7 +351,9 @@ bool FAvidScriptManagedHeapCSharpClosuresTest::RunTest(const FString& Parameters
 			uint8 Value[4]{}; FString Error;
 			if (!TestTrue(TEXT("Read CSharp closure result"), Runtime.ReadStateBytes(16, MakeArrayView(Value), Error))) return false;
 			const bool bStaticIdentity = File == TEXT("csharp-delegate-identity-static.wasm");
-			const uint32 Expected = bStaticIdentity ? 7u : File.Contains(TEXT("identity")) ? 8191u : 1147395u;
+			const bool bDelegateList = File.Contains(TEXT("delegate-list"));
+			const bool bStaticList = File.Contains(TEXT("delegate-list-static"));
+			const uint32 Expected = bStaticIdentity || bStaticList ? 7u : bDelegateList ? 65535u : File.Contains(TEXT("identity")) ? 8191u : 1147395u;
 			TestEqual(TEXT("CSharp closure execution and callable/environment equality match reference results"),
 				uint32(Value[0]) | (uint32(Value[1]) << 8) | (uint32(Value[2]) << 16) | (uint32(Value[3]) << 24), Expected);
 			FHeap* Heap = Runtime.GetManagedHeapForTesting();
@@ -363,7 +367,7 @@ bool FAvidScriptManagedHeapCSharpClosuresTest::RunTest(const FString& Parameters
 			}
 			if (!TestNotNull(TEXT("CSharp module owns heap"), Heap)) return false;
 			const auto Stats = Heap->GetStats();
-			TestTrue(TEXT("Closures use actual managed allocations"), Stats.Allocations >= 16);
+			TestTrue(TEXT("Closures and lists use actual managed allocations"), Stats.Allocations >= (bStaticList ? 2u : 16u));
 			if (File.Contains(TEXT("stress")))
 				TestTrue(TEXT("Every allocation followed by collection"), Stats.Collections >= Stats.Allocations);
 			TestEqual(TEXT("CSharp frames unwind"), Stats.ActiveFrames, 0u);

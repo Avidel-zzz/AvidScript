@@ -11,7 +11,7 @@ internal static class CSharpManagedDelegateLowerer
     public static GuestRegister? LowerCreation(CSharpFunctionLoweringContext context, SemanticOperation operation,
         int blockOrdinal, List<GuestInstruction> instructions)
     {
-        if (context.Document.ClosureEnvironments.Count != 0) return CSharpClosureDelegateLowerer.Create(context, operation, blockOrdinal, instructions);
+        if (CSharpClosureLayout.UsesManagedDelegates(context.Document)) return CSharpClosureDelegateLowerer.Create(context, operation, blockOrdinal, instructions);
         SemanticDelegateType? signature = context.Document.DelegateTypes.FirstOrDefault(item => item.TypeId == operation.TypeId);
         if (!SupportsDelegates(context.Document) || signature is null
             || signature.ReturnRefKind != "none" || operation.Children.Count != 1
@@ -80,7 +80,7 @@ internal static class CSharpManagedDelegateLowerer
             result = context.CreateTemporary(signature.ReturnTypeId, blockOrdinal);
             if (result is null) return true;
         }
-        if (context.Document.ClosureEnvironments.Count != 0)
+        if (CSharpClosureLayout.UsesManagedDelegates(context.Document))
         {
             GuestRegister? target = context.CreateTemporary(CSharpClosureLayout.FunctionType(signature.TypeId), blockOrdinal);
             GuestRegister? environment = context.CreateTemporary(CSharpClosureLayout.ObjectType, blockOrdinal);
@@ -104,7 +104,7 @@ internal static class CSharpManagedDelegateLowerer
             foreach (GuestInstruction instruction in function.Blocks.SelectMany(block => block.Instructions).Where(item => item.Op == "function_ref"))
                 targets[registers[instruction.ResultId!].TypeId].Add(instruction.TargetId!);
         }
-        bool closures = document.ClosureEnvironments.Count != 0;
+        bool closures = CSharpClosureLayout.UsesManagedDelegates(document);
         string FunctionType(SemanticDelegateType signature) => closures ? CSharpClosureLayout.FunctionType(signature.TypeId) : signature.TypeId;
         return document.DelegateTypes.Where(signature => targets.ContainsKey(FunctionType(signature)))
             .OrderBy(signature => signature.TypeId, StringComparer.Ordinal)

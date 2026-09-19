@@ -429,7 +429,7 @@ internal sealed class CSharpFunctionLoweringContext
         out GuestConstant constant)
     {
         string kind = semanticConstant.Kind;
-        if (kind == "null" && Document.ClosureEnvironments.Count != 0 && Document.DelegateTypes.Any(signature => signature.TypeId == typeId)) kind = "zero";
+        if (kind == "null" && CSharpClosureLayout.UsesManagedDelegates(Document) && Document.DelegateTypes.Any(signature => signature.TypeId == typeId)) kind = "zero";
         if (typeId is not null
             && guestTypes.TryGetValue(typeId, out GuestType? type)
             && type.Kind == "enum"
