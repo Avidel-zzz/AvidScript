@@ -81,7 +81,7 @@ public static class WasmModuleCompiler
         WriteFunctionSection(writer, module, layout);
         WriteTableSection(writer, layout);
         WriteMemorySection(writer, module, layout);
-        WriteGlobalSection(writer, module, safepointPlan);
+        WriteGlobalSection(writer, module, layout, safepointPlan);
         WriteExportSection(writer, module, layout);
         WriteElementSection(writer, layout);
         int emittedSafepointCount = WriteCodeSection(
@@ -254,7 +254,7 @@ public static class WasmModuleCompiler
         WasmModuleLayout layout)
     {
         const uint wasmPageSize = 65536;
-        uint requiredBytes = checked((uint)Math.Max(module.MemoryLayout.HeapStart, 1));
+        uint requiredBytes = checked((uint)Math.Max(layout.ManagedHeap.StackStart, 1));
         uint pageCount = checked((requiredBytes + wasmPageSize - 1) / wasmPageSize);
         bool requiresRuntimeStack = module.Functions.Any(
             function => WasmFunctionFrameLayout.Create(function, layout).FrameSize > 0);
@@ -274,15 +274,16 @@ public static class WasmModuleCompiler
     private static void WriteGlobalSection(
         WasmBinaryWriter writer,
         GuestModule module,
+        WasmModuleLayout layout,
         WasmCooperativeSafepointPlan safepointPlan)
     {
         writer.WriteSection(6, section =>
         {
-            section.WriteU32(safepointPlan.Enabled ? 2u : 1u);
+            section.WriteU32((safepointPlan.Enabled ? 2u : 1u) + (layout.ManagedHeap.Enabled ? 1u : 0u));
             section.WriteByte((byte)WasmValueType.I32);
             section.WriteByte(0x01);
             section.WriteByte(0x41);
-            section.WriteS32(module.MemoryLayout.HeapStart);
+            section.WriteS32(layout.ManagedHeap.StackStart);
             section.WriteByte(0x0b);
             if (safepointPlan.Enabled)
             {
@@ -291,6 +292,11 @@ public static class WasmModuleCompiler
                 section.WriteByte(0x41);
                 section.WriteS32(checked((int)safepointPlan.Interval));
                 section.WriteByte(0x0b);
+            }
+            if (layout.ManagedHeap.Enabled)
+            {
+                section.WriteByte((byte)WasmValueType.I32); section.WriteByte(1);
+                section.WriteByte(0x41); section.WriteS32(0); section.WriteByte(0x0b);
             }
         });
     }
@@ -357,6 +363,8 @@ public static class WasmModuleCompiler
         WasmModuleLayout layout)
     {
         List<WasmDataInitializer> initializers = new();
+        if (layout.ManagedHeap.Enabled)
+            initializers.Add(new WasmDataInitializer("$managed_heap_configuration", layout.ManagedHeap.ConfigurationAddress, layout.ManagedHeap.Configuration));
         foreach (GuestGlobal global in module.Globals)
         {
             GuestStateSlot slot = module.MemoryLayout.StateSlots.Single(

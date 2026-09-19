@@ -84,6 +84,7 @@ internal sealed class GuestTypeLayoutResolver
                 "factory_ref" or "object_type_ref" => LayoutObjectCapability(declaration),
                 "composite_ref" => LayoutCompositeValueCapability(declaration),
                 "function_ref" => LayoutFunctionReference(declaration),
+                "managed_ref" => LayoutManagedReference(declaration),
                 _ => InvalidShape(declaration, $"unsupported kind '{declaration.Kind}'"),
             };
         }
@@ -230,6 +231,14 @@ internal sealed class GuestTypeLayoutResolver
         }
 
         return declaration with { Storage = "i32", Size = 4, Alignment = 4 };
+    }
+
+    private GuestType? LayoutManagedReference(GuestType declaration)
+    {
+        if (declaration.Fields.Count != 0 || declaration.UnderlyingTypeId is not null
+            || declaration.ElementTypeId is null || !declarations.TryGetValue(declaration.ElementTypeId, out GuestType? payload)
+            || payload.Kind != "struct") return InvalidShape(declaration, "managed reference requires a struct payload");
+        return declaration with { Storage = "i64", Size = 8, Alignment = 8 };
     }
 
     private GuestType? LayoutCompositeValueCapability(GuestType declaration)

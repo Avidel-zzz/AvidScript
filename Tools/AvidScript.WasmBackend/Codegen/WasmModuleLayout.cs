@@ -30,6 +30,7 @@ internal sealed class WasmModuleLayout
     public IReadOnlyDictionary<string, uint> FunctionIndices { get; }
 
     public uint ImportedFunctionCount { get; }
+    public WasmManagedHeapPlan ManagedHeap { get; private set; } = null!;
 
     public Dictionary<string, WasmFunctionReferenceRange> FunctionReferences { get; } = new(StringComparer.Ordinal);
 
@@ -89,6 +90,7 @@ internal sealed class WasmModuleLayout
             typeIndices,
             functionIndices,
             importedFunctionCount);
+        layout.ManagedHeap = WasmManagedHeapPlan.Create(module, types, safepointPlan?.Enabled == true);
         foreach (GuestFunctionReference reference in module.FunctionReferences.OrderBy(item => item.TypeId, StringComparer.Ordinal))
         {
             // Slot zero is always null. Each nominal signature owns a disjoint range,

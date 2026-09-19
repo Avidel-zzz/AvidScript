@@ -7,7 +7,7 @@ using AvidScript.GuestIr;
 
 namespace AvidScript.WasmBackend;
 
-internal sealed class WasmFunctionCompiler
+internal sealed partial class WasmFunctionCompiler
 {
     private const int MaxArrayRegionElements = 4096;
     private const int MaxArrayRegionBytes = 1024 * 1024;
@@ -74,6 +74,7 @@ internal sealed class WasmFunctionCompiler
         int cooperativeSafepointCount = 0;
         WriteLocals(body);
         WriteFramePrologue(body);
+        WriteManagedPrologue(body);
         if (safepointPlan.PollAtFunctionEntry(function.Id))
         {
             WriteCooperativeSafepointPoll(body);
@@ -142,6 +143,7 @@ internal sealed class WasmFunctionCompiler
         body.WriteByte(0x45);
         body.WriteByte(0x04);
         body.WriteByte(0x40);
+        FlushManagedRoots(body);
         body.WriteByte(0x10);
         body.WriteU32(moduleLayout.FunctionIndices[
             WasmCooperativeSafepointPlan.ImportId]);
@@ -201,6 +203,7 @@ internal sealed class WasmFunctionCompiler
             }
         }
 
+        WriteManagedLocals(locals, ref nextLocalIndex);
         localIndices = indices;
         WriteLocalGroups(body, locals);
     }
@@ -272,6 +275,14 @@ internal sealed class WasmFunctionCompiler
         {
             if (frame.HasSlot(parameter.Id))
             {
+                if (moduleLayout.IsMemoryType(parameter.TypeId))
+                {
+                    WasmMemoryEmitter.WriteCopy(body, writer => WriteFrameAddress(writer, parameter.Id),
+                        writer => WriteLocalGet(writer, localIndices[parameter.Id]), moduleLayout.Types[parameter.TypeId].Size);
+                    WriteFrameAddress(body, parameter.Id);
+                    WriteLocalSet(body, localIndices[parameter.Id]);
+                    continue;
+                }
                 WriteFrameAddress(body, parameter.Id);
                 WriteLocalGet(body, localIndices[parameter.Id]);
                 WasmMemoryEmitter.WriteStore(body, moduleLayout.Types[parameter.TypeId]);
@@ -283,8 +294,17 @@ internal sealed class WasmFunctionCompiler
         WasmBinaryWriter body,
         GuestInstruction instruction)
     {
+        if (instruction.Op is "call" or "call_indirect" or "managed_new" or "managed_collect"
+            or "array_load" or "array_store" or "array_length" or "array_region_load" or "array_region_store")
+            FlushManagedRoots(body);
         switch (instruction.Op)
         {
+            case "managed_new":
+            case "managed_get":
+            case "managed_set":
+            case "managed_collect":
+                CompileManagedInstruction(body, instruction);
+                break;
             case "constant":
                 CompileConstant(body, instruction);
                 break;
@@ -1175,6 +1195,7 @@ internal sealed class WasmFunctionCompiler
 
     private void CompileReturn(WasmBinaryWriter body, GuestTerminator terminator)
     {
+        FlushManagedRoots(body);
         FlushArrayRegion(body);
         if (moduleLayout.UsesSRet(function))
         {
@@ -1185,6 +1206,7 @@ internal sealed class WasmFunctionCompiler
                 moduleLayout.Types[function.ReturnTypeId].Size);
         }
 
+        WriteManagedEpilogue(body);
         RestoreFrame(body);
         if (!moduleLayout.UsesSRet(function) && terminator.ReturnValueId is not null)
         {

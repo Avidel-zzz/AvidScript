@@ -84,7 +84,7 @@ public static class GuestConstantCodec
                 && double.IsFinite(float64):
                 BinaryPrimitives.WriteInt64LittleEndian(destination, BitConverter.DoubleToInt64Bits(float64));
                 return true;
-            case "null" when (IsIntegerTarget(targetType, 4) || targetType.Kind == "function_ref") && constant.Value is null:
+            case "null" when (IsIntegerTarget(targetType, 4) || targetType.Kind is "function_ref" or "managed_ref") && constant.Value is null:
                 return true;
             default:
                 bytes = Array.Empty<byte>();
@@ -101,6 +101,6 @@ public static class GuestConstantCodec
 
     private static bool IsNominalOrdinal(GuestType type)
     {
-        return type.Kind is "class_ref" or "factory_ref" or "object_type_ref";
+        return type.Kind is "class_ref" or "factory_ref" or "object_type_ref" or "managed_ref";
     }
 }

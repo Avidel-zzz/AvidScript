@@ -15,9 +15,15 @@ internal static class GuestInstructionValidator
     {
         GuestRegister? result = ResolveResult(context, function, instruction, values, localIds, assignedValues);
         GuestRegister?[] operands = ResolveOperands(context, function, instruction, values);
+        GuestManagedHeapValidator.ValidateInstruction(context, function, instruction, result, operands, values);
 
         switch (instruction.Op)
         {
+            case "managed_new":
+            case "managed_get":
+            case "managed_set":
+            case "managed_collect":
+                break;
             case "constant":
                 ValidateConstantInstruction(context, function, instruction, result);
                 break;
@@ -247,7 +253,7 @@ internal static class GuestInstructionValidator
         }
         if (context.Types.TryGetValue(operands[0]!.TypeId, out GuestType? operandType)
             && IsNominalOrdinal(operandType)
-            && !(operandType.Kind == "function_ref" && instruction.OperatorKind is "equals" or "not_equals"))
+            && !(operandType.Kind is "function_ref" or "managed_ref" && instruction.OperatorKind is "equals" or "not_equals"))
         {
             AddTypeMismatch(context, function, instruction);
             return;
@@ -449,6 +455,6 @@ internal static class GuestInstructionValidator
 
     private static bool IsNominalOrdinal(GuestType type)
     {
-        return type.Kind is "class_ref" or "factory_ref" or "object_type_ref" or "composite_ref" or "function_ref";
+        return type.Kind is "class_ref" or "factory_ref" or "object_type_ref" or "composite_ref" or "function_ref" or "managed_ref";
     }
 }

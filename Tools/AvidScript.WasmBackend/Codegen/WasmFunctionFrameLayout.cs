@@ -12,16 +12,19 @@ internal sealed class WasmFunctionFrameLayout
     private WasmFunctionFrameLayout(
         IReadOnlyDictionary<string, int> offsets,
         int? arrayElementScratchOffset,
+        int? managedScratchOffset,
         int frameSize)
     {
         this.offsets = offsets;
         ArrayElementScratchOffset = arrayElementScratchOffset;
+        ManagedScratchOffset = managedScratchOffset;
         FrameSize = frameSize;
     }
 
     public int FrameSize { get; }
 
     public int? ArrayElementScratchOffset { get; }
+    public int? ManagedScratchOffset { get; }
 
     public static WasmFunctionFrameLayout Create(
         GuestFunction function,
@@ -41,8 +44,8 @@ internal sealed class WasmFunctionFrameLayout
         foreach (GuestRegister parameter in function.Parameters)
         {
             GuestType type = moduleLayout.Types[parameter.TypeId];
-            if (!moduleLayout.IsMemoryType(parameter.TypeId)
-                && addressTargets.Contains(parameter.Id))
+            if ((!moduleLayout.IsMemoryType(parameter.TypeId) && addressTargets.Contains(parameter.Id))
+                || (moduleLayout.IsMemoryType(parameter.TypeId) && GuestManagedHeap.ContainsReferences(moduleLayout.Types, parameter.TypeId)))
             {
                 cursor = AddSlot(offsets, parameter.Id, type, cursor);
             }
@@ -79,8 +82,14 @@ internal sealed class WasmFunctionFrameLayout
             cursor = checked(offset + scratchSize);
         }
 
+        int? managedScratchOffset = null;
+        if (GuestManagedHeap.NeedsScope(function, moduleLayout.Types))
+        {
+            managedScratchOffset = AlignUp(cursor, 16);
+            cursor = checked(managedScratchOffset.Value + 64);
+        }
         int frameSize = cursor == 0 ? 0 : AlignUp(cursor, 16);
-        return new WasmFunctionFrameLayout(offsets, arrayElementScratchOffset, frameSize);
+        return new WasmFunctionFrameLayout(offsets, arrayElementScratchOffset, managedScratchOffset, frameSize);
     }
 
     public bool HasSlot(string valueId)

@@ -4,6 +4,8 @@
 #include "Memory/AvidScriptManagedHeap.h"
 #include "AvidScriptManagedHeapAbi.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 #include <array>
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptManagedHeapOwnershipTest,
@@ -259,6 +261,50 @@ bool FAvidScriptManagedHeapHostAbiTest::RunTest(const FString& Parameters)
 		const auto Wasm = Build(EFault::None);
 		TestFalse(TEXT("Heap ABI requires invocation cleanup owner"), Unscoped->Load(MakeArrayView(Wasm), TEXT("heap_without_scope"), {}, Error));
 		TestEqual(TEXT("Missing owner diagnostic"), Error.Category, FString(TEXT("managed_heap_scope_required")));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptManagedHeapGeneratedGuestTest,
+	"AvidScript.Runtime.ManagedHeap.GeneratedGuest",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptManagedHeapGeneratedGuestTest::RunTest(const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	using namespace AvidScript::Managed;
+	const FString Directory = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("AvidScriptManagedHeapTests/GuestFixtures"));
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	{
+		for (const FString File : {FString(TEXT("managed.wasm")), FString(TEXT("managed-trap.wasm")), FString(TEXT("managed-cooperative.wasm"))})
+		{
+			if (Backend == EAvidScriptVmBackendKind::Wamr && File == TEXT("managed-cooperative.wasm")) continue;
+			TArray<uint8> Wasm;
+			if (!TestTrue(TEXT("Load current compiler fixture; generate with Build/TestAvidScriptManagedHeap.ps1 -RuntimeAutomation"),
+				FFileHelper::LoadFileToArray(Wasm, *FPaths::Combine(Directory, File)))) return false;
+			FAvidScriptVmBackendSelection Selection;
+			Selection.BackendKind = Backend;
+			Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime ? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+			FAvidScriptWasmRuntimeInstance Runtime(Selection); FAvidScriptWasmSmokeResult Result;
+			if (!TestTrue(TEXT("Generated Guest loads"), Runtime.LoadModule(Wasm.GetData(), Wasm.Num(), File, Result)))
+			{ AddError(Result.ErrorMessage); return false; }
+			const bool bTrap = File == TEXT("managed-trap.wasm");
+			const bool bExecuted = Runtime.BeginPlay(Result);
+			if (!TestEqual(TEXT("Generated program outcome"), bExecuted, !bTrap)) { AddError(Result.ErrorMessage); return false; }
+			uint8 Value[4]{}; FString Error;
+			TestTrue(TEXT("Read generated program result"), Runtime.ReadStateBytes(16, MakeArrayView(Value), Error));
+			TestEqual(TEXT("Reference/aggregate return, recursive/indirect calls and value-copy parameters survive GC"),
+				uint32(Value[0]) | (uint32(Value[1]) << 8) | (uint32(Value[2]) << 16) | (uint32(Value[3]) << 24), 49u);
+			FHeap* Heap = Runtime.GetManagedHeapForTesting();
+			if (!TestNotNull(TEXT("Generated module owns heap"), Heap)) return false;
+			const auto Stats = Heap->GetStats();
+			TestTrue(TEXT("Actual repeated allocation and collection"), Stats.Allocations >= 128 && Stats.Collections >= 128);
+			TestTrue(TEXT("Loop roots do not retain allocation history"), Stats.PeakLiveBytes <= 512);
+			TestEqual(TEXT("All generated frames unwind"), Stats.ActiveFrames, 0u);
+			TestEqual(TEXT("All generated roots unwind"), Stats.LiveRoots, 0u);
+			TestTrue(TEXT("Post-invocation cycle collection"), Heap->Collect() == EHeapError::Ok);
+			TestEqual(TEXT("Escaped/shared graph and self-cycle reclaimed"), Heap->GetStats().LiveObjects, 0u);
+		}
 	}
 	return true;
 }
