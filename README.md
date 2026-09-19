@@ -52,6 +52,7 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 [当前 owner 的 UE 实例委托与 this 捕获](Docs/Phase66/P66.B_Ue_Receiver_Execution.md)已连接同步执行、身份相等、组合/移除及 ref/out，创建和进入回调时验证 receiver，环境盒保持弱 UObject 身份。Guest 346/346、生成类型双后端 Automation 7/7 通过，覆盖 .NET 对照、强制回收、重载及 owner 失效拒绝。跨 Session 接收者、虚派发、持久事件与跨 await 根仍未完成。
 [跨实例路由设计](Docs/Phase66/P66.B_Ue_Method_Routing_Design.md)明确下一组的完整方法签名、目标实例、引用别名、同步重入和版本生命周期要求，并提前安排结构重载与跨帧调试探针；属于设计约束，尚未启用新的跨实例执行能力。
 [UE 实例方法目录](Docs/Phase66/P66.B_Ue_Method_Catalog.md)已交付 Semantic 26/1.30 的版本化签名、私有/反射区分、覆写槽与接口路由，包含封闭泛型接口身份和冷路径解析；Semantic 308/308、Guest 356/356、UE 类型生成器 6/6 通过。目录不构成运行时执行许可，跨 Session 调用、动态派发与持久根仍待连接；引用返回在执行合同接入前明确拒绝。
+[共享执行域的 VM 重入探针](Docs/Phase66/P66.B_Vm_Reentrant_Execution.md)已通过双后端 Automation 2/2，覆盖共享内存/global、嵌套预算、trap 和延迟卸载，并修复 WAMR 嵌套入口重置预算的问题；已有 WAMR 回归 6/6 通过。该证据属于 VM 层，真实 receiver、托管对象与 ref/out 跨实例执行仍待接入。
 
 ## 现在可以做什么
 

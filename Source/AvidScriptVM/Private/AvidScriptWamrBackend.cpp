@@ -630,12 +630,17 @@ public:
 		{
 			*OutResult = FAvidScriptVmCallResult();
 		}
-		bHasPendingHostImportFailure = false;
-		bHostCallBudgetExceeded = false;
-		CurrentHostCallCount = 0;
-		PendingHostImportName.Reset();
-		PendingHostFailureCategory.Reset();
-		PendingHostImportDetails.Reset();
+		// Synchronous Host -> Guest reentry belongs to the outer execution budget.
+		// Resetting here on every call lets nested exports replenish that budget.
+		if (ActiveCallDepth == 0)
+		{
+			bHasPendingHostImportFailure = false;
+			bHostCallBudgetExceeded = false;
+			CurrentHostCallCount = 0;
+			PendingHostImportName.Reset();
+			PendingHostFailureCategory.Reset();
+			PendingHostImportDetails.Reset();
+		}
 #if !AVIDSCRIPT_WITH_WAMR
 		SetVmError(OutError, TEXT("backend_unavailable"), TEXT("WAMR artifacts are unavailable for this target."));
 		return false;
