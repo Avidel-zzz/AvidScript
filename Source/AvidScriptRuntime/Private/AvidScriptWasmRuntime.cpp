@@ -2180,6 +2180,13 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEvent(
 	FAvidScriptWasmSmokeResult& OutResult)
 {
 	if (RejectActiveContextMutation(TEXT("unscoped delegate event"), &OutResult)) return false;
+	return DispatchPreparedDelegateEventInternal(Event, NativeParameters, OutResult, nullptr);
+}
+
+bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEventInternal(
+	const FAvidScriptPreparedDelegateEvent& Event, void* NativeParameters,
+	FAvidScriptWasmSmokeResult& OutResult, const FAvidScriptVmPreparedExportCall* ScopedCall)
+{
 	CaptureSnapshot(OutResult);
 	if (!IsLoaded() || !bHasBegunPlay || bEndPlayAttempted)
 	{
@@ -2302,8 +2309,6 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEvent(
 		return false;
 	}
 
-	FAvidScriptCachedVmExport& CachedExport =
-		DelegateEventExports.FindOrAdd(Event.StableId);
 	const double EventStartSeconds = FPlatformTime::Seconds();
 	ActiveDelegateOutputTransaction = OutputTransaction.Get();
 	ActiveDelegateOutputToken = OutputTransactionToken;
@@ -2312,17 +2317,17 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEvent(
 	BindingInvocationContext.ScopedObjectCapabilities = BorrowedHandles;
 	BeginTypedCallbackEpoch();
 	FAvidScriptVmError EventError;
-	bool bCalled = InvokeVmExport(
-		VmBackend.Get(),
-		CachedExport,
-		Event.ExportName,
-		Frame.CellCount,
-		Frame.Cells,
-		EventError);
+	bool bCalled = ScopedCall != nullptr
+		? ScopedCall->Call(Frame, EventError)
+		: InvokeVmExport(VmBackend.Get(), DelegateEventExports.FindOrAdd(Event.StableId),
+			Event.ExportName, Frame.CellCount, Frame.Cells, EventError);
 	EndTypedCallbackEpoch();
 	BindingInvocationContext.ScopedObjectCapabilities = PreviousScopedCapabilities;
 	ActiveDelegateOutputTransaction = nullptr;
 	ActiveDelegateOutputToken = 0;
+	// An inner scoped failure may have been ignored by a native callback. Never
+	// commit ref/out effects from an invocation chain that has already failed.
+	if (bCalled) bCalled = ValidateContextCallbackCommit(EventError);
 	if (bCalled && OutputTransaction.IsValid())
 	{
 		FString CommitError;
@@ -2363,6 +2368,13 @@ bool FAvidScriptWasmRuntimeInstance::DispatchContinuation(
 	FAvidScriptWasmSmokeResult& OutResult)
 {
 	if (RejectActiveContextMutation(TEXT("unscoped continuation"), &OutResult)) return false;
+	return DispatchContinuationInternal(Completion, OutResult, nullptr);
+}
+
+bool FAvidScriptWasmRuntimeInstance::DispatchContinuationInternal(
+	const FAvidScriptContinuationCompletion& Completion, FAvidScriptWasmSmokeResult& OutResult,
+	const FAvidScriptVmPreparedExportCall* ScopedCall)
+{
 	CaptureSnapshot(OutResult);
 	const bool bUseV2 = ContinuationV2Export.Handle.IsValid();
 	const FString& ExportName = bUseV2
@@ -2415,14 +2427,14 @@ bool FAvidScriptWasmRuntimeInstance::DispatchContinuation(
 	ActiveContinuationResultTransaction = &ResultTransaction;
 	BeginTypedCallbackEpoch();
 	FAvidScriptVmError Error;
-	const bool bCalled = InvokeVmExport(
-		VmBackend.Get(),
-		CachedExport,
-		ExportName,
-		bUseV2 ? UE_ARRAY_COUNT(Args) : 4,
-		Args,
-		Error);
+	FAvidScriptVmCallFrame Frame;
+	Frame.CellCount = bUseV2 ? UE_ARRAY_COUNT(Args) : 4;
+	FMemory::Memcpy(Frame.Cells, Args, Frame.CellCount * sizeof(uint32));
+	bool bCalled = ScopedCall != nullptr
+		? ScopedCall->Call(Frame, Error)
+		: InvokeVmExport(VmBackend.Get(), CachedExport, ExportName, Frame.CellCount, Frame.Cells, Error);
 	EndTypedCallbackEpoch();
+	if (bCalled) bCalled = ValidateContextCallbackCommit(Error);
 	if (bCalled)
 	{
 		ResultTransaction.Commit();

@@ -58,6 +58,8 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 [共享 Runtime 的上下文入口](Docs/Phase66/P66.B_Runtime_Context_Invocation.md)已提供有界同步重入、目标 owner/服务切换、代码身份校验与返回恢复；双后端 Runtime/ABI 探针验证 A→B→A 共享托管对象、地址别名、强制 GC 和失败清理。Windows 构建、C# receiver 10/10、GeneratedTypes 9/9 通过。生成实例 Host 仍使用独立 Session/VM，普通 C# 跨实例调用及持久事件/await 尚未连接。
 [Runtime 持有生成绑定](Docs/Phase66/P66.B_Runtime_Owned_Generated_Bindings.md)进一步使 receiver/属性 import 使用当前实例的弱权限，绑定不随首个注册注销而释放；真实 C# WASM 在双后端共享静态状态并读写各实例 UE 属性。WAMR 补齐 scalar getter/void setter 及 f64 签名适配；Windows 编译、C# receiver 16/16、GeneratedTypes 10/10、WAMR registry 4/4 通过。生产 Host 的共享 VM、完整跨对象路由与持久 event/await 仍待实现，P66.B 保持进行中。
 
+[实例上下文回调](Docs/Phase66/P66.B_Contextual_Callbacks.md)已把 continuation/委托的 owner 切换、状态消费和失败传播接入生成 Session，并覆盖加载、重载、停止及 A 取消后 B 的 Timer 继续运行。Windows 构建、C# receiver 16/16、GeneratedTypes 12/12、continuation 10/10 与委托订阅 5/5 通过。生产 Host 共享执行域、完整跨对象调用与 C# event/await 持久根仍待完成，P66.B 保持进行中。
+
 ## 现在可以做什么
 
 更新于 **2026-09-10**。已跑通 **C# → WASM → UE 事件与 API → Win64 打包运行**，

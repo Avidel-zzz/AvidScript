@@ -185,6 +185,7 @@ private:
 	friend class FAvidScriptWasmRuntimeInstance;
 	TSharedPtr<const uint8> CodeIdentity;
 	FAvidScriptVmPreparedExportCall Call;
+	FString ExportName;
 };
 
 class AVIDSCRIPTRUNTIME_API FAvidScriptWasmRuntimeInstance
@@ -232,6 +233,9 @@ public:
 		FString& OutError);
 	bool PrepareContextualExportCall(
 		const FString& ExportName, FAvidScriptContextualExportCall& OutCall, FString& OutError);
+	// Call after ValidateRequiredExports; returns an empty call when no continuation
+	// export was validated. The prepared entry follows that validation's V2/V1 choice.
+	bool PrepareContextualContinuationCall(FAvidScriptContextualExportCall& OutCall, FString& OutError);
 	bool InvokeInContext(
 		const FAvidScriptContextualExportCall& Call, const FAvidScriptWasmHostContext& Context,
 		const FAvidScriptVmCallFrame& Frame, FAvidScriptVmError& OutError,
@@ -265,6 +269,9 @@ public:
 	bool DispatchContinuation(
 		const FAvidScriptContinuationCompletion& Completion,
 		FAvidScriptWasmSmokeResult& OutResult);
+	bool DispatchContinuationInContext(
+		const FAvidScriptContextualExportCall& Call, const FAvidScriptWasmHostContext& Context,
+		const FAvidScriptContinuationCompletion& Completion, FAvidScriptWasmSmokeResult& OutResult);
 	bool DispatchDebugResume(
 		int64 SuspensionToken,
 		uint32 ResumeRoute,
@@ -282,6 +289,10 @@ public:
 	bool DispatchPreparedDelegateEvent(
 		const FAvidScriptPreparedDelegateEvent& Event,
 		void* NativeParameters,
+		FAvidScriptWasmSmokeResult& OutResult);
+	bool DispatchPreparedDelegateEventInContext(
+		const FAvidScriptContextualExportCall& Call, const FAvidScriptWasmHostContext& Context,
+		const FAvidScriptPreparedDelegateEvent& Event, void* NativeParameters,
 		FAvidScriptWasmSmokeResult& OutResult);
 	void CaptureSnapshot(FAvidScriptWasmSmokeResult& OutResult) const;
 	FAvidScriptWasmHotSnapshot GetHotSnapshot() const;
@@ -553,6 +564,16 @@ public:
 
 
 private:
+	bool InvokeContextOperation(
+		const FAvidScriptContextualExportCall& Call, const FAvidScriptWasmHostContext& Context,
+		TFunctionRef<bool(FAvidScriptVmError&)> Operation, FAvidScriptVmError& OutError);
+	bool DispatchContinuationInternal(
+		const FAvidScriptContinuationCompletion& Completion, FAvidScriptWasmSmokeResult& OutResult,
+		const FAvidScriptVmPreparedExportCall* ScopedCall);
+	bool DispatchPreparedDelegateEventInternal(
+		const FAvidScriptPreparedDelegateEvent& Event, void* NativeParameters,
+		FAvidScriptWasmSmokeResult& OutResult, const FAvidScriptVmPreparedExportCall* ScopedCall);
+	bool ValidateContextCallbackCommit(FAvidScriptVmError& OutError) const;
 	void ApplyHostContext(const FAvidScriptWasmHostContext& Context);
 	bool RejectActiveContextMutation(const TCHAR* Operation, FAvidScriptWasmSmokeResult* OutResult = nullptr);
 	bool ValidateInvocationContext(const FAvidScriptWasmHostContext& Context) const;

@@ -424,6 +424,8 @@ void FAvidScriptRuntimeSession::AbortRuntimeForLifecycleInvalidation()
 	if (GeneratedTypeInstance)
 	{
 		GeneratedTypeInstance->PreparedTypeRoutes.Reset();
+		GeneratedTypeInstance->ContinuationCall = {};
+		GeneratedTypeInstance->DelegateCalls.Reset();
 	}
 	Continuations->ReleaseRetiredEndpoint();
 	if (HostContext.ObjectRegistry != nullptr)
@@ -1091,7 +1093,9 @@ bool FAvidScriptRuntimeSession::PumpReadyContinuations(
 			static_cast<uint64>(Completion.Token));
 		ProfileScope.SetSucceeded(false);
 		const bool bDispatched = LiveRuntime
-			&& LiveRuntime->DispatchContinuation(Completion, OutResult);
+			&& (GeneratedTypeInstance
+				? LiveRuntime->DispatchContinuationInContext(GeneratedTypeInstance->ContinuationCall, HostContext, Completion, OutResult)
+				: LiveRuntime->DispatchContinuation(Completion, OutResult));
 		const bool bFinalized = Continuations->FinalizeDispatched(
 			Completion.Token,
 			bDispatched);
@@ -1375,7 +1379,14 @@ bool FAvidScriptRuntimeSession::DispatchPreparedDelegateEvent(
 		TGuardValue<int32> GuestCallGuard(
 			ActiveGuestCallDepth,
 			ActiveGuestCallDepth + 1);
-		bSucceeded = EventRouter->Dispatch(Event, NativeParameters, OutResult);
+		if (GeneratedTypeInstance)
+		{
+			const auto* Call = GeneratedTypeInstance->DelegateCalls.Find(Event.ExportName);
+			if (Call && LiveRuntime) bSucceeded = LiveRuntime->DispatchPreparedDelegateEventInContext(*Call, HostContext, Event, NativeParameters, OutResult);
+			else SetSessionExecutionFailure(GetLiveModuleId(), Event.ExportName,
+				TEXT("generated instance callback was not prepared for this code generation"), OutResult);
+		}
+		else bSucceeded = EventRouter->Dispatch(Event, NativeParameters, OutResult);
 	}
 	if (!bSucceeded)
 	{
@@ -1509,6 +1520,8 @@ bool FAvidScriptRuntimeSession::StopAndUnload(FAvidScriptWasmSmokeResult& OutRes
 	if (GeneratedTypeInstance)
 	{
 		GeneratedTypeInstance->PreparedTypeRoutes.Reset();
+		GeneratedTypeInstance->ContinuationCall = {};
+		GeneratedTypeInstance->DelegateCalls.Reset();
 	}
 	Continuations->ReleaseRetiredEndpoint();
 	HostContext.Continuations = nullptr;
@@ -2234,6 +2247,8 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 	}
 	TArray<FAvidScriptPreparedDelegateEvent> CandidateDelegateEvents;
 	TArray<FAvidScriptPreparedDelegateEvent> CandidateInboundHandlers;
+	FAvidScriptContextualExportCall CandidateContinuationCall;
+	TMap<FString, FAvidScriptContextualExportCall> CandidateDelegateCalls;
 	FString DelegatePrepareError;
 	DelegateSubscriptions->DiscardPrepared();
 	InboundHandlers->DiscardPrepared();
@@ -2257,6 +2272,28 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 			TEXT("regenerate the callback descriptor and keep the previous runtime active"));
 		CandidateRuntime->Unload();
 		return false;
+	}
+	if (GeneratedTypeInstance)
+	{
+		bool bPrepared = CandidateRuntime->PrepareContextualContinuationCall(CandidateContinuationCall, DelegatePrepareError);
+		for (const auto* Plans : {&CandidateDelegateEvents, &CandidateInboundHandlers})
+		{
+			for (const auto& Plan : *Plans)
+			{
+				if (!bPrepared) break;
+				if (!CandidateDelegateCalls.Contains(Plan.ExportName))
+					bPrepared = CandidateRuntime->PrepareContextualExportCall(Plan.ExportName,
+						CandidateDelegateCalls.Add(Plan.ExportName), DelegatePrepareError);
+			}
+		}
+		if (!bPrepared)
+		{
+			DiscardPreparedCallbacks();
+			SetReloadFailure(OutResult, TEXT("<contextual_callbacks>"), TEXT("callback_export_prepare_failed"),
+				DelegatePrepareError, TEXT("keep the previous Runtime and rebuild the callback exports"));
+			CandidateRuntime->Unload();
+			return false;
+		}
 	}
 	UObject* CandidateDelegateSource = nullptr;
 	if (!CandidateDelegateEvents.IsEmpty()
@@ -2473,6 +2510,8 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 	if (GeneratedTypeInstance)
 	{
 		GeneratedTypeInstance->PreparedTypeRoutes = MoveTemp(CandidateGeneratedTypeRoutes);
+		GeneratedTypeInstance->ContinuationCall = MoveTemp(CandidateContinuationCall);
+		GeneratedTypeInstance->DelegateCalls = MoveTemp(CandidateDelegateCalls);
 	}
 	Scheduler->Attach(*LiveRuntime);
 	LiveManifest = Manifest;

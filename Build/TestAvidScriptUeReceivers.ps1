@@ -29,12 +29,12 @@ $TestName = 'AvidScript.Runtime.GeneratedTypes'
 & (Join-Path $EngineRoot 'Engine/Binaries/Win64/UnrealEditor-Cmd.exe') $ProjectPath -unattended -nop4 -NullRHI -nosplash "-ExecCmds=Automation RunTests $TestName;Quit" '-TestExit=Automation Test Queue Empty' "-abslog=$LogPath"
 if ($LASTEXITCODE -ne 0) { throw "Generated type Automation exited with $LASTEXITCODE. Log: $LogPath" }
 $Log = Get-Content -Raw -LiteralPath $LogPath
-$Found = [regex]::Matches($Log, "Found 10 automation tests based on '$([regex]::Escape($TestName))'").Count
+$Found = [regex]::Matches($Log, "Found 12 automation tests based on '$([regex]::Escape($TestName))'").Count
 $Passed = [regex]::Matches($Log, 'Test Completed\. Result=\{Success\} Name=\{([^}]+)\} Path=\{AvidScript\.Runtime\.GeneratedTypes\.\1\}')
 $Failed = [regex]::Matches($Log, 'Test Completed\. Result=\{Fail\}').Count
 $Complete = [regex]::Matches($Log, '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*\*').Count
 $Exit = [regex]::Matches($Log, 'RequestExitWithStatus\(1, 0,').Count
-if ($Found -ne 1 -or $Passed.Count -ne 10 -or @($Passed | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique).Count -ne 10 -or $Failed -ne 0 -or $Complete -ne 1 -or $Exit -lt 1) {
+if ($Found -ne 1 -or $Passed.Count -ne 12 -or @($Passed | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique).Count -ne 12 -or $Failed -ne 0 -or $Complete -ne 1 -or $Exit -lt 1) {
     throw "Generated type Automation incomplete: found=$Found passed=$($Passed.Count) failed=$Failed complete=$Complete exit=$Exit log=$LogPath"
 }
-Write-Output "AvidScript.UeReceivers.RuntimeAutomation: 10/10 passed; log=$LogPath"
+Write-Output "AvidScript.UeReceivers.RuntimeAutomation: 12/12 passed; log=$LogPath"

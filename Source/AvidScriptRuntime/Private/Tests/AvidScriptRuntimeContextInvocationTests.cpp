@@ -4,6 +4,10 @@
 #include "Memory/AvidScriptManagedHeap.h"
 #include "Tests/AvidScriptGeneratedTypeSessionTestTypes.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
+#include "GameFramework/Actor.h"
+#include "Continuation/AvidScriptSessionContinuations.h"
+#include "Misc/ScopeExit.h"
 #include "Misc/AutomationTest.h"
 #include "UObject/StrongObjectPtr.h"
 
@@ -317,5 +321,203 @@ bool FAvidScriptContextInvocationTest::RunTest(const FString& Parameters)
 {
 	return AvidScriptContextInvocationTests::Run(*this, EAvidScriptVmBackendKind::Wasmtime)
 		&& AvidScriptContextInvocationTests::Run(*this, EAvidScriptVmBackendKind::Wamr);
+}
+namespace AvidScriptContextCallbackTests
+{
+TArray<uint8> BuildFixture()
+{
+	using namespace AvidScriptContextInvocationTests;
+	TArray<uint8> Module{0, 0x61, 0x73, 0x6d, 1, 0, 0, 0};
+	Section(Module, 1, {6, 0x60, 1, 0x7e, 1, 0x7f, 0x60, 2, 0x7d, 0x7f, 1, 0x7e,
+		0x60, 0, 0, 0x60, 0, 1, 0x7e, 0x60, 5, 0x7f, 0x7e, 0x7f, 0x7f, 0x7f, 0, 0x60, 1, 0x7f, 0});
+	TArray<uint8> Imports{2};
+	Name(Imports, "avidscript"); Name(Imports, "context_callback_probe"); Imports.Append({0, 0});
+	Name(Imports, "avidscript"); Name(Imports, "continuation_delay"); Imports.Append({0, 1});
+	Section(Module, 2, Imports);
+	Section(Module, 3, {5, 2, 3, 4, 5, 2});
+	TArray<uint8> Exports{5};
+	for (const auto& Item : {TPair<const char*, uint8>{"avid_on_begin_play", 2}, {"schedule", 3},
+		{"avid_on_continuation_v2", 4}, {"on_event", 5}, {"trap", 6}})
+	{
+		Name(Exports, Item.Key); Exports.Append({0, Item.Value});
+	}
+	Section(Module, 7, Exports);
+	const TArray<uint8> Init{0, 0x0b}, Schedule{0, 0x43, 0x0a, 0xd7, 0x23, 0x3c, 0x41, 51, 0x10, 1, 0x0b},
+		Continuation{0, 0x20, 1, 0x10, 0, 0x1a, 0x0b}, Event{0, 0x42, 0, 0x10, 0, 0x1a, 0x0b}, Trap{0, 0, 0x0b};
+	TArray<uint8> Code{5};
+	for (const auto* Body : {&Init, &Schedule, &Continuation, &Event, &Trap}) { U32(Code, Body->Num()); Code.Append(*Body); }
+	Section(Module, 10, Code);
+	return Module;
+}
+
+struct FProbe
+{
+	FAutomationTestBase& Test;
+	FAvidScriptWasmRuntimeInstance& Runtime;
+	FAvidScriptWasmHostContext A, B;
+	FAvidScriptContextualExportCall Continuation, EventCall, Trap;
+	FAvidScriptPreparedDelegateEvent Event;
+	FAvidScriptContinuationCompletion CompletionB;
+	bool bInjectFailure = false;
+	int32 EventCalls = 0;
+	int32 ContinuationCalls = 0;
+	uint32 ExpectedBState = 222;
+
+	static bool Encode(const void* Identity, const void*, const FAvidScriptBindingInvocationContext&,
+		uint32, FAvidScriptVmCallFrame& Frame, TArray<FAvidScriptObjectHandle>&, FString&, FString&)
+	{
+		auto& Probe = *static_cast<const FProbe*>(Identity);
+		Probe.Test.TestEqual(TEXT("delegate encoding sees target owner"), Probe.Runtime.HandleOwnerGetSlotImport(), static_cast<int32>(Probe.B.OwnerHandle.Slot));
+		Frame.CellCount = 1; Frame.Cells[0] = 17;
+		return true;
+	}
+	static EAvidScriptVmTypedHostStatus Observe(void* Opaque, int64 Token, int32& Result)
+	{
+		auto& P = *static_cast<FProbe*>(Opaque);
+		Result = 1;
+		const int32 Owner = P.Runtime.HandleOwnerGetSlotImport();
+		uint32 State = 0;
+		auto Bytes = MakeArrayView(reinterpret_cast<uint8*>(&State), sizeof(State));
+		if (Token == 0)
+		{
+			++P.EventCalls;
+			P.Test.TestEqual(TEXT("nested delegate executes for B"), Owner, static_cast<int32>(P.B.OwnerHandle.Slot));
+			P.Test.TestEqual(TEXT("event cannot consume surrounding continuation state"), P.Runtime.HandleContinuationStateReadImport(P.CompletionB.Token, Bytes), 0);
+			if (P.bInjectFailure)
+			{
+				FAvidScriptVmError Failure;
+				P.Test.TestFalse(TEXT("nested trap fails"), P.Runtime.InvokeInContext(P.Trap, P.B, {}, Failure));
+			}
+			return EAvidScriptVmTypedHostStatus::Succeeded; // native code deliberately ignores an inner trap
+		}
+		++P.ContinuationCalls;
+		if (Owner == static_cast<int32>(P.A.OwnerHandle.Slot))
+		{
+			FAvidScriptWasmSmokeResult Nested;
+			P.Test.TestEqual(TEXT("nested event result follows the complete call chain"),
+				P.Runtime.DispatchPreparedDelegateEventInContext(P.EventCall, P.B, P.Event, nullptr, Nested), !P.bInjectFailure);
+			if (!P.bInjectFailure)
+				P.Test.TestTrue(TEXT("B continuation may execute inside A continuation"),
+					P.Runtime.DispatchContinuationInContext(P.Continuation, P.B, P.CompletionB, Nested));
+			P.Test.TestEqual(TEXT("A owner restored after nested callbacks"), P.Runtime.HandleOwnerGetSlotImport(), Owner);
+		}
+		P.Test.TestEqual(TEXT("callback reads its own saved state once"), P.Runtime.HandleContinuationStateReadImport(Token, Bytes), 1);
+		P.Test.TestEqual(TEXT("separate instance state is preserved"), State,
+			Owner == static_cast<int32>(P.A.OwnerHandle.Slot) ? 111u : P.ExpectedBState);
+		P.Test.TestEqual(TEXT("state cannot be consumed twice"), P.Runtime.HandleContinuationStateReadImport(Token, Bytes), 0);
+		return EAvidScriptVmTypedHostStatus::Succeeded;
+	}
+};
+
+bool Run(FAutomationTestBase& Test, EAvidScriptVmBackendKind Backend)
+{
+	if (GEngine == nullptr) return false;
+	for (bool bFailure : {false, true})
+	{
+		Test.AddInfo(FString::Printf(TEXT("context callbacks backend=%d nestedFailure=%d"), static_cast<int32>(Backend), bFailure));
+		UWorld* World = UWorld::CreateWorld(EWorldType::Game, false, TEXT("AvidScriptContextCallbacks"));
+		if (World == nullptr) return false;
+		GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+		World->InitializeActorsForPlay(FURL());
+		ON_SCOPE_EXIT { GEngine->DestroyWorldContext(World); World->DestroyWorld(false); };
+		AActor* A = World->SpawnActor<AActor>();
+		AActor* B = World->SpawnActor<AActor>();
+		if (A == nullptr || B == nullptr) return false;
+		FAvidScriptObjectRegistry Objects;
+		FAvidScriptObjectHandleResult HandleResult;
+		auto AContinuations = MakeShared<FAvidScriptSessionContinuations>();
+		auto BContinuations = MakeShared<FAvidScriptSessionContinuations>();
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime ? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		FAvidScriptWasmRuntimeInstance Runtime(Selection);
+		FProbe Probe{Test, Runtime};
+		Probe.bInjectFailure = bFailure;
+		Probe.A.World = World; Probe.A.ObjectRegistry = &Objects;
+		Probe.A.OwnerHandle = Objects.RegisterObject(A, HandleResult, false);
+		Probe.A.Continuations = &AContinuations->ResetActive(World, &Objects, nullptr, Probe.A.OwnerHandle);
+		Probe.B = Probe.A;
+		Probe.B.OwnerHandle = Objects.RegisterObject(B, HandleResult, false);
+		Probe.B.Continuations = &BContinuations->ResetActive(World, &Objects, nullptr, Probe.B.OwnerHandle);
+		Runtime.SetHostContext(Probe.A);
+		FAvidScriptVmTypedHostImport Import;
+		Import.StableId = TEXT("context_callbacks"); Import.ModuleName = TEXT("avidscript"); Import.ImportName = TEXT("context_callback_probe");
+		Import.Signature = TEXT("(I)i"); Import.Shape = EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Get;
+		Import.bSupplementalRuntimeAuthority = true; Import.PreparedTarget.Context = &Probe;
+		Import.PreparedTarget.PackedSelfPropertyI32Get = &FProbe::Observe;
+		FString Error;
+		FAvidScriptWasmSmokeResult Result;
+		const auto Wasm = BuildFixture();
+		if (!Runtime.SetSupplementalTypedHostImports({&Import, 1}, Error)
+			|| !Runtime.LoadModule(Wasm.GetData(), Wasm.Num(), TEXT("context_callbacks"), Result)
+			|| !Runtime.ValidateRequiredExports({TEXT("avid_on_begin_play"), TEXT("avid_on_continuation_v2")}, Result)
+			|| !Runtime.BeginPlay(Result)) { Test.AddError(Error + Result.ErrorMessage); return false; }
+		FAvidScriptContextualExportCall Schedule;
+		if (!Runtime.PrepareContextualExportCall(TEXT("schedule"), Schedule, Error)
+			|| !Runtime.PrepareContextualExportCall(TEXT("avid_on_continuation_v2"), Probe.Continuation, Error)
+			|| !Runtime.PrepareContextualExportCall(TEXT("on_event"), Probe.EventCall, Error)
+			|| !Runtime.PrepareContextualExportCall(TEXT("trap"), Probe.Trap, Error)) { Test.AddError(Error); return false; }
+		Probe.Event.StableId = TEXT("context_event"); Probe.Event.ExportName = TEXT("on_event");
+		Probe.Event.Signature.ImmutableCodecIdentity = &Probe; Probe.Event.Signature.Encode = &FProbe::Encode;
+		Probe.Event.Signature.ParameterCellCount = 1;
+		auto Start = [&](const FAvidScriptWasmHostContext& Context, uint32 State)
+		{
+			FAvidScriptVmCallResult CallResult;
+			FAvidScriptVmError Failure;
+			if (!Runtime.InvokeInContext(Schedule, Context, {}, Failure, &CallResult)) { Test.AddError(Failure.Details); return int64(0); }
+			int64 Token = 0; FMemory::Memcpy(&Token, CallResult.Cells, sizeof(Token));
+			Test.TestTrue(TEXT("scoped Guest Timer await creates a continuation"), Token != 0);
+			Test.TestTrue(TEXT("instance endpoint stores its state"), Context.Continuations->StoreState(Token,
+				MakeArrayView(reinterpret_cast<const uint8*>(&State), sizeof(State))));
+			return Token;
+		};
+		const int64 TokenA = Start(Probe.A, 111), TokenB = Start(Probe.B, 222);
+		World->Tick(LEVELTICK_All, 0); ++GFrameCounter; World->Tick(LEVELTICK_All, 0.02f); ++GFrameCounter;
+		TArray<FAvidScriptContinuationCompletion> ReadyA, ReadyB;
+		AContinuations->DrainReady(ReadyA); BContinuations->DrainReady(ReadyB);
+		if (!Test.TestEqual(TEXT("A Timer completes"), ReadyA.Num(), 1) || !Test.TestEqual(TEXT("B Timer completes"), ReadyB.Num(), 1)) return false;
+		Probe.CompletionB = ReadyB[0];
+		Test.TestEqual(TEXT("whole continuation chain result"), Runtime.DispatchContinuationInContext(Probe.Continuation, Probe.A, ReadyA[0], Result), !bFailure);
+		if (bFailure) Test.TestFalse(TEXT("ignored nested failure has a diagnostic"), Result.ErrorCategory.IsEmpty());
+		Test.TestEqual(TEXT("delegate called exactly once"), Probe.EventCalls, 1);
+		Test.TestEqual(TEXT("continuation dispatch count"), Probe.ContinuationCalls, bFailure ? 1 : 2);
+		Test.TestTrue(TEXT("A finalizes independently"), AContinuations->FinalizeDispatched(TokenA, !bFailure));
+		Test.TestTrue(TEXT("B finalizes independently"), BContinuations->FinalizeDispatched(TokenB, !bFailure));
+		Test.TestEqual(TEXT("A state released"), AContinuations->GetStateFrameByteCountForTesting(), 0);
+		Test.TestEqual(TEXT("B state released"), BContinuations->GetStateFrameByteCountForTesting(), 0);
+		Test.TestEqual(TEXT("base owner restored"), Runtime.HandleOwnerGetSlotImport(), static_cast<int32>(Probe.A.OwnerHandle.Slot));
+		if (!bFailure)
+		{
+			Start(Probe.A, 333); Start(Probe.B, 444); Probe.ExpectedBState = 444;
+			AContinuations->Teardown();
+			Test.TestTrue(TEXT("A owner retires"), Objects.ReleaseHandle(Probe.A.OwnerHandle, HandleResult, false));
+			World->Tick(LEVELTICK_All, 0); ++GFrameCounter; World->Tick(LEVELTICK_All, 0.02f); ++GFrameCounter;
+			AContinuations->DrainReady(ReadyA); BContinuations->DrainReady(ReadyB);
+			Test.TestEqual(TEXT("A teardown cancels only A"), ReadyA.Num(), 0);
+			if (!Test.TestEqual(TEXT("B remains scheduled"), ReadyB.Num(), 1)) return false;
+			Test.TestTrue(TEXT("B callback survives original owner retirement"), Runtime.DispatchContinuationInContext(Probe.Continuation, Probe.B, ReadyB[0], Result));
+			Test.TestTrue(TEXT("B survivor finalizes"), BContinuations->FinalizeDispatched(ReadyB[0].Token, true));
+			Test.TestFalse(TEXT("retired A event cannot enter Guest"), Runtime.DispatchPreparedDelegateEventInContext(Probe.EventCall, Probe.A, Probe.Event, nullptr, Result));
+			Test.TestFalse(TEXT("different export cannot be used as continuation entry"), Runtime.DispatchContinuationInContext(Probe.EventCall, Probe.B, ReadyB[0], Result));
+			Test.TestEqual(TEXT("callback contract mismatch diagnostic"), Result.ErrorCategory, FString(TEXT("context_callback_contract")));
+		}
+		AContinuations->Teardown(); BContinuations->Teardown();
+		Runtime.Unload();
+		if (!Runtime.LoadModule(Wasm.GetData(), Wasm.Num(), TEXT("replacement"), Result)
+			|| !Runtime.ValidateRequiredExports({TEXT("avid_on_begin_play"), TEXT("avid_on_continuation_v2")}, Result)
+			|| !Runtime.BeginPlay(Result)) return false;
+		Test.TestFalse(TEXT("old callback route cannot enter replacement code"), Runtime.DispatchPreparedDelegateEventInContext(Probe.EventCall, Probe.B, Probe.Event, nullptr, Result));
+		Test.TestEqual(TEXT("retired code callback diagnostic"), Result.ErrorCategory, FString(TEXT("context_invocation_code")));
+	}
+	return true;
+}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptContextCallbacksTest,
+	"AvidScript.Runtime.GeneratedTypes.SharedRuntimeCallbacks", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FAvidScriptContextCallbacksTest::RunTest(const FString& Parameters)
+{
+	return AvidScriptContextCallbackTests::Run(*this, EAvidScriptVmBackendKind::Wasmtime)
+		&& AvidScriptContextCallbackTests::Run(*this, EAvidScriptVmBackendKind::Wamr);
 }
 #endif

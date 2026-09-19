@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AvidScriptVmBackend.h"
+#include "AvidScriptWasmRuntime.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeRouter.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeAuthority.h"
 
@@ -26,4 +27,6 @@ struct FAvidScriptRuntimeGeneratedTypeInstanceState
 	FAvidScriptGeneratedTypeInstanceRegistration Registration;
 	TSharedPtr<IAvidScriptGeneratedTypeAuthority> Authority;
 	TArray<FAvidScriptGeneratedPreparedTypeRoute> PreparedTypeRoutes;
+	FAvidScriptContextualExportCall ContinuationCall;
+	TMap<FString, FAvidScriptContextualExportCall> DelegateCalls;
 };

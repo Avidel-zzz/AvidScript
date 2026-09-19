@@ -13,6 +13,7 @@
 
 #include "Dom/JsonObject.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
@@ -1241,6 +1242,85 @@ bool FAvidScriptGeneratedTypeRuntimeHostPrecompiledTest::RunTest(const FString& 
 	Execution->SetStringField(TEXT("sha256"), FAvidScriptHash::Sha256Hex(Module));
 	if (!WritePackage(Execution)) { return false; }
 	RejectPackage(TEXT("Renamed JIT bytes cannot reuse an AOT attestation"), TEXT("execution_attestation_invalid"));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptGeneratedContextContinuationTest,
+	"AvidScript.Runtime.GeneratedTypes.SessionContextContinuation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptGeneratedContextContinuationTest::RunTest(const FString& Parameters)
+{
+	if (GEngine == nullptr) return false;
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false, TEXT("AvidScriptGeneratedCallbackSession"));
+	if (World == nullptr) return false;
+	GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+	World->InitializeActorsForPlay(FURL());
+	ON_SCOPE_EXIT { GEngine->DestroyWorldContext(World); World->DestroyWorld(false); };
+	TArray<uint8> Wasm{0, 0x61, 0x73, 0x6d, 1, 0, 0, 0};
+	AppendWasmSection(Wasm, 1, {6, 0x60, 0, 0, 0x60, 0, 1, 0x7f, 0x60, 2, 0x7d, 0x7f, 1, 0x7e,
+		0x60, 1, 0x7e, 1, 0x7f, 0x60, 5, 0x7f, 0x7e, 0x7f, 0x7f, 0x7f, 0, 0x60, 1, 0x7d, 0});
+	TArray<uint8> Imports{2};
+	auto Name = [&](const char* Text)
+	{
+		const int32 Length = FCStringAnsi::Strlen(Text); Imports.Add(static_cast<uint8>(Length));
+		Imports.Append(reinterpret_cast<const uint8*>(Text), Length);
+	};
+	Name("avidscript"); Name("owner_get_slot"); Imports.Append({0, 1});
+	Name("avidscript"); Name("continuation_delay"); Imports.Append({0, 2});
+	AppendWasmSection(Wasm, 2, Imports);
+	AppendWasmSection(Wasm, 3, {4, 0, 3, 4, 5});
+	AppendWasmSection(Wasm, 6, {1, 0x7f, 1, 0x41, 0, 0x0b});
+	TArray<uint8> Exports{4};
+	AppendWasmExport(Exports, "avid_on_begin_play", 2);
+	AppendWasmExport(Exports, "avid_ue_0123456789abcdef0123456789abcdef", 3);
+	AppendWasmExport(Exports, "avid_on_continuation_v2", 4);
+	AppendWasmExport(Exports, "avid_on_tick", 5);
+	AppendWasmSection(Wasm, 7, Exports);
+	const TArray<uint8> Begin{0, 0x43, 0x0a, 0xd7, 0x23, 0x3c, 0x41, 51, 0x10, 1, 0x1a, 0x0b},
+		Get{0, 0x23, 0, 0x10, 0, 0x6a, 0x0b}, Callback{0, 0x23, 0, 0x41, 0xe8, 7, 0x6a, 0x24, 0, 0x0b}, Tick{0, 0x0b};
+	TArray<uint8> Code{4};
+	for (const auto* Body : {&Begin, &Get, &Callback, &Tick}) { Code.Add(static_cast<uint8>(Body->Num())); Code.Append(*Body); }
+	AppendWasmSection(Wasm, 10, Code);
+	TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot> Registry;
+	FString Error;
+	if (!FAvidScriptGeneratedTypeRegistry::BuildFromJson(BuildGeneratedTypeSessionManifest(), Registry, Error)) { AddError(Error); return false; }
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	{
+		FAvidScriptObjectRegistry Objects;
+		TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> Owner(NewObject<UAvidScriptGeneratedTypeSessionTestObject>(World));
+		FAvidScriptObjectHandleResult HandleResult;
+		FAvidScriptWasmHostContext Context;
+		Context.World = World; Context.ObjectRegistry = &Objects;
+		Context.OwnerHandle = Objects.RegisterObject(Owner.Get(), HandleResult, false);
+		FAvidScriptRuntimeSession Session;
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime ? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		Session.SetBackendSelectionForTesting(Selection); Session.SetHostContext(Context);
+		if (!Session.ConfigureGeneratedTypeInstance(*Owner, Context.OwnerHandle, 0, Registry, Error)) { AddError(Error); return false; }
+		FAvidScriptWasmReloadManifest Manifest;
+		Manifest.ModuleId = TEXT("generated_context_continuation"); Manifest.Language = TEXT("csharp");
+		Manifest.AbiVersion = FAvidScriptWasmReloadManifest::SupportedAbiVersion;
+		Manifest.RequiredExports = {TEXT("avid_on_begin_play"), TEXT("avid_on_tick"), TEXT("avid_on_continuation_v2")};
+		Manifest.RequiredImports = {{TEXT("avidscript"), TEXT("owner_get_slot")}, {TEXT("avidscript"), TEXT("continuation_delay")}};
+		FAvidScriptWasmReloadResult Loaded;
+		if (!Session.LoadInitialModule(Wasm.GetData(), Wasm.Num(), Manifest, Loaded)) { AddError(Loaded.ErrorMessage); return false; }
+		for (int32 Generation = 0; Generation < 2; ++Generation)
+		{
+			World->Tick(LEVELTICK_All, 0); ++GFrameCounter; World->Tick(LEVELTICK_All, 0.02f); ++GFrameCounter;
+			FAvidScriptWasmSmokeResult TickResult;
+			if (!TestTrue(TEXT("generated Session pumps contextual continuation"), Session.TickLive(0.001f, TickResult))) { AddError(TickResult.ErrorMessage); return false; }
+			int32 Value = 0;
+			TestTrue(TEXT("generated route observes callback state"), FAvidScriptGeneratedTypeDispatcher::Invoke(Owner.Get(), 0, 0, {}, &Value));
+			TestEqual(TEXT("callback executed exactly once in the owner context"), Value, 1000 + static_cast<int32>(Context.OwnerHandle.Slot));
+			TestEqual(TEXT("continuation entry finalized"), Session.GetLivePendingContinuationCount(), 0);
+			if (Generation == 0 && !Session.ReloadModule(Wasm.GetData(), Wasm.Num(), Manifest, Loaded)) { AddError(Loaded.ErrorMessage); return false; }
+		}
+		FAvidScriptWasmSmokeResult Stop;
+		TestTrue(TEXT("generated callback Session stops"), Session.StopAndUnload(Stop));
+		TestTrue(TEXT("generated callback registration clears"), Session.ClearGeneratedTypeInstance(Error));
+	}
 	return true;
 }
 

@@ -11,6 +11,8 @@ class UAvidScriptGeneratedTypeSessionTestObject final : public UObject
 	GENERATED_BODY()
 
 public:
+	UWorld* GetWorld() const override { return GetOuter() ? GetOuter()->GetWorld() : nullptr; }
+
 	UPROPERTY()
 	int32 Value = 0;
 
