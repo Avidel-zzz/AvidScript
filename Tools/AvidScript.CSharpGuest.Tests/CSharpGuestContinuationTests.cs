@@ -265,8 +265,8 @@ internal static class CSharpGuestContinuationTests
             block.Id.EndsWith(":result_rejected", StringComparison.Ordinal));
 
         Assert(result.Succeeded
-            && document.SchemaVersion == 24
-            && document.SemanticVersion == "1.28"
+            && document.SchemaVersion == 25
+            && document.SemanticVersion == "1.29"
             && guard.Terminator.Kind == "branch_if"
             && guard.Terminator.TargetBlockId == guardReturn.Id
             && guard.Terminator.FalseTargetBlockId == continuation.Id
@@ -285,7 +285,7 @@ internal static class CSharpGuestContinuationTests
             && WasmModuleCompiler.Compile(module).Succeeded,
             "the false guard path should retain ordinary work and schedule the next controlled await");
 
-        SemanticDocument legacy = document with
+        SemanticDocument legacy = CSharpGuestSemanticFixture.WithoutDispatch(document) with
         {
             SchemaVersion = 13,
             ClassTypes = Array.Empty<SemanticClassType>(),
@@ -719,8 +719,8 @@ internal static class CSharpGuestContinuationTests
             .ToArray();
 
         Assert(result.Succeeded
-            && document.SchemaVersion == 24
-            && document.SemanticVersion == "1.28"
+            && document.SchemaVersion == 25
+            && document.SemanticVersion == "1.29"
             && asyncMethod.Lowering == "reentrant_zero_heap_cps"
             && callbackIds.SequenceEqual(new[]
             {
@@ -1049,7 +1049,7 @@ internal static class CSharpGuestContinuationTests
 
         Assert(first.Succeeded
             && second.Succeeded
-            && document.SemanticVersion == "1.28"
+            && document.SemanticVersion == "1.29"
             && frame.Slots.Select(slot => slot.SymbolId)
                 .SequenceEqual(new[] { countId })
             && frame.Slots.All(slot => slot.SymbolId != overwrittenId),
@@ -1458,7 +1458,7 @@ internal static class CSharpGuestContinuationTests
             """,
             new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower })
             ?? throw new InvalidOperationException("legacy callback JSON produced null");
-        SemanticDocument schemaTen = current with
+        SemanticDocument schemaTen = CSharpGuestSemanticFixture.WithoutDispatch(current) with
         {
             SchemaVersion = 10,
             ClassTypes = Array.Empty<SemanticClassType>(),
@@ -1545,7 +1545,7 @@ internal static class CSharpGuestContinuationTests
         CSharpGuestLoweringResult payloadResult = CSharpGuestLowerer.Lower(
             tamperedPayload,
             SemanticHash);
-        SemanticDocument legacyObjectPayload = tamperedPayload with
+        SemanticDocument legacyObjectPayload = CSharpGuestSemanticFixture.WithoutDispatch(tamperedPayload) with
         {
             SchemaVersion = 10,
             ClassTypes = Array.Empty<SemanticClassType>(),

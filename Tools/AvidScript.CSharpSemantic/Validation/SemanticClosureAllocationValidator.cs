@@ -12,6 +12,7 @@ public static class SemanticClosureAllocationValidator
         if (document.SchemaVersion < 23)
             return document.ClosureEnvironments.All(environment => environment is not null && environment.Allocation is null);
         if (!((document.SchemaVersion == 23 && document.SemanticVersion == "1.27")
+                || (document.SchemaVersion == 24 && document.SemanticVersion == "1.28")
                 || (document.SchemaVersion == SemanticContract.CurrentSchemaVersion && document.SemanticVersion == SemanticContract.CurrentSemanticVersion))
             || document.ControlFlowGraphs is null || document.AsyncMethods is null
             || document.ControlFlowGraphs.Any(graph => graph is null || graph.MethodSymbolId is null)

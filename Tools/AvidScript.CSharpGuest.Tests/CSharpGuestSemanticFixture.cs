@@ -1,9 +1,30 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Text.Json.Nodes;
 using AvidScript.CSharpSemantic;
 
 internal static class CSharpGuestSemanticFixture
 {
+    // Build genuine legacy artifacts: changing the version alone must not retain newer facts.
+    public static SemanticDocument WithoutDispatch(SemanticDocument document)
+    {
+        JsonNode json = JsonNode.Parse(SemanticSerializer.Serialize(document))!;
+        Strip(json);
+        return SemanticSerializer.Deserialize(Encoding.UTF8.GetBytes(json.ToJsonString()));
+
+        static void Strip(JsonNode? node)
+        {
+            if (node is JsonObject value)
+            {
+                value.Remove("dispatch");
+                foreach (JsonNode? child in value.Select(pair => pair.Value).ToArray()) Strip(child);
+            }
+            else if (node is JsonArray array) foreach (JsonNode? child in array) Strip(child);
+        }
+    }
+
     public const string MainMethodId = "symbol:method:global::Game.Script.Main():void";
     public const string HostMethodId = "symbol:method:global::Game.Host.Add(int32,int32):int32";
     public const string StateFieldId = "symbol:field:global::Game.Script.Score:int32";

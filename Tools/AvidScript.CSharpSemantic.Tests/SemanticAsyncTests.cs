@@ -92,15 +92,15 @@ internal static class SemanticAsyncTests
         SemanticAsyncStatement guard = method.Segments[1].Statements.Single();
 
         Assert(document.Succeeded
-            && document.SchemaVersion == 24
-            && document.SemanticVersion == "1.28"
+            && document.SchemaVersion == 25
+            && document.SemanticVersion == "1.29"
             && method.Segments.Count == 3
             && guard.TargetSymbolId is null
             && guard.Operation.Kind == SemanticAsyncMethod.EarlyReturnGuardOperationKind
             && guard.Operation.TypeId == "type:void"
             && guard.Operation.Children.Count == 1
             && guard.Operation.Children[0].TypeId == "type:bool",
-            "top-level early-return guards should remain explicit under the schema-v24 semantic-1.28 contract");
+            "top-level early-return guards should remain explicit under the schema-v25 semantic-1.29 contract");
 
         const string invalidSource = """
             using AvidScript;
@@ -292,10 +292,10 @@ internal static class SemanticAsyncTests
             .ToArray();
 
         Assert(document.Succeeded
-            && document.SchemaVersion == 24
-            && document.SemanticVersion == "1.28"
+            && document.SchemaVersion == 25
+            && document.SemanticVersion == "1.29"
             && document.AsyncMethods.Count == 2,
-            "controlled async exports should publish schema 24 / semantic 1.28");
+            "controlled async exports should publish schema 25 / semantic 1.29");
         Assert(beginPlay.Lowering == "reentrant_zero_heap_cps"
             && beginPlay.Segments.Select(segment => segment.Ordinal)
                 .SequenceEqual(new[] { 0, 1, 2, 3 })
@@ -467,8 +467,8 @@ internal static class SemanticAsyncTests
             .ToArray();
 
         Assert(document.Succeeded
-            && document.SchemaVersion == 24
-            && document.SemanticVersion == "1.28"
+            && document.SchemaVersion == 25
+            && document.SemanticVersion == "1.29"
             && awaitSite.StateFrame is { } stateFrame
             && stateFrame.Slots.Select(slot => slot.SymbolId)
                 .SequenceEqual(new[] { movementCountId })
@@ -525,8 +525,8 @@ internal static class SemanticAsyncTests
             symbol.Kind == "local" && symbol.Name == "index").Id;
 
         Assert(document.Succeeded
-            && document.SchemaVersion == 24
-            && document.SemanticVersion == "1.28"
+            && document.SchemaVersion == 25
+            && document.SemanticVersion == "1.29"
             && method.Lowering == SemanticAsyncMethod.ContinuationCfgLowering
             && method.EntrySegmentOrdinal >= 0
             && method.EntrySegmentOrdinal < method.Segments.Count
@@ -768,8 +768,8 @@ internal static class SemanticAsyncTests
             local.Name.StartsWith("<foreach_index_", StringComparison.Ordinal));
 
         Assert(document.Succeeded
-            && document.SchemaVersion == 24
-            && document.SemanticVersion == "1.28"
+            && document.SchemaVersion == 25
+            && document.SemanticVersion == "1.29"
             && method.Lowering == SemanticAsyncMethod.ContinuationCfgLowering
             && method.CompilerLocals.Count == 2
             && arrayLocal.TypeId == "type:int32[]"

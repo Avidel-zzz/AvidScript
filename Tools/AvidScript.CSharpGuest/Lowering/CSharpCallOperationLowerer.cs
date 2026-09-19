@@ -13,6 +13,11 @@ internal static class CSharpCallOperationLowerer
         int blockOrdinal,
         List<GuestInstruction> instructions)
     {
+        if (operation.Dispatch?.Kind is "virtual" or "interface")
+        {
+            context.Add("ASCG1024", "Virtual/interface dispatch requires a runtime method route; a fixed Guest body is not equivalent.");
+            return null;
+        }
         if (CSharpReferenceObjectCreation.IsRootInitializer(context, operation)) return null;
         if (CSharpManagedDelegateLowerer.TryLowerInvocation(context, operation, blockOrdinal, instructions, out GuestRegister? delegateResult))
             return delegateResult;

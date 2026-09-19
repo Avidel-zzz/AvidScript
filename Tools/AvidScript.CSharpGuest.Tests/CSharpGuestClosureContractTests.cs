@@ -40,7 +40,7 @@ internal static class CSharpGuestClosureContractTests
             Require(!rejected.Succeeded && rejected.Module is null && rejected.Diagnostics.Any(item => item.Code == "ASCG1001"),
                 "stripped, forged or downgraded environments must fail before lowering");
         }
-        SemanticDocument legacy = document with { SchemaVersion = 22, SemanticVersion = "1.26",
+        SemanticDocument legacy = CSharpGuestSemanticFixture.WithoutDispatch(document) with { SchemaVersion = 22, SemanticVersion = "1.26",
             ClassTypes = Array.Empty<SemanticClassType>(),
             ClosureEnvironments = new[] { environment with { Allocation = null } } };
         Require(CSharpGuestLowerer.Lower(legacy, new string('a', 64)).Diagnostics.Any(item => item.Code == "ASCG1024"),

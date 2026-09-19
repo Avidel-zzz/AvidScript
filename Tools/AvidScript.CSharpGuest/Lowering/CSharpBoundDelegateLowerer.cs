@@ -53,7 +53,8 @@ internal static class CSharpBoundDelegateLowerer
     public static GuestRegister? CreateContext(CSharpFunctionLoweringContext context, SemanticCallable callable,
         SemanticOperation target, int block, List<GuestInstruction> instructions)
     {
-        if (target.Children.Count != 1 || target.Children[0].TypeId != callable.ContainingTypeId
+        if (target.Dispatch?.Kind is "virtual" or "interface"
+            || target.Children.Count != 1 || target.Children[0].TypeId != callable.ContainingTypeId
             || !Methods(context.Document).Contains(callable.MethodSymbolId)
             || !context.TryGetGuestType(callable.ContainingTypeId, out GuestType type) || type.Kind is not ("struct" or "managed_ref"))
         { context.Add("ASCG1024", "Bound delegate receiver requires a supported exact Guest value or reference instance method."); return null; }

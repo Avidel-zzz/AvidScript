@@ -48,6 +48,7 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 [普通引用对象执行](Docs/Phase66/P66.B_Reference_Object_Execution.md)进一步连接受支持类的构造、共享字段、ref/out、object 视图、循环引用和同步实例委托；结构体绑定仍使用独立副本。Semantic 219/219、Guest 311/311、双后端 Automation 5/5 通过，含强制回收和 7 类故障的副作用顺序。普通引用类的 this 捕获由后续组连接，持久事件、跨 await/调试暂停根及更广的类语义仍待完成。
 [普通引用对象的 this 捕获](Docs/Phase66/P66.B_Receiver_Capture.md)连接构造、属性、局部函数及嵌套闭包，保持原对象身份并支持闭包/对象循环回收。仅含 receiver 的环境按原对象比较，混合捕获保留 activation 身份；Guest 320/320、闭包 106/106、双后端 Automation 5/5 通过，覆盖强制回收与故障后的根清理。UE receiver 与跨 await/事件生命周期仍待连接。
 [UE receiver 运行时校验](Docs/Phase66/P66.B_Ue_Receiver_Authority.md)提供按生成类型 ordinal 的版本化 Host 入口，核对当前 Session、对象注册表、代际、类型与 World 生命周期；同时补齐 WAMR 所需的 `(I)i` supplemental 调用和基于 generic Call 的预备出口。生成类型双后端用例及回归 6/6、VM 回归 24/24、托管堆运行时回归 5/5 通过。C# UE 实例委托、虚派发和持久回调仍未启用。
+[方法派发合同](Docs/Phase66/P66.B_Method_Dispatch_Contract.md)新增 Semantic 25/1.29 的覆写槽、sealed、显式接口身份与调用位置派发信息，正确区分 base 方法组和虚调用；保留 1.28 委托兼容。Semantic 250/250、Guest 336/336 通过；未接入运行时路由的虚调用明确诊断，避免执行错误的固定函数体。UE 实例委托、动态路由和持久事件仍待实现，P66.B 继续进行。
 
 ## 现在可以做什么
 

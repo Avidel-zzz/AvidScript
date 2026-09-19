@@ -111,7 +111,8 @@ internal static class SemanticOperationProjector
                 ? Enumerable.Empty<IOperation>() : operation.ChildOperations)
                 .Where(child => child is not ILocalFunctionOperation)
                 .Select(child => ProjectOperation(child, unit, typeRegistry, diagnostics, captureRegistry))
-                .ToArray());
+                .ToArray(),
+            SemanticDispatchProjector.Project(operation));
     }
 
     private static (string Kind, bool IsSupported) DescribeOperation(IOperation operation)

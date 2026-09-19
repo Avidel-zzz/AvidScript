@@ -24,7 +24,13 @@ public sealed record SemanticOperation(
     [property: JsonPropertyOrder(13)] SemanticConversion? OutputConversion,
     [property: JsonPropertyOrder(14)] string? CaptureId,
     [property: JsonPropertyOrder(15)] SemanticSpan Span,
-    [property: JsonPropertyOrder(16)] IReadOnlyList<SemanticOperation> Children);
+    [property: JsonPropertyOrder(16)] IReadOnlyList<SemanticOperation> Children,
+    [property: JsonPropertyOrder(17)] SemanticMethodDispatch? Dispatch = null);
+
+public sealed record SemanticMethodDispatch(
+    [property: JsonPropertyOrder(0), JsonRequired] string Kind,
+    [property: JsonPropertyOrder(1), JsonRequired] string? SlotMethodSymbolId,
+    [property: JsonPropertyOrder(2), JsonRequired] bool IsBase);
 
 public sealed record SemanticConstant(
     [property: JsonPropertyOrder(0)] string Kind,

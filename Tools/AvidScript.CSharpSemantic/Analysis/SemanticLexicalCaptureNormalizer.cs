@@ -122,6 +122,9 @@ internal static class SemanticLexicalCaptureNormalizer
                 return operation with { Kind = "literal", SymbolId = null, Children = Array.Empty<SemanticOperation>() };
             SemanticOperation[] children = operation.Children.Select(child => Rewrite(child, ownerId)).ToArray();
             SemanticOperation rewritten = operation with { Children = children };
+            if (operation.Kind is "invocation" or "method_reference"
+                && operation.SymbolId is { } lexicalId && lexical.ContainsKey(lexicalId))
+                rewritten = rewritten with { Dispatch = new SemanticMethodDispatch("static", null, false) };
             string? captureId = operation.Kind == "instance_reference"
                 ? required.GetValueOrDefault(ownerId)?.FirstOrDefault(id => captures[id].IsReceiver)
                 : operation.Kind is "local_reference" or "parameter_reference" ? operation.SymbolId : null;

@@ -13,7 +13,8 @@ public static class SemanticClassContractValidator
             || document.Types.Select(type => type.Id).Distinct(StringComparer.Ordinal).Count() != document.Types.Count)
             return false;
         if (document.SchemaVersion < 24) return document.ClassTypes.Count == 0;
-        if (document.SchemaVersion != 24 || document.SemanticVersion != "1.28"
+        if (!((document.SchemaVersion == 24 && document.SemanticVersion == "1.28")
+                || (document.SchemaVersion == SemanticContract.CurrentSchemaVersion && document.SemanticVersion == SemanticContract.CurrentSemanticVersion))
             || document.ClassTypes.Any(type => type is null || string.IsNullOrWhiteSpace(type.TypeId))
             || document.ClassTypes.Select(type => type.TypeId).Distinct(StringComparer.Ordinal).Count() != document.ClassTypes.Count
             || document.ClassTypes.Count != document.Types.Count(type => type.Kind == "class")) return false;

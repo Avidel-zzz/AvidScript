@@ -17,7 +17,28 @@ internal static class CSharpGuestUeTypeTests
         ScriptDefinedLifecycleUsesCanonicalExportsAndCompatibilityShims();
         ScriptDefinedLifecycleGlobalAliasFailsClosed();
         MultiUClassGuestOwnedStateFailsClosed();
-        return 5;
+        VirtualCallsDoNotSilentlyUseFixedGuestBodies();
+        return 6;
+    }
+
+    private static void VirtualCallsDoNotSilentlyUseFixedGuestBodies()
+    {
+        const string source = """
+            using AvidScript;
+            [UClass] public partial class VirtualActor : AvidActor {
+                [UFunction] public virtual int Read() => 7;
+                [UFunction] public int Call() => Read();
+            }
+            """;
+        const string id = "Scripts/VirtualDispatch.cs";
+        FrontendDocument frontend = FrontendAnalyzer.Analyze(source, id);
+        SemanticDocument semantic = SemanticAnalyzer.Analyze(source, id, frontend.Source.Sha256,
+            new[] { new SemanticReferenceSource(Facade, "generated://AvidScript.UeTypes.cs") });
+        Assert(semantic.Succeeded && SemanticDispatchContractValidator.IsValid(semantic), "UE virtual calls retain valid semantic dispatch facts");
+        CSharpGuestLoweringResult lowering = CSharpGuestLowerer.Lower(semantic, SemanticHash);
+        Assert(!lowering.Succeeded && lowering.Module is null && lowering.Diagnostics.Any(item => item.Code == "ASCG1024"
+            && item.Message.Contains("runtime method route", StringComparison.Ordinal)),
+            "until runtime routing is connected, virtual calls must not execute the statically selected body");
     }
 
     private static void ScriptDefinedLifecycleUsesCanonicalExportsAndCompatibilityShims()

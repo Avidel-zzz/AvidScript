@@ -31,7 +31,7 @@ internal static class CSharpGuestClassContractTests
             Check(!result.Succeeded && result.Module is null && result.Diagnostics.Any(item => item.Code == "ASCG1001"),
                 "malformed class contracts must be rejected before planning managed delegates");
         }
-        SemanticDocument legacy = document with { SchemaVersion = 23, SemanticVersion = "1.27", ClassTypes = Array.Empty<SemanticClassType>() };
+        SemanticDocument legacy = CSharpGuestSemanticFixture.WithoutDispatch(document) with { SchemaVersion = 23, SemanticVersion = "1.27", ClassTypes = Array.Empty<SemanticClassType>() };
         Check(CSharpGuestLowerer.Lower(legacy, new string('a', 64)).Succeeded, "schema 23 retains its existing executable closure allocation contract");
         SemanticDocument plainLambda = CSharpGuestLexicalCaptureTests.Analyze("""
             using System;
@@ -41,7 +41,7 @@ internal static class CSharpGuestClassContractTests
                 public static int Run() { Func<int> read = () => 7; return read(); }
             }
             """);
-        Check(CSharpGuestLowerer.Lower(plainLambda with { SchemaVersion = 23, SemanticVersion = "1.27",
+        Check(CSharpGuestLowerer.Lower(CSharpGuestSemanticFixture.WithoutDispatch(plainLambda) with { SchemaVersion = 23, SemanticVersion = "1.27",
             ClassTypes = Array.Empty<SemanticClassType>() }, new string('a', 64)).Succeeded,
             "schema 23 no-capture lambda creation and invocation retain the original function-reference ABI");
         SemanticDocument referenceObject = CSharpGuestLexicalCaptureTests.Analyze("""

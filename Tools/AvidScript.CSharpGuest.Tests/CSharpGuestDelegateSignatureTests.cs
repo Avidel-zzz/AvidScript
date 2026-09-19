@@ -55,15 +55,15 @@ internal static class CSharpGuestDelegateSignatureTests
                 }
             }
             """, "Scripts/PreviousDelegateContract.cs");
-        SemanticDocument legacy = asyncCurrent with
+        SemanticDocument legacy = CSharpGuestSemanticFixture.WithoutDispatch(asyncCurrent) with
             { SchemaVersion = 20, SemanticVersion = "1.22", DelegateTypes = Array.Empty<SemanticDelegateType>(), ClassTypes = Array.Empty<SemanticClassType>() };
         CSharpGuestLoweringResult previous = CSharpGuestLowerer.Lower(legacy, new string('e', 64));
         Require(previous.Succeeded && WasmModuleCompiler.Compile(previous.Module!).Succeeded,
             "schema 20/1.22 CFG async artifacts must remain consumable");
-        CSharpGuestLoweringResult previousSignatures = CSharpGuestLowerer.Lower(asyncCurrent with { SchemaVersion = 21, SemanticVersion = "1.23", ClassTypes = Array.Empty<SemanticClassType>() }, new string('e', 64));
+        CSharpGuestLoweringResult previousSignatures = CSharpGuestLowerer.Lower(CSharpGuestSemanticFixture.WithoutDispatch(asyncCurrent) with { SchemaVersion = 21, SemanticVersion = "1.23", ClassTypes = Array.Empty<SemanticClassType>() }, new string('e', 64));
         Require(previousSignatures.Succeeded && WasmModuleCompiler.Compile(previousSignatures.Module!).Succeeded,
             "schema 21/1.23 CFG async artifacts must remain consumable");
-        CSharpGuestLoweringResult previousClasses = CSharpGuestLowerer.Lower(asyncCurrent with {
+        CSharpGuestLoweringResult previousClasses = CSharpGuestLowerer.Lower(CSharpGuestSemanticFixture.WithoutDispatch(asyncCurrent) with {
             SchemaVersion = 23, SemanticVersion = "1.27", ClassTypes = Array.Empty<SemanticClassType>() }, new string('e', 64));
         Require(previousClasses.Succeeded && WasmModuleCompiler.Compile(previousClasses.Module!).Succeeded,
             "schema 23/1.27 retains structured async flow and precise continuation state");

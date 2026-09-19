@@ -252,8 +252,8 @@ internal static class SemanticOperationTests
         const string source = "class Script { int Main() => 0; }";
         SemanticDocument document = Analyze(source, "Scripts/SchemaVersion.cs");
 
-        Assert(document.SchemaVersion == 24, "current artifacts should use semantic schema v24");
-        Assert(document.SemanticVersion == "1.28", "current artifacts should advertise semantic version 1.28");
+        Assert(document.SchemaVersion == 25, "current artifacts should use semantic schema v25");
+        Assert(document.SemanticVersion == "1.29", "current artifacts should advertise semantic version 1.29");
     }
     private static void ConversionOperationsRetainCastSemantics()
     {

@@ -83,6 +83,7 @@ internal static class CSharpSemanticInputValidator
             && ValidateMethods(document.Methods)
             && ValidateReachability(document)
             && ValidateGraphs(document.ControlFlowGraphs)
+            && SemanticDispatchContractValidator.IsValid(document)
             && document.Diagnostics.All(diagnostic => diagnostic is not null
                 && !string.IsNullOrWhiteSpace(diagnostic.Code)
                 && !string.IsNullOrWhiteSpace(diagnostic.Severity)
@@ -1207,6 +1208,7 @@ internal static class CSharpSemanticInputValidator
             (21, "1.25") => true,
             (22, "1.26") => true,
             (23, "1.27") => true,
+            (24, "1.28") => true,
             (SemanticContract.CurrentSchemaVersion, SemanticContract.CurrentSemanticVersion) => true,
             _ => false,
         };

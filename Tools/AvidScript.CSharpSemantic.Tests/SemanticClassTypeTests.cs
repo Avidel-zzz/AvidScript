@@ -29,7 +29,7 @@ internal static class SemanticClassTypeTests
             """;
         SemanticDocument document = Analyze(source);
         int count = 0;
-        Check(document.SchemaVersion == 24 && document.SemanticVersion == "1.28"
+        Check(document.SchemaVersion == 25 && document.SemanticVersion == "1.29"
             && SemanticClassContractValidator.IsValid(document), "class metadata must satisfy the versioned contract even if other syntax is unsupported: "
                 + string.Join(" | ", document.ClassTypes));
         SemanticClassType plain = Find("Plain");
@@ -78,7 +78,7 @@ internal static class SemanticClassTypeTests
             document with { ClassTypes = document.ClassTypes.Select(item => item == plain ? item with { BaseTypeId = Find("Base").TypeId }
                 : item.TypeId == Find("Base").TypeId ? item with { BaseTypeId = plain.TypeId } : item).ToArray() },
             document with { SchemaVersion = 23, SemanticVersion = "1.27" },
-            document with { SchemaVersion = 25, SemanticVersion = "1.29" },
+            document with { SchemaVersion = 26, SemanticVersion = "1.30" },
         }) Check(!SemanticClassContractValidator.IsValid(malformed), "invalid, cyclic, incomplete or downgraded class facts must fail closed");
         Check(SemanticClassContractValidator.IsValid(document with { SchemaVersion = 23, SemanticVersion = "1.27",
             ClassTypes = Array.Empty<SemanticClassType>() }), "legacy documents remain readable without claiming class facts");
