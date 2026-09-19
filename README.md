@@ -51,6 +51,7 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 [方法派发合同](Docs/Phase66/P66.B_Method_Dispatch_Contract.md)新增 Semantic 25/1.29 的覆写槽、sealed、显式接口身份与调用位置派发信息，正确区分 base 方法组和虚调用；保留 1.28 委托兼容。Semantic 250/250、Guest 336/336 通过；未接入运行时路由的虚调用明确诊断，避免执行错误的固定函数体。UE 实例委托、动态路由和持久事件仍待实现，P66.B 继续进行。
 [当前 owner 的 UE 实例委托与 this 捕获](Docs/Phase66/P66.B_Ue_Receiver_Execution.md)已连接同步执行、身份相等、组合/移除及 ref/out，创建和进入回调时验证 receiver，环境盒保持弱 UObject 身份。Guest 346/346、生成类型双后端 Automation 7/7 通过，覆盖 .NET 对照、强制回收、重载及 owner 失效拒绝。跨 Session 接收者、虚派发、持久事件与跨 await 根仍未完成。
 [跨实例路由设计](Docs/Phase66/P66.B_Ue_Method_Routing_Design.md)明确下一组的完整方法签名、目标实例、引用别名、同步重入和版本生命周期要求，并提前安排结构重载与跨帧调试探针；属于设计约束，尚未启用新的跨实例执行能力。
+[UE 实例方法目录](Docs/Phase66/P66.B_Ue_Method_Catalog.md)已交付 Semantic 26/1.30 的版本化签名、私有/反射区分、覆写槽与接口路由，包含封闭泛型接口身份和冷路径解析；Semantic 308/308、Guest 356/356、UE 类型生成器 6/6 通过。目录不构成运行时执行许可，跨 Session 调用、动态派发与持久根仍待连接；引用返回在执行合同接入前明确拒绝。
 
 ## 现在可以做什么
 

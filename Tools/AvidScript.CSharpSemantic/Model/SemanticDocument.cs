@@ -58,4 +58,7 @@ public sealed record SemanticDocument(
     [JsonPropertyOrder(22)]
     public IReadOnlyList<SemanticClassType> ClassTypes { get; init; } =
         Array.Empty<SemanticClassType>();
+
+    [JsonPropertyOrder(23)]
+    public SemanticUeMethodCatalog? UeMethodCatalog { get; init; }
 }

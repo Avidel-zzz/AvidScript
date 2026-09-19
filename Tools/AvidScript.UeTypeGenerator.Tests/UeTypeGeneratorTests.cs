@@ -15,8 +15,9 @@ internal static class UeTypeGeneratorTests
         LifecycleKindsMapToNativeShells();
         FunctionDefaultsEnterMetadataManifestAndFingerprint();
         UnsupportedTypesFailClosedBeforePublication();
+        InvalidMethodCatalogFailsBeforeGeneration();
         AtomicPublisherPreservesCacheHits();
-        return 5;
+        return 6;
     }
 
     private static void GenerationIsByteDeterministicAndTopological()
@@ -286,6 +287,42 @@ internal static class UeTypeGeneratorTests
             rejected = exception.Message.Contains("no deterministic UE shell mapping", StringComparison.Ordinal);
         }
         Assert(rejected, "types without a deterministic UE shell mapping should fail before publication");
+    }
+
+    private static void InvalidMethodCatalogFailsBeforeGeneration()
+    {
+        const string source = """
+            using AvidScript;
+            [UClass]
+            public partial class CatalogActor : AvidActor
+            {
+                [UFunction]
+                public int Read() => 7;
+            }
+            """;
+        SemanticDocument document = SemanticSerializer.Deserialize(Analyze(source, "Scripts/CatalogActor.cs"));
+        SemanticUeMethodCatalog catalog = document.UeMethodCatalog!;
+        foreach (SemanticUeMethodCatalog? invalid in new SemanticUeMethodCatalog?[]
+        {
+            null,
+            catalog with { SchemaVersion = catalog.SchemaVersion + 1 },
+            catalog with { Types = Array.Empty<SemanticUeMethodType>() },
+            catalog with { Methods = catalog.Methods.Select(method => method.Name == "Read"
+                ? method with { SignatureId = "forged-signature" } : method).ToArray() },
+        })
+        {
+            bool rejected = false;
+            try
+            {
+                UeTypeShellGenerator.Generate(SemanticSerializer.Serialize(document with { UeMethodCatalog = invalid }),
+                    "AvidScriptGenerated", "5.8");
+            }
+            catch (InvalidOperationException exception)
+            {
+                rejected = exception.Message.Contains("UE method catalog is invalid", StringComparison.Ordinal);
+            }
+            Assert(rejected, "invalid method catalogs should fail before generating native shells");
+        }
     }
 
     private static void AtomicPublisherPreservesCacheHits()

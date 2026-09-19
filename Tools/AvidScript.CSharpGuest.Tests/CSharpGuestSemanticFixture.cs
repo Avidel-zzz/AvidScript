@@ -11,6 +11,7 @@ internal static class CSharpGuestSemanticFixture
     public static SemanticDocument WithoutDispatch(SemanticDocument document)
     {
         JsonNode json = JsonNode.Parse(SemanticSerializer.Serialize(document))!;
+        json.AsObject().Remove("ue_method_catalog");
         Strip(json);
         return SemanticSerializer.Deserialize(Encoding.UTF8.GetBytes(json.ToJsonString()));
 

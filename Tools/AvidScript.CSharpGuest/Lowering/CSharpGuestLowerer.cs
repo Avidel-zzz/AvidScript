@@ -44,6 +44,11 @@ public static class CSharpGuestLowerer
                 Add(diagnostics, "ASCG1024", $"Entrypoint '{root.MethodSymbolId}' cannot expose module-local delegate references to the host.");
         }
         IReadOnlySet<string>? reachableCallableIds = GetReachableCallableIds(document);
+        foreach (SemanticUeMethodEntry method in document.UeMethodCatalog?.Methods ?? Array.Empty<SemanticUeMethodEntry>())
+            if (method.HasGuestBody && method.ReturnRefKind != "none"
+                && (reachableCallableIds is null || reachableCallableIds.Contains(method.MethodSymbolId)))
+                Add(diagnostics, "ASCG1024", $"UE method '{method.MethodSymbolId}' requires a borrowed-return execution contract; lowering it as a value return would lose alias semantics.");
+        if (diagnostics.Count != 0) return Failure(diagnostics);
         GuestGlobal[] globals = LowerGlobals(document, guestTypes, diagnostics);
         GuestImport[] imports = LowerImports(document, reachableCallableIds, guestTypes, diagnostics);
         CSharpGuestDataPool dataPool = new(typeResult.Types);

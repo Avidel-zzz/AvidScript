@@ -14,7 +14,8 @@ public static class SemanticDispatchContractValidator
                 || item.Parameters is null || item.Parameters.Any(parameter => parameter is null))
             || document.Callables.Select(item => item.MethodSymbolId).Distinct(StringComparer.Ordinal).Count() != document.Callables.Count)
             return false;
-        bool current = document.SchemaVersion == 25 && document.SemanticVersion == "1.29";
+        bool current = document.SchemaVersion == 25 && document.SemanticVersion == "1.29"
+            || document.SchemaVersion == 26 && document.SemanticVersion == "1.30";
         if (document.SchemaVersion >= 25 && !current) return false;
         var callables = document.Callables.ToDictionary(item => item.MethodSymbolId, StringComparer.Ordinal);
         var interfaces = document.Types.Where(item => item is not null && item.Kind == "interface")
@@ -54,7 +55,8 @@ public static class SemanticDispatchContractValidator
                     && (!interfaces.Contains(member.ContainingTypeId) || member.IsStatic != method.IsStatic
                         || member.ReturnTypeId != method.ReturnTypeId
                         || !member.Parameters.Select(item => (item.TypeId, item.RefKind))
-                            .SequenceEqual(method.Parameters.Select(item => (item.TypeId, item.RefKind))))) return false;
+                            .SequenceEqual(method.Parameters.Select(item => (item.TypeId, item.RefKind))))
+                    && !HasConstructedInterfaceSignature(document, method, interfaceId)) return false;
         }
         // External base methods need not have executable bodies in this artifact.
         // Known chains must nevertheless terminate and agree on their slot identity.
@@ -130,5 +132,20 @@ public static class SemanticDispatchContractValidator
             foreach (SemanticOperation child in operation.Children) pending.Push(child);
         }
         return true;
+    }
+
+    private static bool HasConstructedInterfaceSignature(SemanticDocument document, SemanticCallable implementation, string declarationId)
+    {
+        if (document.SchemaVersion != 26 || document.SemanticVersion != "1.30" || implementation.IsStatic
+            || document.UeMethodCatalog?.Methods is not { } methods) return false;
+        SemanticUeMethodEntry? owner = methods.FirstOrDefault(item => item is not null && item.MethodSymbolId == implementation.MethodSymbolId);
+        if (owner?.Dispatch?.ExplicitInterfaceMethodIds is not { } targets) return false;
+        return methods.Any(item => item is not null && item.DeclarationMethodSymbolId == declarationId
+            && item.MethodSymbolId != declarationId && item.MethodSymbolId == SemanticUeMethodEntry.GetConstructedId(declarationId, item.ContainingTypeId)
+            && targets.Contains(item.MethodSymbolId) && item.ReturnTypeId == implementation.ReturnTypeId
+            && document.Types.Any(type => type.Id == item.ContainingTypeId && type.Kind == "interface")
+            && item.Parameters is not null && item.Parameters.All(parameter => parameter is not null)
+            && item.Parameters.Select(parameter => (parameter.TypeId, parameter.RefKind))
+                .SequenceEqual(implementation.Parameters.Select(parameter => (parameter.TypeId, parameter.RefKind))));
     }
 }

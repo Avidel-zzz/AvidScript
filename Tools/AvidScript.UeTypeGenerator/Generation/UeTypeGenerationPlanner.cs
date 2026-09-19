@@ -39,6 +39,8 @@ internal static class UeTypeGenerationPlanner
         {
             throw new InvalidOperationException("Semantic UE type contract is invalid: " + validationError);
         }
+        if (!SemanticUeMethodCatalogValidator.IsValid(document))
+            throw new InvalidOperationException("Semantic UE method catalog is invalid.");
 
         Dictionary<string, string> scriptCppNames = document.UeTypeDeclarations.ToDictionary(
             declaration => declaration.TypeId,

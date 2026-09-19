@@ -84,6 +84,7 @@ internal static class CSharpSemanticInputValidator
             && ValidateReachability(document)
             && ValidateGraphs(document.ControlFlowGraphs)
             && SemanticDispatchContractValidator.IsValid(document)
+            && SemanticUeMethodCatalogValidator.IsValid(document)
             && document.Diagnostics.All(diagnostic => diagnostic is not null
                 && !string.IsNullOrWhiteSpace(diagnostic.Code)
                 && !string.IsNullOrWhiteSpace(diagnostic.Severity)
@@ -702,7 +703,7 @@ internal static class CSharpSemanticInputValidator
         IReadOnlyDictionary<string, SemanticSymbol> symbolsById,
         ref int expectedCallbackId)
     {
-        if ((document.SemanticVersion is not ("1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27") && document.SemanticVersion != SemanticContract.CurrentSemanticVersion)
+        if ((document.SemanticVersion is not ("1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29") && document.SemanticVersion != SemanticContract.CurrentSemanticVersion)
             || method.EntrySegmentOrdinal < 0
             || method.EntrySegmentOrdinal >= method.Segments.Count
             || method.Segments.Count > SemanticAsyncMethod.MaximumControlFlowSegments
@@ -944,7 +945,7 @@ internal static class CSharpSemanticInputValidator
 
     private static bool UsesExactAsyncStateFlow(string semanticVersion)
     {
-        return semanticVersion is "1.16" or "1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27"
+        return semanticVersion is "1.16" or "1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29"
             || semanticVersion == SemanticContract.CurrentSemanticVersion;
     }
 
@@ -1209,6 +1210,7 @@ internal static class CSharpSemanticInputValidator
             (22, "1.26") => true,
             (23, "1.27") => true,
             (24, "1.28") => true,
+            (25, "1.29") => true,
             (SemanticContract.CurrentSchemaVersion, SemanticContract.CurrentSemanticVersion) => true,
             _ => false,
         };
@@ -1261,7 +1263,7 @@ internal static class CSharpSemanticInputValidator
         {
             return true;
         }
-        return (semanticVersion is "1.16" or "1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27"
+        return (semanticVersion is "1.16" or "1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29"
                 || semanticVersion == SemanticContract.CurrentSemanticVersion)
             && statement.TargetSymbolId is null
             && ValidateStructuredAsyncFlow(

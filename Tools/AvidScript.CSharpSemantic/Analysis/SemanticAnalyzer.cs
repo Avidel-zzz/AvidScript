@@ -155,6 +155,9 @@ public static class SemanticAnalyzer
             ueTypeProjection.Declarations,
             asyncProjection.Methods);
 
+        SemanticUeMethodCatalog methodCatalog = succeeded
+            ? SemanticUeMethodCatalogProjector.Project(context, typeRegistry, ueTypeProjection.Declarations, callableProjection.Callables)
+            : SemanticUeMethodCatalog.Empty;
         return new SemanticDocument(
             SemanticContract.CurrentSchemaVersion,
             "csharp",
@@ -180,6 +183,7 @@ public static class SemanticAnalyzer
             ClassTypes = typeRegistry.BuildClassTypes(),
             ClosureEnvironments = lexicalCaptures.Closures.Environments,
             ClosureBindings = lexicalCaptures.Closures.Bindings,
+            UeMethodCatalog = methodCatalog,
         };
     }
 
