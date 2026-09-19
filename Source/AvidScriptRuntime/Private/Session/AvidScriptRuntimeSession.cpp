@@ -22,6 +22,19 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptRuntimeSession, Log, All);
 
+struct FAvidScriptPreparedRuntimeActivation
+{
+	TUniquePtr<FAvidScriptWasmRuntimeInstance> Runtime;
+	FAvidScriptWasmHostContext Context;
+	FAvidScriptWasmReloadManifest Manifest;
+	FAvidScriptWasmSmokeResult BeginPlayResult;
+	TArray<FAvidScriptGeneratedPreparedTypeRoute> GeneratedRoutes;
+	FAvidScriptContextualExportCall ContinuationCall;
+	TMap<FString, FAvidScriptContextualExportCall> DelegateCalls;
+	TOptional<FAvidScriptHostEffectTransaction> HostEffectTransaction;
+	int32 BorrowedHandleCheckpoint = 0;
+};
+
 namespace
 {
 void ResetReloadResult(
@@ -212,6 +225,11 @@ FAvidScriptRuntimeSession::FAvidScriptRuntimeSession()
 FAvidScriptRuntimeSession::~FAvidScriptRuntimeSession()
 {
 	check(IsInGameThread());
+	if (PreparedActivation && !bMutationInProgress && ActiveGuestCallDepth == 0)
+	{
+		FAvidScriptWasmReloadResult DiscardResult;
+		DiscardPreparedActivation(DiscardResult);
+	}
 	checkf(!IsOperationActive(), TEXT("AvidScript RuntimeSession cannot be destroyed during an active guest call or mutation."));
 	FAvidScriptRuntimeLifecycleCoordinator::Get().UnregisterSession(*this);
 	UnloadLive();
@@ -629,6 +647,13 @@ bool FAvidScriptRuntimeSession::ReloadArtifact(
 	const FAvidScriptRuntimeArtifact& Artifact,
 	FAvidScriptWasmReloadResult& OutResult)
 {
+	return ReloadArtifactInternal(Artifact, OutResult, false);
+}
+
+bool FAvidScriptRuntimeSession::ReloadArtifactInternal(
+	const FAvidScriptRuntimeArtifact& Artifact,
+	FAvidScriptWasmReloadResult& OutResult, bool bDeferCommit)
+{
 	PrunePendingBorrowedHandles();
 	const FAvidScriptWasmReloadManifest& Manifest = Artifact.Manifest;
 	FAvidScriptProfilerScope ProfileScope(
@@ -653,7 +678,9 @@ bool FAvidScriptRuntimeSession::ReloadArtifact(
 		MarkRejectedReloadWithRollback(PreviousModuleId, OutResult);
 		return false;
 	}
-	if (IsOperationActive())
+	if (bMutationInProgress || ActiveGuestCallDepth > 0 || PreparedActivation
+		|| (bPackageReloadBarrier && !bDeferCommit)
+		|| (bDeferCommit && (!bPackageReloadBarrier || !GeneratedTypeInstance)))
 	{
 		SetReloadFailure(
 			OutResult,
@@ -714,12 +741,17 @@ bool FAvidScriptRuntimeSession::ReloadArtifact(
 	OutResult.StateMigrationSkippedSlotCount = MigrationResult.SkippedSlotCount;
 	OutResult.StateMigrationAliasedSlotCount = MigrationResult.AliasedSlotCount;
 
-	if (!ActivateValidatedRuntime(CandidateRuntime, Manifest, true, OutResult))
+	if (!ActivateValidatedRuntime(CandidateRuntime, Manifest, true, OutResult, bDeferCommit))
 	{
 		++RejectedReloadCount;
 		const FString ActiveModuleId = GetLiveModuleId();
 		MarkRejectedReloadWithRollback(ActiveModuleId, OutResult);
 		return false;
+	}
+	if (bDeferCommit)
+	{
+		ProfileScope.SetSucceeded(true);
+		return true;
 	}
 
 	++SuccessfulReloadCount;
@@ -2258,7 +2290,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 	TUniquePtr<FAvidScriptWasmRuntimeInstance>& CandidateRuntime,
 	const FAvidScriptWasmReloadManifest& Manifest,
 	bool bUseHostEffectTransaction,
-	FAvidScriptWasmReloadResult& OutResult)
+	FAvidScriptWasmReloadResult& OutResult, bool bDeferCommit)
 {
 	if (GeneratedExecutionGeneration == MAX_uint64)
 	{
@@ -2424,7 +2456,9 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 		return false;
 	}
 
-	TOptional<FAvidScriptHostEffectTransaction> HostEffectTransaction;
+	// The journal address remains stable while other package instances prepare.
+	auto Pending = MakeUnique<FAvidScriptPreparedRuntimeActivation>();
+	auto& HostEffectTransaction = Pending->HostEffectTransaction;
 	if (bUseHostEffectTransaction)
 	{
 		HostEffectTransaction.Emplace();
@@ -2523,25 +2557,110 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 		return false;
 	}
 
-	if (bUseHostEffectTransaction)
+	Pending->Runtime = MoveTemp(CandidateRuntime);
+	Pending->Context = CandidateHostContext;
+	Pending->Manifest = Manifest;
+	Pending->BeginPlayResult = BeginPlayResult;
+	Pending->GeneratedRoutes = MoveTemp(CandidateGeneratedTypeRoutes);
+	Pending->ContinuationCall = MoveTemp(CandidateContinuationCall);
+	Pending->DelegateCalls = MoveTemp(CandidateDelegateCalls);
+	Pending->BorrowedHandleCheckpoint = BorrowedHandleCheckpoint;
+	PreparedActivation = MoveTemp(Pending);
+	return bDeferCommit || CommitPreparedActivation(OutResult);
+}
+
+bool FAvidScriptRuntimeSession::ValidatePreparedActivation(FString& OutError)
+{
+	OutError.Reset();
+	if (!IsInGameThread() || ActiveGuestCallDepth != 0 || !PreparedActivation || bApplicationSuspended
+		|| !PreparedActivation->Runtime || !PreparedActivation->Runtime->IsLoaded()
+		|| GeneratedExecutionGeneration == MAX_uint64
+		|| (PreparedActivation->HostEffectTransaction.IsSet()
+			&& PreparedActivation->HostEffectTransaction->GetState() != EAvidScriptHostEffectTransactionState::Open))
 	{
-		FAvidScriptHostEffectTransactionResult CommitResult;
-		if (!HostEffectTransaction->Commit(CommitResult))
+		OutError = TEXT("prepared Runtime activation is no longer publishable");
+		return false;
+	}
+	if (GeneratedTypeInstance)
+	{
+		// Validate the candidate identity, independently of the old Session's fault
+		// quarantine. A replacement must be able to recover a stopped generation.
+		const auto& Context = PreparedActivation->Context;
+		UObject* Receiver = GeneratedTypeInstance->Receiver.Get();
+		FAvidScriptObjectHandleResult Resolved;
+		if (!Receiver || !GeneratedTypeInstance->Registration.IsValid()
+			|| !Context.InstanceExecutionState || Context.InstanceExecutionState->IsRetired()
+			|| Context.InstanceExecutionState->GetLifecycleState() != EAvidScriptLifecycleState::Running
+			|| Context.OwnerHandle != GeneratedTypeInstance->ReceiverHandle || !Context.ObjectRegistry
+			|| Context.World.IsStale() || (Context.World.IsValid() && Context.World->bIsTearingDown)
+			|| Receiver->GetWorld() != Context.World.Get()
+			|| Receiver->HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject | RF_BeginDestroyed | RF_FinishDestroyed)
+			|| Context.ObjectRegistry->ResolveObject(Context.OwnerHandle, Resolved, false) != Receiver)
 		{
-			RollbackBorrowedHandles();
-			CopyHostEffectResult(CommitResult, OutResult);
-			SetReloadFailure(
-				OutResult,
-				TEXT("avid_on_begin_play"),
-				TEXT("host_effect_transaction_invalid_state"),
-				CommitResult.ErrorDetails,
-				TEXT("keep the previous runtime active and report the candidate transaction state"));
-			SetRuntimeBaseContext(*CandidateRuntime, HostContext);
-			Continuations->DiscardPrepared();
-			DiscardPreparedCallbacks();
-			CandidateRuntime->Unload();
+			OutError = TEXT("prepared generated owner is no longer live");
 			return false;
 		}
+	}
+	return Continuations->ValidatePreparedCommit(OutError) && InboundHandlers->ValidatePreparedCommit(OutError);
+}
+
+bool FAvidScriptRuntimeSession::DiscardPreparedActivation(FAvidScriptWasmReloadResult& OutResult)
+{
+	check(IsInGameThread() && ActiveGuestCallDepth == 0);
+	if (!PreparedActivation) return true;
+	TGuardValue<bool> MutationGuard(bMutationInProgress, true);
+	auto Pending = MoveTemp(PreparedActivation);
+	bool bRestored = true;
+	if (Pending->HostEffectTransaction.IsSet())
+	{
+		OutResult.bHostEffectRollbackAttempted = true;
+		FAvidScriptObjectRegistry EmptyRegistry;
+		FAvidScriptHostEffectTransactionResult RollbackResult;
+		bRestored = Pending->HostEffectTransaction->Rollback(
+			HostContext.ObjectRegistry ? *HostContext.ObjectRegistry : EmptyRegistry, RollbackResult);
+		CopyHostEffectResult(RollbackResult, OutResult);
+	}
+	if (ObjectOwnership->GetBorrowedHandleCount() != Pending->BorrowedHandleCheckpoint)
+	{
+		FString Error;
+		bRestored = (HostContext.ObjectRegistry && ObjectOwnership->RollbackBorrowedHandles(
+			*HostContext.ObjectRegistry, Pending->BorrowedHandleCheckpoint, Error)) && bRestored;
+	}
+	Pending->Context.HostEffectJournal = nullptr;
+	SetRuntimeBaseContext(*Pending->Runtime, Pending->Context);
+	Pending->Runtime->Unload();
+	Continuations->DiscardPrepared();
+	DelegateSubscriptions->DiscardPrepared();
+	InboundHandlers->DiscardPrepared();
+	OutResult.bHostEffectRollbackSucceeded = bRestored;
+	OutResult.bRollbackPreservedLiveRuntime = bRestored && LiveRuntime.IsValid();
+	if (!bRestored && OutResult.ErrorMessage.IsEmpty())
+	{
+		OutResult.ErrorCategory = TEXT("prepared_activation_rollback_failed");
+		OutResult.ErrorMessage = TEXT("prepared activation could not restore its native effects or borrowed handles");
+	}
+	return bRestored;
+}
+
+bool FAvidScriptRuntimeSession::CommitPreparedActivation(FAvidScriptWasmReloadResult& OutResult)
+{
+	TGuardValue<bool> MutationGuard(bMutationInProgress, true);
+	FString CommitError;
+	if (!ValidatePreparedActivation(CommitError))
+	{
+		SetReloadFailure(OutResult, TEXT("<activation>"), TEXT("prepared_activation_invalid"), CommitError,
+			TEXT("discard the candidate and preserve the previous Runtime"));
+		DiscardPreparedActivation(OutResult);
+		return false;
+	}
+	auto Pending = MoveTemp(PreparedActivation);
+	auto& CandidateRuntime = Pending->Runtime;
+	auto& CandidateHostContext = Pending->Context;
+	if (Pending->HostEffectTransaction.IsSet())
+	{
+		FAvidScriptHostEffectTransactionResult CommitResult;
+		const bool bCommitted = Pending->HostEffectTransaction->Commit(CommitResult);
+		check(bCommitted); // Open journal was validated; commit executes no Guest code.
 		OutResult.bHostEffectTransactionCommitted = true;
 		CopyHostEffectResult(CommitResult, OutResult);
 		CandidateHostContext.HostEffectJournal = nullptr;
@@ -2566,16 +2685,16 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 	CandidateHostContext.DebugProbes = Debugger.Get();
 	CandidateHostContext.Profiler = Profiler.Get();
 	SetRuntimeBaseContext(*CandidateRuntime, CandidateHostContext);
-	OutResult.RuntimeResult = BeginPlayResult;
+	OutResult.RuntimeResult = Pending->BeginPlayResult;
 	LiveRuntime = MoveTemp(CandidateRuntime);
 	++GeneratedExecutionGeneration;
 	if (GeneratedTypeInstance)
 	{
-		GeneratedTypeInstance->PreparedTypeRoutes = MoveTemp(CandidateGeneratedTypeRoutes);
-		GeneratedTypeInstance->ContinuationCall = MoveTemp(CandidateContinuationCall);
-		GeneratedTypeInstance->DelegateCalls = MoveTemp(CandidateDelegateCalls);
+		GeneratedTypeInstance->PreparedTypeRoutes = MoveTemp(Pending->GeneratedRoutes);
+		GeneratedTypeInstance->ContinuationCall = MoveTemp(Pending->ContinuationCall);
+		GeneratedTypeInstance->DelegateCalls = MoveTemp(Pending->DelegateCalls);
 	}
-	LiveManifest = Manifest;
+	LiveManifest = Pending->Manifest;
 	HostContext.InstanceExecutionState = CandidateHostContext.InstanceExecutionState;
 	HostContext.Continuations = CandidateHostContext.Continuations;
 	HostContext.LatentHost = CandidateHostContext.LatentHost;
@@ -2584,7 +2703,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 	Scheduler->Attach(*LiveRuntime, HostContext.InstanceExecutionState ? &HostContext : nullptr);
 	DelegateSubscriptions->CommitPrepared();
 	DelegateSubscriptions->SetDispatchEnabled(true);
-	InboundCommitError.Reset();
+	FString InboundCommitError;
 	const bool bInboundCommitted =
 		InboundHandlers->CommitPrepared(InboundCommitError);
 	checkf(

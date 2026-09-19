@@ -10,6 +10,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeRegistry.h"
@@ -485,12 +486,22 @@ bool FAvidScriptGeneratedTypeRuntimeHost::ReloadPackage(
 	}
 
 	OutResult.CandidateInstanceCount = Impl->Instances.Num();
-	TArray<FGeneratedTypeRuntimeInstance*> ReloadedInstances;
-	ReloadedInstances.Reserve(Impl->Instances.Num());
+	// Fence every old Session before the first candidate can produce native callbacks.
+	for (auto& Pair : Impl->Instances)
+		if (Pair.Value && Pair.Value->Session) Pair.Value->Session->bPackageReloadBarrier = true;
+	const auto ReleaseBarriers = [this]()
+	{
+		for (auto& Pair : Impl->Instances)
+			if (Pair.Value && Pair.Value->Session) Pair.Value->Session->bPackageReloadBarrier = false;
+	};
+	ON_SCOPE_EXIT { ReleaseBarriers(); };
+	TArray<FGeneratedTypeRuntimeInstance*> PreparedInstances;
+	PreparedInstances.Reserve(Impl->Instances.Num());
+	bool bFailedCandidateRestored = true;
 	for (TPair<FObjectKey, TUniquePtr<FGeneratedTypeRuntimeInstance>>& Pair : Impl->Instances)
 	{
 #if WITH_DEV_AUTOMATION_TESTS
-		if (Impl->ReloadFailureAfterInstanceCountForTesting == ReloadedInstances.Num())
+		if (Impl->ReloadFailureAfterInstanceCountForTesting == PreparedInstances.Num())
 		{
 			Impl->ReloadFailureAfterInstanceCountForTesting = INDEX_NONE;
 			OutError = TEXT("generated type package reload injected a deterministic test failure");
@@ -504,29 +515,36 @@ bool FAvidScriptGeneratedTypeRuntimeHost::ReloadPackage(
 			break;
 		}
 		FAvidScriptWasmReloadResult SessionResult;
-		if (!Instance->Session->ReloadArtifact(Artifact, SessionResult))
+		if (!Instance->Session->ReloadArtifactInternal(Artifact, SessionResult, true))
 		{
+			bFailedCandidateRestored = !SessionResult.bHostEffectRollbackAttempted || SessionResult.bHostEffectRollbackSucceeded;
 			OutError = SessionResult.ErrorMessage.IsEmpty()
 				? TEXT("generated type Runtime Session rejected the candidate package")
 				: SessionResult.ErrorMessage;
 			break;
 		}
-		ReloadedInstances.Add(Instance);
+		PreparedInstances.Add(Instance);
 	}
 #if WITH_DEV_AUTOMATION_TESTS
+	if (Impl->ReloadFailureAfterInstanceCountForTesting == PreparedInstances.Num())
+		OutError = TEXT("generated type package reload injected a deterministic test failure");
 	Impl->ReloadFailureAfterInstanceCountForTesting = INDEX_NONE;
 #endif
 
-	OutResult.ReloadedInstanceCount = ReloadedInstances.Num();
-	if (ReloadedInstances.Num() != Impl->Instances.Num())
+	OutResult.PreparedInstanceCount = PreparedInstances.Num();
+	if (PreparedInstances.Num() == Impl->Instances.Num() && OutError.IsEmpty())
 	{
-		bool bRollbackSucceeded = true;
-		for (int32 Index = ReloadedInstances.Num() - 1; Index >= 0; --Index)
+		for (auto* Instance : PreparedInstances)
+			if (!Instance->Session->ValidatePreparedActivation(OutError)) break;
+	}
+	if (PreparedInstances.Num() != Impl->Instances.Num() || !OutError.IsEmpty())
+	{
+		bool bRollbackSucceeded = bFailedCandidateRestored;
+		for (int32 Index = PreparedInstances.Num() - 1; Index >= 0; --Index)
 		{
 			FAvidScriptWasmReloadResult RollbackResult;
-			if (!ReloadedInstances[Index]->Session->ReloadArtifact(
-				PreviousPackage.Artifact,
-				RollbackResult))
+			++PreparedInstances[Index]->Session->RejectedReloadCount;
+			if (!PreparedInstances[Index]->Session->DiscardPreparedActivation(RollbackResult))
 			{
 				bRollbackSucceeded = false;
 				if (!RollbackResult.ErrorMessage.IsEmpty())
@@ -535,13 +553,14 @@ bool FAvidScriptGeneratedTypeRuntimeHost::ReloadPackage(
 						TEXT("; rollback failed: %s"),
 						*RollbackResult.ErrorMessage);
 				}
-				break;
+				continue;
 			}
 			++OutResult.RolledBackInstanceCount;
 		}
 		OutResult.bRollbackPreservedLivePackage = bRollbackSucceeded;
 		if (!bRollbackSucceeded)
 		{
+			ReleaseBarriers();
 			Impl->bTeardownPending = true;
 			for (auto Iterator = Impl->Instances.CreateIterator(); Iterator; ++Iterator)
 			{
@@ -554,6 +573,32 @@ bool FAvidScriptGeneratedTypeRuntimeHost::ReloadPackage(
 				: TEXT("; generated type teardown remains pending without releasing registered Sessions");
 		}
 		return false;
+	}
+	for (auto* Instance : PreparedInstances)
+	{
+		FAvidScriptWasmReloadResult CommitResult;
+		if (!Instance->Session->CommitPreparedActivation(CommitResult))
+		{
+			// Publication performs no Guest calls. If native lifetime changes still
+			// invalidate a prepared participant, never expose a mixed package.
+			OutError = TEXT("generated package publication invalidated; stopping all instances");
+			for (int32 Index = PreparedInstances.Num() - 1; Index >= 0; --Index)
+			{
+				FAvidScriptWasmReloadResult DiscardResult;
+				PreparedInstances[Index]->Session->DiscardPreparedActivation(DiscardResult);
+			}
+			ReleaseBarriers();
+			Impl->bTeardownPending = true;
+			for (auto Iterator = Impl->Instances.CreateIterator(); Iterator; ++Iterator)
+			{
+				FString TeardownError;
+				TeardownInstance(*Iterator.Value(), Impl->ObjectRegistry, TeardownError);
+				if (!Iterator.Value()->Session && !Iterator.Value()->ReceiverHandle.IsValid()) Iterator.RemoveCurrent();
+			}
+			return false;
+		}
+		++Instance->Session->SuccessfulReloadCount;
+		++OutResult.ReloadedInstanceCount;
 	}
 
 	Impl->Package.Emplace(FGeneratedTypeRuntimePackage{ Registry, Artifact });

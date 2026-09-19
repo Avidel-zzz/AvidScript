@@ -19,6 +19,7 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptGeneratedTypePackageReloadResult
 	EAvidScriptGeneratedTypePackageReloadDisposition Disposition =
 		EAvidScriptGeneratedTypePackageReloadDisposition::Rejected;
 	int32 CandidateInstanceCount = 0;
+	int32 PreparedInstanceCount = 0;
 	int32 ReloadedInstanceCount = 0;
 	int32 RolledBackInstanceCount = 0;
 	bool bRollbackPreservedLivePackage = false;

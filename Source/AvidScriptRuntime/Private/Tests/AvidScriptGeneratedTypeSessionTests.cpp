@@ -2,6 +2,7 @@
 
 #include "AvidScriptGeneratedTypeSessionTestTypes.h"
 #include "AvidScriptHash.h"
+#include "AvidScriptBindingReloadEffect.h"
 #include "AvidScriptRuntimeArtifact.h"
 #include "AvidScriptRuntimeSession.h"
 #include "AvidScriptWasmRuntime.h"
@@ -22,6 +23,7 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "UObject/StrongObjectPtr.h"
+#include "UObject/UnrealType.h"
 
 namespace
 {
@@ -74,7 +76,7 @@ void AppendWasmExport(
 
 TArray<uint8> BuildGeneratedTypeSessionModule(
 	const int32 ReturnConstant = INDEX_NONE,
-	const bool bTrapGeneratedExport = false)
+	const bool bTrapGeneratedExport = false, const bool bIncrementGlobal = false)
 {
 	check(ReturnConstant == INDEX_NONE || ReturnConstant >= 0 && ReturnConstant < 64);
 	TArray<uint8> Module = {
@@ -88,6 +90,7 @@ TArray<uint8> BuildGeneratedTypeSessionModule(
 	AppendWasmSection(Module, 0x01, TypeSection);
 	const TArray<uint8> FunctionSection = { 0x02, 0x00, 0x01 };
 	AppendWasmSection(Module, 0x03, FunctionSection);
+	if (bIncrementGlobal) AppendWasmSection(Module, 6, {1, 0x7f, 1, 0x41, 0, 0x0b});
 
 	TArray<uint8> ExportSection = { 0x02 };
 	AppendWasmExport(ExportSection, "avid_on_begin_play", 0);
@@ -96,7 +99,9 @@ TArray<uint8> BuildGeneratedTypeSessionModule(
 		"avid_ue_0123456789abcdef0123456789abcdef",
 		1);
 	AppendWasmSection(Module, 0x07, ExportSection);
-	const TArray<uint8> CodeSection = bTrapGeneratedExport
+	const TArray<uint8> CodeSection = bIncrementGlobal
+		? TArray<uint8>{2, 2, 0, 0x0b, 11, 0, 0x23, 0, 0x41, 1, 0x6a, 0x24, 0, 0x23, 0, 0x0b}
+		: bTrapGeneratedExport
 		? TArray<uint8>{
 			0x02,
 			0x02, 0x00, 0x0b,
@@ -754,6 +759,12 @@ bool FAvidScriptGeneratedTypeSessionTest::RunTest(const FString& Parameters)
 		TEXT("Repeated generated entry is counted"),
 		TrapSession.GetSnapshot().FaultedEntryRejectCount,
 		1);
+	TestTrue(TEXT("validated replacement can recover a quarantined generated Session"),
+		TrapSession.LoadInitialModule(Module.GetData(), Module.Num(), Manifest, TrapLoadResult));
+	TestFalse(TEXT("replacement clears old generation quarantine"), TrapSession.GetSnapshot().bFaultQuarantined);
+	TestTrue(TEXT("recovered generated route executes"), FAvidScriptGeneratedTypeDispatcher::Invoke(Receiver.Get(), 0, 0, {}, &ScriptResult));
+	TestEqual(TEXT("recovered route retains its owner"), ScriptResult, static_cast<int32>(ReceiverHandle.Slot));
+	TestTrue(TEXT("recovered Session stops"), TrapSession.StopAndUnload(StopResult));
 	TestTrue(
 		TEXT("Trap generated receiver route tears down explicitly"),
 		TrapSession.ClearGeneratedTypeInstance(Error));
@@ -1077,8 +1088,9 @@ bool FAvidScriptGeneratedTypeRuntimeHostTest::RunTest(const FString& Parameters)
 			RollbackResult,
 			Error));
 	TestEqual(TEXT("Rollback transaction sees two Sessions"), RollbackResult.CandidateInstanceCount, 2);
-	TestEqual(TEXT("Rollback transaction commits one candidate before failure"), RollbackResult.ReloadedInstanceCount, 1);
-	TestEqual(TEXT("Rollback transaction restores one committed candidate"), RollbackResult.RolledBackInstanceCount, 1);
+	TestEqual(TEXT("Rollback transaction prepares one candidate before failure"), RollbackResult.PreparedInstanceCount, 1);
+	TestEqual(TEXT("Rejected transaction never publishes a candidate"), RollbackResult.ReloadedInstanceCount, 0);
+	TestEqual(TEXT("Rollback transaction discards one prepared candidate"), RollbackResult.RolledBackInstanceCount, 1);
 	TestTrue(
 		TEXT("Rollback transaction preserves the previous live package"),
 		RollbackResult.bRollbackPreservedLivePackage);
@@ -1488,6 +1500,126 @@ bool FAvidScriptGeneratedSessionExecutionEntriesTest::RunTest(const FString& Par
 		TestTrue(TEXT("stop after EndPlay succeeds"), Session.StopAndUnload(Result));
 		TestTrue(TEXT("stop retires explicit state"), State->IsRetired());
 		TestTrue(TEXT("execution fixture registration clears"), Session.ClearGeneratedTypeInstance(Error));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptGeneratedPackagePreparedReloadTest,
+	"AvidScript.Runtime.GeneratedTypes.PackagePreparedReload",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptGeneratedPackagePreparedReloadTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot> Types;
+	FString Error;
+	if (!FAvidScriptGeneratedTypeRegistry::BuildFromJson(BuildGeneratedTypeSessionManifest(), Types, Error)) return false;
+	const auto Wasm = BuildGeneratedTypeSessionModule(INDEX_NONE, false, true);
+	FAvidScriptWasmReloadManifest Manifest;
+	Manifest.ModuleId = TEXT("prepared_package_reload"); Manifest.Language = TEXT("wasm");
+	Manifest.AbiVersion = FAvidScriptWasmReloadManifest::SupportedAbiVersion;
+	Manifest.RequiredExports = {TEXT("avid_on_begin_play")};
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	{
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime ? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		const auto Artifact = FAvidScriptRuntimeArtifact::FromCanonicalWasm(Manifest, Wasm, Selection);
+		auto Host = FAvidScriptGeneratedTypeRuntimeHost::CreateIsolatedForTesting();
+		ON_SCOPE_EXIT { Host->Shutdown(); };
+		TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> A(NewObject<UAvidScriptGeneratedTypeSessionTestObject>());
+		TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> B(NewObject<UAvidScriptGeneratedTypeSessionTestObject>());
+		if (!Host->InstallPackage(Types, Artifact, Error) || !Host->BeginInstance(*A, 0, Error) || !Host->BeginInstance(*B, 0, Error))
+		{ AddError(Error); return false; }
+		auto* SessionA = Host->GetInstanceSessionForTesting(*A);
+		auto* SessionB = Host->GetInstanceSessionForTesting(*B);
+		const auto BeforeA = SessionA->GetTestSnapshot(), BeforeB = SessionB->GetTestSnapshot();
+		const auto GenerationA = SessionA->GetGeneratedExecutionGeneration(), GenerationB = SessionB->GetGeneratedExecutionGeneration();
+		auto Call = [&](UObject* Owner, int32 Expected)
+		{
+			int32 Value = 0;
+			TestTrue(TEXT("published generated route executes"), FAvidScriptGeneratedTypeDispatcher::Invoke(Owner, 0, 0, {}, &Value));
+			TestEqual(TEXT("module global retains the original VM state"), Value, Expected);
+		};
+		Call(A.Get(), 1); Call(A.Get(), 2); Call(B.Get(), 1);
+		A->Value = 100;
+		int32 CandidateVisits = 0;
+		FProperty* Property = FindFProperty<FProperty>(A->GetClass(), TEXT("Value"));
+		if (!TestNotNull(TEXT("native effect property exists"), Property)) return false;
+		auto ObserveCandidate = [&](IAvidScriptBindingHostEffectJournal* Journal)
+		{
+			++CandidateVisits;
+			TestTrue(TEXT("candidate preparation retains both old VMs"), SessionA->GetLiveRuntimeForTesting() == BeforeA.LiveRuntimeIdentity
+				&& SessionB->GetLiveRuntimeForTesting() == BeforeB.LiveRuntimeIdentity);
+			int32 Rejected = 0;
+			TestFalse(TEXT("package barrier fences old A"), FAvidScriptGeneratedTypeDispatcher::Invoke(A.Get(), 0, 0, {}, &Rejected));
+			TestFalse(TEXT("package barrier fences old B"), FAvidScriptGeneratedTypeDispatcher::Invoke(B.Get(), 0, 0, {}, &Rejected));
+			FAvidScriptWasmSmokeResult Stop;
+			TestFalse(TEXT("candidate cannot unload an idle package peer"), SessionA->StopAndUnload(Stop));
+			TestTrue(TEXT("old instance state is retained until publication"), !BeforeA.HostContext.InstanceExecutionState->IsRetired()
+				&& !BeforeB.HostContext.InstanceExecutionState->IsRetired());
+			FAvidScriptBindingHostEffectPrepareResult Effect;
+			if (TestNotNull(TEXT("candidate owns a stable effect journal"), Journal))
+			{
+				TestTrue(TEXT("both candidate journals capture the same native property in order"), Journal->PrepareReflectedProperty(
+					*BeforeA.HostContext.ObjectRegistry, BeforeA.HostContext.OwnerHandle, *A, *Property, Effect));
+				A->Value += 7;
+			}
+		};
+		for (int32 FailAfter : {1, 2})
+		{
+			SessionA->SetCandidateBeginPlayObserverForTesting(ObserveCandidate);
+			SessionB->SetCandidateBeginPlayObserverForTesting(ObserveCandidate);
+			Host->SetReloadFailureAfterInstanceCountForTesting(FailAfter);
+			FAvidScriptGeneratedTypePackageReloadResult Result;
+			TestFalse(TEXT("prepared package rejects injected failure"), Host->ReloadPackage(Types, Artifact, Result, Error));
+			TestEqual(TEXT("prepared count is separate from published count"), Result.PreparedInstanceCount, FailAfter);
+			TestEqual(TEXT("failure publishes no instances"), Result.ReloadedInstanceCount, 0);
+			TestEqual(TEXT("all prepared candidates are discarded"), Result.RolledBackInstanceCount, FailAfter);
+			TestTrue(TEXT("original package remains live"), Result.bRollbackPreservedLivePackage);
+			TestEqual(TEXT("reverse journal rollback restores pre-package native property"), A->Value, 100);
+			TestTrue(TEXT("A Runtime identity is unchanged"), SessionA->GetLiveRuntimeForTesting() == BeforeA.LiveRuntimeIdentity);
+			TestTrue(TEXT("B Runtime identity is unchanged"), SessionB->GetLiveRuntimeForTesting() == BeforeB.LiveRuntimeIdentity);
+			TestTrue(TEXT("A instance state is unchanged"), SessionA->GetTestSnapshot().HostContext.InstanceExecutionState == BeforeA.HostContext.InstanceExecutionState);
+			TestTrue(TEXT("B instance state is unchanged"), SessionB->GetTestSnapshot().HostContext.InstanceExecutionState == BeforeB.HostContext.InstanceExecutionState);
+			TestEqual(TEXT("A generation is unchanged"), SessionA->GetGeneratedExecutionGeneration(), GenerationA);
+			TestEqual(TEXT("B generation is unchanged"), SessionB->GetGeneratedExecutionGeneration(), GenerationB);
+		}
+		TestEqual(TEXT("both failure points actually prepared candidates"), CandidateVisits, 3);
+		Call(A.Get(), 3); Call(B.Get(), 2);
+		SessionA->SetCandidateBeginPlayObserverForTesting(ObserveCandidate);
+		SessionB->SetCandidateBeginPlayObserverForTesting(ObserveCandidate);
+		FAvidScriptGeneratedTypePackageReloadResult Committed;
+		if (!TestTrue(TEXT("fully prepared package publishes"), Host->ReloadPackage(Types, Artifact, Committed, Error)))
+		{ AddError(Error); return false; }
+		TestEqual(TEXT("whole package prepared before publication"), Committed.PreparedInstanceCount, 2);
+		TestEqual(TEXT("whole package publishes"), Committed.ReloadedInstanceCount, 2);
+		TestEqual(TEXT("committed journals preserve candidate native effects"), A->Value, 114);
+		TestTrue(TEXT("publication retires both old states"), BeforeA.HostContext.InstanceExecutionState->IsRetired()
+			&& BeforeB.HostContext.InstanceExecutionState->IsRetired());
+		TestEqual(TEXT("A generation advances exactly once"), SessionA->GetGeneratedExecutionGeneration(), GenerationA + 1);
+		TestEqual(TEXT("B generation advances exactly once"), SessionB->GetGeneratedExecutionGeneration(), GenerationB + 1);
+		Call(A.Get(), 1); Call(B.Get(), 1);
+		const auto CurrentA = SessionA->GetTestSnapshot().HostContext;
+		const auto CurrentB = SessionB->GetTestSnapshot().HostContext;
+		int32 InvalidatingVisits = 0;
+		auto InvalidateEffectTarget = [&](IAvidScriptBindingHostEffectJournal* Journal)
+		{
+			FAvidScriptBindingHostEffectPrepareResult Effect;
+			if (Journal && Journal->PrepareReflectedProperty(*CurrentA.ObjectRegistry, CurrentA.OwnerHandle, *A, *Property, Effect))
+				A->Value += 3;
+			if (++InvalidatingVisits == 2) A->MarkAsGarbage();
+		};
+		SessionA->SetCandidateBeginPlayObserverForTesting(InvalidateEffectTarget);
+		SessionB->SetCandidateBeginPlayObserverForTesting(InvalidateEffectTarget);
+		FAvidScriptGeneratedTypePackageReloadResult Unrestorable;
+		TestFalse(TEXT("owner invalidation rejects package preparation"), Host->ReloadPackage(Types, Artifact, Unrestorable, Error));
+		TestEqual(TEXT("both candidate effect journals existed before invalidation"), InvalidatingVisits, 2);
+		TestFalse(TEXT("failed native restoration cannot claim preserved package"), Unrestorable.bRollbackPreservedLivePackage);
+		TestEqual(TEXT("unrestorable package publishes nothing"), Unrestorable.ReloadedInstanceCount, 0);
+		TestEqual(TEXT("unrestorable package tears down every Session"), Host->GetActiveInstanceCount(), 0);
+		TestEqual(TEXT("unrestorable package releases registry handles"), Host->GetRegisteredHandleCount(), 0);
+		TestTrue(TEXT("fail-closed teardown retires both original states"), CurrentA.InstanceExecutionState->IsRetired()
+			&& CurrentB.InstanceExecutionState->IsRetired());
 	}
 	return true;
 }

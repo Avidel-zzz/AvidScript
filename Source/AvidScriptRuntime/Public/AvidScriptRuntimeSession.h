@@ -20,6 +20,7 @@ class FAvidScriptGeneratedTypeRegistrySnapshot;
 struct FAvidScriptGeneratedPreparedTypeRoute;
 struct FAvidScriptRuntimeGeneratedTypeInstanceState;
 struct FAvidScriptRuntimeArtifact;
+struct FAvidScriptPreparedRuntimeActivation;
 
 struct AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeSessionSnapshot
 {
@@ -135,7 +136,7 @@ public:
 		void* Result) override;
 
 	bool IsLiveLoaded() const;
-	bool IsOperationActive() const { return bMutationInProgress || ActiveGuestCallDepth > 0; }
+	bool IsOperationActive() const { return bMutationInProgress || ActiveGuestCallDepth > 0 || bPackageReloadBarrier || PreparedActivation.IsValid(); }
 	bool AttachDebugger(TConstArrayView<uint64> BreakpointProbeIds);
 	bool DetachDebugger();
 	bool SetDebugBreakpoints(TConstArrayView<uint64> BreakpointProbeIds);
@@ -224,6 +225,11 @@ public:
 
 private:
 	friend class FAvidScriptRuntimeLifecycleCoordinator;
+	friend class FAvidScriptGeneratedTypeRuntimeHost;
+	bool ReloadArtifactInternal(const FAvidScriptRuntimeArtifact& Artifact, FAvidScriptWasmReloadResult& OutResult, bool bDeferCommit);
+	bool ValidatePreparedActivation(FString& OutError);
+	bool CommitPreparedActivation(FAvidScriptWasmReloadResult& OutResult);
+	bool DiscardPreparedActivation(FAvidScriptWasmReloadResult& OutResult);
 
 	void SuspendForApplicationLifecycle(uint64 Generation);
 	bool ResumeFromApplicationLifecycle(uint64 Generation);
@@ -259,7 +265,7 @@ private:
 		TUniquePtr<FAvidScriptWasmRuntimeInstance>& CandidateRuntime,
 		const FAvidScriptWasmReloadManifest& Manifest,
 		bool bUseHostEffectTransaction,
-		FAvidScriptWasmReloadResult& OutResult);
+		FAvidScriptWasmReloadResult& OutResult, bool bDeferCommit = false);
 	bool PrepareGeneratedTypeExports(
 		FAvidScriptWasmRuntimeInstance& Runtime,
 		TArray<FAvidScriptGeneratedPreparedTypeRoute>& OutRoutes,
@@ -287,6 +293,7 @@ private:
 	TUniquePtr<FAvidScriptRuntimeScheduler> Scheduler;
 	TUniquePtr<FAvidScriptRuntimeEventRouter> EventRouter;
 	TUniquePtr<FAvidScriptRuntimeGeneratedTypeInstanceState> GeneratedTypeInstance;
+	TUniquePtr<FAvidScriptPreparedRuntimeActivation> PreparedActivation;
 	FAvidScriptWasmReloadManifest LiveManifest;
 	FAvidScriptWasmHostContext HostContext;
 	FAvidScriptVmBackendSelection BackendSelection;
@@ -295,6 +302,7 @@ private:
 	int32 ActiveGuestCallDepth = 0;
 	uint64 GeneratedExecutionGeneration = 0;
 	bool bMutationInProgress = false;
+	bool bPackageReloadBarrier = false;
 	bool bBorrowedHandlePrunePending = false;
 	bool bFaultQuarantined = false;
 	FString FaultedModuleId;

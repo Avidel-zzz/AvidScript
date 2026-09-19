@@ -17,8 +17,9 @@
 - Tick 热路径避免动态分配、反射重建和全局锁；按 Session 批量调度并保留预算/超时观测。
 - 异常、trap、fuel、超时和 host error 映射到稳定诊断，不允许跨 C ABI 展开异常。
 - reload 使用 prepare/validate/commit/rollback 事务；旧实例在新实例可用前保持一致状态。
-- generated type package 的 body-only reload 必须先比较完整反射 shape，再对全部活跃 Session 提交；
-  任一实例失败时逆序回滚，回滚失败则 teardown 全部实例 fail-closed。type/member identity、ordinal、
+- generated type package 的 body-only reload 必须先比较完整反射 shape，在全包进入屏障下准备并复核所有活跃 Session，之后统一发布；
+  任一准备失败时逆序丢弃候选、还原 Host effects，保留原 VM/状态/代码身份，禁止重新运行旧代码冒充回滚。
+  回滚或发布失败则 teardown 全部实例 fail-closed。type/member identity、ordinal、
   UClass/UFunction/FProperty 或 ABI route 改变时返回 native rebuild required，禁止当作 body-only 套用。
 - generated type 构建分类必须来自确定性 native shell 输出身份，并携带 previous package 链。Editor 只用该分类
   做冷路径路由与事件去重；Runtime Host 仍必须重新验证实际 Registry shape，禁止把构建元数据当作执行授权。
