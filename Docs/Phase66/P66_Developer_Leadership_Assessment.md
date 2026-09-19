@@ -1,5 +1,33 @@
 # 开发体验与成熟度评估：AvidScript、Unreal AngelScript、Puerts
 
+## 当前复核：2026-09-20
+
+本节更新到产品提交 `f32b3fc6` 及本次只读检查到的工作树；后文 `f1b217e4`、29/29 等记录属于此前评估，不能当作本次执行结果。本次重新读取官方竞品资料、生产所有权、编译器拒绝分支和编辑器重载策略，未运行新编译、Automation、竞品计时或人工玩法验收。现存包级 prepared reload 改动尚未提交，本文不为它补充通过声明。Harness 显示 P66.A 完成、P66.B 进行中，protected dirty 7/7 保持。
+
+**当前判定仍是开发者预览：有值得继续投入的基础，尚不满足成熟框架或开发效率领先的条件。** 最近实例上下文、绑定寿命和实例执行状态的改进，解决的是共享执行域的前置问题；不能据此推导普通跨对象 C#、持久事件、跨 await 闭包或完整调试已可用。P57–P65 的单项能力及打包证据，也不能替代这些组合能力。
+
+| 决定开发体验的问题 | 本次源码证据 | 对产品的含义 |
+| --- | --- | --- |
+| 对象之间能否自然共享状态并相互调用 | `FGeneratedTypeRuntimeInstance` 持有独立 Session；Host 为实例创建 Session；Session 仍独占 `LiveRuntime` | 生产共享 VM/堆/静态状态、完整跨实例方法派发仍须完成；单个 Runtime 的共享探针不能代替生产路径 |
+| 闭包是否可以同时参与事件、await 与调试 | `CSharpGuestLowerer` 明确拒绝尚未连接的 persistent async roots；启用 debug instrumentation 时拒绝 managed delegates | 语言组合和调试共享同一个保活缺口，必须一起设计根、帧、取消及版本寿命 |
+| 增加反射字段是否无需重启 | `ApplyPublishedDescriptor` 的 `NativeRebuildRequired` 分支明确要求 no-clean 构建并重启 Editor | 现有方法体重载不能代表结构热重载；这是与成熟编辑循环的直接差距 |
+| 任意玩法函数能否暂停检查 | `GetDebugResumableFunctionIds` 限定同步 void export，排除 EndPlay、async 和 Guest 调用目标 | source map、调试面板与顶层探针尚不能组成完整源码调试 |
+| 重载失败能否保留原运行状态 | 工作树新增全包准备、复核、发布和逆序丢弃；原 VM 延后替换 | 方向正确，但待交付验证；原生观察者仍可能看见候选暂态，成功迁移也不包含任意堆/闭包 |
+
+源码：[生成 Host](../../Source/AvidScriptRuntime/Private/ScriptTypes/AvidScriptGeneratedTypeRuntimeHost.cpp)、[Session 所有权](../../Source/AvidScriptRuntime/Public/AvidScriptRuntimeSession.h)、[语言及调试入口](../../Tools/AvidScript.CSharpGuest/Lowering/CSharpGuestLowerer.cs)、[结构重载策略](../../Source/AvidScriptEditor/Private/GeneratedTypes/AvidScriptEditorGeneratedTypeReloadPolicy.cpp)。
+
+竞品复核：Hazelight 的 Unreal AngelScript 有已发行游戏实践、编辑器脚本重载、Blueprint 子类和 VS Code 调试；官方区分“无需重启 Editor”与“PIE 中非结构变更”。它包含引擎修改，比较部署成本时必须计入。Puerts 的 UE 文档提供反射 API 接入、TS 类型继承、增量编译、热重载与 VS Code 调试；这不等于任意 npm 包、任意结构变更或全部平台无条件可用。来源：[AngelScript 概览](https://angelscript.hazelight.se/)、[Puerts UE 手册](https://puerts.github.io/en/docs/puerts/unreal/manual/)、[自动绑定](https://puerts.github.io/en/docs/puerts/unreal/uclass_extends/)、[调试](https://puerts.github.io/en/docs/puerts/unreal/vscode_debug/)。本次未实际操作两种竞品，不给出体验计时排名。
+
+### 架构判断与下一步
+
+保留 WASM、版本化 IR、ObjectHandle、生成绑定及候选验证。它们有实际工程价值。最大的投入风险是自建 C# 执行子集、对象系统、库和调试器，却让使用者不断迁就缺失语义。Roslyn 完成前端语义分析，不会自动提供这些执行能力；双 VM 后端也不会自动提高语言成熟度。
+
+继续推进的首要单位应是一段自然玩法，而不是一个新增 opcode：A 调用 B、共享引用和虚派发，事件捕获状态，await 挂起，owner 销毁，重载失败，再定位故障。每个步骤必须同时验证值、对象身份、资源释放与源码诊断。先完成生产执行域和持久根；沿既定 P66 批次补语言组合。同步提前验证 P67 结构重载、P68 可暂停帧的关键假设，避免语言全部扩展后才发现执行模型无法支持编辑与调试。此建议不修改已冻结 Phase 状态。
+
+建议将“跨时代”收敛为可检验的产品目标：**开发者能在运行中的游戏里安全修改玩法，看到对象和异步任务的因果关系，并在候选失败时继续使用原版本。** 超出普通热重载的价值来自这些能力的组合，而不是 C# 或 WASM 名称本身。受控重现和人/AI 修改预检可以后续共享同一套副作用边界，但目前仍是探索目标。
+
+Windows 验收分三层：第一层，独立开发者自然完成技能、UI、网络、存档到 Shipping，无需特殊改写；第二层，同需求对测 AngelScript/Puerts 的开发、修改、排障耗时；第三层，再证明状态迁移、异步因果与安全修改带来的独有价值。沿用后文拟定的保存到生效 P95、迭代和定位耗时目标；另记录峰值内存、回收暂停及失败恢复，不能只比较标量 microbenchmark。当前不足以给出可信的“成熟完成百分比”或确定完成日期。
+
 ## 结论与证据边界
 
 核对日期：2026-09-19。本次复核产品基线提交：`f1b217e4`；Harness 确认 P66 implementing、P66.A 完成、P66.B 进行中，7 项 protected dirty 基线保持一致。本报告是设计与实现差距评估，不修改 Phase 完成状态，不作为 Release Gate。
