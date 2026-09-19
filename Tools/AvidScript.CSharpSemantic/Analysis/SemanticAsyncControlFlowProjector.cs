@@ -275,6 +275,9 @@ internal static class SemanticAsyncControlFlowProjector
                         gotoStatement.Span,
                         "ASCS5418");
 
+                case LocalFunctionStatementSyntax:
+                    return successor;
+
                 case EmptyStatementSyntax:
                     return AddGoto(statement.Span, successor);
             }

@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Operations;
 
 namespace AvidScript.CSharpSemantic;
 
@@ -32,7 +33,14 @@ internal static class SemanticExecutableBodyResolver
                     continue;
                 }
 
-                while (operation.Parent is { } parent)
+                if (method.MethodKind == MethodKind.LocalFunction
+                    && (!SemanticLocalFunctionPolicy.IsSupported(method)
+                        || operation is not ILocalFunctionOperation { Body: not null }))
+                {
+                    continue;
+                }
+
+                while (method.MethodKind != MethodKind.LocalFunction && operation.Parent is { } parent)
                 {
                     operation = parent;
                 }
@@ -46,7 +54,7 @@ internal static class SemanticExecutableBodyResolver
 
     private static bool IsExecutableDeclaration(SyntaxNode node)
     {
-        return node is BaseMethodDeclarationSyntax or AccessorDeclarationSyntax ||
+        return node is BaseMethodDeclarationSyntax or AccessorDeclarationSyntax or LocalFunctionStatementSyntax ||
             node is PropertyDeclarationSyntax { ExpressionBody: not null } ||
             node is IndexerDeclarationSyntax { ExpressionBody: not null };
     }

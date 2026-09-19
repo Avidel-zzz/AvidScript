@@ -180,6 +180,7 @@ internal static class SemanticAsyncStructuredStatementProjector
                     statement.Span);
                 return true;
 
+            case LocalFunctionStatementSyntax:
             case EmptyStatementSyntax:
                 projected = CreateFlowOperation(
                     SemanticAsyncMethod.BlockOperationKind,

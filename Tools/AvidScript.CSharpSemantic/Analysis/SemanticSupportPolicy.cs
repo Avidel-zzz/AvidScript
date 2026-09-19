@@ -23,11 +23,19 @@ internal static class SemanticSupportPolicy
         string stableKind,
         bool hasStableProjection)
     {
-        if (operation is IAnonymousFunctionOperation or ILocalFunctionOperation or IDelegateCreationOperation)
+        if (operation is ILocalFunctionOperation localFunction)
+        {
+            return SemanticLocalFunctionPolicy.IsSupported(localFunction.Symbol)
+                ? new SemanticSupportDecision(true, null, null)
+                : Unsupported(SemanticLocalFunctionPolicy.DiagnosticCode,
+                    SemanticLocalFunctionPolicy.DiagnosticMessage);
+        }
+
+        if (operation is IAnonymousFunctionOperation or IDelegateCreationOperation)
         {
             return Unsupported(
                 "ASCS4001",
-                "Lambda, local-function, delegate, and closure semantics are not supported by the current AvidScript semantic profile.");
+                "Lambda, delegate, and closure semantics are not supported by the current AvidScript semantic profile.");
         }
 
         if (operation is IDynamicInvocationOperation or IDynamicMemberReferenceOperation or
@@ -76,9 +84,14 @@ internal static class SemanticSupportPolicy
             foreach (LocalFunctionStatementSyntax localFunction in root.DescendantNodes()
                 .OfType<LocalFunctionStatementSyntax>())
             {
+                if (semanticModel.GetDeclaredSymbol(localFunction) is IMethodSymbol method
+                    && SemanticLocalFunctionPolicy.IsSupported(method))
+                {
+                    continue;
+                }
                 diagnostics.Add(CreateDiagnostic(
-                    "ASCS4001",
-                    "Local functions are not supported by the current AvidScript semantic profile.",
+                    SemanticLocalFunctionPolicy.DiagnosticCode,
+                    SemanticLocalFunctionPolicy.DiagnosticMessage,
                     unit,
                     localFunction.Span));
             }

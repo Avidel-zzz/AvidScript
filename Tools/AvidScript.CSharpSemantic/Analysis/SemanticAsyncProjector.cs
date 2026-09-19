@@ -221,6 +221,9 @@ internal static class SemanticAsyncProjector
         int diagnosticsBeforeStatements = diagnostics.Count;
         foreach (StatementSyntax statement in declaration.Body.Statements)
         {
+            // Lexical declarations have their own callable/CFG; they are not
+            // executable statements in the enclosing async state machine.
+            if (statement is LocalFunctionStatementSyntax) continue;
             AsyncSegmentBuilder segment = segments[^1];
             if (TryGetDirectAwait(statement, out AwaitExpressionSyntax? awaitExpression, out VariableDeclaratorSyntax? result))
             {

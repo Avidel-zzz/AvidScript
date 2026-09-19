@@ -74,6 +74,16 @@ internal static class SemanticSymbolProjector
             }
         }
 
+        foreach (LocalFunctionStatementSyntax declaration in root.DescendantNodes()
+            .OfType<LocalFunctionStatementSyntax>())
+        {
+            if (semanticModel.GetDeclaredSymbol(declaration) is IMethodSymbol method)
+            {
+                AddSymbol(symbols, method, declaration, sourceText, typeRegistry,
+                    isExecutableReferenceSource);
+            }
+        }
+
         foreach (ParameterSyntax parameterSyntax in root.DescendantNodes().OfType<ParameterSyntax>())
         {
             IParameterSymbol? parameter = semanticModel.GetDeclaredSymbol(parameterSyntax) as IParameterSymbol;
@@ -285,6 +295,24 @@ internal static class SemanticSymbolProjector
     private static string GetMethodId(IMethodSymbol method)
     {
         IMethodSymbol definition = method.OriginalDefinition;
+        if (definition.MethodKind == MethodKind.LocalFunction)
+        {
+            SyntaxNode declaration = definition.DeclaringSyntaxReferences.Single().GetSyntax();
+            // Same-named functions in sibling blocks are legal C#. Their ordinal
+            // within the lexical owner is independent of whitespace/source offsets.
+            SyntaxNode owner = declaration.Ancestors().FirstOrDefault(node =>
+                node is BaseMethodDeclarationSyntax or AccessorDeclarationSyntax
+                    or LocalFunctionStatementSyntax) ?? declaration.SyntaxTree.GetRoot();
+            int ordinal = owner.DescendantNodes()
+                .OfType<LocalFunctionStatementSyntax>()
+                .Where(local => local.Identifier.ValueText == definition.Name
+                    && (local.Ancestors().FirstOrDefault(node =>
+                        node is BaseMethodDeclarationSyntax or AccessorDeclarationSyntax
+                            or LocalFunctionStatementSyntax) ?? local.SyntaxTree.GetRoot()) == owner)
+                .TakeWhile(local => local.SpanStart != declaration.SpanStart)
+                .Count();
+            return $"{GetSymbolId(definition.ContainingSymbol)}:local:{GetMethodSignature(definition)}:scope:{ordinal}";
+        }
         return $"symbol:method:{GetTypeIdentity(definition.ContainingType)}.{GetMethodSignature(definition)}";
     }
 

@@ -25,7 +25,8 @@ internal static class SemanticOperationProjector
         {
             methods.Add(new SemanticMethodBody(
                 SemanticSymbolProjector.GetSymbolId(body.Method),
-                ProjectOperation(body.Operation, body.Unit, typeRegistry, diagnostics)));
+                ProjectOperation(body.Operation is ILocalFunctionOperation localFunction
+                    ? localFunction.Body! : body.Operation, body.Unit, typeRegistry, diagnostics)));
         }
 
         return new SemanticOperationProjection(
@@ -99,6 +100,7 @@ internal static class SemanticOperationProjector
             GetCaptureId(operation, captureRegistry),
             span,
             operation.ChildOperations
+                .Where(child => child is not ILocalFunctionOperation)
                 .Select(child => ProjectOperation(child, unit, typeRegistry, diagnostics, captureRegistry))
                 .ToArray());
     }

@@ -96,6 +96,15 @@ internal static class SemanticCallableProjector
         SyntaxNode root,
         SemanticModel semanticModel)
     {
+        foreach (LocalFunctionStatementSyntax declaration in root.DescendantNodes()
+            .OfType<LocalFunctionStatementSyntax>())
+        {
+            if (semanticModel.GetDeclaredSymbol(declaration) is IMethodSymbol method)
+            {
+                yield return method;
+            }
+        }
+
         foreach (BaseMethodDeclarationSyntax declaration in root.DescendantNodes()
             .OfType<BaseMethodDeclarationSyntax>())
         {
@@ -170,6 +179,16 @@ internal static class SemanticCallableProjector
         AttributeData? avidAttribute = FindAttribute(method, AvidExportAttributeName);
         if (unmanagedAttribute is null && avidAttribute is null)
         {
+            return null;
+        }
+
+        if (method.MethodKind == MethodKind.LocalFunction)
+        {
+            diagnostics.Add(CreateDiagnostic(
+                "ASCS5010",
+                "Local functions have lexical identity and cannot declare WASM exports. Export the containing member instead.",
+                method,
+                unit));
             return null;
         }
 

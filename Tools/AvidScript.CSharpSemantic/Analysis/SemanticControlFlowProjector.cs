@@ -161,6 +161,23 @@ internal static class SemanticControlFlowProjector
         SemanticExecutableBody body,
         SemanticModel semanticModel)
     {
+        if (body.Method.MethodKind == MethodKind.LocalFunction)
+        {
+            SyntaxNode ownerDeclaration = body.Declaration.Ancestors().First(node =>
+                node is BaseMethodDeclarationSyntax or AccessorDeclarationSyntax
+                    or LocalFunctionStatementSyntax);
+            IMethodSymbol ownerMethod = (IMethodSymbol)semanticModel.GetDeclaredSymbol(ownerDeclaration)!;
+            IOperation ownerOperation = semanticModel.GetOperation(ownerDeclaration)!;
+            while (ownerMethod.MethodKind != MethodKind.LocalFunction
+                && ownerOperation.Parent is { } parent)
+            {
+                ownerOperation = parent;
+            }
+            ControlFlowGraph ownerGraph = CreateGraph(
+                new SemanticExecutableBody(ownerDeclaration, ownerMethod, ownerOperation, body.Unit),
+                semanticModel);
+            return ownerGraph.GetLocalFunctionControlFlowGraph(body.Method);
+        }
         return body.Operation switch
         {
             IMethodBodyOperation methodBody => ControlFlowGraph.Create(methodBody),
