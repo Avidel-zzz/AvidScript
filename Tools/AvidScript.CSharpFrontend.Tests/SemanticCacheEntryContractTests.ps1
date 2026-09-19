@@ -144,8 +144,8 @@ $FrontendModel = [ordered]@{
 }
 Write-JsonFile -Path $SeedFrontendPath -Value $FrontendModel
 $SemanticModel = [ordered]@{
-    schema_version = 20
-    semantic_version = "1.22"
+    schema_version = 21
+    semantic_version = "1.23"
     succeeded = $true
     source = [ordered]@{
         source_id = $SourceId
@@ -193,8 +193,8 @@ $SeedReport = [ordered]@{
         artifact_sha256 = Get-AvidScriptBindingSha256Hex $SeedFrontendPath
     }
     semantic = [ordered]@{
-        schema_version = 20
-        version = "1.22"
+        schema_version = 21
+        version = "1.23"
         succeeded = $true
         source_sha256 = $SourceSha256
         frontend_sha256 = $SourceSha256

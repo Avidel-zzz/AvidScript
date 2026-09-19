@@ -42,4 +42,8 @@ public sealed record SemanticDocument(
     [JsonPropertyOrder(17)]
     public IReadOnlyList<SemanticUeTypeDeclaration> UeTypeDeclarations { get; init; } =
         Array.Empty<SemanticUeTypeDeclaration>();
+
+    [JsonPropertyOrder(19)]
+    public IReadOnlyList<SemanticDelegateType> DelegateTypes { get; init; } =
+        Array.Empty<SemanticDelegateType>();
 }

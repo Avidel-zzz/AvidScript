@@ -294,6 +294,18 @@ internal static class SemanticSymbolProjector
 
     private static string GetMethodId(IMethodSymbol method)
     {
+        if (method.MethodKind == MethodKind.DelegateInvoke)
+        {
+            SemanticDelegateParameter[] parameters = method.Parameters.Select(parameter =>
+                new SemanticDelegateParameter(parameter.Ordinal,
+                    "type:" + SemanticTypeRegistry.GetCanonicalName(parameter.Type),
+                    SemanticTypeRegistry.GetDelegateRefKind(parameter.RefKind))).ToArray();
+            return SemanticDelegateType.GetInvokeId(
+                "type:" + SemanticTypeRegistry.GetCanonicalName(method.ContainingType),
+                "type:" + SemanticTypeRegistry.GetCanonicalName(method.ReturnType),
+                method.ReturnsByRefReadonly ? "ref_readonly" : method.ReturnsByRef ? "ref" : "none",
+                parameters);
+        }
         IMethodSymbol definition = method.OriginalDefinition;
         if (definition.MethodKind == MethodKind.LocalFunction)
         {

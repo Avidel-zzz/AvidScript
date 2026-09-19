@@ -265,8 +265,8 @@ internal static class CSharpGuestContinuationTests
             block.Id.EndsWith(":result_rejected", StringComparison.Ordinal));
 
         Assert(result.Succeeded
-            && document.SchemaVersion == 20
-            && document.SemanticVersion == "1.22"
+            && document.SchemaVersion == 21
+            && document.SemanticVersion == "1.23"
             && guard.Terminator.Kind == "branch_if"
             && guard.Terminator.TargetBlockId == guardReturn.Id
             && guard.Terminator.FalseTargetBlockId == continuation.Id
@@ -289,6 +289,7 @@ internal static class CSharpGuestContinuationTests
         {
             SchemaVersion = 13,
             SemanticVersion = "1.13",
+            DelegateTypes = Array.Empty<SemanticDelegateType>(),
         };
         Assert(!CSharpGuestLowerer.Lower(legacy, SemanticHash).Succeeded,
             "schema 13 artifacts must not smuggle schema 14 async guard operations into Guest lowering");
@@ -717,8 +718,8 @@ internal static class CSharpGuestContinuationTests
             .ToArray();
 
         Assert(result.Succeeded
-            && document.SchemaVersion == 20
-            && document.SemanticVersion == "1.22"
+            && document.SchemaVersion == 21
+            && document.SemanticVersion == "1.23"
             && asyncMethod.Lowering == "reentrant_zero_heap_cps"
             && callbackIds.SequenceEqual(new[]
             {
@@ -1047,7 +1048,7 @@ internal static class CSharpGuestContinuationTests
 
         Assert(first.Succeeded
             && second.Succeeded
-            && document.SemanticVersion == "1.22"
+            && document.SemanticVersion == "1.23"
             && frame.Slots.Select(slot => slot.SymbolId)
                 .SequenceEqual(new[] { countId })
             && frame.Slots.All(slot => slot.SymbolId != overwrittenId),
@@ -1460,6 +1461,7 @@ internal static class CSharpGuestContinuationTests
         {
             SchemaVersion = 10,
             SemanticVersion = "1.10",
+            DelegateTypes = Array.Empty<SemanticDelegateType>(),
         };
         CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(schemaTen, SemanticHash);
         GuestModule module = result.Module
@@ -1545,6 +1547,7 @@ internal static class CSharpGuestContinuationTests
         {
             SchemaVersion = 10,
             SemanticVersion = "1.10",
+            DelegateTypes = Array.Empty<SemanticDelegateType>(),
         };
         CSharpGuestLoweringResult legacyPayloadResult = CSharpGuestLowerer.Lower(
             legacyObjectPayload,

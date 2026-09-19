@@ -70,6 +70,7 @@ internal static class CSharpSemanticInputValidator
 
         return ValidateTypes(document.Types)
             && ValidateTypeShapes(document.TypeShapes)
+            && SemanticDelegateContractValidator.IsValid(document)
             && ValidateSymbols(document.Symbols)
             && ValidateCallables(document.SchemaVersion, document.Callables)
             && SemanticUeTypeContractValidator.TryValidate(document, out _)
@@ -698,7 +699,7 @@ internal static class CSharpSemanticInputValidator
         IReadOnlyDictionary<string, SemanticSymbol> symbolsById,
         ref int expectedCallbackId)
     {
-        if (document.SemanticVersion != SemanticContract.CurrentSemanticVersion
+        if ((document.SemanticVersion != "1.22" && document.SemanticVersion != SemanticContract.CurrentSemanticVersion)
             || method.EntrySegmentOrdinal < 0
             || method.EntrySegmentOrdinal >= method.Segments.Count
             || method.Segments.Count > SemanticAsyncMethod.MaximumControlFlowSegments
@@ -940,7 +941,7 @@ internal static class CSharpSemanticInputValidator
 
     private static bool UsesExactAsyncStateFlow(string semanticVersion)
     {
-        return semanticVersion is "1.16"
+        return semanticVersion is "1.16" or "1.22"
             || semanticVersion == SemanticContract.CurrentSemanticVersion;
     }
 
@@ -1198,6 +1199,7 @@ internal static class CSharpSemanticInputValidator
             (15, "1.16") => true,
             (15, "1.17") => true,
             (16, "1.18") => true,
+            (20, "1.22") => true,
             (SemanticContract.CurrentSchemaVersion, SemanticContract.CurrentSemanticVersion) => true,
             _ => false,
         };
@@ -1250,7 +1252,7 @@ internal static class CSharpSemanticInputValidator
         {
             return true;
         }
-        return (semanticVersion is "1.16"
+        return (semanticVersion is "1.16" or "1.22"
                 || semanticVersion == SemanticContract.CurrentSemanticVersion)
             && statement.TargetSymbolId is null
             && ValidateStructuredAsyncFlow(

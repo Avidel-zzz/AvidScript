@@ -9,18 +9,19 @@ internal sealed class SemanticTypeRegistry
 {
     private readonly Dictionary<string, SemanticType> types = new(StringComparer.Ordinal);
     private readonly Dictionary<string, SemanticTypeShape> shapes = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SemanticDelegateType> delegateTypes = new(StringComparer.Ordinal);
 
     public string Register(ITypeSymbol type)
     {
         string canonicalName = GetCanonicalName(type);
         string id = "type:" + canonicalName;
-        types.TryAdd(id, new SemanticType(
+        if (!types.TryAdd(id, new SemanticType(
             id,
             canonicalName,
             type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
             GetKind(type),
             type.IsValueType,
-            type.NullableAnnotation == NullableAnnotation.Annotated));
+            type.NullableAnnotation == NullableAnnotation.Annotated))) return id;
         if (type is IArrayTypeSymbol array)
         {
             shapes.TryAdd(id, new SemanticTypeShape(id, Register(array.ElementType), null));
@@ -28,6 +29,17 @@ internal sealed class SemanticTypeRegistry
         else if (type is INamedTypeSymbol { TypeKind: TypeKind.Enum, EnumUnderlyingType: { } underlying })
         {
             shapes.TryAdd(id, new SemanticTypeShape(id, null, Register(underlying)));
+        }
+        else if (type is INamedTypeSymbol { TypeKind: TypeKind.Delegate, DelegateInvokeMethod: { } invoke })
+        {
+            SemanticDelegateParameter[] parameters = invoke.Parameters.Select(parameter =>
+                new SemanticDelegateParameter(parameter.Ordinal, Register(parameter.Type),
+                    GetDelegateRefKind(parameter.RefKind))).ToArray();
+            string returnTypeId = Register(invoke.ReturnType);
+            string returnRefKind = invoke.ReturnsByRefReadonly ? "ref_readonly" : invoke.ReturnsByRef ? "ref" : "none";
+            delegateTypes.Add(id, new(id,
+                SemanticDelegateType.GetInvokeId(id, returnTypeId, returnRefKind, parameters),
+                returnTypeId, returnRefKind, parameters));
         }
         else if (type is INamedTypeSymbol named
             && named.IsGenericType
@@ -53,6 +65,19 @@ internal sealed class SemanticTypeRegistry
     {
         return shapes.Values.OrderBy(shape => shape.TypeId, StringComparer.Ordinal).ToArray();
     }
+
+    public IReadOnlyList<SemanticDelegateType> BuildDelegateTypes() =>
+        delegateTypes.Values.OrderBy(type => type.TypeId, StringComparer.Ordinal).ToArray();
+
+    internal static string GetDelegateRefKind(RefKind kind) => kind switch
+    {
+        RefKind.None => "none",
+        RefKind.Ref => "ref",
+        RefKind.Out => "out",
+        RefKind.In => "in",
+        RefKind.RefReadOnlyParameter => "ref_readonly",
+        _ => "unsupported:" + kind,
+    };
 
     public static string GetCanonicalName(ITypeSymbol type)
     {

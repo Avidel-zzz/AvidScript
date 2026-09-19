@@ -811,8 +811,8 @@ foreach ($RequiredScriptTypeBuildContract in @(
     'Resolve-AvidScriptCSharpBindingPackage',
     'InvokeCSharpFrontend.ps1',
     'InvokeCSharpSemantic.ps1',
-    'schema_version -ne 20',
-    'semantic_version -cne "1.22"',
+    'schema_version -ne 21',
+    'semantic_version -cne "1.23"',
     'schema_version -ne 6',
     'generator_version -cne "1.8"',
     'semantic_artifact_sha256',
@@ -3867,8 +3867,8 @@ foreach ($RequiredReachabilityContract in @(
     }
 }
 foreach ($RequiredSemanticContract in @(
-    'CurrentSchemaVersion = 20',
-    'CurrentSemanticVersion = "1.22"'
+    'CurrentSchemaVersion = 21',
+    'CurrentSemanticVersion = "1.23"'
 )) {
     if (-not $SemanticContractSource.Contains($RequiredSemanticContract)) {
         Add-Violation "C# Semantic contract is missing current version token $RequiredSemanticContract"

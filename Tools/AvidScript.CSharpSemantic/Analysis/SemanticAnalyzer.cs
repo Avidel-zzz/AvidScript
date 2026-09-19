@@ -176,6 +176,7 @@ public static class SemanticAnalyzer
             ContinuationCallbacks = continuationProjection.Callbacks,
             AsyncMethods = asyncProjection.Methods,
             UeTypeDeclarations = ueTypeProjection.Declarations,
+            DelegateTypes = typeRegistry.BuildDelegateTypes(),
         };
     }
 

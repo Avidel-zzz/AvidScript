@@ -30,6 +30,7 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 语言一致性、结构热重载、完整调试和 Windows 真实玩法验证。P65 未完成的性能、发布与移动端债务继续保留。
 [P66.A 静态局部函数](Docs/Phase66/P66.A_Lexical_Functions.md)已支持独立作用域、嵌套、递归及直接调用；
 [P66.B 直接调用捕获](Docs/Phase66/P66.B_Direct_Capture_Results.md)进一步支持外层变量共享读写及跨 await 保存。
+[委托签名合同](Docs/Phase66/P66.B_Delegate_Signature_Contract.md)已覆盖封闭泛型身份、引用参数及产物校验，为后续委托执行提供类型依据。
 lambda、逃逸委托、泛型/异步局部函数和后续开发体验阶段仍未完成。
 
 ## 现在可以做什么
