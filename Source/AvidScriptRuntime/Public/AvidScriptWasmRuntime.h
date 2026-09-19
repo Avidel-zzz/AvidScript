@@ -470,6 +470,8 @@ public:
 #endif
 
 	bool IsLoaded() const;
+	// Game-thread query for owners that must defer mutation until contextual calls unwind.
+	bool IsContextInvocationActive() const { return ContextInvocationDepth != 0; }
 	const FAvidScriptVmBackendInfo& GetActiveBackendInfo() const
 	{
 		return ActiveBackendInfo;

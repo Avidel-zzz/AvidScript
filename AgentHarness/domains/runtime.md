@@ -2,7 +2,8 @@
 
 ## 所有权
 
-- Session 是脚本实例、VM context、callback、continuation、reload transaction 和资源 token 的生命周期 owner。
+- Session 是脚本实例上下文、callback、continuation、reload transaction 和资源 token 的生命周期 owner；生产生成类型的 VM、堆和静态状态由包/World/registry 执行域持有。独立 Session 路径仍持有独立 Runtime。
+- 同域实例退出只退休自身状态并释放租约，最后实例退出才卸载 VM；共享初始化或执行失败必须隔离整个域，等活动调用退出后清理，不能仅丢弃一个实例冒充共享状态回滚。
 - BeginPlay、Tick、EndPlay、UE event、timer 和 async completion 进入统一 dispatcher，不各自维护私有执行模型。
 - world teardown、object destruction、reload、cancel 和 module shutdown 必须幂等清理，禁止悬挂回调重新进入失效 Session。
 

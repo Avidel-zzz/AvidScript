@@ -21,6 +21,7 @@ struct FAvidScriptGeneratedPreparedTypeRoute;
 struct FAvidScriptRuntimeGeneratedTypeInstanceState;
 struct FAvidScriptRuntimeArtifact;
 struct FAvidScriptPreparedRuntimeActivation;
+class FAvidScriptRuntimeExecutionDomain;
 
 struct AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeSessionSnapshot
 {
@@ -136,7 +137,7 @@ public:
 		void* Result) override;
 
 	bool IsLiveLoaded() const;
-	bool IsOperationActive() const { return bMutationInProgress || ActiveGuestCallDepth > 0 || bPackageReloadBarrier || PreparedActivation.IsValid(); }
+	bool IsOperationActive() const;
 	bool AttachDebugger(TConstArrayView<uint64> BreakpointProbeIds);
 	bool DetachDebugger();
 	bool SetDebugBreakpoints(TConstArrayView<uint64> BreakpointProbeIds);
@@ -169,6 +170,7 @@ public:
 	int32 GetRejectedReloadCount() const { return RejectedReloadCount; }
 #if WITH_DEV_AUTOMATION_TESTS
 	FAvidScriptWasmRuntimeInstance* GetLiveRuntimeForTesting() const { return LiveRuntime.Get(); }
+	TWeakPtr<FAvidScriptWasmRuntimeInstance> GetRuntimeLeaseForTesting() const { return LiveRuntime; }
 	void SetBackendSelectionForTesting(const FAvidScriptVmBackendSelection& InBackendSelection)
 	{
 		check(!LiveRuntime);
@@ -226,7 +228,13 @@ public:
 private:
 	friend class FAvidScriptRuntimeLifecycleCoordinator;
 	friend class FAvidScriptGeneratedTypeRuntimeHost;
-	bool ReloadArtifactInternal(const FAvidScriptRuntimeArtifact& Artifact, FAvidScriptWasmReloadResult& OutResult, bool bDeferCommit);
+	friend class FAvidScriptRuntimeExecutionDomain;
+	bool LoadGeneratedDomainArtifact(const FAvidScriptRuntimeArtifact& Artifact,
+		const TSharedPtr<FAvidScriptRuntimeExecutionDomain>& Domain, FAvidScriptWasmReloadResult& OutResult);
+	bool ReloadArtifactInternal(const FAvidScriptRuntimeArtifact& Artifact, FAvidScriptWasmReloadResult& OutResult, bool bDeferCommit,
+		TSharedPtr<FAvidScriptRuntimeExecutionDomain>* SharedCandidate = nullptr);
+	void ReleaseLiveRuntime(FAvidScriptWasmSmokeResult& OutResult);
+	void RecordDomainFault(const FAvidScriptWasmSmokeResult& Failure);
 	bool ValidatePreparedActivation(FString& OutError);
 	bool CommitPreparedActivation(FAvidScriptWasmReloadResult& OutResult);
 	bool DiscardPreparedActivation(FAvidScriptWasmReloadResult& OutResult);
@@ -250,7 +258,7 @@ private:
 
 	bool BuildValidatedRuntime(
 		const FAvidScriptRuntimeArtifact& Artifact,
-		TUniquePtr<FAvidScriptWasmRuntimeInstance>& OutRuntime,
+		TSharedPtr<FAvidScriptWasmRuntimeInstance>& OutRuntime,
 		FAvidScriptWasmReloadResult& OutResult) const;
 	FAvidScriptVmLoadConfig::FExecutionBudget ResolveExecutionBudget(
 		const FAvidScriptVmBackendSelection& Selection,
@@ -262,10 +270,11 @@ private:
 		const FAvidScriptWasmReloadManifest& Manifest,
 		FAvidScriptWasmReloadResult& OutResult) const;
 	bool ActivateValidatedRuntime(
-		TUniquePtr<FAvidScriptWasmRuntimeInstance>& CandidateRuntime,
+		TSharedPtr<FAvidScriptWasmRuntimeInstance>& CandidateRuntime,
 		const FAvidScriptWasmReloadManifest& Manifest,
 		bool bUseHostEffectTransaction,
-		FAvidScriptWasmReloadResult& OutResult, bool bDeferCommit = false);
+		FAvidScriptWasmReloadResult& OutResult, bool bDeferCommit = false,
+		const TSharedPtr<FAvidScriptRuntimeExecutionDomain>& CandidateDomain = {});
 	bool PrepareGeneratedTypeExports(
 		FAvidScriptWasmRuntimeInstance& Runtime,
 		TArray<FAvidScriptGeneratedPreparedTypeRoute>& OutRoutes,
@@ -289,7 +298,8 @@ private:
 	TSharedPtr<FAvidScriptSessionContinuations> Continuations;
 	TUniquePtr<FAvidScriptProfilerEventBuffer> Profiler;
 	TUniquePtr<FAvidScriptSessionDebugger> Debugger;
-	TUniquePtr<FAvidScriptWasmRuntimeInstance> LiveRuntime;
+	TSharedPtr<FAvidScriptWasmRuntimeInstance> LiveRuntime;
+	TSharedPtr<FAvidScriptRuntimeExecutionDomain> LiveDomain;
 	TUniquePtr<FAvidScriptRuntimeScheduler> Scheduler;
 	TUniquePtr<FAvidScriptRuntimeEventRouter> EventRouter;
 	TUniquePtr<FAvidScriptRuntimeGeneratedTypeInstanceState> GeneratedTypeInstance;

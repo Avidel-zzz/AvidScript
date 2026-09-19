@@ -185,7 +185,7 @@ bool FAvidScriptRuntimeSession::ClearGeneratedTypeInstance(FString& OutError)
 	{
 		return true;
 	}
-	if (!IsInGameThread() || IsOperationActive())
+	if (!IsInGameThread() || IsOperationActive() || LiveDomain)
 	{
 		OutError = TEXT("generated type instance teardown requires an idle GameThread session");
 		return false;

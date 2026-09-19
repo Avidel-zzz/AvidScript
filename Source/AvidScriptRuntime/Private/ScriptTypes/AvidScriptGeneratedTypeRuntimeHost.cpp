@@ -4,6 +4,7 @@
 #include "AvidScriptObjectRegistry.h"
 #include "AvidScriptRuntimeArtifact.h"
 #include "AvidScriptRuntimeSession.h"
+#include "Session/AvidScriptRuntimeExecutionDomain.h"
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
 #include "Misc/CommandLine.h"
@@ -494,8 +495,19 @@ bool FAvidScriptGeneratedTypeRuntimeHost::ReloadPackage(
 		for (auto& Pair : Impl->Instances)
 			if (Pair.Value && Pair.Value->Session) Pair.Value->Session->bPackageReloadBarrier = false;
 	};
+	const auto PoisonLiveDomains = [this, &OutError]()
+	{
+		FAvidScriptWasmSmokeResult Failure;
+		Failure.ModuleId = Impl->Package->Artifact.Manifest.ModuleId;
+		Failure.ErrorCategory = TEXT("execution_domain_package_failed");
+		Failure.ErrorMessage = OutError;
+		for (auto& Pair : Impl->Instances)
+			if (Pair.Value && Pair.Value->Session && Pair.Value->Session->LiveDomain)
+				Pair.Value->Session->LiveDomain->Poison(Failure);
+	};
 	ON_SCOPE_EXIT { ReleaseBarriers(); };
 	TArray<FGeneratedTypeRuntimeInstance*> PreparedInstances;
+	TMap<FAvidScriptRuntimeExecutionDomain*, TSharedPtr<FAvidScriptRuntimeExecutionDomain>> CandidateDomains;
 	PreparedInstances.Reserve(Impl->Instances.Num());
 	bool bFailedCandidateRestored = true;
 	for (TPair<FObjectKey, TUniquePtr<FGeneratedTypeRuntimeInstance>>& Pair : Impl->Instances)
@@ -515,7 +527,8 @@ bool FAvidScriptGeneratedTypeRuntimeHost::ReloadPackage(
 			break;
 		}
 		FAvidScriptWasmReloadResult SessionResult;
-		if (!Instance->Session->ReloadArtifactInternal(Artifact, SessionResult, true))
+		auto& CandidateDomain = CandidateDomains.FindOrAdd(Instance->Session->LiveDomain.Get());
+		if (!Instance->Session->ReloadArtifactInternal(Artifact, SessionResult, true, &CandidateDomain))
 		{
 			bFailedCandidateRestored = !SessionResult.bHostEffectRollbackAttempted || SessionResult.bHostEffectRollbackSucceeded;
 			OutError = SessionResult.ErrorMessage.IsEmpty()
@@ -560,6 +573,7 @@ bool FAvidScriptGeneratedTypeRuntimeHost::ReloadPackage(
 		OutResult.bRollbackPreservedLivePackage = bRollbackSucceeded;
 		if (!bRollbackSucceeded)
 		{
+			PoisonLiveDomains(); // Failed restoration must not execute Guest EndPlay.
 			ReleaseBarriers();
 			Impl->bTeardownPending = true;
 			for (auto Iterator = Impl->Instances.CreateIterator(); Iterator; ++Iterator)
@@ -587,6 +601,7 @@ bool FAvidScriptGeneratedTypeRuntimeHost::ReloadPackage(
 				FAvidScriptWasmReloadResult DiscardResult;
 				PreparedInstances[Index]->Session->DiscardPreparedActivation(DiscardResult);
 			}
+			PoisonLiveDomains(); // Do not run either generation after partial publication.
 			ReleaseBarriers();
 			Impl->bTeardownPending = true;
 			for (auto Iterator = Impl->Instances.CreateIterator(); Iterator; ++Iterator)
@@ -601,7 +616,9 @@ bool FAvidScriptGeneratedTypeRuntimeHost::ReloadPackage(
 		++OutResult.ReloadedInstanceCount;
 	}
 
-	Impl->Package.Emplace(FGeneratedTypeRuntimePackage{ Registry, Artifact });
+	// Body-only compatibility preserves the canonical immutable type identities
+	// used by the shared Runtime imports and by owners joining after this reload.
+	Impl->Package.Emplace(FGeneratedTypeRuntimePackage{ PreviousPackage.Registry, Artifact });
 	OutResult.Disposition =
 		EAvidScriptGeneratedTypePackageReloadDisposition::BodyOnlyApplied;
 	return true;
@@ -1038,7 +1055,32 @@ bool FAvidScriptGeneratedTypeRuntimeHost::BeginInstance(
 	}
 
 	FAvidScriptWasmReloadResult LoadResult;
-	if (!Instance->Session->LoadInitialArtifact(Package.Artifact, LoadResult))
+	TSharedPtr<FAvidScriptRuntimeExecutionDomain> Domain;
+	for (const auto& Pair : Impl->Instances)
+	{
+		const auto* Peer = Pair.Value->Session.Get();
+		if (Peer && Peer->LiveDomain && Peer->HostContext.World == HostContext.World)
+		{
+			Domain = Peer->LiveDomain;
+			break;
+		}
+	}
+	// The candidate may execute native callbacks before it becomes a member.
+	// Fence existing members until its activation has committed or failed.
+	TArray<FAvidScriptRuntimeSession*> FencedPeers;
+	if (Domain)
+		for (auto& Pair : Impl->Instances)
+			if (Pair.Value->Session && Pair.Value->Session->LiveDomain == Domain)
+			{
+				Pair.Value->Session->bPackageReloadBarrier = true;
+				FencedPeers.Add(Pair.Value->Session.Get());
+			}
+	ON_SCOPE_EXIT
+	{
+		for (auto* Peer : FencedPeers) Peer->bPackageReloadBarrier = false;
+		if (Domain) Domain->DrainFault();
+	};
+	if (!Instance->Session->LoadGeneratedDomainArtifact(Package.Artifact, Domain, LoadResult))
 	{
 		OutError = LoadResult.ErrorMessage.IsEmpty()
 			? TEXT("generated type instance Runtime artifact load failed")

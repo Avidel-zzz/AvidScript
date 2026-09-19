@@ -76,7 +76,7 @@ void AppendWasmExport(
 
 TArray<uint8> BuildGeneratedTypeSessionModule(
 	const int32 ReturnConstant = INDEX_NONE,
-	const bool bTrapGeneratedExport = false, const bool bIncrementGlobal = false)
+	const bool bTrapGeneratedExport = false, const bool bIncrementGlobal = false, const bool bTrapSecondBegin = false)
 {
 	check(ReturnConstant == INDEX_NONE || ReturnConstant >= 0 && ReturnConstant < 64);
 	TArray<uint8> Module = {
@@ -90,7 +90,8 @@ TArray<uint8> BuildGeneratedTypeSessionModule(
 	AppendWasmSection(Module, 0x01, TypeSection);
 	const TArray<uint8> FunctionSection = { 0x02, 0x00, 0x01 };
 	AppendWasmSection(Module, 0x03, FunctionSection);
-	if (bIncrementGlobal) AppendWasmSection(Module, 6, {1, 0x7f, 1, 0x41, 0, 0x0b});
+	if (bTrapSecondBegin) AppendWasmSection(Module, 6, {2, 0x7f, 1, 0x41, 0, 0x0b, 0x7f, 1, 0x41, 0, 0x0b});
+	else if (bIncrementGlobal) AppendWasmSection(Module, 6, {1, 0x7f, 1, 0x41, 0, 0x0b});
 
 	TArray<uint8> ExportSection = { 0x02 };
 	AppendWasmExport(ExportSection, "avid_on_begin_play", 0);
@@ -99,7 +100,10 @@ TArray<uint8> BuildGeneratedTypeSessionModule(
 		"avid_ue_0123456789abcdef0123456789abcdef",
 		1);
 	AppendWasmSection(Module, 0x07, ExportSection);
-	const TArray<uint8> CodeSection = bIncrementGlobal
+	const TArray<uint8> CodeSection = bTrapSecondBegin
+		? TArray<uint8>{2, 18, 0, 0x23, 1, 0x41, 1, 0x6a, 0x24, 1, 0x23, 1, 0x41, 2, 0x46, 0x04, 0x40, 0, 0x0b, 0x0b,
+			11, 0, 0x23, 0, 0x41, 1, 0x6a, 0x24, 0, 0x23, 0, 0x0b}
+		: bIncrementGlobal
 		? TArray<uint8>{2, 2, 0, 0x0b, 11, 0, 0x23, 0, 0x41, 1, 0x6a, 0x24, 0, 0x23, 0, 0x0b}
 		: bTrapGeneratedExport
 		? TArray<uint8>{
@@ -385,8 +389,8 @@ bool FAvidScriptGeneratedCSharpSharedBindingsTest::RunTest(const FString& Parame
 		auto ContextB = SessionB.GetTestSnapshot().HostContext;
 		auto ContextC = SessionC.GetTestSnapshot().HostContext;
 		auto* Runtime = SessionA.GetLiveRuntimeForTesting();
-		// Native sharing probe: production Sessions still own separate VMs. A state
-		// from another VM must never be reused even when the receiver ABI matches.
+		// Independent-Session probe: a state from another VM must never be reused
+		// even when the receiver ABI matches. Production Host coverage follows below.
 		for (auto* Context : {&ContextB, &ContextC})
 		{
 			Context->InstanceExecutionState.Reset();
@@ -438,6 +442,36 @@ bool FAvidScriptGeneratedCSharpSharedBindingsTest::RunTest(const FString& Parame
 		TestTrue(TEXT("carrier Session stops"), SessionA.StopAndUnload(Stop));
 		TestTrue(TEXT("foreign Session stops"), SessionC.StopAndUnload(Stop));
 		TestTrue(TEXT("foreign registration clears"), SessionC.ClearGeneratedTypeInstance(Error));
+
+		auto Host = FAvidScriptGeneratedTypeRuntimeHost::CreateIsolatedForTesting();
+		ON_SCOPE_EXIT { Host->Shutdown(); };
+		const auto Artifact = FAvidScriptRuntimeArtifact::FromCanonicalWasm(Manifest, Wasm, Selection);
+		A->Value = 10; B->Value = 20; C->Value = 1000;
+		if (!Host->InstallPackage(Types, Artifact, Error) || !Host->BeginInstance(*A, 0, Error)
+			|| !Host->BeginInstance(*B, 0, Error)) { AddError(Error); return false; }
+		auto* ProductionA = Host->GetInstanceSessionForTesting(*A);
+		auto* ProductionB = Host->GetInstanceSessionForTesting(*B);
+		TestTrue(TEXT("CSharp production owners share the same VM"), ProductionA->GetLiveRuntimeForTesting() == ProductionB->GetLiveRuntimeForTesting());
+		auto CallProduction = [&](UObject* Owner, int32 Expected)
+		{
+			int32 Value = 0;
+			TestTrue(TEXT("CSharp production dispatcher executes"), FAvidScriptGeneratedTypeDispatcher::Invoke(Owner, 0,
+				static_cast<uint32>(Metadata->GetNumberField(TEXT("member_ordinal"))), {}, &Value));
+			TestEqual(TEXT("CSharp production static and owner state match .NET"), Value, Expected);
+		};
+		CallProduction(A.Get(), 1111); CallProduction(B.Get(), 2222); CallProduction(A.Get(), 1414);
+		TestTrue(TEXT("CSharp first production owner exits"), Host->EndInstance(*A, Error));
+		CallProduction(B.Get(), 2626);
+		FAvidScriptGeneratedTypePackageReloadResult ProductionReload;
+		if (!Host->ReloadPackage(OtherTypes, Artifact, ProductionReload, Error)
+			|| !Host->BeginInstance(*C, 0, Error)) { AddError(Error); return false; }
+		TestTrue(TEXT("CSharp post-reload owner shares the canonical bindings"), ProductionB->GetLiveRuntimeForTesting()
+			== Host->GetInstanceSessionForTesting(*C)->GetLiveRuntimeForTesting());
+		CallProduction(B.Get(), 2727); CallProduction(C.Get(), 101202);
+		auto* ProductionHeap = ProductionB->GetLiveRuntimeForTesting()->GetManagedHeapForTesting();
+		TestEqual(TEXT("production invocation frames unwind"), ProductionHeap->GetStats().ActiveFrames, 0u);
+		TestEqual(TEXT("production temporary roots unwind"), ProductionHeap->GetStats().LiveRoots, 0u);
+		if (bStress) TestTrue(TEXT("production captures survive forced GC"), ProductionHeap->GetStats().Collections >= ProductionHeap->GetStats().Allocations);
 	}
 	return true;
 }
@@ -1500,6 +1534,25 @@ bool FAvidScriptGeneratedSessionExecutionEntriesTest::RunTest(const FString& Par
 		TestTrue(TEXT("stop after EndPlay succeeds"), Session.StopAndUnload(Result));
 		TestTrue(TEXT("stop retires explicit state"), State->IsRetired());
 		TestTrue(TEXT("execution fixture registration clears"), Session.ClearGeneratedTypeInstance(Error));
+		auto Host = FAvidScriptGeneratedTypeRuntimeHost::CreateIsolatedForTesting();
+		TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> Peer(NewObject<UAvidScriptGeneratedTypeSessionTestObject>());
+		ON_SCOPE_EXIT { Host->Shutdown(); };
+		const auto Artifact = FAvidScriptRuntimeArtifact::FromCanonicalWasm(Manifest, Wasm, Selection);
+		if (!Host->InstallPackage(Registry, Artifact, Error) || !Host->BeginInstance(*Owner, 0, Error)
+			|| !Host->BeginInstance(*Peer, 0, Error)) { AddError(Error); return false; }
+		auto* OwnerSession = Host->GetInstanceSessionForTesting(*Owner);
+		auto* PeerSession = Host->GetInstanceSessionForTesting(*Peer);
+		const auto OwnerState = OwnerSession->GetTestSnapshot().HostContext.InstanceExecutionState;
+		TestEqual(TEXT("production owner schedules its Timer"), OwnerSession->GetLivePendingTimerCount(), 1);
+		TestEqual(TEXT("production peer schedules a separate Timer"), PeerSession->GetLivePendingTimerCount(), 1);
+		TestTrue(TEXT("production owner exits before its Timer fires"), Host->EndInstance(*Owner, Error));
+		TestTrue(TEXT("exited owner state is retired"), OwnerState->IsRetired());
+		TestEqual(TEXT("exited owner Timer is cancelled"), OwnerState->GetPendingTimerCount(), 0);
+		TestEqual(TEXT("peer Timer survives owner exit"), PeerSession->GetLivePendingTimerCount(), 1);
+		TestTrue(TEXT("production peer pumps its own Timer"), PeerSession->Tick(0.01f, Result));
+		TestEqual(TEXT("only peer Timer executes"), PeerSession->GetLiveTimerCallbackCount(), 1);
+		TestTrue(TEXT("production peer reads shared state after owner exit"), FAvidScriptGeneratedTypeDispatcher::Invoke(Peer.Get(), 0, 0, {}, &Value));
+		TestEqual(TEXT("shared state includes one EndPlay and one surviving Timer"), Value, 2);
 	}
 	return true;
 }
@@ -1540,7 +1593,8 @@ bool FAvidScriptGeneratedPackagePreparedReloadTest::RunTest(const FString& Param
 			TestTrue(TEXT("published generated route executes"), FAvidScriptGeneratedTypeDispatcher::Invoke(Owner, 0, 0, {}, &Value));
 			TestEqual(TEXT("module global retains the original VM state"), Value, Expected);
 		};
-		Call(A.Get(), 1); Call(A.Get(), 2); Call(B.Get(), 1);
+		TestTrue(TEXT("production owners share one VM"), BeforeA.LiveRuntimeIdentity == BeforeB.LiveRuntimeIdentity);
+		Call(A.Get(), 1); Call(A.Get(), 2); Call(B.Get(), 3);
 		A->Value = 100;
 		int32 CandidateVisits = 0;
 		FProperty* Property = FindFProperty<FProperty>(A->GetClass(), TEXT("Value"));
@@ -1585,7 +1639,7 @@ bool FAvidScriptGeneratedPackagePreparedReloadTest::RunTest(const FString& Param
 			TestEqual(TEXT("B generation is unchanged"), SessionB->GetGeneratedExecutionGeneration(), GenerationB);
 		}
 		TestEqual(TEXT("both failure points actually prepared candidates"), CandidateVisits, 3);
-		Call(A.Get(), 3); Call(B.Get(), 2);
+		Call(A.Get(), 4); Call(B.Get(), 5);
 		SessionA->SetCandidateBeginPlayObserverForTesting(ObserveCandidate);
 		SessionB->SetCandidateBeginPlayObserverForTesting(ObserveCandidate);
 		FAvidScriptGeneratedTypePackageReloadResult Committed;
@@ -1598,7 +1652,8 @@ bool FAvidScriptGeneratedPackagePreparedReloadTest::RunTest(const FString& Param
 			&& BeforeB.HostContext.InstanceExecutionState->IsRetired());
 		TestEqual(TEXT("A generation advances exactly once"), SessionA->GetGeneratedExecutionGeneration(), GenerationA + 1);
 		TestEqual(TEXT("B generation advances exactly once"), SessionB->GetGeneratedExecutionGeneration(), GenerationB + 1);
-		Call(A.Get(), 1); Call(B.Get(), 1);
+		TestTrue(TEXT("publication installs one shared candidate VM"), SessionA->GetLiveRuntimeForTesting() == SessionB->GetLiveRuntimeForTesting());
+		Call(A.Get(), 1); Call(B.Get(), 2);
 		const auto CurrentA = SessionA->GetTestSnapshot().HostContext;
 		const auto CurrentB = SessionB->GetTestSnapshot().HostContext;
 		int32 InvalidatingVisits = 0;
@@ -1620,6 +1675,101 @@ bool FAvidScriptGeneratedPackagePreparedReloadTest::RunTest(const FString& Param
 		TestEqual(TEXT("unrestorable package releases registry handles"), Host->GetRegisteredHandleCount(), 0);
 		TestTrue(TEXT("fail-closed teardown retires both original states"), CurrentA.InstanceExecutionState->IsRetired()
 			&& CurrentB.InstanceExecutionState->IsRetired());
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptGeneratedProductionDomainTest,
+	"AvidScript.Runtime.GeneratedTypes.ProductionExecutionDomain",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptGeneratedProductionDomainTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot> Types, ReloadTypes;
+	FString Error;
+	if (!FAvidScriptGeneratedTypeRegistry::BuildFromJson(BuildGeneratedTypeSessionManifest(), Types, Error)
+		|| !FAvidScriptGeneratedTypeRegistry::BuildFromJson(BuildGeneratedTypeSessionManifest(), ReloadTypes, Error))
+	{ AddError(Error); return false; }
+	FAvidScriptWasmReloadManifest Manifest;
+	Manifest.ModuleId = TEXT("production_execution_domain"); Manifest.Language = TEXT("wasm");
+	Manifest.AbiVersion = FAvidScriptWasmReloadManifest::SupportedAbiVersion;
+	Manifest.RequiredExports = {TEXT("avid_on_begin_play")};
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	for (int32 Scenario = 0; Scenario != 3; ++Scenario)
+	{
+		AddInfo(FString::Printf(TEXT("production domain backend=%d scenario=%d"), static_cast<int32>(Backend), Scenario));
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime ? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		const auto Wasm = BuildGeneratedTypeSessionModule(INDEX_NONE, Scenario == 1, Scenario != 1, Scenario == 2);
+		const auto Artifact = FAvidScriptRuntimeArtifact::FromCanonicalWasm(Manifest, Wasm, Selection);
+		auto Host = FAvidScriptGeneratedTypeRuntimeHost::CreateIsolatedForTesting();
+		TStrongObjectPtr<UWorld> OtherWorld(NewObject<UWorld>());
+		TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> A(NewObject<UAvidScriptGeneratedTypeSessionTestObject>());
+		TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> B(NewObject<UAvidScriptGeneratedTypeSessionTestObject>());
+		TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> C(NewObject<UAvidScriptGeneratedTypeSessionTestObject>());
+		TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> Other(NewObject<UAvidScriptGeneratedTypeSessionTestObject>(OtherWorld.Get()));
+		ON_SCOPE_EXIT { Host->Shutdown(); };
+		if (!Host->InstallPackage(Types, Artifact, Error) || !Host->BeginInstance(*A, 0, Error)
+			|| !Host->BeginInstance(*Other, 0, Error)) { AddError(Error); return false; }
+		auto* SA = Host->GetInstanceSessionForTesting(*A);
+		auto* SO = Host->GetInstanceSessionForTesting(*Other);
+		auto OldLease = SA->GetRuntimeLeaseForTesting();
+		const auto StateA = SA->GetTestSnapshot().HostContext.InstanceExecutionState;
+		TestTrue(TEXT("different Worlds use different VMs"), SA->GetLiveRuntimeForTesting() != SO->GetLiveRuntimeForTesting());
+		if (Scenario == 2)
+		{
+			TestFalse(TEXT("second owner initialization trap rejects the join"), Host->BeginInstance(*B, 0, Error));
+			TestTrue(TEXT("failed join quarantines the existing owner"), SA->GetSnapshot().bFaultQuarantined);
+			TestFalse(TEXT("failed join releases existing shared VM"), OldLease.IsValid());
+			TestTrue(TEXT("failed join retires the existing state"), StateA->IsRetired());
+			TestTrue(TEXT("failed join leaves a different World running"), SO->IsLiveLoaded());
+			TestEqual(TEXT("failed new owner releases its handle"), Host->GetRegisteredHandleCount(), 2);
+			continue;
+		}
+		if (!Host->BeginInstance(*B, 0, Error)) { AddError(Error); return false; }
+		auto* SB = Host->GetInstanceSessionForTesting(*B);
+		const auto StateB = SB->GetTestSnapshot().HostContext.InstanceExecutionState;
+		TestTrue(TEXT("same World owners share Runtime identity"), SA->GetLiveRuntimeForTesting() == SB->GetLiveRuntimeForTesting());
+		TestTrue(TEXT("shared Runtime preserves distinct instance state"), StateA != StateB);
+		int32 Value = 0;
+		if (Scenario == 1)
+		{
+			TestFalse(TEXT("member trap fails the source call"), FAvidScriptGeneratedTypeDispatcher::Invoke(A.Get(), 0, 0, {}, &Value));
+			TestTrue(TEXT("trap quarantines both owners"), SA->GetSnapshot().bFaultQuarantined && SB->GetSnapshot().bFaultQuarantined);
+			TestFalse(TEXT("trap releases the complete domain VM"), OldLease.IsValid());
+			TestTrue(TEXT("trap retires all owner states"), StateA->IsRetired() && StateB->IsRetired());
+			TestFalse(TEXT("peer cannot enter failed shared state"), FAvidScriptGeneratedTypeDispatcher::Invoke(B.Get(), 0, 0, {}, &Value));
+			TestTrue(TEXT("another World remains loaded after domain trap"), SO->IsLiveLoaded());
+			continue;
+		}
+		auto Call = [&](UObject* Owner, int32 Expected)
+		{
+			TestTrue(TEXT("production member executes"), FAvidScriptGeneratedTypeDispatcher::Invoke(Owner, 0, 0, {}, &Value));
+			TestEqual(TEXT("production global is shared only inside its World"), Value, Expected);
+		};
+		Call(A.Get(), 1); Call(B.Get(), 2); Call(Other.Get(), 1);
+		FAvidScriptWasmReloadResult Rejected;
+		TestFalse(TEXT("one owner cannot privately reload shared code"), SA->ReloadArtifact(Artifact, Rejected));
+		TestTrue(TEXT("first owner releases its lease"), Host->EndInstance(*A, Error));
+		TestTrue(TEXT("peer retains the VM after first owner exits"), OldLease.IsValid() && SB->IsLiveLoaded());
+		TestTrue(TEXT("only exiting state retires"), StateA->IsRetired() && !StateB->IsRetired());
+		Call(B.Get(), 3);
+		FAvidScriptGeneratedTypePackageReloadResult Reloaded;
+		TestTrue(TEXT("shared package reload accepts a fresh equivalent registry"), Host->ReloadPackage(ReloadTypes, Artifact, Reloaded, Error));
+		TestFalse(TEXT("publication releases previous VM"), OldLease.IsValid());
+		TestTrue(TEXT("old remaining owner state retires"), StateB->IsRetired());
+		if (!Host->BeginInstance(*C, 0, Error)) { AddError(Error); return false; }
+		auto* SC = Host->GetInstanceSessionForTesting(*C);
+		TestTrue(TEXT("owner joining after reload reuses canonical type identity and VM"), SB->GetLiveRuntimeForTesting() == SC->GetLiveRuntimeForTesting());
+		Call(B.Get(), 1); Call(C.Get(), 2); Call(Other.Get(), 1);
+		auto ReloadedLease = SB->GetRuntimeLeaseForTesting();
+		TestTrue(TEXT("reloaded owner B stops"), Host->EndInstance(*B, Error));
+		TestTrue(TEXT("reloaded peer C remains"), ReloadedLease.IsValid());
+		Call(C.Get(), 3);
+		TestTrue(TEXT("last reloaded owner stops"), Host->EndInstance(*C, Error));
+		TestFalse(TEXT("last owner destroys the Runtime"), ReloadedLease.IsValid());
+		TestTrue(TEXT("unrelated World still owns its Runtime"), SO->IsLiveLoaded());
 	}
 	return true;
 }

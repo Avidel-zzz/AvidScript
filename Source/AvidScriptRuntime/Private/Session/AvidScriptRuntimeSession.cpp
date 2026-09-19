@@ -1,4 +1,5 @@
 #include "AvidScriptRuntimeSession.h"
+#include "Session/AvidScriptRuntimeExecutionDomain.h"
 
 #include "AvidScriptRuntimeArtifact.h"
 
@@ -10,6 +11,7 @@
 #include "GameFramework/Actor.h"
 #include "HostEffects/AvidScriptHostEffectTransaction.h"
 #include "Lifecycle/AvidScriptRuntimeLifecycleCoordinator.h"
+#include "Misc/ScopeExit.h"
 #include "Ownership/AvidScriptSessionObjectOwnership.h"
 #include "Session/AvidScriptSessionDelegateSubscriptions.h"
 #include "Session/AvidScriptSessionInboundHandlers.h"
@@ -24,7 +26,8 @@ DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptRuntimeSession, Log, All);
 
 struct FAvidScriptPreparedRuntimeActivation
 {
-	TUniquePtr<FAvidScriptWasmRuntimeInstance> Runtime;
+	TSharedPtr<FAvidScriptWasmRuntimeInstance> Runtime;
+	TSharedPtr<FAvidScriptRuntimeExecutionDomain> Domain;
 	FAvidScriptWasmHostContext Context;
 	FAvidScriptWasmReloadManifest Manifest;
 	FAvidScriptWasmSmokeResult BeginPlayResult;
@@ -34,6 +37,111 @@ struct FAvidScriptPreparedRuntimeActivation
 	TOptional<FAvidScriptHostEffectTransaction> HostEffectTransaction;
 	int32 BorrowedHandleCheckpoint = 0;
 };
+
+FAvidScriptRuntimeExecutionDomain::FAvidScriptRuntimeExecutionDomain(
+	TSharedPtr<FAvidScriptWasmRuntimeInstance> InRuntime, const FAvidScriptWasmHostContext& Context,
+	TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot> InTypes)
+	: Runtime(MoveTemp(InRuntime)), World(Context.World), Registry(Context.ObjectRegistry), Types(MoveTemp(InTypes))
+{
+	check(IsInGameThread() && Runtime && Registry && Types);
+}
+
+FAvidScriptRuntimeExecutionDomain::~FAvidScriptRuntimeExecutionDomain()
+{
+	check(IsInGameThread() && Members.IsEmpty());
+	Runtime->Unload();
+}
+
+bool FAvidScriptRuntimeExecutionDomain::Matches(const FAvidScriptWasmHostContext& Context,
+	const TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot>& InTypes) const
+{
+	return !bFaulted && Runtime->IsLoaded() && !World.IsStale()
+		&& World == Context.World && Registry == Context.ObjectRegistry && Types == InTypes;
+}
+
+bool FAvidScriptRuntimeExecutionDomain::HasActiveCalls() const
+{
+	return Runtime->IsContextInvocationActive();
+}
+
+void FAvidScriptRuntimeExecutionDomain::Attach(FAvidScriptRuntimeSession& Session)
+{
+	check(IsInGameThread() && !bFaulted && !Members.Contains(&Session));
+	Members.Add(&Session);
+}
+
+void FAvidScriptRuntimeExecutionDomain::Detach(FAvidScriptRuntimeSession& Session)
+{
+	check(IsInGameThread() && !HasActiveCalls());
+	const int32 Removed = Members.RemoveSingle(&Session);
+	check(Removed == 1);
+	if (Members.IsEmpty()) Runtime->Unload();
+}
+
+void FAvidScriptRuntimeExecutionDomain::Poison(const FAvidScriptWasmSmokeResult& Failure)
+{
+	check(IsInGameThread());
+	if (!bFaulted)
+	{
+		bFaulted = true;
+		RootFailure = Failure;
+		for (auto* Session : Members) Session->RecordDomainFault(RootFailure);
+	}
+	DrainFault();
+}
+
+void FAvidScriptRuntimeExecutionDomain::DrainFault()
+{
+	if (!bFaulted || bDraining) return;
+	for (const auto* Session : Members)
+		if (Session->IsOperationActive()) return;
+	TGuardValue<bool> DrainGuard(bDraining, true);
+	const auto Snapshot = Members;
+	for (auto* Session : Snapshot)
+	{
+		const int32 PreviousFaultCount = Session->FaultCount;
+		FAvidScriptWasmSmokeResult Stopped;
+		Session->StopAndUnload(Stopped); // Quarantine suppresses Guest EndPlay.
+		Session->RecordDomainFault(RootFailure);
+		Session->FaultCount = PreviousFaultCount;
+	}
+}
+
+void FAvidScriptRuntimeSession::RecordDomainFault(const FAvidScriptWasmSmokeResult& Failure)
+{
+	if (!bFaultQuarantined) ++FaultCount;
+	bFaultQuarantined = true;
+	FaultedModuleId = Failure.ModuleId;
+	FaultCategory = Failure.ErrorCategory.IsEmpty() ? TEXT("execution_domain_faulted") : Failure.ErrorCategory;
+	FaultExportName = Failure.ExportName;
+	FaultDiagnostic = Failure.ErrorMessage.Left(4096);
+}
+
+bool FAvidScriptRuntimeSession::IsOperationActive() const
+{
+	return bMutationInProgress || ActiveGuestCallDepth > 0 || bPackageReloadBarrier || PreparedActivation.IsValid()
+		|| (LiveDomain && LiveDomain->HasActiveCalls());
+}
+
+void FAvidScriptRuntimeSession::ReleaseLiveRuntime(FAvidScriptWasmSmokeResult& OutResult)
+{
+	if (!LiveRuntime) return;
+	if (LiveDomain)
+	{
+		FString RetireError;
+		if (HostContext.InstanceExecutionState && !HostContext.InstanceExecutionState->IsRetired())
+		{
+			const bool bRetired = LiveRuntime->RetireInstanceExecutionState(HostContext.InstanceExecutionState, RetireError);
+			checkf(bRetired, TEXT("idle execution-domain instance could not retire: %s"), *RetireError);
+		}
+		LiveDomain->Detach(*this);
+		LiveDomain.Reset();
+		OutResult = FAvidScriptWasmSmokeResult();
+		OutResult.bUnloaded = true; // This Session has released its VM lease.
+	}
+	else LiveRuntime->Unload(OutResult);
+	LiveRuntime.Reset();
+}
 
 namespace
 {
@@ -436,8 +544,7 @@ void FAvidScriptRuntimeSession::AbortRuntimeForLifecycleInvalidation()
 	if (LiveRuntime)
 	{
 		FAvidScriptWasmSmokeResult IgnoredUnloadResult;
-		LiveRuntime->Unload(IgnoredUnloadResult);
-		LiveRuntime.Reset();
+		ReleaseLiveRuntime(IgnoredUnloadResult);
 	}
 	if (GeneratedTypeInstance)
 	{
@@ -471,6 +578,12 @@ void FAvidScriptRuntimeSession::ResetSuspendedContext()
 
 bool FAvidScriptRuntimeSession::LoadEmbeddedSmoke(FAvidScriptWasmReloadResult& OutResult)
 {
+	if (LiveDomain)
+	{
+		SetReloadFailure(OutResult, TEXT("<domain>"), TEXT("execution_domain_package_required"),
+			TEXT("a generated domain cannot be replaced by an embedded module"), TEXT("reload the generated package"));
+		return false;
+	}
 	PrunePendingBorrowedHandles();
 	const FString ModuleId = TEXT("embedded_smoke");
 	FAvidScriptProfilerScope ProfileScope(
@@ -506,8 +619,8 @@ bool FAvidScriptRuntimeSession::LoadEmbeddedSmoke(FAvidScriptWasmReloadResult& O
 	TGuardValue<bool> MutationGuard(bMutationInProgress, true);
 
 	const FAvidScriptWasmReloadManifest Manifest = FAvidScriptWasmReloadManifest::MakeSmoke(ModuleId);
-	TUniquePtr<FAvidScriptWasmRuntimeInstance> CandidateRuntime =
-		MakeUnique<FAvidScriptWasmRuntimeInstance>(BackendSelection);
+	TSharedPtr<FAvidScriptWasmRuntimeInstance> CandidateRuntime =
+		MakeShared<FAvidScriptWasmRuntimeInstance>(BackendSelection);
 	FAvidScriptWasmSmokeResult RuntimeResult;
 	FString BudgetError;
 	if (!CandidateRuntime->ConfigureExecutionBudget(
@@ -578,6 +691,12 @@ bool FAvidScriptRuntimeSession::LoadInitialArtifact(
 	ProfileScope.SetSucceeded(false);
 	const FString PreviousModuleId = GetLiveModuleId();
 	ResetReloadResult(OutResult, PreviousModuleId, Manifest.ModuleId, PreviousModuleId);
+	if (LiveDomain)
+	{
+		SetReloadFailure(OutResult, TEXT("<domain>"), TEXT("execution_domain_package_required"),
+			TEXT("a generated execution domain must be replaced through its package"), TEXT("reload the generated package"));
+		return false;
+	}
 	if (bApplicationSuspended)
 	{
 		SetReloadFailure(
@@ -605,7 +724,7 @@ bool FAvidScriptRuntimeSession::LoadInitialArtifact(
 		return false;
 	}
 
-	TUniquePtr<FAvidScriptWasmRuntimeInstance> CandidateRuntime;
+	TSharedPtr<FAvidScriptWasmRuntimeInstance> CandidateRuntime;
 	if (!BuildValidatedRuntime(Artifact, CandidateRuntime, OutResult))
 	{
 		OutResult.ActiveModuleId = PreviousModuleId;
@@ -621,6 +740,42 @@ bool FAvidScriptRuntimeSession::LoadInitialArtifact(
 	OutResult.bSucceeded = true;
 	OutResult.ActiveModuleId = Manifest.ModuleId;
 	ProfileScope.SetSucceeded(true);
+	return true;
+}
+
+bool FAvidScriptRuntimeSession::LoadGeneratedDomainArtifact(
+	const FAvidScriptRuntimeArtifact& Artifact, const TSharedPtr<FAvidScriptRuntimeExecutionDomain>& ExistingDomain,
+	FAvidScriptWasmReloadResult& OutResult)
+{
+	ResetReloadResult(OutResult, {}, Artifact.Manifest.ModuleId, {});
+	if (!GeneratedTypeInstance || LiveRuntime || IsOperationActive() || bApplicationSuspended
+		|| (ExistingDomain && (!ExistingDomain->Matches(HostContext, GeneratedTypeInstance->Registry)
+			|| ExistingDomain->HasActiveCalls())))
+	{
+		SetReloadFailure(OutResult, TEXT("<domain>"), TEXT("execution_domain_join_rejected"),
+			TEXT("generated owner cannot join this execution domain"), TEXT("use the current package, World and registry"));
+		return false;
+	}
+	TGuardValue<bool> MutationGuard(bMutationInProgress, true);
+	if (!ValidateManifest(Artifact.Manifest, {}, OutResult) || !ValidateExpectedOwner(Artifact.Manifest, OutResult)) return false;
+	auto Domain = ExistingDomain;
+	TSharedPtr<FAvidScriptWasmRuntimeInstance> Runtime = Domain ? Domain->GetRuntime() : nullptr;
+	if (!Runtime)
+	{
+		if (!BuildValidatedRuntime(Artifact, Runtime, OutResult)) return false;
+		Domain = MakeShared<FAvidScriptRuntimeExecutionDomain>(Runtime, HostContext, GeneratedTypeInstance->Registry);
+	}
+	if (!ActivateValidatedRuntime(Runtime, Artifact.Manifest, false, OutResult, false, Domain))
+	{
+		auto Failure = OutResult.RuntimeResult;
+		Failure.ModuleId = Artifact.Manifest.ModuleId;
+		Failure.ErrorCategory = OutResult.ErrorCategory;
+		Failure.ErrorMessage = OutResult.ErrorMessage;
+		Domain->Poison(Failure);
+		return false;
+	}
+	OutResult.bSucceeded = true;
+	OutResult.ActiveModuleId = Artifact.Manifest.ModuleId;
 	return true;
 }
 
@@ -652,7 +807,8 @@ bool FAvidScriptRuntimeSession::ReloadArtifact(
 
 bool FAvidScriptRuntimeSession::ReloadArtifactInternal(
 	const FAvidScriptRuntimeArtifact& Artifact,
-	FAvidScriptWasmReloadResult& OutResult, bool bDeferCommit)
+	FAvidScriptWasmReloadResult& OutResult, bool bDeferCommit,
+	TSharedPtr<FAvidScriptRuntimeExecutionDomain>* SharedCandidate)
 {
 	PrunePendingBorrowedHandles();
 	const FAvidScriptWasmReloadManifest& Manifest = Artifact.Manifest;
@@ -666,6 +822,12 @@ bool FAvidScriptRuntimeSession::ReloadArtifactInternal(
 	ProfileScope.SetSucceeded(false);
 	const FString PreviousModuleId = GetLiveModuleId();
 	ResetReloadResult(OutResult, PreviousModuleId, Manifest.ModuleId, PreviousModuleId);
+	if (LiveDomain && (!bDeferCommit || !SharedCandidate))
+	{
+		SetReloadFailure(OutResult, TEXT("<domain>"), TEXT("execution_domain_package_required"),
+			TEXT("shared code must be reloaded as a complete generated package"), TEXT("reload the generated package"));
+		return false;
+	}
 	if (bApplicationSuspended)
 	{
 		SetReloadFailure(
@@ -701,8 +863,11 @@ bool FAvidScriptRuntimeSession::ReloadArtifactInternal(
 		return false;
 	}
 
-	TUniquePtr<FAvidScriptWasmRuntimeInstance> CandidateRuntime;
-	if (!BuildValidatedRuntime(Artifact, CandidateRuntime, OutResult))
+	auto CandidateDomain = SharedCandidate ? *SharedCandidate : TSharedPtr<FAvidScriptRuntimeExecutionDomain>();
+	const bool bReuseCandidate = CandidateDomain.IsValid();
+	TSharedPtr<FAvidScriptWasmRuntimeInstance> CandidateRuntime = CandidateDomain ? CandidateDomain->GetRuntime() : nullptr;
+	if ((CandidateDomain && !CandidateDomain->Matches(HostContext, GeneratedTypeInstance->Registry))
+		|| (!CandidateRuntime && !BuildValidatedRuntime(Artifact, CandidateRuntime, OutResult)))
 	{
 		++RejectedReloadCount;
 		MarkRejectedReloadWithRollback(PreviousModuleId, OutResult);
@@ -710,7 +875,7 @@ bool FAvidScriptRuntimeSession::ReloadArtifactInternal(
 	}
 
 	FAvidScriptRuntimeStateMigrationResult MigrationResult;
-	if (LiveRuntime && !FAvidScriptRuntimeStateMigration::Migrate(
+	if (!bReuseCandidate && LiveRuntime && !FAvidScriptRuntimeStateMigration::Migrate(
 		*LiveRuntime,
 		LiveManifest,
 		*CandidateRuntime,
@@ -741,7 +906,12 @@ bool FAvidScriptRuntimeSession::ReloadArtifactInternal(
 	OutResult.StateMigrationSkippedSlotCount = MigrationResult.SkippedSlotCount;
 	OutResult.StateMigrationAliasedSlotCount = MigrationResult.AliasedSlotCount;
 
-	if (!ActivateValidatedRuntime(CandidateRuntime, Manifest, true, OutResult, bDeferCommit))
+	if (SharedCandidate && !CandidateDomain)
+	{
+		CandidateDomain = MakeShared<FAvidScriptRuntimeExecutionDomain>(CandidateRuntime, HostContext, GeneratedTypeInstance->Registry);
+		*SharedCandidate = CandidateDomain;
+	}
+	if (!ActivateValidatedRuntime(CandidateRuntime, Manifest, true, OutResult, bDeferCommit, CandidateDomain))
 	{
 		++RejectedReloadCount;
 		const FString ActiveModuleId = GetLiveModuleId();
@@ -925,7 +1095,7 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 
 void FAvidScriptRuntimeSession::ClearHostContext()
 {
-	if (IsOperationActive())
+	if (IsOperationActive() || LiveDomain)
 	{
 		UE_LOG(
 			LogAvidScriptRuntimeSession,
@@ -1180,6 +1350,11 @@ bool FAvidScriptRuntimeSession::CanEnterGuest(
 	FAvidScriptWasmSmokeResult& OutResult)
 {
 	PrunePendingBorrowedHandles();
+	if (LiveDomain && LiveDomain->IsFaulted())
+	{
+		auto Domain = LiveDomain;
+		Domain->DrainFault();
+	}
 	if (LiveRuntime && ((GeneratedTypeInstance && !HostContext.InstanceExecutionState)
 		|| (HostContext.InstanceExecutionState && HostContext.InstanceExecutionState->IsRetired())))
 	{
@@ -1239,6 +1414,12 @@ bool FAvidScriptRuntimeSession::CanEnterGuest(
 void FAvidScriptRuntimeSession::QuarantineFaultedRuntime(
 	const FAvidScriptWasmSmokeResult& Failure)
 {
+	if (LiveDomain && (LiveDomain->IsFaulted() || GetLiveLifecycleState() == EAvidScriptLifecycleState::Faulted))
+	{
+		auto Domain = LiveDomain;
+		Domain->Poison(Failure);
+		return;
+	}
 	if (!LiveRuntime
 		|| GetLiveLifecycleState() !=
 			EAvidScriptLifecycleState::Faulted)
@@ -1541,7 +1722,7 @@ bool FAvidScriptRuntimeSession::EndPlayLive(FAvidScriptWasmSmokeResult& OutResul
 
 bool FAvidScriptRuntimeSession::StopAndUnload(FAvidScriptWasmSmokeResult& OutResult)
 {
-	if (IsOperationActive())
+	if (IsOperationActive() || (LiveDomain && LiveDomain->HasActiveCalls()))
 	{
 		SetSessionExecutionFailure(
 			GetLiveModuleId(),
@@ -1560,6 +1741,8 @@ bool FAvidScriptRuntimeSession::StopAndUnload(FAvidScriptWasmSmokeResult& OutRes
 		OutResult.bUnloaded = true;
 		return true;
 	}
+	auto DomainAtEntry = LiveDomain;
+	ON_SCOPE_EXIT { if (DomainAtEntry) DomainAtEntry->DrainFault(); };
 	TGuardValue<bool> MutationGuard(bMutationInProgress, true);
 	bool bSucceeded = true;
 	FAvidScriptWasmSmokeResult EndPlayFailure;
@@ -1575,16 +1758,16 @@ bool FAvidScriptRuntimeSession::StopAndUnload(FAvidScriptWasmSmokeResult& OutRes
 		const bool bRunning = State
 			? !State->IsRetired() && State->GetLifecycleState() == EAvidScriptLifecycleState::Running
 			: LiveRuntime->GetLifecycleState() == EAvidScriptLifecycleState::Running;
-		if (bRunning && !(State ? LiveRuntime->EndPlayInContext(HostContext, EndPlayFailure)
+		if (!bFaultQuarantined && bRunning && !(State ? LiveRuntime->EndPlayInContext(HostContext, EndPlayFailure)
 			: LiveRuntime->EndPlay(EndPlayFailure)))
 		{
 			bSucceeded = false;
+			if (LiveDomain) LiveDomain->Poison(EndPlayFailure);
 		}
 
 		FAvidScriptWasmSmokeResult UnloadResult;
-		LiveRuntime->Unload(UnloadResult);
+		ReleaseLiveRuntime(UnloadResult);
 		OutResult = bSucceeded ? UnloadResult : EndPlayFailure;
-		LiveRuntime.Reset();
 	}
 	else
 	{
@@ -2073,12 +2256,12 @@ bool FAvidScriptRuntimeSession::ValidateManifest(
 
 bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 	const FAvidScriptRuntimeArtifact& Artifact,
-	TUniquePtr<FAvidScriptWasmRuntimeInstance>& OutRuntime,
+	TSharedPtr<FAvidScriptWasmRuntimeInstance>& OutRuntime,
 	FAvidScriptWasmReloadResult& OutResult) const
 {
 	const FAvidScriptWasmReloadManifest& Manifest = Artifact.Manifest;
-	TUniquePtr<FAvidScriptWasmRuntimeInstance> CandidateRuntime =
-		MakeUnique<FAvidScriptWasmRuntimeInstance>(Artifact.BackendSelection);
+	TSharedPtr<FAvidScriptWasmRuntimeInstance> CandidateRuntime =
+		MakeShared<FAvidScriptWasmRuntimeInstance>(Artifact.BackendSelection);
 	TArray<FAvidScriptVmTypedHostImport> GeneratedPropertyImports;
 	if (GeneratedTypeInstance)
 	{
@@ -2287,11 +2470,24 @@ bool FAvidScriptRuntimeSession::ValidateExpectedOwner(
 }
 
 bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
-	TUniquePtr<FAvidScriptWasmRuntimeInstance>& CandidateRuntime,
+	TSharedPtr<FAvidScriptWasmRuntimeInstance>& CandidateRuntime,
 	const FAvidScriptWasmReloadManifest& Manifest,
 	bool bUseHostEffectTransaction,
-	FAvidScriptWasmReloadResult& OutResult, bool bDeferCommit)
+	FAvidScriptWasmReloadResult& OutResult, bool bDeferCommit,
+	const TSharedPtr<FAvidScriptRuntimeExecutionDomain>& CandidateDomain)
 {
+	const auto RejectCandidate = [&]()
+	{
+		if (CandidateDomain)
+		{
+			auto Failure = OutResult.RuntimeResult;
+			Failure.ModuleId = Manifest.ModuleId;
+			Failure.ErrorCategory = OutResult.ErrorCategory;
+			Failure.ErrorMessage = OutResult.ErrorMessage;
+			CandidateDomain->Poison(Failure);
+		}
+		else if (CandidateRuntime) CandidateRuntime->Unload();
+	};
 	if (GeneratedExecutionGeneration == MAX_uint64)
 	{
 		SetReloadFailure(OutResult, TEXT("<runtime>"), TEXT("execution_generation_exhausted"),
@@ -2321,7 +2517,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 			TEXT("generated_type_export_prepare_failed"),
 			GeneratedTypePrepareError,
 			TEXT("rebuild the generated type WASM exports and keep the previous runtime active"));
-		CandidateRuntime->Unload();
+		RejectCandidate();
 		return false;
 	}
 	TArray<FAvidScriptPreparedDelegateEvent> CandidateDelegateEvents;
@@ -2349,7 +2545,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 				? TEXT("the candidate delegate event plans could not be prepared")
 				: DelegatePrepareError,
 			TEXT("regenerate the callback descriptor and keep the previous runtime active"));
-		CandidateRuntime->Unload();
+		RejectCandidate();
 		return false;
 	}
 	if (GeneratedTypeInstance)
@@ -2370,7 +2566,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 			DiscardPreparedCallbacks();
 			SetReloadFailure(OutResult, TEXT("<contextual_callbacks>"), TEXT("callback_export_prepare_failed"),
 				DelegatePrepareError, TEXT("keep the previous Runtime and rebuild the callback exports"));
-			CandidateRuntime->Unload();
+			RejectCandidate();
 			return false;
 		}
 	}
@@ -2402,7 +2598,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 				TEXT("delegate_subscription_prepare_failed"),
 				DelegatePrepareError,
 				TEXT("bind the script to a compatible live self object before activation"));
-			CandidateRuntime->Unload();
+			RejectCandidate();
 			return false;
 		}
 	}
@@ -2452,7 +2648,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 		DiscardPreparedCallbacks();
 		SetReloadFailure(OutResult, TEXT("<instance_state>"), TEXT("instance_execution_state_prepare_failed"),
 			GeneratedTypePrepareError, TEXT("bind a live owner in the Runtime World and registry"));
-		CandidateRuntime->Unload();
+		RejectCandidate();
 		return false;
 	}
 
@@ -2507,7 +2703,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 		SetRuntimeBaseContext(*CandidateRuntime, HostContext);
 		Continuations->DiscardPrepared();
 		DiscardPreparedCallbacks();
-		CandidateRuntime->Unload();
+		RejectCandidate();
 		return false;
 	}
 
@@ -2553,11 +2749,12 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 		SetRuntimeBaseContext(*CandidateRuntime, HostContext);
 		Continuations->DiscardPrepared();
 		DiscardPreparedCallbacks();
-		CandidateRuntime->Unload();
+		RejectCandidate();
 		return false;
 	}
 
 	Pending->Runtime = MoveTemp(CandidateRuntime);
+	Pending->Domain = CandidateDomain;
 	Pending->Context = CandidateHostContext;
 	Pending->Manifest = Manifest;
 	Pending->BeginPlayResult = BeginPlayResult;
@@ -2573,6 +2770,7 @@ bool FAvidScriptRuntimeSession::ValidatePreparedActivation(FString& OutError)
 {
 	OutError.Reset();
 	if (!IsInGameThread() || ActiveGuestCallDepth != 0 || !PreparedActivation || bApplicationSuspended
+		|| (PreparedActivation->Domain && PreparedActivation->Domain->IsFaulted())
 		|| !PreparedActivation->Runtime || !PreparedActivation->Runtime->IsLoaded()
 		|| GeneratedExecutionGeneration == MAX_uint64
 		|| (PreparedActivation->HostEffectTransaction.IsSet()
@@ -2628,7 +2826,12 @@ bool FAvidScriptRuntimeSession::DiscardPreparedActivation(FAvidScriptWasmReloadR
 	}
 	Pending->Context.HostEffectJournal = nullptr;
 	SetRuntimeBaseContext(*Pending->Runtime, Pending->Context);
-	Pending->Runtime->Unload();
+	if (Pending->Domain)
+	{
+		FString RetireError;
+		bRestored = Pending->Runtime->RetireInstanceExecutionState(Pending->Context.InstanceExecutionState, RetireError) && bRestored;
+	}
+	else Pending->Runtime->Unload();
 	Continuations->DiscardPrepared();
 	DelegateSubscriptions->DiscardPrepared();
 	InboundHandlers->DiscardPrepared();
@@ -2675,8 +2878,8 @@ bool FAvidScriptRuntimeSession::CommitPreparedActivation(FAvidScriptWasmReloadRe
 		InboundHandlers->SetDispatchEnabled(false);
 		InboundHandlers->UnbindActive();
 		Scheduler->Detach();
-		LiveRuntime->Unload();
-		LiveRuntime.Reset();
+		FAvidScriptWasmSmokeResult Released;
+		ReleaseLiveRuntime(Released);
 		LiveManifest = FAvidScriptWasmReloadManifest();
 	}
 	Continuations->ReleaseRetiredEndpoint();
@@ -2687,6 +2890,8 @@ bool FAvidScriptRuntimeSession::CommitPreparedActivation(FAvidScriptWasmReloadRe
 	SetRuntimeBaseContext(*CandidateRuntime, CandidateHostContext);
 	OutResult.RuntimeResult = Pending->BeginPlayResult;
 	LiveRuntime = MoveTemp(CandidateRuntime);
+	LiveDomain = MoveTemp(Pending->Domain);
+	if (LiveDomain) LiveDomain->Attach(*this);
 	++GeneratedExecutionGeneration;
 	if (GeneratedTypeInstance)
 	{

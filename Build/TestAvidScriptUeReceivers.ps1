@@ -26,7 +26,7 @@ try {
 $RunId = [DateTimeOffset]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')
 $LogPath = Join-Path $ProjectRoot "Saved/Logs/AvidScript_CSharpUeReceiver_$RunId.log"
 $TestName = 'AvidScript.Runtime.GeneratedTypes'
-$ExpectedCount = 15
+$ExpectedCount = 16
 & (Join-Path $EngineRoot 'Engine/Binaries/Win64/UnrealEditor-Cmd.exe') $ProjectPath -unattended -nop4 -NullRHI -nosplash "-ExecCmds=Automation RunTests $TestName;Quit" '-TestExit=Automation Test Queue Empty' "-abslog=$LogPath"
 if ($LASTEXITCODE -ne 0) { throw "Generated type Automation exited with $LASTEXITCODE. Log: $LogPath" }
 $Log = Get-Content -Raw -LiteralPath $LogPath
