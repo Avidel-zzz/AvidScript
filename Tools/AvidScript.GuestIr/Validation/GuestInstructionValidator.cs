@@ -33,6 +33,10 @@ internal static class GuestInstructionValidator
             case "call":
                 ValidateCall(context, function, instruction, result, operands);
                 break;
+            case "function_ref":
+            case "call_indirect":
+                GuestFunctionReferenceValidator.ValidateInstruction(context, function, instruction, result, operands);
+                break;
             case "local_load":
                 GuestStorageInstructionValidator.ValidateLocalLoad(
                     context, function, instruction, result, operands, values);
@@ -254,6 +258,7 @@ internal static class GuestInstructionValidator
         if (comparison)
         {
             if (!context.Types.TryGetValue(result.TypeId, out GuestType? resultType)
+                || IsNominalOrdinal(resultType)
                 || !string.Equals(resultType.Storage, "i32", StringComparison.Ordinal))
             {
                 AddTypeMismatch(context, function, instruction);
@@ -443,6 +448,6 @@ internal static class GuestInstructionValidator
 
     private static bool IsNominalOrdinal(GuestType type)
     {
-        return type.Kind is "class_ref" or "factory_ref" or "object_type_ref" or "composite_ref";
+        return type.Kind is "class_ref" or "factory_ref" or "object_type_ref" or "composite_ref" or "function_ref";
     }
 }

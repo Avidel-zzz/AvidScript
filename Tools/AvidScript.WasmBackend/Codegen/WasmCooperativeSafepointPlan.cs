@@ -197,10 +197,10 @@ internal sealed class WasmCooperativeSafepointPlan
             function => function.Id,
             function => function.Blocks
                 .SelectMany(block => block.Instructions)
-                .Where(instruction => instruction.Op == "call"
-                    && instruction.TargetId is not null
-                    && functionIds.Contains(instruction.TargetId))
-                .Select(instruction => instruction.TargetId!)
+                .SelectMany(instruction => instruction.Op == "call_indirect"
+                    ? module.FunctionReferences.Single(reference => reference.TypeId == instruction.TargetId).TargetFunctionIds
+                    : instruction.Op == "call" && instruction.TargetId is not null && functionIds.Contains(instruction.TargetId)
+                        ? new[] { instruction.TargetId } : Array.Empty<string>())
                 .Distinct(StringComparer.Ordinal)
                 .ToArray(),
             StringComparer.Ordinal);

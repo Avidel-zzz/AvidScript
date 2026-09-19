@@ -17,7 +17,20 @@ public sealed record GuestModule(
     [property: JsonPropertyOrder(10)] IReadOnlyList<GuestDataSegment> DataSegments,
     [property: JsonPropertyOrder(11)] IReadOnlyList<GuestFunction> Functions,
     [property: JsonPropertyOrder(12)] IReadOnlyList<GuestExport> Exports,
-    [property: JsonPropertyOrder(13)] IReadOnlyList<GuestDiagnostic> Diagnostics);
+    [property: JsonPropertyOrder(13)] IReadOnlyList<GuestDiagnostic> Diagnostics)
+{
+    [JsonPropertyOrder(14)]
+    public IReadOnlyList<GuestFunctionReference> FunctionReferences { get; init; } =
+        System.Array.Empty<GuestFunctionReference>();
+}
+
+// A nominal signature and its closed set of addressable Guest functions.
+// Imports require a Guest adapter, so host capabilities cannot become arbitrary table entries.
+public sealed record GuestFunctionReference(
+    [property: JsonPropertyOrder(0)] string TypeId,
+    [property: JsonPropertyOrder(1)] IReadOnlyList<string> ParameterTypeIds,
+    [property: JsonPropertyOrder(2)] string ReturnTypeId,
+    [property: JsonPropertyOrder(3)] IReadOnlyList<string> TargetFunctionIds);
 
 public sealed record GuestProvenance(
     [property: JsonPropertyOrder(0)] string SourceId,

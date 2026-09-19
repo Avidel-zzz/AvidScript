@@ -1811,8 +1811,8 @@ $DirectAbiExports = @($DirectAbiExports | Sort-Object -Unique)
 $UnexpectedDeclaredExports = @($RequiredExports | Where-Object { $DirectAbiExports -notcontains $_ })
 $MissingObservedExports = @($RequiredExports | Where-Object { $ObservedExports -notcontains $_ })
 $UnexpectedObservedExports = @($ObservedExports | Where-Object { $RequiredExports -notcontains $_ })
-$GuestContractValid = [int]$GuestIrModel.schema_version -eq 2 -and
-    [string]$GuestIrModel.ir_version -eq "1.1" -and
+$GuestContractValid = [int]$GuestIrModel.schema_version -eq 3 -and
+    [string]$GuestIrModel.ir_version -eq "1.2" -and
     [bool]$GuestIrModel.succeeded -and
     [string]$GuestIrModel.provenance.semantic_sha256 -eq $SemanticSha256 -and
     [string]$GuestIrModel.provenance.source_sha256 -eq [string]$FrontendModel.source.sha256

@@ -31,6 +31,10 @@ internal sealed class WasmModuleLayout
 
     public uint ImportedFunctionCount { get; }
 
+    public Dictionary<string, WasmFunctionReferenceRange> FunctionReferences { get; } = new(StringComparer.Ordinal);
+
+    public List<string> TableFunctionIds { get; } = new();
+
     public static WasmModuleLayout Create(
         GuestModule module,
         WasmCooperativeSafepointPlan? safepointPlan = null)
@@ -79,12 +83,28 @@ internal sealed class WasmModuleLayout
             functionIndices.Add(function.Id, functionIndex++);
         }
 
-        return new WasmModuleLayout(
+        WasmModuleLayout layout = new(
             types,
             signatures,
             typeIndices,
             functionIndices,
             importedFunctionCount);
+        foreach (GuestFunctionReference reference in module.FunctionReferences.OrderBy(item => item.TypeId, StringComparer.Ordinal))
+        {
+            // Slot zero is always null. Each nominal signature owns a disjoint range,
+            // even when WASM erases different Guest types to the same machine signature.
+            uint start = checked((uint)layout.TableFunctionIds.Count + 1);
+            Dictionary<string, uint> slots = new(StringComparer.Ordinal);
+            foreach (string target in reference.TargetFunctionIds.OrderBy(id => id, StringComparer.Ordinal))
+            {
+                slots.Add(target, checked((uint)layout.TableFunctionIds.Count + 1));
+                layout.TableFunctionIds.Add(target);
+            }
+            uint signature = AddSignature(CreateSignature(reference.ParameterTypeIds, reference.ReturnTypeId,
+                types, IsMemoryType(types[reference.ReturnTypeId])), signatures, signatureIndices);
+            layout.FunctionReferences.Add(reference.TypeId, new(reference, start, slots, signature));
+        }
+        return layout;
     }
 
     public WasmValueType ResolveValueType(string typeId)
@@ -156,6 +176,9 @@ internal sealed class WasmModuleLayout
         return string.Equals(type.Storage, "memory", StringComparison.Ordinal);
     }
 }
+
+internal sealed record WasmFunctionReferenceRange(
+    GuestFunctionReference Contract, uint Start, IReadOnlyDictionary<string, uint> Slots, uint SignatureIndex);
 
 internal sealed record WasmFunctionSignature(
     IReadOnlyList<WasmValueType> Parameters,

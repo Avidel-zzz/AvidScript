@@ -16,12 +16,20 @@ internal static class GuestRequiredGraphValidator
             || module.Functions is null
             || module.Exports is null
             || module.Diagnostics is null
+            || module.FunctionReferences is null
             || HasNull(module.ModuleId, module.Language))
         {
             return false;
         }
 
         GuestProvenance provenance = module.Provenance;
+        foreach (GuestFunctionReference? reference in module.FunctionReferences)
+        {
+            if (reference is null || HasNull(reference.TypeId, reference.ReturnTypeId)
+                || reference.ParameterTypeIds is null || reference.TargetFunctionIds is null
+                || reference.ParameterTypeIds.Any(id => id is null)
+                || reference.TargetFunctionIds.Any(id => id is null)) return false;
+        }
         if (HasNull(
             provenance.SourceId,
             provenance.SourceSha256,

@@ -83,6 +83,7 @@ internal sealed class GuestTypeLayoutResolver
                 "class_ref" => LayoutClassReference(declaration),
                 "factory_ref" or "object_type_ref" => LayoutObjectCapability(declaration),
                 "composite_ref" => LayoutCompositeValueCapability(declaration),
+                "function_ref" => LayoutFunctionReference(declaration),
                 _ => InvalidShape(declaration, $"unsupported kind '{declaration.Kind}'"),
             };
         }
@@ -240,6 +241,14 @@ internal sealed class GuestTypeLayoutResolver
             return InvalidShape(declaration, "composite value capability has fields or related type metadata");
         }
 
+        return declaration with { Storage = "i32", Size = 4, Alignment = 4 };
+    }
+
+    private GuestType? LayoutFunctionReference(GuestType declaration)
+    {
+        if (declaration.Fields.Count != 0 || declaration.ElementTypeId is not null
+            || declaration.UnderlyingTypeId is not null)
+            return InvalidShape(declaration, "function reference has value fields or related type metadata");
         return declaration with { Storage = "i32", Size = 4, Alignment = 4 };
     }
 

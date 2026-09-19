@@ -300,6 +300,14 @@ internal sealed class WasmFunctionCompiler
             case "call":
                 CompileCall(body, instruction);
                 break;
+            case "function_ref":
+                body.WriteByte(0x41);
+                body.WriteS32(checked((int)moduleLayout.FunctionReferences[GetValueType(instruction.ResultId!).Id].Slots[instruction.TargetId!]));
+                WriteResult(body, instruction);
+                break;
+            case "call_indirect":
+                CompileIndirectCall(body, instruction);
+                break;
             case "local_load":
                 CompileLocalLoad(body, instruction);
                 break;
@@ -478,6 +486,34 @@ internal sealed class WasmFunctionCompiler
         {
             WriteResult(body, instruction);
         }
+    }
+
+    private void CompileIndirectCall(WasmBinaryWriter body, GuestInstruction instruction)
+    {
+        FlushArrayRegion(body);
+        WasmFunctionReferenceRange range = moduleLayout.FunctionReferences[instruction.TargetId!];
+        uint referenceLocal = localIndices[instruction.OperandIds[0]];
+        // Unsigned subtraction rejects null, underflow and out-of-range tokens.
+        // This is stronger than call_indirect's erased WASM signature check.
+        WriteLocalGet(body, referenceLocal);
+        body.WriteByte(0x41);
+        body.WriteS32(checked((int)range.Start));
+        body.WriteByte(0x6b); // i32.sub
+        body.WriteByte(0x41);
+        body.WriteS32(range.Slots.Count);
+        body.WriteByte(0x4f); // i32.ge_u
+        body.WriteByte(0x04);
+        body.WriteByte(0x40);
+        body.WriteByte(0x00); // unreachable
+        body.WriteByte(0x0b);
+        bool usesSRet = moduleLayout.IsMemoryType(range.Contract.ReturnTypeId);
+        if (usesSRet) WriteLocalGet(body, localIndices[instruction.ResultId!]);
+        foreach (string argument in instruction.OperandIds.Skip(1)) WriteLocalGet(body, localIndices[argument]);
+        WriteLocalGet(body, referenceLocal);
+        body.WriteByte(0x11); // call_indirect
+        body.WriteU32(range.SignatureIndex);
+        body.WriteU32(0);
+        if (instruction.ResultId is not null && !usesSRet) WriteResult(body, instruction);
     }
 
     private void CompileLocalLoad(WasmBinaryWriter body, GuestInstruction instruction)

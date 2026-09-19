@@ -79,9 +79,11 @@ public static class WasmModuleCompiler
         WriteTypeSection(writer, layout);
         WriteImportSection(writer, module, layout, safepointPlan);
         WriteFunctionSection(writer, module, layout);
+        WriteTableSection(writer, layout);
         WriteMemorySection(writer, module, layout);
         WriteGlobalSection(writer, module, safepointPlan);
         WriteExportSection(writer, module, layout);
+        WriteElementSection(writer, layout);
         int emittedSafepointCount = WriteCodeSection(
             writer,
             module,
@@ -93,6 +95,35 @@ public static class WasmModuleCompiler
             writer.ToArray(),
             debugOffsets,
             safepointPlan.CreateAttestation(emittedSafepointCount));
+    }
+
+    private static void WriteTableSection(WasmBinaryWriter writer, WasmModuleLayout layout)
+    {
+        if (layout.FunctionReferences.Count == 0) return;
+        writer.WriteSection(4, section =>
+        {
+            section.WriteU32(1);
+            section.WriteByte(0x70); // funcref; private, fixed-size WASM 1.0 table.
+            section.WriteByte(1);
+            uint size = checked((uint)layout.TableFunctionIds.Count + 1);
+            section.WriteU32(size);
+            section.WriteU32(size);
+        });
+    }
+
+    private static void WriteElementSection(WasmBinaryWriter writer, WasmModuleLayout layout)
+    {
+        if (layout.TableFunctionIds.Count == 0) return;
+        writer.WriteSection(9, section =>
+        {
+            section.WriteU32(1);
+            section.WriteU32(0); // active element segment for table zero
+            section.WriteByte(0x41);
+            section.WriteS32(1); // reserve the null slot
+            section.WriteByte(0x0b);
+            section.WriteU32(checked((uint)layout.TableFunctionIds.Count));
+            foreach (string target in layout.TableFunctionIds) section.WriteU32(layout.FunctionIndices[target]);
+        });
     }
 
     private static void WriteSafepointProofSection(
