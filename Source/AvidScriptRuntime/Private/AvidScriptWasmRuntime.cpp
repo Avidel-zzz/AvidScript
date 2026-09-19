@@ -10,6 +10,7 @@
 #include "DataBridge/AvidScriptCommandBuffer.h"
 #include "Diagnostics/AvidScriptWasmDebugMap.h"
 #include "Misc/PackageName.h"
+#include "Memory/AvidScriptManagedHeap.h"
 #include "Profiling/AvidScriptProfiler.h"
 #include "UObject/SoftObjectPath.h"
 #include "UObject/UnrealType.h"
@@ -1387,6 +1388,7 @@ bool FAvidScriptWasmRuntimeInstance::LoadArtifactView(
 		Unload();
 		return false;
 	}
+	ManagedHeap = MakeUnique<AvidScript::Managed::FHeap>();
 	return true;
 }
 bool FAvidScriptWasmRuntimeInstance::ValidateRequiredExports(
@@ -2853,6 +2855,11 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	ArrayValueHeap.Reset();
 	Utf8ValueHeap.Reset();
 	CompositeValueHeap.Reset();
+	if (ManagedHeap)
+	{
+		ManagedHeap->Close();
+		ManagedHeap.Reset();
+	}
 	PreparedGeneratedHostCalls.Reset();
 	PreparedReflectionHostCalls.Reset();
 	PreparedVmBindingPackage = FAvidScriptVmBindingPackage();

@@ -20,6 +20,7 @@
 class FAvidScriptWasmDebugMap;
 class FAvidScriptProfilerEventBuffer;
 class UWorld;
+namespace AvidScript::Managed { class FHeap; }
 
 class AVIDSCRIPTRUNTIME_API IAvidScriptEventSubscriptionHost
 {
@@ -262,6 +263,7 @@ public:
 	bool ReadStateBytes(uint32 GuestAddress, TArrayView<uint8> OutBytes, FString& OutError) const;
 	bool WriteStateBytes(uint32 GuestAddress, TConstArrayView<uint8> Bytes, FString& OutError);
 #if WITH_DEV_AUTOMATION_TESTS
+	AvidScript::Managed::FHeap* GetManagedHeapForTesting() const { return ManagedHeap.Get(); }
 	bool InvokeI32PairExportHotForTesting(
 		const FString& ExportName,
 		int32 FirstArgument,
@@ -792,6 +794,7 @@ private:
 		FString& OutError);
 
 	TUniquePtr<IAvidScriptVmBackend> VmBackend;
+	TUniquePtr<AvidScript::Managed::FHeap> ManagedHeap;
 	FAvidScriptVmBackendSelection BackendSelection;
 	FAvidScriptVmBackendInfo ActiveBackendInfo;
 	FAvidScriptVmLoadConfig::FExecutionBudget ExecutionBudget;
