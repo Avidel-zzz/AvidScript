@@ -47,6 +47,9 @@ internal static class GuestInstructionValidator
             case "call":
                 ValidateCall(context, function, instruction, result, operands);
                 break;
+            case "call_framed":
+                GuestFramedCallValidator.ValidateInstruction(context, function, instruction, result, operands);
+                break;
             case "function_ref":
             case "call_indirect":
                 GuestFunctionReferenceValidator.ValidateInstruction(context, function, instruction, result, operands);

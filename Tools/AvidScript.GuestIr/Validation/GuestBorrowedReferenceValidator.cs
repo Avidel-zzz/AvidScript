@@ -29,7 +29,7 @@ internal static class GuestBorrowedReferenceValidator
         bool borrowed = target?.Kind == GuestBorrowedReference.Kind || operands.Any(operand => Type(operand)?.Kind == GuestBorrowedReference.Kind);
         if (!instruction.Op.StartsWith("borrow_", StringComparison.Ordinal))
         {
-            if (borrowed && instruction.Op is not ("copy" or "local_load" or "local_store" or "call" or "call_indirect" or "memory_copy"))
+            if (borrowed && instruction.Op is not ("copy" or "local_load" or "local_store" or "call" or "call_indirect" or "call_framed" or "memory_copy"))
                 Add(context, $"Function '{function.Id}' cannot expose or forge a borrowed descriptor through '{instruction.Op}'.");
             if (instruction.Op == "address_of" && instruction.TargetId is { } addressed && values.TryGetValue(addressed, out GuestRegister? value)
                 && Type(value)?.Kind == GuestBorrowedReference.Kind)

@@ -17,12 +17,16 @@ internal static class GuestRequiredGraphValidator
             || module.Exports is null
             || module.Diagnostics is null
             || module.FunctionReferences is null
+            || module.FramedExports is null
             || HasNull(module.ModuleId, module.Language))
         {
             return false;
         }
 
         GuestProvenance provenance = module.Provenance;
+        foreach (GuestFramedExport? export in module.FramedExports)
+            if (export is null || HasNull(export.Name, export.FunctionId) || export.ParameterKinds is null
+                || export.ParameterKinds.Any(kind => kind is null)) return false;
         foreach (GuestFunctionReference? reference in module.FunctionReferences)
         {
             if (reference is null || HasNull(reference.TypeId, reference.ReturnTypeId)

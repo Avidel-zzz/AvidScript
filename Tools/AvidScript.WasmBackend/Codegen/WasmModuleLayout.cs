@@ -35,6 +35,7 @@ internal sealed class WasmModuleLayout
     public Dictionary<string, WasmFunctionReferenceRange> FunctionReferences { get; } = new(StringComparer.Ordinal);
 
     public List<string> TableFunctionIds { get; } = new();
+    public Dictionary<string, WasmFramedExport> FramedExports { get; } = new(StringComparer.Ordinal);
 
     public static WasmModuleLayout Create(
         GuestModule module,
@@ -91,6 +92,13 @@ internal sealed class WasmModuleLayout
             functionIndices,
             importedFunctionCount);
         layout.ManagedHeap = WasmManagedHeapPlan.Create(module, types, safepointPlan?.Enabled == true);
+        foreach (GuestFramedExport export in module.FramedExports)
+        {
+            GuestFunction function = module.Functions.Single(item => item.Id == export.FunctionId);
+            uint signature = AddSignature(new(new[] { WasmValueType.I32, WasmValueType.I32 }, null), signatures, signatureIndices);
+            layout.FramedExports.Add(export.Name, new(export, function,
+                GuestCallFrameLayout.Create(export, function, types, module.FunctionReferences), functionIndex++, signature));
+        }
         foreach (GuestFunctionReference reference in module.FunctionReferences.OrderBy(item => item.TypeId, StringComparer.Ordinal))
         {
             // Slot zero is always null. Each nominal signature owns a disjoint range,
@@ -181,6 +189,9 @@ internal sealed class WasmModuleLayout
 
 internal sealed record WasmFunctionReferenceRange(
     GuestFunctionReference Contract, uint Start, IReadOnlyDictionary<string, uint> Slots, uint SignatureIndex);
+
+internal sealed record WasmFramedExport(GuestFramedExport Contract, GuestFunction Function,
+    GuestCallFrameLayout Layout, uint FunctionIndex, uint SignatureIndex);
 
 internal sealed record WasmFunctionSignature(
     IReadOnlyList<WasmValueType> Parameters,

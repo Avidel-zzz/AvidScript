@@ -8,7 +8,7 @@ internal static class Program
         {
             int count = WasmLeb128Tests.Run() + WasmModuleCompilerTests.Run()
                 + WasmArrayBoundsTests.Run() + WasmArtifactInspectionReportTests.Run() + WasmFunctionReferenceTests.Run() + WasmManagedHeapTests.Run()
-                + WasmBorrowedReferenceTests.Run();
+                + WasmBorrowedReferenceTests.Run() + WasmFramedCallTests.Run();
             Console.WriteLine($"AvidScript.WasmBackend.Tests: {count}/{count} passed");
             return 0;
         }

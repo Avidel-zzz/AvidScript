@@ -70,6 +70,8 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 
 [生产实例上下文入口](Docs/Phase66/P66.B_Production_Method_Entry.md)进一步连接同域目标 Session 的受检同步调用，保留原始帧、堆 token 与引用位置，并延迟到外层调用退出后清理故障。Windows 构建、C# receiver 16/16、GeneratedTypes 17/17、生命周期/回调回归 36/36 通过，含双后端 A→B→A、混合参数、共享对象、ref 位置别名、GC 与错误展开。该入口是原生 prepared route 的基础，完整 C# 方法目录、参数 ABI、virtual/interface 和持久根仍在推进。
 
+[间接方法参数帧](Docs/Phase66/P66.B_Indirect_Method_ABI.md)新增 IR 7/1.6 与可执行 WASM 适配器，用两个入口参数承载完整类型化帧；双后端验证 16 个混合参数、含引用结构返回、共享别名、递归和 GC。IR 35/35、backend 148/148、Guest 362/362、Windows 构建及堆 Automation 5/5 通过。当前为 Guest IR 执行基础，真实 C# 方法目录、生产跨对象路由、虚/接口派发与持久 event/await 仍待连接，P66.B 保持进行中。
+
 ## 现在可以做什么
 
 更新于 **2026-09-10**。已跑通 **C# → WASM → UE 事件与 API → Win64 打包运行**，

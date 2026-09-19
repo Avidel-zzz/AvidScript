@@ -199,6 +199,8 @@ internal sealed class WasmCooperativeSafepointPlan
                 .SelectMany(block => block.Instructions)
                 .SelectMany(instruction => instruction.Op == "call_indirect"
                     ? module.FunctionReferences.Single(reference => reference.TypeId == instruction.TargetId).TargetFunctionIds
+                    : instruction.Op == "call_framed"
+                        ? new[] { module.FramedExports.Single(export => export.Name == instruction.TargetId).FunctionId }
                     : instruction.Op == "call" && instruction.TargetId is not null && functionIds.Contains(instruction.TargetId)
                         ? new[] { instruction.TargetId } : Array.Empty<string>())
                 .Distinct(StringComparer.Ordinal)

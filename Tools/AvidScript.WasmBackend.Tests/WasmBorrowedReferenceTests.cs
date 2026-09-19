@@ -64,7 +64,7 @@ internal static class WasmBorrowedReferenceTests
         return invalid.Length + 6;
     }
 
-    private static GuestModule Create()
+    internal static GuestModule Create()
     {
         GuestModule basis = WasmModuleCompilerTests.CreateMinimalModule();
         GuestType[] declarations = basis.Types.Concat(new[]

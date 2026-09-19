@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using AvidScript.GuestIr;
 
 namespace AvidScript.WasmBackend;
@@ -75,6 +76,7 @@ public static class WasmModuleCompiler
         List<GuestWasmDebugOffset> debugOffsets = new();
         writer.WriteBytes(Header);
         WriteProvenanceSection(writer, module);
+        WriteCallFrameSection(writer, layout);
         WriteSafepointProofSection(writer, module, safepointPlan);
         WriteTypeSection(writer, layout);
         WriteImportSection(writer, module, layout, safepointPlan);
@@ -95,6 +97,25 @@ public static class WasmModuleCompiler
             writer.ToArray(),
             debugOffsets,
             safepointPlan.CreateAttestation(emittedSafepointCount));
+    }
+
+    private static void WriteCallFrameSection(WasmBinaryWriter writer, WasmModuleLayout layout)
+    {
+        if (layout.FramedExports.Count == 0) return;
+        writer.WriteSection(0, section =>
+        {
+            section.WriteName(GuestCallFrameLayout.SectionName);
+            section.WriteBytes(JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                schema_version = GuestCallFrameLayout.Version,
+                exports = layout.FramedExports.Values.Select(export => new
+                {
+                    name = export.Contract.Name,
+                    signature_sha256 = export.Layout.SignatureSha256,
+                    frame_bytes = export.Layout.ByteSize,
+                }).ToArray(),
+            }));
+        });
     }
 
     private static void WriteTableSection(WasmBinaryWriter writer, WasmModuleLayout layout)
@@ -240,11 +261,12 @@ public static class WasmModuleCompiler
     {
         writer.WriteSection(3, section =>
         {
-            section.WriteU32(checked((uint)module.Functions.Count));
+            section.WriteU32(checked((uint)(module.Functions.Count + layout.FramedExports.Count)));
             foreach (GuestFunction function in module.Functions)
             {
                 section.WriteU32(layout.TypeIndices[function.Id]);
             }
+            foreach (WasmFramedExport export in layout.FramedExports.Values) section.WriteU32(export.SignatureIndex);
         });
     }
 
@@ -308,7 +330,7 @@ public static class WasmModuleCompiler
     {
         writer.WriteSection(7, section =>
         {
-            section.WriteU32(checked((uint)(module.Exports.Count + 1)));
+            section.WriteU32(checked((uint)(module.Exports.Count + layout.FramedExports.Count + 1)));
             section.WriteName("memory");
             section.WriteByte(0x02);
             section.WriteU32(0);
@@ -317,6 +339,11 @@ public static class WasmModuleCompiler
                 section.WriteName(export.Name);
                 section.WriteByte(0x00);
                 section.WriteU32(layout.FunctionIndices[export.FunctionId]);
+            }
+            foreach (WasmFramedExport export in layout.FramedExports.Values)
+            {
+                section.WriteName(export.Contract.Name); section.WriteByte(0);
+                section.WriteU32(export.FunctionIndex);
             }
         });
     }
@@ -331,7 +358,7 @@ public static class WasmModuleCompiler
         int emittedSafepointCount = 0;
         writer.WriteSection(10, section =>
         {
-            section.WriteU32(checked((uint)module.Functions.Count));
+            section.WriteU32(checked((uint)(module.Functions.Count + layout.FramedExports.Count)));
             foreach (GuestFunction function in module.Functions)
             {
                 WasmFunctionCompilationResult body =
@@ -352,6 +379,11 @@ public static class WasmModuleCompiler
                 }
                 section.WriteU32(checked((uint)body.Bytes.Length));
                 section.WriteBytes(body.Bytes);
+            }
+            foreach (WasmFramedExport export in layout.FramedExports.Values)
+            {
+                byte[] body = WasmFramedExportCompiler.Compile(export, layout);
+                section.WriteU32(checked((uint)body.Length)); section.WriteBytes(body);
             }
         });
         return emittedSafepointCount;

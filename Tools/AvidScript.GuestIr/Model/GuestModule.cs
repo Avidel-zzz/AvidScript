@@ -22,7 +22,18 @@ public sealed record GuestModule(
     [JsonPropertyOrder(14)]
     public IReadOnlyList<GuestFunctionReference> FunctionReferences { get; init; } =
         System.Array.Empty<GuestFunctionReference>();
+
+    [JsonPropertyOrder(15)]
+    public IReadOnlyList<GuestFramedExport> FramedExports { get; init; } =
+        System.Array.Empty<GuestFramedExport>();
 }
+
+// Dedicated synchronous, same-domain adapters. Ordinary exports remain subject to
+// the raw-reference escape rules. Parameter kinds are value/ref/out/in, in order.
+public sealed record GuestFramedExport(
+    [property: JsonPropertyOrder(0)] string Name,
+    [property: JsonPropertyOrder(1)] string FunctionId,
+    [property: JsonPropertyOrder(2)] IReadOnlyList<string> ParameterKinds);
 
 // A nominal signature and its closed set of addressable Guest functions.
 // Imports require a Guest adapter, so host capabilities cannot become arbitrary table entries.

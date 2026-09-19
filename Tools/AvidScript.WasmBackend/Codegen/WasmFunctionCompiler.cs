@@ -295,7 +295,7 @@ internal sealed partial class WasmFunctionCompiler
         GuestInstruction instruction)
     {
         RefreshBorrowedSlots(body);
-        if (instruction.Op is "call" or "call_indirect" or "managed_new" or "managed_collect"
+        if (instruction.Op is "call" or "call_indirect" or "call_framed" or "managed_new" or "managed_collect"
             or "array_load" or "array_store" or "array_length" or "array_region_load" or "array_region_store")
             FlushManagedRoots(body);
         switch (instruction.Op)
@@ -328,6 +328,9 @@ internal sealed partial class WasmFunctionCompiler
                 break;
             case "call":
                 CompileCall(body, instruction);
+                break;
+            case "call_framed":
+                CompileFramedCall(body, instruction);
                 break;
             case "function_ref":
                 body.WriteByte(0x41);

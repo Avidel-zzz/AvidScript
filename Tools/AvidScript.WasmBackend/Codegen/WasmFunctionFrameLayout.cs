@@ -25,6 +25,7 @@ internal sealed class WasmFunctionFrameLayout
 
     public int? ArrayElementScratchOffset { get; }
     public int? ManagedScratchOffset { get; }
+    public int? CallScratchOffset { get; private init; }
     public IReadOnlySet<string> BorrowedAddressTargets { get; private init; } = new HashSet<string>();
 
     public static WasmFunctionFrameLayout Create(
@@ -86,9 +87,19 @@ internal sealed class WasmFunctionFrameLayout
             managedScratchOffset = AlignUp(cursor, 16);
             cursor = checked(managedScratchOffset.Value + 64);
         }
+        int? callScratchOffset = null;
+        int callBytes = function.Blocks.SelectMany(block => block.Instructions)
+            .Where(instruction => instruction.Op == "call_framed")
+            .Select(instruction => moduleLayout.FramedExports[instruction.TargetId!].Layout.ByteSize).DefaultIfEmpty(0).Max();
+        if (callBytes > 0)
+        {
+            callScratchOffset = AlignUp(cursor, 16);
+            cursor = checked(callScratchOffset.Value + callBytes);
+        }
         int frameSize = cursor == 0 ? 0 : AlignUp(cursor, 16);
         return new WasmFunctionFrameLayout(offsets, arrayElementScratchOffset, managedScratchOffset, frameSize)
         {
+            CallScratchOffset = callScratchOffset,
             BorrowedAddressTargets = function.Blocks.SelectMany(block => block.Instructions)
                 .Where(instruction => instruction.Op == "borrow_address").Select(instruction => instruction.TargetId!).ToHashSet(StringComparer.Ordinal),
         };

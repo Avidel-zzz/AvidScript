@@ -25,7 +25,7 @@ internal static class WasmManagedHeapTests
         GuestModule[] invalid =
         {
             module with { SchemaVersion = 3, IrVersion = "1.2" },
-            module with { SchemaVersion = 7, IrVersion = "1.6" },
+            module with { SchemaVersion = 8, IrVersion = "1.7" },
             module with { Imports = Array.Empty<GuestImport>() },
             module with { Imports = new[] { module.Imports[0] with { ParameterTypeIds = new[] { I } } } },
             module with { Imports = new[] { module.Imports[0] with { Module = "env" } } },
@@ -139,7 +139,7 @@ internal static class WasmManagedHeapTests
             Require(Regex.IsMatch(header, $@"\b{command}\s*=\s*{(int)command}\s*[,}}]"), $"heap command {command} drift");
     }
 
-    private static GuestModule Create()
+    internal static GuestModule Create()
     {
         GuestModule basis = WasmModuleCompilerTests.CreateMinimalModule();
         GuestType[] declarations = basis.Types.Concat(new[]

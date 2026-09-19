@@ -277,7 +277,7 @@ bool FAvidScriptManagedHeapGeneratedGuestTest::RunTest(const FString& Parameters
 	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
 	{
 		for (const FString File : {FString(TEXT("managed.wasm")), FString(TEXT("managed-trap.wasm")), FString(TEXT("managed-cooperative.wasm")),
-			FString(TEXT("managed-erased.wasm")), FString(TEXT("managed-erased-wrong.wasm"))})
+			FString(TEXT("managed-erased.wasm")), FString(TEXT("managed-erased-wrong.wasm")), FString(TEXT("framed-managed.wasm"))})
 		{
 			if (Backend == EAvidScriptVmBackendKind::Wamr && File == TEXT("managed-cooperative.wasm")) continue;
 			TArray<uint8> Wasm;
@@ -307,7 +307,8 @@ bool FAvidScriptManagedHeapGeneratedGuestTest::RunTest(const FString& Parameters
 			uint8 Value[4]{}; FString Error;
 			TestTrue(TEXT("Read generated program result"), Runtime.ReadStateBytes(16, MakeArrayView(Value), Error));
 			TestEqual(TEXT("Reference/aggregate return, recursive/indirect calls and value-copy parameters survive GC"),
-				uint32(Value[0]) | (uint32(Value[1]) << 8) | (uint32(Value[2]) << 16) | (uint32(Value[3]) << 24), 49u);
+				uint32(Value[0]) | (uint32(Value[1]) << 8) | (uint32(Value[2]) << 16) | (uint32(Value[3]) << 24),
+				File == TEXT("framed-managed.wasm") ? 644u : 49u);
 			FHeap* Heap = Runtime.GetManagedHeapForTesting();
 			if (!TestNotNull(TEXT("Generated module owns heap"), Heap)) return false;
 			const auto Stats = Heap->GetStats();
@@ -409,7 +410,7 @@ bool FAvidScriptManagedHeapBorrowedReferencesTest::RunTest(const FString& Parame
 	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
 	{
 		for (const FString File : {FString(TEXT("borrowed.wasm")), FString(TEXT("borrowed-trap.wasm")),
-			FString(TEXT("csharp-borrowed.wasm")), FString(TEXT("csharp-borrowed-stress.wasm"))})
+			FString(TEXT("csharp-borrowed.wasm")), FString(TEXT("csharp-borrowed-stress.wasm")), FString(TEXT("framed-borrowed.wasm"))})
 		{
 			TArray<uint8> Wasm;
 			if (!TestTrue(TEXT("Load current borrowed reference fixture"), FFileHelper::LoadFileToArray(Wasm, *FPaths::Combine(Directory, File)))) return false;
