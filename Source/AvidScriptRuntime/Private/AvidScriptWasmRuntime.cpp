@@ -1320,8 +1320,10 @@ bool FAvidScriptWasmRuntimeInstance::LoadArtifactView(
 	}
 
 	FAvidScriptVmLoadConfig Config;
+	ManagedHeap = MakeUnique<AvidScript::Managed::FHeap>();
 	Config.ExecutionBudget = ExecutionBudget;
 	Config.HostDispatcher = this;
+	Config.InvocationObserver = this;
 	Config.TypedHostDispatcher = this;
 	Config.TypedHostImports = TypedHostImports;
 	Config.BindingPackage = BindingPackage.IsValid()
@@ -1342,6 +1344,7 @@ bool FAvidScriptWasmRuntimeInstance::LoadArtifactView(
 	OutResult.Metrics = Metrics;
 	if (!bLoaded)
 	{
+		ManagedHeap.Reset();
 		SetFailureFromVmError(OutResult, ModuleId, TEXT("<module>"), Error, DebugMap.Get());
 		VmBackend.Reset();
 		BindingPackage.Reset();
@@ -1388,7 +1391,6 @@ bool FAvidScriptWasmRuntimeInstance::LoadArtifactView(
 		Unload();
 		return false;
 	}
-	ManagedHeap = MakeUnique<AvidScript::Managed::FHeap>();
 	return true;
 }
 bool FAvidScriptWasmRuntimeInstance::ValidateRequiredExports(
@@ -2860,6 +2862,8 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 		ManagedHeap->Close();
 		ManagedHeap.Reset();
 	}
+	ManagedHeapFrameFloor = 0;
+	ManagedHeapInvocationDepth = 0;
 	PreparedGeneratedHostCalls.Reset();
 	PreparedReflectionHostCalls.Reset();
 	PreparedVmBindingPackage = FAvidScriptVmBindingPackage();
@@ -8043,6 +8047,12 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 
 	switch (Call.BindingId)
 	{
+	case EAvidScriptHostBindingId::ManagedHeapV1:
+	{
+		const bool bSucceeded = DispatchManagedHeapCall(Call, OutResult);
+		ProfileScope.SetSucceeded(bSucceeded);
+		return bSucceeded;
+	}
 	case EAvidScriptHostBindingId::HostAddI32:
 		return Finish(HandleHostAddI32Import(Call.IntArgs[0]), true);
 	case EAvidScriptHostBindingId::HostFailI32:

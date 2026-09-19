@@ -274,6 +274,17 @@ public:
 
 		ModuleId = InModuleId;
 		HostDispatcher = Config.HostDispatcher;
+		const bool bUsesManagedHeap = ModuleLayout.FunctionImports.ContainsByPredicate([](const auto& Import)
+		{
+			return Import.ModuleName == TEXT("avidscript") && Import.ImportName == TEXT("avid_managed_heap_v1");
+		});
+		InvocationObserver = bUsesManagedHeap ? Config.InvocationObserver : nullptr;
+		if (bUsesManagedHeap && !InvocationObserver)
+		{
+			SetVmError(OutError, TEXT("managed_heap_scope_required"), TEXT("Managed heap imports require an invocation observer."));
+			Unload();
+			return false;
+		}
 		ModuleBuffer.Append(Bytecode.GetData(), Bytecode.Num());
 
 		char ErrorBuffer[ErrorBufferSize] = {};
@@ -612,11 +623,13 @@ public:
 		uint32 Cells[FAvidScriptVmCallFrame::MaxCells] = {};
 		FMemory::Memcpy(Cells, Frame.Cells, Frame.CellCount * sizeof(uint32));
 		++ActiveCallDepth;
+		const uint64 InvocationToken = InvocationObserver ? InvocationObserver->BeginVmInvocation() : 0;
 		const bool bCallSucceeded = wasm_runtime_call_wasm(
 			ExecEnv,
 			static_cast<wasm_function_inst_t>(FunctionValue),
 			Frame.CellCount,
 			Cells);
+		if (InvocationObserver) InvocationObserver->EndVmInvocation(InvocationToken);
 		const bool bUnloadRequestedDuringCall = bUnloadDeferred;
 		FString Exception;
 		TArray<FAvidScriptVmStackFrame> StackFrames;
@@ -1035,6 +1048,7 @@ private:
 		ModuleBuffer.Reset();
 		ModuleId.Reset();
 		HostDispatcher = nullptr;
+		InvocationObserver = nullptr;
 		MaxHostCallsPerEntry = 0;
 		CurrentHostCallCount = 0;
 		bHostCallBudgetExceeded = false;
@@ -1054,6 +1068,7 @@ private:
 	TArray<uint8> ModuleBuffer;
 	FString ModuleId;
 	IAvidScriptHostDispatcher* HostDispatcher = nullptr;
+	IAvidScriptVmInvocationObserver* InvocationObserver = nullptr;
 	FAvidScriptVmBindingPackage AttachedBindingPackage;
 	TArray<FAvidScriptWamrDynamicRegistration> DynamicRegistrations;
 	TMap<const FAvidScriptWamrRawImportAttachment*, uint32> DynamicOrdinals;

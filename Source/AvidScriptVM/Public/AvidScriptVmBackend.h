@@ -178,7 +178,8 @@ enum class EAvidScriptHostBindingId : uint16
 	DebugSuspend,
 	DebugFrameRead,
 	EventIsCurrentSource,
-	CooperativeSafepointPoll
+	CooperativeSafepointPoll,
+	ManagedHeapV1
 };
 
 struct FAvidScriptVmStackFrame
@@ -417,6 +418,16 @@ public:
 	}
 };
 
+// Optional per-entry resource scope. Backends enable it only for modules that
+// import the managed heap ABI. End is called on normal return and trap, before unload.
+class AVIDSCRIPTVM_API IAvidScriptVmInvocationObserver
+{
+public:
+	virtual ~IAvidScriptVmInvocationObserver() = default;
+	virtual uint64 BeginVmInvocation() = 0;
+	virtual void EndVmInvocation(uint64 Token) = 0;
+};
+
 struct FAvidScriptVmLoadMetrics
 {
 	double RuntimeInitMs = 0.0;
@@ -510,6 +521,7 @@ struct FAvidScriptVmLoadConfig
 	uint32 HeapSize = 64 * 1024;
 	FExecutionBudget ExecutionBudget;
 	IAvidScriptHostDispatcher* HostDispatcher = nullptr;
+	IAvidScriptVmInvocationObserver* InvocationObserver = nullptr;
 	const FAvidScriptVmBindingPackage* BindingPackage = nullptr;
 	IAvidScriptVmTypedHostDispatcher* TypedHostDispatcher = nullptr;
 	TConstArrayView<FAvidScriptVmTypedHostImport> TypedHostImports;

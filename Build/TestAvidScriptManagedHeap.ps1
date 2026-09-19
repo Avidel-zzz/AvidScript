@@ -19,17 +19,17 @@ if ($RuntimeAutomation) {
     $EditorExe = Join-Path $EngineRoot 'Engine/Binaries/Win64/UnrealEditor-Cmd.exe'
     $RunId = [DateTimeOffset]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')
     $LogPath = Join-Path $ProjectRoot "Saved/Logs/AvidScript_ManagedHeap_$RunId.log"
-    $TestName = 'AvidScript.Runtime.ManagedHeap.Ownership'
+    $TestName = 'AvidScript.Runtime.ManagedHeap'
     & $EditorExe $ProjectPath -unattended -nop4 -NullRHI -nosplash "-ExecCmds=Automation RunTests $TestName;Quit" '-TestExit=Automation Test Queue Empty' "-abslog=$LogPath"
     if ($LASTEXITCODE -ne 0) { throw "Managed heap Automation exited with $LASTEXITCODE. Log: $LogPath" }
     $Log = Get-Content -Raw -LiteralPath $LogPath
-    $Found = [regex]::Matches($Log, "Found 1 automation tests based on '$([regex]::Escape($TestName))'").Count
-    $Success = [regex]::Matches($Log, 'Test Completed\. Result=\{Success\} Name=\{Ownership\} Path=\{AvidScript\.Runtime\.ManagedHeap\.Ownership\}').Count
+    $Found = [regex]::Matches($Log, "Found 2 automation tests based on '$([regex]::Escape($TestName))'").Count
+    $Success = [regex]::Matches($Log, 'Test Completed\. Result=\{Success\} Name=\{(Ownership|HostAbi)\} Path=\{AvidScript\.Runtime\.ManagedHeap\.\1\}').Count
     $Failed = [regex]::Matches($Log, 'Test Completed\. Result=\{Fail\}').Count
     $Complete = [regex]::Matches($Log, '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*\*').Count
     $Exit = [regex]::Matches($Log, 'RequestExitWithStatus\(1, 0,').Count
-    if ($Found -ne 1 -or $Success -ne 1 -or $Failed -ne 0 -or $Complete -ne 1 -or $Exit -lt 1) {
+    if ($Found -ne 1 -or $Success -ne 2 -or $Failed -ne 0 -or $Complete -ne 1 -or $Exit -lt 1) {
         throw "Managed heap Automation evidence incomplete: found=$Found passed=$Success failed=$Failed complete=$Complete exit=$Exit log=$LogPath"
     }
-    Write-Output "AvidScript.ManagedHeap.RuntimeAutomation: 1/1 passed; log=$LogPath"
+    Write-Output "AvidScript.ManagedHeap.RuntimeAutomation: 2/2 passed; log=$LogPath"
 }

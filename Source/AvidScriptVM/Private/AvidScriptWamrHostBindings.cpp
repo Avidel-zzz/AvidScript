@@ -1,5 +1,6 @@
 #include "AvidScriptWamrHostBindings.h"
 #include "AvidScriptVmStaticHostImports.h"
+#include "AvidScriptManagedHeapAbi.h"
 
 #ifndef AVIDSCRIPT_WITH_WAMR
 #define AVIDSCRIPT_WITH_WAMR 0
@@ -958,6 +959,35 @@ int32_t ContinuationResultRead(
 		: 0;
 }
 
+int32_t ManagedHeapV1(wasm_exec_env_t ExecEnv, int32_t InputAddress, int32_t InputBytes,
+	int32_t OutputAddress, int32_t OutputBytes)
+{
+	const char* ImportName = StaticImportName(EAvidScriptHostBindingId::ManagedHeapV1);
+	IAvidScriptWamrHostBridge* Bridge = GetBridge(ExecEnv);
+	const uint32 Input = static_cast<uint32>(InputAddress), Output = static_cast<uint32>(OutputAddress);
+	wasm_module_inst_t Instance = ExecEnv ? wasm_runtime_get_module_inst(ExecEnv) : nullptr;
+	if (!AvidScript::Managed::Abi::ValidateRanges(Input, InputBytes, Output, OutputBytes)
+		|| !Instance || !wasm_runtime_validate_app_addr(Instance, Input, static_cast<uint32>(InputBytes))
+		|| (OutputBytes > 0 && !wasm_runtime_validate_app_addr(Instance, Output, static_cast<uint32>(OutputBytes))))
+	{
+		Fail(ExecEnv, Bridge, ImportName, TEXT("Managed heap packet ranges are invalid or overlap."), TEXT("managed_heap_range"));
+		return 0;
+	}
+	const auto* NativeInput = static_cast<const uint8*>(wasm_runtime_addr_app_to_native(Instance, Input));
+	auto* NativeOutput = OutputBytes > 0 ? static_cast<uint8*>(wasm_runtime_addr_app_to_native(Instance, Output)) : nullptr;
+	if (!NativeInput || (OutputBytes > 0 && !NativeOutput))
+	{
+		Fail(ExecEnv, Bridge, ImportName, TEXT("Managed heap packet address translation failed."), TEXT("managed_heap_range"));
+		return 0;
+	}
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::ManagedHeapV1;
+	Call.InputBytes = MakeArrayView(NativeInput, InputBytes);
+	Call.OutputBytes = MakeArrayView(NativeOutput, OutputBytes);
+	FAvidScriptHostCallResult Result;
+	return Dispatch(ExecEnv, ImportName, Call, Result) ? Result.ReturnValue : 0;
+}
+
 int32_t ContinuationStateStore(
 	wasm_exec_env_t ExecEnv,
 	int64_t ContinuationToken,
@@ -1277,6 +1307,7 @@ void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 	case EAvidScriptHostBindingId::EventUnsubscribe: return reinterpret_cast<void*>(EventUnsubscribe);
 	case EAvidScriptHostBindingId::EventIsCurrentSource: return reinterpret_cast<void*>(EventIsCurrentSource);
 	case EAvidScriptHostBindingId::CooperativeSafepointPoll: return reinterpret_cast<void*>(CooperativeSafepointPoll);
+	case EAvidScriptHostBindingId::ManagedHeapV1: return reinterpret_cast<void*>(ManagedHeapV1);
 	case EAvidScriptHostBindingId::DelegateOutputWrite: return reinterpret_cast<void*>(DelegateOutputWrite);
 	case EAvidScriptHostBindingId::DataLaneGetEpoch: return reinterpret_cast<void*>(DataLaneGetEpoch);
 	case EAvidScriptHostBindingId::DataLaneSubmit: return reinterpret_cast<void*>(DataLaneSubmit);

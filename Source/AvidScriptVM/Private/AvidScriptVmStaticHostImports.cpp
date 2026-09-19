@@ -1,4 +1,5 @@
 #include "AvidScriptVmStaticHostImports.h"
+#include "AvidScriptManagedHeapAbi.h"
 
 namespace
 {
@@ -63,11 +64,12 @@ const FAvidScriptVmStaticHostImport GStaticHostImports[] = {
 	{ EAvidScriptHostBindingId::DebugSuspend, "avid_debug_suspend", "(Iiii)I", false },
 	{ EAvidScriptHostBindingId::DebugFrameRead, "avid_debug_frame_read", "(Iii)i", false },
 	{ EAvidScriptHostBindingId::EventIsCurrentSource, "event_is_current_source", "(ii)i", true },
-	{ EAvidScriptHostBindingId::CooperativeSafepointPoll, "avid_cooperative_safepoint_poll", "()", false }
+	{ EAvidScriptHostBindingId::CooperativeSafepointPoll, "avid_cooperative_safepoint_poll", "()", false },
+	{ EAvidScriptHostBindingId::ManagedHeapV1, "avid_managed_heap_v1", "(iiii)i", false }
 };
 
 static_assert(
-	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::CooperativeSafepointPoll),
+	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::ManagedHeapV1),
 	"Static host catalog must remain dense and ordered by binding id.");
 
 bool FailStaticCall(FString& OutFailureDetails, const TCHAR* Details)
@@ -232,6 +234,27 @@ bool InvokeAvidScriptVmStaticHostImport(
 	FAvidScriptHostCallResult HostResult;
 	switch (Import.BindingId)
 	{
+	case EAvidScriptHostBindingId::ManagedHeapV1:
+	{
+		const uint32 Input = static_cast<uint32>(Arguments[0].I32);
+		const int32 InputBytes = Arguments[1].I32;
+		const uint32 Output = static_cast<uint32>(Arguments[2].I32);
+		const int32 OutputBytes = Arguments[3].I32;
+		if (!AvidScript::Managed::Abi::ValidateRanges(Input, InputBytes, Output, OutputBytes))
+		{
+			if (OutFailureCategory) *OutFailureCategory = TEXT("managed_heap_range");
+			return FailStaticCall(OutFailureDetails, TEXT("Managed heap packet ranges are invalid or overlap."));
+		}
+		FString Error;
+		if (!GuestMemory.BorrowReadOnlyBytes(Input, InputBytes, 1, Call.InputBytes, Error)
+			|| (OutputBytes > 0 && !GuestMemory.BorrowMutableBytes(Output, OutputBytes, 1, Call.OutputBytes, Error)))
+		{
+			if (OutFailureCategory) *OutFailureCategory = TEXT("managed_heap_range");
+			OutFailureDetails = Error;
+			return false;
+		}
+		break;
+	}
 	case EAvidScriptHostBindingId::HostAddI32:
 	case EAvidScriptHostBindingId::HostFailI32:
 	case EAvidScriptHostBindingId::TimerCancel:

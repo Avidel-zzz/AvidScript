@@ -1,4 +1,5 @@
 #include "Memory/AvidScriptManagedHeap.h"
+#include "Memory/AvidScriptManagedHeapProtocol.h"
 #include <array>
 #include <iostream>
 #include <map>
@@ -191,6 +192,93 @@ void GraphOracle()
 	Heap.Close(); Heap.Close(); Check(Heap.GetStats().LiveObjects == 0 && Heap.GetStats().LiveRoots == 0, "idempotent close leaked graph");
 	FToken Value = 1; Check(Heap.CreateRoot(0, 0, Value) == EHeapError::Closed && Value == 0, "closed heap re-entered");
 }
+
+using FPacket = std::vector<std::uint8_t>;
+void Wire(FPacket& Bytes, std::uint64_t Value, unsigned Size = 4)
+{
+	for (unsigned I = 0; I < Size; ++I) Bytes.push_back(static_cast<std::uint8_t>(Value >> (8 * I)));
+}
+FPacket Packet(Abi::ECommand Command)
+{
+	FPacket Bytes; Wire(Bytes, Abi::Magic); Wire(Bytes, static_cast<std::uint32_t>(Command)); return Bytes;
+}
+FToken RunPacket(FHeap& Heap, const FPacket& Bytes, bool HasToken = false)
+{
+	std::array<std::uint8_t, 8> Out{};
+	Check(ExecuteHeapCommand(Heap, Bytes, HasToken ? std::span(Out) : std::span<std::uint8_t>{}, 0).Succeeded(), "wire command failed");
+	FToken Value = 0; for (unsigned I = 0; I < 8; ++I) Value |= FToken(Out[I]) << (I * 8); return Value;
+}
+FPacket ConfigurePacket()
+{
+	auto P = Packet(Abi::ECommand::Configure);
+	Wire(P, 1); Wire(P, 1); Wire(P, 16); Wire(P, 1); Wire(P, 0); Wire(P, 1); return P;
+}
+void ProtocolExecution()
+{
+	FHeap Heap; RunPacket(Heap, ConfigurePacket());
+	const auto F = RunPacket(Heap, Packet(Abi::ECommand::PushFrame), true);
+	auto P = Packet(Abi::ECommand::CreateRoot); Wire(P, F, 8); Wire(P, 0, 8);
+	const auto R = RunPacket(Heap, P, true);
+	P = Packet(Abi::ECommand::Allocate); Wire(P, 1); Wire(P, R, 8); const auto O = RunPacket(Heap, P, true);
+	P = Packet(Abi::ECommand::WriteBytes); Wire(P, O, 8); Wire(P, 1); Wire(P, 8); Wire(P, 8); Wire(P, 0x123456789abcdef0, 8);
+	RunPacket(Heap, P);
+	P = Packet(Abi::ECommand::ReadBytes); Wire(P, O, 8); Wire(P, 1); Wire(P, 8); Wire(P, 8);
+	Check(RunPacket(Heap, P, true) == 0x123456789abcdef0, "wire byte read/write lost endian or high bits");
+	P = Packet(Abi::ECommand::WriteReference); Wire(P, O, 8); Wire(P, 1); Wire(P, 0); Wire(P, O, 8); RunPacket(Heap, P);
+	P = Packet(Abi::ECommand::ReadReference); Wire(P, O, 8); Wire(P, 1); Wire(P, 0);
+	Check(RunPacket(Heap, P, true) == O, "wire reference identity changed");
+	P = Packet(Abi::ECommand::CreateRoot); Wire(P, 0, 8); Wire(P, O, 8); const auto Persistent = RunPacket(Heap, P, true);
+	P = Packet(Abi::ECommand::PopFrame); Wire(P, F, 8);
+	Check(ExecuteHeapCommand(Heap, P, {}, 1).Error == EHeapProtocolError::FrameBoundary, "nested call popped caller frame");
+	RunPacket(Heap, P); RunPacket(Heap, Packet(Abi::ECommand::Collect));
+	Check(Heap.IsAlive(O) && Heap.GetStats().LiveRoots == 1, "persistent reference did not escape frame");
+	P = Packet(Abi::ECommand::SetRoot); Wire(P, Persistent, 8); Wire(P, 0, 8); RunPacket(Heap, P);
+	RunPacket(Heap, Packet(Abi::ECommand::Collect)); Check(!Heap.IsAlive(O), "wire self cycle leaked");
+	P = Packet(Abi::ECommand::ReleaseRoot); Wire(P, Persistent, 8); RunPacket(Heap, P);
+}
+void ProtocolRejections()
+{
+	const auto Config = ConfigurePacket();
+	for (std::size_t Size = 0; Size < Config.size(); ++Size)
+	{
+		FHeap Heap;
+		Check(!ExecuteHeapCommand(Heap, std::span(Config).first(Size), {}, 0).Succeeded(), "truncated descriptor accepted");
+		RunPacket(Heap, Config); // Failed parse must not partially configure the heap.
+	}
+	FHeap Heap; auto Bad = Config; Bad.push_back(0);
+	Check(!ExecuteHeapCommand(Heap, Bad, {}, 0).Succeeded(), "trailing descriptor byte accepted");
+	Bad = Config; Bad[0] ^= 1;
+	Check(ExecuteHeapCommand(Heap, Bad, {}, 0).Error == EHeapProtocolError::InvalidVersion, "bad magic accepted");
+	Bad = Packet(static_cast<Abi::ECommand>(0xffffffff));
+	Check(ExecuteHeapCommand(Heap, Bad, {}, 0).Error == EHeapProtocolError::UnknownCommand, "unknown operation accepted");
+	RunPacket(Heap, Config);
+	std::array<std::uint8_t, 8> Out; Out.fill(0xa5);
+	auto P = Packet(Abi::ECommand::PushFrame);
+	Check(ExecuteHeapCommand(Heap, P, std::span(Out).first(7), 0).Error == EHeapProtocolError::InvalidOutput, "short output accepted");
+	Check(Heap.GetStats().ActiveFrames == 0 && Out[0] == 0xa5, "short output mutated heap or response");
+	P = Packet(Abi::ECommand::Allocate); Wire(P, 1); Wire(P, 999, 8);
+	Check(ExecuteHeapCommand(Heap, P, Out, 0).HeapError == EHeapError::InvalidRoot && Out[0] == 0xa5, "failed allocation changed response");
+	P = Packet(Abi::ECommand::ReadBytes); Wire(P, 0, 8); Wire(P, 1); Wire(P, 0); Wire(P, 0xffffffff);
+	Check(ExecuteHeapCommand(Heap, P, {}, 0).Error == EHeapProtocolError::LimitExceeded, "oversized byte count accepted");
+}
+void ProtocolLimitsAndRanges()
+{
+	Check(Abi::ValidateRanges(1, 8, 9, 8), "adjacent ranges rejected");
+	Check(Abi::ValidateRanges(0xfffffff8, 8, 0, 0), "valid high unsigned address rejected");
+	Check(!Abi::ValidateRanges(1, 8, 8, 8) && !Abi::ValidateRanges(0xfffffff9, 8, 0, 0), "overlap or wrap accepted");
+	Check(!Abi::ValidateRanges(0, 8, 0, 0) && !Abi::ValidateRanges(1, -1, 0, 0)
+		&& !Abi::ValidateRanges(1, 8, 5, 0) && !Abi::ValidateRanges(1, 8, 20, -1), "noncanonical range accepted");
+	FHeap Heap; auto P = Packet(Abi::ECommand::Configure); Wire(P, Abi::MaxLayouts + 1);
+	Check(ExecuteHeapCommand(Heap, P, {}, 0).Error == EHeapProtocolError::LimitExceeded, "layout quota ignored");
+	P = Packet(Abi::ECommand::Configure); Wire(P, 257);
+	for (unsigned I = 0; I < 257; ++I)
+	{
+		Wire(P, I + 1); Wire(P, 2048); Wire(P, 256);
+		for (unsigned J = 0; J < 256; ++J) { Wire(P, J * 8); Wire(P, 0); }
+	}
+	Check(ExecuteHeapCommand(Heap, P, {}, 0).Error == EHeapProtocolError::LimitExceeded, "aggregate reference quota ignored");
+	RunPacket(Heap, ConfigurePacket());
+}
 }
 int main()
 {
@@ -198,7 +286,8 @@ int main()
 	{
 		SharedEscapingCells(); Cycles(); TokensAndGenerations(); FramesAndUnwind(); RootListReuse();
 		TypedReferencesAndRanges(); AllocationLimits(); InvalidLayouts(); GenerationRetirement(); GraphOracle();
-		std::cout << "AvidScript.ManagedHeap.Tests: 10/10 passed (4000 graph-oracle steps; full root generation retirement)\n";
+		ProtocolExecution(); ProtocolRejections(); ProtocolLimitsAndRanges();
+		std::cout << "AvidScript.ManagedHeap.Tests: 13/13 passed (4000 graph-oracle steps; full root generation retirement; wire protocol)\n";
 		return 0;
 	}
 	catch (const std::exception& Error) { std::cerr << Error.what() << '\n'; return 1; }

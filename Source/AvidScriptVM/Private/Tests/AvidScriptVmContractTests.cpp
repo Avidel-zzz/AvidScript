@@ -588,6 +588,13 @@ bool FAvidScriptVmEventSubscriptionImportContractTest::RunTest(
 	const FAvidScriptVmStaticHostImport& CooperativeSafepointPoll =
 		GetAvidScriptVmStaticHostImport(
 			EAvidScriptHostBindingId::CooperativeSafepointPoll);
+	const FAvidScriptVmStaticHostImport& ManagedHeap = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::ManagedHeapV1);
+	TestEqual(TEXT("Managed heap appends to the frozen catalog"), static_cast<uint16>(ManagedHeap.BindingId),
+		static_cast<uint16>(EAvidScriptHostBindingId::CooperativeSafepointPoll) + 1);
+	TestEqual(TEXT("Managed heap has a versioned packet signature"), FString(UTF8_TO_TCHAR(ManagedHeap.Signature)), FString(TEXT("(iiii)i")));
+	TestEqual(TEXT("Managed heap import name"), FString(UTF8_TO_TCHAR(ManagedHeap.ImportName)), FString(TEXT("avid_managed_heap_v1")));
+	TestFalse(TEXT("Managed heap rejects legacy env alias"), ManagedHeap.bSupportsEnvCompatibility
+		|| IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("avid_managed_heap_v1")));
 	TestEqual(
 		TEXT("Event subscribe uses the generated facade import name"),
 		FString(UTF8_TO_TCHAR(Subscribe.ImportName)),

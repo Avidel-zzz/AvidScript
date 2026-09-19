@@ -668,6 +668,17 @@ public:
 
 		ModuleId = InModuleId;
 		HostDispatcher = Config.HostDispatcher;
+		const bool bUsesManagedHeap = ModuleLayout.FunctionImports.ContainsByPredicate([](const auto& Import)
+		{
+			return Import.ModuleName == TEXT("avidscript") && Import.ImportName == TEXT("avid_managed_heap_v1");
+		});
+		InvocationObserver = bUsesManagedHeap ? Config.InvocationObserver : nullptr;
+		if (bUsesManagedHeap && !InvocationObserver)
+		{
+			SetWasmtimeError(OutError, TEXT("managed_heap_scope_required"), TEXT("Managed heap imports require an invocation observer."));
+			PerformUnload();
+			return false;
+		}
 		TypedHostDispatcher = Config.TypedHostDispatcher;
 		if (!ValidateTypedImports(
 			ModuleLayout,
@@ -2500,6 +2511,7 @@ private:
 		++ActiveCallDepth;
 		int32 Result = 0;
 		AvidScriptWasmtimeFailure* CallFailure = nullptr;
+		const uint64 InvocationToken = InvocationObserver ? InvocationObserver->BeginVmInvocation() : 0;
 		const AvidScriptWasmtimeCallStatus CallStatus =
 			avidscript_wasmtime_function_call_i32_i32_to_i32_prepared_unchecked(
 				Entry.Function,
@@ -2507,6 +2519,7 @@ private:
 				static_cast<int32>(Frame.Cells[1]),
 				&Result,
 				&CallFailure);
+		if (InvocationObserver) InvocationObserver->EndVmInvocation(InvocationToken);
 		if (bArmExecutionGuards)
 		{
 			DisarmWasmtimeExecutionGuards();
@@ -2544,12 +2557,14 @@ private:
 		float Second = 0.0f;
 		FMemory::Memcpy(&Second, &Frame.Cells[1], sizeof(Second));
 		AvidScriptWasmtimeFailure* CallFailure = nullptr;
+		const uint64 InvocationToken = InvocationObserver ? InvocationObserver->BeginVmInvocation() : 0;
 		const AvidScriptWasmtimeCallStatus CallStatus =
 			avidscript_wasmtime_function_call_i32_f32_to_void_prepared_unchecked(
 				Entry.Function,
 				static_cast<int32>(Frame.Cells[0]),
 				Second,
 				&CallFailure);
+		if (InvocationObserver) InvocationObserver->EndVmInvocation(InvocationToken);
 		if (bArmExecutionGuards)
 		{
 			DisarmWasmtimeExecutionGuards();
@@ -2579,6 +2594,7 @@ private:
 		uint32 ResultCells[FAvidScriptVmCallResult::MaxCells] = {};
 		size_t ResultCellCount = 0;
 		AvidScriptWasmtimeFailure* CallFailure = nullptr;
+		const uint64 InvocationToken = InvocationObserver ? InvocationObserver->BeginVmInvocation() : 0;
 		const AvidScriptWasmtimeCallStatus CallStatus =
 			avidscript_wasmtime_function_call_event_prepared(
 				Store,
@@ -2588,6 +2604,7 @@ private:
 				FAvidScriptVmCallResult::MaxCells,
 				&ResultCellCount,
 				&CallFailure);
+		if (InvocationObserver) InvocationObserver->EndVmInvocation(InvocationToken);
 		if (bArmExecutionGuards)
 		{
 			DisarmWasmtimeExecutionGuards();
@@ -4330,6 +4347,7 @@ private:
 		ExportLookupCount = 0;
 		ModuleId.Reset();
 		HostDispatcher = nullptr;
+		InvocationObserver = nullptr;
 		TypedHostDispatcher = nullptr;
 		ExecutionBudget = FAvidScriptVmLoadConfig::FExecutionBudget();
 		CurrentHostCallCount = 0;
@@ -4350,6 +4368,7 @@ private:
 	const uint64 BackendInstanceIdentity;
 	FString ModuleId;
 	IAvidScriptHostDispatcher* HostDispatcher = nullptr;
+	IAvidScriptVmInvocationObserver* InvocationObserver = nullptr;
 	IAvidScriptVmTypedHostDispatcher* TypedHostDispatcher = nullptr;
 	FAvidScriptVmLoadMetrics LoadMetrics;
 	TMap<FString, uint32> ExportNameToIndex;

@@ -2732,6 +2732,7 @@ $CanonicalStaticImportNames = @(
 	'event_unsubscribe',
 	'event_is_current_source',
 	'avid_cooperative_safepoint_poll',
+	'avid_managed_heap_v1',
 	'avid_delegate_output_write',
 	'avid_debug_probe',
 	'avid_debug_suspend',
@@ -2759,6 +2760,7 @@ $CompatibilityStaticImportNames = @(
         $_ -notin @(
 			'avid_owner_get_handle',
 			'avid_cooperative_safepoint_poll',
+			'avid_managed_heap_v1',
 			'avid_delegate_output_write',
 			'avid_debug_probe',
 			'avid_debug_suspend',

@@ -175,6 +175,7 @@ struct FAvidScriptCachedVmExport
 class AVIDSCRIPTRUNTIME_API FAvidScriptWasmRuntimeInstance
 	: public IAvidScriptHostDispatcher
 	, public IAvidScriptVmTypedHostDispatcher
+	, public IAvidScriptVmInvocationObserver
 {
 public:
 	FAvidScriptWasmRuntimeInstance();
@@ -471,6 +472,9 @@ public:
 		const FString& ExpectedImportName,
 		FAvidScriptVmTypedHostFailure& OutFailure) override;
 	bool DispatchHostCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult) override;
+	uint64 BeginVmInvocation() override;
+	void EndVmInvocation(uint64 Token) override;
+	bool DispatchManagedHeapCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	bool DispatchDynamicHostCall(
 		const FAvidScriptDynamicHostCall& Call,
 		FAvidScriptDynamicHostCallResult& OutResult) override;
@@ -795,6 +799,8 @@ private:
 
 	TUniquePtr<IAvidScriptVmBackend> VmBackend;
 	TUniquePtr<AvidScript::Managed::FHeap> ManagedHeap;
+	uint32 ManagedHeapFrameFloor = 0;
+	uint32 ManagedHeapInvocationDepth = 0;
 	FAvidScriptVmBackendSelection BackendSelection;
 	FAvidScriptVmBackendInfo ActiveBackendInfo;
 	FAvidScriptVmLoadConfig::FExecutionBudget ExecutionBudget;
