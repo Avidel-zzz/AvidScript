@@ -61,6 +61,7 @@ public static class CSharpGuestLowerer
             diagnostics).ToList();
         CSharpReferenceObjects.AddGuards(document, functions);
         CSharpUeReceivers.AddGuards(document, functions);
+        functions.AddRange(CSharpUeDelegateBinding.Build(document));
         functions.AddRange(CSharpClosureDelegateLowerer.BuildThunks(document, functions));
         functions.AddRange(CSharpDelegateComposition.Build(document));
         functions.AddRange(CSharpDelegateIdentityLowerer.Build(document, functions));
@@ -74,6 +75,10 @@ public static class CSharpGuestLowerer
             diagnostics);
         functions.AddRange(asyncMethods.Functions);
         imports = CSharpUeReceivers.AppendImports(document, imports, functions);
+        if (functions.SelectMany(function => function.Blocks).SelectMany(block => block.Instructions)
+            .Any(instruction => instruction.Op == "call" && instruction.TargetId == CSharpUeDelegateBinding.ImportId))
+            imports = imports.Append(new GuestImport(CSharpUeDelegateBinding.ImportId, "avidscript", CSharpUeDelegateBinding.ImportName,
+                new[] { "type:uint64" }, "type:int32")).ToArray();
         imports = AppendUePropertyImports(
             document,
             imports,

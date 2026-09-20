@@ -329,6 +329,8 @@ public:
 		TConstArrayView<uint8> CanonicalWasm = {});
 	bool PrepareGeneratedMethodHostBindings(FString& OutError);
 	bool InvokeGeneratedMethodFrame(uint32 RouteIndex, int32 FrameAddress, int32 FrameBytes);
+	bool ResolveGeneratedReceiverType(int64 PackedSelf,
+		const FAvidScriptGeneratedTypeRegistrySnapshot& Registry, uint32& OutOrdinal);
 	UObject* ResolveGeneratedTypeReceiver(
 		int64 PackedSelf, uint32 TypeOrdinal, const FAvidScriptGeneratedTypeRegistrySnapshot& Registry) const;
 	bool ConfigureExecutionBudget(

@@ -19,7 +19,7 @@ internal static class CSharpUeDispatch
     public static bool TryRoute(SemanticDocument document, SemanticOperation operation, out CSharpUeDispatchRoute route)
     {
         route = null!;
-        if (operation.Kind != "invocation" || operation.Dispatch?.Kind is not ("virtual" or "interface")
+        if (operation.Kind is not ("invocation" or "method_reference") || operation.Dispatch?.Kind is not ("virtual" or "interface")
             || document.UeMethodCatalog is not { } catalog || operation.SymbolId is null) return false;
         SemanticUeMethodEntry? declaration = catalog.Methods.FirstOrDefault(method => method.MethodSymbolId == operation.SymbolId);
         SemanticCallable? callable = document.Callables.FirstOrDefault(method => method.MethodSymbolId == operation.SymbolId);

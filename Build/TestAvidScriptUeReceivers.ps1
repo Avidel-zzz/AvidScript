@@ -24,6 +24,12 @@ try {
     if ($DispatchExit -ne 0 -or ($DispatchOutput -join "`n") -notmatch 'AvidScript.CSharpGuest.Tests.UeDispatch: 14/14 passed') {
         throw 'CSharp UE dynamic dispatch compiler fixtures did not pass completely.'
     }
+    $DelegateOutput = & $Dotnet run --project Tools/AvidScript.CSharpGuest.Tests --configuration Release -- --ue-delegates
+    $DelegateExit = $LASTEXITCODE
+    $DelegateOutput | Write-Output
+    if ($DelegateExit -ne 0 -or ($DelegateOutput -join "`n") -notmatch 'AvidScript.CSharpGuest.Tests.UeDelegates: 15/15 passed') {
+        throw 'CSharp UE delegate binding compiler fixtures did not pass completely.'
+    }
 } finally {
     $env:AVIDSCRIPT_MANAGED_HEAP_WASM_DIR = $PreviousDirectory
     $env:DOTNET_CLI_HOME = $PreviousCliHome

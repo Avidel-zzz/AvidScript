@@ -10,9 +10,9 @@ using AvidScript.WasmBackend;
 
 internal static class CSharpGuestUeDispatchTests
 {
-    public static int Run()
+    public static int Run(bool methodGroups = false)
     {
-        const string source = """
+        string source = """
             using AvidScript;
             public class State { public int Value; }
             public struct Packet { public State Item; public int Sum; }
@@ -52,6 +52,25 @@ internal static class CSharpGuestUeDispatchTests
                 }
             }
             """;
+        if (methodGroups)
+        {
+            source = source.Replace("public class State", "public delegate Packet Change(State value, ref int left, ref int right); public delegate int ReadValue(State value); public class State", StringComparison.Ordinal)
+                .Replace("private static ReceiverActor First;", "private static ReceiverActor First; private static int Evaluations; private static IChange Choose() { Evaluations += 1; return Second; }", StringComparison.Ordinal)
+                .Replace("Packet result = target.Apply(state, ref shared, ref shared);", """
+                    Evaluations = 0;
+                    Change bound = Choose().Apply;
+                    Change again = Second.Apply;
+                    Change original = target.Apply;
+                    target = First;
+                    Change combined = bound + again;
+                    combined -= original;
+                    if (Evaluations != 1 || bound != again || combined != bound || original != bound) return 0;
+                    Packet result = combined(state, ref shared, ref shared);
+                    """, StringComparison.Ordinal)
+                .Replace("IRead reader = Second;", "IRead reader = Second; ReadValue read = reader.Read; ReadValue readAgain = reader.Read; if (read != readAgain) return 0;", StringComparison.Ordinal)
+                .Replace("reader.Read(state)", "read(state)", StringComparison.Ordinal)
+                .Replace("Packet result = base.Apply(value, ref left, ref right);", "Change fixedBase = base.Apply; Change virtualSelf = this.Apply; if (fixedBase == virtualSelf) return new Packet(); Packet result = fixedBase(value, ref left, ref right);", StringComparison.Ordinal);
+        }
         const string facade = """
             namespace AvidScript {
                 [System.AttributeUsage(System.AttributeTargets.Class)] public sealed class UClassAttribute : System.Attribute { }
@@ -85,7 +104,7 @@ internal static class CSharpGuestUeDispatchTests
         Check(lowered.Succeeded, string.Join(" | ", lowered.Diagnostics.Select(item => item.Code + ": " + item.Message)));
         Check(before.SequenceEqual(SemanticSerializer.Serialize(semantic)), "derived dispatch reachability must not mutate source artifact");
         var module = lowered.Module!;
-        Check(module.FramedExports.Count(export => export.HostDispatchTargets is not null) == 3,
+        Check(module.FramedExports.Count(export => export.HostDispatchTargets is not null) == (methodGroups ? 1 : 3),
             "virtual and interface calls have distinct dynamic routes");
         Check(module.Functions.Any(function => function.Id.Contains("DerivedReceiver.Helper", StringComparison.Ordinal)),
             "private dependency reachable only from override must be lowered");
@@ -109,6 +128,8 @@ internal static class CSharpGuestUeDispatchTests
                 && rejected.Diagnostics.Any(item => item.Code == "ASCG1024" && item.Message.Contains(message, StringComparison.Ordinal)),
                 "unsupported interface identity combination must reject explicitly: " + string.Join(" | ", rejected.Diagnostics.Select(item => item.Message)));
         }
+        if (!methodGroups)
+        {
         RejectView(source.Replace("IChange target = Second;", "IChange target = Second; DerivedReceiver checkedTarget = (DerivedReceiver)target;", StringComparison.Ordinal),
             "interface views");
         RejectView(source.Replace("IRead reader = Second;", "IRead reader = Foreign;", StringComparison.Ordinal)
@@ -116,15 +137,30 @@ internal static class CSharpGuestUeDispatchTests
             + " public class ManagedReader : IRead { public int Read(State value) => value.Value + 5; }", "interface views");
         RejectView(source.Replace("public interface IRead { int Read(State value); }", "public interface IRead { int Read(State value) => value.Value + 5; }", StringComparison.Ordinal)
             .Replace("int IRead.Read(State value) => value.Value + 5;", "", StringComparison.Ordinal), "registered UE implementations");
+        }
+        else
+        {
+            const string minimal = "using AvidScript; public delegate int Read(); [UClass] public partial class MinimalActor : AvidActor { private int Value() => 7; [UFunction] public int GetValue() { Read callback = Value; return callback(); } }";
+            var minimalSemantic = SemanticAnalyzer.Analyze(minimal, path, FrontendAnalyzer.Analyze(minimal, path).Source.Sha256,
+                new[] { new SemanticReferenceSource(facade, "generated://UeDispatchFacade.cs") });
+            var minimalGuest = CSharpGuestLowerer.Lower(minimalSemantic, new string('f', 64));
+            Check(minimalGuest.Succeeded && WasmModuleCompiler.Compile(minimalGuest.Module!).Succeeded,
+                "a method group without unrelated bool expressions must compile: " + string.Join(" | ", minimalGuest.Diagnostics.Select(item => item.Message)));
+            Check(module.Imports.Any(import => import.Name == "avid_ue_receiver_type_v1"), "binding resolves live target type at creation");
+            Check(module.Functions.Any(function => function.Id.StartsWith("function:$ue:bind:interface:", StringComparison.Ordinal)), "interface method groups have creation-time selection");
+            Check(module.Functions.Any(function => function.Id.Contains("DerivedReceiver.Apply(", StringComparison.Ordinal)
+                && function.Id.Contains(":$closure:thunk:", StringComparison.Ordinal)), "actual override thunk participates in delegate identity");
+        }
         string? directory = Environment.GetEnvironmentVariable("AVIDSCRIPT_MANAGED_HEAP_WASM_DIR");
         if (!string.IsNullOrWhiteSpace(directory))
         {
             Directory.CreateDirectory(directory);
-            File.WriteAllBytes(Path.Combine(directory, "csharp-ue-dispatch.wasm"), wasm.Bytes);
-            File.WriteAllBytes(Path.Combine(directory, "csharp-ue-dispatch-stress.wasm"), stressWasm.Bytes);
-            File.WriteAllBytes(Path.Combine(directory, "csharp-ue-dispatch.guest-ir.json"), GuestIrSerializer.Serialize(module));
-            File.WriteAllBytes(Path.Combine(directory, "csharp-ue-dispatch.semantic.json"), before);
-            File.WriteAllText(Path.Combine(directory, "csharp-ue-dispatch.json"), JsonSerializer.Serialize(new {
+            string stem = methodGroups ? "csharp-ue-delegates" : "csharp-ue-dispatch";
+            File.WriteAllBytes(Path.Combine(directory, stem + ".wasm"), wasm.Bytes);
+            File.WriteAllBytes(Path.Combine(directory, stem + "-stress.wasm"), stressWasm.Bytes);
+            File.WriteAllBytes(Path.Combine(directory, stem + ".guest-ir.json"), GuestIrSerializer.Serialize(module));
+            File.WriteAllBytes(Path.Combine(directory, stem + ".semantic.json"), before);
+            File.WriteAllText(Path.Combine(directory, stem + ".json"), JsonSerializer.Serialize(new {
                 types = semantic.UeTypeDeclarations.Select((type, ordinal) => new {
                     type_ordinal = ordinal, type_id = type.TypeId,
                     derived = type.TypeId.Contains("DerivedReceiver", StringComparison.Ordinal),

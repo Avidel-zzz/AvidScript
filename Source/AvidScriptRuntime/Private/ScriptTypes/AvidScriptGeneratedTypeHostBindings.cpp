@@ -1,10 +1,23 @@
 #include "ScriptTypes/AvidScriptGeneratedTypeHostBindings.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeAuthority.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeRegistry.h"
+#include "AvidScriptWasmModuleLayout.h"
 #include "UObject/UnrealType.h"
 
 namespace
 {
+EAvidScriptVmTypedHostStatus ResolveGeneratedReceiverType(void* OpaqueContext, const int64 PackedSelf, int32& OutType)
+{
+	OutType = 0;
+	const auto* Context = static_cast<const FAvidScriptGeneratedReceiverHostContext*>(OpaqueContext);
+	uint32 Ordinal = 0;
+	if (!Context || !Context->Runtime || !Context->Registry
+		|| !Context->Runtime->ResolveGeneratedReceiverType(PackedSelf, *Context->Registry, Ordinal)
+		|| Ordinal >= MAX_int32) return EAvidScriptVmTypedHostStatus::Rejected;
+	OutType = static_cast<int32>(Ordinal + 1);
+	return EAvidScriptVmTypedHostStatus::Succeeded;
+}
+
 EAvidScriptVmTypedHostStatus RequireGeneratedReceiver(void* OpaqueContext, const int64 PackedSelf, int32& OutValid)
 {
 	OutValid = 0;
@@ -271,6 +284,23 @@ UObject* FAvidScriptWasmRuntimeInstance::ResolveGeneratedTypeReceiver(
 	return Authority ? Authority->ResolveGeneratedTypeReceiver(PackedSelf, TypeOrdinal, Registry) : nullptr;
 }
 
+bool FAvidScriptWasmRuntimeInstance::ResolveGeneratedReceiverType(const int64 PackedSelf,
+	const FAvidScriptGeneratedTypeRegistrySnapshot& Registry, uint32& OutOrdinal)
+{
+	OutOrdinal = 0;
+	if (!IsInGameThread() || !IsContextInvocationActive()) return false;
+	const auto Authority = HostContext.GeneratedTypeAuthority.Pin();
+	const uint64 Packed = static_cast<uint64>(PackedSelf);
+	const FAvidScriptObjectHandle Target{static_cast<uint32>(Packed), static_cast<uint32>(Packed >> 32)};
+	FAvidScriptObjectHandleResult Resolve;
+	UObject* Object = HostContext.ObjectRegistry ? HostContext.ObjectRegistry->ResolveObject(Target, Resolve, false) : nullptr;
+	if (!Object) return false;
+	FAvidScriptVmError Error;
+	if (!Authority || !Authority->ResolveInstanceTypeOrdinal(*this, Target, Registry, OutOrdinal, Error)) return false;
+	const auto* Type = Registry.FindTypeByOrdinal(OutOrdinal);
+	return Type && Type->Class && Object->IsA(Type->Class);
+}
+
 bool FAvidScriptWasmRuntimeInstance::ConfigureGeneratedTypeHostBindings(
 	const TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot>& Registry,
 	TArray<FAvidScriptVmTypedHostImport>& OutImports, FString& OutError, TConstArrayView<uint8> CanonicalWasm)
@@ -284,6 +314,25 @@ bool FAvidScriptWasmRuntimeInstance::ConfigureGeneratedTypeHostBindings(
 	}
 	TSharedPtr<FAvidScriptGeneratedTypeHostBindings> State = MakeShared<FAvidScriptGeneratedTypeHostBindings>();
 	State->Registry = Registry;
+	if (!CanonicalWasm.IsEmpty())
+	{
+		FAvidScriptWasmModuleLayout Layout;
+		if (!InspectAvidScriptWasmModuleLayout(CanonicalWasm, Layout, OutError)) return false;
+		if (Layout.FunctionImports.ContainsByPredicate([](const auto& Import) {
+			return Import.ModuleName == TEXT("avidscript") && Import.ImportName == TEXT("avid_ue_receiver_type_v1"); }))
+		{
+			auto Context = MakeUnique<FAvidScriptGeneratedReceiverHostContext>();
+			Context->Runtime = this; Context->Registry = Registry.Get();
+			FAvidScriptVmTypedHostImport Import;
+			Import.StableId = TEXT("generated:receiver:type:v1");
+			Import.ModuleName = TEXT("avidscript"); Import.ImportName = TEXT("avid_ue_receiver_type_v1");
+			Import.Signature = TEXT("(I)i"); Import.Shape = EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Get;
+			Import.bSupplementalRuntimeAuthority = true;
+			Import.PreparedTarget.Context = Context.Get();
+			Import.PreparedTarget.PackedSelfPropertyI32Get = &::ResolveGeneratedReceiverType;
+			State->ReceiverContexts.Add(MoveTemp(Context)); State->HostImports.Add(MoveTemp(Import));
+		}
+	}
 	for (const FAvidScriptGeneratedTypePlan& RegistryType : Registry->GetTypes())
 	{
 		TUniquePtr<FAvidScriptGeneratedReceiverHostContext> ReceiverContext = MakeUnique<FAvidScriptGeneratedReceiverHostContext>();

@@ -29,9 +29,12 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptGeneratedCSharpDynamicMethodsTest,
 
 bool FAvidScriptGeneratedCSharpDynamicMethodsTest::RunTest(const FString& Parameters)
 {
+    const auto RunFixture = [&](const FString& Stem) -> bool
+    {
+    AddInfo(FString::Printf(TEXT("CSharp dynamic fixture: %s"), *Stem));
     const FString Directory = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("AvidScriptManagedHeapTests/GuestFixtures"));
     FString MetadataText, Error;
-    if (!FFileHelper::LoadFileToString(MetadataText, *FPaths::Combine(Directory, TEXT("csharp-ue-dispatch.json")))) return false;
+    if (!FFileHelper::LoadFileToString(MetadataText, *FPaths::Combine(Directory, Stem + TEXT(".json")))) return false;
     TSharedPtr<FJsonObject> Metadata;
     if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(MetadataText), Metadata)) return false;
     TArray<TSharedPtr<FJsonValue>> TypeRows;
@@ -82,7 +85,7 @@ bool FAvidScriptGeneratedCSharpDynamicMethodsTest::RunTest(const FString& Parame
     for (const auto& Import : Metadata->GetArrayField(TEXT("imports")))
         Manifest.RequiredImports.Add({Import->AsObject()->GetStringField(TEXT("module")), Import->AsObject()->GetStringField(TEXT("name"))});
     TArray<uint8> Canonical, Payload; bool bFound = false;
-    if (!FFileHelper::LoadFileToArray(Canonical, *FPaths::Combine(Directory, TEXT("csharp-ue-dispatch.wasm")))
+    if (!FFileHelper::LoadFileToArray(Canonical, *FPaths::Combine(Directory, Stem + TEXT(".wasm")))
         || !ReadAvidScriptWasmCustomSection(Canonical, TEXT("avidscript.host_call_frames"), 4 * 1024 * 1024, Payload, bFound, Error)
         || !bFound) return false;
     const FUTF8ToTCHAR RouteText(reinterpret_cast<const ANSICHAR*>(Payload.GetData()), Payload.Num());
@@ -133,7 +136,7 @@ bool FAvidScriptGeneratedCSharpDynamicMethodsTest::RunTest(const FString& Parame
         AddInfo(FString::Printf(TEXT("CSharp dynamic methods backend=%d stress=%d target-kind=%d"), static_cast<int32>(Backend), bStress, TargetKind));
         TArray<uint8> Wasm;
         if (!FFileHelper::LoadFileToArray(Wasm, *FPaths::Combine(Directory,
-            bStress ? TEXT("csharp-ue-dispatch-stress.wasm") : TEXT("csharp-ue-dispatch.wasm")))) return false;
+            Stem + (bStress ? TEXT("-stress.wasm") : TEXT(".wasm"))))) return false;
         FAvidScriptVmBackendSelection Selection;
         Selection.BackendKind = Backend;
         Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime ? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
@@ -183,5 +186,7 @@ bool FAvidScriptGeneratedCSharpDynamicMethodsTest::RunTest(const FString& Parame
         if (!Call(Other.Get(), 33)) return false;
     }
     return true;
+    };
+    return RunFixture(TEXT("csharp-ue-dispatch")) && RunFixture(TEXT("csharp-ue-delegates"));
 }
 #endif

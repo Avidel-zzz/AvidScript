@@ -14,6 +14,8 @@ internal static class CSharpClosureDelegateLowerer
         if (signature is null || operation.Children.Count != 1
             || operation.Children[0] is not { Kind: "method_reference" } target)
         { context.Add("ASCG1024", "Closure delegate requires a nominal signature and a Guest method reference."); return null; }
+        if (CSharpUeDelegateBinding.IsUeReference(context.Document, target))
+            return CSharpUeDelegateBinding.Create(context, operation, block, instructions);
         if (!context.TryGetCallTarget(target.SymbolId, out SemanticCallable callable, out _))
         { context.Add("ASCG1024", $"Closure delegate target '{target.SymbolId}' is not a reachable Guest callable."); return null; }
         if (!Matches(context.Document, callable, signature))

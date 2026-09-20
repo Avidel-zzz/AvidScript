@@ -36,6 +36,7 @@ internal static class CSharpBoundDelegateLowerer
                 && method.HasBody && method.Import is null && structs.Contains(method.ContainingTypeId)) used.Add(id);
             foreach (SemanticOperation child in operation.Children) pending.Push(child);
         }
+        used.UnionWith(CSharpUeDelegateBinding.Plans(document).SelectMany(plan => plan.Targets).Select(target => target.Method.MethodSymbolId));
         return new(used);
     }
 
