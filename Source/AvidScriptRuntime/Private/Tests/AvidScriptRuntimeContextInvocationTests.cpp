@@ -164,7 +164,142 @@ public:
 	int32 Unsubscribes = 0;
 };
 
-enum class EScenario { Normal, Trap, Unload, Mutate, ForeignRegistry, ForeignCode, World, Retire, Timer, Depth, Entries, Frame, Suspended };
+enum class EScenario { Normal, Trap, Unload, Mutate, ForeignRegistry, ForeignCode, World, Retire, Timer, Depth, Entries, Frame, Suspended,
+	RootReturn, RootRestore, RootNoGrant, RootWrongGrant, RootInvalid, RootRelease, RootAllocate, RootCreate, RootShadow, RootDepth, RootRegrant };
+bool IsRootScenario(EScenario Scenario) { return Scenario >= EScenario::RootReturn; }
+bool RootSucceeds(EScenario Scenario) { return Scenario == EScenario::RootReturn || Scenario == EScenario::RootRestore; }
+
+// A real VM caller owns private and returned roots. The callee allocates a new
+// object, transfers it with SetRoot, then its entire heap frame is unwound.
+// Nested no-frame exports exercise equal heap floors at different VM depths.
+TArray<uint8> BuildRootTransferFixture(EScenario Scenario)
+{
+	using namespace AvidScript::Managed;
+	TArray<uint8> Module{0, 0x61, 0x73, 0x6d, 1, 0, 0, 0};
+	Section(Module, 1, {4, 0x60, 4, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f,
+		0x60, 1, 0x7e, 1, 0x7f, 0x60, 0, 1, 0x7f, 0x60, 0, 0});
+	TArray<uint8> Imports{3};
+	for (const auto& Item : {TPair<const char*, uint8>{Abi::ImportName, 0}, {"context_reenter", 1}, {"owner_get_slot", 2}})
+	{
+		Name(Imports, "avidscript"); Name(Imports, Item.Key); Imports.Append({0, Item.Value});
+	}
+	Section(Module, 2, Imports); Section(Module, 3, {6, 3, 1, 2, 2, 1, 1});
+	Section(Module, 5, {1, 1, 1, 1});
+	Section(Module, 6, {2, 0x7f, 1, 0x41, 0, 0x0b, 0x7f, 1, 0x41, 0, 0x0b});
+	TArray<uint8> Exports{7}; Name(Exports, "memory"); Exports.Append({2, 0});
+	for (const auto& Item : {TPair<const char*, uint8>{"avid_on_begin_play", 3}, {"step", 4}, {"trap", 5}, {"count", 6},
+		{"avid_ue_0123456789abcdef0123456789abcdef", 7}, {"leaf", 8}})
+	{ Name(Exports, Item.Key); Exports.Append({0, Item.Value}); }
+	Section(Module, 7, Exports);
+	TArray<uint8> Init{0, 0x23, 1, 0x45, 0x04, 0x40}; HeapCall(Init, 64, 24);
+	Init.Append({0x41, 1, 0x24, 1, 0x0b, 0x0b});
+	TArray<uint8> Root{0};
+	HeapCall(Root, 96, 8, 512, 8); CopyToken(Root, 512, 120); HeapCall(Root, 112, 24, 520, 8);
+	CopyToken(Root, 520, 156); HeapCall(Root, 144, 20, 528, 8); HeapCall(Root, 112, 24, 608, 8);
+	Root.Append({0x42, 1, 0x10, 1, 0x0b});
+	TArray<uint8> Step{0, 0x23, 0, 0x41, 1, 0x6a, 0x24, 0};
+	Constant(Step, 672); Constant(Step, 1); Step.Append({0x36, 0, 0});
+	if (Scenario == EScenario::RootRestore || Scenario == EScenario::RootShadow || Scenario == EScenario::RootDepth || Scenario == EScenario::RootRegrant)
+		Step.Append({0x42, 0, 0x10, 1, 0x1a});
+	HeapCall(Step, 96, 8, 640, 8); CopyToken(Step, 640, 120); HeapCall(Step, 112, 24, 648, 8);
+	CopyToken(Step, 648, 156); HeapCall(Step, 144, 20, 656, 8);
+	CopyToken(Step, 656, 184); HeapCall(Step, 176, 32);
+	if (Scenario == EScenario::RootRelease)
+	{ Constant(Step, 248); Step.Append({0x20, 0, 0x37, 0, 0}); HeapCall(Step, 240, 16); }
+	else if (Scenario == EScenario::RootAllocate)
+	{ Constant(Step, 308); Step.Append({0x20, 0, 0x37, 0, 0}); HeapCall(Step, 296, 20, 664, 8); }
+	else if (Scenario == EScenario::RootCreate)
+	{ CopyToken(Step, 512, 272); HeapCall(Step, 264, 24, 664, 8); }
+	else
+	{ Constant(Step, 216); Step.Append({0x20, 0, 0x37, 0, 0}); CopyToken(Step, 656, 224); HeapCall(Step, 208, 24); }
+	Constant(Step, 99); Step.Add(0x0b);
+	TArray<uint8> Leaf{0}; Constant(Leaf, 216); Leaf.Append({0x20, 0, 0x37, 0, 0});
+	CopyToken(Leaf, 528, 224); HeapCall(Leaf, 208, 24); Constant(Leaf, 99); Leaf.Add(0x0b);
+	const TArray<uint8> Trap{0, 0, 0x0b}, Count{0, 0x23, 0, 0x0b};
+	TArray<uint8> Code{6};
+	const TArray<uint8>* Bodies[] = {&Init, &Step, &Trap, &Count, &Root, &Leaf};
+	for (const auto* Body : Bodies) { U32(Code, Body->Num()); Code.Append(*Body); }
+	Section(Module, 10, Code);
+	TArray<uint8> Memory; Memory.SetNumZeroed(336);
+	auto Put = [&](int32 Address, uint32 Value) { for (uint32 I = 0; I < 4; ++I) Memory[Address + I] = static_cast<uint8>(Value >> (I * 8)); };
+	auto Header = [&](int32 Address, Abi::ECommand Command) { Put(Address, Abi::Magic); Put(Address + 4, static_cast<uint32>(Command)); };
+	Header(64, Abi::ECommand::Configure); Put(72, 1); Put(76, 1); Put(80, 4); Put(84, 0);
+	Header(96, Abi::ECommand::PushFrame); Header(112, Abi::ECommand::CreateRoot);
+	Header(144, Abi::ECommand::Allocate); Put(152, 1);
+	Header(176, Abi::ECommand::WriteBytes); Put(192, 1); Put(196, 0); Put(200, 4); Put(204, 99);
+	Header(208, Abi::ECommand::SetRoot); Header(240, Abi::ECommand::ReleaseRoot);
+	Header(264, Abi::ECommand::CreateRoot); Header(296, Abi::ECommand::Allocate); Put(304, 1);
+	Header(328, Abi::ECommand::Collect);
+	TArray<uint8> Data{1, 0}; Constant(Data, 0); Data.Add(0x0b); U32(Data, Memory.Num()); Data.Append(Memory);
+	Section(Module, 11, Data); return Module;
+}
+
+struct FRootTransferProbe
+{
+	FAutomationTestBase& Test;
+	FAvidScriptWasmRuntimeInstance& Runtime;
+	FAvidScriptWasmHostContext A, B;
+	FAvidScriptContextualExportCall Step, Count, Leaf;
+	EScenario Scenario;
+	int32 Calls = 0;
+	bool bHostGcPreservedReturn = false;
+	FString LastError;
+	uint64 ReadToken(uint32 Offset)
+	{
+		TArray<uint8> Bytes; Bytes.SetNumZeroed(8); FString Error;
+		Test.TestTrue(TEXT("read root transfer token from VM"), Runtime.ReadStateBytes(Offset, Bytes, Error));
+		uint64 Token = 0; FMemory::Memcpy(&Token, Bytes.GetData(), 8); return Token;
+	}
+	static EAvidScriptVmTypedHostStatus Reenter(void* Context, int64 Remaining, int32& Value)
+	{
+		using namespace AvidScript::Managed;
+		auto& Self = *static_cast<FRootTransferProbe*>(Context); ++Self.Calls;
+		const auto ParentSlot = Self.Runtime.HandleOwnerGetSlotImport();
+		const auto Returned = Self.ReadToken(608);
+		FAvidScriptVmCallFrame Frame; Frame.CellCount = 2; FMemory::Memcpy(Frame.Cells, &Returned, 8);
+		FAvidScriptVmError Error; FAvidScriptVmCallResult Result; bool bCalled;
+		const auto Before = Self.Runtime.GetManagedHeapForTesting()->GetStats().ActiveFrames;
+		if (Remaining == 0)
+		{
+			Self.Test.TestEqual(TEXT("nested loan probe enters before callee pushes a heap frame"), Before, 1u);
+			if (Self.Scenario == EScenario::RootRestore)
+				bCalled = Self.Runtime.InvokeGeneratedInstanceExport(Self.A.OwnerHandle, Self.Count, {}, Error, &Result);
+			else if (Self.Scenario == EScenario::RootDepth)
+				bCalled = Self.Runtime.InvokeInContext(Self.Leaf, Self.A, Frame, Error, &Result);
+			else if (Self.Scenario == EScenario::RootRegrant)
+				bCalled = Self.Runtime.InvokeGeneratedInstanceExport(Self.A.OwnerHandle, Self.Leaf, Frame, Error, &Result, {&Returned, 1});
+			else bCalled = Self.Runtime.InvokeGeneratedInstanceExport(Self.A.OwnerHandle, Self.Leaf, Frame, Error, &Result);
+			Self.Test.TestEqual(TEXT("unframed nested entry cannot inherit returned root authority"), bCalled, Self.Scenario == EScenario::RootRestore);
+		}
+		else
+		{
+			uint64 Loan = Self.Scenario == EScenario::RootWrongGrant ? Self.ReadToken(520)
+				: Self.Scenario == EScenario::RootInvalid ? 0 : Returned;
+			const TConstArrayView<uint64> Grants = Self.Scenario == EScenario::RootNoGrant ? TConstArrayView<uint64>{} : TConstArrayView<uint64>{&Loan, 1};
+			bCalled = Self.Runtime.InvokeGeneratedInstanceExport(Self.B.OwnerHandle, Self.Step, Frame, Error, &Result, Grants);
+			Self.Test.TestEqual(TEXT("root transfer route outcome"), bCalled, RootSucceeds(Self.Scenario));
+			if (Self.Scenario == EScenario::RootInvalid)
+				Self.Test.TestEqual(TEXT("invalid loan is rejected before target effects"), Self.ReadToken(672), uint64{0});
+			if (bCalled)
+			{
+				auto* Heap = Self.Runtime.GetManagedHeapForTesting();
+				Self.Test.TestTrue(TEXT("host forces GC before resuming caller"), Heap->Collect() == EHeapError::Ok);
+				const auto Fresh = Self.ReadToken(656);
+				Self.bHostGcPreservedReturn = Heap->IsAlive(Fresh) && Heap->IsAlive(Self.ReadToken(528));
+				Self.Test.TestTrue(TEXT("returned and unrelated caller objects survive callee unwind and host GC"), Self.bHostGcPreservedReturn);
+				uint32 Number = 0;
+				Self.Test.TestTrue(TEXT("returned object remains readable"), Heap->ReadBytes(Fresh, 1, 0,
+					{reinterpret_cast<uint8*>(&Number), sizeof(Number)}) == EHeapError::Ok);
+				Self.Test.TestEqual(TEXT("returned object keeps callee mutation"), Number, 99u);
+			}
+		}
+		if (!bCalled) Self.LastError = Error.Category;
+		Self.Test.TestEqual(TEXT("root transfer restores caller frame floor"), Self.Runtime.GetManagedHeapForTesting()->GetStats().ActiveFrames, Before);
+		Self.Test.TestEqual(TEXT("root transfer restores caller owner"), Self.Runtime.HandleOwnerGetSlotImport(), ParentSlot);
+		Value = bCalled ? static_cast<int32>(Result.Cells[0]) : 0;
+		return EAvidScriptVmTypedHostStatus::Succeeded; // Deliberately ignore failure; the root chain must still fail.
+	}
+};
 struct FProbe
 {
 	FAutomationTestBase& Test;
@@ -775,11 +910,14 @@ bool FAvidScriptProductionInstanceEntryTest::RunTest(const FString& Parameters)
 		*UAvidScriptGeneratedTypeSessionTestObject::StaticClass()->GetPathName());
 	TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot> Types; FString Error;
 	if (!FAvidScriptGeneratedTypeRegistry::BuildFromJson(Json, Types, Error)) { AddError(Error); return false; }
-	const auto Wasm = BuildFixture(true);
 	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
 	for (const auto Scenario : {EScenario::Normal, EScenario::Trap, EScenario::Mutate, EScenario::ForeignCode,
-		EScenario::World, EScenario::Retire, EScenario::Depth, EScenario::Entries, EScenario::Frame, EScenario::Suspended})
+		EScenario::World, EScenario::Retire, EScenario::Depth, EScenario::Entries, EScenario::Frame, EScenario::Suspended,
+		EScenario::RootReturn, EScenario::RootRestore, EScenario::RootNoGrant, EScenario::RootWrongGrant, EScenario::RootInvalid,
+		EScenario::RootRelease, EScenario::RootAllocate, EScenario::RootCreate, EScenario::RootShadow, EScenario::RootDepth, EScenario::RootRegrant})
 	{
+		const bool bRootScenario = IsRootScenario(Scenario);
+		const auto Wasm = bRootScenario ? BuildRootTransferFixture(Scenario) : BuildFixture(true);
 		AddInfo(FString::Printf(TEXT("production entry backend=%d scenario=%d"), static_cast<int32>(Backend), static_cast<int32>(Scenario)));
 		FAvidScriptVmBackendSelection Selection;
 		Selection.BackendKind = Backend;
@@ -792,6 +930,7 @@ bool FAvidScriptProductionInstanceEntryTest::RunTest(const FString& Parameters)
 		TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> Other(NewObject<UAvidScriptGeneratedTypeSessionTestObject>(OtherWorld.Get()));
 		FAvidScriptObjectHandleResult HandleResult;
 		FProbe Probe{*this, *Runtime}; Probe.bProduction = true; Probe.Scenario = Scenario;
+		FRootTransferProbe RootProbe{*this, *Runtime, {}, {}, {}, {}, {}, Scenario};
 		Probe.A.ObjectRegistry = &Registry; Probe.A.OwnerHandle = Registry.RegisterObject(A.Get(), HandleResult, false);
 		Probe.B = Probe.A; Probe.B.OwnerHandle = Registry.RegisterObject(B.Get(), HandleResult, false);
 		Probe.OtherTarget = Registry.RegisterObject(Other.Get(), HandleResult, false);
@@ -807,6 +946,11 @@ bool FAvidScriptProductionInstanceEntryTest::RunTest(const FString& Parameters)
 		Import.Signature = TEXT("(I)i"); Import.Shape = EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Get;
 		Import.bSupplementalRuntimeAuthority = true; Import.PreparedTarget.Context = &Probe;
 		Import.PreparedTarget.PackedSelfPropertyI32Get = &FProbe::Reenter;
+		if (bRootScenario)
+		{
+			Import.PreparedTarget.Context = &RootProbe;
+			Import.PreparedTarget.PackedSelfPropertyI32Get = &FRootTransferProbe::Reenter;
+		}
 		FAvidScriptWasmSmokeResult Loaded;
 		if (!Runtime->SetSupplementalTypedHostImports({&Import, 1}, Error)
 			|| !Runtime->LoadModule(Wasm.GetData(), Wasm.Num(), TEXT("production_instance_entry"), Loaded)
@@ -824,6 +968,10 @@ bool FAvidScriptProductionInstanceEntryTest::RunTest(const FString& Parameters)
 		if (!SA.LoadGeneratedDomainArtifact(Artifact, Domain, Joined) || !SB.LoadGeneratedDomainArtifact(Artifact, Domain, Joined))
 		{ AddError(Joined.ErrorMessage); return false; }
 		Probe.A = SA.HostContext; Probe.B = SB.HostContext;
+		RootProbe.A = Probe.A; RootProbe.B = Probe.B;
+		if (bRootScenario && (!Runtime->PrepareContextualExportCall(TEXT("step"), RootProbe.Step, Error)
+			|| !Runtime->PrepareContextualExportCall(TEXT("count"), RootProbe.Count, Error)
+			|| !Runtime->PrepareContextualExportCall(TEXT("leaf"), RootProbe.Leaf, Error))) { AddError(Error); return false; }
 		if (!Runtime->PrepareContextualExportCall(TEXT("step"), Probe.Step, Error)
 			|| !Runtime->PrepareContextualExportCall(TEXT("trap"), Probe.Trap, Error)) { AddError(Error); return false; }
 		if (Scenario == EScenario::ForeignCode)
@@ -838,6 +986,32 @@ bool FAvidScriptProductionInstanceEntryTest::RunTest(const FString& Parameters)
 		if (Scenario == EScenario::Suspended) SB.SuspendForApplicationLifecycle(1);
 		int32 Value = -1;
 		const bool bCalled = FAvidScriptGeneratedTypeDispatcher::Invoke(A.Get(), 0, 0, {}, &Value);
+		if (bRootScenario)
+		{
+			TestEqual(TEXT("production returned-root authorization result"), bCalled, RootSucceeds(Scenario));
+			TestFalse(TEXT("returned-root chain has exited"), Runtime->IsContextInvocationActive());
+			TestEqual(TEXT("expected returned-root call count"), RootProbe.Calls,
+				Scenario == EScenario::RootRestore || Scenario == EScenario::RootShadow || Scenario == EScenario::RootDepth || Scenario == EScenario::RootRegrant ? 2 : 1);
+			if (RootSucceeds(Scenario))
+			{
+				TestEqual(TEXT("returned-root callee completes"), Value, 99);
+				TestTrue(TEXT("host GC verified the returned object"), RootProbe.bHostGcPreservedReturn);
+				auto* Heap = Runtime->GetManagedHeapForTesting();
+				TestEqual(TEXT("returned-root chain releases all frames"), Heap->GetStats().ActiveFrames, 0u);
+				TestEqual(TEXT("returned-root chain releases all roots"), Heap->GetStats().LiveRoots, 0u);
+				TestTrue(TEXT("returned graph collects after caller exits"), Heap->Collect() == AvidScript::Managed::EHeapError::Ok);
+				TestEqual(TEXT("returned-root chain has no retained object"), Heap->GetStats().LiveObjects, 0u);
+			}
+			else
+			{
+				TestFalse(TEXT("root authority failure unloads shared VM after outer return"), Runtime->IsLoaded());
+				TestTrue(TEXT("root authority failure quarantines whole domain"), SA.GetSnapshot().bFaultQuarantined && SB.GetSnapshot().bFaultQuarantined);
+				TestFalse(TEXT("root authority failure is diagnosed"), RootProbe.LastError.IsEmpty());
+				if (Scenario == EScenario::RootInvalid || Scenario == EScenario::RootRegrant)
+					TestEqual(TEXT("invalid loan rejected by production entry"), RootProbe.LastError, FString(TEXT("generated_invocation_roots")));
+			}
+			continue;
+		}
 		TestEqual(TEXT("production call succeeds only for the authorized complete chain"), bCalled, Scenario == EScenario::Normal);
 		TestFalse(TEXT("outer chain has fully returned"), Runtime->IsContextInvocationActive());
 		if (Scenario == EScenario::Normal)

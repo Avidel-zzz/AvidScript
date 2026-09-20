@@ -15,7 +15,7 @@ enum class EHeapError : std::uint8_t
 	Ok, Closed, InvalidLimits, OwnerExhausted, NotConfigured, AlreadyConfigured,
 	InvalidLayout, InvalidType, InvalidObject, InvalidRoot, InvalidFrame, FrameOrder,
 	ObjectLimit, ByteLimit, RootLimit, FrameLimit, InvalidRange, ReferenceOverlap,
-	InvalidReferenceField, ReferenceTypeMismatch
+	InvalidReferenceField, ReferenceTypeMismatch, RootAuthority
 };
 
 struct FHeapLimits
@@ -65,6 +65,11 @@ public:
 	EHeapError Configure(std::span<const FHeapLayout> InLayouts);
 	// No object allocation authority; only frames and null roots are available.
 	EHeapError ConfigureRootsOnly();
+	// Native transfers grant only roots owned by the caller's current activation.
+	EHeapError ValidateRootTransfer(std::span<const FToken> InRoots, std::uint32_t InvocationFloor = 0) const;
+	EHeapError ValidateGuestRootFrame(FToken Frame, std::uint32_t InvocationFloor) const;
+	EHeapError ValidateGuestRootAccess(FToken Root, std::uint32_t InvocationFloor,
+		std::span<const FToken> TransferredRoots, bool bAllowTransfer) const;
 	EHeapError PushFrame(FToken& OutFrame);
 	EHeapError PopFrame(FToken Frame);
 	EHeapError UnwindToDepth(std::uint32_t Depth);
@@ -90,7 +95,7 @@ private:
 	struct FSlot { std::uint32_t Generation = 1; bool Live = false; };
 	struct FObjectSlot : FSlot { std::uint32_t LayoutIndex = 0; bool Marked = false; std::vector<std::uint8_t> Bytes; };
 	struct FRootSlot : FSlot { FToken Object = 0; std::uint32_t Frame = InvalidIndex; std::uint32_t Previous = InvalidIndex; std::uint32_t Next = InvalidIndex; };
-	struct FFrameSlot : FSlot { std::uint32_t FirstRoot = InvalidIndex; };
+	struct FFrameSlot : FSlot { std::uint32_t FirstRoot = InvalidIndex; std::uint32_t Depth = 0; };
 	FToken Token(ETokenKind Kind, std::uint32_t Index, std::uint32_t Generation) const;
 	std::uint32_t Index(FToken Value, ETokenKind Kind) const;
 	std::uint32_t ObjectIndex(FToken Value, std::uint32_t ExpectedType = 0) const;

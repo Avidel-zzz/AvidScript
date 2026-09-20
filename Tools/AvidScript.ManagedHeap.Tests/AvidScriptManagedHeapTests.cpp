@@ -291,6 +291,73 @@ void ProtocolRootsOnly()
 		"roots-only execution retained frames or allocated placeholder objects");
 	Heap.Close(); Check(Heap.ConfigureRootsOnly() == EHeapError::Closed, "closed roots-only heap was resurrected");
 }
+void ProtocolRootAuthority()
+{
+	FHeapLimits Limits; Limits.MaxRoots = 8;
+	FHeap Heap(Limits), Foreign; Ok(Heap.Configure(Layouts)); Ok(Foreign.Configure(Layouts));
+	const auto Persistent = Root(Heap), Caller = Frame(Heap), Returned = Root(Heap, Caller), Private = Root(Heap, Caller);
+	const auto Old = Allocate(Heap, Private);
+	const std::array<FToken, 2> Aliased{Returned, Returned};
+	Ok(Heap.ValidateRootTransfer(Aliased));
+	const auto ForeignRoot = Root(Foreign), Stale = Root(Heap, Caller); Ok(Heap.ReleaseRoot(Stale));
+	for (const auto Invalid : {FToken{0}, ForeignRoot, Stale})
+		Check(Heap.ValidateRootTransfer({&Invalid, 1}) == EHeapError::InvalidRoot, "invalid root transfer accepted");
+	Check(Heap.ValidateRootTransfer({&Persistent, 1}) == EHeapError::RootAuthority, "persistent root transferred");
+	const std::array<FToken, 9> Oversized{};
+	Check(Heap.ValidateRootTransfer(Oversized) == EHeapError::RootLimit, "unbounded root transfer accepted");
+	const auto Callee = Frame(Heap), Local = Root(Heap, Callee), Fresh = Allocate(Heap, Local);
+	WriteNumber(Heap, Fresh, 99);
+	Check(Heap.ValidateRootTransfer({&Returned, 1}) == EHeapError::RootAuthority, "callee reloaned ancestor root");
+	Ok(Heap.ValidateRootTransfer({&Local, 1}));
+	Ok(Heap.ValidateRootTransfer({&Local, 1}, 1));
+	Check(Heap.ValidateRootTransfer({&Local, 1}, 2) == EHeapError::RootAuthority,
+		"unframed nested VM entry reloaned its caller root");
+	auto Set = [&](FToken RootToken, FToken Object) {
+		auto P = Packet(Abi::ECommand::SetRoot); Wire(P, RootToken, 8); Wire(P, Object, 8); return P;
+	};
+	for (const auto RootToken : {Returned, Private, Persistent})
+		Check(ExecuteHeapCommand(Heap, Set(RootToken, Fresh), {}, 1).HeapError == EHeapError::RootAuthority,
+			"nested call updated an ungranted root");
+	Check(ExecuteHeapCommand(Heap, Set(Private, Fresh), {}, 1, Aliased).HeapError == EHeapError::RootAuthority,
+		"loan authorized another root");
+	std::array<std::uint8_t, 8> Output; Output.fill(0xa5); const auto Untouched = Output;
+	const auto RootsBefore = Heap.GetStats().LiveRoots;
+	const auto AllocationsBefore = Heap.GetStats().Allocations;
+	for (const auto TargetFrame : {FToken{0}, Caller})
+	{
+		auto P = Packet(Abi::ECommand::CreateRoot); Wire(P, TargetFrame, 8); Wire(P, Fresh, 8);
+		Check(ExecuteHeapCommand(Heap, P, Output, 1, Aliased).HeapError == EHeapError::RootAuthority,
+			"callee created persistent or caller-owned root");
+	}
+	auto P = Packet(Abi::ECommand::Allocate); Wire(P, 1); Wire(P, Returned, 8);
+	Check(ExecuteHeapCommand(Heap, P, Output, 1, Aliased).HeapError == EHeapError::RootAuthority, "loan allowed allocation");
+	P = Packet(Abi::ECommand::ReleaseRoot); Wire(P, Returned, 8);
+	Check(ExecuteHeapCommand(Heap, P, {}, 1, Aliased).HeapError == EHeapError::RootAuthority, "loan allowed release");
+	Check(Output == Untouched && Heap.GetStats().LiveRoots == RootsBefore && Heap.GetStats().Allocations == AllocationsBefore,
+		"rejected authority changed output or heap");
+	auto Bad = Set(Returned, Fresh); Bad.push_back(0);
+	Check(ExecuteHeapCommand(Heap, Bad, {}, 1, Aliased).Error == EHeapProtocolError::InvalidPacket, "loan bypassed packet validation");
+	Check(ExecuteHeapCommand(Heap, Set(Returned, Fresh), Output, 1, Aliased).Error == EHeapProtocolError::InvalidOutput,
+		"loan bypassed output validation");
+	Check(ExecuteHeapCommand(Heap, Set(Returned, Fresh), {}, 1, Aliased).Succeeded(), "authorized return root update rejected");
+	Check(ExecuteHeapCommand(Heap, Set(Local, Fresh), {}, 1).Succeeded(), "callee lost its own root authority");
+	const auto Grandchild = Frame(Heap);
+	Check(ExecuteHeapCommand(Heap, Set(Returned, Fresh), {}, 2, Aliased).HeapError == EHeapError::RootAuthority,
+		"grandchild inherited an ancestor root loan");
+	Check(ExecuteHeapCommand(Heap, Set(Local, Fresh), {}, 2, {&Local, 1}).Succeeded(), "immediate caller transfer rejected");
+	Ok(Heap.PopFrame(Grandchild)); Ok(Heap.PopFrame(Callee)); Ok(Heap.Collect());
+	Check(Heap.IsAlive(Old) && Heap.IsAlive(Fresh) && ReadNumber(Heap, Fresh) == 99,
+		"callee unwind or host GC lost returned object or private caller state");
+	Check(ExecuteHeapCommand(Heap, Set(Returned, 0), {}, 1).HeapError == EHeapError::RootAuthority,
+		"a completed loan remained authorized without its scope");
+	const auto ReusedFrame = Frame(Heap), ReusedRoot = Root(Heap, ReusedFrame);
+	Check(ReusedFrame != Callee && ReusedRoot != Local, "frame/root slot reuse lost generation");
+	Check(ExecuteHeapCommand(Heap, Set(Local, Fresh), {}, 1, {&Local, 1}).HeapError == EHeapError::InvalidRoot,
+		"stale loan gained authority through slot reuse");
+	Check(ExecuteHeapCommand(Heap, Set(ReusedRoot, Fresh), {}, 1).Succeeded(), "reused frame has incorrect depth");
+	Ok(Heap.UnwindToDepth(0)); Ok(Heap.ReleaseRoot(Persistent)); Ok(Heap.Collect());
+	Check(Heap.GetStats().LiveRoots == 0 && Heap.GetStats().LiveObjects == 0, "return transfer leaked roots or objects");
+}
 void ProtocolLimitsAndRanges()
 {
 	Check(Abi::ValidateRanges(1, 8, 9, 8), "adjacent ranges rejected");
@@ -316,8 +383,8 @@ int main()
 	{
 		SharedEscapingCells(); Cycles(); TokensAndGenerations(); FramesAndUnwind(); RootListReuse();
 		TypedReferencesAndRanges(); AllocationLimits(); InvalidLayouts(); GenerationRetirement(); GraphOracle();
-		ProtocolExecution(); ProtocolRejections(); ProtocolLimitsAndRanges(); ProtocolRootsOnly();
-		std::cout << "AvidScript.ManagedHeap.Tests: 14/14 passed (4000 graph-oracle steps; full root generation retirement; wire protocol)\n";
+		ProtocolExecution(); ProtocolRejections(); ProtocolLimitsAndRanges(); ProtocolRootsOnly(); ProtocolRootAuthority();
+		std::cout << "AvidScript.ManagedHeap.Tests: 15/15 passed (4000 graph-oracle steps; full root generation retirement; wire protocol)\n";
 		return 0;
 	}
 	catch (const std::exception& Error) { std::cerr << Error.what() << '\n'; return 1; }

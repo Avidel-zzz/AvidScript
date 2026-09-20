@@ -19,7 +19,8 @@ struct FHeapProtocolResult
 // Borrowed, disjoint views. Synchronous: no guest reentry or memory growth.
 // Output and packet shape are checked before mutating the heap or output bytes.
 FHeapProtocolResult ExecuteHeapCommand(FHeap& Heap, std::span<const std::uint8_t> Request,
-	std::span<std::uint8_t> Response, std::uint32_t InvocationFrameFloor);
+	std::span<std::uint8_t> Response, std::uint32_t InvocationFrameFloor,
+	std::span<const FToken> TransferredRoots = {});
 const char* HeapProtocolErrorName(EHeapProtocolError Error);
 const char* HeapErrorName(EHeapError Error);
 }

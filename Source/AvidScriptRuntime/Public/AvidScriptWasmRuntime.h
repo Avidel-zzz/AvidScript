@@ -23,6 +23,7 @@ class UWorld;
 class IAvidScriptGeneratedTypeAuthority;
 class FAvidScriptGeneratedTypeRegistrySnapshot;
 struct FAvidScriptGeneratedTypeHostBindings;
+struct FAvidScriptManagedRootTransfer;
 namespace AvidScript::Managed { class FHeap; }
 
 class AVIDSCRIPTRUNTIME_API IAvidScriptEventSubscriptionHost
@@ -317,7 +318,8 @@ public:
 	// Language method selection and signature marshalling happen before this call.
 	bool InvokeGeneratedInstanceExport(const FAvidScriptObjectHandle& Target,
 		const FAvidScriptContextualExportCall& Call, const FAvidScriptVmCallFrame& Frame,
-		FAvidScriptVmError& OutError, FAvidScriptVmCallResult* OutResult = nullptr);
+		FAvidScriptVmError& OutError, FAvidScriptVmCallResult* OutResult = nullptr,
+		TConstArrayView<uint64> ReturnedRoots = {});
 	bool SetSupplementalTypedHostImports(
 		TConstArrayView<FAvidScriptVmTypedHostImport> Imports,
 		FString& OutError);
@@ -954,6 +956,7 @@ private:
 	TUniquePtr<AvidScript::Managed::FHeap> ManagedHeap;
 	uint32 ManagedHeapFrameFloor = 0;
 	uint32 ManagedHeapInvocationDepth = 0;
+	const FAvidScriptManagedRootTransfer* ActiveRootTransfer = nullptr;
 	FAvidScriptVmBackendSelection BackendSelection;
 	FAvidScriptVmBackendInfo ActiveBackendInfo;
 	FAvidScriptVmLoadConfig::FExecutionBudget ExecutionBudget;

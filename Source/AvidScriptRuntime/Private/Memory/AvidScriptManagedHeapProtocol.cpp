@@ -33,7 +33,7 @@ void WriteToken(std::span<std::uint8_t> Response, FToken Token)
 }
 
 FHeapProtocolResult ExecuteHeapCommand(FHeap& Heap, std::span<const std::uint8_t> Request,
-	std::span<std::uint8_t> Response, std::uint32_t InvocationFrameFloor)
+	std::span<std::uint8_t> Response, std::uint32_t InvocationFrameFloor, std::span<const FToken> TransferredRoots)
 {
 	using namespace ProtocolPrivate;
 	if (Request.size() < Abi::HeaderBytes || Request.size() > Abi::MaxRequestBytes)
@@ -109,6 +109,15 @@ FHeapProtocolResult ExecuteHeapCommand(FHeap& Heap, std::span<const std::uint8_t
 	}
 	if (!Reader.Finished()) return Failure(EHeapProtocolError::InvalidPacket);
 	if (Response.size() != OutputSize) return Failure(EHeapProtocolError::InvalidOutput);
+	// Only SetRoot may use a native transfer, never release or allocation.
+	if (InvocationFrameFloor != 0)
+	{
+		EHeapError Authority = EHeapError::Ok;
+		if (Command == Abi::ECommand::CreateRoot) Authority = Heap.ValidateGuestRootFrame(First, InvocationFrameFloor);
+		else if (Command == Abi::ECommand::SetRoot || Command == Abi::ECommand::ReleaseRoot || Command == Abi::ECommand::Allocate)
+			Authority = Heap.ValidateGuestRootAccess(First, InvocationFrameFloor, TransferredRoots, Command == Abi::ECommand::SetRoot);
+		if (Authority != EHeapError::Ok) return FromHeap(Authority);
+	}
 	EHeapError Error = EHeapError::Ok;
 	FToken Token = 0;
 	switch (Command)
@@ -156,6 +165,7 @@ const char* HeapErrorName(EHeapError Error)
 	AVID_HEAP_NAME(ByteLimit) AVID_HEAP_NAME(RootLimit) AVID_HEAP_NAME(FrameLimit)
 	AVID_HEAP_NAME(InvalidRange) AVID_HEAP_NAME(ReferenceOverlap) AVID_HEAP_NAME(InvalidReferenceField)
 	AVID_HEAP_NAME(ReferenceTypeMismatch)
+	AVID_HEAP_NAME(RootAuthority)
 #undef AVID_HEAP_NAME
 	}
 	return "UnknownHeapError";

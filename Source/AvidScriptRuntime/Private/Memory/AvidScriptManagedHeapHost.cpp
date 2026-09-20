@@ -1,5 +1,6 @@
 #include "AvidScriptWasmRuntime.h"
 #include "Memory/AvidScriptManagedHeapProtocol.h"
+#include "Memory/AvidScriptManagedRootTransfer.h"
 
 uint64 FAvidScriptWasmRuntimeInstance::BeginVmInvocation()
 {
@@ -32,9 +33,13 @@ bool FAvidScriptWasmRuntimeInstance::DispatchManagedHeapCall(
 		OutResult.Details = TEXT("Managed heap commands require an active export invocation; WASM start functions cannot access this ABI.");
 		return false;
 	}
+	std::span<const AvidScript::Managed::FToken> ReturnedRoots;
+	if (ActiveRootTransfer && ActiveRootTransfer->InvocationDepth == ManagedHeapInvocationDepth
+		&& ActiveRootTransfer->FrameFloor == ManagedHeapFrameFloor)
+		ReturnedRoots = {ActiveRootTransfer->Roots.GetData(), static_cast<size_t>(ActiveRootTransfer->Roots.Num())};
 	const auto Result = AvidScript::Managed::ExecuteHeapCommand(*ManagedHeap,
 		{Call.InputBytes.GetData(), static_cast<size_t>(Call.InputBytes.Num())},
-		{Call.OutputBytes.GetData(), static_cast<size_t>(Call.OutputBytes.Num())}, ManagedHeapFrameFloor);
+		{Call.OutputBytes.GetData(), static_cast<size_t>(Call.OutputBytes.Num())}, ManagedHeapFrameFloor, ReturnedRoots);
 	OutResult.bSucceeded = Result.Succeeded();
 	OutResult.ReturnValue = Result.Succeeded() ? 1 : 0;
 	if (!Result.Succeeded())

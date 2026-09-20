@@ -28,7 +28,7 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 
 当前开发主线转向 [P66-P69 开发体验路线](Docs/Phase66/P66.0_Developer_Experience_Architecture.md)：
 语言一致性、结构热重载、完整调试和 Windows 真实玩法验证。P65 未完成的性能、发布与移动端债务继续保留。
-[与 Unreal AngelScript / Puerts 的成熟度评估](Docs/Phase66/P66_Developer_Leadership_Assessment.md)已于 2026-09-20 按 `d0a33857` 与源码、官方资料更新：生产共享执行域及原生受检重入已经交付，完整跨对象语言派发、持久事件/await、结构热重载与完整调试仍有缺口；以真实 Windows 开发工作流验证成熟度，暂不进入成熟版收尾。该评估为文档与源码复核，无新增运行测试或竞品计时，不宣称成熟或全面领先。
+[与 Unreal AngelScript / Puerts 的成熟度评估](Docs/Phase66/P66_Developer_Leadership_Assessment.md)已于 2026-09-20 按 `30f7618d` 与源码、官方资料更新：生产共享执行域、原生受检重入及同 owner 的 C# 完整参数帧已经交付，生产跨对象语言路由、持久事件/await、结构热重载与完整调试仍有缺口；以真实 Windows 开发工作流验证成熟度，暂不进入成熟版收尾。该评估为文档与源码复核，无新增运行测试或竞品计时，不宣称成熟或全面领先。
 [P66.A 静态局部函数](Docs/Phase66/P66.A_Lexical_Functions.md)已支持独立作用域、嵌套、递归及直接调用；
 [P66.B 直接调用捕获](Docs/Phase66/P66.B_Direct_Capture_Results.md)进一步支持外层变量共享读写及跨 await 保存。
 [委托签名合同](Docs/Phase66/P66.B_Delegate_Signature_Contract.md)已覆盖封闭泛型身份、引用参数及产物校验，为后续委托执行提供类型依据。
@@ -73,6 +73,8 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 [间接方法参数帧](Docs/Phase66/P66.B_Indirect_Method_ABI.md)新增 IR 7/1.6 与可执行 WASM 适配器，用两个入口参数承载完整类型化帧；双后端验证 16 个混合参数、含引用结构返回、共享别名、递归和 GC。IR 35/35、backend 148/148、Guest 362/362、Windows 构建及堆 Automation 5/5 通过。当前为 Guest IR 执行基础，真实 C# 方法目录、生产跨对象路由、虚/接口派发与持久 event/await 仍待连接，P66.B 保持进行中。
 
 [C# 实例方法参数帧](Docs/Phase66/P66.B_CSharp_Method_Frames.md)已将方法目录连接到同 owner 的直接调用和绑定方法组，保持复杂值、共享引用与 ref/out 别名；统一 receiver 表示后仍验证原声明类型。IR 8/1.7 新增仅管理根与帧的模式，使无闭包的引用参数无需占位对象。Guest 385/385、IR 35/35、backend 148/148、原生堆 14/14、Windows 构建及双后端 GeneratedTypes 17/17、堆回归 5/5 通过。生产跨对象选择、虚/接口派发、持久事件与 await 仍未完成，P66.B 保持进行中。
+
+[生产返回根授权](Docs/Phase66/P66.B_Returned_Root_Authority.md)进一步限制被调用方只更新明确交给它的返回根，禁止释放、分配、越级转交及无帧嵌套继承。原生堆 15/15、Windows 构建、C# receiver 25/25 与 GeneratedTypes 17/17 通过，包含双后端返回前 Host GC、scope 恢复和失败隔离。此组仍是原生生产入口基础，完整 C# 跨对象路由、虚/接口选择与持久 event/await 继续推进。
 
 ## 现在可以做什么
 

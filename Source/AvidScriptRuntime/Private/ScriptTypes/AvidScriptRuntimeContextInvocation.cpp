@@ -2,6 +2,8 @@
 #include "ScriptTypes/AvidScriptGeneratedTypeAuthority.h"
 #include "Engine/World.h"
 #include "Misc/ScopeExit.h"
+#include "Memory/AvidScriptManagedHeapProtocol.h"
+#include "Memory/AvidScriptManagedRootTransfer.h"
 
 bool FAvidScriptWasmRuntimeInstance::PrepareContextualExportCall(
 	const FString& ExportName, FAvidScriptContextualExportCall& OutCall, FString& OutError)
@@ -91,7 +93,7 @@ bool FAvidScriptWasmRuntimeInstance::InvokeInContext(
 
 bool FAvidScriptWasmRuntimeInstance::InvokeGeneratedInstanceExport(const FAvidScriptObjectHandle& Target,
 	const FAvidScriptContextualExportCall& Call, const FAvidScriptVmCallFrame& Frame,
-	FAvidScriptVmError& OutError, FAvidScriptVmCallResult* OutResult)
+	FAvidScriptVmError& OutError, FAvidScriptVmCallResult* OutResult, TConstArrayView<uint64> ReturnedRoots)
 {
 	OutError.Reset();
 	if (OutResult) *OutResult = {};
@@ -104,7 +106,27 @@ bool FAvidScriptWasmRuntimeInstance::InvokeGeneratedInstanceExport(const FAvidSc
 		OutError.Category = TEXT("generated_invocation_source");
 		OutError.Details = TEXT("instance routing requires an active running generated owner context");
 	}
-	else if (Authority->InvokeInstanceExport(*this, Target, Call, Frame, OutError, OutResult)) return true;
+	else
+	{
+		const auto RootStatus = ReturnedRoots.IsEmpty() ? AvidScript::Managed::EHeapError::Ok
+			: ManagedHeap && ManagedHeapInvocationDepth != 0 ? ManagedHeap->ValidateRootTransfer(
+				{ReturnedRoots.GetData(), static_cast<size_t>(ReturnedRoots.Num())}, ManagedHeapFrameFloor) : AvidScript::Managed::EHeapError::RootAuthority;
+		if (RootStatus != AvidScript::Managed::EHeapError::Ok)
+		{
+			OutError.Category = TEXT("generated_invocation_roots");
+			OutError.Details = FString::Printf(TEXT("returned roots require the caller's current frame: %s"),
+				UTF8_TO_TCHAR(AvidScript::Managed::HeapErrorName(RootStatus)));
+		}
+		else
+		{
+			FAvidScriptManagedRootTransfer Transfer;
+			Transfer.InvocationDepth = ManagedHeapInvocationDepth + 1;
+			Transfer.FrameFloor = ManagedHeap ? ManagedHeap->GetStats().ActiveFrames : 0;
+			Transfer.Roots.Append(ReturnedRoots.GetData(), ReturnedRoots.Num());
+			TGuardValue<const FAvidScriptManagedRootTransfer*> TransferGuard(ActiveRootTransfer, &Transfer);
+			if (Authority->InvokeInstanceExport(*this, Target, Call, Frame, OutError, OutResult)) return true;
+		}
+	}
 	if (OutError.Category.IsEmpty()) OutError.Category = TEXT("generated_invocation_rejected");
 	if (ContextInvocationDepth) LatchContextInvocationFailure(OutError);
 	if (OutResult) *OutResult = {};

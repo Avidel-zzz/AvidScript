@@ -138,6 +138,45 @@ template<class T> void FHeap::Retire(T& Slot, std::uint32_t SlotIndex, std::vect
 	if (Slot.Generation < MaxGeneration) { ++Slot.Generation; Free.push_back(SlotIndex); }
 }
 
+EHeapError FHeap::ValidateRootTransfer(std::span<const FToken> InRoots, std::uint32_t InvocationFloor) const
+{
+	if (const auto State = Ready(); State != EHeapError::Ok) return State;
+	if (InRoots.size() > Limits.MaxRoots) return EHeapError::RootLimit;
+	for (const auto Root : InRoots)
+	{
+		const auto Slot = RootIndex(Root);
+		if (Slot == InvalidIndex) return EHeapError::InvalidRoot;
+		if (FrameStack.size() <= InvocationFloor || Roots[Slot].Frame != FrameStack.back()) return EHeapError::RootAuthority;
+	}
+	return EHeapError::Ok;
+}
+
+EHeapError FHeap::ValidateGuestRootFrame(FToken Frame, std::uint32_t InvocationFloor) const
+{
+	if (const auto State = Ready(); State != EHeapError::Ok) return State;
+	if (!Frame) return InvocationFloor == 0 ? EHeapError::Ok : EHeapError::RootAuthority;
+	const auto Slot = FrameIndex(Frame);
+	if (Slot == InvalidIndex) return EHeapError::InvalidFrame;
+	return Frames[Slot].Depth > InvocationFloor ? EHeapError::Ok : EHeapError::RootAuthority;
+}
+
+EHeapError FHeap::ValidateGuestRootAccess(FToken Root, std::uint32_t InvocationFloor,
+	std::span<const FToken> TransferredRoots, bool bAllowTransfer) const
+{
+	if (const auto State = Ready(); State != EHeapError::Ok) return State;
+	const auto Slot = RootIndex(Root);
+	if (Slot == InvalidIndex) return EHeapError::InvalidRoot;
+	if (InvocationFloor == 0) return EHeapError::Ok;
+	const auto Frame = Roots[Slot].Frame;
+	if (Frame != InvalidIndex)
+	{
+		if (Frames[Frame].Depth > InvocationFloor) return EHeapError::Ok;
+		if (bAllowTransfer && Frames[Frame].Depth == InvocationFloor
+			&& std::find(TransferredRoots.begin(), TransferredRoots.end(), Root) != TransferredRoots.end()) return EHeapError::Ok;
+	}
+	return EHeapError::RootAuthority;
+}
+
 EHeapError FHeap::PushFrame(FToken& OutFrame)
 {
 	OutFrame = 0;
@@ -145,6 +184,7 @@ EHeapError FHeap::PushFrame(FToken& OutFrame)
 	const auto Slot = Acquire(Frames, FreeFrames, Limits.MaxFrames);
 	if (Slot == InvalidIndex) return EHeapError::FrameLimit;
 	Frames[Slot].FirstRoot = InvalidIndex;
+	Frames[Slot].Depth = std::uint32_t(FrameStack.size()) + 1;
 	FrameStack.push_back(Slot);
 	Stats.ActiveFrames = std::uint32_t(FrameStack.size());
 	OutFrame = Token(ETokenKind::Frame, Slot, Frames[Slot].Generation);
