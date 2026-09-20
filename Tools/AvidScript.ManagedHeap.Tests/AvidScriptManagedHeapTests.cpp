@@ -358,6 +358,74 @@ void ProtocolRootAuthority()
 	Ok(Heap.UnwindToDepth(0)); Ok(Heap.ReleaseRoot(Persistent)); Ok(Heap.Collect());
 	Check(Heap.GetStats().LiveRoots == 0 && Heap.GetStats().LiveObjects == 0, "return transfer leaked roots or objects");
 }
+void PersistentRootsOwnGraphs()
+{
+	FHeap Heap; Ok(Heap.Configure(Layouts));
+	const auto F = Frame(Heap), A = Allocate(Heap, Root(Heap, F)), B = Allocate(Heap, Root(Heap, F));
+	Ok(Heap.WriteReference(A, 1, 0, B)); Ok(Heap.WriteReference(B, 1, 0, A));
+	FPersistentRoots Lease;
+	const std::array<FToken, 3> Objects{A, 0, A};
+	Ok(Heap.RetainPersistent(Objects, Lease));
+	Check(Lease.IsValidFor(Heap) && Lease.Count() == 2, "lease must retain non-null roots without copying objects");
+	Ok(Heap.PopFrame(F)); Ok(Heap.Collect());
+	Check(Heap.IsAlive(A) && Heap.IsAlive(B) && Heap.GetStats().ActiveFrames == 0, "lease lost cyclic graph after stack exit");
+	FPersistentRoots Moved(std::move(Lease)); Lease.Reset();
+	Check(!Lease.IsValidFor(Heap) && Moved.IsValidFor(Heap), "move did not transfer unique root ownership");
+	FPersistentRoots Destination; Ok(Heap.RetainPersistent({&B, 1}, Destination));
+	Destination = std::move(Moved);
+	Check(Heap.GetStats().LiveRoots == 2, "move assignment leaked its previous roots");
+	Destination.Reset(); Destination.Reset(); Ok(Heap.Collect());
+	Check(Heap.GetStats().LiveRoots == 0 && Heap.GetStats().LiveObjects == 0, "lease release leaked cyclic graph");
+	const auto AutoFrame = Frame(Heap), AutoObject = Allocate(Heap, Root(Heap, AutoFrame));
+	{
+		FPersistentRoots Scoped; Ok(Heap.RetainPersistent({&AutoObject, 1}, Scoped));
+		Ok(Heap.PopFrame(AutoFrame)); Ok(Heap.Collect());
+		Check(Heap.IsAlive(AutoObject), "scoped owner failed to retain object");
+	}
+	Ok(Heap.Collect());
+	Check(Heap.GetStats().LiveRoots == 0 && !Heap.IsAlive(AutoObject), "owner destruction without Reset leaked roots");
+	{ FPersistentRoots Empty; Ok(Heap.RetainPersistent({}, Empty)); Check(Empty.IsValidFor(Heap), "empty successful lease lost owner identity"); }
+}
+void PersistentRootAcquisitionIsAtomic()
+{
+	FHeapLimits Limits; Limits.MaxRoots = 4;
+	FHeap Heap(Limits), Other; Ok(Heap.Configure(Layouts)); Ok(Other.Configure(Layouts));
+	const auto F = Frame(Heap), A = Allocate(Heap, Root(Heap, F)), B = Allocate(Heap, Root(Heap, F));
+	const auto Foreign = Allocate(Other, Root(Other));
+	FPersistentRoots Lease; Ok(Heap.RetainPersistent({&A, 1}, Lease));
+	const auto Before = Heap.GetStats().LiveRoots;
+	const std::array<FToken, 2> TooMany{B, A}, WrongOwner{B, Foreign}, WrongKind{B, F};
+	Check(Heap.RetainPersistent(TooMany, Lease) == EHeapError::RootLimit, "root budget ignored during atomic replacement");
+	Check(Heap.RetainPersistent(WrongOwner, Lease) == EHeapError::InvalidObject, "foreign object retained");
+	Check(Heap.RetainPersistent(WrongKind, Lease) == EHeapError::InvalidObject, "frame token retained as object");
+	Check(Lease.IsValidFor(Heap) && Lease.Count() == 1 && Heap.GetStats().LiveRoots == Before,
+		"failed acquisition leaked a partial root or replaced prior lease");
+	Ok(Heap.PopFrame(F)); Ok(Heap.Collect());
+	Check(Heap.IsAlive(A) && !Heap.IsAlive(B), "failed replacement changed retained graph");
+	Check(Heap.RetainPersistent({&B, 1}, Lease) == EHeapError::InvalidObject, "stale object retained");
+	Lease.Reset(); Ok(Heap.Collect()); Check(Heap.GetStats().LiveObjects == 0, "atomic failures leaked objects");
+}
+void PersistentRootsOutliveHeapSafely()
+{
+	FPersistentRoots Late;
+	alignas(FHeap) std::array<std::byte, sizeof(FHeap)> Storage;
+	FHeap* Original = std::construct_at(reinterpret_cast<FHeap*>(Storage.data()));
+	Ok(Original->Configure(Layouts));
+	const auto Object = Allocate(*Original, Root(*Original));
+	Ok(Original->RetainPersistent({&Object, 1}, Late));
+	Original->Close();
+	Check(!Late.IsValidFor(*Original) && Original->GetStats().LiveRoots == 0, "close did not invalidate root lease");
+	std::destroy_at(Original);
+	FHeap* Replacement = std::construct_at(reinterpret_cast<FHeap*>(Storage.data()));
+	Ok(Replacement->Configure(Layouts));
+	const auto Fresh = Allocate(*Replacement, Root(*Replacement));
+	Check(!Late.IsValidFor(*Replacement), "old lease became valid for same-address heap");
+	Late.Reset(); Ok(Replacement->Collect());
+	Check(Replacement->IsAlive(Fresh) && Replacement->GetStats().LiveRoots == 1, "late release corrupted replacement heap");
+	Ok(Replacement->RetainPersistent({&Fresh, 1}, Late));
+	std::destroy_at(Replacement); // destructor, without explicit Close
+	Late.Reset();
+}
 void ProtocolLimitsAndRanges()
 {
 	Check(Abi::ValidateRanges(1, 8, 9, 8), "adjacent ranges rejected");
@@ -384,7 +452,8 @@ int main()
 		SharedEscapingCells(); Cycles(); TokensAndGenerations(); FramesAndUnwind(); RootListReuse();
 		TypedReferencesAndRanges(); AllocationLimits(); InvalidLayouts(); GenerationRetirement(); GraphOracle();
 		ProtocolExecution(); ProtocolRejections(); ProtocolLimitsAndRanges(); ProtocolRootsOnly(); ProtocolRootAuthority();
-		std::cout << "AvidScript.ManagedHeap.Tests: 15/15 passed (4000 graph-oracle steps; full root generation retirement; wire protocol)\n";
+		PersistentRootsOwnGraphs(); PersistentRootAcquisitionIsAtomic(); PersistentRootsOutliveHeapSafely();
+		std::cout << "AvidScript.ManagedHeap.Tests: 18/18 passed (4000 graph-oracle steps; full root generation retirement; wire protocol; persistent leases)\n";
 		return 0;
 	}
 	catch (const std::exception& Error) { std::cerr << Error.what() << '\n'; return 1; }

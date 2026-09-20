@@ -131,6 +131,8 @@ Win64 游戏打包现要求并校验完整 Wasmtime 声明集合，实际 UBT �
 
 [Host 选择的动态方法派发](Docs/Phase66/P66.B_Host_Selected_Method_Dispatch.md)使用 IR 10/1.9，将真实 C# 虚调用、显式/隐式接口及 `base` 固定调用接入同域生产执行。接口视图保持弱 UObject handle，派发依据目标已注册脚本类型；普通托管类接口、默认接口方法、检查型向下转换与跨 owner 方法组尚未接通。P66.B 保持进行中，先前条目中的未实现描述只代表各组交付时点。
 
+[持久根所有权基础](Docs/Phase66/P66.B_Persistent_Managed_Roots.md)提供原子获取与自动释放的原生堆租约，堆销毁后晚释放不会访问旧指针。continuation、订阅和 C# 跨 await 的接入仍在推进；该基础不代表这些语言组合已经可用。
+
 ## 架构
 
 ```mermaid

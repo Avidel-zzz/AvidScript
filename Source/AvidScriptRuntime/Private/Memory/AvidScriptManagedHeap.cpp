@@ -6,6 +6,32 @@
 
 namespace AvidScript::Managed
 {
+struct FHeapLifetime { FHeap* Heap = nullptr; };
+
+FPersistentRoots::~FPersistentRoots() { Reset(); }
+FPersistentRoots::FPersistentRoots(FPersistentRoots&& Other) noexcept
+	: Lifetime(std::move(Other.Lifetime)), Roots(std::move(Other.Roots)) {}
+FPersistentRoots& FPersistentRoots::operator=(FPersistentRoots&& Other) noexcept
+{
+	if (this != &Other)
+	{
+		Reset();
+		Lifetime = std::move(Other.Lifetime); Roots = std::move(Other.Roots);
+	}
+	return *this;
+}
+void FPersistentRoots::Reset()
+{
+	if (const auto Owner = Lifetime.lock(); Owner && Owner->Heap)
+		for (const FToken Root : Roots) Owner->Heap->ReleaseRoot(Root);
+	Roots.clear(); Lifetime.reset();
+}
+bool FPersistentRoots::IsValidFor(const FHeap& Heap) const
+{
+	const auto Owner = Lifetime.lock();
+	return Owner && Owner->Heap == &Heap;
+}
+
 namespace HeapCorePrivate
 {
 // Never wrap an owner identity: tokens from any earlier heap stay invalid.
@@ -31,8 +57,9 @@ void StoreReference(std::uint8_t* Bytes, FToken Value)
 }
 }
 
-FHeap::FHeap(FHeapLimits InLimits) : Limits(InLimits)
+FHeap::FHeap(FHeapLimits InLimits) : Limits(InLimits), Lifetime(std::make_shared<FHeapLifetime>())
 {
+	Lifetime->Heap = this;
 	bValidLimits = Limits.MaxObjects > 0 && Limits.MaxObjects <= 65535
 		&& Limits.MaxRoots > 0 && Limits.MaxRoots <= 65535 && Limits.MaxFrames > 0 && Limits.MaxFrames <= 65535
 		&& Limits.MaxLayouts > 0 && Limits.MaxLayouts <= 65535 && Limits.MaxReferencesPerLayout <= 4096
@@ -40,6 +67,26 @@ FHeap::FHeap(FHeapLimits InLimits) : Limits(InLimits)
 		&& Limits.MaxObjectBytes > 0 && Limits.MaxObjectBytes <= 1024 * 1024
 		&& Limits.MaxLiveBytes > 0 && Limits.MaxLiveBytes <= 1024ull * 1024 * 1024;
 	if (bValidLimits) Owner = HeapCorePrivate::AcquireOwner();
+}
+
+FHeap::~FHeap() { Close(); }
+
+EHeapError FHeap::RetainPersistent(std::span<const FToken> InObjects, FPersistentRoots& OutRoots)
+{
+	if (const auto State = Ready(); State != EHeapError::Ok) return State;
+	if (InObjects.size() > Limits.MaxRoots) return EHeapError::RootLimit;
+	FPersistentRoots Candidate;
+	Candidate.Lifetime = Lifetime;
+	Candidate.Roots.reserve(InObjects.size());
+	for (const FToken Object : InObjects)
+	{
+		if (!Object) continue;
+		FToken Root = 0;
+		if (const auto Error = CreateRoot(0, Object, Root); Error != EHeapError::Ok) return Error;
+		Candidate.Roots.push_back(Root);
+	}
+	OutRoots = std::move(Candidate);
+	return EHeapError::Ok;
 }
 
 EHeapError FHeap::Ready() const
@@ -385,6 +432,7 @@ bool FHeap::IsAlive(FToken Object, std::uint32_t ExpectedType) const
 void FHeap::Close()
 {
 	if (bClosed) return;
+	Lifetime->Heap = nullptr;
 	bClosed = true;
 	Stats.ReclaimedObjects += Stats.LiveObjects;
 	Stats.LiveObjects = Stats.LiveRoots = Stats.ActiveFrames = 0;

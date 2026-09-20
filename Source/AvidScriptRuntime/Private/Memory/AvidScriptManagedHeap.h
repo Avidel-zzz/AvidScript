@@ -3,6 +3,7 @@
 // Engine- and backend-independent core. Runtime owns one heap per module instance.
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <vector>
 
@@ -56,10 +57,34 @@ struct FHeapStats
 	std::uint64_t Collections = 0;
 };
 
+class FHeap;
+struct FHeapLifetime;
+
+// Native ownership only. Does not expose root tokens or grant Guest mutation.
+// Like FHeap, leases are used and destroyed on the owning execution thread.
+class FPersistentRoots final
+{
+public:
+	FPersistentRoots() = default;
+	~FPersistentRoots();
+	FPersistentRoots(const FPersistentRoots&) = delete;
+	FPersistentRoots& operator=(const FPersistentRoots&) = delete;
+	FPersistentRoots(FPersistentRoots&& Other) noexcept;
+	FPersistentRoots& operator=(FPersistentRoots&& Other) noexcept;
+	void Reset();
+	bool IsValidFor(const FHeap& Heap) const;
+	std::size_t Count() const { return Roots.size(); }
+private:
+	friend class FHeap;
+	std::weak_ptr<FHeapLifetime> Lifetime;
+	std::vector<FToken> Roots;
+};
+
 class FHeap final
 {
 public:
 	explicit FHeap(FHeapLimits InLimits = {});
+	~FHeap();
 	FHeap(const FHeap&) = delete;
 	FHeap& operator=(const FHeap&) = delete;
 	EHeapError Configure(std::span<const FHeapLayout> InLayouts);
@@ -77,6 +102,9 @@ public:
 	EHeapError CreateRoot(FToken Frame, FToken InitialObject, FToken& OutRoot);
 	EHeapError SetRoot(FToken Root, FToken Object);
 	EHeapError ReleaseRoot(FToken Root);
+	// Acquires all non-null objects before replacing OutRoots. Failure preserves
+	// its old lease and releases every partially acquired root.
+	EHeapError RetainPersistent(std::span<const FToken> Objects, FPersistentRoots& OutRoots);
 	// Allocation publishes into an existing root atomically, including across GC.
 	EHeapError Allocate(std::uint32_t TypeId, FToken Root, FToken& OutObject);
 	EHeapError ReadBytes(FToken Object, std::uint32_t ExpectedType, std::uint32_t Offset, std::span<std::uint8_t> OutBytes) const;
@@ -110,6 +138,7 @@ private:
 	template<class T> static void Retire(T& Slot, std::uint32_t Index, std::vector<std::uint32_t>& Free);
 
 	FHeapLimits Limits;
+	std::shared_ptr<FHeapLifetime> Lifetime;
 	FHeapStats Stats;
 	std::uint32_t Owner = 0;
 	bool bValidLimits = false;
