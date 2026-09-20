@@ -212,6 +212,24 @@ bool FAvidScriptContinuationHostEndpoint::ReadState(
 			OutStateBytes);
 }
 
+bool FAvidScriptContinuationHostEndpoint::StoreManagedState(
+	const int64 ContinuationToken, const FAvidScriptWasmRuntimeInstance& Runtime,
+	TConstArrayView<uint8> StateBytes, TUniquePtr<IAvidScriptContinuationStateLease>&& Lease)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = Owner.Pin();
+	return IsInGameThread() && bValid && PinnedOwner && Lease && Lease->IsValidForRuntime(Runtime)
+		&& PinnedOwner->StoreStateImpl(Lane, ActivationSerial, ContinuationToken, StateBytes, MoveTemp(Lease));
+}
+
+bool FAvidScriptContinuationHostEndpoint::ReadManagedState(
+	const int64 ContinuationToken, const FAvidScriptWasmRuntimeInstance& Runtime,
+	TArrayView<uint8> OutStateBytes)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = Owner.Pin();
+	return bValid && PinnedOwner
+		&& PinnedOwner->ReadStateImpl(Lane, ActivationSerial, ContinuationToken, OutStateBytes, &Runtime);
+}
+
 bool FAvidScriptContinuationHostEndpoint::ConsumeResult(
 	const int64 ContinuationToken,
 	const int32 Slot,
@@ -1142,6 +1160,14 @@ bool FAvidScriptSessionContinuations::StoreState(
 	const int64 ContinuationToken,
 	const TConstArrayView<uint8> StateBytes)
 {
+	return StoreStateImpl(Lane, ActivationSerial, ContinuationToken, StateBytes, nullptr);
+}
+
+bool FAvidScriptSessionContinuations::StoreStateImpl(
+	const EAvidScriptContinuationLane Lane, const uint64 ActivationSerial,
+	const int64 ContinuationToken, TConstArrayView<uint8> StateBytes,
+	TUniquePtr<IAvidScriptContinuationStateLease>&& Lease)
+{
 	if (!IsInGameThread()
 		|| bTearingDown
 		|| !MatchesCurrentEndpoint(Lane, ActivationSerial)
@@ -1172,6 +1198,7 @@ bool FAvidScriptSessionContinuations::StoreState(
 	}
 
 	Slot.Entry->StateFrame.Append(StateBytes.GetData(), StateBytes.Num());
+	Slot.Entry->StateLease = MoveTemp(Lease);
 	return true;
 }
 
@@ -1180,6 +1207,14 @@ bool FAvidScriptSessionContinuations::ReadState(
 	const uint64 ActivationSerial,
 	const int64 ContinuationToken,
 	const TArrayView<uint8> OutStateBytes)
+{
+	return ReadStateImpl(Lane, ActivationSerial, ContinuationToken, OutStateBytes, nullptr);
+}
+
+bool FAvidScriptSessionContinuations::ReadStateImpl(
+	const EAvidScriptContinuationLane Lane, const uint64 ActivationSerial,
+	const int64 ContinuationToken, TArrayView<uint8> OutStateBytes,
+	const FAvidScriptWasmRuntimeInstance* Runtime)
 {
 	if (!IsInGameThread()
 		|| bTearingDown
@@ -1206,6 +1241,13 @@ bool FAvidScriptSessionContinuations::ReadState(
 		|| !Slot.Entry->bDispatching
 		|| Slot.Entry->bStateConsumed
 		|| Slot.Entry->StateFrame.Num() != OutStateBytes.Num())
+	{
+		return false;
+	}
+	// A legacy byte read cannot bypass heap/code lifetime validation. Keep the
+	// lease until dispatch finalization, including the Guest frame-root handoff.
+	if (Runtime ? (!Slot.Entry->StateLease || !Slot.Entry->StateLease->IsValidForRuntime(*Runtime))
+		: Slot.Entry->StateLease.IsValid())
 	{
 		return false;
 	}

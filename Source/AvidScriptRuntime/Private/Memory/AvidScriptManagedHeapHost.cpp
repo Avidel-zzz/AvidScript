@@ -2,6 +2,30 @@
 #include "Memory/AvidScriptManagedHeapProtocol.h"
 #include "Memory/AvidScriptManagedRootTransfer.h"
 
+class FAvidScriptManagedContinuationStateLease final : public IAvidScriptContinuationStateLease
+{
+public:
+	explicit FAvidScriptManagedContinuationStateLease(AvidScript::Managed::FPersistentRoots&& InRoots)
+		: Roots(MoveTemp(InRoots)) {}
+	bool IsValidForRuntime(const FAvidScriptWasmRuntimeInstance& Runtime) const override
+	{
+		return IsInGameThread() && Runtime.ManagedHeap && Roots.IsValidFor(*Runtime.ManagedHeap);
+	}
+private:
+	AvidScript::Managed::FPersistentRoots Roots;
+};
+
+bool FAvidScriptWasmRuntimeInstance::CreateContinuationStateLease(
+	TConstArrayView<uint64> Objects, TUniquePtr<IAvidScriptContinuationStateLease>& OutLease)
+{
+	if (!IsInGameThread() || !IsLoaded() || !ManagedHeap) return false;
+	AvidScript::Managed::FPersistentRoots Roots;
+	if (ManagedHeap->RetainPersistent({Objects.GetData(), static_cast<size_t>(Objects.Num())}, Roots)
+		!= AvidScript::Managed::EHeapError::Ok) return false;
+	OutLease = MakeUnique<FAvidScriptManagedContinuationStateLease>(MoveTemp(Roots));
+	return true;
+}
+
 uint64 FAvidScriptWasmRuntimeInstance::BeginVmInvocation()
 {
 	const uint32 Depth = ManagedHeap ? ManagedHeap->GetStats().ActiveFrames : 0;

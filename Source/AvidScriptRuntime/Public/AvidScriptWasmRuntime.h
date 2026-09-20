@@ -599,6 +599,10 @@ public:
 	uint64 BeginVmInvocation() override;
 	void EndVmInvocation(uint64 Token) override;
 	bool DispatchManagedHeapCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
+	// Native callers retain references extracted from a validated state layout.
+	// Failure leaves OutLease unchanged; use/release on the Game Thread.
+	bool CreateContinuationStateLease(TConstArrayView<uint64> Objects,
+		TUniquePtr<IAvidScriptContinuationStateLease>& OutLease);
 	bool DispatchDynamicHostCall(
 		const FAvidScriptDynamicHostCall& Call,
 		FAvidScriptDynamicHostCallResult& OutResult) override;
@@ -652,6 +656,7 @@ public:
 
 private:
 	enum class EInstanceLifecycleOperation : uint8 { Begin, Tick, End };
+	friend class FAvidScriptManagedContinuationStateLease;
 	bool BeginPlayInternal(FAvidScriptWasmSmokeResult& OutResult);
 	bool TickInternal(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult, EAvidScriptWasmResultDetail ResultDetail);
 	bool EndPlayInternal(FAvidScriptWasmSmokeResult& OutResult);

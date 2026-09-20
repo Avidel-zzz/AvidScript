@@ -54,6 +54,11 @@ public:
 		int32 Generation,
 		const FString& ExpectedTypeId,
 		FAvidScriptBindingLatentCompletionPayload& OutPayload) override;
+	bool StoreManagedState(int64 ContinuationToken,
+		const FAvidScriptWasmRuntimeInstance& Runtime, TConstArrayView<uint8> StateBytes,
+		TUniquePtr<IAvidScriptContinuationStateLease>&& Lease) override;
+	bool ReadManagedState(int64 ContinuationToken,
+		const FAvidScriptWasmRuntimeInstance& Runtime, TArrayView<uint8> OutStateBytes) override;
 	bool BeginLatent(
 		int32 CallbackId,
 		FAvidScriptBindingLatentReservation& OutReservation) override;
@@ -230,6 +235,13 @@ public:
 
 private:
 	friend class UAvidScriptLatentCallbackProxy;
+	friend class FAvidScriptContinuationHostEndpoint;
+	bool StoreStateImpl(EAvidScriptContinuationLane Lane, uint64 ActivationSerial,
+		int64 ContinuationToken, TConstArrayView<uint8> StateBytes,
+		TUniquePtr<IAvidScriptContinuationStateLease>&& Lease);
+	bool ReadStateImpl(EAvidScriptContinuationLane Lane, uint64 ActivationSerial,
+		int64 ContinuationToken, TArrayView<uint8> OutStateBytes,
+		const FAvidScriptWasmRuntimeInstance* Runtime);
 
 	enum class EProducerKind : uint8
 	{
@@ -266,6 +278,7 @@ private:
 		int32 ResultGeneration = 0;
 		int32 BorrowedHandleCheckpoint = 0;
 		TArray<uint8, TInlineAllocator<128>> StateFrame;
+		TUniquePtr<IAvidScriptContinuationStateLease> StateLease;
 		bool bReady = false;
 		bool bDispatching = false;
 		bool bHasBorrowedHandleCheckpoint = false;

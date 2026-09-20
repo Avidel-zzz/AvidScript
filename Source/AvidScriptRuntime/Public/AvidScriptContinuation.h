@@ -3,6 +3,16 @@
 #include "AvidScriptBindingLatent.h"
 #include "CoreMinimal.h"
 
+class FAvidScriptWasmRuntimeInstance;
+
+// Native-only ownership. A lease must not extend the lifetime of its Runtime.
+class AVIDSCRIPTRUNTIME_API IAvidScriptContinuationStateLease
+{
+public:
+	virtual ~IAvidScriptContinuationStateLease() = default;
+	virtual bool IsValidForRuntime(const FAvidScriptWasmRuntimeInstance& Runtime) const = 0;
+};
+
 enum class EAvidScriptContinuationStatus : int32
 {
 	Completed = 1,
@@ -53,6 +63,23 @@ public:
 		int32 Generation,
 		const FString& ExpectedTypeId,
 		FAvidScriptBindingLatentCompletionPayload& OutPayload)
+	{
+		return false;
+	}
+	// Ownership transfers only on success. Bytes must come from a validated
+	// native state layout; these methods are not an arbitrary Guest root ABI.
+	virtual bool StoreManagedState(
+		int64 ContinuationToken,
+		const FAvidScriptWasmRuntimeInstance& Runtime,
+		TConstArrayView<uint8> StateBytes,
+		TUniquePtr<IAvidScriptContinuationStateLease>&& Lease)
+	{
+		return false;
+	}
+	virtual bool ReadManagedState(
+		int64 ContinuationToken,
+		const FAvidScriptWasmRuntimeInstance& Runtime,
+		TArrayView<uint8> OutStateBytes)
 	{
 		return false;
 	}
