@@ -261,6 +261,36 @@ void ProtocolRejections()
 	P = Packet(Abi::ECommand::ReadBytes); Wire(P, 0, 8); Wire(P, 1); Wire(P, 0); Wire(P, 0xffffffff);
 	Check(ExecuteHeapCommand(Heap, P, {}, 0).Error == EHeapProtocolError::LimitExceeded, "oversized byte count accepted");
 }
+void ProtocolRootsOnly()
+{
+	const auto Configuration = Packet(Abi::ECommand::ConfigureRootsOnly);
+	FHeapLimits Limits; Limits.MaxFrames = 2; Limits.MaxRoots = 2;
+	FHeap Heap(Limits);
+	auto Bad = Configuration; Bad.push_back(0);
+	Check(ExecuteHeapCommand(Heap, Bad, {}, 0).Error == EHeapProtocolError::InvalidPacket, "roots-only configure accepted trailing data");
+	std::array<std::uint8_t, 8> Output{};
+	Check(ExecuteHeapCommand(Heap, Configuration, Output, 0).Error == EHeapProtocolError::InvalidOutput, "roots-only configure accepted an output buffer");
+	Bad = Packet(Abi::ECommand::Configure); Wire(Bad, 0);
+	Check(ExecuteHeapCommand(Heap, Bad, {}, 0).Error == EHeapProtocolError::LimitExceeded, "legacy configure accepted empty layouts");
+	RunPacket(Heap, Configuration);
+	Check(Heap.Configure(Layouts) == EHeapError::AlreadyConfigured && Heap.ConfigureRootsOnly() == EHeapError::AlreadyConfigured,
+		"roots-only configuration gained allocation authority or was reconfigured");
+	const auto Outer = Frame(Heap), OuterRoot = Root(Heap, Outer), Inner = Frame(Heap), InnerRoot = Root(Heap, Inner);
+	FToken Value = 123;
+	Check(Heap.Allocate(1, InnerRoot, Value) == EHeapError::InvalidType && Value == 0, "roots-only heap allocated an object");
+	Check(Heap.PushFrame(Value) == EHeapError::FrameLimit && Heap.CreateRoot(0, 0, Value) == EHeapError::RootLimit, "roots-only quotas ignored");
+	FHeap Foreign; Ok(Foreign.Configure(Layouts)); const auto Object = Allocate(Foreign, Root(Foreign));
+	Check(Heap.SetRoot(OuterRoot, Object) == EHeapError::InvalidObject, "roots-only heap imported a foreign object");
+	Ok(Heap.SetRoot(OuterRoot, 0)); Ok(Heap.Collect());
+	auto Pop = Packet(Abi::ECommand::PopFrame); Wire(Pop, Inner, 8);
+	Check(ExecuteHeapCommand(Heap, Pop, {}, 2).Error == EHeapProtocolError::FrameBoundary, "roots-only call popped its caller frame");
+	Ok(Heap.UnwindToDepth(1));
+	Check(Heap.SetRoot(InnerRoot, 0) == EHeapError::InvalidRoot, "unwound roots remained usable");
+	Ok(Heap.PopFrame(Outer));
+	Check(Heap.GetStats().LiveRoots == 0 && Heap.GetStats().ActiveFrames == 0 && Heap.GetStats().Allocations == 0,
+		"roots-only execution retained frames or allocated placeholder objects");
+	Heap.Close(); Check(Heap.ConfigureRootsOnly() == EHeapError::Closed, "closed roots-only heap was resurrected");
+}
 void ProtocolLimitsAndRanges()
 {
 	Check(Abi::ValidateRanges(1, 8, 9, 8), "adjacent ranges rejected");
@@ -286,8 +316,8 @@ int main()
 	{
 		SharedEscapingCells(); Cycles(); TokensAndGenerations(); FramesAndUnwind(); RootListReuse();
 		TypedReferencesAndRanges(); AllocationLimits(); InvalidLayouts(); GenerationRetirement(); GraphOracle();
-		ProtocolExecution(); ProtocolRejections(); ProtocolLimitsAndRanges();
-		std::cout << "AvidScript.ManagedHeap.Tests: 13/13 passed (4000 graph-oracle steps; full root generation retirement; wire protocol)\n";
+		ProtocolExecution(); ProtocolRejections(); ProtocolLimitsAndRanges(); ProtocolRootsOnly();
+		std::cout << "AvidScript.ManagedHeap.Tests: 14/14 passed (4000 graph-oracle steps; full root generation retirement; wire protocol)\n";
 		return 0;
 	}
 	catch (const std::exception& Error) { std::cerr << Error.what() << '\n'; return 1; }

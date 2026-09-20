@@ -56,4 +56,5 @@ public enum GuestManagedHeapCommand
     Configure = 1, PushFrame = 2, PopFrame = 3, CreateRoot = 4,
     SetRoot = 5, ReleaseRoot = 6, Allocate = 7, ReadBytes = 8,
     WriteBytes = 9, ReadReference = 10, WriteReference = 11, Collect = 12,
+    ConfigureRootsOnly = 13,
 }

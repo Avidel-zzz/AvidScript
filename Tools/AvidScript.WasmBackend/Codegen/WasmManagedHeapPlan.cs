@@ -20,7 +20,7 @@ internal sealed class WasmManagedHeapPlan
     {
         GuestType[] references = module.Types.Where(type => type.Kind == "managed_ref" && type.ElementTypeId is not null).OrderBy(type => type.Id, StringComparer.Ordinal).ToArray();
         WasmManagedHeapPlan plan = new() { StackStart = module.MemoryLayout.HeapStart, InitializedGlobalIndex = cooperative ? 2u : 1u };
-        if (references.Length == 0) return plan;
+        if (!module.Types.Any(type => type.Kind == "managed_ref")) return plan;
         for (int index = 0; index < references.Length; ++index) plan.TypeOrdinals.Add(references[index].Id, index + 1);
         foreach (GuestType erased in module.Types.Where(type => type.Kind == "managed_ref" && type.ElementTypeId is null))
             plan.TypeOrdinals.Add(erased.Id, 0);
@@ -29,7 +29,9 @@ internal sealed class WasmManagedHeapPlan
         {
             Span<byte> encoded = stackalloc byte[4]; BinaryPrimitives.WriteUInt32LittleEndian(encoded, value); bytes.AddRange(encoded.ToArray());
         }
-        U32(GuestManagedHeap.Magic); U32((uint)GuestManagedHeapCommand.Configure); U32((uint)references.Length);
+        U32(GuestManagedHeap.Magic);
+        U32((uint)(references.Length == 0 ? GuestManagedHeapCommand.ConfigureRootsOnly : GuestManagedHeapCommand.Configure));
+        if (references.Length != 0) U32((uint)references.Length);
         foreach (GuestType reference in references)
         {
             GuestType payload = types[reference.ElementTypeId!];

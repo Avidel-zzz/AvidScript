@@ -63,6 +63,8 @@ public:
 	FHeap(const FHeap&) = delete;
 	FHeap& operator=(const FHeap&) = delete;
 	EHeapError Configure(std::span<const FHeapLayout> InLayouts);
+	// No object allocation authority; only frames and null roots are available.
+	EHeapError ConfigureRootsOnly();
 	EHeapError PushFrame(FToken& OutFrame);
 	EHeapError PopFrame(FToken Frame);
 	EHeapError UnwindToDepth(std::uint32_t Depth);

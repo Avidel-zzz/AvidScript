@@ -72,6 +72,8 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 
 [间接方法参数帧](Docs/Phase66/P66.B_Indirect_Method_ABI.md)新增 IR 7/1.6 与可执行 WASM 适配器，用两个入口参数承载完整类型化帧；双后端验证 16 个混合参数、含引用结构返回、共享别名、递归和 GC。IR 35/35、backend 148/148、Guest 362/362、Windows 构建及堆 Automation 5/5 通过。当前为 Guest IR 执行基础，真实 C# 方法目录、生产跨对象路由、虚/接口派发与持久 event/await 仍待连接，P66.B 保持进行中。
 
+[C# 实例方法参数帧](Docs/Phase66/P66.B_CSharp_Method_Frames.md)已将方法目录连接到同 owner 的直接调用和绑定方法组，保持复杂值、共享引用与 ref/out 别名；统一 receiver 表示后仍验证原声明类型。IR 8/1.7 新增仅管理根与帧的模式，使无闭包的引用参数无需占位对象。Guest 385/385、IR 35/35、backend 148/148、原生堆 14/14、Windows 构建及双后端 GeneratedTypes 17/17、堆回归 5/5 通过。生产跨对象选择、虚/接口派发、持久事件与 await 仍未完成，P66.B 保持进行中。
+
 ## 现在可以做什么
 
 更新于 **2026-09-10**。已跑通 **C# → WASM → UE 事件与 API → Win64 打包运行**，

@@ -160,6 +160,9 @@ public static class CSharpGuestLowerer
             return Failure(diagnostics);
         }
 
+        IReadOnlyList<GuestFramedExport> framedExports = CSharpUeMethodFrames.Lower(document, functions, diagnostics);
+        if (diagnostics.Count != 0) return Failure(diagnostics);
+
         if (enableDebugInstrumentation)
         {
             CSharpGuestDebugInstrumentationResult instrumentation =
@@ -218,6 +221,7 @@ public static class CSharpGuestLowerer
             Array.Empty<GuestDiagnostic>())
         {
             FunctionReferences = CSharpManagedDelegateLowerer.BuildContracts(document, moduleTypes, functions),
+            FramedExports = framedExports,
         };
         GuestValidationResult validation = GuestModuleValidator.Validate(module);
         if (!validation.Succeeded)

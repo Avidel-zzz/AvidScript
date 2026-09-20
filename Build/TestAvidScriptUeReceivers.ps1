@@ -15,7 +15,7 @@ try {
     $CompilerOutput = & $Dotnet run --project Tools/AvidScript.CSharpGuest.Tests --configuration Release -- --ue-receivers
     $CompilerExit = $LASTEXITCODE
     $CompilerOutput | Write-Output
-    if ($CompilerExit -ne 0 -or ($CompilerOutput -join "`n") -notmatch 'AvidScript.CSharpGuest.Tests.UeReceivers: 16/16 passed') {
+    if ($CompilerExit -ne 0 -or ($CompilerOutput -join "`n") -notmatch 'AvidScript.CSharpGuest.Tests.UeReceivers: 25/25 passed') {
         throw 'CSharp UE receiver compiler fixtures did not pass completely.'
     }
 } finally {

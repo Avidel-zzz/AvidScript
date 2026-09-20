@@ -54,7 +54,7 @@ internal static class WasmFramedCallTests
         GuestModule[] invalid =
         {
             managed with { SchemaVersion = 6, IrVersion = "1.5" },
-            managed with { SchemaVersion = 8, IrVersion = "1.7" },
+            managed with { SchemaVersion = 9, IrVersion = "1.8" },
             managed with { FramedExports = null! },
             managed with { FramedExports = new GuestFramedExport[] { null! } },
             managed with { FramedExports = new[] { managed.FramedExports[0] with { ParameterKinds = null! } } },

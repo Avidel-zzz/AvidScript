@@ -50,6 +50,14 @@ EHeapError FHeap::Ready() const
 	return bConfigured ? EHeapError::Ok : EHeapError::NotConfigured;
 }
 
+EHeapError FHeap::ConfigureRootsOnly()
+{
+	const EHeapError State = Ready();
+	if (State != EHeapError::NotConfigured) return State == EHeapError::Ok ? EHeapError::AlreadyConfigured : State;
+	bConfigured = true;
+	return EHeapError::Ok;
+}
+
 EHeapError FHeap::Configure(std::span<const FHeapLayout> InLayouts)
 {
 	const EHeapError State = Ready();

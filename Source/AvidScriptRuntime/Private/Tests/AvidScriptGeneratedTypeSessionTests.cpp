@@ -236,15 +236,17 @@ bool FAvidScriptGeneratedCSharpReceiverTest::RunTest(const FString& Parameters)
 	const FString Directory = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("AvidScriptManagedHeapTests/GuestFixtures"));
 	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
 	{
-		for (const FString File : {TEXT("csharp-ue-receiver"), TEXT("csharp-ue-receiver-stress"), TEXT("csharp-ue-receiver-null")})
+		for (const FString File : {TEXT("csharp-ue-receiver"), TEXT("csharp-ue-receiver-stress"), TEXT("csharp-ue-receiver-null"), TEXT("csharp-ue-receiver-plain-ref")})
 		{
 			const bool bNull = File.EndsWith(TEXT("-null"));
 			AddInfo(FString::Printf(TEXT("CSharp UE receiver backend=%d fixture=%s"), static_cast<int32>(Backend), *File));
 			TArray<uint8> Wasm;
 			FString MetadataText;
+			FString MetadataName = File;
+			MetadataName.RemoveFromEnd(TEXT("-stress"));
 			if (!TestTrue(TEXT("Read current CSharp WASM"), FFileHelper::LoadFileToArray(Wasm, *FPaths::Combine(Directory, File + TEXT(".wasm"))))) return false;
 			if (!TestTrue(TEXT("Read compiler receiver metadata"), FFileHelper::LoadFileToString(MetadataText,
-				*FPaths::Combine(Directory, bNull ? TEXT("csharp-ue-receiver-null.json") : TEXT("csharp-ue-receiver.json"))))) return false;
+				*FPaths::Combine(Directory, MetadataName + TEXT(".json"))))) return false;
 			TSharedPtr<FJsonObject> Metadata;
 			if (!TestTrue(TEXT("Parse compiler metadata"), FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(MetadataText), Metadata)) || !Metadata) return false;
 			TSharedPtr<FJsonObject> RegistryJson;
@@ -299,7 +301,9 @@ bool FAvidScriptGeneratedCSharpReceiverTest::RunTest(const FString& Parameters)
 				if (!TestNotNull(TEXT("Receiver runtime remains live"), Runtime)) return false;
 				auto* Heap = Runtime->GetManagedHeapForTesting();
 				if (!TestNotNull(TEXT("Receiver contexts use managed heap"), Heap)) return false;
-				TestTrue(TEXT("Repeated receiver bindings allocated contexts"), Heap->GetStats().Allocations >= 64);
+				if (File.EndsWith(TEXT("-plain-ref")))
+					TestEqual(TEXT("Primitive references need no placeholder heap objects"), Heap->GetStats().Allocations, uint64(0));
+				else TestTrue(TEXT("Repeated receiver bindings allocated contexts"), Heap->GetStats().Allocations >= 64);
 				if (File.EndsWith(TEXT("-stress"))) TestTrue(TEXT("Receiver contexts survive collection at every allocation"), Heap->GetStats().Collections >= Heap->GetStats().Allocations);
 				TestEqual(TEXT("Receiver invocation frames unwind"), Heap->GetStats().ActiveFrames, 0u);
 				TestEqual(TEXT("Receiver invocation roots unwind"), Heap->GetStats().LiveRoots, 0u);

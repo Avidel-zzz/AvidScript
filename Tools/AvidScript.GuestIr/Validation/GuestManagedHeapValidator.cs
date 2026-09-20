@@ -14,8 +14,8 @@ internal static class GuestManagedHeapValidator
         if (module.SchemaVersion < 4 || references.Length > GuestManagedHeap.MaxLayouts)
             Add(context, "Managed references require Guest IR 4/1.3 and a bounded layout table.");
         if (references.Any(type => type.ElementTypeId is null)
-            && (module.SchemaVersion < 5 || references.All(type => type.ElementTypeId is null)))
-            Add(context, "Erased managed references require Guest IR 5/1.4 and at least one concrete heap layout.");
+            && (module.SchemaVersion < 5 || module.SchemaVersion < 8 && references.All(type => type.ElementTypeId is null)))
+            Add(context, "Erased managed references require Guest IR 5/1.4; roots-only configurations require IR 8/1.7.");
         GuestImport[] imports = module.Imports.Where(import => import.Module == GuestManagedHeap.ImportModule
             && import.Name == GuestManagedHeap.ImportName).ToArray();
         bool IsI32(string id) => context.Types.TryGetValue(id, out GuestType? type) && type.Kind == "scalar" && type.Storage == "i32" && type.Size == 4;

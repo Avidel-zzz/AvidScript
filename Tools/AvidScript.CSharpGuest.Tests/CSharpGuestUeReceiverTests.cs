@@ -16,6 +16,8 @@ internal static class CSharpGuestUeReceiverTests
             using System;
             using AvidScript;
             public delegate int Change(ref int value, out int other);
+            public class State { public int Value; }
+            public struct Packet { public State Item; public int Sum; }
             [UClass] public partial class ReceiverActor : AvidActor {
                 public static int Count;
                 private int Read() => ++Count;
@@ -25,6 +27,17 @@ internal static class CSharpGuestUeReceiverTests
                 private Func<int> Mixed(int seed) => () => Pure() + ++seed;
                 private Func<int> Local() { int ReadLocal() => Pure(); return ReadLocal; }
                 private int Mutate(ref int value, out int other) { value += Pure(); other = value + 1; return other + Pure(); }
+                private Packet Transfer(State original, ref State first, out State second, ref int left, ref int right,
+                    int a, int b, int c, int d, int e, int f, int g, int h, int i, int j, int k, int l, long tail, double fraction) {
+                    left += 2; right *= 3;
+                    first = new State(); first.Value = 19;
+                    second = new State(); second.Value = first.Value + 4;
+                    Packet result = new Packet(); result.Item = original;
+                    result.Sum = a + b + c + d + e + f + g + h + i + j + k + l + (int)tail + (int)fraction;
+                    original.Value += first.Value;
+                    return result;
+                }
+                private State Echo(State value, int depth) { if (depth == 0) return value; return Echo(value, depth - 1); }
                 [UFunction] public int GetScriptValue() {
                     Count = 0;
                     int bits = 0;
@@ -44,6 +57,12 @@ internal static class CSharpGuestUeReceiverTests
                     if (Self()() == this) bits += 128;
                     for (int i = 0; i < 64; i++) { Func<int> pure = Pure; if (pure() != 7) return 0; }
                     if (Local()() == 7) bits += 256;
+                    State original = new State(); original.Value = 5;
+                    State alias = original; int shared = 4;
+                    Packet packet = Transfer(original, ref alias, out alias, ref shared, ref shared,
+                        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 19L, 23.5);
+                    if (packet.Item != original || packet.Sum != 120 || original.Value != 9
+                        || alias.Value != 4 || shared != 18 || Echo(original, 4) != original) return 0;
                     return bits;
                 }
             }
@@ -87,6 +106,24 @@ internal static class CSharpGuestUeReceiverTests
             + "a.Value = 10; b.Value = 20; return a.GetScriptValue() + b.GetScriptValue() + a.GetScriptValue(); } }") == 4747,
             "two ordinary instances share static state while captures read the correct receiver");
         Compile(shared, "csharp-ue-shared-bindings", true);
+        const string plainReferences = """
+            using AvidScript;
+            [UClass] public partial class ReceiverActor : AvidActor {
+                private int Mutate(ref int left, out int right) { left += 2; right = left * 3; return left + right; }
+                private void Add(in int amount, ref int value) { value += amount; }
+                [UFunction] public int GetScriptValue() {
+                    int value = 4;
+                    int result = Mutate(ref value, out value);
+                    if (result != 36 || value != 18) return 0;
+                    Add(in value, ref value);
+                    return value == 36 ? 511 : 0;
+                }
+            }
+            """;
+        Check(CSharpGuestBorrowedReferenceTests.Reference(plainReferences + Facade
+            + "public static class Script { public static int Run() => new ReceiverActor().GetScriptValue(); }") == 511,
+            "ordinary primitive references retain immediate alias writes without any closures");
+        Compile(plainReferences, "csharp-ue-receiver-plain-ref", false);
         return count;
 
         void Compile(string text, string name, bool stress)
@@ -100,6 +137,9 @@ internal static class CSharpGuestUeReceiverTests
             GuestModule module = lowered.Module!;
             Check(module.Imports.Count(import => import.Name == "avid_ue_receiver_0_require_v1") == 1,
                 "receiver authority is one typed host import for the generated owner");
+            Check(module.FramedExports.Count != 0 && module.FramedExports.All(export =>
+                module.Functions.Single(function => function.Id == export.FunctionId).Parameters[0].TypeId == "type:uint64"),
+                "ordinary C# instance calls and bound method thunks use framed adapters with normalized weak receivers");
             var wasm = WasmModuleCompiler.Compile(module);
             Check(wasm.Succeeded && wasm.Bytes.SequenceEqual(WasmModuleCompiler.Compile(module).Bytes),
                 "UE receiver module emits deterministic WASM: " + string.Join(" | ", wasm.Diagnostics.Select(item => item.Message)));

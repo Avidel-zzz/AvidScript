@@ -42,6 +42,12 @@ FHeapProtocolResult ExecuteHeapCommand(FHeap& Heap, std::span<const std::uint8_t
 	FReader Reader{Request};
 	if (Reader.ReadUint32() != Abi::Magic) return Failure(EHeapProtocolError::InvalidVersion);
 	const auto Command = static_cast<Abi::ECommand>(Reader.ReadUint32());
+	if (Command == Abi::ECommand::ConfigureRootsOnly)
+	{
+		if (!Reader.Finished()) return Failure(EHeapProtocolError::InvalidPacket);
+		if (!Response.empty()) return Failure(EHeapProtocolError::InvalidOutput);
+		return FromHeap(Heap.ConfigureRootsOnly());
+	}
 	if (Command == Abi::ECommand::Configure)
 	{
 		if (!Response.empty()) return Failure(EHeapProtocolError::InvalidOutput);
