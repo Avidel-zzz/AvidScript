@@ -52,6 +52,9 @@ struct FAvidScriptVmTypedHostFailure
 static_assert(sizeof(EAvidScriptVmTypedHostShape) == 1);
 static_assert(sizeof(EAvidScriptVmTypedHostStatus) == 1);
 
+using FAvidScriptVmPreparedI32PairTarget =
+	EAvidScriptVmTypedHostStatus (*)(void* Context, int32 Left, int32 Right, int32& OutValue);
+
 using FAvidScriptVmPreparedSelfI32PairTarget =
 	EAvidScriptVmTypedHostStatus (*)(
 		void* Context,
@@ -212,6 +215,7 @@ using FAvidScriptVmPreparedPackedSelfPropertyF64SetTarget =
 struct AVIDSCRIPTVM_API FAvidScriptVmPreparedTypedHostTarget
 {
 	void* Context = nullptr;
+	FAvidScriptVmPreparedI32PairTarget I32Pair = nullptr;
 	FAvidScriptVmPreparedSelfI32Target SelfI32 = nullptr;
 	FAvidScriptVmDirectSelfI32Target DirectSelfI32 = nullptr;
 	FAvidScriptVmPreparedSelfI32PairTarget SelfI32Pair = nullptr;
@@ -247,6 +251,8 @@ struct AVIDSCRIPTVM_API FAvidScriptVmPreparedTypedHostTarget
 		}
 		switch (Shape)
 		{
+		case EAvidScriptVmTypedHostShape::I32PairToI32:
+			return I32Pair != nullptr;
 		case EAvidScriptVmTypedHostShape::SelfI32ToI32:
 			return SelfI32 != nullptr;
 		case EAvidScriptVmTypedHostShape::SelfI32PairToI32:
@@ -292,7 +298,7 @@ struct AVIDSCRIPTVM_API FAvidScriptVmPreparedTypedHostTarget
 
 	bool HasAnyTarget() const
 	{
-		return SelfI32 != nullptr
+		return I32Pair != nullptr || SelfI32 != nullptr
 			|| SelfI32Pair != nullptr
 			|| SelfI32GuestResult != nullptr
 			|| SelfI32PairGuestResult != nullptr

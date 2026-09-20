@@ -124,7 +124,11 @@ bool FAvidScriptWasmRuntimeInstance::InvokeGeneratedInstanceExport(const FAvidSc
 			Transfer.FrameFloor = ManagedHeap ? ManagedHeap->GetStats().ActiveFrames : 0;
 			Transfer.Roots.Append(ReturnedRoots.GetData(), ReturnedRoots.Num());
 			TGuardValue<const FAvidScriptManagedRootTransfer*> TransferGuard(ActiveRootTransfer, &Transfer);
-			if (Authority->InvokeInstanceExport(*this, Target, Call, Frame, OutError, OutResult)) return true;
+			// A local call also works in an isolated generated Session. Cross-owner
+			// calls require the published execution domain's target membership checks.
+			if (Target == HostContext.OwnerHandle
+				? InvokeInContext(Call, HostContext, Frame, OutError, OutResult)
+				: Authority->InvokeInstanceExport(*this, Target, Call, Frame, OutError, OutResult)) return true;
 		}
 	}
 	if (OutError.Category.IsEmpty()) OutError.Category = TEXT("generated_invocation_rejected");

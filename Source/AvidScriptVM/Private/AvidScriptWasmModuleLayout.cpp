@@ -28,6 +28,7 @@ public:
 	{
 		return Bytes.Num() - Offset;
 	}
+	TConstArrayView<uint8> RemainingBytes() const { return Bytes.Slice(Offset, Remaining()); }
 
 	bool ReadByte(uint8& OutValue)
 	{
@@ -487,6 +488,32 @@ bool ParseWasmCustomSection(
 	OutProof.bPresent = true;
 	return Reader.IsAtEnd();
 }
+}
+
+bool ReadAvidScriptWasmCustomSection(TConstArrayView<uint8> Bytecode, const FString& SectionName,
+	uint32 MaxPayloadBytes, TArray<uint8>& OutPayload, bool& bOutFound, FString& OutError)
+{
+	OutPayload.Reset(); bOutFound = false; OutError.Reset();
+	static const uint8 Header[] = {0, 0x61, 0x73, 0x6d, 1, 0, 0, 0};
+	if (SectionName.IsEmpty() || MaxPayloadBytes > MAX_int32 || Bytecode.Num() < 8
+		|| FMemory::Memcmp(Bytecode.GetData(), Header, sizeof(Header)) != 0)
+	{ OutError = TEXT("invalid WASM custom-section request or module header"); return false; }
+	FAvidScriptWasmLayoutReader Reader(Bytecode.Slice(8, Bytecode.Num() - 8));
+	TArray<uint8> Payload; bool bFound = false; uint32 Sections = 0;
+	while (!Reader.IsAtEnd())
+	{
+		uint8 Id = 0; uint32 Size = 0; FAvidScriptWasmLayoutReader Section({});
+		if (++Sections > MaxWasmLayoutItems || !Reader.ReadByte(Id) || !Reader.ReadU32Leb(Size) || !Reader.ReadSubReader(Size, Section))
+		{ OutError = TEXT("truncated or excessive WASM sections"); return false; }
+		if (Id != 0) continue;
+		FString Name;
+		if (!Section.ReadName(Name, true)) { OutError = TEXT("invalid WASM custom-section name"); return false; }
+		if (Name != SectionName) continue;
+		if (bFound || static_cast<uint32>(Section.Remaining()) > MaxPayloadBytes)
+		{ OutError = TEXT("duplicate or oversized requested WASM custom section"); return false; }
+		bFound = true; Payload.Append(Section.RemainingBytes());
+	}
+	OutPayload = MoveTemp(Payload); bOutFound = bFound; return true;
 }
 
 bool InspectAvidScriptWasmModuleLayout(

@@ -354,7 +354,11 @@ internal static class CSharpOperationLowerer
         GuestRegister? delegateStorage = null;
         bool delegateAssignment = context.Document.DelegateTypes.Any(signature => signature.TypeId == operation.TypeId);
         GuestRegister? left;
-        if (target.Kind == "property_reference")
+        if (target.Kind == "flow_capture_reference" && context.CapturedLocations.Contains(target.CaptureId))
+        {
+            left = context.CapturedLocations.ReadSnapshot(target.CaptureId);
+        }
+        else if (target.Kind == "property_reference")
         {
             propertyReceiver = CSharpCallOperationLowerer.LowerPropertyReceiver(
                 context,
@@ -1233,6 +1237,8 @@ internal static class CSharpOperationLowerer
             return Malformed(context, operation, blockOrdinal);
         }
 
+        if (context.CapturedLocations.Contains(operation.CaptureId))
+            return context.CapturedLocations.Capture(operation, blockOrdinal, instructions);
         context.TrackCaptureTarget(operation.CaptureId, operation.Children[0], blockOrdinal);
         GuestRegister? value = LowerValue(context, operation.Children[0], blockOrdinal, instructions);
         GuestRegister? capture = context.GetOrCreateCapture(
@@ -1260,6 +1266,8 @@ internal static class CSharpOperationLowerer
             return Malformed(context, operation, blockOrdinal);
         }
 
+        if (context.CapturedLocations.Contains(operation.CaptureId))
+            return context.CapturedLocations.Read(operation.CaptureId, operation.TypeId, blockOrdinal, instructions);
         GuestRegister? capture = context.GetOrCreateCapture(
             operation.CaptureId,
             operation.TypeId,
@@ -1329,6 +1337,8 @@ internal static class CSharpOperationLowerer
 
         if (target.Kind == "flow_capture_reference")
         {
+            if (context.CapturedLocations.Contains(target.CaptureId))
+                return context.CapturedLocations.Store(target.CaptureId, value, instructions);
             if (context.TryGetCaptureTarget(target.CaptureId, out SemanticOperation capturedTarget)
                 && string.Equals(target.TypeId, value.TypeId, StringComparison.Ordinal)
                 && string.Equals(capturedTarget.TypeId, value.TypeId, StringComparison.Ordinal))

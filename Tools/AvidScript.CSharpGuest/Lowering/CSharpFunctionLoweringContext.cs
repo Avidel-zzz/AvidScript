@@ -89,10 +89,12 @@ internal sealed class CSharpFunctionLoweringContext
             globalBySymbol.TryAdd(symbol.Id, CSharpGuestIds.Global(symbol.Id));
         }
         ClosureCells = new(this);
+        CapturedLocations = new(this);
     }
 
     public SemanticDocument Document { get; }
     public CSharpClosureCells ClosureCells { get; }
+    public CSharpCapturedLocations CapturedLocations { get; }
 
     public SemanticCallable Callable { get; }
 

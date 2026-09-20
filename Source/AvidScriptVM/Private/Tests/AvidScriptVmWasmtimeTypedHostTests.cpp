@@ -1004,6 +1004,39 @@ bool FAvidScriptVmWasmtimeTypedHostTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("typed left is direct"), Dispatcher.LastLeft, 17);
 	TestEqual(TEXT("typed right is direct"), Dispatcher.LastRight, 19);
 
+	// The frame transport uses the same pair shape, but with a prebound target.
+	// Keep the existing dispatcher-only fixture above as the fallback regression.
+	int32 PairCalls = 0;
+	auto PairImports = Imports;
+	PairImports[0].PreparedTarget.Context = &PairCalls;
+	PairImports[0].PreparedTarget.I32Pair = +[](void* Context, int32 Left, int32 Right, int32& Out)
+	{
+		int32& Calls = *static_cast<int32*>(Context);
+		if (Calls < 0) return EAvidScriptVmTypedHostStatus::Rejected;
+		++Calls; Out = Left - Right;
+		return EAvidScriptVmTypedHostStatus::Succeeded;
+	};
+	auto PairBackend = CreateTypedWasmtimeBackend(Error);
+	auto PairConfig = Config; PairConfig.TypedHostImports = PairImports;
+	FTypedHostDispatcher PairFallback;
+	PairConfig.TypedHostDispatcher = &PairFallback;
+	PairFallback.LastLeft = -1;
+	if (!TestTrue(TEXT("prepared pair target loads"), PairBackend->Load(PairFixture, TEXT("prepared_pair"), PairConfig, Error)))
+	{ AddError(Error.Details); return false; }
+	ResolveAndCallTypedRun(*this, *PairBackend, -2, Error);
+	TestEqual(TEXT("prepared pair target executes once"), PairCalls, 1);
+	TestEqual(TEXT("prepared pair bypasses fallback"), PairFallback.LastLeft, -1);
+	PairCalls = -1;
+	FAvidScriptVmExportHandle PairRun;
+	FAvidScriptVmCallFrame PairFrame;
+	FAvidScriptVmCallResult PairResult;
+	if (!TestTrue(TEXT("resolve rejected prepared pair"), PairBackend->ResolveExport(TEXT("run"), PairRun, Error))) return false;
+	TestFalse(TEXT("prepared pair rejection propagates"), PairBackend->Call(PairRun, PairFrame, Error, &PairResult));
+	PairBackend->Unload();
+	PairImports[0].PreparedTarget.Context = nullptr;
+	PairConfig.TypedHostImports = PairImports;
+	TestFalse(TEXT("partial prepared pair cannot fall back silently"), PairBackend->Load(PairFixture, TEXT("partial_pair"), PairConfig, Error));
+
 	auto VerifyTypedShape = [this](
 		EAvidScriptVmTypedHostShape Shape,
 		const FString& Signature,

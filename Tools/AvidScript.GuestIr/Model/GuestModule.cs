@@ -33,7 +33,14 @@ public sealed record GuestModule(
 public sealed record GuestFramedExport(
     [property: JsonPropertyOrder(0)] string Name,
     [property: JsonPropertyOrder(1)] string FunctionId,
-    [property: JsonPropertyOrder(2)] IReadOnlyList<string> ParameterKinds);
+    [property: JsonPropertyOrder(2)] IReadOnlyList<string> ParameterKinds)
+{
+    // Optional synchronous host route: (frame address, byte count) -> success (1).
+    // The original export remains the validated body and call-graph target.
+    [JsonPropertyOrder(3)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? HostImportId { get; init; }
+}
 
 // A nominal signature and its closed set of addressable Guest functions.
 // Imports require a Guest adapter, so host capabilities cannot become arbitrary table entries.

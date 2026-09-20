@@ -6,8 +6,8 @@ namespace AvidScript.GuestIr;
 
 public static class GuestModuleValidator
 {
-    public const int CurrentSchemaVersion = 8;
-    public const string CurrentIrVersion = "1.7";
+    public const int CurrentSchemaVersion = 9;
+    public const string CurrentIrVersion = "1.8";
     private const int LegacySchemaVersion = 1;
     private const string LegacyIrVersion = "1.0";
 
@@ -63,7 +63,8 @@ public static class GuestModuleValidator
             || (module.SchemaVersion == 4 && module.IrVersion == "1.3")
             || (module.SchemaVersion == 5 && module.IrVersion == "1.4")
             || (module.SchemaVersion == 6 && module.IrVersion == "1.5")
-            || (module.SchemaVersion == 7 && module.IrVersion == "1.6");
+            || (module.SchemaVersion == 7 && module.IrVersion == "1.6")
+            || (module.SchemaVersion == 8 && module.IrVersion == "1.7");
         if ((!isCurrentVersion && !isLegacyVersion)
             || string.IsNullOrWhiteSpace(module.ModuleId)
             || string.IsNullOrWhiteSpace(module.Language)

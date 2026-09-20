@@ -54,7 +54,7 @@ internal static class WasmFramedCallTests
         GuestModule[] invalid =
         {
             managed with { SchemaVersion = 6, IrVersion = "1.5" },
-            managed with { SchemaVersion = 9, IrVersion = "1.8" },
+            managed with { SchemaVersion = 10, IrVersion = "1.9" },
             managed with { FramedExports = null! },
             managed with { FramedExports = new GuestFramedExport[] { null! } },
             managed with { FramedExports = new[] { managed.FramedExports[0] with { ParameterKinds = null! } } },
@@ -79,7 +79,51 @@ internal static class WasmFramedCallTests
         JsonObject legacyJson = JsonNode.Parse(GuestIrSerializer.Serialize(legacy))!.AsObject();
         legacyJson.Remove("framed_exports");
         Valid(GuestIrSerializer.Deserialize(System.Text.Encoding.UTF8.GetBytes(legacyJson.ToJsonString())));
-        return 22 + invalid.Length;
+        return 22 + invalid.Length + HostRoutes(managed);
+    }
+
+    private static int HostRoutes(GuestModule source)
+    {
+        GuestImport host = new("route", "frame_test", "invoke", new[] { "type:int32", "type:int32" }, "type:int32");
+        GuestModule module = source with
+        {
+            SchemaVersion = 9, IrVersion = "1.8", Imports = source.Imports.Append(host).ToArray(),
+            FramedExports = source.FramedExports.Select(export => export.Name == "frame:wide"
+                ? export with { HostImportId = host.Id } : export).ToArray(),
+        };
+        Valid(module);
+        byte[] json = GuestIrSerializer.Serialize(module);
+        Require(json.SequenceEqual(GuestIrSerializer.Serialize(GuestIrSerializer.Deserialize(json))), "host route roundtrip");
+        Require(Layout(module, "frame:wide").SignatureSha256 == Layout(source, "frame:wide").SignatureSha256,
+            "host transport preserves method signature and alias layout");
+        var compiled = WasmModuleCompiler.Compile(module, new(true, 4));
+        Require(compiled.Succeeded && compiled.CooperativeSafepointAttestation is { Verified: true }, "host route retains cooperative call graph");
+        var info = WasmArtifactInspector.Inspect(compiled.Bytes);
+        JsonObject metadata = JsonNode.Parse(info.CustomSections.Single(section => section.Name == GuestCallFrameLayout.HostSectionName).PayloadText)!.AsObject();
+        JsonObject route = metadata["exports"]!.AsArray().Single()!.AsObject();
+        Require(metadata["schema_version"]!.GetValue<int>() == 1 && route["name"]!.GetValue<string>() == "frame:wide"
+            && route["import_module"]!.GetValue<string>() == host.Module && route["import_name"]!.GetValue<string>() == host.Name,
+            "route metadata identifies exact import and export");
+        var layout = Layout(module, "frame:wide");
+        Require(route["frame_bytes"]!.GetValue<int>() == layout.ByteSize
+            && route["signature_sha256"]!.GetValue<string>() == layout.SignatureSha256
+            && route["parameter_offsets"]!.AsArray().Select(item => item!.GetValue<int>()).SequenceEqual(layout.Parameters.Select(slot => slot.Offset))
+            && route["root_token_offsets"]!.AsArray().Select(item => item!.GetValue<int>()).SequenceEqual(layout.Roots.Select(slot => slot.TokenOffset)),
+            "route offsets come from canonical layout");
+        Require(!WasmArtifactInspector.Inspect(WasmModuleCompiler.Compile(source).Bytes).CustomSections
+            .Any(section => section.Name == GuestCallFrameLayout.HostSectionName), "legacy modules do not acquire host capabilities");
+        GuestModule[] invalid = {
+            module with { SchemaVersion = 8, IrVersion = "1.7" },
+            module with { Imports = source.Imports },
+            module with { FramedExports = module.FramedExports.Select(export => export.HostImportId is null ? export : export with { HostImportId = "" }).ToArray() },
+            module with { Imports = source.Imports.Append(host with { ParameterTypeIds = new[] { "type:int32" } }).ToArray() },
+            module with { Imports = source.Imports.Append(host with { ReturnTypeId = "wide_i64" }).ToArray() },
+            module with { Imports = source.Imports.Append(host with { ParameterTypeIds = new[] { "wide_f64", "type:int32" } }).ToArray() },
+        };
+        foreach (var candidate in invalid)
+            Require(!GuestModuleValidator.Validate(candidate).Succeeded && !WasmModuleCompiler.Compile(candidate).Succeeded,
+                "invalid host transport reached executable codegen");
+        return 7 + invalid.Length;
     }
 
     private static GuestModule FrameCalls(GuestModule module)

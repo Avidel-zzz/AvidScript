@@ -13,7 +13,7 @@ namespace AvidScript.CSharpGuest;
 internal static class CSharpUeMethodFrames
 {
     public static IReadOnlyList<GuestFramedExport> Lower(SemanticDocument document,
-        List<GuestFunction> functions, List<GuestDiagnostic> diagnostics)
+        List<GuestFunction> functions, List<GuestImport> imports, List<GuestDiagnostic> diagnostics)
     {
         if (document.UeMethodCatalog is null) return Array.Empty<GuestFramedExport>();
         var bodies = functions.ToDictionary(function => function.Id, StringComparer.Ordinal);
@@ -38,6 +38,12 @@ internal static class CSharpUeMethodFrames
                 continue;
             }
             string identity = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(method.MethodSymbolId))).ToLowerInvariant();
+            int typeOrdinal = document.UeTypeDeclarations.Select((type, ordinal) => new { type.TypeId, ordinal })
+                .Single(type => type.TypeId == method.ContainingTypeId).ordinal;
+            string hostId = "import:$ue:method:" + identity;
+            imports.Add(new(hostId, "avidscript", "avid_ue_method_"
+                + typeOrdinal.ToString(System.Globalization.CultureInfo.InvariantCulture) + "_" + identity + "_invoke_v1",
+                new[] { "type:int32", "type:int32" }, "type:int32"));
             string adapterId = "$ue:method:frame:v1:" + identity;
             GuestRegister[] parameters = body.Parameters.Select((parameter, index) =>
                 new GuestRegister("$argument:" + index, index == 0 ? "type:uint64" : parameter.TypeId)).ToArray();
@@ -53,7 +59,7 @@ internal static class CSharpUeMethodFrames
             exports.Add(bodyId, new("avid_ue_method_" + identity + "_frame_v1", adapterId,
                 new[] { "value" }.Concat(method.Parameters.Select(parameter => parameter.RefKind switch {
                     "none" => "value", "ref_readonly" => "in", _ => parameter.RefKind,
-                })).ToArray()));
+                })).ToArray()) { HostImportId = hostId });
         }
         if (diagnostics.Count != 0) return Array.Empty<GuestFramedExport>();
         // Run after closure thunks and property accessors exist, so all ordinary

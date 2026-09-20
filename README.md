@@ -28,7 +28,7 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 
 当前开发主线转向 [P66-P69 开发体验路线](Docs/Phase66/P66.0_Developer_Experience_Architecture.md)：
 语言一致性、结构热重载、完整调试和 Windows 真实玩法验证。P65 未完成的性能、发布与移动端债务继续保留。
-[与 Unreal AngelScript / Puerts 的成熟度评估](Docs/Phase66/P66_Developer_Leadership_Assessment.md)已于 2026-09-20 按 `30f7618d` 与源码、官方资料更新：生产共享执行域、原生受检重入及同 owner 的 C# 完整参数帧已经交付，生产跨对象语言路由、持久事件/await、结构热重载与完整调试仍有缺口；以真实 Windows 开发工作流验证成熟度，暂不进入成熟版收尾。该评估为文档与源码复核，无新增运行测试或竞品计时，不宣称成熟或全面领先。
+[与 Unreal AngelScript / Puerts 的成熟度评估](Docs/Phase66/P66_Developer_Leadership_Assessment.md)记录开发者预览判断；后续[生产 C# 方法路由](Docs/Phase66/P66.B_CSharp_Production_Method_Routes.md)已接通同域同步直接调用。虚/接口派发、持久事件/await、结构热重载与完整调试仍有缺口；以真实 Windows 开发工作流验证成熟度，暂不进入成熟版收尾，也不以局部验证宣称全面领先。
 [P66.A 静态局部函数](Docs/Phase66/P66.A_Lexical_Functions.md)已支持独立作用域、嵌套、递归及直接调用；
 [P66.B 直接调用捕获](Docs/Phase66/P66.B_Direct_Capture_Results.md)进一步支持外层变量共享读写及跨 await 保存。
 [委托签名合同](Docs/Phase66/P66.B_Delegate_Signature_Contract.md)已覆盖封闭泛型身份、引用参数及产物校验，为后续委托执行提供类型依据。
@@ -75,6 +75,8 @@ Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托
 [C# 实例方法参数帧](Docs/Phase66/P66.B_CSharp_Method_Frames.md)已将方法目录连接到同 owner 的直接调用和绑定方法组，保持复杂值、共享引用与 ref/out 别名；统一 receiver 表示后仍验证原声明类型。IR 8/1.7 新增仅管理根与帧的模式，使无闭包的引用参数无需占位对象。Guest 385/385、IR 35/35、backend 148/148、原生堆 14/14、Windows 构建及双后端 GeneratedTypes 17/17、堆回归 5/5 通过。生产跨对象选择、虚/接口派发、持久事件与 await 仍未完成，P66.B 保持进行中。
 
 [生产返回根授权](Docs/Phase66/P66.B_Returned_Root_Authority.md)进一步限制被调用方只更新明确交给它的返回根，禁止释放、分配、越级转交及无帧嵌套继承。原生堆 15/15、Windows 构建、C# receiver 25/25 与 GeneratedTypes 17/17 通过，包含双后端返回前 Host GC、scope 恢复和失败隔离。此组仍是原生生产入口基础，完整 C# 跨对象路由、虚/接口选择与持久 event/await 继续推进。
+
+[真实 C# 生产跨对象调用](Docs/Phase66/P66.B_CSharp_Production_Method_Routes.md)已将 IR 9/1.8 的方法帧接入同域目标实例，双后端执行 A→B→A、20 个显式混合参数、共享对象与 ref/out 别名，并覆盖强制 GC、包重载、目标退休和 World 故障隔离。字段赋值的捕获位置与 `+=` 旧值快照也保持 C# 求值顺序。Guest 392/392、IR 35/35、backend 161/161、原生堆 15/15、Windows 构建、GeneratedTypes 18/18 与堆回归 5/5 通过。虚/接口动态选择、跨 owner UE 实例委托、持久 event/await 与完整调试仍待完成，P66.B 保持进行中。
 
 ## 现在可以做什么
 
@@ -220,7 +222,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 ## 当前边界
 
 - **UE 类型**：由 Profile 与 ABI/codec 决定生成范围，并非所有 UE API 自动可用。复合容器内强 UObject 引用仍拒绝，平面 `TArray<UObject*>` 可用；Set/Map key 受确定性编码限制，soft/weak 的脚本侧解析易用接口待补齐。
-- **C# 子集**：支持成员内同步、非泛型局部函数、直接调用的变量捕获，以及 Guest 内静态/捕获局部方法组、同步 lambda/匿名方法和共享逃逸闭包；捕获值可作为内部 ref/out 实参，结构体字段与方法保持共享写入，结构体实例委托绑定独立副本，委托支持 `==/!=` 和同步组合/移除。受支持的普通引用类已有构造、共享字段、实例委托及 this 捕获，当前 Session owner 的 UE 实例委托与 this 捕获也已连接；继承/虚派发、字段初始化、自动属性、跨 Session UE 实例调用、跨 await 委托和 `event +=` 仍未支持。无完整 .NET Runtime、任意 awaiter 或异常系统；内部借用不能进入 Host 或持久状态；UE 委托/事件仍使用显式 bind/subscribe 与 `ExecuteX/BroadcastX`。
+- **C# 子集**：支持成员内同步、非泛型局部函数、直接调用的变量捕获，以及 Guest 内静态/捕获局部方法组、同步 lambda/匿名方法和共享逃逸闭包；捕获值可作为内部 ref/out 实参，结构体字段与方法保持共享写入，结构体实例委托绑定独立副本，委托支持 `==/!=` 和同步组合/移除。受支持的普通引用类已有构造、共享字段、实例委托及 this 捕获，当前 Session owner 的 UE 实例委托与 this 捕获也已连接；同执行域 UE 实例间支持同步直接方法调用。继承/虚派发、字段初始化、自动属性、跨 owner UE 实例委托、跨 await 委托和 `event +=` 仍未支持。无完整 .NET Runtime、任意 awaiter 或异常系统；内部借用不能进入普通 Host ABI、跨执行域或持久状态；UE 委托/事件仍使用显式 bind/subscribe 与 `ExecuteX/BroadcastX`。
 - **重载与隔离**：方法体可热重载；UI 样例通过 `NextTickAsync` 在候选提交后初始化。准备期无可回滚适配的反射写入仍被拒绝，不承诺回滚任意外部副作用。反射结构变更需增量 UBT 并重启 Editor；WASM 隔离不是原生 DLL 进程沙箱。
 - **玩法与平台**：UI 包使用独立验证插件和隔离启动配置，Development/Shipping 均通过跨进程自动存取；Development 人工界面、按钮和同一 UserRoot 新进程读档均反馈无问题。Shipping 人工视觉按用户要求不阻塞当前推进，明确转入发布候选验收，不能视为通过。任意损坏存档不在现有保证内；Development 包内一小时切图与当前候选 2/2 多进程网络拓扑通过，UI 重载另有 20 轮有界证据，但不宣称一小时网络/重载长稳；Android UBT/APK/真机及 iOS 仍未验收。
 - **诊断与性能**：typed Host 拒绝已在 Wasmtime 保留具体 category/details/import，WAMR semantic/dynamic 路径同样保留分类；尚无完整 C# 异常系统。纯执行 P50/P95 领先门禁未关闭，也未完成同口径 UnLua/AngelScript 矩阵。

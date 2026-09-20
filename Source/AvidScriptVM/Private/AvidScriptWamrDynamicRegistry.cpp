@@ -105,6 +105,7 @@ const TCHAR* GetWamrSupplementalSignature(const EAvidScriptVmTypedHostShape Shap
 {
 	switch (Shape)
 	{
+	case EAvidScriptVmTypedHostShape::I32PairToI32: return TEXT("(ii)i");
 	case EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Get: return TEXT("(I)i");
 	case EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Set: return TEXT("(Ii)");
 	case EAvidScriptVmTypedHostShape::PackedSelfPropertyI64Get: return TEXT("(I)I");
@@ -454,6 +455,15 @@ bool DispatchAvidScriptWamrSupplementalImport(
 	if (Target.Context == nullptr) return false;
 	switch (Import.Shape)
 	{
+	case EAvidScriptVmTypedHostShape::I32PairToI32:
+	{
+		if (Arguments.Num() != 2 || Target.I32Pair == nullptr) return false;
+		int32 Value = 0;
+		if (Target.I32Pair(Target.Context, static_cast<int32>(Arguments[0]), static_cast<int32>(Arguments[1]), Value)
+			!= EAvidScriptVmTypedHostStatus::Succeeded) return false;
+		OutResultBits = static_cast<uint32>(Value);
+		return true;
+	}
 	case EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Get:
 		return InvokeWamrSupplementalGetter(Target.PackedSelfPropertyI32Get, Target.Context, Arguments, OutResultBits);
 	case EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Set:

@@ -77,6 +77,7 @@ public static class WasmModuleCompiler
         writer.WriteBytes(Header);
         WriteProvenanceSection(writer, module);
         WriteCallFrameSection(writer, layout);
+        WriteHostCallFrameSection(writer, module, layout);
         WriteSafepointProofSection(writer, module, safepointPlan);
         WriteTypeSection(writer, layout);
         WriteImportSection(writer, module, layout, safepointPlan);
@@ -113,6 +114,34 @@ public static class WasmModuleCompiler
                     name = export.Contract.Name,
                     signature_sha256 = export.Layout.SignatureSha256,
                     frame_bytes = export.Layout.ByteSize,
+                }).ToArray(),
+            }));
+        });
+    }
+
+    private static void WriteHostCallFrameSection(WasmBinaryWriter writer, GuestModule module, WasmModuleLayout layout)
+    {
+        WasmFramedExport[] routes = layout.FramedExports.Values.Where(export => export.Contract.HostImportId is not null).ToArray();
+        if (routes.Length == 0) return;
+        writer.WriteSection(0, section =>
+        {
+            section.WriteName(GuestCallFrameLayout.HostSectionName);
+            section.WriteBytes(JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                schema_version = GuestCallFrameLayout.HostSectionVersion,
+                exports = routes.Select(export =>
+                {
+                    GuestImport import = module.Imports.Single(item => item.Id == export.Contract.HostImportId);
+                    return new
+                    {
+                        name = export.Contract.Name,
+                        import_module = import.Module,
+                        import_name = import.Name,
+                        signature_sha256 = export.Layout.SignatureSha256,
+                        frame_bytes = export.Layout.ByteSize,
+                        parameter_offsets = export.Layout.Parameters.Select(slot => slot.Offset).ToArray(),
+                        root_token_offsets = export.Layout.Roots.Select(slot => slot.TokenOffset).ToArray(),
+                    };
                 }).ToArray(),
             }));
         });

@@ -49,7 +49,13 @@ internal sealed partial class WasmFunctionCompiler
             body.WriteByte(0x37); body.WriteU32(3); body.WriteU32(0);
         }
         Address(body); WriteI32Constant(body, call.ByteSize);
-        body.WriteByte(0x10); body.WriteU32(export.FunctionIndex);
+        body.WriteByte(0x10);
+        body.WriteU32(export.Contract.HostImportId is { } hostId ? moduleLayout.FunctionIndices[hostId] : export.FunctionIndex);
+        if (export.Contract.HostImportId is not null)
+        {
+            WriteI32Constant(body, 1); body.WriteByte(0x47);
+            body.WriteByte(0x04); body.WriteByte(0x40); body.WriteByte(0x00); body.WriteByte(0x0b);
+        }
         if (instruction.ResultId is not { } result) return;
         if (call.Result.Type.Storage == "memory")
             WasmMemoryEmitter.WriteCopy(body, writer => WriteLocalGet(writer, localIndices[result]),

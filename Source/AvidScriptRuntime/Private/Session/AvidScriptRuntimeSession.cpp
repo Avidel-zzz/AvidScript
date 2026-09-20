@@ -2311,7 +2311,8 @@ bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 	{
 		TArray<FAvidScriptVmTypedHostImport> AvailableImports;
 		FString BindingError;
-		if (!CandidateRuntime->ConfigureGeneratedTypeHostBindings(GeneratedTypeInstance->Registry, AvailableImports, BindingError))
+		if (!CandidateRuntime->ConfigureGeneratedTypeHostBindings(GeneratedTypeInstance->Registry, AvailableImports, BindingError,
+			Artifact.VmArtifact.CanonicalWasmBytes))
 		{
 			SetReloadFailure(OutResult, TEXT("<generated-properties>"), TEXT("generated_property_import_invalid"),
 				BindingError, TEXT("rebuild the generated type package from the current registry"));
@@ -2443,6 +2444,13 @@ bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 		return false;
 	}
 
+	if (!CandidateRuntime->PrepareGeneratedMethodHostBindings(SupplementalImportError))
+	{
+		SetReloadFailure(OutResult, TEXT("<generated-methods>"), TEXT("generated_method_route_invalid"),
+			SupplementalImportError, TEXT("rebuild the generated method routes from the canonical module"));
+		CandidateRuntime->Unload();
+		return false;
+	}
 	SetRuntimeBaseContext(*CandidateRuntime, HostContext);
 	OutResult.RuntimeResult = RuntimeResult;
 	OutRuntime = MoveTemp(CandidateRuntime);

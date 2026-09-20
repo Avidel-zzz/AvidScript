@@ -124,6 +124,46 @@ internal static class CSharpGuestUeReceiverTests
             + "public static class Script { public static int Run() => new ReceiverActor().GetScriptValue(); }") == 511,
             "ordinary primitive references retain immediate alias writes without any closures");
         Compile(plainReferences, "csharp-ue-receiver-plain-ref", false);
+        const string crossObjects = """
+            using AvidScript;
+            public class State { public int Value; }
+            public struct Packet { public State Item; public int Sum; }
+            [UClass] public partial class ReceiverActor : AvidActor {
+                private static ReceiverActor First;
+                private static ReceiverActor Second;
+                private State Echo(State value, int depth) {
+                    if (this != First) return null;
+                    value.Value += 1;
+                    return depth == 0 ? value : Echo(value, depth - 1);
+                }
+                private Packet Transfer(ReceiverActor other, State original, ref State first, out State second,
+                    ref int left, ref int right, int a, int b, int c, int d, int e, int f, int g, int h,
+                    int i, int j, int k, int l, long tail, double fraction) {
+                    left += 2; right *= 3;
+                    first = new State(); first.Value = 19;
+                    second = new State(); second.Value = first.Value + 4;
+                    original.Value += first.Value;
+                    Packet result = new Packet(); result.Item = other.Echo(original, 3);
+                    result.Sum = this == Second ? a + b + c + d + e + f + g + h + i + j + k + l + (int)tail + (int)fraction : -1;
+                    return result;
+                }
+                [UFunction] public int GetScriptValue() {
+                    if (First == null) { First = this; return 11; }
+                    if (Second == null) { if (this == First) return 33; Second = this; return 22; }
+                    State original = new State(); original.Value = 5;
+                    State alias = original; int shared = 4;
+                    Packet result = Second.Transfer(First, original, ref alias, out alias, ref shared, ref shared,
+                        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 19L, 23.5);
+                    return result.Item == original && result.Sum == 120 && original.Value == 13
+                        && alias.Value == 4 && shared == 18 ? 511 : 0;
+                }
+            }
+            """;
+        Check(CSharpGuestBorrowedReferenceTests.Reference(crossObjects + Facade
+            + "public static class Script { public static int Run() { ReceiverActor a = new ReceiverActor(), b = new ReceiverActor(); "
+            + "if (a.GetScriptValue() != 11 || b.GetScriptValue() != 22) return 0; return a.GetScriptValue(); } }") == 511,
+            "natural A to B to A calls preserve shared objects, mixed signatures and immediate ref/out aliasing in .NET");
+        Compile(crossObjects, "csharp-ue-cross-objects", true);
         return count;
 
         void Compile(string text, string name, bool stress)

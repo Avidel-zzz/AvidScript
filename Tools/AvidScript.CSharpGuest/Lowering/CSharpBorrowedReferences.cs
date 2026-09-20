@@ -34,6 +34,8 @@ internal static class CSharpBorrowedReferences
     {
         if (operation.Kind is "argument" or "declaration_expression" && operation.Children.Count == 1)
             return Address(context, operation.Children[0], block, instructions);
+        if (operation.Kind == "flow_capture_reference" && context.CapturedLocations.Contains(operation.CaptureId))
+            return context.CapturedLocations.Address(operation.CaptureId, block, instructions);
         if (operation.Kind == "flow_capture_reference" && context.TryGetCaptureTarget(operation.CaptureId, out SemanticOperation target))
             return Address(context, target, block, instructions);
         if (context.ClosureCells.TryAddress(operation.SymbolId, operation.TypeId, block, instructions, out GuestRegister? cell)) return cell;

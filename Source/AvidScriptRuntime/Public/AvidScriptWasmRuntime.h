@@ -325,7 +325,10 @@ public:
 		FString& OutError);
 	bool ConfigureGeneratedTypeHostBindings(
 		const TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot>& Registry,
-		TArray<FAvidScriptVmTypedHostImport>& OutImports, FString& OutError);
+		TArray<FAvidScriptVmTypedHostImport>& OutImports, FString& OutError,
+		TConstArrayView<uint8> CanonicalWasm = {});
+	bool PrepareGeneratedMethodHostBindings(FString& OutError);
+	bool InvokeGeneratedMethodFrame(uint32 RouteIndex, int32 FrameAddress, int32 FrameBytes);
 	UObject* ResolveGeneratedTypeReceiver(
 		int64 PackedSelf, uint32 TypeOrdinal, const FAvidScriptGeneratedTypeRegistrySnapshot& Registry) const;
 	bool ConfigureExecutionBudget(

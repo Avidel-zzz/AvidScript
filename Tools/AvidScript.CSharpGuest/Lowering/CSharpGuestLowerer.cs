@@ -160,7 +160,9 @@ public static class CSharpGuestLowerer
             return Failure(diagnostics);
         }
 
-        IReadOnlyList<GuestFramedExport> framedExports = CSharpUeMethodFrames.Lower(document, functions, diagnostics);
+        List<GuestImport> methodImports = imports.ToList();
+        IReadOnlyList<GuestFramedExport> framedExports = CSharpUeMethodFrames.Lower(document, functions, methodImports, diagnostics);
+        imports = methodImports.ToArray();
         if (diagnostics.Count != 0) return Failure(diagnostics);
 
         if (enableDebugInstrumentation)

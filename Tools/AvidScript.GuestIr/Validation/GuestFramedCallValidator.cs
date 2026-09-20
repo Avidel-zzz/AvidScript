@@ -15,6 +15,15 @@ internal static class GuestFramedCallValidator
         HashSet<string> names = new(module.Exports.Select(export => export.Name), StringComparer.Ordinal) { "memory" };
         foreach (GuestFramedExport export in module.FramedExports)
         {
+            if (export.HostImportId is { } hostId)
+            {
+                GuestImport? host = module.Imports.FirstOrDefault(import => import.Id == hostId);
+                bool I32(string typeId) => context.Types.TryGetValue(typeId, out GuestType? type)
+                    && type.Storage == "i32" && type.Size == 4;
+                if (module.SchemaVersion < 9 || string.IsNullOrWhiteSpace(hostId) || host is null
+                    || host.ParameterTypeIds.Count != 2 || !host.ParameterTypeIds.All(I32) || !I32(host.ReturnTypeId))
+                    Add(context, $"Framed export '{export.Name}' requires IR 9/1.8 and a synchronous (i32,i32)->i32 host route.");
+            }
             if (string.IsNullOrWhiteSpace(export.Name) || !names.Add(export.Name)
                 || !context.Functions.TryGetValue(export.FunctionId, out GuestFunction? function)
                 || export.ParameterKinds.Count != function.Parameters.Count

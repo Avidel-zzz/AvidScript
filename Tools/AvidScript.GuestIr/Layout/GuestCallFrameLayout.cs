@@ -23,6 +23,8 @@ public sealed record GuestCallFrameLayout(
     public const int Version = 1, HeaderBytes = 64, Alignment = 16;
     public const int MaxBytes = 65536, MaxParameters = 256, MaxExports = 4096;
     public const string SectionName = "avidscript.call_frames";
+    public const string HostSectionName = "avidscript.host_call_frames";
+    public const int HostSectionVersion = 1;
 
     public static GuestCallFrameLayout Create(GuestFramedExport export, GuestFunction function,
         IReadOnlyDictionary<string, GuestType> types, IReadOnlyList<GuestFunctionReference> functionReferences)

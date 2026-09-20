@@ -24,8 +24,28 @@ internal static class CSharpGuestBorrowedReferenceTests
                 public int Property { get { return Value; } set { Value = value; } }
             }
             public struct Outer { public Cell Child; }
+            public class Box { public int Value; public Outer Nested; }
             public static class Script {
                 public static int Result;
+                static Box Select(ref Box target, ref int calls) { calls++; return target; }
+                static int Swap(ref Box target) { target = new Box(); target.Value = 99; return 17; }
+                static bool CapturedLocations() {
+                    Cell cell = new Cell(3);
+                    Func<int> mutate = () => { cell.Value = 7; return 13; };
+                    cell.Value = cell.Value == 3 ? mutate() : 0;
+                    if (cell.Value != 13) return false;
+                    cell.Value += cell.Value == 13 ? mutate() : 0;
+                    if (cell.Value != 26) return false;
+                    Box original = new Box(); Box target = original; int calls = 0;
+                    Select(ref target, ref calls).Value = target == original ? Swap(ref target) : -1;
+                    if (original.Value != 17 || target.Value != 99 || calls != 1) return false;
+                    target = original;
+                    Select(ref target, ref calls).Nested.Child.Value = calls == 2 ? Swap(ref target) : -1;
+                    if (original.Nested.Child.Value != 17 || target.Value != 99 || calls != 2) return false;
+                    // A value capture must remain a snapshot even when its source changes.
+                    int snapshot = original.Value + (target.Value == 99 ? Swap(ref original) : 0);
+                    return snapshot == 34 && original.Value == 99;
+                }
                 static void Pair(ref int a, ref int b, Func<int> read) { a += 3; b += read(); }
                 static void Touch(ref int value) { value++; }
                 static void TouchCell(ref Cell value) { value.Value += 3; value.Mutate(); }
@@ -34,6 +54,7 @@ internal static class CSharpGuestBorrowedReferenceTests
                     int seed = 100; value = () => ++seed; copy = value;
                 }
                 public static int Run() {
+                    if (!CapturedLocations()) return 0;
                     int shared = 2;
                     Func<int> read = () => shared;
                     Pair(ref shared, ref shared, read);

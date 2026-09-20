@@ -34,11 +34,28 @@ struct FAvidScriptGeneratedPropertyHostContext : FAvidScriptGeneratedReceiverHos
 	FAvidScriptGeneratedPropertyF64Write WriteF64 = nullptr;
 };
 
+struct FAvidScriptGeneratedMethodHostContext
+{
+	FAvidScriptWasmRuntimeInstance* Runtime = nullptr;
+	uint32 RouteIndex = 0;
+	uint32 FrameBytes = 0;
+	UClass* ExpectedClass = nullptr;
+	FString ExportName;
+	FString ImportName;
+	uint8 Signature[32] = {};
+	TArray<uint32> RootTokenOffsets;
+	FAvidScriptContextualExportCall Call;
+};
+
 // Owned by the Runtime, including during Session retirement and candidate load.
 struct FAvidScriptGeneratedTypeHostBindings
 {
 	TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot> Registry;
 	TArray<TUniquePtr<FAvidScriptGeneratedPropertyHostContext>> PropertyContexts;
 	TArray<TUniquePtr<FAvidScriptGeneratedReceiverHostContext>> ReceiverContexts;
+	TArray<TUniquePtr<FAvidScriptGeneratedMethodHostContext>> MethodContexts;
 	TArray<FAvidScriptVmTypedHostImport> HostImports;
 };
+
+bool ConfigureAvidScriptGeneratedMethodRoutes(FAvidScriptWasmRuntimeInstance& Runtime,
+	TConstArrayView<uint8> CanonicalWasm, FAvidScriptGeneratedTypeHostBindings& State, FString& OutError);

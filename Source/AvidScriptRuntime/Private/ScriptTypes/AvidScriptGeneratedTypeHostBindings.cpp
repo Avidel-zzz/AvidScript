@@ -273,7 +273,7 @@ UObject* FAvidScriptWasmRuntimeInstance::ResolveGeneratedTypeReceiver(
 
 bool FAvidScriptWasmRuntimeInstance::ConfigureGeneratedTypeHostBindings(
 	const TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot>& Registry,
-	TArray<FAvidScriptVmTypedHostImport>& OutImports, FString& OutError)
+	TArray<FAvidScriptVmTypedHostImport>& OutImports, FString& OutError, TConstArrayView<uint8> CanonicalWasm)
 {
 	OutImports.Reset();
 	OutError.Reset();
@@ -343,6 +343,7 @@ bool FAvidScriptWasmRuntimeInstance::ConfigureGeneratedTypeHostBindings(
 			}
 		}
 	}
+	if (!CanonicalWasm.IsEmpty() && !ConfigureAvidScriptGeneratedMethodRoutes(*this, CanonicalWasm, *State, OutError)) return false;
 	if (!SetSupplementalTypedHostImports(State->HostImports, OutError)) return false;
 	OutImports = State->HostImports;
 	GeneratedTypeHostBindings = MoveTemp(State);

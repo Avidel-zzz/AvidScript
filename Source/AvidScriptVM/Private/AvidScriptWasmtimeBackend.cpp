@@ -1873,6 +1873,11 @@ public:
 		{
 			return 1;
 		}
+		if (HostContext.PreparedTarget.IsBoundForShape(HostContext.Shape))
+		{
+			return CompleteTypedInvocation(HostContext, HostContext.PreparedTarget.I32Pair(
+				HostContext.PreparedTarget.Context, Left, Right, OutValue));
+		}
 		if (TypedHostDispatcher == nullptr)
 		{
 			RecordPendingHostFailure(
@@ -3706,7 +3711,8 @@ private:
 				+ (Import.PreparedTarget.PackedSelfPropertyF32Get != nullptr ? 1 : 0)
 				+ (Import.PreparedTarget.PackedSelfPropertyF32Set != nullptr ? 1 : 0)
 				+ (Import.PreparedTarget.PackedSelfPropertyF64Get != nullptr ? 1 : 0)
-				+ (Import.PreparedTarget.PackedSelfPropertyF64Set != nullptr ? 1 : 0);
+				+ (Import.PreparedTarget.PackedSelfPropertyF64Set != nullptr ? 1 : 0)
+				+ (Import.PreparedTarget.I32Pair != nullptr ? 1 : 0);
 			const bool bHasPreparedContext =
 				Import.PreparedTarget.Context != nullptr;
 			const bool bRequiresPreparedTarget =

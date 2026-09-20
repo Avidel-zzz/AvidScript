@@ -41,3 +41,9 @@ AVIDSCRIPTVM_API bool InspectAvidScriptWasmModuleLayout(
 	TConstArrayView<uint8> Bytecode,
 	FAvidScriptWasmModuleLayout& OutLayout,
 	FString& OutError);
+
+// Copies one bounded custom-section payload. Duplicate requested names are rejected;
+// interpretation and capability authorization remain with the caller's domain.
+AVIDSCRIPTVM_API bool ReadAvidScriptWasmCustomSection(
+	TConstArrayView<uint8> Bytecode, const FString& SectionName, uint32 MaxPayloadBytes,
+	TArray<uint8>& OutPayload, bool& bOutFound, FString& OutError);
