@@ -33,6 +33,12 @@ public:
 	{
 		return Session.InvokeGeneratedInstanceExport(SourceRuntime, Target, Call, Frame, OutError, OutResult);
 	}
+	bool ResolveInstanceTypeOrdinal(FAvidScriptWasmRuntimeInstance& SourceRuntime,
+		const FAvidScriptObjectHandle& Target, const FAvidScriptGeneratedTypeRegistrySnapshot& Registry,
+		uint32& OutOrdinal, FAvidScriptVmError& OutError) const override
+	{
+		return Session.ResolveGeneratedInstanceTypeOrdinal(SourceRuntime, Target, Registry, OutOrdinal, OutError);
+	}
 private:
 	FAvidScriptRuntimeSession& Session;
 };
@@ -99,6 +105,31 @@ EGeneratedCallShape ResolveCallShape(
 	}
 	return EGeneratedCallShape::Unsupported;
 }
+}
+
+bool FAvidScriptRuntimeSession::ResolveGeneratedInstanceTypeOrdinal(FAvidScriptWasmRuntimeInstance& SourceRuntime,
+	const FAvidScriptObjectHandle& Target, const FAvidScriptGeneratedTypeRegistrySnapshot& Registry,
+	uint32& OutOrdinal, FAvidScriptVmError& OutError) const
+{
+	OutError.Reset();
+	if (!IsInGameThread() || !SourceRuntime.IsContextInvocationActive() || !GeneratedTypeInstance
+		|| GeneratedTypeInstance->Registry.Get() != &Registry)
+	{
+		OutError.Category = TEXT("generated_invocation_source");
+		OutError.Details = TEXT("type selection requires an active generated source and matching registry");
+		return false;
+	}
+	if (Target == HostContext.OwnerHandle)
+	{
+		const uint32 Ordinal = GeneratedTypeInstance->TypeOrdinal;
+		if (ResolveGeneratedTypeReceiver(static_cast<int64>(Target.ToUInt64()), Ordinal, Registry))
+		{ OutOrdinal = Ordinal; return true; }
+	}
+	else if (LiveDomain && LiveRuntime.Get() == &SourceRuntime)
+		return LiveDomain->ResolveTypeOrdinal(*this, Target, OutOrdinal, OutError);
+	OutError.Category = TEXT("generated_invocation_target");
+	OutError.Details = TEXT("type selection requires a valid owner or a live target in the published domain");
+	return false;
 }
 
 bool FAvidScriptRuntimeSession::InvokeGeneratedInstanceExport(FAvidScriptWasmRuntimeInstance& SourceRuntime,

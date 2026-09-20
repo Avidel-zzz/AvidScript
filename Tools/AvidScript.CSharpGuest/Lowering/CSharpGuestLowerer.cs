@@ -26,6 +26,7 @@ public static class CSharpGuestLowerer
             return Failure(diagnostics);
         }
 
+        document = CSharpUeDispatch.ExpandReachability(document);
         CSharpTypeLoweringResult typeResult = CSharpTypeLowerer.Lower(document);
         if (!typeResult.Succeeded)
         {

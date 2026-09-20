@@ -859,9 +859,24 @@ internal static class CSharpOperationLowerer
         }
 
         if (operation.Constant is { Kind: "null" } && context.TryGetGuestType(operation.TypeId, out GuestType nullType)
-            && (nullType.Kind is "function_ref" or "managed_ref" || CSharpUeReceivers.IsType(context.Document, nullType.Id)
+            && (nullType.Kind is "function_ref" or "managed_ref" || CSharpUeReceivers.IsView(context.Document, nullType.Id)
                 || context.Document.DelegateTypes.Any(signature => signature.TypeId == nullType.Id)))
             return LowerLiteral(context, operation, blockOrdinal, instructions);
+
+        string sourceTypeId = operation.Children[0].TypeId ?? "";
+        string targetTypeId = operation.TypeId ?? "";
+        if (sourceTypeId != targetTypeId
+            && (CSharpUeDispatch.IsInterfaceView(context.Document, sourceTypeId)
+                || CSharpUeDispatch.IsInterfaceView(context.Document, targetTypeId))
+            && (!CSharpUeReceivers.IsView(context.Document, sourceTypeId)
+                || !CSharpUeReceivers.IsView(context.Document, targetTypeId)
+                || !operation.Conversion.IsImplicit || !operation.Conversion.IsReference))
+        {
+            // Reject incompatible identities before operand lowering obscures the
+            // conversion with a missing Guest type or constructor diagnostic.
+            context.Add("ASCG1024", "UE interface views require a statically valid reference upcast; managed-object mixing and checked downcasts require a separate identity contract.");
+            return null;
+        }
 
         GuestRegister? operand = LowerValue(context, operation.Children[0], blockOrdinal, instructions);
         if (operand is null)

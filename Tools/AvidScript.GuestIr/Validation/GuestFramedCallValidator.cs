@@ -13,6 +13,7 @@ internal static class GuestFramedCallValidator
             || module.FramedExports.Count > GuestCallFrameLayout.MaxExports)
             Add(context, "Framed exports require IR 7/1.6 and a bounded export count.");
         HashSet<string> names = new(module.Exports.Select(export => export.Name), StringComparer.Ordinal) { "memory" };
+        Dictionary<string, GuestCallFrameLayout> layouts = new(StringComparer.Ordinal);
         foreach (GuestFramedExport export in module.FramedExports)
         {
             if (export.HostImportId is { } hostId)
@@ -41,9 +42,45 @@ internal static class GuestFramedCallValidator
                     valid = false;
             }
             if (!valid) { Add(context, $"Framed export '{export.Name}' has incompatible parameter passing kinds."); continue; }
-            try { GuestCallFrameLayout.Create(export, function, context.Types, module.FunctionReferences); }
+            try { layouts.TryAdd(export.Name, GuestCallFrameLayout.Create(export, function, context.Types, module.FunctionReferences)); }
             catch (Exception exception) when (exception is InvalidOperationException or KeyNotFoundException or OverflowException)
             { Add(context, $"Framed export '{export.Name}': {exception.Message}"); }
+        }
+        ValidateDispatchTargets(context, layouts);
+    }
+
+    private static void ValidateDispatchTargets(GuestValidationContext context,
+        IReadOnlyDictionary<string, GuestCallFrameLayout> layouts)
+    {
+        var exports = context.Module.FramedExports.GroupBy(export => export.Name, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        long total = 0;
+        foreach (GuestFramedExport route in context.Module.FramedExports)
+        {
+            if (route.HostDispatchTargets is not { } targets) continue;
+            total += targets.Count;
+            if (context.Module.SchemaVersion < 10 || route.HostImportId is null
+                || targets.Count is 0 or > GuestCallFrameLayout.MaxExports || total > 65536)
+            { Add(context, $"Framed export '{route.Name}' requires IR 10/1.9, a host import and bounded nonempty dispatch targets."); continue; }
+            uint? previous = null;
+            foreach (GuestHostDispatchTarget entry in targets)
+            {
+                if (previous is { } key && entry.Selector <= key)
+                    Add(context, $"Framed export '{route.Name}' dispatch selectors must be unique and ascending.");
+                previous = entry.Selector;
+                if (!exports.TryGetValue(entry.ExportName, out GuestFramedExport? target)
+                    || target.Name == route.Name || target.HostDispatchTargets is not null || target.HostImportId is null
+                    || !layouts.TryGetValue(route.Name, out GuestCallFrameLayout? sourceLayout)
+                    || !layouts.TryGetValue(target.Name, out GuestCallFrameLayout? targetLayout)
+                    || sourceLayout.SignatureSha256 != targetLayout.SignatureSha256
+                    || !context.Functions.TryGetValue(route.FunctionId, out GuestFunction? sourceFunction)
+                    || !context.Functions.TryGetValue(target.FunctionId, out GuestFunction? targetFunction)
+                    || sourceFunction.ReturnTypeId != targetFunction.ReturnTypeId
+                    || !sourceFunction.Parameters.Select(parameter => parameter.TypeId)
+                        .SequenceEqual(targetFunction.Parameters.Select(parameter => parameter.TypeId))
+                    || !route.ParameterKinds.SequenceEqual(target.ParameterKinds))
+                    Add(context, $"Framed export '{route.Name}' dispatch target '{entry.ExportName}' must be a direct host frame with the same nominal signature and layout.");
+            }
         }
     }
 

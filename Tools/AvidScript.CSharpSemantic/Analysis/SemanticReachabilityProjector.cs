@@ -13,7 +13,8 @@ internal static class SemanticReachabilityProjector
         IReadOnlyList<SemanticDelegateEventCallback> delegateEventCallbacks,
         IReadOnlyList<SemanticContinuationCallback> continuationCallbacks,
         IReadOnlyList<SemanticUeTypeDeclaration> ueTypeDeclarations,
-        IReadOnlyList<SemanticAsyncMethod> asyncMethods)
+        IReadOnlyList<SemanticAsyncMethod> asyncMethods,
+        IReadOnlyList<string>? additionalRootIds = null)
     {
         Dictionary<string, SemanticCallable> callablesById = callables.ToDictionary(
             callable => callable.MethodSymbolId,
@@ -28,6 +29,7 @@ internal static class SemanticReachabilityProjector
             .Select(function => function.MethodSymbolId)
             .ToArray();
         string[] rootIds = exportRootIds
+            .Concat(additionalRootIds ?? Array.Empty<string>())
             .Concat(gameplayEventCallbacks.Select(callback => callback.MethodSymbolId))
             .Concat(delegateEventCallbacks.Select(callback => callback.MethodSymbolId))
             .Concat(continuationCallbacks.Select(callback => callback.MethodSymbolId))

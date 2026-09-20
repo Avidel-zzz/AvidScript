@@ -233,6 +233,9 @@ private:
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FAvidScriptProductionInstanceEntryTest;
 #endif
+	bool ResolveGeneratedInstanceTypeOrdinal(FAvidScriptWasmRuntimeInstance& SourceRuntime,
+		const FAvidScriptObjectHandle& Target, const FAvidScriptGeneratedTypeRegistrySnapshot& Registry,
+		uint32& OutOrdinal, FAvidScriptVmError& OutError) const;
 	bool InvokeGeneratedInstanceExport(FAvidScriptWasmRuntimeInstance& SourceRuntime,
 		const FAvidScriptObjectHandle& Target, const FAvidScriptContextualExportCall& Call,
 		const FAvidScriptVmCallFrame& Frame, FAvidScriptVmError& OutError,

@@ -54,7 +54,7 @@ internal static class WasmFramedCallTests
         GuestModule[] invalid =
         {
             managed with { SchemaVersion = 6, IrVersion = "1.5" },
-            managed with { SchemaVersion = 10, IrVersion = "1.9" },
+            managed with { SchemaVersion = GuestModuleValidator.CurrentSchemaVersion + 1, IrVersion = GuestModuleValidator.CurrentIrVersion },
             managed with { FramedExports = null! },
             managed with { FramedExports = new GuestFramedExport[] { null! } },
             managed with { FramedExports = new[] { managed.FramedExports[0] with { ParameterKinds = null! } } },
@@ -79,7 +79,7 @@ internal static class WasmFramedCallTests
         JsonObject legacyJson = JsonNode.Parse(GuestIrSerializer.Serialize(legacy))!.AsObject();
         legacyJson.Remove("framed_exports");
         Valid(GuestIrSerializer.Deserialize(System.Text.Encoding.UTF8.GetBytes(legacyJson.ToJsonString())));
-        return 22 + invalid.Length + HostRoutes(managed);
+        return 22 + invalid.Length + HostRoutes(managed) + WasmHostDispatchTests.Run(managed);
     }
 
     private static int HostRoutes(GuestModule source)

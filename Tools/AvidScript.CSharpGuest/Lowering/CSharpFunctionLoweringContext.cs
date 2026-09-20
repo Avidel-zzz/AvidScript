@@ -431,7 +431,7 @@ internal sealed class CSharpFunctionLoweringContext
         out GuestConstant constant)
     {
         string kind = semanticConstant.Kind;
-        if (kind == "null" && typeId is not null && CSharpUeReceivers.IsType(Document, typeId)) kind = "zero";
+        if (kind == "null" && typeId is not null && CSharpUeReceivers.IsView(Document, typeId)) kind = "zero";
         if (kind == "null" && CSharpClosureLayout.UsesManagedDelegates(Document) && Document.DelegateTypes.Any(signature => signature.TypeId == typeId)) kind = "zero";
         if (typeId is not null
             && guestTypes.TryGetValue(typeId, out GuestType? type)

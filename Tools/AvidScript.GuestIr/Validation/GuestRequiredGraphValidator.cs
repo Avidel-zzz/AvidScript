@@ -26,7 +26,9 @@ internal static class GuestRequiredGraphValidator
         GuestProvenance provenance = module.Provenance;
         foreach (GuestFramedExport? export in module.FramedExports)
             if (export is null || HasNull(export.Name, export.FunctionId) || export.ParameterKinds is null
-                || export.ParameterKinds.Any(kind => kind is null)) return false;
+                || export.ParameterKinds.Any(kind => kind is null)
+                || export.HostDispatchTargets is { } targets
+                    && targets.Any(target => target is null || target.ExportName is null)) return false;
         foreach (GuestFunctionReference? reference in module.FunctionReferences)
         {
             if (reference is null || HasNull(reference.TypeId, reference.ReturnTypeId)

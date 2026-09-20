@@ -20,6 +20,8 @@ internal static class CSharpUeMethodFrames
         var called = functions.SelectMany(function => function.Blocks).SelectMany(block => block.Instructions)
             .Where(instruction => instruction.Op == "call").Select(instruction => instruction.TargetId)
             .ToHashSet(StringComparer.Ordinal);
+        var dispatch = CSharpUeDispatch.Routes(document).Where(route => called.Contains(route.Id)).ToArray();
+        foreach (var target in dispatch.SelectMany(route => route.Targets)) called.Add(CSharpGuestIds.Function(target.Method.MethodSymbolId));
         Dictionary<string, GuestFramedExport> exports = new(StringComparer.Ordinal);
         List<GuestFunction> adapters = new();
         foreach (SemanticUeMethodEntry method in document.UeMethodCatalog.Methods.OrderBy(method => method.MethodSymbolId, StringComparer.Ordinal))
@@ -60,6 +62,36 @@ internal static class CSharpUeMethodFrames
                 new[] { "value" }.Concat(method.Parameters.Select(parameter => parameter.RefKind switch {
                     "none" => "value", "ref_readonly" => "in", _ => parameter.RefKind,
                 })).ToArray()) { HostImportId = hostId });
+        }
+        if (diagnostics.Count != 0) return Array.Empty<GuestFramedExport>();
+        foreach (var route in dispatch)
+        {
+            List<GuestHostDispatchTarget> targets = new();
+            foreach (var target in route.Targets)
+            {
+                if (!exports.TryGetValue(CSharpGuestIds.Function(target.Method.MethodSymbolId), out var body))
+                {
+                    diagnostics.Add(new("ASCG1024", "error", $"Dynamic method '{route.Callable.MethodSymbolId}' has no executable frame for '{target.Method.MethodSymbolId}'.", null));
+                    continue;
+                }
+                targets.Add(new(target.TypeOrdinal, body.Name));
+            }
+            if (targets.Count != route.Targets.Count || targets.Count == 0) continue;
+            string importId = "import:" + route.Id;
+            imports.Add(new(importId, "avidscript", "avid_ue_dispatch_" + route.Hash + "_invoke_v1",
+                new[] { "type:int32", "type:int32" }, "type:int32"));
+            GuestRegister[] parameters = new[] { new GuestRegister("$receiver", "type:uint64") }
+                .Concat(route.Callable.Parameters.Select(parameter => new GuestRegister("$argument:" + parameter.Ordinal,
+                    CSharpBorrowedReferences.Parameter(document, parameter.TypeId, parameter.RefKind)))).ToArray();
+            // The declaration is a shape only. Calling its adapter directly traps;
+            // the host must select one of the validated concrete implementation frames.
+            string stubId = route.Id + ":shape";
+            adapters.Add(new(stubId, parameters, Array.Empty<GuestRegister>(), route.Callable.ReturnTypeId, "$entry",
+                new[] { new GuestBasicBlock("$entry", Array.Empty<GuestInstruction>(), new("trap", null, null, null, null)) }));
+            exports.Add(route.Id, new("avid_ue_dispatch_" + route.Hash + "_frame_v1", stubId,
+                new[] { "value" }.Concat(route.Callable.Parameters.Select(parameter => parameter.RefKind switch {
+                    "none" => "value", "ref_readonly" => "in", _ => parameter.RefKind,
+                })).ToArray()) { HostImportId = importId, HostDispatchTargets = targets });
         }
         if (diagnostics.Count != 0) return Array.Empty<GuestFramedExport>();
         // Run after closure thunks and property accessors exist, so all ordinary

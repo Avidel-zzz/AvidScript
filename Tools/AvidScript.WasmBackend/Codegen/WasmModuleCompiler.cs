@@ -128,7 +128,8 @@ public static class WasmModuleCompiler
             section.WriteName(GuestCallFrameLayout.HostSectionName);
             section.WriteBytes(JsonSerializer.SerializeToUtf8Bytes(new
             {
-                schema_version = GuestCallFrameLayout.HostSectionVersion,
+                schema_version = routes.Any(export => export.Contract.HostDispatchTargets is not null)
+                    ? GuestCallFrameLayout.HostDispatchSectionVersion : GuestCallFrameLayout.HostSectionVersion,
                 exports = routes.Select(export =>
                 {
                     GuestImport import = module.Imports.Single(item => item.Id == export.Contract.HostImportId);
@@ -141,9 +142,14 @@ public static class WasmModuleCompiler
                         frame_bytes = export.Layout.ByteSize,
                         parameter_offsets = export.Layout.Parameters.Select(slot => slot.Offset).ToArray(),
                         root_token_offsets = export.Layout.Roots.Select(slot => slot.TokenOffset).ToArray(),
+                        dispatch_targets = export.Contract.HostDispatchTargets?.Select(target => new
+                        {
+                            selector = target.Selector,
+                            export_name = target.ExportName,
+                        }).ToArray(),
                     };
                 }).ToArray(),
-            }));
+            }, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull }));
         });
     }
 

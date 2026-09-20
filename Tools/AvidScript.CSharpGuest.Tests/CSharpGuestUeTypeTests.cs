@@ -36,9 +36,17 @@ internal static class CSharpGuestUeTypeTests
             new[] { new SemanticReferenceSource(Facade, "generated://AvidScript.UeTypes.cs") });
         Assert(semantic.Succeeded && SemanticDispatchContractValidator.IsValid(semantic), "UE virtual calls retain valid semantic dispatch facts");
         CSharpGuestLoweringResult lowering = CSharpGuestLowerer.Lower(semantic, SemanticHash);
-        Assert(!lowering.Succeeded && lowering.Module is null && lowering.Diagnostics.Any(item => item.Code == "ASCG1024"
-            && item.Message.Contains("runtime method route", StringComparison.Ordinal)),
-            "until runtime routing is connected, virtual calls must not execute the statically selected body");
+        Assert(lowering.Succeeded && lowering.Module is not null,
+            string.Join(" | ", lowering.Diagnostics.Select(item => item.Message)));
+        GuestModule module = lowering.Module!;
+        GuestFramedExport route = module.FramedExports.Single(export => export.HostDispatchTargets is not null);
+        GuestFunction caller = module.Functions.Single(function => function.Id.Contains("VirtualActor.Call(", StringComparison.Ordinal));
+        Assert(route.HostImportId is not null && route.HostDispatchTargets!.Count == 1
+            && caller.Blocks.SelectMany(block => block.Instructions).Any(instruction =>
+                instruction.Op == "call_framed" && instruction.TargetId == route.Name)
+            && module.Functions.Single(function => function.Id == route.FunctionId).Blocks.All(block => block.Terminator.Kind == "trap"),
+            "even a single registered implementation must use dynamic dispatch rather than a fixed declaration body");
+        Assert(WasmModuleCompiler.Compile(module).Succeeded, "single-target virtual route compiles to canonical WASM");
     }
 
     private static void ScriptDefinedLifecycleUsesCanonicalExportsAndCompatibilityShims()

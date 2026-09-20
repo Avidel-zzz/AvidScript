@@ -121,7 +121,7 @@ bool FAvidScriptGeneratedCSharpMethodRoutesTest::RunTest(const FString& Paramete
         auto First = Routes->GetArrayField(TEXT("exports"))[0]->AsObject();
         switch (Scenario)
         {
-        case 2: Routes->SetNumberField(TEXT("schema_version"), 2); break;
+        case 2: Routes->SetNumberField(TEXT("schema_version"), 3); break;
         case 3: Routes->SetArrayField(TEXT("exports"), {}); break;
         case 4: First->SetStringField(TEXT("import_name"), TEXT("unlisted")); break;
         case 5: First->SetStringField(TEXT("name"), TEXT("missing_export")); break;

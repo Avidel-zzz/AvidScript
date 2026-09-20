@@ -1,5 +1,6 @@
 #include "ScriptTypes/AvidScriptGeneratedTypeHostBindings.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeRegistry.h"
+#include "ScriptTypes/AvidScriptGeneratedTypeAuthority.h"
 #include "AvidScriptWasmModuleLayout.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
@@ -9,6 +10,7 @@ namespace AvidScriptGeneratedMethodBindings
 {
 constexpr uint32 FrameMagic = 0x31464341, FrameVersion = 1, HeaderBytes = 64, MaxFrameBytes = 65536;
 constexpr TCHAR ImportPrefix[] = TEXT("avid_ue_method_");
+constexpr TCHAR DispatchPrefix[] = TEXT("avid_ue_dispatch_");
 
 bool UInt(const TSharedPtr<FJsonValue>& Value, uint32 Maximum, uint32& Out)
 {
@@ -73,7 +75,8 @@ bool ConfigureAvidScriptGeneratedMethodRoutes(FAvidScriptWasmRuntimeInstance& Ru
 	if (!InspectAvidScriptWasmModuleLayout(CanonicalWasm, Layout, OutError)) return false;
 	TSet<FString> Required;
 	for (const auto& Import : Layout.FunctionImports)
-		if (Import.ModuleName == TEXT("avidscript") && Import.ImportName.StartsWith(ImportPrefix)) Required.Add(Import.ImportName);
+		if (Import.ModuleName == TEXT("avidscript")
+			&& (Import.ImportName.StartsWith(ImportPrefix) || Import.ImportName.StartsWith(DispatchPrefix))) Required.Add(Import.ImportName);
 	if (!bFound)
 	{
 		if (Required.IsEmpty()) return true;
@@ -86,10 +89,13 @@ bool ConfigureAvidScriptGeneratedMethodRoutes(FAvidScriptWasmRuntimeInstance& Ru
 	TSharedPtr<FJsonObject> Document;
 	const TArray<TSharedPtr<FJsonValue>>* Exports = nullptr; uint32 Version = 0;
 	if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(FString(Text.Length(), Text.Get())), Document)
-		|| !Document || Document->Values.Num() != 2 || !UInt(*Document, TEXT("schema_version"), 1, Version) || Version != 1
+		|| !Document || Document->Values.Num() != 2 || !UInt(*Document, TEXT("schema_version"), 2, Version) || Version < 1
 		|| !Document->TryGetArrayField(TEXT("exports"), Exports) || Exports->IsEmpty() || Exports->Num() > 4096)
 	{ OutError = TEXT("invalid generated method route metadata"); return false; }
 	TSet<FString> Names;
+	TMap<FString, uint32> Indices;
+	TMap<uint32, TArray<TPair<uint32, FString>>> PendingDispatch;
+	uint32 TotalTargets = 0;
 	for (const auto& Entry : *Exports)
 	{
 		const TSharedPtr<FJsonObject>* Object = nullptr;
@@ -97,29 +103,59 @@ bool ConfigureAvidScriptGeneratedMethodRoutes(FAvidScriptWasmRuntimeInstance& Ru
 		{ OutError = TEXT("generated method route must be an object"); return false; }
 		const auto& Item = **Object;
 		auto Context = MakeUnique<FAvidScriptGeneratedMethodHostContext>();
-		FString Module, Signature; TArray<uint32> Parameters;
-		if (Item.Values.Num() != 7 || !Item.TryGetStringField(TEXT("name"), Context->ExportName)
+		FString Module, Signature;
+		Context->bDynamicDispatch = Item.HasField(TEXT("dispatch_targets"));
+		if (Item.Values.Num() != (Context->bDynamicDispatch ? 8 : 7) || (Context->bDynamicDispatch && Version != 2)
+			|| !Item.TryGetStringField(TEXT("name"), Context->ExportName)
 			|| !Item.TryGetStringField(TEXT("import_module"), Module) || Module != TEXT("avidscript")
 			|| !Item.TryGetStringField(TEXT("import_name"), Context->ImportName) || !Required.Remove(Context->ImportName)
 			|| !Item.TryGetStringField(TEXT("signature_sha256"), Signature) || !Hash(Signature, Context->Signature)
 			|| !UInt(Item, TEXT("frame_bytes"), MaxFrameBytes, Context->FrameBytes) || Context->FrameBytes < 80 || Context->FrameBytes % 16
-			|| !Offsets(Item, TEXT("parameter_offsets"), Context->FrameBytes, 256, Parameters) || Parameters.IsEmpty() || Parameters[0] != HeaderBytes
+			|| !Offsets(Item, TEXT("parameter_offsets"), Context->FrameBytes, 256, Context->ParameterOffsets)
+			|| Context->ParameterOffsets.IsEmpty() || Context->ParameterOffsets[0] != HeaderBytes
 			|| !Offsets(Item, TEXT("root_token_offsets"), Context->FrameBytes, MaxFrameBytes / 8, Context->RootTokenOffsets))
 		{ OutError = TEXT("generated method route has an invalid identity, signature or frame layout"); return false; }
 		for (const uint32 Offset : Context->RootTokenOffsets)
-			if (Offset % 8 || Offset + 8 > Context->FrameBytes || Offset <= Parameters.Last())
+			if (Offset % 8 || Offset + 8 > Context->FrameBytes || Offset <= Context->ParameterOffsets.Last())
 			{ OutError = TEXT("generated method root offsets are invalid"); return false; }
-		TArray<FString> Parts; Context->ImportName.Mid(FCString::Strlen(ImportPrefix)).ParseIntoArray(Parts, TEXT("_"), false);
-		uint32 Ordinal = 0;
-		if (!Context->ImportName.StartsWith(ImportPrefix) || Parts.Num() != 4 || Parts[2] != TEXT("invoke") || Parts[3] != TEXT("v1")
-			|| !LexTryParseString(Ordinal, *Parts[0]) || FString::Printf(TEXT("%u"), Ordinal) != Parts[0] || !Hash(Parts[1], nullptr)
-			|| Context->ExportName != FString(ImportPrefix) + Parts[1] + TEXT("_frame_v1") || Names.Contains(Context->ExportName)
+		Context->Runtime = &Runtime; Context->RouteIndex = State.MethodContexts.Num();
+		TArray<FString> Parts;
+		const TCHAR* Prefix = Context->bDynamicDispatch ? DispatchPrefix : ImportPrefix;
+		Context->ImportName.Mid(FCString::Strlen(Prefix)).ParseIntoArray(Parts, TEXT("_"), false);
+		const int32 HashIndex = Context->bDynamicDispatch ? 0 : 1;
+		if (!Context->ImportName.StartsWith(Prefix) || Parts.Num() != HashIndex + 3
+			|| Parts[HashIndex + 1] != TEXT("invoke") || Parts[HashIndex + 2] != TEXT("v1") || !Hash(Parts[HashIndex], nullptr)
+			|| Context->ExportName != FString(Prefix) + Parts[HashIndex] + TEXT("_frame_v1") || Names.Contains(Context->ExportName)
 			|| !Layout.FunctionExports.ContainsByPredicate([&](const auto& Export) { return Export.Name == Context->ExportName; }))
 		{ OutError = TEXT("generated method route names do not bind a unique canonical export"); return false; }
-		const auto* Type = State.Registry->FindTypeByOrdinal(Ordinal);
-		if (!Type || !Type->Class) { OutError = TEXT("generated method route has no registry type"); return false; }
-		Names.Add(Context->ExportName); Context->ExpectedClass = Type->Class;
-		Context->Runtime = &Runtime; Context->RouteIndex = State.MethodContexts.Num();
+		if (Context->bDynamicDispatch)
+		{
+			const TArray<TSharedPtr<FJsonValue>>* Targets = nullptr;
+			if (!Item.TryGetArrayField(TEXT("dispatch_targets"), Targets) || Targets->IsEmpty() || Targets->Num() > 4096
+				|| (TotalTargets += Targets->Num()) > 65536)
+			{ OutError = TEXT("generated dispatch targets exceed their bounded nonempty contract"); return false; }
+			auto& Pending = PendingDispatch.Add(Context->RouteIndex);
+			for (const auto& Value : *Targets)
+			{
+				const TSharedPtr<FJsonObject>* Target = nullptr; uint32 Selector = 0; FString Name;
+				if (!Value || !Value->TryGetObject(Target) || !Target || !*Target || (*Target)->Values.Num() != 2
+					|| !UInt(**Target, TEXT("selector"), MAX_uint32, Selector)
+					|| (!Pending.IsEmpty() && Selector <= Pending.Last().Key)
+					|| !(*Target)->TryGetStringField(TEXT("export_name"), Name) || Name.IsEmpty())
+				{ OutError = TEXT("generated dispatch targets require ordered unique selectors and named exports"); return false; }
+				Pending.Emplace(Selector, MoveTemp(Name));
+			}
+		}
+		else
+		{
+			uint32 Ordinal = 0;
+			if (!LexTryParseString(Ordinal, *Parts[0]) || FString::Printf(TEXT("%u"), Ordinal) != Parts[0])
+			{ OutError = TEXT("generated method route has a noncanonical type ordinal"); return false; }
+			const auto* Type = State.Registry->FindTypeByOrdinal(Ordinal);
+			if (!Type || !Type->Class) { OutError = TEXT("generated method route has no registry type"); return false; }
+			Context->ExpectedClass = Type->Class;
+		}
+		Names.Add(Context->ExportName); Indices.Add(Context->ExportName, Context->RouteIndex);
 		FAvidScriptVmTypedHostImport Import;
 		Import.StableId = Context->ImportName; Import.ModuleName = Module; Import.ImportName = Context->ImportName;
 		Import.Signature = TEXT("(ii)i"); Import.Shape = EAvidScriptVmTypedHostShape::I32PairToI32;
@@ -127,6 +163,23 @@ bool ConfigureAvidScriptGeneratedMethodRoutes(FAvidScriptWasmRuntimeInstance& Ru
 		State.MethodContexts.Add(MoveTemp(Context)); State.HostImports.Add(MoveTemp(Import));
 	}
 	if (!Required.IsEmpty()) { OutError = TEXT("generated method imports are missing route metadata"); return false; }
+	for (const auto& Pending : PendingDispatch)
+	{
+		auto& Route = *State.MethodContexts[Pending.Key];
+		for (const auto& Entry : Pending.Value)
+		{
+			const uint32* Index = Indices.Find(Entry.Value);
+			const auto* Type = State.Registry->FindTypeByOrdinal(Entry.Key);
+			if (!Index || !Type || !Type->Class)
+			{ OutError = TEXT("generated dispatch target has no registered type or direct export"); return false; }
+			const auto& Target = *State.MethodContexts[*Index];
+			if (Target.bDynamicDispatch || !Target.ExpectedClass || !Type->Class->IsChildOf(Target.ExpectedClass)
+				|| Route.FrameBytes != Target.FrameBytes || Route.ParameterOffsets != Target.ParameterOffsets
+				|| Route.RootTokenOffsets != Target.RootTokenOffsets || FMemory::Memcmp(Route.Signature, Target.Signature, 32))
+			{ OutError = TEXT("generated dispatch target changes the receiver type or frame contract"); return false; }
+			Route.DispatchRoutes.Add(Entry.Key, *Index);
+		}
+	}
 	return true;
 }
 
@@ -179,9 +232,23 @@ bool FAvidScriptWasmRuntimeInstance::InvokeGeneratedMethodFrame(uint32 RouteInde
 	FAvidScriptObjectHandle Target{static_cast<uint32>(PackedSelf), static_cast<uint32>(PackedSelf >> 32)};
 	FAvidScriptObjectHandleResult Resolve;
 	UObject* Object = HostContext.ObjectRegistry->ResolveObject(Target, Resolve, false);
-	if (!Object || !Object->IsA(Route.ExpectedClass)) return Reject(TEXT("method receiver does not satisfy its registry type"));
+	if (!Object) return Reject(TEXT("method receiver is not a live registry object"));
+	const FAvidScriptGeneratedMethodHostContext* Selected = &Route;
+	if (Route.bDynamicDispatch)
+	{
+		const auto Authority = HostContext.GeneratedTypeAuthority.Pin();
+		uint32 Ordinal = 0; FAvidScriptVmError SelectionError;
+		if (!Authority || !Authority->ResolveInstanceTypeOrdinal(*this, Target, *GeneratedTypeHostBindings->Registry, Ordinal, SelectionError))
+			return Reject(TEXT("method dispatch target has no active registered script type"));
+		const uint32* Index = Route.DispatchRoutes.Find(Ordinal);
+		if (!Index || !GeneratedTypeHostBindings->MethodContexts.IsValidIndex(*Index))
+			return Reject(TEXT("method dispatch has no implementation for the registered script type"));
+		Selected = GeneratedTypeHostBindings->MethodContexts[*Index].Get();
+	}
+	if (!Selected->ExpectedClass || !Object->IsA(Selected->ExpectedClass) || !Selected->Call.IsValid())
+		return Reject(TEXT("selected method receiver or prepared code is invalid"));
 	FAvidScriptVmCallFrame Frame; Frame.CellCount = 2;
 	Frame.Cells[0] = static_cast<uint32>(FrameAddress); Frame.Cells[1] = Route.FrameBytes;
 	FAvidScriptVmError Error;
-	return InvokeGeneratedInstanceExport(Target, Route.Call, Frame, Error, nullptr, Roots);
+	return InvokeGeneratedInstanceExport(Target, Selected->Call, Frame, Error, nullptr, Roots);
 }

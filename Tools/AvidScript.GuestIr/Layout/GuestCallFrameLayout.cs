@@ -25,6 +25,7 @@ public sealed record GuestCallFrameLayout(
     public const string SectionName = "avidscript.call_frames";
     public const string HostSectionName = "avidscript.host_call_frames";
     public const int HostSectionVersion = 1;
+    public const int HostDispatchSectionVersion = 2;
 
     public static GuestCallFrameLayout Create(GuestFramedExport export, GuestFunction function,
         IReadOnlyDictionary<string, GuestType> types, IReadOnlyList<GuestFunctionReference> functionReferences)

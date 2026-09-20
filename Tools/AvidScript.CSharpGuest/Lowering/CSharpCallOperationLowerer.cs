@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using AvidScript.CSharpSemantic;
 using AvidScript.GuestIr;
 
@@ -15,8 +16,14 @@ internal static class CSharpCallOperationLowerer
     {
         if (operation.Dispatch?.Kind is "virtual" or "interface")
         {
-            context.Add("ASCG1024", "Virtual/interface dispatch requires a runtime method route; a fixed Guest body is not equivalent.");
-            return null;
+            if (!CSharpUeDispatch.TryRoute(context.Document, operation, out var route) || route.Targets.Count == 0
+                || route.Targets.Any(target => !CSharpUeReceivers.IsType(context.Document, target.Method.ContainingTypeId)))
+            {
+                context.Add("ASCG1024", "Virtual/interface dispatch requires registered UE implementations with synchronous Guest bodies.");
+                return null;
+            }
+            if (!TryLowerOperands(context, route.Callable, operation.Children, blockOrdinal, instructions, out var dynamicOperands)) return null;
+            return CSharpOperationLowerer.EmitCall(context, route.Callable, route.Id, dynamicOperands, blockOrdinal, instructions);
         }
         if (CSharpReferenceObjectCreation.IsRootInitializer(context, operation)) return null;
         if (CSharpManagedDelegateLowerer.TryLowerInvocation(context, operation, blockOrdinal, instructions, out GuestRegister? delegateResult))

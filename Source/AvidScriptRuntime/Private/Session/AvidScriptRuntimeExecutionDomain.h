@@ -20,6 +20,8 @@ public:
 	bool HasActiveCalls() const;
 	void Attach(FAvidScriptRuntimeSession& Session);
 	void Detach(FAvidScriptRuntimeSession& Session);
+	bool ResolveTypeOrdinal(const FAvidScriptRuntimeSession& Source, const FAvidScriptObjectHandle& Target,
+		uint32& OutOrdinal, FAvidScriptVmError& OutError) const;
 	bool Invoke(FAvidScriptRuntimeSession& Source, const FAvidScriptObjectHandle& Target,
 		const FAvidScriptContextualExportCall& Call, const FAvidScriptVmCallFrame& Frame,
 		FAvidScriptVmError& OutError, FAvidScriptVmCallResult* OutResult);
@@ -29,6 +31,8 @@ public:
 	const TSharedPtr<FAvidScriptWasmRuntimeInstance>& GetRuntime() const { return Runtime; }
 
 private:
+	FAvidScriptRuntimeSession* ResolveInvocationTarget(const FAvidScriptRuntimeSession& Source,
+		const FAvidScriptObjectHandle& Target, FAvidScriptVmError& OutError) const;
 	TSharedPtr<FAvidScriptWasmRuntimeInstance> Runtime;
 	TWeakObjectPtr<UWorld> World;
 	FAvidScriptObjectRegistry* Registry = nullptr;

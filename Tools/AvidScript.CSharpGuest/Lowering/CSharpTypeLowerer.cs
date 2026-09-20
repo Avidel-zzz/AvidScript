@@ -27,6 +27,7 @@ internal static class CSharpTypeLowerer
             StringComparer.Ordinal);
         HashSet<string> ueTypeIds = document.UeTypeDeclarations
             .Select(type => type.TypeId)
+            .Concat(document.UeMethodCatalog?.Interfaces.Select(contract => contract.TypeId) ?? Array.Empty<string>())
             .ToHashSet(StringComparer.Ordinal);
         List<GuestType> rawTypes = new()
         {
@@ -262,7 +263,7 @@ internal static class CSharpTypeLowerer
 
         if (ueTypeIds.Contains(type.Id))
         {
-            if (type.Kind != "class" || type.IsValueType)
+            if (type.Kind is not ("class" or "interface") || type.IsValueType)
             {
                 Add(diagnostics, "ASCG1003", $"Script UE type '{type.Id}' is not a reference class.");
                 return null;

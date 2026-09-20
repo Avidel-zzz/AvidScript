@@ -43,7 +43,10 @@ struct FAvidScriptGeneratedMethodHostContext
 	FString ExportName;
 	FString ImportName;
 	uint8 Signature[32] = {};
+	TArray<uint32> ParameterOffsets;
 	TArray<uint32> RootTokenOffsets;
+	bool bDynamicDispatch = false;
+	TMap<uint32, uint32> DispatchRoutes;
 	FAvidScriptContextualExportCall Call;
 };
 

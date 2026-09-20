@@ -25,7 +25,7 @@ internal static class WasmManagedHeapTests
         GuestModule[] invalid =
         {
             module with { SchemaVersion = 3, IrVersion = "1.2" },
-            module with { SchemaVersion = 10, IrVersion = "1.9" },
+            module with { SchemaVersion = GuestModuleValidator.CurrentSchemaVersion + 1, IrVersion = GuestModuleValidator.CurrentIrVersion },
             module with { Imports = Array.Empty<GuestImport>() },
             module with { Imports = new[] { module.Imports[0] with { ParameterTypeIds = new[] { I } } } },
             module with { Imports = new[] { module.Imports[0] with { Module = "env" } } },

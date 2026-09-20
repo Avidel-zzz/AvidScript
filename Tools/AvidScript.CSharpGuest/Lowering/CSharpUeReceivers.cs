@@ -12,6 +12,7 @@ internal static class CSharpUeReceivers
 {
     public static bool IsType(SemanticDocument document, string type) => document.SchemaVersion >= 25
         && document.UeTypeDeclarations.Any(item => item.TypeId == type);
+    public static bool IsView(SemanticDocument document, string type) => IsType(document, type) || CSharpUeDispatch.IsInterfaceView(document, type);
     public static string Import(string type) => "import:$ue:receiver:" + type;
 
     public static bool TryEquality(CSharpFunctionLoweringContext context, SemanticOperation operation, int block,
@@ -21,8 +22,8 @@ internal static class CSharpUeReceivers
         if (operation.OperatorKind is not ("equals" or "not_equals") || operation.SymbolId is not null
             || operation.IsLifted || operation.TypeId != "type:bool" || operation.Children.Count != 2) return false;
         SemanticOperation[] operands = operation.Children.Select(Unwrap).ToArray();
-        if (!operands.Any(item => item.TypeId is { } type && IsType(context.Document, type))
-            || operands.Any(item => item.Constant?.Kind != "null" && (item.TypeId is null || !IsType(context.Document, item.TypeId)))) return false;
+        if (!operands.Any(item => item.TypeId is { } type && IsView(context.Document, type))
+            || operands.Any(item => item.Constant?.Kind != "null" && (item.TypeId is null || !IsView(context.Document, item.TypeId)))) return false;
         List<string> values = new();
         foreach (SemanticOperation operand in operands)
         {

@@ -6,7 +6,7 @@
 #include "AvidScriptGeneratedTypeSessionTestTypes.generated.h"
 
 UCLASS()
-class UAvidScriptGeneratedTypeSessionTestObject final : public UObject
+class UAvidScriptGeneratedTypeSessionTestObject : public UObject
 {
 	GENERATED_BODY()
 
@@ -21,4 +21,16 @@ public:
 	{
 		return 0;
 	}
+};
+
+UCLASS()
+class UAvidScriptGeneratedTypeDerivedTestObject : public UAvidScriptGeneratedTypeSessionTestObject
+{
+	GENERATED_BODY()
+};
+
+UCLASS()
+class UAvidScriptGeneratedTypeNativeChildTestObject final : public UAvidScriptGeneratedTypeDerivedTestObject
+{
+	GENERATED_BODY()
 };

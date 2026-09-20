@@ -6,6 +6,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--ue-dispatch")
+            {
+                int focusedCount = CSharpGuestUeDispatchTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.UeDispatch: {focusedCount}/{focusedCount} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--ue-method-frames")
             {
                 int focusedCount = CSharpGuestUeMethodFrameTests.Run();
@@ -95,7 +101,7 @@ internal static class Program
                 + CSharpGuestLambdaTests.Run()
                 + CSharpGuestClosureContractTests.Run() + CSharpGuestClosureExecutionTests.Run()
                 + CSharpGuestClassContractTests.Run() + CSharpGuestDispatchContractTests.Run() + CSharpGuestUeReceiverTests.Run() + CSharpGuestMethodCatalogTests.Run()
-                + CSharpGuestUeMethodFrameTests.Run();
+                + CSharpGuestUeMethodFrameTests.Run() + CSharpGuestUeDispatchTests.Run();
             Console.WriteLine($"AvidScript.CSharpGuest.Tests: {count}/{count} passed");
             return 0;
         }

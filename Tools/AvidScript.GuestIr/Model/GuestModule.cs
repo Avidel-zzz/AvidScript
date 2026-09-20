@@ -36,11 +36,21 @@ public sealed record GuestFramedExport(
     [property: JsonPropertyOrder(2)] IReadOnlyList<string> ParameterKinds)
 {
     // Optional synchronous host route: (frame address, byte count) -> success (1).
-    // The original export remains the validated body and call-graph target.
+    // The original export remains the validated body. Host-selected routes also
+    // contribute every possible target to the cooperative cancellation graph.
     [JsonPropertyOrder(3)]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? HostImportId { get; init; }
+
+    [JsonPropertyOrder(4)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<GuestHostDispatchTarget>? HostDispatchTargets { get; init; }
 }
+
+// Selectors are opaque to generic IR; only the owning host interprets their meaning.
+public sealed record GuestHostDispatchTarget(
+    [property: JsonPropertyOrder(0), JsonRequired] uint Selector,
+    [property: JsonPropertyOrder(1), JsonRequired] string ExportName);
 
 // A nominal signature and its closed set of addressable Guest functions.
 // Imports require a Guest adapter, so host capabilities cannot become arbitrary table entries.

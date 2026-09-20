@@ -82,15 +82,13 @@ void FAvidScriptRuntimeExecutionDomain::Detach(FAvidScriptRuntimeSession& Sessio
 	if (Members.IsEmpty()) Runtime->Unload();
 }
 
-bool FAvidScriptRuntimeExecutionDomain::Invoke(FAvidScriptRuntimeSession& Source,
-	const FAvidScriptObjectHandle& TargetHandle, const FAvidScriptContextualExportCall& Call,
-	const FAvidScriptVmCallFrame& Frame, FAvidScriptVmError& OutError, FAvidScriptVmCallResult* OutResult)
+FAvidScriptRuntimeSession* FAvidScriptRuntimeExecutionDomain::ResolveInvocationTarget(
+	const FAvidScriptRuntimeSession& Source, const FAvidScriptObjectHandle& TargetHandle, FAvidScriptVmError& OutError) const
 {
 	OutError.Reset();
-	if (OutResult) *OutResult = {};
-	const auto Reject = [&](const TCHAR* Category, const TCHAR* Details)
+	const auto Reject = [&](const TCHAR* Category, const TCHAR* Details) -> FAvidScriptRuntimeSession*
 	{
-		OutError.Category = Category; OutError.Details = Details; return false;
+		OutError.Category = Category; OutError.Details = Details; return nullptr;
 	};
 	if (!IsInGameThread() || bFaulted || !HasActiveCalls() || Source.LiveDomain.Get() != this
 		|| MembersByHandle.FindRef(Source.HostContext.OwnerHandle.ToUInt64()) != &Source)
@@ -108,6 +106,25 @@ bool FAvidScriptRuntimeExecutionDomain::Invoke(FAvidScriptRuntimeSession& Source
 	};
 	if (!CanInvoke(Source) || !CanInvoke(*Target))
 		return Reject(TEXT("generated_invocation_state"), TEXT("source or target is mutating, suspended, retired or faulted"));
+	return Target;
+}
+
+bool FAvidScriptRuntimeExecutionDomain::ResolveTypeOrdinal(const FAvidScriptRuntimeSession& Source,
+	const FAvidScriptObjectHandle& TargetHandle, uint32& OutOrdinal, FAvidScriptVmError& OutError) const
+{
+	const auto* Target = ResolveInvocationTarget(Source, TargetHandle, OutError);
+	if (!Target) return false;
+	OutOrdinal = Target->GeneratedTypeInstance->TypeOrdinal;
+	return true;
+}
+
+bool FAvidScriptRuntimeExecutionDomain::Invoke(FAvidScriptRuntimeSession& Source,
+	const FAvidScriptObjectHandle& TargetHandle, const FAvidScriptContextualExportCall& Call,
+	const FAvidScriptVmCallFrame& Frame, FAvidScriptVmError& OutError, FAvidScriptVmCallResult* OutResult)
+{
+	if (OutResult) *OutResult = {};
+	FAvidScriptRuntimeSession* Target = ResolveInvocationTarget(Source, TargetHandle, OutError);
+	if (!Target) return false;
 	bool bCalled;
 	{
 		TGuardValue<int32> CallGuard(Target->ActiveGuestCallDepth, Target->ActiveGuestCallDepth + 1);

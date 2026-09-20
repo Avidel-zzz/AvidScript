@@ -200,7 +200,7 @@ internal sealed class WasmCooperativeSafepointPlan
                 .SelectMany(instruction => instruction.Op == "call_indirect"
                     ? module.FunctionReferences.Single(reference => reference.TypeId == instruction.TargetId).TargetFunctionIds
                     : instruction.Op == "call_framed"
-                        ? new[] { module.FramedExports.Single(export => export.Name == instruction.TargetId).FunctionId }
+                        ? FramedTargets(module, instruction.TargetId!)
                     : instruction.Op == "call" && instruction.TargetId is not null && functionIds.Contains(instruction.TargetId)
                         ? new[] { instruction.TargetId } : Array.Empty<string>())
                 .Distinct(StringComparer.Ordinal)
@@ -230,5 +230,16 @@ internal sealed class WasmCooperativeSafepointPlan
             }
         }
         return recursive;
+    }
+
+    private static IEnumerable<string> FramedTargets(GuestModule module, string exportName)
+    {
+        GuestFramedExport route = module.FramedExports.Single(export => export.Name == exportName);
+        // Include the validated body and all possible host-selected implementations.
+        // Omitting override targets would falsely attest recursion as cancellable.
+        yield return route.FunctionId;
+        if (route.HostDispatchTargets is not { } targets) yield break;
+        foreach (GuestHostDispatchTarget target in targets)
+            yield return module.FramedExports.Single(export => export.Name == target.ExportName).FunctionId;
     }
 }
