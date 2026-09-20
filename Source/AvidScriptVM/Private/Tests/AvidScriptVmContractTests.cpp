@@ -595,6 +595,18 @@ bool FAvidScriptVmEventSubscriptionImportContractTest::RunTest(
 	TestEqual(TEXT("Managed heap import name"), FString(UTF8_TO_TCHAR(ManagedHeap.ImportName)), FString(TEXT("avid_managed_heap_v1")));
 	TestFalse(TEXT("Managed heap rejects legacy env alias"), ManagedHeap.bSupportsEnvCompatibility
 		|| IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("avid_managed_heap_v1")));
+	const auto& ManagedStore = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::ContinuationManagedStateStoreV1);
+	const auto& ManagedRead = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::ContinuationManagedStateReadV1);
+	TestEqual(TEXT("Managed continuation store appends without renumbering"), static_cast<uint16>(ManagedStore.BindingId),
+		static_cast<uint16>(ManagedHeap.BindingId) + 1);
+	TestEqual(TEXT("Managed continuation read appends without renumbering"), static_cast<uint16>(ManagedRead.BindingId),
+		static_cast<uint16>(ManagedStore.BindingId) + 1);
+	TestEqual(TEXT("Managed store uses concrete type and opaque object"), FString(UTF8_TO_TCHAR(ManagedStore.Signature)), FString(TEXT("(IiI)i")));
+	TestEqual(TEXT("Managed read returns rooted object"), FString(UTF8_TO_TCHAR(ManagedRead.Signature)), FString(TEXT("(Ii)I")));
+	TestFalse(TEXT("Managed continuation imports have no env alias"), ManagedStore.bSupportsEnvCompatibility
+		|| ManagedRead.bSupportsEnvCompatibility
+		|| IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("avid_continuation_state_store_v1"))
+		|| IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("avid_continuation_state_read_v1")));
 	TestEqual(
 		TEXT("Event subscribe uses the generated facade import name"),
 		FString(UTF8_TO_TCHAR(Subscribe.ImportName)),

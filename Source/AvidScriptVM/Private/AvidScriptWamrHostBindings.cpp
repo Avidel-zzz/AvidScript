@@ -988,6 +988,27 @@ int32_t ManagedHeapV1(wasm_exec_env_t ExecEnv, int32_t InputAddress, int32_t Inp
 	return Dispatch(ExecEnv, ImportName, Call, Result) ? Result.ReturnValue : 0;
 }
 
+int32_t ContinuationManagedStateStoreV1(wasm_exec_env_t ExecEnv, int64_t Token, int32_t Type, int64_t Object)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::ContinuationManagedStateStoreV1;
+	Call.Int64Args[0] = Token;
+	Call.IntArgs[0] = Type;
+	Call.Int64Args[1] = Object;
+	FAvidScriptHostCallResult Result;
+	return Dispatch(ExecEnv, StaticImportName(Call.BindingId), Call, Result) ? Result.ReturnValue : 0;
+}
+
+int64_t ContinuationManagedStateReadV1(wasm_exec_env_t ExecEnv, int64_t Token, int32_t Type)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::ContinuationManagedStateReadV1;
+	Call.Int64Args[0] = Token;
+	Call.IntArgs[0] = Type;
+	FAvidScriptHostCallResult Result;
+	return Dispatch(ExecEnv, StaticImportName(Call.BindingId), Call, Result) ? Result.ReturnValueI64 : 0;
+}
+
 int32_t ContinuationStateStore(
 	wasm_exec_env_t ExecEnv,
 	int64_t ContinuationToken,
@@ -1308,6 +1329,8 @@ void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 	case EAvidScriptHostBindingId::EventIsCurrentSource: return reinterpret_cast<void*>(EventIsCurrentSource);
 	case EAvidScriptHostBindingId::CooperativeSafepointPoll: return reinterpret_cast<void*>(CooperativeSafepointPoll);
 	case EAvidScriptHostBindingId::ManagedHeapV1: return reinterpret_cast<void*>(ManagedHeapV1);
+	case EAvidScriptHostBindingId::ContinuationManagedStateStoreV1: return reinterpret_cast<void*>(ContinuationManagedStateStoreV1);
+	case EAvidScriptHostBindingId::ContinuationManagedStateReadV1: return reinterpret_cast<void*>(ContinuationManagedStateReadV1);
 	case EAvidScriptHostBindingId::DelegateOutputWrite: return reinterpret_cast<void*>(DelegateOutputWrite);
 	case EAvidScriptHostBindingId::DataLaneGetEpoch: return reinterpret_cast<void*>(DataLaneGetEpoch);
 	case EAvidScriptHostBindingId::DataLaneSubmit: return reinterpret_cast<void*>(DataLaneSubmit);

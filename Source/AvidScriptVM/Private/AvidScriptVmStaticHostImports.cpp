@@ -1,5 +1,6 @@
 #include "AvidScriptVmStaticHostImports.h"
 #include "AvidScriptManagedHeapAbi.h"
+#include "AvidScriptContinuationStateAbi.h"
 
 namespace
 {
@@ -65,11 +66,13 @@ const FAvidScriptVmStaticHostImport GStaticHostImports[] = {
 	{ EAvidScriptHostBindingId::DebugFrameRead, "avid_debug_frame_read", "(Iii)i", false },
 	{ EAvidScriptHostBindingId::EventIsCurrentSource, "event_is_current_source", "(ii)i", true },
 	{ EAvidScriptHostBindingId::CooperativeSafepointPoll, "avid_cooperative_safepoint_poll", "()", false },
-	{ EAvidScriptHostBindingId::ManagedHeapV1, "avid_managed_heap_v1", "(iiii)i", false }
+	{ EAvidScriptHostBindingId::ManagedHeapV1, "avid_managed_heap_v1", "(iiii)i", false },
+	{ EAvidScriptHostBindingId::ContinuationManagedStateStoreV1, AvidScript::ContinuationState::Abi::StoreImport, "(IiI)i", false },
+	{ EAvidScriptHostBindingId::ContinuationManagedStateReadV1, AvidScript::ContinuationState::Abi::ReadImport, "(Ii)I", false }
 };
 
 static_assert(
-	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::ManagedHeapV1),
+	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::ContinuationManagedStateReadV1),
 	"Static host catalog must remain dense and ordered by binding id.");
 
 bool FailStaticCall(FString& OutFailureDetails, const TCHAR* Details)
@@ -234,6 +237,15 @@ bool InvokeAvidScriptVmStaticHostImport(
 	FAvidScriptHostCallResult HostResult;
 	switch (Import.BindingId)
 	{
+	case EAvidScriptHostBindingId::ContinuationManagedStateStoreV1:
+		Call.Int64Args[0] = Arguments[0].I64;
+		Call.IntArgs[0] = Arguments[1].I32;
+		Call.Int64Args[1] = Arguments[2].I64;
+		break;
+	case EAvidScriptHostBindingId::ContinuationManagedStateReadV1:
+		Call.Int64Args[0] = Arguments[0].I64;
+		Call.IntArgs[0] = Arguments[1].I32;
+		break;
 	case EAvidScriptHostBindingId::ManagedHeapV1:
 	{
 		const uint32 Input = static_cast<uint32>(Arguments[0].I32);

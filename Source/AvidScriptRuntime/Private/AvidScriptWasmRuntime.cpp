@@ -8136,6 +8136,13 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 
 	switch (Call.BindingId)
 	{
+	case EAvidScriptHostBindingId::ContinuationManagedStateStoreV1:
+	case EAvidScriptHostBindingId::ContinuationManagedStateReadV1:
+	{
+		const bool bSucceeded = DispatchContinuationManagedStateCall(Call, OutResult);
+		ProfileScope.SetSucceeded(bSucceeded);
+		return bSucceeded;
+	}
 	case EAvidScriptHostBindingId::ManagedHeapV1:
 	{
 		const bool bSucceeded = DispatchManagedHeapCall(Call, OutResult);
