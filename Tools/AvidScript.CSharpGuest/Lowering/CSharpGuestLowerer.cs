@@ -62,9 +62,7 @@ public static class CSharpGuestLowerer
         CSharpReferenceObjects.AddGuards(document, functions);
         CSharpUeReceivers.AddGuards(document, functions);
         functions.AddRange(CSharpUeDelegateBinding.Build(document));
-        functions.AddRange(CSharpClosureDelegateLowerer.BuildThunks(document, functions));
         functions.AddRange(CSharpDelegateComposition.Build(document));
-        functions.AddRange(CSharpDelegateIdentityLowerer.Build(document, functions));
         if (CSharpClosureLayout.UsesManagedDelegates(document))
             imports = imports.Append(new GuestImport(CSharpClosureLayout.HeapImport, GuestManagedHeap.ImportModule, GuestManagedHeap.ImportName,
                 Enumerable.Repeat(CSharpGuestIds.AddressTypeId, 4).ToArray(), CSharpGuestIds.AddressTypeId)).ToArray();
@@ -74,6 +72,8 @@ public static class CSharpGuestLowerer
             dataPool,
             diagnostics);
         functions.AddRange(asyncMethods.Functions);
+        functions.AddRange(CSharpClosureDelegateLowerer.BuildThunks(document, functions));
+        functions.AddRange(CSharpDelegateIdentityLowerer.Build(document, functions));
         imports = CSharpAsyncManagedState.AppendImports(imports, functions);
         imports = CSharpUeReceivers.AppendImports(document, imports, functions);
         if (functions.SelectMany(function => function.Blocks).SelectMany(block => block.Instructions)
@@ -269,10 +269,13 @@ public static class CSharpGuestLowerer
             Add(diagnostics, "ASCG1001", "Semantic artifact is failed, unsupported, or has invalid provenance.");
         }
 
-        if (document.ClosureEnvironments.Any(environment => environment.Allocation is null
+        if (document.ClosureEnvironments.Any(environment => (environment.Allocation is null
+                && !document.AsyncMethods.Any(method => method.MethodSymbolId == environment.OwnerMethodSymbolId
+                    && method.Lowering == SemanticAsyncMethod.ContinuationCfgLowering
+                    && method.LexicalScopes.Any(scope => scope.Id == environment.Id)))
             || environment.Cells.Any(cell => cell.Kind == "receiver" && !CSharpReferenceObjects.Types(document).Contains(cell.TypeId)
                 && !CSharpUeReceivers.IsType(document, cell.TypeId))))
-            Add(diagnostics, "ASCG1024", "Closure execution requires synchronous allocation metadata and supported source reference or UE receivers; persistent async roots are not yet connected.");
+            Add(diagnostics, "ASCG1024", "Closure execution requires validated synchronous or resumable scope allocation metadata and supported source reference or UE receivers.");
 
         if (document.ControlFlowGraphs
             .GroupBy(graph => graph.MethodSymbolId, StringComparer.Ordinal)
@@ -617,15 +620,11 @@ public static class CSharpGuestLowerer
 		if (import.Module == "env"
 			&& import.Name is "continuation_state_store" or "continuation_state_read")
 		{
-			return document.AsyncMethods
-				.SelectMany(method => method.Segments)
-				.Any(segment => segment.AwaitSite?.StateFrame is not null);
+			return CSharpAsyncClosureState.Frames(document).Any();
 		}
 		if (import.Module == "env" && import.Name == "continuation_cancel")
 		{
-			return document.AsyncMethods
-				.SelectMany(method => method.Segments)
-				.Any(segment => segment.AwaitSite?.StateFrame is not null);
+			return CSharpAsyncClosureState.Frames(document).Any();
 		}
 		string producerIdentity = $"binding_latent|{import.Module}|{import.Name}";
 		return document.AsyncMethods

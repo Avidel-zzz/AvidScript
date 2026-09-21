@@ -1583,7 +1583,7 @@ internal static class CSharpGuestContinuationTests
                     "generated://AvidScript.Continuations.generated.cs",
                     true),
             });
-        Assert(document.Succeeded, "continuation source should produce a valid semantic artifact");
+        Assert(document.Succeeded, sourceId + ": " + string.Join(" | ", document.Diagnostics.Select(diagnostic => diagnostic.Message)));
         return document;
     }
 

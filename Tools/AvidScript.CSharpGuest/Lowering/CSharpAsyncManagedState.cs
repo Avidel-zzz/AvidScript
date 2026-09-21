@@ -17,8 +17,7 @@ internal static class CSharpAsyncManagedState
         // Leave malformed duplicate identities to the canonical layout validator.
         var indexed = types.GroupBy(type => type.Id, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
-        foreach (SemanticAsyncStateFrame frame in document.AsyncMethods.SelectMany(method => method.Segments)
-                     .Select(segment => segment.AwaitSite?.StateFrame).OfType<SemanticAsyncStateFrame>())
+        foreach (SemanticAsyncStateFrame frame in CSharpAsyncClosureState.Frames(document))
             if (GuestManagedHeap.ContainsReferences(indexed, frame.TypeId))
                 types.Add(new(Reference(frame.TypeId), "managed_ref", "i64", Array.Empty<GuestField>(), frame.TypeId, null, 8, 8));
     }
@@ -54,7 +53,9 @@ internal static class CSharpAsyncManagedState
             GuestRegister? value = context.CreateTemporary(slot.TypeId, block);
             if (value is null) return false;
             restored.Add(new("managed_get", value.Id, new[] { state.Id }, payload.Fields[index].Id, null, null));
-            if (!CSharpOperationLowerer.StoreLocal(context, slot.SymbolId, value, block, restored)) return false;
+            if (context.ClosureCells.Environment(slot.SymbolId) is { } environment)
+                restored.Add(new("local_store", null, new[] { value.Id }, environment.Id, null, null));
+            else if (!CSharpOperationLowerer.StoreLocal(context, slot.SymbolId, value, block, restored)) return false;
         }
         restore = restored;
         return true;
@@ -72,7 +73,9 @@ internal static class CSharpAsyncManagedState
         for (int index = 0; index < frame.Slots.Count; ++index)
         {
             SemanticAsyncStateSlot slot = frame.Slots[index];
-            if (!context.TryGetStorage(slot.SymbolId, out GuestRegister storage) || storage.TypeId != slot.TypeId)
+            GuestRegister? storage = context.ClosureCells.Environment(slot.SymbolId);
+            if (storage is null && context.TryGetStorage(slot.SymbolId, out GuestRegister local)) storage = local;
+            if (storage is null || storage.TypeId != slot.TypeId)
             { context.Add("ASCG1020", $"Managed async slot '{slot.SymbolId}' has no live storage."); return false; }
             GuestRegister? value = context.CreateTemporary(slot.TypeId, block);
             if (value is null) return false;

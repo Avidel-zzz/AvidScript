@@ -66,9 +66,7 @@ internal static class CSharpAsyncLowerer
             .SelectMany(method => method.Segments)
             .Any(segment => segment.AwaitSite?.PayloadKind
                 == SemanticContinuationCallback.ResultSlotPayloadKind);
-        bool needsStateImports = document.AsyncMethods
-            .SelectMany(method => method.Segments)
-            .Any(segment => segment.AwaitSite?.StateFrame is not null);
+        bool needsStateImports = CSharpAsyncClosureState.Frames(document).Any();
         if ((needsDelayImport && delayImportId is null)
             || (needsObjectLoadImport && objectLoadImportId is null)
             || (needsBindCancellationImport && bindCancellationImportId is null)

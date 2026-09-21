@@ -73,16 +73,12 @@ internal static class CSharpTypeLowerer
                 4));
         }
 
-        foreach (SemanticAsyncStateFrame frame in document.AsyncMethods
-            .SelectMany(method => method.Segments)
-            .Select(segment => segment.AwaitSite?.StateFrame)
-            .Where(frame => frame is not null)
-            .Cast<SemanticAsyncStateFrame>()
+        foreach (SemanticAsyncStateFrame frame in CSharpAsyncClosureState.Frames(document)
             .OrderBy(frame => frame.TypeId, StringComparer.Ordinal))
         {
             if (rawTypes.Any(type => type.Id == frame.TypeId)
                 || frame.Slots.Count == 0
-                || frame.Slots.Any(slot => !semanticTypes.ContainsKey(slot.TypeId))
+                || frame.Slots.Any(slot => !semanticTypes.ContainsKey(slot.TypeId) && !CSharpAsyncClosureState.IsEnvironment(document, slot))
                 || frame.Slots.Select(slot => slot.SymbolId).Distinct(StringComparer.Ordinal).Count()
                     != frame.Slots.Count)
             {
@@ -129,11 +125,7 @@ internal static class CSharpTypeLowerer
         IReadOnlyDictionary<string, GuestType> laidOutTypes = layout.Types.ToDictionary(
             type => type.Id,
             StringComparer.Ordinal);
-        foreach (SemanticAsyncStateFrame frame in document.AsyncMethods
-            .SelectMany(method => method.Segments)
-            .Select(segment => segment.AwaitSite?.StateFrame)
-            .Where(frame => frame is not null)
-            .Cast<SemanticAsyncStateFrame>())
+        foreach (SemanticAsyncStateFrame frame in CSharpAsyncClosureState.Frames(document))
         {
             if (!laidOutTypes.TryGetValue(frame.TypeId, out GuestType? frameType)
                 || frameType.Size <= 0

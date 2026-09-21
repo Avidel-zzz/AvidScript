@@ -60,6 +60,87 @@ internal static class CSharpGuestManagedAsyncTests
                 if (counter == null) Result = 9;
                 else Result = 0;
                 """),
+            ("owned-shared", """
+                int value = 5;
+                Func<int> increment = () => ++value;
+                Func<int> read = () => value;
+                await AvidContinuations.DelayAsync(0.01f);
+                value += 10;
+                increment();
+                await AvidContinuations.NextTickAsync();
+                Result = read() * 100 + value;
+                """),
+            ("owned-direct", """
+                int value = 1;
+                void Add() { value += 3; }
+                Func<int> read = () => value;
+                await AvidContinuations.DelayAsync(0.01f);
+                Add();
+                await AvidContinuations.NextTickAsync();
+                value += 2;
+                Result = read();
+                """),
+            ("owned-loop", """
+                Func<int> first = null;
+                Func<int> second = null;
+                for (int i = 0; i < 3; ++i) {
+                    int copy = i;
+                    Func<int> read = () => i * 10 + copy;
+                    if (i == 0) first = read;
+                    if (i == 1) second = read;
+                    await AvidContinuations.DelayAsync(0.01f);
+                    copy += 100;
+                }
+                await AvidContinuations.NextTickAsync();
+                Result = first() * 1000 + second();
+                """),
+            ("owned-ref", """
+                Counter counter = new Counter(2);
+                Func<int> read = () => counter.Value;
+                await AvidContinuations.DelayAsync(0.01f);
+                Replace(ref counter);
+                await AvidContinuations.NextTickAsync();
+                Result = read();
+                """),
+            ("owned-scope", """
+                Func<int> read = null;
+                await AvidContinuations.DelayAsync(0.01f);
+                {
+                    int value = 7;
+                    read = () => ++value;
+                    await AvidContinuations.NextTickAsync();
+                    value += 3;
+                }
+                await AvidContinuations.NextTickAsync();
+                Result = read();
+                """),
+            ("owned-no-live", """
+                int value = 1;
+                Func<int> read = () => value;
+                await AvidContinuations.DelayAsync(0.01f);
+                value = 7;
+                Result = value;
+                """),
+            ("owned-cycle", """
+                int value = 1;
+                Func<int> recurse = null;
+                recurse = () => { if (value < 3) { value++; return recurse(); } return value; };
+                await AvidContinuations.DelayAsync(0.01f);
+                Result = recurse();
+                """),
+            ("owned-before-declaration", """
+                await AvidContinuations.DelayAsync(0.01f);
+                int value = 7;
+                Func<int> increment = () => ++value;
+                await AvidContinuations.NextTickAsync();
+                Result = increment();
+                """),
+            ("owned-result", """
+                AvidLoadedObject loaded = await AvidAssets.LoadObjectAsync("/Engine/EngineMeshes/Cube.Cube").WithCancellation(Cancellation.Token);
+                Func<int> read = () => { if (loaded.Slot > 0 && loaded.Generation > 0) return 1; return 0; };
+                await AvidContinuations.NextTickAsync();
+                Result = read();
+                """),
         })
         {
             string source = Source.Replace("// BODY", body, StringComparison.Ordinal)
@@ -67,8 +148,8 @@ internal static class CSharpGuestManagedAsyncTests
                 .Replace("NextTickAsync()", "NextTickAsync().WithCancellation(Cancellation.Token)", StringComparison.Ordinal);
             SemanticDocument document = CSharpGuestContinuationTests.Analyze(source, $"Scripts/ManagedAsync_{name}.cs");
             CSharpGuestLoweringResult lowered = CSharpGuestLowerer.Lower(document, new string('d', 64));
-            Check(lowered.Succeeded, string.Join(" | ", lowered.Diagnostics.Select(item => item.Message)));
-            Check(CSharpGuestLowerer.Lower(document with { SchemaVersion = 26, SemanticVersion = "1.30" }, new string('d', 64)).Succeeded,
+            Check(lowered.Succeeded, name + ": " + string.Join(" | ", lowered.Diagnostics.Select(item => item.Message)));
+            if (!name.StartsWith("owned-", StringComparison.Ordinal)) Check(CSharpGuestLowerer.Lower(document with { SchemaVersion = 26, SemanticVersion = "1.30" }, new string('d', 64)).Succeeded,
                 "Semantic 26/1.30 managed async state remains executable");
             GuestModule module = lowered.Module!;
             Check(module.Functions.SelectMany(fn => fn.Blocks).SelectMany(block => block.Instructions)
@@ -99,9 +180,9 @@ internal static class CSharpGuestManagedAsyncTests
             Result = increment();
             """, StringComparison.Ordinal);
         SemanticDocument localCapture = CSharpGuestContinuationTests.Analyze(localCaptureSource, "Scripts/AsyncOwnedCaptureBoundary.cs");
-        CSharpGuestLoweringResult captureRejected = CSharpGuestLowerer.Lower(localCapture, new string('d', 64));
-        Check(!captureRejected.Succeeded && captureRejected.Diagnostics.Any(item => item.Code == "ASCG1024"),
-            "async-owned closure environments require their own allocation and restore plan");
+        CSharpGuestLoweringResult captured = CSharpGuestLowerer.Lower(localCapture, new string('d', 64));
+        Check(captured.Succeeded && WasmModuleCompiler.Compile(captured.Module!).Succeeded,
+            "async-owned closure environments execute through validated scope and rooted state plans");
         SemanticDocument malformedScope = localCapture with { AsyncMethods = localCapture.AsyncMethods.Select(method =>
             method with { LexicalScopes = Array.Empty<SemanticAsyncLexicalScope>() }).ToArray() };
         CSharpGuestLoweringResult malformedRejected = CSharpGuestLowerer.Lower(malformedScope, new string('d', 64));

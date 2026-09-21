@@ -43,6 +43,10 @@ internal static class CSharpReferenceObjects
             used.Add(callable.ReturnTypeId);
             foreach (SemanticCallableParameter parameter in callable.Parameters) used.Add(parameter.TypeId);
         }
+        // Value and closure layouts are emitted even for unused helper bodies.
+        // Their reference fields still need a concrete type in the layout table.
+        foreach (SemanticType type in document.Types.Where(type => type.Kind == "struct")) used.Add(type.Id);
+        foreach (SemanticClosureCell cell in document.ClosureEnvironments.SelectMany(environment => environment.Cells)) used.Add(cell.TypeId);
         // Discover reference fields inside used value types as well as recursive object graphs.
         var owners = document.Symbols.Where(symbol => symbol.Kind == "type" && symbol.TypeId is not null)
             .ToDictionary(symbol => symbol.Id, symbol => symbol.TypeId!, StringComparer.Ordinal);

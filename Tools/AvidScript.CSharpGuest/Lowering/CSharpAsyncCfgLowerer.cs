@@ -110,6 +110,7 @@ internal static class CSharpAsyncCfgLowerer
         GuestRegister? resultStatus = null;
         GuestRegister? resultSlot = null;
         GuestRegister? resultGeneration = null;
+        GuestRegister? outcome = null;
         SemanticAsyncAwaitSite? incoming = entry.Incoming;
         if (incoming is not null)
         {
@@ -155,7 +156,7 @@ internal static class CSharpAsyncCfgLowerer
         if (incoming?.ResultSymbolId is not null
             && incoming.PayloadKind == SemanticContinuationCallback.ObjectPayloadKind
             && (loadedObject is null
-                || !context.TryBindStorage(incoming.ResultSymbolId, loadedObject)))
+                || (!context.ClosureCells.Has(incoming.ResultSymbolId) && !context.TryBindStorage(incoming.ResultSymbolId, loadedObject))))
         {
             Add(diagnostics, method, $"Async object result '{incoming.ResultSymbolId}' has no compatible resume storage.");
             return false;
@@ -166,7 +167,7 @@ internal static class CSharpAsyncCfgLowerer
         string activePrefixBlockId = functionEntryBlockId;
         List<GuestInstruction> prefixInstructions = new();
         List<GuestBasicBlock> blocks = new();
-        if (incoming?.StateFrame is { } incomingFrame)
+        if (incoming is not null && CSharpAsyncClosureState.Frame(document, method, incoming) is { } incomingFrame)
         {
             if (!CSharpAsyncLowerer.EmitIncomingState(
                 context,
@@ -212,13 +213,13 @@ internal static class CSharpAsyncCfgLowerer
                 abi.Int32Type,
                 prefixInstructions,
                 out GuestRegister? resultReadAccepted,
-                out GuestRegister? outcome))
+                out outcome))
             {
                 return false;
             }
             if (incoming.ResultSymbolId is not null
                 && (outcome is null
-                    || !context.TryBindStorage(incoming.ResultSymbolId, outcome)))
+                    || (!context.ClosureCells.Has(incoming.ResultSymbolId) && !context.TryBindStorage(incoming.ResultSymbolId, outcome))))
             {
                 Add(diagnostics, method, $"Async outcome result '{incoming.ResultSymbolId}' has no compatible resume storage.");
                 return false;
@@ -240,6 +241,13 @@ internal static class CSharpAsyncCfgLowerer
                 new GuestTerminator("trap", null, null, null, null)));
             activePrefixBlockId = acceptedBlockId;
             prefixInstructions = new List<GuestInstruction>();
+        }
+        int? incomingSegment = incoming is null ? null : method.Segments.Single(segment => segment.AwaitSite?.CallbackId == incoming.CallbackId).Ordinal;
+        CSharpAsyncClosureAllocations.Transition(context, method, incomingSegment, entry.SegmentOrdinal, prefixInstructions);
+        if (incoming?.ResultSymbolId is { } resultSymbol && context.ClosureCells.Has(resultSymbol))
+        {
+            GuestRegister? value = loadedObject ?? outcome;
+            if (value is null || !CSharpOperationLowerer.StoreLocal(context, resultSymbol, value, entry.SegmentOrdinal, prefixInstructions)) return false;
         }
         blocks.Add(new GuestBasicBlock(
             activePrefixBlockId,
@@ -266,7 +274,8 @@ internal static class CSharpAsyncCfgLowerer
             Add(diagnostics, method, $"Continuation entry '{entry.FunctionId}' generated duplicate basic-block identities.");
             return false;
         }
-        if (!context.ShortCircuitFlow.Rewrite(context, blocks))
+        if (!context.ShortCircuitFlow.Rewrite(context, blocks)
+            || !CSharpAsyncClosureAllocations.InsertEdges(context, method, blocks))
         {
             return false;
         }
@@ -472,7 +481,7 @@ internal static class CSharpAsyncCfgLowerer
             "await");
 
         GuestRegister? stateStoreAccepted = null;
-        if (awaitSite.StateFrame is { } outgoingFrame
+        if (CSharpAsyncClosureState.Frame(context.Document, method, awaitSite) is { } outgoingFrame
             && !CSharpAsyncLowerer.EmitOutgoingState(
                 context,
                 outgoingFrame,

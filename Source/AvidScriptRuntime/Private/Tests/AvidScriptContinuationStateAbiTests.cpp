@@ -3,6 +3,8 @@
 #include "AvidScriptContinuationStateAbi.h"
 #include "AvidScriptManagedHeapAbi.h"
 #include "Continuation/AvidScriptSessionContinuations.h"
+#include "Continuation/AvidScriptAsyncObjectLoader.h"
+#include "Ownership/AvidScriptSessionObjectOwnership.h"
 #include "Memory/AvidScriptManagedHeap.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -14,6 +16,22 @@
 
 namespace AvidScriptContinuationStateAbiTests
 {
+// Controlled producer for captured await-result semantics. The normal endpoint,
+// object registry, state ownership and Guest resume path remain in use.
+class FCompletedObjectLoad final : public IAvidScriptAsyncObjectLoadHandle
+{
+public:
+	void Cancel() override {}
+};
+class FImmediateObjectLoader final : public IAvidScriptAsyncObjectLoader
+{
+public:
+	TSharedPtr<IAvidScriptAsyncObjectLoadHandle> RequestAsyncLoad(const FSoftObjectPath&, FCompletion&& Completion) override
+	{
+		Completion(UObject::StaticClass());
+		return MakeShared<FCompletedObjectLoad>();
+	}
+};
 enum class EFault { None, StoreType, StoreNull, StoreForeign, StoreStale, ReadType, ReadToken, ReadTwice, ReadOutside, DuplicateStore, NoHeapImport };
 void U32(TArray<uint8>& Out, uint32 Value)
 {
@@ -305,12 +323,16 @@ bool FAvidScriptCSharpManagedAsyncTest::RunTest(const FString& Parameters)
 	GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
 	World->InitializeActorsForPlay(FURL());
 	ON_SCOPE_EXIT { GEngine->DestroyWorldContext(World); World->DestroyWorld(false); };
-	struct FCase { const TCHAR* Name; int32 Expected; int32 Resumes; };
+	struct FCase { const TCHAR* Name; int32 Expected; int32 Resumes; uint32 WaitingRoots = 1; };
 	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
 	for (const FCase Case : {FCase{TEXT("aliases"), 12007, 2}, FCase{TEXT("loop"), 6, 3}, FCase{TEXT("delegate"), 21, 2},
-		FCase{TEXT("aggregate"), 17, 2}, FCase{TEXT("null"), 9, 1}})
-	for (int32 Scenario = 0; Scenario < 3; ++Scenario)
+		FCase{TEXT("aggregate"), 17, 2}, FCase{TEXT("null"), 9, 1}, FCase{TEXT("owned-shared"), 1616, 2},
+		FCase{TEXT("owned-direct"), 6, 2}, FCase{TEXT("owned-loop"), 130131, 4}, FCase{TEXT("owned-ref"), 20, 2},
+		FCase{TEXT("owned-scope"), 11, 3, 0}, FCase{TEXT("owned-no-live"), 7, 1},
+		FCase{TEXT("owned-cycle"), 3, 1}, FCase{TEXT("owned-before-declaration"), 8, 2}, FCase{TEXT("owned-result"), 1, 2}})
+	for (int32 Scenario = 0; Scenario < 5; ++Scenario)
 	{
+		if (Scenario >= 3 && Case.Resumes < 2) continue;
 		const FString Stem = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("AvidScriptManagedHeapTests/GuestFixtures"),
 			FString::Printf(TEXT("csharp-managed-async-%s"), Case.Name));
 		TArray<uint8> Bytes; FString OffsetText; int32 ResultOffset = -1;
@@ -327,14 +349,16 @@ bool FAvidScriptCSharpManagedAsyncTest::RunTest(const FString& Parameters)
 		if (!TestTrue(TEXT("CSharp manifest continuation v2 contract is validated"),
 			Runtime.ValidateRequiredExports({TEXT("avid_on_continuation_v2")}, Result)))
 		{ AddError(Result.ErrorMessage); return false; }
-		const auto Owner = MakeShared<FAvidScriptSessionContinuations>();
-		auto& Endpoint = Owner->ResetActive(World);
+		FAvidScriptObjectRegistry Registry;
+		FAvidScriptSessionObjectOwnership Ownership;
+		const auto Owner = MakeShared<FAvidScriptSessionContinuations>(MakeShared<AvidScriptContinuationStateAbiTests::FImmediateObjectLoader>());
+		auto& Endpoint = Owner->ResetActive(World, &Registry, &Ownership);
 		FAvidScriptWasmHostContext Context; Context.Continuations = &Endpoint; Runtime.SetHostContext(Context);
 		if (!TestTrue(TEXT("CSharp async begins and suspends"), Runtime.BeginPlay(Result)))
 		{ AddError(Result.ErrorMessage); return false; }
 		auto& Heap = *Runtime.GetManagedHeapForTesting();
 		TestTrue(TEXT("Collect all unrooted objects while CSharp is suspended"), Heap.Collect() == EHeapError::Ok);
-		TestEqual(TEXT("CSharp state kept by exactly one continuation root"), Heap.GetStats().LiveRoots, uint32(1));
+		TestEqual(TEXT("CSharp state has the expected continuation ownership"), Heap.GetStats().LiveRoots, Case.WaitingRoots);
 		TestEqual(TEXT("CSharp suspension holds no Guest frame"), Heap.GetStats().ActiveFrames, uint32(0));
 		if (Scenario == 1)
 		{
@@ -343,6 +367,7 @@ bool FAvidScriptCSharpManagedAsyncTest::RunTest(const FString& Parameters)
 		}
 		if (Scenario == 2) Owner->Teardown();
 		int32 Resumed = 0;
+		bool InterruptedAfterResume = false;
 		for (int32 Round = 0; Round < 8; ++Round)
 		{
 			World->Tick(LEVELTICK_All, 0.02f); ++GFrameCounter;
@@ -350,14 +375,21 @@ bool FAvidScriptCSharpManagedAsyncTest::RunTest(const FString& Parameters)
 			for (const auto& Completion : Ready)
 			{
 				if (!TestTrue(TEXT("Actual CSharp resume executes"), Runtime.DispatchContinuation(Completion, Result)))
-				{ AddError(Result.ErrorMessage); return false; }
+				{ AddError(FString::Printf(TEXT("%s: %s"), Case.Name, *Result.ErrorMessage)); return false; }
 				TestTrue(TEXT("CSharp continuation finalizes"), Owner->FinalizeDispatched(Completion.Token, true));
 				++Resumed;
+			}
+			if (Scenario >= 3 && Resumed == 1 && !InterruptedAfterResume)
+			{
+				if (Scenario == 3) TestTrue(TEXT("Cancel CSharp after its first resume"), Runtime.EndPlay(Result));
+				else Owner->Teardown();
+				TestEqual(TEXT("Cancellation releases the resumed state owner"), Heap.GetStats().LiveRoots, uint32(0));
+				InterruptedAfterResume = true;
 			}
 			TestTrue(TEXT("Collect between CSharp resume segments"), Heap.Collect() == EHeapError::Ok);
 			TestEqual(TEXT("No retained CSharp execution frame"), Heap.GetStats().ActiveFrames, uint32(0));
 		}
-		TestEqual(TEXT("Cancellation prevents all late CSharp callbacks"), Resumed, Scenario == 0 ? Case.Resumes : 0);
+		TestEqual(TEXT("Cancellation prevents all late CSharp callbacks"), Resumed, Scenario == 0 ? Case.Resumes : Scenario >= 3 ? 1 : 0);
 		uint8 ResultBytes[4] = {}; FString Error; int32 Value = 0;
 		TestTrue(TEXT("Read actual CSharp result"), Runtime.ReadStateBytes(ResultOffset, MakeArrayView(ResultBytes), Error));
 		FMemory::Memcpy(&Value, ResultBytes, 4);

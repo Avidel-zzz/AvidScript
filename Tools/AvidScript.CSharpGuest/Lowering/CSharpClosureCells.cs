@@ -116,17 +116,23 @@ internal sealed class CSharpClosureCells
             blocks.Add(new(bridge, instructions, new("branch", null, target, null, null)));
         }
         return true;
+    }
 
-        void Allocate(SemanticClosureEnvironment environment, List<GuestInstruction> instructions)
-        {
-            GuestRegister allocated = context.CreateTemporary(CSharpClosureLayout.Reference(environment.Id), -1)!;
-            instructions.Add(new("managed_new", allocated.Id, Array.Empty<string>(), null, null, null));
-            instructions.Add(new("local_store", null, new[] { allocated.Id }, environments[environment.Id].Id, null, null));
-            foreach (SemanticClosureCell cell in environment.Cells.Where(cell => cell.Kind == "parameter"))
-                if (context.TryGetStorage(cell.SymbolId, out GuestRegister parameter))
-                    instructions.Add(new("managed_set", null, new[] { allocated.Id, parameter.Id }, cell.SymbolId, null, null));
-            foreach (SemanticClosureCell cell in environment.Cells.Where(cell => cell.Kind == "receiver"))
-                instructions.Add(new("managed_set", null, new[] { allocated.Id, context.ThisRegister!.Id }, cell.SymbolId, null, null));
-        }
+    public void Allocate(SemanticClosureEnvironment environment, List<GuestInstruction> instructions)
+    {
+        GuestRegister allocated = context.CreateTemporary(CSharpClosureLayout.Reference(environment.Id), -1)!;
+        instructions.Add(new("managed_new", allocated.Id, Array.Empty<string>(), null, null, null));
+        instructions.Add(new("local_store", null, new[] { allocated.Id }, environments[environment.Id].Id, null, null));
+        foreach (SemanticClosureCell cell in environment.Cells.Where(cell => cell.Kind == "parameter"))
+            if (context.TryGetStorage(cell.SymbolId, out GuestRegister parameter))
+                instructions.Add(new("managed_set", null, new[] { allocated.Id, parameter.Id }, cell.SymbolId, null, null));
+        foreach (SemanticClosureCell cell in environment.Cells.Where(cell => cell.Kind == "receiver"))
+            instructions.Add(new("managed_set", null, new[] { allocated.Id, context.ThisRegister!.Id }, cell.SymbolId, null, null));
+    }
+    public void Clear(SemanticClosureEnvironment environment, List<GuestInstruction> instructions)
+    {
+        GuestRegister empty = context.CreateTemporary(CSharpClosureLayout.Reference(environment.Id), -1)!;
+        instructions.Add(new("constant", empty.Id, Array.Empty<string>(), null, null, new("null", null)));
+        instructions.Add(new("local_store", null, new[] { empty.Id }, environments[environment.Id].Id, null, null));
     }
 }
