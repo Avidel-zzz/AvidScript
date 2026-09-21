@@ -1,6 +1,7 @@
 #include "AvidScriptVmStaticHostImports.h"
 #include "AvidScriptManagedHeapAbi.h"
 #include "AvidScriptContinuationStateAbi.h"
+#include "AvidScriptEventStateAbi.h"
 
 namespace
 {
@@ -66,13 +67,15 @@ const FAvidScriptVmStaticHostImport GStaticHostImports[] = {
 	{ EAvidScriptHostBindingId::DebugFrameRead, "avid_debug_frame_read", "(Iii)i", false },
 	{ EAvidScriptHostBindingId::EventIsCurrentSource, "event_is_current_source", "(ii)i", true },
 	{ EAvidScriptHostBindingId::CooperativeSafepointPoll, "avid_cooperative_safepoint_poll", "()", false },
-	{ EAvidScriptHostBindingId::ManagedHeapV1, "avid_managed_heap_v1", "(iiii)i", false },
-	{ EAvidScriptHostBindingId::ContinuationManagedStateStoreV1, AvidScript::ContinuationState::Abi::StoreImport, "(IiI)i", false },
-	{ EAvidScriptHostBindingId::ContinuationManagedStateReadV1, AvidScript::ContinuationState::Abi::ReadImport, "(Ii)I", false }
+	{ EAvidScriptHostBindingId::ManagedHeapV1, "avid_managed_heap_v1", "(iiii)i", false, true },
+	{ EAvidScriptHostBindingId::ContinuationManagedStateStoreV1, AvidScript::ContinuationState::Abi::StoreImport, "(IiI)i", false, true },
+	{ EAvidScriptHostBindingId::ContinuationManagedStateReadV1, AvidScript::ContinuationState::Abi::ReadImport, "(Ii)I", false, true },
+	{ EAvidScriptHostBindingId::EventManagedStateSubscribeV1, AvidScript::EventState::Abi::SubscribeImport, "(iiiiI)I", false, true },
+	{ EAvidScriptHostBindingId::EventManagedStateReadV1, AvidScript::EventState::Abi::ReadImport, "(i)I", false, true }
 };
 
 static_assert(
-	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::ContinuationManagedStateReadV1),
+	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::EventManagedStateReadV1),
 	"Static host catalog must remain dense and ordered by binding id.");
 
 bool FailStaticCall(FString& OutFailureDetails, const TCHAR* Details)
@@ -203,6 +206,16 @@ TConstArrayView<FAvidScriptVmStaticHostImport> GetAvidScriptVmStaticHostImports(
 	return MakeArrayView(GStaticHostImports);
 }
 
+bool RequiresAvidScriptVmManagedInvocation(const FString& ModuleName, const FString& ImportName)
+{
+	for (const auto& Import : GStaticHostImports)
+	{
+		if (Import.bRequiresManagedInvocation && ImportName == UTF8_TO_TCHAR(Import.ImportName)
+			&& (ModuleName == TEXT("avidscript") || (Import.bSupportsEnvCompatibility && ModuleName == TEXT("env")))) return true;
+	}
+	return false;
+}
+
 const FAvidScriptVmStaticHostImport& GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId BindingId)
 {
 	check(BindingId != EAvidScriptHostBindingId::Invalid);
@@ -237,6 +250,13 @@ bool InvokeAvidScriptVmStaticHostImport(
 	FAvidScriptHostCallResult HostResult;
 	switch (Import.BindingId)
 	{
+	case EAvidScriptHostBindingId::EventManagedStateSubscribeV1:
+		for (int32 I = 0; I < 4; ++I) Call.IntArgs[I] = Arguments[I].I32;
+		Call.Int64Args[0] = Arguments[4].I64;
+		break;
+	case EAvidScriptHostBindingId::EventManagedStateReadV1:
+		Call.IntArgs[0] = Arguments[0].I32;
+		break;
 	case EAvidScriptHostBindingId::ContinuationManagedStateStoreV1:
 		Call.Int64Args[0] = Arguments[0].I64;
 		Call.IntArgs[0] = Arguments[1].I32;

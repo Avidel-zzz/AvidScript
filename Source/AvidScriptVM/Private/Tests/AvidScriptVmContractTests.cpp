@@ -597,6 +597,24 @@ bool FAvidScriptVmEventSubscriptionImportContractTest::RunTest(
 		|| IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("avid_managed_heap_v1")));
 	const auto& ManagedStore = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::ContinuationManagedStateStoreV1);
 	const auto& ManagedRead = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::ContinuationManagedStateReadV1);
+	const auto& EventStore = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::EventManagedStateSubscribeV1);
+	const auto& EventRead = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::EventManagedStateReadV1);
+	for (const auto* Import : {&ManagedHeap, &ManagedStore, &ManagedRead, &EventStore, &EventRead})
+	{
+		TestTrue(TEXT("Every heap-bearing import requires an invocation scope"), Import->bRequiresManagedInvocation
+			&& RequiresAvidScriptVmManagedInvocation(TEXT("avidscript"), UTF8_TO_TCHAR(Import->ImportName)));
+	}
+	TestFalse(TEXT("Ordinary subscriptions do not add heap scope overhead"), RequiresAvidScriptVmManagedInvocation(TEXT("avidscript"), TEXT("event_subscribe")));
+	TestEqual(TEXT("Event state appends without renumbering"), static_cast<uint16>(EventStore.BindingId), static_cast<uint16>(ManagedRead.BindingId) + 1);
+	TestEqual(TEXT("Event state read follows subscribe"), static_cast<uint16>(EventRead.BindingId), static_cast<uint16>(EventStore.BindingId) + 1);
+	TestEqual(TEXT("Event state publication signature"), FString(UTF8_TO_TCHAR(EventStore.Signature)), FString(TEXT("(iiiiI)I")));
+	TestEqual(TEXT("Event state read signature"), FString(UTF8_TO_TCHAR(EventRead.Signature)), FString(TEXT("(i)I")));
+	TestTrue(TEXT("Event state imports exist in avidscript only"),
+		IsAvidScriptVmStaticHostImport(TEXT("avidscript"), TEXT("avid_event_state_subscribe_v1"))
+		&& IsAvidScriptVmStaticHostImport(TEXT("avidscript"), TEXT("avid_event_state_read_v1"))
+		&& !IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("avid_event_state_subscribe_v1"))
+		&& !IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("avid_event_state_read_v1"))
+		&& !EventStore.bSupportsEnvCompatibility && !EventRead.bSupportsEnvCompatibility);
 	TestEqual(TEXT("Managed continuation store appends without renumbering"), static_cast<uint16>(ManagedStore.BindingId),
 		static_cast<uint16>(ManagedHeap.BindingId) + 1);
 	TestEqual(TEXT("Managed continuation read appends without renumbering"), static_cast<uint16>(ManagedRead.BindingId),

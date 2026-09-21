@@ -38,9 +38,9 @@ public:
 	// Native-only state from a validated layout. Failure preserves Lease.
 	int64 SubscribeManaged(UObject& Source, uint32 EventOrdinal,
 		const FAvidScriptWasmRuntimeInstance& Runtime, TConstArrayView<uint8> StateBytes,
-		TUniquePtr<IAvidScriptManagedStateLease>&& Lease, FString& OutError);
+		TUniquePtr<IAvidScriptManagedStateLease>&& Lease, FString& OutError) override;
 	bool ReadCurrentManagedState(const FAvidScriptWasmRuntimeInstance& Runtime,
-		TArrayView<uint8> OutStateBytes);
+		TArrayView<uint8> OutStateBytes) override;
 
 	virtual void HandleAvidScriptDelegateBroadcast(
 		uint64 SubscriptionToken,

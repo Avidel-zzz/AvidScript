@@ -37,6 +37,16 @@ public:
 		FString& OutError) = 0;
 	virtual bool Unsubscribe(int64 SubscriptionToken, FString& OutError) = 0;
 	virtual bool IsCurrentSource(const UObject& Source) const { return false; }
+	// Native validated storage. Rejection must preserve the caller's lease.
+	virtual int64 SubscribeManaged(UObject& Source, uint32 EventOrdinal,
+		const FAvidScriptWasmRuntimeInstance& Runtime, TConstArrayView<uint8> StateBytes,
+		TUniquePtr<IAvidScriptManagedStateLease>&& Lease, FString& OutError)
+	{
+		OutError = TEXT("delegate_managed_state_unsupported");
+		return 0;
+	}
+	virtual bool ReadCurrentManagedState(const FAvidScriptWasmRuntimeInstance& Runtime,
+		TArrayView<uint8> OutStateBytes) { return false; }
 };
 
 struct FAvidScriptWasmRuntimeMetrics
@@ -659,6 +669,9 @@ public:
 
 private:
 	enum class EInstanceLifecycleOperation : uint8 { Begin, Tick, End };
+	bool DispatchEventManagedStateCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
+	int64 HandleEventSubscribeInternal(int32 Slot, int32 Generation, int32 EventOrdinal,
+		TConstArrayView<uint8> StateBytes, TUniquePtr<IAvidScriptManagedStateLease>* Lease);
 	friend class FAvidScriptManagedContinuationStateLease;
 	bool BeginPlayInternal(FAvidScriptWasmSmokeResult& OutResult);
 	bool TickInternal(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult, EAvidScriptWasmResultDetail ResultDetail);
@@ -969,6 +982,7 @@ private:
 	TUniquePtr<AvidScript::Managed::FHeap> ManagedHeap;
 	uint32 ManagedHeapFrameFloor = 0;
 	uint32 ManagedHeapInvocationDepth = 0;
+	uint32 ManagedEventInvocationDepth = 0;
 	const FAvidScriptManagedRootTransfer* ActiveRootTransfer = nullptr;
 	FAvidScriptVmBackendSelection BackendSelection;
 	FAvidScriptVmBackendInfo ActiveBackendInfo;

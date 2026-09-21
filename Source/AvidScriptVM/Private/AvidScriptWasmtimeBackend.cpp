@@ -670,9 +670,7 @@ public:
 		HostDispatcher = Config.HostDispatcher;
 		const bool bUsesManagedHeap = ModuleLayout.FunctionImports.ContainsByPredicate([](const auto& Import)
 		{
-			return Import.ModuleName == TEXT("avidscript") && (Import.ImportName == TEXT("avid_managed_heap_v1")
-				|| Import.ImportName == TEXT("avid_continuation_state_store_v1")
-				|| Import.ImportName == TEXT("avid_continuation_state_read_v1"));
+			return RequiresAvidScriptVmManagedInvocation(Import.ModuleName, Import.ImportName);
 		});
 		InvocationObserver = bUsesManagedHeap ? Config.InvocationObserver : nullptr;
 		if (bUsesManagedHeap && !InvocationObserver)

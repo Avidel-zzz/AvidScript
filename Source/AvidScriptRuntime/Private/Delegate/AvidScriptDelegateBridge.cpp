@@ -172,7 +172,9 @@ bool PrepareAvidScriptDelegateBridgeFunction(
 		BridgeClass,
 		FunctionName,
 		RF_Public | RF_Transient,
-		UFunction::StaticClass());
+		// Sparse delegate signatures carry additional reflected fields. Narrowing
+		// their class to UFunction violates UObject duplication's layout contract.
+		SignatureFunction.GetClass());
 	UFunction* const Function = Cast<UFunction>(Duplicate);
 	if (Function == nullptr)
 	{

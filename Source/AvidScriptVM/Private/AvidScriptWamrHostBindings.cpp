@@ -1009,6 +1009,29 @@ int64_t ContinuationManagedStateReadV1(wasm_exec_env_t ExecEnv, int64_t Token, i
 	return Dispatch(ExecEnv, StaticImportName(Call.BindingId), Call, Result) ? Result.ReturnValueI64 : 0;
 }
 
+int64_t EventManagedStateSubscribeV1(wasm_exec_env_t ExecEnv,
+	int32_t Slot, int32_t Generation, int32_t Ordinal, int32_t Type, int64_t Object)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::EventManagedStateSubscribeV1;
+	Call.IntArgs[0] = Slot;
+	Call.IntArgs[1] = Generation;
+	Call.IntArgs[2] = Ordinal;
+	Call.IntArgs[3] = Type;
+	Call.Int64Args[0] = Object;
+	FAvidScriptHostCallResult Result;
+	return Dispatch(ExecEnv, StaticImportName(Call.BindingId), Call, Result) ? Result.ReturnValueI64 : 0;
+}
+
+int64_t EventManagedStateReadV1(wasm_exec_env_t ExecEnv, int32_t Type)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::EventManagedStateReadV1;
+	Call.IntArgs[0] = Type;
+	FAvidScriptHostCallResult Result;
+	return Dispatch(ExecEnv, StaticImportName(Call.BindingId), Call, Result) ? Result.ReturnValueI64 : 0;
+}
+
 int32_t ContinuationStateStore(
 	wasm_exec_env_t ExecEnv,
 	int64_t ContinuationToken,
@@ -1331,6 +1354,8 @@ void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 	case EAvidScriptHostBindingId::ManagedHeapV1: return reinterpret_cast<void*>(ManagedHeapV1);
 	case EAvidScriptHostBindingId::ContinuationManagedStateStoreV1: return reinterpret_cast<void*>(ContinuationManagedStateStoreV1);
 	case EAvidScriptHostBindingId::ContinuationManagedStateReadV1: return reinterpret_cast<void*>(ContinuationManagedStateReadV1);
+	case EAvidScriptHostBindingId::EventManagedStateSubscribeV1: return reinterpret_cast<void*>(EventManagedStateSubscribeV1);
+	case EAvidScriptHostBindingId::EventManagedStateReadV1: return reinterpret_cast<void*>(EventManagedStateReadV1);
 	case EAvidScriptHostBindingId::DelegateOutputWrite: return reinterpret_cast<void*>(DelegateOutputWrite);
 	case EAvidScriptHostBindingId::DataLaneGetEpoch: return reinterpret_cast<void*>(DataLaneGetEpoch);
 	case EAvidScriptHostBindingId::DataLaneSubmit: return reinterpret_cast<void*>(DataLaneSubmit);

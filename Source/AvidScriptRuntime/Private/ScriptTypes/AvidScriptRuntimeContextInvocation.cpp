@@ -197,6 +197,7 @@ bool FAvidScriptWasmRuntimeInstance::InvokeContextOperation(
 	TGuardValue<FAvidScriptPreparedDelegateOutputTransaction*> OutputGuard(ActiveDelegateOutputTransaction, nullptr);
 	TGuardValue<uint32> OutputTokenGuard(ActiveDelegateOutputToken, 0);
 	TGuardValue<bool> ContinuationGuard(bContinuationDispatchActive, false);
+	TGuardValue<uint32> EventStateGuard(ManagedEventInvocationDepth, 0);
 	TGuardValue<bool> ResultGuard(bContinuationResultConsumed, false);
 	TGuardValue<bool> StateGuard(bContinuationStateConsumed, false);
 	TGuardValue<int64> TokenGuard(ActiveContinuationToken, 0);

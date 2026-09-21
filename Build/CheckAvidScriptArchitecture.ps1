@@ -2796,7 +2796,7 @@ $CompatibilityStaticImportNames = @(
 $StaticHostCatalogRecords = @(
     [regex]::Matches(
         $StaticHostCatalogSource,
-        '\{\s*EAvidScriptHostBindingId::(?<binding>[A-Za-z0-9_]+)\s*,\s*"(?<name>[a-z0-9_]+)"\s*,\s*"(?<signature>[^"]+)"\s*,\s*(?<compatibility>true|false)\s*\}')
+        '\{\s*EAvidScriptHostBindingId::(?<binding>[A-Za-z0-9_]+)\s*,\s*"(?<name>[a-z0-9_]+)"\s*,\s*"(?<signature>[^"]+)"\s*,\s*(?<compatibility>true|false)(?:\s*,\s*(?<managedInvocation>true|false))?\s*\}')
 )
 $CatalogStaticImportNames = @(
     $StaticHostCatalogRecords | ForEach-Object { $_.Groups['name'].Value })

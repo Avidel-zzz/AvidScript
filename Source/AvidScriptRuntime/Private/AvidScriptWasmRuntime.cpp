@@ -2340,6 +2340,8 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEventInternal(
 	BindingInvocationContext.ScopedObjectCapabilities = BorrowedHandles;
 	BeginTypedCallbackEpoch();
 	FAvidScriptVmError EventError;
+	// The state belongs to this exact Guest entry, not nested exports invoked by it.
+	TGuardValue<uint32> StateDepthGuard(ManagedEventInvocationDepth, ManagedHeapInvocationDepth + 1);
 	bool bCalled = ScopedCall != nullptr
 		? ScopedCall->Call(Frame, EventError)
 		: InvokeVmExport(VmBackend.Get(), DelegateEventExports.FindOrAdd(Event.StableId),
@@ -5037,6 +5039,13 @@ int64 FAvidScriptWasmRuntimeInstance::HandleEventSubscribeImport(
 	const int32 Generation,
 	const int32 EventOrdinal)
 {
+	return HandleEventSubscribeInternal(Slot, Generation, EventOrdinal, {}, nullptr);
+}
+
+int64 FAvidScriptWasmRuntimeInstance::HandleEventSubscribeInternal(
+	const int32 Slot, const int32 Generation, const int32 EventOrdinal,
+	TConstArrayView<uint8> StateBytes, TUniquePtr<IAvidScriptManagedStateLease>* Lease)
+{
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
 	GetInstanceState().LastHostImportInput = EventOrdinal;
 	GetInstanceState().LastHostImportResult = 0;
@@ -5102,10 +5111,10 @@ int64 FAvidScriptWasmRuntimeInstance::HandleEventSubscribeImport(
 	}
 
 	FString SubscribeError;
-	const int64 SubscriptionToken = HostContext.EventSubscriptions->Subscribe(
-		*Source,
-		static_cast<uint32>(EventOrdinal),
-		SubscribeError);
+	const int64 SubscriptionToken = Lease
+		? HostContext.EventSubscriptions->SubscribeManaged(*Source,
+			static_cast<uint32>(EventOrdinal), *this, StateBytes, MoveTemp(*Lease), SubscribeError)
+		: HostContext.EventSubscriptions->Subscribe(*Source, static_cast<uint32>(EventOrdinal), SubscribeError);
 	if (SubscriptionToken <= 0)
 	{
 		return Fail(
@@ -8140,6 +8149,13 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 	case EAvidScriptHostBindingId::ContinuationManagedStateReadV1:
 	{
 		const bool bSucceeded = DispatchContinuationManagedStateCall(Call, OutResult);
+		ProfileScope.SetSucceeded(bSucceeded);
+		return bSucceeded;
+	}
+	case EAvidScriptHostBindingId::EventManagedStateSubscribeV1:
+	case EAvidScriptHostBindingId::EventManagedStateReadV1:
+	{
+		const bool bSucceeded = DispatchEventManagedStateCall(Call, OutResult);
 		ProfileScope.SetSucceeded(bSucceeded);
 		return bSucceeded;
 	}

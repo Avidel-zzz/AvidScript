@@ -8,6 +8,7 @@ struct FAvidScriptVmStaticHostImport
 	const ANSICHAR* ImportName = nullptr;
 	const ANSICHAR* Signature = nullptr;
 	bool bSupportsEnvCompatibility = true;
+	bool bRequiresManagedInvocation = false;
 };
 
 struct FAvidScriptVmStaticValue
@@ -30,6 +31,7 @@ struct FAvidScriptVmStaticCallResult
 
 TConstArrayView<FAvidScriptVmStaticHostImport> GetAvidScriptVmStaticHostImports();
 const FAvidScriptVmStaticHostImport& GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId BindingId);
+bool RequiresAvidScriptVmManagedInvocation(const FString& ModuleName, const FString& ImportName);
 
 bool InvokeAvidScriptVmStaticHostImport(
 	const FAvidScriptVmStaticHostImport& Import,
