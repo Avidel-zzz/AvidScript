@@ -149,6 +149,8 @@ internal static class CSharpGuestManagedAsyncTests
             SemanticDocument document = CSharpGuestContinuationTests.Analyze(source, $"Scripts/ManagedAsync_{name}.cs");
             CSharpGuestLoweringResult lowered = CSharpGuestLowerer.Lower(document, new string('d', 64));
             Check(lowered.Succeeded, name + ": " + string.Join(" | ", lowered.Diagnostics.Select(item => item.Message)));
+            Check(CSharpGuestLowerer.Lower(document with { SchemaVersion = 27, SemanticVersion = "1.31" }, new string('d', 64)).Succeeded,
+                "Semantic 27/1.31 managed async and owned closures remain executable");
             if (!name.StartsWith("owned-", StringComparison.Ordinal)) Check(CSharpGuestLowerer.Lower(document with { SchemaVersion = 26, SemanticVersion = "1.30" }, new string('d', 64)).Succeeded,
                 "Semantic 26/1.30 managed async state remains executable");
             GuestModule module = lowered.Module!;
@@ -192,7 +194,34 @@ internal static class CSharpGuestManagedAsyncTests
             malformedScope with { SchemaVersion = 26, SemanticVersion = "1.30" }, new string('d', 64));
         Check(!legacyCapture.Succeeded && legacyCapture.Diagnostics.Any(item => item.Code == "ASCG1024"),
             "legacy async capture analysis stays readable but must not execute without ownership");
-        return count + 3;
+        SemanticDocument invocation = CSharpGuestContinuationTests.Analyze("""
+            using AvidScript;
+            public class Worker {
+                public int Value;
+                public async void Run(int amount) {
+                    await AvidContinuations.NextTickAsync();
+                    Value += amount;
+                }
+            }
+            public static class Script {
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static void Begin() { new Worker().Run(3); }
+            }
+            """, "Scripts/AsyncInvocationBoundary.cs");
+        CSharpGuestLoweringResult pendingInvocation = CSharpGuestLowerer.Lower(invocation, new string('d', 64));
+        Check(!pendingInvocation.Succeeded && pendingInvocation.Diagnostics.Any(item => item.Code == "ASCG1024")
+            && pendingInvocation.Diagnostics.All(item => item.Code != "ASCG1001"), "valid invocation contract reaches explicit execution boundary");
+        SemanticAsyncMethod invocationMethod = invocation.AsyncMethods.Single();
+        CSharpGuestLoweringResult missingInputs = CSharpGuestLowerer.Lower(invocation with { AsyncMethods = new[] {
+            invocationMethod with { InvocationInputs = Array.Empty<SemanticAsyncStateSlot>() } } }, new string('d', 64));
+        Check(!missingInputs.Succeeded && missingInputs.Diagnostics.Any(item => item.Code == "ASCG1001"), "missing receiver state is an invalid artifact");
+        CSharpGuestLoweringResult missingFrame = CSharpGuestLowerer.Lower(invocation with { AsyncMethods = new[] {
+            invocationMethod with { Segments = invocationMethod.Segments.Select(segment => segment.AwaitSite is null ? segment : segment with {
+                AwaitSite = segment.AwaitSite with { StateFrame = null } }).ToArray() } } }, new string('d', 64));
+        Check(!missingFrame.Succeeded && missingFrame.Diagnostics.Any(item => item.Code == "ASCG1001"), "missing persistent invocation frame is an invalid artifact");
+        CSharpGuestLoweringResult downgraded = CSharpGuestLowerer.Lower(invocation with { SchemaVersion = 27, SemanticVersion = "1.31" }, new string('d', 64));
+        Check(!downgraded.Succeeded && downgraded.Diagnostics.Any(item => item.Code == "ASCG1001"), "old contract cannot authorize callable async state");
+        return count + 7;
     }
 
     private const string Source = """

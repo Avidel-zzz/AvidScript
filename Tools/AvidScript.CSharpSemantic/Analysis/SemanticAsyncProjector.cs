@@ -145,11 +145,11 @@ internal static class SemanticAsyncProjector
             context.PrimaryUnit.SourceText,
             declaration.Identifier.Span);
         bool valid = callablesById.TryGetValue(methodSymbolId, out SemanticCallable? callable)
-            && callable.Export is not null
-            && method.DeclaredAccessibility == Accessibility.Public
-            && method.IsStatic
+            && (callable.Export is null || method.DeclaredAccessibility == Accessibility.Public
+                && method.IsStatic && method.Parameters.Length == 0)
             && method.ReturnsVoid
-            && method.Parameters.Length == 0
+            && method.Parameters.All(parameter => parameter.RefKind == RefKind.None)
+            && method.ContainingType.TypeKind == TypeKind.Class
             && !method.IsGenericMethod
             && !method.ContainingType.IsGenericType
             && !method.IsAbstract
@@ -160,7 +160,7 @@ internal static class SemanticAsyncProjector
         {
             diagnostics.Add(Error(
                 "ASCS5401",
-                $"Async method '{method.Name}' must be a zero-parameter public static non-generic block-bodied async void export.",
+                $"Async method '{method.Name}' requires a non-generic block-bodied async void class method with value parameters; exports must remain public, static and parameterless.",
                 identifierSpan));
             return false;
         }
@@ -180,9 +180,19 @@ internal static class SemanticAsyncProjector
             return false;
         }
 
+        SemanticAsyncStateSlot[] invocationInputs = callable!.Parameters
+            .Select(parameter => new SemanticAsyncStateSlot(parameter.SymbolId, parameter.TypeId))
+            .Concat(method.IsStatic ? Array.Empty<SemanticAsyncStateSlot>() : new[] {
+                new SemanticAsyncStateSlot(SemanticAsyncMethod.ReceiverSymbol(methodSymbolId), callable.ContainingTypeId) })
+            .OrderBy(slot => slot.SymbolId, StringComparer.Ordinal).ToArray();
+        if (invocationInputs.Length > MaximumStateSlotsPerAwait)
+        {
+            diagnostics.Add(Error("ASCS5414", $"Async invocation exceeds the {MaximumStateSlotsPerAwait}-input limit, including its receiver.", identifierSpan));
+            return false;
+        }
         bool hasLexicalFunctions = declaration.Body.DescendantNodes().Any(node =>
             node is AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax);
-        bool requiresControlFlowCfg = hasLexicalFunctions || awaits.Any(awaitExpression =>
+        bool requiresControlFlowCfg = callable.Export is null || hasLexicalFunctions || awaits.Any(awaitExpression =>
                 !IsDirectMethodBodyAwait(declaration.Body, awaitExpression))
             || declaration.Body.DescendantNodes().OfType<SwitchStatementSyntax>().Any();
         if (requiresControlFlowCfg)
@@ -200,20 +210,22 @@ internal static class SemanticAsyncProjector
                     flowProjection!.Segments,
                     diagnostics,
                     isControlFlow: true,
-                    out IReadOnlyList<SemanticAsyncSegment> framedSegments))
+                    out IReadOnlyList<SemanticAsyncSegment> framedSegments,
+                    invocationInputs))
             {
                 return false;
             }
 
             projected = new SemanticAsyncMethod(
                 methodSymbolId,
-                callable!.Export!.Name,
+                callable.Export?.Name,
                 SemanticAsyncMethod.ContinuationCfgLowering,
                 framedSegments,
                 declarationSpan,
                 flowProjection.EntrySegmentOrdinal)
             {
                 CompilerLocals = flowProjection.CompilerLocals,
+                InvocationInputs = invocationInputs,
                 LexicalScopes = hasLexicalFunctions ? flowProjection.LexicalScopes : Array.Empty<SemanticAsyncLexicalScope>(),
             };
             return true;
@@ -959,7 +971,8 @@ internal static class SemanticAsyncProjector
         IReadOnlyList<SemanticAsyncSegment> segments,
         ICollection<SemanticDiagnostic> diagnostics,
         bool isControlFlow,
-        out IReadOnlyList<SemanticAsyncSegment> projectedSegments)
+        out IReadOnlyList<SemanticAsyncSegment> projectedSegments,
+        IReadOnlyList<SemanticAsyncStateSlot>? invocationInputs = null)
     {
         projectedSegments = segments;
         SemanticAsyncStateFlowAnalysis analysis = isControlFlow
@@ -986,6 +999,7 @@ internal static class SemanticAsyncProjector
             IReadOnlyList<SemanticAsyncStateSlot> slots =
                 analysis.SlotsByAwaitSegment.GetValueOrDefault(segment.Ordinal)
                 ?? Array.Empty<SemanticAsyncStateSlot>();
+            slots = SemanticAsyncInvocationValidator.MergeStateSlots(slots, invocationInputs ?? Array.Empty<SemanticAsyncStateSlot>());
             if (slots.Count > MaximumStateSlotsPerAwait)
             {
                 diagnostics.Add(Error(

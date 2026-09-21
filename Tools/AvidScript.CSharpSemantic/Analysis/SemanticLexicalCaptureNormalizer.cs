@@ -180,7 +180,7 @@ internal static class SemanticLexicalCaptureNormalizer
                 },
             }).ToArray();
             SemanticAsyncProjector.TryAttachStateFrames(segments, diagnostics,
-                method.Lowering == SemanticAsyncMethod.ContinuationCfgLowering, out var framed);
+                method.Lowering == SemanticAsyncMethod.ContinuationCfgLowering, out var framed, method.InvocationInputs);
             return method with { Segments = framed };
         }).ToArray();
         return new(resultSymbols.OrderBy(symbol => symbol.Id, StringComparer.Ordinal).ToArray(),

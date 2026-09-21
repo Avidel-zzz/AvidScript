@@ -134,7 +134,7 @@ internal static class SemanticAsyncScopeTests
         Check(!SemanticClosureContractValidator.IsValid(document with { SchemaVersion = 26, SemanticVersion = "1.30" }), "new scope metadata cannot enter legacy version");
         Check(SemanticClosureContractValidator.IsValid(With(method with { LexicalScopes = Array.Empty<SemanticAsyncLexicalScope>() })
             with { SchemaVersion = 26, SemanticVersion = "1.30" }), "legacy async capture analysis remains readable without allocation support");
-        Check(!SemanticClosureContractValidator.IsValid(document with { SchemaVersion = 28, SemanticVersion = "1.32" }), "future scope contract rejected");
+        Check(!SemanticClosureContractValidator.IsValid(document with { SchemaVersion = SemanticContract.CurrentSchemaVersion + 1 }), "future scope contract rejected");
         return count;
 
         SemanticDocument With(SemanticAsyncMethod replacement) => document with { AsyncMethods = new[] { replacement } };

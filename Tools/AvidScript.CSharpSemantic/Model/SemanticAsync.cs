@@ -6,7 +6,7 @@ namespace AvidScript.CSharpSemantic;
 
 public sealed record SemanticAsyncMethod(
     [property: JsonPropertyOrder(0)] string MethodSymbolId,
-    [property: JsonPropertyOrder(1)] string ExportName,
+    [property: JsonPropertyOrder(1)] string? ExportName,
     [property: JsonPropertyOrder(2)] string Lowering,
     [property: JsonPropertyOrder(3)] IReadOnlyList<SemanticAsyncSegment> Segments,
     [property: JsonPropertyOrder(4)] SemanticSpan Span,
@@ -19,6 +19,14 @@ public sealed record SemanticAsyncMethod(
     [JsonPropertyOrder(7)]
     public IReadOnlyList<SemanticAsyncLexicalScope> LexicalScopes { get; init; } =
         Array.Empty<SemanticAsyncLexicalScope>();
+
+    // Values supplied by each invocation, owned by that invocation across awaits.
+    // The implicit receiver is a language reference, never a borrowed stack address.
+    [JsonPropertyOrder(8)]
+    public IReadOnlyList<SemanticAsyncStateSlot> InvocationInputs { get; init; } =
+        Array.Empty<SemanticAsyncStateSlot>();
+
+    public static string ReceiverSymbol(string methodSymbolId) => "receiver:" + methodSymbolId;
 
     public const string ReentrantZeroHeapCpsLowering = "reentrant_zero_heap_cps";
     public const string ContinuationCfgLowering = "continuation_cfg";

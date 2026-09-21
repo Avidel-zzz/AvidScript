@@ -17,7 +17,8 @@ public static class SemanticAsyncScopeValidator
                 if (method.LexicalScopes.Count != 0) return false;
                 continue;
             }
-            if (document.SchemaVersion != 27 || document.SemanticVersion != "1.31") return false;
+            if (!(document.SchemaVersion == 27 && document.SemanticVersion == "1.31")
+                && !(document.SchemaVersion == SemanticContract.CurrentSchemaVersion && document.SemanticVersion == SemanticContract.CurrentSemanticVersion)) return false;
             if (method.LexicalScopes.Count == 0)
             {
                 if (document.ClosureEnvironments.Any(environment => environment?.OwnerMethodSymbolId == method.MethodSymbolId)) return false;

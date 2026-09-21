@@ -436,7 +436,7 @@ internal static class CSharpSemanticInputValidator
 
         if (document.AsyncMethods.Any(method => method is null)
             || !Unique(document.AsyncMethods.Select(method => method.MethodSymbolId))
-            || !Unique(document.AsyncMethods.Select(method => method.ExportName))
+            || !Unique(document.AsyncMethods.Select(method => method.ExportName).OfType<string>())
             || !document.AsyncMethods.Select(method => method.Span.Start)
                 .SequenceEqual(document.AsyncMethods
                     .Select(method => method.Span.Start)
@@ -460,7 +460,6 @@ internal static class CSharpSemanticInputValidator
         {
             if (method is null
                 || string.IsNullOrWhiteSpace(method.MethodSymbolId)
-                || string.IsNullOrWhiteSpace(method.ExportName)
                 || method.CompilerLocals is null
                 || method.Lowering is not (
                     SemanticAsyncMethod.ReentrantZeroHeapCpsLowering or
@@ -472,10 +471,8 @@ internal static class CSharpSemanticInputValidator
                 || graphMethodIds.Contains(method.MethodSymbolId)
                 || !callablesById.TryGetValue(method.MethodSymbolId, out SemanticCallable? callable)
                 || !callable.HasBody
-                || !callable.IsStatic
                 || callable.IsConstructor
                 || callable.Import is not null
-                || callable.Parameters.Count != 0
                 || callable.ReturnTypeId != "type:void"
                 || callable.Export?.Name != method.ExportName)
             {
@@ -703,7 +700,7 @@ internal static class CSharpSemanticInputValidator
         IReadOnlyDictionary<string, SemanticSymbol> symbolsById,
         ref int expectedCallbackId)
     {
-        if ((document.SemanticVersion is not ("1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30") && document.SemanticVersion != SemanticContract.CurrentSemanticVersion)
+        if ((document.SemanticVersion is not ("1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30" or "1.31") && document.SemanticVersion != SemanticContract.CurrentSemanticVersion)
             || method.EntrySegmentOrdinal < 0
             || method.EntrySegmentOrdinal >= method.Segments.Count
             || method.Segments.Count > SemanticAsyncMethod.MaximumControlFlowSegments
@@ -873,6 +870,7 @@ internal static class CSharpSemanticInputValidator
             IReadOnlyList<SemanticAsyncStateSlot> expectedSlots =
                 stateAnalysis.SlotsByAwaitSegment.GetValueOrDefault(segment.Ordinal)
                 ?? Array.Empty<SemanticAsyncStateSlot>();
+            expectedSlots = SemanticAsyncInvocationValidator.MergeStateSlots(expectedSlots, method.InvocationInputs);
             SemanticAsyncStateFrame? frame = awaitSite.StateFrame;
             if (expectedSlots.Count == 0)
             {
@@ -945,7 +943,7 @@ internal static class CSharpSemanticInputValidator
 
     private static bool UsesExactAsyncStateFlow(string semanticVersion)
     {
-        return semanticVersion is "1.16" or "1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30"
+        return semanticVersion is "1.16" or "1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30" or "1.31"
             || semanticVersion == SemanticContract.CurrentSemanticVersion;
     }
 
@@ -1212,6 +1210,7 @@ internal static class CSharpSemanticInputValidator
             (24, "1.28") => true,
             (25, "1.29") => true,
             (26, "1.30") => true,
+            (27, "1.31") => true,
             (SemanticContract.CurrentSchemaVersion, SemanticContract.CurrentSemanticVersion) => true,
             _ => false,
         };
@@ -1264,7 +1263,7 @@ internal static class CSharpSemanticInputValidator
         {
             return true;
         }
-        return (semanticVersion is "1.16" or "1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30"
+        return (semanticVersion is "1.16" or "1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30" or "1.31"
                 || semanticVersion == SemanticContract.CurrentSemanticVersion)
             && statement.TargetSymbolId is null
             && ValidateStructuredAsyncFlow(

@@ -19,6 +19,8 @@ public static class CSharpGuestLowerer
 
         List<GuestDiagnostic> diagnostics = new();
         ValidateInput(document, semanticSha256, diagnostics);
+        if (diagnostics.Count == 0 && document.AsyncMethods.Any(method => method.ExportName is null))
+            Add(diagnostics, "ASCG1024", "Async callable invocation inputs are analyzed, but receiver and parameter restoration require the persistent invocation execution path.");
         if (diagnostics.Count == 0 && enableDebugInstrumentation && CSharpClosureLayout.UsesManagedDelegates(document))
             Add(diagnostics, "ASCG1024", "Debug pause frames require persistent managed roots before captured closures or delegate lists can be instrumented.");
         if (diagnostics.Count != 0)

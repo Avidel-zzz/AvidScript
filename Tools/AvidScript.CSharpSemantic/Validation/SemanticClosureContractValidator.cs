@@ -10,7 +10,8 @@ public static class SemanticClosureContractValidator
     {
         if (document.ClosureEnvironments is null || document.ClosureBindings is null
             || !SemanticClosureAllocationValidator.IsValid(document)
-            || !SemanticAsyncScopeValidator.IsValid(document)) return false;
+            || !SemanticAsyncScopeValidator.IsValid(document)
+            || !SemanticAsyncInvocationValidator.IsValid(document)) return false;
         if (document.SchemaVersion < 22)
             return document.ClosureEnvironments.Count == 0 && document.ClosureBindings.Count == 0;
         if (document.Symbols is null || document.Callables is null || document.Methods is null
