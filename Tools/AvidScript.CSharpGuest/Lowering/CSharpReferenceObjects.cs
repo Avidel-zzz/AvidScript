@@ -47,6 +47,7 @@ internal static class CSharpReferenceObjects
         // Their reference fields still need a concrete type in the layout table.
         foreach (SemanticType type in document.Types.Where(type => type.Kind == "struct")) used.Add(type.Id);
         foreach (SemanticClosureCell cell in document.ClosureEnvironments.SelectMany(environment => environment.Cells)) used.Add(cell.TypeId);
+        foreach (SemanticAsyncStateSlot input in document.AsyncMethods.SelectMany(method => method.InvocationInputs)) used.Add(input.TypeId);
         // Discover reference fields inside used value types as well as recursive object graphs.
         var owners = document.Symbols.Where(symbol => symbol.Kind == "type" && symbol.TypeId is not null)
             .ToDictionary(symbol => symbol.Id, symbol => symbol.TypeId!, StringComparer.Ordinal);

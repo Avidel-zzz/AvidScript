@@ -145,14 +145,20 @@ internal static class CSharpAsyncCfgLowerer
             parameters.Add(resultGeneration);
         }
 
+        List<GuestRegister> invocation = new();
+        if (!callable.IsStatic) invocation.Add(new(CSharpGuestIds.This(callable.MethodSymbolId), callable.ContainingTypeId));
+        invocation.AddRange(callable.Parameters.OrderBy(parameter => parameter.Ordinal)
+            .Select(parameter => new GuestRegister(CSharpGuestIds.Parameter(parameter.SymbolId), parameter.TypeId)));
+        if (incoming is null) parameters.AddRange(invocation);
         CSharpFunctionLoweringContext context = new(
             document,
             callable,
             guestTypes,
             dataPool,
-            Array.Empty<GuestRegister>(),
+            invocation,
             diagnostics,
-            method.CompilerLocals);
+            method.CompilerLocals,
+            invocationStorageIsLocal: incoming is not null);
         if (incoming?.ResultSymbolId is not null
             && incoming.PayloadKind == SemanticContinuationCallback.ObjectPayloadKind
             && (loadedObject is null
@@ -243,6 +249,13 @@ internal static class CSharpAsyncCfgLowerer
             prefixInstructions = new List<GuestInstruction>();
         }
         int? incomingSegment = incoming is null ? null : method.Segments.Single(segment => segment.AwaitSite?.CallbackId == incoming.CallbackId).Ordinal;
+        if (context.ThisRegister is { } receiver)
+        {
+            // Guards run after restoration and before any resumed side effects.
+            if (CSharpUeReceivers.IsType(document, receiver.TypeId))
+                CSharpUeReceivers.Require(context, receiver, entry.SegmentOrdinal, prefixInstructions);
+            else CSharpReferenceObjects.Require(receiver, prefixInstructions);
+        }
         CSharpAsyncClosureAllocations.Transition(context, method, incomingSegment, entry.SegmentOrdinal, prefixInstructions);
         if (incoming?.ResultSymbolId is { } resultSymbol && context.ClosureCells.Has(resultSymbol))
         {

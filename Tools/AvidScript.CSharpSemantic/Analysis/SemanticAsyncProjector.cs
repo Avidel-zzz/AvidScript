@@ -944,7 +944,8 @@ internal static class SemanticAsyncProjector
             IsTaskLike(item.Type)
             || IsAwaitableType(item.Type)
             || item is IInvocationOperation invocation
-                && (invocation.TargetMethod.IsAsync || IsTaskLike(invocation.TargetMethod.ReturnType)));
+                && (invocation.TargetMethod.IsAsync && !invocation.TargetMethod.ReturnsVoid
+                    || IsTaskLike(invocation.TargetMethod.ReturnType)));
     }
 
     private static bool IsAwaitableType(ITypeSymbol? type)

@@ -55,6 +55,9 @@ internal static class CSharpAsyncManagedState
             restored.Add(new("managed_get", value.Id, new[] { state.Id }, payload.Fields[index].Id, null, null));
             if (context.ClosureCells.Environment(slot.SymbolId) is { } environment)
                 restored.Add(new("local_store", null, new[] { value.Id }, environment.Id, null, null));
+            else if (slot.SymbolId == SemanticAsyncMethod.ReceiverSymbol(context.Callable.MethodSymbolId)
+                && context.ThisRegister is { } receiver)
+                restored.Add(new("local_store", null, new[] { value.Id }, receiver.Id, null, null));
             else if (!CSharpOperationLowerer.StoreLocal(context, slot.SymbolId, value, block, restored)) return false;
         }
         restore = restored;

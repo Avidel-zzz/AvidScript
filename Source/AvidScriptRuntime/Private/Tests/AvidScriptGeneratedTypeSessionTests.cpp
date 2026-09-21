@@ -1778,4 +1778,160 @@ bool FAvidScriptGeneratedProductionDomainTest::RunTest(const FString& Parameters
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptGeneratedCSharpAsyncInvocationTest,
+	"AvidScript.Runtime.GeneratedTypes.CSharpAsyncInvocation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptGeneratedCSharpAsyncInvocationTest::RunTest(const FString& Parameters)
+{
+	if (!GEngine) return false;
+	const FString Directory = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("AvidScriptManagedHeapTests/GuestFixtures"));
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	for (const bool bCapture : {false, true})
+	for (int32 Scenario = 0; Scenario < 9; ++Scenario)
+	{
+		AddInfo(FString::Printf(TEXT("UE async invocation backend=%d capture=%d scenario=%d"), static_cast<int32>(Backend), bCapture, Scenario));
+		const FString Stem = bCapture ? TEXT("csharp-ue-async-capture") : TEXT("csharp-ue-async-scalar");
+		TArray<uint8> Wasm; FString MetadataText, Error;
+		if (!FFileHelper::LoadFileToArray(Wasm, *FPaths::Combine(Directory, Stem + TEXT(".wasm")))
+			|| !FFileHelper::LoadFileToString(MetadataText, *FPaths::Combine(Directory, Stem + TEXT(".json")))) return false;
+		TSharedPtr<FJsonObject> Metadata, RegistryJson;
+		if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(MetadataText), Metadata)
+			|| !FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(BuildGeneratedTypeSessionManifest()), RegistryJson)) return false;
+		const auto Type = RegistryJson->GetArrayField(TEXT("types"))[0]->AsObject();
+		Type->SetStringField(TEXT("stable_type_id"), Metadata->GetStringField(TEXT("type_id")));
+		Type->SetArrayField(TEXT("properties"), Metadata->GetArrayField(TEXT("properties")));
+		const auto Function = Type->GetArrayField(TEXT("functions"))[0]->AsObject();
+		Function->SetNumberField(TEXT("member_ordinal"), Metadata->GetNumberField(TEXT("member_ordinal")));
+		Function->SetStringField(TEXT("stable_member_id"), Metadata->GetStringField(TEXT("method_id")));
+		Function->SetStringField(TEXT("export_name"), Metadata->GetStringField(TEXT("export_name")));
+		FString RegistryText;
+		if (!FJsonSerializer::Serialize(RegistryJson.ToSharedRef(), TJsonWriterFactory<>::Create(&RegistryText))) return false;
+		TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot> Types, ReloadTypes;
+		if (!FAvidScriptGeneratedTypeRegistry::BuildFromJson(RegistryText, Types, Error)
+			|| !FAvidScriptGeneratedTypeRegistry::BuildFromJson(RegistryText, ReloadTypes, Error)) { AddError(Error); return false; }
+		FAvidScriptWasmReloadManifest Manifest;
+		Manifest.ModuleId = TEXT("csharp_ue_async"); Manifest.Language = TEXT("csharp");
+		Manifest.AbiVersion = FAvidScriptWasmReloadManifest::SupportedAbiVersion;
+		Manifest.RequiredExports = {TEXT("avid_on_begin_play"), TEXT("avid_on_continuation_v2")};
+		for (const auto& Import : Metadata->GetArrayField(TEXT("imports")))
+			Manifest.RequiredImports.Add({Import->AsObject()->GetStringField(TEXT("module")), Import->AsObject()->GetStringField(TEXT("name"))});
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime ? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		const auto Artifact = FAvidScriptRuntimeArtifact::FromCanonicalWasm(Manifest, Wasm, Selection);
+		UWorld* World = UWorld::CreateWorld(EWorldType::Game, false, TEXT("AvidScriptUeAsyncWorld"));
+		if (!World) return false;
+		GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+		World->InitializeActorsForPlay(FURL());
+		bool bWorldDestroyed = false;
+		ON_SCOPE_EXIT { if (!bWorldDestroyed) { GEngine->DestroyWorldContext(World); World->DestroyWorld(false); } };
+		auto Host = FAvidScriptGeneratedTypeRuntimeHost::CreateIsolatedForTesting();
+		ON_SCOPE_EXIT { Host->Shutdown(); };
+		TStrongObjectPtr<UWorld> OtherWorld(NewObject<UWorld>());
+		TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> A(NewObject<UAvidScriptGeneratedTypeSessionTestObject>(World));
+		TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> B(NewObject<UAvidScriptGeneratedTypeSessionTestObject>(World));
+		TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> Other(NewObject<UAvidScriptGeneratedTypeSessionTestObject>(OtherWorld.Get()));
+		A->Value = 10; B->Value = 100; Other->Value = 1000;
+		if (!Host->InstallPackage(Types, Artifact, Error) || !Host->BeginInstance(*A, 0, Error)
+			|| !Host->BeginInstance(*B, 0, Error) || !Host->BeginInstance(*Other, 0, Error)) { AddError(Error); return false; }
+		auto* SA = Host->GetInstanceSessionForTesting(*A);
+		auto* SB = Host->GetInstanceSessionForTesting(*B);
+		auto* SO = Host->GetInstanceSessionForTesting(*Other);
+		TestTrue(TEXT("async peers share the production Runtime"), SA->GetLiveRuntimeForTesting() == SB->GetLiveRuntimeForTesting());
+		TestTrue(TEXT("other World has an independent Runtime"), SB->GetLiveRuntimeForTesting() != SO->GetLiveRuntimeForTesting());
+		const uint32 EntryOrdinal = static_cast<uint32>(Metadata->GetIntegerField(TEXT("member_ordinal")));
+		auto Call = [&](UObject* Object, int32 Expected)
+		{
+			int32 Result = -1;
+			return TestTrue(TEXT("compiled UE async entry executes"), FAvidScriptGeneratedTypeDispatcher::Invoke(Object, 0, EntryOrdinal, {}, &Result))
+				&& TestEqual(TEXT("compiled UE async entry result"), Result, Expected);
+		};
+		if (!Call(A.Get(), 11) || !Call(B.Get(), 22) || !Call(A.Get(), 10) || !Call(Other.Get(), 11)) return false;
+		TestEqual(TEXT("initial async side effect targets B"), B->Value, 103);
+		TestEqual(TEXT("caller A owns no target continuation"), SA->GetLivePendingContinuationCount(), 0);
+		TestEqual(TEXT("callee B owns the suspended invocation"), SB->GetLivePendingContinuationCount(), 1);
+		if (Scenario == 7)
+		{
+			if (!Call(A.Get(), 10)) return false;
+			TestEqual(TEXT("same UE object owns separate async invocations"), SB->GetLivePendingContinuationCount(), 2);
+		}
+		auto* Heap = SB->GetLiveRuntimeForTesting()->GetManagedHeapForTesting();
+		bool bReloadedBeforeAllocation = false;
+		auto Collect = [&](uint32 ExpectedRoots)
+		{
+			if (!Heap) return TestEqual(TEXT("scalar continuation needs no managed heap"), ExpectedRoots, 0u);
+			// Scalar frames never initialize the managed heap. Reload likewise
+			// publishes a fresh heap before any async closure has allocated.
+			const auto Expected = !bCapture || bReloadedBeforeAllocation
+				? AvidScript::Managed::EHeapError::NotConfigured : AvidScript::Managed::EHeapError::Ok;
+			if (!TestTrue(TEXT("collect between UE async segments respects lazy heap configuration"), Heap->Collect() == Expected)) return false;
+			TestEqual(TEXT("UE async suspends without Guest frames"), Heap->GetStats().ActiveFrames, 0u);
+			return TestEqual(TEXT("UE async retains only the suspended state"), Heap->GetStats().LiveRoots, ExpectedRoots);
+		};
+		if (!Collect(bCapture ? (Scenario == 7 ? 2u : 1u) : 0u)) return false;
+		auto AdvanceWorld = [&]() { World->Tick(LEVELTICK_All, 0.02f); ++GFrameCounter; };
+		auto ResumeB = [&]()
+		{
+			FAvidScriptWasmSmokeResult Result;
+			if (!SB->TickLive(0.001f, Result)) { AddError(Result.ErrorMessage); return false; }
+			return true;
+		};
+		if (Scenario == 1) { if (!Host->EndInstance(*A, Error)) { AddError(Error); return false; } SA = nullptr; }
+		if (Scenario == 3)
+		{
+			for (int32 I = 0; I < 3 && B->Value == 103; ++I) { AdvanceWorld(); if (!ResumeB()) return false; }
+			TestEqual(TEXT("first UE resume restores this and amount"), B->Value, 107);
+			if (!Collect(bCapture ? 1u : 0u)) return false;
+		}
+		if (Scenario == 5) { AdvanceWorld(); AdvanceWorld(); }
+		if (Scenario == 2 || Scenario == 3 || Scenario == 5)
+		{
+			if (!Host->EndInstance(*B, Error)) { AddError(Error); return false; }
+			SB = nullptr;
+			if (!Collect(0)) return false;
+		}
+		if (Scenario == 4)
+		{
+			GEngine->DestroyWorldContext(World); World->DestroyWorld(false); bWorldDestroyed = true;
+			TestEqual(TEXT("World teardown cancels target await"), SB->GetLivePendingContinuationCount(), 0);
+			TestFalse(TEXT("World teardown invalidates target Session"), SB->IsLiveLoaded());
+		}
+		if (Scenario == 6)
+		{
+			auto Lease = SB->GetRuntimeLeaseForTesting();
+			FAvidScriptGeneratedTypePackageReloadResult Reloaded;
+			if (!Host->ReloadPackage(ReloadTypes, Artifact, Reloaded, Error)) { AddError(Error); return false; }
+			TestFalse(TEXT("reload retires the suspended code lease"), Lease.IsValid());
+			TestEqual(TEXT("reload cancels the old invocation"), SB->GetLivePendingContinuationCount(), 0);
+			Heap = SB->GetLiveRuntimeForTesting()->GetManagedHeapForTesting();
+			bReloadedBeforeAllocation = true;
+		}
+		if (Scenario == 8)
+		{
+			TWeakObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> WeakB(B.Get());
+			B.Reset();
+			CollectGarbage(RF_NoFlags);
+			TestFalse(TEXT("suspended receiver and closure do not retain the UObject"), WeakB.IsValid());
+			AdvanceWorld(); AdvanceWorld();
+			TestEqual(TEXT("collected UObject cancels its pending invocation"), SB->GetLivePendingContinuationCount(), 0);
+			// The object no longer exists; do not enter its retired receiver.
+			SB = nullptr;
+		}
+		if (!bWorldDestroyed)
+		{
+			for (int32 I = 0; I < 6; ++I) { AdvanceWorld(); if (SB && !ResumeB()) return false; }
+			if (!Collect(0)) return false;
+			if (Heap) TestEqual(TEXT("UE async environments are reclaimed"), Heap->GetStats().LiveObjects, 0u);
+		}
+		if (B) TestEqual(TEXT("async target result respects owner cancellation"), B->Value,
+			Scenario <= 1 ? 112 : Scenario == 3 ? 107 : Scenario == 7 ? 124 : 103);
+		TestEqual(TEXT("caller property stays unchanged"), A->Value, 10);
+		TestTrue(TEXT("another World remains live"), SO->IsLiveLoaded());
+		TestEqual(TEXT("another World property stays unchanged"), Other->Value, 1000);
+		TestEqual(TEXT("another World owns no stray await"), SO->GetLivePendingContinuationCount(), 0);
+	}
+	return true;
+}
+
 #endif

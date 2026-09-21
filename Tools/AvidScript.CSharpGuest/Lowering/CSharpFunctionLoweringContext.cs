@@ -28,7 +28,8 @@ internal sealed class CSharpFunctionLoweringContext
         CSharpGuestDataPool dataPool,
         IReadOnlyList<GuestRegister> parameters,
         List<GuestDiagnostic> diagnostics,
-        IReadOnlyList<SemanticAsyncCompilerLocal>? compilerLocals = null)
+        IReadOnlyList<SemanticAsyncCompilerLocal>? compilerLocals = null,
+        bool invocationStorageIsLocal = false)
     {
         Document = document;
         Callable = callable;
@@ -43,6 +44,9 @@ internal sealed class CSharpFunctionLoweringContext
             declaration => declaration.TypeId,
             StringComparer.Ordinal);
         ThisRegister = callable.IsStatic ? null : parameters[0];
+        if (ThisRegister is not null)
+            storageBySymbol.Add(SemanticAsyncMethod.ReceiverSymbol(callable.MethodSymbolId), ThisRegister);
+        if (invocationStorageIsLocal) locals.AddRange(parameters);
 
         foreach (SemanticCallableParameter parameter in callable.Parameters)
         {

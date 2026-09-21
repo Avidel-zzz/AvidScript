@@ -100,13 +100,14 @@ internal static class CSharpAsyncLowerer
             .OrderBy(item => item.MethodSymbolId, StringComparer.Ordinal))
         {
             if (!callables.TryGetValue(method.MethodSymbolId, out SemanticCallable? callable)
-                || callable.Parameters.Count != 0
-                || !callable.IsStatic
+                || (method.ExportName is not null && (callable.Parameters.Count != 0 || !callable.IsStatic))
+                || (!callable.IsStatic && !CSharpReferenceObjects.Types(document).Contains(callable.ContainingTypeId)
+                    && !CSharpUeReceivers.IsType(document, callable.ContainingTypeId))
                 || callable.ReturnTypeId != voidType.Id
                 || callable.Export?.Name != method.ExportName
                 || method.Segments.Count == 0)
             {
-                Add(diagnostics, $"Async method '{method.MethodSymbolId}' has no compatible exported callable.");
+                Add(diagnostics, $"Async method '{method.MethodSymbolId}' has no compatible callable or persistent receiver representation.");
                 continue;
             }
 

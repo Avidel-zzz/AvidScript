@@ -209,8 +209,8 @@ internal static class CSharpGuestManagedAsyncTests
             }
             """, "Scripts/AsyncInvocationBoundary.cs");
         CSharpGuestLoweringResult pendingInvocation = CSharpGuestLowerer.Lower(invocation, new string('d', 64));
-        Check(!pendingInvocation.Succeeded && pendingInvocation.Diagnostics.Any(item => item.Code == "ASCG1024")
-            && pendingInvocation.Diagnostics.All(item => item.Code != "ASCG1001"), "valid invocation contract reaches explicit execution boundary");
+        Check(pendingInvocation.Succeeded && WasmModuleCompiler.Compile(pendingInvocation.Module!).Succeeded,
+            "valid invocation contract compiles a persistent receiver and parameter restore path");
         SemanticAsyncMethod invocationMethod = invocation.AsyncMethods.Single();
         CSharpGuestLoweringResult missingInputs = CSharpGuestLowerer.Lower(invocation with { AsyncMethods = new[] {
             invocationMethod with { InvocationInputs = Array.Empty<SemanticAsyncStateSlot>() } } }, new string('d', 64));

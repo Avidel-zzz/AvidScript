@@ -329,7 +329,11 @@ bool FAvidScriptCSharpManagedAsyncTest::RunTest(const FString& Parameters)
 		FCase{TEXT("aggregate"), 17, 2}, FCase{TEXT("null"), 9, 1}, FCase{TEXT("owned-shared"), 1616, 2},
 		FCase{TEXT("owned-direct"), 6, 2}, FCase{TEXT("owned-loop"), 130131, 4}, FCase{TEXT("owned-ref"), 20, 2},
 		FCase{TEXT("owned-scope"), 11, 3, 0}, FCase{TEXT("owned-no-live"), 7, 1},
-		FCase{TEXT("owned-cycle"), 3, 1}, FCase{TEXT("owned-before-declaration"), 8, 2}, FCase{TEXT("owned-result"), 1, 2}})
+		FCase{TEXT("owned-cycle"), 3, 1}, FCase{TEXT("owned-before-declaration"), 8, 2}, FCase{TEXT("owned-result"), 1, 2},
+		FCase{TEXT("invoke-basic"), 18, 2}, FCase{TEXT("invoke-concurrent"), 10613, 4, 2},
+		FCase{TEXT("invoke-repeated"), 1915, 4, 2}, FCase{TEXT("invoke-capture"), 24, 2},
+		FCase{TEXT("invoke-replace"), 27, 2}, FCase{TEXT("invoke-aggregate"), 20, 2},
+		FCase{TEXT("invoke-delegate"), 9, 2}, FCase{TEXT("invoke-nested"), 405, 3}})
 	for (int32 Scenario = 0; Scenario < 5; ++Scenario)
 	{
 		if (Scenario >= 3 && Case.Resumes < 2) continue;
@@ -379,7 +383,7 @@ bool FAvidScriptCSharpManagedAsyncTest::RunTest(const FString& Parameters)
 				TestTrue(TEXT("CSharp continuation finalizes"), Owner->FinalizeDispatched(Completion.Token, true));
 				++Resumed;
 			}
-			if (Scenario >= 3 && Resumed == 1 && !InterruptedAfterResume)
+			if (Scenario >= 3 && Resumed > 0 && !InterruptedAfterResume)
 			{
 				if (Scenario == 3) TestTrue(TEXT("Cancel CSharp after its first resume"), Runtime.EndPlay(Result));
 				else Owner->Teardown();
@@ -389,7 +393,9 @@ bool FAvidScriptCSharpManagedAsyncTest::RunTest(const FString& Parameters)
 			TestTrue(TEXT("Collect between CSharp resume segments"), Heap.Collect() == EHeapError::Ok);
 			TestEqual(TEXT("No retained CSharp execution frame"), Heap.GetStats().ActiveFrames, uint32(0));
 		}
-		TestEqual(TEXT("Cancellation prevents all late CSharp callbacks"), Resumed, Scenario == 0 ? Case.Resumes : Scenario >= 3 ? 1 : 0);
+		TestEqual(*FString::Printf(TEXT("%s cancellation prevents all late CSharp callbacks"), Case.Name), Resumed,
+			// DrainReady leases one callback at a time, including when peers are ready.
+			Scenario == 0 ? Case.Resumes : Scenario >= 3 ? 1 : 0);
 		uint8 ResultBytes[4] = {}; FString Error; int32 Value = 0;
 		TestTrue(TEXT("Read actual CSharp result"), Runtime.ReadStateBytes(ResultOffset, MakeArrayView(ResultBytes), Error));
 		FMemory::Memcpy(&Value, ResultBytes, 4);
