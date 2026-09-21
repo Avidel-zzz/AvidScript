@@ -67,6 +67,11 @@ internal static class GuestManagedHeapValidator
             GuestContinuationStateValidator.Validate(context, function, instruction, result, operands);
             return;
         }
+        if (instruction.Op is GuestEventState.SubscribeOp or GuestEventState.ReadOp)
+        {
+            GuestEventStateValidator.Validate(context, function, instruction, result, operands);
+            return;
+        }
         if (!instruction.Op.StartsWith("managed_", StringComparison.Ordinal)) return;
         bool valid = context.Module.SchemaVersion >= 4 && context.Module.Types.Any(type => type.Kind == "managed_ref")
             && instruction.Constant is null && instruction.OperatorKind is null;

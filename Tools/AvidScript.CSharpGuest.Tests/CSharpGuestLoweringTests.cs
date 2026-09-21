@@ -154,9 +154,9 @@ internal static class CSharpGuestLoweringTests
             StringComparison.Ordinal);
         GuestModule restored = GuestIrSerializer.Deserialize(Encoding.UTF8.GetBytes(legacySerialized));
 
-        Assert(GuestModuleValidator.CurrentSchemaVersion == 11
-            && GuestModuleValidator.CurrentIrVersion == "1.10",
-            "Guest IR typed continuation state should use the current schema identity");
+        Assert(GuestModuleValidator.CurrentSchemaVersion == 12
+            && GuestModuleValidator.CurrentIrVersion == "1.11",
+            "Guest IR typed event state should use the current schema identity");
         Assert(legacyCompatibleImport.DispatchClass == "semantic"
             && restored.Imports[0].DispatchClass == "semantic",
             "missing dispatch metadata must remain source-compatible as semantic after roundtrip");

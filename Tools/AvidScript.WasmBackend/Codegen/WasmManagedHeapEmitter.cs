@@ -102,6 +102,21 @@ internal sealed partial class WasmFunctionCompiler
 
     private void CompileManagedInstruction(WasmBinaryWriter body, GuestInstruction instruction)
     {
+        if (instruction.Op is GuestEventState.SubscribeOp or GuestEventState.ReadOp)
+        {
+            bool subscribe = instruction.Op == GuestEventState.SubscribeOp;
+            string state = subscribe ? instruction.OperandIds[3] : instruction.ResultId!;
+            if (subscribe)
+                foreach (string operand in instruction.OperandIds.Take(3)) WriteLocalGet(body, localIndices[operand]);
+            WriteI32Constant(body, moduleLayout.ManagedHeap.TypeOrdinals[GetValueType(state).Id]);
+            if (subscribe) WriteLocalGet(body, localIndices[state]);
+            body.WriteByte(0x10); body.WriteU32(moduleLayout.FunctionIndices[instruction.TargetId!]);
+            WriteResult(body, instruction);
+            // The callback lease spans the return; root the reference before any
+            // further call, allocation or cooperative poll can trigger collection.
+            if (!subscribe) FlushManagedRoots(body);
+            return;
+        }
         if (instruction.Op is GuestContinuationState.StoreOp or GuestContinuationState.ReadOp)
         {
             bool store = instruction.Op == GuestContinuationState.StoreOp;

@@ -26,7 +26,7 @@ internal static class WasmContinuationStateTests
         List<GuestModule> invalid = new()
         {
             module with { SchemaVersion = 10, IrVersion = "1.9" },
-            module with { SchemaVersion = 12, IrVersion = "1.11" },
+            module with { SchemaVersion = GuestModuleValidator.CurrentSchemaVersion + 1, IrVersion = GuestModuleValidator.CurrentIrVersion },
             module with { IrVersion = "1.9" },
             module with { Imports = module.Imports.Where(import => import.Id != "store").ToArray() },
             module with { Imports = module.Imports.Where(import => import.Id != "heap").ToArray() },

@@ -9,6 +9,8 @@
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "UObject/UnrealType.h"
 #include <array>
@@ -363,6 +365,110 @@ bool FAvidScriptEventStateNestedScopeTest::RunTest(const FString& Parameters)
 		}
 		TestEqual(TEXT("Nested scopes leave no frames"), Heap.GetStats().ActiveFrames, 0u);
 		Runtime.Unload();
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptCompiledEventStateTest,
+	"AvidScript.Runtime.DelegateSubscription.CompiledManagedState",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptCompiledEventStateTest::RunTest(const FString& Parameters)
+{
+	using namespace AvidScript::Managed;
+	using namespace AvidScriptEventStateAbiTests;
+	if (!GEngine) return false;
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false, TEXT("AvidScriptCompiledEventState"));
+	if (!World) return false;
+	GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+	ON_SCOPE_EXIT { GEngine->DestroyWorldContext(World); World->DestroyWorld(false); };
+	AActor* Owner = World->SpawnActor<AActor>();
+	if (!Owner) return false;
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	for (const FString Variant : {TEXT("normal"), TEXT("self-cancel"), TEXT("wrong"), TEXT("outside")})
+	{
+		AddInfo(FString::Printf(TEXT("Compiled event state backend=%d variant=%s"), static_cast<int32>(Backend), *Variant));
+		const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("AvidScriptManagedHeapTests/GuestFixtures"),
+			FString::Printf(TEXT("event-state-%s.wasm"), *Variant));
+		TArray<uint8> Bytes;
+		if (!TestTrue(TEXT("WasmBackend.Tests generated the event-state fixture"), FFileHelper::LoadFileToArray(Bytes, *Path))) return false;
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime ? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		FAvidScriptRuntimeSession Session;
+		Session.SetBackendSelectionForTesting(Selection);
+		auto Manifest = FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("compiled_event_state"));
+		Manifest.RequiredImports = {
+			{TEXT("avidscript"), UTF8_TO_TCHAR(AvidScript::EventState::Abi::SubscribeImport)},
+			{TEXT("avidscript"), UTF8_TO_TCHAR(AvidScript::EventState::Abi::ReadImport)},
+			{TEXT("avidscript"), UTF8_TO_TCHAR(Abi::ImportName)},
+			{TEXT("avidscript"), TEXT("event_unsubscribe")}, {TEXT("avidscript"), TEXT("owner_get_slot")},
+			{TEXT("avidscript"), TEXT("owner_get_generation")}};
+		FAvidScriptWasmReloadResult Loaded;
+		if (!Session.LoadInitialModule(Bytes.GetData(), Bytes.Num(), Manifest, Loaded)) { AddError(Loaded.ErrorMessage); return false; }
+		auto* Runtime = Session.GetLiveRuntimeForTesting();
+		FAvidScriptObjectRegistry Registry;
+		FAvidScriptObjectHandleResult HandleResult;
+		FAvidScriptSessionDelegateSubscriptions Subscriptions(Session);
+		FAvidScriptWasmHostContext Context;
+		Context.World = World; Context.ObjectRegistry = &Registry;
+		Context.OwnerHandle = Registry.RegisterObject(Owner, HandleResult, false);
+		Context.EventSubscriptions = &Subscriptions;
+		Runtime->SetHostContext(Context);
+		FAvidScriptPreparedDelegateEvent Event;
+		Event.EventOrdinal = 7; Event.StableId = FString::ChrN(64, '6'); Event.ExportName = TEXT("event_callback");
+		Event.ExpectedSourceClass = AActor::StaticClass();
+		Event.Signature.Kind = EAvidScriptPreparedDelegateKind::Multicast;
+		Event.Signature.MulticastProperty = FindFProperty<FMulticastDelegateProperty>(AActor::StaticClass(), TEXT("OnActorBeginOverlap"));
+		Event.Signature.SignatureFunction = Event.Signature.MulticastProperty->SignatureFunction;
+		Event.Signature.ImmutableCodecIdentity = Event.Signature.SignatureFunction;
+		Event.Signature.ParameterCellCount = 1; Event.Signature.Encode = &EncodeFrame;
+		FString Error;
+		if (!Subscriptions.Prepare(World, MakeArrayView(&Event, 1), Error, Runtime)) { AddError(Error); return false; }
+		Subscriptions.CommitPrepared(); Subscriptions.SetDispatchEnabled(true);
+		FAvidScriptWasmSmokeResult Result;
+		const bool Outside = Variant == TEXT("outside");
+		TestEqual(TEXT("Generated subscribe and read use the native invocation contract"), Runtime->Tick(0.0f, Result), !Outside);
+		auto& Heap = *Runtime->GetManagedHeapForTesting();
+		TestTrue(TEXT("Collect after generated publisher frame exits"), Heap.Collect() == EHeapError::Ok);
+		TestEqual(TEXT("Only subscription lease survives publication"), Heap.GetStats().LiveRoots, Outside ? 0u : 1u);
+		TestEqual(TEXT("Compiled state and cyclic child survive publication"), Heap.GetStats().LiveObjects, Outside ? 0u : 2u);
+		TestEqual(TEXT("Generated publication frame cleaned on return or trap"), Heap.GetStats().ActiveFrames, 0u);
+		if (!Outside)
+		{
+			Owner->OnActorBeginOverlap.Broadcast(Owner, Owner);
+			if (Variant == TEXT("wrong"))
+			{
+				TestTrue(TEXT("Wrong generated state type quarantines Session"), Session.GetSnapshot().bFaultQuarantined);
+				TestNull(TEXT("Wrong type unloads VM"), Session.GetLiveRuntimeForTesting());
+				Subscriptions.UnbindActive();
+				continue;
+			}
+			if (!TestFalse(TEXT("Compiled event executes without quarantine"), Session.GetSnapshot().bFaultQuarantined)) return false;
+			uint8 State[16] = {};
+			TestTrue(TEXT("Read compiler-produced observable state"), Runtime->ReadStateBytes(16, MakeArrayView(State), Error));
+			int32 Count = 0, Value = 0; int64 Token = 0;
+			FMemory::Memcpy(&Count, State, 4); FMemory::Memcpy(&Value, State + 4, 4); FMemory::Memcpy(&Token, State + 8, 8);
+			TestEqual(TEXT("Generated callback executes once"), Count, 1);
+			TestEqual(TEXT("Compiled state survives Guest collections and mutates"), Value, 43);
+			TestTrue(TEXT("Subscription token is preserved"), Token > 0);
+			const bool SelfCancel = Variant == TEXT("self-cancel");
+			TestTrue(TEXT("Collect after first callback"), Heap.Collect() == EHeapError::Ok);
+			TestEqual(TEXT("Self cancellation releases graph after callback frame exits"), Heap.GetStats().LiveObjects, SelfCancel ? 0u : 2u);
+			TestEqual(TEXT("Callback temporary roots released"), Heap.GetStats().LiveRoots, SelfCancel ? 0u : 1u);
+			Owner->OnActorBeginOverlap.Broadcast(Owner, Owner);
+			TestTrue(TEXT("Read second generated callback result"), Runtime->ReadStateBytes(16, MakeArrayView(State), Error));
+			FMemory::Memcpy(&Count, State, 4); FMemory::Memcpy(&Value, State + 4, 4);
+			TestEqual(TEXT("Only live subscription receives second event"), Count, SelfCancel ? 1 : 2);
+			TestEqual(TEXT("Second callback updates the same state graph"), Value, SelfCancel ? 43 : 44);
+			TestEqual(TEXT("Existing unsubscribe releases compiled state"), Runtime->HandleEventUnsubscribeImport(Token), SelfCancel ? 0 : 1);
+		}
+		Subscriptions.UnbindActive();
+		TestTrue(TEXT("Final compiled state collection"), Heap.Collect() == EHeapError::Ok);
+		TestEqual(TEXT("No compiled event objects leak"), Heap.GetStats().LiveObjects, 0u);
+		TestEqual(TEXT("No compiled event roots leak"), Heap.GetStats().LiveRoots, 0u);
+		TestEqual(TEXT("No compiled event frames leak"), Heap.GetStats().ActiveFrames, 0u);
+		Session.StopAndUnload(Result);
 	}
 	return true;
 }
