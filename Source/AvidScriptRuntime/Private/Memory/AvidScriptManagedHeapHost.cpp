@@ -26,6 +26,15 @@ bool FAvidScriptWasmRuntimeInstance::CreateContinuationStateLease(
 	return true;
 }
 
+bool FAvidScriptWasmRuntimeInstance::CreateManagedStateLease(
+	TConstArrayView<uint64> Objects, TUniquePtr<IAvidScriptManagedStateLease>& OutLease)
+{
+	TUniquePtr<IAvidScriptContinuationStateLease> Lease;
+	if (!CreateContinuationStateLease(Objects, Lease)) return false;
+	OutLease = MoveTemp(Lease);
+	return true;
+}
+
 uint64 FAvidScriptWasmRuntimeInstance::BeginVmInvocation()
 {
 	const uint32 Depth = ManagedHeap ? ManagedHeap->GetStats().ActiveFrames : 0;

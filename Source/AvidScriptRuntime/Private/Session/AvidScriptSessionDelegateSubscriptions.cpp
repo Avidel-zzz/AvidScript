@@ -4,6 +4,7 @@
 #include "AvidScriptRuntimeSession.h"
 #include "AvidScriptWasmRuntime.h"
 #include "UObject/StrongObjectPtr.h"
+#include "UObject/UObjectGlobals.h"
 #include "UObject/UnrealType.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptDelegateSubscriptions, Log, All);
@@ -11,6 +12,13 @@ DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptDelegateSubscriptions, Log, All);
 namespace
 {
 constexpr int32 AvidScriptMaximumExplicitDelegateSubscriptions = 4096;
+constexpr int32 AvidScriptMaximumDelegateStateBytes = 64 * 1024;
+
+struct FAvidScriptDelegateManagedState
+{
+	TArray<uint8> Bytes;
+	TUniquePtr<IAvidScriptManagedStateLease> Lease;
+};
 
 struct FAvidScriptDelegateSubscriptionEntry
 {
@@ -21,6 +29,7 @@ struct FAvidScriptDelegateSubscriptionEntry
 	FScriptDelegate PreviousSinglecastDelegate;
 	uint64 BridgeToken = 0;
 	int64 GuestToken = 0;
+	TSharedPtr<FAvidScriptDelegateManagedState> ManagedState;
 	bool bBound = false;
 };
 
@@ -183,6 +192,11 @@ struct FAvidScriptSessionDelegateSubscriptions::FImpl
 	TMap<uint32, FAvidScriptPreparedDelegateEvent> PreparedCatalog;
 	TMap<uint64, int32> ActiveBridgeIndices;
 	TWeakObjectPtr<UObject> CurrentSource;
+	TSharedPtr<FAvidScriptDelegateManagedState> CurrentState;
+	const FAvidScriptWasmRuntimeInstance* ActiveRuntime = nullptr;
+	const FAvidScriptWasmRuntimeInstance* PreparedRuntime = nullptr;
+	FDelegateHandle GarbageCollectHandle;
+	bool bCurrentStateRead = false;
 	uint64 NextBridgeToken = 1;
 	uint64 NextGuestToken = 1;
 	bool bPreparing = false;
@@ -263,6 +277,7 @@ FAvidScriptSessionDelegateSubscriptions::
 FAvidScriptSessionDelegateSubscriptions::
 	~FAvidScriptSessionDelegateSubscriptions()
 {
+	FCoreUObjectDelegates::GetPostGarbageCollect().Remove(Impl->GarbageCollectHandle);
 	UnbindActive();
 	DiscardPrepared();
 }
@@ -270,12 +285,14 @@ FAvidScriptSessionDelegateSubscriptions::
 bool FAvidScriptSessionDelegateSubscriptions::Prepare(
 	UObject* Source,
 	const TConstArrayView<FAvidScriptPreparedDelegateEvent> Events,
-	FString& OutError)
+	FString& OutError,
+	const FAvidScriptWasmRuntimeInstance* Runtime)
 {
 	check(IsInGameThread());
 	DiscardPrepared();
 	OutError.Reset();
 	Impl->bPreparing = true;
+	Impl->PreparedRuntime = Runtime;
 	if (Events.IsEmpty())
 	{
 		return true;
@@ -333,6 +350,8 @@ void FAvidScriptSessionDelegateSubscriptions::CommitPrepared()
 	UnbindEntries(Impl->Active);
 	Impl->Active = MoveTemp(Impl->Prepared);
 	Impl->ActiveCatalog = MoveTemp(Impl->PreparedCatalog);
+	Impl->ActiveRuntime = Impl->PreparedRuntime;
+	Impl->PreparedRuntime = nullptr;
 	Impl->RebuildActiveBridgeIndices();
 	for (FAvidScriptDelegateSubscriptionEntry& Entry : Impl->Active)
 	{
@@ -345,6 +364,7 @@ void FAvidScriptSessionDelegateSubscriptions::DiscardPrepared()
 {
 	UnbindEntries(Impl->Prepared);
 	Impl->PreparedCatalog.Reset();
+	Impl->PreparedRuntime = nullptr;
 	Impl->bPreparing = false;
 }
 
@@ -352,6 +372,8 @@ void FAvidScriptSessionDelegateSubscriptions::UnbindActive()
 {
 	Impl->bDispatchEnabled = false;
 	Impl->CurrentSource.Reset();
+	Impl->CurrentState.Reset();
+	Impl->ActiveRuntime = nullptr;
 	UnbindEntries(Impl->Active);
 	Impl->ActiveCatalog.Reset();
 	Impl->ActiveBridgeIndices.Reset();
@@ -378,8 +400,32 @@ int64 FAvidScriptSessionDelegateSubscriptions::Subscribe(
 	const uint32 EventOrdinal,
 	FString& OutError)
 {
+	return SubscribeInternal(Source, EventOrdinal, OutError, nullptr, {}, nullptr);
+}
+
+int64 FAvidScriptSessionDelegateSubscriptions::SubscribeManaged(
+	UObject& Source, const uint32 EventOrdinal,
+	const FAvidScriptWasmRuntimeInstance& Runtime, TConstArrayView<uint8> StateBytes,
+	TUniquePtr<IAvidScriptManagedStateLease>&& Lease, FString& OutError)
+{
+	return SubscribeInternal(Source, EventOrdinal, OutError, &Runtime, StateBytes, &Lease);
+}
+
+int64 FAvidScriptSessionDelegateSubscriptions::SubscribeInternal(
+	UObject& Source, const uint32 EventOrdinal, FString& OutError,
+	const FAvidScriptWasmRuntimeInstance* Runtime, TConstArrayView<uint8> StateBytes,
+	TUniquePtr<IAvidScriptManagedStateLease>* Lease)
+{
 	check(IsInGameThread());
 	OutError.Reset();
+	if (!IsValid(&Source)) { OutError = TEXT("delegate_source_unavailable"); return 0; }
+	if (Lease && (!Runtime || Runtime != (Impl->bPreparing ? Impl->PreparedRuntime : Impl->ActiveRuntime)
+		|| !*Lease || !(*Lease)->IsValidForRuntime(*Runtime)
+		|| StateBytes.IsEmpty() || StateBytes.Num() > AvidScriptMaximumDelegateStateBytes))
+	{
+		OutError = TEXT("delegate_managed_state_invalid");
+		return 0;
+	}
 	TArray<FAvidScriptDelegateSubscriptionEntry>& Entries =
 		Impl->bPreparing ? Impl->Prepared : Impl->Active;
 	const TMap<uint32, FAvidScriptPreparedDelegateEvent>& Catalog =
@@ -436,10 +482,16 @@ int64 FAvidScriptSessionDelegateSubscriptions::Subscribe(
 	{
 		return 0;
 	}
-	if (!Impl->bPreparing)
+	if (Lease)
 	{
-		BindEntry(Entry);
+		Entry.ManagedState = MakeShared<FAvidScriptDelegateManagedState>();
+		Entry.ManagedState->Bytes.Append(StateBytes.GetData(), StateBytes.Num());
+		Entry.ManagedState->Lease = MoveTemp(*Lease);
+		if (!Impl->GarbageCollectHandle.IsValid())
+			Impl->GarbageCollectHandle = FCoreUObjectDelegates::GetPostGarbageCollect().AddRaw(
+				this, &FAvidScriptSessionDelegateSubscriptions::SweepInvalidSources);
 	}
+	if (!Impl->bPreparing) BindEntry(Entry);
 	Entries.Add(MoveTemp(Entry));
 	if (!Impl->bPreparing)
 	{
@@ -493,6 +545,32 @@ bool FAvidScriptSessionDelegateSubscriptions::IsCurrentSource(const UObject& Sou
 		&& Impl->CurrentSource.IsValid() && Impl->CurrentSource.Get() == &Source;
 }
 
+bool FAvidScriptSessionDelegateSubscriptions::ReadCurrentManagedState(
+	const FAvidScriptWasmRuntimeInstance& Runtime, TArrayView<uint8> OutStateBytes)
+{
+	check(IsInGameThread());
+	const auto& State = Impl->CurrentState;
+	if (!Impl->bDispatchEnabled || !Impl->CurrentSource.IsValid() || !State || Impl->bCurrentStateRead
+		|| Impl->ActiveRuntime != &Runtime || !State->Lease || !State->Lease->IsValidForRuntime(Runtime)
+		|| OutStateBytes.Num() != State->Bytes.Num()) return false;
+	FMemory::Memcpy(OutStateBytes.GetData(), State->Bytes.GetData(), State->Bytes.Num());
+	Impl->bCurrentStateRead = true;
+	return true;
+}
+
+void FAvidScriptSessionDelegateSubscriptions::SweepInvalidSources()
+{
+	check(IsInGameThread());
+	for (auto* Entries : {&Impl->Active, &Impl->Prepared})
+		for (int32 Index = Entries->Num() - 1; Index >= 0; --Index)
+			if (!(*Entries)[Index].Source.IsValid())
+			{
+				UnbindEntry((*Entries)[Index]);
+				Entries->RemoveAtSwap(Index, 1, EAllowShrinking::No);
+			}
+	Impl->RebuildActiveBridgeIndices();
+}
+
 void FAvidScriptSessionDelegateSubscriptions::
 	HandleAvidScriptDelegateBroadcast(
 		const uint64 SubscriptionToken,
@@ -514,12 +592,16 @@ void FAvidScriptSessionDelegateSubscriptions::
 	const FAvidScriptPreparedDelegateEvent Event =
 		Impl->Active[*EntryIndex].Event;
 	const TWeakObjectPtr<UObject> Source = Impl->Active[*EntryIndex].Source;
+	// Hold the lease independently: callback code may remove or replace this entry.
+	const auto State = Impl->Active[*EntryIndex].ManagedState;
 	if (!Source.IsValid())
 	{
 		return;
 	}
 	// Keep callback identity independent of entries that a handler may cancel or replace.
 	TGuardValue<TWeakObjectPtr<UObject>> SourceGuard(Impl->CurrentSource, Source);
+	TGuardValue<TSharedPtr<FAvidScriptDelegateManagedState>> StateGuard(Impl->CurrentState, State);
+	TGuardValue<bool> StateReadGuard(Impl->bCurrentStateRead, false);
 
 	FAvidScriptWasmSmokeResult Result;
 	if (!Impl->Session.DispatchPreparedDelegateEvent(

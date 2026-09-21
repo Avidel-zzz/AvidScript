@@ -3,7 +3,10 @@
 #include "AvidScriptRuntimeSession.h"
 #include "Delegate/AvidScriptDelegateBridge.h"
 #include "Session/AvidScriptSessionDelegateSubscriptions.h"
+#include "Memory/AvidScriptManagedHeap.h"
 #include "Tests/AvidScriptDelegateSubscriptionTestTypes.h"
+#include <array>
+#include "Engine/World.h"
 
 #include "Misc/AutomationTest.h"
 #include "UObject/GarbageCollection.h"
@@ -155,6 +158,199 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptDelegateBridgeLifecycleTest,
 	"AvidScript.Runtime.DelegateSubscription.BridgeLifecycle",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptDelegateManagedStateTest,
+	"AvidScript.Runtime.DelegateSubscription.ManagedState",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptDelegateManagedStateTest::RunTest(const FString& Parameters)
+{
+	using namespace AvidScript::Managed;
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	for (int32 Scenario = 0; Scenario < 12; ++Scenario)
+	{
+		AddInfo(FString::Printf(TEXT("Managed subscription backend=%d scenario=%d"), static_cast<int32>(Backend), Scenario));
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime ? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		FAvidScriptRuntimeSession Session;
+		Session.SetBackendSelectionForTesting(Selection);
+		FAvidScriptWasmReloadResult Loaded;
+		if (!Session.LoadEmbeddedSmoke(Loaded)) { AddError(Loaded.ErrorMessage); return false; }
+		auto* Runtime = Session.GetLiveRuntimeForTesting();
+		FAvidScriptWasmRuntimeInstance Other(Selection);
+		FAvidScriptWasmSmokeResult Result;
+		if (!Other.LoadEmbeddedSmokeModule(Result)) { AddError(Result.ErrorMessage); return false; }
+		auto& Heap = *Runtime->GetManagedHeapForTesting();
+		auto& OtherHeap = *Other.GetManagedHeapForTesting();
+		const std::array<FHeapLayout, 1> Layouts{{{1, 8, {{0, 1}}}}};
+		if (!TestTrue(TEXT("subscription state layout configures"), Heap.Configure(Layouts) == EHeapError::Ok)
+			|| !TestTrue(TEXT("foreign state layout configures"), OtherHeap.Configure(Layouts) == EHeapError::Ok)) return false;
+		TStrongObjectPtr<UWorld> CatalogSource(NewObject<UWorld>());
+		TStrongObjectPtr<UAvidScriptRuntimeDelegateTestObject> Source(NewObject<UAvidScriptRuntimeDelegateTestObject>());
+		TStrongObjectPtr<UAvidScriptRuntimeDelegateTestObject> Peer(NewObject<UAvidScriptRuntimeDelegateTestObject>());
+		FAvidScriptSessionDelegateSubscriptions Subscriptions(Session);
+		TFunction<void()> Observe = []() {};
+		FAvidScriptPreparedDelegateEvent Event;
+		Event.EventOrdinal = 0;
+		// Bridge function identity uses the first 16 hex characters.
+		Event.StableId = (Scenario == 10 ? FString(TEXT("b713b713b713b713")) : FString(TEXT("c813c813c813c813"))) + FString::ChrN(48, 'c');
+		Event.ExportName = TEXT("avid_on_tick");
+		Event.ExpectedSourceClass = Source->GetClass();
+		if (Scenario == 10)
+		{
+			Event.Signature.Kind = EAvidScriptPreparedDelegateKind::Singlecast;
+			Event.Signature.SinglecastProperty = FindFProperty<FDelegateProperty>(Source->GetClass(), TEXT("OnSinglecast"));
+			Event.Signature.SignatureFunction = Event.Signature.SinglecastProperty->SignatureFunction;
+		}
+		else
+		{
+			Event.Signature.Kind = EAvidScriptPreparedDelegateKind::Multicast;
+			Event.Signature.MulticastProperty = FindFProperty<FMulticastDelegateProperty>(Source->GetClass(), TEXT("OnSignal"));
+			Event.Signature.SignatureFunction = Event.Signature.MulticastProperty->SignatureFunction;
+		}
+		Event.Signature.ParameterCellCount = 1;
+		Event.Signature.ImmutableCodecIdentity = &Observe;
+		Event.Signature.Encode = &EncodeSourceContextTestFrame;
+		FString Error;
+		if (!Subscriptions.Prepare(CatalogSource.Get(), MakeArrayView(&Event, 1), Error, Runtime)) { AddError(Error); return false; }
+		const bool bPrepared = Scenario == 5 || Scenario == 6 || Scenario == 9;
+		if (!bPrepared) { Subscriptions.CommitPrepared(); Subscriptions.SetDispatchEnabled(true); }
+		auto Acquire = [&](FAvidScriptWasmRuntimeInstance& Owner, TUniquePtr<IAvidScriptManagedStateLease>& Lease)
+		{
+			auto& OwnerHeap = *Owner.GetManagedHeapForTesting();
+			FToken Frame = 0, Root = 0, Object = 0;
+			TestTrue(TEXT("state frame opens"), OwnerHeap.PushFrame(Frame) == EHeapError::Ok);
+			TestTrue(TEXT("state temporary root opens"), OwnerHeap.CreateRoot(Frame, 0, Root) == EHeapError::Ok);
+			TestTrue(TEXT("state object allocates"), OwnerHeap.Allocate(1, Root, Object) == EHeapError::Ok);
+			TestTrue(TEXT("state graph contains a cycle"), OwnerHeap.WriteReference(Object, 1, 0, Object) == EHeapError::Ok);
+			const uint64 Objects[] = {Object};
+			TestTrue(TEXT("state persistent lease acquired"), Owner.CreateManagedStateLease(MakeArrayView(Objects), Lease));
+			TestTrue(TEXT("temporary frame exits"), OwnerHeap.PopFrame(Frame) == EHeapError::Ok);
+			return Object;
+		};
+		auto Bytes = [](const FToken& Object) { return MakeArrayView(reinterpret_cast<const uint8*>(&Object), sizeof(Object)); };
+		auto Collect = [&](FToken Object, bool bExpected)
+		{
+			TestTrue(TEXT("collect subscription graph"), Heap.Collect() == EHeapError::Ok);
+			TestEqual(TEXT("subscription graph liveness"), Heap.IsAlive(Object), bExpected);
+			TestEqual(TEXT("subscription leaves no executing frame"), Heap.GetStats().ActiveFrames, 0u);
+		};
+		TUniquePtr<IAvidScriptManagedStateLease> Lease;
+		const FToken Object = Acquire(*Runtime, Lease);
+		const auto* Identity = Lease.Get();
+		TUniquePtr<IAvidScriptManagedStateLease> ForeignLease;
+		const FToken ForeignObject = Acquire(Other, ForeignLease);
+		TestEqual(TEXT("matching catalog rejects a foreign heap lease"), Subscriptions.SubscribeManaged(*Source, 0, *Runtime, Bytes(ForeignObject), MoveTemp(ForeignLease), Error), int64(0));
+		TestTrue(TEXT("foreign lease remains with caller"), ForeignLease.IsValid());
+		ForeignLease.Reset();
+		TestEqual(TEXT("foreign Runtime cannot publish state"), Subscriptions.SubscribeManaged(*Source, 0, Other, Bytes(Object), MoveTemp(Lease), Error), int64(0));
+		TestTrue(TEXT("failure preserves caller state lease"), Lease.Get() == Identity);
+		TestEqual(TEXT("empty state cannot publish"), Subscriptions.SubscribeManaged(*Source, 0, *Runtime, {}, MoveTemp(Lease), Error), int64(0));
+		TArray<uint8> Oversized; Oversized.SetNumZeroed(64 * 1024 + 1);
+		TestEqual(TEXT("bounded state cannot overflow"), Subscriptions.SubscribeManaged(*Source, 0, *Runtime, Oversized, MoveTemp(Lease), Error), int64(0));
+		TestEqual(TEXT("missing event cannot consume state"), Subscriptions.SubscribeManaged(*Source, 99, *Runtime, Bytes(Object), MoveTemp(Lease), Error), int64(0));
+		TestEqual(TEXT("wrong source class cannot consume state"), Subscriptions.SubscribeManaged(*CatalogSource, 0, *Runtime, Bytes(Object), MoveTemp(Lease), Error), int64(0));
+		TestTrue(TEXT("all publication failures preserve original lease"), Lease.Get() == Identity);
+		const int64 Token = Subscriptions.SubscribeManaged(*Source, 0, *Runtime, Bytes(Object), MoveTemp(Lease), Error);
+		if (!TestTrue(TEXT("managed subscription publishes atomically"), Token > 0 && !Lease)) { AddError(Error); return false; }
+		Collect(Object, true);
+		uint64 Outside = 999;
+		TestFalse(TEXT("state is unreadable outside callback"), Subscriptions.ReadCurrentManagedState(*Runtime, MakeArrayView(reinterpret_cast<uint8*>(&Outside), sizeof(Outside))));
+		TestEqual(TEXT("rejected read preserves output"), Outside, uint64(999));
+		int32 Calls = 0;
+		Observe = [&]()
+		{
+			++Calls;
+			if (Scenario == 1) TestTrue(TEXT("callback unsubscribes itself"), Subscriptions.Unsubscribe(Token, Error));
+			if (Scenario == 3) Peer->Broadcast(Peer.Get(), 1, 1.0f);
+			Collect(Object, true);
+			uint64 Read = 999; auto Output = MakeArrayView(reinterpret_cast<uint8*>(&Read), sizeof(Read));
+			TestFalse(TEXT("foreign heap cannot read current state"), Subscriptions.ReadCurrentManagedState(Other, Output));
+			uint8 Short[1] = {9};
+			TestFalse(TEXT("wrong state size rejected"), Subscriptions.ReadCurrentManagedState(*Runtime, MakeArrayView(Short)));
+			TestEqual(TEXT("wrong size leaves bytes untouched"), Short[0], uint8(9));
+			if (Scenario == 2)
+			{
+				Subscriptions.UnbindActive();
+				TestFalse(TEXT("teardown revokes an unread callback state"), Subscriptions.ReadCurrentManagedState(*Runtime, Output));
+				TestEqual(TEXT("revoked read preserves output"), Read, uint64(999));
+				Collect(Object, true);
+				return;
+			}
+			TestTrue(TEXT("current callback reads its own state"), Subscriptions.ReadCurrentManagedState(*Runtime, Output));
+			TestEqual(TEXT("state object identity is preserved"), Read, Object);
+			TestFalse(TEXT("callback state reads once per invocation"), Subscriptions.ReadCurrentManagedState(*Runtime, Output));
+		};
+		FToken PeerObject = 0;
+		if (Scenario == 3 || Scenario == 10)
+		{
+			PeerObject = Acquire(*Runtime, Lease);
+			const int64 PeerToken = Subscriptions.SubscribeManaged(Scenario == 10 ? *Source : *Peer, 0, *Runtime, Bytes(PeerObject), MoveTemp(Lease), Error);
+			if (Scenario == 10)
+			{
+				TestEqual(TEXT("singlecast duplicate cannot replace state"), PeerToken, int64(0));
+				TestTrue(TEXT("duplicate failure preserves caller lease"), Lease.IsValid());
+				Lease.Reset(); Collect(PeerObject, false);
+			}
+			else TestTrue(TEXT("peer source has separate callback state"), PeerToken > 0);
+		}
+		if (Scenario == 5) { Subscriptions.DiscardPrepared(); Collect(Object, false); }
+		else if (Scenario == 6) { Subscriptions.CommitPrepared(); Subscriptions.SetDispatchEnabled(true); }
+		else if (Scenario == 4 || Scenario == 9)
+		{
+			TWeakObjectPtr<UAvidScriptRuntimeDelegateTestObject> Weak(Source.Get());
+			Source.Reset(); CollectGarbage(RF_NoFlags);
+			TestFalse(TEXT("subscription does not retain UObject source"), Weak.IsValid());
+			TestEqual(TEXT("source GC removes active subscriptions"), Subscriptions.NumActive(), 0);
+			TestEqual(TEXT("source GC removes prepared subscriptions"), Subscriptions.NumPrepared(), 0);
+			Collect(Object, false);
+			if (Scenario == 9) Subscriptions.CommitPrepared();
+		}
+		else if (Scenario == 7 || Scenario == 8)
+		{
+			if (!Subscriptions.Prepare(CatalogSource.Get(), MakeArrayView(&Event, 1), Error, &Other)) return false;
+			PeerObject = Acquire(Other, Lease);
+			if (!TestTrue(TEXT("candidate state belongs to candidate Runtime"), Subscriptions.SubscribeManaged(*Peer, 0, Other, Bytes(PeerObject), MoveTemp(Lease), Error) > 0)) return false;
+			if (Scenario == 7) { Subscriptions.DiscardPrepared(); Collect(Object, true); }
+			else { Subscriptions.CommitPrepared(); Collect(Object, false); }
+			TestTrue(TEXT("candidate heap collects"), OtherHeap.Collect() == EHeapError::Ok);
+			TestEqual(TEXT("candidate transaction owns exactly its graph"), OtherHeap.IsAlive(PeerObject), Scenario == 8);
+		}
+		else if (Scenario == 11)
+		{
+			const FToken OldObject = Acquire(*Runtime, Lease);
+			if (!Session.StopAndUnload(Result) || !Session.LoadEmbeddedSmoke(Loaded)) return false;
+			Subscriptions.UnbindActive();
+			auto* Replacement = Session.GetLiveRuntimeForTesting();
+			if (!Subscriptions.Prepare(CatalogSource.Get(), MakeArrayView(&Event, 1), Error, Replacement)) return false;
+			TestEqual(TEXT("retired heap lease cannot enter replacement code"), Subscriptions.SubscribeManaged(*Source, 0, *Replacement, Bytes(OldObject), MoveTemp(Lease), Error), int64(0));
+			TestTrue(TEXT("expired lease rejection preserves caller ownership"), Lease.IsValid());
+			Lease.Reset(); Subscriptions.DiscardPrepared();
+			TestEqual(TEXT("late release cannot alter replacement Runtime"), Session.GetLiveRuntimeForTesting()->GetManagedHeapForTesting()->GetStats().LiveRoots, 0u);
+			continue;
+		}
+		if (Scenario <= 3 || Scenario == 6 || Scenario == 7 || Scenario == 10)
+		{
+			if (Scenario == 10) Source->ExecuteSinglecast(1); else Source->Broadcast(Source.Get(), 1, 1.0f);
+			TestEqual(TEXT("one real UE event reached the callback"), Calls, 1);
+			Collect(Object, Scenario != 1 && Scenario != 2);
+			if (Scenario == 0)
+			{
+				Source->Broadcast(Source.Get(), 2, 2.0f);
+				TestEqual(TEXT("new event gets a fresh read capability"), Calls, 2);
+			}
+		}
+		Subscriptions.UnbindActive(); Subscriptions.DiscardPrepared();
+		Collect(Object, false);
+		TestEqual(TEXT("all subscription roots released"), Heap.GetStats().LiveRoots, 0u);
+		TestEqual(TEXT("all subscription graphs reclaimed"), Heap.GetStats().LiveObjects, 0u);
+		TestTrue(TEXT("candidate heap final collection"), OtherHeap.Collect() == EHeapError::Ok);
+		TestEqual(TEXT("all candidate roots released"), OtherHeap.GetStats().LiveRoots, 0u);
+		TestEqual(TEXT("all candidate graphs reclaimed"), OtherHeap.GetStats().LiveObjects, 0u);
+	}
+	return true;
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptDelegateExportPreparationTest,

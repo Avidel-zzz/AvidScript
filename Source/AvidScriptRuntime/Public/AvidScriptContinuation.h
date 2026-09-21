@@ -1,12 +1,13 @@
 #pragma once
 
 #include "AvidScriptBindingLatent.h"
+#include "AvidScriptManagedStateLease.h"
 #include "CoreMinimal.h"
 
 class FAvidScriptWasmRuntimeInstance;
 
 // Native-only ownership. A lease must not extend the lifetime of its Runtime.
-class AVIDSCRIPTRUNTIME_API IAvidScriptContinuationStateLease
+class AVIDSCRIPTRUNTIME_API IAvidScriptContinuationStateLease : public IAvidScriptManagedStateLease
 {
 public:
 	virtual ~IAvidScriptContinuationStateLease() = default;

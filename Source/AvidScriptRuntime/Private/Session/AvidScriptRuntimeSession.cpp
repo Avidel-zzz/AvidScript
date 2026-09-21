@@ -1124,7 +1124,7 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 			}
 			if (!LiveRuntime->BuildPreparedCallbacks(Events, Handlers, Error)
 				|| (!Events.IsEmpty()
-					&& !DelegateSubscriptions->Prepare(Source, Events, Error))
+					&& !DelegateSubscriptions->Prepare(Source, Events, Error, LiveRuntime.Get()))
 				|| (!Handlers.IsEmpty()
 					&& !InboundHandlers->Prepare(Source, Handlers, Error)))
 			{
@@ -2195,7 +2195,7 @@ bool FAvidScriptRuntimeSession::PrepareDelegateSubscriptionsForTesting(
 	const TConstArrayView<FAvidScriptPreparedDelegateEvent> Events,
 	FString& OutError)
 {
-	return DelegateSubscriptions->Prepare(Source, Events, OutError);
+	return DelegateSubscriptions->Prepare(Source, Events, OutError, LiveRuntime.Get());
 }
 
 void FAvidScriptRuntimeSession::CommitDelegateSubscriptionsForTesting()
@@ -2654,7 +2654,8 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 		if (!DelegateSubscriptions->Prepare(
 				CandidateDelegateSource,
 				CandidateDelegateEvents,
-				DelegatePrepareError)
+				DelegatePrepareError,
+				CandidateRuntime.Get())
 			|| !InboundHandlers->Prepare(
 				CandidateDelegateSource,
 				CandidateInboundHandlers,

@@ -19,7 +19,8 @@ public:
 	bool Prepare(
 		UObject* Source,
 		TConstArrayView<FAvidScriptPreparedDelegateEvent> Events,
-		FString& OutError);
+		FString& OutError,
+		const FAvidScriptWasmRuntimeInstance* Runtime = nullptr);
 	void CommitPrepared();
 	void DiscardPrepared();
 	void UnbindActive();
@@ -34,12 +35,22 @@ public:
 		int64 SubscriptionToken,
 		FString& OutError) override;
 	virtual bool IsCurrentSource(const UObject& Source) const override;
+	// Native-only state from a validated layout. Failure preserves Lease.
+	int64 SubscribeManaged(UObject& Source, uint32 EventOrdinal,
+		const FAvidScriptWasmRuntimeInstance& Runtime, TConstArrayView<uint8> StateBytes,
+		TUniquePtr<IAvidScriptManagedStateLease>&& Lease, FString& OutError);
+	bool ReadCurrentManagedState(const FAvidScriptWasmRuntimeInstance& Runtime,
+		TArrayView<uint8> OutStateBytes);
 
 	virtual void HandleAvidScriptDelegateBroadcast(
 		uint64 SubscriptionToken,
 		void* Parameters) override;
 
 private:
+	int64 SubscribeInternal(UObject& Source, uint32 EventOrdinal, FString& OutError,
+		const FAvidScriptWasmRuntimeInstance* Runtime, TConstArrayView<uint8> StateBytes,
+		TUniquePtr<IAvidScriptManagedStateLease>* Lease);
+	void SweepInvalidSources();
 	struct FImpl;
 	TUniquePtr<FImpl> Impl;
 };

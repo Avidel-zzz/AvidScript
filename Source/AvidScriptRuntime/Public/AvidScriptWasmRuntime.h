@@ -604,6 +604,8 @@ public:
 	// Failure leaves OutLease unchanged; use/release on the Game Thread.
 	bool CreateContinuationStateLease(TConstArrayView<uint64> Objects,
 		TUniquePtr<IAvidScriptContinuationStateLease>& OutLease);
+	bool CreateManagedStateLease(TConstArrayView<uint64> Objects,
+		TUniquePtr<IAvidScriptManagedStateLease>& OutLease);
 	bool DispatchDynamicHostCall(
 		const FAvidScriptDynamicHostCall& Call,
 		FAvidScriptDynamicHostCallResult& OutResult) override;
