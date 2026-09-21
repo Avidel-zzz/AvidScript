@@ -1,14 +1,36 @@
+<div align="center">
+
 # AvidScript
 
 **用 C# 为 Unreal Engine 编写玩法脚本。**
 
-你可以让 Actor 移动和响应碰撞、等待计时器或资源加载、处理 UI 与存档，也可以用 C# 声明供蓝图使用的 Actor、组件、属性和函数。修改方法体后可热重载，减少反复编译 C++ 的等待。
+<p>
+  <img alt="Unreal Engine 5.8" src="https://img.shields.io/badge/Unreal%20Engine-5.8-0E1128?logo=unrealengine&amp;logoColor=white">
+  <img alt="C#" src="https://img.shields.io/badge/Language-C%23-512BD4?logo=dotnet&amp;logoColor=white">
+  <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&amp;logoColor=white">
+  <img alt="Windows x64" src="https://img.shields.io/badge/Platform-Windows%20x64-0078D4">
+  <img alt="0.1.0 开发预览版" src="https://img.shields.io/badge/Status-0.1.0%20Preview-D29922">
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-26A269"></a>
+</p>
 
-目前是 **0.1.0 开发预览版**，主要验证环境为 **UE 5.8 源码版 + Windows x64**。已有可运行的玩法、UI 和网络样例，但 C# 语言支持、调试体验和平台覆盖仍在完善，尚不适合作为完整 .NET 的替代品。
+[🚀 跑起来](#快速开始) · [🧩 看代码示例](#常见用法) · [🚧 当前限制](#当前边界) · [📚 更多文档](#进一步阅读)
 
-[跑起来](#快速开始) · [看代码示例](#常见用法) · [当前限制](#当前边界) · [更多文档](#进一步阅读)
+</div>
 
-## 快速开始
+---
+
+你可以让 Actor 移动和响应碰撞、等待计时器或资源加载、处理 UI 与存档，也可以用 C# 声明供蓝图使用的 Actor、组件、属性和函数。
+
+| 🎮 编写玩法 | ⚡ 快速迭代 | 🔗 接入 UE |
+| :--- | :--- | :--- |
+| 移动、碰撞、UI、存档与网络 | 修改方法体后热重载，减少 C++ 编译等待 | 调用项目 API，向蓝图暴露类、属性和函数 |
+
+> [!NOTE]
+> **0.1.0 开发预览版** · 主要验证环境为 **UE 5.8 源码版 + Windows x64**。已有可运行样例，C# 语言支持、调试体验和平台覆盖仍在完善，尚不适合作为完整 .NET 的替代品。
+
+<a id="快速开始"></a>
+
+## 🚀 快速开始
 
 先运行仓库自带的 ActorLifecycle 样例：让一个方块移动、旋转并逐渐变大。下面的命令都在项目的 `Plugins/AvidScript` 目录执行。
 
@@ -57,7 +79,9 @@ Saved/AvidScriptCSharpGuest/ActorLifecycle/actor_lifecycle.avidscript.json
 
 这个 JSON 是脚本的加载清单，记录要加载的程序及其信息。手动绑定时，在 Actor 上添加 **AvidScript Component**，将 **Script Manifest File** 指向它；**Script Module** 保持未设置。命令行编译本身不会修改关卡。
 
-## 常见用法
+<a id="常见用法"></a>
+
+## 🧩 常见用法
 
 下面是从仓库样例中提取或简化的片段，用来说明写法；完整文件还包含必要的声明和配置，请从对应样例开始修改。
 
@@ -128,7 +152,9 @@ public partial class Projectile : AvidActor
 
 RPC 是跨网络请求另一端执行函数；属性复制是服务器把属性值同步给客户端；RepNotify 是收到属性变化后的回调。调用权限和对象归属仍遵循 UE 的网络规则。
 
-## 当前边界
+<a id="当前边界"></a>
+
+## 🚧 当前边界
 
 选型时请按下面的实际限制判断。功能出现在样例中，不表示任意 C# 写法或任意 UE 类型都已支持。
 
@@ -145,7 +171,20 @@ RPC 是跨网络请求另一端执行函数；属性复制是服务器把属性�
 
 更具体的语言缺口和下一步见[当前实施计划](Docs/Phase66/P66.1_Implementation_Plan.md)。自动化测试、实际玩家操作和长时间运行的验收分别记录，不能互相代替。
 
-## 它如何运行
+## ⚙️ 它如何运行
+
+```mermaid
+flowchart LR
+    Code["✍️ 编写 C# 玩法"] --> Build["📦 编译为 WASM"]
+    Build --> Run["⚡ 插件加载并执行"]
+    Run --> Game["🎮 驱动 UE 游戏对象"]
+    classDef author fill:#172554,stroke:#60a5fa,color:#eff6ff
+    classDef compile fill:#2e1065,stroke:#a78bfa,color:#f5f3ff
+    classDef runtime fill:#052e2b,stroke:#2dd4bf,color:#f0fdfa
+    class Code author
+    class Build compile
+    class Run,Game runtime
+```
 
 构建工具把 C# 编译成 **WebAssembly（WASM）**，一种供脚本执行引擎运行的程序格式；UE 插件加载它，再把脚本中的调用转交给 UE。游戏运行时不加载完整的 .NET / CLR。
 
@@ -153,17 +192,27 @@ RPC 是跨网络请求另一端执行函数；属性复制是服务器把属性�
 
 主要执行引擎为 Wasmtime，另有 WAMR 兼容后端。底层执行引擎的细节通常不需要进入玩法代码。
 
-## 性能摘要
+<a id="性能摘要"></a>
+
+## 📊 性能摘要
 
 已有冻结用例的性能对比，部分 UE 调用路径取得优势；纯计算等项目仍有未达目标的指标，目前没有证据证明整体领先 Puerts 或 Unreal AngelScript。具体条件与结果见[性能报告](Docs/Phase65/P65.D34_Production_Epoch_Runtime.md)，开发体验差距见[框架成熟度评估](Docs/Phase66/P66_Developer_Leadership_Assessment.md)。
 
-## 进一步阅读
+![历史基准：四类 UE 调用的耗时对比，绿色为 AvidScript，灰色为 Puerts Reflection，柱形越短越好](Docs/Assets/README/phase57-prepared-reflection-performance.svg)
+
+*上图为 P57 历史基准，不是当前版本的完整性能排名。绿色表示 AvidScript，灰色表示 Puerts Reflection；数值越低，指定调用耗时越少。测试环境、采样条件与适用范围见[原始证据](Docs/Phase57/P57.11B1_Recursive_Fixed_Struct_Codec_Evidence.json)。*
+
+<a id="进一步阅读"></a>
+
+## 📚 进一步阅读
 
 - **开发与调试：**[IDE 工作区与编辑器命令](Docs/Phase61/P61.D4c2_Editor_IDE_Commands.md)、[调试面板](Docs/Phase61/P61.C4b_Editor_Debugger_Panel.md)。
 - **发布 Windows 游戏：**[UI 样例的打包流程](Docs/Phase64/P64.D_Packaged_UI.md)、[插件打包与安装](Docs/Phase65/P65.A_Deterministic_Release_And_Atomic_Install.md)。
 - **了解当前研发进度：**[实施计划](Docs/Phase66/P66.1_Implementation_Plan.md)、[设计与历史验证记录](Docs/)。这些是研发文档，不是入门前置阅读。
 - **参与开发：**[仓库工作规则](AGENTS.md)。
 
-## 许可证
+<a id="许可证"></a>
+
+## 📄 许可证
 
 AvidScript 原创代码使用 [MIT License](LICENSE)。Wasmtime 使用 Apache-2.0 WITH LLVM-exception；WAMR 保留上游许可。Unreal Engine 不包含在本仓库中。
