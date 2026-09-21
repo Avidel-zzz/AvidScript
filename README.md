@@ -1,207 +1,28 @@
-<div align="center">
-
 # AvidScript
 
-**面向 Unreal Engine 的现代 C# + WebAssembly 游戏脚本框架**
+**用 C# 为 Unreal Engine 编写玩法脚本。**
 
-<p>
-  <img alt="Unreal Engine 5.8" src="https://img.shields.io/badge/Unreal%20Engine-5.8-0E1128?logo=unrealengine&logoColor=white">
-  <img alt="C# Guest" src="https://img.shields.io/badge/Guest-C%23-512BD4?logo=dotnet&logoColor=white">
-  <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
-  <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
-  <img alt="Win64 Validated" src="https://img.shields.io/badge/Platform-Win64%20Validated-0078D4?logo=windows&logoColor=white">
-  <img alt="Android arm64 Cross-AOT" src="https://img.shields.io/badge/Android%20arm64-Cross--AOT-3DDC84?logo=android&logoColor=white">
-  <img alt="Phase 66 Active" src="https://img.shields.io/badge/Status-Phase%2066%20Active-2B6CB0">
-  <img alt="Automation Baseline 461/461" src="https://img.shields.io/badge/Baseline-461%2F461-26A269">
-  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
-</p>
+你可以让 Actor 移动和响应碰撞、等待计时器或资源加载、处理 UI 与存档，也可以用 C# 声明供蓝图使用的 Actor、组件、属性和函数。修改方法体后可热重载，减少反复编译 C++ 的等待。
 
-AvidScript 将 C# 编译为 WASM，通过自动生成的 Binding 接入 UE 生命周期、项目 API、网络与异步流程。
-Win64 主后端使用 Wasmtime 45，保留 WAMR 兼容后端；UE Runtime 不托管 CLR。
+目前是 **0.1.0 开发预览版**，主要验证环境为 **UE 5.8 源码版 + Windows x64**。已有可运行的玩法、UI 和网络样例，但 C# 语言支持、调试体验和平台覆盖仍在完善，尚不适合作为完整 .NET 的替代品。
 
-</div>
-
-> [!IMPORTANT]
-> 当前版本为 **0.1.0 开发者预览**，主线验证环境是 **UE5.8 源码版 + Win64
-> Development/Shipping + Wasmtime 45**。两种 Win64 配置的 BuildCookRun 均已通过；Android arm64
-> 交叉 AOT 发布已验证，Android UBT/真机与 iOS 仍待正式验收。
-
-当前开发主线转向 [P66-P69 开发体验路线](Docs/Phase66/P66.0_Developer_Experience_Architecture.md)：
-语言一致性、结构热重载、完整调试和 Windows 真实玩法验证。P65 未完成的性能、发布与移动端债务继续保留。
-[与 Unreal AngelScript / Puerts 的成熟度评估](Docs/Phase66/P66_Developer_Leadership_Assessment.md)记录开发者预览判断；[生产 C# 方法路由](Docs/Phase66/P66.B_CSharp_Production_Method_Routes.md)已接通同域同步直接调用，[动态方法派发](Docs/Phase66/P66.B_Host_Selected_Method_Dispatch.md)连接注册 UE 类型的虚覆写及接口调用，[跨对象方法组](Docs/Phase66/P66.B_Ue_Delegate_Binding.md)进一步在绑定时选择实际实现并保留委托身份。持久事件/await、结构热重载与完整调试仍有缺口；以真实 Windows 开发工作流验证成熟度，暂不进入成熟版收尾，也不以局部验证宣称全面领先。
-[P66.A 静态局部函数](Docs/Phase66/P66.A_Lexical_Functions.md)已支持独立作用域、嵌套、递归及直接调用；
-[P66.B 直接调用捕获](Docs/Phase66/P66.B_Direct_Capture_Results.md)进一步支持外层变量共享读写及跨 await 保存。
-[委托签名合同](Docs/Phase66/P66.B_Delegate_Signature_Contract.md)已覆盖封闭泛型身份、引用参数及产物校验，为后续委托执行提供类型依据。
-[Guest 间接调用](Docs/Phase66/P66.B_Indirect_Call_Results.md)已实现函数引用、名义签名检查和递归取消轮询；[C# 静态方法组](Docs/Phase66/P66.B_CSharp_Method_Group_Results.md)已能构造委托、传参/返回并执行，含 ref/out、命名与默认参数。
-[同步无捕获 lambda 与匿名方法](Docs/Phase66/P66.B_Lambda_Results.md)已具有独立 callable/CFG，并能在 Guest 内传递、返回和执行。
-[捕获环境分析](Docs/Phase66/P66.B_Closure_Plan_Results.md)已输出版本化的共享 cell、作用域与绑定合同；Semantic 152/152、Guest 198/198 通过。
-[控制流分配合同](Docs/Phase66/P66.B_Closure_Allocation_Results.md)输出准确的函数/循环/块入口，并保留同步捕获 lambda 的 CFG；同步 foreach 的异常清理 CFG 仍未支持。
-[环境堆与循环回收](Docs/Phase66/P66.B_Managed_Heap_Results.md)已有模块/Session 所有权与回滚验证；[WASM Host ABI 与调用根清理](Docs/Phase66/P66.B_Managed_Heap_ABI.md)覆盖正常返回、trap 及 Wasmtime 预备快路径。
-[Guest 受追踪引用与自动根插桩](Docs/Phase66/P66.B_Guest_Managed_References.md)已支持类型化对象字段、递归/间接调用及含引用的值参数/返回。
-[C# 共享与逃逸闭包执行](Docs/Phase66/P66.B_CSharp_Closure_Execution.md)进一步连接同步捕获 lambda、局部函数方法组、共享 cell、嵌套/递归委托和循环作用域，采用 IR 5/1.4 的受检类型擦除引用；Semantic 174/174、Guest 216/216、IR 35/35、WASM 88/88、原生堆 13/13、UE 增量构建与双后端 Automation 4/4 通过，包含强制回收和错误转换后的清理。
-[内部引用 IR 6/1.5](Docs/Phase66/P66.B_Borrowed_Reference_Contract.md)已验证栈/堆别名、嵌套字段、间接调用和回收根；[C# 共享引用](Docs/Phase66/P66.B_CSharp_Borrowed_References.md)进一步连接捕获值 ref/out、引用委托转发、可变结构体方法/属性与 readonly 防御性复制。UE 对象绑定、持久 event、跨 await 持久根和后续开发体验阶段仍未完成，P66.B 保持进行中。
-本组 Semantic 174/174、Guest 224/224、WASM 112/112、原生堆 13/13、UE 构建与双后端 Automation 5/5 通过；同一 C# 源码的 .NET 与正常/强制回收 WASM 结果一致。
-[委托身份与相等](Docs/Phase66/P66.B_Delegate_Identity.md)进一步支持单目标委托的 `==`/`!=`，按方法和捕获环境身份比较；该组 Guest 232/232、双后端 Automation 5/5 通过。
-[不可变委托调用列表](Docs/Phase66/P66.B_Delegate_Lists.md)已接通同步 `+/-/+=/-=`、顺序/重复项、列表相等、最后连续匹配移除、最后返回值及共享 ref/out；调用期间修改委托变量保留当前快照。该组 Guest 246/246、双后端 Automation 5/5 通过，正常/强制回收结果与 .NET 一致；语言 event 和跨 await 仍待完成，长列表成本尚需优化。
-[结构体实例方法委托](Docs/Phase66/P66.B_Bound_Value_Delegates.md)已接通 receiver 的独立装箱副本、复制委托共享身份、ref/out、组合/移除及闭包字段保活。空结构体使用一字节内部存储；Guest 262/262、双后端 Automation 5/5 通过，正常/强制回收结果与 .NET 一致。普通引用类由后续对象执行组连接，UE 对象实例委托仍待完成。
-[普通引用类语义合同](Docs/Phase66/P66.B_Reference_Class_Contract.md)新增 Semantic 24/1.28 的类继承、构造、初始化和隐式存储事实及输入校验，并修复 partial 类型重复声明的分析异常；旧 23/1.27 闭包、lambda 与 async 仍兼容。Semantic 219/219、Guest 273/273 通过；本组尚未启用普通引用对象或引用类实例委托。
-[普通引用对象执行](Docs/Phase66/P66.B_Reference_Object_Execution.md)进一步连接受支持类的构造、共享字段、ref/out、object 视图、循环引用和同步实例委托；结构体绑定仍使用独立副本。Semantic 219/219、Guest 311/311、双后端 Automation 5/5 通过，含强制回收和 7 类故障的副作用顺序。普通引用类的 this 捕获由后续组连接，持久事件、跨 await/调试暂停根及更广的类语义仍待完成。
-[普通引用对象的 this 捕获](Docs/Phase66/P66.B_Receiver_Capture.md)连接构造、属性、局部函数及嵌套闭包，保持原对象身份并支持闭包/对象循环回收。仅含 receiver 的环境按原对象比较，混合捕获保留 activation 身份；Guest 320/320、闭包 106/106、双后端 Automation 5/5 通过，覆盖强制回收与故障后的根清理。UE receiver 与跨 await/事件生命周期仍待连接。
-[UE receiver 运行时校验](Docs/Phase66/P66.B_Ue_Receiver_Authority.md)提供按生成类型 ordinal 的版本化 Host 入口，核对当前 Session、对象注册表、代际、类型与 World 生命周期；同时补齐 WAMR 所需的 `(I)i` supplemental 调用和基于 generic Call 的预备出口。生成类型双后端用例及回归 6/6、VM 回归 24/24、托管堆运行时回归 5/5 通过。C# UE 实例委托、虚派发和持久回调仍未启用。
-[方法派发合同](Docs/Phase66/P66.B_Method_Dispatch_Contract.md)新增 Semantic 25/1.29 的覆写槽、sealed、显式接口身份与调用位置派发信息，正确区分 base 方法组和虚调用；保留 1.28 委托兼容。Semantic 250/250、Guest 336/336 通过；未接入运行时路由的虚调用明确诊断，避免执行错误的固定函数体。UE 实例委托、动态路由和持久事件仍待实现，P66.B 继续进行。
-[当前 owner 的 UE 实例委托与 this 捕获](Docs/Phase66/P66.B_Ue_Receiver_Execution.md)已连接同步执行、身份相等、组合/移除及 ref/out，创建和进入回调时验证 receiver，环境盒保持弱 UObject 身份。Guest 346/346、生成类型双后端 Automation 7/7 通过，覆盖 .NET 对照、强制回收、重载及 owner 失效拒绝。跨 Session 接收者、虚派发、持久事件与跨 await 根仍未完成。
-[跨实例路由设计](Docs/Phase66/P66.B_Ue_Method_Routing_Design.md)明确下一组的完整方法签名、目标实例、引用别名、同步重入和版本生命周期要求，并提前安排结构重载与跨帧调试探针；属于设计约束，尚未启用新的跨实例执行能力。
-[UE 实例方法目录](Docs/Phase66/P66.B_Ue_Method_Catalog.md)已交付 Semantic 26/1.30 的版本化签名、私有/反射区分、覆写槽与接口路由，包含封闭泛型接口身份和冷路径解析；Semantic 308/308、Guest 356/356、UE 类型生成器 6/6 通过。目录不构成运行时执行许可，跨 Session 调用、动态派发与持久根仍待连接；引用返回在执行合同接入前明确拒绝。
-[共享执行域的 VM 重入探针](Docs/Phase66/P66.B_Vm_Reentrant_Execution.md)已通过双后端 Automation 2/2，覆盖共享内存/global、嵌套预算、trap 和延迟卸载，并修复 WAMR 嵌套入口重置预算的问题；已有 WAMR 回归 6/6 通过。该证据属于 VM 层，真实 receiver、托管对象与 ref/out 跨实例执行仍待接入。
-[生成实例调用链](Docs/Phase66/P66.B_Generated_Invocation_Chain.md)已接入 Router 的源/目标身份、代码代次、父调用、深度/整链入口预算及失败传播；C# receiver 10/10、GeneratedTypes Automation 8/8 通过。原生链与 VM 探针仍未组成完整 C# 跨实例执行，Session 重入保护、共享执行域和持久根继续推进。
-[生成实例 Host 的重入销毁保护](Docs/Phase66/P66.B_Generated_Host_Lifecycle.md)修复 teardown 被拒绝后仍释放 Session 的所有权问题；活动调用与包事务中的变更会明确拒绝，失败清理保留实例。Windows 构建、C# receiver 10/10 与 GeneratedTypes 8/8 通过；调用者仍须空闲时重试，不宣称已实现自动延迟销毁或共享执行域。
-[共享 Runtime 的上下文入口](Docs/Phase66/P66.B_Runtime_Context_Invocation.md)已提供有界同步重入、目标 owner/服务切换、代码身份校验与返回恢复；双后端 Runtime/ABI 探针验证 A→B→A 共享托管对象、地址别名、强制 GC 和失败清理。Windows 构建、C# receiver 10/10、GeneratedTypes 9/9 通过。生成实例 Host 仍使用独立 Session/VM，普通 C# 跨实例调用及持久事件/await 尚未连接。
-[Runtime 持有生成绑定](Docs/Phase66/P66.B_Runtime_Owned_Generated_Bindings.md)进一步使 receiver/属性 import 使用当前实例的弱权限，绑定不随首个注册注销而释放；真实 C# WASM 在双后端共享静态状态并读写各实例 UE 属性。WAMR 补齐 scalar getter/void setter 及 f64 签名适配；Windows 编译、C# receiver 16/16、GeneratedTypes 10/10、WAMR registry 4/4 通过。生产 Host 的共享 VM、完整跨对象路由与持久 event/await 仍待实现，P66.B 保持进行中。
-
-[实例上下文回调](Docs/Phase66/P66.B_Contextual_Callbacks.md)已把 continuation/委托的 owner 切换、状态消费和失败传播接入生成 Session，并覆盖加载、重载、停止及 A 取消后 B 的 Timer 继续运行。Windows 构建、C# receiver 16/16、GeneratedTypes 12/12、continuation 10/10 与委托订阅 5/5 通过。生产 Host 共享执行域、完整跨对象调用与 C# event/await 持久根仍待完成，P66.B 保持进行中。
-
-[实例执行状态分离](Docs/Phase66/P66.B_Instance_Execution_State.md)进一步将生命周期和旧 Timer 队列从 VM/堆中分离；双后端验证 A/B 独立 Tick、EndPlay 取消、共享 global 保留及旧代码状态失效。Windows 构建、C# receiver 16/16、GeneratedTypes 13/13、六组生命周期与回调回归 36/36 通过。生产 Host 共享所有权、包级 reload、完整方法路由与持久根仍待连接，P66.B 继续进行。
-
-[生成 Session 实例状态接入](Docs/Phase66/P66.B_Generated_Session_Execution_State.md)统一生产成员、Tick、事件、调试恢复、快照与故障隔离使用的实例状态，热重载使旧状态退休。Windows 构建、C# receiver 16/16、GeneratedTypes 14/14、生命周期/回调回归 36/36 通过；双后端新增 Timer、事件与调试暂停/恢复验证。生产 Host 仍是每实例独立 VM，共享执行域及包级事务继续推进。
-
-[全包准备后发布](Docs/Phase66/P66.B_Package_Prepared_Reload.md)使 body-only reload 在所有候选准备、复核成功后才替换原 VM；失败逆序还原，保留原 global、实例状态及代码代次，无法还原则停止全包。Windows 构建、C# receiver 16/16、GeneratedTypes 15/15、生命周期与回调回归 36/36 通过。准备期间的原生副作用并非完全不可见；生产共享 VM、完整方法路由及持久 event/await 根仍待完成，P66.B 保持进行中。
-
-[生产共享执行域](Docs/Phase66/P66.B_Production_Execution_Domain.md)已将同包、同 World/registry 的生成实例接入同一 VM/堆/静态状态；实例独立取消，最后 owner 退出才卸载，初始化或执行失败停止整个域。包重载按域准备和迁移候选，并保留生成绑定的类型身份。Windows 构建、C# receiver 16/16、GeneratedTypes 16/16、生命周期/回调回归 36/36 通过，含真实 C#、强制 GC、Timer、World 隔离及重载后加入新对象。完整 C# 跨对象方法、同步 A→B→A、持久 event/await 和调试仍待完成，P66.B 保持进行中。
-
-[生产实例上下文入口](Docs/Phase66/P66.B_Production_Method_Entry.md)进一步连接同域目标 Session 的受检同步调用，保留原始帧、堆 token 与引用位置，并延迟到外层调用退出后清理故障。Windows 构建、C# receiver 16/16、GeneratedTypes 17/17、生命周期/回调回归 36/36 通过，含双后端 A→B→A、混合参数、共享对象、ref 位置别名、GC 与错误展开。该入口是原生 prepared route 的基础，完整 C# 方法目录、参数 ABI、virtual/interface 和持久根仍在推进。
-
-[间接方法参数帧](Docs/Phase66/P66.B_Indirect_Method_ABI.md)新增 IR 7/1.6 与可执行 WASM 适配器，用两个入口参数承载完整类型化帧；双后端验证 16 个混合参数、含引用结构返回、共享别名、递归和 GC。IR 35/35、backend 148/148、Guest 362/362、Windows 构建及堆 Automation 5/5 通过。当前为 Guest IR 执行基础，真实 C# 方法目录、生产跨对象路由、虚/接口派发与持久 event/await 仍待连接，P66.B 保持进行中。
-
-[C# 实例方法参数帧](Docs/Phase66/P66.B_CSharp_Method_Frames.md)已将方法目录连接到同 owner 的直接调用和绑定方法组，保持复杂值、共享引用与 ref/out 别名；统一 receiver 表示后仍验证原声明类型。IR 8/1.7 新增仅管理根与帧的模式，使无闭包的引用参数无需占位对象。Guest 385/385、IR 35/35、backend 148/148、原生堆 14/14、Windows 构建及双后端 GeneratedTypes 17/17、堆回归 5/5 通过。生产跨对象选择、虚/接口派发、持久事件与 await 仍未完成，P66.B 保持进行中。
-
-[生产返回根授权](Docs/Phase66/P66.B_Returned_Root_Authority.md)进一步限制被调用方只更新明确交给它的返回根，禁止释放、分配、越级转交及无帧嵌套继承。原生堆 15/15、Windows 构建、C# receiver 25/25 与 GeneratedTypes 17/17 通过，包含双后端返回前 Host GC、scope 恢复和失败隔离。此组仍是原生生产入口基础，完整 C# 跨对象路由、虚/接口选择与持久 event/await 继续推进。
-
-[真实 C# 生产跨对象调用](Docs/Phase66/P66.B_CSharp_Production_Method_Routes.md)已将 IR 9/1.8 的方法帧接入同域目标实例，双后端执行 A→B→A、20 个显式混合参数、共享对象与 ref/out 别名，并覆盖强制 GC、包重载、目标退休和 World 故障隔离。字段赋值的捕获位置与 `+=` 旧值快照也保持 C# 求值顺序。Guest 392/392、IR 35/35、backend 161/161、原生堆 15/15、Windows 构建、GeneratedTypes 18/18 与堆回归 5/5 通过。虚/接口动态选择、跨 owner UE 实例委托、持久 event/await 与完整调试仍待完成，P66.B 保持进行中。
-
-## 现在可以做什么
-
-更新于 **2026-09-10**。已跑通 **C# → WASM → UE 事件与 API → Win64 打包运行**，
-可开始尝试小型玩法 Demo，不需要 `.avid`。**P64 正式 Gate 与 P65.C Shipping 发布 Gate 已完成；
-当前仍不是完整 UE/.NET 替代层。**
-
-| 能力 | 已实现内容 |
-| --- | --- |
-| C# 游戏逻辑 | `BeginPlay/Tick/EndPlay`、Timer、Overlap、Gameplay Event；事件型脚本可省略 Tick，Startup Scenario 自动挂载与回滚；cooperative Wasmtime AOT 已在实际 Shipping Game 闭环 |
-| UE API 与类型 | 从 Reflection/Profile 生成项目 `UFUNCTION/UPROPERTY`、Interface 和 Blueprint 接口；支持 `UObject/AActor`、`FVector/FTransform`、固定 `USTRUCT`、`FText` 与受支持的递归容器、Set/Map |
-| C# 定义 UE 类型 | Actor、Component、World/GameInstance Subsystem，含继承、override、属性、函数与默认参数 |
-| UI 与存档 | C# 驱动 UMG 按钮/文本、SaveGame 跨进程读回、存取失败保护；切图后恢复存档。Development/Shipping 包内 AOT 存取已通过，Development 样例已有人工界面/点击反馈 |
-| 异步与委托 | 受控 `async/await`、Delay/NextTick、异步加载、Latent、AsyncAction；单播/多播、受支持签名的 `return/ref/out`、独立 UObject 订阅与回调来源查询 |
-| Blueprint 与联机 | callable/event 双向交互；Server/Client/NetMulticast RPC、属性复制与 RepNotify，dedicated/listen 多进程验证 |
-| 热重载与生命周期 | 方法体替换、持久字段迁移、失败候选回滚；存取可穿插重载，退出时取消异步并解绑事件；ObjectHandle 与 Session 隔离 |
-| 构建与发布 | Wasmtime 45 Win64 JIT/AOT、WAMR 兼容后端；内容寻址模块、Generated Type 配置隔离、Development/Shipping BuildCookRun；Win64 cooperative 安全点编译、证明与 CookedPackage 信任闭环；可重复 source package、原子安装/修复、兼容诊断与分层 Release Gate；Android arm64 交叉 AOT |
-| IDE 与诊断 | 增量缓存、persistent Worker、`.slnx`/WASI 工作区；源码映射、跨层栈、受控断点/步进与只读变量；typed Host 错误保留具体分类、原因和 import 身份；UE Trace 和 Profiler 导出 |
-
-直接看 C# 样例：[收集玩法](Samples/CSharp/PickupRush/README.md) ·
-[UI/存档](Samples/CSharp/UiSaveDemo/README.md)（[源码](Samples/CSharp/UiSaveDemo/UiSaveDemoScript.cs)）·
-[项目 API](Samples/CSharp/TypedProjectApi/README.md) · [联机](Samples/CSharp/NetworkTopology/README.md)。
-
-**近期交付：** [Win64 Shipping cooperative C# 闭环](Docs/Phase65/P65.D31_Wasmtime_Codegen_Attribution.md)、
-[Development/Shipping 包内 UI/存档](Docs/Phase64/P64.D_Packaged_UI.md)、
-[包内 World 生命周期门槛](Docs/Phase64/P64.D_Packaged_World_Soak.md)、两次 Editor 一小时切图、
-[分配栈诊断](Docs/Phase64/P64.D_Native_Allocation_Tracing.md)、[调用生命周期修复](Docs/Phase64/P64.D_Invocation_Lifetime.md)
-与[类型化 Host 结构化诊断](Docs/Phase64/P64.D_Typed_Host_Diagnostics.md)。
-首次安装的[干净生成模块构建](Docs/Phase64/P64.D_Clean_Checkout_Build.md)也已完成定点修复与双路径 UBT。
-[完整 Automation 隔离恢复](Docs/Phase64/P64.D_Full_Automation_Recovery.md)修正了无 package Subsystem、
-GameplayEvent 对象授权和故障 Session 所有权合同；正式候选完整 Automation **461/461**、.NET **300/300**、
-PowerShell contracts **16/16** 与三条 clean/generated UBT 路径全部通过。
-已知字符串参数帧逐轮保留已归零；整个 Editor 进程的剩余增长仍在归因，不宣称无泄漏。
-完整记录见 [P64 交付](Docs/Phase64/P64_Closeout.md)，类型范围见 [P58 验收](Docs/Phase58/P58.4_Centralized_Gate_Report.md)。
-实现与验收分别记录，限制见[当前边界](#当前边界)。
-
-D31 的历史 Windows clean candidate 回归 **467/467** 通过，.NET 六组 runner **302/302** 通过；修正了普通编辑器 AOT
-fuel 配置、隔离工程样本路径和 correctness 探针的 gameplay 分帧。详情见
-[D31.C8/C9](Docs/Phase65/P65.D31_Wasmtime_Codegen_Attribution.md#d31c8-普通编辑器-aot-预算一致性)。
-原先两个混合平台用例已拆开，Windows 断言独立保留；恢复主工程 Development 生成类型包身份后，
-两个 Windows 用例与八项 GeneratedTypes 定向测试 **10/10** 通过；随后 `7707d5c6` 完整 Windows
-选择清单逐项通过，包含拆分后保留的 Windows 断言。Android 两项另列为未执行，不计入通过数。
-正式性能采样的 Windows PID 复用误拒绝已改用进程生命周期内固定的实例身份；`7707d5c6`
-完整矩阵有效，**18 项门槛通过 16 项**，剩余两项为纯执行总体比率与胜率。PhysicalCost 入口同类
-修复已补齐 schema 与行为合同；`5bafc180` clean candidate 原生构建、五进程 **1050/1050**
-样本与三项受影响门槛均通过。Android/Mac 实机验收暂缓，
-[公开二进制路径脱敏](Docs/Phase65/P65.D32_Win64_Public_Binary_Privacy.md)已完成包含依赖声明的全新中性 Wasmtime 构建：94 包与独立依赖图一致，另含 Rust 标准库声明，176 文件完整隐私扫描 0 命中。新 DLL 在 `663f773b` 干净候选的 Win64 Editor 回归 **468/468** 通过，运行前后冻结文件与运行库身份一致；在 `e5d7650a` 完成 Shipping 生命周期与故障隔离闭环，D32.H 离线候选进一步通过重复发布与全新工程安装/编译/启动，主工程运行库保持原身份。
-新 DLL 集成中发现的生成绑定事务目录过长与失败后测试越界已修复，覆盖深路径生成、替换和失败保护。同一提交的源码包两次发布身份、清单一致，全新目录 Plan/Install/Verify/NoOp 全部通过、零警告；此项为源码安装证据。
-Win64 游戏打包现要求并校验完整 Wasmtime 声明集合，实际 UBT 已复制 59 文件且逐项哈希一致；staging 行为合同 **27/27**，工具链合同 **70/70**。架构检查已区分声明哈希校验与静态链接，并增加 6 项合同及实际导入库链接断言。
-默认 ActorLifecycle 构建已修复显式 binding package 被忽略的问题，保留绑定身份、import 校验与缓存合同；不改变无包调用和自定义源码的生成引用流程。
-新 DLL 的 Shipping Release、Cook、归档、回执与包内运行已通过；声明回执合同 **24/24**、最终依赖 **84/84**。修复四处被 Shipping `check` 省略的 continuation 令牌解码，聚焦 Automation **16/16**；包内确认 Timer、continuation、EndPlay，以及故障 Session 隔离后 World 继续运行。离线候选安装已通过，最终全量回归、长期运行与性能领导力仍分别验收。
-
-[Host 选择的动态方法派发](Docs/Phase66/P66.B_Host_Selected_Method_Dispatch.md)使用 IR 10/1.9，将真实 C# 虚调用、显式/隐式接口及 `base` 固定调用接入同域生产执行。接口视图保持弱 UObject handle，派发依据目标已注册脚本类型；普通托管类接口、默认接口方法、检查型向下转换与跨 owner 方法组尚未接通。P66.B 保持进行中，先前条目中的未实现描述只代表各组交付时点。
-
-[持久根与 continuation 状态](Docs/Phase66/P66.B_Persistent_Managed_Roots.md)提供原子获取与自动释放的原生堆租约，恢复读取后保持到回调结束；取消、候选丢弃和 teardown 释放状态，旧 Runtime 的租约不能在重载后复活。具体堆类型的版本化 WASM 存取 ABI 已验证对象身份与当前 continuation 的消费权限；类型化 IR、编译器状态对象生成、订阅和 C# 跨 await 接入仍在推进。
-Windows 编译、continuation **12/12**（含双后端状态所有权及真实 WASM 存取）、VM 回归 **25/25** 通过；先前堆回归见对应报告。P66.B 保持进行中，ABI 用例不代表 C# await 组合已完成。
-
-## 架构
-
-```mermaid
-flowchart LR
-    Reflection["UE Reflection<br/>Binding Profile"] --> Generator["AvidScriptEditor<br/>Generator"]
-    Generator --> API["Generated C# API"]
-    Generator --> Package["Immutable Binding Package"]
-    Script["C# Script"] --> Semantic["Roslyn Semantic<br/>Guest IR"]
-    API --> Semantic
-    Semantic --> Wasm["WebAssembly"]
-    Wasm --> VM["Wasmtime / WAMR"]
-    Package --> Runtime["Session + Prepared Plans"]
-    VM --> Runtime
-    Runtime --> UE["Unreal Engine 5.8"]
-```
-
-| 模块 | 职责 |
-| --- | --- |
-| `AvidScriptCore` | 后端无关 ABI、错误与基础合同 |
-| `AvidScriptBindings` | descriptor、codec、prepared executor 与 value heap |
-| `AvidScriptVM` | Wasmtime/WAMR、WASM 校验、Guest Memory 与 Host crossing |
-| `AvidScriptRuntime` | Session、生命周期、对象 registry、事件、异步与热重载 |
-| `AvidScriptEditor` | Reflection/profile、代码生成、C# 构建和 Editor 集成 |
-| `Tools/` | Roslyn 前端、Guest IR 与 WASM backend |
-
-对象始终通过 generational `ObjectHandle` 访问；不向 Guest 暴露原始 `UObject*`。不支持的类型或
-失配的反射身份会在生成或加载阶段失败关闭。
-
-## 性能摘要
-
-**指定 UE 交互路径已领先冻结版本的 Puerts；纯执行层尚未全面领先。**
-以下图表为 **P57 归档基准**，当前 P65 数据见图表后的最新摘要：UE5.8 Win64 Development、Intel Core Ultra 7 265K，
-Wasmtime 45 Cranelift JIT 对冻结版本的 Puerts V8，同机 5 个进程、每进程 5 次预热、每单元 30 次采样。
-比率为 AvidScript / Puerts，越低越好。
-
-![Prepared Reflection 性能对比](Docs/Assets/README/phase57-prepared-reflection-performance.svg)
-
-| UE 交互场景 | AvidScript 耗时（P50） | Puerts Reflection 耗时（P50） | 比率 |
-| --- | ---: | ---: | ---: |
-| Scalar UFUNCTION | `54.57 ns` | `106.15 ns` | **`0.514x`** |
-| Property get/set | `68.14 ns` | `103.01 ns` | **`0.661x`** |
-| FVector value | `66.49 ns` | `1193.10 ns` | **`0.056x`** |
-| UObject roundtrip | `69.60 ns` | `130.90 ns` | **`0.532x`** |
-
-这是指定 prepared/fused 路径的每逻辑操作耗时，不代表任意 `UFUNCTION` 或整款游戏帧率。
-见 [P57 原始证据](Docs/Phase57/P57.11B1_Recursive_Fixed_Struct_Codec_Evidence.json)。
-
-- **游戏逻辑：** P56 Small/Dense gameplay 与 Lifecycle callback 的 P50 比率为 **`0.469x / 0.513x / 0.391x`**，各自对照路径与范围见[报告](Docs/Phase56/P56.5_Fused_Call_Frame_Implementation_Report.md)。
-- **纯执行：** [P65.D34](Docs/Phase65/P65.D34_Production_Epoch_Runtime.md) 的 `6188ebe3` 正式 12-kernel 相同 WASM 对照，P50/P95 几何均值为 **`0.9814x / 1.0495x`**，P50/P95 胜率为 **`83.33% / 8.33%`**，仍未达到 `<= 0.95x` 与 `>= 60%` 的完整目标；高 P95 样本全部保留，未宣称总体领先。
-- **最新 UE crossing：** P65.D10 将通用 `int32 -> int32` generated S1 降至 **`18.17 ns`**，相对 Puerts static 为 **`0.829x`**；十项 micro P50 几何均值已从 `1.440x` 改善到 `1.004x`，但仍未形成全面领先。见[D10 报告](Docs/Phase65/P65.D10_Generated_Unary_I32_Performance.md)。
-- **最新 generated typed 路径：** FVector ref/out 已达到 `103.64 ns`（Puerts static 的 `0.144x`）；P65.D13 又将 UObject roundtrip 从 `147.73 ns` 降至 **`51.88 ns`**，已领先 Puerts reflection，但仍是 Puerts static 的 `1.139x`。十项 UE micro 的 P50/P95 几何均值为 **`0.779x / 0.786x`**。见[D11](Docs/Phase65/P65.D11_Generated_Vector_RefOut_Performance.md)与[D13](Docs/Phase65/P65.D13_Packed_Object_Roundtrip_Performance.md)。
-- **最新 packaged 性能：** P65.D28 让 verified AOT package 使用 fuel-free Cranelift profile，同时保留 epoch watchdog 与签名边界。generated S1 十项 P50/P95 几何均值为 **`0.590x / 0.592x`**，胜项 **`8/10 / 8/10`**；对象 roundtrip 为 **`0.773x / 0.750x`**。`pure_integer` 与 `callback_empty` 仍未领先，semantic lane 仍待优化。见[D28 报告](Docs/Phase65/P65.D28_Verified_Package_Fuel_Free_Artifacts.md)。
-- **最新完整矩阵：** P65.D31.C11 的 semantic / Puerts reflection 为 **`0.619x`**，Small/Dense gameplay 为最佳 Puerts 的 **`0.226x / 0.303x`**；generated scalar/property 为 **`22.16 / 39.63 ns`**，empty callback 为 **`50.03 ns`**。统一 Gate 通过 **`16/18`**，见[D31.C11](Docs/Phase65/P65.D31_Wasmtime_Codegen_Attribution.md#d31c11-当前-windows-全量与完整性能矩阵)。
-- **比较边界：** 尚无同口径 UnLua/AngelScript 排行榜；不宣称全场景领先。其他数据见[容器](Docs/Phase57/P57.11D_Compiler_Managed_Array_Region.md)、[UE 原生对照](Docs/Phase60/P60.D_Performance_And_Gate.md)与[增量构建](Docs/Phase61/P61.E_Integration_Gate.md)。
+[跑起来](#快速开始) · [看代码示例](#常见用法) · [当前限制](#当前边界) · [更多文档](#进一步阅读)
 
 ## 快速开始
 
-要求：UE5.8 源码版、Windows 10/11 x64、Visual Studio 2022、.NET SDK `8.0.416`、
-PowerShell 7 与 Git。
+先运行仓库自带的 ActorLifecycle 样例：让一个方块移动、旋转并逐渐变大。下面的命令都在项目的 `Plugins/AvidScript` 目录执行。
 
-1. 将仓库放入项目的 `Plugins/AvidScript`。
-2. 在插件目录安装锁定的 Wasmtime 依赖：
+### 1. 准备环境
+
+需要 Windows 10/11 x64、UE 5.8 源码版、Visual Studio 2022 的 UE C++ 构建环境、PowerShell 7、Git 和 **.NET SDK 8.0.416**。
+
+将本仓库放到一个 C++ UE 项目的 `Plugins/AvidScript` 目录。安装插件使用的脚本执行引擎 Wasmtime：
 
 ```powershell
 pwsh -NoProfile -File Build/InstallWasmtimeDependency.ps1 -Mode Install
 ```
 
-3. 使用源码版 UE5.8 增量构建 Editor Target：
+然后构建项目的 Editor。将下面的引擎路径、项目路径和 `YourProjectEditor` 替换为自己的配置：
 
 ```powershell
 $env:UE_ROOT = "C:\UnrealEngine"
@@ -212,168 +33,137 @@ $env:UE_ROOT = "C:\UnrealEngine"
   -WaitMutex -NoHotReloadFromIDE
 ```
 
-4. 构建仓库内第一个 C# 生命周期 Guest：
+### 2. 编译并挂到方块上
+
+1. 打开 UE Editor，确认 AvidScript 插件已启用。
+2. 在关卡中放置一个 Cube，将 Mobility 设为 **Movable**，并选中它。
+3. 在 **Tools** 菜单的 **AvidScript** 分组中，执行 **Build And Bind C# ActorLifecycle Script**。
+4. 构建成功后，方块上会添加或复用 **AvidScript Component**，并自动填入脚本文件。
+5. 点击 **Play**：方块会先移动到样例设定的位置，然后持续移动、旋转和变大。
+
+完整脚本在 [ActorLifecycleScript.cs](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)。如果没有变化，先检查 **Output Log** 中的 `AvidScript` 构建或加载错误，以及方块上的组件是否已绑定脚本。
+
+也可以单独用命令行编译：
 
 ```powershell
 pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 ```
 
-项目自定义 API 需要先通过 Editor Reflection 与 Binding Profile 生成 binding package 和 C# facade。
+成功时会输出 `result=direct_abi_built`。生成的脚本入口位于**项目目录**下：
 
-更多样例：[生命周期与异步](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)、
-[事件与热重载](Samples/CSharp/PlayablePickup/README.md)、[RPC](Samples/CSharp/NetworkRpc/README.md)、
-[属性复制](Samples/CSharp/ReplicatedProperty/README.md)、[多进程网络](Samples/CSharp/NetworkTopology/README.md)。
+```text
+Saved/AvidScriptCSharpGuest/ActorLifecycle/actor_lifecycle.avidscript.json
+```
+
+这个 JSON 是脚本的加载清单，记录要加载的程序及其信息。手动绑定时，在 Actor 上添加 **AvidScript Component**，将 **Script Manifest File** 指向它；**Script Module** 保持未设置。命令行编译本身不会修改关卡。
+
+## 常见用法
+
+下面是从仓库样例中提取或简化的片段，用来说明写法；完整文件还包含必要的声明和配置，请从对应样例开始修改。
+
+### 每帧移动 Actor
+
+```csharp
+[UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
+public static void Tick(float deltaSeconds)
+{
+    FVector position = UE.Self.GetActorLocation();
+    UE.Self.SetActorLocation(
+        position + new FVector(120.0f * deltaSeconds, 0.0f, 0.0f));
+}
+```
+
+`UE.Self` 是挂载脚本的 Actor；`FVector` 是 UE 的三维向量。这里每秒沿 X 轴移动 120 个 UE 单位，乘以 `deltaSeconds` 后速度不依赖帧率。方法上方的特性把它接到 UE 的每帧更新事件。
+
+同一套入口还有 `BeginPlay`（开始运行）和 `EndPlay`（结束运行）。见[生命周期样例](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)。
+
+### 等待一段时间，再继续执行
+
+```csharp
+[UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+public static async void BeginPlay()
+{
+    await AvidContinuations.DelayAsync(0.25f);
+    UE.Self.SetActorScale3D(new FVector(1.25f, 1.25f, 1.25f));
+}
+```
+
+效果是开始运行后等待 0.25 秒，再把 Actor 放大。`await` 等待期间游戏继续运行。脚本所属对象或 World 被销毁时，关联等待会被取消，避免随后再操作已销毁的对象。
+
+还可以等待下一帧（`NextTickAsync()`）或资源加载（`AvidAssets.LoadObjectAsync(...)`）。文档中的 **continuation** 指“等待完成后继续执行的那段代码”；**Latent** 是 UE 对这类延迟完成操作的称呼。资源加载写法见[生命周期样例](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)，主动取消见[延迟操作样例](Samples/CSharp/LatentGameplay/README.md)。
+
+### 用 C# 定义蓝图可用的 Actor
+
+```csharp
+using AvidScript;
+
+[UClass(Blueprintable = true, BlueprintType = true)]
+public partial class Projectile : AvidActor
+{
+    [UProperty(EditAnywhere = true, BlueprintReadWrite = true)]
+    public float Damage { get; set; } = 25.0f;
+
+    [UFunction(BlueprintCallable = true)]
+    public void Activate(float damageScale)
+    {
+        Damage *= damageScale;
+    }
+}
+```
+
+生成并编译 UE 类型后，`Projectile` 可以作为蓝图的父类；`Damage` 可以在编辑器和蓝图中修改，`Activate` 可以作为蓝图函数调用。
+
+`UClass`、`UProperty`、`UFunction` 分别标记“UE 能识别的类、属性、函数”。这类脚本需要生成对应的 UE 类型，不能只把 `.cs` 文件挂到组件上。见[脚本定义 UE 类型样例](Samples/CSharp/ScriptDefinedTypes/README.md)。
+
+### 找一个接近你需求的完整样例
+
+| 你想实现什么 | 从哪里开始 |
+| --- | --- |
+| 碰到道具后隐藏，3 秒后重新出现 | [可拾取道具](Samples/CSharp/PlayablePickup/README.md) |
+| 20 秒内收集 5 次，判断胜负并重开 | [PickupRush 小游戏](Samples/CSharp/PickupRush/README.md) |
+| 点击按钮加分，保存并在下次启动时读回 | [UI 与存档](Samples/CSharp/UiSaveDemo/README.md) |
+| 客户端请求服务器执行操作 | [RPC：远程调用](Samples/CSharp/NetworkRpc/README.md) |
+| 服务器修改数值，客户端同步并响应变化 | [属性复制与 RepNotify](Samples/CSharp/ReplicatedProperty/README.md) |
+| 调用项目自己的 C++ 函数、生成蓝图 Actor | [项目 API](Samples/CSharp/TypedProjectApi/README.md) |
+
+RPC 是跨网络请求另一端执行函数；属性复制是服务器把属性值同步给客户端；RepNotify 是收到属性变化后的回调。调用权限和对象归属仍遵循 UE 的网络规则。
 
 ## 当前边界
 
-- **UE 类型**：由 Profile 与 ABI/codec 决定生成范围，并非所有 UE API 自动可用。复合容器内强 UObject 引用仍拒绝，平面 `TArray<UObject*>` 可用；Set/Map key 受确定性编码限制，soft/weak 的脚本侧解析易用接口待补齐。
-- **C# 子集**：支持成员内同步、非泛型局部函数、直接调用的变量捕获，以及 Guest 内静态/捕获局部方法组、同步 lambda/匿名方法和共享逃逸闭包；捕获值可作为内部 ref/out 实参，结构体字段与方法保持共享写入，结构体实例委托绑定独立副本，委托支持 `==/!=` 和同步组合/移除。受支持的普通引用类已有构造、共享字段、实例委托及 this 捕获，当前 Session owner 的 UE 实例委托与 this 捕获也已连接；同执行域 UE 实例间支持同步直接调用、注册类型的虚覆写和接口调用，以及创建时选择实际目标的直接/虚/接口/base 方法组。普通托管类继承/多态、默认接口方法、检查型接口转换、字段初始化、自动属性、跨 owner UE 实例委托、跨 await 委托和 `event +=` 仍未支持；封闭泛型接口的执行覆盖尚未证明。无完整 .NET Runtime、任意 awaiter 或异常系统；内部借用不能进入普通 Host ABI、跨执行域或持久状态；UE 委托/事件仍使用显式 bind/subscribe 与 `ExecuteX/BroadcastX`。
-- **重载与隔离**：方法体可热重载；UI 样例通过 `NextTickAsync` 在候选提交后初始化。准备期无可回滚适配的反射写入仍被拒绝，不承诺回滚任意外部副作用。反射结构变更需增量 UBT 并重启 Editor；WASM 隔离不是原生 DLL 进程沙箱。
-- **玩法与平台**：UI 包使用独立验证插件和隔离启动配置，Development/Shipping 均通过跨进程自动存取；Development 人工界面、按钮和同一 UserRoot 新进程读档均反馈无问题。Shipping 人工视觉按用户要求不阻塞当前推进，明确转入发布候选验收，不能视为通过。任意损坏存档不在现有保证内；Development 包内一小时切图与当前候选 2/2 多进程网络拓扑通过，UI 重载另有 20 轮有界证据，但不宣称一小时网络/重载长稳；Android UBT/APK/真机及 iOS 仍未验收。
-- **诊断与性能**：typed Host 拒绝已在 Wasmtime 保留具体 category/details/import，WAMR semantic/dynamic 路径同样保留分类；尚无完整 C# 异常系统。纯执行 P50/P95 领先门禁未关闭，也未完成同口径 UnLua/AngelScript 矩阵。
+选型时请按下面的实际限制判断。功能出现在样例中，不表示任意 C# 写法或任意 UE 类型都已支持。
 
-P65.A-C 已完成发布工程主链：可重复发布包、原子安装/升级、兼容诊断与分层平台 Gate；P65.D 正在推进性能领导力。
-公开二进制隐私/来源债务 P65-D04 已按 D32.A-H 证据关闭；P65-D03 保持未完成，
-[D33 原生代码实验](Docs/Phase65/P65.D33_Native_Codegen_Inspection.md)已实现隔离 Win64 epoch 寄存器保留补丁，
-强制慢路径/中断恢复合同 17/17、12 kernel 原生诊断通过；不改变现有正式性能结论。
-[D34 运行库候选](Docs/Phase65/P65.D34_Production_Epoch_Runtime.md)已纳入 patchset.3，
-176 文件隐私扫描、Editor 构建与 Wasmtime 16/16 回归通过，保留 `.2` 离线包的校验与替换兼容；
-冻结器已补齐 Generated Type 发布后的 Editor 重编译，干净候选 packaged micro 9000/9000、gameplay 1800/1800 正确性通过；
-正式矩阵四组共 19,050 个正确样本，性能门禁 16/18 通过；纯执行 P50/P95 为 V8 的 0.9814x/1.0495x，
-P95 胜率仍未达标。真实离线包替换两轮成功、第三轮目录改名拒绝访问，旧包完整回滚验证通过；
-安装器现有三秒有界占用重试，真实文件/目录句柄回归及原合同共 28/28 通过。
-修复候选 `f8159f76` 的新离线包两次发布身份一致，包内安装器三轮真实替换 **21/21、0 warning**，
-干净架构检查通过；完整跨框架性能领导力仍待完成。
-Shipping 准备的 NuGet 环境隔离已通过行为合同与真实候选发布/重编译验证；BuildCookRun 现读取唯一 `.uproject` 识别工程，支持目录名不同并拒绝歧义，合同 33/33。
-最新 `8c032e9f` 离线包两次发布身份一致，实际 `.3 → .3` 发布替换 **7/7** 通过；两次目录改名均重试两次后恢复，保留 **2 条 warning**，完整 inventory 校验通过。
-同源 Shipping Release/Cook/归档与包内运行已通过：回执 **78/78**，61 个归档 NonUFS 文件逐项哈希一致，含完整 59 个声明文件；BeginPlay/EndPlay、549 次 Tick、Timer、事件、continuation 和故障 Session 隔离后 World 继续运行均有实际证据，主工程 Editor 已恢复。
-同源完整 Windows Automation **468/468**、零失败，测试清单、进程退出与主工程恢复均核验通过。首轮 460/468 的 Generated Types 失败源于 Shipping 发布后 Editor/Cook 指针不一致；重新发布 Development 包并重编译后完整重跑通过，保留首轮失败证据。两项 Android 主机编译器测试另列未执行。
-正式纯执行尾部诊断保留原门槛与全部样本，后续优先定位 hashing、scalar_float 和 SIMD；两项性能门禁及 AngelScript 同口径矩阵仍未完成。
-[D35 epoch 读取融合诊断](Docs/Phase65/P65.D35_Epoch_Load_Fusion_Diagnostic.md)通过 17/17 中断恢复与 42/42 内存顺序检查；72 个配对进程相对当前运行库 P50/P95 为 0.998966x/0.996449x，整体接近持平且 internal_call 回退，未纳入生产，不改变正式 16/18 结论。
-[D36 AngelScript 隔离 Editor 兼容性](Docs/Phase65/P65.D36_AngelScript_Editor_Compatibility.md)已完成固定源码在独立 UE5.8.0 环境的编译，并实际通过 2/2 脚本执行与 FVector 调用测试；完整同语义矩阵和 packaged native code 尚未验证，正式性能结论保持未完成。
-[D37 AngelScript 同语义适配器](Docs/Phase65/P65.D37_AngelScript_Same_Semantics.md)进一步完成完整 harness 编译、264/264 正确性用例与 17/17 拒绝检查；可移植安装/验证入口通过 9/9、27/27 合同及实际 Editor 重跑。正式计时与 packaged generated native code 仍待完成，不改变生产性能门禁 16/18。
-[D38 AngelScript 计时宿主](Docs/Phase65/P65.D38_AngelScript_Timing_Host.md)已完成固定版本的 Native/Editor VM 每套 5 进程配对采样：327 个校准、600 个预热、3,600 个计时样本逐项验证通过，未删除异常值；验证器合同 34/34 通过。同一隔离引擎的其他框架矩阵与 packaged generated native code 仍待完成，不宣称完整跨框架领先。
-[D39 隔离 Editor 六路径准备](Docs/Phase65/P65.D39_Isolated_Editor_Six_Lane_Preparation.md)已生成三套 C# 产物、编译生成绑定模块，并实际通过 Native/Puerts/AvidScript 六路径诊断的 300 个 micro 与 60 个 gameplay 计时样本校验。正式 runner 的物理安装/独立 target 身份支持、最终配置下的双方正式重跑和 packaged AS 原生执行仍待完成；生产性能门禁保持 16/18。
-Shipping 人工视觉与移动设备证据仍作为独立发布候选 Gate，不以自动报告或阶段编号替代。
+| 范围 | 目前能做什么 | 对开发的影响 |
+| --- | --- | --- |
+| C# 语言 | 常用控制流、受支持的类和结构体、同步 lambda、局部函数、共享捕获变量 | 还不能直接迁入任意 .NET / NuGet 库；普通 C# 类继承与多态、泛型执行覆盖、完整异常系统仍不齐全 |
+| 异步 | 计时器、下一帧、资源加载及受支持的 UE 异步操作 | 跨 `await` 保留捕获对象、实例异步方法还未完整接通；不能使用任意 awaiter |
+| UE 类型与 API | 属性、函数、常用数学类型、文本，以及受支持的数组、Set（去重集合）、Map（键值表） | 先在配置中选择需要的 API，再生成 C# 调用接口；部分嵌套对象容器、软引用（按路径引用资源）和弱引用（不阻止对象回收）的便捷用法仍有限制 |
+| 委托与事件 | 受支持的单播、多播及 `ref/out` 参数 | 通过显式绑定、订阅接口使用；尚不能普遍写成 C# 的 `button.Click += Handler` |
+| 热重载 | 更新方法体，迁移受支持的持久状态，拒绝无效候选版本 | 改移动速度这类逻辑可重载；新增反射属性、修改函数签名需要重新编译 UE 并重启 Editor；不能回滚任意外部副作用 |
+| 调试 | 错误定位、调用栈、受支持的断点 / 单步、只读变量查看和性能分析 | 还不是完整 C# 调试器，部分语言能力与调试插桩不能组合使用 |
+| Windows 打包 | 已有 Development / Shipping 样例与打包验证 | 正式包必须发布脚本模块并设置模块 ID；不能直接沿用上面的临时 JSON 路径 |
+| 移动端 | 已有 Android 预编译准备 | Android 真机和 iOS 尚未验收，目前优先完善 Windows |
 
-P65.A 已完成：thin source 发布器与原子安装器当前通过 **24/24** 轻量合同及真实 commit-based 发布/安装
-smoke。发布输入固定到 Git commit 与 allowlist，package/receipt 由 Schema、inventory 和 SHA-256 约束，
-支持 `Plan / Install / Upgrade / Repair / NoOp / Verify`、项目锁和失败回滚；相同输入重复发布得到相同
-release identity。独立的 `win64-offline` profile 现已携带受控 Win64 Wasmtime 与 WAMR，使用 schema v2；
-源码包仍使用 v1。新增合同 **18/18**、原发布/安装合同 **26/26**，真实离线候选重复发布身份一致，
-包内安装器在全新工程完成 Plan/Install/Verify/NoOp，首次 Editor 编译与固定英文环境下的启动/退出通过，
-主工程 canonical Editor 已恢复且三处 BuildId 一致。
-离线包不包含 UE、VS、.NET SDK 或 NuGet 缓存，完整发布 Gate 与性能目标仍未关闭。
+更具体的语言缺口和下一步见[当前实施计划](Docs/Phase66/P66.1_Implementation_Plan.md)。自动化测试、实际玩家操作和长时间运行的验收分别记录，不能互相代替。
 
-P65.B1 已提供只读 Compatibility Doctor：统一检查 UE5.8、.NET/PowerShell/VS、插件 receipt、Wasmtime、
-Binding、Generated Type、项目 Target 与 Android toolchain，并输出稳定 JSON code/status/remediation。
-当前工程的 Win64 开发链全部通过、**0 blocked**；warning 为源码 checkout 无安装 receipt 与 Android `3/19`
-及其未满足子项，不影响 PC 开发，但不会被写成已完成的分发或移动端证据。
+## 它如何运行
 
-P65.B2 已完成脱敏 support bundle：一次命令执行 Doctor 并原子发布带 Schema/inventory/SHA-256 的支持包，
-路径替换为中性占位符，默认不收集日志。显式日志仅接受 `.log/.txt`，每份限制为 64 KiB/200 行；源码、
-WASM、PDB、Guest IR、环境与原始日志不进入包。当前真实 bundle 隐私扫描和 readback 通过。
+构建工具把 C# 编译成 **WebAssembly（WASM）**，一种供脚本执行引擎运行的程序格式；UE 插件加载它，再把脚本中的调用转交给 UE。游戏运行时不加载完整的 .NET / CLR。
 
-P65.C1 已把 Generated Type 与模块包生产器身份纳入同一个 `release.json`：生产器 SHA-256 与两端 Wasmtime
-lock、Git tree、payload inventory 一同参与 `release_id`。项目实际 `package_id`、模块 catalog 与平台 receipt
-将在分层 Release Gate 中绑定，避免把项目私有产物写死到通用插件发布包。
+项目 API 通过配置选择后生成 C# 接口。例如，选择项目的 `ApplyGameplayValue` 函数后，脚本才能以对应的 C# 方法调用它。技术文档中的 **Profile** 是这份选择配置，**binding / facade** 是生成的连接信息和 C# 调用接口。
 
-P65.C 已提供统一平台 Release Gate：固定报告 release、项目产物、Win64 Shipping、Android toolchain/arm64/
-APK/device 与人工体验 8 层独立状态。最终真实 `Execute` 为 **3 passed / 0 failed / 1 blocked / 4 not_run**，
-Win64 Shipping BuildCookRun 与 fresh receipt 通过；Android 仍为 3/19。Release/UBT/Cooker 可按本次运行隔离可选
-插件，Generated Type 使用配置专属 overlay，不改写 `.uproject` 或源码 `current.json`。详见
-[P65.C3 发布 Gate](Docs/Phase65/P65.C3_Win64_Shipping_Release_Gate.md)。
+主要执行引擎为 Wasmtime，另有 WAMR 兼容后端。底层执行引擎的细节通常不需要进入玩法代码。
 
-P65.D 已完成 clean candidate 的正式 5 进程基线：18 项统一性能 Gate 中 **14 项通过、4 项失败**。
-UE 交互 workload 相对 Puerts 为 Semantic **0.60x**、small **0.38x**、dense **0.52x**；纯执行
-Wasmtime/V8 P50/P95 为 **1.128x/1.189x**，完整 callback 为 **831.86 ns（Puerts 的 5.67x）**。
-因此 UE 交互领先已形成证据，但完整性能领导力仍未关闭；下一批集中优化 guest-entry containment 与
-callback 成功路径。详见 [P65.D3 正式性能基线](Docs/Phase65/P65.D3_Formal_Performance_Baseline.md)。
+## 性能摘要
 
-P65.D4-D6 已加入专用 Wasmtime event thunk、低竞争 epoch watchdog 和 callback 成功路径惰性观测。
-最新 clean candidate 单进程诊断中，三个 AvidScript lane 的 callback P50/P95 均低于对应 Puerts lane；
-generated S1 的 callback P50 比率为 **`0.886x / 0.913x`**，gameplay small/dense 相对 Puerts static
-为 **`0.196x / 0.182x`**。该结果仍是诊断证据，正式 5 进程 Gate 完成前不改写 P65.D3 结论。
-详见 [P65.D7 性能诊断](Docs/Phase65/P65.D7_Clean_Candidate_Performance_Diagnostic.md)。
+已有冻结用例的性能对比，部分 UE 调用路径取得优势；纯计算等项目仍有未达目标的指标，目前没有证据证明整体领先 Puerts 或 Unreal AngelScript。具体条件与结果见[性能报告](Docs/Phase65/P65.D34_Production_Epoch_Runtime.md)，开发体验差距见[框架成熟度评估](Docs/Phase66/P66_Developer_Leadership_Assessment.md)。
 
-同一优化候选的正式 5 进程复测已完成：callback 降至 **`494.31 ns`**，较 P65.D3 下降约
-**`40.6%`**；UE gameplay 继续领先，但 identical-WASM P50/P95 仍为 **`1.126x / 1.168x`**，
-统一 Gate 为 **12/18**。因此诊断方向成立，完整领导力仍未关闭；下一步是由 verified cooked package
-驱动的高性能 containment 层，而不是 benchmark 专用关闭安全机制。详见
-[P65.D8 正式复测](Docs/Phase65/P65.D8_Formal_Performance_Retest.md)。
+## 进一步阅读
 
-P65.D9 已按真实执行预算拆分 Wasmtime compiler profile：配置 fuel 或加载 serialized package 时继续使用
-严格 containment；原始 WASM 且未请求 fuel 时免除 fuel 插桩，并保留 epoch、Host-call 和内存边界。
-正式 identical-WASM P50/P95 相对 D8 改善 **`1.72% / 3.28%`**，但当前仍为
-**`1.1065x / 1.1293x`**，未通过领先门禁。下一步聚焦浮点、SIMD 与 mixed gameplay 的 Cranelift
-生成质量，以及 verified package callback 的安全快层。详见
-[P65.D9 按需 Fuel 配置](Docs/Phase65/P65.D9_Demand_Driven_Fuel_Profile.md)。
-
-P65.D10 已贯通通用实例 `int32 -> int32` generated S1：Descriptor、C# facade、生成 C++、Runtime
-prepared target 与 Wasmtime typed host 使用同一签名合同。真实 packaged host 的 5 进程正式结果中，
-`scalar_noop` 为 **`18.17 ns`**，比冻结 Puerts static 快约 **`17.1%`**，且 generated/semantic/
-prepared-dynamic 计数证明调用没有回退。十项 micro 综合仍为 `1.004x`、胜项 `5/10`，下一批继续处理
-`vector_ref_out` 与 `object_roundtrip`。详见
-[P65.D10 Generated Unary I32](Docs/Phase65/P65.D10_Generated_Unary_I32_Performance.md)。
-
-P65.D11-D13 已把通用 `FVector ref/out` 与 `UObject* -> UObject*` 接入 generated typed-host。
-正式 packaged-host 结果分别为 **`103.64 ns`** 与 **`51.88 ns`**；后者较 D11 提速 `2.85x`，
-领先 Puerts reflection，但相对 Puerts static 仍为 `1.139x`。十项 UE micro 的 generated S1
-P50/P95 几何均值为 **`0.779x / 0.786x`**、胜项 `6/10`。callback、pure integer、object static
-与 AngelScript 同语义矩阵仍未全部关闭，P65-D03 保持未验证。详见
-[P65.D11](Docs/Phase65/P65.D11_Generated_Vector_RefOut_Performance.md)与
-[P65.D13](Docs/Phase65/P65.D13_Packed_Object_Roundtrip_Performance.md)。
-
-P65.D28 已把 verified packaged artifact 的 compiler profile 与真实 Session 安全预算对齐：未启用 fuel
-预算时不再保留 fuel 计数机器码，旧 strict artifact 与非零 fuel 预算仍 fail-closed 兼容。正式 5 进程
-`9000/9000` 样本中，generated S1 十项 P50/P95 几何均值为 **`0.590x / 0.592x`**、胜项
-**`8/10 / 8/10`**；相对 D22 分别改善 `11.31% / 9.55%`。`pure_integer` 为
-`1.395x / 1.625x`，`callback_empty` 为 `1.033x / 1.047x`，adaptive semantic 综合仍为
-`1.472x / 1.483x`，因此 P65-D03 保持开放。详见
-[P65.D28](Docs/Phase65/P65.D28_Verified_Package_Fuel_Free_Artifacts.md)。
-
-P65.D29 已把 adaptive semantic 的通用 `int32 F(int32)` 接入固定 typed-host ABI；正式 Editor Gate 中
-semantic / Puerts reflection 为 **`0.738x`**，Small/Dense gameplay 为 **`0.225x / 0.310x`**。
-该轮 `18` 项性能门禁通过 `14` 项；后续 D31.C11 已将 scalar/property 两项转为通过，当前为
-`16/18`，执行层总体比率和胜率仍未达标。D29 历史结果详见
-[P65.D29](Docs/Phase65/P65.D29_Adaptive_Unary_Typed_Host.md)。
-
-P65.D31.C4 修复编译身份和 Game/Editor 标签后，clean candidate `c6f7b177` 的 Win64 包正式
-微基准 `9000/9000` 样本正确；generated scalar/property 为 `17.19/29.89 ns`，empty callback 为
-`103.61 ns`，其相对 Puerts 优势仍未达标。C5 随后去除 Session 入口的临时字符串构造，改善结果见下文。
-目前优先收尾 Windows，Android/Mac 实机验收暂缓；完整 Gate 已由 D31.C11 更新为 `16/18`。见
-[D31 验证记录](Docs/Phase65/P65.D31_Wasmtime_Codegen_Attribution.md)。
-
-Windows 发布工具已补齐超长路径的备用数据流检查，并支持 UE5.8 的两种合法 Game 归档布局。
-`9ef177ed` 的正式微基准与玩法样本分别为 `9000/9000`、`1800/1800` 正确，优化后的 empty callback
-为 `47.26 ns`（Puerts static `103.06 ns`）；完整 18 项 Gate 仍待汇总。源码预览包已通过重复确定性
-发布、全新工程安装、完整核验和 NoOp；发布合同 `26/26` 通过。
-
-## 验证
-
-完整回归与后续专项分别记录，**不累加成当前全量通过数**：
-
-| 范围 | 已归档证据 |
-| --- | --- |
-| [Phase 64 正式 Gate](Docs/Phase64/P64_Gate_Summary.json)，候选 `cca81ec` | Automation **461/461**、.NET **300/300**、PowerShell contracts **16/16**；12 项 Gate 检查及 clean/generated/published 三条 UE5.8 UBT 路径通过 |
-| [PickupRush](Samples/CSharp/PickupRush/README.md) | Editor / Win64 Development / Shipping 均为 **5/5** 事件与胜利状态；包回执 **21/21 / 19/19** |
-| [存取与正文重载](Docs/Phase64/P64.D_Save_Reload_Ownership.md) | **165/165** 动作、runner **118/118**、生命周期 **18/18**；GC 后资源有界，纯 UI 重载 **84/84** 回归通过 |
-| [存档与异常流程](Docs/Phase64/P64.D_UI_Save_Edges.md) | 五个独立进程 **31/31** 动作；覆盖保存、重启读取、缺档、GC、读取失败、写锁与组件退出 |
-| [Development/Shipping 包内 UI](Docs/Phase64/P64.D_Packaged_UI.md) | Wasmtime 45 AOT，各两个实际 Game 进程 **5/5 + 2/2** 动作，回执 **28/28、25/25**；包内 runner **29/29**，Component 专项 **10/10** |
-| [包内 World 生命周期](Docs/Phase64/P64.D_Packaged_World_Soak.md) | Development AOT **1173 轮/5866 动作/3602.566 秒**及 Shipping **3 轮/16 动作**通过；UObject、Session、backend 与 VM cache 有界，D07 已验证；动态 Delegate `UFunction` 的 GC Fatal 已修复 |
-| [World 连续运行](Docs/Phase64/P64.D_World_Soak.md) | 修复前后两次各 **约 3601 秒、877 次切图、4386/4386 动作**；旧对象逐轮回收，Session/backend live/UObject 有界；Editor 增长已由包内一小时分层 |
-| [内存归因与分配栈](Docs/Phase64/P64.D_Native_Allocation_Tracing.md) | VM/Trace/FName/LLM 快照、GC 书签与 Insights 四组查询；`SetUtf8Value` 两窗口 **0 项/0 字节**，结合包内稳态验证 D07，但不宣称整个进程零增长 |
-| [调用生命周期修复](Docs/Phase64/P64.D_Invocation_Lifetime.md) | 原生 UFunction 非平凡帧统一析构；Wasmtime 重载历史改为调用者按需持有；Binding **1/1**、Wasmtime **14/14**，修复后一小时 **877/877** 轮通过 |
-| [类型化 Host 结构化诊断](Docs/Phase64/P64.D_Typed_Host_Diagnostics.md) | Wasmtime typed 与 WAMR dynamic 实际 WASM、Runtime epoch/重入和 Reflection 拒绝共 **4/4** 通过；no-clean Editor UBT 成功 |
-| [干净安装生成模块](Docs/Phase64/P64.D_Clean_Checkout_Build.md) | 无项目生成头/源的 clean candidate **39/39 actions**，已有真实生成类型 **8/8 actions**；最终 Gate 又完成 clean/generated **35/35 + 35/35** 与发布后 **5/5** |
-| [完整 Automation 隔离恢复](Docs/Phase64/P64.D_Full_Automation_Recovery.md) | UeTypeGenerator **5/5**、聚焦 Automation **10/10**；修复进入正式候选后完整 Automation **461/461**、零失败 |
-
-编译器专项见 [async 短路求值](Docs/Phase64/P64.D_Async_Short_Circuit.md)与[C# 捕获赋值](Docs/Phase64/P64.D_Captured_Assignment.md)。
-上述机器验证不替代真实输入、视觉、设备和完整长稳验收；[Android 边界](Docs/Phase64/P64.D_Android_Readiness.md)单独保留。
-
-阶段状态与实现证据见 [Docs](Docs/)，开发规则见 [AGENTS.md](AGENTS.md)。
+- **开发与调试：**[IDE 工作区与编辑器命令](Docs/Phase61/P61.D4c2_Editor_IDE_Commands.md)、[调试面板](Docs/Phase61/P61.C4b_Editor_Debugger_Panel.md)。
+- **发布 Windows 游戏：**[UI 样例的打包流程](Docs/Phase64/P64.D_Packaged_UI.md)、[插件打包与安装](Docs/Phase65/P65.A_Deterministic_Release_And_Atomic_Install.md)。
+- **了解当前研发进度：**[实施计划](Docs/Phase66/P66.1_Implementation_Plan.md)、[设计与历史验证记录](Docs/)。这些是研发文档，不是入门前置阅读。
+- **参与开发：**[仓库工作规则](AGENTS.md)。
 
 ## 许可证
 
-AvidScript 原创代码使用 [MIT License](LICENSE)。Wasmtime 使用 Apache-2.0 WITH
-LLVM-exception；`Source/ThirdParty/WAMR/upstream` 保留上游许可。Unreal Engine 不包含在本仓库中。
+AvidScript 原创代码使用 [MIT License](LICENSE)。Wasmtime 使用 Apache-2.0 WITH LLVM-exception；WAMR 保留上游许可。Unreal Engine 不包含在本仓库中。
