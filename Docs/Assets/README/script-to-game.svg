@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="240" viewBox="0 0 1200 240" role="img" aria-labelledby="title desc">
+  <title id="title">从 C# 脚本到 UE 游戏对象</title>
+  <desc id="desc">四个步骤：编写 C# 玩法，编译为 WASM，插件加载并执行，调用 UE 游戏对象。每一步附有具体例子。</desc>
+  <rect width="1200" height="240" rx="16" fill="#0c151c"/>
+  <g fill="#12252c" stroke="#345057">
+    <rect x="24" y="24" width="258" height="192" rx="10"/>
+    <rect x="322" y="24" width="258" height="192" rx="10"/>
+    <rect x="620" y="24" width="258" height="192" rx="10"/>
+    <rect x="918" y="24" width="258" height="192" rx="10"/>
+  </g>
+  <g fill="none" stroke="#83f0ca" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 62 55 L 49 67 L 62 79 M 87 55 L 100 67 L 87 79 M 79 51 L 69 83"/>
+    <path d="M 349 57 L 370 47 L 391 57 V 81 L 370 92 L 349 81 Z M 349 57 L 370 68 L 391 57 M 370 68 V 92"/>
+    <path d="M 651 48 H 689 V 85 H 651 Z M 663 57 L 678 66 L 663 76 Z"/>
+    <path d="M 950 61 L 974 49 L 998 61 V 85 L 974 97 L 950 85 Z M 950 61 L 974 73 L 998 61 M 974 73 V 97"/>
+    <path d="M 290 120 H 313 L 306 113 M 313 120 L 306 127 M 588 120 H 611 L 604 113 M 611 120 L 604 127 M 886 120 H 909 L 902 113 M 909 120 L 902 127"/>
+  </g>
+  <g font-family="Consolas, monospace" font-size="13" fill="#91abaa" text-anchor="end">
+    <text x="258" y="62">01 / WRITE</text><text x="556" y="62">02 / BUILD</text><text x="854" y="62">03 / RUN</text><text x="1152" y="62">04 / PLAY</text>
+  </g>
+  <g font-family="'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif">
+    <g font-size="23" font-weight="600" fill="#eff5f0">
+      <text x="48" y="131">编写 C# 玩法</text><text x="346" y="131">编译为 WASM</text><text x="644" y="131">插件加载并执行</text><text x="942" y="131">驱动 UE 游戏对象</text>
+    </g>
+    <g font-size="16" fill="#aac1c2">
+      <text x="48" y="169">例如：每帧更新方块位置</text><text x="346" y="169">生成可加载的脚本程序</text><text x="644" y="169">接收 Tick 等游戏事件</text><text x="942" y="169">方块开始移动</text>
+    </g>
+  </g>
+</svg>

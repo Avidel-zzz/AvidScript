@@ -1,5 +1,7 @@
 <div align="center">
 
+![AvidScript：用 C#，让玩法动起来。代码驱动 UE 方块的概念插画。](Docs/Assets/README/avidscript-hero.svg)
+
 # AvidScript
 
 **用 C# 为 Unreal Engine 编写玩法脚本。**
@@ -173,18 +175,7 @@ RPC 是跨网络请求另一端执行函数；属性复制是服务器把属性�
 
 ## ⚙️ 它如何运行
 
-```mermaid
-flowchart LR
-    Code["✍️ 编写 C# 玩法"] --> Build["📦 编译为 WASM"]
-    Build --> Run["⚡ 插件加载并执行"]
-    Run --> Game["🎮 驱动 UE 游戏对象"]
-    classDef author fill:#172554,stroke:#60a5fa,color:#eff6ff
-    classDef compile fill:#2e1065,stroke:#a78bfa,color:#f5f3ff
-    classDef runtime fill:#052e2b,stroke:#2dd4bf,color:#f0fdfa
-    class Code author
-    class Build compile
-    class Run,Game runtime
-```
+![从脚本到游戏：编写 C# 玩法 → 编译为 WASM → 插件加载并执行 → 驱动 UE 游戏对象。以每帧更新方块位置为例。](Docs/Assets/README/script-to-game.svg)
 
 构建工具把 C# 编译成 **WebAssembly（WASM）**，一种供脚本执行引擎运行的程序格式；UE 插件加载它，再把脚本中的调用转交给 UE。游戏运行时不加载完整的 .NET / CLR。
 
