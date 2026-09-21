@@ -1811,8 +1811,10 @@ $DirectAbiExports = @($DirectAbiExports | Sort-Object -Unique)
 $UnexpectedDeclaredExports = @($RequiredExports | Where-Object { $DirectAbiExports -notcontains $_ })
 $MissingObservedExports = @($RequiredExports | Where-Object { $ObservedExports -notcontains $_ })
 $UnexpectedObservedExports = @($ObservedExports | Where-Object { $RequiredExports -notcontains $_ })
-$GuestContractValid = [int]$GuestIrModel.schema_version -eq 3 -and
-    [string]$GuestIrModel.ir_version -eq "1.2" -and
+# This entry publishes the current compiler contract. Keep the exact pair aligned
+# with GuestModuleValidator; TestCSharpGuestBuildContracts exercises real output.
+$GuestContractValid = [int]$GuestIrModel.schema_version -eq 11 -and
+    [string]$GuestIrModel.ir_version -ceq "1.10" -and
     [bool]$GuestIrModel.succeeded -and
     [string]$GuestIrModel.provenance.semantic_sha256 -eq $SemanticSha256 -and
     [string]$GuestIrModel.provenance.source_sha256 -eq [string]$FrontendModel.source.sha256

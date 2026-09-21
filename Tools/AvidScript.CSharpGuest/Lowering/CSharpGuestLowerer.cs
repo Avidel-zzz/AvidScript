@@ -74,6 +74,7 @@ public static class CSharpGuestLowerer
             dataPool,
             diagnostics);
         functions.AddRange(asyncMethods.Functions);
+        imports = CSharpAsyncManagedState.AppendImports(imports, functions);
         imports = CSharpUeReceivers.AppendImports(document, imports, functions);
         if (functions.SelectMany(function => function.Blocks).SelectMany(block => block.Instructions)
             .Any(instruction => instruction.Op == "call" && instruction.TargetId == CSharpUeDelegateBinding.ImportId))

@@ -145,8 +145,12 @@ internal static class CSharpGuestReferenceObjectTests
                 public static async void Begin() { Node node = new Node(); await AvidContinuations.NextTickAsync(); Result = node.Value; }
             }
             """, "Scripts/ReferenceObjectAsyncBoundary.cs");
-        var asyncRejected = CSharpGuestLowerer.Lower(asyncBoundary, new string('c', 64));
-        Require(!asyncRejected.Succeeded && asyncRejected.Module is null, "reference objects cannot enter unrooted async state frames");
+        var asyncLowered = CSharpGuestLowerer.Lower(asyncBoundary, new string('c', 64));
+        Require(asyncLowered.Succeeded && asyncLowered.Module is { } asyncModule
+            && asyncModule.Functions.SelectMany(function => function.Blocks).SelectMany(block => block.Instructions)
+                .Any(instruction => instruction.Op == GuestContinuationState.StoreOp)
+            && WasmModuleCompiler.Compile(asyncModule).Succeeded,
+            "reference objects must enter typed, rooted async state objects");
         return count + 1;
     }
 

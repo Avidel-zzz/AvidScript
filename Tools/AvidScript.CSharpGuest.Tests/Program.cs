@@ -6,6 +6,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--managed-async")
+            {
+                int focusedCount = CSharpGuestManagedAsyncTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.ManagedAsync: {focusedCount}/{focusedCount} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--ue-delegates")
             {
                 int focusedCount = CSharpGuestUeDispatchTests.Run(methodGroups: true);
@@ -98,6 +104,7 @@ internal static class Program
                 + CSharpDataLaneFusionTests.Run()
                 + CSharpGuestDelegateEventTests.Run()
                 + CSharpGuestContinuationTests.Run()
+                + CSharpGuestManagedAsyncTests.Run()
                 + CSharpGuestShortCircuitTests.Run()
                 + CSharpGuestUeTypeTests.Run()
                 + CSharpGuestLocalFunctionTests.Run()

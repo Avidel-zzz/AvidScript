@@ -291,4 +291,81 @@ bool FAvidScriptCompiledContinuationStateTest::RunTest(const FString& Parameters
 	}
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptCSharpManagedAsyncTest,
+	"AvidScript.Runtime.Continuation.CSharpManagedAsync",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptCSharpManagedAsyncTest::RunTest(const FString& Parameters)
+{
+	using namespace AvidScript::Managed;
+	if (!GEngine) return false;
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false, TEXT("AvidScriptCSharpAsyncWorld"));
+	if (!TestNotNull(TEXT("CSharp async World"), World)) return false;
+	GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+	World->InitializeActorsForPlay(FURL());
+	ON_SCOPE_EXIT { GEngine->DestroyWorldContext(World); World->DestroyWorld(false); };
+	struct FCase { const TCHAR* Name; int32 Expected; int32 Resumes; };
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	for (const FCase Case : {FCase{TEXT("aliases"), 12007, 2}, FCase{TEXT("loop"), 6, 3}, FCase{TEXT("delegate"), 21, 2},
+		FCase{TEXT("aggregate"), 17, 2}, FCase{TEXT("null"), 9, 1}})
+	for (int32 Scenario = 0; Scenario < 3; ++Scenario)
+	{
+		const FString Stem = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("AvidScriptManagedHeapTests/GuestFixtures"),
+			FString::Printf(TEXT("csharp-managed-async-%s"), Case.Name));
+		TArray<uint8> Bytes; FString OffsetText; int32 ResultOffset = -1;
+		if (!TestTrue(TEXT("CSharp managed async compiler fixture exists"), FFileHelper::LoadFileToArray(Bytes, *(Stem + TEXT(".wasm"))))
+			|| !TestTrue(TEXT("Compiler reports the result offset"), FFileHelper::LoadFileToString(OffsetText, *(Stem + TEXT(".result-offset"))))
+			|| !TestTrue(TEXT("Bounded result offset parses"), LexTryParseString(ResultOffset, *OffsetText) && ResultOffset >= 0 && ResultOffset < 65536)) return false;
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime
+			? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		FAvidScriptWasmRuntimeInstance Runtime(Selection); FAvidScriptWasmSmokeResult Result;
+		if (!TestTrue(TEXT("Actual CSharp managed async module loads"), Runtime.LoadModule(Bytes.GetData(), Bytes.Num(), Case.Name, Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		if (!TestTrue(TEXT("CSharp manifest continuation v2 contract is validated"),
+			Runtime.ValidateRequiredExports({TEXT("avid_on_continuation_v2")}, Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		const auto Owner = MakeShared<FAvidScriptSessionContinuations>();
+		auto& Endpoint = Owner->ResetActive(World);
+		FAvidScriptWasmHostContext Context; Context.Continuations = &Endpoint; Runtime.SetHostContext(Context);
+		if (!TestTrue(TEXT("CSharp async begins and suspends"), Runtime.BeginPlay(Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		auto& Heap = *Runtime.GetManagedHeapForTesting();
+		TestTrue(TEXT("Collect all unrooted objects while CSharp is suspended"), Heap.Collect() == EHeapError::Ok);
+		TestEqual(TEXT("CSharp state kept by exactly one continuation root"), Heap.GetStats().LiveRoots, uint32(1));
+		TestEqual(TEXT("CSharp suspension holds no Guest frame"), Heap.GetStats().ActiveFrames, uint32(0));
+		if (Scenario == 1)
+		{
+			TestTrue(TEXT("CSharp EndPlay cancels its pending await"), Runtime.EndPlay(Result));
+			TestEqual(TEXT("Explicit source cancellation releases state before owner teardown"), Heap.GetStats().LiveRoots, uint32(0));
+		}
+		if (Scenario == 2) Owner->Teardown();
+		int32 Resumed = 0;
+		for (int32 Round = 0; Round < 8; ++Round)
+		{
+			World->Tick(LEVELTICK_All, 0.02f); ++GFrameCounter;
+			TArray<FAvidScriptContinuationCompletion> Ready; Owner->DrainReady(Ready);
+			for (const auto& Completion : Ready)
+			{
+				if (!TestTrue(TEXT("Actual CSharp resume executes"), Runtime.DispatchContinuation(Completion, Result)))
+				{ AddError(Result.ErrorMessage); return false; }
+				TestTrue(TEXT("CSharp continuation finalizes"), Owner->FinalizeDispatched(Completion.Token, true));
+				++Resumed;
+			}
+			TestTrue(TEXT("Collect between CSharp resume segments"), Heap.Collect() == EHeapError::Ok);
+			TestEqual(TEXT("No retained CSharp execution frame"), Heap.GetStats().ActiveFrames, uint32(0));
+		}
+		TestEqual(TEXT("Cancellation prevents all late CSharp callbacks"), Resumed, Scenario == 0 ? Case.Resumes : 0);
+		uint8 ResultBytes[4] = {}; FString Error; int32 Value = 0;
+		TestTrue(TEXT("Read actual CSharp result"), Runtime.ReadStateBytes(ResultOffset, MakeArrayView(ResultBytes), Error));
+		FMemory::Memcpy(&Value, ResultBytes, 4);
+		TestEqual(*FString::Printf(TEXT("%s preserves alias, value and delegate semantics"), Case.Name), Value, Scenario == 0 ? Case.Expected : 0);
+		TestEqual(TEXT("Finished or canceled CSharp state has no roots"), Heap.GetStats().LiveRoots, uint32(0));
+		TestEqual(TEXT("State boxes and referenced graphs are reclaimed"), Heap.GetStats().LiveObjects, uint32(0));
+		Owner->Teardown();
+	}
+	return true;
+}
 #endif

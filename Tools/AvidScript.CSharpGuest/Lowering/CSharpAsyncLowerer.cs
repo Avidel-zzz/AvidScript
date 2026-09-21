@@ -615,6 +615,10 @@ internal static class CSharpAsyncLowerer
             return false;
         }
 
+        if (context.TryGetGuestType(CSharpAsyncManagedState.Reference(frame.TypeId), out _))
+            return CSharpAsyncManagedState.Read(context, frame, frameType, blockOrdinal, continuationToken,
+                instructions, out stateReadAccepted, out restoreInstructions);
+
         GuestRegister? frameStorage = context.CreateTemporary(
             frameType.Id,
             blockOrdinal);
@@ -712,6 +716,10 @@ internal static class CSharpAsyncLowerer
             Add(context.Diagnostics, $"Async state frame '{frame.TypeId}' has no compatible suspend contract.");
             return false;
         }
+
+        if (context.TryGetGuestType(CSharpAsyncManagedState.Reference(frame.TypeId), out _))
+            return CSharpAsyncManagedState.Store(context, frame, frameType, blockOrdinal, continuationToken,
+                instructions, out stateStoreAccepted);
 
         GuestRegister? frameStorage = context.CreateTemporary(frameType.Id, blockOrdinal);
         GuestRegister? byteCount = context.CreateTemporary(int32Type.Id, blockOrdinal);

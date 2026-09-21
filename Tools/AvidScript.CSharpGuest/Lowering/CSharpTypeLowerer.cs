@@ -114,6 +114,7 @@ internal static class CSharpTypeLowerer
             AddTypeIfMissing(rawTypes, Scalar("type:uint8", "i32", 1, 1));
         CSharpClosureLayout.AddTypes(document, rawTypes);
         CSharpBorrowedReferences.AddTypes(document, rawTypes);
+        CSharpAsyncManagedState.AddTypes(document, rawTypes);
         GuestTypeLayoutResult layout = GuestDataLayout.ComputeTypes(rawTypes);
         if (!layout.Succeeded)
         {
@@ -165,7 +166,7 @@ internal static class CSharpTypeLowerer
         {
             return false;
         }
-        if (type.Kind is "scalar" or "enum" or "handle" or "class_ref" or "factory_ref" or "object_type_ref")
+        if (type.Kind is "scalar" or "enum" or "handle" or "class_ref" or "factory_ref" or "object_type_ref" or "managed_ref" or "function_ref")
         {
             return type.Size > 0;
         }
