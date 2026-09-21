@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="44" viewBox="0 0 1000 44" role="img" aria-labelledby="title desc">
+  <title id="title">AvidScript 项目信息</title>
+  <desc id="desc">UE 5.8、C#、WebAssembly、Windows x64、0.1.0 开发预览版、MIT 许可证。</desc>
+  <g>
+    <rect width="135" height="40" rx="8" fill="#172a34"/>
+    <rect x="145" width="95" height="40" rx="8" fill="#512bd4"/>
+    <rect x="250" width="185" height="40" rx="8" fill="#5541a9"/>
+    <rect x="445" width="190" height="40" rx="8" fill="#0967a6"/>
+    <rect x="645" width="230" height="40" rx="8" fill="#805413"/>
+    <rect x="885" width="115" height="40" rx="8" fill="#226342"/>
+  </g>
+  <g fill="#ffffff" font-family="'Segoe UI', sans-serif" font-size="18" font-weight="600" text-anchor="middle">
+    <text x="67" y="27">UE 5.8</text>
+    <text x="192" y="27">C#</text>
+    <text x="342" y="27">WebAssembly</text>
+    <text x="540" y="27">Windows x64</text>
+    <text x="760" y="27">0.1.0 Preview</text>
+    <text x="942" y="27">MIT</text>
+  </g>
+</svg>

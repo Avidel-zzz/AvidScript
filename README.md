@@ -1,23 +1,12 @@
-<div align="center">
-
-![AvidScript：用 C#，让玩法动起来。代码驱动 UE 方块的概念插画。](Docs/Assets/README/avidscript-hero.svg)
+![AvidScript：用 C#，让玩法动起来。代码驱动 UE 方块的概念插画。](Docs/Assets/README/avidscript-hero.png)
 
 # AvidScript
 
 **用 C# 为 Unreal Engine 编写玩法脚本。**
 
-<p>
-  <img alt="Unreal Engine 5.8" src="https://img.shields.io/badge/Unreal%20Engine-5.8-0E1128?logo=unrealengine&amp;logoColor=white">
-  <img alt="C#" src="https://img.shields.io/badge/Language-C%23-512BD4?logo=dotnet&amp;logoColor=white">
-  <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&amp;logoColor=white">
-  <img alt="Windows x64" src="https://img.shields.io/badge/Platform-Windows%20x64-0078D4">
-  <img alt="0.1.0 开发预览版" src="https://img.shields.io/badge/Status-0.1.0%20Preview-D29922">
-  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-26A269"></a>
-</p>
+![UE 5.8 · C# · WebAssembly · Windows x64 · 0.1.0 Preview · MIT](Docs/Assets/README/project-badges.png)
 
 [🚀 跑起来](#快速开始) · [🧩 看代码示例](#常见用法) · [🚧 当前限制](#当前边界) · [📚 更多文档](#进一步阅读)
-
-</div>
 
 ---
 
@@ -175,7 +164,7 @@ RPC 是跨网络请求另一端执行函数；属性复制是服务器把属性�
 
 ## ⚙️ 它如何运行
 
-![从脚本到游戏：编写 C# 玩法 → 编译为 WASM → 插件加载并执行 → 驱动 UE 游戏对象。以每帧更新方块位置为例。](Docs/Assets/README/script-to-game.svg)
+![从脚本到游戏：编写 C# 玩法 → 编译为 WASM → 插件加载并执行 → 驱动 UE 游戏对象。以每帧更新方块位置为例。](Docs/Assets/README/script-to-game.png)
 
 构建工具把 C# 编译成 **WebAssembly（WASM）**，一种供脚本执行引擎运行的程序格式；UE 插件加载它，再把脚本中的调用转交给 UE。游戏运行时不加载完整的 .NET / CLR。
 
@@ -189,7 +178,7 @@ RPC 是跨网络请求另一端执行函数；属性复制是服务器把属性�
 
 已有冻结用例的性能对比，部分 UE 调用路径取得优势；纯计算等项目仍有未达目标的指标，目前没有证据证明整体领先 Puerts 或 Unreal AngelScript。具体条件与结果见[性能报告](Docs/Phase65/P65.D34_Production_Epoch_Runtime.md)，开发体验差距见[框架成熟度评估](Docs/Phase66/P66_Developer_Leadership_Assessment.md)。
 
-![历史基准：四类 UE 调用的耗时对比，绿色为 AvidScript，灰色为 Puerts Reflection，柱形越短越好](Docs/Assets/README/phase57-prepared-reflection-performance.svg)
+![历史基准：四类 UE 调用的耗时对比，绿色为 AvidScript，灰色为 Puerts Reflection，柱形越短越好](Docs/Assets/README/phase57-prepared-reflection-performance.png)
 
 *上图为 P57 历史基准，不是当前版本的完整性能排名。绿色表示 AvidScript，灰色表示 Puerts Reflection；数值越低，指定调用耗时越少。测试环境、采样条件与适用范围见[原始证据](Docs/Phase57/P57.11B1_Recursive_Fixed_Struct_Codec_Evidence.json)。*
 
