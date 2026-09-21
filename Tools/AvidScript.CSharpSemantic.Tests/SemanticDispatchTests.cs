@@ -34,7 +34,7 @@ internal static class SemanticDispatchTests
         const string path = "Scripts/MethodDispatch.cs";
         SemanticDocument document = Analyze(source);
         int count = 0;
-        Check(document.SchemaVersion == 26 && document.SemanticVersion == "1.30", "dispatch has a versioned schema");
+        Check(document.SchemaVersion == 27 && document.SemanticVersion == "1.31", "dispatch has a versioned schema");
         Check(SemanticDispatchContractValidator.IsValid(document), "projected dispatch facts satisfy their contract: "
             + string.Join("\n", document.Callables.Select(item => item.MethodSymbolId + " static=" + item.IsStatic + " " + item.Dispatch))
             + "\nOperations:\n" + string.Join("\n", document.Methods.SelectMany(item => Walk(item.Root))
@@ -90,7 +90,7 @@ internal static class SemanticDispatchTests
         }) Check(!SemanticDispatchContractValidator.IsValid(document with { Callables = document.Callables.Select(item => item == derived
             ? item with { Dispatch = invalid } : item).ToArray() }), "malformed declaration dispatch must fail closed");
         Check(!SemanticDispatchContractValidator.IsValid(document with { SchemaVersion = 24, SemanticVersion = "1.28" }), "dispatch cannot be smuggled into older schemas");
-        Check(!SemanticDispatchContractValidator.IsValid(document with { SchemaVersion = 27 }), "future dispatch schema is not implicitly accepted");
+        Check(!SemanticDispatchContractValidator.IsValid(document with { SchemaVersion = SemanticContract.CurrentSchemaVersion + 1 }), "future dispatch schema is not implicitly accepted");
         return count;
 
         SemanticCallable Find(string name) => document.Callables.Single(item => item.MethodSymbolId.Contains("global::" + name + "(", StringComparison.Ordinal));

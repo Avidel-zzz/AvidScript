@@ -68,6 +68,8 @@ internal static class CSharpGuestManagedAsyncTests
             SemanticDocument document = CSharpGuestContinuationTests.Analyze(source, $"Scripts/ManagedAsync_{name}.cs");
             CSharpGuestLoweringResult lowered = CSharpGuestLowerer.Lower(document, new string('d', 64));
             Check(lowered.Succeeded, string.Join(" | ", lowered.Diagnostics.Select(item => item.Message)));
+            Check(CSharpGuestLowerer.Lower(document with { SchemaVersion = 26, SemanticVersion = "1.30" }, new string('d', 64)).Succeeded,
+                "Semantic 26/1.30 managed async state remains executable");
             GuestModule module = lowered.Module!;
             Check(module.Functions.SelectMany(fn => fn.Blocks).SelectMany(block => block.Instructions)
                 .Any(op => op.Op == GuestContinuationState.StoreOp), "C# suspension must use typed state store");
@@ -100,7 +102,16 @@ internal static class CSharpGuestManagedAsyncTests
         CSharpGuestLoweringResult captureRejected = CSharpGuestLowerer.Lower(localCapture, new string('d', 64));
         Check(!captureRejected.Succeeded && captureRejected.Diagnostics.Any(item => item.Code == "ASCG1024"),
             "async-owned closure environments require their own allocation and restore plan");
-        return count + 1;
+        SemanticDocument malformedScope = localCapture with { AsyncMethods = localCapture.AsyncMethods.Select(method =>
+            method with { LexicalScopes = Array.Empty<SemanticAsyncLexicalScope>() }).ToArray() };
+        CSharpGuestLoweringResult malformedRejected = CSharpGuestLowerer.Lower(malformedScope, new string('d', 64));
+        Check(!malformedRejected.Succeeded && malformedRejected.Diagnostics.Any(item => item.Code == "ASCG1001"),
+            "missing async closure scope must fail artifact validation before code generation");
+        CSharpGuestLoweringResult legacyCapture = CSharpGuestLowerer.Lower(
+            malformedScope with { SchemaVersion = 26, SemanticVersion = "1.30" }, new string('d', 64));
+        Check(!legacyCapture.Succeeded && legacyCapture.Diagnostics.Any(item => item.Code == "ASCG1024"),
+            "legacy async capture analysis stays readable but must not execute without ownership");
+        return count + 3;
     }
 
     private const string Source = """

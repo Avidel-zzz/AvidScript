@@ -38,7 +38,7 @@ internal static class SemanticUeMethodCatalogTests
         SemanticDocument document = Analyze(source);
         int count = 0;
         Check(document.Succeeded, string.Join(" | ", document.Diagnostics.Select(item => item.Message)));
-        Check(document.SchemaVersion == 26 && document.SemanticVersion == "1.30", "catalog uses Semantic 26/1.30");
+        Check(document.SchemaVersion == 27 && document.SemanticVersion == "1.31", "catalog uses Semantic 27/1.31");
         Check(SemanticUeMethodCatalogValidator.IsValid(document), "Roslyn catalog validates");
         SemanticUeMethodCatalog catalog = document.UeMethodCatalog!;
         SemanticUeMethodEntry Method(string name) => catalog.Methods.Single(item => item.MethodSymbolId.Contains("global::" + name + "(", StringComparison.Ordinal));

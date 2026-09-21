@@ -16,8 +16,8 @@ internal static class SemanticClosureAllocationProjector
         foreach (SemanticClosureEnvironment environment in environments)
         {
             SemanticExecutableBody owner = owners[environment.OwnerMethodSymbolId];
-            // Async uses a separate resumable CFG. Its allocation points require the
-            // continuation contract; never infer them from a synchronous Roslyn graph.
+            // Async owns LexicalScopes in its resumable CFG. Never substitute
+            // synchronous Roslyn block ordinals for those entry/resume edges.
             if (owner.Method.IsAsync) { result.Add(environment); continue; }
             try
             {

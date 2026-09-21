@@ -180,7 +180,9 @@ internal static class SemanticAsyncProjector
             return false;
         }
 
-        bool requiresControlFlowCfg = awaits.Any(awaitExpression =>
+        bool hasLexicalFunctions = declaration.Body.DescendantNodes().Any(node =>
+            node is AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax);
+        bool requiresControlFlowCfg = hasLexicalFunctions || awaits.Any(awaitExpression =>
                 !IsDirectMethodBodyAwait(declaration.Body, awaitExpression))
             || declaration.Body.DescendantNodes().OfType<SwitchStatementSyntax>().Any();
         if (requiresControlFlowCfg)
@@ -212,6 +214,7 @@ internal static class SemanticAsyncProjector
                 flowProjection.EntrySegmentOrdinal)
             {
                 CompilerLocals = flowProjection.CompilerLocals,
+                LexicalScopes = hasLexicalFunctions ? flowProjection.LexicalScopes : Array.Empty<SemanticAsyncLexicalScope>(),
             };
             return true;
         }

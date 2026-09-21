@@ -9,7 +9,8 @@ public static class SemanticUeMethodCatalogValidator
     public static bool IsValid(SemanticDocument document)
     {
         if (document.SchemaVersion < 26) return document.UeMethodCatalog is null;
-        if (document.SchemaVersion != 26 || document.SemanticVersion != "1.30"
+        if (!((document.SchemaVersion == 26 && document.SemanticVersion == "1.30")
+                || (document.SchemaVersion == SemanticContract.CurrentSchemaVersion && document.SemanticVersion == SemanticContract.CurrentSemanticVersion))
             || document.UeMethodCatalog is not { SchemaVersion: 1 } catalog
             || !Sorted(catalog.Methods, item => item.MethodSymbolId)
             || !Sorted(catalog.Types, item => item.TypeId) || !Sorted(catalog.Interfaces, item => item.TypeId)

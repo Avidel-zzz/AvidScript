@@ -16,6 +16,10 @@ public sealed record SemanticAsyncMethod(
     public IReadOnlyList<SemanticAsyncCompilerLocal> CompilerLocals { get; init; } =
         Array.Empty<SemanticAsyncCompilerLocal>();
 
+    [JsonPropertyOrder(7)]
+    public IReadOnlyList<SemanticAsyncLexicalScope> LexicalScopes { get; init; } =
+        Array.Empty<SemanticAsyncLexicalScope>();
+
     public const string ReentrantZeroHeapCpsLowering = "reentrant_zero_heap_cps";
     public const string ContinuationCfgLowering = "continuation_cfg";
     public const string GotoTransferKind = "goto";
@@ -36,6 +40,17 @@ public sealed record SemanticAsyncMethod(
     public const int MaximumStructuredFlowDepth = 8;
     public const int MaximumControlFlowSegments = 64;
 }
+
+// Segment membership comes from CFG construction, not source-span heuristics.
+// An await edge within a scope resumes the same activation; entering from outside
+// allocates a new environment. Null source denotes the initial method entry only.
+public sealed record SemanticAsyncLexicalScope(
+    [property: JsonPropertyOrder(0)] string Id,
+    [property: JsonPropertyOrder(1)] string Kind,
+    [property: JsonPropertyOrder(2)] int Ordinal,
+    [property: JsonPropertyOrder(3)] SemanticSpan Span,
+    [property: JsonPropertyOrder(4)] IReadOnlyList<int> Segments,
+    [property: JsonPropertyOrder(5)] IReadOnlyList<SemanticClosureEntry> Entries);
 
 public sealed record SemanticAsyncCompilerLocal(
     [property: JsonPropertyOrder(0)] string SymbolId,

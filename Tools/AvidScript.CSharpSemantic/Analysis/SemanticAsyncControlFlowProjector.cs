@@ -12,7 +12,8 @@ namespace AvidScript.CSharpSemantic;
 internal sealed record SemanticAsyncControlFlowProjection(
     IReadOnlyList<SemanticAsyncSegment> Segments,
     int EntrySegmentOrdinal,
-    IReadOnlyList<SemanticAsyncCompilerLocal> CompilerLocals);
+    IReadOnlyList<SemanticAsyncCompilerLocal> CompilerLocals,
+    IReadOnlyList<SemanticAsyncLexicalScope> LexicalScopes);
 
 internal static class SemanticAsyncControlFlowProjector
 {
@@ -49,6 +50,8 @@ internal static class SemanticAsyncControlFlowProjector
         private readonly ICollection<SemanticDiagnostic> diagnostics;
         private readonly List<DraftSegment> drafts = new();
         private readonly List<SemanticAsyncCompilerLocal> compilerLocals = new();
+        private readonly List<(SyntaxNode Node, string Kind, int[] Drafts)> scopes = new();
+        private SyntaxNode declaration = null!;
         private int structuredNodeCount;
         private bool failed;
 
@@ -71,6 +74,7 @@ internal static class SemanticAsyncControlFlowProjector
             ref int nextCallbackId,
             out SemanticAsyncControlFlowProjection? projected)
         {
+            declaration = body.Parent!;
             int exit = AddDraft(
                 body.CloseBraceToken.Span,
                 Array.Empty<SemanticAsyncStatement>(),
@@ -135,12 +139,28 @@ internal static class SemanticAsyncControlFlowProjector
                     transfer));
             }
 
+            scopes.Add((declaration, "activation", drafts.Select(draft => draft.Id).ToArray()));
+            List<SemanticAsyncLexicalScope> lexicalScopes = new();
+            foreach (var (node, kind, members) in scopes)
+            {
+                int[] mapped = members.Where(ordinalByDraft.ContainsKey).Select(id => ordinalByDraft[id]).Order().ToArray();
+                // Unreachable scopes retain their lexical identity but have no
+                // allocation edges; closure analysis can still refer to them.
+                int scopeOrdinal = kind == "activation" ? 0 : declaration.DescendantNodes()
+                    .Where(item => item.RawKind == node.RawKind
+                        && item.Ancestors().FirstOrDefault(SemanticExecutableBodyResolver.IsExecutableDeclaration) == declaration)
+                    .TakeWhile(item => item != node).Count();
+                lexicalScopes.Add(new(SemanticClosureEnvironment.GetId(methodSymbolId, kind, scopeOrdinal), kind, scopeOrdinal,
+                    SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, node.Span), mapped,
+                    SemanticAsyncScopeValidator.GetEntries(segments, ordinalByDraft[entry], mapped)));
+            }
             projected = new SemanticAsyncControlFlowProjection(
                 segments,
                 ordinalByDraft[entry],
                 compilerLocals
                     .OrderBy(local => local.SymbolId, StringComparer.Ordinal)
-                    .ToArray());
+                    .ToArray(),
+                lexicalScopes.OrderBy(scope => scope.Id, StringComparer.Ordinal).ToArray());
             return true;
         }
 
@@ -214,7 +234,12 @@ internal static class SemanticAsyncControlFlowProjector
             switch (statement)
             {
                 case BlockSyntax block:
-                    return BuildSequence(block.Statements, successor, targets, depth + 1);
+                {
+                    int first = drafts.Count;
+                    int blockEntry = BuildSequence(block.Statements, successor, targets, depth + 1);
+                    scopes.Add((block, "block_entry", Enumerable.Range(first, drafts.Count - first).ToArray()));
+                    return blockEntry;
+                }
 
                 case IfStatementSyntax conditional:
                     return BuildIf(conditional, successor, targets, depth);
@@ -226,7 +251,12 @@ internal static class SemanticAsyncControlFlowProjector
                     return BuildDoWhile(loop, successor, targets, depth);
 
                 case ForStatementSyntax loop:
-                    return BuildFor(loop, successor, targets, depth);
+                {
+                    int first = drafts.Count;
+                    int loopEntry = BuildFor(loop, successor, targets, depth);
+                    scopes.Add((loop, "for_entry", Enumerable.Range(first, drafts.Count - first).ToArray()));
+                    return loopEntry;
+                }
 
                 case ForEachStatementSyntax loop:
                     return BuildForEach(loop, successor, targets, depth);
@@ -642,6 +672,7 @@ internal static class SemanticAsyncControlFlowProjector
                 return -1;
             }
 
+            int iterationStart = drafts.Count;
             int body = BuildStatement(
                 loop.Statement,
                 incrementDraft,
@@ -666,6 +697,7 @@ internal static class SemanticAsyncControlFlowProjector
             {
                 return -1;
             }
+            scopes.Add((loop, "foreach_iteration", Enumerable.Range(iterationStart, drafts.Count - iterationStart).ToArray()));
             drafts[conditionDraft].Transfer = new DraftTransfer(
                 SemanticAsyncMethod.BranchTransferKind,
                 condition,
