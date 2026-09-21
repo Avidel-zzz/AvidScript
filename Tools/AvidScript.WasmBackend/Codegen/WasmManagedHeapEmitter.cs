@@ -102,6 +102,20 @@ internal sealed partial class WasmFunctionCompiler
 
     private void CompileManagedInstruction(WasmBinaryWriter body, GuestInstruction instruction)
     {
+        if (instruction.Op is GuestContinuationState.StoreOp or GuestContinuationState.ReadOp)
+        {
+            bool store = instruction.Op == GuestContinuationState.StoreOp;
+            string stateReference = store ? instruction.OperandIds[1] : instruction.ResultId!;
+            WriteLocalGet(body, localIndices[instruction.OperandIds[0]]);
+            WriteI32Constant(body, moduleLayout.ManagedHeap.TypeOrdinals[GetValueType(stateReference).Id]);
+            if (store) WriteLocalGet(body, localIndices[stateReference]);
+            body.WriteByte(0x10); body.WriteU32(moduleLayout.FunctionIndices[instruction.TargetId!]);
+            WriteResult(body, instruction);
+            // The continuation lease bridges the host return; establish the frame
+            // roots immediately, before any subsequent call, allocation or polling.
+            if (!store) FlushManagedRoots(body);
+            return;
+        }
         if (instruction.Op == "managed_cast")
         {
             string source = instruction.OperandIds[0];

@@ -62,6 +62,11 @@ internal static class GuestManagedHeapValidator
         if (instruction.Op == "address_of" && instruction.TargetId is not null && values.TryGetValue(instruction.TargetId, out GuestRegister? target) && Has(target.TypeId)
             || instruction.Op is "indirect_load" or "indirect_store" or "convert" && (Has(result?.TypeId) || operands.Any(operand => Has(operand?.TypeId))))
             Add(context, $"Function '{function.Id}' cannot expose an untraced address alias of managed storage.");
+        if (instruction.Op is GuestContinuationState.StoreOp or GuestContinuationState.ReadOp)
+        {
+            GuestContinuationStateValidator.Validate(context, function, instruction, result, operands);
+            return;
+        }
         if (!instruction.Op.StartsWith("managed_", StringComparison.Ordinal)) return;
         bool valid = context.Module.SchemaVersion >= 4 && context.Module.Types.Any(type => type.Kind == "managed_ref")
             && instruction.Constant is null && instruction.OperatorKind is null;

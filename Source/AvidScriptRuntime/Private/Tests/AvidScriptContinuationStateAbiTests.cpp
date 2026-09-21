@@ -7,6 +7,8 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include <array>
 
@@ -208,6 +210,84 @@ bool FAvidScriptContinuationStateAbiTest::RunTest(const FString& Parameters)
 			const auto Bytes = Build(EFault::None, WrongModule ? "env" : "avidscript", !WrongModule);
 			TestFalse(TEXT("Managed state rejects env alias and wrong signature"), Runtime.LoadModule(Bytes.GetData(), Bytes.Num(), TEXT("bad_state_abi"), Result));
 		}
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptCompiledContinuationStateTest,
+	"AvidScript.Runtime.Continuation.CompiledManagedState",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptCompiledContinuationStateTest::RunTest(const FString& Parameters)
+{
+	using namespace AvidScript::Managed;
+	if (!GEngine) return false;
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false, TEXT("AvidScriptCompiledStateWorld"));
+	if (!TestNotNull(TEXT("Compiled state World"), World)) return false;
+	GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+	World->InitializeActorsForPlay(FURL());
+	ON_SCOPE_EXIT { GEngine->DestroyWorldContext(World); World->DestroyWorld(false); };
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	for (int32 Scenario = 0; Scenario < 4; ++Scenario)
+	{
+		const bool WrongType = Scenario == 1;
+		const bool Cancel = Scenario == 2;
+		const bool Teardown = Scenario == 3;
+		const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("AvidScriptManagedHeapTests/GuestFixtures"),
+			WrongType ? TEXT("continuation-state-wrong.wasm") : TEXT("continuation-state.wasm"));
+		TArray<uint8> Bytes;
+		if (!TestTrue(TEXT("Run WasmBackend.Tests with AVIDSCRIPT_MANAGED_HEAP_WASM_DIR before this test"), FFileHelper::LoadFileToArray(Bytes, *Path))) return false;
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime
+			? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		FAvidScriptWasmRuntimeInstance Runtime(Selection);
+		FAvidScriptWasmSmokeResult Result;
+		if (!TestTrue(TEXT("Compiler-produced state WASM loads"), Runtime.LoadModule(Bytes.GetData(), Bytes.Num(), TEXT("compiled_state"), Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		const auto Owner = MakeShared<FAvidScriptSessionContinuations>();
+		auto& Endpoint = Owner->ResetActive(World);
+		FAvidScriptWasmHostContext Context;
+		Context.Continuations = &Endpoint;
+		Runtime.SetHostContext(Context);
+		if (!TestTrue(TEXT("Generated code creates state and publishes its lease"), Runtime.BeginPlay(Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		auto& Heap = *Runtime.GetManagedHeapForTesting();
+		uint8 Memory[40] = {};
+		FString Error;
+		if (!TestTrue(TEXT("Read compiled state fixture results"), Runtime.ReadStateBytes(0, MakeArrayView(Memory), Error))) return false;
+		int32 Accepted = 0, Duplicate = 0; int64 Token = 0;
+		// GuestLayoutBuilder sorts globals by identity: accepted, duplicate, result, token.
+		FMemory::Memcpy(&Accepted, Memory + 16, 4); FMemory::Memcpy(&Duplicate, Memory + 20, 4); FMemory::Memcpy(&Token, Memory + 32, 8);
+		TestEqual(TEXT("Typed store result preserved"), Accepted, 1);
+		TestEqual(TEXT("Duplicate publication returns zero without trapping"), Duplicate, 0);
+		TestTrue(TEXT("Collect after generated entry frame exits"), Heap.Collect() == EHeapError::Ok);
+		TestEqual(TEXT("State plus cyclic child survive suspension"), Heap.GetStats().LiveObjects, uint32(2));
+		TestEqual(TEXT("Only continuation lease remains"), Heap.GetStats().LiveRoots, uint32(1));
+		TestEqual(TEXT("No suspended Guest stack frame"), Heap.GetStats().ActiveFrames, uint32(0));
+		if (Cancel) TestTrue(TEXT("Explicit pending timer cancellation"), Endpoint.Cancel(Token));
+		if (Teardown) Owner->Teardown();
+		World->Tick(LEVELTICK_All, 0); ++GFrameCounter;
+		World->Tick(LEVELTICK_All, 0.02f); ++GFrameCounter;
+		TArray<FAvidScriptContinuationCompletion> Ready;
+		Owner->DrainReady(Ready);
+		if (!TestEqual(TEXT("Only active state resumes"), Ready.Num(), Cancel || Teardown ? 0 : 1)) return false;
+		if (!Cancel && !Teardown)
+		{
+			TestEqual(TEXT("Concrete restore type enforced in both backends"), Runtime.DispatchContinuation(Ready[0], Result), !WrongType);
+			if (!WrongType)
+			{
+				TestTrue(TEXT("Read recovered child after Guest collections"), Runtime.ReadStateBytes(0, MakeArrayView(Memory), Error));
+				int32 Value = 0; FMemory::Memcpy(&Value, Memory + 24, 4);
+				TestEqual(TEXT("Generated read preserves child value across suspension"), Value, 42);
+			}
+			TestTrue(TEXT("Finalize success or trapped restore"), Owner->FinalizeDispatched(Token, !WrongType));
+		}
+		Owner->Teardown();
+		TestTrue(TEXT("Final collection after all terminal paths"), Heap.Collect() == EHeapError::Ok);
+		TestEqual(TEXT("No leaked generated state graph"), Heap.GetStats().LiveObjects, uint32(0));
+		TestEqual(TEXT("No leaked frame or continuation roots"), Heap.GetStats().LiveRoots, uint32(0));
+		TestEqual(TEXT("Generated restore frame cleaned after success/trap"), Heap.GetStats().ActiveFrames, uint32(0));
 	}
 	return true;
 }

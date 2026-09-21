@@ -296,6 +296,7 @@ internal sealed partial class WasmFunctionCompiler
     {
         RefreshBorrowedSlots(body);
         if (instruction.Op is "call" or "call_indirect" or "call_framed" or "managed_new" or "managed_collect"
+            or GuestContinuationState.StoreOp or GuestContinuationState.ReadOp
             or "array_load" or "array_store" or "array_length" or "array_region_load" or "array_region_store")
             FlushManagedRoots(body);
         switch (instruction.Op)
@@ -312,6 +313,8 @@ internal sealed partial class WasmFunctionCompiler
             case "managed_get":
             case "managed_set":
             case "managed_collect":
+            case GuestContinuationState.StoreOp:
+            case GuestContinuationState.ReadOp:
                 CompileManagedInstruction(body, instruction);
                 break;
             case "constant":

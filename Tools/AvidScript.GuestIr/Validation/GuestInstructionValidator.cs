@@ -31,6 +31,8 @@ internal static class GuestInstructionValidator
             case "managed_get":
             case "managed_set":
             case "managed_collect":
+            case GuestContinuationState.StoreOp:
+            case GuestContinuationState.ReadOp:
                 break;
             case "constant":
                 ValidateConstantInstruction(context, function, instruction, result);
