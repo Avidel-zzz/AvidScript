@@ -26,6 +26,11 @@ public sealed record GuestModule(
     [JsonPropertyOrder(15)]
     public IReadOnlyList<GuestFramedExport> FramedExports { get; init; } =
         System.Array.Empty<GuestFramedExport>();
+
+    // Absent on IR 14 and earlier, preserving their canonical serialized bytes.
+    [JsonPropertyOrder(16)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<GuestLanguageOutcomeType>? LanguageOutcomeTypes { get; init; }
 }
 
 // Dedicated synchronous, same-domain adapters. Ordinary exports remain subject to

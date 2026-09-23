@@ -8,7 +8,7 @@ internal static class Program
         {
             int count = GuestModuleValidationTests.Run() + GuestIrSerializationTests.Run()
                 + GuestDataLayoutTests.Run() + GuestValidatorRobustnessTests.Run()
-                + GuestArrayInstructionTests.Run();
+                + GuestArrayInstructionTests.Run() + GuestLanguageOutcomeTypeTests.Run();
             Console.WriteLine($"AvidScript.GuestIr.Tests: {count}/{count} passed");
             return 0;
         }
