@@ -117,7 +117,7 @@ public static class SemanticAnalyzer
             gameplayEventProjection.Callbacks, delegateEventProjection.Callbacks,
             continuationProjection.Callbacks, ueTypeProjection.Declarations, asyncProjection.Methods);
         SemanticGenericProjection genericProjection = SemanticGenericSpecializer.Project(
-            typeRegistry.Build(), symbols, callableProjection.Callables,
+            typeRegistry.Build(), typeRegistry.BuildShapes(), symbols, callableProjection.Callables,
             operationProjection.Methods, controlFlowProjection.Graphs,
             sourceReachability.ReachableCallableIds.ToHashSet(StringComparer.Ordinal));
         symbols = genericProjection.Symbols;

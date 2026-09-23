@@ -35,7 +35,10 @@ internal static class CSharpTypeLowerer
         };
         foreach (SemanticType type in document.Types.OrderBy(type => type.Id, StringComparer.Ordinal))
         {
-            if (IsCompilerAsyncScaffoldType(document, type))
+            if (IsCompilerAsyncScaffoldType(document, type)
+                || (document.SemanticVersion == SemanticContract.CurrentSemanticVersion
+                    && IsOpenArrayType(type.Id, semanticTypes, shapes,
+                        new HashSet<string>(StringComparer.Ordinal))))
             {
                 continue;
             }
@@ -182,6 +185,24 @@ internal static class CSharpTypeLowerer
                 allowReference: false));
         visiting.Remove(typeId);
         return supported;
+    }
+
+    private static bool IsOpenArrayType(
+        string typeId,
+        IReadOnlyDictionary<string, SemanticType> types,
+        IReadOnlyDictionary<string, SemanticTypeShape> shapes,
+        ISet<string> visiting)
+    {
+        if (!visiting.Add(typeId) || visiting.Count > 32)
+            return false;
+        if (!types.TryGetValue(typeId, out SemanticType? type))
+            return false;
+        if (type.Kind == "type_parameter")
+            return true;
+        return type.Kind == "array"
+            && shapes.TryGetValue(typeId, out SemanticTypeShape? shape)
+            && shape.ElementTypeId is not null
+            && IsOpenArrayType(shape.ElementTypeId, types, shapes, visiting);
     }
 
     private static bool IsCompilerAsyncScaffoldType(

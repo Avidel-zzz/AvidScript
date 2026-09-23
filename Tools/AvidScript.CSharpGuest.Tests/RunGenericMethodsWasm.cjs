@@ -22,6 +22,8 @@ const cases = [
     ['generic_forward', 3],
     ['generic_bounce', 4],
     ['generic_pair', 12],
+    ['generic_ref_out', 57],
+    ['generic_array', 5],
 ];
 for (const [name, expected] of cases) {
     const actual = instance.exports[name]();

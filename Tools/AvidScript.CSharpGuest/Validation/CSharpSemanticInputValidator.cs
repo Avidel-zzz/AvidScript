@@ -69,7 +69,7 @@ internal static class CSharpSemanticInputValidator
         }
 
         return ValidateTypes(document.Types)
-            && ValidateTypeShapes(document.TypeShapes)
+            && ValidateTypeShapes(document.SemanticVersion, document.TypeShapes)
             && SemanticDelegateContractValidator.IsValid(document)
             && SemanticClassContractValidator.IsValid(document)
             && ValidateSymbols(document.SemanticVersion, document.Symbols)
@@ -104,9 +104,11 @@ internal static class CSharpSemanticInputValidator
             && Unique(types.Select(type => type.Id));
     }
 
-    private static bool ValidateTypeShapes(IReadOnlyList<SemanticTypeShape> shapes)
+    private static bool ValidateTypeShapes(
+        string semanticVersion,
+        IReadOnlyList<SemanticTypeShape> shapes)
     {
-        return shapes.All(shape => shape is not null
+        if (!shapes.All(shape => shape is not null
                 && !string.IsNullOrWhiteSpace(shape.TypeId)
                 && new[]
                 {
@@ -114,7 +116,24 @@ internal static class CSharpSemanticInputValidator
                     shape.EnumUnderlyingTypeId,
                     shape.GenericArgumentTypeId,
                 }.Count(value => value is not null) <= 1)
-            && Unique(shapes.Select(shape => shape.TypeId));
+            || !Unique(shapes.Select(shape => shape.TypeId)))
+            return false;
+        if (semanticVersion != SemanticContract.CurrentSemanticVersion)
+            return true;
+        Dictionary<string, SemanticTypeShape> byId = shapes.ToDictionary(
+            shape => shape.TypeId, StringComparer.Ordinal);
+        foreach (SemanticTypeShape shape in shapes)
+        {
+            HashSet<string> visiting = new(StringComparer.Ordinal);
+            string? current = shape.TypeId;
+            while (current is not null && byId.TryGetValue(current, out SemanticTypeShape? next))
+            {
+                if (!visiting.Add(current) || visiting.Count > 32)
+                    return false;
+                current = next.ElementTypeId;
+            }
+        }
+        return true;
     }
 
     private static bool ValidateSymbols(
@@ -196,6 +215,8 @@ internal static class CSharpSemanticInputValidator
             callable => callable.MethodSymbolId, StringComparer.Ordinal);
         Dictionary<string, SemanticType> types = document.Types.ToDictionary(
             type => type.Id, StringComparer.Ordinal);
+        Dictionary<string, SemanticTypeShape> shapes = document.TypeShapes.ToDictionary(
+            shape => shape.TypeId, StringComparer.Ordinal);
         HashSet<string> graphs = document.ControlFlowGraphs.Select(graph => graph.MethodSymbolId)
             .ToHashSet(StringComparer.Ordinal);
         if (document.Callables.Count(callable => callable.GenericDefinitionSymbolId is not null) > 128)
@@ -205,7 +226,11 @@ internal static class CSharpSemanticInputValidator
             if (callable.GenericDefinitionSymbolId is not { } definitionId)
             {
                 if (callable.GenericArgumentTypeIds is not null
-                    || callable.GenericTypeParameterIds is null)
+                    || callable.GenericTypeParameterIds is null
+                    || callable.GenericTypeParameterIds.Any(id =>
+                        !id.StartsWith("type:", StringComparison.Ordinal)
+                        || !types.TryGetValue(id, out SemanticType? type)
+                        || type.Kind != "type_parameter"))
                     return false;
                 continue;
             }
@@ -223,11 +248,15 @@ internal static class CSharpSemanticInputValidator
                 return false;
             Dictionary<string, string> typeMap = formals.Zip(arguments)
                 .ToDictionary(pair => pair.First, pair => pair.Second, StringComparer.Ordinal);
-            string Map(string id) => typeMap.TryGetValue(id, out string? result) ? result : id;
-            if (callable.ReturnTypeId != Map(definition.ReturnTypeId)
+            if (!SemanticGenericTypeSubstitution.TryClose(
+                    definition.ReturnTypeId, typeMap, types, shapes, out string expectedReturnType)
+                || callable.ReturnTypeId != expectedReturnType
                 || callable.Parameters.Count != definition.Parameters.Count
                 || callable.Parameters.Where((parameter, index) =>
-                    parameter.TypeId != Map(definition.Parameters[index].TypeId)
+                    !SemanticGenericTypeSubstitution.TryClose(
+                        definition.Parameters[index].TypeId, typeMap, types, shapes,
+                        out string expectedParameterType)
+                    || parameter.TypeId != expectedParameterType
                     || parameter.SymbolId != definition.Parameters[index].SymbolId.Replace(
                         definitionId, callable.MethodSymbolId, StringComparison.Ordinal)).Any())
                 return false;
@@ -239,6 +268,13 @@ internal static class CSharpSemanticInputValidator
         foreach (SemanticControlFlowGraph graph in document.ControlFlowGraphs
             .Where(graph => document.Reachability?.ReachableCallableIds.Contains(graph.MethodSymbolId) == true))
         {
+            if (!callables.TryGetValue(graph.MethodSymbolId, out SemanticCallable? owner))
+                return false;
+            Dictionary<string, string> ownerTypes = owner.GenericDefinitionSymbolId is { } ownerDefinitionId
+                ? callables[ownerDefinitionId].GenericTypeParameterIds!
+                    .Zip(owner.GenericArgumentTypeIds!)
+                    .ToDictionary(pair => pair.First, pair => pair.Second, StringComparer.Ordinal)
+                : new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (SemanticOperation operation in graph.Blocks
                 .SelectMany(block => block.Operations.Concat(block.BranchValue is null
                     ? Array.Empty<SemanticOperation>() : new[] { block.BranchValue }))
@@ -249,10 +285,19 @@ internal static class CSharpSemanticInputValidator
                     && target.GenericDefinitionSymbolId is not null
                     && !operation.TypeArgumentIds.SequenceEqual(target.GenericArgumentTypeIds!))
                     return false;
-                if (callables[graph.MethodSymbolId].GenericDefinitionSymbolId is not null
-                    && operation.TypeId is { } typeId
-                    && types.TryGetValue(typeId, out SemanticType? type)
-                    && type.Kind == "type_parameter")
+                if (owner.GenericDefinitionSymbolId is not null
+                    && operation.TypeId is { } typeId)
+                {
+                    if (!SemanticGenericTypeSubstitution.TryClose(
+                            typeId, ownerTypes, types, shapes, out string closed)
+                        || closed != typeId)
+                        return false;
+                }
+                if (owner.GenericDefinitionSymbolId is not null
+                    && operation.TypeArgumentIds.Any(typeId =>
+                        !SemanticGenericTypeSubstitution.TryClose(
+                            typeId, ownerTypes, types, shapes, out string closed)
+                        || closed != typeId))
                     return false;
             }
         }

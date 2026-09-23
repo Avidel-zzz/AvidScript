@@ -20,6 +20,7 @@ internal static class SemanticGenericSpecializer
 
     public static SemanticGenericProjection Project(
         IReadOnlyList<SemanticType> types,
+        IReadOnlyList<SemanticTypeShape> typeShapes,
         IReadOnlyList<SemanticSymbol> sourceSymbols,
         IReadOnlyList<SemanticCallable> sourceCallables,
         IReadOnlyList<SemanticMethodBody> sourceMethods,
@@ -34,6 +35,8 @@ internal static class SemanticGenericSpecializer
                 Array.Empty<SemanticDiagnostic>());
 
         Dictionary<string, SemanticType> typesById = types.ToDictionary(type => type.Id, StringComparer.Ordinal);
+        Dictionary<string, SemanticTypeShape> shapesById = typeShapes.ToDictionary(
+            shape => shape.TypeId, StringComparer.Ordinal);
         Dictionary<string, SemanticControlFlowGraph> graphsById = sourceGraphs.ToDictionary(
             graph => graph.MethodSymbolId, StringComparer.Ordinal);
         Dictionary<string, SemanticMethodBody> methodsById = sourceMethods.ToDictionary(
@@ -107,17 +110,11 @@ internal static class SemanticGenericSpecializer
         string? MapType(string? typeId, IReadOnlyDictionary<string, string> typeMap, SemanticSpan span)
         {
             if (typeId is null) return null;
-            if (typeMap.TryGetValue(typeId, out string? closed)) return closed;
-            if (!typesById.TryGetValue(typeId, out SemanticType? type)) return typeId;
-            bool containsOpenType = type.Kind == "type_parameter"
-                || typeMap.Keys.Any(parameterId =>
-                    type.CanonicalName.Contains(parameterId["type:".Length..] + "[", StringComparison.Ordinal)
-                    || type.CanonicalName.Contains("<" + parameterId["type:".Length..], StringComparison.Ordinal)
-                    || type.CanonicalName.Contains("," + parameterId["type:".Length..], StringComparison.Ordinal));
-            if (containsOpenType)
+            if (!SemanticGenericTypeSubstitution.TryClose(
+                    typeId, typeMap, typesById, shapesById, out string closed))
                 diagnostics.Add(new SemanticDiagnostic("ASCS1064", "error",
                     $"Generic type '{typeId}' needs a structured closed type layout.", span));
-            return typeId;
+            return closed;
         }
 
         SemanticControlFlowGraph RewriteGraph(

@@ -18,37 +18,15 @@ internal static class CSharpGuestGenericMethodTests
 
     private static void ClosedMethodsHaveIndependentFunctions()
     {
-        const string source = """
-            using System.Runtime.InteropServices;
-            public static class Script
-            {
-                static T Identity<T>(T value) => value;
-                static T Forward<T>(T value) => Identity<T>(value);
-                static T Bounce<T>(int count, T value) =>
-                    count == 0 ? value : Bounce<T>(count - 1, value);
-                static U Second<T, U>(T first, U second) => second;
-
-                [UnmanagedCallersOnly(EntryPoint = "generic_int")]
-                public static int Int() => Identity<int>(7);
-                [UnmanagedCallersOnly(EntryPoint = "generic_float")]
-                public static float Float() => Identity<float>(2.5f);
-                [UnmanagedCallersOnly(EntryPoint = "generic_forward")]
-                public static int Forwarded() => Forward<int>(3);
-                [UnmanagedCallersOnly(EntryPoint = "generic_bounce")]
-                public static int Bounced() => Bounce<int>(2, 4);
-                [UnmanagedCallersOnly(EntryPoint = "generic_pair")]
-                public static int Pair() => Second<float, int>(2.5f, 9)
-                    + (int)Second<int, float>(1, 3.5f);
-            }
-            """;
+        string source = File.ReadAllText(FindFixture());
         SemanticDocument semantic = Analyze(source);
         Check(semantic.Succeeded && semantic.SemanticVersion == "1.36",
             "closed generic source should publish the current semantic contract");
         SemanticCallable[] instances = semantic.Callables
             .Where(callable => callable.GenericDefinitionSymbolId is not null).ToArray();
-        Check(instances.Length == 6 && instances.Select(callable => callable.MethodSymbolId)
-            .Distinct(StringComparer.Ordinal).Count() == 6,
-            "Identity, Forward, Bounce and ordered Second arguments need six distinct instances");
+        Check(instances.Length == 9 && instances.Select(callable => callable.MethodSymbolId)
+            .Distinct(StringComparer.Ordinal).Count() == 9,
+            "value, recursive, ordered, ref/out and array calls need nine distinct instances");
         Check(instances.All(callable => semantic.Reachability!.ReachableCallableIds
             .Contains(callable.MethodSymbolId))
             && semantic.Reachability!.ReachableCallableIds.All(id =>
@@ -95,6 +73,41 @@ internal static class CSharpGuestGenericMethodTests
         Check(!CSharpGuestLowerer.Lower(
             semantic with { SemanticVersion = "1.35" }, new string('a', 64)).Succeeded,
             "an old version cannot claim a closed generic execution plan");
+        SemanticDocument arraySemantic = Analyze(File.ReadAllText(FindFixture()));
+        SemanticCallable arrayInstance = arraySemantic.Callables.Single(callable =>
+            callable.GenericDefinitionSymbolId?.Contains(".EchoArray", StringComparison.Ordinal) == true);
+        SemanticDocument badArray = arraySemantic with
+        {
+            Callables = arraySemantic.Callables.Select(callable => callable == arrayInstance
+                ? callable with { ReturnTypeId = "type:float32[]" }
+                : callable).ToArray(),
+        };
+        Check(!CSharpGuestLowerer.Lower(badArray, new string('a', 64)).Succeeded,
+            "a closed array instance cannot claim a different return element layout");
+        SemanticControlFlowGraph arrayGraph = arraySemantic.ControlFlowGraphs.Single(graph =>
+            graph.MethodSymbolId == arrayInstance.MethodSymbolId);
+        SemanticDocument openArray = arraySemantic with
+        {
+            ControlFlowGraphs = arraySemantic.ControlFlowGraphs.Select(graph =>
+                graph != arrayGraph ? graph : graph with
+                {
+                    Blocks = graph.Blocks.Select(block => block.BranchValue is null
+                        ? block : block with
+                        {
+                            BranchValue = block.BranchValue with { TypeId = "type:T[]" },
+                        }).ToArray(),
+                }).ToArray(),
+        };
+        Check(!CSharpGuestLowerer.Lower(openArray, new string('a', 64)).Succeeded,
+            "an instance CFG cannot smuggle an open array result");
+        SemanticDocument cyclicShape = arraySemantic with
+        {
+            TypeShapes = arraySemantic.TypeShapes.Select(shape =>
+                shape.TypeId == "type:T[]" ? shape with { ElementTypeId = "type:T[]" }
+                    : shape).ToArray(),
+        };
+        Check(!CSharpGuestLowerer.Lower(cyclicShape, new string('a', 64)).Succeeded,
+            "a cyclic array shape must fail input validation");
     }
 
     private static void CompositeOpenTypesFailClosed()
@@ -103,15 +116,15 @@ internal static class CSharpGuestGenericMethodTests
             using System.Runtime.InteropServices;
             public static class Script
             {
-                static T[] Echo<T>(T[] values) => values;
+                static T[,] Echo<T>(T[,] values) => values;
                 [UnmanagedCallersOnly(EntryPoint = "generic_array")]
-                public static int Main() => Echo<int>(new[] { 1, 2 }).Length;
+                public static int Main() => Echo<int>(new int[1, 1]).Length;
             }
             """;
         SemanticDocument semantic = Analyze(source);
         Check(!semantic.Succeeded && semantic.Diagnostics.Any(diagnostic =>
             diagnostic.Code == "ASCS1064"),
-            "composite open types must fail until they have a structured closed layout");
+            "unsupported composite open types must fail until they have a structured closed layout");
     }
 
     private static SemanticDocument Analyze(string source)
@@ -119,6 +132,19 @@ internal static class CSharpGuestGenericMethodTests
         const string sourceId = "Scripts/GenericMethods.cs";
         FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
         return SemanticAnalyzer.Analyze(source, sourceId, frontend.Source.Sha256);
+    }
+
+    private static string FindFixture()
+    {
+        for (DirectoryInfo? directory = new(AppContext.BaseDirectory);
+            directory is not null; directory = directory.Parent)
+        {
+            string candidate = Path.Combine(
+                directory.FullName, "Fixtures", "Phase66", "GenericMethods.cs");
+            if (File.Exists(candidate))
+                return candidate;
+        }
+        throw new FileNotFoundException("Fixtures/Phase66/GenericMethods.cs");
     }
 
     private static void Check(bool condition, string message)
