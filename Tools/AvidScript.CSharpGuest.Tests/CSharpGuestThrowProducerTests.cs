@@ -130,6 +130,7 @@ internal static class CSharpGuestThrowProducerTests
             }, new GuestTerminator("branch_if", "status", "error", "success", null)),
             new GuestBasicBlock("error", new GuestInstruction[]
             {
+                new("managed_collect", null, Array.Empty<string>(), null, null, null),
                 new("field_load", "error_type", new[] { "result" }, "field:error_type", null, null),
                 new("field_load", "source", new[] { "result" }, "field:source", null, null),
                 new("field_load", "root", new[] { "result" }, "field:error_root", null, null),

@@ -9,7 +9,14 @@ if (process.argv.length !== 3) {
 const wasmModule = new WebAssembly.Module(fs.readFileSync(process.argv[2]));
 let instance;
 let nextToken = 1n;
+let allocations = 0;
 const layouts = new Map(), objects = new Map(), frames = new Map(), roots = new Map();
+function collect() {
+  const live = new Set([...roots.values()].filter(token => token !== 0n));
+  for (const token of objects.keys()) {
+    if (!live.has(token)) objects.delete(token);
+  }
+}
 function managedHeap(input, inputLength, output, outputLength) {
   const view = new DataView(instance.exports.memory.buffer);
   const u32 = offset => view.getUint32(offset, true);
@@ -73,6 +80,7 @@ function managedHeap(input, inputLength, output, outputLength) {
     check(layouts.has(ordinal) && roots.has(root), 'allocation identity');
     const token = nextToken++;
     objects.set(token, { ordinal, bytes: new Uint8Array(layouts.get(ordinal)) });
+    allocations++;
     roots.set(root, token);
     put64(output, token);
     return 1;
@@ -92,6 +100,11 @@ function managedHeap(input, inputLength, output, outputLength) {
     }
     return 1;
   }
+  if (command === 12) {
+    check(inputLength === 8 && outputLength === 0, 'collect size');
+    collect();
+    return 1;
+  }
   throw new Error(`Unexpected managed heap command: ${command}`);
 }
 
@@ -105,7 +118,9 @@ for (const entry of WebAssembly.Module.imports(wasmModule)) {
 instance = new WebAssembly.Instance(wasmModule, imports);
 const actual = instance.exports.throw_source_probe();
 if (actual !== 3) throw new Error(`throw_source_probe() = ${actual}; expected 3`);
-if (objects.size !== 1 || frames.size !== 0 || roots.size !== 0) {
-  throw new Error(`Root teardown mismatch: objects=${objects.size}, frames=${frames.size}, roots=${roots.size}`);
+if (allocations !== 1 || frames.size !== 0 || roots.size !== 0) {
+  throw new Error(`Root teardown mismatch: allocations=${allocations}, frames=${frames.size}, roots=${roots.size}`);
 }
+collect();
+if (objects.size !== 0) throw new Error('Unrooted error object survived collection');
 process.stdout.write('C# source throw producer WASM: 1/1 passed\n');
