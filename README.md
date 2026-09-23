@@ -1,96 +1,14 @@
-![AvidScript：C# 代码驱动 Unreal Engine 游戏对象的概念插画](Docs/Assets/README/avidscript-hero.png)
-
-<h1 align="center">AvidScript</h1>
-
-<p align="center"><strong>用 C# 为 Unreal Engine 编写玩法脚本。</strong></p>
+# AvidScript
 
 ![Unreal Engine 5.8](https://img.shields.io/badge/Unreal%20Engine-5.8-172A34?logo=unrealengine&logoColor=white) ![C#](https://img.shields.io/badge/Language-C%23-512BD4?logo=dotnet&logoColor=white) ![WebAssembly](https://img.shields.io/badge/Target-WebAssembly-5541A9?logo=webassembly&logoColor=white) ![Windows x64](https://img.shields.io/badge/Platform-Windows%20x64-0967A6?logo=windows&logoColor=white) ![0.1.0 Preview](https://img.shields.io/badge/Status-0.1.0%20Preview-805413) [![MIT License](https://img.shields.io/badge/License-MIT-226342)](LICENSE)
 
-<p align="center">
-  <a href="#快速开始">🚀 快速开始</a> ·
-  <a href="#常见用法">🧩 代码示例</a> ·
-  <a href="#当前边界">🚧 当前限制</a> ·
-  <a href="#进一步阅读">📚 更多文档</a>
-</p>
+AvidScript 是 Unreal Engine 的 C# 脚本插件。构建工具将 C# 编译为 WebAssembly（WASM），插件在游戏中加载脚本并调用 UE API；游戏运行时不加载 .NET/CLR。
 
----
+当前版本为 **0.1.0 Preview**，主要验证环境是 **UE 5.8 源码版、Windows x64**。它支持下列样例中的开发流程，但尚不能运行任意 .NET 程序或 NuGet 包。
 
-用 C# 写 Actor 行为、异步流程和蓝图可用的类型。先看一个能运行的方块样例，再从下面的例子找自己的起点。
+## 代码示例
 
-![三种 C# 玩法入口：每帧驱动方块、等待后继续执行、定义蓝图可用的 Actor](Docs/Assets/README/three-ways-to-start.png)
-
-| 🎮 游戏玩法 | ⏱️ 等待与恢复 | 🧱 蓝图类型 |
-| :--- | :--- | :--- |
-| [看方块移动的完整代码](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) | [看 0.25 秒后放大 Actor 的例子](Samples/CSharp/LatentGameplay/README.md) | [看 C# 定义蓝图类型的例子](Samples/CSharp/ScriptDefinedTypes/README.md) |
-
-> [!NOTE]
-> **0.1.0 开发预览版** · 主要验证环境为 **UE 5.8 源码版 + Windows x64**。已有可运行样例，C# 语言支持、调试体验和平台覆盖仍在完善，尚不适合作为完整 .NET 的替代品。
-
-<a id="快速开始"></a>
-
-## 🚀 快速开始
-
-先运行仓库自带的 ActorLifecycle 样例：让一个方块移动、旋转并逐渐变大。下面的命令都在项目的 `Plugins/AvidScript` 目录执行。
-
-![从 C# 脚本到 UE 游戏对象的四步流程：编写、编译、加载、运行](Docs/Assets/README/script-to-game.png)
-
-### 🧰 1. 准备环境
-
-需要 Windows 10/11 x64、UE 5.8 源码版、Visual Studio 2022 的 UE C++ 构建环境、PowerShell 7、Git 和 **.NET SDK 8.0.416**。
-
-将本仓库放到一个 C++ UE 项目的 `Plugins/AvidScript` 目录。安装插件使用的脚本执行引擎 Wasmtime：
-
-```powershell
-pwsh -NoProfile -File Build/InstallWasmtimeDependency.ps1 -Mode Install
-```
-
-然后构建项目的 Editor。将下面的引擎路径、项目路径和 `YourProjectEditor` 替换为自己的配置：
-
-```powershell
-$env:UE_ROOT = "C:\UnrealEngine"
-
-& "$env:UE_ROOT\Engine\Build\BatchFiles\Build.bat" `
-  YourProjectEditor Win64 Development `
-  "-Project=C:\Path\To\YourProject.uproject" `
-  -WaitMutex -NoHotReloadFromIDE
-```
-
-### 🎮 2. 编译并挂到方块上
-
-1. 打开 UE Editor，确认 AvidScript 插件已启用。
-2. 在关卡中放置一个 Cube，将 Mobility 设为 **Movable**，并选中它。
-3. 在 **Tools** 菜单的 **AvidScript** 分组中，执行 **Build And Bind C# ActorLifecycle Script**。
-4. 构建成功后，方块上会添加或复用 **AvidScript Component**，并自动填入脚本文件。
-5. 点击 **Play**：方块会先移动到样例设定的位置，然后持续移动、旋转和变大。
-
-完整脚本在 [ActorLifecycleScript.cs](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)。如果没有变化，先检查 **Output Log** 中的 `AvidScript` 构建或加载错误，以及方块上的组件是否已绑定脚本。
-
-<details>
-<summary>⌨️ 可选：命令行编译与手动绑定</summary>
-
-也可以单独用命令行编译：
-
-```powershell
-pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
-```
-
-成功时会输出 `result=direct_abi_built`。生成的脚本入口位于**项目目录**下：
-
-```text
-Saved/AvidScriptCSharpGuest/ActorLifecycle/actor_lifecycle.avidscript.json
-```
-
-这个 JSON 是脚本的加载清单，记录要加载的程序及其信息。手动绑定时，在 Actor 上添加 **AvidScript Component**，将 **Script Manifest File** 指向它；**Script Module** 保持未设置。命令行编译本身不会修改关卡。
-
-</details>
-
-<a id="常见用法"></a>
-
-## 🧩 常见用法
-
-下面的片段从仓库样例提取或简化；完整文件还包含必要的声明和配置，请从对应样例开始修改。
-
-### 🧭 每帧移动 Actor
+以下是 [ActorLifecycleScript.cs](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) 中每帧移动 Actor 的核心写法：
 
 ```csharp
 [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
@@ -102,25 +20,50 @@ public static void Tick(float deltaSeconds)
 }
 ```
 
-`UE.Self` 是挂载脚本的 Actor；`FVector` 是 UE 的三维向量。这里每秒沿 X 轴移动 120 个 UE 单位，乘以 `deltaSeconds` 后速度不依赖帧率。方法上方的特性把它接到 UE 的每帧更新事件。
+`UE.Self` 是挂载脚本的 Actor。这里按 `deltaSeconds` 计算位移，每秒沿 X 轴移动 120 个 UE 单位。完整样例还处理 `BeginPlay`、旋转、缩放、计时器、资源加载和 `EndPlay`。
 
-同一套入口还有 `BeginPlay`（开始运行）和 `EndPlay`（结束运行）。见[生命周期样例](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)。
+## 快速开始
 
-### 🔁 遍历一维数组
+需要 Windows 10/11 x64、UE 5.8 源码版、Visual Studio 2022 的 UE C++ 构建环境、PowerShell 7、Git 和 .NET SDK **8.0.416**。以下命令均在项目的 `Plugins/AvidScript` 目录执行。
 
-```csharp
-int[] values = new[] { 3, 5, 8 };
-int sum = 0;
-foreach (int value in values)
-{
-    sum += value;
-}
-// sum == 16
+1. 将本仓库放入 C++ UE 项目的 `Plugins/AvidScript`，安装 Wasmtime 依赖：
+
+   ```powershell
+   pwsh -NoProfile -File Build/InstallWasmtimeDependency.ps1 -Mode Install
+   ```
+
+2. 构建项目的 Editor。将路径和 target 名换成自己的项目：
+
+   ```powershell
+   $env:UE_ROOT = "C:\UnrealEngine"
+
+   & "$env:UE_ROOT\Engine\Build\BatchFiles\Build.bat" `
+     YourProjectEditor Win64 Development `
+     "-Project=C:\Path\To\YourProject.uproject" `
+     -WaitMutex -NoHotReloadFromIDE
+   ```
+
+3. 打开 Editor，确认插件已启用。在关卡中放一个 Cube，将 **Mobility** 设为 **Movable** 并选中它。
+4. 执行 **Tools > AvidScript > Build And Bind C# ActorLifecycle Script**，然后点击 **Play**。脚本会设置方块的初始位置，并持续移动、旋转和放大它。
+
+如果没有看到变化，检查 Cube 上的 **AvidScript Component** 和 **Output Log** 中的 `AvidScript` 构建、加载错误。
+
+<details>
+<summary>命令行编译与手动绑定</summary>
+
+在插件目录运行：
+
+```powershell
+pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 ```
 
-同步方法支持这样的数组遍历，也支持循环中的 `break` 和 `continue`。数组表达式只求值一次；`List<T>` 等普通枚举器及捕获循环变量的闭包仍待完成清理和逐次捕获语义。[当前实施范围](Docs/Phase66/P66.C_Language_Execution_Plan.md)。
+成功时会输出 `result=direct_abi_built`。加载清单位于**项目目录**下的 `Saved/AvidScriptCSharpGuest/ActorLifecycle/actor_lifecycle.avidscript.json`。在 Actor 上添加 **AvidScript Component**，将 **Script Manifest File** 指向该文件；**Script Module** 留空。命令行编译不会修改关卡。
 
-### ⏱️ 等待一段时间，再继续执行
+</details>
+
+## 常见用法
+
+### 等待后继续执行
 
 ```csharp
 [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
@@ -131,15 +74,13 @@ public static async void BeginPlay()
 }
 ```
 
-![BeginPlay 等待 0.25 秒后继续执行并放大 Actor；对象或 World 销毁时取消](Docs/Assets/README/async-lifecycle.png)
+游戏不会因为 `await` 停帧。等待期间如果脚本所属对象或 World 被销毁，后续代码会取消。还支持下一帧、资源加载及受支持的 UE Latent API；主动取消的完整写法见 [LatentGameplay](Samples/CSharp/LatentGameplay/README.md)。
 
-效果是开始运行后等待 0.25 秒，再把 Actor 放大。`await` 等待期间游戏继续运行。脚本所属对象或 World 被销毁时，关联等待会被取消，避免随后再操作已销毁的对象。
+![异步等待、恢复与对象销毁时取消的时间线](Docs/Assets/README/async-lifecycle.png)
 
-还可以等待下一帧（`NextTickAsync()`）或资源加载（`AvidAssets.LoadObjectAsync(...)`）。文档中的 **continuation** 指“等待完成后继续执行的那段代码”；**Latent** 是 UE 对这类延迟完成操作的称呼。资源加载写法见[生命周期样例](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)，主动取消见[延迟操作样例](Samples/CSharp/LatentGameplay/README.md)。
+### 用 C# 定义 UE 类型
 
-用 C# 新定义的 UE Actor 也可以在 `[UFunction] async void` 方法里等待下一帧：从蓝图或原生代码调用后，方法暂时返回，下一帧再修改该 Actor 的属性；对象在等待期间销毁则取消恢复。见[生成类型样例](Samples/CSharp/ScriptDefinedTypes/README.md)。
-
-### 🧱 用 C# 定义蓝图可用的 Actor
+以下摘自 [ScriptDefinedTypes.cs](Samples/CSharp/ScriptDefinedTypes/ScriptDefinedTypes.cs)，展示可被蓝图调用的 Actor 方法：
 
 ```csharp
 using AvidScript;
@@ -147,131 +88,77 @@ using AvidScript;
 [UClass(Blueprintable = true, BlueprintType = true)]
 public partial class Projectile : AvidActor
 {
-    [UProperty(EditAnywhere = true, BlueprintReadWrite = true)]
-    public float Damage { get; set; } = 25.0f;
+    [UProperty(BlueprintReadWrite = true, Category = "Projectile")]
+    public float LaunchSpeed { get; set; } = 1200.0f;
 
-    [UFunction(BlueprintCallable = true)]
-    public void Activate(float damageScale)
+    [UFunction(BlueprintCallable = true, Category = "Projectile")]
+    public async void SetLaunchSpeedNextTick(float speed)
     {
-        Damage *= damageScale;
+        await AvidContinuations.NextTickAsync();
+        LaunchSpeed = speed;
     }
 }
 ```
 
-生成并编译 UE 类型后，`Projectile` 可以作为蓝图的父类；`Damage` 可以在编辑器和蓝图中修改，`Activate` 可以作为蓝图函数调用。
+调用后本帧保持原值，下一帧才写入 `speed`。新增或修改 `UClass/UProperty/UFunction` 等反射结构时，需要重新构建 Editor 并重启；仅修改受支持的方法体可以走热重载。[生成类型的构建与网络行为](Samples/CSharp/ScriptDefinedTypes/README.md)。
 
-`UClass`、`UProperty`、`UFunction` 分别标记“UE 能识别的类、属性、函数”。这类脚本需要生成对应的 UE 类型，不能只把 `.cs` 文件挂到组件上。见[脚本定义 UE 类型样例](Samples/CSharp/ScriptDefinedTypes/README.md)。
+### 完整样例
 
-### 🔔 订阅 UE 事件并记住得分
+| 需求 | 样例 |
+| --- | --- |
+| Actor 生命周期、Tick、资源加载 | [ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) |
+| 道具拾取、延迟恢复 | [PlayablePickup](Samples/CSharp/PlayablePickup/README.md) |
+| 限时收集小游戏 | [PickupRush](Samples/CSharp/PickupRush/README.md) |
+| UI 与存档 | [UiSaveDemo](Samples/CSharp/UiSaveDemo/README.md) |
+| RPC、属性复制与 RepNotify | [NetworkRpc](Samples/CSharp/NetworkRpc/README.md)、[ReplicatedProperty](Samples/CSharp/ReplicatedProperty/README.md) |
+| UE 事件订阅与跨 `await` 回调 | [ScriptDefinedTypes](Samples/CSharp/ScriptDefinedTypes/README.md)、[事件合同](Docs/Phase66/P66.B_Event_Language_Contract.md) |
+| 项目 C++ API 的生成绑定 | [TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) |
 
-```csharp
-int score = 40;
-AvidSubscription subscription = AvidSubscriptions.SubscribeOnScriptSignal(
-    UE.Self,
-    (actor, amount, scale) => { score += amount; });
+## 工作原理
 
-// 不再需要时：subscription.Cancel();
+```text
+C# 源码 ──Roslyn/Guest IR──> WASM 模块
+UE API 选择配置 ──绑定生成器──> C# 调用接口 + UE 描述符
+WASM 模块 ──AvidScript Runtime──> UE 对象、属性、函数与事件
 ```
 
-事件发生时，即使订阅函数已返回，回调仍会更新同一个 `score`。`OnScriptSignal` 是测试项目生成的事件名；在你的项目中，接口名称和参数由选中的 UE 事件决定。订阅代码应只执行一次，通常保存返回的句柄供取消使用。[完整写法与目前限制](Docs/Phase66/P66.B_Persistent_Event_State.md)。
+项目先选择要暴露的 UE API，构建工具再生成对应的 C# 调用接口。脚本持有受验证的对象句柄，不直接保存 `UObject*`。Wasmtime 是主要执行后端，另有 WAMR 兼容后端。
 
-对**已选中并生成绑定**的 UE 事件，也可以用熟悉的 C# 写法：
+## 当前支持范围
 
-```csharp
-public static class ScoreScript
-{
-    public static int Score;
-    static void AddScore(AActor actor, int amount, float scale) => Score += amount;
+| 范围 | 已有能力 | 主要限制 |
+| --- | --- | --- |
+| C# 语言 | 常用控制流、一维数组 `foreach`、受支持的类/结构体、lambda、局部函数 | 泛型执行、普通枚举器、异常等尚未覆盖完整 C#；不能直接使用任意 NuGet 包 |
+| 异步 | 计时器、下一帧、资源加载、受支持的 UE Latent API | 不能等待任意 `Task` 或自定义 awaiter |
+| UE API 与类型 | 生成的属性/函数绑定、常用数学类型、文本、受支持的数组/Set/Map | API 需先选择并生成绑定；部分嵌套容器和软/弱引用用法仍有限制 |
+| UE 类型与网络 | C# 定义 Actor/Component/Subsystem；RPC、复制属性、RepNotify 的聚焦测试 | 反射结构变更需重建 Editor；真实游戏流程仍需单独验收 |
+| 调试与重载 | 错误定位、调用栈、受支持的断点/变量查看；方法体热重载 | 不是完整 C# 调试器；不能回滚任意外部副作用 |
+| 平台与打包 | Windows Development/Shipping 样例与打包验证 | Android 真机与 iOS 尚未验收；当前优先完善 Windows |
 
-    public static void Start() => UE.Self.OnScriptSignal += AddScore;
-    public static void Stop()  => UE.Self.OnScriptSignal -= AddScore;
-}
-```
+样例说明具体可运行路径；它们不表示任意 C# 写法或任意 UE 类型都已支持。已实现与待完成项见 [P66 实施计划](Docs/Phase66/P66.1_Implementation_Plan.md)。自动化测试也不能代替实际 Play、网络、长时间运行验收。
 
-`Start()` 注册回调，`Stop()` 移除回调。重复注册会重复触发；同一脚本分别订阅两个有访问权限、同 World 的 Actor 时，移除其中一个不会影响另一个。
+## 性能
+
+部分冻结的 UE 调用基准优于 Puerts Reflection，但纯计算等项目尚未达到目标；目前没有证据证明整体领先 Puerts 或 Unreal AngelScript。测试条件和适用范围见 [性能报告](Docs/Phase65/P65.D34_Production_Epoch_Runtime.md)与[框架成熟度评估](Docs/Phase66/P66_Developer_Leadership_Assessment.md)。
 
 <details>
-<summary>🔍 事件进阶：再次广播、await、重载与取消</summary>
+<summary>查看 P57 历史调用基准图</summary>
 
-| 场景 | 会发生什么 |
-| --- | --- |
-| 回调再次广播 | 收到 `2` 后再广播 `3`，回调共加 `5`；需要终止条件，避免无限递归。 |
-| 回调里 `await` | 先加 `2`，下一帧恢复后再加 `20`；局部值会保留。[碰撞事件样例](Samples/CSharp/ScriptDefinedTypes/README.md) |
-| 对象销毁或脚本卸载 | 只取消该对象的订阅与等待，不影响同 World 的其他 Actor。 |
-| 脚本更新 | 更新失败时旧回调继续工作；成功时旧回调解绑，新脚本可重新订阅。 |
+![P57 UE 调用基准：AvidScript 与 Puerts Reflection 的耗时对比](Docs/Assets/README/phase57-prepared-reflection-performance.png)
 
-这些行为已在 Win64 Editor 自动化及 Wasmtime / WAMR 的聚焦测试中验证。实际 Editor Play 操作、Cook/Shipping 切换和长时间运行仍待验收。单播占用、跨 World 拒绝和不同版本代码切换的完整范围见[事件合同](Docs/Phase66/P66.B_Event_Language_Contract.md)。
+这是 P57 历史基准，不是当前版本的完整性能排名。[原始证据](Docs/Phase57/P57.11B1_Recursive_Fixed_Struct_Codec_Evidence.json)包含测试配置与采样数据。
 
 </details>
 
-### 🗂️ 找一个接近你需求的完整样例
+## 文档
 
-| 你想实现什么 | 从哪里开始 |
-| --- | --- |
-| 🎁 碰到道具后隐藏，3 秒后重新出现 | [可拾取道具](Samples/CSharp/PlayablePickup/README.md) |
-| 🏁 20 秒内收集 5 次，判断胜负并重开 | [PickupRush 小游戏](Samples/CSharp/PickupRush/README.md) |
-| 💾 点击按钮加分，保存并在下次启动时读回 | [UI 与存档](Samples/CSharp/UiSaveDemo/README.md) |
-| 🌐 客户端请求服务器执行操作 | [RPC：远程调用](Samples/CSharp/NetworkRpc/README.md) |
-| 🔄 服务器修改数值，客户端同步并响应变化 | [属性复制与 RepNotify](Samples/CSharp/ReplicatedProperty/README.md) |
-| 🧱 调用项目自己的 C++ 函数、生成蓝图 Actor | [项目 API](Samples/CSharp/TypedProjectApi/README.md) |
+- [编辑器命令与 IDE 工作区](Docs/Phase61/P61.D4c2_Editor_IDE_Commands.md)
+- [调试面板](Docs/Phase61/P61.C4b_Editor_Debugger_Panel.md)
+- [Windows 打包样例](Docs/Phase64/P64.D_Packaged_UI.md)
+- [插件打包与安装](Docs/Phase65/P65.A_Deterministic_Release_And_Atomic_Install.md)
+- [研发计划与设计记录](Docs/)
+- [仓库工作规则](AGENTS.md)
 
-RPC 是跨网络请求另一端执行函数；属性复制是服务器把属性值同步给客户端；RepNotify 是收到属性变化后的回调。调用权限和对象归属仍遵循 UE 的网络规则。
+## 许可证
 
-<a id="当前边界"></a>
-
-## 🚧 当前边界
-
-选型时请按下面的实际限制判断。功能出现在样例中，不表示任意 C# 写法或任意 UE 类型都已支持。
-
-| 范围 | 目前能做什么 | 对开发的影响 |
-| --- | --- | --- |
-| C# 语言 | 常用控制流、同步一维数组 `foreach`、受支持的类和结构体、同步 lambda、局部函数、共享捕获变量 | 还不能直接迁入任意 .NET / NuGet 库；普通枚举器遍历、泛型执行覆盖、完整异常系统仍不齐全 |
-| 异步 | 计时器、下一帧、资源加载；受支持的 `async void` 实例方法可跨 `await` 保留 `this`、参数、局部对象与共享变量 | 还不能等待任意 `Task` 或自定义 awaiter。[延迟加分示例与生命周期](Docs/Phase66/P66.B_Async_Invocation_Contract.md) |
-| UE 类型与 API | 属性、函数、常用数学类型、文本，以及受支持的数组、Set（去重集合）、Map（键值表） | 先在配置中选择需要的 API，再生成 C# 调用接口；部分嵌套对象容器、软引用（按路径引用资源）和弱引用（不阻止对象回收）的便捷用法仍有限制 |
-| 委托与事件 | 受支持的单播、多播及 `ref/out` 参数；显式订阅可接收捕获变量的 lambda、实例方法和静态方法；已生成的 UE 事件可用 `+=` / `-=` | 普通 .NET 事件不会自动接入 UE；事件语法的复杂委托组合仍在验收。[显式订阅范围](Docs/Phase66/P66.B_Persistent_Event_State.md)、[事件语法范围](Docs/Phase66/P66.B_Event_Language_Contract.md) |
-| 热重载 | 更新方法体，迁移受支持的持久状态，拒绝无效候选版本 | 改移动速度这类逻辑可重载；新增反射属性、修改函数签名需要重新编译 UE 并重启 Editor；不能回滚任意外部副作用 |
-| 调试 | 错误定位、调用栈、受支持的断点 / 单步、只读变量查看和性能分析 | 还不是完整 C# 调试器，部分语言能力与调试插桩不能组合使用 |
-| Windows 打包 | 已有 Development / Shipping 样例与打包验证 | 正式包必须发布脚本模块并设置模块 ID；不能直接沿用上面的临时 JSON 路径 |
-| 移动端 | 已有 Android 预编译准备 | Android 真机和 iOS 尚未验收，目前优先完善 Windows |
-
-闭包、委托和 UE 事件的当前验收范围见 [P66.B 批次记录](Docs/Phase66/P66.B_Batch_Completion.md)；其他语言缺口和下一步见[当前实施计划](Docs/Phase66/P66.1_Implementation_Plan.md)。自动化测试、实际玩家操作和长时间运行的验收分别记录，不能互相代替。
-
-## ⚙️ 它如何运行
-
-构建工具把 C# 编译成 **WebAssembly（WASM）**，一种供脚本执行引擎运行的程序格式；UE 插件加载它，再把脚本中的调用转交给 UE。游戏运行时不加载完整的 .NET / CLR。
-
-```mermaid
-flowchart LR
-    Source["✍️ C# 玩法代码"] --> Compiler["编译器"] --> Wasm["WASM 脚本"]
-    UEAPI["🔎 从 UE 选出的 API"] --> Bindings["生成的 C# 调用接口"] --> Compiler
-    Wasm --> Runtime["🧩 AvidScript 插件"] --> Game["🎮 UE Actor / UI / 蓝图"]
-```
-
-项目 API 通过配置选择后生成 C# 接口。例如，选择项目的 `ApplyGameplayValue` 函数后，脚本才能以对应的 C# 方法调用它。技术文档中的 **Profile** 是这份选择配置，**binding / facade** 是生成的连接信息和 C# 调用接口。
-
-主要执行引擎为 Wasmtime，另有 WAMR 兼容后端。底层执行引擎的细节通常不需要进入玩法代码。
-
-<a id="性能摘要"></a>
-
-## 📊 性能摘要
-
-已有冻结用例的性能对比，部分 UE 调用路径取得优势；纯计算等项目仍有未达目标的指标，目前没有证据证明整体领先 Puerts 或 Unreal AngelScript。具体条件与结果见[性能报告](Docs/Phase65/P65.D34_Production_Epoch_Runtime.md)，开发体验差距见[框架成熟度评估](Docs/Phase66/P66_Developer_Leadership_Assessment.md)。
-
-![历史基准：四类 UE 调用的耗时对比，绿色为 AvidScript，灰色为 Puerts Reflection，柱形越短越好](Docs/Assets/README/phase57-prepared-reflection-performance.png)
-
-*上图为 P57 历史基准，不是当前版本的完整性能排名。绿色表示 AvidScript，灰色表示 Puerts Reflection；数值越低，指定调用耗时越少。测试环境、采样条件与适用范围见[原始证据](Docs/Phase57/P57.11B1_Recursive_Fixed_Struct_Codec_Evidence.json)。*
-
-<a id="进一步阅读"></a>
-
-## 📚 进一步阅读
-
-- **开发与调试：**[IDE 工作区与编辑器命令](Docs/Phase61/P61.D4c2_Editor_IDE_Commands.md)、[调试面板](Docs/Phase61/P61.C4b_Editor_Debugger_Panel.md)。
-- **发布 Windows 游戏：**[UI 样例的打包流程](Docs/Phase64/P64.D_Packaged_UI.md)、[插件打包与安装](Docs/Phase65/P65.A_Deterministic_Release_And_Atomic_Install.md)。
-- **了解当前研发进度：**[实施计划](Docs/Phase66/P66.1_Implementation_Plan.md)、[设计与历史验证记录](Docs/)。这些是研发文档，不是入门前置阅读。
-- **参与开发：**[仓库工作规则](AGENTS.md)。
-
-<a id="许可证"></a>
-
-## 📄 许可证
-
-AvidScript 原创代码使用 [MIT License](LICENSE)。Wasmtime 使用 Apache-2.0 WITH LLVM-exception；WAMR 保留上游许可。Unreal Engine 不包含在本仓库中。
+AvidScript 原创代码采用 [MIT License](LICENSE)。Wasmtime 使用 Apache-2.0 WITH LLVM-exception；WAMR 保留上游许可。Unreal Engine 不包含在本仓库中。
