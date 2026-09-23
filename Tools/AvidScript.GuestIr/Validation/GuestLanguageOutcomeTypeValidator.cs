@@ -14,14 +14,17 @@ internal static class GuestLanguageOutcomeTypeValidator
         IReadOnlyList<GuestLanguageOutcomeType>? declarations = context.Module.LanguageOutcomeTypes;
         if (declarations is null)
         {
-            if (context.Module.SchemaVersion == SchemaVersion)
-                context.Add("ASIR1024", "IR 15 requires an explicit language outcome type list.");
+            if (context.Module.SchemaVersion is SchemaVersion or GuestLanguageOutcomeFlowValidator.SchemaVersion)
+                context.Add("ASIR1024", "IR 15 and 16 require an explicit language outcome type list.");
             return;
         }
 
-        if (context.Module.SchemaVersion != SchemaVersion || context.Module.IrVersion != IrVersion)
+        bool validVersion = (context.Module.SchemaVersion == SchemaVersion && context.Module.IrVersion == IrVersion)
+            || (context.Module.SchemaVersion == GuestLanguageOutcomeFlowValidator.SchemaVersion
+                && context.Module.IrVersion == GuestLanguageOutcomeFlowValidator.IrVersion);
+        if (!validVersion)
         {
-            context.Add("ASIR1024", "Language outcome types require Guest IR 15/1.14.");
+            context.Add("ASIR1024", "Language outcome types require Guest IR 15/1.14 or 16/1.15.");
             return;
         }
 

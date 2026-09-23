@@ -2,8 +2,8 @@ using System.Text.Json.Serialization;
 
 namespace AvidScript.GuestIr;
 
-// A versioned layout declaration only. Callable propagation and catch handling
-// require separate contracts before source-level exceptions can be enabled.
+// IR 15 declares layout only. IR 16 additionally validates call-result status
+// branches; propagation, cleanup and catch handling still need their own rules.
 public sealed record GuestLanguageOutcomeType(
     [property: JsonPropertyOrder(0)] string TypeId,
     [property: JsonPropertyOrder(1)] string? ValueTypeId)

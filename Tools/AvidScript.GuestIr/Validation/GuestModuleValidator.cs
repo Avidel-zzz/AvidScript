@@ -31,6 +31,7 @@ public static class GuestModuleValidator
         ValidateTypes(context);
         GuestCanonicalTypeValidator.Validate(context);
         GuestLanguageOutcomeTypeValidator.Validate(context);
+        GuestLanguageOutcomeFlowValidator.Validate(context);
         ValidateImports(context);
         GuestFunctionReferenceValidator.ValidateContracts(context);
         GuestManagedHeapValidator.ValidateContracts(context);
@@ -59,6 +60,8 @@ public static class GuestModuleValidator
             && string.Equals(module.IrVersion, CurrentIrVersion, StringComparison.Ordinal);
         bool isOutcomeVersion = module.SchemaVersion == GuestLanguageOutcomeTypeValidator.SchemaVersion
             && string.Equals(module.IrVersion, GuestLanguageOutcomeTypeValidator.IrVersion, StringComparison.Ordinal);
+        bool isOutcomeFlowVersion = module.SchemaVersion == GuestLanguageOutcomeFlowValidator.SchemaVersion
+            && string.Equals(module.IrVersion, GuestLanguageOutcomeFlowValidator.IrVersion, StringComparison.Ordinal);
         bool isLegacyVersion = (module.SchemaVersion == LegacySchemaVersion
             && string.Equals(module.IrVersion, LegacyIrVersion, StringComparison.Ordinal))
             || (module.SchemaVersion == 2 && module.IrVersion == "1.1")
@@ -73,7 +76,7 @@ public static class GuestModuleValidator
             || (module.SchemaVersion == 11 && module.IrVersion == "1.10")
             || (module.SchemaVersion == 12 && module.IrVersion == "1.11")
             || (module.SchemaVersion == 13 && module.IrVersion == "1.12");
-        if ((!isCurrentVersion && !isOutcomeVersion && !isLegacyVersion)
+        if ((!isCurrentVersion && !isOutcomeVersion && !isOutcomeFlowVersion && !isLegacyVersion)
             || string.IsNullOrWhiteSpace(module.ModuleId)
             || string.IsNullOrWhiteSpace(module.Language)
             || string.IsNullOrWhiteSpace(provenance.SourceId)

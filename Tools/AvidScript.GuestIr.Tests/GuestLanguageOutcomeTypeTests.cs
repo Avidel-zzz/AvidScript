@@ -110,7 +110,7 @@ internal static class GuestLanguageOutcomeTypeTests
         AssertError(module, "ASIR1001");
     }
 
-    private static GuestModule CreateModule(string? valueTypeId = Int)
+    internal static GuestModule CreateModule(string? valueTypeId = Int)
     {
         GuestModule baseline = GuestModuleValidationTests.CreateMinimalModule();
         GuestType payload = new(Payload, "struct", "memory",
