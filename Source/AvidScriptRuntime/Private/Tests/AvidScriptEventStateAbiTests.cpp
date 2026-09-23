@@ -103,6 +103,37 @@ TArray<uint8> Build(EFault Fault, const char* Module = "avidscript", bool BadSig
 	U32(Code, Event.Num()); Code.Append(Event); Section(Wasm, 10, Code);
 	return Wasm;
 }
+TArray<uint8> BuildLanguage()
+{
+	TArray<uint8> Wasm{0, 0x61, 0x73, 0x6d, 1, 0, 0, 0};
+	Section(Wasm, 1, {4,
+		0x60, 5, 0x7f, 0x7f, 0x7f, 0x7f, 0x7e, 1, 0x7e, // subscribe
+		0x60, 4, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7e,       // lookup
+		0x60, 0, 0, 0x60, 1, 0x7d, 0});               // BeginPlay, Tick
+	TArray<uint8> Imports; U32(Imports, 2);
+	Name(Imports, "avidscript"); Name(Imports, AvidScript::EventState::Abi::LanguageSubscribeImport); Imports.Append({0, 0});
+	Name(Imports, "avidscript"); Name(Imports, AvidScript::EventState::Abi::LanguageLookupImport); Imports.Append({0, 1});
+	Section(Wasm, 2, Imports);
+	Section(Wasm, 3, {2, 2, 3});
+	Section(Wasm, 5, {1, 1, 1, 1});
+	TArray<uint8> Exports{3};
+	Name(Exports, "memory"); Exports.Append({2, 0});
+	Name(Exports, "avid_on_begin_play"); Exports.Append({0, 2});
+	Name(Exports, "avid_on_tick"); Exports.Append({0, 3});
+	Section(Wasm, 7, Exports);
+	TArray<uint8> Tick{0};
+	auto Lookup = [&](int32 Output)
+	{
+		I32(Tick, Output); Load(Tick, 0, false); Load(Tick, 4, false); Load(Tick, 8, false);
+		I32(Tick, 1); Tick.Append({0x10, 1, 0x37, 0, 0});
+	};
+	Lookup(40);
+	I32(Tick, 24); Load(Tick, 0, false); Load(Tick, 4, false); Load(Tick, 8, false);
+	I32(Tick, 1); Load(Tick, 16, true); Tick.Append({0x10, 0, 0x37, 0, 0});
+	Lookup(32); Tick.Add(0x0b);
+	TArray<uint8> Code{2, 2, 0, 0x0b}; U32(Code, Tick.Num()); Code.Append(Tick); Section(Wasm, 10, Code);
+	return Wasm;
+}
 bool EncodeFrame(const void*, const void*, const FAvidScriptBindingInvocationContext&,
 	uint32, FAvidScriptVmCallFrame& Frame, TArray<FAvidScriptObjectHandle>&, FString&, FString&)
 {
@@ -468,6 +499,93 @@ bool FAvidScriptCompiledEventStateTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("No compiled event objects leak"), Heap.GetStats().LiveObjects, 0u);
 		TestEqual(TEXT("No compiled event roots leak"), Heap.GetStats().LiveRoots, 0u);
 		TestEqual(TEXT("No compiled event frames leak"), Heap.GetStats().ActiveFrames, 0u);
+		Session.StopAndUnload(Result);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptLanguageEventStateAbiTest,
+	"AvidScript.Runtime.DelegateSubscription.LanguageStateAbi",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptLanguageEventStateAbiTest::RunTest(const FString& Parameters)
+{
+	using namespace AvidScript::Managed;
+	using namespace AvidScriptEventStateAbiTests;
+	if (!GEngine) return false;
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false, TEXT("AvidScriptLanguageEventStateWorld"));
+	if (!World) return false;
+	GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+	ON_SCOPE_EXIT { GEngine->DestroyWorldContext(World); World->DestroyWorld(false); };
+	AActor* Owner = World->SpawnActor<AActor>();
+	if (!Owner) return false;
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	{
+		AddInfo(FString::Printf(TEXT("Language event ABI backend=%d"), static_cast<int32>(Backend)));
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime ? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		FAvidScriptRuntimeSession Session;
+		Session.SetBackendSelectionForTesting(Selection);
+		const auto Wasm = BuildLanguage();
+		auto Manifest = FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("language_event_state_abi"));
+		Manifest.RequiredImports = {
+			{TEXT("avidscript"), UTF8_TO_TCHAR(AvidScript::EventState::Abi::LanguageSubscribeImport)},
+			{TEXT("avidscript"), UTF8_TO_TCHAR(AvidScript::EventState::Abi::LanguageLookupImport)}};
+		FAvidScriptWasmReloadResult Loaded;
+		if (!Session.LoadInitialModule(Wasm.GetData(), Wasm.Num(), Manifest, Loaded)) { AddError(Loaded.ErrorMessage); return false; }
+		auto* Runtime = Session.GetLiveRuntimeForTesting();
+		FAvidScriptObjectRegistry Registry;
+		FAvidScriptObjectHandleResult HandleResult;
+		const auto OwnerHandle = Registry.RegisterObject(Owner, HandleResult, false);
+		FAvidScriptSessionDelegateSubscriptions Subscriptions(Session);
+		FAvidScriptWasmHostContext Context;
+		Context.World = World; Context.ObjectRegistry = &Registry; Context.OwnerHandle = OwnerHandle;
+		Context.EventSubscriptions = &Subscriptions;
+		Runtime->SetHostContext(Context);
+		FAvidScriptPreparedDelegateEvent Event;
+		Event.EventOrdinal = 7; Event.StableId = FString::ChrN(64, '9'); Event.ExportName = TEXT("event_callback");
+		Event.ExpectedSourceClass = AActor::StaticClass(); Event.bRequiresManagedState = true;
+		Event.Signature.Kind = EAvidScriptPreparedDelegateKind::Multicast;
+		Event.Signature.MulticastProperty = FindFProperty<FMulticastDelegateProperty>(AActor::StaticClass(), TEXT("OnActorBeginOverlap"));
+		Event.Signature.SignatureFunction = Event.Signature.MulticastProperty->SignatureFunction;
+		Event.Signature.ImmutableCodecIdentity = Event.Signature.SignatureFunction;
+		Event.Signature.ParameterCellCount = 1; Event.Signature.Encode = &EncodeFrame;
+		FString Error;
+		if (!Subscriptions.Prepare(World, MakeArrayView(&Event, 1), Error, Runtime)) { AddError(Error); return false; }
+		Subscriptions.CommitPrepared(); Subscriptions.SetDispatchEnabled(true);
+		auto& Heap = *Runtime->GetManagedHeapForTesting();
+		const std::array<FHeapLayout, 1> Layouts{{{1, 8, {}}}};
+		TestTrue(TEXT("Language box layout"), Heap.Configure(Layouts) == EHeapError::Ok);
+		FToken Frame = 0, Root = 0, Object = 0;
+		TestTrue(TEXT("Publisher frame"), Heap.PushFrame(Frame) == EHeapError::Ok);
+		TestTrue(TEXT("Publisher root"), Heap.CreateRoot(Frame, 0, Root) == EHeapError::Ok);
+		TestTrue(TEXT("Language box"), Heap.Allocate(1, Root, Object) == EHeapError::Ok);
+		uint8 Memory[48] = {};
+		const int32 Ordinal = 7;
+		FMemory::Memcpy(Memory, &OwnerHandle.Slot, 4);
+		FMemory::Memcpy(Memory + 4, &OwnerHandle.Generation, 4);
+		FMemory::Memcpy(Memory + 8, &Ordinal, 4);
+		FMemory::Memcpy(Memory + 16, &Object, 8);
+		TestTrue(TEXT("Guest input"), Runtime->WriteStateBytes(0, MakeArrayView(Memory), Error));
+		FAvidScriptWasmSmokeResult Result;
+		TestTrue(TEXT("Guest subscribes and looks up language state"), Runtime->Tick(0.0f, Result));
+		TestTrue(TEXT("Guest output"), Runtime->ReadStateBytes(0, MakeArrayView(Memory), Error));
+		int64 Token = 0;
+		uint64 Before = 1, After = 0;
+		FMemory::Memcpy(&Token, Memory + 24, 8);
+		FMemory::Memcpy(&After, Memory + 32, 8);
+		FMemory::Memcpy(&Before, Memory + 40, 8);
+		TestEqual(TEXT("Lookup before publication is absent"), Before, uint64(0));
+		TestTrue(TEXT("Language subscription publishes one bridge"), Token > 0 && Subscriptions.NumActive() == 1);
+		TestEqual(TEXT("Lookup returns exact typed box"), After, Object);
+		TestTrue(TEXT("Publisher frame exits"), Heap.PopFrame(Frame) == EHeapError::Ok);
+		TestTrue(TEXT("Collect preserves published box"), Heap.Collect() == EHeapError::Ok && Heap.IsAlive(Object));
+		TestEqual(TEXT("Published bridge retains one root"), Heap.GetStats().LiveRoots, 1u);
+		TestEqual(TEXT("Existing cancellation releases bridge"), Runtime->HandleEventUnsubscribeImport(Token), 1);
+		TestTrue(TEXT("Final language box collection"), Heap.Collect() == EHeapError::Ok);
+		TestEqual(TEXT("Language state leaves no roots"), Heap.GetStats().LiveRoots, 0u);
+		TestEqual(TEXT("Language state leaves no objects"), Heap.GetStats().LiveObjects, 0u);
 		Session.StopAndUnload(Result);
 	}
 	return true;

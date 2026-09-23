@@ -5067,7 +5067,8 @@ int64 FAvidScriptWasmRuntimeInstance::HandleEventSubscribeImport(
 
 int64 FAvidScriptWasmRuntimeInstance::HandleEventSubscribeInternal(
 	const int32 Slot, const int32 Generation, const int32 EventOrdinal,
-	TConstArrayView<uint8> StateBytes, TUniquePtr<IAvidScriptManagedStateLease>* Lease)
+	TConstArrayView<uint8> StateBytes, TUniquePtr<IAvidScriptManagedStateLease>* Lease,
+	const bool bLanguageManaged)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
 	GetInstanceState().LastHostImportInput = EventOrdinal;
@@ -5135,8 +5136,11 @@ int64 FAvidScriptWasmRuntimeInstance::HandleEventSubscribeInternal(
 
 	FString SubscribeError;
 	const int64 SubscriptionToken = Lease
-		? HostContext.EventSubscriptions->SubscribeManaged(*Source,
-			static_cast<uint32>(EventOrdinal), *this, StateBytes, MoveTemp(*Lease), SubscribeError)
+		? (bLanguageManaged
+			? HostContext.EventSubscriptions->SubscribeManagedLanguage(*Source,
+				static_cast<uint32>(EventOrdinal), *this, StateBytes, MoveTemp(*Lease), SubscribeError)
+			: HostContext.EventSubscriptions->SubscribeManaged(*Source,
+				static_cast<uint32>(EventOrdinal), *this, StateBytes, MoveTemp(*Lease), SubscribeError))
 		: HostContext.EventSubscriptions->Subscribe(*Source, static_cast<uint32>(EventOrdinal), SubscribeError);
 	if (SubscriptionToken <= 0)
 	{
@@ -8177,6 +8181,8 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 	}
 	case EAvidScriptHostBindingId::EventManagedStateSubscribeV1:
 	case EAvidScriptHostBindingId::EventManagedStateReadV1:
+	case EAvidScriptHostBindingId::EventLanguageSubscribeV1:
+	case EAvidScriptHostBindingId::EventLanguageLookupV1:
 	{
 		const bool bSucceeded = DispatchEventManagedStateCall(Call, OutResult);
 		ProfileScope.SetSucceeded(bSucceeded);

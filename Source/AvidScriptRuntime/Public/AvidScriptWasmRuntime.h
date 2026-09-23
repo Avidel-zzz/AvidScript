@@ -692,7 +692,8 @@ private:
 	enum class EInstanceLifecycleOperation : uint8 { Begin, Tick, End };
 	bool DispatchEventManagedStateCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	int64 HandleEventSubscribeInternal(int32 Slot, int32 Generation, int32 EventOrdinal,
-		TConstArrayView<uint8> StateBytes, TUniquePtr<IAvidScriptManagedStateLease>* Lease);
+		TConstArrayView<uint8> StateBytes, TUniquePtr<IAvidScriptManagedStateLease>* Lease,
+		bool bLanguageManaged = false);
 	friend class FAvidScriptManagedContinuationStateLease;
 	bool BeginPlayInternal(FAvidScriptWasmSmokeResult& OutResult);
 	bool TickInternal(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult, EAvidScriptWasmResultDetail ResultDetail);

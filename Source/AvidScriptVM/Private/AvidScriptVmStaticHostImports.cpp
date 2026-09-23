@@ -71,11 +71,13 @@ const FAvidScriptVmStaticHostImport GStaticHostImports[] = {
 	{ EAvidScriptHostBindingId::ContinuationManagedStateStoreV1, AvidScript::ContinuationState::Abi::StoreImport, "(IiI)i", false, true },
 	{ EAvidScriptHostBindingId::ContinuationManagedStateReadV1, AvidScript::ContinuationState::Abi::ReadImport, "(Ii)I", false, true },
 	{ EAvidScriptHostBindingId::EventManagedStateSubscribeV1, AvidScript::EventState::Abi::SubscribeImport, "(iiiiI)I", false, true },
-	{ EAvidScriptHostBindingId::EventManagedStateReadV1, AvidScript::EventState::Abi::ReadImport, "(i)I", false, true }
+	{ EAvidScriptHostBindingId::EventManagedStateReadV1, AvidScript::EventState::Abi::ReadImport, "(i)I", false, true },
+	{ EAvidScriptHostBindingId::EventLanguageSubscribeV1, AvidScript::EventState::Abi::LanguageSubscribeImport, "(iiiiI)I", false, true },
+	{ EAvidScriptHostBindingId::EventLanguageLookupV1, AvidScript::EventState::Abi::LanguageLookupImport, "(iiii)I", false, true }
 };
 
 static_assert(
-	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::EventManagedStateReadV1),
+	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::EventLanguageLookupV1),
 	"Static host catalog must remain dense and ordered by binding id.");
 
 bool FailStaticCall(FString& OutFailureDetails, const TCHAR* Details)
@@ -251,8 +253,12 @@ bool InvokeAvidScriptVmStaticHostImport(
 	switch (Import.BindingId)
 	{
 	case EAvidScriptHostBindingId::EventManagedStateSubscribeV1:
+	case EAvidScriptHostBindingId::EventLanguageSubscribeV1:
 		for (int32 I = 0; I < 4; ++I) Call.IntArgs[I] = Arguments[I].I32;
 		Call.Int64Args[0] = Arguments[4].I64;
+		break;
+	case EAvidScriptHostBindingId::EventLanguageLookupV1:
+		for (int32 I = 0; I < 4; ++I) Call.IntArgs[I] = Arguments[I].I32;
 		break;
 	case EAvidScriptHostBindingId::EventManagedStateReadV1:
 		Call.IntArgs[0] = Arguments[0].I32;

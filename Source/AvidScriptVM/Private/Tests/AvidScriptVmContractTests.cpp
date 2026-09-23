@@ -599,7 +599,9 @@ bool FAvidScriptVmEventSubscriptionImportContractTest::RunTest(
 	const auto& ManagedRead = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::ContinuationManagedStateReadV1);
 	const auto& EventStore = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::EventManagedStateSubscribeV1);
 	const auto& EventRead = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::EventManagedStateReadV1);
-	for (const auto* Import : {&ManagedHeap, &ManagedStore, &ManagedRead, &EventStore, &EventRead})
+	const auto& LanguageStore = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::EventLanguageSubscribeV1);
+	const auto& LanguageLookup = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::EventLanguageLookupV1);
+	for (const auto* Import : {&ManagedHeap, &ManagedStore, &ManagedRead, &EventStore, &EventRead, &LanguageStore, &LanguageLookup})
 	{
 		TestTrue(TEXT("Every heap-bearing import requires an invocation scope"), Import->bRequiresManagedInvocation
 			&& RequiresAvidScriptVmManagedInvocation(TEXT("avidscript"), UTF8_TO_TCHAR(Import->ImportName)));
@@ -609,6 +611,15 @@ bool FAvidScriptVmEventSubscriptionImportContractTest::RunTest(
 	TestEqual(TEXT("Event state read follows subscribe"), static_cast<uint16>(EventRead.BindingId), static_cast<uint16>(EventStore.BindingId) + 1);
 	TestEqual(TEXT("Event state publication signature"), FString(UTF8_TO_TCHAR(EventStore.Signature)), FString(TEXT("(iiiiI)I")));
 	TestEqual(TEXT("Event state read signature"), FString(UTF8_TO_TCHAR(EventRead.Signature)), FString(TEXT("(i)I")));
+	TestEqual(TEXT("Language subscribe appends without renumbering"), static_cast<uint16>(LanguageStore.BindingId), static_cast<uint16>(EventRead.BindingId) + 1);
+	TestEqual(TEXT("Language lookup follows subscribe"), static_cast<uint16>(LanguageLookup.BindingId), static_cast<uint16>(LanguageStore.BindingId) + 1);
+	TestEqual(TEXT("Language subscribe signature"), FString(UTF8_TO_TCHAR(LanguageStore.Signature)), FString(TEXT("(iiiiI)I")));
+	TestEqual(TEXT("Language lookup signature"), FString(UTF8_TO_TCHAR(LanguageLookup.Signature)), FString(TEXT("(iiii)I")));
+	TestTrue(TEXT("Language imports exist in avidscript only"),
+		IsAvidScriptVmStaticHostImport(TEXT("avidscript"), TEXT("avid_event_language_subscribe_v1"))
+		&& IsAvidScriptVmStaticHostImport(TEXT("avidscript"), TEXT("avid_event_language_lookup_v1"))
+		&& !IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("avid_event_language_subscribe_v1"))
+		&& !IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("avid_event_language_lookup_v1")));
 	TestTrue(TEXT("Event state imports exist in avidscript only"),
 		IsAvidScriptVmStaticHostImport(TEXT("avidscript"), TEXT("avid_event_state_subscribe_v1"))
 		&& IsAvidScriptVmStaticHostImport(TEXT("avidscript"), TEXT("avid_event_state_read_v1"))

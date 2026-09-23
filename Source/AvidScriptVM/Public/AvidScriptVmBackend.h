@@ -183,7 +183,9 @@ enum class EAvidScriptHostBindingId : uint16
 	ContinuationManagedStateStoreV1,
 	ContinuationManagedStateReadV1,
 	EventManagedStateSubscribeV1,
-	EventManagedStateReadV1
+	EventManagedStateReadV1,
+	EventLanguageSubscribeV1,
+	EventLanguageLookupV1
 };
 
 struct FAvidScriptVmStackFrame
