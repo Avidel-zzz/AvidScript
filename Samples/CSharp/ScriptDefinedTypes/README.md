@@ -48,6 +48,8 @@ private async void OnOverlapAsync(AActor overlappedActor, AActor otherActor)
 
 调用 `StartOverlapAwait()` 后，碰撞广播会立即把 `OverlapScore` 加到 `2`，下一帧变为 `22`。Win64 Editor 自动化从本文件正式生成原生类型壳和 WASM 包，验证了两个 Actor 各自订阅、其中一个销毁后取消等待、另一个继续恢复。这里订阅的是 UE 现有事件；从 C# **新声明** UE 事件仍不在本例范围内。
 
+同一生成包的 body-only 热重载也已测试：候选准备失败时保留原订阅和等待；成功发布后旧回调与等待会被取消，脚本可再次订阅。此测试使用同一份代码包验证生命周期事务；修改代码后发布不同版本、PIE 操作和长时间运行仍需另外验收。
+
 RPC 壳层与真实独立进程网络传输均已验证：客户端 Server RPC、服务器 Client/NetMulticast、replicated
 property 和客户端 C# RepNotify 在 dedicated/listen 拓扑中形成闭环。
 

@@ -364,6 +364,127 @@ bool FAvidScriptGeneratedCSharpEventAwaitTest::RunTest(const FString& Parameters
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptGeneratedCSharpEventAwaitReloadTest,
+	"AvidScript.GeneratedTypes.CSharpEventAwaitReload",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptGeneratedCSharpEventAwaitReloadTest::RunTest(const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("AvidScript"));
+	if (!TestTrue(TEXT("AvidScript plugin resolves for generated event reload"), Plugin.IsValid()))
+	{
+		return true;
+	}
+	const FString DescriptorPath = FPaths::Combine(
+		Plugin->GetBaseDir(), TEXT("Content/AvidScriptGenerated/current.json"));
+	if (!TestTrue(TEXT("Generated event package pointer exists"), FPaths::FileExists(DescriptorPath)))
+	{
+		return true;
+	}
+
+	UWorld* World = nullptr;
+	if (!CreateGeneratedScriptWorld(World))
+	{
+		AddError(TEXT("Failed to create the generated event reload world."));
+		return true;
+	}
+	AProjectile* const Retiring = World->SpawnActor<AProjectile>();
+	AProjectile* const Survivor = World->SpawnActor<AProjectile>();
+	if (!TestNotNull(TEXT("Reload event owner spawns"), Retiring)
+		|| !TestNotNull(TEXT("Reload event peer spawns"), Survivor))
+	{
+		DestroyGeneratedScriptWorld(World);
+		return true;
+	}
+	const FURL Url;
+	World->InitializeActorsForPlay(Url);
+	World->BeginPlay();
+	World->SetBegunPlay(true);
+	if (!Retiring->HasActorBegunPlay()) Retiring->DispatchBeginPlay();
+	if (!Survivor->HasActorBegunPlay()) Survivor->DispatchBeginPlay();
+
+	FAvidScriptGeneratedTypeRuntimeHost& Host = FAvidScriptGeneratedTypeRuntimeHost::Get();
+	FAvidScriptRuntimeSession* const RetiringSession = Host.GetInstanceSessionForTesting(*Retiring);
+	FAvidScriptRuntimeSession* const SurvivorSession = Host.GetInstanceSessionForTesting(*Survivor);
+	if (!TestNotNull(TEXT("Reload event owner has a Session"), RetiringSession)
+		|| !TestNotNull(TEXT("Reload event peer has a Session"), SurvivorSession))
+	{
+		DestroyGeneratedScriptWorld(World);
+		return true;
+	}
+	Retiring->StartOverlapAwait();
+	Survivor->StartOverlapAwait();
+	Retiring->OnActorBeginOverlap.Broadcast(Retiring, Survivor);
+	Survivor->OnActorBeginOverlap.Broadcast(Survivor, Retiring);
+	TestEqual(TEXT("Reload owner suspends after event"), RetiringSession->GetLivePendingContinuationCount(), 1);
+	TestEqual(TEXT("Reload peer suspends after event"), SurvivorSession->GetLivePendingContinuationCount(), 1);
+	TestEqual(TEXT("Reload owner writes before await"), Retiring->OverlapScore, 2);
+	TestEqual(TEXT("Reload peer writes before await"), Survivor->OverlapScore, 2);
+
+	Host.SetReloadFailureAfterInstanceCountForTesting(1);
+	FAvidScriptGeneratedTypePackageReloadResult Rejected;
+	FString ReloadError;
+	const bool bRejectedCandidateApplied = Host.ReloadPackageFromDescriptorFile(
+		DescriptorPath, Rejected, ReloadError);
+	TestFalse(TEXT("Injected generated package candidate rolls back"), bRejectedCandidateApplied);
+	TestTrue(TEXT("Rollback prepared a candidate"), Rejected.PreparedInstanceCount >= 1);
+	TestEqual(TEXT("Rollback published no new Session"), Rejected.ReloadedInstanceCount, 0);
+	TestTrue(TEXT("Rollback preserved the live package"), Rejected.bRollbackPreservedLivePackage);
+	TestEqual(TEXT("Rollback preserves owner await"), RetiringSession->GetLivePendingContinuationCount(), 1);
+	TestEqual(TEXT("Rollback preserves peer await"), SurvivorSession->GetLivePendingContinuationCount(), 1);
+	if (bRejectedCandidateApplied || !Rejected.bRollbackPreservedLivePackage)
+	{
+		DestroyGeneratedScriptWorld(World);
+		return true;
+	}
+
+	FAvidScriptGeneratedTypePackageReloadResult Applied;
+	if (!TestTrue(TEXT("Body-only package reload applies to generated C# event owners"),
+		Host.ReloadPackageFromDescriptorFile(DescriptorPath, Applied, ReloadError)))
+	{
+		AddError(ReloadError);
+		DestroyGeneratedScriptWorld(World);
+		return true;
+	}
+	TestEqual(TEXT("Body-only reload disposition"), Applied.Disposition,
+		EAvidScriptGeneratedTypePackageReloadDisposition::BodyOnlyApplied);
+	TestTrue(TEXT("Both generated event owners reload"), Applied.ReloadedInstanceCount >= 2);
+	TestEqual(TEXT("Reload retires owner continuation"), RetiringSession->GetLivePendingContinuationCount(), 0);
+	TestEqual(TEXT("Reload retires peer continuation"), SurvivorSession->GetLivePendingContinuationCount(), 0);
+	Retiring->OnActorBeginOverlap.Broadcast(Retiring, Survivor);
+	Survivor->OnActorBeginOverlap.Broadcast(Survivor, Retiring);
+	TestEqual(TEXT("Old owner event bridge is removed"), Retiring->OverlapScore, 2);
+	TestEqual(TEXT("Old peer event bridge is removed"), Survivor->OverlapScore, 2);
+
+	Retiring->StartOverlapAwait();
+	Survivor->StartOverlapAwait();
+	Retiring->OnActorBeginOverlap.Broadcast(Retiring, Survivor);
+	Survivor->OnActorBeginOverlap.Broadcast(Survivor, Retiring);
+	TestEqual(TEXT("New owner event bridge runs once"), Retiring->OverlapScore, 4);
+	TestEqual(TEXT("New peer event bridge runs once"), Survivor->OverlapScore, 4);
+	TestEqual(TEXT("New owner callback awaits"), RetiringSession->GetLivePendingContinuationCount(), 1);
+	TestEqual(TEXT("New peer callback awaits"), SurvivorSession->GetLivePendingContinuationCount(), 1);
+	TestTrue(TEXT("Destroying reloaded owner runs EndPlay"), Retiring->Destroy());
+	for (int32 Attempt = 0; Attempt < 4 && Survivor->OverlapScore == 4; ++Attempt)
+	{
+		World->Tick(LEVELTICK_All, 0.02f);
+		++GFrameCounter;
+		FAvidScriptWasmSmokeResult TickResult;
+		if (!SurvivorSession->TickLive(0.001f, TickResult))
+		{
+			AddError(TickResult.ErrorMessage);
+			break;
+		}
+	}
+	TestEqual(TEXT("Retired reloaded owner cannot resume"), Retiring->OverlapScore, 4);
+	TestEqual(TEXT("Reloaded peer resumes only its new callback"), Survivor->OverlapScore, 24);
+	TestEqual(TEXT("Reloaded peer consumes its continuation"), SurvivorSession->GetLivePendingContinuationCount(), 0);
+	DestroyGeneratedScriptWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptGeneratedCSharpInheritanceDispatchTest,
 	"AvidScript.GeneratedTypes.CSharpInheritanceDispatch",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

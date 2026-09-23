@@ -186,11 +186,11 @@ public static class ScoreScript
 
 对这种已生成的无返回值多播事件，回调也能再次广播：例如先收到 `2`，再广播 `3`，两次回调会让得分共加 `5`。再次广播时要设置终止条件，避免无限递归。
 
-事件回调也可以等待下一帧：收到 `2` 后先加 `2`，`await AvidContinuations.NextTickAsync()` 恢复后再加 `20`。等待期间的局部值会保留；同一份脚本作用于两个 Actor 时，停止或销毁其中一个只取消它自己的等待。这个流程已从 C# `[UClass]` 的 `[UFunction]` 入口在 Windows 双后端跑通。基础生成类型已通过 Editor 冷启动安装、反射和 C# 调用测试；事件跨 `await` 与新生成原生壳的完整组合仍待验证。[完整代码与重载、取消边界](Docs/Phase66/P66.B_Event_Language_Contract.md#事件回调跨-await)。
+事件回调也可以等待下一帧：收到 `2` 后先加 `2`，`await AvidContinuations.NextTickAsync()` 恢复后再加 `20`。等待期间的局部值会保留；同一份脚本作用于两个 Actor 时，停止或销毁其中一个只取消它自己的等待。这个流程已从 C# 自动生成的 `Projectile` 原生函数壳和 Win64 脚本包在 Editor 自动化中跑通；独立测试还覆盖 Wasmtime 与 WAMR 两后端。[可运行的碰撞事件样例](Samples/CSharp/ScriptDefinedTypes/README.md)和[重载、取消边界](Docs/Phase66/P66.B_Event_Language_Contract.md#事件回调跨-await)。
 
 脚本卸载、World 清理或源 Actor 销毁后会自动解绑。更新脚本失败时旧回调继续工作，成功时旧回调解绑，新脚本可重新订阅。单播事件已被占用、对象已失效或对象属于另一个 World 时，运行时会拒绝新订阅。[完整的事件行为与当前限制](Docs/Phase66/P66.B_Event_Language_Contract.md)。
 
-例如两个 Actor 的事件回调都在等待下一帧：包级更新失败时，两人的旧等待继续；更新成功时，两人的旧等待都取消，重新订阅后才能触发新版本。该组合已在 Windows 双后端自动化验证；[测试壳与未完成范围](Docs/Phase66/P66.B_Event_Language_Contract.md#事件回调跨-await)。
+例如两个 Actor 的事件回调都在等待下一帧：包级更新失败时，两人的旧等待继续；更新成功时，两人的旧等待都取消，重新订阅后才能再触发。正式生成的 `Projectile` 已用同一包验证这条 Win64 生命周期路径；不同代码版本的发布切换和实际游戏长时间运行仍待验收。[详细范围](Docs/Phase66/P66.B_Event_Language_Contract.md#事件回调跨-await)。
 
 </details>
 
