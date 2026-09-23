@@ -23,6 +23,8 @@ public sealed class MemberBox<T>
 
 public static class Script
 {
+    public static int RuntimeResult;
+
     static T Identity<T>(T value) => value;
     static T Forward<T>(T value) => Identity<T>(value);
     static T Bounce<T>(int count, T value) =>
@@ -95,16 +97,14 @@ public static class Script
         box.Value.First += 1;
         return box.Value.First;
     }
-    [UnmanagedCallersOnly(EntryPoint = "generic_member_int")]
-    public static int MemberInt()
+    static int MemberIntCore()
     {
         MemberBox<int> first = MakeMemberBox<int>(7);
         MemberBox<int> second = new MemberBox<int>(4);
         first.Store(first.Read() + 2);
         return first.Relay() * 10 + second.Read();
     }
-    [UnmanagedCallersOnly(EntryPoint = "generic_member_nested")]
-    public static int MemberNested()
+    static int MemberNestedCore()
     {
         MemberBox<Pair<int, float>> box = MakeMemberBox(
             MakePair<int, float>(7, 2.5f));
@@ -113,4 +113,13 @@ public static class Script
         box.Store(value);
         return box.Relay().First;
     }
+
+    [UnmanagedCallersOnly(EntryPoint = "generic_member_int")]
+    public static int MemberInt() => MemberIntCore();
+
+    [UnmanagedCallersOnly(EntryPoint = "generic_member_nested")]
+    public static int MemberNested() => MemberNestedCore();
+
+    [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+    public static void BeginPlay() => RuntimeResult = MemberIntCore() + MemberNestedCore();
 }

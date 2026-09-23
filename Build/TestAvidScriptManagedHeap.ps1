@@ -19,6 +19,7 @@ if ($RuntimeAutomation) {
     $GuestDirectory = Join-Path $ProjectRoot 'Saved/AvidScriptManagedHeapTests/GuestFixtures'
     $Dotnet = Join-Path $env:USERPROFILE '.dotnet/dotnet.exe'
     $PreviousGuestDirectory = $env:AVIDSCRIPT_MANAGED_HEAP_WASM_DIR
+    $PreviousGenericDirectory = $env:AVIDSCRIPT_GENERIC_METHOD_WASM_DIR
     $PreviousCliHome = $env:DOTNET_CLI_HOME
     Push-Location $PluginRoot
     try {
@@ -30,8 +31,12 @@ if ($RuntimeAutomation) {
         if ($LASTEXITCODE -ne 0) { throw 'Managed heap Guest fixture compiler tests failed.' }
         & $Dotnet run --project (Join-Path $PluginRoot 'Tools/AvidScript.CSharpGuest.Tests') --configuration Release -- --closures
         if ($LASTEXITCODE -ne 0) { throw 'CSharp closure fixture compiler tests failed.' }
+        $env:AVIDSCRIPT_GENERIC_METHOD_WASM_DIR = $GuestDirectory
+        & $Dotnet run --project (Join-Path $PluginRoot 'Tools/AvidScript.CSharpGuest.Tests') --configuration Release -- --generic-methods
+        if ($LASTEXITCODE -ne 0) { throw 'CSharp generic member fixture compiler tests failed.' }
     } finally {
         $env:AVIDSCRIPT_MANAGED_HEAP_WASM_DIR = $PreviousGuestDirectory
+        $env:AVIDSCRIPT_GENERIC_METHOD_WASM_DIR = $PreviousGenericDirectory
         $env:DOTNET_CLI_HOME = $PreviousCliHome
         Pop-Location
     }
@@ -42,13 +47,13 @@ if ($RuntimeAutomation) {
     & $EditorExe $ProjectPath -unattended -nop4 -NullRHI -nosplash "-ExecCmds=Automation RunTests $TestName;Quit" '-TestExit=Automation Test Queue Empty' "-abslog=$LogPath"
     if ($LASTEXITCODE -ne 0) { throw "Managed heap Automation exited with $LASTEXITCODE. Log: $LogPath" }
     $Log = Get-Content -Raw -LiteralPath $LogPath
-    $Found = [regex]::Matches($Log, "Found 5 automation tests based on '$([regex]::Escape($TestName))'").Count
-    $Success = [regex]::Matches($Log, 'Test Completed\. Result=\{Success\} Name=\{(Ownership|HostAbi|GeneratedGuest|CSharpClosures|BorrowedReferences)\} Path=\{AvidScript\.Runtime\.ManagedHeap\.\1\}').Count
+    $Found = [regex]::Matches($Log, "Found 6 automation tests based on '$([regex]::Escape($TestName))'").Count
+    $Success = [regex]::Matches($Log, 'Test Completed\. Result=\{Success\} Name=\{(Ownership|HostAbi|GeneratedGuest|CSharpClosures|GenericMembers|BorrowedReferences)\} Path=\{AvidScript\.Runtime\.ManagedHeap\.\1\}').Count
     $Failed = [regex]::Matches($Log, 'Test Completed\. Result=\{Fail\}').Count
     $Complete = [regex]::Matches($Log, '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*\*').Count
     $Exit = [regex]::Matches($Log, 'RequestExitWithStatus\(1, 0,').Count
-    if ($Found -ne 1 -or $Success -ne 5 -or $Failed -ne 0 -or $Complete -ne 1 -or $Exit -lt 1) {
+    if ($Found -ne 1 -or $Success -ne 6 -or $Failed -ne 0 -or $Complete -ne 1 -or $Exit -lt 1) {
         throw "Managed heap Automation evidence incomplete: found=$Found passed=$Success failed=$Failed complete=$Complete exit=$Exit log=$LogPath"
     }
-    Write-Output "AvidScript.ManagedHeap.RuntimeAutomation: 5/5 passed; log=$LogPath"
+    Write-Output "AvidScript.ManagedHeap.RuntimeAutomation: 6/6 passed; log=$LogPath"
 }

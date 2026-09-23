@@ -135,6 +135,11 @@ for (const [name, expected] of cases) {
     }
     console.log(`${name}: ${actual}`);
 }
+instance.exports.avid_on_begin_play();
+const runtimeResult = new DataView(instance.exports.memory.buffer).getInt32(16, true);
+if (runtimeResult !== 102 || frames.size !== 0 || roots.size !== 0) {
+    throw new Error(`avid_on_begin_play: expected 102 and no live frames or roots, received ${runtimeResult}`);
+}
 if (layouts.size !== 4 || objects.size < 6) {
     throw new Error('Generic class allocations did not exercise the four closed heap layouts');
 }

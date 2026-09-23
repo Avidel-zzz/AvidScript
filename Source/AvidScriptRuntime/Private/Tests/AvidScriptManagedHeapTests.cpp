@@ -398,6 +398,55 @@ bool FAvidScriptManagedHeapCSharpClosuresTest::RunTest(const FString& Parameters
 	}
 	return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptManagedHeapGenericMembersTest,
+	"AvidScript.Runtime.ManagedHeap.GenericMembers",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptManagedHeapGenericMembersTest::RunTest(const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	using namespace AvidScript::Managed;
+	const FString File = FPaths::Combine(FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptManagedHeapTests/GuestFixtures/generic-methods.wasm"));
+	TArray<uint8> Wasm;
+	if (!TestTrue(TEXT("Load current generic fixture; generate with Build/TestAvidScriptManagedHeap.ps1 -RuntimeAutomation"),
+		FFileHelper::LoadFileToArray(Wasm, *File))) return false;
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	{
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime
+			? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		Selection.bAllowFallback = false;
+		FAvidScriptWasmRuntimeInstance Runtime(Selection);
+		FAvidScriptWasmSmokeResult Result;
+		if (!TestTrue(TEXT("Generic member fixture loads"),
+			Runtime.LoadModule(Wasm.GetData(), Wasm.Num(), TEXT("generic_members"), Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		TestEqual(TEXT("Generic member fixture uses requested VM backend"),
+			Runtime.GetActiveBackendInfo().Kind, Backend);
+		TestEqual(TEXT("Generic member fixture uses requested execution mode"),
+			Runtime.GetActiveBackendInfo().ExecutionMode, Selection.ExecutionMode);
+		if (!TestTrue(TEXT("Generic member constructors and methods execute in BeginPlay"), Runtime.BeginPlay(Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		uint8 Value[4]{};
+		FString Error;
+		if (!TestTrue(TEXT("Read generic member result"), Runtime.ReadStateBytes(16, MakeArrayView(Value), Error)))
+		{ AddError(Error); return false; }
+		TestEqual(TEXT("Closed int and nested value members retain .NET results"),
+			uint32(Value[0]) | (uint32(Value[1]) << 8) | (uint32(Value[2]) << 16) | (uint32(Value[3]) << 24), 102u);
+		FHeap* Heap = Runtime.GetManagedHeapForTesting();
+		if (!TestNotNull(TEXT("Generic member module owns managed heap"), Heap)) return false;
+		const auto Stats = Heap->GetStats();
+		TestTrue(TEXT("Generic class instances allocate through Host ABI"), Stats.Allocations >= 3);
+		TestEqual(TEXT("Generic member frames unwind"), Stats.ActiveFrames, 0u);
+		TestEqual(TEXT("Generic member roots unwind"), Stats.LiveRoots, 0u);
+		TestTrue(TEXT("Collect detached generic class instances"), Heap->Collect() == EHeapError::Ok);
+		TestEqual(TEXT("Generic member objects reclaimed"), Heap->GetStats().LiveObjects, 0u);
+	}
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptManagedHeapBorrowedReferencesTest,
 	"AvidScript.Runtime.ManagedHeap.BorrowedReferences",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
