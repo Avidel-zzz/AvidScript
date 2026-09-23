@@ -36,9 +36,10 @@ internal static class SemanticExceptionFlowTests
         CrossMethodCallGetsCatchRoute();
         NestedCallableOwnsItsThrowSite();
         MixedSourceKeepsOrdinaryGraphs();
+        DirectCallersInheritLanguageErrorEffect();
         OrdinaryArtifactsKeepTheirOriginalShape();
         ContractValidatorRejectsDowngradeAndCorruption();
-        return 10;
+        return 11;
     }
 
     private static void NestedThrowCatchRethrowKeepsRoslynRegions()
@@ -342,6 +343,44 @@ internal static class SemanticExceptionFlowTests
                 graph.MethodSymbolId.Contains(".Good(", StringComparison.Ordinal))
             && SemanticExceptionFlowContractValidator.IsValid(unsupported),
             "other support errors must not erase ordinary CFGs from an exception artifact");
+    }
+
+    private static void DirectCallersInheritLanguageErrorEffect()
+    {
+        const string source = """
+            using System;
+            class Script
+            {
+                static int Fail() { throw new Exception(); }
+                static int Wrap() => Fail();
+                static int Top() => Wrap();
+                static int Good() => 7;
+            }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/TransitiveLanguageError.cs");
+        Check(SemanticLanguageErrorEffectPlanner.TryBuild(document,
+                out SemanticLanguageErrorEffectPlan? plan)
+            && plan is not null
+            && plan.OutcomeMethodIds.Count == 3
+            && plan.OutcomeMethodIds.Any(id => id.Contains(".Fail(", StringComparison.Ordinal))
+            && plan.OutcomeMethodIds.Any(id => id.Contains(".Wrap(", StringComparison.Ordinal))
+            && plan.OutcomeMethodIds.Any(id => id.Contains(".Top(", StringComparison.Ordinal))
+            && plan.OutcomeMethodIds.All(id => !id.Contains(".Good(", StringComparison.Ordinal)),
+            "direct callers must be marked for a language-error result signature transitively");
+
+        const string virtualSource = """
+            using System;
+            class Base { public virtual int Value() => 1; }
+            class Script
+            {
+                static int Fail() { throw new Exception(); }
+                static int Call(Base target) => target.Value();
+            }
+            """;
+        SemanticDocument virtualDocument = Analyze(virtualSource, "Scripts/VirtualLanguageError.cs");
+        Check(virtualDocument.ExceptionFlows is { Count: 1 }
+            && !SemanticLanguageErrorEffectPlanner.TryBuild(virtualDocument, out _),
+            "unresolved virtual targets must not yield a partial language-error effect closure");
     }
 
     private static void OrdinaryArtifactsKeepTheirOriginalShape()
