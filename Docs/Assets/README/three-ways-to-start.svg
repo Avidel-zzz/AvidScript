@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="330" viewBox="0 0 1200 330" role="img" aria-labelledby="title desc">
+  <title id="title">从玩法、异步和蓝图类型开始使用 AvidScript</title>
+  <desc id="desc">三张示意卡：C# Tick 驱动方块移动；等待计时器后继续执行，销毁时取消；用 C# 定义可供蓝图使用的 Actor。示意图不是 Unreal Editor 截图。</desc>
+  <rect width="1200" height="330" rx="18" fill="#0c151c"/>
+  <g fill="#14262d" stroke="#345057" stroke-width="1.4">
+    <rect x="24" y="24" width="368" height="282" rx="14"/>
+    <rect x="416" y="24" width="368" height="282" rx="14"/>
+    <rect x="808" y="24" width="368" height="282" rx="14"/>
+  </g>
+  <g font-family="Consolas, 'Liberation Mono', monospace" font-size="13" letter-spacing="1.5" fill="#8aa9ad">
+    <text x="48" y="57">01 / GAMEPLAY</text>
+    <text x="440" y="57">02 / ASYNC</text>
+    <text x="832" y="57">03 / BLUEPRINT</text>
+  </g>
+  <g fill="none" stroke="#83f0ca" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 129 98 L 161 82 L 193 98 V 133 L 161 150 L 129 133 Z M 129 98 L 161 115 L 193 98 M 161 115 V 150"/>
+    <path d="M 208 115 H 280 M 267 103 L 280 115 L 267 127"/>
+    <circle cx="507" cy="113" r="28"/>
+    <path d="M 507 95 V 114 L 520 121 M 543 113 H 680 M 670 103 L 680 113 L 670 123"/>
+    <rect x="904" y="85" width="126" height="61" rx="8"/>
+    <path d="M 1030 115 H 1090 M 1080 105 L 1090 115 L 1080 125"/>
+    <rect x="1096" y="94" width="42" height="42" rx="7"/>
+  </g>
+  <g font-family="Consolas, 'Liberation Mono', monospace" font-size="15" fill="#b9cfce">
+    <text x="49" y="194">Tick() → SetActorLocation()</text>
+    <text x="441" y="194">await DelayAsync(0.25f)</text>
+    <text x="833" y="194">[UClass] Projectile</text>
+  </g>
+  <g font-family="'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif">
+    <g font-size="25" font-weight="600" fill="#f0f5ef">
+      <text x="47" y="232">让方块动起来</text>
+      <text x="439" y="232">等待后继续执行</text>
+      <text x="831" y="232">定义蓝图可用的类型</text>
+    </g>
+    <g font-size="16" fill="#a9c0c2">
+      <text x="48" y="271">每帧更新位置、旋转和大小</text>
+      <text x="440" y="271">对象销毁时自动取消等待</text>
+      <text x="832" y="271">属性和函数在 UE 中可见</text>
+    </g>
+  </g>
+</svg>

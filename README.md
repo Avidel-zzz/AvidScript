@@ -1,12 +1,17 @@
 ![AvidScript：C# 代码驱动 Unreal Engine 游戏对象的概念插画](Docs/Assets/README/avidscript-hero.png)
 
-# AvidScript
+<h1 align="center">AvidScript</h1>
 
-**用 C# 为 Unreal Engine 编写玩法脚本。**
+<p align="center"><strong>用 C# 为 Unreal Engine 编写玩法脚本。</strong></p>
 
 ![UE 5.8 · C# · WebAssembly · Windows x64 · 0.1.0 Preview · MIT：带图标的本地徽章](Docs/Assets/README/project-badges.png)
 
-[🚀 快速开始](#快速开始) · [🧩 代码示例](#常见用法) · [🚧 当前限制](#当前边界) · [📚 更多文档](#进一步阅读)
+<p align="center">
+  <a href="#快速开始">🚀 快速开始</a> ·
+  <a href="#常见用法">🧩 代码示例</a> ·
+  <a href="#当前边界">🚧 当前限制</a> ·
+  <a href="#进一步阅读">📚 更多文档</a>
+</p>
 
 ---
 
@@ -82,7 +87,9 @@ Saved/AvidScriptCSharpGuest/ActorLifecycle/actor_lifecycle.avidscript.json
 
 ## 🧩 常见用法
 
-下面是从仓库样例中提取或简化的片段，用来说明写法；完整文件还包含必要的声明和配置，请从对应样例开始修改。
+![三种可运行的 C# 玩法入口：每帧驱动方块、等待后继续执行、定义蓝图可用的 Actor](Docs/Assets/README/three-ways-to-start.png)
+
+下面的片段从仓库样例提取或简化；完整文件还包含必要的声明和配置，请从对应样例开始修改。
 
 ### 🧭 每帧移动 Actor
 
@@ -110,6 +117,8 @@ public static async void BeginPlay()
     UE.Self.SetActorScale3D(new FVector(1.25f, 1.25f, 1.25f));
 }
 ```
+
+![BeginPlay 等待 0.25 秒后继续执行并放大 Actor；对象或 World 销毁时取消](Docs/Assets/README/async-lifecycle.png)
 
 效果是开始运行后等待 0.25 秒，再把 Actor 放大。`await` 等待期间游戏继续运行。脚本所属对象或 World 被销毁时，关联等待会被取消，避免随后再操作已销毁的对象。
 

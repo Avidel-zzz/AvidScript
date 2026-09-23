@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="250" viewBox="0 0 1200 250" role="img" aria-labelledby="title desc">
+  <title id="title">异步等待的继续执行与取消</title>
+  <desc id="desc">BeginPlay 开始等待 0.25 秒；Actor 仍然有效时继续执行并放大。若 Actor 或 World 在等待期间销毁，则取消，不再访问对象。</desc>
+  <rect width="1200" height="250" rx="16" fill="#0c151c"/>
+  <g font-family="Consolas, 'Liberation Mono', monospace" font-size="15" fill="#97b5b7">
+    <text x="32" y="39">await AvidContinuations.DelayAsync(0.25f)</text>
+  </g>
+  <path d="M 94 122 H 1132" fill="none" stroke="#3c595c" stroke-width="3"/>
+  <path d="M 441 122 H 746" fill="none" stroke="#83f0ca" stroke-width="4"/>
+  <path d="M 735 113 L 746 122 L 735 131" fill="none" stroke="#83f0ca" stroke-width="3"/>
+  <g fill="#14262d" stroke="#83f0ca" stroke-width="2">
+    <circle cx="120" cy="122" r="20"/>
+    <circle cx="435" cy="122" r="20"/>
+    <circle cx="752" cy="122" r="20"/>
+  </g>
+  <path d="M 568 123 V 185 H 752" fill="none" stroke="#d8a355" stroke-width="2.5" stroke-dasharray="7 7"/>
+  <path d="M 742 176 L 752 185 L 742 194" fill="none" stroke="#d8a355" stroke-width="2.5"/>
+  <g font-family="'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif" font-size="19" font-weight="600">
+    <text x="120" y="90" fill="#f0f5ef" text-anchor="middle">开始</text>
+    <text x="435" y="90" fill="#f0f5ef" text-anchor="middle">等待中</text>
+    <text x="752" y="90" fill="#83f0ca" text-anchor="middle">继续执行</text>
+    <text x="817" y="90" fill="#bed4d1">Actor 放大</text>
+    <text x="770" y="191" fill="#d8a355">对象 / World 销毁 → 取消</text>
+  </g>
+  <g font-family="Consolas, 'Liberation Mono', monospace" font-size="14" fill="#9cb5b7">
+    <text x="120" y="166" text-anchor="middle">BeginPlay</text>
+    <text x="435" y="166" text-anchor="middle">0.25 s</text>
+  </g>
+</svg>
