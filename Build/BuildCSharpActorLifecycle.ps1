@@ -1813,8 +1813,8 @@ $MissingObservedExports = @($RequiredExports | Where-Object { $ObservedExports -
 $UnexpectedObservedExports = @($ObservedExports | Where-Object { $RequiredExports -notcontains $_ })
 # This entry publishes the current compiler contract. Keep the exact pair aligned
 # with GuestModuleValidator; TestCSharpGuestBuildContracts exercises real output.
-$GuestContractValid = [int]$GuestIrModel.schema_version -eq 13 -and
-    [string]$GuestIrModel.ir_version -ceq "1.12" -and
+$GuestContractValid = [int]$GuestIrModel.schema_version -eq 14 -and
+    [string]$GuestIrModel.ir_version -ceq "1.13" -and
     [bool]$GuestIrModel.succeeded -and
     [string]$GuestIrModel.provenance.semantic_sha256 -eq $SemanticSha256 -and
     [string]$GuestIrModel.provenance.source_sha256 -eq [string]$FrontendModel.source.sha256

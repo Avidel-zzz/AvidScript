@@ -99,18 +99,20 @@ internal sealed partial class WasmFunctionCompiler
 
     private void CompileManagedInstruction(WasmBinaryWriter body, GuestInstruction instruction)
     {
-        if (instruction.Op is GuestEventState.SubscribeOp or GuestEventState.ReadOp)
+        if (instruction.Op is GuestEventState.SubscribeOp or GuestEventState.ReadOp
+            or GuestEventState.LanguageSubscribeOp or GuestEventState.LanguageLookupOp)
         {
-            bool subscribe = instruction.Op == GuestEventState.SubscribeOp;
+            bool subscribe = instruction.Op is GuestEventState.SubscribeOp or GuestEventState.LanguageSubscribeOp;
+            bool lookup = instruction.Op == GuestEventState.LanguageLookupOp;
             string state = subscribe ? instruction.OperandIds[3] : instruction.ResultId!;
-            if (subscribe)
+            if (subscribe || lookup)
                 foreach (string operand in instruction.OperandIds.Take(3)) WriteLocalGet(body, localIndices[operand]);
             WriteI32Constant(body, moduleLayout.ManagedHeap.TypeOrdinals[GetValueType(state).Id]);
             if (subscribe) WriteLocalGet(body, localIndices[state]);
             body.WriteByte(0x10); body.WriteU32(moduleLayout.FunctionIndices[instruction.TargetId!]);
             WriteResult(body, instruction);
-            // The callback lease spans the return; root the reference before any
-            // further call, allocation or cooperative poll can trigger collection.
+            // The owner lease spans the return; establish the Guest frame root
+            // before any call, allocation or cooperative poll can collect.
             if (!subscribe) FlushManagedRoots(body);
             return;
         }

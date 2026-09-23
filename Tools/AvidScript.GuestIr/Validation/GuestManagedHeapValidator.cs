@@ -67,7 +67,8 @@ internal static class GuestManagedHeapValidator
             GuestContinuationStateValidator.Validate(context, function, instruction, result, operands);
             return;
         }
-        if (instruction.Op is GuestEventState.SubscribeOp or GuestEventState.ReadOp)
+        if (instruction.Op is GuestEventState.SubscribeOp or GuestEventState.ReadOp
+            or GuestEventState.LanguageSubscribeOp or GuestEventState.LanguageLookupOp)
         {
             GuestEventStateValidator.Validate(context, function, instruction, result, operands);
             return;

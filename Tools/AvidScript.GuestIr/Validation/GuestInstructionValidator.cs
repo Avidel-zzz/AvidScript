@@ -36,6 +36,8 @@ internal static class GuestInstructionValidator
             case GuestContinuationState.ReadOp:
             case GuestEventState.SubscribeOp:
             case GuestEventState.ReadOp:
+            case GuestEventState.LanguageSubscribeOp:
+            case GuestEventState.LanguageLookupOp:
                 break;
             case "constant":
                 ValidateConstantInstruction(context, function, instruction, result);

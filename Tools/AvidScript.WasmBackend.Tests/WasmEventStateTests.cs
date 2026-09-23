@@ -87,8 +87,26 @@ internal static class WasmEventStateTests
         Check(directory is not null, "native event ABI header exists");
         string native = File.ReadAllText(Path.Combine(directory!.FullName, header));
         Check(native.Contains($"SubscribeImport[] = \"{GuestEventState.SubscribeImport}\"", StringComparison.Ordinal)
-            && native.Contains($"ReadImport[] = \"{GuestEventState.ReadImport}\"", StringComparison.Ordinal), "event ABI name drift");
-        return invalid.Count + 20;
+            && native.Contains($"ReadImport[] = \"{GuestEventState.ReadImport}\"", StringComparison.Ordinal)
+            && native.Contains($"LanguageSubscribeImport[] = \"{GuestEventState.LanguageSubscribeImport}\"", StringComparison.Ordinal)
+            && native.Contains($"LanguageLookupImport[] = \"{GuestEventState.LanguageLookupImport}\"", StringComparison.Ordinal), "event ABI name drift");
+        GuestModule language = CreateLanguage();
+        Check(WasmArtifactInspector.Inspect(Compile(language).Bytes).Imports.Count == 8, "language IR emits declared imports only");
+        GuestInstruction languageSubscribe = language.Functions[1].Blocks[0].Instructions.Single(op => op.Op == GuestEventState.LanguageSubscribeOp);
+        GuestInstruction languageLookup = language.Functions[1].Blocks[0].Instructions.Single(op => op.Op == GuestEventState.LanguageLookupOp);
+        GuestModule[] badLanguage =
+        {
+            language with { SchemaVersion = 13, IrVersion = "1.12" },
+            Replace(language, "tick", languageSubscribe, languageSubscribe with { TargetId = "subscribe" }),
+            Replace(language, "tick", languageSubscribe, languageSubscribe with { OperandIds = new[] { "slot", "generation", "ordinal", "erased" } }),
+            Replace(language, "tick", languageLookup, languageLookup with { TargetId = "read" }),
+            Replace(language, "tick", languageLookup, languageLookup with { OperandIds = new[] { "slot", "generation" } }),
+            Replace(language, "tick", languageLookup, languageLookup with { ResultId = "erased" }),
+            language with { Imports = language.Imports.Where(import => import.Id != "language_lookup").ToArray() },
+        };
+        foreach (GuestModule bad in badLanguage)
+            Check(!GuestModuleValidator.Validate(bad).Succeeded, "language IR rejects malformed or legacy capabilities");
+        return invalid.Count + badLanguage.Length + 21;
     }
 
     private static GuestModule Create(string variant = "normal")
@@ -157,6 +175,31 @@ internal static class WasmEventStateTests
                 Fn("event", new[] { Reg("dt", F) }, new[] { Reg("state", variant == "wrong" ? W : S), Reg("child", R), Reg("number", I), Reg("one", I), Reg("token", L), Reg("erased", E), Reg("updated", I), Reg("count", I), Reg("nextCount", I), Reg("cancelled", I) }, callback.ToArray()),
             },
             Exports = new[] { new GuestExport("avid_on_begin_play", "begin"), new GuestExport("avid_on_tick", "tick"), new GuestExport("event_callback", "event") },
+        };
+    }
+    private static GuestModule CreateLanguage()
+    {
+        GuestModule module = Create();
+        GuestFunction tick = module.Functions[1];
+        GuestBasicBlock entry = tick.Blocks[0];
+        GuestInstruction[] extra =
+        {
+            Op(GuestEventState.LanguageLookupOp, "languageState", new[] { "slot", "generation", "ordinal" }, "language_lookup"),
+            Op(GuestEventState.LanguageSubscribeOp, "languageToken", new[] { "slot", "generation", "ordinal", "state" }, "language_subscribe"),
+        };
+        return module with
+        {
+            SchemaVersion = 14, IrVersion = "1.13",
+            Imports = module.Imports.Concat(new[]
+            {
+                new GuestImport("language_subscribe", GuestEventState.ImportModule, GuestEventState.LanguageSubscribeImport, new[] { I, I, I, I, L }, L),
+                new GuestImport("language_lookup", GuestEventState.ImportModule, GuestEventState.LanguageLookupImport, new[] { I, I, I, I }, L),
+            }).ToArray(),
+            Functions = module.Functions.Select(function => function.Id != "tick" ? function : function with
+            {
+                Locals = function.Locals.Concat(new[] { Reg("languageState", S), Reg("languageToken", L) }).ToArray(),
+                Blocks = new[] { entry with { Instructions = entry.Instructions.Concat(extra).ToArray() } },
+            }).ToArray(),
         };
     }
     private static GuestModule Replace(GuestModule module, string id, GuestInstruction before, GuestInstruction after) => module with

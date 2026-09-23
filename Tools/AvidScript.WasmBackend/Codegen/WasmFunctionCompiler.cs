@@ -304,6 +304,7 @@ internal sealed partial class WasmFunctionCompiler
         if (instruction.Op is "call" or "call_indirect" or "call_framed" or "managed_new" or "managed_collect"
             or GuestContinuationState.StoreOp or GuestContinuationState.ReadOp
             or GuestEventState.SubscribeOp or GuestEventState.ReadOp
+            or GuestEventState.LanguageSubscribeOp or GuestEventState.LanguageLookupOp
             or "array_load" or "array_store" or "array_length" or "array_region_load" or "array_region_store")
             FlushManagedRoots(body);
         switch (instruction.Op)
@@ -325,6 +326,8 @@ internal sealed partial class WasmFunctionCompiler
             case GuestContinuationState.ReadOp:
             case GuestEventState.SubscribeOp:
             case GuestEventState.ReadOp:
+            case GuestEventState.LanguageSubscribeOp:
+            case GuestEventState.LanguageLookupOp:
                 CompileManagedInstruction(body, instruction);
                 break;
             case "constant":
