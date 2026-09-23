@@ -4,7 +4,7 @@
 
 <p align="center"><strong>用 C# 为 Unreal Engine 编写玩法脚本。</strong></p>
 
-![UE 5.8 · C# · WebAssembly · Windows x64 · 0.1.0 Preview · MIT：带图标的本地徽章](Docs/Assets/README/project-badges.png)
+![Unreal Engine 5.8](https://img.shields.io/badge/Unreal%20Engine-5.8-172A34?logo=unrealengine&logoColor=white) ![C#](https://img.shields.io/badge/Language-C%23-512BD4?logo=dotnet&logoColor=white) ![WebAssembly](https://img.shields.io/badge/Target-WebAssembly-5541A9?logo=webassembly&logoColor=white) ![Windows x64](https://img.shields.io/badge/Platform-Windows%20x64-0967A6?logo=windows&logoColor=white) ![0.1.0 Preview](https://img.shields.io/badge/Status-0.1.0%20Preview-805413) [![MIT License](https://img.shields.io/badge/License-MIT-226342)](LICENSE)
 
 <p align="center">
   <a href="#快速开始">🚀 快速开始</a> ·
@@ -17,10 +17,11 @@
 
 用 C# 写 Actor 行为、异步流程和蓝图可用的类型。先看一个能运行的方块样例，再从下面的例子找自己的起点。
 
+![三种 C# 玩法入口：每帧驱动方块、等待后继续执行、定义蓝图可用的 Actor](Docs/Assets/README/three-ways-to-start.png)
+
 | 🎮 游戏玩法 | ⏱️ 等待与恢复 | 🧱 蓝图类型 |
 | :--- | :--- | :--- |
-| 方块每帧移动，碰撞后触发逻辑 | 等 0.25 秒再放大 Actor；对象销毁时取消等待 | 用 C# 声明 Actor、属性和可调用函数 |
-| [看生命周期样例](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) | [看延迟操作样例](Samples/CSharp/LatentGameplay/README.md) | [看脚本定义类型样例](Samples/CSharp/ScriptDefinedTypes/README.md) |
+| [看方块移动的完整代码](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) | [看 0.25 秒后放大 Actor 的例子](Samples/CSharp/LatentGameplay/README.md) | [看 C# 定义蓝图类型的例子](Samples/CSharp/ScriptDefinedTypes/README.md) |
 
 > [!NOTE]
 > **0.1.0 开发预览版** · 主要验证环境为 **UE 5.8 源码版 + Windows x64**。已有可运行样例，C# 语言支持、调试体验和平台覆盖仍在完善，尚不适合作为完整 .NET 的替代品。
@@ -86,8 +87,6 @@ Saved/AvidScriptCSharpGuest/ActorLifecycle/actor_lifecycle.avidscript.json
 <a id="常见用法"></a>
 
 ## 🧩 常见用法
-
-![三种可运行的 C# 玩法入口：每帧驱动方块、等待后继续执行、定义蓝图可用的 Actor](Docs/Assets/README/three-ways-to-start.png)
 
 下面的片段从仓库样例提取或简化；完整文件还包含必要的声明和配置，请从对应样例开始修改。
 
@@ -192,15 +191,16 @@ public static class ScoreScript
 `Start()` 注册回调，`Stop()` 移除回调。重复注册会重复触发；同一脚本分别订阅两个有访问权限、同 World 的 Actor 时，移除其中一个不会影响另一个。
 
 <details>
-<summary>🔍 更多事件行为：再次广播、await、重载与取消</summary>
+<summary>🔍 事件进阶：再次广播、await、重载与取消</summary>
 
-对这种已生成的无返回值多播事件，回调也能再次广播：例如先收到 `2`，再广播 `3`，两次回调会让得分共加 `5`。再次广播时要设置终止条件，避免无限递归。
+| 场景 | 会发生什么 |
+| --- | --- |
+| 回调再次广播 | 收到 `2` 后再广播 `3`，回调共加 `5`；需要终止条件，避免无限递归。 |
+| 回调里 `await` | 先加 `2`，下一帧恢复后再加 `20`；局部值会保留。[碰撞事件样例](Samples/CSharp/ScriptDefinedTypes/README.md) |
+| 对象销毁或脚本卸载 | 只取消该对象的订阅与等待，不影响同 World 的其他 Actor。 |
+| 脚本更新 | 更新失败时旧回调继续工作；成功时旧回调解绑，新脚本可重新订阅。 |
 
-事件回调也可以等待下一帧：收到 `2` 后先加 `2`，`await AvidContinuations.NextTickAsync()` 恢复后再加 `20`。等待期间的局部值会保留；同一份脚本作用于两个 Actor 时，停止或销毁其中一个只取消它自己的等待。这个流程已从 C# 自动生成的 `Projectile` 原生函数壳和 Win64 脚本包在 Editor 自动化中跑通；独立测试还覆盖 Wasmtime 与 WAMR 两后端。[可运行的碰撞事件样例](Samples/CSharp/ScriptDefinedTypes/README.md)和[重载、取消边界](Docs/Phase66/P66.B_Event_Language_Contract.md#事件回调跨-await)。
-
-脚本卸载、World 清理或源 Actor 销毁后会自动解绑。更新脚本失败时旧回调继续工作，成功时旧回调解绑，新脚本可重新订阅。单播事件已被占用、对象已失效或对象属于另一个 World 时，运行时会拒绝新订阅。[完整的事件行为与当前限制](Docs/Phase66/P66.B_Event_Language_Contract.md)。
-
-例如两个 Actor 的事件回调都在等待下一帧：包级更新失败时，两人的旧等待继续；更新成功时，两人的旧等待都取消，重新订阅后才能再触发。正式生成的 `Projectile` 已在 Win64 Editor 自动化中验证同包重载，以及把恢复后倍率从 `10` 改为 `20` 的不同代码版本切换；测试覆盖 Game 和 PIE 类型的 World，实际 Editor Play 操作、Cook/Shipping 切换和长时间运行仍待验收。[详细范围](Docs/Phase66/P66.B_Event_Language_Contract.md#事件回调跨-await)。
+这些行为已在 Win64 Editor 自动化及 Wasmtime / WAMR 的聚焦测试中验证。实际 Editor Play 操作、Cook/Shipping 切换和长时间运行仍待验收。单播占用、跨 World 拒绝和不同版本代码切换的完整范围见[事件合同](Docs/Phase66/P66.B_Event_Language_Contract.md)。
 
 </details>
 
