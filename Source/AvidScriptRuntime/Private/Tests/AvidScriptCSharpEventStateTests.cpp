@@ -15,6 +15,7 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "UObject/StructOnScope.h"
+#include "UObject/UObjectGlobals.h"
 #include "UObject/UnrealType.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptCSharpEventStateTest,
@@ -401,6 +402,39 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
             }
             ForeignActor->Destroy();
             StaleActor->Destroy();
+        }
+        {
+            AActor* GcOwner = World->SpawnActor<AActor>(Signal->ExpectedSourceClass);
+            if (!TestNotNull(TEXT("GC event source spawned"), GcOwner)) return false;
+            TWeakObjectPtr<AActor> WeakGcOwner = GcOwner;
+            FAvidScriptObjectRegistry GcRegistry;
+            FAvidScriptObjectHandleResult GcHandleResult;
+            FAvidScriptWasmHostContext GcContext;
+            GcContext.World = World;
+            GcContext.ObjectRegistry = &GcRegistry;
+            GcContext.OwnerHandle = GcRegistry.RegisterObject(GcOwner, GcHandleResult, false);
+            if (!TestTrue(TEXT("GC event source registered"), GcHandleResult.bSucceeded)) return false;
+            FAvidScriptRuntimeSession GcSession;
+            GcSession.SetBackendSelectionForTesting(Selection);
+            GcSession.SetHostContext(GcContext);
+            FAvidScriptWasmReloadResult GcLoaded;
+            if (!GcSession.LoadInitialModule(Bytes.GetData(), Bytes.Num(), Manifest, GcLoaded))
+            { AddError(GcLoaded.ErrorMessage); return false; }
+            auto* GcRuntime = GcSession.GetLiveRuntimeForTesting();
+            FAvidScriptWasmSmokeResult GcResult;
+            if (!GcRuntime->Tick(1.0f, GcResult)) { AddError(GcResult.ErrorMessage); return false; }
+            TestEqual(TEXT("GC source owns one language bridge"), GcSession.GetDelegateSubscriptionCountForTesting(), 1);
+            TestEqual(TEXT("GC source owns one callback root"),
+                GcRuntime->GetManagedHeapForTesting()->GetStats().LiveRoots, 1u);
+            GcOwner->Destroy();
+            GcOwner = nullptr;
+            CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS, true);
+            TestFalse(TEXT("Destroyed event source is invalid after GC"), WeakGcOwner.IsValid());
+            TestEqual(TEXT("Post-GC removes language bridge"), GcSession.GetDelegateSubscriptionCountForTesting(), 0);
+            TestEqual(TEXT("Post-GC releases callback root"),
+                GcRuntime->GetManagedHeapForTesting()->GetStats().LiveRoots, 0u);
+            if (GcSession.IsLiveLoaded() && !TestTrue(TEXT("GC event Session stops"),
+                GcSession.StopAndUnload(GcResult))) return false;
         }
         FAvidScriptWasmReloadResult Loaded;
         if (!Session.LoadInitialModule(Bytes.GetData(), Bytes.Num(), Manifest, Loaded))
