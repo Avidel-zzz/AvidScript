@@ -170,7 +170,19 @@ bool FAvidScriptGeneratedCSharpPropertyInteractionTest::RunTest(
 	TestEqual(TEXT("Generated int32 default"), Projectile->ActivationCount, 1);
 	TestEqual(TEXT("Generated int64 default"), Projectile->AccumulatedDamage, 100LL);
 	TestEqual(TEXT("Generated float64 default"), Projectile->PrecisionScale, 1.5);
+	TestEqual(TEXT("Generated launch speed default"), Projectile->LaunchSpeed, 1200.0f);
 	TestFalse(TEXT("Generated bool default"), Projectile->IsActive);
+	FFloatProperty* const LaunchSpeedProperty = FindFProperty<FFloatProperty>(
+		AProjectile::StaticClass(),
+		TEXT("LaunchSpeed"));
+	if (!TestNotNull(TEXT("New C# launch speed is reflected by UHT"), LaunchSpeedProperty))
+	{
+		DestroyGeneratedScriptWorld(World);
+		return true;
+	}
+	TestTrue(
+		TEXT("New C# launch speed is visible to Blueprint"),
+		LaunchSpeedProperty->HasAnyPropertyFlags(CPF_BlueprintVisible));
 	const FURL Url;
 	World->InitializeActorsForPlay(Url);
 	World->BeginPlay();
@@ -199,6 +211,11 @@ bool FAvidScriptGeneratedCSharpPropertyInteractionTest::RunTest(
 	TestEqual(TEXT("C# property codec updates int64"), Projectile->AccumulatedDamage, 125LL);
 	TestEqual(TEXT("C# property codec updates float64"), Projectile->PrecisionScale, 3.0);
 	TestTrue(TEXT("C# property codec updates bool"), Projectile->IsActive);
+	Projectile->ConfigureLaunch(900.0f, false, 3);
+	TestEqual(TEXT("C# ConfigureLaunch updates new UE property"), Projectile->LaunchSpeed, 900.0f);
+	TestEqual(TEXT("C# float return observes new UE property"), Projectile->GetLaunchSpeed(), 900.0f);
+	TestEqual(TEXT("C# ConfigureLaunch updates existing UE property"), Projectile->ActivationCount, 5);
+	TestFalse(TEXT("C# ConfigureLaunch writes bool parameter"), Projectile->IsActive);
 
 	DestroyGeneratedScriptWorld(World);
 	return true;

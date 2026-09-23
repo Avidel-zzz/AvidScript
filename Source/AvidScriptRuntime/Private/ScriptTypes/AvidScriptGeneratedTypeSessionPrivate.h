@@ -11,11 +11,28 @@ class UClass;
 class FAvidScriptRuntimeSession;
 
 
+enum class EAvidScriptGeneratedNativeScalar : uint8
+{
+	Invalid,
+	Void,
+	I32,
+	F32,
+	Bool,
+	I64,
+	F64,
+};
+
+struct FAvidScriptGeneratedPreparedMemberRoute
+{
+	FAvidScriptContextualExportCall Call;
+	TArray<EAvidScriptGeneratedNativeScalar> Parameters;
+	EAvidScriptGeneratedNativeScalar Result = EAvidScriptGeneratedNativeScalar::Invalid;
+};
+
 struct FAvidScriptGeneratedPreparedTypeRoute
 {
 	bool bEnabled = false;
-	TArray<FAvidScriptContextualExportCall> Calls;
-	TArray<uint8> CallShapes;
+	TArray<FAvidScriptGeneratedPreparedMemberRoute> Members;
 };
 
 struct FAvidScriptRuntimeGeneratedTypeInstanceState

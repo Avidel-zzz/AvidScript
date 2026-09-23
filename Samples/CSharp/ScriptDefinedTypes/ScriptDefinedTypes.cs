@@ -22,6 +22,9 @@ public partial class Projectile : AvidActor
     public double PrecisionScale { get; set; } = 1.5;
 
     [UProperty(BlueprintReadWrite = true, Category = "Projectile")]
+    public float LaunchSpeed { get; set; } = 1200.0f;
+
+    [UProperty(BlueprintReadWrite = true, Category = "Projectile")]
     public bool IsActive { get; set; }
 
     [UProperty(BlueprintReadOnly = true, Category = "Projectile")]
@@ -73,10 +76,16 @@ public partial class Projectile : AvidActor
         return ActivationCount;
     }
 
+    [UFunction(BlueprintPure = true, Category = "Projectile")]
+    public float GetLaunchSpeed()
+    {
+        return LaunchSpeed;
+    }
+
     [UFunction(BlueprintCallable = true, Category = "Projectile")]
     public void ConfigureLaunch(float speed = 1200.0f, bool homing = false, int burstCount = 1)
     {
-        PrecisionScale = speed;
+        LaunchSpeed = speed;
         IsActive = homing;
         ActivationCount += burstCount;
     }

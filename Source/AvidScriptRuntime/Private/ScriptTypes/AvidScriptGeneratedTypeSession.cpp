@@ -9,17 +9,6 @@
 #include "Session/AvidScriptRuntimeExecutionDomain.h"
 #include "UObject/UnrealType.h"
 
-namespace
-{
-enum class EGeneratedCallShape : uint8
-{
-	Unsupported,
-	ReceiverVoid,
-	ReceiverI32,
-	ReceiverF32Void,
-};
-}
-
 class FGeneratedSessionAuthority final : public IAvidScriptGeneratedTypeAuthority
 {
 public:
@@ -48,65 +37,119 @@ private:
 
 namespace
 {
-EGeneratedCallShape ResolveCallShape(
+EAvidScriptGeneratedNativeScalar ResolveNativeScalar(const FProperty* Property)
+{
+	if (CastField<FIntProperty>(Property) != nullptr
+		|| CastField<FUInt32Property>(Property) != nullptr)
+	{
+		return EAvidScriptGeneratedNativeScalar::I32;
+	}
+	if (CastField<FFloatProperty>(Property) != nullptr)
+	{
+		return EAvidScriptGeneratedNativeScalar::F32;
+	}
+	if (CastField<FBoolProperty>(Property) != nullptr)
+	{
+		return EAvidScriptGeneratedNativeScalar::Bool;
+	}
+	if (CastField<FInt64Property>(Property) != nullptr
+		|| CastField<FUInt64Property>(Property) != nullptr)
+	{
+		return EAvidScriptGeneratedNativeScalar::I64;
+	}
+	if (CastField<FDoubleProperty>(Property) != nullptr)
+	{
+		return EAvidScriptGeneratedNativeScalar::F64;
+	}
+	return EAvidScriptGeneratedNativeScalar::Invalid;
+}
+
+uint32 NativeScalarCellCount(const EAvidScriptGeneratedNativeScalar Kind)
+{
+	switch (Kind)
+	{
+	case EAvidScriptGeneratedNativeScalar::I32:
+	case EAvidScriptGeneratedNativeScalar::F32:
+	case EAvidScriptGeneratedNativeScalar::Bool:
+		return 1;
+	case EAvidScriptGeneratedNativeScalar::I64:
+	case EAvidScriptGeneratedNativeScalar::F64:
+		return 2;
+	default:
+		return 0;
+	}
+}
+
+bool PrepareNativeCallShape(
 	const FAvidScriptGeneratedMemberPlan& Member,
-	const FAvidScriptContextualExportCall& Call)
+	FAvidScriptGeneratedPreparedMemberRoute& Route)
 {
 	if (Member.Kind != EAvidScriptGeneratedMemberKind::Function)
 	{
-		return EGeneratedCallShape::Unsupported;
+		return false;
 	}
+	const FAvidScriptContextualExportCall& Call = Route.Call;
 	if (Member.Function == nullptr)
 	{
 		if (!Member.bLifecycle || Call.GetResultCellCount() != 0)
 		{
-			return EGeneratedCallShape::Unsupported;
+			return false;
 		}
+		Route.Result = EAvidScriptGeneratedNativeScalar::Void;
 		if (Call.GetParameterCellCount() == 2)
 		{
-			return EGeneratedCallShape::ReceiverVoid;
+			return Member.StableMemberId.EndsWith(TEXT("():void"), ESearchCase::CaseSensitive);
 		}
-		return Call.GetParameterCellCount() == 3
-			? EGeneratedCallShape::ReceiverF32Void
-			: EGeneratedCallShape::Unsupported;
+		if (Call.GetParameterCellCount() == 3
+			&& Member.StableMemberId.EndsWith(TEXT(".Tick(float32):void"), ESearchCase::CaseSensitive))
+		{
+			Route.Parameters.Add(EAvidScriptGeneratedNativeScalar::F32);
+			return true;
+		}
+		return false;
 	}
 
-	FProperty* InputProperty = nullptr;
-	FProperty* ReturnProperty = nullptr;
-	int32 InputCount = 0;
+	uint32 ParameterCells = 2;
+	EAvidScriptGeneratedNativeScalar ReturnKind = EAvidScriptGeneratedNativeScalar::Void;
 	for (TFieldIterator<FProperty> Iterator(Member.Function); Iterator; ++Iterator)
 	{
-		FProperty* const Property = *Iterator;
+	const FProperty* const Property = *Iterator;
 		if (!Property->HasAnyPropertyFlags(CPF_Parm))
 		{
 			continue;
 		}
 		if (Property->HasAnyPropertyFlags(CPF_ReturnParm))
 		{
-			ReturnProperty = Property;
+			ReturnKind = ResolveNativeScalar(Property);
+			if (ReturnKind == EAvidScriptGeneratedNativeScalar::Invalid)
+			{
+				return false;
+			}
 			continue;
 		}
-		++InputCount;
-		InputProperty = Property;
+		if (Property->HasAnyPropertyFlags(CPF_OutParm | CPF_ReferenceParm))
+		{
+			return false;
+		}
+		const EAvidScriptGeneratedNativeScalar Kind = ResolveNativeScalar(Property);
+		if (Kind == EAvidScriptGeneratedNativeScalar::Invalid)
+		{
+			return false;
+		}
+		ParameterCells += NativeScalarCellCount(Kind);
+		if (ParameterCells > FAvidScriptVmCallFrame::MaxCells)
+		{
+			return false;
+		}
+		Route.Parameters.Add(Kind);
 	}
-
-	if (InputCount == 0 && ReturnProperty == nullptr
-		&& Call.GetParameterCellCount() == 2 && Call.GetResultCellCount() == 0)
+	if (ParameterCells != Call.GetParameterCellCount()
+		|| NativeScalarCellCount(ReturnKind) != Call.GetResultCellCount())
 	{
-		return EGeneratedCallShape::ReceiverVoid;
+		return false;
 	}
-	if (InputCount == 0 && CastField<FIntProperty>(ReturnProperty) != nullptr
-		&& Call.GetParameterCellCount() == 2 && Call.GetResultCellCount() == 1)
-	{
-		return EGeneratedCallShape::ReceiverI32;
-	}
-	if (InputCount == 1 && CastField<FFloatProperty>(InputProperty) != nullptr
-		&& ReturnProperty == nullptr
-		&& Call.GetParameterCellCount() == 3 && Call.GetResultCellCount() == 0)
-	{
-		return EGeneratedCallShape::ReceiverF32Void;
-	}
-	return EGeneratedCallShape::Unsupported;
+	Route.Result = ReturnKind;
+	return true;
 }
 }
 
@@ -309,15 +352,16 @@ bool FAvidScriptRuntimeSession::PrepareGeneratedTypeExports(
 
 		FAvidScriptGeneratedPreparedTypeRoute& Route = OutRoutes[Type.TypeOrdinal];
 		Route.bEnabled = true;
-		Route.Calls.SetNum(Type.Members.Num());
-		Route.CallShapes.SetNumZeroed(Type.Members.Num());
+		Route.Members.SetNum(Type.Members.Num());
 		for (const FAvidScriptGeneratedMemberPlan& Member : Type.Members)
 		{
 			if (Member.Kind != EAvidScriptGeneratedMemberKind::Function)
 			{
 				continue;
 			}
-			FAvidScriptContextualExportCall& Call = Route.Calls[Member.MemberOrdinal];
+			FAvidScriptGeneratedPreparedMemberRoute& Prepared =
+				Route.Members[Member.MemberOrdinal];
+			FAvidScriptContextualExportCall& Call = Prepared.Call;
 			FString PrepareError;
 			if (!Runtime.PrepareContextualExportCall(Member.ExportName, Call, PrepareError))
 			{
@@ -337,8 +381,15 @@ bool FAvidScriptRuntimeSession::PrepareGeneratedTypeExports(
 				OutRoutes.Reset();
 				return false;
 			}
-			Route.CallShapes[Member.MemberOrdinal] = static_cast<uint8>(
-				ResolveCallShape(Member, Call));
+			if (!PrepareNativeCallShape(Member, Prepared))
+			{
+				OutError = FString::Printf(
+					TEXT("stable_member_id=%s; export=%s; native call shape is unsupported or mismatched"),
+					*Member.StableMemberId,
+					*Member.ExportName);
+				OutRoutes.Reset();
+				return false;
+			}
 		}
 	}
 	return true;
@@ -385,17 +436,17 @@ bool FAvidScriptRuntimeSession::InvokeGeneratedTypeMember(
 
 	const FAvidScriptGeneratedPreparedTypeRoute& Route =
 		GeneratedTypeInstance->PreparedTypeRoutes[TypeOrdinal];
-	if (!Route.bEnabled
-		|| !Route.Calls.IsValidIndex(static_cast<int32>(MemberOrdinal))
-		|| !Route.CallShapes.IsValidIndex(static_cast<int32>(MemberOrdinal)))
+	if (!Route.bEnabled || !Route.Members.IsValidIndex(static_cast<int32>(MemberOrdinal)))
 	{
 		return false;
 	}
 
-	const FAvidScriptContextualExportCall& Call = Route.Calls[MemberOrdinal];
-	const EGeneratedCallShape Shape = static_cast<EGeneratedCallShape>(
-		Route.CallShapes[MemberOrdinal]);
-	if (!Call.IsValid() || Shape == EGeneratedCallShape::Unsupported)
+	const FAvidScriptGeneratedPreparedMemberRoute& Prepared = Route.Members[MemberOrdinal];
+	const FAvidScriptContextualExportCall& Call = Prepared.Call;
+	const EAvidScriptGeneratedNativeScalar ResultKind = Prepared.Result;
+	if (!Call.IsValid() || ResultKind == EAvidScriptGeneratedNativeScalar::Invalid
+		|| Arguments.Num() != Prepared.Parameters.Num()
+		|| (Result != nullptr) != (ResultKind != EAvidScriptGeneratedNativeScalar::Void))
 	{
 		return false;
 	}
@@ -404,27 +455,31 @@ bool FAvidScriptRuntimeSession::InvokeGeneratedTypeMember(
 	Frame.Cells[0] = ReceiverHandle.Slot;
 	Frame.Cells[1] = ReceiverHandle.Generation;
 	Frame.CellCount = 2;
-	if (Shape == EGeneratedCallShape::ReceiverF32Void)
+	for (int32 Index = 0; Index < Arguments.Num(); ++Index)
 	{
-		if (Arguments.Num() != 1 || Arguments[0].Data == nullptr || Result != nullptr)
+		const EAvidScriptGeneratedNativeScalar Kind = Prepared.Parameters[Index];
+		const uint32 CellCount = NativeScalarCellCount(Kind);
+		if (Arguments[Index].Data == nullptr || CellCount == 0
+			|| Frame.CellCount + CellCount > FAvidScriptVmCallFrame::MaxCells)
 		{
 			return false;
 		}
-		FMemory::Memcpy(&Frame.Cells[2], Arguments[0].Data, sizeof(uint32));
-		Frame.CellCount = 3;
+		if (Kind == EAvidScriptGeneratedNativeScalar::Bool)
+		{
+			Frame.Cells[Frame.CellCount] = *static_cast<const bool*>(Arguments[Index].Data) ? 1u : 0u;
+		}
+		else
+		{
+			FMemory::Memcpy(&Frame.Cells[Frame.CellCount],
+				Arguments[Index].Data, CellCount * sizeof(uint32));
+		}
+		Frame.CellCount += CellCount;
 	}
-	else if (!Arguments.IsEmpty())
-	{
-		return false;
-	}
+	if (Frame.CellCount != Call.GetParameterCellCount()) return false;
 
 	FAvidScriptVmCallResult CallResult;
 	FAvidScriptVmError Error;
-	if ((Shape == EGeneratedCallShape::ReceiverI32 && Result == nullptr)
-		|| (Shape != EGeneratedCallShape::ReceiverI32 && Result != nullptr))
-	{
-		return false;
-	}
+	const uint32 ResultCells = NativeScalarCellCount(ResultKind);
 	bool bCalled = false;
 	bool bResultValid = false;
 	{
@@ -438,12 +493,9 @@ bool FAvidScriptRuntimeSession::InvokeGeneratedTypeMember(
 		bCalled = LiveRuntime->InvokeInContext(Call, InvocationContext,
 			Frame,
 			Error,
-			Shape == EGeneratedCallShape::ReceiverI32
-				? &CallResult
-				: nullptr);
+			ResultCells != 0 ? &CallResult : nullptr);
 		bResultValid = bCalled
-			&& (Shape != EGeneratedCallShape::ReceiverI32
-				|| CallResult.CellCount == 1);
+			&& (ResultCells == 0 || CallResult.CellCount == ResultCells);
 	}
 	if (!bCalled)
 	{
@@ -455,14 +507,17 @@ bool FAvidScriptRuntimeSession::InvokeGeneratedTypeMember(
 		QuarantineFaultedRuntime(Failure);
 		return false;
 	}
-	if (Shape == EGeneratedCallShape::ReceiverI32)
+	if (!bResultValid) return false;
+	if (ResultCells != 0)
 	{
-		if (!bResultValid)
+		if (ResultKind == EAvidScriptGeneratedNativeScalar::Bool)
 		{
-			return false;
+			*static_cast<bool*>(Result) = CallResult.Cells[0] != 0;
 		}
-		*static_cast<int32*>(Result) = static_cast<int32>(CallResult.Cells[0]);
-		return true;
+		else
+		{
+			FMemory::Memcpy(Result, CallResult.Cells, ResultCells * sizeof(uint32));
+		}
 	}
-	return bResultValid;
+	return true;
 }

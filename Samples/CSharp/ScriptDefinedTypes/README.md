@@ -9,6 +9,12 @@
 - 生成链确定性发布 UHT native shell、WASM body 与 Runtime package。
 
 方法体变化可自动热重载；类型、属性、函数、签名或反射 flag 变化需要 no-clean UBT 并重启 Editor。
+
+例如 `Projectile` 的 `LaunchSpeed` 是新声明的蓝图可读写属性，默认值为 `1200`；调用
+`ConfigureLaunch(900.0f, false, 3)` 后，C# 方法会把它更新为 `900`，`GetLaunchSpeed()`
+可从生成的 UE 函数返回新值。新增这两个反射成员时，构建链会报告
+`native_rebuild_required`，需要重新编译 Editor 并冷启动验证。
+
 RPC 壳层与真实独立进程网络传输均已验证：客户端 Server RPC、服务器 Client/NetMulticast、replicated
 property 和客户端 C# RepNotify 在 dedicated/listen 拓扑中形成闭环。
 
