@@ -162,6 +162,8 @@ public static class ScoreScript
 
 对这种已生成的无返回值多播事件，回调也能再次广播：例如先收到 `2`，再广播 `3`，两次回调会让得分共加 `5`。再次广播时要设置终止条件，避免无限递归。
 
+事件回调也可以等待下一帧：收到 `2` 后先加 `2`，`await AvidContinuations.NextTickAsync()` 恢复后再加 `20`。等待期间的局部值会保留；[完整代码与重载、取消边界](Docs/Phase66/P66.B_Event_Language_Contract.md#事件回调跨-await)。
+
 脚本卸载、World 清理或源 Actor 销毁后会自动解绑。更新脚本失败时旧回调继续工作，成功时旧回调解绑，新脚本可重新订阅。单播事件已被占用、对象已失效或对象属于另一个 World 时，运行时会拒绝新订阅。[完整的事件行为与当前限制](Docs/Phase66/P66.B_Event_Language_Contract.md)。
 
 ### 🗂️ 找一个接近你需求的完整样例

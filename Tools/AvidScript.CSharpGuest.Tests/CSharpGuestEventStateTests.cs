@@ -169,6 +169,7 @@ internal static class CSharpGuestEventStateTests
         string facade = File.ReadAllText(Path.Combine(directory, "event-facade.generated.cs"));
         const string source = """
             using AvidScript;
+            using System;
             using System.Runtime.InteropServices;
             public sealed class Counter
             {
@@ -229,6 +230,14 @@ internal static class CSharpGuestEventStateTests
                     UE.Self.BroadcastOnScriptSignal(UE.Self, 3, 1.0f);
                     value += Count;
                     doubled = value * 2;
+                }
+                static async void OnSignalAsync(AActor actor, int amount, float scale)
+                {
+                    int bonus = amount;
+                    Func<int> readBonus = () => bonus;
+                    Count += readBonus();
+                    await AvidContinuations.NextTickAsync();
+                    Count += readBonus() * 10;
                 }
                 static int OnSinglecastFirst(ref int value, out int doubled)
                 {
@@ -330,6 +339,8 @@ internal static class CSharpGuestEventStateTests
                         UE.Self.OnRefOutSignal -= OnRefOutNested;
                         UE.Self.OnScriptSignal -= Handle;
                     }
+                    if (delta == 28.0f) UE.Self.OnScriptSignal += OnSignalAsync;
+                    if (delta == 29.0f) UE.Self.OnScriptSignal -= OnSignalAsync;
                 }
             }
             """;

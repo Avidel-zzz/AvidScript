@@ -269,6 +269,8 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
         Context.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
         Session.SetHostContext(Context);
         auto Manifest = FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("csharp_event_language"));
+        Manifest.Language = TEXT("csharp");
+        Manifest.RequiredExports.Add(TEXT("avid_on_continuation_v2"));
         Manifest.BindingPackage = Package;
         Manifest.RequiredImports.Reset();
         for (const auto& Value : Guest->GetArrayField(TEXT("imports")))
@@ -567,6 +569,104 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
                 NestedOutputSession.GetDelegateSubscriptionCountForTesting(), 0);
             if (!TestTrue(TEXT("Nested output Session stops"),
                 NestedOutputSession.StopAndUnload(NestedOutputResult))) return false;
+        }
+        {
+            FAvidScriptRuntimeSession AsyncEventSession;
+            AsyncEventSession.SetBackendSelectionForTesting(Selection);
+            AsyncEventSession.SetHostContext(Context);
+            FAvidScriptWasmReloadResult AsyncLoaded;
+            if (!AsyncEventSession.LoadInitialModule(Bytes.GetData(), Bytes.Num(), Manifest, AsyncLoaded))
+            { AddError(AsyncLoaded.ErrorMessage); return false; }
+            auto* AsyncRuntime = AsyncEventSession.GetLiveRuntimeForTesting();
+            FAvidScriptWasmSmokeResult AsyncResult;
+            if (!AsyncRuntime->Tick(28.0f, AsyncResult)) { AddError(AsyncResult.ErrorMessage); return false; }
+            TestEqual(TEXT("Async event installs one language bridge"),
+                AsyncEventSession.GetDelegateSubscriptionCountForTesting(), 1);
+            auto* Heap = AsyncRuntime->GetManagedHeapForTesting();
+            const uint32 SubscribedRoots = Heap->GetStats().LiveRoots;
+            FStructOnScope Frame(Signal->Signature.SignatureFunction);
+            FindFProperty<FObjectProperty>(Signal->Signature.SignatureFunction, TEXT("SourceActor"))
+                ->SetObjectPropertyValue_InContainer(Frame.GetStructMemory(), Owner);
+            auto* Amount = FindFProperty<FIntProperty>(Signal->Signature.SignatureFunction, TEXT("Count"));
+            Amount->SetPropertyValue_InContainer(Frame.GetStructMemory(), 2);
+            FindFProperty<FFloatProperty>(Signal->Signature.SignatureFunction, TEXT("Scale"))
+                ->SetPropertyValue_InContainer(Frame.GetStructMemory(), 1.0f);
+            const auto Broadcast = [&]()
+            {
+                Signal->Signature.MulticastProperty->GetMulticastDelegate(
+                    Signal->Signature.MulticastProperty->ContainerPtrToValuePtr<void>(Owner))
+                    ->ProcessDelegate<UObject>(Frame.GetStructMemory());
+            };
+            Broadcast();
+            int32 Score = 0;
+            if (!TestTrue(TEXT("Read async event score before await"), AsyncRuntime->ReadStateBytes(
+                CountAddress, MakeArrayView(reinterpret_cast<uint8*>(&Score), 4), Error)))
+            { AddError(Error); return false; }
+            TestEqual(TEXT("Event callback executes before await"), Score, 2);
+            TestEqual(TEXT("Event callback creates one owned continuation"),
+                AsyncEventSession.GetLivePendingContinuationCount(), 1);
+            TestTrue(TEXT("Suspended event capture retains a managed root"),
+                Heap->GetStats().LiveRoots > SubscribedRoots);
+            const TArray<uint8> InvalidBytes{ 0 };
+            FAvidScriptWasmReloadResult AsyncReload;
+            TestFalse(TEXT("Invalid reload cannot replace a suspended event callback"),
+                AsyncEventSession.ReloadModule(InvalidBytes.GetData(), InvalidBytes.Num(), Manifest, AsyncReload));
+            TestTrue(TEXT("Invalid reload preserves the suspended event runtime"),
+                AsyncReload.bRollbackPreservedLiveRuntime
+                    && AsyncEventSession.GetLiveRuntimeForTesting() == AsyncRuntime);
+            TestEqual(TEXT("Invalid reload preserves the event continuation"),
+                AsyncEventSession.GetLivePendingContinuationCount(), 1);
+            TestEqual(TEXT("Invalid reload preserves the event bridge"),
+                AsyncEventSession.GetDelegateSubscriptionCountForTesting(), 1);
+            if (!TestTrue(TEXT("GC preserves suspended event capture"), Heap->Collect() == EHeapError::Ok)) return false;
+            World->Tick(LEVELTICK_All, 0); ++GFrameCounter;
+            World->Tick(LEVELTICK_All, 0.02f); ++GFrameCounter;
+            if (!AsyncEventSession.TickLive(0.001f, AsyncResult)) { AddError(AsyncResult.ErrorMessage); return false; }
+            if (!TestTrue(TEXT("Read async event score after await"), AsyncRuntime->ReadStateBytes(
+                CountAddress, MakeArrayView(reinterpret_cast<uint8*>(&Score), 4), Error)))
+            { AddError(Error); return false; }
+            TestEqual(TEXT("Event capture resumes with the original value"), Score, 22);
+            TestEqual(TEXT("Resumed event continuation is consumed"),
+                AsyncEventSession.GetLivePendingContinuationCount(), 0);
+            if (!AsyncRuntime->Tick(29.0f, AsyncResult)) { AddError(AsyncResult.ErrorMessage); return false; }
+            TestEqual(TEXT("Async event removal releases the language bridge"),
+                AsyncEventSession.GetDelegateSubscriptionCountForTesting(), 0);
+            if (!TestTrue(TEXT("GC reclaims completed event and await roots"), Heap->Collect() == EHeapError::Ok)) return false;
+            TestEqual(TEXT("Completed event and await leave no managed roots"), Heap->GetStats().LiveRoots, 0u);
+            if (!AsyncRuntime->Tick(28.0f, AsyncResult)) { AddError(AsyncResult.ErrorMessage); return false; }
+            Amount->SetPropertyValue_InContainer(Frame.GetStructMemory(), 3);
+            Broadcast();
+            TestEqual(TEXT("New event callback can suspend again"),
+                AsyncEventSession.GetLivePendingContinuationCount(), 1);
+            auto UpdatedManifest = Manifest;
+            UpdatedManifest.ModuleId = TEXT("csharp_event_language_async_v2");
+            if (!TestTrue(TEXT("Valid reload replaces a suspended event callback"),
+                AsyncEventSession.ReloadModule(Bytes.GetData(), Bytes.Num(), UpdatedManifest, AsyncReload)))
+            { AddError(AsyncReload.ErrorMessage); return false; }
+            TestEqual(TEXT("Reload retires the old event continuation"),
+                AsyncEventSession.GetLivePendingContinuationCount(), 0);
+            TestEqual(TEXT("Reload retires the old event bridge"),
+                AsyncEventSession.GetDelegateSubscriptionCountForTesting(), 0);
+            auto* UpdatedRuntime = AsyncEventSession.GetLiveRuntimeForTesting();
+            World->Tick(LEVELTICK_All, 0); ++GFrameCounter;
+            World->Tick(LEVELTICK_All, 0.02f); ++GFrameCounter;
+            if (!AsyncEventSession.TickLive(0.001f, AsyncResult)) { AddError(AsyncResult.ErrorMessage); return false; }
+            int32 UpdatedScore = -1;
+            if (!TestTrue(TEXT("Read replacement score after old timer"), UpdatedRuntime->ReadStateBytes(
+                CountAddress, MakeArrayView(reinterpret_cast<uint8*>(&UpdatedScore), 4), Error)))
+            { AddError(Error); return false; }
+            TestEqual(TEXT("Old event continuation cannot mutate replacement state"), UpdatedScore, 0);
+            if (!UpdatedRuntime->Tick(28.0f, AsyncResult)) { AddError(AsyncResult.ErrorMessage); return false; }
+            Amount->SetPropertyValue_InContainer(Frame.GetStructMemory(), 4);
+            Broadcast();
+            TestEqual(TEXT("New version can start an event continuation"),
+                AsyncEventSession.GetLivePendingContinuationCount(), 1);
+            if (!TestTrue(TEXT("Stopping owner cancels event and await"),
+                AsyncEventSession.StopAndUnload(AsyncResult))) return false;
+            TestEqual(TEXT("Stopped event owner retains no continuation"),
+                AsyncEventSession.GetLivePendingContinuationCount(), 0);
+            TestEqual(TEXT("Stopped event owner retains no bridge"),
+                AsyncEventSession.GetDelegateSubscriptionCountForTesting(), 0);
         }
         {
             AActor* GcOwner = World->SpawnActor<AActor>(Signal->ExpectedSourceClass);
