@@ -10,6 +10,8 @@ internal static class GuestLanguageOutcomeFlowTests
     private const string Outcome = "type:language_outcome";
     private const string Leaf = "function:outcome_leaf";
     private const string Caller = "function:outcome_caller";
+    private const string Propagator = "function:outcome_propagator";
+    private const string PropagationProbe = "function:outcome_propagation_probe";
 
     public static int Run()
     {
@@ -26,7 +28,16 @@ internal static class GuestLanguageOutcomeFlowTests
         OutcomeParameterIsRejected();
         HostOutcomeImportIsRejected();
         RawOutcomeExportIsRejected();
-        return 13;
+        ValidErrorPropagationReturnsCheckedOutcome();
+        MissingStatusIsRejected();
+        InvalidStatusValueIsRejected();
+        MissingSuccessValueIsRejected();
+        MissingErrorSourceIsRejected();
+        NonDominatingStatusConstantIsRejected();
+        MutableStatusConstantIsRejected();
+        ValueReadBeforeProducerStatusIsRejected();
+        StatusReadBeforeProducerAssignmentIsRejected();
+        return 22;
     }
 
     private static void DirectCallChecksStatusBeforeValue()
@@ -210,6 +221,166 @@ internal static class GuestLanguageOutcomeFlowTests
         }, "ASIR1025");
     }
 
+    private static void ValidErrorPropagationReturnsCheckedOutcome()
+    {
+        GuestModule module = CreateModule();
+        GuestFunction caller = module.Functions.Single(function => function.Id == Caller);
+        GuestBasicBlock error = caller.Blocks.Single(block => block.Id == "error") with
+        {
+            Instructions = Array.Empty<GuestInstruction>(),
+            Terminator = Return("result"),
+        };
+        GuestBasicBlock success = caller.Blocks.Single(block => block.Id == "success") with
+        {
+            Instructions = new[]
+            {
+                Load("value", "result", "value"), Op("stack_alloc", "out"),
+                Constant("zero", 0), Store("out", "status", "zero"),
+                Store("out", "value", "value"),
+            },
+            Terminator = Return("out"),
+        };
+        caller = caller with
+        {
+            ReturnTypeId = Outcome,
+            Locals = caller.Locals.Append(new GuestRegister("out", Outcome))
+                .Append(new GuestRegister("zero", Int)).ToArray(),
+            Blocks = ReplaceBlock(caller with { Blocks = ReplaceBlock(caller, error) }, success),
+        };
+        AssertValid(module with
+        {
+            Functions = ReplaceFunction(module, caller),
+            Exports = Array.Empty<GuestExport>(),
+        });
+    }
+
+    private static void MissingStatusIsRejected()
+    {
+        GuestModule module = CreateModule();
+        GuestFunction leaf = module.Functions.Single(function => function.Id == Leaf);
+        GuestBasicBlock error = leaf.Blocks.Single(block => block.Id == "error") with
+        {
+            Instructions = leaf.Blocks.Single(block => block.Id == "error").Instructions
+                .Where(instruction => instruction.TargetId != "field:status").ToArray(),
+        };
+        AssertError(module with { Functions = ReplaceFunction(module, leaf with
+        {
+            Blocks = ReplaceBlock(leaf, error),
+        }) }, "ASIR1026");
+    }
+
+    private static void InvalidStatusValueIsRejected()
+    {
+        GuestModule module = CreateModule();
+        GuestFunction leaf = module.Functions.Single(function => function.Id == Leaf);
+        GuestBasicBlock entry = leaf.Blocks[0] with
+        {
+            Instructions = leaf.Blocks[0].Instructions.Select(instruction =>
+                instruction.ResultId == "one" ? Constant("one", 2) : instruction).ToArray(),
+        };
+        AssertError(module with { Functions = ReplaceFunction(module, leaf with
+        {
+            Blocks = ReplaceBlock(leaf, entry),
+        }) }, "ASIR1026");
+    }
+
+    private static void MissingSuccessValueIsRejected()
+    {
+        GuestModule module = CreateModule();
+        GuestFunction leaf = module.Functions.Single(function => function.Id == Leaf);
+        GuestBasicBlock success = leaf.Blocks.Single(block => block.Id == "success") with
+        {
+            Instructions = leaf.Blocks.Single(block => block.Id == "success").Instructions
+                .Where(instruction => instruction.TargetId != "field:value").ToArray(),
+        };
+        AssertError(module with { Functions = ReplaceFunction(module, leaf with
+        {
+            Blocks = ReplaceBlock(leaf, success),
+        }) }, "ASIR1026");
+    }
+
+    private static void MissingErrorSourceIsRejected()
+    {
+        GuestModule module = CreateModule();
+        GuestFunction leaf = module.Functions.Single(function => function.Id == Leaf);
+        GuestBasicBlock error = leaf.Blocks.Single(block => block.Id == "error") with
+        {
+            Instructions = leaf.Blocks.Single(block => block.Id == "error").Instructions
+                .Where(instruction => instruction.TargetId != "field:source").ToArray(),
+        };
+        AssertError(module with { Functions = ReplaceFunction(module, leaf with
+        {
+            Blocks = ReplaceBlock(leaf, error),
+        }) }, "ASIR1026");
+    }
+
+    private static void NonDominatingStatusConstantIsRejected()
+    {
+        GuestModule module = CreateModule();
+        GuestFunction leaf = module.Functions.Single(function => function.Id == Leaf);
+        GuestBasicBlock entry = leaf.Blocks[0] with
+        {
+            Instructions = leaf.Blocks[0].Instructions
+                .Where(instruction => instruction.ResultId != "one").ToArray(),
+        };
+        GuestBasicBlock success = leaf.Blocks.Single(block => block.Id == "success") with
+        {
+            Instructions = new[] { Constant("one", 1) }
+                .Concat(leaf.Blocks.Single(block => block.Id == "success").Instructions).ToArray(),
+        };
+        leaf = leaf with { Blocks = ReplaceBlock(leaf with { Blocks = ReplaceBlock(leaf, entry) }, success) };
+        AssertError(module with { Functions = ReplaceFunction(module, leaf) }, "ASIR1026");
+    }
+
+    private static void MutableStatusConstantIsRejected()
+    {
+        GuestModule module = CreateModule();
+        GuestFunction leaf = module.Functions.Single(function => function.Id == Leaf);
+        GuestBasicBlock entry = leaf.Blocks[0] with
+        {
+            Instructions = leaf.Blocks[0].Instructions.Append(
+                Op("local_store", null, new[] { "zero" }, "one")).ToArray(),
+        };
+        AssertError(module with { Functions = ReplaceFunction(module, leaf with
+        {
+            Blocks = ReplaceBlock(leaf, entry),
+        }) }, "ASIR1026");
+    }
+
+    private static void ValueReadBeforeProducerStatusIsRejected()
+    {
+        GuestModule module = CreateModule();
+        GuestFunction leaf = module.Functions.Single(function => function.Id == Leaf);
+        GuestBasicBlock entry = leaf.Blocks[0] with
+        {
+            Instructions = leaf.Blocks[0].Instructions.Append(
+                Load("scratch", "out", "value")).ToArray(),
+        };
+        leaf = leaf with
+        {
+            Locals = leaf.Locals.Append(new GuestRegister("scratch", Int)).ToArray(),
+            Blocks = ReplaceBlock(leaf, entry),
+        };
+        AssertError(module with { Functions = ReplaceFunction(module, leaf) }, "ASIR1026");
+    }
+
+    private static void StatusReadBeforeProducerAssignmentIsRejected()
+    {
+        GuestModule module = CreateModule();
+        GuestFunction leaf = module.Functions.Single(function => function.Id == Leaf);
+        GuestBasicBlock entry = leaf.Blocks[0] with
+        {
+            Instructions = leaf.Blocks[0].Instructions.Append(
+                Load("scratch", "out", "status")).ToArray(),
+        };
+        leaf = leaf with
+        {
+            Locals = leaf.Locals.Append(new GuestRegister("scratch", Int)).ToArray(),
+            Blocks = ReplaceBlock(leaf, entry),
+        };
+        AssertError(module with { Functions = ReplaceFunction(module, leaf) }, "ASIR1026");
+    }
+
     internal static GuestModule CreateModule()
     {
         GuestModule baseline = GuestLanguageOutcomeTypeTests.CreateModule();
@@ -251,12 +422,45 @@ internal static class GuestLanguageOutcomeFlowTests
                 }, Return("error_code")),
                 Block("success", new[] { Load("value", "result", "value") }, Return("value")),
             });
+        GuestFunction propagator = new(Propagator, new[] { Reg("input", Int) },
+            new[] { Reg("result", Outcome), Reg("status", Int), Reg("out", Outcome),
+                Reg("value", Int), Reg("one", Int), Reg("next", Int), Reg("zero", Int) },
+            Outcome, "entry", new[]
+            {
+                Block("entry", new[]
+                {
+                    Op("call", "result", new[] { "input" }, Leaf),
+                    Load("status", "result", "status"),
+                }, new GuestTerminator("branch_if", "status", "error", "success", null)),
+                Block("error", Array.Empty<GuestInstruction>(), Return("result")),
+                Block("success", new[]
+                {
+                    Load("value", "result", "value"),
+                    Op("stack_alloc", "out"), Constant("one", 1), Constant("zero", 0),
+                    new GuestInstruction("binary", "next", new[] { "value", "one" },
+                        null, "add", null),
+                    Store("out", "status", "zero"), Store("out", "value", "next"),
+                }, Return("out")),
+            });
+        GuestFunction propagationProbe = caller with
+        {
+            Id = PropagationProbe,
+            Blocks = caller.Blocks.Select(block => block.Id == "entry" ? block with
+            {
+                Instructions = new[]
+                {
+                    Op("call", "result", new[] { "input" }, Propagator),
+                    Load("status", "result", "status"),
+                },
+            } : block).ToArray(),
+        };
         return baseline with
         {
             SchemaVersion = 16,
             IrVersion = "1.15",
-            Functions = new[] { leaf, caller },
-            Exports = new[] { new GuestExport("checked_outcome", Caller) },
+            Functions = new[] { leaf, caller, propagator, propagationProbe },
+            Exports = new[] { new GuestExport("checked_outcome", Caller),
+                new GuestExport("propagated_outcome", PropagationProbe) },
         };
     }
 

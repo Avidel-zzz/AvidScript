@@ -24,12 +24,15 @@ const imports = {
   } },
 };
 instance = new WebAssembly.Instance(wasmModule, imports);
-const call = instance.exports.checked_outcome;
-if (typeof call !== 'function') throw new Error('Missing checked_outcome export');
-for (const [input, expected] of [[0, 42], [1, 2]]) {
+for (const [name, input, expected] of [
+  ['checked_outcome', 0, 42], ['checked_outcome', 1, 2],
+  ['propagated_outcome', 0, 43], ['propagated_outcome', 1, 2],
+]) {
+  const call = instance.exports[name];
+  if (typeof call !== 'function') throw new Error(`Missing ${name} export`);
   const actual = call(input);
   if (actual !== expected) {
-    throw new Error(`checked_outcome(${input}) = ${actual}; expected ${expected}`);
+    throw new Error(`${name}(${input}) = ${actual}; expected ${expected}`);
   }
 }
-process.stdout.write('Language outcome flow WASM: 2/2 passed\n');
+process.stdout.write('Language outcome flow WASM: 4/4 passed\n');

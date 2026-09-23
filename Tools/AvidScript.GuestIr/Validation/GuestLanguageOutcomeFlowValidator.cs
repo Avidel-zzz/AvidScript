@@ -90,6 +90,7 @@ internal static class GuestLanguageOutcomeFlowValidator
                 }
             }
         }
+        GuestLanguageOutcomeProducerValidator.Validate(context, outcomeTypes);
     }
 
     private static string? CallReturnType(GuestValidationContext context, GuestInstruction instruction)
