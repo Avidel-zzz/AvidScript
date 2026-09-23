@@ -110,6 +110,12 @@ internal static class CSharpGuestUeDispatchTests
             "private dependency reachable only from override must be lowered");
         Check(module.FramedExports.Where(export => export.HostDispatchTargets is not null)
             .All(export => export.HostDispatchTargets!.Count == 2), "both registered types have exact implementation choices");
+        CSharpGuestDebugMap debugMap = CSharpGuestDebugMapProjector.Project(
+            semantic, module, new string('a', 64), new string('b', 64));
+        Check(debugMap.DefinedFunctionCount == module.Functions.Count
+            && debugMap.Functions.Count > 0
+            && debugMap.Functions.All(function => function.GuestFunctionId.StartsWith("function:", StringComparison.Ordinal)),
+            "virtual/interface dispatch frames keep WASM indices without synthetic C# source spans");
         var wasm = WasmModuleCompiler.Compile(module);
         Check(wasm.Succeeded, string.Join(" | ", wasm.Diagnostics.Select(item => item.Message)));
         Check(WasmModuleCompiler.Compile(module, new(true, 4)).Succeeded, "dynamic source compiles with cooperative cancellation");

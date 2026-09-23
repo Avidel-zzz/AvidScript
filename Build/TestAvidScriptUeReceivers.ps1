@@ -21,13 +21,13 @@ try {
     $DispatchOutput = & $Dotnet run --project Tools/AvidScript.CSharpGuest.Tests --configuration Release -- --ue-dispatch
     $DispatchExit = $LASTEXITCODE
     $DispatchOutput | Write-Output
-    if ($DispatchExit -ne 0 -or ($DispatchOutput -join "`n") -notmatch 'AvidScript.CSharpGuest.Tests.UeDispatch: 14/14 passed') {
+    if ($DispatchExit -ne 0 -or ($DispatchOutput -join "`n") -notmatch 'AvidScript.CSharpGuest.Tests.UeDispatch: 15/15 passed') {
         throw 'CSharp UE dynamic dispatch compiler fixtures did not pass completely.'
     }
     $DelegateOutput = & $Dotnet run --project Tools/AvidScript.CSharpGuest.Tests --configuration Release -- --ue-delegates
     $DelegateExit = $LASTEXITCODE
     $DelegateOutput | Write-Output
-    if ($DelegateExit -ne 0 -or ($DelegateOutput -join "`n") -notmatch 'AvidScript.CSharpGuest.Tests.UeDelegates: 15/15 passed') {
+    if ($DelegateExit -ne 0 -or ($DelegateOutput -join "`n") -notmatch 'AvidScript.CSharpGuest.Tests.UeDelegates: 16/16 passed') {
         throw 'CSharp UE delegate binding compiler fixtures did not pass completely.'
     }
 } finally {
@@ -38,7 +38,7 @@ try {
 $RunId = [DateTimeOffset]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')
 $LogPath = Join-Path $ProjectRoot "Saved/Logs/AvidScript_CSharpUeReceiver_$RunId.log"
 $TestName = 'AvidScript.Runtime.GeneratedTypes'
-$ExpectedCount = 19
+$ExpectedCount = 20
 & (Join-Path $EngineRoot 'Engine/Binaries/Win64/UnrealEditor-Cmd.exe') $ProjectPath -unattended -nop4 -NullRHI -nosplash "-ExecCmds=Automation RunTests $TestName;Quit" '-TestExit=Automation Test Queue Empty' "-abslog=$LogPath"
 if ($LASTEXITCODE -ne 0) { throw "Generated type Automation exited with $LASTEXITCODE. Log: $LogPath" }
 $Log = Get-Content -Raw -LiteralPath $LogPath

@@ -51,6 +51,8 @@ $DefaultGuestCompilerPath = Join-Path $BuildDir "InvokeCSharpGuestCompiler.ps1"
 $Utf8 = [System.Text.UTF8Encoding]::new($false)
 $script:GeneratedTypeImportNames = [System.Collections.Generic.HashSet[string]]::new(
     [System.StringComparer]::Ordinal)
+$script:GeneratedTypeHostImports = [System.Collections.Generic.Dictionary[string, object]]::new(
+    [System.StringComparer]::Ordinal)
 $script:GeneratedTypeExportNames = [System.Collections.Generic.HashSet[string]]::new(
     [System.StringComparer]::Ordinal)
 . (Join-Path $BuildDir "AvidScriptCSharpSemanticCache.ps1")
@@ -455,6 +457,12 @@ function Test-CompilerInjectedBindingImport {
     }
     if ($AllowGeneratedTypeImports -and
         [string]$Import.dispatch_class -ceq "semantic") {
+        $ExpectedHostImport = $null
+        if ($script:GeneratedTypeHostImports.TryGetValue([string]$Import.name, [ref]$ExpectedHostImport)) {
+            return [string]$Import.id -ceq [string]$ExpectedHostImport.Id -and
+                [string]$Import.return_type_id -ceq [string]$ExpectedHostImport.ReturnTypeId -and
+                [string]::Join("`n", $ParameterTypes) -ceq [string]::Join("`n", [string[]]$ExpectedHostImport.ParameterTypeIds)
+        }
         $GeneratedMatch = [System.Text.RegularExpressions.Regex]::Match(
             [string]$Import.id,
             '^import:method:synthetic:ue_property:([0-9]+):([0-9]+):(get|set)$',
@@ -492,6 +500,41 @@ function Test-CompilerInjectedBindingImport {
             [string]$Import.return_type_id -ceq "type:int32"
     }
     return $false
+}
+
+function Add-GeneratedDispatchImportsFromOperation {
+    param([AllowNull()][object]$Operation)
+
+    if ($null -eq $Operation) { return }
+    $Dispatch = $Operation.dispatch
+    if ([string]$Operation.kind -cin @("invocation", "method_reference") -and
+        [string]$Dispatch.kind -cin @("virtual", "interface")) {
+        $MethodId = [string]$Operation.symbol_id
+        $Method = @($script:GeneratedSemanticMethods | Where-Object {
+            [string]$_.method_symbol_id -ceq $MethodId -and
+            [string]$_.return_ref_kind -ceq "none"
+        })
+        $Callable = @($script:GeneratedSemanticCallables | Where-Object {
+            [string]$_.method_symbol_id -ceq $MethodId -and -not [bool]$_.is_static
+        })
+        if ($Method.Count -eq 1 -and $Callable.Count -eq 1) {
+            $DispatchInput = [string]$Dispatch.kind + "`n" + $MethodId + "`n" + [string]$Dispatch.slot_method_symbol_id
+            $Identity = [System.Convert]::ToHexString(
+                [System.Security.Cryptography.SHA256]::HashData(
+                    [System.Text.Encoding]::UTF8.GetBytes($DispatchInput))).ToLowerInvariant()
+            $DispatchName = "avid_ue_dispatch_${Identity}_invoke_v1"
+            if (-not $script:GeneratedTypeHostImports.ContainsKey($DispatchName)) {
+                $script:GeneratedTypeHostImports.Add($DispatchName, [ordered]@{
+                    Id = "import:`$ue:dispatch:$Identity"
+                    ParameterTypeIds = [string[]]@("type:int32", "type:int32")
+                    ReturnTypeId = "type:int32"
+                })
+            }
+        }
+    }
+    foreach ($Child in @($Operation.children)) {
+        Add-GeneratedDispatchImportsFromOperation -Operation $Child
+    }
 }
 
 function Test-BindingPackageImports {
@@ -1700,6 +1743,55 @@ $ObservedExports = @($WasmInspectionModel.exports | Where-Object { [int]$_.kind 
 $RequiredImports = @($GuestIrModel.imports | ForEach-Object {
     [ordered]@{ module = [string]$_.module; name = [string]$_.name }
 })
+if ($AllowGeneratedTypeImports) {
+    $SemanticTypes = @($SemanticModel.ue_type_declarations)
+    $ManifestTypes = @($GeneratedTypeManifest.types)
+    if ($SemanticTypes.Count -ne $ManifestTypes.Count) {
+        throw "Generated type manifest and semantic type count differ."
+    }
+    $SemanticMethods = @($SemanticModel.ue_method_catalog.methods)
+    for ($TypeOrdinal = 0; $TypeOrdinal -lt $ManifestTypes.Count; $TypeOrdinal++) {
+        $GeneratedType = $ManifestTypes[$TypeOrdinal]
+        $TypeId = [string]$GeneratedType.stable_type_id
+        if ([int]$GeneratedType.type_ordinal -ne $TypeOrdinal -or
+            [string]$SemanticTypes[$TypeOrdinal].type_id -cne $TypeId) {
+            throw "Generated type manifest and semantic type order differ."
+        }
+        $ReceiverName = "avid_ue_receiver_${TypeOrdinal}_require_v1"
+        $script:GeneratedTypeHostImports.Add($ReceiverName, [ordered]@{
+            Id = "import:`$ue:receiver:$TypeId"
+            ParameterTypeIds = [string[]]@($TypeId)
+            ReturnTypeId = "type:int32"
+        })
+        foreach ($Method in @($SemanticMethods | Where-Object {
+            [string]$_.containing_type_id -ceq $TypeId -and [bool]$_.has_guest_body
+        })) {
+            $MethodId = [string]$Method.method_symbol_id
+            $Identity = [System.Convert]::ToHexString(
+                [System.Security.Cryptography.SHA256]::HashData(
+                    [System.Text.Encoding]::UTF8.GetBytes($MethodId))).ToLowerInvariant()
+            $MethodName = "avid_ue_method_${TypeOrdinal}_${Identity}_invoke_v1"
+            $script:GeneratedTypeHostImports.Add($MethodName, [ordered]@{
+                Id = "import:`$ue:method:$Identity"
+                ParameterTypeIds = [string[]]@("type:int32", "type:int32")
+                ReturnTypeId = "type:int32"
+            })
+        }
+    }
+    $script:GeneratedSemanticMethods = $SemanticMethods
+    $script:GeneratedSemanticCallables = @($SemanticModel.callables)
+    $ReachableCallables = @($SemanticModel.reachability.reachable_callable_ids)
+    foreach ($Graph in @($SemanticModel.control_flow_graphs | Where-Object {
+        $ReachableCallables -ccontains [string]$_.method_symbol_id
+    })) {
+        foreach ($Block in @($Graph.blocks | Where-Object { [bool]$_.is_reachable })) {
+            foreach ($Operation in @($Block.operations)) {
+                Add-GeneratedDispatchImportsFromOperation -Operation $Operation
+            }
+            Add-GeneratedDispatchImportsFromOperation -Operation $Block.branch_value
+        }
+    }
+}
 if ($UsesBindingPackage) {
     $AuthorizationValidation = Test-BindingPackageImports `
         -PackageInfo $BindingAuthorizationInfo `
@@ -1808,9 +1900,34 @@ $DirectAbiExports += @($SemanticModel.delegate_event_callbacks |
     ForEach-Object { [string]$_.export_name })
 $DirectAbiExports += @($script:GeneratedTypeExportNames)
 $DirectAbiExports = @($DirectAbiExports | Sort-Object -Unique)
+$FramedAbiExports = @()
+if ($AllowGeneratedTypeImports) {
+    foreach ($FramedExport in @($GuestIrModel.framed_exports)) {
+        $FrameMatch = [System.Text.RegularExpressions.Regex]::Match(
+            [string]$FramedExport.name,
+            '^avid_ue_(method|dispatch)_([0-9a-f]{64})_frame_v1$',
+            [System.Text.RegularExpressions.RegexOptions]::CultureInvariant)
+        if (-not $FrameMatch.Success) { continue }
+        $Kind = $FrameMatch.Groups[1].Value
+        $Identity = $FrameMatch.Groups[2].Value
+        $HostId = "import:`$ue:${Kind}:$Identity"
+        $FunctionId = if ($Kind -ceq "method") {
+            "`$ue:method:frame:v1:$Identity"
+        } else {
+            "`$ue:dispatch:${Identity}:shape"
+        }
+        if ([string]$FramedExport.host_import_id -cne $HostId -or
+            [string]$FramedExport.function_id -cne $FunctionId -or
+            @($script:GeneratedTypeHostImports.Values | Where-Object { [string]$_.Id -ceq $HostId }).Count -ne 1) {
+            continue
+        }
+        $FramedAbiExports += [string]$FramedExport.name
+    }
+}
 $UnexpectedDeclaredExports = @($RequiredExports | Where-Object { $DirectAbiExports -notcontains $_ })
-$MissingObservedExports = @($RequiredExports | Where-Object { $ObservedExports -notcontains $_ })
-$UnexpectedObservedExports = @($ObservedExports | Where-Object { $RequiredExports -notcontains $_ })
+$ExpectedObservedExports = @($RequiredExports) + @($FramedAbiExports)
+$MissingObservedExports = @($ExpectedObservedExports | Where-Object { $ObservedExports -notcontains $_ })
+$UnexpectedObservedExports = @($ObservedExports | Where-Object { $ExpectedObservedExports -notcontains $_ })
 # This entry publishes the current compiler contract. Keep the exact pair aligned
 # with GuestModuleValidator; TestCSharpGuestBuildContracts exercises real output.
 $GuestContractValid = [int]$GuestIrModel.schema_version -eq 14 -and

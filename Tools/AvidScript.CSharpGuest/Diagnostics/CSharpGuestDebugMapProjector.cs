@@ -20,6 +20,15 @@ public static class CSharpGuestDebugMapProjector
         CSharpGuestIds.UeTickCompatibilityFunctionId,
         CSharpGuestIds.UeEndPlayCompatibilityFunctionId,
     };
+    private static readonly string[] SourceLessGeneratedFunctionPrefixes =
+    {
+        CSharpGuestIds.DelegateEventFunctionPrefix,
+        "function:$class:require:",
+        "function:$delegate:list:",
+        "function:$delegate:equals:",
+        "function:$event:language:",
+        "function:$ue:bind:",
+    };
 
     public static CSharpGuestDebugMap Project(
         SemanticDocument document,
@@ -67,18 +76,28 @@ public static class CSharpGuestDebugMapProjector
         HashSet<string> functionIds = new(StringComparer.Ordinal);
         HashSet<string> methodIds = new(StringComparer.Ordinal);
         HashSet<string> probeIds = new(StringComparer.Ordinal);
+        HashSet<string> generatedFrameIds = module.FramedExports
+            .Select(export => export.FunctionId)
+            .Where(id => id.StartsWith("$ue:method:frame:v1:", StringComparison.Ordinal)
+                || (id.StartsWith("$ue:dispatch:", StringComparison.Ordinal)
+                    && id.EndsWith(":shape", StringComparison.Ordinal)))
+            .ToHashSet(StringComparer.Ordinal);
         List<CSharpGuestDebugFunction> functions = new(module.Functions.Count);
         for (int ordinal = 0; ordinal < module.Functions.Count; ++ordinal)
         {
             GuestFunction function = module.Functions[ordinal];
+            bool generatedFrame = generatedFrameIds.Contains(function.Id);
             if (!functionIds.Add(function.Id)
-                || !function.Id.StartsWith(FunctionPrefix, StringComparison.Ordinal))
+                || (!function.Id.StartsWith(FunctionPrefix, StringComparison.Ordinal) && !generatedFrame))
             {
                 throw new InvalidDataException($"ASDEBUG1002: Guest function identity '{function.Id}' is invalid or duplicated.");
             }
 
-            if (SourceLessGeneratedFunctionIds.Contains(function.Id)
-                || function.Id.StartsWith(CSharpGuestIds.DelegateEventFunctionPrefix, StringComparison.Ordinal))
+            int closureThunk = function.Id.IndexOf(":$closure:thunk:", StringComparison.Ordinal);
+            if (generatedFrame || SourceLessGeneratedFunctionIds.Contains(function.Id)
+                || SourceLessGeneratedFunctionPrefixes.Any(prefix => function.Id.StartsWith(prefix, StringComparison.Ordinal))
+                || (closureThunk > FunctionPrefix.Length
+                    && callables.ContainsKey(function.Id[FunctionPrefix.Length..closureThunk])))
             {
                 continue;
             }

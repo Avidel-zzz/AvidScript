@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using AvidScript.CSharpFrontend;
 using AvidScript.CSharpGuest;
@@ -39,6 +40,18 @@ internal static class CSharpGuestUeMethodFrameTests
         var lowered = CSharpGuestLowerer.Lower(document, new string('b', 64));
         Check(lowered.Succeeded, string.Join(" | ", lowered.Diagnostics.Select(item => item.Message)));
         GuestModule module = lowered.Module!;
+        CSharpGuestDebugMap debugMap = CSharpGuestDebugMapProjector.Project(
+            document, module, new string('c', 64), new string('d', 64));
+        Check(debugMap.DefinedFunctionCount == module.Functions.Count
+            && debugMap.Functions.Count > 0
+            && debugMap.Functions.All(function => function.GuestFunctionId.StartsWith("function:", StringComparison.Ordinal)),
+            "generated UE method frame adapters retain WASM indices without forging C# source locations");
+        GuestModule forgedFrame = module with { Functions = module.Functions.Append(
+            module.Functions[0] with { Id = "$ue:method:frame:v1:" + new string('0', 64) }).ToArray() };
+        bool rejectedForgedFrame = false;
+        try { CSharpGuestDebugMapProjector.Project(document, forgedFrame, new string('c', 64), new string('d', 64)); }
+        catch (InvalidDataException error) { rejectedForgedFrame = error.Message.StartsWith("ASDEBUG1002:", StringComparison.Ordinal); }
+        Check(rejectedForgedFrame, "only registered generated frames may omit a C# source mapping");
         Check(WasmModuleCompiler.Compile(module).Succeeded, "plain ref/out/in methods require no artificial closure to get the framed ABI");
         Check(!GuestModuleValidator.Validate(module with { SchemaVersion = 7, IrVersion = "1.6" }).Succeeded,
             "roots-only configuration cannot be silently downgraded to IR 7");
