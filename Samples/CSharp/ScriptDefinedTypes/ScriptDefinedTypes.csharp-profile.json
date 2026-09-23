@@ -1,0 +1,24 @@
+{
+  "schema_version": 10,
+  "language": "csharp",
+  "source_path": "Plugins/AvidScript/Samples/CSharp/ScriptDefinedTypes/ScriptDefinedTypes.cs",
+  "project_path": "Plugins/AvidScript/Samples/CSharp/ActorLifecycle/AvidScript.ActorLifecycle.csproj",
+  "module_id": "avidscript.sample.script_defined_types",
+  "artifact_stem": "script_defined_types",
+  "output_root": "Saved/AvidScriptCSharpGuest/Profiles/script_defined_types",
+  "report_path": "Saved/AvidScriptCSharpGuest/Profiles/script_defined_types/script_defined_types.csharp.report.json",
+  "manifest_path": "Saved/AvidScriptCSharpGuest/Profiles/script_defined_types/script_defined_types.avidscript.json",
+  "build_script_path": "Plugins/AvidScript/Build/BuildCSharpActorLifecycle.ps1",
+  "configuration": "Release",
+  "binding_profile": {
+    "package_name": "avidscript.sample.script_defined_types",
+    "self_class_path": "/Script/Engine.Actor",
+    "classes": [
+      {
+        "class_path": "/Script/Engine.Actor",
+        "include_functions": ["K2_GetActorLocation"],
+        "include_events": ["OnActorBeginOverlap"]
+      }
+    ]
+  }
+}

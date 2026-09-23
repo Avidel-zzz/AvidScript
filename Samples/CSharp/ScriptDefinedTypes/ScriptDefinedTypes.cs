@@ -60,6 +60,9 @@ public partial class Projectile : AvidActor
     [UProperty(BlueprintReadOnly = true, Category = "Projectile")]
     public int EndPlayCount { get; private set; }
 
+    [UProperty(BlueprintReadOnly = true, Category = "Projectile")]
+    public int OverlapScore { get; private set; }
+
     [UFunction(BlueprintCallable = true, BlueprintNativeEvent = true, Category = "Projectile")]
     public virtual void Activate(float damageScale)
     {
@@ -95,6 +98,20 @@ public partial class Projectile : AvidActor
     {
         await AvidContinuations.NextTickAsync();
         LaunchSpeed = speed;
+    }
+
+    [UFunction(BlueprintCallable = true, Category = "Projectile")]
+    public void StartOverlapAwait()
+    {
+        UE.Self.OnActorBeginOverlap += OnOverlapAsync;
+    }
+
+    private async void OnOverlapAsync(AActor overlappedActor, AActor otherActor)
+    {
+        int bonus = 2;
+        OverlapScore += bonus;
+        await AvidContinuations.NextTickAsync();
+        OverlapScore += bonus * 10;
     }
 
     [UFunction(Server = true, Reliable = true)]

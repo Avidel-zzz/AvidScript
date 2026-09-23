@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text.Json;
 using AvidScript.CSharpFrontend;
 using AvidScript.CSharpGuest;
@@ -92,6 +93,18 @@ internal static class CSharpGuestEventStateTests
                 Directory.CreateDirectory(directory);
                 File.WriteAllBytes(Path.Combine(directory, "csharp-event-" + kind + ".wasm"), wasm.Bytes);
                 File.WriteAllBytes(Path.Combine(directory, "csharp-event-" + kind + ".guest.json"), GuestIrSerializer.Serialize(stressed));
+            }
+            if (kind == "bound") {
+                var entry = document.EventSubscriptions.Single();
+                string guestIrSha256 = Convert.ToHexString(
+                    SHA256.HashData(GuestIrSerializer.Serialize(module))).ToLowerInvariant();
+                CSharpGuestDebugMap debugMap = CSharpGuestDebugMapProjector.Project(
+                    document, module, guestIrSha256, new string('e', 64));
+                Require(debugMap.DefinedFunctionCount == module.Functions.Count + module.FramedExports.Count
+                    && debugMap.Functions.All(function => function.GuestFunctionId
+                        != "function:" + entry.MethodSymbolId)
+                    && debugMap.Functions.Any(function => function.GuestFunctionId.Contains("Script.Tick", StringComparison.Ordinal)),
+                    "generated event subscription keeps its WASM index without a fabricated C# source location");
             }
             if (kind == "capture") {
                 var entry = document.EventSubscriptions.Single();

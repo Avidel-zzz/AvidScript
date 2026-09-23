@@ -72,6 +72,11 @@ public static class CSharpGuestDebugMapProjector
             document.Symbols,
             symbol => symbol.Id,
             "symbol");
+        HashSet<string> generatedSubscriptionFunctionIds = CSharpEventSubscriptions.Active(document)
+            .Where(entry => callables.TryGetValue(entry.MethodSymbolId, out SemanticCallable? callable)
+                && !callable.HasBody && callable.Import is null)
+            .Select(entry => CSharpGuestIds.Function(entry.MethodSymbolId))
+            .ToHashSet(StringComparer.Ordinal);
         Dictionary<string, AsyncResumeDebugTarget> asyncResumeTargets = BuildAsyncResumeTargets(document);
         HashSet<string> functionIds = new(StringComparer.Ordinal);
         HashSet<string> methodIds = new(StringComparer.Ordinal);
@@ -95,6 +100,7 @@ public static class CSharpGuestDebugMapProjector
 
             int closureThunk = function.Id.IndexOf(":$closure:thunk:", StringComparison.Ordinal);
             if (generatedFrame || SourceLessGeneratedFunctionIds.Contains(function.Id)
+                || generatedSubscriptionFunctionIds.Contains(function.Id)
                 || SourceLessGeneratedFunctionPrefixes.Any(prefix => function.Id.StartsWith(prefix, StringComparison.Ordinal))
                 || (closureThunk > FunctionPrefix.Length
                     && callables.ContainsKey(function.Id[FunctionPrefix.Length..closureThunk])))

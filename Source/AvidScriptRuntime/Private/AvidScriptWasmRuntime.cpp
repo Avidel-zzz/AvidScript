@@ -3172,13 +3172,30 @@ int64 FAvidScriptWasmRuntimeInstance::HandleOwnerGetHandleImport()
 		return 0;
 	}
 
-	if (!BindingPackage.IsValid()
-		|| BindingPackage->GetExpectedSelfClass() == nullptr)
+	UClass* const ExpectedSelfClass = BindingPackage.IsValid()
+		? BindingPackage->GetExpectedSelfClass() : nullptr;
+	if (!IsValid(ExpectedSelfClass))
 	{
 		SetPendingHostImportFailure(
 			TEXT("avidscript"),
 			TEXT("avid_owner_get_handle"),
 			TEXT("Packed owner access requires a binding package with ExpectedSelfClass"));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+	FAvidScriptObjectHandleResult ResolveResult;
+	UObject* const OwnerObject = HostContext.ObjectRegistry != nullptr
+		? HostContext.ObjectRegistry->ResolveObject(OwnerHandle, ResolveResult, false) : nullptr;
+	if (OwnerObject == nullptr || !OwnerObject->IsA(ExpectedSelfClass))
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("avid_owner_get_handle"),
+			FString::Printf(
+				TEXT("Packed owner requires a live %s; actual=%s; reason=%s"),
+				*ExpectedSelfClass->GetName(),
+				OwnerObject != nullptr ? *OwnerObject->GetClass()->GetName() : TEXT("<unresolved>"),
+				ResolveResult.ErrorCategory.IsEmpty() ? TEXT("owner_type_mismatch") : *ResolveResult.ErrorCategory));
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 		return 0;
 	}

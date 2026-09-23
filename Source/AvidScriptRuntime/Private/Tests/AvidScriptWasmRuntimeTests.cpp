@@ -10,6 +10,7 @@
 #include "Engine/World.h"
 #include "Misc/EngineVersion.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/ScopeExit.h"
 #include "UObject/UObjectGlobals.h"
 
 #include <initializer_list>
@@ -720,10 +721,19 @@ bool FAvidScriptTypedOwnerImportsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Object-type import uses the fixed signature"),
 		ObjectTypeImport.Signature, FString(TEXT("(iii)i")));
 
+	UWorld* OwnerWorld = nullptr;
+	if (!TestTrue(TEXT("Typed owner test world is created"), CreateSmokeWorld(OwnerWorld)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT { DestroySmokeWorld(OwnerWorld); };
+	AActor* const OwnerObject = OwnerWorld->SpawnActor<AActor>();
+	if (!TestNotNull(TEXT("Typed Actor owner spawns"), OwnerObject))
+	{
+		return false;
+	}
 	FAvidScriptObjectRegistry Registry;
 	FAvidScriptObjectHandleResult RegisterResult;
-	UObject* OwnerObject =
-		NewObject<UAvidScriptObjectRegistryTestObject>(GetTransientPackage());
 	const FAvidScriptObjectHandle OwnerHandle = Registry.RegisterObject(OwnerObject, RegisterResult, false);
 	if (!TestTrue(TEXT("Typed owner target registers in the runtime registry"),
 		RegisterResult.bSucceeded && OwnerHandle.IsValid()))
@@ -732,6 +742,25 @@ bool FAvidScriptTypedOwnerImportsTest::RunTest(const FString& Parameters)
 	}
 	HostContext.ObjectRegistry = &Registry;
 	HostContext.OwnerHandle = OwnerHandle;
+	HostContext.World = OwnerWorld;
+
+	UObject* const WrongOwner = NewObject<UAvidScriptObjectRegistryTestObject>(GetTransientPackage());
+	const FAvidScriptObjectHandle WrongOwnerHandle = Registry.RegisterObject(WrongOwner, RegisterResult, false);
+	if (!TestTrue(TEXT("Non-Actor owner registers for the negative Self test"),
+		RegisterResult.bSucceeded && WrongOwnerHandle.IsValid()))
+	{
+		return false;
+	}
+	FAvidScriptWasmRuntimeInstance WrongOwnerRuntime;
+	WrongOwnerRuntime.SetBindingPackageForTesting(PublishedPackage);
+	FAvidScriptWasmHostContext WrongOwnerContext = HostContext;
+	WrongOwnerContext.OwnerHandle = WrongOwnerHandle;
+	WrongOwnerRuntime.SetHostContext(WrongOwnerContext);
+	TestEqual(TEXT("Packed Actor Self rejects a live non-Actor"),
+		WrongOwnerRuntime.HandleOwnerGetHandleImport(), static_cast<int64>(0));
+	TestTrue(TEXT("Wrong Self type reports a Host import failure"),
+		WrongOwnerRuntime.ConsumePendingHostImportFailure(FailureModule, FailureName, FailureDetails));
+	TestTrue(TEXT("Wrong Self type identifies the expected Actor"), FailureDetails.Contains(TEXT("Actor")));
 
 	const TArray<uint8> TypedObjectRouteModule = MakeTypedObjectRouteWasmModule();
 	const TArray<uint8> WrongObjectTypeSignatureModule = MakeObjectTypeWrongSignatureWasmModule();
@@ -780,14 +809,14 @@ bool FAvidScriptTypedOwnerImportsTest::RunTest(const FString& Parameters)
 		FMemory::Memcpy(&ObjectMismatch, RouteState.GetData() + 4, sizeof(ObjectMismatch));
 		FMemory::Memcpy(&PackedOwnerHandle, RouteState.GetData() + 8, sizeof(PackedOwnerHandle));
 		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("UObject type match")), ObjectMatch, 1);
-		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("Actor type mismatch")), ObjectMismatch, 0);
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("Actor type match")), ObjectMismatch, 1);
 		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("packed owner handle")), PackedOwnerHandle, OwnerHandle.ToUInt64());
 		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("static plus dynamic host call count")), RouteBeginPlayResult.HostImportCallCount, 3);
 		TestEqual(
 			*AvidScriptRuntimeLaneLabel(Lane, TEXT("last dynamic binding ordinal")),
 			RouteBeginPlayResult.LastHostImportInput,
 			static_cast<int32>(ObjectTypeImport.Ordinal));
-		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("last dynamic result")), RouteBeginPlayResult.LastHostImportResult, 0);
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("last dynamic result")), RouteBeginPlayResult.LastHostImportResult, 1);
 		LaneRuntime.Unload();
 
 		FAvidScriptWasmSmokeResult WrongObjectTypeSignatureResult;

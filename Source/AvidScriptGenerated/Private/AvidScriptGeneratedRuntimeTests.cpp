@@ -296,6 +296,74 @@ bool FAvidScriptGeneratedCSharpAsyncUFunctionTest::RunTest(const FString& Parame
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptGeneratedCSharpEventAwaitTest,
+	"AvidScript.GeneratedTypes.CSharpEventAwait",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptGeneratedCSharpEventAwaitTest::RunTest(const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	UWorld* World = nullptr;
+	if (!CreateGeneratedScriptWorld(World))
+	{
+		AddError(TEXT("Failed to create the generated event test world."));
+		return true;
+	}
+
+	AProjectile* const Retiring = World->SpawnActor<AProjectile>();
+	AProjectile* const Survivor = World->SpawnActor<AProjectile>();
+	if (!TestNotNull(TEXT("Event owner spawns"), Retiring)
+		|| !TestNotNull(TEXT("Event peer spawns"), Survivor))
+	{
+		DestroyGeneratedScriptWorld(World);
+		return true;
+	}
+	const FURL Url;
+	World->InitializeActorsForPlay(Url);
+	World->BeginPlay();
+	World->SetBegunPlay(true);
+	if (!Retiring->HasActorBegunPlay()) Retiring->DispatchBeginPlay();
+	if (!Survivor->HasActorBegunPlay()) Survivor->DispatchBeginPlay();
+
+	FAvidScriptGeneratedTypeRuntimeHost& Host = FAvidScriptGeneratedTypeRuntimeHost::Get();
+	FAvidScriptRuntimeSession* const RetiringSession = Host.GetInstanceSessionForTesting(*Retiring);
+	FAvidScriptRuntimeSession* const SurvivorSession = Host.GetInstanceSessionForTesting(*Survivor);
+	if (!TestNotNull(TEXT("Event owner has a generated Session"), RetiringSession)
+		|| !TestNotNull(TEXT("Event peer has a generated Session"), SurvivorSession))
+	{
+		DestroyGeneratedScriptWorld(World);
+		return true;
+	}
+	Retiring->StartOverlapAwait();
+	Survivor->StartOverlapAwait();
+	Retiring->OnActorBeginOverlap.Broadcast(Retiring, Survivor);
+	Survivor->OnActorBeginOverlap.Broadcast(Survivor, Retiring);
+	TestEqual(TEXT("Event callback updates the retiring owner before await"), Retiring->OverlapScore, 2);
+	TestEqual(TEXT("Event callback updates the surviving owner before await"), Survivor->OverlapScore, 2);
+	TestEqual(TEXT("Event callback suspends the retiring owner"), RetiringSession->GetLivePendingContinuationCount(), 1);
+	TestEqual(TEXT("Event callback suspends the surviving owner"), SurvivorSession->GetLivePendingContinuationCount(), 1);
+
+	TestTrue(TEXT("Destroying event owner runs EndPlay"), Retiring->Destroy());
+	TestFalse(TEXT("Destroyed event owner has no generated Session"), Host.IsInstanceActive(*Retiring));
+	for (int32 Attempt = 0; Attempt < 4 && Survivor->OverlapScore == 2; ++Attempt)
+	{
+		World->Tick(LEVELTICK_All, 0.02f);
+		++GFrameCounter;
+		FAvidScriptWasmSmokeResult TickResult;
+		if (!SurvivorSession->TickLive(0.001f, TickResult))
+		{
+			AddError(TickResult.ErrorMessage);
+			break;
+		}
+	}
+	TestEqual(TEXT("Retired event callback cannot resume"), Retiring->OverlapScore, 2);
+	TestEqual(TEXT("Surviving event callback restores its local and this"), Survivor->OverlapScore, 22);
+	TestEqual(TEXT("Surviving event callback consumes its continuation"), SurvivorSession->GetLivePendingContinuationCount(), 0);
+	DestroyGeneratedScriptWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptGeneratedCSharpInheritanceDispatchTest,
 	"AvidScript.GeneratedTypes.CSharpInheritanceDispatch",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

@@ -2517,15 +2517,10 @@ bool FAvidScriptRuntimeSession::ValidateExpectedOwner(
 	{
 		return true;
 	}
-	// One generated module may own Actors, Components and Subsystems, even when
-	// its binding facade has an Actor Self. The registered generated UClass is
-	// the receiver authority unless this module imports the facade's packed Self.
-	if (GeneratedTypeInstance && !Manifest.RequiredImports.ContainsByPredicate(
-			[](const FAvidScriptWasmRequiredImport& Import)
-			{
-				return Import.ModuleName == TEXT("avidscript")
-					&& Import.ImportName == TEXT("avid_owner_get_handle");
-			}))
+	// A generated module can contain Actors, Components and Subsystems while its
+	// facade has an Actor Self. Generated receiver identity is checked against
+	// the registered UClass; packed Self is checked when that import is called.
+	if (GeneratedTypeInstance)
 	{
 		return true;
 	}

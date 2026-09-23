@@ -457,6 +457,24 @@ function Test-CompilerInjectedBindingImport {
     }
     if ($AllowGeneratedTypeImports -and
         [string]$Import.dispatch_class -ceq "semantic") {
+        # These are compiler-owned bridges for generated receivers and C# event/closure state.
+        # Match the complete IR contract so a user-declared import cannot gain this exemption.
+        $CompilerBridges = @(
+            @{ Id = 'import:$event:subscribe'; Name = 'avid_event_state_subscribe_v1'; Parameters = @('type:int32', 'type:int32', 'type:int32', 'type:int32', 'type:int64'); Result = 'type:int64' }
+            @{ Id = 'import:$event:read'; Name = 'avid_event_state_read_v1'; Parameters = @('type:int32'); Result = 'type:int64' }
+            @{ Id = 'import:$event:language:subscribe'; Name = 'avid_event_language_subscribe_v1'; Parameters = @('type:int32', 'type:int32', 'type:int32', 'type:int32', 'type:int64'); Result = 'type:int64' }
+            @{ Id = 'import:$event:language:lookup'; Name = 'avid_event_language_lookup_v1'; Parameters = @('type:int32', 'type:int32', 'type:int32', 'type:int32'); Result = 'type:int64' }
+            @{ Id = 'import:$event:language:cancel'; Name = 'event_unsubscribe'; Parameters = @('type:int64'); Result = 'type:int32' }
+            @{ Id = 'import:$closure:heap'; Name = 'avid_managed_heap_v1'; Parameters = @('type:address', 'type:address', 'type:address', 'type:address'); Result = 'type:address' }
+            @{ Id = 'import:$ue:receiver:type'; Name = 'avid_ue_receiver_type_v1'; Parameters = @('type:uint64'); Result = 'type:int32' }
+        )
+        foreach ($Bridge in $CompilerBridges) {
+            if ([string]$Import.id -ceq $Bridge.Id) {
+                return [string]$Import.name -ceq $Bridge.Name -and
+                    [string]$Import.return_type_id -ceq $Bridge.Result -and
+                    [string]::Join("`n", $ParameterTypes) -ceq [string]::Join("`n", [string[]]$Bridge.Parameters)
+            }
+        }
         $ExpectedHostImport = $null
         if ($script:GeneratedTypeHostImports.TryGetValue([string]$Import.name, [ref]$ExpectedHostImport)) {
             return [string]$Import.id -ceq [string]$ExpectedHostImport.Id -and
@@ -1898,6 +1916,26 @@ $DirectAbiExports = @(
     "avid_on_debug_resume")
 $DirectAbiExports += @($SemanticModel.delegate_event_callbacks |
     ForEach-Object { [string]$_.export_name })
+if ($UsesBindingPackage -and @($SemanticModel.event_subscriptions).Count -gt 0) {
+    $BoundDescriptor = Get-Content -Raw -LiteralPath $BindingAuthorizationInfo.DescriptorPath | ConvertFrom-Json
+    foreach ($Subscription in @($SemanticModel.event_subscriptions)) {
+        $SubscriptionId = [string]$Subscription.subscription_id
+        $BoundEvents = @($BoundDescriptor.delegate_events | Where-Object {
+            [string]$_.stable_id -ceq $SubscriptionId -and
+            [int]$_.ordinal -eq [int]$Subscription.event_ordinal
+        })
+        if ($SubscriptionId -cmatch '^[0-9a-f]{64}$' -and $BoundEvents.Count -eq 1) {
+            $CallbackExport = [string]$BoundEvents[0].export_name + '_state_v1'
+            $CallbackFunctionId = "function:synthetic:delegate_event:$SubscriptionId"
+            if (@($GuestIrModel.exports | Where-Object {
+                [string]$_.name -ceq $CallbackExport -and
+                [string]$_.function_id -ceq $CallbackFunctionId
+            }).Count -eq 1) {
+                $DirectAbiExports += $CallbackExport
+            }
+        }
+    }
+}
 $DirectAbiExports += @($script:GeneratedTypeExportNames)
 $DirectAbiExports = @($DirectAbiExports | Sort-Object -Unique)
 $FramedAbiExports = @()
