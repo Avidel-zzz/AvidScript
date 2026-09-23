@@ -104,10 +104,10 @@ $SeedSemanticJson = Get-Content -Raw -LiteralPath $SeedSemantic | ConvertFrom-Js
 $SeedGuestIrJson = Get-Content -Raw -LiteralPath $SeedGuestIr | ConvertFrom-Json
 Assert-Condition (
     [int]$SeedReportJson.semantic.schema_version -eq 30 -and
-    [string]$SeedReportJson.semantic.version -ceq "1.35" -and
+    [string]$SeedReportJson.semantic.version -ceq "1.36" -and
     [int]$SeedSemanticJson.schema_version -eq 30 -and
-    [string]$SeedSemanticJson.semantic_version -ceq "1.35") `
-    "seed publication semantic contract is not 30/1.35"
+    [string]$SeedSemanticJson.semantic_version -ceq "1.36") `
+    "seed publication semantic contract is not 30/1.36"
 Assert-Condition (@($SeedGuestIrJson.imports | Where-Object {
     [string]$_.module -ceq "env" -and [string]$_.name -ceq "continuation_load_object"
 }).Count -eq 1) "seed publication Guest IR omits continuation_load_object"

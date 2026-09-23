@@ -74,7 +74,7 @@ internal static class CSharpGuestEventStateTests
                 .Replace("\"global::System.Single\", \"none\", \"global::System.Void\"", "\"global::System.Int32;global::System.Int32\", \"ref;out\", \"global::System.Int32\"");
             SemanticDocument document = Analyze(source, facade);
             Require(document.Succeeded, string.Join(" | ", document.Diagnostics.Select(d => d.Message)));
-            Require(document.SchemaVersion == 30 && document.SemanticVersion == "1.35"
+            Require(document.SchemaVersion == 30 && document.SemanticVersion == "1.36"
                 && SemanticEventSubscriptionValidator.IsValid(document), "versioned event contract");
             Require(SemanticSerializer.Serialize(document).SequenceEqual(SemanticSerializer.Serialize(SemanticSerializer.Deserialize(SemanticSerializer.Serialize(document)))), "canonical round trip");
             var lowered = CSharpGuestLowerer.Lower(document, new string('a', 64));

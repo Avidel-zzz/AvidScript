@@ -78,6 +78,12 @@ internal static class Program
                 Console.WriteLine($"AvidScript.CSharpGuest.Tests.GeneratedEventState: {focusedCount}/{focusedCount} passed");
                 return 0;
             }
+            if (args.Length == 1 && args[0] == "--generic-methods")
+            {
+                int focusedCount = CSharpGuestGenericMethodTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.GenericMethods: {focusedCount}/{focusedCount} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--generated-event-language")
             {
                 int focusedCount = CSharpGuestEventStateTests.RunGeneratedLanguageFacade();
@@ -103,6 +109,7 @@ internal static class Program
                 throw new ArgumentException("Supported arguments: --delegate-events, --captured-assignments, --lexical-captures, --reference-objects; omit arguments for the full suite.");
             }
             int count = CSharpGuestLoweringTests.Run()
+                + CSharpGuestGenericMethodTests.Run()
                 + CSharpGuestOperationTests.Run()
                 + CSharpGuestAdvancedTests.Run()
                 + CSharpGuestFlowTests.Run()

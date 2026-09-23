@@ -93,14 +93,14 @@ internal static class SemanticAsyncTests
 
         Assert(document.Succeeded
             && document.SchemaVersion == 30
-            && document.SemanticVersion == "1.35"
+            && document.SemanticVersion == "1.36"
             && method.Segments.Count == 3
             && guard.TargetSymbolId is null
             && guard.Operation.Kind == SemanticAsyncMethod.EarlyReturnGuardOperationKind
             && guard.Operation.TypeId == "type:void"
             && guard.Operation.Children.Count == 1
             && guard.Operation.Children[0].TypeId == "type:bool",
-            "top-level early-return guards should remain explicit under the schema-v30 semantic-1.35 contract");
+            "top-level early-return guards should remain explicit under the schema-v30 semantic-1.36 contract");
 
         const string invalidSource = """
             using AvidScript;
@@ -293,9 +293,9 @@ internal static class SemanticAsyncTests
 
         Assert(document.Succeeded
             && document.SchemaVersion == 30
-            && document.SemanticVersion == "1.35"
+            && document.SemanticVersion == "1.36"
             && document.AsyncMethods.Count == 2,
-            "controlled async exports should publish schema 30 / semantic 1.35");
+            "controlled async exports should publish schema 30 / semantic 1.36");
         Assert(beginPlay.Lowering == "reentrant_zero_heap_cps"
             && beginPlay.Segments.Select(segment => segment.Ordinal)
                 .SequenceEqual(new[] { 0, 1, 2, 3 })
@@ -468,7 +468,7 @@ internal static class SemanticAsyncTests
 
         Assert(document.Succeeded
             && document.SchemaVersion == 30
-            && document.SemanticVersion == "1.35"
+            && document.SemanticVersion == "1.36"
             && awaitSite.StateFrame is { } stateFrame
             && stateFrame.Slots.Select(slot => slot.SymbolId)
                 .SequenceEqual(new[] { movementCountId })
@@ -526,7 +526,7 @@ internal static class SemanticAsyncTests
 
         Assert(document.Succeeded
             && document.SchemaVersion == 30
-            && document.SemanticVersion == "1.35"
+            && document.SemanticVersion == "1.36"
             && method.Lowering == SemanticAsyncMethod.ContinuationCfgLowering
             && method.EntrySegmentOrdinal >= 0
             && method.EntrySegmentOrdinal < method.Segments.Count
@@ -769,7 +769,7 @@ internal static class SemanticAsyncTests
 
         Assert(document.Succeeded
             && document.SchemaVersion == 30
-            && document.SemanticVersion == "1.35"
+            && document.SemanticVersion == "1.36"
             && method.Lowering == SemanticAsyncMethod.ContinuationCfgLowering
             && method.CompilerLocals.Count == 2
             && arrayLocal.TypeId == "type:int32[]"

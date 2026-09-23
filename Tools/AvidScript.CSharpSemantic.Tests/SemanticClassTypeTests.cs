@@ -29,7 +29,7 @@ internal static class SemanticClassTypeTests
             """;
         SemanticDocument document = Analyze(source);
         int count = 0;
-        Check(document.SchemaVersion == 30 && document.SemanticVersion == "1.35"
+        Check(document.SchemaVersion == 30 && document.SemanticVersion == "1.36"
             && SemanticClassContractValidator.IsValid(document), "class metadata must satisfy the versioned contract even if other syntax is unsupported: "
                 + string.Join(" | ", document.ClassTypes));
         SemanticClassType plain = Find("Plain");

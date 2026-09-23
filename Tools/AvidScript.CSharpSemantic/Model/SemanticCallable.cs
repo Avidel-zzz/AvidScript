@@ -15,7 +15,10 @@ public sealed record SemanticCallable(
     [property: JsonPropertyOrder(8)] SemanticCallableImport? Import,
     [property: JsonPropertyOrder(9)] SemanticCallableExport? Export,
     [property: JsonPropertyOrder(10)] SemanticCallableOptimization? Optimization = null,
-    [property: JsonPropertyOrder(11)] SemanticCallableDispatch? Dispatch = null);
+    [property: JsonPropertyOrder(11)] SemanticCallableDispatch? Dispatch = null,
+    [property: JsonPropertyOrder(12)] IReadOnlyList<string>? GenericTypeParameterIds = null,
+    [property: JsonPropertyOrder(13)] string? GenericDefinitionSymbolId = null,
+    [property: JsonPropertyOrder(14)] IReadOnlyList<string>? GenericArgumentTypeIds = null);
 
 public sealed record SemanticCallableDispatch(
     [property: JsonPropertyOrder(0), JsonRequired] bool IsVirtual,

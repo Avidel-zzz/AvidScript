@@ -77,7 +77,8 @@ internal static class SemanticCallableProjector
                     import,
                     export,
                     optimization,
-                    SemanticDispatchProjector.Project(method));
+                    SemanticDispatchProjector.Project(method),
+                    method.TypeParameters.Select(typeRegistry.Register).ToArray());
                 if (!callables.TryAdd(methodId, callable))
                 {
                     if (method.MethodKind == MethodKind.Constructor && !hasBody

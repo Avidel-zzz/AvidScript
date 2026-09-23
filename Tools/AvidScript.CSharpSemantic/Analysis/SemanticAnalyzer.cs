@@ -112,8 +112,21 @@ public static class SemanticAnalyzer
         operationProjection = operationProjection with { Methods = lexicalCaptures.Methods };
         controlFlowProjection = controlFlowProjection with { Graphs = lexicalCaptures.Graphs };
         asyncProjection = asyncProjection with { Methods = lexicalCaptures.AsyncMethods };
+        SemanticReachability sourceReachability = SemanticReachabilityProjector.Project(
+            callableProjection.Callables, controlFlowProjection.Graphs,
+            gameplayEventProjection.Callbacks, delegateEventProjection.Callbacks,
+            continuationProjection.Callbacks, ueTypeProjection.Declarations, asyncProjection.Methods);
+        SemanticGenericProjection genericProjection = SemanticGenericSpecializer.Project(
+            typeRegistry.Build(), symbols, callableProjection.Callables,
+            operationProjection.Methods, controlFlowProjection.Graphs,
+            sourceReachability.ReachableCallableIds.ToHashSet(StringComparer.Ordinal));
+        symbols = genericProjection.Symbols;
+        callableProjection = callableProjection with { Callables = genericProjection.Callables };
+        operationProjection = operationProjection with { Methods = genericProjection.Methods };
+        controlFlowProjection = controlFlowProjection with { Graphs = genericProjection.Graphs };
         IReadOnlyList<SemanticDiagnostic> supportDiagnostics = supportProjection.Diagnostics
             .Concat(lexicalCaptures.Diagnostics)
+            .Concat(genericProjection.Diagnostics)
             .Concat(operationProjection.Diagnostics)
             .Concat(asyncProjection.Diagnostics)
             .Concat(callableProjection.Diagnostics)

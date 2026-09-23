@@ -20,7 +20,8 @@ internal static class SemanticReachabilityProjector
             callable => callable.MethodSymbolId,
             StringComparer.Ordinal);
         string[] exportRootIds = callables
-            .Where(callable => callable.Export is not null)
+            .Where(callable => callable.Export is not null
+                && callable.GenericTypeParameterIds?.Count is not > 0)
             .Select(callable => callable.MethodSymbolId)
             .ToArray();
         string[] ueTypeRootIds = ueTypeDeclarations
@@ -39,7 +40,10 @@ internal static class SemanticReachabilityProjector
             .ToArray();
         if (rootIds.Length == 0)
         {
-            string[] allCallableIds = callablesById.Keys.OrderBy(id => id, StringComparer.Ordinal).ToArray();
+            string[] allCallableIds = callables
+                .Where(callable => callable.GenericTypeParameterIds?.Count is not > 0)
+                .Select(callable => callable.MethodSymbolId)
+                .OrderBy(id => id, StringComparer.Ordinal).ToArray();
             return new SemanticReachability(
                 "all_callables_compatibility",
                 Array.Empty<string>(),

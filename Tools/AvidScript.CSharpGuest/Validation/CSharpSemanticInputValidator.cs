@@ -74,6 +74,7 @@ internal static class CSharpSemanticInputValidator
             && SemanticClassContractValidator.IsValid(document)
             && ValidateSymbols(document.SemanticVersion, document.Symbols)
             && ValidateCallables(document.SchemaVersion, document.Callables)
+            && ValidateGenericInstances(document)
             && SemanticClosureContractValidator.IsValid(document)
             && SemanticUeTypeContractValidator.TryValidate(document, out _)
             && ValidateGameplayEventCallbacks(document)
@@ -127,7 +128,7 @@ internal static class CSharpSemanticInputValidator
                 && symbol.Signature is not null
                 && !string.IsNullOrWhiteSpace(symbol.Accessibility)
                 && symbol.Span is not null)
-            && (semanticVersion == SemanticContract.CurrentSemanticVersion
+            && (semanticVersion is "1.35" or SemanticContract.CurrentSemanticVersion
                 || symbols.All(symbol => !symbol.Id.StartsWith("symbol:compiler_local:", StringComparison.Ordinal)))
             && Unique(symbols.Select(symbol => symbol.Id))
             && Unique(symbols
@@ -182,6 +183,87 @@ internal static class CSharpSemanticInputValidator
         }
 
         return true;
+    }
+
+    private static bool ValidateGenericInstances(SemanticDocument document)
+    {
+        if (document.SemanticVersion != SemanticContract.CurrentSemanticVersion)
+            return document.Callables.All(callable => callable.GenericDefinitionSymbolId is null
+                && callable.GenericArgumentTypeIds is null
+                && callable.GenericTypeParameterIds?.Count is not > 0);
+
+        Dictionary<string, SemanticCallable> callables = document.Callables.ToDictionary(
+            callable => callable.MethodSymbolId, StringComparer.Ordinal);
+        Dictionary<string, SemanticType> types = document.Types.ToDictionary(
+            type => type.Id, StringComparer.Ordinal);
+        HashSet<string> graphs = document.ControlFlowGraphs.Select(graph => graph.MethodSymbolId)
+            .ToHashSet(StringComparer.Ordinal);
+        if (document.Callables.Count(callable => callable.GenericDefinitionSymbolId is not null) > 128)
+            return false;
+        foreach (SemanticCallable callable in document.Callables)
+        {
+            if (callable.GenericDefinitionSymbolId is not { } definitionId)
+            {
+                if (callable.GenericArgumentTypeIds is not null
+                    || callable.GenericTypeParameterIds is null)
+                    return false;
+                continue;
+            }
+            if (callable.GenericArgumentTypeIds is not { } arguments
+                || callable.GenericTypeParameterIds?.Count != 0
+                || !callable.IsStatic
+                || !callables.TryGetValue(definitionId, out SemanticCallable? definition)
+                || definition.GenericDefinitionSymbolId is not null
+                || definition.GenericTypeParameterIds is not { Count: > 0 } formals
+                || formals.Count != arguments.Count
+                || arguments.Any(argument => !types.TryGetValue(argument, out SemanticType? type)
+                    || type.Kind == "type_parameter")
+                || callable.MethodSymbolId != SemanticContract.GenericInstanceId(definitionId, arguments)
+                || !graphs.Contains(callable.MethodSymbolId))
+                return false;
+            Dictionary<string, string> typeMap = formals.Zip(arguments)
+                .ToDictionary(pair => pair.First, pair => pair.Second, StringComparer.Ordinal);
+            string Map(string id) => typeMap.TryGetValue(id, out string? result) ? result : id;
+            if (callable.ReturnTypeId != Map(definition.ReturnTypeId)
+                || callable.Parameters.Count != definition.Parameters.Count
+                || callable.Parameters.Where((parameter, index) =>
+                    parameter.TypeId != Map(definition.Parameters[index].TypeId)
+                    || parameter.SymbolId != definition.Parameters[index].SymbolId.Replace(
+                        definitionId, callable.MethodSymbolId, StringComparison.Ordinal)).Any())
+                return false;
+        }
+        if (document.Reachability?.ReachableCallableIds.Any(id =>
+            callables.TryGetValue(id, out SemanticCallable? callable)
+            && callable.GenericTypeParameterIds?.Count > 0) == true)
+            return false;
+        foreach (SemanticControlFlowGraph graph in document.ControlFlowGraphs
+            .Where(graph => document.Reachability?.ReachableCallableIds.Contains(graph.MethodSymbolId) == true))
+        {
+            foreach (SemanticOperation operation in graph.Blocks
+                .SelectMany(block => block.Operations.Concat(block.BranchValue is null
+                    ? Array.Empty<SemanticOperation>() : new[] { block.BranchValue }))
+                .SelectMany(Flatten))
+            {
+                if (operation.SymbolId is { } targetId
+                    && callables.TryGetValue(targetId, out SemanticCallable? target)
+                    && target.GenericDefinitionSymbolId is not null
+                    && !operation.TypeArgumentIds.SequenceEqual(target.GenericArgumentTypeIds!))
+                    return false;
+                if (callables[graph.MethodSymbolId].GenericDefinitionSymbolId is not null
+                    && operation.TypeId is { } typeId
+                    && types.TryGetValue(typeId, out SemanticType? type)
+                    && type.Kind == "type_parameter")
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    private static IEnumerable<SemanticOperation> Flatten(SemanticOperation operation)
+    {
+        yield return operation;
+        foreach (SemanticOperation child in operation.Children.SelectMany(Flatten))
+            yield return child;
     }
 
     private static bool ValidateReachability(SemanticDocument document)
@@ -1219,6 +1301,7 @@ internal static class CSharpSemanticInputValidator
             (28, "1.32") => true,
             (29, "1.33") => true,
             (30, "1.34") => true,
+            (30, "1.35") => true,
             (SemanticContract.CurrentSchemaVersion, SemanticContract.CurrentSemanticVersion) => true,
             _ => false,
         };

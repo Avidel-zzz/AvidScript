@@ -239,7 +239,7 @@ internal static class SemanticDelegateEventTests
             candidate => candidate.SubscriptionId == SignalId);
         Assert(document.Succeeded
             && document.SchemaVersion == 30
-            && document.SemanticVersion == "1.35"
+            && document.SemanticVersion == "1.36"
             && document.DelegateEventCallbacks.Count == 2,
             "valid delegate event contracts should publish semantic schema v30");
         Assert(callback.SubscriptionId == SignalId
