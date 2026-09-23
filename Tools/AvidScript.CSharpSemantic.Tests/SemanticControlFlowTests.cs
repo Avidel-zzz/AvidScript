@@ -153,6 +153,12 @@ internal static class SemanticControlFlowTests
                     finally { input += 4; }
                     return input;
                 }
+
+                static float Convert(int input)
+                {
+                    try { return input; }
+                    finally { input++; }
+                }
             }
             """;
         SemanticDocument document = Analyze(source, "Scripts/FinallyControlFlow.cs");
@@ -161,13 +167,19 @@ internal static class SemanticControlFlowTests
             + string.Join(" | ", document.Diagnostics.Select(item => item.Message)));
         Assert(document.Symbols.Any(symbol => symbol.Id.Contains(":finally_return", StringComparison.Ordinal)),
             "return values crossing finally need an explicit compiler local");
-        SemanticControlFlowGraph graph = document.ControlFlowGraphs.Single();
+        SemanticControlFlowGraph graph = document.ControlFlowGraphs.Single(item =>
+            item.MethodSymbolId.Contains(".Run(", StringComparison.Ordinal));
         Assert(graph.Blocks.SelectMany(block => block.Successors)
             .All(edge => edge.Semantics is "regular" or "return"),
             "finally must be represented by executable regular paths, not exception-region edges");
         Assert(graph.Blocks.Count(block => block.Operations.SelectMany(Flatten).Any(operation =>
             operation.Kind == "compound_assignment")) >= 2,
             "normal and early-return paths must each retain the cleanup body");
+        SemanticControlFlowGraph converted = document.ControlFlowGraphs.Single(item =>
+            item.MethodSymbolId.Contains(".Convert(", StringComparison.Ordinal));
+        Assert(converted.Blocks.SelectMany(block => block.Operations).SelectMany(Flatten).Any(operation =>
+            operation.Kind == "conversion" && operation.TypeId == "type:float32"),
+            "the return value must be converted before the cleanup path executes");
     }
 
     private static void PlainThrowControlFlowFailsClosed()

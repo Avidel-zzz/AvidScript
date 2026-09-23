@@ -319,7 +319,11 @@ internal static class SemanticAsyncControlFlowProjector
                             -1));
 
                 case ReturnStatementSyntax { Expression: not null } valueReturn when allowValueReturns:
-                    if (!TryProjectValue(valueReturn.Expression, out SemanticOperation? returnValue))
+                    if (semanticModel.GetOperation(valueReturn) is not IReturnOperation { ReturnedValue: { } convertedReturn })
+                    {
+                        return Reject("A return requires a supported converted result value.", valueReturn.Span);
+                    }
+                    if (!TryProjectValue(valueReturn.Expression, out SemanticOperation? returnValue, convertedReturn))
                     {
                         return -1;
                     }
@@ -1072,7 +1076,8 @@ internal static class SemanticAsyncControlFlowProjector
 
         private bool TryProjectValue(
             SyntaxNode syntax,
-            out SemanticOperation? projected)
+            out SemanticOperation? projected,
+            IOperation? operationOverride = null)
         {
             if (syntax.DescendantNodesAndSelf().OfType<AwaitExpressionSyntax>().Any())
             {
@@ -1084,7 +1089,7 @@ internal static class SemanticAsyncControlFlowProjector
                 failed = true;
                 return false;
             }
-            IOperation? operation = semanticModel.GetOperation(syntax);
+            IOperation? operation = operationOverride ?? semanticModel.GetOperation(syntax);
             if (operation is IVariableInitializerOperation initializer)
             {
                 operation = initializer.Value;

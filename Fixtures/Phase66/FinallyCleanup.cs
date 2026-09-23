@@ -49,6 +49,12 @@ public static class Script
         return sum;
     }
 
+    private static float ConvertedReturnCore()
+    {
+        try { return CleanupCount + 3; }
+        finally { CleanupCount += 1; }
+    }
+
     [UnmanagedCallersOnly(EntryPoint = "finally_normal")]
     public static int Normal() => NormalCore();
 
@@ -64,6 +70,9 @@ public static class Script
     [UnmanagedCallersOnly(EntryPoint = "finally_loop_exits")]
     public static int LoopExits() => LoopExitsCore();
 
+    [UnmanagedCallersOnly(EntryPoint = "finally_converted_return")]
+    public static float ConvertedReturn() => ConvertedReturnCore();
+
     [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
     public static void BeginPlay()
     {
@@ -72,5 +81,6 @@ public static class Script
         RuntimeNestedReturn = NestedReturnCore();
         RuntimeCleanupCount = CleanupCount;
         RuntimeLoopExits = LoopExitsCore();
+        RuntimeNormal += (int)ConvertedReturnCore();
     }
 }

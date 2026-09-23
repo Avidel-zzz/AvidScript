@@ -1650,7 +1650,7 @@ bool FAvidScriptRuntimeFinallyCleanupTest::RunTest(const FString& Parameters)
 	TArray<uint8> Wasm;
 	if (!TestTrue(TEXT("Load current finally fixture; generate with Build/TestAvidScriptFinallyCleanup.ps1"),
 		FFileHelper::LoadFileToArray(Wasm, *File))) return false;
-	const int32 Expected[] = {21, 21, 11, 42, 13, 7};
+	const int32 Expected[] = {22, 21, 11, 42, 13, 31};
 	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
 	{
 		FAvidScriptVmBackendSelection Selection;

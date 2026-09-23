@@ -15,6 +15,7 @@ const cases = [
     ['finally_nested_return', 13],
     ['finally_cleanup_count', 21],
     ['finally_loop_exits', 42],
+    ['finally_converted_return', 24],
 ];
 for (const [name, expected] of cases) {
     const actual = instance.exports[name]();
@@ -27,7 +28,7 @@ const lifecycle = new WebAssembly.Instance(wasmModule);
 lifecycle.exports.avid_on_begin_play();
 const state = new DataView(lifecycle.exports.memory.buffer);
 // Static state is laid out in stable symbol order, not source declaration order.
-const stateValues = [21, 21, 11, 42, 13, 7];
+const stateValues = [22, 21, 11, 42, 13, 31];
 for (let index = 0; index < stateValues.length; ++index) {
     const actual = state.getInt32(16 + index * 4, true);
     if (actual !== stateValues[index]) {

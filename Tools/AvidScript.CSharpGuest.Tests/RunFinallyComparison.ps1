@@ -31,9 +31,9 @@ $WasmOutput = @(& $NodePath $WasmRunner $OutputDirectory)
 if ($LASTEXITCODE -ne 0) { throw "The finally WASM run failed." }
 $ReferenceRows = @($ReferenceOutput | Where-Object { $_ -match '^finally_[a-z_]+: ' })
 $WasmRows = @($WasmOutput | Where-Object { $_ -match '^finally_[a-z_]+: ' })
-if ($ReferenceRows.Count -ne 5 -or $WasmRows.Count -ne 5 -or
+if ($ReferenceRows.Count -ne 6 -or $WasmRows.Count -ne 6 -or
     @(Compare-Object $ReferenceRows $WasmRows -SyncWindow 0).Count -ne 0) {
     throw ("The .NET and WASM finally results differ. .NET: {0}; WASM: {1}; raw .NET: {2}" -f
         ($ReferenceRows -join ", "), ($WasmRows -join ", "), ($ReferenceOutput -join " | "))
 }
-Write-Output "FinallyCleanupDotNetWasm: 5/5 matched"
+Write-Output "FinallyCleanupDotNetWasm: 6/6 matched"
