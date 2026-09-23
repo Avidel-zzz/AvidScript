@@ -3,6 +3,7 @@
 #include "AvidScriptBindingInvocation.h"
 #include "Lifecycle/AvidScriptRuntimeLifecycleCoordinator.h"
 #include "Memory/AvidScriptManagedHeap.h"
+#include "Ownership/AvidScriptSessionObjectOwnership.h"
 #include "Dom/JsonObject.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -216,6 +217,7 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
     });
     if (!TestNotNull(TEXT("Selected generated event is in the native catalog"), Signal)) return false;
     uint32 CountAddress = 0, ResultAddress = 0, SourceEvaluationsAddress = 0, HandlerEvaluationsAddress = 0;
+    uint32 TargetSlotAddress = 0, TargetGenerationAddress = 0;
     for (const auto& Value : Guest->GetObjectField(TEXT("memory_layout"))->GetArrayField(TEXT("state_slots")))
     {
         auto Slot = Value->AsObject();
@@ -227,9 +229,14 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
             SourceEvaluationsAddress = Slot->GetIntegerField(TEXT("offset"));
         if (Slot->GetStringField(TEXT("global_id")).Contains(TEXT("::Script.HandlerEvaluations:")))
             HandlerEvaluationsAddress = Slot->GetIntegerField(TEXT("offset"));
+        if (Slot->GetStringField(TEXT("global_id")).Contains(TEXT("::Script.TargetSlot:")))
+            TargetSlotAddress = Slot->GetIntegerField(TEXT("offset"));
+        if (Slot->GetStringField(TEXT("global_id")).Contains(TEXT("::Script.TargetGeneration:")))
+            TargetGenerationAddress = Slot->GetIntegerField(TEXT("offset"));
     }
     if (!TestTrue(TEXT("Compiler exposes event callback state"), CountAddress > 0 && ResultAddress > 0
-        && SourceEvaluationsAddress > 0 && HandlerEvaluationsAddress > 0)) return false;
+        && SourceEvaluationsAddress > 0 && HandlerEvaluationsAddress > 0
+        && TargetSlotAddress > 0 && TargetGenerationAddress > 0)) return false;
     if (!GEngine) return false;
     UWorld* World = UWorld::CreateWorld(EWorldType::Game, false, TEXT("AvidScriptCSharpEventLanguage"));
     if (!World) return false;
@@ -342,6 +349,58 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
             if (!NewRuntime->Tick(1.0f, TickResult)) { AddError(TickResult.ErrorMessage); return false; }
             TestEqual(TEXT("New Runtime can establish its own language bridge"), ReloadSession.GetDelegateSubscriptionCountForTesting(), 1);
             if (!TestTrue(TEXT("Reloaded event Session stops"), ReloadSession.StopAndUnload(TickResult))) return false;
+        }
+        {
+            UWorld* ForeignWorld = UWorld::CreateWorld(EWorldType::Game, false, TEXT("AvidScriptCSharpEventForeignWorld"));
+            if (!TestNotNull(TEXT("Foreign event World created"), ForeignWorld)) return false;
+            GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(ForeignWorld);
+            ON_SCOPE_EXIT { GEngine->DestroyWorldContext(ForeignWorld); ForeignWorld->DestroyWorld(false); };
+            AActor* ForeignActor = ForeignWorld->SpawnActor<AActor>(Signal->ExpectedSourceClass);
+            AActor* StaleActor = World->SpawnActor<AActor>(Signal->ExpectedSourceClass);
+            if (!TestNotNull(TEXT("Foreign event source spawned"), ForeignActor)
+                || !TestNotNull(TEXT("Stale event source spawned"), StaleActor)) return false;
+            FAvidScriptObjectHandleResult SourceResult;
+            const auto ForeignHandle = Registry.RegisterObject(ForeignActor, SourceResult, false);
+            if (!TestTrue(TEXT("Foreign source handle registered"), SourceResult.bSucceeded)) return false;
+            const auto StaleHandle = Registry.RegisterObject(StaleActor, SourceResult, false);
+            if (!TestTrue(TEXT("Stale source handle registered"), SourceResult.bSucceeded)) return false;
+            if (!TestTrue(TEXT("Stale source handle released"),
+                Registry.ReleaseHandle(StaleHandle, SourceResult, false))) return false;
+            for (const bool bForeignWorld : { true, false })
+            {
+                FAvidScriptRuntimeSession ProbeSession;
+                ProbeSession.SetBackendSelectionForTesting(Selection);
+                ProbeSession.SetHostContext(Context);
+                FAvidScriptWasmReloadResult ProbeLoaded;
+                if (!ProbeSession.LoadInitialModule(Bytes.GetData(), Bytes.Num(), Manifest, ProbeLoaded))
+                { AddError(ProbeLoaded.ErrorMessage); return false; }
+                auto* ProbeRuntime = ProbeSession.GetLiveRuntimeForTesting();
+                if (bForeignWorld && !TestTrue(TEXT("Foreign source capability granted before World check"),
+                    ProbeSession.GetTestSnapshot().HostContext.ObjectOwnership->Borrow(
+                        Registry, *ForeignActor, SourceResult))) return false;
+                const auto TargetHandle = bForeignWorld ? ForeignHandle : StaleHandle;
+                const int32 Slot = static_cast<int32>(TargetHandle.Slot);
+                const int32 Generation = static_cast<int32>(TargetHandle.Generation);
+                if (!TestTrue(TEXT("Inject CSharp event source slot"), ProbeRuntime->WriteStateBytes(
+                    TargetSlotAddress, MakeArrayView(reinterpret_cast<const uint8*>(&Slot), 4), Error))
+                    || !TestTrue(TEXT("Inject CSharp event source generation"), ProbeRuntime->WriteStateBytes(
+                        TargetGenerationAddress, MakeArrayView(reinterpret_cast<const uint8*>(&Generation), 4), Error)))
+                { AddError(Error); return false; }
+                FAvidScriptWasmSmokeResult ProbeResult;
+                TestFalse(TEXT("CSharp event rejects inaccessible source"), ProbeRuntime->Tick(22.0f, ProbeResult));
+                TestTrue(TEXT("CSharp event reports source authority category"), ProbeResult.ErrorMessage.Contains(
+                    bForeignWorld ? TEXT("event_language_world") : TEXT("event_language_source")));
+                TestEqual(TEXT("Rejected CSharp source publishes no bridge"), ProbeSession.GetDelegateSubscriptionCountForTesting(), 0);
+                TestFalse(TEXT("Rejected CSharp source leaves owner event unbound"),
+                    Signal->Signature.MulticastProperty->GetMulticastDelegate(
+                        Signal->Signature.MulticastProperty->ContainerPtrToValuePtr<void>(Owner))->IsBound());
+                TestFalse(TEXT("Rejected CSharp source leaves foreign event unbound"),
+                    Signal->Signature.MulticastProperty->GetMulticastDelegate(
+                        Signal->Signature.MulticastProperty->ContainerPtrToValuePtr<void>(ForeignActor))->IsBound());
+                if (ProbeSession.IsLiveLoaded()) ProbeSession.StopAndUnload(ProbeResult);
+            }
+            ForeignActor->Destroy();
+            StaleActor->Destroy();
         }
         FAvidScriptWasmReloadResult Loaded;
         if (!Session.LoadInitialModule(Bytes.GetData(), Bytes.Num(), Manifest, Loaded))

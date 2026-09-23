@@ -184,6 +184,8 @@ internal static class CSharpGuestEventStateTests
                 public static int Result;
                 public static int SourceEvaluations;
                 public static int HandlerEvaluations;
+                public static int TargetSlot;
+                public static int TargetGeneration;
                 [AvidTransient] public static AvidSubscription Subscription;
                 static void Handle(AActor actor, int amount, float scale) { Count += amount; }
                 static AAvidScriptEditorDelegateEventTestActor GetSource()
@@ -288,6 +290,11 @@ internal static class CSharpGuestEventStateTests
                     {
                         Subscription = AvidSubscriptions.BindOnSinglecastSignal(UE.Self, OnSinglecastFirst);
                         Result = Subscription.IsValid ? 1 : 0;
+                    }
+                    if (delta == 22.0f)
+                    {
+                        var target = new AAvidScriptEditorDelegateEventTestActor(TargetSlot, TargetGeneration);
+                        target.OnScriptSignal += Handle;
                     }
                 }
             }
