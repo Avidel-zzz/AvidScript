@@ -1299,7 +1299,7 @@ internal static class CSharpOperationLowerer
         return result;
     }
 
-    private static bool StoreValue(
+    internal static bool StoreValue(
         CSharpFunctionLoweringContext context,
         SemanticOperation target,
         GuestRegister value,

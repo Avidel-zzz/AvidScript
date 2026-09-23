@@ -149,9 +149,10 @@ internal static class CSharpGuestManagedAsyncTests
             SemanticDocument document = CSharpGuestContinuationTests.Analyze(source, $"Scripts/ManagedAsync_{name}.cs");
             CSharpGuestLoweringResult lowered = CSharpGuestLowerer.Lower(document, new string('d', 64));
             Check(lowered.Succeeded, name + ": " + string.Join(" | ", lowered.Diagnostics.Select(item => item.Message)));
-            Check(CSharpGuestLowerer.Lower(document with { SchemaVersion = 27, SemanticVersion = "1.31" }, new string('d', 64)).Succeeded,
+            SemanticDocument legacyDocument = CSharpGuestSemanticFixture.WithoutNamedGenericShapes(document);
+            Check(CSharpGuestLowerer.Lower(legacyDocument with { SchemaVersion = 27, SemanticVersion = "1.31" }, new string('d', 64)).Succeeded,
                 "Semantic 27/1.31 managed async and owned closures remain executable");
-            if (!name.StartsWith("owned-", StringComparison.Ordinal)) Check(CSharpGuestLowerer.Lower(document with { SchemaVersion = 26, SemanticVersion = "1.30" }, new string('d', 64)).Succeeded,
+            if (!name.StartsWith("owned-", StringComparison.Ordinal)) Check(CSharpGuestLowerer.Lower(legacyDocument with { SchemaVersion = 26, SemanticVersion = "1.30" }, new string('d', 64)).Succeeded,
                 "Semantic 26/1.30 managed async state remains executable");
             GuestModule module = lowered.Module!;
             Check(module.Functions.SelectMany(fn => fn.Blocks).SelectMany(block => block.Instructions)
@@ -191,7 +192,8 @@ internal static class CSharpGuestManagedAsyncTests
         Check(!malformedRejected.Succeeded && malformedRejected.Diagnostics.Any(item => item.Code == "ASCG1001"),
             "missing async closure scope must fail artifact validation before code generation");
         CSharpGuestLoweringResult legacyCapture = CSharpGuestLowerer.Lower(
-            malformedScope with { SchemaVersion = 26, SemanticVersion = "1.30" }, new string('d', 64));
+            CSharpGuestSemanticFixture.WithoutNamedGenericShapes(malformedScope) with
+            { SchemaVersion = 26, SemanticVersion = "1.30" }, new string('d', 64));
         Check(!legacyCapture.Succeeded && legacyCapture.Diagnostics.Any(item => item.Code == "ASCG1024"),
             "legacy async capture analysis stays readable but must not execute without ownership");
         SemanticDocument invocation = CSharpGuestContinuationTests.Analyze("""

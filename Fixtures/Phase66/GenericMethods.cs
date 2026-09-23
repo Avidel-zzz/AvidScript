@@ -1,5 +1,11 @@
 using System.Runtime.InteropServices;
 
+public struct Pair<T, U>
+{
+    public T First;
+    public U Second;
+}
+
 public static class Script
 {
     static T Identity<T>(T value) => value;
@@ -15,6 +21,13 @@ public static class Script
     }
     static void Set<T>(out T value, T input) => value = input;
     static T[] EchoArray<T>(T[] values) => values;
+    static Pair<T, U> MakePair<T, U>(T first, U second)
+    {
+        Pair<T, U> pair = default;
+        pair.First = first;
+        pair.Second = second;
+        return pair;
+    }
 
     [UnmanagedCallersOnly(EntryPoint = "generic_int")]
     public static int Int() => Identity<int>(7);
@@ -38,4 +51,11 @@ public static class Script
     }
     [UnmanagedCallersOnly(EntryPoint = "generic_array")]
     public static int Array() => EchoArray<int>(new[] { 3, 5 })[1];
+    [UnmanagedCallersOnly(EntryPoint = "generic_named_int_float")]
+    public static int NamedIntFloat() => MakePair<int, float>(7, 2.5f).First;
+    [UnmanagedCallersOnly(EntryPoint = "generic_named_float_int")]
+    public static int NamedFloatInt() => MakePair<float, int>(2.5f, 9).Second;
+    [UnmanagedCallersOnly(EntryPoint = "generic_named_nested")]
+    public static int NamedNested() =>
+        MakePair<Pair<int, float>, int>(MakePair<int, float>(7, 2.5f), 4).First.First;
 }

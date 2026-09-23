@@ -51,7 +51,8 @@ public static class SemanticGenericTypeSubstitution
             && shape.ElementTypeId is { } elementId)
         {
             if (!typeId.EndsWith("[]", StringComparison.Ordinal)
-                || !TryCloseCore(elementId, argumentsByParameter, types, shapes, visiting,
+                || !TryCloseCore(elementId, argumentsByParameter, types, shapes,
+                    new HashSet<string>(visiting, StringComparer.Ordinal),
                     out string closedElementId))
                 return false;
             if (closedElementId == elementId)
@@ -63,6 +64,37 @@ public static class SemanticGenericTypeSubstitution
                     || !candidate.TypeId.EndsWith("[]", StringComparison.Ordinal)
                     || !types.TryGetValue(candidate.TypeId, out SemanticType? candidateType)
                     || candidateType.Kind != "array")
+                    continue;
+                if (matchedTypeId is not null)
+                    return false;
+                matchedTypeId = candidate.TypeId;
+            }
+            if (matchedTypeId is null)
+                return false;
+            closedTypeId = matchedTypeId;
+            return true;
+        }
+        if (shapes.TryGetValue(typeId, out SemanticTypeShape? namedShape)
+            && namedShape.GenericDefinitionTypeId is { } definitionId
+            && namedShape.GenericArgumentTypeIds is { } argumentIds)
+        {
+            string[] closedArguments = new string[argumentIds.Count];
+            for (int index = 0; index < argumentIds.Count; ++index)
+            {
+                if (!TryCloseCore(argumentIds[index], argumentsByParameter,
+                        types, shapes, new HashSet<string>(visiting, StringComparer.Ordinal),
+                        out closedArguments[index]))
+                    return false;
+            }
+            if (closedArguments.SequenceEqual(argumentIds))
+                return true;
+            string? matchedTypeId = null;
+            foreach (SemanticTypeShape candidate in shapes.Values)
+            {
+                if (candidate.GenericDefinitionTypeId != definitionId
+                    || candidate.GenericArgumentTypeIds is not { } candidateArguments
+                    || !candidateArguments.SequenceEqual(closedArguments)
+                    || !types.ContainsKey(candidate.TypeId))
                     continue;
                 if (matchedTypeId is not null)
                     return false;

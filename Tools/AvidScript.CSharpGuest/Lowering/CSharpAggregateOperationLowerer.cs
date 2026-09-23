@@ -202,7 +202,13 @@ internal static class CSharpAggregateOperationLowerer
             target.SymbolId,
             null,
             null));
-        return true;
+        // Only value receivers need copy-back; reference receivers already
+        // observe the field_store through their shared object.
+        return !context.TryGetGuestType(aggregate.TypeId, out GuestType aggregateType)
+            || aggregateType.Kind != "struct"
+            || target.Children[0].Kind == "instance_reference"
+            || CSharpOperationLowerer.StoreValue(
+                context, target.Children[0], aggregate, blockOrdinal, instructions);
     }
 
     public static GuestRegister? LowerInstance(

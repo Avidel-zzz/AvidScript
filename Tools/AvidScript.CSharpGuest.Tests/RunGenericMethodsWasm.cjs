@@ -24,6 +24,9 @@ const cases = [
     ['generic_pair', 12],
     ['generic_ref_out', 57],
     ['generic_array', 5],
+    ['generic_named_int_float', 7],
+    ['generic_named_float_int', 9],
+    ['generic_named_nested', 7],
 ];
 for (const [name, expected] of cases) {
     const actual = instance.exports[name]();

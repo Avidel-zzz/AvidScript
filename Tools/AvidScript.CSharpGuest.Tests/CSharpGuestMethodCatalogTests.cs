@@ -21,7 +21,8 @@ internal static class CSharpGuestMethodCatalogTests
         int count = 0;
         var current = CSharpGuestLowerer.Lower(document, new string('a', 64));
         Check(current.Succeeded && WasmModuleCompiler.Compile(current.Module!).Succeeded, "new catalog contract retains existing execution");
-        SemanticDocument legacy = document with { SchemaVersion = 25, SemanticVersion = "1.29", UeMethodCatalog = null };
+        SemanticDocument legacy = CSharpGuestSemanticFixture.WithoutNamedGenericShapes(document)
+            with { SchemaVersion = 25, SemanticVersion = "1.29", UeMethodCatalog = null };
         var previous = CSharpGuestLowerer.Lower(legacy, new string('a', 64));
         Check(previous.Succeeded && WasmModuleCompiler.Compile(previous.Module!).Succeeded, "1.29 instance delegates still execute without inventing catalog metadata");
         foreach (SemanticDocument malformed in new[] {
@@ -50,7 +51,9 @@ internal static class CSharpGuestMethodCatalogTests
         const string path = "Scripts/UeMethodCatalog.cs";
         SemanticDocument ue = SemanticAnalyzer.Analyze(source, path, FrontendAnalyzer.Analyze(source, path).Source.Sha256,
             new[] { new SemanticReferenceSource(facade, "generated://UeMethodFacade.cs") });
-        foreach (SemanticDocument input in new[] { ue, ue with { SchemaVersion = 25, SemanticVersion = "1.29", UeMethodCatalog = null } })
+        foreach (SemanticDocument input in new[] { ue,
+            CSharpGuestSemanticFixture.WithoutNamedGenericShapes(ue) with
+            { SchemaVersion = 25, SemanticVersion = "1.29", UeMethodCatalog = null } })
         {
             var result = CSharpGuestLowerer.Lower(input, new string('a', 64));
             Check(result.Succeeded && WasmModuleCompiler.Compile(result.Module!).Succeeded, "new and previous UE receiver contracts produce WASM");

@@ -54,6 +54,20 @@ internal sealed class SemanticTypeRegistry
                 null,
                 Register(named.TypeArguments[0])));
         }
+        if (type is INamedTypeSymbol genericType && genericType.IsGenericType)
+        {
+            string definitionTypeId = "type:" + GetCanonicalName(genericType.OriginalDefinition);
+            string[] argumentTypeIds = genericType.TypeArguments
+                .Select(Register).ToArray();
+            shapes[id] = shapes.TryGetValue(id, out SemanticTypeShape? existing)
+                ? existing with
+                {
+                    GenericDefinitionTypeId = definitionTypeId,
+                    GenericArgumentTypeIds = argumentTypeIds,
+                }
+                : new SemanticTypeShape(id, null, null, null,
+                    definitionTypeId, argumentTypeIds);
+        }
         if (type is INamedTypeSymbol { TypeKind: TypeKind.Class } classType && GetKind(type) == "class")
             classTypes.Add(id, SemanticClassTypeProjector.Project(classType, id, this));
         return id;

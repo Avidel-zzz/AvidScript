@@ -74,7 +74,7 @@ internal static class CSharpGuestEventStateTests
                 .Replace("\"global::System.Single\", \"none\", \"global::System.Void\"", "\"global::System.Int32;global::System.Int32\", \"ref;out\", \"global::System.Int32\"");
             SemanticDocument document = Analyze(source, facade);
             Require(document.Succeeded, string.Join(" | ", document.Diagnostics.Select(d => d.Message)));
-            Require(document.SchemaVersion == 30 && document.SemanticVersion == "1.36"
+            Require(document.SchemaVersion == 31 && document.SemanticVersion == "1.37"
                 && SemanticEventSubscriptionValidator.IsValid(document), "versioned event contract");
             Require(SemanticSerializer.Serialize(document).SequenceEqual(SemanticSerializer.Serialize(SemanticSerializer.Deserialize(SemanticSerializer.Serialize(document)))), "canonical round trip");
             var lowered = CSharpGuestLowerer.Lower(document, new string('a', 64));
@@ -123,7 +123,17 @@ internal static class CSharpGuestEventStateTests
             count++;
         }
         const string legacySource = "using System; using System.Runtime.InteropServices; public static class Script { static int Value() => 4; [UnmanagedCallersOnly(EntryPoint=\"run\")] public static int Run() { Func<int> handler = Value; return handler(); } }";
-        var legacy = Analyze(legacySource, "") with { SchemaVersion = 28, SemanticVersion = "1.32" };
+        var currentLegacySource = Analyze(legacySource, "");
+        var legacy = currentLegacySource with
+        {
+            SchemaVersion = 28,
+            SemanticVersion = "1.32",
+            TypeShapes = currentLegacySource.TypeShapes.Select(shape => shape with
+            {
+                GenericDefinitionTypeId = null,
+                GenericArgumentTypeIds = null,
+            }).ToArray(),
+        };
         Require(CSharpGuestLowerer.Lower(legacy, new string('a', 64)).Succeeded, "Semantic 28 static delegate compatibility retained");
         return count + 1;
     }

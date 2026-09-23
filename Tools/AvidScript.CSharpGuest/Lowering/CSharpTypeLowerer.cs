@@ -36,8 +36,8 @@ internal static class CSharpTypeLowerer
         foreach (SemanticType type in document.Types.OrderBy(type => type.Id, StringComparer.Ordinal))
         {
             if (IsCompilerAsyncScaffoldType(document, type)
-                || (document.SemanticVersion == SemanticContract.CurrentSemanticVersion
-                    && IsOpenArrayType(type.Id, semanticTypes, shapes,
+                || (document.SemanticVersion is "1.36" or SemanticContract.CurrentSemanticVersion
+                    && IsOpenGenericType(type.Id, semanticTypes, shapes,
                         new HashSet<string>(StringComparer.Ordinal))))
             {
                 continue;
@@ -187,7 +187,7 @@ internal static class CSharpTypeLowerer
         return supported;
     }
 
-    private static bool IsOpenArrayType(
+    private static bool IsOpenGenericType(
         string typeId,
         IReadOnlyDictionary<string, SemanticType> types,
         IReadOnlyDictionary<string, SemanticTypeShape> shapes,
@@ -199,10 +199,14 @@ internal static class CSharpTypeLowerer
             return false;
         if (type.Kind == "type_parameter")
             return true;
-        return type.Kind == "array"
-            && shapes.TryGetValue(typeId, out SemanticTypeShape? shape)
-            && shape.ElementTypeId is not null
-            && IsOpenArrayType(shape.ElementTypeId, types, shapes, visiting);
+        if (!shapes.TryGetValue(typeId, out SemanticTypeShape? shape))
+            return false;
+        if (type.Kind == "array" && shape.ElementTypeId is { } elementId)
+            return IsOpenGenericType(elementId, types, shapes,
+                new HashSet<string>(visiting, StringComparer.Ordinal));
+        return shape.GenericArgumentTypeIds?.Any(argumentId =>
+            IsOpenGenericType(argumentId, types, shapes,
+                new HashSet<string>(visiting, StringComparer.Ordinal))) == true;
     }
 
     private static bool IsCompilerAsyncScaffoldType(
@@ -398,7 +402,7 @@ internal static class CSharpTypeLowerer
         switch (type.Kind)
         {
             case "struct":
-                return LowerStruct(type, symbols);
+                return LowerStruct(type, symbols, shapes, semanticTypes, diagnostics);
             case "enum":
                 if (!shapes.TryGetValue(type.Id, out SemanticTypeShape? enumShape)
                     || enumShape.EnumUnderlyingTypeId is null)
@@ -460,19 +464,55 @@ internal static class CSharpTypeLowerer
         return guestType is not null;
     }
 
-    private static GuestType LowerStruct(SemanticType type, IReadOnlyList<SemanticSymbol> symbols)
+    private static GuestType? LowerStruct(
+        SemanticType type,
+        IReadOnlyList<SemanticSymbol> symbols,
+        IReadOnlyDictionary<string, SemanticTypeShape> shapes,
+        IReadOnlyDictionary<string, SemanticType> types,
+        List<GuestDiagnostic> diagnostics)
     {
-        string containingTypeId = $"symbol:type:{type.CanonicalName}";
-        GuestField[] fields = symbols
+        SemanticType template = type;
+        Dictionary<string, string> substitutions = new(StringComparer.Ordinal);
+        if (shapes.TryGetValue(type.Id, out SemanticTypeShape? closedShape)
+            && closedShape.GenericDefinitionTypeId is { } definitionId
+            && definitionId != type.Id)
+        {
+            if (!types.TryGetValue(definitionId, out SemanticType? definitionType)
+                || definitionType.Kind != "struct"
+                || !shapes.TryGetValue(definitionId, out SemanticTypeShape? definitionShape)
+                || definitionShape.GenericArgumentTypeIds is not { } formals
+                || closedShape.GenericArgumentTypeIds is not { } arguments
+                || formals.Count != arguments.Count)
+            {
+                Add(diagnostics, "ASCG1003", $"Generic value type '{type.Id}' has no definition layout.");
+                return null;
+            }
+            template = definitionType;
+            substitutions = formals.Zip(arguments)
+                .ToDictionary(pair => pair.First, pair => pair.Second, StringComparer.Ordinal);
+        }
+        string containingTypeId = $"symbol:type:{template.CanonicalName}";
+        SemanticSymbol[] fieldSymbols = symbols
             .Where(symbol => symbol.Kind == "field"
                 && !symbol.IsStatic
                 && string.Equals(symbol.ContainingSymbolId, containingTypeId, StringComparison.Ordinal))
             .OrderBy(symbol => symbol.Span.Start)
             .ThenBy(symbol => symbol.Id, StringComparer.Ordinal)
-            .Select(symbol => new GuestField(symbol.Id, symbol.Name, symbol.TypeId!, 0))
             .ToArray();
+        List<GuestField> fields = new();
+        foreach (SemanticSymbol field in fieldSymbols)
+        {
+            if (field.TypeId is null
+                || !SemanticGenericTypeSubstitution.TryClose(
+                    field.TypeId, substitutions, types, shapes, out string closedFieldType))
+            {
+                Add(diagnostics, "ASCG1003", $"Generic field '{field.Id}' has no closed value layout.");
+                return null;
+            }
+            fields.Add(new GuestField(field.Id, field.Name, closedFieldType, 0));
+        }
         // A fieldless value still occupies addressable storage, including when boxed.
-        if (fields.Length == 0) fields = new[] { new GuestField("$empty:" + type.Id, "$storage", "type:uint8", 0) };
+        if (fields.Count == 0) fields.Add(new GuestField("$empty:" + type.Id, "$storage", "type:uint8", 0));
         return new GuestType(type.Id, "struct", "memory", fields, null, null, 0, 1);
     }
 

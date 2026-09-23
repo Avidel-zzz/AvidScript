@@ -12,21 +12,22 @@ internal static class CSharpGuestGenericMethodTests
     {
         ClosedMethodsHaveIndependentFunctions();
         TamperedInstancesFailClosed();
+        StructuredNamedShapesFailClosed();
         CompositeOpenTypesFailClosed();
-        return 3;
+        return 4;
     }
 
     private static void ClosedMethodsHaveIndependentFunctions()
     {
         string source = File.ReadAllText(FindFixture());
         SemanticDocument semantic = Analyze(source);
-        Check(semantic.Succeeded && semantic.SemanticVersion == "1.36",
+        Check(semantic.Succeeded && semantic.SemanticVersion == "1.37",
             "closed generic source should publish the current semantic contract");
         SemanticCallable[] instances = semantic.Callables
             .Where(callable => callable.GenericDefinitionSymbolId is not null).ToArray();
-        Check(instances.Length == 9 && instances.Select(callable => callable.MethodSymbolId)
-            .Distinct(StringComparer.Ordinal).Count() == 9,
-            "value, recursive, ordered, ref/out and array calls need nine distinct instances");
+        Check(instances.Length == 12 && instances.Select(callable => callable.MethodSymbolId)
+            .Distinct(StringComparer.Ordinal).Count() == 12,
+            "scalar, ref/out, array and ordered nested value calls need twelve distinct instances");
         Check(instances.All(callable => semantic.Reachability!.ReachableCallableIds
             .Contains(callable.MethodSymbolId))
             && semantic.Reachability!.ReachableCallableIds.All(id =>
@@ -71,8 +72,13 @@ internal static class CSharpGuestGenericMethodTests
         Check(!CSharpGuestLowerer.Lower(badId, new string('a', 64)).Succeeded,
             "changing the ordered generic arguments without its instance identity must fail");
         Check(!CSharpGuestLowerer.Lower(
-            semantic with { SemanticVersion = "1.35" }, new string('a', 64)).Succeeded,
+            semantic with { SchemaVersion = 30, SemanticVersion = "1.35" },
+            new string('a', 64)).Succeeded,
             "an old version cannot claim a closed generic execution plan");
+        Check(CSharpGuestLowerer.Lower(
+            semantic with { SchemaVersion = 30, SemanticVersion = "1.36" },
+            new string('a', 64)).Succeeded,
+            "schema 30 / semantic 1.36 closed method artifacts must remain readable");
         SemanticDocument arraySemantic = Analyze(File.ReadAllText(FindFixture()));
         SemanticCallable arrayInstance = arraySemantic.Callables.Single(callable =>
             callable.GenericDefinitionSymbolId?.Contains(".EchoArray", StringComparison.Ordinal) == true);
@@ -108,6 +114,52 @@ internal static class CSharpGuestGenericMethodTests
         };
         Check(!CSharpGuestLowerer.Lower(cyclicShape, new string('a', 64)).Succeeded,
             "a cyclic array shape must fail input validation");
+    }
+
+    private static void StructuredNamedShapesFailClosed()
+    {
+        SemanticDocument semantic = Analyze(File.ReadAllText(FindFixture()));
+        Check(semantic.Succeeded, "named generic fixture must analyze");
+        SemanticTypeShape forward = semantic.TypeShapes.Single(shape =>
+            shape.TypeId == "type:global::Pair<int, float>");
+        SemanticTypeShape reverse = semantic.TypeShapes.Single(shape =>
+            shape.TypeId == "type:global::Pair<float, int>");
+        Check(forward.GenericDefinitionTypeId == reverse.GenericDefinitionTypeId
+            && forward.GenericArgumentTypeIds!.SequenceEqual(new[] { "type:int32", "type:float32" })
+            && reverse.GenericArgumentTypeIds!.SequenceEqual(new[] { "type:float32", "type:int32" }),
+            "ordered named generic arguments must be structural rather than text substitutions");
+
+        SemanticDocument swapped = semantic with
+        {
+            TypeShapes = semantic.TypeShapes.Select(shape => shape == forward
+                ? shape with { GenericArgumentTypeIds = reverse.GenericArgumentTypeIds }
+                : shape).ToArray(),
+        };
+        Check(!CSharpGuestLowerer.Lower(swapped, new string('a', 64)).Succeeded,
+            "two named types cannot claim the same definition and ordered arguments");
+        SemanticDocument missingArgument = semantic with
+        {
+            TypeShapes = semantic.TypeShapes.Select(shape => shape == forward
+                ? shape with { GenericArgumentTypeIds = new[] { "type:missing", "type:float32" } }
+                : shape).ToArray(),
+        };
+        Check(!CSharpGuestLowerer.Lower(missingArgument, new string('a', 64)).Succeeded,
+            "a named shape cannot reference an unregistered argument type");
+        SemanticDocument cyclic = semantic with
+        {
+            TypeShapes = semantic.TypeShapes.Select(shape => shape == forward
+                ? shape with { GenericArgumentTypeIds = new[] { forward.TypeId, "type:float32" } }
+                : shape).ToArray(),
+        };
+        Check(!CSharpGuestLowerer.Lower(cyclic, new string('a', 64)).Succeeded,
+            "a named shape cannot embed itself as an argument");
+        SemanticDocument downgraded = semantic with
+        {
+            SchemaVersion = 30,
+            SemanticVersion = "1.36",
+        };
+        Check(!CSharpGuestLowerer.Lower(downgraded, new string('a', 64)).Succeeded,
+            "schema 30 cannot claim schema 31 named shape metadata");
     }
 
     private static void CompositeOpenTypesFailClosed()

@@ -296,12 +296,13 @@ internal static class CSharpGuestArrayCapabilityTests
         FrontendDocument frontend = FrontendAnalyzer.Analyze(source, "Scripts/ArrayForeachVersion.cs");
         SemanticDocument semantic = SemanticAnalyzer.Analyze(
             source, "Scripts/ArrayForeachVersion.cs", frontend.Source.Sha256);
-        Assert(semantic.Succeeded && semantic.SemanticVersion == "1.36"
+        Assert(semantic.Succeeded && semantic.SemanticVersion == "1.37"
             && semantic.Symbols.Any(symbol => symbol.Id.StartsWith(
                 "symbol:compiler_local:", StringComparison.Ordinal)),
             "array foreach should advertise the versioned synchronous iteration plan");
         CSharpGuestLoweringResult downgraded = CSharpGuestLowerer.Lower(
-            semantic with { SemanticVersion = "1.34" }, new string('c', 64));
+            semantic with { SchemaVersion = 30, SemanticVersion = "1.34" },
+            new string('c', 64));
         Assert(!downgraded.Succeeded,
             "schema 30 / semantic 1.34 cannot claim the new array iteration plan");
 
@@ -317,7 +318,8 @@ internal static class CSharpGuestArrayCapabilityTests
         SemanticDocument oldSemantic = SemanticAnalyzer.Analyze(
             oldSource, "Scripts/OldSemantic.cs", oldFrontend.Source.Sha256);
         Assert(CSharpGuestLowerer.Lower(
-            oldSemantic with { SemanticVersion = "1.34" }, new string('c', 64)).Succeeded,
+            oldSemantic with { SchemaVersion = 30, SemanticVersion = "1.34" },
+            new string('c', 64)).Succeeded,
             "a prior semantic 1.34 artifact without new compiler locals should stay readable");
     }
 

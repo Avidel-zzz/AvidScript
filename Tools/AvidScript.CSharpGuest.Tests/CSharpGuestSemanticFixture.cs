@@ -7,11 +7,29 @@ using AvidScript.CSharpSemantic;
 
 internal static class CSharpGuestSemanticFixture
 {
+    public static SemanticDocument WithoutNamedGenericShapes(SemanticDocument document) =>
+        document with
+        {
+            TypeShapes = document.TypeShapes.Select(shape => shape with
+            {
+                GenericDefinitionTypeId = null,
+                GenericArgumentTypeIds = null,
+            }).ToArray(),
+        };
+
     // Build genuine legacy artifacts: changing the version alone must not retain newer facts.
     public static SemanticDocument WithoutDispatch(SemanticDocument document)
     {
         JsonNode json = JsonNode.Parse(SemanticSerializer.Serialize(document))!;
         json.AsObject().Remove("ue_method_catalog");
+        if (json["type_shapes"] is JsonArray shapes)
+        {
+            foreach (JsonObject shape in shapes.OfType<JsonObject>())
+            {
+                shape.Remove("generic_definition_type_id");
+                shape.Remove("generic_argument_type_ids");
+            }
+        }
         Strip(json);
         return SemanticSerializer.Deserialize(Encoding.UTF8.GetBytes(json.ToJsonString()));
 

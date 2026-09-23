@@ -69,7 +69,7 @@ internal static class CSharpSemanticInputValidator
         }
 
         return ValidateTypes(document.Types)
-            && ValidateTypeShapes(document.SemanticVersion, document.TypeShapes)
+            && ValidateTypeShapes(document.SemanticVersion, document.Types, document.TypeShapes)
             && SemanticDelegateContractValidator.IsValid(document)
             && SemanticClassContractValidator.IsValid(document)
             && ValidateSymbols(document.SemanticVersion, document.Symbols)
@@ -106,6 +106,7 @@ internal static class CSharpSemanticInputValidator
 
     private static bool ValidateTypeShapes(
         string semanticVersion,
+        IReadOnlyList<SemanticType> types,
         IReadOnlyList<SemanticTypeShape> shapes)
     {
         if (!shapes.All(shape => shape is not null
@@ -118,12 +119,43 @@ internal static class CSharpSemanticInputValidator
                 }.Count(value => value is not null) <= 1)
             || !Unique(shapes.Select(shape => shape.TypeId)))
             return false;
-        if (semanticVersion != SemanticContract.CurrentSemanticVersion)
+        if (semanticVersion != SemanticContract.CurrentSemanticVersion
+            && shapes.Any(shape => shape.GenericDefinitionTypeId is not null
+                || shape.GenericArgumentTypeIds is not null))
+            return false;
+        if (semanticVersion == SemanticContract.CurrentSemanticVersion)
+        {
+            HashSet<string> typeIds = types.Select(type => type.Id)
+                .ToHashSet(StringComparer.Ordinal);
+            HashSet<string> genericKeys = new(StringComparer.Ordinal);
+            foreach (SemanticTypeShape shape in shapes)
+            {
+                if (!typeIds.Contains(shape.TypeId)
+                    || (shape.GenericDefinitionTypeId is null)
+                        != (shape.GenericArgumentTypeIds is null))
+                    return false;
+                if (shape.GenericDefinitionTypeId is not { } definitionId)
+                    continue;
+                if (!definitionId.StartsWith("type:", StringComparison.Ordinal)
+                    || definitionId.Contains('\n')
+                    || shape.TypeId.Contains('\n')
+                    || shape.GenericArgumentTypeIds is not { Count: > 0 and <= 32 } arguments
+                    || arguments.Any(argumentId =>
+                        !typeIds.Contains(argumentId) || argumentId.Contains('\n'))
+                    || !genericKeys.Add(definitionId + "\n" + string.Join("\n", arguments)))
+                    return false;
+            }
+        }
+        if (semanticVersion is not "1.36" && semanticVersion != SemanticContract.CurrentSemanticVersion)
             return true;
         Dictionary<string, SemanticTypeShape> byId = shapes.ToDictionary(
             shape => shape.TypeId, StringComparer.Ordinal);
         foreach (SemanticTypeShape shape in shapes)
         {
+            if (semanticVersion == SemanticContract.CurrentSemanticVersion
+                && !AcyclicShape(shape.TypeId, byId,
+                    new HashSet<string>(StringComparer.Ordinal), depth: 0))
+                return false;
             HashSet<string> visiting = new(StringComparer.Ordinal);
             string? current = shape.TypeId;
             while (current is not null && byId.TryGetValue(current, out SemanticTypeShape? next))
@@ -147,7 +179,7 @@ internal static class CSharpSemanticInputValidator
                 && symbol.Signature is not null
                 && !string.IsNullOrWhiteSpace(symbol.Accessibility)
                 && symbol.Span is not null)
-            && (semanticVersion is "1.35" or SemanticContract.CurrentSemanticVersion
+            && (semanticVersion is "1.35" or "1.36" or SemanticContract.CurrentSemanticVersion
                 || symbols.All(symbol => !symbol.Id.StartsWith("symbol:compiler_local:", StringComparison.Ordinal)))
             && Unique(symbols.Select(symbol => symbol.Id))
             && Unique(symbols
@@ -204,9 +236,32 @@ internal static class CSharpSemanticInputValidator
         return true;
     }
 
+    private static bool AcyclicShape(
+        string typeId,
+        IReadOnlyDictionary<string, SemanticTypeShape> shapes,
+        HashSet<string> active,
+        int depth)
+    {
+        if (depth > 32 || !active.Add(typeId))
+            return false;
+        if (shapes.TryGetValue(typeId, out SemanticTypeShape? shape))
+        {
+            if (shape.ElementTypeId is { } elementId
+                && !AcyclicShape(elementId, shapes, active, depth + 1))
+                return false;
+            if (shape.GenericArgumentTypeIds is { } arguments
+                && arguments.Any(argumentId =>
+                    !AcyclicShape(argumentId, shapes, active, depth + 1)))
+                return false;
+        }
+        active.Remove(typeId);
+        return true;
+    }
+
     private static bool ValidateGenericInstances(SemanticDocument document)
     {
-        if (document.SemanticVersion != SemanticContract.CurrentSemanticVersion)
+        if (document.SemanticVersion is not "1.36"
+            && document.SemanticVersion != SemanticContract.CurrentSemanticVersion)
             return document.Callables.All(callable => callable.GenericDefinitionSymbolId is null
                 && callable.GenericArgumentTypeIds is null
                 && callable.GenericTypeParameterIds?.Count is not > 0);
@@ -832,7 +887,7 @@ internal static class CSharpSemanticInputValidator
         IReadOnlyDictionary<string, SemanticSymbol> symbolsById,
         ref int expectedCallbackId)
     {
-        if ((document.SemanticVersion is not ("1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30" or "1.31" or "1.32" or "1.33" or "1.34") && document.SemanticVersion != SemanticContract.CurrentSemanticVersion)
+        if ((document.SemanticVersion is not ("1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30" or "1.31" or "1.32" or "1.33" or "1.34" or "1.36") && document.SemanticVersion != SemanticContract.CurrentSemanticVersion)
             || method.EntrySegmentOrdinal < 0
             || method.EntrySegmentOrdinal >= method.Segments.Count
             || method.Segments.Count > SemanticAsyncMethod.MaximumControlFlowSegments
@@ -1075,7 +1130,7 @@ internal static class CSharpSemanticInputValidator
 
     private static bool UsesExactAsyncStateFlow(string semanticVersion)
     {
-        return semanticVersion is "1.16" or "1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30" or "1.31" or "1.32" or "1.33" or "1.34"
+        return semanticVersion is "1.16" or "1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30" or "1.31" or "1.32" or "1.33" or "1.34" or "1.36"
             || semanticVersion == SemanticContract.CurrentSemanticVersion;
     }
 
@@ -1347,6 +1402,7 @@ internal static class CSharpSemanticInputValidator
             (29, "1.33") => true,
             (30, "1.34") => true,
             (30, "1.35") => true,
+            (30, "1.36") => true,
             (SemanticContract.CurrentSchemaVersion, SemanticContract.CurrentSemanticVersion) => true,
             _ => false,
         };
@@ -1399,7 +1455,7 @@ internal static class CSharpSemanticInputValidator
         {
             return true;
         }
-        return (semanticVersion is "1.16" or "1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30" or "1.31" or "1.32" or "1.33" or "1.34"
+        return (semanticVersion is "1.16" or "1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30" or "1.31" or "1.32" or "1.33" or "1.34" or "1.36"
                 || semanticVersion == SemanticContract.CurrentSemanticVersion)
             && statement.TargetSymbolId is null
             && ValidateStructuredAsyncFlow(
