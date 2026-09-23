@@ -25,14 +25,16 @@ internal static class SemanticAsyncControlFlowProjector
         SemanticTypeRegistry typeRegistry,
         ICollection<SemanticDiagnostic> diagnostics,
         ref int nextCallbackId,
-        out SemanticAsyncControlFlowProjection? projected)
+        out SemanticAsyncControlFlowProjection? projected,
+        bool allowValueReturns = false)
     {
         Builder builder = new(
             context,
             semanticModel,
             methodSymbolId,
             typeRegistry,
-            diagnostics);
+            diagnostics,
+            allowValueReturns);
         if (!builder.TryBuild(body, ref nextCallbackId, out projected))
         {
             projected = null;
@@ -48,6 +50,7 @@ internal static class SemanticAsyncControlFlowProjector
         private readonly string methodSymbolId;
         private readonly SemanticTypeRegistry typeRegistry;
         private readonly ICollection<SemanticDiagnostic> diagnostics;
+        private readonly bool allowValueReturns;
         private readonly List<DraftSegment> drafts = new();
         private readonly List<SemanticAsyncCompilerLocal> compilerLocals = new();
         private readonly List<(SyntaxNode Node, string Kind, int[] Drafts)> scopes = new();
@@ -60,13 +63,15 @@ internal static class SemanticAsyncControlFlowProjector
             SemanticModel semanticModel,
             string methodSymbolId,
             SemanticTypeRegistry typeRegistry,
-            ICollection<SemanticDiagnostic> diagnostics)
+            ICollection<SemanticDiagnostic> diagnostics,
+            bool allowValueReturns)
         {
             this.context = context;
             this.semanticModel = semanticModel;
             this.methodSymbolId = methodSymbolId;
             this.typeRegistry = typeRegistry;
             this.diagnostics = diagnostics;
+            this.allowValueReturns = allowValueReturns;
         }
 
         public bool TryBuild(
@@ -296,6 +301,21 @@ internal static class SemanticAsyncControlFlowProjector
                         new DraftTransfer(
                             SemanticAsyncMethod.ReturnTransferKind,
                             null,
+                            -1,
+                            -1));
+
+                case ReturnStatementSyntax { Expression: not null } valueReturn when allowValueReturns:
+                    if (!TryProjectValue(valueReturn.Expression, out SemanticOperation? returnValue))
+                    {
+                        return -1;
+                    }
+                    return AddDraft(
+                        valueReturn.Span,
+                        Array.Empty<SemanticAsyncStatement>(),
+                        null,
+                        new DraftTransfer(
+                            SemanticAsyncMethod.ReturnTransferKind,
+                            returnValue,
                             -1,
                             -1));
 

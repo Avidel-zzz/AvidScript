@@ -107,6 +107,20 @@ public static void Tick(float deltaSeconds)
 
 同一套入口还有 `BeginPlay`（开始运行）和 `EndPlay`（结束运行）。见[生命周期样例](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)。
 
+### 🔁 遍历一维数组
+
+```csharp
+int[] values = new[] { 3, 5, 8 };
+int sum = 0;
+foreach (int value in values)
+{
+    sum += value;
+}
+// sum == 16
+```
+
+同步方法支持这样的数组遍历，也支持循环中的 `break` 和 `continue`。数组表达式只求值一次；`List<T>` 等普通枚举器及捕获循环变量的闭包仍待完成清理和逐次捕获语义。[当前实施范围](Docs/Phase66/P66.C_Language_Execution_Plan.md)。
+
 ### ⏱️ 等待一段时间，再继续执行
 
 ```csharp
@@ -211,7 +225,7 @@ RPC 是跨网络请求另一端执行函数；属性复制是服务器把属性�
 
 | 范围 | 目前能做什么 | 对开发的影响 |
 | --- | --- | --- |
-| C# 语言 | 常用控制流、受支持的类和结构体、同步 lambda、局部函数、共享捕获变量 | 还不能直接迁入任意 .NET / NuGet 库；普通 C# 类继承与多态、泛型执行覆盖、完整异常系统仍不齐全 |
+| C# 语言 | 常用控制流、同步一维数组 `foreach`、受支持的类和结构体、同步 lambda、局部函数、共享捕获变量 | 还不能直接迁入任意 .NET / NuGet 库；普通枚举器遍历、泛型执行覆盖、完整异常系统仍不齐全 |
 | 异步 | 计时器、下一帧、资源加载；受支持的 `async void` 实例方法可跨 `await` 保留 `this`、参数、局部对象与共享变量 | 还不能等待任意 `Task` 或自定义 awaiter。[延迟加分示例与生命周期](Docs/Phase66/P66.B_Async_Invocation_Contract.md) |
 | UE 类型与 API | 属性、函数、常用数学类型、文本，以及受支持的数组、Set（去重集合）、Map（键值表） | 先在配置中选择需要的 API，再生成 C# 调用接口；部分嵌套对象容器、软引用（按路径引用资源）和弱引用（不阻止对象回收）的便捷用法仍有限制 |
 | 委托与事件 | 受支持的单播、多播及 `ref/out` 参数；显式订阅可接收捕获变量的 lambda、实例方法和静态方法；已生成的 UE 事件可用 `+=` / `-=` | 普通 .NET 事件不会自动接入 UE；事件语法的复杂委托组合仍在验收。[显式订阅范围](Docs/Phase66/P66.B_Persistent_Event_State.md)、[事件语法范围](Docs/Phase66/P66.B_Event_Language_Contract.md) |

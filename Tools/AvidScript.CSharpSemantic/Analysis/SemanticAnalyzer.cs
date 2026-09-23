@@ -101,6 +101,9 @@ public static class SemanticAnalyzer
             context,
             typeRegistry,
             asyncProjection.ControlledMethodSymbolIds);
+        symbols = symbols.Concat(controlFlowProjection.CompilerLocalSymbols)
+            .OrderBy(symbol => symbol.Id, StringComparer.Ordinal)
+            .ToArray();
         SemanticLexicalCaptureProjection lexicalCaptures = SemanticLexicalCaptureNormalizer.Normalize(
             context, symbols, callableProjection.Callables, operationProjection.Methods,
             controlFlowProjection.Graphs, asyncProjection.Methods);

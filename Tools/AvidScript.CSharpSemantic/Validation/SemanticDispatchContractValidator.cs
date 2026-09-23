@@ -19,7 +19,7 @@ public static class SemanticDispatchContractValidator
             || document.SchemaVersion == 27 && document.SemanticVersion == "1.31"
             || document.SchemaVersion == 28 && document.SemanticVersion == "1.32"
             || document.SchemaVersion == 29 && document.SemanticVersion == "1.33"
-            || document.SchemaVersion == SemanticContract.CurrentSchemaVersion && document.SemanticVersion == SemanticContract.CurrentSemanticVersion;
+            || SemanticContract.IsCurrentOrPrevious(document.SchemaVersion, document.SemanticVersion);
         if (document.SchemaVersion >= 25 && !current) return false;
         var callables = document.Callables.ToDictionary(item => item.MethodSymbolId, StringComparer.Ordinal);
         var interfaces = document.Types.Where(item => item is not null && item.Kind == "interface")
@@ -144,7 +144,7 @@ public static class SemanticDispatchContractValidator
                 || (document.SchemaVersion == 27 && document.SemanticVersion == "1.31")
                 || (document.SchemaVersion == 28 && document.SemanticVersion == "1.32")
                 || (document.SchemaVersion == 29 && document.SemanticVersion == "1.33")
-                || (document.SchemaVersion == SemanticContract.CurrentSchemaVersion && document.SemanticVersion == SemanticContract.CurrentSemanticVersion)) || implementation.IsStatic
+                || SemanticContract.IsCurrentOrPrevious(document.SchemaVersion, document.SemanticVersion)) || implementation.IsStatic
             || document.UeMethodCatalog?.Methods is not { } methods) return false;
         SemanticUeMethodEntry? owner = methods.FirstOrDefault(item => item is not null && item.MethodSymbolId == implementation.MethodSymbolId);
         if (owner?.Dispatch?.ExplicitInterfaceMethodIds is not { } targets) return false;

@@ -72,7 +72,7 @@ internal static class CSharpSemanticInputValidator
             && ValidateTypeShapes(document.TypeShapes)
             && SemanticDelegateContractValidator.IsValid(document)
             && SemanticClassContractValidator.IsValid(document)
-            && ValidateSymbols(document.Symbols)
+            && ValidateSymbols(document.SemanticVersion, document.Symbols)
             && ValidateCallables(document.SchemaVersion, document.Callables)
             && SemanticClosureContractValidator.IsValid(document)
             && SemanticUeTypeContractValidator.TryValidate(document, out _)
@@ -116,7 +116,9 @@ internal static class CSharpSemanticInputValidator
             && Unique(shapes.Select(shape => shape.TypeId));
     }
 
-    private static bool ValidateSymbols(IReadOnlyList<SemanticSymbol> symbols)
+    private static bool ValidateSymbols(
+        string semanticVersion,
+        IReadOnlyList<SemanticSymbol> symbols)
     {
         return symbols.All(symbol => symbol is not null
                 && !string.IsNullOrWhiteSpace(symbol.Id)
@@ -125,6 +127,8 @@ internal static class CSharpSemanticInputValidator
                 && symbol.Signature is not null
                 && !string.IsNullOrWhiteSpace(symbol.Accessibility)
                 && symbol.Span is not null)
+            && (semanticVersion == SemanticContract.CurrentSemanticVersion
+                || symbols.All(symbol => !symbol.Id.StartsWith("symbol:compiler_local:", StringComparison.Ordinal)))
             && Unique(symbols.Select(symbol => symbol.Id))
             && Unique(symbols
                 .Where(symbol => symbol.Kind == "field" && symbol.ContainingSymbolId is not null)
@@ -701,7 +705,7 @@ internal static class CSharpSemanticInputValidator
         IReadOnlyDictionary<string, SemanticSymbol> symbolsById,
         ref int expectedCallbackId)
     {
-        if ((document.SemanticVersion is not ("1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30" or "1.31" or "1.32" or "1.33") && document.SemanticVersion != SemanticContract.CurrentSemanticVersion)
+        if ((document.SemanticVersion is not ("1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30" or "1.31" or "1.32" or "1.33" or "1.34") && document.SemanticVersion != SemanticContract.CurrentSemanticVersion)
             || method.EntrySegmentOrdinal < 0
             || method.EntrySegmentOrdinal >= method.Segments.Count
             || method.Segments.Count > SemanticAsyncMethod.MaximumControlFlowSegments
@@ -944,7 +948,7 @@ internal static class CSharpSemanticInputValidator
 
     private static bool UsesExactAsyncStateFlow(string semanticVersion)
     {
-        return semanticVersion is "1.16" or "1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30" or "1.31" or "1.32" or "1.33"
+        return semanticVersion is "1.16" or "1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30" or "1.31" or "1.32" or "1.33" or "1.34"
             || semanticVersion == SemanticContract.CurrentSemanticVersion;
     }
 
@@ -1214,6 +1218,7 @@ internal static class CSharpSemanticInputValidator
             (27, "1.31") => true,
             (28, "1.32") => true,
             (29, "1.33") => true,
+            (30, "1.34") => true,
             (SemanticContract.CurrentSchemaVersion, SemanticContract.CurrentSemanticVersion) => true,
             _ => false,
         };
@@ -1266,7 +1271,7 @@ internal static class CSharpSemanticInputValidator
         {
             return true;
         }
-        return (semanticVersion is "1.16" or "1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30" or "1.31" or "1.32" or "1.33"
+        return (semanticVersion is "1.16" or "1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30" or "1.31" or "1.32" or "1.33" or "1.34"
                 || semanticVersion == SemanticContract.CurrentSemanticVersion)
             && statement.TargetSymbolId is null
             && ValidateStructuredAsyncFlow(

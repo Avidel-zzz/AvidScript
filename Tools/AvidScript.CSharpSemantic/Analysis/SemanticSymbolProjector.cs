@@ -25,7 +25,6 @@ internal static class SemanticSymbolProjector
                 unit.SourceText,
                 symbols,
                 typeRegistry,
-                unit.IsPrimary,
                 !unit.IsPrimary);
         }
 
@@ -38,7 +37,6 @@ internal static class SemanticSymbolProjector
         SourceText sourceText,
         IDictionary<string, SemanticSymbol> symbols,
         SemanticTypeRegistry typeRegistry,
-        bool projectForeachLocals,
         bool isExecutableReferenceSource)
     {
         foreach (MemberDeclarationSyntax declaration in root.DescendantNodes().OfType<MemberDeclarationSyntax>())
@@ -168,9 +166,7 @@ internal static class SemanticSymbolProjector
             }
         }
 
-        foreach (ForEachStatementSyntax loop in projectForeachLocals
-            ? root.DescendantNodes().OfType<ForEachStatementSyntax>()
-            : Enumerable.Empty<ForEachStatementSyntax>())
+        foreach (ForEachStatementSyntax loop in root.DescendantNodes().OfType<ForEachStatementSyntax>())
         {
             ILocalSymbol? local = semanticModel.GetDeclaredSymbol(loop) as ILocalSymbol;
             if (local is not null)

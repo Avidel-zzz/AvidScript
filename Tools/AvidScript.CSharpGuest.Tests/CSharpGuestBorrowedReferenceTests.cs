@@ -117,7 +117,7 @@ internal static class CSharpGuestBorrowedReferenceTests
         return 8;
     }
 
-    internal static int Reference(string source, Type? expectedFailure = null)
+    internal static int Reference(string source, Type? expectedFailure = null, string methodName = "Run")
     {
         var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator)
             .Select(path => MetadataReference.CreateFromFile(path));
@@ -133,7 +133,7 @@ internal static class CSharpGuestBorrowedReferenceTests
             Type script = context.LoadFromStream(bytes).GetType("Script")!;
             try
             {
-                int value = (int)script.GetMethod("Run")!.Invoke(null, null)!;
+                int value = (int)script.GetMethod(methodName)!.Invoke(null, null)!;
                 Require(expectedFailure is null, "reference execution was expected to fail");
                 return value;
             }

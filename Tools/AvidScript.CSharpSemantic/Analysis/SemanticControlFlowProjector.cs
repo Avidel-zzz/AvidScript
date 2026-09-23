@@ -10,7 +10,8 @@ namespace AvidScript.CSharpSemantic;
 
 internal sealed record SemanticControlFlowProjection(
     IReadOnlyList<SemanticControlFlowGraph> Graphs,
-    IReadOnlyList<SemanticDiagnostic> Diagnostics);
+    IReadOnlyList<SemanticDiagnostic> Diagnostics,
+    IReadOnlyList<SemanticSymbol> CompilerLocalSymbols);
 
 internal static class SemanticControlFlowProjector
 {
@@ -21,6 +22,7 @@ internal static class SemanticControlFlowProjector
     {
         List<SemanticDiagnostic> diagnostics = new();
         List<SemanticControlFlowGraph> graphs = new();
+        List<SemanticSymbol> compilerLocalSymbols = new();
         Diagnostic? compilerError = context.Compilation.GetDiagnostics()
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .OrderBy(diagnostic => diagnostic.Location.IsInSource
@@ -36,7 +38,8 @@ internal static class SemanticControlFlowProjector
                 compilerError.Location.IsInSource && compilerError.Location.SourceTree == context.SyntaxTree
                     ? SemanticSpanFactory.Create(context.SourceText, compilerError.Location.SourceSpan)
                     : SemanticSpanFactory.Empty));
-            return new SemanticControlFlowProjection(Array.Empty<SemanticControlFlowGraph>(), diagnostics);
+            return new SemanticControlFlowProjection(Array.Empty<SemanticControlFlowGraph>(), diagnostics,
+                Array.Empty<SemanticSymbol>());
         }
 
         foreach (SemanticExecutableBody body in SemanticExecutableBodyResolver.Resolve(context))
@@ -89,6 +92,29 @@ internal static class SemanticControlFlowProjector
 
             if (HasUnsupportedExceptionFlow(graph))
             {
+                if (SemanticArrayForEachControlFlowProjector.IsCandidate(body, semanticModel))
+                {
+                    if (!SemanticArrayForEachControlFlowProjector.TryProject(
+                        context, body, semanticModel, typeRegistry, diagnostics,
+                        out SemanticControlFlowGraph? arrayGraph,
+                        out IReadOnlyList<SemanticSymbol> arrayCompilerLocals))
+                    {
+                        continue;
+                    }
+                    IReadOnlyList<string> unsupportedArrayKinds = GetUnsupportedOperationKinds(arrayGraph!);
+                    if (unsupportedArrayKinds.Count > 0)
+                    {
+                        diagnostics.Add(CreateDiagnostic(
+                            "ASCS3004",
+                            $"Array foreach contains unsupported lowered operations: {string.Join(", ", unsupportedArrayKinds)}.",
+                            bodySpan));
+                        continue;
+                    }
+                    graphs.Add(arrayGraph!);
+                    compilerLocalSymbols.AddRange(arrayCompilerLocals);
+                    continue;
+                }
+
                 diagnostics.Add(CreateDiagnostic(
                     "ASCS3001",
                     "Exception control flow is not supported by the current AvidScript semantic profile.",
@@ -122,12 +148,14 @@ internal static class SemanticControlFlowProjector
         {
             return new SemanticControlFlowProjection(
                 Array.Empty<SemanticControlFlowGraph>(),
-                orderedDiagnostics);
+                orderedDiagnostics,
+                Array.Empty<SemanticSymbol>());
         }
 
         return new SemanticControlFlowProjection(
             graphs.OrderBy(graph => graph.MethodSymbolId, StringComparer.Ordinal).ToArray(),
-            orderedDiagnostics);
+            orderedDiagnostics,
+            compilerLocalSymbols.OrderBy(symbol => symbol.Id, StringComparer.Ordinal).ToArray());
     }
 
     private static IReadOnlyList<string> GetUnsupportedOperationKinds(

@@ -18,7 +18,7 @@ public static class SemanticClosureAllocationValidator
                 || (document.SchemaVersion == 27 && document.SemanticVersion == "1.31")
                 || (document.SchemaVersion == 28 && document.SemanticVersion == "1.32")
                 || (document.SchemaVersion == 29 && document.SemanticVersion == "1.33")
-                || (document.SchemaVersion == SemanticContract.CurrentSchemaVersion && document.SemanticVersion == SemanticContract.CurrentSemanticVersion))
+                || SemanticContract.IsCurrentOrPrevious(document.SchemaVersion, document.SemanticVersion))
             || document.ControlFlowGraphs is null || document.AsyncMethods is null
             || document.ControlFlowGraphs.Any(graph => graph is null || graph.MethodSymbolId is null)
             || document.ControlFlowGraphs.Select(graph => graph.MethodSymbolId).Distinct(StringComparer.Ordinal).Count() != document.ControlFlowGraphs.Count)

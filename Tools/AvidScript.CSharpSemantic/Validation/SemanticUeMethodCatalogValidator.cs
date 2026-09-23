@@ -13,7 +13,7 @@ public static class SemanticUeMethodCatalogValidator
                 || (document.SchemaVersion == 27 && document.SemanticVersion == "1.31")
                 || (document.SchemaVersion == 28 && document.SemanticVersion == "1.32")
                 || (document.SchemaVersion == 29 && document.SemanticVersion == "1.33")
-                || (document.SchemaVersion == SemanticContract.CurrentSchemaVersion && document.SemanticVersion == SemanticContract.CurrentSemanticVersion))
+                || SemanticContract.IsCurrentOrPrevious(document.SchemaVersion, document.SemanticVersion))
             || document.UeMethodCatalog is not { SchemaVersion: 1 } catalog
             || !Sorted(catalog.Methods, item => item.MethodSymbolId)
             || !Sorted(catalog.Types, item => item.TypeId) || !Sorted(catalog.Interfaces, item => item.TypeId)
