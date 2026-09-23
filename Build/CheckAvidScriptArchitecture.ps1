@@ -673,6 +673,7 @@ $GeneratedTypeHostBindingsSource = Read-RequiredFile 'Source/AvidScriptRuntime/P
 $GeneratedTypeWasmRuntimeHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptWasmRuntime.h'
 $RuntimeModuleSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptRuntimeModule.cpp'
 $CSharpScriptTypeBuildSource = Read-RequiredFile 'Build/BuildCSharpScriptTypes.ps1'
+$UeTypeGenerationPlannerSource = Read-RequiredFile 'Tools/AvidScript.UeTypeGenerator/Generation/UeTypeGenerationPlanner.cs'
 $GeneratedTypeReloadClassificationSource = Read-RequiredFile 'Build/AvidScriptGeneratedTypeReloadClassification.ps1'
 $GeneratedTypeCookPackageSource = Read-RequiredFile 'Build/AvidScriptGeneratedTypeCookPackage.ps1'
 $GeneratedTypeCookPackageContractSource = Read-RequiredFile 'Build/Contracts/TestGeneratedTypeCookPackage.ps1'
@@ -820,8 +821,8 @@ foreach ($RequiredScriptTypeBuildContract in @(
     'Resolve-AvidScriptCSharpBindingPackage',
     'InvokeCSharpFrontend.ps1',
     'InvokeCSharpSemantic.ps1',
-    'schema_version -ne 22',
-    'semantic_version -cne "1.26"',
+    'semantic_schema_version -ne [int]$Semantic.schema_version',
+    'semantic_version -cne [string]$Semantic.semantic_version',
     'schema_version -ne 6',
     'generator_version -cne "1.8"',
     'semantic_artifact_sha256',
@@ -830,6 +831,13 @@ foreach ($RequiredScriptTypeBuildContract in @(
     'Get-FileHash')) {
     if (-not $CSharpScriptTypeBuildSource.Contains($RequiredScriptTypeBuildContract)) {
         Add-Violation "C# script type build pipeline is missing $RequiredScriptTypeBuildContract"
+    }
+}
+foreach ($RequiredUeGeneratorVersionContract in @(
+    'document.SchemaVersion != SemanticContract.CurrentSchemaVersion',
+    'document.SemanticVersion != SemanticContract.CurrentSemanticVersion')) {
+    if (-not $UeTypeGenerationPlannerSource.Contains($RequiredUeGeneratorVersionContract)) {
+        Add-Violation "UE type generator must validate the current Semantic contract: $RequiredUeGeneratorVersionContract"
     }
 }
 foreach ($RequiredGeneratedFunctionDefaultContract in @(
@@ -3718,10 +3726,12 @@ foreach ($RequiredDebugArtifactBuildContract in @(
 foreach ($RequiredOptionalExportContract in @(
     '$SemanticModel.delegate_event_callbacks',
     '$UnexpectedDeclaredExports = @($RequiredExports | Where-Object { $DirectAbiExports -notcontains $_ })',
-    '$MissingObservedExports = @($RequiredExports | Where-Object { $ObservedExports -notcontains $_ })',
-    '$UnexpectedObservedExports = @($ObservedExports | Where-Object { $RequiredExports -notcontains $_ })')) {
+    '$ExpectedObservedExports = @($RequiredExports) + @($FramedAbiExports)',
+    '$MissingObservedExports = @($ExpectedObservedExports | Where-Object { $ObservedExports -notcontains $_ })',
+    '$UnexpectedObservedExports = @($ObservedExports | Where-Object { $ExpectedObservedExports -notcontains $_ })',
+    '^avid_ue_(method|dispatch)_([0-9a-f]{64})_frame_v1$')) {
     if (-not $CSharpBuildScriptSource.Contains($RequiredOptionalExportContract)) {
-        Add-Violation "C# direct ABI must validate only the event hooks declared by the script: $RequiredOptionalExportContract"
+        Add-Violation "C# direct ABI export validation is missing $RequiredOptionalExportContract"
     }
 }
 if ($CSharpBuildScriptSource.Contains(
