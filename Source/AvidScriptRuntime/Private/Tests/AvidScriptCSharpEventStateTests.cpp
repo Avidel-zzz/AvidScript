@@ -1,9 +1,12 @@
 #if WITH_DEV_AUTOMATION_TESTS
 #include "AvidScriptRuntimeSession.h"
+#include "AvidScriptRuntimeArtifact.h"
 #include "AvidScriptBindingInvocation.h"
 #include "Lifecycle/AvidScriptRuntimeLifecycleCoordinator.h"
 #include "Memory/AvidScriptManagedHeap.h"
 #include "Ownership/AvidScriptSessionObjectOwnership.h"
+#include "ScriptTypes/AvidScriptGeneratedTypeRegistry.h"
+#include "ScriptTypes/AvidScriptGeneratedTypeRuntimeHost.h"
 #include "Dom/JsonObject.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -700,6 +703,117 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
                 GcRuntime->GetManagedHeapForTesting()->GetStats().LiveRoots, 0u);
             if (GcSession.IsLiveLoaded() && !TestTrue(TEXT("GC event Session stops"),
                 GcSession.StopAndUnload(GcResult))) return false;
+        }
+        {
+            AActor* Peer = World->SpawnActor<AActor>(Signal->ExpectedSourceClass);
+            if (!TestNotNull(TEXT("Shared event peer spawned"), Peer)) return false;
+            FString ClassPackage, ClassName;
+            if (!TestTrue(TEXT("Generated event class path is script-owned"),
+                Signal->ExpectedSourceClass->GetPathName().Split(TEXT("."), &ClassPackage, &ClassName)
+                    && ClassPackage.RemoveFromStart(TEXT("/Script/")))) return false;
+            const TSharedRef<FJsonObject> TypeJson = MakeShared<FJsonObject>();
+            TypeJson->SetNumberField(TEXT("type_ordinal"), 0);
+            TypeJson->SetStringField(TEXT("stable_type_id"), TEXT("type:csharp-event-shared-domain"));
+            TypeJson->SetStringField(TEXT("engine_name"), ClassName);
+            TypeJson->SetStringField(TEXT("class_path"), Signal->ExpectedSourceClass->GetPathName());
+            TypeJson->SetArrayField(TEXT("properties"), {});
+            TypeJson->SetArrayField(TEXT("functions"), {});
+            const TSharedRef<FJsonObject> RegistryJson = MakeShared<FJsonObject>();
+            RegistryJson->SetNumberField(TEXT("schema_version"), 6);
+            RegistryJson->SetStringField(TEXT("generator_version"), TEXT("1.8"));
+            RegistryJson->SetStringField(TEXT("module_name"), ClassPackage);
+            RegistryJson->SetStringField(TEXT("generation_key_sha256"), FString::ChrN(64, TEXT('a')));
+            TArray<TSharedPtr<FJsonValue>> TypesJson;
+            TypesJson.Add(MakeShared<FJsonValueObject>(TypeJson));
+            RegistryJson->SetArrayField(TEXT("types"), MoveTemp(TypesJson));
+            FString RegistryText;
+            if (!FJsonSerializer::Serialize(RegistryJson, TJsonWriterFactory<>::Create(&RegistryText))) return false;
+            TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot> Types;
+            if (!FAvidScriptGeneratedTypeRegistry::BuildFromJson(RegistryText, Types, Error))
+            { AddError(Error); return false; }
+            auto Host = FAvidScriptGeneratedTypeRuntimeHost::CreateIsolatedForTesting();
+            ON_SCOPE_EXIT { Host->Shutdown(); };
+            const FAvidScriptRuntimeArtifact Artifact = FAvidScriptRuntimeArtifact::FromCanonicalWasm(
+                Manifest, Bytes, Selection);
+            if (!Host->InstallPackage(Types, Artifact, Error)
+                || !Host->BeginInstance(*Owner, 0, Error)
+                || !Host->BeginInstance(*Peer, 0, Error))
+            { AddError(Error); return false; }
+            auto* OwnerSession = Host->GetInstanceSessionForTesting(*Owner);
+            auto* PeerSession = Host->GetInstanceSessionForTesting(*Peer);
+            if (!TestNotNull(TEXT("Shared event owner Session"), OwnerSession)
+                || !TestNotNull(TEXT("Shared event peer Session"), PeerSession)) return false;
+            auto* SharedRuntime = OwnerSession->GetLiveRuntimeForTesting();
+            TestTrue(TEXT("Event owners share the production Runtime"),
+                SharedRuntime == PeerSession->GetLiveRuntimeForTesting());
+            FAvidScriptWasmSmokeResult SharedResult;
+            if (!OwnerSession->TickLive(28.0f, SharedResult)
+                || !PeerSession->TickLive(28.0f, SharedResult))
+            { AddError(SharedResult.ErrorMessage); return false; }
+            TestEqual(TEXT("Owner installs its language bridge"),
+                OwnerSession->GetDelegateSubscriptionCountForTesting(), 1);
+            TestEqual(TEXT("Peer installs its language bridge"),
+                PeerSession->GetDelegateSubscriptionCountForTesting(), 1);
+            const auto Broadcast = [&](AActor* Source, const int32 Amount)
+            {
+                FStructOnScope Frame(Signal->Signature.SignatureFunction);
+                FindFProperty<FObjectProperty>(Signal->Signature.SignatureFunction, TEXT("SourceActor"))
+                    ->SetObjectPropertyValue_InContainer(Frame.GetStructMemory(), Source);
+                FindFProperty<FIntProperty>(Signal->Signature.SignatureFunction, TEXT("Count"))
+                    ->SetPropertyValue_InContainer(Frame.GetStructMemory(), Amount);
+                FindFProperty<FFloatProperty>(Signal->Signature.SignatureFunction, TEXT("Scale"))
+                    ->SetPropertyValue_InContainer(Frame.GetStructMemory(), 1.0f);
+                Signal->Signature.MulticastProperty->GetMulticastDelegate(
+                    Signal->Signature.MulticastProperty->ContainerPtrToValuePtr<void>(Source))
+                    ->ProcessDelegate<UObject>(Frame.GetStructMemory());
+            };
+            Broadcast(Owner, 2);
+            Broadcast(Peer, 3);
+            TestEqual(TEXT("Owner owns one suspended event callback"),
+                OwnerSession->GetLivePendingContinuationCount(), 1);
+            TestEqual(TEXT("Peer owns one suspended event callback"),
+                PeerSession->GetLivePendingContinuationCount(), 1);
+            int32 SharedScore = 0;
+            if (!TestTrue(TEXT("Read shared score before async resume"), SharedRuntime->ReadStateBytes(
+                CountAddress, MakeArrayView(reinterpret_cast<uint8*>(&SharedScore), 4), Error)))
+            { AddError(Error); return false; }
+            TestEqual(TEXT("Two event owners share script statics"), SharedScore, 5);
+            auto* SharedHeap = SharedRuntime->GetManagedHeapForTesting();
+            const uint32 RootsBeforeOwnerEnd = SharedHeap->GetStats().LiveRoots;
+            if (!Host->EndInstance(*Owner, Error)) { AddError(Error); return false; }
+            TestTrue(TEXT("Peer Runtime survives owner teardown"),
+                PeerSession->GetLiveRuntimeForTesting() == SharedRuntime);
+            TestEqual(TEXT("Peer await survives owner teardown"),
+                PeerSession->GetLivePendingContinuationCount(), 1);
+            TestTrue(TEXT("Owner teardown releases its event and await roots"),
+                SharedHeap->GetStats().LiveRoots < RootsBeforeOwnerEnd);
+            TestFalse(TEXT("Retired owner event is unbound"),
+                Signal->Signature.MulticastProperty->GetMulticastDelegate(
+                    Signal->Signature.MulticastProperty->ContainerPtrToValuePtr<void>(Owner))->IsBound());
+            TestTrue(TEXT("Peer event remains bound"),
+                Signal->Signature.MulticastProperty->GetMulticastDelegate(
+                    Signal->Signature.MulticastProperty->ContainerPtrToValuePtr<void>(Peer))->IsBound());
+            Broadcast(Owner, 5);
+            if (!TestTrue(TEXT("Read shared score after retired broadcast"), SharedRuntime->ReadStateBytes(
+                CountAddress, MakeArrayView(reinterpret_cast<uint8*>(&SharedScore), 4), Error)))
+            { AddError(Error); return false; }
+            TestEqual(TEXT("Retired owner cannot deliver another event"), SharedScore, 5);
+            World->Tick(LEVELTICK_All, 0); ++GFrameCounter;
+            World->Tick(LEVELTICK_All, 0.02f); ++GFrameCounter;
+            if (!PeerSession->TickLive(0.001f, SharedResult)) { AddError(SharedResult.ErrorMessage); return false; }
+            if (!TestTrue(TEXT("Read shared score after peer resume"), SharedRuntime->ReadStateBytes(
+                CountAddress, MakeArrayView(reinterpret_cast<uint8*>(&SharedScore), 4), Error)))
+            { AddError(Error); return false; }
+            TestEqual(TEXT("Retired owner cannot resume; peer can"), SharedScore, 35);
+            TestEqual(TEXT("Peer event continuation is consumed"),
+                PeerSession->GetLivePendingContinuationCount(), 0);
+            if (!TestTrue(TEXT("GC after peer resume succeeds"), SharedHeap->Collect() == EHeapError::Ok)) return false;
+            TestEqual(TEXT("Only peer event retains a managed root"), SharedHeap->GetStats().LiveRoots, 1u);
+            if (!Host->EndInstance(*Peer, Error)) { AddError(Error); return false; }
+            TestEqual(TEXT("Shared event package has no active instances"), Host->GetActiveInstanceCount(), 0);
+            TestFalse(TEXT("Final owner event is unbound"),
+                Signal->Signature.MulticastProperty->GetMulticastDelegate(
+                    Signal->Signature.MulticastProperty->ContainerPtrToValuePtr<void>(Peer))->IsBound());
         }
         FAvidScriptWasmReloadResult Loaded;
         if (!Session.LoadInitialModule(Bytes.GetData(), Bytes.Num(), Manifest, Loaded))
