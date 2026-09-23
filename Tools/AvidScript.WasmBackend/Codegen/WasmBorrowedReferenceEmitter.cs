@@ -31,6 +31,13 @@ internal sealed partial class WasmFunctionCompiler
     private void CompileBorrowedInstruction(WasmBinaryWriter body, GuestInstruction instruction)
     {
         string? result = instruction.ResultId;
+        if (instruction.Op == "borrow_global")
+        {
+            WasmMemoryEmitter.WriteZero(body, writer => WriteLocalGet(writer, localIndices[result!]), GuestBorrowedReference.Size);
+            StoreBorrowI32(body, result!, GuestBorrowedReference.AddressOffset,
+                writer => WriteI32Constant(writer, GetStateSlot(instruction.TargetId!).Offset));
+            return;
+        }
         if (instruction.Op == "borrow_address")
         {
             string storage = instruction.TargetId!;

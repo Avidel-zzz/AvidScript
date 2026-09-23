@@ -30,8 +30,8 @@ public static class SemanticAsyncInvocationValidator
                     || !callable.IsStatic || callable.Parameters.Count != 0) return false;
                 continue;
             }
-            if (document.SchemaVersion != SemanticContract.CurrentSchemaVersion
-                || document.SemanticVersion != SemanticContract.CurrentSemanticVersion) return false;
+            if (!(document.SchemaVersion == 28 && document.SemanticVersion == "1.32")
+                && !(document.SchemaVersion == SemanticContract.CurrentSchemaVersion && document.SemanticVersion == SemanticContract.CurrentSemanticVersion)) return false;
             if (method.ExportName is not null)
             {
                 if (string.IsNullOrWhiteSpace(method.ExportName) || !callable.IsStatic

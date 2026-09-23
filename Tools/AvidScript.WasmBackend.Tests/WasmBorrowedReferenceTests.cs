@@ -61,7 +61,20 @@ internal static class WasmBorrowedReferenceTests
             File.WriteAllBytes(Path.Combine(output, "borrowed-trap.wasm"), trapped.Bytes);
             File.WriteAllBytes(Path.Combine(output, "borrowed.guest-ir.json"), json);
         }
-        return invalid.Length + 6;
+        GuestModule globalBorrow = ReplaceBegin(module, Op("borrow_global", "a", target: "result")) with { SchemaVersion = 13, IrVersion = "1.12" };
+        Require(WasmModuleCompiler.Compile(globalBorrow).Succeeded, "mutable global borrow compiles");
+        GuestModule[] badGlobals = {
+            globalBorrow with { SchemaVersion = 12, IrVersion = "1.11" },
+            ReplaceBegin(globalBorrow, Op("borrow_global", "a", target: "missing")),
+            ReplaceBegin(globalBorrow, Op("borrow_global", "stackRef", target: "result")),
+            ReplaceBegin(globalBorrow, Op("borrow_global", "a", new[] { "owner" }, "result")),
+            ReplaceBegin(globalBorrow, new("borrow_global", "a", Array.Empty<string>(), "result", "add", null)),
+            ReplaceBegin(globalBorrow, new("borrow_global", "a", Array.Empty<string>(), "result", null, new("int32", "1"))),
+            globalBorrow with { Globals = globalBorrow.Globals.Select(g => g with { IsMutable = false }).ToArray() },
+        };
+        foreach (var candidate in badGlobals) Require(!WasmModuleCompiler.Compile(candidate).Succeeded, "invalid or legacy global borrow rejected");
+        Require(GuestModuleValidator.Validate(module with { SchemaVersion = 12, IrVersion = "1.11" }).Succeeded, "IR 12 remains readable");
+        return invalid.Length + 6 + badGlobals.Length + 2;
     }
 
     internal static GuestModule Create()

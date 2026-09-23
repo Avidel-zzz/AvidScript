@@ -269,6 +269,12 @@ internal sealed partial class WasmFunctionCompiler
                 WriteFrameAddress(body, local.Id);
                 WriteLocalSet(body, localIndices[local.Id]);
             }
+            else if (frame.AddressTakenTargets.Contains(local.Id))
+            {
+                // Stack memory is reused across invocations; mirror the zeroed
+                // WASM local before any address-based refresh can observe it.
+                StoreAddressTakenSlot(body, local.Id);
+            }
         }
 
         foreach (GuestRegister parameter in function.Parameters)
@@ -294,7 +300,7 @@ internal sealed partial class WasmFunctionCompiler
         WasmBinaryWriter body,
         GuestInstruction instruction)
     {
-        RefreshBorrowedSlots(body);
+        RefreshAddressTakenSlots(body);
         if (instruction.Op is "call" or "call_indirect" or "call_framed" or "managed_new" or "managed_collect"
             or GuestContinuationState.StoreOp or GuestContinuationState.ReadOp
             or GuestEventState.SubscribeOp or GuestEventState.ReadOp
@@ -302,6 +308,7 @@ internal sealed partial class WasmFunctionCompiler
             FlushManagedRoots(body);
         switch (instruction.Op)
         {
+            case "borrow_global":
             case "borrow_address":
             case "borrow_managed":
             case "borrow_field":
@@ -1183,7 +1190,7 @@ internal sealed partial class WasmFunctionCompiler
         GuestTerminator terminator,
         IReadOnlyDictionary<string, int> blockIndices)
     {
-        RefreshBorrowedSlots(body);
+        RefreshAddressTakenSlots(body);
         switch (terminator.Kind)
         {
             case "branch":
@@ -1357,18 +1364,18 @@ internal sealed partial class WasmFunctionCompiler
     private void WriteResult(WasmBinaryWriter body, GuestInstruction instruction)
     {
         WriteLocalSet(body, localIndices[instruction.ResultId!]);
-        StoreBorrowedSlot(body, instruction.ResultId!);
+        StoreAddressTakenSlot(body, instruction.ResultId!);
     }
 
-    private void StoreBorrowedSlot(WasmBinaryWriter body, string id)
+    private void StoreAddressTakenSlot(WasmBinaryWriter body, string id)
     {
-        if (!frame.BorrowedAddressTargets.Contains(id) || IsMemoryValue(id)) return;
+        if (!frame.AddressTakenTargets.Contains(id) || IsMemoryValue(id)) return;
         WriteFrameAddress(body, id); WriteLocalGet(body, localIndices[id]); WasmMemoryEmitter.WriteStore(body, GetValueType(id));
     }
 
-    private void RefreshBorrowedSlots(WasmBinaryWriter body)
+    private void RefreshAddressTakenSlots(WasmBinaryWriter body)
     {
-        foreach (string id in frame.BorrowedAddressTargets.OrderBy(id => id, StringComparer.Ordinal))
+        foreach (string id in frame.AddressTakenTargets.OrderBy(id => id, StringComparer.Ordinal))
         {
             if (IsMemoryValue(id)) continue;
             WriteFrameAddress(body, id); WasmMemoryEmitter.WriteLoad(body, GetValueType(id)); WriteLocalSet(body, localIndices[id]);

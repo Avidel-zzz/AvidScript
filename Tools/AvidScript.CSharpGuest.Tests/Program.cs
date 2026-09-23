@@ -72,9 +72,15 @@ internal static class Program
                 Console.WriteLine($"AvidScript.CSharpGuest.Tests.LexicalCaptures: {focusedCount}/{focusedCount} passed");
                 return 0;
             }
+            if (args.Length == 1 && args[0] == "--generated-event-state")
+            {
+                int focusedCount = CSharpGuestEventStateTests.RunGeneratedFacade();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.GeneratedEventState: {focusedCount}/{focusedCount} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--delegate-events")
             {
-                int focusedCount = CSharpGuestDelegateEventTests.Run();
+                int focusedCount = CSharpGuestDelegateEventTests.Run() + CSharpGuestEventStateTests.Run();
                 Console.WriteLine($"AvidScript.CSharpGuest.Tests.DelegateEvents: {focusedCount}/{focusedCount} passed");
                 return 0;
             }
@@ -108,7 +114,7 @@ internal static class Program
                 + CSharpGuestArrayCapabilityTests.Run()
                 + CSharpGuestCompositeCapabilityTests.Run()
                 + CSharpDataLaneFusionTests.Run()
-                + CSharpGuestDelegateEventTests.Run()
+                + CSharpGuestDelegateEventTests.Run() + CSharpGuestEventStateTests.Run()
                 + CSharpGuestContinuationTests.Run()
                 + CSharpGuestManagedAsyncTests.Run()
                 + CSharpGuestAsyncInvocationTests.Run()

@@ -31,7 +31,8 @@ internal static class CSharpDelegateEventLowerer
         IReadOnlyList<GuestFunction> loweredFunctions,
         List<GuestDiagnostic> diagnostics)
     {
-        if (document.DelegateEventCallbacks.Count == 0)
+        var subscriptions = CSharpEventSubscriptions.Active(document).ToDictionary(entry => entry.SubscriptionId, StringComparer.Ordinal);
+        if (document.DelegateEventCallbacks.Count == 0 && subscriptions.Count == 0)
         {
             return null;
         }
@@ -50,7 +51,20 @@ internal static class CSharpDelegateEventLowerer
         List<GuestFunction> functions = new();
         List<GuestExport> exports = new();
 
-        foreach (SemanticDelegateEventCallback callback in document.DelegateEventCallbacks
+        // Reuse one codec and output transaction for static and persistent callbacks.
+        List<SemanticDelegateEventCallback> callbacks = document.DelegateEventCallbacks.ToList();
+        foreach (var entry in subscriptions.Values)
+        {
+            if (callbacks.Any(callback => callback.SubscriptionId == entry.SubscriptionId))
+                Add(diagnostics, $"Event '{entry.SubscriptionId}' cannot mix a fixed handler with a stateful subscription in the same module.");
+            var signature = document.DelegateTypes.Single(item => item.TypeId == entry.DelegateTypeId);
+            string method = "$event:signature:" + entry.SubscriptionId;
+            callablesById.Add(method, new SemanticCallable(method, "type:void", signature.ReturnTypeId,
+                signature.Parameters.Select(p => new SemanticCallableParameter(p.Ordinal, method + ":" + p.Ordinal,
+                    "arg" + p.Ordinal, p.TypeId, p.RefKind)).ToArray(), true, false, false, null, null, null));
+            callbacks.Add(new(entry.SubscriptionId, entry.ExportName, entry.DelegateTypeId, method, new SemanticSpan(0, 0, 0, 0, 0, 0)));
+        }
+        foreach (SemanticDelegateEventCallback callback in callbacks
             .OrderBy(callback => callback.SubscriptionId, StringComparer.Ordinal))
         {
             if (explicitExports.Contains(callback.ExportName)
@@ -62,9 +76,9 @@ internal static class CSharpDelegateEventLowerer
             }
 
             if (!callablesById.TryGetValue(callback.MethodSymbolId, out SemanticCallable? callable)
-                || !loweredFunctionIds.Contains(CSharpGuestIds.Function(callback.MethodSymbolId))
+                || !subscriptions.ContainsKey(callback.SubscriptionId) && !loweredFunctionIds.Contains(CSharpGuestIds.Function(callback.MethodSymbolId))
                 || !callable.IsStatic
-                || !callable.HasBody
+                || !subscriptions.ContainsKey(callback.SubscriptionId) && !callable.HasBody
                 || callable.Parameters.Any(parameter => parameter.RefKind is not ("none" or "ref" or "out")))
             {
                 Add(diagnostics,
@@ -136,12 +150,12 @@ internal static class CSharpDelegateEventLowerer
                 callback,
                 callable,
                 plans,
-                returnPlan);
+                returnPlan, document, subscriptions.GetValueOrDefault(callback.SubscriptionId));
             functions.Add(wrapper);
             exports.Add(new GuestExport(callback.ExportName, wrapper.Id));
         }
 
-        bool requiresOutputWrite = document.DelegateEventCallbacks.Any(callback =>
+        bool requiresOutputWrite = callbacks.Any(callback =>
             callablesById.TryGetValue(callback.MethodSymbolId, out SemanticCallable? callable)
             && (!string.Equals(callable.ReturnTypeId, "type:void", StringComparison.Ordinal)
                 || callable.Parameters.Any(parameter => parameter.RefKind is "ref" or "out")));
@@ -237,7 +251,7 @@ internal static class CSharpDelegateEventLowerer
         SemanticDelegateEventCallback callback,
         SemanticCallable callable,
         IReadOnlyList<AbiValuePlan> plans,
-        AbiValuePlan? returnPlan)
+        AbiValuePlan? returnPlan, SemanticDocument document, SemanticEventSubscription? subscription)
     {
         SemanticCallableParameter[] callableParameters = callable.Parameters
             .OrderBy(parameter => parameter.Ordinal)
@@ -265,7 +279,7 @@ internal static class CSharpDelegateEventLowerer
         List<GuestInstruction> instructions = new();
         List<string> arguments = new();
         List<(int Ordinal, GuestRegister Address)> outputAddresses = new();
-        int leafOrdinal = 0;
+        int leafOrdinal = hasOutputs ? 1 : 0;
         int aggregateOrdinal = 0;
         int outputOrdinal = 0;
         for (int index = 0; index < plans.Count; ++index)
@@ -300,7 +314,14 @@ internal static class CSharpDelegateEventLowerer
                     value.Id,
                     null,
                     null));
-                arguments.Add(address.Id);
+                if (CSharpBorrowedReferences.Enabled(document))
+                {
+                    GuestRegister borrowed = new(address.Id + ":borrow", CSharpBorrowedReferences.Type(value.TypeId));
+                    locals.Add(borrowed);
+                    instructions.Add(new("borrow_address", borrowed.Id, Array.Empty<string>(), value.Id, null, null));
+                    arguments.Add(borrowed.Id);
+                }
+                else arguments.Add(address.Id);
                 outputAddresses.Add((outputOrdinal++, address));
             }
             else
@@ -320,13 +341,10 @@ internal static class CSharpDelegateEventLowerer
             locals.Add(returnValue);
         }
 
-        instructions.Add(new GuestInstruction(
-            "call",
-            returnValue?.Id,
-            arguments,
-            CSharpGuestIds.Function(callable.MethodSymbolId),
-            null,
-            null));
+        if (subscription is not null)
+            CSharpEventSubscriptions.Invoke(subscription, arguments, returnValue?.Id, locals, instructions);
+        else instructions.Add(new GuestInstruction(
+            "call", returnValue?.Id, arguments, CSharpGuestIds.Function(callable.MethodSymbolId), null, null));
         if (returnValue is not null)
         {
             GuestRegister returnAddress = new(

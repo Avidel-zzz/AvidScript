@@ -1,4 +1,5 @@
 #include "AvidScriptWasmRuntime.h"
+#include "AvidScriptEventStateAbi.h"
 #include "AvidScriptWasmRuntimePrivate.h"
 
 #include "AvidScriptBindingDescriptor.h"
@@ -2154,11 +2155,33 @@ bool FAvidScriptWasmRuntimeInstance::PrepareDelegateEventExports(
 
 	TArray<FAvidScriptPreparedDelegateEvent> ImplementedEvents;
 	ImplementedEvents.Reserve(InOutEvents.Num());
-	for (const FAvidScriptPreparedDelegateEvent& Event : InOutEvents)
+	for (FAvidScriptPreparedDelegateEvent Event : InOutEvents)
 	{
 		FAvidScriptVmExportHandle Handle;
 		FAvidScriptVmError ResolveError;
-		if (!VmBackend->ResolveExport(Event.ExportName, Handle, ResolveError))
+		Event.bRequiresManagedState = false;
+		const FString LegacyName = Event.ExportName;
+		const bool bLegacy = VmBackend->ResolveExport(LegacyName, Handle, ResolveError);
+		FAvidScriptVmExportHandle ManagedHandle;
+		FAvidScriptVmError ManagedError;
+		const FString ManagedName = LegacyName + UTF8_TO_TCHAR(AvidScript::EventState::Abi::CallbackExportSuffix);
+		const bool bManaged = VmBackend->ResolveExport(ManagedName, ManagedHandle, ManagedError);
+		if ((!bLegacy && ResolveError.Category != TEXT("missing_export"))
+			|| (!bManaged && ManagedError.Category != TEXT("missing_export"))
+			|| (bLegacy && bManaged)
+			|| (bManaged && Event.CallbackKind != TEXT("multicast") && Event.CallbackKind != TEXT("singlecast")))
+		{
+			OutError = TEXT("delegate_export_contract_invalid | ") + LegacyName;
+			DelegateEventExports.Reset();
+			return false;
+		}
+		if (bManaged)
+		{
+			Handle = ManagedHandle;
+			Event.ExportName = ManagedName;
+			Event.bRequiresManagedState = true;
+		}
+		if (!bLegacy && !bManaged)
 		{
 			if (ResolveError.Category == TEXT("missing_export"))
 			{

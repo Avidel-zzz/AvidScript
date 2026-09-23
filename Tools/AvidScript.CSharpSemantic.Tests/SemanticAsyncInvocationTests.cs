@@ -38,7 +38,7 @@ internal static class SemanticAsyncInvocationTests
             """;
         SemanticDocument document = Analyze(source);
         Check(document.Succeeded, string.Join(" | ", document.Diagnostics.Select(item => item.Message)));
-        Check(document.SchemaVersion == 28 && document.SemanticVersion == "1.32", "async callable invocation is versioned");
+        Check(document.SchemaVersion == 29 && document.SemanticVersion == "1.33", "async callable invocation is versioned");
         Check(SemanticClosureContractValidator.IsValid(document), "complete invocation, lexical scope and closure contracts validate");
         Check(document.AsyncMethods.Count == 4 && document.AsyncMethods.All(method => method.ExportName is null
             && method.Lowering == SemanticAsyncMethod.ContinuationCfgLowering), "member calls have no invented WASM export and use resumable CFG");
@@ -71,7 +71,7 @@ internal static class SemanticAsyncInvocationTests
         foreach (SemanticAsyncMethod bad in badMethods)
             Check(!SemanticClosureContractValidator.IsValid(document with { AsyncMethods = document.AsyncMethods.Select(method => method == run ? bad : method).ToArray() }), "tampered invocation metadata fails closed");
         Check(!SemanticAsyncInvocationValidator.IsValid(document with { SchemaVersion = 27, SemanticVersion = "1.31" }), "old version cannot carry new invocation inputs");
-        Check(!SemanticAsyncInvocationValidator.IsValid(document with { SchemaVersion = 29, SemanticVersion = "1.33" }), "unknown future contract is rejected");
+        Check(!SemanticAsyncInvocationValidator.IsValid(document with { SchemaVersion = SemanticContract.CurrentSchemaVersion + 1, SemanticVersion = "1.33" }), "unknown future contract is rejected");
         SemanticCallable runCallable = document.Callables.Single(item => item.MethodSymbolId == run.MethodSymbolId);
         Check(!SemanticAsyncInvocationValidator.IsValid(document with { Callables = document.Callables.Select(callable => callable == runCallable ? callable with {
             Parameters = callable.Parameters.Select(parameter => parameter with { RefKind = "ref" }).ToArray() } : callable).ToArray() }), "borrowed inputs cannot cross a suspension");

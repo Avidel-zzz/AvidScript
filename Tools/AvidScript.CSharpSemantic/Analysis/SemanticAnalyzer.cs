@@ -88,7 +88,7 @@ public static class SemanticAnalyzer
         SemanticGameplayEventProjection gameplayEventProjection =
             SemanticGameplayEventProjector.Project(context, callableProjection.Callables);
         SemanticDelegateEventProjection delegateEventProjection =
-            SemanticDelegateEventProjector.Project(context);
+            SemanticDelegateEventProjector.Project(context, typeRegistry);
         SemanticContinuationProjection continuationProjection =
             SemanticContinuationProjector.Project(context);
         SemanticSupportProjection supportProjection = SemanticSupportPolicy.ProjectDocument(context);
@@ -176,6 +176,7 @@ public static class SemanticAnalyzer
             StateContracts = stateContractProjection.Contracts,
             GameplayEventCallbacks = gameplayEventProjection.Callbacks,
             DelegateEventCallbacks = delegateEventProjection.Callbacks,
+            EventSubscriptions = delegateEventProjection.Subscriptions,
             ContinuationCallbacks = continuationProjection.Callbacks,
             AsyncMethods = asyncProjection.Methods,
             UeTypeDeclarations = ueTypeProjection.Declarations,

@@ -2872,7 +2872,28 @@ bool FAvidScriptEditorDelegateEventFacadeTest::RunTest(
 			&& SharedOwnerSource.Find(SenderSignature, ESearchCase::CaseSensitive,
 				ESearchDir::FromStart, SenderOffset + SenderSignature.Len()) == INDEX_NONE);
 
+	TestTrue(TEXT("Typed overload binds an exact delegate and versioned compiler boundary"),
+		ReferenceSource.Contains(TEXT("public delegate void OnScriptSignal(global::AvidScript.AActor arg0, global::System.Int32 arg1, global::System.Single arg2);"))
+		&& ReferenceSource.Contains(TEXT("source, AvidEventHandlers.OnScriptSignal handler)"))
+		&& ReferenceSource.Contains(FString::Printf(TEXT("[AvidEventSubscription(\"%s\", %d)]"), *Event.StableId, Event.Ordinal)));
+	TestTrue(TEXT("Typed overload preserves descriptor ordinal"),
+		NonSequentialOrdinalSource.Contains(FString::Printf(TEXT("[AvidEventSubscription(\"%s\", 37)]"), *Event.StableId)));
+	FAvidScriptBindingSelectionProfile ExecutionProfile = SharedOwnerProfile;
+	ExecutionProfile.ExplicitDelegateEvents.Add({ OwnerPath, TEXT("OnSinglecastSignal") });
+	ExecutionProfile.ExplicitDelegateEvents.Last().CallbackKind = TEXT("singlecast");
+	FString ExecutionDescriptor, ExecutionSource, ExecutionManifest;
+	FAvidScriptCSharpBindingEmitResult ExecutionResult;
+	if (!FAvidScriptEditorCSharpBindingEmitter::EmitProfile(ExecutionProfile,
+		ExecutionDescriptor, ExecutionSource, ExecutionManifest, ExecutionResult))
+	{ AddError(ExecutionResult.ErrorMessage); return false; }
+	const FString FixtureRoot = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("AvidScriptManagedHeapTests/GuestFixtures"));
+	IFileManager::Get().MakeDirectory(*FixtureRoot, true);
+	if (!TestTrue(TEXT("Publish production event facade for CSharp execution tests"),
+		FFileHelper::SaveStringToFile(ExecutionSource, *FPaths::Combine(FixtureRoot, TEXT("event-facade.generated.cs")), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM)
+		&& FFileHelper::SaveStringToFile(ExecutionDescriptor, *FPaths::Combine(FixtureRoot, TEXT("event-facade.bindings.json")), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))) return false;
+
 	const TArray<FString> ReservedTypeNames = {
+		TEXT("AvidEventHandlers"), TEXT("AvidEventSubscriptionNative"), TEXT("AvidEventSubscriptionAttribute"),
 		TEXT("AvidSubscription"),
 		TEXT("AvidSubscriptions")
 	};

@@ -40,6 +40,12 @@ internal static class GuestBorrowedReferenceValidator
         if (instruction.Op == "borrow_address")
             valid &= target?.Kind == GuestBorrowedReference.Kind && operands.Count == 0
                 && instruction.TargetId is { } id && values.TryGetValue(id, out GuestRegister? storage) && target.ElementTypeId == storage.TypeId;
+        else if (instruction.Op == "borrow_global")
+        {
+            GuestGlobal? global = context.Module.Globals.FirstOrDefault(item => item.Id == instruction.TargetId);
+            valid &= context.Module.SchemaVersion >= 13 && target?.Kind == GuestBorrowedReference.Kind
+                && operands.Count == 0 && global is { IsMutable: true } && target.ElementTypeId == global.TypeId;
+        }
         else if (instruction.Op is "borrow_managed" or "borrow_field")
         {
             bool owner = instruction.Op == "borrow_managed" ? first?.Kind == "managed_ref" : first?.Kind == GuestBorrowedReference.Kind;

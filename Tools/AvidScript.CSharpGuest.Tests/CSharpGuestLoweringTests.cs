@@ -154,8 +154,8 @@ internal static class CSharpGuestLoweringTests
             StringComparison.Ordinal);
         GuestModule restored = GuestIrSerializer.Deserialize(Encoding.UTF8.GetBytes(legacySerialized));
 
-        Assert(GuestModuleValidator.CurrentSchemaVersion == 12
-            && GuestModuleValidator.CurrentIrVersion == "1.11",
+        Assert(GuestModuleValidator.CurrentSchemaVersion == 13
+            && GuestModuleValidator.CurrentIrVersion == "1.12",
             "Guest IR typed event state should use the current schema identity");
         Assert(legacyCompatibleImport.DispatchClass == "semantic"
             && restored.Imports[0].DispatchClass == "semantic",

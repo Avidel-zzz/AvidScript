@@ -314,7 +314,7 @@ bool FAvidScriptSessionDelegateSubscriptions::Prepare(
 			return false;
 		}
 		Impl->PreparedCatalog.Add(Event.EventOrdinal, Event);
-		if (Event.Signature.Kind
+		if (Event.bRequiresManagedState || Event.Signature.Kind
 			== EAvidScriptPreparedDelegateKind::Singlecast)
 		{
 			continue;
@@ -447,6 +447,7 @@ int64 FAvidScriptSessionDelegateSubscriptions::SubscribeInternal(
 		OutError = TEXT("delegate_event_unavailable");
 		return 0;
 	}
+	if (Event->bRequiresManagedState && !Lease) { OutError = TEXT("delegate_managed_state_required"); return 0; }
 	if (Event->Signature.Kind
 			== EAvidScriptPreparedDelegateKind::Singlecast
 		&& Entries.ContainsByPredicate(

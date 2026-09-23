@@ -403,7 +403,7 @@ internal sealed class CSharpFunctionLoweringContext
     {
         if (methodSymbolId is not null
             && callablesBySymbol.TryGetValue(methodSymbolId, out SemanticCallable? found)
-            && (found.Import is not null || found.HasBody)
+            && (found.Import is not null || found.HasBody || Document.EventSubscriptions.Any(entry => entry.MethodSymbolId == found.MethodSymbolId))
             && IsReachable(found)
             && (!found.IsConstructor
                 || (!CSharpClassReferencePolicy.IsClassReferenceTypeId(found.ContainingTypeId)

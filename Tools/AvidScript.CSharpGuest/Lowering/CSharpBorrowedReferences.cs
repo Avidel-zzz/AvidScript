@@ -48,6 +48,12 @@ internal static class CSharpBorrowedReferences
             { context.Add("ASCG1024", "A raw Host reference cannot become a traced Guest borrow without an explicit boundary adapter."); return null; }
             return Storage(context, storage, block, instructions);
         }
+        if (operation.Kind == "field_reference" && operation.Children.Count == 0 && context.TryGetGlobal(operation.SymbolId, out string global))
+        {
+            GuestRegister? reference = context.CreateTemporary(Type(operation.TypeId!), block);
+            if (reference is not null) instructions.Add(new("borrow_global", reference.Id, Array.Empty<string>(), global, null, null));
+            return reference;
+        }
         if (operation.Kind == "field_reference" && operation.Children.Count == 1 && !context.IsUeProperty(operation.SymbolId))
         {
             if (CSharpReferenceObjects.IsField(context, operation))

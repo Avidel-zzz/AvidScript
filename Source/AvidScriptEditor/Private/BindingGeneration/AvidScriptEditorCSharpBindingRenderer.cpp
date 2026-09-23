@@ -2359,6 +2359,12 @@ bool AppendDelegateEventReferenceSurface(
 		TEXT("    internal string ReturnType { get; }"),
 		TEXT("}"),
 		TEXT(""),
+		TEXT("[AttributeUsage(AttributeTargets.Method, Inherited = false, AllowMultiple = false)]"),
+		TEXT("internal sealed class AvidEventSubscriptionAttribute : Attribute"),
+		TEXT("{"),
+		TEXT("    internal AvidEventSubscriptionAttribute(string subscriptionId, int eventOrdinal) { }"),
+		TEXT("}"),
+		TEXT(""),
 		TEXT("public readonly struct AvidSubscription"),
 		TEXT("{"),
 		TEXT("    private readonly long Token;"),
@@ -2375,6 +2381,8 @@ bool AppendDelegateEventReferenceSurface(
 		TEXT("public static class AvidEvents"),
 		TEXT("{")
 	});
+	TArray<FString> HandlerLines = { TEXT("public static class AvidEventHandlers"), TEXT("{") };
+	TArray<FString> SubscriptionLines = { TEXT("internal static class AvidEventSubscriptionNative"), TEXT("{") };
 	for (const FAvidScriptBindingDelegateEventModel& Event :
 		Package.DelegateEvents)
 	{
@@ -2430,6 +2438,21 @@ bool AppendDelegateEventReferenceSurface(
 				return false;
 			}
 		}
+		TArray<FString> HandlerParameters;
+		for (int32 Index = 0; Index < ParameterTypes.Num(); ++Index)
+		{
+			const FString Direction = ParameterDirections[Index] == TEXT("none")
+				? FString() : ParameterDirections[Index] + TEXT(" ");
+			HandlerParameters.Add(FString::Printf(TEXT("%s%s arg%d"), *Direction, *ParameterTypes[Index], Index));
+		}
+		const FString HandlerName = FAvidScriptEditorCSharpSyntax::MakeIdentifier(Event.ScriptName);
+		HandlerLines.Add(FString::Printf(TEXT("    public delegate %s %s(%s);"),
+			ReturnType == TEXT("global::System.Void") ? TEXT("void") : *ReturnType,
+			*HandlerName, *FString::Join(HandlerParameters, TEXT(", "))));
+		SubscriptionLines.Add(FString::Printf(TEXT("    [AvidEventSubscription(\"%s\", %d)]"), *Event.StableId, Event.Ordinal));
+		SubscriptionLines.Add(TEXT("    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.InternalCall)]"));
+		SubscriptionLines.Add(FString::Printf(TEXT("    internal static extern long Subscribe_%s(int slot, int generation, AvidEventHandlers.%s handler);"),
+			*Event.StableId.Left(16), *HandlerName));
 		Lines.Add(Package.SchemaVersion >= 20
 			? FString::Printf(
 				TEXT("    [AvidEventContract(\"%s\", \"%s\", \"%s\", \"%s\")]"),
@@ -2447,9 +2470,12 @@ bool AppendDelegateEventReferenceSurface(
 			*FAvidScriptEditorCSharpSyntax::MakeIdentifier(Event.ScriptName),
 			*EscapeCSharpString(Event.StableId)));
 	}
+	Lines.Append({ TEXT("}"), TEXT("") });
+	HandlerLines.Append({ TEXT("}"), TEXT("") });
+	SubscriptionLines.Append({ TEXT("}"), TEXT("") });
+	Lines.Append(HandlerLines);
+	Lines.Append(SubscriptionLines);
 	Lines.Append({
-		TEXT("}"),
-		TEXT(""),
 		TEXT("public static class AvidSubscriptions"),
 		TEXT("{")
 	});
@@ -2485,6 +2511,12 @@ bool AppendDelegateEventReferenceSurface(
 		Lines.Add(FString::Printf(
 			TEXT("        => new(AvidScriptRuntimeNative.EventSubscribe(source.AvidScriptSlot, source.AvidScriptGeneration, %d));"),
 			Event.Ordinal));
+		Lines.Add(FString::Printf(TEXT("    public static AvidSubscription %s%s(%s source, AvidEventHandlers.%s handler)"),
+			*MethodPrefix, *FAvidScriptEditorCSharpSyntax::MakeIdentifier(Event.ScriptName),
+			*FAvidScriptEditorCSharpSyntax::MakeIdentifier(OwnerType->CppType),
+			*FAvidScriptEditorCSharpSyntax::MakeIdentifier(Event.ScriptName)));
+		Lines.Add(FString::Printf(TEXT("        => new(AvidEventSubscriptionNative.Subscribe_%s(source.AvidScriptSlot, source.AvidScriptGeneration, handler));"),
+			*Event.StableId.Left(16)));
 		if (Event.DelegateKind == TEXT("multicast"))
 		{
 			Lines.Add(FString::Printf(
@@ -2807,12 +2839,15 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 	if (!Package.DelegateEvents.IsEmpty()
 		&& (CSharpTypeNames.Contains(TEXT("AvidEventAttribute"))
 			|| CSharpTypeNames.Contains(TEXT("AvidEventContractAttribute"))
+			|| CSharpTypeNames.Contains(TEXT("AvidEventSubscriptionAttribute"))
+			|| CSharpTypeNames.Contains(TEXT("AvidEventHandlers"))
+			|| CSharpTypeNames.Contains(TEXT("AvidEventSubscriptionNative"))
 			|| CSharpTypeNames.Contains(TEXT("AvidEvents"))
 			|| CSharpTypeNames.Contains(TEXT("AvidSubscription"))
 			|| CSharpTypeNames.Contains(TEXT("AvidSubscriptions"))))
 	{
 		OutErrorCategory = TEXT("csharp_type_collision");
-		OutErrorSource = TEXT("AvidEventAttribute|AvidEventContractAttribute|AvidEvents|AvidSubscription|AvidSubscriptions");
+		OutErrorSource = TEXT("AvidEventAttribute|AvidEventContractAttribute|AvidEventSubscriptionAttribute|AvidEventHandlers|AvidEventSubscriptionNative|AvidEvents|AvidSubscription|AvidSubscriptions");
 		return false;
 	}
 	if (Package.SchemaVersion >= 9

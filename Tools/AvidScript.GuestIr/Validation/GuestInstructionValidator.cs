@@ -20,6 +20,7 @@ internal static class GuestInstructionValidator
 
         switch (instruction.Op)
         {
+            case "borrow_global":
             case "borrow_address":
             case "borrow_managed":
             case "borrow_field":

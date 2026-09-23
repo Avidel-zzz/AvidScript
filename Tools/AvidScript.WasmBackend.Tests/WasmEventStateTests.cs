@@ -23,7 +23,7 @@ internal static class WasmEventStateTests
         List<GuestModule> invalid = new()
         {
             module with { SchemaVersion = 11, IrVersion = "1.10" },
-            module with { SchemaVersion = 13, IrVersion = "1.12" },
+            module with { SchemaVersion = GuestModuleValidator.CurrentSchemaVersion + 1, IrVersion = "future" },
             module with { IrVersion = "1.10" },
             module with { Imports = module.Imports.Where(import => import.Id != "subscribe").ToArray() },
             module with { Imports = module.Imports.Where(import => import.Id != "heap").ToArray() },

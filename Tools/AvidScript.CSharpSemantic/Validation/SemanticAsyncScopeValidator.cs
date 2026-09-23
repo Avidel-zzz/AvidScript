@@ -18,6 +18,7 @@ public static class SemanticAsyncScopeValidator
                 continue;
             }
             if (!(document.SchemaVersion == 27 && document.SemanticVersion == "1.31")
+                && !(document.SchemaVersion == 28 && document.SemanticVersion == "1.32")
                 && !(document.SchemaVersion == SemanticContract.CurrentSchemaVersion && document.SemanticVersion == SemanticContract.CurrentSemanticVersion)) return false;
             if (method.LexicalScopes.Count == 0)
             {

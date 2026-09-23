@@ -91,10 +91,56 @@ internal static class WasmFunctionReferenceTests
             File.WriteAllBytes(Path.Combine(root, "function-references.wasm"), compiled.Bytes);
             File.WriteAllBytes(Path.Combine(root, "function-references-cooperative.wasm"), cooperative.Bytes);
         }
-        return 7 + 2 + invalid.Length + 1;
+        GuestModule addressTaken = CreateAddressTakenRegression(module);
+        WasmCompilationResult addressTakenWasm = WasmModuleCompiler.Compile(addressTaken);
+        Require(addressTakenWasm.Succeeded, string.Join(" | ", addressTakenWasm.Diagnostics.Select(item => item.Message)));
+        string? eventFixtureRoot = Environment.GetEnvironmentVariable("AVIDSCRIPT_MANAGED_HEAP_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(eventFixtureRoot))
+        {
+            Directory.CreateDirectory(eventFixtureRoot);
+            File.WriteAllBytes(Path.Combine(eventFixtureRoot, "address-taken-regression.wasm"), addressTakenWasm.Bytes);
+        }
+        return 7 + 2 + invalid.Length + 2;
 
         GuestModule Change(GuestFunctionReference reference) => module with
             { FunctionReferences = new[] { reference }.Concat(module.FunctionReferences.Skip(1)).ToArray() };
+    }
+
+    private static GuestModule CreateAddressTakenRegression(GuestModule basis)
+    {
+        GuestType floatType = new("type:float32", "scalar", "f32", Array.Empty<GuestField>(), null, null, 4, 4);
+        GuestTypeLayoutResult types = GuestDataLayout.ComputeTypes(basis.Types.Append(floatType).ToArray());
+        GuestGlobal[] globals = { new("observed_zero", Int, true, new("int32", "0")),
+            new("observed_call_result", Int, true, new("int32", "0")) };
+        GuestLayoutResult layout = GuestLayoutBuilder.Build(types.Types, globals, Array.Empty<GuestDataSegment>());
+        Require(types.Succeeded && layout.Succeeded
+            && layout.Layout!.StateSlots.Single(slot => slot.GlobalId == "observed_call_result").Offset == 16
+            && layout.Layout.StateSlots.Single(slot => slot.GlobalId == "observed_zero").Offset == 20,
+            "address-taken runtime layout");
+
+        GuestFunction prime = Function("function:prime_address_slot", Array.Empty<GuestRegister>(),
+            new[] { Reg("value", Int), Reg("address", Address) }, "type:void",
+            new[] { Constant("value", 777), Op("address_of", "address", Array.Empty<string>(), "value") }, null);
+        GuestFunction observe = Function("function:observe_address_slot", Array.Empty<GuestRegister>(),
+            new[] { Reg("value", Int), Reg("address", Address), Reg("observed", Int) }, Int,
+            new[] { Op("address_of", "address", Array.Empty<string>(), "value"),
+                Op("indirect_load", "observed", new[] { "address" }, Int) }, "observed");
+        GuestFunction begin = Function("function:address_taken_begin", Array.Empty<GuestRegister>(),
+            Array.Empty<GuestRegister>(), "type:void", Array.Empty<GuestInstruction>(), null);
+        GuestFunction entry = Function("function:address_taken_entry", new[] { Reg("delta", floatType.Id) },
+            new[] { Reg("zero", Int), Reg("seventy_five", Int), Reg("call_result", Int),
+                Reg("address", Address), Reg("observed", Int) }, "type:void",
+            new[] { Op("call", null, Array.Empty<string>(), prime.Id),
+                Op("call", "zero", Array.Empty<string>(), observe.Id),
+                Op("global_store", null, new[] { "zero" }, globals[0].Id),
+                Constant("seventy_five", 75), Op("call", "call_result", new[] { "seventy_five" }, "function:plus"),
+                Op("address_of", "address", Array.Empty<string>(), "call_result"),
+                Op("indirect_load", "observed", new[] { "address" }, Int),
+                Op("global_store", null, new[] { "observed" }, globals[1].Id) }, null);
+        return basis with { Types = types.Types, Globals = globals, MemoryLayout = layout.Layout!,
+            Functions = basis.Functions.Concat(new[] { prime, observe, begin, entry }).ToArray(),
+            Exports = basis.Exports.Concat(new[] { new GuestExport("avid_on_begin_play", begin.Id),
+                new GuestExport("avid_on_tick", entry.Id) }).ToArray() };
     }
 
     private static GuestModule Create()

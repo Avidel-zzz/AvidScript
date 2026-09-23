@@ -266,6 +266,8 @@ struct FAvidScriptPreparedDelegateSignaturePlan
 
 struct FAvidScriptPreparedDelegateEvent
 {
+	// Resolved from the versioned Guest entry, never accepted from descriptor JSON.
+	bool bRequiresManagedState = false;
 	uint32 EventOrdinal = MAX_uint32;
 	FString StableId;
 	FString ExportName;

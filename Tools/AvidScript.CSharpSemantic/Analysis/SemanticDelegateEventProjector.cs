@@ -8,7 +8,8 @@ namespace AvidScript.CSharpSemantic;
 
 internal sealed record SemanticDelegateEventProjection(
     IReadOnlyList<SemanticDelegateEventCallback> Callbacks,
-    IReadOnlyList<SemanticDiagnostic> Diagnostics);
+    IReadOnlyList<SemanticDiagnostic> Diagnostics,
+    IReadOnlyList<SemanticEventSubscription> Subscriptions);
 
 internal static class SemanticDelegateEventProjector
 {
@@ -22,7 +23,7 @@ internal static class SemanticDelegateEventProjector
         IReadOnlyList<string> ParameterDirections,
         string ReturnType);
 
-    public static SemanticDelegateEventProjection Project(SemanticCompilationContext context)
+    public static SemanticDelegateEventProjection Project(SemanticCompilationContext context, SemanticTypeRegistry typeRegistry)
     {
         List<SemanticDiagnostic> diagnostics = new();
         Dictionary<string, EventContract> contracts = CollectContracts(context, diagnostics);
@@ -149,12 +150,55 @@ internal static class SemanticDelegateEventProjector
             callbacks.Clear();
         }
 
+        IReadOnlyList<SemanticEventSubscription> subscriptions = CollectSubscriptions(context, typeRegistry, contracts, diagnostics);
         return new SemanticDelegateEventProjection(
-            callbacks.OrderBy(callback => callback.SubscriptionId, StringComparer.Ordinal).ToArray(),
+            (diagnostics.Count == 0 ? callbacks : new()).OrderBy(callback => callback.SubscriptionId, StringComparer.Ordinal).ToArray(),
             diagnostics
                 .OrderBy(diagnostic => diagnostic.Span.Start)
                 .ThenBy(diagnostic => diagnostic.Code, StringComparer.Ordinal)
-                .ToArray());
+                .ToArray(), subscriptions);
+    }
+
+    private static IReadOnlyList<SemanticEventSubscription> CollectSubscriptions(
+        SemanticCompilationContext context, SemanticTypeRegistry registry,
+        IReadOnlyDictionary<string, EventContract> contracts, List<SemanticDiagnostic> diagnostics)
+    {
+        List<SemanticEventSubscription> result = new();
+        HashSet<string> ids = new(StringComparer.Ordinal), exports = new(StringComparer.Ordinal);
+        HashSet<int> ordinals = new();
+        foreach (SyntaxTree tree in context.Compilation.SyntaxTrees)
+        {
+            SemanticModel model = context.Compilation.GetSemanticModel(tree);
+            foreach (MethodDeclarationSyntax syntax in tree.GetRoot().DescendantNodes().OfType<MethodDeclarationSyntax>())
+            {
+                if (model.GetDeclaredSymbol(syntax) is not IMethodSymbol method
+                    || FindAttribute(method.GetAttributes(), "global::AvidScript.AvidEventSubscriptionAttribute") is not { } attribute) continue;
+                string? id = ReadStringArgument(attribute, 0);
+                int ordinal = attribute.ConstructorArguments.Length == 2 && attribute.ConstructorArguments[1].Value is int value ? value : -1;
+                IMethodSymbol? invoke = method.Parameters.Length == 3
+                    ? (method.Parameters[2].Type as INamedTypeSymbol)?.DelegateInvokeMethod : null;
+                bool valid = id is not null && IsStableId(id) && contracts.TryGetValue(id, out EventContract? contract)
+                    && ordinal >= 0 && ordinal < int.MaxValue && method.IsStatic && method.IsExtern && !method.IsGenericMethod
+                    && method.ContainingType.Arity == 0 && syntax.Body is null && syntax.ExpressionBody is null
+                    && method.GetDllImportData() is null && method.ReturnType.SpecialType == SpecialType.System_Int64
+                    && method.RefKind == RefKind.None && method.Parameters.Length == 3
+                    && method.Parameters.All(p => p.RefKind == RefKind.None && !p.HasExplicitDefaultValue && !p.IsParams)
+                    && method.Parameters[0].Type.SpecialType == SpecialType.System_Int32
+                    && method.Parameters[1].Type.SpecialType == SpecialType.System_Int32
+                    && invoke is not null && invoke.RefKind == RefKind.None
+                    && ParametersMatch(invoke.Parameters, contract.ParameterTypes, contract.ParameterDirections)
+                    && TypeMatches(invoke.ReturnType, contract.ReturnType)
+                    && ids.Add(id) && exports.Add(ExportPrefix + id[..16]) && ordinals.Add(ordinal);
+                if (!valid)
+                {
+                    diagnostics.Add(Error("ASCS5209", $"Typed event subscription '{method.Name}' must uniquely match a generated event and expose static extern long(int, int, exact delegate).",
+                        tree == context.PrimaryUnit.SyntaxTree ? SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, syntax.Identifier.Span) : SemanticSpanFactory.Empty));
+                    continue;
+                }
+                result.Add(new(id!, ordinal, SemanticSymbolProjector.GetSymbolId(method), registry.Register(method.Parameters[2].Type)));
+            }
+        }
+        return diagnostics.Count == 0 ? result.OrderBy(item => item.SubscriptionId, StringComparer.Ordinal).ToArray() : Array.Empty<SemanticEventSubscription>();
     }
 
     private static Dictionary<string, EventContract> CollectContracts(

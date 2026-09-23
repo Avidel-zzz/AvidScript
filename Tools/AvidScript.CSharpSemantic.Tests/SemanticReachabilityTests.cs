@@ -76,7 +76,7 @@ internal static class SemanticReachabilityTests
             });
 
         Assert(document.Succeeded, "reachable generated facade source should analyze");
-        Assert(document.SchemaVersion == 28 && document.SemanticVersion == "1.32",
+        Assert(document.SchemaVersion == 29 && document.SemanticVersion == "1.33",
             "reachability requires the explicit semantic schema version");
         SemanticReachability reachability = document.Reachability
             ?? throw new InvalidOperationException("schema 6 semantic output omitted reachability");

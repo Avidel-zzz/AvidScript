@@ -26,7 +26,7 @@ internal sealed class WasmFunctionFrameLayout
     public int? ArrayElementScratchOffset { get; }
     public int? ManagedScratchOffset { get; }
     public int? CallScratchOffset { get; private init; }
-    public IReadOnlySet<string> BorrowedAddressTargets { get; private init; } = new HashSet<string>();
+    public IReadOnlySet<string> AddressTakenTargets { get; private init; } = new HashSet<string>();
 
     public static WasmFunctionFrameLayout Create(
         GuestFunction function,
@@ -100,8 +100,9 @@ internal sealed class WasmFunctionFrameLayout
         return new WasmFunctionFrameLayout(offsets, arrayElementScratchOffset, managedScratchOffset, frameSize)
         {
             CallScratchOffset = callScratchOffset,
-            BorrowedAddressTargets = function.Blocks.SelectMany(block => block.Instructions)
-                .Where(instruction => instruction.Op == "borrow_address").Select(instruction => instruction.TargetId!).ToHashSet(StringComparer.Ordinal),
+            // Both raw Host output addresses and traced borrows observe the same
+            // scalar storage. Call results must be stored before handing it out.
+            AddressTakenTargets = addressTargets,
         };
     }
 

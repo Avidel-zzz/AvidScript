@@ -18,7 +18,7 @@ internal static class CSharpClosureLayout
     public static string Thunk(string method, string signature) => CSharpGuestIds.Function(method) + ":$closure:thunk:" + signature;
     public static bool UsesManagedDelegates(SemanticDocument document) => document.ClosureEnvironments.Count != 0
         || CSharpDelegateComposition.Signatures(document).Count != 0 || CSharpBoundDelegateLowerer.Methods(document).Count != 0
-        || CSharpReferenceObjects.Types(document).Count != 0
+        || CSharpReferenceObjects.Types(document).Count != 0 || CSharpEventSubscriptions.Active(document).Count != 0
         // Instance frames use traced borrowed descriptors even when the source
         // has no closures or reference objects. Do not depend on an unrelated
         // lambda to select the correct ref/out ABI.
@@ -42,6 +42,7 @@ internal static class CSharpClosureLayout
         foreach (SemanticClosureBinding binding in document.ClosureBindings.Where(binding => binding.IsDelegateTarget))
             AddEnvironment(Binding(binding.MethodSymbolId), Environments(document, binding.MethodSymbolId)
                 .Select(environment => Field(environment.Id, Reference(environment.Id))).ToArray());
+        CSharpEventSubscriptions.AddTypes(document, types);
         CSharpDelegateComposition.AddTypes(document, types);
         CSharpBoundDelegateLowerer.AddTypes(document, types);
         void AddEnvironment(string id, GuestField[] fields)

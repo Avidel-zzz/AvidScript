@@ -21,7 +21,7 @@ internal static class SemanticDelegateTypeTests
         FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
         SemanticDocument document = SemanticAnalyzer.Analyze(source, sourceId, frontend.Source.Sha256);
         Require(document.Succeeded, string.Join(" | ", document.Diagnostics.Select(item => item.Message)));
-        Require(document.SchemaVersion == 28 && document.SemanticVersion == "1.32"
+        Require(document.SchemaVersion == 29 && document.SemanticVersion == "1.33"
             && SemanticDelegateContractValidator.IsValid(document), "delegate signatures require the versioned schema-21 contract");
         SemanticDelegateType[] functions = document.DelegateTypes.Where(type => type.TypeId.Contains("System.Func<")).ToArray();
         Require(functions.Length == 2 && functions.Select(type => type.InvokeMethodSymbolId).Distinct().Count() == 2,

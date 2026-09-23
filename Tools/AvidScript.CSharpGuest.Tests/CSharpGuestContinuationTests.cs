@@ -265,8 +265,8 @@ internal static class CSharpGuestContinuationTests
             block.Id.EndsWith(":result_rejected", StringComparison.Ordinal));
 
         Assert(result.Succeeded
-            && document.SchemaVersion == 28
-            && document.SemanticVersion == "1.32"
+            && document.SchemaVersion == 29
+            && document.SemanticVersion == "1.33"
             && guard.Terminator.Kind == "branch_if"
             && guard.Terminator.TargetBlockId == guardReturn.Id
             && guard.Terminator.FalseTargetBlockId == continuation.Id
@@ -719,8 +719,8 @@ internal static class CSharpGuestContinuationTests
             .ToArray();
 
         Assert(result.Succeeded
-            && document.SchemaVersion == 28
-            && document.SemanticVersion == "1.32"
+            && document.SchemaVersion == 29
+            && document.SemanticVersion == "1.33"
             && asyncMethod.Lowering == "reentrant_zero_heap_cps"
             && callbackIds.SequenceEqual(new[]
             {
@@ -1049,7 +1049,7 @@ internal static class CSharpGuestContinuationTests
 
         Assert(first.Succeeded
             && second.Succeeded
-            && document.SemanticVersion == "1.32"
+            && document.SemanticVersion == "1.33"
             && frame.Slots.Select(slot => slot.SymbolId)
                 .SequenceEqual(new[] { countId })
             && frame.Slots.All(slot => slot.SymbolId != overwrittenId),

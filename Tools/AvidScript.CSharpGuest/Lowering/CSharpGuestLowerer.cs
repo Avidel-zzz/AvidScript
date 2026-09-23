@@ -63,6 +63,8 @@ public static class CSharpGuestLowerer
         CSharpUeReceivers.AddGuards(document, functions);
         functions.AddRange(CSharpUeDelegateBinding.Build(document));
         functions.AddRange(CSharpDelegateComposition.Build(document));
+        functions.AddRange(CSharpEventSubscriptions.Build(document));
+        imports = imports.Concat(CSharpEventSubscriptions.Imports(document)).ToArray();
         if (CSharpClosureLayout.UsesManagedDelegates(document))
             imports = imports.Append(new GuestImport(CSharpClosureLayout.HeapImport, GuestManagedHeap.ImportModule, GuestManagedHeap.ImportName,
                 Enumerable.Repeat(CSharpGuestIds.AddressTypeId, 4).ToArray(), CSharpGuestIds.AddressTypeId)).ToArray();
