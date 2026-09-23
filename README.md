@@ -188,6 +188,8 @@ public static class ScoreScript
 
 脚本卸载、World 清理或源 Actor 销毁后会自动解绑。更新脚本失败时旧回调继续工作，成功时旧回调解绑，新脚本可重新订阅。单播事件已被占用、对象已失效或对象属于另一个 World 时，运行时会拒绝新订阅。[完整的事件行为与当前限制](Docs/Phase66/P66.B_Event_Language_Contract.md)。
 
+例如两个 Actor 的事件回调都在等待下一帧：包级更新失败时，两人的旧等待继续；更新成功时，两人的旧等待都取消，重新订阅后才能触发新版本。该组合已在 Windows 双后端自动化验证；[测试壳与未完成范围](Docs/Phase66/P66.B_Event_Language_Contract.md#事件回调跨-await)。
+
 </details>
 
 ### 🗂️ 找一个接近你需求的完整样例

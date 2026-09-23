@@ -906,6 +906,122 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
             TestEqual(TEXT("GC leaves only the peer event root"), SurvivingHeap->GetStats().LiveRoots, 1u);
             if (!Host->EndInstance(*SurvivingPeer, Error)) { AddError(Error); return false; }
             TestEqual(TEXT("GC peer exit empties the Host"), Host->GetActiveInstanceCount(), 0);
+
+            AActor* ReloadOwner = World->SpawnActor<AActor>(Signal->ExpectedSourceClass);
+            AActor* ReloadPeer = World->SpawnActor<AActor>(Signal->ExpectedSourceClass);
+            if (!TestNotNull(TEXT("Reload event owner spawned"), ReloadOwner)
+                || !TestNotNull(TEXT("Reload event peer spawned"), ReloadPeer)) return false;
+            if (!Host->BeginInstance(*ReloadOwner, 0, Error)
+                || !Host->BeginInstance(*ReloadPeer, 0, Error)) { AddError(Error); return false; }
+            auto* ReloadOwnerSession = Host->GetInstanceSessionForTesting(*ReloadOwner);
+            auto* ReloadPeerSession = Host->GetInstanceSessionForTesting(*ReloadPeer);
+            if (!TestNotNull(TEXT("Reload owner Session exists"), ReloadOwnerSession)
+                || !TestNotNull(TEXT("Reload peer Session exists"), ReloadPeerSession)) return false;
+            auto* OldReloadRuntime = ReloadOwnerSession->GetLiveRuntimeForTesting();
+            auto OldReloadLease = ReloadOwnerSession->GetRuntimeLeaseForTesting();
+            TestTrue(TEXT("Reload event owners share the old Runtime"),
+                OldReloadRuntime == ReloadPeerSession->GetLiveRuntimeForTesting());
+            int32 ReloadOwnerStart = -1, ReloadPeerStart = -1;
+            if (!TestTrue(TEXT("Reload owner subscribes from CSharp UClass"),
+                    FAvidScriptGeneratedTypeDispatcher::Invoke(ReloadOwner, 0, StartOrdinal, {}, &ReloadOwnerStart))
+                || !TestTrue(TEXT("Reload peer subscribes from CSharp UClass"),
+                    FAvidScriptGeneratedTypeDispatcher::Invoke(ReloadPeer, 0, StartOrdinal, {}, &ReloadPeerStart))) return false;
+            Broadcast(ReloadOwner, 2);
+            Broadcast(ReloadPeer, 3);
+            TestEqual(TEXT("Reload owner suspends before candidate"),
+                ReloadOwnerSession->GetLivePendingContinuationCount(), 1);
+            TestEqual(TEXT("Reload peer suspends before candidate"),
+                ReloadPeerSession->GetLivePendingContinuationCount(), 1);
+            Host->SetReloadFailureAfterInstanceCountForTesting(1);
+            FAvidScriptGeneratedTypePackageReloadResult RejectedPackage;
+            if (!TestFalse(TEXT("Injected package candidate fails after one prepared owner"),
+                Host->ReloadPackage(Types, Artifact, RejectedPackage, Error))) return false;
+            TestEqual(TEXT("Rejected event package prepared one owner"), RejectedPackage.PreparedInstanceCount, 1);
+            TestEqual(TEXT("Rejected event package rolled back its candidate"), RejectedPackage.RolledBackInstanceCount, 1);
+            TestTrue(TEXT("Rejected event package preserves both live owners"),
+                RejectedPackage.bRollbackPreservedLivePackage && Host->GetActiveInstanceCount() == 2);
+            TestTrue(TEXT("Rejected event package preserves shared Runtime identity"),
+                OldReloadLease.IsValid()
+                    && ReloadOwnerSession->GetLiveRuntimeForTesting() == OldReloadRuntime
+                    && ReloadPeerSession->GetLiveRuntimeForTesting() == OldReloadRuntime);
+            TestEqual(TEXT("Rejected package retains owner language bridge"),
+                ReloadOwnerSession->GetDelegateSubscriptionCountForTesting(), 1);
+            TestEqual(TEXT("Rejected package retains peer language bridge"),
+                ReloadPeerSession->GetDelegateSubscriptionCountForTesting(), 1);
+            TestEqual(TEXT("Rejected package retains owner await"),
+                ReloadOwnerSession->GetLivePendingContinuationCount(), 1);
+            TestEqual(TEXT("Rejected package retains peer await"),
+                ReloadPeerSession->GetLivePendingContinuationCount(), 1);
+            Broadcast(ReloadPeer, 1);
+            SharedScore = 0;
+            if (!TestTrue(TEXT("Read old shared score after rollback"), OldReloadRuntime->ReadStateBytes(
+                SharedCountAddress, MakeArrayView(reinterpret_cast<uint8*>(&SharedScore), 4), Error)))
+            { AddError(Error); return false; }
+            TestEqual(TEXT("Old event bridge remains callable after rollback"), SharedScore, 6);
+            TestEqual(TEXT("Rollback retains both peer awaits"),
+                ReloadPeerSession->GetLivePendingContinuationCount(), 2);
+
+            FAvidScriptGeneratedTypePackageReloadResult PublishedPackage;
+            if (!TestTrue(TEXT("Equivalent package publishes after rejected candidate"),
+                Host->ReloadPackage(Types, Artifact, PublishedPackage, Error)))
+            { AddError(Error); return false; }
+            TestEqual(TEXT("Published event package prepares both owners"), PublishedPackage.PreparedInstanceCount, 2);
+            TestEqual(TEXT("Published event package replaces both owners"), PublishedPackage.ReloadedInstanceCount, 2);
+            TestTrue(TEXT("Publication retires the old shared Runtime"), !OldReloadLease.IsValid());
+            auto* NewReloadRuntime = ReloadOwnerSession->GetLiveRuntimeForTesting();
+            TestTrue(TEXT("Published event owners share one replacement Runtime"),
+                NewReloadRuntime == ReloadPeerSession->GetLiveRuntimeForTesting());
+            TestEqual(TEXT("Publication cancels owner event await"),
+                ReloadOwnerSession->GetLivePendingContinuationCount(), 0);
+            TestEqual(TEXT("Publication cancels both peer event awaits"),
+                ReloadPeerSession->GetLivePendingContinuationCount(), 0);
+            TestEqual(TEXT("Publication removes owner language bridge"),
+                ReloadOwnerSession->GetDelegateSubscriptionCountForTesting(), 0);
+            TestEqual(TEXT("Publication removes peer language bridge"),
+                ReloadPeerSession->GetDelegateSubscriptionCountForTesting(), 0);
+            const auto IsSignalBound = [&](AActor* Source)
+            {
+                return Signal->Signature.MulticastProperty->GetMulticastDelegate(
+                    Signal->Signature.MulticastProperty->ContainerPtrToValuePtr<void>(Source))->IsBound();
+            };
+            TestFalse(TEXT("Published package unbinds owner UE event"), IsSignalBound(ReloadOwner));
+            TestFalse(TEXT("Published package unbinds peer UE event"), IsSignalBound(ReloadPeer));
+            int32 ScoreAfterPublication = 0;
+            if (!TestTrue(TEXT("Read replacement score before old timers fire"), NewReloadRuntime->ReadStateBytes(
+                SharedCountAddress, MakeArrayView(reinterpret_cast<uint8*>(&ScoreAfterPublication), 4), Error)))
+            { AddError(Error); return false; }
+            World->Tick(LEVELTICK_All, 0); ++GFrameCounter;
+            World->Tick(LEVELTICK_All, 0.02f); ++GFrameCounter;
+            if (!ReloadOwnerSession->TickLive(0.001f, SharedResult)
+                || !ReloadPeerSession->TickLive(0.001f, SharedResult))
+            { AddError(SharedResult.ErrorMessage); return false; }
+            SharedScore = 0;
+            if (!TestTrue(TEXT("Read replacement score after old timers"), NewReloadRuntime->ReadStateBytes(
+                SharedCountAddress, MakeArrayView(reinterpret_cast<uint8*>(&SharedScore), 4), Error)))
+            { AddError(Error); return false; }
+            TestEqual(TEXT("Old event awaits cannot mutate replacement statics"), SharedScore, ScoreAfterPublication);
+            auto* NewReloadHeap = NewReloadRuntime->GetManagedHeapForTesting();
+            if (!TestTrue(TEXT("Replacement managed heap collects"), NewReloadHeap->Collect() == EHeapError::Ok)) return false;
+            TestEqual(TEXT("Published package has no old event roots"), NewReloadHeap->GetStats().LiveRoots, 0u);
+            if (!TestTrue(TEXT("Published owner can resubscribe"),
+                    FAvidScriptGeneratedTypeDispatcher::Invoke(ReloadOwner, 0, StartOrdinal, {}, &ReloadOwnerStart))
+                || !TestTrue(TEXT("Published peer can resubscribe"),
+                    FAvidScriptGeneratedTypeDispatcher::Invoke(ReloadPeer, 0, StartOrdinal, {}, &ReloadPeerStart))) return false;
+            Broadcast(ReloadOwner, 2);
+            Broadcast(ReloadPeer, 3);
+            World->Tick(LEVELTICK_All, 0); ++GFrameCounter;
+            World->Tick(LEVELTICK_All, 0.02f); ++GFrameCounter;
+            if (!ReloadOwnerSession->TickLive(0.001f, SharedResult)
+                || !ReloadPeerSession->TickLive(0.001f, SharedResult))
+            { AddError(SharedResult.ErrorMessage); return false; }
+            SharedScore = 0;
+            if (!TestTrue(TEXT("Read replacement score after fresh events"), NewReloadRuntime->ReadStateBytes(
+                SharedCountAddress, MakeArrayView(reinterpret_cast<uint8*>(&SharedScore), 4), Error)))
+            { AddError(Error); return false; }
+            TestEqual(TEXT("Fresh event awaits resume in replacement domain"), SharedScore, ScoreAfterPublication + 55);
+            if (!Host->EndInstance(*ReloadOwner, Error) || !Host->EndInstance(*ReloadPeer, Error))
+            { AddError(Error); return false; }
+            TestEqual(TEXT("Reload event package exits cleanly"), Host->GetActiveInstanceCount(), 0);
         }
         FAvidScriptWasmReloadResult Loaded;
         if (!Session.LoadInitialModule(Bytes.GetData(), Bytes.Num(), Manifest, Loaded))
