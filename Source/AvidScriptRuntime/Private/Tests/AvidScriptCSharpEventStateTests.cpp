@@ -311,6 +311,38 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
             }
             if (ConflictSession.IsLiveLoaded()) ConflictSession.StopAndUnload(ConflictResult);
         }
+        {
+            FAvidScriptRuntimeSession ReloadSession;
+            ReloadSession.SetBackendSelectionForTesting(Selection);
+            ReloadSession.SetHostContext(Context);
+            FAvidScriptWasmReloadResult ReloadResult;
+            if (!ReloadSession.LoadInitialModule(Bytes.GetData(), Bytes.Num(), Manifest, ReloadResult))
+            { AddError(ReloadResult.ErrorMessage); return false; }
+            auto* OldRuntime = ReloadSession.GetLiveRuntimeForTesting();
+            FAvidScriptWasmSmokeResult TickResult;
+            if (!OldRuntime->Tick(1.0f, TickResult)) { AddError(TickResult.ErrorMessage); return false; }
+            TestEqual(TEXT("Live language bridge exists before candidate"), ReloadSession.GetDelegateSubscriptionCountForTesting(), 1);
+            const TArray<uint8> InvalidBytes{ 0 };
+            TestFalse(TEXT("Invalid reload candidate is rejected"), ReloadSession.ReloadModule(
+                InvalidBytes.GetData(), InvalidBytes.Num(), Manifest, ReloadResult));
+            TestTrue(TEXT("Rejected candidate preserves live runtime"), ReloadResult.bRollbackPreservedLiveRuntime);
+            TestEqual(TEXT("Rejected candidate preserves language bridge"), ReloadSession.GetDelegateSubscriptionCountForTesting(), 1);
+            TestTrue(TEXT("Rejected candidate leaves UE event bound"), Signal->Signature.MulticastProperty->GetMulticastDelegate(
+                Signal->Signature.MulticastProperty->ContainerPtrToValuePtr<void>(Owner))->IsBound());
+
+            auto CandidateManifest = Manifest;
+            CandidateManifest.ModuleId = TEXT("csharp_event_language_v2");
+            if (!TestTrue(TEXT("Valid event module candidate commits"), ReloadSession.ReloadModule(
+                Bytes.GetData(), Bytes.Num(), CandidateManifest, ReloadResult)))
+            { AddError(ReloadResult.ErrorMessage); return false; }
+            TestEqual(TEXT("Reload retires old language bridge"), ReloadSession.GetDelegateSubscriptionCountForTesting(), 0);
+            TestFalse(TEXT("Reload unbinds old UE event"), Signal->Signature.MulticastProperty->GetMulticastDelegate(
+                Signal->Signature.MulticastProperty->ContainerPtrToValuePtr<void>(Owner))->IsBound());
+            auto* NewRuntime = ReloadSession.GetLiveRuntimeForTesting();
+            if (!NewRuntime->Tick(1.0f, TickResult)) { AddError(TickResult.ErrorMessage); return false; }
+            TestEqual(TEXT("New Runtime can establish its own language bridge"), ReloadSession.GetDelegateSubscriptionCountForTesting(), 1);
+            if (!TestTrue(TEXT("Reloaded event Session stops"), ReloadSession.StopAndUnload(TickResult))) return false;
+        }
         FAvidScriptWasmReloadResult Loaded;
         if (!Session.LoadInitialModule(Bytes.GetData(), Bytes.Num(), Manifest, Loaded))
         { AddError(Loaded.ErrorMessage); return false; }
