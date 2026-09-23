@@ -107,7 +107,8 @@ public:
 	bool DispatchPreparedDelegateEvent(
 		const FAvidScriptPreparedDelegateEvent& Event,
 		void* NativeParameters,
-		FAvidScriptWasmSmokeResult& OutResult);
+		FAvidScriptWasmSmokeResult& OutResult,
+		bool bLanguageManagedCallback = false);
 	bool CaptureLiveSnapshot(FAvidScriptWasmSmokeResult& OutResult) const;
 	bool EndPlayLive(FAvidScriptWasmSmokeResult& OutResult);
 	void SetHostContext(const FAvidScriptWasmHostContext& InHostContext);
@@ -294,7 +295,8 @@ private:
 	bool PumpReadyContinuations(FAvidScriptWasmSmokeResult& OutResult);
 	bool CanEnterGuest(
 		FStringView ExportName,
-		FAvidScriptWasmSmokeResult& OutResult);
+		FAvidScriptWasmSmokeResult& OutResult,
+		bool bAllowNestedDelegate = false);
 	void QuarantineFaultedRuntime(
 		const FAvidScriptWasmSmokeResult& Failure);
 	void ClearFaultQuarantine();

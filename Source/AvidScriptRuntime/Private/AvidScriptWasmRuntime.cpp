@@ -11,6 +11,7 @@
 #include "DataBridge/AvidScriptCommandBuffer.h"
 #include "Diagnostics/AvidScriptWasmDebugMap.h"
 #include "Misc/PackageName.h"
+#include "Misc/ScopeExit.h"
 #include "Memory/AvidScriptManagedHeap.h"
 #include "Profiling/AvidScriptProfiler.h"
 #include "UObject/SoftObjectPath.h"
@@ -2226,6 +2227,21 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEvent(
 	FAvidScriptWasmSmokeResult& OutResult)
 {
 	if (RejectActiveContextMutation(TEXT("unscoped delegate event"), &OutResult)) return false;
+	if (ManagedHeapInvocationDepth > 0)
+	{
+		// A reflected UFunction can broadcast while its outer invocation still
+		// owns pointers into this scratch buffer. Give the nested callback a
+		// separate buffer and restore the outer binding authority on return.
+		const FAvidScriptBindingInvocationContext PreviousContext = BindingInvocationContext;
+		TArray<uint8> PreviousScratch = MoveTemp(BindingInvocationScratch);
+		BindingInvocationScratch.SetNumUninitialized(PreviousScratch.Num());
+		ON_SCOPE_EXIT
+		{
+			BindingInvocationContext = PreviousContext;
+			BindingInvocationScratch = MoveTemp(PreviousScratch);
+		};
+		return DispatchPreparedDelegateEventInternal(Event, NativeParameters, OutResult, nullptr);
+	}
 	return DispatchPreparedDelegateEventInternal(Event, NativeParameters, OutResult, nullptr);
 }
 
@@ -2356,8 +2372,9 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEventInternal(
 	}
 
 	const double EventStartSeconds = FPlatformTime::Seconds();
-	ActiveDelegateOutputTransaction = OutputTransaction.Get();
-	ActiveDelegateOutputToken = OutputTransactionToken;
+	TGuardValue<FAvidScriptPreparedDelegateOutputTransaction*> OutputGuard(
+		ActiveDelegateOutputTransaction, OutputTransaction.Get());
+	TGuardValue<uint32> OutputTokenGuard(ActiveDelegateOutputToken, OutputTransactionToken);
 	const TConstArrayView<FAvidScriptObjectHandle> PreviousScopedCapabilities =
 		BindingInvocationContext.ScopedObjectCapabilities;
 	BindingInvocationContext.ScopedObjectCapabilities = BorrowedHandles;
@@ -2371,8 +2388,6 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEventInternal(
 			Event.ExportName, Frame.CellCount, Frame.Cells, EventError);
 	EndTypedCallbackEpoch();
 	BindingInvocationContext.ScopedObjectCapabilities = PreviousScopedCapabilities;
-	ActiveDelegateOutputTransaction = nullptr;
-	ActiveDelegateOutputToken = 0;
 	// An inner scoped failure may have been ignored by a native callback. Never
 	// commit ref/out effects from an invocation chain that has already failed.
 	if (bCalled) bCalled = ValidateContextCallbackCommit(EventError);

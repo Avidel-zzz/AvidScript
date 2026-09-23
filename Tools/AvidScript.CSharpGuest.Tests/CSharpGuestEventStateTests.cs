@@ -186,6 +186,7 @@ internal static class CSharpGuestEventStateTests
                 public static int HandlerEvaluations;
                 public static int TargetSlot;
                 public static int TargetGeneration;
+                public static int NestedDepth;
                 [AvidTransient] public static AvidSubscription Subscription;
                 static void Handle(AActor actor, int amount, float scale) { Count += amount; }
                 static AAvidScriptEditorDelegateEventTestActor GetSource()
@@ -206,12 +207,28 @@ internal static class CSharpGuestEventStateTests
                     UE.Self.OnScriptSignal += Other;
                     UE.Self.OnScriptSignal -= AddDuringCallback;
                 }
+                static void Nested(AActor actor, int amount, float scale)
+                {
+                    Count += amount;
+                    if (NestedDepth == 0)
+                    {
+                        NestedDepth = 1;
+                        UE.Self.BroadcastOnScriptSignal(actor, amount + 1, scale);
+                        NestedDepth = 0;
+                    }
+                }
                 static void OnRefOut(ref int value, out int doubled)
                 {
                     Count++;
                     Result += value;
                     value = Result;
                     doubled = Result * 2;
+                }
+                static void OnRefOutNested(ref int value, out int doubled)
+                {
+                    UE.Self.BroadcastOnScriptSignal(UE.Self, 3, 1.0f);
+                    value += Count;
+                    doubled = value * 2;
                 }
                 static int OnSinglecastFirst(ref int value, out int doubled)
                 {
@@ -300,6 +317,18 @@ internal static class CSharpGuestEventStateTests
                     {
                         var target = new AAvidScriptEditorDelegateEventTestActor(TargetSlot, TargetGeneration);
                         target.OnScriptSignal -= Handle;
+                    }
+                    if (delta == 24.0f) UE.Self.OnScriptSignal += Nested;
+                    if (delta == 25.0f) UE.Self.OnScriptSignal -= Nested;
+                    if (delta == 26.0f)
+                    {
+                        UE.Self.OnScriptSignal += Handle;
+                        UE.Self.OnRefOutSignal += OnRefOutNested;
+                    }
+                    if (delta == 27.0f)
+                    {
+                        UE.Self.OnRefOutSignal -= OnRefOutNested;
+                        UE.Self.OnScriptSignal -= Handle;
                     }
                 }
             }

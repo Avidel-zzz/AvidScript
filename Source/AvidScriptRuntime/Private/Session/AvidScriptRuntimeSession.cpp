@@ -1408,7 +1408,8 @@ bool FAvidScriptRuntimeSession::PumpReadyContinuations(
 
 bool FAvidScriptRuntimeSession::CanEnterGuest(
 	const FStringView ExportName,
-	FAvidScriptWasmSmokeResult& OutResult)
+	FAvidScriptWasmSmokeResult& OutResult,
+	const bool bAllowNestedDelegate)
 {
 	PrunePendingBorrowedHandles();
 	if (LiveDomain && LiveDomain->IsFaulted())
@@ -1452,7 +1453,11 @@ bool FAvidScriptRuntimeSession::CanEnterGuest(
 			OutResult);
 		return false;
 	}
-	if (IsOperationActive())
+	const bool bSafeNestedDelegate = bAllowNestedDelegate
+		&& ActiveGuestCallDepth > 0 && ActiveGuestCallDepth < 64
+		&& !bMutationInProgress && !bPackageReloadBarrier && !PreparedActivation
+		&& LiveRuntime && (!LiveDomain || LiveDomain->HasActiveCalls());
+	if (IsOperationActive() && !bSafeNestedDelegate)
 	{
 		SetSessionExecutionFailure(
 			GetLiveModuleId(),
@@ -1665,7 +1670,8 @@ bool FAvidScriptRuntimeSession::DispatchGameplayEventHot(
 bool FAvidScriptRuntimeSession::DispatchPreparedDelegateEvent(
 	const FAvidScriptPreparedDelegateEvent& Event,
 	void* NativeParameters,
-	FAvidScriptWasmSmokeResult& OutResult)
+	FAvidScriptWasmSmokeResult& OutResult,
+	const bool bLanguageManagedCallback)
 {
 	if (SuppressApplicationLifecycleEntry(Event.ExportName, OutResult))
 	{
@@ -1679,7 +1685,10 @@ bool FAvidScriptRuntimeSession::DispatchPreparedDelegateEvent(
 		0,
 		GetTypeHash(Event.ExportName));
 	ProfileScope.SetSucceeded(false);
-	if (!CanEnterGuest(Event.ExportName, OutResult))
+	const bool bCanNest = bLanguageManagedCallback
+		&& Event.Signature.Kind == EAvidScriptPreparedDelegateKind::Multicast
+		&& Event.Signature.OutputValueCount == 0;
+	if (!CanEnterGuest(Event.ExportName, OutResult, bCanNest))
 	{
 		return false;
 	}

@@ -217,6 +217,12 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
             && Event.Signature.MulticastProperty->GetFName() == TEXT("OnScriptSignal");
     });
     if (!TestNotNull(TEXT("Selected generated event is in the native catalog"), Signal)) return false;
+    const FAvidScriptPreparedDelegateEvent* RefOutSignal = Catalog.FindByPredicate([](const auto& Event)
+    {
+        return Event.Signature.MulticastProperty != nullptr
+            && Event.Signature.MulticastProperty->GetFName() == TEXT("OnRefOutSignal");
+    });
+    if (!TestNotNull(TEXT("Selected ref/out event is in the native catalog"), RefOutSignal)) return false;
     uint32 CountAddress = 0, ResultAddress = 0, SourceEvaluationsAddress = 0, HandlerEvaluationsAddress = 0;
     uint32 TargetSlotAddress = 0, TargetGenerationAddress = 0;
     for (const auto& Value : Guest->GetObjectField(TEXT("memory_layout"))->GetArrayField(TEXT("state_slots")))
@@ -260,6 +266,7 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
         FAvidScriptWasmHostContext Context;
         Context.World = World; Context.ObjectRegistry = &Registry;
         Context.OwnerHandle = Registry.RegisterObject(Owner, HandleResult, false);
+        Context.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
         Session.SetHostContext(Context);
         auto Manifest = FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("csharp_event_language"));
         Manifest.BindingPackage = Package;
@@ -488,6 +495,78 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
             if (!TestTrue(TEXT("Multi-source event Session stops"),
                 MultiSession.StopAndUnload(MultiResult))) return false;
             Peer->Destroy();
+        }
+        {
+            FAvidScriptRuntimeSession NestedSession;
+            NestedSession.SetBackendSelectionForTesting(Selection);
+            NestedSession.SetHostContext(Context);
+            FAvidScriptWasmReloadResult NestedLoaded;
+            if (!NestedSession.LoadInitialModule(Bytes.GetData(), Bytes.Num(), Manifest, NestedLoaded))
+            { AddError(NestedLoaded.ErrorMessage); return false; }
+            auto* NestedRuntime = NestedSession.GetLiveRuntimeForTesting();
+            FAvidScriptWasmSmokeResult NestedResult;
+            if (!NestedRuntime->Tick(24.0f, NestedResult)) { AddError(NestedResult.ErrorMessage); return false; }
+            TestEqual(TEXT("Nested callback begins with one language bridge"),
+                NestedSession.GetDelegateSubscriptionCountForTesting(), 1);
+            FStructOnScope Frame(Signal->Signature.SignatureFunction);
+            FindFProperty<FObjectProperty>(Signal->Signature.SignatureFunction, TEXT("SourceActor"))
+                ->SetObjectPropertyValue_InContainer(Frame.GetStructMemory(), Owner);
+            FindFProperty<FIntProperty>(Signal->Signature.SignatureFunction, TEXT("Count"))
+                ->SetPropertyValue_InContainer(Frame.GetStructMemory(), 2);
+            FindFProperty<FFloatProperty>(Signal->Signature.SignatureFunction, TEXT("Scale"))
+                ->SetPropertyValue_InContainer(Frame.GetStructMemory(), 1.0f);
+            Signal->Signature.MulticastProperty->GetMulticastDelegate(
+                Signal->Signature.MulticastProperty->ContainerPtrToValuePtr<void>(Owner))
+                ->ProcessDelegate<UObject>(Frame.GetStructMemory());
+            int32 NestedCount = 0;
+            if (!TestTrue(TEXT("Read nested event count"), NestedRuntime->ReadStateBytes(
+                CountAddress, MakeArrayView(reinterpret_cast<uint8*>(&NestedCount), 4), Error)))
+            { AddError(Error); return false; }
+            TestEqual(TEXT("Nested UE event executes both CSharp callbacks"), NestedCount, 5);
+            TestFalse(TEXT("Nested UE event leaves Session healthy"), NestedSession.GetSnapshot().bFaultQuarantined);
+            if (!NestedRuntime->Tick(25.0f, NestedResult)) { AddError(NestedResult.ErrorMessage); return false; }
+            TestEqual(TEXT("Nested callback removal releases bridge"),
+                NestedSession.GetDelegateSubscriptionCountForTesting(), 0);
+            if (!TestTrue(TEXT("Nested event Session stops"),
+                NestedSession.StopAndUnload(NestedResult))) return false;
+        }
+        {
+            FAvidScriptRuntimeSession NestedOutputSession;
+            NestedOutputSession.SetBackendSelectionForTesting(Selection);
+            NestedOutputSession.SetHostContext(Context);
+            FAvidScriptWasmReloadResult NestedOutputLoaded;
+            if (!NestedOutputSession.LoadInitialModule(Bytes.GetData(), Bytes.Num(), Manifest, NestedOutputLoaded))
+            { AddError(NestedOutputLoaded.ErrorMessage); return false; }
+            auto* NestedOutputRuntime = NestedOutputSession.GetLiveRuntimeForTesting();
+            FAvidScriptWasmSmokeResult NestedOutputResult;
+            if (!NestedOutputRuntime->Tick(26.0f, NestedOutputResult))
+            { AddError(NestedOutputResult.ErrorMessage); return false; }
+            TestEqual(TEXT("Nested output test installs two bridges"),
+                NestedOutputSession.GetDelegateSubscriptionCountForTesting(), 2);
+            FStructOnScope Frame(RefOutSignal->Signature.SignatureFunction);
+            auto* Value = FindFProperty<FIntProperty>(RefOutSignal->Signature.SignatureFunction, TEXT("Value"));
+            auto* Doubled = FindFProperty<FIntProperty>(RefOutSignal->Signature.SignatureFunction, TEXT("Doubled"));
+            Value->SetPropertyValue_InContainer(Frame.GetStructMemory(), 2);
+            RefOutSignal->Signature.MulticastProperty->GetMulticastDelegate(
+                RefOutSignal->Signature.MulticastProperty->ContainerPtrToValuePtr<void>(Owner))
+                ->ProcessDelegate<UObject>(Frame.GetStructMemory());
+            TestEqual(TEXT("Nested callback preserves outer ref write"),
+                Value->GetPropertyValue_InContainer(Frame.GetStructMemory()), 5);
+            TestEqual(TEXT("Nested callback preserves outer out write"),
+                Doubled->GetPropertyValue_InContainer(Frame.GetStructMemory()), 10);
+            int32 NestedOutputCount = 0;
+            if (!TestTrue(TEXT("Read nested output callback count"), NestedOutputRuntime->ReadStateBytes(
+                CountAddress, MakeArrayView(reinterpret_cast<uint8*>(&NestedOutputCount), 4), Error)))
+            { AddError(Error); return false; }
+            TestEqual(TEXT("Nested event callback executes inside ref/out handler"), NestedOutputCount, 3);
+            TestFalse(TEXT("Nested output Session remains healthy"),
+                NestedOutputSession.GetSnapshot().bFaultQuarantined);
+            if (!NestedOutputRuntime->Tick(27.0f, NestedOutputResult))
+            { AddError(NestedOutputResult.ErrorMessage); return false; }
+            TestEqual(TEXT("Nested output cleanup releases both bridges"),
+                NestedOutputSession.GetDelegateSubscriptionCountForTesting(), 0);
+            if (!TestTrue(TEXT("Nested output Session stops"),
+                NestedOutputSession.StopAndUnload(NestedOutputResult))) return false;
         }
         {
             AActor* GcOwner = World->SpawnActor<AActor>(Signal->ExpectedSourceClass);

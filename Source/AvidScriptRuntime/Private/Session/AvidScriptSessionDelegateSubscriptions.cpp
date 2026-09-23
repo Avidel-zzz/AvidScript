@@ -659,6 +659,7 @@ void FAvidScriptSessionDelegateSubscriptions::
 	const FAvidScriptPreparedDelegateEvent Event =
 		Impl->Active[*EntryIndex].Event;
 	const TWeakObjectPtr<UObject> Source = Impl->Active[*EntryIndex].Source;
+	const bool bLanguageManagedCallback = Impl->Active[*EntryIndex].bLanguageManaged;
 	// Hold the lease independently: callback code may remove or replace this entry.
 	const auto State = Impl->Active[*EntryIndex].ManagedState;
 	if (!Source.IsValid())
@@ -674,7 +675,8 @@ void FAvidScriptSessionDelegateSubscriptions::
 	if (!Impl->Session.DispatchPreparedDelegateEvent(
 			Event,
 			Parameters,
-			Result)
+			Result,
+			bLanguageManagedCallback)
 		&& Result.ErrorCategory != TEXT("reentrant_operation"))
 	{
 		UE_LOG(
