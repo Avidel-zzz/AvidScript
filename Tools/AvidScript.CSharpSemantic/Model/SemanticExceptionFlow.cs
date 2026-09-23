@@ -3,7 +3,8 @@ using System.Text.Json.Serialization;
 
 namespace AvidScript.CSharpSemantic;
 
-// Diagnostic projection of Roslyn's exception flow. It is not an executable CFG.
+// Diagnostic projection of Roslyn's exception flow and block operations.
+// It is not an executable CFG until the Guest outcome and cleanup paths consume it.
 public sealed record SemanticExceptionFlow(
     [property: JsonPropertyOrder(0)] string MethodSymbolId,
     [property: JsonPropertyOrder(1)] string SourceId,
@@ -11,7 +12,17 @@ public sealed record SemanticExceptionFlow(
     [property: JsonPropertyOrder(3)] IReadOnlyList<SemanticExceptionRegion> Regions,
     [property: JsonPropertyOrder(4)] IReadOnlyList<SemanticExceptionBranch> Branches,
     [property: JsonPropertyOrder(5)] IReadOnlyList<SemanticThrowSite> Throws,
-    [property: JsonPropertyOrder(6)] IReadOnlyList<SemanticCatchHandler> Catches);
+    [property: JsonPropertyOrder(6)] IReadOnlyList<SemanticCatchHandler> Catches,
+    [property: JsonPropertyOrder(7)] IReadOnlyList<SemanticExceptionBlock>? Blocks = null);
+
+public sealed record SemanticExceptionBlock(
+    [property: JsonPropertyOrder(0)] int Ordinal,
+    [property: JsonPropertyOrder(1)] string Kind,
+    [property: JsonPropertyOrder(2)] bool IsReachable,
+    [property: JsonPropertyOrder(3)] string ConditionKind,
+    [property: JsonPropertyOrder(4)] int EnclosingRegionOrdinal,
+    [property: JsonPropertyOrder(5)] IReadOnlyList<SemanticOperation> Operations,
+    [property: JsonPropertyOrder(6)] SemanticOperation? BranchValue);
 
 public sealed record SemanticExceptionRegion(
     [property: JsonPropertyOrder(0)] int Ordinal,
@@ -40,4 +51,5 @@ public sealed record SemanticCatchHandler(
     [property: JsonPropertyOrder(1)] string? ExceptionTypeId,
     [property: JsonPropertyOrder(2)] string? ExceptionVariableSymbolId,
     [property: JsonPropertyOrder(3)] bool HasFilter,
-    [property: JsonPropertyOrder(4)] SemanticSpan Span);
+    [property: JsonPropertyOrder(4)] SemanticSpan Span,
+    [property: JsonPropertyOrder(5)] int RegionOrdinal);

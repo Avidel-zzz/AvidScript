@@ -88,6 +88,16 @@ internal static class SemanticExceptionFlowProjector
                 type is null ? null : typeRegistry.Register(type),
                 SemanticSpanFactory.Create(body.Unit.SourceText, node.Span));
         }).ToArray();
+        ControlFlowRegion[] catchRegions = roslynRegions
+            .Where(region => region.Kind == ControlFlowRegionKind.Catch)
+            .ToArray();
+        if (catchRegions.Length != catches.Length)
+        {
+            diagnostics.Add(new SemanticDiagnostic("ASCS3005", "error",
+                "Roslyn catch regions do not match the source handlers.",
+                SemanticSpanFactory.Create(body.Unit.SourceText, body.Declaration.Span)));
+            return null;
+        }
         SemanticCatchHandler[] handlers = catches.Select((catchClause, ordinal) =>
         {
             ITypeSymbol? type = catchClause.Declaration is { } declaration
@@ -105,13 +115,57 @@ internal static class SemanticExceptionFlowProjector
                 type is null ? null : typeRegistry.Register(type),
                 variable is null ? null : SemanticSymbolProjector.GetSymbolId(variable),
                 catchClause.Filter is not null,
-                SemanticSpanFactory.Create(body.Unit.SourceText, catchClause.Span));
+                SemanticSpanFactory.Create(body.Unit.SourceText, catchClause.Span),
+                ordinals[catchRegions[ordinal]]);
         }).ToArray();
+        SemanticCatchHandler? mismatchedHandler = handlers.FirstOrDefault(handler =>
+            handler.ExceptionTypeId != regions[handler.RegionOrdinal].ExceptionTypeId
+            && !(handler.ExceptionTypeId is null
+                && regions[handler.RegionOrdinal].ExceptionTypeId == "type:object"));
+        if (mismatchedHandler is not null)
+        {
+            diagnostics.Add(new SemanticDiagnostic("ASCS3005", "error",
+                $"Roslyn catch region type '{regions[mismatchedHandler.RegionOrdinal].ExceptionTypeId}' " +
+                    $"does not match source handler '{mismatchedHandler.ExceptionTypeId}'.",
+                SemanticSpanFactory.Create(body.Unit.SourceText, body.Declaration.Span)));
+            return null;
+        }
+        SemanticCaptureRegistry captureRegistry = new();
+        SemanticExceptionBlock[] blocks = graph.Blocks
+            .OrderBy(block => block.Ordinal)
+            .Select(block => new SemanticExceptionBlock(
+                block.Ordinal,
+                block.Kind switch
+                {
+                    BasicBlockKind.Entry => "entry",
+                    BasicBlockKind.Exit => "exit",
+                    _ => "block",
+                },
+                block.IsReachable,
+                block.ConditionKind switch
+                {
+                    ControlFlowConditionKind.WhenTrue => "when_true",
+                    ControlFlowConditionKind.WhenFalse => "when_false",
+                    _ => "none",
+                },
+                roslynRegions
+                    .Where(region => region.FirstBlockOrdinal <= block.Ordinal
+                        && region.LastBlockOrdinal >= block.Ordinal)
+                    .Select(region => ordinals[region])
+                    .Last(),
+                block.Operations.Select(operation =>
+                    SemanticOperationProjector.ProjectControlFlowOperation(
+                        operation, body.Unit, typeRegistry, captureRegistry)).ToArray(),
+                block.BranchValue is { } branchValue
+                    ? SemanticOperationProjector.ProjectControlFlowOperation(
+                        branchValue, body.Unit, typeRegistry, captureRegistry)
+                    : null))
+            .ToArray();
         return new SemanticExceptionFlow(
             SemanticSymbolProjector.GetSymbolId(body.Method),
             body.Unit.SyntaxTree.FilePath,
             body.Unit.SourceText.Length,
-            regions, branches, throwSites, handlers);
+            regions, branches, throwSites, handlers, blocks);
 
     }
 

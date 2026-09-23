@@ -10,8 +10,8 @@ public static class SemanticExceptionFlowContractValidator
     {
         ArgumentNullException.ThrowIfNull(document);
         if (document.ExceptionFlows is null)
-            return document.SchemaVersion != SemanticContract.ExceptionFlowSchemaVersion
-                && document.SemanticVersion != SemanticContract.ExceptionFlowSemanticVersion;
+            return document.SchemaVersion is not (32 or SemanticContract.ExceptionFlowSchemaVersion)
+                && document.SemanticVersion is not ("1.41" or SemanticContract.ExceptionFlowSemanticVersion);
 
         IReadOnlyList<SemanticExceptionFlow> flows = document.ExceptionFlows;
         if (document.SchemaVersion != SemanticContract.ExceptionFlowSchemaVersion
@@ -31,9 +31,10 @@ public static class SemanticExceptionFlowContractValidator
             if (flow is null || string.IsNullOrWhiteSpace(flow.MethodSymbolId)
                 || !methods.Contains(flow.MethodSymbolId) || !seen.Add(flow.MethodSymbolId)
                 || string.IsNullOrWhiteSpace(flow.SourceId) || flow.SourceLength < 0
-                || flow.Regions is null || flow.Branches is null
+                || flow.Regions is null || flow.Branches is null || flow.Blocks is null
                 || flow.Throws is null || flow.Catches is null
                 || flow.Regions.Count is 0 or > 512 || flow.Branches.Count > 4096
+                || flow.Blocks.Count is 0 or > 2048
                 || flow.Throws.Count > 256 || flow.Catches.Count > 256
                 || flow.Throws.Count + flow.Catches.Count == 0)
                 return false;
@@ -53,6 +54,30 @@ public static class SemanticExceptionFlowContractValidator
             }
 
             int lastBlockOrdinal = flow.Regions[0].LastBlockOrdinal;
+            if (flow.Blocks.Count != lastBlockOrdinal + 1)
+                return false;
+            int operationCount = 0;
+            for (int index = 0; index < flow.Blocks.Count; ++index)
+            {
+                SemanticExceptionBlock? block = flow.Blocks[index];
+                if (block is null || block.Ordinal != index
+                    || block.Kind is not ("entry" or "block" or "exit")
+                    || (index == 0) != (block.Kind == "entry")
+                    || (index == lastBlockOrdinal) != (block.Kind == "exit")
+                    || block.ConditionKind is not ("none" or "when_true" or "when_false")
+                    || block.EnclosingRegionOrdinal < 0
+                    || block.EnclosingRegionOrdinal >= flow.Regions.Count
+                    || flow.Regions[block.EnclosingRegionOrdinal].FirstBlockOrdinal > index
+                    || flow.Regions[block.EnclosingRegionOrdinal].LastBlockOrdinal < index
+                    || block.Operations is null || block.Operations.Count > 1024)
+                    return false;
+                foreach (SemanticOperation? operation in block.Operations)
+                    if (!ValidOperation(operation, flow.SourceLength, types, 0, ref operationCount))
+                        return false;
+                if (block.BranchValue is not null
+                    && !ValidOperation(block.BranchValue, flow.SourceLength, types, 0, ref operationCount))
+                    return false;
+            }
             foreach (SemanticExceptionBranch? branch in flow.Branches)
             {
                 if (branch is null || branch.SourceBlockOrdinal < 0
@@ -81,6 +106,11 @@ public static class SemanticExceptionFlowContractValidator
             {
                 SemanticCatchHandler? handler = flow.Catches[index];
                 if (handler is null || handler.Ordinal != index
+                    || handler.RegionOrdinal < 0 || handler.RegionOrdinal >= flow.Regions.Count
+                    || flow.Regions[handler.RegionOrdinal].Kind != "catch"
+                    || handler.ExceptionTypeId != flow.Regions[handler.RegionOrdinal].ExceptionTypeId
+                        && !(handler.ExceptionTypeId is null
+                            && flow.Regions[handler.RegionOrdinal].ExceptionTypeId == "type:object")
                     || !KnownType(handler.ExceptionTypeId, types)
                     || !ValidSpan(handler.Span, flow.SourceLength))
                     return false;
@@ -111,4 +141,25 @@ public static class SemanticExceptionFlowContractValidator
             && (long)span.Start + span.Length <= sourceLength
             && span.Line >= 0 && span.Column >= 0
             && span.EndLine >= span.Line && span.EndColumn >= 0;
+
+    private static bool ValidOperation(
+        SemanticOperation? operation,
+        int sourceLength,
+        IReadOnlySet<string> types,
+        int depth,
+        ref int operationCount)
+    {
+        if (operation is null || ++operationCount > 8192 || depth > 64
+            || string.IsNullOrWhiteSpace(operation.Kind)
+            || !ValidSpan(operation.Span, sourceLength)
+            || !KnownType(operation.TypeId, types)
+            || operation.TypeArgumentIds is null
+            || operation.TypeArgumentIds.Any(typeId => !types.Contains(typeId))
+            || operation.Children is null || operation.Children.Count > 128)
+            return false;
+        foreach (SemanticOperation? child in operation.Children)
+            if (!ValidOperation(child, sourceLength, types, depth + 1, ref operationCount))
+                return false;
+        return true;
+    }
 }
