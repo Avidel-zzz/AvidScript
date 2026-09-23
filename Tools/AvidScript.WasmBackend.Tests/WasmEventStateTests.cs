@@ -91,9 +91,11 @@ internal static class WasmEventStateTests
             && native.Contains($"LanguageSubscribeImport[] = \"{GuestEventState.LanguageSubscribeImport}\"", StringComparison.Ordinal)
             && native.Contains($"LanguageLookupImport[] = \"{GuestEventState.LanguageLookupImport}\"", StringComparison.Ordinal), "event ABI name drift");
         GuestModule language = CreateLanguage();
-        Check(WasmArtifactInspector.Inspect(Compile(language).Bytes).Imports.Count == 8, "language IR emits declared imports only");
+        WasmCompilationResult languageArtifact = Compile(language);
+        Check(WasmArtifactInspector.Inspect(languageArtifact.Bytes).Imports.Count == 8, "language IR emits declared imports only");
+        if (!string.IsNullOrWhiteSpace(output)) File.WriteAllBytes(Path.Combine(output, "event-language-state.wasm"), languageArtifact.Bytes);
         GuestInstruction languageSubscribe = language.Functions[1].Blocks[0].Instructions.Single(op => op.Op == GuestEventState.LanguageSubscribeOp);
-        GuestInstruction languageLookup = language.Functions[1].Blocks[0].Instructions.Single(op => op.Op == GuestEventState.LanguageLookupOp);
+        GuestInstruction languageLookup = language.Functions[1].Blocks[0].Instructions.First(op => op.Op == GuestEventState.LanguageLookupOp);
         GuestModule[] badLanguage =
         {
             language with { SchemaVersion = 13, IrVersion = "1.12" },
@@ -186,6 +188,12 @@ internal static class WasmEventStateTests
         {
             Op(GuestEventState.LanguageLookupOp, "languageState", new[] { "slot", "generation", "ordinal" }, "language_lookup"),
             Op(GuestEventState.LanguageSubscribeOp, "languageToken", new[] { "slot", "generation", "ordinal", "state" }, "language_subscribe"),
+            Op("global_store", args: new[] { "languageToken" }, target: "subscription"),
+            Op(GuestEventState.LanguageLookupOp, "languageFound", new[] { "slot", "generation", "ordinal" }, "language_lookup"),
+            Op("managed_collect"),
+            Op("managed_get", "languageChild", new[] { "languageFound" }, "child"),
+            Op("managed_get", "languageNumber", new[] { "languageChild" }, "number"),
+            Op("global_store", args: new[] { "languageNumber" }, target: "result"),
         };
         return module with
         {
@@ -197,7 +205,8 @@ internal static class WasmEventStateTests
             }).ToArray(),
             Functions = module.Functions.Select(function => function.Id != "tick" ? function : function with
             {
-                Locals = function.Locals.Concat(new[] { Reg("languageState", S), Reg("languageToken", L) }).ToArray(),
+                Locals = function.Locals.Concat(new[] { Reg("languageState", S), Reg("languageToken", L),
+                    Reg("languageFound", S), Reg("languageChild", R), Reg("languageNumber", I) }).ToArray(),
                 Blocks = new[] { entry with { Instructions = entry.Instructions.Concat(extra).ToArray() } },
             }).ToArray(),
         };

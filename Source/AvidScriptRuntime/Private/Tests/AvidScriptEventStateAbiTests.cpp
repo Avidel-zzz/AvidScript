@@ -590,4 +590,87 @@ bool FAvidScriptLanguageEventStateAbiTest::RunTest(const FString& Parameters)
 	}
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptCompiledLanguageEventStateTest,
+	"AvidScript.Runtime.DelegateSubscription.CompiledLanguageState",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptCompiledLanguageEventStateTest::RunTest(const FString& Parameters)
+{
+	using namespace AvidScript::Managed;
+	using namespace AvidScriptEventStateAbiTests;
+	if (!GEngine) return false;
+	const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptManagedHeapTests/GuestFixtures/event-language-state.wasm"));
+	TArray<uint8> Wasm;
+	if (!TestTrue(TEXT("WasmBackend.Tests generated the language event fixture"), FFileHelper::LoadFileToArray(Wasm, *Path))) return false;
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false, TEXT("AvidScriptCompiledLanguageEventWorld"));
+	if (!World) return false;
+	GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+	ON_SCOPE_EXIT { GEngine->DestroyWorldContext(World); World->DestroyWorld(false); };
+	AActor* Owner = World->SpawnActor<AActor>();
+	if (!Owner) return false;
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	{
+		AddInfo(FString::Printf(TEXT("Compiled language event backend=%d"), static_cast<int32>(Backend)));
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime ? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		FAvidScriptRuntimeSession Session;
+		Session.SetBackendSelectionForTesting(Selection);
+		auto Manifest = FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("compiled_language_event_state"));
+		Manifest.RequiredImports = {
+			{TEXT("avidscript"), UTF8_TO_TCHAR(AvidScript::EventState::Abi::SubscribeImport)},
+			{TEXT("avidscript"), UTF8_TO_TCHAR(AvidScript::EventState::Abi::ReadImport)},
+			{TEXT("avidscript"), UTF8_TO_TCHAR(AvidScript::EventState::Abi::LanguageSubscribeImport)},
+			{TEXT("avidscript"), UTF8_TO_TCHAR(AvidScript::EventState::Abi::LanguageLookupImport)},
+			{TEXT("avidscript"), TEXT("avid_managed_heap_v1")},
+			{TEXT("avidscript"), TEXT("event_unsubscribe")},
+			{TEXT("avidscript"), TEXT("owner_get_slot")},
+			{TEXT("avidscript"), TEXT("owner_get_generation")}};
+		FAvidScriptWasmReloadResult Loaded;
+		if (!Session.LoadInitialModule(Wasm.GetData(), Wasm.Num(), Manifest, Loaded)) { AddError(Loaded.ErrorMessage); return false; }
+		auto* Runtime = Session.GetLiveRuntimeForTesting();
+		FAvidScriptObjectRegistry Registry;
+		FAvidScriptObjectHandleResult HandleResult;
+		FAvidScriptSessionDelegateSubscriptions Subscriptions(Session);
+		FAvidScriptWasmHostContext Context;
+		Context.World = World; Context.ObjectRegistry = &Registry;
+		Context.OwnerHandle = Registry.RegisterObject(Owner, HandleResult, false);
+		Context.EventSubscriptions = &Subscriptions;
+		Runtime->SetHostContext(Context);
+		FAvidScriptPreparedDelegateEvent Event;
+		Event.EventOrdinal = 7; Event.StableId = FString::ChrN(64, '8'); Event.ExportName = TEXT("event_callback");
+		Event.ExpectedSourceClass = AActor::StaticClass(); Event.bRequiresManagedState = true;
+		Event.Signature.Kind = EAvidScriptPreparedDelegateKind::Multicast;
+		Event.Signature.MulticastProperty = FindFProperty<FMulticastDelegateProperty>(AActor::StaticClass(), TEXT("OnActorBeginOverlap"));
+		Event.Signature.SignatureFunction = Event.Signature.MulticastProperty->SignatureFunction;
+		Event.Signature.ImmutableCodecIdentity = Event.Signature.SignatureFunction;
+		Event.Signature.ParameterCellCount = 1; Event.Signature.Encode = &EncodeFrame;
+		FString Error;
+		if (!Subscriptions.Prepare(World, MakeArrayView(&Event, 1), Error, Runtime)) { AddError(Error); return false; }
+		Subscriptions.CommitPrepared(); Subscriptions.SetDispatchEnabled(true);
+		FAvidScriptWasmSmokeResult Result;
+		if (!TestTrue(TEXT("Compiled language lookup and subscription execute"), Runtime->Tick(0.0f, Result))) return false;
+		uint8 Output[16] = {};
+		TestTrue(TEXT("Read compiled language state result"), Runtime->ReadStateBytes(16, MakeArrayView(Output), Error));
+		int32 Value = 0; int64 LanguageToken = 0;
+		FMemory::Memcpy(&Value, Output + 4, 4);
+		FMemory::Memcpy(&LanguageToken, Output + 8, 8);
+		TestEqual(TEXT("Lookup survives forced Guest collection"), Value, 42);
+		TestTrue(TEXT("Language token and explicit subscription coexist"), LanguageToken > 0 && Subscriptions.NumActive() == 2);
+		auto& Heap = *Runtime->GetManagedHeapForTesting();
+		TestTrue(TEXT("Collect after compiled publisher"), Heap.Collect() == EHeapError::Ok);
+		TestEqual(TEXT("Both bridges retain roots"), Heap.GetStats().LiveRoots, 2u);
+		TestEqual(TEXT("Compiled publisher frame exited"), Heap.GetStats().ActiveFrames, 0u);
+		TestEqual(TEXT("Language token cancels only its bridge"), Runtime->HandleEventUnsubscribeImport(LanguageToken), 1);
+		TestEqual(TEXT("Explicit bridge remains"), Subscriptions.NumActive(), 1);
+		Subscriptions.UnbindActive();
+		TestTrue(TEXT("Final compiled language state collection"), Heap.Collect() == EHeapError::Ok);
+		TestEqual(TEXT("No compiled language roots leak"), Heap.GetStats().LiveRoots, 0u);
+		TestEqual(TEXT("No compiled language objects leak"), Heap.GetStats().LiveObjects, 0u);
+		Session.StopAndUnload(Result);
+	}
+	return true;
+}
 #endif
