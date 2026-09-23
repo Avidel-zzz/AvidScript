@@ -210,7 +210,7 @@ RPC 是跨网络请求另一端执行函数；属性复制是服务器把属性�
 | Windows 打包 | 已有 Development / Shipping 样例与打包验证 | 正式包必须发布脚本模块并设置模块 ID；不能直接沿用上面的临时 JSON 路径 |
 | 移动端 | 已有 Android 预编译准备 | Android 真机和 iOS 尚未验收，目前优先完善 Windows |
 
-更具体的语言缺口和下一步见[当前实施计划](Docs/Phase66/P66.1_Implementation_Plan.md)。自动化测试、实际玩家操作和长时间运行的验收分别记录，不能互相代替。
+闭包、委托和 UE 事件的当前验收范围见 [P66.B 批次记录](Docs/Phase66/P66.B_Batch_Completion.md)；其他语言缺口和下一步见[当前实施计划](Docs/Phase66/P66.1_Implementation_Plan.md)。自动化测试、实际玩家操作和长时间运行的验收分别记录，不能互相代替。
 
 ## ⚙️ 它如何运行
 
