@@ -5,6 +5,7 @@
 #include "AvidScriptRuntimeArtifact.h"
 #include "AvidScriptRuntimeSession.h"
 #include "Session/AvidScriptRuntimeExecutionDomain.h"
+#include "Containers/Ticker.h"
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
 #include "Misc/CommandLine.h"
@@ -17,6 +18,7 @@
 #include "ScriptTypes/AvidScriptGeneratedTypeRegistry.h"
 #include "Validation/AvidScriptWasmImportPolicy.h"
 #include "UObject/ObjectKey.h"
+#include "UObject/UObjectGlobals.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptGeneratedTypeRuntimeHost, Log, All);
 
@@ -149,7 +151,8 @@ bool DeserializeJsonObject(
 bool TeardownInstance(
 	FGeneratedTypeRuntimeInstance& Instance,
 	FAvidScriptObjectRegistry& ObjectRegistry,
-	FString& OutError)
+	FString& OutError,
+	const bool bOwnerCollected = false)
 {
 	bool bSucceeded = true;
 	if (Instance.Session)
@@ -161,7 +164,15 @@ bool TeardownInstance(
 			OutError = TEXT("generated type teardown requires the active invocation to return");
 			return false;
 		}
-		if (Instance.Session->IsLiveLoaded())
+		if (bOwnerCollected)
+		{
+			if (!Instance.Session->StopAndUnloadForCollectedGeneratedOwner())
+			{
+				OutError = TEXT("collected generated owner could not retire its idle Session");
+				return false;
+			}
+		}
+		else if (Instance.Session->IsLiveLoaded())
 		{
 			FAvidScriptWasmSmokeResult StopResult;
 			if (!Instance.Session->StopAndUnload(StopResult))
@@ -296,6 +307,8 @@ struct FAvidScriptGeneratedTypeRuntimeHost::FImpl
 	TOptional<FGeneratedTypeRuntimePackage> Package;
 	FAvidScriptObjectRegistry ObjectRegistry;
 	TMap<FObjectKey, TUniquePtr<FGeneratedTypeRuntimeInstance>> Instances;
+	FDelegateHandle PostGarbageCollectHandle;
+	FTSTicker::FDelegateHandle CollectedSweepTickerHandle;
 #if WITH_DEV_AUTOMATION_TESTS
 	int32 ReloadFailureAfterInstanceCountForTesting = INDEX_NONE;
 #endif
@@ -368,6 +381,56 @@ bool FAvidScriptGeneratedTypeRuntimeHost::CanMutateInstances(FString& OutError) 
 	return true;
 }
 
+void FAvidScriptGeneratedTypeRuntimeHost::QueueCollectedInstanceSweep()
+{
+	if (!Impl || !Impl->bStarted || !IsInGameThread()
+		|| Impl->CollectedSweepTickerHandle.IsValid()) return;
+	bool bHasCollectedReceiver = false;
+	for (const auto& Pair : Impl->Instances)
+	{
+		if (Pair.Value && !Pair.Value->Receiver.IsValid())
+		{
+			bHasCollectedReceiver = true;
+			break;
+		}
+	}
+	if (bHasCollectedReceiver)
+	{
+		// Run after GC and any active Guest call have returned. The generated
+		// shell normally calls EndInstance from EndPlay; this closes missed exits.
+		Impl->CollectedSweepTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateRaw(this, &FAvidScriptGeneratedTypeRuntimeHost::SweepCollectedInstances), 0.0f);
+	}
+}
+
+bool FAvidScriptGeneratedTypeRuntimeHost::SweepCollectedInstances(float DeltaTime)
+{
+	if (!Impl) return false;
+	Impl->CollectedSweepTickerHandle.Reset();
+	FString GuardError;
+	if (!CanMutateInstances(GuardError))
+	{
+		QueueCollectedInstanceSweep();
+		return false;
+	}
+	TGuardValue<bool> MutationGuard(Impl->bMutationInProgress, true);
+	for (auto Iterator = Impl->Instances.CreateIterator(); Iterator; ++Iterator)
+	{
+		if (!Iterator.Value() || Iterator.Value()->Receiver.IsValid()) continue;
+		FString Error;
+		if (!TeardownInstance(*Iterator.Value(), Impl->ObjectRegistry, Error, true))
+		{
+			UE_LOG(LogAvidScriptGeneratedTypeRuntimeHost, Warning,
+				TEXT("Generated host collected-instance teardown: %s"), *Error);
+		}
+		if (!Iterator.Value()->Session && !Iterator.Value()->ReceiverHandle.IsValid())
+		{
+			Iterator.RemoveCurrent();
+		}
+	}
+	return false;
+}
+
 FAvidScriptGeneratedTypeRuntimeHost::FAvidScriptGeneratedTypeRuntimeHost() = default;
 
 FAvidScriptGeneratedTypeRuntimeHost::~FAvidScriptGeneratedTypeRuntimeHost()
@@ -387,6 +450,8 @@ bool FAvidScriptGeneratedTypeRuntimeHost::Startup()
 	}
 	Impl = MakeUnique<FImpl>();
 	Impl->bStarted = true;
+	Impl->PostGarbageCollectHandle = FCoreUObjectDelegates::GetPostGarbageCollect().AddRaw(
+		this, &FAvidScriptGeneratedTypeRuntimeHost::QueueCollectedInstanceSweep);
 	return true;
 }
 
@@ -407,7 +472,8 @@ void FAvidScriptGeneratedTypeRuntimeHost::Shutdown()
 		for (auto Iterator = Impl->Instances.CreateIterator(); Iterator; ++Iterator)
 		{
 			FString Error;
-			if (!TeardownInstance(*Iterator.Value(), Impl->ObjectRegistry, Error))
+			if (!TeardownInstance(*Iterator.Value(), Impl->ObjectRegistry, Error,
+				!Iterator.Value()->Receiver.IsValid()))
 				UE_LOG(LogAvidScriptGeneratedTypeRuntimeHost, Warning, TEXT("Generated host teardown: %s"), *Error);
 			if (!Iterator.Value()->Session && !Iterator.Value()->ReceiverHandle.IsValid()) Iterator.RemoveCurrent();
 		}
@@ -416,6 +482,12 @@ void FAvidScriptGeneratedTypeRuntimeHost::Shutdown()
 	{
 		Impl->bTeardownPending = true;
 		return;
+	}
+	FCoreUObjectDelegates::GetPostGarbageCollect().Remove(Impl->PostGarbageCollectHandle);
+	if (Impl->CollectedSweepTickerHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(Impl->CollectedSweepTickerHandle);
+		Impl->CollectedSweepTickerHandle.Reset();
 	}
 	Impl->ObjectRegistry.Reset();
 	Impl->Package.Reset();

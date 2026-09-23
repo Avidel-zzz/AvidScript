@@ -71,6 +71,8 @@ private:
 	FAvidScriptGeneratedTypeRuntimeHost(const FAvidScriptGeneratedTypeRuntimeHost&) = delete;
 	FAvidScriptGeneratedTypeRuntimeHost& operator=(const FAvidScriptGeneratedTypeRuntimeHost&) = delete;
 	bool CanMutateInstances(FString& OutError) const;
+	void QueueCollectedInstanceSweep();
+	bool SweepCollectedInstances(float DeltaTime);
 	bool LoadPackageFromDescriptorFile(
 		const FString& DescriptorPath,
 		TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot>& OutRegistry,

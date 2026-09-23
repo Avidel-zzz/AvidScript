@@ -96,6 +96,8 @@ public:
 	bool DispatchEvent(int32 EventId, float Value, FAvidScriptWasmSmokeResult& OutResult);
 	bool DispatchGameplayEvent(const FAvidScriptGameplayEvent& Event, FAvidScriptWasmSmokeResult& OutResult);
 	bool StopAndUnload(FAvidScriptWasmSmokeResult& OutResult);
+	// Retire a collected generated receiver without entering its invalid EndPlay context.
+	bool StopAndUnloadForCollectedGeneratedOwner();
 	bool TickLive(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult);
 	bool TickHot(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutFailure);
 	bool DispatchEventLive(int32 EventId, float Value, FAvidScriptWasmSmokeResult& OutResult);

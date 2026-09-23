@@ -1790,6 +1790,16 @@ bool FAvidScriptRuntimeSession::EndPlayLive(FAvidScriptWasmSmokeResult& OutResul
 	return bSucceeded;
 }
 
+bool FAvidScriptRuntimeSession::StopAndUnloadForCollectedGeneratedOwner()
+{
+	if (!IsInGameThread() || !GeneratedTypeInstance || GeneratedTypeInstance->Receiver.IsValid()
+		|| IsOperationActive()) return false;
+	AbortRuntimeForLifecycleInvalidation();
+	bLifecycleInvalidated = true;
+	++LifecycleInvalidationCount;
+	return true;
+}
+
 bool FAvidScriptRuntimeSession::StopAndUnload(FAvidScriptWasmSmokeResult& OutResult)
 {
 	if (IsOperationActive() || (LiveDomain && LiveDomain->HasActiveCalls()))

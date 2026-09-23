@@ -2,6 +2,7 @@
 #include "AvidScriptRuntimeSession.h"
 #include "AvidScriptRuntimeArtifact.h"
 #include "AvidScriptBindingInvocation.h"
+#include "Containers/Ticker.h"
 #include "Lifecycle/AvidScriptRuntimeLifecycleCoordinator.h"
 #include "Memory/AvidScriptManagedHeap.h"
 #include "Ownership/AvidScriptSessionObjectOwnership.h"
@@ -860,6 +861,51 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
             TestFalse(TEXT("Final owner event is unbound"),
                 Signal->Signature.MulticastProperty->GetMulticastDelegate(
                     Signal->Signature.MulticastProperty->ContainerPtrToValuePtr<void>(Peer))->IsBound());
+
+            AActor* CollectedOwner = World->SpawnActor<AActor>(Signal->ExpectedSourceClass);
+            AActor* SurvivingPeer = World->SpawnActor<AActor>(Signal->ExpectedSourceClass);
+            if (!TestNotNull(TEXT("GC event owner spawned"), CollectedOwner)
+                || !TestNotNull(TEXT("GC event peer spawned"), SurvivingPeer)) return false;
+            if (!Host->BeginInstance(*CollectedOwner, 0, Error)
+                || !Host->BeginInstance(*SurvivingPeer, 0, Error)) { AddError(Error); return false; }
+            auto* SurvivingSession = Host->GetInstanceSessionForTesting(*SurvivingPeer);
+            if (!TestNotNull(TEXT("GC peer Session exists"), SurvivingSession)) return false;
+            auto* SurvivingRuntime = SurvivingSession->GetLiveRuntimeForTesting();
+            int32 CollectedStart = -1, SurvivingStart = -1;
+            if (!TestTrue(TEXT("GC owner enters CSharp UClass method"),
+                    FAvidScriptGeneratedTypeDispatcher::Invoke(CollectedOwner, 0, StartOrdinal, {}, &CollectedStart))
+                || !TestTrue(TEXT("GC peer enters CSharp UClass method"),
+                    FAvidScriptGeneratedTypeDispatcher::Invoke(SurvivingPeer, 0, StartOrdinal, {}, &SurvivingStart))) return false;
+            Broadcast(CollectedOwner, 2);
+            Broadcast(SurvivingPeer, 3);
+            TestEqual(TEXT("GC owner and peer each suspend"),
+                SurvivingSession->GetLivePendingContinuationCount(), 1);
+            TWeakObjectPtr<AActor> WeakCollectedOwner(CollectedOwner);
+            CollectedOwner->Destroy();
+            CollectedOwner = nullptr;
+            CollectGarbage(RF_NoFlags);
+            TestFalse(TEXT("Destroyed generated event owner is collected"), WeakCollectedOwner.IsValid());
+            FTSTicker::GetCoreTicker().Tick(0.02f);
+            TestEqual(TEXT("GC retires only the destroyed generated instance"), Host->GetActiveInstanceCount(), 1);
+            TestEqual(TEXT("GC releases only the destroyed owner handle"), Host->GetRegisteredHandleCount(), 1);
+            TestTrue(TEXT("GC leaves peer Runtime live"),
+                SurvivingSession->GetLiveRuntimeForTesting() == SurvivingRuntime);
+            TestEqual(TEXT("GC leaves peer await pending"),
+                SurvivingSession->GetLivePendingContinuationCount(), 1);
+            World->Tick(LEVELTICK_All, 0); ++GFrameCounter;
+            World->Tick(LEVELTICK_All, 0.02f); ++GFrameCounter;
+            if (!SurvivingSession->TickLive(0.001f, SharedResult))
+            { AddError(SharedResult.ErrorMessage); return false; }
+            SharedScore = 0;
+            if (!TestTrue(TEXT("Read shared score after GC and peer resume"), SurvivingRuntime->ReadStateBytes(
+                SharedCountAddress, MakeArrayView(reinterpret_cast<uint8*>(&SharedScore), 4), Error)))
+            { AddError(Error); return false; }
+            TestEqual(TEXT("Collected owner cannot resume but peer can"), SharedScore, 35);
+            auto* SurvivingHeap = SurvivingRuntime->GetManagedHeapForTesting();
+            if (!TestTrue(TEXT("GC peer managed heap collects"), SurvivingHeap->Collect() == EHeapError::Ok)) return false;
+            TestEqual(TEXT("GC leaves only the peer event root"), SurvivingHeap->GetStats().LiveRoots, 1u);
+            if (!Host->EndInstance(*SurvivingPeer, Error)) { AddError(Error); return false; }
+            TestEqual(TEXT("GC peer exit empties the Host"), Host->GetActiveInstanceCount(), 0);
         }
         FAvidScriptWasmReloadResult Loaded;
         if (!Session.LoadInitialModule(Bytes.GetData(), Bytes.Num(), Manifest, Loaded))
