@@ -33,10 +33,11 @@ internal static class SemanticExceptionFlowTests
         CatchFilterIsExplicitlyRejected();
         NestedHandlersKeepTheirOwnRegions();
         CatchAllKeepsItsRegion();
+        CrossMethodCallGetsCatchRoute();
         NestedCallableOwnsItsThrowSite();
         OrdinaryArtifactsKeepTheirOriginalShape();
         ContractValidatorRejectsDowngradeAndCorruption();
-        return 8;
+        return 9;
     }
 
     private static void NestedThrowCatchRethrowKeepsRoslynRegions()
@@ -80,6 +81,27 @@ internal static class SemanticExceptionFlowTests
             && flow.Regions[block.EnclosingRegionOrdinal].FirstBlockOrdinal <= block.Ordinal
             && flow.Regions[block.EnclosingRegionOrdinal].LastBlockOrdinal >= block.Ordinal),
             "each exception block must retain its Roslyn region ownership");
+        Check(SemanticExceptionDispatchPlanner.TryBuild(flow, out SemanticExceptionDispatchPlan? dispatch)
+            && dispatch is not null,
+            "nested exception regions must produce a bounded dispatch plan");
+        SemanticExceptionDispatchRoute throwRoute = dispatch!.Routes.Single(route =>
+            route.SourceBlockOrdinal == flow.Branches.Single(branch =>
+                branch.Semantics == "throw").SourceBlockOrdinal);
+        Check(throwRoute.Steps.Select(step => step.Kind).SequenceEqual(
+                new[] { "finally", "catch", "finally" })
+            && throwRoute.Steps[1].HandlerOrdinals.SequenceEqual(new[] { 0 }),
+            "throw must run inner cleanup before the handler and outer cleanup if unmatched");
+        SemanticExceptionDispatchRoute rethrowRoute = dispatch.Routes.Single(route =>
+            route.SourceBlockOrdinal == flow.Branches.Single(branch =>
+                branch.Semantics == "rethrow").SourceBlockOrdinal);
+        Check(rethrowRoute.Steps.Select(step => step.Kind).SequenceEqual(new[] { "finally" }),
+            "rethrow must skip its current catch and continue into the outer cleanup");
+        int innerFinally = throwRoute.Steps[0].RegionOrdinal;
+        int outerFinally = throwRoute.Steps[2].RegionOrdinal;
+        Check(dispatch.Routes[flow.Regions[innerFinally].FirstBlockOrdinal].Steps
+                .Select(step => step.Kind).SequenceEqual(new[] { "catch", "finally" })
+            && dispatch.Routes[flow.Regions[outerFinally].FirstBlockOrdinal].Steps.Count == 0,
+            "a replacement error in a finally must continue outward without rerunning that finally");
         Check(flow.Regions.Select(region => region.Ordinal)
             .SequenceEqual(Enumerable.Range(0, flow.Regions.Count)),
             "region ordinals must be stable and contiguous");
@@ -121,6 +143,8 @@ internal static class SemanticExceptionFlowTests
         SemanticDocument document = Analyze(source, "Scripts/FilteredCatch.cs");
         Check(!document.Succeeded && document.ExceptionFlows!.Single().Catches.Single().HasFilter,
             "filtered catch must remain diagnostic-only");
+        Check(!SemanticExceptionDispatchPlanner.TryBuild(document.ExceptionFlows!.Single(), out _),
+            "filtered handlers must not acquire an executable dispatch route");
         SemanticDiagnostic diagnostic = document.Diagnostics.Single(item => item.Code == "ASCS3005");
         Check(source.Substring(diagnostic.Span.Start, diagnostic.Span.Length) == "when (value > 0)",
             "unsupported filter diagnostic must point at the filter");
@@ -164,6 +188,19 @@ internal static class SemanticExceptionFlowTests
             "nested typed handlers must map to their own Roslyn catch regions");
         Check(SemanticExceptionFlowContractValidator.IsValid(document),
             "multiple handler regions must satisfy the versioned contract");
+        Check(SemanticExceptionDispatchPlanner.TryBuild(flow, out SemanticExceptionDispatchPlan? plan)
+            && plan is not null,
+            "nested handlers must produce a dispatch route");
+        SemanticThrowSite innerThrow = flow.Throws[1];
+        SemanticExceptionBlock throwBlock = flow.Blocks!.Single(block =>
+            block.BranchValue is { } value
+            && value.Span.Start >= innerThrow.Span.Start
+            && value.Span.Start < innerThrow.Span.Start + innerThrow.Span.Length);
+        Check(plan!.Routes[throwBlock.Ordinal].Steps.Select(step => step.Kind)
+                .SequenceEqual(new[] { "catch", "catch" })
+            && plan.Routes[throwBlock.Ordinal].Steps[0].HandlerOrdinals.SequenceEqual(new[] { 0 })
+            && plan.Routes[throwBlock.Ordinal].Steps[1].HandlerOrdinals.SequenceEqual(new[] { 1, 2, 3 }),
+            "inner throw must try its local handler before outer handlers in source order");
     }
 
     private static void CatchAllKeepsItsRegion()
@@ -189,6 +226,43 @@ internal static class SemanticExceptionFlowTests
             && flow.Regions[handler.RegionOrdinal].ExceptionTypeId == "type:object"
             && SemanticExceptionFlowContractValidator.IsValid(document),
             "catch-all must keep an untyped handler tied to its catch region");
+        Check(SemanticExceptionDispatchPlanner.TryBuild(flow, out SemanticExceptionDispatchPlan? plan)
+            && plan!.Routes.Any(route => route.Steps.Any(step =>
+                step.Kind == "catch" && step.HandlerOrdinals.SequenceEqual(new[] { 0 }))),
+            "catch-all must remain in the dispatch candidate list");
+    }
+
+    private static void CrossMethodCallGetsCatchRoute()
+    {
+        const string source = """
+            using System;
+            class Script
+            {
+                static int Fail() { throw new InvalidOperationException(); }
+                static int Run()
+                {
+                    try { return Fail(); }
+                    catch (InvalidOperationException) { return 7; }
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/CrossMethodException.cs");
+        SemanticExceptionFlow caller = document.ExceptionFlows!.Single(flow =>
+            flow.MethodSymbolId.Contains(".Run(", StringComparison.Ordinal));
+        Check(SemanticExceptionDispatchPlanner.TryBuild(caller, out SemanticExceptionDispatchPlan? plan)
+            && plan is not null,
+            "caller with a catch must yield a dispatch plan for failed callees");
+        SemanticExceptionBlock callBlock = caller.Blocks!.Single(block =>
+            block.BranchValue is { } value && ContainsOperation(value, "invocation"));
+        Check(plan!.Routes[callBlock.Ordinal].Steps.Select(step => step.Kind)
+                .SequenceEqual(new[] { "catch" })
+            && plan.Routes[callBlock.Ordinal].Steps[0].HandlerOrdinals.SequenceEqual(new[] { 0 }),
+            "a language error returned by a call must reach the caller's local handler");
+        SemanticExceptionFlow callee = document.ExceptionFlows!.Single(flow =>
+            flow.MethodSymbolId.Contains(".Fail(", StringComparison.Ordinal));
+        Check(SemanticExceptionDispatchPlanner.TryBuild(callee, out SemanticExceptionDispatchPlan? calleePlan)
+            && calleePlan!.Routes.All(route => route.Steps.Count == 0),
+            "an uncaught callee error must leave the method for its caller");
     }
 
     private static void NestedCallableOwnsItsThrowSite()
@@ -265,6 +339,11 @@ internal static class SemanticExceptionFlowTests
                     index == 1 ? block with { EnclosingRegionOrdinal = flow.Regions.Count } : block).ToArray(),
             } },
         }), "out-of-range block region ownership must be rejected");
+        Check(!SemanticExceptionDispatchPlanner.TryBuild(flow with
+        {
+            Blocks = flow.Blocks!.Select((block, index) =>
+                index == 1 ? block with { EnclosingRegionOrdinal = flow.Regions.Count } : block).ToArray(),
+        }, out _), "dispatch planning must reject a forged block region");
         SemanticExceptionBlock valueBlock = flow.Blocks!.First(block => block.BranchValue is not null);
         Check(!SemanticExceptionFlowContractValidator.IsValid(document with
         {
