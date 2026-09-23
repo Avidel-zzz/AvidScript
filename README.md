@@ -1,20 +1,21 @@
-![AvidScript：用 C# 驱动 Unreal Engine 游戏对象的概念插画](Docs/Assets/README/avidscript-hero.png)
+![AvidScript：C# 代码驱动 Unreal Engine 游戏对象的概念插画](Docs/Assets/README/avidscript-hero.png)
 
 # AvidScript
 
 **用 C# 为 Unreal Engine 编写玩法脚本。**
 
-![UE 5.8 · C# · WebAssembly · Windows x64 · 0.1.0 Preview · MIT](Docs/Assets/README/project-badges.png)
+![UE 5.8 · C# · WebAssembly · Windows x64 · 0.1.0 Preview · MIT：带图标的本地徽章](Docs/Assets/README/project-badges.png)
 
 [🚀 快速开始](#快速开始) · [🧩 代码示例](#常见用法) · [🚧 当前限制](#当前边界) · [📚 更多文档](#进一步阅读)
 
 ---
 
-你可以让 Actor 移动和响应碰撞、等待计时器或资源加载、处理 UI 与存档，也可以用 C# 声明供蓝图使用的 Actor、组件、属性和函数。
+用 C# 写 Actor 行为、异步流程和蓝图可用的类型。先看一个能运行的方块样例，再从下面的例子找自己的起点。
 
-| 🎮 编写玩法 | ⚡ 快速迭代 | 🔗 接入 UE |
+| 🎮 游戏玩法 | ⏱️ 等待与恢复 | 🧱 蓝图类型 |
 | :--- | :--- | :--- |
-| 移动、碰撞、UI、存档与网络 | 修改方法体后热重载，减少 C++ 编译等待 | 调用项目 API，向蓝图暴露类、属性和函数 |
+| 方块每帧移动，碰撞后触发逻辑 | 等 0.25 秒再放大 Actor；对象销毁时取消等待 | 用 C# 声明 Actor、属性和可调用函数 |
+| [看生命周期样例](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) | [看延迟操作样例](Samples/CSharp/LatentGameplay/README.md) | [看脚本定义类型样例](Samples/CSharp/ScriptDefinedTypes/README.md) |
 
 > [!NOTE]
 > **0.1.0 开发预览版** · 主要验证环境为 **UE 5.8 源码版 + Windows x64**。已有可运行样例，C# 语言支持、调试体验和平台覆盖仍在完善，尚不适合作为完整 .NET 的替代品。

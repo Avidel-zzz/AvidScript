@@ -1,20 +1,35 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="44" viewBox="0 0 1000 44" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="52" viewBox="0 0 1000 52" role="img" aria-labelledby="title desc">
   <title id="title">AvidScript 项目信息</title>
-  <desc id="desc">UE 5.8、C#、WebAssembly、Windows x64、0.1.0 开发预览版、MIT 许可证。</desc>
+  <desc id="desc">带图标的徽章：UE 5.8、C#、WebAssembly、Windows x64、0.1.0 开发预览版、MIT 许可证。</desc>
   <g>
-    <rect width="135" height="40" rx="8" fill="#172a34"/>
-    <rect x="145" width="95" height="40" rx="8" fill="#512bd4"/>
-    <rect x="250" width="185" height="40" rx="8" fill="#5541a9"/>
-    <rect x="445" width="190" height="40" rx="8" fill="#0967a6"/>
-    <rect x="645" width="230" height="40" rx="8" fill="#805413"/>
-    <rect x="885" width="115" height="40" rx="8" fill="#226342"/>
+    <rect width="135" height="48" rx="10" fill="#172a34"/>
+    <rect x="145" width="95" height="48" rx="10" fill="#512bd4"/>
+    <rect x="250" width="185" height="48" rx="10" fill="#5541a9"/>
+    <rect x="445" width="190" height="48" rx="10" fill="#0967a6"/>
+    <rect x="645" width="230" height="48" rx="10" fill="#805413"/>
+    <rect x="885" width="115" height="48" rx="10" fill="#226342"/>
   </g>
-  <g fill="#ffffff" font-family="'Segoe UI', sans-serif" font-size="18" font-weight="600" text-anchor="middle">
-    <text x="67" y="27">UE 5.8</text>
-    <text x="192" y="27">C#</text>
-    <text x="342" y="27">WebAssembly</text>
-    <text x="540" y="27">Windows x64</text>
-    <text x="760" y="27">0.1.0 Preview</text>
-    <text x="942" y="27">MIT</text>
+  <g fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="23" cy="24" r="13"/>
+    <path d="M 17 18 V 25 Q 17 31 23 31 Q 29 31 29 25 V 18"/>
+    <circle cx="164" cy="24" r="13"/>
+    <rect x="264" y="11" width="28" height="26" rx="5"/>
+    <path d="M 460 13 H 472 V 23 H 460 Z M 476 13 H 488 V 23 H 476 Z M 460 27 H 472 V 37 H 460 Z M 476 27 H 488 V 37 H 476 Z"/>
+    <circle cx="666" cy="24" r="13"/>
+    <path d="M 663 17 L 670 24 L 663 31"/>
+    <rect x="899" y="12" width="24" height="25" rx="3"/>
+    <path d="M 904 19 H 918 M 904 24 H 918 M 904 29 H 914"/>
+  </g>
+  <g fill="#fff" font-family="'Segoe UI', Arial, sans-serif" font-weight="700">
+    <text x="159" y="29" font-size="14">C</text>
+    <text x="269" y="29" font-size="14">W</text>
+  </g>
+  <g fill="#fff" font-family="'Segoe UI', Arial, sans-serif" font-size="16" font-weight="600" dominant-baseline="middle">
+    <text x="44" y="25">UE 5.8</text>
+    <text x="183" y="25">C#</text>
+    <text x="304" y="25">WebAssembly</text>
+    <text x="500" y="25">Windows x64</text>
+    <text x="690" y="25">0.1.0 Preview</text>
+    <text x="935" y="25">MIT</text>
   </g>
 </svg>
