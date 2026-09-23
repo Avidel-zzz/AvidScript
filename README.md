@@ -16,6 +16,8 @@
 | :--- | :--- | :--- |
 | 移动、碰撞、UI、存档与网络 | 修改方法体后热重载，减少 C++ 编译等待 | 调用项目 API，向蓝图暴露类、属性和函数 |
 
+![AvidScript 使用流程：编写 C# 玩法、编译为 WASM、由插件加载执行，最后驱动 UE 游戏对象。](Docs/Assets/README/script-to-game.png)
+
 > [!NOTE]
 > **0.1.0 开发预览版** · 主要验证环境为 **UE 5.8 源码版 + Windows x64**。已有可运行样例，C# 语言支持、调试体验和平台覆盖仍在完善，尚不适合作为完整 .NET 的替代品。
 
@@ -25,7 +27,7 @@
 
 先运行仓库自带的 ActorLifecycle 样例：让一个方块移动、旋转并逐渐变大。下面的命令都在项目的 `Plugins/AvidScript` 目录执行。
 
-### 1. 准备环境
+### 🧰 1. 准备环境
 
 需要 Windows 10/11 x64、UE 5.8 源码版、Visual Studio 2022 的 UE C++ 构建环境、PowerShell 7、Git 和 **.NET SDK 8.0.416**。
 
@@ -46,7 +48,7 @@ $env:UE_ROOT = "C:\UnrealEngine"
   -WaitMutex -NoHotReloadFromIDE
 ```
 
-### 2. 编译并挂到方块上
+### 🎮 2. 编译并挂到方块上
 
 1. 打开 UE Editor，确认 AvidScript 插件已启用。
 2. 在关卡中放置一个 Cube，将 Mobility 设为 **Movable**，并选中它。
@@ -76,7 +78,7 @@ Saved/AvidScriptCSharpGuest/ActorLifecycle/actor_lifecycle.avidscript.json
 
 下面是从仓库样例中提取或简化的片段，用来说明写法；完整文件还包含必要的声明和配置，请从对应样例开始修改。
 
-### 每帧移动 Actor
+### 🧭 每帧移动 Actor
 
 ```csharp
 [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
@@ -92,7 +94,7 @@ public static void Tick(float deltaSeconds)
 
 同一套入口还有 `BeginPlay`（开始运行）和 `EndPlay`（结束运行）。见[生命周期样例](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)。
 
-### 等待一段时间，再继续执行
+### ⏱️ 等待一段时间，再继续执行
 
 ```csharp
 [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
@@ -107,7 +109,7 @@ public static async void BeginPlay()
 
 还可以等待下一帧（`NextTickAsync()`）或资源加载（`AvidAssets.LoadObjectAsync(...)`）。文档中的 **continuation** 指“等待完成后继续执行的那段代码”；**Latent** 是 UE 对这类延迟完成操作的称呼。资源加载写法见[生命周期样例](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)，主动取消见[延迟操作样例](Samples/CSharp/LatentGameplay/README.md)。
 
-### 用 C# 定义蓝图可用的 Actor
+### 🧱 用 C# 定义蓝图可用的 Actor
 
 ```csharp
 using AvidScript;
@@ -130,7 +132,7 @@ public partial class Projectile : AvidActor
 
 `UClass`、`UProperty`、`UFunction` 分别标记“UE 能识别的类、属性、函数”。这类脚本需要生成对应的 UE 类型，不能只把 `.cs` 文件挂到组件上。见[脚本定义 UE 类型样例](Samples/CSharp/ScriptDefinedTypes/README.md)。
 
-### 订阅 UE 事件并记住得分
+### 🔔 订阅 UE 事件并记住得分
 
 ```csharp
 int score = 40;
@@ -158,7 +160,7 @@ public static class ScoreScript
 
 这段写法已通过 Windows 上两种 WASM 后端的真实 UE 事件自动化测试，覆盖重复添加和逐次移除。捕获变量、`ref/out`、单播以及回调内修改订阅等组合仍在补充验证；需要稳定覆盖这些写法时，先用上面的显式订阅接口。[事件语法的当前合同](Docs/Phase66/P66.B_Event_Language_Contract.md)。
 
-### 找一个接近你需求的完整样例
+### 🗂️ 找一个接近你需求的完整样例
 
 | 你想实现什么 | 从哪里开始 |
 | --- | --- |
@@ -191,8 +193,6 @@ RPC 是跨网络请求另一端执行函数；属性复制是服务器把属性�
 更具体的语言缺口和下一步见[当前实施计划](Docs/Phase66/P66.1_Implementation_Plan.md)。自动化测试、实际玩家操作和长时间运行的验收分别记录，不能互相代替。
 
 ## ⚙️ 它如何运行
-
-![从脚本到游戏：编写 C# 玩法 → 编译为 WASM → 插件加载并执行 → 驱动 UE 游戏对象。以每帧更新方块位置为例。](Docs/Assets/README/script-to-game.png)
 
 构建工具把 C# 编译成 **WebAssembly（WASM）**，一种供脚本执行引擎运行的程序格式；UE 插件加载它，再把脚本中的调用转交给 UE。游戏运行时不加载完整的 .NET / CLR。
 
