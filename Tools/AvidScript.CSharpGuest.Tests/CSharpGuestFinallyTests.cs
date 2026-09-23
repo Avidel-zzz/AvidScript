@@ -24,6 +24,9 @@ internal static class CSharpGuestFinallyTests
         CSharpGuestLoweringResult guest = CSharpGuestLowerer.Lower(semantic, new string('a', 64));
         Check(guest.Succeeded,
             "try/finally should lower: " + string.Join(" | ", guest.Diagnostics.Select(item => item.Message)));
+        Check(CSharpGuestLowerer.Lower(
+            semantic with { SemanticVersion = "1.39" }, new string('a', 64)).Succeeded,
+            "the previous synchronous finally contract must remain readable");
         Check(!CSharpGuestLowerer.Lower(
             semantic with { SemanticVersion = "1.38" }, new string('a', 64)).Succeeded,
             "structured cleanup cannot be published under the previous semantic contract");

@@ -303,7 +303,7 @@ internal static class CSharpGuestArrayCapabilityTests
         FrontendDocument frontend = FrontendAnalyzer.Analyze(source, "Scripts/ArrayForeachVersion.cs");
         SemanticDocument semantic = SemanticAnalyzer.Analyze(
             source, "Scripts/ArrayForeachVersion.cs", frontend.Source.Sha256);
-        Assert(semantic.Succeeded && semantic.SemanticVersion == "1.39"
+        Assert(semantic.Succeeded && semantic.SemanticVersion == "1.40"
             && semantic.Symbols.Any(symbol => symbol.Id.StartsWith(
                 "symbol:compiler_local:", StringComparison.Ordinal)),
             "array foreach should advertise the versioned synchronous iteration plan");

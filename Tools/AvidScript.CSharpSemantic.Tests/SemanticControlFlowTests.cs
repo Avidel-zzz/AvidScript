@@ -46,11 +46,12 @@ internal static class SemanticControlFlowTests
         StructuredControlFlowProducesStableBlocksAndEdges();
         ShortCircuitFlowCapturesRetainStableIds();
         StructuredFinallyPublishesCleanupPaths();
+        StructuredEnumeratorPublishesDisposePaths();
         PlainThrowControlFlowFailsClosed();
         ExceptionAsyncAndYieldControlFlowFailClosed();
         InvalidControlFlowDoesNotProducePartialGraphs();
         ControlFlowSerializationIsDeterministic();
-        return 7;
+        return 8;
     }
 
     private static void StructuredControlFlowProducesStableBlocksAndEdges()
@@ -58,8 +59,8 @@ internal static class SemanticControlFlowTests
         SemanticDocument document = Analyze(StructuredSource, "Scripts/StructuredControlFlow.cs");
 
         Assert(document.Succeeded, "supported structured control flow should pass semantic analysis");
-        Assert(document.SchemaVersion == 31 && document.SemanticVersion == "1.39",
-            "current callable artifacts should advertise semantic schema v31 / version 1.39");
+        Assert(document.SchemaVersion == 31 && document.SemanticVersion == "1.40",
+            "current callable artifacts should advertise semantic schema v31 / version 1.40");
         SemanticControlFlowGraph graph = document.ControlFlowGraphs.Single(item =>
             item.MethodSymbolId == "symbol:method:global::Game.Script.Run(int32):int32");
         Assert(graph.Blocks.Select(block => block.Ordinal).SequenceEqual(Enumerable.Range(0, graph.Blocks.Count)),
@@ -180,6 +181,52 @@ internal static class SemanticControlFlowTests
         Assert(converted.Blocks.SelectMany(block => block.Operations).SelectMany(Flatten).Any(operation =>
             operation.Kind == "conversion" && operation.TypeId == "type:float32"),
             "the return value must be converted before the cleanup path executes");
+    }
+
+    private static void StructuredEnumeratorPublishesDisposePaths()
+    {
+        const string source = """
+            using System;
+            sealed class Collection
+            {
+                public Cursor GetEnumerator() => new Cursor();
+            }
+            sealed class Cursor : IDisposable
+            {
+                int index;
+                public int Current => index;
+                public bool MoveNext() { index++; return index <= 2; }
+                public void Dispose() { index = 0; }
+            }
+            static class Script
+            {
+                static int Run()
+                {
+                    foreach (int value in new Collection())
+                    {
+                        if (value == 0) continue;
+                        if (value == 1) return value;
+                        break;
+                    }
+                    return 0;
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/EnumeratorControlFlow.cs");
+        Assert(document.Succeeded,
+            "sealed source enumerable should publish structured cleanup: "
+            + string.Join(" | ", document.Diagnostics.Select(item => item.Message)));
+        Assert(document.Symbols.Any(symbol => symbol.Id.EndsWith(":enumerator", StringComparison.Ordinal)),
+            "enumerator lifetime needs an explicit compiler local");
+        SemanticControlFlowGraph graph = document.ControlFlowGraphs.Single(item =>
+            item.MethodSymbolId.Contains(".Run(", StringComparison.Ordinal));
+        Assert(graph.Blocks.Count(block => block.Operations.SelectMany(Flatten).Any(operation =>
+            operation.Kind == "invocation"
+                && operation.SymbolId?.Contains(".Dispose(", StringComparison.Ordinal) == true)) >= 2,
+            "normal exit and early return must each execute Dispose");
+        Assert(graph.Blocks.SelectMany(block => block.Successors).All(edge =>
+            edge.Semantics is "regular" or "return"),
+            "enumerator cleanup must use executable edges rather than exception-region metadata");
     }
 
     private static void PlainThrowControlFlowFailsClosed()

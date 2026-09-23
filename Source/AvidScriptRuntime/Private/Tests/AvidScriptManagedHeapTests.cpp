@@ -447,6 +447,66 @@ bool FAvidScriptManagedHeapGenericMembersTest::RunTest(const FString& Parameters
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptEnumeratorCleanupTest,
+	"AvidScript.Runtime.EnumeratorCleanup",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEnumeratorCleanupTest::RunTest(const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	using namespace AvidScript::Managed;
+	const FString File = FPaths::Combine(FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptEnumeratorTests/GuestFixtures/enumerator-cleanup.wasm"));
+	TArray<uint8> Wasm;
+	if (!TestTrue(TEXT("Load current enumerator fixture; generate with Build/TestAvidScriptEnumeratorCleanup.ps1"),
+		FFileHelper::LoadFileToArray(Wasm, *File))) return false;
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	{
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime
+			? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		Selection.bAllowFallback = false;
+		FAvidScriptWasmRuntimeInstance Runtime(Selection);
+		FAvidScriptWasmSmokeResult Result;
+		if (!TestTrue(TEXT("Enumerator fixture loads"),
+			Runtime.LoadModule(Wasm.GetData(), Wasm.Num(), TEXT("enumerator_cleanup"), Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		TestEqual(TEXT("Enumerator fixture uses requested VM backend"),
+			Runtime.GetActiveBackendInfo().Kind, Backend);
+		TestEqual(TEXT("Enumerator fixture uses requested execution mode"),
+			Runtime.GetActiveBackendInfo().ExecutionMode, Selection.ExecutionMode);
+		if (!TestTrue(TEXT("Enumerator fixture executes in BeginPlay"), Runtime.BeginPlay(Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		uint8 Values[24]{};
+		FString Error;
+		if (!TestTrue(TEXT("Read enumerator counts and results"), Runtime.ReadStateBytes(16, MakeArrayView(Values), Error)))
+		{ AddError(Error); return false; }
+		auto ReadValue = [&Values](int32 Index)
+		{
+			const int32 Offset = Index * 4;
+			return uint32(Values[Offset]) | (uint32(Values[Offset + 1]) << 8)
+				| (uint32(Values[Offset + 2]) << 16) | (uint32(Values[Offset + 3]) << 24);
+		};
+		// Static slots use stable symbol order, not C# declaration order.
+		TestEqual(TEXT("Collection acquired once per loop"), ReadValue(0), 3u);
+		TestEqual(TEXT("Enumerator disposed once per loop"), ReadValue(1), 3u);
+		TestEqual(TEXT("Break and continue result"), ReadValue(2), 2u);
+		TestEqual(TEXT("Final acquire/dispose count"), ReadValue(3), 33u);
+		TestEqual(TEXT("Early return evaluates before Dispose"), ReadValue(4), 22u);
+		TestEqual(TEXT("Normal completion result"), ReadValue(5), 12u);
+		FHeap* Heap = Runtime.GetManagedHeapForTesting();
+		if (!TestNotNull(TEXT("Enumerator fixture owns managed heap"), Heap)) return false;
+		const auto Stats = Heap->GetStats();
+		TestTrue(TEXT("Collections and enumerators allocate through Host ABI"), Stats.Allocations >= 6);
+		TestEqual(TEXT("Enumerator frames unwind"), Stats.ActiveFrames, 0u);
+		TestEqual(TEXT("Enumerator roots unwind"), Stats.LiveRoots, 0u);
+		TestTrue(TEXT("Collect detached enumerators"), Heap->Collect() == EHeapError::Ok);
+		TestEqual(TEXT("Enumerator objects reclaimed"), Heap->GetStats().LiveObjects, 0u);
+	}
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptManagedHeapBorrowedReferencesTest,
 	"AvidScript.Runtime.ManagedHeap.BorrowedReferences",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

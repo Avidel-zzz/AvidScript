@@ -211,10 +211,10 @@ Assert-Condition (Test-Path -LiteralPath $PreparedSemanticPath -PathType Leaf) "
 $PreparedSemanticModel = Get-Content -Raw -LiteralPath $PreparedSemanticPath | ConvertFrom-Json
 Assert-Condition (
     [int]$PreparedReportJson.semantic.schema_version -eq 31 -and
-    [string]$PreparedReportJson.semantic.version -ceq "1.39" -and
+    [string]$PreparedReportJson.semantic.version -ceq "1.40" -and
     [int]$PreparedSemanticModel.schema_version -eq 31 -and
-    [string]$PreparedSemanticModel.semantic_version -ceq "1.39") `
-    "prepared semantic contract is not 31/1.39"
+    [string]$PreparedSemanticModel.semantic_version -ceq "1.40") `
+    "prepared semantic contract is not 31/1.40"
 Assert-Condition (Test-Path -LiteralPath $PreparedDebugMapPath -PathType Leaf) "prepared C# debug map artifact is missing"
 $PreparedDebugMap = Get-Content -Raw -LiteralPath $PreparedDebugMapPath | ConvertFrom-Json
 $PreparedManifest = Get-Content -Raw -LiteralPath $ManifestPath | ConvertFrom-Json

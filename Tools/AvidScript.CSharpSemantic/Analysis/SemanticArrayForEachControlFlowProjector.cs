@@ -36,11 +36,15 @@ internal static class SemanticArrayForEachControlFlowProjector
 
         foreach (ForEachStatementSyntax loop in loops)
         {
+            ILocalSymbol? item = semanticModel.GetDeclaredSymbol(loop);
+            bool array = semanticModel.GetTypeInfo(loop.Expression).Type is IArrayTypeSymbol { Rank: 1 } arrayType
+                && item is not null
+                && SymbolEqualityComparer.Default.Equals(item.Type, arrayType.ElementType);
+            bool enumerator = SemanticSynchronousEnumeratorPlanner.TryCreate(loop, semanticModel, out _);
             if (!loop.AwaitKeyword.IsKind(SyntaxKind.None)
                 || loop.Type is RefTypeSyntax
-                || semanticModel.GetTypeInfo(loop.Expression).Type is not IArrayTypeSymbol { Rank: 1 } arrayType
-                || semanticModel.GetDeclaredSymbol(loop) is not ILocalSymbol item
-                || !SymbolEqualityComparer.Default.Equals(item.Type, arrayType.ElementType)
+                || (!array && !enumerator)
+                || item is null
                 || IsIterationVariableCaptured(loop, item, semanticModel))
             {
                 return false;

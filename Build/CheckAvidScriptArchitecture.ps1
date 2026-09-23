@@ -3889,7 +3889,7 @@ foreach ($RequiredReachabilityContract in @(
 }
 foreach ($RequiredSemanticContract in @(
     'CurrentSchemaVersion = 31',
-    'CurrentSemanticVersion = "1.39"'
+    'CurrentSemanticVersion = "1.40"'
 )) {
     if (-not $SemanticContractSource.Contains($RequiredSemanticContract)) {
         Add-Violation "C# Semantic contract is missing current version token $RequiredSemanticContract"

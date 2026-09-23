@@ -22,7 +22,7 @@ internal static class CSharpGuestGenericMethodTests
     {
         string source = File.ReadAllText(FindFixture());
         SemanticDocument semantic = Analyze(source);
-        Check(semantic.Succeeded && semantic.SemanticVersion == "1.39",
+        Check(semantic.Succeeded && semantic.SemanticVersion == "1.40",
             "closed generic source should publish the current semantic contract");
         SemanticCallable[] instances = semantic.Callables
             .Where(callable => callable.GenericDefinitionSymbolId is not null).ToArray();

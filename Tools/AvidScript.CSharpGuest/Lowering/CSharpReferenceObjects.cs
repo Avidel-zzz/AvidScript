@@ -155,7 +155,10 @@ internal static class CSharpReferenceObjects
         && !type.IsStatic && !type.IsAbstract && !type.IsRecord && !type.HasPrimaryConstructor
         && !type.HasInstanceInitializers && !type.HasStaticInitialization
         && !type.HasImplicitInstanceStorage && !type.HasVirtualMembers && !type.HasFinalizer
-        && type.BaseTypeId == "type:object" && type.InterfaceTypeIds.Count == 0;
+        && type.BaseTypeId == "type:object"
+        && (type.InterfaceTypeIds.Count == 0
+            || type.IsSealed && type.InterfaceTypeIds.Count == 1
+                && type.InterfaceTypeIds[0] == "type:global::System.IDisposable");
 
     private static bool IsClosed(string typeId,
         IReadOnlyDictionary<string, SemanticType> types,

@@ -703,8 +703,16 @@ internal static class SemanticAsyncControlFlowProjector
             }
 
             ITypeSymbol? collectionType = semanticModel.GetTypeInfo(loop.Expression).Type;
-            if (collectionType is not IArrayTypeSymbol { Rank: 1 } arrayType
-                || semanticModel.GetDeclaredSymbol(loop) is not ILocalSymbol itemSymbol
+            if (collectionType is not IArrayTypeSymbol { Rank: 1 } arrayType)
+            {
+                return SemanticSynchronousEnumeratorPlanner.TryCreate(loop, semanticModel, out var enumerator)
+                    ? BuildEnumeratorForEach(loop, enumerator!, successor, depth)
+                    : Reject(
+                        "Structured foreach requires an exact array or a sealed source enumerator with Dispose.",
+                        loop.Span,
+                        "ASCS5419");
+            }
+            if (semanticModel.GetDeclaredSymbol(loop) is not ILocalSymbol itemSymbol
                 || !SymbolEqualityComparer.Default.Equals(itemSymbol.Type, arrayType.ElementType))
             {
                 return Reject(
@@ -844,6 +852,95 @@ internal static class SemanticAsyncControlFlowProjector
                 new[] { new SemanticAsyncStatement(collection!, arraySymbolId) },
                 null,
                 new DraftTransfer(SemanticAsyncMethod.GotoTransferKind, null, indexDraft, -1));
+        }
+
+        private int BuildEnumeratorForEach(
+            ForEachStatementSyntax loop,
+            SemanticSynchronousEnumeratorPlan plan,
+            int successor,
+            int depth)
+        {
+            if (!allowValueReturns)
+            {
+                return Reject("Controlled async foreach cannot own a synchronous enumerator.",
+                    loop.Span, "ASCS5419");
+            }
+            if (!TryProjectValue(loop.Expression, out SemanticOperation? collection)) return -1;
+
+            string collectionTypeId = typeRegistry.Register(plan.CollectionType);
+            string enumeratorTypeId = typeRegistry.Register(plan.EnumeratorType);
+            string itemTypeId = typeRegistry.Register(plan.Item.Type);
+            string prefix = $"symbol:compiler_local:{methodSymbolId}:foreach:{loop.SpanStart}";
+            string collectionId = prefix + ":collection";
+            string enumeratorId = prefix + ":enumerator";
+            SemanticSpan span = SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, loop.Span);
+            compilerLocals.Add(new(collectionId, $"<foreach_collection_{loop.SpanStart}>", collectionTypeId, span));
+            compilerLocals.Add(new(enumeratorId, $"<foreach_enumerator_{loop.SpanStart}>", enumeratorTypeId, span));
+
+            SemanticOperation collectionReference = CreateValueOperation(
+                "local_reference", collectionTypeId, collectionId, loop.Expression.Span);
+            SemanticOperation enumeratorReference = CreateValueOperation(
+                "local_reference", enumeratorTypeId, enumeratorId, loop.Expression.Span);
+            SemanticOperation dispose = CreateDirectInvocation("type:void",
+                SemanticSymbolProjector.GetSymbolId(plan.Dispose), loop.Span,
+                new[] { enumeratorReference });
+            int normalCleanup = AddDraft(loop.Span,
+                new[] { new SemanticAsyncStatement(dispose, null) }, null,
+                new DraftTransfer(SemanticAsyncMethod.GotoTransferKind, null, successor, -1));
+            if (normalCleanup < 0) return -1;
+
+            int returnContinuation = returnCleanupTarget;
+            if (returnContinuation < 0)
+            {
+                SemanticOperation? result = returnTypeId == "type:void" ? null
+                    : CreateValueOperation("local_reference", returnTypeId,
+                        EnsureReturnValueLocal(loop.Span), loop.Span);
+                returnContinuation = AddDraft(loop.Span, Array.Empty<SemanticAsyncStatement>(), null,
+                    new DraftTransfer(SemanticAsyncMethod.ReturnTransferKind, result, -1, -1));
+                if (returnContinuation < 0) return -1;
+            }
+            int returnCleanup = AddDraft(loop.Span,
+                new[] { new SemanticAsyncStatement(dispose, null) }, null,
+                new DraftTransfer(SemanticAsyncMethod.GotoTransferKind, null, returnContinuation, -1));
+            if (returnCleanup < 0) return -1;
+
+            int conditionDraft = AddDraft(loop.Expression.Span, Array.Empty<SemanticAsyncStatement>(), null,
+                new DraftTransfer(SemanticAsyncMethod.ReturnTransferKind, null, -1, -1));
+            if (conditionDraft < 0) return -1;
+            int iterationStart = drafts.Count;
+            int outerReturnCleanup = returnCleanupTarget;
+            returnCleanupTarget = returnCleanup;
+            int body = BuildStatement(loop.Statement, conditionDraft,
+                new LoopTargets(normalCleanup, conditionDraft), depth + 1);
+            returnCleanupTarget = outerReturnCleanup;
+            if (body < 0) return -1;
+
+            SemanticOperation current = CreateValueOperation("property_reference", itemTypeId,
+                SemanticSymbolProjector.GetSymbolId(plan.Current), loop.Identifier.Span,
+                new[] { enumeratorReference });
+            int itemDraft = AddDraft(loop.Identifier.Span,
+                new[] { new SemanticAsyncStatement(current,
+                    SemanticSymbolProjector.GetSymbolId(plan.Item)) }, null,
+                new DraftTransfer(SemanticAsyncMethod.GotoTransferKind, null, body, -1));
+            if (itemDraft < 0) return -1;
+            scopes.Add((loop, "foreach_iteration",
+                Enumerable.Range(iterationStart, drafts.Count - iterationStart).ToArray()));
+            SemanticOperation moveNext = CreateDirectInvocation("type:bool",
+                SemanticSymbolProjector.GetSymbolId(plan.MoveNext), loop.Expression.Span,
+                new[] { enumeratorReference });
+            drafts[conditionDraft].Transfer = new DraftTransfer(
+                SemanticAsyncMethod.BranchTransferKind, moveNext, itemDraft, normalCleanup);
+
+            SemanticOperation getEnumerator = CreateDirectInvocation(enumeratorTypeId,
+                SemanticSymbolProjector.GetSymbolId(plan.GetEnumerator), loop.Expression.Span,
+                new[] { collectionReference });
+            int acquire = AddDraft(loop.Expression.Span,
+                new[] { new SemanticAsyncStatement(getEnumerator, enumeratorId) }, null,
+                new DraftTransfer(SemanticAsyncMethod.GotoTransferKind, null, conditionDraft, -1));
+            if (acquire < 0) return -1;
+            return AddDraft(loop.Expression.Span,
+                new[] { new SemanticAsyncStatement(collection!, collectionId) }, null,
+                new DraftTransfer(SemanticAsyncMethod.GotoTransferKind, null, acquire, -1));
         }
 
         private int BuildSwitch(
@@ -1293,6 +1390,16 @@ internal static class SemanticAsyncControlFlowProjector
                 null,
                 SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, span),
                 children ?? Array.Empty<SemanticOperation>());
+        }
+
+        private SemanticOperation CreateDirectInvocation(
+            string typeId,
+            string symbolId,
+            TextSpan span,
+            IReadOnlyList<SemanticOperation> operands)
+        {
+            return CreateValueOperation("invocation", typeId, symbolId, span, operands)
+                with { Dispatch = new SemanticMethodDispatch("direct", null, false) };
         }
 
         private SemanticDiagnostic Error(string code, string message, TextSpan span)

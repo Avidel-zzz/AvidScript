@@ -91,6 +91,7 @@ Roslyn 前端生成版本化 Guest IR，再编译为 WASM。UE 运行时通过�
 | 已有实现 | 当前边界 |
 | --- | --- |
 | 控制流、数组、部分 C# 类/结构体、lambda、局部函数和受限泛型 | 只支持编译器明确接受的 C# 子集；示例见 [GenericMethods](Fixtures/Phase66/GenericMethods.cs) |
+| 数组 `foreach`、受限 sealed class 枚举器的同步 `foreach` 与自动 `Dispose` | 其他枚举器形态和异常退出清理尚未支持；[可运行示例](Fixtures/Phase66/EnumeratorCleanup.cs) |
 | 同步 `try/finally` 的正常结束、`return`、`break`、`continue` 清理 | 尚不支持 `catch`、`throw`、跨 `await` 的清理；[清理示例](Fixtures/Phase66/FinallyCleanup.cs) |
 | 下一帧、计时器、资源加载和部分 UE Latent API | 不支持任意 `Task` 或自定义 awaiter |
 | 脚本定义的 UE 类型、生成的 API 绑定，以及 RPC/复制属性/RepNotify 聚焦测试 | 真实客户端/服务器玩法仍需验收 |
