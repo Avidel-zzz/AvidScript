@@ -34,7 +34,7 @@ internal static class SemanticDispatchTests
         const string path = "Scripts/MethodDispatch.cs";
         SemanticDocument document = Analyze(source);
         int count = 0;
-        Check(document.SchemaVersion == 29 && document.SemanticVersion == "1.33", "dispatch has a versioned schema");
+        Check(document.SchemaVersion == 30 && document.SemanticVersion == "1.34", "dispatch has a versioned schema");
         Check(SemanticDispatchContractValidator.IsValid(document), "projected dispatch facts satisfy their contract: "
             + string.Join("\n", document.Callables.Select(item => item.MethodSymbolId + " static=" + item.IsStatic + " " + item.Dispatch))
             + "\nOperations:\n" + string.Join("\n", document.Methods.SelectMany(item => Walk(item.Root))

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Operations;
 
 namespace AvidScript.CSharpSemantic;
 
@@ -15,6 +16,7 @@ internal static class SemanticDelegateEventProjector
 {
     private const string EventAttributeName = "global::AvidScript.AvidEventAttribute";
     private const string ContractAttributeName = "global::AvidScript.AvidEventContractAttribute";
+    private const string LanguageAttributeName = "global::AvidScript.AvidEventLanguageAttribute";
     private const string ExportPrefix = "avid_on_delegate_";
 
     private sealed record EventContract(
@@ -198,7 +200,83 @@ internal static class SemanticDelegateEventProjector
                 result.Add(new(id!, ordinal, SemanticSymbolProjector.GetSymbolId(method), registry.Register(method.Parameters[2].Type)));
             }
         }
+        CollectLanguageEvents(context, registry, result, diagnostics);
+        ValidateLanguageAssignments(context, result, diagnostics);
         return diagnostics.Count == 0 ? result.OrderBy(item => item.SubscriptionId, StringComparer.Ordinal).ToArray() : Array.Empty<SemanticEventSubscription>();
+    }
+
+    private static void CollectLanguageEvents(
+        SemanticCompilationContext context, SemanticTypeRegistry registry,
+        List<SemanticEventSubscription> subscriptions, List<SemanticDiagnostic> diagnostics)
+    {
+        Dictionary<string, int> subscriptionsById = subscriptions
+            .Select((entry, index) => (entry.SubscriptionId, index))
+            .ToDictionary(entry => entry.SubscriptionId, entry => entry.index, StringComparer.Ordinal);
+        HashSet<string> observedIds = new(StringComparer.Ordinal);
+        foreach (SyntaxTree tree in context.Compilation.SyntaxTrees)
+        {
+            SemanticModel model = context.Compilation.GetSemanticModel(tree);
+            foreach (EventDeclarationSyntax syntax in tree.GetRoot().DescendantNodes().OfType<EventDeclarationSyntax>())
+            {
+                if (model.GetDeclaredSymbol(syntax) is not IEventSymbol eventSymbol
+                    || FindAttribute(eventSymbol.GetAttributes(), LanguageAttributeName) is not { } attribute) continue;
+                string? id = ReadStringArgument(attribute, 0);
+                int ordinal = attribute.ConstructorArguments.Length == 2 && attribute.ConstructorArguments[1].Value is int value ? value : -1;
+                bool generatedReference = tree != context.PrimaryUnit.SyntaxTree
+                    && context.ProjectionUnits.Any(unit => unit.SyntaxTree == tree);
+                bool emptyAccessors = syntax.AccessorList?.Accessors.Count == 2
+                    && syntax.AccessorList.Accessors.All(accessor =>
+                        accessor.Body?.Statements.Count == 0 && accessor.ExpressionBody is null)
+                    && syntax.AccessorList.Accessors.Any(accessor => accessor.Keyword.ValueText == "add")
+                    && syntax.AccessorList.Accessors.Any(accessor => accessor.Keyword.ValueText == "remove");
+                int index = -1;
+                bool valid = id is not null && IsStableId(id) && observedIds.Add(id)
+                    && subscriptionsById.TryGetValue(id, out index)
+                    && subscriptions[index].EventOrdinal == ordinal
+                    && registry.Register(eventSymbol.Type) == subscriptions[index].DelegateTypeId
+                    && eventSymbol.DeclaredAccessibility == Accessibility.Public && !eventSymbol.IsStatic
+                    && eventSymbol.ContainingType.TypeKind == TypeKind.Struct && eventSymbol.ContainingType.IsReadOnly
+                    && eventSymbol.ContainingType.Arity == 0
+                    && eventSymbol.AddMethod?.DeclaredAccessibility == Accessibility.Public
+                    && eventSymbol.RemoveMethod?.DeclaredAccessibility == Accessibility.Public
+                    && generatedReference && emptyAccessors;
+                if (!valid)
+                {
+                    diagnostics.Add(Error("ASCS5210",
+                        $"Language event '{eventSymbol.Name}' must be a generated public instance event with matching id, ordinal, delegate, and empty add/remove accessors.",
+                        tree == context.PrimaryUnit.SyntaxTree
+                            ? SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, syntax.Identifier.Span)
+                            : SemanticSpanFactory.Empty));
+                    continue;
+                }
+                subscriptions[index] = subscriptions[index] with
+                {
+                    EventSymbolId = SemanticSymbolProjector.GetSymbolId(eventSymbol),
+                    OwnerTypeId = registry.Register(eventSymbol.ContainingType),
+                };
+            }
+        }
+    }
+
+    private static void ValidateLanguageAssignments(
+        SemanticCompilationContext context, IReadOnlyList<SemanticEventSubscription> subscriptions,
+        List<SemanticDiagnostic> diagnostics)
+    {
+        HashSet<string> generatedEvents = subscriptions.Where(entry => entry.EventSymbolId is not null)
+            .Select(entry => entry.EventSymbolId!).ToHashSet(StringComparer.Ordinal);
+        foreach (SemanticCompilationUnit unit in context.ProjectionUnits)
+        {
+            SemanticModel model = context.Compilation.GetSemanticModel(unit.SyntaxTree);
+            foreach (AssignmentExpressionSyntax syntax in unit.SyntaxTree.GetRoot().DescendantNodes().OfType<AssignmentExpressionSyntax>())
+            {
+                if (model.GetOperation(syntax) is not IEventAssignmentOperation assignment) continue;
+                if (assignment.EventReference is IEventReferenceOperation eventReference
+                    && generatedEvents.Contains(SemanticSymbolProjector.GetSymbolId(eventReference.Event))) continue;
+                diagnostics.Add(Error("ASCS5211",
+                    "Event += and -= require a selected generated UE event with a validated language contract.",
+                    unit.IsPrimary ? SemanticSpanFactory.Create(unit.SourceText, syntax.Span) : SemanticSpanFactory.Empty));
+            }
+        }
     }
 
     private static Dictionary<string, EventContract> CollectContracts(

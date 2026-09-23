@@ -21,7 +21,130 @@ internal static class SemanticDelegateEventTests
         InvalidHandlersFailClosed();
         MalformedAndDuplicateContractsFailClosed();
         NoncapturingLambdaInEventHandlerIsSupported();
-        return 6;
+        GeneratedLanguageEventAssignmentsProjectOnce();
+        InvalidLanguageEventAssignmentsFailClosed();
+        return 8;
+    }
+
+    private static void GeneratedLanguageEventAssignmentsProjectOnce()
+    {
+        const string source = """
+            using AvidScript;
+            namespace Game;
+            public static class Script
+            {
+                static void Handle(float value) { }
+                public static void Run()
+                {
+                    AActor actor = default;
+                    Handler handler = Handle;
+                    actor.Signal += handler;
+                    actor.Signal -= handler;
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, LanguageFacade());
+        Assert(document.Succeeded, "generated language events should analyze: " +
+            string.Join(" | ", document.Diagnostics.Select(diagnostic => diagnostic.Message)));
+        SemanticEventSubscription entry = document.EventSubscriptions.Single();
+        SemanticOperation[] assignments = document.Methods.SelectMany(method => Flatten(method.Root))
+            .Where(operation => operation.Kind == "event_assignment").ToArray();
+        Assert(entry.EventSymbolId is not null && entry.OwnerTypeId == "type:global::AvidScript.AActor"
+            && assignments.Length == 2
+            && assignments.Select(operation => operation.OperatorKind).SequenceEqual(new[] { "add", "remove" })
+            && assignments.All(operation => operation.SymbolId == entry.EventSymbolId
+                && operation.Children.Count == 2
+                && operation.Children[0].Kind == "event_reference"
+                && operation.Children[1].TypeId == entry.DelegateTypeId)
+            && SemanticEventSubscriptionValidator.IsValid(document),
+            "event assignments should preserve exact owner, event, and handler identities");
+        SemanticDocument decoded = SemanticSerializer.Deserialize(SemanticSerializer.Serialize(document));
+        Assert(SemanticEventSubscriptionValidator.IsValid(decoded)
+            && decoded.EventSubscriptions.Single().EventSymbolId == entry.EventSymbolId,
+            "language event metadata should survive canonical serialization");
+    }
+
+    private static void InvalidLanguageEventAssignmentsFailClosed()
+    {
+        const string source = """
+            using AvidScript;
+            namespace Game;
+            public static class Script
+            {
+                static void Handle(float value) { }
+                public static void Run()
+                {
+                    AActor actor = default;
+                    actor.Signal += Handle;
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, LanguageFacade());
+        Assert(document.Succeeded && SemanticEventSubscriptionValidator.IsValid(document),
+            "valid language event assignment should be accepted");
+        SemanticEventSubscription entry = document.EventSubscriptions.Single();
+        Assert(!SemanticEventSubscriptionValidator.IsValid(document with
+            { EventSubscriptions = new[] { entry with { EventSymbolId = "symbol:event:forged" } } })
+            && !SemanticEventSubscriptionValidator.IsValid(document with
+            { EventSubscriptions = new[] { entry with { OwnerTypeId = "type:global::Game.Script" } } })
+            && !SemanticEventSubscriptionValidator.IsValid(document with
+            { SchemaVersion = 29, SemanticVersion = "1.33" })
+            && !SemanticEventSubscriptionValidator.IsValid(document with
+            {
+                SchemaVersion = 29, SemanticVersion = "1.33",
+                EventSubscriptions = new[] { entry with { EventSymbolId = null, OwnerTypeId = null } },
+            }), "forged metadata and legacy event assignments must fail closed");
+        SemanticDocument badOrdinal = Analyze(source, LanguageFacade().Replace(
+            "[AvidEventLanguage(Events.Signal, 7)]", "[AvidEventLanguage(Events.Signal, 8)]"));
+        Assert(!badOrdinal.Succeeded && badOrdinal.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCS5210"),
+            "mismatched generated event ordinal must be diagnosed");
+        string userEventSource = source.Replace("namespace Game;", "")
+            .Replace("actor.Signal += Handle;", "new Custom().Signal += Handle;")
+            + "\npublic sealed class Custom { public event AvidScript.Handler Signal { add { } remove { } } }";
+        SemanticDocument userEvent = Analyze(userEventSource, LanguageFacade());
+        Assert(!userEvent.Succeeded && userEvent.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCS5211"),
+            "non-generated C# events must not silently lower as UE events");
+    }
+
+    private static string LanguageFacade() => $$"""
+        using System;
+        using System.Runtime.CompilerServices;
+        namespace AvidScript;
+        [AttributeUsage(AttributeTargets.Field)] internal sealed class AvidEventContractAttribute : Attribute
+        {
+            public AvidEventContractAttribute(string id, string parameters, string directions, string result) { }
+        }
+        [AttributeUsage(AttributeTargets.Method)] internal sealed class AvidEventSubscriptionAttribute : Attribute
+        {
+            public AvidEventSubscriptionAttribute(string id, int ordinal) { }
+        }
+        [AttributeUsage(AttributeTargets.Event)] internal sealed class AvidEventLanguageAttribute : Attribute
+        {
+            public AvidEventLanguageAttribute(string id, int ordinal) { }
+        }
+        public delegate void Handler(float value);
+        public readonly struct AActor
+        {
+            public readonly int Slot;
+            public readonly int Generation;
+            [AvidEventLanguage(Events.Signal, 7)]
+            public event Handler Signal { add { } remove { } }
+        }
+        public static class Events
+        {
+            [AvidEventContract("{{SignalId}}", "global::System.Single", "none", "global::System.Void")]
+            public const string Signal = "{{SignalId}}";
+            [AvidEventSubscription(Signal, 7)]
+            [MethodImpl(MethodImplOptions.InternalCall)]
+            public static extern long Subscribe(int slot, int generation, Handler handler);
+        }
+        """;
+
+    private static System.Collections.Generic.IEnumerable<SemanticOperation> Flatten(SemanticOperation operation)
+    {
+        yield return operation;
+        foreach (SemanticOperation child in operation.Children)
+            foreach (SemanticOperation nested in Flatten(child)) yield return nested;
     }
 
     private static void ReturnContractsProjectTypedHandlers()
@@ -110,10 +233,10 @@ internal static class SemanticDelegateEventTests
         SemanticDelegateEventCallback callback = document.DelegateEventCallbacks.Single(
             candidate => candidate.SubscriptionId == SignalId);
         Assert(document.Succeeded
-            && document.SchemaVersion == 29
-            && document.SemanticVersion == "1.33"
+            && document.SchemaVersion == 30
+            && document.SemanticVersion == "1.34"
             && document.DelegateEventCallbacks.Count == 2,
-            "valid delegate event contracts should publish semantic schema v29");
+            "valid delegate event contracts should publish semantic schema v30");
         Assert(callback.SubscriptionId == SignalId
             && callback.ExportName == "avid_on_delegate_0123456789abcdef"
             && callback.Name == "HandleSignal",

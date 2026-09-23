@@ -181,7 +181,7 @@ internal static class SemanticReachabilityProjector
             accessorsByAssociatedSymbolId,
             reachable,
             pending,
-            includeAssociatedAccessors: operation.Kind != "property_reference");
+            includeAssociatedAccessors: operation.Kind is not ("property_reference" or "event_assignment" or "event_reference"));
         QueueTarget(
             operation.Conversion?.MethodSymbolId,
             callablesById,

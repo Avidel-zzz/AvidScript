@@ -135,6 +135,7 @@ internal static class SemanticOperationProjector
             ILocalReferenceOperation => ("local_reference", true),
             IParameterReferenceOperation => ("parameter_reference", true),
             IPropertyReferenceOperation => ("property_reference", true),
+            IEventAssignmentOperation => ("event_assignment", true),
             IEventReferenceOperation => ("event_reference", true),
             IMethodReferenceOperation => ("method_reference", true),
             IAnonymousFunctionOperation or IFlowAnonymousFunctionOperation => ("method_reference", true),
@@ -202,6 +203,7 @@ internal static class SemanticOperationProjector
         return operation switch
         {
             ICompoundAssignmentOperation compound => MapBinaryOperator(compound.OperatorKind.ToString()),
+            IEventAssignmentOperation assignment => assignment.Adds ? "add" : "remove",
             IBinaryOperation binary => MapBinaryOperator(binary.OperatorKind.ToString()),
             IUnaryOperation unary => MapUnaryOperator(unary.OperatorKind.ToString()),
             IIncrementOrDecrementOperation increment => increment.Kind.ToString() switch
@@ -318,6 +320,7 @@ internal static class SemanticOperationProjector
             ILocalReferenceOperation local => local.Local,
             IParameterReferenceOperation parameter => parameter.Parameter,
             IPropertyReferenceOperation property => property.Property,
+            IEventAssignmentOperation { EventReference: IEventReferenceOperation eventReference } => eventReference.Event,
             IEventReferenceOperation eventReference => eventReference.Event,
             IMethodReferenceOperation method => method.Method,
             IInvocationOperation invocation => invocation.TargetMethod,

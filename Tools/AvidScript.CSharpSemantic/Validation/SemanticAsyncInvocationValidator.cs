@@ -31,6 +31,7 @@ public static class SemanticAsyncInvocationValidator
                 continue;
             }
             if (!(document.SchemaVersion == 28 && document.SemanticVersion == "1.32")
+                && !(document.SchemaVersion == 29 && document.SemanticVersion == "1.33")
                 && !(document.SchemaVersion == SemanticContract.CurrentSchemaVersion && document.SemanticVersion == SemanticContract.CurrentSemanticVersion)) return false;
             if (method.ExportName is not null)
             {

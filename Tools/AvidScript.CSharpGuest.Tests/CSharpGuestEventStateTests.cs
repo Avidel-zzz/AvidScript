@@ -72,7 +72,7 @@ internal static class CSharpGuestEventStateTests
                 .Replace("\"global::System.Single\", \"none\", \"global::System.Void\"", "\"global::System.Int32;global::System.Int32\", \"ref;out\", \"global::System.Int32\"");
             SemanticDocument document = Analyze(source, facade);
             Require(document.Succeeded, string.Join(" | ", document.Diagnostics.Select(d => d.Message)));
-            Require(document.SchemaVersion == 29 && document.SemanticVersion == "1.33"
+            Require(document.SchemaVersion == 30 && document.SemanticVersion == "1.34"
                 && SemanticEventSubscriptionValidator.IsValid(document), "versioned event contract");
             Require(SemanticSerializer.Serialize(document).SequenceEqual(SemanticSerializer.Serialize(SemanticSerializer.Deserialize(SemanticSerializer.Serialize(document)))), "canonical round trip");
             var lowered = CSharpGuestLowerer.Lower(document, new string('a', 64));
@@ -98,10 +98,13 @@ internal static class CSharpGuestEventStateTests
                     entry with { MethodSymbolId = "missing" }, entry with { DelegateTypeId = "type:int32" } })
                     Require(!CSharpGuestLowerer.Lower(document with { EventSubscriptions = new[] { bad } }, new string('a', 64)).Succeeded, "tampered subscription rejected");
                 Require(!CSharpGuestLowerer.Lower(document with { SchemaVersion = 28, SemanticVersion = "1.32" }, new string('a', 64)).Succeeded, "old schema cannot carry new contracts");
+                var prior = CSharpGuestLowerer.Lower(document with { SchemaVersion = 29, SemanticVersion = "1.33" }, new string('a', 64));
+                Require(prior.Succeeded, "schema 29 typed subscription compatibility retained: " +
+                    string.Join(" | ", prior.Diagnostics.Select(d => d.Message)));
                 Require(!Analyze(source, facade.Replace("Signal, 7", "Signal, -1")).Succeeded, "negative ordinal rejected in source");
                 Require(!Analyze(source, facade.Replace("global::System.Single", "global::System.Int32")).Succeeded, "signature mismatch rejected in source");
                 Require(!Analyze(source, facade.Replace("public static extern long Subscribe", "public static extern int Subscribe")).Succeeded, "subscription return contract rejected");
-                count += 8;
+                count += 9;
             }
             count++;
         }
@@ -144,6 +147,8 @@ internal static class CSharpGuestEventStateTests
                 """.Replace("CALLBACK", callback);
             var semantic = Analyze(source, facade);
             Require(semantic.Succeeded, string.Join(" | ", semantic.Diagnostics.Select(d => d.Message)));
+            Require(semantic.EventSubscriptions.Any(entry => entry.EventSymbolId is not null),
+                "production generated facade should expose validated language event metadata");
             var lowered = CSharpGuestLowerer.Lower(semantic, new string('a', 64));
             Require(lowered.Succeeded, kind + ": " + string.Join(" | ", lowered.Diagnostics.Select(d => d.Message)));
             var module = lowered.Module! with { Functions = lowered.Module!.Functions.Select(f => f with {

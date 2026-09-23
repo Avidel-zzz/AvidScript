@@ -260,6 +260,7 @@ internal static class SemanticSymbolProjector
             INamedTypeSymbol type => "symbol:type:" + GetTypeIdentity(type),
             IFieldSymbol field => GetFieldId(field),
             IPropertySymbol property => GetPropertyId(property),
+            IEventSymbol eventSymbol => GetEventId(eventSymbol),
             IMethodSymbol method => GetMethodId(method),
             IParameterSymbol parameter => GetParameterId(parameter),
             ILocalSymbol local => $"symbol:local:{GetSymbolId(local.ContainingSymbol)}.local:{GetSourceStart(local)}:{local.Name}:{SemanticTypeRegistry.GetCanonicalName(local.Type)}",
@@ -283,6 +284,7 @@ internal static class SemanticSymbolProjector
         {
             IFieldSymbol field => field.Type,
             IPropertySymbol property => property.Type,
+            IEventSymbol eventSymbol => eventSymbol.Type,
             IMethodSymbol method => method.ReturnType,
             IParameterSymbol parameter => parameter.Type,
             ILocalSymbol local => local.Type,
@@ -363,6 +365,12 @@ internal static class SemanticSymbolProjector
     {
         IPropertySymbol definition = property.OriginalDefinition;
         return $"symbol:property:{GetTypeIdentity(definition.ContainingType)}.{GetPropertySignature(definition)}";
+    }
+
+    private static string GetEventId(IEventSymbol eventSymbol)
+    {
+        IEventSymbol definition = eventSymbol.OriginalDefinition;
+        return $"symbol:event:{GetTypeIdentity(definition.ContainingType)}.{definition.Name}:{SemanticTypeRegistry.GetCanonicalName(definition.Type)}";
     }
 
     private static string GetPropertySignature(IPropertySymbol property)
