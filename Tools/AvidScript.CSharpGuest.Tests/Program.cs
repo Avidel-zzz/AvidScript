@@ -96,6 +96,12 @@ internal static class Program
                 Console.WriteLine($"AvidScript.CSharpGuest.Tests.LanguageOutcome: {focusedCount}/{focusedCount} passed");
                 return 0;
             }
+            if (args.Length == 1 && args[0] == "--throw-producer")
+            {
+                int focusedCount = CSharpGuestThrowProducerTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.ThrowProducer: {focusedCount}/{focusedCount} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--enumerator")
             {
                 int focusedCount = CSharpGuestEnumeratorTests.Run();
@@ -128,6 +134,7 @@ internal static class Program
             }
             int count = CSharpGuestLoweringTests.Run()
                 + CSharpGuestLanguageOutcomeTests.Run()
+                + CSharpGuestThrowProducerTests.Run()
                 + CSharpGuestGenericMethodTests.Run()
                 + CSharpGuestFinallyTests.Run()
                 + CSharpGuestEnumeratorTests.Run()
