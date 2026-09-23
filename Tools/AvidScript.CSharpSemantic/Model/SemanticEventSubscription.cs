@@ -23,7 +23,8 @@ public static class SemanticEventSubscriptionValidator
     public static bool IsValid(SemanticDocument document)
     {
         if (document.EventSubscriptions is null) return false;
-        if (document.SchemaVersion < 29) return document.EventSubscriptions.Count == 0;
+        if (document.SchemaVersion < 29) return document.EventSubscriptions.Count == 0
+            && !EnumerateDocumentOperations(document).Any(operation => operation.Kind == "event_assignment");
         HashSet<string> methods = new(StringComparer.Ordinal), events = new(StringComparer.Ordinal), exports = new(StringComparer.Ordinal);
         HashSet<string> languageSymbols = new(StringComparer.Ordinal);
         HashSet<int> ordinals = new();
@@ -60,22 +61,17 @@ public static class SemanticEventSubscriptionValidator
                 || eventSymbol.Accessibility != "public" || !eventSymbol.IsExecutableReferenceSource
                 || eventSymbol.TypeId != entry.DelegateTypeId
                 || eventSymbol.ContainingSymbolId != ownerSymbol?.Id
-                || ownerSymbol?.TypeId != entry.OwnerTypeId) return false;
+                || ownerSymbol?.TypeId != entry.OwnerTypeId
+                || document.Types.SingleOrDefault(type => type.Id == entry.OwnerTypeId)?.Kind != "struct"
+                || new[] { "Slot", "Generation" }.Any(name => document.Symbols.Count(symbol =>
+                    symbol.ContainingSymbolId == "symbol:" + entry.OwnerTypeId && symbol.Kind == "field"
+                    && symbol.Name == name && symbol.TypeId == "type:int32"
+                    && !symbol.IsStatic && symbol.IsReadonly && symbol.IsExecutableReferenceSource) != 1)) return false;
         }
         Dictionary<string, SemanticEventSubscription> languageEvents = document.EventSubscriptions
             .Where(entry => entry.EventSymbolId is not null)
             .ToDictionary(entry => entry.EventSymbolId!, StringComparer.Ordinal);
-        IEnumerable<SemanticOperation> roots = document.Methods.Select(method => method.Root)
-            .Concat(document.ControlFlowGraphs.SelectMany(graph => graph.Blocks)
-                .SelectMany(block => block.Operations.Concat(block.BranchValue is null
-                    ? Array.Empty<SemanticOperation>() : new[] { block.BranchValue })))
-            .Concat(document.AsyncMethods.SelectMany(method => method.Segments)
-                .SelectMany(segment => segment.Statements.Select(statement => statement.Operation)
-                    .Concat(segment.Transfer?.Condition is { } condition ? new[] { condition } : Array.Empty<SemanticOperation>())
-                    .Concat(segment.AwaitSite?.Arguments ?? Array.Empty<SemanticOperation>())
-                    .Concat(segment.AwaitSite?.CancellationToken is { } cancellation
-                        ? new[] { cancellation } : Array.Empty<SemanticOperation>())));
-        return roots.SelectMany(EnumerateOperations).All(operation =>
+        return EnumerateDocumentOperations(document).All(operation =>
         {
             if (operation.Kind != "event_assignment") return true;
             if (document.SchemaVersion < 30 || operation.OperatorKind is not ("add" or "remove")
@@ -89,6 +85,21 @@ public static class SemanticEventSubscriptionValidator
                 && eventReference.Children.Count == 1
                 && handler.TypeId == entry.DelegateTypeId;
         });
+    }
+
+    private static IEnumerable<SemanticOperation> EnumerateDocumentOperations(SemanticDocument document)
+    {
+        IEnumerable<SemanticOperation> roots = document.Methods.Select(method => method.Root)
+            .Concat(document.ControlFlowGraphs.SelectMany(graph => graph.Blocks)
+                .SelectMany(block => block.Operations.Concat(block.BranchValue is null
+                    ? Array.Empty<SemanticOperation>() : new[] { block.BranchValue })))
+            .Concat(document.AsyncMethods.SelectMany(method => method.Segments)
+                .SelectMany(segment => segment.Statements.Select(statement => statement.Operation)
+                    .Concat(segment.Transfer?.Condition is { } condition ? new[] { condition } : Array.Empty<SemanticOperation>())
+                    .Concat(segment.AwaitSite?.Arguments ?? Array.Empty<SemanticOperation>())
+                    .Concat(segment.AwaitSite?.CancellationToken is { } cancellation
+                        ? new[] { cancellation } : Array.Empty<SemanticOperation>())));
+        return roots.SelectMany(EnumerateOperations);
     }
 
     private static IEnumerable<SemanticOperation> EnumerateOperations(SemanticOperation operation)

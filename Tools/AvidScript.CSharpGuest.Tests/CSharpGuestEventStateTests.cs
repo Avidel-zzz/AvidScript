@@ -162,6 +162,45 @@ internal static class CSharpGuestEventStateTests
         return 7;
     }
 
+    public static int RunGeneratedLanguageFacade()
+    {
+        string directory = Environment.GetEnvironmentVariable("AVIDSCRIPT_MANAGED_HEAP_WASM_DIR")
+            ?? throw new InvalidOperationException("Set AVIDSCRIPT_MANAGED_HEAP_WASM_DIR to the native fixture directory.");
+        string facade = File.ReadAllText(Path.Combine(directory, "event-facade.generated.cs"));
+        const string source = """
+            using AvidScript;
+            using System.Runtime.InteropServices;
+            public static class Script
+            {
+                public static int Count;
+                static void Handle(AActor actor, int amount, float scale) { Count += amount; }
+                [UnmanagedCallersOnly(EntryPoint="avid_on_begin_play")]
+                public static void Begin() { }
+                [UnmanagedCallersOnly(EntryPoint="avid_on_tick")]
+                public static void Tick(float delta)
+                {
+                    AvidEventHandlers.OnScriptSignal handler = Handle;
+                    if (delta == 1.0f || delta == 2.0f) UE.Self.OnScriptSignal += handler;
+                    if (delta == 3.0f || delta == 4.0f) UE.Self.OnScriptSignal -= handler;
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, facade);
+        Require(document.Succeeded, string.Join(" | ", document.Diagnostics.Select(d => d.Message)));
+        var lowered = CSharpGuestLowerer.Lower(document, new string('a', 64));
+        Require(lowered.Succeeded, string.Join(" | ", lowered.Diagnostics.Select(d => d.Message)));
+        GuestModule module = lowered.Module!;
+        Require(module.Functions.Count(function => function.Id.Contains("function:$event:language:", StringComparison.Ordinal)) >= 2
+            && module.Imports.Any(import => import.Name == GuestEventState.LanguageSubscribeImport)
+            && module.Imports.Any(import => import.Name == GuestEventState.LanguageLookupImport),
+            "generated C# += and -= must lower through language event Host operations");
+        var wasm = WasmModuleCompiler.Compile(module);
+        Require(wasm.Succeeded, string.Join(" | ", wasm.Diagnostics.Select(d => d.Message)));
+        File.WriteAllBytes(Path.Combine(directory, "csharp-event-language.wasm"), wasm.Bytes);
+        File.WriteAllBytes(Path.Combine(directory, "csharp-event-language.guest.json"), GuestIrSerializer.Serialize(module));
+        return 1;
+    }
+
     private static SemanticDocument Analyze(string source, string facade)
     {
         var frontend = FrontendAnalyzer.Analyze(source, "Scripts/EventState.cs");

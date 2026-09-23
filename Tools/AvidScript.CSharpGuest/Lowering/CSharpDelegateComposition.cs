@@ -30,6 +30,9 @@ internal static class CSharpDelegateComposition
         {
             if (operation.Kind is "binary" or "compound_assignment" && operation.OperatorKind is "add" or "subtract"
                 && operation.TypeId is { } type && delegates.Contains(type)) used.Add(type);
+            if (operation.Kind == "event_assignment" && operation.Children.Count == 2
+                && operation.Children[1].TypeId is { } handlerType && delegates.Contains(handlerType))
+                used.Add(handlerType);
             foreach (SemanticOperation child in operation.Children) pending.Push(child);
         }
         return new(used);

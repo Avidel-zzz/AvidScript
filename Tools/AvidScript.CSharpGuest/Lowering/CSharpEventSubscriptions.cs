@@ -10,30 +10,50 @@ namespace AvidScript.CSharpGuest;
 internal static class CSharpEventSubscriptions
 {
     public const string SubscribeImport = "import:$event:subscribe", ReadImport = "import:$event:read";
-    public const string HandlerField = "$handler";
+    public const string LanguageSubscribeImport = "import:$event:language:subscribe", LanguageLookupImport = "import:$event:language:lookup";
+    public const string CancelImport = "import:$event:language:cancel";
+    public const string HandlerField = "$handler", TokenField = "$token";
     public static string Box(SemanticEventSubscription entry) => "$event:" + entry.SubscriptionId;
     public static IReadOnlyList<SemanticEventSubscription> Active(SemanticDocument document) => document.EventSubscriptions
-        .Where(entry => document.Reachability is null || document.Reachability.ReachableCallableIds.Contains(entry.MethodSymbolId)).ToArray();
+        .Where(entry => document.Reachability is null || document.Reachability.ReachableCallableIds.Contains(entry.MethodSymbolId)
+            || entry.EventSymbolId is not null && CSharpEventLanguageLowerer.Used(document).Contains(entry.EventSymbolId)).ToArray();
 
     public static void AddTypes(SemanticDocument document, List<GuestType> types)
     {
         foreach (var entry in Active(document))
         {
             string payload = CSharpClosureLayout.Payload(Box(entry));
-            types.Add(new(payload, "struct", "memory", new[] { new GuestField(HandlerField, HandlerField, entry.DelegateTypeId, 0) }, null, null, 0, 1));
+            types.Add(new(payload, "struct", "memory", new[] {
+                new GuestField(HandlerField, HandlerField, entry.DelegateTypeId, 0),
+                new GuestField(TokenField, TokenField, "type:int64", 0) }, null, null, 0, 1));
             types.Add(new(CSharpClosureLayout.Reference(Box(entry)), "managed_ref", "i64", Array.Empty<GuestField>(), payload, null, 8, 8));
         }
     }
 
-    public static IEnumerable<GuestImport> Imports(SemanticDocument document) => Active(document).Count == 0 ? Array.Empty<GuestImport>() : new[]
+    public static IEnumerable<GuestImport> Imports(SemanticDocument document)
     {
-        new GuestImport(SubscribeImport, GuestEventState.ImportModule, GuestEventState.SubscribeImport,
-            new[] { "type:int32", "type:int32", "type:int32", "type:int32", "type:int64" }, "type:int64"),
-        new GuestImport(ReadImport, GuestEventState.ImportModule, GuestEventState.ReadImport, new[] { "type:int32" }, "type:int64"),
-    };
+        if (Active(document).Count == 0) return Array.Empty<GuestImport>();
+        List<GuestImport> imports = new()
+        {
+            new(SubscribeImport, GuestEventState.ImportModule, GuestEventState.SubscribeImport,
+                new[] { "type:int32", "type:int32", "type:int32", "type:int32", "type:int64" }, "type:int64"),
+            new(ReadImport, GuestEventState.ImportModule, GuestEventState.ReadImport,
+                new[] { "type:int32" }, "type:int64"),
+        };
+        if (CSharpEventLanguageLowerer.Used(document).Count != 0)
+        {
+            imports.Add(new(LanguageSubscribeImport, GuestEventState.ImportModule, GuestEventState.LanguageSubscribeImport,
+                new[] { "type:int32", "type:int32", "type:int32", "type:int32", "type:int64" }, "type:int64"));
+            imports.Add(new(LanguageLookupImport, GuestEventState.ImportModule, GuestEventState.LanguageLookupImport,
+                new[] { "type:int32", "type:int32", "type:int32", "type:int32" }, "type:int64"));
+            imports.Add(new(CancelImport, "avidscript", "event_unsubscribe", new[] { "type:int64" }, "type:int32"));
+        }
+        return imports;
+    }
 
     public static IEnumerable<GuestFunction> Build(SemanticDocument document)
     {
+        foreach (GuestFunction function in CSharpEventLanguageLowerer.Build(document)) yield return function;
         foreach (var entry in Active(document))
         {
             string functionType = CSharpClosureLayout.FunctionType(entry.DelegateTypeId);

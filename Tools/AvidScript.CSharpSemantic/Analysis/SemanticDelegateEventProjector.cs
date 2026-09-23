@@ -237,6 +237,7 @@ internal static class SemanticDelegateEventProjector
                     && eventSymbol.DeclaredAccessibility == Accessibility.Public && !eventSymbol.IsStatic
                     && eventSymbol.ContainingType.TypeKind == TypeKind.Struct && eventSymbol.ContainingType.IsReadOnly
                     && eventSymbol.ContainingType.Arity == 0
+                    && HasHandleFields(eventSymbol.ContainingType)
                     && eventSymbol.AddMethod?.DeclaredAccessibility == Accessibility.Public
                     && eventSymbol.RemoveMethod?.DeclaredAccessibility == Accessibility.Public
                     && generatedReference && emptyAccessors;
@@ -256,6 +257,13 @@ internal static class SemanticDelegateEventProjector
                 };
             }
         }
+    }
+
+    private static bool HasHandleFields(INamedTypeSymbol owner)
+    {
+        return new[] { "Slot", "Generation" }.All(name =>
+            owner.GetMembers(name).OfType<IFieldSymbol>().Count(field =>
+                !field.IsStatic && field.IsReadOnly && field.Type.SpecialType == SpecialType.System_Int32) == 1);
     }
 
     private static void ValidateLanguageAssignments(

@@ -143,6 +143,21 @@ AvidSubscription subscription = AvidSubscriptions.SubscribeOnScriptSignal(
 
 事件发生时，即使订阅函数已返回，回调仍会更新同一个 `score`。`OnScriptSignal` 是测试项目生成的事件名；在你的项目中，接口名称和参数由选中的 UE 事件决定。订阅代码应只执行一次，通常保存返回的句柄供取消使用。[完整写法与目前限制](Docs/Phase66/P66.B_Persistent_Event_State.md)。
 
+对**已选中并生成绑定**的 UE 事件，也可以用熟悉的 C# 写法：
+
+```csharp
+public static class ScoreScript
+{
+    public static int Score;
+    static void AddScore(AActor actor, int amount, float scale) => Score += amount;
+
+    public static void Start() => UE.Self.OnScriptSignal += AddScore;
+    public static void Stop()  => UE.Self.OnScriptSignal -= AddScore;
+}
+```
+
+这段写法已通过 Windows 上两种 WASM 后端的真实 UE 事件自动化测试，覆盖重复添加和逐次移除。捕获变量、`ref/out`、单播以及回调内修改订阅等组合仍在补充验证；需要稳定覆盖这些写法时，先用上面的显式订阅接口。[事件语法的当前合同](Docs/Phase66/P66.B_Event_Language_Contract.md)。
+
 ### 找一个接近你需求的完整样例
 
 | 你想实现什么 | 从哪里开始 |
@@ -167,7 +182,7 @@ RPC 是跨网络请求另一端执行函数；属性复制是服务器把属性�
 | C# 语言 | 常用控制流、受支持的类和结构体、同步 lambda、局部函数、共享捕获变量 | 还不能直接迁入任意 .NET / NuGet 库；普通 C# 类继承与多态、泛型执行覆盖、完整异常系统仍不齐全 |
 | 异步 | 计时器、下一帧、资源加载；受支持的 `async void` 实例方法可跨 `await` 保留 `this`、参数、局部对象与共享变量 | 还不能等待任意 `Task` 或自定义 awaiter。[延迟加分示例与生命周期](Docs/Phase66/P66.B_Async_Invocation_Contract.md) |
 | UE 类型与 API | 属性、函数、常用数学类型、文本，以及受支持的数组、Set（去重集合）、Map（键值表） | 先在配置中选择需要的 API，再生成 C# 调用接口；部分嵌套对象容器、软引用（按路径引用资源）和弱引用（不阻止对象回收）的便捷用法仍有限制 |
-| 委托与事件 | 受支持的单播、多播及 `ref/out` 参数；生成的订阅接口可接收捕获变量的 lambda、实例方法和静态方法 | 用 `AvidSubscriptions.Subscribe…(source, handler)` 显式订阅，并保存返回值以便取消；[写法与适用范围](Docs/Phase66/P66.B_Persistent_Event_State.md)。尚不能普遍写成 `button.Click += Handler` |
+| 委托与事件 | 受支持的单播、多播及 `ref/out` 参数；显式订阅可接收捕获变量的 lambda、实例方法和静态方法；已生成的 UE 事件可用 `+=` / `-=` | 普通 .NET 事件不会自动接入 UE；事件语法的复杂委托组合仍在验收。[显式订阅范围](Docs/Phase66/P66.B_Persistent_Event_State.md)、[事件语法范围](Docs/Phase66/P66.B_Event_Language_Contract.md) |
 | 热重载 | 更新方法体，迁移受支持的持久状态，拒绝无效候选版本 | 改移动速度这类逻辑可重载；新增反射属性、修改函数签名需要重新编译 UE 并重启 Editor；不能回滚任意外部副作用 |
 | 调试 | 错误定位、调用栈、受支持的断点 / 单步、只读变量查看和性能分析 | 还不是完整 C# 调试器，部分语言能力与调试插桩不能组合使用 |
 | Windows 打包 | 已有 Development / Shipping 样例与打包验证 | 正式包必须发布脚本模块并设置模块 ID；不能直接沿用上面的临时 JSON 路径 |

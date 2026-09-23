@@ -78,6 +78,12 @@ internal static class Program
                 Console.WriteLine($"AvidScript.CSharpGuest.Tests.GeneratedEventState: {focusedCount}/{focusedCount} passed");
                 return 0;
             }
+            if (args.Length == 1 && args[0] == "--generated-event-language")
+            {
+                int focusedCount = CSharpGuestEventStateTests.RunGeneratedLanguageFacade();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.GeneratedEventLanguage: {focusedCount}/{focusedCount} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--delegate-events")
             {
                 int focusedCount = CSharpGuestDelegateEventTests.Run() + CSharpGuestEventStateTests.Run();

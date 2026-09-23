@@ -67,6 +67,7 @@ internal static class CSharpOperationLowerer
             "conversion" => LowerConversion(context, operation, blockOrdinal, instructions),
             "declaration_expression" => LowerAddress(context, operation, blockOrdinal, instructions),
             "delegate_creation" => CSharpManagedDelegateLowerer.LowerCreation(context, operation, blockOrdinal, instructions),
+            "event_assignment" => CSharpEventLanguageLowerer.Lower(context, operation, blockOrdinal, instructions),
             "default_value" => LowerDefaultValue(context, operation, blockOrdinal, instructions),
             "field_reference" => LowerFieldLoad(context, operation, blockOrdinal, instructions),
             "flow_capture" => LowerFlowCapture(context, operation, blockOrdinal, instructions),

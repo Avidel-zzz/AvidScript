@@ -93,6 +93,11 @@ internal static class SemanticDelegateEventTests
             {
                 SchemaVersion = 29, SemanticVersion = "1.33",
                 EventSubscriptions = new[] { entry with { EventSymbolId = null, OwnerTypeId = null } },
+            })
+            && !SemanticEventSubscriptionValidator.IsValid(document with
+            {
+                SchemaVersion = 28, SemanticVersion = "1.32",
+                EventSubscriptions = Array.Empty<SemanticEventSubscription>(),
             }), "forged metadata and legacy event assignments must fail closed");
         SemanticDocument badOrdinal = Analyze(source, LanguageFacade().Replace(
             "[AvidEventLanguage(Events.Signal, 7)]", "[AvidEventLanguage(Events.Signal, 8)]"));
