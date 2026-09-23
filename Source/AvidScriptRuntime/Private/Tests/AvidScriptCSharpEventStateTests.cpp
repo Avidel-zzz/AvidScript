@@ -276,6 +276,41 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
             TestEqual(TEXT("Invalid source publishes no bridge"), InvalidSession.GetDelegateSubscriptionCountForTesting(), 0);
             if (InvalidSession.IsLiveLoaded()) InvalidSession.StopAndUnload(InvalidResult);
         }
+        for (const bool bLanguageFirst : { true, false })
+        {
+            FAvidScriptRuntimeSession ConflictSession;
+            ConflictSession.SetBackendSelectionForTesting(Selection);
+            ConflictSession.SetHostContext(Context);
+            FAvidScriptWasmReloadResult ConflictLoaded;
+            if (!ConflictSession.LoadInitialModule(Bytes.GetData(), Bytes.Num(), Manifest, ConflictLoaded))
+            { AddError(ConflictLoaded.ErrorMessage); return false; }
+            auto* ConflictRuntime = ConflictSession.GetLiveRuntimeForTesting();
+            FAvidScriptWasmSmokeResult ConflictResult;
+            if (!ConflictRuntime->Tick(bLanguageFirst ? 11.0f : 21.0f, ConflictResult))
+            { AddError(ConflictResult.ErrorMessage); return false; }
+            TestEqual(TEXT("First singlecast owner installs one bridge"), ConflictSession.GetDelegateSubscriptionCountForTesting(), 1);
+            int32 TokenValid = -1;
+            if (!bLanguageFirst)
+            {
+                if (!ConflictRuntime->ReadStateBytes(ResultAddress,
+                    MakeArrayView(reinterpret_cast<uint8*>(&TokenValid), 4), Error)) { AddError(Error); return false; }
+                TestEqual(TEXT("Explicit singlecast token is valid before conflict"), TokenValid, 1);
+            }
+            if (bLanguageFirst)
+            {
+                if (!ConflictRuntime->Tick(21.0f, ConflictResult)) { AddError(ConflictResult.ErrorMessage); return false; }
+                if (!ConflictRuntime->ReadStateBytes(ResultAddress,
+                    MakeArrayView(reinterpret_cast<uint8*>(&TokenValid), 4), Error)) { AddError(Error); return false; }
+                TestEqual(TEXT("Explicit token cannot replace language singlecast"), TokenValid, 0);
+                TestEqual(TEXT("Rejected explicit bind leaves language bridge"), ConflictSession.GetDelegateSubscriptionCountForTesting(), 1);
+            }
+            else
+            {
+                TestFalse(TEXT("Language event cannot replace explicit singlecast"), ConflictRuntime->Tick(11.0f, ConflictResult));
+                TestEqual(TEXT("Rejected language bind preserves original explicit bridge"), ConflictSession.GetDelegateSubscriptionCountForTesting(), 1);
+            }
+            if (ConflictSession.IsLiveLoaded()) ConflictSession.StopAndUnload(ConflictResult);
+        }
         FAvidScriptWasmReloadResult Loaded;
         if (!Session.LoadInitialModule(Bytes.GetData(), Bytes.Num(), Manifest, Loaded))
         { AddError(Loaded.ErrorMessage); return false; }

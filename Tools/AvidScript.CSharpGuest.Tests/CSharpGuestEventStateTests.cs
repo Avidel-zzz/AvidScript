@@ -284,6 +284,11 @@ internal static class CSharpGuestEventStateTests
                         invalid.OnScriptSignal += Handle;
                     }
                     if (delta == 20.0f) GetSource().OnScriptSignal -= GetHandler();
+                    if (delta == 21.0f)
+                    {
+                        Subscription = AvidSubscriptions.BindOnSinglecastSignal(UE.Self, OnSinglecastFirst);
+                        Result = Subscription.IsValid ? 1 : 0;
+                    }
                 }
             }
             """;

@@ -158,7 +158,7 @@ public static class ScoreScript
 }
 ```
 
-这段写法已通过 Windows 双后端的真实 UE 事件测试：重复与组合移除、捕获、实例方法、回调内增删、与显式订阅共存、`ref/out`、单播返回，以及 Session/World 结束时解绑。跨 World 和错误代际、单播占用冲突及重载仍待验证；需要这些组合时，先用上面的显式订阅接口。[事件语法的当前合同](Docs/Phase66/P66.B_Event_Language_Contract.md)。
+这段写法已通过 Windows 双后端的真实 UE 事件测试：重复与组合移除、捕获、实例方法、回调内增删、与显式订阅共存、`ref/out`、单播返回，以及 Session/World 结束时解绑。单播事件已被占用时，第二次绑定会被拒绝，不会覆盖原处理函数。跨 World、错误代际和重载仍待验证；需要这些组合时，先用上面的显式订阅接口。[事件语法的当前合同](Docs/Phase66/P66.B_Event_Language_Contract.md)。
 
 ### 🗂️ 找一个接近你需求的完整样例
 
