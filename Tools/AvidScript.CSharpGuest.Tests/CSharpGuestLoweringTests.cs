@@ -14,6 +14,7 @@ internal static class CSharpGuestLoweringTests
     public static int Run()
     {
         FailedSemanticDocumentIsRejected();
+        ForgedExceptionPlanIsRejected();
         TypesStateAndCallableAbiAreProjected();
         VoidFallthroughExitReturnsNormally();
         LoweringIsByteDeterministic();
@@ -26,7 +27,7 @@ internal static class CSharpGuestLoweringTests
         ExplicitGameplayRouterConflictFailsClosed();
         ImportDispatchClassDefaultsRoundTripsAndValidates();
         InvalidImportDispatchClassFailsClosed();
-        return 13;
+        return 14;
     }
 
     private static void FailedSemanticDocumentIsRejected()
@@ -39,6 +40,25 @@ internal static class CSharpGuestLoweringTests
             "failed semantic input should not produce Guest IR");
         Assert(result.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCG1001"),
             "failed semantic input should report ASCG1001");
+    }
+
+    private static void ForgedExceptionPlanIsRejected()
+    {
+        SemanticDocument forged = CSharpGuestSemanticFixture.Create() with
+        {
+            ExceptionFlows = new[]
+            {
+                new SemanticExceptionFlow("symbol:method:forged", "Scripts/Forged.cs", 1,
+                    Array.Empty<SemanticExceptionRegion>(),
+                    Array.Empty<SemanticExceptionBranch>(),
+                    Array.Empty<SemanticThrowSite>(),
+                    Array.Empty<SemanticCatchHandler>()),
+            },
+        };
+        CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(forged, SemanticHash);
+        Assert(!result.Succeeded && result.Module is null
+            && result.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCG1001"),
+            "a downgraded Semantic exception plan must not enter the current Guest lowerer");
     }
 
     private static void TypesStateAndCallableAbiAreProjected()

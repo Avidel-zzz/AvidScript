@@ -174,10 +174,13 @@ public static class SemanticAnalyzer
         SemanticUeMethodCatalog methodCatalog = succeeded
             ? SemanticUeMethodCatalogProjector.Project(context, typeRegistry, ueTypeProjection.Declarations, callableProjection.Callables)
             : SemanticUeMethodCatalog.Empty;
+        bool hasExceptionFlows = controlFlowProjection.ExceptionFlows.Count > 0;
         return new SemanticDocument(
-            SemanticContract.CurrentSchemaVersion,
+            hasExceptionFlows ? SemanticContract.ExceptionFlowSchemaVersion
+                : SemanticContract.CurrentSchemaVersion,
             "csharp",
-            SemanticContract.CurrentSemanticVersion,
+            hasExceptionFlows ? SemanticContract.ExceptionFlowSemanticVersion
+                : SemanticContract.CurrentSemanticVersion,
             semanticSource,
             succeeded,
             typeRegistry.Build(),
@@ -201,6 +204,7 @@ public static class SemanticAnalyzer
             ClosureEnvironments = lexicalCaptures.Closures.Environments,
             ClosureBindings = lexicalCaptures.Closures.Bindings,
             UeMethodCatalog = methodCatalog,
+            ExceptionFlows = hasExceptionFlows ? controlFlowProjection.ExceptionFlows : null,
         };
     }
 

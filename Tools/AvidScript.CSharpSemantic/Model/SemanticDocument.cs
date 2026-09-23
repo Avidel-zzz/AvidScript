@@ -65,4 +65,9 @@ public sealed record SemanticDocument(
 
     [JsonPropertyOrder(23)]
     public SemanticUeMethodCatalog? UeMethodCatalog { get; init; }
+
+    // Diagnostic-only until Guest lowering validates exception effects and cleanup.
+    [JsonPropertyOrder(25)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<SemanticExceptionFlow>? ExceptionFlows { get; init; }
 }

@@ -11,7 +11,8 @@ namespace AvidScript.CSharpSemantic;
 internal sealed record SemanticControlFlowProjection(
     IReadOnlyList<SemanticControlFlowGraph> Graphs,
     IReadOnlyList<SemanticDiagnostic> Diagnostics,
-    IReadOnlyList<SemanticSymbol> CompilerLocalSymbols);
+    IReadOnlyList<SemanticSymbol> CompilerLocalSymbols,
+    IReadOnlyList<SemanticExceptionFlow> ExceptionFlows);
 
 internal static class SemanticControlFlowProjector
 {
@@ -23,6 +24,7 @@ internal static class SemanticControlFlowProjector
         List<SemanticDiagnostic> diagnostics = new();
         List<SemanticControlFlowGraph> graphs = new();
         List<SemanticSymbol> compilerLocalSymbols = new();
+        List<SemanticExceptionFlow> exceptionFlows = new();
         Diagnostic? compilerError = context.Compilation.GetDiagnostics()
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .OrderBy(diagnostic => diagnostic.Location.IsInSource
@@ -39,7 +41,7 @@ internal static class SemanticControlFlowProjector
                     ? SemanticSpanFactory.Create(context.SourceText, compilerError.Location.SourceSpan)
                     : SemanticSpanFactory.Empty));
             return new SemanticControlFlowProjection(Array.Empty<SemanticControlFlowGraph>(), diagnostics,
-                Array.Empty<SemanticSymbol>());
+                Array.Empty<SemanticSymbol>(), Array.Empty<SemanticExceptionFlow>());
         }
 
         foreach (SemanticExecutableBody body in SemanticExecutableBodyResolver.Resolve(context))
@@ -92,7 +94,15 @@ internal static class SemanticControlFlowProjector
 
             if (HasUnsupportedExceptionFlow(graph))
             {
-                if (SemanticArrayForEachControlFlowProjector.IsCandidate(body, semanticModel))
+                bool hasExceptionSyntax = SemanticExceptionFlowProjector.IsCandidate(body);
+                if (hasExceptionSyntax)
+                {
+                    SemanticExceptionFlow? exceptionFlow = SemanticExceptionFlowProjector.Project(
+                        body, semanticModel, graph, typeRegistry, diagnostics);
+                    if (exceptionFlow is not null) exceptionFlows.Add(exceptionFlow);
+                }
+                if (!hasExceptionSyntax
+                    && SemanticArrayForEachControlFlowProjector.IsCandidate(body, semanticModel))
                 {
                     if (!SemanticArrayForEachControlFlowProjector.TryProject(
                         context, body, semanticModel, typeRegistry, diagnostics,
@@ -149,13 +159,15 @@ internal static class SemanticControlFlowProjector
             return new SemanticControlFlowProjection(
                 Array.Empty<SemanticControlFlowGraph>(),
                 orderedDiagnostics,
-                Array.Empty<SemanticSymbol>());
+                Array.Empty<SemanticSymbol>(),
+                exceptionFlows.OrderBy(flow => flow.MethodSymbolId, StringComparer.Ordinal).ToArray());
         }
 
         return new SemanticControlFlowProjection(
             graphs.OrderBy(graph => graph.MethodSymbolId, StringComparer.Ordinal).ToArray(),
             orderedDiagnostics,
-            compilerLocalSymbols.OrderBy(symbol => symbol.Id, StringComparer.Ordinal).ToArray());
+            compilerLocalSymbols.OrderBy(symbol => symbol.Id, StringComparer.Ordinal).ToArray(),
+            Array.Empty<SemanticExceptionFlow>());
     }
 
     private static IReadOnlyList<string> GetUnsupportedOperationKinds(
