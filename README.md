@@ -158,7 +158,7 @@ public static class ScoreScript
 }
 ```
 
-这段写法已通过 Windows 上两种 WASM 后端的真实 UE 事件自动化测试，覆盖重复添加和逐次移除。捕获变量、`ref/out`、单播以及回调内修改订阅等组合仍在补充验证；需要稳定覆盖这些写法时，先用上面的显式订阅接口。[事件语法的当前合同](Docs/Phase66/P66.B_Event_Language_Contract.md)。
+这段写法已通过 Windows 上两种 WASM 后端的真实 UE 事件自动化测试，覆盖重复与组合移除、捕获变量、绑定实例方法、回调内自移除、`ref/out` 写回和单播返回值。错误来源、与显式订阅共存、回调内添加以及重载和 World 销毁仍需验证；需要这些组合时，先用上面的显式订阅接口。[事件语法的当前合同](Docs/Phase66/P66.B_Event_Language_Contract.md)。
 
 ### 🗂️ 找一个接近你需求的完整样例
 

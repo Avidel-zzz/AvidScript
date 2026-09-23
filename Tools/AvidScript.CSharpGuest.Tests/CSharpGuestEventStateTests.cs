@@ -170,10 +170,42 @@ internal static class CSharpGuestEventStateTests
         const string source = """
             using AvidScript;
             using System.Runtime.InteropServices;
+            public sealed class Counter
+            {
+                public void Handle(AActor actor, int amount, float scale)
+                {
+                    Script.Count += amount;
+                    UE.Self.OnScriptSignal -= Handle;
+                }
+            }
             public static class Script
             {
                 public static int Count;
+                public static int Result;
                 static void Handle(AActor actor, int amount, float scale) { Count += amount; }
+                static void Other(AActor actor, int amount, float scale) { Count += 100; }
+                static void OnRefOut(ref int value, out int doubled)
+                {
+                    Count++;
+                    Result += value;
+                    value = Result;
+                    doubled = Result * 2;
+                }
+                static int OnSinglecastFirst(ref int value, out int doubled)
+                {
+                    Count++;
+                    value++;
+                    doubled = value * 2;
+                    return 111;
+                }
+                static int OnSinglecastLast(ref int value, out int doubled)
+                {
+                    Count++;
+                    Result += value;
+                    value = Result;
+                    doubled = Result * 2;
+                    return doubled + 1;
+                }
                 [UnmanagedCallersOnly(EntryPoint="avid_on_begin_play")]
                 public static void Begin() { }
                 [UnmanagedCallersOnly(EntryPoint="avid_on_tick")]
@@ -182,6 +214,43 @@ internal static class CSharpGuestEventStateTests
                     AvidEventHandlers.OnScriptSignal handler = Handle;
                     if (delta == 1.0f || delta == 2.0f) UE.Self.OnScriptSignal += handler;
                     if (delta == 3.0f || delta == 4.0f) UE.Self.OnScriptSignal -= handler;
+                    if (delta == 5.0f)
+                    {
+                        int score = 40;
+                        AvidEventHandlers.OnScriptSignal once = null;
+                        once = (actor, amount, scale) =>
+                        {
+                            score += amount;
+                            Result = score;
+                            Count += amount;
+                            UE.Self.OnScriptSignal -= once;
+                        };
+                        UE.Self.OnScriptSignal += once;
+                    }
+                    if (delta == 6.0f)
+                    {
+                        AvidEventHandlers.OnScriptSignal other = Other;
+                        UE.Self.OnScriptSignal += handler + other + handler;
+                        UE.Self.OnScriptSignal -= other + handler;
+                    }
+                    if (delta == 7.0f)
+                    {
+                        AvidEventHandlers.OnScriptSignal empty = null;
+                        UE.Self.OnScriptSignal += empty;
+                        UE.Self.OnScriptSignal -= empty;
+                    }
+                    if (delta == 8.0f) UE.Self.OnScriptSignal -= handler;
+                    if (delta == 9.0f)
+                    {
+                        Counter counter = new Counter();
+                        UE.Self.OnScriptSignal += counter.Handle;
+                    }
+                    if (delta == 10.0f) UE.Self.OnRefOutSignal += OnRefOut;
+                    if (delta == 11.0f)
+                    {
+                        UE.Self.OnSinglecastSignal += OnSinglecastFirst;
+                        UE.Self.OnSinglecastSignal += OnSinglecastLast;
+                    }
                 }
             }
             """;

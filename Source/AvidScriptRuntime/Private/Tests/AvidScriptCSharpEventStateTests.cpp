@@ -214,14 +214,16 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
             && Event.Signature.MulticastProperty->GetFName() == TEXT("OnScriptSignal");
     });
     if (!TestNotNull(TEXT("Selected generated event is in the native catalog"), Signal)) return false;
-    uint32 CountAddress = 0;
+    uint32 CountAddress = 0, ResultAddress = 0;
     for (const auto& Value : Guest->GetObjectField(TEXT("memory_layout"))->GetArrayField(TEXT("state_slots")))
     {
         auto Slot = Value->AsObject();
         if (Slot->GetStringField(TEXT("global_id")).Contains(TEXT("::Script.Count:")))
             CountAddress = Slot->GetIntegerField(TEXT("offset"));
+        if (Slot->GetStringField(TEXT("global_id")).Contains(TEXT("::Script.Result:")))
+            ResultAddress = Slot->GetIntegerField(TEXT("offset"));
     }
-    if (!TestTrue(TEXT("Compiler exposes event callback count"), CountAddress > 0)) return false;
+    if (!TestTrue(TEXT("Compiler exposes event callback state"), CountAddress > 0 && ResultAddress > 0)) return false;
     if (!GEngine) return false;
     UWorld* World = UWorld::CreateWorld(EWorldType::Game, false, TEXT("AvidScriptCSharpEventLanguage"));
     if (!World) return false;
@@ -259,9 +261,27 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
         auto* Runtime = Session.GetLiveRuntimeForTesting();
         if (!TestNotNull(TEXT("Language event runtime loaded"), Runtime)) return false;
         TArray<FAvidScriptPreparedDelegateEvent> Events;
-        if (!Runtime->BuildPreparedDelegateEvents(Events, Error) || Events.Num() != 1)
+        if (!Runtime->BuildPreparedDelegateEvents(Events, Error) || Events.Num() != 3)
         { AddError(Error); return false; }
-        const auto& Event = Events[0];
+        const auto* SignalEvent = Events.FindByPredicate([](const auto& Candidate)
+        {
+            return Candidate.Signature.MulticastProperty != nullptr
+                && Candidate.Signature.MulticastProperty->GetFName() == TEXT("OnScriptSignal");
+        });
+        const auto* RefOutEvent = Events.FindByPredicate([](const auto& Candidate)
+        {
+            return Candidate.Signature.MulticastProperty != nullptr
+                && Candidate.Signature.MulticastProperty->GetFName() == TEXT("OnRefOutSignal");
+        });
+        const auto* SinglecastEvent = Events.FindByPredicate([](const auto& Candidate)
+        {
+            return Candidate.Signature.SinglecastProperty != nullptr
+                && Candidate.Signature.SinglecastProperty->GetFName() == TEXT("OnSinglecastSignal");
+        });
+        if (!TestNotNull(TEXT("Generated signal event"), SignalEvent)
+            || !TestNotNull(TEXT("Generated ref/out event"), RefOutEvent)
+            || !TestNotNull(TEXT("Generated singlecast event"), SinglecastEvent)) return false;
+        const auto& Event = *SignalEvent;
         if (!TestTrue(TEXT("Language event uses managed callback state"), Event.bRequiresManagedState)) return false;
         auto& Heap = *Runtime->GetManagedHeapForTesting();
         FAvidScriptWasmSmokeResult Result;
@@ -290,6 +310,102 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
             TestTrue(TEXT("Collect between language event operations"), Heap.Collect() == EHeapError::Ok);
             TestEqual(TEXT("Language bridge retains only its active root"), Heap.GetStats().LiveRoots, Round == 3 ? 0u : 1u);
         }
+        auto BroadcastSignal = [&]()
+        {
+            FStructOnScope Frame(Event.Signature.SignatureFunction);
+            FindFProperty<FObjectProperty>(Event.Signature.SignatureFunction, TEXT("SourceActor"))
+                ->SetObjectPropertyValue_InContainer(Frame.GetStructMemory(), Owner);
+            FindFProperty<FIntProperty>(Event.Signature.SignatureFunction, TEXT("Count"))
+                ->SetPropertyValue_InContainer(Frame.GetStructMemory(), 2);
+            FindFProperty<FFloatProperty>(Event.Signature.SignatureFunction, TEXT("Scale"))
+                ->SetPropertyValue_InContainer(Frame.GetStructMemory(), 1.0f);
+            Event.Signature.MulticastProperty->GetMulticastDelegate(
+                Event.Signature.MulticastProperty->ContainerPtrToValuePtr<void>(Owner))
+                ->ProcessDelegate<UObject>(Frame.GetStructMemory());
+        };
+        auto ReadInt = [&](const uint32 Address, int32& Value)
+        {
+            return Runtime->ReadStateBytes(Address, MakeArrayView(reinterpret_cast<uint8*>(&Value), 4), Error);
+        };
+        if (!Runtime->Tick(5.0f, Result)) { AddError(Result.ErrorMessage); return false; }
+        TestEqual(TEXT("Captured handler opens one language bridge"), Session.GetDelegateSubscriptionCountForTesting(), 1);
+        BroadcastSignal();
+        int32 Count = 0, CapturedResult = 0;
+        if (!ReadInt(CountAddress, Count) || !ReadInt(ResultAddress, CapturedResult))
+        { AddError(Error); return false; }
+        TestEqual(TEXT("Captured self-removal executes current callback once"), Count, 10);
+        TestEqual(TEXT("Captured local mutates during event callback"), CapturedResult, 42);
+        TestEqual(TEXT("Self-removal releases language bridge after dispatch"), Session.GetDelegateSubscriptionCountForTesting(), 0);
+        BroadcastSignal();
+        if (!ReadInt(CountAddress, Count)) { AddError(Error); return false; }
+        TestEqual(TEXT("Self-removal affects the next event"), Count, 10);
+        TestTrue(TEXT("Collect self-referential captured handler"), Heap.Collect() == EHeapError::Ok);
+        TestEqual(TEXT("Self-removal releases captured cycle"), Heap.GetStats().LiveObjects, 0u);
+        TestEqual(TEXT("Self-removal releases persistent root"), Heap.GetStats().LiveRoots, 0u);
+
+        if (!Runtime->Tick(6.0f, Result)) { AddError(Result.ErrorMessage); return false; }
+        TestEqual(TEXT("Combined handler occupies one bridge"), Session.GetDelegateSubscriptionCountForTesting(), 1);
+        BroadcastSignal();
+        if (!ReadInt(CountAddress, Count)) { AddError(Error); return false; }
+        TestEqual(TEXT("Removing last matching subsequence preserves first handler"), Count, 12);
+        if (!Runtime->Tick(7.0f, Result)) { AddError(Result.ErrorMessage); return false; }
+        TestEqual(TEXT("Null add/remove leaves bridge unchanged"), Session.GetDelegateSubscriptionCountForTesting(), 1);
+        BroadcastSignal();
+        if (!ReadInt(CountAddress, Count)) { AddError(Error); return false; }
+        TestEqual(TEXT("Null handler does not change callback list"), Count, 14);
+        if (!Runtime->Tick(8.0f, Result)) { AddError(Result.ErrorMessage); return false; }
+        TestEqual(TEXT("Final removal releases combined bridge"), Session.GetDelegateSubscriptionCountForTesting(), 0);
+        BroadcastSignal();
+        if (!ReadInt(CountAddress, Count)) { AddError(Error); return false; }
+        TestEqual(TEXT("Final removal stops later callbacks"), Count, 14);
+        if (!Runtime->Tick(9.0f, Result)) { AddError(Result.ErrorMessage); return false; }
+        TestEqual(TEXT("Bound instance handler opens one bridge"), Session.GetDelegateSubscriptionCountForTesting(), 1);
+        BroadcastSignal();
+        if (!ReadInt(CountAddress, Count)) { AddError(Error); return false; }
+        TestEqual(TEXT("Bound instance handler receives event"), Count, 16);
+        TestEqual(TEXT("Equivalent bound method group removes bridge"), Session.GetDelegateSubscriptionCountForTesting(), 0);
+        BroadcastSignal();
+        if (!ReadInt(CountAddress, Count)) { AddError(Error); return false; }
+        TestEqual(TEXT("Bound instance self-removal affects next event"), Count, 16);
+        TestTrue(TEXT("Collect bound receiver after self-removal"), Heap.Collect() == EHeapError::Ok);
+        TestEqual(TEXT("Bound receiver and language box are reclaimed"), Heap.GetStats().LiveObjects, 0u);
+
+        if (!Runtime->Tick(10.0f, Result)) { AddError(Result.ErrorMessage); return false; }
+        TestEqual(TEXT("Language ref/out event owns one bridge"), Session.GetDelegateSubscriptionCountForTesting(), 1);
+        {
+            FStructOnScope Frame(RefOutEvent->Signature.SignatureFunction);
+            auto* Value = FindFProperty<FIntProperty>(RefOutEvent->Signature.SignatureFunction, TEXT("Value"));
+            auto* Doubled = FindFProperty<FIntProperty>(RefOutEvent->Signature.SignatureFunction, TEXT("Doubled"));
+            Value->SetPropertyValue_InContainer(Frame.GetStructMemory(), 2);
+            RefOutEvent->Signature.MulticastProperty->GetMulticastDelegate(
+                RefOutEvent->Signature.MulticastProperty->ContainerPtrToValuePtr<void>(Owner))
+                ->ProcessDelegate<UObject>(Frame.GetStructMemory());
+            TestEqual(TEXT("Language ref callback updates UE ref"), Value->GetPropertyValue_InContainer(Frame.GetStructMemory()), 44);
+            TestEqual(TEXT("Language ref callback updates UE out"), Doubled->GetPropertyValue_InContainer(Frame.GetStructMemory()), 88);
+        }
+        if (!ReadInt(CountAddress, Count) || !ReadInt(ResultAddress, CapturedResult))
+        { AddError(Error); return false; }
+        TestEqual(TEXT("Language ref callback executes once"), Count, 17);
+        TestEqual(TEXT("Language ref callback preserves state"), CapturedResult, 44);
+
+        if (!Runtime->Tick(11.0f, Result)) { AddError(Result.ErrorMessage); return false; }
+        TestEqual(TEXT("Language singlecast event adds one bridge"), Session.GetDelegateSubscriptionCountForTesting(), 2);
+        {
+            FStructOnScope Frame(SinglecastEvent->Signature.SignatureFunction);
+            auto* Value = FindFProperty<FIntProperty>(SinglecastEvent->Signature.SignatureFunction, TEXT("Value"));
+            auto* Doubled = FindFProperty<FIntProperty>(SinglecastEvent->Signature.SignatureFunction, TEXT("Doubled"));
+            auto* ReturnValue = FindFProperty<FIntProperty>(SinglecastEvent->Signature.SignatureFunction, TEXT("ReturnValue"));
+            Value->SetPropertyValue_InContainer(Frame.GetStructMemory(), 2);
+            SinglecastEvent->Signature.SinglecastProperty->GetPropertyValuePtr_InContainer(Owner)
+                ->ProcessDelegate<UObject>(Frame.GetStructMemory());
+            TestEqual(TEXT("Language singlecast passes ref through both handlers"), Value->GetPropertyValue_InContainer(Frame.GetStructMemory()), 47);
+            TestEqual(TEXT("Language singlecast passes out from last handler"), Doubled->GetPropertyValue_InContainer(Frame.GetStructMemory()), 94);
+            TestEqual(TEXT("Language singlecast returns last handler result"), ReturnValue->GetPropertyValue_InContainer(Frame.GetStructMemory()), 95);
+        }
+        if (!ReadInt(CountAddress, Count) || !ReadInt(ResultAddress, CapturedResult))
+        { AddError(Error); return false; }
+        TestEqual(TEXT("Language singlecast executes both handlers"), Count, 19);
+        TestEqual(TEXT("Language singlecast retains shared state"), CapturedResult, 47);
         Session.UnbindDelegateSubscriptionsForTesting();
         TestTrue(TEXT("Final language event collection"), Heap.Collect() == EHeapError::Ok);
         TestEqual(TEXT("Language event releases managed objects"), Heap.GetStats().LiveObjects, 0u);
