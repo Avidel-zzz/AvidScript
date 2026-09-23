@@ -30,6 +30,7 @@ struct FAvidScriptDelegateSubscriptionEntry
 	uint64 BridgeToken = 0;
 	int64 GuestToken = 0;
 	TSharedPtr<FAvidScriptDelegateManagedState> ManagedState;
+	bool bLanguageManaged = false;
 	bool bBound = false;
 };
 
@@ -411,10 +412,18 @@ int64 FAvidScriptSessionDelegateSubscriptions::SubscribeManaged(
 	return SubscribeInternal(Source, EventOrdinal, OutError, &Runtime, StateBytes, &Lease);
 }
 
+int64 FAvidScriptSessionDelegateSubscriptions::SubscribeManagedLanguage(
+	UObject& Source, const uint32 EventOrdinal,
+	const FAvidScriptWasmRuntimeInstance& Runtime, TConstArrayView<uint8> StateBytes,
+	TUniquePtr<IAvidScriptManagedStateLease>&& Lease, FString& OutError)
+{
+	return SubscribeInternal(Source, EventOrdinal, OutError, &Runtime, StateBytes, &Lease, true);
+}
+
 int64 FAvidScriptSessionDelegateSubscriptions::SubscribeInternal(
 	UObject& Source, const uint32 EventOrdinal, FString& OutError,
 	const FAvidScriptWasmRuntimeInstance* Runtime, TConstArrayView<uint8> StateBytes,
-	TUniquePtr<IAvidScriptManagedStateLease>* Lease)
+	TUniquePtr<IAvidScriptManagedStateLease>* Lease, const bool bLanguageManaged)
 {
 	check(IsInGameThread());
 	OutError.Reset();
@@ -448,6 +457,21 @@ int64 FAvidScriptSessionDelegateSubscriptions::SubscribeInternal(
 		return 0;
 	}
 	if (Event->bRequiresManagedState && !Lease) { OutError = TEXT("delegate_managed_state_required"); return 0; }
+	if (bLanguageManaged && (!Lease || !Event->bRequiresManagedState))
+	{
+		OutError = TEXT("delegate_language_state_invalid");
+		return 0;
+	}
+	if (bLanguageManaged && Entries.ContainsByPredicate(
+		[&Source, EventOrdinal](const FAvidScriptDelegateSubscriptionEntry& Entry)
+		{
+			return Entry.bLanguageManaged && Entry.Event.EventOrdinal == EventOrdinal
+				&& Entry.Source.Get() == &Source;
+		}))
+	{
+		OutError = TEXT("delegate_language_state_exists");
+		return 0;
+	}
 	if (Event->Signature.Kind
 			== EAvidScriptPreparedDelegateKind::Singlecast
 		&& Entries.ContainsByPredicate(
@@ -485,6 +509,7 @@ int64 FAvidScriptSessionDelegateSubscriptions::SubscribeInternal(
 	}
 	if (Lease)
 	{
+		Entry.bLanguageManaged = bLanguageManaged;
 		Entry.ManagedState = MakeShared<FAvidScriptDelegateManagedState>();
 		Entry.ManagedState->Bytes.Append(StateBytes.GetData(), StateBytes.Num());
 		Entry.ManagedState->Lease = MoveTemp(*Lease);
@@ -499,6 +524,47 @@ int64 FAvidScriptSessionDelegateSubscriptions::SubscribeInternal(
 		Impl->ActiveBridgeIndices.Add(BridgeToken, Entries.Num() - 1);
 	}
 	return GuestToken;
+}
+
+EAvidScriptLanguageEventStateResult FAvidScriptSessionDelegateSubscriptions::ReadLanguageManagedState(
+	UObject& Source, const uint32 EventOrdinal, const FAvidScriptWasmRuntimeInstance& Runtime,
+	TArrayView<uint8> OutStateBytes, FString& OutError)
+{
+	check(IsInGameThread());
+	OutError.Reset();
+	const FAvidScriptWasmRuntimeInstance* ExpectedRuntime =
+		Impl->bPreparing ? Impl->PreparedRuntime : Impl->ActiveRuntime;
+	const TMap<uint32, FAvidScriptPreparedDelegateEvent>& Catalog =
+		Impl->bPreparing ? Impl->PreparedCatalog : Impl->ActiveCatalog;
+	const FAvidScriptPreparedDelegateEvent* Event = Catalog.Find(EventOrdinal);
+	if (!IsValid(&Source) || &Runtime != ExpectedRuntime
+		|| (!Impl->bPreparing && !Impl->bDispatchEnabled)
+		|| OutStateBytes.IsEmpty() || OutStateBytes.Num() > AvidScriptMaximumDelegateStateBytes
+		|| !Event || !Event->bRequiresManagedState
+		|| !Source.IsA(Event->ExpectedSourceClass))
+	{
+		OutError = TEXT("delegate_language_state_invalid");
+		return EAvidScriptLanguageEventStateResult::Rejected;
+	}
+	const TArray<FAvidScriptDelegateSubscriptionEntry>& Entries =
+		Impl->bPreparing ? Impl->Prepared : Impl->Active;
+	const FAvidScriptDelegateSubscriptionEntry* Entry = Entries.FindByPredicate(
+		[&Source, EventOrdinal](const FAvidScriptDelegateSubscriptionEntry& Candidate)
+		{
+			return Candidate.bLanguageManaged && Candidate.Event.EventOrdinal == EventOrdinal
+				&& Candidate.Source.Get() == &Source;
+		});
+	if (!Entry) return EAvidScriptLanguageEventStateResult::Absent;
+	if (!Entry->ManagedState.IsValid()
+		|| !Entry->ManagedState->Lease.IsValid()
+		|| !Entry->ManagedState->Lease->IsValidForRuntime(Runtime)
+		|| Entry->ManagedState->Bytes.Num() != OutStateBytes.Num())
+	{
+		OutError = TEXT("delegate_language_state_corrupt");
+		return EAvidScriptLanguageEventStateResult::Rejected;
+	}
+	FMemory::Memcpy(OutStateBytes.GetData(), Entry->ManagedState->Bytes.GetData(), OutStateBytes.Num());
+	return EAvidScriptLanguageEventStateResult::Found;
 }
 
 bool FAvidScriptSessionDelegateSubscriptions::Unsubscribe(

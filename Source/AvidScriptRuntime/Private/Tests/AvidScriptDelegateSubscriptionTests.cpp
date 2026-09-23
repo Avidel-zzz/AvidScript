@@ -738,4 +738,114 @@ bool FAvidScriptSinglecastDelegateLeaseTest::RunTest(
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptDelegateLanguageStateTest,
+	"AvidScript.Runtime.DelegateSubscription.LanguageState",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptDelegateLanguageStateTest::RunTest(const FString& Parameters)
+{
+	using namespace AvidScript::Managed;
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	{
+		AddInfo(FString::Printf(TEXT("Language event state backend=%d"), static_cast<int32>(Backend)));
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime
+			? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		FAvidScriptRuntimeSession Session;
+		Session.SetBackendSelectionForTesting(Selection);
+		FAvidScriptWasmReloadResult Loaded;
+		if (!Session.LoadEmbeddedSmoke(Loaded)) { AddError(Loaded.ErrorMessage); return false; }
+		auto* Runtime = Session.GetLiveRuntimeForTesting();
+		FAvidScriptWasmRuntimeInstance Foreign(Selection);
+		auto& Heap = *Runtime->GetManagedHeapForTesting();
+		const std::array<FHeapLayout, 1> Layouts{{{1, 8, {{0, 1}}}}};
+		if (!TestTrue(TEXT("language event heap configures"), Heap.Configure(Layouts) == EHeapError::Ok)) return false;
+		TStrongObjectPtr<UAvidScriptRuntimeDelegateTestObject> Source(NewObject<UAvidScriptRuntimeDelegateTestObject>());
+		TStrongObjectPtr<UAvidScriptRuntimeDelegateTestObject> Peer(NewObject<UAvidScriptRuntimeDelegateTestObject>());
+		FAvidScriptSessionDelegateSubscriptions Subscriptions(Session);
+		TFunction<void()> Observe = []() {};
+		FAvidScriptPreparedDelegateEvent Event;
+		Event.EventOrdinal = 0;
+		Event.StableId = FString(TEXT("e919e919e919e919")) + FString::ChrN(48, 'e');
+		Event.ExportName = TEXT("avid_on_tick");
+		Event.bRequiresManagedState = true;
+		Event.ExpectedSourceClass = Source->GetClass();
+		Event.Signature.Kind = EAvidScriptPreparedDelegateKind::Multicast;
+		Event.Signature.MulticastProperty = FindFProperty<FMulticastDelegateProperty>(Source->GetClass(), TEXT("OnSignal"));
+		Event.Signature.SignatureFunction = Event.Signature.MulticastProperty->SignatureFunction;
+		Event.Signature.ParameterCellCount = 1;
+		Event.Signature.ImmutableCodecIdentity = &Observe;
+		Event.Signature.Encode = &EncodeSourceContextTestFrame;
+		FString Error;
+		if (!Subscriptions.Prepare(Source.Get(), MakeArrayView(&Event, 1), Error, Runtime)) { AddError(Error); return false; }
+		Subscriptions.CommitPrepared();
+		Subscriptions.SetDispatchEnabled(true);
+		auto Acquire = [&](TUniquePtr<IAvidScriptManagedStateLease>& Lease)
+		{
+			FToken Frame = 0, Root = 0, Object = 0;
+			TestTrue(TEXT("language event frame opens"), Heap.PushFrame(Frame) == EHeapError::Ok);
+			TestTrue(TEXT("language event temporary root opens"), Heap.CreateRoot(Frame, 0, Root) == EHeapError::Ok);
+			TestTrue(TEXT("language event object allocates"), Heap.Allocate(1, Root, Object) == EHeapError::Ok);
+			const uint64 Objects[] = {Object};
+			TestTrue(TEXT("language event persistent root opens"), Runtime->CreateManagedStateLease(MakeArrayView(Objects), Lease));
+			TestTrue(TEXT("language event temporary frame exits"), Heap.PopFrame(Frame) == EHeapError::Ok);
+			return Object;
+		};
+		uint64 Read = 999;
+		auto Output = MakeArrayView(reinterpret_cast<uint8*>(&Read), sizeof(Read));
+		TestEqual(TEXT("No language handler is an ordinary absence"),
+			Subscriptions.ReadLanguageManagedState(*Source, 0, *Runtime, Output, Error),
+			EAvidScriptLanguageEventStateResult::Absent);
+		TestEqual(TEXT("Absent read leaves output untouched"), Read, uint64(999));
+		TUniquePtr<IAvidScriptManagedStateLease> Lease;
+		const FToken ExplicitObject = Acquire(Lease);
+		const int64 ExplicitToken = Subscriptions.SubscribeManaged(*Source, 0, *Runtime,
+			MakeArrayView(reinterpret_cast<const uint8*>(&ExplicitObject), sizeof(ExplicitObject)), MoveTemp(Lease), Error);
+		TestTrue(TEXT("Explicit subscription publishes"), ExplicitToken > 0);
+		TestEqual(TEXT("Language lookup cannot select an explicit token"),
+			Subscriptions.ReadLanguageManagedState(*Source, 0, *Runtime, Output, Error),
+			EAvidScriptLanguageEventStateResult::Absent);
+		const FToken LanguageObject = Acquire(Lease);
+		const int64 LanguageToken = Subscriptions.SubscribeManagedLanguage(*Source, 0, *Runtime,
+			MakeArrayView(reinterpret_cast<const uint8*>(&LanguageObject), sizeof(LanguageObject)), MoveTemp(Lease), Error);
+		if (!TestTrue(TEXT("One language bridge publishes beside explicit subscriptions"), LanguageToken > 0))
+		{ AddError(Error); return false; }
+		const FToken DuplicateObject = Acquire(Lease);
+		TestEqual(TEXT("Duplicate language bridge is rejected"), Subscriptions.SubscribeManagedLanguage(*Source, 0, *Runtime,
+			MakeArrayView(reinterpret_cast<const uint8*>(&DuplicateObject), sizeof(DuplicateObject)), MoveTemp(Lease), Error), int64(0));
+		TestTrue(TEXT("Rejected duplicate retains caller lease"), Lease.IsValid());
+		Lease.Reset();
+		TestEqual(TEXT("Matching source reads only its language state"),
+			Subscriptions.ReadLanguageManagedState(*Source, 0, *Runtime, Output, Error),
+			EAvidScriptLanguageEventStateResult::Found);
+		TestEqual(TEXT("Language state preserves its object identity"), Read, LanguageObject);
+		uint8 Short[1] = {9};
+		TestEqual(TEXT("Wrong state size rejects without writing"),
+			Subscriptions.ReadLanguageManagedState(*Source, 0, *Runtime, MakeArrayView(Short), Error),
+			EAvidScriptLanguageEventStateResult::Rejected);
+		TestEqual(TEXT("Wrong size preserves output"), Short[0], uint8(9));
+		TestEqual(TEXT("Foreign Runtime cannot read language state"),
+			Subscriptions.ReadLanguageManagedState(*Source, 0, Foreign, Output, Error),
+			EAvidScriptLanguageEventStateResult::Rejected);
+		TestEqual(TEXT("Peer source does not inherit handlers"),
+			Subscriptions.ReadLanguageManagedState(*Peer, 0, *Runtime, Output, Error),
+			EAvidScriptLanguageEventStateResult::Absent);
+		TestTrue(TEXT("Explicit cancellation leaves language bridge"), Subscriptions.Unsubscribe(ExplicitToken, Error));
+		TestEqual(TEXT("Language bridge remains readable"),
+			Subscriptions.ReadLanguageManagedState(*Source, 0, *Runtime, Output, Error),
+			EAvidScriptLanguageEventStateResult::Found);
+		TestTrue(TEXT("Language cancellation succeeds"), Subscriptions.Unsubscribe(LanguageToken, Error));
+		TestEqual(TEXT("Cancelled language state disappears"),
+			Subscriptions.ReadLanguageManagedState(*Source, 0, *Runtime, Output, Error),
+			EAvidScriptLanguageEventStateResult::Absent);
+		TestTrue(TEXT("All cancelled state collects"), Heap.Collect() == EHeapError::Ok);
+		TestEqual(TEXT("Language and explicit roots are both gone"), Heap.GetStats().LiveRoots, 0u);
+		TestEqual(TEXT("Language and explicit objects are both gone"), Heap.GetStats().LiveObjects, 0u);
+		FAvidScriptWasmSmokeResult Stop;
+		TestTrue(TEXT("Language state session stops"), Session.StopAndUnload(Stop));
+	}
+	return true;
+}
+
 #endif

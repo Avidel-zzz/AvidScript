@@ -26,6 +26,13 @@ struct FAvidScriptGeneratedTypeHostBindings;
 struct FAvidScriptManagedRootTransfer;
 namespace AvidScript::Managed { class FHeap; }
 
+enum class EAvidScriptLanguageEventStateResult : uint8
+{
+	Absent,
+	Found,
+	Rejected
+};
+
 class AVIDSCRIPTRUNTIME_API IAvidScriptEventSubscriptionHost
 {
 public:
@@ -44,6 +51,20 @@ public:
 	{
 		OutError = TEXT("delegate_managed_state_unsupported");
 		return 0;
+	}
+	virtual int64 SubscribeManagedLanguage(UObject& Source, uint32 EventOrdinal,
+		const FAvidScriptWasmRuntimeInstance& Runtime, TConstArrayView<uint8> StateBytes,
+		TUniquePtr<IAvidScriptManagedStateLease>&& Lease, FString& OutError)
+	{
+		OutError = TEXT("delegate_language_state_unsupported");
+		return 0;
+	}
+	virtual EAvidScriptLanguageEventStateResult ReadLanguageManagedState(
+		UObject& Source, uint32 EventOrdinal, const FAvidScriptWasmRuntimeInstance& Runtime,
+		TArrayView<uint8> OutStateBytes, FString& OutError)
+	{
+		OutError = TEXT("delegate_language_state_unsupported");
+		return EAvidScriptLanguageEventStateResult::Rejected;
 	}
 	virtual bool ReadCurrentManagedState(const FAvidScriptWasmRuntimeInstance& Runtime,
 		TArrayView<uint8> OutStateBytes) { return false; }

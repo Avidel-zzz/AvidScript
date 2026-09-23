@@ -39,6 +39,12 @@ public:
 	int64 SubscribeManaged(UObject& Source, uint32 EventOrdinal,
 		const FAvidScriptWasmRuntimeInstance& Runtime, TConstArrayView<uint8> StateBytes,
 		TUniquePtr<IAvidScriptManagedStateLease>&& Lease, FString& OutError) override;
+	int64 SubscribeManagedLanguage(UObject& Source, uint32 EventOrdinal,
+		const FAvidScriptWasmRuntimeInstance& Runtime, TConstArrayView<uint8> StateBytes,
+		TUniquePtr<IAvidScriptManagedStateLease>&& Lease, FString& OutError) override;
+	EAvidScriptLanguageEventStateResult ReadLanguageManagedState(
+		UObject& Source, uint32 EventOrdinal, const FAvidScriptWasmRuntimeInstance& Runtime,
+		TArrayView<uint8> OutStateBytes, FString& OutError) override;
 	bool ReadCurrentManagedState(const FAvidScriptWasmRuntimeInstance& Runtime,
 		TArrayView<uint8> OutStateBytes) override;
 
@@ -49,7 +55,7 @@ public:
 private:
 	int64 SubscribeInternal(UObject& Source, uint32 EventOrdinal, FString& OutError,
 		const FAvidScriptWasmRuntimeInstance* Runtime, TConstArrayView<uint8> StateBytes,
-		TUniquePtr<IAvidScriptManagedStateLease>* Lease);
+		TUniquePtr<IAvidScriptManagedStateLease>* Lease, bool bLanguageManaged = false);
 	void SweepInvalidSources();
 	struct FImpl;
 	TUniquePtr<FImpl> Impl;
