@@ -296,6 +296,11 @@ internal static class CSharpGuestEventStateTests
                         var target = new AAvidScriptEditorDelegateEventTestActor(TargetSlot, TargetGeneration);
                         target.OnScriptSignal += Handle;
                     }
+                    if (delta == 23.0f)
+                    {
+                        var target = new AAvidScriptEditorDelegateEventTestActor(TargetSlot, TargetGeneration);
+                        target.OnScriptSignal -= Handle;
+                    }
                 }
             }
             """;

@@ -404,6 +404,92 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
             StaleActor->Destroy();
         }
         {
+            AActor* Peer = World->SpawnActor<AActor>(Signal->ExpectedSourceClass);
+            if (!TestNotNull(TEXT("Same-World event peer spawned"), Peer)) return false;
+            FAvidScriptObjectHandleResult PeerResult;
+            const auto PeerHandle = Registry.RegisterObject(Peer, PeerResult, false);
+            if (!TestTrue(TEXT("Same-World event peer registered"), PeerResult.bSucceeded)) return false;
+            FAvidScriptRuntimeSession MultiSession;
+            MultiSession.SetBackendSelectionForTesting(Selection);
+            MultiSession.SetHostContext(Context);
+            FAvidScriptWasmReloadResult MultiLoaded;
+            if (!MultiSession.LoadInitialModule(Bytes.GetData(), Bytes.Num(), Manifest, MultiLoaded))
+            { AddError(MultiLoaded.ErrorMessage); return false; }
+            if (!TestTrue(TEXT("Same-World peer capability granted"),
+                MultiSession.GetTestSnapshot().HostContext.ObjectOwnership->Borrow(
+                    Registry, *Peer, PeerResult))) return false;
+            auto* MultiRuntime = MultiSession.GetLiveRuntimeForTesting();
+            const int32 PeerSlot = static_cast<int32>(PeerHandle.Slot);
+            const int32 PeerGeneration = static_cast<int32>(PeerHandle.Generation);
+            if (!TestTrue(TEXT("Inject same-World peer slot"), MultiRuntime->WriteStateBytes(
+                TargetSlotAddress, MakeArrayView(reinterpret_cast<const uint8*>(&PeerSlot), 4), Error))
+                || !TestTrue(TEXT("Inject same-World peer generation"), MultiRuntime->WriteStateBytes(
+                    TargetGenerationAddress, MakeArrayView(reinterpret_cast<const uint8*>(&PeerGeneration), 4), Error)))
+            { AddError(Error); return false; }
+            FAvidScriptWasmSmokeResult MultiResult;
+            if (!MultiRuntime->Tick(22.0f, MultiResult) || !MultiRuntime->Tick(1.0f, MultiResult))
+            { AddError(MultiResult.ErrorMessage); return false; }
+            TestEqual(TEXT("Two event sources have independent language bridges"),
+                MultiSession.GetDelegateSubscriptionCountForTesting(), 2);
+            TestEqual(TEXT("Two event sources retain two callback roots"),
+                MultiRuntime->GetManagedHeapForTesting()->GetStats().LiveRoots, 2u);
+            auto IsSignalBound = [&](AActor* EventOwner)
+            {
+                return Signal->Signature.MulticastProperty->GetMulticastDelegate(
+                    Signal->Signature.MulticastProperty->ContainerPtrToValuePtr<void>(EventOwner))->IsBound();
+            };
+            TestTrue(TEXT("Peer event is bound"), IsSignalBound(Peer));
+            TestTrue(TEXT("Owner event is bound"), IsSignalBound(Owner));
+            auto BroadcastTo = [&](AActor* EventOwner)
+            {
+                FStructOnScope Frame(Signal->Signature.SignatureFunction);
+                FindFProperty<FObjectProperty>(Signal->Signature.SignatureFunction, TEXT("SourceActor"))
+                    ->SetObjectPropertyValue_InContainer(Frame.GetStructMemory(), EventOwner);
+                FindFProperty<FIntProperty>(Signal->Signature.SignatureFunction, TEXT("Count"))
+                    ->SetPropertyValue_InContainer(Frame.GetStructMemory(), 2);
+                FindFProperty<FFloatProperty>(Signal->Signature.SignatureFunction, TEXT("Scale"))
+                    ->SetPropertyValue_InContainer(Frame.GetStructMemory(), 1.0f);
+                Signal->Signature.MulticastProperty->GetMulticastDelegate(
+                    Signal->Signature.MulticastProperty->ContainerPtrToValuePtr<void>(EventOwner))
+                    ->ProcessDelegate<UObject>(Frame.GetStructMemory());
+            };
+            auto ReadCount = [&]()
+            {
+                int32 Value = 0;
+                if (!TestTrue(TEXT("Read independent event count"), MultiRuntime->ReadStateBytes(
+                    CountAddress, MakeArrayView(reinterpret_cast<uint8*>(&Value), 4), Error)))
+                { AddError(Error); return -1; }
+                return Value;
+            };
+            BroadcastTo(Peer);
+            TestEqual(TEXT("Peer callback executes independently"), ReadCount(), 2);
+            BroadcastTo(Owner);
+            TestEqual(TEXT("Owner callback executes independently"), ReadCount(), 4);
+            if (!MultiRuntime->Tick(23.0f, MultiResult)) { AddError(MultiResult.ErrorMessage); return false; }
+            TestEqual(TEXT("Removing peer leaves owner bridge"),
+                MultiSession.GetDelegateSubscriptionCountForTesting(), 1);
+            TestEqual(TEXT("Removing peer leaves one callback root"),
+                MultiRuntime->GetManagedHeapForTesting()->GetStats().LiveRoots, 1u);
+            TestFalse(TEXT("Peer event is unbound after removal"), IsSignalBound(Peer));
+            TestTrue(TEXT("Owner event stays bound after peer removal"), IsSignalBound(Owner));
+            BroadcastTo(Peer);
+            TestEqual(TEXT("Removed peer callback does not execute"), ReadCount(), 4);
+            BroadcastTo(Owner);
+            TestEqual(TEXT("Only owner callback survives peer removal"), ReadCount(), 6);
+            if (!MultiRuntime->Tick(3.0f, MultiResult)) { AddError(MultiResult.ErrorMessage); return false; }
+            TestEqual(TEXT("Removing owner releases final bridge"),
+                MultiSession.GetDelegateSubscriptionCountForTesting(), 0);
+            TestEqual(TEXT("Removing owner releases final callback root"),
+                MultiRuntime->GetManagedHeapForTesting()->GetStats().LiveRoots, 0u);
+            TestFalse(TEXT("Owner event is unbound after removal"), IsSignalBound(Owner));
+            BroadcastTo(Peer);
+            BroadcastTo(Owner);
+            TestEqual(TEXT("Neither removed source receives callbacks"), ReadCount(), 6);
+            if (!TestTrue(TEXT("Multi-source event Session stops"),
+                MultiSession.StopAndUnload(MultiResult))) return false;
+            Peer->Destroy();
+        }
+        {
             AActor* GcOwner = World->SpawnActor<AActor>(Signal->ExpectedSourceClass);
             if (!TestNotNull(TEXT("GC event source spawned"), GcOwner)) return false;
             TWeakObjectPtr<AActor> WeakGcOwner = GcOwner;
