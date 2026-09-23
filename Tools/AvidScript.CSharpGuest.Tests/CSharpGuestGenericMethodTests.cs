@@ -13,8 +13,9 @@ internal static class CSharpGuestGenericMethodTests
         ClosedMethodsHaveIndependentFunctions();
         TamperedInstancesFailClosed();
         StructuredNamedShapesFailClosed();
+        GenericReferenceLayoutsFailClosed();
         CompositeOpenTypesFailClosed();
-        return 4;
+        return 5;
     }
 
     private static void ClosedMethodsHaveIndependentFunctions()
@@ -25,9 +26,9 @@ internal static class CSharpGuestGenericMethodTests
             "closed generic source should publish the current semantic contract");
         SemanticCallable[] instances = semantic.Callables
             .Where(callable => callable.GenericDefinitionSymbolId is not null).ToArray();
-        Check(instances.Length == 12 && instances.Select(callable => callable.MethodSymbolId)
-            .Distinct(StringComparer.Ordinal).Count() == 12,
-            "scalar, ref/out, array and ordered nested value calls need twelve distinct instances");
+        Check(instances.Length == 14 && instances.Select(callable => callable.MethodSymbolId)
+            .Distinct(StringComparer.Ordinal).Count() == 14,
+            "scalar, ref/out, array, value and reference calls need fourteen distinct instances");
         Check(instances.All(callable => semantic.Reachability!.ReachableCallableIds
             .Contains(callable.MethodSymbolId))
             && semantic.Reachability!.ReachableCallableIds.All(id =>
@@ -160,6 +161,55 @@ internal static class CSharpGuestGenericMethodTests
         };
         Check(!CSharpGuestLowerer.Lower(downgraded, new string('a', 64)).Succeeded,
             "schema 30 cannot claim schema 31 named shape metadata");
+    }
+
+    private static void GenericReferenceLayoutsFailClosed()
+    {
+        SemanticDocument semantic = Analyze(File.ReadAllText(FindFixture()));
+        CSharpGuestLoweringResult guest = CSharpGuestLowerer.Lower(semantic, new string('a', 64));
+        Check(guest.Succeeded, "closed generic reference fixture must lower");
+        foreach ((string typeId, string fieldTypeId) in new[]
+        {
+            ("type:global::Box<int>", "type:int32"),
+            ("type:global::Box<global::Pair<int, float>>", "type:global::Pair<int, float>"),
+        })
+        {
+            var reference = guest.Module!.Types.Single(type => type.Id == typeId);
+            Check(reference.Kind == "managed_ref" && reference.ElementTypeId is not null,
+                "each closed generic class needs its own managed reference layout");
+            var payload = guest.Module.Types.Single(type => type.Id == reference.ElementTypeId);
+            Check(payload.Fields.Count == 1 && payload.Fields[0].TypeId == fieldTypeId,
+                "generic class state must use the ordered closed field type");
+        }
+        Check(!guest.Module!.Types.Any(type => type.Id == "type:global::Box<T>"),
+            "the open class definition cannot become an executable managed reference");
+        SemanticDocument wrongDefinition = semantic with
+        {
+            TypeShapes = semantic.TypeShapes.Select(shape =>
+                shape.TypeId == "type:global::Box<int>"
+                    ? shape with { GenericDefinitionTypeId = "type:global::Pair<T, U>" }
+                    : shape).ToArray(),
+        };
+        Check(!CSharpGuestLowerer.Lower(wrongDefinition, new string('a', 64)).Succeeded,
+            "a reference type cannot borrow another generic definition's field layout");
+
+        const string explicitConstructor = """
+            using System.Runtime.InteropServices;
+            public sealed class Box<T> {
+                public T Value;
+                public Box(T value) { Value = value; }
+            }
+            public static class Script {
+                static Box<T> Make<T>(T value) => new Box<T>(value);
+                [UnmanagedCallersOnly(EntryPoint = "generic_box_explicit")]
+                public static int Main() => Make<int>(7).Value;
+            }
+            """;
+        SemanticDocument unsupported = Analyze(explicitConstructor);
+        Check((!unsupported.Succeeded
+                && unsupported.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCS1064"))
+            || !CSharpGuestLowerer.Lower(unsupported, new string('a', 64)).Succeeded,
+            "generic constructors with bodies require member specialization before execution");
     }
 
     private static void CompositeOpenTypesFailClosed()

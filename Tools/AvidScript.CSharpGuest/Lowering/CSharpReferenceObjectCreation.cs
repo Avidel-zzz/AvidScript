@@ -11,7 +11,10 @@ internal static class CSharpReferenceObjectCreation
     public static GuestRegister? Lower(CSharpFunctionLoweringContext context, SemanticOperation operation, int block, List<GuestInstruction> instructions)
     {
         SemanticCallable? constructor = context.Document.Callables.SingleOrDefault(callable => callable.MethodSymbolId == operation.SymbolId);
-        if (constructor is null || !constructor.IsConstructor || constructor.IsStatic || constructor.ContainingTypeId != operation.TypeId
+        if (constructor is null || !constructor.IsConstructor || constructor.IsStatic
+            || (constructor.ContainingTypeId != operation.TypeId
+                && !CSharpReferenceObjects.IsClosedImplicitConstructor(
+                    context.Document, operation.TypeId, constructor))
             || constructor.ReturnTypeId != CSharpGuestIds.VoidTypeId
             || constructor.Import is not null || (!constructor.HasBody && (!context.Document.ClassTypes.Single(type => type.TypeId == operation.TypeId).HasImplicitDefaultConstructor
                 || constructor.Parameters.Count != 0)))

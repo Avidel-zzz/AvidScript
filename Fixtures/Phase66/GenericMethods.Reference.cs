@@ -14,6 +14,8 @@ internal static unsafe class Program
         delegate* unmanaged<int> genericNamedIntFloat = &Script.NamedIntFloat;
         delegate* unmanaged<int> genericNamedFloatInt = &Script.NamedFloatInt;
         delegate* unmanaged<int> genericNamedNested = &Script.NamedNested;
+        delegate* unmanaged<int> genericBoxInt = &Script.BoxInt;
+        delegate* unmanaged<int> genericBoxNested = &Script.BoxNested;
         Console.WriteLine($"generic_int: {genericInt()}");
         Console.WriteLine($"generic_float: {genericFloat()}");
         Console.WriteLine($"generic_forward: {genericForward()}");
@@ -24,5 +26,7 @@ internal static unsafe class Program
         Console.WriteLine($"generic_named_int_float: {genericNamedIntFloat()}");
         Console.WriteLine($"generic_named_float_int: {genericNamedFloatInt()}");
         Console.WriteLine($"generic_named_nested: {genericNamedNested()}");
+        Console.WriteLine($"generic_box_int: {genericBoxInt()}");
+        Console.WriteLine($"generic_box_nested: {genericBoxNested()}");
     }
 }

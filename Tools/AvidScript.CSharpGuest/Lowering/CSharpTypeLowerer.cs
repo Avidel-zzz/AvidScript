@@ -108,7 +108,8 @@ internal static class CSharpTypeLowerer
             return Failure(diagnostics);
         }
 
-        CSharpReferenceObjects.AddTypes(document, rawTypes);
+        if (!CSharpReferenceObjects.AddTypes(document, rawTypes, diagnostics))
+            return Failure(diagnostics);
         if (rawTypes.Any(type => type.Fields.Any(field => field.Id.StartsWith("$empty:", StringComparison.Ordinal))))
             AddTypeIfMissing(rawTypes, Scalar("type:uint8", "i32", 1, 1));
         CSharpClosureLayout.AddTypes(document, rawTypes);

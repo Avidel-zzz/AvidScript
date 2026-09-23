@@ -128,7 +128,7 @@ WASM 模块 ──AvidScript Runtime──> UE 对象、属性、函数与事件
 
 | 范围 | 已有能力 | 主要限制 |
 | --- | --- | --- |
-| C# 语言 | 常用控制流、一维数组 `foreach`、受支持的类/结构体、lambda、局部函数、封闭静态泛型方法 | 泛型实例状态、普通枚举器、异常等尚未覆盖完整 C#；不能直接使用任意 NuGet 包 |
+| C# 语言 | 常用控制流、一维数组 `foreach`、受支持的类/结构体、lambda、局部函数、[封闭泛型方法和简单泛型类](Fixtures/Phase66/GenericMethods.cs) | 泛型类自定义构造器与实例方法、普通枚举器、异常等尚未覆盖完整 C#；不能直接使用任意 NuGet 包 |
 | 异步 | 计时器、下一帧、资源加载、受支持的 UE Latent API | 不能等待任意 `Task` 或自定义 awaiter |
 | UE API 与类型 | 生成的属性/函数绑定、常用数学类型、文本、受支持的数组/Set/Map | API 需先选择并生成绑定；部分嵌套容器和软/弱引用用法仍有限制 |
 | UE 类型与网络 | C# 定义 Actor/Component/Subsystem；RPC、复制属性、RepNotify 的聚焦测试 | 反射结构变更需重建 Editor；真实游戏流程仍需单独验收 |

@@ -31,8 +31,8 @@ $WasmOutput = @(& $NodePath $WasmRunner $OutputDirectory)
 if ($LASTEXITCODE -ne 0) { throw "The WASM run failed." }
 $ReferenceRows = @($ReferenceOutput | Where-Object { $_ -match '^generic_[a-z_]+: ' })
 $WasmRows = @($WasmOutput | Where-Object { $_ -match '^generic_[a-z_]+: ' })
-if ($ReferenceRows.Count -ne 10 -or $WasmRows.Count -ne 10 -or @(Compare-Object $ReferenceRows $WasmRows -SyncWindow 0).Count -ne 0) {
+if ($ReferenceRows.Count -ne 12 -or $WasmRows.Count -ne 12 -or @(Compare-Object $ReferenceRows $WasmRows -SyncWindow 0).Count -ne 0) {
     throw ("The .NET and WASM results differ. .NET: {0}; WASM: {1}" -f
         ($ReferenceRows -join ", "), ($WasmRows -join ", "))
 }
-Write-Output "GenericMethodsDotNetWasm: 10/10 matched"
+Write-Output "GenericMethodsDotNetWasm: 12/12 matched"

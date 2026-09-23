@@ -6,6 +6,11 @@ public struct Pair<T, U>
     public U Second;
 }
 
+public sealed class Box<T>
+{
+    public T Value;
+}
+
 public static class Script
 {
     static T Identity<T>(T value) => value;
@@ -27,6 +32,12 @@ public static class Script
         pair.First = first;
         pair.Second = second;
         return pair;
+    }
+    static Box<T> MakeBox<T>(T value)
+    {
+        Box<T> box = new Box<T>();
+        box.Value = value;
+        return box;
     }
 
     [UnmanagedCallersOnly(EntryPoint = "generic_int")]
@@ -58,4 +69,19 @@ public static class Script
     [UnmanagedCallersOnly(EntryPoint = "generic_named_nested")]
     public static int NamedNested() =>
         MakePair<Pair<int, float>, int>(MakePair<int, float>(7, 2.5f), 4).First.First;
+    [UnmanagedCallersOnly(EntryPoint = "generic_box_int")]
+    public static int BoxInt()
+    {
+        Box<int> first = MakeBox<int>(7);
+        Box<int> second = MakeBox<int>(4);
+        first.Value += 2;
+        return first.Value * 10 + second.Value;
+    }
+    [UnmanagedCallersOnly(EntryPoint = "generic_box_nested")]
+    public static int BoxNested()
+    {
+        Box<Pair<int, float>> box = MakeBox(MakePair<int, float>(7, 2.5f));
+        box.Value.First += 1;
+        return box.Value.First;
+    }
 }

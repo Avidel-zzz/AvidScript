@@ -9,7 +9,8 @@ namespace AvidScript.CSharpGuest;
 
 internal static class CSharpReferenceObjects
 {
-    private sealed record Plan(IReadOnlySet<string> Types);
+    private sealed record Layout(string DefinitionTypeId, IReadOnlyDictionary<string, string> TypeArguments);
+    private sealed record Plan(IReadOnlySet<string> Types, IReadOnlyDictionary<string, Layout> Layouts);
     private static readonly ConditionalWeakTable<SemanticDocument, Plan> Plans = new();
     public static IReadOnlySet<string> Types(SemanticDocument document) => Plans.GetValue(document, Analyze).Types;
     public static string Payload(string type) => "type:$class:payload:" + type;
@@ -17,13 +18,44 @@ internal static class CSharpReferenceObjects
 
     private static Plan Analyze(SemanticDocument document)
     {
-        HashSet<string> candidates = document.ClassTypes.Where(type => type.IsSourceDeclared && !type.IsStatic
-            && !type.IsAbstract && !type.IsGeneric && !type.IsRecord && !type.HasPrimaryConstructor
-            && !type.HasInstanceInitializers && !type.HasStaticInitialization && !type.HasImplicitInstanceStorage
-            && !type.HasVirtualMembers && !type.HasFinalizer && type.BaseTypeId == "type:object"
-            && type.InterfaceTypeIds.Count == 0 && !document.UeTypeDeclarations.Any(ue => ue.TypeId == type.TypeId)
-            && document.Symbols.Any(symbol => symbol.Kind == "type" && symbol.TypeId == type.TypeId))
-            .Select(type => type.TypeId).ToHashSet(StringComparer.Ordinal);
+        Dictionary<string, SemanticClassType> classes = document.ClassTypes.ToDictionary(
+            type => type.TypeId, StringComparer.Ordinal);
+        Dictionary<string, SemanticType> semanticTypes = document.Types.ToDictionary(
+            type => type.Id, StringComparer.Ordinal);
+        Dictionary<string, SemanticTypeShape> shapes = document.TypeShapes.ToDictionary(
+            shape => shape.TypeId, StringComparer.Ordinal);
+        Dictionary<string, Layout> candidates = new(StringComparer.Ordinal);
+        foreach (SemanticClassType type in document.ClassTypes)
+        {
+            if (!Eligible(type) || document.UeTypeDeclarations.Any(ue => ue.TypeId == type.TypeId))
+                continue;
+            string definitionId = type.TypeId;
+            Dictionary<string, string> arguments = new(StringComparer.Ordinal);
+            if (type.IsGeneric)
+            {
+                if (!shapes.TryGetValue(type.TypeId, out SemanticTypeShape? shape)
+                    || shape.GenericDefinitionTypeId is not { } genericDefinitionId
+                    || genericDefinitionId == type.TypeId
+                    || !classes.TryGetValue(genericDefinitionId, out SemanticClassType? definition)
+                    || !Eligible(definition) || !definition.IsGeneric
+                    || !shapes.TryGetValue(genericDefinitionId, out SemanticTypeShape? definitionShape)
+                    || definitionShape.GenericArgumentTypeIds is not { } formals
+                    || shape.GenericArgumentTypeIds is not { } actuals
+                    || formals.Count == 0 || formals.Count != actuals.Count
+                    || formals.Distinct(StringComparer.Ordinal).Count() != formals.Count
+                    || formals.Any(id => !semanticTypes.TryGetValue(id, out SemanticType? formal)
+                        || formal.Kind != "type_parameter")
+                    || actuals.Any(id => !IsClosed(id, semanticTypes, shapes,
+                        new HashSet<string>(StringComparer.Ordinal))))
+                    continue;
+                definitionId = genericDefinitionId;
+                arguments = formals.Zip(actuals).ToDictionary(
+                    pair => pair.First, pair => pair.Second, StringComparer.Ordinal);
+            }
+            if (!document.Symbols.Any(symbol => symbol.Kind == "type" && symbol.TypeId == definitionId))
+                continue;
+            candidates.Add(type.TypeId, new Layout(definitionId, arguments));
+        }
         bool Reachable(string id) => document.Reachability is null || document.Reachability.ReachableCallableIds.Contains(id);
         HashSet<string> used = new(StringComparer.Ordinal);
         Stack<SemanticOperation> pending = new(document.Methods.Where(method => Reachable(method.MethodSymbolId)).Select(method => method.Root));
@@ -55,25 +87,90 @@ internal static class CSharpReferenceObjects
         do { changed = false; foreach (SemanticSymbol field in document.Symbols.Where(symbol => symbol.Kind == "field" && !symbol.IsStatic))
             if (field.ContainingSymbolId is { } owner && owners.TryGetValue(owner, out string? type) && used.Contains(type)
                 && field.TypeId is { } fieldType) changed |= used.Add(fieldType); } while (changed);
-        candidates.IntersectWith(used);
-        return new(candidates);
+        foreach (string id in candidates.Keys.Where(id => !used.Contains(id)).ToArray())
+            candidates.Remove(id);
+        return new(candidates.Keys.ToHashSet(StringComparer.Ordinal), candidates);
     }
 
-    public static void AddTypes(SemanticDocument document, List<GuestType> types)
+    public static bool AddTypes(SemanticDocument document, List<GuestType> types,
+        List<GuestDiagnostic> diagnostics)
     {
+        Plan plan = Plans.GetValue(document, Analyze);
+        Dictionary<string, SemanticType> semanticTypes = document.Types.ToDictionary(
+            type => type.Id, StringComparer.Ordinal);
+        Dictionary<string, SemanticTypeShape> shapes = document.TypeShapes.ToDictionary(
+            shape => shape.TypeId, StringComparer.Ordinal);
         foreach (string id in Types(document).OrderBy(id => id, StringComparer.Ordinal))
         {
-            string owner = document.Symbols.Single(symbol => symbol.Kind == "type" && symbol.TypeId == id).Id;
-            GuestField[] fields = document.Symbols.Where(symbol => symbol.Kind == "field" && !symbol.IsStatic && symbol.ContainingSymbolId == owner)
-                .OrderBy(symbol => symbol.Id, StringComparer.Ordinal).Select(symbol => new GuestField(symbol.Id, symbol.Name, symbol.TypeId!, 0)).ToArray();
+            Layout layout = plan.Layouts[id];
+            SemanticSymbol[] owners = document.Symbols.Where(symbol => symbol.Kind == "type"
+                && symbol.TypeId == layout.DefinitionTypeId).ToArray();
+            if (owners.Length != 1)
+            {
+                diagnostics.Add(new GuestDiagnostic("ASCG1024", "error",
+                    $"Reference type '{id}' has no unique source definition.", null));
+                return false;
+            }
+            string owner = owners[0].Id;
+            List<GuestField> closedFields = new();
+            foreach (SemanticSymbol field in document.Symbols.Where(symbol => symbol.Kind == "field"
+                && !symbol.IsStatic && symbol.ContainingSymbolId == owner)
+                .OrderBy(symbol => symbol.Id, StringComparer.Ordinal))
+            {
+                if (field.TypeId is null || !SemanticGenericTypeSubstitution.TryClose(
+                        field.TypeId, layout.TypeArguments, semanticTypes, shapes,
+                        out string closedTypeId))
+                {
+                    diagnostics.Add(new GuestDiagnostic("ASCG1024", "error",
+                        $"Reference field '{field.Id}' has no closed type layout.", null));
+                    return false;
+                }
+                closedFields.Add(new GuestField(field.Id, field.Name, closedTypeId, 0));
+            }
+            GuestField[] fields = closedFields.ToArray();
             if (fields.Length == 0) fields = new[] { new GuestField("$empty:" + id, "$storage", "type:uint8", 0) };
             types.Add(new(Payload(id), "struct", "memory", fields, null, null, 0, 1));
             types.Add(new(id, "managed_ref", "i64", Array.Empty<GuestField>(), Payload(id), null, 8, 8));
         }
-        if (Types(document).Count == 0) return;
+        if (Types(document).Count == 0) return true;
         types.Add(new("type:object", "managed_ref", "i64", Array.Empty<GuestField>(), null, null, 8, 8));
         if (types.All(type => type.Id != "type:bool")) types.Add(new("type:bool", "scalar", "i32", Array.Empty<GuestField>(), null, null, 4, 4));
         if (types.All(type => type.Id != "type:void")) types.Add(new("type:void", "void", "none", Array.Empty<GuestField>(), null, null, 0, 1));
+        return true;
+    }
+
+    public static bool IsClosedImplicitConstructor(SemanticDocument document,
+        string? closedTypeId, SemanticCallable constructor)
+    {
+        if (closedTypeId is null || constructor.HasBody || constructor.Parameters.Count != 0
+            || !Plans.GetValue(document, Analyze).Layouts.TryGetValue(closedTypeId, out Layout? layout)
+            || layout.DefinitionTypeId == closedTypeId
+            || constructor.ContainingTypeId != layout.DefinitionTypeId)
+            return false;
+        return document.ClassTypes.Any(type => type.TypeId == closedTypeId
+            && type.HasImplicitDefaultConstructor);
+    }
+
+    private static bool Eligible(SemanticClassType type) => type.IsSourceDeclared
+        && !type.IsStatic && !type.IsAbstract && !type.IsRecord && !type.HasPrimaryConstructor
+        && !type.HasInstanceInitializers && !type.HasStaticInitialization
+        && !type.HasImplicitInstanceStorage && !type.HasVirtualMembers && !type.HasFinalizer
+        && type.BaseTypeId == "type:object" && type.InterfaceTypeIds.Count == 0;
+
+    private static bool IsClosed(string typeId,
+        IReadOnlyDictionary<string, SemanticType> types,
+        IReadOnlyDictionary<string, SemanticTypeShape> shapes,
+        HashSet<string> visiting)
+    {
+        if (!types.TryGetValue(typeId, out SemanticType? type)
+            || type.Kind == "type_parameter" || !visiting.Add(typeId))
+            return false;
+        if (!shapes.TryGetValue(typeId, out SemanticTypeShape? shape)) return true;
+        if (shape.ElementTypeId is { } elementId
+            && !IsClosed(elementId, types, shapes, new HashSet<string>(visiting, StringComparer.Ordinal)))
+            return false;
+        return shape.GenericArgumentTypeIds?.All(id => IsClosed(id, types, shapes,
+            new HashSet<string>(visiting, StringComparer.Ordinal))) != false;
     }
 
     public static bool IsField(CSharpFunctionLoweringContext context, SemanticOperation operation) =>
