@@ -90,6 +90,13 @@ public partial class Projectile : AvidActor
         ActivationCount += burstCount;
     }
 
+    [UFunction(BlueprintCallable = true, Category = "Projectile")]
+    public async void SetLaunchSpeedNextTick(float speed)
+    {
+        await AvidContinuations.NextTickAsync();
+        LaunchSpeed = speed;
+    }
+
     [UFunction(Server = true, Reliable = true)]
     public void ServerSubmitDamage(float submittedDamage)
     {

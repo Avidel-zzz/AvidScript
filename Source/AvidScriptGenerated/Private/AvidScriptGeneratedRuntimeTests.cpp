@@ -9,6 +9,7 @@
 #include "Interfaces/IPluginManager.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Paths.h"
+#include "AvidScriptRuntimeSession.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeRuntimeHost.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeRouter.h"
 #include "UObject/StrongObjectPtr.h"
@@ -216,6 +217,79 @@ bool FAvidScriptGeneratedCSharpPropertyInteractionTest::RunTest(
 	TestEqual(TEXT("C# float return observes new UE property"), Projectile->GetLaunchSpeed(), 900.0f);
 	TestEqual(TEXT("C# ConfigureLaunch updates existing UE property"), Projectile->ActivationCount, 5);
 	TestFalse(TEXT("C# ConfigureLaunch writes bool parameter"), Projectile->IsActive);
+
+	DestroyGeneratedScriptWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptGeneratedCSharpAsyncUFunctionTest,
+	"AvidScript.GeneratedTypes.CSharpAsyncUFunction",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptGeneratedCSharpAsyncUFunctionTest::RunTest(const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	UWorld* World = nullptr;
+	if (!CreateGeneratedScriptWorld(World))
+	{
+		AddError(TEXT("Failed to create the generated async UFUNCTION test world."));
+		return true;
+	}
+
+	AProjectile* const Retiring = World->SpawnActor<AProjectile>();
+	AProjectile* const Survivor = World->SpawnActor<AProjectile>();
+	if (!TestNotNull(TEXT("Async owner spawns from generated C# class"), Retiring)
+		|| !TestNotNull(TEXT("Async peer spawns from generated C# class"), Survivor))
+	{
+		DestroyGeneratedScriptWorld(World);
+		return true;
+	}
+	const FURL Url;
+	World->InitializeActorsForPlay(Url);
+	World->BeginPlay();
+	World->SetBegunPlay(true);
+	if (!Retiring->HasActorBegunPlay()) Retiring->DispatchBeginPlay();
+	if (!Survivor->HasActorBegunPlay()) Survivor->DispatchBeginPlay();
+
+	FAvidScriptGeneratedTypeRuntimeHost& Host = FAvidScriptGeneratedTypeRuntimeHost::Get();
+	FAvidScriptRuntimeSession* const RetiringSession = Host.GetInstanceSessionForTesting(*Retiring);
+	FAvidScriptRuntimeSession* const SurvivorSession = Host.GetInstanceSessionForTesting(*Survivor);
+	if (!TestNotNull(TEXT("Async owner has a generated Session"), RetiringSession)
+		|| !TestNotNull(TEXT("Async peer has a generated Session"), SurvivorSession))
+	{
+		DestroyGeneratedScriptWorld(World);
+		return true;
+	}
+	TestTrue(TEXT("Async owners share their package Runtime"),
+		RetiringSession->GetLiveRuntimeForTesting() == SurvivorSession->GetLiveRuntimeForTesting());
+	Retiring->SetLaunchSpeedNextTick(700.0f);
+	Survivor->SetLaunchSpeedNextTick(900.0f);
+	TestEqual(TEXT("Generated UFUNCTION suspends the retiring owner"),
+		RetiringSession->GetLivePendingContinuationCount(), 1);
+	TestEqual(TEXT("Generated UFUNCTION suspends the surviving peer"),
+		SurvivorSession->GetLivePendingContinuationCount(), 1);
+	TestEqual(TEXT("Await has not written the retiring property early"), Retiring->LaunchSpeed, 1200.0f);
+	TestEqual(TEXT("Await has not written the surviving property early"), Survivor->LaunchSpeed, 1200.0f);
+
+	TestTrue(TEXT("Destroying generated owner runs EndPlay"), Retiring->Destroy());
+	TestFalse(TEXT("Destroyed owner has no active generated Session"), Host.IsInstanceActive(*Retiring));
+	for (int32 Attempt = 0; Attempt < 4 && Survivor->LaunchSpeed == 1200.0f; ++Attempt)
+	{
+		World->Tick(LEVELTICK_All, 0.02f);
+		++GFrameCounter;
+		FAvidScriptWasmSmokeResult TickResult;
+		if (!SurvivorSession->TickLive(0.001f, TickResult))
+		{
+			AddError(TickResult.ErrorMessage);
+			break;
+		}
+	}
+	TestEqual(TEXT("Retired async owner cannot resume into its property"), Retiring->LaunchSpeed, 1200.0f);
+	TestEqual(TEXT("Surviving C# async method restores its float argument and this"),
+		Survivor->LaunchSpeed, 900.0f);
+	TestEqual(TEXT("Surviving async method consumes its continuation"),
+		SurvivorSession->GetLivePendingContinuationCount(), 0);
 
 	DestroyGeneratedScriptWorld(World);
 	return true;

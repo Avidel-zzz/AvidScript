@@ -114,6 +114,8 @@ public static async void BeginPlay()
 
 还可以等待下一帧（`NextTickAsync()`）或资源加载（`AvidAssets.LoadObjectAsync(...)`）。文档中的 **continuation** 指“等待完成后继续执行的那段代码”；**Latent** 是 UE 对这类延迟完成操作的称呼。资源加载写法见[生命周期样例](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)，主动取消见[延迟操作样例](Samples/CSharp/LatentGameplay/README.md)。
 
+用 C# 新定义的 UE Actor 也可以在 `[UFunction] async void` 方法里等待下一帧：从蓝图或原生代码调用后，方法暂时返回，下一帧再修改该 Actor 的属性；对象在等待期间销毁则取消恢复。见[生成类型样例](Samples/CSharp/ScriptDefinedTypes/README.md)。
+
 ### 🧱 用 C# 定义蓝图可用的 Actor
 
 ```csharp
