@@ -1,12 +1,26 @@
-![AvidScript：用 C# 驱动 Unreal Engine 游戏对象的概念插画](Docs/Assets/README/avidscript-hero.png)
+<p align="center">
+  <img src="Docs/Assets/README/avidscript-hero.png" alt="AvidScript：用 C# 驱动 Unreal Engine 游戏对象的概念插画" width="100%">
+</p>
 
-# AvidScript
+<h1 align="center">AvidScript</h1>
 
-**用 C# 为 Unreal Engine 编写玩法脚本。**
+<p align="center"><strong>用 C# 为 Unreal Engine 编写玩法脚本。</strong></p>
 
-![UE 5.8 · C# · WebAssembly · Windows x64 · 0.1.0 Preview · MIT](Docs/Assets/README/project-badges.png)
+<p align="center">
+  <img src="https://img.shields.io/badge/Unreal%20Engine-5.8-172A34?logo=unrealengine&amp;logoColor=white" alt="Unreal Engine 5.8">
+  <img src="https://img.shields.io/badge/Language-C%23-512BD4?logo=dotnet&amp;logoColor=white" alt="C#">
+  <img src="https://img.shields.io/badge/Target-WebAssembly-5541A9?logo=webassembly&amp;logoColor=white" alt="WebAssembly">
+  <img src="https://img.shields.io/badge/Platform-Windows%20x64-0967A6?logo=windows&amp;logoColor=white" alt="Windows x64">
+  <img src="https://img.shields.io/badge/Status-0.1.0%20Preview-805413" alt="0.1.0 开发预览版">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-226342" alt="MIT License"></a>
+</p>
 
-[🚀 快速开始](#快速开始) · [🧩 代码示例](#常见用法) · [🚧 当前限制](#当前边界) · [📚 更多文档](#进一步阅读)
+<p align="center">
+  <a href="#快速开始">🚀 快速开始</a> ·
+  <a href="#常见用法">🧩 代码示例</a> ·
+  <a href="#当前边界">🚧 当前限制</a> ·
+  <a href="#进一步阅读">📚 更多文档</a>
+</p>
 
 ---
 
