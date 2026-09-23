@@ -182,8 +182,28 @@ internal static class CSharpGuestEventStateTests
             {
                 public static int Count;
                 public static int Result;
+                public static int SourceEvaluations;
+                public static int HandlerEvaluations;
+                [AvidTransient] public static AvidSubscription Subscription;
                 static void Handle(AActor actor, int amount, float scale) { Count += amount; }
+                static AAvidScriptEditorDelegateEventTestActor GetSource()
+                {
+                    SourceEvaluations++;
+                    return UE.Self;
+                }
+                static AvidEventHandlers.OnScriptSignal GetHandler()
+                {
+                    HandlerEvaluations++;
+                    return Handle;
+                }
                 static void Other(AActor actor, int amount, float scale) { Count += 100; }
+                static void Explicit(AActor actor, int amount, float scale) { Count += 1000; }
+                static void AddDuringCallback(AActor actor, int amount, float scale)
+                {
+                    Count += amount;
+                    UE.Self.OnScriptSignal += Other;
+                    UE.Self.OnScriptSignal -= AddDuringCallback;
+                }
                 static void OnRefOut(ref int value, out int doubled)
                 {
                     Count++;
@@ -251,6 +271,19 @@ internal static class CSharpGuestEventStateTests
                         UE.Self.OnSinglecastSignal += OnSinglecastFirst;
                         UE.Self.OnSinglecastSignal += OnSinglecastLast;
                     }
+                    if (delta == 12.0f) UE.Self.OnScriptSignal += AddDuringCallback;
+                    if (delta == 13.0f) UE.Self.OnScriptSignal -= Other;
+                    if (delta == 14.0f) Subscription = AvidSubscriptions.SubscribeOnScriptSignal(UE.Self, Explicit);
+                    if (delta == 15.0f) UE.Self.OnScriptSignal += Handle;
+                    if (delta == 16.0f) UE.Self.OnScriptSignal -= Handle;
+                    if (delta == 17.0f) Subscription.Cancel();
+                    if (delta == 18.0f) GetSource().OnScriptSignal += GetHandler();
+                    if (delta == 19.0f)
+                    {
+                        AAvidScriptEditorDelegateEventTestActor invalid = default;
+                        invalid.OnScriptSignal += Handle;
+                    }
+                    if (delta == 20.0f) GetSource().OnScriptSignal -= GetHandler();
                 }
             }
             """;

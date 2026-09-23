@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 #include "AvidScriptRuntimeSession.h"
 #include "AvidScriptBindingInvocation.h"
+#include "Lifecycle/AvidScriptRuntimeLifecycleCoordinator.h"
 #include "Memory/AvidScriptManagedHeap.h"
 #include "Dom/JsonObject.h"
 #include "Engine/Engine.h"
@@ -214,7 +215,7 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
             && Event.Signature.MulticastProperty->GetFName() == TEXT("OnScriptSignal");
     });
     if (!TestNotNull(TEXT("Selected generated event is in the native catalog"), Signal)) return false;
-    uint32 CountAddress = 0, ResultAddress = 0;
+    uint32 CountAddress = 0, ResultAddress = 0, SourceEvaluationsAddress = 0, HandlerEvaluationsAddress = 0;
     for (const auto& Value : Guest->GetObjectField(TEXT("memory_layout"))->GetArrayField(TEXT("state_slots")))
     {
         auto Slot = Value->AsObject();
@@ -222,8 +223,13 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
             CountAddress = Slot->GetIntegerField(TEXT("offset"));
         if (Slot->GetStringField(TEXT("global_id")).Contains(TEXT("::Script.Result:")))
             ResultAddress = Slot->GetIntegerField(TEXT("offset"));
+        if (Slot->GetStringField(TEXT("global_id")).Contains(TEXT("::Script.SourceEvaluations:")))
+            SourceEvaluationsAddress = Slot->GetIntegerField(TEXT("offset"));
+        if (Slot->GetStringField(TEXT("global_id")).Contains(TEXT("::Script.HandlerEvaluations:")))
+            HandlerEvaluationsAddress = Slot->GetIntegerField(TEXT("offset"));
     }
-    if (!TestTrue(TEXT("Compiler exposes event callback state"), CountAddress > 0 && ResultAddress > 0)) return false;
+    if (!TestTrue(TEXT("Compiler exposes event callback state"), CountAddress > 0 && ResultAddress > 0
+        && SourceEvaluationsAddress > 0 && HandlerEvaluationsAddress > 0)) return false;
     if (!GEngine) return false;
     UWorld* World = UWorld::CreateWorld(EWorldType::Game, false, TEXT("AvidScriptCSharpEventLanguage"));
     if (!World) return false;
@@ -254,6 +260,21 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
         {
             auto Import = Value->AsObject();
             Manifest.RequiredImports.Add({ Import->GetStringField(TEXT("module")), Import->GetStringField(TEXT("name")) });
+        }
+        {
+            FAvidScriptRuntimeSession InvalidSession;
+            InvalidSession.SetBackendSelectionForTesting(Selection);
+            InvalidSession.SetHostContext(Context);
+            FAvidScriptWasmReloadResult InvalidLoaded;
+            if (!InvalidSession.LoadInitialModule(Bytes.GetData(), Bytes.Num(), Manifest, InvalidLoaded))
+            { AddError(InvalidLoaded.ErrorMessage); return false; }
+            auto* InvalidRuntime = InvalidSession.GetLiveRuntimeForTesting();
+            FAvidScriptWasmSmokeResult InvalidResult;
+            TestFalse(TEXT("Default event proxy rejects subscription"), InvalidRuntime->Tick(19.0f, InvalidResult));
+            TestTrue(TEXT("Invalid source reports event-language source failure"),
+                InvalidResult.ErrorMessage.Contains(TEXT("event_language_source")));
+            TestEqual(TEXT("Invalid source publishes no bridge"), InvalidSession.GetDelegateSubscriptionCountForTesting(), 0);
+            if (InvalidSession.IsLiveLoaded()) InvalidSession.StopAndUnload(InvalidResult);
         }
         FAvidScriptWasmReloadResult Loaded;
         if (!Session.LoadInitialModule(Bytes.GetData(), Bytes.Num(), Manifest, Loaded))
@@ -406,10 +427,73 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
         { AddError(Error); return false; }
         TestEqual(TEXT("Language singlecast executes both handlers"), Count, 19);
         TestEqual(TEXT("Language singlecast retains shared state"), CapturedResult, 47);
-        Session.UnbindDelegateSubscriptionsForTesting();
-        TestTrue(TEXT("Final language event collection"), Heap.Collect() == EHeapError::Ok);
-        TestEqual(TEXT("Language event releases managed objects"), Heap.GetStats().LiveObjects, 0u);
-        Session.StopAndUnload(Result);
+
+        if (!Runtime->Tick(12.0f, Result)) { AddError(Result.ErrorMessage); return false; }
+        TestEqual(TEXT("Mutation callback creates one language bridge"), Session.GetDelegateSubscriptionCountForTesting(), 3);
+        BroadcastSignal();
+        if (!ReadInt(CountAddress, Count)) { AddError(Error); return false; }
+        TestEqual(TEXT("Handler added during dispatch waits until next event"), Count, 21);
+        TestEqual(TEXT("In-callback replacement keeps one language bridge"), Session.GetDelegateSubscriptionCountForTesting(), 3);
+        BroadcastSignal();
+        if (!ReadInt(CountAddress, Count)) { AddError(Error); return false; }
+        TestEqual(TEXT("Next event observes replacement handler"), Count, 121);
+        if (!Runtime->Tick(13.0f, Result)) { AddError(Result.ErrorMessage); return false; }
+        TestEqual(TEXT("Removing callback-added handler releases language bridge"), Session.GetDelegateSubscriptionCountForTesting(), 2);
+
+        if (!Runtime->Tick(14.0f, Result)) { AddError(Result.ErrorMessage); return false; }
+        TestEqual(TEXT("Explicit token subscribes beside other language events"), Session.GetDelegateSubscriptionCountForTesting(), 3);
+        if (!Runtime->Tick(15.0f, Result)) { AddError(Result.ErrorMessage); return false; }
+        TestEqual(TEXT("Same-signal language event coexists with explicit token"), Session.GetDelegateSubscriptionCountForTesting(), 4);
+        BroadcastSignal();
+        if (!ReadInt(CountAddress, Count)) { AddError(Error); return false; }
+        TestEqual(TEXT("Explicit and language handlers both receive event"), Count, 1123);
+        if (!Runtime->Tick(16.0f, Result)) { AddError(Result.ErrorMessage); return false; }
+        TestEqual(TEXT("Language removal leaves explicit token bound"), Session.GetDelegateSubscriptionCountForTesting(), 3);
+        BroadcastSignal();
+        if (!ReadInt(CountAddress, Count)) { AddError(Error); return false; }
+        TestEqual(TEXT("Explicit handler survives language removal"), Count, 2123);
+        if (!Runtime->Tick(17.0f, Result)) { AddError(Result.ErrorMessage); return false; }
+        TestEqual(TEXT("Explicit cancellation leaves other language events bound"), Session.GetDelegateSubscriptionCountForTesting(), 2);
+        BroadcastSignal();
+        if (!ReadInt(CountAddress, Count)) { AddError(Error); return false; }
+        TestEqual(TEXT("Cancelled explicit handler no longer runs"), Count, 2123);
+        if (!Runtime->Tick(18.0f, Result)) { AddError(Result.ErrorMessage); return false; }
+        TestEqual(TEXT("Computed event source adds one language bridge"), Session.GetDelegateSubscriptionCountForTesting(), 3);
+        int32 SourceEvaluations = 0, HandlerEvaluations = 0;
+        if (!ReadInt(SourceEvaluationsAddress, SourceEvaluations)
+            || !ReadInt(HandlerEvaluationsAddress, HandlerEvaluations)) { AddError(Error); return false; }
+        TestEqual(TEXT("Event add evaluates source once"), SourceEvaluations, 1);
+        TestEqual(TEXT("Event add evaluates handler once"), HandlerEvaluations, 1);
+        BroadcastSignal();
+        if (!ReadInt(CountAddress, Count)) { AddError(Error); return false; }
+        TestEqual(TEXT("Computed event source binds correct Actor"), Count, 2125);
+        if (!Runtime->Tick(20.0f, Result)) { AddError(Result.ErrorMessage); return false; }
+        TestEqual(TEXT("Computed event removal leaves other events"), Session.GetDelegateSubscriptionCountForTesting(), 2);
+        if (!ReadInt(SourceEvaluationsAddress, SourceEvaluations)
+            || !ReadInt(HandlerEvaluationsAddress, HandlerEvaluations)) { AddError(Error); return false; }
+        TestEqual(TEXT("Event remove evaluates source once"), SourceEvaluations, 2);
+        TestEqual(TEXT("Event remove evaluates handler once"), HandlerEvaluations, 2);
+        BroadcastSignal();
+        if (!ReadInt(CountAddress, Count)) { AddError(Error); return false; }
+        TestEqual(TEXT("Computed event removal stops callback"), Count, 2125);
+        TestTrue(TEXT("Collect after independent event cancellations"), Heap.Collect() == EHeapError::Ok);
+        TestEqual(TEXT("Only ref/out and singlecast roots remain"), Heap.GetStats().LiveRoots, 2u);
+        if (Backend == EAvidScriptVmBackendKind::Wasmtime)
+        {
+            if (!TestTrue(TEXT("Session teardown succeeds with active language events"), Session.StopAndUnload(Result))) return false;
+        }
+        else
+        {
+            FAvidScriptRuntimeLifecycleCoordinator::Get().CleanupWorldForTesting(*World);
+            TestTrue(TEXT("World teardown invalidates language event Session"), Session.GetSnapshot().bLifecycleInvalidated);
+        }
+        TestEqual(TEXT("Owner teardown cancels all language bridges"), Session.GetDelegateSubscriptionCountForTesting(), 0);
+        TestFalse(TEXT("Owner teardown unbinds signal"), SignalEvent->Signature.MulticastProperty->GetMulticastDelegate(
+            SignalEvent->Signature.MulticastProperty->ContainerPtrToValuePtr<void>(Owner))->IsBound());
+        TestFalse(TEXT("Owner teardown unbinds ref/out"), RefOutEvent->Signature.MulticastProperty->GetMulticastDelegate(
+            RefOutEvent->Signature.MulticastProperty->ContainerPtrToValuePtr<void>(Owner))->IsBound());
+        TestFalse(TEXT("Owner teardown unbinds singlecast"), SinglecastEvent->Signature.SinglecastProperty
+            ->GetPropertyValuePtr_InContainer(Owner)->IsBound());
         Owner->Destroy();
     }
     return true;
