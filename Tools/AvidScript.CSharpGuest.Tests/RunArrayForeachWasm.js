@@ -13,6 +13,7 @@ const cases = [
     ['array-foreach-branches.wasm', 'array_foreach_branches', 107],
     ['array-foreach-nested-return.wasm', 'array_foreach_nested_return', 117],
     ['array-foreach-reference.wasm', 'array_foreach_reference', 6],
+    ['array-foreach-finally.wasm', 'array_foreach_finally', 26],
 ];
 
 for (const [fileName, exportName, expected] of cases) {

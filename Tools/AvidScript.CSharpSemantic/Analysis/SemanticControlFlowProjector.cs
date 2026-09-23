@@ -106,7 +106,7 @@ internal static class SemanticControlFlowProjector
                     {
                         diagnostics.Add(CreateDiagnostic(
                             "ASCS3004",
-                            $"Array foreach contains unsupported lowered operations: {string.Join(", ", unsupportedArrayKinds)}.",
+                            $"Structured flow contains unsupported lowered operations: {string.Join(", ", unsupportedArrayKinds)}.",
                             bodySpan));
                         continue;
                     }

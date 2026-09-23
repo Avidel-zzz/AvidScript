@@ -7,9 +7,8 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace AvidScript.CSharpSemantic;
 
-// Roslyn's general CFG expresses even array foreach through an enumerator and
-// a finally region. This projector reuses the controlled async array iteration
-// plan, then publishes ordinary, synchronous basic blocks for Guest lowering.
+// Roslyn's general CFG expresses array foreach and try/finally through exception
+// regions. Reuse the structured flow planner to publish synchronous basic blocks.
 internal static class SemanticArrayForEachControlFlowProjector
 {
     public static bool IsCandidate(
@@ -25,7 +24,10 @@ internal static class SemanticArrayForEachControlFlowProjector
             .OfType<ForEachStatementSyntax>()
             .Where(loop => IsOwnedBy(loop, body.Declaration))
             .ToArray();
-        if (loops.Length == 0 || block.DescendantNodes()
+        bool hasFinally = block.DescendantNodes().OfType<TryStatementSyntax>()
+            .Any(statement => IsOwnedBy(statement, body.Declaration)
+                && statement.Finally is not null && statement.Catches.Count == 0);
+        if ((!hasFinally && loops.Length == 0) || block.DescendantNodes()
             .OfType<ForEachVariableStatementSyntax>()
             .Any(loop => IsOwnedBy(loop, body.Declaration)))
         {
@@ -79,7 +81,7 @@ internal static class SemanticArrayForEachControlFlowProjector
 
         if (nextCallbackId != 0 || flow!.Segments.Any(segment => segment.AwaitSite is not null))
         {
-            diagnostics.Add(Error(body, "A synchronous array foreach cannot contain an await site."));
+            diagnostics.Add(Error(body, "Synchronous structured flow cannot contain an await site."));
             return false;
         }
 
@@ -94,7 +96,7 @@ internal static class SemanticArrayForEachControlFlowProjector
                 if (!TryAddStatement(statement, operations))
                 {
                     diagnostics.Add(Error(body,
-                        $"Array foreach contains a statement that cannot be lowered as synchronous control flow: {statement.Operation.Kind}."));
+                        $"Structured flow contains a statement that cannot be lowered as synchronous control flow: {statement.Operation.Kind}."));
                     return false;
                 }
             }
@@ -102,7 +104,7 @@ internal static class SemanticArrayForEachControlFlowProjector
             SemanticAsyncControlTransfer? transfer = segment.Transfer;
             if (transfer is null)
             {
-                diagnostics.Add(Error(body, "Array foreach has no control-flow transfer."));
+                diagnostics.Add(Error(body, "Structured flow has no control-flow transfer."));
                 return false;
             }
             SemanticOperation? branchValue = null;
@@ -124,7 +126,7 @@ internal static class SemanticArrayForEachControlFlowProjector
                     edges.Add(new(segment.Ordinal, exitOrdinal, "fallthrough", "return"));
                     break;
                 default:
-                    diagnostics.Add(Error(body, $"Array foreach has unsupported transfer '{transfer.Kind}'."));
+                    diagnostics.Add(Error(body, $"Structured flow has unsupported transfer '{transfer.Kind}'."));
                     return false;
             }
 

@@ -124,6 +124,7 @@ internal static class SemanticOperationProjector
             IMethodBodyOperation => ("method_body", true),
             IConstructorBodyOperation => ("constructor_body", true),
             IBlockOperation => ("block", true),
+            ITryOperation => ("try", true),
             IExpressionStatementOperation => ("expression_statement", true),
             IVariableDeclarationGroupOperation => ("variable_declaration_group", true),
             IVariableDeclarationOperation => ("variable_declaration", true),

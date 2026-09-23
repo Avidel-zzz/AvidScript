@@ -8,7 +8,7 @@ namespace AvidScript.CSharpSemantic;
 public static class SemanticContract
 {
     public const int CurrentSchemaVersion = 31;
-    public const string CurrentSemanticVersion = "1.38";
+    public const string CurrentSemanticVersion = "1.39";
 
     public static string GenericInstanceId(string definitionId, IReadOnlyList<string> arguments)
     {
@@ -20,5 +20,5 @@ public static class SemanticContract
     public static bool IsCurrentOrPrevious(int schemaVersion, string semanticVersion) =>
         (schemaVersion == 30 && semanticVersion is "1.34" or "1.35" or "1.36")
         || (schemaVersion == CurrentSchemaVersion
-            && semanticVersion is ("1.37" or CurrentSemanticVersion));
+            && semanticVersion is ("1.37" or "1.38" or CurrentSemanticVersion));
 }

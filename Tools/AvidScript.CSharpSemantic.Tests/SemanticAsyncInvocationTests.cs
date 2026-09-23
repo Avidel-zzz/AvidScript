@@ -38,7 +38,7 @@ internal static class SemanticAsyncInvocationTests
             """;
         SemanticDocument document = Analyze(source);
         Check(document.Succeeded, string.Join(" | ", document.Diagnostics.Select(item => item.Message)));
-        Check(document.SchemaVersion == 31 && document.SemanticVersion == "1.38", "async callable invocation is versioned");
+        Check(document.SchemaVersion == 31 && document.SemanticVersion == "1.39", "async callable invocation is versioned");
         Check(SemanticClosureContractValidator.IsValid(document), "complete invocation, lexical scope and closure contracts validate");
         Check(document.AsyncMethods.Count == 4 && document.AsyncMethods.All(method => method.ExportName is null
             && method.Lowering == SemanticAsyncMethod.ContinuationCfgLowering), "member calls have no invented WASM export and use resumable CFG");

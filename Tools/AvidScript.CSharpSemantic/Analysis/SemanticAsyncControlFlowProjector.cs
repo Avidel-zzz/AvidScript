@@ -55,6 +55,9 @@ internal static class SemanticAsyncControlFlowProjector
         private readonly List<SemanticAsyncCompilerLocal> compilerLocals = new();
         private readonly List<(SyntaxNode Node, string Kind, int[] Drafts)> scopes = new();
         private SyntaxNode declaration = null!;
+        private string returnTypeId = "type:void";
+        private string? returnValueSymbolId;
+        private int returnCleanupTarget = -1;
         private int structuredNodeCount;
         private bool failed;
 
@@ -80,6 +83,10 @@ internal static class SemanticAsyncControlFlowProjector
             out SemanticAsyncControlFlowProjection? projected)
         {
             declaration = body.Parent!;
+            if (SemanticExecutableBodyResolver.GetMethodSymbol(declaration, semanticModel) is { } method)
+            {
+                returnTypeId = typeRegistry.Register(method.ReturnType);
+            }
             int exit = AddDraft(
                 body.CloseBraceToken.Span,
                 Array.Empty<SemanticAsyncStatement>(),
@@ -266,6 +273,9 @@ internal static class SemanticAsyncControlFlowProjector
                 case ForEachStatementSyntax loop:
                     return BuildForEach(loop, successor, targets, depth);
 
+                case TryStatementSyntax tryStatement:
+                    return BuildTryFinally(tryStatement, successor, targets, depth);
+
                 case ForEachVariableStatementSyntax loop:
                     return Reject(
                         "Controlled async foreach does not support deconstruction variables.",
@@ -294,6 +304,10 @@ internal static class SemanticAsyncControlFlowProjector
                     return AddGoto(statement.Span, targets.ContinueTarget);
 
                 case ReturnStatementSyntax { Expression: null }:
+                    if (returnCleanupTarget >= 0)
+                    {
+                        return AddGoto(statement.Span, returnCleanupTarget);
+                    }
                     return AddDraft(
                         statement.Span,
                         Array.Empty<SemanticAsyncStatement>(),
@@ -308,6 +322,24 @@ internal static class SemanticAsyncControlFlowProjector
                     if (!TryProjectValue(valueReturn.Expression, out SemanticOperation? returnValue))
                     {
                         return -1;
+                    }
+                    if (returnCleanupTarget >= 0)
+                    {
+                        if (returnValue!.TypeId != returnTypeId)
+                        {
+                            return Reject(
+                                "A return crossing finally requires an exact result type.",
+                                valueReturn.Expression.Span);
+                        }
+                        return AddDraft(
+                            valueReturn.Span,
+                            new[] { new SemanticAsyncStatement(returnValue, EnsureReturnValueLocal(valueReturn.Span)) },
+                            null,
+                            new DraftTransfer(
+                                SemanticAsyncMethod.GotoTransferKind,
+                                null,
+                                returnCleanupTarget,
+                                -1));
                     }
                     return AddDraft(
                         valueReturn.Span,
@@ -360,6 +392,70 @@ internal static class SemanticAsyncControlFlowProjector
                     null,
                     successor,
                     -1));
+        }
+
+        private int BuildTryFinally(
+            TryStatementSyntax statement,
+            int successor,
+            LoopTargets targets,
+            int depth)
+        {
+            if (!allowValueReturns || statement.Catches.Count != 0 || statement.Finally is null)
+            {
+                return Reject(
+                    "Structured cleanup requires a synchronous try/finally without catch clauses.",
+                    statement.Span,
+                    "ASCS5420");
+            }
+            if (statement.DescendantNodes().OfType<AwaitExpressionSyntax>().Any())
+            {
+                return Reject(
+                    "Await inside try/finally requires a suspended cleanup owner.",
+                    statement.Span,
+                    "ASCS5420");
+            }
+
+            BlockSyntax cleanup = statement.Finally.Block;
+            int normalCleanup = BuildStatement(cleanup, successor, LoopTargets.None, depth + 1);
+            if (normalCleanup < 0) return -1;
+
+            int returnContinuation = returnCleanupTarget;
+            if (returnContinuation < 0)
+            {
+                SemanticOperation? value = returnTypeId == "type:void" ? null
+                    : CreateValueOperation("local_reference", returnTypeId,
+                        EnsureReturnValueLocal(statement.Span), statement.Span);
+                returnContinuation = AddDraft(statement.Span,
+                    Array.Empty<SemanticAsyncStatement>(), null,
+                    new DraftTransfer(SemanticAsyncMethod.ReturnTransferKind, value, -1, -1));
+                if (returnContinuation < 0) return -1;
+            }
+            int returnCleanup = BuildStatement(cleanup, returnContinuation, LoopTargets.None, depth + 1);
+            if (returnCleanup < 0) return -1;
+
+            int breakCleanup = targets.BreakTarget < 0 ? -1
+                : BuildStatement(cleanup, targets.BreakTarget, LoopTargets.None, depth + 1);
+            if (targets.BreakTarget >= 0 && breakCleanup < 0) return -1;
+            int continueCleanup = targets.ContinueTarget < 0 ? -1
+                : BuildStatement(cleanup, targets.ContinueTarget, LoopTargets.None, depth + 1);
+            if (targets.ContinueTarget >= 0 && continueCleanup < 0) return -1;
+
+            int outerReturnCleanup = returnCleanupTarget;
+            returnCleanupTarget = returnCleanup;
+            int entry = BuildStatement(statement.Block, normalCleanup,
+                new LoopTargets(breakCleanup, continueCleanup), depth + 1);
+            returnCleanupTarget = outerReturnCleanup;
+            return entry;
+        }
+
+        private string EnsureReturnValueLocal(TextSpan span)
+        {
+            if (returnValueSymbolId is not null) return returnValueSymbolId;
+            returnValueSymbolId = $"symbol:compiler_local:{methodSymbolId}:finally_return";
+            compilerLocals.Add(new SemanticAsyncCompilerLocal(
+                returnValueSymbolId, "<finally_return>", returnTypeId,
+                SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, span)));
+            return returnValueSymbolId;
         }
 
         private int BuildIf(

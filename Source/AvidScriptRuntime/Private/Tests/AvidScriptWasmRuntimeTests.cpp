@@ -10,6 +10,8 @@
 #include "Engine/World.h"
 #include "Misc/EngineVersion.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "UObject/UObjectGlobals.h"
 
@@ -1632,6 +1634,52 @@ bool FAvidScriptWorldSubsystemLifecycleSmokeTest::RunTest(const FString& Paramet
 	}
 
 	DestroySmokeWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptRuntimeFinallyCleanupTest,
+	"AvidScript.Runtime.FinallyCleanup",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptRuntimeFinallyCleanupTest::RunTest(const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	const FString File = FPaths::Combine(FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptFinallyTests/GuestFixtures/finally-cleanup.wasm"));
+	TArray<uint8> Wasm;
+	if (!TestTrue(TEXT("Load current finally fixture; generate with Build/TestAvidScriptFinallyCleanup.ps1"),
+		FFileHelper::LoadFileToArray(Wasm, *File))) return false;
+	const int32 Expected[] = {21, 21, 11, 42, 13, 7};
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	{
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime
+			? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		Selection.bAllowFallback = false;
+		FAvidScriptWasmRuntimeInstance Runtime(Selection);
+		FAvidScriptWasmSmokeResult Result;
+		if (!TestTrue(TEXT("Finally fixture loads"),
+			Runtime.LoadModule(Wasm.GetData(), Wasm.Num(), TEXT("finally_cleanup"), Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		TestEqual(TEXT("Finally fixture uses requested backend"), Runtime.GetActiveBackendInfo().Kind, Backend);
+		TestEqual(TEXT("Finally fixture uses requested execution mode"),
+			Runtime.GetActiveBackendInfo().ExecutionMode, Selection.ExecutionMode);
+		if (!TestTrue(TEXT("Finally fixture executes BeginPlay"), Runtime.BeginPlay(Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		uint8 State[sizeof(Expected)]{};
+		FString Error;
+		if (!TestTrue(TEXT("Read finally results"), Runtime.ReadStateBytes(16, MakeArrayView(State), Error)))
+		{ AddError(Error); return false; }
+		for (int32 Index = 0; Index < UE_ARRAY_COUNT(Expected); ++Index)
+		{
+			const int32 Offset = Index * 4;
+			const int32 Actual = int32(uint32(State[Offset]) | (uint32(State[Offset + 1]) << 8)
+				| (uint32(State[Offset + 2]) << 16) | (uint32(State[Offset + 3]) << 24));
+			TestEqual(FString::Printf(TEXT("Finally state %d matches .NET"), Index), Actual, Expected[Index]);
+		}
+	}
 	return true;
 }
 

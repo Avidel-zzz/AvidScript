@@ -84,6 +84,12 @@ internal static class Program
                 Console.WriteLine($"AvidScript.CSharpGuest.Tests.GenericMethods: {focusedCount}/{focusedCount} passed");
                 return 0;
             }
+            if (args.Length == 1 && args[0] == "--finally")
+            {
+                int focusedCount = CSharpGuestFinallyTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.Finally: {focusedCount}/{focusedCount} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--generated-event-language")
             {
                 int focusedCount = CSharpGuestEventStateTests.RunGeneratedLanguageFacade();
@@ -110,6 +116,7 @@ internal static class Program
             }
             int count = CSharpGuestLoweringTests.Run()
                 + CSharpGuestGenericMethodTests.Run()
+                + CSharpGuestFinallyTests.Run()
                 + CSharpGuestOperationTests.Run()
                 + CSharpGuestAdvancedTests.Run()
                 + CSharpGuestFlowTests.Run()

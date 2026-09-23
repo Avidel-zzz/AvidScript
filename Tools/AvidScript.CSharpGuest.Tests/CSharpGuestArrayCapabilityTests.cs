@@ -21,7 +21,7 @@ internal static class CSharpGuestArrayCapabilityTests
         ArrayForeachRequiresCurrentSemanticContract();
         EnumeratorForeachRemainsRejected();
         CapturedIterationVariableRemainsRejected();
-        ArrayForeachDoesNotBypassExplicitFinally();
+        ArrayForeachExecutesExplicitFinally();
         return 11;
     }
 
@@ -204,7 +204,7 @@ internal static class CSharpGuestArrayCapabilityTests
         }
     }
 
-    private static void ArrayForeachDoesNotBypassExplicitFinally()
+    private static void ArrayForeachExecutesExplicitFinally()
     {
         const string source = """
             using System.Runtime.InteropServices;
@@ -229,9 +229,16 @@ internal static class CSharpGuestArrayCapabilityTests
         FrontendDocument frontend = FrontendAnalyzer.Analyze(source, "Scripts/ArrayForeachFinally.cs");
         SemanticDocument semantic = SemanticAnalyzer.Analyze(
             source, "Scripts/ArrayForeachFinally.cs", frontend.Source.Sha256);
-        Assert(frontend.Succeeded && !semantic.Succeeded
-            && semantic.Diagnostics.Any(diagnostic => diagnostic.Code.StartsWith("ASCS", StringComparison.Ordinal)),
-            "array foreach must not drop an explicit finally that the synchronous plan cannot execute");
+        Assert(frontend.Succeeded && semantic.Succeeded,
+            "array foreach and explicit finally must share the structured cleanup plan");
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(Lower(source));
+        Assert(wasm.Succeeded, "array foreach with explicit finally must compile to WASM");
+        string? outputDirectory = Environment.GetEnvironmentVariable("AVIDSCRIPT_ARRAY_FOREACH_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(outputDirectory))
+        {
+            Directory.CreateDirectory(outputDirectory);
+            File.WriteAllBytes(Path.Combine(outputDirectory, "array-foreach-finally.wasm"), wasm.Bytes);
+        }
     }
 
     private static void ExecutableReferenceSourceArrayForeachLowers()
@@ -296,7 +303,7 @@ internal static class CSharpGuestArrayCapabilityTests
         FrontendDocument frontend = FrontendAnalyzer.Analyze(source, "Scripts/ArrayForeachVersion.cs");
         SemanticDocument semantic = SemanticAnalyzer.Analyze(
             source, "Scripts/ArrayForeachVersion.cs", frontend.Source.Sha256);
-        Assert(semantic.Succeeded && semantic.SemanticVersion == "1.38"
+        Assert(semantic.Succeeded && semantic.SemanticVersion == "1.39"
             && semantic.Symbols.Any(symbol => symbol.Id.StartsWith(
                 "symbol:compiler_local:", StringComparison.Ordinal)),
             "array foreach should advertise the versioned synchronous iteration plan");

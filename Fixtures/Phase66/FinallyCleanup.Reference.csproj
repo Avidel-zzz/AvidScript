@@ -7,7 +7,7 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="GenericMethods.cs" />
-    <Compile Include="GenericMethods.Reference.cs" />
+    <Compile Include="FinallyCleanup.cs" />
+    <Compile Include="FinallyCleanup.Reference.cs" />
   </ItemGroup>
 </Project>

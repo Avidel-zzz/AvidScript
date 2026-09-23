@@ -92,12 +92,14 @@ public partial class Projectile : AvidActor
 
 | 范围 | 当前状态 |
 | --- | --- |
-| C# | 常用控制流、数组、受支持的类/结构体、lambda、局部函数、封闭泛型方法与简单泛型类的同步成员；[泛型样例](Fixtures/Phase66/GenericMethods.cs) |
+| C# | 常用控制流、数组、受支持的类/结构体、lambda、局部函数、封闭泛型方法与简单泛型类的同步成员；无 `catch` 的同步 `try/finally` 支持正常结束、`return`、`break` 和 `continue`；[泛型样例](Fixtures/Phase66/GenericMethods.cs) · [清理样例](Fixtures/Phase66/FinallyCleanup.cs) |
 | 异步 | 下一帧、计时器、资源加载、部分 UE Latent API；不支持任意 `Task` 或自定义 awaiter |
 | UE | 生成的 API 绑定、脚本定义的 UE 类型，以及 RPC/复制属性/RepNotify 的聚焦测试；真实网络玩法仍待验收 |
 | 工具与平台 | 错误定位、部分调试与热重载、Windows 打包样例；Android 真机和 iOS 尚未验收 |
 
 完整进度见 [P66 实施计划](Docs/Phase66/P66.1_Implementation_Plan.md)。性能数据和测试配置见[性能报告](Docs/Phase65/P65.D34_Production_Epoch_Runtime.md)；现有结果不能代表整体领先 Puerts 或 Unreal AngelScript。
+
+同步 `try/finally` 尚不支持 `catch`、`throw`、跨 `await` 清理或普通枚举器的 `Dispose`；边界和可复现测试见 [P66.C 执行计划](Docs/Phase66/P66.C_Language_Execution_Plan.md)。
 
 ## 仓库结构与文档
 

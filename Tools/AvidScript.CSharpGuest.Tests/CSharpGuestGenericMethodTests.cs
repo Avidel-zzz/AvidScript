@@ -22,7 +22,7 @@ internal static class CSharpGuestGenericMethodTests
     {
         string source = File.ReadAllText(FindFixture());
         SemanticDocument semantic = Analyze(source);
-        Check(semantic.Succeeded && semantic.SemanticVersion == "1.38",
+        Check(semantic.Succeeded && semantic.SemanticVersion == "1.39",
             "closed generic source should publish the current semantic contract");
         SemanticCallable[] instances = semantic.Callables
             .Where(callable => callable.GenericDefinitionSymbolId is not null).ToArray();
@@ -84,6 +84,10 @@ internal static class CSharpGuestGenericMethodTests
             semantic with { SemanticVersion = "1.37" },
             new string('a', 64)).Succeeded,
             "schema 31 / semantic 1.37 closed method artifacts must remain readable");
+        Check(CSharpGuestLowerer.Lower(
+            semantic with { SemanticVersion = "1.38" },
+            new string('a', 64)).Succeeded,
+            "schema 31 / semantic 1.38 closed member artifacts must remain readable");
         SemanticDocument arraySemantic = Analyze(File.ReadAllText(FindFixture()));
         SemanticCallable arrayInstance = arraySemantic.Callables.Single(callable =>
             callable.GenericDefinitionSymbolId?.Contains(".EchoArray", StringComparison.Ordinal) == true);

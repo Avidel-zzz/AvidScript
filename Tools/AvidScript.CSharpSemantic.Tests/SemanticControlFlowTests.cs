@@ -45,11 +45,12 @@ internal static class SemanticControlFlowTests
     {
         StructuredControlFlowProducesStableBlocksAndEdges();
         ShortCircuitFlowCapturesRetainStableIds();
+        StructuredFinallyPublishesCleanupPaths();
         PlainThrowControlFlowFailsClosed();
         ExceptionAsyncAndYieldControlFlowFailClosed();
         InvalidControlFlowDoesNotProducePartialGraphs();
         ControlFlowSerializationIsDeterministic();
-        return 6;
+        return 7;
     }
 
     private static void StructuredControlFlowProducesStableBlocksAndEdges()
@@ -57,8 +58,8 @@ internal static class SemanticControlFlowTests
         SemanticDocument document = Analyze(StructuredSource, "Scripts/StructuredControlFlow.cs");
 
         Assert(document.Succeeded, "supported structured control flow should pass semantic analysis");
-        Assert(document.SchemaVersion == 31 && document.SemanticVersion == "1.38",
-            "current callable artifacts should advertise semantic schema v31 / version 1.38");
+        Assert(document.SchemaVersion == 31 && document.SemanticVersion == "1.39",
+            "current callable artifacts should advertise semantic schema v31 / version 1.39");
         SemanticControlFlowGraph graph = document.ControlFlowGraphs.Single(item =>
             item.MethodSymbolId == "symbol:method:global::Game.Script.Run(int32):int32");
         Assert(graph.Blocks.Select(block => block.Ordinal).SequenceEqual(Enumerable.Range(0, graph.Blocks.Count)),
@@ -135,6 +136,38 @@ internal static class SemanticControlFlowTests
             "flow captures should retain AvidScript-owned numeric ids");
         Assert(references.Count > 0 && references.All(captures.Contains),
             "flow capture references should target a declared capture id");
+    }
+
+    private static void StructuredFinallyPublishesCleanupPaths()
+    {
+        const string source = """
+            class Script
+            {
+                static int Run(int input)
+                {
+                    try
+                    {
+                        if (input > 0) return input;
+                        input += 2;
+                    }
+                    finally { input += 4; }
+                    return input;
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/FinallyControlFlow.cs");
+        Assert(document.Succeeded,
+            "synchronous try/finally should publish a supported structured CFG: "
+            + string.Join(" | ", document.Diagnostics.Select(item => item.Message)));
+        Assert(document.Symbols.Any(symbol => symbol.Id.Contains(":finally_return", StringComparison.Ordinal)),
+            "return values crossing finally need an explicit compiler local");
+        SemanticControlFlowGraph graph = document.ControlFlowGraphs.Single();
+        Assert(graph.Blocks.SelectMany(block => block.Successors)
+            .All(edge => edge.Semantics is "regular" or "return"),
+            "finally must be represented by executable regular paths, not exception-region edges");
+        Assert(graph.Blocks.Count(block => block.Operations.SelectMany(Flatten).Any(operation =>
+            operation.Kind == "compound_assignment")) >= 2,
+            "normal and early-return paths must each retain the cleanup body");
     }
 
     private static void PlainThrowControlFlowFailsClosed()
