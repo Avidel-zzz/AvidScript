@@ -1683,4 +1683,80 @@ bool FAvidScriptRuntimeFinallyCleanupTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptRuntimeLanguageOutcomeSlotTest,
+	"AvidScript.Runtime.LanguageOutcomeSlot",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptRuntimeLanguageOutcomeSlotTest::RunTest(const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	const FString File = FPaths::Combine(FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptOutcomeTests/GuestFixtures/outcome-slots.wasm"));
+	TArray<uint8> Wasm;
+	if (!TestTrue(TEXT("Load current outcome fixture; generate with Build/TestAvidScriptLanguageOutcomeSlot.ps1"),
+		FFileHelper::LoadFileToArray(Wasm, *File))) return false;
+	struct FCase
+	{
+		uint32 Input;
+		uint32 CleanupThrows;
+		int32 Expected[5];
+	};
+	const FCase Cases[] = {
+		{2, 0, {0, 0, 0, 23, 1}},
+		{1, 0, {1, 7, 31, 0, 1}},
+		{0, 0, {1, 7, 31, 0, 1}},
+		{2, 1, {1, 9, 44, 0, 1}},
+		{1, 1, {1, 9, 44, 0, 1}},
+	};
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	{
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime
+			? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		Selection.bAllowFallback = false;
+		FAvidScriptWasmRuntimeInstance Runtime(Selection);
+		FAvidScriptWasmSmokeResult Result;
+		if (!TestTrue(TEXT("Outcome fixture loads"),
+			Runtime.LoadModule(Wasm.GetData(), Wasm.Num(), TEXT("language_outcome_slot"), Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		TestEqual(TEXT("Outcome fixture uses requested backend"), Runtime.GetActiveBackendInfo().Kind, Backend);
+		TestEqual(TEXT("Outcome fixture uses requested execution mode"),
+			Runtime.GetActiveBackendInfo().ExecutionMode, Selection.ExecutionMode);
+		if (!TestTrue(TEXT("Outcome fixture executes BeginPlay"), Runtime.BeginPlay(Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		FAvidScriptVmPreparedExportCall Prepared;
+		FString Error;
+		if (!TestTrue(TEXT("Prepare outcome export"),
+			Runtime.PrepareNamedExportCall(TEXT("outcome_call"), Prepared, Error)))
+		{ AddError(Error); return false; }
+		TestEqual(TEXT("Outcome call has per-invocation SRet and two values"), Prepared.ParameterCellCount, 3u);
+		TestEqual(TEXT("Outcome call returns through SRet"), Prepared.ResultCellCount, 0u);
+		for (const FCase& Case : Cases)
+		{
+			FAvidScriptVmCallFrame Frame;
+			Frame.Cells[0] = 4096;
+			Frame.Cells[1] = Case.Input;
+			Frame.Cells[2] = Case.CleanupThrows;
+			Frame.CellCount = 3;
+			FAvidScriptVmError CallError;
+			if (!TestTrue(TEXT("Outcome call executes"), Prepared.Call(Frame, CallError)))
+			{ AddError(CallError.Details); return false; }
+			uint8 Bytes[20]{};
+			if (!TestTrue(TEXT("Read per-call outcome"), Runtime.ReadStateBytes(4096, MakeArrayView(Bytes), Error)))
+			{ AddError(Error); return false; }
+			for (int32 Index = 0; Index < 5; ++Index)
+			{
+				const int32 Offset = Index * 4;
+				const int32 Actual = int32(uint32(Bytes[Offset]) | (uint32(Bytes[Offset + 1]) << 8)
+					| (uint32(Bytes[Offset + 2]) << 16) | (uint32(Bytes[Offset + 3]) << 24));
+				TestEqual(FString::Printf(TEXT("Outcome case %u/%u slot %d"), Case.Input,
+					Case.CleanupThrows, Index), Actual, Case.Expected[Index]);
+			}
+		}
+	}
+	return true;
+}
+
 #endif
