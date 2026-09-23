@@ -1,5 +1,8 @@
 #include "AvidScriptRuntimeSession.h"
 #include "Engine/World.h"
+#include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
+#include "Subsystems/WorldSubsystem.h"
 
 #include "ScriptTypes/AvidScriptGeneratedTypeRegistry.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeSessionPrivate.h"
@@ -230,7 +233,8 @@ UObject* FAvidScriptRuntimeSession::ResolveGeneratedTypeReceiver(
 	if (Type == nullptr || Type->Class == nullptr || Receiver == nullptr || !Receiver->IsA(Type->Class)
 		|| Receiver->HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject | RF_BeginDestroyed | RF_FinishDestroyed)) return nullptr;
 	if (const UWorld* World = Receiver->GetWorld(); World != nullptr
-		&& (World != HostContext.World.Get() || World->bIsTearingDown)) return nullptr;
+		&& (World != HostContext.World.Get()
+			|| (World->bIsTearingDown && !bGeneratedWorldTeardownLifecycle))) return nullptr;
 	FAvidScriptObjectHandleResult ResolveResult;
 	return HostContext.ObjectRegistry->ResolveObject(Handle, ResolveResult, false) == Receiver ? Receiver : nullptr;
 }
@@ -367,7 +371,17 @@ bool FAvidScriptRuntimeSession::InvokeGeneratedTypeMember(
 	{
 		return false;
 	}
-	const FString& ExportName = Type->Members[MemberOrdinal].ExportName;
+	const FAvidScriptGeneratedMemberPlan& Member = Type->Members[MemberOrdinal];
+	const FString& ExportName = Member.ExportName;
+	// UE marks the World as tearing down before Actor EndPlay and subsystem Deinitialize.
+	// Only these native terminal routes may enter their already-owned Session.
+	const bool bWorldTeardownLifecycle = Member.bLifecycle
+		&& ((Receiver.IsA<UWorldSubsystem>()
+				&& Member.StableMemberId.EndsWith(TEXT(".Deinitialize():void"), ESearchCase::CaseSensitive))
+			|| ((Receiver.IsA<AActor>() || Receiver.IsA<UActorComponent>())
+				&& Member.StableMemberId.EndsWith(TEXT(".EndPlay():void"), ESearchCase::CaseSensitive)))
+		&& HostContext.World.IsValid()
+		&& HostContext.World->bIsTearingDown;
 
 	const FAvidScriptGeneratedPreparedTypeRoute& Route =
 		GeneratedTypeInstance->PreparedTypeRoutes[TypeOrdinal];
@@ -417,7 +431,11 @@ bool FAvidScriptRuntimeSession::InvokeGeneratedTypeMember(
 		TGuardValue<int32> GuestCallGuard(
 			ActiveGuestCallDepth,
 			ActiveGuestCallDepth + 1);
-		bCalled = LiveRuntime->InvokeInContext(Call, HostContext,
+		TGuardValue<bool> TeardownCallGuard(
+			bGeneratedWorldTeardownLifecycle, bWorldTeardownLifecycle);
+		FAvidScriptWasmHostContext InvocationContext = HostContext;
+		InvocationContext.bAllowWorldTeardownLifecycle = bWorldTeardownLifecycle;
+		bCalled = LiveRuntime->InvokeInContext(Call, InvocationContext,
 			Frame,
 			Error,
 			Shape == EGeneratedCallShape::ReceiverI32

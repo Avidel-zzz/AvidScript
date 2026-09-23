@@ -158,7 +158,7 @@ public static class CSharpGuestDebugMapProjector
             "2.0",
             module.ModuleId,
             importedFunctionCount,
-            module.Functions.Count,
+            checked(module.Functions.Count + module.FramedExports.Count),
             new CSharpGuestDebugSource(sourceId, document.Source.Sha256),
             new CSharpGuestDebugProvenance(
                 frontendArtifactSha256,

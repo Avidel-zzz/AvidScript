@@ -42,7 +42,7 @@ internal static class CSharpGuestUeMethodFrameTests
         GuestModule module = lowered.Module!;
         CSharpGuestDebugMap debugMap = CSharpGuestDebugMapProjector.Project(
             document, module, new string('c', 64), new string('d', 64));
-        Check(debugMap.DefinedFunctionCount == module.Functions.Count
+        Check(debugMap.DefinedFunctionCount == module.Functions.Count + module.FramedExports.Count
             && debugMap.Functions.Count > 0
             && debugMap.Functions.All(function => function.GuestFunctionId.StartsWith("function:", StringComparison.Ordinal)),
             "generated UE method frame adapters retain WASM indices without forging C# source locations");

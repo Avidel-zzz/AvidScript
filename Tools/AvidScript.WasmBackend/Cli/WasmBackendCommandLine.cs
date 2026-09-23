@@ -89,7 +89,7 @@ public static class WasmBackendCommandLine
                     Sha256(guestIrArtifact),
                     Sha256(result.Bytes),
                     module.Imports.Count + (enableCooperativeSafepoints ? 1 : 0),
-                    module.Functions.Count,
+                    checked(module.Functions.Count + module.FramedExports.Count),
                     result.DebugOffsets);
                 GuestWasmDebugOffsetMapSerializer.Write(debugOffsetPath, offsetMap);
             }

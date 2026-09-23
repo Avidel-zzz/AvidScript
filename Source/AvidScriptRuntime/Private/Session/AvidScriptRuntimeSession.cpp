@@ -9,6 +9,7 @@
 #include "Debugging/AvidScriptSessionDebugger.h"
 #include "Diagnostics/AvidScriptWasmDebugMap.h"
 #include "GameFramework/Actor.h"
+#include "Engine/World.h"
 #include "HostEffects/AvidScriptHostEffectTransaction.h"
 #include "Lifecycle/AvidScriptRuntimeLifecycleCoordinator.h"
 #include "Misc/ScopeExit.h"
@@ -1838,7 +1839,22 @@ bool FAvidScriptRuntimeSession::StopAndUnload(FAvidScriptWasmSmokeResult& OutRes
 		const bool bRunning = State
 			? !State->IsRetired() && State->GetLifecycleState() == EAvidScriptLifecycleState::Running
 			: LiveRuntime->GetLifecycleState() == EAvidScriptLifecycleState::Running;
-		if (!bFaultQuarantined && bRunning && !(State ? LiveRuntime->EndPlayInContext(HostContext, EndPlayFailure)
+		// A retired generated owner cannot safely receive the generic EndPlay export.
+		// Its native terminal lifecycle route has already had its chance to run.
+		bool bContextOwnerLive = true;
+		if (State)
+		{
+			FAvidScriptObjectHandleResult ResolveResult;
+			UObject* const Owner = HostContext.ObjectRegistry != nullptr
+				? HostContext.ObjectRegistry->ResolveObject(HostContext.OwnerHandle, ResolveResult, false)
+				: nullptr;
+			bContextOwnerLive = Owner != nullptr
+				&& !Owner->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed)
+				&& !HostContext.World.IsStale()
+				&& (!HostContext.World.IsValid() || !HostContext.World->bIsTearingDown)
+				&& Owner->GetWorld() == HostContext.World.Get();
+		}
+		if (!bFaultQuarantined && bRunning && bContextOwnerLive && !(State ? LiveRuntime->EndPlayInContext(HostContext, EndPlayFailure)
 			: LiveRuntime->EndPlay(EndPlayFailure)))
 		{
 			bSucceeded = false;

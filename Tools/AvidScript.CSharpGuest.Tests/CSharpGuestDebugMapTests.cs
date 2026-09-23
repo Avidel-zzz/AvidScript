@@ -235,7 +235,7 @@ internal static class CSharpGuestDebugMapTests
             guestIrSha256,
             new string('e', 64));
 
-        Assert(debugMap.DefinedFunctionCount == module.Functions.Count,
+        Assert(debugMap.DefinedFunctionCount == module.Functions.Count + module.FramedExports.Count,
             "continuation routers should retain the complete WASM function index range");
         Assert(debugMap.Functions.All(function =>
                 function.GuestFunctionId != routerId),
@@ -300,7 +300,7 @@ internal static class CSharpGuestDebugMapTests
             guestIrSha256,
             new string('e', 64));
 
-        Assert(debugMap.DefinedFunctionCount == module.Functions.Count,
+        Assert(debugMap.DefinedFunctionCount == module.Functions.Count + module.FramedExports.Count,
             "source-less generated functions should retain the complete WASM function index range");
         Assert(debugMap.Functions.All(function => function.GuestFunctionId != routerId),
             "the generated gameplay router must not publish a fake C# source location");
@@ -375,7 +375,7 @@ internal static class CSharpGuestDebugMapTests
         Assert(debugMap.Functions.Count == lowered.Functions.Count,
             "non-method backend functions should not publish fake C# source locations");
         Assert(debugMap.ImportedFunctionCount == module.Imports.Count
-            && debugMap.DefinedFunctionCount == module.Functions.Count,
+            && debugMap.DefinedFunctionCount == module.Functions.Count + module.FramedExports.Count,
             "debug map should retain the complete WASM function index range despite omitted constructors");
         Assert(debugMap.Functions.Select(function => function.WasmFunctionIndex)
             .SequenceEqual(Enumerable.Range(module.Imports.Count, lowered.Functions.Count)),
@@ -493,7 +493,7 @@ internal static class CSharpGuestDebugMapTests
             && first.DebugVersion == "2.0"
             && first.ModuleId == module.ModuleId
             && first.ImportedFunctionCount == module.Imports.Count
-            && first.DefinedFunctionCount == module.Functions.Count,
+            && first.DefinedFunctionCount == module.Functions.Count + module.FramedExports.Count,
             "debug map should publish its stable root contract");
         Assert(first.Source.Id == sourceId
             && first.Source.Sha256 == semantic.Source.Sha256,

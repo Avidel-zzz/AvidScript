@@ -159,6 +159,8 @@ struct FAvidScriptWasmHostContext
 	IAvidScriptObjectOwnershipDomain* ObjectOwnership = nullptr;
 	FAvidScriptObjectHandle OwnerHandle;
 	TWeakObjectPtr<UWorld> World;
+	// Native terminal lifecycle calls may finish during UWorld teardown; Guest cannot set this.
+	bool bAllowWorldTeardownLifecycle = false;
 	EAvidScriptActorWritePolicy ActorWritePolicy = EAvidScriptActorWritePolicy::ReadOnly;
 	IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr;
 	IAvidScriptEventSubscriptionHost* EventSubscriptions = nullptr;

@@ -328,6 +328,7 @@ private:
 	uint64 GeneratedExecutionGeneration = 0;
 	bool bMutationInProgress = false;
 	bool bPackageReloadBarrier = false;
+	bool bGeneratedWorldTeardownLifecycle = false;
 	bool bBorrowedHandlePrunePending = false;
 	bool bFaultQuarantined = false;
 	FString FaultedModuleId;

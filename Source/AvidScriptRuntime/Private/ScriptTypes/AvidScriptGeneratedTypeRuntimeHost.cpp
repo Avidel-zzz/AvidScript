@@ -4,6 +4,7 @@
 #include "AvidScriptObjectRegistry.h"
 #include "AvidScriptRuntimeArtifact.h"
 #include "AvidScriptRuntimeSession.h"
+#include "AvidScriptWasmRuntime.h"
 #include "Session/AvidScriptRuntimeExecutionDomain.h"
 #include "Containers/Ticker.h"
 #include "Dom/JsonObject.h"
@@ -761,6 +762,8 @@ bool FAvidScriptGeneratedTypeRuntimeHost::LoadPackageFromDescriptorFile(
 
 	FString TypeManifestPath;
 	FString RuntimeManifestPath;
+	FString CanonicalWasmPath;
+	FString ExpectedCanonicalWasmSha256;
 	if (!ResolvePackageFile(
 			NormalizedDescriptorPath,
 			TypeManifestEntry,
@@ -825,6 +828,19 @@ bool FAvidScriptGeneratedTypeRuntimeHost::LoadPackageFromDescriptorFile(
 		{
 			return false;
 		}
+		TSharedPtr<FJsonObject> RuntimeManifestObject;
+		FGeneratedTypePackageFile WasmEntry;
+		if (!DeserializeJsonObject(RuntimeManifestBytes, RuntimeManifestObject)
+			|| !ReadPackageFileEntry(RuntimeManifestObject, TEXT("wasm"), WasmEntry))
+		{
+			OutError = TEXT("generated type Runtime manifest has no canonical WASM identity");
+			return false;
+		}
+		if (!ResolvePackageFile(RuntimeManifestPath, WasmEntry, CanonicalWasmPath, OutError))
+		{
+			return false;
+		}
+		ExpectedCanonicalWasmSha256 = WasmEntry.Sha256;
 	}
 	else
 	{
@@ -850,6 +866,18 @@ bool FAvidScriptGeneratedTypeRuntimeHost::LoadPackageFromDescriptorFile(
 			OutError = TEXT("generated type package identity does not match its manifest hashes");
 			return false;
 		}
+		FAvidScriptResolvedModulePackage ResolvedPackage;
+		FAvidScriptModuleResolveResult ResolveResult;
+		if (!FAvidScriptModulePackageResolver::ResolveModule(
+				FName(*RuntimeModuleId), ResolvedPackage, ResolveResult)
+			|| ResolvedPackage.PackageId != PackageId)
+		{
+			OutError = ResolveResult.ErrorMessage.IsEmpty()
+				? TEXT("generated type Cook pointer does not select the current module package")
+				: ResolveResult.ErrorMessage;
+			return false;
+		}
+		CanonicalWasmPath = ResolvedPackage.CanonicalWasmPath;
 
 	}
 
@@ -884,30 +912,45 @@ bool FAvidScriptGeneratedTypeRuntimeHost::LoadPackageFromDescriptorFile(
 	{
 		return false;
 	}
-	TArray<FAvidScriptVmExpectedImport> RuntimeAuthorizedImports;
-	for (const FAvidScriptGeneratedTypePlan& Type : Registry->GetTypes())
+	const int64 CanonicalWasmSize = IFileManager::Get().FileSize(*CanonicalWasmPath);
+	if (CanonicalWasmSize <= 0 || CanonicalWasmSize > 128LL * 1024 * 1024)
 	{
-		for (const FAvidScriptGeneratedMemberPlan& Member : Type.Members)
+		OutError = TEXT("generated type canonical WASM is missing or exceeds the preflight size limit");
+		return false;
+	}
+	TArray<uint8> CanonicalWasmBytes;
+	if (!FFileHelper::LoadFileToArray(CanonicalWasmBytes, *CanonicalWasmPath)
+		|| CanonicalWasmBytes.Num() != CanonicalWasmSize)
+	{
+		OutError = TEXT("generated type canonical WASM could not be read for import preflight");
+		return false;
+	}
+	const FString CanonicalWasmSha256 = FAvidScriptHash::Sha256Hex(CanonicalWasmBytes);
+	if (!ExpectedCanonicalWasmSha256.IsEmpty()
+		&& CanonicalWasmSha256 != ExpectedCanonicalWasmSha256)
+	{
+		OutError = TEXT("generated type canonical WASM hash changed before import preflight");
+		return false;
+	}
+	FAvidScriptWasmRuntimeInstance PreflightRuntime;
+	TArray<FAvidScriptVmTypedHostImport> PreflightHostImports;
+	if (!PreflightRuntime.ConfigureGeneratedTypeHostBindings(
+			Registry, PreflightHostImports, OutError, CanonicalWasmBytes))
+	{
+		return false;
+	}
+	TArray<FAvidScriptVmExpectedImport> RuntimeAuthorizedImports;
+	RuntimeAuthorizedImports.Reserve(PreflightHostImports.Num());
+	for (const FAvidScriptVmTypedHostImport& Import : PreflightHostImports)
+	{
+		if (!Import.bSupplementalRuntimeAuthority
+			|| Import.BindingOrdinal != MAX_uint32
+			|| Import.ModuleName != TEXT("avidscript"))
 		{
-			if (Member.Kind != EAvidScriptGeneratedMemberKind::Property)
-			{
-				continue;
-			}
-			if (!Member.GetterImportName.IsEmpty())
-			{
-				RuntimeAuthorizedImports.Add({
-					TEXT("avidscript"),
-					Member.GetterImportName
-				});
-			}
-			if (!Member.SetterImportName.IsEmpty())
-			{
-				RuntimeAuthorizedImports.Add({
-					TEXT("avidscript"),
-					Member.SetterImportName
-				});
-			}
+			OutError = TEXT("generated type import preflight produced an invalid capability");
+			return false;
 		}
+		RuntimeAuthorizedImports.Add({ Import.ModuleName, Import.ImportName });
 	}
 
 	FAvidScriptRuntimeArtifact Artifact;
@@ -929,6 +972,11 @@ bool FAvidScriptGeneratedTypeRuntimeHost::LoadPackageFromDescriptorFile(
 		OutError = LoadResult.CanonicalResult.ErrorMessage.IsEmpty()
 			? TEXT("generated type Runtime artifact failed to load")
 			: LoadResult.CanonicalResult.ErrorMessage;
+		return false;
+	}
+	if (Artifact.Manifest.WasmSha256 != CanonicalWasmSha256)
+	{
+		OutError = TEXT("generated type import preflight and loaded canonical WASM differ");
 		return false;
 	}
 	if (Artifact.Manifest.ModuleId != RuntimeModuleId)

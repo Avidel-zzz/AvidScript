@@ -1037,12 +1037,12 @@ Assert-Condition ($FrontendJson.source.sha256 -eq $NormalJson.source.sha256) "re
 $NormalSemanticPath = Resolve-ArtifactPath $NormalJson.artifacts.semantic_file
 Assert-Condition (Test-Path -LiteralPath $NormalSemanticPath -PathType Leaf) "valid source semantic artifact is missing"
 $SemanticJson = Get-Content -Raw -LiteralPath $NormalSemanticPath | ConvertFrom-Json
-Assert-Condition ($SemanticJson.schema_version -eq 22) "semantic artifact schema version is not 22"
-Assert-Condition ($SemanticJson.semantic_version -eq "1.26") "semantic artifact version is not 1.26"
+Assert-Condition ($SemanticJson.schema_version -eq 30) "semantic artifact schema version is not 30"
+Assert-Condition ($SemanticJson.semantic_version -eq "1.34") "semantic artifact version is not 1.34"
 Assert-Condition ($SemanticJson.succeeded) "valid source semantic artifact reports failure"
 Assert-Condition ($SemanticJson.source.sha256 -eq $FrontendJson.source.sha256) "semantic/frontend source hashes differ"
 Assert-Condition ($SemanticJson.source.frontend_sha256 -eq $FrontendJson.source.sha256) "semantic artifact did not preserve the frontend source hash"
-Assert-Condition (@($SemanticJson.callables).Count -eq 84) "ActorLifecycle semantic callable count is not 84"
+Assert-Condition (@($SemanticJson.callables).Count -eq 86) "ActorLifecycle semantic callable count is not 86"
 $ActorMatchesCallables = @($SemanticJson.callables | Where-Object {
     [string]$_.method_symbol_id -ceq "symbol:method:global::AvidScript.AActor.Matches(global::AvidScript.AActor):bool"
 })
@@ -1106,7 +1106,7 @@ $SemanticSha256 = Get-Sha256Hex $NormalSemanticPath
 $GuestIrSha256 = Get-Sha256Hex $NormalGuestIrPath
 $DebugMapSha256 = Get-Sha256Hex $NormalDebugMapPath
 $WasmSha256 = Get-Sha256Hex $NormalWasmPath
-Assert-Condition ($GuestIrJson.schema_version -eq 3 -and $GuestIrJson.ir_version -eq "1.2" -and $GuestIrJson.succeeded) "Guest IR contract is invalid"
+Assert-Condition ($GuestIrJson.schema_version -eq 14 -and $GuestIrJson.ir_version -eq "1.13" -and $GuestIrJson.succeeded) "Guest IR contract is invalid"
 Assert-Condition ($GuestIrJson.provenance.semantic_sha256 -eq $SemanticSha256) "Guest IR semantic provenance hash differs"
 Assert-Condition (@($GuestIrJson.imports | Where-Object {
     [string]$_.module -ceq 'env' -and [string]$_.name -ceq 'continuation_load_object'
@@ -1159,8 +1159,8 @@ Assert-Condition (@($DebugMapJson.functions | Where-Object {
     [string]$_.guest_function_id -clike 'function:synthetic:async_resume:*' -and
     [string]$_.method_symbol_id -clike '*#async_resume:*'
 }).Count -eq 3) "controlled async resume functions do not map to their source segments"
-Assert-Condition ([int]$DebugMapJson.defined_function_count -eq @($GuestIrJson.functions).Count) "generated gameplay router collapsed the debug-map function index space"
-Assert-Condition ($NormalJson.guest_ir.schema_version -eq 3 -and $NormalJson.guest_ir.version -eq "1.2") "report Guest IR contract is invalid"
+Assert-Condition ([int]$DebugMapJson.defined_function_count -eq (@($GuestIrJson.functions).Count + @($GuestIrJson.framed_exports).Count)) "generated gameplay router collapsed the debug-map function index space"
+Assert-Condition ($NormalJson.guest_ir.schema_version -eq 14 -and $NormalJson.guest_ir.version -eq "1.13") "report Guest IR contract is invalid"
 Assert-Condition ($NormalJson.guest_ir.semantic_sha256 -eq $SemanticSha256) "report Guest IR semantic hash differs"
 Assert-Condition ($NormalJson.guest_ir.sha256 -eq $GuestIrSha256) "report Guest IR artifact hash differs"
 Assert-Condition ($NormalJson.debug_map.schema_version -eq 2 -and $NormalJson.debug_map.version -eq "2.0") "report C# debug map contract is invalid"
@@ -1190,7 +1190,7 @@ Assert-Condition (-not [string]::IsNullOrWhiteSpace($ManifestJson.source.fronten
 Assert-Condition (-not [string]::IsNullOrWhiteSpace($ManifestJson.source.semantic_file)) "manifest does not reference the semantic artifact"
 Assert-Condition ($ManifestJson.source.semantic_sha256 -eq $SemanticSha256) "manifest semantic hash differs"
 Assert-Condition ($ManifestJson.guest_ir.file -eq $NormalJson.artifacts.guest_ir_file) "manifest Guest IR path differs"
-Assert-Condition ($ManifestJson.guest_ir.schema_version -eq 3 -and $ManifestJson.guest_ir.version -eq "1.2") "manifest Guest IR contract is invalid"
+Assert-Condition ($ManifestJson.guest_ir.schema_version -eq 14 -and $ManifestJson.guest_ir.version -eq "1.13") "manifest Guest IR contract is invalid"
 Assert-Condition ($ManifestJson.guest_ir.module_id -eq $GuestIrJson.module_id) "manifest Guest IR module identity differs"
 Assert-Condition ($ManifestJson.guest_ir.sha256 -eq $GuestIrSha256) "manifest Guest IR hash differs"
 Assert-Condition ($ManifestJson.debug_map.file -eq $NormalJson.artifacts.debug_map_file) "manifest C# debug map path differs"

@@ -40,7 +40,9 @@ bool FAvidScriptWasmRuntimeInstance::ValidateInvocationContext(const FAvidScript
 {
 	if (!IsInGameThread() || Context.ObjectRegistry == nullptr || !Context.OwnerHandle.IsValid()
 		|| !ValidateInstanceExecutionState(Context)
-		|| Context.World.IsStale() || (Context.World.IsValid() && Context.World->bIsTearingDown)
+		|| Context.World.IsStale()
+		|| (Context.World.IsValid() && Context.World->bIsTearingDown
+			&& !Context.bAllowWorldTeardownLifecycle)
 		|| (!bAllowSuspended && Context.DebugProbes != nullptr && Context.DebugProbes->IsExecutionSuspended())) return false;
 	FAvidScriptObjectHandleResult Result;
 	UObject* Owner = Context.ObjectRegistry->ResolveObject(Context.OwnerHandle, Result, false);

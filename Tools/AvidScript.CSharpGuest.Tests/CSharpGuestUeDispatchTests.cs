@@ -112,7 +112,7 @@ internal static class CSharpGuestUeDispatchTests
             .All(export => export.HostDispatchTargets!.Count == 2), "both registered types have exact implementation choices");
         CSharpGuestDebugMap debugMap = CSharpGuestDebugMapProjector.Project(
             semantic, module, new string('a', 64), new string('b', 64));
-        Check(debugMap.DefinedFunctionCount == module.Functions.Count
+        Check(debugMap.DefinedFunctionCount == module.Functions.Count + module.FramedExports.Count
             && debugMap.Functions.Count > 0
             && debugMap.Functions.All(function => function.GuestFunctionId.StartsWith("function:", StringComparison.Ordinal)),
             "virtual/interface dispatch frames keep WASM indices without synthetic C# source spans");

@@ -1946,7 +1946,7 @@ $DebugIndexSpaceValid = (Try-GetJsonInt32 -Value $DebugMapModel.imported_functio
     $DebugDefinedFunctionCount -le 65536 -and
     $DebugImportedFunctionCount -le ([int]::MaxValue - $DebugDefinedFunctionCount) -and
     $DebugImportedFunctionCount -eq $ExpectedDebugImportedFunctionCount -and
-    $DebugDefinedFunctionCount -eq @($GuestIrModel.functions).Count
+    $DebugDefinedFunctionCount -eq (@($GuestIrModel.functions).Count + @($GuestIrModel.framed_exports).Count)
 $DebugSchemaVersion = if ($null -eq $DebugMapModel) { 0 } else { [int]$DebugMapModel.schema_version }
 $DebugVersionValid = ($DebugSchemaVersion -eq 1 -and [string]$DebugMapModel.debug_version -eq "1.0") -or
     ($DebugSchemaVersion -eq 2 -and [string]$DebugMapModel.debug_version -eq "2.0")

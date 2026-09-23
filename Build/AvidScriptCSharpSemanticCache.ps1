@@ -923,8 +923,8 @@ function Publish-AvidScriptCSharpSemanticCacheEntry {
                 artifact_sha256 = Get-AvidScriptBindingSha256Hex $StagingFrontendPath
             }
             semantic = [ordered]@{
-                schema_version = 22
-                version = "1.26"
+                schema_version = [int]$Prepared.SemanticModel.schema_version
+                version = [string]$Prepared.SemanticModel.semantic_version
                 succeeded = $true
                 source_sha256 = [string]$Prepared.SemanticModel.source.sha256
                 frontend_sha256 = [string]$Prepared.SemanticModel.source.frontend_sha256
