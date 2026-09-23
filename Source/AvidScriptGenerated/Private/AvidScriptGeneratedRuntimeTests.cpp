@@ -18,7 +18,9 @@
 
 namespace
 {
-bool CreateGeneratedScriptWorld(UWorld*& OutWorld)
+bool CreateGeneratedScriptWorld(
+	UWorld*& OutWorld,
+	const EWorldType::Type WorldType = EWorldType::Game)
 {
 	OutWorld = nullptr;
 	if (GEngine == nullptr)
@@ -26,14 +28,14 @@ bool CreateGeneratedScriptWorld(UWorld*& OutWorld)
 		return false;
 	}
 	OutWorld = UWorld::CreateWorld(
-		EWorldType::Game,
+		WorldType,
 		false,
 		TEXT("AvidScriptGeneratedRuntimeWorld"));
 	if (OutWorld == nullptr)
 	{
 		return false;
 	}
-	FWorldContext& Context = GEngine->CreateNewWorldContext(EWorldType::Game);
+	FWorldContext& Context = GEngine->CreateNewWorldContext(WorldType);
 	Context.SetCurrentWorld(OutWorld);
 	return true;
 }
@@ -382,6 +384,8 @@ bool FAvidScriptGeneratedCSharpEventAwaitReloadTest::RunTest(const FString& Para
 	const FString CandidateDescriptorPath = FPlatformMisc::GetEnvironmentVariable(
 		TEXT("AVIDSCRIPT_GENERATED_EVENT_CANDIDATE_DESCRIPTOR"));
 	const bool bVersionedCandidate = !CandidateDescriptorPath.IsEmpty();
+	const bool bPieWorld = FPlatformMisc::GetEnvironmentVariable(
+		TEXT("AVIDSCRIPT_GENERATED_EVENT_TEST_PIE_WORLD")) == TEXT("1");
 	if (bVersionedCandidate)
 	{
 		DescriptorPath = CandidateDescriptorPath;
@@ -393,11 +397,15 @@ bool FAvidScriptGeneratedCSharpEventAwaitReloadTest::RunTest(const FString& Para
 	}
 
 	UWorld* World = nullptr;
-	if (!CreateGeneratedScriptWorld(World))
+	if (!CreateGeneratedScriptWorld(
+			World,
+			bPieWorld ? EWorldType::PIE : EWorldType::Game))
 	{
 		AddError(TEXT("Failed to create the generated event reload world."));
 		return true;
 	}
+	TestEqual(TEXT("Generated event reload uses the requested World type"),
+		World->WorldType, bPieWorld ? EWorldType::PIE : EWorldType::Game);
 	AProjectile* const Retiring = World->SpawnActor<AProjectile>();
 	AProjectile* const Survivor = World->SpawnActor<AProjectile>();
 	if (!TestNotNull(TEXT("Reload event owner spawns"), Retiring)

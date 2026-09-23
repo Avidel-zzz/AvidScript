@@ -18,7 +18,8 @@ $RunRoot = Join-Path $ProjectRoot ('Saved/AvidScript/GeneratedEventVersionReload
 $NativeRoot = Join-Path $RunRoot 'Native'
 $ArtifactRoot = Join-Path $RunRoot 'Artifacts'
 $DescriptorPath = Join-Path $NativeRoot 'AvidScriptGeneratedPackage.json'
-$LogPath = Join-Path $RunRoot 'EditorAutomation.log'
+$GameLogPath = Join-Path $RunRoot 'EditorAutomation-Game.log'
+$PieLogPath = Join-Path $RunRoot 'EditorAutomation-PIE.log'
 
 foreach ($RequiredFile in @(
         $BindingPackageManifestPath, $DotNetPath, $EditorCmdPath, $ProjectPath,
@@ -66,29 +67,38 @@ if ([string]$Candidate.package_id -ceq [string]$Baseline.package_id -or
 
 $PreviousDescriptor = [Environment]::GetEnvironmentVariable(
     'AVIDSCRIPT_GENERATED_EVENT_CANDIDATE_DESCRIPTOR', 'Process')
+$PreviousPieWorld = [Environment]::GetEnvironmentVariable(
+    'AVIDSCRIPT_GENERATED_EVENT_TEST_PIE_WORLD', 'Process')
 try {
     [Environment]::SetEnvironmentVariable(
         'AVIDSCRIPT_GENERATED_EVENT_CANDIDATE_DESCRIPTOR', $DescriptorPath, 'Process')
-    & $EditorCmdPath $ProjectPath `
-        -unattended -nop4 -nosplash -nullrhi -nosound `
-        '-ExecCmds=Automation RunTests AvidScript.GeneratedTypes.CSharpEventAwaitReload;Quit' `
-        "-abslog=$LogPath"
-    $EditorExitCode = $LASTEXITCODE
+    foreach ($WorldCase in @(
+            @{ Name = 'Game'; PieWorld = '0'; LogPath = $GameLogPath },
+            @{ Name = 'PIE'; PieWorld = '1'; LogPath = $PieLogPath })) {
+        [Environment]::SetEnvironmentVariable(
+            'AVIDSCRIPT_GENERATED_EVENT_TEST_PIE_WORLD', $WorldCase.PieWorld, 'Process')
+        & $EditorCmdPath $ProjectPath `
+            -unattended -nop4 -nosplash -nullrhi -nosound `
+            '-ExecCmds=Automation RunTests AvidScript.GeneratedTypes.CSharpEventAwaitReload;Quit' `
+            "-abslog=$($WorldCase.LogPath)"
+        $EditorExitCode = $LASTEXITCODE
+        if (-not (Test-Path -LiteralPath $WorldCase.LogPath -PathType Leaf)) {
+            throw "Editor Automation did not write its $($WorldCase.Name) log: $($WorldCase.LogPath)"
+        }
+        $Log = Get-Content -Raw -LiteralPath $WorldCase.LogPath
+        if ($EditorExitCode -ne 0 -or
+            $Log -notmatch "Found 1 automation tests based on 'AvidScript.GeneratedTypes.CSharpEventAwaitReload'" -or
+            $Log -notmatch 'Test Completed\. Result=\{Success\} Name=\{CSharpEventAwaitReload\}' -or
+            $Log -notmatch '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*\*') {
+            throw "Generated C# event reload failed in $($WorldCase.Name) World. Editor exit=$EditorExitCode; log=$($WorldCase.LogPath)"
+        }
+    }
 }
 finally {
     [Environment]::SetEnvironmentVariable(
         'AVIDSCRIPT_GENERATED_EVENT_CANDIDATE_DESCRIPTOR', $PreviousDescriptor, 'Process')
-}
-
-if (-not (Test-Path -LiteralPath $LogPath -PathType Leaf)) {
-    throw "Editor Automation did not write its log: $LogPath"
-}
-$Log = Get-Content -Raw -LiteralPath $LogPath
-if ($EditorExitCode -ne 0 -or
-    $Log -notmatch "Found 1 automation tests based on 'AvidScript.GeneratedTypes.CSharpEventAwaitReload'" -or
-    $Log -notmatch 'Test Completed\. Result=\{Success\} Name=\{CSharpEventAwaitReload\}' -or
-    $Log -notmatch '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*\*') {
-    throw "Generated C# event version reload did not pass. Editor exit=$EditorExitCode; log=$LogPath"
+    [Environment]::SetEnvironmentVariable(
+        'AVIDSCRIPT_GENERATED_EVENT_TEST_PIE_WORLD', $PreviousPieWorld, 'Process')
 }
 
 [pscustomobject]@{
@@ -96,7 +106,8 @@ if ($EditorExitCode -ne 0 -or
     baseline_package_id = $Baseline.package_id
     candidate_package_id = $Candidate.package_id
     native_structure_sha256 = $Candidate.reload.native_structure_sha256
-    editor_test_count = 1
+    editor_test_count = 2
     editor_failed_count = 0
-    log = $LogPath
+    game_log = $GameLogPath
+    pie_log = $PieLogPath
 } | ConvertTo-Json -Depth 4
