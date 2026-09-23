@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using AvidScript.CSharpFrontend;
 using AvidScript.CSharpGuest;
 using AvidScript.CSharpSemantic;
@@ -179,6 +180,7 @@ internal static class CSharpGuestEventStateTests
                     UE.Self.OnScriptSignal -= Handle;
                 }
             }
+            // GENERATED TYPE
             public static class Script
             {
                 public static int Count;
@@ -231,7 +233,7 @@ internal static class CSharpGuestEventStateTests
                     value += Count;
                     doubled = value * 2;
                 }
-                static async void OnSignalAsync(AActor actor, int amount, float scale)
+                public static async void OnSignalAsync(AActor actor, int amount, float scale)
                 {
                     int bonus = amount;
                     Func<int> readBonus = () => bonus;
@@ -357,6 +359,41 @@ internal static class CSharpGuestEventStateTests
         Require(wasm.Succeeded, string.Join(" | ", wasm.Diagnostics.Select(d => d.Message)));
         File.WriteAllBytes(Path.Combine(directory, "csharp-event-language.wasm"), wasm.Bytes);
         File.WriteAllBytes(Path.Combine(directory, "csharp-event-language.guest.json"), GuestIrSerializer.Serialize(module));
+        const string generatedType = """
+            [UClass(Name = "AvidScriptEditorDelegateEventTestActor")]
+            public partial class EventReceiver : AvidActor
+            {
+                [UFunction] public int StartEventAwait()
+                {
+                    UE.Self.OnScriptSignal += Script.OnSignalAsync;
+                    return Script.Count;
+                }
+            }
+            """;
+        string typedSource = source.Replace("// GENERATED TYPE", generatedType, StringComparison.Ordinal);
+        SemanticDocument typedDocument = Analyze(typedSource, facade);
+        Require(typedDocument.Succeeded, string.Join(" | ", typedDocument.Diagnostics.Select(d => d.Message)));
+        var typedLowered = CSharpGuestLowerer.Lower(typedDocument, new string('a', 64));
+        Require(typedLowered.Succeeded, string.Join(" | ", typedLowered.Diagnostics.Select(d => d.Message)));
+        GuestModule typedModule = typedLowered.Module!;
+        var declaration = typedDocument.UeTypeDeclarations.Single();
+        var entry = declaration.Functions.Single();
+        var memberOrdinals = SemanticUeTypeRuntimeContract.BuildMemberOrdinals(declaration);
+        var exportName = SemanticUeTypeRuntimeContract.GetFunctionExportName(entry.MethodSymbolId);
+        Require(typedModule.Exports.Any(export => export.Name == exportName),
+            "C# UClass event entry has a generated WASM export");
+        var typedWasm = WasmModuleCompiler.Compile(typedModule);
+        Require(typedWasm.Succeeded, string.Join(" | ", typedWasm.Diagnostics.Select(d => d.Message)));
+        File.WriteAllBytes(Path.Combine(directory, "csharp-event-language-uclass.wasm"), typedWasm.Bytes);
+        File.WriteAllBytes(Path.Combine(directory, "csharp-event-language-uclass.guest.json"), GuestIrSerializer.Serialize(typedModule));
+        File.WriteAllText(Path.Combine(directory, "csharp-event-language-uclass.type.json"), JsonSerializer.Serialize(new {
+            type_id = declaration.TypeId,
+            engine_name = declaration.EngineName,
+            method_id = entry.MethodSymbolId,
+            native_name = entry.Name,
+            member_ordinal = memberOrdinals[entry.MethodSymbolId],
+            export_name = exportName,
+        }));
         return 1;
     }
 

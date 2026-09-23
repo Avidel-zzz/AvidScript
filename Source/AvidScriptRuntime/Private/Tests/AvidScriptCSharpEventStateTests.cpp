@@ -6,6 +6,7 @@
 #include "Memory/AvidScriptManagedHeap.h"
 #include "Ownership/AvidScriptSessionObjectOwnership.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeRegistry.h"
+#include "ScriptTypes/AvidScriptGeneratedTypeDispatcher.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeRuntimeHost.h"
 #include "Dom/JsonObject.h"
 #include "Engine/Engine.h"
@@ -707,17 +708,50 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
         {
             AActor* Peer = World->SpawnActor<AActor>(Signal->ExpectedSourceClass);
             if (!TestNotNull(TEXT("Shared event peer spawned"), Peer)) return false;
+            FString TypeMetadataText, TypedGuestText;
+            TArray<uint8> TypedBytes;
+            if (!TestTrue(TEXT("Compiled CSharp UClass metadata exists"), FFileHelper::LoadFileToString(
+                TypeMetadataText, *FPaths::Combine(Root, TEXT("csharp-event-language-uclass.type.json"))))
+                || !TestTrue(TEXT("Compiled CSharp UClass Guest IR exists"), FFileHelper::LoadFileToString(
+                    TypedGuestText, *FPaths::Combine(Root, TEXT("csharp-event-language-uclass.guest.json"))))
+                || !TestTrue(TEXT("Compiled CSharp UClass WASM exists"), FFileHelper::LoadFileToArray(
+                    TypedBytes, *FPaths::Combine(Root, TEXT("csharp-event-language-uclass.wasm"))))) return false;
+            TSharedPtr<FJsonObject> TypeMetadata, TypedGuest;
+            if (!TestTrue(TEXT("Compiled CSharp UClass metadata parses"),
+                FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(TypeMetadataText), TypeMetadata)
+                    && TypeMetadata.IsValid())
+                || !TestTrue(TEXT("Compiled CSharp UClass Guest IR parses"),
+                    FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(TypedGuestText), TypedGuest)
+                        && TypedGuest.IsValid())) return false;
+            uint32 SharedCountAddress = 0;
+            for (const auto& Value : TypedGuest->GetObjectField(TEXT("memory_layout"))->GetArrayField(TEXT("state_slots")))
+            {
+                auto Slot = Value->AsObject();
+                if (Slot->GetStringField(TEXT("global_id")).Contains(TEXT("::Script.Count:")))
+                    SharedCountAddress = Slot->GetIntegerField(TEXT("offset"));
+            }
+            if (!TestTrue(TEXT("Compiled UClass fixture exposes shared score"), SharedCountAddress > 0)) return false;
             FString ClassPackage, ClassName;
             if (!TestTrue(TEXT("Generated event class path is script-owned"),
                 Signal->ExpectedSourceClass->GetPathName().Split(TEXT("."), &ClassPackage, &ClassName)
                     && ClassPackage.RemoveFromStart(TEXT("/Script/")))) return false;
+            if (!TestEqual(TEXT("CSharp UClass name matches its native test shell"),
+                TypeMetadata->GetStringField(TEXT("engine_name")), ClassName)) return false;
             const TSharedRef<FJsonObject> TypeJson = MakeShared<FJsonObject>();
             TypeJson->SetNumberField(TEXT("type_ordinal"), 0);
-            TypeJson->SetStringField(TEXT("stable_type_id"), TEXT("type:csharp-event-shared-domain"));
+            TypeJson->SetStringField(TEXT("stable_type_id"), TypeMetadata->GetStringField(TEXT("type_id")));
             TypeJson->SetStringField(TEXT("engine_name"), ClassName);
             TypeJson->SetStringField(TEXT("class_path"), Signal->ExpectedSourceClass->GetPathName());
             TypeJson->SetArrayField(TEXT("properties"), {});
-            TypeJson->SetArrayField(TEXT("functions"), {});
+            const TSharedRef<FJsonObject> FunctionJson = MakeShared<FJsonObject>();
+            FunctionJson->SetNumberField(TEXT("member_ordinal"), TypeMetadata->GetIntegerField(TEXT("member_ordinal")));
+            FunctionJson->SetStringField(TEXT("stable_member_id"), TypeMetadata->GetStringField(TEXT("method_id")));
+            FunctionJson->SetStringField(TEXT("native_name"), TypeMetadata->GetStringField(TEXT("native_name")));
+            FunctionJson->SetStringField(TEXT("export_name"), TypeMetadata->GetStringField(TEXT("export_name")));
+            FunctionJson->SetArrayField(TEXT("flags"), {});
+            TArray<TSharedPtr<FJsonValue>> FunctionsJson;
+            FunctionsJson.Add(MakeShared<FJsonValueObject>(FunctionJson));
+            TypeJson->SetArrayField(TEXT("functions"), MoveTemp(FunctionsJson));
             const TSharedRef<FJsonObject> RegistryJson = MakeShared<FJsonObject>();
             RegistryJson->SetNumberField(TEXT("schema_version"), 6);
             RegistryJson->SetStringField(TEXT("generator_version"), TEXT("1.8"));
@@ -733,8 +767,15 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
             { AddError(Error); return false; }
             auto Host = FAvidScriptGeneratedTypeRuntimeHost::CreateIsolatedForTesting();
             ON_SCOPE_EXIT { Host->Shutdown(); };
+            FAvidScriptWasmReloadManifest SharedManifest = Manifest;
+            SharedManifest.RequiredImports.Reset();
+            for (const auto& Value : TypedGuest->GetArrayField(TEXT("imports")))
+            {
+                auto Import = Value->AsObject();
+                SharedManifest.RequiredImports.Add({Import->GetStringField(TEXT("module")), Import->GetStringField(TEXT("name"))});
+            }
             const FAvidScriptRuntimeArtifact Artifact = FAvidScriptRuntimeArtifact::FromCanonicalWasm(
-                Manifest, Bytes, Selection);
+                SharedManifest, TypedBytes, Selection);
             if (!Host->InstallPackage(Types, Artifact, Error)
                 || !Host->BeginInstance(*Owner, 0, Error)
                 || !Host->BeginInstance(*Peer, 0, Error))
@@ -747,9 +788,14 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
             TestTrue(TEXT("Event owners share the production Runtime"),
                 SharedRuntime == PeerSession->GetLiveRuntimeForTesting());
             FAvidScriptWasmSmokeResult SharedResult;
-            if (!OwnerSession->TickLive(28.0f, SharedResult)
-                || !PeerSession->TickLive(28.0f, SharedResult))
-            { AddError(SharedResult.ErrorMessage); return false; }
+            const uint32 StartOrdinal = static_cast<uint32>(TypeMetadata->GetIntegerField(TEXT("member_ordinal")));
+            int32 OwnerStart = -1, PeerStart = -1;
+            if (!TestTrue(TEXT("CSharp UClass method subscribes owner"),
+                    FAvidScriptGeneratedTypeDispatcher::Invoke(Owner, 0, StartOrdinal, {}, &OwnerStart))
+                || !TestTrue(TEXT("CSharp UClass method subscribes peer"),
+                    FAvidScriptGeneratedTypeDispatcher::Invoke(Peer, 0, StartOrdinal, {}, &PeerStart))) return false;
+            TestEqual(TEXT("Owner CSharp method observes initial shared score"), OwnerStart, 0);
+            TestEqual(TEXT("Peer CSharp method observes initial shared score"), PeerStart, 0);
             TestEqual(TEXT("Owner installs its language bridge"),
                 OwnerSession->GetDelegateSubscriptionCountForTesting(), 1);
             TestEqual(TEXT("Peer installs its language bridge"),
@@ -775,7 +821,7 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
                 PeerSession->GetLivePendingContinuationCount(), 1);
             int32 SharedScore = 0;
             if (!TestTrue(TEXT("Read shared score before async resume"), SharedRuntime->ReadStateBytes(
-                CountAddress, MakeArrayView(reinterpret_cast<uint8*>(&SharedScore), 4), Error)))
+                SharedCountAddress, MakeArrayView(reinterpret_cast<uint8*>(&SharedScore), 4), Error)))
             { AddError(Error); return false; }
             TestEqual(TEXT("Two event owners share script statics"), SharedScore, 5);
             auto* SharedHeap = SharedRuntime->GetManagedHeapForTesting();
@@ -795,14 +841,14 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
                     Signal->Signature.MulticastProperty->ContainerPtrToValuePtr<void>(Peer))->IsBound());
             Broadcast(Owner, 5);
             if (!TestTrue(TEXT("Read shared score after retired broadcast"), SharedRuntime->ReadStateBytes(
-                CountAddress, MakeArrayView(reinterpret_cast<uint8*>(&SharedScore), 4), Error)))
+                SharedCountAddress, MakeArrayView(reinterpret_cast<uint8*>(&SharedScore), 4), Error)))
             { AddError(Error); return false; }
             TestEqual(TEXT("Retired owner cannot deliver another event"), SharedScore, 5);
             World->Tick(LEVELTICK_All, 0); ++GFrameCounter;
             World->Tick(LEVELTICK_All, 0.02f); ++GFrameCounter;
             if (!PeerSession->TickLive(0.001f, SharedResult)) { AddError(SharedResult.ErrorMessage); return false; }
             if (!TestTrue(TEXT("Read shared score after peer resume"), SharedRuntime->ReadStateBytes(
-                CountAddress, MakeArrayView(reinterpret_cast<uint8*>(&SharedScore), 4), Error)))
+                SharedCountAddress, MakeArrayView(reinterpret_cast<uint8*>(&SharedScore), 4), Error)))
             { AddError(Error); return false; }
             TestEqual(TEXT("Retired owner cannot resume; peer can"), SharedScore, 35);
             TestEqual(TEXT("Peer event continuation is consumed"),

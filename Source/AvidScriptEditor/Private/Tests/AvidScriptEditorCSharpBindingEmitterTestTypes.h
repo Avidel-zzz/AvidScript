@@ -287,6 +287,10 @@ public:
 		CapturedDelegateScale = Scale;
 	}
 
+	// Native test shell for the C# [UClass] event/await production entry.
+	UFUNCTION()
+	int32 StartEventAwait() const { return -1; }
+
 	UFUNCTION()
 	int32 CaptureSinglecastSignal(
 		UPARAM(ref) int32& Value,
