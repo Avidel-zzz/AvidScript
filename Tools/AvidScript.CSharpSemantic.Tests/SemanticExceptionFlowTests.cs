@@ -35,16 +35,17 @@ internal static class SemanticExceptionFlowTests
         CatchAllKeepsItsRegion();
         CrossMethodCallGetsCatchRoute();
         NestedCallableOwnsItsThrowSite();
+        MixedSourceKeepsOrdinaryGraphs();
         OrdinaryArtifactsKeepTheirOriginalShape();
         ContractValidatorRejectsDowngradeAndCorruption();
-        return 9;
+        return 10;
     }
 
     private static void NestedThrowCatchRethrowKeepsRoslynRegions()
     {
         SemanticDocument document = Analyze(NestedSource, "Scripts/ExceptionFlow.cs");
-        Check(!document.Succeeded && document.SchemaVersion == 33
-            && document.SemanticVersion == "1.42", "exception plans require a separate failed Semantic identity");
+        Check(!document.Succeeded && document.SchemaVersion == 34
+            && document.SemanticVersion == "1.43", "exception plans require a separate failed Semantic identity");
         Check(document.ControlFlowGraphs.Count == 0
             && document.Diagnostics.Any(item => item.Code == "ASCS3001"),
             "exception source must not publish an executable CFG");
@@ -284,6 +285,65 @@ internal static class SemanticExceptionFlowTests
             "nested throw must belong only to its local function");
     }
 
+    private static void MixedSourceKeepsOrdinaryGraphs()
+    {
+        const string source = """
+            using System;
+            class Script
+            {
+                static int Good(int value) => value + 1;
+                static int Fail() { throw new Exception(); }
+                static int Run(int value)
+                {
+                    try { return Good(value); }
+                    catch (Exception) { return 0; }
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/MixedException.cs");
+        Check(!document.Succeeded && document.SchemaVersion == 34
+            && document.SemanticVersion == "1.43"
+            && document.ExceptionFlows is { Count: 2 }
+            && document.ControlFlowGraphs.Count == 1
+            && document.ControlFlowGraphs[0].MethodSymbolId.Contains(".Good(", StringComparison.Ordinal)
+            && document.ExceptionFlows.All(flow => document.ControlFlowGraphs.All(graph =>
+                graph.MethodSymbolId != flow.MethodSymbolId)),
+            "a failed exception artifact must retain ordinary CFGs without publishing an exception CFG");
+        Check(SemanticExceptionFlowContractValidator.IsValid(document),
+            "mixed ordinary and exception methods must satisfy the new contract");
+        Check(!SemanticExceptionFlowContractValidator.IsValid(document with
+        {
+            ControlFlowGraphs = new[]
+            {
+                document.ControlFlowGraphs[0] with
+                {
+                    MethodSymbolId = document.ExceptionFlows![0].MethodSymbolId,
+                },
+            },
+        }), "an exception method cannot masquerade as an ordinary executable CFG");
+        byte[] bytes = SemanticSerializer.Serialize(document);
+        Check(bytes.SequenceEqual(SemanticSerializer.Serialize(SemanticSerializer.Deserialize(bytes))),
+            "mixed exception artifacts must round-trip canonically");
+
+        const string unsupportedSource = """
+            using System;
+            class Script
+            {
+                static int Good(int value) => value + 1;
+                static int Unsupported(dynamic value) => value.Missing();
+                static int Fail() { throw new Exception(); }
+            }
+            """;
+        SemanticDocument unsupported = Analyze(unsupportedSource, "Scripts/MixedUnsupportedException.cs");
+        Check(!unsupported.Succeeded
+            && unsupported.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCS4002")
+            && unsupported.ExceptionFlows is { Count: 1 }
+            && unsupported.ControlFlowGraphs.Any(graph =>
+                graph.MethodSymbolId.Contains(".Good(", StringComparison.Ordinal))
+            && SemanticExceptionFlowContractValidator.IsValid(unsupported),
+            "other support errors must not erase ordinary CFGs from an exception artifact");
+    }
+
     private static void OrdinaryArtifactsKeepTheirOriginalShape()
     {
         const string source = "class Script { static int Run() => 7; }";
@@ -314,9 +374,9 @@ internal static class SemanticExceptionFlowTests
         }), "new Semantic identity requires an exception plan");
         Check(!SemanticExceptionFlowContractValidator.IsValid(document with
         {
-            SchemaVersion = 32,
-            SemanticVersion = "1.41",
-        }), "the older diagnostic-only identity cannot carry projected blocks");
+            SchemaVersion = 33,
+            SemanticVersion = "1.42",
+        }), "the older diagnostic-only identity cannot carry ordinary graphs");
 
         SemanticExceptionFlow flow = document.ExceptionFlows!.Single();
         Check(!SemanticExceptionFlowContractValidator.IsValid(document with

@@ -156,10 +156,15 @@ internal static class SemanticControlFlowProjector
             .ToArray();
         if (orderedDiagnostics.Count > 0)
         {
+            bool hasExceptionFlows = exceptionFlows.Count > 0;
             return new SemanticControlFlowProjection(
-                Array.Empty<SemanticControlFlowGraph>(),
+                hasExceptionFlows
+                    ? graphs.OrderBy(graph => graph.MethodSymbolId, StringComparer.Ordinal).ToArray()
+                    : Array.Empty<SemanticControlFlowGraph>(),
                 orderedDiagnostics,
-                Array.Empty<SemanticSymbol>(),
+                hasExceptionFlows
+                    ? compilerLocalSymbols.OrderBy(symbol => symbol.Id, StringComparer.Ordinal).ToArray()
+                    : Array.Empty<SemanticSymbol>(),
                 exceptionFlows.OrderBy(flow => flow.MethodSymbolId, StringComparer.Ordinal).ToArray());
         }
 

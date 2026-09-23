@@ -140,7 +140,8 @@ public static class SemanticAnalyzer
             .Select(group => group.First())
             .ToArray();
         bool hasSupportErrors = supportDiagnostics.Any(diagnostic => diagnostic.Severity == "error");
-        IReadOnlyList<SemanticControlFlowGraph> controlFlowGraphs = hasSupportErrors
+        IReadOnlyList<SemanticControlFlowGraph> controlFlowGraphs =
+            hasSupportErrors && controlFlowProjection.ExceptionFlows.Count == 0
             ? Array.Empty<SemanticControlFlowGraph>()
             : controlFlowProjection.Graphs;
         IReadOnlyList<SemanticDiagnostic> compilerDiagnostics = context.Compilation

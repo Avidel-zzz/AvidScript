@@ -10,13 +10,13 @@ public static class SemanticExceptionFlowContractValidator
     {
         ArgumentNullException.ThrowIfNull(document);
         if (document.ExceptionFlows is null)
-            return document.SchemaVersion is not (32 or SemanticContract.ExceptionFlowSchemaVersion)
-                && document.SemanticVersion is not ("1.41" or SemanticContract.ExceptionFlowSemanticVersion);
+            return document.SchemaVersion is not (32 or 33 or SemanticContract.ExceptionFlowSchemaVersion)
+                && document.SemanticVersion is not ("1.41" or "1.42" or SemanticContract.ExceptionFlowSemanticVersion);
 
         IReadOnlyList<SemanticExceptionFlow> flows = document.ExceptionFlows;
         if (document.SchemaVersion != SemanticContract.ExceptionFlowSchemaVersion
             || document.SemanticVersion != SemanticContract.ExceptionFlowSemanticVersion
-            || document.Succeeded || document.ControlFlowGraphs is not { Count: 0 }
+            || document.Succeeded || document.ControlFlowGraphs is null
             || flows.Count is 0 or > 256
             || document.Callables is null || document.Types is null)
             return false;
@@ -26,10 +26,22 @@ public static class SemanticExceptionFlowContractValidator
         HashSet<string> types = document.Types.Select(type => type.Id)
             .ToHashSet(StringComparer.Ordinal);
         HashSet<string> seen = new(StringComparer.Ordinal);
+        HashSet<string> graphMethods = new(StringComparer.Ordinal);
+        foreach (SemanticControlFlowGraph? graph in document.ControlFlowGraphs)
+        {
+            if (graph is null || !methods.Contains(graph.MethodSymbolId)
+                || !graphMethods.Add(graph.MethodSymbolId)
+                || graph.Blocks is null || graph.Blocks.Count is 0 or > 2048
+                || graph.EntryBlockOrdinal < 0 || graph.ExitBlockOrdinal < 0
+                || graph.EntryBlockOrdinal >= graph.Blocks.Count
+                || graph.ExitBlockOrdinal >= graph.Blocks.Count)
+                return false;
+        }
         foreach (SemanticExceptionFlow? flow in flows)
         {
             if (flow is null || string.IsNullOrWhiteSpace(flow.MethodSymbolId)
                 || !methods.Contains(flow.MethodSymbolId) || !seen.Add(flow.MethodSymbolId)
+                || graphMethods.Contains(flow.MethodSymbolId)
                 || string.IsNullOrWhiteSpace(flow.SourceId) || flow.SourceLength < 0
                 || flow.Regions is null || flow.Branches is null || flow.Blocks is null
                 || flow.Throws is null || flow.Catches is null

@@ -9,8 +9,8 @@ public static class SemanticContract
 {
     public const int CurrentSchemaVersion = 31;
     public const string CurrentSemanticVersion = "1.40";
-    public const int ExceptionFlowSchemaVersion = 33;
-    public const string ExceptionFlowSemanticVersion = "1.42";
+    public const int ExceptionFlowSchemaVersion = 34;
+    public const string ExceptionFlowSemanticVersion = "1.43";
 
     public static string GenericInstanceId(string definitionId, IReadOnlyList<string> arguments)
     {
