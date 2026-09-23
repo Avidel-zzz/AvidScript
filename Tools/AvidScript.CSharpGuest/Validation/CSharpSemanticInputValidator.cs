@@ -119,11 +119,11 @@ internal static class CSharpSemanticInputValidator
                 }.Count(value => value is not null) <= 1)
             || !Unique(shapes.Select(shape => shape.TypeId)))
             return false;
-        if (semanticVersion != SemanticContract.CurrentSemanticVersion
+        if (semanticVersion is not ("1.37" or SemanticContract.CurrentSemanticVersion)
             && shapes.Any(shape => shape.GenericDefinitionTypeId is not null
                 || shape.GenericArgumentTypeIds is not null))
             return false;
-        if (semanticVersion == SemanticContract.CurrentSemanticVersion)
+        if (semanticVersion is "1.37" or SemanticContract.CurrentSemanticVersion)
         {
             HashSet<string> typeIds = types.Select(type => type.Id)
                 .ToHashSet(StringComparer.Ordinal);
@@ -146,13 +146,13 @@ internal static class CSharpSemanticInputValidator
                     return false;
             }
         }
-        if (semanticVersion is not "1.36" && semanticVersion != SemanticContract.CurrentSemanticVersion)
+        if (semanticVersion is not ("1.36" or "1.37" or SemanticContract.CurrentSemanticVersion))
             return true;
         Dictionary<string, SemanticTypeShape> byId = shapes.ToDictionary(
             shape => shape.TypeId, StringComparer.Ordinal);
         foreach (SemanticTypeShape shape in shapes)
         {
-            if (semanticVersion == SemanticContract.CurrentSemanticVersion
+            if (semanticVersion is "1.37" or SemanticContract.CurrentSemanticVersion
                 && !AcyclicShape(shape.TypeId, byId,
                     new HashSet<string>(StringComparer.Ordinal), depth: 0))
                 return false;
@@ -179,7 +179,7 @@ internal static class CSharpSemanticInputValidator
                 && symbol.Signature is not null
                 && !string.IsNullOrWhiteSpace(symbol.Accessibility)
                 && symbol.Span is not null)
-            && (semanticVersion is "1.35" or "1.36" or SemanticContract.CurrentSemanticVersion
+            && (semanticVersion is "1.35" or "1.36" or "1.37" or SemanticContract.CurrentSemanticVersion
                 || symbols.All(symbol => !symbol.Id.StartsWith("symbol:compiler_local:", StringComparison.Ordinal)))
             && Unique(symbols.Select(symbol => symbol.Id))
             && Unique(symbols
@@ -260,8 +260,7 @@ internal static class CSharpSemanticInputValidator
 
     private static bool ValidateGenericInstances(SemanticDocument document)
     {
-        if (document.SemanticVersion is not "1.36"
-            && document.SemanticVersion != SemanticContract.CurrentSemanticVersion)
+        if (document.SemanticVersion is not ("1.36" or "1.37" or SemanticContract.CurrentSemanticVersion))
             return document.Callables.All(callable => callable.GenericDefinitionSymbolId is null
                 && callable.GenericArgumentTypeIds is null
                 && callable.GenericTypeParameterIds?.Count is not > 0);
@@ -291,19 +290,43 @@ internal static class CSharpSemanticInputValidator
             }
             if (callable.GenericArgumentTypeIds is not { } arguments
                 || callable.GenericTypeParameterIds?.Count != 0
-                || !callable.IsStatic
                 || !callables.TryGetValue(definitionId, out SemanticCallable? definition)
+                || callable.IsStatic != definition.IsStatic
+                || callable.IsConstructor != definition.IsConstructor
+                || callable.HasBody != definition.HasBody
+                || (document.SemanticVersion != SemanticContract.CurrentSemanticVersion
+                    && !callable.IsStatic)
                 || definition.GenericDefinitionSymbolId is not null
                 || definition.GenericTypeParameterIds is not { Count: > 0 } formals
+                || !Unique(formals)
                 || formals.Count != arguments.Count
                 || arguments.Any(argument => !types.TryGetValue(argument, out SemanticType? type)
-                    || type.Kind == "type_parameter")
+                    || type.Kind == "type_parameter"
+                    || !SemanticGenericTypeSubstitution.TryClose(argument,
+                        new Dictionary<string, string>(StringComparer.Ordinal), types, shapes,
+                        out string closedArgument)
+                    || closedArgument != argument)
+                || definition.Import is not null
+                || definition.Dispatch?.IsVirtual == true
+                || definition.Dispatch?.IsAbstract == true
                 || callable.MethodSymbolId != SemanticContract.GenericInstanceId(definitionId, arguments)
-                || !graphs.Contains(callable.MethodSymbolId))
+                || graphs.Contains(callable.MethodSymbolId) != definition.HasBody)
                 return false;
             Dictionary<string, string> typeMap = formals.Zip(arguments)
                 .ToDictionary(pair => pair.First, pair => pair.Second, StringComparer.Ordinal);
             if (!SemanticGenericTypeSubstitution.TryClose(
+                    definition.ContainingTypeId, typeMap, types, shapes,
+                    out string expectedContainingType)
+                || callable.ContainingTypeId != expectedContainingType
+                || (!callable.IsStatic
+                    && (!types.TryGetValue(callable.ContainingTypeId, out SemanticType? ownerType)
+                        || ownerType.Kind != "class"))
+                || (!definition.HasBody
+                    && (!definition.IsConstructor || definition.Parameters.Count != 0
+                        || !document.ClassTypes.Any(type =>
+                            type.TypeId == callable.ContainingTypeId
+                            && type.HasImplicitDefaultConstructor)))
+                || !SemanticGenericTypeSubstitution.TryClose(
                     definition.ReturnTypeId, typeMap, types, shapes, out string expectedReturnType)
                 || callable.ReturnTypeId != expectedReturnType
                 || callable.Parameters.Count != definition.Parameters.Count
@@ -887,7 +910,7 @@ internal static class CSharpSemanticInputValidator
         IReadOnlyDictionary<string, SemanticSymbol> symbolsById,
         ref int expectedCallbackId)
     {
-        if ((document.SemanticVersion is not ("1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30" or "1.31" or "1.32" or "1.33" or "1.34" or "1.36") && document.SemanticVersion != SemanticContract.CurrentSemanticVersion)
+        if ((document.SemanticVersion is not ("1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30" or "1.31" or "1.32" or "1.33" or "1.34" or "1.36" or "1.37") && document.SemanticVersion != SemanticContract.CurrentSemanticVersion)
             || method.EntrySegmentOrdinal < 0
             || method.EntrySegmentOrdinal >= method.Segments.Count
             || method.Segments.Count > SemanticAsyncMethod.MaximumControlFlowSegments
@@ -1130,7 +1153,7 @@ internal static class CSharpSemanticInputValidator
 
     private static bool UsesExactAsyncStateFlow(string semanticVersion)
     {
-        return semanticVersion is "1.16" or "1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30" or "1.31" or "1.32" or "1.33" or "1.34" or "1.36"
+        return semanticVersion is "1.16" or "1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30" or "1.31" or "1.32" or "1.33" or "1.34" or "1.36" or "1.37"
             || semanticVersion == SemanticContract.CurrentSemanticVersion;
     }
 
@@ -1403,6 +1426,7 @@ internal static class CSharpSemanticInputValidator
             (30, "1.34") => true,
             (30, "1.35") => true,
             (30, "1.36") => true,
+            (31, "1.37") => true,
             (SemanticContract.CurrentSchemaVersion, SemanticContract.CurrentSemanticVersion) => true,
             _ => false,
         };
@@ -1455,7 +1479,7 @@ internal static class CSharpSemanticInputValidator
         {
             return true;
         }
-        return (semanticVersion is "1.16" or "1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30" or "1.31" or "1.32" or "1.33" or "1.34" or "1.36"
+        return (semanticVersion is "1.16" or "1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30" or "1.31" or "1.32" or "1.33" or "1.34" or "1.36" or "1.37"
                 || semanticVersion == SemanticContract.CurrentSemanticVersion)
             && statement.TargetSymbolId is null
             && ValidateStructuredAsyncFlow(

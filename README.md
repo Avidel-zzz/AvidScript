@@ -98,7 +98,7 @@ public partial class Projectile : AvidActor
 
 | 方面 | 已有支持 | 仍有限制 |
 | --- | --- | --- |
-| C# | 常用控制流、数组、受支持的类/结构体、lambda、局部函数、封闭泛型方法和简单泛型类 | 泛型类自定义构造器与实例方法、任意 .NET/NuGet 库尚不支持 |
+| C# | 常用控制流、数组、受支持的类/结构体、lambda、局部函数、封闭泛型方法和[简单泛型类](Fixtures/Phase66/GenericMethods.cs)的同步成员 | 复杂泛型类、异步泛型及任意 .NET/NuGet 库尚不支持 |
 | 异步 | 计时器、下一帧、资源加载、受支持的 UE Latent API | 不能等待任意 `Task` 或自定义 awaiter |
 | UE 集成 | 生成的 API 绑定、脚本定义的 Actor/Component/Subsystem、RPC、属性复制与 RepNotify 的聚焦测试 | 反射结构变更需重建 Editor；真实网络玩法仍需单独验收 |
 | 工具与平台 | 错误定位、受支持的调试与热重载；Windows 打包样例 | 不是完整 C# 调试器；Android 真机和 iOS 尚未验收 |

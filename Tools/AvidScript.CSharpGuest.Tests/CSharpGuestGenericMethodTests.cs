@@ -22,13 +22,13 @@ internal static class CSharpGuestGenericMethodTests
     {
         string source = File.ReadAllText(FindFixture());
         SemanticDocument semantic = Analyze(source);
-        Check(semantic.Succeeded && semantic.SemanticVersion == "1.37",
+        Check(semantic.Succeeded && semantic.SemanticVersion == "1.38",
             "closed generic source should publish the current semantic contract");
         SemanticCallable[] instances = semantic.Callables
             .Where(callable => callable.GenericDefinitionSymbolId is not null).ToArray();
-        Check(instances.Length == 14 && instances.Select(callable => callable.MethodSymbolId)
-            .Distinct(StringComparer.Ordinal).Count() == 14,
-            "scalar, ref/out, array, value and reference calls need fourteen distinct instances");
+        Check(instances.Length == 26 && instances.Select(callable => callable.MethodSymbolId)
+            .Distinct(StringComparer.Ordinal).Count() == 26,
+            $"scalar, ref/out, array, value and reference members need 26 distinct instances; found {instances.Length}");
         Check(instances.All(callable => semantic.Reachability!.ReachableCallableIds
             .Contains(callable.MethodSymbolId))
             && semantic.Reachability!.ReachableCallableIds.All(id =>
@@ -80,6 +80,10 @@ internal static class CSharpGuestGenericMethodTests
             semantic with { SchemaVersion = 30, SemanticVersion = "1.36" },
             new string('a', 64)).Succeeded,
             "schema 30 / semantic 1.36 closed method artifacts must remain readable");
+        Check(CSharpGuestLowerer.Lower(
+            semantic with { SemanticVersion = "1.37" },
+            new string('a', 64)).Succeeded,
+            "schema 31 / semantic 1.37 closed method artifacts must remain readable");
         SemanticDocument arraySemantic = Analyze(File.ReadAllText(FindFixture()));
         SemanticCallable arrayInstance = arraySemantic.Callables.Single(callable =>
             callable.GenericDefinitionSymbolId?.Contains(".EchoArray", StringComparison.Ordinal) == true);
@@ -172,6 +176,8 @@ internal static class CSharpGuestGenericMethodTests
         {
             ("type:global::Box<int>", "type:int32"),
             ("type:global::Box<global::Pair<int, float>>", "type:global::Pair<int, float>"),
+            ("type:global::MemberBox<int>", "type:int32"),
+            ("type:global::MemberBox<global::Pair<int, float>>", "type:global::Pair<int, float>"),
         })
         {
             var reference = guest.Module!.Types.Single(type => type.Id == typeId);
@@ -183,6 +189,8 @@ internal static class CSharpGuestGenericMethodTests
         }
         Check(!guest.Module!.Types.Any(type => type.Id == "type:global::Box<T>"),
             "the open class definition cannot become an executable managed reference");
+        Check(!guest.Module.Types.Any(type => type.Id == "type:global::MemberBox<T>"),
+            "the open class member definition cannot become an executable managed reference");
         SemanticDocument wrongDefinition = semantic with
         {
             TypeShapes = semantic.TypeShapes.Select(shape =>
@@ -193,23 +201,20 @@ internal static class CSharpGuestGenericMethodTests
         Check(!CSharpGuestLowerer.Lower(wrongDefinition, new string('a', 64)).Succeeded,
             "a reference type cannot borrow another generic definition's field layout");
 
-        const string explicitConstructor = """
-            using System.Runtime.InteropServices;
-            public sealed class Box<T> {
-                public T Value;
-                public Box(T value) { Value = value; }
-            }
-            public static class Script {
-                static Box<T> Make<T>(T value) => new Box<T>(value);
-                [UnmanagedCallersOnly(EntryPoint = "generic_box_explicit")]
-                public static int Main() => Make<int>(7).Value;
-            }
-            """;
-        SemanticDocument unsupported = Analyze(explicitConstructor);
-        Check((!unsupported.Succeeded
-                && unsupported.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCS1064"))
-            || !CSharpGuestLowerer.Lower(unsupported, new string('a', 64)).Succeeded,
-            "generic constructors with bodies require member specialization before execution");
+        SemanticCallable closedMember = semantic.Callables.Single(callable =>
+            callable.GenericDefinitionSymbolId?.Contains("MemberBox<T>.Read", StringComparison.Ordinal) == true
+            && callable.ContainingTypeId == "type:global::MemberBox<int>");
+        SemanticDocument wrongMemberOwner = semantic with
+        {
+            Callables = semantic.Callables.Select(callable => callable == closedMember
+                ? callable with { ContainingTypeId = "type:global::MemberBox<global::Pair<int, float>>" }
+                : callable).ToArray(),
+        };
+        Check(!CSharpGuestLowerer.Lower(wrongMemberOwner, new string('a', 64)).Succeeded,
+            "a closed member cannot claim another instantiation's receiver layout");
+        Check(!CSharpGuestLowerer.Lower(
+            semantic with { SemanticVersion = "1.37" }, new string('a', 64)).Succeeded,
+            "semantic 1.37 cannot claim the new generic class member execution plan");
     }
 
     private static void CompositeOpenTypesFailClosed()
@@ -227,6 +232,24 @@ internal static class CSharpGuestGenericMethodTests
         Check(!semantic.Succeeded && semantic.Diagnostics.Any(diagnostic =>
             diagnostic.Code == "ASCS1064"),
             "unsupported composite open types must fail until they have a structured closed layout");
+
+        const string shadowedParameter = """
+            using System.Runtime.InteropServices;
+            public sealed class Shadow<T>
+            {
+                public U Echo<U>(U value) => value;
+                public T Echo<T>(T value, int ignored) => value;
+            }
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "generic_shadow")]
+                public static int Main() => new Shadow<int>().Echo<float>(2.5f, 0) > 0 ? 1 : 0;
+            }
+            """;
+        SemanticDocument shadowed = Analyze(shadowedParameter);
+        Check(!shadowed.Succeeded && shadowed.Diagnostics.Any(diagnostic =>
+            diagnostic.Code == "ASCS1064"),
+            "same-named class and method type parameters must fail closed until scoped identities exist");
     }
 
     private static SemanticDocument Analyze(string source)

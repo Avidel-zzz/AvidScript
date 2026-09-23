@@ -38,6 +38,9 @@ internal static class CSharpGuestSemanticFixture
             if (node is JsonObject value)
             {
                 value.Remove("dispatch");
+                value.Remove("generic_type_parameter_ids");
+                value.Remove("generic_definition_symbol_id");
+                value.Remove("generic_argument_type_ids");
                 foreach (JsonNode? child in value.Select(pair => pair.Value).ToArray()) Strip(child);
             }
             else if (node is JsonArray array) foreach (JsonNode? child in array) Strip(child);

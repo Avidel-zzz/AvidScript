@@ -122,6 +122,8 @@ const cases = [
     ['generic_named_nested', 7],
     ['generic_box_int', 94],
     ['generic_box_nested', 8],
+    ['generic_member_int', 94],
+    ['generic_member_nested', 8],
 ];
 for (const [name, expected] of cases) {
     const actual = instance.exports[name]();
@@ -133,7 +135,7 @@ for (const [name, expected] of cases) {
     }
     console.log(`${name}: ${actual}`);
 }
-if (layouts.size !== 2 || objects.size < 3) {
-    throw new Error('Generic class allocations did not exercise both closed heap layouts');
+if (layouts.size !== 4 || objects.size < 6) {
+    throw new Error('Generic class allocations did not exercise the four closed heap layouts');
 }
 console.log(`GenericMethodsWasm: ${cases.length}/${cases.length} passed`);

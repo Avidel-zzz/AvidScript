@@ -144,15 +144,19 @@ internal static class SemanticGenericSpecializer
             if (symbolId is not null && definitions.TryGetValue(symbolId, out SemanticCallable? target))
             {
                 string[] formals = target.GenericTypeParameterIds!.ToArray();
-                if (!target.IsStatic || target.IsConstructor || target.Import is not null
+                if ((!target.IsStatic
+                        && (!typesById.TryGetValue(target.ContainingTypeId, out SemanticType? ownerType)
+                            || ownerType.Kind != "class"))
+                    || target.Import is not null
                     || target.Dispatch?.IsVirtual == true
                     || target.Dispatch?.IsAbstract == true
+                    || formals.Distinct(StringComparer.Ordinal).Count() != formals.Length
                     || formals.Length != typeArguments.Length
                     || typeArguments.Any(typeId => !typesById.TryGetValue(typeId, out SemanticType? type)
                         || type.Kind == "type_parameter"))
                 {
                     diagnostics.Add(new SemanticDiagnostic("ASCS1064", "error",
-                        $"Generic call '{symbolId}' has no supported closed static method layout.",
+                        $"Generic call '{symbolId}' has no supported closed member layout.",
                         operation.Span));
                 }
                 else
@@ -172,6 +176,8 @@ internal static class SemanticGenericSpecializer
                             callables.Add(target with
                             {
                                 MethodSymbolId = instanceId,
+                                ContainingTypeId = MapType(target.ContainingTypeId, targetTypes,
+                                    operation.Span)!,
                                 ReturnTypeId = MapType(target.ReturnTypeId, targetTypes, operation.Span)!,
                                 Parameters = target.Parameters.Select(parameter => parameter with
                                 {

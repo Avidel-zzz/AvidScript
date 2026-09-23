@@ -11,6 +11,16 @@ public sealed class Box<T>
     public T Value;
 }
 
+public sealed class MemberBox<T>
+{
+    public T Value;
+
+    public MemberBox(T value) { Value = value; }
+    public T Read() => Value;
+    public T Relay() => Read();
+    public void Store(T value) { Value = value; }
+}
+
 public static class Script
 {
     static T Identity<T>(T value) => value;
@@ -39,6 +49,7 @@ public static class Script
         box.Value = value;
         return box;
     }
+    static MemberBox<T> MakeMemberBox<T>(T value) => new MemberBox<T>(value);
 
     [UnmanagedCallersOnly(EntryPoint = "generic_int")]
     public static int Int() => Identity<int>(7);
@@ -83,5 +94,23 @@ public static class Script
         Box<Pair<int, float>> box = MakeBox(MakePair<int, float>(7, 2.5f));
         box.Value.First += 1;
         return box.Value.First;
+    }
+    [UnmanagedCallersOnly(EntryPoint = "generic_member_int")]
+    public static int MemberInt()
+    {
+        MemberBox<int> first = MakeMemberBox<int>(7);
+        MemberBox<int> second = new MemberBox<int>(4);
+        first.Store(first.Read() + 2);
+        return first.Relay() * 10 + second.Read();
+    }
+    [UnmanagedCallersOnly(EntryPoint = "generic_member_nested")]
+    public static int MemberNested()
+    {
+        MemberBox<Pair<int, float>> box = MakeMemberBox(
+            MakePair<int, float>(7, 2.5f));
+        Pair<int, float> value = box.Read();
+        value.First += 1;
+        box.Store(value);
+        return box.Relay().First;
     }
 }

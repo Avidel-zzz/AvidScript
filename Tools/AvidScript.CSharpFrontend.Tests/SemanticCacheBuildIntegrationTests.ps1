@@ -199,10 +199,10 @@ function Assert-SemanticContract {
     $Semantic = Get-Content -Raw -LiteralPath $SemanticPath | ConvertFrom-Json
     Assert-Condition (
         [int]$Build.Report.semantic.schema_version -eq 31 -and
-        [string]$Build.Report.semantic.version -ceq "1.37" -and
+        [string]$Build.Report.semantic.version -ceq "1.38" -and
         [int]$Semantic.schema_version -eq 31 -and
-        [string]$Semantic.semantic_version -ceq "1.37") `
-        "$Label semantic contract is not 31/1.37"
+        [string]$Semantic.semantic_version -ceq "1.38") `
+        "$Label semantic contract is not 31/1.38"
 }
 
 foreach ($Directory in @($RunRoot, $CacheParent)) {

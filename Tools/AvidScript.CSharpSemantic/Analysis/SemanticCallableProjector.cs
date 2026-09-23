@@ -78,7 +78,13 @@ internal static class SemanticCallableProjector
                     export,
                     optimization,
                     SemanticDispatchProjector.Project(method),
-                    method.TypeParameters.Select(typeRegistry.Register).ToArray());
+                    // A class member is closed by its containing type before its own method arguments.
+                    (method.ContainingType.TypeKind == TypeKind.Class
+                        ? method.ContainingType.TypeParameters
+                        : Enumerable.Empty<ITypeParameterSymbol>())
+                        .Concat(method.TypeParameters)
+                        .Select(typeRegistry.Register)
+                        .ToArray());
                 if (!callables.TryAdd(methodId, callable))
                 {
                     if (method.MethodKind == MethodKind.Constructor && !hasBody

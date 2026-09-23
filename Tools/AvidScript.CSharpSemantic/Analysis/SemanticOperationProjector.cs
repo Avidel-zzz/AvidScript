@@ -298,14 +298,21 @@ internal static class SemanticOperationProjector
         {
             IInvocationOperation invocation => invocation.TargetMethod,
             IMethodReferenceOperation methodReference => methodReference.Method,
+            IObjectCreationOperation creation => creation.Constructor,
             _ => null,
         };
-        if (method is null || method.Arity == 0)
+        if (method is null)
         {
             return Array.Empty<string>();
         }
 
-        return method.TypeArguments.Select(typeRegistry.Register).ToArray();
+        // Constructors carry the class arguments even though their method arity is zero.
+        return (method.ContainingType.TypeKind == TypeKind.Class
+                ? method.ContainingType.TypeArguments
+                : Enumerable.Empty<ITypeSymbol>())
+            .Concat(method.TypeArguments)
+            .Select(typeRegistry.Register)
+            .ToArray();
     }
     private static ISymbol? GetReferencedSymbol(IOperation operation)
     {

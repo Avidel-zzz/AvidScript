@@ -266,7 +266,7 @@ internal static class CSharpGuestContinuationTests
 
         Assert(result.Succeeded
             && document.SchemaVersion == 31
-            && document.SemanticVersion == "1.37"
+            && document.SemanticVersion == "1.38"
             && guard.Terminator.Kind == "branch_if"
             && guard.Terminator.TargetBlockId == guardReturn.Id
             && guard.Terminator.FalseTargetBlockId == continuation.Id
@@ -720,7 +720,7 @@ internal static class CSharpGuestContinuationTests
 
         Assert(result.Succeeded
             && document.SchemaVersion == 31
-            && document.SemanticVersion == "1.37"
+            && document.SemanticVersion == "1.38"
             && asyncMethod.Lowering == "reentrant_zero_heap_cps"
             && callbackIds.SequenceEqual(new[]
             {
@@ -1049,7 +1049,7 @@ internal static class CSharpGuestContinuationTests
 
         Assert(first.Succeeded
             && second.Succeeded
-            && document.SemanticVersion == "1.37"
+            && document.SemanticVersion == "1.38"
             && frame.Slots.Select(slot => slot.SymbolId)
                 .SequenceEqual(new[] { countId })
             && frame.Slots.All(slot => slot.SymbolId != overwrittenId),
@@ -1467,7 +1467,8 @@ internal static class CSharpGuestContinuationTests
         };
         CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(schemaTen, SemanticHash);
         GuestModule module = result.Module
-            ?? throw new InvalidOperationException("schema 10 continuation callbacks produced no Guest module");
+            ?? throw new InvalidOperationException("schema 10 continuation callbacks produced no Guest module: "
+                + string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Message)));
         GuestExport export = module.Exports.Single(export => export.Name == "avid_on_continuation");
         GuestFunction router = module.Functions.Single(function => function.Id == export.FunctionId);
 

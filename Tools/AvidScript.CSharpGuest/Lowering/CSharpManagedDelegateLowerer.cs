@@ -26,6 +26,7 @@ internal static class CSharpManagedDelegateLowerer
                 && context.Document.SemanticVersion is not "1.30"
                 && context.Document.SemanticVersion is not ("1.31" or "1.32")
                 && context.Document.SemanticVersion != "1.36"
+                && context.Document.SemanticVersion != "1.37"
                 && context.Document.SemanticVersion != SemanticContract.CurrentSemanticVersion)
             || !callable.IsStatic || callable.IsConstructor || !callable.HasBody || callable.Import is not null
             || callable.ReturnTypeId != signature.ReturnTypeId
@@ -123,7 +124,7 @@ internal static class CSharpManagedDelegateLowerer
     public static bool ContainsReference(string typeId, IReadOnlyDictionary<string, GuestType> types)
         => ContainsReference(typeId, types, new HashSet<string>(StringComparer.Ordinal));
 
-    private static bool SupportsDelegates(SemanticDocument document) => document.SemanticVersion is "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30" or "1.31" or "1.32" or "1.36"
+    private static bool SupportsDelegates(SemanticDocument document) => document.SemanticVersion is "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30" or "1.31" or "1.32" or "1.36" or "1.37"
         || document.SemanticVersion == SemanticContract.CurrentSemanticVersion;
 
     private static bool ContainsReference(string typeId, IReadOnlyDictionary<string, GuestType> types, HashSet<string> visited)
