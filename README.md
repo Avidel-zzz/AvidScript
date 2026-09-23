@@ -176,7 +176,7 @@ public static class ScoreScript
 
 脚本卸载、World 清理或源 Actor 销毁后会自动解绑。更新脚本失败时旧回调继续工作，成功时旧回调解绑，新脚本可重新订阅。单播事件已被占用、对象已失效或对象属于另一个 World 时，运行时会拒绝新订阅。[完整的事件行为与当前限制](Docs/Phase66/P66.B_Event_Language_Contract.md)。
 
-例如两个 Actor 的事件回调都在等待下一帧：包级更新失败时，两人的旧等待继续；更新成功时，两人的旧等待都取消，重新订阅后才能再触发。正式生成的 `Projectile` 已用同一包验证这条 Win64 生命周期路径；不同代码版本的发布切换和实际游戏长时间运行仍待验收。[详细范围](Docs/Phase66/P66.B_Event_Language_Contract.md#事件回调跨-await)。
+例如两个 Actor 的事件回调都在等待下一帧：包级更新失败时，两人的旧等待继续；更新成功时，两人的旧等待都取消，重新订阅后才能再触发。正式生成的 `Projectile` 已在 Win64 Editor 自动化中验证同包重载，以及把恢复后倍率从 `10` 改为 `20` 的不同代码版本切换；PIE、Cook/Shipping 切换和长时间运行仍待验收。[详细范围](Docs/Phase66/P66.B_Event_Language_Contract.md#事件回调跨-await)。
 
 </details>
 

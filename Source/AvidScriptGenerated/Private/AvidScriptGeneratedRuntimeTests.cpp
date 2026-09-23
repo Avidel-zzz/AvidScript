@@ -6,6 +6,7 @@
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "HAL/PlatformTime.h"
+#include "HAL/PlatformMisc.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Paths.h"
@@ -376,8 +377,16 @@ bool FAvidScriptGeneratedCSharpEventAwaitReloadTest::RunTest(const FString& Para
 	{
 		return true;
 	}
-	const FString DescriptorPath = FPaths::Combine(
+	FString DescriptorPath = FPaths::Combine(
 		Plugin->GetBaseDir(), TEXT("Content/AvidScriptGenerated/current.json"));
+	const FString CandidateDescriptorPath = FPlatformMisc::GetEnvironmentVariable(
+		TEXT("AVIDSCRIPT_GENERATED_EVENT_CANDIDATE_DESCRIPTOR"));
+	const bool bVersionedCandidate = !CandidateDescriptorPath.IsEmpty();
+	if (bVersionedCandidate)
+	{
+		DescriptorPath = CandidateDescriptorPath;
+		AddInfo(TEXT("Generated event reload uses a separately published C# body candidate."));
+	}
 	if (!TestTrue(TEXT("Generated event package pointer exists"), FPaths::FileExists(DescriptorPath)))
 	{
 		return true;
@@ -427,6 +436,10 @@ bool FAvidScriptGeneratedCSharpEventAwaitReloadTest::RunTest(const FString& Para
 	FString ReloadError;
 	const bool bRejectedCandidateApplied = Host.ReloadPackageFromDescriptorFile(
 		DescriptorPath, Rejected, ReloadError);
+	if (!ReloadError.IsEmpty())
+	{
+		AddInfo(FString::Printf(TEXT("Generated candidate rejection: %s"), *ReloadError));
+	}
 	TestFalse(TEXT("Injected generated package candidate rolls back"), bRejectedCandidateApplied);
 	TestTrue(TEXT("Rollback prepared a candidate"), Rejected.PreparedInstanceCount >= 1);
 	TestEqual(TEXT("Rollback published no new Session"), Rejected.ReloadedInstanceCount, 0);
@@ -478,7 +491,8 @@ bool FAvidScriptGeneratedCSharpEventAwaitReloadTest::RunTest(const FString& Para
 		}
 	}
 	TestEqual(TEXT("Retired reloaded owner cannot resume"), Retiring->OverlapScore, 4);
-	TestEqual(TEXT("Reloaded peer resumes only its new callback"), Survivor->OverlapScore, 24);
+	TestEqual(TEXT("Reloaded peer resumes only its new callback"), Survivor->OverlapScore,
+		bVersionedCandidate ? 44 : 24);
 	TestEqual(TEXT("Reloaded peer consumes its continuation"), SurvivorSession->GetLivePendingContinuationCount(), 0);
 	DestroyGeneratedScriptWorld(World);
 	return true;
