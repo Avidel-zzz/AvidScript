@@ -2763,6 +2763,12 @@ bool FAvidScriptEditorDelegateEventFacadeTest::RunTest(
 		TEXT("Facade declares internal event contract attribute"),
 		ReferenceSource.Contains(
 			TEXT("internal sealed class AvidEventContractAttribute : Attribute")));
+	TestTrue(TEXT("Facade declares a typed instance event with stable language identity"),
+		ReferenceSource.Contains(FString::Printf(
+			TEXT("[AvidEventLanguage(\"%s\", %d)]"), *Event.StableId, Event.Ordinal))
+		&& ReferenceSource.Contains(TEXT("public event AvidEventHandlers.OnScriptSignal OnScriptSignal"))
+		&& ReferenceSource.Contains(TEXT("add { }"))
+		&& ReferenceSource.Contains(TEXT("remove { }")));
 	TestTrue(
 		TEXT("Facade publishes event constants"),
 		ReferenceSource.Contains(TEXT("public static class AvidEvents")));
@@ -2851,6 +2857,17 @@ bool FAvidScriptEditorDelegateEventFacadeTest::RunTest(
 		TEXT("Facade does not derive the event ordinal from array position"),
 		NonSequentialOrdinalSource.Contains(TEXT(
 			"AvidScriptRuntimeNative.EventSubscribe(source.AvidScriptSlot, source.AvidScriptGeneration, 37)")));
+	TestTrue(TEXT("Language event member keeps the descriptor ordinal"),
+		NonSequentialOrdinalSource.Contains(FString::Printf(
+			TEXT("[AvidEventLanguage(\"%s\", 37)]"), *Event.StableId)));
+	FAvidScriptBindingPackageModel EventNameCollision = Package;
+	EventNameCollision.DelegateEvents[0].ScriptName = TEXT("IsValid");
+	FString EventCollisionSource, EventCollisionCategory, EventCollisionDetail;
+	TestFalse(TEXT("Language event cannot shadow an owner proxy member"),
+		FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(EventNameCollision,
+			Result.DescriptorHash, EventCollisionSource, EventCollisionCategory, EventCollisionDetail));
+	TestEqual(TEXT("Event collision is diagnosed at generation"), EventCollisionCategory,
+		FString(TEXT("csharp_event_member_collision")));
 
 	FAvidScriptBindingSelectionProfile SharedOwnerProfile = Profile;
 	SharedOwnerProfile.ExplicitDelegateEvents.Add({ OwnerPath, TEXT("OnRefOutSignal") });
@@ -2894,6 +2911,7 @@ bool FAvidScriptEditorDelegateEventFacadeTest::RunTest(
 
 	const TArray<FString> ReservedTypeNames = {
 		TEXT("AvidEventHandlers"), TEXT("AvidEventSubscriptionNative"), TEXT("AvidEventSubscriptionAttribute"),
+		TEXT("AvidEventLanguageAttribute"),
 		TEXT("AvidSubscription"),
 		TEXT("AvidSubscriptions")
 	};

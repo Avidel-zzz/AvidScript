@@ -2365,6 +2365,12 @@ bool AppendDelegateEventReferenceSurface(
 		TEXT("    internal AvidEventSubscriptionAttribute(string subscriptionId, int eventOrdinal) { }"),
 		TEXT("}"),
 		TEXT(""),
+		TEXT("[AttributeUsage(AttributeTargets.Event, Inherited = false, AllowMultiple = false)]"),
+		TEXT("internal sealed class AvidEventLanguageAttribute : Attribute"),
+		TEXT("{"),
+		TEXT("    internal AvidEventLanguageAttribute(string subscriptionId, int eventOrdinal) { }"),
+		TEXT("}"),
+		TEXT(""),
 		TEXT("public readonly struct AvidSubscription"),
 		TEXT("{"),
 		TEXT("    private readonly long Token;"),
@@ -2840,6 +2846,7 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 		&& (CSharpTypeNames.Contains(TEXT("AvidEventAttribute"))
 			|| CSharpTypeNames.Contains(TEXT("AvidEventContractAttribute"))
 			|| CSharpTypeNames.Contains(TEXT("AvidEventSubscriptionAttribute"))
+			|| CSharpTypeNames.Contains(TEXT("AvidEventLanguageAttribute"))
 			|| CSharpTypeNames.Contains(TEXT("AvidEventHandlers"))
 			|| CSharpTypeNames.Contains(TEXT("AvidEventSubscriptionNative"))
 			|| CSharpTypeNames.Contains(TEXT("AvidEvents"))
@@ -2847,7 +2854,7 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 			|| CSharpTypeNames.Contains(TEXT("AvidSubscriptions"))))
 	{
 		OutErrorCategory = TEXT("csharp_type_collision");
-		OutErrorSource = TEXT("AvidEventAttribute|AvidEventContractAttribute|AvidEventSubscriptionAttribute|AvidEventHandlers|AvidEventSubscriptionNative|AvidEvents|AvidSubscription|AvidSubscriptions");
+		OutErrorSource = TEXT("AvidEventAttribute|AvidEventContractAttribute|AvidEventSubscriptionAttribute|AvidEventLanguageAttribute|AvidEventHandlers|AvidEventSubscriptionNative|AvidEvents|AvidSubscription|AvidSubscriptions");
 		return false;
 	}
 	if (Package.SchemaVersion >= 9
@@ -3477,6 +3484,37 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 				Lines.Add(TEXT(""));
 				Lines.Append(RenderedMethods.FindChecked(Binding->Ordinal).MethodLines);
 			}
+		}
+		TSet<FString> EventMemberNames;
+		for (const FAvidScriptBindingDelegateEventModel& Event : Package.DelegateEvents)
+		{
+			if (Event.OwnerClass != OwnerPath) continue;
+			const FString MemberName = FAvidScriptEditorCSharpSyntax::MakeIdentifier(Event.ScriptName);
+			if (bStaticOnly || EventMemberNames.Contains(MemberName)
+				|| MemberName == TypeName || MemberName == TEXT("Slot")
+				|| MemberName == TEXT("Generation") || MemberName == TEXT("AvidScriptSlot")
+				|| MemberName == TEXT("AvidScriptGeneration") || MemberName == TEXT("IsNull")
+				|| MemberName == TEXT("HasHandle") || MemberName == TEXT("IsValid")
+				|| (OwnerBindings && OwnerBindings->ContainsByPredicate(
+					[&MemberName](const FAvidScriptBindingFunctionModel* Binding)
+					{
+						return FAvidScriptEditorCSharpSyntax::MakeIdentifier(Binding->ScriptName) == MemberName;
+					})))
+			{
+				OutErrorCategory = TEXT("csharp_event_member_collision");
+				OutErrorSource = Event.OwnerClass + TEXT(".") + Event.ScriptName;
+				return false;
+			}
+			EventMemberNames.Add(MemberName);
+			Lines.Append({
+				TEXT(""),
+				FString::Printf(TEXT("    [AvidEventLanguage(\"%s\", %d)]"), *Event.StableId, Event.Ordinal),
+				FString::Printf(TEXT("    public event AvidEventHandlers.%s %s"), *MemberName, *MemberName),
+				TEXT("    {"),
+				TEXT("        add { }"),
+				TEXT("        remove { }"),
+				TEXT("    }")
+			});
 		}
 		Lines.Add(TEXT("}"));
 		Lines.Add(TEXT(""));
