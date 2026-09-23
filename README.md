@@ -1,12 +1,26 @@
-![AvidScript：用 C#，让玩法动起来。代码驱动 UE 方块的概念插画。](Docs/Assets/README/avidscript-hero.png)
+<p align="center">
+  <img src="Docs/Assets/README/avidscript-hero.png" alt="AvidScript：用 C# 驱动 Unreal Engine 中的方块" width="100%">
+</p>
 
-# AvidScript
+<h1 align="center">AvidScript</h1>
 
-**用 C# 为 Unreal Engine 编写玩法脚本。**
+<p align="center"><strong>用 C# 为 Unreal Engine 编写玩法脚本。</strong></p>
 
-![UE 5.8 · C# · WebAssembly · Windows x64 · 0.1.0 Preview · MIT](Docs/Assets/README/project-badges.png)
+<p align="center">
+  <img src="https://img.shields.io/badge/Unreal%20Engine-5.8-172A34?logo=unrealengine&amp;logoColor=white" alt="Unreal Engine 5.8">
+  <img src="https://img.shields.io/badge/Language-C%23-512BD4?logo=dotnet&amp;logoColor=white" alt="C#">
+  <img src="https://img.shields.io/badge/Target-WebAssembly-5541A9?logo=webassembly&amp;logoColor=white" alt="WebAssembly">
+  <img src="https://img.shields.io/badge/Platform-Windows%20x64-0967A6?logo=windows&amp;logoColor=white" alt="Windows x64">
+  <img src="https://img.shields.io/badge/Status-0.1.0%20Preview-805413" alt="0.1.0 开发预览版">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-226342" alt="MIT License"></a>
+</p>
 
-[🚀 跑起来](#快速开始) · [🧩 看代码示例](#常见用法) · [🚧 当前限制](#当前边界) · [📚 更多文档](#进一步阅读)
+<p align="center">
+  <a href="#快速开始">🚀 快速开始</a> ·
+  <a href="#常见用法">🧩 代码示例</a> ·
+  <a href="#当前边界">🚧 当前限制</a> ·
+  <a href="#进一步阅读">📚 更多文档</a>
+</p>
 
 ---
 
@@ -16,8 +30,6 @@
 | :--- | :--- | :--- |
 | 移动、碰撞、UI、存档与网络 | 修改方法体后热重载，减少 C++ 编译等待 | 调用项目 API，向蓝图暴露类、属性和函数 |
 
-![AvidScript 使用流程：编写 C# 玩法、编译为 WASM、由插件加载执行，最后驱动 UE 游戏对象。](Docs/Assets/README/script-to-game.png)
-
 > [!NOTE]
 > **0.1.0 开发预览版** · 主要验证环境为 **UE 5.8 源码版 + Windows x64**。已有可运行样例，C# 语言支持、调试体验和平台覆盖仍在完善，尚不适合作为完整 .NET 的替代品。
 
@@ -26,6 +38,8 @@
 ## 🚀 快速开始
 
 先运行仓库自带的 ActorLifecycle 样例：让一个方块移动、旋转并逐渐变大。下面的命令都在项目的 `Plugins/AvidScript` 目录执行。
+
+![从 C# 脚本到 UE 游戏对象的四步流程：编写、编译、加载、运行](Docs/Assets/README/script-to-game.png)
 
 ### 🧰 1. 准备环境
 
@@ -58,6 +72,9 @@ $env:UE_ROOT = "C:\UnrealEngine"
 
 完整脚本在 [ActorLifecycleScript.cs](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)。如果没有变化，先检查 **Output Log** 中的 `AvidScript` 构建或加载错误，以及方块上的组件是否已绑定脚本。
 
+<details>
+<summary>⌨️ 可选：命令行编译与手动绑定</summary>
+
 也可以单独用命令行编译：
 
 ```powershell
@@ -71,6 +88,8 @@ Saved/AvidScriptCSharpGuest/ActorLifecycle/actor_lifecycle.avidscript.json
 ```
 
 这个 JSON 是脚本的加载清单，记录要加载的程序及其信息。手动绑定时，在 Actor 上添加 **AvidScript Component**，将 **Script Manifest File** 指向它；**Script Module** 保持未设置。命令行编译本身不会修改关卡。
+
+</details>
 
 <a id="常见用法"></a>
 
@@ -160,22 +179,27 @@ public static class ScoreScript
 
 `Start()` 注册回调，`Stop()` 移除回调。重复注册会重复触发；同一脚本分别订阅两个有访问权限、同 World 的 Actor 时，移除其中一个不会影响另一个。
 
+<details>
+<summary>🔍 更多事件行为：再次广播、await、重载与取消</summary>
+
 对这种已生成的无返回值多播事件，回调也能再次广播：例如先收到 `2`，再广播 `3`，两次回调会让得分共加 `5`。再次广播时要设置终止条件，避免无限递归。
 
 事件回调也可以等待下一帧：收到 `2` 后先加 `2`，`await AvidContinuations.NextTickAsync()` 恢复后再加 `20`。等待期间的局部值会保留；同一份脚本作用于两个 Actor 时，停止或销毁其中一个只取消它自己的等待。这个流程已从 C# `[UClass]` 的 `[UFunction]` 入口在 Windows 双后端跑通；原生类自动生成与安装的完整流程还在验证中。[完整代码与重载、取消边界](Docs/Phase66/P66.B_Event_Language_Contract.md#事件回调跨-await)。
 
 脚本卸载、World 清理或源 Actor 销毁后会自动解绑。更新脚本失败时旧回调继续工作，成功时旧回调解绑，新脚本可重新订阅。单播事件已被占用、对象已失效或对象属于另一个 World 时，运行时会拒绝新订阅。[完整的事件行为与当前限制](Docs/Phase66/P66.B_Event_Language_Contract.md)。
 
+</details>
+
 ### 🗂️ 找一个接近你需求的完整样例
 
 | 你想实现什么 | 从哪里开始 |
 | --- | --- |
-| 碰到道具后隐藏，3 秒后重新出现 | [可拾取道具](Samples/CSharp/PlayablePickup/README.md) |
-| 20 秒内收集 5 次，判断胜负并重开 | [PickupRush 小游戏](Samples/CSharp/PickupRush/README.md) |
-| 点击按钮加分，保存并在下次启动时读回 | [UI 与存档](Samples/CSharp/UiSaveDemo/README.md) |
-| 客户端请求服务器执行操作 | [RPC：远程调用](Samples/CSharp/NetworkRpc/README.md) |
-| 服务器修改数值，客户端同步并响应变化 | [属性复制与 RepNotify](Samples/CSharp/ReplicatedProperty/README.md) |
-| 调用项目自己的 C++ 函数、生成蓝图 Actor | [项目 API](Samples/CSharp/TypedProjectApi/README.md) |
+| 🎁 碰到道具后隐藏，3 秒后重新出现 | [可拾取道具](Samples/CSharp/PlayablePickup/README.md) |
+| 🏁 20 秒内收集 5 次，判断胜负并重开 | [PickupRush 小游戏](Samples/CSharp/PickupRush/README.md) |
+| 💾 点击按钮加分，保存并在下次启动时读回 | [UI 与存档](Samples/CSharp/UiSaveDemo/README.md) |
+| 🌐 客户端请求服务器执行操作 | [RPC：远程调用](Samples/CSharp/NetworkRpc/README.md) |
+| 🔄 服务器修改数值，客户端同步并响应变化 | [属性复制与 RepNotify](Samples/CSharp/ReplicatedProperty/README.md) |
+| 🧱 调用项目自己的 C++ 函数、生成蓝图 Actor | [项目 API](Samples/CSharp/TypedProjectApi/README.md) |
 
 RPC 是跨网络请求另一端执行函数；属性复制是服务器把属性值同步给客户端；RepNotify 是收到属性变化后的回调。调用权限和对象归属仍遵循 UE 的网络规则。
 
@@ -201,6 +225,13 @@ RPC 是跨网络请求另一端执行函数；属性复制是服务器把属性�
 ## ⚙️ 它如何运行
 
 构建工具把 C# 编译成 **WebAssembly（WASM）**，一种供脚本执行引擎运行的程序格式；UE 插件加载它，再把脚本中的调用转交给 UE。游戏运行时不加载完整的 .NET / CLR。
+
+```mermaid
+flowchart LR
+    Source["✍️ C# 玩法代码"] --> Compiler["编译器"] --> Wasm["WASM 脚本"]
+    UEAPI["🔎 从 UE 选出的 API"] --> Bindings["生成的 C# 调用接口"] --> Compiler
+    Wasm --> Runtime["🧩 AvidScript 插件"] --> Game["🎮 UE Actor / UI / 蓝图"]
+```
 
 项目 API 通过配置选择后生成 C# 接口。例如，选择项目的 `ApplyGameplayValue` 函数后，脚本才能以对应的 C# 方法调用它。技术文档中的 **Profile** 是这份选择配置，**binding / facade** 是生成的连接信息和 C# 调用接口。
 
