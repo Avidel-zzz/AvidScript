@@ -26,6 +26,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'C# language-error Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'catch-caller.wasm')
     if ($LASTEXITCODE -ne 0) { throw 'C# handled language-error Node WASM probe failed.' }
+    & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'multi-catch.wasm')
+    if ($LASTEXITCODE -ne 0) { throw 'C# multi-producer catch Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'catch-mismatch.wasm')
     if ($LASTEXITCODE -ne 0) { throw 'C# unmatched language-error Node WASM probe failed.' }
 }

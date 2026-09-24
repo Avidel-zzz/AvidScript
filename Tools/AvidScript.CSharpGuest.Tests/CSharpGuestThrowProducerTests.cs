@@ -15,10 +15,81 @@ internal static class CSharpGuestThrowProducerTests
         SourceThrowProducesManagedLanguageError();
         SameSourceCallerPropagatesManagedLanguageError();
         SameSourceCallerCatchesManagedLanguageError();
+        MultipleThrowProducersKeepDistinctSourceTokens();
         NonmatchingCatchPropagatesLanguageError();
         ConstructorSideEffectsAreRejected();
         CatchRequiresHandlerLowering();
-        return 6;
+        return 7;
+    }
+
+    private static void MultipleThrowProducersKeepDistinctSourceTokens()
+    {
+        const string source = """
+            using System;
+            class Script
+            {
+                static int FailA() { throw new Exception(); }
+                static int FailB() { throw new Exception(); }
+                static int CatchA()
+                {
+                    try { return FailA(); }
+                    catch (Exception) { return 11; }
+                }
+                static int CatchB()
+                {
+                    try { return FailB(); }
+                    catch (Exception) { return 22; }
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay() { CatchA(); CatchB(); }
+            }
+            """;
+        SemanticDocument semantic = Analyze(source);
+        Check(semantic.ExceptionFlows is { Count: 4 },
+            "two throw producers and two catch methods need separate exception flows");
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "multiple throw producers did not lower");
+        GuestModule module = compiled!.Module;
+        Check(module.LanguageErrorCatalog is { Types.Count: 1, Sources.Count: 2 } catalog
+            && catalog.Sources[0].Token == 1 && catalog.Sources[1].Token == 2
+            && catalog.Sources[0].Start < catalog.Sources[1].Start
+            && module.Functions.Count(function => function.Id.Contains(".Fail", StringComparison.Ordinal)) == 2,
+            "distinct throw sites must retain deterministic source tokens in one module");
+        byte[] serialized = GuestIrSerializer.Serialize(module);
+        Check(serialized.SequenceEqual(GuestIrSerializer.Serialize(GuestIrSerializer.Deserialize(serialized)))
+            && GuestIrSerializer.Deserialize(serialized).LanguageErrorCatalog?.Sources.Count == 2,
+            "a multi-source-token module must round-trip canonically");
+        SemanticDocument mismatchedLength = semantic with
+        {
+            ExceptionFlows = semantic.ExceptionFlows!.Select((flow, index) =>
+                index == 1 ? flow with { SourceLength = flow.SourceLength + 1 } : flow).ToArray(),
+        };
+        Check(!CSharpLanguageErrorCompiler.TryLower(mismatchedLength, new string('a', 64),
+                out _, out string? mismatchError)
+            && mismatchError is not null && mismatchError.Contains("length", StringComparison.Ordinal),
+            "conflicting lengths for one source unit must fail closed");
+        GuestFunction catchA = module.Functions.Single(function =>
+            function.Id.Contains(".CatchA(", StringComparison.Ordinal));
+        GuestFunction catchB = module.Functions.Single(function =>
+            function.Id.Contains(".CatchB(", StringComparison.Ordinal));
+        GuestModule probe = AddCatchProbe(
+            AddCatchProbe(module, catchA, "function:catch_source_probe_a", "catch_source_probe_a"),
+            catchB, "function:catch_source_probe_b", "catch_source_probe_b");
+        GuestValidationResult validation = GuestModuleValidator.Validate(probe);
+        Check(validation.Succeeded,
+            string.Join(" | ", validation.Diagnostics.Select(item => item.Message)));
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8
+            && wasm.Bytes.SequenceEqual(WasmModuleCompiler.Compile(probe).Bytes),
+            "multi-producer catch WASM must compile deterministically");
+        AssertLanguageErrorMetadata(wasm.Bytes, probe);
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "multi-catch.wasm"), wasm.Bytes);
+        }
     }
 
     private static void SameSourceCallerCatchesManagedLanguageError()
@@ -364,9 +435,10 @@ internal static class CSharpGuestThrowProducerTests
         };
     }
 
-    private static GuestModule AddCatchProbe(GuestModule module, GuestFunction handler)
+    private static GuestModule AddCatchProbe(GuestModule module, GuestFunction handler,
+        string probeId = "function:catch_source_probe",
+        string exportName = "catch_source_probe")
     {
-        const string probeId = "function:catch_source_probe";
         GuestFunction probe = new(probeId, Array.Empty<GuestRegister>(), new[]
         {
             new GuestRegister("catch_result", handler.ReturnTypeId),
@@ -395,7 +467,7 @@ internal static class CSharpGuestThrowProducerTests
         return module with
         {
             Functions = module.Functions.Append(probe).ToArray(),
-            Exports = module.Exports.Append(new GuestExport("catch_source_probe", probeId)).ToArray(),
+            Exports = module.Exports.Append(new GuestExport(exportName, probeId)).ToArray(),
         };
     }
 

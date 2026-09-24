@@ -287,7 +287,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& Parameters)
 {
 	const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(),
-		TEXT("AvidScriptLanguageErrorCatalogTests/GuestFixtures/catch-caller.wasm"));
+		TEXT("AvidScriptLanguageErrorCatalogTests/GuestFixtures/multi-catch.wasm"));
 	TArray<uint8> CanonicalWasm;
 	if (!TestTrue(TEXT("read C# catch compiler WASM fixture"),
 			FFileHelper::LoadFileToArray(CanonicalWasm, *Path)))
@@ -305,8 +305,13 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 		}
 		const FAvidScriptLanguageErrorCatalog* Catalog = Runtime.GetLanguageErrorCatalog();
 		const FString* Type = Catalog ? Catalog->FindType(1) : nullptr;
+		const FAvidScriptLanguageErrorSource* FirstSource = Catalog ? Catalog->FindSource(1) : nullptr;
+		const FAvidScriptLanguageErrorSource* SecondSource = Catalog ? Catalog->FindSource(2) : nullptr;
 		TestTrue(TEXT("handled C# exception type is retained"), Type
 			&& *Type == TEXT("type:global::System.Exception"));
+		TestTrue(TEXT("both throw sites retain distinct source positions"), FirstSource
+			&& SecondSource && FirstSource->SourceId == SecondSource->SourceId
+			&& FirstSource->Start < SecondSource->Start);
 		if (!TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("caught BeginPlay succeeds")),
 				Runtime.BeginPlay(Result)))
 			AddError(Result.ErrorMessage);

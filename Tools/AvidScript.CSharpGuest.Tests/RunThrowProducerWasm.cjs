@@ -129,13 +129,22 @@ for (const entry of WebAssembly.Module.imports(wasmModule)) {
   (imports[entry.module] ??= {})[entry.name] = managedHeap;
 }
 instance = new WebAssembly.Instance(wasmModule, imports);
-const catches = typeof instance.exports.catch_source_probe === 'function';
-const actual = catches
-  ? instance.exports.catch_source_probe()
-  : instance.exports.throw_source_probe();
-const expected = catches ? 7 : 3;
-if (actual !== expected) throw new Error(`source probe() = ${actual}; expected ${expected}`);
-if (allocations !== 1 || frames.size !== 0 || roots.size !== 0) {
+const multipleCatches = typeof instance.exports.catch_source_probe_a === 'function';
+const catches = multipleCatches || typeof instance.exports.catch_source_probe === 'function';
+if (multipleCatches) {
+  const first = instance.exports.catch_source_probe_a();
+  const second = instance.exports.catch_source_probe_b();
+  if (first !== 11 || second !== 22) {
+    throw new Error(`Multi-producer catch results = ${first}, ${second}; expected 11, 22`);
+  }
+} else {
+  const actual = catches
+    ? instance.exports.catch_source_probe()
+    : instance.exports.throw_source_probe();
+  const expected = catches ? 7 : 3;
+  if (actual !== expected) throw new Error(`source probe() = ${actual}; expected ${expected}`);
+}
+if (allocations !== (multipleCatches ? 2 : 1) || frames.size !== 0 || roots.size !== 0) {
   throw new Error(`Root teardown mismatch: allocations=${allocations}, frames=${frames.size}, roots=${roots.size}`);
 }
 collect();
@@ -147,7 +156,9 @@ if (catches) {
   }
   collect();
   if (objects.size !== 0) throw new Error('Handled error object survived collection');
-  process.stdout.write('C# source catch WASM: 2/2 passed\n');
+  process.stdout.write(multipleCatches
+    ? 'C# source multi-catch WASM: 3/3 passed\n'
+    : 'C# source catch WASM: 2/2 passed\n');
   process.exit(0);
 }
 if (instance.exports.avid_on_begin_play) {
