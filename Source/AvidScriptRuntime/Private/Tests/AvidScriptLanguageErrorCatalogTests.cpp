@@ -367,6 +367,7 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 		TEXT("called-return-finally.wasm"),
 		TEXT("catch-finally.wasm"),
 		TEXT("cleanup-replaces-error.wasm"), TEXT("nested-cleanup-replaces-error.wasm"),
+		TEXT("branching-cleanup.wasm"),
 		TEXT("catch-rethrow.wasm"), TEXT("nested-rethrow.wasm"),
 		TEXT("catch-variable.wasm")};
 	for (const FString& FixtureName : HandledFixtures)

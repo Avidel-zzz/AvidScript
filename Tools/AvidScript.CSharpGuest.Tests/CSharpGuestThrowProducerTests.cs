@@ -36,10 +36,11 @@ internal static class CSharpGuestThrowProducerTests
         CatchReturnsRunOuterFinally();
         CleanupThrowReplacesOriginalError();
         NestedCleanupThrowReplacesOriginalError();
+        BranchingFinallyRunsBeforeErrorPropagation();
         CatchRethrowPreservesOriginalError();
         NestedCatchRethrowReachesOuterHandler();
         CatchVariableReadsBoundError();
-        return 22;
+        return 23;
     }
 
     private static void MultipleThrowProducersKeepDistinctSourceTokens()
@@ -663,17 +664,18 @@ internal static class CSharpGuestThrowProducerTests
             class Script
             {
                 static int Count;
+                static void ChangeCount() { Count = Count + 1; }
                 static int Fail()
                 {
                     try { throw new System.Exception(); }
-                    finally { if (Count == 0) Count = 1; }
+                    finally { if (Count == 0) ChangeCount(); }
                 }
             }
             """;
         Check(!CSharpLanguageErrorCompiler.TryLower(Analyze(branchingSource), new string('a', 64),
                 out _, out string? branchingError)
             && branchingError is not null && branchingError.Contains("cleanup", StringComparison.Ordinal),
-            "branching cleanup in a throw method must fail closed");
+            "a call inside branching cleanup must fail closed");
     }
 
     private static void NestedLocalThrowRunsFinaliesInnerToOuter()
@@ -1318,6 +1320,82 @@ internal static class CSharpGuestThrowProducerTests
             Directory.CreateDirectory(output);
             File.WriteAllBytes(Path.Combine(output,
                 "nested-cleanup-replaces-error.wasm"), wasm.Bytes);
+        }
+    }
+
+    private static void BranchingFinallyRunsBeforeErrorPropagation()
+    {
+        const string source = """
+            class Script
+            {
+                static bool UseFirst;
+                static int Count;
+                static int Fail()
+                {
+                    try { throw new System.Exception(); }
+                    finally
+                    {
+                        if (UseFirst) { Count = Count + 1; }
+                        else { Count = Count + 2; }
+                        Count = Count + 10;
+                    }
+                }
+                static int First()
+                {
+                    Count = 0;
+                    UseFirst = true;
+                    try { return Fail(); }
+                    catch (System.Exception) { return Count; }
+                }
+                static int Second()
+                {
+                    Count = 0;
+                    UseFirst = false;
+                    try { return Fail(); }
+                    catch (System.Exception) { return Count; }
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay() { First(); Second(); }
+            }
+            """;
+        Check(ReferenceCatch(source, "First") == 11
+            && ReferenceCatch(source, "Second") == 12,
+            "the CLR reference must run both branches before propagating the error");
+        SemanticDocument semantic = Analyze(source);
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "branching cleanup failed to compile");
+        GuestModule module = compiled!.Module;
+        GuestFunction fail = module.Functions.Single(function =>
+            function.Id.Contains(".Fail(", StringComparison.Ordinal));
+        Check(fail.Blocks.Count(block => block.Terminator.Kind == "branch_if") == 1
+            && fail.Blocks.Count(block => block.Instructions.Any(item =>
+                item.Op == "global_store")) == 3
+            && fail.Blocks.Sum(block => block.Instructions.Count(item =>
+                item.Op == "managed_new")) == 1,
+            "the branching finally must preserve both paths and one error root");
+        GuestFunction first = module.Functions.Single(function =>
+            function.Id.Contains(".First(", StringComparison.Ordinal));
+        GuestFunction second = module.Functions.Single(function =>
+            function.Id.Contains(".Second(", StringComparison.Ordinal));
+        GuestModule stressed = AddLocalCleanupCollectProbe(module, fail.Id, 3);
+        GuestModule probe = AddCatchProbe(AddCatchProbe(
+                AddProbe(stressed, fail, appendTarget: false,
+                    "function:branch_cleanup_source_probe",
+                    "branch_cleanup_source_probe"),
+                first, "function:branch_cleanup_first_probe", "branch_cleanup_first_probe"),
+            second, "function:branch_cleanup_second_probe", "branch_cleanup_second_probe");
+        GuestValidationResult validation = GuestModuleValidator.Validate(probe);
+        Check(validation.Succeeded,
+            string.Join(" | ", validation.Diagnostics.Select(item => item.Message)));
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "branching cleanup must compile to executable WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "branching-cleanup.wasm"), wasm.Bytes);
         }
     }
 

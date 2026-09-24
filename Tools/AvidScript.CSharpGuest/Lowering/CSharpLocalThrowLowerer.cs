@@ -189,7 +189,15 @@ internal static class CSharpLocalThrowLowerer
                 return Fail("The local throw has an invalid cleanup route.", out error);
             string[] cleanupIds = cleanupOrdinals.Select(ordinal =>
                 CSharpGuestIds.Block(flow.MethodSymbolId, ordinal)).ToArray();
-            string? cleanupId = cleanupIds.FirstOrDefault();
+            CSharpBranchingCleanup? branchingCleanup = site.BranchingCleanup;
+            if (branchingCleanup is not null && (cleanupOrdinals.Count != 0
+                || site.ReplacesThrowBlockOrdinal is not null))
+                return Fail("A branching cleanup cannot share or replace another cleanup route.",
+                    out error);
+            string? cleanupId = branchingCleanup is null
+                ? cleanupIds.FirstOrDefault()
+                : CSharpGuestIds.Block(flow.MethodSymbolId,
+                    branchingCleanup.EntryBlockOrdinal);
             string? replacedOutcome = site.ReplacesThrowBlockOrdinal is { } replacedOrdinal
                 ? "local_throw:" + replacedOrdinal.ToString(CultureInfo.InvariantCulture) + ":outcome"
                 : null;
@@ -306,7 +314,12 @@ internal static class CSharpLocalThrowLowerer
             };
             if (cleanupId is not null)
             {
-                for (int index = 0; index < cleanupIds.Length; ++index)
+                if (branchingCleanup is not null && !ValidBranchingCleanup(
+                        flow, function, blocks, blockId, branchingCleanup))
+                    return Fail("The local throw has no bounded branching cleanup graph.",
+                        out error);
+                for (int index = 0; branchingCleanup is null && index < cleanupIds.Length;
+                    ++index)
                 {
                     string id = cleanupIds[index];
                     bool last = index == cleanupIds.Length - 1;
@@ -324,7 +337,9 @@ internal static class CSharpLocalThrowLowerer
                 }
                 if (replacementContinuesCleanup)
                     continue;
-                string lastCleanupId = cleanupIds[^1];
+                string lastCleanupId = branchingCleanup is null ? cleanupIds[^1]
+                    : CSharpGuestIds.Block(flow.MethodSymbolId,
+                        branchingCleanup.ExitBlockOrdinal);
                 GuestBasicBlock cleanup = blocks[lastCleanupId];
                 if (!preparedCleanupReturns.Add(lastCleanupId))
                 {
@@ -425,6 +440,70 @@ internal static class CSharpLocalThrowLowerer
             Blocks = function.Blocks.Select(block => blocks[block.Id]).ToArray(),
         };
         return true;
+    }
+
+    private static bool ValidBranchingCleanup(
+        SemanticExceptionFlow flow,
+        GuestFunction function,
+        IReadOnlyDictionary<string, GuestBasicBlock> blocks,
+        string throwBlockId,
+        CSharpBranchingCleanup cleanup)
+    {
+        int count = cleanup.ExitBlockOrdinal - cleanup.EntryBlockOrdinal + 1;
+        if (count is < 3 or > 16
+            || !cleanup.BlockOrdinals.SequenceEqual(
+                Enumerable.Range(cleanup.EntryBlockOrdinal, count)))
+            return false;
+        string[] ids = cleanup.BlockOrdinals.Select(ordinal =>
+            CSharpGuestIds.Block(flow.MethodSymbolId, ordinal)).ToArray();
+        HashSet<string> cleanupIds = ids.ToHashSet(StringComparer.Ordinal);
+        string entryId = ids[0], exitId = ids[^1];
+        HashSet<string> reached = new(StringComparer.Ordinal) { entryId };
+        for (int index = 0; index < ids.Length; ++index)
+        {
+            string id = ids[index];
+            if (!reached.Contains(id) || !blocks.TryGetValue(id, out GuestBasicBlock? block)
+                || block.Instructions.Any(instruction => instruction.Op is not
+                    ("constant" or "global_load" or "global_store" or "local_load"
+                        or "local_store" or "field_load" or "field_store" or "binary"
+                        or "unary" or "stack_alloc")))
+                return false;
+            if (id == exitId)
+            {
+                if (block.Terminator.Kind != "return") return false;
+                continue;
+            }
+            string[] targets = block.Terminator.Kind switch
+            {
+                "branch" when block.Terminator.TargetBlockId is not null =>
+                    new[] { block.Terminator.TargetBlockId },
+                "branch_if" when block.Terminator.TargetBlockId is not null
+                    && block.Terminator.FalseTargetBlockId is not null
+                    && block.Terminator.ConditionValueId is not null =>
+                    new[] { block.Terminator.TargetBlockId,
+                        block.Terminator.FalseTargetBlockId },
+                _ => Array.Empty<string>(),
+            };
+            if (targets.Length is < 1 or > 2
+                || targets.Distinct(StringComparer.Ordinal).Count() != targets.Length
+                || targets.Any(target => !cleanupIds.Contains(target)
+                    || Array.IndexOf(ids, target) <= index))
+                return false;
+            reached.UnionWith(targets);
+        }
+        foreach (GuestBasicBlock block in function.Blocks)
+        {
+            string?[] targets =
+            {
+                block.Terminator.TargetBlockId,
+                block.Terminator.FalseTargetBlockId,
+            };
+            if (targets.Any(target => target is not null && cleanupIds.Contains(target)
+                && !cleanupIds.Contains(block.Id)
+                && (block.Id != throwBlockId || target != entryId)))
+                return false;
+        }
+        return reached.Count == ids.Length;
     }
 
     private static GuestInstruction Constant(string register, int value) =>

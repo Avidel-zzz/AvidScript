@@ -95,7 +95,8 @@ public static class CSharpLanguageErrorCompiler
             normalReturns.ContainsKey(CSharpGuestIds.Function(item.MethodSymbolId))
             || item.Catches.Count == 0 && localThrows.TryGetValue(
                 CSharpGuestIds.Function(item.MethodSymbolId), out var sites)
-                && sites.Any(site => site.CleanupBlockOrdinals is { Count: > 0 })))
+                && sites.Any(site => site.CleanupBlockOrdinals is { Count: > 0 }
+                    || site.BranchingCleanup is not null)))
         {
             string functionId = CSharpGuestIds.Function(handler.MethodSymbolId);
             cleanupRoutes.Add(functionId,

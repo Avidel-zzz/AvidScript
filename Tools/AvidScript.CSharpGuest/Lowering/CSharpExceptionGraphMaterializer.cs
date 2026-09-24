@@ -8,7 +8,11 @@ namespace AvidScript.CSharpGuest;
 internal sealed record CSharpLocalThrowSite(
     int BlockOrdinal, SemanticThrowSite Site,
     IReadOnlyList<int>? CleanupBlockOrdinals = null,
-    int? ReplacesThrowBlockOrdinal = null);
+    int? ReplacesThrowBlockOrdinal = null,
+    CSharpBranchingCleanup? BranchingCleanup = null);
+internal sealed record CSharpBranchingCleanup(
+    int EntryBlockOrdinal, int ExitBlockOrdinal,
+    IReadOnlyList<int> BlockOrdinals);
 internal sealed record CSharpNormalReturnCleanupSite(
     int BlockOrdinal, int CleanupBlockOrdinal);
 internal sealed record CSharpRethrowSite(
@@ -37,6 +41,9 @@ internal static class CSharpExceptionGraphMaterializer
         {
             if (flow.Regions.Count(region => region.Kind == "finally") != 1)
                 return TryBuildNestedDirectThrowFinally(flow, out graph, out localThrows, out error);
+            if (flow.Regions.First(region => region.Kind == "finally") is { } cleanup
+                && cleanup.LastBlockOrdinal > cleanup.FirstBlockOrdinal)
+                return TryBuildBranchingCleanup(flow, out graph, out localThrows, out error);
             return flow.Blocks is { Count: > 4 } && flow.Throws.Count > 0
                 ? TryBuildBranchingThrowFinally(flow, out graph, out localThrows,
                     out normalReturns, out error)
@@ -143,6 +150,139 @@ internal static class CSharpExceptionGraphMaterializer
                 .ToArray());
         localThrows = projectedThrows;
         rethrows = projectedRethrows;
+        return true;
+    }
+
+    private static bool TryBuildBranchingCleanup(
+        SemanticExceptionFlow flow,
+        out SemanticControlFlowGraph? graph,
+        out IReadOnlyList<CSharpLocalThrowSite> localThrows,
+        out string? error)
+    {
+        graph = null;
+        localThrows = Array.Empty<CSharpLocalThrowSite>();
+        error = null;
+        if (flow.Catches.Count != 0 || flow.Throws.Count != 1
+            || flow.Regions.Count != 4
+            || flow.Regions[0].Kind != "root"
+            || flow.Regions[1].Kind != "try_and_finally"
+            || flow.Regions[1].ParentOrdinal != 0
+            || flow.Regions[2].Kind != "try"
+            || flow.Regions[2].ParentOrdinal != 1
+            || flow.Regions[3].Kind != "finally"
+            || flow.Regions[3].ParentOrdinal != 1
+            || flow.Blocks is not { } blocks
+            || !SemanticExceptionDispatchPlanner.TryBuild(flow, out var dispatch)
+            || dispatch is null)
+            return Fail("Branching cleanup needs one direct throw and one finally region.",
+                out error);
+
+        SemanticExceptionRegion cleanup = flow.Regions[3];
+        int entry = cleanup.FirstBlockOrdinal, last = cleanup.LastBlockOrdinal;
+        if (entry != 2 || last is < 4 or > 17 || blocks.Count != last + 2
+            || flow.Regions[2].FirstBlockOrdinal != 1
+            || flow.Regions[2].LastBlockOrdinal != 1
+            || blocks[0].Operations.Count != 0 || blocks[0].BranchValue is not null
+            || blocks[^1].Operations.Count != 0 || blocks[^1].BranchValue is not null
+            || blocks[1].EnclosingRegionOrdinal != flow.Regions[2].Ordinal
+            || blocks[1].Operations.Count != 0
+            || blocks[1].BranchValue is not { Kind: "object_creation", IsSupported: true } expression
+            || expression.TypeId != CSharpThrowProducerLowerer.ExceptionTypeId
+            || expression.SymbolId != CSharpThrowProducerLowerer.ExceptionConstructorId
+            || expression.Children.Count != 0
+            || flow.Branches.Count(branch => branch.SourceBlockOrdinal == 0
+                && branch.DestinationBlockOrdinal == 1
+                && branch.Semantics == "regular") != 1
+            || flow.Branches.Count(branch => branch.SourceBlockOrdinal == 1
+                && branch.DestinationBlockOrdinal == -1
+                && branch.Semantics == "throw") != 1
+            || dispatch.Routes[1].Steps.Count != 1
+            || dispatch.Routes[1].Steps[0].Kind != "finally"
+            || dispatch.Routes[1].Steps[0].RegionOrdinal != cleanup.Ordinal)
+            return Fail("Branching cleanup has an unsupported source route.", out error);
+        SemanticThrowSite[] sites = flow.Throws.Where(site => site.Kind == "throw"
+            && site.ExceptionTypeId == CSharpThrowProducerLowerer.ExceptionTypeId
+            && site.Span.Start <= expression.Span.Start
+            && expression.Span.End <= site.Span.End).ToArray();
+        if (sites.Length != 1)
+            return Fail("Branching cleanup needs one source-backed exception.", out error);
+
+        List<SemanticControlFlowEdge> edges = new()
+        {
+            new(0, 1, "fallthrough", "regular"),
+            new(1, entry, "fallthrough", "regular"),
+        };
+        for (int ordinal = entry; ordinal <= last; ++ordinal)
+        {
+            SemanticExceptionBlock block = blocks[ordinal];
+            SemanticExceptionBranch[] outgoing = flow.Branches.Where(branch =>
+                branch.SourceBlockOrdinal == ordinal).ToArray();
+            if (block.EnclosingRegionOrdinal != cleanup.Ordinal
+                || block.Operations.Any(operation => !Supported(operation)
+                    || Descendants(operation).Any(item => item.Kind is
+                        "conditional" or "switch" or "branch" or "loop" or "await"
+                        or "try" or "throw" or "invocation")))
+                return Fail("Branching cleanup has an unsupported operation.", out error);
+            if (ordinal == last)
+            {
+                if (block.ConditionKind != "none" || block.BranchValue is not null
+                    || outgoing.Length != 1
+                    || outgoing[0].DestinationBlockOrdinal != -1
+                    || outgoing[0].Semantics != "structured_exception_handling")
+                    return Fail("Branching cleanup needs one final exit.", out error);
+                edges.Add(new(ordinal, blocks.Count - 1, "fallthrough", "return"));
+                continue;
+            }
+            if (outgoing.Length == 2)
+            {
+                if (block.Operations.Count != 0 || block.ConditionKind == "none"
+                    || block.BranchValue is not { } condition
+                    || !PureThrowDecision(condition)
+                    || outgoing.Count(branch => branch.Kind == "fallthrough") != 1
+                    || outgoing.Count(branch => branch.Kind == "conditional") != 1
+                    || outgoing.Select(branch => branch.DestinationBlockOrdinal)
+                        .Distinct().Count() != 2)
+                    return Fail("Branching cleanup needs a pure conditional.", out error);
+            }
+            else if (outgoing.Length != 1 || block.ConditionKind != "none"
+                || block.BranchValue is not null || outgoing[0].Kind != "fallthrough")
+                return Fail("Branching cleanup needs bounded forward blocks.", out error);
+            if (outgoing.Any(branch => branch.Semantics != "regular"
+                || branch.DestinationBlockOrdinal <= ordinal
+                || branch.DestinationBlockOrdinal > last))
+                return Fail("Branching cleanup cannot leave or loop inside its finally.", out error);
+            edges.AddRange(outgoing.Select(branch => new SemanticControlFlowEdge(
+                ordinal, branch.DestinationBlockOrdinal, branch.Kind, "regular")));
+        }
+        HashSet<int> visited = new() { entry };
+        for (int ordinal = entry; ordinal <= last; ++ordinal)
+        {
+            if (!visited.Contains(ordinal))
+                return Fail("Branching cleanup contains an unreachable block.", out error);
+            foreach (SemanticControlFlowEdge edge in edges.Where(edge =>
+                edge.SourceBlockOrdinal == ordinal
+                && edge.DestinationBlockOrdinal <= last))
+                visited.Add(edge.DestinationBlockOrdinal);
+        }
+        if (flow.Branches.Count != edges.Count)
+            return Fail("Branching cleanup has an unaccounted source edge.", out error);
+
+        graph = new SemanticControlFlowGraph(flow.MethodSymbolId, 0, blocks.Count - 1,
+            blocks.Select(block => new SemanticBasicBlock(block.Ordinal, block.Kind,
+                block.Ordinal == blocks.Count - 1 || block.IsReachable,
+                block.ConditionKind, block.Operations,
+                block.Ordinal == 1 ? null
+                    : block.Ordinal == last ? ZeroPlaceholder(sites[0].Span)
+                        : block.BranchValue,
+                edges.Where(edge => edge.DestinationBlockOrdinal == block.Ordinal).ToArray(),
+                edges.Where(edge => edge.SourceBlockOrdinal == block.Ordinal).ToArray()))
+                .ToArray());
+        localThrows = new[]
+        {
+            new CSharpLocalThrowSite(1, sites[0], BranchingCleanup:
+                new CSharpBranchingCleanup(entry, last,
+                    Enumerable.Range(entry, last - entry + 1).ToArray())),
+        };
         return true;
     }
 

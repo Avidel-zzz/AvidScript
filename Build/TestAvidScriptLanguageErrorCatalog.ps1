@@ -56,6 +56,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'C# cleanup-replaces-error Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'nested-cleanup-replaces-error.wasm')
     if ($LASTEXITCODE -ne 0) { throw 'C# nested-cleanup-replaces-error Node WASM probe failed.' }
+    & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'branching-cleanup.wasm')
+    if ($LASTEXITCODE -ne 0) { throw 'C# branching-cleanup Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'catch-rethrow.wasm')
     if ($LASTEXITCODE -ne 0) { throw 'C# catch-rethrow Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'nested-rethrow.wasm')
