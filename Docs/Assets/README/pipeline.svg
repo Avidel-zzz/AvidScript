@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="136" viewBox="0 0 1000 136" role="img" aria-labelledby="title desc">
+  <title id="title">AvidScript build and runtime pipeline</title>
+  <desc id="desc">C# source is compiled through Roslyn and Guest IR to a WASM module, which the UE runtime loads to access Unreal objects.</desc>
+  <rect width="1000" height="136" rx="8" fill="#0d1117"/>
+  <g fill="#161b22" stroke="#30363d" stroke-width="1.5">
+    <rect x="20" y="25" width="165" height="74" rx="6"/>
+    <rect x="221" y="25" width="165" height="74" rx="6"/>
+    <rect x="422" y="25" width="165" height="74" rx="6"/>
+    <rect x="623" y="25" width="165" height="74" rx="6"/>
+    <rect x="824" y="25" width="156" height="74" rx="6"/>
+  </g>
+  <g stroke="#8b949e" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 190 62 H 211 M 205 56 L 211 62 L 205 68"/>
+    <path d="M 391 62 H 412 M 406 56 L 412 62 L 406 68"/>
+    <path d="M 592 62 H 613 M 607 56 L 613 62 L 607 68"/>
+    <path d="M 793 62 H 814 M 808 56 L 814 62 L 808 68"/>
+  </g>
+  <g font-family="Consolas, 'Liberation Mono', monospace" font-size="16" text-anchor="middle">
+    <text x="102" y="56" fill="#d2a8ff">Script.cs</text>
+    <text x="102" y="79" fill="#8b949e" font-size="12">source</text>
+    <text x="303" y="56" fill="#c9d1d9">Roslyn</text>
+    <text x="303" y="79" fill="#8b949e" font-size="12">Guest IR</text>
+    <text x="504" y="56" fill="#79c0ff">script.wasm</text>
+    <text x="504" y="79" fill="#8b949e" font-size="12">module</text>
+    <text x="705" y="56" fill="#c9d1d9">UE Runtime</text>
+    <text x="705" y="79" fill="#8b949e" font-size="12">ObjectHandle</text>
+    <text x="902" y="56" fill="#7ee787">UObject</text>
+    <text x="902" y="79" fill="#8b949e" font-size="12">game world</text>
+  </g>
+  <g font-family="Consolas, 'Liberation Mono', monospace" font-size="11" fill="#8b949e" text-anchor="middle">
+    <text x="304" y="122">build time</text>
+    <text x="803" y="122">runtime</text>
+  </g>
+</svg>
