@@ -14,9 +14,97 @@ internal static class CSharpGuestThrowProducerTests
     {
         SourceThrowProducesManagedLanguageError();
         SameSourceCallerPropagatesManagedLanguageError();
+        SameSourceCallerCatchesManagedLanguageError();
+        NonmatchingCatchPropagatesLanguageError();
         ConstructorSideEffectsAreRejected();
         CatchRequiresHandlerLowering();
-        return 4;
+        return 6;
+    }
+
+    private static void SameSourceCallerCatchesManagedLanguageError()
+    {
+        const string source = """
+            using System;
+            class Script
+            {
+                static int Fail() { throw new Exception(); }
+                static int Catch()
+                {
+                    try { return Fail(); }
+                    catch (InvalidOperationException) { return 5; }
+                    catch (Exception) { return 7; }
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay() { Catch(); }
+            }
+            """;
+        SemanticDocument semantic = Analyze(source);
+        Check(semantic.ExceptionFlows is { Count: 2 },
+            "the source must project separate throw and handler methods");
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null,
+            error ?? "source-backed catch failed to lower");
+        GuestModule module = compiled!.Module;
+        GuestFunction handler = module.Functions.Single(function =>
+            function.Id.Contains(".Catch(", StringComparison.Ordinal));
+        Check(handler.Blocks.Any(block => block.Instructions.Any(instruction =>
+                instruction.Op == "field_load" && instruction.TargetId == "field:error_type")
+                && block.Terminator.Kind == "branch_if")
+            && GuestModuleValidator.Validate(module).Succeeded,
+            "a failed call must select a typed local catch before propagation");
+        GuestModule probe = AddCatchProbe(module, handler);
+        GuestValidationResult validation = GuestModuleValidator.Validate(probe);
+        Check(validation.Succeeded,
+            string.Join(" | ", validation.Diagnostics.Select(item => item.Message)));
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "the source-backed catch must compile to executable WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "catch-caller.wasm"), wasm.Bytes);
+        }
+    }
+
+    private static void NonmatchingCatchPropagatesLanguageError()
+    {
+        const string source = """
+            using System;
+            class Script
+            {
+                static int Fail() { throw new Exception(); }
+                static int Catch()
+                {
+                    try { return Fail(); }
+                    catch (InvalidOperationException) { return 7; }
+                }
+            }
+            """;
+        SemanticDocument semantic = Analyze(source);
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "nonmatching catch failed to lower");
+        GuestModule module = compiled!.Module;
+        Check(module.LanguageErrorCatalog is { Types.Count: 1 } catalog
+            && catalog.Types[0].TypeId == "type:global::System.Exception",
+            "handler-only types must not become unused runtime error tokens");
+        GuestFunction handler = module.Functions.Single(function =>
+            function.Id.Contains(".Catch(", StringComparison.Ordinal));
+        GuestModule probe = AddProbe(module, handler, appendTarget: false);
+        GuestValidationResult validation = GuestModuleValidator.Validate(probe);
+        Check(validation.Succeeded,
+            string.Join(" | ", validation.Diagnostics.Select(item => item.Message)));
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "an unmatched source catch must propagate the original error in WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "catch-mismatch.wasm"), wasm.Bytes);
+        }
     }
 
     private static void SameSourceCallerPropagatesManagedLanguageError()
@@ -142,7 +230,7 @@ internal static class CSharpGuestThrowProducerTests
         Check(!CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
                 out _, out string? compilerError)
             && compilerError is not null && compilerError.Contains("zero-argument", StringComparison.Ordinal),
-            "same-source compilation must reject constructor side effects");
+            "same-source compilation must reject constructor side effects: " + compilerError);
     }
 
     private static void CatchRequiresHandlerLowering()
@@ -167,6 +255,41 @@ internal static class CSharpGuestThrowProducerTests
                 out _, out string? compilerError)
             && compilerError is not null && compilerError.Contains("handler", StringComparison.Ordinal),
             "same-source compilation must retain the catch boundary");
+
+        const string variableSource = """
+            class Script
+            {
+                static int Fail() { throw new System.Exception(); }
+                static int Catch()
+                {
+                    try { return Fail(); }
+                    catch (System.Exception error) { return 7; }
+                }
+            }
+            """;
+        SemanticDocument variableSemantic = Analyze(variableSource);
+        Check(!CSharpLanguageErrorCompiler.TryLower(variableSemantic, new string('a', 64),
+                out _, out string? variableError)
+            && variableError is not null && variableError.Contains("variable", StringComparison.Ordinal),
+            "a catch variable cannot be accepted before its error object is bound");
+
+        const string cleanupSource = """
+            class Script
+            {
+                static int Fail() { throw new System.Exception(); }
+                static int Run()
+                {
+                    int value = 0;
+                    try { return Fail(); }
+                    finally { value = 1; }
+                }
+            }
+            """;
+        SemanticDocument cleanupSemantic = Analyze(cleanupSource);
+        Check(!CSharpLanguageErrorCompiler.TryLower(cleanupSemantic, new string('a', 64),
+                out _, out string? cleanupError)
+            && cleanupError is not null && cleanupError.Contains("cleanup", StringComparison.Ordinal),
+            "finally cannot be skipped by the handler-only graph materializer");
     }
 
     private static SemanticDocument Analyze(string source)
@@ -238,6 +361,41 @@ internal static class CSharpGuestThrowProducerTests
                 ? module.Functions.Append(producer).Append(probe).ToArray()
                 : module.Functions.Append(probe).ToArray(),
             Exports = module.Exports.Append(new GuestExport("throw_source_probe", probeId)).ToArray(),
+        };
+    }
+
+    private static GuestModule AddCatchProbe(GuestModule module, GuestFunction handler)
+    {
+        const string probeId = "function:catch_source_probe";
+        GuestFunction probe = new(probeId, Array.Empty<GuestRegister>(), new[]
+        {
+            new GuestRegister("catch_result", handler.ReturnTypeId),
+            new GuestRegister("catch_status", "type:int32"),
+            new GuestRegister("catch_value", "type:int32"),
+            new GuestRegister("catch_failure", "type:int32"),
+        }, "type:int32", "catch_entry", new[]
+        {
+            new GuestBasicBlock("catch_entry", new[]
+            {
+                new GuestInstruction("call", "catch_result", Array.Empty<string>(), handler.Id, null, null),
+                new GuestInstruction("field_load", "catch_status", new[] { "catch_result" },
+                    "field:status", null, null),
+            }, new GuestTerminator("branch_if", "catch_status", "catch_error", "catch_success", null)),
+            new GuestBasicBlock("catch_error", new[]
+            {
+                new GuestInstruction("constant", "catch_failure", Array.Empty<string>(), null, null,
+                    new GuestConstant("int32", "-1")),
+            }, new GuestTerminator("return", null, null, null, "catch_failure")),
+            new GuestBasicBlock("catch_success", new[]
+            {
+                new GuestInstruction("field_load", "catch_value", new[] { "catch_result" },
+                    "field:value", null, null),
+            }, new GuestTerminator("return", null, null, null, "catch_value")),
+        });
+        return module with
+        {
+            Functions = module.Functions.Append(probe).ToArray(),
+            Exports = module.Exports.Append(new GuestExport("catch_source_probe", probeId)).ToArray(),
         };
     }
 

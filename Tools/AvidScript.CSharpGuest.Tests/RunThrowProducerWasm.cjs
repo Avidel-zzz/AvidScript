@@ -129,13 +129,27 @@ for (const entry of WebAssembly.Module.imports(wasmModule)) {
   (imports[entry.module] ??= {})[entry.name] = managedHeap;
 }
 instance = new WebAssembly.Instance(wasmModule, imports);
-const actual = instance.exports.throw_source_probe();
-if (actual !== 3) throw new Error(`throw_source_probe() = ${actual}; expected 3`);
+const catches = typeof instance.exports.catch_source_probe === 'function';
+const actual = catches
+  ? instance.exports.catch_source_probe()
+  : instance.exports.throw_source_probe();
+const expected = catches ? 7 : 3;
+if (actual !== expected) throw new Error(`source probe() = ${actual}; expected ${expected}`);
 if (allocations !== 1 || frames.size !== 0 || roots.size !== 0) {
   throw new Error(`Root teardown mismatch: allocations=${allocations}, frames=${frames.size}, roots=${roots.size}`);
 }
 collect();
 if (objects.size !== 0) throw new Error('Unrooted error object survived collection');
+if (catches) {
+  instance.exports.avid_on_begin_play();
+  if (reported || frames.size !== 0 || roots.size !== 0) {
+    throw new Error('A handled language error escaped or retained a frame root');
+  }
+  collect();
+  if (objects.size !== 0) throw new Error('Handled error object survived collection');
+  process.stdout.write('C# source catch WASM: 2/2 passed\n');
+  process.exit(0);
+}
 if (instance.exports.avid_on_begin_play) {
   try {
     instance.exports.avid_on_begin_play();

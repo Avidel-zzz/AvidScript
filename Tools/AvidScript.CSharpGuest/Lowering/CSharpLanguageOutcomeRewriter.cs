@@ -8,6 +8,10 @@ using AvidScript.GuestIr;
 
 namespace AvidScript.CSharpGuest;
 
+internal sealed record CSharpLanguageCatchMatch(int TypeToken, string HandlerBlockId);
+internal sealed record CSharpLanguageCatchRoute(
+    string SourceBlockId, IReadOnlyList<CSharpLanguageCatchMatch> Matches);
+
 // Converts ordinary lowered functions into IR 16 outcome functions. Exception
 // producers and UE boundary adapters are separate steps; this pass refuses a
 // raw export or an unresolved caller rather than publishing an invalid module.
@@ -20,7 +24,9 @@ public static class CSharpLanguageOutcomeRewriter
         out GuestModule? rewritten,
         out string? error) =>
         TryRewriteCore(semantic, module, affectedFunctionIds,
-            new HashSet<string>(StringComparer.Ordinal), out rewritten, out error);
+            new HashSet<string>(StringComparer.Ordinal),
+            new Dictionary<string, IReadOnlyList<CSharpLanguageCatchRoute>>(StringComparer.Ordinal),
+            out rewritten, out error);
 
     internal static bool TryRewriteWithProducers(
         SemanticDocument semantic,
@@ -30,19 +36,35 @@ public static class CSharpLanguageOutcomeRewriter
         out GuestModule? rewritten,
         out string? error) =>
         TryRewriteCore(semantic, module, affectedFunctionIds,
-            producerFunctionIds, out rewritten, out error);
+            producerFunctionIds,
+            new Dictionary<string, IReadOnlyList<CSharpLanguageCatchRoute>>(StringComparer.Ordinal),
+            out rewritten, out error);
+
+    internal static bool TryRewriteWithHandlers(
+        SemanticDocument semantic,
+        GuestModule module,
+        IReadOnlySet<string> affectedFunctionIds,
+        IReadOnlySet<string> producerFunctionIds,
+        IReadOnlyDictionary<string, IReadOnlyList<CSharpLanguageCatchRoute>> catchRoutes,
+        out GuestModule? rewritten,
+        out string? error) =>
+        TryRewriteCore(semantic, module, affectedFunctionIds,
+            producerFunctionIds, catchRoutes, out rewritten, out error);
 
     private static bool TryRewriteCore(
         SemanticDocument semantic,
         GuestModule module,
         IReadOnlySet<string> affectedFunctionIds,
         IReadOnlySet<string> producerFunctionIds,
+        IReadOnlyDictionary<string, IReadOnlyList<CSharpLanguageCatchRoute>> catchRoutes,
         out GuestModule? rewritten,
         out string? error)
     {
         rewritten = null;
         error = null;
         if (semantic is null || module is null || affectedFunctionIds is null || affectedFunctionIds.Count == 0
+            || catchRoutes is null || catchRoutes.Keys.Any(id => !affectedFunctionIds.Contains(id)
+                || producerFunctionIds.Contains(id))
             || module.LanguageOutcomeTypes is not null)
             return Fail("Expected an ordinary Guest module and a nonempty outcome effect set.", out error);
         if (!semantic.Succeeded || semantic.ExceptionFlows is not null
@@ -71,7 +93,7 @@ public static class CSharpLanguageOutcomeRewriter
                 return Fail($"Affected function '{id}' has no unique Semantic body.", out error);
             if (!producerFunctionIds.Contains(id)
                 && (semantic.AsyncMethods.Any(method => method.MethodSymbolId == callable.MethodSymbolId)
-                    || ContainsStructuredCleanup(bodies[0].Root)))
+                    || !catchRoutes.ContainsKey(id) && ContainsStructuredCleanup(bodies[0].Root)))
                 return Fail($"Function '{callable.MethodSymbolId}' needs cleanup-aware outcome lowering.", out error);
         }
         if (affectedFunctionIds.Any(id => !functions.ContainsKey(id))
@@ -138,6 +160,7 @@ public static class CSharpLanguageOutcomeRewriter
                 continue;
             }
             if (!TryRewriteFunction(function, functions, affectedFunctionIds, outcomeByValueType,
+                catchRoutes.TryGetValue(function.Id, out var routes) ? routes : Array.Empty<CSharpLanguageCatchRoute>(),
                 int32.Id, rootId, out GuestFunction? result, out error)) return false;
             rewrittenFunctions.Add(result!);
         }
@@ -170,6 +193,7 @@ public static class CSharpLanguageOutcomeRewriter
         IReadOnlyDictionary<string, GuestFunction> functions,
         IReadOnlySet<string> affected,
         IReadOnlyDictionary<string, string> outcomeByValueType,
+        IReadOnlyList<CSharpLanguageCatchRoute> catchRoutes,
         string int32TypeId,
         string rootTypeId,
         out GuestFunction? rewritten,
@@ -183,6 +207,17 @@ public static class CSharpLanguageOutcomeRewriter
             .Select(register => register.Id).ToHashSet(StringComparer.Ordinal);
         HashSet<string> blockIds = function.Blocks.Select(block => block.Id)
             .ToHashSet(StringComparer.Ordinal);
+        if (catchRoutes.Any(route => !blockIds.Contains(route.SourceBlockId)
+                || route.Matches.Count == 0
+                || route.Matches.Any(match => match.TypeToken <= 0
+                    || !blockIds.Contains(match.HandlerBlockId))
+                || route.Matches.Select(match => match.TypeToken).Distinct().Count()
+                    != route.Matches.Count)
+            || catchRoutes.Select(route => route.SourceBlockId).Distinct(StringComparer.Ordinal).Count()
+                != catchRoutes.Count)
+            return Fail($"Function '{function.Id}' has an invalid catch route.", out error);
+        Dictionary<string, CSharpLanguageCatchRoute> catchByBlock = catchRoutes
+            .ToDictionary(route => route.SourceBlockId, StringComparer.Ordinal);
         int registerOrdinal = 0, blockOrdinal = 0;
         string Register(string typeId)
         {
@@ -220,13 +255,39 @@ public static class CSharpLanguageOutcomeRewriter
                     new[] { result }, "field:status", null, null));
                 blocks.Add(new GuestBasicBlock(currentId, instructions,
                     new GuestTerminator("branch_if", status, errorBlock, successBlock, null)));
+                string unhandledBlock = errorBlock;
+                if (catchByBlock.TryGetValue(source.Id, out CSharpLanguageCatchRoute? catchRoute))
+                {
+                    string errorType = Register(int32TypeId);
+                    string testBlock = errorBlock;
+                    for (int matchOrdinal = 0; matchOrdinal < catchRoute.Matches.Count; ++matchOrdinal)
+                    {
+                        CSharpLanguageCatchMatch match = catchRoute.Matches[matchOrdinal];
+                        string key = Register(int32TypeId), equal = Register(int32TypeId);
+                        string nextBlock = Block();
+                        List<GuestInstruction> tests = new();
+                        if (matchOrdinal == 0)
+                            tests.Add(new GuestInstruction("field_load", errorType,
+                                new[] { result }, "field:error_type", null, null));
+                        tests.Add(new GuestInstruction("constant", key, Array.Empty<string>(),
+                            null, null, new GuestConstant("int32", match.TypeToken.ToString(
+                                System.Globalization.CultureInfo.InvariantCulture))));
+                        tests.Add(new GuestInstruction("binary", equal,
+                            new[] { errorType, key }, null, "equals", null));
+                        blocks.Add(new GuestBasicBlock(testBlock, tests,
+                            new GuestTerminator("branch_if", equal,
+                                match.HandlerBlockId, nextBlock, null)));
+                        testBlock = nextBlock;
+                    }
+                    unhandledBlock = testBlock;
+                }
                 if (calledOutcome != outcomeType)
                 {
                     string ownError = Register(outcomeType);
                     string errorType = Register(int32TypeId), sourceId = Register(int32TypeId);
                     string errorRoot = Register(rootTypeId);
                     string one = Register(int32TypeId);
-                    blocks.Add(new GuestBasicBlock(errorBlock, new GuestInstruction[]
+                    blocks.Add(new GuestBasicBlock(unhandledBlock, new GuestInstruction[]
                     {
                         new("field_load", errorType, new[] { result }, "field:error_type", null, null),
                         new("field_load", sourceId, new[] { result }, "field:source", null, null),
@@ -239,7 +300,7 @@ public static class CSharpLanguageOutcomeRewriter
                         Store(ownError, "error_root", errorRoot),
                     }, new GuestTerminator("return", null, null, null, ownError)));
                 }
-                else blocks.Add(new GuestBasicBlock(errorBlock,
+                else blocks.Add(new GuestBasicBlock(unhandledBlock,
                     Array.Empty<GuestInstruction>(), new GuestTerminator("return", null, null, null, result)));
                 currentId = successBlock;
                 instructions = new();

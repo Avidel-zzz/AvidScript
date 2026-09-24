@@ -279,4 +279,45 @@ bool FAvidScriptLanguageErrorCatalogRealArtifactTest::RunTest(const FString& Par
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptLanguageErrorCatalogHandledArtifactTest,
+	"AvidScript.Runtime.LanguageErrorCatalog.HandledCompilerArtifact",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& Parameters)
+{
+	const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptLanguageErrorCatalogTests/GuestFixtures/catch-caller.wasm"));
+	TArray<uint8> CanonicalWasm;
+	if (!TestTrue(TEXT("read C# catch compiler WASM fixture"),
+			FFileHelper::LoadFileToArray(CanonicalWasm, *Path)))
+		return false;
+	const FString ModuleId = TEXT("csharp:Scripts/SourceThrow.cs");
+	for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
+	{
+		FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
+		FAvidScriptWasmSmokeResult Result;
+		if (!TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("handled IR 17 WASM loads")),
+				Runtime.LoadModule(CanonicalWasm.GetData(), CanonicalWasm.Num(), ModuleId, Result)))
+		{
+			AddError(Result.ErrorMessage);
+			continue;
+		}
+		const FAvidScriptLanguageErrorCatalog* Catalog = Runtime.GetLanguageErrorCatalog();
+		const FString* Type = Catalog ? Catalog->FindType(1) : nullptr;
+		TestTrue(TEXT("handled C# exception type is retained"), Type
+			&& *Type == TEXT("type:global::System.Exception"));
+		if (!TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("caught BeginPlay succeeds")),
+				Runtime.BeginPlay(Result)))
+			AddError(Result.ErrorMessage);
+		const AvidScript::Managed::FHeap* Heap = Runtime.GetManagedHeapForTesting();
+		TestTrue(TEXT("handled call releases managed invocation roots"), Heap
+			&& Heap->GetStats().ActiveFrames == 0 && Heap->GetStats().LiveRoots == 0);
+		Runtime.Unload();
+		TestNull(TEXT("handled compiler catalog is released on unload"),
+			Runtime.GetLanguageErrorCatalog());
+	}
+	return true;
+}
+
 #endif

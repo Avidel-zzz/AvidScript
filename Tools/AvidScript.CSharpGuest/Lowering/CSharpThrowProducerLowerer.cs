@@ -136,12 +136,11 @@ public static class CSharpThrowProducerLowerer
         return true;
     }
 
-    private static CSharpLanguageErrorTokenCatalog BuildCatalog(
+    internal static CSharpLanguageErrorTokenCatalog BuildCatalog(
         IReadOnlyList<SemanticExceptionFlow> flows)
     {
         CSharpLanguageErrorTypeToken[] types = flows
-            .SelectMany(flow => flow.Throws.Select(site => site.ExceptionTypeId)
-                .Concat(flow.Catches.Select(handler => handler.ExceptionTypeId)))
+            .SelectMany(flow => flow.Throws.Select(site => site.ExceptionTypeId))
             .Where(id => id is not null)
             .Distinct(StringComparer.Ordinal)
             .OrderBy(id => id, StringComparer.Ordinal)
