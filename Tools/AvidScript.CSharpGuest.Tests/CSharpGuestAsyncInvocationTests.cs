@@ -109,7 +109,62 @@ internal static class CSharpGuestAsyncInvocationTests
             count++;
         }
         return count + TaskResultSemanticCompilesToWasm()
-            + TaskLocalSemanticCompilesToWasm() + TaskParallelLocalsCompileToWasm();
+            + TaskLocalSemanticCompilesToWasm() + TaskParallelLocalsCompileToWasm()
+            + TaskIntegratedCompilesToWasm();
+    }
+
+    private static int TaskIntegratedCompilesToWasm()
+    {
+        DirectoryInfo? directory = new(Environment.CurrentDirectory);
+        string? fixture = null;
+        while (directory is not null)
+        {
+            string candidate = Path.Combine(directory.FullName,
+                "Fixtures", "Phase66", "TaskIntIntegrated.cs");
+            if (File.Exists(candidate))
+            {
+                fixture = candidate;
+                break;
+            }
+            directory = directory.Parent;
+        }
+        Check(fixture is not null, "Task<int> integration source is missing");
+        SemanticDocument document = CSharpGuestContinuationTests.Analyze(
+            File.ReadAllText(fixture!), "Scripts/TaskIntIntegrated.cs");
+        Check(document.Succeeded && document.SchemaVersion == SemanticContract.TaskLocalSchemaVersion,
+            "integrated task locals require Semantic 36: "
+                + string.Join(" | ", document.Diagnostics.Select(item => item.Message)));
+        CSharpGuestLoweringResult lowered = CSharpGuestLowerer.Lower(document, new string('d', 64));
+        Check(lowered.Succeeded,
+            "integrated Task<int> lowering failed: "
+                + string.Join(" | ", lowered.Diagnostics.Select(item => item.Code + ":" + item.Message)));
+        GuestModule module = lowered.Module!;
+        Check(module.SchemaVersion == 19 && module.IrVersion == "1.18",
+            "integrated Task<int> retains the task-local Guest IR version");
+        WasmCompilationResult compiled = WasmModuleCompiler.Compile(module);
+        Check(compiled.Succeeded,
+            "integrated Task<int> WASM failed: "
+                + string.Join(" | ", compiled.Diagnostics.Select(item => item.Message)));
+        Check(compiled.Bytes.SequenceEqual(WasmModuleCompiler.Compile(
+                GuestIrSerializer.Deserialize(GuestIrSerializer.Serialize(module))).Bytes),
+            "integrated Task<int> WASM is deterministic after IR round-trip");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_MANAGED_HEAP_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            string stem = Path.Combine(output, "csharp-task-int-integrated");
+            GuestStateSlot result = module.MemoryLayout.StateSlots.Single(slot =>
+                slot.GlobalId.Contains(".Result:", StringComparison.Ordinal));
+            File.WriteAllBytes(stem + ".wasm", compiled.Bytes);
+            File.WriteAllBytes(stem + ".guest-ir.json", GuestIrSerializer.Serialize(module));
+            File.WriteAllText(stem + ".result-offset",
+                result.Offset.ToString(CultureInfo.InvariantCulture));
+            GuestStateSlot cleanups = module.MemoryLayout.StateSlots.Single(slot =>
+                slot.GlobalId.Contains(".Cleanups:", StringComparison.Ordinal));
+            File.WriteAllText(stem + ".cleanup-offset",
+                cleanups.Offset.ToString(CultureInfo.InvariantCulture));
+        }
+        return 1;
     }
 
     private static int TaskParallelLocalsCompileToWasm()

@@ -572,8 +572,9 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 	World->InitializeActorsForPlay(FURL());
 	ON_SCOPE_EXIT { GEngine->DestroyWorldContext(World); World->DestroyWorld(false); };
 	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
-	for (const TCHAR* Scenario : {TEXT("immediate"), TEXT("deferred"), TEXT("teardown"), TEXT("chain"), TEXT("arguments"), TEXT("combined"), TEXT("cleanup"), TEXT("local"), TEXT("local-teardown"), TEXT("local-waiter-teardown"), TEXT("parallel"), TEXT("parallel-teardown"), TEXT("parallel-waiter-teardown")})
+	for (const TCHAR* Scenario : {TEXT("immediate"), TEXT("deferred"), TEXT("teardown"), TEXT("chain"), TEXT("arguments"), TEXT("combined"), TEXT("cleanup"), TEXT("local"), TEXT("local-teardown"), TEXT("local-waiter-teardown"), TEXT("parallel"), TEXT("parallel-teardown"), TEXT("parallel-waiter-teardown"), TEXT("integrated")})
 	{
+		const bool bIntegrated = FCString::Strcmp(Scenario, TEXT("integrated")) == 0;
 		const bool bParallel = FCString::Strcmp(Scenario, TEXT("parallel")) == 0
 			|| FCString::Strcmp(Scenario, TEXT("parallel-teardown")) == 0
 			|| FCString::Strcmp(Scenario, TEXT("parallel-waiter-teardown")) == 0;
@@ -641,7 +642,7 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Immediate completion or deferred initial state"),
 			ReadResult(), bDeferred ? 0 : 12);
 		TestEqual(TEXT("Task ownership after initial entry"),
-			Owner->GetTaskResultsForTesting().GetCount(), bChain || bParallel ? 2 : bDeferred ? 1 : 0);
+			Owner->GetTaskResultsForTesting().GetCount(), bIntegrated ? 3 : bChain || bParallel ? 2 : bDeferred ? 1 : 0);
 		if (bTeardown) Owner->Teardown();
 		bool bStopped = bTeardown;
 		int32 Resumes = 0;
@@ -684,9 +685,34 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 		}
 		if (!bWaiterTeardown)
 			TestEqual(TEXT("Compiled C# Task<int> has the expected resume count"), Resumes,
-				bTeardown ? 0 : bParallel ? 6 : bLocal ? 4 : bChain ? 3 : bDeferred ? 2 : 0);
+				bTeardown ? 0 : bIntegrated ? 7 : bParallel ? 6 : bLocal ? 4 : bChain ? 3 : bDeferred ? 2 : 0);
 		TestEqual(TEXT("Compiled C# Task<int> preserves result"), ReadResult(),
-			bTeardown || bWaiterTeardown ? 0 : bParallel ? 75 : bLocal ? 24 : bChain ? 13 : bArguments ? 75 : bCombined ? 16 : bCleanup ? 161 : 12);
+			bTeardown || bWaiterTeardown ? 0 : bIntegrated ? 253 : bParallel ? 75 : bLocal ? 24 : bChain ? 13 : bArguments ? 75 : bCombined ? 16 : bCleanup ? 161 : 12);
+		if (bIntegrated)
+		{
+			FString CleanupOffsetText;
+			int32 CleanupOffset = -1;
+			if (!TestTrue(TEXT("Integrated Task<int> cleanup offset exists"),
+					FFileHelper::LoadFileToString(CleanupOffsetText,
+						*(Stem + TEXT(".cleanup-offset"))))
+				|| !TestTrue(TEXT("Integrated Task<int> cleanup offset is bounded"),
+					LexTryParseString(CleanupOffset, *CleanupOffsetText)
+						&& CleanupOffset >= 0 && CleanupOffset < 65536))
+				return false;
+			uint8 CleanupBytes[4] = {};
+			FString Error;
+			if (!TestTrue(TEXT("Integrated Task<int> cleanup state is readable"),
+					Runtime.ReadStateBytes(CleanupOffset, MakeArrayView(CleanupBytes), Error)))
+			{
+				AddError(Error);
+				return false;
+			}
+			int32 Cleanups = 0;
+			FMemory::Memcpy(&Cleanups, CleanupBytes, sizeof(Cleanups));
+			TestEqual(TEXT("Both concurrent producers run finally once"), Cleanups, 2);
+			AddInfo(FString::Printf(TEXT("integrated Task<int> backend=%d result=%d cleanups=%d resumes=%d"),
+				static_cast<int32>(Backend), ReadResult(), Cleanups, Resumes));
+		}
 		TestEqual(TEXT("Compiled C# Task<int> releases all result references"),
 			Owner->GetTaskResultsForTesting().GetCount(), 0);
 		Owner->Teardown();

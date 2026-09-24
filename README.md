@@ -64,7 +64,7 @@ UE.Self.SetActorScale3D(new FVector(1.25f, 1.25f, 1.25f));
 
 - 已自动测试 Win64 Editor、打包样例和独立进程网络样例；真实游戏流程、真实多人联机及 Android/iOS 仍需验收。
 - 编译器只支持已实现的 C# 和 UE API 子集，不能直接运行任意 .NET 项目或 NuGet 包。
-- `Task<int>` 支持直接 `await`，也支持在方法开头声明最多 8 个独立变量后跨帧等待；别名、重赋值和其他 `Task<T>` 尚不支持。见 [Task 结果合同](Docs/Phase66/P66.C4_Task_Result_Contract.md)。
+- `Task<int>` 支持直接 `await`，也支持在方法开头声明最多 8 个独立变量后跨帧等待；[组合示例](Fixtures/Phase66/TaskIntIntegrated.cs)已在 Win64 两种 VM 上测试。别名、重赋值和其他 `Task<T>` 尚不支持。见 [Task 结果合同](Docs/Phase66/P66.C4_Task_Result_Contract.md)。
 - 同步 `try/finally` 可用，但其中不能 `await`；`catch` 和 `throw` 尚未接入常规构建入口。见 [异常合同](Docs/Phase66/P66.C3_Language_Error_Channel_Contract.md)。
 - 修改 C# 声明的 `UClass`、`UProperty` 或 `UFunction` 后，需要重新构建并重启 Editor。
 
