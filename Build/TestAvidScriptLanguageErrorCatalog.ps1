@@ -46,6 +46,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'C# nested local-throw cleanup Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'multi-local-throw-finally.wasm')
     if ($LASTEXITCODE -ne 0) { throw 'C# shared local-throw cleanup Node WASM probe failed.' }
+    & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'side-effect-throw-finally.wasm')
+    if ($LASTEXITCODE -ne 0) { throw 'C# bounded side-effecting throw decision Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'mixed-local-throw-finally.wasm')
     if ($LASTEXITCODE -ne 0) { throw 'C# mixed normal/error cleanup Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'mixed-branching-finally.wasm')

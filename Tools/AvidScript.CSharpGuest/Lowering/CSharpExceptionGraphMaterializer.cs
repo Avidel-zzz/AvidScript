@@ -720,7 +720,8 @@ internal static class CSharpExceptionGraphMaterializer
             }
             if (outgoing.Length != 2 || block.Operations.Count != 0
                 || block.ConditionKind == "none"
-                || block.BranchValue is not { } condition || !PureThrowDecision(condition)
+                || block.BranchValue is not { } condition
+                || !BoundedTryDecision(condition)
                 || outgoing.Any(branch => branch.Semantics != "regular"
                     || branch.DestinationBlockOrdinal <= ordinal
                     || branch.DestinationBlockOrdinal >= cleanupEntry)
@@ -1086,6 +1087,38 @@ internal static class CSharpExceptionGraphMaterializer
             _ => false,
         };
         return allowed && operation.Children.All(PureThrowDecision);
+    }
+
+    // A try decision may update an int local or field before selecting a throw
+    // leaf. The condition is emitted once by the CFG; checked/user operators and
+    // calls stay excluded because their own failure would need another cleanup edge.
+    private static bool BoundedTryDecision(SemanticOperation operation)
+    {
+        if (!operation.IsSupported || operation.IsChecked || operation.IsLifted
+            || (operation.Kind is "binary" or "unary" or "increment_or_decrement")
+                && operation.SymbolId is not null)
+            return false;
+        if (operation.Kind == "increment_or_decrement")
+        {
+            return operation.TypeId == "type:int32"
+                && operation.OperatorKind is "increment" or "decrement"
+                && operation.Children.Count == 1
+                && operation.Children[0] is { IsSupported: true, TypeId: "type:int32",
+                    Kind: "local_reference" or "field_reference" }
+                && operation.Children[0].Children.Count == 0;
+        }
+        bool allowed = operation.Kind switch
+        {
+            "binary" => operation.OperatorKind is
+                ("equals" or "not_equals" or "less_than" or "less_than_or_equal"
+                    or "greater_than" or "greater_than_or_equal" or "logical_and"
+                    or "logical_or" or "bitwise_and" or "bitwise_or" or "bitwise_xor"),
+            "unary" => operation.OperatorKind is "logical_not" or "bitwise_not",
+            "field_reference" or "local_reference" or "parameter_reference"
+                or "literal" => true,
+            _ => false,
+        };
+        return allowed && operation.Children.All(BoundedTryDecision);
     }
 
     private static bool IsCatchBindingBlock(

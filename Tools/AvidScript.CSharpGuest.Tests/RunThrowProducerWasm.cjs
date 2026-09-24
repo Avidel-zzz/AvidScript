@@ -135,6 +135,7 @@ const nestedFinallyCatches = typeof instance.exports.nested_finally_source_probe
 const throwFinallyCatches = typeof instance.exports.throw_finally_source_probe === 'function';
 const nestedLocalThrowCatches = typeof instance.exports.nested_local_throw_catch_probe === 'function';
 const multiLocalThrowCatches = typeof instance.exports.multi_local_cleanup_first_probe === 'function';
+const sideEffectCatches = typeof instance.exports.side_effect_first_probe === 'function';
 const mixedCleanupCatches = typeof instance.exports.mixed_cleanup_normal_first_probe === 'function';
 const mixedBranchCatches = typeof instance.exports.mixed_branch_normal_first_probe === 'function';
 const calledReturnCatches = typeof instance.exports.called_return_normal_probe === 'function';
@@ -155,7 +156,8 @@ const nestedRethrowCatches = typeof instance.exports.nested_rethrow_source_probe
 const nestedCatchCleanupCatches = typeof instance.exports.nested_catch_cleanup_normal_first_probe === 'function';
 const catchVariableCatches = typeof instance.exports.catch_variable_call_probe === 'function';
 const catches = multipleCatches || finallyCatches || nestedFinallyCatches || throwFinallyCatches
-  || nestedLocalThrowCatches || multiLocalThrowCatches || mixedCleanupCatches || mixedBranchCatches || calledReturnCatches
+  || nestedLocalThrowCatches || multiLocalThrowCatches || sideEffectCatches
+  || mixedCleanupCatches || mixedBranchCatches || calledReturnCatches
   || calledBranchCatches
   || catchFinallyCatches || catchBranchCatches || rethrowFinallyCatches
   || rethrowBranchCatches || localRethrowFinallyCatches || localRethrowBranchCatches
@@ -206,6 +208,12 @@ if (multipleCatches) {
   const source = instance.exports.nested_local_throw_source_probe();
   if (handled !== 11 || source !== 3) {
     throw new Error(`Nested local throw results = ${handled}, ${source}; expected 11, 3`);
+  }
+} else if (sideEffectCatches) {
+  const first = instance.exports.side_effect_first_probe();
+  const second = instance.exports.side_effect_second_probe();
+  if (first !== 11 || second !== 21) {
+    throw new Error(`Side-effecting throw decisions = ${first}, ${second}; expected 11, 21`);
   }
 } else if (multiLocalThrowCatches) {
   const first = instance.exports.multi_local_cleanup_first_probe();
@@ -386,6 +394,7 @@ if (allocations !== (rethrowCatches || replacementCatches || nestedReplacementCa
   : mixedBranchCatches || multiLocalThrowCatches ? 6
   : nestedRethrowCatches || catchVariableCatches || mixedCleanupCatches || calledReturnCatches ? 4
   : rethrowFinallyCatches || localRethrowFinallyCatches || multipleCatches
+    || sideEffectCatches
     || nestedLocalThrowCatches ? 2 : 1)
   || frames.size !== 0 || roots.size !== 0) {
   throw new Error(`Root teardown mismatch: allocations=${allocations}, frames=${frames.size}, roots=${roots.size}`);
@@ -407,6 +416,7 @@ if (catches) {
     : catchVariableCatches ? 'C# source catch-variable WASM: 5/5 passed\n'
     : nestedLocalThrowCatches ? 'C# source nested-local-throw-finally WASM: 3/3 passed\n'
     : multiLocalThrowCatches ? 'C# source multi-local-throw-finally WASM: 7/7 passed\n'
+    : sideEffectCatches ? 'C# source side-effect-throw-finally WASM: 2/2 passed\n'
     : mixedCleanupCatches ? 'C# source mixed-local-throw-finally WASM: 7/7 passed\n'
     : mixedBranchCatches ? 'C# source mixed-branching-finally WASM: 9/9 passed\n'
     : calledReturnCatches ? 'C# source called-return-finally WASM: 6/6 passed\n'

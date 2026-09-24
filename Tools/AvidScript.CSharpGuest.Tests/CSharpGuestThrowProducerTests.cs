@@ -870,13 +870,49 @@ internal static class CSharpGuestThrowProducerTests
                     }
                     finally { Count = Count + 1; }
                 }
+                static int CatchFirst()
+                {
+                    Choice = 0; Count = 0;
+                    try { return Fail(); }
+                    catch (System.Exception) { return Choice * 10 + Count; }
+                }
+                static int CatchSecond()
+                {
+                    Choice = 1; Count = 0;
+                    try { return Fail(); }
+                    catch (System.Exception) { return Choice * 10 + Count; }
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay() { CatchFirst(); CatchSecond(); }
             }
             """;
+        Check(ReferenceCatch(sideEffectSource, "CatchFirst") == 11
+            && ReferenceCatch(sideEffectSource, "CatchSecond") == 21,
+            "the CLR reference evaluates each increment once before cleanup");
         SemanticDocument sideEffectSemantic = Analyze(sideEffectSource);
-        Check(!CSharpLanguageErrorCompiler.TryLower(sideEffectSemantic,
-                new string('a', 64), out _, out string? sideEffectError)
-            && sideEffectError is not null,
-            "a side-effecting throw decision must fail closed");
+        Check(CSharpLanguageErrorCompiler.TryLower(sideEffectSemantic,
+                new string('a', 64), out CSharpLanguageErrorCompilation? sideEffect,
+                out string? sideEffectError) && sideEffect is not null,
+            sideEffectError ?? "bounded side-effecting throw decision did not lower");
+        GuestModule sideEffectProbe = sideEffect!.Module;
+        foreach ((string method, string suffix) in new[]
+        {
+            ("CatchFirst", "first"),
+            ("CatchSecond", "second"),
+        })
+        {
+            GuestFunction handler = sideEffect.Module.Functions.Single(function =>
+                function.Id.Contains("." + method + "(", StringComparison.Ordinal));
+            sideEffectProbe = AddCatchProbe(sideEffectProbe, handler,
+                "function:side_effect_" + suffix + "_probe",
+                "side_effect_" + suffix + "_probe");
+        }
+        WasmCompilationResult sideEffectWasm = WasmModuleCompiler.Compile(sideEffectProbe);
+        Check(sideEffectWasm.Succeeded && sideEffectWasm.Bytes.Length > 8,
+            "bounded side-effecting throw decision must compile to WASM");
+        if (!string.IsNullOrWhiteSpace(output))
+            File.WriteAllBytes(Path.Combine(output, "side-effect-throw-finally.wasm"),
+                sideEffectWasm.Bytes);
 
         const string trappingSource = """
             class Script

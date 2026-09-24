@@ -363,7 +363,8 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 	const TArray<FString> HandledFixtures = {
 		TEXT("finally-catch.wasm"), TEXT("nested-finally-catch.wasm"),
 		TEXT("throw-finally-catch.wasm"), TEXT("nested-local-throw-finally.wasm"),
-		TEXT("multi-local-throw-finally.wasm"), TEXT("mixed-local-throw-finally.wasm"),
+		TEXT("multi-local-throw-finally.wasm"), TEXT("side-effect-throw-finally.wasm"),
+		TEXT("mixed-local-throw-finally.wasm"),
 		TEXT("mixed-branching-finally.wasm"),
 		TEXT("called-return-finally.wasm"), TEXT("called-branching-finally.wasm"),
 		TEXT("catch-finally.wasm"), TEXT("catch-branching-finally.wasm"),
@@ -403,6 +404,7 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 			const bool bHasThirdThrow = FixtureName == TEXT("multi-local-throw-finally.wasm")
 				|| FixtureName == TEXT("mixed-branching-finally.wasm");
 			const bool bHasSecondThrow = bHasThirdThrow
+				|| FixtureName == TEXT("side-effect-throw-finally.wasm")
 				|| FixtureName == TEXT("mixed-local-throw-finally.wasm")
 				|| FixtureName == TEXT("called-return-finally.wasm")
 				|| FixtureName == TEXT("catch-finally.wasm")
