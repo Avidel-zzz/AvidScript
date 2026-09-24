@@ -6,6 +6,8 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 
 namespace AvidScriptTaskResultAbiTests
@@ -366,6 +368,110 @@ bool FAvidScriptTaskResultAbiTest::RunTest(const FString& Parameters)
 		TestFalse(TEXT("Task import rejects mismatched WASM signature"),
 			BadSignature.LoadModule(BadBytes.GetData(), BadBytes.Num(),
 				TEXT("task_result_bad_signature"), Result));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptCompiledTaskIntTest,
+	"AvidScript.Runtime.Continuation.CompiledTaskInt",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
+{
+	if (!GEngine) return false;
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false,
+		TEXT("AvidScriptCompiledTaskIntWorld"));
+	if (!TestNotNull(TEXT("Compiled Task<int> world created"), World)) return false;
+	GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+	World->InitializeActorsForPlay(FURL());
+	ON_SCOPE_EXIT { GEngine->DestroyWorldContext(World); World->DestroyWorld(false); };
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	for (const TCHAR* Scenario : {TEXT("immediate"), TEXT("deferred"), TEXT("teardown")})
+	{
+		const bool bTeardown = FCString::Strcmp(Scenario, TEXT("teardown")) == 0;
+		const bool bDeferred = FCString::Strcmp(Scenario, TEXT("immediate")) != 0;
+		const FString Stem = FPaths::Combine(FPaths::ProjectSavedDir(),
+			TEXT("AvidScriptManagedHeapTests/GuestFixtures"),
+			FString::Printf(TEXT("csharp-task-int-%s"), bDeferred ? TEXT("deferred") : TEXT("immediate")));
+		TArray<uint8> Bytes;
+		FString OffsetText;
+		int32 ResultOffset = -1;
+		if (!TestTrue(TEXT("Compile Task<int> fixtures with AVIDSCRIPT_MANAGED_HEAP_WASM_DIR"),
+			FFileHelper::LoadFileToArray(Bytes, *(Stem + TEXT(".wasm"))))
+			|| !TestTrue(TEXT("Compiled Task<int> result offset exists"),
+				FFileHelper::LoadFileToString(OffsetText, *(Stem + TEXT(".result-offset"))))
+			|| !TestTrue(TEXT("Compiled Task<int> result offset is bounded"),
+				LexTryParseString(ResultOffset, *OffsetText) && ResultOffset >= 0 && ResultOffset < 65536))
+			return false;
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime
+			? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		FAvidScriptWasmRuntimeInstance Runtime(Selection);
+		FAvidScriptWasmSmokeResult Result;
+		if (!TestTrue(TEXT("Compiled C# Task<int> module loads"),
+			Runtime.LoadModule(Bytes.GetData(), Bytes.Num(), Scenario, Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		if (!TestTrue(TEXT("Compiled C# task continuation export exists"),
+			Runtime.ValidateRequiredExports({TEXT("avid_on_continuation_v2")}, Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		const auto Owner = MakeShared<FAvidScriptSessionContinuations>();
+		auto& Endpoint = Owner->ResetActive(World);
+		FAvidScriptWasmHostContext Context;
+		Context.Tasks = &Endpoint;
+		Context.Continuations = &Endpoint;
+		Context.World = World;
+		Runtime.SetHostContext(Context);
+		if (!TestTrue(TEXT("Compiled C# Task<int> BeginPlay runs"), Runtime.BeginPlay(Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		auto ReadResult = [&]() -> int32
+		{
+			uint8 ValueBytes[4] = {};
+			FString Error;
+			if (!Runtime.ReadStateBytes(ResultOffset, MakeArrayView(ValueBytes), Error))
+			{
+				AddError(Error);
+				return MIN_int32;
+			}
+			int32 Value = 0;
+			FMemory::Memcpy(&Value, ValueBytes, sizeof(Value));
+			return Value;
+		};
+		TestEqual(TEXT("Immediate completion or deferred initial state"),
+			ReadResult(), bDeferred ? 0 : 12);
+		TestEqual(TEXT("Task ownership after initial entry"),
+			Owner->GetTaskResultsForTesting().GetCount(), bDeferred ? 1 : 0);
+		if (bTeardown) Owner->Teardown();
+		int32 Resumes = 0;
+		for (int32 Round = 0; bDeferred && Round < 8; ++Round)
+		{
+			World->Tick(LEVELTICK_All, 0.02f);
+			++GFrameCounter;
+			TArray<FAvidScriptContinuationCompletion> Ready;
+			Owner->DrainReady(Ready);
+			if (bTeardown)
+			{
+				TestEqual(TEXT("Teardown suppresses pending C# task callbacks"), Ready.Num(), 0);
+				continue;
+			}
+			for (const auto& Completion : Ready)
+			{
+				if (!TestTrue(TEXT("Compiled C# Task<int> resume runs"),
+					Runtime.DispatchContinuation(Completion, Result)))
+				{ AddError(Result.ErrorMessage); return false; }
+				TestTrue(TEXT("Compiled C# Task<int> continuation finalizes"),
+					Owner->FinalizeDispatched(Completion.Token, true));
+				++Resumes;
+			}
+		}
+		TestEqual(TEXT("Compiled C# Task<int> resumes exactly twice"), Resumes,
+			bTeardown ? 0 : bDeferred ? 2 : 0);
+		TestEqual(TEXT("Compiled C# Task<int> preserves result"), ReadResult(),
+			bTeardown ? 0 : 12);
+		TestEqual(TEXT("Compiled C# Task<int> releases all result references"),
+			Owner->GetTaskResultsForTesting().GetCount(), 0);
+		Owner->Teardown();
 	}
 	return true;
 }

@@ -14,6 +14,7 @@ internal sealed record CSharpAsyncAbi(
     string? StateStoreImportId,
     string? StateReadImportId,
     string? CancelImportId,
+    string? TaskResultImportId,
     GuestType Int32Type,
     GuestType Int64Type,
     GuestType StatusType,
@@ -159,6 +160,16 @@ internal static class CSharpAsyncCfgLowerer
             diagnostics,
             method.CompilerLocals,
             invocationStorageIsLocal: incoming is not null);
+        if (method.TaskResultTypeId is not null
+            && context.CreateInternalStorage(CSharpTaskResultAbi.ProducerSlot(method),
+                CSharpTaskResultAbi.TokenTypeId) is null)
+            return false;
+        foreach (SemanticAsyncAwaitSite taskAwait in method.Segments
+            .Select(segment => segment.AwaitSite)
+            .Where(site => site?.ProducerKind == "task_call").Cast<SemanticAsyncAwaitSite>())
+            if (context.CreateInternalStorage(CSharpTaskResultAbi.AwaitSlot(taskAwait),
+                CSharpTaskResultAbi.TokenTypeId) is null)
+                return false;
         if (incoming?.ResultSymbolId is not null
             && incoming.PayloadKind == SemanticContinuationCallback.ObjectPayloadKind
             && (loadedObject is null
@@ -173,6 +184,18 @@ internal static class CSharpAsyncCfgLowerer
         string activePrefixBlockId = functionEntryBlockId;
         List<GuestInstruction> prefixInstructions = new();
         List<GuestBasicBlock> blocks = new();
+        if (incoming is null && method.TaskResultTypeId is not null)
+        {
+            if (abi.TaskResultImportId is null
+                || !context.TryGetStorage(CSharpTaskResultAbi.ProducerSlot(method), out GuestRegister taskStorage))
+                return false;
+            GuestRegister? task = CSharpTaskResultAbi.Call(context,
+                CSharpTaskResultAbi.Create, null, null, entry.SegmentOrdinal, prefixInstructions);
+            if (task is null || CSharpTaskResultAbi.Call(context,
+                    CSharpTaskResultAbi.Retain, task, null, entry.SegmentOrdinal, prefixInstructions) is null)
+                return false;
+            prefixInstructions.Add(new("local_store", null, new[] { task.Id }, taskStorage.Id, null, null));
+        }
         if (incoming is not null && CSharpAsyncClosureState.Frame(document, method, incoming) is { } incomingFrame)
         {
             if (!CSharpAsyncLowerer.EmitIncomingState(
@@ -248,6 +271,14 @@ internal static class CSharpAsyncCfgLowerer
             activePrefixBlockId = acceptedBlockId;
             prefixInstructions = new List<GuestInstruction>();
         }
+        if (incoming?.ProducerKind == "task_call")
+        {
+            if (!CSharpTaskAwaitLowerer.EmitIncoming(context, incoming,
+                entry.SegmentOrdinal, prefixInstructions, blocks,
+                ref activePrefixBlockId, out List<GuestInstruction>? resumedPrefix))
+                return false;
+            prefixInstructions = resumedPrefix!;
+        }
         int? incomingSegment = incoming is null ? null : method.Segments.Single(segment => segment.AwaitSite?.CallbackId == incoming.CallbackId).Ordinal;
         if (context.ThisRegister is { } receiver)
         {
@@ -275,6 +306,7 @@ internal static class CSharpAsyncCfgLowerer
                 segment,
                 context,
                 abi,
+                incoming is null,
                 blocks,
                 diagnostics))
             {
@@ -296,7 +328,8 @@ internal static class CSharpAsyncCfgLowerer
             entry.FunctionId,
             parameters,
             context.Locals,
-            abi.VoidType.Id,
+            incoming is null && method.TaskResultTypeId is not null
+                ? callable.ReturnTypeId : abi.VoidType.Id,
             functionEntryBlockId,
             blocks);
         return true;
@@ -307,6 +340,7 @@ internal static class CSharpAsyncCfgLowerer
         SemanticAsyncSegment segment,
         CSharpFunctionLoweringContext context,
         CSharpAsyncAbi abi,
+        bool initialEntry,
         List<GuestBasicBlock> blocks,
         List<GuestDiagnostic> diagnostics)
     {
@@ -421,6 +455,29 @@ internal static class CSharpAsyncCfgLowerer
             }
 
             case SemanticAsyncMethod.ReturnTransferKind:
+                string? taskReturnValueId = null;
+                if (method.TaskResultTypeId is not null)
+                {
+                    if (abi.TaskResultImportId is null || transfer.Condition is null) return false;
+                    GuestRegister? value = CSharpOperationLowerer.LowerValue(
+                        context, transfer.Condition, segment.Ordinal, instructions);
+                    GuestRegister? task = CSharpTaskResultAbi.LoadProducerToken(
+                        context, method, segment.Ordinal, instructions);
+                    if (value is null || value.TypeId != CSharpTaskResultAbi.IntTypeId
+                        || task is null
+                        || CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Succeed,
+                            task, value, segment.Ordinal, instructions) is null
+                        || CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release,
+                            task, null, segment.Ordinal, instructions) is null)
+                        return false;
+                    if (initialEntry)
+                    {
+                        GuestRegister? returned = CSharpTaskResultAbi.ReturnValue(
+                            context, method, segment.Ordinal, instructions);
+                        if (returned is null) return false;
+                        taskReturnValueId = returned.Id;
+                    }
+                }
                 blocks.Add(new GuestBasicBlock(
                     activeBlockId,
                     instructions,
@@ -429,7 +486,7 @@ internal static class CSharpAsyncCfgLowerer
                         null,
                         null,
                         null,
-                        null,
+                        taskReturnValueId,
                         CSharpGuestDebugTagger.Create(
                             segment.Span,
                             CSharpGuestDebugTagger.OperationId(
@@ -445,6 +502,7 @@ internal static class CSharpAsyncCfgLowerer
                     segment,
                     context,
                     abi,
+                    initialEntry,
                     activeBlockId,
                     instructions,
                     blocks,
@@ -461,12 +519,16 @@ internal static class CSharpAsyncCfgLowerer
         SemanticAsyncSegment segment,
         CSharpFunctionLoweringContext context,
         CSharpAsyncAbi abi,
+        bool initialEntry,
         string activeBlockId,
         List<GuestInstruction> instructions,
         List<GuestBasicBlock> blocks,
         List<GuestDiagnostic> diagnostics)
     {
         SemanticAsyncAwaitSite? awaitSite = segment.AwaitSite;
+        if (awaitSite?.ProducerKind == "task_call")
+            return CSharpTaskAwaitLowerer.Lower(method, segment, context, abi,
+                initialEntry, activeBlockId, instructions, blocks);
         int awaitInstructionStart = instructions.Count;
         if (awaitSite is null
             || !CSharpAsyncLowerer.EmitProducer(
@@ -585,10 +647,19 @@ internal static class CSharpAsyncCfgLowerer
                 acceptedBlockId,
                 rejectedBlockId,
                 null)));
+        List<GuestInstruction> acceptedInstructions = new();
+        string? acceptedReturnId = null;
+        if (method.TaskResultTypeId is not null && initialEntry)
+        {
+            GuestRegister? returned = CSharpTaskResultAbi.ReturnValue(
+                context, method, segment.Ordinal, acceptedInstructions);
+            if (returned is null) return false;
+            acceptedReturnId = returned.Id;
+        }
         blocks.Add(new GuestBasicBlock(
             acceptedBlockId,
-            Array.Empty<GuestInstruction>(),
-            new GuestTerminator("return", null, null, null, null)));
+            acceptedInstructions,
+            new GuestTerminator("return", null, null, null, acceptedReturnId)));
         blocks.Add(new GuestBasicBlock(
             rejectedBlockId,
             rejectionInstructions,
@@ -622,6 +693,11 @@ internal static class CSharpAsyncCfgLowerer
             {
                 pending.Push(segment.Transfer.PrimaryTarget);
                 pending.Push(segment.Transfer.SecondaryTarget);
+            }
+            else if (segment.Transfer.Kind == SemanticAsyncMethod.AwaitTransferKind
+                && segment.AwaitSite?.ProducerKind == "task_call")
+            {
+                pending.Push(segment.Transfer.PrimaryTarget);
             }
         }
         return reachable.Select(ordinal => segments[ordinal]).ToArray();

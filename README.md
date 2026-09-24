@@ -76,7 +76,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 
 - 编译器只支持本项目实现的 C# 语法和 UE API 子集，不能直接运行任意 .NET 项目或 NuGet 包。
 - `try` / `catch` / `finally` 的受限写法目前只在[专用测试入口](Docs/Phase66/P66.C3_Language_Error_Channel_Contract.md)可用。
-- `int score = await LoadScoreAsync();` 这样的 `Task<int>` 调用目前还不能从 C# 编译为可执行 WASM；进度见 [Task 结果合同](Docs/Phase66/P66.C4_Task_Result_Contract.md)。
+- `Task<int>` 目前只支持同源、静态、无参数方法的直接 `await`；其他 `Task<T>`、Task 变量及语言错误传播尚未接通。见 [Task 结果合同](Docs/Phase66/P66.C4_Task_Result_Contract.md)。
 
 ## Development
 

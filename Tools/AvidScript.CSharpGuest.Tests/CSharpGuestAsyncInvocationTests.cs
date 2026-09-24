@@ -108,36 +108,71 @@ internal static class CSharpGuestAsyncInvocationTests
             }
             count++;
         }
-        TaskResultSemanticRequiresGuestAbi();
-        return count + 1;
+        return count + TaskResultSemanticCompilesToWasm();
     }
 
-    private static void TaskResultSemanticRequiresGuestAbi()
+    private static int TaskResultSemanticCompilesToWasm()
     {
-        const string source = """
+        int count = 0;
+        foreach ((string scenario, string producerBody) in new[]
+        {
+            ("deferred", "await AvidContinuations.NextTickAsync();"),
+            ("immediate", ""),
+        })
+        {
+            string source = $$"""
             using AvidScript;
+            using System.Runtime.InteropServices;
             using System.Threading.Tasks;
             public static class Script
             {
+                public static int Result;
                 public static async Task<int> LoadScoreAsync()
                 {
-                    await AvidContinuations.NextTickAsync();
+                    {{producerBody}}
                     return 12;
                 }
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
                 public static async void BeginPlay()
                 {
                     int score = await LoadScoreAsync();
+                    Result = score;
                 }
             }
             """;
-        SemanticDocument document = CSharpGuestContinuationTests.Analyze(
-            source, "Scripts/TaskIntAbiBoundary.cs");
-        Check(document.Succeeded
-            && document.SchemaVersion == SemanticContract.TaskResultSchemaVersion,
-            "task result source must reach the new semantic contract");
-        CSharpGuestLoweringResult lowered = CSharpGuestLowerer.Lower(document, new string('d', 64));
-        Check(!lowered.Succeeded && lowered.Diagnostics.Any(item => item.Code == "ASCG1001"),
-            "Guest must reject task semantic artifacts until its result ABI is implemented");
+            SemanticDocument document = CSharpGuestContinuationTests.Analyze(
+                source, "Scripts/TaskIntAbiBoundary_" + scenario + ".cs");
+            Check(document.Succeeded
+                && document.SchemaVersion == SemanticContract.TaskResultSchemaVersion,
+                scenario + ": task result source must reach the new semantic contract");
+            CSharpGuestLoweringResult lowered = CSharpGuestLowerer.Lower(document, new string('d', 64));
+            Check(lowered.Succeeded,
+                scenario + ": Task<int> Guest lowering failed: " + string.Join(" | ", lowered.Diagnostics.Select(item => item.Code + ":" + item.Message)));
+            GuestModule module = lowered.Module!;
+            Check(module.SchemaVersion == 18 && module.IrVersion == "1.17"
+                && module.Imports.Count(imported => imported.Module == "avidscript"
+                    && imported.Name == "avid_task_i32_v1") == 1,
+                scenario + ": Task<int> lowering must use the versioned Guest IR and Host import");
+            WasmCompilationResult compiled = WasmModuleCompiler.Compile(module);
+            Check(compiled.Succeeded,
+                scenario + ": Task<int> WASM compilation failed: " + string.Join(" | ", compiled.Diagnostics.Select(item => item.Message)));
+            Check(WasmArtifactInspector.Inspect(compiled.Bytes).Imports.Any(imported =>
+                imported.Module == "avidscript" && imported.Name == "avid_task_i32_v1"),
+                scenario + ": Task<int> WASM must retain the exact Host import");
+            string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_MANAGED_HEAP_WASM_DIR");
+            if (!string.IsNullOrWhiteSpace(output))
+            {
+                Directory.CreateDirectory(output);
+                string stem = Path.Combine(output, "csharp-task-int-" + scenario);
+                GuestStateSlot result = module.MemoryLayout.StateSlots.Single(slot =>
+                    slot.GlobalId.Contains(".Result:", StringComparison.Ordinal));
+                File.WriteAllBytes(stem + ".wasm", compiled.Bytes);
+                File.WriteAllBytes(stem + ".guest-ir.json", GuestIrSerializer.Serialize(module));
+                File.WriteAllText(stem + ".result-offset", result.Offset.ToString(CultureInfo.InvariantCulture));
+            }
+            count++;
+        }
+        return count;
     }
 
     private const string Source = """

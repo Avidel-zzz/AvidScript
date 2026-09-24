@@ -1,0 +1,160 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using AvidScript.CSharpSemantic;
+using AvidScript.GuestIr;
+
+namespace AvidScript.CSharpGuest;
+
+internal static class CSharpTaskAwaitLowerer
+{
+    public static bool Lower(SemanticAsyncMethod method, SemanticAsyncSegment segment,
+        CSharpFunctionLoweringContext context, CSharpAsyncAbi abi, bool initialEntry,
+        string blockId, List<GuestInstruction> instructions, List<GuestBasicBlock> blocks)
+    {
+        SemanticAsyncAwaitSite? site = segment.AwaitSite;
+        SemanticCallable? target = context.Document.Callables.SingleOrDefault(callable =>
+            callable.MethodSymbolId == site?.TaskCallableId);
+        if (site is null || target is null || abi.TaskResultImportId is null
+            || segment.Transfer?.Kind != SemanticAsyncMethod.AwaitTransferKind
+            || !context.TryGetStorage(CSharpTaskResultAbi.AwaitSlot(site), out GuestRegister storage))
+        {
+            context.Add("ASCG1010", "Task<int> await has no validated target or state storage.");
+            return false;
+        }
+
+        GuestRegister? taskValue = context.CreateTemporary(target.ReturnTypeId, segment.Ordinal);
+        GuestRegister? token = context.CreateTemporary(CSharpTaskResultAbi.TokenTypeId, segment.Ordinal);
+        if (taskValue is null || token is null) return false;
+        instructions.Add(new("call", taskValue.Id, Array.Empty<string>(),
+            CSharpGuestIds.Function(target.MethodSymbolId), null, null));
+        instructions.Add(new("convert", token.Id, new[] { taskValue.Id }, null, null, null));
+        instructions.Add(new("local_store", null, new[] { token.Id }, storage.Id, null, null));
+        GuestRegister? callback = CSharpTaskResultAbi.Constant(context,
+            CSharpTaskResultAbi.IntTypeId, site.CallbackId, segment.Ordinal, instructions);
+        GuestRegister? scheduled = callback is null ? null : CSharpTaskResultAbi.Call(context,
+            CSharpTaskResultAbi.Await, token, callback, segment.Ordinal, instructions);
+        GuestRegister? zero = CSharpTaskResultAbi.Constant(context,
+            CSharpTaskResultAbi.TokenTypeId, 0, segment.Ordinal, instructions);
+        GuestRegister? ready = context.CreateTemporary(CSharpTaskResultAbi.IntTypeId, segment.Ordinal);
+        if (scheduled is null || zero is null || ready is null) return false;
+        instructions.Add(new("binary", ready.Id, new[] { scheduled.Id, zero.Id },
+            null, "equals", null));
+        string readyBlock = blockId + ":task_ready";
+        string pendingBlock = blockId + ":task_pending";
+        blocks.Add(new(blockId, instructions,
+            new("branch_if", ready.Id, readyBlock, pendingBlock, null)));
+
+        List<GuestInstruction> readyInstructions = new();
+        if (!EmitRead(context, token, segment.Ordinal, readyInstructions,
+            out GuestRegister? value, out GuestRegister? succeeded)) return false;
+        string valueBlock = blockId + ":task_value";
+        string failedBlock = blockId + ":task_failed";
+        blocks.Add(new(readyBlock, readyInstructions,
+            new("branch_if", succeeded!.Id, valueBlock, failedBlock, null)));
+        List<GuestInstruction> failedInstructions = new();
+        if (CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release, token, null,
+                segment.Ordinal, failedInstructions) is null) return false;
+        blocks.Add(new(failedBlock, failedInstructions,
+            new("trap", null, null, null, null)));
+        List<GuestInstruction> valueInstructions = new();
+        if (site.ResultSymbolId is not null
+            && !CSharpOperationLowerer.StoreLocal(context, site.ResultSymbolId,
+                value!, segment.Ordinal, valueInstructions)) return false;
+        if (CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release, token, null,
+                segment.Ordinal, valueInstructions) is null) return false;
+        blocks.Add(new(valueBlock, valueInstructions,
+            new("branch", null,
+                CSharpGuestIds.AsyncSegmentBlock(method.MethodSymbolId,
+                    segment.Transfer.PrimaryTarget), null, null)));
+
+        List<GuestInstruction> pendingInstructions = new();
+        SemanticAsyncStateFrame? frame = CSharpAsyncClosureState.Frame(context.Document, method, site);
+        if (frame is null || !CSharpAsyncLowerer.EmitOutgoingState(context, frame,
+                site.CallbackId, scheduled, abi.StateStoreImportId, abi.Int32Type,
+                pendingInstructions, out GuestRegister? stateAccepted)
+            || stateAccepted is null) return false;
+        string acceptedBlock = blockId + ":task_pending_accepted";
+        string rejectedBlock = blockId + ":task_pending_rejected";
+        blocks.Add(new(pendingBlock, pendingInstructions,
+            new("branch_if", stateAccepted.Id, acceptedBlock, rejectedBlock, null)));
+        List<GuestInstruction> acceptedInstructions = new();
+        if (CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release,
+                token, null, segment.Ordinal, acceptedInstructions) is null) return false;
+        string? returnId = null;
+        if (method.TaskResultTypeId is not null && initialEntry)
+        {
+            GuestRegister? returned = CSharpTaskResultAbi.ReturnValue(context,
+                method, segment.Ordinal, acceptedInstructions);
+            if (returned is null) return false;
+            returnId = returned.Id;
+        }
+        blocks.Add(new(acceptedBlock, acceptedInstructions,
+            new("return", null, null, null, returnId)));
+        List<GuestInstruction> rejectedInstructions = new();
+        if (abi.CancelImportId is not null)
+        {
+            GuestRegister? ignored = context.CreateTemporary(CSharpTaskResultAbi.IntTypeId, segment.Ordinal);
+            if (ignored is null) return false;
+            rejectedInstructions.Add(new("call", ignored.Id,
+                new[] { scheduled.Id }, abi.CancelImportId, null, null));
+        }
+        if (CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release,
+                token, null, segment.Ordinal, rejectedInstructions) is null) return false;
+        blocks.Add(new(rejectedBlock, rejectedInstructions,
+            new("trap", null, null, null, null)));
+        return true;
+    }
+
+    public static bool EmitIncoming(CSharpFunctionLoweringContext context,
+        SemanticAsyncAwaitSite site, int block, List<GuestInstruction> instructions,
+        List<GuestBasicBlock> blocks, ref string activeBlockId,
+        out List<GuestInstruction>? nextInstructions)
+    {
+        nextInstructions = null;
+        if (!context.TryGetStorage(CSharpTaskResultAbi.AwaitSlot(site), out GuestRegister storage))
+            return false;
+        GuestRegister? token = context.CreateTemporary(CSharpTaskResultAbi.TokenTypeId, block);
+        if (token is null) return false;
+        instructions.Add(new("local_load", token.Id, Array.Empty<string>(), storage.Id, null, null));
+        if (!EmitRead(context, token, block, instructions,
+            out GuestRegister? value, out GuestRegister? succeeded)) return false;
+        string accepted = activeBlockId + ":task_read_accepted";
+        string rejected = activeBlockId + ":task_read_rejected";
+        blocks.Add(new(activeBlockId, instructions,
+            new("branch_if", succeeded!.Id, accepted, rejected, null)));
+        blocks.Add(new(rejected, Array.Empty<GuestInstruction>(),
+            new("trap", null, null, null, null)));
+        nextInstructions = new();
+        if (site.ResultSymbolId is not null
+            && !CSharpOperationLowerer.StoreLocal(context, site.ResultSymbolId,
+                value!, block, nextInstructions)) return false;
+        activeBlockId = accepted;
+        return true;
+    }
+
+    private static bool EmitRead(CSharpFunctionLoweringContext context,
+        GuestRegister token, int block, List<GuestInstruction> instructions,
+        out GuestRegister? value, out GuestRegister? succeeded)
+    {
+        value = null;
+        succeeded = null;
+        GuestRegister? packed = CSharpTaskResultAbi.Call(context,
+            CSharpTaskResultAbi.Read, token, null, block, instructions);
+        GuestRegister? shift = CSharpTaskResultAbi.Constant(context,
+            CSharpTaskResultAbi.TokenTypeId, 32, block, instructions);
+        GuestRegister? state = context.CreateTemporary(CSharpTaskResultAbi.TokenTypeId, block);
+        GuestRegister? successState = CSharpTaskResultAbi.Constant(context,
+            CSharpTaskResultAbi.TokenTypeId, 1, block, instructions);
+        succeeded = context.CreateTemporary(CSharpTaskResultAbi.IntTypeId, block);
+        value = context.CreateTemporary(CSharpTaskResultAbi.IntTypeId, block);
+        if (packed is null || shift is null || state is null
+            || successState is null || succeeded is null || value is null) return false;
+        instructions.Add(new("binary", state.Id, new[] { packed.Id, shift.Id },
+            null, "right_shift", null));
+        instructions.Add(new("binary", succeeded.Id, new[] { state.Id, successState.Id },
+            null, "equals", null));
+        instructions.Add(new("convert", value.Id, new[] { packed.Id }, null, null, null));
+        return true;
+    }
+}

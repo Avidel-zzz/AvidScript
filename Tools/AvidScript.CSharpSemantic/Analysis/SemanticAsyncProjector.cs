@@ -196,6 +196,12 @@ internal static class SemanticAsyncProjector
             node is AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax);
         bool requiresControlFlowCfg = callable.Export is null || hasLexicalFunctions || awaits.Any(awaitExpression =>
                 !IsDirectMethodBodyAwait(declaration.Body, awaitExpression))
+            || awaits.Any(awaitExpression =>
+                semanticModel.GetOperation(awaitExpression) is IAwaitOperation
+                    { Operation: IInvocationOperation invocation }
+                && invocation.TargetMethod.IsAsync
+                && TryGetSupportedTaskResult(context.Compilation,
+                    invocation.TargetMethod.ReturnType, out _))
             || declaration.Body.DescendantNodes().OfType<SwitchStatementSyntax>().Any();
         if (requiresControlFlowCfg)
         {

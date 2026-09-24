@@ -116,6 +116,8 @@ public static class CSharpGuestLowerer
             dataPool,
             diagnostics);
         functions.AddRange(asyncMethods.Functions);
+        if (document.SchemaVersion == SemanticContract.TaskResultSchemaVersion)
+            imports = imports.Append(CSharpTaskResultAbi.Import()).ToArray();
         functions.AddRange(CSharpClosureDelegateLowerer.BuildThunks(document, functions));
         functions.AddRange(CSharpDelegateIdentityLowerer.Build(document, functions));
         imports = CSharpAsyncManagedState.AppendImports(imports, functions);
@@ -252,8 +254,10 @@ public static class CSharpGuestLowerer
         }
 
         GuestModule module = new(
-            GuestModuleValidator.CurrentSchemaVersion,
-            GuestModuleValidator.CurrentIrVersion,
+            document.SchemaVersion == SemanticContract.TaskResultSchemaVersion
+                ? 18 : GuestModuleValidator.CurrentSchemaVersion,
+            document.SchemaVersion == SemanticContract.TaskResultSchemaVersion
+                ? "1.17" : GuestModuleValidator.CurrentIrVersion,
             $"csharp:{document.Source.SourceId}",
             "csharp",
             new GuestProvenance(

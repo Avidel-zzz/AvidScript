@@ -103,7 +103,11 @@ internal static class CSharpAsyncLowerer
                 || (method.ExportName is not null && (callable.Parameters.Count != 0 || !callable.IsStatic))
                 || (!callable.IsStatic && !CSharpReferenceObjects.Types(document).Contains(callable.ContainingTypeId)
                     && !CSharpUeReceivers.IsType(document, callable.ContainingTypeId))
-                || callable.ReturnTypeId != voidType.Id
+                || (method.TaskResultTypeId is null
+                    ? callable.ReturnTypeId != voidType.Id
+                    : method.TaskResultTypeId != CSharpTaskResultAbi.IntTypeId
+                        || document.SchemaVersion != SemanticContract.TaskResultSchemaVersion
+                        || !guestTypes.ContainsKey(callable.ReturnTypeId))
                 || callable.Export?.Name != method.ExportName
                 || method.Segments.Count == 0)
             {
@@ -127,6 +131,8 @@ internal static class CSharpAsyncLowerer
                         stateStoreImportId,
                         stateReadImportId,
                         cancelImportId,
+                        document.SchemaVersion == SemanticContract.TaskResultSchemaVersion
+                            ? CSharpTaskResultAbi.ImportId : null,
                         int32Type,
                         int64Type,
                         statusType,

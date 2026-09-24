@@ -36,7 +36,7 @@ internal static class CSharpTypeLowerer
         foreach (SemanticType type in document.Types.OrderBy(type => type.Id, StringComparer.Ordinal))
         {
             if (IsCompilerAsyncScaffoldType(document, type)
-                || (document.SemanticVersion is "1.36" or "1.37" or "1.38" or "1.39" or SemanticContract.CurrentSemanticVersion
+                || (document.SemanticVersion is "1.36" or "1.37" or "1.38" or "1.39" or SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion
                     && IsOpenGenericType(type.Id, semanticTypes, shapes,
                         new HashSet<string>(StringComparer.Ordinal))))
             {
@@ -279,6 +279,20 @@ internal static class CSharpTypeLowerer
 
         if (type.Kind == "delegate")
             return new GuestType(type.Id, "function_ref", "i32", Array.Empty<GuestField>(), null, null, 4, 4);
+
+        if (type.CanonicalName == "global::System.Threading.Tasks.Task<int>")
+        {
+            if (type.Kind != "class"
+                || !shapes.TryGetValue(type.Id, out SemanticTypeShape? taskShape)
+                || taskShape.GenericArgumentTypeIds is not { Count: 1 }
+                || taskShape.GenericArgumentTypeIds[0] != "type:int32")
+            {
+                Add(diagnostics, "ASCG1003", $"Task result type '{type.Id}' has no canonical int result shape.");
+                return null;
+            }
+            return new GuestType(type.Id, "handle", "i64",
+                Array.Empty<GuestField>(), null, null, 8, 8);
+        }
 
         if (ueTypeIds.Contains(type.Id))
         {

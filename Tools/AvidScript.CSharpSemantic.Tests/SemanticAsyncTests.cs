@@ -79,7 +79,10 @@ internal static class SemanticAsyncTests
         SemanticDocument document = Analyze(source, "Scripts/TaskIntAwait.cs");
         Assert(document.Succeeded, "direct Task<int> await source must analyze successfully");
         SemanticAsyncMethod producer = document.AsyncMethods.Single(method => method.TaskResultTypeId is not null);
-        SemanticAsyncAwaitSite site = document.AsyncMethods.Single(method => method.TaskResultTypeId is null)
+        SemanticAsyncMethod consumer = document.AsyncMethods.Single(method => method.TaskResultTypeId is null);
+        Assert(consumer.Lowering == SemanticAsyncMethod.ContinuationCfgLowering,
+            "direct Task<int> await must use the CFG needed for immediate and deferred completion");
+        SemanticAsyncAwaitSite site = consumer
             .Segments.Select(segment => segment.AwaitSite)
             .Single(awaitSite => awaitSite?.ProducerKind == "task_call")!;
         Assert(site.TaskCallableId == producer.MethodSymbolId

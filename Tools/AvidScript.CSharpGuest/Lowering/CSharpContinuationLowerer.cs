@@ -113,7 +113,8 @@ internal static class CSharpContinuationLowerer
                 || route.PayloadKind is not (
                     SemanticContinuationCallback.NonePayloadKind or
                     SemanticContinuationCallback.ObjectPayloadKind or
-                    SemanticContinuationCallback.ResultSlotPayloadKind)
+                    SemanticContinuationCallback.ResultSlotPayloadKind or
+                    "task_result")
                 || !loweredFunctionIds.Contains(route.FunctionId))
             {
                 Add(diagnostics, $"Async continuation callback '{route.CallbackId}' has no compatible lowered resume function.");

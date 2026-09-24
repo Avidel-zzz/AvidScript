@@ -110,6 +110,19 @@ internal sealed class CSharpFunctionLoweringContext
 
     public IReadOnlyList<GuestRegister> Locals => locals;
 
+    public GuestRegister? CreateInternalStorage(string symbolId, string typeId)
+    {
+        if (storageBySymbol.ContainsKey(symbolId) || !guestTypes.ContainsKey(typeId))
+        {
+            Add("ASCG1004", $"Internal async storage '{symbolId}' has no unique Guest type.");
+            return null;
+        }
+        GuestRegister register = new(CSharpGuestIds.Local(symbolId), typeId);
+        storageBySymbol.Add(symbolId, register);
+        locals.Add(register);
+        return register;
+    }
+
     public CSharpShortCircuitLowerer ShortCircuitFlow { get; } = new();
 
     public GuestRegister? CreateTemporary(string? typeId, int blockOrdinal)
