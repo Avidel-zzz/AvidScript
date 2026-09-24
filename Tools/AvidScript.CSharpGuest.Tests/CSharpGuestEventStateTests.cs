@@ -195,6 +195,7 @@ internal static class CSharpGuestEventStateTests
             using AvidScript;
             using System;
             using System.Runtime.InteropServices;
+            using System.Threading.Tasks;
             public sealed class Counter
             {
                 public void Handle(AActor actor, int amount, float scale)
@@ -263,6 +264,19 @@ internal static class CSharpGuestEventStateTests
                     Count += readBonus();
                     await AvidContinuations.NextTickAsync();
                     Count += readBonus() * 10;
+                }
+                private static async Task<int> LoadSignalScoreAsync(int amount)
+                {
+                    await AvidContinuations.NextTickAsync();
+                    return amount * 10;
+                }
+                public static async void OnSignalTaskAsync(AActor actor, int amount, float scale)
+                {
+                    int bonus = amount;
+                    Func<int> readBonus = () => bonus;
+                    Count += readBonus();
+                    int score = await LoadSignalScoreAsync(readBonus());
+                    Count += score + readBonus();
                 }
                 static int OnSinglecastFirst(ref int value, out int doubled)
                 {
@@ -366,6 +380,8 @@ internal static class CSharpGuestEventStateTests
                     }
                     if (delta == 28.0f) UE.Self.OnScriptSignal += OnSignalAsync;
                     if (delta == 29.0f) UE.Self.OnScriptSignal -= OnSignalAsync;
+                    if (delta == 30.0f) UE.Self.OnScriptSignal += OnSignalTaskAsync;
+                    if (delta == 31.0f) UE.Self.OnScriptSignal -= OnSignalTaskAsync;
                 }
             }
             """;

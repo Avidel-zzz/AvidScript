@@ -674,6 +674,104 @@ bool FAvidScriptCSharpEventLanguageTest::RunTest(const FString& Parameters)
                 AsyncEventSession.GetDelegateSubscriptionCountForTesting(), 0);
         }
         {
+            FAvidScriptRuntimeSession TaskEventSession;
+            TaskEventSession.SetBackendSelectionForTesting(Selection);
+            TaskEventSession.SetHostContext(Context);
+            FAvidScriptWasmReloadResult TaskLoaded;
+            if (!TaskEventSession.LoadInitialModule(Bytes.GetData(), Bytes.Num(), Manifest, TaskLoaded))
+            { AddError(TaskLoaded.ErrorMessage); return false; }
+            auto* TaskRuntime = TaskEventSession.GetLiveRuntimeForTesting();
+            FAvidScriptWasmSmokeResult TaskResult;
+            if (!TaskRuntime->Tick(30.0f, TaskResult)) { AddError(TaskResult.ErrorMessage); return false; }
+            TestEqual(TEXT("Task event installs one language bridge"),
+                TaskEventSession.GetDelegateSubscriptionCountForTesting(), 1);
+            auto* TaskHeap = TaskRuntime->GetManagedHeapForTesting();
+            const uint32 TaskSubscribedRoots = TaskHeap->GetStats().LiveRoots;
+            FStructOnScope TaskFrame(Signal->Signature.SignatureFunction);
+            FindFProperty<FObjectProperty>(Signal->Signature.SignatureFunction, TEXT("SourceActor"))
+                ->SetObjectPropertyValue_InContainer(TaskFrame.GetStructMemory(), Owner);
+            auto* TaskAmount = FindFProperty<FIntProperty>(Signal->Signature.SignatureFunction, TEXT("Count"));
+            TaskAmount->SetPropertyValue_InContainer(TaskFrame.GetStructMemory(), 2);
+            FindFProperty<FFloatProperty>(Signal->Signature.SignatureFunction, TEXT("Scale"))
+                ->SetPropertyValue_InContainer(TaskFrame.GetStructMemory(), 1.0f);
+            const auto BroadcastTask = [&]()
+            {
+                Signal->Signature.MulticastProperty->GetMulticastDelegate(
+                    Signal->Signature.MulticastProperty->ContainerPtrToValuePtr<void>(Owner))
+                    ->ProcessDelegate<UObject>(TaskFrame.GetStructMemory());
+            };
+            BroadcastTask();
+            int32 TaskScore = -1;
+            if (!TaskRuntime->ReadStateBytes(CountAddress,
+                MakeArrayView(reinterpret_cast<uint8*>(&TaskScore), 4), Error))
+            { AddError(Error); return false; }
+            TestEqual(TEXT("Task event reads captured amount before await"), TaskScore, 2);
+            TestEqual(TEXT("Task event owns producer and waiter continuations"),
+                TaskEventSession.GetLivePendingContinuationCount(), 2);
+            TestTrue(TEXT("Task event retains its suspended capture"),
+                TaskHeap->GetStats().LiveRoots > TaskSubscribedRoots);
+            if (!TestTrue(TEXT("GC preserves Task event capture"), TaskHeap->Collect() == EHeapError::Ok)) return false;
+            for (int32 Round = 0; Round < 4 && TaskScore != 24; ++Round)
+            {
+                World->Tick(LEVELTICK_All, 0.02f); ++GFrameCounter;
+                if (!TaskEventSession.TickLive(0.001f, TaskResult))
+                { AddError(TaskResult.ErrorMessage); return false; }
+                if (!TaskRuntime->ReadStateBytes(CountAddress,
+                    MakeArrayView(reinterpret_cast<uint8*>(&TaskScore), 4), Error))
+                { AddError(Error); return false; }
+            }
+            TestEqual(TEXT("Task result and captured event value compose"), TaskScore, 24);
+            TestEqual(TEXT("Completed Task event consumes both continuations"),
+                TaskEventSession.GetLivePendingContinuationCount(), 0);
+            if (!TaskRuntime->Tick(31.0f, TaskResult)) { AddError(TaskResult.ErrorMessage); return false; }
+            TestEqual(TEXT("Task event removal releases language bridge"),
+                TaskEventSession.GetDelegateSubscriptionCountForTesting(), 0);
+            if (!TestTrue(TEXT("GC reclaims completed Task event roots"), TaskHeap->Collect() == EHeapError::Ok)) return false;
+            TestEqual(TEXT("Completed Task event leaves no managed roots"), TaskHeap->GetStats().LiveRoots, 0u);
+            if (!TaskRuntime->Tick(30.0f, TaskResult)) { AddError(TaskResult.ErrorMessage); return false; }
+            TaskAmount->SetPropertyValue_InContainer(TaskFrame.GetStructMemory(), 3);
+            BroadcastTask();
+            TestEqual(TEXT("Second Task event suspends producer and waiter"),
+                TaskEventSession.GetLivePendingContinuationCount(), 2);
+            const TArray<uint8> InvalidTaskBytes{ 0 };
+            FAvidScriptWasmReloadResult TaskReload;
+            TestFalse(TEXT("Invalid reload preserves suspended Task event"),
+                TaskEventSession.ReloadModule(InvalidTaskBytes.GetData(), InvalidTaskBytes.Num(), Manifest, TaskReload));
+            TestTrue(TEXT("Invalid Task reload preserves the live runtime"),
+                TaskReload.bRollbackPreservedLiveRuntime
+                    && TaskEventSession.GetLiveRuntimeForTesting() == TaskRuntime);
+            TestEqual(TEXT("Invalid Task reload preserves both continuations"),
+                TaskEventSession.GetLivePendingContinuationCount(), 2);
+            auto TaskUpdatedManifest = Manifest;
+            TaskUpdatedManifest.ModuleId = TEXT("csharp_event_language_task_v2");
+            if (!TestTrue(TEXT("Valid reload retires suspended Task event"),
+                TaskEventSession.ReloadModule(Bytes.GetData(), Bytes.Num(), TaskUpdatedManifest, TaskReload)))
+            { AddError(TaskReload.ErrorMessage); return false; }
+            TestEqual(TEXT("Reload retires Task producer and waiter"),
+                TaskEventSession.GetLivePendingContinuationCount(), 0);
+            TestEqual(TEXT("Reload retires Task event bridge"),
+                TaskEventSession.GetDelegateSubscriptionCountForTesting(), 0);
+            TaskRuntime = TaskEventSession.GetLiveRuntimeForTesting();
+            World->Tick(LEVELTICK_All, 0.02f); ++GFrameCounter;
+            if (!TaskEventSession.TickLive(0.001f, TaskResult))
+            { AddError(TaskResult.ErrorMessage); return false; }
+            if (!TaskRuntime->ReadStateBytes(CountAddress,
+                MakeArrayView(reinterpret_cast<uint8*>(&TaskScore), 4), Error))
+            { AddError(Error); return false; }
+            TestEqual(TEXT("Retired Task event cannot mutate replacement state"), TaskScore, 0);
+            if (!TaskRuntime->Tick(30.0f, TaskResult)) { AddError(TaskResult.ErrorMessage); return false; }
+            TaskAmount->SetPropertyValue_InContainer(TaskFrame.GetStructMemory(), 4);
+            BroadcastTask();
+            TestEqual(TEXT("Replacement Task event suspends producer and waiter"),
+                TaskEventSession.GetLivePendingContinuationCount(), 2);
+            if (!TestTrue(TEXT("Stopping Task event owner cancels both continuations"),
+                TaskEventSession.StopAndUnload(TaskResult))) return false;
+            TestEqual(TEXT("Stopped Task event retains no continuation"),
+                TaskEventSession.GetLivePendingContinuationCount(), 0);
+            TestEqual(TEXT("Stopped Task event retains no bridge"),
+                TaskEventSession.GetDelegateSubscriptionCountForTesting(), 0);
+        }
+        {
             AActor* GcOwner = World->SpawnActor<AActor>(Signal->ExpectedSourceClass);
             if (!TestNotNull(TEXT("GC event source spawned"), GcOwner)) return false;
             TWeakObjectPtr<AActor> WeakGcOwner = GcOwner;

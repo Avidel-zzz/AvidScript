@@ -61,7 +61,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 AvidScript 处于开发阶段。Win64 Editor、打包样例和独立进程网络样例已有自动化测试；真实游戏流程、真实多人联机和 Android/iOS 尚未验收。
 
 - 编译器支持 C# 和 UE API 的子集；不能直接运行任意 .NET 项目或 NuGet 包。
-- 异步支持 `int score = await LoadScoreAsync(7, 5)` 这样的[同源静态 `Task<int>` 调用](Tools/AvidScript.CSharpGuest.Tests/CSharpGuestAsyncInvocationTests.cs)。Task 变量和其他 `Task<T>` 尚不支持；详见 [Task<int> 合同](Docs/Phase66/P66.C4_Task_Result_Contract.md)。
+- 异步支持 `int score = await LoadScoreAsync(7, 5)` 这样的[同源静态 `Task<int>` 调用](Tools/AvidScript.CSharpGuest.Tests/CSharpGuestAsyncInvocationTests.cs)；UE 事件回调内直接等待 `Task<int>` 也已在 Win64 双 VM 验证。Task 变量和其他 `Task<T>` 尚不支持；详见 [Task<int> 合同](Docs/Phase66/P66.C4_Task_Result_Contract.md)。
 - 同步 `try/finally` 可用，包括 `await` 恢复后的代码；`try/finally` 内的 `await` 尚不支持。`catch` / `throw` 目前只在[专用测试入口](Docs/Phase66/P66.C3_Language_Error_Channel_Contract.md)支持受限写法。
 - 修改 C# 声明的 `UClass`、`UProperty` 或 `UFunction` 后，需重新构建并重启 Editor。
 
