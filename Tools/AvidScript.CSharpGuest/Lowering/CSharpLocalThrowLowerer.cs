@@ -56,8 +56,32 @@ internal static class CSharpLocalThrowLowerer
             string cleanupId = CSharpGuestIds.Block(flow.MethodSymbolId,
                 site.CleanupBlockOrdinal);
             if (!blocks.TryGetValue(returnId, out GuestBasicBlock? normal)
-                || !blocks.TryGetValue(cleanupId, out GuestBasicBlock? cleanup)
-                || normal.Terminator.Kind != "return"
+                || !blocks.TryGetValue(cleanupId, out GuestBasicBlock? cleanup))
+                return Fail("A normal return has no unique synchronous cleanup.",
+                    out error);
+            HashSet<string> visited = new(StringComparer.Ordinal);
+            for (int depth = 0; normal.Terminator.Kind == "branch_if"; ++depth)
+            {
+                GuestInstruction[] instructions = normal.Instructions.ToArray();
+                if (depth >= 16 || !visited.Add(normal.Id)
+                    || instructions.Length < 2
+                    || instructions[^2] is not { Op: "call", ResultId: not null } call
+                    || instructions[^1] is not { Op: "field_load", ResultId: not null,
+                        TargetId: "field:status" } status
+                    || status.OperandIds.Count != 1
+                    || status.OperandIds[0] != call.ResultId
+                    || normal.Terminator.ConditionValueId != status.ResultId
+                    || normal.Terminator.TargetBlockId is not { } errorId
+                    || !blocks.ContainsKey(errorId)
+                    || normal.Terminator.FalseTargetBlockId is not { } successId
+                    || !blocks.TryGetValue(successId, out GuestBasicBlock? success)
+                    || instructions.Take(instructions.Length - 2).Any(instruction =>
+                        instruction.Op is "call" or "call_indirect"))
+                    return Fail("A normal return has an unchecked call or cleanup path.",
+                        out error);
+                normal = success;
+            }
+            if (normal.Terminator.Kind != "return"
                 || normal.Terminator.ReturnValueId is null
                 || normal.Instructions.Any(instruction => instruction.Op is
                     "call" or "call_indirect")
@@ -116,7 +140,7 @@ internal static class CSharpLocalThrowLowerer
                     TargetId = target,
                 });
             }
-            blocks[returnId] = normal with
+            blocks[normal.Id] = normal with
             {
                 Instructions = normal.Instructions.Concat(copied).ToArray(),
             };

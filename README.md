@@ -80,7 +80,7 @@ public partial class Projectile : AvidActor
 
 - Win64 Editor 和打包样例已有自动化验证。Android 真机和 iOS 尚未验收。
 - 网络 RPC、属性复制和 RepNotify 有独立进程自动化测试；实际游戏中的多人联机仍需单独验收。
-- `try` / `catch` / `finally` 还不能用于普通脚本构建。当前只在专用测试入口中验证部分异常处理写法；详见[实现范围](Docs/Phase66/P66.C_Language_Execution_Plan.md)。
+- `try` / `catch` / `finally` 还不能用于普通脚本构建。专用测试入口已验证 `try { return Get(); } finally { Count = Count + 1; }` 等受限写法；详见[实现范围](Docs/Phase66/P66.C_Language_Execution_Plan.md)。
 
 代码位于 [`Source/`](Source/)（UE 插件）和 [`Tools/`](Tools/)（C# 编译器）；构建脚本见 [`Build/`](Build/)，设计与验证记录见 [`Docs/`](Docs/)。仓库开发约定见 [AGENTS.md](AGENTS.md)。
 

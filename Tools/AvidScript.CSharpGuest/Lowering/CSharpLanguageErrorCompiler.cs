@@ -95,8 +95,16 @@ public static class CSharpLanguageErrorCompiler
             item.Catches.Count == 0 && localThrows.TryGetValue(
                 CSharpGuestIds.Function(item.MethodSymbolId), out var sites)
                 && sites.Any(site => site.CleanupBlockOrdinals is { Count: > 0 })))
-            cleanupRoutes.Add(CSharpGuestIds.Function(handler.MethodSymbolId),
-                Array.Empty<CSharpLanguageCleanupRoute>());
+        {
+            string functionId = CSharpGuestIds.Function(handler.MethodSymbolId);
+            cleanupRoutes.Add(functionId,
+                normalReturns.TryGetValue(functionId, out var returnSites)
+                    ? returnSites.Select(site => new CSharpLanguageCleanupRoute(
+                        CSharpGuestIds.Block(handler.MethodSymbolId, site.BlockOrdinal),
+                        new[] { CSharpGuestIds.Block(handler.MethodSymbolId,
+                            site.CleanupBlockOrdinal) })).ToArray()
+                    : Array.Empty<CSharpLanguageCleanupRoute>());
+        }
         CSharpLanguageErrorTokenCatalog tokens = CSharpThrowProducerLowerer.BuildCatalog(flows);
         Dictionary<string, int> sourceLengths = new(StringComparer.Ordinal);
         foreach (SemanticExceptionFlow item in flows)

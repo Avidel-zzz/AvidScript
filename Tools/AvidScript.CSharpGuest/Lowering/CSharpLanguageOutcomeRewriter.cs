@@ -356,14 +356,25 @@ public static class CSharpLanguageOutcomeRewriter
                     foreach (string cleanupId in cleanupRoute.CleanupBlockIds)
                     {
                         GuestBasicBlock cleanup = sourceBlocks[cleanupId];
-                        if (cleanup.Terminator.Kind != "branch"
-                            || cleanup.Instructions.Any(item => item.Op == "call_indirect"
+                        IReadOnlyList<GuestInstruction> cleanupInstructions = cleanup.Instructions;
+                        if (cleanup.Terminator.Kind == "return")
+                        {
+                            GuestInstruction? placeholder = cleanupInstructions.LastOrDefault();
+                            if (placeholder is not { Op: "constant", ResultId: not null,
+                                    Constant: { Kind: "int32", Value: "0" } }
+                                || placeholder.ResultId != cleanup.Terminator.ReturnValueId)
+                                return Fail($"Function '{function.Id}' has an invalid finally return placeholder.", out error);
+                            cleanupInstructions = cleanupInstructions.Take(cleanupInstructions.Count - 1).ToArray();
+                        }
+                        else if (cleanup.Terminator.Kind != "branch")
+                            return Fail($"Function '{function.Id}' has a throwing or branching finally.", out error);
+                        if (cleanupInstructions.Any(item => item.Op == "call_indirect"
                                 || item.Op == "call" && item.TargetId is { } called
                                     && affected.Contains(called)))
                             return Fail($"Function '{function.Id}' has a throwing or branching finally.", out error);
                         Dictionary<string, string> renamed = new(StringComparer.Ordinal);
                         List<GuestInstruction> copied = new();
-                        foreach (GuestInstruction item in cleanup.Instructions)
+                        foreach (GuestInstruction item in cleanupInstructions)
                         {
                             string[] operands = item.OperandIds.Select(id =>
                                 renamed.TryGetValue(id, out string? replacement) ? replacement : id).ToArray();

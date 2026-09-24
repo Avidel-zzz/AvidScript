@@ -136,12 +136,13 @@ const throwFinallyCatches = typeof instance.exports.throw_finally_source_probe =
 const nestedLocalThrowCatches = typeof instance.exports.nested_local_throw_catch_probe === 'function';
 const multiLocalThrowCatches = typeof instance.exports.multi_local_cleanup_first_probe === 'function';
 const mixedCleanupCatches = typeof instance.exports.mixed_cleanup_normal_first_probe === 'function';
+const calledReturnCatches = typeof instance.exports.called_return_normal_probe === 'function';
 const replacementCatches = typeof instance.exports.replacement_catch_probe === 'function';
 const rethrowCatches = typeof instance.exports.rethrow_local_source_probe === 'function';
 const nestedRethrowCatches = typeof instance.exports.nested_rethrow_source_probe === 'function';
 const catchVariableCatches = typeof instance.exports.catch_variable_call_probe === 'function';
 const catches = multipleCatches || finallyCatches || nestedFinallyCatches || throwFinallyCatches
-  || nestedLocalThrowCatches || multiLocalThrowCatches || mixedCleanupCatches
+  || nestedLocalThrowCatches || multiLocalThrowCatches || mixedCleanupCatches || calledReturnCatches
   || replacementCatches || rethrowCatches || nestedRethrowCatches || catchVariableCatches
   || typeof instance.exports.catch_source_probe === 'function';
 if (multipleCatches) {
@@ -186,6 +187,18 @@ if (multipleCatches) {
   if (values.some((value, index) => value !== expected[index])) {
     throw new Error(`Mixed cleanup results = ${values}; expected ${expected}`);
   }
+} else if (calledReturnCatches) {
+  const values = [
+    instance.exports.called_return_normal_probe(),
+    instance.exports.called_return_called_error_probe(),
+    instance.exports.called_return_local_error_probe(),
+    instance.exports.called_return_source_called_probe(),
+    instance.exports.called_return_source_local_probe(),
+  ];
+  const expected = [114, 11, 21, 3, 4];
+  if (values.some((value, index) => value !== expected[index])) {
+    throw new Error(`Called-return cleanup results = ${values}; expected ${expected}`);
+  }
 } else if (rethrowCatches) {
   const localSource = instance.exports.rethrow_local_source_probe();
   const calledSource = instance.exports.rethrow_call_source_probe();
@@ -221,7 +234,7 @@ if (multipleCatches) {
   if (actual !== expected) throw new Error(`source probe() = ${actual}; expected ${expected}`);
 }
 if (allocations !== (rethrowCatches || replacementCatches ? 4
-  : nestedRethrowCatches || catchVariableCatches || mixedCleanupCatches ? 4
+  : nestedRethrowCatches || catchVariableCatches || mixedCleanupCatches || calledReturnCatches ? 4
   : multiLocalThrowCatches ? 6
   : multipleCatches || nestedLocalThrowCatches ? 2 : 1)
   || frames.size !== 0 || roots.size !== 0) {
@@ -244,6 +257,7 @@ if (catches) {
     : nestedLocalThrowCatches ? 'C# source nested-local-throw-finally WASM: 3/3 passed\n'
     : multiLocalThrowCatches ? 'C# source multi-local-throw-finally WASM: 7/7 passed\n'
     : mixedCleanupCatches ? 'C# source mixed-local-throw-finally WASM: 7/7 passed\n'
+    : calledReturnCatches ? 'C# source called-return-finally WASM: 6/6 passed\n'
     : replacementCatches ? 'C# source cleanup-replaces-error WASM: 3/3 passed\n'
     : nestedFinallyCatches ? 'C# source nested-finally-catch WASM: 2/2 passed\n'
     : throwFinallyCatches ? 'C# source throw-finally-catch WASM: 2/2 passed\n'

@@ -32,11 +32,12 @@ internal static class CSharpGuestThrowProducerTests
         NestedLocalThrowRunsFinaliesInnerToOuter();
         MultipleLocalThrowsShareFinallyAndKeepSources();
         NormalReturnsAndLocalThrowsRunTheSameFinally();
+        CalledReturnAndLocalThrowRunTheSameFinally();
         CleanupThrowReplacesOriginalError();
         CatchRethrowPreservesOriginalError();
         NestedCatchRethrowReachesOuterHandler();
         CatchVariableReadsBoundError();
-        return 19;
+        return 20;
     }
 
     private static void MultipleThrowProducersKeepDistinctSourceTokens()
@@ -1037,6 +1038,110 @@ internal static class CSharpGuestThrowProducerTests
             && propertyError is not null
             && propertyError.Contains("synchronous cleanup", StringComparison.Ordinal),
             "a hidden getter call in a return must not bypass cleanup");
+    }
+
+    private static void CalledReturnAndLocalThrowRunTheSameFinally()
+    {
+        const string source = """
+            class Script
+            {
+                static int Choice;
+                static int Count;
+                static int Calls;
+                static int Fail() { throw new System.Exception(); }
+                static int Get()
+                {
+                    Calls = Calls + 1;
+                    if (Choice == 0) return 7;
+                    if (Calls == 1) return 7;
+                    return Fail();
+                }
+                static int Run()
+                {
+                    try
+                    {
+                        if (Choice < 2) return Get() + Get();
+                        throw new System.Exception();
+                    }
+                    finally { Count = Count + 1; }
+                }
+                static int Normal()
+                {
+                    Choice = 0; Count = 0; Calls = 0;
+                    int value = Run();
+                    return value + Count * 100;
+                }
+                static int CalledError()
+                {
+                    Choice = 1; Count = 0; Calls = 0;
+                    try { return Run(); }
+                    catch (System.Exception) { return Count + 10; }
+                }
+                static int LocalError()
+                {
+                    Choice = 2; Count = 0; Calls = 0;
+                    try { return Run(); }
+                    catch (System.Exception) { return Count + 20; }
+                }
+                static int UncaughtCalled() { Choice = 1; Count = 0; Calls = 0; return Run(); }
+                static int UncaughtLocal() { Choice = 2; Count = 0; Calls = 0; return Run(); }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay() { Normal(); CalledError(); LocalError(); }
+            }
+            """;
+        Check(ReferenceCatch(source, "Normal") == 114
+            && ReferenceCatch(source, "CalledError") == 11
+            && ReferenceCatch(source, "LocalError") == 21,
+            "CLR must run cleanup once after a called return succeeds or fails");
+        SemanticDocument semantic = Analyze(source);
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "called return cleanup failed to compile");
+        GuestModule module = compiled!.Module;
+        Check(module.LanguageErrorCatalog is { Sources.Count: 2 } catalog
+            && catalog.Sources.Select(item => item.Token).SequenceEqual(new[] { 1, 2 })
+            && GuestModuleValidator.Validate(module).Succeeded,
+            "called and local errors need distinct source tokens and a valid outcome graph");
+        GuestFunction run = module.Functions.Single(function =>
+            function.Id.Contains(".Run(", StringComparison.Ordinal));
+        GuestModule probe = AddLocalCleanupCollectProbe(module, run.Id, 4);
+        foreach ((string method, string suffix) in new[]
+        {
+            ("Normal", "normal"),
+            ("CalledError", "called_error"),
+            ("LocalError", "local_error"),
+        })
+        {
+            GuestFunction caller = module.Functions.Single(function =>
+                function.Id.Contains("." + method + "(", StringComparison.Ordinal));
+            probe = AddCatchProbe(probe, caller,
+                "function:called_return_" + suffix + "_probe",
+                "called_return_" + suffix + "_probe");
+        }
+        foreach ((string method, string suffix) in new[]
+        {
+            ("UncaughtCalled", "source_called"),
+            ("UncaughtLocal", "source_local"),
+        })
+        {
+            GuestFunction caller = module.Functions.Single(function =>
+                function.Id.Contains("." + method + "(", StringComparison.Ordinal));
+            probe = AddProbe(probe, caller, appendTarget: false,
+                "function:called_return_" + suffix + "_probe",
+                "called_return_" + suffix + "_probe");
+        }
+        Check(GuestModuleValidator.Validate(probe).Succeeded,
+            "called-return probes must preserve the Guest outcome contract");
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "called-return cleanup must compile to executable WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "called-return-finally.wasm"),
+                wasm.Bytes);
+        }
     }
 
     private static void CleanupThrowReplacesOriginalError()

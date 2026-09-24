@@ -241,10 +241,13 @@ internal static class CSharpExceptionGraphMaterializer
                     || branch.FinallyRegionOrdinals[0] != cleanupRegion.Ordinal
                     || block.BranchValue is not { } value || !Supported(value)
                     || block.Operations.Any(operation => !Supported(operation))
-                    || block.Operations.Append(value).SelectMany(Descendants)
+                    || block.Operations.SelectMany(Descendants)
                         .Any(operation => operation.Kind is
                             "invocation" or "await" or "throw" or "try"
-                            or "conditional" or "switch" or "branch" or "loop"))
+                            or "conditional" or "switch" or "branch" or "loop")
+                    || Descendants(value).Any(operation => operation.Kind is
+                        "await" or "throw" or "try" or "conditional" or "switch"
+                        or "branch" or "loop"))
                     return Fail("A normal return needs one evaluated value before linear cleanup.",
                         out error);
                 returns.Add(new(ordinal, cleanupOrdinal));
