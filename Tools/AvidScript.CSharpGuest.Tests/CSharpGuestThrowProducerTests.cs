@@ -32,6 +32,7 @@ internal static class CSharpGuestThrowProducerTests
         NestedLocalThrowRunsFinaliesInnerToOuter();
         MultipleLocalThrowsShareFinallyAndKeepSources();
         NormalReturnsAndLocalThrowsRunTheSameFinally();
+        MixedExitsRunBranchingFinally();
         CalledReturnAndLocalThrowRunTheSameFinally();
         CalledReturnRunsBranchingFinally();
         CatchReturnsRunOuterFinally();
@@ -41,7 +42,7 @@ internal static class CSharpGuestThrowProducerTests
         CatchRethrowPreservesOriginalError();
         NestedCatchRethrowReachesOuterHandler();
         CatchVariableReadsBoundError();
-        return 24;
+        return 25;
     }
 
     private static void MultipleThrowProducersKeepDistinctSourceTokens()
@@ -1041,7 +1042,145 @@ internal static class CSharpGuestThrowProducerTests
                 new string('a', 64), out _, out string? propertyError)
             && propertyError is not null
             && propertyError.Contains("synchronous cleanup", StringComparison.Ordinal),
-            "a hidden getter call in a return must not bypass cleanup");
+            $"a hidden getter call in a return must not bypass cleanup: {propertyError}");
+    }
+
+    private static void MixedExitsRunBranchingFinally()
+    {
+        const string source = """
+            class Script
+            {
+                static int Choice;
+                static int Count;
+                static bool FailGet;
+                static int Fail() { throw new System.Exception(); }
+                static int Get()
+                {
+                    if (FailGet) return Fail();
+                    return 7;
+                }
+                static int Run()
+                {
+                    try
+                    {
+                        if (Choice == 0) return Count + 7;
+                        if (Choice == 1) throw new System.Exception();
+                        if (Choice == 2) return Get() + 20;
+                        throw new System.Exception();
+                    }
+                    finally
+                    {
+                        if (Choice < 2) Count = Count + 1;
+                        else Count = Count + 2;
+                        Count = Count + 10;
+                    }
+                }
+                static int NormalFirst()
+                {
+                    Choice = 0; Count = 0; FailGet = false;
+                    int value = Run();
+                    return value + Count * 100;
+                }
+                static int ErrorFirst()
+                {
+                    Choice = 1; Count = 0; FailGet = false;
+                    try { return Run(); }
+                    catch (System.Exception) { return Count + 10; }
+                }
+                static int NormalSecond()
+                {
+                    Choice = 2; Count = 0; FailGet = false;
+                    int value = Run();
+                    return value + Count * 100;
+                }
+                static int ErrorSecond()
+                {
+                    Choice = 3; Count = 0; FailGet = false;
+                    try { return Run(); }
+                    catch (System.Exception) { return Count + 20; }
+                }
+                static int CalledError()
+                {
+                    Choice = 2; Count = 0; FailGet = true;
+                    try { return Run(); }
+                    catch (System.Exception) { return Count + 30; }
+                }
+                static int UncaughtFirst()
+                {
+                    Choice = 1; Count = 0; FailGet = false; return Run();
+                }
+                static int UncaughtSecond()
+                {
+                    Choice = 3; Count = 0; FailGet = false; return Run();
+                }
+                static int UncaughtCalled()
+                {
+                    Choice = 2; Count = 0; FailGet = true; return Run();
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay()
+                {
+                    NormalFirst(); ErrorFirst(); NormalSecond();
+                    ErrorSecond(); CalledError();
+                }
+            }
+            """;
+        Check(ReferenceCatch(source, "NormalFirst") == 1107
+            && ReferenceCatch(source, "ErrorFirst") == 21
+            && ReferenceCatch(source, "NormalSecond") == 1227
+            && ReferenceCatch(source, "ErrorSecond") == 32
+            && ReferenceCatch(source, "CalledError") == 42,
+            "CLR must evaluate returns before either cleanup branch and propagate all errors");
+        Check(CSharpLanguageErrorCompiler.TryLower(Analyze(source), new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "mixed branching cleanup failed to compile");
+        GuestModule module = compiled!.Module;
+        Check(module.LanguageErrorCatalog is { Sources.Count: 3 }
+            && GuestModuleValidator.Validate(module).Succeeded,
+            "mixed branching exits need three source tokens and a valid outcome graph");
+        GuestFunction run = module.Functions.Single(function =>
+            function.Id.Contains(".Run(", StringComparison.Ordinal));
+        GuestModule probe = AddLocalCleanupCollectProbe(module, run.Id, 6);
+        foreach ((string method, string suffix) in new[]
+        {
+            ("NormalFirst", "normal_first"),
+            ("ErrorFirst", "error_first"),
+            ("NormalSecond", "normal_second"),
+            ("ErrorSecond", "error_second"),
+            ("CalledError", "called_error"),
+        })
+        {
+            GuestFunction caller = module.Functions.Single(function =>
+                function.Id.Contains("." + method + "(", StringComparison.Ordinal));
+            probe = AddCatchProbe(probe, caller,
+                "function:mixed_branch_" + suffix + "_probe",
+                "mixed_branch_" + suffix + "_probe");
+        }
+        foreach ((string method, string suffix) in new[]
+        {
+            ("UncaughtFirst", "source_first"),
+            ("UncaughtSecond", "source_second"),
+            ("UncaughtCalled", "source_called"),
+        })
+        {
+            GuestFunction caller = module.Functions.Single(function =>
+                function.Id.Contains("." + method + "(", StringComparison.Ordinal));
+            probe = AddProbe(probe, caller, appendTarget: false,
+                "function:mixed_branch_" + suffix + "_probe",
+                "mixed_branch_" + suffix + "_probe");
+        }
+        Check(GuestModuleValidator.Validate(probe).Succeeded,
+            "mixed branching probes must preserve the Guest outcome contract");
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "mixed branching cleanup must compile to executable WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "mixed-branching-finally.wasm"),
+                wasm.Bytes);
+        }
     }
 
     private static void CalledReturnAndLocalThrowRunTheSameFinally()

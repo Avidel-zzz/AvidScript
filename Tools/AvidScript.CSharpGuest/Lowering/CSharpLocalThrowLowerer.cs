@@ -46,6 +46,36 @@ internal static class CSharpLocalThrowLowerer
         Dictionary<string, string> registerTypes = function.Parameters.Concat(locals)
             .ToDictionary(register => register.Id, register => register.TypeId,
                 StringComparer.Ordinal);
+        Dictionary<int, (string OutcomeId, int SiteCount)> branchingShared = new();
+        foreach (IGrouping<int, CSharpLocalThrowSite> group in sites
+            .Where(site => site.BranchingCleanup is not null)
+            .GroupBy(site => site.BranchingCleanup!.ExitBlockOrdinal))
+        {
+            CSharpLocalThrowSite[] owners = group.ToArray();
+            CSharpBranchingCleanup route = owners[0].BranchingCleanup!;
+            if (owners.Length > 16 || owners.Any(site =>
+                    site.ReplacesThrowBlockOrdinal is not null
+                    || site.BranchingCleanup is not { } other
+                    || !other.BlockOrdinals.SequenceEqual(route.BlockOrdinals)))
+                return Fail("Shared branching cleanup needs one source-derived route.",
+                    out error);
+            string outcomeId = "local_throw:branch_cleanup:"
+                + group.Key.ToString(CultureInfo.InvariantCulture) + ":outcome";
+            if (!registerIds.Add(outcomeId)
+                || !blocks.TryGetValue(function.EntryBlockId, out GuestBasicBlock? entry))
+                return Fail("Shared branching cleanup has no unique outcome.", out error);
+            locals.Add(new GuestRegister(outcomeId, function.ReturnTypeId));
+            blocks[function.EntryBlockId] = entry with
+            {
+                Instructions = new[]
+                {
+                    new GuestInstruction("stack_alloc", outcomeId,
+                        Array.Empty<string>(), null, null, null),
+                }.Concat(entry.Instructions).ToArray(),
+            };
+            branchingShared.Add(group.Key, (outcomeId, owners.Length));
+        }
+        Dictionary<int, HashSet<string>> normalBranchEntrances = new();
         if (normalReturns.Count > 16
             || normalReturns.Select(site => site.BlockOrdinal).Distinct().Count()
                 != normalReturns.Count)
@@ -77,15 +107,59 @@ internal static class CSharpLocalThrowLowerer
                     || !blocks.TryGetValue(successId, out GuestBasicBlock? success)
                     || instructions.Take(instructions.Length - 2).Any(instruction =>
                         instruction.Op is "call" or "call_indirect"))
-                    return Fail("A normal return has an unchecked call or cleanup path.",
+                    return Fail("A normal return has an unchecked call before synchronous cleanup.",
                         out error);
                 normal = success;
             }
             if (normal.Terminator.Kind != "return"
                 || normal.Terminator.ReturnValueId is null
                 || normal.Instructions.Any(instruction => instruction.Op is
-                    "call" or "call_indirect")
-                || cleanup.Terminator.Kind != "return"
+                    "call" or "call_indirect"))
+                return Fail("A normal return has an unchecked call before synchronous cleanup.",
+                    out error);
+            if (site.BranchingCleanup is { } branching)
+            {
+                if (site.CleanupBlockOrdinal != branching.EntryBlockOrdinal
+                    || !branchingShared.TryGetValue(branching.ExitBlockOrdinal,
+                        out (string OutcomeId, int SiteCount) shared)
+                    || normal.Instructions.Count < 4)
+                    return Fail("A normal return has no shared branching cleanup.", out error);
+                int returnTail = normal.Instructions.Count - 4;
+                GuestInstruction[] returnSuffix = normal.Instructions.Skip(returnTail).ToArray();
+                if (returnSuffix[0].Op != "stack_alloc"
+                    || returnSuffix[0].ResultId != normal.Terminator.ReturnValueId
+                    || returnSuffix[1].Op != "constant"
+                    || returnSuffix[1].ResultId is null
+                    || returnSuffix[1].Constant is not { Kind: "int32", Value: "0" }
+                    || returnSuffix[2].Op != "field_store"
+                    || returnSuffix[2].TargetId != "field:status"
+                    || !returnSuffix[2].OperandIds.SequenceEqual(new[]
+                        { returnSuffix[0].ResultId!, returnSuffix[1].ResultId })
+                    || returnSuffix[3].Op != "field_store"
+                    || returnSuffix[3].TargetId != "field:value"
+                    || returnSuffix[3].OperandIds.Count != 2
+                    || returnSuffix[3].OperandIds[0] != returnSuffix[0].ResultId)
+                    return Fail("The branching return has no verified value suffix.", out error);
+                blocks[normal.Id] = normal with
+                {
+                    Instructions = normal.Instructions.Take(returnTail)
+                        .Concat(new[]
+                        {
+                            returnSuffix[1],
+                            Store(shared.OutcomeId, "status", returnSuffix[1].ResultId!),
+                            Store(shared.OutcomeId, "value", returnSuffix[3].OperandIds[1]),
+                        }).ToArray(),
+                    Terminator = new GuestTerminator("branch", null, cleanupId,
+                        null, null),
+                };
+                if (!normalBranchEntrances.TryGetValue(branching.ExitBlockOrdinal,
+                        out HashSet<string>? entrances))
+                    normalBranchEntrances.Add(branching.ExitBlockOrdinal,
+                        entrances = new HashSet<string>(StringComparer.Ordinal));
+                entrances.Add(normal.Id);
+                continue;
+            }
+            if (cleanup.Terminator.Kind != "return"
                 || cleanup.Instructions.Count < 4
                 || cleanup.Instructions.Any(instruction => instruction.Op is
                     "call" or "call_indirect"))
@@ -145,7 +219,8 @@ internal static class CSharpLocalThrowLowerer
                 Instructions = normal.Instructions.Concat(copied).ToArray(),
             };
         }
-        Dictionary<int, (string OutcomeId, int SiteCount)> sharedCleanups = new();
+        Dictionary<int, (string OutcomeId, int SiteCount)> sharedCleanups =
+            new(branchingShared);
         foreach (IGrouping<int, CSharpLocalThrowSite> group in sites
             .Where(site => site.ReplacesThrowBlockOrdinal is null
                 && site.CleanupBlockOrdinals is { Count: > 0 })
@@ -251,8 +326,10 @@ internal static class CSharpLocalThrowLowerer
             bool shared = false;
             int sharedSiteCount = 1;
             string outcome = prefix + "outcome";
-            if (cleanupOrdinals.Count != 0
-                && sharedCleanups.TryGetValue(cleanupOrdinals[^1],
+            int? sharedKey = branchingCleanup?.ExitBlockOrdinal
+                ?? (cleanupOrdinals.Count != 0 ? cleanupOrdinals[^1] : null);
+            if (sharedKey is { } key
+                && sharedCleanups.TryGetValue(key,
                     out (string OutcomeId, int SiteCount) sharedCleanup))
             {
                 shared = true;
@@ -314,10 +391,22 @@ internal static class CSharpLocalThrowLowerer
             };
             if (cleanupId is not null)
             {
-                if (branchingCleanup is not null && !ValidBranchingCleanup(
-                        flow, function, blocks, blockId, branchingCleanup))
-                    return Fail("The local throw has no bounded branching cleanup graph.",
-                        out error);
+                if (branchingCleanup is not null)
+                {
+                    HashSet<string> owners = sites.Where(other =>
+                            other.BranchingCleanup?.ExitBlockOrdinal
+                                == branchingCleanup.ExitBlockOrdinal)
+                        .Select(other => CSharpGuestIds.Block(flow.MethodSymbolId,
+                            other.BlockOrdinal)).ToHashSet(StringComparer.Ordinal);
+                    if (normalBranchEntrances.TryGetValue(
+                            branchingCleanup.ExitBlockOrdinal,
+                            out HashSet<string>? normalOwners))
+                        owners.UnionWith(normalOwners);
+                    if (!ValidBranchingCleanup(flow, blocks, owners,
+                            branchingCleanup))
+                        return Fail("The local throw has no bounded branching cleanup graph.",
+                            out error);
+                }
                 for (int index = 0; branchingCleanup is null && index < cleanupIds.Length;
                     ++index)
                 {
@@ -444,9 +533,8 @@ internal static class CSharpLocalThrowLowerer
 
     private static bool ValidBranchingCleanup(
         SemanticExceptionFlow flow,
-        GuestFunction function,
         IReadOnlyDictionary<string, GuestBasicBlock> blocks,
-        string throwBlockId,
+        IReadOnlySet<string> entryOwners,
         CSharpBranchingCleanup cleanup)
     {
         int count = cleanup.ExitBlockOrdinal - cleanup.EntryBlockOrdinal + 1;
@@ -491,7 +579,7 @@ internal static class CSharpLocalThrowLowerer
                 return false;
             reached.UnionWith(targets);
         }
-        foreach (GuestBasicBlock block in function.Blocks)
+        foreach (GuestBasicBlock block in blocks.Values)
         {
             string?[] targets =
             {
@@ -500,7 +588,7 @@ internal static class CSharpLocalThrowLowerer
             };
             if (targets.Any(target => target is not null && cleanupIds.Contains(target)
                 && !cleanupIds.Contains(block.Id)
-                && (block.Id != throwBlockId || target != entryId)))
+                && (target != entryId || !entryOwners.Contains(block.Id))))
                 return false;
         }
         return reached.Count == ids.Length;

@@ -14,7 +14,8 @@ internal sealed record CSharpBranchingCleanup(
     int EntryBlockOrdinal, int ExitBlockOrdinal,
     IReadOnlyList<int> BlockOrdinals);
 internal sealed record CSharpNormalReturnCleanupSite(
-    int BlockOrdinal, int CleanupBlockOrdinal);
+    int BlockOrdinal, int CleanupBlockOrdinal,
+    CSharpBranchingCleanup? BranchingCleanup = null);
 internal sealed record CSharpRethrowSite(
     int BlockOrdinal, int HandlerOrdinal, SemanticThrowSite Site);
 
@@ -42,7 +43,9 @@ internal static class CSharpExceptionGraphMaterializer
             if (flow.Regions.Count(region => region.Kind == "finally") != 1)
                 return TryBuildNestedDirectThrowFinally(flow, out graph, out localThrows, out error);
             if (flow.Regions.First(region => region.Kind == "finally") is { } cleanup
-                && cleanup.LastBlockOrdinal > cleanup.FirstBlockOrdinal)
+                && cleanup.LastBlockOrdinal > cleanup.FirstBlockOrdinal
+                && flow.Regions.Count == 4 && flow.Regions[2].Kind == "try"
+                && flow.Regions[2].FirstBlockOrdinal == flow.Regions[2].LastBlockOrdinal)
                 return TryBuildBranchingCleanup(flow, out graph, out localThrows, out error);
             return flow.Blocks is { Count: > 4 } && flow.Throws.Count > 0
                 ? TryBuildBranchingThrowFinally(flow, out graph, out localThrows,
@@ -392,31 +395,76 @@ internal static class CSharpExceptionGraphMaterializer
             || flow.Blocks is not { Count: >= 6 } blocks
             || !SemanticExceptionDispatchPlanner.TryBuild(flow, out var dispatch)
             || dispatch is null)
-            return Fail("Branching local throws need one source-backed linear finally.",
+            return Fail("Mixed exits need one source-backed synchronous finally.",
                 out error);
 
-        int cleanupOrdinal = blocks.Count - 2;
         SemanticExceptionRegion cleanupRegion = flow.Regions[3];
-        SemanticExceptionBlock cleanup = blocks[cleanupOrdinal];
-        if (cleanupRegion.FirstBlockOrdinal != cleanupOrdinal
-            || cleanupRegion.LastBlockOrdinal != cleanupOrdinal
-            || cleanup.EnclosingRegionOrdinal != cleanupRegion.Ordinal
-            || cleanup.Operations.Count == 0 || cleanup.BranchValue is not null
-            || cleanup.Operations.Any(operation => !Supported(operation)
-                || Descendants(operation).Any(item => item.Kind is
-                    "conditional" or "switch" or "branch" or "loop" or "await"
-                    or "try" or "throw" or "invocation"))
+        int cleanupEntry = cleanupRegion.FirstBlockOrdinal;
+        int cleanupExit = cleanupRegion.LastBlockOrdinal;
+        if (cleanupEntry < 2 || cleanupExit != blocks.Count - 2
+            || cleanupExit - cleanupEntry + 1 > 16
+            || flow.Regions[2].FirstBlockOrdinal != 1
+            || flow.Regions[2].LastBlockOrdinal != cleanupEntry - 1
             || blocks[0].Operations.Count != 0 || blocks[0].BranchValue is not null
             || blocks[^1].Operations.Count != 0 || blocks[^1].BranchValue is not null
             || flow.Branches.Count(branch => branch.SourceBlockOrdinal == 0
                 && branch.DestinationBlockOrdinal == 1
-                && branch.Semantics == "regular") != 1
-            || flow.Branches.Count(branch =>
-                branch.SourceBlockOrdinal == cleanupOrdinal
-                && branch.DestinationBlockOrdinal == -1
-                && branch.Semantics == "structured_exception_handling") != 1)
-            return Fail("Multiple local throws have an unsupported cleanup block.",
+                && branch.Semantics == "regular") != 1)
+            return Fail("Mixed exits have an unsupported cleanup region.",
                 out error);
+
+        CSharpBranchingCleanup? branchingCleanup = cleanupEntry == cleanupExit
+            ? null : new(cleanupEntry, cleanupExit,
+                Enumerable.Range(cleanupEntry, cleanupExit - cleanupEntry + 1).ToArray());
+        List<SemanticControlFlowEdge> cleanupEdges = new();
+        HashSet<int> reachedCleanup = new() { cleanupEntry };
+        for (int ordinal = cleanupEntry; ordinal <= cleanupExit; ++ordinal)
+        {
+            SemanticExceptionBlock block = blocks[ordinal];
+            SemanticExceptionBranch[] outgoing = flow.Branches.Where(branch =>
+                branch.SourceBlockOrdinal == ordinal).ToArray();
+            if (!reachedCleanup.Contains(ordinal)
+                || block.EnclosingRegionOrdinal != cleanupRegion.Ordinal
+                || block.Operations.Any(operation => !Supported(operation)
+                    || Descendants(operation).Any(item => item.Kind is
+                        "conditional" or "switch" or "branch" or "loop" or "await"
+                        or "try" or "throw" or "invocation")))
+                return Fail("Mixed exits have an unsupported cleanup operation.", out error);
+            if (ordinal == cleanupExit)
+            {
+                if (block.Operations.Count == 0 || block.ConditionKind != "none"
+                    || block.BranchValue is not null || outgoing.Length != 1
+                    || outgoing[0].DestinationBlockOrdinal != -1
+                    || outgoing[0].Semantics != "structured_exception_handling")
+                    return Fail("Mixed exits need one final cleanup exit.", out error);
+                cleanupEdges.Add(new(ordinal, blocks.Count - 1, "fallthrough", "return"));
+                continue;
+            }
+            if (outgoing.Length == 2)
+            {
+                if (block.Operations.Count != 0 || block.ConditionKind == "none"
+                    || block.BranchValue is not { } condition
+                    || !PureThrowDecision(condition)
+                    || outgoing.Count(branch => branch.Kind == "conditional") != 1
+                    || outgoing.Count(branch => branch.Kind == "fallthrough") != 1
+                    || outgoing.Select(branch => branch.DestinationBlockOrdinal)
+                        .Distinct().Count() != 2)
+                    return Fail("Mixed exits need pure cleanup decisions.", out error);
+            }
+            else if (outgoing.Length != 1 || block.ConditionKind != "none"
+                || block.BranchValue is not null || outgoing[0].Kind != "fallthrough")
+                return Fail("Mixed exits need bounded forward cleanup blocks.", out error);
+            if (outgoing.Any(branch => branch.Semantics != "regular"
+                || branch.DestinationBlockOrdinal <= ordinal
+                || branch.DestinationBlockOrdinal > cleanupExit))
+                return Fail("Mixed exit cleanup cannot leave or loop.", out error);
+            foreach (SemanticExceptionBranch branch in outgoing)
+            {
+                reachedCleanup.Add(branch.DestinationBlockOrdinal);
+                cleanupEdges.Add(new(ordinal, branch.DestinationBlockOrdinal,
+                    branch.Kind, "regular"));
+            }
+        }
 
         List<CSharpLocalThrowSite> projected = new();
         List<CSharpNormalReturnCleanupSite> returns = new();
@@ -424,7 +472,7 @@ internal static class CSharpExceptionGraphMaterializer
         {
             new(0, 1, "fallthrough", "regular"),
         };
-        for (int ordinal = 1; ordinal < cleanupOrdinal; ++ordinal)
+        for (int ordinal = 1; ordinal < cleanupEntry; ++ordinal)
         {
             SemanticExceptionBlock block = blocks[ordinal];
             SemanticExceptionBranch[] outgoing = flow.Branches.Where(branch =>
@@ -454,8 +502,9 @@ internal static class CSharpExceptionGraphMaterializer
                     return Fail("Each local throw leaf needs one direct System.Exception.",
                         out error);
                 projected.Add(new CSharpLocalThrowSite(ordinal, sites[0],
-                    new[] { cleanupOrdinal }));
-                edges.Add(new(ordinal, cleanupOrdinal, "fallthrough", "regular"));
+                    branchingCleanup is null ? new[] { cleanupEntry } : null,
+                    BranchingCleanup: branchingCleanup));
+                edges.Add(new(ordinal, cleanupEntry, "fallthrough", "regular"));
                 continue;
             }
             if (outgoing.Length == 1 && outgoing[0].Semantics == "return")
@@ -473,9 +522,9 @@ internal static class CSharpExceptionGraphMaterializer
                     || Descendants(value).Any(operation => operation.Kind is
                         "await" or "throw" or "try" or "conditional" or "switch"
                         or "branch" or "loop"))
-                    return Fail("A normal return needs one evaluated value before linear cleanup.",
+                    return Fail("A normal return needs one evaluated value before synchronous cleanup.",
                         out error);
-                returns.Add(new(ordinal, cleanupOrdinal));
+                returns.Add(new(ordinal, cleanupEntry, branchingCleanup));
                 edges.Add(new(ordinal, blocks.Count - 1, branch.Kind, "return"));
                 continue;
             }
@@ -484,7 +533,7 @@ internal static class CSharpExceptionGraphMaterializer
                 || block.BranchValue is not { } condition || !PureThrowDecision(condition)
                 || outgoing.Any(branch => branch.Semantics != "regular"
                     || branch.DestinationBlockOrdinal <= ordinal
-                    || branch.DestinationBlockOrdinal >= cleanupOrdinal)
+                    || branch.DestinationBlockOrdinal >= cleanupEntry)
                 || outgoing.Select(branch => branch.DestinationBlockOrdinal)
                     .Distinct().Count() != 2
                 || outgoing.Count(branch => branch.Kind == "fallthrough") != 1
@@ -498,18 +547,18 @@ internal static class CSharpExceptionGraphMaterializer
             || projected.Count + returns.Count > 16
             || projected.Select(site => site.Site.Span.Start).Distinct().Count()
                 != projected.Count
-            || flow.Branches.Count != edges.Count + 1
-            || Enumerable.Range(1, cleanupOrdinal - 1).Any(ordinal =>
+            || flow.Branches.Count != edges.Count + cleanupEdges.Count
+            || Enumerable.Range(1, cleanupEntry - 1).Any(ordinal =>
                 edges.Count(edge => edge.DestinationBlockOrdinal == ordinal) != 1))
             return Fail("Every try path must reach a distinct throw or return leaf.",
                 out error);
-        edges.Add(new(cleanupOrdinal, blocks.Count - 1, "fallthrough", "return"));
+        edges.AddRange(cleanupEdges);
         graph = new SemanticControlFlowGraph(flow.MethodSymbolId, 0, blocks.Count - 1,
             blocks.Select(block => new SemanticBasicBlock(block.Ordinal, block.Kind,
-                block.Ordinal >= cleanupOrdinal || block.IsReachable,
+                block.Ordinal >= cleanupEntry || block.IsReachable,
                 block.ConditionKind, block.Operations,
                 projected.Any(site => site.BlockOrdinal == block.Ordinal)
-                    ? null : block.Ordinal == cleanupOrdinal
+                    ? null : block.Ordinal == cleanupExit
                         ? ZeroPlaceholder(projected[0].Site.Span) : block.BranchValue,
                 edges.Where(edge => edge.DestinationBlockOrdinal == block.Ordinal).ToArray(),
                 edges.Where(edge => edge.SourceBlockOrdinal == block.Ordinal).ToArray()))
