@@ -118,12 +118,13 @@ public static class SemanticAnalyzer
             continuationProjection.Callbacks, ueTypeProjection.Declarations, asyncProjection.Methods);
         SemanticGenericProjection genericProjection = SemanticGenericSpecializer.Project(
             typeRegistry.Build(), typeRegistry.BuildShapes(), symbols, callableProjection.Callables,
-            operationProjection.Methods, controlFlowProjection.Graphs,
+            operationProjection.Methods, controlFlowProjection.Graphs, asyncProjection.Methods,
             sourceReachability.ReachableCallableIds.ToHashSet(StringComparer.Ordinal));
         symbols = genericProjection.Symbols;
         callableProjection = callableProjection with { Callables = genericProjection.Callables };
         operationProjection = operationProjection with { Methods = genericProjection.Methods };
         controlFlowProjection = controlFlowProjection with { Graphs = genericProjection.Graphs };
+        asyncProjection = asyncProjection with { Methods = genericProjection.AsyncMethods };
         IReadOnlyList<SemanticDiagnostic> supportDiagnostics = supportProjection.Diagnostics
             .Concat(lexicalCaptures.Diagnostics)
             .Concat(genericProjection.Diagnostics)

@@ -104,6 +104,13 @@ internal static class SemanticReachabilityProjector
 
             if (asyncMethodsById.TryGetValue(current, out SemanticAsyncMethod? asyncMethod))
             {
+                foreach (SemanticAsyncAwaitSite site in asyncMethod.Segments
+                    .Where(segment => segment.AwaitSite?.TaskCallableId is not null)
+                    .Select(segment => segment.AwaitSite!))
+                {
+                    QueueTarget(site.TaskCallableId, callablesById,
+                        accessorsByAssociatedSymbolId, reachable, pending);
+                }
                 foreach (SemanticOperation operation in EnumerateAsyncOperations(asyncMethod))
                 {
                     QueueOperationTargets(

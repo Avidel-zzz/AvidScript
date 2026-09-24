@@ -9,6 +9,7 @@ internal sealed record SemanticGenericProjection(
     IReadOnlyList<SemanticCallable> Callables,
     IReadOnlyList<SemanticMethodBody> Methods,
     IReadOnlyList<SemanticControlFlowGraph> Graphs,
+    IReadOnlyList<SemanticAsyncMethod> AsyncMethods,
     IReadOnlyList<SemanticDiagnostic> Diagnostics);
 
 // A closed method is a separate executable symbol. The source definition and its
@@ -25,6 +26,7 @@ internal static class SemanticGenericSpecializer
         IReadOnlyList<SemanticCallable> sourceCallables,
         IReadOnlyList<SemanticMethodBody> sourceMethods,
         IReadOnlyList<SemanticControlFlowGraph> sourceGraphs,
+        IReadOnlyList<SemanticAsyncMethod> sourceAsyncMethods,
         IReadOnlySet<string> reachableSourceIds)
     {
         Dictionary<string, SemanticCallable> definitions = sourceCallables
@@ -32,6 +34,7 @@ internal static class SemanticGenericSpecializer
             .ToDictionary(callable => callable.MethodSymbolId, StringComparer.Ordinal);
         if (definitions.Count == 0)
             return new(sourceSymbols, sourceCallables, sourceMethods, sourceGraphs,
+                sourceAsyncMethods,
                 Array.Empty<SemanticDiagnostic>());
 
         Dictionary<string, SemanticType> typesById = types.ToDictionary(type => type.Id, StringComparer.Ordinal);
@@ -60,6 +63,37 @@ internal static class SemanticGenericSpecializer
             graphs.Add(RewriteGraph(graph, new Dictionary<string, string>(StringComparer.Ordinal),
                 new Dictionary<string, string>(StringComparer.Ordinal), 0));
         }
+
+        Dictionary<string, string> emptyTypes = new(StringComparer.Ordinal);
+        Dictionary<string, string> emptySymbols = new(StringComparer.Ordinal);
+        SemanticAsyncMethod[] asyncMethods = sourceAsyncMethods.Select(method =>
+            !reachableSourceIds.Contains(method.MethodSymbolId)
+                ? method
+                : method with
+                {
+                    Segments = method.Segments.Select(segment => segment with
+                    {
+                        Statements = segment.Statements.Select(statement => statement with
+                        {
+                            Operation = RewriteOperation(statement.Operation,
+                                emptyTypes, emptySymbols, 0),
+                        }).ToArray(),
+                        Transfer = segment.Transfer is null ? null : segment.Transfer with
+                        {
+                            Condition = segment.Transfer.Condition is null ? null
+                                : RewriteOperation(segment.Transfer.Condition,
+                                    emptyTypes, emptySymbols, 0),
+                        },
+                        AwaitSite = segment.AwaitSite is null ? null : segment.AwaitSite with
+                        {
+                            Arguments = segment.AwaitSite.Arguments.Select(argument =>
+                                RewriteOperation(argument, emptyTypes, emptySymbols, 0)).ToArray(),
+                            CancellationToken = segment.AwaitSite.CancellationToken is null ? null
+                                : RewriteOperation(segment.AwaitSite.CancellationToken,
+                                    emptyTypes, emptySymbols, 0),
+                        },
+                    }).ToArray(),
+                }).ToArray();
 
         while (pending.Count > 0)
         {
@@ -105,6 +139,7 @@ internal static class SemanticGenericSpecializer
             callables.OrderBy(callable => callable.MethodSymbolId, StringComparer.Ordinal).ToArray(),
             methods.OrderBy(method => method.MethodSymbolId, StringComparer.Ordinal).ToArray(),
             graphs.OrderBy(graph => graph.MethodSymbolId, StringComparer.Ordinal).ToArray(),
+            asyncMethods,
             diagnostics.ToArray());
 
         string? MapType(string? typeId, IReadOnlyDictionary<string, string> typeMap, SemanticSpan span)

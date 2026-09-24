@@ -353,6 +353,27 @@ internal static class CSharpSemanticInputValidator
             callables.TryGetValue(id, out SemanticCallable? callable)
             && callable.GenericTypeParameterIds?.Count > 0) == true)
             return false;
+        foreach (SemanticAsyncMethod method in document.AsyncMethods.Where(method =>
+            document.Reachability?.ReachableCallableIds.Contains(method.MethodSymbolId) == true))
+        {
+            foreach (SemanticOperation operation in method.Segments.SelectMany(segment =>
+                    segment.Statements.Select(statement => statement.Operation)
+                        .Concat(segment.Transfer?.Condition is null
+                            ? Array.Empty<SemanticOperation>()
+                            : new[] { segment.Transfer.Condition })
+                        .Concat(segment.AwaitSite?.Arguments ?? Array.Empty<SemanticOperation>())
+                        .Concat(segment.AwaitSite?.CancellationToken is null
+                            ? Array.Empty<SemanticOperation>()
+                            : new[] { segment.AwaitSite.CancellationToken }))
+                .SelectMany(Flatten))
+            {
+                if (operation.SymbolId is { } targetId
+                    && callables.TryGetValue(targetId, out SemanticCallable? target)
+                    && target.GenericDefinitionSymbolId is not null
+                    && !operation.TypeArgumentIds.SequenceEqual(target.GenericArgumentTypeIds!))
+                    return false;
+            }
+        }
         foreach (SemanticControlFlowGraph graph in document.ControlFlowGraphs
             .Where(graph => document.Reachability?.ReachableCallableIds.Contains(graph.MethodSymbolId) == true))
         {
@@ -465,7 +486,7 @@ internal static class CSharpSemanticInputValidator
         }
 
         if (document.SchemaVersion >= 12
-            && document.AsyncMethods
+            && document.AsyncMethods.Where(method => reachableIds.Contains(method.MethodSymbolId))
                 .SelectMany(method => method.Segments)
                 .SelectMany(segment => segment.Statements
                     .Select(statement => statement.Operation)
@@ -483,6 +504,14 @@ internal static class CSharpSemanticInputValidator
         {
             return false;
         }
+
+        if (document.SchemaVersion == SemanticContract.TaskResultSchemaVersion
+            && document.AsyncMethods.Where(method => reachableIds.Contains(method.MethodSymbolId))
+                .SelectMany(method => method.Segments)
+                .Select(segment => segment.AwaitSite?.TaskCallableId)
+                .Where(id => id is not null)
+                .Any(id => !reachableIds.Contains(id!)))
+            return false;
 
         SemanticReachableImport[] expectedImports = reachability.ReachableCallableIds
             .Select(id => callablesById[id])

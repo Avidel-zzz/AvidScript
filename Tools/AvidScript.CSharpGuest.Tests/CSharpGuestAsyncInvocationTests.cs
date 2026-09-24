@@ -190,6 +190,33 @@ internal static class CSharpGuestAsyncInvocationTests
             }
             """;
         CompileTaskFixture("arguments", argumentsSource);
+        const string combinedSource = """
+            using AvidScript;
+            using System.Runtime.InteropServices;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static int Result;
+                private static T Identity<T>(T value) => value;
+                public static async Task<int> LoadScoreAsync()
+                {
+                    int total = 0;
+                    foreach (int value in new[] { 3, 5, 8 })
+                    {
+                        total += Identity<int>(value);
+                    }
+                    await AvidContinuations.NextTickAsync();
+                    return total;
+                }
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay()
+                {
+                    int score = await LoadScoreAsync();
+                    Result = score;
+                }
+            }
+            """;
+        CompileTaskFixture("combined", combinedSource);
         const string cancellationSource = """
             using AvidScript;
             using System.Runtime.InteropServices;
@@ -257,16 +284,59 @@ internal static class CSharpGuestAsyncInvocationTests
             }
             """;
         CompileTaskFixture("cancelled-chain", cancellationChainSource);
-        return count + 4;
+        return count + 5;
     }
 
     private static void CompileTaskFixture(string scenario, string source)
     {
         SemanticDocument document = CSharpGuestContinuationTests.Analyze(
             source, "Scripts/TaskIntAbiBoundary_" + scenario + ".cs");
+        if (scenario == "combined")
+            document = SemanticSerializer.Deserialize(SemanticSerializer.Serialize(document));
         Check(document.Succeeded
             && document.SchemaVersion == SemanticContract.TaskResultSchemaVersion,
             scenario + ": task result source must reach the new semantic contract");
+        if (scenario == "combined")
+        {
+            SemanticCallable instance = document.Callables.Single(callable =>
+                callable.GenericDefinitionSymbolId is not null);
+            Check(document.Reachability!.ReachableCallableIds.Contains(instance.MethodSymbolId)
+                && document.AsyncMethods.Any(method => method.Segments
+                    .SelectMany(segment => segment.Statements)
+                    .Any(statement => ContainsCall(statement.Operation, instance.MethodSymbolId))),
+                "combined: the async segment must call a reachable closed generic instance");
+            SemanticDocument missingInstance = document with
+            {
+                Reachability = document.Reachability with
+                {
+                    ReachableCallableIds = document.Reachability.ReachableCallableIds
+                        .Where(id => id != instance.MethodSymbolId).ToArray(),
+                },
+            };
+            Check(!CSharpGuestLowerer.Lower(missingInstance, new string('d', 64)).Succeeded,
+                "combined: dropping the closed async call target must fail validation");
+            string producerId = document.AsyncMethods.Single(method =>
+                method.TaskResultTypeId == "type:int32").MethodSymbolId;
+            Check(document.Reachability.ReachableCallableIds.Contains(producerId),
+                "combined: direct Task<int> producer must be reachable from the entrypoint");
+            string totalId = document.Symbols.Single(symbol => symbol.Name == "total"
+                && symbol.ContainingSymbolId == producerId).Id;
+            SemanticAsyncMethod producer = document.AsyncMethods.Single(method =>
+                method.MethodSymbolId == producerId);
+            Check(producer.Segments.Single(segment => segment.AwaitSite is not null)
+                    .AwaitSite!.StateFrame?.Slots.Any(slot => slot.SymbolId == totalId) == true,
+                "combined: the returned local must survive the suspension");
+            SemanticDocument missingProducer = document with
+            {
+                Reachability = document.Reachability with
+                {
+                    ReachableCallableIds = document.Reachability.ReachableCallableIds
+                        .Where(id => id != producerId).ToArray(),
+                },
+            };
+            Check(!CSharpGuestLowerer.Lower(missingProducer, new string('d', 64)).Succeeded,
+                "combined: dropping the awaited producer must fail validation");
+        }
         CSharpGuestLoweringResult lowered = CSharpGuestLowerer.Lower(document, new string('d', 64));
         Check(lowered.Succeeded,
             scenario + ": Task<int> Guest lowering failed: " + string.Join(" | ", lowered.Diagnostics.Select(item => item.Code + ":" + item.Message)));
@@ -293,6 +363,10 @@ internal static class CSharpGuestAsyncInvocationTests
         WasmCompilationResult compiled = WasmModuleCompiler.Compile(module);
         Check(compiled.Succeeded,
             scenario + ": Task<int> WASM compilation failed: " + string.Join(" | ", compiled.Diagnostics.Select(item => item.Message)));
+        if (scenario == "combined")
+            Check(compiled.Bytes.SequenceEqual(WasmModuleCompiler.Compile(
+                    GuestIrSerializer.Deserialize(GuestIrSerializer.Serialize(module))).Bytes),
+                "combined: serialized Guest IR must preserve the executable module");
         Check(WasmArtifactInspector.Inspect(compiled.Bytes).Imports.Any(imported =>
             imported.Module == "avidscript" && imported.Name == "avid_task_i32_v1"),
             scenario + ": Task<int> WASM must retain the exact Host import");
@@ -314,6 +388,9 @@ internal static class CSharpGuestAsyncInvocationTests
             File.WriteAllText(stem + ".result-offset", result.Offset.ToString(CultureInfo.InvariantCulture));
         }
     }
+
+    private static bool ContainsCall(SemanticOperation operation, string target) =>
+        operation.SymbolId == target || operation.Children.Any(child => ContainsCall(child, target));
 
     private const string Source = """
         using System; using System.Runtime.InteropServices; using AvidScript;
