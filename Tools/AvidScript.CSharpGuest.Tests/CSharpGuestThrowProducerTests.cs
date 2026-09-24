@@ -26,6 +26,8 @@ internal static class CSharpGuestThrowProducerTests
             {
                 static int Fail() { throw new System.Exception(); }
                 static int Wrap() => Fail();
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay() { Wrap(); }
             }
             """;
         SemanticDocument semantic = Analyze(source);
@@ -37,6 +39,8 @@ internal static class CSharpGuestThrowProducerTests
             function.Id.Contains(".Fail(", StringComparison.Ordinal)).Id;
         GuestFunction caller = module.Functions.Single(function =>
             function.Id.Contains(".Wrap(", StringComparison.Ordinal));
+        GuestExport entry = module.Exports.Single(export => export.Name == "avid_on_begin_play");
+        GuestFunction adapter = module.Functions.Single(function => function.Id == entry.FunctionId);
         Check(module.SchemaVersion == 17 && module.IrVersion == "1.16"
             && module.Provenance.SemanticSchemaVersion == 34
             && module.Provenance.SemanticVersion == "1.43"
@@ -49,7 +53,12 @@ internal static class CSharpGuestThrowProducerTests
                 instruction.Op == "call" && instruction.TargetId == failId)
                 && block.Instructions.Any(instruction =>
                     instruction.Op == "field_load" && instruction.TargetId == "field:status")
-                && block.Terminator.Kind == "branch_if"),
+                && block.Terminator.Kind == "branch_if")
+            && adapter.ReturnTypeId == "type:void"
+            && adapter.Blocks.Any(block => block.Terminator.Kind == "branch_if")
+            && adapter.Blocks.Any(block => block.Instructions.Any(instruction =>
+                instruction.Op == "call" && instruction.TargetId == "import:language_error_report_v1")
+                && block.Terminator.Kind == "trap"),
             "the original exception artifact must produce a checked same-source direct call");
         byte[] serialized = GuestIrSerializer.Serialize(module);
         Check(serialized.SequenceEqual(GuestIrSerializer.Serialize(GuestIrSerializer.Deserialize(serialized)))
@@ -57,6 +66,15 @@ internal static class CSharpGuestThrowProducerTests
                 == "type:global::System.Exception",
             "the source/type token catalog must round-trip as part of the versioned IR");
         GuestModule probe = AddProbe(module, caller, appendTarget: false);
+        GuestImport report = module.Imports.Single(import =>
+            import.Name == "avid_language_error_report_v1");
+        GuestModule forgedReport = module with
+        {
+            Imports = module.Imports.Select(import => import == report
+                ? import with { Name = "untrusted_language_error_report" } : import).ToArray(),
+        };
+        Check(!GuestModuleValidator.Validate(forgedReport).Succeeded,
+            "arbitrary host imports must not receive module-local managed references");
         GuestValidationResult validation = GuestModuleValidator.Validate(probe);
         Check(validation.Succeeded,
             string.Join(" | ", validation.Diagnostics.Select(item => item.Message)));

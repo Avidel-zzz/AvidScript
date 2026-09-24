@@ -2,7 +2,9 @@
 
 #include "AvidScriptLanguageErrorCatalog.h"
 #include "AvidScriptRuntimeBackendTestLanes.h"
+#include "AvidScriptRuntimeSession.h"
 #include "AvidScriptWasmRuntime.h"
+#include "Memory/AvidScriptManagedHeap.h"
 
 #include "Containers/StringConv.h"
 #include "Dom/JsonObject.h"
@@ -243,8 +245,36 @@ bool FAvidScriptLanguageErrorCatalogRealArtifactTest::RunTest(const FString& Par
 			&& Source->SourceId == TEXT("Scripts/SourceThrow.cs")
 			&& Source->Start >= 0 && Source->Length > 0
 			&& Source->Start + Source->Length <= Source->SourceLength);
+		TestFalse(*AvidScriptRuntimeLaneLabel(Lane, TEXT("uncaught UE entry fails")),
+			Runtime.BeginPlay(Result));
+		TestEqual(TEXT("uncaught language error has a distinct category"),
+			Result.ErrorCategory, FString(TEXT("language_error_uncaught")));
+		TestTrue(TEXT("uncaught report includes type and source position"),
+			Type && Source && Result.ErrorMessage.Contains(*Type)
+			&& Result.ErrorMessage.Contains(Source->SourceId)
+			&& Result.ErrorMessage.Contains(FString::Printf(TEXT(":%d:%d"), Source->Line, Source->Column)));
+		const AvidScript::Managed::FHeap* Heap = Runtime.GetManagedHeapForTesting();
+		TestTrue(TEXT("uncaught call releases managed invocation roots"), Heap
+			&& Heap->GetStats().ActiveFrames == 0 && Heap->GetStats().LiveRoots == 0);
+		const FString SourceId = Source ? Source->SourceId : FString();
 		Runtime.Unload();
 		TestNull(TEXT("real compiler catalog is released on unload"), Runtime.GetLanguageErrorCatalog());
+		FAvidScriptRuntimeSession Session;
+		Session.SetBackendSelectionForTesting(Lane.Selection);
+		FAvidScriptWasmReloadManifest Manifest = FAvidScriptWasmReloadManifest::MakeSmoke(ModuleId);
+		Manifest.RequiredExports = {TEXT("avid_on_begin_play")};
+		Manifest.RequiredImports = {
+			{TEXT("avidscript"), TEXT("avid_managed_heap_v1")},
+			{TEXT("avidscript"), TEXT("avid_language_error_report_v1")},
+		};
+		FAvidScriptWasmReloadResult SessionResult;
+		TestFalse(*AvidScriptRuntimeLaneLabel(Lane, TEXT("Session rejects uncaught BeginPlay")),
+			Session.LoadInitialModule(CanonicalWasm.GetData(), CanonicalWasm.Num(), Manifest, SessionResult));
+		TestEqual(TEXT("Session preserves language error category"),
+			SessionResult.ErrorCategory, FString(TEXT("language_error_uncaught")));
+		TestTrue(TEXT("Session preserves source diagnostic"), !SourceId.IsEmpty()
+			&& SessionResult.ErrorMessage.Contains(SourceId));
+		TestFalse(TEXT("failed initial activation has no live Session VM"), Session.IsLiveLoaded());
 	}
 	return true;
 }

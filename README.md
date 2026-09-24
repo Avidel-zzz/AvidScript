@@ -53,7 +53,7 @@ public static void Tick(float deltaSeconds)
 | UE 类型声明 | [Actor、Component、Subsystem](Samples/CSharp/ScriptDefinedTypes/README.md) | 声明或签名变化需要重新构建并重启 Editor |
 | 异步 | [计时器、异步加载、取消](Samples/CSharp/LatentGameplay/README.md) | 不支持任意 `Task` 或自定义 awaiter |
 | 网络 | [RPC](Samples/CSharp/NetworkRpc/README.md)、[属性复制 / RepNotify](Samples/CSharp/ReplicatedProperty/README.md) | 真实游戏的客户端/服务器验收仍需完成 |
-| 控制流清理 | [`foreach` 清理](Fixtures/Phase66/EnumeratorCleanup.cs)、[`finally` 清理](Fixtures/Phase66/FinallyCleanup.cs) | `throw`/`catch` 和跨 `await` 的异常清理尚未形成运行时闭环 |
+| 控制流清理 | [`foreach` 清理](Fixtures/Phase66/EnumeratorCleanup.cs)、[`finally` 清理](Fixtures/Phase66/FinallyCleanup.cs) | 公开构建入口仍不支持 `throw`/`catch` 和跨 `await` 的异常清理 |
 | 平台 | Windows Editor 与打包样例 | Android 真机和 iOS 尚未验收 |
 
 完整语言范围与待办见 [P66 语言执行计划](Docs/Phase66/P66.C_Language_Execution_Plan.md)。

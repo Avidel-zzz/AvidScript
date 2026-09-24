@@ -65,7 +65,15 @@ public static class CSharpLanguageErrorCompiler
         if (!lowered.Succeeded || lowered.Module is null)
             return Fail("The ordinary methods could not be lowered: "
                 + string.Join(" | ", lowered.Diagnostics.Select(diagnostic => diagnostic.Message)), out error);
-        if (!CSharpLanguageOutcomeRewriter.TryRewriteWithProducers(ordinary, lowered.Module,
+        GuestExport[] affectedExports = lowered.Module.Exports
+            .Where(export => affected.Contains(export.FunctionId)).ToArray();
+        Dictionary<string, GuestFunction> originalFunctions = lowered.Module.Functions
+            .ToDictionary(function => function.Id, StringComparer.Ordinal);
+        GuestModule internalModule = lowered.Module with
+        {
+            Exports = lowered.Module.Exports.Except(affectedExports).ToArray(),
+        };
+        if (!CSharpLanguageOutcomeRewriter.TryRewriteWithProducers(ordinary, internalModule,
                 affected, new[] { producerId }.ToHashSet(StringComparer.Ordinal),
                 out GuestModule? outcomes, out error)
             || outcomes is null)
@@ -94,6 +102,11 @@ public static class CSharpLanguageErrorCompiler
                         entry.Span.Line, entry.Span.Column,
                         entry.Span.EndLine, entry.Span.EndColumn)).ToArray()),
         };
+        if (!CSharpLanguageErrorEntryAdapter.TryAdd(candidate, affectedExports,
+                originalFunctions, out GuestModule? adapted, out error)
+            || adapted is null)
+            return false;
+        candidate = adapted;
         GuestValidationResult validation = GuestModuleValidator.Validate(candidate);
         if (!validation.Succeeded)
             return Fail("The composed language-error module failed validation: "

@@ -11,6 +11,7 @@ let instance;
 let nextToken = 1n;
 let allocations = 0;
 const layouts = new Map(), objects = new Map(), frames = new Map(), roots = new Map();
+let reported = false;
 function collect() {
   const live = new Set([...roots.values()].filter(token => token !== 0n));
   for (const token of objects.keys()) {
@@ -110,6 +111,18 @@ function managedHeap(input, inputLength, output, outputLength) {
 
 const imports = {};
 for (const entry of WebAssembly.Module.imports(wasmModule)) {
+  if (entry.module === 'avidscript' && entry.name === 'avid_language_error_report_v1') {
+    (imports[entry.module] ??= {})[entry.name] = (type, source, root) => {
+      const activeRoots = [...frames.values()].at(-1);
+      if (type !== 1 || source !== 1 || !objects.has(root)
+        || !activeRoots || ![...activeRoots].some(token => roots.get(token) === root)) {
+        throw new Error(`Invalid uncaught language-error report: type=${type} source=${source} object=${root}`);
+      }
+      reported = true;
+      throw new Error('uncaught-language-error');
+    };
+    continue;
+  }
   if (entry.module !== 'avidscript' || entry.name !== 'avid_managed_heap_v1') {
     throw new Error(`Unexpected import ${entry.module}.${entry.name}`);
   }
@@ -123,4 +136,14 @@ if (allocations !== 1 || frames.size !== 0 || roots.size !== 0) {
 }
 collect();
 if (objects.size !== 0) throw new Error('Unrooted error object survived collection');
-process.stdout.write('C# source throw producer WASM: 1/1 passed\n');
+if (instance.exports.avid_on_begin_play) {
+  try {
+    instance.exports.avid_on_begin_play();
+    throw new Error('UE entry returned after an uncaught language error');
+  } catch (error) {
+    if (error.message !== 'uncaught-language-error' || !reported) throw error;
+  }
+  process.stdout.write('C# source throw producer WASM: 2/2 passed\n');
+} else {
+  process.stdout.write('C# source throw producer WASM: 1/1 passed\n');
+}

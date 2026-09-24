@@ -8244,6 +8244,31 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 		ProfileScope.SetSucceeded(bSucceeded);
 		return bSucceeded;
 	}
+	case EAvidScriptHostBindingId::LanguageErrorReportV1:
+	{
+		const FString* Type = LanguageErrorCatalog
+			? LanguageErrorCatalog->FindType(Call.IntArgs[0]) : nullptr;
+		const FAvidScriptLanguageErrorSource* Source = LanguageErrorCatalog
+			? LanguageErrorCatalog->FindSource(Call.IntArgs[1]) : nullptr;
+		const AvidScript::Managed::FToken ErrorObject = static_cast<uint64>(Call.Int64Args[0]);
+		// The Guest value is an object reference. Its frame roots are maintained by
+		// the WASM backend and are released when this invocation unwinds.
+		if (!Type || !Source || !ManagedHeap || ManagedHeapInvocationDepth == 0
+			|| !ManagedHeap->IsObjectRootedInCurrentFrame(ErrorObject, ManagedHeapFrameFloor))
+		{
+			SetPendingHostImportFailure(TEXT("avidscript"), TEXT("avid_language_error_report_v1"),
+				TEXT("Uncaught language error has an invalid catalog token or managed root."),
+				TEXT("language_error_invalid_report"));
+		}
+		else
+		{
+			SetPendingHostImportFailure(TEXT("avidscript"), TEXT("avid_language_error_report_v1"),
+				FString::Printf(TEXT("Uncaught %s at %s:%d:%d (UTF-16 span %d+%d)."),
+					**Type, *Source->SourceId, Source->Line, Source->Column,
+					Source->Start, Source->Length), TEXT("language_error_uncaught"));
+		}
+		return Finish(0, false);
+	}
 	case EAvidScriptHostBindingId::HostAddI32:
 		return Finish(HandleHostAddI32Import(Call.IntArgs[0]), true);
 	case EAvidScriptHostBindingId::HostFailI32:

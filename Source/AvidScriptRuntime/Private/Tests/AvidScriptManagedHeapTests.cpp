@@ -26,6 +26,23 @@ bool FAvidScriptManagedHeapOwnershipTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Configure environment layout"), LiveHeap->Configure(Layouts) == EHeapError::Ok);
 	TestTrue(TEXT("Create persistent root"), LiveHeap->CreateRoot(0, 0, Root) == EHeapError::Ok);
 	TestTrue(TEXT("Allocate environment"), LiveHeap->Allocate(1, Root, Object) == EHeapError::Ok);
+	TestFalse(TEXT("Persistent object has no invocation frame root"),
+		LiveHeap->IsObjectRootedInCurrentFrame(Object));
+	FToken InvocationFrame = 0, InvocationRoot = 0, InvocationObject = 0;
+	TestTrue(TEXT("Create invocation frame"), LiveHeap->PushFrame(InvocationFrame) == EHeapError::Ok);
+	TestTrue(TEXT("Create invocation root"),
+		LiveHeap->CreateRoot(InvocationFrame, 0, InvocationRoot) == EHeapError::Ok);
+	TestTrue(TEXT("Allocate invocation object"),
+		LiveHeap->Allocate(1, InvocationRoot, InvocationObject) == EHeapError::Ok);
+	TestTrue(TEXT("Current frame owns invocation object"),
+		LiveHeap->IsObjectRootedInCurrentFrame(InvocationObject));
+	TestFalse(TEXT("Invocation floor cannot claim an older frame"),
+		LiveHeap->IsObjectRootedInCurrentFrame(InvocationObject, 1));
+	TestFalse(TEXT("Persistent object is not a current-frame language error"),
+		LiveHeap->IsObjectRootedInCurrentFrame(Object));
+	TestTrue(TEXT("Close invocation frame"), LiveHeap->PopFrame(InvocationFrame) == EHeapError::Ok);
+	TestFalse(TEXT("Retired invocation root is rejected"),
+		LiveHeap->IsObjectRootedInCurrentFrame(InvocationObject));
 	const uint8 InvalidModule[] = {0, 0, 0, 0};
 	TestFalse(TEXT("Invalid candidate rejected"), Candidate.LoadModule(InvalidModule, UE_ARRAY_COUNT(InvalidModule), TEXT("invalid_heap_candidate"), Result));
 	TestNull(TEXT("Failed candidate has no heap"), Candidate.GetManagedHeapForTesting());

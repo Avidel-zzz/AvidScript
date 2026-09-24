@@ -198,6 +198,15 @@ EHeapError FHeap::ValidateRootTransfer(std::span<const FToken> InRoots, std::uin
 	return EHeapError::Ok;
 }
 
+bool FHeap::IsObjectRootedInCurrentFrame(FToken Object, std::uint32_t InvocationFloor) const
+{
+	if (Ready() != EHeapError::Ok || ObjectIndex(Object) == InvalidIndex
+		|| FrameStack.size() <= InvocationFloor) return false;
+	for (auto Root = Frames[FrameStack.back()].FirstRoot; Root != InvalidIndex; Root = Roots[Root].Next)
+		if (Roots[Root].Object == Object) return true;
+	return false;
+}
+
 EHeapError FHeap::ValidateGuestRootFrame(FToken Frame, std::uint32_t InvocationFloor) const
 {
 	if (const auto State = Ready(); State != EHeapError::Ok) return State;

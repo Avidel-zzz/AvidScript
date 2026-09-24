@@ -46,7 +46,17 @@ internal static class GuestManagedHeapValidator
             || module.Types.Any(type => type.Kind == "array" && type.ElementTypeId is not null && Has(type.ElementTypeId)))
             Add(context, "Managed references cannot enter untraced globals, static data or array storage.");
         foreach (GuestImport import in module.Imports)
-            if (Has(import.ReturnTypeId) || import.ParameterTypeIds.Any(Has))
+            if ((Has(import.ReturnTypeId) || import.ParameterTypeIds.Any(Has))
+                && !(module.SchemaVersion == GuestLanguageErrorCatalogValidator.SchemaVersion
+                    && module.IrVersion == GuestLanguageErrorCatalogValidator.IrVersion
+                    && module.LanguageErrorCatalog is not null
+                    && import.Id == "import:language_error_report_v1"
+                    && import.Module == "avidscript"
+                    && import.Name == "avid_language_error_report_v1"
+                    && import.ParameterTypeIds.SequenceEqual(new[]
+                        { "type:int32", "type:int32", "type:language_error_root" })
+                    && import.ReturnTypeId == "type:int32"
+                    && import.OptimizationClass == "none"))
                 Add(context, $"Import '{import.Id}' cannot expose module-local managed references.");
         foreach (GuestExport export in module.Exports)
             if (context.Functions.TryGetValue(export.FunctionId, out GuestFunction? function)
