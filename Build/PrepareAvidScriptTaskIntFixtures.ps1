@@ -37,7 +37,7 @@ try {
     finally {
         Pop-Location
     }
-    foreach ($Scenario in @('immediate', 'deferred', 'chain', 'arguments', 'cancelled')) {
+    foreach ($Scenario in @('immediate', 'deferred', 'chain', 'arguments', 'cancelled', 'cancelled-chain')) {
         $Stem = Join-Path $FixtureRoot "csharp-task-int-$Scenario"
         $Wasm = "$Stem.wasm"
         $OffsetFile = "$Stem.result-offset"
@@ -60,4 +60,4 @@ finally {
     $env:AVIDSCRIPT_MANAGED_HEAP_WASM_DIR = $PreviousFixtures
 }
 
-Write-Output "AvidScript.TaskIntFixtures: 5/5 generated; directory=$FixtureRoot"
+Write-Output "AvidScript.TaskIntFixtures: 6/6 generated; directory=$FixtureRoot"

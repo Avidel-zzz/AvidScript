@@ -1,6 +1,56 @@
 #include "AvidScriptWasmRuntime.h"
 #include "AvidScriptTaskResultAbi.h"
 
+bool FAvidScriptWasmRuntimeInstance::DispatchTaskPropagateFailureCall(
+	const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult)
+{
+	OutResult = {};
+	auto Fail = [&OutResult](const TCHAR* Category, const TCHAR* Details)
+	{
+		OutResult.ErrorCategory = Category;
+		OutResult.Details = Details;
+		return false;
+	};
+	if (!IsInGameThread() || !IsLoaded() || ManagedHeapInvocationDepth == 0
+		|| HostContext.Tasks == nullptr)
+	{
+		return Fail(TEXT("task_result_context"),
+			TEXT("Task failure propagation requires a live Session and managed VM invocation."));
+	}
+	const int64 SourceToken = Call.Int64Args[0];
+	const int64 TargetToken = Call.Int64Args[1];
+	if (SourceToken <= 0 || TargetToken <= 0 || SourceToken == TargetToken
+		|| !HostContext.Tasks->HasTaskResultType(SourceToken, TEXT("type:int32"))
+		|| !HostContext.Tasks->HasTaskResultType(TargetToken, TEXT("type:int32")))
+	{
+		return Fail(TEXT("task_result_identity"),
+			TEXT("Task failure propagation needs distinct live Task<int> tokens in the current Session."));
+	}
+	FAvidScriptTaskResultSnapshot Source;
+	if (!HostContext.Tasks->ReadTaskResult(SourceToken, Source)
+		|| Source.TypeId != TEXT("type:int32"))
+	{
+		return Fail(TEXT("task_result_read"),
+			TEXT("Source Task<int> has no readable terminal result."));
+	}
+	TArray<int64> Waiters;
+	const bool bPropagated = Source.State == EAvidScriptTaskResultState::Cancelled
+		? HostContext.Tasks->CancelTaskResult(TargetToken, Waiters)
+		: Source.State == EAvidScriptTaskResultState::Faulted
+			&& !Source.ErrorCode.IsEmpty()
+			&& HostContext.Tasks->FaultTaskResult(
+				TargetToken, Source.ErrorCode, Waiters);
+	if (!bPropagated)
+	{
+		return Fail(TEXT("task_result_propagate"),
+			TEXT("Only a cancelled or faulted Task<int> can terminate a running target task."));
+	}
+	OutResult.ReturnValue = 1;
+	OutResult.ReturnValueI64 = 1;
+	OutResult.bSucceeded = true;
+	return true;
+}
+
 bool FAvidScriptWasmRuntimeInstance::DispatchTaskBindProducerCall(
 	const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult)
 {

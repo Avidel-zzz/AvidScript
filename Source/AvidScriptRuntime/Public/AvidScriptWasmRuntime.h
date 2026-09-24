@@ -639,6 +639,7 @@ public:
 	bool DispatchContinuationManagedStateCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	bool DispatchTaskResultInt32Call(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	bool DispatchTaskBindProducerCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
+	bool DispatchTaskPropagateFailureCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	// Native callers retain references extracted from a validated state layout.
 	// Failure leaves OutLease unchanged; use/release on the Game Thread.
 	bool CreateContinuationStateLease(TConstArrayView<uint64> Objects,

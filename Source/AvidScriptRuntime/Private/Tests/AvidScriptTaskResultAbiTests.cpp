@@ -153,6 +153,35 @@ TArray<uint8> Build(EFixture Fixture)
 	return Wasm;
 }
 
+TArray<uint8> BuildFailurePropagation()
+{
+	using namespace AvidScript::TaskResult::Abi;
+	TArray<uint8> Wasm{0, 0x61, 0x73, 0x6d, 1, 0, 0, 0};
+	Section(Wasm, 1, {2,
+		0x60, 2, 0x7e, 0x7e, 1, 0x7f, // import: (i64, i64) -> i32
+		0x60, 0, 0}); // BeginPlay
+	TArray<uint8> Imports{1};
+	Name(Imports, "avidscript");
+	Name(Imports, PropagateFailureImport);
+	Imports.Append({0, 0});
+	Section(Wasm, 2, Imports);
+	Section(Wasm, 3, {1, 1});
+	Section(Wasm, 5, {1, 0, 1});
+	TArray<uint8> Exports{2};
+	Name(Exports, "memory"); Exports.Append({2, 0});
+	Name(Exports, "avid_on_begin_play"); Exports.Append({0, 1});
+	Section(Wasm, 7, Exports);
+	TArray<uint8> Begin{0};
+	I32(Begin, 24);
+	Load64(Begin, 8);
+	Load64(Begin, 16);
+	Begin.Append({0x10, 0, 0x36, 2, 0, 0x0b}); // call import; i32.store
+	TArray<uint8> Code{1};
+	U32(Code, Begin.Num()); Code.Append(Begin);
+	Section(Wasm, 10, Code);
+	return Wasm;
+}
+
 int64 ReadI64(const uint8* Bytes, int32 Offset)
 {
 	int64 Value = 0;
@@ -363,6 +392,105 @@ bool FAvidScriptTaskResultAbiTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Faulted task releases"), FaultedEndpoint.ReleaseTaskResult(FaultedTask));
 		FaultedOwner->Teardown();
 
+		const TArray<uint8> PropagationBytes = BuildFailurePropagation();
+		for (const bool bFaulted : {false, true})
+		{
+			FAvidScriptWasmRuntimeInstance Propagation(Selection);
+			if (!TestTrue(TEXT("Failure propagation fixture loads in both VMs"),
+				Propagation.LoadModule(PropagationBytes.GetData(), PropagationBytes.Num(),
+					bFaulted ? TEXT("task_fault_propagation") : TEXT("task_cancel_propagation"), Result)))
+			{ AddError(Result.ErrorMessage); return false; }
+			const auto PropagationOwner = MakeShared<FAvidScriptSessionContinuations>();
+			auto& PropagationEndpoint = PropagationOwner->ResetActive(World);
+			const int64 SourceTask = PropagationEndpoint.CreateTaskResult(TEXT("type:int32"));
+			const int64 TargetTask = PropagationEndpoint.CreateTaskResult(TEXT("type:int32"));
+			if (!TestTrue(TEXT("Failure propagation creates distinct task tokens"),
+				SourceTask > 0 && TargetTask > 0 && SourceTask != TargetTask)) return false;
+			TArray<int64> PropagationWaiters;
+			const bool bSourceTerminated = bFaulted
+				? PropagationEndpoint.FaultTaskResult(SourceTask, TEXT("script_error_inner"), PropagationWaiters)
+				: PropagationEndpoint.CancelTaskResult(SourceTask, PropagationWaiters);
+			if (!TestTrue(TEXT("Failure propagation source terminates"), bSourceTerminated)) return false;
+			int64 TargetWaiter = 0;
+			if (!TestTrue(TEXT("Failure propagation target registers a waiter"),
+				PropagationEndpoint.AwaitTaskResult(TargetTask, 91, TargetWaiter)
+					== EAvidScriptTaskWaitRegistration::Queued)) return false;
+			Context.Tasks = &PropagationEndpoint;
+			Context.Continuations = &PropagationEndpoint;
+			Propagation.SetHostContext(Context);
+			uint8 PropagationMemory[28] = {};
+			FMemory::Memcpy(PropagationMemory + 8, &SourceTask, sizeof(SourceTask));
+			FMemory::Memcpy(PropagationMemory + 16, &TargetTask, sizeof(TargetTask));
+			if (!TestTrue(TEXT("Failure propagation supplies task tokens"),
+				Propagation.WriteStateBytes(0, MakeArrayView(PropagationMemory), Error))) return false;
+			if (!TestTrue(TEXT("WASM propagates source failure without a trap"),
+				Propagation.BeginPlay(Result)))
+			{ AddError(Result.ErrorMessage); return false; }
+			if (!TestTrue(TEXT("Read failure propagation result"),
+				Propagation.ReadStateBytes(0, MakeArrayView(PropagationMemory), Error))) return false;
+			int32 Accepted = 0;
+			FMemory::Memcpy(&Accepted, PropagationMemory + 24, sizeof(Accepted));
+			TestEqual(TEXT("Failure propagation import accepts terminal source"), Accepted, 1);
+			FAvidScriptTaskResultSnapshot Propagated;
+			if (!TestTrue(TEXT("Target has a readable terminal result"),
+				PropagationEndpoint.ReadTaskResult(TargetTask, Propagated))) return false;
+			TestTrue(TEXT("Target preserves source terminal state"),
+				Propagated.State == (bFaulted
+					? EAvidScriptTaskResultState::Faulted : EAvidScriptTaskResultState::Cancelled));
+			TestEqual(TEXT("Target preserves source error code"), Propagated.ErrorCode,
+				bFaulted ? FString(TEXT("script_error_inner")) : FString());
+			PropagationOwner->DrainReady(Ready);
+			if (!TestEqual(TEXT("Failure propagation wakes one target waiter"), Ready.Num(), 1)) return false;
+			TestTrue(TEXT("Target waiter receives propagated status"),
+				Ready[0].Status == (bFaulted
+					? EAvidScriptContinuationStatus::Failed : EAvidScriptContinuationStatus::Cancelled));
+			TestTrue(TEXT("Failure propagation waiter finalizes"),
+				PropagationOwner->FinalizeDispatched(TargetWaiter, true));
+			TestTrue(TEXT("Failure propagation source releases"),
+				PropagationEndpoint.ReleaseTaskResult(SourceTask));
+			TestTrue(TEXT("Failure propagation target releases"),
+				PropagationEndpoint.ReleaseTaskResult(TargetTask));
+			TestEqual(TEXT("Failure propagation leaves no task results"),
+				PropagationOwner->GetTaskResultsForTesting().GetCount(), 0);
+			PropagationOwner->Teardown();
+		}
+		FAvidScriptWasmRuntimeInstance RejectedPropagation(Selection);
+		if (!TestTrue(TEXT("Invalid failure propagation fixture loads"),
+			RejectedPropagation.LoadModule(PropagationBytes.GetData(), PropagationBytes.Num(),
+				TEXT("task_success_not_failure"), Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		const auto RejectedOwner = MakeShared<FAvidScriptSessionContinuations>();
+		auto& RejectedEndpoint = RejectedOwner->ResetActive(World);
+		const int64 SucceededSource = RejectedEndpoint.CreateTaskResult(TEXT("type:int32"));
+		const int64 RunningTarget = RejectedEndpoint.CreateTaskResult(TEXT("type:int32"));
+		const uint8 SuccessValue[4] = {1, 0, 0, 0};
+		TArray<int64> RejectedWaiters;
+		if (!TestTrue(TEXT("Invalid propagation source succeeds"),
+			RejectedEndpoint.SucceedTaskResult(SucceededSource,
+				MakeArrayView(SuccessValue), RejectedWaiters))) return false;
+		Context.Tasks = &RejectedEndpoint;
+		Context.Continuations = &RejectedEndpoint;
+		RejectedPropagation.SetHostContext(Context);
+		uint8 RejectedMemory[28] = {};
+		FMemory::Memcpy(RejectedMemory + 8, &SucceededSource, sizeof(SucceededSource));
+		FMemory::Memcpy(RejectedMemory + 16, &RunningTarget, sizeof(RunningTarget));
+		if (!TestTrue(TEXT("Invalid propagation supplies task tokens"),
+			RejectedPropagation.WriteStateBytes(0, MakeArrayView(RejectedMemory), Error))) return false;
+		TestFalse(TEXT("Succeeded source cannot propagate failure"),
+			RejectedPropagation.BeginPlay(Result));
+		TestEqual(TEXT("Invalid propagation has a stable error category"),
+			Result.ErrorCategory, FString(TEXT("task_result_propagate")));
+		TestTrue(TEXT("Rejected propagation leaves target running"),
+			RejectedEndpoint.SucceedTaskResult(RunningTarget,
+				MakeArrayView(SuccessValue), RejectedWaiters));
+		TestTrue(TEXT("Rejected propagation source releases"),
+			RejectedEndpoint.ReleaseTaskResult(SucceededSource));
+		TestTrue(TEXT("Rejected propagation target releases"),
+			RejectedEndpoint.ReleaseTaskResult(RunningTarget));
+		TestEqual(TEXT("Rejected propagation leaves no task results"),
+			RejectedOwner->GetTaskResultsForTesting().GetCount(), 0);
+		RejectedOwner->Teardown();
+
 		const TArray<uint8> BadBytes = Build(EFixture::BadSignature);
 		FAvidScriptWasmRuntimeInstance BadSignature(Selection);
 		TestFalse(TEXT("Task import rejects mismatched WASM signature"),
@@ -476,9 +604,12 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 		Owner->Teardown();
 	}
 	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	for (const TCHAR* Scenario : {TEXT("cancelled"), TEXT("cancelled-chain")})
 	{
+		const bool bChain = FCString::Strcmp(Scenario, TEXT("cancelled-chain")) == 0;
 		const FString Stem = FPaths::Combine(FPaths::ProjectSavedDir(),
-			TEXT("AvidScriptManagedHeapTests/GuestFixtures/csharp-task-int-cancelled"));
+			TEXT("AvidScriptManagedHeapTests/GuestFixtures"),
+			FString::Printf(TEXT("csharp-task-int-%s"), Scenario));
 		TArray<uint8> Bytes;
 		FString OffsetText;
 		int32 ResultOffset = -1;
@@ -497,7 +628,10 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 		FAvidScriptWasmRuntimeInstance Runtime(Selection);
 		FAvidScriptWasmSmokeResult Result;
 		if (!TestTrue(TEXT("Compiled cancelled Task<int> module loads"),
-			Runtime.LoadModule(Bytes.GetData(), Bytes.Num(), TEXT("task_int_cancelled"), Result)))
+			Runtime.LoadModule(Bytes.GetData(), Bytes.Num(), Scenario, Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		if (!TestTrue(TEXT("Cancelled C# task continuation export exists"),
+			Runtime.ValidateRequiredExports({TEXT("avid_on_continuation_v2")}, Result)))
 		{ AddError(Result.ErrorMessage); return false; }
 		const auto Owner = MakeShared<FAvidScriptSessionContinuations>();
 		auto& Endpoint = Owner->ResetActive(World);
@@ -508,8 +642,8 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 		Runtime.SetHostContext(Context);
 		if (!TestTrue(TEXT("C# Task<int> producer suspends"), Runtime.BeginPlay(Result)))
 		{ AddError(Result.ErrorMessage); return false; }
-		TestEqual(TEXT("Suspended producer owns one task result"),
-			Owner->GetTaskResultsForTesting().GetCount(), 1);
+		TestEqual(TEXT("Suspended producers own their task results"),
+			Owner->GetTaskResultsForTesting().GetCount(), bChain ? 2 : 1);
 		if (!TestTrue(TEXT("C# cancellation source cancels producer"),
 			Runtime.Tick(0.016f, Result)))
 		{ AddError(Result.ErrorMessage); return false; }
@@ -519,6 +653,19 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 			return false;
 		TestTrue(TEXT("Cancelled C# await receives terminal status"),
 			Ready[0].Status == EAvidScriptContinuationStatus::Cancelled);
+		if (bChain)
+		{
+			if (!TestTrue(TEXT("Middle Task<int> propagates cancellation without VM trap"),
+				Runtime.DispatchContinuation(Ready[0], Result)))
+			{ AddError(Result.ErrorMessage); return false; }
+			TestTrue(TEXT("Middle Task<int> continuation finalizes"),
+				Owner->FinalizeDispatched(Ready[0].Token, true));
+			Owner->DrainReady(Ready);
+			if (!TestEqual(TEXT("Parent cancellation wakes the outer awaiter"),
+				Ready.Num(), 1)) return false;
+			TestTrue(TEXT("Outer awaiter sees propagated cancellation"),
+				Ready[0].Status == EAvidScriptContinuationStatus::Cancelled);
+		}
 		TestFalse(TEXT("C# await rejects cancelled Task<int> result"),
 			Runtime.DispatchContinuation(Ready[0], Result));
 		TestTrue(TEXT("Cancelled C# awaiter finalizes"),

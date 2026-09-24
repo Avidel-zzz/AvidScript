@@ -34,6 +34,8 @@ internal static class GuestModuleValidationTests
             new[] { "type:int32", "type:int64", "type:int32", "type:int32" }, "type:int64");
         GuestImport bindProducer = new("import:task_bind_producer_v1", "avidscript",
             "avid_task_bind_producer_v1", new[] { "type:int64", "type:int64" }, "type:int32");
+        GuestImport propagateFailure = new("import:task_propagate_failure_v1", "avidscript",
+            "avid_task_propagate_failure_v1", new[] { "type:int64", "type:int64" }, "type:int32");
         GuestModule module = baseline with
         {
             SchemaVersion = 18,
@@ -51,6 +53,12 @@ internal static class GuestModuleValidationTests
         GuestModule boundModule = module with { Imports = new[] { task, bindProducer } };
         Assert(GuestModuleValidator.Validate(boundModule).Succeeded,
             "IR 18 accepts the versioned producer binding import");
+        GuestModule propagatedModule = module with
+        {
+            Imports = new[] { task, bindProducer, propagateFailure },
+        };
+        Assert(GuestModuleValidator.Validate(propagatedModule).Succeeded,
+            "IR 18 accepts the versioned failure propagation import");
         byte[] bytes = GuestIrSerializer.Serialize(module);
         Assert(bytes.SequenceEqual(GuestIrSerializer.Serialize(GuestIrSerializer.Deserialize(bytes))),
             "Task<int> Guest IR has a canonical round trip");
@@ -74,6 +82,12 @@ internal static class GuestModuleValidationTests
         } } }, "ASIR1028");
         AssertDiagnostic(boundModule with { Imports = new[] { task, bindProducer,
             bindProducer with { Id = "import:duplicate_bind" } } }, "ASIR1028");
+        AssertDiagnostic(propagatedModule with { SchemaVersion = 17, IrVersion = "1.16" }, "ASIR1028");
+        AssertDiagnostic(propagatedModule with { Imports = new[] { task, bindProducer,
+            propagateFailure with { ReturnTypeId = "type:int64" } } }, "ASIR1028");
+        AssertDiagnostic(propagatedModule with { Imports = new[] { task, bindProducer,
+            propagateFailure, propagateFailure with { Id = "import:duplicate_propagate" } } },
+            "ASIR1028");
     }
 
     private static void MinimalModuleIsValid()

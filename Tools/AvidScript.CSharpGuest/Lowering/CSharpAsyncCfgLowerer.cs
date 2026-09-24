@@ -273,7 +273,7 @@ internal static class CSharpAsyncCfgLowerer
         }
         if (incoming?.ProducerKind == "task_call")
         {
-            if (!CSharpTaskAwaitLowerer.EmitIncoming(context, incoming,
+            if (!CSharpTaskAwaitLowerer.EmitIncoming(context, method, incoming,
                 entry.SegmentOrdinal, prefixInstructions, blocks,
                 ref activePrefixBlockId, out List<GuestInstruction>? resumedPrefix))
                 return false;

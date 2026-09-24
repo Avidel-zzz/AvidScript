@@ -10,6 +10,7 @@ internal static class CSharpTaskResultAbi
 {
     public const string ImportId = "import:$async:task_i32_v1";
     public const string BindProducerImportId = "import:$async:task_bind_producer_v1";
+    public const string PropagateFailureImportId = "import:$async:task_propagate_failure_v1";
     public const string TokenTypeId = "type:int64";
     public const string IntTypeId = "type:int32";
     public const int Create = 1;
@@ -31,6 +32,22 @@ internal static class CSharpTaskResultAbi
     public static GuestImport BindProducerImport() => new(BindProducerImportId,
         "avidscript", "avid_task_bind_producer_v1",
         new[] { TokenTypeId, TokenTypeId }, IntTypeId);
+
+    public static GuestImport PropagateFailureImport() => new(PropagateFailureImportId,
+        "avidscript", "avid_task_propagate_failure_v1",
+        new[] { TokenTypeId, TokenTypeId }, IntTypeId);
+
+    public static GuestRegister? PropagateFailure(CSharpFunctionLoweringContext context,
+        SemanticAsyncMethod method, GuestRegister sourceTask, int block,
+        List<GuestInstruction> instructions)
+    {
+        GuestRegister? targetTask = LoadProducerToken(context, method, block, instructions);
+        GuestRegister? accepted = context.CreateTemporary(IntTypeId, block);
+        if (targetTask is null || accepted is null) return null;
+        instructions.Add(new("call", accepted.Id,
+            new[] { sourceTask.Id, targetTask.Id }, PropagateFailureImportId, null, null));
+        return accepted;
+    }
 
     public static GuestRegister? BindProducer(CSharpFunctionLoweringContext context,
         SemanticAsyncMethod method, GuestRegister continuationToken, int block,

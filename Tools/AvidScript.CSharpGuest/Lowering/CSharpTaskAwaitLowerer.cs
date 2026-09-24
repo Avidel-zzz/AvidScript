@@ -63,10 +63,26 @@ internal static class CSharpTaskAwaitLowerer
         blocks.Add(new(readyBlock, readyInstructions,
             new("branch_if", succeeded!.Id, valueBlock, failedBlock, null)));
         List<GuestInstruction> failedInstructions = new();
+        if (method.TaskResultTypeId is not null
+            && CSharpTaskResultAbi.PropagateFailure(context, method, token,
+                segment.Ordinal, failedInstructions) is null) return false;
         if (CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release, token, null,
                 segment.Ordinal, failedInstructions) is null) return false;
+        string? failedReturnId = null;
+        if (method.TaskResultTypeId is not null && initialEntry)
+        {
+            GuestRegister? producer = CSharpTaskResultAbi.LoadProducerToken(
+                context, method, segment.Ordinal, failedInstructions);
+            if (producer is null || CSharpTaskResultAbi.Call(context,
+                    CSharpTaskResultAbi.Release, producer, null,
+                    segment.Ordinal, failedInstructions) is null) return false;
+            failedReturnId = CSharpTaskResultAbi.ReturnValue(context, method,
+                segment.Ordinal, failedInstructions)?.Id;
+            if (failedReturnId is null) return false;
+        }
         blocks.Add(new(failedBlock, failedInstructions,
-            new("trap", null, null, null, null)));
+            new(method.TaskResultTypeId is null ? "trap" : "return",
+                null, null, null, failedReturnId)));
         List<GuestInstruction> valueInstructions = new();
         if (site.ResultSymbolId is not null
             && !CSharpOperationLowerer.StoreLocal(context, site.ResultSymbolId,
@@ -137,7 +153,8 @@ internal static class CSharpTaskAwaitLowerer
     }
 
     public static bool EmitIncoming(CSharpFunctionLoweringContext context,
-        SemanticAsyncAwaitSite site, int block, List<GuestInstruction> instructions,
+        SemanticAsyncMethod method, SemanticAsyncAwaitSite site,
+        int block, List<GuestInstruction> instructions,
         List<GuestBasicBlock> blocks, ref string activeBlockId,
         out List<GuestInstruction>? nextInstructions)
     {
@@ -153,8 +170,13 @@ internal static class CSharpTaskAwaitLowerer
         string rejected = activeBlockId + ":task_read_rejected";
         blocks.Add(new(activeBlockId, instructions,
             new("branch_if", succeeded!.Id, accepted, rejected, null)));
-        blocks.Add(new(rejected, Array.Empty<GuestInstruction>(),
-            new("trap", null, null, null, null)));
+        List<GuestInstruction> rejectedInstructions = new();
+        if (method.TaskResultTypeId is not null
+            && CSharpTaskResultAbi.PropagateFailure(context, method, token,
+                block, rejectedInstructions) is null) return false;
+        blocks.Add(new(rejected, rejectedInstructions,
+            new(method.TaskResultTypeId is null ? "trap" : "return",
+                null, null, null, null)));
         nextInstructions = new();
         if (site.ResultSymbolId is not null
             && !CSharpOperationLowerer.StoreLocal(context, site.ResultSymbolId,
