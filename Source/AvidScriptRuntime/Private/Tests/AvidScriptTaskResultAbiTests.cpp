@@ -387,17 +387,18 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 	World->InitializeActorsForPlay(FURL());
 	ON_SCOPE_EXIT { GEngine->DestroyWorldContext(World); World->DestroyWorld(false); };
 	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
-	for (const TCHAR* Scenario : {TEXT("immediate"), TEXT("deferred"), TEXT("teardown")})
+	for (const TCHAR* Scenario : {TEXT("immediate"), TEXT("deferred"), TEXT("teardown"), TEXT("chain")})
 	{
 		const bool bTeardown = FCString::Strcmp(Scenario, TEXT("teardown")) == 0;
+		const bool bChain = FCString::Strcmp(Scenario, TEXT("chain")) == 0;
 		const bool bDeferred = FCString::Strcmp(Scenario, TEXT("immediate")) != 0;
 		const FString Stem = FPaths::Combine(FPaths::ProjectSavedDir(),
 			TEXT("AvidScriptManagedHeapTests/GuestFixtures"),
-			FString::Printf(TEXT("csharp-task-int-%s"), bDeferred ? TEXT("deferred") : TEXT("immediate")));
+			FString::Printf(TEXT("csharp-task-int-%s"), bTeardown ? TEXT("deferred") : Scenario));
 		TArray<uint8> Bytes;
 		FString OffsetText;
 		int32 ResultOffset = -1;
-		if (!TestTrue(TEXT("Compile Task<int> fixtures with AVIDSCRIPT_MANAGED_HEAP_WASM_DIR"),
+		if (!TestTrue(TEXT("Run Build/PrepareAvidScriptTaskIntFixtures.ps1 before this test"),
 			FFileHelper::LoadFileToArray(Bytes, *(Stem + TEXT(".wasm"))))
 			|| !TestTrue(TEXT("Compiled Task<int> result offset exists"),
 				FFileHelper::LoadFileToString(OffsetText, *(Stem + TEXT(".result-offset"))))
@@ -441,7 +442,7 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Immediate completion or deferred initial state"),
 			ReadResult(), bDeferred ? 0 : 12);
 		TestEqual(TEXT("Task ownership after initial entry"),
-			Owner->GetTaskResultsForTesting().GetCount(), bDeferred ? 1 : 0);
+			Owner->GetTaskResultsForTesting().GetCount(), bChain ? 2 : bDeferred ? 1 : 0);
 		if (bTeardown) Owner->Teardown();
 		int32 Resumes = 0;
 		for (int32 Round = 0; bDeferred && Round < 8; ++Round)
@@ -465,10 +466,10 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 				++Resumes;
 			}
 		}
-		TestEqual(TEXT("Compiled C# Task<int> resumes exactly twice"), Resumes,
-			bTeardown ? 0 : bDeferred ? 2 : 0);
+		TestEqual(TEXT("Compiled C# Task<int> has the expected resume count"), Resumes,
+			bTeardown ? 0 : bChain ? 3 : bDeferred ? 2 : 0);
 		TestEqual(TEXT("Compiled C# Task<int> preserves result"), ReadResult(),
-			bTeardown ? 0 : 12);
+			bTeardown ? 0 : bChain ? 13 : 12);
 		TestEqual(TEXT("Compiled C# Task<int> releases all result references"),
 			Owner->GetTaskResultsForTesting().GetCount(), 0);
 		Owner->Teardown();
