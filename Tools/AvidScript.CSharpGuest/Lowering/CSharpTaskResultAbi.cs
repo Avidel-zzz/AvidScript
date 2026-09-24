@@ -32,7 +32,9 @@ internal static class CSharpTaskResultAbi
         (document.SchemaVersion == SemanticContract.TaskResultSchemaVersion
             && document.SemanticVersion == SemanticContract.TaskResultSemanticVersion)
         || (document.SchemaVersion == SemanticContract.TaskLocalSchemaVersion
-            && document.SemanticVersion == SemanticContract.TaskLocalSemanticVersion);
+            && document.SemanticVersion == SemanticContract.TaskLocalSemanticVersion)
+        || (document.SchemaVersion == SemanticContract.TaskAssignmentSchemaVersion
+            && document.SemanticVersion == SemanticContract.TaskAssignmentSemanticVersion);
 
     public static string[] TaskLocalSymbols(SemanticAsyncMethod method) => method.Segments
         .Select(segment => segment.AwaitSite?.TaskLocalSymbolId)

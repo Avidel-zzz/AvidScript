@@ -34,18 +34,20 @@ internal static class GuestTaskResultValidator
         bool taskIr = module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion;
         bool taskLocalSemantic = module.Provenance.SemanticSchemaVersion == 36
             && module.Provenance.SemanticVersion == "1.45";
+        bool taskAssignmentSemantic = module.Provenance.SemanticSchemaVersion == 37
+            && module.Provenance.SemanticVersion == "1.46";
         bool taskLocalIr = module.SchemaVersion == TaskLocalSchemaVersion
             && module.IrVersion == TaskLocalIrVersion;
-        if (!taskSemantic && !taskIr && !taskLocalSemantic && !taskLocalIr
+        if (!taskSemantic && !taskIr && !taskLocalSemantic && !taskAssignmentSemantic && !taskLocalIr
             && taskImports.Length == 0 && producerImports.Length == 0
             && failureImports.Length == 0 && retainedImports.Length == 0) return;
 
-        if (!((taskSemantic && taskIr) || (taskLocalSemantic && taskLocalIr))
+        if (!((taskSemantic && taskIr) || ((taskLocalSemantic || taskAssignmentSemantic) && taskLocalIr))
             || module.Language != "csharp"
             || taskImports.Length != 1)
         {
             context.Add(DiagnosticCode,
-                "Task<int> requires paired C# Semantic 35/1.44 and Guest IR 18/1.17, or Semantic 36/1.45 and Guest IR 19/1.18.");
+                "Task<int> requires Semantic 35/1.44 with IR 18/1.17, or Semantic 36/1.45 or 37/1.46 with IR 19/1.18.");
             return;
         }
 

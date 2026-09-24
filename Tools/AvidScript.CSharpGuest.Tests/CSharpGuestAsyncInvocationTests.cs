@@ -131,8 +131,9 @@ internal static class CSharpGuestAsyncInvocationTests
         Check(fixture is not null, "Task<int> integration source is missing");
         SemanticDocument document = CSharpGuestContinuationTests.Analyze(
             File.ReadAllText(fixture!), "Scripts/TaskIntIntegrated.cs");
-        Check(document.Succeeded && document.SchemaVersion == SemanticContract.TaskLocalSchemaVersion,
-            "integrated task locals require Semantic 36: "
+        Check(document.Succeeded && document.SchemaVersion == SemanticContract.TaskAssignmentSchemaVersion
+            && document.SemanticVersion == SemanticContract.TaskAssignmentSemanticVersion,
+            "integrated task assignment requires Semantic 37: "
                 + string.Join(" | ", document.Diagnostics.Select(item => item.Message)));
         CSharpGuestLoweringResult lowered = CSharpGuestLowerer.Lower(document, new string('d', 64));
         Check(lowered.Succeeded,
@@ -141,6 +142,19 @@ internal static class CSharpGuestAsyncInvocationTests
         GuestModule module = lowered.Module!;
         Check(module.SchemaVersion == 19 && module.IrVersion == "1.18",
             "integrated Task<int> retains the task-local Guest IR version");
+        string resultGlobalId = module.MemoryLayout.StateSlots.Single(slot =>
+            slot.GlobalId.Contains(".Result:", StringComparison.Ordinal)).GlobalId;
+        Check(module.Functions.SelectMany(function => function.Blocks)
+            .SelectMany(block => block.Instructions)
+            .Any(instruction => instruction.Op == "global_store"
+                && instruction.TargetId == resultGlobalId),
+            "await result must write the script field in Guest IR");
+        Check(!CSharpGuestLowerer.Lower(document with
+        {
+            SchemaVersion = SemanticContract.TaskLocalSchemaVersion,
+            SemanticVersion = SemanticContract.TaskLocalSemanticVersion,
+        }, new string('d', 64)).Succeeded,
+            "Semantic 36 must not accept the new field-assignment contract");
         WasmCompilationResult compiled = WasmModuleCompiler.Compile(module);
         Check(compiled.Succeeded,
             "integrated Task<int> WASM failed: "

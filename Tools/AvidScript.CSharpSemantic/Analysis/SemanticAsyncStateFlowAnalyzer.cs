@@ -59,7 +59,8 @@ public static class SemanticAsyncStateFlowAnalyzer
             }
 
             if (segment.AwaitSite is
-                { ResultSymbolId: { } resultSymbolId, ResultTypeId: { } resultTypeId } awaitSite)
+                { ResultSymbolId: { } resultSymbolId, ResultTypeId: { } resultTypeId,
+                    ResultStorageKind: null } awaitSite)
             {
                 AddLocal(
                     locals,
@@ -200,6 +201,7 @@ public static class SemanticAsyncStateFlowAnalyzer
 
             if (segment.AwaitSite is
                 { ResultSymbolId: { } resultSymbolId, ResultTypeId: { } resultTypeId } awaitSite
+                && awaitSite.ResultStorageKind is null
                 && segment.Transfer is { Kind: SemanticAsyncMethod.AwaitTransferKind } transfer)
             {
                 AddLocal(

@@ -98,9 +98,7 @@ internal static class CSharpTaskAwaitLowerer
             new(method.TaskResultTypeId is null ? "trap" : "return",
                 null, null, null, failedReturnId)));
         List<GuestInstruction> valueInstructions = new();
-        if (site.ResultSymbolId is not null
-            && !CSharpOperationLowerer.StoreLocal(context, site.ResultSymbolId,
-                value!, segment.Ordinal, valueInstructions)) return false;
+        if (!StoreResult(context, site, value!, segment.Ordinal, valueInstructions)) return false;
         if (!taskLocal && CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release,
                 token, null, segment.Ordinal, valueInstructions) is null) return false;
         blocks.Add(new(valueBlock, valueInstructions,
@@ -196,11 +194,25 @@ internal static class CSharpTaskAwaitLowerer
             new(method.TaskResultTypeId is null ? "trap" : "return",
                 null, null, null, null)));
         nextInstructions = new();
-        if (site.ResultSymbolId is not null
-            && !CSharpOperationLowerer.StoreLocal(context, site.ResultSymbolId,
-                value!, block, nextInstructions)) return false;
+        if (!StoreResult(context, site, value!, block, nextInstructions)) return false;
         activeBlockId = accepted;
         return true;
+    }
+
+    private static bool StoreResult(CSharpFunctionLoweringContext context,
+        SemanticAsyncAwaitSite site, GuestRegister value, int block,
+        List<GuestInstruction> instructions)
+    {
+        if (site.ResultSymbolId is null) return true;
+        if (site.ResultStorageKind == "static_field")
+        {
+            if (!context.TryGetGlobal(site.ResultSymbolId, out string globalId)) return false;
+            instructions.Add(new("global_store", null, new[] { value.Id }, globalId, null, null));
+            return true;
+        }
+        return site.ResultStorageKind is null
+            && CSharpOperationLowerer.StoreLocal(context, site.ResultSymbolId,
+                value, block, instructions);
     }
 
     private static bool EmitRead(CSharpFunctionLoweringContext context,

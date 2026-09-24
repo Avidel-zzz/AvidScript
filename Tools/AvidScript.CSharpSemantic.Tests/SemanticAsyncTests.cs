@@ -27,9 +27,68 @@ internal static class SemanticAsyncTests
         TaskIntAwaitProjectsValueArguments();
         TaskIntLocalPublishesProducerAndFrame();
         TaskIntParallelLocalsPreserveBothOwners();
+        TaskIntStaticFieldAssignmentIsVersionedAndBounded();
         TaskIntSuspendedCleanupFailsClosed();
         FailedExceptionPlanKeepsItsContractBesideTaskSource();
-        return 19;
+        return 20;
+    }
+
+    private static void TaskIntStaticFieldAssignmentIsVersionedAndBounded()
+    {
+        const string source = """
+            using AvidScript;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static int Result;
+                public static async Task<int> LoadScoreAsync()
+                {
+                    await AvidContinuations.NextTickAsync();
+                    return 12;
+                }
+                public static async void BeginPlay()
+                {
+                    Result = await LoadScoreAsync();
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/TaskIntStaticAssignment.cs");
+        Assert(document.Succeeded
+            && document.SchemaVersion == SemanticContract.TaskAssignmentSchemaVersion
+            && document.SemanticVersion == SemanticContract.TaskAssignmentSemanticVersion
+            && SemanticAsyncInvocationValidator.IsValid(document),
+            "direct Task<int> field assignment must select a validated Semantic contract");
+        SemanticAsyncMethod consumer = document.AsyncMethods.Single(method =>
+            method.TaskResultTypeId is null);
+        SemanticAsyncAwaitSite site = consumer.Segments.Select(segment => segment.AwaitSite)
+            .Single(awaitSite => awaitSite?.ProducerKind == "task_call")!;
+        Assert(site.ResultStorageKind == "static_field"
+            && document.Symbols.Any(symbol => symbol.Id == site.ResultSymbolId
+                && symbol.Kind == "field" && symbol.Name == "Result")
+            && consumer.Segments.All(segment => segment.AwaitSite?.StateFrame?.Slots
+                .Any(slot => slot.SymbolId == site.ResultSymbolId) != true),
+            "static result is a global write, not a continuation frame local");
+        byte[] bytes = SemanticSerializer.Serialize(document);
+        Assert(bytes.SequenceEqual(SemanticSerializer.Serialize(SemanticSerializer.Deserialize(bytes))),
+            "field assignment metadata must round-trip canonically");
+        Assert(!SemanticAsyncInvocationValidator.IsValid(document with
+        {
+            SchemaVersion = SemanticContract.TaskLocalSchemaVersion,
+            SemanticVersion = SemanticContract.TaskLocalSemanticVersion,
+        }), "older Semantic versions cannot acquire field assignment by relabeling");
+        Assert(!SemanticAsyncInvocationValidator.IsValid(document with
+        {
+            AsyncMethods = document.AsyncMethods.Select(method => method == consumer
+                ? method with { Segments = method.Segments.Select(segment => segment.AwaitSite == site
+                    ? segment with { AwaitSite = site with { ResultSymbolId = "symbol:forged" } }
+                    : segment).ToArray() }
+                : method).ToArray(),
+        }), "a forged result field must be rejected");
+        SemanticDocument property = Analyze(source.Replace("public static int Result;",
+            "public static int Result { get; set; }", StringComparison.Ordinal),
+            "Scripts/TaskIntPropertyAssignment.cs");
+        Assert(!property.Succeeded && property.Diagnostics.Any(item => item.Code == "ASCS5404"),
+            "property targets stay rejected until pre-await receiver evaluation is modeled");
     }
 
     private static void TaskIntParallelLocalsPreserveBothOwners()

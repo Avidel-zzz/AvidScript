@@ -41,7 +41,6 @@ public static class Script
     [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
     public static async void BeginPlay()
     {
-        int result = await RunScenarioAsync();
-        Result = result;
+        Result = await RunScenarioAsync();
     }
 }

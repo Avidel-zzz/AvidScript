@@ -105,6 +105,18 @@ internal static class GuestModuleValidationTests
         };
         Assert(GuestModuleValidator.Validate(taskLocalModule).Succeeded,
             "IR 19 accepts the versioned Task continuation retention import");
+        GuestModule taskAssignmentModule = taskLocalModule with
+        {
+            Provenance = taskLocalModule.Provenance with
+            {
+                SemanticSchemaVersion = 37,
+                SemanticVersion = "1.46",
+            },
+        };
+        Assert(GuestModuleValidator.Validate(taskAssignmentModule).Succeeded,
+            "IR 19 accepts the paired Semantic 37 task assignment contract");
+        AssertDiagnostic(taskAssignmentModule with { SchemaVersion = 18, IrVersion = "1.17" },
+            "ASIR1028");
         byte[] taskLocalBytes = GuestIrSerializer.Serialize(taskLocalModule);
         Assert(taskLocalBytes.SequenceEqual(
                 GuestIrSerializer.Serialize(GuestIrSerializer.Deserialize(taskLocalBytes))),
