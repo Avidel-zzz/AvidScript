@@ -12,9 +12,52 @@ internal static class CSharpGuestThrowProducerTests
     public static int Run()
     {
         SourceThrowProducesManagedLanguageError();
+        SameSourceCallerPropagatesManagedLanguageError();
         ConstructorSideEffectsAreRejected();
         CatchRequiresHandlerLowering();
-        return 3;
+        return 4;
+    }
+
+    private static void SameSourceCallerPropagatesManagedLanguageError()
+    {
+        const string source = """
+            class Script
+            {
+                static int Fail() { throw new System.Exception(); }
+                static int Wrap() => Fail();
+            }
+            """;
+        SemanticDocument semantic = Analyze(source);
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "same-source language error did not lower");
+        GuestModule module = compiled!.Module;
+        string failId = module.Functions.Single(function =>
+            function.Id.Contains(".Fail(", StringComparison.Ordinal)).Id;
+        GuestFunction caller = module.Functions.Single(function =>
+            function.Id.Contains(".Wrap(", StringComparison.Ordinal));
+        Check(module.SchemaVersion == 16 && module.IrVersion == "1.15"
+            && module.Provenance.SemanticSchemaVersion == 34
+            && module.Provenance.SemanticVersion == "1.43"
+            && caller.Blocks.Any(block => block.Instructions.Any(instruction =>
+                instruction.Op == "call" && instruction.TargetId == failId)
+                && block.Instructions.Any(instruction =>
+                    instruction.Op == "field_load" && instruction.TargetId == "field:status")
+                && block.Terminator.Kind == "branch_if"),
+            "the original exception artifact must produce a checked same-source direct call");
+        GuestModule probe = AddProbe(module, caller, appendTarget: false);
+        GuestValidationResult validation = GuestModuleValidator.Validate(probe);
+        Check(validation.Succeeded,
+            string.Join(" | ", validation.Diagnostics.Select(item => item.Message)));
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "same-source throw and caller must compile together to WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "throw-caller.wasm"), wasm.Bytes);
+        }
     }
 
     private static void SourceThrowProducesManagedLanguageError()
@@ -60,6 +103,10 @@ internal static class CSharpGuestThrowProducerTests
                 OutcomeHostModule(), out _, out string? error)
             && error is not null && error.Contains("zero-argument", StringComparison.Ordinal),
             "constructor arguments cannot be dropped while producing a language error");
+        Check(!CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out _, out string? compilerError)
+            && compilerError is not null && compilerError.Contains("zero-argument", StringComparison.Ordinal),
+            "same-source compilation must reject constructor side effects");
     }
 
     private static void CatchRequiresHandlerLowering()
@@ -80,6 +127,10 @@ internal static class CSharpGuestThrowProducerTests
                 OutcomeHostModule(), out _, out string? error)
             && error is not null && error.Contains("handler", StringComparison.Ordinal),
             "a catch cannot be bypassed by treating its throw as an uncaught error");
+        Check(!CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out _, out string? compilerError)
+            && compilerError is not null && compilerError.Contains("handler", StringComparison.Ordinal),
+            "same-source compilation must retain the catch boundary");
     }
 
     private static SemanticDocument Analyze(string source)
@@ -107,7 +158,8 @@ internal static class CSharpGuestThrowProducerTests
         return rewritten!;
     }
 
-    private static GuestModule AddProbe(GuestModule module, GuestFunction producer)
+    private static GuestModule AddProbe(GuestModule module, GuestFunction producer,
+        bool appendTarget = true)
     {
         const string probeId = "function:throw_source_probe";
         GuestFunction probe = new(probeId, Array.Empty<GuestRegister>(), new[]
@@ -146,7 +198,9 @@ internal static class CSharpGuestThrowProducerTests
         });
         return module with
         {
-            Functions = module.Functions.Append(producer).Append(probe).ToArray(),
+            Functions = appendTarget
+                ? module.Functions.Append(producer).Append(probe).ToArray()
+                : module.Functions.Append(probe).ToArray(),
             Exports = module.Exports.Append(new GuestExport("throw_source_probe", probeId)).ToArray(),
         };
     }

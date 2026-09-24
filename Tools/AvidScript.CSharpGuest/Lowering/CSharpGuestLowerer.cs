@@ -12,10 +12,27 @@ public static class CSharpGuestLowerer
         SemanticDocument document,
         string semanticSha256,
         bool enableDataLaneFusion = true,
-        bool enableDebugInstrumentation = false)
+        bool enableDebugInstrumentation = false) =>
+        LowerCore(document, semanticSha256, enableDataLaneFusion,
+            enableDebugInstrumentation, Array.Empty<GuestFunction>());
+
+    internal static CSharpGuestLoweringResult LowerWithFunctionSubstitutes(
+        SemanticDocument document,
+        string semanticSha256,
+        IReadOnlyList<GuestFunction> substitutes) =>
+        LowerCore(document, semanticSha256, enableDataLaneFusion: true,
+            enableDebugInstrumentation: false, substitutes);
+
+    private static CSharpGuestLoweringResult LowerCore(
+        SemanticDocument document,
+        string semanticSha256,
+        bool enableDataLaneFusion,
+        bool enableDebugInstrumentation,
+        IReadOnlyList<GuestFunction> substitutes)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(semanticSha256);
+        ArgumentNullException.ThrowIfNull(substitutes);
 
         List<GuestDiagnostic> diagnostics = new();
         ValidateInput(document, semanticSha256, diagnostics);
@@ -58,7 +75,9 @@ public static class CSharpGuestLowerer
             reachableCallableIds,
             guestTypes,
             dataPool,
+            substitutes.Select(function => function.Id).ToHashSet(StringComparer.Ordinal),
             diagnostics).ToList();
+        functions.AddRange(substitutes);
         CSharpReferenceObjects.AddGuards(document, functions);
         CSharpUeReceivers.AddGuards(document, functions);
         functions.AddRange(CSharpUeDelegateBinding.Build(document));
@@ -550,6 +569,7 @@ public static class CSharpGuestLowerer
         IReadOnlySet<string>? reachableCallableIds,
         IReadOnlyDictionary<string, GuestType> guestTypes,
         CSharpGuestDataPool dataPool,
+        IReadOnlySet<string> substitutedFunctionIds,
         List<GuestDiagnostic> diagnostics)
     {
         Dictionary<string, SemanticControlFlowGraph> graphs = document.ControlFlowGraphs
@@ -558,6 +578,7 @@ public static class CSharpGuestLowerer
         List<GuestFunction> functions = new();
         foreach (SemanticCallable callable in document.Callables
             .Where(callable => callable.HasBody
+                && !substitutedFunctionIds.Contains(CSharpGuestIds.Function(callable.MethodSymbolId))
                 && !CSharpClassReferencePolicy.IsIntrinsicConstructor(callable)
                 && !CSharpClassReferencePolicy.IsIntrinsicUpcast(document, callable)
                 && !CSharpObjectCapabilityPolicy.IsIntrinsicConstructor(callable)

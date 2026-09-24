@@ -30,6 +30,23 @@ public static class CSharpThrowProducerLowerer
         SemanticExceptionFlow flow,
         GuestModule module,
         out CSharpThrowProducerResult? result,
+        out string? error) =>
+        TryLowerCore(semantic, flow, module, replaceExisting: false, out result, out error);
+
+    internal static bool TryLowerReplacing(
+        SemanticDocument semantic,
+        SemanticExceptionFlow flow,
+        GuestModule module,
+        out CSharpThrowProducerResult? result,
+        out string? error) =>
+        TryLowerCore(semantic, flow, module, replaceExisting: true, out result, out error);
+
+    private static bool TryLowerCore(
+        SemanticDocument semantic,
+        SemanticExceptionFlow flow,
+        GuestModule module,
+        bool replaceExisting,
+        out CSharpThrowProducerResult? result,
         out string? error)
     {
         result = null;
@@ -85,7 +102,10 @@ public static class CSharpThrowProducerLowerer
             || !module.Types.Any(item => item.Id == root.ElementTypeId
                 && item.Fields.Any(field => field.Id == "field:code"
                     && field.TypeId == "type:int32"))
-            || module.Functions.Any(item => item.Id == CSharpGuestIds.Function(flow.MethodSymbolId)))
+            || module.Functions.Count(item => item.Id == CSharpGuestIds.Function(flow.MethodSymbolId))
+                != (replaceExisting ? 1 : 0)
+            || replaceExisting && module.Functions.Single(item =>
+                item.Id == CSharpGuestIds.Function(flow.MethodSymbolId)).ReturnTypeId != outcome.TypeId)
             return Fail("The Guest module lacks a unique matching outcome and managed error root.", out error);
 
         string functionId = CSharpGuestIds.Function(flow.MethodSymbolId);

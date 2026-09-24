@@ -18,6 +18,26 @@ public static class CSharpLanguageOutcomeRewriter
         GuestModule module,
         IReadOnlySet<string> affectedFunctionIds,
         out GuestModule? rewritten,
+        out string? error) =>
+        TryRewriteCore(semantic, module, affectedFunctionIds,
+            new HashSet<string>(StringComparer.Ordinal), out rewritten, out error);
+
+    internal static bool TryRewriteWithProducers(
+        SemanticDocument semantic,
+        GuestModule module,
+        IReadOnlySet<string> affectedFunctionIds,
+        IReadOnlySet<string> producerFunctionIds,
+        out GuestModule? rewritten,
+        out string? error) =>
+        TryRewriteCore(semantic, module, affectedFunctionIds,
+            producerFunctionIds, out rewritten, out error);
+
+    private static bool TryRewriteCore(
+        SemanticDocument semantic,
+        GuestModule module,
+        IReadOnlySet<string> affectedFunctionIds,
+        IReadOnlySet<string> producerFunctionIds,
+        out GuestModule? rewritten,
         out string? error)
     {
         rewritten = null;
@@ -49,8 +69,9 @@ public static class CSharpLanguageOutcomeRewriter
                 method.MethodSymbolId == callable.MethodSymbolId).ToArray();
             if (bodies.Length != 1)
                 return Fail($"Affected function '{id}' has no unique Semantic body.", out error);
-            if (semantic.AsyncMethods.Any(method => method.MethodSymbolId == callable.MethodSymbolId)
-                || ContainsStructuredCleanup(bodies[0].Root))
+            if (!producerFunctionIds.Contains(id)
+                && (semantic.AsyncMethods.Any(method => method.MethodSymbolId == callable.MethodSymbolId)
+                    || ContainsStructuredCleanup(bodies[0].Root)))
                 return Fail($"Function '{callable.MethodSymbolId}' needs cleanup-aware outcome lowering.", out error);
         }
         if (affectedFunctionIds.Any(id => !functions.ContainsKey(id))
