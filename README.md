@@ -2,13 +2,13 @@
 
 ![UE 5.8](https://img.shields.io/badge/Unreal_Engine-5.8-313131?logo=unrealengine&logoColor=white) ![C# to WASM](https://img.shields.io/badge/C%23-to_WASM-512BD4?logo=dotnet&logoColor=white) ![Win64](https://img.shields.io/badge/platform-Win64-0078D4?logo=windows&logoColor=white) [![MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-UE 5.8 的 C# → WASM 脚本插件。C# 在构建时编译为 WASM；游戏运行时加载 WASM，通过生成的绑定调用 UE API，不加载 CLR。
+Unreal Engine 5.8 的 C# 脚本插件。构建时将 C# 编译为 WebAssembly；运行时由 UE 插件加载 WASM、调用引擎 API，无需在游戏中加载 CLR。
 
-![C# → WASM → UE Runtime](Docs/Assets/README/pipeline.svg)
+![AvidScript 编译与运行流程](Docs/Assets/README/pipeline.svg)
 
-## 运行样例
+## Quick start
 
-需要 **UE 5.8 源码版、Win64、Visual Studio 2022（UE C++ 工作负载）、PowerShell 7** 和 [global.json](global.json) 指定的 **.NET SDK 8.0.416**。以下命令在 `Plugins/AvidScript` 目录执行，使用本仓库的 `AvidTPSTemplate.uproject`。
+需要 UE 5.8 源码版、Win64、Visual Studio 2022（UE C++ 工作负载）、PowerShell 7 和 [global.json](global.json) 指定的 .NET SDK 8.0.416。以下命令在 `Plugins/AvidScript` 目录执行。
 
 ```powershell
 pwsh -NoProfile -File Build/InstallWasmtimeDependency.ps1 -Mode Install
@@ -20,52 +20,59 @@ $uproject = (Resolve-Path ../../AvidTPSTemplate.uproject).Path
   -WaitMutex -NoHotReloadFromIDE
 ```
 
-打开工程，在关卡中放置并选中一个 **Movable Cube**。运行 **Tools → AvidScript → Build And Bind C# ActorLifecycle Script**，然后点击 **Play**。Cube 应移动、旋转并放大。
+打开 `AvidTPSTemplate.uproject`，在关卡中放置并选中一个 **Movable Cube**，运行 **Tools → AvidScript → Build And Bind C# ActorLifecycle Script**，然后点击 **Play**。Cube 会移动、旋转并放大。
 
-只编译这个样例、不在 Editor 中绑定 Actor：
+只生成样例 WASM：
 
 ```powershell
 pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 ```
 
-运行后没有变化时，检查 Cube 上的 **AvidScript Component**，并在 **Output Log** 中搜索 `AvidScript`。
+如果 Play 后 Cube 没有变化，检查它是否挂有 **AvidScript Component**，并在 **Output Log** 中搜索 `AvidScript`。
 
-## 脚本代码
+## Example
 
-[ActorLifecycleScript.cs](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) 中的 `Tick`：
+[ActorLifecycleScript.cs](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) 的 `Tick` 每帧读取当前位置，并让 Actor 沿 X 轴移动：
 
 ```csharp
 [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
 public static void Tick(float deltaSeconds)
 {
-    FVector position = UE.Self.GetActorLocation();
-    UE.Self.SetActorLocation(position + new FVector(120.0f * deltaSeconds, 0.0f, 0.0f));
+    FVector currentLocation = UE.Self.GetActorLocation();
+    UE.Self.SetActorLocation(
+        currentLocation + new FVector(120.0f * deltaSeconds, 0.0f, 0.0f));
 }
 ```
 
-Actor 沿 X 轴以每秒 120 个 UE 单位移动。`UE.Self` 是样例的当前 Actor 绑定，完整代码和类型定义在上面的源文件中。
+`UE.Self` 指向当前绑定的 Actor。完整样例还包含 BeginPlay、异步加载、输入和碰撞回调。
 
-## 样例目录
+## Samples
 
-| 要实现的功能 | 从这里开始 |
+| 场景 | 代码与说明 |
 | --- | --- |
-| Actor 生命周期与变换 | [ActorLifecycleScript.cs](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) |
+| Actor 生命周期与变换 | [ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) |
 | 下一帧、计时器、异步加载 | [LatentGameplay](Samples/CSharp/LatentGameplay/README.md) |
 | RPC、属性复制、RepNotify | [NetworkRpc](Samples/CSharp/NetworkRpc/README.md) · [ReplicatedProperty](Samples/CSharp/ReplicatedProperty/README.md) |
 | UI 与存档 | [UiSaveDemo](Samples/CSharp/UiSaveDemo/README.md) |
-| 项目 C++ API 绑定 | [TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) |
+| 绑定项目 C++ API | [TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) |
 | C# 定义 Actor、Component、Subsystem | [ScriptDefinedTypes](Samples/CSharp/ScriptDefinedTypes/README.md) |
 
-修改脚本声明的 `UClass`、`UProperty` 或 `UFunction` 后，需要重新构建并重启 Editor；参见 [ScriptDefinedTypes](Samples/CSharp/ScriptDefinedTypes/README.md)。
+修改脚本声明的 `UClass`、`UProperty` 或 `UFunction` 后，需重新构建并重启 Editor；步骤见 [ScriptDefinedTypes](Samples/CSharp/ScriptDefinedTypes/README.md)。
 
-## 当前限制
+## Status
 
-- 主要验证平台是 **Win64**。Editor 和打包样例有自动化测试；Android、iOS 尚未验收。
-- C# 编译器支持已实现的语法子集，不能直接运行任意 .NET 项目或 NuGet 包。
-- RPC、属性复制和 RepNotify 已通过独立进程测试；实际游戏多人联机仍待验收。
-- `try` / `catch` / `finally` 目前仅在专用测试入口支持部分写法，普通脚本构建尚未启用。详见 [P66.C 实现范围](Docs/Phase66/P66.C_Language_Execution_Plan.md)。
+- **Win64：** Editor 与打包样例有自动化测试。Android 和 iOS 尚未验收。
+- **C#：** 支持项目实现的语法子集，不能直接运行任意 .NET 项目或 NuGet 包。
+- **网络：** RPC、属性复制和 RepNotify 已通过独立进程测试；实际游戏多人联机仍待验收。
+- **异常：** `try` / `catch` / `finally` 仅在专用测试入口支持部分写法，普通脚本构建尚未启用。见[当前实现范围](Docs/Phase66/P66.C_Language_Execution_Plan.md)。
 
-代码在 [Source/](Source/)（UE 模块）、[Tools/](Tools/)（C# 编译器）和 [Build/](Build/)（构建脚本）。设计与测试记录在 [Docs/](Docs/)；开发约定见 [AGENTS.md](AGENTS.md)。
+## Development
+
+```powershell
+dotnet run --project Tools/AvidScript.CSharpGuest.Tests/AvidScript.CSharpGuest.Tests.csproj -c Release
+```
+
+UE 模块在 [Source/](Source/)，C# 编译器在 [Tools/](Tools/)，构建入口在 [Build/](Build/)。开发约定见 [AGENTS.md](AGENTS.md)，设计与测试记录见 [Docs/](Docs/)。
 
 ## License
 
