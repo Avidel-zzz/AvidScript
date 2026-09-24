@@ -17,7 +17,9 @@ internal sealed record CSharpNormalReturnCleanupSite(
     int BlockOrdinal, int CleanupBlockOrdinal,
     CSharpBranchingCleanup? BranchingCleanup = null);
 internal sealed record CSharpRethrowSite(
-    int BlockOrdinal, int HandlerOrdinal, SemanticThrowSite Site);
+    int BlockOrdinal, int HandlerOrdinal, SemanticThrowSite Site,
+    int? CleanupBlockOrdinal = null,
+    CSharpBranchingCleanup? BranchingCleanup = null);
 
 // Internal bridge for exception methods whose ordinary block operations can be
 // lowered unchanged. The exceptional call edges are added by the outcome pass;
@@ -37,7 +39,8 @@ internal static class CSharpExceptionGraphMaterializer
         rethrows = Array.Empty<CSharpRethrowSite>();
         error = null;
         if (flow.Catches.Count != 0 && flow.Regions.Any(region => region.Kind == "finally"))
-            return TryBuildCatchFinally(flow, out graph, out normalReturns, out error);
+            return TryBuildCatchFinally(flow, out graph, out localThrows,
+                out normalReturns, out rethrows, out error);
         if (flow.Catches.Count == 0 && flow.Regions.Any(region => region.Kind == "finally"))
         {
             if (flow.Regions.Count(region => region.Kind == "finally") != 1)
@@ -292,13 +295,24 @@ internal static class CSharpExceptionGraphMaterializer
     private static bool TryBuildCatchFinally(
         SemanticExceptionFlow flow,
         out SemanticControlFlowGraph? graph,
+        out IReadOnlyList<CSharpLocalThrowSite> localThrows,
         out IReadOnlyList<CSharpNormalReturnCleanupSite> normalReturns,
+        out IReadOnlyList<CSharpRethrowSite> rethrows,
         out string? error)
     {
         graph = null;
+        localThrows = Array.Empty<CSharpLocalThrowSite>();
         normalReturns = Array.Empty<CSharpNormalReturnCleanupSite>();
+        rethrows = Array.Empty<CSharpRethrowSite>();
         error = null;
+        SemanticThrowSite[] rethrowSites = flow.Throws.Where(site =>
+            site.Kind == "rethrow").ToArray();
+        bool hasRethrow = rethrowSites.Length == 1;
+        bool hasLocalThrow = hasRethrow && flow.Throws.Count == 2
+            && flow.Throws.Count(site => site.Kind == "throw") == 1;
+        SemanticThrowSite? rethrow = hasRethrow ? rethrowSites[0] : null;
         if (flow.Catches.Count != 1 || flow.Throws.Count != 0
+                && !(hasRethrow && (flow.Throws.Count == 1 || hasLocalThrow))
             || flow.Regions.Count != 7 || flow.Blocks is not { Count: >= 5 } blocks
             || flow.Branches.Count < 4
             || flow.Regions[0] is not { Kind: "root", ParentOrdinal: -1 }
@@ -327,26 +341,62 @@ internal static class CSharpExceptionGraphMaterializer
             || blocks[^1].ConditionKind != "none"
             || blocks[1].Operations.Count != 0 || blocks[2].Operations.Count != 0
             || blocks[1].BranchValue is not { } tryValue || !Supported(tryValue)
-            || blocks[2].BranchValue is not { } catchValue || !Supported(catchValue)
-            || new[] { tryValue, catchValue }.SelectMany(Descendants)
+            || hasLocalThrow && (tryValue.Kind != "object_creation"
+                || tryValue.TypeId != CSharpThrowProducerLowerer.ExceptionTypeId
+                || tryValue.SymbolId != CSharpThrowProducerLowerer.ExceptionConstructorId
+                || tryValue.Children.Count != 0
+                || !flow.Throws.Any(site => site.Kind == "throw"
+                    && site.ExceptionTypeId == CSharpThrowProducerLowerer.ExceptionTypeId
+                    && site.Span.Start <= tryValue.Span.Start
+                    && tryValue.Span.End <= site.Span.End))
+            || hasRethrow && blocks[2].BranchValue is not null
+            || !hasRethrow && (blocks[2].BranchValue is not { } catchValue
+                || !Supported(catchValue))
+            || new SemanticOperation?[] { tryValue, blocks[2].BranchValue }
+                .Where(value => value is not null)
+                .SelectMany(value => Descendants(value!))
                 .Any(operation => operation.Kind is "await" or "throw" or "try"
                     or "conditional" or "switch" or "branch" or "loop")
+            || hasRethrow && (rethrow is null
+                || rethrow.Span.Start < flow.Catches[0].Span.Start
+                || rethrow.Span.End > flow.Catches[0].Span.End)
             || flow.Branches.Count(branch => branch.SourceBlockOrdinal == 0
                 && branch.DestinationBlockOrdinal == 1
                 && branch.Kind == "fallthrough"
                 && branch.Semantics == "regular") != 1
-            || new[] { 1, 2 }.Any(ordinal => flow.Branches.Count(branch =>
-                branch.SourceBlockOrdinal == ordinal
-                && branch.DestinationBlockOrdinal == blocks.Count - 1
+            || flow.Branches.Count(branch => branch.SourceBlockOrdinal == 1
+                && branch.DestinationBlockOrdinal == (hasLocalThrow
+                    ? -1 : blocks.Count - 1)
                 && branch.Kind == "fallthrough"
-                && branch.Semantics == "return"
-                && branch.FinallyRegionOrdinals.SequenceEqual(new[] { 6 })) != 1)
+                && branch.Semantics == (hasLocalThrow ? "throw" : "return")
+                && branch.FinallyRegionOrdinals.SequenceEqual(hasLocalThrow
+                    ? Array.Empty<int>() : new[] { 6 })) != 1
+            || flow.Branches.Count(branch => branch.SourceBlockOrdinal == 2
+                && branch.DestinationBlockOrdinal == (hasRethrow
+                    ? -1 : blocks.Count - 1)
+                && branch.Kind == "fallthrough"
+                && branch.Semantics == (hasRethrow ? "rethrow" : "return")
+                && branch.FinallyRegionOrdinals.SequenceEqual(hasRethrow
+                    ? Array.Empty<int>() : new[] { 6 })) != 1
             || flow.Branches.Count(branch => branch.SourceBlockOrdinal
                 == flow.Regions[6].LastBlockOrdinal
                 && branch.DestinationBlockOrdinal == -1
                 && branch.Kind == "fallthrough"
                 && branch.Semantics == "structured_exception_handling") != 1)
-            return Fail("Catch cleanup needs one source-backed bounded finally around two return leaves.",
+            return Fail("Catch cleanup needs source-backed return or rethrow leaves and one bounded finally.",
+                out error);
+
+        if (hasRethrow && (!SemanticExceptionDispatchPlanner.TryBuild(flow,
+                out var dispatch) || dispatch is null
+            || dispatch.Routes[2].Steps.Count != 1
+            || dispatch.Routes[2].Steps[0] is not { Kind: "finally", RegionOrdinal: 6 }
+            || hasLocalThrow && (dispatch.Routes[1].Steps.Count != 2
+                || dispatch.Routes[1].Steps[0].Kind != "catch"
+                || !dispatch.Routes[1].Steps[0].HandlerOrdinals.SequenceEqual(
+                    new[] { 0 })
+                || dispatch.Routes[1].Steps[1] is not
+                    { Kind: "finally", RegionOrdinal: 6 })))
+            return Fail("Catch rethrow needs the source-derived outer finally route.",
                 out error);
 
         int cleanupExit = flow.Regions[6].LastBlockOrdinal;
@@ -412,17 +462,36 @@ internal static class CSharpExceptionGraphMaterializer
             blocks.Select(block => new SemanticBasicBlock(block.Ordinal, block.Kind,
                 block.Ordinal >= 3 || block.IsReachable,
                 block.ConditionKind, block.Operations,
-                block.Ordinal == cleanupExit
+                block.Ordinal == 1 && hasLocalThrow
+                    ? ZeroPlaceholder(tryValue.Span)
+                    : block.Ordinal == 2 && hasRethrow
+                    ? ZeroPlaceholder(rethrow!.Span)
+                    : block.Ordinal == cleanupExit
                     ? ZeroPlaceholder(blocks[cleanupExit].Operations[0].Span)
                     : block.BranchValue,
                 edges.Where(edge => edge.DestinationBlockOrdinal == block.Ordinal).ToArray(),
                 edges.Where(edge => edge.SourceBlockOrdinal == block.Ordinal).ToArray()))
                 .ToArray());
-        normalReturns = new[]
-        {
-            new CSharpNormalReturnCleanupSite(1, 3, branchingCleanup),
-            new CSharpNormalReturnCleanupSite(2, 3, branchingCleanup),
-        };
+        normalReturns = hasLocalThrow
+            ? Array.Empty<CSharpNormalReturnCleanupSite>()
+            : hasRethrow
+            ? new[] { new CSharpNormalReturnCleanupSite(1, 3, branchingCleanup) }
+            : new[]
+            {
+                new CSharpNormalReturnCleanupSite(1, 3, branchingCleanup),
+                new CSharpNormalReturnCleanupSite(2, 3, branchingCleanup),
+            };
+        if (hasRethrow)
+            rethrows = new[]
+            {
+                new CSharpRethrowSite(2, 0, rethrow!, 3, branchingCleanup),
+            };
+        if (hasLocalThrow)
+            localThrows = new[]
+            {
+                new CSharpLocalThrowSite(1, flow.Throws.Single(site =>
+                    site.Kind == "throw")),
+            };
         return true;
     }
 

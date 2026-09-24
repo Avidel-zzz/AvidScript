@@ -93,13 +93,16 @@ public static class CSharpLanguageErrorCompiler
             new(plannedCleanups, StringComparer.Ordinal);
         foreach (SemanticExceptionFlow handler in handlers.Where(item =>
             normalReturns.ContainsKey(CSharpGuestIds.Function(item.MethodSymbolId))
+            || rethrows.TryGetValue(CSharpGuestIds.Function(item.MethodSymbolId),
+                out var rethrowSites) && rethrowSites.Any(site =>
+                    site.CleanupBlockOrdinal is not null)
             || item.Catches.Count == 0 && localThrows.TryGetValue(
                 CSharpGuestIds.Function(item.MethodSymbolId), out var sites)
                 && sites.Any(site => site.CleanupBlockOrdinals is { Count: > 0 }
                     || site.BranchingCleanup is not null)))
         {
             string functionId = CSharpGuestIds.Function(handler.MethodSymbolId);
-            cleanupRoutes.Add(functionId,
+            IEnumerable<CSharpLanguageCleanupRoute> returnRoutes =
                 normalReturns.TryGetValue(functionId, out var returnSites)
                     ? returnSites.Select(site => new CSharpLanguageCleanupRoute(
                         CSharpGuestIds.Block(handler.MethodSymbolId, site.BlockOrdinal),
@@ -108,7 +111,20 @@ public static class CSharpLanguageErrorCompiler
                                 ?? new[] { site.CleanupBlockOrdinal })
                             .Select(ordinal => CSharpGuestIds.Block(
                                 handler.MethodSymbolId, ordinal)).ToArray()) })).ToArray()
-                    : Array.Empty<CSharpLanguageCleanupRoute>());
+                    : Array.Empty<CSharpLanguageCleanupRoute>();
+            IEnumerable<CSharpLanguageCleanupRoute> rethrowRoutes =
+                rethrows.TryGetValue(functionId, out var rethrowSites)
+                    ? rethrowSites.Where(site => site.CleanupBlockOrdinal is not null)
+                        .Select(site => new CSharpLanguageCleanupRoute(
+                            CSharpGuestIds.Block(handler.MethodSymbolId, site.BlockOrdinal),
+                            new[] { new CSharpLanguageCleanupRegion(
+                                (site.BranchingCleanup?.BlockOrdinals
+                                    ?? new[] { site.CleanupBlockOrdinal!.Value })
+                                    .Select(ordinal => CSharpGuestIds.Block(
+                                        handler.MethodSymbolId, ordinal)).ToArray()) }))
+                        .ToArray()
+                    : Array.Empty<CSharpLanguageCleanupRoute>();
+            cleanupRoutes.Add(functionId, returnRoutes.Concat(rethrowRoutes).ToArray());
         }
         CSharpLanguageErrorTokenCatalog tokens = CSharpThrowProducerLowerer.BuildCatalog(flows);
         Dictionary<string, int> sourceLengths = new(StringComparer.Ordinal);

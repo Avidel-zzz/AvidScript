@@ -141,6 +141,10 @@ const calledReturnCatches = typeof instance.exports.called_return_normal_probe =
 const calledBranchCatches = typeof instance.exports.called_branch_normal_probe === 'function';
 const catchFinallyCatches = typeof instance.exports.catch_finally_normal_probe === 'function';
 const catchBranchCatches = typeof instance.exports.catch_branch_normal_first_probe === 'function';
+const rethrowFinallyCatches = typeof instance.exports.rethrow_finally_normal_probe === 'function';
+const rethrowBranchCatches = typeof instance.exports.rethrow_branch_normal_first_probe === 'function';
+const localRethrowFinallyCatches = typeof instance.exports.local_rethrow_finally_catch_probe === 'function';
+const localRethrowBranchCatches = typeof instance.exports.local_rethrow_branch_first_probe === 'function';
 const replacementCatches = typeof instance.exports.replacement_catch_probe === 'function';
 const nestedReplacementCatches = typeof instance.exports.nested_replacement_catch_probe === 'function';
 const outerNestedReplacementCatches = typeof instance.exports.outer_nested_replacement_catch_probe === 'function';
@@ -152,7 +156,8 @@ const catchVariableCatches = typeof instance.exports.catch_variable_call_probe =
 const catches = multipleCatches || finallyCatches || nestedFinallyCatches || throwFinallyCatches
   || nestedLocalThrowCatches || multiLocalThrowCatches || mixedCleanupCatches || mixedBranchCatches || calledReturnCatches
   || calledBranchCatches
-  || catchFinallyCatches || catchBranchCatches
+  || catchFinallyCatches || catchBranchCatches || rethrowFinallyCatches
+  || rethrowBranchCatches || localRethrowFinallyCatches || localRethrowBranchCatches
   || replacementCatches || nestedReplacementCatches || outerNestedReplacementCatches
   || outermostReplacementCatches
   || branchCleanupCatches || rethrowCatches
@@ -294,6 +299,38 @@ if (multipleCatches) {
   if (values.some((value, index) => value !== expected[index])) {
     throw new Error(`Catch branching cleanup results = ${values}; expected ${expected}`);
   }
+} else if (rethrowFinallyCatches) {
+  const normal = instance.exports.rethrow_finally_normal_probe();
+  const handled = instance.exports.rethrow_finally_error_probe();
+  const source = instance.exports.rethrow_finally_source_probe();
+  if (normal !== 1007 || handled !== 10 || source !== 3) {
+    throw new Error(`Rethrow cleanup results = ${normal}, ${handled}, ${source}; expected 1007, 10, 3`);
+  }
+} else if (rethrowBranchCatches) {
+  const values = [
+    instance.exports.rethrow_branch_normal_first_probe(),
+    instance.exports.rethrow_branch_normal_second_probe(),
+    instance.exports.rethrow_branch_error_first_probe(),
+    instance.exports.rethrow_branch_error_second_probe(),
+    instance.exports.rethrow_branch_source_probe(),
+  ];
+  const expected = [1107, 1207, 11, 12, 3];
+  if (values.some((value, index) => value !== expected[index])) {
+    throw new Error(`Branching rethrow cleanup results = ${values}; expected ${expected}`);
+  }
+} else if (localRethrowFinallyCatches) {
+  const handled = instance.exports.local_rethrow_finally_catch_probe();
+  const source = instance.exports.local_rethrow_finally_source_probe();
+  if (handled !== 10 || source !== 3) {
+    throw new Error(`Local rethrow cleanup results = ${handled}, ${source}; expected 10, 3`);
+  }
+} else if (localRethrowBranchCatches) {
+  const first = instance.exports.local_rethrow_branch_first_probe();
+  const second = instance.exports.local_rethrow_branch_second_probe();
+  const source = instance.exports.local_rethrow_branch_source_probe();
+  if (first !== 11 || second !== 12 || source !== 3) {
+    throw new Error(`Local branching rethrow cleanup results = ${first}, ${second}, ${source}; expected 11, 12, 3`);
+  }
 } else if (rethrowCatches) {
   const localSource = instance.exports.rethrow_local_source_probe();
   const calledSource = instance.exports.rethrow_call_source_probe();
@@ -330,13 +367,14 @@ if (multipleCatches) {
 }
 if (allocations !== (rethrowCatches || replacementCatches || nestedReplacementCatches
   || outerNestedReplacementCatches || outermostReplacementCatches ? 4
-  : branchCleanupCatches ? 3
+  : branchCleanupCatches || rethrowBranchCatches || localRethrowBranchCatches ? 3
   : calledBranchCatches ? 7
   : catchFinallyCatches ? 5
   : catchBranchCatches ? 10
   : mixedBranchCatches || multiLocalThrowCatches ? 6
   : nestedRethrowCatches || catchVariableCatches || mixedCleanupCatches || calledReturnCatches ? 4
-  : multipleCatches || nestedLocalThrowCatches ? 2 : 1)
+  : rethrowFinallyCatches || localRethrowFinallyCatches || multipleCatches
+    || nestedLocalThrowCatches ? 2 : 1)
   || frames.size !== 0 || roots.size !== 0) {
   throw new Error(`Root teardown mismatch: allocations=${allocations}, frames=${frames.size}, roots=${roots.size}`);
 }
@@ -362,6 +400,10 @@ if (catches) {
     : calledBranchCatches ? 'C# source called-branching-finally WASM: 10/10 passed\n'
     : catchFinallyCatches ? 'C# source catch-finally WASM: 5/5 passed\n'
     : catchBranchCatches ? 'C# source catch-branching-finally WASM: 9/9 passed\n'
+    : rethrowFinallyCatches ? 'C# source catch-rethrow-finally WASM: 4/4 passed\n'
+    : rethrowBranchCatches ? 'C# source catch-rethrow-branching-finally WASM: 6/6 passed\n'
+    : localRethrowFinallyCatches ? 'C# source local-catch-rethrow-finally WASM: 3/3 passed\n'
+    : localRethrowBranchCatches ? 'C# source local-catch-rethrow-branching-finally WASM: 4/4 passed\n'
     : replacementCatches ? 'C# source cleanup-replaces-error WASM: 3/3 passed\n'
     : nestedReplacementCatches ? 'C# source nested-cleanup-replaces-error WASM: 3/3 passed\n'
     : outerNestedReplacementCatches ? 'C# source outer-nested-cleanup-replaces-error WASM: 3/3 passed\n'

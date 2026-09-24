@@ -42,10 +42,14 @@ internal static class CSharpGuestThrowProducerTests
         OuterNestedCleanupThrowReplacesOriginalError();
         OutermostCleanupThrowReplacesOriginalError();
         BranchingFinallyRunsBeforeErrorPropagation();
+        CatchRethrowRunsOuterFinally();
+        CatchRethrowRunsBranchingFinally();
+        CatchLocalRethrowRunsOuterFinally();
+        CatchLocalRethrowRunsBranchingFinally();
         CatchRethrowPreservesOriginalError();
         NestedCatchRethrowReachesOuterHandler();
         CatchVariableReadsBoundError();
-        return 28;
+        return 32;
     }
 
     private static void MultipleThrowProducersKeepDistinctSourceTokens()
@@ -2076,6 +2080,310 @@ internal static class CSharpGuestThrowProducerTests
             "a cleanup throw must not drop constructor side effects");
     }
 
+    private static void CatchRethrowRunsOuterFinally()
+    {
+        const string source = """
+            class Script
+            {
+                static bool FailNow;
+                static int Count;
+                static int Fail() { throw new System.Exception(); }
+                static int Choose()
+                {
+                    if (FailNow) return Fail();
+                    return 7;
+                }
+                static int Run()
+                {
+                    try { return Choose(); }
+                    catch (System.Exception) { throw; }
+                    finally { Count = Count + 10; }
+                }
+                static int Normal()
+                {
+                    Count = 0;
+                    FailNow = false;
+                    return Run() + Count * 100;
+                }
+                static int Error()
+                {
+                    Count = 0;
+                    FailNow = true;
+                    try { return Run(); }
+                    catch (System.Exception) { return Count; }
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay() { Normal(); Error(); }
+            }
+            """;
+        Check(ReferenceCatch(source, "Normal") == 1007
+            && ReferenceCatch(source, "Error") == 10,
+            "the CLR reference must run outer cleanup on normal return and catch rethrow");
+        SemanticDocument semantic = Analyze(source);
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "catch rethrow cleanup failed to compile");
+        GuestModule module = compiled!.Module;
+        Check(module.LanguageErrorCatalog is { Types.Count: 1, Sources.Count: 1 },
+            "the rethrow must not allocate a second source token");
+        GuestFunction run = module.Functions.Single(function =>
+            function.Id.Contains(".Run(", StringComparison.Ordinal));
+        GuestFunction normal = module.Functions.Single(function =>
+            function.Id.Contains(".Normal(", StringComparison.Ordinal));
+        GuestFunction handled = module.Functions.Single(function =>
+            function.Id.Contains(".Error(", StringComparison.Ordinal));
+        GuestModule stressed = AddLocalCleanupCollectProbe(module, run.Id, 3);
+        GuestModule probe = AddCatchProbe(AddCatchProbe(
+                AddProbe(stressed, run, appendTarget: false,
+                    "function:rethrow_finally_source_probe", "rethrow_finally_source_probe"),
+                normal, "function:rethrow_finally_normal_probe",
+                "rethrow_finally_normal_probe"),
+            handled, "function:rethrow_finally_error_probe",
+            "rethrow_finally_error_probe");
+        GuestValidationResult validation = GuestModuleValidator.Validate(probe);
+        Check(validation.Succeeded,
+            string.Join(" | ", validation.Diagnostics.Select(item => item.Message)));
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "catch rethrow cleanup must compile to executable WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "catch-rethrow-finally.wasm"),
+                wasm.Bytes);
+        }
+    }
+
+    private static void CatchRethrowRunsBranchingFinally()
+    {
+        const string source = """
+            class Script
+            {
+                static bool FailNow;
+                static bool UseFirst;
+                static int Count;
+                static int Fail() { throw new System.Exception(); }
+                static int Choose()
+                {
+                    if (FailNow) return Fail();
+                    return 7;
+                }
+                static int Run()
+                {
+                    try { return Choose(); }
+                    catch (System.Exception) { throw; }
+                    finally
+                    {
+                        if (UseFirst) { Count = Count + 1; }
+                        else { Count = Count + 2; }
+                        Count = Count + 10;
+                    }
+                }
+                static int NormalFirst()
+                {
+                    Count = 0; FailNow = false; UseFirst = true;
+                    return Run() + Count * 100;
+                }
+                static int NormalSecond()
+                {
+                    Count = 0; FailNow = false; UseFirst = false;
+                    return Run() + Count * 100;
+                }
+                static int ErrorFirst()
+                {
+                    Count = 0; FailNow = true; UseFirst = true;
+                    try { return Run(); }
+                    catch (System.Exception) { return Count; }
+                }
+                static int ErrorSecond()
+                {
+                    Count = 0; FailNow = true; UseFirst = false;
+                    try { return Run(); }
+                    catch (System.Exception) { return Count; }
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay()
+                {
+                    NormalFirst(); NormalSecond(); ErrorFirst(); ErrorSecond();
+                }
+            }
+            """;
+        Check(ReferenceCatch(source, "NormalFirst") == 1107
+            && ReferenceCatch(source, "NormalSecond") == 1207
+            && ReferenceCatch(source, "ErrorFirst") == 11
+            && ReferenceCatch(source, "ErrorSecond") == 12,
+            "the CLR reference must select one cleanup branch on each return or rethrow");
+        SemanticDocument semantic = Analyze(source);
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "branching catch rethrow cleanup failed to compile");
+        GuestModule module = compiled!.Module;
+        Check(module.LanguageErrorCatalog is { Types.Count: 1, Sources.Count: 1 },
+            "branching cleanup must preserve the original throw source");
+        GuestFunction run = module.Functions.Single(function =>
+            function.Id.Contains(".Run(", StringComparison.Ordinal));
+        GuestModule probe = AddLocalCleanupCollectProbe(module, run.Id, 6);
+        probe = AddProbe(probe, run, appendTarget: false,
+            "function:rethrow_branch_source_probe", "rethrow_branch_source_probe");
+        foreach ((string method, string export) in new[]
+        {
+            ("NormalFirst", "rethrow_branch_normal_first_probe"),
+            ("NormalSecond", "rethrow_branch_normal_second_probe"),
+            ("ErrorFirst", "rethrow_branch_error_first_probe"),
+            ("ErrorSecond", "rethrow_branch_error_second_probe"),
+        })
+        {
+            GuestFunction target = module.Functions.Single(function =>
+                function.Id.Contains("." + method + "(", StringComparison.Ordinal));
+            probe = AddCatchProbe(probe, target, "function:" + export, export);
+        }
+        GuestValidationResult validation = GuestModuleValidator.Validate(probe);
+        Check(validation.Succeeded,
+            string.Join(" | ", validation.Diagnostics.Select(item => item.Message)));
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "branching catch rethrow cleanup must compile to executable WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "catch-rethrow-branching-finally.wasm"),
+                wasm.Bytes);
+        }
+    }
+
+    private static void CatchLocalRethrowRunsOuterFinally()
+    {
+        const string source = """
+            class Script
+            {
+                static int Count;
+                static int Run()
+                {
+                    try { throw new System.Exception(); }
+                    catch (System.Exception) { throw; }
+                    finally { Count = Count + 10; }
+                }
+                static int Catch()
+                {
+                    Count = 0;
+                    try { return Run(); }
+                    catch (System.Exception) { return Count; }
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay() { Catch(); }
+            }
+            """;
+        Check(ReferenceCatch(source) == 10,
+            "the CLR reference must run cleanup after the same method catches and rethrows");
+        SemanticDocument semantic = Analyze(source);
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "local catch rethrow cleanup failed to compile");
+        GuestModule module = compiled!.Module;
+        Check(module.LanguageErrorCatalog is { Types.Count: 1, Sources.Count: 1 },
+            "local rethrow must reuse its original source token");
+        GuestFunction run = module.Functions.Single(function =>
+            function.Id.Contains(".Run(", StringComparison.Ordinal));
+        GuestFunction handled = module.Functions.Single(function =>
+            function.Id.Contains(".Catch(", StringComparison.Ordinal));
+        GuestModule stressed = AddLocalCleanupCollectProbe(module, run.Id, 1);
+        GuestModule probe = AddCatchProbe(
+            AddProbe(stressed, run, appendTarget: false,
+                "function:local_rethrow_finally_source_probe",
+                "local_rethrow_finally_source_probe"),
+            handled, "function:local_rethrow_finally_catch_probe",
+            "local_rethrow_finally_catch_probe");
+        GuestValidationResult validation = GuestModuleValidator.Validate(probe);
+        Check(validation.Succeeded,
+            string.Join(" | ", validation.Diagnostics.Select(item => item.Message)));
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "local catch rethrow cleanup must compile to executable WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "local-catch-rethrow-finally.wasm"),
+                wasm.Bytes);
+        }
+    }
+
+    private static void CatchLocalRethrowRunsBranchingFinally()
+    {
+        const string source = """
+            class Script
+            {
+                static bool UseFirst;
+                static int Count;
+                static int Run()
+                {
+                    try { throw new System.Exception(); }
+                    catch (System.Exception) { throw; }
+                    finally
+                    {
+                        if (UseFirst) { Count = Count + 1; }
+                        else { Count = Count + 2; }
+                        Count = Count + 10;
+                    }
+                }
+                static int First()
+                {
+                    Count = 0; UseFirst = true;
+                    try { return Run(); }
+                    catch (System.Exception) { return Count; }
+                }
+                static int Second()
+                {
+                    Count = 0; UseFirst = false;
+                    try { return Run(); }
+                    catch (System.Exception) { return Count; }
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay() { First(); Second(); }
+            }
+            """;
+        Check(ReferenceCatch(source, "First") == 11
+            && ReferenceCatch(source, "Second") == 12,
+            "the CLR reference must select one cleanup branch after local rethrow");
+        SemanticDocument semantic = Analyze(source);
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "branching local rethrow cleanup failed to compile");
+        GuestModule module = compiled!.Module;
+        Check(module.LanguageErrorCatalog is { Types.Count: 1, Sources.Count: 1 },
+            "branching local rethrow must reuse its original source token");
+        GuestFunction run = module.Functions.Single(function =>
+            function.Id.Contains(".Run(", StringComparison.Ordinal));
+        GuestFunction first = module.Functions.Single(function =>
+            function.Id.Contains(".First(", StringComparison.Ordinal));
+        GuestFunction second = module.Functions.Single(function =>
+            function.Id.Contains(".Second(", StringComparison.Ordinal));
+        GuestModule stressed = AddLocalCleanupCollectProbe(module, run.Id, 3);
+        GuestModule probe = AddCatchProbe(AddCatchProbe(
+                AddProbe(stressed, run, appendTarget: false,
+                    "function:local_rethrow_branch_source_probe",
+                    "local_rethrow_branch_source_probe"),
+                first, "function:local_rethrow_branch_first_probe",
+                "local_rethrow_branch_first_probe"),
+            second, "function:local_rethrow_branch_second_probe",
+            "local_rethrow_branch_second_probe");
+        GuestValidationResult validation = GuestModuleValidator.Validate(probe);
+        Check(validation.Succeeded,
+            string.Join(" | ", validation.Diagnostics.Select(item => item.Message)));
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "branching local rethrow cleanup must compile to executable WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output,
+                "local-catch-rethrow-branching-finally.wasm"), wasm.Bytes);
+        }
+    }
+
     private static void CatchRethrowPreservesOriginalError()
     {
         const string source = """
@@ -2357,7 +2665,7 @@ internal static class CSharpGuestThrowProducerTests
         GuestBasicBlock[] cleanupBlocks = function.Blocks.Where(block =>
             block.Instructions.Any(instruction => instruction.Op == "global_store")).ToArray();
         Check(cleanupBlocks.Length == expectedBlocks,
-            "local throw must have the expected distinct cleanup blocks");
+            $"local throw needs {expectedBlocks} cleanup blocks, found {cleanupBlocks.Length}");
         IReadOnlySet<string> cleanupIds = cleanupBlocks.Select(block => block.Id)
             .ToHashSet(StringComparer.Ordinal);
         GuestFunction stressed = function with

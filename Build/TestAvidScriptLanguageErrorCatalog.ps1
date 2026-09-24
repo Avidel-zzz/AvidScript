@@ -70,6 +70,14 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'C# branching-cleanup Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'catch-rethrow.wasm')
     if ($LASTEXITCODE -ne 0) { throw 'C# catch-rethrow Node WASM probe failed.' }
+    & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'catch-rethrow-finally.wasm')
+    if ($LASTEXITCODE -ne 0) { throw 'C# catch-rethrow-finally Node WASM probe failed.' }
+    & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'catch-rethrow-branching-finally.wasm')
+    if ($LASTEXITCODE -ne 0) { throw 'C# catch-rethrow-branching-finally Node WASM probe failed.' }
+    & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'local-catch-rethrow-finally.wasm')
+    if ($LASTEXITCODE -ne 0) { throw 'C# local-catch-rethrow-finally Node WASM probe failed.' }
+    & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'local-catch-rethrow-branching-finally.wasm')
+    if ($LASTEXITCODE -ne 0) { throw 'C# local-catch-rethrow-branching-finally Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'nested-rethrow.wasm')
     if ($LASTEXITCODE -ne 0) { throw 'C# nested-rethrow Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'catch-variable.wasm')

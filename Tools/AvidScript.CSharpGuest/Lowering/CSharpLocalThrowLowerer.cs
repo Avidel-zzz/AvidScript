@@ -52,6 +52,8 @@ internal static class CSharpLocalThrowLowerer
             .Select(site => site.BranchingCleanup!)
             .Concat(normalReturns.Where(site => site.BranchingCleanup is not null)
                 .Select(site => site.BranchingCleanup!))
+            .Concat(rethrows.Where(site => site.BranchingCleanup is not null)
+                .Select(site => site.BranchingCleanup!))
             .GroupBy(route => route.ExitBlockOrdinal))
         {
             CSharpBranchingCleanup[] routeVariants = group.ToArray();
@@ -480,6 +482,8 @@ internal static class CSharpLocalThrowLowerer
                 ? outerRoute.Matches.SingleOrDefault(match =>
                     catalog.Types.Count == 1 && match.TypeToken == catalog.Types[0].Token)
                 : null;
+            string? cleanupId = site.CleanupBlockOrdinal is { } cleanupOrdinal
+                ? CSharpGuestIds.Block(flow.MethodSymbolId, cleanupOrdinal) : null;
             if (!blocks.TryGetValue(blockId, out GuestBasicBlock? original)
                 || original.Terminator.Kind != "return"
                 || original.Terminator.ReturnValueId is null
@@ -490,6 +494,7 @@ internal static class CSharpLocalThrowLowerer
                 || !locals.Any(register => register.Id == capture
                     && register.TypeId == function.ReturnTypeId)
                 || catalog.Types.Count != 1
+                || cleanupId is not null && outerMatch is not null
                 || !routes.Values.SelectMany(route => route.Matches).Any(match =>
                     match.HandlerBlockId == blockId && match.CaptureError))
                 return Fail("The rethrow has no unique captured error context.", out error);
@@ -525,14 +530,95 @@ internal static class CSharpLocalThrowLowerer
                     forwarding.Add(Store(outerCapture, field, id));
                 }
             }
+            string? sharedOutcome = null;
+            if (site.BranchingCleanup is { } branching)
+            {
+                if (cleanupId != CSharpGuestIds.Block(flow.MethodSymbolId,
+                        branching.EntryBlockOrdinal)
+                    || !branchingShared.TryGetValue(branching.ExitBlockOrdinal,
+                        out (string OutcomeId, int SiteCount) shared))
+                    return Fail("The rethrow has no shared branching cleanup outcome.",
+                        out error);
+                sharedOutcome = shared.OutcomeId;
+                string statusId = "rethrow:" + site.BlockOrdinal.ToString(
+                    CultureInfo.InvariantCulture) + ":cleanup_status";
+                if (!registerIds.Add(statusId))
+                    return Fail("The rethrow cleanup status register is already in use.",
+                        out error);
+                locals.Add(new GuestRegister(statusId, "type:int32"));
+                forwarding.Add(Constant(statusId,
+                    GuestLanguageOutcomeType.LanguageErrorStatus));
+                forwarding.Add(Store(sharedOutcome, "status", statusId));
+                foreach ((string field, string typeId) in new[]
+                {
+                    ("error_type", "type:int32"),
+                    ("source", "type:int32"),
+                    ("error_root", "type:language_error_root"),
+                })
+                {
+                    string id = "rethrow:" + site.BlockOrdinal.ToString(
+                        CultureInfo.InvariantCulture) + ":cleanup_" + field;
+                    if (!registerIds.Add(id))
+                        return Fail("The rethrow cleanup register is already in use.",
+                            out error);
+                    locals.Add(new GuestRegister(id, typeId));
+                    forwarding.Add(new GuestInstruction("field_load", id,
+                        new[] { capture }, "field:" + field, null, null));
+                    forwarding.Add(Store(sharedOutcome, field, id));
+                }
+            }
             blocks[blockId] = original with
             {
                 Instructions = forwarding,
-                Terminator = outerMatch is null
+                Terminator = cleanupId is not null
+                    ? new GuestTerminator("branch", null, cleanupId, null, null)
+                    : outerMatch is null
                     ? new GuestTerminator("return", null, null, null, capture)
                     : new GuestTerminator("branch", null,
                         outerMatch.HandlerBlockId, null, null),
             };
+            if (cleanupId is not null)
+            {
+                if (site.BranchingCleanup is { } cleanupBranching)
+                {
+                    HashSet<string> entrances = normalBranchEntrances.TryGetValue(
+                            cleanupBranching.ExitBlockOrdinal,
+                            out HashSet<string>? normalOwners)
+                        ? new HashSet<string>(normalOwners, StringComparer.Ordinal)
+                        : new HashSet<string>(StringComparer.Ordinal);
+                    entrances.Add(blockId);
+                    string exitId = CSharpGuestIds.Block(flow.MethodSymbolId,
+                        cleanupBranching.ExitBlockOrdinal);
+                    if (!ValidBranchingCleanup(flow, blocks, entrances,
+                            cleanupBranching)
+                        || !blocks.TryGetValue(exitId, out GuestBasicBlock? exit))
+                        return Fail("The rethrow has no verified branching cleanup.",
+                            out error);
+                    if (preparedCleanupReturns.Add(exitId))
+                    {
+                        if (!TryRewriteSyntheticCleanupReturn(exit, sharedOutcome!,
+                                out GuestBasicBlock? rewritten))
+                            return Fail("The rethrow cleanup has no verified exit.",
+                                out error);
+                        blocks[exitId] = rewritten!;
+                    }
+                    else if (exit.Terminator.ReturnValueId != sharedOutcome)
+                        return Fail("The rethrow changed its shared cleanup result.",
+                            out error);
+                }
+                else
+                {
+                    if (!blocks.TryGetValue(cleanupId, out GuestBasicBlock? cleanup)
+                        || cleanup.Instructions.Any(instruction => instruction.Op is
+                            "call" or "call_indirect")
+                        || function.Blocks.Count(block => block.Terminator.Kind == "branch"
+                            && block.Terminator.TargetBlockId == cleanupId) != 0
+                        || !TryRewriteSyntheticCleanupReturn(cleanup, capture,
+                            out GuestBasicBlock? rewritten))
+                        return Fail("The rethrow has no unique synchronous cleanup.", out error);
+                    blocks[cleanupId] = rewritten!;
+                }
+            }
         }
         lowered = function with
         {
