@@ -42,6 +42,37 @@ internal static class CSharpLocalThrowLowerer
             .ToDictionary(block => block.Id, StringComparer.Ordinal);
         Dictionary<string, CSharpLanguageCatchRoute> routes = catchRoutes
             .ToDictionary(route => route.SourceBlockId, StringComparer.Ordinal);
+        Dictionary<int, (string OutcomeId, int SiteCount)> sharedCleanups = new();
+        foreach (IGrouping<int, CSharpLocalThrowSite> group in sites
+            .Where(site => site.CleanupBlockOrdinals is { Count: > 0 })
+            .GroupBy(site => site.CleanupBlockOrdinals![^1]))
+        {
+            CSharpLocalThrowSite[] owners = group.ToArray();
+            if (owners.Length < 2) continue;
+            IReadOnlyList<int> route = owners[0].CleanupBlockOrdinals!;
+            if (owners.Length > 16 || owners.Any(site =>
+                    site.ReplacesThrowBlockOrdinal is not null
+                    || !site.CleanupBlockOrdinals!.SequenceEqual(route)))
+                return Fail("Shared cleanup needs one bounded source-derived route.",
+                    out error);
+            string outcomeId = "local_throw:shared_cleanup:"
+                + group.Key.ToString(CultureInfo.InvariantCulture) + ":outcome";
+            if (!registerIds.Add(outcomeId)
+                || !blocks.TryGetValue(function.EntryBlockId,
+                    out GuestBasicBlock? entry))
+                return Fail("Shared cleanup has no unique entry outcome.", out error);
+            locals.Add(new GuestRegister(outcomeId, function.ReturnTypeId));
+            blocks[function.EntryBlockId] = entry with
+            {
+                Instructions = new[]
+                {
+                    new GuestInstruction("stack_alloc", outcomeId,
+                        Array.Empty<string>(), null, null, null),
+                }.Concat(entry.Instructions).ToArray(),
+            };
+            sharedCleanups.Add(group.Key, (outcomeId, owners.Length));
+        }
+        HashSet<string> preparedCleanupReturns = new(StringComparer.Ordinal);
 
         foreach (CSharpLocalThrowSite site in sites)
         {
@@ -91,23 +122,33 @@ internal static class CSharpLocalThrowLowerer
                 return Fail("A local throw cannot skip cleanup to enter a catch.", out error);
 
             string prefix = "local_throw:" + site.BlockOrdinal.ToString(CultureInfo.InvariantCulture) + ":";
-            string outcome = prefix + "outcome", root = prefix + "root";
+            bool shared = false;
+            int sharedSiteCount = 1;
+            string outcome = prefix + "outcome";
+            if (cleanupOrdinals.Count != 0
+                && sharedCleanups.TryGetValue(cleanupOrdinals[^1],
+                    out (string OutcomeId, int SiteCount) sharedCleanup))
+            {
+                shared = true;
+                sharedSiteCount = sharedCleanup.SiteCount;
+                outcome = sharedCleanup.OutcomeId;
+            }
+            string root = prefix + "root";
             string status = prefix + "status", errorType = prefix + "type";
             string sourceToken = prefix + "source";
-            GuestRegister[] added =
+            List<GuestRegister> added = new()
             {
-                new(outcome, function.ReturnTypeId),
                 new(root, "type:language_error_root"),
                 new(status, "type:int32"),
                 new(errorType, "type:int32"),
                 new(sourceToken, "type:int32"),
             };
+            if (!shared) added.Insert(0, new GuestRegister(outcome, function.ReturnTypeId));
             if (added.Any(register => !registerIds.Add(register.Id)))
                 return Fail("The local throw register identity is already in use.", out error);
             locals.AddRange(added);
             List<GuestInstruction> instructions = new()
             {
-                new("stack_alloc", outcome, Array.Empty<string>(), null, null, null),
                 Constant(status, GuestLanguageOutcomeType.LanguageErrorStatus),
                 Constant(errorType, type.Token),
                 Constant(sourceToken, source.Token),
@@ -118,6 +159,9 @@ internal static class CSharpLocalThrowLowerer
                 Store(outcome, "source", sourceToken),
                 Store(outcome, "error_root", root),
             };
+            if (!shared)
+                instructions.Insert(0, new GuestInstruction("stack_alloc", outcome,
+                    Array.Empty<string>(), null, null, null));
             if (catchMatch is { CaptureError: true })
             {
                 string capture = CSharpLanguageCatchContext.OutcomeRegister(handler!);
@@ -152,7 +196,8 @@ internal static class CSharpLocalThrowLowerer
                         || current.Instructions.Any(instruction => instruction.Op is
                             "call" or "call_indirect")
                         || function.Blocks.Count(block => block.Terminator.Kind == "branch"
-                            && block.Terminator.TargetBlockId == id) != 1
+                            && block.Terminator.TargetBlockId == id)
+                            != (index == 0 ? sharedSiteCount : 1)
                         || !last && (current.Terminator.Kind != "branch"
                             || current.Terminator.TargetBlockId != cleanupIds[index + 1])
                         || last && current.Terminator.Kind != "return")
@@ -161,6 +206,12 @@ internal static class CSharpLocalThrowLowerer
                 }
                 string lastCleanupId = cleanupIds[^1];
                 GuestBasicBlock cleanup = blocks[lastCleanupId];
+                if (!preparedCleanupReturns.Add(lastCleanupId))
+                {
+                    if (!shared || cleanup.Terminator.ReturnValueId != outcome)
+                        return Fail("Shared cleanup changed its error outcome.", out error);
+                    continue;
+                }
                 if (cleanup.Instructions.Count < 4)
                     return Fail("The local throw has no unique linear cleanup return.", out error);
                 int tail = cleanup.Instructions.Count - 4;

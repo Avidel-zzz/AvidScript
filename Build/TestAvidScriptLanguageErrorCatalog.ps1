@@ -44,6 +44,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'C# throw-finally-catch Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'nested-local-throw-finally.wasm')
     if ($LASTEXITCODE -ne 0) { throw 'C# nested local-throw cleanup Node WASM probe failed.' }
+    & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'multi-local-throw-finally.wasm')
+    if ($LASTEXITCODE -ne 0) { throw 'C# shared local-throw cleanup Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'cleanup-replaces-error.wasm')
     if ($LASTEXITCODE -ne 0) { throw 'C# cleanup-replaces-error Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'catch-rethrow.wasm')

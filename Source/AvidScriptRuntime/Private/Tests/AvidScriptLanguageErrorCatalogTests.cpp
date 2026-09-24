@@ -363,7 +363,7 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 	const TArray<FString> HandledFixtures = {
 		TEXT("finally-catch.wasm"), TEXT("nested-finally-catch.wasm"),
 		TEXT("throw-finally-catch.wasm"), TEXT("nested-local-throw-finally.wasm"),
-		TEXT("cleanup-replaces-error.wasm"),
+		TEXT("multi-local-throw-finally.wasm"), TEXT("cleanup-replaces-error.wasm"),
 		TEXT("catch-rethrow.wasm"), TEXT("nested-rethrow.wasm"),
 		TEXT("catch-variable.wasm")};
 	for (const FString& FixtureName : HandledFixtures)
@@ -389,19 +389,27 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 			const FAvidScriptLanguageErrorCatalog* Catalog = Runtime.GetLanguageErrorCatalog();
 			const FString* Type = Catalog ? Catalog->FindType(1) : nullptr;
 			const FAvidScriptLanguageErrorSource* Source = Catalog ? Catalog->FindSource(1) : nullptr;
-			const bool bHasSecondThrow = FixtureName == TEXT("cleanup-replaces-error.wasm")
+			const bool bHasThirdThrow = FixtureName == TEXT("multi-local-throw-finally.wasm");
+			const bool bHasSecondThrow = bHasThirdThrow
+				|| FixtureName == TEXT("cleanup-replaces-error.wasm")
 				|| FixtureName == TEXT("catch-rethrow.wasm")
 				|| FixtureName == TEXT("nested-rethrow.wasm")
 				|| FixtureName == TEXT("catch-variable.wasm");
-			const FAvidScriptLanguageErrorSource* ReplacementSource =
+			const FAvidScriptLanguageErrorSource* SecondSource =
 				Catalog ? Catalog->FindSource(2) : nullptr;
+			const FAvidScriptLanguageErrorSource* ThirdSource =
+				Catalog ? Catalog->FindSource(3) : nullptr;
 			TestTrue(*FString::Printf(TEXT("%s retains its throw type and source"), *FixtureName),
 				Type && Source && *Type == TEXT("type:global::System.Exception")
 				&& Source->SourceId == TEXT("Scripts/SourceThrow.cs")
-				&& (bHasSecondThrow ? ReplacementSource
-					&& ReplacementSource->SourceId == Source->SourceId
-					&& ReplacementSource->Start > Source->Start
-					&& !Catalog->FindSource(3) : !ReplacementSource));
+				&& (bHasSecondThrow ? SecondSource
+					&& SecondSource->SourceId == Source->SourceId
+					&& SecondSource->Start > Source->Start
+					&& (bHasThirdThrow ? ThirdSource
+						&& ThirdSource->SourceId == Source->SourceId
+						&& ThirdSource->Start > SecondSource->Start
+						&& !Catalog->FindSource(4) : !ThirdSource)
+					: !SecondSource && !ThirdSource));
 			if (!TestTrue(*AvidScriptRuntimeLaneLabel(Lane,
 					*FString::Printf(TEXT("%s BeginPlay succeeds"), *FixtureName)),
 					Runtime.BeginPlay(Result)))

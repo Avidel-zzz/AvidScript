@@ -30,11 +30,12 @@ internal static class CSharpGuestThrowProducerTests
         NestedFinallyRunsInnerToOuter();
         LocalThrowRunsFinallyBeforeOuterCatch();
         NestedLocalThrowRunsFinaliesInnerToOuter();
+        MultipleLocalThrowsShareFinallyAndKeepSources();
         CleanupThrowReplacesOriginalError();
         CatchRethrowPreservesOriginalError();
         NestedCatchRethrowReachesOuterHandler();
         CatchVariableReadsBoundError();
-        return 17;
+        return 18;
     }
 
     private static void MultipleThrowProducersKeepDistinctSourceTokens()
@@ -712,7 +713,7 @@ internal static class CSharpGuestThrowProducerTests
             "nested cleanup must preserve both effects and the original error root");
         GuestFunction handler = module.Functions.Single(function =>
             function.Id.Contains(".Catch(", StringComparison.Ordinal));
-        GuestModule stressed = AddNestedLocalCleanupCollectProbe(module, fail.Id);
+        GuestModule stressed = AddLocalCleanupCollectProbe(module, fail.Id, 2);
         GuestModule probe = AddCatchProbe(
             AddProbe(stressed, fail, appendTarget: false,
                 "function:nested_local_throw_source_probe",
@@ -750,6 +751,139 @@ internal static class CSharpGuestThrowProducerTests
             && branchingError is not null
             && branchingError.Contains("cleanup", StringComparison.Ordinal),
             "branching nested cleanup must fail closed");
+    }
+
+    private static void MultipleLocalThrowsShareFinallyAndKeepSources()
+    {
+        const string source = """
+            class Script
+            {
+                static int Choice;
+                static int CleanupCount;
+                static int Fail()
+                {
+                    try
+                    {
+                        if (Choice == 0) throw new System.Exception();
+                        if (Choice == 1) throw new System.Exception();
+                        throw new System.Exception();
+                    }
+                    finally { CleanupCount = CleanupCount + 1; }
+                }
+                static int CatchFirst()
+                {
+                    Choice = 0;
+                    CleanupCount = 0;
+                    try { return Fail(); }
+                    catch (System.Exception) { return CleanupCount + 10; }
+                }
+                static int CatchSecond()
+                {
+                    Choice = 1;
+                    CleanupCount = 0;
+                    try { return Fail(); }
+                    catch (System.Exception) { return CleanupCount + 20; }
+                }
+                static int CatchThird()
+                {
+                    Choice = 2;
+                    CleanupCount = 0;
+                    try { return Fail(); }
+                    catch (System.Exception) { return CleanupCount + 30; }
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay() { CatchFirst(); CatchSecond(); CatchThird(); }
+            }
+            """;
+        Check(ReferenceCatch(source, "CatchFirst") == 11
+            && ReferenceCatch(source, "CatchSecond") == 21
+            && ReferenceCatch(source, "CatchThird") == 31,
+            "the CLR reference runs one cleanup after each selected throw");
+        SemanticDocument semantic = Analyze(source);
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "shared cleanup failed to compile");
+        GuestModule module = compiled!.Module;
+        Check(module.LanguageErrorCatalog is { Sources.Count: 3 } catalog
+            && catalog.Sources.Select(item => item.Token).SequenceEqual(new[] { 1, 2, 3 })
+            && catalog.Sources.All(item =>
+                source.Substring(item.Start, item.Length)
+                    == "throw new System.Exception();")
+            && GuestModuleValidator.Validate(module).Succeeded,
+            "each local throw needs its own source token and a valid shared outcome");
+        GuestFunction fail = module.Functions.Single(function =>
+            function.Id.Contains(".Fail(", StringComparison.Ordinal));
+        GuestModule stressed = AddLocalCleanupCollectProbe(module, fail.Id, 1);
+        GuestModule probe = AddProbe(stressed, fail, appendTarget: false,
+            "function:multi_local_cleanup_source_probe",
+            "multi_local_cleanup_source_probe");
+        foreach ((string method, string suffix) in new[]
+        {
+            ("CatchFirst", "first"),
+            ("CatchSecond", "second"),
+            ("CatchThird", "third"),
+        })
+        {
+            GuestFunction handler = module.Functions.Single(function =>
+                function.Id.Contains("." + method + "(", StringComparison.Ordinal));
+            probe = AddCatchProbe(probe, handler,
+                "function:multi_local_cleanup_" + suffix + "_probe",
+                "multi_local_cleanup_" + suffix + "_probe");
+        }
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "the shared cleanup must compile to executable WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "multi-local-throw-finally.wasm"),
+                wasm.Bytes);
+        }
+
+        const string sideEffectSource = """
+            class Script
+            {
+                static int Choice;
+                static int Count;
+                static int Fail()
+                {
+                    try
+                    {
+                        if (++Choice == 1) throw new System.Exception();
+                        throw new System.Exception();
+                    }
+                    finally { Count = Count + 1; }
+                }
+            }
+            """;
+        SemanticDocument sideEffectSemantic = Analyze(sideEffectSource);
+        Check(!CSharpLanguageErrorCompiler.TryLower(sideEffectSemantic,
+                new string('a', 64), out _, out string? sideEffectError)
+            && sideEffectError is not null,
+            "a side-effecting throw decision must fail closed");
+
+        const string trappingSource = """
+            class Script
+            {
+                static int Choice;
+                static int Divisor;
+                static int Count;
+                static int Fail()
+                {
+                    try
+                    {
+                        if (Choice / Divisor == 0) throw new System.Exception();
+                        throw new System.Exception();
+                    }
+                    finally { Count = Count + 1; }
+                }
+            }
+            """;
+        Check(!CSharpLanguageErrorCompiler.TryLower(Analyze(trappingSource),
+                new string('a', 64), out _, out string? trappingError)
+            && trappingError is not null,
+            "a trapping decision must not masquerade as a pure throw branch");
     }
 
     private static void CleanupThrowReplacesOriginalError()
@@ -1123,14 +1257,14 @@ internal static class CSharpGuestThrowProducerTests
             "exception members must stay rejected until their object contract executes");
     }
 
-    private static GuestModule AddNestedLocalCleanupCollectProbe(
-        GuestModule module, string functionId)
+    private static GuestModule AddLocalCleanupCollectProbe(
+        GuestModule module, string functionId, int expectedBlocks)
     {
         GuestFunction function = module.Functions.Single(item => item.Id == functionId);
         GuestBasicBlock[] cleanupBlocks = function.Blocks.Where(block =>
             block.Instructions.Any(instruction => instruction.Op == "global_store")).ToArray();
-        Check(cleanupBlocks.Length == 2,
-            "nested local throw must have two distinct cleanup blocks");
+        Check(cleanupBlocks.Length == expectedBlocks,
+            "local throw must have the expected distinct cleanup blocks");
         IReadOnlySet<string> cleanupIds = cleanupBlocks.Select(block => block.Id)
             .ToHashSet(StringComparer.Ordinal);
         GuestFunction stressed = function with
@@ -1151,7 +1285,7 @@ internal static class CSharpGuestThrowProducerTests
                 ? stressed : item).ToArray(),
         };
         Check(GuestModuleValidator.Validate(result).Succeeded,
-            "the nested cleanup GC probe must remain a valid Guest module");
+            "the local cleanup GC probe must remain a valid Guest module");
         return result;
     }
 
