@@ -766,6 +766,13 @@ internal static class CSharpExceptionGraphMaterializer
                 out error);
 
         bool replacesError = flow.Throws.Count == 2;
+        int[] replacementIndices = Enumerable.Range(0, cleanupCount)
+            .Where(index => blocks[index + 2].BranchValue is not null).ToArray();
+        if (replacesError && replacementIndices.Length != 1
+            || !replacesError && replacementIndices.Length != 0)
+            return Fail("Nested cleanup needs one source-backed replacement throw.",
+                out error);
+        int replacementIndex = replacesError ? replacementIndices[0] : -1;
 
         List<SemanticExceptionRegion> outerToInner = new(cleanupCount);
         int parentOrdinal = 0;
@@ -830,7 +837,7 @@ internal static class CSharpExceptionGraphMaterializer
             int ordinal = index + 2;
             SemanticExceptionRegion region = orderedCleanups[index];
             SemanticExceptionBlock block = blocks[ordinal];
-            bool throwingCleanup = replacesError && index == 0;
+            bool throwingCleanup = index == replacementIndex;
             SemanticOperation? replacementExpression = block.BranchValue;
             if (throwingCleanup)
             {
@@ -844,10 +851,10 @@ internal static class CSharpExceptionGraphMaterializer
                     || replacementExpression.TypeId != CSharpThrowProducerLowerer.ExceptionTypeId
                     || replacementExpression.SymbolId != CSharpThrowProducerLowerer.ExceptionConstructorId
                     || replacementExpression.Children.Count != 0
-                    || dispatch.Routes[ordinal].Steps.Count != cleanupCount - 1
+                    || dispatch.Routes[ordinal].Steps.Count != cleanupCount - index - 1
                     || dispatch.Routes[ordinal].Steps.Where((step, routeIndex) =>
                         step.Kind != "finally" || step.RegionOrdinal
-                            != orderedCleanups[routeIndex + 1].Ordinal).Any())
+                            != orderedCleanups[index + routeIndex + 1].Ordinal).Any())
                     return Fail("A nested cleanup throw needs one new error before the outer finally.",
                         out error);
                 replacement = matches[0];
@@ -882,9 +889,10 @@ internal static class CSharpExceptionGraphMaterializer
             blocks.Select(block => new SemanticBasicBlock(block.Ordinal, block.Kind,
                 block.Ordinal == blocks.Count - 1 || block.IsReachable,
                 block.ConditionKind, block.Operations,
-                block.Ordinal == 1 || replacesError && block.Ordinal == 2 ? null
-                    : block.Ordinal == blocks.Count - 2
-                        ? ZeroPlaceholder(site.Span) : block.BranchValue,
+                block.Ordinal == blocks.Count - 2 ? ZeroPlaceholder(site.Span)
+                    : block.Ordinal == 1 || replacesError
+                        && block.Ordinal == replacementIndex + 2 ? null
+                        : block.BranchValue,
                 edges.Where(edge => edge.DestinationBlockOrdinal == block.Ordinal).ToArray(),
                 edges.Where(edge => edge.SourceBlockOrdinal == block.Ordinal).ToArray()))
                 .ToArray());
@@ -893,8 +901,9 @@ internal static class CSharpExceptionGraphMaterializer
             {
                 new CSharpLocalThrowSite(1, site,
                     orderedCleanups.Select(region => region.FirstBlockOrdinal).ToArray()),
-                new CSharpLocalThrowSite(2, replacement!,
-                    orderedCleanups.Skip(1).Select(region => region.FirstBlockOrdinal).ToArray(),
+                new CSharpLocalThrowSite(replacementIndex + 2, replacement!,
+                    orderedCleanups.Skip(replacementIndex + 1)
+                        .Select(region => region.FirstBlockOrdinal).ToArray(),
                     ReplacesThrowBlockOrdinal: 1),
             }
             : new[]

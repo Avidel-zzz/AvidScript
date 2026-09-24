@@ -304,26 +304,30 @@ internal static class CSharpLocalThrowLowerer
             bool replacementContinuesCleanup = sites.Any(other =>
                 other.ReplacesThrowBlockOrdinal == site.BlockOrdinal
                 && cleanupOrdinals.Count > 1
-                && other.BlockOrdinal == cleanupOrdinals[0]
+                && cleanupOrdinals.Take(cleanupOrdinals.Count - 1)
+                    .Contains(other.BlockOrdinal)
                 && other.CleanupBlockOrdinals is { } remaining
-                && remaining.SequenceEqual(cleanupOrdinals.Skip(1)));
+                && remaining.SequenceEqual(cleanupOrdinals.SkipWhile(ordinal =>
+                    ordinal != other.BlockOrdinal).Skip(1)));
             bool replacesLastCleanup = replacedOutcome is not null && cleanupId is null
                 && sites.Any(other => other.BlockOrdinal == site.ReplacesThrowBlockOrdinal
                     && other.CleanupBlockOrdinals is { Count: > 0 } cleanups
                     && cleanups[^1] == site.BlockOrdinal);
-            bool replacesInnerCleanup = replacedOutcome is not null && cleanupId is not null
+            bool replacesIntermediateCleanup = replacedOutcome is not null
+                && cleanupId is not null
                 && sites.Any(other => other.BlockOrdinal == site.ReplacesThrowBlockOrdinal
                     && other.CleanupBlockOrdinals is { Count: > 1 } cleanups
-                    && cleanups[0] == site.BlockOrdinal
+                    && cleanups.Take(cleanups.Count - 1).Contains(site.BlockOrdinal)
                     && site.CleanupBlockOrdinals is { } remaining
-                    && remaining.SequenceEqual(cleanups.Skip(1)));
+                    && remaining.SequenceEqual(cleanups.SkipWhile(ordinal =>
+                        ordinal != site.BlockOrdinal).Skip(1)));
             if (!blocks.TryGetValue(blockId, out GuestBasicBlock? original)
                 || cleanupId is null && original.Terminator.Kind != "return"
                 || cleanupId is not null && (original.Terminator.Kind != "branch"
                     || original.Terminator.TargetBlockId != cleanupId)
                 || replacedOutcome is not null && (
                     cleanupId is null && original.Terminator.ReturnValueId != replacedOutcome
-                    || !replacesLastCleanup && !replacesInnerCleanup
+                    || !replacesLastCleanup && !replacesIntermediateCleanup
                     || original.Instructions.Any(instruction => instruction.Op is not
                         ("constant" or "global_load" or "binary" or "global_store")))
                 || replacedOutcome is null && original.Instructions.Any(instruction =>

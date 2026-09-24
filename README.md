@@ -64,7 +64,7 @@ public static void Tick(float deltaSeconds)
 - **Win64：** Editor 与打包样例有自动化测试。Android 和 iOS 尚未验收。
 - **C#：** 支持项目实现的语法子集，不能直接运行任意 .NET 项目或 NuGet 包。
 - **网络：** RPC、属性复制和 RepNotify 已通过独立进程测试；实际游戏多人联机仍待验收。
-- **异常：** `try` / `catch` / `finally` 仅在专用测试入口支持部分写法，普通脚本构建尚未启用。见[当前实现范围](Docs/Phase66/P66.C_Language_Execution_Plan.md)。
+- **异常：** 专用测试入口可执行受限的 `try { throw new System.Exception(); } finally { Count = Count + 1; }`，包括嵌套清理；普通脚本构建尚未启用。见[当前实现范围](Docs/Phase66/P66.C_Language_Execution_Plan.md)。
 
 ## Development
 

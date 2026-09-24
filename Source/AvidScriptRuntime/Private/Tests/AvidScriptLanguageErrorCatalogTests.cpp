@@ -368,6 +368,8 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 		TEXT("called-return-finally.wasm"), TEXT("called-branching-finally.wasm"),
 		TEXT("catch-finally.wasm"), TEXT("catch-branching-finally.wasm"),
 		TEXT("cleanup-replaces-error.wasm"), TEXT("nested-cleanup-replaces-error.wasm"),
+		TEXT("outer-nested-cleanup-replaces-error.wasm"),
+		TEXT("outermost-cleanup-replaces-error.wasm"),
 		TEXT("branching-cleanup.wasm"),
 		TEXT("catch-rethrow.wasm"), TEXT("nested-rethrow.wasm"),
 		TEXT("catch-variable.wasm")};
@@ -403,6 +405,8 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 				|| FixtureName == TEXT("catch-branching-finally.wasm")
 				|| FixtureName == TEXT("cleanup-replaces-error.wasm")
 				|| FixtureName == TEXT("nested-cleanup-replaces-error.wasm")
+				|| FixtureName == TEXT("outer-nested-cleanup-replaces-error.wasm")
+				|| FixtureName == TEXT("outermost-cleanup-replaces-error.wasm")
 				|| FixtureName == TEXT("catch-rethrow.wasm")
 				|| FixtureName == TEXT("nested-rethrow.wasm")
 				|| FixtureName == TEXT("catch-variable.wasm");
