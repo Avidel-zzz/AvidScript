@@ -6,7 +6,8 @@ using AvidScript.CSharpSemantic;
 namespace AvidScript.CSharpGuest;
 
 internal sealed record CSharpLocalThrowSite(
-    int BlockOrdinal, SemanticThrowSite Site, int? CleanupBlockOrdinal = null);
+    int BlockOrdinal, SemanticThrowSite Site, int? CleanupBlockOrdinal = null,
+    int? ReplacesThrowBlockOrdinal = null);
 
 // Internal bridge for exception methods whose ordinary block operations can be
 // lowered unchanged. The exceptional call edges are added by the outcome pass;
@@ -87,7 +88,7 @@ internal static class CSharpExceptionGraphMaterializer
         graph = null;
         localThrows = Array.Empty<CSharpLocalThrowSite>();
         error = null;
-        if (flow.Catches.Count != 0 || flow.Throws.Count != 1
+        if (flow.Catches.Count != 0 || flow.Throws.Count is not (1 or 2)
             || flow.Blocks is not { Count: 4 } blocks
             || flow.Regions.Count != 4 || flow.Branches.Count != 3
             || !SemanticExceptionDispatchPlanner.TryBuild(flow, out var dispatch)
@@ -97,7 +98,8 @@ internal static class CSharpExceptionGraphMaterializer
             .Where(region => region.Kind == "finally").ToArray();
         SemanticExceptionBranch[] throws = flow.Branches
             .Where(branch => branch.Semantics == "throw").ToArray();
-        if (finallyRegions.Length != 1 || throws.Length != 1
+        bool replacesError = flow.Throws.Count == 2;
+        if (finallyRegions.Length != 1 || throws.Length != (replacesError ? 2 : 1)
             || flow.Regions[0].Kind != "root"
             || flow.Regions[1].Kind != "try_and_finally"
             || flow.Regions[1].ParentOrdinal != 0
@@ -114,18 +116,34 @@ internal static class CSharpExceptionGraphMaterializer
                 && branch.DestinationBlockOrdinal == throwOrdinal
                 && branch.Semantics == "regular") != 1
             || flow.Branches.Count(branch => branch.SourceBlockOrdinal == cleanupOrdinal
-                && branch.Semantics == "structured_exception_handling"
+                && branch.Semantics == (replacesError ? "throw" : "structured_exception_handling")
                 && branch.DestinationBlockOrdinal == -1) != 1
             || dispatch.Routes[throwOrdinal].Steps.Count != 1
             || dispatch.Routes[throwOrdinal].Steps[0].Kind != "finally"
             || dispatch.Routes[throwOrdinal].Steps[0].RegionOrdinal
-                != finallyRegions[0].Ordinal)
+                != finallyRegions[0].Ordinal
+            || replacesError && (throws[1].SourceBlockOrdinal != cleanupOrdinal
+                || dispatch.Routes[cleanupOrdinal].Steps.Count != 0))
             return Fail("Direct throw cleanup has an unsupported control-flow route.", out error);
         SemanticExceptionBlock throwBlock = blocks[throwOrdinal];
         SemanticExceptionBlock cleanupBlock = blocks[cleanupOrdinal];
         SemanticOperation? expression = throwBlock.BranchValue;
-        SemanticThrowSite site = flow.Throws[0];
-        if (site.Kind != "throw" || site.ExceptionTypeId != CSharpThrowProducerLowerer.ExceptionTypeId
+        SemanticOperation? replacementExpression = cleanupBlock.BranchValue;
+        SemanticThrowSite[] originalSites = flow.Throws.Where(item => expression is not null
+            && item.Span.Start <= expression.Span.Start
+            && expression.Span.End <= item.Span.End).ToArray();
+        SemanticThrowSite[] replacementSites = flow.Throws.Where(item =>
+            replacementExpression is not null
+            && item.Span.Start <= replacementExpression.Span.Start
+            && replacementExpression.Span.End <= item.Span.End).ToArray();
+        SemanticThrowSite? site = originalSites.Length == 1 ? originalSites[0] : null;
+        SemanticThrowSite? replacement = replacementSites.Length == 1
+            ? replacementSites[0] : null;
+        if (site is null || site.Kind != "throw"
+            || site.ExceptionTypeId != CSharpThrowProducerLowerer.ExceptionTypeId
+            || originalSites.Length != 1
+            || replacementSites.Length != (replacesError ? 1 : 0)
+            || replacesError && replacement!.Span == site.Span
             || blocks[0].Operations.Count != 0 || blocks[0].BranchValue is not null
             || blocks[3].Operations.Count != 0 || blocks[3].BranchValue is not null
             || throwBlock.EnclosingRegionOrdinal != 2
@@ -136,7 +154,16 @@ internal static class CSharpExceptionGraphMaterializer
             || expression.SymbolId != CSharpThrowProducerLowerer.ExceptionConstructorId
             || expression.Children.Count != 0
             || site.Span.Start > expression.Span.Start || expression.Span.End > site.Span.End
-            || cleanupBlock.BranchValue is not null || cleanupBlock.Operations.Count == 0
+            || !replacesError && cleanupBlock.Operations.Count == 0
+            || !replacesError && replacementExpression is not null
+            || replacesError && (replacement is null || replacement.Kind != "throw"
+                || replacement.ExceptionTypeId != CSharpThrowProducerLowerer.ExceptionTypeId
+                || replacementExpression is not { Kind: "object_creation", IsSupported: true }
+                || replacementExpression.TypeId != CSharpThrowProducerLowerer.ExceptionTypeId
+                || replacementExpression.SymbolId != CSharpThrowProducerLowerer.ExceptionConstructorId
+                || replacementExpression.Children.Count != 0
+                || replacement.Span.Start > replacementExpression.Span.Start
+                || replacementExpression.Span.End > replacement.Span.End)
             || cleanupBlock.Operations.Any(operation => !Supported(operation)
                 || Descendants(operation).Any(item => item.Kind is
                     "conditional" or "switch" or "branch" or "loop" or "await" or "try"
@@ -160,7 +187,14 @@ internal static class CSharpExceptionGraphMaterializer
                 edges.Where(edge => edge.DestinationBlockOrdinal == block.Ordinal).ToArray(),
                 edges.Where(edge => edge.SourceBlockOrdinal == block.Ordinal).ToArray()))
                 .ToArray());
-        localThrows = new[] { new CSharpLocalThrowSite(throwOrdinal, site, cleanupOrdinal) };
+        localThrows = replacesError
+            ? new[]
+            {
+                new CSharpLocalThrowSite(throwOrdinal, site, cleanupOrdinal),
+                new CSharpLocalThrowSite(cleanupOrdinal, replacement!,
+                    ReplacesThrowBlockOrdinal: throwOrdinal),
+            }
+            : new[] { new CSharpLocalThrowSite(throwOrdinal, site, cleanupOrdinal) };
         return true;
     }
 

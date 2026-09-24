@@ -28,7 +28,8 @@ internal static class CSharpGuestThrowProducerTests
         FinallyRunsBeforeOuterCatch();
         NestedFinallyRunsInnerToOuter();
         LocalThrowRunsFinallyBeforeOuterCatch();
-        return 12;
+        CleanupThrowReplacesOriginalError();
+        return 13;
     }
 
     private static void MultipleThrowProducersKeepDistinctSourceTokens()
@@ -665,21 +666,6 @@ internal static class CSharpGuestThrowProducerTests
             File.WriteAllBytes(Path.Combine(output, "throw-finally-catch.wasm"), wasm.Bytes);
         }
 
-        const string replacingSource = """
-            class Script
-            {
-                static int Fail()
-                {
-                    try { throw new System.Exception(); }
-                    finally { throw new System.Exception(); }
-                }
-            }
-            """;
-        Check(!CSharpLanguageErrorCompiler.TryLower(Analyze(replacingSource), new string('a', 64),
-                out _, out string? replacingError)
-            && replacingError is not null && replacingError.Contains("cleanup", StringComparison.Ordinal),
-            "a throwing finally must wait for error replacement semantics");
-
         const string branchingSource = """
             class Script
             {
@@ -695,6 +681,103 @@ internal static class CSharpGuestThrowProducerTests
                 out _, out string? branchingError)
             && branchingError is not null && branchingError.Contains("cleanup", StringComparison.Ordinal),
             "branching cleanup in a throw method must fail closed");
+    }
+
+    private static void CleanupThrowReplacesOriginalError()
+    {
+        const string source = """
+            class Script
+            {
+                static int Count;
+                static int Fail()
+                {
+                    try { throw new System.Exception(); }
+                    finally { Count = Count + 1; throw new System.Exception(); }
+                }
+                static int Catch()
+                {
+                    try { return Fail(); }
+                    catch (System.Exception) { return Count; }
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay() { Catch(); }
+            }
+            """;
+        Check(ReferenceCatch(source) == 1,
+            "the CLR reference must replace the original error after running cleanup");
+        SemanticDocument semantic = Analyze(source);
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "cleanup error replacement failed to compile");
+        GuestModule module = compiled!.Module;
+        Check(module.LanguageErrorCatalog is { Sources.Count: 2 } catalog
+            && source.Substring(catalog.Sources[0].Start, catalog.Sources[0].Length)
+                == "throw new System.Exception();"
+            && source.Substring(catalog.Sources[1].Start, catalog.Sources[1].Length)
+                == "throw new System.Exception();"
+            && catalog.Sources[0].Start < catalog.Sources[1].Start,
+            "both original and replacing throws must retain source tokens");
+        SemanticDocument reordered = semantic with
+        {
+            ExceptionFlows = semantic.ExceptionFlows!.Select(flow =>
+                flow.MethodSymbolId.Contains(".Fail(", StringComparison.Ordinal)
+                    ? flow with { Throws = flow.Throws.Reverse().ToArray() } : flow).ToArray(),
+        };
+        Check(CSharpLanguageErrorCompiler.TryLower(reordered, new string('a', 64),
+                out CSharpLanguageErrorCompilation? reorderedCompilation, out string? reorderedError)
+            && reorderedCompilation is not null
+            && GuestIrSerializer.Serialize(reorderedCompilation.Module)
+                .SequenceEqual(GuestIrSerializer.Serialize(module)),
+            reorderedError ?? "throw-site catalog order must not change the executable mapping");
+        GuestFunction fail = module.Functions.Single(function =>
+            function.Id.Contains(".Fail(", StringComparison.Ordinal));
+        GuestFunction handler = module.Functions.Single(function =>
+            function.Id.Contains(".Catch(", StringComparison.Ordinal));
+        GuestModule probe = AddCatchProbe(AddProbe(module, fail, appendTarget: false),
+            handler, "function:replacement_catch_probe", "replacement_catch_probe");
+        GuestValidationResult validation = GuestModuleValidator.Validate(probe);
+        Check(validation.Succeeded,
+            string.Join(" | ", validation.Diagnostics.Select(item => item.Message)));
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "cleanup error replacement must compile to executable WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "cleanup-replaces-error.wasm"), wasm.Bytes);
+        }
+
+        const string directSource = """
+            class Script
+            {
+                static int Fail()
+                {
+                    try { throw new System.Exception(); }
+                    finally { throw new System.Exception(); }
+                }
+            }
+            """;
+        Check(CSharpLanguageErrorCompiler.TryLower(Analyze(directSource), new string('a', 64),
+                out CSharpLanguageErrorCompilation? direct, out string? directError)
+            && direct is not null && direct.Module.LanguageErrorCatalog?.Sources.Count == 2
+            && WasmModuleCompiler.Compile(direct.Module).Succeeded,
+            directError ?? "a cleanup-only replacement needs no unrelated side effect");
+
+        const string constructorSource = """
+            class Script
+            {
+                static int Fail()
+                {
+                    try { throw new System.Exception(); }
+                    finally { throw new System.Exception("message"); }
+                }
+            }
+            """;
+        Check(!CSharpLanguageErrorCompiler.TryLower(Analyze(constructorSource), new string('a', 64),
+                out _, out string? constructorError)
+            && constructorError is not null && constructorError.Contains("cleanup", StringComparison.Ordinal),
+            "a cleanup throw must not drop constructor side effects");
     }
 
     private static int ReferenceCatch(string source)

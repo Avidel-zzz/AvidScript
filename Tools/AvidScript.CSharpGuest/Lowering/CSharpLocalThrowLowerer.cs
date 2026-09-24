@@ -46,12 +46,21 @@ internal static class CSharpLocalThrowLowerer
             string blockId = CSharpGuestIds.Block(flow.MethodSymbolId, site.BlockOrdinal);
             string? cleanupId = site.CleanupBlockOrdinal is { } cleanupOrdinal
                 ? CSharpGuestIds.Block(flow.MethodSymbolId, cleanupOrdinal) : null;
+            string? replacedOutcome = site.ReplacesThrowBlockOrdinal is { } replacedOrdinal
+                ? "local_throw:" + replacedOrdinal.ToString(CultureInfo.InvariantCulture) + ":outcome"
+                : null;
             if (!blocks.TryGetValue(blockId, out GuestBasicBlock? original)
                 || cleanupId is null && original.Terminator.Kind != "return"
                 || cleanupId is not null && (original.Terminator.Kind != "branch"
                     || original.Terminator.TargetBlockId != cleanupId)
-                || original.Instructions.Any(instruction => instruction.Op is not
-                    ("constant" or "stack_alloc" or "field_store")
+                || replacedOutcome is not null && (cleanupId is not null
+                    || original.Terminator.ReturnValueId != replacedOutcome
+                    || !sites.Any(other => other.BlockOrdinal == site.ReplacesThrowBlockOrdinal
+                        && other.CleanupBlockOrdinal == site.BlockOrdinal)
+                    || original.Instructions.Any(instruction => instruction.Op is not
+                        ("constant" or "global_load" or "binary" or "global_store")))
+                || replacedOutcome is null && original.Instructions.Any(instruction =>
+                    instruction.Op is not ("constant" or "stack_alloc" or "field_store")
                     || instruction.Op == "field_store"
                     && instruction.TargetId is not ("field:status" or "field:value")))
                 return Fail("The local throw placeholder contains an unaccounted side effect.", out error);
@@ -99,7 +108,8 @@ internal static class CSharpLocalThrowLowerer
             };
             blocks[blockId] = original with
             {
-                Instructions = instructions,
+                Instructions = replacedOutcome is null
+                    ? instructions : original.Instructions.Concat(instructions).ToArray(),
                 Terminator = cleanupId is not null
                     ? new GuestTerminator("branch", null, cleanupId, null, null)
                     : handler is null

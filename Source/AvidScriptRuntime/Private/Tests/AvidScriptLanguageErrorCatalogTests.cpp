@@ -362,7 +362,7 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 	}
 	const TArray<FString> CleanupFixtures = {
 		TEXT("finally-catch.wasm"), TEXT("nested-finally-catch.wasm"),
-		TEXT("throw-finally-catch.wasm")};
+		TEXT("throw-finally-catch.wasm"), TEXT("cleanup-replaces-error.wasm")};
 	for (const FString& FixtureName : CleanupFixtures)
 	{
 		const FString FixturePath = FPaths::Combine(FPaths::ProjectSavedDir(),
@@ -386,10 +386,16 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 			const FAvidScriptLanguageErrorCatalog* Catalog = Runtime.GetLanguageErrorCatalog();
 			const FString* Type = Catalog ? Catalog->FindType(1) : nullptr;
 			const FAvidScriptLanguageErrorSource* Source = Catalog ? Catalog->FindSource(1) : nullptr;
+			const bool bReplacesError = FixtureName == TEXT("cleanup-replaces-error.wasm");
+			const FAvidScriptLanguageErrorSource* ReplacementSource =
+				Catalog ? Catalog->FindSource(2) : nullptr;
 			TestTrue(*FString::Printf(TEXT("%s retains its throw type and source"), *FixtureName),
 				Type && Source && *Type == TEXT("type:global::System.Exception")
 				&& Source->SourceId == TEXT("Scripts/SourceThrow.cs")
-				&& !Catalog->FindSource(2));
+				&& (bReplacesError ? ReplacementSource
+					&& ReplacementSource->SourceId == Source->SourceId
+					&& ReplacementSource->Start > Source->Start
+					&& !Catalog->FindSource(3) : !ReplacementSource));
 			if (!TestTrue(*AvidScriptRuntimeLaneLabel(Lane,
 					*FString::Printf(TEXT("%s BeginPlay succeeds"), *FixtureName)),
 					Runtime.BeginPlay(Result)))

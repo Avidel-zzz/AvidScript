@@ -133,13 +133,21 @@ const multipleCatches = typeof instance.exports.catch_source_probe_a === 'functi
 const finallyCatches = typeof instance.exports.finally_source_probe === 'function';
 const nestedFinallyCatches = typeof instance.exports.nested_finally_source_probe === 'function';
 const throwFinallyCatches = typeof instance.exports.throw_finally_source_probe === 'function';
+const replacementCatches = typeof instance.exports.replacement_catch_probe === 'function';
 const catches = multipleCatches || finallyCatches || nestedFinallyCatches || throwFinallyCatches
+  || replacementCatches
   || typeof instance.exports.catch_source_probe === 'function';
 if (multipleCatches) {
   const first = instance.exports.catch_source_probe_a();
   const second = instance.exports.catch_source_probe_b();
   if (first !== 11 || second !== 22) {
     throw new Error(`Multi-producer catch results = ${first}, ${second}; expected 11, 22`);
+  }
+} else if (replacementCatches) {
+  const handled = instance.exports.replacement_catch_probe();
+  const source = instance.exports.throw_source_probe();
+  if (source !== 4 || handled !== 1) {
+    throw new Error(`Cleanup replacement results = ${source}, ${handled}; expected 4, 1`);
   }
 } else {
   const actual = nestedFinallyCatches
@@ -151,7 +159,8 @@ if (multipleCatches) {
     : throwFinallyCatches || finallyCatches ? 1 : catches ? 7 : 3;
   if (actual !== expected) throw new Error(`source probe() = ${actual}; expected ${expected}`);
 }
-if (allocations !== (multipleCatches ? 2 : 1) || frames.size !== 0 || roots.size !== 0) {
+if (allocations !== (replacementCatches ? 4 : multipleCatches ? 2 : 1)
+  || frames.size !== 0 || roots.size !== 0) {
   throw new Error(`Root teardown mismatch: allocations=${allocations}, frames=${frames.size}, roots=${roots.size}`);
 }
 collect();
@@ -165,6 +174,7 @@ if (catches) {
   if (objects.size !== 0) throw new Error('Handled error object survived collection');
   process.stdout.write(multipleCatches
     ? 'C# source multi-catch WASM: 3/3 passed\n'
+    : replacementCatches ? 'C# source cleanup-replaces-error WASM: 3/3 passed\n'
     : nestedFinallyCatches ? 'C# source nested-finally-catch WASM: 2/2 passed\n'
     : throwFinallyCatches ? 'C# source throw-finally-catch WASM: 2/2 passed\n'
     : finallyCatches ? 'C# source finally-catch WASM: 2/2 passed\n'
