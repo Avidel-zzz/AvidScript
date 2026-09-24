@@ -21,6 +21,7 @@ namespace
 {
 std::atomic<uint32> GAvidScriptContinuationGeneration{1};
 constexpr uint64 CancellationSourceKindMask = 0x8000000000000000ull;
+constexpr uint64 TaskResultKindMask = 0x4000000000000000ull;
 
 bool TryMakeAsyncObjectPath(
 	const FString& ObjectPath,
@@ -466,6 +467,7 @@ void FAvidScriptSessionContinuations::CommitPrepared()
 			Ready.Lane = EAvidScriptContinuationLane::Active;
 		}
 	}
+	TaskResults.PromotePrepared(PreparedActivation);
 	ActiveEntryCount += PreparedEntryCount;
 	PreparedEntryCount = 0;
 
@@ -1751,7 +1753,7 @@ bool FAvidScriptSessionContinuations::UnpackToken(
 	uint32& OutGeneration)
 {
 	const uint64 Packed = static_cast<uint64>(Token);
-	if ((Packed & CancellationSourceKindMask) != 0)
+	if ((Packed & (CancellationSourceKindMask | TaskResultKindMask)) != 0)
 	{
 		return false;
 	}
@@ -1781,12 +1783,13 @@ bool FAvidScriptSessionContinuations::UnpackCancellationSourceToken(
 	uint32& OutGeneration)
 {
 	const uint64 Packed = static_cast<uint64>(Token);
-	if ((Packed & CancellationSourceKindMask) == 0)
+	if ((Packed & (CancellationSourceKindMask | TaskResultKindMask))
+		!= CancellationSourceKindMask)
 	{
 		return false;
 	}
 	const uint32 EncodedSlot = static_cast<uint32>(Packed & 0xffffffffu);
-	OutGeneration = static_cast<uint32>((Packed >> 32) & 0x7fffffffu);
+	OutGeneration = static_cast<uint32>((Packed >> 32) & 0x3fffffffu);
 	if (EncodedSlot == 0 || OutGeneration == 0)
 	{
 		return false;
@@ -1801,7 +1804,7 @@ uint32 FAvidScriptSessionContinuations::AllocateGeneration()
 	{
 		const uint32 Candidate = GAvidScriptContinuationGeneration.fetch_add(
 			1,
-			std::memory_order_relaxed) & 0x7fffffffu;
+			std::memory_order_relaxed) & 0x3fffffffu;
 		if (Candidate != 0)
 		{
 			return Candidate;
@@ -2491,6 +2494,7 @@ void FAvidScriptSessionContinuations::CancelLane(
 	const EAvidScriptContinuationLane Lane,
 	const uint64 ActivationSerial)
 {
+	TaskResults.RetireLane(Lane, ActivationSerial);
 	for (int32 SlotIndex = 0; SlotIndex < Slots.Num(); ++SlotIndex)
 	{
 		FSlot& Slot = Slots[SlotIndex];

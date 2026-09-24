@@ -4,6 +4,7 @@
 #include "AvidScriptContinuation.h"
 #include "AvidScriptObjectRegistry.h"
 #include "Continuation/AvidScriptLatentCallbackProxy.h"
+#include "Continuation/AvidScriptSessionTaskResults.h"
 #include "Delegate/AvidScriptDelegateBridge.h"
 #include "Templates/SharedPointer.h"
 #include "TimerManager.h"
@@ -126,6 +127,7 @@ public:
 	int32 GetActiveCount() const;
 	int32 GetPreparedCount() const;
 #if WITH_DEV_AUTOMATION_TESTS
+	FAvidScriptSessionTaskResults& GetTaskResultsForTesting() { return TaskResults; }
 	int32 GetCancellationSourceCountForTesting() const
 	{
 		return OccupiedCancellationSourceCount;
@@ -402,6 +404,7 @@ private:
 	TArray<FResultSlot> ResultSlots;
 	TArray<uint32> FreeResultSlots;
 	TArray<FReadyCompletion> ReadyCompletions;
+	FAvidScriptSessionTaskResults TaskResults;
 	TArray<FRetiredLatentProxy> RetiredLatentProxies;
 	TMap<uint64, FAsyncActionRoute> AsyncActionRoutes;
 	TArray<TStrongObjectPtr<UObject>> RetainedLoadedObjects;
