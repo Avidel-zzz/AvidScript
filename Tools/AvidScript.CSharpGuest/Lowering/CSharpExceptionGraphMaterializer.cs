@@ -30,17 +30,31 @@ internal static class CSharpExceptionGraphMaterializer
             return TryBuildDirectThrowFinally(flow, out graph, out localThrows, out error);
         if (flow.Catches.Count == 0
             || flow.Catches.Any(handler => handler.HasFilter
-                || handler.ExceptionVariableSymbolId is not null)
+                || handler.ExceptionVariableSymbolId is not null
+                    && handler.ExceptionTypeId != CSharpThrowProducerLowerer.ExceptionTypeId)
             || flow.Regions.Any(region => region.Kind is not
                 ("root" or "local_lifetime" or "try" or "try_and_catch" or "catch"))
             || flow.Blocks is not { Count: > 0 } blocks
             || flow.Branches.Any(branch => branch.Semantics is not
                 ("regular" or "return" or "throw" or "rethrow")
                 || branch.Semantics is not ("throw" or "rethrow")
-                    && branch.DestinationBlockOrdinal < 0)
-            || blocks.Any(block => block.Operations.Any(operation => !Supported(operation))
-                || block.BranchValue is { } value && !Supported(value)))
+                    && branch.DestinationBlockOrdinal < 0))
             return Fail("The catch method needs unsupported throw, cleanup, filter, variable, or block operations.", out error);
+
+        Dictionary<int, SemanticCatchHandler> boundHandlers = new();
+        foreach (SemanticCatchHandler handler in flow.Catches.Where(item =>
+            item.ExceptionVariableSymbolId is not null))
+        {
+            int first = flow.Regions[handler.RegionOrdinal].FirstBlockOrdinal;
+            if (first < 0 || first >= blocks.Count
+                || !boundHandlers.TryAdd(first, handler)
+                || !IsCatchBindingBlock(blocks[first], handler))
+                return Fail($"Catch handler {handler.Ordinal} in '{flow.MethodSymbolId}' needs one source-derived exception assignment.", out error);
+        }
+        if (blocks.Any(block => !boundHandlers.ContainsKey(block.Ordinal)
+                && block.Operations.Any(operation => !Supported(operation))
+                || block.BranchValue is { } value && !Supported(value)))
+            return Fail("The catch method has unsupported block operations.", out error);
 
         List<CSharpLocalThrowSite> projectedThrows = new();
         foreach (SemanticExceptionBranch branch in flow.Branches.Where(item => item.Semantics == "throw"))
@@ -78,7 +92,8 @@ internal static class CSharpExceptionGraphMaterializer
                 && site.Span.End <= handlers[0].Span.End).ToArray();
             if (branch.DestinationBlockOrdinal != -1
                 || flow.Branches.Count(item => item.SourceBlockOrdinal == block.Ordinal) != 1
-                || block.Operations.Count != 0 || block.BranchValue is not null
+                || block.Operations.Count != 0 && !boundHandlers.ContainsKey(block.Ordinal)
+                || block.BranchValue is not null
                 || handlers.Length != 1 || sites.Length != 1
                 || dispatch.Routes[block.Ordinal].Steps.Any(step => step.Kind != "catch"))
                 return Fail("Only a direct catch rethrow without cleanup is executable.", out error);
@@ -102,7 +117,9 @@ internal static class CSharpExceptionGraphMaterializer
             .ToDictionary(item => item.BlockOrdinal, item => item.Site.Span);
         graph = new SemanticControlFlowGraph(flow.MethodSymbolId, 0, blocks.Count - 1,
             blocks.Select(block => new SemanticBasicBlock(block.Ordinal, block.Kind,
-                block.IsReachable, block.ConditionKind, block.Operations,
+                block.IsReachable, block.ConditionKind,
+                boundHandlers.ContainsKey(block.Ordinal)
+                    ? Array.Empty<SemanticOperation>() : block.Operations,
                 throwBlocks.Contains(block.Ordinal) ? ZeroPlaceholder(block.BranchValue!.Span)
                     : rethrowSpans.TryGetValue(block.Ordinal, out SemanticSpan? span)
                         ? ZeroPlaceholder(span)
@@ -252,6 +269,27 @@ internal static class CSharpExceptionGraphMaterializer
 
     private static bool Supported(SemanticOperation operation) =>
         operation.IsSupported && operation.Children.All(Supported);
+
+    private static bool IsCatchBindingBlock(
+        SemanticExceptionBlock block, SemanticCatchHandler handler)
+    {
+        if (block.Operations.Count == 0) return true;
+        if (block.Operations.Count != 1
+            || block.Operations[0] is not { Kind: "assignment", IsSupported: true } assignment
+            || assignment.Children.Count != 2)
+            return false;
+        SemanticOperation target = assignment.Children[0];
+        SemanticOperation value = assignment.Children[1];
+        return target is { Kind: "local_reference", IsSupported: true }
+            && target.SymbolId == handler.ExceptionVariableSymbolId
+            && target.TypeId == handler.ExceptionTypeId
+            && target.Children.Count == 0
+            && value is { Kind: "roslyn:CaughtException", IsSupported: false }
+            && value.TypeId == handler.ExceptionTypeId
+            && value.Children.Count == 0
+            && handler.Span.Start <= assignment.Span.Start
+            && assignment.Span.End <= handler.Span.End;
+    }
 
     private static bool Fail(string message, out string? error)
     {

@@ -26,6 +26,20 @@ public static class CSharpLanguageErrorCompiler
             || semantic.Diagnostics.Any(diagnostic => diagnostic.Severity == "error"
                 && diagnostic.Code != "ASCS3001"))
             return Fail("Expected a validated exception-flow artifact without unrelated errors.", out error);
+        bool hasCatchVariables = flows.Any(flow => flow.Catches.Any(handler =>
+            handler.ExceptionVariableSymbolId is not null));
+        if (flows.Any(flow => flow.Catches.Any(handler =>
+                handler.ExceptionVariableSymbolId is { } id
+                && (handler.ExceptionTypeId != CSharpThrowProducerLowerer.ExceptionTypeId
+                    || semantic.Symbols.Count(symbol => symbol.Id == id
+                        && symbol.Kind == "local"
+                        && symbol.TypeId == handler.ExceptionTypeId
+                        && symbol.ContainingSymbolId == flow.MethodSymbolId) != 1)))
+            || flows.SelectMany(flow => flow.Catches)
+                .Where(handler => handler.ExceptionVariableSymbolId is not null)
+                .GroupBy(handler => handler.ExceptionVariableSymbolId,
+                    StringComparer.Ordinal).Any(group => group.Count() != 1))
+            return Fail("A catch variable needs a unique System.Exception local symbol.", out error);
         SemanticExceptionFlow[] throwFlows = flows.Where(item => item.Throws.Count > 0).ToArray();
         if (throwFlows.Length == 0)
             return Fail("At least one supported throw site is required.", out error);
@@ -111,7 +125,8 @@ public static class CSharpLanguageErrorCompiler
                     if (decision.HandlerOrdinal is { } ordinal)
                         matches.Add(new(type.Token, CSharpGuestIds.Block(handler.MethodSymbolId,
                             handler.Regions[handler.Catches[ordinal].RegionOrdinal].FirstBlockOrdinal),
-                            rethrowHandlers.Contains(ordinal)));
+                            rethrowHandlers.Contains(ordinal)
+                            || handler.Catches[ordinal].ExceptionVariableSymbolId is not null));
                 }
                 if (matches.Count != 0)
                     routes.Add(new(CSharpGuestIds.Block(handler.MethodSymbolId, block.Ordinal), matches));
@@ -148,7 +163,7 @@ public static class CSharpLanguageErrorCompiler
                     }, new GuestTerminator("return", null, null, null, "language_error:placeholder")),
                 })).ToArray();
         CSharpGuestLoweringResult lowered = CSharpGuestLowerer.LowerWithFunctionSubstitutes(
-            ordinary, semanticSha256, substitutes);
+            ordinary, semanticSha256, substitutes, hasCatchVariables);
         if (!lowered.Succeeded || lowered.Module is null)
             return Fail("The ordinary methods could not be lowered: "
                 + string.Join(" | ", lowered.Diagnostics.Select(diagnostic => diagnostic.Message)), out error);
@@ -165,6 +180,13 @@ public static class CSharpLanguageErrorCompiler
                 out GuestModule? outcomes, out error)
             || outcomes is null)
             return false;
+        if (hasCatchVariables)
+        {
+            if (!TryBindCatchVariables(flows, outcomes,
+                    out GuestModule? bound, out error) || bound is null)
+                return false;
+            outcomes = bound;
+        }
         Dictionary<string, GuestFunction> loweredProducers = new(StringComparer.Ordinal);
         foreach (SemanticExceptionFlow item in producers)
         {
@@ -220,6 +242,80 @@ public static class CSharpLanguageErrorCompiler
             return Fail("The composed language-error module failed validation: "
                 + string.Join(" | ", validation.Diagnostics.Select(item => item.Message)), out error);
         compilation = new(candidate);
+        return true;
+    }
+
+    private static bool TryBindCatchVariables(
+        IReadOnlyList<SemanticExceptionFlow> flows,
+        GuestModule module,
+        out GuestModule? bound,
+        out string? error)
+    {
+        bound = null;
+        error = null;
+        Dictionary<string, GuestFunction> functions = module.Functions.ToDictionary(
+            function => function.Id, StringComparer.Ordinal);
+        foreach (SemanticExceptionFlow flow in flows.Where(item => item.Catches.Any(
+            handler => handler.ExceptionVariableSymbolId is not null)))
+        {
+            string functionId = CSharpGuestIds.Function(flow.MethodSymbolId);
+            if (!functions.TryGetValue(functionId, out GuestFunction? function))
+                return Fail("The catch variable has no lowered owner function.", out error);
+            List<GuestRegister> locals = function.Locals.ToList();
+            HashSet<string> registerIds = function.Parameters.Concat(locals)
+                .Select(register => register.Id).ToHashSet(StringComparer.Ordinal);
+            Dictionary<string, GuestBasicBlock> blocks = function.Blocks.ToDictionary(
+                block => block.Id, StringComparer.Ordinal);
+            foreach (SemanticCatchHandler handler in flow.Catches.Where(item =>
+                item.ExceptionVariableSymbolId is not null))
+            {
+                int blockOrdinal = flow.Regions[handler.RegionOrdinal].FirstBlockOrdinal;
+                // A single-block rethrow has no readable use of the catch local.
+                // Its captured outcome already owns the original error root.
+                if (flow.Branches.Any(branch => branch.SourceBlockOrdinal == blockOrdinal
+                    && branch.Semantics == "rethrow"))
+                    continue;
+                string blockId = CSharpGuestIds.Block(flow.MethodSymbolId, blockOrdinal);
+                string capture = CSharpLanguageCatchContext.OutcomeRegister(blockId);
+                string storage = CSharpGuestIds.Local(handler.ExceptionVariableSymbolId!);
+                string root = "language_catch:bind_root:" + handler.Ordinal;
+                string reference = "language_catch:bind_ref:" + handler.Ordinal;
+                if (!blocks.TryGetValue(blockId, out GuestBasicBlock? block)
+                    || !locals.Any(register => register.Id == capture
+                        && register.TypeId == function.ReturnTypeId)
+                    || !locals.Any(register => register.Id == storage
+                        && register.TypeId == CSharpThrowProducerLowerer.ExceptionTypeId)
+                    || !registerIds.Add(root) || !registerIds.Add(reference))
+                    return Fail("The catch variable has no unique captured error root or local storage.", out error);
+                locals.Add(new GuestRegister(root, "type:language_error_root"));
+                locals.Add(new GuestRegister(reference,
+                    CSharpThrowProducerLowerer.ExceptionTypeId));
+                GuestInstruction[] binding =
+                {
+                    new("field_load", root, new[] { capture }, "field:error_root", null, null),
+                    new("managed_cast", reference, new[] { root }, null, null, null),
+                    new("local_store", null, new[] { reference }, storage, null, null),
+                };
+                blocks[blockId] = block with
+                {
+                    Instructions = binding.Concat(block.Instructions).ToArray(),
+                };
+            }
+            functions[functionId] = function with
+            {
+                Locals = locals,
+                Blocks = function.Blocks.Select(block => blocks[block.Id]).ToArray(),
+            };
+        }
+        GuestModule candidate = module with
+        {
+            Functions = module.Functions.Select(function => functions[function.Id]).ToArray(),
+        };
+        GuestValidationResult validation = GuestModuleValidator.Validate(candidate);
+        if (!validation.Succeeded)
+            return Fail("The catch variable binding failed Guest validation: "
+                + string.Join(" | ", validation.Diagnostics.Select(item => item.Message)), out error);
+        bound = candidate;
         return true;
     }
 

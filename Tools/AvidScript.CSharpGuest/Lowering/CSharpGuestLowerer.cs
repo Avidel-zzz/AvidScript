@@ -14,21 +14,24 @@ public static class CSharpGuestLowerer
         bool enableDataLaneFusion = true,
         bool enableDebugInstrumentation = false) =>
         LowerCore(document, semanticSha256, enableDataLaneFusion,
-            enableDebugInstrumentation, Array.Empty<GuestFunction>());
+            enableDebugInstrumentation, Array.Empty<GuestFunction>(), false);
 
     internal static CSharpGuestLoweringResult LowerWithFunctionSubstitutes(
         SemanticDocument document,
         string semanticSha256,
-        IReadOnlyList<GuestFunction> substitutes) =>
+        IReadOnlyList<GuestFunction> substitutes,
+        bool includeLanguageExceptionReference = false) =>
         LowerCore(document, semanticSha256, enableDataLaneFusion: true,
-            enableDebugInstrumentation: false, substitutes);
+            enableDebugInstrumentation: false, substitutes,
+            includeLanguageExceptionReference);
 
     private static CSharpGuestLoweringResult LowerCore(
         SemanticDocument document,
         string semanticSha256,
         bool enableDataLaneFusion,
         bool enableDebugInstrumentation,
-        IReadOnlyList<GuestFunction> substitutes)
+        IReadOnlyList<GuestFunction> substitutes,
+        bool includeLanguageExceptionReference)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(semanticSha256);
@@ -50,10 +53,24 @@ public static class CSharpGuestLowerer
             return Failure(typeResult.Diagnostics);
         }
 
-        Dictionary<string, GuestType> guestTypes = typeResult.Types.ToDictionary(
-            type => type.Id,
-            StringComparer.Ordinal);
         IReadOnlyList<GuestType> moduleTypes = typeResult.Types;
+        if (includeLanguageExceptionReference)
+        {
+            if (!document.Types.Any(type => type.Id == CSharpThrowProducerLowerer.ExceptionTypeId
+                    && type.Kind == "class" && !type.IsValueType)
+                || moduleTypes.Any(type => type.Id == CSharpThrowProducerLowerer.ExceptionTypeId))
+                return Failure(new[] { new GuestDiagnostic("ASCG1003", "error",
+                    "The language exception reference has no unique class type.", null) });
+            moduleTypes = moduleTypes.Append(new GuestType(
+                CSharpThrowProducerLowerer.ExceptionTypeId, "managed_ref", "i64",
+                Array.Empty<GuestField>(), null, null, 8, 8)).ToArray();
+            if (!moduleTypes.Any(type => type.Id == "type:object"))
+                moduleTypes = moduleTypes.Append(new GuestType(
+                    "type:object", "managed_ref", "i64",
+                    Array.Empty<GuestField>(), null, null, 8, 8)).ToArray();
+        }
+        Dictionary<string, GuestType> guestTypes = moduleTypes.ToDictionary(
+            type => type.Id, StringComparer.Ordinal);
         foreach (SemanticCallable root in document.Callables.Where(callable =>
             document.Reachability?.RootCallableIds.Contains(callable.MethodSymbolId) == true || callable.Export is not null))
         {
@@ -69,7 +86,7 @@ public static class CSharpGuestLowerer
         if (diagnostics.Count != 0) return Failure(diagnostics);
         GuestGlobal[] globals = LowerGlobals(document, guestTypes, diagnostics);
         GuestImport[] imports = LowerImports(document, reachableCallableIds, guestTypes, diagnostics);
-        CSharpGuestDataPool dataPool = new(typeResult.Types);
+        CSharpGuestDataPool dataPool = new(moduleTypes);
         List<GuestFunction> functions = LowerFunctions(
             document,
             reachableCallableIds,
@@ -87,6 +104,12 @@ public static class CSharpGuestLowerer
         if (CSharpClosureLayout.UsesManagedDelegates(document))
             imports = imports.Append(new GuestImport(CSharpClosureLayout.HeapImport, GuestManagedHeap.ImportModule, GuestManagedHeap.ImportName,
                 Enumerable.Repeat(CSharpGuestIds.AddressTypeId, 4).ToArray(), CSharpGuestIds.AddressTypeId)).ToArray();
+        if (includeLanguageExceptionReference && !imports.Any(import =>
+                import.Module == GuestManagedHeap.ImportModule
+                && import.Name == GuestManagedHeap.ImportName))
+            imports = imports.Append(new GuestImport("import:language_error_heap",
+                GuestManagedHeap.ImportModule, GuestManagedHeap.ImportName,
+                Enumerable.Repeat("type:int32", 4).ToArray(), "type:int32")).ToArray();
         CSharpAsyncLoweringResult asyncMethods = CSharpAsyncLowerer.Lower(
             document,
             guestTypes,

@@ -136,8 +136,9 @@ const throwFinallyCatches = typeof instance.exports.throw_finally_source_probe =
 const replacementCatches = typeof instance.exports.replacement_catch_probe === 'function';
 const rethrowCatches = typeof instance.exports.rethrow_local_source_probe === 'function';
 const nestedRethrowCatches = typeof instance.exports.nested_rethrow_source_probe === 'function';
+const catchVariableCatches = typeof instance.exports.catch_variable_call_probe === 'function';
 const catches = multipleCatches || finallyCatches || nestedFinallyCatches || throwFinallyCatches
-  || replacementCatches || rethrowCatches || nestedRethrowCatches
+  || replacementCatches || rethrowCatches || nestedRethrowCatches || catchVariableCatches
   || typeof instance.exports.catch_source_probe === 'function';
 if (multipleCatches) {
   const first = instance.exports.catch_source_probe_a();
@@ -167,6 +168,14 @@ if (multipleCatches) {
   if (source !== 3 || local !== 3 || escaped !== 5 || mismatch !== 6) {
     throw new Error(`Nested rethrow results = ${source}, ${local}, ${escaped}, ${mismatch}; expected 3, 3, 5, 6`);
   }
+} else if (catchVariableCatches) {
+  const called = instance.exports.catch_variable_call_probe();
+  const local = instance.exports.catch_variable_local_probe();
+  const unused = instance.exports.catch_variable_unused_probe();
+  const rethrown = instance.exports.catch_variable_rethrow_probe();
+  if (called !== 7 || local !== 9 || unused !== 11 || rethrown !== 13) {
+    throw new Error(`Catch variable results = ${called}, ${local}, ${unused}, ${rethrown}; expected 7, 9, 11, 13`);
+  }
 } else {
   const actual = nestedFinallyCatches
     ? instance.exports.nested_finally_source_probe()
@@ -178,7 +187,7 @@ if (multipleCatches) {
   if (actual !== expected) throw new Error(`source probe() = ${actual}; expected ${expected}`);
 }
 if (allocations !== (rethrowCatches || replacementCatches ? 4
-  : nestedRethrowCatches ? 4 : multipleCatches ? 2 : 1)
+  : nestedRethrowCatches || catchVariableCatches ? 4 : multipleCatches ? 2 : 1)
   || frames.size !== 0 || roots.size !== 0) {
   throw new Error(`Root teardown mismatch: allocations=${allocations}, frames=${frames.size}, roots=${roots.size}`);
 }
@@ -195,6 +204,7 @@ if (catches) {
     ? 'C# source multi-catch WASM: 3/3 passed\n'
     : rethrowCatches ? 'C# source catch-rethrow WASM: 5/5 passed\n'
     : nestedRethrowCatches ? 'C# source nested-rethrow WASM: 5/5 passed\n'
+    : catchVariableCatches ? 'C# source catch-variable WASM: 5/5 passed\n'
     : replacementCatches ? 'C# source cleanup-replaces-error WASM: 3/3 passed\n'
     : nestedFinallyCatches ? 'C# source nested-finally-catch WASM: 2/2 passed\n'
     : throwFinallyCatches ? 'C# source throw-finally-catch WASM: 2/2 passed\n'

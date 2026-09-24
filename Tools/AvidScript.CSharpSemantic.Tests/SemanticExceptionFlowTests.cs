@@ -20,7 +20,7 @@ internal static class SemanticExceptionFlowTests
                     }
                     finally { value += 1; }
                 }
-                catch (InvalidOperationException) { throw; }
+                catch (InvalidOperationException error) { throw; }
                 finally { value += 2; }
             }
         }
@@ -66,6 +66,10 @@ internal static class SemanticExceptionFlowTests
             && flow.Regions[flow.Catches[0].RegionOrdinal].Kind == "catch"
             && !flow.Catches[0].HasFilter,
             "typed catch must retain type matching and filter status");
+        Check(document.Symbols.Count(symbol => symbol.Id == flow.Catches[0].ExceptionVariableSymbolId
+            && symbol.Kind == "local" && symbol.TypeId == flow.Catches[0].ExceptionTypeId
+            && symbol.ContainingSymbolId == flow.MethodSymbolId) == 1,
+            "catch variable must retain its local symbol and owner method");
         Check(flow.Regions.Any(region => region.Kind == "catch")
             && flow.Regions.Count(region => region.Kind == "finally") >= 2,
             "nested catch and cleanup regions must survive projection");

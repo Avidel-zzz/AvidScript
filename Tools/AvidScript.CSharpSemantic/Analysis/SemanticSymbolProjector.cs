@@ -166,6 +166,15 @@ internal static class SemanticSymbolProjector
             }
         }
 
+        foreach (CatchClauseSyntax catchClause in root.DescendantNodes().OfType<CatchClauseSyntax>())
+        {
+            if (catchClause.Declaration is not { } declaration
+                || semanticModel.GetDeclaredSymbol(declaration) is not ILocalSymbol local)
+                continue;
+            AddSymbol(symbols, local, declaration, sourceText, typeRegistry,
+                isExecutableReferenceSource);
+        }
+
         foreach (ForEachStatementSyntax loop in root.DescendantNodes().OfType<ForEachStatementSyntax>())
         {
             ILocalSymbol? local = semanticModel.GetDeclaredSymbol(loop) as ILocalSymbol;

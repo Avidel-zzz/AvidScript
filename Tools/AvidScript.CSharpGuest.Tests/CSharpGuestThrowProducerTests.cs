@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -31,7 +32,8 @@ internal static class CSharpGuestThrowProducerTests
         CleanupThrowReplacesOriginalError();
         CatchRethrowPreservesOriginalError();
         NestedCatchRethrowReachesOuterHandler();
-        return 15;
+        CatchVariableReadsBoundError();
+        return 16;
     }
 
     private static void MultipleThrowProducersKeepDistinctSourceTokens()
@@ -374,23 +376,6 @@ internal static class CSharpGuestThrowProducerTests
                 out _, out string? constructorError)
             && constructorError is not null && constructorError.Contains("zero-argument", StringComparison.Ordinal),
             "a local throw cannot drop constructor arguments");
-
-        const string variableSource = """
-            class Script
-            {
-                static int Fail() { throw new System.Exception(); }
-                static int Catch()
-                {
-                    try { return Fail(); }
-                    catch (System.Exception error) { return 7; }
-                }
-            }
-            """;
-        SemanticDocument variableSemantic = Analyze(variableSource);
-        Check(!CSharpLanguageErrorCompiler.TryLower(variableSemantic, new string('a', 64),
-                out _, out string? variableError)
-            && variableError is not null && variableError.Contains("variable", StringComparison.Ordinal),
-            "a catch variable cannot be accepted before its error object is bound");
 
         const string cleanupSource = """
             class Script
@@ -936,6 +921,174 @@ internal static class CSharpGuestThrowProducerTests
             Directory.CreateDirectory(output);
             File.WriteAllBytes(Path.Combine(output, "nested-rethrow.wasm"), wasm.Bytes);
         }
+    }
+
+    private static void CatchVariableReadsBoundError()
+    {
+        const string source = """
+            class Script
+            {
+                static int Fail() { throw new System.Exception(); }
+                static int Catch()
+                {
+                    try { return Fail(); }
+                    catch (System.Exception error) { return error == null ? 0 : 7; }
+                }
+                static int LocalCatch()
+                {
+                    try { throw new System.Exception(); }
+                    catch (System.Exception error) { return error == null ? 0 : 9; }
+                }
+                static int UnusedCatch()
+                {
+                    try { return Fail(); }
+                    catch (System.Exception unused) { return 11; }
+                }
+                static int VariableRethrow()
+                {
+                    try { return Fail(); }
+                    catch (System.Exception error) { throw; }
+                }
+                static int CatchRethrow()
+                {
+                    try { return VariableRethrow(); }
+                    catch (System.Exception) { return 13; }
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay() { Catch(); LocalCatch(); UnusedCatch(); CatchRethrow(); }
+            }
+            """;
+        Check(ReferenceCatch(source) == 7
+            && ReferenceCatch(source, "LocalCatch") == 9
+            && ReferenceCatch(source, "UnusedCatch") == 11
+            && ReferenceCatch(source, "CatchRethrow") == 13,
+            "the CLR reference must observe bound and unused catch variables");
+        SemanticDocument semantic = Analyze(source);
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "catch variable failed to compile");
+        GuestModule module = compiled!.Module;
+        Check(module.LanguageErrorCatalog is { Types.Count: 1, Sources.Count: 2 },
+            "catch variable binding must preserve source-backed throw identities");
+        GuestFunction caught = module.Functions.Single(function =>
+            function.Id.Contains(".Catch(", StringComparison.Ordinal));
+        GuestFunction local = module.Functions.Single(function =>
+            function.Id.Contains(".LocalCatch(", StringComparison.Ordinal));
+        GuestFunction unused = module.Functions.Single(function =>
+            function.Id.Contains(".UnusedCatch(", StringComparison.Ordinal));
+        GuestFunction rethrown = module.Functions.Single(function =>
+            function.Id.Contains(".CatchRethrow(", StringComparison.Ordinal));
+        GuestModule probe = AddCatchProbe(AddCatchProbe(AddCatchProbe(AddCatchProbe(
+                AddCatchVariableCollectProbe(module),
+                caught, "function:catch_variable_call_probe", "catch_variable_call_probe"),
+            local, "function:catch_variable_local_probe", "catch_variable_local_probe"),
+            unused, "function:catch_variable_unused_probe", "catch_variable_unused_probe"),
+            rethrown, "function:catch_variable_rethrow_probe", "catch_variable_rethrow_probe");
+        GuestValidationResult validation = GuestModuleValidator.Validate(probe);
+        Check(validation.Succeeded,
+            string.Join(" | ", validation.Diagnostics.Select(item => item.Message)));
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "catch variable binding must compile to executable WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "catch-variable.wasm"), wasm.Bytes);
+        }
+
+        SemanticCatchHandler boundHandler = semantic.ExceptionFlows!.Single(flow =>
+            flow.MethodSymbolId.Contains(".Catch():", StringComparison.Ordinal)).Catches.Single();
+        SemanticDocument missingSymbol = semantic with
+        {
+            Symbols = semantic.Symbols.Where(symbol =>
+                symbol.Id != boundHandler.ExceptionVariableSymbolId).ToArray(),
+        };
+        Check(!CSharpLanguageErrorCompiler.TryLower(missingSymbol, new string('a', 64),
+                out _, out string? missingError)
+            && missingError is not null && missingError.Contains("catch variable", StringComparison.Ordinal),
+            "a catch variable with no source symbol must fail closed");
+
+        const string subtypeSource = """
+            class Script
+            {
+                static int Fail() { throw new System.Exception(); }
+                static int Catch()
+                {
+                    try { return Fail(); }
+                    catch (System.InvalidOperationException error) { return 7; }
+                }
+            }
+            """;
+        Check(!CSharpLanguageErrorCompiler.TryLower(Analyze(subtypeSource), new string('a', 64),
+                out _, out string? subtypeError)
+            && subtypeError is not null && subtypeError.Contains("catch variable", StringComparison.Ordinal),
+            "an unsupported exception variable type must fail closed");
+
+        const string memberSource = """
+            class Script
+            {
+                static int Fail() { throw new System.Exception(); }
+                static int Catch()
+                {
+                    try { return Fail(); }
+                    catch (System.Exception error) { return error.Message.Length; }
+                }
+            }
+            """;
+        Check(!CSharpLanguageErrorCompiler.TryLower(Analyze(memberSource), new string('a', 64),
+                out _, out string? memberError) && memberError is not null,
+            "exception members must stay rejected until their object contract executes");
+    }
+
+    private static GuestModule AddCatchVariableCollectProbe(GuestModule module)
+    {
+        const string exceptionTypeId = "type:global::System.Exception";
+        GuestFunction[] functions = module.Functions.Select(function =>
+        {
+            if (!function.Id.Contains(".Catch(", StringComparison.Ordinal)
+                && !function.Id.Contains(".LocalCatch(", StringComparison.Ordinal))
+                return function;
+            GuestBasicBlock[] bindingBlocks = function.Blocks.Where(block =>
+                block.Instructions.Any(instruction => instruction.Op == "managed_cast"
+                    && instruction.ResultId is { } result
+                    && function.Locals.Any(local => local.Id == result
+                        && local.TypeId == exceptionTypeId))).ToArray();
+            Check(bindingBlocks.Length == 1, "the catch variable needs one bound handler block");
+            GuestBasicBlock binding = bindingBlocks[0];
+            GuestInstruction cast = binding.Instructions.Single(instruction =>
+                instruction.Op == "managed_cast"
+                && instruction.ResultId is { } result
+                && function.Locals.Any(local => local.Id == result
+                    && local.TypeId == exceptionTypeId));
+            int storeIndex = binding.Instructions.ToList().FindIndex(instruction =>
+                instruction.Op == "local_store" && instruction.OperandIds.SequenceEqual(
+                    new[] { cast.ResultId! }));
+            Check(storeIndex >= 0, "the catch variable must receive the captured object");
+            string rootId = "catch_variable:collect_root";
+            string codeId = "catch_variable:collect_code";
+            Check(!function.Locals.Any(local => local.Id is
+                    "catch_variable:collect_root" or "catch_variable:collect_code"),
+                "the collect probe needs unique registers");
+            List<GuestInstruction> instructions = binding.Instructions.ToList();
+            instructions.InsertRange(storeIndex + 1, new GuestInstruction[]
+            {
+                new("managed_collect", null, Array.Empty<string>(), null, null, null),
+                new("managed_cast", rootId, new[] { cast.ResultId! }, null, null, null),
+                new("managed_get", codeId, new[] { rootId }, "field:code", null, null),
+            });
+            return function with
+            {
+                Locals = function.Locals.Concat(new[]
+                {
+                    new GuestRegister(rootId, "type:language_error_root"),
+                    new GuestRegister(codeId, "type:int32"),
+                }).ToArray(),
+                Blocks = function.Blocks.Select(block => block.Id == binding.Id
+                    ? block with { Instructions = instructions } : block).ToArray(),
+            };
+        }).ToArray();
+        return module with { Functions = functions };
     }
 
     private static int ReferenceCatch(string source, string methodName = "Catch")
