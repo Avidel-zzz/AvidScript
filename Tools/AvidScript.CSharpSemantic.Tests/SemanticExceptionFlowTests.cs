@@ -32,6 +32,7 @@ internal static class SemanticExceptionFlowTests
         ExpressionThrowKeepsItsSourceSpan();
         CatchFilterIsExplicitlyRejected();
         NestedHandlersKeepTheirOwnRegions();
+        BaseCatchMatchesDerivedError();
         CatchAllKeepsItsRegion();
         CrossMethodCallGetsCatchRoute();
         NestedCallableOwnsItsThrowSite();
@@ -39,7 +40,7 @@ internal static class SemanticExceptionFlowTests
         DirectCallersInheritLanguageErrorEffect();
         OrdinaryArtifactsKeepTheirOriginalShape();
         ContractValidatorRejectsDowngradeAndCorruption();
-        return 11;
+        return 12;
     }
 
     private static void NestedThrowCatchRethrowKeepsRoslynRegions()
@@ -104,6 +105,35 @@ internal static class SemanticExceptionFlowTests
                 .Select(step => step.Kind).SequenceEqual(new[] { "catch", "finally" })
             && dispatch.Routes[flow.Regions[outerFinally].FirstBlockOrdinal].Steps.Count == 0,
             "a replacement error in a finally must continue outward without rerunning that finally");
+        int throwBlockOrdinal = throwRoute.SourceBlockOrdinal;
+        Check(SemanticExceptionDispatchResolver.TryResolve(document, flow.MethodSymbolId,
+                throwBlockOrdinal, "type:global::System.InvalidOperationException",
+                out SemanticExceptionDispatchResolution? handled)
+            && handled!.HandlerOrdinal == 0
+            && handled.FinallyRegionOrdinals.SequenceEqual(new[] { innerFinally }),
+            "a matching local handler must run only the cleanup before that catch");
+        Check(SemanticExceptionDispatchResolver.TryResolve(document, flow.MethodSymbolId,
+                throwBlockOrdinal, "type:global::System.Exception",
+                out SemanticExceptionDispatchResolution? unhandled)
+            && unhandled!.HandlerOrdinal is null
+            && unhandled.FinallyRegionOrdinals.SequenceEqual(new[] { innerFinally, outerFinally }),
+            "an unmatched error must run all outward cleanup in order");
+        Check(!SemanticExceptionDispatchResolver.TryResolve(document, flow.MethodSymbolId,
+                throwBlockOrdinal, "type:int32", out _),
+            "non-exception runtime values must not enter catch dispatch");
+        Check(!SemanticExceptionDispatchResolver.TryResolve(document, flow.MethodSymbolId,
+                throwBlockOrdinal, "type:global::System.MissingException", out _),
+            "unknown runtime exception types must fail closed until their hierarchy is registered");
+        Check(!SemanticExceptionDispatchResolver.TryResolve(document, flow.MethodSymbolId,
+                flow.Blocks!.Count, "type:global::System.Exception", out _),
+            "dispatch must reject a block outside the validated method");
+        int rethrowBlockOrdinal = rethrowRoute.SourceBlockOrdinal;
+        Check(SemanticExceptionDispatchResolver.TryResolve(document, flow.MethodSymbolId,
+                rethrowBlockOrdinal, "type:global::System.InvalidOperationException",
+                out SemanticExceptionDispatchResolution? rethrown)
+            && rethrown!.HandlerOrdinal is null
+            && rethrown.FinallyRegionOrdinals.SequenceEqual(new[] { outerFinally }),
+            "rethrow must skip its active handler and run only the remaining outer cleanup");
         Check(flow.Regions.Select(region => region.Ordinal)
             .SequenceEqual(Enumerable.Range(0, flow.Regions.Count)),
             "region ordinals must be stable and contiguous");
@@ -115,6 +145,40 @@ internal static class SemanticExceptionFlowTests
         Check(first.SequenceEqual(second)
             && first.SequenceEqual(SemanticSerializer.Serialize(SemanticSerializer.Deserialize(first))),
             "exception diagnostic artifacts must serialize deterministically");
+    }
+
+    private static void BaseCatchMatchesDerivedError()
+    {
+        const string source = """
+            using System;
+            class Script
+            {
+                static void Run()
+                {
+                    try { throw new InvalidOperationException(); }
+                    catch (Exception) { }
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/BaseCatch.cs");
+        SemanticExceptionFlow flow = document.ExceptionFlows!.Single();
+        int throwBlock = flow.Blocks!.Single(block =>
+            block.BranchValue is { } value && ContainsOperation(value, "object_creation")).Ordinal;
+        Check(SemanticExceptionDispatchResolver.TryResolve(document, flow.MethodSymbolId,
+                throwBlock, "type:global::System.InvalidOperationException",
+                out SemanticExceptionDispatchResolution? resolution)
+            && resolution!.HandlerOrdinal == 0
+            && resolution.FinallyRegionOrdinals.Count == 0,
+            "a base catch must accept a registered derived runtime exception");
+        SemanticDocument forged = document with
+        {
+            ClassTypes = document.ClassTypes.Select(type =>
+                type.TypeId == "type:global::System.InvalidOperationException"
+                    ? type with { BaseTypeId = type.TypeId } : type).ToArray(),
+        };
+        Check(!SemanticExceptionDispatchResolver.TryResolve(forged, flow.MethodSymbolId,
+                throwBlock, "type:global::System.InvalidOperationException", out _),
+            "a forged cyclic exception hierarchy must not authorize a catch");
     }
 
     private static void ExpressionThrowKeepsItsSourceSpan()
@@ -203,6 +267,21 @@ internal static class SemanticExceptionFlowTests
             && plan.Routes[throwBlock.Ordinal].Steps[0].HandlerOrdinals.SequenceEqual(new[] { 0 })
             && plan.Routes[throwBlock.Ordinal].Steps[1].HandlerOrdinals.SequenceEqual(new[] { 1, 2, 3 }),
             "inner throw must try its local handler before outer handlers in source order");
+        Check(SemanticExceptionDispatchResolver.TryResolve(document, flow.MethodSymbolId,
+                throwBlock.Ordinal, "type:global::System.InvalidOperationException",
+                out SemanticExceptionDispatchResolution? inner)
+            && inner!.HandlerOrdinal == 0,
+            "inner handler must win over an outer handler of the same type");
+        Check(SemanticExceptionDispatchResolver.TryResolve(document, flow.MethodSymbolId,
+                throwBlock.Ordinal, "type:global::System.ArgumentException",
+                out SemanticExceptionDispatchResolution? outer)
+            && outer!.HandlerOrdinal == 1,
+            "a nonmatching inner handler must defer to the first matching outer handler");
+        Check(SemanticExceptionDispatchResolver.TryResolve(document, flow.MethodSymbolId,
+                throwBlock.Ordinal, "type:global::System.Exception",
+                out SemanticExceptionDispatchResolution? baseHandler)
+            && baseHandler!.HandlerOrdinal == 3,
+            "catch base type must match after more specific source-order handlers");
     }
 
     private static void CatchAllKeepsItsRegion()
@@ -232,6 +311,13 @@ internal static class SemanticExceptionFlowTests
             && plan!.Routes.Any(route => route.Steps.Any(step =>
                 step.Kind == "catch" && step.HandlerOrdinals.SequenceEqual(new[] { 0 }))),
             "catch-all must remain in the dispatch candidate list");
+        int throwBlock = flow.Blocks!.Single(block =>
+            block.BranchValue is { } value && ContainsOperation(value, "object_creation")).Ordinal;
+        Check(SemanticExceptionDispatchResolver.TryResolve(document, flow.MethodSymbolId,
+                throwBlock, "type:global::System.Exception",
+                out SemanticExceptionDispatchResolution? catchAll)
+            && catchAll!.HandlerOrdinal == 0,
+            "untyped catch must select the handler for a valid exception type");
     }
 
     private static void CrossMethodCallGetsCatchRoute()

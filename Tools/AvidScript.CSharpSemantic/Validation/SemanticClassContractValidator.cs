@@ -19,6 +19,8 @@ public static class SemanticClassContractValidator
                 || (document.SchemaVersion == 27 && document.SemanticVersion == "1.31")
                 || (document.SchemaVersion == 28 && document.SemanticVersion == "1.32")
                 || (document.SchemaVersion == 29 && document.SemanticVersion == "1.33")
+                || (document.SchemaVersion == SemanticContract.ExceptionFlowSchemaVersion
+                    && document.SemanticVersion == SemanticContract.ExceptionFlowSemanticVersion)
                 || SemanticContract.IsCurrentOrPrevious(document.SchemaVersion, document.SemanticVersion))
             || document.ClassTypes.Any(type => type is null || string.IsNullOrWhiteSpace(type.TypeId))
             || document.ClassTypes.Select(type => type.TypeId).Distinct(StringComparer.Ordinal).Count() != document.ClassTypes.Count
