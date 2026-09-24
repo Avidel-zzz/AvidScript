@@ -26,6 +26,9 @@ public sealed record SemanticAsyncMethod(
     public IReadOnlyList<SemanticAsyncStateSlot> InvocationInputs { get; init; } =
         Array.Empty<SemanticAsyncStateSlot>();
 
+    [JsonPropertyOrder(9), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TaskResultTypeId { get; init; }
+
     public static string ReceiverSymbol(string methodSymbolId) => "receiver:" + methodSymbolId;
 
     public const string ReentrantZeroHeapCpsLowering = "reentrant_zero_heap_cps";
@@ -95,7 +98,11 @@ public sealed record SemanticAsyncAwaitSite(
     [property: JsonPropertyOrder(8)] int BindingOrdinal = -1,
     [property: JsonPropertyOrder(9)] string? PayloadDescriptorTypeId = null,
     [property: JsonPropertyOrder(10)] string? PayloadValueTypeId = null,
-    [property: JsonPropertyOrder(11)] SemanticAsyncStateFrame? StateFrame = null);
+    [property: JsonPropertyOrder(11)] SemanticAsyncStateFrame? StateFrame = null)
+{
+    [JsonPropertyOrder(12), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TaskCallableId { get; init; }
+}
 
 public sealed record SemanticAsyncStateFrame(
     [property: JsonPropertyOrder(0)] string TypeId,

@@ -11,6 +11,8 @@ public static class SemanticContract
     public const string CurrentSemanticVersion = "1.40";
     public const int ExceptionFlowSchemaVersion = 34;
     public const string ExceptionFlowSemanticVersion = "1.43";
+    public const int TaskResultSchemaVersion = 35;
+    public const string TaskResultSemanticVersion = "1.44";
 
     public static string GenericInstanceId(string definitionId, IReadOnlyList<string> arguments)
     {
@@ -22,5 +24,7 @@ public static class SemanticContract
     public static bool IsCurrentOrPrevious(int schemaVersion, string semanticVersion) =>
         (schemaVersion == 30 && semanticVersion is "1.34" or "1.35" or "1.36")
         || (schemaVersion == CurrentSchemaVersion
-            && semanticVersion is ("1.37" or "1.38" or "1.39" or CurrentSemanticVersion));
+            && semanticVersion is ("1.37" or "1.38" or "1.39" or CurrentSemanticVersion))
+        || (schemaVersion == TaskResultSchemaVersion
+            && semanticVersion == TaskResultSemanticVersion);
 }

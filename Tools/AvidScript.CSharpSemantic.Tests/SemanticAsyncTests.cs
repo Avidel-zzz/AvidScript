@@ -22,7 +22,137 @@ internal static class SemanticAsyncTests
         ControlFlowSegmentLimitFailsClosed();
         GeneratedLatentProducerProjectsImportIdentity();
         LocalInitializersPreserveContextualConversions();
-        return 12;
+        TaskIntResultProjectsTypedReturn();
+        TaskIntAwaitPublishesDirectTarget();
+        FailedExceptionPlanKeepsItsContractBesideTaskSource();
+        return 15;
+    }
+
+    private static void FailedExceptionPlanKeepsItsContractBesideTaskSource()
+    {
+        const string source = """
+            using AvidScript;
+            using System;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static async Task<int> LoadScoreAsync()
+                {
+                    await AvidContinuations.NextTickAsync();
+                    return 12;
+                }
+                private static int Handle()
+                {
+                    try { throw new InvalidOperationException(); }
+                    catch (InvalidOperationException) { return 1; }
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/TaskAndExceptionPlan.cs");
+        Assert(!document.Succeeded
+            && document.SchemaVersion == SemanticContract.ExceptionFlowSchemaVersion
+            && document.SemanticVersion == SemanticContract.ExceptionFlowSemanticVersion
+            && document.AsyncMethods.Count == 0
+            && document.ExceptionFlows?.Count == 1
+            && SemanticExceptionFlowContractValidator.IsValid(document),
+            "a failed exception plan keeps its diagnostic schema instead of publishing task execution metadata");
+    }
+
+    private static void TaskIntAwaitPublishesDirectTarget()
+    {
+        const string source = """
+            using AvidScript;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static async Task<int> LoadScoreAsync()
+                {
+                    await AvidContinuations.NextTickAsync();
+                    return 12;
+                }
+                public static async void BeginPlay()
+                {
+                    int score = await LoadScoreAsync();
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/TaskIntAwait.cs");
+        Assert(document.Succeeded, "direct Task<int> await source must analyze successfully");
+        SemanticAsyncMethod producer = document.AsyncMethods.Single(method => method.TaskResultTypeId is not null);
+        SemanticAsyncAwaitSite site = document.AsyncMethods.Single(method => method.TaskResultTypeId is null)
+            .Segments.Select(segment => segment.AwaitSite)
+            .Single(awaitSite => awaitSite?.ProducerKind == "task_call")!;
+        Assert(site.TaskCallableId == producer.MethodSymbolId
+            && site.ResultTypeId == "type:int32"
+            && site.PayloadKind == "task_result"
+            && site.ResultSymbolId is not null,
+            "Task<int> await publishes its exact source target and result local");
+        Assert(SemanticClosureContractValidator.IsValid(document),
+            "the direct task await passes semantic readers");
+        byte[] serialized = SemanticSerializer.Serialize(document);
+        Assert(serialized.SequenceEqual(SemanticSerializer.Serialize(SemanticSerializer.Deserialize(serialized)))
+            && serialized.SequenceEqual(SemanticSerializer.Serialize(Analyze(source, "Scripts/TaskIntAwait.cs"))),
+            "Task<int> invocation and result serialize canonically and deterministically");
+        Assert(!SemanticAsyncInvocationValidator.IsValid(document with
+        {
+            AsyncMethods = document.AsyncMethods.Select(method => method.TaskResultTypeId is null
+                ? method with { Segments = method.Segments.Select(segment => segment.AwaitSite == site
+                    ? segment with { AwaitSite = site with { TaskCallableId = "symbol:unknown" } }
+                    : segment).ToArray() }
+                : method).ToArray()
+        }), "task await target tampering is rejected");
+
+        SemanticDocument unsupported = Analyze(source.Replace("Task<int>", "Task<double>")
+            .Replace("return 12;", "return 12.0;"), "Scripts/UnsupportedTaskResult.cs");
+        Assert(!unsupported.Succeeded && unsupported.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCS5401"),
+            "unsupported Task<double> remains rejected at its declaration");
+    }
+
+    private static void TaskIntResultProjectsTypedReturn()
+    {
+        const string source = """
+            using AvidScript;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static async Task<int> LoadScoreAsync()
+                {
+                    await AvidContinuations.NextTickAsync();
+                    return 12;
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/TaskIntResult.cs");
+        Assert(document.Succeeded, "Task<int> producer source must analyze successfully");
+        Assert(document.SchemaVersion == SemanticContract.TaskResultSchemaVersion
+            && document.SemanticVersion == SemanticContract.TaskResultSemanticVersion,
+            "Task<int> producer selects its versioned semantic contract");
+        SemanticAsyncMethod method = document.AsyncMethods.Single();
+        Assert(method.TaskResultTypeId == "type:int32"
+            && method.ExportName is null
+            && method.Lowering == SemanticAsyncMethod.ContinuationCfgLowering,
+            "Task<int> producer publishes the underlying result type and CFG lowering");
+        Assert(method.Segments.Any(segment => segment.Transfer is
+            { Kind: SemanticAsyncMethod.ReturnTransferKind, Condition.TypeId: "type:int32" }),
+            "Task<int> return carries the converted int result");
+        Assert(SemanticAsyncInvocationValidator.IsValid(document),
+            "Task<int> producer passes the independent invocation contract");
+        Assert(SemanticClosureContractValidator.IsValid(document)
+            && SemanticClassContractValidator.IsValid(document)
+            && SemanticDispatchContractValidator.IsValid(document)
+            && SemanticUeMethodCatalogValidator.IsValid(document),
+            "Task<int> producer passes all existing semantic readers");
+        Assert(!SemanticAsyncInvocationValidator.IsValid(document with
+        {
+            AsyncMethods = new[] { method with { TaskResultTypeId = "type:float64" } }
+        }), "Task result type tampering is rejected");
+        Assert(!SemanticAsyncInvocationValidator.IsValid(document with
+        {
+            SchemaVersion = SemanticContract.CurrentSchemaVersion,
+            SemanticVersion = SemanticContract.CurrentSemanticVersion,
+        }), "Task result metadata cannot be relabeled as an older contract");
+        Assert(!SemanticAsyncInvocationValidator.IsValid(document with { TypeShapes = null! }),
+            "missing task type shapes fail closed");
     }
 
     private static void LocalInitializersPreserveContextualConversions()
@@ -296,6 +426,15 @@ internal static class SemanticAsyncTests
             && document.SemanticVersion == "1.40"
             && document.AsyncMethods.Count == 2,
             "controlled async exports should publish schema 31 / semantic 1.40");
+        string oldContractJson = Encoding.UTF8.GetString(SemanticSerializer.Serialize(document));
+        Assert(!oldContractJson.Contains("task_result_type_id", StringComparison.Ordinal)
+            && !oldContractJson.Contains("task_callable_id", StringComparison.Ordinal),
+            "old async void artifacts omit the new task fields");
+        Assert(!SemanticAsyncInvocationValidator.IsValid(document with
+        {
+            SchemaVersion = SemanticContract.TaskResultSchemaVersion,
+            SemanticVersion = SemanticContract.TaskResultSemanticVersion,
+        }), "old async void artifacts cannot claim the task-result contract");
         Assert(beginPlay.Lowering == "reentrant_zero_heap_cps"
             && beginPlay.Segments.Select(segment => segment.Ordinal)
                 .SequenceEqual(new[] { 0, 1, 2, 3 })

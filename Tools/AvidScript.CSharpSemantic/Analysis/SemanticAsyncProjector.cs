@@ -144,10 +144,12 @@ internal static class SemanticAsyncProjector
         SemanticSpan identifierSpan = SemanticSpanFactory.Create(
             context.PrimaryUnit.SourceText,
             declaration.Identifier.Span);
+        bool hasTaskResult = TryGetSupportedTaskResult(
+            context.Compilation, method.ReturnType, out ITypeSymbol? taskResultType);
         bool valid = callablesById.TryGetValue(methodSymbolId, out SemanticCallable? callable)
             && (callable.Export is null || method.DeclaredAccessibility == Accessibility.Public
                 && method.IsStatic && method.Parameters.Length == 0)
-            && method.ReturnsVoid
+            && (method.ReturnsVoid || hasTaskResult && callable.Export is null)
             && method.Parameters.All(parameter => parameter.RefKind == RefKind.None)
             && method.ContainingType.TypeKind == TypeKind.Class
             && !method.IsGenericMethod
@@ -160,7 +162,7 @@ internal static class SemanticAsyncProjector
         {
             diagnostics.Add(Error(
                 "ASCS5401",
-                $"Async method '{method.Name}' requires a non-generic block-bodied async void class method with value parameters; exports must remain public, static and parameterless.",
+                $"Async method '{method.Name}' requires a non-generic block-bodied async void or supported Task<int> class method with value parameters; exports must remain async void, public, static and parameterless.",
                 identifierSpan));
             return false;
         }
@@ -205,7 +207,9 @@ internal static class SemanticAsyncProjector
                 typeRegistry,
                 diagnostics,
                 ref nextCallbackId,
-                out SemanticAsyncControlFlowProjection? flowProjection)
+                out SemanticAsyncControlFlowProjection? flowProjection,
+                allowValueReturns: hasTaskResult,
+                resultType: taskResultType)
                 || !TryAttachStateFrames(
                     flowProjection!.Segments,
                     diagnostics,
@@ -227,6 +231,7 @@ internal static class SemanticAsyncProjector
                 CompilerLocals = flowProjection.CompilerLocals,
                 InvocationInputs = invocationInputs,
                 LexicalScopes = hasLexicalFunctions ? flowProjection.LexicalScopes : Array.Empty<SemanticAsyncLexicalScope>(),
+                TaskResultTypeId = hasTaskResult ? typeRegistry.Register(taskResultType!) : null,
             };
             return true;
         }
@@ -584,6 +589,58 @@ internal static class SemanticAsyncProjector
         {
             invocation = wrappedProducer!;
             cancellationTokenOperation = tokenOperation;
+        }
+
+        if (invocation.TargetMethod.IsAsync
+            && TryGetSupportedTaskResult(context.Compilation,
+                invocation.TargetMethod.ReturnType, out ITypeSymbol? taskResultType))
+        {
+            IMethodSymbol target = invocation.TargetMethod;
+            if (cancellationTokenOperation is not null
+                || !ReferenceEquals(invocation, candidateInvocation)
+                || !target.IsStatic
+                || target.Parameters.Length != 0
+                || target.IsGenericMethod
+                || target.ContainingType.IsGenericType
+                || target.IsVirtual || target.IsOverride || target.IsAbstract
+                || target.DeclaringSyntaxReferences.Length != 1
+                || target.DeclaringSyntaxReferences[0].SyntaxTree != context.PrimaryUnit.SyntaxTree
+                || !SymbolEqualityComparer.Default.Equals(awaitOperation.Type, taskResultType))
+            {
+                diagnostics.Add(Error("ASCS5403",
+                    "Task<int> await requires a direct zero-argument static source method call.",
+                    SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, awaitExpression.Span)));
+                return false;
+            }
+
+            string? taskResultSymbolId = null;
+            if (result is not null)
+            {
+                if (semanticModel.GetDeclaredSymbol(result) is not ILocalSymbol local
+                    || !SymbolEqualityComparer.Default.Equals(local.Type, taskResultType))
+                {
+                    diagnostics.Add(Error("ASCS5404",
+                        "Task<int> await result must be an exact int local.",
+                        SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, result.Span)));
+                    return false;
+                }
+                taskResultSymbolId = SemanticSymbolProjector.GetSymbolId(local);
+            }
+
+            string taskResultTypeId = typeRegistry.Register(taskResultType!);
+            projected = new SemanticAsyncAwaitSite(
+                callbackId,
+                "task_call",
+                "task_result",
+                Array.Empty<SemanticOperation>(),
+                taskResultSymbolId,
+                taskResultTypeId,
+                SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, awaitExpression.Span),
+                PayloadValueTypeId: taskResultTypeId)
+            {
+                TaskCallableId = SemanticSymbolProjector.GetSymbolId(target),
+            };
+            return true;
         }
 
         ProducerContract? producer = GetProducerContract(context, invocation.TargetMethod);
@@ -954,6 +1011,21 @@ internal static class SemanticAsyncProjector
             && named.GetMembers("GetAwaiter")
                 .OfType<IMethodSymbol>()
                 .Any(method => !method.IsStatic && method.Parameters.Length == 0);
+    }
+
+    private static bool TryGetSupportedTaskResult(
+        Compilation compilation, ITypeSymbol type, out ITypeSymbol? result)
+    {
+        result = null;
+        if (type is not INamedTypeSymbol { Arity: 1, Name: "Task" } named
+            || !SymbolEqualityComparer.Default.Equals(named.OriginalDefinition,
+                compilation.GetTypeByMetadataName("System.Threading.Tasks.Task`1"))
+            || named.TypeArguments[0].SpecialType != SpecialType.System_Int32)
+        {
+            return false;
+        }
+        result = named.TypeArguments[0];
+        return true;
     }
 
     private static bool IsTaskLike(ITypeSymbol? type)

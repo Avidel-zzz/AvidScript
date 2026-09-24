@@ -176,11 +176,15 @@ public static class SemanticAnalyzer
             ? SemanticUeMethodCatalogProjector.Project(context, typeRegistry, ueTypeProjection.Declarations, callableProjection.Callables)
             : SemanticUeMethodCatalog.Empty;
         bool hasExceptionFlows = controlFlowProjection.ExceptionFlows.Count > 0;
+        bool hasTaskResults = asyncProjection.Methods.Any(method => method.TaskResultTypeId is not null
+            || method.Segments.Any(segment => segment.AwaitSite?.TaskCallableId is not null));
         return new SemanticDocument(
             hasExceptionFlows ? SemanticContract.ExceptionFlowSchemaVersion
+                : hasTaskResults ? SemanticContract.TaskResultSchemaVersion
                 : SemanticContract.CurrentSchemaVersion,
             "csharp",
             hasExceptionFlows ? SemanticContract.ExceptionFlowSemanticVersion
+                : hasTaskResults ? SemanticContract.TaskResultSemanticVersion
                 : SemanticContract.CurrentSemanticVersion,
             semanticSource,
             succeeded,
@@ -198,7 +202,7 @@ public static class SemanticAnalyzer
             DelegateEventCallbacks = delegateEventProjection.Callbacks,
             EventSubscriptions = delegateEventProjection.Subscriptions,
             ContinuationCallbacks = continuationProjection.Callbacks,
-            AsyncMethods = asyncProjection.Methods,
+            AsyncMethods = hasExceptionFlows ? Array.Empty<SemanticAsyncMethod>() : asyncProjection.Methods,
             UeTypeDeclarations = ueTypeProjection.Declarations,
             DelegateTypes = typeRegistry.BuildDelegateTypes(),
             ClassTypes = typeRegistry.BuildClassTypes(),

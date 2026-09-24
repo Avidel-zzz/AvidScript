@@ -26,7 +26,8 @@ internal static class SemanticAsyncControlFlowProjector
         ICollection<SemanticDiagnostic> diagnostics,
         ref int nextCallbackId,
         out SemanticAsyncControlFlowProjection? projected,
-        bool allowValueReturns = false)
+        bool allowValueReturns = false,
+        ITypeSymbol? resultType = null)
     {
         Builder builder = new(
             context,
@@ -34,7 +35,8 @@ internal static class SemanticAsyncControlFlowProjector
             methodSymbolId,
             typeRegistry,
             diagnostics,
-            allowValueReturns);
+            allowValueReturns,
+            resultType);
         if (!builder.TryBuild(body, ref nextCallbackId, out projected))
         {
             projected = null;
@@ -51,6 +53,7 @@ internal static class SemanticAsyncControlFlowProjector
         private readonly SemanticTypeRegistry typeRegistry;
         private readonly ICollection<SemanticDiagnostic> diagnostics;
         private readonly bool allowValueReturns;
+        private readonly ITypeSymbol? resultType;
         private readonly List<DraftSegment> drafts = new();
         private readonly List<SemanticAsyncCompilerLocal> compilerLocals = new();
         private readonly List<(SyntaxNode Node, string Kind, int[] Drafts)> scopes = new();
@@ -67,7 +70,8 @@ internal static class SemanticAsyncControlFlowProjector
             string methodSymbolId,
             SemanticTypeRegistry typeRegistry,
             ICollection<SemanticDiagnostic> diagnostics,
-            bool allowValueReturns)
+            bool allowValueReturns,
+            ITypeSymbol? resultType)
         {
             this.context = context;
             this.semanticModel = semanticModel;
@@ -75,6 +79,7 @@ internal static class SemanticAsyncControlFlowProjector
             this.typeRegistry = typeRegistry;
             this.diagnostics = diagnostics;
             this.allowValueReturns = allowValueReturns;
+            this.resultType = resultType;
         }
 
         public bool TryBuild(
@@ -85,7 +90,7 @@ internal static class SemanticAsyncControlFlowProjector
             declaration = body.Parent!;
             if (SemanticExecutableBodyResolver.GetMethodSymbol(declaration, semanticModel) is { } method)
             {
-                returnTypeId = typeRegistry.Register(method.ReturnType);
+                returnTypeId = typeRegistry.Register(resultType ?? method.ReturnType);
             }
             int exit = AddDraft(
                 body.CloseBraceToken.Span,

@@ -108,7 +108,36 @@ internal static class CSharpGuestAsyncInvocationTests
             }
             count++;
         }
-        return count;
+        TaskResultSemanticRequiresGuestAbi();
+        return count + 1;
+    }
+
+    private static void TaskResultSemanticRequiresGuestAbi()
+    {
+        const string source = """
+            using AvidScript;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static async Task<int> LoadScoreAsync()
+                {
+                    await AvidContinuations.NextTickAsync();
+                    return 12;
+                }
+                public static async void BeginPlay()
+                {
+                    int score = await LoadScoreAsync();
+                }
+            }
+            """;
+        SemanticDocument document = CSharpGuestContinuationTests.Analyze(
+            source, "Scripts/TaskIntAbiBoundary.cs");
+        Check(document.Succeeded
+            && document.SchemaVersion == SemanticContract.TaskResultSchemaVersion,
+            "task result source must reach the new semantic contract");
+        CSharpGuestLoweringResult lowered = CSharpGuestLowerer.Lower(document, new string('d', 64));
+        Check(!lowered.Succeeded && lowered.Diagnostics.Any(item => item.Code == "ASCG1001"),
+            "Guest must reject task semantic artifacts until its result ABI is implemented");
     }
 
     private const string Source = """
