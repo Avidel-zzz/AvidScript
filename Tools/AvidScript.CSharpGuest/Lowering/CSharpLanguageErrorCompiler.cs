@@ -103,8 +103,11 @@ public static class CSharpLanguageErrorCompiler
                 normalReturns.TryGetValue(functionId, out var returnSites)
                     ? returnSites.Select(site => new CSharpLanguageCleanupRoute(
                         CSharpGuestIds.Block(handler.MethodSymbolId, site.BlockOrdinal),
-                        new[] { CSharpGuestIds.Block(handler.MethodSymbolId,
-                            site.CleanupBlockOrdinal) })).ToArray()
+                        new[] { new CSharpLanguageCleanupRegion(new[]
+                        {
+                            CSharpGuestIds.Block(handler.MethodSymbolId,
+                                site.CleanupBlockOrdinal),
+                        }) })).ToArray()
                     : Array.Empty<CSharpLanguageCleanupRoute>());
         }
         CSharpLanguageErrorTokenCatalog tokens = CSharpThrowProducerLowerer.BuildCatalog(flows);

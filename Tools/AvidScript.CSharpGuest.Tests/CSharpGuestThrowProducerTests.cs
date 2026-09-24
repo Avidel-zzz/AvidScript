@@ -33,6 +33,7 @@ internal static class CSharpGuestThrowProducerTests
         MultipleLocalThrowsShareFinallyAndKeepSources();
         NormalReturnsAndLocalThrowsRunTheSameFinally();
         CalledReturnAndLocalThrowRunTheSameFinally();
+        CalledReturnRunsBranchingFinally();
         CatchReturnsRunOuterFinally();
         CleanupThrowReplacesOriginalError();
         NestedCleanupThrowReplacesOriginalError();
@@ -40,7 +41,7 @@ internal static class CSharpGuestThrowProducerTests
         CatchRethrowPreservesOriginalError();
         NestedCatchRethrowReachesOuterHandler();
         CatchVariableReadsBoundError();
-        return 23;
+        return 24;
     }
 
     private static void MultipleThrowProducersKeepDistinctSourceTokens()
@@ -554,11 +555,10 @@ internal static class CSharpGuestThrowProducerTests
             """;
         SemanticDocument branching = Analyze(branchingSource);
         bool branchingLowered = CSharpLanguageErrorCompiler.TryLower(branching, new string('a', 64),
-            out _, out string? branchingError);
-        Check(!branchingLowered
-            && branchingError is not null
-            && branchingError.Contains("cleanup", StringComparison.Ordinal),
-            $"branching finally must fail closed: lowered={branchingLowered}, error={branchingError}");
+            out CSharpLanguageErrorCompilation? branchingCompiled, out string? branchingError);
+        Check(branchingLowered && branchingCompiled is not null
+            && GuestModuleValidator.Validate(branchingCompiled.Module).Succeeded,
+            branchingError ?? "single-arm finally must have an executable error route");
     }
 
     private static void NestedFinallyRunsInnerToOuter()
@@ -1145,6 +1145,173 @@ internal static class CSharpGuestThrowProducerTests
             Directory.CreateDirectory(output);
             File.WriteAllBytes(Path.Combine(output, "called-return-finally.wasm"),
                 wasm.Bytes);
+        }
+    }
+
+    private static void CalledReturnRunsBranchingFinally()
+    {
+        const string source = """
+            class Script
+            {
+                static bool UseFirst;
+                static int Mode;
+                static int Count;
+                static int Fail() { throw new System.Exception(); }
+                static int Get()
+                {
+                    if (Mode == 0) return 7;
+                    return Fail();
+                }
+                static int Run()
+                {
+                    try { return Get(); }
+                    finally
+                    {
+                        if (UseFirst) { Count = Count + 1; }
+                        else { Count = Count + 2; }
+                        Count = Count + 10;
+                    }
+                }
+                static int RunNoElse()
+                {
+                    try { return Get(); }
+                    finally { if (UseFirst) Count = Count + 1; }
+                }
+                static int RunNested()
+                {
+                    try
+                    {
+                        try { return Get(); }
+                        finally
+                        {
+                            if (UseFirst) Count = Count + 1;
+                            else Count = Count + 2;
+                        }
+                    }
+                    finally { Count = Count + 100; }
+                }
+                static int Normal()
+                {
+                    Mode = 0; UseFirst = true; Count = 0;
+                    return Run() + Count * 100;
+                }
+                static int FirstError()
+                {
+                    Mode = 1; UseFirst = true; Count = 0;
+                    try { return Run(); }
+                    catch (System.Exception) { return Count; }
+                }
+                static int SecondError()
+                {
+                    Mode = 1; UseFirst = false; Count = 0;
+                    try { return Run(); }
+                    catch (System.Exception) { return Count; }
+                }
+                static int NoElseTaken()
+                {
+                    Mode = 1; UseFirst = true; Count = 0;
+                    try { return RunNoElse(); }
+                    catch (System.Exception) { return Count; }
+                }
+                static int NoElseSkipped()
+                {
+                    Mode = 1; UseFirst = false; Count = 0;
+                    try { return RunNoElse(); }
+                    catch (System.Exception) { return Count; }
+                }
+                static int NestedNormal()
+                {
+                    Mode = 0; UseFirst = true; Count = 0;
+                    return RunNested() + Count * 100;
+                }
+                static int NestedFirstError()
+                {
+                    Mode = 1; UseFirst = true; Count = 0;
+                    try { return RunNested(); }
+                    catch (System.Exception) { return Count; }
+                }
+                static int NestedSecondError()
+                {
+                    Mode = 1; UseFirst = false; Count = 0;
+                    try { return RunNested(); }
+                    catch (System.Exception) { return Count; }
+                }
+                static int Uncaught()
+                {
+                    Mode = 1; UseFirst = true; Count = 0;
+                    return Run();
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay()
+                {
+                    Normal(); FirstError(); SecondError(); NoElseTaken(); NoElseSkipped();
+                    NestedNormal(); NestedFirstError(); NestedSecondError();
+                }
+            }
+            """;
+        Check(ReferenceCatch(source, "Normal") == 1107
+            && ReferenceCatch(source, "FirstError") == 11
+            && ReferenceCatch(source, "SecondError") == 12
+            && ReferenceCatch(source, "NoElseTaken") == 1
+            && ReferenceCatch(source, "NoElseSkipped") == 0
+            && ReferenceCatch(source, "NestedNormal") == 10107
+            && ReferenceCatch(source, "NestedFirstError") == 101
+            && ReferenceCatch(source, "NestedSecondError") == 102,
+            "CLR must execute either finally branch after normal and error returns");
+        Check(CSharpLanguageErrorCompiler.TryLower(Analyze(source), new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "called-error branching finally failed to compile");
+        GuestModule module = compiled!.Module;
+        GuestFunction run = module.Functions.Single(function =>
+            function.Id.Contains(".Run(", StringComparison.Ordinal));
+        Check(run.Blocks.Count(block => block.Terminator.Kind == "branch_if") == 3
+            && run.Blocks.Count(block => block.Instructions.Any(instruction =>
+                instruction.Op == "global_store")) == 6
+            && GuestModuleValidator.Validate(module).Succeeded,
+            "normal and error paths need independent copies of the branching cleanup");
+        GuestModule probe = AddLocalCleanupCollectProbe(module, run.Id, 6);
+        GuestFunction noElse = module.Functions.Single(function =>
+            function.Id.Contains(".RunNoElse(", StringComparison.Ordinal));
+        Check(noElse.Blocks.Count(block => block.Terminator.Kind == "branch_if") == 3
+            && noElse.Blocks.Count(block => block.Instructions.Any(instruction =>
+                instruction.Op == "global_store")) == 2,
+            "single-arm cleanup needs both taken and skipped error edges");
+        probe = AddLocalCleanupCollectProbe(probe, noElse.Id, 2);
+        GuestFunction nested = module.Functions.Single(function =>
+            function.Id.Contains(".RunNested(", StringComparison.Ordinal));
+        probe = AddLocalCleanupCollectProbe(probe, nested.Id, 6);
+        foreach ((string method, string suffix) in new[]
+        {
+            ("Normal", "normal"),
+            ("FirstError", "first"),
+            ("SecondError", "second"),
+            ("NoElseTaken", "no_else_taken"),
+            ("NoElseSkipped", "no_else_skipped"),
+            ("NestedNormal", "nested_normal"),
+            ("NestedFirstError", "nested_first"),
+            ("NestedSecondError", "nested_second"),
+        })
+        {
+            GuestFunction caller = module.Functions.Single(function =>
+                function.Id.Contains("." + method + "(", StringComparison.Ordinal));
+            probe = AddCatchProbe(probe, caller,
+                "function:called_branch_" + suffix + "_probe",
+                "called_branch_" + suffix + "_probe");
+        }
+        GuestFunction uncaught = module.Functions.Single(function =>
+            function.Id.Contains(".Uncaught(", StringComparison.Ordinal));
+        probe = AddProbe(probe, uncaught, appendTarget: false,
+            "function:called_branch_source_probe", "called_branch_source_probe");
+        Check(GuestModuleValidator.Validate(probe).Succeeded,
+            "called branching cleanup probes must preserve the outcome contract");
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "called branching cleanup must compile to executable WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "called-branching-finally.wasm"), wasm.Bytes);
         }
     }
 

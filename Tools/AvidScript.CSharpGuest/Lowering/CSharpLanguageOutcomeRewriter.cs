@@ -242,7 +242,10 @@ public static class CSharpLanguageOutcomeRewriter
                 .Any(group => group.Select(match => match.CaptureError).Distinct().Count() != 1))
             return Fail($"Function '{function.Id}' has an invalid catch route.", out error);
         if (cleanupRoutes.Any(route => !blockIds.Contains(route.SourceBlockId)
-                || route.CleanupBlockIds.Any(id => !blockIds.Contains(id)))
+                || route.Regions.Any(region => region.BlockIds.Count is < 1 or > 16
+                    || region.BlockIds.Any(id => !blockIds.Contains(id))
+                    || region.BlockIds.Distinct(StringComparer.Ordinal).Count()
+                        != region.BlockIds.Count))
             || cleanupRoutes.Select(route => route.SourceBlockId)
                 .Distinct(StringComparer.Ordinal).Count() != cleanupRoutes.Count)
             return Fail($"Function '{function.Id}' has an invalid cleanup route.", out error);
@@ -353,52 +356,11 @@ public static class CSharpLanguageOutcomeRewriter
                 }
                 if (cleanupByBlock.TryGetValue(source.Id, out CSharpLanguageCleanupRoute? cleanupRoute))
                 {
-                    foreach (string cleanupId in cleanupRoute.CleanupBlockIds)
+                    foreach (CSharpLanguageCleanupRegion region in cleanupRoute.Regions)
                     {
-                        GuestBasicBlock cleanup = sourceBlocks[cleanupId];
-                        IReadOnlyList<GuestInstruction> cleanupInstructions = cleanup.Instructions;
-                        if (cleanup.Terminator.Kind == "return")
-                        {
-                            GuestInstruction? placeholder = cleanupInstructions.LastOrDefault();
-                            if (placeholder is not { Op: "constant", ResultId: not null,
-                                    Constant: { Kind: "int32", Value: "0" } }
-                                || placeholder.ResultId != cleanup.Terminator.ReturnValueId)
-                                return Fail($"Function '{function.Id}' has an invalid finally return placeholder.", out error);
-                            cleanupInstructions = cleanupInstructions.Take(cleanupInstructions.Count - 1).ToArray();
-                        }
-                        else if (cleanup.Terminator.Kind != "branch")
-                            return Fail($"Function '{function.Id}' has a throwing or branching finally.", out error);
-                        if (cleanupInstructions.Any(item => item.Op == "call_indirect"
-                                || item.Op == "call" && item.TargetId is { } called
-                                    && affected.Contains(called)))
-                            return Fail($"Function '{function.Id}' has a throwing or branching finally.", out error);
-                        Dictionary<string, string> renamed = new(StringComparer.Ordinal);
-                        List<GuestInstruction> copied = new();
-                        foreach (GuestInstruction item in cleanupInstructions)
-                        {
-                            string[] operands = item.OperandIds.Select(id =>
-                                renamed.TryGetValue(id, out string? replacement) ? replacement : id).ToArray();
-                            string? targetId = item.TargetId is { } oldTarget
-                                && renamed.TryGetValue(oldTarget, out string? newTarget)
-                                    ? newTarget : item.TargetId;
-                            string? resultId = null;
-                            if (item.ResultId is { } oldResult)
-                            {
-                                if (!registerTypes.TryGetValue(oldResult, out string? typeId))
-                                    return Fail($"Function '{function.Id}' has an untyped finally value.", out error);
-                                resultId = Register(typeId);
-                                renamed[oldResult] = resultId;
-                            }
-                            copied.Add(item with
-                            {
-                                ResultId = resultId,
-                                OperandIds = operands,
-                                TargetId = targetId,
-                            });
-                        }
-                        string nextBlock = Block();
-                        blocks.Add(new GuestBasicBlock(unhandledBlock, copied,
-                            new GuestTerminator("branch", null, nextBlock, null, null)));
+                        if (!TryCopyCleanupRegion(function.Id, region, sourceBlocks,
+                                affected, registerTypes, Register, Block, unhandledBlock,
+                                blocks, out string nextBlock, out error)) return false;
                         unhandledBlock = nextBlock;
                     }
                 }
@@ -447,6 +409,111 @@ public static class CSharpLanguageOutcomeRewriter
             blocks.Add(new GuestBasicBlock(currentId, instructions, terminator));
         }
         rewritten = function with { ReturnTypeId = outcomeType, Locals = locals, Blocks = blocks };
+        return true;
+    }
+
+    private static bool TryCopyCleanupRegion(
+        string functionId,
+        CSharpLanguageCleanupRegion region,
+        IReadOnlyDictionary<string, GuestBasicBlock> sourceBlocks,
+        IReadOnlySet<string> affected,
+        IReadOnlyDictionary<string, string> registerTypes,
+        Func<string, string> register,
+        Func<string> block,
+        string entryBlockId,
+        List<GuestBasicBlock> output,
+        out string nextBlockId,
+        out string? error)
+    {
+        nextBlockId = "";
+        error = null;
+        IReadOnlyList<string> ids = region.BlockIds;
+        Dictionary<string, int> order = ids.Select((id, index) => (id, index))
+            .ToDictionary(item => item.id, item => item.index, StringComparer.Ordinal);
+        Dictionary<string, string> copiedBlocks = new(StringComparer.Ordinal);
+        for (int index = 0; index < ids.Count; ++index)
+            copiedBlocks.Add(ids[index], index == 0 ? entryBlockId : block());
+        nextBlockId = block();
+        Dictionary<string, string> renamed = new(StringComparer.Ordinal);
+        List<IReadOnlyList<GuestInstruction>> instructionsByBlock = new();
+        string? exitTarget = null;
+        bool ForwardOrExit(string? target, int sourceIndex)
+        {
+            if (target is null) return false;
+            if (order.TryGetValue(target, out int destination))
+                return destination > sourceIndex;
+            if (exitTarget is null) exitTarget = target;
+            return exitTarget == target;
+        }
+        for (int index = 0; index < ids.Count; ++index)
+        {
+            GuestBasicBlock source = sourceBlocks[ids[index]];
+            GuestTerminator terminator = source.Terminator;
+            IReadOnlyList<GuestInstruction> instructions = source.Instructions;
+            bool last = index == ids.Count - 1;
+            if (last && terminator.Kind == "return")
+            {
+                GuestInstruction? placeholder = instructions.LastOrDefault();
+                if (placeholder is not { Op: "constant", ResultId: not null,
+                        Constant: { Kind: "int32", Value: "0" } }
+                    || placeholder.ResultId != terminator.ReturnValueId)
+                    return Fail($"Function '{functionId}' has an invalid finally return placeholder.",
+                        out error);
+                instructions = instructions.Take(instructions.Count - 1).ToArray();
+            }
+            else if (!(terminator.Kind switch
+            {
+                "branch" => ForwardOrExit(terminator.TargetBlockId, index),
+                "branch_if" => terminator.ConditionValueId is not null
+                    && terminator.TargetBlockId != terminator.FalseTargetBlockId
+                    && ForwardOrExit(terminator.TargetBlockId, index)
+                    && ForwardOrExit(terminator.FalseTargetBlockId, index),
+                _ => false,
+            }))
+                return Fail($"Function '{functionId}' has an invalid finally control flow.", out error);
+            if (instructions.Any(item => item.Op == "call_indirect"
+                    || item.Op == "call" && item.TargetId is { } called
+                        && affected.Contains(called)))
+                return Fail($"Function '{functionId}' may throw while executing finally.", out error);
+            foreach (GuestInstruction item in instructions)
+            {
+                if (item.ResultId is not { } oldResult || renamed.ContainsKey(oldResult)) continue;
+                if (!registerTypes.TryGetValue(oldResult, out string? typeId))
+                    return Fail($"Function '{functionId}' has an untyped finally value.", out error);
+                renamed.Add(oldResult, register(typeId));
+            }
+            instructionsByBlock.Add(instructions);
+        }
+        if (exitTarget is null && sourceBlocks[ids[^1]].Terminator.Kind != "return")
+            return Fail($"Function '{functionId}' has no finally exit.", out error);
+        string Rename(string id) => renamed.TryGetValue(id, out string? replacement)
+            ? replacement : id;
+        string continuationBlockId = nextBlockId;
+        string MapTarget(string id) => copiedBlocks.TryGetValue(id, out string? copied)
+            ? copied : continuationBlockId;
+        for (int index = 0; index < ids.Count; ++index)
+        {
+            GuestBasicBlock source = sourceBlocks[ids[index]];
+            GuestInstruction[] copied = instructionsByBlock[index].Select(item => item with
+            {
+                ResultId = item.ResultId is { } result ? Rename(result) : null,
+                OperandIds = item.OperandIds.Select(Rename).ToArray(),
+                TargetId = item.TargetId is { } target ? Rename(target) : null,
+            }).ToArray();
+            GuestTerminator terminator = source.Terminator;
+            GuestTerminator copiedTerminator = terminator.Kind == "return"
+                ? new GuestTerminator("branch", null, nextBlockId, null, null)
+                : terminator with
+                {
+                    ConditionValueId = terminator.ConditionValueId is { } condition
+                        ? Rename(condition) : null,
+                    TargetBlockId = MapTarget(terminator.TargetBlockId!),
+                    FalseTargetBlockId = terminator.FalseTargetBlockId is { } falseTarget
+                        ? MapTarget(falseTarget) : null,
+                };
+            output.Add(new GuestBasicBlock(copiedBlocks[ids[index]], copied,
+                copiedTerminator));
+        }
         return true;
     }
 

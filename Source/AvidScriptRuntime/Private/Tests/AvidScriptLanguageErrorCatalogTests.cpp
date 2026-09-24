@@ -364,7 +364,7 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 		TEXT("finally-catch.wasm"), TEXT("nested-finally-catch.wasm"),
 		TEXT("throw-finally-catch.wasm"), TEXT("nested-local-throw-finally.wasm"),
 		TEXT("multi-local-throw-finally.wasm"), TEXT("mixed-local-throw-finally.wasm"),
-		TEXT("called-return-finally.wasm"),
+		TEXT("called-return-finally.wasm"), TEXT("called-branching-finally.wasm"),
 		TEXT("catch-finally.wasm"),
 		TEXT("cleanup-replaces-error.wasm"), TEXT("nested-cleanup-replaces-error.wasm"),
 		TEXT("branching-cleanup.wasm"),
