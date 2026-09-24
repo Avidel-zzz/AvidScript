@@ -47,6 +47,17 @@ public static void Tick(float deltaSeconds)
 
 异步调用见 [LatentGameplay](Samples/CSharp/LatentGameplay/README.md)：`await UKismetSystemLibrary.DelayAsync(0.25f)` 在等待期间挂起脚本，恢复后再修改 Actor。该样例也展示了 EndPlay 时取消等待。
 
+两个结果任务的写法（节选自 [WASM 测试源码](Tools/AvidScript.CSharpGuest.Tests/CSharpGuestAsyncInvocationTests.cs)）：
+
+```csharp
+Task<int> left = LoadScoreAsync(7);
+Task<int> right = LoadScoreAsync(5);
+await AvidContinuations.NextTickAsync();
+int first = await left;
+int second = await right;
+Result = first * 10 + second; // 75
+```
+
 ## 样例
 
 | 用途 | 源码或说明 |
@@ -62,7 +73,7 @@ public static void Tick(float deltaSeconds)
 
 - **已自动测试：** Win64 Editor、打包样例和独立进程网络样例。真实游戏流程、真实多人联机、Android 和 iOS 仍需验收。
 - **C#：** 只编译已实现的语法与 UE API 子集；不能直接运行任意 .NET 项目或 NuGet 包。
-- **异步结果：** 支持直接 `await LoadScoreAsync(7, 5)`；也支持方法首句声明一个 `Task<int> pending = LoadScoreAsync()`，跨帧后 `await pending`。多个 Task 变量、重赋值和其他 `Task<T>` 暂不支持。详见 [Task 结果合同](Docs/Phase66/P66.C4_Task_Result_Contract.md)。
+- **异步结果：** 支持直接 `await LoadScoreAsync(7, 5)`，或在方法开头连续声明最多 8 个 `Task<int>` 变量后跨帧等待。每个变量须由同源静态方法直接创建并被 `await`；别名、重赋值及其他 `Task<T>` 暂不支持。详见 [Task 结果合同](Docs/Phase66/P66.C4_Task_Result_Contract.md)。
 - **异常：** 同步 `try/finally` 可用；`await` 不能放在其中。`catch` / `throw` 尚未接入常规构建入口。详见 [异常合同](Docs/Phase66/P66.C3_Language_Error_Channel_Contract.md)。
 - **UE 类型声明：** 修改 C# 声明的 `UClass`、`UProperty` 或 `UFunction` 后，需重新构建并重启 Editor。
 

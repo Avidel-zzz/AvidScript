@@ -34,9 +34,10 @@ internal static class CSharpTaskResultAbi
         || (document.SchemaVersion == SemanticContract.TaskLocalSchemaVersion
             && document.SemanticVersion == SemanticContract.TaskLocalSemanticVersion);
 
-    public static string? TaskLocalSymbol(SemanticAsyncMethod method) => method.Segments
+    public static string[] TaskLocalSymbols(SemanticAsyncMethod method) => method.Segments
         .Select(segment => segment.AwaitSite?.TaskLocalSymbolId)
-        .FirstOrDefault(symbolId => symbolId is not null);
+        .OfType<string>().Distinct(StringComparer.Ordinal)
+        .OrderBy(symbolId => symbolId, StringComparer.Ordinal).ToArray();
 
     public static GuestImport Import() => new(ImportId, "avidscript", "avid_task_i32_v1",
         new[] { IntTypeId, TokenTypeId, IntTypeId, IntTypeId }, TokenTypeId);
@@ -54,9 +55,9 @@ internal static class CSharpTaskResultAbi
         new[] { TokenTypeId, TokenTypeId }, IntTypeId);
 
     public static GuestRegister? LoadTaskLocalToken(CSharpFunctionLoweringContext context,
-        SemanticAsyncMethod method, int block, List<GuestInstruction> instructions)
+        string symbolId, int block, List<GuestInstruction> instructions)
     {
-        if (!context.TryGetStorage(TaskLocalSymbol(method), out GuestRegister storage)) return null;
+        if (!context.TryGetStorage(symbolId, out GuestRegister storage)) return null;
         GuestRegister? value = context.CreateTemporary(storage.TypeId, block);
         GuestRegister? token = context.CreateTemporary(TokenTypeId, block);
         if (value is null || token is null) return null;
@@ -68,30 +69,41 @@ internal static class CSharpTaskResultAbi
     public static bool ReleaseTaskLocal(CSharpFunctionLoweringContext context,
         SemanticAsyncMethod method, int block, List<GuestInstruction> instructions)
     {
-        if (TaskLocalSymbol(method) is null) return true;
-        GuestRegister? token = LoadTaskLocalToken(context, method, block, instructions);
-        return token is not null && Call(context, Release, token, null, block, instructions) is not null;
+        foreach (string symbolId in TaskLocalSymbols(method))
+        {
+            GuestRegister? token = LoadTaskLocalToken(context, symbolId, block, instructions);
+            if (token is null || Call(context, Release, token, null, block, instructions) is null)
+                return false;
+        }
+        return true;
     }
 
     public static bool RetainTaskLocal(CSharpFunctionLoweringContext context,
         SemanticAsyncMethod method, int block, List<GuestInstruction> instructions)
     {
-        if (TaskLocalSymbol(method) is null) return true;
-        GuestRegister? token = LoadTaskLocalToken(context, method, block, instructions);
-        return token is not null && Call(context, Retain, token, null, block, instructions) is not null;
+        foreach (string symbolId in TaskLocalSymbols(method))
+        {
+            GuestRegister? token = LoadTaskLocalToken(context, symbolId, block, instructions);
+            if (token is null || Call(context, Retain, token, null, block, instructions) is null)
+                return false;
+        }
+        return true;
     }
 
     public static bool TransferTaskLocalToContinuation(CSharpFunctionLoweringContext context,
         SemanticAsyncMethod method, GuestRegister continuationToken, int block,
         List<GuestInstruction> instructions)
     {
-        if (TaskLocalSymbol(method) is null) return true;
-        GuestRegister? token = LoadTaskLocalToken(context, method, block, instructions);
-        GuestRegister? accepted = context.CreateTemporary(IntTypeId, block);
-        if (token is null || accepted is null) return false;
-        instructions.Add(new("call", accepted.Id, new[] { token.Id, continuationToken.Id },
-            RetainForContinuationImportId, null, null));
-        return ReleaseTaskLocal(context, method, block, instructions);
+        foreach (string symbolId in TaskLocalSymbols(method))
+        {
+            GuestRegister? token = LoadTaskLocalToken(context, symbolId, block, instructions);
+            GuestRegister? accepted = context.CreateTemporary(IntTypeId, block);
+            if (token is null || accepted is null) return false;
+            instructions.Add(new("call", accepted.Id, new[] { token.Id, continuationToken.Id },
+                RetainForContinuationImportId, null, null));
+            if (Call(context, Release, token, null, block, instructions) is null) return false;
+        }
+        return true;
     }
 
     public static GuestRegister? PropagateFailure(CSharpFunctionLoweringContext context,

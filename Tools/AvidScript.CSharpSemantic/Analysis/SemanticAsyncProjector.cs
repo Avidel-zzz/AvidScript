@@ -1104,12 +1104,27 @@ internal static class SemanticAsyncProjector
             return false;
 
         MethodDeclarationSyntax? owner = variable.Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault();
-        if (owner?.Body?.Statements.FirstOrDefault() is not LocalDeclarationStatementSyntax
-                { Declaration.Variables.Count: 1 } first
-            || first.Declaration.Variables[0] != variable
+        if (owner?.Body is null) return false;
+        VariableDeclaratorSyntax[] leadingTasks = owner.Body.Statements
+            .TakeWhile(statement => statement is LocalDeclarationStatementSyntax
+                { Declaration.Variables.Count: 1 } declaration
+                && semanticModel.GetDeclaredSymbol(declaration.Declaration.Variables[0]) is ILocalSymbol symbol
+                && TryGetSupportedTaskResult(context.Compilation, symbol.Type, out _))
+            .Cast<LocalDeclarationStatementSyntax>()
+            .Select(statement => statement.Declaration.Variables[0]).ToArray();
+        if (leadingTasks.Length < 1
+            || leadingTasks.Length > SemanticAsyncInvocationValidator.MaximumTaskLocalsPerMethod
+            || !leadingTasks.Contains(variable)
             || owner.Body.DescendantNodes().OfType<VariableDeclaratorSyntax>()
                 .Count(candidate => semanticModel.GetDeclaredSymbol(candidate) is ILocalSymbol symbol
-                    && TryGetSupportedTaskResult(context.Compilation, symbol.Type, out _)) != 1)
+                    && TryGetSupportedTaskResult(context.Compilation, symbol.Type, out _)) != leadingTasks.Length
+            || leadingTasks.Any(candidate =>
+                semanticModel.GetDeclaredSymbol(candidate) is not ILocalSymbol symbol
+                || !owner.DescendantNodes().OfType<IdentifierNameSyntax>().Any(identifier =>
+                    SymbolEqualityComparer.Default.Equals(
+                        semanticModel.GetSymbolInfo(identifier).Symbol, symbol)
+                    && identifier.Parent is AwaitExpressionSyntax { Expression: IdentifierNameSyntax operand }
+                    && operand == identifier)))
             return false;
         IdentifierNameSyntax[] references = owner.DescendantNodes().OfType<IdentifierNameSyntax>()
             .Where(identifier => SymbolEqualityComparer.Default.Equals(

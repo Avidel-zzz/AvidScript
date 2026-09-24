@@ -686,16 +686,19 @@ internal static class CSharpSemanticInputValidator
         foreach (SemanticAsyncMethod method in document.AsyncMethods)
         {
             string[] locals = method.Segments.Select(segment => segment.AwaitSite?.TaskLocalSymbolId)
-                .OfType<string>().Distinct(StringComparer.Ordinal).ToArray();
+                .OfType<string>().Distinct(StringComparer.Ordinal)
+                .OrderBy(id => id, StringComparer.Ordinal).ToArray();
             if (locals.Length == 0) continue;
-            if (locals.Length != 1
-                || method.Segments.SingleOrDefault(segment =>
-                    segment.Ordinal == method.EntrySegmentOrdinal) is not { } entry
-                || entry.Statements.Count != 1
-                || entry.Statements[0].TargetSymbolId != locals[0]
-                || entry.Statements[0].Operation.Kind != "invocation"
-                || method.Segments.SelectMany(segment => segment.Statements)
-                    .Count(statement => statement.TargetSymbolId == locals[0]) != 1)
+            string[] declaredTasks = document.Symbols.Where(symbol => symbol.Kind == "local"
+                    && symbol.ContainingSymbolId == method.MethodSymbolId
+                    && document.Types.Any(type => type.Id == symbol.TypeId
+                        && type.CanonicalName == "global::System.Threading.Tasks.Task<int>"))
+                .Select(symbol => symbol.Id).OrderBy(id => id, StringComparer.Ordinal).ToArray();
+            if (locals.Length > SemanticAsyncInvocationValidator.MaximumTaskLocalsPerMethod
+                || !locals.SequenceEqual(declaredTasks)
+                || !SemanticAsyncInvocationValidator.HasLeadingTaskInitializers(method, locals)
+                || locals.Any(id => method.Segments.SelectMany(segment => segment.Statements)
+                    .Count(statement => statement.TargetSymbolId == id) != 1))
                 return false;
         }
         return true;

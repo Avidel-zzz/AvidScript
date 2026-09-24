@@ -8,6 +8,8 @@ namespace AvidScript.CSharpSemantic;
 // verifies that no caller stack reference becomes a persistent async input.
 public static class SemanticAsyncInvocationValidator
 {
+    public const int MaximumTaskLocalsPerMethod = 8;
+
     public static bool IsValid(SemanticDocument document)
     {
         if (document.AsyncMethods is null || document.Callables is null || document.Symbols is null
@@ -73,6 +75,20 @@ public static class SemanticAsyncInvocationValidator
             if (method.Segments is null || method.Segments.Any(segment => segment is null)) return false;
             if (taskLocalContract)
             {
+                HashSet<string> taskTypes = document.Types.Where(type =>
+                        type.CanonicalName == "global::System.Threading.Tasks.Task<int>")
+                    .Select(type => type.Id).ToHashSet(StringComparer.Ordinal);
+                string[] declaredTasks = document.Symbols.Where(symbol => symbol.Kind == "local"
+                        && symbol.ContainingSymbolId == method.MethodSymbolId
+                        && symbol.TypeId is { } typeId && taskTypes.Contains(typeId))
+                    .Select(symbol => symbol.Id).OrderBy(id => id, StringComparer.Ordinal).ToArray();
+                string[] awaitedTasks = method.Segments.Select(segment =>
+                        segment.AwaitSite?.TaskLocalSymbolId).OfType<string>()
+                    .Distinct(StringComparer.Ordinal).OrderBy(id => id, StringComparer.Ordinal).ToArray();
+                if (declaredTasks.Length > MaximumTaskLocalsPerMethod
+                    || !declaredTasks.SequenceEqual(awaitedTasks)) return false;
+                if (awaitedTasks.Length != 0
+                    && !HasLeadingTaskInitializers(method, awaitedTasks)) return false;
                 SemanticAsyncStateFlowAnalysis flow = SemanticAsyncStateFlowAnalyzer.AnalyzeControlFlow(method.Segments);
                 if (flow.Issues.Count != 0 || method.Segments.Where(segment => segment.AwaitSite is not null)
                     .Any(segment => !MergeStateSlots(
@@ -144,6 +160,32 @@ public static class SemanticAsyncInvocationValidator
     private static bool ContainsReference(SemanticOperation operation, string symbolId) =>
         operation.Kind == "local_reference" && operation.SymbolId == symbolId
         || operation.Children?.Any(child => child is not null && ContainsReference(child, symbolId)) == true;
+
+    public static bool HasLeadingTaskInitializers(SemanticAsyncMethod method,
+        IReadOnlyCollection<string> localIds)
+    {
+        if (localIds.Count < 1 || localIds.Count > MaximumTaskLocalsPerMethod) return false;
+        HashSet<string> remaining = localIds.ToHashSet(StringComparer.Ordinal);
+        HashSet<int> visited = new();
+        int ordinal = method.EntrySegmentOrdinal;
+        while (remaining.Count != 0)
+        {
+            SemanticAsyncSegment[] matches = method.Segments.Where(candidate =>
+                candidate.Ordinal == ordinal).Take(2).ToArray();
+            if (matches.Length != 1 || !visited.Add(ordinal)) return false;
+            SemanticAsyncSegment segment = matches[0];
+            if (segment.AwaitSite is not null
+                || segment.Statements.Count != 1
+                || segment.Statements[0] is not { TargetSymbolId: { } id,
+                    Operation.Kind: "invocation" }
+                || !remaining.Remove(id)
+                || segment.Transfer is not
+                    { Kind: SemanticAsyncMethod.GotoTransferKind, PrimaryTarget: var next })
+                return false;
+            ordinal = next;
+        }
+        return true;
+    }
 
     private static bool IsSupportedTaskResult(
         SemanticDocument document, string returnTypeId, string resultTypeId)

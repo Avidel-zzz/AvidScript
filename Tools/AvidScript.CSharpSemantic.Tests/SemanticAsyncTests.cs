@@ -26,9 +26,83 @@ internal static class SemanticAsyncTests
         TaskIntAwaitPublishesDirectTarget();
         TaskIntAwaitProjectsValueArguments();
         TaskIntLocalPublishesProducerAndFrame();
+        TaskIntParallelLocalsPreserveBothOwners();
         TaskIntSuspendedCleanupFailsClosed();
         FailedExceptionPlanKeepsItsContractBesideTaskSource();
-        return 18;
+        return 19;
+    }
+
+    private static void TaskIntParallelLocalsPreserveBothOwners()
+    {
+        const string source = """
+            using AvidScript;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static async Task<int> LoadScoreAsync(int score)
+                {
+                    await AvidContinuations.NextTickAsync();
+                    return score;
+                }
+                public static async void BeginPlay()
+                {
+                    Task<int> left = LoadScoreAsync(7);
+                    Task<int> right = LoadScoreAsync(5);
+                    await AvidContinuations.NextTickAsync();
+                    int first = await left;
+                    int second = await right;
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/TaskIntParallelLocals.cs");
+        Assert(document.Succeeded && SemanticAsyncInvocationValidator.IsValid(document),
+            "two leading Task<int> locals must have validated producer provenance: "
+                + string.Join(" | ", document.Diagnostics.Select(item => item.Code + ":" + item.Message)));
+        SemanticAsyncMethod consumer = document.AsyncMethods.Single(method => method.TaskResultTypeId is null);
+        string[] locals = consumer.Segments.Select(segment => segment.AwaitSite?.TaskLocalSymbolId)
+            .OfType<string>().Distinct(StringComparer.Ordinal).ToArray();
+        SemanticAsyncAwaitSite firstAwait = consumer.Segments.Select(segment => segment.AwaitSite)
+            .First(site => site is not null)!;
+        Assert(locals.Length == 2 && locals.All(id => firstAwait.StateFrame?.Slots
+                .Any(slot => slot.SymbolId == id) == true),
+            "the first suspension frame must preserve both live task locals");
+        SemanticDocument unawaited = Analyze(source.Replace(
+            "Task<int> right = LoadScoreAsync(5);",
+            "Task<int> right = LoadScoreAsync(5); Task<int> ignored = LoadScoreAsync(8);",
+            StringComparison.Ordinal), "Scripts/TaskIntUnawaitedLocal.cs");
+        Assert(!unawaited.Succeeded && unawaited.Diagnostics.Any(item => item.Code == "ASCS5403"),
+            "an unawaited Task local must not leak its producer reference");
+        SemanticDocument noTaskAwait = Analyze(source.Replace(
+            "int first = await left;", "int first = 0;", StringComparison.Ordinal)
+            .Replace("int second = await right;", "int second = 0;", StringComparison.Ordinal),
+            "Scripts/TaskIntNoAwait.cs");
+        Assert(!noTaskAwait.Succeeded,
+            "Task locals without any await must not escape ownership tracking");
+        string sixDeclarations = string.Join(" ", Enumerable.Range(0, 6)
+            .Select(index => $"Task<int> extra{index} = LoadScoreAsync({index});"));
+        string sixAwaits = string.Join(" ", Enumerable.Range(0, 6)
+            .Select(index => $"await extra{index};"));
+        SemanticDocument atBudget = Analyze(source.Replace(
+                "Task<int> right = LoadScoreAsync(5);",
+                "Task<int> right = LoadScoreAsync(5); " + sixDeclarations,
+                StringComparison.Ordinal).Replace("int second = await right;",
+                "int second = await right; " + sixAwaits, StringComparison.Ordinal),
+            "Scripts/TaskIntEightLocals.cs");
+        Assert(atBudget.Succeeded && SemanticAsyncInvocationValidator.IsValid(atBudget),
+            "eight leading Task locals must remain inside the ownership budget");
+        string extraDeclarations = string.Join(" ", Enumerable.Range(0, 7)
+            .Select(index => $"Task<int> extra{index} = LoadScoreAsync({index});"));
+        string extraAwaits = string.Join(" ", Enumerable.Range(0, 7)
+            .Select(index => $"await extra{index};"));
+        SemanticDocument overBudget = Analyze(source.Replace(
+                "Task<int> right = LoadScoreAsync(5);",
+                "Task<int> right = LoadScoreAsync(5); " + extraDeclarations,
+                StringComparison.Ordinal).Replace("int second = await right;",
+                "int second = await right; " + extraAwaits, StringComparison.Ordinal),
+            "Scripts/TaskIntTooManyLocals.cs");
+        Assert(!overBudget.Succeeded
+            && overBudget.Diagnostics.Any(item => item.Code == "ASCS5403"),
+            "the bounded Task local ownership profile must reject a ninth local");
     }
 
     private static void TaskIntLocalPublishesProducerAndFrame()

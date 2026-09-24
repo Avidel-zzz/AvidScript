@@ -108,7 +108,84 @@ internal static class CSharpGuestAsyncInvocationTests
             }
             count++;
         }
-        return count + TaskResultSemanticCompilesToWasm() + TaskLocalSemanticCompilesToWasm();
+        return count + TaskResultSemanticCompilesToWasm()
+            + TaskLocalSemanticCompilesToWasm() + TaskParallelLocalsCompileToWasm();
+    }
+
+    private static int TaskParallelLocalsCompileToWasm()
+    {
+        const string source = """
+            using AvidScript;
+            using System.Runtime.InteropServices;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static int Result;
+                public static async Task<int> LoadScoreAsync(int score)
+                {
+                    await AvidContinuations.NextTickAsync();
+                    await AvidContinuations.NextTickAsync();
+                    return score;
+                }
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay()
+                {
+                    Task<int> left = LoadScoreAsync(7);
+                    Task<int> right = LoadScoreAsync(5);
+                    await AvidContinuations.NextTickAsync();
+                    int first = await left;
+                    int second = await right;
+                    Result = first * 10 + second;
+                }
+            }
+            """;
+        SemanticDocument document = CSharpGuestContinuationTests.Analyze(
+            source, "Scripts/TaskIntParallelLocals.cs");
+        Check(document.Succeeded && document.SchemaVersion == SemanticContract.TaskLocalSchemaVersion,
+            "parallel Task locals require Semantic 36: "
+                + string.Join(" | ", document.Diagnostics.Select(item => item.Message)));
+        CSharpGuestLoweringResult lowered = CSharpGuestLowerer.Lower(document, new string('d', 64));
+        Check(lowered.Succeeded,
+            "parallel Task local lowering failed: "
+                + string.Join(" | ", lowered.Diagnostics.Select(item => item.Code + ":" + item.Message)));
+        GuestModule module = lowered.Module!;
+        Check(module.SchemaVersion == 19 && module.IrVersion == "1.18"
+            && module.Imports.Count(imported => imported.Name ==
+                "avid_task_retain_for_continuation_v1") == 1,
+            "parallel Task locals retain the versioned Guest IR ownership contract");
+        WasmCompilationResult compiled = WasmModuleCompiler.Compile(module);
+        Check(compiled.Succeeded,
+            "parallel Task local WASM failed: "
+                + string.Join(" | ", compiled.Diagnostics.Select(item => item.Message)));
+        Check(compiled.Bytes.SequenceEqual(WasmModuleCompiler.Compile(
+                GuestIrSerializer.Deserialize(GuestIrSerializer.Serialize(module))).Bytes),
+            "parallel Task local WASM must be deterministic after IR round-trip");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_MANAGED_HEAP_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            string stem = Path.Combine(output, "csharp-task-int-parallel");
+            GuestStateSlot result = module.MemoryLayout.StateSlots.Single(slot =>
+                slot.GlobalId.Contains(".Result:", StringComparison.Ordinal));
+            File.WriteAllBytes(stem + ".wasm", compiled.Bytes);
+            File.WriteAllBytes(stem + ".guest-ir.json", GuestIrSerializer.Serialize(module));
+            File.WriteAllText(stem + ".result-offset",
+                result.Offset.ToString(CultureInfo.InvariantCulture));
+        }
+        string sixDeclarations = string.Join(" ", Enumerable.Range(0, 6)
+            .Select(index => $"Task<int> extra{index} = LoadScoreAsync({index});"));
+        string sixAwaits = string.Join(" ", Enumerable.Range(0, 6)
+            .Select(index => $"await extra{index};"));
+        SemanticDocument atBudget = CSharpGuestContinuationTests.Analyze(source.Replace(
+                "Task<int> right = LoadScoreAsync(5);",
+                "Task<int> right = LoadScoreAsync(5); " + sixDeclarations,
+                StringComparison.Ordinal).Replace("int second = await right;",
+                "int second = await right; " + sixAwaits, StringComparison.Ordinal),
+            "Scripts/TaskIntEightLocals.cs");
+        CSharpGuestLoweringResult eight = CSharpGuestLowerer.Lower(atBudget, new string('d', 64));
+        Check(eight.Succeeded && WasmModuleCompiler.Compile(eight.Module!).Succeeded,
+            "eight parallel Task locals must fit the compiled continuation frame");
+        return 1;
     }
 
     private static int TaskLocalSemanticCompilesToWasm()

@@ -30,7 +30,7 @@ internal static class CSharpTaskAwaitLowerer
         if (taskLocal)
         {
             token = CSharpTaskResultAbi.LoadTaskLocalToken(
-                context, method, segment.Ordinal, instructions);
+                context, site!.TaskLocalSymbolId!, segment.Ordinal, instructions);
         }
         else
         {
