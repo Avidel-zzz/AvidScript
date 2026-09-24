@@ -29,11 +29,12 @@ internal static class CSharpGuestThrowProducerTests
         FinallyRunsBeforeOuterCatch();
         NestedFinallyRunsInnerToOuter();
         LocalThrowRunsFinallyBeforeOuterCatch();
+        NestedLocalThrowRunsFinaliesInnerToOuter();
         CleanupThrowReplacesOriginalError();
         CatchRethrowPreservesOriginalError();
         NestedCatchRethrowReachesOuterHandler();
         CatchVariableReadsBoundError();
-        return 16;
+        return 17;
     }
 
     private static void MultipleThrowProducersKeepDistinctSourceTokens()
@@ -670,6 +671,87 @@ internal static class CSharpGuestThrowProducerTests
             "branching cleanup in a throw method must fail closed");
     }
 
+    private static void NestedLocalThrowRunsFinaliesInnerToOuter()
+    {
+        const string source = """
+            class Script
+            {
+                static int CleanupCount;
+                static int Fail()
+                {
+                    try
+                    {
+                        try { throw new System.Exception(); }
+                        finally { CleanupCount = CleanupCount + 1; }
+                    }
+                    finally { CleanupCount = CleanupCount + 10; }
+                }
+                static int Catch()
+                {
+                    try { return Fail(); }
+                    catch (System.Exception) { return CleanupCount; }
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay() { Catch(); }
+            }
+            """;
+        Check(ReferenceCatch(source) == 11,
+            "the CLR reference runs nested local-throw cleanup inside-out");
+        SemanticDocument semantic = Analyze(source);
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "nested local-throw cleanup failed to compile");
+        GuestModule module = compiled!.Module;
+        GuestFunction fail = module.Functions.Single(function =>
+            function.Id.Contains(".Fail(", StringComparison.Ordinal));
+        Check(fail.Blocks.Count(block => block.Instructions.Any(item =>
+                item.Op == "global_store")) == 2
+            && fail.Blocks.Any(block => block.Instructions.Any(item =>
+                item.Op == "managed_new"))
+            && GuestModuleValidator.Validate(module).Succeeded,
+            "nested cleanup must preserve both effects and the original error root");
+        GuestFunction handler = module.Functions.Single(function =>
+            function.Id.Contains(".Catch(", StringComparison.Ordinal));
+        GuestModule stressed = AddNestedLocalCleanupCollectProbe(module, fail.Id);
+        GuestModule probe = AddCatchProbe(
+            AddProbe(stressed, fail, appendTarget: false,
+                "function:nested_local_throw_source_probe",
+                "nested_local_throw_source_probe"),
+            handler, "function:nested_local_throw_catch_probe",
+            "nested_local_throw_catch_probe");
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "nested local-throw cleanup must compile to executable WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "nested-local-throw-finally.wasm"),
+                wasm.Bytes);
+        }
+
+        const string branchingSource = """
+            class Script
+            {
+                static int Count;
+                static int Fail()
+                {
+                    try
+                    {
+                        try { throw new System.Exception(); }
+                        finally { Count = Count + 1; }
+                    }
+                    finally { if (Count == 1) Count = Count + 10; }
+                }
+            }
+            """;
+        Check(!CSharpLanguageErrorCompiler.TryLower(Analyze(branchingSource),
+                new string('a', 64), out _, out string? branchingError)
+            && branchingError is not null
+            && branchingError.Contains("cleanup", StringComparison.Ordinal),
+            "branching nested cleanup must fail closed");
+    }
+
     private static void CleanupThrowReplacesOriginalError()
     {
         const string source = """
@@ -1039,6 +1121,38 @@ internal static class CSharpGuestThrowProducerTests
         Check(!CSharpLanguageErrorCompiler.TryLower(Analyze(memberSource), new string('a', 64),
                 out _, out string? memberError) && memberError is not null,
             "exception members must stay rejected until their object contract executes");
+    }
+
+    private static GuestModule AddNestedLocalCleanupCollectProbe(
+        GuestModule module, string functionId)
+    {
+        GuestFunction function = module.Functions.Single(item => item.Id == functionId);
+        GuestBasicBlock[] cleanupBlocks = function.Blocks.Where(block =>
+            block.Instructions.Any(instruction => instruction.Op == "global_store")).ToArray();
+        Check(cleanupBlocks.Length == 2,
+            "nested local throw must have two distinct cleanup blocks");
+        IReadOnlySet<string> cleanupIds = cleanupBlocks.Select(block => block.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        GuestFunction stressed = function with
+        {
+            Blocks = function.Blocks.Select(block => cleanupIds.Contains(block.Id)
+                ? block with
+                {
+                    Instructions = new[]
+                    {
+                        new GuestInstruction("managed_collect", null,
+                            Array.Empty<string>(), null, null, null),
+                    }.Concat(block.Instructions).ToArray(),
+                } : block).ToArray(),
+        };
+        GuestModule result = module with
+        {
+            Functions = module.Functions.Select(item => item.Id == functionId
+                ? stressed : item).ToArray(),
+        };
+        Check(GuestModuleValidator.Validate(result).Succeeded,
+            "the nested cleanup GC probe must remain a valid Guest module");
+        return result;
     }
 
     private static GuestModule AddCatchVariableCollectProbe(GuestModule module)

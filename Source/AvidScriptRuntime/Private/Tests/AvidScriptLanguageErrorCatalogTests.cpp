@@ -362,7 +362,8 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 	}
 	const TArray<FString> HandledFixtures = {
 		TEXT("finally-catch.wasm"), TEXT("nested-finally-catch.wasm"),
-		TEXT("throw-finally-catch.wasm"), TEXT("cleanup-replaces-error.wasm"),
+		TEXT("throw-finally-catch.wasm"), TEXT("nested-local-throw-finally.wasm"),
+		TEXT("cleanup-replaces-error.wasm"),
 		TEXT("catch-rethrow.wasm"), TEXT("nested-rethrow.wasm"),
 		TEXT("catch-variable.wasm")};
 	for (const FString& FixtureName : HandledFixtures)

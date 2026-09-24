@@ -46,8 +46,15 @@ internal static class CSharpLocalThrowLowerer
         foreach (CSharpLocalThrowSite site in sites)
         {
             string blockId = CSharpGuestIds.Block(flow.MethodSymbolId, site.BlockOrdinal);
-            string? cleanupId = site.CleanupBlockOrdinal is { } cleanupOrdinal
-                ? CSharpGuestIds.Block(flow.MethodSymbolId, cleanupOrdinal) : null;
+            IReadOnlyList<int> cleanupOrdinals = site.CleanupBlockOrdinals
+                ?? Array.Empty<int>();
+            if (cleanupOrdinals.Count > 16
+                || cleanupOrdinals.Distinct().Count() != cleanupOrdinals.Count
+                || cleanupOrdinals.Contains(site.BlockOrdinal))
+                return Fail("The local throw has an invalid cleanup route.", out error);
+            string[] cleanupIds = cleanupOrdinals.Select(ordinal =>
+                CSharpGuestIds.Block(flow.MethodSymbolId, ordinal)).ToArray();
+            string? cleanupId = cleanupIds.FirstOrDefault();
             string? replacedOutcome = site.ReplacesThrowBlockOrdinal is { } replacedOrdinal
                 ? "local_throw:" + replacedOrdinal.ToString(CultureInfo.InvariantCulture) + ":outcome"
                 : null;
@@ -58,7 +65,8 @@ internal static class CSharpLocalThrowLowerer
                 || replacedOutcome is not null && (cleanupId is not null
                     || original.Terminator.ReturnValueId != replacedOutcome
                     || !sites.Any(other => other.BlockOrdinal == site.ReplacesThrowBlockOrdinal
-                        && other.CleanupBlockOrdinal == site.BlockOrdinal)
+                        && other.CleanupBlockOrdinals is { Count: > 0 } cleanups
+                        && cleanups[^1] == site.BlockOrdinal)
                     || original.Instructions.Any(instruction => instruction.Op is not
                         ("constant" or "global_load" or "binary" or "global_store")))
                 || replacedOutcome is null && original.Instructions.Any(instruction =>
@@ -136,12 +144,24 @@ internal static class CSharpLocalThrowLowerer
             };
             if (cleanupId is not null)
             {
-                if (!blocks.TryGetValue(cleanupId, out GuestBasicBlock? cleanup)
-                    || cleanup.Terminator.Kind != "return"
-                    || cleanup.Instructions.Count < 4
-                    || cleanup.Instructions.Any(instruction => instruction.Op is "call" or "call_indirect")
-                    || function.Blocks.Count(block => block.Terminator.Kind == "branch"
-                        && block.Terminator.TargetBlockId == cleanupId) != 1)
+                for (int index = 0; index < cleanupIds.Length; ++index)
+                {
+                    string id = cleanupIds[index];
+                    bool last = index == cleanupIds.Length - 1;
+                    if (!blocks.TryGetValue(id, out GuestBasicBlock? current)
+                        || current.Instructions.Any(instruction => instruction.Op is
+                            "call" or "call_indirect")
+                        || function.Blocks.Count(block => block.Terminator.Kind == "branch"
+                            && block.Terminator.TargetBlockId == id) != 1
+                        || !last && (current.Terminator.Kind != "branch"
+                            || current.Terminator.TargetBlockId != cleanupIds[index + 1])
+                        || last && current.Terminator.Kind != "return")
+                        return Fail("The local throw has no unique linear cleanup chain.",
+                            out error);
+                }
+                string lastCleanupId = cleanupIds[^1];
+                GuestBasicBlock cleanup = blocks[lastCleanupId];
+                if (cleanup.Instructions.Count < 4)
                     return Fail("The local throw has no unique linear cleanup return.", out error);
                 int tail = cleanup.Instructions.Count - 4;
                 GuestInstruction[] suffix = cleanup.Instructions.Skip(tail).ToArray();
@@ -158,7 +178,7 @@ internal static class CSharpLocalThrowLowerer
                     || suffix[3].OperandIds.Count != 2
                     || suffix[3].OperandIds[0] != normalOutcome)
                     return Fail("The cleanup's synthetic normal return changed shape.", out error);
-                blocks[cleanupId] = cleanup with
+                blocks[lastCleanupId] = cleanup with
                 {
                     Instructions = cleanup.Instructions.Take(tail).ToArray(),
                     Terminator = new GuestTerminator("return", null, null, null, outcome),

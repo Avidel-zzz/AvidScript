@@ -85,7 +85,7 @@ public partial class Projectile : AvidActor
 当前限制：
 
 - 编译器只支持已实现的 C# 子集；不能直接运行任意 .NET 项目或 NuGet 包。
-- `throw` / `catch` / `finally` 仅在专用测试编译入口支持部分语义；标准脚本构建入口仍拒绝异常源码。当前 `catch (System.Exception e)` 只支持引用判断。详见 [P66 计划](Docs/Phase66/P66.C_Language_Execution_Plan.md)。
+- `throw` / `catch` / `finally` 仅在专用测试编译入口支持零参 `System.Exception`、部分同步清理和重抛；`catch` 变量只支持引用判断。标准脚本构建入口仍拒绝异常源码。详见 [P66 计划](Docs/Phase66/P66.C_Language_Execution_Plan.md)。
 - Windows Editor 与打包样例已有验证；Android 真机与 iOS 尚未验收。
 
 ## 目录

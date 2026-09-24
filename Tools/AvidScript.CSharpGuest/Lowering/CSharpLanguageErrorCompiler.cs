@@ -89,7 +89,7 @@ public static class CSharpLanguageErrorCompiler
         foreach (SemanticExceptionFlow handler in handlers.Where(item =>
             item.Catches.Count == 0 && localThrows.TryGetValue(
                 CSharpGuestIds.Function(item.MethodSymbolId), out var sites)
-                && sites.Any(site => site.CleanupBlockOrdinal is not null)))
+                && sites.Any(site => site.CleanupBlockOrdinals is { Count: > 0 })))
             cleanupRoutes.Add(CSharpGuestIds.Function(handler.MethodSymbolId),
                 Array.Empty<CSharpLanguageCleanupRoute>());
         CSharpLanguageErrorTokenCatalog tokens = CSharpThrowProducerLowerer.BuildCatalog(flows);
