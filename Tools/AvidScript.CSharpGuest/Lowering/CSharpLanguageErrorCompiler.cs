@@ -144,13 +144,21 @@ public static class CSharpLanguageErrorCompiler
                     {
                         string sourceBlockId = CSharpGuestIds.Block(handler.MethodSymbolId,
                             block.Ordinal);
-                        string[] cleanupBlockIds = decision.FinallyRegionOrdinals
-                            .Select(region => CSharpGuestIds.Block(handler.MethodSymbolId,
-                                handler.Regions[region].FirstBlockOrdinal)).ToArray();
+                        string[][] cleanupRegionBlocks = decision.FinallyRegionOrdinals
+                            .Select(region => Enumerable.Range(
+                                    handler.Regions[region].FirstBlockOrdinal,
+                                    handler.Regions[region].LastBlockOrdinal
+                                        - handler.Regions[region].FirstBlockOrdinal + 1)
+                                .Select(ordinal => CSharpGuestIds.Block(
+                                    handler.MethodSymbolId, ordinal)).ToArray())
+                            .ToArray();
                         if (decision.HandlerOrdinal is not null
                             || !cleanupRoutes.TryGetValue(functionId, out var functionCleanups)
                             || !functionCleanups.Any(route => route.SourceBlockId == sourceBlockId
-                                && route.CleanupBlockIds.SequenceEqual(cleanupBlockIds)))
+                                && route.Regions.Count == cleanupRegionBlocks.Length
+                                && route.Regions.Select((region, index) =>
+                                        region.BlockIds.SequenceEqual(cleanupRegionBlocks[index]))
+                                    .All(matches => matches)))
                             return Fail("Catch routing requires a validated cleanup and handler path.", out error);
                     }
                     if (decision.HandlerOrdinal is { } ordinal)

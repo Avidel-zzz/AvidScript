@@ -47,19 +47,22 @@ internal static class CSharpLocalThrowLowerer
             .ToDictionary(register => register.Id, register => register.TypeId,
                 StringComparer.Ordinal);
         Dictionary<int, (string OutcomeId, int SiteCount)> branchingShared = new();
-        foreach (IGrouping<int, CSharpLocalThrowSite> group in sites
+        foreach (IGrouping<int, CSharpBranchingCleanup> group in sites
             .Where(site => site.BranchingCleanup is not null)
-            .GroupBy(site => site.BranchingCleanup!.ExitBlockOrdinal))
+            .Select(site => site.BranchingCleanup!)
+            .Concat(normalReturns.Where(site => site.BranchingCleanup is not null)
+                .Select(site => site.BranchingCleanup!))
+            .GroupBy(route => route.ExitBlockOrdinal))
         {
-            CSharpLocalThrowSite[] owners = group.ToArray();
-            CSharpBranchingCleanup route = owners[0].BranchingCleanup!;
-            if (owners.Length > 16 || owners.Any(site =>
-                    site.ReplacesThrowBlockOrdinal is not null
-                    || site.BranchingCleanup is not { } other
-                    || !other.BlockOrdinals.SequenceEqual(route.BlockOrdinals)))
+            CSharpBranchingCleanup[] routeVariants = group.ToArray();
+            CSharpBranchingCleanup route = routeVariants[0];
+            if (routeVariants.Length > 16 || routeVariants.Any(other =>
+                    !other.BlockOrdinals.SequenceEqual(route.BlockOrdinals))
+                || sites.Any(site => site.BranchingCleanup?.ExitBlockOrdinal
+                    == group.Key && site.ReplacesThrowBlockOrdinal is not null))
                 return Fail("Shared branching cleanup needs one source-derived route.",
                     out error);
-            string outcomeId = "local_throw:branch_cleanup:"
+            string outcomeId = "language_error:branch_cleanup:"
                 + group.Key.ToString(CultureInfo.InvariantCulture) + ":outcome";
             if (!registerIds.Add(outcomeId)
                 || !blocks.TryGetValue(function.EntryBlockId, out GuestBasicBlock? entry))
@@ -73,7 +76,8 @@ internal static class CSharpLocalThrowLowerer
                         Array.Empty<string>(), null, null, null),
                 }.Concat(entry.Instructions).ToArray(),
             };
-            branchingShared.Add(group.Key, (outcomeId, owners.Length));
+            branchingShared.Add(group.Key, (outcomeId,
+                sites.Count(site => site.BranchingCleanup?.ExitBlockOrdinal == group.Key)));
         }
         Dictionary<int, HashSet<string>> normalBranchEntrances = new();
         if (normalReturns.Count > 16
@@ -252,6 +256,27 @@ internal static class CSharpLocalThrowLowerer
             sharedCleanups.Add(group.Key, (outcomeId, owners.Length));
         }
         HashSet<string> preparedCleanupReturns = new(StringComparer.Ordinal);
+        foreach (IGrouping<int, CSharpNormalReturnCleanupSite> group in normalReturns
+            .Where(site => site.BranchingCleanup is not null)
+            .GroupBy(site => site.BranchingCleanup!.ExitBlockOrdinal))
+        {
+            if (sites.Any(site => site.BranchingCleanup?.ExitBlockOrdinal == group.Key))
+                continue;
+            CSharpBranchingCleanup route = group.First().BranchingCleanup!;
+            string exitId = CSharpGuestIds.Block(flow.MethodSymbolId, group.Key);
+            if (!normalBranchEntrances.TryGetValue(group.Key,
+                    out HashSet<string>? owners)
+                || !branchingShared.TryGetValue(group.Key,
+                    out (string OutcomeId, int SiteCount) shared)
+                || !ValidBranchingCleanup(flow, blocks, owners, route)
+                || !blocks.TryGetValue(exitId, out GuestBasicBlock? cleanup)
+                || !TryRewriteSyntheticCleanupReturn(cleanup, shared.OutcomeId,
+                    out GuestBasicBlock? rewritten))
+                return Fail("Normal returns need one verified branching cleanup exit.",
+                    out error);
+            blocks[exitId] = rewritten!;
+            preparedCleanupReturns.Add(exitId);
+        }
 
         foreach (CSharpLocalThrowSite site in sites)
         {
@@ -436,28 +461,10 @@ internal static class CSharpLocalThrowLowerer
                         return Fail("Shared cleanup changed its error outcome.", out error);
                     continue;
                 }
-                if (cleanup.Instructions.Count < 4)
-                    return Fail("The local throw has no unique linear cleanup return.", out error);
-                int tail = cleanup.Instructions.Count - 4;
-                GuestInstruction[] suffix = cleanup.Instructions.Skip(tail).ToArray();
-                string? normalOutcome = cleanup.Terminator.ReturnValueId;
-                if (normalOutcome is null || suffix[0].Op != "stack_alloc"
-                    || suffix[0].ResultId != normalOutcome
-                    || suffix[1].Op != "constant"
-                    || suffix[1].Constant is not { Kind: "int32", Value: "0" }
-                    || suffix[2].Op != "field_store" || suffix[2].TargetId != "field:status"
-                    || suffix[2].OperandIds.Count != 2
-                    || suffix[2].OperandIds[0] != normalOutcome
-                    || suffix[2].OperandIds[1] != suffix[1].ResultId
-                    || suffix[3].Op != "field_store" || suffix[3].TargetId != "field:value"
-                    || suffix[3].OperandIds.Count != 2
-                    || suffix[3].OperandIds[0] != normalOutcome)
+                if (!TryRewriteSyntheticCleanupReturn(cleanup, outcome,
+                        out GuestBasicBlock? rewritten))
                     return Fail("The cleanup's synthetic normal return changed shape.", out error);
-                blocks[lastCleanupId] = cleanup with
-                {
-                    Instructions = cleanup.Instructions.Take(tail).ToArray(),
-                    Terminator = new GuestTerminator("return", null, null, null, outcome),
-                };
+                blocks[lastCleanupId] = rewritten!;
             }
         }
         foreach (CSharpRethrowSite site in rethrows)
@@ -592,6 +599,36 @@ internal static class CSharpLocalThrowLowerer
                 return false;
         }
         return reached.Count == ids.Length;
+    }
+
+    private static bool TryRewriteSyntheticCleanupReturn(
+        GuestBasicBlock cleanup, string outcome, out GuestBasicBlock? rewritten)
+    {
+        rewritten = null;
+        if (cleanup.Terminator.Kind != "return"
+            || cleanup.Instructions.Count < 4)
+            return false;
+        int tail = cleanup.Instructions.Count - 4;
+        GuestInstruction[] suffix = cleanup.Instructions.Skip(tail).ToArray();
+        string? normalOutcome = cleanup.Terminator.ReturnValueId;
+        if (normalOutcome is null || suffix[0].Op != "stack_alloc"
+            || suffix[0].ResultId != normalOutcome
+            || suffix[1].Op != "constant"
+            || suffix[1].Constant is not { Kind: "int32", Value: "0" }
+            || suffix[2].Op != "field_store" || suffix[2].TargetId != "field:status"
+            || suffix[2].OperandIds.Count != 2
+            || suffix[2].OperandIds[0] != normalOutcome
+            || suffix[2].OperandIds[1] != suffix[1].ResultId
+            || suffix[3].Op != "field_store" || suffix[3].TargetId != "field:value"
+            || suffix[3].OperandIds.Count != 2
+            || suffix[3].OperandIds[0] != normalOutcome)
+            return false;
+        rewritten = cleanup with
+        {
+            Instructions = cleanup.Instructions.Take(tail).ToArray(),
+            Terminator = new GuestTerminator("return", null, null, null, outcome),
+        };
+        return true;
     }
 
     private static GuestInstruction Constant(string register, int value) =>

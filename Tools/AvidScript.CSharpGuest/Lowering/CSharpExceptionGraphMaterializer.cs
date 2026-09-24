@@ -299,8 +299,8 @@ internal static class CSharpExceptionGraphMaterializer
         normalReturns = Array.Empty<CSharpNormalReturnCleanupSite>();
         error = null;
         if (flow.Catches.Count != 1 || flow.Throws.Count != 0
-            || flow.Regions.Count != 7 || flow.Blocks is not { Count: 5 } blocks
-            || flow.Branches.Count != 4
+            || flow.Regions.Count != 7 || flow.Blocks is not { Count: >= 5 } blocks
+            || flow.Branches.Count < 4
             || flow.Regions[0] is not { Kind: "root", ParentOrdinal: -1 }
             || flow.Regions[1] is not { Kind: "try_and_finally", ParentOrdinal: 0 }
             || flow.Regions[2] is not { Kind: "try", ParentOrdinal: 1 }
@@ -310,64 +310,118 @@ internal static class CSharpExceptionGraphMaterializer
             || flow.Regions[5] is not { Kind: "catch", ParentOrdinal: 3,
                 FirstBlockOrdinal: 2, LastBlockOrdinal: 2 }
             || flow.Regions[6] is not { Kind: "finally", ParentOrdinal: 1,
-                FirstBlockOrdinal: 3, LastBlockOrdinal: 3 }
+                FirstBlockOrdinal: 3 }
+            || flow.Regions[6].LastBlockOrdinal != blocks.Count - 2
+            || flow.Regions[6].LastBlockOrdinal > 18
             || flow.Catches[0] is not { RegionOrdinal: 5, HasFilter: false,
                 ExceptionVariableSymbolId: null }
             || flow.Catches[0].ExceptionTypeId
                 != CSharpThrowProducerLowerer.ExceptionTypeId
             || blocks[0].Operations.Count != 0 || blocks[0].BranchValue is not null
-            || blocks[4].Operations.Count != 0 || blocks[4].BranchValue is not null
+            || blocks[^1].Operations.Count != 0 || blocks[^1].BranchValue is not null
             || blocks[1].EnclosingRegionOrdinal != 4
             || blocks[2].EnclosingRegionOrdinal != 5
-            || blocks[3].EnclosingRegionOrdinal != 6
-            || blocks.Any(block => block.ConditionKind != "none")
+            || blocks[0].ConditionKind != "none"
+            || blocks[1].ConditionKind != "none"
+            || blocks[2].ConditionKind != "none"
+            || blocks[^1].ConditionKind != "none"
             || blocks[1].Operations.Count != 0 || blocks[2].Operations.Count != 0
             || blocks[1].BranchValue is not { } tryValue || !Supported(tryValue)
             || blocks[2].BranchValue is not { } catchValue || !Supported(catchValue)
             || new[] { tryValue, catchValue }.SelectMany(Descendants)
                 .Any(operation => operation.Kind is "await" or "throw" or "try"
                     or "conditional" or "switch" or "branch" or "loop")
-            || blocks[3].Operations.Count == 0 || blocks[3].BranchValue is not null
-            || blocks[3].Operations.Any(operation => !Supported(operation)
-                || Descendants(operation).Any(item => item.Kind is
-                    "invocation" or "await" or "throw" or "try"
-                    or "conditional" or "switch" or "branch" or "loop"))
             || flow.Branches.Count(branch => branch.SourceBlockOrdinal == 0
                 && branch.DestinationBlockOrdinal == 1
                 && branch.Kind == "fallthrough"
                 && branch.Semantics == "regular") != 1
             || new[] { 1, 2 }.Any(ordinal => flow.Branches.Count(branch =>
                 branch.SourceBlockOrdinal == ordinal
-                && branch.DestinationBlockOrdinal == 4
+                && branch.DestinationBlockOrdinal == blocks.Count - 1
                 && branch.Kind == "fallthrough"
                 && branch.Semantics == "return"
                 && branch.FinallyRegionOrdinals.SequenceEqual(new[] { 6 })) != 1)
-            || flow.Branches.Count(branch => branch.SourceBlockOrdinal == 3
+            || flow.Branches.Count(branch => branch.SourceBlockOrdinal
+                == flow.Regions[6].LastBlockOrdinal
                 && branch.DestinationBlockOrdinal == -1
                 && branch.Kind == "fallthrough"
                 && branch.Semantics == "structured_exception_handling") != 1)
-            return Fail("Catch cleanup needs one source-backed linear finally around two return leaves.",
+            return Fail("Catch cleanup needs one source-backed bounded finally around two return leaves.",
                 out error);
 
-        SemanticControlFlowEdge[] edges =
+        int cleanupExit = flow.Regions[6].LastBlockOrdinal;
+        List<SemanticControlFlowEdge> edges = new()
         {
             new(0, 1, "fallthrough", "regular"),
-            new(1, 4, "fallthrough", "return"),
-            new(2, 4, "fallthrough", "return"),
-            new(3, 4, "fallthrough", "return"),
+            new(1, blocks.Count - 1, "fallthrough", "return"),
+            new(2, blocks.Count - 1, "fallthrough", "return"),
         };
-        graph = new SemanticControlFlowGraph(flow.MethodSymbolId, 0, 4,
+        HashSet<int> reachedCleanup = new() { 3 };
+        for (int ordinal = 3; ordinal <= cleanupExit; ++ordinal)
+        {
+            SemanticExceptionBlock block = blocks[ordinal];
+            SemanticExceptionBranch[] outgoing = flow.Branches.Where(branch =>
+                branch.SourceBlockOrdinal == ordinal).ToArray();
+            if (!reachedCleanup.Contains(ordinal)
+                || block.EnclosingRegionOrdinal != 6
+                || block.Operations.Any(operation => !Supported(operation)
+                    || Descendants(operation).Any(item => item.Kind is
+                        "invocation" or "await" or "throw" or "try"
+                        or "conditional" or "switch" or "branch" or "loop")))
+                return Fail("Catch cleanup has an unsupported operation or block.", out error);
+            if (ordinal == cleanupExit)
+            {
+                if (block.Operations.Count == 0 || block.ConditionKind != "none"
+                    || block.BranchValue is not null || outgoing.Length != 1
+                    || outgoing[0].DestinationBlockOrdinal != -1
+                    || outgoing[0].Semantics != "structured_exception_handling")
+                    return Fail("Catch cleanup needs one final exit.", out error);
+                edges.Add(new(ordinal, blocks.Count - 1, "fallthrough", "return"));
+                continue;
+            }
+            if (outgoing.Length == 2)
+            {
+                if (block.Operations.Count != 0 || block.ConditionKind == "none"
+                    || block.BranchValue is not { } condition
+                    || !PureThrowDecision(condition)
+                    || outgoing.Count(branch => branch.Kind == "conditional") != 1
+                    || outgoing.Count(branch => branch.Kind == "fallthrough") != 1
+                    || outgoing.Select(branch => branch.DestinationBlockOrdinal)
+                        .Distinct().Count() != 2)
+                    return Fail("Catch cleanup needs pure branch decisions.", out error);
+            }
+            else if (outgoing.Length != 1 || block.ConditionKind != "none"
+                || block.BranchValue is not null || outgoing[0].Kind != "fallthrough")
+                return Fail("Catch cleanup needs bounded forward blocks.", out error);
+            if (outgoing.Any(branch => branch.Semantics != "regular"
+                || branch.DestinationBlockOrdinal <= ordinal
+                || branch.DestinationBlockOrdinal > cleanupExit))
+                return Fail("Catch cleanup cannot leave or loop.", out error);
+            foreach (SemanticExceptionBranch branch in outgoing)
+            {
+                reachedCleanup.Add(branch.DestinationBlockOrdinal);
+                edges.Add(new(ordinal, branch.DestinationBlockOrdinal,
+                    branch.Kind, "regular"));
+            }
+        }
+        if (flow.Branches.Count != edges.Count)
+            return Fail("Catch cleanup has an unaccounted source edge.", out error);
+        CSharpBranchingCleanup? branchingCleanup = cleanupExit == 3 ? null
+            : new(3, cleanupExit, Enumerable.Range(3, cleanupExit - 2).ToArray());
+        graph = new SemanticControlFlowGraph(flow.MethodSymbolId, 0, blocks.Count - 1,
             blocks.Select(block => new SemanticBasicBlock(block.Ordinal, block.Kind,
-                block.IsReachable, block.ConditionKind, block.Operations,
-                block.Ordinal == 3 ? ZeroPlaceholder(blocks[3].Operations[0].Span)
+                block.Ordinal >= 3 || block.IsReachable,
+                block.ConditionKind, block.Operations,
+                block.Ordinal == cleanupExit
+                    ? ZeroPlaceholder(blocks[cleanupExit].Operations[0].Span)
                     : block.BranchValue,
                 edges.Where(edge => edge.DestinationBlockOrdinal == block.Ordinal).ToArray(),
                 edges.Where(edge => edge.SourceBlockOrdinal == block.Ordinal).ToArray()))
                 .ToArray());
         normalReturns = new[]
         {
-            new CSharpNormalReturnCleanupSite(1, 3),
-            new CSharpNormalReturnCleanupSite(2, 3),
+            new CSharpNormalReturnCleanupSite(1, 3, branchingCleanup),
+            new CSharpNormalReturnCleanupSite(2, 3, branchingCleanup),
         };
         return true;
     }

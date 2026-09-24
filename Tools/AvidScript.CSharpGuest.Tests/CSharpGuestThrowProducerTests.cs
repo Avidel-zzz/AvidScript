@@ -36,13 +36,14 @@ internal static class CSharpGuestThrowProducerTests
         CalledReturnAndLocalThrowRunTheSameFinally();
         CalledReturnRunsBranchingFinally();
         CatchReturnsRunOuterFinally();
+        CatchReturnsRunBranchingFinally();
         CleanupThrowReplacesOriginalError();
         NestedCleanupThrowReplacesOriginalError();
         BranchingFinallyRunsBeforeErrorPropagation();
         CatchRethrowPreservesOriginalError();
         NestedCatchRethrowReachesOuterHandler();
         CatchVariableReadsBoundError();
-        return 25;
+        return 26;
     }
 
     private static void MultipleThrowProducersKeepDistinctSourceTokens()
@@ -1545,6 +1546,152 @@ internal static class CSharpGuestThrowProducerTests
         {
             Directory.CreateDirectory(output);
             File.WriteAllBytes(Path.Combine(output, "catch-finally.wasm"), wasm.Bytes);
+        }
+    }
+
+    private static void CatchReturnsRunBranchingFinally()
+    {
+        const string source = """
+            class Script
+            {
+                static int Choice;
+                static bool UseFirst;
+                static int Count;
+                static int FailTry() { throw new System.Exception(); }
+                static int FailCatch() { throw new System.Exception(); }
+                static int Maybe()
+                {
+                    if (Choice == 0) return 5;
+                    return FailTry();
+                }
+                static int Recover()
+                {
+                    if (Choice == 1) return 7;
+                    return FailCatch();
+                }
+                static int Run()
+                {
+                    try { return Maybe(); }
+                    catch (System.Exception) { return Recover(); }
+                    finally
+                    {
+                        if (UseFirst) Count = Count + 1;
+                        else Count = Count + 2;
+                        Count = Count + 10;
+                    }
+                }
+                static int NormalFirst()
+                {
+                    Choice = 0; UseFirst = true; Count = 0;
+                    int value = Run();
+                    return value + Count * 100;
+                }
+                static int NormalSecond()
+                {
+                    Choice = 0; UseFirst = false; Count = 0;
+                    int value = Run();
+                    return value + Count * 100;
+                }
+                static int HandledFirst()
+                {
+                    Choice = 1; UseFirst = true; Count = 0;
+                    int value = Run();
+                    return value + Count * 100;
+                }
+                static int HandledSecond()
+                {
+                    Choice = 1; UseFirst = false; Count = 0;
+                    int value = Run();
+                    return value + Count * 100;
+                }
+                static int EscapedFirst()
+                {
+                    Choice = 2; UseFirst = true; Count = 0;
+                    try { return Run(); }
+                    catch (System.Exception) { return Count + 20; }
+                }
+                static int EscapedSecond()
+                {
+                    Choice = 2; UseFirst = false; Count = 0;
+                    try { return Run(); }
+                    catch (System.Exception) { return Count + 20; }
+                }
+                static int UncaughtFirst()
+                {
+                    Choice = 2; UseFirst = true; Count = 0; return Run();
+                }
+                static int UncaughtSecond()
+                {
+                    Choice = 2; UseFirst = false; Count = 0; return Run();
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay()
+                {
+                    NormalFirst(); NormalSecond(); HandledFirst();
+                    HandledSecond(); EscapedFirst(); EscapedSecond();
+                }
+            }
+            """;
+        Check(ReferenceCatch(source, "NormalFirst") == 1105
+            && ReferenceCatch(source, "NormalSecond") == 1205
+            && ReferenceCatch(source, "HandledFirst") == 1107
+            && ReferenceCatch(source, "HandledSecond") == 1207
+            && ReferenceCatch(source, "EscapedFirst") == 31
+            && ReferenceCatch(source, "EscapedSecond") == 32,
+            "CLR must run the selected outer finally branch after try, catch, and escaping errors");
+        Check(CSharpLanguageErrorCompiler.TryLower(Analyze(source), new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "catch branching cleanup failed to compile");
+        GuestModule module = compiled!.Module;
+        Check(module.LanguageErrorCatalog is { Sources.Count: 2 }
+            && GuestModuleValidator.Validate(module).Succeeded,
+            "catch branching cleanup needs two source errors and a valid outcome graph");
+        GuestFunction run = module.Functions.Single(function =>
+            function.Id.Contains(".Run(", StringComparison.Ordinal));
+        int cleanupBlocks = run.Blocks.Count(block => block.Instructions.Any(
+            instruction => instruction.Op == "global_store"));
+        Check(cleanupBlocks >= 6 && cleanupBlocks % 3 == 0,
+            "catch branching cleanup must retain both arms and their cloned error paths");
+        GuestModule probe = AddLocalCleanupCollectProbe(module, run.Id, cleanupBlocks);
+        foreach ((string method, string suffix) in new[]
+        {
+            ("NormalFirst", "normal_first"),
+            ("NormalSecond", "normal_second"),
+            ("HandledFirst", "handled_first"),
+            ("HandledSecond", "handled_second"),
+            ("EscapedFirst", "escaped_first"),
+            ("EscapedSecond", "escaped_second"),
+        })
+        {
+            GuestFunction caller = module.Functions.Single(function =>
+                function.Id.Contains("." + method + "(", StringComparison.Ordinal));
+            probe = AddCatchProbe(probe, caller,
+                "function:catch_branch_" + suffix + "_probe",
+                "catch_branch_" + suffix + "_probe");
+        }
+        foreach ((string method, string suffix) in new[]
+        {
+            ("UncaughtFirst", "source_first"),
+            ("UncaughtSecond", "source_second"),
+        })
+        {
+            GuestFunction caller = module.Functions.Single(function =>
+                function.Id.Contains("." + method + "(", StringComparison.Ordinal));
+            probe = AddProbe(probe, caller, appendTarget: false,
+                "function:catch_branch_" + suffix + "_probe",
+                "catch_branch_" + suffix + "_probe");
+        }
+        Check(GuestModuleValidator.Validate(probe).Succeeded,
+            "catch branching probes must preserve the Guest outcome contract");
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "catch branching cleanup must compile to executable WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "catch-branching-finally.wasm"),
+                wasm.Bytes);
         }
     }
 
