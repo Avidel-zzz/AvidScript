@@ -387,10 +387,11 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 	World->InitializeActorsForPlay(FURL());
 	ON_SCOPE_EXIT { GEngine->DestroyWorldContext(World); World->DestroyWorld(false); };
 	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
-	for (const TCHAR* Scenario : {TEXT("immediate"), TEXT("deferred"), TEXT("teardown"), TEXT("chain")})
+	for (const TCHAR* Scenario : {TEXT("immediate"), TEXT("deferred"), TEXT("teardown"), TEXT("chain"), TEXT("arguments")})
 	{
 		const bool bTeardown = FCString::Strcmp(Scenario, TEXT("teardown")) == 0;
 		const bool bChain = FCString::Strcmp(Scenario, TEXT("chain")) == 0;
+		const bool bArguments = FCString::Strcmp(Scenario, TEXT("arguments")) == 0;
 		const bool bDeferred = FCString::Strcmp(Scenario, TEXT("immediate")) != 0;
 		const FString Stem = FPaths::Combine(FPaths::ProjectSavedDir(),
 			TEXT("AvidScriptManagedHeapTests/GuestFixtures"),
@@ -469,7 +470,7 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Compiled C# Task<int> has the expected resume count"), Resumes,
 			bTeardown ? 0 : bChain ? 3 : bDeferred ? 2 : 0);
 		TestEqual(TEXT("Compiled C# Task<int> preserves result"), ReadResult(),
-			bTeardown ? 0 : bChain ? 13 : 12);
+			bTeardown ? 0 : bChain ? 13 : bArguments ? 75 : 12);
 		TestEqual(TEXT("Compiled C# Task<int> releases all result references"),
 			Owner->GetTaskResultsForTesting().GetCount(), 0);
 		Owner->Teardown();

@@ -81,7 +81,7 @@ public static class SemanticAsyncInvocationValidator
                         || document.SemanticVersion != SemanticContract.TaskResultSemanticVersion
                         || site.TaskCallableId is null
                         || !callables.TryGetValue(site.TaskCallableId, out SemanticCallable? target)
-                        || !target.IsStatic || target.Parameters.Count != 0
+                        || !target.IsStatic
                         || !IsSupportedTaskResult(document, target.ReturnTypeId, site.ResultTypeId ?? "")
                         || !document.AsyncMethods.Any(producer => producer.MethodSymbolId == site.TaskCallableId
                             && producer.TaskResultTypeId == site.ResultTypeId)
@@ -90,7 +90,11 @@ public static class SemanticAsyncInvocationValidator
                         || site.ResultSymbolId is { } resultSymbolId
                             && !document.Symbols.Any(symbol => symbol?.Id == resultSymbolId
                                 && symbol.Kind == "local" && symbol.TypeId == site.ResultTypeId)
-                        || site.Arguments is null || site.Arguments.Count != 0
+                        || site.Arguments is null
+                        || site.Arguments.Count != target.Parameters.Count
+                        || site.Arguments.Where((argument, index) => argument is null
+                            || target.Parameters[index].RefKind != "none"
+                            || argument.TypeId != target.Parameters[index].TypeId).Any()
                         || site.CancellationToken is not null
                         || site.BindingOrdinal != -1
                         || site.PayloadDescriptorTypeId is not null) return false;

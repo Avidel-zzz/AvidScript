@@ -602,10 +602,15 @@ internal static class SemanticAsyncProjector
                 invocation.TargetMethod.ReturnType, out ITypeSymbol? taskResultType))
         {
             IMethodSymbol target = invocation.TargetMethod;
+            IArgumentOperation[] taskArguments = invocation.Arguments.ToArray();
             if (cancellationTokenOperation is not null
                 || !ReferenceEquals(invocation, candidateInvocation)
                 || !target.IsStatic
-                || target.Parameters.Length != 0
+                || taskArguments.Length != target.Parameters.Length
+                || taskArguments.Where((argument, index) =>
+                    argument.ArgumentKind != ArgumentKind.Explicit
+                    || argument.Parameter?.Ordinal != index
+                    || target.Parameters[index].RefKind != RefKind.None).Any()
                 || target.IsGenericMethod
                 || target.ContainingType.IsGenericType
                 || target.IsVirtual || target.IsOverride || target.IsAbstract
@@ -614,7 +619,25 @@ internal static class SemanticAsyncProjector
                 || !SymbolEqualityComparer.Default.Equals(awaitOperation.Type, taskResultType))
             {
                 diagnostics.Add(Error("ASCS5403",
-                    "Task<int> await requires a direct zero-argument static source method call.",
+                    "Task<int> await requires a direct static source method call with explicit value arguments in parameter order.",
+                    SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, awaitExpression.Span)));
+                return false;
+            }
+
+            List<SemanticOperation> projectedTaskArguments = new(taskArguments.Length);
+            int diagnosticsBeforeArguments = diagnostics.Count;
+            foreach (IArgumentOperation argument in taskArguments)
+            {
+                projectedTaskArguments.Add(SemanticOperationProjector.ProjectAsyncStatementOperation(
+                    argument.Value, context.PrimaryUnit, typeRegistry, diagnostics));
+            }
+            if (diagnostics.Count != diagnosticsBeforeArguments
+                || projectedTaskArguments.Where((argument, index) =>
+                    !AllOperationsSupported(argument)
+                    || argument.TypeId != typeRegistry.Register(target.Parameters[index].Type)).Any())
+            {
+                diagnostics.Add(Error("ASCS5404",
+                    "Task<int> await arguments must match the source method value parameters.",
                     SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, awaitExpression.Span)));
                 return false;
             }
@@ -638,7 +661,7 @@ internal static class SemanticAsyncProjector
                 callbackId,
                 "task_call",
                 "task_result",
-                Array.Empty<SemanticOperation>(),
+                projectedTaskArguments,
                 taskResultSymbolId,
                 taskResultTypeId,
                 SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, awaitExpression.Span),

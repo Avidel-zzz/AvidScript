@@ -1217,11 +1217,14 @@ internal static class CSharpSemanticInputValidator
                 && awaitSite.TaskCallableId is { } targetId
                 && callables.Count(callable => callable.MethodSymbolId == targetId
                     && callable.HasBody && callable.IsStatic
-                    && callable.Parameters.Count == 0) == 1
+                    && callable.Parameters.Count == awaitSite.Arguments.Count
+                    && callable.Parameters.OrderBy(parameter => parameter.Ordinal)
+                        .Select((parameter, index) => parameter.RefKind == "none"
+                            && parameter.TypeId == awaitSite.Arguments[index].TypeId)
+                        .All(matches => matches)) == 1
                 && document.AsyncMethods.Any(producer => producer.MethodSymbolId == targetId
                     && producer.TaskResultTypeId == "type:int32")
                 && awaitSite.PayloadKind == "task_result"
-                && awaitSite.Arguments.Count == 0
                 && awaitSite.CancellationToken is null
                 && awaitSite.ResultTypeId == "type:int32"
                 && awaitSite.PayloadValueTypeId == "type:int32"

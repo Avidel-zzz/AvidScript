@@ -169,7 +169,28 @@ internal static class CSharpGuestAsyncInvocationTests
             }
             """;
         CompileTaskFixture("chain", chainSource);
-        return count + 1;
+        const string argumentsSource = """
+            using AvidScript;
+            using System.Runtime.InteropServices;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static int Result;
+                public static async Task<int> LoadScoreAsync(int startingScore, int bonus)
+                {
+                    await AvidContinuations.NextTickAsync();
+                    return startingScore * 10 + bonus;
+                }
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay()
+                {
+                    int score = await LoadScoreAsync(7, 5);
+                    Result = score;
+                }
+            }
+            """;
+        CompileTaskFixture("arguments", argumentsSource);
+        return count + 2;
     }
 
     private static void CompileTaskFixture(string scenario, string source)

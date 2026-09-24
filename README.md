@@ -58,7 +58,7 @@ public static void Tick(float deltaSeconds)
 
 - 这是开发中的插件。Win64 Editor、打包样例及独立进程网络样例有自动化测试；真实游戏流程、真实多人联机和 Android/iOS 尚未验收。
 - 编译器实现的是 C# 与 UE API 的子集，不支持把任意 .NET 项目或 NuGet 包直接放进游戏运行。
-- `Task<int>` 仅支持直接 `await` 同源静态无参数方法；Task 变量、其他 `Task<T>` 以及语言错误传播还未接通，见 [任务结果合同](Docs/Phase66/P66.C4_Task_Result_Contract.md)。
+- `Task<int>` 支持直接 `await` 同源静态方法，值参数须按声明顺序显式传入；Task 变量、其他 `Task<T>` 以及语言错误传播还未接通，见 [任务结果合同](Docs/Phase66/P66.C4_Task_Result_Contract.md)。
 - `try` / `catch` / `finally` 的受限写法目前只在[专用测试入口](Docs/Phase66/P66.C3_Language_Error_Channel_Contract.md)可用。
 - 修改 C# 声明的 `UClass`、`UProperty` 或 `UFunction` 后，需要重新构建并重启 Editor，见 [ScriptDefinedTypes](Samples/CSharp/ScriptDefinedTypes/README.md)。
 

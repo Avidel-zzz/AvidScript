@@ -17,6 +17,7 @@ internal static class CSharpTaskAwaitLowerer
             callable.MethodSymbolId == site?.TaskCallableId);
         if (site is null || target is null || abi.TaskResultImportId is null
             || segment.Transfer?.Kind != SemanticAsyncMethod.AwaitTransferKind
+            || site.Arguments.Count != target.Parameters.Count
             || !context.TryGetStorage(CSharpTaskResultAbi.AwaitSlot(site), out GuestRegister storage))
         {
             context.Add("ASCG1010", "Task<int> await has no validated target or state storage.");
@@ -26,7 +27,16 @@ internal static class CSharpTaskAwaitLowerer
         GuestRegister? taskValue = context.CreateTemporary(target.ReturnTypeId, segment.Ordinal);
         GuestRegister? token = context.CreateTemporary(CSharpTaskResultAbi.TokenTypeId, segment.Ordinal);
         if (taskValue is null || token is null) return false;
-        instructions.Add(new("call", taskValue.Id, Array.Empty<string>(),
+        List<string> arguments = new(site.Arguments.Count);
+        SemanticCallableParameter[] parameters = target.Parameters.OrderBy(parameter => parameter.Ordinal).ToArray();
+        for (int index = 0; index < site.Arguments.Count; ++index)
+        {
+            GuestRegister? argument = CSharpOperationLowerer.LowerValue(
+                context, site.Arguments[index], segment.Ordinal, instructions);
+            if (argument is null || argument.TypeId != parameters[index].TypeId) return false;
+            arguments.Add(argument.Id);
+        }
+        instructions.Add(new("call", taskValue.Id, arguments,
             CSharpGuestIds.Function(target.MethodSymbolId), null, null));
         instructions.Add(new("convert", token.Id, new[] { taskValue.Id }, null, null, null));
         instructions.Add(new("local_store", null, new[] { token.Id }, storage.Id, null, null));

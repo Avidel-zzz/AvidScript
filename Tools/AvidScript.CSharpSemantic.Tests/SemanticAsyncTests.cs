@@ -24,8 +24,65 @@ internal static class SemanticAsyncTests
         LocalInitializersPreserveContextualConversions();
         TaskIntResultProjectsTypedReturn();
         TaskIntAwaitPublishesDirectTarget();
+        TaskIntAwaitProjectsValueArguments();
         FailedExceptionPlanKeepsItsContractBesideTaskSource();
-        return 15;
+        return 16;
+    }
+
+    private static void TaskIntAwaitProjectsValueArguments()
+    {
+        const string source = """
+            using AvidScript;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static async Task<int> AddAsync(int left, int right)
+                {
+                    await AvidContinuations.NextTickAsync();
+                    return left + right;
+                }
+                public static async void BeginPlay()
+                {
+                    int result = await AddAsync(7, 5);
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/TaskIntArguments.cs");
+        Assert(document.Succeeded, "Task<int> value arguments must analyze successfully: "
+            + string.Join(" | ", document.Diagnostics.Select(item => item.Message)));
+        SemanticAsyncMethod consumer = document.AsyncMethods.Single(method => method.TaskResultTypeId is null);
+        SemanticAsyncAwaitSite site = consumer.Segments.Select(segment => segment.AwaitSite)
+            .Single(awaitSite => awaitSite?.ProducerKind == "task_call")!;
+        Assert(site.Arguments.Count == 2
+            && site.Arguments.All(argument => argument.TypeId == "type:int32")
+            && SemanticAsyncInvocationValidator.IsValid(document)
+            && SemanticClosureContractValidator.IsValid(document),
+            "Task<int> call preserves ordered, typed arguments across the semantic boundary");
+        byte[] bytes = SemanticSerializer.Serialize(document);
+        Assert(bytes.SequenceEqual(SemanticSerializer.Serialize(SemanticSerializer.Deserialize(bytes))),
+            "parameterized Task<int> metadata round-trips canonically");
+        Assert(!SemanticAsyncInvocationValidator.IsValid(document with
+        {
+            AsyncMethods = document.AsyncMethods.Select(method => method == consumer
+                ? method with { Segments = method.Segments.Select(segment => segment.AwaitSite == site
+                    ? segment with { AwaitSite = site with { Arguments = site.Arguments.Take(1).ToArray() } }
+                    : segment).ToArray() }
+                : method).ToArray()
+        }), "Task<int> argument count tampering is rejected");
+        Assert(!SemanticAsyncInvocationValidator.IsValid(document with
+        {
+            AsyncMethods = document.AsyncMethods.Select(method => method == consumer
+                ? method with { Segments = method.Segments.Select(segment => segment.AwaitSite == site
+                    ? segment with { AwaitSite = site with { Arguments = new[]
+                        { site.Arguments[0] with { TypeId = "type:float32" }, site.Arguments[1] } } }
+                    : segment).ToArray() }
+                : method).ToArray()
+        }), "Task<int> argument type tampering is rejected");
+        SemanticDocument reordered = Analyze(source.Replace("AddAsync(7, 5)",
+            "AddAsync(right: 5, left: 7)", StringComparison.Ordinal),
+            "Scripts/TaskIntReorderedArguments.cs");
+        Assert(!reordered.Succeeded && reordered.Diagnostics.Any(item => item.Code == "ASCS5403"),
+            "reordered named arguments are rejected until evaluation order is represented");
     }
 
     private static void FailedExceptionPlanKeepsItsContractBesideTaskSource()
