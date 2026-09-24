@@ -86,7 +86,8 @@ bool FAvidScriptSessionTaskResults::Retain(const int64 Token)
 {
 	check(IsInGameThread());
 	FSlot* const Slot = Find(Token);
-	if (Slot == nullptr || Slot->Entry->ReferenceCount == MAX_int32)
+	if (Slot == nullptr || Slot->Entry->ReferenceCount <= 0
+		|| Slot->Entry->ReferenceCount == MAX_int32)
 	{
 		return false;
 	}
@@ -205,6 +206,29 @@ bool FAvidScriptSessionTaskResults::Read(
 	OutSnapshot.Value = Entry.Value;
 	OutSnapshot.ErrorCode = Entry.ErrorCode;
 	return true;
+}
+
+bool FAvidScriptSessionTaskResults::MatchesOwner(
+	const int64 Token, const EAvidScriptContinuationLane Lane,
+	const uint64 ActivationSerial) const
+{
+	check(IsInGameThread());
+	const FSlot* const Slot = Find(Token);
+	return Slot != nullptr && Slot->Entry->Lane == Lane
+		&& Slot->Entry->ActivationSerial == ActivationSerial;
+}
+
+bool FAvidScriptSessionTaskResults::HasLaneEntries(
+	const EAvidScriptContinuationLane Lane,
+	const uint64 ActivationSerial) const
+{
+	check(IsInGameThread());
+	return Slots.ContainsByPredicate(
+		[Lane, ActivationSerial](const FSlot& Slot)
+		{
+			return Slot.Entry.IsSet() && Slot.Entry->Lane == Lane
+				&& Slot.Entry->ActivationSerial == ActivationSerial;
+		});
 }
 
 void FAvidScriptSessionTaskResults::ReleaseSlot(const uint32 SlotIndex)

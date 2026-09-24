@@ -2,7 +2,9 @@
 
 #include "Continuation/AvidScriptSessionContinuations.h"
 
+#include "Engine/World.h"
 #include "Misc/AutomationTest.h"
+#include "UObject/StrongObjectPtr.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptSessionTaskResultsTest,
@@ -60,6 +62,14 @@ bool FAvidScriptSessionTaskResultsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Second reference releases"), Tasks.Release(Task));
 	TestEqual(TEXT("Last release reclaims result"), Tasks.GetCount(), 0);
 	TestFalse(TEXT("Released task token is stale"), Tasks.Read(Task, First));
+	const int64 Unowned = Tasks.Create(
+		EAvidScriptContinuationLane::Active, ActiveSerial, TEXT("System.Int32"));
+	TestTrue(TEXT("Running task may release its last handle"), Tasks.Release(Unowned));
+	TestFalse(TEXT("Zero-reference running task cannot be resurrected"),
+		Tasks.Retain(Unowned));
+	TestTrue(TEXT("Unowned producer completion reclaims the task"),
+		Tasks.Succeed(Unowned, ResultBytes, Woken));
+	TestFalse(TEXT("Reclaimed task token is stale"), Tasks.Read(Unowned, First));
 
 	const int64 Faulted = Tasks.Create(
 		EAvidScriptContinuationLane::Active, ActiveSerial, TEXT("System.Int32"));
@@ -99,6 +109,86 @@ bool FAvidScriptSessionTaskResultsTest::RunTest(const FString& Parameters)
 	Owner->Teardown();
 	TestEqual(TEXT("Teardown reclaims all tasks"), Tasks.GetCount(), 0);
 	TestFalse(TEXT("Teardown invalidates published task"), Tasks.Retain(PublishedTask));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptSessionTaskEndpointTest,
+	"AvidScript.Runtime.Continuation.TaskEndpoint",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptSessionTaskEndpointTest::RunTest(const FString& Parameters)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> Owner =
+		MakeShared<FAvidScriptSessionContinuations>();
+	FAvidScriptContinuationHostEndpoint& MissingWorld = Owner->ResetActive(nullptr);
+	TestEqual(TEXT("A task cannot be created without a live world"),
+		MissingWorld.CreateTaskResult(TEXT("System.Int32")), 0LL);
+
+	TStrongObjectPtr<UWorld> World(NewObject<UWorld>());
+	FAvidScriptContinuationHostEndpoint& Active = Owner->ResetActive(World.Get());
+	const int64 ActiveTask = Active.CreateTaskResult(TEXT("System.Int32"));
+	TestNotEqual(TEXT("Active endpoint creates a Session-owned task"), ActiveTask, 0LL);
+	TestEqual(TEXT("Empty task type is rejected"), Active.CreateTaskResult({}), 0LL);
+	TestTrue(TEXT("Active endpoint retains its own task"), Active.RetainTaskResult(ActiveTask));
+	TestTrue(TEXT("Active waiter queues"),
+		Active.RegisterTaskWaiter(ActiveTask, 101)
+			== EAvidScriptTaskWaitRegistration::Queued);
+
+	FAvidScriptContinuationHostEndpoint& Prepared = Owner->BeginPrepared(World.Get());
+	const int64 PreparedTask = Prepared.CreateTaskResult(TEXT("System.Int32"));
+	TestNotEqual(TEXT("Prepared endpoint creates a separate task"), PreparedTask, 0LL);
+	FAvidScriptTaskResultSnapshot Snapshot;
+	TArray<int64> Woken;
+	const int32 Value = 12;
+	const TConstArrayView<uint8> ValueBytes(
+		reinterpret_cast<const uint8*>(&Value), sizeof(Value));
+	TestFalse(TEXT("Prepared endpoint cannot read an active task"),
+		Prepared.ReadTaskResult(ActiveTask, Snapshot));
+	TestFalse(TEXT("Prepared endpoint cannot complete an active task"),
+		Prepared.SucceedTaskResult(ActiveTask, ValueBytes, Woken));
+	TestFalse(TEXT("Active endpoint cannot cancel a prepared task"),
+		Active.CancelTaskResult(PreparedTask, Woken));
+	TestTrue(TEXT("Active task completes"),
+		Active.SucceedTaskResult(ActiveTask, ValueBytes, Woken));
+	TestEqual(TEXT("Completion returns its waiter"), Woken.Num(), 1);
+	TestEqual(TEXT("Waiter identity is preserved"), Woken[0], 101LL);
+	TestTrue(TEXT("Active result is repeatable"), Active.ReadTaskResult(ActiveTask, Snapshot));
+	TestTrue(TEXT("Active result is successful"),
+		Snapshot.State == EAvidScriptTaskResultState::Succeeded);
+	TestTrue(TEXT("First active reference releases"), Active.ReleaseTaskResult(ActiveTask));
+	TestTrue(TEXT("Second active reference releases"), Active.ReleaseTaskResult(ActiveTask));
+	TestFalse(TEXT("Released task cannot be read"),
+		Active.ReadTaskResult(ActiveTask, Snapshot));
+
+	FString CommitError;
+	TestTrue(TEXT("Live prepared task allows publication"),
+		Owner->ValidatePreparedCommit(CommitError));
+	Owner->CommitPrepared();
+	TestEqual(TEXT("Old endpoint rejects creation after publication"),
+		Active.CreateTaskResult(TEXT("System.Int32")), 0LL);
+	TestTrue(TEXT("Promoted endpoint retains its task identity"),
+		Prepared.RetainTaskResult(PreparedTask));
+	TestTrue(TEXT("Promoted task can complete"),
+		Prepared.SucceedTaskResult(PreparedTask, ValueBytes, Woken));
+	TestTrue(TEXT("Promoted task remains readable"),
+		Prepared.ReadTaskResult(PreparedTask, Snapshot));
+	Owner->Teardown();
+	TestFalse(TEXT("Teardown rejects late task reads"),
+		Prepared.ReadTaskResult(PreparedTask, Snapshot));
+	TestEqual(TEXT("Teardown retires task storage"),
+		Owner->GetTaskResultsForTesting().GetCount(), 0);
+
+	FAvidScriptContinuationHostEndpoint& InvalidPrepared = Owner->BeginPrepared(nullptr);
+	const int64 Orphan = Owner->GetTaskResultsForTesting().Create(
+		EAvidScriptContinuationLane::Prepared,
+		InvalidPrepared.GetActivationSerial(), TEXT("System.Int32"));
+	TestNotEqual(TEXT("Test fixture seeds a candidate task"), Orphan, 0LL);
+	TestFalse(TEXT("Candidate task with no live context cannot publish"),
+		Owner->ValidatePreparedCommit(CommitError));
+	Owner->DiscardPrepared();
+	TestEqual(TEXT("Rollback retires orphan candidate task"),
+		Owner->GetTaskResultsForTesting().GetCount(), 0);
 	return true;
 }
 

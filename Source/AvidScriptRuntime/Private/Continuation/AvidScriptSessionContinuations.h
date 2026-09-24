@@ -60,6 +60,15 @@ public:
 		TUniquePtr<IAvidScriptContinuationStateLease>&& Lease) override;
 	bool ReadManagedState(int64 ContinuationToken,
 		const FAvidScriptWasmRuntimeInstance& Runtime, TArrayView<uint8> OutStateBytes) override;
+	int64 CreateTaskResult(FString TypeId);
+	bool RetainTaskResult(int64 Token);
+	bool ReleaseTaskResult(int64 Token);
+	EAvidScriptTaskWaitRegistration RegisterTaskWaiter(int64 Token, int64 WaiterToken);
+	bool SucceedTaskResult(int64 Token, TConstArrayView<uint8> Value,
+		TArray<int64>& OutWaiters);
+	bool FaultTaskResult(int64 Token, FString ErrorCode, TArray<int64>& OutWaiters);
+	bool CancelTaskResult(int64 Token, TArray<int64>& OutWaiters);
+	bool ReadTaskResult(int64 Token, FAvidScriptTaskResultSnapshot& OutSnapshot) const;
 	bool BeginLatent(
 		int32 CallbackId,
 		FAvidScriptBindingLatentReservation& OutReservation) override;
@@ -80,6 +89,7 @@ public:
 	uint64 GetActivationSerial() const { return ActivationSerial; }
 
 private:
+	TSharedPtr<FAvidScriptSessionContinuations> PinTaskOwner(int64 Token = 0) const;
 	TWeakPtr<FAvidScriptSessionContinuations> Owner;
 	EAvidScriptContinuationLane Lane = EAvidScriptContinuationLane::Prepared;
 	uint64 ActivationSerial = 0;
@@ -90,6 +100,7 @@ class FAvidScriptSessionContinuations final
 	: public TSharedFromThis<FAvidScriptSessionContinuations>
 	, public IAvidScriptDelegateBridgeSink
 {
+	friend class FAvidScriptContinuationHostEndpoint;
 public:
 	static constexpr int32 MaximumPendingContinuations = 4096;
 	static constexpr int32 MaximumRetainedLoadedObjects = 1024;
@@ -386,6 +397,8 @@ private:
 	void ClearRetainedLoadedObjects();
 	bool MatchesCurrentEndpoint(
 		EAvidScriptContinuationLane Lane,
+		uint64 ActivationSerial) const;
+	bool CanUseTaskResults(EAvidScriptContinuationLane Lane,
 		uint64 ActivationSerial) const;
 	bool HasLaneEntries(
 		EAvidScriptContinuationLane Lane,

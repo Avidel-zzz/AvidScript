@@ -45,6 +45,10 @@ public:
 	bool Fault(int64 Token, FString ErrorCode, TArray<int64>& OutWaiters);
 	bool Cancel(int64 Token, TArray<int64>& OutWaiters);
 	bool Read(int64 Token, FAvidScriptTaskResultSnapshot& OutSnapshot) const;
+	bool MatchesOwner(int64 Token, EAvidScriptContinuationLane Lane,
+		uint64 ActivationSerial) const;
+	bool HasLaneEntries(EAvidScriptContinuationLane Lane,
+		uint64 ActivationSerial) const;
 	void RetireLane(EAvidScriptContinuationLane Lane, uint64 ActivationSerial);
 	void PromotePrepared(uint64 ActivationSerial);
 	int32 GetCount() const { return OccupiedCount; }

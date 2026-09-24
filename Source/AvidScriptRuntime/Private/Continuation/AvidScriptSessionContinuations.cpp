@@ -109,6 +109,23 @@ FAvidScriptContinuationHostEndpoint::FAvidScriptContinuationHostEndpoint(
 {
 }
 
+TSharedPtr<FAvidScriptSessionContinuations>
+FAvidScriptContinuationHostEndpoint::PinTaskOwner(const int64 Token) const
+{
+	if (!IsInGameThread() || !bValid)
+	{
+		return nullptr;
+	}
+	TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = Owner.Pin();
+	if (!PinnedOwner || !PinnedOwner->CanUseTaskResults(Lane, ActivationSerial)
+		|| (Token != 0 && !PinnedOwner->TaskResults.MatchesOwner(
+			Token, Lane, ActivationSerial)))
+	{
+		return nullptr;
+	}
+	return PinnedOwner;
+}
+
 int64 FAvidScriptContinuationHostEndpoint::ScheduleDelay(
 	const float DelaySeconds,
 	const int32 CallbackId)
@@ -229,6 +246,65 @@ bool FAvidScriptContinuationHostEndpoint::ReadManagedState(
 	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = Owner.Pin();
 	return bValid && PinnedOwner
 		&& PinnedOwner->ReadStateImpl(Lane, ActivationSerial, ContinuationToken, OutStateBytes, &Runtime);
+}
+
+int64 FAvidScriptContinuationHostEndpoint::CreateTaskResult(FString TypeId)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = PinTaskOwner();
+	return PinnedOwner
+		? PinnedOwner->TaskResults.Create(Lane, ActivationSerial, MoveTemp(TypeId))
+		: 0;
+}
+
+bool FAvidScriptContinuationHostEndpoint::RetainTaskResult(const int64 Token)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = PinTaskOwner(Token);
+	return PinnedOwner && PinnedOwner->TaskResults.Retain(Token);
+}
+
+bool FAvidScriptContinuationHostEndpoint::ReleaseTaskResult(const int64 Token)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = PinTaskOwner(Token);
+	return PinnedOwner && PinnedOwner->TaskResults.Release(Token);
+}
+
+EAvidScriptTaskWaitRegistration FAvidScriptContinuationHostEndpoint::RegisterTaskWaiter(
+	const int64 Token, const int64 WaiterToken)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = PinTaskOwner(Token);
+	return PinnedOwner
+		? PinnedOwner->TaskResults.RegisterWaiter(Token, WaiterToken)
+		: EAvidScriptTaskWaitRegistration::Invalid;
+}
+
+bool FAvidScriptContinuationHostEndpoint::SucceedTaskResult(
+	const int64 Token, const TConstArrayView<uint8> Value,
+	TArray<int64>& OutWaiters)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = PinTaskOwner(Token);
+	return PinnedOwner && PinnedOwner->TaskResults.Succeed(Token, Value, OutWaiters);
+}
+
+bool FAvidScriptContinuationHostEndpoint::FaultTaskResult(
+	const int64 Token, FString ErrorCode, TArray<int64>& OutWaiters)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = PinTaskOwner(Token);
+	return PinnedOwner && PinnedOwner->TaskResults.Fault(
+		Token, MoveTemp(ErrorCode), OutWaiters);
+}
+
+bool FAvidScriptContinuationHostEndpoint::CancelTaskResult(
+	const int64 Token, TArray<int64>& OutWaiters)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = PinTaskOwner(Token);
+	return PinnedOwner && PinnedOwner->TaskResults.Cancel(Token, OutWaiters);
+}
+
+bool FAvidScriptContinuationHostEndpoint::ReadTaskResult(
+	const int64 Token, FAvidScriptTaskResultSnapshot& OutSnapshot) const
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = PinTaskOwner(Token);
+	return PinnedOwner && PinnedOwner->TaskResults.Read(Token, OutSnapshot);
 }
 
 bool FAvidScriptContinuationHostEndpoint::ConsumeResult(
@@ -383,6 +459,9 @@ bool FAvidScriptSessionContinuations::ValidatePreparedCommit(
 				EAvidScriptContinuationLane::Prepared,
 				PreparedActivation)
 			|| HasLaneCancellationSources(
+				EAvidScriptContinuationLane::Prepared,
+				PreparedActivation)
+			|| TaskResults.HasLaneEntries(
 				EAvidScriptContinuationLane::Prepared,
 				PreparedActivation))
 		&& !IsLaneContextLive(EAvidScriptContinuationLane::Prepared))
@@ -2580,6 +2659,15 @@ bool FAvidScriptSessionContinuations::MatchesCurrentEndpoint(
 			? ActiveEndpoint
 			: PreparedEndpoint;
 	return Endpoint && Endpoint->GetActivationSerial() == ActivationSerial;
+}
+
+bool FAvidScriptSessionContinuations::CanUseTaskResults(
+	const EAvidScriptContinuationLane Lane,
+	const uint64 ActivationSerial) const
+{
+	return IsInGameThread() && !bTearingDown
+		&& MatchesCurrentEndpoint(Lane, ActivationSerial)
+		&& IsLaneContextLive(Lane);
 }
 
 bool FAvidScriptSessionContinuations::HasLaneEntries(

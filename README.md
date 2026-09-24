@@ -68,7 +68,7 @@ public static void Tick(float deltaSeconds)
 - C# 只支持本项目实现的语法和 API 子集，不能直接运行任意 .NET 项目或 NuGet 包。
 - RPC、属性复制和 RepNotify 已通过独立进程测试；真实多人联机尚未验收。
 - `try` / `catch` / `finally` 的受限写法目前只在[专用测试入口](Docs/Phase66/P66.C3_Language_Error_Channel_Contract.md)可用；普通脚本构建尚未启用。
-- `Task<int>` 的直接调用与 `await` 已有[语义合同](Docs/Phase66/P66.C4_Task_Result_Contract.md)，Guest/WASM 执行和等待唤醒尚未接通。
+- `Task<int>` 的直接调用与 `await` 已有[语义合同](Docs/Phase66/P66.C4_Task_Result_Contract.md)；原生 Session 可保存任务结果，Guest/WASM 执行和等待唤醒尚未接通。
 
 ## 开发
 
