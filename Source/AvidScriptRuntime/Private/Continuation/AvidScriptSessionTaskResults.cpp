@@ -238,6 +238,15 @@ bool FAvidScriptSessionTaskResults::MatchesOwner(
 		&& Slot->Entry->ActivationSerial == ActivationSerial;
 }
 
+bool FAvidScriptSessionTaskResults::HasType(
+	const int64 Token, const FString& TypeId) const
+{
+	check(IsInGameThread());
+	const FSlot* const Slot = Find(Token);
+	return Slot != nullptr && Slot->Entry->ReferenceCount > 0
+		&& Slot->Entry->TypeId == TypeId;
+}
+
 bool FAvidScriptSessionTaskResults::HasLaneEntries(
 	const EAvidScriptContinuationLane Lane,
 	const uint64 ActivationSerial) const

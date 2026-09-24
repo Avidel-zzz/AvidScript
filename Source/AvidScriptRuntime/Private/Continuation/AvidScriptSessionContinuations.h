@@ -64,6 +64,7 @@ public:
 	int64 CreateTaskResult(FString TypeId) override;
 	bool RetainTaskResult(int64 Token) override;
 	bool ReleaseTaskResult(int64 Token) override;
+	bool HasTaskResultType(int64 Token, const FString& TypeId) const override;
 	EAvidScriptTaskWaitRegistration AwaitTaskResult(
 		int64 Token, int32 CallbackId, int64& OutContinuationToken) override;
 	bool SucceedTaskResult(int64 Token, TConstArrayView<uint8> Value,

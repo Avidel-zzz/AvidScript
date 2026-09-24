@@ -25,6 +25,7 @@ public:
 	bool Read(int64 Token, FAvidScriptTaskResultSnapshot& OutSnapshot) const;
 	bool MatchesOwner(int64 Token, EAvidScriptContinuationLane Lane,
 		uint64 ActivationSerial) const;
+	bool HasType(int64 Token, const FString& TypeId) const;
 	bool HasLaneEntries(EAvidScriptContinuationLane Lane,
 		uint64 ActivationSerial) const;
 	void RetireLane(EAvidScriptContinuationLane Lane, uint64 ActivationSerial);

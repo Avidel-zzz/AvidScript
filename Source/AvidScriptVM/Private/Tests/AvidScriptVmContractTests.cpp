@@ -4,6 +4,7 @@
 #include "AvidScriptVmExportTable.h"
 #include "AvidScriptVmResultFixtureBuilder.h"
 #include "AvidScriptVmStaticHostImports.h"
+#include "AvidScriptTaskResultAbi.h"
 
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
@@ -601,12 +602,27 @@ bool FAvidScriptVmEventSubscriptionImportContractTest::RunTest(
 	const auto& EventRead = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::EventManagedStateReadV1);
 	const auto& LanguageStore = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::EventLanguageSubscribeV1);
 	const auto& LanguageLookup = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::EventLanguageLookupV1);
+	const auto& TaskInt32 = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::TaskResultInt32V1);
 	for (const auto* Import : {&ManagedHeap, &ManagedStore, &ManagedRead, &EventStore, &EventRead, &LanguageStore, &LanguageLookup})
 	{
 		TestTrue(TEXT("Every heap-bearing import requires an invocation scope"), Import->bRequiresManagedInvocation
 			&& RequiresAvidScriptVmManagedInvocation(TEXT("avidscript"), UTF8_TO_TCHAR(Import->ImportName)));
 	}
 	TestFalse(TEXT("Ordinary subscriptions do not add heap scope overhead"), RequiresAvidScriptVmManagedInvocation(TEXT("avidscript"), TEXT("event_subscribe")));
+	TestEqual(TEXT("Task<int> appends without renumbering"), static_cast<uint16>(TaskInt32.BindingId),
+		static_cast<uint16>(EAvidScriptHostBindingId::LanguageErrorReportV1) + 1);
+	TestEqual(TEXT("Task<int> has a fixed-width versioned signature"),
+		FString(UTF8_TO_TCHAR(TaskInt32.Signature)), FString(TEXT("(iIii)I")));
+	TestEqual(TEXT("Task<int> import name"), FString(UTF8_TO_TCHAR(TaskInt32.ImportName)),
+		FString(UTF8_TO_TCHAR(AvidScript::TaskResult::Abi::Int32Import)));
+	TestTrue(TEXT("Task<int> requires a managed invocation scope"),
+		TaskInt32.bRequiresManagedInvocation
+		&& RequiresAvidScriptVmManagedInvocation(TEXT("avidscript"),
+			UTF8_TO_TCHAR(TaskInt32.ImportName)));
+	TestFalse(TEXT("Task<int> has no env compatibility alias"),
+		TaskInt32.bSupportsEnvCompatibility
+		|| IsAvidScriptVmStaticHostImport(TEXT("env"),
+			UTF8_TO_TCHAR(AvidScript::TaskResult::Abi::Int32Import)));
 	TestEqual(TEXT("Event state appends without renumbering"), static_cast<uint16>(EventStore.BindingId), static_cast<uint16>(ManagedRead.BindingId) + 1);
 	TestEqual(TEXT("Event state read follows subscribe"), static_cast<uint16>(EventRead.BindingId), static_cast<uint16>(EventStore.BindingId) + 1);
 	TestEqual(TEXT("Event state publication signature"), FString(UTF8_TO_TCHAR(EventStore.Signature)), FString(TEXT("(iiiiI)I")));

@@ -35,6 +35,7 @@ public:
 	virtual int64 CreateTaskResult(FString TypeId) = 0;
 	virtual bool RetainTaskResult(int64 Token) = 0;
 	virtual bool ReleaseTaskResult(int64 Token) = 0;
+	virtual bool HasTaskResultType(int64 Token, const FString& TypeId) const = 0;
 	// Returns a Session-owned continuation token only when the task is pending.
 	virtual EAvidScriptTaskWaitRegistration AwaitTaskResult(
 		int64 Token, int32 CallbackId, int64& OutContinuationToken) = 0;

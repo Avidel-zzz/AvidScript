@@ -1,0 +1,373 @@
+#if WITH_DEV_AUTOMATION_TESTS
+
+#include "AvidScriptWasmRuntime.h"
+#include "AvidScriptTaskResultAbi.h"
+#include "Continuation/AvidScriptSessionContinuations.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "Misc/AutomationTest.h"
+#include "Misc/ScopeExit.h"
+
+namespace AvidScriptTaskResultAbiTests
+{
+enum class EFixture : uint8
+{
+	Valid, Immediate, Cancelled, ForgedRead, ProvidedRead, BadSignature
+};
+
+void U32(TArray<uint8>& Out, uint32 Value)
+{
+	do
+	{
+		uint8 Byte = Value & 0x7f;
+		Value >>= 7;
+		Out.Add(Byte | (Value ? 0x80 : 0));
+	} while (Value);
+}
+
+void I32(TArray<uint8>& Out, int32 Value)
+{
+	Out.Add(0x41);
+	bool More;
+	do
+	{
+		uint8 Byte = Value & 0x7f;
+		Value >>= 7;
+		More = !((Value == 0 && !(Byte & 0x40))
+			|| (Value == -1 && (Byte & 0x40)));
+		Out.Add(Byte | (More ? 0x80 : 0));
+	} while (More);
+}
+
+void Name(TArray<uint8>& Out, const char* Value)
+{
+	const int32 Size = FCStringAnsi::Strlen(Value);
+	U32(Out, Size);
+	Out.Append(reinterpret_cast<const uint8*>(Value), Size);
+}
+
+void Section(TArray<uint8>& Out, uint8 Id, const TArray<uint8>& Bytes)
+{
+	Out.Add(Id);
+	U32(Out, Bytes.Num());
+	Out.Append(Bytes);
+}
+
+void Load64(TArray<uint8>& Out, int32 Address)
+{
+	I32(Out, Address);
+	Out.Append({0x29, 3, 0});
+}
+
+void Store64(TArray<uint8>& Out, int32 Address)
+{
+	I32(Out, Address);
+}
+
+void TaskCall(TArray<uint8>& Out, AvidScript::TaskResult::Abi::ECommand Command,
+	int32 TokenAddress, int32 Argument)
+{
+	I32(Out, static_cast<int32>(Command));
+	if (TokenAddress == 0)
+		Out.Append({0x42, 0});
+	else
+		Load64(Out, TokenAddress);
+	I32(Out, Argument);
+	I32(Out, 0);
+	Out.Append({0x10, 0});
+}
+
+void StoreCall(TArray<uint8>& Out, int32 OutputAddress,
+	AvidScript::TaskResult::Abi::ECommand Command,
+	int32 TokenAddress, int32 Argument)
+{
+	Store64(Out, OutputAddress);
+	TaskCall(Out, Command, TokenAddress, Argument);
+	Out.Append({0x37, 3, 0});
+}
+
+TArray<uint8> Build(EFixture Fixture)
+{
+	using namespace AvidScript::TaskResult::Abi;
+	TArray<uint8> Wasm{0, 0x61, 0x73, 0x6d, 1, 0, 0, 0};
+	TArray<uint8> Types{4,
+		0x60, 4, Fixture == EFixture::BadSignature ? uint8(0x7e) : uint8(0x7f),
+		0x7e, 0x7f, 0x7f, 1, 0x7e, // import: (i32, i64, i32, i32) -> i64
+		0x60, 0, 0, // BeginPlay
+		0x60, 1, 0x7d, 0, // Tick
+		0x60, 3, 0x7f, 0x7e, 0x7f, 0 // continuation
+	};
+	Section(Wasm, 1, Types);
+	TArray<uint8> Imports{1};
+	Name(Imports, "avidscript");
+	Name(Imports, Int32Import);
+	Imports.Append({0, 0});
+	Section(Wasm, 2, Imports);
+	Section(Wasm, 3, {3, 1, 2, 3});
+	Section(Wasm, 5, {1, 0, 1});
+	TArray<uint8> Exports{4};
+	Name(Exports, "memory"); Exports.Append({2, 0});
+	Name(Exports, "avid_on_begin_play"); Exports.Append({0, 1});
+	Name(Exports, "avid_on_tick"); Exports.Append({0, 2});
+	Name(Exports, "avid_on_continuation"); Exports.Append({0, 3});
+	Section(Wasm, 7, Exports);
+
+	TArray<uint8> Begin{0};
+	if (Fixture == EFixture::Valid || Fixture == EFixture::Immediate
+		|| Fixture == EFixture::Cancelled)
+	{
+		StoreCall(Begin, 8, ECommand::Create, 0, 0);
+		if (Fixture == EFixture::Immediate)
+			StoreCall(Begin, 24, ECommand::Succeed, 8, -12);
+		StoreCall(Begin, 16, ECommand::Await, 8, 77);
+		if (Fixture == EFixture::Valid)
+			StoreCall(Begin, 24, ECommand::Succeed, 8, -12);
+		else if (Fixture == EFixture::Cancelled)
+			StoreCall(Begin, 24, ECommand::Cancel, 8, 0);
+		StoreCall(Begin, 32, ECommand::Read, 8, 0);
+		StoreCall(Begin, 40, ECommand::Release, 8, 0);
+	}
+	else if (Fixture == EFixture::ForgedRead)
+	{
+		I32(Begin, static_cast<int32>(ECommand::Read));
+		Begin.Append({0x42, 1});
+		I32(Begin, 0); I32(Begin, 0);
+		Begin.Append({0x10, 0, 0x1a});
+	}
+	else if (Fixture == EFixture::ProvidedRead)
+	{
+		StoreCall(Begin, 32, ECommand::Read, 8, 0);
+	}
+	Begin.Add(0x0b);
+	TArray<uint8> Resume{0};
+	if (Fixture == EFixture::Valid || Fixture == EFixture::Cancelled)
+		StoreCall(Resume, 48, ECommand::Read, 8, 0);
+	Resume.Add(0x0b);
+	TArray<uint8> Code{3};
+	U32(Code, Begin.Num()); Code.Append(Begin);
+	Code.Append({2, 0, 0x0b});
+	U32(Code, Resume.Num()); Code.Append(Resume);
+	Section(Wasm, 10, Code);
+	return Wasm;
+}
+
+int64 ReadI64(const uint8* Bytes, int32 Offset)
+{
+	int64 Value = 0;
+	FMemory::Memcpy(&Value, Bytes + Offset, sizeof(Value));
+	return Value;
+}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptTaskResultAbiTest,
+	"AvidScript.Runtime.Continuation.TaskResultAbi",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptTaskResultAbiTest::RunTest(const FString& Parameters)
+{
+	using namespace AvidScriptTaskResultAbiTests;
+	using namespace AvidScript::TaskResult::Abi;
+	if (!GEngine) return false;
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false,
+		TEXT("AvidScriptTaskResultAbiWorld"));
+	if (!TestNotNull(TEXT("Task ABI world created"), World)) return false;
+	GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+	World->InitializeActorsForPlay(FURL());
+	ON_SCOPE_EXIT { GEngine->DestroyWorldContext(World); World->DestroyWorld(false); };
+
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	{
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime
+			? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		FAvidScriptWasmSmokeResult Result;
+		const TArray<uint8> Bytes = Build(EFixture::Valid);
+		FAvidScriptWasmRuntimeInstance Runtime(Selection);
+		if (!TestTrue(TEXT("Task ABI module loads in both VMs"),
+			Runtime.LoadModule(Bytes.GetData(), Bytes.Num(), TEXT("task_result_i32"), Result)))
+		{
+			AddError(Result.ErrorMessage);
+			return false;
+		}
+		const auto Owner = MakeShared<FAvidScriptSessionContinuations>();
+		auto& Endpoint = Owner->ResetActive(World);
+		FAvidScriptWasmHostContext Context;
+		Context.Tasks = &Endpoint;
+		Context.Continuations = &Endpoint;
+		Context.World = World;
+		Runtime.SetHostContext(Context);
+		if (!TestTrue(TEXT("WASM creates, awaits and completes Task<int>"), Runtime.BeginPlay(Result)))
+		{
+			AddError(Result.ErrorMessage);
+			return false;
+		}
+		uint8 Memory[56] = {};
+		FString Error;
+		if (!TestTrue(TEXT("Read Task<int> fixture memory"),
+			Runtime.ReadStateBytes(0, MakeArrayView(Memory), Error))) return false;
+		const int64 Task = ReadI64(Memory, 8);
+		const int64 Waiter = ReadI64(Memory, 16);
+		TestTrue(TEXT("Guest receives opaque task token"), Task > 0);
+		TestTrue(TEXT("Guest receives Session continuation token"), Waiter > 0);
+		TestEqual(TEXT("Completion accepted"), ReadI64(Memory, 24), 1LL);
+		TestEqual(TEXT("Immediate read preserves signed i32 value"),
+			ReadI64(Memory, 32), static_cast<int64>(PackRead(EState::Succeeded, -12)));
+		TestEqual(TEXT("Producer reference releases"), ReadI64(Memory, 40), 1LL);
+		TArray<FAvidScriptContinuationCompletion> Ready;
+		Owner->DrainReady(Ready);
+		if (!TestEqual(TEXT("Task resumes exactly one waiter"), Ready.Num(), 1)) return false;
+		TestEqual(TEXT("Task callback ID"), Ready[0].CallbackId, 77);
+		TestEqual(TEXT("Task continuation token"), Ready[0].Token, Waiter);
+		TestTrue(TEXT("Task completion has completed status"),
+			Ready[0].Status == EAvidScriptContinuationStatus::Completed);
+		if (!TestTrue(TEXT("WASM continuation reads terminal Task<int>"),
+			Runtime.DispatchContinuation(Ready[0], Result)))
+		{
+			AddError(Result.ErrorMessage);
+			return false;
+		}
+		TestTrue(TEXT("Read resumed Task<int> result"),
+			Runtime.ReadStateBytes(0, MakeArrayView(Memory), Error));
+		TestEqual(TEXT("Resumed read preserves signed i32 value"),
+			ReadI64(Memory, 48), static_cast<int64>(PackRead(EState::Succeeded, -12)));
+		TestTrue(TEXT("Dispatch finalization releases waiter reference"),
+			Owner->FinalizeDispatched(Waiter, true));
+		TestEqual(TEXT("No task result survives dispatch"),
+			Owner->GetTaskResultsForTesting().GetCount(), 0);
+		Owner->Teardown();
+
+		const TArray<uint8> ImmediateBytes = Build(EFixture::Immediate);
+		FAvidScriptWasmRuntimeInstance Immediate(Selection);
+		TestTrue(TEXT("Immediate-result fixture loads"),
+			Immediate.LoadModule(ImmediateBytes.GetData(), ImmediateBytes.Num(),
+				TEXT("task_result_immediate"), Result));
+		const auto ImmediateOwner = MakeShared<FAvidScriptSessionContinuations>();
+		auto& ImmediateEndpoint = ImmediateOwner->ResetActive(World);
+		Context.Tasks = &ImmediateEndpoint;
+		Context.Continuations = &ImmediateEndpoint;
+		Immediate.SetHostContext(Context);
+		TestTrue(TEXT("Already-completed task runs synchronously"), Immediate.BeginPlay(Result));
+		TestTrue(TEXT("Read immediate-result fixture memory"),
+			Immediate.ReadStateBytes(0, MakeArrayView(Memory), Error));
+		TestEqual(TEXT("Already-ready await returns no continuation"),
+			ReadI64(Memory, 16), 0LL);
+		TestEqual(TEXT("Already-ready task preserves its value"),
+			ReadI64(Memory, 32), static_cast<int64>(PackRead(EState::Succeeded, -12)));
+		ImmediateOwner->DrainReady(Ready);
+		TestEqual(TEXT("Already-ready task never queues a callback"), Ready.Num(), 0);
+		TestEqual(TEXT("Immediate task releases at final reference"),
+			ImmediateOwner->GetTaskResultsForTesting().GetCount(), 0);
+		ImmediateOwner->Teardown();
+
+		const TArray<uint8> CancelledBytes = Build(EFixture::Cancelled);
+		FAvidScriptWasmRuntimeInstance Cancelled(Selection);
+		TestTrue(TEXT("Cancelled-result fixture loads"),
+			Cancelled.LoadModule(CancelledBytes.GetData(), CancelledBytes.Num(),
+				TEXT("task_result_cancelled"), Result));
+		const auto CancelledOwner = MakeShared<FAvidScriptSessionContinuations>();
+		auto& CancelledEndpoint = CancelledOwner->ResetActive(World);
+		Context.Tasks = &CancelledEndpoint;
+		Context.Continuations = &CancelledEndpoint;
+		Cancelled.SetHostContext(Context);
+		TestTrue(TEXT("WASM cancellation reaches a terminal task"), Cancelled.BeginPlay(Result));
+		TestTrue(TEXT("Read cancelled-result fixture memory"),
+			Cancelled.ReadStateBytes(0, MakeArrayView(Memory), Error));
+		TestEqual(TEXT("Cancelled task encodes its state"),
+			ReadI64(Memory, 32), static_cast<int64>(PackRead(EState::Cancelled, 0)));
+		CancelledOwner->DrainReady(Ready);
+		if (!TestEqual(TEXT("Cancellation resumes one waiter"), Ready.Num(), 1)) return false;
+		TestTrue(TEXT("Cancelled callback has distinct status"),
+			Ready[0].Status == EAvidScriptContinuationStatus::Cancelled);
+		TestTrue(TEXT("Cancelled continuation can read terminal state"),
+			Cancelled.DispatchContinuation(Ready[0], Result));
+		TestTrue(TEXT("Read cancelled continuation memory"),
+			Cancelled.ReadStateBytes(0, MakeArrayView(Memory), Error));
+		TestEqual(TEXT("Cancelled callback reads the same state"),
+			ReadI64(Memory, 48), static_cast<int64>(PackRead(EState::Cancelled, 0)));
+		TestTrue(TEXT("Cancelled callback finalizes"),
+			CancelledOwner->FinalizeDispatched(Ready[0].Token, true));
+		TestEqual(TEXT("Cancelled result is reclaimed"),
+			CancelledOwner->GetTaskResultsForTesting().GetCount(), 0);
+		CancelledOwner->Teardown();
+
+		FAvidScriptWasmRuntimeInstance WithoutSession(Selection);
+		TestTrue(TEXT("No-session fixture loads"),
+			WithoutSession.LoadModule(Bytes.GetData(), Bytes.Num(), TEXT("task_result_no_session"), Result));
+		TestFalse(TEXT("Task import rejects missing Session context"),
+			WithoutSession.BeginPlay(Result));
+		TestEqual(TEXT("Missing Session has a stable error category"),
+			Result.ErrorCategory, FString(TEXT("task_result_context")));
+
+		const TArray<uint8> ForgedBytes = Build(EFixture::ForgedRead);
+		FAvidScriptWasmRuntimeInstance Forged(Selection);
+		TestTrue(TEXT("Forged-token fixture loads"),
+			Forged.LoadModule(ForgedBytes.GetData(), ForgedBytes.Num(), TEXT("task_result_forged"), Result));
+		const auto ForgedOwner = MakeShared<FAvidScriptSessionContinuations>();
+		auto& ForgedEndpoint = ForgedOwner->ResetActive(World);
+		Context.Tasks = &ForgedEndpoint;
+		Context.Continuations = &ForgedEndpoint;
+		Forged.SetHostContext(Context);
+		TestFalse(TEXT("Task import rejects forged token"), Forged.BeginPlay(Result));
+		TestEqual(TEXT("Forged token has a stable error category"),
+			Result.ErrorCategory, FString(TEXT("task_result_identity")));
+		ForgedOwner->Teardown();
+
+		const TArray<uint8> ProvidedBytes = Build(EFixture::ProvidedRead);
+		FAvidScriptWasmRuntimeInstance WrongType(Selection);
+		TestTrue(TEXT("Wrong-type fixture loads"),
+			WrongType.LoadModule(ProvidedBytes.GetData(), ProvidedBytes.Num(),
+				TEXT("task_result_wrong_type"), Result));
+		const auto WrongTypeOwner = MakeShared<FAvidScriptSessionContinuations>();
+		auto& WrongTypeEndpoint = WrongTypeOwner->ResetActive(World);
+		const int64 ForeignTypeTask = WrongTypeEndpoint.CreateTaskResult(TEXT("type:float32"));
+		TestTrue(TEXT("Fixture creates wrong-type task"), ForeignTypeTask > 0);
+		Context.Tasks = &WrongTypeEndpoint;
+		Context.Continuations = &WrongTypeEndpoint;
+		WrongType.SetHostContext(Context);
+		uint8 ProvidedMemory[16] = {};
+		FMemory::Memcpy(ProvidedMemory + 8, &ForeignTypeTask, sizeof(ForeignTypeTask));
+		TestTrue(TEXT("Fixture supplies wrong-type task token"),
+			WrongType.WriteStateBytes(0, MakeArrayView(ProvidedMemory), Error));
+		TestFalse(TEXT("Task<int> import rejects other result type"), WrongType.BeginPlay(Result));
+		TestEqual(TEXT("Wrong type has a stable identity error"),
+			Result.ErrorCategory, FString(TEXT("task_result_identity")));
+		WrongTypeOwner->Teardown();
+
+		FAvidScriptWasmRuntimeInstance Faulted(Selection);
+		TestTrue(TEXT("Fault-read fixture loads"),
+			Faulted.LoadModule(ProvidedBytes.GetData(), ProvidedBytes.Num(),
+				TEXT("task_result_faulted"), Result));
+		const auto FaultedOwner = MakeShared<FAvidScriptSessionContinuations>();
+		auto& FaultedEndpoint = FaultedOwner->ResetActive(World);
+		const int64 FaultedTask = FaultedEndpoint.CreateTaskResult(TEXT("type:int32"));
+		TArray<int64> FaultWaiters;
+		TestTrue(TEXT("Native fault creates a terminal task"),
+			FaultedEndpoint.FaultTaskResult(
+				FaultedTask, TEXT("script_error"), FaultWaiters));
+		Context.Tasks = &FaultedEndpoint;
+		Context.Continuations = &FaultedEndpoint;
+		Faulted.SetHostContext(Context);
+		FMemory::Memcpy(ProvidedMemory + 8, &FaultedTask, sizeof(FaultedTask));
+		TestTrue(TEXT("Fixture supplies faulted task token"),
+			Faulted.WriteStateBytes(0, MakeArrayView(ProvidedMemory), Error));
+		TestTrue(TEXT("Guest can read faulted state without a Host trap"),
+			Faulted.BeginPlay(Result));
+		TestTrue(TEXT("Read faulted fixture memory"),
+			Faulted.ReadStateBytes(0, MakeArrayView(Memory), Error));
+		TestEqual(TEXT("Faulted task has a distinct state"),
+			ReadI64(Memory, 32), static_cast<int64>(PackRead(EState::Faulted, 0)));
+		TestTrue(TEXT("Faulted task releases"), FaultedEndpoint.ReleaseTaskResult(FaultedTask));
+		FaultedOwner->Teardown();
+
+		const TArray<uint8> BadBytes = Build(EFixture::BadSignature);
+		FAvidScriptWasmRuntimeInstance BadSignature(Selection);
+		TestFalse(TEXT("Task import rejects mismatched WASM signature"),
+			BadSignature.LoadModule(BadBytes.GetData(), BadBytes.Num(),
+				TEXT("task_result_bad_signature"), Result));
+	}
+	return true;
+}
+
+#endif

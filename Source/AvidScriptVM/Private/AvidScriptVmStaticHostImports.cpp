@@ -2,6 +2,7 @@
 #include "AvidScriptManagedHeapAbi.h"
 #include "AvidScriptContinuationStateAbi.h"
 #include "AvidScriptEventStateAbi.h"
+#include "AvidScriptTaskResultAbi.h"
 
 namespace
 {
@@ -74,11 +75,12 @@ const FAvidScriptVmStaticHostImport GStaticHostImports[] = {
 	{ EAvidScriptHostBindingId::EventManagedStateReadV1, AvidScript::EventState::Abi::ReadImport, "(i)I", false, true },
 	{ EAvidScriptHostBindingId::EventLanguageSubscribeV1, AvidScript::EventState::Abi::LanguageSubscribeImport, "(iiiiI)I", false, true },
 	{ EAvidScriptHostBindingId::EventLanguageLookupV1, AvidScript::EventState::Abi::LanguageLookupImport, "(iiii)I", false, true },
-	{ EAvidScriptHostBindingId::LanguageErrorReportV1, "avid_language_error_report_v1", "(iiI)i", false, true }
+	{ EAvidScriptHostBindingId::LanguageErrorReportV1, "avid_language_error_report_v1", "(iiI)i", false, true },
+	{ EAvidScriptHostBindingId::TaskResultInt32V1, AvidScript::TaskResult::Abi::Int32Import, "(iIii)I", false, true }
 };
 
 static_assert(
-	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::LanguageErrorReportV1),
+	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::TaskResultInt32V1),
 	"Static host catalog must remain dense and ordered by binding id.");
 
 bool FailStaticCall(FString& OutFailureDetails, const TCHAR* Details)
@@ -265,6 +267,12 @@ bool InvokeAvidScriptVmStaticHostImport(
 		Call.IntArgs[0] = Arguments[0].I32;
 		Call.IntArgs[1] = Arguments[1].I32;
 		Call.Int64Args[0] = Arguments[2].I64;
+		break;
+	case EAvidScriptHostBindingId::TaskResultInt32V1:
+		Call.IntArgs[0] = Arguments[0].I32;
+		Call.Int64Args[0] = Arguments[1].I64;
+		Call.IntArgs[1] = Arguments[2].I32;
+		Call.IntArgs[2] = Arguments[3].I32;
 		break;
 	case EAvidScriptHostBindingId::EventManagedStateReadV1:
 		Call.IntArgs[0] = Arguments[0].I32;

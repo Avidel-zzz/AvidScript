@@ -268,6 +268,13 @@ bool FAvidScriptContinuationHostEndpoint::ReleaseTaskResult(const int64 Token)
 	return PinnedOwner && PinnedOwner->TaskResults.Release(Token);
 }
 
+bool FAvidScriptContinuationHostEndpoint::HasTaskResultType(
+	const int64 Token, const FString& TypeId) const
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = PinTaskOwner(Token);
+	return PinnedOwner && PinnedOwner->TaskResults.HasType(Token, TypeId);
+}
+
 EAvidScriptTaskWaitRegistration FAvidScriptContinuationHostEndpoint::AwaitTaskResult(
 	const int64 Token, const int32 CallbackId, int64& OutContinuationToken)
 {

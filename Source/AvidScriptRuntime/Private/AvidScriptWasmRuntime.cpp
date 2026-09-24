@@ -8244,6 +8244,12 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 		ProfileScope.SetSucceeded(bSucceeded);
 		return bSucceeded;
 	}
+	case EAvidScriptHostBindingId::TaskResultInt32V1:
+	{
+		const bool bSucceeded = DispatchTaskResultInt32Call(Call, OutResult);
+		ProfileScope.SetSucceeded(bSucceeded);
+		return bSucceeded;
+	}
 	case EAvidScriptHostBindingId::LanguageErrorReportV1:
 	{
 		const FString* Type = LanguageErrorCatalog
