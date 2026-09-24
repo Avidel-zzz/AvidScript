@@ -293,7 +293,10 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 			FFileHelper::LoadFileToArray(CanonicalWasm, *Path)))
 		return false;
 	const FString ModuleId = TEXT("csharp:Scripts/SourceThrow.cs");
-	for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
+	const TArray<FAvidScriptRuntimeBackendTestLane> Lanes = GetAvidScriptRuntimeBackendTestLanes();
+	if (!TestEqual(TEXT("handled language errors require WAMR and Wasmtime lanes"), Lanes.Num(), 2))
+		return false;
+	for (const FAvidScriptRuntimeBackendTestLane& Lane : Lanes)
 	{
 		FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
 		FAvidScriptWasmSmokeResult Result;
@@ -303,6 +306,7 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 			AddError(Result.ErrorMessage);
 			continue;
 		}
+		TestAvidScriptRuntimeLaneIdentity(*this, Lane, Result);
 		const FAvidScriptLanguageErrorCatalog* Catalog = Runtime.GetLanguageErrorCatalog();
 		const FString* Type = Catalog ? Catalog->FindType(1) : nullptr;
 		const FAvidScriptLanguageErrorSource* FirstSource = Catalog ? Catalog->FindSource(1) : nullptr;
@@ -320,6 +324,40 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 			&& Heap->GetStats().ActiveFrames == 0 && Heap->GetStats().LiveRoots == 0);
 		Runtime.Unload();
 		TestNull(TEXT("handled compiler catalog is released on unload"),
+			Runtime.GetLanguageErrorCatalog());
+	}
+	const FString LocalPath = FPaths::Combine(FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptLanguageErrorCatalogTests/GuestFixtures/local-catch.wasm"));
+	TArray<uint8> LocalWasm;
+	if (!TestTrue(TEXT("read same-method C# catch compiler WASM fixture"),
+			FFileHelper::LoadFileToArray(LocalWasm, *LocalPath)))
+		return false;
+	for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
+	{
+		FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
+		FAvidScriptWasmSmokeResult Result;
+		if (!TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("local catch WASM loads")),
+				Runtime.LoadModule(LocalWasm.GetData(), LocalWasm.Num(), ModuleId, Result)))
+		{
+			AddError(Result.ErrorMessage);
+			continue;
+		}
+		TestAvidScriptRuntimeLaneIdentity(*this, Lane, Result);
+		const FAvidScriptLanguageErrorCatalog* Catalog = Runtime.GetLanguageErrorCatalog();
+		const FString* Type = Catalog ? Catalog->FindType(1) : nullptr;
+		const FAvidScriptLanguageErrorSource* Source = Catalog ? Catalog->FindSource(1) : nullptr;
+		TestTrue(TEXT("local throw retains its type and source"), Type && Source
+			&& *Type == TEXT("type:global::System.Exception")
+			&& Source->SourceId == TEXT("Scripts/SourceThrow.cs")
+			&& !Catalog->FindSource(2));
+		if (!TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("local catch BeginPlay succeeds")),
+				Runtime.BeginPlay(Result)))
+			AddError(Result.ErrorMessage);
+		const AvidScript::Managed::FHeap* Heap = Runtime.GetManagedHeapForTesting();
+		TestTrue(TEXT("local catch releases managed invocation roots"), Heap
+			&& Heap->GetStats().ActiveFrames == 0 && Heap->GetStats().LiveRoots == 0);
+		Runtime.Unload();
+		TestNull(TEXT("local catch catalog is released on unload"),
 			Runtime.GetLanguageErrorCatalog());
 	}
 	return true;

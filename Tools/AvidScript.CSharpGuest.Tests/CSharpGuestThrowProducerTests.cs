@@ -18,8 +18,10 @@ internal static class CSharpGuestThrowProducerTests
         MultipleThrowProducersKeepDistinctSourceTokens();
         NonmatchingCatchPropagatesLanguageError();
         ConstructorSideEffectsAreRejected();
-        CatchRequiresHandlerLowering();
-        return 7;
+        LocalThrowUsesHandlerLowering();
+        MultipleLocalThrowSitesKeepDistinctSourceTokens();
+        NonmatchingLocalCatchPropagatesLanguageError();
+        return 9;
     }
 
     private static void MultipleThrowProducersKeepDistinctSourceTokens()
@@ -304,16 +306,18 @@ internal static class CSharpGuestThrowProducerTests
             "same-source compilation must reject constructor side effects: " + compilerError);
     }
 
-    private static void CatchRequiresHandlerLowering()
+    private static void LocalThrowUsesHandlerLowering()
     {
         const string source = """
             class Script
             {
-                static int Fail()
+                static int Run()
                 {
                     try { throw new System.Exception(); }
                     catch (System.Exception) { return 7; }
                 }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay() { Run(); }
             }
             """;
         SemanticDocument semantic = Analyze(source);
@@ -322,10 +326,44 @@ internal static class CSharpGuestThrowProducerTests
                 OutcomeHostModule(), out _, out string? error)
             && error is not null && error.Contains("handler", StringComparison.Ordinal),
             "a catch cannot be bypassed by treating its throw as an uncaught error");
-        Check(!CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
-                out _, out string? compilerError)
-            && compilerError is not null && compilerError.Contains("handler", StringComparison.Ordinal),
-            "same-source compilation must retain the catch boundary");
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? compilerError)
+            && compiled is not null, compilerError ?? "the local throw did not reach its catch");
+        GuestModule module = compiled!.Module;
+        GuestFunction handler = module.Functions.Single(function =>
+            function.Id.Contains(".Run(", StringComparison.Ordinal));
+        Check(handler.Blocks.Any(block => block.Instructions.Any(instruction =>
+                instruction.Op == "managed_new") && block.Terminator.Kind == "branch")
+            && module.LanguageErrorCatalog is { Types.Count: 1, Sources.Count: 1 }
+            && GuestModuleValidator.Validate(module).Succeeded,
+            "a local throw must allocate a rooted error and branch to the source-derived catch");
+        GuestModule probe = AddCatchProbe(module, handler);
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8
+            && wasm.Bytes.SequenceEqual(WasmModuleCompiler.Compile(probe).Bytes),
+            "the local catch must compile deterministically to executable WASM");
+        AssertLanguageErrorMetadata(wasm.Bytes, probe);
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "local-catch.wasm"), wasm.Bytes);
+        }
+
+        const string constructorSource = """
+            class Script
+            {
+                static int Run()
+                {
+                    try { throw new System.Exception("message"); }
+                    catch (System.Exception) { return 7; }
+                }
+            }
+            """;
+        Check(!CSharpLanguageErrorCompiler.TryLower(Analyze(constructorSource), new string('a', 64),
+                out _, out string? constructorError)
+            && constructorError is not null && constructorError.Contains("zero-argument", StringComparison.Ordinal),
+            "a local throw cannot drop constructor arguments");
 
         const string variableSource = """
             class Script
@@ -361,6 +399,92 @@ internal static class CSharpGuestThrowProducerTests
                 out _, out string? cleanupError)
             && cleanupError is not null && cleanupError.Contains("cleanup", StringComparison.Ordinal),
             "finally cannot be skipped by the handler-only graph materializer");
+    }
+
+    private static void NonmatchingLocalCatchPropagatesLanguageError()
+    {
+        const string source = """
+            class Script
+            {
+                static int Run()
+                {
+                    try { throw new System.Exception(); }
+                    catch (System.InvalidOperationException) { return 7; }
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay() { Run(); }
+            }
+            """;
+        SemanticDocument semantic = Analyze(source);
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "nonmatching local catch did not lower");
+        GuestModule module = compiled!.Module;
+        GuestFunction handler = module.Functions.Single(function =>
+            function.Id.Contains(".Run(", StringComparison.Ordinal));
+        Check(handler.Blocks.Any(block => block.Instructions.Any(instruction =>
+                instruction.Op == "managed_new") && block.Terminator.Kind == "return")
+            && GuestModuleValidator.Validate(module).Succeeded,
+            "an unmatched local catch must return the rooted language error");
+        GuestModule probe = AddProbe(module, handler, appendTarget: false);
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "an unmatched local catch must compile to executable WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "local-mismatch.wasm"), wasm.Bytes);
+        }
+    }
+
+    private static void MultipleLocalThrowSitesKeepDistinctSourceTokens()
+    {
+        const string source = """
+            class Script
+            {
+                static int CatchA()
+                {
+                    try { throw new System.Exception(); }
+                    catch (System.Exception) { return 11; }
+                }
+                static int CatchB()
+                {
+                    try { throw new System.Exception(); }
+                    catch (System.Exception) { return 22; }
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay() { CatchA(); CatchB(); }
+            }
+            """;
+        SemanticDocument semantic = Analyze(source);
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "multiple local throws did not lower");
+        GuestModule module = compiled!.Module;
+        Check(module.LanguageErrorCatalog is { Types.Count: 1, Sources.Count: 2 } catalog
+            && catalog.Sources[0].Start < catalog.Sources[1].Start,
+            "local throws must retain separate ordered source positions");
+        GuestFunction catchA = module.Functions.Single(function =>
+            function.Id.Contains(".CatchA(", StringComparison.Ordinal));
+        GuestFunction catchB = module.Functions.Single(function =>
+            function.Id.Contains(".CatchB(", StringComparison.Ordinal));
+        GuestModule probe = AddCatchProbe(
+            AddCatchProbe(module, catchA, "function:catch_source_probe_a", "catch_source_probe_a"),
+            catchB, "function:catch_source_probe_b", "catch_source_probe_b");
+        GuestValidationResult validation = GuestModuleValidator.Validate(probe);
+        Check(validation.Succeeded,
+            string.Join(" | ", validation.Diagnostics.Select(item => item.Message)));
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "multiple local catch methods must compile to WASM");
+        AssertLanguageErrorMetadata(wasm.Bytes, probe);
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "multi-local-catch.wasm"), wasm.Bytes);
+        }
     }
 
     private static SemanticDocument Analyze(string source)

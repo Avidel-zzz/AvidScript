@@ -8,9 +8,9 @@ namespace AvidScript.CSharpGuest;
 
 public sealed record CSharpLanguageErrorCompilation(GuestModule Module);
 
-// Compiles source-backed throw producers, their direct callers, and bounded
-// catch methods. The ordinary projection is private to this pass: the published
-// module keeps the original exception-flow provenance.
+// Compiles source-backed throw producers, local throws, direct callers, and
+// bounded catch methods. The ordinary projection is private to this pass:
+// the published module keeps the original exception-flow provenance.
 public static class CSharpLanguageErrorCompiler
 {
     public static bool TryLower(
@@ -28,18 +28,23 @@ public static class CSharpLanguageErrorCompiler
             return Fail("Expected a validated exception-flow artifact without unrelated errors.", out error);
         SemanticExceptionFlow[] throwFlows = flows.Where(item => item.Throws.Count > 0).ToArray();
         if (throwFlows.Length == 0)
-            return Fail("At least one supported throw producer is required.", out error);
-        IReadOnlySet<string> throwMethodIds = throwFlows.Select(item => item.MethodSymbolId)
+            return Fail("At least one supported throw site is required.", out error);
+        SemanticExceptionFlow[] producers = throwFlows.Where(item => item.Catches.Count == 0).ToArray();
+        IReadOnlySet<string> producerMethodIds = producers.Select(item => item.MethodSymbolId)
             .ToHashSet(StringComparer.Ordinal);
         SemanticExceptionFlow[] handlers = flows.Where(item =>
-            !throwMethodIds.Contains(item.MethodSymbolId)).ToArray();
+            !producerMethodIds.Contains(item.MethodSymbolId)).ToArray();
         List<SemanticControlFlowGraph> handlerGraphs = new();
+        Dictionary<string, IReadOnlyList<CSharpLocalThrowSite>> localThrows = new(StringComparer.Ordinal);
         foreach (SemanticExceptionFlow handler in handlers)
         {
             if (!CSharpExceptionGraphMaterializer.TryBuild(handler,
-                    out SemanticControlFlowGraph? graph, out error))
+                    out SemanticControlFlowGraph? graph, out IReadOnlyList<CSharpLocalThrowSite> sites,
+                    out error))
                 return false;
             handlerGraphs.Add(graph!);
+            if (sites.Count != 0)
+                localThrows.Add(CSharpGuestIds.Function(handler.MethodSymbolId), sites);
         }
         if (throwFlows.Any(item => semantic.Callables.Count(callable =>
                     callable.MethodSymbolId == item.MethodSymbolId
@@ -50,7 +55,7 @@ public static class CSharpLanguageErrorCompiler
             || effects is null)
             return Fail("The exception source needs supported int32 producers and a complete direct-call effect plan.", out error);
 
-        IReadOnlySet<string> producerIds = throwFlows.Select(item =>
+        IReadOnlySet<string> producerIds = producers.Select(item =>
             CSharpGuestIds.Function(item.MethodSymbolId)).ToHashSet(StringComparer.Ordinal);
         IReadOnlySet<string> affected = effects.OutcomeMethodIds
             .Select(CSharpGuestIds.Function).ToHashSet(StringComparer.Ordinal);
@@ -139,13 +144,23 @@ public static class CSharpLanguageErrorCompiler
             || outcomes is null)
             return false;
         Dictionary<string, GuestFunction> loweredProducers = new(StringComparer.Ordinal);
-        foreach (SemanticExceptionFlow item in throwFlows)
+        foreach (SemanticExceptionFlow item in producers)
         {
             if (!CSharpThrowProducerLowerer.TryLowerReplacing(semantic, item, outcomes,
                     out CSharpThrowProducerResult? producer, out error)
                 || producer is null)
                 return false;
             loweredProducers.Add(producer.Function.Id, producer.Function);
+        }
+        foreach (SemanticExceptionFlow item in handlers.Where(flow => flow.Throws.Count != 0))
+        {
+            string functionId = CSharpGuestIds.Function(item.MethodSymbolId);
+            if (!CSharpLocalThrowLowerer.TryLowerReplacing(item, localThrows[functionId],
+                    tokens, catchRoutes[functionId], outcomes,
+                    out GuestFunction? handler, out error)
+                || handler is null)
+                return false;
+            loweredProducers.Add(functionId, handler);
         }
         GuestModule candidate = outcomes with
         {

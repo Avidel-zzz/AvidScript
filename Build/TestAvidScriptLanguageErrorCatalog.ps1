@@ -30,6 +30,12 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'C# multi-producer catch Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'catch-mismatch.wasm')
     if ($LASTEXITCODE -ne 0) { throw 'C# unmatched language-error Node WASM probe failed.' }
+    & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'local-catch.wasm')
+    if ($LASTEXITCODE -ne 0) { throw 'C# local-catch Node WASM probe failed.' }
+    & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'multi-local-catch.wasm')
+    if ($LASTEXITCODE -ne 0) { throw 'C# multi-local-catch Node WASM probe failed.' }
+    & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'local-mismatch.wasm')
+    if ($LASTEXITCODE -ne 0) { throw 'C# unmatched local-catch Node WASM probe failed.' }
 }
 finally {
     $env:DOTNET_CLI_HOME = $PreviousCliHome

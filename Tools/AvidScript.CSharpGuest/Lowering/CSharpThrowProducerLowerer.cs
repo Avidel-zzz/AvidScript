@@ -20,8 +20,8 @@ public sealed record CSharpThrowProducerResult(
 // Other constructors, handlers, cleanup, and rethrow need their own lowering.
 public static class CSharpThrowProducerLowerer
 {
-    private const string ExceptionTypeId = "type:global::System.Exception";
-    private const string ExceptionConstructorId =
+    internal const string ExceptionTypeId = "type:global::System.Exception";
+    internal const string ExceptionConstructorId =
         "symbol:method:global::System.Exception..ctor():void";
     private const string RootTypeId = "type:language_error_root";
 

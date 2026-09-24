@@ -79,7 +79,7 @@ public partial class Projectile : AvidActor
 
 ## 支持范围
 
-- **C#：** 支持仓库样例使用的语言子集；不支持任意 .NET API 或 NuGet 包。`throw` / `catch` 目前只覆盖部分受约束路径，完整异常语义仍在实现，见 [P66 语言执行计划](Docs/Phase66/P66.C_Language_Execution_Plan.md)。
+- **C#：** 支持仓库样例使用的语言子集；不支持任意 .NET API 或 NuGet 包。`throw` / `catch` 目前只有专用测试编译入口覆盖部分写法，标准脚本构建入口仍会拒绝异常源码，见 [P66 语言执行计划](Docs/Phase66/P66.C_Language_Execution_Plan.md)。
 - **UE 集成：** 通过生成的绑定访问 UE API，也可用 C# 声明 Actor、Component 和 Subsystem。新增或修改 UE 反射成员需要重新构建并重启 Editor。
 - **异步：** 支持样例中的下一帧、计时器和异步资源加载；不支持任意 `Task` 或自定义 awaiter。
 - **网络：** RPC、属性复制和 RepNotify 有聚焦测试及样例；真实游戏客户端/服务器验收仍需完成。
