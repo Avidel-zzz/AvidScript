@@ -6,9 +6,7 @@ using AvidScript.GuestIr;
 
 namespace AvidScript.CSharpGuest;
 
-public sealed record CSharpLanguageErrorCompilation(
-    GuestModule Module,
-    CSharpLanguageErrorTokenCatalog Catalog);
+public sealed record CSharpLanguageErrorCompilation(GuestModule Module);
 
 // Compiles the first source-backed, directly propagated language error.
 // The ordinary projection is private to this pass: the published module keeps
@@ -78,6 +76,8 @@ public static class CSharpLanguageErrorCompiler
             return false;
         GuestModule candidate = outcomes with
         {
+            SchemaVersion = GuestLanguageErrorCatalog.SchemaVersion,
+            IrVersion = GuestLanguageErrorCatalog.IrVersion,
             Provenance = outcomes.Provenance with
             {
                 SemanticSchemaVersion = semantic.SchemaVersion,
@@ -85,12 +85,20 @@ public static class CSharpLanguageErrorCompiler
             },
             Functions = outcomes.Functions.Select(function =>
                 function.Id == producerId ? producer.Function : function).ToArray(),
+            LanguageErrorCatalog = new GuestLanguageErrorCatalog(
+                producer.Catalog.Types.Select(entry =>
+                    new GuestLanguageErrorTypeToken(entry.Token, entry.TypeId)).ToArray(),
+                producer.Catalog.Sources.Select(entry =>
+                    new GuestLanguageErrorSourceToken(entry.Token, entry.SourceId,
+                        flow.SourceLength, entry.Span.Start, entry.Span.Length,
+                        entry.Span.Line, entry.Span.Column,
+                        entry.Span.EndLine, entry.Span.EndColumn)).ToArray()),
         };
         GuestValidationResult validation = GuestModuleValidator.Validate(candidate);
         if (!validation.Succeeded)
             return Fail("The composed language-error module failed validation: "
                 + string.Join(" | ", validation.Diagnostics.Select(item => item.Message)), out error);
-        compilation = new(candidate, producer.Catalog);
+        compilation = new(candidate);
         return true;
     }
 

@@ -4,8 +4,8 @@ using System.Linq;
 
 namespace AvidScript.GuestIr;
 
-// IR 16 admits outcome-returning calls only when the call result is split by
-// its status before any normal value or error payload is read.
+// IR 16 and later admit outcome-returning calls only when the call result is
+// split by its status before any normal value or error payload is read.
 internal static class GuestLanguageOutcomeFlowValidator
 {
     public const int SchemaVersion = 16;
@@ -19,7 +19,9 @@ internal static class GuestLanguageOutcomeFlowValidator
         HashSet<string> outcomeTypes = declarations.Select(item => item.TypeId)
             .ToHashSet(StringComparer.Ordinal);
         bool flowVersion = context.Module.SchemaVersion == SchemaVersion
-            && context.Module.IrVersion == IrVersion;
+                && context.Module.IrVersion == IrVersion
+            || context.Module.SchemaVersion == GuestLanguageErrorCatalogValidator.SchemaVersion
+                && context.Module.IrVersion == GuestLanguageErrorCatalogValidator.IrVersion;
 
         foreach (GuestImport import in context.Module.Imports)
         {

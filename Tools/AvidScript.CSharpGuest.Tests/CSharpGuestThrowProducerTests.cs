@@ -36,15 +36,25 @@ internal static class CSharpGuestThrowProducerTests
             function.Id.Contains(".Fail(", StringComparison.Ordinal)).Id;
         GuestFunction caller = module.Functions.Single(function =>
             function.Id.Contains(".Wrap(", StringComparison.Ordinal));
-        Check(module.SchemaVersion == 16 && module.IrVersion == "1.15"
+        Check(module.SchemaVersion == 17 && module.IrVersion == "1.16"
             && module.Provenance.SemanticSchemaVersion == 34
             && module.Provenance.SemanticVersion == "1.43"
+            && module.LanguageErrorCatalog is { Types.Count: 1, Sources.Count: 1 } catalog
+            && catalog.Types[0].TypeId == "type:global::System.Exception"
+            && catalog.Sources[0].SourceId == semantic.Source.SourceId
+            && source.Substring(catalog.Sources[0].Start, catalog.Sources[0].Length)
+                == "throw new System.Exception();"
             && caller.Blocks.Any(block => block.Instructions.Any(instruction =>
                 instruction.Op == "call" && instruction.TargetId == failId)
                 && block.Instructions.Any(instruction =>
                     instruction.Op == "field_load" && instruction.TargetId == "field:status")
                 && block.Terminator.Kind == "branch_if"),
             "the original exception artifact must produce a checked same-source direct call");
+        byte[] serialized = GuestIrSerializer.Serialize(module);
+        Check(serialized.SequenceEqual(GuestIrSerializer.Serialize(GuestIrSerializer.Deserialize(serialized)))
+            && GuestIrSerializer.Deserialize(serialized).LanguageErrorCatalog?.Types[0].TypeId
+                == "type:global::System.Exception",
+            "the source/type token catalog must round-trip as part of the versioned IR");
         GuestModule probe = AddProbe(module, caller, appendTarget: false);
         GuestValidationResult validation = GuestModuleValidator.Validate(probe);
         Check(validation.Succeeded,
@@ -57,6 +67,7 @@ internal static class CSharpGuestThrowProducerTests
         {
             Directory.CreateDirectory(output);
             File.WriteAllBytes(Path.Combine(output, "throw-caller.wasm"), wasm.Bytes);
+            GuestIrArtifactWriter.Write(Path.Combine(output, "throw-caller.guest.json"), probe);
         }
     }
 

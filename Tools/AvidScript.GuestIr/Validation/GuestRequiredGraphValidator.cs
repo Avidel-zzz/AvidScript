@@ -30,6 +30,11 @@ internal static class GuestRequiredGraphValidator
         {
             return false;
         }
+        if (module.LanguageErrorCatalog is { } catalog
+            && (catalog.Types is null || catalog.Sources is null
+                || catalog.Types.Any(type => type is null || HasNull(type.TypeId))
+                || catalog.Sources.Any(source => source is null || HasNull(source.SourceId))))
+            return false;
         foreach (GuestFramedExport? export in module.FramedExports)
             if (export is null || HasNull(export.Name, export.FunctionId) || export.ParameterKinds is null
                 || export.ParameterKinds.Any(kind => kind is null)

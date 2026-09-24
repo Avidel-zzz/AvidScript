@@ -31,6 +31,11 @@ public sealed record GuestModule(
     [JsonPropertyOrder(16)]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<GuestLanguageOutcomeType>? LanguageOutcomeTypes { get; init; }
+
+    // IR 17 only; omitted from older artifacts to preserve canonical bytes.
+    [JsonPropertyOrder(17)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public GuestLanguageErrorCatalog? LanguageErrorCatalog { get; init; }
 }
 
 // Dedicated synchronous, same-domain adapters. Ordinary exports remain subject to
