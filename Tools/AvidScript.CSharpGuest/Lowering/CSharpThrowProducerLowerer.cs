@@ -15,14 +15,18 @@ public sealed record CSharpThrowProducerResult(
     GuestFunction Function,
     CSharpLanguageErrorTokenCatalog Catalog);
 
-// First source-backed language-error producer. The accepted form is deliberately
-// exact: System.Exception's zero-argument constructor has no user code to skip.
-// Other constructors, handlers, cleanup, and rethrow need their own lowering.
+// Only selected framework exceptions with parameterless constructors are
+// modeled here. Exception members remain outside this bounded profile; no
+// user-defined constructor body is silently skipped.
 public static class CSharpThrowProducerLowerer
 {
     internal const string ExceptionTypeId = "type:global::System.Exception";
     internal const string ExceptionConstructorId =
         "symbol:method:global::System.Exception..ctor():void";
+    private const string InvalidOperationExceptionTypeId =
+        "type:global::System.InvalidOperationException";
+    private const string ArgumentExceptionTypeId =
+        "type:global::System.ArgumentException";
     private const string RootTypeId = "type:language_error_root";
 
     public static bool TryLower(
@@ -81,17 +85,26 @@ public static class CSharpThrowProducerLowerer
             return Fail("The throw method needs an unsupported branch, handler, or cleanup path.", out error);
         SemanticThrowSite site = flow.Throws[0];
         SemanticOperation? expression = blocks[1].BranchValue;
-        if (site.Kind != "throw" || site.ExceptionTypeId != ExceptionTypeId
-            || expression is not { Kind: "object_creation", IsSupported: true }
-            || expression.TypeId != ExceptionTypeId
-            || expression.SymbolId != ExceptionConstructorId
-            || expression.Children.Count != 0
-            || expression.Span.Start < site.Span.Start
-            || expression.Span.End > site.Span.End)
-            return Fail("Only a zero-argument System.Exception constructor is currently executable.", out error);
+        // Roslyn inserts an implicit reference upcast from a derived exception
+        // to System.Exception at a throw branch. It has no executable effect.
+        SemanticOperation? creation = expression;
+        if (expression is { Kind: "conversion", TypeId: ExceptionTypeId }
+            && expression.Conversion is
+                { Exists: true, IsImplicit: true, IsReference: true, IsUserDefined: false, MethodSymbolId: null }
+            && expression.Children.Count == 1)
+            creation = expression.Children[0];
+        if (site.Kind != "throw"
+            || !TryGetBuiltInConstructor(site.ExceptionTypeId, out string? constructorId)
+            || creation is not { Kind: "object_creation", IsSupported: true }
+            || creation.TypeId != site.ExceptionTypeId
+            || creation.SymbolId != constructorId
+            || creation.Children.Count != 0
+            || creation.Span.Start < site.Span.Start
+            || creation.Span.End > site.Span.End)
+            return Fail("Only a zero-argument supported framework exception constructor is executable.", out error);
 
         CSharpLanguageErrorTokenCatalog catalog = BuildCatalog(semantic.ExceptionFlows);
-        int typeToken = catalog.Types.Single(item => item.TypeId == ExceptionTypeId).Token;
+        int typeToken = catalog.Types.Single(item => item.TypeId == site.ExceptionTypeId).Token;
         int sourceToken = catalog.Sources.Single(item => item.SourceId == flow.SourceId
             && item.Span.Start == site.Span.Start && item.Span.Length == site.Span.Length).Token;
         GuestLanguageOutcomeType? outcome = module.LanguageOutcomeTypes?.SingleOrDefault(item =>
@@ -158,6 +171,20 @@ public static class CSharpThrowProducerLowerer
                 index + 1, item.SourceId, item.Span))
             .ToArray();
         return new(types, sources);
+    }
+
+    private static bool TryGetBuiltInConstructor(string? typeId, out string? constructorId)
+    {
+        constructorId = typeId switch
+        {
+            ExceptionTypeId => ExceptionConstructorId,
+            InvalidOperationExceptionTypeId =>
+                "symbol:method:global::System.InvalidOperationException..ctor():void",
+            ArgumentExceptionTypeId =>
+                "symbol:method:global::System.ArgumentException..ctor():void",
+            _ => null,
+        };
+        return constructorId is not null;
     }
 
     private static GuestInstruction Constant(string register, int value) =>

@@ -21,6 +21,7 @@ internal static class CSharpGuestThrowProducerTests
         SameSourceCallerPropagatesManagedLanguageError();
         SameSourceCallerCatchesManagedLanguageError();
         MultipleThrowProducersKeepDistinctSourceTokens();
+        BuiltInExceptionTypesSelectDerivedAndBaseCatches();
         NonmatchingCatchPropagatesLanguageError();
         ConstructorSideEffectsAreRejected();
         LocalThrowUsesHandlerLowering();
@@ -51,7 +52,7 @@ internal static class CSharpGuestThrowProducerTests
         NestedCatchRethrowReachesOuterHandler();
         NestedCatchRethrowRunsBranchingOuterFinally();
         CatchVariableReadsBoundError();
-        return 34;
+        return 35;
     }
 
     private static void MultipleThrowProducersKeepDistinctSourceTokens()
@@ -122,6 +123,96 @@ internal static class CSharpGuestThrowProducerTests
             Directory.CreateDirectory(output);
             File.WriteAllBytes(Path.Combine(output, "multi-catch.wasm"), wasm.Bytes);
         }
+    }
+
+    private static void BuiltInExceptionTypesSelectDerivedAndBaseCatches()
+    {
+        const string source = """
+            using System;
+            class Script
+            {
+                static int FailInvalid() { throw new InvalidOperationException(); }
+                static int FailArgument() { throw new ArgumentException(); }
+                static int CatchInvalid()
+                {
+                    try { return FailInvalid(); }
+                    catch (ArgumentException) { return 1; }
+                    catch (InvalidOperationException) { return 11; }
+                }
+                static int CatchArgument()
+                {
+                    try { return FailArgument(); }
+                    catch (InvalidOperationException) { return 2; }
+                    catch (ArgumentException) { return 22; }
+                }
+                static int CatchBase()
+                {
+                    try { return FailInvalid(); }
+                    catch (ArgumentException) { return 3; }
+                    catch (Exception) { return 33; }
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay() { CatchInvalid(); CatchArgument(); CatchBase(); }
+            }
+            """;
+        Check(ReferenceCatch(source, "CatchInvalid") == 11
+            && ReferenceCatch(source, "CatchArgument") == 22
+            && ReferenceCatch(source, "CatchBase") == 33,
+            "the same C# source needs the expected CLR exception dispatch results");
+        SemanticDocument semantic = Analyze(source);
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "typed built-in exceptions did not lower");
+        GuestModule module = compiled!.Module;
+        Check(module.LanguageErrorCatalog is { Types.Count: 2, Sources.Count: 2 } catalog
+            && catalog.Types[0].TypeId == "type:global::System.ArgumentException"
+            && catalog.Types[1].TypeId == "type:global::System.InvalidOperationException",
+            "distinct built-in exceptions need deterministic dynamic type tokens");
+        foreach ((string method, string export) in new[]
+        {
+            ("CatchInvalid", "typed_invalid_probe"),
+            ("CatchArgument", "typed_argument_probe"),
+            ("CatchBase", "typed_base_probe"),
+        })
+        {
+            GuestFunction handler = module.Functions.Single(function =>
+                function.Id.Contains("." + method + "(", StringComparison.Ordinal));
+            module = AddCatchProbe(module, handler, "function:" + export, export);
+        }
+        Check(GuestModuleValidator.Validate(module).Succeeded,
+            "typed exception catches must keep the Guest outcome contract valid");
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(module);
+        Check(wasm.Succeeded && wasm.Bytes.SequenceEqual(WasmModuleCompiler.Compile(module).Bytes),
+            "typed exception dispatch must compile to deterministic WASM");
+        AssertLanguageErrorMetadata(wasm.Bytes, module);
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "typed-catch.wasm"), wasm.Bytes);
+        }
+
+        const string constructorArguments = """
+            using System;
+            class Script
+            {
+                static int Fail() { throw new InvalidOperationException("message"); }
+            }
+            """;
+        Check(!CSharpLanguageErrorCompiler.TryLower(Analyze(constructorArguments),
+                new string('a', 64), out _, out _),
+            "framework exception constructors with arguments must remain fail-closed");
+        const string customException = """
+            using System;
+            class CustomException : Exception { }
+            class Script
+            {
+                static int Fail() { throw new CustomException(); }
+            }
+            """;
+        Check(!CSharpLanguageErrorCompiler.TryLower(Analyze(customException),
+                new string('a', 64), out _, out _),
+            "user-defined exception constructors need real executable lowering");
     }
 
     private static void SameSourceCallerCatchesManagedLanguageError()

@@ -326,6 +326,44 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 		TestNull(TEXT("handled compiler catalog is released on unload"),
 			Runtime.GetLanguageErrorCatalog());
 	}
+	const FString TypedPath = FPaths::Combine(FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptLanguageErrorCatalogTests/GuestFixtures/typed-catch.wasm"));
+	TArray<uint8> TypedWasm;
+	if (!TestTrue(TEXT("read typed C# catch compiler WASM fixture"),
+			FFileHelper::LoadFileToArray(TypedWasm, *TypedPath)))
+		return false;
+	for (const FAvidScriptRuntimeBackendTestLane& Lane : Lanes)
+	{
+		FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
+		FAvidScriptWasmSmokeResult Result;
+		if (!TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("typed catch WASM loads")),
+				Runtime.LoadModule(TypedWasm.GetData(), TypedWasm.Num(), ModuleId, Result)))
+		{
+			AddError(Result.ErrorMessage);
+			continue;
+		}
+		TestAvidScriptRuntimeLaneIdentity(*this, Lane, Result);
+		const FAvidScriptLanguageErrorCatalog* Catalog = Runtime.GetLanguageErrorCatalog();
+		const FString* ArgumentType = Catalog ? Catalog->FindType(1) : nullptr;
+		const FString* InvalidType = Catalog ? Catalog->FindType(2) : nullptr;
+		const FAvidScriptLanguageErrorSource* FirstSource = Catalog ? Catalog->FindSource(1) : nullptr;
+		const FAvidScriptLanguageErrorSource* SecondSource = Catalog ? Catalog->FindSource(2) : nullptr;
+		TestTrue(TEXT("typed catches retain ordered dynamic exception types and sources"),
+			ArgumentType && InvalidType && FirstSource && SecondSource
+			&& *ArgumentType == TEXT("type:global::System.ArgumentException")
+			&& *InvalidType == TEXT("type:global::System.InvalidOperationException")
+			&& FirstSource->SourceId == SecondSource->SourceId
+			&& FirstSource->Start < SecondSource->Start && !Catalog->FindType(3));
+		if (!TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("typed catch BeginPlay succeeds")),
+				Runtime.BeginPlay(Result)))
+			AddError(Result.ErrorMessage);
+		const AvidScript::Managed::FHeap* Heap = Runtime.GetManagedHeapForTesting();
+		TestTrue(TEXT("typed catches release managed invocation roots"), Heap
+			&& Heap->GetStats().ActiveFrames == 0 && Heap->GetStats().LiveRoots == 0);
+		Runtime.Unload();
+		TestNull(TEXT("typed catch catalog is released on unload"),
+			Runtime.GetLanguageErrorCatalog());
+	}
 	const FString LocalPath = FPaths::Combine(FPaths::ProjectSavedDir(),
 		TEXT("AvidScriptLanguageErrorCatalogTests/GuestFixtures/local-catch.wasm"));
 	TArray<uint8> LocalWasm;

@@ -130,6 +130,7 @@ for (const entry of WebAssembly.Module.imports(wasmModule)) {
 }
 instance = new WebAssembly.Instance(wasmModule, imports);
 const multipleCatches = typeof instance.exports.catch_source_probe_a === 'function';
+const typedCatches = typeof instance.exports.typed_invalid_probe === 'function';
 const finallyCatches = typeof instance.exports.finally_source_probe === 'function';
 const nestedFinallyCatches = typeof instance.exports.nested_finally_source_probe === 'function';
 const throwFinallyCatches = typeof instance.exports.throw_finally_source_probe === 'function';
@@ -156,7 +157,7 @@ const rethrowCatches = typeof instance.exports.rethrow_local_source_probe === 'f
 const nestedRethrowCatches = typeof instance.exports.nested_rethrow_source_probe === 'function';
 const nestedCatchCleanupCatches = typeof instance.exports.nested_catch_cleanup_normal_first_probe === 'function';
 const catchVariableCatches = typeof instance.exports.catch_variable_call_probe === 'function';
-const catches = multipleCatches || finallyCatches || nestedFinallyCatches || throwFinallyCatches
+const catches = typedCatches || multipleCatches || finallyCatches || nestedFinallyCatches || throwFinallyCatches
   || nestedLocalThrowCatches || multiLocalThrowCatches || sideEffectCatches
   || mixedCleanupCatches || mixedBranchCatches || calledReturnCatches
   || calledBranchCatches
@@ -167,7 +168,14 @@ const catches = multipleCatches || finallyCatches || nestedFinallyCatches || thr
   || branchCleanupCatches || rethrowCatches
   || nestedRethrowCatches || nestedCatchCleanupCatches || catchVariableCatches
   || typeof instance.exports.catch_source_probe === 'function';
-if (multipleCatches) {
+if (typedCatches) {
+  const invalid = instance.exports.typed_invalid_probe();
+  const argument = instance.exports.typed_argument_probe();
+  const base = instance.exports.typed_base_probe();
+  if (invalid !== 11 || argument !== 22 || base !== 33) {
+    throw new Error(`Typed catch results = ${invalid}, ${argument}, ${base}; expected 11, 22, 33`);
+  }
+} else if (multipleCatches) {
   const first = instance.exports.catch_source_probe_a();
   const second = instance.exports.catch_source_probe_b();
   if (first !== 11 || second !== 22) {
@@ -391,6 +399,7 @@ if (multipleCatches) {
   if (actual !== expected) throw new Error(`source probe() = ${actual}; expected ${expected}`);
 }
 if (allocations !== (consecutiveReplacementCatches ? 6
+  : typedCatches ? 3
   : rethrowCatches || replacementCatches || nestedReplacementCatches
   || outerNestedReplacementCatches || outermostReplacementCatches ? 4
   : branchCleanupCatches || rethrowBranchCatches || localRethrowBranchCatches
@@ -416,7 +425,8 @@ if (catches) {
   }
   collect();
   if (objects.size !== 0) throw new Error('Handled error object survived collection');
-  process.stdout.write(multipleCatches
+  process.stdout.write(typedCatches ? 'C# source typed-catch WASM: 4/4 passed\n'
+    : multipleCatches
     ? 'C# source multi-catch WASM: 3/3 passed\n'
     : rethrowCatches ? 'C# source catch-rethrow WASM: 5/5 passed\n'
     : nestedRethrowCatches ? 'C# source nested-rethrow WASM: 5/5 passed\n'
