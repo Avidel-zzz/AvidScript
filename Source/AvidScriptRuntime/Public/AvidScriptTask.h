@@ -42,6 +42,10 @@ public:
 	// The Session retains one producer reference while this continuation is pending.
 	// A dispatch may transfer that reference to its next continuation.
 	virtual bool BindTaskProducer(int64 TaskToken, int64 ContinuationToken) = 0;
+	// Retains a task reference until the pending continuation is dispatched or
+	// retired. The caller may then release its own reference before suspension.
+	virtual bool RetainTaskForContinuation(
+		int64 TaskToken, int64 ContinuationToken) = 0;
 	virtual bool SucceedTaskResult(int64 Token, TConstArrayView<uint8> Value,
 		TArray<int64>& OutWaiters) = 0;
 	virtual bool FaultTaskResult(int64 Token, FString ErrorCode,

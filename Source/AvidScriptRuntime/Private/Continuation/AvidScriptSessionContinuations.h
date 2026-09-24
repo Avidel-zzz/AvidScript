@@ -68,6 +68,8 @@ public:
 	EAvidScriptTaskWaitRegistration AwaitTaskResult(
 		int64 Token, int32 CallbackId, int64& OutContinuationToken) override;
 	bool BindTaskProducer(int64 TaskToken, int64 ContinuationToken) override;
+	bool RetainTaskForContinuation(
+		int64 TaskToken, int64 ContinuationToken) override;
 	bool SucceedTaskResult(int64 Token, TConstArrayView<uint8> Value,
 		TArray<int64>& OutWaiters) override;
 	bool FaultTaskResult(int64 Token, FString ErrorCode, TArray<int64>& OutWaiters) override;
@@ -114,6 +116,7 @@ public:
 	static constexpr int32 MaximumResultPayloadCells = 64;
 	static constexpr int32 MaximumFixedResultBytes = 4096;
 	static constexpr int32 MaximumStateFrameBytes = 4096;
+	static constexpr int32 MaximumTaskReferencesPerContinuation = 64;
 
 	explicit FAvidScriptSessionContinuations(
 		TSharedPtr<IAvidScriptAsyncObjectLoader> InAsyncObjectLoader = nullptr);
@@ -186,6 +189,8 @@ public:
 		EAvidScriptContinuationLane Lane, uint64 ActivationSerial,
 		int64 TaskToken, int32 CallbackId, int64& OutContinuationToken);
 	bool BindTaskProducer(EAvidScriptContinuationLane Lane,
+		uint64 ActivationSerial, int64 TaskToken, int64 ContinuationToken);
+	bool RetainTaskForContinuation(EAvidScriptContinuationLane Lane,
 		uint64 ActivationSerial, int64 TaskToken, int64 ContinuationToken);
 	bool Cancel(
 		EAvidScriptContinuationLane Lane,
@@ -283,6 +288,7 @@ private:
 		int64 Token = 0;
 		int64 TaskResultToken = 0;
 		int64 ProducerTaskToken = 0;
+		TArray<int64> RetainedTaskTokens;
 		int64 CancellationSourceToken = 0;
 		TWeakObjectPtr<UWorld> World;
 		FTimerHandle TimerHandle;

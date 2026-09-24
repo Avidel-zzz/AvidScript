@@ -294,6 +294,14 @@ bool FAvidScriptContinuationHostEndpoint::BindTaskProducer(
 		Lane, ActivationSerial, TaskToken, ContinuationToken);
 }
 
+bool FAvidScriptContinuationHostEndpoint::RetainTaskForContinuation(
+	const int64 TaskToken, const int64 ContinuationToken)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = PinTaskOwner(TaskToken);
+	return PinnedOwner && PinnedOwner->RetainTaskForContinuation(
+		Lane, ActivationSerial, TaskToken, ContinuationToken);
+}
+
 bool FAvidScriptContinuationHostEndpoint::SucceedTaskResult(
 	const int64 Token, const TConstArrayView<uint8> Value,
 	TArray<int64>& OutWaiters)
@@ -998,6 +1006,40 @@ bool FAvidScriptSessionContinuations::BindTaskProducer(
 		TaskResults.Release(TaskToken);
 	}
 	Slot.Entry->ProducerTaskToken = TaskToken;
+	return true;
+}
+
+bool FAvidScriptSessionContinuations::RetainTaskForContinuation(
+	const EAvidScriptContinuationLane Lane,
+	const uint64 ActivationSerial,
+	const int64 TaskToken,
+	const int64 ContinuationToken)
+{
+	if (!CanUseTaskResults(Lane, ActivationSerial)
+		|| !TaskResults.MatchesOwner(TaskToken, Lane, ActivationSerial))
+	{
+		return false;
+	}
+	uint32 SlotIndex = 0;
+	uint32 Generation = 0;
+	if (!UnpackToken(ContinuationToken, SlotIndex, Generation)
+		|| !Slots.IsValidIndex(static_cast<int32>(SlotIndex)))
+	{
+		return false;
+	}
+	FSlot& Slot = Slots[SlotIndex];
+	if (Slot.Generation != Generation || !Slot.Entry.IsSet()
+		|| Slot.Entry->Lane != Lane
+		|| Slot.Entry->ActivationSerial != ActivationSerial
+		|| Slot.Entry->bReady || Slot.Entry->bDispatching
+		|| Slot.Entry->bStateConsumed || Slot.Entry->StateFrame.IsEmpty()
+		|| Slot.Entry->ProducerTaskToken == TaskToken
+		|| Slot.Entry->RetainedTaskTokens.Num() >= MaximumTaskReferencesPerContinuation
+		|| !TaskResults.Retain(TaskToken))
+	{
+		return false;
+	}
+	Slot.Entry->RetainedTaskTokens.Add(TaskToken);
 	return true;
 }
 
@@ -2178,6 +2220,10 @@ void FAvidScriptSessionContinuations::ReleaseSlot(const uint32 SlotIndex)
 		TaskResults.UnregisterWaiter(
 			Slot.Entry->TaskResultToken, Slot.Entry->Token);
 		TaskResults.Release(Slot.Entry->TaskResultToken);
+	}
+	for (const int64 TaskToken : Slot.Entry->RetainedTaskTokens)
+	{
+		verify(TaskResults.Release(TaskToken));
 	}
 	ReleaseEntryResult(Slot.Entry.GetValue());
 	UnbindEntryFromCancellationSource(Slot.Entry.GetValue());

@@ -473,4 +473,113 @@ bool FAvidScriptSessionTaskProducerBindingTest::RunTest(const FString& Parameter
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptSessionTaskContinuationOwnershipTest,
+	"AvidScript.Runtime.Continuation.TaskContinuationOwnership",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptSessionTaskContinuationOwnershipTest::RunTest(const FString& Parameters)
+{
+	TStrongObjectPtr<UWorld> World(NewObject<UWorld>());
+	const TSharedPtr<FAvidScriptSessionContinuations> Owner =
+		MakeShared<FAvidScriptSessionContinuations>();
+	FAvidScriptContinuationHostEndpoint& Host = Owner->ResetActive(World.Get());
+	FAvidScriptSessionTaskResults& Tasks = Owner->GetTaskResultsForTesting();
+	const TArray<uint8> StateBytes{1};
+	const int32 Value = 19;
+	const TConstArrayView<uint8> ValueBytes(
+		reinterpret_cast<const uint8*>(&Value), sizeof(Value));
+	TArray<int64> Woken;
+	TArray<FAvidScriptContinuationCompletion> Ready;
+	FAvidScriptTaskResultSnapshot Snapshot;
+
+	const int64 CancelledTask = Host.CreateTaskResult(TEXT("System.Int32"));
+	const int64 CancelledContinuation = Host.ScheduleDelay(30.0f, 401);
+	TestFalse(TEXT("Task reference requires a stored continuation frame"),
+		Host.RetainTaskForContinuation(CancelledTask, CancelledContinuation));
+	TestTrue(TEXT("Cancellation continuation stores its frame"),
+		Host.StoreState(CancelledContinuation, StateBytes));
+	TestTrue(TEXT("Continuation retains the local task"),
+		Host.RetainTaskForContinuation(CancelledTask, CancelledContinuation));
+	TestFalse(TEXT("A task token is not a continuation"),
+		Host.RetainTaskForContinuation(CancelledTask, CancelledTask));
+	TestTrue(TEXT("Caller transfers its reference"),
+		Host.ReleaseTaskResult(CancelledTask));
+	TestTrue(TEXT("Captured task can finish without its caller"),
+		Host.SucceedTaskResult(CancelledTask, ValueBytes, Woken));
+	TestTrue(TEXT("Cancellation retires the capture"), Host.Cancel(CancelledContinuation));
+	TestEqual(TEXT("Cancelled continuation releases its task"), Tasks.GetCount(), 0);
+	TestFalse(TEXT("Retired continuation cannot capture another task"),
+		Host.RetainTaskForContinuation(CancelledTask, CancelledContinuation));
+
+	const int64 Trigger = Host.CreateTaskResult(TEXT("System.Int32"));
+	const int64 ResumedTask = Host.CreateTaskResult(TEXT("System.Int32"));
+	int64 Waiter = 0;
+	TestTrue(TEXT("A task result schedules the resuming continuation"),
+		Host.AwaitTaskResult(Trigger, 402, Waiter)
+			== EAvidScriptTaskWaitRegistration::Queued);
+	TestTrue(TEXT("Resuming continuation stores its frame"),
+		Host.StoreState(Waiter, StateBytes));
+	TestTrue(TEXT("Resuming continuation retains another local task"),
+		Host.RetainTaskForContinuation(ResumedTask, Waiter));
+	TestTrue(TEXT("Caller releases the local task before suspension"),
+		Host.ReleaseTaskResult(ResumedTask));
+	TestTrue(TEXT("Local task completes while continuation is pending"),
+		Host.SucceedTaskResult(ResumedTask, ValueBytes, Woken));
+	TestTrue(TEXT("Trigger completes"), Host.SucceedTaskResult(Trigger, ValueBytes, Woken));
+	TestTrue(TEXT("Trigger caller releases"), Host.ReleaseTaskResult(Trigger));
+	Owner->DrainReady(Ready);
+	TestEqual(TEXT("Resuming continuation dispatches once"), Ready.Num(), 1);
+	TestTrue(TEXT("Guest reclaims the task during dispatch"),
+		Host.RetainTaskResult(ResumedTask));
+	TestTrue(TEXT("Dispatch finalizes"), Owner->FinalizeDispatched(Waiter, true));
+	TestEqual(TEXT("Only the reclaimed task remains"), Tasks.GetCount(), 1);
+	TestTrue(TEXT("Reclaimed task result remains readable"),
+		Host.ReadTaskResult(ResumedTask, Snapshot));
+	TestEqual(TEXT("Reclaimed result has an int payload"),
+		Snapshot.Value.Num(), static_cast<int32>(sizeof(Value)));
+	if (Snapshot.Value.Num() == sizeof(Value))
+	{
+		int32 ReadValue = 0;
+		FMemory::Memcpy(&ReadValue, Snapshot.Value.GetData(), sizeof(ReadValue));
+		TestEqual(TEXT("Reclaimed task result keeps its value"), ReadValue, Value);
+	}
+	TestTrue(TEXT("Guest releases its final task reference"),
+		Host.ReleaseTaskResult(ResumedTask));
+	TestEqual(TEXT("Completed path releases every task"), Tasks.GetCount(), 0);
+
+	const int64 ActiveTask = Host.CreateTaskResult(TEXT("System.Int32"));
+	const int64 ActiveContinuation = Host.ScheduleDelay(30.0f, 403);
+	TestTrue(TEXT("Active continuation stores its frame"),
+		Host.StoreState(ActiveContinuation, StateBytes));
+	FAvidScriptContinuationHostEndpoint& Prepared = Owner->BeginPrepared(World.Get());
+	const int64 PreparedTask = Prepared.CreateTaskResult(TEXT("System.Int32"));
+	TestFalse(TEXT("Active endpoint rejects a prepared task"),
+		Host.RetainTaskForContinuation(PreparedTask, ActiveContinuation));
+	TestFalse(TEXT("Prepared endpoint rejects an active continuation"),
+		Prepared.RetainTaskForContinuation(PreparedTask, ActiveContinuation));
+	TestTrue(TEXT("Active continuation still accepts its own task"),
+		Host.RetainTaskForContinuation(ActiveTask, ActiveContinuation));
+	TestTrue(TEXT("Active caller transfers task ownership"),
+		Host.ReleaseTaskResult(ActiveTask));
+	Owner->DiscardPrepared();
+	TestFalse(TEXT("Discarded prepared task cannot be captured"),
+		Host.RetainTaskForContinuation(PreparedTask, ActiveContinuation));
+	TestTrue(TEXT("Active continuation cancels after rollback"),
+		Host.Cancel(ActiveContinuation));
+
+	const int64 TeardownTask = Host.CreateTaskResult(TEXT("System.Int32"));
+	const int64 TeardownContinuation = Host.ScheduleDelay(30.0f, 404);
+	TestTrue(TEXT("Teardown continuation stores its frame"),
+		Host.StoreState(TeardownContinuation, StateBytes));
+	TestTrue(TEXT("Teardown continuation captures its task"),
+		Host.RetainTaskForContinuation(TeardownTask, TeardownContinuation));
+	TestTrue(TEXT("Teardown caller transfers its reference"),
+		Host.ReleaseTaskResult(TeardownTask));
+	Owner->Teardown();
+	TestEqual(TEXT("Teardown retires captured running task"), Tasks.GetCount(), 0);
+	TestEqual(TEXT("Teardown retires continuation"), Owner->GetActiveCount(), 0);
+	return true;
+}
+
 #endif
