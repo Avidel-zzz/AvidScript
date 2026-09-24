@@ -1104,7 +1104,13 @@ internal static class SemanticAsyncProjector
             return false;
 
         MethodDeclarationSyntax? owner = variable.Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault();
-        if (owner is null) return false;
+        if (owner?.Body?.Statements.FirstOrDefault() is not LocalDeclarationStatementSyntax
+                { Declaration.Variables.Count: 1 } first
+            || first.Declaration.Variables[0] != variable
+            || owner.Body.DescendantNodes().OfType<VariableDeclaratorSyntax>()
+                .Count(candidate => semanticModel.GetDeclaredSymbol(candidate) is ILocalSymbol symbol
+                    && TryGetSupportedTaskResult(context.Compilation, symbol.Type, out _)) != 1)
+            return false;
         IdentifierNameSyntax[] references = owner.DescendantNodes().OfType<IdentifierNameSyntax>()
             .Where(identifier => SymbolEqualityComparer.Default.Equals(
                 semanticModel.GetSymbolInfo(identifier).Symbol, local))

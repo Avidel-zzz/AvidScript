@@ -572,9 +572,14 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 	World->InitializeActorsForPlay(FURL());
 	ON_SCOPE_EXIT { GEngine->DestroyWorldContext(World); World->DestroyWorld(false); };
 	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
-	for (const TCHAR* Scenario : {TEXT("immediate"), TEXT("deferred"), TEXT("teardown"), TEXT("chain"), TEXT("arguments"), TEXT("combined"), TEXT("cleanup")})
+	for (const TCHAR* Scenario : {TEXT("immediate"), TEXT("deferred"), TEXT("teardown"), TEXT("chain"), TEXT("arguments"), TEXT("combined"), TEXT("cleanup"), TEXT("local"), TEXT("local-teardown"), TEXT("local-waiter-teardown")})
 	{
-		const bool bTeardown = FCString::Strcmp(Scenario, TEXT("teardown")) == 0;
+		const bool bLocal = FCString::Strcmp(Scenario, TEXT("local")) == 0
+			|| FCString::Strcmp(Scenario, TEXT("local-teardown")) == 0
+			|| FCString::Strcmp(Scenario, TEXT("local-waiter-teardown")) == 0;
+		const bool bTeardown = FCString::Strcmp(Scenario, TEXT("teardown")) == 0
+			|| FCString::Strcmp(Scenario, TEXT("local-teardown")) == 0;
+		const bool bWaiterTeardown = FCString::Strcmp(Scenario, TEXT("local-waiter-teardown")) == 0;
 		const bool bChain = FCString::Strcmp(Scenario, TEXT("chain")) == 0;
 		const bool bArguments = FCString::Strcmp(Scenario, TEXT("arguments")) == 0;
 		const bool bCombined = FCString::Strcmp(Scenario, TEXT("combined")) == 0;
@@ -582,7 +587,8 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 		const bool bDeferred = FCString::Strcmp(Scenario, TEXT("immediate")) != 0;
 		const FString Stem = FPaths::Combine(FPaths::ProjectSavedDir(),
 			TEXT("AvidScriptManagedHeapTests/GuestFixtures"),
-			FString::Printf(TEXT("csharp-task-int-%s"), bTeardown ? TEXT("deferred") : Scenario));
+			FString::Printf(TEXT("csharp-task-int-%s"), bTeardown || bWaiterTeardown
+				? (bLocal ? TEXT("local") : TEXT("deferred")) : Scenario));
 		TArray<uint8> Bytes;
 		FString OffsetText;
 		int32 ResultOffset = -1;
@@ -632,14 +638,16 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Task ownership after initial entry"),
 			Owner->GetTaskResultsForTesting().GetCount(), bChain ? 2 : bDeferred ? 1 : 0);
 		if (bTeardown) Owner->Teardown();
+		bool bStopped = bTeardown;
 		int32 Resumes = 0;
+		int32 WaiterTeardownResumes = -1;
 		for (int32 Round = 0; bDeferred && Round < 8; ++Round)
 		{
 			World->Tick(LEVELTICK_All, 0.02f);
 			++GFrameCounter;
 			TArray<FAvidScriptContinuationCompletion> Ready;
 			Owner->DrainReady(Ready);
-			if (bTeardown)
+			if (bStopped)
 			{
 				TestEqual(TEXT("Teardown suppresses pending C# task callbacks"), Ready.Num(), 0);
 				continue;
@@ -653,11 +661,27 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 					Owner->FinalizeDispatched(Completion.Token, true));
 				++Resumes;
 			}
+			if (bWaiterTeardown && Owner->GetTaskResultsForTesting().GetWaiterCount() == 1)
+			{
+				TestEqual(TEXT("Pending Task local retains its result"),
+					Owner->GetTaskResultsForTesting().GetCount(), 1);
+				WaiterTeardownResumes = Resumes;
+				Owner->Teardown();
+				bStopped = true;
+			}
 		}
-		TestEqual(TEXT("Compiled C# Task<int> has the expected resume count"), Resumes,
-			bTeardown ? 0 : bChain ? 3 : bDeferred ? 2 : 0);
+		if (bWaiterTeardown)
+		{
+			TestTrue(TEXT("Task local reached a registered waiter before teardown"),
+				WaiterTeardownResumes > 0 && WaiterTeardownResumes < 4);
+			TestEqual(TEXT("Teardown suppresses pending Task local resumes"),
+				Resumes, WaiterTeardownResumes);
+		}
+		if (!bWaiterTeardown)
+			TestEqual(TEXT("Compiled C# Task<int> has the expected resume count"), Resumes,
+				bTeardown ? 0 : bLocal ? 4 : bChain ? 3 : bDeferred ? 2 : 0);
 		TestEqual(TEXT("Compiled C# Task<int> preserves result"), ReadResult(),
-			bTeardown ? 0 : bChain ? 13 : bArguments ? 75 : bCombined ? 16 : bCleanup ? 161 : 12);
+			bTeardown || bWaiterTeardown ? 0 : bLocal ? 24 : bChain ? 13 : bArguments ? 75 : bCombined ? 16 : bCleanup ? 161 : 12);
 		TestEqual(TEXT("Compiled C# Task<int> releases all result references"),
 			Owner->GetTaskResultsForTesting().GetCount(), 0);
 		Owner->Teardown();

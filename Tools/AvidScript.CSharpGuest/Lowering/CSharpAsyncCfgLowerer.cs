@@ -166,7 +166,7 @@ internal static class CSharpAsyncCfgLowerer
             return false;
         foreach (SemanticAsyncAwaitSite taskAwait in method.Segments
             .Select(segment => segment.AwaitSite)
-            .Where(site => site?.ProducerKind == "task_call").Cast<SemanticAsyncAwaitSite>())
+            .Where(site => site?.ProducerKind is "task_call" or "task_local").Cast<SemanticAsyncAwaitSite>())
             if (context.CreateInternalStorage(CSharpTaskResultAbi.AwaitSlot(taskAwait),
                 CSharpTaskResultAbi.TokenTypeId) is null)
                 return false;
@@ -271,7 +271,7 @@ internal static class CSharpAsyncCfgLowerer
             activePrefixBlockId = acceptedBlockId;
             prefixInstructions = new List<GuestInstruction>();
         }
-        if (incoming?.ProducerKind == "task_call")
+        if (incoming?.ProducerKind is "task_call" or "task_local")
         {
             if (!CSharpTaskAwaitLowerer.EmitIncoming(context, method, incoming,
                 entry.SegmentOrdinal, prefixInstructions, blocks,
@@ -287,6 +287,8 @@ internal static class CSharpAsyncCfgLowerer
                 CSharpUeReceivers.Require(context, receiver, entry.SegmentOrdinal, prefixInstructions);
             else CSharpReferenceObjects.Require(receiver, prefixInstructions);
         }
+        if (incoming is not null && !CSharpTaskResultAbi.RetainTaskLocal(
+                context, method, entry.SegmentOrdinal, prefixInstructions)) return false;
         CSharpAsyncClosureAllocations.Transition(context, method, incomingSegment, entry.SegmentOrdinal, prefixInstructions);
         if (incoming?.ResultSymbolId is { } resultSymbol && context.ClosureCells.Has(resultSymbol))
         {
@@ -478,6 +480,8 @@ internal static class CSharpAsyncCfgLowerer
                         taskReturnValueId = returned.Id;
                     }
                 }
+                if (!CSharpTaskResultAbi.ReleaseTaskLocal(context, method,
+                        segment.Ordinal, instructions)) return false;
                 blocks.Add(new GuestBasicBlock(
                     activeBlockId,
                     instructions,
@@ -526,7 +530,7 @@ internal static class CSharpAsyncCfgLowerer
         List<GuestDiagnostic> diagnostics)
     {
         SemanticAsyncAwaitSite? awaitSite = segment.AwaitSite;
-        if (awaitSite?.ProducerKind == "task_call")
+        if (awaitSite?.ProducerKind is "task_call" or "task_local")
             return CSharpTaskAwaitLowerer.Lower(method, segment, context, abi,
                 initialEntry, activeBlockId, instructions, blocks);
         int awaitInstructionStart = instructions.Count;
@@ -647,6 +651,8 @@ internal static class CSharpAsyncCfgLowerer
                 null,
                 null));
         }
+        if (!CSharpTaskResultAbi.ReleaseTaskLocal(context, method,
+                segment.Ordinal, rejectionInstructions)) return false;
         blocks.Add(new GuestBasicBlock(
             activeBlockId,
             instructions,
@@ -658,6 +664,8 @@ internal static class CSharpAsyncCfgLowerer
                 null)));
         List<GuestInstruction> acceptedInstructions = new();
         string? acceptedReturnId = null;
+        if (!CSharpTaskResultAbi.TransferTaskLocalToContinuation(context,
+                method, scheduledToken, segment.Ordinal, acceptedInstructions)) return false;
         if (method.TaskResultTypeId is not null && initialEntry)
         {
             GuestRegister? producer = CSharpTaskResultAbi.LoadProducerToken(
@@ -709,7 +717,7 @@ internal static class CSharpAsyncCfgLowerer
                 pending.Push(segment.Transfer.SecondaryTarget);
             }
             else if (segment.Transfer.Kind == SemanticAsyncMethod.AwaitTransferKind
-                && segment.AwaitSite?.ProducerKind == "task_call")
+                && segment.AwaitSite?.ProducerKind is ("task_call" or "task_local"))
             {
                 pending.Push(segment.Transfer.PrimaryTarget);
             }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using AvidScript.CSharpSemantic;
 using AvidScript.GuestIr;
 
@@ -11,6 +12,7 @@ internal static class CSharpTaskResultAbi
     public const string ImportId = "import:$async:task_i32_v1";
     public const string BindProducerImportId = "import:$async:task_bind_producer_v1";
     public const string PropagateFailureImportId = "import:$async:task_propagate_failure_v1";
+    public const string RetainForContinuationImportId = "import:$async:task_retain_for_continuation_v1";
     public const string TokenTypeId = "type:int64";
     public const string IntTypeId = "type:int32";
     public const int Create = 1;
@@ -26,6 +28,16 @@ internal static class CSharpTaskResultAbi
     public static string AwaitSlot(SemanticAsyncAwaitSite site) =>
         "$async:await_task:" + site.CallbackId;
 
+    public static bool Supports(SemanticDocument document) =>
+        (document.SchemaVersion == SemanticContract.TaskResultSchemaVersion
+            && document.SemanticVersion == SemanticContract.TaskResultSemanticVersion)
+        || (document.SchemaVersion == SemanticContract.TaskLocalSchemaVersion
+            && document.SemanticVersion == SemanticContract.TaskLocalSemanticVersion);
+
+    public static string? TaskLocalSymbol(SemanticAsyncMethod method) => method.Segments
+        .Select(segment => segment.AwaitSite?.TaskLocalSymbolId)
+        .FirstOrDefault(symbolId => symbolId is not null);
+
     public static GuestImport Import() => new(ImportId, "avidscript", "avid_task_i32_v1",
         new[] { IntTypeId, TokenTypeId, IntTypeId, IntTypeId }, TokenTypeId);
 
@@ -36,6 +48,51 @@ internal static class CSharpTaskResultAbi
     public static GuestImport PropagateFailureImport() => new(PropagateFailureImportId,
         "avidscript", "avid_task_propagate_failure_v1",
         new[] { TokenTypeId, TokenTypeId }, IntTypeId);
+
+    public static GuestImport RetainForContinuationImport() => new(RetainForContinuationImportId,
+        "avidscript", "avid_task_retain_for_continuation_v1",
+        new[] { TokenTypeId, TokenTypeId }, IntTypeId);
+
+    public static GuestRegister? LoadTaskLocalToken(CSharpFunctionLoweringContext context,
+        SemanticAsyncMethod method, int block, List<GuestInstruction> instructions)
+    {
+        if (!context.TryGetStorage(TaskLocalSymbol(method), out GuestRegister storage)) return null;
+        GuestRegister? value = context.CreateTemporary(storage.TypeId, block);
+        GuestRegister? token = context.CreateTemporary(TokenTypeId, block);
+        if (value is null || token is null) return null;
+        instructions.Add(new("local_load", value.Id, Array.Empty<string>(), storage.Id, null, null));
+        instructions.Add(new("convert", token.Id, new[] { value.Id }, null, null, null));
+        return token;
+    }
+
+    public static bool ReleaseTaskLocal(CSharpFunctionLoweringContext context,
+        SemanticAsyncMethod method, int block, List<GuestInstruction> instructions)
+    {
+        if (TaskLocalSymbol(method) is null) return true;
+        GuestRegister? token = LoadTaskLocalToken(context, method, block, instructions);
+        return token is not null && Call(context, Release, token, null, block, instructions) is not null;
+    }
+
+    public static bool RetainTaskLocal(CSharpFunctionLoweringContext context,
+        SemanticAsyncMethod method, int block, List<GuestInstruction> instructions)
+    {
+        if (TaskLocalSymbol(method) is null) return true;
+        GuestRegister? token = LoadTaskLocalToken(context, method, block, instructions);
+        return token is not null && Call(context, Retain, token, null, block, instructions) is not null;
+    }
+
+    public static bool TransferTaskLocalToContinuation(CSharpFunctionLoweringContext context,
+        SemanticAsyncMethod method, GuestRegister continuationToken, int block,
+        List<GuestInstruction> instructions)
+    {
+        if (TaskLocalSymbol(method) is null) return true;
+        GuestRegister? token = LoadTaskLocalToken(context, method, block, instructions);
+        GuestRegister? accepted = context.CreateTemporary(IntTypeId, block);
+        if (token is null || accepted is null) return false;
+        instructions.Add(new("call", accepted.Id, new[] { token.Id, continuationToken.Id },
+            RetainForContinuationImportId, null, null));
+        return ReleaseTaskLocal(context, method, block, instructions);
+    }
 
     public static GuestRegister? PropagateFailure(CSharpFunctionLoweringContext context,
         SemanticAsyncMethod method, GuestRegister sourceTask, int block,

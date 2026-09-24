@@ -108,7 +108,74 @@ internal static class CSharpGuestAsyncInvocationTests
             }
             count++;
         }
-        return count + TaskResultSemanticCompilesToWasm();
+        return count + TaskResultSemanticCompilesToWasm() + TaskLocalSemanticCompilesToWasm();
+    }
+
+    private static int TaskLocalSemanticCompilesToWasm()
+    {
+        const string source = """
+            using AvidScript;
+            using System.Runtime.InteropServices;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static int Result;
+                public static async Task<int> LoadScoreAsync()
+                {
+                    await AvidContinuations.NextTickAsync();
+                    await AvidContinuations.NextTickAsync();
+                    return 12;
+                }
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay()
+                {
+                    Task<int> pending = LoadScoreAsync();
+                    await AvidContinuations.NextTickAsync();
+                    int first = await pending;
+                    int second = await pending;
+                    Result = first + second;
+                }
+            }
+            """;
+        SemanticDocument document = CSharpGuestContinuationTests.Analyze(
+            source, "Scripts/TaskIntLocal.cs");
+        Check(document.Succeeded
+            && document.SchemaVersion == SemanticContract.TaskLocalSchemaVersion,
+            "Task local source must select Semantic 36: "
+                + string.Join(" | ", document.Diagnostics.Select(item => item.Message)));
+        CSharpGuestLoweringResult lowered = CSharpGuestLowerer.Lower(document, new string('d', 64));
+        Check(lowered.Succeeded,
+            "Task local Guest lowering failed: "
+                + string.Join(" | ", lowered.Diagnostics.Select(item => item.Code + ":" + item.Message)));
+        GuestModule module = lowered.Module!;
+        Check(module.SchemaVersion == 19 && module.IrVersion == "1.18"
+            && module.Imports.Count(imported => imported.Module == "avidscript"
+                && imported.Name == "avid_task_retain_for_continuation_v1") == 1
+            && module.Functions.SelectMany(function => function.Blocks)
+                .SelectMany(block => block.Instructions)
+                .Any(instruction => instruction.TargetId == "import:$async:task_retain_for_continuation_v1"),
+            "Task local WASM must transfer ownership to the continuation");
+        WasmCompilationResult compiled = WasmModuleCompiler.Compile(module);
+        Check(compiled.Succeeded,
+            "Task local WASM compilation failed: "
+                + string.Join(" | ", compiled.Diagnostics.Select(item => item.Message)));
+        Check(compiled.Bytes.SequenceEqual(WasmModuleCompiler.Compile(
+                GuestIrSerializer.Deserialize(GuestIrSerializer.Serialize(module))).Bytes)
+            && !GuestModuleValidator.Validate(module with
+                { SchemaVersion = 18, IrVersion = "1.17" }).Succeeded,
+            "Task local IR round-trips but cannot be relabeled as the older Task contract");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_MANAGED_HEAP_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            string stem = Path.Combine(output, "csharp-task-int-local");
+            GuestStateSlot result = module.MemoryLayout.StateSlots.Single(slot =>
+                slot.GlobalId.Contains(".Result:", StringComparison.Ordinal));
+            File.WriteAllBytes(stem + ".wasm", compiled.Bytes);
+            File.WriteAllBytes(stem + ".guest-ir.json", GuestIrSerializer.Serialize(module));
+            File.WriteAllText(stem + ".result-offset", result.Offset.ToString(CultureInfo.InvariantCulture));
+        }
+        return 1;
     }
 
     private static int TaskResultSemanticCompilesToWasm()

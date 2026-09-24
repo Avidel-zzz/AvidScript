@@ -13,32 +13,44 @@ internal static class CSharpTaskAwaitLowerer
         string blockId, List<GuestInstruction> instructions, List<GuestBasicBlock> blocks)
     {
         SemanticAsyncAwaitSite? site = segment.AwaitSite;
+        bool taskLocal = site?.ProducerKind == "task_local";
         SemanticCallable? target = context.Document.Callables.SingleOrDefault(callable =>
             callable.MethodSymbolId == site?.TaskCallableId);
         if (site is null || target is null || abi.TaskResultImportId is null
             || segment.Transfer?.Kind != SemanticAsyncMethod.AwaitTransferKind
-            || site.Arguments.Count != target.Parameters.Count
+            || (taskLocal ? site.Arguments.Count != 1
+                : site.Arguments.Count != target.Parameters.Count)
             || !context.TryGetStorage(CSharpTaskResultAbi.AwaitSlot(site), out GuestRegister storage))
         {
             context.Add("ASCG1010", "Task<int> await has no validated target or state storage.");
             return false;
         }
 
-        GuestRegister? taskValue = context.CreateTemporary(target.ReturnTypeId, segment.Ordinal);
-        GuestRegister? token = context.CreateTemporary(CSharpTaskResultAbi.TokenTypeId, segment.Ordinal);
-        if (taskValue is null || token is null) return false;
-        List<string> arguments = new(site.Arguments.Count);
-        SemanticCallableParameter[] parameters = target.Parameters.OrderBy(parameter => parameter.Ordinal).ToArray();
-        for (int index = 0; index < site.Arguments.Count; ++index)
+        GuestRegister? token;
+        if (taskLocal)
         {
-            GuestRegister? argument = CSharpOperationLowerer.LowerValue(
-                context, site.Arguments[index], segment.Ordinal, instructions);
-            if (argument is null || argument.TypeId != parameters[index].TypeId) return false;
-            arguments.Add(argument.Id);
+            token = CSharpTaskResultAbi.LoadTaskLocalToken(
+                context, method, segment.Ordinal, instructions);
         }
-        instructions.Add(new("call", taskValue.Id, arguments,
-            CSharpGuestIds.Function(target.MethodSymbolId), null, null));
-        instructions.Add(new("convert", token.Id, new[] { taskValue.Id }, null, null, null));
+        else
+        {
+            GuestRegister? taskValue = context.CreateTemporary(target.ReturnTypeId, segment.Ordinal);
+            token = context.CreateTemporary(CSharpTaskResultAbi.TokenTypeId, segment.Ordinal);
+            if (taskValue is null || token is null) return false;
+            List<string> arguments = new(site.Arguments.Count);
+            SemanticCallableParameter[] parameters = target.Parameters.OrderBy(parameter => parameter.Ordinal).ToArray();
+            for (int index = 0; index < site.Arguments.Count; ++index)
+            {
+                GuestRegister? argument = CSharpOperationLowerer.LowerValue(
+                    context, site.Arguments[index], segment.Ordinal, instructions);
+                if (argument is null || argument.TypeId != parameters[index].TypeId) return false;
+                arguments.Add(argument.Id);
+            }
+            instructions.Add(new("call", taskValue.Id, arguments,
+                CSharpGuestIds.Function(target.MethodSymbolId), null, null));
+            instructions.Add(new("convert", token.Id, new[] { taskValue.Id }, null, null, null));
+        }
+        if (token is null) return false;
         instructions.Add(new("local_store", null, new[] { token.Id }, storage.Id, null, null));
         GuestRegister? callback = CSharpTaskResultAbi.Constant(context,
             CSharpTaskResultAbi.IntTypeId, site.CallbackId, segment.Ordinal, instructions);
@@ -66,8 +78,10 @@ internal static class CSharpTaskAwaitLowerer
         if (method.TaskResultTypeId is not null
             && CSharpTaskResultAbi.PropagateFailure(context, method, token,
                 segment.Ordinal, failedInstructions) is null) return false;
-        if (CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release, token, null,
-                segment.Ordinal, failedInstructions) is null) return false;
+        if ((!taskLocal && CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release,
+                token, null, segment.Ordinal, failedInstructions) is null)
+            || !CSharpTaskResultAbi.ReleaseTaskLocal(context, method,
+                segment.Ordinal, failedInstructions)) return false;
         string? failedReturnId = null;
         if (method.TaskResultTypeId is not null && initialEntry)
         {
@@ -87,8 +101,8 @@ internal static class CSharpTaskAwaitLowerer
         if (site.ResultSymbolId is not null
             && !CSharpOperationLowerer.StoreLocal(context, site.ResultSymbolId,
                 value!, segment.Ordinal, valueInstructions)) return false;
-        if (CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release, token, null,
-                segment.Ordinal, valueInstructions) is null) return false;
+        if (!taskLocal && CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release,
+                token, null, segment.Ordinal, valueInstructions) is null) return false;
         blocks.Add(new(valueBlock, valueInstructions,
             new("branch", null,
                 CSharpGuestIds.AsyncSegmentBlock(method.MethodSymbolId,
@@ -117,7 +131,9 @@ internal static class CSharpTaskAwaitLowerer
         blocks.Add(new(pendingBlock, pendingInstructions,
             new("branch_if", finalAcceptance.Id, acceptedBlock, rejectedBlock, null)));
         List<GuestInstruction> acceptedInstructions = new();
-        if (CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release,
+        if (!CSharpTaskResultAbi.TransferTaskLocalToContinuation(context,
+                method, scheduled, segment.Ordinal, acceptedInstructions)
+            || !taskLocal && CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release,
                 token, null, segment.Ordinal, acceptedInstructions) is null) return false;
         if (method.TaskResultTypeId is not null && initialEntry)
         {
@@ -145,8 +161,10 @@ internal static class CSharpTaskAwaitLowerer
             rejectedInstructions.Add(new("call", ignored.Id,
                 new[] { scheduled.Id }, abi.CancelImportId, null, null));
         }
-        if (CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release,
-                token, null, segment.Ordinal, rejectedInstructions) is null) return false;
+        if ((!taskLocal && CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release,
+                token, null, segment.Ordinal, rejectedInstructions) is null)
+            || !CSharpTaskResultAbi.ReleaseTaskLocal(context, method,
+                segment.Ordinal, rejectedInstructions)) return false;
         blocks.Add(new(rejectedBlock, rejectedInstructions,
             new("trap", null, null, null, null)));
         return true;

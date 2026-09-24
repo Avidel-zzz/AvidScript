@@ -93,6 +93,11 @@ internal static class SemanticAsyncTests
             "Scripts/TaskIntAlias.cs");
         Assert(!alias.Succeeded && alias.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCS5403"),
             "Task aliasing stays rejected until ownership transfer is represented");
+        SemanticDocument late = Analyze(source.Replace("Task<int> pending = LoadScoreAsync();",
+            "await AvidContinuations.NextTickAsync(); Task<int> pending = LoadScoreAsync();",
+            StringComparison.Ordinal), "Scripts/TaskIntLateLocal.cs");
+        Assert(!late.Succeeded && late.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCS5403"),
+            "Task creation after the first statement stays rejected until path ownership is represented");
     }
 
     private static void TaskIntSuspendedCleanupFailsClosed()

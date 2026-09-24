@@ -17,8 +17,11 @@ internal static class CSharpAsyncClosureState
     public static SemanticAsyncStateFrame? Frame(SemanticDocument document, SemanticAsyncMethod method, SemanticAsyncAwaitSite site)
     {
         SemanticClosureEnvironment[] owned = document.ClosureEnvironments.Where(environment => environment.OwnerMethodSymbolId == method.MethodSymbolId).ToArray();
+        string? taskLocalId = CSharpTaskResultAbi.TaskLocalSymbol(method);
+        string? taskLocalType = document.Symbols.FirstOrDefault(symbol => symbol.Id == taskLocalId)?.TypeId;
         if (owned.Length == 0 && method.TaskResultTypeId is null
-            && site.ProducerKind != "task_call") return site.StateFrame;
+            && site.ProducerKind is not ("task_call" or "task_local")
+            && taskLocalId is null) return site.StateFrame;
         int segment = method.Segments.Single(segment => segment.AwaitSite?.CallbackId == site.CallbackId).Ordinal;
         // this is immutable and still needed by ordinary instance accesses and
         // the resume authority check, even when a closure also captures it.
@@ -26,16 +29,20 @@ internal static class CSharpAsyncClosureState
             .Select(cell => cell.SymbolId).ToHashSet(StringComparer.Ordinal);
         HashSet<string> active = method.LexicalScopes.Where(scope => scope.Segments.Contains(segment)).Select(scope => scope.Id).ToHashSet(StringComparer.Ordinal);
         SemanticAsyncStateSlot[] slots = (site.StateFrame?.Slots ?? Array.Empty<SemanticAsyncStateSlot>())
-            .Where(slot => !captured.Contains(slot.SymbolId))
+            .Where(slot => !captured.Contains(slot.SymbolId) && slot.SymbolId != taskLocalId)
             .Concat(owned.Where(environment => active.Contains(environment.Id))
                 .Select(environment => new SemanticAsyncStateSlot(environment.Id, CSharpClosureLayout.Reference(environment.Id))))
             .Concat(method.TaskResultTypeId is null ? Array.Empty<SemanticAsyncStateSlot>() : new[]
             {
                 new SemanticAsyncStateSlot(CSharpTaskResultAbi.ProducerSlot(method), CSharpTaskResultAbi.TokenTypeId),
             })
-            .Concat(site.ProducerKind != "task_call" ? Array.Empty<SemanticAsyncStateSlot>() : new[]
+            .Concat(site.ProducerKind is not ("task_call" or "task_local") ? Array.Empty<SemanticAsyncStateSlot>() : new[]
             {
                 new SemanticAsyncStateSlot(CSharpTaskResultAbi.AwaitSlot(site), CSharpTaskResultAbi.TokenTypeId),
+            })
+            .Concat(taskLocalId is null || taskLocalType is null ? Array.Empty<SemanticAsyncStateSlot>() : new[]
+            {
+                new SemanticAsyncStateSlot(taskLocalId, taskLocalType),
             })
             .OrderBy(slot => slot.SymbolId, StringComparer.Ordinal).ToArray();
         if (slots.Length == 0) return null;
