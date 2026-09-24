@@ -29,7 +29,8 @@ public static class CSharpLanguageErrorCompiler
         SemanticExceptionFlow[] throwFlows = flows.Where(item => item.Throws.Count > 0).ToArray();
         if (throwFlows.Length == 0)
             return Fail("At least one supported throw site is required.", out error);
-        SemanticExceptionFlow[] producers = throwFlows.Where(item => item.Catches.Count == 0).ToArray();
+        SemanticExceptionFlow[] producers = throwFlows.Where(item => item.Catches.Count == 0
+            && !item.Regions.Any(region => region.Kind == "finally")).ToArray();
         IReadOnlySet<string> producerMethodIds = producers.Select(item => item.MethodSymbolId)
             .ToHashSet(StringComparer.Ordinal);
         SemanticExceptionFlow[] handlers = flows.Where(item =>
@@ -62,9 +63,17 @@ public static class CSharpLanguageErrorCompiler
         if (producerIds.Any(id => !affected.Contains(id)))
             return Fail("An exception producer is absent from its effect closure.", out error);
         if (!CSharpLanguageCleanupRoutePlanner.TryBuild(semantic, affected,
-                out IReadOnlyDictionary<string, IReadOnlyList<CSharpLanguageCleanupRoute>> cleanupRoutes,
+                out IReadOnlyDictionary<string, IReadOnlyList<CSharpLanguageCleanupRoute>> plannedCleanups,
                 out error))
             return false;
+        Dictionary<string, IReadOnlyList<CSharpLanguageCleanupRoute>> cleanupRoutes =
+            new(plannedCleanups, StringComparer.Ordinal);
+        foreach (SemanticExceptionFlow handler in handlers.Where(item =>
+            item.Catches.Count == 0 && localThrows.TryGetValue(
+                CSharpGuestIds.Function(item.MethodSymbolId), out var sites)
+                && sites.Any(site => site.CleanupBlockOrdinal is not null)))
+            cleanupRoutes.Add(CSharpGuestIds.Function(handler.MethodSymbolId),
+                Array.Empty<CSharpLanguageCleanupRoute>());
         CSharpLanguageErrorTokenCatalog tokens = CSharpThrowProducerLowerer.BuildCatalog(flows);
         Dictionary<string, int> sourceLengths = new(StringComparer.Ordinal);
         foreach (SemanticExceptionFlow item in flows)
@@ -77,6 +86,7 @@ public static class CSharpLanguageErrorCompiler
         Dictionary<string, IReadOnlyList<CSharpLanguageCatchRoute>> catchRoutes = new(StringComparer.Ordinal);
         foreach (SemanticExceptionFlow handler in handlers)
         {
+            if (handler.Catches.Count == 0) continue;
             string functionId = CSharpGuestIds.Function(handler.MethodSymbolId);
             if (!affected.Contains(functionId))
                 return Fail("A catch method is absent from the language-error effect closure.", out error);
@@ -160,7 +170,8 @@ public static class CSharpLanguageErrorCompiler
         {
             string functionId = CSharpGuestIds.Function(item.MethodSymbolId);
             if (!CSharpLocalThrowLowerer.TryLowerReplacing(item, localThrows[functionId],
-                    tokens, catchRoutes[functionId], outcomes,
+                    tokens, catchRoutes.TryGetValue(functionId, out var routes)
+                        ? routes : Array.Empty<CSharpLanguageCatchRoute>(), outcomes,
                     out GuestFunction? handler, out error)
                 || handler is null)
                 return false;

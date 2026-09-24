@@ -44,8 +44,12 @@ internal static class CSharpLocalThrowLowerer
         foreach (CSharpLocalThrowSite site in sites)
         {
             string blockId = CSharpGuestIds.Block(flow.MethodSymbolId, site.BlockOrdinal);
+            string? cleanupId = site.CleanupBlockOrdinal is { } cleanupOrdinal
+                ? CSharpGuestIds.Block(flow.MethodSymbolId, cleanupOrdinal) : null;
             if (!blocks.TryGetValue(blockId, out GuestBasicBlock? original)
-                || original.Terminator.Kind != "return"
+                || cleanupId is null && original.Terminator.Kind != "return"
+                || cleanupId is not null && (original.Terminator.Kind != "branch"
+                    || original.Terminator.TargetBlockId != cleanupId)
                 || original.Instructions.Any(instruction => instruction.Op is not
                     ("constant" or "stack_alloc" or "field_store")
                     || instruction.Op == "field_store"
@@ -62,6 +66,8 @@ internal static class CSharpLocalThrowLowerer
                 : null;
             if (handler is not null && !blocks.ContainsKey(handler))
                 return Fail("The local catch target is absent from the lowered function.", out error);
+            if (cleanupId is not null && handler is not null)
+                return Fail("A local throw cannot skip cleanup to enter a catch.", out error);
 
             string prefix = "local_throw:" + site.BlockOrdinal.ToString(CultureInfo.InvariantCulture) + ":";
             string outcome = prefix + "outcome", root = prefix + "root";
@@ -94,10 +100,42 @@ internal static class CSharpLocalThrowLowerer
             blocks[blockId] = original with
             {
                 Instructions = instructions,
-                Terminator = handler is null
+                Terminator = cleanupId is not null
+                    ? new GuestTerminator("branch", null, cleanupId, null, null)
+                    : handler is null
                     ? new GuestTerminator("return", null, null, null, outcome)
                     : new GuestTerminator("branch", null, handler, null, null),
             };
+            if (cleanupId is not null)
+            {
+                if (!blocks.TryGetValue(cleanupId, out GuestBasicBlock? cleanup)
+                    || cleanup.Terminator.Kind != "return"
+                    || cleanup.Instructions.Count < 4
+                    || cleanup.Instructions.Any(instruction => instruction.Op is "call" or "call_indirect")
+                    || function.Blocks.Count(block => block.Terminator.Kind == "branch"
+                        && block.Terminator.TargetBlockId == cleanupId) != 1)
+                    return Fail("The local throw has no unique linear cleanup return.", out error);
+                int tail = cleanup.Instructions.Count - 4;
+                GuestInstruction[] suffix = cleanup.Instructions.Skip(tail).ToArray();
+                string? normalOutcome = cleanup.Terminator.ReturnValueId;
+                if (normalOutcome is null || suffix[0].Op != "stack_alloc"
+                    || suffix[0].ResultId != normalOutcome
+                    || suffix[1].Op != "constant"
+                    || suffix[1].Constant is not { Kind: "int32", Value: "0" }
+                    || suffix[2].Op != "field_store" || suffix[2].TargetId != "field:status"
+                    || suffix[2].OperandIds.Count != 2
+                    || suffix[2].OperandIds[0] != normalOutcome
+                    || suffix[2].OperandIds[1] != suffix[1].ResultId
+                    || suffix[3].Op != "field_store" || suffix[3].TargetId != "field:value"
+                    || suffix[3].OperandIds.Count != 2
+                    || suffix[3].OperandIds[0] != normalOutcome)
+                    return Fail("The cleanup's synthetic normal return changed shape.", out error);
+                blocks[cleanupId] = cleanup with
+                {
+                    Instructions = cleanup.Instructions.Take(tail).ToArray(),
+                    Terminator = new GuestTerminator("return", null, null, null, outcome),
+                };
+            }
         }
         lowered = function with
         {

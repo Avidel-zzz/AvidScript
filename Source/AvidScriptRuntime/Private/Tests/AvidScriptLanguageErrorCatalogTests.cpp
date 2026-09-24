@@ -361,7 +361,8 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 			Runtime.GetLanguageErrorCatalog());
 	}
 	const TArray<FString> CleanupFixtures = {
-		TEXT("finally-catch.wasm"), TEXT("nested-finally-catch.wasm")};
+		TEXT("finally-catch.wasm"), TEXT("nested-finally-catch.wasm"),
+		TEXT("throw-finally-catch.wasm")};
 	for (const FString& FixtureName : CleanupFixtures)
 	{
 		const FString FixturePath = FPaths::Combine(FPaths::ProjectSavedDir(),

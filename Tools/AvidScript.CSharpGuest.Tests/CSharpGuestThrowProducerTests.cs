@@ -27,7 +27,8 @@ internal static class CSharpGuestThrowProducerTests
         NonmatchingLocalCatchPropagatesLanguageError();
         FinallyRunsBeforeOuterCatch();
         NestedFinallyRunsInnerToOuter();
-        return 11;
+        LocalThrowRunsFinallyBeforeOuterCatch();
+        return 12;
     }
 
     private static void MultipleThrowProducersKeepDistinctSourceTokens()
@@ -616,6 +617,84 @@ internal static class CSharpGuestThrowProducerTests
             Directory.CreateDirectory(output);
             File.WriteAllBytes(Path.Combine(output, "nested-finally-catch.wasm"), wasm.Bytes);
         }
+    }
+
+    private static void LocalThrowRunsFinallyBeforeOuterCatch()
+    {
+        const string source = """
+            class Script
+            {
+                static int CleanupCount;
+                static int Fail()
+                {
+                    try { throw new System.Exception(); }
+                    finally { CleanupCount = CleanupCount + 1; }
+                }
+                static int Catch()
+                {
+                    try { return Fail(); }
+                    catch (System.Exception) { return CleanupCount; }
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay() { Catch(); }
+            }
+            """;
+        Check(ReferenceCatch(source) == 1,
+            "the CLR reference runs a throwing method's finally before its caller catch");
+        SemanticDocument semantic = Analyze(source);
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "local throw cleanup failed to compile");
+        GuestFunction fail = compiled!.Module.Functions.Single(function =>
+            function.Id.Contains(".Fail(", StringComparison.Ordinal));
+        Check(fail.Blocks.Any(block => block.Instructions.Any(item => item.Op == "global_store"))
+            && fail.Blocks.Any(block => block.Instructions.Any(item => item.Op == "managed_new"))
+            && GuestModuleValidator.Validate(compiled.Module).Succeeded,
+            "the local throw must retain its error root through the cleanup block");
+        GuestFunction handler = compiled.Module.Functions.Single(function =>
+            function.Id.Contains(".Catch(", StringComparison.Ordinal));
+        GuestModule probe = AddCatchProbe(compiled.Module, handler,
+            "function:throw_finally_source_probe", "throw_finally_source_probe");
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "local throw cleanup must compile to executable WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "throw-finally-catch.wasm"), wasm.Bytes);
+        }
+
+        const string replacingSource = """
+            class Script
+            {
+                static int Fail()
+                {
+                    try { throw new System.Exception(); }
+                    finally { throw new System.Exception(); }
+                }
+            }
+            """;
+        Check(!CSharpLanguageErrorCompiler.TryLower(Analyze(replacingSource), new string('a', 64),
+                out _, out string? replacingError)
+            && replacingError is not null && replacingError.Contains("cleanup", StringComparison.Ordinal),
+            "a throwing finally must wait for error replacement semantics");
+
+        const string branchingSource = """
+            class Script
+            {
+                static int Count;
+                static int Fail()
+                {
+                    try { throw new System.Exception(); }
+                    finally { if (Count == 0) Count = 1; }
+                }
+            }
+            """;
+        Check(!CSharpLanguageErrorCompiler.TryLower(Analyze(branchingSource), new string('a', 64),
+                out _, out string? branchingError)
+            && branchingError is not null && branchingError.Contains("cleanup", StringComparison.Ordinal),
+            "branching cleanup in a throw method must fail closed");
     }
 
     private static int ReferenceCatch(string source)

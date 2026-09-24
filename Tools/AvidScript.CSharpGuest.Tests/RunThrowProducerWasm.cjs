@@ -132,7 +132,8 @@ instance = new WebAssembly.Instance(wasmModule, imports);
 const multipleCatches = typeof instance.exports.catch_source_probe_a === 'function';
 const finallyCatches = typeof instance.exports.finally_source_probe === 'function';
 const nestedFinallyCatches = typeof instance.exports.nested_finally_source_probe === 'function';
-const catches = multipleCatches || finallyCatches || nestedFinallyCatches
+const throwFinallyCatches = typeof instance.exports.throw_finally_source_probe === 'function';
+const catches = multipleCatches || finallyCatches || nestedFinallyCatches || throwFinallyCatches
   || typeof instance.exports.catch_source_probe === 'function';
 if (multipleCatches) {
   const first = instance.exports.catch_source_probe_a();
@@ -143,9 +144,11 @@ if (multipleCatches) {
 } else {
   const actual = nestedFinallyCatches
     ? instance.exports.nested_finally_source_probe()
+    : throwFinallyCatches ? instance.exports.throw_finally_source_probe()
     : finallyCatches ? instance.exports.finally_source_probe()
     : catches ? instance.exports.catch_source_probe() : instance.exports.throw_source_probe();
-  const expected = nestedFinallyCatches ? 11 : finallyCatches ? 1 : catches ? 7 : 3;
+  const expected = nestedFinallyCatches ? 11
+    : throwFinallyCatches || finallyCatches ? 1 : catches ? 7 : 3;
   if (actual !== expected) throw new Error(`source probe() = ${actual}; expected ${expected}`);
 }
 if (allocations !== (multipleCatches ? 2 : 1) || frames.size !== 0 || roots.size !== 0) {
@@ -163,6 +166,7 @@ if (catches) {
   process.stdout.write(multipleCatches
     ? 'C# source multi-catch WASM: 3/3 passed\n'
     : nestedFinallyCatches ? 'C# source nested-finally-catch WASM: 2/2 passed\n'
+    : throwFinallyCatches ? 'C# source throw-finally-catch WASM: 2/2 passed\n'
     : finallyCatches ? 'C# source finally-catch WASM: 2/2 passed\n'
       : 'C# source catch WASM: 2/2 passed\n');
   process.exit(0);

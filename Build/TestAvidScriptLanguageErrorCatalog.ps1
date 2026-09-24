@@ -40,6 +40,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'C# finally-catch Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'nested-finally-catch.wasm')
     if ($LASTEXITCODE -ne 0) { throw 'C# nested-finally-catch Node WASM probe failed.' }
+    & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'throw-finally-catch.wasm')
+    if ($LASTEXITCODE -ne 0) { throw 'C# throw-finally-catch Node WASM probe failed.' }
 }
 finally {
     $env:DOTNET_CLI_HOME = $PreviousCliHome

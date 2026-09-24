@@ -81,7 +81,7 @@ public partial class Projectile : AvidActor
 
 | 范围 | 状态 |
 | --- | --- |
-| C# | 编译仓库样例使用的语言子集；不支持任意 .NET API 或 NuGet 包。受限 `throw` / `catch` 和同步 `finally` 仅由专用测试编译入口覆盖，标准脚本构建入口仍拒绝异常源码。 |
+| C# | 编译仓库样例使用的语言子集；不支持任意 .NET API 或 NuGet 包。受限 `throw` / `catch` 和线性同步 `finally` 仅由专用测试编译入口覆盖，标准脚本构建入口仍拒绝异常源码。 |
 | 异步 | 支持样例中的下一帧、计时器和异步资源加载；不支持任意 `Task` 或自定义 awaiter。 |
 | 网络 | RPC、属性复制和 RepNotify 有样例与聚焦测试；真实游戏客户端/服务器验收尚未完成。 |
 | 平台 | Windows Editor 与打包样例已验证；Android 真机和 iOS 尚未验收。 |
