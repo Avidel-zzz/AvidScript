@@ -26,6 +26,7 @@ enum class EAvidScriptContinuationLane : uint8
 
 class FAvidScriptContinuationHostEndpoint final
 	: public IAvidScriptContinuationHost
+	, public IAvidScriptTaskHost
 	, public IAvidScriptBindingLatentHost
 {
 public:
@@ -60,15 +61,15 @@ public:
 		TUniquePtr<IAvidScriptContinuationStateLease>&& Lease) override;
 	bool ReadManagedState(int64 ContinuationToken,
 		const FAvidScriptWasmRuntimeInstance& Runtime, TArrayView<uint8> OutStateBytes) override;
-	int64 CreateTaskResult(FString TypeId);
-	bool RetainTaskResult(int64 Token);
-	bool ReleaseTaskResult(int64 Token);
-	EAvidScriptTaskWaitRegistration RegisterTaskWaiter(int64 Token, int64 WaiterToken);
+	int64 CreateTaskResult(FString TypeId) override;
+	bool RetainTaskResult(int64 Token) override;
+	bool ReleaseTaskResult(int64 Token) override;
+	EAvidScriptTaskWaitRegistration RegisterTaskWaiter(int64 Token, int64 WaiterToken) override;
 	bool SucceedTaskResult(int64 Token, TConstArrayView<uint8> Value,
-		TArray<int64>& OutWaiters);
-	bool FaultTaskResult(int64 Token, FString ErrorCode, TArray<int64>& OutWaiters);
-	bool CancelTaskResult(int64 Token, TArray<int64>& OutWaiters);
-	bool ReadTaskResult(int64 Token, FAvidScriptTaskResultSnapshot& OutSnapshot) const;
+		TArray<int64>& OutWaiters) override;
+	bool FaultTaskResult(int64 Token, FString ErrorCode, TArray<int64>& OutWaiters) override;
+	bool CancelTaskResult(int64 Token, TArray<int64>& OutWaiters) override;
+	bool ReadTaskResult(int64 Token, FAvidScriptTaskResultSnapshot& OutSnapshot) const override;
 	bool BeginLatent(
 		int32 CallbackId,
 		FAvidScriptBindingLatentReservation& OutReservation) override;

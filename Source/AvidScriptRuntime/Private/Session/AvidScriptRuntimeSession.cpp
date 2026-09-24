@@ -1038,6 +1038,7 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 	NextHostContext.HostEffectJournal = nullptr;
 	NextHostContext.EventSubscriptions = DelegateSubscriptions.Get();
 	NextHostContext.Continuations = HostContext.Continuations;
+	NextHostContext.Tasks = HostContext.Tasks;
 	NextHostContext.DebugProbes = Debugger.Get();
 	NextHostContext.Profiler = Profiler.Get();
 	NextHostContext.LatentHost = HostContext.LatentHost;
@@ -1082,11 +1083,13 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 					ObjectOwnership.Get(),
 					NextHostContext.OwnerHandle);
 			NextHostContext.Continuations = &ActiveContinuationHost;
+			NextHostContext.Tasks = &ActiveContinuationHost;
 			NextHostContext.LatentHost = &ActiveContinuationHost;
 		}
 		else
 		{
 			NextHostContext.Continuations = nullptr;
+			NextHostContext.Tasks = nullptr;
 			NextHostContext.LatentHost = nullptr;
 		}
 		if (!LiveRuntime)
@@ -1394,6 +1397,7 @@ bool FAvidScriptRuntimeSession::PumpReadyContinuations(
 		{
 			Continuations->Teardown();
 			HostContext.Continuations = nullptr;
+			HostContext.Tasks = nullptr;
 			HostContext.LatentHost = nullptr;
 			if (LiveRuntime)
 			{
@@ -1774,6 +1778,7 @@ bool FAvidScriptRuntimeSession::EndPlayLive(FAvidScriptWasmSmokeResult& OutResul
 			? LiveRuntime->EndPlayInContext(HostContext, OutResult) : LiveRuntime->EndPlay(OutResult);
 	}
 	HostContext.Continuations = nullptr;
+	HostContext.Tasks = nullptr;
 	HostContext.LatentHost = nullptr;
 	SetRuntimeBaseContext(*LiveRuntime, HostContext);
 	Continuations->ReleaseRetiredEndpoint();
@@ -1878,6 +1883,7 @@ bool FAvidScriptRuntimeSession::StopAndUnload(FAvidScriptWasmSmokeResult& OutRes
 	}
 	Continuations->ReleaseRetiredEndpoint();
 	HostContext.Continuations = nullptr;
+	HostContext.Tasks = nullptr;
 	HostContext.LatentHost = nullptr;
 	HostContext.InstanceExecutionState.Reset();
 	if (HostContext.ObjectRegistry != nullptr)
@@ -2750,6 +2756,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 	CandidateHostContext.InstanceExecutionState.Reset();
 	CandidateHostContext.DebugProbes = nullptr;
 	CandidateHostContext.Continuations = &PreparedContinuationHost;
+	CandidateHostContext.Tasks = &PreparedContinuationHost;
 	CandidateHostContext.LatentHost = &PreparedContinuationHost;
 	SetRuntimeBaseContext(*CandidateRuntime, CandidateHostContext);
 
@@ -3014,6 +3021,7 @@ bool FAvidScriptRuntimeSession::CommitPreparedActivation(FAvidScriptWasmReloadRe
 	LiveManifest = Pending->Manifest;
 	HostContext.InstanceExecutionState = CandidateHostContext.InstanceExecutionState;
 	HostContext.Continuations = CandidateHostContext.Continuations;
+	HostContext.Tasks = CandidateHostContext.Tasks;
 	HostContext.LatentHost = CandidateHostContext.LatentHost;
 	HostContext.DebugProbes = Debugger.Get();
 	HostContext.Profiler = Profiler.Get();

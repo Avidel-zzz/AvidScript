@@ -18,6 +18,7 @@
 #include "CoreMinimal.h"
 
 class FAvidScriptWasmDebugMap;
+class IAvidScriptTaskHost;
 class FAvidScriptLanguageErrorCatalog;
 class FAvidScriptProfilerEventBuffer;
 class UWorld;
@@ -166,6 +167,7 @@ struct FAvidScriptWasmHostContext
 	IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr;
 	IAvidScriptEventSubscriptionHost* EventSubscriptions = nullptr;
 	IAvidScriptContinuationHost* Continuations = nullptr;
+	IAvidScriptTaskHost* Tasks = nullptr;
 	IAvidScriptDebugProbeHost* DebugProbes = nullptr;
 	FAvidScriptProfilerEventBuffer* Profiler = nullptr;
 	IAvidScriptBindingLatentHost* LatentHost = nullptr;

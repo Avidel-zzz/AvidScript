@@ -1,31 +1,8 @@
 #pragma once
 
-#include "CoreMinimal.h"
+#include "AvidScriptTask.h"
 
 enum class EAvidScriptContinuationLane : uint8;
-
-enum class EAvidScriptTaskResultState : uint8
-{
-	Running,
-	Succeeded,
-	Faulted,
-	Cancelled
-};
-
-enum class EAvidScriptTaskWaitRegistration : uint8
-{
-	Invalid,
-	Queued,
-	Ready
-};
-
-struct FAvidScriptTaskResultSnapshot
-{
-	EAvidScriptTaskResultState State = EAvidScriptTaskResultState::Running;
-	FString TypeId;
-	TArray<uint8> Value;
-	FString ErrorCode;
-};
 
 // Session-owned fixed-wire task results. Managed values and language-error roots
 // require a separate validated codec before they can enter this table.

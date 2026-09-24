@@ -8,6 +8,7 @@
 #include "AvidScriptObjectRegistryTestTypes.h"
 #include "AvidScriptRuntimeArtifact.h"
 #include "AvidScriptRuntimeSession.h"
+#include "AvidScriptTask.h"
 #include "AvidScriptVmArtifact.h"
 #include "AvidScriptWasmRuntime.h"
 #include "AvidScriptWasmRuntimePrivate.h"
@@ -1195,6 +1196,15 @@ bool FAvidScriptRuntimeSessionCandidateBeginRollbackTest::RunTest(const FString&
 			UE_ARRAY_COUNT(GSessionCompatibleModule),
 			FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("session_live")),
 			ReloadResult));
+	TestTrue(TEXT("Live Session publishes a task host capability"),
+		Session.GetTestSnapshot().HostContext.Tasks != nullptr);
+	const IAvidScriptTaskHost* const ActiveTaskHost =
+		Session.GetTestSnapshot().HostContext.Tasks;
+	if (IAvidScriptTaskHost* const Tasks = Session.GetTestSnapshot().HostContext.Tasks)
+	{
+		TestEqual(TEXT("Task host rejects creation without a live World"),
+			Tasks->CreateTaskResult(TEXT("System.Int32")), 0LL);
+	}
 
 	FAvidScriptWasmSmokeResult TickResult;
 	TestTrue(TEXT("initial live runtime ticks"), Session.Tick(1.0f / 60.0f, TickResult));
@@ -1266,6 +1276,8 @@ bool FAvidScriptRuntimeSessionCandidateBeginRollbackTest::RunTest(const FString&
 	TestEqual(TEXT("old module remains active"), Session.GetSnapshot().ModuleId, FString(TEXT("session_live")));
 	TestEqual(TEXT("one reload is rejected"), Session.GetSnapshot().RejectedReloadCount, 1);
 	TestEqual(TEXT("session remains running"), Session.GetSnapshot().LifecycleState, EAvidScriptLifecycleState::Running);
+	TestTrue(TEXT("Candidate rollback preserves the active task host"),
+		Session.GetTestSnapshot().HostContext.Tasks == ActiveTaskHost);
 
 	TestTrue(TEXT("old runtime continues ticking"), Session.Tick(1.0f / 60.0f, TickResult));
 	TestEqual(TEXT("old tick count continues"), Session.GetSnapshot().TickCallCount, 2);
@@ -1273,6 +1285,8 @@ bool FAvidScriptRuntimeSessionCandidateBeginRollbackTest::RunTest(const FString&
 	FAvidScriptWasmSmokeResult StopResult;
 	Session.StopAndUnload(StopResult);
 	TestEqual(TEXT("session returns to empty"), Session.GetSnapshot().LifecycleState, EAvidScriptLifecycleState::Empty);
+	TestTrue(TEXT("Stop clears the task host capability"),
+		Session.GetTestSnapshot().HostContext.Tasks == nullptr);
 	return true;
 }
 
