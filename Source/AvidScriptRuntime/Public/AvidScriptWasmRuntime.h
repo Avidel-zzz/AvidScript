@@ -18,6 +18,7 @@
 #include "CoreMinimal.h"
 
 class FAvidScriptWasmDebugMap;
+class FAvidScriptLanguageErrorCatalog;
 class FAvidScriptProfilerEventBuffer;
 class UWorld;
 class IAvidScriptGeneratedTypeAuthority;
@@ -312,6 +313,7 @@ public:
 		const TSharedPtr<const FAvidScriptWasmDebugMap>& InDebugMap,
 		EAvidScriptVmArtifactTrust ArtifactTrust,
 		FAvidScriptWasmSmokeResult& OutResult);
+	const FAvidScriptLanguageErrorCatalog* GetLanguageErrorCatalog() const;
 	bool ValidateRequiredExports(
 		const TArray<FString>& RequiredExports,
 		FAvidScriptWasmSmokeResult& OutResult);
@@ -1057,6 +1059,7 @@ private:
 	FAvidScriptBindingInvocationContext BindingInvocationContext;
 	TSharedPtr<const FAvidScriptBindingPackage> BindingPackage;
 	TSharedPtr<const FAvidScriptWasmDebugMap> DebugMap;
+	TUniquePtr<FAvidScriptLanguageErrorCatalog> LanguageErrorCatalog;
 	TArray<FAvidScriptVmTypedHostImport> SupplementalTypedHostImports;
 	TSharedPtr<FAvidScriptGeneratedTypeHostBindings> GeneratedTypeHostBindings;
 	TArray<FAvidScriptVmTypedHostImport> TypedHostImports;

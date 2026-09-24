@@ -1,5 +1,6 @@
 #include "AvidScriptWasmRuntime.h"
 #include "AvidScriptEventStateAbi.h"
+#include "AvidScriptLanguageErrorCatalog.h"
 #include "AvidScriptWasmRuntimePrivate.h"
 
 #include "AvidScriptBindingDescriptor.h"
@@ -644,6 +645,11 @@ FAvidScriptWasmRuntimeInstance::~FAvidScriptWasmRuntimeInstance()
 	Unload();
 }
 
+const FAvidScriptLanguageErrorCatalog* FAvidScriptWasmRuntimeInstance::GetLanguageErrorCatalog() const
+{
+	return LanguageErrorCatalog.Get();
+}
+
 bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 	FString& OutError)
 {
@@ -1267,6 +1273,16 @@ bool FAvidScriptWasmRuntimeInstance::LoadArtifactView(
 		return false;
 	}
 
+	TUniquePtr<FAvidScriptLanguageErrorCatalog> CandidateLanguageErrors;
+	FString LanguageErrorMetadataError;
+	if (!FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+			Artifact.CanonicalWasmBytes, InModuleId, CandidateLanguageErrors, LanguageErrorMetadataError))
+	{
+		SetFailure(OutResult, ModuleId, TEXT("<module>"), TEXT("invalid_language_error_metadata"),
+			LanguageErrorMetadataError, TEXT("rebuild the canonical WASM from validated Guest IR"));
+		return false;
+	}
+
 	FAvidScriptVmError Error;
 	VmBackend = CreateAvidScriptVmBackend(BackendSelection, Error);
 	if (!VmBackend)
@@ -1394,6 +1410,7 @@ bool FAvidScriptWasmRuntimeInstance::LoadArtifactView(
 		Unload();
 		return false;
 	}
+	LanguageErrorCatalog = MoveTemp(CandidateLanguageErrors);
 	return true;
 }
 bool FAvidScriptWasmRuntimeInstance::ValidateRequiredExports(
@@ -2985,6 +3002,7 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	TypedHostImports.Reset();
 	BindingPackage.Reset();
 	DebugMap.Reset();
+	LanguageErrorCatalog.Reset();
 	BindingInvocationScratch.Reset();
 	FusedCallbackFrameStack.Reset();
 	InvalidateSelfCapability();
