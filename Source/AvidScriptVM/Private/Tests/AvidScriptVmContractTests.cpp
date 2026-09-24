@@ -603,6 +603,7 @@ bool FAvidScriptVmEventSubscriptionImportContractTest::RunTest(
 	const auto& LanguageStore = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::EventLanguageSubscribeV1);
 	const auto& LanguageLookup = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::EventLanguageLookupV1);
 	const auto& TaskInt32 = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::TaskResultInt32V1);
+	const auto& TaskBindProducer = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::TaskBindProducerV1);
 	for (const auto* Import : {&ManagedHeap, &ManagedStore, &ManagedRead, &EventStore, &EventRead, &LanguageStore, &LanguageLookup})
 	{
 		TestTrue(TEXT("Every heap-bearing import requires an invocation scope"), Import->bRequiresManagedInvocation
@@ -623,6 +624,19 @@ bool FAvidScriptVmEventSubscriptionImportContractTest::RunTest(
 		TaskInt32.bSupportsEnvCompatibility
 		|| IsAvidScriptVmStaticHostImport(TEXT("env"),
 			UTF8_TO_TCHAR(AvidScript::TaskResult::Abi::Int32Import)));
+	TestEqual(TEXT("Producer binding appends without renumbering"),
+		static_cast<uint16>(TaskBindProducer.BindingId),
+		static_cast<uint16>(EAvidScriptHostBindingId::TaskResultInt32V1) + 1);
+	TestEqual(TEXT("Producer binding uses two full-width tokens"),
+		FString(UTF8_TO_TCHAR(TaskBindProducer.Signature)), FString(TEXT("(II)i")));
+	TestTrue(TEXT("Producer binding requires an invocation scope"),
+		TaskBindProducer.bRequiresManagedInvocation
+		&& RequiresAvidScriptVmManagedInvocation(TEXT("avidscript"),
+			UTF8_TO_TCHAR(AvidScript::TaskResult::Abi::BindProducerImport)));
+	TestFalse(TEXT("Producer binding has no env compatibility alias"),
+		TaskBindProducer.bSupportsEnvCompatibility
+		|| IsAvidScriptVmStaticHostImport(TEXT("env"),
+			UTF8_TO_TCHAR(AvidScript::TaskResult::Abi::BindProducerImport)));
 	TestEqual(TEXT("Event state appends without renumbering"), static_cast<uint16>(EventStore.BindingId), static_cast<uint16>(ManagedRead.BindingId) + 1);
 	TestEqual(TEXT("Event state read follows subscribe"), static_cast<uint16>(EventRead.BindingId), static_cast<uint16>(EventStore.BindingId) + 1);
 	TestEqual(TEXT("Event state publication signature"), FString(UTF8_TO_TCHAR(EventStore.Signature)), FString(TEXT("(iiiiI)I")));

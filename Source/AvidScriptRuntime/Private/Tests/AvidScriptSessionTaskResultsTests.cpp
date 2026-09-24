@@ -342,4 +342,135 @@ bool FAvidScriptSessionTaskDispatchTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptSessionTaskProducerBindingTest,
+	"AvidScript.Runtime.Continuation.TaskProducerBinding",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptSessionTaskProducerBindingTest::RunTest(const FString& Parameters)
+{
+	TStrongObjectPtr<UWorld> World(NewObject<UWorld>());
+	const TSharedPtr<FAvidScriptSessionContinuations> Owner =
+		MakeShared<FAvidScriptSessionContinuations>();
+	FAvidScriptContinuationHostEndpoint& Host = Owner->ResetActive(World.Get());
+	FAvidScriptSessionTaskResults& Tasks = Owner->GetTaskResultsForTesting();
+	FAvidScriptTaskResultSnapshot Snapshot;
+	TArray<FAvidScriptContinuationCompletion> Ready;
+	TArray<int64> Woken;
+	const int32 Value = 7;
+	const TConstArrayView<uint8> ValueBytes(
+		reinterpret_cast<const uint8*>(&Value), sizeof(Value));
+
+	const int64 CancelledTask = Host.CreateTaskResult(TEXT("System.Int32"));
+	TestTrue(TEXT("Producer owns a second result reference"),
+		Host.RetainTaskResult(CancelledTask));
+	const int64 CancelledProducer = Host.ScheduleDelay(30.0f, 301);
+	TestTrue(TEXT("Pending producer binds to its result"),
+		Host.BindTaskProducer(CancelledTask, CancelledProducer));
+	TestFalse(TEXT("Duplicate producer binding is rejected"),
+		Host.BindTaskProducer(CancelledTask, CancelledProducer));
+	TestTrue(TEXT("Producer transfers ownership to Session"),
+		Host.ReleaseTaskResult(CancelledTask));
+	int64 CancelledWaiter = 0;
+	TestTrue(TEXT("Caller awaits producer result"),
+		Host.AwaitTaskResult(CancelledTask, 302, CancelledWaiter)
+			== EAvidScriptTaskWaitRegistration::Queued);
+	TestTrue(TEXT("Caller releases its result reference"),
+		Host.ReleaseTaskResult(CancelledTask));
+	const int64 Source = Host.CreateCancellationSource();
+	TestTrue(TEXT("Cancellation source binds producer"),
+		Host.BindCancellationSource(Source, CancelledProducer));
+	TestTrue(TEXT("Cancellation source cancels producer"),
+		Host.CancelCancellationSource(Source));
+	TestFalse(TEXT("Cancelled producer token is stale"), Host.Cancel(CancelledProducer));
+	TestTrue(TEXT("Waiter can read cancelled result"),
+		Host.ReadTaskResult(CancelledTask, Snapshot));
+	TestTrue(TEXT("Cancellation propagates to task"),
+		Snapshot.State == EAvidScriptTaskResultState::Cancelled);
+	Owner->DrainReady(Ready);
+	TestEqual(TEXT("Cancellation wakes one waiter"), Ready.Num(), 1);
+	if (Ready.Num() == 1)
+	{
+		TestEqual(TEXT("Cancelled waiter identity"), Ready[0].Token, CancelledWaiter);
+		TestTrue(TEXT("Waiter receives cancelled status"),
+			Ready[0].Status == EAvidScriptContinuationStatus::Cancelled);
+	}
+	TestTrue(TEXT("Cancelled waiter finalizes"),
+		Owner->FinalizeDispatched(CancelledWaiter, true));
+	TestEqual(TEXT("Cancelled task references are reclaimed"), Tasks.GetCount(), 0);
+	TestTrue(TEXT("Cancellation source releases"),
+		Host.ReleaseCancellationSource(Source));
+
+	const int64 Trigger = Host.CreateTaskResult(TEXT("System.Int32"));
+	const int64 TransferredTask = Host.CreateTaskResult(TEXT("System.Int32"));
+	int64 FirstProducer = 0;
+	TestTrue(TEXT("Producer awaits trigger"),
+		Host.AwaitTaskResult(Trigger, 303, FirstProducer)
+			== EAvidScriptTaskWaitRegistration::Queued);
+	TestTrue(TEXT("First producer binding succeeds"),
+		Host.BindTaskProducer(TransferredTask, FirstProducer));
+	TestFalse(TEXT("Parallel producer binding is rejected"),
+		Host.BindTaskProducer(TransferredTask, Host.ScheduleDelay(30.0f, 304)));
+	TestTrue(TEXT("Trigger completes"), Host.SucceedTaskResult(Trigger, ValueBytes, Woken));
+	TestTrue(TEXT("Trigger caller releases"), Host.ReleaseTaskResult(Trigger));
+	Owner->DrainReady(Ready);
+	TestEqual(TEXT("First producer dispatches"), Ready.Num(), 1);
+	const int64 NextProducer = Host.ScheduleDelay(30.0f, 305);
+	TestTrue(TEXT("Dispatch transfers producer binding"),
+		Host.BindTaskProducer(TransferredTask, NextProducer));
+	TestTrue(TEXT("First producer finalizes without ending task"),
+		Owner->FinalizeDispatched(FirstProducer, true));
+	TestTrue(TEXT("Task remains pending after transfer"),
+		!Host.ReadTaskResult(TransferredTask, Snapshot));
+	TestTrue(TEXT("New producer cancels"), Host.Cancel(NextProducer));
+	TestTrue(TEXT("Transferred cancellation reaches task"),
+		Host.ReadTaskResult(TransferredTask, Snapshot));
+	TestTrue(TEXT("Transferred task is cancelled"),
+		Snapshot.State == EAvidScriptTaskResultState::Cancelled);
+	TestTrue(TEXT("Caller releases transferred task"),
+		Host.ReleaseTaskResult(TransferredTask));
+
+	const int64 FaultTrigger = Host.CreateTaskResult(TEXT("System.Int32"));
+	const int64 FaultTask = Host.CreateTaskResult(TEXT("System.Int32"));
+	int64 FaultProducer = 0;
+	TestTrue(TEXT("Faulting producer awaits trigger"),
+		Host.AwaitTaskResult(FaultTrigger, 306, FaultProducer)
+			== EAvidScriptTaskWaitRegistration::Queued);
+	TestTrue(TEXT("Faulting producer binds result"),
+		Host.BindTaskProducer(FaultTask, FaultProducer));
+	TestTrue(TEXT("Fault trigger completes"),
+		Host.SucceedTaskResult(FaultTrigger, ValueBytes, Woken));
+	TestTrue(TEXT("Fault trigger caller releases"),
+		Host.ReleaseTaskResult(FaultTrigger));
+	Owner->DrainReady(Ready);
+	TestEqual(TEXT("Faulting producer dispatches"), Ready.Num(), 1);
+	TestTrue(TEXT("Failed producer finalizes"),
+		Owner->FinalizeDispatched(FaultProducer, false));
+	TestTrue(TEXT("Failed dispatch ends result"),
+		Host.ReadTaskResult(FaultTask, Snapshot));
+	TestTrue(TEXT("Failed dispatch faults task"),
+		Snapshot.State == EAvidScriptTaskResultState::Faulted);
+	TestEqual(TEXT("Failed dispatch stores stable error code"),
+		Snapshot.ErrorCode, FString(TEXT("script_execution_failed")));
+	TestTrue(TEXT("Faulted result caller releases"),
+		Host.ReleaseTaskResult(FaultTask));
+	FAvidScriptContinuationHostEndpoint& Prepared = Owner->BeginPrepared(World.Get());
+	const int64 PreparedTask = Prepared.CreateTaskResult(TEXT("System.Int32"));
+	const int64 ActiveContinuation = Host.ScheduleDelay(30.0f, 307);
+	TestFalse(TEXT("Active continuation rejects prepared result"),
+		Host.BindTaskProducer(PreparedTask, ActiveContinuation));
+	TestFalse(TEXT("Prepared endpoint rejects active continuation"),
+		Prepared.BindTaskProducer(PreparedTask, ActiveContinuation));
+	TestFalse(TEXT("Released task token cannot be rebound"),
+		Host.BindTaskProducer(FaultTask, ActiveContinuation));
+	TestTrue(TEXT("Unused active continuation cancels"),
+		Host.Cancel(ActiveContinuation));
+	Owner->DiscardPrepared();
+	Owner->Teardown();
+	TestEqual(TEXT("Teardown retires remaining continuations"),
+		Owner->GetActiveCount(), 0);
+	TestEqual(TEXT("Teardown retires all task results"), Tasks.GetCount(), 0);
+	return true;
+}
+
 #endif

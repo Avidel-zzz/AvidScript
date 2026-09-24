@@ -466,12 +466,12 @@ internal static class CSharpAsyncCfgLowerer
                     if (value is null || value.TypeId != CSharpTaskResultAbi.IntTypeId
                         || task is null
                         || CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Succeed,
-                            task, value, segment.Ordinal, instructions) is null
-                        || CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release,
-                            task, null, segment.Ordinal, instructions) is null)
+                            task, value, segment.Ordinal, instructions) is null)
                         return false;
                     if (initialEntry)
                     {
+                        if (CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release,
+                                task, null, segment.Ordinal, instructions) is null) return false;
                         GuestRegister? returned = CSharpTaskResultAbi.ReturnValue(
                             context, method, segment.Ordinal, instructions);
                         if (returned is null) return false;
@@ -570,6 +570,14 @@ internal static class CSharpAsyncCfgLowerer
             return false;
         }
 
+        if (scheduledToken is null) return false;
+        GuestRegister? producerBindingAccepted = method.TaskResultTypeId is null
+            ? null
+            : CSharpTaskResultAbi.BindProducer(context, method, scheduledToken,
+                segment.Ordinal, instructions);
+        if (method.TaskResultTypeId is not null && producerBindingAccepted is null)
+            return false;
+
         GuestRegister? zeroToken = context.CreateTemporary(
             abi.Int64Type.Id,
             segment.Ordinal);
@@ -599,6 +607,7 @@ internal static class CSharpAsyncCfgLowerer
         {
             cancellationBindingAccepted,
             stateStoreAccepted,
+            producerBindingAccepted,
         }.Where(value => value is not null).Cast<GuestRegister>())
         {
             GuestRegister? combined = context.CreateTemporary(
@@ -651,6 +660,11 @@ internal static class CSharpAsyncCfgLowerer
         string? acceptedReturnId = null;
         if (method.TaskResultTypeId is not null && initialEntry)
         {
+            GuestRegister? producer = CSharpTaskResultAbi.LoadProducerToken(
+                context, method, segment.Ordinal, acceptedInstructions);
+            if (producer is null || CSharpTaskResultAbi.Call(context,
+                    CSharpTaskResultAbi.Release, producer, null,
+                    segment.Ordinal, acceptedInstructions) is null) return false;
             GuestRegister? returned = CSharpTaskResultAbi.ReturnValue(
                 context, method, segment.Ordinal, acceptedInstructions);
             if (returned is null) return false;

@@ -11,6 +11,7 @@ internal static class GuestTaskResultValidator
     public const string IrVersion = "1.17";
     public const string ImportModule = "avidscript";
     public const string ImportName = "avid_task_i32_v1";
+    public const string BindProducerImportName = "avid_task_bind_producer_v1";
     private const string DiagnosticCode = "ASIR1028";
 
     public static void Validate(GuestValidationContext context)
@@ -18,10 +19,13 @@ internal static class GuestTaskResultValidator
         GuestModule module = context.Module;
         GuestImport[] taskImports = module.Imports.Where(import =>
             import.Module == ImportModule && import.Name == ImportName).ToArray();
+        GuestImport[] producerImports = module.Imports.Where(import =>
+            import.Module == ImportModule && import.Name == BindProducerImportName).ToArray();
         bool taskSemantic = module.Provenance.SemanticSchemaVersion == 35
             && module.Provenance.SemanticVersion == "1.44";
         bool taskIr = module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion;
-        if (!taskSemantic && !taskIr && taskImports.Length == 0) return;
+        if (!taskSemantic && !taskIr && taskImports.Length == 0
+            && producerImports.Length == 0) return;
 
         if (!taskSemantic || !taskIr || module.Language != "csharp"
             || taskImports.Length != 1)
@@ -41,6 +45,18 @@ internal static class GuestTaskResultValidator
             || !HasScalar(context, "type:int32", "i32", 4)
             || !HasScalar(context, "type:int64", "i64", 8))
             context.Add(DiagnosticCode, "Task<int> Host import has a noncanonical signature or scalar layout.");
+
+        if (producerImports.Length > 1
+            || (producerImports.Length == 1
+                && (producerImports[0].ParameterTypeIds.Count != 2
+                    || !producerImports[0].ParameterTypeIds.SequenceEqual(
+                        new[] { "type:int64", "type:int64" }, StringComparer.Ordinal)
+                    || producerImports[0].ReturnTypeId != "type:int32"
+                    || producerImports[0].DispatchClass != "semantic"
+                    || producerImports[0].OptimizationClass != "none"
+                    || producerImports[0].BindingOrdinal != -1)))
+            context.Add(DiagnosticCode,
+                "Task<int> producer binding import has a noncanonical signature.");
     }
 
     private static bool HasScalar(GuestValidationContext context, string id, string storage, int size) =>

@@ -117,7 +117,8 @@ public static class CSharpGuestLowerer
             diagnostics);
         functions.AddRange(asyncMethods.Functions);
         if (document.SchemaVersion == SemanticContract.TaskResultSchemaVersion)
-            imports = imports.Append(CSharpTaskResultAbi.Import()).ToArray();
+            imports = imports.Append(CSharpTaskResultAbi.Import())
+                .Append(CSharpTaskResultAbi.BindProducerImport()).ToArray();
         functions.AddRange(CSharpClosureDelegateLowerer.BuildThunks(document, functions));
         functions.AddRange(CSharpDelegateIdentityLowerer.Build(document, functions));
         imports = CSharpAsyncManagedState.AppendImports(imports, functions);

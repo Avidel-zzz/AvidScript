@@ -8,6 +8,7 @@
 namespace AvidScript::TaskResult::Abi
 {
 inline constexpr char Int32Import[] = "avid_task_i32_v1"; // (iIii)I
+inline constexpr char BindProducerImport[] = "avid_task_bind_producer_v1"; // (II)i
 inline constexpr char Int32TypeId[] = "type:int32";
 
 enum class ECommand : std::uint32_t

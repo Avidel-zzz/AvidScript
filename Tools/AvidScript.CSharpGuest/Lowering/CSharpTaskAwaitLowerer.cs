@@ -84,13 +84,33 @@ internal static class CSharpTaskAwaitLowerer
                 site.CallbackId, scheduled, abi.StateStoreImportId, abi.Int32Type,
                 pendingInstructions, out GuestRegister? stateAccepted)
             || stateAccepted is null) return false;
+        GuestRegister finalAcceptance = stateAccepted;
+        if (method.TaskResultTypeId is not null)
+        {
+            GuestRegister? bound = CSharpTaskResultAbi.BindProducer(
+                context, method, scheduled, segment.Ordinal, pendingInstructions);
+            GuestRegister? combined = context.CreateTemporary(
+                CSharpTaskResultAbi.IntTypeId, segment.Ordinal);
+            if (bound is null || combined is null) return false;
+            pendingInstructions.Add(new("binary", combined.Id,
+                new[] { stateAccepted.Id, bound.Id }, null, "bitwise_and", null));
+            finalAcceptance = combined;
+        }
         string acceptedBlock = blockId + ":task_pending_accepted";
         string rejectedBlock = blockId + ":task_pending_rejected";
         blocks.Add(new(pendingBlock, pendingInstructions,
-            new("branch_if", stateAccepted.Id, acceptedBlock, rejectedBlock, null)));
+            new("branch_if", finalAcceptance.Id, acceptedBlock, rejectedBlock, null)));
         List<GuestInstruction> acceptedInstructions = new();
         if (CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release,
                 token, null, segment.Ordinal, acceptedInstructions) is null) return false;
+        if (method.TaskResultTypeId is not null && initialEntry)
+        {
+            GuestRegister? producer = CSharpTaskResultAbi.LoadProducerToken(
+                context, method, segment.Ordinal, acceptedInstructions);
+            if (producer is null || CSharpTaskResultAbi.Call(context,
+                    CSharpTaskResultAbi.Release, producer, null,
+                    segment.Ordinal, acceptedInstructions) is null) return false;
+        }
         string? returnId = null;
         if (method.TaskResultTypeId is not null && initialEntry)
         {

@@ -1085,6 +1085,18 @@ int64_t TaskResultInt32V1(wasm_exec_env_t ExecEnv,
 		? Result.ReturnValueI64 : 0;
 }
 
+int32_t TaskBindProducerV1(wasm_exec_env_t ExecEnv,
+	int64_t TaskToken, int64_t ContinuationToken)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::TaskBindProducerV1;
+	Call.Int64Args[0] = TaskToken;
+	Call.Int64Args[1] = ContinuationToken;
+	FAvidScriptHostCallResult Result;
+	return Dispatch(ExecEnv, StaticImportName(Call.BindingId), Call, Result)
+		? Result.ReturnValue : 0;
+}
+
 int32_t ContinuationStateStore(
 	wasm_exec_env_t ExecEnv,
 	int64_t ContinuationToken,
@@ -1413,6 +1425,7 @@ void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 	case EAvidScriptHostBindingId::EventLanguageLookupV1: return reinterpret_cast<void*>(EventLanguageLookupV1);
 	case EAvidScriptHostBindingId::LanguageErrorReportV1: return reinterpret_cast<void*>(LanguageErrorReportV1);
 	case EAvidScriptHostBindingId::TaskResultInt32V1: return reinterpret_cast<void*>(TaskResultInt32V1);
+	case EAvidScriptHostBindingId::TaskBindProducerV1: return reinterpret_cast<void*>(TaskBindProducerV1);
 	case EAvidScriptHostBindingId::DelegateOutputWrite: return reinterpret_cast<void*>(DelegateOutputWrite);
 	case EAvidScriptHostBindingId::DataLaneGetEpoch: return reinterpret_cast<void*>(DataLaneGetEpoch);
 	case EAvidScriptHostBindingId::DataLaneSubmit: return reinterpret_cast<void*>(DataLaneSubmit);

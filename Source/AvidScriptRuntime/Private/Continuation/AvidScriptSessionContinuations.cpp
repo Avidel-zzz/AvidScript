@@ -286,6 +286,14 @@ EAvidScriptTaskWaitRegistration FAvidScriptContinuationHostEndpoint::AwaitTaskRe
 		: EAvidScriptTaskWaitRegistration::Invalid;
 }
 
+bool FAvidScriptContinuationHostEndpoint::BindTaskProducer(
+	const int64 TaskToken, const int64 ContinuationToken)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = PinTaskOwner(TaskToken);
+	return PinnedOwner && PinnedOwner->BindTaskProducer(
+		Lane, ActivationSerial, TaskToken, ContinuationToken);
+}
+
 bool FAvidScriptContinuationHostEndpoint::SucceedTaskResult(
 	const int64 Token, const TConstArrayView<uint8> Value,
 	TArray<int64>& OutWaiters)
@@ -841,6 +849,8 @@ bool FAvidScriptSessionContinuations::FinalizeDispatched(
 	{
 		Entry.LatentProxy->Disarm();
 	}
+	FinishBoundProducerTask(Entry,
+		(!bSucceeded || !bFinalized) && !Entry.bCancelledTerminalQueued);
 	ReleaseSlot(SlotIndex);
 	return bFinalized;
 }
@@ -928,6 +938,67 @@ EAvidScriptTaskWaitRegistration FAvidScriptSessionContinuations::AwaitTaskResult
 	}
 	OutContinuationToken = ContinuationToken;
 	return Registration;
+}
+
+bool FAvidScriptSessionContinuations::BindTaskProducer(
+	const EAvidScriptContinuationLane Lane,
+	const uint64 ActivationSerial,
+	const int64 TaskToken,
+	const int64 ContinuationToken)
+{
+	if (!CanUseTaskResults(Lane, ActivationSerial)
+		|| !TaskResults.MatchesOwner(TaskToken, Lane, ActivationSerial))
+	{
+		return false;
+	}
+	FAvidScriptTaskResultSnapshot Terminal;
+	if (TaskResults.Read(TaskToken, Terminal))
+	{
+		return false;
+	}
+	uint32 SlotIndex = 0;
+	uint32 Generation = 0;
+	if (!UnpackToken(ContinuationToken, SlotIndex, Generation)
+		|| !Slots.IsValidIndex(static_cast<int32>(SlotIndex)))
+	{
+		return false;
+	}
+	FSlot& Slot = Slots[SlotIndex];
+	if (Slot.Generation != Generation || !Slot.Entry.IsSet()
+		|| Slot.Entry->Lane != Lane
+		|| Slot.Entry->ActivationSerial != ActivationSerial
+		|| Slot.Entry->bDispatching
+		|| Slot.Entry->ProducerTaskToken != 0
+		|| Slot.Entry->TaskResultToken == TaskToken)
+	{
+		return false;
+	}
+
+	FEntry* DispatchingProducer = nullptr;
+	for (FSlot& ExistingSlot : Slots)
+	{
+		if (!ExistingSlot.Entry.IsSet()
+			|| ExistingSlot.Entry->ProducerTaskToken != TaskToken)
+		{
+			continue;
+		}
+		if (!ExistingSlot.Entry->bDispatching || DispatchingProducer != nullptr)
+		{
+			return false;
+		}
+		DispatchingProducer = &ExistingSlot.Entry.GetValue();
+	}
+	if (!TaskResults.Retain(TaskToken))
+	{
+		return false;
+	}
+	if (DispatchingProducer != nullptr)
+	{
+		DispatchingProducer->ProducerTaskToken = 0;
+		TaskResults.Release(TaskToken);
+	}
+	Slot.Entry->ProducerTaskToken = TaskToken;
+	return true;
 }
 
 int64 FAvidScriptSessionContinuations::ScheduleDelay(
@@ -2198,6 +2269,29 @@ void FAvidScriptSessionContinuations::UnbindEntryFromCancellationSource(
 	Entry.CancellationSourceToken = 0;
 }
 
+void FAvidScriptSessionContinuations::FinishBoundProducerTask(
+	FEntry& Entry, const bool bFault)
+{
+	const int64 TaskToken = Entry.ProducerTaskToken;
+	Entry.ProducerTaskToken = 0;
+	if (TaskToken == 0)
+	{
+		return;
+	}
+	TArray<int64> Waiters;
+	const bool bFinished = bFault
+		? TaskResults.Fault(TaskToken, TEXT("script_execution_failed"), Waiters)
+		: TaskResults.Cancel(TaskToken, Waiters);
+	if (bFinished)
+	{
+		QueueTaskWaiters(TaskToken,
+			bFault ? EAvidScriptTaskResultState::Faulted
+				: EAvidScriptTaskResultState::Cancelled,
+			Waiters);
+	}
+	TaskResults.Release(TaskToken);
+}
+
 bool FAvidScriptSessionContinuations::CancelEntry(
 	const uint32 SlotIndex,
 	const bool bDeliverTerminal)
@@ -2222,6 +2316,7 @@ bool FAvidScriptSessionContinuations::CancelEntry(
 	RemoveReadyToken(Entry.Token);
 	if (!bResumeOutcome)
 	{
+		FinishBoundProducerTask(Entry, false);
 		ReleaseSlot(SlotIndex);
 		return true;
 	}

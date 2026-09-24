@@ -67,6 +67,7 @@ public:
 	bool HasTaskResultType(int64 Token, const FString& TypeId) const override;
 	EAvidScriptTaskWaitRegistration AwaitTaskResult(
 		int64 Token, int32 CallbackId, int64& OutContinuationToken) override;
+	bool BindTaskProducer(int64 TaskToken, int64 ContinuationToken) override;
 	bool SucceedTaskResult(int64 Token, TConstArrayView<uint8> Value,
 		TArray<int64>& OutWaiters) override;
 	bool FaultTaskResult(int64 Token, FString ErrorCode, TArray<int64>& OutWaiters) override;
@@ -184,6 +185,8 @@ public:
 	EAvidScriptTaskWaitRegistration AwaitTaskResult(
 		EAvidScriptContinuationLane Lane, uint64 ActivationSerial,
 		int64 TaskToken, int32 CallbackId, int64& OutContinuationToken);
+	bool BindTaskProducer(EAvidScriptContinuationLane Lane,
+		uint64 ActivationSerial, int64 TaskToken, int64 ContinuationToken);
 	bool Cancel(
 		EAvidScriptContinuationLane Lane,
 		uint64 ActivationSerial,
@@ -279,6 +282,7 @@ private:
 		int32 CallbackId = 0;
 		int64 Token = 0;
 		int64 TaskResultToken = 0;
+		int64 ProducerTaskToken = 0;
 		int64 CancellationSourceToken = 0;
 		TWeakObjectPtr<UWorld> World;
 		FTimerHandle TimerHandle;
@@ -383,6 +387,7 @@ private:
 	void ReleaseEntryResult(FEntry& Entry);
 	void UnbindEntryFromCancellationSource(FEntry& Entry);
 	bool CancelEntry(uint32 SlotIndex, bool bDeliverTerminal);
+	void FinishBoundProducerTask(FEntry& Entry, bool bFault);
 	void HandleTimerCompletion(int64 Token);
 	void HandleObjectLoadCompletion(int64 Token, UObject* LoadedObject);
 	void HandleLatentCompletion(int64 Token, int32 Linkage);

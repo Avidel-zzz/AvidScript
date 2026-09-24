@@ -475,6 +475,65 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 			Owner->GetTaskResultsForTesting().GetCount(), 0);
 		Owner->Teardown();
 	}
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	{
+		const FString Stem = FPaths::Combine(FPaths::ProjectSavedDir(),
+			TEXT("AvidScriptManagedHeapTests/GuestFixtures/csharp-task-int-cancelled"));
+		TArray<uint8> Bytes;
+		FString OffsetText;
+		int32 ResultOffset = -1;
+		if (!TestTrue(TEXT("Compiled cancelled Task<int> fixture exists"),
+			FFileHelper::LoadFileToArray(Bytes, *(Stem + TEXT(".wasm"))))
+			|| !TestTrue(TEXT("Cancelled Task<int> result offset exists"),
+				FFileHelper::LoadFileToString(OffsetText, *(Stem + TEXT(".result-offset"))))
+			|| !TestTrue(TEXT("Cancelled Task<int> result offset is bounded"),
+				LexTryParseString(ResultOffset, *OffsetText)
+					&& ResultOffset >= 0 && ResultOffset < 65536))
+			return false;
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime
+			? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		FAvidScriptWasmRuntimeInstance Runtime(Selection);
+		FAvidScriptWasmSmokeResult Result;
+		if (!TestTrue(TEXT("Compiled cancelled Task<int> module loads"),
+			Runtime.LoadModule(Bytes.GetData(), Bytes.Num(), TEXT("task_int_cancelled"), Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		const auto Owner = MakeShared<FAvidScriptSessionContinuations>();
+		auto& Endpoint = Owner->ResetActive(World);
+		FAvidScriptWasmHostContext Context;
+		Context.Tasks = &Endpoint;
+		Context.Continuations = &Endpoint;
+		Context.World = World;
+		Runtime.SetHostContext(Context);
+		if (!TestTrue(TEXT("C# Task<int> producer suspends"), Runtime.BeginPlay(Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		TestEqual(TEXT("Suspended producer owns one task result"),
+			Owner->GetTaskResultsForTesting().GetCount(), 1);
+		if (!TestTrue(TEXT("C# cancellation source cancels producer"),
+			Runtime.Tick(0.016f, Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		TArray<FAvidScriptContinuationCompletion> Ready;
+		Owner->DrainReady(Ready);
+		if (!TestEqual(TEXT("Cancelled task wakes its C# awaiter"), Ready.Num(), 1))
+			return false;
+		TestTrue(TEXT("Cancelled C# await receives terminal status"),
+			Ready[0].Status == EAvidScriptContinuationStatus::Cancelled);
+		TestFalse(TEXT("C# await rejects cancelled Task<int> result"),
+			Runtime.DispatchContinuation(Ready[0], Result));
+		TestTrue(TEXT("Cancelled C# awaiter finalizes"),
+			Owner->FinalizeDispatched(Ready[0].Token, false));
+		uint8 ResultBytes[4] = {};
+		FString Error;
+		TestTrue(TEXT("Cancelled script result remains readable"),
+			Runtime.ReadStateBytes(ResultOffset, MakeArrayView(ResultBytes), Error));
+		int32 Value = 0;
+		FMemory::Memcpy(&Value, ResultBytes, sizeof(Value));
+		TestEqual(TEXT("Cancelled C# await does not publish value"), Value, 0);
+		TestEqual(TEXT("Cancelled Task<int> result is reclaimed"),
+			Owner->GetTaskResultsForTesting().GetCount(), 0);
+		Owner->Teardown();
+	}
 	return true;
 }
 

@@ -190,7 +190,38 @@ internal static class CSharpGuestAsyncInvocationTests
             }
             """;
         CompileTaskFixture("arguments", argumentsSource);
-        return count + 2;
+        const string cancellationSource = """
+            using AvidScript;
+            using System.Runtime.InteropServices;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static int Result;
+                [AvidTransient] private static AvidCancellationSource Cancellation;
+                [AvidTransient] private static AvidCancellationToken Token;
+                public static async Task<int> LoadScoreAsync()
+                {
+                    await AvidContinuations.NextTickAsync().WithCancellation(Token);
+                    return 99;
+                }
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay()
+                {
+                    Cancellation = AvidCancellationSource.Create();
+                    Token = Cancellation.Token;
+                    int score = await LoadScoreAsync();
+                    Result = score;
+                }
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
+                public static void Tick(float deltaSeconds)
+                {
+                    Cancellation.Cancel();
+                    Cancellation.Release();
+                }
+            }
+            """;
+        CompileTaskFixture("cancelled", cancellationSource);
+        return count + 3;
     }
 
     private static void CompileTaskFixture(string scenario, string source)
@@ -206,14 +237,24 @@ internal static class CSharpGuestAsyncInvocationTests
         GuestModule module = lowered.Module!;
         Check(module.SchemaVersion == 18 && module.IrVersion == "1.17"
             && module.Imports.Count(imported => imported.Module == "avidscript"
-                && imported.Name == "avid_task_i32_v1") == 1,
-            scenario + ": Task<int> lowering must use the versioned Guest IR and Host import");
+                && imported.Name == "avid_task_i32_v1") == 1
+            && module.Imports.Count(imported => imported.Module == "avidscript"
+                && imported.Name == "avid_task_bind_producer_v1") == 1
+            && (scenario == "immediate"
+                || module.Functions.SelectMany(function => function.Blocks)
+                    .SelectMany(block => block.Instructions)
+                    .Any(instruction => instruction.Op == "call"
+                        && instruction.TargetId == "import:$async:task_bind_producer_v1")),
+            scenario + ": Task<int> lowering must bind each pending producer to its continuation");
         WasmCompilationResult compiled = WasmModuleCompiler.Compile(module);
         Check(compiled.Succeeded,
             scenario + ": Task<int> WASM compilation failed: " + string.Join(" | ", compiled.Diagnostics.Select(item => item.Message)));
         Check(WasmArtifactInspector.Inspect(compiled.Bytes).Imports.Any(imported =>
             imported.Module == "avidscript" && imported.Name == "avid_task_i32_v1"),
             scenario + ": Task<int> WASM must retain the exact Host import");
+        Check(WasmArtifactInspector.Inspect(compiled.Bytes).Imports.Any(imported =>
+            imported.Module == "avidscript" && imported.Name == "avid_task_bind_producer_v1"),
+            scenario + ": Task<int> WASM must retain the producer binding import");
         string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_MANAGED_HEAP_WASM_DIR");
         if (!string.IsNullOrWhiteSpace(output))
         {

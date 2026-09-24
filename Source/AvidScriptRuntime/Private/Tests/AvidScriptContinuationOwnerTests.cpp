@@ -1887,6 +1887,9 @@ bool FAvidScriptContinuationLatentResultSlotTest::RunTest(
 	TestTrue(
 		TEXT("Outcome cancellation latent commits"),
 		ActiveHost.CommitLatent(ResumedCancellation.Token));
+	const int64 ResumedTask = ActiveHost.CreateTaskResult(TEXT("System.Int32"));
+	TestTrue(TEXT("Outcome continuation owns its Task<int> producer"),
+		ActiveHost.BindTaskProducer(ResumedTask, ResumedCancellation.Token));
 	TestTrue(
 		TEXT("Outcome cancellation queues its terminal callback"),
 		ActiveHost.Cancel(ResumedCancellation.Token));
@@ -1909,8 +1912,15 @@ bool FAvidScriptContinuationLatentResultSlotTest::RunTest(
 		TestEqual(TEXT("Cancelled outcome has no result generation"), Completions[0].ObjectGeneration, 0);
 		TestTrue(
 			TEXT("Cancelled outcome dispatch finalizes"),
-			Owner->FinalizeDispatched(Completions[0].Token, true));
+			Owner->FinalizeDispatched(Completions[0].Token, false));
 	}
+	FAvidScriptTaskResultSnapshot CancelledTaskSnapshot;
+	TestTrue(TEXT("Cancelled outcome task remains readable"),
+		ActiveHost.ReadTaskResult(ResumedTask, CancelledTaskSnapshot));
+	TestTrue(TEXT("Failed cancellation callback preserves task cancellation"),
+		CancelledTaskSnapshot.State == EAvidScriptTaskResultState::Cancelled);
+	TestTrue(TEXT("Cancelled outcome task caller releases"),
+		ActiveHost.ReleaseTaskResult(ResumedTask));
 
 	FAvidScriptContinuationHostEndpoint& PreparedHost =
 		Owner->BeginPrepared(World);

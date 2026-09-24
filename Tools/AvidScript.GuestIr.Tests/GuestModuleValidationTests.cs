@@ -32,6 +32,8 @@ internal static class GuestModuleValidationTests
             Array.Empty<GuestField>(), null, null, 8, 8);
         GuestImport task = new("import:task_i32_v1", "avidscript", "avid_task_i32_v1",
             new[] { "type:int32", "type:int64", "type:int32", "type:int32" }, "type:int64");
+        GuestImport bindProducer = new("import:task_bind_producer_v1", "avidscript",
+            "avid_task_bind_producer_v1", new[] { "type:int64", "type:int64" }, "type:int32");
         GuestModule module = baseline with
         {
             SchemaVersion = 18,
@@ -46,6 +48,9 @@ internal static class GuestModuleValidationTests
         };
         Assert(GuestModuleValidator.Validate(module).Succeeded,
             "IR 18 accepts the canonical Task<int> Host ABI");
+        GuestModule boundModule = module with { Imports = new[] { task, bindProducer } };
+        Assert(GuestModuleValidator.Validate(boundModule).Succeeded,
+            "IR 18 accepts the versioned producer binding import");
         byte[] bytes = GuestIrSerializer.Serialize(module);
         Assert(bytes.SequenceEqual(GuestIrSerializer.Serialize(GuestIrSerializer.Deserialize(bytes))),
             "Task<int> Guest IR has a canonical round trip");
@@ -62,6 +67,13 @@ internal static class GuestModuleValidationTests
             "ASIR1028");
         AssertDiagnostic(module with { Types = baseline.Types.Append(int64 with { Size = 4 }).ToArray() },
             "ASIR1028");
+        AssertDiagnostic(boundModule with { SchemaVersion = 17, IrVersion = "1.16" }, "ASIR1028");
+        AssertDiagnostic(boundModule with { Imports = new[] { task, bindProducer with
+        {
+            ParameterTypeIds = new[] { "type:int32", "type:int64" },
+        } } }, "ASIR1028");
+        AssertDiagnostic(boundModule with { Imports = new[] { task, bindProducer,
+            bindProducer with { Id = "import:duplicate_bind" } } }, "ASIR1028");
     }
 
     private static void MinimalModuleIsValid()
