@@ -51,17 +51,22 @@ public static class CSharpLanguageErrorCompiler
             !producerMethodIds.Contains(item.MethodSymbolId)).ToArray();
         List<SemanticControlFlowGraph> handlerGraphs = new();
         Dictionary<string, IReadOnlyList<CSharpLocalThrowSite>> localThrows = new(StringComparer.Ordinal);
+        Dictionary<string, IReadOnlyList<CSharpNormalReturnCleanupSite>> normalReturns =
+            new(StringComparer.Ordinal);
         Dictionary<string, IReadOnlyList<CSharpRethrowSite>> rethrows = new(StringComparer.Ordinal);
         foreach (SemanticExceptionFlow handler in handlers)
         {
             if (!CSharpExceptionGraphMaterializer.TryBuild(handler,
                     out SemanticControlFlowGraph? graph, out IReadOnlyList<CSharpLocalThrowSite> sites,
+                    out IReadOnlyList<CSharpNormalReturnCleanupSite> returnSites,
                     out IReadOnlyList<CSharpRethrowSite> rethrowSites,
                     out error))
                 return false;
             handlerGraphs.Add(graph!);
             if (sites.Count != 0)
                 localThrows.Add(CSharpGuestIds.Function(handler.MethodSymbolId), sites);
+            if (returnSites.Count != 0)
+                normalReturns.Add(CSharpGuestIds.Function(handler.MethodSymbolId), returnSites);
             if (rethrowSites.Count != 0)
                 rethrows.Add(CSharpGuestIds.Function(handler.MethodSymbolId), rethrowSites);
         }
@@ -202,6 +207,8 @@ public static class CSharpLanguageErrorCompiler
             if (!CSharpLocalThrowLowerer.TryLowerReplacing(item,
                     localThrows.TryGetValue(functionId, out var sites)
                         ? sites : Array.Empty<CSharpLocalThrowSite>(),
+                    normalReturns.TryGetValue(functionId, out var returnSites)
+                        ? returnSites : Array.Empty<CSharpNormalReturnCleanupSite>(),
                     rethrows.TryGetValue(functionId, out var rethrowSites)
                         ? rethrowSites : Array.Empty<CSharpRethrowSite>(),
                     tokens, catchRoutes.TryGetValue(functionId, out var routes)

@@ -14,6 +14,7 @@ internal static class CSharpLocalThrowLowerer
     public static bool TryLowerReplacing(
         SemanticExceptionFlow flow,
         IReadOnlyList<CSharpLocalThrowSite> sites,
+        IReadOnlyList<CSharpNormalReturnCleanupSite> normalReturns,
         IReadOnlyList<CSharpRethrowSite> rethrows,
         CSharpLanguageErrorTokenCatalog catalog,
         IReadOnlyList<CSharpLanguageCatchRoute> catchRoutes,
@@ -42,6 +43,84 @@ internal static class CSharpLocalThrowLowerer
             .ToDictionary(block => block.Id, StringComparer.Ordinal);
         Dictionary<string, CSharpLanguageCatchRoute> routes = catchRoutes
             .ToDictionary(route => route.SourceBlockId, StringComparer.Ordinal);
+        Dictionary<string, string> registerTypes = function.Parameters.Concat(locals)
+            .ToDictionary(register => register.Id, register => register.TypeId,
+                StringComparer.Ordinal);
+        if (normalReturns.Count > 16
+            || normalReturns.Select(site => site.BlockOrdinal).Distinct().Count()
+                != normalReturns.Count)
+            return Fail("Normal returns need distinct bounded cleanup paths.", out error);
+        foreach (CSharpNormalReturnCleanupSite site in normalReturns)
+        {
+            string returnId = CSharpGuestIds.Block(flow.MethodSymbolId, site.BlockOrdinal);
+            string cleanupId = CSharpGuestIds.Block(flow.MethodSymbolId,
+                site.CleanupBlockOrdinal);
+            if (!blocks.TryGetValue(returnId, out GuestBasicBlock? normal)
+                || !blocks.TryGetValue(cleanupId, out GuestBasicBlock? cleanup)
+                || normal.Terminator.Kind != "return"
+                || normal.Terminator.ReturnValueId is null
+                || normal.Instructions.Any(instruction => instruction.Op is
+                    "call" or "call_indirect")
+                || cleanup.Terminator.Kind != "return"
+                || cleanup.Instructions.Count < 4
+                || cleanup.Instructions.Any(instruction => instruction.Op is
+                    "call" or "call_indirect"))
+                return Fail("A normal return has no unique synchronous cleanup.",
+                    out error);
+            int tail = cleanup.Instructions.Count - 4;
+            GuestInstruction[] suffix = cleanup.Instructions.Skip(tail).ToArray();
+            if (tail == 0 || suffix[0].Op != "stack_alloc"
+                || suffix[0].ResultId != cleanup.Terminator.ReturnValueId
+                || suffix[1].Op != "constant"
+                || suffix[1].Constant is not { Kind: "int32", Value: "0" }
+                || suffix[2].Op != "field_store"
+                || suffix[2].TargetId != "field:status"
+                || suffix[2].OperandIds.Count != 2
+                || suffix[2].OperandIds[0] != suffix[0].ResultId
+                || suffix[2].OperandIds[1] != suffix[1].ResultId
+                || suffix[3].Op != "field_store"
+                || suffix[3].TargetId != "field:value"
+                || suffix[3].OperandIds.Count != 2
+                || suffix[3].OperandIds[0] != suffix[0].ResultId)
+                return Fail("The normal return cleanup has no verified return suffix.",
+                    out error);
+            Dictionary<string, string> renamed = new(StringComparer.Ordinal);
+            List<GuestInstruction> copied = new();
+            foreach (GuestInstruction instruction in cleanup.Instructions.Take(tail))
+            {
+                string[] operands = instruction.OperandIds.Select(id =>
+                    renamed.TryGetValue(id, out string? replacement) ? replacement : id)
+                    .ToArray();
+                string? target = instruction.TargetId is { } oldTarget
+                    && renamed.TryGetValue(oldTarget, out string? newTarget)
+                        ? newTarget : instruction.TargetId;
+                string? result = null;
+                if (instruction.ResultId is { } oldResult)
+                {
+                    if (!registerTypes.TryGetValue(oldResult, out string? typeId))
+                        return Fail("The normal return cleanup has an untyped value.",
+                            out error);
+                    result = "normal_cleanup:"
+                        + site.BlockOrdinal.ToString(CultureInfo.InvariantCulture)
+                        + ":" + oldResult;
+                    if (!registerIds.Add(result))
+                        return Fail("The normal return cleanup reused a register.",
+                            out error);
+                    locals.Add(new GuestRegister(result, typeId));
+                    renamed.Add(oldResult, result);
+                }
+                copied.Add(instruction with
+                {
+                    ResultId = result,
+                    OperandIds = operands,
+                    TargetId = target,
+                });
+            }
+            blocks[returnId] = normal with
+            {
+                Instructions = normal.Instructions.Concat(copied).ToArray(),
+            };
+        }
         Dictionary<int, (string OutcomeId, int SiteCount)> sharedCleanups = new();
         foreach (IGrouping<int, CSharpLocalThrowSite> group in sites
             .Where(site => site.CleanupBlockOrdinals is { Count: > 0 })

@@ -135,12 +135,13 @@ const nestedFinallyCatches = typeof instance.exports.nested_finally_source_probe
 const throwFinallyCatches = typeof instance.exports.throw_finally_source_probe === 'function';
 const nestedLocalThrowCatches = typeof instance.exports.nested_local_throw_catch_probe === 'function';
 const multiLocalThrowCatches = typeof instance.exports.multi_local_cleanup_first_probe === 'function';
+const mixedCleanupCatches = typeof instance.exports.mixed_cleanup_normal_first_probe === 'function';
 const replacementCatches = typeof instance.exports.replacement_catch_probe === 'function';
 const rethrowCatches = typeof instance.exports.rethrow_local_source_probe === 'function';
 const nestedRethrowCatches = typeof instance.exports.nested_rethrow_source_probe === 'function';
 const catchVariableCatches = typeof instance.exports.catch_variable_call_probe === 'function';
 const catches = multipleCatches || finallyCatches || nestedFinallyCatches || throwFinallyCatches
-  || nestedLocalThrowCatches || multiLocalThrowCatches
+  || nestedLocalThrowCatches || multiLocalThrowCatches || mixedCleanupCatches
   || replacementCatches || rethrowCatches || nestedRethrowCatches || catchVariableCatches
   || typeof instance.exports.catch_source_probe === 'function';
 if (multipleCatches) {
@@ -171,6 +172,19 @@ if (multipleCatches) {
   if (first !== 11 || firstSource !== 3 || second !== 21 || secondSource !== 4
     || third !== 31 || thirdSource !== 5) {
     throw new Error(`Shared cleanup results = ${first}, ${firstSource}, ${second}, ${secondSource}, ${third}, ${thirdSource}; expected 11, 3, 21, 4, 31, 5`);
+  }
+} else if (mixedCleanupCatches) {
+  const values = [
+    instance.exports.mixed_cleanup_normal_first_probe(),
+    instance.exports.mixed_cleanup_error_first_probe(),
+    instance.exports.mixed_cleanup_normal_second_probe(),
+    instance.exports.mixed_cleanup_error_second_probe(),
+    instance.exports.mixed_cleanup_source_first_probe(),
+    instance.exports.mixed_cleanup_source_second_probe(),
+  ];
+  const expected = [107, 11, 120, 21, 3, 4];
+  if (values.some((value, index) => value !== expected[index])) {
+    throw new Error(`Mixed cleanup results = ${values}; expected ${expected}`);
   }
 } else if (rethrowCatches) {
   const localSource = instance.exports.rethrow_local_source_probe();
@@ -207,7 +221,7 @@ if (multipleCatches) {
   if (actual !== expected) throw new Error(`source probe() = ${actual}; expected ${expected}`);
 }
 if (allocations !== (rethrowCatches || replacementCatches ? 4
-  : nestedRethrowCatches || catchVariableCatches ? 4
+  : nestedRethrowCatches || catchVariableCatches || mixedCleanupCatches ? 4
   : multiLocalThrowCatches ? 6
   : multipleCatches || nestedLocalThrowCatches ? 2 : 1)
   || frames.size !== 0 || roots.size !== 0) {
@@ -229,6 +243,7 @@ if (catches) {
     : catchVariableCatches ? 'C# source catch-variable WASM: 5/5 passed\n'
     : nestedLocalThrowCatches ? 'C# source nested-local-throw-finally WASM: 3/3 passed\n'
     : multiLocalThrowCatches ? 'C# source multi-local-throw-finally WASM: 7/7 passed\n'
+    : mixedCleanupCatches ? 'C# source mixed-local-throw-finally WASM: 7/7 passed\n'
     : replacementCatches ? 'C# source cleanup-replaces-error WASM: 3/3 passed\n'
     : nestedFinallyCatches ? 'C# source nested-finally-catch WASM: 2/2 passed\n'
     : throwFinallyCatches ? 'C# source throw-finally-catch WASM: 2/2 passed\n'

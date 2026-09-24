@@ -9,6 +9,8 @@ internal sealed record CSharpLocalThrowSite(
     int BlockOrdinal, SemanticThrowSite Site,
     IReadOnlyList<int>? CleanupBlockOrdinals = null,
     int? ReplacesThrowBlockOrdinal = null);
+internal sealed record CSharpNormalReturnCleanupSite(
+    int BlockOrdinal, int CleanupBlockOrdinal);
 internal sealed record CSharpRethrowSite(
     int BlockOrdinal, int HandlerOrdinal, SemanticThrowSite Site);
 
@@ -20,19 +22,22 @@ internal static class CSharpExceptionGraphMaterializer
     public static bool TryBuild(SemanticExceptionFlow flow,
         out SemanticControlFlowGraph? graph,
         out IReadOnlyList<CSharpLocalThrowSite> localThrows,
+        out IReadOnlyList<CSharpNormalReturnCleanupSite> normalReturns,
         out IReadOnlyList<CSharpRethrowSite> rethrows,
         out string? error)
     {
         graph = null;
         localThrows = Array.Empty<CSharpLocalThrowSite>();
+        normalReturns = Array.Empty<CSharpNormalReturnCleanupSite>();
         rethrows = Array.Empty<CSharpRethrowSite>();
         error = null;
         if (flow.Catches.Count == 0 && flow.Regions.Any(region => region.Kind == "finally"))
         {
             if (flow.Regions.Count(region => region.Kind == "finally") != 1)
                 return TryBuildNestedDirectThrowFinally(flow, out graph, out localThrows, out error);
-            return flow.Blocks is { Count: > 4 } && flow.Throws.Count > 1
-                ? TryBuildMultipleDirectThrowsFinally(flow, out graph, out localThrows, out error)
+            return flow.Blocks is { Count: > 4 } && flow.Throws.Count > 0
+                ? TryBuildBranchingThrowFinally(flow, out graph, out localThrows,
+                    out normalReturns, out error)
                 : TryBuildDirectThrowFinally(flow, out graph, out localThrows, out error);
         }
         if (flow.Catches.Count == 0
@@ -139,16 +144,18 @@ internal static class CSharpExceptionGraphMaterializer
         return true;
     }
 
-    private static bool TryBuildMultipleDirectThrowsFinally(
+    private static bool TryBuildBranchingThrowFinally(
         SemanticExceptionFlow flow,
         out SemanticControlFlowGraph? graph,
         out IReadOnlyList<CSharpLocalThrowSite> localThrows,
+        out IReadOnlyList<CSharpNormalReturnCleanupSite> normalReturns,
         out string? error)
     {
         graph = null;
         localThrows = Array.Empty<CSharpLocalThrowSite>();
+        normalReturns = Array.Empty<CSharpNormalReturnCleanupSite>();
         error = null;
-        if (flow.Catches.Count != 0 || flow.Throws.Count is < 2 or > 16
+        if (flow.Catches.Count != 0 || flow.Throws.Count is < 1 or > 16
             || flow.Regions.Count != 4
             || flow.Regions[0].Kind != "root"
             || flow.Regions[1].Kind != "try_and_finally"
@@ -160,7 +167,7 @@ internal static class CSharpExceptionGraphMaterializer
             || flow.Blocks is not { Count: >= 6 } blocks
             || !SemanticExceptionDispatchPlanner.TryBuild(flow, out var dispatch)
             || dispatch is null)
-            return Fail("Multiple local throws need one source-backed linear finally.",
+            return Fail("Branching local throws need one source-backed linear finally.",
                 out error);
 
         int cleanupOrdinal = blocks.Count - 2;
@@ -187,6 +194,7 @@ internal static class CSharpExceptionGraphMaterializer
                 out error);
 
         List<CSharpLocalThrowSite> projected = new();
+        List<CSharpNormalReturnCleanupSite> returns = new();
         List<SemanticControlFlowEdge> edges = new()
         {
             new(0, 1, "fallthrough", "regular"),
@@ -225,6 +233,24 @@ internal static class CSharpExceptionGraphMaterializer
                 edges.Add(new(ordinal, cleanupOrdinal, "fallthrough", "regular"));
                 continue;
             }
+            if (outgoing.Length == 1 && outgoing[0].Semantics == "return")
+            {
+                SemanticExceptionBranch branch = outgoing[0];
+                if (branch.DestinationBlockOrdinal != blocks.Count - 1
+                    || branch.FinallyRegionOrdinals.Count != 1
+                    || branch.FinallyRegionOrdinals[0] != cleanupRegion.Ordinal
+                    || block.BranchValue is not { } value || !Supported(value)
+                    || block.Operations.Any(operation => !Supported(operation))
+                    || block.Operations.Append(value).SelectMany(Descendants)
+                        .Any(operation => operation.Kind is
+                            "invocation" or "await" or "throw" or "try"
+                            or "conditional" or "switch" or "branch" or "loop"))
+                    return Fail("A normal return needs one evaluated value before linear cleanup.",
+                        out error);
+                returns.Add(new(ordinal, cleanupOrdinal));
+                edges.Add(new(ordinal, blocks.Count - 1, branch.Kind, "return"));
+                continue;
+            }
             if (outgoing.Length != 2 || block.Operations.Count != 0
                 || block.ConditionKind == "none"
                 || block.BranchValue is not { } condition || !PureThrowDecision(condition)
@@ -241,12 +267,13 @@ internal static class CSharpExceptionGraphMaterializer
                 ordinal, branch.DestinationBlockOrdinal, branch.Kind, "regular")));
         }
         if (projected.Count != flow.Throws.Count
+            || projected.Count + returns.Count > 16
             || projected.Select(site => site.Site.Span.Start).Distinct().Count()
                 != projected.Count
             || flow.Branches.Count != edges.Count + 1
             || Enumerable.Range(1, cleanupOrdinal - 1).Any(ordinal =>
                 edges.Count(edge => edge.DestinationBlockOrdinal == ordinal) != 1))
-            return Fail("Every path through the try must reach one distinct throw leaf.",
+            return Fail("Every try path must reach a distinct throw or return leaf.",
                 out error);
         edges.Add(new(cleanupOrdinal, blocks.Count - 1, "fallthrough", "return"));
         graph = new SemanticControlFlowGraph(flow.MethodSymbolId, 0, blocks.Count - 1,
@@ -260,6 +287,7 @@ internal static class CSharpExceptionGraphMaterializer
                 edges.Where(edge => edge.SourceBlockOrdinal == block.Ordinal).ToArray()))
                 .ToArray());
         localThrows = projected;
+        normalReturns = returns;
         return true;
     }
 
