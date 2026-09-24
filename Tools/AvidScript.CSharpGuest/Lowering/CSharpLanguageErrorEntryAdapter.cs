@@ -5,7 +5,7 @@ using AvidScript.GuestIr;
 
 namespace AvidScript.CSharpGuest;
 
-// Keeps a void UE export's ABI while the source function returns an internal outcome.
+// Keeps a UE export's ABI while the source function returns an internal outcome.
 internal static class CSharpLanguageErrorEntryAdapter
 {
     internal const string ImportModule = "avidscript";
@@ -31,13 +31,20 @@ internal static class CSharpLanguageErrorEntryAdapter
         foreach (GuestExport export in affectedExports)
         {
             if (!originalFunctions.TryGetValue(export.FunctionId, out GuestFunction? original)
-                || original.ReturnTypeId != "type:void"
                 || !module.Functions.Any(function => function.Id == export.FunctionId))
             {
-                error = $"Export '{export.Name}' needs a supported void UE boundary adapter.";
+                error = $"Export '{export.Name}' needs a supported UE boundary adapter.";
                 return false;
             }
             GuestFunction target = module.Functions.Single(function => function.Id == export.FunctionId);
+            GuestLanguageOutcomeType? outcome = module.LanguageOutcomeTypes?.SingleOrDefault(
+                entry => entry.TypeId == target.ReturnTypeId);
+            if (outcome is null || outcome.ValueTypeId !=
+                (original.ReturnTypeId == "type:void" ? null : original.ReturnTypeId))
+            {
+                error = $"Export '{export.Name}' has no matching language-outcome return type.";
+                return false;
+            }
             string id = "function:language_error_entry:" + export.Name;
             if (functions.Any(function => function.Id == id))
             {
@@ -45,7 +52,7 @@ internal static class CSharpLanguageErrorEntryAdapter
                 return false;
             }
             GuestRegister[] parameters = original.Parameters.ToArray();
-            GuestRegister[] locals =
+            List<GuestRegister> locals = new()
             {
                 new("entry:outcome", target.ReturnTypeId),
                 new("entry:status", "type:int32"),
@@ -54,7 +61,9 @@ internal static class CSharpLanguageErrorEntryAdapter
                 new("entry:error_root", "type:language_error_root"),
                 new("entry:report_result", "type:int32"),
             };
-            functions.Add(new GuestFunction(id, parameters, locals, "type:void", "entry", new[]
+            bool hasValue = original.ReturnTypeId != "type:void";
+            if (hasValue) locals.Add(new GuestRegister("entry:value", original.ReturnTypeId));
+            functions.Add(new GuestFunction(id, parameters, locals, original.ReturnTypeId, "entry", new[]
             {
                 new GuestBasicBlock("entry", new[]
                 {
@@ -75,8 +84,12 @@ internal static class CSharpLanguageErrorEntryAdapter
                         new[] { "entry:error_type", "entry:source", "entry:error_root" },
                         ImportId, null, null),
                 }, new GuestTerminator("trap", null, null, null, null)),
-                new GuestBasicBlock("success", Array.Empty<GuestInstruction>(),
-                    new GuestTerminator("return", null, null, null, null)),
+                new GuestBasicBlock("success", hasValue
+                        ? new[] { new GuestInstruction("field_load", "entry:value",
+                            new[] { "entry:outcome" }, "field:value", null, null) }
+                        : Array.Empty<GuestInstruction>(),
+                    new GuestTerminator("return", null, null, null,
+                        hasValue ? "entry:value" : null)),
             }));
             exports.Add(new GuestExport(export.Name, id));
         }

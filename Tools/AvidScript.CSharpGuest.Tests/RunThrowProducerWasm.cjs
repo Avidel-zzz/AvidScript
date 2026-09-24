@@ -123,12 +123,52 @@ for (const entry of WebAssembly.Module.imports(wasmModule)) {
     };
     continue;
   }
+  if (entry.module === 'avidscript' && entry.name === 'avid_ue_receiver_0_require_v1') {
+    (imports[entry.module] ??= {})[entry.name] = handle => {
+      if (handle !== 123n) throw new Error(`Unexpected generated receiver: ${handle}`);
+      return 1;
+    };
+    continue;
+  }
   if (entry.module !== 'avidscript' || entry.name !== 'avid_managed_heap_v1') {
     throw new Error(`Unexpected import ${entry.module}.${entry.name}`);
   }
   (imports[entry.module] ??= {})[entry.name] = managedHeap;
 }
 instance = new WebAssembly.Instance(wasmModule, imports);
+const generatedFunctions = Object.keys(instance.exports).filter(name => name.startsWith('avid_ue_'));
+if (generatedFunctions.length !== 0) {
+  if (generatedFunctions.length !== 1) {
+    throw new Error(`Expected one generated UFunction export, got ${generatedFunctions.length}`);
+  }
+  const entry = instance.exports[generatedFunctions[0]];
+  const value = entry(123n, 5);
+  if (value !== 7 || frames.size !== 0 || roots.size !== 0 || objects.size !== 0) {
+    throw new Error(`Generated UFunction result/cleanup = ${value}/${frames.size}/${roots.size}/${objects.size}; expected 7/0/0/0`);
+  }
+  try {
+    entry(123n, -1);
+    throw new Error('Generated UFunction returned after an uncaught language error');
+  } catch (error) {
+    if (error.message !== 'uncaught-language-error' || !reported || allocations !== 1) throw error;
+  }
+  process.stdout.write('C# source generated UFunction language boundary WASM: 4/4 passed\n');
+  process.exit(0);
+}
+if (typeof instance.exports.avid_language_value_entry === 'function') {
+  const value = instance.exports.avid_language_value_entry(5);
+  if (value !== 7 || frames.size !== 0 || roots.size !== 0 || objects.size !== 0) {
+    throw new Error(`Value entry result/cleanup = ${value}/${frames.size}/${roots.size}/${objects.size}; expected 7/0/0/0`);
+  }
+  try {
+    instance.exports.avid_language_value_entry(-1);
+    throw new Error('Value entry returned after an uncaught language error');
+  } catch (error) {
+    if (error.message !== 'uncaught-language-error' || !reported || allocations !== 1) throw error;
+  }
+  process.stdout.write('C# source return-value UE boundary WASM: 4/4 passed\n');
+  process.exit(0);
+}
 const multipleCatches = typeof instance.exports.catch_source_probe_a === 'function';
 const typedCatches = typeof instance.exports.typed_invalid_probe === 'function';
 const finallyCatches = typeof instance.exports.finally_source_probe === 'function';

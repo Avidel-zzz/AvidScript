@@ -19,6 +19,8 @@ internal static class CSharpGuestThrowProducerTests
     {
         SourceThrowProducesManagedLanguageError();
         SameSourceCallerPropagatesManagedLanguageError();
+        ReturnValueExportPreservesOriginalAbi();
+        GeneratedUFunctionPreservesOriginalAbi();
         SameSourceCallerCatchesManagedLanguageError();
         MultipleThrowProducersKeepDistinctSourceTokens();
         BuiltInExceptionTypesSelectDerivedAndBaseCatches();
@@ -52,7 +54,127 @@ internal static class CSharpGuestThrowProducerTests
         NestedCatchRethrowReachesOuterHandler();
         NestedCatchRethrowRunsBranchingOuterFinally();
         CatchVariableReadsBoundError();
-        return 35;
+        return 37;
+    }
+
+    private static void GeneratedUFunctionPreservesOriginalAbi()
+    {
+        const string source = """
+            using System;
+            using AvidScript;
+            [UClass]
+            public partial class Script : AvidActor
+            {
+                static int Fail() { throw new Exception(); }
+                [UFunction]
+                public int Read(int value)
+                {
+                    if (value < 0) return Fail();
+                    return value + 2;
+                }
+            }
+            """;
+        const string facade = """
+            using System;
+            namespace AvidScript;
+            [AttributeUsage(AttributeTargets.Class)]
+            public sealed class UClassAttribute : Attribute { }
+            [AttributeUsage(AttributeTargets.Method)]
+            public sealed class UFunctionAttribute : Attribute { }
+            public abstract class AvidActor
+            {
+                protected virtual void BeginPlay() { }
+                protected virtual void Tick(float deltaSeconds) { }
+                protected virtual void EndPlay() { }
+            }
+            """;
+        const string sourceId = "Scripts/GeneratedLanguageError.cs";
+        Check(ReferenceInstance(source, facade, "Read", 5) == 7,
+            "the generated UFunction must return the CLR reference value");
+        FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
+        SemanticDocument semantic = SemanticAnalyzer.Analyze(source, sourceId,
+            frontend.Source.Sha256,
+            new[] { new SemanticReferenceSource(facade, "generated://AvidScript.UeTypes.cs") });
+        Check(semantic.UeMethodCatalog?.Methods.Count > 0,
+            "Exception diagnostic artifact must retain the generated UE method catalog");
+        Check(!CSharpLanguageErrorCompiler.TryLower(semantic with
+            {
+                UeMethodCatalog = SemanticUeMethodCatalog.Empty,
+            }, new string('a', 64), out _, out _),
+            "a generated UFunction cannot lower without its validated UE method catalog");
+        SemanticUeFunctionDeclaration function = semantic.UeTypeDeclarations.Single().Functions.Single();
+        string exportName = SemanticUeTypeRuntimeContract.GetFunctionExportName(function.MethodSymbolId);
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "generated UFunction did not lower");
+        GuestModule module = compiled!.Module;
+        GuestExport export = module.Exports.Single(item => item.Name == exportName);
+        GuestFunction adapter = module.Functions.Single(item => item.Id == export.FunctionId);
+        Check(adapter.ReturnTypeId == "type:int32" && adapter.Parameters.Count == 2
+            && adapter.Parameters[0].TypeId == "type:global::Script"
+            && adapter.Parameters[1].TypeId == "type:int32"
+            && adapter.Blocks.Single(block => block.Id == "success").Terminator.ReturnValueId
+                == "entry:value",
+            "a generated instance UFunction must preserve its handle, argument and value ABI");
+        GuestValidationResult validation = GuestModuleValidator.Validate(module);
+        Check(validation.Succeeded,
+            string.Join(" | ", validation.Diagnostics.Select(item => item.Message)));
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(module);
+        Check(wasm.Succeeded && wasm.Bytes.SequenceEqual(WasmModuleCompiler.Compile(module).Bytes),
+            "generated UFunction boundary must compile to deterministic WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "generated-ufunction-entry.wasm"), wasm.Bytes);
+        }
+    }
+
+    private static void ReturnValueExportPreservesOriginalAbi()
+    {
+        const string source = """
+            using System;
+            class Script
+            {
+                static int Fail() { throw new Exception(); }
+                static int Calculate(int value)
+                {
+                    if (value < 0) return Fail();
+                    return value + 2;
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_language_value_entry")]
+                static int Export(int value) => Calculate(value);
+            }
+            """;
+        Check(ReferenceCatch(source, "Calculate", new object[] { 5 }) == 7,
+            "the CLR oracle should return the same normal value as the WASM export");
+        SemanticDocument semantic = Analyze(source);
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "return-value export did not lower");
+        GuestModule module = compiled!.Module;
+        GuestExport export = module.Exports.Single(item => item.Name == "avid_language_value_entry");
+        GuestFunction adapter = module.Functions.Single(function => function.Id == export.FunctionId);
+        Check(adapter.ReturnTypeId == "type:int32"
+            && adapter.Parameters.Count == 1 && adapter.Parameters[0].TypeId == "type:int32"
+            && adapter.Blocks.Single(block => block.Id == "success").Instructions.Any(instruction =>
+                instruction.Op == "field_load" && instruction.TargetId == "field:value")
+            && adapter.Blocks.Single(block => block.Id == "error").Instructions.Any(instruction =>
+                instruction.Op == "call" && instruction.TargetId == "import:language_error_report_v1")
+            && adapter.Blocks.Single(block => block.Id == "error").Terminator.Kind == "trap",
+            "the return-value adapter must preserve parameters and normal return while reporting errors");
+        GuestValidationResult validation = GuestModuleValidator.Validate(module);
+        Check(validation.Succeeded,
+            string.Join(" | ", validation.Diagnostics.Select(item => item.Message)));
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(module);
+        Check(wasm.Succeeded && wasm.Bytes.SequenceEqual(WasmModuleCompiler.Compile(module).Bytes),
+            "a return-value boundary must compile to deterministic WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "return-value-entry.wasm"), wasm.Bytes);
+        }
     }
 
     private static void MultipleThrowProducersKeepDistinctSourceTokens()
@@ -3027,7 +3149,39 @@ internal static class CSharpGuestThrowProducerTests
         return module with { Functions = functions };
     }
 
-    private static int ReferenceCatch(string source, string methodName = "Catch")
+    private static int ReferenceInstance(string source, string facade, string methodName,
+        int argument)
+    {
+        string[] assemblyPaths = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
+            .Split(Path.PathSeparator);
+        CSharpCompilation compilation = CSharpCompilation.Create(
+            "AvidScriptGeneratedLanguageErrorOracle",
+            new[] { CSharpSyntaxTree.ParseText(source), CSharpSyntaxTree.ParseText(facade) },
+            assemblyPaths.Select(path => MetadataReference.CreateFromFile(path)),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary,
+                optimizationLevel: OptimizationLevel.Release));
+        using MemoryStream bytes = new();
+        var result = compilation.Emit(bytes);
+        Check(result.Success,
+            string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.ToString())));
+        bytes.Position = 0;
+        AssemblyLoadContext context = new("avidscript-generated-language-error-oracle",
+            isCollectible: true);
+        try
+        {
+            Type script = context.LoadFromStream(bytes).GetType("Script")!;
+            object instance = Activator.CreateInstance(script)!;
+            MethodInfo method = script.GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public)!;
+            return (int)method.Invoke(instance, new object[] { argument })!;
+        }
+        finally
+        {
+            context.Unload();
+        }
+    }
+
+    private static int ReferenceCatch(string source, string methodName = "Catch",
+        object[]? arguments = null)
     {
         string[] assemblyPaths = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
             .Split(Path.PathSeparator);
@@ -3047,7 +3201,7 @@ internal static class CSharpGuestThrowProducerTests
         {
             Type script = context.LoadFromStream(bytes).GetType("Script")!;
             MethodInfo method = script.GetMethod(methodName, BindingFlags.Static | BindingFlags.NonPublic)!;
-            return (int)method.Invoke(null, null)!;
+            return (int)method.Invoke(null, arguments)!;
         }
         finally
         {
