@@ -64,7 +64,8 @@ public:
 	int64 CreateTaskResult(FString TypeId) override;
 	bool RetainTaskResult(int64 Token) override;
 	bool ReleaseTaskResult(int64 Token) override;
-	EAvidScriptTaskWaitRegistration RegisterTaskWaiter(int64 Token, int64 WaiterToken) override;
+	EAvidScriptTaskWaitRegistration AwaitTaskResult(
+		int64 Token, int32 CallbackId, int64& OutContinuationToken) override;
 	bool SucceedTaskResult(int64 Token, TConstArrayView<uint8> Value,
 		TArray<int64>& OutWaiters) override;
 	bool FaultTaskResult(int64 Token, FString ErrorCode, TArray<int64>& OutWaiters) override;
@@ -179,6 +180,9 @@ public:
 		uint64 ActivationSerial,
 		FString ObjectPath,
 		int32 CallbackId);
+	EAvidScriptTaskWaitRegistration AwaitTaskResult(
+		EAvidScriptContinuationLane Lane, uint64 ActivationSerial,
+		int64 TaskToken, int32 CallbackId, int64& OutContinuationToken);
 	bool Cancel(
 		EAvidScriptContinuationLane Lane,
 		uint64 ActivationSerial,
@@ -262,7 +266,8 @@ private:
 		Timer,
 		AsyncObjectLoad,
 		LatentAction,
-		AsyncAction
+		AsyncAction,
+		TaskResult
 	};
 
 	struct FEntry
@@ -272,6 +277,7 @@ private:
 		uint64 RegistrationSerial = 0;
 		int32 CallbackId = 0;
 		int64 Token = 0;
+		int64 TaskResultToken = 0;
 		int64 CancellationSourceToken = 0;
 		TWeakObjectPtr<UWorld> World;
 		FTimerHandle TimerHandle;
@@ -386,6 +392,8 @@ private:
 	void SweepInvalidAsyncActions();
 	uint64 AllocateAsyncActionBridgeToken();
 	void CancelEntryProducer(FEntry& Entry);
+	void QueueTaskWaiters(int64 TaskToken, EAvidScriptTaskResultState State,
+		const TArray<int64>& Waiters);
 	void RetireLatentProxy(FEntry& Entry);
 	void CollectRetiredLatentProxies();
 	void CancelLane(EAvidScriptContinuationLane Lane, uint64 ActivationSerial);

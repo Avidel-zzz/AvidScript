@@ -16,8 +16,9 @@ public:
 	int64 Create(EAvidScriptContinuationLane Lane, uint64 ActivationSerial, FString TypeId);
 	bool Retain(int64 Token);
 	bool Release(int64 Token);
-	// The waiter owns a reference until it has read the terminal result.
+	// The caller retains a task reference for each registered waiter.
 	EAvidScriptTaskWaitRegistration RegisterWaiter(int64 Token, int64 WaiterToken);
+	bool UnregisterWaiter(int64 Token, int64 WaiterToken);
 	bool Succeed(int64 Token, TConstArrayView<uint8> Value, TArray<int64>& OutWaiters);
 	bool Fault(int64 Token, FString ErrorCode, TArray<int64>& OutWaiters);
 	bool Cancel(int64 Token, TArray<int64>& OutWaiters);

@@ -138,6 +138,26 @@ EAvidScriptTaskWaitRegistration FAvidScriptSessionTaskResults::RegisterWaiter(
 	return EAvidScriptTaskWaitRegistration::Queued;
 }
 
+bool FAvidScriptSessionTaskResults::UnregisterWaiter(
+	const int64 Token, const int64 WaiterToken)
+{
+	check(IsInGameThread());
+	FSlot* const Slot = Find(Token);
+	if (Slot == nullptr || Slot->Entry->State != EAvidScriptTaskResultState::Running)
+	{
+		return false;
+	}
+	const int32 Index = Slot->Entry->Waiters.IndexOfByKey(WaiterToken);
+	if (Index == INDEX_NONE)
+	{
+		return false;
+	}
+	Slot->Entry->Waiters.RemoveAt(Index);
+	check(WaiterCount > 0);
+	--WaiterCount;
+	return true;
+}
+
 bool FAvidScriptSessionTaskResults::Finish(
 	const int64 Token,
 	const EAvidScriptTaskResultState State,

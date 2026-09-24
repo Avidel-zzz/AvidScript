@@ -3924,7 +3924,7 @@ foreach ($RequiredCompositeCapabilityProvenanceContract in @(
 }
 foreach ($RequiredControlledAsyncSemanticContract in @(
     'SemanticAsyncProjector.Project',
-    'AsyncMethods = asyncProjection.Methods'
+    'AsyncMethods = hasExceptionFlows ? Array.Empty<SemanticAsyncMethod>() : asyncProjection.Methods'
 )) {
     if (-not $SemanticAnalyzerSource.Contains($RequiredControlledAsyncSemanticContract)) {
         Add-Violation "C# Semantic analyzer is missing controlled async contract $RequiredControlledAsyncSemanticContract"

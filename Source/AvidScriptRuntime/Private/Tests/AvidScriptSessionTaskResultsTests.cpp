@@ -34,6 +34,11 @@ bool FAvidScriptSessionTaskResultsTest::RunTest(const FString& Parameters)
 		== EAvidScriptTaskWaitRegistration::Queued);
 	TestTrue(TEXT("Duplicate waiter is rejected"), Tasks.RegisterWaiter(Task, 11)
 		== EAvidScriptTaskWaitRegistration::Invalid);
+	TestTrue(TEXT("Pending waiter may unregister"), Tasks.UnregisterWaiter(Task, 22));
+	TestFalse(TEXT("Unregistered waiter cannot unregister twice"),
+		Tasks.UnregisterWaiter(Task, 22));
+	TestTrue(TEXT("Removed waiter can queue again"), Tasks.RegisterWaiter(Task, 22)
+		== EAvidScriptTaskWaitRegistration::Queued);
 	TestEqual(TEXT("Two pending waiters are retained"), Tasks.GetWaiterCount(), 2);
 
 	const int32 Result = 12;
@@ -131,9 +136,12 @@ bool FAvidScriptSessionTaskEndpointTest::RunTest(const FString& Parameters)
 	TestNotEqual(TEXT("Active endpoint creates a Session-owned task"), ActiveTask, 0LL);
 	TestEqual(TEXT("Empty task type is rejected"), Active.CreateTaskResult({}), 0LL);
 	TestTrue(TEXT("Active endpoint retains its own task"), Active.RetainTaskResult(ActiveTask));
+	int64 ActiveWaiter = 0;
 	TestTrue(TEXT("Active waiter queues"),
-		Active.RegisterTaskWaiter(ActiveTask, 101)
+		Active.AwaitTaskResult(ActiveTask, 101, ActiveWaiter)
 			== EAvidScriptTaskWaitRegistration::Queued);
+	TestNotEqual(TEXT("Waiter receives a continuation token"), ActiveWaiter, 0LL);
+	TestEqual(TEXT("Session retains the pending waiter"), Owner->GetActiveCount(), 1);
 
 	FAvidScriptContinuationHostEndpoint& Prepared = Owner->BeginPrepared(World.Get());
 	const int64 PreparedTask = Prepared.CreateTaskResult(TEXT("System.Int32"));
@@ -152,10 +160,31 @@ bool FAvidScriptSessionTaskEndpointTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Active task completes"),
 		Active.SucceedTaskResult(ActiveTask, ValueBytes, Woken));
 	TestEqual(TEXT("Completion returns its waiter"), Woken.Num(), 1);
-	TestEqual(TEXT("Waiter identity is preserved"), Woken[0], 101LL);
+	TestEqual(TEXT("Waiter identity is preserved"), Woken[0], ActiveWaiter);
+	TArray<FAvidScriptContinuationCompletion> Ready;
+	Owner->DrainReady(Ready);
+	TestEqual(TEXT("Completion enters dispatcher once"), Ready.Num(), 1);
+	if (Ready.Num() == 1)
+	{
+		TestEqual(TEXT("Task callback identity is preserved"), Ready[0].CallbackId, 101);
+		TestEqual(TEXT("Task continuation token is preserved"),
+			Ready[0].Token, ActiveWaiter);
+		TestTrue(TEXT("Success resumes with completed status"),
+			Ready[0].Status == EAvidScriptContinuationStatus::Completed);
+	}
+	Owner->DrainReady(Ready);
+	TestEqual(TEXT("Task completion does not dispatch twice"), Ready.Num(), 0);
 	TestTrue(TEXT("Active result is repeatable"), Active.ReadTaskResult(ActiveTask, Snapshot));
 	TestTrue(TEXT("Active result is successful"),
 		Snapshot.State == EAvidScriptTaskResultState::Succeeded);
+	TestTrue(TEXT("Dispatched waiter releases its task reference"),
+		Owner->FinalizeDispatched(ActiveWaiter, true));
+	TestEqual(TEXT("Dispatcher releases the waiter slot"), Owner->GetActiveCount(), 0);
+	int64 AlreadyReady = -1;
+	TestTrue(TEXT("Late await observes the terminal task"),
+		Active.AwaitTaskResult(ActiveTask, 102, AlreadyReady)
+			== EAvidScriptTaskWaitRegistration::Ready);
+	TestEqual(TEXT("Ready await needs no continuation"), AlreadyReady, 0LL);
 	TestTrue(TEXT("First active reference releases"), Active.ReleaseTaskResult(ActiveTask));
 	TestTrue(TEXT("Second active reference releases"), Active.ReleaseTaskResult(ActiveTask));
 	TestFalse(TEXT("Released task cannot be read"),
@@ -189,6 +218,127 @@ bool FAvidScriptSessionTaskEndpointTest::RunTest(const FString& Parameters)
 	Owner->DiscardPrepared();
 	TestEqual(TEXT("Rollback retires orphan candidate task"),
 		Owner->GetTaskResultsForTesting().GetCount(), 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptSessionTaskDispatchTest,
+	"AvidScript.Runtime.Continuation.TaskDispatch",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptSessionTaskDispatchTest::RunTest(const FString& Parameters)
+{
+	TStrongObjectPtr<UWorld> World(NewObject<UWorld>());
+	const TSharedPtr<FAvidScriptSessionContinuations> Owner =
+		MakeShared<FAvidScriptSessionContinuations>();
+	FAvidScriptContinuationHostEndpoint& Host = Owner->ResetActive(World.Get());
+	FAvidScriptSessionTaskResults& Tasks = Owner->GetTaskResultsForTesting();
+	const int64 Task = Host.CreateTaskResult(TEXT("System.Int32"));
+	TestNotEqual(TEXT("Multiwaiter task is created"), Task, 0LL);
+	int64 First = 0;
+	int64 Removed = 0;
+	int64 Last = 0;
+	TestTrue(TEXT("First waiter queues"), Host.AwaitTaskResult(Task, 201, First)
+		== EAvidScriptTaskWaitRegistration::Queued);
+	TestTrue(TEXT("Removable waiter queues"), Host.AwaitTaskResult(Task, 202, Removed)
+		== EAvidScriptTaskWaitRegistration::Queued);
+	TestTrue(TEXT("Last waiter queues"), Host.AwaitTaskResult(Task, 203, Last)
+		== EAvidScriptTaskWaitRegistration::Queued);
+	TestEqual(TEXT("Three waiters are registered"), Tasks.GetWaiterCount(), 3);
+	TestTrue(TEXT("Explicit cancellation releases one waiter"), Host.Cancel(Removed));
+	TestEqual(TEXT("Cancellation unregisters the waiter"), Tasks.GetWaiterCount(), 2);
+	int64 InvalidWaiter = -1;
+	TestTrue(TEXT("Invalid callback is rejected"),
+		Host.AwaitTaskResult(Task, 0, InvalidWaiter)
+			== EAvidScriptTaskWaitRegistration::Invalid);
+	TestEqual(TEXT("Rejected await has no token"), InvalidWaiter, 0LL);
+
+	const int32 Value = 34;
+	const TConstArrayView<uint8> ValueBytes(
+		reinterpret_cast<const uint8*>(&Value), sizeof(Value));
+	TArray<int64> Woken;
+	TestTrue(TEXT("Task completion queues remaining waiters"),
+		Host.SucceedTaskResult(Task, ValueBytes, Woken));
+	TestEqual(TEXT("Only live waiters wake"), Woken.Num(), 2);
+	if (Woken.Num() == 2)
+	{
+		TestEqual(TEXT("First waiter wakes first"), Woken[0], First);
+		TestEqual(TEXT("Last waiter wakes second"), Woken[1], Last);
+	}
+	TestTrue(TEXT("Producer may release its result before dispatch"),
+		Host.ReleaseTaskResult(Task));
+	TArray<FAvidScriptContinuationCompletion> Ready;
+	Owner->DrainReady(Ready);
+	TestEqual(TEXT("First registered callback dispatches first"), Ready.Num(), 1);
+	if (Ready.Num() == 1)
+	{
+		TestEqual(TEXT("First callback ID"), Ready[0].CallbackId, 201);
+	}
+	FAvidScriptTaskResultSnapshot Snapshot;
+	TestTrue(TEXT("First waiter can still read terminal result"),
+		Host.ReadTaskResult(Task, Snapshot));
+	TestTrue(TEXT("First waiter finalizes"), Owner->FinalizeDispatched(First, true));
+	Owner->DrainReady(Ready);
+	TestEqual(TEXT("Second registered callback dispatches second"), Ready.Num(), 1);
+	if (Ready.Num() == 1)
+	{
+		TestEqual(TEXT("Second callback ID"), Ready[0].CallbackId, 203);
+	}
+	TestTrue(TEXT("Second waiter can still read terminal result"),
+		Host.ReadTaskResult(Task, Snapshot));
+	TestTrue(TEXT("Second waiter finalizes"), Owner->FinalizeDispatched(Last, true));
+	TestEqual(TEXT("Last waiter releases task result"), Tasks.GetCount(), 0);
+	Owner->DrainReady(Ready);
+	TestEqual(TEXT("No duplicate completion remains"), Ready.Num(), 0);
+
+	const int64 Faulted = Host.CreateTaskResult(TEXT("System.Int32"));
+	int64 FaultWaiter = 0;
+	TestTrue(TEXT("Fault waiter queues"), Host.AwaitTaskResult(Faulted, 204, FaultWaiter)
+		== EAvidScriptTaskWaitRegistration::Queued);
+	TestTrue(TEXT("Task fault is accepted"),
+		Host.FaultTaskResult(Faulted, TEXT("script_error"), Woken));
+	Owner->DrainReady(Ready);
+	TestEqual(TEXT("Fault dispatches once"), Ready.Num(), 1);
+	if (Ready.Num() == 1)
+	{
+		TestTrue(TEXT("Fault maps to failed completion"),
+			Ready[0].Status == EAvidScriptContinuationStatus::Failed);
+	}
+	TestTrue(TEXT("Faulted task remains readable during dispatch"),
+		Host.ReadTaskResult(Faulted, Snapshot));
+	TestEqual(TEXT("Fault code is preserved"), Snapshot.ErrorCode,
+		FString(TEXT("script_error")));
+	TestTrue(TEXT("Fault producer releases"), Host.ReleaseTaskResult(Faulted));
+	TestTrue(TEXT("Fault waiter finalizes"), Owner->FinalizeDispatched(FaultWaiter, true));
+
+	const int64 Cancelled = Host.CreateTaskResult(TEXT("System.Int32"));
+	int64 CancelWaiter = 0;
+	TestTrue(TEXT("Cancel waiter queues"), Host.AwaitTaskResult(Cancelled, 205, CancelWaiter)
+		== EAvidScriptTaskWaitRegistration::Queued);
+	TestTrue(TEXT("Task cancellation is accepted"),
+		Host.CancelTaskResult(Cancelled, Woken));
+	Owner->DrainReady(Ready);
+	TestEqual(TEXT("Cancellation dispatches once"), Ready.Num(), 1);
+	if (Ready.Num() == 1)
+	{
+		TestTrue(TEXT("Task cancellation maps to cancelled completion"),
+			Ready[0].Status == EAvidScriptContinuationStatus::Cancelled);
+	}
+	TestTrue(TEXT("Cancelled task remains readable during dispatch"),
+		Host.ReadTaskResult(Cancelled, Snapshot));
+	TestTrue(TEXT("Cancel producer releases"), Host.ReleaseTaskResult(Cancelled));
+	TestTrue(TEXT("Cancel waiter finalizes"), Owner->FinalizeDispatched(CancelWaiter, true));
+
+	const int64 Pending = Host.CreateTaskResult(TEXT("System.Int32"));
+	int64 PendingWaiter = 0;
+	TestTrue(TEXT("Teardown waiter queues"), Host.AwaitTaskResult(Pending, 206, PendingWaiter)
+		== EAvidScriptTaskWaitRegistration::Queued);
+	Owner->Teardown();
+	TestEqual(TEXT("Teardown retires every task"), Tasks.GetCount(), 0);
+	TestEqual(TEXT("Teardown retires every waiter"), Tasks.GetWaiterCount(), 0);
+	TestEqual(TEXT("Teardown retires every continuation"), Owner->GetActiveCount(), 0);
+	Owner->DrainReady(Ready);
+	TestEqual(TEXT("Teardown cannot resume a waiter"), Ready.Num(), 0);
 	return true;
 }
 

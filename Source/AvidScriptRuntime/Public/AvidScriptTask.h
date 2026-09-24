@@ -35,8 +35,9 @@ public:
 	virtual int64 CreateTaskResult(FString TypeId) = 0;
 	virtual bool RetainTaskResult(int64 Token) = 0;
 	virtual bool ReleaseTaskResult(int64 Token) = 0;
-	virtual EAvidScriptTaskWaitRegistration RegisterTaskWaiter(
-		int64 Token, int64 WaiterToken) = 0;
+	// Returns a Session-owned continuation token only when the task is pending.
+	virtual EAvidScriptTaskWaitRegistration AwaitTaskResult(
+		int64 Token, int32 CallbackId, int64& OutContinuationToken) = 0;
 	virtual bool SucceedTaskResult(int64 Token, TConstArrayView<uint8> Value,
 		TArray<int64>& OutWaiters) = 0;
 	virtual bool FaultTaskResult(int64 Token, FString ErrorCode,
