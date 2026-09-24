@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using AvidScript.CSharpFrontend;
 using AvidScript.CSharpGuest;
 using AvidScript.CSharpSemantic;
@@ -62,6 +63,9 @@ internal static class CSharpGuestThrowProducerTests
         WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
         Check(wasm.Succeeded && wasm.Bytes.Length > 8,
             "same-source throw and caller must compile together to WASM");
+        Check(wasm.Bytes.SequenceEqual(WasmModuleCompiler.Compile(probe).Bytes),
+            "language-error metadata must compile deterministically");
+        AssertLanguageErrorMetadata(wasm.Bytes, probe);
         string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
         if (!string.IsNullOrWhiteSpace(output))
         {
@@ -97,6 +101,9 @@ internal static class CSharpGuestThrowProducerTests
         WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
         Check(wasm.Succeeded && wasm.Bytes.Length > 8,
             "source-backed throw producer must compile to WASM");
+        Check(WasmArtifactInspector.Inspect(wasm.Bytes).CustomSections.All(section =>
+                section.Name != "avidscript.language_errors"),
+            "IR 16 must not invent the IR 17 language-error WASM metadata");
         string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
         if (!string.IsNullOrWhiteSpace(output))
         {
@@ -219,5 +226,38 @@ internal static class CSharpGuestThrowProducerTests
     private static void Check(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException(message);
+    }
+
+    private static void AssertLanguageErrorMetadata(byte[] wasm, GuestModule module)
+    {
+        string[] sections = WasmArtifactInspector.Inspect(wasm).CustomSections
+            .Where(section => section.Name == "avidscript.language_errors")
+            .Select(section => section.PayloadText)
+            .ToArray();
+        Check(sections.Length == 1, "IR 17 must publish exactly one language-error WASM section");
+        using JsonDocument document = JsonDocument.Parse(sections[0]);
+        JsonElement root = document.RootElement;
+        GuestLanguageErrorCatalog catalog = module.LanguageErrorCatalog!;
+        JsonElement type = root.GetProperty("types")[0];
+        JsonElement source = root.GetProperty("sources")[0];
+        Check(root.GetProperty("schema_version").GetInt32() == 1
+            && root.GetProperty("guest_ir_schema_version").GetInt32() == 17
+            && root.GetProperty("guest_ir_version").GetString() == "1.16"
+            && root.GetProperty("module_id").GetString() == module.ModuleId
+            && root.GetProperty("source_sha256").GetString() == module.Provenance.SourceSha256
+            && root.GetProperty("types").GetArrayLength() == catalog.Types.Count
+            && root.GetProperty("sources").GetArrayLength() == catalog.Sources.Count
+            && type.GetProperty("token").GetInt32() == catalog.Types[0].Token
+            && type.GetProperty("type_id").GetString() == catalog.Types[0].TypeId
+            && source.GetProperty("token").GetInt32() == catalog.Sources[0].Token
+            && source.GetProperty("source_id").GetString() == catalog.Sources[0].SourceId
+            && source.GetProperty("source_length").GetInt32() == catalog.Sources[0].SourceLength
+            && source.GetProperty("start").GetInt32() == catalog.Sources[0].Start
+            && source.GetProperty("length").GetInt32() == catalog.Sources[0].Length
+            && source.GetProperty("line").GetInt32() == catalog.Sources[0].Line
+            && source.GetProperty("column").GetInt32() == catalog.Sources[0].Column
+            && source.GetProperty("end_line").GetInt32() == catalog.Sources[0].EndLine
+            && source.GetProperty("end_column").GetInt32() == catalog.Sources[0].EndColumn,
+            "WASM metadata must preserve the source-backed type and UTF-16 source span");
     }
 }

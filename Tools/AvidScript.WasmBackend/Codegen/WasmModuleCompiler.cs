@@ -76,6 +76,7 @@ public static class WasmModuleCompiler
         List<GuestWasmDebugOffset> debugOffsets = new();
         writer.WriteBytes(Header);
         WriteProvenanceSection(writer, module);
+        WriteLanguageErrorCatalogSection(writer, module);
         WriteCallFrameSection(writer, layout);
         WriteHostCallFrameSection(writer, module, layout);
         WriteSafepointProofSection(writer, module, safepointPlan);
@@ -422,6 +423,45 @@ public static class WasmModuleCompiler
             }
         });
         return emittedSafepointCount;
+    }
+
+    private static void WriteLanguageErrorCatalogSection(WasmBinaryWriter writer, GuestModule module)
+    {
+        if (module.LanguageErrorCatalog is not { } catalog) return;
+
+        byte[] payload = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            schema_version = 1,
+            guest_ir_schema_version = module.SchemaVersion,
+            guest_ir_version = module.IrVersion,
+            module_id = module.ModuleId,
+            source_sha256 = module.Provenance.SourceSha256,
+            types = catalog.Types.Select(entry => new
+            {
+                token = entry.Token,
+                type_id = entry.TypeId,
+            }).ToArray(),
+            sources = catalog.Sources.Select(entry => new
+            {
+                token = entry.Token,
+                source_id = entry.SourceId,
+                source_length = entry.SourceLength,
+                start = entry.Start,
+                length = entry.Length,
+                line = entry.Line,
+                column = entry.Column,
+                end_line = entry.EndLine,
+                end_column = entry.EndColumn,
+            }).ToArray(),
+        });
+        if (payload.Length > 4 * 1024 * 1024)
+            throw new InvalidOperationException("Language-error WASM metadata exceeds 4 MiB.");
+
+        writer.WriteSection(0, section =>
+        {
+            section.WriteName("avidscript.language_errors");
+            section.WriteBytes(payload);
+        });
     }
 
     private static void WriteDataSection(
