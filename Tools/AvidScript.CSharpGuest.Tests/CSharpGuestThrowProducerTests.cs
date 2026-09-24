@@ -29,7 +29,8 @@ internal static class CSharpGuestThrowProducerTests
         NestedFinallyRunsInnerToOuter();
         LocalThrowRunsFinallyBeforeOuterCatch();
         CleanupThrowReplacesOriginalError();
-        return 13;
+        CatchRethrowPreservesOriginalError();
+        return 14;
     }
 
     private static void MultipleThrowProducersKeepDistinctSourceTokens()
@@ -780,7 +781,96 @@ internal static class CSharpGuestThrowProducerTests
             "a cleanup throw must not drop constructor side effects");
     }
 
-    private static int ReferenceCatch(string source)
+    private static void CatchRethrowPreservesOriginalError()
+    {
+        const string source = """
+            class Script
+            {
+                static int Throw() { throw new System.Exception(); }
+                static int RethrowLocal()
+                {
+                    try { throw new System.Exception(); }
+                    catch (System.Exception) { throw; }
+                }
+                static int RethrowCall()
+                {
+                    try { return Throw(); }
+                    catch (System.Exception) { throw; }
+                }
+                static int CatchLocal()
+                {
+                    try { return RethrowLocal(); }
+                    catch (System.Exception) { return 7; }
+                }
+                static int CatchCall()
+                {
+                    try { return RethrowCall(); }
+                    catch (System.Exception) { return 9; }
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay() { CatchLocal(); CatchCall(); }
+            }
+            """;
+        Check(ReferenceCatch(source, "CatchLocal") == 7
+            && ReferenceCatch(source, "CatchCall") == 9,
+            "the CLR reference must route both local and called rethrows to outer handlers");
+        SemanticDocument semantic = Analyze(source);
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "catch rethrow failed to compile");
+        GuestModule module = compiled!.Module;
+        Check(module.LanguageErrorCatalog is { Types.Count: 1, Sources.Count: 2 } catalog
+            && catalog.Sources[0].Start < catalog.Sources[1].Start,
+            "a rethrow must reuse its original source token without adding a catalog entry");
+        GuestFunction local = module.Functions.Single(function =>
+            function.Id.Contains(".RethrowLocal(", StringComparison.Ordinal));
+        GuestFunction called = module.Functions.Single(function =>
+            function.Id.Contains(".RethrowCall(", StringComparison.Ordinal));
+        GuestFunction localCatch = module.Functions.Single(function =>
+            function.Id.Contains(".CatchLocal(", StringComparison.Ordinal));
+        GuestFunction callCatch = module.Functions.Single(function =>
+            function.Id.Contains(".CatchCall(", StringComparison.Ordinal));
+        GuestModule probe = AddCatchProbe(AddCatchProbe(AddProbe(AddProbe(module, local,
+                    appendTarget: false, probeId: "function:rethrow_local_source_probe",
+                    exportName: "rethrow_local_source_probe"),
+                called, appendTarget: false, probeId: "function:rethrow_call_source_probe",
+                exportName: "rethrow_call_source_probe"),
+            localCatch, "function:rethrow_local_catch_probe", "rethrow_local_catch_probe"),
+            callCatch, "function:rethrow_call_catch_probe", "rethrow_call_catch_probe");
+        GuestValidationResult validation = GuestModuleValidator.Validate(probe);
+        Check(validation.Succeeded,
+            string.Join(" | ", validation.Diagnostics.Select(item => item.Message)));
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "both source-backed rethrow routes must compile to executable WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "catch-rethrow.wasm"), wasm.Bytes);
+        }
+
+        const string nestedSource = """
+            class Script
+            {
+                static int Run()
+                {
+                    try
+                    {
+                        try { throw new System.Exception(); }
+                        catch (System.Exception) { throw; }
+                    }
+                    catch (System.Exception) { return 3; }
+                }
+            }
+            """;
+        Check(!CSharpLanguageErrorCompiler.TryLower(Analyze(nestedSource), new string('a', 64),
+                out _, out string? nestedError)
+            && nestedError is not null,
+            "an in-method outer catch must not be skipped by a rethrow");
+    }
+
+    private static int ReferenceCatch(string source, string methodName = "Catch")
     {
         string[] assemblyPaths = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
             .Split(Path.PathSeparator);
@@ -799,7 +889,7 @@ internal static class CSharpGuestThrowProducerTests
         try
         {
             Type script = context.LoadFromStream(bytes).GetType("Script")!;
-            MethodInfo method = script.GetMethod("Catch", BindingFlags.Static | BindingFlags.NonPublic)!;
+            MethodInfo method = script.GetMethod(methodName, BindingFlags.Static | BindingFlags.NonPublic)!;
             return (int)method.Invoke(null, null)!;
         }
         finally
@@ -834,9 +924,10 @@ internal static class CSharpGuestThrowProducerTests
     }
 
     private static GuestModule AddProbe(GuestModule module, GuestFunction producer,
-        bool appendTarget = true)
+        bool appendTarget = true,
+        string probeId = "function:throw_source_probe",
+        string exportName = "throw_source_probe")
     {
-        const string probeId = "function:throw_source_probe";
         GuestFunction probe = new(probeId, Array.Empty<GuestRegister>(), new[]
         {
             new GuestRegister("result", producer.ReturnTypeId),
@@ -876,7 +967,7 @@ internal static class CSharpGuestThrowProducerTests
             Functions = appendTarget
                 ? module.Functions.Append(producer).Append(probe).ToArray()
                 : module.Functions.Append(probe).ToArray(),
-            Exports = module.Exports.Append(new GuestExport("throw_source_probe", probeId)).ToArray(),
+            Exports = module.Exports.Append(new GuestExport(exportName, probeId)).ToArray(),
         };
     }
 

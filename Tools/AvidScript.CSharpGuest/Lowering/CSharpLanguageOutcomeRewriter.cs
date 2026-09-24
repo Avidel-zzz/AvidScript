@@ -8,9 +8,15 @@ using AvidScript.GuestIr;
 
 namespace AvidScript.CSharpGuest;
 
-internal sealed record CSharpLanguageCatchMatch(int TypeToken, string HandlerBlockId);
+internal sealed record CSharpLanguageCatchMatch(
+    int TypeToken, string HandlerBlockId, bool CaptureError = false);
 internal sealed record CSharpLanguageCatchRoute(
     string SourceBlockId, IReadOnlyList<CSharpLanguageCatchMatch> Matches);
+internal static class CSharpLanguageCatchContext
+{
+    public static string OutcomeRegister(string handlerBlockId) =>
+        "language_catch:outcome:" + handlerBlockId;
+}
 
 // Converts ordinary lowered functions into IR 16 outcome functions. Exception
 // producers and UE boundary adapters are separate steps; this pass refuses a
@@ -230,7 +236,10 @@ public static class CSharpLanguageOutcomeRewriter
                 || route.Matches.Select(match => match.TypeToken).Distinct().Count()
                     != route.Matches.Count)
             || catchRoutes.Select(route => route.SourceBlockId).Distinct(StringComparer.Ordinal).Count()
-                != catchRoutes.Count)
+                != catchRoutes.Count
+            || catchRoutes.SelectMany(route => route.Matches)
+                .GroupBy(match => match.HandlerBlockId, StringComparer.Ordinal)
+                .Any(group => group.Select(match => match.CaptureError).Distinct().Count() != 1))
             return Fail($"Function '{function.Id}' has an invalid catch route.", out error);
         if (cleanupRoutes.Any(route => !blockIds.Contains(route.SourceBlockId)
                 || route.CleanupBlockIds.Any(id => !blockIds.Contains(id)))
@@ -241,6 +250,18 @@ public static class CSharpLanguageOutcomeRewriter
             .ToDictionary(route => route.SourceBlockId, StringComparer.Ordinal);
         Dictionary<string, CSharpLanguageCleanupRoute> cleanupByBlock = cleanupRoutes
             .ToDictionary(route => route.SourceBlockId, StringComparer.Ordinal);
+        string[] capturedHandlers = catchRoutes.SelectMany(route => route.Matches)
+            .Where(match => match.CaptureError).Select(match => match.HandlerBlockId)
+            .Distinct(StringComparer.Ordinal).OrderBy(id => id, StringComparer.Ordinal).ToArray();
+        Dictionary<string, string> capturedOutcomes = new(StringComparer.Ordinal);
+        foreach (string handlerId in capturedHandlers)
+        {
+            string id = CSharpLanguageCatchContext.OutcomeRegister(handlerId);
+            if (!registerIds.Add(id))
+                return Fail($"Function '{function.Id}' has a conflicting catch context.", out error);
+            locals.Add(new GuestRegister(id, outcomeType));
+            capturedOutcomes.Add(handlerId, id);
+        }
         int registerOrdinal = 0, blockOrdinal = 0;
         string Register(string typeId)
         {
@@ -260,6 +281,10 @@ public static class CSharpLanguageOutcomeRewriter
         {
             string currentId = source.Id;
             List<GuestInstruction> instructions = new();
+            if (source.Id == function.EntryBlockId)
+                foreach (string handlerId in capturedHandlers)
+                    instructions.Add(new GuestInstruction("stack_alloc", capturedOutcomes[handlerId],
+                        Array.Empty<string>(), null, null, null));
             foreach (GuestInstruction instruction in source.Instructions)
             {
                 if (instruction.Op != "call" || instruction.TargetId is not { } target
@@ -299,9 +324,29 @@ public static class CSharpLanguageOutcomeRewriter
                                 System.Globalization.CultureInfo.InvariantCulture))));
                         tests.Add(new GuestInstruction("binary", equal,
                             new[] { errorType, key }, null, "equals", null));
+                        string matchedTarget = match.CaptureError ? Block() : match.HandlerBlockId;
                         blocks.Add(new GuestBasicBlock(testBlock, tests,
                             new GuestTerminator("branch_if", equal,
-                                match.HandlerBlockId, nextBlock, null)));
+                                matchedTarget, nextBlock, null)));
+                        if (match.CaptureError)
+                        {
+                            string capture = capturedOutcomes[match.HandlerBlockId];
+                            string sourceToken = Register(int32TypeId);
+                            string errorRoot = Register(rootTypeId);
+                            string one = Register(int32TypeId);
+                            blocks.Add(new GuestBasicBlock(matchedTarget, new GuestInstruction[]
+                            {
+                                new("field_load", sourceToken, new[] { result }, "field:source", null, null),
+                                new("field_load", errorRoot, new[] { result }, "field:error_root", null, null),
+                                new("constant", one, Array.Empty<string>(), null, null,
+                                    new GuestConstant("int32", "1")),
+                                Store(capture, "status", one),
+                                Store(capture, "error_type", errorType),
+                                Store(capture, "source", sourceToken),
+                                Store(capture, "error_root", errorRoot),
+                            }, new GuestTerminator("branch", null,
+                                match.HandlerBlockId, null, null)));
+                        }
                         testBlock = nextBlock;
                     }
                     unhandledBlock = testBlock;

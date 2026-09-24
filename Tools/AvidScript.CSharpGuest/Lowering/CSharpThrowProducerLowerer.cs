@@ -140,14 +140,16 @@ public static class CSharpThrowProducerLowerer
         IReadOnlyList<SemanticExceptionFlow> flows)
     {
         CSharpLanguageErrorTypeToken[] types = flows
-            .SelectMany(flow => flow.Throws.Select(site => site.ExceptionTypeId))
+            .SelectMany(flow => flow.Throws.Where(site => site.Kind == "throw")
+                .Select(site => site.ExceptionTypeId))
             .Where(id => id is not null)
             .Distinct(StringComparer.Ordinal)
             .OrderBy(id => id, StringComparer.Ordinal)
             .Select((id, index) => new CSharpLanguageErrorTypeToken(index + 1, id!))
             .ToArray();
         CSharpLanguageErrorSourceToken[] sources = flows
-            .SelectMany(flow => flow.Throws.Select(site => (flow.SourceId, site.Span)))
+            .SelectMany(flow => flow.Throws.Where(site => site.Kind == "throw")
+                .Select(site => (flow.SourceId, site.Span)))
             .Distinct()
             .OrderBy(item => item.SourceId, StringComparer.Ordinal)
             .ThenBy(item => item.Span.Start)

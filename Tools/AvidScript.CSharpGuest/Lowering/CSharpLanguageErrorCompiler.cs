@@ -37,15 +37,19 @@ public static class CSharpLanguageErrorCompiler
             !producerMethodIds.Contains(item.MethodSymbolId)).ToArray();
         List<SemanticControlFlowGraph> handlerGraphs = new();
         Dictionary<string, IReadOnlyList<CSharpLocalThrowSite>> localThrows = new(StringComparer.Ordinal);
+        Dictionary<string, IReadOnlyList<CSharpRethrowSite>> rethrows = new(StringComparer.Ordinal);
         foreach (SemanticExceptionFlow handler in handlers)
         {
             if (!CSharpExceptionGraphMaterializer.TryBuild(handler,
                     out SemanticControlFlowGraph? graph, out IReadOnlyList<CSharpLocalThrowSite> sites,
+                    out IReadOnlyList<CSharpRethrowSite> rethrowSites,
                     out error))
                 return false;
             handlerGraphs.Add(graph!);
             if (sites.Count != 0)
                 localThrows.Add(CSharpGuestIds.Function(handler.MethodSymbolId), sites);
+            if (rethrowSites.Count != 0)
+                rethrows.Add(CSharpGuestIds.Function(handler.MethodSymbolId), rethrowSites);
         }
         if (throwFlows.Any(item => semantic.Callables.Count(callable =>
                     callable.MethodSymbolId == item.MethodSymbolId
@@ -90,6 +94,9 @@ public static class CSharpLanguageErrorCompiler
             string functionId = CSharpGuestIds.Function(handler.MethodSymbolId);
             if (!affected.Contains(functionId))
                 return Fail("A catch method is absent from the language-error effect closure.", out error);
+            IReadOnlySet<int> rethrowHandlers = rethrows.TryGetValue(functionId, out var rethrowSites)
+                ? rethrowSites.Select(site => site.HandlerOrdinal).ToHashSet()
+                : new HashSet<int>();
             List<CSharpLanguageCatchRoute> routes = new();
             foreach (SemanticExceptionBlock block in handler.Blocks!)
             {
@@ -103,7 +110,8 @@ public static class CSharpLanguageErrorCompiler
                         return Fail("Catch routing requires a validated handler without cleanup.", out error);
                     if (decision.HandlerOrdinal is { } ordinal)
                         matches.Add(new(type.Token, CSharpGuestIds.Block(handler.MethodSymbolId,
-                            handler.Regions[handler.Catches[ordinal].RegionOrdinal].FirstBlockOrdinal)));
+                            handler.Regions[handler.Catches[ordinal].RegionOrdinal].FirstBlockOrdinal),
+                            rethrowHandlers.Contains(ordinal)));
                 }
                 if (matches.Count != 0)
                     routes.Add(new(CSharpGuestIds.Block(handler.MethodSymbolId, block.Ordinal), matches));
@@ -169,7 +177,11 @@ public static class CSharpLanguageErrorCompiler
         foreach (SemanticExceptionFlow item in handlers.Where(flow => flow.Throws.Count != 0))
         {
             string functionId = CSharpGuestIds.Function(item.MethodSymbolId);
-            if (!CSharpLocalThrowLowerer.TryLowerReplacing(item, localThrows[functionId],
+            if (!CSharpLocalThrowLowerer.TryLowerReplacing(item,
+                    localThrows.TryGetValue(functionId, out var sites)
+                        ? sites : Array.Empty<CSharpLocalThrowSite>(),
+                    rethrows.TryGetValue(functionId, out var rethrowSites)
+                        ? rethrowSites : Array.Empty<CSharpRethrowSite>(),
                     tokens, catchRoutes.TryGetValue(functionId, out var routes)
                         ? routes : Array.Empty<CSharpLanguageCatchRoute>(), outcomes,
                     out GuestFunction? handler, out error)

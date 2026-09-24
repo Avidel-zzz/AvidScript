@@ -134,8 +134,9 @@ const finallyCatches = typeof instance.exports.finally_source_probe === 'functio
 const nestedFinallyCatches = typeof instance.exports.nested_finally_source_probe === 'function';
 const throwFinallyCatches = typeof instance.exports.throw_finally_source_probe === 'function';
 const replacementCatches = typeof instance.exports.replacement_catch_probe === 'function';
+const rethrowCatches = typeof instance.exports.rethrow_local_source_probe === 'function';
 const catches = multipleCatches || finallyCatches || nestedFinallyCatches || throwFinallyCatches
-  || replacementCatches
+  || replacementCatches || rethrowCatches
   || typeof instance.exports.catch_source_probe === 'function';
 if (multipleCatches) {
   const first = instance.exports.catch_source_probe_a();
@@ -149,6 +150,14 @@ if (multipleCatches) {
   if (source !== 4 || handled !== 1) {
     throw new Error(`Cleanup replacement results = ${source}, ${handled}; expected 4, 1`);
   }
+} else if (rethrowCatches) {
+  const localSource = instance.exports.rethrow_local_source_probe();
+  const calledSource = instance.exports.rethrow_call_source_probe();
+  const localHandled = instance.exports.rethrow_local_catch_probe();
+  const calledHandled = instance.exports.rethrow_call_catch_probe();
+  if (localSource !== 4 || calledSource !== 3 || localHandled !== 7 || calledHandled !== 9) {
+    throw new Error(`Rethrow results = ${localSource}, ${calledSource}, ${localHandled}, ${calledHandled}; expected 4, 3, 7, 9`);
+  }
 } else {
   const actual = nestedFinallyCatches
     ? instance.exports.nested_finally_source_probe()
@@ -159,7 +168,7 @@ if (multipleCatches) {
     : throwFinallyCatches || finallyCatches ? 1 : catches ? 7 : 3;
   if (actual !== expected) throw new Error(`source probe() = ${actual}; expected ${expected}`);
 }
-if (allocations !== (replacementCatches ? 4 : multipleCatches ? 2 : 1)
+if (allocations !== (rethrowCatches || replacementCatches ? 4 : multipleCatches ? 2 : 1)
   || frames.size !== 0 || roots.size !== 0) {
   throw new Error(`Root teardown mismatch: allocations=${allocations}, frames=${frames.size}, roots=${roots.size}`);
 }
@@ -174,6 +183,7 @@ if (catches) {
   if (objects.size !== 0) throw new Error('Handled error object survived collection');
   process.stdout.write(multipleCatches
     ? 'C# source multi-catch WASM: 3/3 passed\n'
+    : rethrowCatches ? 'C# source catch-rethrow WASM: 5/5 passed\n'
     : replacementCatches ? 'C# source cleanup-replaces-error WASM: 3/3 passed\n'
     : nestedFinallyCatches ? 'C# source nested-finally-catch WASM: 2/2 passed\n'
     : throwFinallyCatches ? 'C# source throw-finally-catch WASM: 2/2 passed\n'

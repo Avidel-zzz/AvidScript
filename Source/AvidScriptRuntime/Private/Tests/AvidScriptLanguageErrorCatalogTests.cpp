@@ -360,15 +360,16 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 		TestNull(TEXT("local catch catalog is released on unload"),
 			Runtime.GetLanguageErrorCatalog());
 	}
-	const TArray<FString> CleanupFixtures = {
+	const TArray<FString> HandledFixtures = {
 		TEXT("finally-catch.wasm"), TEXT("nested-finally-catch.wasm"),
-		TEXT("throw-finally-catch.wasm"), TEXT("cleanup-replaces-error.wasm")};
-	for (const FString& FixtureName : CleanupFixtures)
+		TEXT("throw-finally-catch.wasm"), TEXT("cleanup-replaces-error.wasm"),
+		TEXT("catch-rethrow.wasm")};
+	for (const FString& FixtureName : HandledFixtures)
 	{
 		const FString FixturePath = FPaths::Combine(FPaths::ProjectSavedDir(),
 			TEXT("AvidScriptLanguageErrorCatalogTests/GuestFixtures"), FixtureName);
 		TArray<uint8> FixtureWasm;
-		if (!TestTrue(*FString::Printf(TEXT("read C# cleanup fixture %s"), *FixtureName),
+		if (!TestTrue(*FString::Printf(TEXT("read C# handled fixture %s"), *FixtureName),
 				FFileHelper::LoadFileToArray(FixtureWasm, *FixturePath)))
 			return false;
 		for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
@@ -386,13 +387,14 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 			const FAvidScriptLanguageErrorCatalog* Catalog = Runtime.GetLanguageErrorCatalog();
 			const FString* Type = Catalog ? Catalog->FindType(1) : nullptr;
 			const FAvidScriptLanguageErrorSource* Source = Catalog ? Catalog->FindSource(1) : nullptr;
-			const bool bReplacesError = FixtureName == TEXT("cleanup-replaces-error.wasm");
+			const bool bHasSecondThrow = FixtureName == TEXT("cleanup-replaces-error.wasm")
+				|| FixtureName == TEXT("catch-rethrow.wasm");
 			const FAvidScriptLanguageErrorSource* ReplacementSource =
 				Catalog ? Catalog->FindSource(2) : nullptr;
 			TestTrue(*FString::Printf(TEXT("%s retains its throw type and source"), *FixtureName),
 				Type && Source && *Type == TEXT("type:global::System.Exception")
 				&& Source->SourceId == TEXT("Scripts/SourceThrow.cs")
-				&& (bReplacesError ? ReplacementSource
+				&& (bHasSecondThrow ? ReplacementSource
 					&& ReplacementSource->SourceId == Source->SourceId
 					&& ReplacementSource->Start > Source->Start
 					&& !Catalog->FindSource(3) : !ReplacementSource));

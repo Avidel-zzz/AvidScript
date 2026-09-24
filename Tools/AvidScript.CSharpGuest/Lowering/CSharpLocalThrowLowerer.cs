@@ -14,6 +14,7 @@ internal static class CSharpLocalThrowLowerer
     public static bool TryLowerReplacing(
         SemanticExceptionFlow flow,
         IReadOnlyList<CSharpLocalThrowSite> sites,
+        IReadOnlyList<CSharpRethrowSite> rethrows,
         CSharpLanguageErrorTokenCatalog catalog,
         IReadOnlyList<CSharpLanguageCatchRoute> catchRoutes,
         GuestModule module,
@@ -24,7 +25,8 @@ internal static class CSharpLocalThrowLowerer
         error = null;
         string functionId = CSharpGuestIds.Function(flow.MethodSymbolId);
         GuestFunction[] matches = module.Functions.Where(item => item.Id == functionId).ToArray();
-        if (sites.Count == 0 || sites.Count != flow.Throws.Count || matches.Length != 1
+        if (sites.Count + rethrows.Count == 0
+            || sites.Count + rethrows.Count != flow.Throws.Count || matches.Length != 1
             || module.LanguageOutcomeTypes?.All(item => item.TypeId != matches[0].ReturnTypeId) != false
             || !module.Types.Any(type => type.Id == "type:language_error_root"
                 && type.Kind == "managed_ref")
@@ -70,9 +72,11 @@ internal static class CSharpLocalThrowLowerer
                 item.SourceId == flow.SourceId && item.Span == site.Site.Span);
             if (type is null || source is null)
                 return Fail("The local throw is absent from the source token catalog.", out error);
-            string? handler = routes.TryGetValue(blockId, out CSharpLanguageCatchRoute? route)
-                ? route.Matches.SingleOrDefault(match => match.TypeToken == type.Token)?.HandlerBlockId
+            CSharpLanguageCatchMatch? catchMatch = routes.TryGetValue(blockId,
+                    out CSharpLanguageCatchRoute? route)
+                ? route.Matches.SingleOrDefault(match => match.TypeToken == type.Token)
                 : null;
+            string? handler = catchMatch?.HandlerBlockId;
             if (handler is not null && !blocks.ContainsKey(handler))
                 return Fail("The local catch target is absent from the lowered function.", out error);
             if (cleanupId is not null && handler is not null)
@@ -93,7 +97,7 @@ internal static class CSharpLocalThrowLowerer
             if (added.Any(register => !registerIds.Add(register.Id)))
                 return Fail("The local throw register identity is already in use.", out error);
             locals.AddRange(added);
-            GuestInstruction[] instructions =
+            List<GuestInstruction> instructions = new()
             {
                 new("stack_alloc", outcome, Array.Empty<string>(), null, null, null),
                 Constant(status, GuestLanguageOutcomeType.LanguageErrorStatus),
@@ -106,6 +110,20 @@ internal static class CSharpLocalThrowLowerer
                 Store(outcome, "source", sourceToken),
                 Store(outcome, "error_root", root),
             };
+            if (catchMatch is { CaptureError: true })
+            {
+                string capture = CSharpLanguageCatchContext.OutcomeRegister(handler!);
+                if (!locals.Any(register => register.Id == capture
+                    && register.TypeId == function.ReturnTypeId))
+                    return Fail("The local catch has no owned error context.", out error);
+                instructions.AddRange(new[]
+                {
+                    Store(capture, "status", status),
+                    Store(capture, "error_type", errorType),
+                    Store(capture, "source", sourceToken),
+                    Store(capture, "error_root", root),
+                });
+            }
             blocks[blockId] = original with
             {
                 Instructions = replacedOutcome is null
@@ -146,6 +164,28 @@ internal static class CSharpLocalThrowLowerer
                     Terminator = new GuestTerminator("return", null, null, null, outcome),
                 };
             }
+        }
+        foreach (CSharpRethrowSite site in rethrows)
+        {
+            string blockId = CSharpGuestIds.Block(flow.MethodSymbolId, site.BlockOrdinal);
+            string capture = CSharpLanguageCatchContext.OutcomeRegister(blockId);
+            if (!blocks.TryGetValue(blockId, out GuestBasicBlock? original)
+                || original.Terminator.Kind != "return"
+                || original.Terminator.ReturnValueId is null
+                || original.Instructions.Any(instruction => instruction.Op is not
+                    ("constant" or "stack_alloc" or "field_store")
+                    || instruction.Op == "field_store"
+                        && instruction.TargetId is not ("field:status" or "field:value"))
+                || !locals.Any(register => register.Id == capture
+                    && register.TypeId == function.ReturnTypeId)
+                || !routes.Values.SelectMany(route => route.Matches).Any(match =>
+                    match.HandlerBlockId == blockId && match.CaptureError))
+                return Fail("The rethrow has no unique captured error context.", out error);
+            blocks[blockId] = original with
+            {
+                Instructions = Array.Empty<GuestInstruction>(),
+                Terminator = new GuestTerminator("return", null, null, null, capture),
+            };
         }
         lowered = function with
         {

@@ -8,6 +8,8 @@ namespace AvidScript.CSharpGuest;
 internal sealed record CSharpLocalThrowSite(
     int BlockOrdinal, SemanticThrowSite Site, int? CleanupBlockOrdinal = null,
     int? ReplacesThrowBlockOrdinal = null);
+internal sealed record CSharpRethrowSite(
+    int BlockOrdinal, int HandlerOrdinal, SemanticThrowSite Site);
 
 // Internal bridge for exception methods whose ordinary block operations can be
 // lowered unchanged. The exceptional call edges are added by the outcome pass;
@@ -17,10 +19,12 @@ internal static class CSharpExceptionGraphMaterializer
     public static bool TryBuild(SemanticExceptionFlow flow,
         out SemanticControlFlowGraph? graph,
         out IReadOnlyList<CSharpLocalThrowSite> localThrows,
+        out IReadOnlyList<CSharpRethrowSite> rethrows,
         out string? error)
     {
         graph = null;
         localThrows = Array.Empty<CSharpLocalThrowSite>();
+        rethrows = Array.Empty<CSharpRethrowSite>();
         error = null;
         if (flow.Catches.Count == 0 && flow.Regions.Any(region => region.Kind == "finally"))
             return TryBuildDirectThrowFinally(flow, out graph, out localThrows, out error);
@@ -31,8 +35,9 @@ internal static class CSharpExceptionGraphMaterializer
                 ("root" or "local_lifetime" or "try" or "try_and_catch" or "catch"))
             || flow.Blocks is not { Count: > 0 } blocks
             || flow.Branches.Any(branch => branch.Semantics is not
-                ("regular" or "return" or "throw")
-                || branch.Semantics != "throw" && branch.DestinationBlockOrdinal < 0)
+                ("regular" or "return" or "throw" or "rethrow")
+                || branch.Semantics is not ("throw" or "rethrow")
+                    && branch.DestinationBlockOrdinal < 0)
             || blocks.Any(block => block.Operations.Any(operation => !Supported(operation))
                 || block.BranchValue is { } value && !Supported(value)))
             return Fail("The catch method needs unsupported throw, cleanup, filter, variable, or block operations.", out error);
@@ -57,25 +62,56 @@ internal static class CSharpExceptionGraphMaterializer
                 return Fail("Only a zero-argument System.Exception local throw without cleanup is executable.", out error);
             projectedThrows.Add(new(block.Ordinal, matches[0]));
         }
-        if (projectedThrows.Count != flow.Throws.Count
+        List<CSharpRethrowSite> projectedRethrows = new();
+        if (!SemanticExceptionDispatchPlanner.TryBuild(flow, out var dispatch)
+            || dispatch is null)
+            return Fail("The catch method has an invalid exception dispatch route.", out error);
+        foreach (SemanticExceptionBranch branch in flow.Branches.Where(item => item.Semantics == "rethrow"))
+        {
+            SemanticExceptionBlock block = blocks[branch.SourceBlockOrdinal];
+            SemanticCatchHandler[] handlers = flow.Catches.Where(handler =>
+                handler.RegionOrdinal == block.EnclosingRegionOrdinal
+                && flow.Regions[handler.RegionOrdinal].FirstBlockOrdinal == block.Ordinal
+                && flow.Regions[handler.RegionOrdinal].LastBlockOrdinal == block.Ordinal).ToArray();
+            SemanticThrowSite[] sites = flow.Throws.Where(site => site.Kind == "rethrow"
+                && handlers.Length == 1 && handlers[0].Span.Start <= site.Span.Start
+                && site.Span.End <= handlers[0].Span.End).ToArray();
+            if (branch.DestinationBlockOrdinal != -1
+                || flow.Branches.Count(item => item.SourceBlockOrdinal == block.Ordinal) != 1
+                || block.Operations.Count != 0 || block.BranchValue is not null
+                || handlers.Length != 1 || sites.Length != 1
+                || dispatch.Routes[block.Ordinal].Steps.Count != 0)
+                return Fail("Only a direct catch rethrow without nested cleanup is executable.", out error);
+            projectedRethrows.Add(new(block.Ordinal, handlers[0].Ordinal, sites[0]));
+        }
+        if (projectedThrows.Count + projectedRethrows.Count != flow.Throws.Count
             || projectedThrows.Select(item => item.Site.Span.Start).Distinct().Count()
-                != projectedThrows.Count)
+                != projectedThrows.Count
+            || projectedRethrows.Select(item => item.Site.Span.Start).Distinct().Count()
+                != projectedRethrows.Count)
             return Fail("Every local throw needs one distinct executable source block.", out error);
 
         SemanticControlFlowEdge[] edges = flow.Branches.Select(branch =>
             new SemanticControlFlowEdge(branch.SourceBlockOrdinal,
-                branch.Semantics == "throw" ? blocks.Count - 1 : branch.DestinationBlockOrdinal,
-                branch.Kind, branch.Semantics == "throw" ? "return" : branch.Semantics)).ToArray();
+                branch.Semantics is "throw" or "rethrow"
+                    ? blocks.Count - 1 : branch.DestinationBlockOrdinal,
+                branch.Kind, branch.Semantics is "throw" or "rethrow"
+                    ? "return" : branch.Semantics)).ToArray();
         IReadOnlySet<int> throwBlocks = projectedThrows.Select(item => item.BlockOrdinal).ToHashSet();
+        IReadOnlyDictionary<int, SemanticSpan> rethrowSpans = projectedRethrows
+            .ToDictionary(item => item.BlockOrdinal, item => item.Site.Span);
         graph = new SemanticControlFlowGraph(flow.MethodSymbolId, 0, blocks.Count - 1,
             blocks.Select(block => new SemanticBasicBlock(block.Ordinal, block.Kind,
                 block.IsReachable, block.ConditionKind, block.Operations,
                 throwBlocks.Contains(block.Ordinal) ? ZeroPlaceholder(block.BranchValue!.Span)
+                    : rethrowSpans.TryGetValue(block.Ordinal, out SemanticSpan? span)
+                        ? ZeroPlaceholder(span)
                     : block.BranchValue,
                 edges.Where(edge => edge.DestinationBlockOrdinal == block.Ordinal).ToArray(),
                 edges.Where(edge => edge.SourceBlockOrdinal == block.Ordinal).ToArray()))
                 .ToArray());
         localThrows = projectedThrows;
+        rethrows = projectedRethrows;
         return true;
     }
 
