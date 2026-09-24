@@ -102,6 +102,9 @@ public sealed record SemanticAsyncAwaitSite(
 {
     [JsonPropertyOrder(12), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? TaskCallableId { get; init; }
+
+    [JsonPropertyOrder(13), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TaskLocalSymbolId { get; init; }
 }
 
 public sealed record SemanticAsyncStateFrame(

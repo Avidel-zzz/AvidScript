@@ -179,12 +179,16 @@ public static class SemanticAnalyzer
         bool hasExceptionFlows = controlFlowProjection.ExceptionFlows.Count > 0;
         bool hasTaskResults = asyncProjection.Methods.Any(method => method.TaskResultTypeId is not null
             || method.Segments.Any(segment => segment.AwaitSite?.TaskCallableId is not null));
+        bool hasTaskLocals = asyncProjection.Methods.Any(method => method.Segments.Any(segment =>
+            segment.AwaitSite?.TaskLocalSymbolId is not null));
         return new SemanticDocument(
             hasExceptionFlows ? SemanticContract.ExceptionFlowSchemaVersion
+                : hasTaskLocals ? SemanticContract.TaskLocalSchemaVersion
                 : hasTaskResults ? SemanticContract.TaskResultSchemaVersion
                 : SemanticContract.CurrentSchemaVersion,
             "csharp",
             hasExceptionFlows ? SemanticContract.ExceptionFlowSemanticVersion
+                : hasTaskLocals ? SemanticContract.TaskLocalSemanticVersion
                 : hasTaskResults ? SemanticContract.TaskResultSemanticVersion
                 : SemanticContract.CurrentSemanticVersion,
             semanticSource,

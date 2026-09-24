@@ -25,9 +25,74 @@ internal static class SemanticAsyncTests
         TaskIntResultProjectsTypedReturn();
         TaskIntAwaitPublishesDirectTarget();
         TaskIntAwaitProjectsValueArguments();
+        TaskIntLocalPublishesProducerAndFrame();
         TaskIntSuspendedCleanupFailsClosed();
         FailedExceptionPlanKeepsItsContractBesideTaskSource();
-        return 17;
+        return 18;
+    }
+
+    private static void TaskIntLocalPublishesProducerAndFrame()
+    {
+        const string source = """
+            using AvidScript;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static async Task<int> LoadScoreAsync()
+                {
+                    await AvidContinuations.NextTickAsync();
+                    return 12;
+                }
+                public static async void BeginPlay()
+                {
+                    Task<int> pending = LoadScoreAsync();
+                    await AvidContinuations.NextTickAsync();
+                    int score = await pending;
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/TaskIntLocal.cs");
+        Assert(document.Succeeded, "Task<int> local must analyze: "
+            + string.Join(" | ", document.Diagnostics.Select(item => item.Message)));
+        Assert(document.SchemaVersion == SemanticContract.TaskLocalSchemaVersion
+            && document.SemanticVersion == SemanticContract.TaskLocalSemanticVersion,
+            "Task local selects its own semantic contract");
+        SemanticAsyncMethod consumer = document.AsyncMethods.Single(method => method.TaskResultTypeId is null);
+        SemanticAsyncAwaitSite site = consumer.Segments.Select(segment => segment.AwaitSite)
+            .Single(awaitSite => awaitSite?.ProducerKind == "task_local")!;
+        Assert(site.TaskLocalSymbolId is not null && site.TaskCallableId is not null
+            && site.Arguments.Single().SymbolId == site.TaskLocalSymbolId
+            && consumer.Segments.Any(segment => segment.AwaitSite?.StateFrame?.Slots
+                .Any(slot => slot.SymbolId == site.TaskLocalSymbolId) == true)
+            && SemanticAsyncInvocationValidator.IsValid(document),
+            "Task local publishes exact producer provenance and survives the preceding await");
+        byte[] bytes = SemanticSerializer.Serialize(document);
+        Assert(bytes.SequenceEqual(SemanticSerializer.Serialize(SemanticSerializer.Deserialize(bytes))),
+            "Task local semantic metadata round-trips canonically");
+        Assert(!SemanticAsyncInvocationValidator.IsValid(document with
+        {
+            AsyncMethods = document.AsyncMethods.Select(method => method == consumer
+                ? method with { Segments = method.Segments.Select(segment => segment.AwaitSite == site
+                    ? segment with { AwaitSite = site with { TaskCallableId = "symbol:forged" } }
+                    : segment).ToArray() }
+                : method).ToArray(),
+        }), "forged Task local producer is rejected");
+        Assert(!SemanticAsyncInvocationValidator.IsValid(document with
+        {
+            AsyncMethods = document.AsyncMethods.Select(method => method == consumer
+                ? method with { Segments = method.Segments.Select(segment =>
+                    segment.AwaitSite is { ProducerKind: "next_tick", StateFrame: { } frame }
+                        ? segment with { AwaitSite = segment.AwaitSite with
+                            { StateFrame = frame with { Slots = frame.Slots.Where(slot =>
+                                slot.SymbolId != site.TaskLocalSymbolId).ToArray() } } }
+                        : segment).ToArray() }
+                : method).ToArray(),
+        }), "Task local cannot disappear from a pending continuation frame");
+        SemanticDocument alias = Analyze(source.Replace("int score = await pending;",
+            "Task<int> copied = pending; int score = await pending;", StringComparison.Ordinal),
+            "Scripts/TaskIntAlias.cs");
+        Assert(!alias.Succeeded && alias.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCS5403"),
+            "Task aliasing stays rejected until ownership transfer is represented");
     }
 
     private static void TaskIntSuspendedCleanupFailsClosed()

@@ -202,6 +202,10 @@ internal static class SemanticAsyncProjector
                 && invocation.TargetMethod.IsAsync
                 && TryGetSupportedTaskResult(context.Compilation,
                     invocation.TargetMethod.ReturnType, out _))
+            || awaits.Any(awaitExpression =>
+                semanticModel.GetOperation(awaitExpression) is IAwaitOperation
+                    { Operation: ILocalReferenceOperation taskLocal }
+                && TryGetSupportedTaskResult(context.Compilation, taskLocal.Local.Type, out _))
             || declaration.Body.DescendantNodes().OfType<SwitchStatementSyntax>().Any();
         if (requiresControlFlowCfg)
         {
@@ -427,7 +431,11 @@ internal static class SemanticAsyncProjector
             return false;
         }
 
-        if (ContainsAsyncHelperOrTask(operation))
+        bool taskLocalDeclaration = statement is LocalDeclarationStatementSyntax
+            { Declaration.Variables.Count: 1 } taskDeclaration
+            && semanticModel.GetDeclaredSymbol(taskDeclaration.Declaration.Variables[0]) is ILocalSymbol taskLocal
+            && TryGetTaskLocalProducer(context, semanticModel, taskLocal, out _);
+        if (ContainsAsyncHelperOrTask(operation) && !taskLocalDeclaration)
         {
             diagnostics.Add(Error(
                 "ASCS5403",
@@ -575,8 +583,7 @@ internal static class SemanticAsyncProjector
         out SemanticAsyncAwaitSite? projected)
     {
         projected = null;
-        if (semanticModel.GetOperation(awaitExpression) is not IAwaitOperation awaitOperation
-            || awaitOperation.Operation is not IInvocationOperation candidateInvocation)
+        if (semanticModel.GetOperation(awaitExpression) is not IAwaitOperation awaitOperation)
         {
             diagnostics.Add(Error(
                 "ASCS5403",
@@ -585,9 +592,25 @@ internal static class SemanticAsyncProjector
             return false;
         }
 
+        ILocalReferenceOperation? taskLocalReference = awaitOperation.Operation as ILocalReferenceOperation;
+        IInvocationOperation? candidateInvocation = awaitOperation.Operation as IInvocationOperation;
+        if (taskLocalReference is not null
+            && !TryGetTaskLocalProducer(context, semanticModel,
+                taskLocalReference.Local, out candidateInvocation))
+        {
+            candidateInvocation = null;
+        }
+        if (candidateInvocation is null)
+        {
+            diagnostics.Add(Error("ASCS5403",
+                "Controlled await requires a direct producer call or a validated Task<int> local.",
+                SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, awaitExpression.Span)));
+            return false;
+        }
+
         IInvocationOperation invocation = candidateInvocation;
         IOperation? cancellationTokenOperation = null;
-        if (TryUnwrapCancellationMarker(
+        if (taskLocalReference is null && TryUnwrapCancellationMarker(
                 context,
                 candidateInvocation,
                 out IInvocationOperation? wrappedProducer,
@@ -626,18 +649,33 @@ internal static class SemanticAsyncProjector
 
             List<SemanticOperation> projectedTaskArguments = new(taskArguments.Length);
             int diagnosticsBeforeArguments = diagnostics.Count;
-            foreach (IArgumentOperation argument in taskArguments)
+            if (taskLocalReference is not null)
             {
                 projectedTaskArguments.Add(SemanticOperationProjector.ProjectAsyncStatementOperation(
-                    argument.Value, context.PrimaryUnit, typeRegistry, diagnostics));
+                    taskLocalReference, context.PrimaryUnit, typeRegistry, diagnostics));
+            }
+            else
+            {
+                foreach (IArgumentOperation argument in taskArguments)
+                {
+                    projectedTaskArguments.Add(SemanticOperationProjector.ProjectAsyncStatementOperation(
+                        argument.Value, context.PrimaryUnit, typeRegistry, diagnostics));
+                }
             }
             if (diagnostics.Count != diagnosticsBeforeArguments
-                || projectedTaskArguments.Where((argument, index) =>
-                    !AllOperationsSupported(argument)
-                    || argument.TypeId != typeRegistry.Register(target.Parameters[index].Type)).Any())
+                || (taskLocalReference is null
+                    ? projectedTaskArguments.Where((argument, index) =>
+                        !AllOperationsSupported(argument)
+                        || argument.TypeId != typeRegistry.Register(target.Parameters[index].Type)).Any()
+                    : projectedTaskArguments.Count != 1
+                        || !AllOperationsSupported(projectedTaskArguments[0])
+                        || projectedTaskArguments[0].Kind != "local_reference"
+                        || projectedTaskArguments[0].SymbolId != SemanticSymbolProjector.GetSymbolId(taskLocalReference.Local)))
             {
                 diagnostics.Add(Error("ASCS5404",
-                    "Task<int> await arguments must match the source method value parameters.",
+                    taskLocalReference is null
+                        ? "Task<int> await arguments must match the source method value parameters."
+                        : "Task<int> await must read its validated local without conversion.",
                     SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, awaitExpression.Span)));
                 return false;
             }
@@ -659,7 +697,7 @@ internal static class SemanticAsyncProjector
             string taskResultTypeId = typeRegistry.Register(taskResultType!);
             projected = new SemanticAsyncAwaitSite(
                 callbackId,
-                "task_call",
+                taskLocalReference is null ? "task_call" : "task_local",
                 "task_result",
                 projectedTaskArguments,
                 taskResultSymbolId,
@@ -668,6 +706,8 @@ internal static class SemanticAsyncProjector
                 PayloadValueTypeId: taskResultTypeId)
             {
                 TaskCallableId = SemanticSymbolProjector.GetSymbolId(target),
+                TaskLocalSymbolId = taskLocalReference is null
+                    ? null : SemanticSymbolProjector.GetSymbolId(taskLocalReference.Local),
             };
             return true;
         }
@@ -1032,6 +1072,52 @@ internal static class SemanticAsyncProjector
             || item is IInvocationOperation invocation
                 && (invocation.TargetMethod.IsAsync && !invocation.TargetMethod.ReturnsVoid
                     || IsTaskLike(invocation.TargetMethod.ReturnType)));
+    }
+
+    private static bool TryGetTaskLocalProducer(
+        SemanticCompilationContext context,
+        SemanticModel semanticModel,
+        ILocalSymbol local,
+        out IInvocationOperation? producer)
+    {
+        producer = null;
+        if (!TryGetSupportedTaskResult(context.Compilation, local.Type, out _)
+            || local.DeclaringSyntaxReferences is not { Length: 1 }
+            || local.DeclaringSyntaxReferences[0].GetSyntax() is not VariableDeclaratorSyntax
+                { Initializer.Value: InvocationExpressionSyntax invocationSyntax } variable
+            || variable.SyntaxTree != context.PrimaryUnit.SyntaxTree
+            || semanticModel.GetOperation(invocationSyntax) is not IInvocationOperation invocation
+            || !invocation.TargetMethod.IsAsync
+            || !SymbolEqualityComparer.Default.Equals(invocation.TargetMethod.ReturnType, local.Type)
+            || !invocation.TargetMethod.IsStatic
+            || invocation.TargetMethod.IsGenericMethod
+            || invocation.TargetMethod.ContainingType.IsGenericType
+            || invocation.TargetMethod.IsVirtual || invocation.TargetMethod.IsOverride
+            || invocation.TargetMethod.IsAbstract
+            || invocation.TargetMethod.DeclaringSyntaxReferences.Length != 1
+            || invocation.TargetMethod.DeclaringSyntaxReferences[0].SyntaxTree != context.PrimaryUnit.SyntaxTree
+            || invocation.Arguments.Length != invocation.TargetMethod.Parameters.Length
+            || invocation.Arguments.Where((argument, index) =>
+                argument.ArgumentKind != ArgumentKind.Explicit
+                || argument.Parameter?.Ordinal != index
+                || invocation.TargetMethod.Parameters[index].RefKind != RefKind.None).Any())
+            return false;
+
+        MethodDeclarationSyntax? owner = variable.Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault();
+        if (owner is null) return false;
+        IdentifierNameSyntax[] references = owner.DescendantNodes().OfType<IdentifierNameSyntax>()
+            .Where(identifier => SymbolEqualityComparer.Default.Equals(
+                semanticModel.GetSymbolInfo(identifier).Symbol, local))
+            .ToArray();
+        if (references.Length == 0 || references.Any(identifier =>
+                identifier.Parent is not AwaitExpressionSyntax { Expression: IdentifierNameSyntax operand }
+                || operand != identifier
+                || identifier.Ancestors().Any(node => node is AnonymousFunctionExpressionSyntax
+                    or LocalFunctionStatementSyntax)))
+            return false;
+
+        producer = invocation;
+        return true;
     }
 
     private static bool IsAwaitableType(ITypeSymbol? type)

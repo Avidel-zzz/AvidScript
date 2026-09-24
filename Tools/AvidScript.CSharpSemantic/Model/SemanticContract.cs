@@ -13,6 +13,8 @@ public static class SemanticContract
     public const string ExceptionFlowSemanticVersion = "1.43";
     public const int TaskResultSchemaVersion = 35;
     public const string TaskResultSemanticVersion = "1.44";
+    public const int TaskLocalSchemaVersion = 36;
+    public const string TaskLocalSemanticVersion = "1.45";
 
     public static string GenericInstanceId(string definitionId, IReadOnlyList<string> arguments)
     {
@@ -26,5 +28,7 @@ public static class SemanticContract
         || (schemaVersion == CurrentSchemaVersion
             && semanticVersion is ("1.37" or "1.38" or "1.39" or CurrentSemanticVersion))
         || (schemaVersion == TaskResultSchemaVersion
-            && semanticVersion == TaskResultSemanticVersion);
+            && semanticVersion == TaskResultSemanticVersion)
+        || (schemaVersion == TaskLocalSchemaVersion
+            && semanticVersion == TaskLocalSemanticVersion);
 }
