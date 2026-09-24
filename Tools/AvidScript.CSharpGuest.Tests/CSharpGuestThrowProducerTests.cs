@@ -35,10 +35,11 @@ internal static class CSharpGuestThrowProducerTests
         CalledReturnAndLocalThrowRunTheSameFinally();
         CatchReturnsRunOuterFinally();
         CleanupThrowReplacesOriginalError();
+        NestedCleanupThrowReplacesOriginalError();
         CatchRethrowPreservesOriginalError();
         NestedCatchRethrowReachesOuterHandler();
         CatchVariableReadsBoundError();
-        return 21;
+        return 22;
     }
 
     private static void MultipleThrowProducersKeepDistinctSourceTokens()
@@ -1236,6 +1237,87 @@ internal static class CSharpGuestThrowProducerTests
         {
             Directory.CreateDirectory(output);
             File.WriteAllBytes(Path.Combine(output, "catch-finally.wasm"), wasm.Bytes);
+        }
+    }
+
+    private static void NestedCleanupThrowReplacesOriginalError()
+    {
+        const string source = """
+            class Script
+            {
+                static int Count;
+                static int Fail()
+                {
+                    try
+                    {
+                        try { throw new System.Exception(); }
+                        finally { Count = Count + 1; throw new System.Exception(); }
+                    }
+                    finally { Count = Count + 10; }
+                }
+                static int Catch()
+                {
+                    try { return Fail(); }
+                    catch (System.Exception) { return Count; }
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay() { Catch(); }
+            }
+            """;
+        Check(ReferenceCatch(source) == 11,
+            "the CLR reference must replace the inner error and run outer cleanup");
+        SemanticDocument semantic = Analyze(source);
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "nested cleanup replacement failed to compile");
+        GuestModule module = compiled!.Module;
+        Check(module.LanguageErrorCatalog is { Types.Count: 1, Sources.Count: 2 } catalog
+            && catalog.Sources[0].Start < catalog.Sources[1].Start
+            && source.Substring(catalog.Sources[0].Start, catalog.Sources[0].Length)
+                == "throw new System.Exception();"
+            && source.Substring(catalog.Sources[1].Start, catalog.Sources[1].Length)
+                == "throw new System.Exception();",
+            "nested replacement must retain both source-backed throw identities");
+        SemanticDocument reordered = semantic with
+        {
+            ExceptionFlows = semantic.ExceptionFlows!.Select(flow =>
+                flow.MethodSymbolId.Contains(".Fail(", StringComparison.Ordinal)
+                    ? flow with { Throws = flow.Throws.Reverse().ToArray() } : flow).ToArray(),
+        };
+        Check(CSharpLanguageErrorCompiler.TryLower(reordered, new string('a', 64),
+                out CSharpLanguageErrorCompilation? reorderedCompilation, out string? reorderedError)
+            && reorderedCompilation is not null
+            && GuestIrSerializer.Serialize(reorderedCompilation.Module)
+                .SequenceEqual(GuestIrSerializer.Serialize(module)),
+            reorderedError ?? "nested replacement must not depend on throw-site order");
+        GuestFunction fail = module.Functions.Single(function =>
+            function.Id.Contains(".Fail(", StringComparison.Ordinal));
+        Check(fail.Blocks.Sum(block => block.Instructions.Count(item =>
+                item.Op == "managed_new")) == 2
+            && fail.Blocks.Count(block => block.Instructions.Any(item =>
+                item.Op == "global_store")) == 2,
+            "nested replacement must allocate both errors and run both cleanup blocks");
+        GuestFunction handler = module.Functions.Single(function =>
+            function.Id.Contains(".Catch(", StringComparison.Ordinal));
+        GuestModule stressed = AddLocalCleanupCollectProbe(module, fail.Id, 2);
+        GuestModule probe = AddCatchProbe(
+            AddProbe(stressed, fail, appendTarget: false,
+                "function:nested_replacement_source_probe",
+                "nested_replacement_source_probe"),
+            handler, "function:nested_replacement_catch_probe",
+            "nested_replacement_catch_probe");
+        GuestValidationResult validation = GuestModuleValidator.Validate(probe);
+        Check(validation.Succeeded,
+            string.Join(" | ", validation.Diagnostics.Select(item => item.Message)));
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "nested cleanup replacement must compile to executable WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output,
+                "nested-cleanup-replaces-error.wasm"), wasm.Bytes);
         }
     }
 

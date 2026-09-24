@@ -139,13 +139,15 @@ const mixedCleanupCatches = typeof instance.exports.mixed_cleanup_normal_first_p
 const calledReturnCatches = typeof instance.exports.called_return_normal_probe === 'function';
 const catchFinallyCatches = typeof instance.exports.catch_finally_normal_probe === 'function';
 const replacementCatches = typeof instance.exports.replacement_catch_probe === 'function';
+const nestedReplacementCatches = typeof instance.exports.nested_replacement_catch_probe === 'function';
 const rethrowCatches = typeof instance.exports.rethrow_local_source_probe === 'function';
 const nestedRethrowCatches = typeof instance.exports.nested_rethrow_source_probe === 'function';
 const catchVariableCatches = typeof instance.exports.catch_variable_call_probe === 'function';
 const catches = multipleCatches || finallyCatches || nestedFinallyCatches || throwFinallyCatches
   || nestedLocalThrowCatches || multiLocalThrowCatches || mixedCleanupCatches || calledReturnCatches
   || catchFinallyCatches
-  || replacementCatches || rethrowCatches || nestedRethrowCatches || catchVariableCatches
+  || replacementCatches || nestedReplacementCatches || rethrowCatches
+  || nestedRethrowCatches || catchVariableCatches
   || typeof instance.exports.catch_source_probe === 'function';
 if (multipleCatches) {
   const first = instance.exports.catch_source_probe_a();
@@ -158,6 +160,12 @@ if (multipleCatches) {
   const source = instance.exports.throw_source_probe();
   if (source !== 4 || handled !== 1) {
     throw new Error(`Cleanup replacement results = ${source}, ${handled}; expected 4, 1`);
+  }
+} else if (nestedReplacementCatches) {
+  const handled = instance.exports.nested_replacement_catch_probe();
+  const source = instance.exports.nested_replacement_source_probe();
+  if (source !== 4 || handled !== 11) {
+    throw new Error(`Nested cleanup replacement results = ${source}, ${handled}; expected 4, 11`);
   }
 } else if (nestedLocalThrowCatches) {
   const handled = instance.exports.nested_local_throw_catch_probe();
@@ -246,7 +254,7 @@ if (multipleCatches) {
     : throwFinallyCatches || finallyCatches ? 1 : catches ? 7 : 3;
   if (actual !== expected) throw new Error(`source probe() = ${actual}; expected ${expected}`);
 }
-if (allocations !== (rethrowCatches || replacementCatches ? 4
+if (allocations !== (rethrowCatches || replacementCatches || nestedReplacementCatches ? 4
   : catchFinallyCatches ? 5
   : nestedRethrowCatches || catchVariableCatches || mixedCleanupCatches || calledReturnCatches ? 4
   : multiLocalThrowCatches ? 6
@@ -274,6 +282,7 @@ if (catches) {
     : calledReturnCatches ? 'C# source called-return-finally WASM: 6/6 passed\n'
     : catchFinallyCatches ? 'C# source catch-finally WASM: 5/5 passed\n'
     : replacementCatches ? 'C# source cleanup-replaces-error WASM: 3/3 passed\n'
+    : nestedReplacementCatches ? 'C# source nested-cleanup-replaces-error WASM: 3/3 passed\n'
     : nestedFinallyCatches ? 'C# source nested-finally-catch WASM: 2/2 passed\n'
     : throwFinallyCatches ? 'C# source throw-finally-catch WASM: 2/2 passed\n'
     : finallyCatches ? 'C# source finally-catch WASM: 2/2 passed\n'

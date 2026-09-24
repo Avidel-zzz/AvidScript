@@ -147,7 +147,8 @@ internal static class CSharpLocalThrowLowerer
         }
         Dictionary<int, (string OutcomeId, int SiteCount)> sharedCleanups = new();
         foreach (IGrouping<int, CSharpLocalThrowSite> group in sites
-            .Where(site => site.CleanupBlockOrdinals is { Count: > 0 })
+            .Where(site => site.ReplacesThrowBlockOrdinal is null
+                && site.CleanupBlockOrdinals is { Count: > 0 })
             .GroupBy(site => site.CleanupBlockOrdinals![^1]))
         {
             CSharpLocalThrowSite[] owners = group.ToArray();
@@ -192,15 +193,29 @@ internal static class CSharpLocalThrowLowerer
             string? replacedOutcome = site.ReplacesThrowBlockOrdinal is { } replacedOrdinal
                 ? "local_throw:" + replacedOrdinal.ToString(CultureInfo.InvariantCulture) + ":outcome"
                 : null;
+            bool replacementContinuesCleanup = sites.Any(other =>
+                other.ReplacesThrowBlockOrdinal == site.BlockOrdinal
+                && cleanupOrdinals.Count > 1
+                && other.BlockOrdinal == cleanupOrdinals[0]
+                && other.CleanupBlockOrdinals is { } remaining
+                && remaining.SequenceEqual(cleanupOrdinals.Skip(1)));
+            bool replacesLastCleanup = replacedOutcome is not null && cleanupId is null
+                && sites.Any(other => other.BlockOrdinal == site.ReplacesThrowBlockOrdinal
+                    && other.CleanupBlockOrdinals is { Count: > 0 } cleanups
+                    && cleanups[^1] == site.BlockOrdinal);
+            bool replacesInnerCleanup = replacedOutcome is not null && cleanupId is not null
+                && sites.Any(other => other.BlockOrdinal == site.ReplacesThrowBlockOrdinal
+                    && other.CleanupBlockOrdinals is { Count: > 1 } cleanups
+                    && cleanups[0] == site.BlockOrdinal
+                    && site.CleanupBlockOrdinals is { } remaining
+                    && remaining.SequenceEqual(cleanups.Skip(1)));
             if (!blocks.TryGetValue(blockId, out GuestBasicBlock? original)
                 || cleanupId is null && original.Terminator.Kind != "return"
                 || cleanupId is not null && (original.Terminator.Kind != "branch"
                     || original.Terminator.TargetBlockId != cleanupId)
-                || replacedOutcome is not null && (cleanupId is not null
-                    || original.Terminator.ReturnValueId != replacedOutcome
-                    || !sites.Any(other => other.BlockOrdinal == site.ReplacesThrowBlockOrdinal
-                        && other.CleanupBlockOrdinals is { Count: > 0 } cleanups
-                        && cleanups[^1] == site.BlockOrdinal)
+                || replacedOutcome is not null && (
+                    cleanupId is null && original.Terminator.ReturnValueId != replacedOutcome
+                    || !replacesLastCleanup && !replacesInnerCleanup
                     || original.Instructions.Any(instruction => instruction.Op is not
                         ("constant" or "global_load" or "binary" or "global_store")))
                 || replacedOutcome is null && original.Instructions.Any(instruction =>
@@ -307,6 +322,8 @@ internal static class CSharpLocalThrowLowerer
                         return Fail("The local throw has no unique linear cleanup chain.",
                             out error);
                 }
+                if (replacementContinuesCleanup)
+                    continue;
                 string lastCleanupId = cleanupIds[^1];
                 GuestBasicBlock cleanup = blocks[lastCleanupId];
                 if (!preparedCleanupReturns.Add(lastCleanupId))

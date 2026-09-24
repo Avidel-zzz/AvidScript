@@ -511,7 +511,7 @@ internal static class CSharpExceptionGraphMaterializer
         SemanticExceptionRegion[] finallyRegions = regions
             .Where(region => region.Kind == "finally").ToArray();
         int cleanupCount = finallyRegions.Length;
-        if (flow.Catches.Count != 0 || flow.Throws.Count != 1
+        if (flow.Catches.Count != 0 || flow.Throws.Count is not (1 or 2)
             || cleanupCount is < 2 or > 16
             || regions.Length != 1 + cleanupCount * 3
             || regions[0].Kind != "root"
@@ -521,6 +521,8 @@ internal static class CSharpExceptionGraphMaterializer
             || dispatch is null)
             return Fail("Nested throw cleanup needs one direct throw and bounded linear finally scopes.",
                 out error);
+
+        bool replacesError = flow.Throws.Count == 2;
 
         List<SemanticExceptionRegion> outerToInner = new(cleanupCount);
         int parentOrdinal = 0;
@@ -564,37 +566,67 @@ internal static class CSharpExceptionGraphMaterializer
 
         SemanticExceptionBlock throwBlock = blocks[1];
         SemanticOperation? expression = throwBlock.BranchValue;
-        SemanticThrowSite site = flow.Throws[0];
+        SemanticThrowSite[] originalSites = flow.Throws.Where(item =>
+            expression is not null && item.Kind == "throw"
+            && item.Span.Start <= expression.Span.Start
+            && expression.Span.End <= item.Span.End).ToArray();
+        SemanticThrowSite? site = originalSites.Length == 1 ? originalSites[0] : null;
         if (throwBlock.EnclosingRegionOrdinal != innermostTryOrdinal
             || throwBlock.Operations.Count != 0
             || expression is not { Kind: "object_creation", IsSupported: true }
             || expression.TypeId != CSharpThrowProducerLowerer.ExceptionTypeId
             || expression.SymbolId != CSharpThrowProducerLowerer.ExceptionConstructorId
             || expression.Children.Count != 0
-            || site.Kind != "throw"
-            || site.ExceptionTypeId != CSharpThrowProducerLowerer.ExceptionTypeId
-            || site.Span.Start > expression.Span.Start
-            || expression.Span.End > site.Span.End)
+            || site is null
+            || site.ExceptionTypeId != CSharpThrowProducerLowerer.ExceptionTypeId)
             return Fail("Nested throw cleanup needs a direct zero-argument System.Exception.",
                 out error);
+        SemanticThrowSite? replacement = null;
         for (int index = 0; index < cleanupCount; ++index)
         {
             int ordinal = index + 2;
             SemanticExceptionRegion region = orderedCleanups[index];
             SemanticExceptionBlock block = blocks[ordinal];
+            bool throwingCleanup = replacesError && index == 0;
+            SemanticOperation? replacementExpression = block.BranchValue;
+            if (throwingCleanup)
+            {
+                SemanticThrowSite[] matches = flow.Throws.Where(item =>
+                    item.Kind == "throw" && replacementExpression is not null
+                    && item.Span.Start <= replacementExpression.Span.Start
+                    && replacementExpression.Span.End <= item.Span.End).ToArray();
+                if (matches.Length != 1 || matches[0].Span == site.Span
+                    || matches[0].ExceptionTypeId != CSharpThrowProducerLowerer.ExceptionTypeId
+                    || replacementExpression is not { Kind: "object_creation", IsSupported: true }
+                    || replacementExpression.TypeId != CSharpThrowProducerLowerer.ExceptionTypeId
+                    || replacementExpression.SymbolId != CSharpThrowProducerLowerer.ExceptionConstructorId
+                    || replacementExpression.Children.Count != 0
+                    || dispatch.Routes[ordinal].Steps.Count != cleanupCount - 1
+                    || dispatch.Routes[ordinal].Steps.Where((step, routeIndex) =>
+                        step.Kind != "finally" || step.RegionOrdinal
+                            != orderedCleanups[routeIndex + 1].Ordinal).Any())
+                    return Fail("A nested cleanup throw needs one new error before the outer finally.",
+                        out error);
+                replacement = matches[0];
+            }
             if (region.FirstBlockOrdinal != ordinal || region.LastBlockOrdinal != ordinal
                 || block.EnclosingRegionOrdinal != region.Ordinal
-                || block.Operations.Count == 0 || block.BranchValue is not null
+                || !throwingCleanup && block.Operations.Count == 0
+                || !throwingCleanup && replacementExpression is not null
                 || block.Operations.Any(operation => !Supported(operation)
                     || Descendants(operation).Any(item => item.Kind is
                         "conditional" or "switch" or "branch" or "loop" or "await"
                         or "try" or "throw" or "invocation"))
                 || flow.Branches.Count(branch => branch.SourceBlockOrdinal == ordinal
                     && branch.DestinationBlockOrdinal == -1
-                    && branch.Semantics == "structured_exception_handling") != 1)
+                    && branch.Semantics == (throwingCleanup
+                        ? "throw" : "structured_exception_handling")) != 1)
                 return Fail("Nested throw cleanup needs one linear synchronous block per finally.",
                     out error);
         }
+        if (flow.Throws.Count != (replacesError ? 2 : 1)
+            || replacesError && replacement is null)
+            return Fail("Nested cleanup did not account for every throw site.", out error);
 
         List<SemanticControlFlowEdge> edges = new()
         {
@@ -607,17 +639,26 @@ internal static class CSharpExceptionGraphMaterializer
             blocks.Select(block => new SemanticBasicBlock(block.Ordinal, block.Kind,
                 block.Ordinal == blocks.Count - 1 || block.IsReachable,
                 block.ConditionKind, block.Operations,
-                block.Ordinal == 1 ? null
+                block.Ordinal == 1 || replacesError && block.Ordinal == 2 ? null
                     : block.Ordinal == blocks.Count - 2
                         ? ZeroPlaceholder(site.Span) : block.BranchValue,
                 edges.Where(edge => edge.DestinationBlockOrdinal == block.Ordinal).ToArray(),
                 edges.Where(edge => edge.SourceBlockOrdinal == block.Ordinal).ToArray()))
                 .ToArray());
-        localThrows = new[]
-        {
-            new CSharpLocalThrowSite(1, site,
-                orderedCleanups.Select(region => region.FirstBlockOrdinal).ToArray()),
-        };
+        localThrows = replacesError
+            ? new[]
+            {
+                new CSharpLocalThrowSite(1, site,
+                    orderedCleanups.Select(region => region.FirstBlockOrdinal).ToArray()),
+                new CSharpLocalThrowSite(2, replacement!,
+                    orderedCleanups.Skip(1).Select(region => region.FirstBlockOrdinal).ToArray(),
+                    ReplacesThrowBlockOrdinal: 1),
+            }
+            : new[]
+            {
+                new CSharpLocalThrowSite(1, site,
+                    orderedCleanups.Select(region => region.FirstBlockOrdinal).ToArray()),
+            };
         return true;
     }
 

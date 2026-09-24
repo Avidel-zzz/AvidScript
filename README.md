@@ -63,7 +63,7 @@ public static void Tick(float deltaSeconds)
 | Win64 Editor 与打包样例 | 已有自动化验证 |
 | RPC、属性复制、RepNotify | 已有独立进程测试；实际游戏多人联机仍待验收 |
 | Android、iOS | 尚未验收 |
-| `try` / `catch` / `finally` | 专用测试入口支持部分写法；普通脚本构建尚未启用，见[实现范围](Docs/Phase66/P66.C_Language_Execution_Plan.md) |
+| `try` / `catch` / `finally` | 专用测试入口支持受限的抛出、捕获和嵌套清理；普通脚本构建尚未启用，见[实现范围](Docs/Phase66/P66.C_Language_Execution_Plan.md) |
 
 UE 模块在 [`Source/`](Source/)，C# 编译器在 [`Tools/`](Tools/)，构建入口在 [`Build/`](Build/)。设计与验证记录见 [`Docs/`](Docs/)，仓库开发约定见 [AGENTS.md](AGENTS.md)。
 
