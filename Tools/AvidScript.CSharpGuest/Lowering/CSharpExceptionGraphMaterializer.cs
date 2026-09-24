@@ -80,8 +80,8 @@ internal static class CSharpExceptionGraphMaterializer
                 || flow.Branches.Count(item => item.SourceBlockOrdinal == block.Ordinal) != 1
                 || block.Operations.Count != 0 || block.BranchValue is not null
                 || handlers.Length != 1 || sites.Length != 1
-                || dispatch.Routes[block.Ordinal].Steps.Count != 0)
-                return Fail("Only a direct catch rethrow without nested cleanup is executable.", out error);
+                || dispatch.Routes[block.Ordinal].Steps.Any(step => step.Kind != "catch"))
+                return Fail("Only a direct catch rethrow without cleanup is executable.", out error);
             projectedRethrows.Add(new(block.Ordinal, handlers[0].Ordinal, sites[0]));
         }
         if (projectedThrows.Count + projectedRethrows.Count != flow.Throws.Count

@@ -169,6 +169,11 @@ internal static class CSharpLocalThrowLowerer
         {
             string blockId = CSharpGuestIds.Block(flow.MethodSymbolId, site.BlockOrdinal);
             string capture = CSharpLanguageCatchContext.OutcomeRegister(blockId);
+            CSharpLanguageCatchMatch? outerMatch = routes.TryGetValue(blockId,
+                    out CSharpLanguageCatchRoute? outerRoute)
+                ? outerRoute.Matches.SingleOrDefault(match =>
+                    catalog.Types.Count == 1 && match.TypeToken == catalog.Types[0].Token)
+                : null;
             if (!blocks.TryGetValue(blockId, out GuestBasicBlock? original)
                 || original.Terminator.Kind != "return"
                 || original.Terminator.ReturnValueId is null
@@ -178,13 +183,49 @@ internal static class CSharpLocalThrowLowerer
                         && instruction.TargetId is not ("field:status" or "field:value"))
                 || !locals.Any(register => register.Id == capture
                     && register.TypeId == function.ReturnTypeId)
+                || catalog.Types.Count != 1
                 || !routes.Values.SelectMany(route => route.Matches).Any(match =>
                     match.HandlerBlockId == blockId && match.CaptureError))
                 return Fail("The rethrow has no unique captured error context.", out error);
+            List<GuestInstruction> forwarding = new();
+            if (outerMatch is { CaptureError: true })
+            {
+                string outerCapture = CSharpLanguageCatchContext.OutcomeRegister(
+                    outerMatch.HandlerBlockId);
+                if (outerCapture == capture || !locals.Any(register =>
+                    register.Id == outerCapture && register.TypeId == function.ReturnTypeId))
+                    return Fail("The outer rethrow has no owned error context.", out error);
+                string statusId = "rethrow:" + site.BlockOrdinal.ToString(
+                    CultureInfo.InvariantCulture) + ":status";
+                if (!registerIds.Add(statusId))
+                    return Fail("The rethrow register identity is already in use.", out error);
+                locals.Add(new GuestRegister(statusId, "type:int32"));
+                forwarding.Add(Constant(statusId, GuestLanguageOutcomeType.LanguageErrorStatus));
+                forwarding.Add(Store(outerCapture, "status", statusId));
+                foreach ((string field, string typeId) in new[]
+                {
+                    ("error_type", "type:int32"),
+                    ("source", "type:int32"),
+                    ("error_root", "type:language_error_root"),
+                })
+                {
+                    string id = "rethrow:" + site.BlockOrdinal.ToString(
+                        CultureInfo.InvariantCulture) + ":" + field;
+                    if (!registerIds.Add(id))
+                        return Fail("The rethrow register identity is already in use.", out error);
+                    locals.Add(new GuestRegister(id, typeId));
+                    forwarding.Add(new GuestInstruction("field_load", id,
+                        new[] { capture }, "field:" + field, null, null));
+                    forwarding.Add(Store(outerCapture, field, id));
+                }
+            }
             blocks[blockId] = original with
             {
-                Instructions = Array.Empty<GuestInstruction>(),
-                Terminator = new GuestTerminator("return", null, null, null, capture),
+                Instructions = forwarding,
+                Terminator = outerMatch is null
+                    ? new GuestTerminator("return", null, null, null, capture)
+                    : new GuestTerminator("branch", null,
+                        outerMatch.HandlerBlockId, null, null),
             };
         }
         lowered = function with

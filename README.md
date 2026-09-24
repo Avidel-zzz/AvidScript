@@ -77,7 +77,7 @@ public partial class Projectile : AvidActor
 | UI 与存档 | [UiSaveDemo](Samples/CSharp/UiSaveDemo/README.md) | 以样例覆盖的 API 为准 |
 | 项目 C++ API | [TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) | 通过生成的绑定调用 |
 
-编译器目前只支持受控 C# 子集，不支持任意 .NET API 或 NuGet 包。受限 `throw` / `catch` 和线性同步 `finally` 目前只在专用测试编译入口覆盖；标准脚本构建入口仍拒绝异常源码。Windows Editor 与打包样例已有验证；Android 真机和 iOS 尚未验收。语言侧正在进行的工作见 [P66 计划](Docs/Phase66/P66.C_Language_Execution_Plan.md)。
+编译器目前只支持受控 C# 子集，不支持任意 .NET API 或 NuGet 包。受限 `throw` / `catch`（含嵌套 `throw;` 重抛）和线性同步 `finally` 目前只在专用测试编译入口覆盖；标准脚本构建入口仍拒绝异常源码。Windows Editor 与打包样例已有验证；Android 真机和 iOS 尚未验收。语言侧正在进行的工作见 [P66 计划](Docs/Phase66/P66.C_Language_Execution_Plan.md)。
 
 ## 仓库目录
 

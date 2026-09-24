@@ -30,7 +30,8 @@ internal static class CSharpGuestThrowProducerTests
         LocalThrowRunsFinallyBeforeOuterCatch();
         CleanupThrowReplacesOriginalError();
         CatchRethrowPreservesOriginalError();
-        return 14;
+        NestedCatchRethrowReachesOuterHandler();
+        return 15;
     }
 
     private static void MultipleThrowProducersKeepDistinctSourceTokens()
@@ -850,10 +851,15 @@ internal static class CSharpGuestThrowProducerTests
             File.WriteAllBytes(Path.Combine(output, "catch-rethrow.wasm"), wasm.Bytes);
         }
 
-        const string nestedSource = """
+    }
+
+    private static void NestedCatchRethrowReachesOuterHandler()
+    {
+        const string source = """
             class Script
             {
-                static int Run()
+                static int Throw() { throw new System.Exception(); }
+                static int NestedLocal()
                 {
                     try
                     {
@@ -862,12 +868,74 @@ internal static class CSharpGuestThrowProducerTests
                     }
                     catch (System.Exception) { return 3; }
                 }
+                static int NestedEscape()
+                {
+                    try
+                    {
+                        try { return Throw(); }
+                        catch (System.Exception) { throw; }
+                    }
+                    catch (System.Exception) { throw; }
+                }
+                static int CatchEscape()
+                {
+                    try { return NestedEscape(); }
+                    catch (System.Exception) { return 5; }
+                }
+                static int NestedMismatch()
+                {
+                    try
+                    {
+                        try { return Throw(); }
+                        catch (System.Exception) { throw; }
+                    }
+                    catch (System.InvalidOperationException) { return 1; }
+                }
+                static int CatchMismatch()
+                {
+                    try { return NestedMismatch(); }
+                    catch (System.Exception) { return 6; }
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay() { NestedLocal(); CatchEscape(); CatchMismatch(); }
             }
             """;
-        Check(!CSharpLanguageErrorCompiler.TryLower(Analyze(nestedSource), new string('a', 64),
-                out _, out string? nestedError)
-            && nestedError is not null,
-            "an in-method outer catch must not be skipped by a rethrow");
+        Check(ReferenceCatch(source, "NestedLocal") == 3
+            && ReferenceCatch(source, "CatchEscape") == 5
+            && ReferenceCatch(source, "CatchMismatch") == 6,
+            "the CLR reference must route nested rethrows to their outer handlers");
+        Check(CSharpLanguageErrorCompiler.TryLower(Analyze(source), new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "nested catch rethrow failed to compile");
+        GuestModule module = compiled!.Module;
+        Check(module.LanguageErrorCatalog is { Types.Count: 1, Sources.Count: 2 },
+            "nested rethrows must retain only the original throw source tokens");
+        GuestFunction local = module.Functions.Single(function =>
+            function.Id.Contains(".NestedLocal(", StringComparison.Ordinal));
+        GuestFunction escaped = module.Functions.Single(function =>
+            function.Id.Contains(".NestedEscape(", StringComparison.Ordinal));
+        GuestFunction catchEscape = module.Functions.Single(function =>
+            function.Id.Contains(".CatchEscape(", StringComparison.Ordinal));
+        GuestFunction catchMismatch = module.Functions.Single(function =>
+            function.Id.Contains(".CatchMismatch(", StringComparison.Ordinal));
+        GuestModule probe = AddCatchProbe(AddCatchProbe(AddCatchProbe(AddProbe(module, escaped,
+                appendTarget: false, probeId: "function:nested_rethrow_source_probe",
+                exportName: "nested_rethrow_source_probe"),
+            local, "function:nested_rethrow_local_probe", "nested_rethrow_local_probe"),
+            catchEscape, "function:nested_rethrow_escape_probe", "nested_rethrow_escape_probe"),
+            catchMismatch, "function:nested_rethrow_mismatch_probe", "nested_rethrow_mismatch_probe");
+        GuestValidationResult validation = GuestModuleValidator.Validate(probe);
+        Check(validation.Succeeded,
+            string.Join(" | ", validation.Diagnostics.Select(item => item.Message)));
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "nested catch rethrows must compile to executable WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "nested-rethrow.wasm"), wasm.Bytes);
+        }
     }
 
     private static int ReferenceCatch(string source, string methodName = "Catch")
