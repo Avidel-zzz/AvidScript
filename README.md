@@ -2,38 +2,13 @@
 
 ![UE 5.8](https://img.shields.io/badge/UE-5.8-313131?logo=unrealengine&logoColor=white) ![Win64](https://img.shields.io/badge/platform-Win64-0078D4?logo=windows&logoColor=white) [![MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-![AvidScript：C# 脚本、WebAssembly 与 Unreal Engine](Docs/Assets/README/avidscript-hero.svg)
+AvidScript 是 Unreal Engine 5.8 的 C# 脚本插件。工具链将受支持的 C# 编译为 WebAssembly；UE 在运行时加载 WASM，通过生成的绑定调用 UE API，不需要在游戏进程中加载 CLR。目前主要在 Win64 上开发和验证。
 
-AvidScript 是 Unreal Engine 5.8 的 C# 脚本插件。构建工具把受支持的 C# 编译成 WebAssembly，UE 插件加载 WASM 并通过生成的绑定调用 UE API；游戏运行时不加载 CLR。目前以 Win64 为主要验证平台。
+![C# 源码到 UE 对象的路径](Docs/Assets/README/pipeline.svg)
 
-## 示例
+## 快速开始
 
-[ActorLifecycleScript.cs](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) 中的 `Tick` 每秒让 Actor 沿 X 轴移动 120 UE 单位：
-
-```csharp
-[UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
-public static void Tick(float deltaSeconds)
-{
-    FVector currentLocation = UE.Self.GetActorLocation();
-    UE.Self.SetActorLocation(currentLocation + new FVector(120.0f * deltaSeconds, 0.0f, 0.0f));
-}
-```
-
-`UE.Self` 是绑定了脚本的 Actor，`deltaSeconds` 由 UE 的 Tick 提供。源码经 Roslyn 和 Guest IR 编译为 WASM，运行时通过 ObjectHandle 访问 UE 对象：
-
-![C# 到 UE 对象的编译与运行路径](Docs/Assets/README/pipeline.svg)
-
-异步脚本也使用 C# 的 `await`。[LatentGameplayScript.cs](Samples/CSharp/LatentGameplay/LatentGameplayScript.cs) 等待 0.25 秒后修改 Actor；`EndPlay` 会取消尚未完成的等待：
-
-```csharp
-await UKismetSystemLibrary.DelayAsync(0.25f)
-    .WithCancellation(LifetimeCancellation.Token);
-UE.Self.SetActorScale3D(new FVector(1.25f, 1.25f, 1.25f));
-```
-
-## 构建并运行
-
-需要 UE 5.8 源码版、Visual Studio 2022（UE C++ 工作负载）、PowerShell 7，以及 [global.json](global.json) 指定的 .NET SDK 8.0.416。从 `Plugins/AvidScript` 目录执行：
+需要 UE 5.8 源码版、Visual Studio 2022（UE C++ 工作负载）、PowerShell 7 和 [global.json](global.json) 指定的 .NET SDK 8.0.416。在 `Plugins/AvidScript` 目录运行：
 
 ```powershell
 pwsh -NoProfile -File Build/InstallWasmtimeDependency.ps1 -Mode Install
@@ -45,10 +20,33 @@ $uproject = (Resolve-Path ../../AvidTPSTemplate.uproject).Path
   -WaitMutex -NoHotReloadFromIDE
 ```
 
-打开 `AvidTPSTemplate.uproject`，在关卡中放入一个设为 `Movable` 的 Cube 并选中它。运行 **Tools → AvidScript → Build And Bind C# ActorLifecycle Script**，再点击 **Play**；Cube 会移动、旋转并放大。只需编译该样例的 WASM 时，执行：
+打开 `AvidTPSTemplate.uproject`，在关卡中放入一个设为 `Movable` 的 Cube 并选中它。运行 **Tools → AvidScript → Build And Bind C# ActorLifecycle Script**，然后点击 **Play**。Cube 会移动、旋转并放大。菜单使用的源码是 [ActorLifecycleScript.cs](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)。
+
+只编译该样例的 WASM，无需启动 Editor：
 
 ```powershell
 pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
+```
+
+## 代码示例
+
+以下代码摘自 [ActorLifecycleScript.cs](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)。`UE.Self` 是绑定脚本的 Actor；`deltaSeconds` 是本帧经过的秒数。每次 Tick 按 120 UE 单位/秒更新 X 位置。
+
+```csharp
+[UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
+public static void Tick(float deltaSeconds)
+{
+    FVector currentLocation = UE.Self.GetActorLocation();
+    UE.Self.SetActorLocation(currentLocation + new FVector(120.0f * deltaSeconds, 0.0f, 0.0f));
+}
+```
+
+[LatentGameplayScript.cs](Samples/CSharp/LatentGameplay/LatentGameplayScript.cs) 展示了跨帧等待：等待 0.25 秒后修改 Actor。样例还在 `EndPlay` 中取消未完成的等待。
+
+```csharp
+await UKismetSystemLibrary.DelayAsync(0.25f)
+    .WithCancellation(LifetimeCancellation.Token);
+UE.Self.SetActorScale3D(new FVector(1.25f, 1.25f, 1.25f));
 ```
 
 ## 样例

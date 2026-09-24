@@ -127,6 +127,21 @@ internal static class CSharpGuestThrowProducerTests
         {
             Directory.CreateDirectory(output);
             File.WriteAllBytes(Path.Combine(output, "generated-ufunction-entry.wasm"), wasm.Bytes);
+            File.WriteAllText(Path.Combine(output, "generated-ufunction-entry.json"),
+                JsonSerializer.Serialize(new
+                {
+                    module_id = module.ModuleId,
+                    type_id = semantic.UeTypeDeclarations.Single().TypeId,
+                    method_id = function.MethodSymbolId,
+                    member_ordinal = SemanticUeTypeRuntimeContract.BuildMemberOrdinals(
+                        semantic.UeTypeDeclarations.Single())[function.MethodSymbolId],
+                    export_name = exportName,
+                    imports = module.Imports.Select(import => new
+                    {
+                        module = import.Module,
+                        name = import.Name,
+                    }).ToArray(),
+                }));
         }
     }
 

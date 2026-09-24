@@ -90,6 +90,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'C# nested-catch-branching-finally Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'catch-variable.wasm')
     if ($LASTEXITCODE -ne 0) { throw 'C# catch-variable Node WASM probe failed.' }
+    & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'generated-ufunction-entry.wasm')
+    if ($LASTEXITCODE -ne 0) { throw 'C# generated UFunction language-error Node WASM probe failed.' }
 }
 finally {
     $env:DOTNET_CLI_HOME = $PreviousCliHome
@@ -106,17 +108,19 @@ $TestPrefix = 'AvidScript.Runtime.LanguageErrorCatalog'
     "-ExecCmds=Automation RunTests $TestPrefix;Quit" '-TestExit=Automation Test Queue Empty' "-abslog=$LogPath"
 if ($LASTEXITCODE -ne 0) { throw "Language-error catalog Automation exited with $LASTEXITCODE. Log: $LogPath" }
 $Log = Get-Content -Raw -LiteralPath $LogPath
-$Found = [regex]::Matches($Log, "Found 3 automation tests based on '$([regex]::Escape($TestPrefix))'").Count
+$Found = [regex]::Matches($Log, "Found 4 automation tests based on '$([regex]::Escape($TestPrefix))'").Count
 $LoadSuccess = [regex]::Matches($Log,
     'Test Completed\. Result=\{Success\} Name=\{LoadAndReject\} Path=\{AvidScript\.Runtime\.LanguageErrorCatalog\.LoadAndReject\}').Count
 $RealSuccess = [regex]::Matches($Log,
     'Test Completed\. Result=\{Success\} Name=\{RealCompilerArtifact\} Path=\{AvidScript\.Runtime\.LanguageErrorCatalog\.RealCompilerArtifact\}').Count
 $HandledSuccess = [regex]::Matches($Log,
     'Test Completed\. Result=\{Success\} Name=\{HandledCompilerArtifact\} Path=\{AvidScript\.Runtime\.LanguageErrorCatalog\.HandledCompilerArtifact\}').Count
+$GeneratedSuccess = [regex]::Matches($Log,
+    'Test Completed\. Result=\{Success\} Name=\{GeneratedUFunction\} Path=\{AvidScript\.Runtime\.LanguageErrorCatalog\.GeneratedUFunction\}').Count
 $Failed = [regex]::Matches($Log, 'Test Completed\. Result=\{Fail\}').Count
 $Complete = [regex]::Matches($Log, '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*\*').Count
 $Exit = [regex]::Matches($Log, 'RequestExitWithStatus\(1, 0,').Count
-if ($Found -ne 1 -or $LoadSuccess -ne 1 -or $RealSuccess -ne 1 -or $HandledSuccess -ne 1 -or $Failed -ne 0 -or $Complete -ne 1 -or $Exit -lt 1) {
-    throw "Language-error catalog Automation evidence incomplete: found=$Found load=$LoadSuccess real=$RealSuccess handled=$HandledSuccess failed=$Failed complete=$Complete exit=$Exit log=$LogPath"
+if ($Found -ne 1 -or $LoadSuccess -ne 1 -or $RealSuccess -ne 1 -or $HandledSuccess -ne 1 -or $GeneratedSuccess -ne 1 -or $Failed -ne 0 -or $Complete -ne 1 -or $Exit -lt 1) {
+    throw "Language-error catalog Automation evidence incomplete: found=$Found load=$LoadSuccess real=$RealSuccess handled=$HandledSuccess generated=$GeneratedSuccess failed=$Failed complete=$Complete exit=$Exit log=$LogPath"
 }
-Write-Output "AvidScript.Runtime.LanguageErrorCatalog: 3/3 passed; log=$LogPath"
+Write-Output "AvidScript.Runtime.LanguageErrorCatalog: 4/4 passed; log=$LogPath"

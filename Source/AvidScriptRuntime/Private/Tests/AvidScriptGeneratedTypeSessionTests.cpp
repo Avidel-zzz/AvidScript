@@ -1934,4 +1934,166 @@ bool FAvidScriptGeneratedCSharpAsyncInvocationTest::RunTest(const FString& Param
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptGeneratedLanguageErrorEntryTest,
+	"AvidScript.Runtime.LanguageErrorCatalog.GeneratedUFunction",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptGeneratedLanguageErrorEntryTest::RunTest(const FString& Parameters)
+{
+	const FString Directory = FPaths::Combine(FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptLanguageErrorCatalogTests/GuestFixtures"));
+	TArray<uint8> Wasm;
+	FString MetadataText;
+	if (!TestTrue(TEXT("read generated language-error WASM"), FFileHelper::LoadFileToArray(
+			Wasm, *FPaths::Combine(Directory, TEXT("generated-ufunction-entry.wasm"))))
+		|| !TestTrue(TEXT("read generated language-error metadata"), FFileHelper::LoadFileToString(
+			MetadataText, *FPaths::Combine(Directory, TEXT("generated-ufunction-entry.json")))))
+		return false;
+	TSharedPtr<FJsonObject> Metadata, RegistryJson;
+	if (!TestTrue(TEXT("parse generated language-error metadata"), FJsonSerializer::Deserialize(
+			TJsonReaderFactory<>::Create(MetadataText), Metadata))
+		|| !TestTrue(TEXT("parse generated type registry fixture"), FJsonSerializer::Deserialize(
+			TJsonReaderFactory<>::Create(BuildGeneratedTypeSessionManifest()), RegistryJson)))
+		return false;
+	const auto TypeJson = RegistryJson->GetArrayField(TEXT("types"))[0]->AsObject();
+	TypeJson->SetStringField(TEXT("stable_type_id"), Metadata->GetStringField(TEXT("type_id")));
+	const auto FunctionJson = TypeJson->GetArrayField(TEXT("functions"))[0]->AsObject();
+	FunctionJson->SetNumberField(TEXT("member_ordinal"), Metadata->GetNumberField(TEXT("member_ordinal")));
+	FunctionJson->SetStringField(TEXT("stable_member_id"), Metadata->GetStringField(TEXT("method_id")));
+	FunctionJson->SetStringField(TEXT("native_name"), TEXT("GetLanguageErrorValue"));
+	FunctionJson->SetStringField(TEXT("export_name"), Metadata->GetStringField(TEXT("export_name")));
+	FString RegistryText, Error;
+	if (!FJsonSerializer::Serialize(RegistryJson.ToSharedRef(), TJsonWriterFactory<>::Create(&RegistryText)))
+		return false;
+	TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot> Types;
+	if (!TestTrue(TEXT("build generated language-error registry"),
+			FAvidScriptGeneratedTypeRegistry::BuildFromJson(RegistryText, Types, Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+	FAvidScriptWasmReloadManifest Manifest;
+	Manifest.ModuleId = Metadata->GetStringField(TEXT("module_id"));
+	Manifest.Language = TEXT("csharp");
+	Manifest.AbiVersion = FAvidScriptWasmReloadManifest::SupportedAbiVersion;
+	Manifest.RequiredExports = {TEXT("avid_on_begin_play"), Metadata->GetStringField(TEXT("export_name"))};
+	for (const auto& Import : Metadata->GetArrayField(TEXT("imports")))
+		Manifest.RequiredImports.Add({Import->AsObject()->GetStringField(TEXT("module")),
+			Import->AsObject()->GetStringField(TEXT("name"))});
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	{
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime
+			? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		AddInfo(FString::Printf(TEXT("generated language-error backend=%d"), static_cast<int32>(Backend)));
+		FAvidScriptObjectRegistry Objects;
+		TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> Receiver(
+			NewObject<UAvidScriptGeneratedTypeSessionTestObject>());
+		FAvidScriptObjectHandleResult HandleResult;
+		FAvidScriptWasmHostContext HostContext;
+		HostContext.ObjectRegistry = &Objects;
+		HostContext.OwnerHandle = Objects.RegisterObject(Receiver.Get(), HandleResult, false);
+		FAvidScriptRuntimeSession Session;
+		Session.SetHostContext(HostContext);
+		Session.SetBackendSelectionForTesting(Selection);
+		if (!Session.ConfigureGeneratedTypeInstance(*Receiver, HostContext.OwnerHandle, 0, Types, Error))
+		{
+			AddError(Error);
+			return false;
+		}
+		FAvidScriptWasmReloadResult Loaded;
+		if (!TestTrue(TEXT("load generated language-error instance"),
+				Session.LoadInitialModule(Wasm.GetData(), Wasm.Num(), Manifest, Loaded)))
+		{
+			AddError(Loaded.ErrorMessage);
+			return false;
+		}
+		auto* Runtime = Session.GetLiveRuntimeForTesting();
+		FAvidScriptContextualExportCall Entry;
+		if (!TestTrue(TEXT("prepare generated language-error entry"),
+				Runtime->PrepareContextualExportCall(Metadata->GetStringField(TEXT("export_name")),
+					Entry, Error)))
+		{
+			AddError(Error);
+			return false;
+		}
+		const auto Context = Session.GetTestSnapshot().HostContext;
+		FAvidScriptVmCallFrame Frame;
+		Frame.CellCount = 3;
+		Frame.Cells[0] = HostContext.OwnerHandle.Slot;
+		Frame.Cells[1] = HostContext.OwnerHandle.Generation;
+		Frame.Cells[2] = 5;
+		FAvidScriptVmError Failure;
+		FAvidScriptVmCallResult Value;
+		if (!TestTrue(TEXT("generated value entry returns normally"),
+				Runtime->InvokeInContext(Entry, Context, Frame, Failure, &Value)))
+		{
+			AddError(Failure.Details);
+			return false;
+		}
+		TestEqual(TEXT("generated value matches C#"), static_cast<int32>(Value.Cells[0]), 7);
+		const AvidScript::Managed::FHeap* Heap = Runtime->GetManagedHeapForTesting();
+		TestTrue(TEXT("normal generated call leaves no invocation roots"), Heap
+			&& Heap->GetStats().ActiveFrames == 0 && Heap->GetStats().LiveRoots == 0);
+		Frame.Cells[2] = static_cast<uint32>(-1);
+		TestFalse(TEXT("uncaught generated error fails the call"),
+			Runtime->InvokeInContext(Entry, Context, Frame, Failure, &Value));
+		TestEqual(TEXT("generated error has language category"), Failure.Category,
+			FString(TEXT("language_error_uncaught")));
+		TestTrue(TEXT("generated error retains source position"),
+			Failure.Details.Contains(TEXT("Scripts/GeneratedLanguageError.cs")));
+		TestTrue(TEXT("failed generated call leaves no invocation roots"), Heap
+			&& Heap->GetStats().ActiveFrames == 0 && Heap->GetStats().LiveRoots == 0);
+		FAvidScriptWasmSmokeResult Stopped;
+		TestTrue(TEXT("generated test instance stops"), Session.StopAndUnload(Stopped));
+		TestTrue(TEXT("generated test registration clears"), Session.ClearGeneratedTypeInstance(Error));
+
+		auto Production = FAvidScriptGeneratedTypeRuntimeHost::CreateIsolatedForTesting();
+		ON_SCOPE_EXIT { Production->Shutdown(); };
+		const auto Artifact = FAvidScriptRuntimeArtifact::FromCanonicalWasm(Manifest, Wasm, Selection);
+		TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> A(
+			NewObject<UAvidScriptGeneratedTypeSessionTestObject>());
+		TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> B(
+			NewObject<UAvidScriptGeneratedTypeSessionTestObject>());
+		if (!Production->InstallPackage(Types, Artifact, Error)
+			|| !Production->BeginInstance(*A, 0, Error)
+			|| !Production->BeginInstance(*B, 0, Error))
+		{
+			AddError(Error);
+			return false;
+		}
+		auto* OwnerSession = Production->GetInstanceSessionForTesting(*A);
+		auto* PeerSession = Production->GetInstanceSessionForTesting(*B);
+		const auto Lease = OwnerSession->GetRuntimeLeaseForTesting();
+		int32 Input = 5, Result = 0;
+		FAvidScriptGeneratedCallArgument Argument{&Input};
+		if (!TestTrue(TEXT("production generated UFunction returns normally"),
+				FAvidScriptGeneratedTypeDispatcher::Invoke(A.Get(), 0,
+					static_cast<uint32>(Metadata->GetNumberField(TEXT("member_ordinal"))),
+					MakeArrayView(&Argument, 1), &Result)))
+			return false;
+		TestEqual(TEXT("production generated value matches C#"), Result, 7);
+		Input = -1;
+		TestFalse(TEXT("production generated UFunction reports uncaught error"),
+			FAvidScriptGeneratedTypeDispatcher::Invoke(A.Get(), 0,
+				static_cast<uint32>(Metadata->GetNumberField(TEXT("member_ordinal"))),
+				MakeArrayView(&Argument, 1), &Result));
+		const auto OwnerFault = OwnerSession->GetSnapshot();
+		TestEqual(TEXT("production owner preserves language error category"), OwnerFault.FaultCategory,
+			FString(TEXT("language_error_uncaught")));
+		TestTrue(TEXT("production owner preserves source position"),
+			OwnerFault.FaultDiagnostic.Contains(TEXT("Scripts/GeneratedLanguageError.cs")));
+		TestTrue(TEXT("language error quarantines the shared execution domain"),
+			OwnerFault.bFaultQuarantined && PeerSession->GetSnapshot().bFaultQuarantined);
+		TestFalse(TEXT("language error releases the shared VM lease"), Lease.IsValid());
+		TestFalse(TEXT("peer cannot reenter the failed generated package"),
+			FAvidScriptGeneratedTypeDispatcher::Invoke(B.Get(), 0,
+				static_cast<uint32>(Metadata->GetNumberField(TEXT("member_ordinal"))),
+				MakeArrayView(&Argument, 1), &Result));
+	}
+	return true;
+}
+
 #endif

@@ -21,6 +21,12 @@ public:
 	{
 		return 0;
 	}
+
+	UFUNCTION()
+	int32 GetLanguageErrorValue(int32 Input) const
+	{
+		return Input;
+	}
 };
 
 UCLASS()
