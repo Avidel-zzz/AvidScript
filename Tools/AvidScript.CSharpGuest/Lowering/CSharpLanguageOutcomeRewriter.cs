@@ -26,6 +26,7 @@ public static class CSharpLanguageOutcomeRewriter
         TryRewriteCore(semantic, module, affectedFunctionIds,
             new HashSet<string>(StringComparer.Ordinal),
             new Dictionary<string, IReadOnlyList<CSharpLanguageCatchRoute>>(StringComparer.Ordinal),
+            new Dictionary<string, IReadOnlyList<CSharpLanguageCleanupRoute>>(StringComparer.Ordinal),
             out rewritten, out error);
 
     internal static bool TryRewriteWithProducers(
@@ -38,6 +39,7 @@ public static class CSharpLanguageOutcomeRewriter
         TryRewriteCore(semantic, module, affectedFunctionIds,
             producerFunctionIds,
             new Dictionary<string, IReadOnlyList<CSharpLanguageCatchRoute>>(StringComparer.Ordinal),
+            new Dictionary<string, IReadOnlyList<CSharpLanguageCleanupRoute>>(StringComparer.Ordinal),
             out rewritten, out error);
 
     internal static bool TryRewriteWithHandlers(
@@ -46,10 +48,11 @@ public static class CSharpLanguageOutcomeRewriter
         IReadOnlySet<string> affectedFunctionIds,
         IReadOnlySet<string> producerFunctionIds,
         IReadOnlyDictionary<string, IReadOnlyList<CSharpLanguageCatchRoute>> catchRoutes,
+        IReadOnlyDictionary<string, IReadOnlyList<CSharpLanguageCleanupRoute>> cleanupRoutes,
         out GuestModule? rewritten,
         out string? error) =>
         TryRewriteCore(semantic, module, affectedFunctionIds,
-            producerFunctionIds, catchRoutes, out rewritten, out error);
+            producerFunctionIds, catchRoutes, cleanupRoutes, out rewritten, out error);
 
     private static bool TryRewriteCore(
         SemanticDocument semantic,
@@ -57,6 +60,7 @@ public static class CSharpLanguageOutcomeRewriter
         IReadOnlySet<string> affectedFunctionIds,
         IReadOnlySet<string> producerFunctionIds,
         IReadOnlyDictionary<string, IReadOnlyList<CSharpLanguageCatchRoute>> catchRoutes,
+        IReadOnlyDictionary<string, IReadOnlyList<CSharpLanguageCleanupRoute>> cleanupRoutes,
         out GuestModule? rewritten,
         out string? error)
     {
@@ -65,6 +69,8 @@ public static class CSharpLanguageOutcomeRewriter
         if (semantic is null || module is null || affectedFunctionIds is null || affectedFunctionIds.Count == 0
             || catchRoutes is null || catchRoutes.Keys.Any(id => !affectedFunctionIds.Contains(id)
                 || producerFunctionIds.Contains(id))
+            || cleanupRoutes is null || cleanupRoutes.Keys.Any(id => !affectedFunctionIds.Contains(id)
+                || producerFunctionIds.Contains(id) || catchRoutes.ContainsKey(id))
             || module.LanguageOutcomeTypes is not null)
             return Fail("Expected an ordinary Guest module and a nonempty outcome effect set.", out error);
         if (!semantic.Succeeded || semantic.ExceptionFlows is not null
@@ -93,7 +99,8 @@ public static class CSharpLanguageOutcomeRewriter
                 return Fail($"Affected function '{id}' has no unique Semantic body.", out error);
             if (!producerFunctionIds.Contains(id)
                 && (semantic.AsyncMethods.Any(method => method.MethodSymbolId == callable.MethodSymbolId)
-                    || !catchRoutes.ContainsKey(id) && ContainsStructuredCleanup(bodies[0].Root)))
+                    || !catchRoutes.ContainsKey(id) && !cleanupRoutes.ContainsKey(id)
+                        && ContainsStructuredCleanup(bodies[0].Root)))
                 return Fail($"Function '{callable.MethodSymbolId}' needs cleanup-aware outcome lowering.", out error);
         }
         if (affectedFunctionIds.Any(id => !functions.ContainsKey(id))
@@ -161,6 +168,9 @@ public static class CSharpLanguageOutcomeRewriter
             }
             if (!TryRewriteFunction(function, functions, affectedFunctionIds, outcomeByValueType,
                 catchRoutes.TryGetValue(function.Id, out var routes) ? routes : Array.Empty<CSharpLanguageCatchRoute>(),
+                cleanupRoutes.TryGetValue(function.Id, out var cleanups)
+                    ? cleanups : Array.Empty<CSharpLanguageCleanupRoute>(),
+                cleanupRoutes.ContainsKey(function.Id),
                 int32.Id, rootId, out GuestFunction? result, out error)) return false;
             rewrittenFunctions.Add(result!);
         }
@@ -194,6 +204,8 @@ public static class CSharpLanguageOutcomeRewriter
         IReadOnlySet<string> affected,
         IReadOnlyDictionary<string, string> outcomeByValueType,
         IReadOnlyList<CSharpLanguageCatchRoute> catchRoutes,
+        IReadOnlyList<CSharpLanguageCleanupRoute> cleanupRoutes,
+        bool requireCleanupCoverage,
         string int32TypeId,
         string rootTypeId,
         out GuestFunction? rewritten,
@@ -207,6 +219,10 @@ public static class CSharpLanguageOutcomeRewriter
             .Select(register => register.Id).ToHashSet(StringComparer.Ordinal);
         HashSet<string> blockIds = function.Blocks.Select(block => block.Id)
             .ToHashSet(StringComparer.Ordinal);
+        Dictionary<string, GuestBasicBlock> sourceBlocks = function.Blocks
+            .ToDictionary(block => block.Id, StringComparer.Ordinal);
+        Dictionary<string, string> registerTypes = function.Parameters.Concat(function.Locals)
+            .ToDictionary(register => register.Id, register => register.TypeId, StringComparer.Ordinal);
         if (catchRoutes.Any(route => !blockIds.Contains(route.SourceBlockId)
                 || route.Matches.Count == 0
                 || route.Matches.Any(match => match.TypeToken <= 0
@@ -216,7 +232,14 @@ public static class CSharpLanguageOutcomeRewriter
             || catchRoutes.Select(route => route.SourceBlockId).Distinct(StringComparer.Ordinal).Count()
                 != catchRoutes.Count)
             return Fail($"Function '{function.Id}' has an invalid catch route.", out error);
+        if (cleanupRoutes.Any(route => !blockIds.Contains(route.SourceBlockId)
+                || route.CleanupBlockIds.Any(id => !blockIds.Contains(id)))
+            || cleanupRoutes.Select(route => route.SourceBlockId)
+                .Distinct(StringComparer.Ordinal).Count() != cleanupRoutes.Count)
+            return Fail($"Function '{function.Id}' has an invalid cleanup route.", out error);
         Dictionary<string, CSharpLanguageCatchRoute> catchByBlock = catchRoutes
+            .ToDictionary(route => route.SourceBlockId, StringComparer.Ordinal);
+        Dictionary<string, CSharpLanguageCleanupRoute> cleanupByBlock = cleanupRoutes
             .ToDictionary(route => route.SourceBlockId, StringComparer.Ordinal);
         int registerOrdinal = 0, blockOrdinal = 0;
         string Register(string typeId)
@@ -246,6 +269,8 @@ public static class CSharpLanguageOutcomeRewriter
                     continue;
                 }
                 GuestFunction callee = functions[target];
+                if (requireCleanupCoverage && !cleanupByBlock.ContainsKey(source.Id))
+                    return Fail($"Function '{function.Id}' has an unchecked error cleanup path.", out error);
                 string calledOutcome = outcomeByValueType[callee.ReturnTypeId];
                 string result = Register(calledOutcome);
                 string status = Register(int32TypeId);
@@ -280,6 +305,46 @@ public static class CSharpLanguageOutcomeRewriter
                         testBlock = nextBlock;
                     }
                     unhandledBlock = testBlock;
+                }
+                if (cleanupByBlock.TryGetValue(source.Id, out CSharpLanguageCleanupRoute? cleanupRoute))
+                {
+                    foreach (string cleanupId in cleanupRoute.CleanupBlockIds)
+                    {
+                        GuestBasicBlock cleanup = sourceBlocks[cleanupId];
+                        if (cleanup.Terminator.Kind != "branch"
+                            || cleanup.Instructions.Any(item => item.Op == "call_indirect"
+                                || item.Op == "call" && item.TargetId is { } called
+                                    && affected.Contains(called)))
+                            return Fail($"Function '{function.Id}' has a throwing or branching finally.", out error);
+                        Dictionary<string, string> renamed = new(StringComparer.Ordinal);
+                        List<GuestInstruction> copied = new();
+                        foreach (GuestInstruction item in cleanup.Instructions)
+                        {
+                            string[] operands = item.OperandIds.Select(id =>
+                                renamed.TryGetValue(id, out string? replacement) ? replacement : id).ToArray();
+                            string? targetId = item.TargetId is { } oldTarget
+                                && renamed.TryGetValue(oldTarget, out string? newTarget)
+                                    ? newTarget : item.TargetId;
+                            string? resultId = null;
+                            if (item.ResultId is { } oldResult)
+                            {
+                                if (!registerTypes.TryGetValue(oldResult, out string? typeId))
+                                    return Fail($"Function '{function.Id}' has an untyped finally value.", out error);
+                                resultId = Register(typeId);
+                                renamed[oldResult] = resultId;
+                            }
+                            copied.Add(item with
+                            {
+                                ResultId = resultId,
+                                OperandIds = operands,
+                                TargetId = targetId,
+                            });
+                        }
+                        string nextBlock = Block();
+                        blocks.Add(new GuestBasicBlock(unhandledBlock, copied,
+                            new GuestTerminator("branch", null, nextBlock, null, null)));
+                        unhandledBlock = nextBlock;
+                    }
                 }
                 if (calledOutcome != outcomeType)
                 {

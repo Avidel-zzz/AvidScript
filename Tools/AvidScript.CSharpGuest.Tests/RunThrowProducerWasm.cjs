@@ -130,7 +130,10 @@ for (const entry of WebAssembly.Module.imports(wasmModule)) {
 }
 instance = new WebAssembly.Instance(wasmModule, imports);
 const multipleCatches = typeof instance.exports.catch_source_probe_a === 'function';
-const catches = multipleCatches || typeof instance.exports.catch_source_probe === 'function';
+const finallyCatches = typeof instance.exports.finally_source_probe === 'function';
+const nestedFinallyCatches = typeof instance.exports.nested_finally_source_probe === 'function';
+const catches = multipleCatches || finallyCatches || nestedFinallyCatches
+  || typeof instance.exports.catch_source_probe === 'function';
 if (multipleCatches) {
   const first = instance.exports.catch_source_probe_a();
   const second = instance.exports.catch_source_probe_b();
@@ -138,10 +141,11 @@ if (multipleCatches) {
     throw new Error(`Multi-producer catch results = ${first}, ${second}; expected 11, 22`);
   }
 } else {
-  const actual = catches
-    ? instance.exports.catch_source_probe()
-    : instance.exports.throw_source_probe();
-  const expected = catches ? 7 : 3;
+  const actual = nestedFinallyCatches
+    ? instance.exports.nested_finally_source_probe()
+    : finallyCatches ? instance.exports.finally_source_probe()
+    : catches ? instance.exports.catch_source_probe() : instance.exports.throw_source_probe();
+  const expected = nestedFinallyCatches ? 11 : finallyCatches ? 1 : catches ? 7 : 3;
   if (actual !== expected) throw new Error(`source probe() = ${actual}; expected ${expected}`);
 }
 if (allocations !== (multipleCatches ? 2 : 1) || frames.size !== 0 || roots.size !== 0) {
@@ -158,7 +162,9 @@ if (catches) {
   if (objects.size !== 0) throw new Error('Handled error object survived collection');
   process.stdout.write(multipleCatches
     ? 'C# source multi-catch WASM: 3/3 passed\n'
-    : 'C# source catch WASM: 2/2 passed\n');
+    : nestedFinallyCatches ? 'C# source nested-finally-catch WASM: 2/2 passed\n'
+    : finallyCatches ? 'C# source finally-catch WASM: 2/2 passed\n'
+      : 'C# source catch WASM: 2/2 passed\n');
   process.exit(0);
 }
 if (instance.exports.avid_on_begin_play) {

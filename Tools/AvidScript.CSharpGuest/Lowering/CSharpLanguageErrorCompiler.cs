@@ -61,6 +61,10 @@ public static class CSharpLanguageErrorCompiler
             .Select(CSharpGuestIds.Function).ToHashSet(StringComparer.Ordinal);
         if (producerIds.Any(id => !affected.Contains(id)))
             return Fail("An exception producer is absent from its effect closure.", out error);
+        if (!CSharpLanguageCleanupRoutePlanner.TryBuild(semantic, affected,
+                out IReadOnlyDictionary<string, IReadOnlyList<CSharpLanguageCleanupRoute>> cleanupRoutes,
+                out error))
+            return false;
         CSharpLanguageErrorTokenCatalog tokens = CSharpThrowProducerLowerer.BuildCatalog(flows);
         Dictionary<string, int> sourceLengths = new(StringComparer.Ordinal);
         foreach (SemanticExceptionFlow item in flows)
@@ -139,7 +143,7 @@ public static class CSharpLanguageErrorCompiler
             Exports = lowered.Module.Exports.Except(affectedExports).ToArray(),
         };
         if (!CSharpLanguageOutcomeRewriter.TryRewriteWithHandlers(ordinary, internalModule,
-                affected, producerIds, catchRoutes,
+                affected, producerIds, catchRoutes, cleanupRoutes,
                 out GuestModule? outcomes, out error)
             || outcomes is null)
             return false;

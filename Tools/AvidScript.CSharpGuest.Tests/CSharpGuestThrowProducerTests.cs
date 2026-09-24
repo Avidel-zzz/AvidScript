@@ -1,12 +1,16 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Reflection;
+using System.Runtime.Loader;
 using System.Text.Json;
 using AvidScript.CSharpFrontend;
 using AvidScript.CSharpGuest;
 using AvidScript.CSharpSemantic;
 using AvidScript.GuestIr;
 using AvidScript.WasmBackend;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 
 internal static class CSharpGuestThrowProducerTests
 {
@@ -21,7 +25,9 @@ internal static class CSharpGuestThrowProducerTests
         LocalThrowUsesHandlerLowering();
         MultipleLocalThrowSitesKeepDistinctSourceTokens();
         NonmatchingLocalCatchPropagatesLanguageError();
-        return 9;
+        FinallyRunsBeforeOuterCatch();
+        NestedFinallyRunsInnerToOuter();
+        return 11;
     }
 
     private static void MultipleThrowProducersKeepDistinctSourceTokens()
@@ -388,9 +394,8 @@ internal static class CSharpGuestThrowProducerTests
                 static int Fail() { throw new System.Exception(); }
                 static int Run()
                 {
-                    int value = 0;
                     try { return Fail(); }
-                    finally { value = 1; }
+                    finally { throw new System.Exception(); }
                 }
             }
             """;
@@ -398,7 +403,7 @@ internal static class CSharpGuestThrowProducerTests
         Check(!CSharpLanguageErrorCompiler.TryLower(cleanupSemantic, new string('a', 64),
                 out _, out string? cleanupError)
             && cleanupError is not null && cleanupError.Contains("cleanup", StringComparison.Ordinal),
-            "finally cannot be skipped by the handler-only graph materializer");
+            "a throwing finally needs error replacement semantics before it can execute");
     }
 
     private static void NonmatchingLocalCatchPropagatesLanguageError()
@@ -484,6 +489,160 @@ internal static class CSharpGuestThrowProducerTests
         {
             Directory.CreateDirectory(output);
             File.WriteAllBytes(Path.Combine(output, "multi-local-catch.wasm"), wasm.Bytes);
+        }
+    }
+
+    private static void FinallyRunsBeforeOuterCatch()
+    {
+        const string source = """
+            class Script
+            {
+                static int CleanupCount;
+                static int Fail() { throw new System.Exception(); }
+                static int Run()
+                {
+                    try { return Fail(); }
+                    finally { CleanupCount = CleanupCount + 1; }
+                }
+                static int Catch()
+                {
+                    try { return Run(); }
+                    catch (System.Exception) { return CleanupCount; }
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay() { Catch(); }
+            }
+            """;
+        Check(ReferenceCatch(source) == 1,
+            "the CLR reference runs finally before the outer catch");
+        SemanticDocument semantic = Analyze(source);
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "a language error bypassed finally");
+        GuestModule module = compiled!.Module;
+        GuestFunction run = module.Functions.Single(function =>
+            function.Id.Contains(".Run(", StringComparison.Ordinal));
+        Check(run.Blocks.Any(block => block.Id.StartsWith("outcome:block:", StringComparison.Ordinal)
+                && block.Instructions.Any(instruction => instruction.Op == "global_store"))
+            && GuestModuleValidator.Validate(module).Succeeded,
+            "the error route must execute a copy of the source cleanup block");
+        GuestFunction handler = module.Functions.Single(function =>
+            function.Id.Contains(".Catch(", StringComparison.Ordinal));
+        GuestModule probe = AddCatchProbe(module, handler,
+            "function:finally_source_probe", "finally_source_probe");
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "the error cleanup must compile to executable WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "finally-catch.wasm"), wasm.Bytes);
+        }
+
+        const string branchingSource = """
+            class Script
+            {
+                static int CleanupCount;
+                static int Fail() { throw new System.Exception(); }
+                static int Run()
+                {
+                    try { Fail(); }
+                    finally
+                    {
+                        if (CleanupCount == 0) CleanupCount = 1;
+                    }
+                    return 0;
+                }
+            }
+            """;
+        SemanticDocument branching = Analyze(branchingSource);
+        bool branchingLowered = CSharpLanguageErrorCompiler.TryLower(branching, new string('a', 64),
+            out _, out string? branchingError);
+        Check(!branchingLowered
+            && branchingError is not null
+            && branchingError.Contains("cleanup", StringComparison.Ordinal),
+            $"branching finally must fail closed: lowered={branchingLowered}, error={branchingError}");
+    }
+
+    private static void NestedFinallyRunsInnerToOuter()
+    {
+        const string source = """
+            class Script
+            {
+                static int CleanupCount;
+                static int Fail() { throw new System.Exception(); }
+                static int Run()
+                {
+                    try
+                    {
+                        try { Fail(); }
+                        finally { CleanupCount = CleanupCount + 1; }
+                    }
+                    finally { CleanupCount = CleanupCount + 10; }
+                    return 0;
+                }
+                static int Catch()
+                {
+                    try { return Run(); }
+                    catch (System.Exception) { return CleanupCount; }
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay() { Catch(); }
+            }
+            """;
+        Check(ReferenceCatch(source) == 11,
+            "the CLR reference runs nested finally blocks inside-out");
+        SemanticDocument semantic = Analyze(source);
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "nested finally failed to compile");
+        GuestFunction run = compiled!.Module.Functions.Single(function =>
+            function.Id.Contains(".Run(", StringComparison.Ordinal));
+        Check(run.Blocks.Count(block => block.Id.StartsWith("outcome:block:", StringComparison.Ordinal)
+                && block.Instructions.Any(instruction => instruction.Op == "global_store")) >= 2
+            && GuestModuleValidator.Validate(compiled.Module).Succeeded,
+            "the error route must execute the inner then outer cleanup blocks");
+        GuestFunction handler = compiled.Module.Functions.Single(function =>
+            function.Id.Contains(".Catch(", StringComparison.Ordinal));
+        GuestModule probe = AddCatchProbe(compiled.Module, handler,
+            "function:nested_finally_source_probe", "nested_finally_source_probe");
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "nested error cleanup must compile to executable WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "nested-finally-catch.wasm"), wasm.Bytes);
+        }
+    }
+
+    private static int ReferenceCatch(string source)
+    {
+        string[] assemblyPaths = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
+            .Split(Path.PathSeparator);
+        CSharpCompilation compilation = CSharpCompilation.Create(
+            "AvidScriptLanguageErrorOracle",
+            new[] { CSharpSyntaxTree.ParseText(source) },
+            assemblyPaths.Select(path => MetadataReference.CreateFromFile(path)),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary,
+                optimizationLevel: OptimizationLevel.Release));
+        using MemoryStream bytes = new();
+        var result = compilation.Emit(bytes);
+        Check(result.Success,
+            string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.ToString())));
+        bytes.Position = 0;
+        AssemblyLoadContext context = new("avidscript-language-error-oracle", isCollectible: true);
+        try
+        {
+            Type script = context.LoadFromStream(bytes).GetType("Script")!;
+            MethodInfo method = script.GetMethod("Catch", BindingFlags.Static | BindingFlags.NonPublic)!;
+            return (int)method.Invoke(null, null)!;
+        }
+        finally
+        {
+            context.Unload();
         }
     }
 

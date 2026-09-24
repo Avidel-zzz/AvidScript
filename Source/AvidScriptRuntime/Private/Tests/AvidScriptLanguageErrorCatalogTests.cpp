@@ -360,6 +360,47 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 		TestNull(TEXT("local catch catalog is released on unload"),
 			Runtime.GetLanguageErrorCatalog());
 	}
+	const TArray<FString> CleanupFixtures = {
+		TEXT("finally-catch.wasm"), TEXT("nested-finally-catch.wasm")};
+	for (const FString& FixtureName : CleanupFixtures)
+	{
+		const FString FixturePath = FPaths::Combine(FPaths::ProjectSavedDir(),
+			TEXT("AvidScriptLanguageErrorCatalogTests/GuestFixtures"), FixtureName);
+		TArray<uint8> FixtureWasm;
+		if (!TestTrue(*FString::Printf(TEXT("read C# cleanup fixture %s"), *FixtureName),
+				FFileHelper::LoadFileToArray(FixtureWasm, *FixturePath)))
+			return false;
+		for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
+		{
+			FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
+			FAvidScriptWasmSmokeResult Result;
+			const FString FixtureLabel = FString::Printf(TEXT("%s loads"), *FixtureName);
+			if (!TestTrue(*AvidScriptRuntimeLaneLabel(Lane, *FixtureLabel),
+					Runtime.LoadModule(FixtureWasm.GetData(), FixtureWasm.Num(), ModuleId, Result)))
+			{
+				AddError(Result.ErrorMessage);
+				continue;
+			}
+			TestAvidScriptRuntimeLaneIdentity(*this, Lane, Result);
+			const FAvidScriptLanguageErrorCatalog* Catalog = Runtime.GetLanguageErrorCatalog();
+			const FString* Type = Catalog ? Catalog->FindType(1) : nullptr;
+			const FAvidScriptLanguageErrorSource* Source = Catalog ? Catalog->FindSource(1) : nullptr;
+			TestTrue(*FString::Printf(TEXT("%s retains its throw type and source"), *FixtureName),
+				Type && Source && *Type == TEXT("type:global::System.Exception")
+				&& Source->SourceId == TEXT("Scripts/SourceThrow.cs")
+				&& !Catalog->FindSource(2));
+			if (!TestTrue(*AvidScriptRuntimeLaneLabel(Lane,
+					*FString::Printf(TEXT("%s BeginPlay succeeds"), *FixtureName)),
+					Runtime.BeginPlay(Result)))
+				AddError(Result.ErrorMessage);
+			const AvidScript::Managed::FHeap* Heap = Runtime.GetManagedHeapForTesting();
+			TestTrue(*FString::Printf(TEXT("%s releases managed invocation roots"), *FixtureName),
+				Heap && Heap->GetStats().ActiveFrames == 0 && Heap->GetStats().LiveRoots == 0);
+			Runtime.Unload();
+			TestNull(*FString::Printf(TEXT("%s catalog is released on unload"), *FixtureName),
+				Runtime.GetLanguageErrorCatalog());
+		}
+	}
 	return true;
 }
 
