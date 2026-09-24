@@ -80,6 +80,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'C# local-catch-rethrow-branching-finally Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'nested-rethrow.wasm')
     if ($LASTEXITCODE -ne 0) { throw 'C# nested-rethrow Node WASM probe failed.' }
+    & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'nested-catch-branching-finally.wasm')
+    if ($LASTEXITCODE -ne 0) { throw 'C# nested-catch-branching-finally Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'catch-variable.wasm')
     if ($LASTEXITCODE -ne 0) { throw 'C# catch-variable Node WASM probe failed.' }
 }

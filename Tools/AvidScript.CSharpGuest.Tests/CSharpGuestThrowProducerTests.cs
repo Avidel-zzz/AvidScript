@@ -48,8 +48,9 @@ internal static class CSharpGuestThrowProducerTests
         CatchLocalRethrowRunsBranchingFinally();
         CatchRethrowPreservesOriginalError();
         NestedCatchRethrowReachesOuterHandler();
+        NestedCatchRethrowRunsBranchingOuterFinally();
         CatchVariableReadsBoundError();
-        return 32;
+        return 33;
     }
 
     private static void MultipleThrowProducersKeepDistinctSourceTokens()
@@ -2537,6 +2538,101 @@ internal static class CSharpGuestThrowProducerTests
         {
             Directory.CreateDirectory(output);
             File.WriteAllBytes(Path.Combine(output, "nested-rethrow.wasm"), wasm.Bytes);
+        }
+    }
+
+    private static void NestedCatchRethrowRunsBranchingOuterFinally()
+    {
+        const string source = """
+            class Script
+            {
+                static bool FailNow;
+                static bool UseFirst;
+                static int Count;
+                static int Fail() { throw new System.Exception(); }
+                static int Choose() { if (FailNow) return Fail(); return 7; }
+                static int Run()
+                {
+                    try
+                    {
+                        try { return Choose(); }
+                        catch (System.Exception) { throw; }
+                    }
+                    catch (System.Exception) { return 5; }
+                    finally
+                    {
+                        if (UseFirst) { Count = Count + 1; }
+                        else { Count = Count + 2; }
+                        Count = Count + 10;
+                    }
+                }
+                static int NormalFirst()
+                {
+                    FailNow = false; UseFirst = true; Count = 0;
+                    return Run() + Count * 100;
+                }
+                static int NormalSecond()
+                {
+                    FailNow = false; UseFirst = false; Count = 0;
+                    return Run() + Count * 100;
+                }
+                static int HandledFirst()
+                {
+                    FailNow = true; UseFirst = true; Count = 0;
+                    return Run() + Count * 100;
+                }
+                static int HandledSecond()
+                {
+                    FailNow = true; UseFirst = false; Count = 0;
+                    return Run() + Count * 100;
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay()
+                {
+                    NormalFirst(); NormalSecond(); HandledFirst(); HandledSecond();
+                }
+            }
+            """;
+        Check(ReferenceCatch(source, "NormalFirst") == 1107
+            && ReferenceCatch(source, "NormalSecond") == 1207
+            && ReferenceCatch(source, "HandledFirst") == 1105
+            && ReferenceCatch(source, "HandledSecond") == 1205,
+            "the CLR reference must run outer cleanup after normal and nested handled returns");
+        SemanticDocument semantic = Analyze(source);
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null,
+            error ?? "nested catch branching cleanup failed to compile");
+        GuestModule module = compiled!.Module;
+        Check(module.LanguageErrorCatalog is { Types.Count: 1, Sources.Count: 1 },
+            "nested catch rethrow must retain only the original source token");
+        GuestFunction run = module.Functions.Single(function =>
+            function.Id.Contains(".Run(", StringComparison.Ordinal));
+        GuestModule probe = AddLocalCleanupCollectProbe(module, run.Id, 6);
+        foreach ((string method, string exportName) in new[]
+        {
+            ("NormalFirst", "nested_catch_cleanup_normal_first_probe"),
+            ("NormalSecond", "nested_catch_cleanup_normal_second_probe"),
+            ("HandledFirst", "nested_catch_cleanup_handled_first_probe"),
+            ("HandledSecond", "nested_catch_cleanup_handled_second_probe"),
+        })
+        {
+            GuestFunction handler = module.Functions.Single(function =>
+                function.Id.Contains("." + method + "(", StringComparison.Ordinal));
+            probe = AddCatchProbe(probe, handler, "function:" + exportName, exportName);
+        }
+        GuestValidationResult validation = GuestModuleValidator.Validate(probe);
+        Check(validation.Succeeded,
+            string.Join(" | ", validation.Diagnostics.Select(item => item.Message)));
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "nested catch branching cleanup must compile to executable WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "nested-catch-branching-finally.wasm"),
+                wasm.Bytes);
         }
     }
 

@@ -64,7 +64,7 @@ public static void Tick(float deltaSeconds)
 | Android / iOS | 尚未验收 |
 | C# | 支持项目实现的语法子集；不能直接运行任意 .NET 项目或 NuGet 包 |
 | RPC / 复制属性 / RepNotify | 有独立进程测试；真实多人游戏联机尚未验收 |
-| `try` / `catch` / `finally` | 受限写法仅在专用测试入口可用，普通脚本构建尚未启用；见[实现范围](Docs/Phase66/P66.C3_Language_Error_Channel_Contract.md) |
+| `try` / `catch` / `finally` | 包括嵌套 `catch` 和有界分支 `finally` 的受限写法仅在专用测试入口可用；普通脚本构建尚未启用，见[实现范围](Docs/Phase66/P66.C3_Language_Error_Channel_Contract.md) |
 
 ## Development
 
