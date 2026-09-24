@@ -21,7 +21,47 @@ internal static class GuestModuleValidationTests
         ObjectCapabilityFamiliesFailClosed();
         VoidSemanticsUseTypeShape();
         ExportsMustBeUniqueAndTargetFunctions();
-        return 15;
+        TaskResultImportRequiresItsOwnVersionAndSignature();
+        return 16;
+    }
+
+    private static void TaskResultImportRequiresItsOwnVersionAndSignature()
+    {
+        GuestModule baseline = CreateMinimalModule();
+        GuestType int64 = new("type:int64", "scalar", "i64",
+            Array.Empty<GuestField>(), null, null, 8, 8);
+        GuestImport task = new("import:task_i32_v1", "avidscript", "avid_task_i32_v1",
+            new[] { "type:int32", "type:int64", "type:int32", "type:int32" }, "type:int64");
+        GuestModule module = baseline with
+        {
+            SchemaVersion = 18,
+            IrVersion = "1.17",
+            Provenance = baseline.Provenance with
+            {
+                SemanticSchemaVersion = 35,
+                SemanticVersion = "1.44",
+            },
+            Types = baseline.Types.Append(int64).ToArray(),
+            Imports = new[] { task },
+        };
+        Assert(GuestModuleValidator.Validate(module).Succeeded,
+            "IR 18 accepts the canonical Task<int> Host ABI");
+        byte[] bytes = GuestIrSerializer.Serialize(module);
+        Assert(bytes.SequenceEqual(GuestIrSerializer.Serialize(GuestIrSerializer.Deserialize(bytes))),
+            "Task<int> Guest IR has a canonical round trip");
+        AssertDiagnostic(module with { SchemaVersion = 17, IrVersion = "1.16" }, "ASIR1028");
+        AssertDiagnostic(module with { Provenance = baseline.Provenance }, "ASIR1028");
+        AssertDiagnostic(module with { Imports = Array.Empty<GuestImport>() }, "ASIR1028");
+        AssertDiagnostic(module with { Imports = new[] { task, task with { Id = "import:duplicate_task" } } },
+            "ASIR1028");
+        AssertDiagnostic(module with { Imports = new[] { task with
+        {
+            ParameterTypeIds = new[] { "type:int64", "type:int64", "type:int32", "type:int32" },
+        } } }, "ASIR1028");
+        AssertDiagnostic(module with { Imports = new[] { task with { ReturnTypeId = "type:int32" } } },
+            "ASIR1028");
+        AssertDiagnostic(module with { Types = baseline.Types.Append(int64 with { Size = 4 }).ToArray() },
+            "ASIR1028");
     }
 
     private static void MinimalModuleIsValid()
