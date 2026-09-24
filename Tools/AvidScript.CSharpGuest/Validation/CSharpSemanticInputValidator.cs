@@ -86,10 +86,10 @@ internal static class CSharpSemanticInputValidator
                 || SemanticAsyncInvocationValidator.IsValid(document))
             && ValidateAsyncMethods(document)
             && ValidateMethods(document.Methods)
-            && (document.SemanticVersion is "1.39" or SemanticContract.CurrentSemanticVersion
+            && (document.SemanticVersion is "1.39" or SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion
                 || !document.Methods.Any(method => EnumerateOperations(method.Root)
                     .Any(operation => operation.Kind == "try")))
-            && (document.SemanticVersion == SemanticContract.CurrentSemanticVersion
+            && (document.SemanticVersion is SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion
                 || !document.Symbols.Any(symbol => symbol.Kind == "local"
                     && symbol.Id.StartsWith("symbol:compiler_local:", StringComparison.Ordinal)
                     && symbol.Id.EndsWith(":enumerator", StringComparison.Ordinal)))
@@ -1182,9 +1182,15 @@ internal static class CSharpSemanticInputValidator
             return method.CompilerLocals.Count == 0;
         }
         string prefix = $"symbol:compiler_local:{method.MethodSymbolId}:foreach:";
+        string returnValueId = $"symbol:compiler_local:{method.MethodSymbolId}:finally_return";
         return method.CompilerLocals.Count <= SemanticAsyncMethod.MaximumControlFlowSegments * 2
             && method.CompilerLocals.All(local => local is not null
-                && local.SymbolId.StartsWith(prefix, StringComparison.Ordinal)
+                && (local.SymbolId.StartsWith(prefix, StringComparison.Ordinal)
+                    || document.SchemaVersion == SemanticContract.TaskResultSchemaVersion
+                        && method.TaskResultTypeId is not null
+                        && local.SymbolId == returnValueId
+                        && local.Name == "<finally_return>"
+                        && local.TypeId == method.TaskResultTypeId)
                 && !string.IsNullOrWhiteSpace(local.Name)
                 && document.Types.Any(type => type.Id == local.TypeId)
                 && IsValidSpan(local.Span, document.Source.Length)
@@ -1195,7 +1201,16 @@ internal static class CSharpSemanticInputValidator
             && method.CompilerLocals.Select(local => local.SymbolId)
                 .SequenceEqual(method.CompilerLocals
                     .Select(local => local.SymbolId)
-                    .OrderBy(id => id, StringComparer.Ordinal));
+                    .OrderBy(id => id, StringComparer.Ordinal))
+            && (!method.CompilerLocals.Any(local => local.SymbolId == returnValueId)
+                || document.Methods.Any(body => body.MethodSymbolId == method.MethodSymbolId
+                    && EnumerateOperations(body.Root).Any(operation => operation.Kind == "try"))
+                    && method.Segments.Any(segment => segment.Statements.Any(statement =>
+                        statement.TargetSymbolId == returnValueId))
+                    && method.Segments.Any(segment => segment.Transfer is
+                        { Kind: SemanticAsyncMethod.ReturnTransferKind,
+                            Condition: { Kind: "local_reference", SymbolId: var symbolId } }
+                        && symbolId == returnValueId));
     }
 
     private static bool UsesExactAsyncStateFlow(string semanticVersion)

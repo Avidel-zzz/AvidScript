@@ -25,8 +25,36 @@ internal static class SemanticAsyncTests
         TaskIntResultProjectsTypedReturn();
         TaskIntAwaitPublishesDirectTarget();
         TaskIntAwaitProjectsValueArguments();
+        TaskIntSuspendedCleanupFailsClosed();
         FailedExceptionPlanKeepsItsContractBesideTaskSource();
-        return 16;
+        return 17;
+    }
+
+    private static void TaskIntSuspendedCleanupFailsClosed()
+    {
+        const string source = """
+            using AvidScript;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                private static int Cleanups;
+                public static async Task<int> LoadScoreAsync()
+                {
+                    try
+                    {
+                        await AvidContinuations.NextTickAsync();
+                        return 12;
+                    }
+                    finally
+                    {
+                        Cleanups++;
+                    }
+                }
+            }
+            """;
+        SemanticDocument rejected = Analyze(source, "Scripts/TaskIntSuspendedCleanup.cs");
+        Assert(!rejected.Succeeded && rejected.Diagnostics.Any(item => item.Code == "ASCS5420"),
+            "await inside try/finally must fail until suspended cleanup is owned by the task");
     }
 
     private static void TaskIntAwaitProjectsValueArguments()

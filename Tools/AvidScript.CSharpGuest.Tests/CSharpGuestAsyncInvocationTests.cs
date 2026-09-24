@@ -217,6 +217,41 @@ internal static class CSharpGuestAsyncInvocationTests
             }
             """;
         CompileTaskFixture("combined", combinedSource);
+        const string cleanupSource = """
+            using AvidScript;
+            using System.Runtime.InteropServices;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static int Result;
+                private static int Cleanups;
+                private static T Identity<T>(T value) => value;
+                public static async Task<int> LoadScoreAsync()
+                {
+                    await AvidContinuations.NextTickAsync();
+                    int total = 0;
+                    try
+                    {
+                        foreach (int value in new[] { 3, 5, 8 })
+                        {
+                            total += Identity<int>(value);
+                        }
+                        return total;
+                    }
+                    finally
+                    {
+                        Cleanups++;
+                    }
+                }
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay()
+                {
+                    int score = await LoadScoreAsync();
+                    Result = score * 10 + Cleanups;
+                }
+            }
+            """;
+        CompileTaskFixture("cleanup", cleanupSource);
         const string cancellationSource = """
             using AvidScript;
             using System.Runtime.InteropServices;
@@ -284,14 +319,14 @@ internal static class CSharpGuestAsyncInvocationTests
             }
             """;
         CompileTaskFixture("cancelled-chain", cancellationChainSource);
-        return count + 5;
+        return count + 6;
     }
 
     private static void CompileTaskFixture(string scenario, string source)
     {
         SemanticDocument document = CSharpGuestContinuationTests.Analyze(
             source, "Scripts/TaskIntAbiBoundary_" + scenario + ".cs");
-        if (scenario == "combined")
+        if (scenario is "combined" or "cleanup")
             document = SemanticSerializer.Deserialize(SemanticSerializer.Serialize(document));
         Check(document.Succeeded
             && document.SchemaVersion == SemanticContract.TaskResultSchemaVersion,
@@ -336,6 +371,30 @@ internal static class CSharpGuestAsyncInvocationTests
             };
             Check(!CSharpGuestLowerer.Lower(missingProducer, new string('d', 64)).Succeeded,
                 "combined: dropping the awaited producer must fail validation");
+        }
+        if (scenario == "cleanup")
+        {
+            SemanticAsyncMethod producer = document.AsyncMethods.Single(method =>
+                method.TaskResultTypeId == "type:int32");
+            SemanticAsyncCompilerLocal returnLocal = producer.CompilerLocals.Single(local =>
+                local.SymbolId.EndsWith(":finally_return", StringComparison.Ordinal));
+            Check(returnLocal.Name == "<finally_return>"
+                && returnLocal.TypeId == "type:int32",
+                "cleanup: return value must use the validated finally storage");
+            SemanticDocument forgedLocal = document with
+            {
+                AsyncMethods = document.AsyncMethods.Select(method =>
+                    method.MethodSymbolId == producer.MethodSymbolId
+                        ? method with
+                        {
+                            CompilerLocals = method.CompilerLocals.Select(local =>
+                                local.SymbolId == returnLocal.SymbolId
+                                    ? local with { Name = "<other>" } : local).ToArray(),
+                        }
+                        : method).ToArray(),
+            };
+            Check(!CSharpGuestLowerer.Lower(forgedLocal, new string('d', 64)).Succeeded,
+                "cleanup: a forged finally return local must fail validation");
         }
         CSharpGuestLoweringResult lowered = CSharpGuestLowerer.Lower(document, new string('d', 64));
         Check(lowered.Succeeded,
