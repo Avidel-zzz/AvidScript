@@ -68,6 +68,8 @@ public static class GuestModuleValidator
             && string.Equals(module.IrVersion, GuestLanguageErrorCatalogValidator.IrVersion, StringComparison.Ordinal);
         bool isTaskResultVersion = module.SchemaVersion == GuestTaskResultValidator.SchemaVersion
             && string.Equals(module.IrVersion, GuestTaskResultValidator.IrVersion, StringComparison.Ordinal);
+        bool isTaskLocalVersion = module.SchemaVersion == GuestTaskResultValidator.TaskLocalSchemaVersion
+            && string.Equals(module.IrVersion, GuestTaskResultValidator.TaskLocalIrVersion, StringComparison.Ordinal);
         bool isLegacyVersion = (module.SchemaVersion == LegacySchemaVersion
             && string.Equals(module.IrVersion, LegacyIrVersion, StringComparison.Ordinal))
             || (module.SchemaVersion == 2 && module.IrVersion == "1.1")
@@ -83,7 +85,8 @@ public static class GuestModuleValidator
             || (module.SchemaVersion == 12 && module.IrVersion == "1.11")
             || (module.SchemaVersion == 13 && module.IrVersion == "1.12");
         if ((!isCurrentVersion && !isOutcomeVersion && !isOutcomeFlowVersion
-                && !isLanguageErrorCatalogVersion && !isTaskResultVersion && !isLegacyVersion)
+                && !isLanguageErrorCatalogVersion && !isTaskResultVersion
+                && !isTaskLocalVersion && !isLegacyVersion)
             || string.IsNullOrWhiteSpace(module.ModuleId)
             || string.IsNullOrWhiteSpace(module.Language)
             || string.IsNullOrWhiteSpace(provenance.SourceId)

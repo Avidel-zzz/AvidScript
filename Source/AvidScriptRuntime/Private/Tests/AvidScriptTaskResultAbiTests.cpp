@@ -153,16 +153,17 @@ TArray<uint8> Build(EFixture Fixture)
 	return Wasm;
 }
 
-TArray<uint8> BuildFailurePropagation()
+TArray<uint8> BuildTwoTokenCall(const char* ImportName,
+	const bool bBadSignature = false)
 {
-	using namespace AvidScript::TaskResult::Abi;
 	TArray<uint8> Wasm{0, 0x61, 0x73, 0x6d, 1, 0, 0, 0};
 	Section(Wasm, 1, {2,
-		0x60, 2, 0x7e, 0x7e, 1, 0x7f, // import: (i64, i64) -> i32
+		0x60, 2, bBadSignature ? uint8(0x7f) : uint8(0x7e),
+		0x7e, 1, 0x7f, // import: (i64, i64) -> i32
 		0x60, 0, 0}); // BeginPlay
 	TArray<uint8> Imports{1};
 	Name(Imports, "avidscript");
-	Name(Imports, PropagateFailureImport);
+	Name(Imports, ImportName);
 	Imports.Append({0, 0});
 	Section(Wasm, 2, Imports);
 	Section(Wasm, 3, {1, 1});
@@ -180,6 +181,12 @@ TArray<uint8> BuildFailurePropagation()
 	U32(Code, Begin.Num()); Code.Append(Begin);
 	Section(Wasm, 10, Code);
 	return Wasm;
+}
+
+TArray<uint8> BuildFailurePropagation()
+{
+	return BuildTwoTokenCall(
+		AvidScript::TaskResult::Abi::PropagateFailureImport);
 }
 
 int64 ReadI64(const uint8* Bytes, int32 Offset)
@@ -490,6 +497,56 @@ bool FAvidScriptTaskResultAbiTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Rejected propagation leaves no task results"),
 			RejectedOwner->GetTaskResultsForTesting().GetCount(), 0);
 		RejectedOwner->Teardown();
+
+		const TArray<uint8> RetainBytes = BuildTwoTokenCall(RetainForContinuationImport);
+		FAvidScriptWasmRuntimeInstance Retain(Selection);
+		if (!TestTrue(TEXT("Task continuation retention fixture loads in both VMs"),
+			Retain.LoadModule(RetainBytes.GetData(), RetainBytes.Num(),
+				TEXT("task_retain_for_continuation"), Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		const auto RetainOwner = MakeShared<FAvidScriptSessionContinuations>();
+		auto& RetainEndpoint = RetainOwner->ResetActive(World);
+		const int64 RetainedTask = RetainEndpoint.CreateTaskResult(TEXT("type:int32"));
+		const int64 RetainedContinuation = RetainEndpoint.ScheduleDelay(30.0f, 92);
+		const TArray<uint8> RetainedState{1};
+		if (!TestTrue(TEXT("Retention fixture stores a continuation frame"),
+			RetainEndpoint.StoreState(RetainedContinuation, RetainedState))) return false;
+		Context.Tasks = &RetainEndpoint;
+		Context.Continuations = &RetainEndpoint;
+		Retain.SetHostContext(Context);
+		uint8 RetainMemory[28] = {};
+		FMemory::Memcpy(RetainMemory + 8, &RetainedTask, sizeof(RetainedTask));
+		FMemory::Memcpy(RetainMemory + 16, &RetainedContinuation,
+			sizeof(RetainedContinuation));
+		if (!TestTrue(TEXT("Retention fixture supplies full-width tokens"),
+			Retain.WriteStateBytes(0, MakeArrayView(RetainMemory), Error))) return false;
+		if (!TestTrue(TEXT("WASM retains task for a pending continuation"),
+			Retain.BeginPlay(Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		if (!TestTrue(TEXT("Read retention import result"),
+			Retain.ReadStateBytes(0, MakeArrayView(RetainMemory), Error))) return false;
+		int32 RetainAccepted = 0;
+		FMemory::Memcpy(&RetainAccepted, RetainMemory + 24, sizeof(RetainAccepted));
+		TestEqual(TEXT("Retention import returns accepted"), RetainAccepted, 1);
+		TestTrue(TEXT("Guest owner releases its task reference"),
+			RetainEndpoint.ReleaseTaskResult(RetainedTask));
+		const uint8 RetainedValue[4] = {19, 0, 0, 0};
+		TArray<int64> RetainWaiters;
+		TestTrue(TEXT("Captured task completes after Guest release"),
+			RetainEndpoint.SucceedTaskResult(RetainedTask,
+				MakeArrayView(RetainedValue), RetainWaiters));
+		TestTrue(TEXT("Continuation cancellation releases captured task"),
+			RetainEndpoint.Cancel(RetainedContinuation));
+		TestEqual(TEXT("WASM retention path leaves no task result"),
+			RetainOwner->GetTaskResultsForTesting().GetCount(), 0);
+		RetainOwner->Teardown();
+
+		const TArray<uint8> BadRetainBytes = BuildTwoTokenCall(
+			RetainForContinuationImport, true);
+		FAvidScriptWasmRuntimeInstance BadRetain(Selection);
+		TestFalse(TEXT("Retention import rejects mismatched WASM signature"),
+			BadRetain.LoadModule(BadRetainBytes.GetData(), BadRetainBytes.Num(),
+				TEXT("task_retain_bad_signature"), Result));
 
 		const TArray<uint8> BadBytes = Build(EFixture::BadSignature);
 		FAvidScriptWasmRuntimeInstance BadSignature(Selection);

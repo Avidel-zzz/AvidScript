@@ -64,7 +64,54 @@ internal static class WasmTaskResultTests
         {
             ParameterTypeIds = new[] { "type:int64", "type:int64", "type:int32", "type:int32" },
         } } }).Succeeded, "incorrect Task<int> Host signature is rejected before codegen");
-        return 7;
+
+        GuestImport retained = new("import:task_retain_for_continuation_v1", "avidscript",
+            "avid_task_retain_for_continuation_v1", new[] { "type:int64", "type:int64" }, "type:int32");
+        GuestFunction retainEntry = new("function:task_retain", new[]
+            {
+                new GuestRegister("task_token", "type:int64"),
+                new GuestRegister("continuation_token", "type:int64"),
+            }, new[] { new GuestRegister("accepted", "type:int32") }, "type:int32",
+            "block:task_retain", new[]
+            {
+                new GuestBasicBlock("block:task_retain", new GuestInstruction[]
+                {
+                    new("call", "accepted", new[] { "task_token", "continuation_token" },
+                        retained.Id, null, null),
+                }, new GuestTerminator("return", null, null, null, "accepted")),
+            });
+        GuestModule taskLocalModule = module with
+        {
+            SchemaVersion = 19,
+            IrVersion = "1.18",
+            Provenance = module.Provenance with
+            {
+                SemanticSchemaVersion = 36,
+                SemanticVersion = "1.45",
+            },
+            Imports = new[] { task, retained },
+            Functions = module.Functions.Append(retainEntry).ToArray(),
+            Exports = module.Exports.Append(new GuestExport("guest_task_retain", retainEntry.Id)).ToArray(),
+        };
+        Require(GuestModuleValidator.Validate(taskLocalModule).Succeeded,
+            "versioned Task continuation retention Guest IR must validate before codegen");
+        WasmCompilationResult retainedCompilation = WasmModuleCompiler.Compile(taskLocalModule);
+        Require(retainedCompilation.Succeeded && retainedCompilation.Bytes.Length > 0,
+            "Task continuation retention call must compile to WASM");
+        WasmArtifactInfo retainedArtifact = WasmArtifactInspector.Inspect(retainedCompilation.Bytes);
+        Require(retainedArtifact.Imports.Count == 2
+            && retainedArtifact.Imports.Any(import => import.Module == "avidscript"
+                && import.Name == "avid_task_retain_for_continuation_v1" && import.Kind == 0)
+            && retainedArtifact.Exports.Any(export => export.Name == "guest_task_retain"),
+            "WASM preserves the versioned retention import and export");
+        Require(retainedCompilation.Bytes.SequenceEqual(WasmModuleCompiler.Compile(taskLocalModule).Bytes),
+            "Task continuation retention codegen is deterministic");
+        Require(!WasmModuleCompiler.Compile(taskLocalModule with
+        {
+            SchemaVersion = 18,
+            IrVersion = "1.17",
+        }).Succeeded, "older Guest IR cannot smuggle the retention import");
+        return 8;
     }
 
     private static void Require(bool condition, string message)

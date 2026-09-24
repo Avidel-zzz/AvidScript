@@ -78,6 +78,33 @@ bool FAvidScriptWasmRuntimeInstance::DispatchTaskBindProducerCall(
 	return true;
 }
 
+bool FAvidScriptWasmRuntimeInstance::DispatchTaskRetainForContinuationCall(
+	const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult)
+{
+	OutResult = {};
+	if (!IsInGameThread() || !IsLoaded() || ManagedHeapInvocationDepth == 0
+		|| HostContext.Tasks == nullptr)
+	{
+		OutResult.ErrorCategory = TEXT("task_result_context");
+		OutResult.Details = TEXT("Task continuation retention requires a live Session and managed VM invocation.");
+		return false;
+	}
+	const int64 TaskToken = Call.Int64Args[0];
+	const int64 ContinuationToken = Call.Int64Args[1];
+	if (TaskToken <= 0 || ContinuationToken <= 0
+		|| !HostContext.Tasks->HasTaskResultType(TaskToken, TEXT("type:int32"))
+		|| !HostContext.Tasks->RetainTaskForContinuation(TaskToken, ContinuationToken))
+	{
+		OutResult.ErrorCategory = TEXT("task_result_retain_for_continuation");
+		OutResult.Details = TEXT("Session rejected Task<int> continuation retention.");
+		return false;
+	}
+	OutResult.ReturnValue = 1;
+	OutResult.ReturnValueI64 = 1;
+	OutResult.bSucceeded = true;
+	return true;
+}
+
 bool FAvidScriptWasmRuntimeInstance::DispatchTaskResultInt32Call(
 	const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult)
 {

@@ -9,10 +9,13 @@ internal static class GuestTaskResultValidator
 {
     public const int SchemaVersion = 18;
     public const string IrVersion = "1.17";
+    public const int TaskLocalSchemaVersion = 19;
+    public const string TaskLocalIrVersion = "1.18";
     public const string ImportModule = "avidscript";
     public const string ImportName = "avid_task_i32_v1";
     public const string BindProducerImportName = "avid_task_bind_producer_v1";
     public const string PropagateFailureImportName = "avid_task_propagate_failure_v1";
+    public const string RetainForContinuationImportName = "avid_task_retain_for_continuation_v1";
     private const string DiagnosticCode = "ASIR1028";
 
     public static void Validate(GuestValidationContext context)
@@ -24,19 +27,31 @@ internal static class GuestTaskResultValidator
             import.Module == ImportModule && import.Name == BindProducerImportName).ToArray();
         GuestImport[] failureImports = module.Imports.Where(import =>
             import.Module == ImportModule && import.Name == PropagateFailureImportName).ToArray();
+        GuestImport[] retainedImports = module.Imports.Where(import =>
+            import.Module == ImportModule && import.Name == RetainForContinuationImportName).ToArray();
         bool taskSemantic = module.Provenance.SemanticSchemaVersion == 35
             && module.Provenance.SemanticVersion == "1.44";
         bool taskIr = module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion;
-        if (!taskSemantic && !taskIr && taskImports.Length == 0
-            && producerImports.Length == 0 && failureImports.Length == 0) return;
+        bool taskLocalSemantic = module.Provenance.SemanticSchemaVersion == 36
+            && module.Provenance.SemanticVersion == "1.45";
+        bool taskLocalIr = module.SchemaVersion == TaskLocalSchemaVersion
+            && module.IrVersion == TaskLocalIrVersion;
+        if (!taskSemantic && !taskIr && !taskLocalSemantic && !taskLocalIr
+            && taskImports.Length == 0 && producerImports.Length == 0
+            && failureImports.Length == 0 && retainedImports.Length == 0) return;
 
-        if (!taskSemantic || !taskIr || module.Language != "csharp"
+        if (!((taskSemantic && taskIr) || (taskLocalSemantic && taskLocalIr))
+            || module.Language != "csharp"
             || taskImports.Length != 1)
         {
             context.Add(DiagnosticCode,
-                "Task<int> requires C# Semantic 35/1.44, Guest IR 18/1.17 and one versioned Host import.");
+                "Task<int> requires paired C# Semantic 35/1.44 and Guest IR 18/1.17, or Semantic 36/1.45 and Guest IR 19/1.18.");
             return;
         }
+
+        if (retainedImports.Length != (taskLocalIr ? 1 : 0))
+            context.Add(DiagnosticCode,
+                "Task continuation retention requires exactly one import in Guest IR 19/1.18 and none in older IR.");
 
         GuestImport import = taskImports[0];
         if (import.ParameterTypeIds.Count != 4
@@ -72,6 +87,17 @@ internal static class GuestTaskResultValidator
                     || failureImports[0].BindingOrdinal != -1)))
             context.Add(DiagnosticCode,
                 "Task<int> failure propagation import has a noncanonical signature.");
+
+        if (retainedImports.Length == 1
+            && (retainedImports[0].ParameterTypeIds.Count != 2
+                || !retainedImports[0].ParameterTypeIds.SequenceEqual(
+                    new[] { "type:int64", "type:int64" }, StringComparer.Ordinal)
+                || retainedImports[0].ReturnTypeId != "type:int32"
+                || retainedImports[0].DispatchClass != "semantic"
+                || retainedImports[0].OptimizationClass != "none"
+                || retainedImports[0].BindingOrdinal != -1))
+            context.Add(DiagnosticCode,
+                "Task continuation retention import has a noncanonical signature.");
     }
 
     private static bool HasScalar(GuestValidationContext context, string id, string storage, int size) =>

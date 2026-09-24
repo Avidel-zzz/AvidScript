@@ -36,6 +36,9 @@ internal static class GuestModuleValidationTests
             "avid_task_bind_producer_v1", new[] { "type:int64", "type:int64" }, "type:int32");
         GuestImport propagateFailure = new("import:task_propagate_failure_v1", "avidscript",
             "avid_task_propagate_failure_v1", new[] { "type:int64", "type:int64" }, "type:int32");
+        GuestImport retainForContinuation = new("import:task_retain_for_continuation_v1", "avidscript",
+            "avid_task_retain_for_continuation_v1",
+            new[] { "type:int64", "type:int64" }, "type:int32");
         GuestModule module = baseline with
         {
             SchemaVersion = 18,
@@ -88,6 +91,38 @@ internal static class GuestModuleValidationTests
         AssertDiagnostic(propagatedModule with { Imports = new[] { task, bindProducer,
             propagateFailure, propagateFailure with { Id = "import:duplicate_propagate" } } },
             "ASIR1028");
+
+        GuestModule taskLocalModule = propagatedModule with
+        {
+            SchemaVersion = 19,
+            IrVersion = "1.18",
+            Provenance = propagatedModule.Provenance with
+            {
+                SemanticSchemaVersion = 36,
+                SemanticVersion = "1.45",
+            },
+            Imports = new[] { task, bindProducer, propagateFailure, retainForContinuation },
+        };
+        Assert(GuestModuleValidator.Validate(taskLocalModule).Succeeded,
+            "IR 19 accepts the versioned Task continuation retention import");
+        byte[] taskLocalBytes = GuestIrSerializer.Serialize(taskLocalModule);
+        Assert(taskLocalBytes.SequenceEqual(
+                GuestIrSerializer.Serialize(GuestIrSerializer.Deserialize(taskLocalBytes))),
+            "Task-local Guest IR has a canonical round trip");
+        AssertDiagnostic(propagatedModule with
+        {
+            Imports = taskLocalModule.Imports,
+        }, "ASIR1028");
+        AssertDiagnostic(taskLocalModule with { Imports = propagatedModule.Imports }, "ASIR1028");
+        AssertDiagnostic(taskLocalModule with { SchemaVersion = 18, IrVersion = "1.17" }, "ASIR1028");
+        AssertDiagnostic(taskLocalModule with { Provenance = propagatedModule.Provenance }, "ASIR1028");
+        AssertDiagnostic(taskLocalModule with { Imports = taskLocalModule.Imports.Append(
+            retainForContinuation with { Id = "import:duplicate_retain" }).ToArray() }, "ASIR1028");
+        AssertDiagnostic(taskLocalModule with { Imports = new[] { task, bindProducer,
+            propagateFailure, retainForContinuation with
+            {
+                ParameterTypeIds = new[] { "type:int32", "type:int64" },
+            } } }, "ASIR1028");
     }
 
     private static void MinimalModuleIsValid()
