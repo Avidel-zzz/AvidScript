@@ -68,6 +68,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'C# outer-nested-cleanup-replaces-error Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'outermost-cleanup-replaces-error.wasm')
     if ($LASTEXITCODE -ne 0) { throw 'C# outermost-cleanup-replaces-error Node WASM probe failed.' }
+    & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'consecutive-nested-cleanup-replaces-error.wasm')
+    if ($LASTEXITCODE -ne 0) { throw 'C# consecutive-nested-cleanup-replaces-error Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'branching-cleanup.wasm')
     if ($LASTEXITCODE -ne 0) { throw 'C# branching-cleanup Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'catch-rethrow.wasm')

@@ -371,6 +371,7 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 		TEXT("cleanup-replaces-error.wasm"), TEXT("nested-cleanup-replaces-error.wasm"),
 		TEXT("outer-nested-cleanup-replaces-error.wasm"),
 		TEXT("outermost-cleanup-replaces-error.wasm"),
+		TEXT("consecutive-nested-cleanup-replaces-error.wasm"),
 		TEXT("branching-cleanup.wasm"),
 		TEXT("catch-rethrow.wasm"), TEXT("catch-rethrow-finally.wasm"),
 		TEXT("catch-rethrow-branching-finally.wasm"), TEXT("nested-rethrow.wasm"),
@@ -402,7 +403,8 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 			const FString* Type = Catalog ? Catalog->FindType(1) : nullptr;
 			const FAvidScriptLanguageErrorSource* Source = Catalog ? Catalog->FindSource(1) : nullptr;
 			const bool bHasThirdThrow = FixtureName == TEXT("multi-local-throw-finally.wasm")
-				|| FixtureName == TEXT("mixed-branching-finally.wasm");
+				|| FixtureName == TEXT("mixed-branching-finally.wasm")
+				|| FixtureName == TEXT("consecutive-nested-cleanup-replaces-error.wasm");
 			const bool bHasSecondThrow = bHasThirdThrow
 				|| FixtureName == TEXT("side-effect-throw-finally.wasm")
 				|| FixtureName == TEXT("mixed-local-throw-finally.wasm")

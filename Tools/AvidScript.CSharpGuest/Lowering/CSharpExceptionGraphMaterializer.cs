@@ -891,8 +891,9 @@ internal static class CSharpExceptionGraphMaterializer
         SemanticExceptionRegion[] finallyRegions = regions
             .Where(region => region.Kind == "finally").ToArray();
         int cleanupCount = finallyRegions.Length;
-        if (flow.Catches.Count != 0 || flow.Throws.Count is not (1 or 2)
+        if (flow.Catches.Count != 0 || flow.Throws.Count is < 1 or > 17
             || cleanupCount is < 2 or > 16
+            || flow.Throws.Count > cleanupCount + 1
             || regions.Length != 1 + cleanupCount * 3
             || regions[0].Kind != "root"
             || flow.Blocks is not { } blocks || blocks.Count != cleanupCount + 3
@@ -902,14 +903,11 @@ internal static class CSharpExceptionGraphMaterializer
             return Fail("Nested throw cleanup needs one direct throw and bounded linear finally scopes.",
                 out error);
 
-        bool replacesError = flow.Throws.Count == 2;
         int[] replacementIndices = Enumerable.Range(0, cleanupCount)
             .Where(index => blocks[index + 2].BranchValue is not null).ToArray();
-        if (replacesError && replacementIndices.Length != 1
-            || !replacesError && replacementIndices.Length != 0)
-            return Fail("Nested cleanup needs one source-backed replacement throw.",
+        if (replacementIndices.Length != flow.Throws.Count - 1)
+            return Fail("Nested cleanup needs one source-backed throw per replacement.",
                 out error);
-        int replacementIndex = replacesError ? replacementIndices[0] : -1;
 
         List<SemanticExceptionRegion> outerToInner = new(cleanupCount);
         int parentOrdinal = 0;
@@ -968,13 +966,13 @@ internal static class CSharpExceptionGraphMaterializer
             || site.ExceptionTypeId != CSharpThrowProducerLowerer.ExceptionTypeId)
             return Fail("Nested throw cleanup needs a direct zero-argument System.Exception.",
                 out error);
-        SemanticThrowSite? replacement = null;
+        List<(int Index, SemanticThrowSite Site)> replacements = new();
         for (int index = 0; index < cleanupCount; ++index)
         {
             int ordinal = index + 2;
             SemanticExceptionRegion region = orderedCleanups[index];
             SemanticExceptionBlock block = blocks[ordinal];
-            bool throwingCleanup = index == replacementIndex;
+            bool throwingCleanup = replacementIndices.Contains(index);
             SemanticOperation? replacementExpression = block.BranchValue;
             if (throwingCleanup)
             {
@@ -994,7 +992,11 @@ internal static class CSharpExceptionGraphMaterializer
                             != orderedCleanups[index + routeIndex + 1].Ordinal).Any())
                     return Fail("A nested cleanup throw needs one new error before the outer finally.",
                         out error);
-                replacement = matches[0];
+                if (matches[0].Span == site.Span
+                    || replacements.Any(previous => previous.Site.Span == matches[0].Span))
+                    return Fail("Nested cleanup replacement source sites must be distinct.",
+                        out error);
+                replacements.Add((index, matches[0]));
             }
             if (region.FirstBlockOrdinal != ordinal || region.LastBlockOrdinal != ordinal
                 || block.EnclosingRegionOrdinal != region.Ordinal
@@ -1011,8 +1013,7 @@ internal static class CSharpExceptionGraphMaterializer
                 return Fail("Nested throw cleanup needs one linear synchronous block per finally.",
                     out error);
         }
-        if (flow.Throws.Count != (replacesError ? 2 : 1)
-            || replacesError && replacement is null)
+        if (replacements.Count != flow.Throws.Count - 1)
             return Fail("Nested cleanup did not account for every throw site.", out error);
 
         List<SemanticControlFlowEdge> edges = new()
@@ -1027,27 +1028,27 @@ internal static class CSharpExceptionGraphMaterializer
                 block.Ordinal == blocks.Count - 1 || block.IsReachable,
                 block.ConditionKind, block.Operations,
                 block.Ordinal == blocks.Count - 2 ? ZeroPlaceholder(site.Span)
-                    : block.Ordinal == 1 || replacesError
-                        && block.Ordinal == replacementIndex + 2 ? null
+                    : block.Ordinal == 1 || replacementIndices.Contains(block.Ordinal - 2) ? null
                         : block.BranchValue,
                 edges.Where(edge => edge.DestinationBlockOrdinal == block.Ordinal).ToArray(),
                 edges.Where(edge => edge.SourceBlockOrdinal == block.Ordinal).ToArray()))
                 .ToArray());
-        localThrows = replacesError
-            ? new[]
-            {
-                new CSharpLocalThrowSite(1, site,
-                    orderedCleanups.Select(region => region.FirstBlockOrdinal).ToArray()),
-                new CSharpLocalThrowSite(replacementIndex + 2, replacement!,
-                    orderedCleanups.Skip(replacementIndex + 1)
-                        .Select(region => region.FirstBlockOrdinal).ToArray(),
-                    ReplacesThrowBlockOrdinal: 1),
-            }
-            : new[]
-            {
-                new CSharpLocalThrowSite(1, site,
-                    orderedCleanups.Select(region => region.FirstBlockOrdinal).ToArray()),
-            };
+        List<CSharpLocalThrowSite> sites = new()
+        {
+            new(1, site,
+                orderedCleanups.Select(region => region.FirstBlockOrdinal).ToArray()),
+        };
+        int replacedBlockOrdinal = 1;
+        foreach ((int index, SemanticThrowSite replacement) in replacements)
+        {
+            int replacementBlockOrdinal = index + 2;
+            sites.Add(new CSharpLocalThrowSite(replacementBlockOrdinal, replacement,
+                orderedCleanups.Skip(index + 1)
+                    .Select(region => region.FirstBlockOrdinal).ToArray(),
+                ReplacesThrowBlockOrdinal: replacedBlockOrdinal));
+            replacedBlockOrdinal = replacementBlockOrdinal;
+        }
+        localThrows = sites;
         return true;
     }
 

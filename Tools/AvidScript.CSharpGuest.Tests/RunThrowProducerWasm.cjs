@@ -150,6 +150,7 @@ const replacementCatches = typeof instance.exports.replacement_catch_probe === '
 const nestedReplacementCatches = typeof instance.exports.nested_replacement_catch_probe === 'function';
 const outerNestedReplacementCatches = typeof instance.exports.outer_nested_replacement_catch_probe === 'function';
 const outermostReplacementCatches = typeof instance.exports.outermost_replacement_catch_probe === 'function';
+const consecutiveReplacementCatches = typeof instance.exports.consecutive_replacement_catch_probe === 'function';
 const branchCleanupCatches = typeof instance.exports.branch_cleanup_first_probe === 'function';
 const rethrowCatches = typeof instance.exports.rethrow_local_source_probe === 'function';
 const nestedRethrowCatches = typeof instance.exports.nested_rethrow_source_probe === 'function';
@@ -162,7 +163,7 @@ const catches = multipleCatches || finallyCatches || nestedFinallyCatches || thr
   || catchFinallyCatches || catchBranchCatches || rethrowFinallyCatches
   || rethrowBranchCatches || localRethrowFinallyCatches || localRethrowBranchCatches
   || replacementCatches || nestedReplacementCatches || outerNestedReplacementCatches
-  || outermostReplacementCatches
+  || outermostReplacementCatches || consecutiveReplacementCatches
   || branchCleanupCatches || rethrowCatches
   || nestedRethrowCatches || nestedCatchCleanupCatches || catchVariableCatches
   || typeof instance.exports.catch_source_probe === 'function';
@@ -195,6 +196,12 @@ if (multipleCatches) {
   const source = instance.exports.outermost_replacement_source_probe();
   if (source !== 4 || handled !== 11) {
     throw new Error(`Outermost cleanup replacement results = ${source}, ${handled}; expected 4, 11`);
+  }
+} else if (consecutiveReplacementCatches) {
+  const handled = instance.exports.consecutive_replacement_catch_probe();
+  const source = instance.exports.consecutive_replacement_source_probe();
+  if (source !== 5 || handled !== 11) {
+    throw new Error(`Consecutive cleanup replacement results = ${source}, ${handled}; expected 5, 11`);
   }
 } else if (branchCleanupCatches) {
   const first = instance.exports.branch_cleanup_first_probe();
@@ -383,7 +390,8 @@ if (multipleCatches) {
     : throwFinallyCatches || finallyCatches ? 1 : catches ? 7 : 3;
   if (actual !== expected) throw new Error(`source probe() = ${actual}; expected ${expected}`);
 }
-if (allocations !== (rethrowCatches || replacementCatches || nestedReplacementCatches
+if (allocations !== (consecutiveReplacementCatches ? 6
+  : rethrowCatches || replacementCatches || nestedReplacementCatches
   || outerNestedReplacementCatches || outermostReplacementCatches ? 4
   : branchCleanupCatches || rethrowBranchCatches || localRethrowBranchCatches
     ? 3
@@ -431,6 +439,7 @@ if (catches) {
     : nestedReplacementCatches ? 'C# source nested-cleanup-replaces-error WASM: 3/3 passed\n'
     : outerNestedReplacementCatches ? 'C# source outer-nested-cleanup-replaces-error WASM: 3/3 passed\n'
     : outermostReplacementCatches ? 'C# source outermost-cleanup-replaces-error WASM: 3/3 passed\n'
+    : consecutiveReplacementCatches ? 'C# source consecutive-nested-cleanup-replaces-error WASM: 3/3 passed\n'
     : branchCleanupCatches ? 'C# source branching-cleanup WASM: 3/3 passed\n'
     : nestedFinallyCatches ? 'C# source nested-finally-catch WASM: 2/2 passed\n'
     : throwFinallyCatches ? 'C# source throw-finally-catch WASM: 2/2 passed\n'

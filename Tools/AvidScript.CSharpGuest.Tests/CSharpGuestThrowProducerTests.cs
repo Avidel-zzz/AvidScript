@@ -41,6 +41,7 @@ internal static class CSharpGuestThrowProducerTests
         NestedCleanupThrowReplacesOriginalError();
         OuterNestedCleanupThrowReplacesOriginalError();
         OutermostCleanupThrowReplacesOriginalError();
+        ConsecutiveNestedCleanupThrowsKeepLastError();
         BranchingFinallyRunsBeforeErrorPropagation();
         CatchRethrowRunsOuterFinally();
         CatchRethrowRunsBranchingFinally();
@@ -50,7 +51,7 @@ internal static class CSharpGuestThrowProducerTests
         NestedCatchRethrowReachesOuterHandler();
         NestedCatchRethrowRunsBranchingOuterFinally();
         CatchVariableReadsBoundError();
-        return 33;
+        return 34;
     }
 
     private static void MultipleThrowProducersKeepDistinctSourceTokens()
@@ -1941,6 +1942,69 @@ internal static class CSharpGuestThrowProducerTests
             Directory.CreateDirectory(output);
             File.WriteAllBytes(Path.Combine(output,
                 "outermost-cleanup-replaces-error.wasm"), wasm.Bytes);
+        }
+    }
+
+    private static void ConsecutiveNestedCleanupThrowsKeepLastError()
+    {
+        const string source = """
+            class Script
+            {
+                static int Count;
+                static int Fail()
+                {
+                    try
+                    {
+                        try { throw new System.Exception(); }
+                        finally { Count = Count + 1; throw new System.Exception(); }
+                    }
+                    finally { Count = Count + 10; throw new System.Exception(); }
+                }
+                static int Catch()
+                {
+                    try { return Fail(); }
+                    catch (System.Exception) { return Count; }
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay() { Catch(); }
+            }
+            """;
+        Check(ReferenceCatch(source) == 11,
+            "the CLR reference must execute both throwing cleanup blocks");
+        SemanticDocument semantic = Analyze(source);
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null,
+            error ?? "consecutive nested cleanup throws failed to compile");
+        GuestModule module = compiled!.Module;
+        Check(module.LanguageErrorCatalog is { Sources.Count: 3 },
+            "each replacing throw needs its own source token");
+        GuestFunction fail = module.Functions.Single(function =>
+            function.Id.Contains(".Fail(", StringComparison.Ordinal));
+        Check(fail.Blocks.Sum(block => block.Instructions.Count(item =>
+                item.Op == "managed_new")) == 3,
+            "consecutive cleanup throws must allocate three distinct errors");
+        GuestFunction handler = module.Functions.Single(function =>
+            function.Id.Contains(".Catch(", StringComparison.Ordinal));
+        GuestModule stressed = AddLocalCleanupCollectProbe(module, fail.Id, 2);
+        GuestModule probe = AddCatchProbe(
+            AddProbe(stressed, fail, appendTarget: false,
+                "function:consecutive_replacement_source_probe",
+                "consecutive_replacement_source_probe"),
+            handler, "function:consecutive_replacement_catch_probe",
+            "consecutive_replacement_catch_probe");
+        GuestValidationResult validation = GuestModuleValidator.Validate(probe);
+        Check(validation.Succeeded,
+            string.Join(" | ", validation.Diagnostics.Select(item => item.Message)));
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "consecutive nested cleanup throws must compile to WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output,
+                "consecutive-nested-cleanup-replaces-error.wasm"), wasm.Bytes);
         }
     }
 
