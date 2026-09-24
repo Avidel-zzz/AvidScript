@@ -92,7 +92,8 @@ public static class CSharpLanguageErrorCompiler
         Dictionary<string, IReadOnlyList<CSharpLanguageCleanupRoute>> cleanupRoutes =
             new(plannedCleanups, StringComparer.Ordinal);
         foreach (SemanticExceptionFlow handler in handlers.Where(item =>
-            item.Catches.Count == 0 && localThrows.TryGetValue(
+            normalReturns.ContainsKey(CSharpGuestIds.Function(item.MethodSymbolId))
+            || item.Catches.Count == 0 && localThrows.TryGetValue(
                 CSharpGuestIds.Function(item.MethodSymbolId), out var sites)
                 && sites.Any(site => site.CleanupBlockOrdinals is { Count: > 0 })))
         {
@@ -133,8 +134,21 @@ public static class CSharpLanguageErrorCompiler
                     if (!SemanticExceptionDispatchResolver.TryResolve(semantic,
                             handler.MethodSymbolId, block.Ordinal, type.TypeId,
                             out SemanticExceptionDispatchResolution? decision)
-                        || decision is null || decision.FinallyRegionOrdinals.Count != 0)
-                        return Fail("Catch routing requires a validated handler without cleanup.", out error);
+                        || decision is null)
+                        return Fail("Catch routing requires a validated cleanup and handler path.", out error);
+                    if (decision.FinallyRegionOrdinals.Count != 0)
+                    {
+                        string sourceBlockId = CSharpGuestIds.Block(handler.MethodSymbolId,
+                            block.Ordinal);
+                        string[] cleanupBlockIds = decision.FinallyRegionOrdinals
+                            .Select(region => CSharpGuestIds.Block(handler.MethodSymbolId,
+                                handler.Regions[region].FirstBlockOrdinal)).ToArray();
+                        if (decision.HandlerOrdinal is not null
+                            || !cleanupRoutes.TryGetValue(functionId, out var functionCleanups)
+                            || !functionCleanups.Any(route => route.SourceBlockId == sourceBlockId
+                                && route.CleanupBlockIds.SequenceEqual(cleanupBlockIds)))
+                            return Fail("Catch routing requires a validated cleanup and handler path.", out error);
+                    }
                     if (decision.HandlerOrdinal is { } ordinal)
                         matches.Add(new(type.Token, CSharpGuestIds.Block(handler.MethodSymbolId,
                             handler.Regions[handler.Catches[ordinal].RegionOrdinal].FirstBlockOrdinal),
@@ -209,7 +223,8 @@ public static class CSharpLanguageErrorCompiler
                 return false;
             loweredProducers.Add(producer.Function.Id, producer.Function);
         }
-        foreach (SemanticExceptionFlow item in handlers.Where(flow => flow.Throws.Count != 0))
+        foreach (SemanticExceptionFlow item in handlers.Where(flow => flow.Throws.Count != 0
+            || normalReturns.ContainsKey(CSharpGuestIds.Function(flow.MethodSymbolId))))
         {
             string functionId = CSharpGuestIds.Function(item.MethodSymbolId);
             if (!CSharpLocalThrowLowerer.TryLowerReplacing(item,

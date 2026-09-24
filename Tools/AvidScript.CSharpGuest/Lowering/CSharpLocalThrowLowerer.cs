@@ -26,7 +26,7 @@ internal static class CSharpLocalThrowLowerer
         error = null;
         string functionId = CSharpGuestIds.Function(flow.MethodSymbolId);
         GuestFunction[] matches = module.Functions.Where(item => item.Id == functionId).ToArray();
-        if (sites.Count + rethrows.Count == 0
+        if (sites.Count + rethrows.Count + normalReturns.Count == 0
             || sites.Count + rethrows.Count != flow.Throws.Count || matches.Length != 1
             || module.LanguageOutcomeTypes?.All(item => item.TypeId != matches[0].ReturnTypeId) != false
             || !module.Types.Any(type => type.Id == "type:language_error_root"

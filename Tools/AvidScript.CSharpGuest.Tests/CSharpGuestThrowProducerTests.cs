@@ -33,11 +33,12 @@ internal static class CSharpGuestThrowProducerTests
         MultipleLocalThrowsShareFinallyAndKeepSources();
         NormalReturnsAndLocalThrowsRunTheSameFinally();
         CalledReturnAndLocalThrowRunTheSameFinally();
+        CatchReturnsRunOuterFinally();
         CleanupThrowReplacesOriginalError();
         CatchRethrowPreservesOriginalError();
         NestedCatchRethrowReachesOuterHandler();
         CatchVariableReadsBoundError();
-        return 20;
+        return 21;
     }
 
     private static void MultipleThrowProducersKeepDistinctSourceTokens()
@@ -1141,6 +1142,100 @@ internal static class CSharpGuestThrowProducerTests
             Directory.CreateDirectory(output);
             File.WriteAllBytes(Path.Combine(output, "called-return-finally.wasm"),
                 wasm.Bytes);
+        }
+    }
+
+    private static void CatchReturnsRunOuterFinally()
+    {
+        const string source = """
+            class Script
+            {
+                static int Choice;
+                static int Count;
+                static int FailTry() { throw new System.Exception(); }
+                static int FailCatch() { throw new System.Exception(); }
+                static int Maybe()
+                {
+                    if (Choice == 0) return 5;
+                    return FailTry();
+                }
+                static int Recover()
+                {
+                    if (Choice == 1) return 7;
+                    return FailCatch();
+                }
+                static int Run()
+                {
+                    try { return Maybe(); }
+                    catch (System.Exception) { return Recover(); }
+                    finally { Count = Count + 1; }
+                }
+                static int Normal()
+                {
+                    Choice = 0; Count = 0;
+                    int value = Run();
+                    return value + Count * 100;
+                }
+                static int Handled()
+                {
+                    Choice = 1; Count = 0;
+                    int value = Run();
+                    return value + Count * 100;
+                }
+                static int Escaped()
+                {
+                    Choice = 2; Count = 0;
+                    try { return Run(); }
+                    catch (System.Exception) { return Count + 20; }
+                }
+                static int Uncaught() { Choice = 2; Count = 0; return Run(); }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay() { Normal(); Handled(); Escaped(); }
+            }
+            """;
+        Check(ReferenceCatch(source, "Normal") == 105
+            && ReferenceCatch(source, "Handled") == 107
+            && ReferenceCatch(source, "Escaped") == 21,
+            "CLR must run the outer finally after try, catch, and escaped catch errors");
+        SemanticDocument semantic = Analyze(source);
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "catch cleanup failed to compile");
+        GuestModule module = compiled!.Module;
+        Check(module.LanguageErrorCatalog is { Sources.Count: 2 } catalog
+            && catalog.Sources.Select(item => item.Token).SequenceEqual(new[] { 1, 2 })
+            && GuestModuleValidator.Validate(module).Succeeded,
+            "catch cleanup must retain both source errors and a valid outcome graph");
+        GuestFunction run = module.Functions.Single(function =>
+            function.Id.Contains(".Run(", StringComparison.Ordinal));
+        GuestModule probe = AddLocalCleanupCollectProbe(module, run.Id, 5);
+        foreach ((string method, string suffix) in new[]
+        {
+            ("Normal", "normal"),
+            ("Handled", "handled"),
+            ("Escaped", "escaped"),
+        })
+        {
+            GuestFunction caller = module.Functions.Single(function =>
+                function.Id.Contains("." + method + "(", StringComparison.Ordinal));
+            probe = AddCatchProbe(probe, caller,
+                "function:catch_finally_" + suffix + "_probe",
+                "catch_finally_" + suffix + "_probe");
+        }
+        GuestFunction uncaught = module.Functions.Single(function =>
+            function.Id.Contains(".Uncaught(", StringComparison.Ordinal));
+        probe = AddProbe(probe, uncaught, appendTarget: false,
+            "function:catch_finally_source_probe", "catch_finally_source_probe");
+        Check(GuestModuleValidator.Validate(probe).Succeeded,
+            "catch-finally probes must preserve the Guest outcome contract");
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(probe);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "catch-finally must compile to executable WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "catch-finally.wasm"), wasm.Bytes);
         }
     }
 

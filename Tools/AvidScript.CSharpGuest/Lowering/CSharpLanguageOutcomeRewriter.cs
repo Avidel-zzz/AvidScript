@@ -76,7 +76,7 @@ public static class CSharpLanguageOutcomeRewriter
             || catchRoutes is null || catchRoutes.Keys.Any(id => !affectedFunctionIds.Contains(id)
                 || producerFunctionIds.Contains(id))
             || cleanupRoutes is null || cleanupRoutes.Keys.Any(id => !affectedFunctionIds.Contains(id)
-                || producerFunctionIds.Contains(id) || catchRoutes.ContainsKey(id))
+                || producerFunctionIds.Contains(id))
             || module.LanguageOutcomeTypes is not null)
             return Fail("Expected an ordinary Guest module and a nonempty outcome effect set.", out error);
         if (!semantic.Succeeded || semantic.ExceptionFlows is not null

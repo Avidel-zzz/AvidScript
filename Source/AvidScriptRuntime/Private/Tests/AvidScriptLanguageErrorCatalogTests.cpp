@@ -365,6 +365,7 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 		TEXT("throw-finally-catch.wasm"), TEXT("nested-local-throw-finally.wasm"),
 		TEXT("multi-local-throw-finally.wasm"), TEXT("mixed-local-throw-finally.wasm"),
 		TEXT("called-return-finally.wasm"),
+		TEXT("catch-finally.wasm"),
 		TEXT("cleanup-replaces-error.wasm"),
 		TEXT("catch-rethrow.wasm"), TEXT("nested-rethrow.wasm"),
 		TEXT("catch-variable.wasm")};
@@ -395,6 +396,7 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 			const bool bHasSecondThrow = bHasThirdThrow
 				|| FixtureName == TEXT("mixed-local-throw-finally.wasm")
 				|| FixtureName == TEXT("called-return-finally.wasm")
+				|| FixtureName == TEXT("catch-finally.wasm")
 				|| FixtureName == TEXT("cleanup-replaces-error.wasm")
 				|| FixtureName == TEXT("catch-rethrow.wasm")
 				|| FixtureName == TEXT("nested-rethrow.wasm")

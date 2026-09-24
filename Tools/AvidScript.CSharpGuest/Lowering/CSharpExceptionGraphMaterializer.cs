@@ -31,6 +31,8 @@ internal static class CSharpExceptionGraphMaterializer
         normalReturns = Array.Empty<CSharpNormalReturnCleanupSite>();
         rethrows = Array.Empty<CSharpRethrowSite>();
         error = null;
+        if (flow.Catches.Count != 0 && flow.Regions.Any(region => region.Kind == "finally"))
+            return TryBuildCatchFinally(flow, out graph, out normalReturns, out error);
         if (flow.Catches.Count == 0 && flow.Regions.Any(region => region.Kind == "finally"))
         {
             if (flow.Regions.Count(region => region.Kind == "finally") != 1)
@@ -141,6 +143,89 @@ internal static class CSharpExceptionGraphMaterializer
                 .ToArray());
         localThrows = projectedThrows;
         rethrows = projectedRethrows;
+        return true;
+    }
+
+    private static bool TryBuildCatchFinally(
+        SemanticExceptionFlow flow,
+        out SemanticControlFlowGraph? graph,
+        out IReadOnlyList<CSharpNormalReturnCleanupSite> normalReturns,
+        out string? error)
+    {
+        graph = null;
+        normalReturns = Array.Empty<CSharpNormalReturnCleanupSite>();
+        error = null;
+        if (flow.Catches.Count != 1 || flow.Throws.Count != 0
+            || flow.Regions.Count != 7 || flow.Blocks is not { Count: 5 } blocks
+            || flow.Branches.Count != 4
+            || flow.Regions[0] is not { Kind: "root", ParentOrdinal: -1 }
+            || flow.Regions[1] is not { Kind: "try_and_finally", ParentOrdinal: 0 }
+            || flow.Regions[2] is not { Kind: "try", ParentOrdinal: 1 }
+            || flow.Regions[3] is not { Kind: "try_and_catch", ParentOrdinal: 2 }
+            || flow.Regions[4] is not { Kind: "try", ParentOrdinal: 3,
+                FirstBlockOrdinal: 1, LastBlockOrdinal: 1 }
+            || flow.Regions[5] is not { Kind: "catch", ParentOrdinal: 3,
+                FirstBlockOrdinal: 2, LastBlockOrdinal: 2 }
+            || flow.Regions[6] is not { Kind: "finally", ParentOrdinal: 1,
+                FirstBlockOrdinal: 3, LastBlockOrdinal: 3 }
+            || flow.Catches[0] is not { RegionOrdinal: 5, HasFilter: false,
+                ExceptionVariableSymbolId: null }
+            || flow.Catches[0].ExceptionTypeId
+                != CSharpThrowProducerLowerer.ExceptionTypeId
+            || blocks[0].Operations.Count != 0 || blocks[0].BranchValue is not null
+            || blocks[4].Operations.Count != 0 || blocks[4].BranchValue is not null
+            || blocks[1].EnclosingRegionOrdinal != 4
+            || blocks[2].EnclosingRegionOrdinal != 5
+            || blocks[3].EnclosingRegionOrdinal != 6
+            || blocks.Any(block => block.ConditionKind != "none")
+            || blocks[1].Operations.Count != 0 || blocks[2].Operations.Count != 0
+            || blocks[1].BranchValue is not { } tryValue || !Supported(tryValue)
+            || blocks[2].BranchValue is not { } catchValue || !Supported(catchValue)
+            || new[] { tryValue, catchValue }.SelectMany(Descendants)
+                .Any(operation => operation.Kind is "await" or "throw" or "try"
+                    or "conditional" or "switch" or "branch" or "loop")
+            || blocks[3].Operations.Count == 0 || blocks[3].BranchValue is not null
+            || blocks[3].Operations.Any(operation => !Supported(operation)
+                || Descendants(operation).Any(item => item.Kind is
+                    "invocation" or "await" or "throw" or "try"
+                    or "conditional" or "switch" or "branch" or "loop"))
+            || flow.Branches.Count(branch => branch.SourceBlockOrdinal == 0
+                && branch.DestinationBlockOrdinal == 1
+                && branch.Kind == "fallthrough"
+                && branch.Semantics == "regular") != 1
+            || new[] { 1, 2 }.Any(ordinal => flow.Branches.Count(branch =>
+                branch.SourceBlockOrdinal == ordinal
+                && branch.DestinationBlockOrdinal == 4
+                && branch.Kind == "fallthrough"
+                && branch.Semantics == "return"
+                && branch.FinallyRegionOrdinals.SequenceEqual(new[] { 6 })) != 1)
+            || flow.Branches.Count(branch => branch.SourceBlockOrdinal == 3
+                && branch.DestinationBlockOrdinal == -1
+                && branch.Kind == "fallthrough"
+                && branch.Semantics == "structured_exception_handling") != 1)
+            return Fail("Catch cleanup needs one source-backed linear finally around two return leaves.",
+                out error);
+
+        SemanticControlFlowEdge[] edges =
+        {
+            new(0, 1, "fallthrough", "regular"),
+            new(1, 4, "fallthrough", "return"),
+            new(2, 4, "fallthrough", "return"),
+            new(3, 4, "fallthrough", "return"),
+        };
+        graph = new SemanticControlFlowGraph(flow.MethodSymbolId, 0, 4,
+            blocks.Select(block => new SemanticBasicBlock(block.Ordinal, block.Kind,
+                block.IsReachable, block.ConditionKind, block.Operations,
+                block.Ordinal == 3 ? ZeroPlaceholder(blocks[3].Operations[0].Span)
+                    : block.BranchValue,
+                edges.Where(edge => edge.DestinationBlockOrdinal == block.Ordinal).ToArray(),
+                edges.Where(edge => edge.SourceBlockOrdinal == block.Ordinal).ToArray()))
+                .ToArray());
+        normalReturns = new[]
+        {
+            new CSharpNormalReturnCleanupSite(1, 3),
+            new CSharpNormalReturnCleanupSite(2, 3),
+        };
         return true;
     }
 

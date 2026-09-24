@@ -50,6 +50,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'C# mixed normal/error cleanup Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'called-return-finally.wasm')
     if ($LASTEXITCODE -ne 0) { throw 'C# called-return cleanup Node WASM probe failed.' }
+    & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'catch-finally.wasm')
+    if ($LASTEXITCODE -ne 0) { throw 'C# catch-finally Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'cleanup-replaces-error.wasm')
     if ($LASTEXITCODE -ne 0) { throw 'C# cleanup-replaces-error Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'catch-rethrow.wasm')
