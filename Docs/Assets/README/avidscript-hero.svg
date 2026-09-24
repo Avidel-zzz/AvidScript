@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-labelledby="title desc">
-  <title id="title">AvidScript — 用 C# 为 Unreal Engine 编写玩法</title>
-  <desc id="desc">深色工程画布上的 AvidScript 标识、C# 代码与线框方块。代码经过 WebAssembly 驱动 UE 游戏对象。此图是概念插画，并非编辑器截图。</desc>
+  <title id="title">AvidScript — C# scripting for Unreal Engine</title>
+  <desc id="desc">AvidScript project banner with C# code and an Unreal Engine object.</desc>
   <defs>
     <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M 32 0 H 0 V 32" fill="none" stroke="#263b41" stroke-width="0.7"/></pattern>
     <linearGradient id="fade" x2="1" y2="1"><stop stop-color="#14282e"/><stop offset="1" stop-color="#0c151c"/></linearGradient>
@@ -11,22 +11,22 @@
   <path d="M 56 84 L 78 40 L 100 84 M 66 67 H 90" fill="none" stroke="#83f0ca" stroke-width="6" stroke-linejoin="round"/>
   <g font-family="Consolas, 'Liberation Mono', monospace" font-size="13" letter-spacing="2">
     <text x="117" y="65" fill="#a7bebf">C# / WEBASSEMBLY / UNREAL ENGINE</text>
-    <text x="57" y="367" fill="#83f0ca">WRITE. BUILD. PLAY.</text>
+    <text x="57" y="367" fill="#83f0ca">SOURCE / BUILD / RUNTIME</text>
     <text x="1139" y="377" fill="#91abaa" text-anchor="end">DEVELOPER PREVIEW</text>
   </g>
   <text x="52" y="174" font-family="Bahnschrift, 'Trebuchet MS', sans-serif" font-size="83" font-weight="700" letter-spacing="-3" fill="#f0f5ef">AvidScript<tspan fill="#83f0ca">.</tspan></text>
   <g font-family="'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif">
-    <text x="57" y="225" font-size="28" fill="#eef5f1">用 C#，让玩法动起来。</text>
-    <text x="58" y="267" font-size="17" fill="#a7bebf">编写游戏逻辑 · 接入 UE 与蓝图 · 迭代玩法</text>
+    <text x="57" y="225" font-size="28" fill="#eef5f1">C# scripts for Unreal Engine 5.8</text>
+    <text x="58" y="267" font-size="17" fill="#a7bebf">Roslyn · WebAssembly · UE API bindings</text>
   </g>
   <path d="M 58 309 H 586" stroke="#30454a"/>
   <rect x="712" y="65" width="422" height="137" rx="10" fill="#101d26" stroke="#39505a"/>
   <circle cx="734" cy="85" r="4" fill="#83f0ca"/>
-  <text x="748" y="90" font-family="Consolas, monospace" font-size="12" fill="#a7bebf">ActorLifecycle.cs / Tick</text>
+  <text x="748" y="90" font-family="Consolas, monospace" font-size="12" fill="#a7bebf">ActorLifecycleScript.cs / BeginPlay</text>
   <path d="M 713 103 H 1133" stroke="#2c414a"/>
-  <g font-family="Consolas, 'Liberation Mono', monospace" font-size="17">
+  <g font-family="Consolas, 'Liberation Mono', monospace" font-size="15">
     <text x="735" y="139" fill="#e3efec">UE.Self.<tspan fill="#83f0ca">SetActorLocation</tspan>(</text>
-    <text x="757" y="168" fill="#b1c8d2">position + velocity * dt);</text>
+    <text x="757" y="168" fill="#b1c8d2">new FVector(100.0f, 200.0f, 300.0f));</text>
   </g>
   <path d="M 764 203 V 284 H 851" fill="none" stroke="#83f0ca" stroke-width="2" stroke-dasharray="5 6"/>
   <path d="M 844 278 L 851 284 L 844 290" fill="none" stroke="#83f0ca" stroke-width="2"/>
