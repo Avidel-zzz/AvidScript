@@ -55,11 +55,16 @@ internal static class CSharpGuestAsyncLanguageErrorTests
             && module.Provenance.SemanticSchemaVersion == semantic.SchemaVersion
             && module.LanguageErrorCatalog is { Types.Count: 1, Sources.Count: 1 }
             && module.Imports.Count(item => item.Name == "avid_task_fault_language_error_v1") == 1
+            && module.Imports.Count(item => item.Name == "avid_language_error_report_v1") == 1
             && module.Functions.SelectMany(function => function.Blocks)
                 .SelectMany(block => block.Instructions)
                 .Count(item => item.Op == "call"
-                    && item.TargetId == "import:task_fault_language_error_v1") == 1,
-            "IR 21 must bind one source-backed Task fault call");
+                    && item.TargetId == "import:task_fault_language_error_v1") == 1
+            && module.Functions.SelectMany(function => function.Blocks)
+                .SelectMany(block => block.Instructions)
+                .Count(item => item.Op == "call"
+                    && item.TargetId == "import:language_error_report_v1") == 2,
+            "IR 21 must bind Task fault and unhandled await report calls");
         Check(GuestModuleValidator.Validate(module).Succeeded,
             "lowered IR must pass its versioned contract");
         byte[] serialized = GuestIrSerializer.Serialize(module);

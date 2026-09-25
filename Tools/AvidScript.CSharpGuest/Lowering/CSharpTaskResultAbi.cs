@@ -16,6 +16,7 @@ internal static class CSharpTaskResultAbi
     public const string FaultLanguageErrorImportId = "import:task_fault_language_error_v1";
     public const string LanguageErrorMetaImportId = "import:task_language_error_meta_v1";
     public const string LanguageErrorRootImportId = "import:task_language_error_root_v1";
+    public const string LanguageErrorReportImportId = "import:language_error_report_v1";
     public const string TokenTypeId = "type:int64";
     public const string IntTypeId = "type:int32";
     public const int Create = 1;
@@ -94,6 +95,10 @@ internal static class CSharpTaskResultAbi
     public static GuestImport LanguageErrorRootImport() => new(LanguageErrorRootImportId,
         "avidscript", "avid_task_language_error_root_v1",
         new[] { TokenTypeId }, "type:language_error_root");
+
+    public static GuestImport LanguageErrorReportImport() => new(LanguageErrorReportImportId,
+        "avidscript", "avid_language_error_report_v1",
+        new[] { IntTypeId, IntTypeId, "type:language_error_root" }, IntTypeId);
 
     public static GuestRegister? LoadTaskLocalToken(CSharpFunctionLoweringContext context,
         string symbolId, int block, List<GuestInstruction> instructions)

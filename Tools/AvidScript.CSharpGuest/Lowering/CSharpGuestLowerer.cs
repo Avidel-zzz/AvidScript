@@ -151,7 +151,8 @@ public static class CSharpGuestLowerer
             imports = imports.Append(CSharpTaskResultAbi.RetainForContinuationImport())
                 .Append(CSharpTaskResultAbi.FaultLanguageErrorImport())
                 .Append(CSharpTaskResultAbi.LanguageErrorMetaImport())
-                .Append(CSharpTaskResultAbi.LanguageErrorRootImport()).ToArray();
+                .Append(CSharpTaskResultAbi.LanguageErrorRootImport())
+                .Append(CSharpTaskResultAbi.LanguageErrorReportImport()).ToArray();
         if (document.SchemaVersion is SemanticContract.TaskLocalSchemaVersion
             or SemanticContract.TaskAssignmentSchemaVersion
             or SemanticContract.TaskExistingLocalSchemaVersion

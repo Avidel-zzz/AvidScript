@@ -69,34 +69,45 @@ internal static class CSharpTaskAwaitLowerer
 
         List<GuestInstruction> readyInstructions = new();
         if (!EmitRead(context, token, segment.Ordinal, readyInstructions,
-            out GuestRegister? value, out GuestRegister? succeeded)) return false;
+            out GuestRegister? value, out GuestRegister? succeeded,
+            out GuestRegister? state)) return false;
         string valueBlock = blockId + ":task_value";
         string failedBlock = blockId + ":task_failed";
         blocks.Add(new(readyBlock, readyInstructions,
             new("branch_if", succeeded!.Id, valueBlock, failedBlock, null)));
         List<GuestInstruction> failedInstructions = new();
-        if (method.TaskResultTypeId is not null
-            && CSharpTaskResultAbi.PropagateFailure(context, method, token,
-                segment.Ordinal, failedInstructions) is null) return false;
-        if ((!taskLocal && CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release,
-                token, null, segment.Ordinal, failedInstructions) is null)
-            || !CSharpTaskResultAbi.ReleaseTaskLocal(context, method,
-                segment.Ordinal, failedInstructions)) return false;
-        string? failedReturnId = null;
-        if (method.TaskResultTypeId is not null && initialEntry)
+        if (method.TaskResultTypeId is null
+            && context.Document.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion)
         {
-            GuestRegister? producer = CSharpTaskResultAbi.LoadProducerToken(
-                context, method, segment.Ordinal, failedInstructions);
-            if (producer is null || CSharpTaskResultAbi.Call(context,
-                    CSharpTaskResultAbi.Release, producer, null,
-                    segment.Ordinal, failedInstructions) is null) return false;
-            failedReturnId = CSharpTaskResultAbi.ReturnValue(context, method,
-                segment.Ordinal, failedInstructions)?.Id;
-            if (failedReturnId is null) return false;
+            if (!EmitUnhandledFailure(context, method, token, state!, segment.Ordinal,
+                    failedBlock, failedInstructions, blocks,
+                    releaseDirectToken: !taskLocal, releaseTaskLocals: true)) return false;
         }
-        blocks.Add(new(failedBlock, failedInstructions,
-            new(method.TaskResultTypeId is null ? "trap" : "return",
-                null, null, null, failedReturnId)));
+        else
+        {
+            if (method.TaskResultTypeId is not null
+                && CSharpTaskResultAbi.PropagateFailure(context, method, token,
+                    segment.Ordinal, failedInstructions) is null) return false;
+            if ((!taskLocal && CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release,
+                    token, null, segment.Ordinal, failedInstructions) is null)
+                || !CSharpTaskResultAbi.ReleaseTaskLocal(context, method,
+                    segment.Ordinal, failedInstructions)) return false;
+            string? failedReturnId = null;
+            if (method.TaskResultTypeId is not null && initialEntry)
+            {
+                GuestRegister? producer = CSharpTaskResultAbi.LoadProducerToken(
+                    context, method, segment.Ordinal, failedInstructions);
+                if (producer is null || CSharpTaskResultAbi.Call(context,
+                        CSharpTaskResultAbi.Release, producer, null,
+                        segment.Ordinal, failedInstructions) is null) return false;
+                failedReturnId = CSharpTaskResultAbi.ReturnValue(context, method,
+                    segment.Ordinal, failedInstructions)?.Id;
+                if (failedReturnId is null) return false;
+            }
+            blocks.Add(new(failedBlock, failedInstructions,
+                new(method.TaskResultTypeId is null ? "trap" : "return",
+                    null, null, null, failedReturnId)));
+        }
         List<GuestInstruction> valueInstructions = new();
         if (!StoreResult(context, site, value!, segment.Ordinal, valueInstructions)) return false;
         if (!taskLocal && CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release,
@@ -181,22 +192,92 @@ internal static class CSharpTaskAwaitLowerer
         if (token is null) return false;
         instructions.Add(new("local_load", token.Id, Array.Empty<string>(), storage.Id, null, null));
         if (!EmitRead(context, token, block, instructions,
-            out GuestRegister? value, out GuestRegister? succeeded)) return false;
+            out GuestRegister? value, out GuestRegister? succeeded,
+            out GuestRegister? state)) return false;
         string accepted = activeBlockId + ":task_read_accepted";
         string rejected = activeBlockId + ":task_read_rejected";
         blocks.Add(new(activeBlockId, instructions,
             new("branch_if", succeeded!.Id, accepted, rejected, null)));
         List<GuestInstruction> rejectedInstructions = new();
-        if (method.TaskResultTypeId is not null
-            && CSharpTaskResultAbi.PropagateFailure(context, method, token,
-                block, rejectedInstructions) is null) return false;
-        blocks.Add(new(rejected, rejectedInstructions,
-            new(method.TaskResultTypeId is null ? "trap" : "return",
-                null, null, null, null)));
+        if (method.TaskResultTypeId is null
+            && context.Document.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion)
+        {
+            if (!EmitUnhandledFailure(context, method, token, state!, block,
+                    rejected, rejectedInstructions, blocks,
+                    releaseDirectToken: false, releaseTaskLocals: false)) return false;
+        }
+        else
+        {
+            if (method.TaskResultTypeId is not null
+                && CSharpTaskResultAbi.PropagateFailure(context, method, token,
+                    block, rejectedInstructions) is null) return false;
+            blocks.Add(new(rejected, rejectedInstructions,
+                new(method.TaskResultTypeId is null ? "trap" : "return",
+                    null, null, null, null)));
+        }
         nextInstructions = new();
         if (!StoreResult(context, site, value!, block, nextInstructions)) return false;
         activeBlockId = accepted;
         return true;
+    }
+
+    private static bool EmitUnhandledFailure(CSharpFunctionLoweringContext context,
+        SemanticAsyncMethod method, GuestRegister token, GuestRegister state,
+        int block, string failedBlockId, List<GuestInstruction> instructions,
+        List<GuestBasicBlock> blocks, bool releaseDirectToken,
+        bool releaseTaskLocals)
+    {
+        GuestRegister? faultedState = CSharpTaskResultAbi.Constant(context,
+            CSharpTaskResultAbi.TokenTypeId, 2, block, instructions);
+        GuestRegister? faulted = context.CreateTemporary(CSharpTaskResultAbi.IntTypeId, block);
+        if (faultedState is null || faulted is null) return false;
+        instructions.Add(new("binary", faulted.Id,
+            new[] { state.Id, faultedState.Id }, null, "equals", null));
+        string languageErrorBlock = failedBlockId + ":language_error";
+        string otherFailureBlock = failedBlockId + ":other_failure";
+        blocks.Add(new(failedBlockId, instructions,
+            new("branch_if", faulted.Id, languageErrorBlock, otherFailureBlock, null)));
+
+        List<GuestInstruction> report = new();
+        GuestRegister? metadata = context.CreateTemporary(CSharpTaskResultAbi.TokenTypeId, block);
+        GuestRegister? shift = CSharpTaskResultAbi.Constant(context,
+            CSharpTaskResultAbi.TokenTypeId, 32, block, report);
+        GuestRegister? typePacked = context.CreateTemporary(CSharpTaskResultAbi.TokenTypeId, block);
+        GuestRegister? typeToken = context.CreateTemporary(CSharpTaskResultAbi.IntTypeId, block);
+        GuestRegister? sourceToken = context.CreateTemporary(CSharpTaskResultAbi.IntTypeId, block);
+        GuestRegister? root = context.CreateTemporary("type:language_error_root", block);
+        GuestRegister? reported = context.CreateTemporary(CSharpTaskResultAbi.IntTypeId, block);
+        if (metadata is null || shift is null || typePacked is null
+            || typeToken is null || sourceToken is null || root is null
+            || reported is null) return false;
+        report.Add(new("call", metadata.Id, new[] { token.Id },
+            CSharpTaskResultAbi.LanguageErrorMetaImportId, null, null));
+        report.Add(new("binary", typePacked.Id,
+            new[] { metadata.Id, shift.Id }, null, "right_shift", null));
+        report.Add(new("convert", typeToken.Id,
+            new[] { typePacked.Id }, null, null, null));
+        report.Add(new("convert", sourceToken.Id,
+            new[] { metadata.Id }, null, null, null));
+        report.Add(new("call", root.Id, new[] { token.Id },
+            CSharpTaskResultAbi.LanguageErrorRootImportId, null, null));
+        if (!ReleaseOwners(report)) return false;
+        report.Add(new("call", reported.Id,
+            new[] { typeToken.Id, sourceToken.Id, root.Id },
+            CSharpTaskResultAbi.LanguageErrorReportImportId, null, null));
+        blocks.Add(new(languageErrorBlock, report,
+            new("trap", null, null, null, null)));
+
+        List<GuestInstruction> other = new();
+        if (!ReleaseOwners(other)) return false;
+        blocks.Add(new(otherFailureBlock, other,
+            new("trap", null, null, null, null)));
+        return true;
+
+        bool ReleaseOwners(List<GuestInstruction> output) =>
+            (!releaseDirectToken || CSharpTaskResultAbi.Call(context,
+                CSharpTaskResultAbi.Release, token, null, block, output) is not null)
+            && (!releaseTaskLocals || CSharpTaskResultAbi.ReleaseTaskLocal(
+                context, method, block, output));
     }
 
     private static bool StoreResult(CSharpFunctionLoweringContext context,
@@ -217,15 +298,17 @@ internal static class CSharpTaskAwaitLowerer
 
     private static bool EmitRead(CSharpFunctionLoweringContext context,
         GuestRegister token, int block, List<GuestInstruction> instructions,
-        out GuestRegister? value, out GuestRegister? succeeded)
+        out GuestRegister? value, out GuestRegister? succeeded,
+        out GuestRegister? state)
     {
         value = null;
         succeeded = null;
+        state = null;
         GuestRegister? packed = CSharpTaskResultAbi.Call(context,
             CSharpTaskResultAbi.Read, token, null, block, instructions);
         GuestRegister? shift = CSharpTaskResultAbi.Constant(context,
             CSharpTaskResultAbi.TokenTypeId, 32, block, instructions);
-        GuestRegister? state = context.CreateTemporary(CSharpTaskResultAbi.TokenTypeId, block);
+        state = context.CreateTemporary(CSharpTaskResultAbi.TokenTypeId, block);
         GuestRegister? successState = CSharpTaskResultAbi.Constant(context,
             CSharpTaskResultAbi.TokenTypeId, 1, block, instructions);
         succeeded = context.CreateTemporary(CSharpTaskResultAbi.IntTypeId, block);

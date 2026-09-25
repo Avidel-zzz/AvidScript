@@ -914,6 +914,11 @@ bool FAvidScriptCompiledTaskLanguageErrorTest::RunTest(const FString& Parameters
 						Stats.LiveObjects > 0 && Stats.LiveRoots > 0);
 					TestFalse(TEXT("Unhandled async void await does not succeed"),
 						Runtime.DispatchContinuation(Completion, Result));
+					TestEqual(TEXT("Unhandled Task language error keeps its category"),
+						Result.ErrorCategory, FString(TEXT("language_error_uncaught")));
+					TestTrue(TEXT("Unhandled Task language error names type and source"),
+						Result.ErrorMessage.Contains(TEXT("InvalidOperationException"))
+						&& Result.ErrorMessage.Contains(TEXT("TaskLanguageError.cs")));
 					TestTrue(TEXT("Failed awaiter finalizes"),
 						Owner->FinalizeDispatched(Completion.Token, false));
 					++FaultedWaiters;
