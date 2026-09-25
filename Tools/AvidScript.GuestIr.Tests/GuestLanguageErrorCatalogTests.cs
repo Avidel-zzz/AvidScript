@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
@@ -214,6 +215,12 @@ internal static class GuestLanguageErrorCatalogTests
         byte[] bytes = GuestIrSerializer.Serialize(combined);
         Check(bytes.SequenceEqual(GuestIrSerializer.Serialize(GuestIrSerializer.Deserialize(bytes))),
             "IR 20 task/language-error module must round-trip canonically");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_TASK_LANGUAGE_ERROR_IR_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "P66_TaskLanguageError.guestir.json"), bytes);
+        }
         AssertError(combined with { SchemaVersion = 19, IrVersion = "1.18" }, "ASIR1029");
         AssertError(combined with { Provenance = combined.Provenance with
         {

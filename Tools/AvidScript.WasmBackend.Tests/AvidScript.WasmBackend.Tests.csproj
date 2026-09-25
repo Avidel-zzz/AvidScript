@@ -11,4 +11,10 @@
     <ProjectReference Include="../AvidScript.GuestIr/AvidScript.GuestIr.csproj" />
     <ProjectReference Include="../AvidScript.WasmBackend/AvidScript.WasmBackend.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="../../Tests/Fixtures/WasmBackend/P66_TaskLanguageError.guestir.json"
+          Link="Fixtures/P66_TaskLanguageError.guestir.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../Tests/Fixtures/WasmBackend/P66_TaskLanguageError.wasm"
+          Link="Fixtures/P66_TaskLanguageError.wasm" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

@@ -60,6 +60,20 @@ void Custom(TArray<uint8>& Module, const ANSICHAR* Name, const FString& Text)
 	Module.Append(Payload);
 }
 
+void WasmName(TArray<uint8>& Bytes, const ANSICHAR* Name)
+{
+	const int32 Length = FCStringAnsi::Strlen(Name);
+	U32(Bytes, Length);
+	Bytes.Append(reinterpret_cast<const uint8*>(Name), Length);
+}
+
+void WasmSection(TArray<uint8>& Module, uint8 Id, const TArray<uint8>& Payload)
+{
+	Module.Add(Id);
+	U32(Module, Payload.Num());
+	Module.Append(Payload);
+}
+
 FString Provenance(int32 GuestSchema = 17)
 {
 	const FString GuestVersion = GuestSchema == 20 ? TEXT("1.19") : TEXT("1.16");
@@ -116,6 +130,55 @@ TArray<uint8> Module(const FString* Metadata, bool bProvenance = true,
 		Custom(Wasm, "avidscript.language_errors", *Metadata);
 		if (bDuplicate) Custom(Wasm, "avidscript.language_errors", *Metadata);
 	}
+	return Wasm;
+}
+
+TArray<uint8> TaskFaultImportModule(int32 GuestSchema)
+{
+	TArray<uint8> Wasm;
+	Wasm.Append(BaseWasm, 8); // magic and WASM version only
+	TArray<uint8> Types;
+	const uint8 Signatures[] = {
+		2, 0x60, 4, 0x7e, 0x7f, 0x7f, 0x7e, 1, 0x7f,
+		0x60, 0, 0
+	};
+	Types.Append(Signatures, UE_ARRAY_COUNT(Signatures));
+	WasmSection(Wasm, 1, Types);
+	TArray<uint8> Imports;
+	U32(Imports, 1);
+	WasmName(Imports, "avidscript");
+	WasmName(Imports, "avid_task_fault_language_error_v1");
+	Imports.Add(0); // function import
+	U32(Imports, 0); // (i64, i32, i32, i64) -> i32
+	WasmSection(Wasm, 2, Imports);
+	TArray<uint8> Functions;
+	U32(Functions, 1);
+	U32(Functions, 1); // () -> void
+	WasmSection(Wasm, 3, Functions);
+	TArray<uint8> Exports;
+	U32(Exports, 2);
+	for (const ANSICHAR* Name : {"avid_on_begin_play", "avid_on_end_play"})
+	{
+		WasmName(Exports, Name);
+		Exports.Add(0); // function export
+		U32(Exports, 1); // imported function occupies index 0
+	}
+	WasmSection(Wasm, 7, Exports);
+	TArray<uint8> Code;
+	U32(Code, 1);
+	const uint8 Body[] = {
+		0, // no locals
+		0x42, 0, 0x41, 1, 0x41, 1, 0x42, 0,
+		0x10, 0, // call imported fault function
+		0x1a, // drop its result
+		0x0b
+	};
+	U32(Code, UE_ARRAY_COUNT(Body));
+	Code.Append(Body, UE_ARRAY_COUNT(Body));
+	WasmSection(Wasm, 10, Code);
+	Custom(Wasm, "avidscript.provenance", Provenance(GuestSchema));
+	const FString Metadata = Json(Document(GuestSchema));
+	Custom(Wasm, "avidscript.language_errors", Metadata);
 	return Wasm;
 }
 }
@@ -500,6 +563,70 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 			Runtime.Unload();
 			TestNull(*FString::Printf(TEXT("%s catalog is released on unload"), *FixtureName),
 				Runtime.GetLanguageErrorCatalog());
+		}
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptTaskLanguageErrorVmImportTest,
+	"AvidScript.Runtime.LanguageErrorCatalog.TaskFaultVmImport",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptTaskLanguageErrorVmImportTest::RunTest(const FString& Parameters)
+{
+	using namespace AvidScriptLanguageErrorCatalogTests;
+	const FString FixturePath = FPaths::Combine(FPaths::ProjectPluginsDir(),
+		TEXT("AvidScript/Tests/Fixtures/WasmBackend/P66_TaskLanguageError.wasm"));
+	TArray<uint8> GeneratedWasm;
+	if (!TestTrue(TEXT("read production-backend IR 20 WASM fixture"),
+		FFileHelper::LoadFileToArray(GeneratedWasm, *FixturePath)))
+		return false;
+	for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
+	{
+		FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
+		FAvidScriptWasmSmokeResult Result;
+		if (!TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("generated IR 20 WASM loads")),
+			Runtime.LoadModule(GeneratedWasm.GetData(), GeneratedWasm.Num(), TEXT("minimal"), Result)))
+		{
+			AddError(Result.ErrorMessage);
+			continue;
+		}
+		TestAvidScriptRuntimeLaneIdentity(*this, Lane, Result);
+		TestTrue(TEXT("generated IR 20 catalog authorizes the fault import"),
+			Runtime.GetLanguageErrorCatalog()
+			&& Runtime.GetLanguageErrorCatalog()->SupportsTaskLanguageErrorFault());
+		Runtime.Unload();
+	}
+	for (const int32 GuestSchema : {20, 17})
+	{
+		const TArray<uint8> Wasm = TaskFaultImportModule(GuestSchema);
+		for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
+		{
+			FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
+			FAvidScriptWasmSmokeResult Result;
+			if (!TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("fault import WASM loads")),
+				Runtime.LoadModule(Wasm.GetData(), Wasm.Num(), ModuleId, Result)))
+			{
+				AddError(Result.ErrorMessage);
+				continue;
+			}
+			TestAvidScriptRuntimeLaneIdentity(*this, Lane, Result);
+			const bool bAllowedVersion = GuestSchema == 20;
+			TestEqual(TEXT("catalog gates the imported function by IR version"),
+				Runtime.GetLanguageErrorCatalog()->SupportsTaskLanguageErrorFault(), bAllowedVersion);
+			TestFalse(TEXT("WASM call rejects missing Session task context"),
+				Runtime.BeginPlay(Result));
+			TestEqual(TEXT("VM import preserves the Host rejection category"),
+				Result.ErrorCategory, bAllowedVersion
+					? FString(TEXT("task_result_context"))
+					: FString(TEXT("task_language_error_version")));
+			TestEqual(TEXT("VM reports the called import"), Result.ImportName,
+				FString(TEXT("avid_task_fault_language_error_v1")));
+			const AvidScript::Managed::FHeap* Heap = Runtime.GetManagedHeapForTesting();
+			TestTrue(TEXT("rejected VM import leaves no managed roots"), Heap
+				&& Heap->GetStats().ActiveFrames == 0 && Heap->GetStats().LiveRoots == 0);
+			Runtime.Unload();
 		}
 	}
 	return true;

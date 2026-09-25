@@ -1,0 +1,937 @@
+{
+  "schema_version": 20,
+  "ir_version": "1.19",
+  "module_id": "minimal",
+  "language": "csharp",
+  "provenance": {
+    "source_id": "Scripts/Minimal.cs",
+    "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "frontend_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "semantic_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "semantic_schema_version": 40,
+    "semantic_version": "1.49"
+  },
+  "succeeded": true,
+  "memory_layout": {
+    "state_start": 16,
+    "state_size": 0,
+    "data_start": 16,
+    "data_end": 16,
+    "heap_start": 16,
+    "state_slots": []
+  },
+  "types": [
+    {
+      "id": "type:int32",
+      "kind": "scalar",
+      "storage": "i32",
+      "fields": [],
+      "element_type_id": null,
+      "underlying_type_id": null,
+      "size": 4,
+      "alignment": 4
+    },
+    {
+      "id": "type:language_error_payload",
+      "kind": "struct",
+      "storage": "memory",
+      "fields": [
+        {
+          "id": "field:code",
+          "name": "code",
+          "type_id": "type:int32",
+          "offset": 0
+        }
+      ],
+      "element_type_id": null,
+      "underlying_type_id": null,
+      "size": 4,
+      "alignment": 4
+    },
+    {
+      "id": "type:language_error_root",
+      "kind": "managed_ref",
+      "storage": "i64",
+      "fields": [],
+      "element_type_id": "type:language_error_payload",
+      "underlying_type_id": null,
+      "size": 8,
+      "alignment": 8
+    },
+    {
+      "id": "type:language_outcome",
+      "kind": "struct",
+      "storage": "memory",
+      "fields": [
+        {
+          "id": "field:status",
+          "name": "status",
+          "type_id": "type:int32",
+          "offset": 0
+        },
+        {
+          "id": "field:error_type",
+          "name": "error_type",
+          "type_id": "type:int32",
+          "offset": 4
+        },
+        {
+          "id": "field:source",
+          "name": "source",
+          "type_id": "type:int32",
+          "offset": 8
+        },
+        {
+          "id": "field:error_root",
+          "name": "error_root",
+          "type_id": "type:language_error_root",
+          "offset": 16
+        },
+        {
+          "id": "field:value",
+          "name": "value",
+          "type_id": "type:int32",
+          "offset": 24
+        }
+      ],
+      "element_type_id": null,
+      "underlying_type_id": null,
+      "size": 32,
+      "alignment": 8
+    },
+    {
+      "id": "type:void",
+      "kind": "void",
+      "storage": "none",
+      "fields": [],
+      "element_type_id": null,
+      "underlying_type_id": null,
+      "size": 0,
+      "alignment": 1
+    },
+    {
+      "id": "type:int64",
+      "kind": "scalar",
+      "storage": "i64",
+      "fields": [],
+      "element_type_id": null,
+      "underlying_type_id": null,
+      "size": 8,
+      "alignment": 8
+    }
+  ],
+  "imports": [
+    {
+      "id": "import:managed_heap",
+      "module": "avidscript",
+      "name": "avid_managed_heap_v1",
+      "parameter_type_ids": [
+        "type:int32",
+        "type:int32",
+        "type:int32",
+        "type:int32"
+      ],
+      "return_type_id": "type:int32",
+      "dispatch_class": "semantic",
+      "optimization_class": "none",
+      "binding_ordinal": -1
+    },
+    {
+      "id": "import:task_i32_v1",
+      "module": "avidscript",
+      "name": "avid_task_i32_v1",
+      "parameter_type_ids": [
+        "type:int32",
+        "type:int64",
+        "type:int32",
+        "type:int32"
+      ],
+      "return_type_id": "type:int64",
+      "dispatch_class": "semantic",
+      "optimization_class": "none",
+      "binding_ordinal": -1
+    },
+    {
+      "id": "import:task_bind_producer_v1",
+      "module": "avidscript",
+      "name": "avid_task_bind_producer_v1",
+      "parameter_type_ids": [
+        "type:int64",
+        "type:int64"
+      ],
+      "return_type_id": "type:int32",
+      "dispatch_class": "semantic",
+      "optimization_class": "none",
+      "binding_ordinal": -1
+    },
+    {
+      "id": "import:task_propagate_failure_v1",
+      "module": "avidscript",
+      "name": "avid_task_propagate_failure_v1",
+      "parameter_type_ids": [
+        "type:int64",
+        "type:int64"
+      ],
+      "return_type_id": "type:int32",
+      "dispatch_class": "semantic",
+      "optimization_class": "none",
+      "binding_ordinal": -1
+    },
+    {
+      "id": "import:task_retain_for_continuation_v1",
+      "module": "avidscript",
+      "name": "avid_task_retain_for_continuation_v1",
+      "parameter_type_ids": [
+        "type:int64",
+        "type:int64"
+      ],
+      "return_type_id": "type:int32",
+      "dispatch_class": "semantic",
+      "optimization_class": "none",
+      "binding_ordinal": -1
+    },
+    {
+      "id": "import:task_fault_language_error_v1",
+      "module": "avidscript",
+      "name": "avid_task_fault_language_error_v1",
+      "parameter_type_ids": [
+        "type:int64",
+        "type:int32",
+        "type:int32",
+        "type:language_error_root"
+      ],
+      "return_type_id": "type:int32",
+      "dispatch_class": "semantic",
+      "optimization_class": "none",
+      "binding_ordinal": -1
+    }
+  ],
+  "globals": [],
+  "data_segments": [],
+  "functions": [
+    {
+      "id": "function:outcome_leaf",
+      "parameters": [
+        {
+          "id": "input",
+          "type_id": "type:int32"
+        }
+      ],
+      "locals": [
+        {
+          "id": "out",
+          "type_id": "type:language_outcome"
+        },
+        {
+          "id": "zero",
+          "type_id": "type:int32"
+        },
+        {
+          "id": "one",
+          "type_id": "type:int32"
+        },
+        {
+          "id": "answer",
+          "type_id": "type:int32"
+        }
+      ],
+      "return_type_id": "type:language_outcome",
+      "entry_block_id": "entry",
+      "blocks": [
+        {
+          "id": "entry",
+          "instructions": [
+            {
+              "op": "stack_alloc",
+              "result_id": "out",
+              "operand_ids": [],
+              "target_id": null,
+              "operator_kind": null,
+              "constant": null
+            },
+            {
+              "op": "constant",
+              "result_id": "zero",
+              "operand_ids": [],
+              "target_id": null,
+              "operator_kind": null,
+              "constant": {
+                "kind": "int32",
+                "value": "0"
+              }
+            },
+            {
+              "op": "constant",
+              "result_id": "one",
+              "operand_ids": [],
+              "target_id": null,
+              "operator_kind": null,
+              "constant": {
+                "kind": "int32",
+                "value": "1"
+              }
+            },
+            {
+              "op": "constant",
+              "result_id": "answer",
+              "operand_ids": [],
+              "target_id": null,
+              "operator_kind": null,
+              "constant": {
+                "kind": "int32",
+                "value": "42"
+              }
+            }
+          ],
+          "terminator": {
+            "kind": "branch_if",
+            "condition_value_id": "input",
+            "target_block_id": "error",
+            "false_target_block_id": "success",
+            "return_value_id": null
+          }
+        },
+        {
+          "id": "success",
+          "instructions": [
+            {
+              "op": "field_store",
+              "result_id": null,
+              "operand_ids": [
+                "out",
+                "zero"
+              ],
+              "target_id": "field:status",
+              "operator_kind": null,
+              "constant": null
+            },
+            {
+              "op": "field_store",
+              "result_id": null,
+              "operand_ids": [
+                "out",
+                "answer"
+              ],
+              "target_id": "field:value",
+              "operator_kind": null,
+              "constant": null
+            }
+          ],
+          "terminator": {
+            "kind": "return",
+            "condition_value_id": null,
+            "target_block_id": null,
+            "false_target_block_id": null,
+            "return_value_id": "out"
+          }
+        },
+        {
+          "id": "error",
+          "instructions": [
+            {
+              "op": "field_store",
+              "result_id": null,
+              "operand_ids": [
+                "out",
+                "one"
+              ],
+              "target_id": "field:status",
+              "operator_kind": null,
+              "constant": null
+            },
+            {
+              "op": "field_store",
+              "result_id": null,
+              "operand_ids": [
+                "out",
+                "one"
+              ],
+              "target_id": "field:error_type",
+              "operator_kind": null,
+              "constant": null
+            },
+            {
+              "op": "field_store",
+              "result_id": null,
+              "operand_ids": [
+                "out",
+                "one"
+              ],
+              "target_id": "field:source",
+              "operator_kind": null,
+              "constant": null
+            }
+          ],
+          "terminator": {
+            "kind": "return",
+            "condition_value_id": null,
+            "target_block_id": null,
+            "false_target_block_id": null,
+            "return_value_id": "out"
+          }
+        }
+      ]
+    },
+    {
+      "id": "function:outcome_caller",
+      "parameters": [
+        {
+          "id": "input",
+          "type_id": "type:int32"
+        }
+      ],
+      "locals": [
+        {
+          "id": "result",
+          "type_id": "type:language_outcome"
+        },
+        {
+          "id": "status",
+          "type_id": "type:int32"
+        },
+        {
+          "id": "value",
+          "type_id": "type:int32"
+        },
+        {
+          "id": "error_type",
+          "type_id": "type:int32"
+        },
+        {
+          "id": "source",
+          "type_id": "type:int32"
+        },
+        {
+          "id": "error_code",
+          "type_id": "type:int32"
+        }
+      ],
+      "return_type_id": "type:int32",
+      "entry_block_id": "entry",
+      "blocks": [
+        {
+          "id": "entry",
+          "instructions": [
+            {
+              "op": "call",
+              "result_id": "result",
+              "operand_ids": [
+                "input"
+              ],
+              "target_id": "function:outcome_leaf",
+              "operator_kind": null,
+              "constant": null
+            },
+            {
+              "op": "field_load",
+              "result_id": "status",
+              "operand_ids": [
+                "result"
+              ],
+              "target_id": "field:status",
+              "operator_kind": null,
+              "constant": null
+            }
+          ],
+          "terminator": {
+            "kind": "branch_if",
+            "condition_value_id": "status",
+            "target_block_id": "error",
+            "false_target_block_id": "success",
+            "return_value_id": null
+          }
+        },
+        {
+          "id": "error",
+          "instructions": [
+            {
+              "op": "field_load",
+              "result_id": "error_type",
+              "operand_ids": [
+                "result"
+              ],
+              "target_id": "field:error_type",
+              "operator_kind": null,
+              "constant": null
+            },
+            {
+              "op": "field_load",
+              "result_id": "source",
+              "operand_ids": [
+                "result"
+              ],
+              "target_id": "field:source",
+              "operator_kind": null,
+              "constant": null
+            },
+            {
+              "op": "binary",
+              "result_id": "error_code",
+              "operand_ids": [
+                "error_type",
+                "source"
+              ],
+              "target_id": null,
+              "operator_kind": "add",
+              "constant": null
+            }
+          ],
+          "terminator": {
+            "kind": "return",
+            "condition_value_id": null,
+            "target_block_id": null,
+            "false_target_block_id": null,
+            "return_value_id": "error_code"
+          }
+        },
+        {
+          "id": "success",
+          "instructions": [
+            {
+              "op": "field_load",
+              "result_id": "value",
+              "operand_ids": [
+                "result"
+              ],
+              "target_id": "field:value",
+              "operator_kind": null,
+              "constant": null
+            }
+          ],
+          "terminator": {
+            "kind": "return",
+            "condition_value_id": null,
+            "target_block_id": null,
+            "false_target_block_id": null,
+            "return_value_id": "value"
+          }
+        }
+      ]
+    },
+    {
+      "id": "function:outcome_propagator",
+      "parameters": [
+        {
+          "id": "input",
+          "type_id": "type:int32"
+        }
+      ],
+      "locals": [
+        {
+          "id": "result",
+          "type_id": "type:language_outcome"
+        },
+        {
+          "id": "status",
+          "type_id": "type:int32"
+        },
+        {
+          "id": "out",
+          "type_id": "type:language_outcome"
+        },
+        {
+          "id": "value",
+          "type_id": "type:int32"
+        },
+        {
+          "id": "one",
+          "type_id": "type:int32"
+        },
+        {
+          "id": "next",
+          "type_id": "type:int32"
+        },
+        {
+          "id": "zero",
+          "type_id": "type:int32"
+        }
+      ],
+      "return_type_id": "type:language_outcome",
+      "entry_block_id": "entry",
+      "blocks": [
+        {
+          "id": "entry",
+          "instructions": [
+            {
+              "op": "call",
+              "result_id": "result",
+              "operand_ids": [
+                "input"
+              ],
+              "target_id": "function:outcome_leaf",
+              "operator_kind": null,
+              "constant": null
+            },
+            {
+              "op": "field_load",
+              "result_id": "status",
+              "operand_ids": [
+                "result"
+              ],
+              "target_id": "field:status",
+              "operator_kind": null,
+              "constant": null
+            }
+          ],
+          "terminator": {
+            "kind": "branch_if",
+            "condition_value_id": "status",
+            "target_block_id": "error",
+            "false_target_block_id": "success",
+            "return_value_id": null
+          }
+        },
+        {
+          "id": "error",
+          "instructions": [],
+          "terminator": {
+            "kind": "return",
+            "condition_value_id": null,
+            "target_block_id": null,
+            "false_target_block_id": null,
+            "return_value_id": "result"
+          }
+        },
+        {
+          "id": "success",
+          "instructions": [
+            {
+              "op": "field_load",
+              "result_id": "value",
+              "operand_ids": [
+                "result"
+              ],
+              "target_id": "field:value",
+              "operator_kind": null,
+              "constant": null
+            },
+            {
+              "op": "stack_alloc",
+              "result_id": "out",
+              "operand_ids": [],
+              "target_id": null,
+              "operator_kind": null,
+              "constant": null
+            },
+            {
+              "op": "constant",
+              "result_id": "one",
+              "operand_ids": [],
+              "target_id": null,
+              "operator_kind": null,
+              "constant": {
+                "kind": "int32",
+                "value": "1"
+              }
+            },
+            {
+              "op": "constant",
+              "result_id": "zero",
+              "operand_ids": [],
+              "target_id": null,
+              "operator_kind": null,
+              "constant": {
+                "kind": "int32",
+                "value": "0"
+              }
+            },
+            {
+              "op": "binary",
+              "result_id": "next",
+              "operand_ids": [
+                "value",
+                "one"
+              ],
+              "target_id": null,
+              "operator_kind": "add",
+              "constant": null
+            },
+            {
+              "op": "field_store",
+              "result_id": null,
+              "operand_ids": [
+                "out",
+                "zero"
+              ],
+              "target_id": "field:status",
+              "operator_kind": null,
+              "constant": null
+            },
+            {
+              "op": "field_store",
+              "result_id": null,
+              "operand_ids": [
+                "out",
+                "next"
+              ],
+              "target_id": "field:value",
+              "operator_kind": null,
+              "constant": null
+            }
+          ],
+          "terminator": {
+            "kind": "return",
+            "condition_value_id": null,
+            "target_block_id": null,
+            "false_target_block_id": null,
+            "return_value_id": "out"
+          }
+        }
+      ]
+    },
+    {
+      "id": "function:outcome_propagation_probe",
+      "parameters": [
+        {
+          "id": "input",
+          "type_id": "type:int32"
+        }
+      ],
+      "locals": [
+        {
+          "id": "result",
+          "type_id": "type:language_outcome"
+        },
+        {
+          "id": "status",
+          "type_id": "type:int32"
+        },
+        {
+          "id": "value",
+          "type_id": "type:int32"
+        },
+        {
+          "id": "error_type",
+          "type_id": "type:int32"
+        },
+        {
+          "id": "source",
+          "type_id": "type:int32"
+        },
+        {
+          "id": "error_code",
+          "type_id": "type:int32"
+        }
+      ],
+      "return_type_id": "type:int32",
+      "entry_block_id": "entry",
+      "blocks": [
+        {
+          "id": "entry",
+          "instructions": [
+            {
+              "op": "call",
+              "result_id": "result",
+              "operand_ids": [
+                "input"
+              ],
+              "target_id": "function:outcome_propagator",
+              "operator_kind": null,
+              "constant": null
+            },
+            {
+              "op": "field_load",
+              "result_id": "status",
+              "operand_ids": [
+                "result"
+              ],
+              "target_id": "field:status",
+              "operator_kind": null,
+              "constant": null
+            }
+          ],
+          "terminator": {
+            "kind": "branch_if",
+            "condition_value_id": "status",
+            "target_block_id": "error",
+            "false_target_block_id": "success",
+            "return_value_id": null
+          }
+        },
+        {
+          "id": "error",
+          "instructions": [
+            {
+              "op": "field_load",
+              "result_id": "error_type",
+              "operand_ids": [
+                "result"
+              ],
+              "target_id": "field:error_type",
+              "operator_kind": null,
+              "constant": null
+            },
+            {
+              "op": "field_load",
+              "result_id": "source",
+              "operand_ids": [
+                "result"
+              ],
+              "target_id": "field:source",
+              "operator_kind": null,
+              "constant": null
+            },
+            {
+              "op": "binary",
+              "result_id": "error_code",
+              "operand_ids": [
+                "error_type",
+                "source"
+              ],
+              "target_id": null,
+              "operator_kind": "add",
+              "constant": null
+            }
+          ],
+          "terminator": {
+            "kind": "return",
+            "condition_value_id": null,
+            "target_block_id": null,
+            "false_target_block_id": null,
+            "return_value_id": "error_code"
+          }
+        },
+        {
+          "id": "success",
+          "instructions": [
+            {
+              "op": "field_load",
+              "result_id": "value",
+              "operand_ids": [
+                "result"
+              ],
+              "target_id": "field:value",
+              "operator_kind": null,
+              "constant": null
+            }
+          ],
+          "terminator": {
+            "kind": "return",
+            "condition_value_id": null,
+            "target_block_id": null,
+            "false_target_block_id": null,
+            "return_value_id": "value"
+          }
+        }
+      ]
+    },
+    {
+      "id": "function:task_fault_language_error",
+      "parameters": [
+        {
+          "id": "task",
+          "type_id": "type:int64"
+        },
+        {
+          "id": "root",
+          "type_id": "type:language_error_root"
+        }
+      ],
+      "locals": [
+        {
+          "id": "type_token",
+          "type_id": "type:int32"
+        },
+        {
+          "id": "source_token",
+          "type_id": "type:int32"
+        },
+        {
+          "id": "accepted",
+          "type_id": "type:int32"
+        }
+      ],
+      "return_type_id": "type:int32",
+      "entry_block_id": "entry",
+      "blocks": [
+        {
+          "id": "entry",
+          "instructions": [
+            {
+              "op": "constant",
+              "result_id": "type_token",
+              "operand_ids": [],
+              "target_id": null,
+              "operator_kind": null,
+              "constant": {
+                "kind": "int32",
+                "value": "1"
+              }
+            },
+            {
+              "op": "constant",
+              "result_id": "source_token",
+              "operand_ids": [],
+              "target_id": null,
+              "operator_kind": null,
+              "constant": {
+                "kind": "int32",
+                "value": "1"
+              }
+            },
+            {
+              "op": "call",
+              "result_id": "accepted",
+              "operand_ids": [
+                "task",
+                "type_token",
+                "source_token",
+                "root"
+              ],
+              "target_id": "import:task_fault_language_error_v1",
+              "operator_kind": null,
+              "constant": null
+            }
+          ],
+          "terminator": {
+            "kind": "return",
+            "condition_value_id": null,
+            "target_block_id": null,
+            "false_target_block_id": null,
+            "return_value_id": "accepted"
+          }
+        }
+      ]
+    }
+  ],
+  "exports": [
+    {
+      "name": "checked_outcome",
+      "function_id": "function:outcome_caller"
+    },
+    {
+      "name": "propagated_outcome",
+      "function_id": "function:outcome_propagation_probe"
+    }
+  ],
+  "diagnostics": [],
+  "function_references": [],
+  "framed_exports": [],
+  "language_outcome_types": [
+    {
+      "type_id": "type:language_outcome",
+      "value_type_id": "type:int32"
+    }
+  ],
+  "language_error_catalog": {
+    "types": [
+      {
+        "token": 1,
+        "type_id": "type:global::System.Exception"
+      }
+    ],
+    "sources": [
+      {
+        "token": 1,
+        "source_id": "Scripts/Error.cs",
+        "source_length": 32,
+        "start": 0,
+        "length": 5,
+        "line": 0,
+        "column": 0,
+        "end_line": 0,
+        "end_column": 5
+      }
+    ]
+  }
+}
