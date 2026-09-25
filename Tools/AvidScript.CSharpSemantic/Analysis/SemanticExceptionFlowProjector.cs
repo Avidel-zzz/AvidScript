@@ -18,6 +18,11 @@ internal static class SemanticExceptionFlowProjector
             node is CatchClauseSyntax or ThrowStatementSyntax or ThrowExpressionSyntax
             && IsOwnedBy(node, body.Declaration));
 
+    public static bool IsAsyncRegionCandidate(SemanticExecutableBody body) =>
+        IsCandidate(body) || body.Declaration.DescendantNodes()
+            .OfType<FinallyClauseSyntax>()
+            .Any(node => IsOwnedBy(node, body.Declaration));
+
     public static SemanticExceptionFlow? Project(
         SemanticExecutableBody body,
         SemanticModel semanticModel,

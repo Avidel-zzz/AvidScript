@@ -12,7 +12,8 @@ public static class SemanticAsyncInvocationValidator
 
     public static bool IsValid(SemanticDocument document)
     {
-        if (document.AsyncMethods is null || document.Callables is null || document.Symbols is null
+        if (document.RejectedAsyncExceptionFlows is not null
+            || document.AsyncMethods is null || document.Callables is null || document.Symbols is null
             || document.Types is null || document.TypeShapes is null
             || document.Callables.Any(callable => callable is null || string.IsNullOrWhiteSpace(callable.MethodSymbolId))
             || document.Callables.Select(callable => callable.MethodSymbolId).Distinct(StringComparer.Ordinal).Count() != document.Callables.Count)

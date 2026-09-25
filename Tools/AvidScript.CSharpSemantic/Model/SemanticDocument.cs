@@ -70,4 +70,10 @@ public sealed record SemanticDocument(
     [JsonPropertyOrder(25)]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<SemanticExceptionFlow>? ExceptionFlows { get; init; }
+
+    // Source-backed Roslyn evidence for rejected async syntax. This sidecar is
+    // never an executable exception-flow contract or a Guest input.
+    [JsonPropertyOrder(26)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<SemanticExceptionFlow>? RejectedAsyncExceptionFlows { get; init; }
 }

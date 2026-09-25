@@ -12,7 +12,8 @@ internal sealed record SemanticControlFlowProjection(
     IReadOnlyList<SemanticControlFlowGraph> Graphs,
     IReadOnlyList<SemanticDiagnostic> Diagnostics,
     IReadOnlyList<SemanticSymbol> CompilerLocalSymbols,
-    IReadOnlyList<SemanticExceptionFlow> ExceptionFlows);
+    IReadOnlyList<SemanticExceptionFlow> ExceptionFlows,
+    IReadOnlyList<SemanticExceptionFlow> RejectedAsyncExceptionFlows);
 
 internal static class SemanticControlFlowProjector
 {
@@ -25,6 +26,7 @@ internal static class SemanticControlFlowProjector
         List<SemanticControlFlowGraph> graphs = new();
         List<SemanticSymbol> compilerLocalSymbols = new();
         List<SemanticExceptionFlow> exceptionFlows = new();
+        List<SemanticExceptionFlow> rejectedAsyncExceptionFlows = new();
         Diagnostic? compilerError = context.Compilation.GetDiagnostics()
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .OrderBy(diagnostic => diagnostic.Location.IsInSource
@@ -41,7 +43,8 @@ internal static class SemanticControlFlowProjector
                     ? SemanticSpanFactory.Create(context.SourceText, compilerError.Location.SourceSpan)
                     : SemanticSpanFactory.Empty));
             return new SemanticControlFlowProjection(Array.Empty<SemanticControlFlowGraph>(), diagnostics,
-                Array.Empty<SemanticSymbol>(), Array.Empty<SemanticExceptionFlow>());
+                Array.Empty<SemanticSymbol>(), Array.Empty<SemanticExceptionFlow>(),
+                Array.Empty<SemanticExceptionFlow>());
         }
 
         foreach (SemanticExecutableBody body in SemanticExecutableBodyResolver.Resolve(context))
@@ -58,6 +61,29 @@ internal static class SemanticControlFlowProjector
                     SemanticSymbolProjector.GetSymbolId(body.Method)))
                 {
                     continue;
+                }
+
+                // Keep Roslyn's source-backed exception regions on a rejected
+                // async method. They are diagnostic evidence for the future
+                // continuation CFG, never executable synchronous flow.
+                if (SemanticExceptionFlowProjector.IsAsyncRegionCandidate(body))
+                {
+                    try
+                    {
+                        ControlFlowGraph asyncGraph = CreateGraph(body, semanticModel);
+                        SemanticExceptionFlow? sourceFlow =
+                            SemanticExceptionFlowProjector.Project(
+                                body, semanticModel, asyncGraph, typeRegistry, diagnostics);
+                        if (sourceFlow is not null) rejectedAsyncExceptionFlows.Add(sourceFlow);
+                    }
+                    catch (ArgumentException)
+                    {
+                        diagnostics.Add(CreateInvalidGraphDiagnostic(bodySpan));
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        diagnostics.Add(CreateInvalidGraphDiagnostic(bodySpan));
+                    }
                 }
 
                 diagnostics.Add(CreateDiagnostic(
@@ -165,13 +191,16 @@ internal static class SemanticControlFlowProjector
                 hasExceptionFlows
                     ? compilerLocalSymbols.OrderBy(symbol => symbol.Id, StringComparer.Ordinal).ToArray()
                     : Array.Empty<SemanticSymbol>(),
-                exceptionFlows.OrderBy(flow => flow.MethodSymbolId, StringComparer.Ordinal).ToArray());
+                exceptionFlows.OrderBy(flow => flow.MethodSymbolId, StringComparer.Ordinal).ToArray(),
+                rejectedAsyncExceptionFlows.OrderBy(flow => flow.MethodSymbolId,
+                    StringComparer.Ordinal).ToArray());
         }
 
         return new SemanticControlFlowProjection(
             graphs.OrderBy(graph => graph.MethodSymbolId, StringComparer.Ordinal).ToArray(),
             orderedDiagnostics,
             compilerLocalSymbols.OrderBy(symbol => symbol.Id, StringComparer.Ordinal).ToArray(),
+            Array.Empty<SemanticExceptionFlow>(),
             Array.Empty<SemanticExceptionFlow>());
     }
 

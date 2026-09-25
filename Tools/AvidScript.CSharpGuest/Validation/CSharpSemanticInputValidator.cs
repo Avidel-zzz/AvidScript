@@ -46,6 +46,7 @@ internal static class CSharpSemanticInputValidator
     public static bool IsValid(SemanticDocument document)
     {
         if (document.ExceptionFlows is not null
+            || document.RejectedAsyncExceptionFlows is not null
             || document.Source is null
             || document.Types is null
             || document.TypeShapes is null

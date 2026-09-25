@@ -44,6 +44,11 @@ internal static class CSharpGuestAsyncLanguageErrorTests
             "source must publish one async Task throw site");
         Check(!CSharpGuestLowerer.Lower(semantic, new string('a', 64)).Succeeded,
             "ordinary compilation must reject the diagnostic-only artifact");
+        Check(!CSharpGuestLowerer.Lower(semantic with
+        {
+            RejectedAsyncExceptionFlows = Array.Empty<SemanticExceptionFlow>(),
+        }, new string('a', 64), enableAsyncLanguageErrors: true).Succeeded,
+            "IR 21 must reject even an empty diagnostic async exception sidecar");
         CSharpGuestLoweringResult lowered = CSharpGuestLowerer.Lower(semantic,
             new string('a', 64), enableAsyncLanguageErrors: true);
         Check(lowered.Succeeded && lowered.Module is not null,

@@ -9,6 +9,7 @@ public static class SemanticExceptionFlowContractValidator
     public static bool IsValid(SemanticDocument document)
     {
         ArgumentNullException.ThrowIfNull(document);
+        if (document.RejectedAsyncExceptionFlows is not null) return false;
         if (document.ExceptionFlows is null)
             return document.SchemaVersion is not (32 or 33 or SemanticContract.ExceptionFlowSchemaVersion
                     or SemanticContract.TaskLanguageErrorSchemaVersion)

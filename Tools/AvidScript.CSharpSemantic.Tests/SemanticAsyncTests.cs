@@ -33,9 +33,64 @@ internal static class SemanticAsyncTests
         TaskIntExistingLocalAssignmentPreservesStorage();
         TaskIntSuspendedCleanupFailsClosed();
         AwaitFailureSuccessorKeepsCleanupLocalAlive();
+        RejectedAsyncExceptionRetainsRoslynRegions();
         TaskAndExceptionPlansKeepBothContracts();
         TaskIntThrowPublishesVersionedErrorPlan();
-        return 24;
+        return 25;
+    }
+
+    private static void RejectedAsyncExceptionRetainsRoslynRegions()
+    {
+        const string source = """
+            using AvidScript;
+            using System;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static async Task<int> LoadAsync()
+                {
+                    await AvidContinuations.NextTickAsync();
+                    return 12;
+                }
+                public static async Task<int> RunAsync()
+                {
+                    try
+                    {
+                        return await LoadAsync();
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        return 7;
+                    }
+                    finally
+                    {
+                        CleanupCount++;
+                    }
+                }
+                public static int CleanupCount;
+            }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/AsyncExceptionRegions.cs");
+        SemanticExceptionFlow? flow = document.RejectedAsyncExceptionFlows?.SingleOrDefault(item =>
+            item.MethodSymbolId.Contains(".RunAsync(", StringComparison.Ordinal));
+        Assert(!document.Succeeded
+            && document.Diagnostics.Any(item => item.Code == "ASCS5420")
+            && document.Diagnostics.Any(item => item.Code == "ASCS3002")
+            && flow is { Catches.Count: 1, Blocks.Count: > 0 }
+            && flow.Catches[0].ExceptionTypeId
+                == "type:global::System.InvalidOperationException"
+            && flow.Regions.Any(region => region.Kind == "try_and_catch")
+            && flow.Regions.Any(region => region.Kind == "finally")
+            && document.AsyncMethods.All(method => method.MethodSymbolId != flow.MethodSymbolId)
+            && document.ExceptionFlows is null
+            && !SemanticAsyncInvocationValidator.IsValid(document)
+            && !SemanticExceptionFlowContractValidator.IsValid(document),
+            "a rejected async catch/finally must retain Roslyn regions for diagnostics without publishing executable flow: "
+                + string.Join(" | ", document.Diagnostics.Select(item => item.Code + ":" + item.Message)));
+        byte[] bytes = SemanticSerializer.Serialize(document);
+        Assert(bytes.SequenceEqual(SemanticSerializer.Serialize(
+            SemanticSerializer.Deserialize(bytes))),
+            "the diagnostic async exception regions must round-trip canonically");
     }
 
     private static void AwaitFailureSuccessorKeepsCleanupLocalAlive()
@@ -171,7 +226,9 @@ internal static class SemanticAsyncTests
             "Scripts/TaskIntThrowArguments.cs");
         Assert(!unsupported.Succeeded && unsupported.ControlFlowGraphs.Count == 0
             && unsupported.Diagnostics.Any(item => item.Code == "ASCS5421"),
-            "a parameterized exception constructor must fail at the source location");
+            "a parameterized exception constructor must fail at the source location: graphs="
+                + unsupported.ControlFlowGraphs.Count + " diagnostics="
+                + string.Join(" | ", unsupported.Diagnostics.Select(item => item.Code)));
         SemanticDocument cleanup = Analyze(source.Replace(
             "if (fail) throw new InvalidOperationException();",
             "try { if (fail) throw new InvalidOperationException(); } finally { }",
@@ -624,7 +681,10 @@ internal static class SemanticAsyncTests
             }
             """;
         SemanticDocument rejected = Analyze(source, "Scripts/TaskIntSuspendedCleanup.cs");
-        Assert(!rejected.Succeeded && rejected.Diagnostics.Any(item => item.Code == "ASCS5420"),
+        Assert(!rejected.Succeeded && rejected.Diagnostics.Any(item => item.Code == "ASCS5420")
+            && rejected.RejectedAsyncExceptionFlows is { Count: 1 } flows
+            && flows[0].Regions.Any(region => region.Kind == "finally")
+            && rejected.ExceptionFlows is null,
             "await inside try/finally must fail until suspended cleanup is owned by the task");
     }
 

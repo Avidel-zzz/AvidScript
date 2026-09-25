@@ -246,6 +246,8 @@ public static class SemanticAnalyzer
             ClosureBindings = lexicalCaptures.Closures.Bindings,
             UeMethodCatalog = methodCatalog,
             ExceptionFlows = hasExceptionFlows ? controlFlowProjection.ExceptionFlows : null,
+            RejectedAsyncExceptionFlows = controlFlowProjection.RejectedAsyncExceptionFlows.Count > 0
+                ? controlFlowProjection.RejectedAsyncExceptionFlows : null,
         };
     }
 
