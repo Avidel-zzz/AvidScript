@@ -13,7 +13,18 @@ public sealed record SemanticExceptionFlow(
     [property: JsonPropertyOrder(4)] IReadOnlyList<SemanticExceptionBranch> Branches,
     [property: JsonPropertyOrder(5)] IReadOnlyList<SemanticThrowSite> Throws,
     [property: JsonPropertyOrder(6)] IReadOnlyList<SemanticCatchHandler> Catches,
-    [property: JsonPropertyOrder(7)] IReadOnlyList<SemanticExceptionBlock>? Blocks = null);
+    [property: JsonPropertyOrder(7)] IReadOnlyList<SemanticExceptionBlock>? Blocks = null)
+{
+    // Kept only on rejected async source; no published Semantic contract accepts it.
+    [JsonPropertyOrder(8), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SemanticAsyncExceptionPreview? AsyncContinuationPreview { get; init; }
+}
+
+public sealed record SemanticAsyncExceptionPreview(
+    [property: JsonPropertyOrder(0)] IReadOnlyList<SemanticAsyncSegment> Segments,
+    [property: JsonPropertyOrder(1)] int EntrySegmentOrdinal,
+    [property: JsonPropertyOrder(2)] IReadOnlyList<SemanticAsyncCompilerLocal> CompilerLocals,
+    [property: JsonPropertyOrder(3)] IReadOnlyList<SemanticAsyncLexicalScope> LexicalScopes);
 
 public sealed record SemanticExceptionBlock(
     [property: JsonPropertyOrder(0)] int Ordinal,

@@ -55,6 +55,7 @@ public static class SemanticExceptionFlowContractValidator
         foreach (SemanticExceptionFlow? flow in flows)
         {
             if (flow is null || string.IsNullOrWhiteSpace(flow.MethodSymbolId)
+                || flow.AsyncContinuationPreview is not null
                 || !methods.Contains(flow.MethodSymbolId) || !seen.Add(flow.MethodSymbolId)
                 || graphMethods.Contains(flow.MethodSymbolId)
                 || string.IsNullOrWhiteSpace(flow.SourceId) || flow.SourceLength < 0

@@ -1090,6 +1090,10 @@ internal static class CSharpSemanticInputValidator
             }
 
             SemanticAsyncControlTransfer transfer = segment.Transfer;
+            if (transfer.ExceptionTypeId is not null)
+            {
+                return false;
+            }
             bool validTransfer = transfer.Kind switch
             {
                 SemanticAsyncMethod.GotoTransferKind =>

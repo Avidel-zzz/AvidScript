@@ -45,6 +45,9 @@ public sealed record SemanticAsyncMethod(
     public const string AwaitTransferKind = "await";
     public const string ReturnTransferKind = "return";
     public const string ThrowTransferKind = "throw";
+    // Diagnostic preview only until the versioned async exception contract lands.
+    public const string PropagateFaultTransferKind = "propagate_fault";
+    public const string CatchMatchTransferKind = "catch_match";
     public const string EarlyReturnGuardOperationKind = "async_early_return_guard";
     public const string BlockOperationKind = "async_block";
     public const string LocalDeclarationOperationKind = "async_local_declaration";
@@ -101,7 +104,9 @@ public sealed record SemanticAsyncControlTransfer(
     [property: JsonPropertyOrder(0)] string Kind,
     [property: JsonPropertyOrder(1)] SemanticOperation? Condition,
     [property: JsonPropertyOrder(2)] int PrimaryTarget,
-    [property: JsonPropertyOrder(3)] int SecondaryTarget = -1);
+    [property: JsonPropertyOrder(3)] int SecondaryTarget = -1,
+    [property: JsonPropertyOrder(4), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? ExceptionTypeId = null);
 
 public sealed record SemanticAsyncStatement(
     [property: JsonPropertyOrder(0)] SemanticOperation Operation,

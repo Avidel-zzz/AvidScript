@@ -28,7 +28,8 @@ internal static class SemanticAsyncControlFlowProjector
         ref int nextCallbackId,
         out SemanticAsyncControlFlowProjection? projected,
         bool allowValueReturns = false,
-        ITypeSymbol? resultType = null)
+        ITypeSymbol? resultType = null,
+        bool previewSuspendedFinally = false)
     {
         Builder builder = new(
             context,
@@ -37,7 +38,8 @@ internal static class SemanticAsyncControlFlowProjector
             typeRegistry,
             diagnostics,
             allowValueReturns,
-            resultType);
+            resultType,
+            previewSuspendedFinally);
         if (!builder.TryBuild(body, ref nextCallbackId, out projected))
         {
             projected = null;
@@ -55,6 +57,7 @@ internal static class SemanticAsyncControlFlowProjector
         private readonly ICollection<SemanticDiagnostic> diagnostics;
         private readonly bool allowValueReturns;
         private readonly ITypeSymbol? resultType;
+        private readonly bool previewSuspendedFinally;
         private readonly List<DraftSegment> drafts = new();
         private readonly List<SemanticAsyncCompilerLocal> compilerLocals = new();
         private readonly List<(SyntaxNode Node, string Kind, int[] Drafts)> scopes = new();
@@ -62,6 +65,7 @@ internal static class SemanticAsyncControlFlowProjector
         private string returnTypeId = "type:void";
         private string? returnValueSymbolId;
         private int returnCleanupTarget = -1;
+        private int faultCleanupTarget = -1;
         private int structuredNodeCount;
         private bool failed;
 
@@ -72,7 +76,8 @@ internal static class SemanticAsyncControlFlowProjector
             SemanticTypeRegistry typeRegistry,
             ICollection<SemanticDiagnostic> diagnostics,
             bool allowValueReturns,
-            ITypeSymbol? resultType)
+            ITypeSymbol? resultType,
+            bool previewSuspendedFinally)
         {
             this.context = context;
             this.semanticModel = semanticModel;
@@ -81,6 +86,7 @@ internal static class SemanticAsyncControlFlowProjector
             this.diagnostics = diagnostics;
             this.allowValueReturns = allowValueReturns;
             this.resultType = resultType;
+            this.previewSuspendedFinally = previewSuspendedFinally;
         }
 
         public bool TryBuild(
@@ -148,7 +154,8 @@ internal static class SemanticAsyncControlFlowProjector
                     draft.Transfer.Kind,
                     draft.Transfer.Condition,
                     RemapTarget(draft.Transfer.PrimaryTarget, ordinalByDraft),
-                    RemapTarget(draft.Transfer.SecondaryTarget, ordinalByDraft));
+                    RemapTarget(draft.Transfer.SecondaryTarget, ordinalByDraft),
+                    draft.Transfer.ExceptionTypeId);
                 segments.Add(new SemanticAsyncSegment(
                     ordinal,
                     draft.Statements,
@@ -263,7 +270,8 @@ internal static class SemanticAsyncControlFlowProjector
                         SemanticAsyncMethod.AwaitTransferKind,
                         null,
                         successor,
-                        -1));
+                        awaitSite!.ProducerKind is "task_call" or "task_local"
+                            ? faultCleanupTarget : -1));
             }
 
             switch (statement)
@@ -297,7 +305,9 @@ internal static class SemanticAsyncControlFlowProjector
                     return BuildForEach(loop, successor, targets, depth);
 
                 case TryStatementSyntax tryStatement:
-                    return BuildTryFinally(tryStatement, successor, targets, depth);
+                    return previewSuspendedFinally && tryStatement.Catches.Count > 0
+                        ? BuildTryCatchPreview(tryStatement, successor, targets, depth)
+                        : BuildTryFinally(tryStatement, successor, targets, depth);
 
                 case ForEachVariableStatementSyntax loop:
                     return Reject(
@@ -360,6 +370,12 @@ internal static class SemanticAsyncControlFlowProjector
                         new DraftTransfer(SemanticAsyncMethod.ThrowTransferKind,
                             thrown, -1, -1));
                 }
+
+                case ThrowStatementSyntax { Expression: null } when previewSuspendedFinally:
+                    return faultCleanupTarget >= 0
+                        ? AddGoto(statement.Span, faultCleanupTarget)
+                        : Reject("Rethrow has no enclosing async error owner.", statement.Span,
+                            "ASCS5420");
 
                 case ReturnStatementSyntax { Expression: not null } valueReturn when allowValueReturns:
                     if (semanticModel.GetOperation(valueReturn) is not IReturnOperation { ReturnedValue: { } convertedReturn })
@@ -441,6 +457,143 @@ internal static class SemanticAsyncControlFlowProjector
                     -1));
         }
 
+        private int BuildTryCatchPreview(
+            TryStatementSyntax statement,
+            int successor,
+            LoopTargets targets,
+            int depth)
+        {
+            if (!allowValueReturns || statement.Catches.Any(clause =>
+                    clause.Filter is not null
+                    || !string.IsNullOrEmpty(clause.Declaration?.Identifier.ValueText))
+                || statement.Finally?.Block.DescendantNodes()
+                    .OfType<AwaitExpressionSyntax>().Any() == true
+                || statement.Catches.Any(clause => clause.Block.DescendantNodes()
+                    .OfType<AwaitExpressionSyntax>().Any())
+                || statement.Block.DescendantNodes().OfType<ThrowStatementSyntax>()
+                    .Any(node => node.Expression is not null && node.Ancestors()
+                        .FirstOrDefault(SemanticExecutableBodyResolver.IsExecutableDeclaration)
+                            == declaration)
+                || statement.Catches.Any(clause => clause.Block.DescendantNodes()
+                    .OfType<ThrowStatementSyntax>().Any(node =>
+                        node.Expression is not null && node.Ancestors()
+                            .FirstOrDefault(SemanticExecutableBodyResolver.IsExecutableDeclaration)
+                                == declaration)))
+            {
+                return Reject(
+                    "Async exception preview requires typed catches without variables or filters and synchronous cleanup.",
+                    statement.Span,
+                    "ASCS5420");
+            }
+
+            BlockSyntax? cleanup = statement.Finally?.Block;
+            int normalExit = cleanup is null ? successor
+                : BuildStatement(cleanup, successor, LoopTargets.None, depth + 1);
+            if (normalExit < 0) return -1;
+
+            int returnExit = returnCleanupTarget;
+            if (cleanup is not null)
+            {
+                int returnContinuation = returnExit;
+                if (returnContinuation < 0)
+                {
+                    SemanticOperation? value = returnTypeId == "type:void" ? null
+                        : CreateValueOperation("local_reference", returnTypeId,
+                            EnsureReturnValueLocal(statement.Span), statement.Span);
+                    returnContinuation = AddDraft(statement.Span,
+                        Array.Empty<SemanticAsyncStatement>(), null,
+                        new DraftTransfer(SemanticAsyncMethod.ReturnTransferKind,
+                            value, -1, -1));
+                    if (returnContinuation < 0) return -1;
+                }
+                returnExit = BuildStatement(cleanup, returnContinuation,
+                    LoopTargets.None, depth + 1);
+                if (returnExit < 0) return -1;
+            }
+
+            int breakExit = targets.BreakTarget;
+            int continueExit = targets.ContinueTarget;
+            if (cleanup is not null)
+            {
+                if (breakExit >= 0)
+                {
+                    breakExit = BuildStatement(cleanup, breakExit,
+                        LoopTargets.None, depth + 1);
+                    if (breakExit < 0) return -1;
+                }
+                if (continueExit >= 0)
+                {
+                    continueExit = BuildStatement(cleanup, continueExit,
+                        LoopTargets.None, depth + 1);
+                    if (continueExit < 0) return -1;
+                }
+            }
+
+            int faultContinuation = faultCleanupTarget;
+            if (faultContinuation < 0)
+            {
+                faultContinuation = AddDraft(statement.Span,
+                    Array.Empty<SemanticAsyncStatement>(), null,
+                    new DraftTransfer(SemanticAsyncMethod.PropagateFaultTransferKind,
+                        null, -1, -1));
+                if (faultContinuation < 0) return -1;
+            }
+            int faultExit = cleanup is null ? faultContinuation
+                : BuildStatement(cleanup, faultContinuation,
+                    LoopTargets.None, depth + 1);
+            if (faultExit < 0) return -1;
+
+            int outerReturn = returnCleanupTarget;
+            int outerFault = faultCleanupTarget;
+            returnCleanupTarget = returnExit;
+            faultCleanupTarget = faultExit;
+            int[] handlerEntries = new int[statement.Catches.Count];
+            for (int index = statement.Catches.Count - 1; index >= 0; --index)
+            {
+                handlerEntries[index] = BuildStatement(statement.Catches[index].Block,
+                    normalExit, new LoopTargets(breakExit, continueExit), depth + 1);
+                if (handlerEntries[index] < 0)
+                {
+                    returnCleanupTarget = outerReturn;
+                    faultCleanupTarget = outerFault;
+                    return -1;
+                }
+            }
+            returnCleanupTarget = outerReturn;
+            faultCleanupTarget = outerFault;
+
+            int dispatch = faultExit;
+            for (int index = statement.Catches.Count - 1; index >= 0; --index)
+            {
+                CatchClauseSyntax clause = statement.Catches[index];
+                ITypeSymbol? exceptionType = clause.Declaration is null ? null
+                    : semanticModel.GetTypeInfo(clause.Declaration.Type).Type;
+                if (clause.Declaration is not null && exceptionType is null)
+                    return Reject("Catch type could not be resolved by Roslyn.",
+                        clause.Span, "ASCS5420");
+                dispatch = AddDraft(clause.CatchKeyword.Span,
+                    Array.Empty<SemanticAsyncStatement>(), null,
+                    new DraftTransfer(SemanticAsyncMethod.CatchMatchTransferKind,
+                        null, handlerEntries[index], dispatch,
+                        exceptionType is null ? null : typeRegistry.Register(exceptionType)));
+                if (dispatch < 0) return -1;
+            }
+
+            returnCleanupTarget = returnExit;
+            faultCleanupTarget = dispatch;
+            int firstProtectedDraft = drafts.Count;
+            int entry = BuildStatement(statement.Block, normalExit,
+                new LoopTargets(breakExit, continueExit), depth + 1);
+            returnCleanupTarget = outerReturn;
+            faultCleanupTarget = outerFault;
+            if (entry < 0) return -1;
+            if (drafts.Skip(firstProtectedDraft).Any(draft => draft.AwaitSite is
+                { ProducerKind: not ("task_call" or "task_local") }))
+                return Reject("Async exception preview requires Task<int> await sites.",
+                    statement.Span, "ASCS5420");
+            return entry;
+        }
+
         private int BuildTryFinally(
             TryStatementSyntax statement,
             int successor,
@@ -454,7 +607,13 @@ internal static class SemanticAsyncControlFlowProjector
                     statement.Span,
                     "ASCS5420");
             }
-            if (statement.DescendantNodes().OfType<AwaitExpressionSyntax>().Any()
+            BlockSyntax cleanup = statement.Finally.Block;
+            bool suspended = statement.Block.DescendantNodes()
+                .OfType<AwaitExpressionSyntax>().Any();
+            if ((!previewSuspendedFinally && statement.DescendantNodes()
+                    .OfType<AwaitExpressionSyntax>().Any())
+                || previewSuspendedFinally && cleanup.DescendantNodes()
+                    .OfType<AwaitExpressionSyntax>().Any()
                 || statement.DescendantNodes().OfType<ThrowStatementSyntax>().Any(node =>
                     node.Ancestors().FirstOrDefault(
                         SemanticExecutableBodyResolver.IsExecutableDeclaration) == declaration))
@@ -465,7 +624,6 @@ internal static class SemanticAsyncControlFlowProjector
                     "ASCS5420");
             }
 
-            BlockSyntax cleanup = statement.Finally.Block;
             int normalCleanup = BuildStatement(cleanup, successor, LoopTargets.None, depth + 1);
             if (normalCleanup < 0) return -1;
 
@@ -490,11 +648,38 @@ internal static class SemanticAsyncControlFlowProjector
                 : BuildStatement(cleanup, targets.ContinueTarget, LoopTargets.None, depth + 1);
             if (targets.ContinueTarget >= 0 && continueCleanup < 0) return -1;
 
+            int faultCleanup = faultCleanupTarget;
+            if (previewSuspendedFinally && suspended)
+            {
+                if (faultCleanup < 0)
+                {
+                    faultCleanup = AddDraft(statement.Span,
+                        Array.Empty<SemanticAsyncStatement>(), null,
+                        new DraftTransfer(SemanticAsyncMethod.PropagateFaultTransferKind,
+                            null, -1, -1));
+                    if (faultCleanup < 0) return -1;
+                }
+                faultCleanup = BuildStatement(cleanup, faultCleanup, LoopTargets.None, depth + 1);
+                if (faultCleanup < 0) return -1;
+            }
+
             int outerReturnCleanup = returnCleanupTarget;
+            int outerFaultCleanup = faultCleanupTarget;
             returnCleanupTarget = returnCleanup;
+            faultCleanupTarget = faultCleanup;
+            int firstProtectedDraft = drafts.Count;
             int entry = BuildStatement(statement.Block, normalCleanup,
                 new LoopTargets(breakCleanup, continueCleanup), depth + 1);
             returnCleanupTarget = outerReturnCleanup;
+            faultCleanupTarget = outerFaultCleanup;
+            if (previewSuspendedFinally && drafts.Skip(firstProtectedDraft)
+                .Any(draft => draft.AwaitSite is { ProducerKind: not ("task_call" or "task_local") }))
+            {
+                return Reject(
+                    "Suspended cleanup preview currently requires Task<int> await sites.",
+                    statement.Span,
+                    "ASCS5420");
+            }
             return entry;
         }
 
@@ -1495,7 +1680,8 @@ internal static class SemanticAsyncControlFlowProjector
         string Kind,
         SemanticOperation? Condition,
         int PrimaryTarget,
-        int SecondaryTarget);
+        int SecondaryTarget,
+        string? ExceptionTypeId = null);
 
     private sealed record SwitchCaseTarget(
         CaseSwitchLabelSyntax Label,

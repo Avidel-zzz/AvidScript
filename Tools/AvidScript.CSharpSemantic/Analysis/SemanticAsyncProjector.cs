@@ -1291,7 +1291,7 @@ internal static class SemanticAsyncProjector
                 .Any(method => !method.IsStatic && method.Parameters.Length == 0);
     }
 
-    private static bool TryGetSupportedTaskResult(
+    internal static bool TryGetSupportedTaskResult(
         Compilation compilation, ITypeSymbol type, out ITypeSymbol? result)
     {
         result = null;

@@ -49,6 +49,27 @@ internal static class CSharpGuestAsyncLanguageErrorTests
             RejectedAsyncExceptionFlows = Array.Empty<SemanticExceptionFlow>(),
         }, new string('a', 64), enableAsyncLanguageErrors: true).Succeeded,
             "IR 21 must reject even an empty diagnostic async exception sidecar");
+        SemanticAsyncMethod taskMethod = semantic.AsyncMethods.Single(method =>
+            method.ErrorPlan is not null);
+        Check(!CSharpGuestLowerer.Lower(semantic with
+        {
+            AsyncMethods = semantic.AsyncMethods.Select(method => method == taskMethod
+                ? method with
+                {
+                    Segments = method.Segments.Select(segment => segment.Ordinal
+                        == method.EntrySegmentOrdinal
+                        ? segment with
+                        {
+                            Transfer = segment.Transfer! with
+                            {
+                                ExceptionTypeId = "type:global::System.InvalidOperationException",
+                            },
+                        }
+                        : segment).ToArray(),
+                }
+                : method).ToArray(),
+        }, new string('a', 64), enableAsyncLanguageErrors: true).Succeeded,
+            "IR 21 must reject preview-only catch metadata on executable transfers");
         CSharpGuestLoweringResult lowered = CSharpGuestLowerer.Lower(semantic,
             new string('a', 64), enableAsyncLanguageErrors: true);
         Check(lowered.Succeeded && lowered.Module is not null,

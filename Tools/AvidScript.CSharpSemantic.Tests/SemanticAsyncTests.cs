@@ -34,9 +34,188 @@ internal static class SemanticAsyncTests
         TaskIntSuspendedCleanupFailsClosed();
         AwaitFailureSuccessorKeepsCleanupLocalAlive();
         RejectedAsyncExceptionRetainsRoslynRegions();
+        SuspendedFinallyPreviewRoutesTaskFailureThroughCleanup();
+        AsyncCatchPreviewPreservesHandlerAndCleanupRoutes();
         TaskAndExceptionPlansKeepBothContracts();
         TaskIntThrowPublishesVersionedErrorPlan();
-        return 25;
+        return 27;
+    }
+
+    private static void AsyncCatchPreviewPreservesHandlerAndCleanupRoutes()
+    {
+        const string source = """
+            using AvidScript;
+            using System;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static int CleanupCount;
+                public static async Task<int> LoadAsync(int mode)
+                {
+                    await AvidContinuations.NextTickAsync();
+                    if (mode == 1) throw new InvalidOperationException();
+                    return 12;
+                }
+                public static async Task<int> RunAsync(int mode)
+                {
+                    try
+                    {
+                        int value = await LoadAsync(mode);
+                        return value;
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        if (mode == 2) throw;
+                        return 7;
+                    }
+                    finally
+                    {
+                        CleanupCount++;
+                        if (mode == 3) throw new ArgumentException();
+                    }
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/AsyncCatchFaultPreview.cs");
+        SemanticExceptionFlow? flow = document.RejectedAsyncExceptionFlows
+            ?.SingleOrDefault(item => item.MethodSymbolId.Contains(".RunAsync(",
+                StringComparison.Ordinal));
+        SemanticAsyncExceptionPreview? preview = flow?.AsyncContinuationPreview;
+        Assert(!document.Succeeded && preview is not null
+            && document.Diagnostics.Any(item => item.Code == "ASCS5420")
+            && document.ExceptionFlows is null
+            && flow!.Catches.Single().ExceptionTypeId
+                == "type:global::System.InvalidOperationException",
+            "typed async catch/finally remains diagnostic until its execution contract exists");
+        SemanticAsyncSegment awaited = preview!.Segments.Single(segment =>
+            segment.AwaitSite?.ProducerKind == "task_call");
+        SemanticAsyncSegment dispatch = preview.Segments[awaited.Transfer!.SecondaryTarget];
+        Assert(dispatch.Transfer is
+            {
+                Kind: SemanticAsyncMethod.CatchMatchTransferKind,
+                ExceptionTypeId: "type:global::System.InvalidOperationException",
+                PrimaryTarget: >= 0,
+                SecondaryTarget: >= 0,
+            }
+            && dispatch.Transfer.PrimaryTarget != dispatch.Transfer.SecondaryTarget
+            && preview.Segments.Any(segment => segment.Transfer?.Kind
+                == SemanticAsyncMethod.PropagateFaultTransferKind)
+            && preview.Segments.Any(segment => segment.Transfer is
+                {
+                    Kind: SemanticAsyncMethod.ThrowTransferKind,
+                    Condition.TypeId: "type:global::System.ArgumentException",
+            }),
+            "await failure must enter a typed handler decision with unmatched propagation and replacing finally throw");
+        int cleanupStart = source.IndexOf("CleanupCount++", StringComparison.Ordinal);
+        bool ReachesAfterCleanup(int start, string terminalKind)
+        {
+            Queue<(int Ordinal, bool Cleaned)> pending = new();
+            HashSet<(int Ordinal, bool Cleaned)> visited = new();
+            pending.Enqueue((start, false));
+            while (pending.Count > 0)
+            {
+                var current = pending.Dequeue();
+                if (!visited.Add(current)) continue;
+                SemanticAsyncSegment segment = preview.Segments[current.Ordinal];
+                bool cleaned = current.Cleaned || segment.Statements.Any(statement =>
+                    statement.Operation.Span.Start == cleanupStart);
+                if (cleaned && segment.Transfer?.Kind == terminalKind) return true;
+                if (segment.Transfer?.PrimaryTarget >= 0)
+                    pending.Enqueue((segment.Transfer.PrimaryTarget, cleaned));
+                if (segment.Transfer?.SecondaryTarget >= 0)
+                    pending.Enqueue((segment.Transfer.SecondaryTarget, cleaned));
+            }
+            return false;
+        }
+        Assert(ReachesAfterCleanup(dispatch.Transfer!.PrimaryTarget,
+                SemanticAsyncMethod.ReturnTransferKind)
+            && ReachesAfterCleanup(dispatch.Transfer.PrimaryTarget,
+                SemanticAsyncMethod.PropagateFaultTransferKind)
+            && ReachesAfterCleanup(dispatch.Transfer.SecondaryTarget,
+                SemanticAsyncMethod.PropagateFaultTransferKind)
+            && ReachesAfterCleanup(dispatch.Transfer.SecondaryTarget,
+                SemanticAsyncMethod.ThrowTransferKind),
+            "matched return, rethrow, unmatched fault, and replacement throw must traverse finally");
+        byte[] bytes = SemanticSerializer.Serialize(document);
+        Assert(bytes.SequenceEqual(SemanticSerializer.Serialize(
+            SemanticSerializer.Deserialize(bytes))),
+            "typed catch and cleanup preview must round-trip canonically");
+        SemanticDocument replacingCatch = Analyze(source.Replace(
+            "if (mode == 2) throw;",
+            "if (mode == 2) throw new ArgumentException();",
+            StringComparison.Ordinal), "Scripts/AsyncCatchReplacementPreview.cs");
+        Assert(replacingCatch.RejectedAsyncExceptionFlows?.Single(item =>
+                item.MethodSymbolId.Contains(".RunAsync(", StringComparison.Ordinal))
+                .AsyncContinuationPreview is null,
+            "a catch-local replacement throw must not publish a preview that skips finally");
+    }
+
+    private static void SuspendedFinallyPreviewRoutesTaskFailureThroughCleanup()
+    {
+        const string source = """
+            using AvidScript;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static int CleanupCount;
+                public static async Task<int> LoadAsync()
+                {
+                    await AvidContinuations.NextTickAsync();
+                    return 12;
+                }
+                public static async Task<int> RunAsync()
+                {
+                    try
+                    {
+                        int value = await LoadAsync();
+                        return value;
+                    }
+                    finally
+                    {
+                        CleanupCount++;
+                    }
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/AsyncFinallyFaultPreview.cs");
+        SemanticAsyncExceptionPreview? preview = document.RejectedAsyncExceptionFlows
+            ?.SingleOrDefault(flow => flow.MethodSymbolId.Contains(".RunAsync(",
+                StringComparison.Ordinal))?.AsyncContinuationPreview;
+        Assert(!document.Succeeded && preview is not null
+            && document.Diagnostics.Any(item => item.Code == "ASCS5420")
+            && document.ExceptionFlows is null
+            && !SemanticAsyncInvocationValidator.IsValid(document),
+            "a suspended finally preview must remain a rejected diagnostic artifact");
+        SemanticAsyncSegment awaited = preview!.Segments.Single(segment =>
+            segment.AwaitSite?.ProducerKind == "task_call");
+        Assert(awaited.Transfer is { Kind: SemanticAsyncMethod.AwaitTransferKind,
+                PrimaryTarget: >= 0, SecondaryTarget: >= 0 }
+            && awaited.Transfer.PrimaryTarget != awaited.Transfer.SecondaryTarget,
+            "a Task await inside try/finally needs separate success and failure successors");
+        int cursor = awaited.Transfer!.SecondaryTarget;
+        HashSet<int> visited = new();
+        bool ranCleanup = false;
+        bool propagated = false;
+        while (visited.Add(cursor))
+        {
+            SemanticAsyncSegment segment = preview.Segments[cursor];
+            ranCleanup |= segment.Statements.Any(statement =>
+                statement.Operation.Span.Start == source.IndexOf("CleanupCount++",
+                    StringComparison.Ordinal));
+            if (segment.Transfer?.Kind == SemanticAsyncMethod.PropagateFaultTransferKind)
+            {
+                propagated = true;
+                break;
+            }
+            if (segment.Transfer?.Kind != SemanticAsyncMethod.GotoTransferKind) break;
+            cursor = segment.Transfer.PrimaryTarget;
+        }
+        Assert(ranCleanup && propagated,
+            "a failed Task await must run finally once before propagating its in-flight fault");
+        byte[] bytes = SemanticSerializer.Serialize(document);
+        Assert(bytes.SequenceEqual(SemanticSerializer.Serialize(
+            SemanticSerializer.Deserialize(bytes))),
+            "the rejected continuation preview must round-trip canonically");
     }
 
     private static void RejectedAsyncExceptionRetainsRoslynRegions()
@@ -200,6 +379,23 @@ internal static class SemanticAsyncTests
             SchemaVersion = SemanticContract.TaskLanguageErrorSchemaVersion,
             SemanticVersion = SemanticContract.TaskLanguageErrorSemanticVersion,
         }), "schema 40 must reject async language-error metadata");
+        Assert(!SemanticAsyncInvocationValidator.IsValid(document with
+        {
+            AsyncMethods = document.AsyncMethods.Select(candidate => candidate == method
+                ? candidate with
+                {
+                    Segments = candidate.Segments.Select(item => item.Ordinal == segment.Ordinal
+                        ? item with
+                        {
+                            Transfer = item.Transfer! with
+                            {
+                                ExceptionTypeId = site.ExceptionTypeId,
+                            },
+                        }
+                        : item).ToArray(),
+                }
+                : candidate).ToArray(),
+        }), "the current executable async schema must reject preview-only catch metadata");
         Assert(!SemanticAsyncInvocationValidator.IsValid(document with
         {
             AsyncMethods = new[] { method with

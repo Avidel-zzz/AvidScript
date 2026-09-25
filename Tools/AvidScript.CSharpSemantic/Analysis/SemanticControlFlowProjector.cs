@@ -74,7 +74,40 @@ internal static class SemanticControlFlowProjector
                         SemanticExceptionFlow? sourceFlow =
                             SemanticExceptionFlowProjector.Project(
                                 body, semanticModel, asyncGraph, typeRegistry, diagnostics);
-                        if (sourceFlow is not null) rejectedAsyncExceptionFlows.Add(sourceFlow);
+                        if (sourceFlow is not null)
+                        {
+                            if (body.Unit.SyntaxTree == context.SyntaxTree
+                                && body.Declaration is MethodDeclarationSyntax { Body: { } asyncBody }
+                                && SemanticAsyncProjector.TryGetSupportedTaskResult(
+                                    context.Compilation, body.Method.ReturnType,
+                                    out ITypeSymbol? resultType))
+                            {
+                                List<SemanticDiagnostic> previewDiagnostics = new();
+                                int previewCallbackId = 0;
+                                if (SemanticAsyncControlFlowProjector.TryProject(
+                                        context, semanticModel, asyncBody,
+                                        sourceFlow.MethodSymbolId, typeRegistry,
+                                        previewDiagnostics, ref previewCallbackId,
+                                        out SemanticAsyncControlFlowProjection? preview,
+                                        allowValueReturns: true, resultType: resultType,
+                                        previewSuspendedFinally: true)
+                                    && preview is not null
+                                    && preview.Segments.Any(segment => segment.Transfer is
+                                        { Kind: SemanticAsyncMethod.AwaitTransferKind,
+                                            SecondaryTarget: >= 0 }))
+                                {
+                                    sourceFlow = sourceFlow with
+                                    {
+                                        AsyncContinuationPreview = new(
+                                            preview.Segments,
+                                            preview.EntrySegmentOrdinal,
+                                            preview.CompilerLocals,
+                                            preview.LexicalScopes),
+                                    };
+                                }
+                            }
+                            rejectedAsyncExceptionFlows.Add(sourceFlow);
+                        }
                     }
                     catch (ArgumentException)
                     {

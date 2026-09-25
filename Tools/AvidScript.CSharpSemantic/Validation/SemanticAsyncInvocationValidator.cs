@@ -96,7 +96,8 @@ public static class SemanticAsyncInvocationValidator
                 || expected.Any(slot => !document.Types.Any(type => type?.Id == slot.TypeId))
                 || callable.Parameters.Any(parameter => !document.Symbols.Any(symbol => symbol?.Id == parameter.SymbolId
                     && symbol.Kind == "parameter" && symbol.TypeId == parameter.TypeId && symbol.ContainingSymbolId == callable.MethodSymbolId))) return false;
-            if (method.Segments is null || method.Segments.Any(segment => segment is null)) return false;
+            if (method.Segments is null || method.Segments.Any(segment => segment is null
+                || segment.Transfer?.ExceptionTypeId is not null)) return false;
             IReadOnlyDictionary<string, string> taskProducers = new Dictionary<string, string>();
             if (taskLocalContract || taskAssignmentContract || taskExistingLocalContract || taskAliasContract || combinedContract)
             {
