@@ -416,7 +416,8 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 		TEXT("nested-catch-branching-finally.wasm"),
 		TEXT("local-catch-rethrow-finally.wasm"),
 		TEXT("local-catch-rethrow-branching-finally.wasm"),
-		TEXT("catch-variable.wasm"), TEXT("conditional-guard.wasm")};
+		TEXT("catch-variable.wasm"), TEXT("conditional-guard.wasm"),
+		TEXT("void-throw-producer.wasm")};
 	for (const FString& FixtureName : HandledFixtures)
 	{
 		const FString FixturePath = FPaths::Combine(FPaths::ProjectSavedDir(),

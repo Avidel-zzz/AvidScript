@@ -92,6 +92,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'C# catch-variable Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'conditional-guard.wasm')
     if ($LASTEXITCODE -ne 0) { throw 'C# conditional-guard Node WASM probe failed.' }
+    & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'void-throw-producer.wasm')
+    if ($LASTEXITCODE -ne 0) { throw 'C# void throw producer Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'generated-ufunction-entry.wasm')
     if ($LASTEXITCODE -ne 0) { throw 'C# generated UFunction language-error Node WASM probe failed.' }
 }

@@ -78,10 +78,10 @@ public static class CSharpLanguageErrorCompiler
         if (throwFlows.Any(item => semantic.Callables.Count(callable =>
                     callable.MethodSymbolId == item.MethodSymbolId
                     && callable.HasBody && callable.IsStatic
-                    && callable.ReturnTypeId == "type:int32") != 1)
+                    && callable.ReturnTypeId is "type:int32" or "type:void") != 1)
             || !SemanticLanguageErrorEffectPlanner.TryBuild(semantic, out var effects)
             || effects is null)
-            return Fail("The exception source needs supported static int32 methods and a complete direct-call effect plan.", out error);
+            return Fail("The exception source needs supported static int32 or void methods and a complete direct-call effect plan.", out error);
 
         IReadOnlySet<string> producerIds = producers.Select(item =>
             CSharpGuestIds.Function(item.MethodSymbolId)).ToHashSet(StringComparer.Ordinal);
@@ -219,16 +219,8 @@ public static class CSharpLanguageErrorCompiler
                     ordinary, effects.OutcomeMethodIds.ToArray()),
             };
         GuestFunction[] substitutes = producerIds.OrderBy(id => id, StringComparer.Ordinal)
-            .Select(id => new GuestFunction(id, Array.Empty<GuestRegister>(),
-                new[] { new GuestRegister("language_error:placeholder", "type:int32") },
-                "type:int32", "language_error:entry", new[]
-                {
-                    new GuestBasicBlock("language_error:entry", new[]
-                    {
-                        new GuestInstruction("constant", "language_error:placeholder",
-                            Array.Empty<string>(), null, null, new GuestConstant("int32", "0")),
-                    }, new GuestTerminator("return", null, null, null, "language_error:placeholder")),
-                })).ToArray();
+            .Select(id => CreateProducerSubstitute(id, semantic.Callables.Single(callable =>
+                CSharpGuestIds.Function(callable.MethodSymbolId) == id).ReturnTypeId)).ToArray();
         CSharpGuestLoweringResult lowered = CSharpGuestLowerer.LowerWithFunctionSubstitutes(
             ordinary, semanticSha256, substitutes, hasCatchVariables);
         if (!lowered.Succeeded || lowered.Module is null)
@@ -313,6 +305,25 @@ public static class CSharpLanguageErrorCompiler
                 + string.Join(" | ", validation.Diagnostics.Select(item => item.Message)), out error);
         compilation = new(candidate);
         return true;
+    }
+
+    private static GuestFunction CreateProducerSubstitute(string id, string returnTypeId)
+    {
+        bool returnsVoid = returnTypeId == "type:void";
+        const string entry = "language_error:entry";
+        const string placeholder = "language_error:placeholder";
+        return new GuestFunction(id, Array.Empty<GuestRegister>(),
+            returnsVoid ? Array.Empty<GuestRegister>()
+                : new[] { new GuestRegister(placeholder, returnTypeId) },
+            returnTypeId, entry, new[]
+            {
+                new GuestBasicBlock(entry,
+                    returnsVoid ? Array.Empty<GuestInstruction>()
+                        : new[] { new GuestInstruction("constant", placeholder,
+                            Array.Empty<string>(), null, null, new GuestConstant("int32", "0")) },
+                    new GuestTerminator("return", null, null, null,
+                        returnsVoid ? null : placeholder)),
+            });
     }
 
     private static bool TryBindCatchVariables(

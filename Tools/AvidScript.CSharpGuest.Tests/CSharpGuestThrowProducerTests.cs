@@ -21,6 +21,7 @@ internal static class CSharpGuestThrowProducerTests
         SameSourceCallerPropagatesManagedLanguageError();
         ReturnValueExportPreservesOriginalAbi();
         ConditionalThrowUsesParameterAndNormalReturn();
+        VoidThrowProducerPreservesCallAndExportResults();
         GeneratedUFunctionPreservesOriginalAbi();
         SameSourceCallerCatchesManagedLanguageError();
         MultipleThrowProducersKeepDistinctSourceTokens();
@@ -55,7 +56,62 @@ internal static class CSharpGuestThrowProducerTests
         NestedCatchRethrowReachesOuterHandler();
         NestedCatchRethrowRunsBranchingOuterFinally();
         CatchVariableReadsBoundError();
-        return 38;
+        return 39;
+    }
+
+    private static void VoidThrowProducerPreservesCallAndExportResults()
+    {
+        const string source = """
+            using System;
+            using System.Runtime.InteropServices;
+            class Script
+            {
+                static void Fail() { throw new Exception(); }
+                static int Catch(int value)
+                {
+                    try
+                    {
+                        if (value < 0) Fail();
+                        return value + 2;
+                    }
+                    catch (Exception) { return 19; }
+                }
+                [UnmanagedCallersOnly(EntryPoint = "avid_void_handled_entry")]
+                static int ExportHandled(int value) => Catch(value);
+                [UnmanagedCallersOnly(EntryPoint = "avid_void_uncaught_entry")]
+                static void ExportUncaught() => Fail();
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay()
+                {
+                    if (Catch(5) != 7 || Catch(-1) != 19) Fail();
+                }
+            }
+            """;
+        Check(ReferenceCatch(source, "Catch", new object[] { 5 }) == 7
+            && ReferenceCatch(source, "Catch", new object[] { -1 }) == 19,
+            "CLR void throw producer must preserve normal and handled results");
+        SemanticDocument semantic = Analyze(source);
+        Check(!CSharpGuestLowerer.Lower(semantic, new string('a', 64)).Succeeded,
+            "ordinary Guest lowering must keep unsupported exception syntax closed");
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "void throw producer did not lower");
+        GuestModule module = compiled!.Module;
+        Check(module.Exports.Any(item => item.Name == "avid_void_handled_entry")
+            && module.Exports.Any(item => item.Name == "avid_void_uncaught_entry"),
+            "void throw producer must preserve int and void public entries");
+        GuestValidationResult validation = GuestModuleValidator.Validate(module);
+        Check(validation.Succeeded,
+            string.Join(" | ", validation.Diagnostics.Select(item => item.Message)));
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(module);
+        Check(wasm.Succeeded && wasm.Bytes.SequenceEqual(WasmModuleCompiler.Compile(module).Bytes),
+            "void throw producer must compile to deterministic WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "void-throw-producer.wasm"), wasm.Bytes);
+        }
     }
 
     private static void ConditionalThrowUsesParameterAndNormalReturn()
