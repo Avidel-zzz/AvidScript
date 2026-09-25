@@ -96,14 +96,32 @@ internal static class SemanticControlFlowProjector
                                         { Kind: SemanticAsyncMethod.AwaitTransferKind,
                                             SecondaryTarget: >= 0 }))
                                 {
-                                    sourceFlow = sourceFlow with
+                                    SemanticAsyncStateSlot[] inputs = body.Method.Parameters
+                                        .Select(parameter => new SemanticAsyncStateSlot(
+                                            SemanticSymbolProjector.GetSymbolId(parameter),
+                                            typeRegistry.Register(parameter.Type)))
+                                        .Concat(body.Method.IsStatic
+                                            ? Array.Empty<SemanticAsyncStateSlot>()
+                                            : new[] { new SemanticAsyncStateSlot(
+                                                SemanticAsyncMethod.ReceiverSymbol(sourceFlow.MethodSymbolId),
+                                                typeRegistry.Register(body.Method.ContainingType)) })
+                                        .OrderBy(slot => slot.SymbolId, StringComparer.Ordinal)
+                                        .ToArray();
+                                    if (SemanticAsyncProjector.TryAttachStateFrames(
+                                            preview.Segments, previewDiagnostics,
+                                            isControlFlow: true,
+                                            out IReadOnlyList<SemanticAsyncSegment> framed,
+                                            inputs))
                                     {
-                                        AsyncContinuationPreview = new(
-                                            preview.Segments,
-                                            preview.EntrySegmentOrdinal,
-                                            preview.CompilerLocals,
-                                            preview.LexicalScopes),
-                                    };
+                                        sourceFlow = sourceFlow with
+                                        {
+                                            AsyncContinuationPreview = new(
+                                                framed,
+                                                preview.EntrySegmentOrdinal,
+                                                preview.CompilerLocals,
+                                                preview.LexicalScopes),
+                                        };
+                                    }
                                 }
                             }
                             rejectedAsyncExceptionFlows.Add(sourceFlow);

@@ -58,6 +58,8 @@ internal static class SemanticAsyncTests
                 }
                 public static async Task<int> RunAsync(int mode)
                 {
+                    int fallback = mode + 7;
+                    int cleanupIncrement = mode + 1;
                     try
                     {
                         int value = await LoadAsync(mode);
@@ -66,11 +68,11 @@ internal static class SemanticAsyncTests
                     catch (InvalidOperationException)
                     {
                         if (mode == 2) throw;
-                        return 7;
+                        return fallback;
                     }
                     finally
                     {
-                        CleanupCount++;
+                        CleanupCount = CleanupCount + cleanupIncrement;
                         if (mode == 3) throw new ArgumentException();
                     }
                 }
@@ -106,7 +108,18 @@ internal static class SemanticAsyncTests
                     Condition.TypeId: "type:global::System.ArgumentException",
             }),
             "await failure must enter a typed handler decision with unmatched propagation and replacing finally throw");
-        int cleanupStart = source.IndexOf("CleanupCount++", StringComparison.Ordinal);
+        string fallbackId = document.Symbols.Single(symbol => symbol.Kind == "local"
+            && symbol.Name == "fallback" && symbol.ContainingSymbolId == flow!.MethodSymbolId).Id;
+        string cleanupId = document.Symbols.Single(symbol => symbol.Kind == "local"
+            && symbol.Name == "cleanupIncrement" && symbol.ContainingSymbolId == flow!.MethodSymbolId).Id;
+        string modeId = document.Symbols.Single(symbol => symbol.Kind == "parameter"
+            && symbol.Name == "mode" && symbol.ContainingSymbolId == flow!.MethodSymbolId).Id;
+        string[] savedIds = awaited.AwaitSite!.StateFrame?.Slots
+            .Select(slot => slot.SymbolId).ToArray() ?? Array.Empty<string>();
+        Assert(savedIds.Contains(fallbackId) && savedIds.Contains(cleanupId)
+            && savedIds.Contains(modeId),
+            "catch-only, cleanup-only, and invocation input values must survive a suspended await");
+        int cleanupStart = source.IndexOf("CleanupCount =", StringComparison.Ordinal);
         bool ReachesAfterCleanup(int start, string terminalKind)
         {
             Queue<(int Ordinal, bool Cleaned)> pending = new();

@@ -332,6 +332,9 @@ public static class SemanticAsyncStateFlowAnalyzer
                     GetSuccessorLive(segment, transfer.PrimaryTarget, liveIn, issues),
                     GetSuccessorLive(segment, transfer.SecondaryTarget, liveIn, issues)),
                 localIds),
+            SemanticAsyncMethod.CatchMatchTransferKind => Union(
+                GetSuccessorLive(segment, transfer.PrimaryTarget, liveIn, issues),
+                GetSuccessorLive(segment, transfer.SecondaryTarget, liveIn, issues)),
             SemanticAsyncMethod.AwaitTransferKind => TransferAwait(
                 segment,
                 transfer,
@@ -633,6 +636,21 @@ public static class SemanticAsyncStateFlowAnalyzer
                 span,
                 "Async local declaration has no stable symbol or type identity."));
             return;
+        }
+        // Generated compiler slots are activation-owned storage. Distinct return
+        // branches can write the same slot without declaring separate locals.
+        if (symbolId.StartsWith("symbol:compiler_local:", StringComparison.Ordinal))
+        {
+            if (locals.TryGetValue(symbolId, out SemanticAsyncLocalState? existing))
+            {
+                if (existing.TypeId != typeId)
+                {
+                    issues.Add(new SemanticAsyncStateFlowIssue(
+                        symbolId, span, $"Async compiler local '{symbolId}' changes type."));
+                }
+                return;
+            }
+            declarationSegment = 0;
         }
         if (!locals.TryAdd(
             symbolId,
