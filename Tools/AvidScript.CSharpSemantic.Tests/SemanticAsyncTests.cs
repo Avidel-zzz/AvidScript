@@ -36,9 +36,75 @@ internal static class SemanticAsyncTests
         RejectedAsyncExceptionRetainsRoslynRegions();
         SuspendedFinallyPreviewRoutesTaskFailureThroughCleanup();
         AsyncCatchPreviewPreservesHandlerAndCleanupRoutes();
+        NestedSuspendedCleanupBindsDistinctRoslynRegions();
         TaskAndExceptionPlansKeepBothContracts();
         TaskIntThrowPublishesVersionedErrorPlan();
-        return 27;
+        return 28;
+    }
+
+    private static void NestedSuspendedCleanupBindsDistinctRoslynRegions()
+    {
+        const string source = """
+            using AvidScript;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static int InnerCount;
+                public static int OuterCount;
+                public static async Task<int> LoadAsync()
+                {
+                    await AvidContinuations.NextTickAsync();
+                    return 12;
+                }
+                public static async Task<int> RunAsync()
+                {
+                    try
+                    {
+                        try { int value = await LoadAsync(); return value; }
+                        finally { InnerCount++; }
+                    }
+                    finally { OuterCount++; }
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/NestedAsyncFinallyRegions.cs");
+        SemanticExceptionFlow? flow = document.RejectedAsyncExceptionFlows
+            ?.SingleOrDefault(item => item.MethodSymbolId.Contains(".RunAsync(",
+                StringComparison.Ordinal));
+        SemanticAsyncExceptionPreview? preview = flow?.AsyncContinuationPreview;
+        Assert(!document.Succeeded && preview is { Regions.Count: 4 }
+            && preview.Regions.Count(region => region.Kind == "try") == 2
+            && preview.Regions.Count(region => region.Kind == "finally") == 2,
+            "nested suspended cleanup must bind both source try/finally pairs");
+        SemanticAsyncExceptionPreviewRegion inner = preview!.Regions.Single(region =>
+            region.Kind == "finally" && region.SourceSpan.Start ==
+                source.IndexOf("finally { InnerCount", StringComparison.Ordinal));
+        SemanticAsyncExceptionPreviewRegion outer = preview.Regions.Single(region =>
+            region.Kind == "finally" && region.SourceSpan.Start ==
+                source.IndexOf("finally { OuterCount", StringComparison.Ordinal));
+        Assert(inner.RoslynRegionOrdinal != outer.RoslynRegionOrdinal
+            && flow!.Regions[inner.RoslynRegionOrdinal].Kind == "finally"
+            && flow.Regions[outer.RoslynRegionOrdinal].Kind == "finally",
+            "copied cleanup segments must retain distinct Roslyn region identities");
+        int cursor = preview.Segments.Single(segment => segment.AwaitSite?.ProducerKind
+            == "task_call").Transfer!.SecondaryTarget;
+        List<int> cleanupOrder = new();
+        HashSet<int> visited = new();
+        while (visited.Add(cursor))
+        {
+            if (inner.Segments.Contains(cursor)) cleanupOrder.Add(inner.RoslynRegionOrdinal);
+            if (outer.Segments.Contains(cursor)) cleanupOrder.Add(outer.RoslynRegionOrdinal);
+            SemanticAsyncControlTransfer transfer = preview.Segments[cursor].Transfer!;
+            if (transfer.Kind == SemanticAsyncMethod.PropagateFaultTransferKind) break;
+            Assert(transfer.Kind == SemanticAsyncMethod.GotoTransferKind,
+                "nested fault cleanup path must use deterministic goto edges");
+            cursor = transfer.PrimaryTarget;
+        }
+        Assert(cleanupOrder.SequenceEqual(new[] { inner.RoslynRegionOrdinal,
+                outer.RoslynRegionOrdinal })
+            && preview.Segments[cursor].Transfer?.Kind
+                == SemanticAsyncMethod.PropagateFaultTransferKind,
+            "fault propagation must execute inner then outer finally exactly once");
     }
 
     private static void AsyncCatchPreviewPreservesHandlerAndCleanupRoutes()
@@ -92,6 +158,14 @@ internal static class SemanticAsyncTests
         SemanticAsyncSegment awaited = preview!.Segments.Single(segment =>
             segment.AwaitSite?.ProducerKind == "task_call");
         SemanticAsyncSegment dispatch = preview.Segments[awaited.Transfer!.SecondaryTarget];
+        Assert(preview.Regions.Count == 3
+            && preview.Regions.Single(region => region.Kind == "try")
+                .Segments.Contains(awaited.Ordinal)
+            && preview.Regions.Single(region => region.Kind == "catch")
+                .RoslynRegionOrdinal == flow!.Catches.Single().RegionOrdinal
+            && preview.Regions.Single(region => region.Kind == "finally")
+                .Segments.Count > 1,
+            "protected await, typed catch and copied cleanup must bind their Roslyn regions");
         Assert(dispatch.Transfer is
             {
                 Kind: SemanticAsyncMethod.CatchMatchTransferKind,

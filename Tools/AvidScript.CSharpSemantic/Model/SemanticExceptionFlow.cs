@@ -24,7 +24,14 @@ public sealed record SemanticAsyncExceptionPreview(
     [property: JsonPropertyOrder(0)] IReadOnlyList<SemanticAsyncSegment> Segments,
     [property: JsonPropertyOrder(1)] int EntrySegmentOrdinal,
     [property: JsonPropertyOrder(2)] IReadOnlyList<SemanticAsyncCompilerLocal> CompilerLocals,
-    [property: JsonPropertyOrder(3)] IReadOnlyList<SemanticAsyncLexicalScope> LexicalScopes);
+    [property: JsonPropertyOrder(3)] IReadOnlyList<SemanticAsyncLexicalScope> LexicalScopes,
+    [property: JsonPropertyOrder(4)] IReadOnlyList<SemanticAsyncExceptionPreviewRegion> Regions);
+
+public sealed record SemanticAsyncExceptionPreviewRegion(
+    [property: JsonPropertyOrder(0)] string Kind,
+    [property: JsonPropertyOrder(1)] int RoslynRegionOrdinal,
+    [property: JsonPropertyOrder(2)] SemanticSpan SourceSpan,
+    [property: JsonPropertyOrder(3)] IReadOnlyList<int> Segments);
 
 public sealed record SemanticExceptionBlock(
     [property: JsonPropertyOrder(0)] int Ordinal,

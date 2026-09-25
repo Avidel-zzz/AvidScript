@@ -111,7 +111,12 @@ internal static class SemanticControlFlowProjector
                                             preview.Segments, previewDiagnostics,
                                             isControlFlow: true,
                                             out IReadOnlyList<SemanticAsyncSegment> framed,
-                                            inputs))
+                                            inputs)
+                                        && SemanticAsyncExceptionRegionBinder.TryBind(
+                                            context, (MethodDeclarationSyntax)body.Declaration,
+                                            sourceFlow, preview,
+                                            out IReadOnlyList<SemanticAsyncExceptionPreviewRegion>
+                                                boundRegions))
                                     {
                                         sourceFlow = sourceFlow with
                                         {
@@ -119,7 +124,8 @@ internal static class SemanticControlFlowProjector
                                                 framed,
                                                 preview.EntrySegmentOrdinal,
                                                 preview.CompilerLocals,
-                                                preview.LexicalScopes),
+                                                preview.LexicalScopes,
+                                                boundRegions),
                                         };
                                     }
                                 }

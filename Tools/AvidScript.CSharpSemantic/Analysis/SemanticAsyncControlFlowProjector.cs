@@ -14,7 +14,19 @@ internal sealed record SemanticAsyncControlFlowProjection(
     int EntrySegmentOrdinal,
     IReadOnlyList<SemanticAsyncCompilerLocal> CompilerLocals,
     IReadOnlyList<SemanticAsyncLexicalScope> LexicalScopes,
-    SemanticAsyncErrorPlan? ErrorPlan);
+    SemanticAsyncErrorPlan? ErrorPlan)
+{
+    public IReadOnlyList<SemanticAsyncPreviewRegionDraft> PreviewRegions { get; init; } =
+        Array.Empty<SemanticAsyncPreviewRegionDraft>();
+}
+
+// Membership is captured while the structured CFG owns draft identities.
+// A later binder pairs the source construct with Roslyn's region ordinal.
+internal sealed record SemanticAsyncPreviewRegionDraft(
+    string Kind,
+    TextSpan TrySpan,
+    TextSpan PartSpan,
+    IReadOnlyList<int> Segments);
 
 internal static class SemanticAsyncControlFlowProjector
 {
@@ -59,6 +71,8 @@ internal static class SemanticAsyncControlFlowProjector
         private readonly ITypeSymbol? resultType;
         private readonly bool previewSuspendedFinally;
         private readonly List<DraftSegment> drafts = new();
+        private readonly List<(string Kind, TextSpan TrySpan, TextSpan PartSpan,
+            IReadOnlyList<int> DraftIds)> previewRegions = new();
         private readonly List<SemanticAsyncCompilerLocal> compilerLocals = new();
         private readonly List<(SyntaxNode Node, string Kind, int[] Drafts)> scopes = new();
         private SyntaxNode declaration = null!;
@@ -186,7 +200,21 @@ internal static class SemanticAsyncControlFlowProjector
                     .OrderBy(local => local.SymbolId, StringComparer.Ordinal)
                     .ToArray(),
                 lexicalScopes.OrderBy(scope => scope.Id, StringComparer.Ordinal).ToArray(),
-                BuildErrorPlan(segments));
+                BuildErrorPlan(segments))
+            {
+                PreviewRegions = previewRegions
+                    .OrderBy(region => region.TrySpan.Start)
+                    .ThenBy(region => region.Kind == "try" ? 0
+                        : region.Kind == "catch" ? 1 : 2)
+                    .ThenBy(region => region.PartSpan.Start)
+                    .Select(region => new SemanticAsyncPreviewRegionDraft(
+                        region.Kind,
+                        region.TrySpan,
+                        region.PartSpan,
+                        region.DraftIds.Where(ordinalByDraft.ContainsKey)
+                            .Select(id => ordinalByDraft[id]).Order().ToArray()))
+                    .ToArray(),
+            };
             return true;
         }
 
@@ -487,8 +515,10 @@ internal static class SemanticAsyncControlFlowProjector
             }
 
             BlockSyntax? cleanup = statement.Finally?.Block;
+            List<int> cleanupDrafts = new();
             int normalExit = cleanup is null ? successor
-                : BuildStatement(cleanup, successor, LoopTargets.None, depth + 1);
+                : BuildPreviewRegionBlock(cleanup, successor, LoopTargets.None,
+                    depth + 1, cleanupDrafts);
             if (normalExit < 0) return -1;
 
             int returnExit = returnCleanupTarget;
@@ -506,8 +536,8 @@ internal static class SemanticAsyncControlFlowProjector
                             value, -1, -1));
                     if (returnContinuation < 0) return -1;
                 }
-                returnExit = BuildStatement(cleanup, returnContinuation,
-                    LoopTargets.None, depth + 1);
+                returnExit = BuildPreviewRegionBlock(cleanup, returnContinuation,
+                    LoopTargets.None, depth + 1, cleanupDrafts);
                 if (returnExit < 0) return -1;
             }
 
@@ -517,14 +547,14 @@ internal static class SemanticAsyncControlFlowProjector
             {
                 if (breakExit >= 0)
                 {
-                    breakExit = BuildStatement(cleanup, breakExit,
-                        LoopTargets.None, depth + 1);
+                    breakExit = BuildPreviewRegionBlock(cleanup, breakExit,
+                        LoopTargets.None, depth + 1, cleanupDrafts);
                     if (breakExit < 0) return -1;
                 }
                 if (continueExit >= 0)
                 {
-                    continueExit = BuildStatement(cleanup, continueExit,
-                        LoopTargets.None, depth + 1);
+                    continueExit = BuildPreviewRegionBlock(cleanup, continueExit,
+                        LoopTargets.None, depth + 1, cleanupDrafts);
                     if (continueExit < 0) return -1;
                 }
             }
@@ -539,8 +569,8 @@ internal static class SemanticAsyncControlFlowProjector
                 if (faultContinuation < 0) return -1;
             }
             int faultExit = cleanup is null ? faultContinuation
-                : BuildStatement(cleanup, faultContinuation,
-                    LoopTargets.None, depth + 1);
+                : BuildPreviewRegionBlock(cleanup, faultContinuation,
+                    LoopTargets.None, depth + 1, cleanupDrafts);
             if (faultExit < 0) return -1;
 
             int outerReturn = returnCleanupTarget;
@@ -548,10 +578,14 @@ internal static class SemanticAsyncControlFlowProjector
             returnCleanupTarget = returnExit;
             faultCleanupTarget = faultExit;
             int[] handlerEntries = new int[statement.Catches.Count];
+            List<int>[] handlerDrafts = Enumerable.Range(0, statement.Catches.Count)
+                .Select(_ => new List<int>()).ToArray();
             for (int index = statement.Catches.Count - 1; index >= 0; --index)
             {
-                handlerEntries[index] = BuildStatement(statement.Catches[index].Block,
-                    normalExit, new LoopTargets(breakExit, continueExit), depth + 1);
+                handlerEntries[index] = BuildPreviewRegionBlock(
+                    statement.Catches[index].Block, normalExit,
+                    new LoopTargets(breakExit, continueExit), depth + 1,
+                    handlerDrafts[index]);
                 if (handlerEntries[index] < 0)
                 {
                     returnCleanupTarget = outerReturn;
@@ -582,8 +616,10 @@ internal static class SemanticAsyncControlFlowProjector
             returnCleanupTarget = returnExit;
             faultCleanupTarget = dispatch;
             int firstProtectedDraft = drafts.Count;
-            int entry = BuildStatement(statement.Block, normalExit,
-                new LoopTargets(breakExit, continueExit), depth + 1);
+            List<int> protectedDrafts = new();
+            int entry = BuildPreviewRegionBlock(statement.Block, normalExit,
+                new LoopTargets(breakExit, continueExit), depth + 1,
+                protectedDrafts);
             returnCleanupTarget = outerReturn;
             faultCleanupTarget = outerFault;
             if (entry < 0) return -1;
@@ -591,6 +627,14 @@ internal static class SemanticAsyncControlFlowProjector
                 { ProducerKind: not ("task_call" or "task_local") }))
                 return Reject("Async exception preview requires Task<int> await sites.",
                     statement.Span, "ASCS5420");
+            previewRegions.Add(("try", statement.Span, statement.Block.Span,
+                protectedDrafts));
+            for (int index = 0; index < statement.Catches.Count; ++index)
+                previewRegions.Add(("catch", statement.Span,
+                    statement.Catches[index].Span, handlerDrafts[index]));
+            if (statement.Finally is not null)
+                previewRegions.Add(("finally", statement.Span,
+                    statement.Finally.Span, cleanupDrafts));
             return entry;
         }
 
@@ -608,6 +652,7 @@ internal static class SemanticAsyncControlFlowProjector
                     "ASCS5420");
             }
             BlockSyntax cleanup = statement.Finally.Block;
+            List<int> cleanupDrafts = new();
             bool suspended = statement.Block.DescendantNodes()
                 .OfType<AwaitExpressionSyntax>().Any();
             if ((!previewSuspendedFinally && statement.DescendantNodes()
@@ -624,7 +669,8 @@ internal static class SemanticAsyncControlFlowProjector
                     "ASCS5420");
             }
 
-            int normalCleanup = BuildStatement(cleanup, successor, LoopTargets.None, depth + 1);
+            int normalCleanup = BuildPreviewRegionBlock(cleanup, successor,
+                LoopTargets.None, depth + 1, cleanupDrafts);
             if (normalCleanup < 0) return -1;
 
             int returnContinuation = returnCleanupTarget;
@@ -638,14 +684,17 @@ internal static class SemanticAsyncControlFlowProjector
                     new DraftTransfer(SemanticAsyncMethod.ReturnTransferKind, value, -1, -1));
                 if (returnContinuation < 0) return -1;
             }
-            int returnCleanup = BuildStatement(cleanup, returnContinuation, LoopTargets.None, depth + 1);
+            int returnCleanup = BuildPreviewRegionBlock(cleanup, returnContinuation,
+                LoopTargets.None, depth + 1, cleanupDrafts);
             if (returnCleanup < 0) return -1;
 
             int breakCleanup = targets.BreakTarget < 0 ? -1
-                : BuildStatement(cleanup, targets.BreakTarget, LoopTargets.None, depth + 1);
+                : BuildPreviewRegionBlock(cleanup, targets.BreakTarget,
+                    LoopTargets.None, depth + 1, cleanupDrafts);
             if (targets.BreakTarget >= 0 && breakCleanup < 0) return -1;
             int continueCleanup = targets.ContinueTarget < 0 ? -1
-                : BuildStatement(cleanup, targets.ContinueTarget, LoopTargets.None, depth + 1);
+                : BuildPreviewRegionBlock(cleanup, targets.ContinueTarget,
+                    LoopTargets.None, depth + 1, cleanupDrafts);
             if (targets.ContinueTarget >= 0 && continueCleanup < 0) return -1;
 
             int faultCleanup = faultCleanupTarget;
@@ -659,7 +708,8 @@ internal static class SemanticAsyncControlFlowProjector
                             null, -1, -1));
                     if (faultCleanup < 0) return -1;
                 }
-                faultCleanup = BuildStatement(cleanup, faultCleanup, LoopTargets.None, depth + 1);
+                faultCleanup = BuildPreviewRegionBlock(cleanup, faultCleanup,
+                    LoopTargets.None, depth + 1, cleanupDrafts);
                 if (faultCleanup < 0) return -1;
             }
 
@@ -668,8 +718,10 @@ internal static class SemanticAsyncControlFlowProjector
             returnCleanupTarget = returnCleanup;
             faultCleanupTarget = faultCleanup;
             int firstProtectedDraft = drafts.Count;
-            int entry = BuildStatement(statement.Block, normalCleanup,
-                new LoopTargets(breakCleanup, continueCleanup), depth + 1);
+            List<int> protectedDrafts = new();
+            int entry = BuildPreviewRegionBlock(statement.Block, normalCleanup,
+                new LoopTargets(breakCleanup, continueCleanup), depth + 1,
+                protectedDrafts);
             returnCleanupTarget = outerReturnCleanup;
             faultCleanupTarget = outerFaultCleanup;
             if (previewSuspendedFinally && drafts.Skip(firstProtectedDraft)
@@ -679,6 +731,29 @@ internal static class SemanticAsyncControlFlowProjector
                     "Suspended cleanup preview currently requires Task<int> await sites.",
                     statement.Span,
                     "ASCS5420");
+            }
+            if (previewSuspendedFinally && entry >= 0)
+            {
+                previewRegions.Add(("try", statement.Span, statement.Block.Span,
+                    protectedDrafts));
+                previewRegions.Add(("finally", statement.Span, statement.Finally.Span,
+                    cleanupDrafts));
+            }
+            return entry;
+        }
+
+        private int BuildPreviewRegionBlock(
+            BlockSyntax block,
+            int successor,
+            LoopTargets targets,
+            int depth,
+            ICollection<int> members)
+        {
+            int first = drafts.Count;
+            int entry = BuildStatement(block, successor, targets, depth);
+            if (entry >= 0)
+            {
+                for (int id = first; id < drafts.Count; ++id) members.Add(id);
             }
             return entry;
         }
