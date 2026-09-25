@@ -156,7 +156,8 @@ public static class SemanticAsyncExceptionPlanValidator
                         return false;
                 }
             }
-            if (plan.Catches.Count != catchDecisionSegments.Count) return false;
+            if (plan.Catches.Count != catchDecisionSegments.Count
+                || !SemanticAsyncExceptionOwnerFlow.TryAnalyze(method, out _)) return false;
         }
         return true;
     }

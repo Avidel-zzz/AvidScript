@@ -1142,6 +1142,23 @@ internal static class SemanticAsyncTests
                 }
                 : method).ToArray(),
         }), "forged catch-region identities must be rejected");
+        SemanticAsyncSegment decision = consumer.Segments.Single(segment =>
+            segment.Transfer?.Kind == SemanticAsyncMethod.CatchMatchTransferKind);
+        int normalReturn = consumer.Segments.First(segment =>
+            segment.Transfer?.Kind == SemanticAsyncMethod.ReturnTransferKind).Ordinal;
+        SemanticAsyncMethod forgedOwnerRoute = consumer with
+        {
+            Segments = consumer.Segments.Select(segment => segment == decision
+                ? segment with { Transfer = segment.Transfer! with
+                    { SecondaryTarget = normalReturn } }
+                : segment).ToArray(),
+        };
+        Assert(!SemanticAsyncExceptionOwnerFlow.TryAnalyze(forgedOwnerRoute, out _)
+            && !SemanticAsyncExceptionPlanValidator.IsValid(document with
+            {
+                AsyncMethods = document.AsyncMethods.Select(method => method == consumer
+                    ? forgedOwnerRoute : method).ToArray(),
+            }), "unmatched language faults cannot enter a normal return and drop the source Task owner");
     }
 
     private static void AsyncExceptionFixturePublishesAllMethods()
@@ -1172,6 +1189,13 @@ internal static class SemanticAsyncTests
                 + " | "
                 + string.Join(" | ", document.Diagnostics.Select(item =>
                     item.Code + ":" + item.Message)));
+        SemanticAsyncMethod handler = document.AsyncMethods.Single(method =>
+            method.MethodSymbolId.Contains(".RunAsync(", StringComparison.Ordinal));
+        Assert(SemanticAsyncExceptionOwnerFlow.TryAnalyze(handler, out var states)
+            && states.Values.Any(state => state.HasFlag(
+                    SemanticAsyncExceptionOwnerState.Normal)
+                && state.HasFlag(SemanticAsyncExceptionOwnerState.HandledFault)),
+            "shared finally paths must retain both normal and caught-fault ownership states");
     }
 
     private static void TaskIntAwaitProjectsValueArguments()
