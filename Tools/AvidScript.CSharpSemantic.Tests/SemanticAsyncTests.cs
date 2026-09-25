@@ -398,6 +398,63 @@ internal static class SemanticAsyncTests
             && lateConsumer.Segments.Any(segment => before.TryGetValue(segment.Ordinal,
                 out IReadOnlyList<string>? active) && active.Contains(lateTask)),
             "only the second suspension may transfer the late task owner");
+        const string conditionalSource = """
+            using AvidScript;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static int Flag;
+                public static async Task<int> LoadScoreAsync()
+                {
+                    await AvidContinuations.NextTickAsync();
+                    return 12;
+                }
+                public static async void BeginPlay()
+                {
+                    if (Flag == 0)
+                    {
+                        await AvidContinuations.NextTickAsync();
+                        Task<int> pending = LoadScoreAsync();
+                        int score = await pending;
+                        return;
+                    }
+                    return;
+                }
+            }
+            """;
+        SemanticDocument conditional = Analyze(conditionalSource, "Scripts/TaskIntConditionalLocal.cs");
+        Assert(conditional.Succeeded && SemanticAsyncInvocationValidator.IsValid(conditional),
+            "a conditional early return may skip a later Task local declaration: "
+                + string.Join(" | ", conditional.Diagnostics.Select(item => item.Message)));
+        const string mergingSource = """
+            using AvidScript;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static int Flag;
+                public static async Task<int> LoadScoreAsync()
+                {
+                    await AvidContinuations.NextTickAsync();
+                    return 12;
+                }
+                public static async void BeginPlay()
+                {
+                    if (Flag == 0)
+                    {
+                        Task<int> first = LoadScoreAsync();
+                        int left = await first;
+                    }
+                    else
+                    {
+                        Task<int> second = LoadScoreAsync();
+                        int right = await second;
+                    }
+                }
+            }
+            """;
+        SemanticDocument merging = Analyze(mergingSource, "Scripts/TaskIntMergingOwners.cs");
+        Assert(!merging.Succeeded && merging.Diagnostics.Any(item => item.Code == "ASCS5403"),
+            "branches with different live Task owners must be rejected at their join");
     }
 
     private static void TaskIntSuspendedCleanupFailsClosed()

@@ -109,7 +109,8 @@ internal static class CSharpGuestAsyncInvocationTests
             count++;
         }
         return count + TaskResultSemanticCompilesToWasm()
-            + TaskLocalSemanticCompilesToWasm() + TaskParallelLocalsCompileToWasm()
+            + TaskLocalSemanticCompilesToWasm() + TaskConditionalLocalsCompileToWasm()
+            + TaskParallelLocalsCompileToWasm()
             + TaskFieldAssignmentCompilesToWasm() + TaskIntegratedCompilesToWasm();
     }
 
@@ -423,6 +424,75 @@ internal static class CSharpGuestAsyncInvocationTests
                 slot.GlobalId.Contains(".Result:", StringComparison.Ordinal));
             File.WriteAllBytes(stem + ".wasm", earlyCompiled.Bytes);
             File.WriteAllText(stem + ".result-offset", result.Offset.ToString(CultureInfo.InvariantCulture));
+        }
+        return 2;
+    }
+
+    private static int TaskConditionalLocalsCompileToWasm()
+    {
+        const string source = """
+            using AvidScript;
+            using System.Runtime.InteropServices;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static int Result;
+                public static int Flag;
+                public static async Task<int> LoadScoreAsync()
+                {
+                    await AvidContinuations.NextTickAsync();
+                    return 12;
+                }
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay()
+                {
+                    if (Flag == 0)
+                    {
+                        await AvidContinuations.NextTickAsync();
+                        Task<int> pending = LoadScoreAsync();
+                        Result = await pending;
+                        return;
+                    }
+                    Result = 7;
+                }
+            }
+            """;
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_MANAGED_HEAP_WASM_DIR");
+        foreach ((string scenario, string script) in new[]
+        {
+            ("conditional-local", source),
+            ("conditional-skip", source.Replace("if (Flag == 0)",
+                "Flag = 1; if (Flag == 0)", StringComparison.Ordinal)),
+        })
+        {
+            SemanticDocument document = CSharpGuestContinuationTests.Analyze(
+                script, "Scripts/TaskInt" + scenario + ".cs");
+            Check(document.Succeeded && SemanticAsyncInvocationValidator.IsValid(document),
+                scenario + " must publish a valid nested Task owner: "
+                    + string.Join(" | ", document.Diagnostics.Select(item => item.Message)));
+            CSharpGuestLoweringResult lowered = CSharpGuestLowerer.Lower(
+                document, new string('d', 64));
+            Check(lowered.Succeeded,
+                scenario + " Guest lowering failed: "
+                    + string.Join(" | ", lowered.Diagnostics.Select(item => item.Message)));
+            GuestModule module = lowered.Module!;
+            WasmCompilationResult compiled = WasmModuleCompiler.Compile(module);
+            Check(compiled.Succeeded,
+                scenario + " WASM compilation failed: "
+                    + string.Join(" | ", compiled.Diagnostics.Select(item => item.Message)));
+            Check(compiled.Bytes.SequenceEqual(WasmModuleCompiler.Compile(
+                    GuestIrSerializer.Deserialize(GuestIrSerializer.Serialize(module))).Bytes),
+                scenario + " WASM must be deterministic after IR round-trip");
+            if (!string.IsNullOrWhiteSpace(output))
+            {
+                Directory.CreateDirectory(output);
+                string stem = Path.Combine(output, "csharp-task-int-" + scenario);
+                GuestStateSlot result = module.MemoryLayout.StateSlots.Single(slot =>
+                    slot.GlobalId.Contains(".Result:", StringComparison.Ordinal));
+                File.WriteAllBytes(stem + ".wasm", compiled.Bytes);
+                File.WriteAllText(stem + ".result-offset",
+                    result.Offset.ToString(CultureInfo.InvariantCulture));
+            }
         }
         return 2;
     }

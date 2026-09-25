@@ -572,8 +572,11 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 	World->InitializeActorsForPlay(FURL());
 	ON_SCOPE_EXIT { GEngine->DestroyWorldContext(World); World->DestroyWorld(false); };
 	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
-	for (const TCHAR* Scenario : {TEXT("immediate"), TEXT("deferred"), TEXT("teardown"), TEXT("chain"), TEXT("arguments"), TEXT("combined"), TEXT("cleanup"), TEXT("local"), TEXT("local-teardown"), TEXT("local-waiter-teardown"), TEXT("early-return"), TEXT("parallel"), TEXT("parallel-teardown"), TEXT("parallel-waiter-teardown"), TEXT("integrated"), TEXT("integrated-teardown"), TEXT("integrated-waiter-teardown")})
+	for (const TCHAR* Scenario : {TEXT("immediate"), TEXT("deferred"), TEXT("teardown"), TEXT("chain"), TEXT("arguments"), TEXT("combined"), TEXT("cleanup"), TEXT("local"), TEXT("local-teardown"), TEXT("local-waiter-teardown"), TEXT("early-return"), TEXT("conditional-local"), TEXT("conditional-local-waiter-teardown"), TEXT("conditional-skip"), TEXT("parallel"), TEXT("parallel-teardown"), TEXT("parallel-waiter-teardown"), TEXT("integrated"), TEXT("integrated-teardown"), TEXT("integrated-waiter-teardown")})
 	{
+		const bool bConditionalLocal = FCString::Strcmp(Scenario, TEXT("conditional-local")) == 0
+			|| FCString::Strcmp(Scenario, TEXT("conditional-local-waiter-teardown")) == 0;
+		const bool bConditionalSkip = FCString::Strcmp(Scenario, TEXT("conditional-skip")) == 0;
 		const bool bIntegrated = FCString::Strncmp(Scenario, TEXT("integrated"), 10) == 0;
 		const bool bParallel = FCString::Strcmp(Scenario, TEXT("parallel")) == 0
 			|| FCString::Strcmp(Scenario, TEXT("parallel-teardown")) == 0
@@ -586,6 +589,7 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 			|| FCString::Strcmp(Scenario, TEXT("parallel-teardown")) == 0
 			|| FCString::Strcmp(Scenario, TEXT("integrated-teardown")) == 0;
 		const bool bWaiterTeardown = FCString::Strcmp(Scenario, TEXT("local-waiter-teardown")) == 0
+			|| FCString::Strcmp(Scenario, TEXT("conditional-local-waiter-teardown")) == 0
 			|| FCString::Strcmp(Scenario, TEXT("parallel-waiter-teardown")) == 0
 			|| FCString::Strcmp(Scenario, TEXT("integrated-waiter-teardown")) == 0;
 		const bool bChain = FCString::Strcmp(Scenario, TEXT("chain")) == 0;
@@ -593,12 +597,14 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 		const bool bArguments = FCString::Strcmp(Scenario, TEXT("arguments")) == 0;
 		const bool bCombined = FCString::Strcmp(Scenario, TEXT("combined")) == 0;
 		const bool bCleanup = FCString::Strcmp(Scenario, TEXT("cleanup")) == 0;
-		const bool bDeferred = FCString::Strcmp(Scenario, TEXT("immediate")) != 0 && !bEarlyReturn;
+		const bool bDeferred = FCString::Strcmp(Scenario, TEXT("immediate")) != 0
+			&& !bEarlyReturn && !bConditionalSkip;
 		const FString Stem = FPaths::Combine(FPaths::ProjectSavedDir(),
 			TEXT("AvidScriptManagedHeapTests/GuestFixtures"),
 			FString::Printf(TEXT("csharp-task-int-%s"), bTeardown || bWaiterTeardown
 				? (bIntegrated ? TEXT("integrated") : bParallel ? TEXT("parallel")
-					: bLocal ? TEXT("local") : TEXT("deferred")) : Scenario));
+					: bLocal ? TEXT("local") : bConditionalLocal
+						? TEXT("conditional-local") : TEXT("deferred")) : Scenario));
 		TArray<uint8> Bytes;
 		FString OffsetText;
 		int32 ResultOffset = -1;
@@ -644,9 +650,9 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 			return Value;
 		};
 		TestEqual(TEXT("Immediate completion or deferred initial state"),
-			ReadResult(), bDeferred || bEarlyReturn ? 0 : 12);
+			ReadResult(), bConditionalSkip ? 7 : bDeferred || bEarlyReturn ? 0 : 12);
 		TestEqual(TEXT("Task ownership after initial entry"),
-			Owner->GetTaskResultsForTesting().GetCount(), bIntegrated ? 3 : bChain || bParallel ? 2 : bLocal || bEarlyReturn ? 0 : bDeferred ? 1 : 0);
+			Owner->GetTaskResultsForTesting().GetCount(), bIntegrated ? 3 : bChain || bParallel ? 2 : bLocal || bEarlyReturn || bConditionalLocal || bConditionalSkip ? 0 : bDeferred ? 1 : 0);
 		if (bTeardown) Owner->Teardown();
 		bool bStopped = bTeardown;
 		int32 Resumes = 0;
@@ -683,15 +689,15 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 		if (bWaiterTeardown)
 		{
 			TestTrue(TEXT("Task local reached a registered waiter before teardown"),
-				WaiterTeardownResumes > 0 && WaiterTeardownResumes < (bIntegrated ? 7 : bParallel ? 6 : bLocal ? 5 : 4));
+				WaiterTeardownResumes > 0 && WaiterTeardownResumes < (bIntegrated ? 7 : bParallel ? 6 : bLocal ? 5 : bConditionalLocal ? 3 : 4));
 			TestEqual(TEXT("Teardown suppresses pending Task local resumes"),
 				Resumes, WaiterTeardownResumes);
 		}
 		if (!bWaiterTeardown)
 			TestEqual(TEXT("Compiled C# Task<int> has the expected resume count"), Resumes,
-				bTeardown ? 0 : bIntegrated ? 7 : bParallel ? 6 : bLocal ? 5 : bChain ? 3 : bDeferred ? 2 : 0);
+				bTeardown ? 0 : bIntegrated ? 7 : bParallel ? 6 : bLocal ? 5 : bConditionalLocal ? 3 : bChain ? 3 : bDeferred ? 2 : 0);
 		TestEqual(TEXT("Compiled C# Task<int> preserves result"), ReadResult(),
-			bTeardown || bWaiterTeardown || bEarlyReturn ? 0 : bIntegrated ? 253 : bParallel ? 75 : bLocal ? 24 : bChain ? 13 : bArguments ? 75 : bCombined ? 16 : bCleanup ? 161 : 12);
+			bTeardown || bWaiterTeardown || bEarlyReturn ? 0 : bConditionalSkip ? 7 : bIntegrated ? 253 : bParallel ? 75 : bLocal ? 24 : bChain ? 13 : bArguments ? 75 : bCombined ? 16 : bCleanup ? 161 : 12);
 		if (bIntegrated && !bTeardown && !bWaiterTeardown)
 		{
 			FString CleanupOffsetText;

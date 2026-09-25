@@ -1263,7 +1263,9 @@ internal static class SemanticAsyncProjector
 
     private static VariableDeclaratorSyntax[] GetTaskLocalDeclarations(
         SemanticCompilationContext context, SemanticModel semanticModel, BlockSyntax body) =>
-        body.Statements.OfType<LocalDeclarationStatementSyntax>()
+        body.DescendantNodes().OfType<LocalDeclarationStatementSyntax>()
+            .Where(statement => !statement.Ancestors().Any(node =>
+                node is AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax))
             .Where(statement => statement.Declaration.Variables.Count == 1
                 && semanticModel.GetDeclaredSymbol(statement.Declaration.Variables[0]) is ILocalSymbol symbol
                 && TryGetSupportedTaskResult(context.Compilation, symbol.Type, out _))
