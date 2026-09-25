@@ -24,7 +24,8 @@ internal static class SemanticControlFlowProjector
         IReadOnlySet<string> controlledAsyncMethodIds,
         IReadOnlyList<SemanticAsyncMethod> controlledAsyncMethods,
         IReadOnlyList<SemanticCallable> callables,
-        bool enableAsyncExceptionFlow = false)
+        bool enableAsyncExceptionFlow = false,
+        bool enableDirectAwaitCleanup = false)
     {
         List<SemanticDiagnostic> diagnostics = new();
         List<SemanticControlFlowGraph> graphs = new();
@@ -99,11 +100,15 @@ internal static class SemanticControlFlowProjector
                                         previewDiagnostics, ref previewCallbackId,
                                         out SemanticAsyncControlFlowProjection? preview,
                                         allowValueReturns: true, resultType: resultType,
-                                        previewSuspendedFinally: true)
+                                        previewSuspendedFinally: true,
+                                        allowDirectAwaitCleanup: enableDirectAwaitCleanup)
                                     && preview is not null
                                     && preview.Segments.Any(segment => segment.Transfer is
                                         { Kind: SemanticAsyncMethod.AwaitTransferKind,
-                                            SecondaryTarget: >= 0 }))
+                                            SecondaryTarget: >= 0 }
+                                        || enableDirectAwaitCleanup && segment.Transfer is
+                                            { Kind: SemanticAsyncMethod.AwaitTransferKind,
+                                                CancellationTarget: >= 0 }))
                                 {
                                     SemanticAsyncStateSlot[] inputs = body.Method.Parameters
                                         .Select(parameter => new SemanticAsyncStateSlot(

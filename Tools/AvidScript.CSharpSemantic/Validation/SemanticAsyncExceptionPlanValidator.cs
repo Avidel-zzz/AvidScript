@@ -15,9 +15,14 @@ public static class SemanticAsyncExceptionPlanValidator
             return false;
         bool enabled = document.SchemaVersion == SemanticContract.AsyncExceptionFlowSchemaVersion
             && document.SemanticVersion == SemanticContract.AsyncExceptionFlowSemanticVersion;
+        bool directCleanup = document.SchemaVersion == SemanticContract.DirectAwaitCleanupSchemaVersion
+            && document.SemanticVersion == SemanticContract.DirectAwaitCleanupSemanticVersion;
+        enabled |= directCleanup;
         if (!enabled)
             return document.SchemaVersion != SemanticContract.AsyncExceptionFlowSchemaVersion
                 && document.SemanticVersion != SemanticContract.AsyncExceptionFlowSemanticVersion
+                && document.SchemaVersion != SemanticContract.DirectAwaitCleanupSchemaVersion
+                && document.SemanticVersion != SemanticContract.DirectAwaitCleanupSemanticVersion
                 && document.AsyncMethods.All(method => method is not null
                     && method.ExceptionPlan is null && method.Segments is not null
                     && method.Segments.All(segment => segment is not null
@@ -27,6 +32,10 @@ public static class SemanticAsyncExceptionPlanValidator
                                 && !IsExceptionTransfer(segment.Transfer.Kind))));
         if (!document.AsyncMethods.Any(method => method?.ExceptionPlan is not null))
             return false;
+        if (directCleanup && !document.AsyncMethods.Any(method => method?.ExceptionPlan is not null
+            && method.Segments.Any(segment => segment?.AwaitSite?.ProducerKind is "delay" or "next_tick"
+                && segment.Transfer?.CancellationTarget is >= 0
+                && segment.Transfer.SecondaryTarget == -1))) return false;
         foreach (SemanticAsyncMethod? method in document.AsyncMethods)
         {
             if (method?.Segments is null || method.Span is null) return false;
@@ -73,7 +82,9 @@ public static class SemanticAsyncExceptionPlanValidator
                     catchRegions.Add(region.RoslynRegionOrdinal, region);
                 if (region.Kind == "try")
                     hasProtectedAwait |= region.Segments.Any(ordinal =>
-                        method.Segments[ordinal].AwaitSite is { ProducerKind: "task_call" or "task_local" });
+                        method.Segments[ordinal].AwaitSite is { ProducerKind: "task_call" or "task_local" }
+                        || directCleanup && method.Segments[ordinal].AwaitSite is
+                            { ProducerKind: "delay" or "next_tick" });
             }
             if (!hasProtectedAwait || !plan.Regions.Any(region => region.Kind == "try")
                 || !plan.Regions.Any(region => region.Kind is "catch" or "finally")
@@ -98,18 +109,29 @@ public static class SemanticAsyncExceptionPlanValidator
                 switch (transfer.Kind)
                 {
                     case SemanticAsyncMethod.AwaitTransferKind:
+                        bool taskAwait = segment.AwaitSite?.ProducerKind is "task_call" or "task_local";
+                        bool directAwait = directCleanup && segment.AwaitSite?.ProducerKind is "delay" or "next_tick";
+                        bool protectedAwait = plan.Regions.Any(region => region.Kind == "try"
+                            && region.Segments.Contains(segment.Ordinal));
                         if (segment.AwaitSite is null || transfer.PrimaryTarget < 0
-                            || (transfer.SecondaryTarget >= 0) !=
+                            || transfer.ExceptionTypeId is not null
+                            || taskAwait && ((transfer.SecondaryTarget >= 0) !=
                                 (transfer.CancellationTarget is >= 0)
-                            || transfer.SecondaryTarget == transfer.CancellationTarget
-                            || transfer.ExceptionTypeId is not null) return false;
-                        if (plan.Regions.Any(region => region.Kind == "try"
-                                && region.Segments.Contains(segment.Ordinal))
-                            && (segment.AwaitSite.ProducerKind is not ("task_call" or "task_local")
-                                || transfer.SecondaryTarget < 0)) return false;
+                                || transfer.SecondaryTarget == transfer.CancellationTarget)
+                            || directAwait && transfer.SecondaryTarget >= 0
+                            || !taskAwait && !directAwait && transfer.CancellationTarget is not null)
+                            return false;
+                        if (protectedAwait && (taskAwait && transfer.SecondaryTarget < 0
+                            || directAwait && transfer.CancellationTarget is not >= 0
+                            || !taskAwait && !directAwait)) return false;
+                        if (directAwait && transfer.CancellationTarget == transfer.PrimaryTarget)
+                            return false;
                         if (transfer.SecondaryTarget >= 0
-                            && !plan.Regions.Any(region => region.Kind == "try"
-                                && region.Segments.Contains(segment.Ordinal))) return false;
+                            && !protectedAwait || transfer.CancellationTarget is not null
+                            && !protectedAwait) return false;
+                        if (directAwait && transfer.CancellationTarget is int directCancellation
+                            && !plan.Regions.Any(region => region.Kind == "finally"
+                                && region.Segments.Contains(directCancellation))) return false;
                         if (transfer.CancellationTarget is int cancellationTarget
                             && !ValidCancellationPath(method, cancellationTarget)) return false;
                         break;

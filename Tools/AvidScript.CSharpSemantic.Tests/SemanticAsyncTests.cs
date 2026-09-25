@@ -34,6 +34,7 @@ internal static class SemanticAsyncTests
         TaskIntExistingLocalAssignmentPreservesStorage();
         TaskIntSuspendedCleanupFailsClosed();
         AsyncExceptionPlanPublishesVersionedSegments();
+        DirectAwaitCleanupPublishesCancellationOnlyRoute();
         AsyncExceptionFixturePublishesAllMethods();
         AwaitFailureSuccessorKeepsCleanupLocalAlive();
         RejectedAsyncExceptionRetainsRoslynRegions();
@@ -42,7 +43,65 @@ internal static class SemanticAsyncTests
         NestedSuspendedCleanupBindsDistinctRoslynRegions();
         TaskAndExceptionPlansKeepBothContracts();
         TaskIntThrowPublishesVersionedErrorPlan();
-        return 30;
+        return 31;
+    }
+
+    private static void DirectAwaitCleanupPublishesCancellationOnlyRoute()
+    {
+        const string source = """
+            using AvidScript;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static int Cleanups;
+                public static async Task<int> RunAsync()
+                {
+                    try { await AvidContinuations.NextTickAsync(); return 16; }
+                    finally { Cleanups++; }
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/DirectAwaitCleanup.cs",
+            enableAsyncExceptionFlow: true, enableDirectAwaitCleanup: true);
+        SemanticAsyncMethod? method = document.AsyncMethods.SingleOrDefault(item =>
+            item.MethodSymbolId.Contains(".RunAsync(", StringComparison.Ordinal));
+        SemanticAsyncSegment? awaited = method?.Segments.SingleOrDefault(segment =>
+            segment.AwaitSite?.ProducerKind == "next_tick");
+        Assert(document.Succeeded
+            && document.SchemaVersion == SemanticContract.DirectAwaitCleanupSchemaVersion
+            && document.SemanticVersion == SemanticContract.DirectAwaitCleanupSemanticVersion
+            && method?.ExceptionPlan is { Regions.Count: 2, Catches.Count: 0 }
+            && awaited?.Transfer is { SecondaryTarget: -1, CancellationTarget: >= 0 }
+            && SemanticAsyncExceptionPlanValidator.IsValid(document)
+            && SemanticAsyncInvocationValidator.IsValid(document)
+            && SemanticAsyncExceptionOwnerFlow.TryAnalyze(method!, out var states)
+            && states[awaited!.Transfer!.CancellationTarget!.Value]
+                .HasFlag(SemanticAsyncExceptionOwnerState.Cancellation),
+            "protected direct await must publish a cancellation-only route: "
+                + string.Join(" | ", document.Diagnostics.Select(item =>
+                    item.Code + ":" + item.Message)));
+        byte[] serialized = SemanticSerializer.Serialize(document);
+        Assert(serialized.SequenceEqual(SemanticSerializer.Serialize(
+            SemanticSerializer.Deserialize(serialized))),
+            "schema 43 direct await cleanup must round-trip canonically");
+        Assert(!SemanticAsyncExceptionPlanValidator.IsValid(document with
+        {
+            SchemaVersion = SemanticContract.AsyncExceptionFlowSchemaVersion,
+            SemanticVersion = SemanticContract.AsyncExceptionFlowSemanticVersion,
+        }), "schema 42 must reject a direct cancellation route");
+        Assert(!SemanticAsyncExceptionPlanValidator.IsValid(document with
+        {
+            AsyncMethods = document.AsyncMethods.Select(item => item == method
+                ? item with { Segments = item.Segments.Select(segment => segment == awaited
+                    ? segment with { Transfer = segment.Transfer! with
+                        { CancellationTarget = segment.Transfer.PrimaryTarget } }
+                    : segment).ToArray() }
+                : item).ToArray(),
+        }), "direct cancellation cannot enter the normal return path");
+        SemanticDocument gated = Analyze(source, "Scripts/DirectAwaitCleanup.cs",
+            enableAsyncExceptionFlow: true);
+        Assert(!gated.Succeeded && gated.Diagnostics.Any(item => item.Code == "ASCS3002"),
+            "the production profile must keep direct cleanup disabled until Guest IR is ready");
     }
 
     private static void NestedSuspendedCleanupBindsDistinctRoslynRegions()
@@ -2360,7 +2419,7 @@ internal static class SemanticAsyncTests
     }
 
     internal static SemanticDocument Analyze(string source, string sourceId,
-        bool enableAsyncExceptionFlow = false)
+        bool enableAsyncExceptionFlow = false, bool enableDirectAwaitCleanup = false)
     {
         FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
         return SemanticAnalyzer.Analyze(
@@ -2375,7 +2434,8 @@ internal static class SemanticAsyncTests
                     true),
             },
             new SemanticCompilerWorkspace(),
-            enableAsyncExceptionFlow);
+            enableAsyncExceptionFlow,
+            enableDirectAwaitCleanup);
     }
 
     private static System.Collections.Generic.IEnumerable<SemanticOperation> Enumerate(

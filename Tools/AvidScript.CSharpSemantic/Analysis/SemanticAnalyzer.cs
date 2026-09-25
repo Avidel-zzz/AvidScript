@@ -35,7 +35,8 @@ public static class SemanticAnalyzer
         string frontendSourceSha256,
         IReadOnlyList<SemanticReferenceSource> referenceSources,
         SemanticCompilerWorkspace workspace,
-        bool enableAsyncExceptionFlow = false)
+        bool enableAsyncExceptionFlow = false,
+        bool enableDirectAwaitCleanup = false)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceId);
@@ -105,7 +106,8 @@ public static class SemanticAnalyzer
             asyncProjection.ControlledMethodSymbolIds,
             asyncProjection.Methods,
             callableProjection.Callables,
-            enableAsyncExceptionFlow);
+            enableAsyncExceptionFlow,
+            enableDirectAwaitCleanup);
         asyncProjection = asyncProjection with
         {
             Methods = asyncProjection.Methods.Concat(
@@ -211,9 +213,13 @@ public static class SemanticAnalyzer
         bool hasTaskAliases = asyncProjection.Methods.Any(method => method.TaskLocalSymbolIds is not null);
         bool hasAsyncLanguageErrors = asyncProjection.Methods.Any(method => method.ErrorPlan is not null);
         bool hasAsyncExceptionPlans = asyncProjection.Methods.Any(method => method.ExceptionPlan is not null);
+        bool hasDirectAwaitCleanup = asyncProjection.Methods.Any(method => method.ExceptionPlan is not null
+            && method.Segments.Any(segment => segment.AwaitSite?.ProducerKind is "delay" or "next_tick"
+                && segment.Transfer?.CancellationTarget is >= 0));
         bool hasTaskLanguageErrors = hasExceptionFlows && hasTaskResults;
         return new SemanticDocument(
-            hasAsyncExceptionPlans ? SemanticContract.AsyncExceptionFlowSchemaVersion
+            hasDirectAwaitCleanup ? SemanticContract.DirectAwaitCleanupSchemaVersion
+                : hasAsyncExceptionPlans ? SemanticContract.AsyncExceptionFlowSchemaVersion
                 : hasAsyncLanguageErrors ? SemanticContract.AsyncLanguageErrorSchemaVersion
                 : hasTaskLanguageErrors ? SemanticContract.TaskLanguageErrorSchemaVersion
                 : hasExceptionFlows ? SemanticContract.ExceptionFlowSchemaVersion
@@ -224,7 +230,8 @@ public static class SemanticAnalyzer
                 : hasTaskResults ? SemanticContract.TaskResultSchemaVersion
                 : SemanticContract.CurrentSchemaVersion,
             "csharp",
-            hasAsyncExceptionPlans ? SemanticContract.AsyncExceptionFlowSemanticVersion
+            hasDirectAwaitCleanup ? SemanticContract.DirectAwaitCleanupSemanticVersion
+                : hasAsyncExceptionPlans ? SemanticContract.AsyncExceptionFlowSemanticVersion
                 : hasAsyncLanguageErrors ? SemanticContract.AsyncLanguageErrorSemanticVersion
                 : hasTaskLanguageErrors ? SemanticContract.TaskLanguageErrorSemanticVersion
                 : hasExceptionFlows ? SemanticContract.ExceptionFlowSemanticVersion

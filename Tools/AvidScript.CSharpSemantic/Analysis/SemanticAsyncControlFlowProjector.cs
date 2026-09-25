@@ -41,7 +41,8 @@ internal static class SemanticAsyncControlFlowProjector
         out SemanticAsyncControlFlowProjection? projected,
         bool allowValueReturns = false,
         ITypeSymbol? resultType = null,
-        bool previewSuspendedFinally = false)
+        bool previewSuspendedFinally = false,
+        bool allowDirectAwaitCleanup = false)
     {
         Builder builder = new(
             context,
@@ -51,7 +52,8 @@ internal static class SemanticAsyncControlFlowProjector
             diagnostics,
             allowValueReturns,
             resultType,
-            previewSuspendedFinally);
+            previewSuspendedFinally,
+            allowDirectAwaitCleanup);
         if (!builder.TryBuild(body, ref nextCallbackId, out projected))
         {
             projected = null;
@@ -70,6 +72,7 @@ internal static class SemanticAsyncControlFlowProjector
         private readonly bool allowValueReturns;
         private readonly ITypeSymbol? resultType;
         private readonly bool previewSuspendedFinally;
+        private readonly bool allowDirectAwaitCleanup;
         private readonly List<DraftSegment> drafts = new();
         private readonly List<(string Kind, TextSpan TrySpan, TextSpan PartSpan,
             IReadOnlyList<int> DraftIds)> previewRegions = new();
@@ -92,7 +95,8 @@ internal static class SemanticAsyncControlFlowProjector
             ICollection<SemanticDiagnostic> diagnostics,
             bool allowValueReturns,
             ITypeSymbol? resultType,
-            bool previewSuspendedFinally)
+            bool previewSuspendedFinally,
+            bool allowDirectAwaitCleanup)
         {
             this.context = context;
             this.semanticModel = semanticModel;
@@ -102,6 +106,7 @@ internal static class SemanticAsyncControlFlowProjector
             this.allowValueReturns = allowValueReturns;
             this.resultType = resultType;
             this.previewSuspendedFinally = previewSuspendedFinally;
+            this.allowDirectAwaitCleanup = allowDirectAwaitCleanup;
         }
 
         public bool TryBuild(
@@ -309,6 +314,8 @@ internal static class SemanticAsyncControlFlowProjector
                             ? faultCleanupTarget : -1,
                         null,
                         awaitSite.ProducerKind is "task_call" or "task_local"
+                            || (allowDirectAwaitCleanup
+                                && (awaitSite.ProducerKind is "delay" or "next_tick"))
                             ? cancellationCleanupTarget : -1));
             }
 
@@ -773,7 +780,10 @@ internal static class SemanticAsyncControlFlowProjector
             faultCleanupTarget = outerFaultCleanup;
             cancellationCleanupTarget = outerCancellationCleanup;
             if (previewSuspendedFinally && drafts.Skip(firstProtectedDraft)
-                .Any(draft => draft.AwaitSite is { ProducerKind: not ("task_call" or "task_local") }))
+                .Any(draft => draft.AwaitSite is { } site
+                    && site.ProducerKind is not ("task_call" or "task_local")
+                    && !(allowDirectAwaitCleanup
+                        && (site.ProducerKind is "delay" or "next_tick"))))
             {
                 return Reject(
                     "Suspended cleanup preview currently requires Task<int> await sites.",
