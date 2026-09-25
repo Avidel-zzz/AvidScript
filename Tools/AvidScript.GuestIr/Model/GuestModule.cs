@@ -40,7 +40,22 @@ public sealed record GuestModule(
     [JsonPropertyOrder(18)]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<GuestAsyncExceptionRoute>? AsyncExceptionRoutes { get; init; }
+
+    [JsonPropertyOrder(19)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<GuestDirectAwaitRoute>? DirectAwaitRoutes { get; init; }
 }
+
+// IR 23 binds a protected Timer await to a status-aware resume. There is no
+// language-fault successor or source Task error lease on this route.
+public sealed record GuestDirectAwaitRoute(
+    [property: JsonPropertyOrder(0)] string MethodFunctionId,
+    [property: JsonPropertyOrder(1)] int CallbackId,
+    [property: JsonPropertyOrder(2)] string ProducerKind,
+    [property: JsonPropertyOrder(3)] string AwaitBlockId,
+    [property: JsonPropertyOrder(4)] string NormalTargetBlockId,
+    [property: JsonPropertyOrder(5)] string CancellationTargetBlockId,
+    [property: JsonPropertyOrder(6)] string ScheduleImportId);
 
 // IR 22 binds each protected Task await to all three executable successors.
 // The local identities name the retained source Task and the fault type token.

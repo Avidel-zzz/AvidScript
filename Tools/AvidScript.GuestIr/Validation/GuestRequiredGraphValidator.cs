@@ -41,6 +41,11 @@ internal static class GuestRequiredGraphValidator
                     route.NormalTargetBlockId, route.FaultTargetBlockId,
                     route.CancellationTargetBlockId, route.OwnerLocalId,
                     route.TypeLocalId))) return false;
+        if (module.DirectAwaitRoutes is { } directRoutes
+            && directRoutes.Any(route => route is null
+                || HasNull(route.MethodFunctionId, route.ProducerKind,
+                    route.AwaitBlockId, route.NormalTargetBlockId,
+                    route.CancellationTargetBlockId, route.ScheduleImportId))) return false;
         foreach (GuestFramedExport? export in module.FramedExports)
             if (export is null || HasNull(export.Name, export.FunctionId) || export.ParameterKinds is null
                 || export.ParameterKinds.Any(kind => kind is null)

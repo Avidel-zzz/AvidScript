@@ -41,13 +41,21 @@ public static class CSharpGuestLowerer
         ArgumentNullException.ThrowIfNull(substitutes);
 
         List<GuestDiagnostic> diagnostics = new();
+        bool directCleanup = document.SchemaVersion == SemanticContract.DirectAwaitCleanupSchemaVersion
+            && document.SemanticVersion == SemanticContract.DirectAwaitCleanupSemanticVersion;
         bool asyncExceptionFlow = enableAsyncLanguageErrors
-            && document.SchemaVersion == SemanticContract.AsyncExceptionFlowSchemaVersion
-            && document.SemanticVersion == SemanticContract.AsyncExceptionFlowSemanticVersion;
-        bool asyncLanguageErrors = asyncExceptionFlow || enableAsyncLanguageErrors
-            && document.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion
-            && document.SemanticVersion == SemanticContract.AsyncLanguageErrorSemanticVersion;
+            && (document.SchemaVersion == SemanticContract.AsyncExceptionFlowSchemaVersion
+                && document.SemanticVersion == SemanticContract.AsyncExceptionFlowSemanticVersion
+                || directCleanup);
+        bool asyncLanguageErrors = enableAsyncLanguageErrors && (
+            asyncExceptionFlow && (!directCleanup || document.AsyncMethods.Any(method =>
+                method.ErrorPlan is not null || method.Segments.Any(segment =>
+                    segment.AwaitSite?.ProducerKind is "task_call" or "task_local")))
+            || document.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion
+                && document.SemanticVersion == SemanticContract.AsyncLanguageErrorSemanticVersion);
         ValidateInput(document, semanticSha256, asyncLanguageErrors, diagnostics);
+        if (directCleanup && !enableAsyncLanguageErrors)
+            Add(diagnostics, "ASCG1004", "Direct await cleanup requires bounded language-error mode.");
         if (asyncLanguageErrors && document.ExceptionFlows is not null)
             Add(diagnostics, "ASCG1004", "Async Task faults cannot yet share a module with synchronous language-error methods.");
         if (diagnostics.Count == 0 && enableDebugInstrumentation && CSharpClosureLayout.UsesManagedDelegates(document))
@@ -156,6 +164,8 @@ public static class CSharpGuestLowerer
                 .Append(CSharpTaskResultAbi.LanguageErrorMetaImport())
                 .Append(CSharpTaskResultAbi.LanguageErrorRootImport())
                 .Append(CSharpTaskResultAbi.LanguageErrorReportImport()).ToArray();
+        else if (directCleanup)
+            imports = imports.Append(CSharpTaskResultAbi.RetainForContinuationImport()).ToArray();
         if (document.SchemaVersion is SemanticContract.TaskLocalSchemaVersion
             or SemanticContract.TaskAssignmentSchemaVersion
             or SemanticContract.TaskExistingLocalSchemaVersion
@@ -297,7 +307,8 @@ public static class CSharpGuestLowerer
         }
 
         GuestModule module = new(
-            asyncExceptionFlow ? GuestTaskLanguageErrorValidator.ExceptionFlowSchemaVersion
+            directCleanup ? GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion
+                : asyncExceptionFlow ? GuestTaskLanguageErrorValidator.ExceptionFlowSchemaVersion
                 : asyncLanguageErrors ? GuestTaskLanguageErrorValidator.AsyncSchemaVersion
                 : document.SchemaVersion is SemanticContract.TaskLocalSchemaVersion
                 or SemanticContract.TaskAssignmentSchemaVersion
@@ -305,7 +316,8 @@ public static class CSharpGuestLowerer
                 or SemanticContract.TaskAliasSchemaVersion
                 ? 19 : CSharpTaskResultAbi.Supports(document)
                     ? 18 : GuestModuleValidator.CurrentSchemaVersion,
-            asyncExceptionFlow ? GuestTaskLanguageErrorValidator.ExceptionFlowIrVersion
+            directCleanup ? GuestTaskLanguageErrorValidator.DirectCleanupIrVersion
+                : asyncExceptionFlow ? GuestTaskLanguageErrorValidator.ExceptionFlowIrVersion
                 : asyncLanguageErrors ? GuestTaskLanguageErrorValidator.AsyncIrVersion
                 : document.SchemaVersion is SemanticContract.TaskLocalSchemaVersion
                 or SemanticContract.TaskAssignmentSchemaVersion
@@ -357,6 +369,26 @@ public static class CSharpGuestLowerer
                                 CSharpTaskResultAbi.ExceptionSourceSlot(method)),
                             CSharpGuestIds.Local(
                                 CSharpTaskResultAbi.ExceptionTypeSlot(method)))))
+                    .OrderBy(route => route.CallbackId).ToArray() : null,
+            DirectAwaitRoutes = directCleanup
+                ? document.AsyncMethods.Where(method => method.ExceptionPlan is not null)
+                    .SelectMany(method => method.Segments
+                        .Where(segment => segment.AwaitSite?.ProducerKind is "delay" or "next_tick"
+                            && segment.Transfer?.CancellationTarget is >= 0)
+                        .Select(segment => new GuestDirectAwaitRoute(
+                            CSharpGuestIds.Function(method.MethodSymbolId),
+                            segment.AwaitSite!.CallbackId,
+                            segment.AwaitSite.ProducerKind,
+                            CSharpGuestIds.AsyncSegmentBlock(method.MethodSymbolId,
+                                segment.Ordinal),
+                            CSharpGuestIds.AsyncSegmentBlock(method.MethodSymbolId,
+                                segment.Transfer!.PrimaryTarget),
+                            CSharpGuestIds.AsyncSegmentBlock(method.MethodSymbolId,
+                                segment.Transfer.CancellationTarget!.Value),
+                            CSharpGuestIds.Import(document.Callables.Single(callable =>
+                                callable.Import is { Module: "avidscript",
+                                    Name: "avid_continuation_delay_cancel_resume_v1" })
+                                .MethodSymbolId))))
                     .OrderBy(route => route.CallbackId).ToArray() : null,
         };
         GuestValidationResult validation = GuestModuleValidator.Validate(module);
@@ -724,12 +756,21 @@ public static class CSharpGuestLowerer
 		{
 			return false;
 		}
-		if (import.Module == "env" && import.Name == "continuation_delay")
-		{
-			return document.AsyncMethods
-				.SelectMany(method => method.Segments)
-				.Any(segment => segment.AwaitSite?.ProducerKind is "delay" or "next_tick");
-		}
+	if (import.Module == "env" && import.Name == "continuation_delay")
+	{
+		return document.AsyncMethods
+			.SelectMany(method => method.Segments)
+			.Any(segment => segment.AwaitSite?.ProducerKind is "delay" or "next_tick"
+				&& segment.Transfer?.CancellationTarget is null);
+	}
+	if (import.Module == "avidscript"
+		&& import.Name == "avid_continuation_delay_cancel_resume_v1")
+	{
+		return document.AsyncMethods
+			.SelectMany(method => method.Segments)
+			.Any(segment => segment.AwaitSite?.ProducerKind is "delay" or "next_tick"
+				&& segment.Transfer?.CancellationTarget is >= 0);
+	}
 		if (import.Module == "env" && import.Name == "continuation_load_object")
 		{
 			return document.AsyncMethods

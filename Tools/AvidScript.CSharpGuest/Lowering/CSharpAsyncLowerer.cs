@@ -10,7 +10,8 @@ namespace AvidScript.CSharpGuest;
 internal sealed record CSharpAsyncResumeRoute(
     int CallbackId,
     string PayloadKind,
-    string FunctionId);
+    string FunctionId,
+    bool StatusAware = false);
 
 internal sealed record CSharpAsyncLoweringResult(
     IReadOnlyList<GuestFunction> Functions,
@@ -35,6 +36,8 @@ internal static class CSharpAsyncLowerer
             .GroupBy(callable => callable.MethodSymbolId, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.Single(), StringComparer.Ordinal);
         string? delayImportId = FindImport(document, "env", "continuation_delay");
+        string? cancelResumeDelayImportId = FindImport(document, "avidscript",
+            "avid_continuation_delay_cancel_resume_v1");
         string? objectLoadImportId = FindImport(document, "env", "continuation_load_object");
         string? bindCancellationImportId = FindImport(
             document,
@@ -55,7 +58,12 @@ internal static class CSharpAsyncLowerer
         string? cancelImportId = FindImport(document, "env", "continuation_cancel");
         bool needsDelayImport = document.AsyncMethods
             .SelectMany(method => method.Segments)
-            .Any(segment => segment.AwaitSite?.ProducerKind is "delay" or "next_tick");
+            .Any(segment => segment.AwaitSite?.ProducerKind is "delay" or "next_tick"
+                && segment.Transfer?.CancellationTarget is null);
+        bool needsCancelResumeDelayImport = document.AsyncMethods
+            .SelectMany(method => method.Segments)
+            .Any(segment => segment.AwaitSite?.ProducerKind is "delay" or "next_tick"
+                && segment.Transfer?.CancellationTarget is >= 0);
         bool needsObjectLoadImport = document.AsyncMethods
             .SelectMany(method => method.Segments)
             .Any(segment => segment.AwaitSite?.ProducerKind == "object_load");
@@ -68,6 +76,7 @@ internal static class CSharpAsyncLowerer
                 == SemanticContinuationCallback.ResultSlotPayloadKind);
         bool needsStateImports = CSharpAsyncClosureState.Frames(document).Any();
         if ((needsDelayImport && delayImportId is null)
+            || (needsCancelResumeDelayImport && cancelResumeDelayImportId is null)
             || (needsObjectLoadImport && objectLoadImportId is null)
             || (needsBindCancellationImport && bindCancellationImportId is null)
             || (needsResultReadImport && resultReadImportId is null)
@@ -125,6 +134,7 @@ internal static class CSharpAsyncLowerer
                     dataPool,
                     new CSharpAsyncAbi(
                         delayImportId,
+                        cancelResumeDelayImportId,
                         objectLoadImportId,
                         bindCancellationImportId,
                         resultReadImportId,
@@ -403,6 +413,8 @@ internal static class CSharpAsyncLowerer
                         context,
                         awaitSite,
                         delayImportId,
+                        null,
+                        false,
                         objectLoadImportId,
                         bindCancellationImportId,
                         int32Type,
@@ -1028,6 +1040,8 @@ internal static class CSharpAsyncLowerer
         CSharpFunctionLoweringContext context,
         SemanticAsyncAwaitSite awaitSite,
         string? delayImportId,
+        string? cancelResumeDelayImportId,
+        bool statusAware,
         string? objectLoadImportId,
         string? bindCancellationImportId,
         GuestType int32Type,
@@ -1043,7 +1057,8 @@ internal static class CSharpAsyncLowerer
         switch (awaitSite.ProducerKind)
         {
             case "delay":
-                if (awaitSite.Arguments.Count != 1 || delayImportId is null)
+                if (awaitSite.Arguments.Count != 1
+                    || (statusAware ? cancelResumeDelayImportId : delayImportId) is null)
                 {
                     Add(context.Diagnostics, "DelayAsync await site must contain one delay argument.");
                     return false;
@@ -1059,10 +1074,10 @@ internal static class CSharpAsyncLowerer
                     return false;
                 }
                 operands.Add(delay.Id);
-                targetId = delayImportId;
+                targetId = statusAware ? cancelResumeDelayImportId! : delayImportId!;
                 break;
             case "next_tick":
-                if (delayImportId is null
+                if ((statusAware ? cancelResumeDelayImportId : delayImportId) is null
                     || awaitSite.Arguments.Count != 0
                     || !context.TryGetGuestType("type:float32", out GuestType floatType))
                 {
@@ -1083,7 +1098,7 @@ internal static class CSharpAsyncLowerer
                     null,
                     new GuestConstant("float32", "0")));
                 operands.Add(zero.Id);
-                targetId = delayImportId;
+                targetId = statusAware ? cancelResumeDelayImportId! : delayImportId!;
                 break;
             case "object_load":
                 if (awaitSite.Arguments.Count != 1 || objectLoadImportId is null)

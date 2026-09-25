@@ -22,6 +22,10 @@ public static class GuestTaskLanguageErrorValidator
     public const string ExceptionFlowIrVersion = "1.21";
     public const int ExceptionFlowSemanticSchemaVersion = 42;
     public const string ExceptionFlowSemanticVersion = "1.51";
+    public const int DirectCleanupSchemaVersion = 23;
+    public const string DirectCleanupIrVersion = "1.22";
+    public const int DirectCleanupSemanticSchemaVersion = 43;
+    public const string DirectCleanupSemanticVersion = "1.52";
     public const string ImportId = "import:task_fault_language_error_v1";
     public const string ImportName = "avid_task_fault_language_error_v1";
     public const string MetaImportId = "import:task_language_error_meta_v1";
@@ -38,26 +42,35 @@ public static class GuestTaskLanguageErrorValidator
             && module.IrVersion == AsyncIrVersion;
         bool exceptionFlowVersion = module.SchemaVersion == ExceptionFlowSchemaVersion
             && module.IrVersion == ExceptionFlowIrVersion;
+        bool directCleanupVersion = module.SchemaVersion == DirectCleanupSchemaVersion
+            && module.IrVersion == DirectCleanupIrVersion;
         GuestImport[] imports = module.Imports.Where(import =>
             import.Module == GuestTaskResultValidator.ImportModule && import.Name == ImportName).ToArray();
         GuestImport[] metadataImports = module.Imports.Where(import =>
             import.Name == MetaImportName).ToArray();
         GuestImport[] rootImports = module.Imports.Where(import =>
             import.Name == RootImportName).ToArray();
-        if (!combinedVersion && !asyncVersion && !exceptionFlowVersion && imports.Length == 0
+        if (directCleanupVersion && module.LanguageErrorCatalog is null
+            && imports.Length == 0 && metadataImports.Length == 0
+            && rootImports.Length == 0) return;
+        if (!combinedVersion && !asyncVersion && !exceptionFlowVersion
+            && !directCleanupVersion && imports.Length == 0
             && metadataImports.Length == 0 && rootImports.Length == 0) return;
-        if ((!combinedVersion && !asyncVersion && !exceptionFlowVersion) || module.Language != "csharp"
+        if ((!combinedVersion && !asyncVersion && !exceptionFlowVersion
+                && !directCleanupVersion) || module.Language != "csharp"
             || module.Provenance.SemanticSchemaVersion
-                != (exceptionFlowVersion ? ExceptionFlowSemanticSchemaVersion
+                != (directCleanupVersion ? DirectCleanupSemanticSchemaVersion
+                    : exceptionFlowVersion ? ExceptionFlowSemanticSchemaVersion
                     : asyncVersion ? AsyncSemanticSchemaVersion : SemanticSchemaVersion)
             || module.Provenance.SemanticVersion
-                != (exceptionFlowVersion ? ExceptionFlowSemanticVersion
+                != (directCleanupVersion ? DirectCleanupSemanticVersion
+                    : exceptionFlowVersion ? ExceptionFlowSemanticVersion
                     : asyncVersion ? AsyncSemanticVersion : SemanticVersion)
             || module.LanguageErrorCatalog is null
             || combinedVersion && module.LanguageOutcomeTypes is null
             || imports.Length != 1)
         {
-            Add(context, "Task language errors require paired Semantic 40/IR 20, Semantic 41/IR 21, or Semantic 42/IR 22, a catalog and exactly one fault import.");
+            Add(context, "Task language errors require paired Semantic 40-43/IR 20-23, a catalog and exactly one fault import.");
             return;
         }
 
@@ -87,12 +100,12 @@ public static class GuestTaskLanguageErrorValidator
 
         if (module.LanguageErrorCatalog is { } catalog)
             ValidateCallTokens(context, fault, catalog);
-        if (asyncVersion || exceptionFlowVersion)
+        if (asyncVersion || exceptionFlowVersion || directCleanupVersion)
             ValidateAsyncFaultRoots(context, fault);
 
         if (metadataImports.Length == 0 && rootImports.Length == 0)
         {
-            if (asyncVersion || exceptionFlowVersion)
+            if (asyncVersion || exceptionFlowVersion || directCleanupVersion)
                 Add(context, "Async Task language errors require the metadata/root read import pair.");
             return;
         }

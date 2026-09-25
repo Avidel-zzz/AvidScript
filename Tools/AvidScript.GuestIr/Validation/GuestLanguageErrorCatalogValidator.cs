@@ -21,10 +21,14 @@ internal static class GuestLanguageErrorCatalogValidator
             || module.SchemaVersion == GuestTaskLanguageErrorValidator.AsyncSchemaVersion
                 && module.IrVersion == GuestTaskLanguageErrorValidator.AsyncIrVersion
             || module.SchemaVersion == GuestTaskLanguageErrorValidator.ExceptionFlowSchemaVersion
-                && module.IrVersion == GuestTaskLanguageErrorValidator.ExceptionFlowIrVersion;
+                && module.IrVersion == GuestTaskLanguageErrorValidator.ExceptionFlowIrVersion
+            || module.SchemaVersion == GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion
+                && module.IrVersion == GuestTaskLanguageErrorValidator.DirectCleanupIrVersion;
         if (catalog is null)
         {
-            if (correctVersion) Add(context, "This Guest IR version requires a language-error token catalog.");
+            if (correctVersion && module.SchemaVersion
+                != GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion)
+                Add(context, "This Guest IR version requires a language-error token catalog.");
             return;
         }
         if (!correctVersion)
@@ -32,7 +36,11 @@ internal static class GuestLanguageErrorCatalogValidator
             Add(context, "Language-error tokens require Guest IR 17/1.16 or the combined Task/error version.");
             return;
         }
-        if (catalog.Types.Count is 0 or > 256 || catalog.Sources.Count is 0 or > 1024)
+        bool emptyDirectCatalog = module.SchemaVersion
+            == GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion
+            && catalog.Types.Count == 0 && catalog.Sources.Count == 0;
+        if (!emptyDirectCatalog && (catalog.Types.Count is 0 or > 256
+            || catalog.Sources.Count is 0 or > 1024))
         {
             Add(context, "Language-error token counts are outside the bounded catalog.");
             return;
@@ -151,7 +159,9 @@ internal static class GuestLanguageErrorCatalogValidator
             if (context.Module.SchemaVersion == GuestTaskLanguageErrorValidator.AsyncSchemaVersion
                 && context.Module.IrVersion == GuestTaskLanguageErrorValidator.AsyncIrVersion
                 || context.Module.SchemaVersion == GuestTaskLanguageErrorValidator.ExceptionFlowSchemaVersion
-                && context.Module.IrVersion == GuestTaskLanguageErrorValidator.ExceptionFlowIrVersion)
+                && context.Module.IrVersion == GuestTaskLanguageErrorValidator.ExceptionFlowIrVersion
+                || context.Module.SchemaVersion == GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion
+                && context.Module.IrVersion == GuestTaskLanguageErrorValidator.DirectCleanupIrVersion)
             {
                 foreach (GuestInstruction call in function.Blocks.SelectMany(block => block.Instructions)
                     .Where(instruction => instruction.Op == "call"

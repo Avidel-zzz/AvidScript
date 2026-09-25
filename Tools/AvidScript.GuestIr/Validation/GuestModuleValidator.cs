@@ -44,6 +44,7 @@ public static class GuestModuleValidator
         GuestMemoryLayoutValidator.Validate(context);
         ValidateFunctions(context);
         GuestAsyncExceptionRouteValidator.Validate(context);
+        GuestDirectAwaitRouteValidator.Validate(context);
         ValidateExports(context);
         ValidateReportedStatus(context);
 
@@ -78,6 +79,8 @@ public static class GuestModuleValidator
             && string.Equals(module.IrVersion, GuestTaskLanguageErrorValidator.AsyncIrVersion, StringComparison.Ordinal);
         bool isAsyncExceptionFlowVersion = module.SchemaVersion == GuestTaskLanguageErrorValidator.ExceptionFlowSchemaVersion
             && string.Equals(module.IrVersion, GuestTaskLanguageErrorValidator.ExceptionFlowIrVersion, StringComparison.Ordinal);
+        bool isDirectCleanupVersion = module.SchemaVersion == GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion
+            && string.Equals(module.IrVersion, GuestTaskLanguageErrorValidator.DirectCleanupIrVersion, StringComparison.Ordinal);
         bool isLegacyVersion = (module.SchemaVersion == LegacySchemaVersion
             && string.Equals(module.IrVersion, LegacyIrVersion, StringComparison.Ordinal))
             || (module.SchemaVersion == 2 && module.IrVersion == "1.1")
@@ -96,6 +99,7 @@ public static class GuestModuleValidator
                 && !isLanguageErrorCatalogVersion && !isTaskResultVersion
                 && !isTaskLocalVersion && !isTaskLanguageErrorVersion
                 && !isAsyncLanguageErrorVersion && !isAsyncExceptionFlowVersion
+                && !isDirectCleanupVersion
                 && !isLegacyVersion)
             || string.IsNullOrWhiteSpace(module.ModuleId)
             || string.IsNullOrWhiteSpace(module.Language)

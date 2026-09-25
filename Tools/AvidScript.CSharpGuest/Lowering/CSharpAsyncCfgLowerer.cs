@@ -8,6 +8,7 @@ namespace AvidScript.CSharpGuest;
 
 internal sealed record CSharpAsyncAbi(
     string? DelayImportId,
+    string? CancelResumeDelayImportId,
     string? ObjectLoadImportId,
     string? BindCancellationImportId,
     string? ResultReadImportId,
@@ -50,7 +51,10 @@ internal static class CSharpAsyncCfgLowerer
             routes.Add(new CSharpAsyncResumeRoute(
                 awaitSite.CallbackId,
                 awaitSite.PayloadKind,
-                CSharpGuestIds.AsyncResumeFunction(awaitSite.CallbackId)));
+                CSharpGuestIds.AsyncResumeFunction(awaitSite.CallbackId),
+                method.Segments.Any(segment => segment.AwaitSite?.CallbackId
+                    == awaitSite.CallbackId && segment.Transfer?.CancellationTarget is >= 0
+                    && segment.AwaitSite.ProducerKind is "delay" or "next_tick")));
         }
 
         List<EntryPoint> entries = new()
@@ -113,12 +117,25 @@ internal static class CSharpAsyncCfgLowerer
         GuestRegister? resultGeneration = null;
         GuestRegister? outcome = null;
         SemanticAsyncAwaitSite? incoming = entry.Incoming;
+        SemanticAsyncControlTransfer? incomingTransfer = incoming is null ? null
+            : method.Segments.Single(segment => segment.AwaitSite?.CallbackId
+                == incoming.CallbackId).Transfer;
+        bool statusAware = incoming is { ProducerKind: "delay" or "next_tick" }
+            && incomingTransfer?.CancellationTarget is >= 0;
+        GuestRegister? directStatus = null;
         if (incoming is not null)
         {
             continuationToken = new GuestRegister(
                 CSharpGuestIds.AsyncResumeParameter(incoming.CallbackId, "token"),
                 abi.Int64Type.Id);
             parameters.Add(continuationToken);
+        }
+        if (statusAware)
+        {
+            directStatus = new GuestRegister(
+                CSharpGuestIds.AsyncResumeParameter(incoming!.CallbackId, "status"),
+                abi.Int32Type.Id);
+            parameters.Add(directStatus);
         }
         if (incoming?.PayloadKind == SemanticContinuationCallback.ObjectPayloadKind)
         {
@@ -295,24 +312,70 @@ internal static class CSharpAsyncCfgLowerer
                 CSharpUeReceivers.Require(context, receiver, entry.SegmentOrdinal, prefixInstructions);
             else CSharpReferenceObjects.Require(receiver, prefixInstructions);
         }
-        if (incoming is not null && !CSharpTaskResultAbi.RetainTaskLocal(
+        if (!statusAware && incoming is not null && !CSharpTaskResultAbi.RetainTaskLocal(
                 context, method, entry.SegmentOrdinal, prefixInstructions)) return false;
-        CSharpAsyncClosureAllocations.Transition(context, method, incomingSegment, entry.SegmentOrdinal, prefixInstructions);
+        if (!statusAware)
+            CSharpAsyncClosureAllocations.Transition(context, method, incomingSegment,
+                entry.SegmentOrdinal, prefixInstructions);
         if (incoming?.ResultSymbolId is { } resultSymbol && context.ClosureCells.Has(resultSymbol))
         {
             GuestRegister? value = loadedObject ?? outcome;
             if (value is null || !CSharpOperationLowerer.StoreLocal(context, resultSymbol, value, entry.SegmentOrdinal, prefixInstructions)) return false;
         }
-        blocks.Add(new GuestBasicBlock(
-            activePrefixBlockId,
-            prefixInstructions,
-            new GuestTerminator("branch", null, firstFlowBlockId, null, null)));
+        if (statusAware)
+        {
+            int cancellationTarget = incomingTransfer!.CancellationTarget!.Value;
+            GuestRegister? completed = CSharpTaskResultAbi.Constant(context,
+                abi.Int32Type.Id, 1, entry.SegmentOrdinal, prefixInstructions);
+            GuestRegister? isCompleted = context.CreateTemporary(abi.Int32Type.Id,
+                entry.SegmentOrdinal);
+            if (completed is null || isCompleted is null) return false;
+            prefixInstructions.Add(new("binary", isCompleted.Id,
+                new[] { directStatus!.Id, completed.Id }, null, "equals", null));
+            string normalPath = functionEntryBlockId + ":normal_path";
+            string cancellationCheck = functionEntryBlockId + ":cancel_check";
+            string cancellationPath = functionEntryBlockId + ":cancel_path";
+            string invalidStatus = functionEntryBlockId + ":invalid_status";
+            blocks.Add(new(activePrefixBlockId, prefixInstructions,
+                new("branch_if", isCompleted.Id, normalPath,
+                    cancellationCheck, null)));
+            List<GuestInstruction> check = new();
+            GuestRegister? cancelled = CSharpTaskResultAbi.Constant(context,
+                abi.Int32Type.Id, 3, entry.SegmentOrdinal, check);
+            GuestRegister? isCancelled = context.CreateTemporary(abi.Int32Type.Id,
+                entry.SegmentOrdinal);
+            if (cancelled is null || isCancelled is null) return false;
+            check.Add(new("binary", isCancelled.Id,
+                new[] { directStatus.Id, cancelled.Id }, null, "equals", null));
+            blocks.Add(new(cancellationCheck, check,
+                new("branch_if", isCancelled.Id, cancellationPath,
+                    invalidStatus, null)));
+            blocks.Add(new(invalidStatus, Array.Empty<GuestInstruction>(),
+                new("trap", null, null, null, null)));
+            List<GuestInstruction> normalInstructions = new();
+            if (!CSharpTaskResultAbi.RetainTaskLocal(context, method,
+                    entry.SegmentOrdinal, normalInstructions)) return false;
+            CSharpAsyncClosureAllocations.Transition(context, method,
+                incomingSegment, entry.SegmentOrdinal, normalInstructions);
+            blocks.Add(new(normalPath, normalInstructions,
+                new("branch", null, firstFlowBlockId, null, null)));
+            List<GuestInstruction> cancellationInstructions = new();
+            if (!CSharpTaskResultAbi.RetainTaskLocal(context, method,
+                    cancellationTarget, cancellationInstructions)) return false;
+            CSharpAsyncClosureAllocations.Transition(context, method,
+                incomingSegment, cancellationTarget, cancellationInstructions);
+            blocks.Add(new(cancellationPath, cancellationInstructions,
+                new("branch", null, FlowBlockId(method, cancellationTarget), null, null)));
+        }
+        else
+        {
+            blocks.Add(new GuestBasicBlock(activePrefixBlockId, prefixInstructions,
+                new GuestTerminator("branch", null, firstFlowBlockId, null, null)));
+        }
 
         List<int> entryTargets = new() { entry.SegmentOrdinal };
         if (incoming is not null && method.ExceptionPlan is not null)
         {
-            SemanticAsyncControlTransfer? incomingTransfer = method.Segments.Single(
-                segment => segment.AwaitSite?.CallbackId == incoming.CallbackId).Transfer;
             if (incomingTransfer?.SecondaryTarget is >= 0)
                 entryTargets.Add(incomingTransfer.SecondaryTarget);
             if (incomingTransfer?.CancellationTarget is int cancellationTarget)
@@ -584,7 +647,8 @@ internal static class CSharpAsyncCfgLowerer
         if (site is null || method.TaskResultTypeId != CSharpTaskResultAbi.IntTypeId
             || context.Document.SchemaVersion is not
                 (SemanticContract.AsyncLanguageErrorSchemaVersion
-                    or SemanticContract.AsyncExceptionFlowSchemaVersion))
+                    or SemanticContract.AsyncExceptionFlowSchemaVersion
+                    or SemanticContract.DirectAwaitCleanupSchemaVersion))
         {
             Add(diagnostics, method, "Async throw has no validated Task<int> language-error site.");
             return false;
@@ -652,6 +716,44 @@ internal static class CSharpAsyncCfgLowerer
             return false;
         GuestRegister? owner = CSharpAsyncExceptionLowerer.LoadOwner(context,
             method, segment.Ordinal, instructions);
+        bool directCancellation = context.Document.SchemaVersion
+                == SemanticContract.DirectAwaitCleanupSchemaVersion
+            && segment.Transfer?.Kind
+                == SemanticAsyncMethod.PropagateCancellationTransferKind;
+        bool hasProtectedTaskAwait = method.Segments.Any(candidate =>
+            candidate.AwaitSite?.ProducerKind is "task_call" or "task_local"
+            && candidate.Transfer?.SecondaryTarget is >= 0);
+        if (directCancellation && !hasProtectedTaskAwait)
+        {
+            if (initialEntry || !CSharpTaskResultAbi.ReleaseTaskLocal(context,
+                    method, segment.Ordinal, instructions)) return false;
+            blocks.Add(new(activeBlockId, instructions,
+                new("return", null, null, null, null)));
+            return true;
+        }
+        if (directCancellation)
+        {
+            if (initialEntry || owner is null) return false;
+            GuestRegister? zeroOwner = CSharpTaskResultAbi.Constant(context,
+                CSharpTaskResultAbi.TokenTypeId, 0, segment.Ordinal, instructions);
+            GuestRegister? hasOwner = context.CreateTemporary(
+                CSharpTaskResultAbi.IntTypeId, segment.Ordinal);
+            if (zeroOwner is null || hasOwner is null) return false;
+            instructions.Add(new("binary", hasOwner.Id,
+                new[] { owner.Id, zeroOwner.Id }, null, "not_equals", null));
+            string taskCancellation = activeBlockId + ":task_cancellation";
+            string directCompletion = activeBlockId + ":direct_cancellation";
+            blocks.Add(new(activeBlockId, instructions,
+                new("branch_if", hasOwner.Id, taskCancellation,
+                    directCompletion, null)));
+            List<GuestInstruction> directInstructions = new();
+            if (!CSharpTaskResultAbi.ReleaseTaskLocal(context, method,
+                    segment.Ordinal, directInstructions)) return false;
+            blocks.Add(new(directCompletion, directInstructions,
+                new("return", null, null, null, null)));
+            activeBlockId = taskCancellation;
+            instructions = new List<GuestInstruction>();
+        }
         GuestRegister? accepted = owner is null ? null
             : CSharpTaskResultAbi.PropagateFailure(context, method, owner,
                 segment.Ordinal, instructions);
@@ -707,6 +809,9 @@ internal static class CSharpAsyncCfgLowerer
                 context,
                 awaitSite,
                 abi.DelayImportId,
+                abi.CancelResumeDelayImportId,
+                segment.Transfer?.CancellationTarget is >= 0
+                    && awaitSite.ProducerKind is "delay" or "next_tick",
                 abi.ObjectLoadImportId,
                 abi.BindCancellationImportId,
                 abi.Int32Type,

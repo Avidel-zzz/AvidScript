@@ -17,7 +17,8 @@ internal static class CSharpContinuationLowerer
         int CallbackId,
         string PayloadKind,
         string FunctionId,
-        bool IsCompilerAsync);
+        bool IsCompilerAsync,
+        bool StatusAware);
 
     public static CSharpContinuationLoweringResult? Lower(
         SemanticDocument document,
@@ -110,6 +111,8 @@ internal static class CSharpContinuationLowerer
         foreach (CSharpAsyncResumeRoute route in asyncRoutes)
         {
             if (route.CallbackId <= 0
+                || route.StatusAware && route.PayloadKind
+                    != SemanticContinuationCallback.NonePayloadKind
                 || route.PayloadKind is not (
                     SemanticContinuationCallback.NonePayloadKind or
                     SemanticContinuationCallback.ObjectPayloadKind or
@@ -127,12 +130,14 @@ internal static class CSharpContinuationLowerer
                 callback.CallbackId,
                 callback.PayloadKind,
                 CSharpGuestIds.Function(callback.MethodSymbolId),
+                false,
                 false))
             .Concat(asyncRoutes.Select(route => new DispatchTarget(
                 route.CallbackId,
                 route.PayloadKind,
                 route.FunctionId,
-                true)))
+                true,
+                route.StatusAware)))
             .OrderBy(target => target.CallbackId)
             .ToArray();
         if (targets.GroupBy(target => target.CallbackId).Any(group => group.Count() != 1))
@@ -206,10 +211,11 @@ internal static class CSharpContinuationLowerer
             if (target.IsCompilerAsync
                 && target.PayloadKind == SemanticContinuationCallback.NonePayloadKind)
             {
-                // A void-payload resume cannot inspect the host status itself.
-                // Unexpected failures must not continue after the await.
-                invokeBlockId = callBlockId + ":completed";
+                invokeBlockId = callBlockId + (target.StatusAware
+                    ? ":status_accepted" : ":completed");
                 string rejectedBlockId = callBlockId + ":invalid_status";
+                string? cancelledCheckBlockId = target.StatusAware
+                    ? callBlockId + ":check_cancelled" : null;
                 GuestRegister completedStatus = Local(
                     version2, target.CallbackId, "completed_status", int32Type.Id, locals);
                 GuestRegister statusAccepted = Local(
@@ -224,7 +230,24 @@ internal static class CSharpContinuationLowerer
                             new[] { status.Id, completedStatus.Id }, null, "equals", null),
                     },
                     new GuestTerminator("branch_if", statusAccepted.Id,
-                        invokeBlockId, rejectedBlockId, null)));
+                        invokeBlockId, cancelledCheckBlockId ?? rejectedBlockId, null)));
+                if (cancelledCheckBlockId is not null)
+                {
+                    GuestRegister cancelledStatus = Local(version2, target.CallbackId,
+                        "cancelled_status", int32Type.Id, locals);
+                    GuestRegister cancellationAccepted = Local(version2,
+                        target.CallbackId, "cancellation_accepted", int32Type.Id, locals);
+                    blocks.Add(new GuestBasicBlock(cancelledCheckBlockId,
+                        new GuestInstruction[]
+                        {
+                            new("constant", cancelledStatus.Id, Array.Empty<string>(),
+                                null, null, new GuestConstant("int32", "3")),
+                            new("binary", cancellationAccepted.Id,
+                                new[] { status.Id, cancelledStatus.Id }, null, "equals", null),
+                        },
+                        new GuestTerminator("branch_if", cancellationAccepted.Id,
+                            invokeBlockId, rejectedBlockId, null)));
+                }
                 blocks.Add(new GuestBasicBlock(
                     rejectedBlockId,
                     Array.Empty<GuestInstruction>(),
@@ -233,7 +256,8 @@ internal static class CSharpContinuationLowerer
 
             List<GuestInstruction> callInstructions = new();
             string[] argumentIds = target.IsCompilerAsync
-                ? new[] { token.Id }
+                ? target.StatusAware ? new[] { token.Id, status.Id }
+                    : new[] { token.Id }
                 : Array.Empty<string>();
             if (target.PayloadKind == SemanticContinuationCallback.ObjectPayloadKind)
             {

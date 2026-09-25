@@ -17,15 +17,17 @@ internal static class GuestAsyncExceptionRouteValidator
         GuestModule module = context.Module;
         bool ir22 = module.SchemaVersion == GuestTaskLanguageErrorValidator.ExceptionFlowSchemaVersion
             && module.IrVersion == GuestTaskLanguageErrorValidator.ExceptionFlowIrVersion;
-        if (!ir22)
+        bool ir23 = module.SchemaVersion == GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion
+            && module.IrVersion == GuestTaskLanguageErrorValidator.DirectCleanupIrVersion;
+        if (!ir22 && !ir23)
         {
             if (module.AsyncExceptionRoutes is not null)
                 Add(context, "Async exception routes require IR 22.");
             return;
         }
-        if (module.AsyncExceptionRoutes is not { Count: > 0 } routes)
+        if (module.AsyncExceptionRoutes is not { } routes || ir22 && routes.Count == 0)
         {
-            Add(context, "IR 22 requires protected await routes.");
+            Add(context, "Async exception IR requires protected Task await routes.");
             return;
         }
 
@@ -110,7 +112,7 @@ internal static class GuestAsyncExceptionRouteValidator
         }
         HashSet<string> listedOwners = routes.Select(route => route.OwnerLocalId)
             .ToHashSet(StringComparer.Ordinal);
-        if (module.Functions.SelectMany(function => function.Locals).Any(local =>
+        if (ir22 && module.Functions.SelectMany(function => function.Locals).Any(local =>
             local.Id.StartsWith("value:local:$async:exception_source:",
                 StringComparison.Ordinal) && !listedOwners.Contains(local.Id)))
             Add(context, "IR 22 has a protected method without await routes.");

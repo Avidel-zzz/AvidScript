@@ -283,7 +283,9 @@ internal static class CSharpTaskAwaitLowerer
         (document.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion
             && document.SemanticVersion == SemanticContract.AsyncLanguageErrorSemanticVersion)
         || (document.SchemaVersion == SemanticContract.AsyncExceptionFlowSchemaVersion
-            && document.SemanticVersion == SemanticContract.AsyncExceptionFlowSemanticVersion);
+            && document.SemanticVersion == SemanticContract.AsyncExceptionFlowSemanticVersion)
+        || (document.SchemaVersion == SemanticContract.DirectAwaitCleanupSchemaVersion
+            && document.SemanticVersion == SemanticContract.DirectAwaitCleanupSemanticVersion);
 
     private static bool StoreResult(CSharpFunctionLoweringContext context,
         SemanticAsyncAwaitSite site, GuestRegister value, int block,
