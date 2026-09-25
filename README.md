@@ -78,7 +78,7 @@ public static void EndPlay()
 
 - Win64 Editor、打包样例和独立进程网络样例有自动化测试；真实游戏流程、真实多人联机、Android/iOS 尚待验收。
 - 编译器支持已实现的 C# 和 UE API 子集，不能直接运行普通 .NET 项目或任意 NuGet 包。
-- `Task<int>` 支持直接 `await`、有限的任务局部变量和别名；其他 `Task<T>` 与任务变量重赋值未支持。见 [Task 结果合同](Docs/Phase66/P66.C4_Task_Result_Contract.md)。
+- `Task<int>` 支持直接 `await`，以及首次 `await` 前按顺序声明的任务变量和别名；其他 `Task<T>` 与任务变量重赋值未支持。见 [Task 结果合同](Docs/Phase66/P66.C4_Task_Result_Contract.md)。
 - 同步 `try/finally` 可用；普通脚本构建尚不接受 `catch`、`throw` 或 `finally` 中的 `await`。见 [语言错误合同](Docs/Phase66/P66.C3_Language_Error_Channel_Contract.md)。
 - C# 声明的 `UClass`、`UProperty`、`UFunction` 变更后，需要重新构建并重启 Editor。
 

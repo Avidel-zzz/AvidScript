@@ -99,6 +99,21 @@ internal static class SemanticAsyncTests
                 ? method with { TaskLocalSymbolIds = method.TaskLocalSymbolIds!.Reverse().ToArray() }
                 : method).ToArray(),
         }), "Task alias owner order must match source declarations");
+        SemanticDocument interleaved = Analyze(source.Replace(
+                "Task<int> original = LoadScoreAsync();",
+                "Result = 1; Task<int> original = LoadScoreAsync();", StringComparison.Ordinal)
+            .Replace("Task<int> alias = original;",
+                "Task<int> alias = original; Result = 2;", StringComparison.Ordinal),
+            "Scripts/TaskIntInterleavedAliases.cs");
+        Assert(interleaved.Succeeded && SemanticAsyncInvocationValidator.IsValid(interleaved),
+            "straight-line synchronous statements may precede and separate task owners: "
+                + string.Join(" | ", interleaved.Diagnostics.Select(item => item.Message)));
+        SemanticDocument branchingOwner = Analyze(source.Replace(
+            "Task<int> alias = original;",
+            "if (Result == 0) return; Task<int> alias = original;", StringComparison.Ordinal),
+            "Scripts/TaskIntBranchedOwner.cs");
+        Assert(!branchingOwner.Succeeded && branchingOwner.Diagnostics.Any(item => item.Code == "ASCS5403"),
+            "a branch between task declarations must not bypass ownership setup");
         SemanticDocument reassignment = Analyze(source.Replace("Task<int> last = alias;",
             "Task<int> last = alias; last = original;", StringComparison.Ordinal),
             "Scripts/TaskIntReassignedAlias.cs");

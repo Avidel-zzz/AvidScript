@@ -30,13 +30,16 @@ public static class Script
 
     public static async Task<int> RunScenarioAsync()
     {
+        int adjustment = 1;
         Task<int> left = LoadScoreAsync(7);
+        adjustment = adjustment + 1;
         Task<int> leftAlias = left;
+        adjustment = adjustment + 1;
         Task<int> right = LoadScoreAsync(5);
         await AvidContinuations.NextTickAsync();
         int first = await leftAlias;
         int second = await right;
-        return first * 10 + second + Cleanups;
+        return first * 10 + second + Cleanups + adjustment - 3;
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]

@@ -245,6 +245,22 @@ internal static class SemanticAsyncProjector
                 TaskResultTypeId = hasTaskResult ? typeRegistry.Register(taskResultType!) : null,
                 TaskLocalSymbolIds = GetTaskAliasLocalIds(context, semanticModel, declaration.Body),
             };
+            VariableDeclaratorSyntax[] taskDeclarations = GetTaskLocalDeclarations(
+                context, semanticModel, declaration.Body);
+            string[] taskLocals = taskDeclarations
+                .Select(variable => SemanticSymbolProjector.GetSymbolId(
+                    (ILocalSymbol)semanticModel.GetDeclaredSymbol(variable)!)).ToArray();
+            if (taskLocals.Length != 0 && !SemanticAsyncInvocationValidator.TryGetTaskLocalBindings(
+                    projected, taskLocals, projected.TaskLocalSymbolIds is not null,
+                    out _, out _))
+            {
+                diagnostics.Add(Error("ASCS5403",
+                    "Task<int> locals must be initialized on one straight-line path before the first await.",
+                    SemanticSpanFactory.Create(context.PrimaryUnit.SourceText,
+                        taskDeclarations[^1].Span)));
+                projected = null;
+                return false;
+            }
             return true;
         }
 
@@ -1151,25 +1167,20 @@ internal static class SemanticAsyncProjector
             return false;
         MethodDeclarationSyntax? owner = variable.Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault();
         if (owner?.Body is null) return false;
-        VariableDeclaratorSyntax[] leadingTasks = owner.Body.Statements
-            .TakeWhile(statement => statement is LocalDeclarationStatementSyntax
-                { Declaration.Variables.Count: 1 } declaration
-                && semanticModel.GetDeclaredSymbol(declaration.Declaration.Variables[0]) is ILocalSymbol symbol
-                && TryGetSupportedTaskResult(context.Compilation, symbol.Type, out _))
-            .Cast<LocalDeclarationStatementSyntax>()
-            .Select(statement => statement.Declaration.Variables[0]).ToArray();
-        if (leadingTasks.Length < 1
-            || leadingTasks.Length > SemanticAsyncInvocationValidator.MaximumTaskLocalsPerMethod
-            || !leadingTasks.Contains(variable)
+        VariableDeclaratorSyntax[] taskDeclarations = GetTaskLocalDeclarations(
+            context, semanticModel, owner.Body);
+        if (taskDeclarations.Length < 1
+            || taskDeclarations.Length > SemanticAsyncInvocationValidator.MaximumTaskLocalsPerMethod
+            || !taskDeclarations.Contains(variable)
             || owner.Body.DescendantNodes().OfType<VariableDeclaratorSyntax>()
                 .Count(candidate => semanticModel.GetDeclaredSymbol(candidate) is ILocalSymbol symbol
-                    && TryGetSupportedTaskResult(context.Compilation, symbol.Type, out _)) != leadingTasks.Length)
+                    && TryGetSupportedTaskResult(context.Compilation, symbol.Type, out _)) != taskDeclarations.Length)
             return false;
 
         Dictionary<string, IInvocationOperation> roots = new(StringComparer.Ordinal);
         Dictionary<string, string> aliasSources = new(StringComparer.Ordinal);
         HashSet<string> awaited = new(StringComparer.Ordinal);
-        foreach (VariableDeclaratorSyntax candidate in leadingTasks)
+        foreach (VariableDeclaratorSyntax candidate in taskDeclarations)
         {
             if (semanticModel.GetDeclaredSymbol(candidate) is not ILocalSymbol symbol
                 || candidate.Initializer is null) return false;
@@ -1205,7 +1216,7 @@ internal static class SemanticAsyncProjector
             else return false;
         }
 
-        foreach (VariableDeclaratorSyntax candidate in leadingTasks)
+        foreach (VariableDeclaratorSyntax candidate in taskDeclarations)
         {
             ILocalSymbol symbol = (ILocalSymbol)semanticModel.GetDeclaredSymbol(candidate)!;
             string id = SemanticSymbolProjector.GetSymbolId(symbol);
@@ -1227,7 +1238,7 @@ internal static class SemanticAsyncProjector
                 if (reference.Parent is EqualsValueClauseSyntax initializer
                     && initializer.Value == reference
                     && initializer.Parent is VariableDeclaratorSyntax alias
-                    && leadingTasks.Contains(alias)
+                    && taskDeclarations.Contains(alias)
                     && aliasSources.TryGetValue(SemanticSymbolProjector.GetSymbolId(
                         (ILocalSymbol)semanticModel.GetDeclaredSymbol(alias)!), out string? source)
                     && source == id) continue;
@@ -1245,24 +1256,27 @@ internal static class SemanticAsyncProjector
                 cursor = source;
             }
         }
-        if (leadingTasks.Any(candidate => semanticModel.GetDeclaredSymbol(candidate) is not ILocalSymbol symbol
+        if (taskDeclarations.Any(candidate => semanticModel.GetDeclaredSymbol(candidate) is not ILocalSymbol symbol
             || !used.Contains(SemanticSymbolProjector.GetSymbolId(symbol)))) return false;
         return roots.TryGetValue(SemanticSymbolProjector.GetSymbolId(local), out producer);
     }
 
+    private static VariableDeclaratorSyntax[] GetTaskLocalDeclarations(
+        SemanticCompilationContext context, SemanticModel semanticModel, BlockSyntax body) =>
+        body.Statements.OfType<LocalDeclarationStatementSyntax>()
+            .Where(statement => statement.Declaration.Variables.Count == 1
+                && semanticModel.GetDeclaredSymbol(statement.Declaration.Variables[0]) is ILocalSymbol symbol
+                && TryGetSupportedTaskResult(context.Compilation, symbol.Type, out _))
+            .Select(statement => statement.Declaration.Variables[0]).ToArray();
+
     private static IReadOnlyList<string>? GetTaskAliasLocalIds(
         SemanticCompilationContext context, SemanticModel semanticModel, BlockSyntax body)
     {
-        VariableDeclaratorSyntax[] leading = body.Statements
-            .TakeWhile(statement => statement is LocalDeclarationStatementSyntax
-                { Declaration.Variables.Count: 1 } declaration
-                && semanticModel.GetDeclaredSymbol(declaration.Declaration.Variables[0]) is ILocalSymbol symbol
-                && TryGetSupportedTaskResult(context.Compilation, symbol.Type, out _))
-            .Cast<LocalDeclarationStatementSyntax>()
-            .Select(statement => statement.Declaration.Variables[0]).ToArray();
-        if (!leading.Any(variable => variable.Initializer?.Value is IdentifierNameSyntax identifier
+        VariableDeclaratorSyntax[] declarations = GetTaskLocalDeclarations(
+            context, semanticModel, body);
+        if (!declarations.Any(variable => variable.Initializer?.Value is IdentifierNameSyntax identifier
             && semanticModel.GetOperation(identifier) is ILocalReferenceOperation)) return null;
-        return leading.Select(variable => SemanticSymbolProjector.GetSymbolId(
+        return declarations.Select(variable => SemanticSymbolProjector.GetSymbolId(
             (ILocalSymbol)semanticModel.GetDeclaredSymbol(variable)!)).ToArray();
     }
 

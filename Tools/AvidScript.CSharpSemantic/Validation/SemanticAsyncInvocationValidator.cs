@@ -235,6 +235,7 @@ public static class SemanticAsyncInvocationValidator
         aliases = sources;
         if (localIds.Count < 1 || localIds.Count > MaximumTaskLocalsPerMethod) return false;
         HashSet<string> remaining = localIds.ToHashSet(StringComparer.Ordinal);
+        HashSet<string> owned = localIds.ToHashSet(StringComparer.Ordinal);
         List<string> declarationOrder = new(localIds.Count);
         HashSet<int> visited = new();
         int ordinal = method.EntrySegmentOrdinal;
@@ -245,12 +246,21 @@ public static class SemanticAsyncInvocationValidator
             if (matches.Length != 1 || !visited.Add(ordinal)) return false;
             SemanticAsyncSegment segment = matches[0];
             if (segment.AwaitSite is not null
-                || segment.Statements.Count != 1
-                || segment.Statements[0] is not { TargetSymbolId: { } id } statement
-                || !remaining.Remove(id)
                 || segment.Transfer is not
                     { Kind: SemanticAsyncMethod.GotoTransferKind, PrimaryTarget: var next })
                 return false;
+            SemanticAsyncStatement[] declarations = segment.Statements.Where(statement =>
+                statement.TargetSymbolId is { } target && owned.Contains(target)).ToArray();
+            if (declarations.Length == 0)
+            {
+                // Straight-line synchronous work before the first suspension does
+                // not change task ownership. Every task still exists at resume.
+                ordinal = next;
+                continue;
+            }
+            if (declarations.Length != 1 || segment.Statements.Count != 1
+                || declarations[0] is not { TargetSymbolId: { } id } statement
+                || !remaining.Remove(id)) return false;
             declarationOrder.Add(id);
             if (statement.Operation is { Kind: "invocation", SymbolId: { } callableId })
                 roots.Add(id, callableId);

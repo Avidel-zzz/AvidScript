@@ -334,11 +334,13 @@ internal static class CSharpGuestAsyncInvocationTests
                 [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
                 public static async void BeginPlay()
                 {
+                    int adjustment = 1;
                     Task<int> pending = LoadScoreAsync();
+                    adjustment = adjustment + 1;
                     await AvidContinuations.NextTickAsync();
                     int first = await pending;
                     int second = await pending;
-                    Result = first + second;
+                    Result = first + second + adjustment - 2;
                 }
             }
             """;
