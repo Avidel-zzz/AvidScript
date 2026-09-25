@@ -1,10 +1,13 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AvidScriptWasmRuntime.h"
+#include "AvidScriptLanguageErrorCatalog.h"
 #include "AvidScriptTaskResultAbi.h"
 #include "Continuation/AvidScriptSessionContinuations.h"
+#include "Memory/AvidScriptManagedHeap.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "HAL/PlatformMisc.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -804,6 +807,133 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Cancelled Task<int> result is reclaimed"),
 			Owner->GetTaskResultsForTesting().GetCount(), 0);
 		Owner->Teardown();
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptCompiledTaskLanguageErrorTest,
+	"AvidScript.Runtime.Continuation.CompiledTaskLanguageError",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptCompiledTaskLanguageErrorTest::RunTest(const FString& Parameters)
+{
+	if (!GEngine) return false;
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false,
+		TEXT("AvidScriptCompiledTaskLanguageErrorWorld"));
+	if (!TestNotNull(TEXT("Async language-error world created"), World)) return false;
+	GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+	World->InitializeActorsForPlay(FURL());
+	ON_SCOPE_EXIT { GEngine->DestroyWorldContext(World); World->DestroyWorld(false); };
+	const FString FixtureDirectory = FPlatformMisc::GetEnvironmentVariable(
+		TEXT("AVIDSCRIPT_ASYNC_LANGUAGE_ERROR_WASM_DIR"));
+	const FString OverrideWasm = FPlatformMisc::GetEnvironmentVariable(
+		TEXT("AVIDSCRIPT_ASYNC_LANGUAGE_ERROR_WASM_PATH"));
+	const FString OverrideModuleId = FPlatformMisc::GetEnvironmentVariable(
+		TEXT("AVIDSCRIPT_ASYNC_LANGUAGE_ERROR_MODULE_ID"));
+	const FString Fixture = OverrideWasm.IsEmpty()
+		? FPaths::Combine(
+			FixtureDirectory.IsEmpty()
+				? FPaths::Combine(FPaths::ProjectSavedDir(),
+					TEXT("AvidScriptAsyncLanguageErrorTests/GuestFixtures"))
+				: FixtureDirectory,
+			TEXT("csharp-task-language-error.wasm"))
+		: OverrideWasm;
+	const FString ModuleId = OverrideWasm.IsEmpty()
+		? TEXT("csharp:Scripts/AsyncTaskLanguageError.cs") : OverrideModuleId;
+	if (!TestFalse(TEXT("Executable fixture has a module identity"),
+		ModuleId.IsEmpty())) return false;
+	TArray<uint8> Bytes;
+	if (!TestTrue(TEXT("Run the async language-error fixture generator first"),
+		FFileHelper::LoadFileToArray(Bytes, *Fixture))) return false;
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	{
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime
+			? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		FAvidScriptWasmRuntimeInstance Runtime(Selection);
+		FAvidScriptWasmSmokeResult Result;
+		if (!TestTrue(TEXT("Compiled async language-error module loads"),
+			Runtime.LoadModule(Bytes.GetData(), Bytes.Num(), ModuleId, Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		TestTrue(TEXT("IR 21 catalog permits a Task language-error fault"),
+			Runtime.GetLanguageErrorCatalog()
+				&& Runtime.GetLanguageErrorCatalog()->SupportsTaskLanguageErrorFault());
+		if (!TestTrue(TEXT("Compiled async language-error continuation export exists"),
+			Runtime.ValidateRequiredExports({TEXT("avid_on_continuation_v2")}, Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		const auto Owner = MakeShared<FAvidScriptSessionContinuations>();
+		auto& Endpoint = Owner->ResetActive(World);
+		FAvidScriptWasmHostContext Context;
+		Context.Tasks = &Endpoint;
+		Context.Continuations = &Endpoint;
+		Context.World = World;
+		Runtime.SetHostContext(Context);
+		if (!OverrideWasm.IsEmpty())
+		{
+			if (!TestTrue(TEXT("Formal mixed module keeps its synchronous Tick export"),
+				Runtime.ValidateRequiredExports({TEXT("avid_on_tick")}, Result)))
+			{ AddError(Result.ErrorMessage); return false; }
+		}
+		if (!TestTrue(TEXT("Async Task<int> producer suspends"),
+			Runtime.BeginPlay(Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		if (!OverrideWasm.IsEmpty()
+			&& !TestTrue(TEXT("Synchronous Tick executes beside async task fault"),
+				Runtime.Tick(0.016f, Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		TestEqual(TEXT("Suspended producer owns one task"),
+			Owner->GetTaskResultsForTesting().GetCount(), 1);
+		int32 ProducerResumes = 0;
+		int32 FaultedWaiters = 0;
+		for (int32 Round = 0; Round < 5 && FaultedWaiters == 0; ++Round)
+		{
+			World->Tick(LEVELTICK_All, 0.02f);
+			++GFrameCounter;
+			TArray<FAvidScriptContinuationCompletion> Ready;
+			Owner->DrainReady(Ready);
+			for (const FAvidScriptContinuationCompletion& Completion : Ready)
+			{
+				if (Completion.Status == EAvidScriptContinuationStatus::Completed)
+				{
+					if (!TestTrue(TEXT("Compiled producer faults without a VM trap"),
+						Runtime.DispatchContinuation(Completion, Result)))
+					{ AddError(Result.ErrorMessage); return false; }
+					TestTrue(TEXT("Faulting producer finalizes"),
+						Owner->FinalizeDispatched(Completion.Token, true));
+					++ProducerResumes;
+				}
+				else
+				{
+					TestEqual(TEXT("Awaiter receives the faulted task status"),
+						Completion.Status, EAvidScriptContinuationStatus::Failed);
+					const AvidScript::Managed::FHeapStats Stats =
+						Runtime.GetManagedHeapForTesting()->GetStats();
+					TestTrue(TEXT("Task fault retains its managed error root"),
+						Stats.LiveObjects > 0 && Stats.LiveRoots > 0);
+					TestFalse(TEXT("Unhandled async void await does not succeed"),
+						Runtime.DispatchContinuation(Completion, Result));
+					TestTrue(TEXT("Failed awaiter finalizes"),
+						Owner->FinalizeDispatched(Completion.Token, false));
+					++FaultedWaiters;
+				}
+			}
+		}
+		TestEqual(TEXT("Task fault producer resumes once"), ProducerResumes, 1);
+		TestEqual(TEXT("Task fault wakes one awaiter"), FaultedWaiters, 1);
+		TestEqual(TEXT("Task fault releases all task references"),
+			Owner->GetTaskResultsForTesting().GetCount(), 0);
+		Owner->Teardown();
+		AvidScript::Managed::FHeap* Heap = Runtime.GetManagedHeapForTesting();
+		TestEqual(TEXT("Teardown releases Task language-error roots"),
+			Heap->GetStats().LiveRoots, static_cast<uint32>(0));
+		TestEqual(TEXT("Unrooted Task language-error objects collect"),
+			Heap->Collect(), AvidScript::Managed::EHeapError::Ok);
+		TestEqual(TEXT("GC reclaims Task language-error objects"),
+			Heap->GetStats().LiveObjects, static_cast<uint32>(0));
+		AddInfo(FString::Printf(TEXT("compiled Task language error backend=%d producer=%d waiter=%d"),
+			static_cast<int32>(Backend), ProducerResumes, FaultedWaiters));
 	}
 	return true;
 }

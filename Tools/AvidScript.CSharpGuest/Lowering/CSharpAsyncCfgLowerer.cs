@@ -527,10 +527,82 @@ internal static class CSharpAsyncCfgLowerer
                     blocks,
                     diagnostics);
 
+            case SemanticAsyncMethod.ThrowTransferKind:
+                return TryLowerThrow(method, segment, context, initialEntry,
+                    activeBlockId, instructions, blocks, diagnostics);
+
             default:
                 Add(diagnostics, method, $"Continuation CFG segment {segment.Ordinal} has unknown transfer '{transfer.Kind}'.");
                 return false;
         }
+    }
+
+    private static bool TryLowerThrow(
+        SemanticAsyncMethod method,
+        SemanticAsyncSegment segment,
+        CSharpFunctionLoweringContext context,
+        bool initialEntry,
+        string activeBlockId,
+        List<GuestInstruction> instructions,
+        List<GuestBasicBlock> blocks,
+        List<GuestDiagnostic> diagnostics)
+    {
+        SemanticAsyncThrowSite? site = method.ErrorPlan?.Throws.SingleOrDefault(item =>
+            item.SegmentOrdinal == segment.Ordinal);
+        if (site is null || method.TaskResultTypeId != CSharpTaskResultAbi.IntTypeId
+            || context.Document.SchemaVersion != SemanticContract.AsyncLanguageErrorSchemaVersion)
+        {
+            Add(diagnostics, method, "Async throw has no validated Task<int> language-error site.");
+            return false;
+        }
+        CSharpLanguageErrorTokenCatalog catalog =
+            CSharpAsyncLanguageErrorCatalog.Build(context.Document);
+        int typeToken = catalog.Types.Single(item => item.TypeId == site.ExceptionTypeId).Token;
+        int sourceToken = catalog.Sources.Single(item => item.SourceId == method.ErrorPlan!.SourceId
+            && item.Span == site.Span).Token;
+        GuestRegister? type = CSharpTaskResultAbi.Constant(context,
+            CSharpTaskResultAbi.IntTypeId, typeToken, segment.Ordinal, instructions);
+        GuestRegister? source = CSharpTaskResultAbi.Constant(context,
+            CSharpTaskResultAbi.IntTypeId, sourceToken, segment.Ordinal, instructions);
+        GuestRegister? root = context.CreateTemporary("type:language_error_root", segment.Ordinal);
+        GuestRegister? task = CSharpTaskResultAbi.LoadProducerToken(context,
+            method, segment.Ordinal, instructions);
+        GuestRegister? accepted = context.CreateTemporary(CSharpTaskResultAbi.IntTypeId,
+            segment.Ordinal);
+        if (type is null || source is null || root is null || task is null
+            || accepted is null) return false;
+        int firstInstruction = instructions.Count;
+        instructions.Add(new("managed_new", root.Id, Array.Empty<string>(), null, null, null));
+        instructions.Add(new("managed_set", null, new[] { root.Id, type.Id },
+            "field:code", null, null));
+        instructions.Add(new("call", accepted.Id,
+            new[] { task.Id, type.Id, source.Id, root.Id },
+            CSharpTaskResultAbi.FaultLanguageErrorImportId, null, null));
+        CSharpGuestDebugTagger.TagFirstEmitted(instructions, firstInstruction,
+            site.Span, CSharpGuestDebugTagger.OperationId(
+                method.MethodSymbolId, $"async:{segment.Ordinal}:throw", 0), "statement");
+
+        string completed = activeBlockId + ":task_fault_accepted";
+        string rejected = activeBlockId + ":task_fault_rejected";
+        blocks.Add(new(activeBlockId, instructions,
+            new("branch_if", accepted.Id, completed, rejected, null)));
+        List<GuestInstruction> release = new();
+        if (!CSharpTaskResultAbi.ReleaseTaskLocal(context, method,
+                segment.Ordinal, release)) return false;
+        string? returnValue = null;
+        if (initialEntry)
+        {
+            if (CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release,
+                    task, null, segment.Ordinal, release) is null) return false;
+            returnValue = CSharpTaskResultAbi.ReturnValue(context, method,
+                segment.Ordinal, release)?.Id;
+            if (returnValue is null) return false;
+        }
+        blocks.Add(new(completed, release,
+            new("return", null, null, null, returnValue)));
+        blocks.Add(new(rejected, Array.Empty<GuestInstruction>(),
+            new("trap", null, null, null, null)));
+        return true;
     }
 
     private static bool TryLowerAwait(

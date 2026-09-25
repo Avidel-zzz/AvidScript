@@ -87,10 +87,10 @@ internal static class CSharpSemanticInputValidator
             && ValidateAsyncMethods(document)
             && ValidateTaskLocalOwnership(document)
             && ValidateMethods(document.Methods)
-            && (document.SemanticVersion is "1.39" or SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion or SemanticContract.TaskLocalSemanticVersion or SemanticContract.TaskAssignmentSemanticVersion or SemanticContract.TaskExistingLocalSemanticVersion or SemanticContract.TaskAliasSemanticVersion
+            && (document.SemanticVersion is "1.39" or SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion or SemanticContract.TaskLocalSemanticVersion or SemanticContract.TaskAssignmentSemanticVersion or SemanticContract.TaskExistingLocalSemanticVersion or SemanticContract.TaskAliasSemanticVersion or SemanticContract.AsyncLanguageErrorSemanticVersion
                 || !document.Methods.Any(method => EnumerateOperations(method.Root)
                     .Any(operation => operation.Kind == "try")))
-            && (document.SemanticVersion is SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion or SemanticContract.TaskLocalSemanticVersion or SemanticContract.TaskAssignmentSemanticVersion or SemanticContract.TaskExistingLocalSemanticVersion or SemanticContract.TaskAliasSemanticVersion
+            && (document.SemanticVersion is SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion or SemanticContract.TaskLocalSemanticVersion or SemanticContract.TaskAssignmentSemanticVersion or SemanticContract.TaskExistingLocalSemanticVersion or SemanticContract.TaskAliasSemanticVersion or SemanticContract.AsyncLanguageErrorSemanticVersion
                 || !document.Symbols.Any(symbol => symbol.Kind == "local"
                     && symbol.Id.StartsWith("symbol:compiler_local:", StringComparison.Ordinal)
                     && symbol.Id.EndsWith(":enumerator", StringComparison.Ordinal)))
@@ -130,11 +130,11 @@ internal static class CSharpSemanticInputValidator
                 }.Count(value => value is not null) <= 1)
             || !Unique(shapes.Select(shape => shape.TypeId)))
             return false;
-        if (semanticVersion is not ("1.37" or "1.38" or "1.39" or SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion or SemanticContract.TaskLocalSemanticVersion or SemanticContract.TaskAssignmentSemanticVersion or SemanticContract.TaskExistingLocalSemanticVersion or SemanticContract.TaskAliasSemanticVersion)
+        if (semanticVersion is not ("1.37" or "1.38" or "1.39" or SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion or SemanticContract.TaskLocalSemanticVersion or SemanticContract.TaskAssignmentSemanticVersion or SemanticContract.TaskExistingLocalSemanticVersion or SemanticContract.TaskAliasSemanticVersion or SemanticContract.AsyncLanguageErrorSemanticVersion)
             && shapes.Any(shape => shape.GenericDefinitionTypeId is not null
                 || shape.GenericArgumentTypeIds is not null))
             return false;
-        if (semanticVersion is "1.37" or "1.38" or "1.39" or SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion or SemanticContract.TaskLocalSemanticVersion or SemanticContract.TaskAssignmentSemanticVersion or SemanticContract.TaskExistingLocalSemanticVersion or SemanticContract.TaskAliasSemanticVersion)
+        if (semanticVersion is "1.37" or "1.38" or "1.39" or SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion or SemanticContract.TaskLocalSemanticVersion or SemanticContract.TaskAssignmentSemanticVersion or SemanticContract.TaskExistingLocalSemanticVersion or SemanticContract.TaskAliasSemanticVersion or SemanticContract.AsyncLanguageErrorSemanticVersion)
         {
             HashSet<string> typeIds = types.Select(type => type.Id)
                 .ToHashSet(StringComparer.Ordinal);
@@ -157,13 +157,13 @@ internal static class CSharpSemanticInputValidator
                     return false;
             }
         }
-        if (semanticVersion is not ("1.36" or "1.37" or "1.38" or "1.39" or SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion or SemanticContract.TaskLocalSemanticVersion or SemanticContract.TaskAssignmentSemanticVersion or SemanticContract.TaskExistingLocalSemanticVersion or SemanticContract.TaskAliasSemanticVersion))
+        if (semanticVersion is not ("1.36" or "1.37" or "1.38" or "1.39" or SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion or SemanticContract.TaskLocalSemanticVersion or SemanticContract.TaskAssignmentSemanticVersion or SemanticContract.TaskExistingLocalSemanticVersion or SemanticContract.TaskAliasSemanticVersion or SemanticContract.AsyncLanguageErrorSemanticVersion))
             return true;
         Dictionary<string, SemanticTypeShape> byId = shapes.ToDictionary(
             shape => shape.TypeId, StringComparer.Ordinal);
         foreach (SemanticTypeShape shape in shapes)
         {
-            if (semanticVersion is "1.37" or "1.38" or "1.39" or SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion or SemanticContract.TaskLocalSemanticVersion or SemanticContract.TaskAssignmentSemanticVersion or SemanticContract.TaskExistingLocalSemanticVersion or SemanticContract.TaskAliasSemanticVersion
+            if (semanticVersion is "1.37" or "1.38" or "1.39" or SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion or SemanticContract.TaskLocalSemanticVersion or SemanticContract.TaskAssignmentSemanticVersion or SemanticContract.TaskExistingLocalSemanticVersion or SemanticContract.TaskAliasSemanticVersion or SemanticContract.AsyncLanguageErrorSemanticVersion
                 && !AcyclicShape(shape.TypeId, byId,
                     new HashSet<string>(StringComparer.Ordinal), depth: 0))
                 return false;
@@ -190,7 +190,7 @@ internal static class CSharpSemanticInputValidator
                 && symbol.Signature is not null
                 && !string.IsNullOrWhiteSpace(symbol.Accessibility)
                 && symbol.Span is not null)
-            && (semanticVersion is "1.35" or "1.36" or "1.37" or "1.38" or "1.39" or SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion or SemanticContract.TaskLocalSemanticVersion or SemanticContract.TaskAssignmentSemanticVersion or SemanticContract.TaskExistingLocalSemanticVersion or SemanticContract.TaskAliasSemanticVersion
+            && (semanticVersion is "1.35" or "1.36" or "1.37" or "1.38" or "1.39" or SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion or SemanticContract.TaskLocalSemanticVersion or SemanticContract.TaskAssignmentSemanticVersion or SemanticContract.TaskExistingLocalSemanticVersion or SemanticContract.TaskAliasSemanticVersion or SemanticContract.AsyncLanguageErrorSemanticVersion
                 || symbols.All(symbol => !symbol.Id.StartsWith("symbol:compiler_local:", StringComparison.Ordinal)))
             && Unique(symbols.Select(symbol => symbol.Id))
             && Unique(symbols
@@ -271,7 +271,7 @@ internal static class CSharpSemanticInputValidator
 
     private static bool ValidateGenericInstances(SemanticDocument document)
     {
-        if (document.SemanticVersion is not ("1.36" or "1.37" or "1.38" or "1.39" or SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion or SemanticContract.TaskLocalSemanticVersion or SemanticContract.TaskAssignmentSemanticVersion or SemanticContract.TaskExistingLocalSemanticVersion or SemanticContract.TaskAliasSemanticVersion))
+        if (document.SemanticVersion is not ("1.36" or "1.37" or "1.38" or "1.39" or SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion or SemanticContract.TaskLocalSemanticVersion or SemanticContract.TaskAssignmentSemanticVersion or SemanticContract.TaskExistingLocalSemanticVersion or SemanticContract.TaskAliasSemanticVersion or SemanticContract.AsyncLanguageErrorSemanticVersion))
             return document.Callables.All(callable => callable.GenericDefinitionSymbolId is null
                 && callable.GenericArgumentTypeIds is null
                 && callable.GenericTypeParameterIds?.Count is not > 0);
@@ -682,7 +682,8 @@ internal static class CSharpSemanticInputValidator
         if (document.SchemaVersion is not (SemanticContract.TaskLocalSchemaVersion
             or SemanticContract.TaskAssignmentSchemaVersion
             or SemanticContract.TaskExistingLocalSchemaVersion
-            or SemanticContract.TaskAliasSchemaVersion))
+            or SemanticContract.TaskAliasSchemaVersion
+            or SemanticContract.AsyncLanguageErrorSchemaVersion))
             return !document.AsyncMethods.SelectMany(method => method.Segments)
                 .Any(segment => segment.AwaitSite?.TaskLocalSymbolId is not null)
                 && document.AsyncMethods.All(method => method.TaskLocalSymbolIds is null);
@@ -703,11 +704,13 @@ internal static class CSharpSemanticInputValidator
             if (owned.Length > SemanticAsyncInvocationValidator.MaximumTaskLocalsPerMethod
                 || !owned.SequenceEqual(declaredTasks)
                 || method.TaskLocalSymbolIds is { } listed
-                    && (document.SchemaVersion != SemanticContract.TaskAliasSchemaVersion
+                    && (document.SchemaVersion is not (SemanticContract.TaskAliasSchemaVersion
+                        or SemanticContract.AsyncLanguageErrorSchemaVersion)
                         || listed.Count == 0
                         || listed.Distinct(StringComparer.Ordinal).Count() != listed.Count)
                 || !SemanticAsyncInvocationValidator.TryGetTaskLocalBindings(method, owned,
-                    document.SchemaVersion == SemanticContract.TaskAliasSchemaVersion,
+                    document.SchemaVersion is SemanticContract.TaskAliasSchemaVersion
+                        or SemanticContract.AsyncLanguageErrorSchemaVersion,
                     out _, out IReadOnlyDictionary<string, string> aliases)
                 || method.TaskLocalSymbolIds is not null && aliases.Count == 0
                 || !SemanticAsyncInvocationValidator.AllTaskLocalsReachAwait(locals, owned, aliases)
@@ -1012,7 +1015,8 @@ internal static class CSharpSemanticInputValidator
                 && document.SemanticVersion != SemanticContract.TaskLocalSemanticVersion
                 && document.SemanticVersion != SemanticContract.TaskAssignmentSemanticVersion
                 && document.SemanticVersion != SemanticContract.TaskExistingLocalSemanticVersion
-                && document.SemanticVersion != SemanticContract.TaskAliasSemanticVersion)
+                && document.SemanticVersion != SemanticContract.TaskAliasSemanticVersion
+                && document.SemanticVersion != SemanticContract.AsyncLanguageErrorSemanticVersion)
             || method.EntrySegmentOrdinal < 0
             || method.EntrySegmentOrdinal >= method.Segments.Count
             || method.Segments.Count > SemanticAsyncMethod.MaximumControlFlowSegments
@@ -1112,6 +1116,13 @@ internal static class CSharpSemanticInputValidator
                         : transfer.Condition is { TypeId: "type:int32" } value
                             && ValidateOperation(value)
                             && AllOperationsSupported(value))
+                    && transfer.PrimaryTarget == -1
+                    && transfer.SecondaryTarget == -1,
+                SemanticAsyncMethod.ThrowTransferKind =>
+                    document.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion
+                    && segment.AwaitSite is null
+                    && transfer.Condition is { Kind: "object_creation", IsSupported: true }
+                    && ValidateOperation(transfer.Condition)
                     && transfer.PrimaryTarget == -1
                     && transfer.SecondaryTarget == -1,
                 _ => false,
@@ -1284,7 +1295,7 @@ internal static class CSharpSemanticInputValidator
     private static bool UsesExactAsyncStateFlow(string semanticVersion)
     {
         return semanticVersion is "1.16" or "1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30" or "1.31" or "1.32" or "1.33" or "1.34" or "1.36" or "1.37" or "1.38" or "1.39"
-            || semanticVersion is SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion or SemanticContract.TaskLocalSemanticVersion or SemanticContract.TaskAssignmentSemanticVersion or SemanticContract.TaskExistingLocalSemanticVersion or SemanticContract.TaskAliasSemanticVersion;
+            || semanticVersion is SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion or SemanticContract.TaskLocalSemanticVersion or SemanticContract.TaskAssignmentSemanticVersion or SemanticContract.TaskExistingLocalSemanticVersion or SemanticContract.TaskAliasSemanticVersion or SemanticContract.AsyncLanguageErrorSemanticVersion;
     }
 
     private static bool ValidateAsyncAwaitSite(
@@ -1332,7 +1343,8 @@ internal static class CSharpSemanticInputValidator
                 && (!taskLocal || document.SchemaVersion is
                     (SemanticContract.TaskLocalSchemaVersion or SemanticContract.TaskAssignmentSchemaVersion
                         or SemanticContract.TaskExistingLocalSchemaVersion
-                        or SemanticContract.TaskAliasSchemaVersion))
+                        or SemanticContract.TaskAliasSchemaVersion
+                        or SemanticContract.AsyncLanguageErrorSchemaVersion))
                 && awaitSite.TaskCallableId is { } targetId
                 && callables.Count(callable => callable.MethodSymbolId == targetId
                     && callable.HasBody && callable.IsStatic
@@ -1366,13 +1378,15 @@ internal static class CSharpSemanticInputValidator
                     "static_field" => document.SchemaVersion is
                             (SemanticContract.TaskAssignmentSchemaVersion
                             or SemanticContract.TaskExistingLocalSchemaVersion
-                            or SemanticContract.TaskAliasSchemaVersion)
+                            or SemanticContract.TaskAliasSchemaVersion
+                            or SemanticContract.AsyncLanguageErrorSchemaVersion)
                         && awaitSite.ResultSymbolId is { } fieldId
                         && IsWritableStaticResultField(symbolsById, methodSymbolId,
                             fieldId, "type:int32"),
                     "existing_local" => document.SchemaVersion is
                             (SemanticContract.TaskExistingLocalSchemaVersion
-                            or SemanticContract.TaskAliasSchemaVersion)
+                            or SemanticContract.TaskAliasSchemaVersion
+                            or SemanticContract.AsyncLanguageErrorSchemaVersion)
                         && awaitSite.ResultSymbolId is { } localId
                         && IsMethodLocal(symbolsById, methodSymbolId: methodSymbolId,
                             symbolId: localId, expectedTypeId: "type:int32"),
@@ -1636,6 +1650,7 @@ internal static class CSharpSemanticInputValidator
             (SemanticContract.TaskAssignmentSchemaVersion, SemanticContract.TaskAssignmentSemanticVersion) => true,
             (SemanticContract.TaskExistingLocalSchemaVersion, SemanticContract.TaskExistingLocalSemanticVersion) => true,
             (SemanticContract.TaskAliasSchemaVersion, SemanticContract.TaskAliasSemanticVersion) => true,
+            (SemanticContract.AsyncLanguageErrorSchemaVersion, SemanticContract.AsyncLanguageErrorSemanticVersion) => true,
             _ => false,
         };
     }
@@ -1688,7 +1703,7 @@ internal static class CSharpSemanticInputValidator
             return true;
         }
         return (semanticVersion is "1.16" or "1.22" or "1.23" or "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30" or "1.31" or "1.32" or "1.33" or "1.34" or "1.36" or "1.37"
-                || semanticVersion is SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion or SemanticContract.TaskLocalSemanticVersion or SemanticContract.TaskAssignmentSemanticVersion or SemanticContract.TaskExistingLocalSemanticVersion or SemanticContract.TaskAliasSemanticVersion)
+                || semanticVersion is SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion or SemanticContract.TaskLocalSemanticVersion or SemanticContract.TaskAssignmentSemanticVersion or SemanticContract.TaskExistingLocalSemanticVersion or SemanticContract.TaskAliasSemanticVersion or SemanticContract.AsyncLanguageErrorSemanticVersion)
             && statement.TargetSymbolId is null
             && ValidateStructuredAsyncFlow(
                 statement.Operation,

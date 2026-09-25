@@ -17,7 +17,9 @@ internal static class GuestLanguageErrorCatalogValidator
         GuestLanguageErrorCatalog? catalog = module.LanguageErrorCatalog;
         bool correctVersion = module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion
             || module.SchemaVersion == GuestTaskLanguageErrorValidator.SchemaVersion
-                && module.IrVersion == GuestTaskLanguageErrorValidator.IrVersion;
+                && module.IrVersion == GuestTaskLanguageErrorValidator.IrVersion
+            || module.SchemaVersion == GuestTaskLanguageErrorValidator.AsyncSchemaVersion
+                && module.IrVersion == GuestTaskLanguageErrorValidator.AsyncIrVersion;
         if (catalog is null)
         {
             if (correctVersion) Add(context, "This Guest IR version requires a language-error token catalog.");
@@ -144,9 +146,44 @@ internal static class GuestLanguageErrorCatalogValidator
                 }
                 (typeField ? usedTypes : usedSources).Add(token);
             }
+            if (context.Module.SchemaVersion == GuestTaskLanguageErrorValidator.AsyncSchemaVersion
+                && context.Module.IrVersion == GuestTaskLanguageErrorValidator.AsyncIrVersion)
+            {
+                foreach (GuestInstruction call in function.Blocks.SelectMany(block => block.Instructions)
+                    .Where(instruction => instruction.Op == "call"
+                        && instruction.TargetId == GuestTaskLanguageErrorValidator.ImportId))
+                {
+                    if (call.OperandIds.Count != 4
+                        || !LiteralToken(call.OperandIds[1], typeTokens, definitions,
+                            ambiguous, out int typeToken)
+                        || !LiteralToken(call.OperandIds[2], sourceTokens, definitions,
+                            ambiguous, out int sourceToken))
+                    {
+                        Add(context, $"Function '{function.Id}' has an untraceable async language-error token.");
+                        continue;
+                    }
+                    usedTypes.Add(typeToken);
+                    usedSources.Add(sourceToken);
+                }
+            }
         }
         if (!typeTokens.SetEquals(usedTypes) || !sourceTokens.SetEquals(usedSources))
             Add(context, "Language-error catalog contains a token with no literal producer.");
+    }
+
+    private static bool LiteralToken(string register, HashSet<int> allowed,
+        IReadOnlyDictionary<string, GuestInstruction> definitions,
+        IReadOnlySet<string> ambiguous, out int token)
+    {
+        token = 0;
+        return !ambiguous.Contains(register)
+            && definitions.TryGetValue(register, out GuestInstruction? origin)
+            && origin.Op == "constant"
+            && origin.Constant is { Kind: "int32", Value: { } value }
+            && int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture,
+                out token)
+            && token.ToString(CultureInfo.InvariantCulture) == value
+            && allowed.Contains(token);
     }
 
     private static void Add(GuestValidationContext context, string message) =>

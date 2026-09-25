@@ -8,12 +8,16 @@ namespace AvidScript.GuestIr;
 // IR 20 is the first version that can carry both a language-error catalog and
 // Task<int> imports. Paired read imports expose catalog tokens and a frame-rooted
 // object; rethrowing after await still requires Guest lowering.
-internal static class GuestTaskLanguageErrorValidator
+public static class GuestTaskLanguageErrorValidator
 {
     public const int SchemaVersion = 20;
     public const string IrVersion = "1.19";
     public const int SemanticSchemaVersion = 40;
     public const string SemanticVersion = "1.49";
+    public const int AsyncSchemaVersion = 21;
+    public const string AsyncIrVersion = "1.20";
+    public const int AsyncSemanticSchemaVersion = 41;
+    public const string AsyncSemanticVersion = "1.50";
     public const string ImportId = "import:task_fault_language_error_v1";
     public const string ImportName = "avid_task_fault_language_error_v1";
     public const string MetaImportId = "import:task_language_error_meta_v1";
@@ -22,25 +26,30 @@ internal static class GuestTaskLanguageErrorValidator
     public const string RootImportName = "avid_task_language_error_root_v1";
     private const string DiagnosticCode = "ASIR1029";
 
-    public static void Validate(GuestValidationContext context)
+    internal static void Validate(GuestValidationContext context)
     {
         GuestModule module = context.Module;
         bool combinedVersion = module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion;
+        bool asyncVersion = module.SchemaVersion == AsyncSchemaVersion
+            && module.IrVersion == AsyncIrVersion;
         GuestImport[] imports = module.Imports.Where(import =>
             import.Module == GuestTaskResultValidator.ImportModule && import.Name == ImportName).ToArray();
         GuestImport[] metadataImports = module.Imports.Where(import =>
             import.Name == MetaImportName).ToArray();
         GuestImport[] rootImports = module.Imports.Where(import =>
             import.Name == RootImportName).ToArray();
-        if (!combinedVersion && imports.Length == 0
+        if (!combinedVersion && !asyncVersion && imports.Length == 0
             && metadataImports.Length == 0 && rootImports.Length == 0) return;
-        if (!combinedVersion || module.Language != "csharp"
-            || module.Provenance.SemanticSchemaVersion != SemanticSchemaVersion
-            || module.Provenance.SemanticVersion != SemanticVersion
-            || module.LanguageErrorCatalog is null || module.LanguageOutcomeTypes is null
+        if ((!combinedVersion && !asyncVersion) || module.Language != "csharp"
+            || module.Provenance.SemanticSchemaVersion
+                != (asyncVersion ? AsyncSemanticSchemaVersion : SemanticSchemaVersion)
+            || module.Provenance.SemanticVersion
+                != (asyncVersion ? AsyncSemanticVersion : SemanticVersion)
+            || module.LanguageErrorCatalog is null
+            || combinedVersion && module.LanguageOutcomeTypes is null
             || imports.Length != 1)
         {
-            Add(context, "Task language errors require Semantic 40/1.49, Guest IR 20/1.19, a catalog and exactly one fault import.");
+            Add(context, "Task language errors require Semantic 40/1.49 with IR 20/1.19 or Semantic 41/1.50 with IR 21/1.20, a catalog and exactly one fault import.");
             return;
         }
 
@@ -70,8 +79,15 @@ internal static class GuestTaskLanguageErrorValidator
 
         if (module.LanguageErrorCatalog is { } catalog)
             ValidateCallTokens(context, fault, catalog);
+        if (asyncVersion)
+            ValidateAsyncFaultRoots(context, fault);
 
-        if (metadataImports.Length == 0 && rootImports.Length == 0) return;
+        if (metadataImports.Length == 0 && rootImports.Length == 0)
+        {
+            if (asyncVersion)
+                Add(context, "Async Task language errors require the metadata/root read import pair.");
+            return;
+        }
         if (metadataImports.Length != 1 || rootImports.Length != 1)
         {
             Add(context, "Task language-error read imports must be declared as one metadata/root pair.");
@@ -91,13 +107,33 @@ internal static class GuestTaskLanguageErrorValidator
         && import.DispatchClass == "semantic" && import.OptimizationClass == "none"
         && import.BindingOrdinal == -1;
 
+    private static void ValidateAsyncFaultRoots(GuestValidationContext context,
+        GuestImport fault)
+    {
+        foreach (GuestFunction function in context.Module.Functions)
+        foreach (GuestBasicBlock block in function.Blocks)
+        for (int index = 0; index < block.Instructions.Count; ++index)
+        {
+            GuestInstruction call = block.Instructions[index];
+            if (call.Op != "call" || call.TargetId != fault.Id) continue;
+            if (call.OperandIds.Count != 4 || index < 2
+                || block.Instructions[index - 1] is not { Op: "managed_set" } set
+                || set.TargetId != "field:code" || set.OperandIds.Count != 2
+                || set.OperandIds[0] != call.OperandIds[3]
+                || set.OperandIds[1] != call.OperandIds[1]
+                || block.Instructions[index - 2] is not { Op: "managed_new" } create
+                || create.ResultId != call.OperandIds[3])
+                Add(context, $"Function '{function.Id}' must fault with a fresh frame-rooted error object carrying the same type token.");
+        }
+    }
+
     private static void ValidateCallTokens(GuestValidationContext context, GuestImport fault,
         GuestLanguageErrorCatalog catalog)
     {
         HashSet<int> types = catalog.Types.Select(item => item.Token).ToHashSet();
         HashSet<int> sources = catalog.Sources.Select(item => item.Token).ToHashSet();
         Dictionary<string, (string TypeField, string SourceField)> outcomes =
-            context.Module.LanguageOutcomeTypes!
+            (context.Module.LanguageOutcomeTypes ?? Array.Empty<GuestLanguageOutcomeType>())
                 .Where(item => context.Types.TryGetValue(item.TypeId, out GuestType? type)
                     && type.Fields.Count >= 3)
                 .ToDictionary(item => item.TypeId, item =>

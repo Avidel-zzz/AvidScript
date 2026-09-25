@@ -458,6 +458,13 @@ function Test-CompilerInjectedBindingImport {
         $LanguageErrorBridges = @(
             @{ Id = 'import:language_error_heap'; Name = 'avid_managed_heap_v1'; Parameters = @('type:int32', 'type:int32', 'type:int32', 'type:int32'); Result = 'type:int32' }
             @{ Id = 'import:language_error_report_v1'; Name = 'avid_language_error_report_v1'; Parameters = @('type:int32', 'type:int32', 'type:language_error_root'); Result = 'type:int32' }
+            @{ Id = 'import:$async:task_i32_v1'; Name = 'avid_task_i32_v1'; Parameters = @('type:int32', 'type:int64', 'type:int32', 'type:int32'); Result = 'type:int64' }
+            @{ Id = 'import:$async:task_bind_producer_v1'; Name = 'avid_task_bind_producer_v1'; Parameters = @('type:int64', 'type:int64'); Result = 'type:int32' }
+            @{ Id = 'import:$async:task_propagate_failure_v1'; Name = 'avid_task_propagate_failure_v1'; Parameters = @('type:int64', 'type:int64'); Result = 'type:int32' }
+            @{ Id = 'import:$async:task_retain_for_continuation_v1'; Name = 'avid_task_retain_for_continuation_v1'; Parameters = @('type:int64', 'type:int64'); Result = 'type:int32' }
+            @{ Id = 'import:task_fault_language_error_v1'; Name = 'avid_task_fault_language_error_v1'; Parameters = @('type:int64', 'type:int32', 'type:int32', 'type:language_error_root'); Result = 'type:int32' }
+            @{ Id = 'import:task_language_error_meta_v1'; Name = 'avid_task_language_error_meta_v1'; Parameters = @('type:int64'); Result = 'type:int64' }
+            @{ Id = 'import:task_language_error_root_v1'; Name = 'avid_task_language_error_root_v1'; Parameters = @('type:int64'); Result = 'type:language_error_root' }
         )
         foreach ($Bridge in $LanguageErrorBridges) {
             if ([string]$Import.name -ceq $Bridge.Name) {
@@ -1126,6 +1133,7 @@ $LegacyDotNetWasmPath = Join-Path $OutputRoot "$ArtifactStem.dotnet.wasm"
 $FrontendModel = $null
 $SemanticModel = $null
 $BoundedSemanticArtifact = $false
+$BoundedAsyncSemanticArtifact = $false
 $GuestIrModel = $null
 $DebugMapModel = $null
 $StateSchemaModel = $null
@@ -1538,12 +1546,23 @@ elseif (-not $SemanticCacheHit) {
         }
     }
     $SemanticErrors = @($SemanticModel.diagnostics | Where-Object { [string]$_.severity -ceq "error" })
-    $BoundedSemanticArtifact = $LanguageErrors -ceq "bounded" -and
-        $SemanticExitCode -eq 1 -and
-        $null -ne $SemanticModel -and -not [bool]$SemanticModel.succeeded -and
+    $BoundedSyncSemanticArtifact = $null -ne $SemanticModel -and
+        [int]$SemanticModel.schema_version -in @(34, 40) -and
         @($SemanticModel.exception_flows | Where-Object { $null -ne $_ }).Count -gt 0 -and
         $SemanticErrors.Count -gt 0 -and
         @($SemanticErrors | Where-Object { [string]$_.code -cne "ASCS3001" }).Count -eq 0
+    $BoundedAsyncSemanticArtifact = $null -ne $SemanticModel -and
+        [int]$SemanticModel.schema_version -eq 41 -and
+        [string]$SemanticModel.semantic_version -ceq '1.50' -and
+        @($SemanticModel.async_methods | Where-Object {
+            $null -ne $_.PSObject.Properties['error_plan'] -and $null -ne $_.error_plan
+        }).Count -gt 0 -and
+        $SemanticErrors.Count -gt 0 -and
+        @($SemanticErrors | Where-Object { [string]$_.code -cne "ASCS5422" }).Count -eq 0
+    $BoundedSemanticArtifact = $LanguageErrors -ceq "bounded" -and
+        $SemanticExitCode -eq 1 -and
+        $null -ne $SemanticModel -and -not [bool]$SemanticModel.succeeded -and
+        ($BoundedSyncSemanticArtifact -or $BoundedAsyncSemanticArtifact)
     if ($SemanticExitCode -ne 0 -and -not $BoundedSemanticArtifact -or
         $null -eq $SemanticModel -or
         -not [bool]$SemanticModel.succeeded -and -not $BoundedSemanticArtifact) {
@@ -1555,7 +1574,9 @@ elseif (-not $SemanticCacheHit) {
         exit 1
     }
     if ($BoundedSemanticArtifact) {
-        $Diagnostics = @($Diagnostics | Where-Object { [string]$_.code -cne "ASCS3001" })
+        $Diagnostics = @($Diagnostics | Where-Object {
+            [string]$_.code -cne $(if ($BoundedAsyncSemanticArtifact) { 'ASCS5422' } else { 'ASCS3001' })
+        })
     }
 }
 
@@ -2036,8 +2057,12 @@ $MissingObservedExports = @($ExpectedObservedExports | Where-Object { $ObservedE
 $UnexpectedObservedExports = @($ObservedExports | Where-Object { $ExpectedObservedExports -notcontains $_ })
 # This entry publishes the current compiler contract. Keep the exact pair aligned
 # with GuestModuleValidator; TestCSharpGuestBuildContracts exercises real output.
-$ExpectedGuestSchema = if ($BoundedSemanticArtifact) { 17 } else { 14 }
-$ExpectedGuestVersion = if ($BoundedSemanticArtifact) { "1.16" } else { "1.13" }
+$ExpectedGuestSchema = if ($BoundedAsyncSemanticArtifact) { 21 }
+    elseif ($BoundedSemanticArtifact -and [int]$SemanticModel.schema_version -eq 40) { 20 }
+    elseif ($BoundedSemanticArtifact) { 17 } else { 14 }
+$ExpectedGuestVersion = if ($BoundedAsyncSemanticArtifact) { "1.20" }
+    elseif ($BoundedSemanticArtifact -and [int]$SemanticModel.schema_version -eq 40) { "1.19" }
+    elseif ($BoundedSemanticArtifact) { "1.16" } else { "1.13" }
 $GuestContractValid = [int]$GuestIrModel.schema_version -eq $ExpectedGuestSchema -and
     [string]$GuestIrModel.ir_version -ceq $ExpectedGuestVersion -and
     (-not $BoundedSemanticArtifact -or $null -ne $GuestIrModel.language_error_catalog) -and

@@ -92,7 +92,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 
 - 编译器只实现了部分 C# 语法和 UE API；不能把任意 .NET 项目或 NuGet 包直接作为脚本运行。
 - `Task<int>` 可以在同一脚本 Session 内调用并等待；把 Task 交给另一个 Session 等待还不支持。见 [Task 结果说明](Docs/Phase66/P66.C4_Task_Result_Contract.md)。
-- 同步 `throw/catch` 需要构建参数 `-LanguageErrors bounded`。异步方法中的 `catch` 和 `finally` 尚未完整支持。见 [异常处理说明](Docs/Phase66/P66.C3_Language_Error_Channel_Contract.md)。
+- `-LanguageErrors bounded` 支持同步 `throw/catch`；在受支持的 `async Task<int>` 中，`throw new InvalidOperationException()` 能使任务失败。`await` 后的 `catch` 和异步 `finally` 仍不支持。见 [同步异常](Docs/Phase66/P66.C3_Language_Error_Channel_Contract.md)和 [异步异常](Docs/Phase66/P66.C5_Async_Language_Error_Contract.md)。
 - 修改 C# 声明的 `UClass`、`UProperty` 或 `UFunction` 后，需要重新构建并重启 Editor。
 
 ## Development

@@ -42,6 +42,7 @@ internal static class SemanticAsyncTests
         const string source = """
             using AvidScript;
             using System;
+            using System.Runtime.InteropServices;
             using System.Threading.Tasks;
             public static class Script
             {
@@ -55,6 +56,11 @@ internal static class SemanticAsyncTests
                 {
                     await AvidContinuations.NextTickAsync();
                 }
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
+                public static void Tick(float deltaSeconds)
+                {
+                    float elapsed = deltaSeconds + 1.0f;
+                }
             }
             """;
         SemanticDocument document = Analyze(source, "Scripts/TaskIntThrow.cs");
@@ -64,6 +70,8 @@ internal static class SemanticAsyncTests
             && document.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion
             && document.SemanticVersion == SemanticContract.AsyncLanguageErrorSemanticVersion
             && document.AsyncMethods.Count == 2
+            && document.ControlFlowGraphs.Any(graph =>
+                graph.MethodSymbolId.Contains(".Tick(", StringComparison.Ordinal))
             && SemanticAsyncInvocationValidator.IsValid(document)
             && SemanticAsyncErrorPlanValidator.IsValid(document),
             "async Task<int> throw must publish a validated error plan: "
@@ -113,7 +121,8 @@ internal static class SemanticAsyncTests
             "new InvalidOperationException()",
             "new InvalidOperationException(\"message\")", StringComparison.Ordinal),
             "Scripts/TaskIntThrowArguments.cs");
-        Assert(!unsupported.Succeeded && unsupported.Diagnostics.Any(item => item.Code == "ASCS5421"),
+        Assert(!unsupported.Succeeded && unsupported.ControlFlowGraphs.Count == 0
+            && unsupported.Diagnostics.Any(item => item.Code == "ASCS5421"),
             "a parameterized exception constructor must fail at the source location");
         SemanticDocument cleanup = Analyze(source.Replace(
             "if (fail) throw new InvalidOperationException();",

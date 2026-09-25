@@ -62,11 +62,17 @@ public static class GuestCommandLine
             string semanticSha256 = Convert.ToHexString(SHA256.HashData(artifact)).ToLowerInvariant();
             SemanticDocument document = SemanticArtifactReader.Deserialize(artifact);
             GuestModule? module;
-            if (boundedLanguageErrors && document.ExceptionFlows is { Count: > 0 })
+            bool asyncLanguageErrors = document.SchemaVersion
+                    == SemanticContract.AsyncLanguageErrorSchemaVersion
+                && document.AsyncMethods.Any(method => method.ErrorPlan is not null);
+            if (boundedLanguageErrors && (document.ExceptionFlows is { Count: > 0 }
+                    || asyncLanguageErrors)
+                && (!dataLaneFusionEnabled || debugInstrumentationEnabled))
+                throw new ArgumentException(
+                    "Bounded language errors require data-lane fusion enabled and debug instrumentation disabled.");
+            if (boundedLanguageErrors && document.ExceptionFlows is { Count: > 0 }
+                && !asyncLanguageErrors)
             {
-                if (!dataLaneFusionEnabled || debugInstrumentationEnabled)
-                    throw new ArgumentException(
-                        "Bounded language errors require data-lane fusion enabled and debug instrumentation disabled.");
                 if (!CSharpLanguageErrorCompiler.TryLower(document, semanticSha256,
                         out CSharpLanguageErrorCompilation? compilation, out string? error)
                     || compilation is null)
@@ -83,7 +89,8 @@ public static class GuestCommandLine
                     document,
                     semanticSha256,
                     enableDataLaneFusion: dataLaneFusionEnabled,
-                    enableDebugInstrumentation: debugInstrumentationEnabled);
+                    enableDebugInstrumentation: debugInstrumentationEnabled,
+                    enableAsyncLanguageErrors: boundedLanguageErrors && asyncLanguageErrors);
                 if (!result.Succeeded || result.Module is null)
                 {
                     DeletePublishedArtifacts(outputPath, stateSchemaPath, debugMapPath);

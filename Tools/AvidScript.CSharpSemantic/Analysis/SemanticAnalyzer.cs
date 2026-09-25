@@ -148,9 +148,12 @@ public static class SemanticAnalyzer
                 (diagnostic.Code, diagnostic.Severity, diagnostic.Span.Start, diagnostic.Span.Length))
             .Select(group => group.First())
             .ToArray();
-        bool hasSupportErrors = supportDiagnostics.Any(diagnostic => diagnostic.Severity == "error");
+        // ASCS5422 marks a bounded async throw plan for opt-in lowering. It does not
+        // invalidate control-flow graphs for unrelated synchronous methods.
+        bool hasBlockingSupportErrors = supportDiagnostics.Any(diagnostic =>
+            diagnostic.Severity == "error" && diagnostic.Code != "ASCS5422");
         IReadOnlyList<SemanticControlFlowGraph> controlFlowGraphs =
-            hasSupportErrors && controlFlowProjection.ExceptionFlows.Count == 0
+            hasBlockingSupportErrors && controlFlowProjection.ExceptionFlows.Count == 0
             ? Array.Empty<SemanticControlFlowGraph>()
             : controlFlowProjection.Graphs;
         IReadOnlyList<SemanticDiagnostic> compilerDiagnostics = context.Compilation

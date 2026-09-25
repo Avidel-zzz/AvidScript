@@ -12,9 +12,11 @@ public static class CSharpGuestLowerer
         SemanticDocument document,
         string semanticSha256,
         bool enableDataLaneFusion = true,
-        bool enableDebugInstrumentation = false) =>
+        bool enableDebugInstrumentation = false,
+        bool enableAsyncLanguageErrors = false) =>
         LowerCore(document, semanticSha256, enableDataLaneFusion,
-            enableDebugInstrumentation, Array.Empty<GuestFunction>(), false);
+            enableDebugInstrumentation, Array.Empty<GuestFunction>(), false,
+            enableAsyncLanguageErrors);
 
     internal static CSharpGuestLoweringResult LowerWithFunctionSubstitutes(
         SemanticDocument document,
@@ -23,7 +25,7 @@ public static class CSharpGuestLowerer
         bool includeLanguageExceptionReference = false) =>
         LowerCore(document, semanticSha256, enableDataLaneFusion: true,
             enableDebugInstrumentation: false, substitutes,
-            includeLanguageExceptionReference);
+            includeLanguageExceptionReference, enableAsyncLanguageErrors: false);
 
     private static CSharpGuestLoweringResult LowerCore(
         SemanticDocument document,
@@ -31,14 +33,20 @@ public static class CSharpGuestLowerer
         bool enableDataLaneFusion,
         bool enableDebugInstrumentation,
         IReadOnlyList<GuestFunction> substitutes,
-        bool includeLanguageExceptionReference)
+        bool includeLanguageExceptionReference,
+        bool enableAsyncLanguageErrors)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(semanticSha256);
         ArgumentNullException.ThrowIfNull(substitutes);
 
         List<GuestDiagnostic> diagnostics = new();
-        ValidateInput(document, semanticSha256, diagnostics);
+        bool asyncLanguageErrors = enableAsyncLanguageErrors
+            && document.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion
+            && document.SemanticVersion == SemanticContract.AsyncLanguageErrorSemanticVersion;
+        ValidateInput(document, semanticSha256, asyncLanguageErrors, diagnostics);
+        if (asyncLanguageErrors && document.ExceptionFlows is not null)
+            Add(diagnostics, "ASCG1004", "Async Task faults cannot yet share a module with synchronous language-error methods.");
         if (diagnostics.Count == 0 && enableDebugInstrumentation && CSharpClosureLayout.UsesManagedDelegates(document))
             Add(diagnostics, "ASCG1024", "Debug pause frames require persistent managed roots before captured closures or delegate lists can be instrumented.");
         if (diagnostics.Count != 0)
@@ -54,6 +62,25 @@ public static class CSharpGuestLowerer
         }
 
         IReadOnlyList<GuestType> moduleTypes = typeResult.Types;
+        if (asyncLanguageErrors)
+        {
+            if (moduleTypes.Any(type => type.Id is "type:language_error_payload"
+                    or "type:language_error_root"))
+                return Failure(new[] { new GuestDiagnostic("ASCG1003", "error",
+                    "The async language-error root type identity is already occupied.", null) });
+            GuestTypeLayoutResult errorTypes = GuestDataLayout.ComputeTypes(moduleTypes.Concat(new[]
+            {
+                new GuestType("type:language_error_payload", "struct", "memory",
+                    new[] { new GuestField("field:code", "code", "type:int32", 0) },
+                    null, null, 0, 1),
+                new GuestType("type:language_error_root", "managed_ref", "i64",
+                    Array.Empty<GuestField>(), "type:language_error_payload", null, 8, 8),
+            }).ToArray());
+            if (!errorTypes.Succeeded)
+                return Failure(new[] { new GuestDiagnostic("ASCG1003", "error",
+                    "The async language-error root has an invalid layout.", null) });
+            moduleTypes = errorTypes.Types;
+        }
         if (includeLanguageExceptionReference)
         {
             if (!document.Types.Any(type => type.Id == CSharpThrowProducerLowerer.ExceptionTypeId
@@ -104,7 +131,7 @@ public static class CSharpGuestLowerer
         if (CSharpClosureLayout.UsesManagedDelegates(document))
             imports = imports.Append(new GuestImport(CSharpClosureLayout.HeapImport, GuestManagedHeap.ImportModule, GuestManagedHeap.ImportName,
                 Enumerable.Repeat(CSharpGuestIds.AddressTypeId, 4).ToArray(), CSharpGuestIds.AddressTypeId)).ToArray();
-        if (includeLanguageExceptionReference && !imports.Any(import =>
+        if ((includeLanguageExceptionReference || asyncLanguageErrors) && !imports.Any(import =>
                 import.Module == GuestManagedHeap.ImportModule
                 && import.Name == GuestManagedHeap.ImportName))
             imports = imports.Append(new GuestImport("import:language_error_heap",
@@ -120,6 +147,11 @@ public static class CSharpGuestLowerer
             imports = imports.Append(CSharpTaskResultAbi.Import())
                 .Append(CSharpTaskResultAbi.BindProducerImport())
                 .Append(CSharpTaskResultAbi.PropagateFailureImport()).ToArray();
+        if (asyncLanguageErrors)
+            imports = imports.Append(CSharpTaskResultAbi.RetainForContinuationImport())
+                .Append(CSharpTaskResultAbi.FaultLanguageErrorImport())
+                .Append(CSharpTaskResultAbi.LanguageErrorMetaImport())
+                .Append(CSharpTaskResultAbi.LanguageErrorRootImport()).ToArray();
         if (document.SchemaVersion is SemanticContract.TaskLocalSchemaVersion
             or SemanticContract.TaskAssignmentSchemaVersion
             or SemanticContract.TaskExistingLocalSchemaVersion
@@ -261,13 +293,15 @@ public static class CSharpGuestLowerer
         }
 
         GuestModule module = new(
-            document.SchemaVersion is SemanticContract.TaskLocalSchemaVersion
+            asyncLanguageErrors ? GuestTaskLanguageErrorValidator.AsyncSchemaVersion
+                : document.SchemaVersion is SemanticContract.TaskLocalSchemaVersion
                 or SemanticContract.TaskAssignmentSchemaVersion
                 or SemanticContract.TaskExistingLocalSchemaVersion
                 or SemanticContract.TaskAliasSchemaVersion
                 ? 19 : CSharpTaskResultAbi.Supports(document)
                     ? 18 : GuestModuleValidator.CurrentSchemaVersion,
-            document.SchemaVersion is SemanticContract.TaskLocalSchemaVersion
+            asyncLanguageErrors ? GuestTaskLanguageErrorValidator.AsyncIrVersion
+                : document.SchemaVersion is SemanticContract.TaskLocalSchemaVersion
                 or SemanticContract.TaskAssignmentSchemaVersion
                 or SemanticContract.TaskExistingLocalSchemaVersion
                 or SemanticContract.TaskAliasSchemaVersion
@@ -294,6 +328,9 @@ public static class CSharpGuestLowerer
         {
             FunctionReferences = CSharpManagedDelegateLowerer.BuildContracts(document, moduleTypes, functions),
             FramedExports = framedExports,
+            LanguageErrorCatalog = asyncLanguageErrors
+                ? CSharpAsyncLanguageErrorCatalog.ToGuest(document,
+                    CSharpAsyncLanguageErrorCatalog.Build(document)) : null,
         };
         GuestValidationResult validation = GuestModuleValidator.Validate(module);
         if (!validation.Succeeded)
@@ -312,6 +349,7 @@ public static class CSharpGuestLowerer
     private static void ValidateInput(
         SemanticDocument document,
         string semanticSha256,
+        bool asyncLanguageErrors,
         List<GuestDiagnostic> diagnostics)
     {
         if (!CSharpSemanticInputValidator.IsValid(document))
@@ -323,8 +361,10 @@ public static class CSharpGuestLowerer
         if (document.SchemaVersion < 4
             || !string.Equals(document.Language, "csharp", StringComparison.Ordinal)
             || string.IsNullOrWhiteSpace(document.SemanticVersion)
-            || !document.Succeeded
-            || document.Diagnostics.Any(diagnostic => diagnostic.Severity == "error")
+            || !document.Succeeded && !asyncLanguageErrors
+            || document.Diagnostics.Any(diagnostic => diagnostic.Severity == "error"
+                && !(asyncLanguageErrors && diagnostic.Code == "ASCS5422"))
+            || asyncLanguageErrors && !SemanticAsyncErrorPlanValidator.IsValid(document)
             || !IsSha256(document.Source.Sha256)
             || !IsSha256(document.Source.FrontendSha256)
             || !IsSha256(semanticSha256))

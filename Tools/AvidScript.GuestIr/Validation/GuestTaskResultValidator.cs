@@ -47,25 +47,31 @@ internal static class GuestTaskResultValidator
             && module.Provenance.SemanticVersion == GuestTaskLanguageErrorValidator.SemanticVersion;
         bool combinedIr = module.SchemaVersion == GuestTaskLanguageErrorValidator.SchemaVersion
             && module.IrVersion == GuestTaskLanguageErrorValidator.IrVersion;
+        bool asyncErrorSemantic = module.Provenance.SemanticSchemaVersion
+                == GuestTaskLanguageErrorValidator.AsyncSemanticSchemaVersion
+            && module.Provenance.SemanticVersion == GuestTaskLanguageErrorValidator.AsyncSemanticVersion;
+        bool asyncErrorIr = module.SchemaVersion == GuestTaskLanguageErrorValidator.AsyncSchemaVersion
+            && module.IrVersion == GuestTaskLanguageErrorValidator.AsyncIrVersion;
         if (!taskSemantic && !taskIr && !taskLocalSemantic && !taskAssignmentSemantic
             && !taskExistingLocalSemantic && !taskAliasSemantic && !taskLocalIr
-            && !combinedSemantic && !combinedIr
+            && !combinedSemantic && !combinedIr && !asyncErrorSemantic && !asyncErrorIr
             && taskImports.Length == 0 && producerImports.Length == 0
             && failureImports.Length == 0 && retainedImports.Length == 0) return;
 
         if (!((taskSemantic && taskIr)
             || ((taskLocalSemantic || taskAssignmentSemantic || taskExistingLocalSemantic
                 || taskAliasSemantic) && taskLocalIr)
-            || (combinedSemantic && combinedIr))
+            || (combinedSemantic && combinedIr)
+            || (asyncErrorSemantic && asyncErrorIr))
             || module.Language != "csharp"
             || taskImports.Length != 1)
         {
             context.Add(DiagnosticCode,
-                "Task<int> requires Semantic 35/1.44 with IR 18/1.17, Semantic 36/1.45 through 39/1.48 with IR 19/1.18, or the combined Task/error version.");
+                "Task<int> requires Semantic 35/1.44 with IR 18/1.17, Semantic 36/1.45 through 39/1.48 with IR 19/1.18, or a paired Task/error version.");
             return;
         }
 
-        if (retainedImports.Length != (taskLocalIr || combinedIr ? 1 : 0))
+        if (retainedImports.Length != (taskLocalIr || combinedIr || asyncErrorIr ? 1 : 0))
             context.Add(DiagnosticCode,
                 "Task continuation retention requires exactly one import in Guest IR 19/1.18 or the combined version, and none in older IR.");
 

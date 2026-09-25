@@ -77,7 +77,8 @@ void WasmSection(TArray<uint8>& Module, uint8 Id, const TArray<uint8>& Payload)
 
 FString Provenance(int32 GuestSchema = 17)
 {
-	const FString GuestVersion = GuestSchema == 20 ? TEXT("1.19") : TEXT("1.16");
+	const FString GuestVersion = GuestSchema == 21 ? TEXT("1.20")
+		: GuestSchema == 20 ? TEXT("1.19") : TEXT("1.16");
 	return FString::Printf(TEXT("module_id=%s\nsource_id=Scripts/SourceThrow.cs\nsource_sha256=%s\n")
 		TEXT("frontend_sha256=%s\nsemantic_sha256=%s\nguest_ir=%d/%s"),
 		*ModuleId, *SourceSha256, *FString::ChrN(64, 'b'), *FString::ChrN(64, 'c'),
@@ -90,7 +91,8 @@ TSharedRef<FJsonObject> Document(int32 GuestSchema = 17)
 	Root->SetNumberField(TEXT("schema_version"), 1);
 	Root->SetNumberField(TEXT("guest_ir_schema_version"), GuestSchema);
 	Root->SetStringField(TEXT("guest_ir_version"),
-		GuestSchema == 20 ? TEXT("1.19") : TEXT("1.16"));
+		GuestSchema == 21 ? TEXT("1.20")
+			: GuestSchema == 20 ? TEXT("1.19") : TEXT("1.16"));
 	Root->SetStringField(TEXT("module_id"), ModuleId);
 	Root->SetStringField(TEXT("source_sha256"), SourceSha256);
 	auto Type = MakeShared<FJsonObject>();
@@ -261,6 +263,14 @@ bool FAvidScriptLanguageErrorCatalogRuntimeTest::RunTest(const FString& Paramete
 		&& Source->Line == 1 && Source->Column == 5 && Source->EndLine == 1 && Source->EndColumn == 15);
 	TestNull(TEXT("zero type token is rejected"), Catalog->FindType(0));
 	TestNull(TEXT("unknown source token is rejected"), Catalog->FindSource(2));
+	const FString AsyncJson = Json(Document(21));
+	const TArray<uint8> AsyncWasm = Module(&AsyncJson, true, false, 21);
+	Catalog.Reset();
+	TestTrue(TEXT("IR 21 async Task language-error catalog loads"),
+		FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+			AsyncWasm, ModuleId, Catalog, Error));
+	TestTrue(TEXT("IR 21 authorizes Task language-error fault"),
+		Catalog && Catalog->SupportsTaskLanguageErrorFault());
 
 	for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
 	{
@@ -648,7 +658,7 @@ bool FAvidScriptTaskLanguageErrorVmImportTest::RunTest(const FString& Parameters
 			&& Runtime.GetLanguageErrorCatalog()->SupportsTaskLanguageErrorFault());
 		Runtime.Unload();
 	}
-	for (const int32 GuestSchema : {20, 17})
+	for (const int32 GuestSchema : {20, 21, 17})
 	{
 		const TArray<uint8> Wasm = TaskFaultImportModule(GuestSchema);
 		for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
@@ -662,7 +672,7 @@ bool FAvidScriptTaskLanguageErrorVmImportTest::RunTest(const FString& Parameters
 				continue;
 			}
 			TestAvidScriptRuntimeLaneIdentity(*this, Lane, Result);
-			const bool bAllowedVersion = GuestSchema == 20;
+			const bool bAllowedVersion = GuestSchema == 20 || GuestSchema == 21;
 			TestEqual(TEXT("catalog gates the imported function by IR version"),
 				Runtime.GetLanguageErrorCatalog()->SupportsTaskLanguageErrorFault(), bAllowedVersion);
 			TestFalse(TEXT("WASM call rejects missing Session task context"),
@@ -683,7 +693,7 @@ bool FAvidScriptTaskLanguageErrorVmImportTest::RunTest(const FString& Parameters
 		AvidScript::TaskResult::Abi::LanguageErrorMetaImport,
 		AvidScript::TaskResult::Abi::LanguageErrorRootImport })
 	{
-		for (const int32 GuestSchema : {20, 17})
+		for (const int32 GuestSchema : {20, 21, 17})
 		{
 			const TArray<uint8> Wasm = TaskReadImportModule(GuestSchema, ImportName);
 			for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
@@ -700,7 +710,7 @@ bool FAvidScriptTaskLanguageErrorVmImportTest::RunTest(const FString& Parameters
 				TestFalse(TEXT("Task read import rejects missing Session task context"),
 					Runtime.BeginPlay(Result));
 				TestEqual(TEXT("Task read import preserves version or context rejection"),
-					Result.ErrorCategory, GuestSchema == 20
+					Result.ErrorCategory, GuestSchema == 20 || GuestSchema == 21
 						? FString(TEXT("task_result_context"))
 						: FString(TEXT("task_language_error_version")));
 				TestEqual(TEXT("VM reports the called Task read import"),

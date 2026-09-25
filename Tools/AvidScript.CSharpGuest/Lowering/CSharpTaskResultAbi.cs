@@ -41,7 +41,9 @@ internal static class CSharpTaskResultAbi
         || (document.SchemaVersion == SemanticContract.TaskExistingLocalSchemaVersion
             && document.SemanticVersion == SemanticContract.TaskExistingLocalSemanticVersion)
         || (document.SchemaVersion == SemanticContract.TaskAliasSchemaVersion
-            && document.SemanticVersion == SemanticContract.TaskAliasSemanticVersion);
+            && document.SemanticVersion == SemanticContract.TaskAliasSemanticVersion)
+        || (document.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion
+            && document.SemanticVersion == SemanticContract.AsyncLanguageErrorSemanticVersion);
 
     public static string[] TaskLocalSymbols(SemanticAsyncMethod method) =>
         (method.TaskLocalSymbolIds ?? method.Segments

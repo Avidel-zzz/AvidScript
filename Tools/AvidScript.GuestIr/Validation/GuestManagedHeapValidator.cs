@@ -46,7 +46,9 @@ internal static class GuestManagedHeapValidator
             || module.Types.Any(type => type.Kind == "array" && type.ElementTypeId is not null && Has(type.ElementTypeId)))
             Add(context, "Managed references cannot enter untraced globals, static data or array storage.");
         bool combinedVersion = module.SchemaVersion == GuestTaskLanguageErrorValidator.SchemaVersion
-            && module.IrVersion == GuestTaskLanguageErrorValidator.IrVersion;
+            && module.IrVersion == GuestTaskLanguageErrorValidator.IrVersion
+            || module.SchemaVersion == GuestTaskLanguageErrorValidator.AsyncSchemaVersion
+            && module.IrVersion == GuestTaskLanguageErrorValidator.AsyncIrVersion;
         bool catalogVersion = module.SchemaVersion == GuestLanguageErrorCatalogValidator.SchemaVersion
             && module.IrVersion == GuestLanguageErrorCatalogValidator.IrVersion;
         foreach (GuestImport import in module.Imports)
