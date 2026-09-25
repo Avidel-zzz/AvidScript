@@ -1254,4 +1254,147 @@ bool FAvidScriptCompiledAsyncExceptionFlowTest::RunTest(const FString& Parameter
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptCompiledIntegratedLanguageFlowTest,
+	"AvidScript.Runtime.Continuation.CompiledIntegratedLanguageFlow",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptCompiledIntegratedLanguageFlowTest::RunTest(const FString& Parameters)
+{
+	if (!GEngine) return false;
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false,
+		TEXT("AvidScriptCompiledIntegratedLanguageFlowWorld"));
+	if (!TestNotNull(TEXT("Integrated language-flow world created"), World)) return false;
+	GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+	World->InitializeActorsForPlay(FURL());
+	ON_SCOPE_EXIT { GEngine->DestroyWorldContext(World); World->DestroyWorld(false); };
+
+	const FString Fixture = FPlatformMisc::GetEnvironmentVariable(
+		TEXT("AVIDSCRIPT_INTEGRATED_WASM_PATH"));
+	const FString ModuleId = FPlatformMisc::GetEnvironmentVariable(
+		TEXT("AVIDSCRIPT_INTEGRATED_MODULE_ID"));
+	auto ReadOffset = [&](const TCHAR* Name, int32& OutOffset) -> bool
+	{
+		const FString Text = FPlatformMisc::GetEnvironmentVariable(Name);
+		return LexTryParseString(OutOffset, *Text)
+			&& OutOffset >= 0 && OutOffset < 65536;
+	};
+	int32 ModeOffset = -1;
+	int32 ResultOffset = -1;
+	int32 CleanupOffset = -1;
+	if (!TestFalse(TEXT("Integrated WASM fixture path is set"), Fixture.IsEmpty())
+		|| !TestFalse(TEXT("Integrated module id is set"), ModuleId.IsEmpty())
+		|| !TestTrue(TEXT("Integrated mode offset is valid"),
+			ReadOffset(TEXT("AVIDSCRIPT_INTEGRATED_MODE_OFFSET"), ModeOffset))
+		|| !TestTrue(TEXT("Integrated result offset is valid"),
+			ReadOffset(TEXT("AVIDSCRIPT_INTEGRATED_RESULT_OFFSET"), ResultOffset))
+		|| !TestTrue(TEXT("Integrated cleanup offset is valid"),
+			ReadOffset(TEXT("AVIDSCRIPT_INTEGRATED_CLEANUP_OFFSET"), CleanupOffset)))
+		return false;
+	TArray<uint8> Bytes;
+	if (!TestTrue(TEXT("Integrated WASM fixture exists"),
+		FFileHelper::LoadFileToArray(Bytes, *Fixture))) return false;
+
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime,
+		EAvidScriptVmBackendKind::Wamr})
+	for (const int32 Mode : {0, 1, 2})
+	{
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime
+			? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		FAvidScriptWasmRuntimeInstance Runtime(Selection);
+		FAvidScriptWasmSmokeResult Result;
+		if (!TestTrue(TEXT("Integrated module loads"),
+			Runtime.LoadModule(Bytes.GetData(), Bytes.Num(), ModuleId, Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		if (!TestTrue(TEXT("Integrated continuation export exists"),
+			Runtime.ValidateRequiredExports({TEXT("avid_on_continuation_v2")}, Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		const auto Owner = MakeShared<FAvidScriptSessionContinuations>();
+		auto& Endpoint = Owner->ResetActive(World);
+		FAvidScriptWasmHostContext Context;
+		Context.Tasks = &Endpoint;
+		Context.Continuations = &Endpoint;
+		Context.World = World;
+		Runtime.SetHostContext(Context);
+		uint8 ModeBytes[sizeof(int32)] = {};
+		FMemory::Memcpy(ModeBytes, &Mode, sizeof(Mode));
+		FString Error;
+		if (!TestTrue(TEXT("Inject integrated fixture mode"),
+			Runtime.WriteStateBytes(ModeOffset, MakeArrayView(ModeBytes), Error)))
+		{ AddError(Error); return false; }
+		if (!TestTrue(TEXT("Integrated BeginPlay suspends"), Runtime.BeginPlay(Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+
+		int32 Resumes = 0;
+		bool bSawUncaught = false;
+		for (int32 Round = 0; Round < 8; ++Round)
+		{
+			World->Tick(LEVELTICK_All, 0.02f);
+			++GFrameCounter;
+			TArray<FAvidScriptContinuationCompletion> Ready;
+			Owner->DrainReady(Ready);
+			for (const FAvidScriptContinuationCompletion& Completion : Ready)
+			{
+				const bool bDispatched = Runtime.DispatchContinuation(Completion, Result);
+				if (!bDispatched)
+				{
+					TestTrue(TEXT("Only unmatched mode may leave async void"),
+						Mode == 2 && Completion.Status == EAvidScriptContinuationStatus::Failed
+						&& !bSawUncaught);
+					TestEqual(TEXT("Integrated unmatched error keeps its category"),
+						Result.ErrorCategory, FString(TEXT("language_error_uncaught")));
+					TestTrue(TEXT("Integrated unmatched error names type and source"),
+						Result.ErrorMessage.Contains(TEXT("ArgumentException"))
+						&& Result.ErrorMessage.Contains(TEXT("IntegratedLanguageFlow.cs")));
+					bSawUncaught = true;
+				}
+				TestTrue(TEXT("Integrated continuation finalizes"),
+					Owner->FinalizeDispatched(Completion.Token, bDispatched));
+				++Resumes;
+			}
+		}
+		auto ReadInt32 = [&](const int32 Offset) -> int32
+		{
+			uint8 ValueBytes[sizeof(int32)] = {};
+			FString ReadError;
+			if (!Runtime.ReadStateBytes(Offset, MakeArrayView(ValueBytes), ReadError))
+			{
+				AddError(ReadError);
+				return MIN_int32;
+			}
+			int32 Value = 0;
+			FMemory::Memcpy(&Value, ValueBytes, sizeof(Value));
+			return Value;
+		};
+		TestEqual(TEXT("Integrated producer, consumer and outer await resume"),
+			Resumes, 3);
+		TestEqual(TEXT("Integrated unmatched error is reported once"),
+			bSawUncaught, Mode == 2);
+		TestEqual(TEXT("Integrated result matches .NET"),
+			ReadInt32(ResultOffset), Mode == 0 ? 16 : Mode == 1 ? 17 : 0);
+		TestEqual(TEXT("Integrated finally executes once"),
+			ReadInt32(CleanupOffset), 1);
+		TestEqual(TEXT("Integrated task results are released"),
+			Owner->GetTaskResultsForTesting().GetCount(), 0);
+		TestEqual(TEXT("Integrated continuations are retired"),
+			Owner->GetActiveCount(), 0);
+		TestEqual(TEXT("Integrated array capabilities are released"),
+			Runtime.GetArrayValueHeapForTesting().GetStats().LiveValues, 0);
+		Owner->Teardown();
+		AvidScript::Managed::FHeap* Heap = Runtime.GetManagedHeapForTesting();
+		TestEqual(TEXT("Integrated managed roots are released"),
+			Heap->GetStats().LiveRoots, static_cast<uint32>(0));
+		TestEqual(TEXT("Integrated managed GC succeeds"),
+			Heap->Collect(), AvidScript::Managed::EHeapError::Ok);
+		TestEqual(TEXT("Integrated managed objects are reclaimed"),
+			Heap->GetStats().LiveObjects, static_cast<uint32>(0));
+		AddInfo(FString::Printf(TEXT("compiled integrated language flow backend=%d mode=%d result=%d cleanup=%d resumes=%d"),
+			static_cast<int32>(Backend), Mode, ReadInt32(ResultOffset),
+			ReadInt32(CleanupOffset), Resumes));
+	}
+	return true;
+}
+
 #endif

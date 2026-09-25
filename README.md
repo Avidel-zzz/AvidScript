@@ -83,6 +83,7 @@ public static void EndPlay()
 | 范围 | 当前状态 |
 | --- | --- |
 | 模板工程 · Win64 Editor / Development | 上述构建与 ActorLifecycle 流程已验证 |
+| 异步、数组与泛型组合 | [示例](Fixtures/Phase66/IntegratedLanguageFlow.cs) 已通过 Win64 双后端自动化；[直接在 `try` 内等待下一帧](Fixtures/Phase66/DirectAwaitInTry.cs)尚不支持 |
 | Android / iOS / Shipping | 尚未验收 |
 | 真实多人游戏 | 尚未验收；提供 RPC 与属性复制样例 |
 
