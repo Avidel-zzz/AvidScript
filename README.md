@@ -92,7 +92,7 @@ public static void EndPlay()
 
 - 只编译项目支持的 C# 子集；不能直接运行任意 .NET 程序或 NuGet 包。
 - `Task<int>` 只能在同一脚本实例内等待。[详细限制](Docs/Phase66/P66.C4_Task_Result_Contract.md)
-- `await` 后的 `catch/finally` 仍在开发，尚未通过正式 Win64 运行验收。[进展记录](Docs/Phase66/P66.C5_Async_Language_Error_Contract.md)
+- `await` 后的 `catch/finally` 仅支持受限 `Task<int>` 场景，需用 `-LanguageErrors bounded -AsyncExceptionFlow` 显式开启；过滤器和处理块内再次 `await` 暂不支持。[详细限制](Docs/Phase66/P66.C5_Async_Language_Error_Contract.md)
 - 修改 C# 声明的 `UClass`、`UProperty` 或 `UFunction` 后，需要重新构建并重启 Editor。
 
 ## Development

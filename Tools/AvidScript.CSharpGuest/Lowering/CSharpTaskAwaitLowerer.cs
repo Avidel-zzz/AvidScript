@@ -84,7 +84,7 @@ internal static class CSharpTaskAwaitLowerer
                     releaseDirectToken: !taskLocal)) return false;
         }
         else if (method.TaskResultTypeId is null
-            && context.Document.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion)
+            && ReportsUnhandledLanguageError(context.Document))
         {
             if (!EmitUnhandledFailure(context, method, token, state!, segment.Ordinal,
                     failedBlock, failedInstructions, blocks,
@@ -216,7 +216,7 @@ internal static class CSharpTaskAwaitLowerer
                     rejectedInstructions, blocks, releaseDirectToken: false)) return false;
         }
         else if (method.TaskResultTypeId is null
-            && context.Document.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion)
+            && ReportsUnhandledLanguageError(context.Document))
         {
             if (!EmitUnhandledFailure(context, method, token, state!, block,
                     rejected, rejectedInstructions, blocks,
@@ -278,6 +278,12 @@ internal static class CSharpTaskAwaitLowerer
             && (!releaseTaskLocals || CSharpTaskResultAbi.ReleaseTaskLocal(
                 context, method, block, output));
     }
+
+    private static bool ReportsUnhandledLanguageError(SemanticDocument document) =>
+        (document.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion
+            && document.SemanticVersion == SemanticContract.AsyncLanguageErrorSemanticVersion)
+        || (document.SchemaVersion == SemanticContract.AsyncExceptionFlowSchemaVersion
+            && document.SemanticVersion == SemanticContract.AsyncExceptionFlowSemanticVersion);
 
     private static bool StoreResult(CSharpFunctionLoweringContext context,
         SemanticAsyncAwaitSite site, GuestRegister value, int block,

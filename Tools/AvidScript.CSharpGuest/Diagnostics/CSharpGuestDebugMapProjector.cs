@@ -196,6 +196,7 @@ public static class CSharpGuestDebugMapProjector
                     if (targetSegment is null
                         || !targets.TryAdd(functionId, new AsyncResumeDebugTarget(
                             method.MethodSymbolId,
+                            incoming.CallbackId,
                             targetSegment.Ordinal,
                             targetSegment.Span)))
                     {
@@ -218,6 +219,7 @@ public static class CSharpGuestDebugMapProjector
                 string functionId = CSharpGuestIds.AsyncResumeFunction(incoming.CallbackId);
                 if (!targets.TryAdd(functionId, new AsyncResumeDebugTarget(
                     method.MethodSymbolId,
+                    incoming.CallbackId,
                     method.Segments[index].Ordinal,
                     method.Segments[index].Span)))
                 {
@@ -257,7 +259,9 @@ public static class CSharpGuestDebugMapProjector
         string debugMethodId = string.Concat(
             target.MethodSymbolId,
             "#async_resume:",
-            target.SegmentOrdinal.ToString(CultureInfo.InvariantCulture));
+            target.SegmentOrdinal.ToString(CultureInfo.InvariantCulture),
+            ":",
+            target.CallbackId.ToString(CultureInfo.InvariantCulture));
         if (!methodIds.Add(debugMethodId))
         {
             throw new InvalidDataException(
@@ -561,6 +565,7 @@ public static class CSharpGuestDebugMapProjector
 
     private sealed record AsyncResumeDebugTarget(
         string MethodSymbolId,
+        int CallbackId,
         int SegmentOrdinal,
         SemanticSpan Span);
 }

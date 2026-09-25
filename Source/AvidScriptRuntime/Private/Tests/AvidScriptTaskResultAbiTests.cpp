@@ -943,4 +943,191 @@ bool FAvidScriptCompiledTaskLanguageErrorTest::RunTest(const FString& Parameters
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptCompiledAsyncExceptionFlowTest,
+	"AvidScript.Runtime.Continuation.CompiledAsyncExceptionFlow",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptCompiledAsyncExceptionFlowTest::RunTest(const FString& Parameters)
+{
+	if (!GEngine) return false;
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false,
+		TEXT("AvidScriptCompiledAsyncExceptionFlowWorld"));
+	if (!TestNotNull(TEXT("Async exception-flow world created"), World)) return false;
+	GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+	World->InitializeActorsForPlay(FURL());
+	ON_SCOPE_EXIT { GEngine->DestroyWorldContext(World); World->DestroyWorld(false); };
+
+	const FString Fixture = FPlatformMisc::GetEnvironmentVariable(
+		TEXT("AVIDSCRIPT_ASYNC_EXCEPTION_WASM_PATH"));
+	const FString ModuleId = FPlatformMisc::GetEnvironmentVariable(
+		TEXT("AVIDSCRIPT_ASYNC_EXCEPTION_MODULE_ID"));
+	auto ReadOffset = [&](const TCHAR* Name, int32& OutOffset) -> bool
+	{
+		const FString Text = FPlatformMisc::GetEnvironmentVariable(Name);
+		return LexTryParseString(OutOffset, *Text)
+			&& OutOffset >= 0 && OutOffset < 65536;
+	};
+	int32 ModeOffset = -1;
+	int32 ResultOffset = -1;
+	int32 CleanupOffset = -1;
+	if (!TestFalse(TEXT("Formal IR 22 fixture path is set"), Fixture.IsEmpty())
+		|| !TestFalse(TEXT("Formal IR 22 module id is set"), ModuleId.IsEmpty())
+		|| !TestTrue(TEXT("Mode state offset is valid"),
+			ReadOffset(TEXT("AVIDSCRIPT_ASYNC_EXCEPTION_MODE_OFFSET"), ModeOffset))
+		|| !TestTrue(TEXT("Result state offset is valid"),
+			ReadOffset(TEXT("AVIDSCRIPT_ASYNC_EXCEPTION_RESULT_OFFSET"), ResultOffset))
+		|| !TestTrue(TEXT("Cleanup state offset is valid"),
+			ReadOffset(TEXT("AVIDSCRIPT_ASYNC_EXCEPTION_CLEANUP_OFFSET"), CleanupOffset)))
+		return false;
+	TArray<uint8> Bytes;
+	if (!TestTrue(TEXT("Formal IR 22 WASM exists"),
+		FFileHelper::LoadFileToArray(Bytes, *Fixture))) return false;
+
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime,
+		EAvidScriptVmBackendKind::Wamr})
+	for (const int32 Mode : {0, 1, 2, 3, 4, 5})
+	{
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime
+			? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		FAvidScriptWasmRuntimeInstance Runtime(Selection);
+		FAvidScriptWasmSmokeResult Result;
+		if (!TestTrue(TEXT("Compiled IR 22 module loads"),
+			Runtime.LoadModule(Bytes.GetData(), Bytes.Num(), ModuleId, Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		if (!TestTrue(TEXT("Compiled IR 22 continuation export exists"),
+			Runtime.ValidateRequiredExports({TEXT("avid_on_continuation_v2")}, Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		const auto Owner = MakeShared<FAvidScriptSessionContinuations>();
+		auto& Endpoint = Owner->ResetActive(World);
+		FAvidScriptWasmHostContext Context;
+		Context.Tasks = &Endpoint;
+		Context.Continuations = &Endpoint;
+		Context.World = World;
+		Runtime.SetHostContext(Context);
+		uint8 ModeBytes[sizeof(int32)] = {};
+		FMemory::Memcpy(ModeBytes, &Mode, sizeof(Mode));
+		FString Error;
+		if (!TestTrue(TEXT("Inject IR 22 fixture mode"),
+			Runtime.WriteStateBytes(ModeOffset, MakeArrayView(ModeBytes), Error)))
+		{ AddError(Error); return false; }
+		if (!TestTrue(TEXT("IR 22 BeginPlay suspends without a VM trap"),
+			Runtime.BeginPlay(Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+
+		int32 Resumes = 0;
+		bool bSawUncaught = false;
+		for (int32 Round = 0; Round < 8; ++Round)
+		{
+			World->Tick(LEVELTICK_All, 0.02f);
+			++GFrameCounter;
+			TArray<FAvidScriptContinuationCompletion> Ready;
+			Owner->DrainReady(Ready);
+			for (const FAvidScriptContinuationCompletion& Completion : Ready)
+			{
+				const bool bDispatched = Runtime.DispatchContinuation(Completion, Result);
+				if (!bDispatched)
+				{
+					TestTrue(TEXT("Only the final faulted async void await may fail"),
+						Mode >= 2 && Mode <= 4
+						&& Completion.Status == EAvidScriptContinuationStatus::Failed
+						&& !bSawUncaught);
+					TestEqual(TEXT("Unhandled IR 22 error keeps its category"),
+						Result.ErrorCategory, FString(TEXT("language_error_uncaught")));
+					const TCHAR* ExpectedType = Mode == 4
+						? TEXT("InvalidOperationException") : TEXT("ArgumentException");
+					TestTrue(TEXT("Unhandled IR 22 error names its type and source"),
+						Result.ErrorMessage.Contains(ExpectedType)
+						&& Result.ErrorMessage.Contains(TEXT("AsyncExceptionFlow.cs")));
+					bSawUncaught = true;
+				}
+				TestTrue(TEXT("IR 22 continuation finalizes"),
+					Owner->FinalizeDispatched(Completion.Token, bDispatched));
+				++Resumes;
+			}
+		}
+		auto ReadInt32 = [&](int32 Offset) -> int32
+		{
+			uint8 ValueBytes[sizeof(int32)] = {};
+			FString ReadError;
+			if (!Runtime.ReadStateBytes(Offset, MakeArrayView(ValueBytes), ReadError))
+			{
+				AddError(ReadError);
+				return MIN_int32;
+			}
+			int32 Value = 0;
+			FMemory::Memcpy(&Value, ValueBytes, sizeof(Value));
+			return Value;
+		};
+		TestTrue(TEXT("IR 22 exercised both producer and consumer resumes"),
+			Resumes >= 2);
+		TestEqual(TEXT("IR 22 reports only unhandled language errors"),
+			bSawUncaught, Mode >= 2 && Mode <= 4);
+		TestEqual(TEXT("IR 22 normal, handled, or unhandled result"), ReadInt32(ResultOffset),
+			Mode == 0 ? 12 : Mode == 1 || Mode == 5 ? 7 : 0);
+		TestEqual(TEXT("IR 22 executes the expected cleanup paths"),
+			ReadInt32(CleanupOffset), Mode == 5 ? 11 : 1);
+		TestEqual(TEXT("IR 22 releases all Task<int> results"),
+			Owner->GetTaskResultsForTesting().GetCount(), 0);
+		Owner->Teardown();
+		AvidScript::Managed::FHeap* Heap = Runtime.GetManagedHeapForTesting();
+		TestEqual(TEXT("IR 22 teardown releases language-error roots"),
+			Heap->GetStats().LiveRoots, static_cast<uint32>(0));
+		TestEqual(TEXT("IR 22 managed GC succeeds"),
+			Heap->Collect(), AvidScript::Managed::EHeapError::Ok);
+		TestEqual(TEXT("IR 22 managed GC reclaims objects"),
+			Heap->GetStats().LiveObjects, static_cast<uint32>(0));
+		AddInfo(FString::Printf(TEXT("compiled async exception flow backend=%d mode=%d result=%d cleanup=%d resumes=%d"),
+			static_cast<int32>(Backend), Mode, ReadInt32(ResultOffset),
+			ReadInt32(CleanupOffset), Resumes));
+	}
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime,
+		EAvidScriptVmBackendKind::Wamr})
+	{
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime
+			? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		FAvidScriptWasmRuntimeInstance Runtime(Selection);
+		FAvidScriptWasmSmokeResult Result;
+		if (!TestTrue(TEXT("IR 22 teardown module loads"),
+			Runtime.LoadModule(Bytes.GetData(), Bytes.Num(), ModuleId, Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		const auto Owner = MakeShared<FAvidScriptSessionContinuations>();
+		auto& Endpoint = Owner->ResetActive(World);
+		FAvidScriptWasmHostContext Context;
+		Context.Tasks = &Endpoint;
+		Context.Continuations = &Endpoint;
+		Context.World = World;
+		Runtime.SetHostContext(Context);
+		if (!TestTrue(TEXT("IR 22 teardown fixture suspends"),
+			Runtime.BeginPlay(Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		TestTrue(TEXT("IR 22 owns pending work before teardown"),
+			Owner->GetActiveCount() > 0
+			&& Owner->GetTaskResultsForTesting().GetCount() > 0);
+		Owner->Teardown();
+		World->Tick(LEVELTICK_All, 0.02f);
+		++GFrameCounter;
+		TArray<FAvidScriptContinuationCompletion> Ready;
+		Owner->DrainReady(Ready);
+		TestEqual(TEXT("IR 22 teardown prevents callback reentry"), Ready.Num(), 0);
+		TestEqual(TEXT("IR 22 teardown cancels active continuations"),
+			Owner->GetActiveCount(), 0);
+		TestEqual(TEXT("IR 22 teardown releases task results"),
+			Owner->GetTaskResultsForTesting().GetCount(), 0);
+		AvidScript::Managed::FHeap* Heap = Runtime.GetManagedHeapForTesting();
+		TestEqual(TEXT("IR 22 teardown releases heap roots"),
+			Heap->GetStats().LiveRoots, static_cast<uint32>(0));
+		TestEqual(TEXT("IR 22 teardown GC succeeds"),
+			Heap->Collect(), AvidScript::Managed::EHeapError::Ok);
+		AddInfo(FString::Printf(TEXT("compiled async exception flow teardown backend=%d ready=%d tasks=%d"),
+			static_cast<int32>(Backend), Ready.Num(),
+			Owner->GetTaskResultsForTesting().GetCount()));
+	}
+	return true;
+}
+
 #endif

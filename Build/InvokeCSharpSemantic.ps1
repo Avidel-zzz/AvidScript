@@ -6,6 +6,8 @@ param(
     [Parameter(Mandatory = $true)][string]$OutputPath,
     [string]$ReferenceSourcePath = "",
     [string]$ExecutableReferenceSourcePath = "",
+    [ValidateSet("enabled", "disabled")]
+    [string]$AsyncExceptionFlow = "disabled",
     [string]$Configuration = "Release"
 )
 
@@ -75,6 +77,9 @@ try {
         }
         if (-not [string]::IsNullOrWhiteSpace($ExecutableReferenceSourcePath)) {
             $SemanticArguments += @("--executable-reference-source", $ExecutableReferenceSourcePath)
+        }
+        if ($AsyncExceptionFlow -ceq "enabled") {
+            $SemanticArguments += @("--async-exception-flow", "enabled")
         }
         & $DotNetPath $SemanticDll @SemanticArguments
         $ExitCode = $LASTEXITCODE

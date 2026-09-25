@@ -176,6 +176,55 @@ internal static class CSharpGuestAsyncLanguageErrorTests
         Check(exceptionWasm.Succeeded && exceptionWasm.Bytes.Length > 8,
             "IR 22 must compile to WASM: " + string.Join(" | ",
                 exceptionWasm.Diagnostics.Select(item => item.Message)));
+        string exceptionCliDirectory = Path.Combine(Path.GetTempPath(),
+            "avidscript-async-exception-cli-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(exceptionCliDirectory);
+        try
+        {
+            string sourcePath = Path.Combine(exceptionCliDirectory, "flow.cs");
+            string frontendPath = Path.Combine(exceptionCliDirectory, "flow.frontend.json");
+            string facadePath = Path.Combine(exceptionCliDirectory, "continuations.generated.cs");
+            string semanticPath = Path.Combine(exceptionCliDirectory, "flow.semantic.json");
+            string guestPath = Path.Combine(exceptionCliDirectory, "flow.guest-ir.json");
+            File.WriteAllText(sourcePath, exceptionSource);
+            File.WriteAllBytes(frontendPath, FrontendSerializer.Serialize(exceptionFrontend));
+            File.WriteAllText(facadePath, CSharpGuestContinuationTests.ReferenceFacade);
+            int semanticExit = SemanticCommandLine.Run(new[]
+            {
+                "--source", sourcePath, "--source-id", exceptionSourceId,
+                "--frontend", frontendPath, "--output", semanticPath,
+                "--executable-reference-source", facadePath,
+                "--async-exception-flow", "enabled",
+            });
+            Check(semanticExit == 1, "explicit Semantic CLI opt-in must publish a bounded schema 42 diagnostic artifact: exit="
+                + semanticExit + " diagnostics=" + (File.Exists(semanticPath)
+                    ? string.Join(" | ", SemanticSerializer.Deserialize(
+                        File.ReadAllBytes(semanticPath)).Diagnostics.Select(item =>
+                        item.Code + ":" + item.Message)) : "no artifact"));
+            SemanticDocument publishedSemantic = SemanticSerializer.Deserialize(
+                File.ReadAllBytes(semanticPath));
+            Check(publishedSemantic.SchemaVersion
+                == SemanticContract.AsyncExceptionFlowSchemaVersion,
+                "Semantic CLI must retain the protected exception plan");
+            Check(GuestCommandLine.Run(new[]
+            {
+                "--semantic", semanticPath, "--output", guestPath,
+            }) != 0 && !File.Exists(guestPath),
+                "Guest CLI default must still reject Semantic 42");
+            Check(GuestCommandLine.Run(new[]
+            {
+                "--semantic", semanticPath, "--output", guestPath,
+                "--language-errors", "bounded",
+            }) == 0 && File.Exists(guestPath),
+                "bounded Guest CLI must publish IR 22");
+            Check(GuestIrSerializer.Deserialize(File.ReadAllBytes(guestPath))
+                .SchemaVersion == GuestTaskLanguageErrorValidator.ExceptionFlowSchemaVersion,
+                "published IR must retain schema 22");
+        }
+        finally
+        {
+            Directory.Delete(exceptionCliDirectory, recursive: true);
+        }
         Check(!CSharpGuestLowerer.Lower(semantic, new string('a', 64)).Succeeded,
             "ordinary compilation must reject the diagnostic-only artifact");
         Check(!CSharpGuestLowerer.Lower(semantic with

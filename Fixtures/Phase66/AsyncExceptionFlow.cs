@@ -7,6 +7,7 @@ public static class Script
 {
     public static int CleanupCount;
     public static int Result;
+    public static int TestMode;
 
     private static async Task<int> LoadAsync(int mode)
     {
@@ -63,6 +64,13 @@ public static class Script
     [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
     public static async void BeginPlay()
     {
-        Result = await RunAsync(1);
+        if (TestMode == 5)
+        {
+            Result = await RunNestedAsync();
+        }
+        else
+        {
+            Result = await RunAsync(TestMode);
+        }
     }
 }

@@ -20,6 +20,7 @@ param(
     [string]$DataLaneFusion = "enabled",
     [ValidateSet("disabled", "bounded")]
     [string]$LanguageErrors = "disabled",
+    [switch]$AsyncExceptionFlow,
     [ValidateSet("auto", "enabled", "disabled")]
     [string]$DebugInstrumentation = "auto",
     [switch]$AllowGeneratedTypeImports,
@@ -78,6 +79,9 @@ if ($LanguageErrors -ceq "bounded") {
     $DisableSemanticCache = $true
     $DisableCompilationCache = $true
     $CompilerWorkerMode = "disabled"
+}
+if ($AsyncExceptionFlow -and $LanguageErrors -cne "bounded") {
+    throw "Async exception flow requires -LanguageErrors bounded."
 }
 $CompilationCacheDisabledForBuild =
     [bool]$DisableCompilationCache -or [bool]$CooperativeSafepoints
@@ -1134,6 +1138,7 @@ $FrontendModel = $null
 $SemanticModel = $null
 $BoundedSemanticArtifact = $false
 $BoundedAsyncSemanticArtifact = $false
+$BoundedAsyncExceptionSemanticArtifact = $false
 $GuestIrModel = $null
 $DebugMapModel = $null
 $StateSchemaModel = $null
@@ -1531,6 +1536,9 @@ elseif (-not $SemanticCacheHit) {
                 "-ExecutableReferenceSourcePath",
                 $BindingAuthorizationInfo.ReferenceSourcePath)
         }
+        if ($AsyncExceptionFlow) {
+            $SemanticArguments += @("-AsyncExceptionFlow", "enabled")
+        }
         $SemanticInvocation = Invoke-AvidScriptPowerShell -Arguments $SemanticArguments
         $SemanticOutput = @($SemanticInvocation.Output)
         $SemanticExitCode = [int]$SemanticInvocation.ExitCode
@@ -1559,10 +1567,21 @@ elseif (-not $SemanticCacheHit) {
         }).Count -gt 0 -and
         $SemanticErrors.Count -gt 0 -and
         @($SemanticErrors | Where-Object { [string]$_.code -cne "ASCS5422" }).Count -eq 0
+    $BoundedAsyncExceptionSemanticArtifact = $AsyncExceptionFlow -and
+        $null -ne $SemanticModel -and
+        [int]$SemanticModel.schema_version -eq 42 -and
+        [string]$SemanticModel.semantic_version -ceq '1.51' -and
+        @($SemanticModel.async_methods | Where-Object {
+            $null -ne $_.PSObject.Properties['exception_plan'] -and
+            $null -ne $_.exception_plan
+        }).Count -gt 0 -and
+        $SemanticErrors.Count -gt 0 -and
+        @($SemanticErrors | Where-Object { [string]$_.code -cne "ASCS5422" }).Count -eq 0
     $BoundedSemanticArtifact = $LanguageErrors -ceq "bounded" -and
         $SemanticExitCode -eq 1 -and
         $null -ne $SemanticModel -and -not [bool]$SemanticModel.succeeded -and
-        ($BoundedSyncSemanticArtifact -or $BoundedAsyncSemanticArtifact)
+        ($BoundedSyncSemanticArtifact -or $BoundedAsyncSemanticArtifact -or
+            $BoundedAsyncExceptionSemanticArtifact)
     if ($SemanticExitCode -ne 0 -and -not $BoundedSemanticArtifact -or
         $null -eq $SemanticModel -or
         -not [bool]$SemanticModel.succeeded -and -not $BoundedSemanticArtifact) {
@@ -1573,9 +1592,20 @@ elseif (-not $SemanticCacheHit) {
         Write-Output "[AvidScript][CSharp][Semantic] result=semantic_failed exit_code=$SemanticExitCode report=$ReportPath"
         exit 1
     }
+    if ($AsyncExceptionFlow -and -not $BoundedAsyncExceptionSemanticArtifact) {
+        $Diagnostics += [ordered]@{
+            code = "async_exception_flow_unavailable"
+            severity = "error"
+            message = "The source did not produce a supported Semantic 42 async exception plan."
+            file = $SourceId
+        }
+        Write-BuildReport -Result "semantic_failed" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics
+        exit 1
+    }
     if ($BoundedSemanticArtifact) {
         $Diagnostics = @($Diagnostics | Where-Object {
-            [string]$_.code -cne $(if ($BoundedAsyncSemanticArtifact) { 'ASCS5422' } else { 'ASCS3001' })
+            [string]$_.code -cne $(if ($BoundedAsyncSemanticArtifact -or
+                $BoundedAsyncExceptionSemanticArtifact) { 'ASCS5422' } else { 'ASCS3001' })
         })
     }
 }
@@ -2057,10 +2087,12 @@ $MissingObservedExports = @($ExpectedObservedExports | Where-Object { $ObservedE
 $UnexpectedObservedExports = @($ObservedExports | Where-Object { $ExpectedObservedExports -notcontains $_ })
 # This entry publishes the current compiler contract. Keep the exact pair aligned
 # with GuestModuleValidator; TestCSharpGuestBuildContracts exercises real output.
-$ExpectedGuestSchema = if ($BoundedAsyncSemanticArtifact) { 21 }
+$ExpectedGuestSchema = if ($BoundedAsyncExceptionSemanticArtifact) { 22 }
+    elseif ($BoundedAsyncSemanticArtifact) { 21 }
     elseif ($BoundedSemanticArtifact -and [int]$SemanticModel.schema_version -eq 40) { 20 }
     elseif ($BoundedSemanticArtifact) { 17 } else { 14 }
-$ExpectedGuestVersion = if ($BoundedAsyncSemanticArtifact) { "1.20" }
+$ExpectedGuestVersion = if ($BoundedAsyncExceptionSemanticArtifact) { "1.21" }
+    elseif ($BoundedAsyncSemanticArtifact) { "1.20" }
     elseif ($BoundedSemanticArtifact -and [int]$SemanticModel.schema_version -eq 40) { "1.19" }
     elseif ($BoundedSemanticArtifact) { "1.16" } else { "1.13" }
 $GuestContractValid = [int]$GuestIrModel.schema_version -eq $ExpectedGuestSchema -and

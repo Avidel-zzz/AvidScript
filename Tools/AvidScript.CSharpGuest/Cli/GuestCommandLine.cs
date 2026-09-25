@@ -64,7 +64,10 @@ public static class GuestCommandLine
             GuestModule? module;
             bool asyncLanguageErrors = document.SchemaVersion
                     == SemanticContract.AsyncLanguageErrorSchemaVersion
-                && document.AsyncMethods.Any(method => method.ErrorPlan is not null);
+                    && document.AsyncMethods.Any(method => method.ErrorPlan is not null)
+                || document.SchemaVersion
+                    == SemanticContract.AsyncExceptionFlowSchemaVersion
+                    && document.AsyncMethods.Any(method => method.ExceptionPlan is not null);
             if (boundedLanguageErrors && (document.ExceptionFlows is { Count: > 0 }
                     || asyncLanguageErrors)
                 && (!dataLaneFusionEnabled || debugInstrumentationEnabled))

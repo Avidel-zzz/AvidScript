@@ -77,7 +77,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchTaskFaultLanguageErrorCall(
 	if (!LanguageErrorCatalog || !LanguageErrorCatalog->SupportsTaskLanguageErrorFault())
 	{
 		OutResult.ErrorCategory = TEXT("task_language_error_version");
-		OutResult.Details = TEXT("Task language-error fault import requires catalog-bearing Guest IR 20/1.19 or 21/1.20.");
+		OutResult.Details = TEXT("Task language-error fault import requires catalog-bearing Guest IR 20/1.19, 21/1.20, or 22/1.21.");
 		return false;
 	}
 	return AdmitTaskLanguageError(Call.Int64Args[0], Call.IntArgs[0], Call.IntArgs[1],

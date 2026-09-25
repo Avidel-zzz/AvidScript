@@ -45,12 +45,16 @@ public static class SemanticCommandLine
             string source = File.ReadAllText(sourcePath);
             string frontendSourceSha256 = ReadFrontendSourceSha256(frontendPath);
             IReadOnlyList<SemanticReferenceSource> referenceSources = LoadReferenceSources(referenceSourceOptions);
+            bool enableAsyncExceptionFlow = options.TryGetValue(
+                    "--async-exception-flow", out string? flowMode)
+                && string.Equals(flowMode, "enabled", StringComparison.Ordinal);
             SemanticDocument document = SemanticAnalyzer.Analyze(
                 source,
                 sourceId,
                 frontendSourceSha256,
                 referenceSources,
-                workspace);
+                workspace,
+                enableAsyncExceptionFlow);
             SemanticArtifactWriter.WriteAtomic(outputPath, SemanticSerializer.Serialize(document));
             return document.Succeeded ? 0 : 1;
         }
@@ -83,7 +87,7 @@ public static class SemanticCommandLine
         referenceSourceOptions = new List<ReferenceSourceOption>();
         if (args.Length == 0 || args.Length % 2 != 0)
         {
-            throw new ArgumentException("Usage: --source <path> --source-id <id> --frontend <path> --output <path> [--reference-source <path>]... [--executable-reference-source <path>]...");
+            throw new ArgumentException("Usage: --source <path> --source-id <id> --frontend <path> --output <path> [--reference-source <path>]... [--executable-reference-source <path>]... [--async-exception-flow enabled|disabled]");
         }
 
         Dictionary<string, string> options = new(StringComparer.Ordinal);
@@ -104,10 +108,14 @@ public static class SemanticCommandLine
                 continue;
             }
 
-            if (Array.IndexOf(RequiredOptions, option) < 0)
+            if (Array.IndexOf(RequiredOptions, option) < 0
+                && option != "--async-exception-flow")
             {
                 throw new ArgumentException($"Unknown option: {option}");
             }
+            if (option == "--async-exception-flow"
+                && value is not ("enabled" or "disabled"))
+                throw new ArgumentException("--async-exception-flow must be enabled or disabled.");
 
             if (string.IsNullOrWhiteSpace(value) || !options.TryAdd(option, value))
             {
