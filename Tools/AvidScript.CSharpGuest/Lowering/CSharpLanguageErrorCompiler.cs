@@ -61,7 +61,12 @@ public static class CSharpLanguageErrorCompiler
         Dictionary<string, IReadOnlyList<CSharpRethrowSite>> rethrows = new(StringComparer.Ordinal);
         foreach (SemanticExceptionFlow handler in handlers)
         {
+            SemanticCallable[] callables = semantic.Callables.Where(callable =>
+                callable.MethodSymbolId == handler.MethodSymbolId).Take(2).ToArray();
+            if (callables.Length != 1)
+                return Fail("An exception method needs one source-backed callable.", out error);
             if (!CSharpExceptionGraphMaterializer.TryBuild(handler,
+                    callables[0].ReturnTypeId == "type:void",
                     out SemanticControlFlowGraph? graph, out IReadOnlyList<CSharpLocalThrowSite> sites,
                     out IReadOnlyList<CSharpNormalReturnCleanupSite> returnSites,
                     out IReadOnlyList<CSharpRethrowSite> rethrowSites,

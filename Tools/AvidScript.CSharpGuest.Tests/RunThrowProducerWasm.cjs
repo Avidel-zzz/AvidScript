@@ -136,6 +136,29 @@ for (const entry of WebAssembly.Module.imports(wasmModule)) {
   (imports[entry.module] ??= {})[entry.name] = managedHeap;
 }
 instance = new WebAssembly.Instance(wasmModule, imports);
+if (typeof instance.exports.avid_void_guard_entry === 'function') {
+  const handled = instance.exports.avid_void_guard_entry;
+  const uncaught = instance.exports.avid_void_guard_uncaught_entry;
+  const beginPlay = instance.exports.avid_on_begin_play;
+  if (typeof uncaught !== 'function' || typeof beginPlay !== 'function') {
+    throw new Error('Conditional void guard is missing its public entries');
+  }
+  const normal = handled(5), recovered = handled(-1), direct = uncaught(5);
+  beginPlay();
+  collect();
+  if (normal !== 7 || recovered !== 19 || direct !== undefined || allocations !== 2
+    || frames.size !== 0 || roots.size !== 0 || objects.size !== 0) {
+    throw new Error(`Conditional void guard results/cleanup = ${normal}/${recovered}/${direct}/${allocations}/${frames.size}/${roots.size}/${objects.size}`);
+  }
+  try {
+    uncaught(-1);
+    throw new Error('Conditional void guard returned after an uncaught language error');
+  } catch (error) {
+    if (error.message !== 'uncaught-language-error' || !reported || allocations !== 3) throw error;
+  }
+  process.stdout.write('C# conditional void guard WASM: 5/5 passed\n');
+  process.exit(0);
+}
 if (typeof instance.exports.avid_void_handled_entry === 'function') {
   const handled = instance.exports.avid_void_handled_entry;
   const uncaught = instance.exports.avid_void_uncaught_entry;

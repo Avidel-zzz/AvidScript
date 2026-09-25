@@ -26,7 +26,7 @@ internal sealed record CSharpRethrowSite(
 // local throw return placeholders are replaced before publishing the module.
 internal static class CSharpExceptionGraphMaterializer
 {
-    public static bool TryBuild(SemanticExceptionFlow flow,
+    public static bool TryBuild(SemanticExceptionFlow flow, bool returnsVoid,
         out SemanticControlFlowGraph? graph,
         out IReadOnlyList<CSharpLocalThrowSite> localThrows,
         out IReadOnlyList<CSharpNormalReturnCleanupSite> normalReturns,
@@ -154,9 +154,10 @@ internal static class CSharpExceptionGraphMaterializer
                 block.IsReachable, block.ConditionKind,
                 boundHandlers.ContainsKey(block.Ordinal)
                     ? Array.Empty<SemanticOperation>() : block.Operations,
-                throwBlocks.Contains(block.Ordinal) ? ZeroPlaceholder(block.BranchValue!.Span)
+                throwBlocks.Contains(block.Ordinal)
+                    ? (returnsVoid ? null : ZeroPlaceholder(block.BranchValue!.Span))
                     : rethrowSpans.TryGetValue(block.Ordinal, out SemanticSpan? span)
-                        ? ZeroPlaceholder(span)
+                        ? (returnsVoid ? null : ZeroPlaceholder(span))
                     : block.BranchValue,
                 edges.Where(edge => edge.DestinationBlockOrdinal == block.Ordinal).ToArray(),
                 edges.Where(edge => edge.SourceBlockOrdinal == block.Ordinal).ToArray()))
