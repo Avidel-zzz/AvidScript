@@ -303,10 +303,9 @@ public static class CSharpLanguageErrorCompiler
                     import.Id == CSharpTaskResultAbi.RetainForContinuationImportId)
                     ? Array.Empty<GuestImport>()
                     : new[] { CSharpTaskResultAbi.RetainForContinuationImport() })
-                .Append(new GuestImport("import:task_fault_language_error_v1",
-                    "avidscript", "avid_task_fault_language_error_v1",
-                    new[] { "type:int64", "type:int32", "type:int32", "type:language_error_root" },
-                    "type:int32")).ToArray()
+                .Append(CSharpTaskResultAbi.FaultLanguageErrorImport())
+                .Append(CSharpTaskResultAbi.LanguageErrorMetaImport())
+                .Append(CSharpTaskResultAbi.LanguageErrorRootImport()).ToArray()
                 : outcomes.Imports,
             LanguageErrorCatalog = new GuestLanguageErrorCatalog(
                 tokens.Types.Select(entry =>

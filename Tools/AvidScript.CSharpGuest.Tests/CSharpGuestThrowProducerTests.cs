@@ -114,6 +114,8 @@ internal static class CSharpGuestThrowProducerTests
             && module.Provenance.SemanticSchemaVersion == 40
             && module.Imports.Any(import => import.Name == "avid_task_i32_v1")
             && module.Imports.Any(import => import.Name == "avid_task_fault_language_error_v1")
+            && module.Imports.Count(import => import.Name == "avid_task_language_error_meta_v1") == 1
+            && module.Imports.Count(import => import.Name == "avid_task_language_error_root_v1") == 1
             && module.LanguageErrorCatalog is not null
             && module.Functions.Any(function => function.Id.Contains("LoadAsync(", StringComparison.Ordinal)),
             "C# lowering must keep both execution paths in versioned IR 20");
@@ -122,6 +124,12 @@ internal static class CSharpGuestThrowProducerTests
         WasmCompilationResult wasm = WasmModuleCompiler.Compile(module);
         Check(wasm.Succeeded && wasm.Bytes.Length > 8,
             "combined C# output must compile to WASM");
+        WasmArtifactInfo artifact = WasmArtifactInspector.Inspect(wasm.Bytes);
+        Check(artifact.Imports.Any(import => import.Module == "avidscript"
+                && import.Name == "avid_task_language_error_meta_v1")
+            && artifact.Imports.Any(import => import.Module == "avidscript"
+                && import.Name == "avid_task_language_error_root_v1"),
+            "C# combined output must publish both Task error read imports to WASM");
         string crossingSource = source.Replace("return 12;", "return Catch();",
             StringComparison.Ordinal);
         FrontendDocument crossingFrontend = FrontendAnalyzer.Analyze(crossingSource, sourceId);

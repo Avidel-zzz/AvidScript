@@ -13,6 +13,9 @@ internal static class CSharpTaskResultAbi
     public const string BindProducerImportId = "import:$async:task_bind_producer_v1";
     public const string PropagateFailureImportId = "import:$async:task_propagate_failure_v1";
     public const string RetainForContinuationImportId = "import:$async:task_retain_for_continuation_v1";
+    public const string FaultLanguageErrorImportId = "import:task_fault_language_error_v1";
+    public const string LanguageErrorMetaImportId = "import:task_language_error_meta_v1";
+    public const string LanguageErrorRootImportId = "import:task_language_error_root_v1";
     public const string TokenTypeId = "type:int64";
     public const string IntTypeId = "type:int32";
     public const int Create = 1;
@@ -77,6 +80,18 @@ internal static class CSharpTaskResultAbi
     public static GuestImport RetainForContinuationImport() => new(RetainForContinuationImportId,
         "avidscript", "avid_task_retain_for_continuation_v1",
         new[] { TokenTypeId, TokenTypeId }, IntTypeId);
+
+    public static GuestImport FaultLanguageErrorImport() => new(FaultLanguageErrorImportId,
+        "avidscript", "avid_task_fault_language_error_v1",
+        new[] { TokenTypeId, IntTypeId, IntTypeId, "type:language_error_root" }, IntTypeId);
+
+    public static GuestImport LanguageErrorMetaImport() => new(LanguageErrorMetaImportId,
+        "avidscript", "avid_task_language_error_meta_v1",
+        new[] { TokenTypeId }, TokenTypeId);
+
+    public static GuestImport LanguageErrorRootImport() => new(LanguageErrorRootImportId,
+        "avidscript", "avid_task_language_error_root_v1",
+        new[] { TokenTypeId }, "type:language_error_root");
 
     public static GuestRegister? LoadTaskLocalToken(CSharpFunctionLoweringContext context,
         string symbolId, int block, List<GuestInstruction> instructions)
