@@ -278,6 +278,11 @@ public static class SemanticAsyncStateFlowAnalyzer
             {
                 slots.Remove(resultSymbolId);
             }
+            if (transfer.SecondaryTarget >= 0)
+            {
+                slots.UnionWith(GetSuccessorLive(segment, transfer.SecondaryTarget,
+                    liveIn, issues));
+            }
             slotsByAwait[segment.Ordinal] = slots
                 .Where(locals.ContainsKey)
                 .OrderBy(symbolId => symbolId, StringComparer.Ordinal)
@@ -368,6 +373,11 @@ public static class SemanticAsyncStateFlowAnalyzer
         if (segment.AwaitSite?.ResultSymbolId is { } resultSymbolId)
         {
             live.Remove(resultSymbolId);
+        }
+        if (transfer.SecondaryTarget >= 0)
+        {
+            live.UnionWith(GetSuccessorLive(segment, transfer.SecondaryTarget,
+                liveIn, issues));
         }
         if (segment.AwaitSite?.CancellationToken is { } cancellationToken)
         {

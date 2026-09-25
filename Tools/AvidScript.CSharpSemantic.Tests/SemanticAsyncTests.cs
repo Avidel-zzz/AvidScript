@@ -32,9 +32,50 @@ internal static class SemanticAsyncTests
         TaskIntStaticFieldAssignmentIsVersionedAndBounded();
         TaskIntExistingLocalAssignmentPreservesStorage();
         TaskIntSuspendedCleanupFailsClosed();
+        AwaitFailureSuccessorKeepsCleanupLocalAlive();
         TaskAndExceptionPlansKeepBothContracts();
         TaskIntThrowPublishesVersionedErrorPlan();
-        return 23;
+        return 24;
+    }
+
+    private static void AwaitFailureSuccessorKeepsCleanupLocalAlive()
+    {
+        SemanticSpan span = new(0, 1, 0, 0, 0, 1);
+        const string localId = "symbol:local:cleanup_value";
+        SemanticOperation Value(string kind, string? symbolId = null) => new(
+            kind, true, null, false, false, false, false, "type:int32",
+            symbolId, Array.Empty<string>(), null, null, null, null, null,
+            span, Array.Empty<SemanticOperation>());
+        SemanticAsyncSegment[] segments =
+        {
+            new(0, new[] { new SemanticAsyncStatement(Value("literal"), localId) },
+                null, span, new(SemanticAsyncMethod.GotoTransferKind, null, 1)),
+            new(1, Array.Empty<SemanticAsyncStatement>(),
+                new SemanticAsyncAwaitSite(1, "task_call", "none",
+                    Array.Empty<SemanticOperation>(), localId, "type:int32", span)
+                { ResultStorageKind = "existing_local" },
+                span, new(SemanticAsyncMethod.AwaitTransferKind, null, 2, 3)),
+            new(2, Array.Empty<SemanticAsyncStatement>(), null, span,
+                new(SemanticAsyncMethod.ReturnTransferKind, Value("literal"), -1)),
+            new(3, Array.Empty<SemanticAsyncStatement>(), null, span,
+                new(SemanticAsyncMethod.ReturnTransferKind,
+                    Value("local_reference", localId), -1)),
+        };
+        SemanticAsyncStateFlowAnalysis analysis =
+            SemanticAsyncStateFlowAnalyzer.AnalyzeControlFlow(segments);
+        Assert(analysis.Issues.Count == 0
+            && analysis.SlotsByAwaitSegment.TryGetValue(1, out var saved)
+            && saved.Count == 1 && saved[0].SymbolId == localId,
+            "the old value of an await assignment target must survive for a failure cleanup");
+
+        SemanticAsyncSegment[] invalid = (SemanticAsyncSegment[])segments.Clone();
+        invalid[1] = segments[1] with
+        {
+            Transfer = segments[1].Transfer! with { SecondaryTarget = 99 },
+        };
+        Assert(SemanticAsyncStateFlowAnalyzer.AnalyzeControlFlow(invalid).Issues
+                .Any(issue => issue.Message.Contains("missing segment 99", StringComparison.Ordinal)),
+            "a missing await failure successor must fail closed");
     }
 
     private static void TaskIntThrowPublishesVersionedErrorPlan()
