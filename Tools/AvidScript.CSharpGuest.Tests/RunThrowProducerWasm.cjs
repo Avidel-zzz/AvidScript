@@ -136,6 +136,29 @@ for (const entry of WebAssembly.Module.imports(wasmModule)) {
   (imports[entry.module] ??= {})[entry.name] = managedHeap;
 }
 instance = new WebAssembly.Instance(wasmModule, imports);
+if (typeof instance.exports.avid_guarded_entry === 'function') {
+  const handled = instance.exports.avid_guarded_entry;
+  const uncaught = instance.exports.avid_guarded_uncaught_entry;
+  const beginPlay = instance.exports.avid_on_begin_play;
+  if (typeof uncaught !== 'function' || typeof beginPlay !== 'function') {
+    throw new Error('Conditional guard is missing its public entries');
+  }
+  const normal = handled(5), recovered = handled(-1), direct = uncaught(5);
+  beginPlay();
+  collect();
+  if (normal !== 7 || recovered !== 19 || direct !== 7
+    || frames.size !== 0 || roots.size !== 0 || objects.size !== 0 || allocations !== 2) {
+    throw new Error(`Conditional guard results/cleanup = ${normal}/${recovered}/${direct}/${frames.size}/${roots.size}/${objects.size}/${allocations}`);
+  }
+  try {
+    uncaught(-1);
+    throw new Error('Conditional guard returned after an uncaught language error');
+  } catch (error) {
+    if (error.message !== 'uncaught-language-error' || !reported || allocations !== 3) throw error;
+  }
+  process.stdout.write('C# parameterized conditional guard WASM: 5/5 passed\n');
+  process.exit(0);
+}
 const generatedFunctions = Object.keys(instance.exports).filter(name => name.startsWith('avid_ue_'));
 if (generatedFunctions.length !== 0) {
   if (generatedFunctions.length !== 1) {

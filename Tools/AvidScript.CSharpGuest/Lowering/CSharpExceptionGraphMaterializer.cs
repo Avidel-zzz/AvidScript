@@ -55,7 +55,14 @@ internal static class CSharpExceptionGraphMaterializer
                     out normalReturns, out error)
                 : TryBuildDirectThrowFinally(flow, out graph, out localThrows, out error);
         }
-        if (flow.Catches.Count == 0
+        if (flow.Catches.Count == 0 && (flow.Throws.Count is < 1 or > 16
+                || flow.Blocks is not { Count: > 0 and <= 32 }
+                || flow.Regions.Any(region => region.Kind is not ("root" or "local_lifetime"))
+                || flow.Branches.Any(branch => branch.DestinationBlockOrdinal >= 0
+                    && branch.DestinationBlockOrdinal <= branch.SourceBlockOrdinal)
+                || flow.Blocks.Any(block => flow.Branches.Count(branch =>
+                        branch.SourceBlockOrdinal == block.Ordinal) > 1
+                    && (block.BranchValue is null || !PureThrowDecision(block.BranchValue))))
             || flow.Catches.Any(handler => handler.HasFilter
                 || handler.ExceptionVariableSymbolId is not null
                     && handler.ExceptionTypeId != CSharpThrowProducerLowerer.ExceptionTypeId)
@@ -66,7 +73,7 @@ internal static class CSharpExceptionGraphMaterializer
                 ("regular" or "return" or "throw" or "rethrow")
                 || branch.Semantics is not ("throw" or "rethrow")
                     && branch.DestinationBlockOrdinal < 0))
-            return Fail("The catch method needs unsupported throw, cleanup, filter, variable, or block operations.", out error);
+            return Fail("The exception method needs supported throw, cleanup, filter, variable, or block operations.", out error);
 
         Dictionary<int, SemanticCatchHandler> boundHandlers = new();
         foreach (SemanticCatchHandler handler in flow.Catches.Where(item =>

@@ -20,6 +20,7 @@ internal static class CSharpGuestThrowProducerTests
         SourceThrowProducesManagedLanguageError();
         SameSourceCallerPropagatesManagedLanguageError();
         ReturnValueExportPreservesOriginalAbi();
+        ConditionalThrowUsesParameterAndNormalReturn();
         GeneratedUFunctionPreservesOriginalAbi();
         SameSourceCallerCatchesManagedLanguageError();
         MultipleThrowProducersKeepDistinctSourceTokens();
@@ -54,7 +55,79 @@ internal static class CSharpGuestThrowProducerTests
         NestedCatchRethrowReachesOuterHandler();
         NestedCatchRethrowRunsBranchingOuterFinally();
         CatchVariableReadsBoundError();
-        return 37;
+        return 38;
+    }
+
+    private static void ConditionalThrowUsesParameterAndNormalReturn()
+    {
+        const string source = """
+            using System;
+            class Script
+            {
+                static int Guarded(int value)
+                {
+                    if (value < 0) throw new Exception();
+                    return value + 2;
+                }
+                static int Catch(int value)
+                {
+                    try { return Guarded(value); }
+                    catch (Exception) { return 19; }
+                }
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_guarded_entry")]
+                static int ExportHandled(int value) => Catch(value);
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_guarded_uncaught_entry")]
+                static int ExportUncaught(int value) => Guarded(value);
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay()
+                {
+                    if (Catch(5) != 7 || Catch(-1) != 19) Guarded(-1);
+                }
+            }
+            """;
+        Check(ReferenceCatch(source, "Catch", new object[] { 5 }) == 7
+            && ReferenceCatch(source, "Catch", new object[] { -1 }) == 19,
+            "CLR conditional guard reference must take both normal and error paths");
+        SemanticDocument semantic = Analyze(source);
+        Check(!CSharpGuestLowerer.Lower(semantic, new string('a', 64)).Succeeded,
+            "the ordinary Guest entry must keep exception syntax closed");
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "conditional guard did not lower");
+        GuestModule module = compiled!.Module;
+        Check(module.Exports.Any(item => item.Name == "avid_guarded_entry")
+            && module.Exports.Any(item => item.Name == "avid_guarded_uncaught_entry"),
+            "conditional guard must preserve both exported entrypoints");
+        GuestValidationResult validation = GuestModuleValidator.Validate(module);
+        Check(validation.Succeeded,
+            string.Join(" | ", validation.Diagnostics.Select(item => item.Message)));
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(module);
+        Check(wasm.Succeeded && wasm.Bytes.SequenceEqual(WasmModuleCompiler.Compile(module).Bytes),
+            "conditional guard must compile to deterministic WASM");
+        string? output = Environment.GetEnvironmentVariable("AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(output);
+            File.WriteAllBytes(Path.Combine(output, "conditional-guard.wasm"), wasm.Bytes);
+        }
+        const string unsafeDecision = """
+            using System;
+            class Script
+            {
+                static int Guarded(int value)
+                {
+                    if (10 / value > 1) throw new Exception();
+                    return value;
+                }
+            }
+            """;
+        SemanticDocument unsafeSemantic = Analyze(unsafeDecision);
+        Check(unsafeSemantic.ExceptionFlows is { Count: > 0 }
+            && !CSharpLanguageErrorCompiler.TryLower(unsafeSemantic,
+                new string('a', 64), out _, out string? unsafeError)
+            && unsafeError?.StartsWith("The exception method needs supported",
+                StringComparison.Ordinal) == true,
+            "a condition that can fault before the throw must remain rejected");
     }
 
     private static void GeneratedUFunctionPreservesOriginalAbi()

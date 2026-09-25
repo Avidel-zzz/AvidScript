@@ -43,8 +43,13 @@ public static class CSharpLanguageErrorCompiler
         SemanticExceptionFlow[] throwFlows = flows.Where(item => item.Throws.Count > 0).ToArray();
         if (throwFlows.Length == 0)
             return Fail("At least one supported throw site is required.", out error);
+        // The standalone producer only models an unconditional, argument-free
+        // throw. Conditional guards and parameterized methods retain their CFG.
         SemanticExceptionFlow[] producers = throwFlows.Where(item => item.Catches.Count == 0
-            && !item.Regions.Any(region => region.Kind == "finally")).ToArray();
+            && !item.Regions.Any(region => region.Kind == "finally")
+            && item.Throws.Count == 1 && item.Blocks is { Count: 3 }
+            && semantic.Callables.Any(callable => callable.MethodSymbolId == item.MethodSymbolId
+                && callable.Parameters.Count == 0)).ToArray();
         IReadOnlySet<string> producerMethodIds = producers.Select(item => item.MethodSymbolId)
             .ToHashSet(StringComparer.Ordinal);
         SemanticExceptionFlow[] handlers = flows.Where(item =>
@@ -73,11 +78,10 @@ public static class CSharpLanguageErrorCompiler
         if (throwFlows.Any(item => semantic.Callables.Count(callable =>
                     callable.MethodSymbolId == item.MethodSymbolId
                     && callable.HasBody && callable.IsStatic
-                    && callable.Parameters.Count == 0
                     && callable.ReturnTypeId == "type:int32") != 1)
             || !SemanticLanguageErrorEffectPlanner.TryBuild(semantic, out var effects)
             || effects is null)
-            return Fail("The exception source needs supported int32 producers and a complete direct-call effect plan.", out error);
+            return Fail("The exception source needs supported static int32 methods and a complete direct-call effect plan.", out error);
 
         IReadOnlySet<string> producerIds = producers.Select(item =>
             CSharpGuestIds.Function(item.MethodSymbolId)).ToHashSet(StringComparer.Ordinal);
@@ -138,8 +142,16 @@ public static class CSharpLanguageErrorCompiler
         Dictionary<string, IReadOnlyList<CSharpLanguageCatchRoute>> catchRoutes = new(StringComparer.Ordinal);
         foreach (SemanticExceptionFlow handler in handlers)
         {
-            if (handler.Catches.Count == 0) continue;
             string functionId = CSharpGuestIds.Function(handler.MethodSymbolId);
+            if (handler.Catches.Count == 0)
+            {
+                // This empty route certifies that the source-backed forward CFG
+                // was materialized even though it has no local catch target.
+                if (handler.Throws.Count != 0
+                    && !handler.Regions.Any(region => region.Kind == "finally"))
+                    catchRoutes.Add(functionId, Array.Empty<CSharpLanguageCatchRoute>());
+                continue;
+            }
             if (!affected.Contains(functionId))
                 return Fail("A catch method is absent from the language-error effect closure.", out error);
             IReadOnlySet<int> rethrowHandlers = rethrows.TryGetValue(functionId, out var rethrowSites)
