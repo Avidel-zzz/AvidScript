@@ -18,6 +18,8 @@ param(
     [string]$CompilationCacheRoot = "",
     [ValidateSet("enabled", "disabled")]
     [string]$DataLaneFusion = "enabled",
+    [ValidateSet("disabled", "bounded")]
+    [string]$LanguageErrors = "disabled",
     [ValidateSet("auto", "enabled", "disabled")]
     [string]$DebugInstrumentation = "auto",
     [switch]$AllowGeneratedTypeImports,
@@ -64,6 +66,18 @@ $ResolvedDebugInstrumentation = if ($DebugInstrumentation -ceq "auto") {
 }
 else {
     $DebugInstrumentation
+}
+if ($LanguageErrors -ceq "bounded") {
+    if ($DataLaneFusion -cne "enabled" -or $ResolvedDebugInstrumentation -cne "disabled") {
+        throw "Bounded language errors require data-lane fusion enabled and debug instrumentation disabled."
+    }
+    if (-not [string]::IsNullOrWhiteSpace($PreparedBuildReportPath) -or
+        $CompilerWorkerMode -ceq "required") {
+        throw "Bounded language errors do not yet support prepared Semantic artifacts or a required compiler worker."
+    }
+    $DisableSemanticCache = $true
+    $DisableCompilationCache = $true
+    $CompilerWorkerMode = "disabled"
 }
 $CompilationCacheDisabledForBuild =
     [bool]$DisableCompilationCache -or [bool]$CooperativeSafepoints
@@ -428,7 +442,8 @@ function Test-CompilerInjectedBindingImport {
         [Parameter(Mandatory = $true)][object]$Import,
         [Parameter(Mandatory = $true)][bool]$AllowDataLaneImports,
         [Parameter(Mandatory = $true)][bool]$AllowGeneratedTypeImports,
-        [Parameter(Mandatory = $true)][bool]$AllowDebugImports
+        [Parameter(Mandatory = $true)][bool]$AllowDebugImports,
+        [Parameter(Mandatory = $true)][bool]$AllowBoundedLanguageErrors
     )
 
     if ([string]$Import.module -cne "avidscript" -or
@@ -438,6 +453,20 @@ function Test-CompilerInjectedBindingImport {
     }
 
     $ParameterTypes = @($Import.parameter_type_ids | ForEach-Object { [string]$_ })
+    if ($AllowBoundedLanguageErrors -and
+        [string]$Import.dispatch_class -ceq "semantic") {
+        $LanguageErrorBridges = @(
+            @{ Id = 'import:language_error_heap'; Name = 'avid_managed_heap_v1'; Parameters = @('type:int32', 'type:int32', 'type:int32', 'type:int32'); Result = 'type:int32' }
+            @{ Id = 'import:language_error_report_v1'; Name = 'avid_language_error_report_v1'; Parameters = @('type:int32', 'type:int32', 'type:language_error_root'); Result = 'type:int32' }
+        )
+        foreach ($Bridge in $LanguageErrorBridges) {
+            if ([string]$Import.name -ceq $Bridge.Name) {
+                return [string]$Import.id -ceq $Bridge.Id -and
+                    [string]$Import.return_type_id -ceq $Bridge.Result -and
+                    [string]::Join("`n", $ParameterTypes) -ceq [string]::Join("`n", [string[]]$Bridge.Parameters)
+            }
+        }
+    }
     if ($AllowDebugImports -and
         [string]$Import.id -ceq "import:synthetic:debug_probe:v1" -and
         [string]$Import.name -ceq "avid_debug_probe" -and
@@ -561,7 +590,8 @@ function Test-BindingPackageImports {
         [AllowEmptyCollection()][object[]]$GuestImports,
         [bool]$AllowDataLaneImports = $false,
         [bool]$AllowGeneratedTypeImports = $false,
-        [bool]$AllowDebugImports = $false
+        [bool]$AllowDebugImports = $false,
+        [bool]$AllowBoundedLanguageErrors = $false
     )
 
     $DeclaredByKey = [System.Collections.Generic.Dictionary[string, object]]::new(
@@ -578,12 +608,25 @@ function Test-BindingPackageImports {
     foreach ($Import in @($GuestImports | Where-Object { [string]$_.module -eq "avidscript" })) {
         $Key = "$([string]$Import.module)`n$([string]$Import.name)"
         [void]$ObservedKeys.Add($Key)
+        if ($AllowBoundedLanguageErrors -and
+            [string]$Import.name -cin @('avid_managed_heap_v1', 'avid_language_error_report_v1')) {
+            if (-not (Test-CompilerInjectedBindingImport `
+                -Import $Import `
+                -AllowDataLaneImports $AllowDataLaneImports `
+                -AllowGeneratedTypeImports $AllowGeneratedTypeImports `
+                -AllowDebugImports $AllowDebugImports `
+                -AllowBoundedLanguageErrors $true)) {
+                $UnexpectedImports += "$([string]$Import.module).$([string]$Import.name)"
+            }
+            continue
+        }
         if (-not $DeclaredByKey.ContainsKey($Key) -and
             -not (Test-CompilerInjectedBindingImport `
                 -Import $Import `
                 -AllowDataLaneImports $AllowDataLaneImports `
                 -AllowGeneratedTypeImports $AllowGeneratedTypeImports `
-                -AllowDebugImports $AllowDebugImports)) {
+                -AllowDebugImports $AllowDebugImports `
+                -AllowBoundedLanguageErrors $AllowBoundedLanguageErrors)) {
             $UnexpectedImports += "$([string]$Import.module).$([string]$Import.name)"
         }
     }
@@ -772,6 +815,7 @@ function Write-BuildReport {
         compilation = [ordered]@{
             data_lane_fusion = $DataLaneFusion
             debug_instrumentation = $ResolvedDebugInstrumentation
+            language_errors = $LanguageErrors
         }
         build_reuse = $BuildReuse
         semantic_cache = $SemanticCache
@@ -862,6 +906,7 @@ function Write-BuildReport {
 
 if ([string]::IsNullOrWhiteSpace($SourcePath)) { $SourcePath = $DefaultSourcePath }
 if ([string]::IsNullOrWhiteSpace($ProjectPath)) { $ProjectPath = $DefaultProjectPath }
+$ModuleIdWasExplicit = -not [string]::IsNullOrWhiteSpace($ModuleId)
 if ([string]::IsNullOrWhiteSpace($ModuleId)) { $ModuleId = $DefaultModuleId }
 if ([string]::IsNullOrWhiteSpace($ArtifactStem)) { $ArtifactStem = $DefaultArtifactStem }
 if ([string]::IsNullOrWhiteSpace($GuestCompilerPath)) { $GuestCompilerPath = $DefaultGuestCompilerPath }
@@ -875,6 +920,13 @@ if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
 $SourcePath = [System.IO.Path]::GetFullPath($SourcePath)
 $ProjectPath = [System.IO.Path]::GetFullPath($ProjectPath)
 $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
+if ($LanguageErrors -ceq "bounded") {
+    $CanonicalModuleId = "csharp:$(Convert-ToProjectRelativePath $SourcePath)"
+    if ($ModuleIdWasExplicit -and $ModuleId -cne $CanonicalModuleId) {
+        throw "Bounded language errors require ModuleId '$CanonicalModuleId' to match the compiled Guest IR."
+    }
+    $ModuleId = $CanonicalModuleId
+}
 $IsDefaultSource = $SourcePath.Equals(
     [System.IO.Path]::GetFullPath($DefaultSourcePath),
     [System.StringComparison]::OrdinalIgnoreCase)
@@ -1076,6 +1128,7 @@ $LegacyAdapterWasmPath = Join-Path $OutputRoot "$ArtifactStem.csharp_adapter.was
 $LegacyDotNetWasmPath = Join-Path $OutputRoot "$ArtifactStem.dotnet.wasm"
 $FrontendModel = $null
 $SemanticModel = $null
+$BoundedSemanticArtifact = $false
 $GuestIrModel = $null
 $DebugMapModel = $null
 $StateSchemaModel = $null
@@ -1487,13 +1540,25 @@ elseif (-not $SemanticCacheHit) {
             $Diagnostics += [ordered]@{ code = "semantic_artifact_invalid"; severity = "error"; message = $_.Exception.Message; file = $SourceId }
         }
     }
-    if ($SemanticExitCode -ne 0 -or $null -eq $SemanticModel -or -not $SemanticModel.succeeded) {
+    $SemanticErrors = @($SemanticModel.diagnostics | Where-Object { [string]$_.severity -ceq "error" })
+    $BoundedSemanticArtifact = $LanguageErrors -ceq "bounded" -and
+        $SemanticExitCode -eq 1 -and
+        $null -ne $SemanticModel -and -not [bool]$SemanticModel.succeeded -and
+        @($SemanticModel.exception_flows | Where-Object { $null -ne $_ }).Count -gt 0 -and
+        $SemanticErrors.Count -gt 0 -and
+        @($SemanticErrors | Where-Object { [string]$_.code -cne "ASCS3001" }).Count -eq 0
+    if ($SemanticExitCode -ne 0 -and -not $BoundedSemanticArtifact -or
+        $null -eq $SemanticModel -or
+        -not [bool]$SemanticModel.succeeded -and -not $BoundedSemanticArtifact) {
         if ($null -eq $SemanticModel) {
             $Diagnostics += [ordered]@{ code = "semantic_failed"; severity = "error"; message = "C# semantic analyzer did not publish a valid artifact."; output = @($SemanticOutput) }
         }
         Write-BuildReport -Result "semantic_failed" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics -Compiler "avidscript-csharp-roslyn-semantic"
         Write-Output "[AvidScript][CSharp][Semantic] result=semantic_failed exit_code=$SemanticExitCode report=$ReportPath"
         exit 1
+    }
+    if ($BoundedSemanticArtifact) {
+        $Diagnostics = @($Diagnostics | Where-Object { [string]$_.code -cne "ASCS3001" })
     }
 }
 
@@ -1621,6 +1686,9 @@ if (-not $CompilationCacheHit) {
             "-Configuration", $Configuration,
             "-DataLaneFusion", $DataLaneFusion,
             "-DebugInstrumentation", $ResolvedDebugInstrumentation)
+        if ($LanguageErrors -ceq "bounded") {
+            $CompilerArguments += @("-LanguageErrors", "bounded")
+        }
         if ($CooperativeSafepoints) {
             $CompilerArguments += @(
                 "-CooperativeSafepoints",
@@ -1816,7 +1884,8 @@ if ($UsesBindingPackage) {
         -GuestImports @($GuestIrModel.imports) `
         -AllowDataLaneImports ($DataLaneFusion -ceq "enabled") `
         -AllowGeneratedTypeImports ([bool]$AllowGeneratedTypeImports) `
-        -AllowDebugImports ($ResolvedDebugInstrumentation -ceq "enabled")
+        -AllowDebugImports ($ResolvedDebugInstrumentation -ceq "enabled") `
+        -AllowBoundedLanguageErrors ([bool]$BoundedSemanticArtifact)
     $UsedAuthorizationBindingImports = @($AuthorizationValidation.UsedImports)
     if (@($AuthorizationValidation.UnexpectedImports).Count -gt 0) {
         Remove-LoadableArtifacts
@@ -1836,7 +1905,8 @@ if ($UsesBindingPackage) {
         -GuestImports @($GuestIrModel.imports) `
         -AllowDataLaneImports ($DataLaneFusion -ceq "enabled") `
         -AllowGeneratedTypeImports ([bool]$AllowGeneratedTypeImports) `
-        -AllowDebugImports ($ResolvedDebugInstrumentation -ceq "enabled")
+        -AllowDebugImports ($ResolvedDebugInstrumentation -ceq "enabled") `
+        -AllowBoundedLanguageErrors ([bool]$BoundedSemanticArtifact)
     $UsedRuntimeBindingImports = @($RuntimeValidation.UsedImports)
     $RuntimeIdentityMismatch = @()
     $RuntimeUsedByKey = [System.Collections.Generic.Dictionary[string, object]]::new(
@@ -1968,8 +2038,11 @@ $MissingObservedExports = @($ExpectedObservedExports | Where-Object { $ObservedE
 $UnexpectedObservedExports = @($ObservedExports | Where-Object { $ExpectedObservedExports -notcontains $_ })
 # This entry publishes the current compiler contract. Keep the exact pair aligned
 # with GuestModuleValidator; TestCSharpGuestBuildContracts exercises real output.
-$GuestContractValid = [int]$GuestIrModel.schema_version -eq 14 -and
-    [string]$GuestIrModel.ir_version -ceq "1.13" -and
+$ExpectedGuestSchema = if ($BoundedSemanticArtifact) { 17 } else { 14 }
+$ExpectedGuestVersion = if ($BoundedSemanticArtifact) { "1.16" } else { "1.13" }
+$GuestContractValid = [int]$GuestIrModel.schema_version -eq $ExpectedGuestSchema -and
+    [string]$GuestIrModel.ir_version -ceq $ExpectedGuestVersion -and
+    (-not $BoundedSemanticArtifact -or $null -ne $GuestIrModel.language_error_catalog) -and
     [bool]$GuestIrModel.succeeded -and
     [string]$GuestIrModel.provenance.semantic_sha256 -eq $SemanticSha256 -and
     [string]$GuestIrModel.provenance.source_sha256 -eq [string]$FrontendModel.source.sha256

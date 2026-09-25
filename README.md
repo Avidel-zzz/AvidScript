@@ -65,7 +65,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 
 - 编译器实现的是 C# / UE API 子集，不能直接运行普通 .NET 项目或任意 NuGet 包。
 - `Task<int>` 可直接 `await`，也可存入局部变量或别名；前一次 `await` 后、提前退出的条件分支内都能创建任务。所有权不确定的分支汇合、任务变量重赋值和其他 `Task<T>` 尚未支持。详见 [Task 结果合同](Docs/Phase66/P66.C4_Task_Result_Contract.md)。
-- 同步 `try/finally` 可用；脚本源码中的 `catch`、`throw` 和 `finally` 内的 `await` 尚未支持。详见 [语言错误合同](Docs/Phase66/P66.C3_Language_Error_Channel_Contract.md)。
+- 同步 `try/finally` 可用。默认构建仍拒绝 `catch`/`throw`；`-LanguageErrors bounded` 仅接受[这个示例](Fixtures/Phase66/BoundedLanguageErrorsLifecycle.cs)中的受限同步异常。`finally` 内的 `await` 尚未支持。详见 [语言错误合同](Docs/Phase66/P66.C3_Language_Error_Channel_Contract.md)。
 - 修改 C# 声明的 `UClass`、`UProperty` 或 `UFunction` 后，需要重新构建并重启 Editor。
 - Win64 Editor、打包样例和独立进程网络样例有自动化测试；真实游戏流程、真实多人联机及 Android/iOS 尚待验收。
 

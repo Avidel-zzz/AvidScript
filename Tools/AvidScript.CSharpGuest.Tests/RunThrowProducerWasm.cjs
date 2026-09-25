@@ -2,8 +2,9 @@
 
 const fs = require('node:fs');
 
-if (process.argv.length !== 3) {
-  throw new Error('Usage: node RunThrowProducerWasm.cjs <throw-producer.wasm>');
+if (process.argv.length !== 3 && (process.argv.length !== 4
+  || process.argv[3] !== '--bounded-lifecycle')) {
+  throw new Error('Usage: node RunThrowProducerWasm.cjs <throw-producer.wasm> [--bounded-lifecycle]');
 }
 
 const wasmModule = new WebAssembly.Module(fs.readFileSync(process.argv[2]));
@@ -136,6 +137,32 @@ for (const entry of WebAssembly.Module.imports(wasmModule)) {
   (imports[entry.module] ??= {})[entry.name] = managedHeap;
 }
 instance = new WebAssembly.Instance(wasmModule, imports);
+if (process.argv[3] === '--bounded-lifecycle') {
+  if (typeof instance.exports.avid_on_begin_play !== 'function'
+    || typeof instance.exports.avid_on_tick !== 'function') {
+    throw new Error('Bounded lifecycle exports are missing');
+  }
+  const begin = instance.exports.avid_on_begin_play();
+  const tick = instance.exports.avid_on_tick(0.016);
+  collect();
+  if (begin !== undefined || tick !== undefined || reported || allocations !== 1
+    || frames.size !== 0 || roots.size !== 0 || objects.size !== 0) {
+    throw new Error(`Bounded lifecycle results/cleanup = ${begin}/${tick}/${reported}/${allocations}/${frames.size}/${roots.size}/${objects.size}`);
+  }
+  try {
+    instance.exports.avid_on_tick(-1);
+    throw new Error('Negative Tick failed to report its language error');
+  } catch (error) {
+    if (error.message !== 'uncaught-language-error' || !reported) throw error;
+  }
+  // This host stub throws at the report import. Production runtime unwinds the
+  // managed heap invocation after that failure; raw Node cannot emulate it.
+  if (allocations !== 2 || frames.size === 0 || roots.size === 0) {
+    throw new Error(`Bounded lifecycle report root = ${allocations}/${frames.size}/${roots.size}`);
+  }
+  process.stdout.write('C# bounded lifecycle WASM: 4/4 passed\n');
+  process.exit(0);
+}
 if (typeof instance.exports.avid_void_guard_entry === 'function') {
   const handled = instance.exports.avid_void_guard_entry;
   const uncaught = instance.exports.avid_void_guard_uncaught_entry;
