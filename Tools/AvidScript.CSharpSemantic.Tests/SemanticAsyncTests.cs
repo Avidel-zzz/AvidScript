@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using AvidScript.CSharpFrontend;
@@ -112,8 +113,10 @@ internal static class SemanticAsyncTests
             "Task<int> alias = original;",
             "if (Result == 0) return; Task<int> alias = original;", StringComparison.Ordinal),
             "Scripts/TaskIntBranchedOwner.cs");
-        Assert(!branchingOwner.Succeeded && branchingOwner.Diagnostics.Any(item => item.Code == "ASCS5403"),
-            "a branch between task declarations must not bypass ownership setup");
+        Assert(branchingOwner.Succeeded
+            && SemanticAsyncInvocationValidator.IsValid(branchingOwner),
+            "an early return between owners may release only the task already created: "
+                + string.Join(" | ", branchingOwner.Diagnostics.Select(item => item.Message)));
         SemanticDocument reassignment = Analyze(source.Replace("Task<int> last = alias;",
             "Task<int> last = alias; last = original;", StringComparison.Ordinal),
             "Scripts/TaskIntReassignedAlias.cs");
@@ -376,8 +379,25 @@ internal static class SemanticAsyncTests
         SemanticDocument late = Analyze(source.Replace("Task<int> pending = LoadScoreAsync();",
             "await AvidContinuations.NextTickAsync(); Task<int> pending = LoadScoreAsync();",
             StringComparison.Ordinal), "Scripts/TaskIntLateLocal.cs");
-        Assert(!late.Succeeded && late.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCS5403"),
-            "Task creation after the first statement stays rejected until path ownership is represented");
+        Assert(late.Succeeded && SemanticAsyncInvocationValidator.IsValid(late),
+            "Task creation after an earlier await must have validated path ownership: "
+                + string.Join(" | ", late.Diagnostics.Select(item => item.Message)));
+        SemanticAsyncMethod lateConsumer = late.AsyncMethods.Single(method => method.TaskResultTypeId is null);
+        string lateTask = lateConsumer.Segments.Select(segment => segment.AwaitSite?.TaskLocalSymbolId)
+            .OfType<string>().Single();
+        Assert(SemanticAsyncInvocationValidator.TryGetTaskLocalFlow(
+                lateConsumer, new[] { lateTask }, false, out _, out _,
+                out IReadOnlyDictionary<int, IReadOnlyList<string>> before,
+                out IReadOnlyDictionary<int, IReadOnlyList<string>> after),
+            "late task ownership must be derivable from the CFG");
+        SemanticAsyncSegment[] ticks = lateConsumer.Segments.Where(segment =>
+            segment.AwaitSite?.ProducerKind == "next_tick").OrderBy(segment =>
+            segment.Ordinal).ToArray();
+        Assert(ticks.Length == 2 && after[ticks[0].Ordinal].Count == 0
+            && after[ticks[1].Ordinal].SequenceEqual(new[] { lateTask })
+            && lateConsumer.Segments.Any(segment => before.TryGetValue(segment.Ordinal,
+                out IReadOnlyList<string>? active) && active.Contains(lateTask)),
+            "only the second suspension may transfer the late task owner");
     }
 
     private static void TaskIntSuspendedCleanupFailsClosed()

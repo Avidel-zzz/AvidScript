@@ -47,6 +47,22 @@ internal static class CSharpTaskResultAbi
         .OfType<string>().Distinct(StringComparer.Ordinal)
         .OrderBy(symbolId => symbolId, StringComparer.Ordinal).ToArray();
 
+    private static IReadOnlyList<string>? ActiveTaskLocalSymbols(
+        SemanticAsyncMethod method, int segmentOrdinal, bool atEntry)
+    {
+        string[] owned = TaskLocalSymbols(method);
+        if (owned.Length == 0) return Array.Empty<string>();
+        if (!SemanticAsyncInvocationValidator.TryGetTaskLocalFlow(
+                method, owned, method.TaskLocalSymbolIds is not null,
+                out _, out _,
+                out IReadOnlyDictionary<int, IReadOnlyList<string>> before,
+                out IReadOnlyDictionary<int, IReadOnlyList<string>> after))
+            return null;
+        IReadOnlyDictionary<int, IReadOnlyList<string>> states = atEntry ? before : after;
+        return states.TryGetValue(segmentOrdinal, out IReadOnlyList<string>? active)
+            ? active : null;
+    }
+
     public static GuestImport Import() => new(ImportId, "avidscript", "avid_task_i32_v1",
         new[] { IntTypeId, TokenTypeId, IntTypeId, IntTypeId }, TokenTypeId);
 
@@ -77,7 +93,9 @@ internal static class CSharpTaskResultAbi
     public static bool ReleaseTaskLocal(CSharpFunctionLoweringContext context,
         SemanticAsyncMethod method, int block, List<GuestInstruction> instructions)
     {
-        foreach (string symbolId in TaskLocalSymbols(method))
+        IReadOnlyList<string>? active = ActiveTaskLocalSymbols(method, block, false);
+        if (active is null) return false;
+        foreach (string symbolId in active)
         {
             GuestRegister? token = LoadTaskLocalToken(context, symbolId, block, instructions);
             if (token is null || Call(context, Release, token, null, block, instructions) is null)
@@ -89,7 +107,9 @@ internal static class CSharpTaskResultAbi
     public static bool RetainTaskLocal(CSharpFunctionLoweringContext context,
         SemanticAsyncMethod method, int block, List<GuestInstruction> instructions)
     {
-        foreach (string symbolId in TaskLocalSymbols(method))
+        IReadOnlyList<string>? active = ActiveTaskLocalSymbols(method, block, true);
+        if (active is null) return false;
+        foreach (string symbolId in active)
         {
             GuestRegister? token = LoadTaskLocalToken(context, symbolId, block, instructions);
             if (token is null || Call(context, Retain, token, null, block, instructions) is null)
@@ -102,7 +122,9 @@ internal static class CSharpTaskResultAbi
         SemanticAsyncMethod method, GuestRegister continuationToken, int block,
         List<GuestInstruction> instructions)
     {
-        foreach (string symbolId in TaskLocalSymbols(method))
+        IReadOnlyList<string>? active = ActiveTaskLocalSymbols(method, block, false);
+        if (active is null) return false;
+        foreach (string symbolId in active)
         {
             GuestRegister? token = LoadTaskLocalToken(context, symbolId, block, instructions);
             GuestRegister? accepted = context.CreateTemporary(IntTypeId, block);

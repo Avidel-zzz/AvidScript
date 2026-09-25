@@ -335,6 +335,7 @@ internal static class CSharpGuestAsyncInvocationTests
                 public static async void BeginPlay()
                 {
                     int adjustment = 1;
+                    await AvidContinuations.NextTickAsync();
                     Task<int> pending = LoadScoreAsync();
                     adjustment = adjustment + 1;
                     await AvidContinuations.NextTickAsync();
@@ -382,7 +383,48 @@ internal static class CSharpGuestAsyncInvocationTests
             File.WriteAllBytes(stem + ".guest-ir.json", GuestIrSerializer.Serialize(module));
             File.WriteAllText(stem + ".result-offset", result.Offset.ToString(CultureInfo.InvariantCulture));
         }
-        return 1;
+        const string earlyReturnSource = """
+            using AvidScript;
+            using System.Runtime.InteropServices;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static int Result;
+                public static async Task<int> LoadScoreAsync()
+                {
+                    return 12;
+                }
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay()
+                {
+                    Task<int> pending = LoadScoreAsync();
+                    if (Result == 0) return;
+                    int score = await pending;
+                    Result = score;
+                }
+            }
+            """;
+        SemanticDocument earlyDocument = CSharpGuestContinuationTests.Analyze(
+            earlyReturnSource, "Scripts/TaskIntEarlyReturn.cs");
+        Check(earlyDocument.Succeeded
+            && SemanticAsyncInvocationValidator.IsValid(earlyDocument),
+            "early return after task creation must preserve owner provenance");
+        CSharpGuestLoweringResult earlyLowered = CSharpGuestLowerer.Lower(
+            earlyDocument, new string('d', 64));
+        Check(earlyLowered.Succeeded,
+            "early return Guest lowering failed: "
+                + string.Join(" | ", earlyLowered.Diagnostics.Select(item => item.Message)));
+        WasmCompilationResult earlyCompiled = WasmModuleCompiler.Compile(earlyLowered.Module!);
+        Check(earlyCompiled.Succeeded, "early return must compile to executable WASM");
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            string stem = Path.Combine(output, "csharp-task-int-early-return");
+            GuestStateSlot result = earlyLowered.Module!.MemoryLayout.StateSlots.Single(slot =>
+                slot.GlobalId.Contains(".Result:", StringComparison.Ordinal));
+            File.WriteAllBytes(stem + ".wasm", earlyCompiled.Bytes);
+            File.WriteAllText(stem + ".result-offset", result.Offset.ToString(CultureInfo.InvariantCulture));
+        }
+        return 2;
     }
 
     private static int TaskResultSemanticCompilesToWasm()

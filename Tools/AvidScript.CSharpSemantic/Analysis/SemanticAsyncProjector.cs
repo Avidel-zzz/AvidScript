@@ -255,7 +255,7 @@ internal static class SemanticAsyncProjector
                     out _, out _))
             {
                 diagnostics.Add(Error("ASCS5403",
-                    "Task<int> locals must be initialized on one straight-line path before the first await.",
+                    "Task<int> locals require a definite owner on every control-flow path.",
                     SemanticSpanFactory.Create(context.PrimaryUnit.SourceText,
                         taskDeclarations[^1].Span)));
                 projected = null;
