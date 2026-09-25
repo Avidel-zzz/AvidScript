@@ -34,12 +34,8 @@ bool FAvidScriptWasmRuntimeInstance::DispatchTaskPropagateFailureCall(
 			TEXT("Source Task<int> has no readable terminal result."));
 	}
 	TArray<int64> Waiters;
-	const bool bPropagated = Source.State == EAvidScriptTaskResultState::Cancelled
-		? HostContext.Tasks->CancelTaskResult(TargetToken, Waiters)
-		: Source.State == EAvidScriptTaskResultState::Faulted
-			&& !Source.ErrorCode.IsEmpty()
-			&& HostContext.Tasks->FaultTaskResult(
-				TargetToken, Source.ErrorCode, Waiters);
+	const bool bPropagated = HostContext.Tasks->PropagateTaskFailure(
+		SourceToken, TargetToken, Waiters);
 	if (!bPropagated)
 	{
 		return Fail(TEXT("task_result_propagate"),

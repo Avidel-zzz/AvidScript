@@ -163,13 +163,17 @@ bool FAvidScriptSessionTaskResults::Finish(
 	const EAvidScriptTaskResultState State,
 	const TConstArrayView<uint8> Value,
 	FString ErrorCode,
-	TArray<int64>& OutWaiters)
+	TArray<int64>& OutWaiters,
+	TOptional<FAvidScriptTaskLanguageError> LanguageError,
+	TSharedPtr<IAvidScriptTaskLanguageErrorLease> RootLease)
 {
 	check(IsInGameThread());
 	FSlot* const Slot = Find(Token);
 	if (Slot == nullptr || Slot->Entry->State != EAvidScriptTaskResultState::Running
 		|| Value.Num() > MaximumValueBytes
-		|| (State == EAvidScriptTaskResultState::Faulted && ErrorCode.IsEmpty()))
+		|| (State == EAvidScriptTaskResultState::Faulted && ErrorCode.IsEmpty())
+		|| LanguageError.IsSet() != RootLease.IsValid()
+		|| (LanguageError.IsSet() && State != EAvidScriptTaskResultState::Faulted))
 	{
 		return false;
 	}
@@ -180,6 +184,8 @@ bool FAvidScriptSessionTaskResults::Finish(
 		Entry.Value.Append(Value.GetData(), Value.Num());
 	}
 	Entry.ErrorCode = MoveTemp(ErrorCode);
+	Entry.LanguageError = MoveTemp(LanguageError);
+	Entry.LanguageErrorRoot = MoveTemp(RootLease);
 	WaiterCount -= Entry.Waiters.Num();
 	OutWaiters = MoveTemp(Entry.Waiters);
 	if (Entry.ReferenceCount == 0)
@@ -205,6 +211,56 @@ bool FAvidScriptSessionTaskResults::Fault(
 		MoveTemp(ErrorCode), OutWaiters);
 }
 
+bool FAvidScriptSessionTaskResults::FaultLanguageError(
+	const int64 Token, const FAvidScriptTaskLanguageError Error,
+	TSharedPtr<IAvidScriptTaskLanguageErrorLease> RootLease,
+	TArray<int64>& OutWaiters)
+{
+	if (Error.TypeToken <= 0 || Error.SourceToken <= 0 || Error.ObjectToken == 0
+		|| !RootLease.IsValid())
+	{
+		return false;
+	}
+	return Finish(Token, EAvidScriptTaskResultState::Faulted, {},
+		TEXT("language_error"), OutWaiters, Error, MoveTemp(RootLease));
+}
+
+bool FAvidScriptSessionTaskResults::PropagateFailure(
+	const int64 SourceToken, const int64 TargetToken, TArray<int64>& OutWaiters)
+{
+	check(IsInGameThread());
+	if (SourceToken == TargetToken)
+	{
+		return false;
+	}
+	const FSlot* const SourceSlot = Find(SourceToken);
+	const FSlot* const TargetSlot = Find(TargetToken);
+	if (SourceSlot == nullptr || TargetSlot == nullptr)
+	{
+		return false;
+	}
+	const FEntry& Source = SourceSlot->Entry.GetValue();
+	const FEntry& Target = TargetSlot->Entry.GetValue();
+	if (Source.Lane != Target.Lane
+		|| Source.ActivationSerial != Target.ActivationSerial
+		|| Source.TypeId != Target.TypeId
+		|| Target.State != EAvidScriptTaskResultState::Running)
+	{
+		return false;
+	}
+	if (Source.State == EAvidScriptTaskResultState::Cancelled)
+	{
+		return Cancel(TargetToken, OutWaiters);
+	}
+	if (Source.State != EAvidScriptTaskResultState::Faulted)
+	{
+		return false;
+	}
+	return Finish(TargetToken, EAvidScriptTaskResultState::Faulted, {},
+		Source.ErrorCode, OutWaiters, Source.LanguageError,
+		Source.LanguageErrorRoot);
+}
+
 bool FAvidScriptSessionTaskResults::Cancel(
 	const int64 Token, TArray<int64>& OutWaiters)
 {
@@ -225,6 +281,7 @@ bool FAvidScriptSessionTaskResults::Read(
 	OutSnapshot.TypeId = Entry.TypeId;
 	OutSnapshot.Value = Entry.Value;
 	OutSnapshot.ErrorCode = Entry.ErrorCode;
+	OutSnapshot.LanguageError = Entry.LanguageError;
 	return true;
 }
 

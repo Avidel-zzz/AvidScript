@@ -73,6 +73,12 @@ public:
 	bool SucceedTaskResult(int64 Token, TConstArrayView<uint8> Value,
 		TArray<int64>& OutWaiters) override;
 	bool FaultTaskResult(int64 Token, FString ErrorCode, TArray<int64>& OutWaiters) override;
+	bool FaultTaskResultLanguageError(int64 Token,
+		FAvidScriptTaskLanguageError Error,
+		TSharedPtr<IAvidScriptTaskLanguageErrorLease> RootLease,
+		TArray<int64>& OutWaiters) override;
+	bool PropagateTaskFailure(int64 SourceToken, int64 TargetToken,
+		TArray<int64>& OutWaiters) override;
 	bool CancelTaskResult(int64 Token, TArray<int64>& OutWaiters) override;
 	bool ReadTaskResult(int64 Token, FAvidScriptTaskResultSnapshot& OutSnapshot) const override;
 	bool BeginLatent(

@@ -330,6 +330,39 @@ bool FAvidScriptContinuationHostEndpoint::FaultTaskResult(
 	return true;
 }
 
+bool FAvidScriptContinuationHostEndpoint::FaultTaskResultLanguageError(
+	const int64 Token, const FAvidScriptTaskLanguageError Error,
+	TSharedPtr<IAvidScriptTaskLanguageErrorLease> RootLease,
+	TArray<int64>& OutWaiters)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = PinTaskOwner(Token);
+	if (!PinnedOwner || !PinnedOwner->TaskResults.FaultLanguageError(
+		Token, Error, MoveTemp(RootLease), OutWaiters))
+	{
+		return false;
+	}
+	PinnedOwner->QueueTaskWaiters(
+		Token, EAvidScriptTaskResultState::Faulted, OutWaiters);
+	return true;
+}
+
+bool FAvidScriptContinuationHostEndpoint::PropagateTaskFailure(
+	const int64 SourceToken, const int64 TargetToken,
+	TArray<int64>& OutWaiters)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = PinTaskOwner(SourceToken);
+	FAvidScriptTaskResultSnapshot Source;
+	if (!PinnedOwner || !PinTaskOwner(TargetToken)
+		|| !PinnedOwner->TaskResults.Read(SourceToken, Source)
+		|| !PinnedOwner->TaskResults.PropagateFailure(
+			SourceToken, TargetToken, OutWaiters))
+	{
+		return false;
+	}
+	PinnedOwner->QueueTaskWaiters(TargetToken, Source.State, OutWaiters);
+	return true;
+}
+
 bool FAvidScriptContinuationHostEndpoint::CancelTaskResult(
 	const int64 Token, TArray<int64>& OutWaiters)
 {

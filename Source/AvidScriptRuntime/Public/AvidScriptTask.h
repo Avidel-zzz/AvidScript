@@ -17,12 +17,29 @@ enum class EAvidScriptTaskWaitRegistration : uint8
 	Ready
 };
 
+// Catalog tokens and managed object identity belong to the task's code
+// activation. A future Guest import must validate the catalog and current
+// invocation root before constructing this native error payload.
+struct FAvidScriptTaskLanguageError
+{
+	int32 TypeToken = 0;
+	int32 SourceToken = 0;
+	uint64 ObjectToken = 0;
+};
+
+class AVIDSCRIPTRUNTIME_API IAvidScriptTaskLanguageErrorLease
+{
+public:
+	virtual ~IAvidScriptTaskLanguageErrorLease() = default;
+};
+
 struct FAvidScriptTaskResultSnapshot
 {
 	EAvidScriptTaskResultState State = EAvidScriptTaskResultState::Running;
 	FString TypeId;
 	TArray<uint8> Value;
 	FString ErrorCode;
+	TOptional<FAvidScriptTaskLanguageError> LanguageError;
 };
 
 // Native Session capability. Guest bytes must be validated against a versioned
@@ -49,6 +66,12 @@ public:
 	virtual bool SucceedTaskResult(int64 Token, TConstArrayView<uint8> Value,
 		TArray<int64>& OutWaiters) = 0;
 	virtual bool FaultTaskResult(int64 Token, FString ErrorCode,
+		TArray<int64>& OutWaiters) = 0;
+	virtual bool FaultTaskResultLanguageError(int64 Token,
+		FAvidScriptTaskLanguageError Error,
+		TSharedPtr<IAvidScriptTaskLanguageErrorLease> RootLease,
+		TArray<int64>& OutWaiters) = 0;
+	virtual bool PropagateTaskFailure(int64 SourceToken, int64 TargetToken,
 		TArray<int64>& OutWaiters) = 0;
 	virtual bool CancelTaskResult(int64 Token, TArray<int64>& OutWaiters) = 0;
 	virtual bool ReadTaskResult(int64 Token,

@@ -1,10 +1,25 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Continuation/AvidScriptSessionContinuations.h"
+#include "Memory/AvidScriptManagedHeap.h"
 
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
 #include "UObject/StrongObjectPtr.h"
+
+#include <array>
+
+namespace AvidScriptTaskLanguageErrorTestPrivate
+{
+class FRootLease final : public IAvidScriptTaskLanguageErrorLease
+{
+public:
+	explicit FRootLease(AvidScript::Managed::FPersistentRoots&& InRoots)
+		: Roots(MoveTemp(InRoots)) {}
+private:
+	AvidScript::Managed::FPersistentRoots Roots;
+};
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptSessionTaskResultsTest,
@@ -114,6 +129,123 @@ bool FAvidScriptSessionTaskResultsTest::RunTest(const FString& Parameters)
 	Owner->Teardown();
 	TestEqual(TEXT("Teardown reclaims all tasks"), Tasks.GetCount(), 0);
 	TestFalse(TEXT("Teardown invalidates published task"), Tasks.Retain(PublishedTask));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptSessionTaskLanguageErrorTest,
+	"AvidScript.Runtime.Continuation.TaskLanguageError",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptSessionTaskLanguageErrorTest::RunTest(const FString& Parameters)
+{
+	using namespace AvidScript::Managed;
+	FHeap Heap;
+	const std::array<FHeapLayout, 1> Layouts{{{1, 8, {}}}};
+	if (!TestTrue(TEXT("Error heap configures"), Heap.Configure(Layouts) == EHeapError::Ok))
+	{
+		return false;
+	}
+	FToken Frame = 0, FrameRoot = 0, ErrorObject = 0;
+	TestTrue(TEXT("Error invocation frame starts"), Heap.PushFrame(Frame) == EHeapError::Ok);
+	TestTrue(TEXT("Error frame root exists"), Heap.CreateRoot(Frame, 0, FrameRoot) == EHeapError::Ok);
+	TestTrue(TEXT("Error object allocates in frame"), Heap.Allocate(1, FrameRoot, ErrorObject) == EHeapError::Ok);
+	TestTrue(TEXT("Object has caller root authority"),
+		Heap.IsObjectRootedInCurrentFrame(ErrorObject));
+	const std::array<FToken, 1> Objects{{ErrorObject}};
+	FPersistentRoots Roots;
+	TestTrue(TEXT("Task acquires a persistent root"),
+		Heap.RetainPersistent(Objects, Roots) == EHeapError::Ok);
+	TestTrue(TEXT("Invocation frame exits"), Heap.PopFrame(Frame) == EHeapError::Ok);
+	TSharedPtr<IAvidScriptTaskLanguageErrorLease> Lease =
+		MakeShared<AvidScriptTaskLanguageErrorTestPrivate::FRootLease>(MoveTemp(Roots));
+
+	TStrongObjectPtr<UWorld> World(NewObject<UWorld>());
+	const TSharedPtr<FAvidScriptSessionContinuations> Owner =
+		MakeShared<FAvidScriptSessionContinuations>();
+	FAvidScriptContinuationHostEndpoint& Host = Owner->ResetActive(World.Get());
+	const int64 Source = Host.CreateTaskResult(TEXT("type:int32"));
+	const int64 Target = Host.CreateTaskResult(TEXT("type:int32"));
+	if (!TestNotEqual(TEXT("Source task exists"), Source, 0LL)
+		|| !TestNotEqual(TEXT("Target task exists"), Target, 0LL))
+	{
+		return false;
+	}
+	int64 Waiter = 0;
+	TestTrue(TEXT("Target waiter registers"),
+		Host.AwaitTaskResult(Target, 301, Waiter)
+			== EAvidScriptTaskWaitRegistration::Queued);
+	TArray<int64> Woken;
+	FAvidScriptTaskLanguageError Error{3, 7, ErrorObject};
+	TestTrue(TEXT("Language error faults source"), Host.FaultTaskResultLanguageError(
+		Source, Error, MoveTemp(Lease), Woken));
+	TestTrue(TEXT("Caller releases root lease ownership"), !Lease.IsValid());
+	TestTrue(TEXT("Root survives after frame exit"), Heap.Collect() == EHeapError::Ok);
+	TestTrue(TEXT("Faulted source keeps error object"), Heap.IsAlive(ErrorObject));
+	TestTrue(TEXT("Fault propagates to target"),
+		Host.PropagateTaskFailure(Source, Target, Woken));
+	TestEqual(TEXT("Target waiter wakes once"), Woken.Num(), 1);
+	if (Woken.Num() == 1)
+	{
+		TestEqual(TEXT("Correct waiter wakes"), Woken[0], Waiter);
+	}
+	FAvidScriptTaskResultSnapshot Snapshot;
+	TestTrue(TEXT("Target result remains readable"), Host.ReadTaskResult(Target, Snapshot));
+	TestTrue(TEXT("Target result is faulted"),
+		Snapshot.State == EAvidScriptTaskResultState::Faulted);
+	TestEqual(TEXT("Fault code survives propagation"),
+		Snapshot.ErrorCode, FString(TEXT("language_error")));
+	TestTrue(TEXT("Language payload survives propagation"), Snapshot.LanguageError.IsSet());
+	if (Snapshot.LanguageError.IsSet())
+	{
+		TestEqual(TEXT("Type token survives"), Snapshot.LanguageError->TypeToken, 3);
+		TestEqual(TEXT("Source token survives"), Snapshot.LanguageError->SourceToken, 7);
+		TestEqual(TEXT("Object token survives"), Snapshot.LanguageError->ObjectToken, ErrorObject);
+	}
+	TestFalse(TEXT("Fault cannot propagate twice to completed target"),
+		Host.PropagateTaskFailure(Source, Target, Woken));
+	TestTrue(TEXT("Source reference releases"), Host.ReleaseTaskResult(Source));
+	TestTrue(TEXT("Target root survives source retirement"), Heap.Collect() == EHeapError::Ok);
+	TestTrue(TEXT("Target still owns error object"), Heap.IsAlive(ErrorObject));
+	TestTrue(TEXT("Producer releases target reference"), Host.ReleaseTaskResult(Target));
+	TArray<FAvidScriptContinuationCompletion> Ready;
+	Owner->DrainReady(Ready);
+	TestEqual(TEXT("Faulted target dispatches waiter"), Ready.Num(), 1);
+	TestTrue(TEXT("Waiter finalizes"), Owner->FinalizeDispatched(Waiter, true));
+	TestTrue(TEXT("Collected object is released with last waiter"),
+		Heap.Collect() == EHeapError::Ok);
+	TestFalse(TEXT("No error object remains after task release"), Heap.IsAlive(ErrorObject));
+	TestEqual(TEXT("No persistent error roots remain"), Heap.GetStats().LiveRoots, 0u);
+
+	FToken CandidateFrame = 0, CandidateFrameRoot = 0, CandidateObject = 0;
+	TestTrue(TEXT("Candidate frame starts"),
+		Heap.PushFrame(CandidateFrame) == EHeapError::Ok);
+	TestTrue(TEXT("Candidate frame root exists"),
+		Heap.CreateRoot(CandidateFrame, 0, CandidateFrameRoot) == EHeapError::Ok);
+	TestTrue(TEXT("Candidate error object allocates"),
+		Heap.Allocate(1, CandidateFrameRoot, CandidateObject) == EHeapError::Ok);
+	const std::array<FToken, 1> CandidateObjects{{CandidateObject}};
+	FPersistentRoots CandidateRoots;
+	TestTrue(TEXT("Candidate task acquires root"),
+		Heap.RetainPersistent(CandidateObjects, CandidateRoots) == EHeapError::Ok);
+	TestTrue(TEXT("Candidate frame exits"),
+		Heap.PopFrame(CandidateFrame) == EHeapError::Ok);
+	FAvidScriptContinuationHostEndpoint& Prepared = Owner->BeginPrepared(World.Get());
+	const int64 Candidate = Prepared.CreateTaskResult(TEXT("type:int32"));
+	TSharedPtr<IAvidScriptTaskLanguageErrorLease> CandidateLease =
+		MakeShared<AvidScriptTaskLanguageErrorTestPrivate::FRootLease>(
+			MoveTemp(CandidateRoots));
+	TestTrue(TEXT("Prepared task stores its error root"),
+		Prepared.FaultTaskResultLanguageError(Candidate,
+			{5, 9, CandidateObject}, MoveTemp(CandidateLease), Woken));
+	Owner->DiscardPrepared();
+	TestTrue(TEXT("Rollback collects discarded error object"),
+		Heap.Collect() == EHeapError::Ok);
+	TestFalse(TEXT("Candidate root does not survive rollback"),
+		Heap.IsAlive(CandidateObject));
+	TestFalse(TEXT("Rolled-back task token is stale"),
+		Prepared.ReadTaskResult(Candidate, Snapshot));
+	Owner->Teardown();
 	return true;
 }
 
