@@ -8,6 +8,8 @@ param(
     [string]$ExecutableReferenceSourcePath = "",
     [ValidateSet("enabled", "disabled")]
     [string]$AsyncExceptionFlow = "disabled",
+    [ValidateSet("enabled", "disabled")]
+    [string]$DirectAwaitCleanup = "disabled",
     [string]$Configuration = "Release"
 )
 
@@ -80,6 +82,9 @@ try {
         }
         if ($AsyncExceptionFlow -ceq "enabled") {
             $SemanticArguments += @("--async-exception-flow", "enabled")
+        }
+        if ($DirectAwaitCleanup -ceq "enabled") {
+            $SemanticArguments += @("--direct-await-cleanup", "enabled")
         }
         & $DotNetPath $SemanticDll @SemanticArguments
         $ExitCode = $LASTEXITCODE

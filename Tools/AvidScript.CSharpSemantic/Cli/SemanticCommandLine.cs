@@ -48,13 +48,19 @@ public static class SemanticCommandLine
             bool enableAsyncExceptionFlow = options.TryGetValue(
                     "--async-exception-flow", out string? flowMode)
                 && string.Equals(flowMode, "enabled", StringComparison.Ordinal);
+            bool enableDirectAwaitCleanup = options.TryGetValue(
+                    "--direct-await-cleanup", out string? cleanupMode)
+                && string.Equals(cleanupMode, "enabled", StringComparison.Ordinal);
+            if (enableDirectAwaitCleanup && !enableAsyncExceptionFlow)
+                throw new ArgumentException("Direct await cleanup requires async exception flow.");
             SemanticDocument document = SemanticAnalyzer.Analyze(
                 source,
                 sourceId,
                 frontendSourceSha256,
                 referenceSources,
                 workspace,
-                enableAsyncExceptionFlow);
+                enableAsyncExceptionFlow,
+                enableDirectAwaitCleanup);
             SemanticArtifactWriter.WriteAtomic(outputPath, SemanticSerializer.Serialize(document));
             return document.Succeeded ? 0 : 1;
         }
@@ -87,7 +93,7 @@ public static class SemanticCommandLine
         referenceSourceOptions = new List<ReferenceSourceOption>();
         if (args.Length == 0 || args.Length % 2 != 0)
         {
-            throw new ArgumentException("Usage: --source <path> --source-id <id> --frontend <path> --output <path> [--reference-source <path>]... [--executable-reference-source <path>]... [--async-exception-flow enabled|disabled]");
+            throw new ArgumentException("Usage: --source <path> --source-id <id> --frontend <path> --output <path> [--reference-source <path>]... [--executable-reference-source <path>]... [--async-exception-flow enabled|disabled] [--direct-await-cleanup enabled|disabled]");
         }
 
         Dictionary<string, string> options = new(StringComparer.Ordinal);
@@ -109,13 +115,16 @@ public static class SemanticCommandLine
             }
 
             if (Array.IndexOf(RequiredOptions, option) < 0
-                && option != "--async-exception-flow")
+                && option is not ("--async-exception-flow" or "--direct-await-cleanup"))
             {
                 throw new ArgumentException($"Unknown option: {option}");
             }
             if (option == "--async-exception-flow"
                 && value is not ("enabled" or "disabled"))
                 throw new ArgumentException("--async-exception-flow must be enabled or disabled.");
+            if (option == "--direct-await-cleanup"
+                && value is not ("enabled" or "disabled"))
+                throw new ArgumentException("--direct-await-cleanup must be enabled or disabled.");
 
             if (string.IsNullOrWhiteSpace(value) || !options.TryAdd(option, value))
             {

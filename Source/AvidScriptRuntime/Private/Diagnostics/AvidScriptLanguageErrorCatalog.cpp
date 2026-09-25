@@ -136,7 +136,8 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 		if (bValidProvenance && (ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("17/1.16")
 			|| ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("20/1.19")
 			|| ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("21/1.20")
-			|| ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("22/1.21")))
+			|| ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("22/1.21")
+			|| ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("23/1.22")))
 		{
 			OutError = TEXT("Catalog-bearing Guest IR WASM is missing language-error metadata");
 			return false;
@@ -148,7 +149,8 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 		|| (ProvenanceFields.FindRef(TEXT("guest_ir")) != TEXT("17/1.16")
 			&& ProvenanceFields.FindRef(TEXT("guest_ir")) != TEXT("20/1.19")
 			&& ProvenanceFields.FindRef(TEXT("guest_ir")) != TEXT("21/1.20")
-			&& ProvenanceFields.FindRef(TEXT("guest_ir")) != TEXT("22/1.21")))
+			&& ProvenanceFields.FindRef(TEXT("guest_ir")) != TEXT("22/1.21")
+			&& ProvenanceFields.FindRef(TEXT("guest_ir")) != TEXT("23/1.22")))
 	{
 		OutError = TEXT("language-error metadata has no matching versioned provenance");
 		return false;
@@ -179,7 +181,7 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 	const TArray<TSharedPtr<FJsonValue>>* Types = nullptr;
 	const TArray<TSharedPtr<FJsonValue>>* Sources = nullptr;
 	if (!CatalogPrivate::Number(*Document, TEXT("schema_version"), 1, 1, SectionVersion)
-		|| !CatalogPrivate::Number(*Document, TEXT("guest_ir_schema_version"), 17, 22, GuestSchema)
+		|| !CatalogPrivate::Number(*Document, TEXT("guest_ir_schema_version"), 17, 23, GuestSchema)
 		|| !Document->TryGetStringField(TEXT("guest_ir_version"), GuestVersion)
 		|| !((GuestSchema == 17 && GuestVersion == TEXT("1.16")
 			&& ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("17/1.16"))
@@ -188,13 +190,17 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 			|| (GuestSchema == 21 && GuestVersion == TEXT("1.20")
 				&& ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("21/1.20"))
 			|| (GuestSchema == 22 && GuestVersion == TEXT("1.21")
-				&& ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("22/1.21")))
+				&& ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("22/1.21"))
+			|| (GuestSchema == 23 && GuestVersion == TEXT("1.22")
+				&& ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("23/1.22")))
 		|| !Document->TryGetStringField(TEXT("module_id"), ModuleId) || ModuleId != ExpectedModuleId
 		|| !Document->TryGetStringField(TEXT("source_sha256"), SourceSha256)
 		|| !CatalogPrivate::IsLowerSha256(SourceSha256)
 		|| SourceSha256 != ProvenanceFields.FindRef(TEXT("source_sha256"))
-		|| !Document->TryGetArrayField(TEXT("types"), Types) || Types->Num() < 1 || Types->Num() > 256
-		|| !Document->TryGetArrayField(TEXT("sources"), Sources) || Sources->Num() < 1 || Sources->Num() > 1024)
+		|| !Document->TryGetArrayField(TEXT("types"), Types) || Types->Num() > 256
+		|| !Document->TryGetArrayField(TEXT("sources"), Sources) || Sources->Num() > 1024
+		|| ((Types->IsEmpty() || Sources->IsEmpty())
+			&& (GuestSchema != 23 || Types->Num() != Sources->Num())))
 	{
 		OutError = TEXT("language-error metadata identity or token counts are invalid");
 		return false;
