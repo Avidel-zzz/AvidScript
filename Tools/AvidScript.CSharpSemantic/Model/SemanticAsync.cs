@@ -36,6 +36,9 @@ public sealed record SemanticAsyncMethod(
     [JsonPropertyOrder(11), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public SemanticAsyncErrorPlan? ErrorPlan { get; init; }
 
+    [JsonPropertyOrder(12), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SemanticAsyncExceptionPlan? ExceptionPlan { get; init; }
+
     public static string ReceiverSymbol(string methodSymbolId) => "receiver:" + methodSymbolId;
 
     public const string ReentrantZeroHeapCpsLowering = "reentrant_zero_heap_cps";
@@ -76,6 +79,20 @@ public sealed record SemanticAsyncThrowSite(
     [property: JsonPropertyOrder(1)] string ExceptionTypeId,
     [property: JsonPropertyOrder(2)] string ConstructorSymbolId,
     [property: JsonPropertyOrder(3)] SemanticSpan Span);
+
+// Source-backed handler order and CFG membership for schema 42. Runtime
+// routing uses segment targets; these regions validate their provenance.
+public sealed record SemanticAsyncExceptionPlan(
+    [property: JsonPropertyOrder(0)] string SourceId,
+    [property: JsonPropertyOrder(1)] int SourceLength,
+    [property: JsonPropertyOrder(2)] IReadOnlyList<SemanticAsyncExceptionRegion> Regions,
+    [property: JsonPropertyOrder(3)] IReadOnlyList<SemanticCatchHandler> Catches);
+
+public sealed record SemanticAsyncExceptionRegion(
+    [property: JsonPropertyOrder(0)] string Kind,
+    [property: JsonPropertyOrder(1)] int RoslynRegionOrdinal,
+    [property: JsonPropertyOrder(2)] SemanticSpan SourceSpan,
+    [property: JsonPropertyOrder(3)] IReadOnlyList<int> Segments);
 
 // Segment membership comes from CFG construction, not source-span heuristics.
 // An await edge within a scope resumes the same activation; entering from outside

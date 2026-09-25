@@ -35,10 +35,16 @@ public static class SemanticAsyncScopeValidator
             foreach (SemanticAsyncSegment segment in method.Segments)
             {
                 SemanticAsyncControlTransfer transfer = segment.Transfer!;
-                if (transfer.Kind is not (SemanticAsyncMethod.GotoTransferKind or SemanticAsyncMethod.BranchTransferKind
-                    or SemanticAsyncMethod.AwaitTransferKind or SemanticAsyncMethod.ReturnTransferKind
-                    or SemanticAsyncMethod.ThrowTransferKind)
-                    || transfer.CancellationTarget is not null
+                bool exceptionTransfer = method.ExceptionPlan is not null
+                    && document.SchemaVersion == SemanticContract.AsyncExceptionFlowSchemaVersion
+                    && transfer.Kind is (SemanticAsyncMethod.CatchMatchTransferKind
+                        or SemanticAsyncMethod.PropagateFaultTransferKind
+                        or SemanticAsyncMethod.PropagateCancellationTransferKind);
+                if (!exceptionTransfer && transfer.Kind is not
+                    (SemanticAsyncMethod.GotoTransferKind or SemanticAsyncMethod.BranchTransferKind
+                        or SemanticAsyncMethod.AwaitTransferKind or SemanticAsyncMethod.ReturnTransferKind
+                        or SemanticAsyncMethod.ThrowTransferKind)
+                    || method.ExceptionPlan is null && transfer.CancellationTarget is not null
                     || Targets(transfer).Any(target => target < 0 || target >= method.Segments.Count)) return false;
             }
             HashSet<string> ids = new(StringComparer.Ordinal);
@@ -83,9 +89,10 @@ public static class SemanticAsyncScopeValidator
 
     public static IEnumerable<int> Targets(SemanticAsyncControlTransfer transfer)
     {
-        if (transfer.Kind is SemanticAsyncMethod.GotoTransferKind or SemanticAsyncMethod.AwaitTransferKind or SemanticAsyncMethod.BranchTransferKind)
+        if (transfer.Kind is SemanticAsyncMethod.GotoTransferKind or SemanticAsyncMethod.AwaitTransferKind
+            or SemanticAsyncMethod.BranchTransferKind or SemanticAsyncMethod.CatchMatchTransferKind)
             yield return transfer.PrimaryTarget;
-        if (transfer.Kind == SemanticAsyncMethod.BranchTransferKind
+        if (transfer.Kind is SemanticAsyncMethod.BranchTransferKind or SemanticAsyncMethod.CatchMatchTransferKind
             || transfer.Kind == SemanticAsyncMethod.AwaitTransferKind && transfer.SecondaryTarget >= 0)
             yield return transfer.SecondaryTarget;
         if (transfer.Kind == SemanticAsyncMethod.AwaitTransferKind

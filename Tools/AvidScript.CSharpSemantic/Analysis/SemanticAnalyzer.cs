@@ -34,7 +34,8 @@ public static class SemanticAnalyzer
         string sourceId,
         string frontendSourceSha256,
         IReadOnlyList<SemanticReferenceSource> referenceSources,
-        SemanticCompilerWorkspace workspace)
+        SemanticCompilerWorkspace workspace,
+        bool enableAsyncExceptionFlow = false)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceId);
@@ -96,11 +97,20 @@ public static class SemanticAnalyzer
         SemanticAsyncProjection asyncProjection = SemanticAsyncProjector.Project(
             context,
             typeRegistry,
-            callableProjection.Callables);
+            callableProjection.Callables,
+            enableAsyncExceptionFlow);
         SemanticControlFlowProjection controlFlowProjection = SemanticControlFlowProjector.Project(
             context,
             typeRegistry,
-            asyncProjection.ControlledMethodSymbolIds);
+            asyncProjection.ControlledMethodSymbolIds,
+            asyncProjection.Methods,
+            callableProjection.Callables,
+            enableAsyncExceptionFlow);
+        asyncProjection = asyncProjection with
+        {
+            Methods = asyncProjection.Methods.Concat(
+                controlFlowProjection.AsyncExceptionMethods).ToArray(),
+        };
         symbols = symbols.Concat(controlFlowProjection.CompilerLocalSymbols)
             .OrderBy(symbol => symbol.Id, StringComparer.Ordinal)
             .ToArray();
@@ -200,9 +210,11 @@ public static class SemanticAnalyzer
             segment.AwaitSite?.ResultStorageKind == "existing_local"));
         bool hasTaskAliases = asyncProjection.Methods.Any(method => method.TaskLocalSymbolIds is not null);
         bool hasAsyncLanguageErrors = asyncProjection.Methods.Any(method => method.ErrorPlan is not null);
+        bool hasAsyncExceptionPlans = asyncProjection.Methods.Any(method => method.ExceptionPlan is not null);
         bool hasTaskLanguageErrors = hasExceptionFlows && hasTaskResults;
         return new SemanticDocument(
-            hasAsyncLanguageErrors ? SemanticContract.AsyncLanguageErrorSchemaVersion
+            hasAsyncExceptionPlans ? SemanticContract.AsyncExceptionFlowSchemaVersion
+                : hasAsyncLanguageErrors ? SemanticContract.AsyncLanguageErrorSchemaVersion
                 : hasTaskLanguageErrors ? SemanticContract.TaskLanguageErrorSchemaVersion
                 : hasExceptionFlows ? SemanticContract.ExceptionFlowSchemaVersion
                 : hasTaskAliases ? SemanticContract.TaskAliasSchemaVersion
@@ -212,7 +224,8 @@ public static class SemanticAnalyzer
                 : hasTaskResults ? SemanticContract.TaskResultSchemaVersion
                 : SemanticContract.CurrentSchemaVersion,
             "csharp",
-            hasAsyncLanguageErrors ? SemanticContract.AsyncLanguageErrorSemanticVersion
+            hasAsyncExceptionPlans ? SemanticContract.AsyncExceptionFlowSemanticVersion
+                : hasAsyncLanguageErrors ? SemanticContract.AsyncLanguageErrorSemanticVersion
                 : hasTaskLanguageErrors ? SemanticContract.TaskLanguageErrorSemanticVersion
                 : hasExceptionFlows ? SemanticContract.ExceptionFlowSemanticVersion
                 : hasTaskAliases ? SemanticContract.TaskAliasSemanticVersion

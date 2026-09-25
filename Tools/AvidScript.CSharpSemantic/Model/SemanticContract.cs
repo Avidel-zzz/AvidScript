@@ -25,6 +25,8 @@ public static class SemanticContract
     public const string TaskLanguageErrorSemanticVersion = "1.49";
     public const int AsyncLanguageErrorSchemaVersion = 41;
     public const string AsyncLanguageErrorSemanticVersion = "1.50";
+    public const int AsyncExceptionFlowSchemaVersion = 42;
+    public const string AsyncExceptionFlowSemanticVersion = "1.51";
 
     public static string GenericInstanceId(string definitionId, IReadOnlyList<string> arguments)
     {
@@ -50,5 +52,7 @@ public static class SemanticContract
         || (schemaVersion == TaskLanguageErrorSchemaVersion
             && semanticVersion == TaskLanguageErrorSemanticVersion)
         || (schemaVersion == AsyncLanguageErrorSchemaVersion
-            && semanticVersion == AsyncLanguageErrorSemanticVersion);
+            && semanticVersion == AsyncLanguageErrorSemanticVersion)
+        || (schemaVersion == AsyncExceptionFlowSchemaVersion
+            && semanticVersion == AsyncExceptionFlowSemanticVersion);
 }

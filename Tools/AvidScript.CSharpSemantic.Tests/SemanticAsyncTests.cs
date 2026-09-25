@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using AvidScript.CSharpFrontend;
@@ -32,6 +33,8 @@ internal static class SemanticAsyncTests
         TaskIntStaticFieldAssignmentIsVersionedAndBounded();
         TaskIntExistingLocalAssignmentPreservesStorage();
         TaskIntSuspendedCleanupFailsClosed();
+        AsyncExceptionPlanPublishesVersionedSegments();
+        AsyncExceptionFixturePublishesAllMethods();
         AwaitFailureSuccessorKeepsCleanupLocalAlive();
         RejectedAsyncExceptionRetainsRoslynRegions();
         SuspendedFinallyPreviewRoutesTaskFailureThroughCleanup();
@@ -39,7 +42,7 @@ internal static class SemanticAsyncTests
         NestedSuspendedCleanupBindsDistinctRoslynRegions();
         TaskAndExceptionPlansKeepBothContracts();
         TaskIntThrowPublishesVersionedErrorPlan();
-        return 28;
+        return 30;
     }
 
     private static void NestedSuspendedCleanupBindsDistinctRoslynRegions()
@@ -1061,6 +1064,114 @@ internal static class SemanticAsyncTests
             && flows[0].Regions.Any(region => region.Kind == "finally")
             && rejected.ExceptionFlows is null,
             "await inside try/finally must fail until suspended cleanup is owned by the task");
+    }
+
+    private static void AsyncExceptionPlanPublishesVersionedSegments()
+    {
+        const string source = """
+            using AvidScript;
+            using System;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static int Cleanups;
+                public static async Task<int> LoadAsync()
+                {
+                    await AvidContinuations.NextTickAsync();
+                    return 12;
+                }
+                public static async Task<int> RunAsync()
+                {
+                    try { int value = await LoadAsync(); return value; }
+                    catch (InvalidOperationException) { return 7; }
+                    finally { Cleanups++; }
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source,
+            "Scripts/VersionedAsyncException.cs", enableAsyncExceptionFlow: true);
+        SemanticAsyncMethod? consumer = document.AsyncMethods.SingleOrDefault(method =>
+            method.MethodSymbolId.Contains(".RunAsync(", StringComparison.Ordinal));
+        Assert(document.SchemaVersion == SemanticContract.AsyncExceptionFlowSchemaVersion
+            && document.SemanticVersion == SemanticContract.AsyncExceptionFlowSemanticVersion
+            && document.Succeeded
+            && document.RejectedAsyncExceptionFlows is null
+            && !document.Diagnostics.Any(item => item.Code is "ASCS3002" or "ASCS5420")
+            && consumer?.ExceptionPlan is { Regions.Count: 3, Catches.Count: 1 }
+            && SemanticAsyncExceptionPlanValidator.IsValid(document)
+            && SemanticAsyncInvocationValidator.IsValid(document)
+            && consumer.Segments.Any(segment => segment.Transfer is
+                { Kind: SemanticAsyncMethod.AwaitTransferKind,
+                    SecondaryTarget: >= 0, CancellationTarget: >= 0 }),
+            "source-backed async handlers must publish a distinct schema 42 continuation plan: "
+                + string.Join(" | ", document.Diagnostics.Select(item =>
+                    item.Code + ":" + item.Message)));
+        byte[] bytes = SemanticSerializer.Serialize(document);
+        Assert(bytes.SequenceEqual(SemanticSerializer.Serialize(
+            SemanticSerializer.Deserialize(bytes))),
+            "schema 42 async exception regions must round-trip canonically");
+        Assert(!SemanticAsyncExceptionPlanValidator.IsValid(document with
+        {
+            SchemaVersion = SemanticContract.AsyncLanguageErrorSchemaVersion,
+            SemanticVersion = SemanticContract.AsyncLanguageErrorSemanticVersion,
+        }), "schema 41 must reject a schema 42 exception plan");
+        SemanticAsyncSegment awaited = consumer!.Segments.Single(segment =>
+            segment.AwaitSite?.ProducerKind == "task_call");
+        Assert(!SemanticAsyncExceptionPlanValidator.IsValid(document with
+        {
+            AsyncMethods = document.AsyncMethods.Select(method => method == consumer
+                ? method with
+                {
+                    Segments = method.Segments.Select(segment => segment == awaited
+                        ? segment with { Transfer = segment.Transfer! with
+                            { CancellationTarget = segment.Transfer.SecondaryTarget } }
+                        : segment).ToArray(),
+                }
+                : method).ToArray(),
+        }), "cancellation cannot alias the catch dispatch edge");
+        Assert(!SemanticAsyncExceptionPlanValidator.IsValid(document with
+        {
+            AsyncMethods = document.AsyncMethods.Select(method => method == consumer
+                ? method with
+                {
+                    ExceptionPlan = method.ExceptionPlan! with
+                    {
+                        Catches = method.ExceptionPlan.Catches.Select(handler => handler with
+                            { RegionOrdinal = -1 }).ToArray(),
+                    },
+                }
+                : method).ToArray(),
+        }), "forged catch-region identities must be rejected");
+    }
+
+    private static void AsyncExceptionFixturePublishesAllMethods()
+    {
+        string source = File.ReadAllText(Path.Combine(Directory.GetCurrentDirectory(),
+            "Fixtures", "Phase66", "AsyncExceptionFlow.cs"));
+        SemanticDocument document = Analyze(source,
+            "Fixtures/Phase66/AsyncExceptionFlow.cs",
+            enableAsyncExceptionFlow: true);
+        Assert(document.SchemaVersion == SemanticContract.AsyncExceptionFlowSchemaVersion
+            && document.AsyncMethods.Count == 4
+            && document.AsyncMethods.Count(method => method.ExceptionPlan is not null) == 2
+            && document.RejectedAsyncExceptionFlows is null
+            && document.Diagnostics.All(diagnostic => diagnostic.Severity != "error"
+                || diagnostic.Code == "ASCS5422")
+            && SemanticAsyncInvocationValidator.IsValid(document)
+            && SemanticClosureContractValidator.IsValid(document),
+            "the fixed async exception fixture must retain producer, handler, nested cleanup and export: "
+                + "scope=" + SemanticAsyncScopeValidator.IsValid(document)
+                + " closure=" + SemanticClosureContractValidator.IsValid(document)
+                + " invocation=" + SemanticAsyncInvocationValidator.IsValid(document)
+                + " methods=" + document.AsyncMethods.Count
+                + " plans=" + document.AsyncMethods.Count(method => method.ExceptionPlan is not null)
+                + " rejected=" + (document.RejectedAsyncExceptionFlows?.Count ?? 0)
+                + " perScope=" + string.Join(",", document.AsyncMethods.Select(method =>
+                    method.MethodSymbolId + ":" + SemanticAsyncScopeValidator.IsValid(
+                        document with { AsyncMethods = new[] { method } })))
+                + " | "
+                + string.Join(" | ", document.Diagnostics.Select(item =>
+                    item.Code + ":" + item.Message)));
     }
 
     private static void TaskIntAwaitProjectsValueArguments()
@@ -2224,7 +2335,8 @@ internal static class SemanticAsyncTests
             "oversized controlled async CFGs should fail closed with ASCS5417 instead of throwing");
     }
 
-    internal static SemanticDocument Analyze(string source, string sourceId)
+    internal static SemanticDocument Analyze(string source, string sourceId,
+        bool enableAsyncExceptionFlow = false)
     {
         FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
         return SemanticAnalyzer.Analyze(
@@ -2237,7 +2349,9 @@ internal static class SemanticAsyncTests
                     AsyncFacade,
                     "generated://AvidScript.Async.generated.cs",
                     true),
-            });
+            },
+            new SemanticCompilerWorkspace(),
+            enableAsyncExceptionFlow);
     }
 
     private static System.Collections.Generic.IEnumerable<SemanticOperation> Enumerate(

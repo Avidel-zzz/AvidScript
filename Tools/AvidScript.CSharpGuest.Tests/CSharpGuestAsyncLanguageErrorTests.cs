@@ -42,6 +42,38 @@ internal static class CSharpGuestAsyncLanguageErrorTests
         Check(semantic.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion
             && semantic.Diagnostics.Count(item => item.Code == "ASCS5422") == 1,
             "source must publish one async Task throw site");
+        const string handlerSource = """
+            using AvidScript;
+            using System;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                static async Task<int> LoadAsync()
+                {
+                    await AvidContinuations.NextTickAsync();
+                    return 12;
+                }
+                static async Task<int> RunAsync()
+                {
+                    try { int value = await LoadAsync(); return value; }
+                    catch (InvalidOperationException) { return 7; }
+                }
+            }
+            """;
+        FrontendDocument handlerFrontend = FrontendAnalyzer.Analyze(handlerSource,
+            "Scripts/AsyncHandlerVersion.cs");
+        SemanticDocument handlerSemantic = SemanticAnalyzer.Analyze(handlerSource,
+            "Scripts/AsyncHandlerVersion.cs", handlerFrontend.Source.Sha256,
+            new[] { new SemanticReferenceSource(
+                CSharpGuestContinuationTests.ReferenceFacade,
+                "generated://AvidScript.Continuations.generated.cs", true) },
+            new SemanticCompilerWorkspace(), enableAsyncExceptionFlow: true);
+        Check(handlerSemantic.Succeeded
+            && handlerSemantic.SchemaVersion == SemanticContract.AsyncExceptionFlowSchemaVersion
+            && handlerSemantic.AsyncMethods.Any(method => method.ExceptionPlan is not null)
+            && !CSharpGuestLowerer.Lower(handlerSemantic, new string('a', 64),
+                enableAsyncLanguageErrors: true).Succeeded,
+            "IR 21 must reject a valid Semantic 42 handler plan before IR 22 exists");
         Check(!CSharpGuestLowerer.Lower(semantic, new string('a', 64)).Succeeded,
             "ordinary compilation must reject the diagnostic-only artifact");
         Check(!CSharpGuestLowerer.Lower(semantic with

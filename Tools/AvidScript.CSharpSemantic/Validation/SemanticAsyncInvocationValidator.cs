@@ -32,8 +32,11 @@ public static class SemanticAsyncInvocationValidator
             (document.SchemaVersion == SemanticContract.TaskLanguageErrorSchemaVersion
                 && document.SemanticVersion == SemanticContract.TaskLanguageErrorSemanticVersion)
             || (document.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion
-                && document.SemanticVersion == SemanticContract.AsyncLanguageErrorSemanticVersion);
-        if (!SemanticAsyncErrorPlanValidator.IsValid(document)) return false;
+                && document.SemanticVersion == SemanticContract.AsyncLanguageErrorSemanticVersion)
+            || (document.SchemaVersion == SemanticContract.AsyncExceptionFlowSchemaVersion
+                && document.SemanticVersion == SemanticContract.AsyncExceptionFlowSemanticVersion);
+        if (!SemanticAsyncErrorPlanValidator.IsValid(document)
+            || !SemanticAsyncExceptionPlanValidator.IsValid(document)) return false;
         if (taskResultContract && !document.AsyncMethods.Any(method => method?.TaskResultTypeId is not null
                 || method?.Segments?.Any(segment => segment?.AwaitSite?.TaskCallableId is not null) == true))
             return false;
@@ -97,8 +100,9 @@ public static class SemanticAsyncInvocationValidator
                 || callable.Parameters.Any(parameter => !document.Symbols.Any(symbol => symbol?.Id == parameter.SymbolId
                     && symbol.Kind == "parameter" && symbol.TypeId == parameter.TypeId && symbol.ContainingSymbolId == callable.MethodSymbolId))) return false;
             if (method.Segments is null || method.Segments.Any(segment => segment is null
-                || segment.Transfer?.ExceptionTypeId is not null
-                || segment.Transfer?.CancellationTarget is not null)) return false;
+                || method.ExceptionPlan is null &&
+                    (segment.Transfer?.ExceptionTypeId is not null
+                        || segment.Transfer?.CancellationTarget is not null))) return false;
             IReadOnlyDictionary<string, string> taskProducers = new Dictionary<string, string>();
             if (taskLocalContract || taskAssignmentContract || taskExistingLocalContract || taskAliasContract || combinedContract)
             {

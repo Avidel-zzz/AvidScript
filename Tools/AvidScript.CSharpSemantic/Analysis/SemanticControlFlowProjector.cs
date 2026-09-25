@@ -13,20 +13,29 @@ internal sealed record SemanticControlFlowProjection(
     IReadOnlyList<SemanticDiagnostic> Diagnostics,
     IReadOnlyList<SemanticSymbol> CompilerLocalSymbols,
     IReadOnlyList<SemanticExceptionFlow> ExceptionFlows,
-    IReadOnlyList<SemanticExceptionFlow> RejectedAsyncExceptionFlows);
+    IReadOnlyList<SemanticExceptionFlow> RejectedAsyncExceptionFlows,
+    IReadOnlyList<SemanticAsyncMethod> AsyncExceptionMethods);
 
 internal static class SemanticControlFlowProjector
 {
     public static SemanticControlFlowProjection Project(
         SemanticCompilationContext context,
         SemanticTypeRegistry typeRegistry,
-        IReadOnlySet<string> controlledAsyncMethodIds)
+        IReadOnlySet<string> controlledAsyncMethodIds,
+        IReadOnlyList<SemanticAsyncMethod> controlledAsyncMethods,
+        IReadOnlyList<SemanticCallable> callables,
+        bool enableAsyncExceptionFlow = false)
     {
         List<SemanticDiagnostic> diagnostics = new();
         List<SemanticControlFlowGraph> graphs = new();
         List<SemanticSymbol> compilerLocalSymbols = new();
         List<SemanticExceptionFlow> exceptionFlows = new();
         List<SemanticExceptionFlow> rejectedAsyncExceptionFlows = new();
+        List<SemanticAsyncMethod> asyncExceptionMethods = new();
+        int nextAsyncCallbackId = Math.Max(SemanticContinuationProjector.CompilerCallbackIdStart,
+            controlledAsyncMethods.SelectMany(method => method.Segments)
+                .Select(segment => segment.AwaitSite?.CallbackId ?? -1)
+                .DefaultIfEmpty(-1).Max() + 1);
         Diagnostic? compilerError = context.Compilation.GetDiagnostics()
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .OrderBy(diagnostic => diagnostic.Location.IsInSource
@@ -44,7 +53,7 @@ internal static class SemanticControlFlowProjector
                     : SemanticSpanFactory.Empty));
             return new SemanticControlFlowProjection(Array.Empty<SemanticControlFlowGraph>(), diagnostics,
                 Array.Empty<SemanticSymbol>(), Array.Empty<SemanticExceptionFlow>(),
-                Array.Empty<SemanticExceptionFlow>());
+                Array.Empty<SemanticExceptionFlow>(), Array.Empty<SemanticAsyncMethod>());
         }
 
         foreach (SemanticExecutableBody body in SemanticExecutableBodyResolver.Resolve(context))
@@ -83,7 +92,7 @@ internal static class SemanticControlFlowProjector
                                     out ITypeSymbol? resultType))
                             {
                                 List<SemanticDiagnostic> previewDiagnostics = new();
-                                int previewCallbackId = 0;
+                                int previewCallbackId = nextAsyncCallbackId;
                                 if (SemanticAsyncControlFlowProjector.TryProject(
                                         context, semanticModel, asyncBody,
                                         sourceFlow.MethodSymbolId, typeRegistry,
@@ -118,6 +127,50 @@ internal static class SemanticControlFlowProjector
                                             out IReadOnlyList<SemanticAsyncExceptionPreviewRegion>
                                                 boundRegions))
                                     {
+                                        if (enableAsyncExceptionFlow
+                                            && callables.Any(callable =>
+                                                callable.MethodSymbolId == sourceFlow.MethodSymbolId
+                                                && callable.HasBody && !callable.IsConstructor
+                                                && callable.Export is null
+                                                && callable.Import is null)
+                                            && body.Method.Parameters.All(parameter =>
+                                                parameter.RefKind == RefKind.None)
+                                            && !body.Method.IsGenericMethod
+                                            && !body.Method.ContainingType.IsGenericType
+                                            && body.Method.ContainingType.TypeKind
+                                                == TypeKind.Class
+                                            && !asyncBody.DescendantNodes()
+                                                .OfType<VariableDeclaratorSyntax>()
+                                                .Any(variable => semanticModel.GetDeclaredSymbol(variable)
+                                                    is ILocalSymbol local
+                                                    && SemanticAsyncProjector.TryGetSupportedTaskResult(
+                                                        context.Compilation, local.Type, out _)))
+                                        {
+                                            asyncExceptionMethods.Add(new SemanticAsyncMethod(
+                                                sourceFlow.MethodSymbolId, null,
+                                                SemanticAsyncMethod.ContinuationCfgLowering,
+                                                framed, bodySpan,
+                                                preview.EntrySegmentOrdinal)
+                                            {
+                                                CompilerLocals = preview.CompilerLocals,
+                                                InvocationInputs = inputs,
+                                                LexicalScopes = preview.LexicalScopes,
+                                                TaskResultTypeId = typeRegistry.Register(resultType!),
+                                                ErrorPlan = preview.ErrorPlan,
+                                                ExceptionPlan = new(
+                                                    sourceFlow.SourceId,
+                                                    sourceFlow.SourceLength,
+                                                    boundRegions.Select(region =>
+                                                        new SemanticAsyncExceptionRegion(
+                                                            region.Kind,
+                                                            region.RoslynRegionOrdinal,
+                                                            region.SourceSpan,
+                                                            region.Segments)).ToArray(),
+                                                    sourceFlow.Catches),
+                                            });
+                                            nextAsyncCallbackId = previewCallbackId;
+                                            continue;
+                                        }
                                         sourceFlow = sourceFlow with
                                         {
                                             AsyncContinuationPreview = new(
@@ -250,7 +303,8 @@ internal static class SemanticControlFlowProjector
                     : Array.Empty<SemanticSymbol>(),
                 exceptionFlows.OrderBy(flow => flow.MethodSymbolId, StringComparer.Ordinal).ToArray(),
                 rejectedAsyncExceptionFlows.OrderBy(flow => flow.MethodSymbolId,
-                    StringComparer.Ordinal).ToArray());
+                    StringComparer.Ordinal).ToArray(),
+                asyncExceptionMethods.OrderBy(method => method.Span.Start).ToArray());
         }
 
         return new SemanticControlFlowProjection(
@@ -258,7 +312,8 @@ internal static class SemanticControlFlowProjector
             orderedDiagnostics,
             compilerLocalSymbols.OrderBy(symbol => symbol.Id, StringComparer.Ordinal).ToArray(),
             Array.Empty<SemanticExceptionFlow>(),
-            Array.Empty<SemanticExceptionFlow>());
+            Array.Empty<SemanticExceptionFlow>(),
+            asyncExceptionMethods.OrderBy(method => method.Span.Start).ToArray());
     }
 
     private static IReadOnlyList<string> GetUnsupportedOperationKinds(

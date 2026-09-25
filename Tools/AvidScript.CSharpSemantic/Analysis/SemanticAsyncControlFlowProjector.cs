@@ -183,9 +183,13 @@ internal static class SemanticAsyncControlFlowProjector
 
             scopes.Add((declaration, "activation", drafts.Select(draft => draft.Id).ToArray()));
             List<SemanticAsyncLexicalScope> lexicalScopes = new();
-            foreach (var (node, kind, members) in scopes)
+            foreach (var group in scopes.GroupBy(scope => (scope.Node, scope.Kind)))
             {
-                int[] mapped = members.Where(ordinalByDraft.ContainsKey).Select(id => ordinalByDraft[id]).Order().ToArray();
+                SyntaxNode node = group.Key.Node;
+                string kind = group.Key.Kind;
+                int[] mapped = group.SelectMany(scope => scope.Drafts)
+                    .Where(ordinalByDraft.ContainsKey)
+                    .Select(id => ordinalByDraft[id]).Distinct().Order().ToArray();
                 // Unreachable scopes retain their lexical identity but have no
                 // allocation edges; closure analysis can still refer to them.
                 int scopeOrdinal = kind == "activation" ? 0 : declaration.DescendantNodes()

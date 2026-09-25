@@ -47,7 +47,8 @@ internal static class SemanticAsyncProjector
     public static SemanticAsyncProjection Project(
         SemanticCompilationContext context,
         SemanticTypeRegistry typeRegistry,
-        IReadOnlyList<SemanticCallable> callables)
+        IReadOnlyList<SemanticCallable> callables,
+        bool enableAsyncExceptionFlow = false)
     {
         SemanticModel semanticModel = context.Compilation.GetSemanticModel(
             context.PrimaryUnit.SyntaxTree,
@@ -70,6 +71,18 @@ internal static class SemanticAsyncProjector
         foreach (MethodDeclarationSyntax declaration in declarations)
         {
             if (semanticModel.GetDeclaredSymbol(declaration) is not IMethodSymbol method)
+            {
+                continue;
+            }
+
+            // Roslyn exception regions and continuation segments must be bound
+            // together; the ordinary async projector cannot validate either
+            // side alone. The control-flow projector owns this source shape.
+            if (enableAsyncExceptionFlow && declaration.Body is not null
+                && TryGetSupportedTaskResult(context.Compilation,
+                    method.ReturnType, out _)
+                && declaration.Body.DescendantNodes().OfType<TryStatementSyntax>()
+                    .Any(node => node.Catches.Count > 0 || node.Finally is not null))
             {
                 continue;
             }

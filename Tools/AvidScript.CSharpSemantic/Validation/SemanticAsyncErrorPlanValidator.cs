@@ -24,9 +24,12 @@ public static class SemanticAsyncErrorPlanValidator
     {
         if (document is null || document.AsyncMethods is null || document.Source is null
             || document.Types is null) return false;
-        bool enabled = document.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion
+        bool originalContract = document.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion
             && document.SemanticVersion == SemanticContract.AsyncLanguageErrorSemanticVersion;
-        if (enabled && !document.AsyncMethods.Any(method => method?.ErrorPlan is not null))
+        bool enabled = originalContract
+            || document.SchemaVersion == SemanticContract.AsyncExceptionFlowSchemaVersion
+                && document.SemanticVersion == SemanticContract.AsyncExceptionFlowSemanticVersion;
+        if (originalContract && !document.AsyncMethods.Any(method => method?.ErrorPlan is not null))
             return false;
         foreach (SemanticAsyncMethod? method in document.AsyncMethods)
         {
