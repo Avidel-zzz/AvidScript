@@ -56,9 +56,11 @@ public static class CSharpLanguageOutcomeRewriter
         IReadOnlyDictionary<string, IReadOnlyList<CSharpLanguageCatchRoute>> catchRoutes,
         IReadOnlyDictionary<string, IReadOnlyList<CSharpLanguageCleanupRoute>> cleanupRoutes,
         out GuestModule? rewritten,
-        out string? error) =>
+        out string? error,
+        bool deferValidation = false) =>
         TryRewriteCore(semantic, module, affectedFunctionIds,
-            producerFunctionIds, catchRoutes, cleanupRoutes, out rewritten, out error);
+            producerFunctionIds, catchRoutes, cleanupRoutes, out rewritten, out error,
+            deferValidation);
 
     private static bool TryRewriteCore(
         SemanticDocument semantic,
@@ -68,7 +70,8 @@ public static class CSharpLanguageOutcomeRewriter
         IReadOnlyDictionary<string, IReadOnlyList<CSharpLanguageCatchRoute>> catchRoutes,
         IReadOnlyDictionary<string, IReadOnlyList<CSharpLanguageCleanupRoute>> cleanupRoutes,
         out GuestModule? rewritten,
-        out string? error)
+        out string? error,
+        bool deferValidation = false)
     {
         rewritten = null;
         error = null;
@@ -197,9 +200,12 @@ public static class CSharpLanguageOutcomeRewriter
                 .Select(pair => new GuestLanguageOutcomeType(pair.Value,
                     pair.Key == "type:void" ? null : pair.Key)).ToArray(),
         };
-        GuestValidationResult validation = GuestModuleValidator.Validate(candidate);
-        if (!validation.Succeeded)
-            return Fail(string.Join(" | ", validation.Diagnostics.Select(item => item.Message)), out error);
+        if (!deferValidation)
+        {
+            GuestValidationResult validation = GuestModuleValidator.Validate(candidate);
+            if (!validation.Succeeded)
+                return Fail(string.Join(" | ", validation.Diagnostics.Select(item => item.Message)), out error);
+        }
         rewritten = candidate;
         return true;
     }

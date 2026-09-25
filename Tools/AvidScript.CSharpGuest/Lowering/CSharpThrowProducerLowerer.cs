@@ -42,8 +42,10 @@ public static class CSharpThrowProducerLowerer
         SemanticExceptionFlow flow,
         GuestModule module,
         out CSharpThrowProducerResult? result,
-        out string? error) =>
-        TryLowerCore(semantic, flow, module, replaceExisting: true, out result, out error);
+        out string? error,
+        bool deferValidation = false) =>
+        TryLowerCore(semantic, flow, module, replaceExisting: true, out result, out error,
+            deferValidation);
 
     private static bool TryLowerCore(
         SemanticDocument semantic,
@@ -51,7 +53,8 @@ public static class CSharpThrowProducerLowerer
         GuestModule module,
         bool replaceExisting,
         out CSharpThrowProducerResult? result,
-        out string? error)
+        out string? error,
+        bool deferValidation = false)
     {
         result = null;
         error = null;
@@ -62,7 +65,7 @@ public static class CSharpThrowProducerLowerer
             || semantic.Diagnostics.Any(diagnostic => diagnostic.Severity == "error"
                 && diagnostic.Code != "ASCS3001"))
             return Fail("The source is not a validated exception diagnostic artifact.", out error);
-        if (!GuestModuleValidator.Validate(module).Succeeded)
+        if (!deferValidation && !GuestModuleValidator.Validate(module).Succeeded)
             return Fail("The target Guest module is invalid.", out error);
         SemanticCallable[] matches = semantic.Callables.Where(item =>
             item.MethodSymbolId == flow.MethodSymbolId).Take(2).ToArray();

@@ -77,7 +77,7 @@ public static void EndPlay()
 - 主要开发与验证平台是 UE 5.8 / Win64；Android、iOS 尚未验收。
 - 编译器支持 C# 和生成的 UE API 子集，不能直接运行任意 .NET 项目或 NuGet 包。
 - `Task<int>` 目前只支持受限的同源静态调用与 `await`；跨 Session 等待尚未支持。见 [Task 结果合同](Docs/Phase66/P66.C4_Task_Result_Contract.md)。
-- 同步 `catch/throw` 需要显式启用 `-LanguageErrors bounded`。`finally` 中不能 `await`；异步任务错误尚不能进入 C# `catch`。生成类型中的该模式目前限 Win64 Development。见 [语言错误合同](Docs/Phase66/P66.C3_Language_Error_Channel_Contract.md)。
+- 同步 `catch/throw` 需要显式启用 `-LanguageErrors bounded`。同一源码可包含独立的同步异常方法与 `Task<int>` 方法；异步方法内抛错及 `await` 后捕获仍未支持。`finally` 中不能 `await`；生成类型中的该模式目前限 Win64 Development。见 [语言错误合同](Docs/Phase66/P66.C3_Language_Error_Channel_Contract.md)。
 - 修改脚本定义的 `UClass`、`UProperty` 或 `UFunction` 后，需要重新构建并重启 Editor。
 - 样例和自动化测试尚不能代替真实游戏流程及真实多人联机验收。
 

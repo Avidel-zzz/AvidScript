@@ -188,8 +188,10 @@ public static class SemanticAnalyzer
         bool hasTaskExistingLocalAssignments = asyncProjection.Methods.Any(method => method.Segments.Any(segment =>
             segment.AwaitSite?.ResultStorageKind == "existing_local"));
         bool hasTaskAliases = asyncProjection.Methods.Any(method => method.TaskLocalSymbolIds is not null);
+        bool hasTaskLanguageErrors = hasExceptionFlows && hasTaskResults;
         return new SemanticDocument(
-            hasExceptionFlows ? SemanticContract.ExceptionFlowSchemaVersion
+            hasTaskLanguageErrors ? SemanticContract.TaskLanguageErrorSchemaVersion
+                : hasExceptionFlows ? SemanticContract.ExceptionFlowSchemaVersion
                 : hasTaskAliases ? SemanticContract.TaskAliasSchemaVersion
                 : hasTaskExistingLocalAssignments ? SemanticContract.TaskExistingLocalSchemaVersion
                 : hasTaskAssignments ? SemanticContract.TaskAssignmentSchemaVersion
@@ -197,7 +199,8 @@ public static class SemanticAnalyzer
                 : hasTaskResults ? SemanticContract.TaskResultSchemaVersion
                 : SemanticContract.CurrentSchemaVersion,
             "csharp",
-            hasExceptionFlows ? SemanticContract.ExceptionFlowSemanticVersion
+            hasTaskLanguageErrors ? SemanticContract.TaskLanguageErrorSemanticVersion
+                : hasExceptionFlows ? SemanticContract.ExceptionFlowSemanticVersion
                 : hasTaskAliases ? SemanticContract.TaskAliasSemanticVersion
                 : hasTaskExistingLocalAssignments ? SemanticContract.TaskExistingLocalSemanticVersion
                 : hasTaskAssignments ? SemanticContract.TaskAssignmentSemanticVersion
@@ -220,7 +223,8 @@ public static class SemanticAnalyzer
             DelegateEventCallbacks = delegateEventProjection.Callbacks,
             EventSubscriptions = delegateEventProjection.Subscriptions,
             ContinuationCallbacks = continuationProjection.Callbacks,
-            AsyncMethods = hasExceptionFlows ? Array.Empty<SemanticAsyncMethod>() : asyncProjection.Methods,
+            AsyncMethods = hasExceptionFlows && !hasTaskLanguageErrors
+                ? Array.Empty<SemanticAsyncMethod>() : asyncProjection.Methods,
             UeTypeDeclarations = ueTypeProjection.Declarations,
             DelegateTypes = typeRegistry.BuildDelegateTypes(),
             ClassTypes = typeRegistry.BuildClassTypes(),

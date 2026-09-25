@@ -10,16 +10,27 @@ public static class SemanticExceptionFlowContractValidator
     {
         ArgumentNullException.ThrowIfNull(document);
         if (document.ExceptionFlows is null)
-            return document.SchemaVersion is not (32 or 33 or SemanticContract.ExceptionFlowSchemaVersion)
-                && document.SemanticVersion is not ("1.41" or "1.42" or SemanticContract.ExceptionFlowSemanticVersion);
+            return document.SchemaVersion is not (32 or 33 or SemanticContract.ExceptionFlowSchemaVersion
+                    or SemanticContract.TaskLanguageErrorSchemaVersion)
+                && document.SemanticVersion is not ("1.41" or "1.42" or SemanticContract.ExceptionFlowSemanticVersion
+                    or SemanticContract.TaskLanguageErrorSemanticVersion);
 
         IReadOnlyList<SemanticExceptionFlow> flows = document.ExceptionFlows;
-        if (document.SchemaVersion != SemanticContract.ExceptionFlowSchemaVersion
-            || document.SemanticVersion != SemanticContract.ExceptionFlowSemanticVersion
+        bool exceptionContract = document.SchemaVersion == SemanticContract.ExceptionFlowSchemaVersion
+            && document.SemanticVersion == SemanticContract.ExceptionFlowSemanticVersion;
+        bool combinedContract = document.SchemaVersion == SemanticContract.TaskLanguageErrorSchemaVersion
+            && document.SemanticVersion == SemanticContract.TaskLanguageErrorSemanticVersion;
+        if (!(exceptionContract || combinedContract)
             || document.Succeeded || document.ControlFlowGraphs is null
             || flows.Count is 0 or > 256
             || document.Callables is null || document.Types is null)
             return false;
+        if (exceptionContract && document.AsyncMethods is not { Count: 0 }) return false;
+        if (combinedContract && (document.AsyncMethods is not { Count: > 0 }
+            || !document.AsyncMethods.Any(method => method is not null
+                && (method.TaskResultTypeId is not null
+                    || method.Segments?.Any(segment => segment?.AwaitSite?.TaskCallableId is not null) == true))
+            || !SemanticAsyncInvocationValidator.IsValid(document))) return false;
 
         HashSet<string> methods = document.Callables.Select(callable => callable.MethodSymbolId)
             .ToHashSet(StringComparer.Ordinal);
@@ -50,6 +61,8 @@ public static class SemanticExceptionFlowContractValidator
                 || flow.Throws.Count > 256 || flow.Catches.Count > 256
                 || flow.Throws.Count + flow.Catches.Count == 0)
                 return false;
+            if (combinedContract && document.AsyncMethods.Any(method =>
+                method?.MethodSymbolId == flow.MethodSymbolId)) return false;
 
             for (int index = 0; index < flow.Regions.Count; ++index)
             {

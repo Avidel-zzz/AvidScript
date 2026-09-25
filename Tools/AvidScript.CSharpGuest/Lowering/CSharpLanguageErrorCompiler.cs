@@ -94,6 +94,11 @@ public static class CSharpLanguageErrorCompiler
             .Select(CSharpGuestIds.Function).ToHashSet(StringComparer.Ordinal);
         if (producerIds.Any(id => !affected.Contains(id)))
             return Fail("An exception producer is absent from its effect closure.", out error);
+        bool combinedTaskContract = semantic.SchemaVersion == SemanticContract.TaskLanguageErrorSchemaVersion
+            && semantic.SemanticVersion == SemanticContract.TaskLanguageErrorSemanticVersion;
+        if (combinedTaskContract && semantic.AsyncMethods.Any(method =>
+            effects.OutcomeMethodIds.Contains(method.MethodSymbolId)))
+            return Fail("An async Task method cannot enter the synchronous language-error effect closure.", out error);
         if (!CSharpLanguageCleanupRoutePlanner.TryBuild(semantic, affected,
                 out IReadOnlyDictionary<string, IReadOnlyList<CSharpLanguageCleanupRoute>> plannedCleanups,
                 out error))
@@ -207,8 +212,10 @@ public static class CSharpLanguageErrorCompiler
         }
         SemanticDocument ordinary = semantic with
         {
-            SchemaVersion = SemanticContract.CurrentSchemaVersion,
-            SemanticVersion = SemanticContract.CurrentSemanticVersion,
+            SchemaVersion = combinedTaskContract ? OrdinaryTaskSchema(semantic)
+                : SemanticContract.CurrentSchemaVersion,
+            SemanticVersion = combinedTaskContract ? OrdinaryTaskVersion(semantic)
+                : SemanticContract.CurrentSemanticVersion,
             Succeeded = true,
             ExceptionFlows = null,
             ControlFlowGraphs = semantic.ControlFlowGraphs.Concat(handlerGraphs)
@@ -241,7 +248,7 @@ public static class CSharpLanguageErrorCompiler
         };
         if (!CSharpLanguageOutcomeRewriter.TryRewriteWithHandlers(ordinary, internalModule,
                 affected, producerIds, catchRoutes, cleanupRoutes,
-                out GuestModule? outcomes, out error)
+                out GuestModule? outcomes, out error, combinedTaskContract)
             || outcomes is null)
             return false;
         if (hasCatchVariables)
@@ -255,7 +262,8 @@ public static class CSharpLanguageErrorCompiler
         foreach (SemanticExceptionFlow item in producers)
         {
             if (!CSharpThrowProducerLowerer.TryLowerReplacing(semantic, item, outcomes,
-                    out CSharpThrowProducerResult? producer, out error)
+                    out CSharpThrowProducerResult? producer, out error,
+                    combinedTaskContract)
                 || producer is null)
                 return false;
             loweredProducers.Add(producer.Function.Id, producer.Function);
@@ -280,8 +288,8 @@ public static class CSharpLanguageErrorCompiler
         }
         GuestModule candidate = outcomes with
         {
-            SchemaVersion = GuestLanguageErrorCatalog.SchemaVersion,
-            IrVersion = GuestLanguageErrorCatalog.IrVersion,
+            SchemaVersion = combinedTaskContract ? 20 : GuestLanguageErrorCatalog.SchemaVersion,
+            IrVersion = combinedTaskContract ? "1.19" : GuestLanguageErrorCatalog.IrVersion,
             Provenance = outcomes.Provenance with
             {
                 SemanticSchemaVersion = semantic.SchemaVersion,
@@ -290,6 +298,16 @@ public static class CSharpLanguageErrorCompiler
             Functions = outcomes.Functions.Select(function =>
                 loweredProducers.TryGetValue(function.Id, out GuestFunction? producer)
                     ? producer : function).ToArray(),
+            Imports = combinedTaskContract ? outcomes.Imports
+                .Concat(outcomes.Imports.Any(import =>
+                    import.Id == CSharpTaskResultAbi.RetainForContinuationImportId)
+                    ? Array.Empty<GuestImport>()
+                    : new[] { CSharpTaskResultAbi.RetainForContinuationImport() })
+                .Append(new GuestImport("import:task_fault_language_error_v1",
+                    "avidscript", "avid_task_fault_language_error_v1",
+                    new[] { "type:int64", "type:int32", "type:int32", "type:language_error_root" },
+                    "type:int32")).ToArray()
+                : outcomes.Imports,
             LanguageErrorCatalog = new GuestLanguageErrorCatalog(
                 tokens.Types.Select(entry =>
                     new GuestLanguageErrorTypeToken(entry.Token, entry.TypeId)).ToArray(),
@@ -311,6 +329,33 @@ public static class CSharpLanguageErrorCompiler
         compilation = new(candidate);
         return true;
     }
+
+    private static int OrdinaryTaskSchema(SemanticDocument document)
+    {
+        IReadOnlyList<SemanticAsyncMethod> methods = document.AsyncMethods;
+        if (methods.Any(method => method.TaskLocalSymbolIds is not null))
+            return SemanticContract.TaskAliasSchemaVersion;
+        if (methods.Any(method => method.Segments.Any(segment =>
+                segment.AwaitSite?.ResultStorageKind == "existing_local")))
+            return SemanticContract.TaskExistingLocalSchemaVersion;
+        if (methods.Any(method => method.Segments.Any(segment =>
+                segment.AwaitSite?.ResultStorageKind == "static_field")))
+            return SemanticContract.TaskAssignmentSchemaVersion;
+        if (methods.Any(method => method.Segments.Any(segment =>
+                segment.AwaitSite?.TaskLocalSymbolId is not null)))
+            return SemanticContract.TaskLocalSchemaVersion;
+        return SemanticContract.TaskResultSchemaVersion;
+    }
+
+    private static string OrdinaryTaskVersion(SemanticDocument document) =>
+        OrdinaryTaskSchema(document) switch
+        {
+            SemanticContract.TaskAliasSchemaVersion => SemanticContract.TaskAliasSemanticVersion,
+            SemanticContract.TaskExistingLocalSchemaVersion => SemanticContract.TaskExistingLocalSemanticVersion,
+            SemanticContract.TaskAssignmentSchemaVersion => SemanticContract.TaskAssignmentSemanticVersion,
+            SemanticContract.TaskLocalSchemaVersion => SemanticContract.TaskLocalSemanticVersion,
+            _ => SemanticContract.TaskResultSemanticVersion,
+        };
 
     private static GuestFunction CreateProducerSubstitute(string id, string returnTypeId)
     {

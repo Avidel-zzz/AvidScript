@@ -59,7 +59,83 @@ internal static class CSharpGuestThrowProducerTests
         NestedCatchRethrowReachesOuterHandler();
         NestedCatchRethrowRunsBranchingOuterFinally();
         CatchVariableReadsBoundError();
-        return 41;
+        DisjointTaskAndLanguageErrorCompileTogether();
+        return 42;
+    }
+
+    private static void DisjointTaskAndLanguageErrorCompileTogether()
+    {
+        const string source = """
+            using AvidScript;
+            using System;
+            using System.Runtime.InteropServices;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                static int Result;
+                static async Task<int> LoadAsync()
+                {
+                    await AvidContinuations.NextTickAsync();
+                    return 12;
+                }
+                static int Fail() { throw new Exception(); }
+                static int Catch()
+                {
+                    try { return Fail(); }
+                    catch (Exception) { return 7; }
+                }
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay() { Result = await LoadAsync(); }
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
+                public static void Tick() { Result = Catch(); }
+            }
+            """;
+        const string sourceId = "Scripts/CombinedTaskAndLanguageError.cs";
+        FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
+        SemanticDocument semantic = SemanticAnalyzer.Analyze(source, sourceId,
+            frontend.Source.Sha256, new[]
+            {
+                new SemanticReferenceSource(CSharpGuestContinuationTests.ReferenceFacade,
+                    "generated://AvidScript.Continuations.generated.cs", true),
+            });
+        Check(semantic.SchemaVersion == SemanticContract.TaskLanguageErrorSchemaVersion
+            && semantic.AsyncMethods.Count == 2
+            && semantic.ExceptionFlows is { Count: 2 }
+            && SemanticExceptionFlowContractValidator.IsValid(semantic),
+            "disjoint Task and exception methods need a valid combined semantic plan: "
+                + semantic.SchemaVersion + ", async=" + semantic.AsyncMethods.Count
+                + ", exception=" + semantic.ExceptionFlows?.Count
+                + ", diagnostics=" + string.Join(" | ", semantic.Diagnostics.Select(item => item.Code + ":" + item.Message)));
+        Check(CSharpLanguageErrorCompiler.TryLower(semantic, new string('a', 64),
+                out CSharpLanguageErrorCompilation? compiled, out string? error)
+            && compiled is not null, error ?? "combined Task/error C# lowering failed");
+        GuestModule module = compiled!.Module;
+        Check(module.SchemaVersion == 20 && module.IrVersion == "1.19"
+            && module.Provenance.SemanticSchemaVersion == 40
+            && module.Imports.Any(import => import.Name == "avid_task_i32_v1")
+            && module.Imports.Any(import => import.Name == "avid_task_fault_language_error_v1")
+            && module.LanguageErrorCatalog is not null
+            && module.Functions.Any(function => function.Id.Contains("LoadAsync(", StringComparison.Ordinal)),
+            "C# lowering must keep both execution paths in versioned IR 20");
+        Check(GuestModuleValidator.Validate(module).Succeeded,
+            "combined C# output must pass Guest IR validation");
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(module);
+        Check(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "combined C# output must compile to WASM");
+        string crossingSource = source.Replace("return 12;", "return Catch();",
+            StringComparison.Ordinal);
+        FrontendDocument crossingFrontend = FrontendAnalyzer.Analyze(crossingSource, sourceId);
+        SemanticDocument crossing = SemanticAnalyzer.Analyze(crossingSource, sourceId,
+            crossingFrontend.Source.Sha256, new[]
+            {
+                new SemanticReferenceSource(CSharpGuestContinuationTests.ReferenceFacade,
+                    "generated://AvidScript.Continuations.generated.cs", true),
+            });
+        Check(crossing.SchemaVersion == SemanticContract.TaskLanguageErrorSchemaVersion
+            && !CSharpLanguageErrorCompiler.TryLower(crossing, new string('a', 64),
+                out _, out string? crossingError)
+            && crossingError?.Contains("async Task method", StringComparison.Ordinal) == true,
+            "a synchronous language error must not cross into an async Task without a Task fault route");
     }
 
     private static void BoundedLanguageErrorsUseFormalGuestCli()

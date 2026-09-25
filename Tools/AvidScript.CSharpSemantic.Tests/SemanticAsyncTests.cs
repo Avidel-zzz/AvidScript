@@ -32,7 +32,7 @@ internal static class SemanticAsyncTests
         TaskIntStaticFieldAssignmentIsVersionedAndBounded();
         TaskIntExistingLocalAssignmentPreservesStorage();
         TaskIntSuspendedCleanupFailsClosed();
-        FailedExceptionPlanKeepsItsContractBesideTaskSource();
+        TaskAndExceptionPlansKeepBothContracts();
         return 22;
     }
 
@@ -540,7 +540,7 @@ internal static class SemanticAsyncTests
             "reordered named arguments are rejected until evaluation order is represented");
     }
 
-    private static void FailedExceptionPlanKeepsItsContractBesideTaskSource()
+    private static void TaskAndExceptionPlansKeepBothContracts()
     {
         const string source = """
             using AvidScript;
@@ -562,12 +562,37 @@ internal static class SemanticAsyncTests
             """;
         SemanticDocument document = Analyze(source, "Scripts/TaskAndExceptionPlan.cs");
         Assert(!document.Succeeded
-            && document.SchemaVersion == SemanticContract.ExceptionFlowSchemaVersion
-            && document.SemanticVersion == SemanticContract.ExceptionFlowSemanticVersion
-            && document.AsyncMethods.Count == 0
+            && document.SchemaVersion == SemanticContract.TaskLanguageErrorSchemaVersion
+            && document.SemanticVersion == SemanticContract.TaskLanguageErrorSemanticVersion
+            && document.AsyncMethods.Count == 1
             && document.ExceptionFlows?.Count == 1
-            && SemanticExceptionFlowContractValidator.IsValid(document),
-            "a failed exception plan keeps its diagnostic schema instead of publishing task execution metadata");
+            && SemanticExceptionFlowContractValidator.IsValid(document)
+            && SemanticAsyncInvocationValidator.IsValid(document),
+            "a source with disjoint Task and exception methods retains both validated plans");
+        byte[] serialized = SemanticSerializer.Serialize(document);
+        Assert(serialized.SequenceEqual(SemanticSerializer.Serialize(
+            SemanticSerializer.Deserialize(serialized))),
+            "the combined semantic contract round-trips canonically");
+        Assert(!SemanticExceptionFlowContractValidator.IsValid(document with
+        {
+            ExceptionFlows = null,
+        }), "Semantic 40 requires its exception plan");
+        Assert(!SemanticExceptionFlowContractValidator.IsValid(document with
+        {
+            AsyncMethods = Array.Empty<SemanticAsyncMethod>(),
+        }), "Semantic 40 requires its Task plan");
+        Assert(!SemanticExceptionFlowContractValidator.IsValid(document with
+        {
+            SchemaVersion = SemanticContract.ExceptionFlowSchemaVersion,
+            SemanticVersion = SemanticContract.ExceptionFlowSemanticVersion,
+        }), "Semantic 34 cannot erase the Task/error version boundary");
+        Assert(!SemanticExceptionFlowContractValidator.IsValid(document with
+        {
+            AsyncMethods = document.AsyncMethods.Select(method => method with
+            {
+                MethodSymbolId = document.ExceptionFlows![0].MethodSymbolId,
+            }).ToArray(),
+        }), "one method cannot publish incompatible Task and exception CFGs");
     }
 
     private static void TaskIntAwaitPublishesDirectTarget()

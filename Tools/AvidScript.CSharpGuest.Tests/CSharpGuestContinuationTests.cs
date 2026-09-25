@@ -1588,6 +1588,8 @@ internal static class CSharpGuestContinuationTests
         return document;
     }
 
+    internal static string ReferenceFacade => ContinuationFacade;
+
     private const string ContinuationFacade = """
         using System;
         using System.Runtime.CompilerServices;
