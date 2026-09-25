@@ -70,6 +70,20 @@ bool FAvidScriptWasmRuntimeInstance::AdmitTaskLanguageError(
 	return true;
 }
 
+bool FAvidScriptWasmRuntimeInstance::DispatchTaskFaultLanguageErrorCall(
+	const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult)
+{
+	OutResult = {};
+	if (!LanguageErrorCatalog || !LanguageErrorCatalog->SupportsTaskLanguageErrorFault())
+	{
+		OutResult.ErrorCategory = TEXT("task_language_error_version");
+		OutResult.Details = TEXT("Task language-error fault import requires catalog-bearing Guest IR 20/1.19.");
+		return false;
+	}
+	return AdmitTaskLanguageError(Call.Int64Args[0], Call.IntArgs[0], Call.IntArgs[1],
+		static_cast<uint64>(Call.Int64Args[1]), OutResult);
+}
+
 bool FAvidScriptWasmRuntimeInstance::DispatchTaskPropagateFailureCall(
 	const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult)
 {

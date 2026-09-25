@@ -15,15 +15,17 @@ internal static class GuestLanguageErrorCatalogValidator
     {
         GuestModule module = context.Module;
         GuestLanguageErrorCatalog? catalog = module.LanguageErrorCatalog;
-        bool correctVersion = module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion;
+        bool correctVersion = module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion
+            || module.SchemaVersion == GuestTaskLanguageErrorValidator.SchemaVersion
+                && module.IrVersion == GuestTaskLanguageErrorValidator.IrVersion;
         if (catalog is null)
         {
-            if (correctVersion) Add(context, "IR 17 requires a language-error token catalog.");
+            if (correctVersion) Add(context, "This Guest IR version requires a language-error token catalog.");
             return;
         }
         if (!correctVersion)
         {
-            Add(context, "Language-error tokens require Guest IR 17/1.16.");
+            Add(context, "Language-error tokens require Guest IR 17/1.16 or the combined Task/error version.");
             return;
         }
         if (catalog.Types.Count is 0 or > 256 || catalog.Sources.Count is 0 or > 1024)

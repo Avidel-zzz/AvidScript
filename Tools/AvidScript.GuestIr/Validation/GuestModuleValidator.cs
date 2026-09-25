@@ -35,6 +35,7 @@ public static class GuestModuleValidator
         GuestLanguageErrorCatalogValidator.Validate(context);
         ValidateImports(context);
         GuestTaskResultValidator.Validate(context);
+        GuestTaskLanguageErrorValidator.Validate(context);
         GuestFunctionReferenceValidator.ValidateContracts(context);
         GuestManagedHeapValidator.ValidateContracts(context);
         GuestBorrowedReferenceValidator.ValidateContracts(context);
@@ -70,6 +71,8 @@ public static class GuestModuleValidator
             && string.Equals(module.IrVersion, GuestTaskResultValidator.IrVersion, StringComparison.Ordinal);
         bool isTaskLocalVersion = module.SchemaVersion == GuestTaskResultValidator.TaskLocalSchemaVersion
             && string.Equals(module.IrVersion, GuestTaskResultValidator.TaskLocalIrVersion, StringComparison.Ordinal);
+        bool isTaskLanguageErrorVersion = module.SchemaVersion == GuestTaskLanguageErrorValidator.SchemaVersion
+            && string.Equals(module.IrVersion, GuestTaskLanguageErrorValidator.IrVersion, StringComparison.Ordinal);
         bool isLegacyVersion = (module.SchemaVersion == LegacySchemaVersion
             && string.Equals(module.IrVersion, LegacyIrVersion, StringComparison.Ordinal))
             || (module.SchemaVersion == 2 && module.IrVersion == "1.1")
@@ -86,7 +89,7 @@ public static class GuestModuleValidator
             || (module.SchemaVersion == 13 && module.IrVersion == "1.12");
         if ((!isCurrentVersion && !isOutcomeVersion && !isOutcomeFlowVersion
                 && !isLanguageErrorCatalogVersion && !isTaskResultVersion
-                && !isTaskLocalVersion && !isLegacyVersion)
+                && !isTaskLocalVersion && !isTaskLanguageErrorVersion && !isLegacyVersion)
             || string.IsNullOrWhiteSpace(module.ModuleId)
             || string.IsNullOrWhiteSpace(module.Language)
             || string.IsNullOrWhiteSpace(provenance.SourceId)

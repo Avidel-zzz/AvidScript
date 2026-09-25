@@ -42,25 +42,32 @@ internal static class GuestTaskResultValidator
             && module.Provenance.SemanticVersion == "1.48";
         bool taskLocalIr = module.SchemaVersion == TaskLocalSchemaVersion
             && module.IrVersion == TaskLocalIrVersion;
+        bool combinedSemantic = module.Provenance.SemanticSchemaVersion
+                == GuestTaskLanguageErrorValidator.SemanticSchemaVersion
+            && module.Provenance.SemanticVersion == GuestTaskLanguageErrorValidator.SemanticVersion;
+        bool combinedIr = module.SchemaVersion == GuestTaskLanguageErrorValidator.SchemaVersion
+            && module.IrVersion == GuestTaskLanguageErrorValidator.IrVersion;
         if (!taskSemantic && !taskIr && !taskLocalSemantic && !taskAssignmentSemantic
             && !taskExistingLocalSemantic && !taskAliasSemantic && !taskLocalIr
+            && !combinedSemantic && !combinedIr
             && taskImports.Length == 0 && producerImports.Length == 0
             && failureImports.Length == 0 && retainedImports.Length == 0) return;
 
         if (!((taskSemantic && taskIr)
             || ((taskLocalSemantic || taskAssignmentSemantic || taskExistingLocalSemantic
-                || taskAliasSemantic) && taskLocalIr))
+                || taskAliasSemantic) && taskLocalIr)
+            || (combinedSemantic && combinedIr))
             || module.Language != "csharp"
             || taskImports.Length != 1)
         {
             context.Add(DiagnosticCode,
-                "Task<int> requires Semantic 35/1.44 with IR 18/1.17, or Semantic 36/1.45 through 39/1.48 with IR 19/1.18.");
+                "Task<int> requires Semantic 35/1.44 with IR 18/1.17, Semantic 36/1.45 through 39/1.48 with IR 19/1.18, or the combined Task/error version.");
             return;
         }
 
-        if (retainedImports.Length != (taskLocalIr ? 1 : 0))
+        if (retainedImports.Length != (taskLocalIr || combinedIr ? 1 : 0))
             context.Add(DiagnosticCode,
-                "Task continuation retention requires exactly one import in Guest IR 19/1.18 and none in older IR.");
+                "Task continuation retention requires exactly one import in Guest IR 19/1.18 or the combined version, and none in older IR.");
 
         GuestImport import = taskImports[0];
         if (import.ParameterTypeIds.Count != 4

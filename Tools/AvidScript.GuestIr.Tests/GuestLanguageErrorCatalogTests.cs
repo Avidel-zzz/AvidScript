@@ -20,7 +20,8 @@ internal static class GuestLanguageErrorCatalogTests
         UnusedCatalogTokenIsRejected();
         NullEntryFailsClosed();
         OutcomeFlowChecksRemainActive();
-        return 12;
+        CombinedTaskLanguageErrorVersion();
+        return 13;
     }
 
     private static void CatalogChangesArtifactIdentity()
@@ -155,6 +156,86 @@ internal static class GuestLanguageErrorCatalogTests
                     ? entry with { Terminator = new GuestTerminator("branch", null, "success", null, null) }
                     : block).ToArray(),
             } : function).ToArray() }, "ASIR1025");
+    }
+
+    private static void CombinedTaskLanguageErrorVersion()
+    {
+        GuestModule prior = CreateModule();
+        GuestImport task = new("import:task_i32_v1", "avidscript", "avid_task_i32_v1",
+            new[] { "type:int32", "type:int64", "type:int32", "type:int32" }, "type:int64");
+        GuestImport bind = new("import:task_bind_producer_v1", "avidscript",
+            "avid_task_bind_producer_v1", new[] { "type:int64", "type:int64" }, "type:int32");
+        GuestImport propagate = new("import:task_propagate_failure_v1", "avidscript",
+            "avid_task_propagate_failure_v1", new[] { "type:int64", "type:int64" }, "type:int32");
+        GuestImport retain = new("import:task_retain_for_continuation_v1", "avidscript",
+            "avid_task_retain_for_continuation_v1", new[] { "type:int64", "type:int64" }, "type:int32");
+        GuestImport fault = new("import:task_fault_language_error_v1", "avidscript",
+            "avid_task_fault_language_error_v1",
+            new[] { "type:int64", "type:int32", "type:int32", "type:language_error_root" },
+            "type:int32");
+        GuestFunction caller = new("function:task_fault_language_error",
+            new[]
+            {
+                new GuestRegister("task", "type:int64"),
+                new GuestRegister("root", "type:language_error_root"),
+            },
+            new[]
+            {
+                new GuestRegister("type_token", "type:int32"),
+                new GuestRegister("source_token", "type:int32"),
+                new GuestRegister("accepted", "type:int32"),
+            }, "type:int32", "entry", new[]
+            {
+                new GuestBasicBlock("entry", new GuestInstruction[]
+                {
+                    new("constant", "type_token", Array.Empty<string>(), null, null,
+                        new GuestConstant("int32", "1")),
+                    new("constant", "source_token", Array.Empty<string>(), null, null,
+                        new GuestConstant("int32", "1")),
+                    new("call", "accepted", new[] { "task", "type_token", "source_token", "root" },
+                        fault.Id, null, null),
+                }, new GuestTerminator("return", null, null, null, "accepted")),
+            });
+        GuestModule combined = prior with
+        {
+            SchemaVersion = 20,
+            IrVersion = "1.19",
+            Provenance = prior.Provenance with
+            {
+                SemanticSchemaVersion = 40,
+                SemanticVersion = "1.49",
+            },
+            Types = prior.Types.Append(new GuestType("type:int64", "scalar", "i64",
+                Array.Empty<GuestField>(), null, null, 8, 8)).ToArray(),
+            Imports = prior.Imports.Concat(new[] { task, bind, propagate, retain, fault }).ToArray(),
+            Functions = prior.Functions.Append(caller).ToArray(),
+        };
+        AssertValid(combined);
+        byte[] bytes = GuestIrSerializer.Serialize(combined);
+        Check(bytes.SequenceEqual(GuestIrSerializer.Serialize(GuestIrSerializer.Deserialize(bytes))),
+            "IR 20 task/language-error module must round-trip canonically");
+        AssertError(combined with { SchemaVersion = 19, IrVersion = "1.18" }, "ASIR1029");
+        AssertError(combined with { Provenance = combined.Provenance with
+        {
+            SemanticSchemaVersion = 39, SemanticVersion = "1.48",
+        } }, "ASIR1029");
+        AssertError(combined with { LanguageErrorCatalog = null }, "ASIR1027");
+        AssertError(combined with { Imports = combined.Imports.Where(item =>
+            item.Name != fault.Name).ToArray() }, "ASIR1029");
+        AssertError(combined with { Imports = combined.Imports.Where(item =>
+            item.Name != task.Name).ToArray() }, "ASIR1028");
+        AssertError(combined with { Imports = combined.Imports.Select(item =>
+            item.Name == fault.Name ? item with { ParameterTypeIds = new[]
+                { "type:int32", "type:int32", "type:int32", "type:language_error_root" } }
+                : item).ToArray() }, "ASIR1029");
+        AssertError(combined with { Functions = combined.Functions.Select(function =>
+            function.Id == caller.Id ? function with { Blocks = new[]
+            {
+                caller.Blocks[0] with { Instructions = caller.Blocks[0].Instructions.Select(instruction =>
+                    instruction.ResultId == "source_token"
+                        ? instruction with { Constant = new GuestConstant("int32", "2") }
+                        : instruction).ToArray() },
+            } } : function).ToArray() }, "ASIR1029");
     }
 
     private static void AssertValid(GuestModule module)

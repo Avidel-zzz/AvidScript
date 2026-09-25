@@ -190,7 +190,8 @@ enum class EAvidScriptHostBindingId : uint16
 	TaskResultInt32V1,
 	TaskBindProducerV1,
 	TaskPropagateFailureV1,
-	TaskRetainForContinuationV1
+	TaskRetainForContinuationV1,
+	TaskFaultLanguageErrorV1
 };
 
 struct FAvidScriptVmStackFrame

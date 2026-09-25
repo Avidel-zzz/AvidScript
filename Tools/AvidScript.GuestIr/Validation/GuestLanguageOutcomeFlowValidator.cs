@@ -21,7 +21,9 @@ internal static class GuestLanguageOutcomeFlowValidator
         bool flowVersion = context.Module.SchemaVersion == SchemaVersion
                 && context.Module.IrVersion == IrVersion
             || context.Module.SchemaVersion == GuestLanguageErrorCatalogValidator.SchemaVersion
-                && context.Module.IrVersion == GuestLanguageErrorCatalogValidator.IrVersion;
+                && context.Module.IrVersion == GuestLanguageErrorCatalogValidator.IrVersion
+            || context.Module.SchemaVersion == GuestTaskLanguageErrorValidator.SchemaVersion
+                && context.Module.IrVersion == GuestTaskLanguageErrorValidator.IrVersion;
 
         foreach (GuestImport import in context.Module.Imports)
         {

@@ -15,8 +15,9 @@ internal static class GuestLanguageOutcomeTypeValidator
         if (declarations is null)
         {
             if (context.Module.SchemaVersion is SchemaVersion or GuestLanguageOutcomeFlowValidator.SchemaVersion
-                or GuestLanguageErrorCatalogValidator.SchemaVersion)
-                context.Add("ASIR1024", "IR 15 through 17 require an explicit language outcome type list.");
+                or GuestLanguageErrorCatalogValidator.SchemaVersion
+                or GuestTaskLanguageErrorValidator.SchemaVersion)
+                context.Add("ASIR1024", "Language-outcome IR requires an explicit outcome type list.");
             return;
         }
 
@@ -24,10 +25,12 @@ internal static class GuestLanguageOutcomeTypeValidator
             || (context.Module.SchemaVersion == GuestLanguageOutcomeFlowValidator.SchemaVersion
                 && context.Module.IrVersion == GuestLanguageOutcomeFlowValidator.IrVersion)
             || (context.Module.SchemaVersion == GuestLanguageErrorCatalogValidator.SchemaVersion
-                && context.Module.IrVersion == GuestLanguageErrorCatalogValidator.IrVersion);
+                && context.Module.IrVersion == GuestLanguageErrorCatalogValidator.IrVersion)
+            || (context.Module.SchemaVersion == GuestTaskLanguageErrorValidator.SchemaVersion
+                && context.Module.IrVersion == GuestTaskLanguageErrorValidator.IrVersion);
         if (!validVersion)
         {
-            context.Add("ASIR1024", "Language outcome types require Guest IR 15/1.14 through 17/1.16.");
+            context.Add("ASIR1024", "Language outcome types require a versioned outcome-flow contract.");
             return;
         }
 

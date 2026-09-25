@@ -60,19 +60,22 @@ void Custom(TArray<uint8>& Module, const ANSICHAR* Name, const FString& Text)
 	Module.Append(Payload);
 }
 
-FString Provenance()
+FString Provenance(int32 GuestSchema = 17)
 {
+	const FString GuestVersion = GuestSchema == 20 ? TEXT("1.19") : TEXT("1.16");
 	return FString::Printf(TEXT("module_id=%s\nsource_id=Scripts/SourceThrow.cs\nsource_sha256=%s\n")
-		TEXT("frontend_sha256=%s\nsemantic_sha256=%s\nguest_ir=17/1.16"),
-		*ModuleId, *SourceSha256, *FString::ChrN(64, 'b'), *FString::ChrN(64, 'c'));
+		TEXT("frontend_sha256=%s\nsemantic_sha256=%s\nguest_ir=%d/%s"),
+		*ModuleId, *SourceSha256, *FString::ChrN(64, 'b'), *FString::ChrN(64, 'c'),
+		GuestSchema, *GuestVersion);
 }
 
-TSharedRef<FJsonObject> Document()
+TSharedRef<FJsonObject> Document(int32 GuestSchema = 17)
 {
 	auto Root = MakeShared<FJsonObject>();
 	Root->SetNumberField(TEXT("schema_version"), 1);
-	Root->SetNumberField(TEXT("guest_ir_schema_version"), 17);
-	Root->SetStringField(TEXT("guest_ir_version"), TEXT("1.16"));
+	Root->SetNumberField(TEXT("guest_ir_schema_version"), GuestSchema);
+	Root->SetStringField(TEXT("guest_ir_version"),
+		GuestSchema == 20 ? TEXT("1.19") : TEXT("1.16"));
 	Root->SetStringField(TEXT("module_id"), ModuleId);
 	Root->SetStringField(TEXT("source_sha256"), SourceSha256);
 	auto Type = MakeShared<FJsonObject>();
@@ -102,11 +105,12 @@ FString Json(const TSharedRef<FJsonObject>& Root)
 	return Text;
 }
 
-TArray<uint8> Module(const FString* Metadata, bool bProvenance = true, bool bDuplicate = false)
+TArray<uint8> Module(const FString* Metadata, bool bProvenance = true,
+	bool bDuplicate = false, int32 GuestSchema = 17)
 {
 	TArray<uint8> Wasm;
 	Wasm.Append(BaseWasm, UE_ARRAY_COUNT(BaseWasm));
-	if (bProvenance) Custom(Wasm, "avidscript.provenance", Provenance());
+	if (bProvenance) Custom(Wasm, "avidscript.provenance", Provenance(GuestSchema));
 	if (Metadata)
 	{
 		Custom(Wasm, "avidscript.language_errors", *Metadata);
@@ -156,6 +160,13 @@ bool FAvidScriptLanguageErrorCatalogRuntimeTest::RunTest(const FString& Paramete
 			continue;
 		}
 		TestNotNull(TEXT("loaded runtime retains validated catalog"), Runtime.GetLanguageErrorCatalog());
+		FAvidScriptHostCall FaultCall;
+		FaultCall.BindingId = EAvidScriptHostBindingId::TaskFaultLanguageErrorV1;
+		FAvidScriptHostCallResult FaultResult;
+		TestFalse(TEXT("IR 17 cannot use Task language-error fault import"),
+			Runtime.DispatchHostCall(FaultCall, FaultResult));
+		TestEqual(TEXT("Old IR has a stable import-version error"), FaultResult.ErrorCategory,
+			FString(TEXT("task_language_error_version")));
 		Runtime.Unload();
 		TestNull(TEXT("unload clears language-error catalog"), Runtime.GetLanguageErrorCatalog());
 		const TArray<uint8> OldWasm = Module(nullptr, false);
@@ -183,6 +194,8 @@ bool FAvidScriptLanguageErrorCatalogRuntimeTest::RunTest(const FString& Paramete
 	const FString BadHashJson = Json(BadHash);
 	Invalid.Emplace(TEXT("provenance mismatch"), Module(&BadHashJson));
 	Invalid.Emplace(TEXT("missing IR 17 catalog"), Module(nullptr));
+	Invalid.Emplace(TEXT("missing IR 20 catalog"), Module(nullptr, true, false, 20));
+	Invalid.Emplace(TEXT("IR 20 catalog with IR 17 metadata"), Module(&ValidJson, true, false, 20));
 	Invalid.Emplace(TEXT("missing provenance"), Module(&ValidJson, false));
 	Invalid.Emplace(TEXT("duplicate section"), Module(&ValidJson, true, true));
 	const FString DuplicateJson = FString::Printf(
@@ -501,8 +514,8 @@ bool FAvidScriptTaskLanguageErrorAdmissionTest::RunTest(const FString& Parameter
 {
 	using namespace AvidScriptLanguageErrorCatalogTests;
 	using namespace AvidScript::Managed;
-	const FString Metadata = Json(Document());
-	const TArray<uint8> Wasm = Module(&Metadata);
+	const FString Metadata = Json(Document(20));
+	const TArray<uint8> Wasm = Module(&Metadata, true, false, 20);
 	TStrongObjectPtr<UWorld> World(NewObject<UWorld>());
 	if (!TestNotNull(TEXT("Task error test world exists"), World.Get())) return false;
 	const TArray<FAvidScriptRuntimeBackendTestLane> Lanes = GetAvidScriptRuntimeBackendTestLanes();
@@ -538,8 +551,22 @@ bool FAvidScriptTaskLanguageErrorAdmissionTest::RunTest(const FString& Parameter
 		Context.Continuations = &Endpoint;
 		Runtime.SetHostContext(Context);
 		FAvidScriptHostCallResult Result;
+		auto InvokeFaultImport = [&Runtime](int64 TaskToken, int32 TypeToken,
+			int32 SourceToken, uint64 ObjectToken, FAvidScriptHostCallResult& OutResult)
+		{
+			FAvidScriptHostCall Call;
+			Call.BindingId = EAvidScriptHostBindingId::TaskFaultLanguageErrorV1;
+			Call.Int64Args[0] = TaskToken;
+			Call.IntArgs[0] = TypeToken;
+			Call.IntArgs[1] = SourceToken;
+			Call.Int64Args[1] = static_cast<int64>(ObjectToken);
+			return Runtime.DispatchHostCall(Call, OutResult);
+		};
+		TestTrue(TEXT("Combined IR catalog authorizes Task error import"),
+			Runtime.GetLanguageErrorCatalog()
+			&& Runtime.GetLanguageErrorCatalog()->SupportsTaskLanguageErrorFault());
 		TestFalse(TEXT("Outside VM invocation cannot fault a task"),
-			Runtime.AdmitTaskLanguageError(Task, 1, 1, 1, Result));
+			InvokeFaultImport(Task, 1, 1, 1, Result));
 		TestEqual(TEXT("Missing invocation category"), Result.ErrorCategory,
 			FString(TEXT("task_result_context")));
 		FToken OuterFrame = 0, OuterRoot = 0, OuterObject = 0;
@@ -557,28 +584,28 @@ bool FAvidScriptTaskLanguageErrorAdmissionTest::RunTest(const FString& Parameter
 		TestTrue(TEXT("Current error object allocates"),
 			Heap->Allocate(1, Root, ErrorObject) == EHeapError::Ok);
 		TestFalse(TEXT("Foreign Session task is rejected"),
-			Runtime.AdmitTaskLanguageError(ForeignTask, 1, 1, ErrorObject, Result));
+			InvokeFaultImport(ForeignTask, 1, 1, ErrorObject, Result));
 		TestEqual(TEXT("Foreign task has identity category"), Result.ErrorCategory,
 			FString(TEXT("task_result_identity")));
 		TestFalse(TEXT("Unknown type token is rejected"),
-			Runtime.AdmitTaskLanguageError(Task, 2, 1, ErrorObject, Result));
+			InvokeFaultImport(Task, 2, 1, ErrorObject, Result));
 		TestEqual(TEXT("Unknown type has catalog category"), Result.ErrorCategory,
 			FString(TEXT("task_language_error_catalog")));
 		TestFalse(TEXT("Unknown source token is rejected"),
-			Runtime.AdmitTaskLanguageError(Task, 1, 2, ErrorObject, Result));
+			InvokeFaultImport(Task, 1, 2, ErrorObject, Result));
 		TestFalse(TEXT("Older frame root cannot be submitted"),
-			Runtime.AdmitTaskLanguageError(Task, 1, 1, OuterObject, Result));
+			InvokeFaultImport(Task, 1, 1, OuterObject, Result));
 		TestEqual(TEXT("Older frame has root category"), Result.ErrorCategory,
 			FString(TEXT("task_language_error_root")));
 		FAvidScriptTaskResultSnapshot Snapshot;
 		TestFalse(TEXT("Rejected reports leave task running"),
 			Endpoint.ReadTaskResult(Task, Snapshot));
 		TestTrue(TEXT("Current frame root faults Task<int>"),
-			Runtime.AdmitTaskLanguageError(Task, 1, 1, ErrorObject, Result));
+			InvokeFaultImport(Task, 1, 1, ErrorObject, Result));
 		TestTrue(TEXT("Admission returns success"), Result.bSucceeded && Result.ReturnValue == 1);
 		const uint32 LiveRoots = Heap->GetStats().LiveRoots;
 		TestFalse(TEXT("Completed task cannot be faulted twice"),
-			Runtime.AdmitTaskLanguageError(Task, 1, 1, ErrorObject, Result));
+			InvokeFaultImport(Task, 1, 1, ErrorObject, Result));
 		TestEqual(TEXT("Rejected completion category"), Result.ErrorCategory,
 			FString(TEXT("task_result_complete")));
 		TestEqual(TEXT("Rejected completion releases temporary root"),
