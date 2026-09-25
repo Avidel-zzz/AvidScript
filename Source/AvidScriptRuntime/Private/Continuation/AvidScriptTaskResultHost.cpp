@@ -1,5 +1,74 @@
 #include "AvidScriptWasmRuntime.h"
+#include "AvidScriptLanguageErrorCatalog.h"
 #include "AvidScriptTaskResultAbi.h"
+#include "Memory/AvidScriptManagedHeap.h"
+
+namespace
+{
+class FAvidScriptTaskLanguageErrorHeapLease final : public IAvidScriptTaskLanguageErrorLease
+{
+public:
+	explicit FAvidScriptTaskLanguageErrorHeapLease(AvidScript::Managed::FPersistentRoots&& InRoots)
+		: Roots(MoveTemp(InRoots)) {}
+private:
+	AvidScript::Managed::FPersistentRoots Roots;
+};
+}
+
+bool FAvidScriptWasmRuntimeInstance::AdmitTaskLanguageError(
+	const int64 TaskToken, const int32 TypeToken, const int32 SourceToken,
+	const uint64 ObjectToken, FAvidScriptHostCallResult& OutResult)
+{
+	OutResult = {};
+	auto Fail = [&OutResult](const TCHAR* Category, const TCHAR* Details)
+	{
+		OutResult.ErrorCategory = Category;
+		OutResult.Details = Details;
+		return false;
+	};
+	if (!IsInGameThread() || !IsLoaded() || ManagedHeapInvocationDepth == 0
+		|| !ManagedHeap || HostContext.Tasks == nullptr)
+	{
+		return Fail(TEXT("task_result_context"),
+			TEXT("Task language errors require a live Session and managed VM invocation."));
+	}
+	if (TaskToken <= 0 || !HostContext.Tasks->HasTaskResultType(TaskToken, TEXT("type:int32")))
+	{
+		return Fail(TEXT("task_result_identity"),
+			TEXT("Task token is stale, foreign or has the wrong result type."));
+	}
+	if (!LanguageErrorCatalog || !LanguageErrorCatalog->FindType(TypeToken)
+		|| !LanguageErrorCatalog->FindSource(SourceToken))
+	{
+		return Fail(TEXT("task_language_error_catalog"),
+			TEXT("Task language error tokens must belong to the loaded module catalog."));
+	}
+	if (!ManagedHeap->IsObjectRootedInCurrentFrame(ObjectToken, ManagedHeapFrameFloor))
+	{
+		return Fail(TEXT("task_language_error_root"),
+			TEXT("Task language error object needs a root in the current VM invocation."));
+	}
+	AvidScript::Managed::FPersistentRoots Roots;
+	if (ManagedHeap->RetainPersistent({&ObjectToken, 1}, Roots)
+		!= AvidScript::Managed::EHeapError::Ok)
+	{
+		return Fail(TEXT("task_language_error_root"),
+			TEXT("Task language error root could not be retained."));
+	}
+	TSharedPtr<IAvidScriptTaskLanguageErrorLease> Lease =
+		MakeShared<FAvidScriptTaskLanguageErrorHeapLease>(MoveTemp(Roots));
+	TArray<int64> Waiters;
+	if (!HostContext.Tasks->FaultTaskResultLanguageError(TaskToken,
+		{TypeToken, SourceToken, ObjectToken}, MoveTemp(Lease), Waiters))
+	{
+		return Fail(TEXT("task_result_complete"),
+			TEXT("Session rejected Task<int> language-error completion."));
+	}
+	OutResult.ReturnValue = 1;
+	OutResult.ReturnValueI64 = 1;
+	OutResult.bSucceeded = true;
+	return true;
+}
 
 bool FAvidScriptWasmRuntimeInstance::DispatchTaskPropagateFailureCall(
 	const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult)

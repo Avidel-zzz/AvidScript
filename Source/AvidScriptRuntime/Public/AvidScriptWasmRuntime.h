@@ -638,6 +638,10 @@ public:
 	bool DispatchManagedHeapCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	bool DispatchContinuationManagedStateCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	bool DispatchTaskResultInt32Call(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
+	// Native admission for a Task<int> language error. A versioned Guest import
+	// may call this only after its own ABI and IR contract has been validated.
+	bool AdmitTaskLanguageError(int64 TaskToken, int32 TypeToken, int32 SourceToken,
+		uint64 ObjectToken, FAvidScriptHostCallResult& OutResult);
 	bool DispatchTaskBindProducerCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	bool DispatchTaskPropagateFailureCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	bool DispatchTaskRetainForContinuationCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);

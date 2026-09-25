@@ -4,16 +4,21 @@
 #include "AvidScriptRuntimeBackendTestLanes.h"
 #include "AvidScriptRuntimeSession.h"
 #include "AvidScriptWasmRuntime.h"
+#include "Continuation/AvidScriptSessionContinuations.h"
 #include "Memory/AvidScriptManagedHeap.h"
 
 #include "Containers/StringConv.h"
 #include "Dom/JsonObject.h"
+#include "Engine/World.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Policies/CondensedJsonPrintPolicy.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "UObject/StrongObjectPtr.h"
+
+#include <array>
 
 namespace AvidScriptLanguageErrorCatalogTests
 {
@@ -483,6 +488,124 @@ bool FAvidScriptLanguageErrorCatalogHandledArtifactTest::RunTest(const FString& 
 			TestNull(*FString::Printf(TEXT("%s catalog is released on unload"), *FixtureName),
 				Runtime.GetLanguageErrorCatalog());
 		}
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptTaskLanguageErrorAdmissionTest,
+	"AvidScript.Runtime.Continuation.TaskLanguageErrorAdmission",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptTaskLanguageErrorAdmissionTest::RunTest(const FString& Parameters)
+{
+	using namespace AvidScriptLanguageErrorCatalogTests;
+	using namespace AvidScript::Managed;
+	const FString Metadata = Json(Document());
+	const TArray<uint8> Wasm = Module(&Metadata);
+	TStrongObjectPtr<UWorld> World(NewObject<UWorld>());
+	if (!TestNotNull(TEXT("Task error test world exists"), World.Get())) return false;
+	const TArray<FAvidScriptRuntimeBackendTestLane> Lanes = GetAvidScriptRuntimeBackendTestLanes();
+	if (!TestEqual(TEXT("Task error admission covers two VM lanes"), Lanes.Num(), 2)) return false;
+	for (const FAvidScriptRuntimeBackendTestLane& Lane : Lanes)
+	{
+		FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
+		FAvidScriptWasmSmokeResult LoadResult;
+		if (!TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("catalog-bearing WASM loads")),
+			Runtime.LoadModule(Wasm.GetData(), Wasm.Num(), ModuleId, LoadResult)))
+		{
+			AddError(LoadResult.ErrorMessage);
+			return false;
+		}
+		FHeap* Heap = Runtime.GetManagedHeapForTesting();
+		const std::array<FHeapLayout, 1> Layouts{{{1, 8, {}}}};
+		if (!TestTrue(TEXT("Task error heap configures"), Heap
+			&& Heap->Configure(Layouts) == EHeapError::Ok)) return false;
+		const TSharedPtr<FAvidScriptSessionContinuations> Owner =
+			MakeShared<FAvidScriptSessionContinuations>();
+		FAvidScriptContinuationHostEndpoint& Endpoint = Owner->ResetActive(World.Get());
+		const int64 Task = Endpoint.CreateTaskResult(TEXT("type:int32"));
+		const int64 Target = Endpoint.CreateTaskResult(TEXT("type:int32"));
+		const TSharedPtr<FAvidScriptSessionContinuations> ForeignOwner =
+			MakeShared<FAvidScriptSessionContinuations>();
+		FAvidScriptContinuationHostEndpoint& Foreign = ForeignOwner->ResetActive(World.Get());
+		const int64 ForeignTask = Foreign.CreateTaskResult(TEXT("type:int32"));
+		if (!TestTrue(TEXT("Session tasks exist"), Task > 0 && Target > 0 && ForeignTask > 0))
+			return false;
+		FAvidScriptWasmHostContext Context;
+		Context.World = World.Get();
+		Context.Tasks = &Endpoint;
+		Context.Continuations = &Endpoint;
+		Runtime.SetHostContext(Context);
+		FAvidScriptHostCallResult Result;
+		TestFalse(TEXT("Outside VM invocation cannot fault a task"),
+			Runtime.AdmitTaskLanguageError(Task, 1, 1, 1, Result));
+		TestEqual(TEXT("Missing invocation category"), Result.ErrorCategory,
+			FString(TEXT("task_result_context")));
+		FToken OuterFrame = 0, OuterRoot = 0, OuterObject = 0;
+		TestTrue(TEXT("Older frame starts"), Heap->PushFrame(OuterFrame) == EHeapError::Ok);
+		TestTrue(TEXT("Older frame root exists"),
+			Heap->CreateRoot(OuterFrame, 0, OuterRoot) == EHeapError::Ok);
+		TestTrue(TEXT("Older frame object allocates"),
+			Heap->Allocate(1, OuterRoot, OuterObject) == EHeapError::Ok);
+		const uint64 Invocation = Runtime.BeginVmInvocation();
+		FToken Frame = 0, Root = 0, ErrorObject = 0;
+		TestTrue(TEXT("Current invocation frame starts"),
+			Heap->PushFrame(Frame) == EHeapError::Ok);
+		TestTrue(TEXT("Current frame root exists"),
+			Heap->CreateRoot(Frame, 0, Root) == EHeapError::Ok);
+		TestTrue(TEXT("Current error object allocates"),
+			Heap->Allocate(1, Root, ErrorObject) == EHeapError::Ok);
+		TestFalse(TEXT("Foreign Session task is rejected"),
+			Runtime.AdmitTaskLanguageError(ForeignTask, 1, 1, ErrorObject, Result));
+		TestEqual(TEXT("Foreign task has identity category"), Result.ErrorCategory,
+			FString(TEXT("task_result_identity")));
+		TestFalse(TEXT("Unknown type token is rejected"),
+			Runtime.AdmitTaskLanguageError(Task, 2, 1, ErrorObject, Result));
+		TestEqual(TEXT("Unknown type has catalog category"), Result.ErrorCategory,
+			FString(TEXT("task_language_error_catalog")));
+		TestFalse(TEXT("Unknown source token is rejected"),
+			Runtime.AdmitTaskLanguageError(Task, 1, 2, ErrorObject, Result));
+		TestFalse(TEXT("Older frame root cannot be submitted"),
+			Runtime.AdmitTaskLanguageError(Task, 1, 1, OuterObject, Result));
+		TestEqual(TEXT("Older frame has root category"), Result.ErrorCategory,
+			FString(TEXT("task_language_error_root")));
+		FAvidScriptTaskResultSnapshot Snapshot;
+		TestFalse(TEXT("Rejected reports leave task running"),
+			Endpoint.ReadTaskResult(Task, Snapshot));
+		TestTrue(TEXT("Current frame root faults Task<int>"),
+			Runtime.AdmitTaskLanguageError(Task, 1, 1, ErrorObject, Result));
+		TestTrue(TEXT("Admission returns success"), Result.bSucceeded && Result.ReturnValue == 1);
+		const uint32 LiveRoots = Heap->GetStats().LiveRoots;
+		TestFalse(TEXT("Completed task cannot be faulted twice"),
+			Runtime.AdmitTaskLanguageError(Task, 1, 1, ErrorObject, Result));
+		TestEqual(TEXT("Rejected completion category"), Result.ErrorCategory,
+			FString(TEXT("task_result_complete")));
+		TestEqual(TEXT("Rejected completion releases temporary root"),
+			Heap->GetStats().LiveRoots, LiveRoots);
+		TestTrue(TEXT("Task reports catalog and object tokens"),
+			Endpoint.ReadTaskResult(Task, Snapshot)
+			&& Snapshot.LanguageError.IsSet()
+			&& Snapshot.LanguageError->TypeToken == 1
+			&& Snapshot.LanguageError->SourceToken == 1
+			&& Snapshot.LanguageError->ObjectToken == ErrorObject);
+		TArray<int64> Waiters;
+		TestTrue(TEXT("Session propagates rooted language error"),
+			Endpoint.PropagateTaskFailure(Task, Target, Waiters));
+		Runtime.EndVmInvocation(Invocation);
+		TestTrue(TEXT("Older frame closes"), Heap->PopFrame(OuterFrame) == EHeapError::Ok);
+		TestTrue(TEXT("Root survives invocation exit"), Heap->Collect() == EHeapError::Ok);
+		TestTrue(TEXT("Faulted tasks retain error object"), Heap->IsAlive(ErrorObject));
+		TestTrue(TEXT("Source task releases"), Endpoint.ReleaseTaskResult(Task));
+		TestTrue(TEXT("Target retains root after source release"),
+			Heap->Collect() == EHeapError::Ok && Heap->IsAlive(ErrorObject));
+		TestTrue(TEXT("Target task releases"), Endpoint.ReleaseTaskResult(Target));
+		TestTrue(TEXT("Last task releases error root"),
+			Heap->Collect() == EHeapError::Ok && !Heap->IsAlive(ErrorObject)
+			&& Heap->GetStats().LiveRoots == 0);
+		ForeignOwner->Teardown();
+		Owner->Teardown();
+		Runtime.Unload();
 	}
 	return true;
 }
