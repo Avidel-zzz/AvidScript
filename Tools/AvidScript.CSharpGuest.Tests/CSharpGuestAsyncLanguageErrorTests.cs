@@ -65,6 +65,23 @@ internal static class CSharpGuestAsyncLanguageErrorTests
                 .Count(item => item.Op == "call"
                     && item.TargetId == "import:language_error_report_v1") == 2,
             "IR 21 must bind Task fault and unhandled await report calls");
+        GuestBasicBlock[] reportBlocks = module.Functions.SelectMany(function => function.Blocks)
+            .Where(block => block.Instructions.Any(instruction =>
+                instruction.TargetId == "import:language_error_report_v1"))
+            .ToArray();
+        Check(reportBlocks.Length == 2 && reportBlocks.All(block =>
+        {
+            var instructions = block.Instructions.ToList();
+            int meta = instructions.FindIndex(item =>
+                item.TargetId == "import:task_language_error_meta_v1");
+            int root = instructions.FindIndex(item =>
+                item.TargetId == "import:task_language_error_root_v1");
+            int report = instructions.FindIndex(item =>
+                item.TargetId == "import:language_error_report_v1");
+            return meta >= 0 && root > meta && report > root
+                && instructions[meta].OperandIds.SequenceEqual(instructions[root].OperandIds)
+                && instructions[report].OperandIds[2] == instructions[root].ResultId;
+        }), "ready and resumed failures must read metadata and root from the same owned task before reporting");
         Check(GuestModuleValidator.Validate(module).Succeeded,
             "lowered IR must pass its versioned contract");
         byte[] serialized = GuestIrSerializer.Serialize(module);

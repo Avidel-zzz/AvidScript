@@ -7,6 +7,11 @@ using AvidScript.GuestIr;
 
 namespace AvidScript.CSharpGuest;
 
+internal sealed record CSharpTaskLanguageError(
+    GuestRegister TypeToken,
+    GuestRegister SourceToken,
+    GuestRegister Root);
+
 internal static class CSharpTaskResultAbi
 {
     public const string ImportId = "import:$async:task_i32_v1";
@@ -99,6 +104,33 @@ internal static class CSharpTaskResultAbi
     public static GuestImport LanguageErrorReportImport() => new(LanguageErrorReportImportId,
         "avidscript", "avid_language_error_report_v1",
         new[] { IntTypeId, IntTypeId, "type:language_error_root" }, IntTypeId);
+
+    // The source task must remain owned until both imports have validated its
+    // language-error payload and transferred the root into this call frame.
+    public static CSharpTaskLanguageError? ReadLanguageError(
+        CSharpFunctionLoweringContext context, GuestRegister sourceTask,
+        int block, List<GuestInstruction> instructions)
+    {
+        GuestRegister? metadata = context.CreateTemporary(TokenTypeId, block);
+        GuestRegister? shift = Constant(context, TokenTypeId, 32, block, instructions);
+        GuestRegister? typePacked = context.CreateTemporary(TokenTypeId, block);
+        GuestRegister? typeToken = context.CreateTemporary(IntTypeId, block);
+        GuestRegister? sourceToken = context.CreateTemporary(IntTypeId, block);
+        GuestRegister? root = context.CreateTemporary("type:language_error_root", block);
+        if (metadata is null || shift is null || typePacked is null
+            || typeToken is null || sourceToken is null || root is null) return null;
+        instructions.Add(new("call", metadata.Id, new[] { sourceTask.Id },
+            LanguageErrorMetaImportId, null, null));
+        instructions.Add(new("binary", typePacked.Id,
+            new[] { metadata.Id, shift.Id }, null, "right_shift", null));
+        instructions.Add(new("convert", typeToken.Id,
+            new[] { typePacked.Id }, null, null, null));
+        instructions.Add(new("convert", sourceToken.Id,
+            new[] { metadata.Id }, null, null, null));
+        instructions.Add(new("call", root.Id, new[] { sourceTask.Id },
+            LanguageErrorRootImportId, null, null));
+        return new CSharpTaskLanguageError(typeToken, sourceToken, root);
+    }
 
     public static GuestRegister? LoadTaskLocalToken(CSharpFunctionLoweringContext context,
         string symbolId, int block, List<GuestInstruction> instructions)

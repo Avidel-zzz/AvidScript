@@ -239,30 +239,13 @@ internal static class CSharpTaskAwaitLowerer
             new("branch_if", faulted.Id, languageErrorBlock, otherFailureBlock, null)));
 
         List<GuestInstruction> report = new();
-        GuestRegister? metadata = context.CreateTemporary(CSharpTaskResultAbi.TokenTypeId, block);
-        GuestRegister? shift = CSharpTaskResultAbi.Constant(context,
-            CSharpTaskResultAbi.TokenTypeId, 32, block, report);
-        GuestRegister? typePacked = context.CreateTemporary(CSharpTaskResultAbi.TokenTypeId, block);
-        GuestRegister? typeToken = context.CreateTemporary(CSharpTaskResultAbi.IntTypeId, block);
-        GuestRegister? sourceToken = context.CreateTemporary(CSharpTaskResultAbi.IntTypeId, block);
-        GuestRegister? root = context.CreateTemporary("type:language_error_root", block);
+        CSharpTaskLanguageError? error = CSharpTaskResultAbi.ReadLanguageError(
+            context, token, block, report);
         GuestRegister? reported = context.CreateTemporary(CSharpTaskResultAbi.IntTypeId, block);
-        if (metadata is null || shift is null || typePacked is null
-            || typeToken is null || sourceToken is null || root is null
-            || reported is null) return false;
-        report.Add(new("call", metadata.Id, new[] { token.Id },
-            CSharpTaskResultAbi.LanguageErrorMetaImportId, null, null));
-        report.Add(new("binary", typePacked.Id,
-            new[] { metadata.Id, shift.Id }, null, "right_shift", null));
-        report.Add(new("convert", typeToken.Id,
-            new[] { typePacked.Id }, null, null, null));
-        report.Add(new("convert", sourceToken.Id,
-            new[] { metadata.Id }, null, null, null));
-        report.Add(new("call", root.Id, new[] { token.Id },
-            CSharpTaskResultAbi.LanguageErrorRootImportId, null, null));
+        if (error is null || reported is null) return false;
         if (!ReleaseOwners(report)) return false;
         report.Add(new("call", reported.Id,
-            new[] { typeToken.Id, sourceToken.Id, root.Id },
+            new[] { error.TypeToken.Id, error.SourceToken.Id, error.Root.Id },
             CSharpTaskResultAbi.LanguageErrorReportImportId, null, null));
         blocks.Add(new(languageErrorBlock, report,
             new("trap", null, null, null, null)));
