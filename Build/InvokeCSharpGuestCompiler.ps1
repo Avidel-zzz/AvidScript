@@ -12,6 +12,8 @@ param(
     [string]$DataLaneFusion = "enabled",
     [ValidateSet("enabled", "disabled")]
     [string]$DebugInstrumentation = "disabled",
+    [ValidateSet("disabled", "bounded")]
+    [string]$LanguageErrors = "disabled",
     [switch]$CooperativeSafepoints,
     [ValidateRange(1, 65536)]
     [int]$SafepointInterval = 256,
@@ -107,6 +109,9 @@ try {
         "--debug-instrumentation", $DebugInstrumentation)
     if ($CooperativeSafepoints) {
         $GuestArguments += @("--implicit-function-import-count", "1")
+    }
+    if ($LanguageErrors -ceq "bounded") {
+        $GuestArguments += @("--language-errors", "bounded")
     }
     & $DotNetPath @GuestArguments
     if ($LASTEXITCODE -ne 0) {

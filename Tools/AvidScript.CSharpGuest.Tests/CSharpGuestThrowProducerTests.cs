@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.Loader;
+using System.Security.Cryptography;
 using System.Text.Json;
 using AvidScript.CSharpFrontend;
 using AvidScript.CSharpGuest;
@@ -23,6 +24,7 @@ internal static class CSharpGuestThrowProducerTests
         ConditionalThrowUsesParameterAndNormalReturn();
         VoidThrowProducerPreservesCallAndExportResults();
         ConditionalVoidThrowUsesParameter();
+        BoundedLanguageErrorsUseFormalGuestCli();
         GeneratedUFunctionPreservesOriginalAbi();
         SameSourceCallerCatchesManagedLanguageError();
         MultipleThrowProducersKeepDistinctSourceTokens();
@@ -57,7 +59,111 @@ internal static class CSharpGuestThrowProducerTests
         NestedCatchRethrowReachesOuterHandler();
         NestedCatchRethrowRunsBranchingOuterFinally();
         CatchVariableReadsBoundError();
-        return 40;
+        return 41;
+    }
+
+    private static void BoundedLanguageErrorsUseFormalGuestCli()
+    {
+        const string source = """
+            using System;
+            using System.Runtime.InteropServices;
+            class Script
+            {
+                static int Guarded(int value)
+                {
+                    if (value < 0) throw new Exception();
+                    return value + 2;
+                }
+                static int Catch(int value)
+                {
+                    try { return Guarded(value); }
+                    catch (Exception) { return 19; }
+                }
+                [UnmanagedCallersOnly(EntryPoint = "avid_guarded_entry")]
+                static int ExportHandled(int value) => Catch(value);
+                [UnmanagedCallersOnly(EntryPoint = "avid_guarded_uncaught_entry")]
+                static int ExportUncaught(int value) => Guarded(value);
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                static void BeginPlay()
+                {
+                    if (Catch(5) != 7 || Catch(-1) != 19) Guarded(-1);
+                }
+            }
+            """;
+        string directory = Directory.CreateTempSubdirectory("avidscript-language-cli-").FullName;
+        try
+        {
+            string semanticPath = Path.Combine(directory, "input.semantic.json");
+            string outputPath = Path.Combine(directory, "output.guestir.json");
+            string statePath = Path.Combine(directory, "output.state.json");
+            string debugPath = Path.Combine(directory, "output.debug.json");
+            byte[] frontendBytes = FrontendSerializer.Serialize(
+                FrontendAnalyzer.Analyze(source, "Scripts/SourceThrow.cs"));
+            string frontendArtifactSha256 = Convert.ToHexString(
+                SHA256.HashData(frontendBytes)).ToLowerInvariant();
+            byte[] semanticBytes = SemanticSerializer.Serialize(Analyze(source));
+            File.WriteAllBytes(semanticPath, semanticBytes);
+            string[] arguments =
+            {
+                "--semantic", semanticPath, "--output", outputPath,
+                "--state-schema", statePath, "--debug-map", debugPath,
+                "--frontend-artifact-sha256", frontendArtifactSha256,
+            };
+            Check(GuestCommandLine.Run(arguments) == 1 && !File.Exists(outputPath),
+                "formal Guest CLI must reject exception syntax by default");
+            string[] bounded = arguments.Concat(new[] { "--language-errors", "bounded" })
+                .ToArray();
+            Check(GuestCommandLine.Run(bounded) == 0,
+                "formal Guest CLI must compile the explicitly selected bounded profile");
+            byte[] first = File.ReadAllBytes(outputPath);
+            GuestModule module = GuestIrSerializer.Deserialize(first);
+            Check(GuestModuleValidator.Validate(module).Succeeded
+                && module.Provenance.SemanticSha256 == Convert.ToHexString(
+                    SHA256.HashData(semanticBytes)).ToLowerInvariant()
+                && File.Exists(statePath) && File.Exists(debugPath),
+                "bounded CLI must preserve provenance, state schema, and debug map");
+            Check(WasmModuleCompiler.Compile(module).Succeeded,
+                "formal bounded CLI Guest IR must compile to WASM");
+            Check(GuestCommandLine.Run(bounded) == 0
+                && first.SequenceEqual(File.ReadAllBytes(outputPath)),
+                "bounded CLI artifact must be deterministic");
+            string? fixtureOutput = Environment.GetEnvironmentVariable(
+                "AVIDSCRIPT_THROW_PRODUCER_WASM_DIR");
+            if (!string.IsNullOrWhiteSpace(fixtureOutput))
+            {
+                Directory.CreateDirectory(fixtureOutput);
+                File.WriteAllBytes(Path.Combine(fixtureOutput,
+                    "bounded-cli.semantic.json"), semanticBytes);
+                File.WriteAllBytes(Path.Combine(fixtureOutput,
+                    "bounded-cli.frontend.json"), frontendBytes);
+            }
+            Check(GuestCommandLine.Run(arguments.Concat(new[]
+                { "--language-errors", "unsupported" }).ToArray()) == 2,
+                "unknown language-error modes must be rejected");
+            Check(GuestCommandLine.Run(bounded.Concat(new[]
+                { "--debug-instrumentation", "enabled" }).ToArray()) == 2,
+                "bounded exceptions must reject unsupported debug instrumentation");
+            const string unsafeSource = """
+                using System;
+                class Script
+                {
+                    static int Guarded(int value)
+                    {
+                        if (10 / value > 1) throw new Exception();
+                        return value;
+                    }
+                }
+                """;
+            File.WriteAllBytes(semanticPath, SemanticSerializer.Serialize(Analyze(unsafeSource)));
+            Check(GuestCommandLine.Run(bounded) == 1
+                && !File.Exists(outputPath) && !File.Exists(statePath)
+                && !File.Exists(debugPath),
+                "unsupported exception flow must remove previously published CLI artifacts");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
     }
 
     private static void ConditionalVoidThrowUsesParameter()

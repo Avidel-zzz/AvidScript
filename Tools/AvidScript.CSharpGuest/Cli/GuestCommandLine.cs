@@ -34,6 +34,7 @@ public static class GuestCommandLine
             options.TryGetValue("--frontend-artifact-sha256", out string? frontendArtifactSha256);
             bool dataLaneFusionEnabled = ParseDataLaneFusion(options);
             bool debugInstrumentationEnabled = ParseDebugInstrumentation(options);
+            bool boundedLanguageErrors = ParseLanguageErrors(options);
             int implicitFunctionImportCount =
                 ParseImplicitFunctionImportCount(options);
             if ((debugMapPath is null) != (frontendArtifactSha256 is null))
@@ -58,26 +59,43 @@ public static class GuestCommandLine
             byte[] artifact = File.ReadAllBytes(semanticPath);
             string semanticSha256 = Convert.ToHexString(SHA256.HashData(artifact)).ToLowerInvariant();
             SemanticDocument document = SemanticArtifactReader.Deserialize(artifact);
-            CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(
-                document,
-                semanticSha256,
-                enableDataLaneFusion: dataLaneFusionEnabled,
-                enableDebugInstrumentation: debugInstrumentationEnabled);
-            if (!result.Succeeded || result.Module is null)
+            GuestModule? module;
+            if (boundedLanguageErrors && document.ExceptionFlows is { Count: > 0 })
             {
-                DeletePublishedArtifacts(outputPath, stateSchemaPath, debugMapPath);
-                foreach (GuestDiagnostic diagnostic in result.Diagnostics)
+                if (!dataLaneFusionEnabled || debugInstrumentationEnabled)
+                    throw new ArgumentException(
+                        "Bounded language errors require data-lane fusion enabled and debug instrumentation disabled.");
+                if (!CSharpLanguageErrorCompiler.TryLower(document, semanticSha256,
+                        out CSharpLanguageErrorCompilation? compilation, out string? error)
+                    || compilation is null)
                 {
-                    Console.Error.WriteLine($"{diagnostic.Code}: {diagnostic.Message}");
+                    DeletePublishedArtifacts(outputPath, stateSchemaPath, debugMapPath);
+                    Console.Error.WriteLine($"ASCG1004: {error ?? "Bounded language error lowering failed."}");
+                    return 1;
                 }
-
-                return 1;
+                module = compilation.Module;
+            }
+            else
+            {
+                CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(
+                    document,
+                    semanticSha256,
+                    enableDataLaneFusion: dataLaneFusionEnabled,
+                    enableDebugInstrumentation: debugInstrumentationEnabled);
+                if (!result.Succeeded || result.Module is null)
+                {
+                    DeletePublishedArtifacts(outputPath, stateSchemaPath, debugMapPath);
+                    foreach (GuestDiagnostic diagnostic in result.Diagnostics)
+                        Console.Error.WriteLine($"{diagnostic.Code}: {diagnostic.Message}");
+                    return 1;
+                }
+                module = result.Module;
             }
 
             CSharpGuestStateSchema? stateSchema = stateSchemaPath is null
                 ? null
-                : CSharpGuestStateSchemaProjector.Project(document, result.Module);
-            GuestIrArtifactWriter.Write(outputPath, result.Module);
+                : CSharpGuestStateSchemaProjector.Project(document, module);
+            GuestIrArtifactWriter.Write(outputPath, module);
             if (stateSchemaPath is not null && stateSchema is not null)
             {
                 CSharpGuestStateSchemaSerializer.Write(stateSchemaPath, stateSchema);
@@ -88,7 +106,7 @@ public static class GuestCommandLine
                     SHA256.HashData(File.ReadAllBytes(outputPath))).ToLowerInvariant();
                 CSharpGuestDebugMap debugMap = CSharpGuestDebugMapProjector.Project(
                     document,
-                    result.Module,
+                    module,
                     guestIrSha256,
                     frontendArtifactSha256!,
                     implicitFunctionImportCount);
@@ -123,16 +141,10 @@ public static class GuestCommandLine
 
     private static IReadOnlyDictionary<string, string> ParseOptions(string[] args)
     {
-        if (args.Length != 4
-            && args.Length != 6
-            && args.Length != 8
-            && args.Length != 10
-            && args.Length != 12
-            && args.Length != 14
-            && args.Length != 16)
+        if (args.Length is < 4 or > 18 || args.Length % 2 != 0)
         {
             throw new ArgumentException(
-                "Usage: --semantic <path> --output <path> [--state-schema <path>] [--debug-map <path> --frontend-artifact-sha256 <sha256>] [--data-lane-fusion enabled|disabled] [--debug-instrumentation enabled|disabled] [--implicit-function-import-count <0..16>] | --finalize-debug-map <path> --offset-map <path>");
+                "Usage: --semantic <path> --output <path> [--state-schema <path>] [--debug-map <path> --frontend-artifact-sha256 <sha256>] [--data-lane-fusion enabled|disabled] [--debug-instrumentation enabled|disabled] [--implicit-function-import-count <0..16>] [--language-errors disabled|bounded] | --finalize-debug-map <path> --offset-map <path>");
         }
 
         Dictionary<string, string> options = new(StringComparer.Ordinal);
@@ -147,7 +159,8 @@ public static class GuestCommandLine
                     && name != "--frontend-artifact-sha256"
                     && name != "--data-lane-fusion"
                     && name != "--debug-instrumentation"
-                    && name != "--implicit-function-import-count")
+                    && name != "--implicit-function-import-count"
+                    && name != "--language-errors")
                 || string.IsNullOrWhiteSpace(value)
                 || !options.TryAdd(name, value))
             {
@@ -191,6 +204,16 @@ public static class GuestCommandLine
         }
 
         throw new ArgumentException("--debug-instrumentation must be enabled or disabled.");
+    }
+
+    private static bool ParseLanguageErrors(IReadOnlyDictionary<string, string> options)
+    {
+        if (!options.TryGetValue("--language-errors", out string? value)
+            || value.Equals("disabled", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (value.Equals("bounded", StringComparison.OrdinalIgnoreCase))
+            return true;
+        throw new ArgumentException("--language-errors must be disabled or bounded.");
     }
 
     private static int ParseImplicitFunctionImportCount(

@@ -22,6 +22,22 @@ try {
     }
     & $DotNet run --project 'Tools/AvidScript.CSharpGuest.Tests/AvidScript.CSharpGuest.Tests.csproj' -c Release -- --throw-producer
     if ($LASTEXITCODE -ne 0) { throw 'C# language-error fixture generation failed.' }
+    $BoundedFrontend = Join-Path $FixtureDirectory 'bounded-cli.frontend.json'
+    $BoundedSemantic = Join-Path $FixtureDirectory 'bounded-cli.semantic.json'
+    $BoundedFrontendSha256 = (Get-FileHash -LiteralPath $BoundedFrontend -Algorithm SHA256).Hash.ToLowerInvariant()
+    & pwsh -NoProfile -File 'Build/InvokeCSharpGuestCompiler.ps1' `
+        -DotNetPath $DotNet `
+        -SemanticPath $BoundedSemantic `
+        -FrontendArtifactSha256 $BoundedFrontendSha256 `
+        -GuestIrPath (Join-Path $FixtureDirectory 'bounded-cli.guestir.json') `
+        -DebugMapPath (Join-Path $FixtureDirectory 'bounded-cli.debug.json') `
+        -StateSchemaPath (Join-Path $FixtureDirectory 'bounded-cli.state.json') `
+        -WasmPath (Join-Path $FixtureDirectory 'bounded-cli.wasm') `
+        -InspectionPath (Join-Path $FixtureDirectory 'bounded-cli.inspection.json') `
+        -LanguageErrors bounded
+    if ($LASTEXITCODE -ne 0) { throw 'Formal bounded language-error compiler pipeline failed.' }
+    & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'bounded-cli.wasm')
+    if ($LASTEXITCODE -ne 0) { throw 'Formal bounded language-error WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'throw-caller.wasm')
     if ($LASTEXITCODE -ne 0) { throw 'C# language-error Node WASM probe failed.' }
     & node 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs' (Join-Path $FixtureDirectory 'catch-caller.wasm')

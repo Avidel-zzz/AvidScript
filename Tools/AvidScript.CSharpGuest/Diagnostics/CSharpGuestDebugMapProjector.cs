@@ -28,6 +28,7 @@ public static class CSharpGuestDebugMapProjector
         "function:$delegate:equals:",
         "function:$event:language:",
         "function:$ue:bind:",
+        "function:language_error_entry:",
     };
 
     public static CSharpGuestDebugMap Project(
