@@ -33,6 +33,9 @@ public sealed record SemanticAsyncMethod(
     [JsonPropertyOrder(10), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? TaskLocalSymbolIds { get; init; }
 
+    [JsonPropertyOrder(11), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SemanticAsyncErrorPlan? ErrorPlan { get; init; }
+
     public static string ReceiverSymbol(string methodSymbolId) => "receiver:" + methodSymbolId;
 
     public const string ReentrantZeroHeapCpsLowering = "reentrant_zero_heap_cps";
@@ -41,6 +44,7 @@ public sealed record SemanticAsyncMethod(
     public const string BranchTransferKind = "branch";
     public const string AwaitTransferKind = "await";
     public const string ReturnTransferKind = "return";
+    public const string ThrowTransferKind = "throw";
     public const string EarlyReturnGuardOperationKind = "async_early_return_guard";
     public const string BlockOperationKind = "async_block";
     public const string LocalDeclarationOperationKind = "async_local_declaration";
@@ -55,6 +59,19 @@ public sealed record SemanticAsyncMethod(
     public const int MaximumStructuredFlowDepth = 8;
     public const int MaximumControlFlowSegments = 64;
 }
+
+// A source-backed plan for language errors in one controlled async method.
+// Handler and cleanup routing will be added before this plan is executable.
+public sealed record SemanticAsyncErrorPlan(
+    [property: JsonPropertyOrder(0)] string SourceId,
+    [property: JsonPropertyOrder(1)] int SourceLength,
+    [property: JsonPropertyOrder(2)] IReadOnlyList<SemanticAsyncThrowSite> Throws);
+
+public sealed record SemanticAsyncThrowSite(
+    [property: JsonPropertyOrder(0)] int SegmentOrdinal,
+    [property: JsonPropertyOrder(1)] string ExceptionTypeId,
+    [property: JsonPropertyOrder(2)] string ConstructorSymbolId,
+    [property: JsonPropertyOrder(3)] SemanticSpan Span);
 
 // Segment membership comes from CFG construction, not source-span heuristics.
 // An await edge within a scope resumes the same activation; entering from outside

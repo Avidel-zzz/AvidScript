@@ -36,7 +36,8 @@ public static class SemanticAsyncScopeValidator
             {
                 SemanticAsyncControlTransfer transfer = segment.Transfer!;
                 if (transfer.Kind is not (SemanticAsyncMethod.GotoTransferKind or SemanticAsyncMethod.BranchTransferKind
-                    or SemanticAsyncMethod.AwaitTransferKind or SemanticAsyncMethod.ReturnTransferKind)
+                    or SemanticAsyncMethod.AwaitTransferKind or SemanticAsyncMethod.ReturnTransferKind
+                    or SemanticAsyncMethod.ThrowTransferKind)
                     || Targets(transfer).Any(target => target < 0 || target >= method.Segments.Count)) return false;
             }
             HashSet<string> ids = new(StringComparer.Ordinal);

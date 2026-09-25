@@ -244,6 +244,7 @@ internal static class SemanticAsyncProjector
                 LexicalScopes = hasLexicalFunctions ? flowProjection.LexicalScopes : Array.Empty<SemanticAsyncLexicalScope>(),
                 TaskResultTypeId = hasTaskResult ? typeRegistry.Register(taskResultType!) : null,
                 TaskLocalSymbolIds = GetTaskAliasLocalIds(context, semanticModel, declaration.Body),
+                ErrorPlan = flowProjection.ErrorPlan,
             };
             VariableDeclaratorSyntax[] taskDeclarations = GetTaskLocalDeclarations(
                 context, semanticModel, declaration.Body);

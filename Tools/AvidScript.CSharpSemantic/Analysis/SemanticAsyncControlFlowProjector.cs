@@ -13,7 +13,8 @@ internal sealed record SemanticAsyncControlFlowProjection(
     IReadOnlyList<SemanticAsyncSegment> Segments,
     int EntrySegmentOrdinal,
     IReadOnlyList<SemanticAsyncCompilerLocal> CompilerLocals,
-    IReadOnlyList<SemanticAsyncLexicalScope> LexicalScopes);
+    IReadOnlyList<SemanticAsyncLexicalScope> LexicalScopes,
+    SemanticAsyncErrorPlan? ErrorPlan);
 
 internal static class SemanticAsyncControlFlowProjector
 {
@@ -177,8 +178,25 @@ internal static class SemanticAsyncControlFlowProjector
                 compilerLocals
                     .OrderBy(local => local.SymbolId, StringComparer.Ordinal)
                     .ToArray(),
-                lexicalScopes.OrderBy(scope => scope.Id, StringComparer.Ordinal).ToArray());
+                lexicalScopes.OrderBy(scope => scope.Id, StringComparer.Ordinal).ToArray(),
+                BuildErrorPlan(segments));
             return true;
+        }
+
+        private SemanticAsyncErrorPlan? BuildErrorPlan(IReadOnlyList<SemanticAsyncSegment> segments)
+        {
+            SemanticAsyncThrowSite[] sites = segments
+                .Where(segment => segment.Transfer?.Kind == SemanticAsyncMethod.ThrowTransferKind)
+                .Select(segment => new SemanticAsyncThrowSite(
+                    segment.Ordinal,
+                    segment.Transfer!.Condition!.TypeId!,
+                    segment.Transfer.Condition.SymbolId!,
+                    segment.Span))
+                .ToArray();
+            return sites.Length == 0 ? null : new SemanticAsyncErrorPlan(
+                context.SyntaxTree.FilePath,
+                context.SourceText.Length,
+                sites);
         }
 
         private int BuildSequence(
@@ -323,6 +341,26 @@ internal static class SemanticAsyncControlFlowProjector
                             -1,
                             -1));
 
+                case ThrowStatementSyntax { Expression: { } exception } when allowValueReturns:
+                {
+                    if (!TryProjectValue(exception, out SemanticOperation? thrown)) return -1;
+                    if (thrown is not
+                        { Kind: "object_creation", IsSupported: true, Children.Count: 0 }
+                        || !SemanticAsyncErrorPlanValidator.TryGetConstructor(
+                            thrown.TypeId, out string? constructor)
+                        || thrown.SymbolId != constructor)
+                    {
+                        return Reject(
+                            "Async Task<int> throw requires a supported zero-argument framework exception constructor.",
+                            statement.Span,
+                            "ASCS5421");
+                    }
+                    return AddDraft(statement.Span,
+                        Array.Empty<SemanticAsyncStatement>(), null,
+                        new DraftTransfer(SemanticAsyncMethod.ThrowTransferKind,
+                            thrown, -1, -1));
+                }
+
                 case ReturnStatementSyntax { Expression: not null } valueReturn when allowValueReturns:
                     if (semanticModel.GetOperation(valueReturn) is not IReturnOperation { ReturnedValue: { } convertedReturn })
                     {
@@ -416,10 +454,13 @@ internal static class SemanticAsyncControlFlowProjector
                     statement.Span,
                     "ASCS5420");
             }
-            if (statement.DescendantNodes().OfType<AwaitExpressionSyntax>().Any())
+            if (statement.DescendantNodes().OfType<AwaitExpressionSyntax>().Any()
+                || statement.DescendantNodes().OfType<ThrowStatementSyntax>().Any(node =>
+                    node.Ancestors().FirstOrDefault(
+                        SemanticExecutableBodyResolver.IsExecutableDeclaration) == declaration))
             {
                 return Reject(
-                    "Await inside try/finally requires a suspended cleanup owner.",
+                    "Await or throw inside try/finally requires a suspended cleanup owner.",
                     statement.Span,
                     "ASCS5420");
             }

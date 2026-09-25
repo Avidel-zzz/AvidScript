@@ -33,7 +33,94 @@ internal static class SemanticAsyncTests
         TaskIntExistingLocalAssignmentPreservesStorage();
         TaskIntSuspendedCleanupFailsClosed();
         TaskAndExceptionPlansKeepBothContracts();
-        return 22;
+        TaskIntThrowPublishesVersionedErrorPlan();
+        return 23;
+    }
+
+    private static void TaskIntThrowPublishesVersionedErrorPlan()
+    {
+        const string source = """
+            using AvidScript;
+            using System;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static async Task<int> LoadAsync(bool fail)
+                {
+                    await AvidContinuations.NextTickAsync();
+                    if (fail) throw new InvalidOperationException();
+                    return 12;
+                }
+                public static async void BeginPlay()
+                {
+                    await AvidContinuations.NextTickAsync();
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/TaskIntThrow.cs");
+        Assert(!document.Succeeded
+            && document.Diagnostics.Any(item => item.Code == "ASCS5422"
+                && item.Span.Start == source.IndexOf("throw new", StringComparison.Ordinal))
+            && document.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion
+            && document.SemanticVersion == SemanticContract.AsyncLanguageErrorSemanticVersion
+            && document.AsyncMethods.Count == 2
+            && SemanticAsyncInvocationValidator.IsValid(document)
+            && SemanticAsyncErrorPlanValidator.IsValid(document),
+            "async Task<int> throw must publish a validated error plan: "
+                + string.Join(" | ", document.Diagnostics.Select(item => item.Code + ":" + item.Message)));
+        SemanticAsyncMethod method = document.AsyncMethods.Single(item => item.ErrorPlan is not null);
+        SemanticAsyncThrowSite site = method.ErrorPlan!.Throws.Single();
+        SemanticAsyncSegment segment = method.Segments.Single(item =>
+            item.Transfer?.Kind == SemanticAsyncMethod.ThrowTransferKind);
+        Assert(method.ErrorPlan.SourceId == document.Source.SourceId
+            && method.ErrorPlan.SourceLength == document.Source.Length
+            && site.SegmentOrdinal == segment.Ordinal
+            && site.Span == segment.Span
+            && site.ExceptionTypeId == "type:global::System.InvalidOperationException"
+            && segment.Transfer!.Condition is
+                { Kind: "object_creation", Children.Count: 0 },
+            "the throw transfer must retain source, constructor and segment identity");
+        byte[] bytes = SemanticSerializer.Serialize(document);
+        Assert(bytes.SequenceEqual(SemanticSerializer.Serialize(
+            SemanticSerializer.Deserialize(bytes))),
+            "the async error plan must round-trip canonically");
+        Assert(!SemanticAsyncInvocationValidator.IsValid(document with
+        {
+            SchemaVersion = SemanticContract.TaskLanguageErrorSchemaVersion,
+            SemanticVersion = SemanticContract.TaskLanguageErrorSemanticVersion,
+        }), "schema 40 must reject async language-error metadata");
+        Assert(!SemanticAsyncInvocationValidator.IsValid(document with
+        {
+            AsyncMethods = new[] { method with
+            {
+                ErrorPlan = method.ErrorPlan with { Throws = new[]
+                {
+                    site with { SegmentOrdinal = method.EntrySegmentOrdinal }
+                } }
+            } }
+        }), "a forged throw segment must fail validation");
+        Assert(!SemanticAsyncInvocationValidator.IsValid(document with
+        {
+            AsyncMethods = new[] { method with
+            {
+                ErrorPlan = method.ErrorPlan with { Throws = new[]
+                {
+                    site with { ConstructorSymbolId = "symbol:forged" }
+                } }
+            } }
+        }), "a forged exception constructor must fail validation");
+        SemanticDocument unsupported = Analyze(source.Replace(
+            "new InvalidOperationException()",
+            "new InvalidOperationException(\"message\")", StringComparison.Ordinal),
+            "Scripts/TaskIntThrowArguments.cs");
+        Assert(!unsupported.Succeeded && unsupported.Diagnostics.Any(item => item.Code == "ASCS5421"),
+            "a parameterized exception constructor must fail at the source location");
+        SemanticDocument cleanup = Analyze(source.Replace(
+            "if (fail) throw new InvalidOperationException();",
+            "try { if (fail) throw new InvalidOperationException(); } finally { }",
+            StringComparison.Ordinal), "Scripts/TaskIntThrowCleanup.cs");
+        Assert(!cleanup.Succeeded && cleanup.Diagnostics.Any(item => item.Code == "ASCS5420"),
+            "a throw inside try/finally must not skip the cleanup edge");
     }
 
     private static void TaskIntAliasesPreserveEveryOwner()

@@ -18,8 +18,11 @@ public static class SemanticExceptionFlowContractValidator
         IReadOnlyList<SemanticExceptionFlow> flows = document.ExceptionFlows;
         bool exceptionContract = document.SchemaVersion == SemanticContract.ExceptionFlowSchemaVersion
             && document.SemanticVersion == SemanticContract.ExceptionFlowSemanticVersion;
-        bool combinedContract = document.SchemaVersion == SemanticContract.TaskLanguageErrorSchemaVersion
-            && document.SemanticVersion == SemanticContract.TaskLanguageErrorSemanticVersion;
+        bool combinedContract =
+            (document.SchemaVersion == SemanticContract.TaskLanguageErrorSchemaVersion
+                && document.SemanticVersion == SemanticContract.TaskLanguageErrorSemanticVersion)
+            || (document.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion
+                && document.SemanticVersion == SemanticContract.AsyncLanguageErrorSemanticVersion);
         if (!(exceptionContract || combinedContract)
             || document.Succeeded || document.ControlFlowGraphs is null
             || flows.Count is 0 or > 256

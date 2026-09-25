@@ -125,11 +125,19 @@ public static class SemanticAnalyzer
         operationProjection = operationProjection with { Methods = genericProjection.Methods };
         controlFlowProjection = controlFlowProjection with { Graphs = genericProjection.Graphs };
         asyncProjection = asyncProjection with { Methods = genericProjection.AsyncMethods };
+        IReadOnlyList<SemanticDiagnostic> asyncLanguageErrorDiagnostics = asyncProjection.Methods
+            .SelectMany(method => method.ErrorPlan?.Throws ?? Array.Empty<SemanticAsyncThrowSite>())
+            .Select(site => new SemanticDiagnostic(
+                "ASCS5422", "error",
+                "Async Task<int> throw has a semantic plan, but executable task-fault lowering is not available yet.",
+                site.Span))
+            .ToArray();
         IReadOnlyList<SemanticDiagnostic> supportDiagnostics = supportProjection.Diagnostics
             .Concat(lexicalCaptures.Diagnostics)
             .Concat(genericProjection.Diagnostics)
             .Concat(operationProjection.Diagnostics)
             .Concat(asyncProjection.Diagnostics)
+            .Concat(asyncLanguageErrorDiagnostics)
             .Concat(callableProjection.Diagnostics)
             .Concat(stateContractProjection.Diagnostics)
             .Concat(ueTypeProjection.Diagnostics)
@@ -188,9 +196,11 @@ public static class SemanticAnalyzer
         bool hasTaskExistingLocalAssignments = asyncProjection.Methods.Any(method => method.Segments.Any(segment =>
             segment.AwaitSite?.ResultStorageKind == "existing_local"));
         bool hasTaskAliases = asyncProjection.Methods.Any(method => method.TaskLocalSymbolIds is not null);
+        bool hasAsyncLanguageErrors = asyncProjection.Methods.Any(method => method.ErrorPlan is not null);
         bool hasTaskLanguageErrors = hasExceptionFlows && hasTaskResults;
         return new SemanticDocument(
-            hasTaskLanguageErrors ? SemanticContract.TaskLanguageErrorSchemaVersion
+            hasAsyncLanguageErrors ? SemanticContract.AsyncLanguageErrorSchemaVersion
+                : hasTaskLanguageErrors ? SemanticContract.TaskLanguageErrorSchemaVersion
                 : hasExceptionFlows ? SemanticContract.ExceptionFlowSchemaVersion
                 : hasTaskAliases ? SemanticContract.TaskAliasSchemaVersion
                 : hasTaskExistingLocalAssignments ? SemanticContract.TaskExistingLocalSchemaVersion
@@ -199,7 +209,8 @@ public static class SemanticAnalyzer
                 : hasTaskResults ? SemanticContract.TaskResultSchemaVersion
                 : SemanticContract.CurrentSchemaVersion,
             "csharp",
-            hasTaskLanguageErrors ? SemanticContract.TaskLanguageErrorSemanticVersion
+            hasAsyncLanguageErrors ? SemanticContract.AsyncLanguageErrorSemanticVersion
+                : hasTaskLanguageErrors ? SemanticContract.TaskLanguageErrorSemanticVersion
                 : hasExceptionFlows ? SemanticContract.ExceptionFlowSemanticVersion
                 : hasTaskAliases ? SemanticContract.TaskAliasSemanticVersion
                 : hasTaskExistingLocalAssignments ? SemanticContract.TaskExistingLocalSemanticVersion

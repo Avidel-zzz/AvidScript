@@ -27,8 +27,12 @@ public static class SemanticAsyncInvocationValidator
             && document.SemanticVersion == SemanticContract.TaskExistingLocalSemanticVersion;
         bool taskAliasContract = document.SchemaVersion == SemanticContract.TaskAliasSchemaVersion
             && document.SemanticVersion == SemanticContract.TaskAliasSemanticVersion;
-        bool combinedContract = document.SchemaVersion == SemanticContract.TaskLanguageErrorSchemaVersion
-            && document.SemanticVersion == SemanticContract.TaskLanguageErrorSemanticVersion;
+        bool combinedContract =
+            (document.SchemaVersion == SemanticContract.TaskLanguageErrorSchemaVersion
+                && document.SemanticVersion == SemanticContract.TaskLanguageErrorSemanticVersion)
+            || (document.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion
+                && document.SemanticVersion == SemanticContract.AsyncLanguageErrorSemanticVersion);
+        if (!SemanticAsyncErrorPlanValidator.IsValid(document)) return false;
         if (taskResultContract && !document.AsyncMethods.Any(method => method?.TaskResultTypeId is not null
                 || method?.Segments?.Any(segment => segment?.AwaitSite?.TaskCallableId is not null) == true))
             return false;
@@ -304,7 +308,8 @@ public static class SemanticAsyncInvocationValidator
                     new[] { segment.Transfer.PrimaryTarget },
                 SemanticAsyncMethod.BranchTransferKind =>
                     new[] { segment.Transfer.PrimaryTarget, segment.Transfer.SecondaryTarget },
-                SemanticAsyncMethod.ReturnTransferKind => Array.Empty<int>(),
+                SemanticAsyncMethod.ReturnTransferKind or SemanticAsyncMethod.ThrowTransferKind =>
+                    Array.Empty<int>(),
                 _ => null!,
             };
             if (successors is null) return false;
