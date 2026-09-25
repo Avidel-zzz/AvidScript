@@ -36,10 +36,14 @@ internal static class CSharpTaskResultAbi
         || (document.SchemaVersion == SemanticContract.TaskAssignmentSchemaVersion
             && document.SemanticVersion == SemanticContract.TaskAssignmentSemanticVersion)
         || (document.SchemaVersion == SemanticContract.TaskExistingLocalSchemaVersion
-            && document.SemanticVersion == SemanticContract.TaskExistingLocalSemanticVersion);
+            && document.SemanticVersion == SemanticContract.TaskExistingLocalSemanticVersion)
+        || (document.SchemaVersion == SemanticContract.TaskAliasSchemaVersion
+            && document.SemanticVersion == SemanticContract.TaskAliasSemanticVersion);
 
-    public static string[] TaskLocalSymbols(SemanticAsyncMethod method) => method.Segments
-        .Select(segment => segment.AwaitSite?.TaskLocalSymbolId)
+    public static string[] TaskLocalSymbols(SemanticAsyncMethod method) =>
+        (method.TaskLocalSymbolIds ?? method.Segments
+            .Select(segment => segment.AwaitSite?.TaskLocalSymbolId)
+            .OfType<string>().ToArray())
         .OfType<string>().Distinct(StringComparer.Ordinal)
         .OrderBy(symbolId => symbolId, StringComparer.Ordinal).ToArray();
 

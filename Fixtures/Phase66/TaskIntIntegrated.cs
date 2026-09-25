@@ -31,9 +31,10 @@ public static class Script
     public static async Task<int> RunScenarioAsync()
     {
         Task<int> left = LoadScoreAsync(7);
+        Task<int> leftAlias = left;
         Task<int> right = LoadScoreAsync(5);
         await AvidContinuations.NextTickAsync();
-        int first = await left;
+        int first = await leftAlias;
         int second = await right;
         return first * 10 + second + Cleanups;
     }

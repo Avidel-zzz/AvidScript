@@ -29,6 +29,10 @@ public sealed record SemanticAsyncMethod(
     [JsonPropertyOrder(9), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? TaskResultTypeId { get; init; }
 
+    // Every owned Task<int> local, including aliases that are not awaited directly.
+    [JsonPropertyOrder(10), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? TaskLocalSymbolIds { get; init; }
+
     public static string ReceiverSymbol(string methodSymbolId) => "receiver:" + methodSymbolId;
 
     public const string ReentrantZeroHeapCpsLowering = "reentrant_zero_heap_cps";

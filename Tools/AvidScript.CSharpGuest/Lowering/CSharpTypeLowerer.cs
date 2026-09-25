@@ -36,7 +36,7 @@ internal static class CSharpTypeLowerer
         foreach (SemanticType type in document.Types.OrderBy(type => type.Id, StringComparer.Ordinal))
         {
             if (IsCompilerAsyncScaffoldType(document, type)
-                || (document.SemanticVersion is "1.36" or "1.37" or "1.38" or "1.39" or SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion or SemanticContract.TaskLocalSemanticVersion or SemanticContract.TaskAssignmentSemanticVersion or SemanticContract.TaskExistingLocalSemanticVersion
+                || (document.SemanticVersion is "1.36" or "1.37" or "1.38" or "1.39" or SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion or SemanticContract.TaskLocalSemanticVersion or SemanticContract.TaskAssignmentSemanticVersion or SemanticContract.TaskExistingLocalSemanticVersion or SemanticContract.TaskAliasSemanticVersion
                     && IsOpenGenericType(type.Id, semanticTypes, shapes,
                         new HashSet<string>(StringComparer.Ordinal))))
             {

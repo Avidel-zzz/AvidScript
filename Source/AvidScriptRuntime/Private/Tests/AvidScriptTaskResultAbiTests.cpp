@@ -572,9 +572,9 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 	World->InitializeActorsForPlay(FURL());
 	ON_SCOPE_EXIT { GEngine->DestroyWorldContext(World); World->DestroyWorld(false); };
 	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
-	for (const TCHAR* Scenario : {TEXT("immediate"), TEXT("deferred"), TEXT("teardown"), TEXT("chain"), TEXT("arguments"), TEXT("combined"), TEXT("cleanup"), TEXT("local"), TEXT("local-teardown"), TEXT("local-waiter-teardown"), TEXT("parallel"), TEXT("parallel-teardown"), TEXT("parallel-waiter-teardown"), TEXT("integrated")})
+	for (const TCHAR* Scenario : {TEXT("immediate"), TEXT("deferred"), TEXT("teardown"), TEXT("chain"), TEXT("arguments"), TEXT("combined"), TEXT("cleanup"), TEXT("local"), TEXT("local-teardown"), TEXT("local-waiter-teardown"), TEXT("parallel"), TEXT("parallel-teardown"), TEXT("parallel-waiter-teardown"), TEXT("integrated"), TEXT("integrated-teardown"), TEXT("integrated-waiter-teardown")})
 	{
-		const bool bIntegrated = FCString::Strcmp(Scenario, TEXT("integrated")) == 0;
+		const bool bIntegrated = FCString::Strncmp(Scenario, TEXT("integrated"), 10) == 0;
 		const bool bParallel = FCString::Strcmp(Scenario, TEXT("parallel")) == 0
 			|| FCString::Strcmp(Scenario, TEXT("parallel-teardown")) == 0
 			|| FCString::Strcmp(Scenario, TEXT("parallel-waiter-teardown")) == 0;
@@ -583,9 +583,11 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 			|| FCString::Strcmp(Scenario, TEXT("local-waiter-teardown")) == 0;
 		const bool bTeardown = FCString::Strcmp(Scenario, TEXT("teardown")) == 0
 			|| FCString::Strcmp(Scenario, TEXT("local-teardown")) == 0
-			|| FCString::Strcmp(Scenario, TEXT("parallel-teardown")) == 0;
+			|| FCString::Strcmp(Scenario, TEXT("parallel-teardown")) == 0
+			|| FCString::Strcmp(Scenario, TEXT("integrated-teardown")) == 0;
 		const bool bWaiterTeardown = FCString::Strcmp(Scenario, TEXT("local-waiter-teardown")) == 0
-			|| FCString::Strcmp(Scenario, TEXT("parallel-waiter-teardown")) == 0;
+			|| FCString::Strcmp(Scenario, TEXT("parallel-waiter-teardown")) == 0
+			|| FCString::Strcmp(Scenario, TEXT("integrated-waiter-teardown")) == 0;
 		const bool bChain = FCString::Strcmp(Scenario, TEXT("chain")) == 0;
 		const bool bArguments = FCString::Strcmp(Scenario, TEXT("arguments")) == 0;
 		const bool bCombined = FCString::Strcmp(Scenario, TEXT("combined")) == 0;
@@ -594,7 +596,8 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 		const FString Stem = FPaths::Combine(FPaths::ProjectSavedDir(),
 			TEXT("AvidScriptManagedHeapTests/GuestFixtures"),
 			FString::Printf(TEXT("csharp-task-int-%s"), bTeardown || bWaiterTeardown
-				? (bParallel ? TEXT("parallel") : bLocal ? TEXT("local") : TEXT("deferred")) : Scenario));
+				? (bIntegrated ? TEXT("integrated") : bParallel ? TEXT("parallel")
+					: bLocal ? TEXT("local") : TEXT("deferred")) : Scenario));
 		TArray<uint8> Bytes;
 		FString OffsetText;
 		int32 ResultOffset = -1;
@@ -670,7 +673,7 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 			if (bWaiterTeardown && Owner->GetTaskResultsForTesting().GetWaiterCount() == 1)
 			{
 				TestEqual(TEXT("Pending Task local retains its result"),
-					Owner->GetTaskResultsForTesting().GetCount(), bParallel ? 2 : 1);
+					Owner->GetTaskResultsForTesting().GetCount(), bIntegrated ? 3 : bParallel ? 2 : 1);
 				WaiterTeardownResumes = Resumes;
 				Owner->Teardown();
 				bStopped = true;
@@ -679,7 +682,7 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 		if (bWaiterTeardown)
 		{
 			TestTrue(TEXT("Task local reached a registered waiter before teardown"),
-				WaiterTeardownResumes > 0 && WaiterTeardownResumes < (bParallel ? 6 : 4));
+				WaiterTeardownResumes > 0 && WaiterTeardownResumes < (bIntegrated ? 7 : bParallel ? 6 : 4));
 			TestEqual(TEXT("Teardown suppresses pending Task local resumes"),
 				Resumes, WaiterTeardownResumes);
 		}
@@ -688,7 +691,7 @@ bool FAvidScriptCompiledTaskIntTest::RunTest(const FString& Parameters)
 				bTeardown ? 0 : bIntegrated ? 7 : bParallel ? 6 : bLocal ? 4 : bChain ? 3 : bDeferred ? 2 : 0);
 		TestEqual(TEXT("Compiled C# Task<int> preserves result"), ReadResult(),
 			bTeardown || bWaiterTeardown ? 0 : bIntegrated ? 253 : bParallel ? 75 : bLocal ? 24 : bChain ? 13 : bArguments ? 75 : bCombined ? 16 : bCleanup ? 161 : 12);
-		if (bIntegrated)
+		if (bIntegrated && !bTeardown && !bWaiterTeardown)
 		{
 			FString CleanupOffsetText;
 			int32 CleanupOffset = -1;

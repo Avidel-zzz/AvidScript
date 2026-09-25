@@ -243,6 +243,7 @@ internal static class SemanticAsyncProjector
                 InvocationInputs = invocationInputs,
                 LexicalScopes = hasLexicalFunctions ? flowProjection.LexicalScopes : Array.Empty<SemanticAsyncLexicalScope>(),
                 TaskResultTypeId = hasTaskResult ? typeRegistry.Register(taskResultType!) : null,
+                TaskLocalSymbolIds = GetTaskAliasLocalIds(context, semanticModel, declaration.Body),
             };
             return true;
         }
@@ -1145,26 +1146,9 @@ internal static class SemanticAsyncProjector
         producer = null;
         if (!TryGetSupportedTaskResult(context.Compilation, local.Type, out _)
             || local.DeclaringSyntaxReferences is not { Length: 1 }
-            || local.DeclaringSyntaxReferences[0].GetSyntax() is not VariableDeclaratorSyntax
-                { Initializer.Value: InvocationExpressionSyntax invocationSyntax } variable
-            || variable.SyntaxTree != context.PrimaryUnit.SyntaxTree
-            || semanticModel.GetOperation(invocationSyntax) is not IInvocationOperation invocation
-            || !invocation.TargetMethod.IsAsync
-            || !SymbolEqualityComparer.Default.Equals(invocation.TargetMethod.ReturnType, local.Type)
-            || !invocation.TargetMethod.IsStatic
-            || invocation.TargetMethod.IsGenericMethod
-            || invocation.TargetMethod.ContainingType.IsGenericType
-            || invocation.TargetMethod.IsVirtual || invocation.TargetMethod.IsOverride
-            || invocation.TargetMethod.IsAbstract
-            || invocation.TargetMethod.DeclaringSyntaxReferences.Length != 1
-            || invocation.TargetMethod.DeclaringSyntaxReferences[0].SyntaxTree != context.PrimaryUnit.SyntaxTree
-            || invocation.Arguments.Length != invocation.TargetMethod.Parameters.Length
-            || invocation.Arguments.Where((argument, index) =>
-                argument.ArgumentKind != ArgumentKind.Explicit
-                || argument.Parameter?.Ordinal != index
-                || invocation.TargetMethod.Parameters[index].RefKind != RefKind.None).Any())
+            || local.DeclaringSyntaxReferences[0].GetSyntax() is not VariableDeclaratorSyntax variable
+            || variable.SyntaxTree != context.PrimaryUnit.SyntaxTree)
             return false;
-
         MethodDeclarationSyntax? owner = variable.Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault();
         if (owner?.Body is null) return false;
         VariableDeclaratorSyntax[] leadingTasks = owner.Body.Statements
@@ -1179,28 +1163,107 @@ internal static class SemanticAsyncProjector
             || !leadingTasks.Contains(variable)
             || owner.Body.DescendantNodes().OfType<VariableDeclaratorSyntax>()
                 .Count(candidate => semanticModel.GetDeclaredSymbol(candidate) is ILocalSymbol symbol
-                    && TryGetSupportedTaskResult(context.Compilation, symbol.Type, out _)) != leadingTasks.Length
-            || leadingTasks.Any(candidate =>
-                semanticModel.GetDeclaredSymbol(candidate) is not ILocalSymbol symbol
-                || !owner.DescendantNodes().OfType<IdentifierNameSyntax>().Any(identifier =>
-                    SymbolEqualityComparer.Default.Equals(
-                        semanticModel.GetSymbolInfo(identifier).Symbol, symbol)
-                    && identifier.Parent is AwaitExpressionSyntax { Expression: IdentifierNameSyntax operand }
-                    && operand == identifier)))
-            return false;
-        IdentifierNameSyntax[] references = owner.DescendantNodes().OfType<IdentifierNameSyntax>()
-            .Where(identifier => SymbolEqualityComparer.Default.Equals(
-                semanticModel.GetSymbolInfo(identifier).Symbol, local))
-            .ToArray();
-        if (references.Length == 0 || references.Any(identifier =>
-                identifier.Parent is not AwaitExpressionSyntax { Expression: IdentifierNameSyntax operand }
-                || operand != identifier
-                || identifier.Ancestors().Any(node => node is AnonymousFunctionExpressionSyntax
-                    or LocalFunctionStatementSyntax)))
+                    && TryGetSupportedTaskResult(context.Compilation, symbol.Type, out _)) != leadingTasks.Length)
             return false;
 
-        producer = invocation;
-        return true;
+        Dictionary<string, IInvocationOperation> roots = new(StringComparer.Ordinal);
+        Dictionary<string, string> aliasSources = new(StringComparer.Ordinal);
+        HashSet<string> awaited = new(StringComparer.Ordinal);
+        foreach (VariableDeclaratorSyntax candidate in leadingTasks)
+        {
+            if (semanticModel.GetDeclaredSymbol(candidate) is not ILocalSymbol symbol
+                || candidate.Initializer is null) return false;
+            string id = SemanticSymbolProjector.GetSymbolId(symbol);
+            if (candidate.Initializer.Value is InvocationExpressionSyntax invocationSyntax
+                && semanticModel.GetOperation(invocationSyntax) is IInvocationOperation invocation
+                && invocation.TargetMethod.IsAsync
+                && SymbolEqualityComparer.Default.Equals(invocation.TargetMethod.ReturnType, symbol.Type)
+                && invocation.TargetMethod.IsStatic
+                && !invocation.TargetMethod.IsGenericMethod
+                && !invocation.TargetMethod.ContainingType.IsGenericType
+                && !invocation.TargetMethod.IsVirtual && !invocation.TargetMethod.IsOverride
+                && !invocation.TargetMethod.IsAbstract
+                && invocation.TargetMethod.DeclaringSyntaxReferences.Length == 1
+                && invocation.TargetMethod.DeclaringSyntaxReferences[0].SyntaxTree == context.PrimaryUnit.SyntaxTree
+                && invocation.Arguments.Length == invocation.TargetMethod.Parameters.Length
+                && !invocation.Arguments.Where((argument, index) =>
+                    argument.ArgumentKind != ArgumentKind.Explicit
+                    || argument.Parameter?.Ordinal != index
+                    || invocation.TargetMethod.Parameters[index].RefKind != RefKind.None).Any())
+            {
+                roots.Add(id, invocation);
+            }
+            else if (candidate.Initializer.Value is IdentifierNameSyntax identifier
+                && semanticModel.GetOperation(identifier) is ILocalReferenceOperation reference
+                && SymbolEqualityComparer.Default.Equals(reference.Local.Type, symbol.Type)
+                && roots.TryGetValue(SemanticSymbolProjector.GetSymbolId(reference.Local),
+                    out IInvocationOperation? root))
+            {
+                roots.Add(id, root);
+                aliasSources.Add(id, SemanticSymbolProjector.GetSymbolId(reference.Local));
+            }
+            else return false;
+        }
+
+        foreach (VariableDeclaratorSyntax candidate in leadingTasks)
+        {
+            ILocalSymbol symbol = (ILocalSymbol)semanticModel.GetDeclaredSymbol(candidate)!;
+            string id = SemanticSymbolProjector.GetSymbolId(symbol);
+            IdentifierNameSyntax[] references = owner.Body.DescendantNodes()
+                .OfType<IdentifierNameSyntax>()
+                .Where(identifier => SymbolEqualityComparer.Default.Equals(
+                    semanticModel.GetSymbolInfo(identifier).Symbol, symbol)).ToArray();
+            if (references.Length == 0) return false;
+            foreach (IdentifierNameSyntax reference in references)
+            {
+                if (reference.Ancestors().Any(node => node is AnonymousFunctionExpressionSyntax
+                    or LocalFunctionStatementSyntax)) return false;
+                if (reference.Parent is AwaitExpressionSyntax { Expression: IdentifierNameSyntax operand }
+                    && operand == reference)
+                {
+                    awaited.Add(id);
+                    continue;
+                }
+                if (reference.Parent is EqualsValueClauseSyntax initializer
+                    && initializer.Value == reference
+                    && initializer.Parent is VariableDeclaratorSyntax alias
+                    && leadingTasks.Contains(alias)
+                    && aliasSources.TryGetValue(SemanticSymbolProjector.GetSymbolId(
+                        (ILocalSymbol)semanticModel.GetDeclaredSymbol(alias)!), out string? source)
+                    && source == id) continue;
+                return false;
+            }
+        }
+
+        HashSet<string> used = new(awaited, StringComparer.Ordinal);
+        foreach (string id in awaited)
+        {
+            string cursor = id;
+            while (aliasSources.TryGetValue(cursor, out string? source))
+            {
+                used.Add(source);
+                cursor = source;
+            }
+        }
+        if (leadingTasks.Any(candidate => semanticModel.GetDeclaredSymbol(candidate) is not ILocalSymbol symbol
+            || !used.Contains(SemanticSymbolProjector.GetSymbolId(symbol)))) return false;
+        return roots.TryGetValue(SemanticSymbolProjector.GetSymbolId(local), out producer);
+    }
+
+    private static IReadOnlyList<string>? GetTaskAliasLocalIds(
+        SemanticCompilationContext context, SemanticModel semanticModel, BlockSyntax body)
+    {
+        VariableDeclaratorSyntax[] leading = body.Statements
+            .TakeWhile(statement => statement is LocalDeclarationStatementSyntax
+                { Declaration.Variables.Count: 1 } declaration
+                && semanticModel.GetDeclaredSymbol(declaration.Declaration.Variables[0]) is ILocalSymbol symbol
+                && TryGetSupportedTaskResult(context.Compilation, symbol.Type, out _))
+            .Cast<LocalDeclarationStatementSyntax>()
+            .Select(statement => statement.Declaration.Variables[0]).ToArray();
+        if (!leading.Any(variable => variable.Initializer?.Value is IdentifierNameSyntax identifier
+            && semanticModel.GetOperation(identifier) is ILocalReferenceOperation)) return null;
+        return leading.Select(variable => SemanticSymbolProjector.GetSymbolId(
+            (ILocalSymbol)semanticModel.GetDeclaredSymbol(variable)!)).ToArray();
     }
 
     private static bool IsAwaitableType(ITypeSymbol? type)

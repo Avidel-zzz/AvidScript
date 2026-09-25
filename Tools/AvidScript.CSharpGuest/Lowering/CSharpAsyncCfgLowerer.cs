@@ -381,6 +381,21 @@ internal static class CSharpAsyncCfgLowerer
                     statement.Operation,
                     segment.Ordinal,
                     instructions);
+                if (statement.TargetSymbolId is { } aliasId
+                    && method.TaskLocalSymbolIds?.Contains(aliasId, StringComparer.Ordinal) == true
+                    && statement.Operation is { Kind: "local_reference", SymbolId: { } sourceId }
+                    && method.TaskLocalSymbolIds.Contains(sourceId, StringComparer.Ordinal))
+                {
+                    GuestRegister? token = context.CreateTemporary(CSharpTaskResultAbi.TokenTypeId,
+                        segment.Ordinal);
+                    if (value is null || token is null) return false;
+                    instructions.Add(new GuestInstruction("convert", token.Id,
+                        new[] { value.Id }, null, null, null));
+                    // Retain returns an acceptance flag; the local still stores
+                    // the original task token held by the source local.
+                    if (CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Retain,
+                            token, null, segment.Ordinal, instructions) is null) return false;
+                }
                 if (statement.TargetSymbolId is not null
                     && (value is null
                         || !CSharpOperationLowerer.StoreLocal(

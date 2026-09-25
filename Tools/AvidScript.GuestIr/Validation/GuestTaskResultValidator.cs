@@ -38,20 +38,23 @@ internal static class GuestTaskResultValidator
             && module.Provenance.SemanticVersion == "1.46";
         bool taskExistingLocalSemantic = module.Provenance.SemanticSchemaVersion == 38
             && module.Provenance.SemanticVersion == "1.47";
+        bool taskAliasSemantic = module.Provenance.SemanticSchemaVersion == 39
+            && module.Provenance.SemanticVersion == "1.48";
         bool taskLocalIr = module.SchemaVersion == TaskLocalSchemaVersion
             && module.IrVersion == TaskLocalIrVersion;
         if (!taskSemantic && !taskIr && !taskLocalSemantic && !taskAssignmentSemantic
-            && !taskExistingLocalSemantic && !taskLocalIr
+            && !taskExistingLocalSemantic && !taskAliasSemantic && !taskLocalIr
             && taskImports.Length == 0 && producerImports.Length == 0
             && failureImports.Length == 0 && retainedImports.Length == 0) return;
 
         if (!((taskSemantic && taskIr)
-            || ((taskLocalSemantic || taskAssignmentSemantic || taskExistingLocalSemantic) && taskLocalIr))
+            || ((taskLocalSemantic || taskAssignmentSemantic || taskExistingLocalSemantic
+                || taskAliasSemantic) && taskLocalIr))
             || module.Language != "csharp"
             || taskImports.Length != 1)
         {
             context.Add(DiagnosticCode,
-                "Task<int> requires Semantic 35/1.44 with IR 18/1.17, or Semantic 36/1.45, 37/1.46, or 38/1.47 with IR 19/1.18.");
+                "Task<int> requires Semantic 35/1.44 with IR 18/1.17, or Semantic 36/1.45 through 39/1.48 with IR 19/1.18.");
             return;
         }
 

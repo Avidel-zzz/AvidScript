@@ -164,10 +164,14 @@ internal static class CSharpGuestAsyncInvocationTests
         Check(fixture is not null, "Task<int> integration source is missing");
         SemanticDocument document = CSharpGuestContinuationTests.Analyze(
             File.ReadAllText(fixture!), "Scripts/TaskIntIntegrated.cs");
-        Check(document.Succeeded && document.SchemaVersion == SemanticContract.TaskExistingLocalSchemaVersion
-            && document.SemanticVersion == SemanticContract.TaskExistingLocalSemanticVersion,
-            "integrated existing-local task assignment requires Semantic 38: "
+        Check(document.Succeeded && document.SchemaVersion == SemanticContract.TaskAliasSchemaVersion
+            && document.SemanticVersion == SemanticContract.TaskAliasSemanticVersion,
+            "integrated Task alias requires Semantic 39: "
                 + string.Join(" | ", document.Diagnostics.Select(item => item.Message)));
+        Check(document.AsyncMethods.Single(method => method.TaskResultTypeId is not null
+                && method.MethodSymbolId.Contains("RunScenarioAsync", StringComparison.Ordinal))
+                .TaskLocalSymbolIds is { Count: 3 },
+            "integrated Task alias must keep its unawaited source as a separate owner");
         CSharpGuestLoweringResult lowered = CSharpGuestLowerer.Lower(document, new string('d', 64));
         Check(lowered.Succeeded,
             "integrated Task<int> lowering failed: "
@@ -175,6 +179,28 @@ internal static class CSharpGuestAsyncInvocationTests
         GuestModule module = lowered.Module!;
         Check(module.SchemaVersion == 19 && module.IrVersion == "1.18",
             "integrated Task<int> retains the task-local Guest IR version");
+        SemanticCallable scenario = document.Callables.Single(callable => callable.MethodSymbolId
+            .Contains("RunScenarioAsync", StringComparison.Ordinal));
+        SemanticSymbol left = document.Symbols.Single(symbol => symbol.Kind == "local"
+            && symbol.Name == "left" && symbol.ContainingSymbolId == scenario.MethodSymbolId);
+        SemanticSymbol alias = document.Symbols.Single(symbol => symbol.Kind == "local"
+            && symbol.Name == "leftAlias" && symbol.ContainingSymbolId == scenario.MethodSymbolId);
+        GuestFunction scenarioFunction = module.Functions.Single(function =>
+            function.Id == "function:" + scenario.MethodSymbolId);
+        GuestBasicBlock aliasBlock = scenarioFunction.Blocks.Single(block => block.Instructions
+            .Any(instruction => instruction.Op == "local_store"
+                && instruction.TargetId?.Contains(alias.Id, StringComparison.Ordinal) == true));
+        GuestInstruction[] aliasInstructions = aliasBlock.Instructions.ToArray();
+        int aliasStoreIndex = Array.FindIndex(aliasInstructions, instruction =>
+            instruction.Op == "local_store"
+                && instruction.TargetId?.Contains(alias.Id, StringComparison.Ordinal) == true);
+        int retainIndex = Array.FindIndex(aliasInstructions, instruction =>
+            instruction.Op == "call" && instruction.TargetId == "import:$async:task_i32_v1");
+        Check(retainIndex >= 0 && retainIndex < aliasStoreIndex
+            && aliasInstructions.Any(instruction => instruction.Op == "local_load"
+                && instruction.TargetId?.Contains(left.Id, StringComparison.Ordinal) == true
+                && instruction.ResultId == aliasInstructions[aliasStoreIndex].OperandIds.Single()),
+            "Task alias retains the source token but stores the token, not the Host acceptance flag");
         string resultGlobalId = module.MemoryLayout.StateSlots.Single(slot =>
             slot.GlobalId.Contains(".Result:", StringComparison.Ordinal)).GlobalId;
         Check(module.Functions.SelectMany(function => function.Blocks)
@@ -187,7 +213,7 @@ internal static class CSharpGuestAsyncInvocationTests
             SchemaVersion = SemanticContract.TaskAssignmentSchemaVersion,
             SemanticVersion = SemanticContract.TaskAssignmentSemanticVersion,
         }, new string('d', 64)).Succeeded,
-            "Semantic 37 must not accept the new existing-local assignment contract");
+            "Semantic 37 must not accept Task aliases or existing-local assignment");
         WasmCompilationResult compiled = WasmModuleCompiler.Compile(module);
         Check(compiled.Succeeded,
             "integrated Task<int> WASM failed: "

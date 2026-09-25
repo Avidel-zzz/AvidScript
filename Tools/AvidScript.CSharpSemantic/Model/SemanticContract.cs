@@ -19,6 +19,8 @@ public static class SemanticContract
     public const string TaskAssignmentSemanticVersion = "1.46";
     public const int TaskExistingLocalSchemaVersion = 38;
     public const string TaskExistingLocalSemanticVersion = "1.47";
+    public const int TaskAliasSchemaVersion = 39;
+    public const string TaskAliasSemanticVersion = "1.48";
 
     public static string GenericInstanceId(string definitionId, IReadOnlyList<string> arguments)
     {
@@ -38,5 +40,7 @@ public static class SemanticContract
         || (schemaVersion == TaskAssignmentSchemaVersion
             && semanticVersion == TaskAssignmentSemanticVersion)
         || (schemaVersion == TaskExistingLocalSchemaVersion
-            && semanticVersion == TaskExistingLocalSemanticVersion);
+            && semanticVersion == TaskExistingLocalSemanticVersion)
+        || (schemaVersion == TaskAliasSchemaVersion
+            && semanticVersion == TaskAliasSemanticVersion);
 }

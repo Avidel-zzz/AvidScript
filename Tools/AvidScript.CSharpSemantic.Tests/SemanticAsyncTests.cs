@@ -27,11 +27,83 @@ internal static class SemanticAsyncTests
         TaskIntAwaitProjectsValueArguments();
         TaskIntLocalPublishesProducerAndFrame();
         TaskIntParallelLocalsPreserveBothOwners();
+        TaskIntAliasesPreserveEveryOwner();
         TaskIntStaticFieldAssignmentIsVersionedAndBounded();
         TaskIntExistingLocalAssignmentPreservesStorage();
         TaskIntSuspendedCleanupFailsClosed();
         FailedExceptionPlanKeepsItsContractBesideTaskSource();
-        return 21;
+        return 22;
+    }
+
+    private static void TaskIntAliasesPreserveEveryOwner()
+    {
+        const string source = """
+            using AvidScript;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static int Result;
+                public static async Task<int> LoadScoreAsync()
+                {
+                    await AvidContinuations.NextTickAsync();
+                    return 12;
+                }
+                public static async void BeginPlay()
+                {
+                    Task<int> original = LoadScoreAsync();
+                    Task<int> alias = original;
+                    Task<int> last = alias;
+                    await AvidContinuations.NextTickAsync();
+                    Result = await last;
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/TaskIntAliases.cs");
+        Assert(document.Succeeded
+            && document.SchemaVersion == SemanticContract.TaskAliasSchemaVersion
+            && document.SemanticVersion == SemanticContract.TaskAliasSemanticVersion
+            && SemanticAsyncInvocationValidator.IsValid(document),
+            "Task aliases must select Semantic 39 with validated provenance: "
+                + string.Join(" | ", document.Diagnostics.Select(item => item.Code + ":" + item.Message)));
+        SemanticAsyncMethod consumer = document.AsyncMethods.Single(method => method.TaskResultTypeId is null);
+        SemanticAsyncAwaitSite site = consumer.Segments.Select(segment => segment.AwaitSite)
+            .Single(awaitSite => awaitSite?.ProducerKind == "task_local")!;
+        Assert(consumer.TaskLocalSymbolIds is { Count: 3 }
+            && site.TaskLocalSymbolId == consumer.TaskLocalSymbolIds[2]
+            && consumer.Segments.Any(segment => segment.AwaitSite?.StateFrame?.Slots
+                .Any(slot => slot.SymbolId == site.TaskLocalSymbolId) == true),
+            "all aliases retain a separate owner even if only the last alias is awaited");
+        byte[] bytes = SemanticSerializer.Serialize(document);
+        Assert(bytes.SequenceEqual(SemanticSerializer.Serialize(SemanticSerializer.Deserialize(bytes))),
+            "Task alias ownership metadata must round-trip canonically");
+        Assert(!SemanticAsyncInvocationValidator.IsValid(document with
+        {
+            SchemaVersion = SemanticContract.TaskExistingLocalSchemaVersion,
+            SemanticVersion = SemanticContract.TaskExistingLocalSemanticVersion,
+        }), "older semantic labels cannot acquire alias ownership");
+        Assert(!SemanticAsyncInvocationValidator.IsValid(document with
+        {
+            AsyncMethods = document.AsyncMethods.Select(method => method == consumer
+                ? method with { TaskLocalSymbolIds = method.TaskLocalSymbolIds!.Skip(1).ToArray() }
+                : method).ToArray(),
+        }), "omitting an unawaited source owner must be rejected");
+        Assert(!SemanticAsyncInvocationValidator.IsValid(document with
+        {
+            AsyncMethods = document.AsyncMethods.Select(method => method == consumer
+                ? method with { TaskLocalSymbolIds = Array.Empty<string>() }
+                : method).ToArray(),
+        }), "an empty alias ownership list cannot claim Semantic 39");
+        Assert(!SemanticAsyncInvocationValidator.IsValid(document with
+        {
+            AsyncMethods = document.AsyncMethods.Select(method => method == consumer
+                ? method with { TaskLocalSymbolIds = method.TaskLocalSymbolIds!.Reverse().ToArray() }
+                : method).ToArray(),
+        }), "Task alias owner order must match source declarations");
+        SemanticDocument reassignment = Analyze(source.Replace("Task<int> last = alias;",
+            "Task<int> last = alias; last = original;", StringComparison.Ordinal),
+            "Scripts/TaskIntReassignedAlias.cs");
+        Assert(!reassignment.Succeeded && reassignment.Diagnostics.Any(item => item.Code == "ASCS5403"),
+            "reassignment remains rejected until path-dependent ownership is represented");
     }
 
     private static void TaskIntExistingLocalAssignmentPreservesStorage()
