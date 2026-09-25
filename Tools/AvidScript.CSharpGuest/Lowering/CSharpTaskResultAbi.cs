@@ -37,6 +37,12 @@ internal static class CSharpTaskResultAbi
     public static string AwaitSlot(SemanticAsyncAwaitSite site) =>
         "$async:await_task:" + site.CallbackId;
 
+    public static string ExceptionSourceSlot(SemanticAsyncMethod method) =>
+        "$async:exception_source:" + method.MethodSymbolId;
+
+    public static string ExceptionTypeSlot(SemanticAsyncMethod method) =>
+        "$async:exception_type:" + method.MethodSymbolId;
+
     public static bool Supports(SemanticDocument document) =>
         (document.SchemaVersion == SemanticContract.TaskResultSchemaVersion
             && document.SemanticVersion == SemanticContract.TaskResultSemanticVersion)
@@ -49,7 +55,9 @@ internal static class CSharpTaskResultAbi
         || (document.SchemaVersion == SemanticContract.TaskAliasSchemaVersion
             && document.SemanticVersion == SemanticContract.TaskAliasSemanticVersion)
         || (document.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion
-            && document.SemanticVersion == SemanticContract.AsyncLanguageErrorSemanticVersion);
+            && document.SemanticVersion == SemanticContract.AsyncLanguageErrorSemanticVersion)
+        || (document.SchemaVersion == SemanticContract.AsyncExceptionFlowSchemaVersion
+            && document.SemanticVersion == SemanticContract.AsyncExceptionFlowSemanticVersion);
 
     public static string[] TaskLocalSymbols(SemanticAsyncMethod method) =>
         (method.TaskLocalSymbolIds ?? method.Segments

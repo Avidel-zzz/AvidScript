@@ -18,6 +18,10 @@ public static class GuestTaskLanguageErrorValidator
     public const string AsyncIrVersion = "1.20";
     public const int AsyncSemanticSchemaVersion = 41;
     public const string AsyncSemanticVersion = "1.50";
+    public const int ExceptionFlowSchemaVersion = 22;
+    public const string ExceptionFlowIrVersion = "1.21";
+    public const int ExceptionFlowSemanticSchemaVersion = 42;
+    public const string ExceptionFlowSemanticVersion = "1.51";
     public const string ImportId = "import:task_fault_language_error_v1";
     public const string ImportName = "avid_task_fault_language_error_v1";
     public const string MetaImportId = "import:task_language_error_meta_v1";
@@ -32,24 +36,28 @@ public static class GuestTaskLanguageErrorValidator
         bool combinedVersion = module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion;
         bool asyncVersion = module.SchemaVersion == AsyncSchemaVersion
             && module.IrVersion == AsyncIrVersion;
+        bool exceptionFlowVersion = module.SchemaVersion == ExceptionFlowSchemaVersion
+            && module.IrVersion == ExceptionFlowIrVersion;
         GuestImport[] imports = module.Imports.Where(import =>
             import.Module == GuestTaskResultValidator.ImportModule && import.Name == ImportName).ToArray();
         GuestImport[] metadataImports = module.Imports.Where(import =>
             import.Name == MetaImportName).ToArray();
         GuestImport[] rootImports = module.Imports.Where(import =>
             import.Name == RootImportName).ToArray();
-        if (!combinedVersion && !asyncVersion && imports.Length == 0
+        if (!combinedVersion && !asyncVersion && !exceptionFlowVersion && imports.Length == 0
             && metadataImports.Length == 0 && rootImports.Length == 0) return;
-        if ((!combinedVersion && !asyncVersion) || module.Language != "csharp"
+        if ((!combinedVersion && !asyncVersion && !exceptionFlowVersion) || module.Language != "csharp"
             || module.Provenance.SemanticSchemaVersion
-                != (asyncVersion ? AsyncSemanticSchemaVersion : SemanticSchemaVersion)
+                != (exceptionFlowVersion ? ExceptionFlowSemanticSchemaVersion
+                    : asyncVersion ? AsyncSemanticSchemaVersion : SemanticSchemaVersion)
             || module.Provenance.SemanticVersion
-                != (asyncVersion ? AsyncSemanticVersion : SemanticVersion)
+                != (exceptionFlowVersion ? ExceptionFlowSemanticVersion
+                    : asyncVersion ? AsyncSemanticVersion : SemanticVersion)
             || module.LanguageErrorCatalog is null
             || combinedVersion && module.LanguageOutcomeTypes is null
             || imports.Length != 1)
         {
-            Add(context, "Task language errors require Semantic 40/1.49 with IR 20/1.19 or Semantic 41/1.50 with IR 21/1.20, a catalog and exactly one fault import.");
+            Add(context, "Task language errors require paired Semantic 40/IR 20, Semantic 41/IR 21, or Semantic 42/IR 22, a catalog and exactly one fault import.");
             return;
         }
 
@@ -79,12 +87,12 @@ public static class GuestTaskLanguageErrorValidator
 
         if (module.LanguageErrorCatalog is { } catalog)
             ValidateCallTokens(context, fault, catalog);
-        if (asyncVersion)
+        if (asyncVersion || exceptionFlowVersion)
             ValidateAsyncFaultRoots(context, fault);
 
         if (metadataImports.Length == 0 && rootImports.Length == 0)
         {
-            if (asyncVersion)
+            if (asyncVersion || exceptionFlowVersion)
                 Add(context, "Async Task language errors require the metadata/root read import pair.");
             return;
         }

@@ -76,7 +76,14 @@ internal static class CSharpTaskAwaitLowerer
         blocks.Add(new(readyBlock, readyInstructions,
             new("branch_if", succeeded!.Id, valueBlock, failedBlock, null)));
         List<GuestInstruction> failedInstructions = new();
-        if (method.TaskResultTypeId is null
+        if (method.ExceptionPlan is not null)
+        {
+            if (!CSharpAsyncExceptionLowerer.EmitFailure(context, method,
+                    segment.Transfer!, token, state!, segment.Ordinal,
+                    failedBlock, failedInstructions, blocks,
+                    releaseDirectToken: !taskLocal)) return false;
+        }
+        else if (method.TaskResultTypeId is null
             && context.Document.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion)
         {
             if (!EmitUnhandledFailure(context, method, token, state!, segment.Ordinal,
@@ -199,7 +206,16 @@ internal static class CSharpTaskAwaitLowerer
         blocks.Add(new(activeBlockId, instructions,
             new("branch_if", succeeded!.Id, accepted, rejected, null)));
         List<GuestInstruction> rejectedInstructions = new();
-        if (method.TaskResultTypeId is null
+        SemanticAsyncSegment? incomingSegment = method.Segments.SingleOrDefault(segment =>
+            segment.AwaitSite?.CallbackId == site.CallbackId);
+        if (method.ExceptionPlan is not null)
+        {
+            if (incomingSegment?.Transfer is not { } transfer
+                || !CSharpAsyncExceptionLowerer.EmitFailure(context, method,
+                    transfer, token, state!, block, rejected,
+                    rejectedInstructions, blocks, releaseDirectToken: false)) return false;
+        }
+        else if (method.TaskResultTypeId is null
             && context.Document.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion)
         {
             if (!EmitUnhandledFailure(context, method, token, state!, block,

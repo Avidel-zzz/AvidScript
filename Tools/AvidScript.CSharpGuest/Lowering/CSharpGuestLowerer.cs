@@ -41,7 +41,10 @@ public static class CSharpGuestLowerer
         ArgumentNullException.ThrowIfNull(substitutes);
 
         List<GuestDiagnostic> diagnostics = new();
-        bool asyncLanguageErrors = enableAsyncLanguageErrors
+        bool asyncExceptionFlow = enableAsyncLanguageErrors
+            && document.SchemaVersion == SemanticContract.AsyncExceptionFlowSchemaVersion
+            && document.SemanticVersion == SemanticContract.AsyncExceptionFlowSemanticVersion;
+        bool asyncLanguageErrors = asyncExceptionFlow || enableAsyncLanguageErrors
             && document.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion
             && document.SemanticVersion == SemanticContract.AsyncLanguageErrorSemanticVersion;
         ValidateInput(document, semanticSha256, asyncLanguageErrors, diagnostics);
@@ -294,14 +297,16 @@ public static class CSharpGuestLowerer
         }
 
         GuestModule module = new(
-            asyncLanguageErrors ? GuestTaskLanguageErrorValidator.AsyncSchemaVersion
+            asyncExceptionFlow ? GuestTaskLanguageErrorValidator.ExceptionFlowSchemaVersion
+                : asyncLanguageErrors ? GuestTaskLanguageErrorValidator.AsyncSchemaVersion
                 : document.SchemaVersion is SemanticContract.TaskLocalSchemaVersion
                 or SemanticContract.TaskAssignmentSchemaVersion
                 or SemanticContract.TaskExistingLocalSchemaVersion
                 or SemanticContract.TaskAliasSchemaVersion
                 ? 19 : CSharpTaskResultAbi.Supports(document)
                     ? 18 : GuestModuleValidator.CurrentSchemaVersion,
-            asyncLanguageErrors ? GuestTaskLanguageErrorValidator.AsyncIrVersion
+            asyncExceptionFlow ? GuestTaskLanguageErrorValidator.ExceptionFlowIrVersion
+                : asyncLanguageErrors ? GuestTaskLanguageErrorValidator.AsyncIrVersion
                 : document.SchemaVersion is SemanticContract.TaskLocalSchemaVersion
                 or SemanticContract.TaskAssignmentSchemaVersion
                 or SemanticContract.TaskExistingLocalSchemaVersion
@@ -332,6 +337,27 @@ public static class CSharpGuestLowerer
             LanguageErrorCatalog = asyncLanguageErrors
                 ? CSharpAsyncLanguageErrorCatalog.ToGuest(document,
                     CSharpAsyncLanguageErrorCatalog.Build(document)) : null,
+            AsyncExceptionRoutes = asyncExceptionFlow
+                ? document.AsyncMethods.Where(method => method.ExceptionPlan is not null)
+                    .SelectMany(method => method.Segments
+                        .Where(segment => segment.AwaitSite is not null
+                            && segment.Transfer?.SecondaryTarget is >= 0)
+                        .Select(segment => new GuestAsyncExceptionRoute(
+                            CSharpGuestIds.Function(method.MethodSymbolId),
+                            segment.AwaitSite!.CallbackId,
+                            CSharpGuestIds.AsyncSegmentBlock(method.MethodSymbolId,
+                                segment.Ordinal),
+                            CSharpGuestIds.AsyncSegmentBlock(method.MethodSymbolId,
+                                segment.Transfer!.PrimaryTarget),
+                            CSharpGuestIds.AsyncSegmentBlock(method.MethodSymbolId,
+                                segment.Transfer.SecondaryTarget),
+                            CSharpGuestIds.AsyncSegmentBlock(method.MethodSymbolId,
+                                segment.Transfer.CancellationTarget!.Value),
+                            CSharpGuestIds.Local(
+                                CSharpTaskResultAbi.ExceptionSourceSlot(method)),
+                            CSharpGuestIds.Local(
+                                CSharpTaskResultAbi.ExceptionTypeSlot(method)))))
+                    .OrderBy(route => route.CallbackId).ToArray() : null,
         };
         GuestValidationResult validation = GuestModuleValidator.Validate(module);
         if (!validation.Succeeded)

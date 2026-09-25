@@ -84,7 +84,7 @@ public static void EndPlay()
 
 - 不支持任意 .NET 项目或 NuGet 包；可用的 C# 语法和 UE API 以当前编译器与绑定为准。
 - `Task<int>` 仅支持同一脚本实例内的等待。跨实例等待尚未支持；见 [Task 结果合同](Docs/Phase66/P66.C4_Task_Result_Contract.md)。
-- 显式 `-LanguageErrors bounded` 支持受限的同步 `throw/catch` 和异步 `Task<int>` 故障；`await` 后的 `catch/finally` 尚未进入正式可执行构建。见 [异步异常合同](Docs/Phase66/P66.C5_Async_Language_Error_Contract.md)。
+- 显式 `-LanguageErrors bounded` 支持受限的同步 `throw/catch` 和异步 `Task<int>` 故障。`await` 后的 `catch/finally` 目前仅能在工具链内部编译，尚未进入正式构建或 Win64 运行验收。见 [异步异常合同](Docs/Phase66/P66.C5_Async_Language_Error_Contract.md)。
 - 修改 C# 声明的 `UClass`、`UProperty` 或 `UFunction` 后，需要重新构建并重启 Editor。
 
 ## 开发

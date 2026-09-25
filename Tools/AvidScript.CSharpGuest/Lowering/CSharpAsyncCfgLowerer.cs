@@ -164,6 +164,11 @@ internal static class CSharpAsyncCfgLowerer
             && context.CreateInternalStorage(CSharpTaskResultAbi.ProducerSlot(method),
                 CSharpTaskResultAbi.TokenTypeId) is null)
             return false;
+        if (method.ExceptionPlan is not null
+            && (context.CreateInternalStorage(CSharpTaskResultAbi.ExceptionSourceSlot(method),
+                    CSharpTaskResultAbi.TokenTypeId) is null
+                || context.CreateInternalStorage(CSharpTaskResultAbi.ExceptionTypeSlot(method),
+                    CSharpTaskResultAbi.IntTypeId) is null)) return false;
         foreach (SemanticAsyncAwaitSite taskAwait in method.Segments
             .Select(segment => segment.AwaitSite)
             .Where(site => site?.ProducerKind is "task_call" or "task_local").Cast<SemanticAsyncAwaitSite>())
@@ -271,6 +276,9 @@ internal static class CSharpAsyncCfgLowerer
             activePrefixBlockId = acceptedBlockId;
             prefixInstructions = new List<GuestInstruction>();
         }
+        if (method.ExceptionPlan is not null
+            && !CSharpAsyncExceptionLowerer.Initialize(context, method,
+                entry.SegmentOrdinal, prefixInstructions)) return false;
         if (incoming?.ProducerKind is "task_call" or "task_local")
         {
             if (!CSharpTaskAwaitLowerer.EmitIncoming(context, method, incoming,
@@ -300,7 +308,19 @@ internal static class CSharpAsyncCfgLowerer
             prefixInstructions,
             new GuestTerminator("branch", null, firstFlowBlockId, null, null)));
 
-        foreach (SemanticAsyncSegment segment in CollectSynchronousReachable(method, entry.SegmentOrdinal)
+        List<int> entryTargets = new() { entry.SegmentOrdinal };
+        if (incoming is not null && method.ExceptionPlan is not null)
+        {
+            SemanticAsyncControlTransfer? incomingTransfer = method.Segments.Single(
+                segment => segment.AwaitSite?.CallbackId == incoming.CallbackId).Transfer;
+            if (incomingTransfer?.SecondaryTarget is >= 0)
+                entryTargets.Add(incomingTransfer.SecondaryTarget);
+            if (incomingTransfer?.CancellationTarget is int cancellationTarget)
+                entryTargets.Add(cancellationTarget);
+        }
+        foreach (SemanticAsyncSegment segment in entryTargets
+            .SelectMany(target => CollectSynchronousReachable(method, target))
+            .DistinctBy(item => item.Ordinal)
             .OrderBy(item => item.Ordinal))
         {
             if (!TryLowerSegment(
@@ -472,6 +492,9 @@ internal static class CSharpAsyncCfgLowerer
             }
 
             case SemanticAsyncMethod.ReturnTransferKind:
+                if (!CSharpAsyncExceptionLowerer.ReleaseIfHeld(context, method,
+                        segment.Ordinal, blocks, ref activeBlockId,
+                        ref instructions)) return false;
                 string? taskReturnValueId = null;
                 if (method.TaskResultTypeId is not null)
                 {
@@ -531,6 +554,15 @@ internal static class CSharpAsyncCfgLowerer
                 return TryLowerThrow(method, segment, context, initialEntry,
                     activeBlockId, instructions, blocks, diagnostics);
 
+            case SemanticAsyncMethod.CatchMatchTransferKind:
+                return CSharpAsyncExceptionLowerer.EmitCatchMatch(context, method,
+                    transfer, segment.Ordinal, activeBlockId, instructions, blocks);
+
+            case SemanticAsyncMethod.PropagateFaultTransferKind:
+            case SemanticAsyncMethod.PropagateCancellationTransferKind:
+                return TryLowerExceptionPropagation(method, segment, context,
+                    initialEntry, activeBlockId, instructions, blocks);
+
             default:
                 Add(diagnostics, method, $"Continuation CFG segment {segment.Ordinal} has unknown transfer '{transfer.Kind}'.");
                 return false;
@@ -550,11 +582,16 @@ internal static class CSharpAsyncCfgLowerer
         SemanticAsyncThrowSite? site = method.ErrorPlan?.Throws.SingleOrDefault(item =>
             item.SegmentOrdinal == segment.Ordinal);
         if (site is null || method.TaskResultTypeId != CSharpTaskResultAbi.IntTypeId
-            || context.Document.SchemaVersion != SemanticContract.AsyncLanguageErrorSchemaVersion)
+            || context.Document.SchemaVersion is not
+                (SemanticContract.AsyncLanguageErrorSchemaVersion
+                    or SemanticContract.AsyncExceptionFlowSchemaVersion))
         {
             Add(diagnostics, method, "Async throw has no validated Task<int> language-error site.");
             return false;
         }
+        if (!CSharpAsyncExceptionLowerer.ReleaseIfHeld(context, method,
+                segment.Ordinal, blocks, ref activeBlockId,
+                ref instructions)) return false;
         CSharpLanguageErrorTokenCatalog catalog =
             CSharpAsyncLanguageErrorCatalog.Build(context.Document);
         int typeToken = catalog.Types.Single(item => item.TypeId == site.ExceptionTypeId).Token;
@@ -602,6 +639,50 @@ internal static class CSharpAsyncCfgLowerer
             new("return", null, null, null, returnValue)));
         blocks.Add(new(rejected, Array.Empty<GuestInstruction>(),
             new("trap", null, null, null, null)));
+        return true;
+    }
+
+    private static bool TryLowerExceptionPropagation(
+        SemanticAsyncMethod method, SemanticAsyncSegment segment,
+        CSharpFunctionLoweringContext context, bool initialEntry,
+        string activeBlockId, List<GuestInstruction> instructions,
+        List<GuestBasicBlock> blocks)
+    {
+        if (method.ExceptionPlan is null || method.TaskResultTypeId is null)
+            return false;
+        GuestRegister? owner = CSharpAsyncExceptionLowerer.LoadOwner(context,
+            method, segment.Ordinal, instructions);
+        GuestRegister? accepted = owner is null ? null
+            : CSharpTaskResultAbi.PropagateFailure(context, method, owner,
+                segment.Ordinal, instructions);
+        if (accepted is null) return false;
+        string propagated = activeBlockId + ":propagated";
+        string rejected = activeBlockId + ":propagate_rejected";
+        blocks.Add(new(activeBlockId, instructions,
+            new("branch_if", accepted.Id, propagated, rejected, null)));
+        blocks.Add(new(rejected, Array.Empty<GuestInstruction>(),
+            new("trap", null, null, null, null)));
+        activeBlockId = propagated;
+        instructions = new List<GuestInstruction>();
+        if (!CSharpAsyncExceptionLowerer.ReleaseIfHeld(context, method,
+                segment.Ordinal, blocks, ref activeBlockId,
+                ref instructions)
+            || !CSharpTaskResultAbi.ReleaseTaskLocal(context, method,
+                segment.Ordinal, instructions)) return false;
+        string? returnValue = null;
+        if (initialEntry)
+        {
+            GuestRegister? producer = CSharpTaskResultAbi.LoadProducerToken(
+                context, method, segment.Ordinal, instructions);
+            if (producer is null || CSharpTaskResultAbi.Call(context,
+                    CSharpTaskResultAbi.Release, producer, null,
+                    segment.Ordinal, instructions) is null) return false;
+            returnValue = CSharpTaskResultAbi.ReturnValue(context, method,
+                segment.Ordinal, instructions)?.Id;
+            if (returnValue is null) return false;
+        }
+        blocks.Add(new(activeBlockId, instructions,
+            new("return", null, null, null, returnValue)));
         return true;
     }
 
@@ -803,10 +884,19 @@ internal static class CSharpAsyncCfgLowerer
                 pending.Push(segment.Transfer.PrimaryTarget);
                 pending.Push(segment.Transfer.SecondaryTarget);
             }
+            else if (segment.Transfer.Kind == SemanticAsyncMethod.CatchMatchTransferKind)
+            {
+                pending.Push(segment.Transfer.PrimaryTarget);
+                pending.Push(segment.Transfer.SecondaryTarget);
+            }
             else if (segment.Transfer.Kind == SemanticAsyncMethod.AwaitTransferKind
                 && segment.AwaitSite?.ProducerKind is ("task_call" or "task_local"))
             {
                 pending.Push(segment.Transfer.PrimaryTarget);
+                if (segment.Transfer.SecondaryTarget >= 0)
+                    pending.Push(segment.Transfer.SecondaryTarget);
+                if (segment.Transfer.CancellationTarget is int cancellationTarget)
+                    pending.Push(cancellationTarget);
             }
         }
         return reachable.Select(ordinal => segments[ordinal]).ToArray();

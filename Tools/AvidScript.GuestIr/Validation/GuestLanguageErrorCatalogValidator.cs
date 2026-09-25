@@ -19,7 +19,9 @@ internal static class GuestLanguageErrorCatalogValidator
             || module.SchemaVersion == GuestTaskLanguageErrorValidator.SchemaVersion
                 && module.IrVersion == GuestTaskLanguageErrorValidator.IrVersion
             || module.SchemaVersion == GuestTaskLanguageErrorValidator.AsyncSchemaVersion
-                && module.IrVersion == GuestTaskLanguageErrorValidator.AsyncIrVersion;
+                && module.IrVersion == GuestTaskLanguageErrorValidator.AsyncIrVersion
+            || module.SchemaVersion == GuestTaskLanguageErrorValidator.ExceptionFlowSchemaVersion
+                && module.IrVersion == GuestTaskLanguageErrorValidator.ExceptionFlowIrVersion;
         if (catalog is null)
         {
             if (correctVersion) Add(context, "This Guest IR version requires a language-error token catalog.");
@@ -147,7 +149,9 @@ internal static class GuestLanguageErrorCatalogValidator
                 (typeField ? usedTypes : usedSources).Add(token);
             }
             if (context.Module.SchemaVersion == GuestTaskLanguageErrorValidator.AsyncSchemaVersion
-                && context.Module.IrVersion == GuestTaskLanguageErrorValidator.AsyncIrVersion)
+                && context.Module.IrVersion == GuestTaskLanguageErrorValidator.AsyncIrVersion
+                || context.Module.SchemaVersion == GuestTaskLanguageErrorValidator.ExceptionFlowSchemaVersion
+                && context.Module.IrVersion == GuestTaskLanguageErrorValidator.ExceptionFlowIrVersion)
             {
                 foreach (GuestInstruction call in function.Blocks.SelectMany(block => block.Instructions)
                     .Where(instruction => instruction.Op == "call"

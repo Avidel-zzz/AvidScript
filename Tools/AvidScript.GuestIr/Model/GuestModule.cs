@@ -36,7 +36,23 @@ public sealed record GuestModule(
     [JsonPropertyOrder(17)]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public GuestLanguageErrorCatalog? LanguageErrorCatalog { get; init; }
+
+    [JsonPropertyOrder(18)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<GuestAsyncExceptionRoute>? AsyncExceptionRoutes { get; init; }
 }
+
+// IR 22 binds each protected Task await to all three executable successors.
+// The local identities name the retained source Task and the fault type token.
+public sealed record GuestAsyncExceptionRoute(
+    [property: JsonPropertyOrder(0)] string MethodFunctionId,
+    [property: JsonPropertyOrder(1)] int CallbackId,
+    [property: JsonPropertyOrder(2)] string AwaitBlockId,
+    [property: JsonPropertyOrder(3)] string NormalTargetBlockId,
+    [property: JsonPropertyOrder(4)] string FaultTargetBlockId,
+    [property: JsonPropertyOrder(5)] string CancellationTargetBlockId,
+    [property: JsonPropertyOrder(6)] string OwnerLocalId,
+    [property: JsonPropertyOrder(7)] string TypeLocalId);
 
 // Dedicated synchronous, same-domain adapters. Ordinary exports remain subject to
 // the raw-reference escape rules. Parameter kinds are value/ref/out/in, in order.

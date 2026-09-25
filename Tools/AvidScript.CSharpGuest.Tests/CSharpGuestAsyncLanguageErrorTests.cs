@@ -71,9 +71,111 @@ internal static class CSharpGuestAsyncLanguageErrorTests
         Check(handlerSemantic.Succeeded
             && handlerSemantic.SchemaVersion == SemanticContract.AsyncExceptionFlowSchemaVersion
             && handlerSemantic.AsyncMethods.Any(method => method.ExceptionPlan is not null)
-            && !CSharpGuestLowerer.Lower(handlerSemantic, new string('a', 64),
-                enableAsyncLanguageErrors: true).Succeeded,
-            "IR 21 must reject a valid Semantic 42 handler plan before IR 22 exists");
+            && !CSharpGuestLowerer.Lower(handlerSemantic, new string('a', 64)).Succeeded,
+            "default Guest compilation must reject an opt-in Semantic 42 handler plan");
+        string exceptionSource = File.ReadAllText(Path.Combine(
+            Directory.GetCurrentDirectory(), "Fixtures", "Phase66", "AsyncExceptionFlow.cs"));
+        const string exceptionSourceId = "Fixtures/Phase66/AsyncExceptionFlow.cs";
+        FrontendDocument exceptionFrontend = FrontendAnalyzer.Analyze(
+            exceptionSource, exceptionSourceId);
+        SemanticDocument exceptionSemantic = SemanticAnalyzer.Analyze(
+            exceptionSource, exceptionSourceId, exceptionFrontend.Source.Sha256,
+            new[] { new SemanticReferenceSource(
+                CSharpGuestContinuationTests.ReferenceFacade,
+                "generated://AvidScript.Continuations.generated.cs", true) },
+            new SemanticCompilerWorkspace(), enableAsyncExceptionFlow: true);
+        CSharpGuestLoweringResult exceptionLowered = CSharpGuestLowerer.Lower(
+            exceptionSemantic, new string('a', 64), enableAsyncLanguageErrors: true);
+        Check(exceptionLowered.Succeeded && exceptionLowered.Module is not null,
+            "Semantic 42 async exception fixture must lower to IR 22: "
+                + string.Join(" | ", exceptionLowered.Diagnostics.Select(item =>
+                    item.Code + ":" + item.Message)));
+        GuestModule exceptionModule = exceptionLowered.Module!;
+        Check(exceptionModule.SchemaVersion
+                == GuestTaskLanguageErrorValidator.ExceptionFlowSchemaVersion
+            && exceptionModule.IrVersion
+                == GuestTaskLanguageErrorValidator.ExceptionFlowIrVersion
+            && GuestModuleValidator.Validate(exceptionModule).Succeeded,
+            "IR 22 must retain paired Semantic 42 provenance and pass validation");
+        GuestAsyncExceptionRoute[] routes = exceptionModule.AsyncExceptionRoutes?.ToArray()
+            ?? Array.Empty<GuestAsyncExceptionRoute>();
+        Check(routes.Length == 2
+            && routes.All(route => route.CallbackId > 0),
+            "IR 22 must name each protected Task await");
+        GuestAsyncExceptionRoute firstRoute = routes[0];
+        Check(!GuestModuleValidator.Validate(exceptionModule with
+        {
+            AsyncExceptionRoutes = null,
+        }).Succeeded, "IR 22 must reject missing await routes");
+        Check(GuestModuleValidator.Validate(exceptionModule with
+        {
+            AsyncExceptionRoutes = routes.Take(1).ToArray(),
+        }).Diagnostics.Any(item => item.Code == "ASIR1030"),
+            "IR 22 must reject an omitted protected await");
+        Check(!GuestModuleValidator.Validate(exceptionModule with
+        {
+            AsyncExceptionRoutes = routes.Select((route, index) => index == 0
+                ? route with { FaultTargetBlockId = route.CancellationTargetBlockId }
+                : route).ToArray(),
+        }).Succeeded, "IR 22 must reject a forged fault successor");
+        Check(!GuestModuleValidator.Validate(exceptionModule with
+        {
+            AsyncExceptionRoutes = routes.Select((route, index) => index == 0
+                ? route with { OwnerLocalId = "local:forged_owner" }
+                : route).ToArray(),
+        }).Succeeded, "IR 22 must reject an unbound source Task owner");
+        string faultRetainedId = firstRoute.AwaitBlockId + ":task_failed:fault:retained";
+        GuestFunction sourceFunction = exceptionModule.Functions.Single(function =>
+            function.Id == firstRoute.MethodFunctionId);
+        Check(sourceFunction.Blocks.Any(block => block.Id == faultRetainedId),
+            "fixture must contain the immediate fault owner branch");
+        GuestFunction forgedSource = sourceFunction with
+        {
+            Blocks = sourceFunction.Blocks.Select(block => block.Id == faultRetainedId
+                ? block with { Terminator = block.Terminator with
+                    { TargetBlockId = firstRoute.NormalTargetBlockId } }
+                : block).ToArray(),
+        };
+        GuestModule forgedFlow = exceptionModule with
+        {
+            Functions = exceptionModule.Functions.Select(function =>
+                function.Id == forgedSource.Id ? forgedSource : function).ToArray(),
+        };
+        Check(GuestModuleValidator.Validate(forgedFlow).Diagnostics.Any(item =>
+                item.Code == "ASIR1030"),
+            "IR 22 must reject a fault branch redirected into the normal successor");
+        Check(GuestModuleValidator.Validate(exceptionModule with
+        {
+            SchemaVersion = GuestTaskLanguageErrorValidator.AsyncSchemaVersion,
+            IrVersion = GuestTaskLanguageErrorValidator.AsyncIrVersion,
+            Provenance = exceptionModule.Provenance with
+            {
+                SemanticSchemaVersion = SemanticContract.AsyncLanguageErrorSchemaVersion,
+                SemanticVersion = SemanticContract.AsyncLanguageErrorSemanticVersion,
+            },
+        }).Diagnostics.Any(item => item.Code == "ASIR1030"),
+            "IR 21 must reject IR 22 route metadata even with paired provenance");
+        Check(!GuestModuleValidator.Validate(exceptionModule with
+        {
+            SchemaVersion = GuestTaskLanguageErrorValidator.AsyncSchemaVersion,
+            IrVersion = GuestTaskLanguageErrorValidator.AsyncIrVersion,
+        }).Succeeded, "IR 21 must reject a downgraded Semantic 42 exception-flow module");
+        Check(!GuestModuleValidator.Validate(exceptionModule with
+        {
+            Provenance = exceptionModule.Provenance with
+            {
+                SemanticSchemaVersion = SemanticContract.AsyncLanguageErrorSchemaVersion,
+                SemanticVersion = SemanticContract.AsyncLanguageErrorSemanticVersion,
+            },
+        }).Succeeded, "IR 22 must reject spoofed Semantic 41 provenance");
+        byte[] exceptionBytes = GuestIrSerializer.Serialize(exceptionModule);
+        Check(exceptionBytes.SequenceEqual(GuestIrSerializer.Serialize(
+            GuestIrSerializer.Deserialize(exceptionBytes))),
+            "IR 22 must round-trip canonically");
+        WasmCompilationResult exceptionWasm = WasmModuleCompiler.Compile(exceptionModule);
+        Check(exceptionWasm.Succeeded && exceptionWasm.Bytes.Length > 8,
+            "IR 22 must compile to WASM: " + string.Join(" | ",
+                exceptionWasm.Diagnostics.Select(item => item.Message)));
         Check(!CSharpGuestLowerer.Lower(semantic, new string('a', 64)).Succeeded,
             "ordinary compilation must reject the diagnostic-only artifact");
         Check(!CSharpGuestLowerer.Lower(semantic with

@@ -35,6 +35,12 @@ internal static class GuestRequiredGraphValidator
                 || catalog.Types.Any(type => type is null || HasNull(type.TypeId))
                 || catalog.Sources.Any(source => source is null || HasNull(source.SourceId))))
             return false;
+        if (module.AsyncExceptionRoutes is { } routes
+            && routes.Any(route => route is null
+                || HasNull(route.MethodFunctionId, route.AwaitBlockId,
+                    route.NormalTargetBlockId, route.FaultTargetBlockId,
+                    route.CancellationTargetBlockId, route.OwnerLocalId,
+                    route.TypeLocalId))) return false;
         foreach (GuestFramedExport? export in module.FramedExports)
             if (export is null || HasNull(export.Name, export.FunctionId) || export.ParameterKinds is null
                 || export.ParameterKinds.Any(kind => kind is null)

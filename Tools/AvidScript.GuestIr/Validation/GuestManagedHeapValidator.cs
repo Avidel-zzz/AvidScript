@@ -48,7 +48,9 @@ internal static class GuestManagedHeapValidator
         bool combinedVersion = module.SchemaVersion == GuestTaskLanguageErrorValidator.SchemaVersion
             && module.IrVersion == GuestTaskLanguageErrorValidator.IrVersion
             || module.SchemaVersion == GuestTaskLanguageErrorValidator.AsyncSchemaVersion
-            && module.IrVersion == GuestTaskLanguageErrorValidator.AsyncIrVersion;
+            && module.IrVersion == GuestTaskLanguageErrorValidator.AsyncIrVersion
+            || module.SchemaVersion == GuestTaskLanguageErrorValidator.ExceptionFlowSchemaVersion
+            && module.IrVersion == GuestTaskLanguageErrorValidator.ExceptionFlowIrVersion;
         bool catalogVersion = module.SchemaVersion == GuestLanguageErrorCatalogValidator.SchemaVersion
             && module.IrVersion == GuestLanguageErrorCatalogValidator.IrVersion;
         foreach (GuestImport import in module.Imports)
