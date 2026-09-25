@@ -709,8 +709,22 @@ internal static class SemanticAsyncProjector
             {
                 IMethodSymbol? containingMethod = semanticModel.GetEnclosingSymbol(
                     awaitExpression.SpanStart) as IMethodSymbol;
-                if (!assignment.IsKind(SyntaxKind.SimpleAssignmentExpression)
-                    || semanticModel.GetOperation(assignment.Left) is not IFieldReferenceOperation fieldReference
+                IOperation? assignedTarget = semanticModel.GetOperation(assignment.Left);
+                if (assignment.IsKind(SyntaxKind.SimpleAssignmentExpression)
+                    && assignedTarget is ILocalReferenceOperation localReference
+                    && localReference.Local is { RefKind: RefKind.None } local
+                    && containingMethod is not null
+                    && SymbolEqualityComparer.Default.Equals(local.ContainingSymbol, containingMethod)
+                    && SymbolEqualityComparer.Default.Equals(local.Type, taskResultType)
+                    && local.DeclaringSyntaxReferences.Length == 1
+                    && local.DeclaringSyntaxReferences[0].SyntaxTree == context.PrimaryUnit.SyntaxTree
+                    && local.DeclaringSyntaxReferences[0].Span.Start < awaitExpression.SpanStart)
+                {
+                    taskResultSymbolId = SemanticSymbolProjector.GetSymbolId(local);
+                    resultStorageKind = "existing_local";
+                }
+                else if (!assignment.IsKind(SyntaxKind.SimpleAssignmentExpression)
+                    || assignedTarget is not IFieldReferenceOperation fieldReference
                     || fieldReference.Instance is not null
                     || fieldReference.Field is not { IsStatic: true, IsConst: false,
                         IsReadOnly: false, IsVolatile: false } field
@@ -722,12 +736,15 @@ internal static class SemanticAsyncProjector
                     || field.DeclaringSyntaxReferences[0].SyntaxTree != context.PrimaryUnit.SyntaxTree)
                 {
                     diagnostics.Add(Error("ASCS5404",
-                        "Task<int> await assignment requires a writable static int field on the current script type.",
+                        "Task<int> await assignment requires an exact int local or a writable static int field on the current script type.",
                         SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, assignment.Left.Span)));
                     return false;
                 }
-                taskResultSymbolId = SemanticSymbolProjector.GetSymbolId(field);
-                resultStorageKind = "static_field";
+                else
+                {
+                    taskResultSymbolId = SemanticSymbolProjector.GetSymbolId(fieldReference.Field);
+                    resultStorageKind = "static_field";
+                }
             }
 
             string taskResultTypeId = typeRegistry.Register(taskResultType!);
@@ -752,7 +769,7 @@ internal static class SemanticAsyncProjector
         if (awaitExpression.Parent is AssignmentExpressionSyntax)
         {
             diagnostics.Add(Error("ASCS5404",
-                "Direct await assignment currently requires a Task<int> producer and a static int field.",
+                "Direct await assignment currently requires a Task<int> producer and an exact int local or static field.",
                 SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, awaitExpression.Span)));
             return false;
         }

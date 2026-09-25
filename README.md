@@ -85,7 +85,7 @@ Roslyn 只在构建时运行。WASM 通过 `ObjectHandle` 和生成的绑定访�
 
 - Win64 Editor、打包样例和独立进程网络样例已通过自动化测试。真实游戏流程、真实多人联机及 Android/iOS 尚未验收。
 - 编译器只支持已实现的 C# 和 UE API 子集，不能直接运行任意 .NET 项目或 NuGet 包。
-- `Task<int>` 可直接 `await` 或赋给脚本静态 `int` 字段，也可在方法开头声明最多 8 个独立任务变量后跨帧等待；别名、重赋值及其他 `Task<T>` 尚未支持。详见 [Task 结果合同](Docs/Phase66/P66.C4_Task_Result_Contract.md)。
+- `Task<int>` 可直接 `await`，或将结果赋给已声明的 `int` 局部变量、脚本静态 `int` 字段；方法开头最多可声明 8 个独立任务变量供跨帧等待。任务别名、任务变量重赋值及其他 `Task<T>` 尚未支持。详见 [Task 结果合同](Docs/Phase66/P66.C4_Task_Result_Contract.md)。
 - 同步 `try/finally` 可用；`finally` 内的 `await`、常规构建入口中的 `catch` 和 `throw` 尚未支持。详见 [异常合同](Docs/Phase66/P66.C3_Language_Error_Channel_Contract.md)。
 - 修改 C# 声明的 `UClass`、`UProperty` 或 `UFunction` 后，需要重新构建并重启 Editor。
 

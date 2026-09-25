@@ -28,9 +28,69 @@ internal static class SemanticAsyncTests
         TaskIntLocalPublishesProducerAndFrame();
         TaskIntParallelLocalsPreserveBothOwners();
         TaskIntStaticFieldAssignmentIsVersionedAndBounded();
+        TaskIntExistingLocalAssignmentPreservesStorage();
         TaskIntSuspendedCleanupFailsClosed();
         FailedExceptionPlanKeepsItsContractBesideTaskSource();
-        return 20;
+        return 21;
+    }
+
+    private static void TaskIntExistingLocalAssignmentPreservesStorage()
+    {
+        const string source = """
+            using AvidScript;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static int Result;
+                public static async Task<int> LoadScoreAsync()
+                {
+                    await AvidContinuations.NextTickAsync();
+                    return 12;
+                }
+                public static async void BeginPlay()
+                {
+                    int score = 0;
+                    score = await LoadScoreAsync();
+                    Result = score;
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/TaskIntExistingLocal.cs");
+        Assert(document.Succeeded
+            && document.SchemaVersion == SemanticContract.TaskExistingLocalSchemaVersion
+            && document.SemanticVersion == SemanticContract.TaskExistingLocalSemanticVersion
+            && SemanticAsyncInvocationValidator.IsValid(document),
+            "await assignment to an existing int local needs Semantic 38");
+        SemanticAsyncMethod consumer = document.AsyncMethods.Single(method =>
+            method.TaskResultTypeId is null);
+        SemanticAsyncAwaitSite site = consumer.Segments.Select(segment => segment.AwaitSite)
+            .Single(awaitSite => awaitSite?.ProducerKind == "task_call")!;
+        Assert(site.ResultStorageKind == "existing_local"
+            && document.Symbols.Any(symbol => symbol.Id == site.ResultSymbolId
+                && symbol.Kind == "local" && symbol.Name == "score")
+            && consumer.Segments.All(segment => segment.AwaitSite?.StateFrame?.Slots
+                .Any(slot => slot.SymbolId == site.ResultSymbolId) != true),
+            "await overwrites the local on resume instead of saving its previous value");
+        byte[] bytes = SemanticSerializer.Serialize(document);
+        Assert(bytes.SequenceEqual(SemanticSerializer.Serialize(SemanticSerializer.Deserialize(bytes))),
+            "existing-local assignment metadata must round-trip canonically");
+        Assert(!SemanticAsyncInvocationValidator.IsValid(document with
+        {
+            SchemaVersion = SemanticContract.TaskAssignmentSchemaVersion,
+            SemanticVersion = SemanticContract.TaskAssignmentSemanticVersion,
+        }), "Semantic 37 cannot acquire existing-local assignment by relabeling");
+        Assert(!SemanticAsyncInvocationValidator.IsValid(document with
+        {
+            AsyncMethods = document.AsyncMethods.Select(method => method == consumer
+                ? method with { Segments = method.Segments.Select(segment => segment.AwaitSite == site
+                    ? segment with { AwaitSite = site with { ResultSymbolId = "symbol:forged" } }
+                    : segment).ToArray() }
+                : method).ToArray(),
+        }), "a forged existing-local result must be rejected");
+        SemanticDocument uninitialized = Analyze(source.Replace("int score = 0;",
+            "int score;", StringComparison.Ordinal), "Scripts/TaskIntUninitializedLocal.cs");
+        Assert(uninitialized.Succeeded && SemanticAsyncInvocationValidator.IsValid(uninitialized),
+            "a declared local without an initializer can receive an awaited result");
     }
 
     private static void TaskIntStaticFieldAssignmentIsVersionedAndBounded()

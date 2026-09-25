@@ -30,7 +30,8 @@ internal static class CSharpManagedDelegateLowerer
                 && context.Document.SemanticVersion != SemanticContract.CurrentSemanticVersion
                 && context.Document.SemanticVersion != SemanticContract.TaskResultSemanticVersion
                 && context.Document.SemanticVersion != SemanticContract.TaskLocalSemanticVersion
-                && context.Document.SemanticVersion != SemanticContract.TaskAssignmentSemanticVersion)
+                && context.Document.SemanticVersion != SemanticContract.TaskAssignmentSemanticVersion
+                && context.Document.SemanticVersion != SemanticContract.TaskExistingLocalSemanticVersion)
             || !callable.IsStatic || callable.IsConstructor || !callable.HasBody || callable.Import is not null
             || callable.ReturnTypeId != signature.ReturnTypeId
             || !callable.Parameters.Select(parameter => (parameter.TypeId, parameter.RefKind))
@@ -128,7 +129,7 @@ internal static class CSharpManagedDelegateLowerer
         => ContainsReference(typeId, types, new HashSet<string>(StringComparer.Ordinal));
 
     private static bool SupportsDelegates(SemanticDocument document) => document.SemanticVersion is "1.24" or "1.25" or "1.26" or "1.27" or "1.28" or "1.29" or "1.30" or "1.31" or "1.32" or "1.36" or "1.37"
-        || document.SemanticVersion is SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion or SemanticContract.TaskLocalSemanticVersion or SemanticContract.TaskAssignmentSemanticVersion;
+        || document.SemanticVersion is SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion or SemanticContract.TaskLocalSemanticVersion or SemanticContract.TaskAssignmentSemanticVersion or SemanticContract.TaskExistingLocalSemanticVersion;
 
     private static bool ContainsReference(string typeId, IReadOnlyDictionary<string, GuestType> types, HashSet<string> visited)
     {

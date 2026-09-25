@@ -185,14 +185,18 @@ public static class SemanticAnalyzer
             segment.AwaitSite?.TaskLocalSymbolId is not null));
         bool hasTaskAssignments = asyncProjection.Methods.Any(method => method.Segments.Any(segment =>
             segment.AwaitSite?.ResultStorageKind == "static_field"));
+        bool hasTaskExistingLocalAssignments = asyncProjection.Methods.Any(method => method.Segments.Any(segment =>
+            segment.AwaitSite?.ResultStorageKind == "existing_local"));
         return new SemanticDocument(
             hasExceptionFlows ? SemanticContract.ExceptionFlowSchemaVersion
+                : hasTaskExistingLocalAssignments ? SemanticContract.TaskExistingLocalSchemaVersion
                 : hasTaskAssignments ? SemanticContract.TaskAssignmentSchemaVersion
                 : hasTaskLocals ? SemanticContract.TaskLocalSchemaVersion
                 : hasTaskResults ? SemanticContract.TaskResultSchemaVersion
                 : SemanticContract.CurrentSchemaVersion,
             "csharp",
             hasExceptionFlows ? SemanticContract.ExceptionFlowSemanticVersion
+                : hasTaskExistingLocalAssignments ? SemanticContract.TaskExistingLocalSemanticVersion
                 : hasTaskAssignments ? SemanticContract.TaskAssignmentSemanticVersion
                 : hasTaskLocals ? SemanticContract.TaskLocalSemanticVersion
                 : hasTaskResults ? SemanticContract.TaskResultSemanticVersion

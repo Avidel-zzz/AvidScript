@@ -121,7 +121,8 @@ public static class CSharpGuestLowerer
                 .Append(CSharpTaskResultAbi.BindProducerImport())
                 .Append(CSharpTaskResultAbi.PropagateFailureImport()).ToArray();
         if (document.SchemaVersion is SemanticContract.TaskLocalSchemaVersion
-            or SemanticContract.TaskAssignmentSchemaVersion)
+            or SemanticContract.TaskAssignmentSchemaVersion
+            or SemanticContract.TaskExistingLocalSchemaVersion)
             imports = imports.Append(CSharpTaskResultAbi.RetainForContinuationImport()).ToArray();
         functions.AddRange(CSharpClosureDelegateLowerer.BuildThunks(document, functions));
         functions.AddRange(CSharpDelegateIdentityLowerer.Build(document, functions));
@@ -261,10 +262,12 @@ public static class CSharpGuestLowerer
         GuestModule module = new(
             document.SchemaVersion is SemanticContract.TaskLocalSchemaVersion
                 or SemanticContract.TaskAssignmentSchemaVersion
+                or SemanticContract.TaskExistingLocalSchemaVersion
                 ? 19 : CSharpTaskResultAbi.Supports(document)
                     ? 18 : GuestModuleValidator.CurrentSchemaVersion,
             document.SchemaVersion is SemanticContract.TaskLocalSchemaVersion
                 or SemanticContract.TaskAssignmentSchemaVersion
+                or SemanticContract.TaskExistingLocalSchemaVersion
                 ? "1.18" : CSharpTaskResultAbi.Supports(document)
                     ? "1.17" : GuestModuleValidator.CurrentIrVersion,
             $"csharp:{document.Source.SourceId}",

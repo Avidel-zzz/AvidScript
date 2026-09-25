@@ -110,7 +110,40 @@ internal static class CSharpGuestAsyncInvocationTests
         }
         return count + TaskResultSemanticCompilesToWasm()
             + TaskLocalSemanticCompilesToWasm() + TaskParallelLocalsCompileToWasm()
-            + TaskIntegratedCompilesToWasm();
+            + TaskFieldAssignmentCompilesToWasm() + TaskIntegratedCompilesToWasm();
+    }
+
+    private static int TaskFieldAssignmentCompilesToWasm()
+    {
+        const string source = """
+            using AvidScript;
+            using System.Runtime.InteropServices;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static int Result;
+                public static async Task<int> LoadScoreAsync()
+                {
+                    await AvidContinuations.NextTickAsync();
+                    return 12;
+                }
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay()
+                {
+                    Result = await LoadScoreAsync();
+                }
+            }
+            """;
+        SemanticDocument document = CSharpGuestContinuationTests.Analyze(
+            source, "Scripts/TaskFieldAssignment.cs");
+        Check(document.Succeeded
+            && document.SchemaVersion == SemanticContract.TaskAssignmentSchemaVersion,
+            "the prior direct field assignment contract must remain available");
+        CSharpGuestLoweringResult lowered = CSharpGuestLowerer.Lower(document, new string('d', 64));
+        Check(lowered.Succeeded && lowered.Module is not null
+            && WasmModuleCompiler.Compile(lowered.Module).Succeeded,
+            "Semantic 37 field assignment must still compile to WASM");
+        return 1;
     }
 
     private static int TaskIntegratedCompilesToWasm()
@@ -131,9 +164,9 @@ internal static class CSharpGuestAsyncInvocationTests
         Check(fixture is not null, "Task<int> integration source is missing");
         SemanticDocument document = CSharpGuestContinuationTests.Analyze(
             File.ReadAllText(fixture!), "Scripts/TaskIntIntegrated.cs");
-        Check(document.Succeeded && document.SchemaVersion == SemanticContract.TaskAssignmentSchemaVersion
-            && document.SemanticVersion == SemanticContract.TaskAssignmentSemanticVersion,
-            "integrated task assignment requires Semantic 37: "
+        Check(document.Succeeded && document.SchemaVersion == SemanticContract.TaskExistingLocalSchemaVersion
+            && document.SemanticVersion == SemanticContract.TaskExistingLocalSemanticVersion,
+            "integrated existing-local task assignment requires Semantic 38: "
                 + string.Join(" | ", document.Diagnostics.Select(item => item.Message)));
         CSharpGuestLoweringResult lowered = CSharpGuestLowerer.Lower(document, new string('d', 64));
         Check(lowered.Succeeded,
@@ -151,10 +184,10 @@ internal static class CSharpGuestAsyncInvocationTests
             "await result must write the script field in Guest IR");
         Check(!CSharpGuestLowerer.Lower(document with
         {
-            SchemaVersion = SemanticContract.TaskLocalSchemaVersion,
-            SemanticVersion = SemanticContract.TaskLocalSemanticVersion,
+            SchemaVersion = SemanticContract.TaskAssignmentSchemaVersion,
+            SemanticVersion = SemanticContract.TaskAssignmentSemanticVersion,
         }, new string('d', 64)).Succeeded,
-            "Semantic 36 must not accept the new field-assignment contract");
+            "Semantic 37 must not accept the new existing-local assignment contract");
         WasmCompilationResult compiled = WasmModuleCompiler.Compile(module);
         Check(compiled.Succeeded,
             "integrated Task<int> WASM failed: "

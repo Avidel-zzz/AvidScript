@@ -115,6 +115,18 @@ internal static class GuestModuleValidationTests
         };
         Assert(GuestModuleValidator.Validate(taskAssignmentModule).Succeeded,
             "IR 19 accepts the paired Semantic 37 task assignment contract");
+        GuestModule taskExistingLocalModule = taskLocalModule with
+        {
+            Provenance = taskLocalModule.Provenance with
+            {
+                SemanticSchemaVersion = 38,
+                SemanticVersion = "1.47",
+            },
+        };
+        Assert(GuestModuleValidator.Validate(taskExistingLocalModule).Succeeded,
+            "IR 19 accepts the paired Semantic 38 existing-local assignment contract");
+        AssertDiagnostic(taskExistingLocalModule with { SchemaVersion = 18, IrVersion = "1.17" },
+            "ASIR1028");
         AssertDiagnostic(taskAssignmentModule with { SchemaVersion = 18, IrVersion = "1.17" },
             "ASIR1028");
         byte[] taskLocalBytes = GuestIrSerializer.Serialize(taskLocalModule);

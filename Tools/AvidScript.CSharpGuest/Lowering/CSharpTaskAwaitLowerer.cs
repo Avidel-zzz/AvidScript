@@ -210,7 +210,7 @@ internal static class CSharpTaskAwaitLowerer
             instructions.Add(new("global_store", null, new[] { value.Id }, globalId, null, null));
             return true;
         }
-        return site.ResultStorageKind is null
+        return (site.ResultStorageKind is null or "existing_local")
             && CSharpOperationLowerer.StoreLocal(context, site.ResultSymbolId,
                 value, block, instructions);
     }
