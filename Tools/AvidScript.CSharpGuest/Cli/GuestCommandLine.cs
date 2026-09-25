@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
 using AvidScript.CSharpSemantic;
 using AvidScript.GuestIr;
@@ -35,6 +36,7 @@ public static class GuestCommandLine
             bool dataLaneFusionEnabled = ParseDataLaneFusion(options);
             bool debugInstrumentationEnabled = ParseDebugInstrumentation(options);
             bool boundedLanguageErrors = ParseLanguageErrors(options);
+            options.TryGetValue("--module-id", out string? requestedModuleId);
             int implicitFunctionImportCount =
                 ParseImplicitFunctionImportCount(options);
             if ((debugMapPath is null) != (frontendArtifactSha256 is null))
@@ -92,6 +94,18 @@ public static class GuestCommandLine
                 module = result.Module;
             }
 
+            if (requestedModuleId is not null)
+            {
+                if (requestedModuleId.Length > 1024 || requestedModuleId.Any(char.IsControl))
+                    throw new ArgumentException(
+                        "--module-id must be at most 1024 characters and contain no control characters.");
+                module = module with { ModuleId = requestedModuleId };
+                GuestValidationResult validation = GuestModuleValidator.Validate(module);
+                if (!validation.Succeeded)
+                    throw new InvalidDataException(
+                        "ASCG1005: Requested module identity does not satisfy the Guest IR contract.");
+            }
+
             CSharpGuestStateSchema? stateSchema = stateSchemaPath is null
                 ? null
                 : CSharpGuestStateSchemaProjector.Project(document, module);
@@ -109,13 +123,15 @@ public static class GuestCommandLine
                     module,
                     guestIrSha256,
                     frontendArtifactSha256!,
-                    implicitFunctionImportCount);
+                    implicitFunctionImportCount,
+                    requestedModuleId);
                 CSharpGuestDebugMapSerializer.Write(debugMapPath, debugMap);
             }
             return 0;
         }
         catch (ArgumentException exception)
         {
+            DeletePublishedArtifacts(outputPath, stateSchemaPath, debugMapPath);
             Console.Error.WriteLine(exception.Message);
             return 2;
         }
@@ -141,10 +157,10 @@ public static class GuestCommandLine
 
     private static IReadOnlyDictionary<string, string> ParseOptions(string[] args)
     {
-        if (args.Length is < 4 or > 18 || args.Length % 2 != 0)
+        if (args.Length is < 4 or > 20 || args.Length % 2 != 0)
         {
             throw new ArgumentException(
-                "Usage: --semantic <path> --output <path> [--state-schema <path>] [--debug-map <path> --frontend-artifact-sha256 <sha256>] [--data-lane-fusion enabled|disabled] [--debug-instrumentation enabled|disabled] [--implicit-function-import-count <0..16>] [--language-errors disabled|bounded] | --finalize-debug-map <path> --offset-map <path>");
+                "Usage: --semantic <path> --output <path> [--state-schema <path>] [--debug-map <path> --frontend-artifact-sha256 <sha256>] [--data-lane-fusion enabled|disabled] [--debug-instrumentation enabled|disabled] [--implicit-function-import-count <0..16>] [--language-errors disabled|bounded] [--module-id <id>] | --finalize-debug-map <path> --offset-map <path>");
         }
 
         Dictionary<string, string> options = new(StringComparer.Ordinal);
@@ -160,7 +176,8 @@ public static class GuestCommandLine
                     && name != "--data-lane-fusion"
                     && name != "--debug-instrumentation"
                     && name != "--implicit-function-import-count"
-                    && name != "--language-errors")
+                    && name != "--language-errors"
+                    && name != "--module-id")
                 || string.IsNullOrWhiteSpace(value)
                 || !options.TryAdd(name, value))
             {

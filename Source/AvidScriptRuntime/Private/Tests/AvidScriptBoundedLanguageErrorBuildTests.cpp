@@ -34,7 +34,7 @@ bool FAvidScriptBoundedLanguageErrorBuildTest::RunTest(const FString& Parameters
 		return false;
 	}
 	TestEqual(TEXT("formal module id"), Manifest.ModuleId,
-		FString(TEXT("csharp:Plugins/AvidScript/Fixtures/Phase66/BoundedLanguageErrorsLifecycle.cs")));
+		FString(TEXT("bounded_language_errors")));
 	const TArray<FAvidScriptRuntimeBackendTestLane> Lanes =
 		GetAvidScriptRuntimeBackendTestLanes();
 	if (!TestEqual(TEXT("Windows test has both VM backends"), Lanes.Num(), 2))

@@ -21,7 +21,8 @@ function Invoke-Case {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
         [Parameter(Mandatory = $true)][string]$Source,
-        [Parameter(Mandatory = $true)][bool]$Bounded
+        [Parameter(Mandatory = $true)][bool]$Bounded,
+        [string]$ModuleId = ''
     )
     $output = Join-Path $runRoot $Name
     $arguments = @('-NoProfile', '-File', $build,
@@ -30,6 +31,9 @@ function Invoke-Case {
         '-BindingPackagePath', $package, '-ArtifactStem', $stem,
         '-CompilerWorkerMode', 'disabled')
     if ($Bounded) { $arguments += @('-LanguageErrors', 'bounded') }
+    if (-not [string]::IsNullOrWhiteSpace($ModuleId)) {
+        $arguments += @('-ModuleId', $ModuleId)
+    }
     & (Join-Path $PSHOME 'pwsh.exe') @arguments *> (Join-Path $runRoot "$Name.log")
     $exitCode = $LASTEXITCODE
     $reportFile = Join-Path $output "$stem.csharp.report.json"
@@ -42,6 +46,7 @@ function Invoke-Case {
         Wasm = Join-Path $output "$stem.wasm"
         Manifest = Join-Path $output "$stem.avidscript.json"
         GuestIr = Join-Path $output "$stem.guestir.json"
+        DebugMap = Join-Path $output "$stem.csharp.debug.json"
     }
 }
 
@@ -91,27 +96,47 @@ if ($unsafe.ExitCode -eq 0 -or $unsafe.Report.succeeded -or
 }
 Write-Host 'PASS bounded rejects unsupported constructor'
 
-$wrongOutput = Join-Path $runRoot 'wrong_module_id'
-& (Join-Path $PSHOME 'pwsh.exe') -NoProfile -File $build `
-    -DotNetPath $DotNetPath -SourcePath $source -ProjectPath $project `
-    -ProjectRoot $projectRoot -OutputRoot $wrongOutput `
-    -BindingPackagePath $package -ArtifactStem $stem -ModuleId 'wrong_module_id' `
-    -LanguageErrors bounded -CompilerWorkerMode disabled `
-    *> (Join-Path $runRoot 'wrong_module_id.log')
-if ($LASTEXITCODE -eq 0 -or
-    (Test-Path -LiteralPath (Join-Path $wrongOutput "$stem.wasm")) -or
-    (Test-Path -LiteralPath (Join-Path $wrongOutput "$stem.avidscript.json"))) {
-    throw "Bounded build accepted a mismatched module identity: $runRoot"
+$customId = 'bounded_language_errors_custom'
+$custom = Invoke-Case -Name 'custom_module_id' -Source $source -Bounded $true -ModuleId $customId
+if ($custom.ExitCode -ne 0 -or $custom.Report.result -cne 'direct_abi_built' -or
+    $custom.Report.module_id -cne $customId -or
+    -not (Test-Path -LiteralPath $custom.Wasm -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $custom.Manifest -PathType Leaf)) {
+    throw "Bounded build could not publish a custom module identity: $runRoot"
 }
-Write-Host 'PASS bounded rejects mismatched module identity'
+$customManifest = Get-Content -LiteralPath $custom.Manifest -Raw | ConvertFrom-Json
+$customIr = Get-Content -LiteralPath $custom.GuestIr -Raw | ConvertFrom-Json
+$customDebugMap = Get-Content -LiteralPath $custom.DebugMap -Raw | ConvertFrom-Json
+if ($customManifest.module_id -cne $customId -or
+    $customIr.module_id -cne $customId -or
+    $customDebugMap.module_id -cne $customId -or
+    (Get-FileHash -LiteralPath $custom.Wasm -Algorithm SHA256).Hash -ceq
+        (Get-FileHash -LiteralPath $positive.Wasm -Algorithm SHA256).Hash) {
+    throw "Custom module identity did not reach every formal artifact: $runRoot"
+}
+& node $runner $custom.Wasm --bounded-lifecycle
+if ($LASTEXITCODE -ne 0) { throw "Custom module identity WASM execution failed: $runRoot" }
+Write-Host 'PASS bounded custom module identity'
+
+$invalid = Invoke-Case -Name 'invalid_module_id' -Source $source -Bounded $true `
+    -ModuleId "bad`nmodule"
+if ($invalid.ExitCode -eq 0 -or $invalid.Report.result -cne 'guest_ir_failed' -or
+    (Test-Path -LiteralPath $invalid.Wasm) -or
+    (Test-Path -LiteralPath $invalid.Manifest) -or
+    -not (@($invalid.Report.diagnostics[0].output) -join "`n").Contains(
+        '--module-id must be at most 1024 characters')) {
+    throw "Bounded build accepted an invalid module identity: $runRoot"
+}
+Write-Host 'PASS bounded rejects control characters in module identity'
 
 [ordered]@{
-    passed = 4
-    total = 4
+    passed = 5
+    total = 5
     package = $package
     bounded_wasm_sha256 = (Get-FileHash -LiteralPath $positive.Wasm -Algorithm SHA256).Hash.ToLowerInvariant()
+    custom_module_id = $customId
     default_result = [string]$default.Report.result
     unsupported_result = [string]$unsafe.Report.result
 } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $runRoot 'results.json') -Encoding utf8NoBOM
-Write-Host 'Bounded language-error build contracts: 4/4'
+Write-Host 'Bounded language-error build contracts: 5/5'
 Write-Host "Evidence: $runRoot"

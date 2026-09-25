@@ -18,7 +18,7 @@ $stem = 'bounded_language_errors'
 & pwsh -NoProfile -File $build -DotNetPath $DotNetPath `
     -SourcePath $source -ProjectPath $fixtureProject -ProjectRoot $projectRoot `
     -BindingPackagePath $package -OutputRoot $output -ArtifactStem $stem `
-    -LanguageErrors bounded -CompilerWorkerMode disabled
+    -ModuleId $stem -LanguageErrors bounded -CompilerWorkerMode disabled
 if ($LASTEXITCODE -ne 0) { throw 'Formal bounded lifecycle build failed.' }
 & node (Join-Path $pluginRoot 'Tools/AvidScript.CSharpGuest.Tests/RunThrowProducerWasm.cjs') `
     (Join-Path $output "$stem.wasm") --bounded-lifecycle

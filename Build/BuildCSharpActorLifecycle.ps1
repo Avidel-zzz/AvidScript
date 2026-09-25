@@ -922,10 +922,7 @@ $ProjectPath = [System.IO.Path]::GetFullPath($ProjectPath)
 $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
 if ($LanguageErrors -ceq "bounded") {
     $CanonicalModuleId = "csharp:$(Convert-ToProjectRelativePath $SourcePath)"
-    if ($ModuleIdWasExplicit -and $ModuleId -cne $CanonicalModuleId) {
-        throw "Bounded language errors require ModuleId '$CanonicalModuleId' to match the compiled Guest IR."
-    }
-    $ModuleId = $CanonicalModuleId
+    if (-not $ModuleIdWasExplicit) { $ModuleId = $CanonicalModuleId }
 }
 $IsDefaultSource = $SourcePath.Equals(
     [System.IO.Path]::GetFullPath($DefaultSourcePath),
@@ -1688,6 +1685,7 @@ if (-not $CompilationCacheHit) {
             "-DebugInstrumentation", $ResolvedDebugInstrumentation)
         if ($LanguageErrors -ceq "bounded") {
             $CompilerArguments += @("-LanguageErrors", "bounded")
+            $CompilerArguments += @("-ModuleId", $ModuleId)
         }
         if ($CooperativeSafepoints) {
             $CompilerArguments += @(

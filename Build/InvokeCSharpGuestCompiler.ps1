@@ -14,6 +14,7 @@ param(
     [string]$DebugInstrumentation = "disabled",
     [ValidateSet("disabled", "bounded")]
     [string]$LanguageErrors = "disabled",
+    [string]$ModuleId = "",
     [switch]$CooperativeSafepoints,
     [ValidateRange(1, 65536)]
     [int]$SafepointInterval = 256,
@@ -112,6 +113,9 @@ try {
     }
     if ($LanguageErrors -ceq "bounded") {
         $GuestArguments += @("--language-errors", "bounded")
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ModuleId)) {
+        $GuestArguments += @("--module-id", $ModuleId)
     }
     & $DotNetPath @GuestArguments
     if ($LASTEXITCODE -ne 0) {

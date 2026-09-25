@@ -36,7 +36,8 @@ public static class CSharpGuestDebugMapProjector
         GuestModule module,
         string guestIrSha256,
         string frontendArtifactSha256,
-        int implicitFunctionImportCount = 0)
+        int implicitFunctionImportCount = 0,
+        string? requestedModuleId = null)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(module);
@@ -57,7 +58,8 @@ public static class CSharpGuestDebugMapProjector
             || !IsSha256(module.Provenance.SemanticSha256)
             || !IsSha256(guestIrSha256)
             || !IsSha256(frontendArtifactSha256)
-            || !string.Equals(module.ModuleId, $"csharp:{document.Source.SourceId}", StringComparison.Ordinal)
+            || !string.Equals(module.ModuleId,
+                requestedModuleId ?? $"csharp:{document.Source.SourceId}", StringComparison.Ordinal)
             || !string.Equals(module.Provenance.SourceId, document.Source.SourceId, StringComparison.Ordinal)
             || !string.Equals(module.Provenance.SourceSha256, document.Source.Sha256, StringComparison.Ordinal)
             || !string.Equals(module.Provenance.FrontendSha256, document.Source.FrontendSha256, StringComparison.Ordinal))
