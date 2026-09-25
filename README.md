@@ -2,15 +2,43 @@
 
 ![Unreal Engine 5.8](https://img.shields.io/badge/Unreal%20Engine-5.8-313131?logo=unrealengine&logoColor=white) ![Win64](https://img.shields.io/badge/platform-Win64-0078D4?logo=windows&logoColor=white) [![MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-AvidScript 是 Unreal Engine 5.8 的 C# 脚本插件：将受支持的 C# 编译为 WebAssembly，在 UE 中执行，并通过生成的绑定调用引擎 API。UE 运行时不加载 CLR。
+UE 5.8 的 C# 脚本插件。编译器将受支持的 C# 编译为 WASM；UE 插件加载 WASM，并通过生成的绑定调用引擎 API。UE 进程不加载 CLR。
 
-> 开发中。下方命令适用于仓库自带的模板工程和 Win64 Editor / Development；Android、iOS 与真实多人游戏尚未验收。
+当前适用范围：仓库自带的模板工程、Win64 Editor / Development。项目仍在开发；Android、iOS 和真实多人游戏尚未验收。
 
-![C# 到 Unreal Engine 的编译与运行路径](Docs/Assets/README/pipeline.svg)
+![C#、WASM 和 UE Runtime 的调用路径](Docs/Assets/README/pipeline.svg)
 
-## 代码示例
+## 运行样例
 
-[ActorLifecycleScript.cs](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)：Actor 每秒沿 X 轴移动 120 UE 单位。
+需要 UE 5.8 源码版、Visual Studio 2022（UE C++ 工作负载）、PowerShell 7，以及 [global.json](global.json) 指定的 .NET SDK。以下命令在 `Plugins/AvidScript` 目录执行。
+
+安装仓库锁定的 Wasmtime 版本：
+
+```powershell
+pwsh -NoProfile -File Build/InstallWasmtimeDependency.ps1 -Mode Install
+```
+
+构建模板工程的 Editor target。将 `UE_ROOT` 改为本机 UE 源码目录：
+
+```powershell
+$env:UE_ROOT = 'C:\UnrealEngine'
+$project = (Resolve-Path ../../AvidTPSTemplate.uproject).Path
+& (Join-Path $env:UE_ROOT 'Engine\Build\BatchFiles\Build.bat') `
+  AvidTPSTemplateEditor Win64 Development "-Project=$project" `
+  -WaitMutex -NoHotReloadFromIDE
+```
+
+打开 `AvidTPSTemplate.uproject`，在关卡中放置并选中一个 **Movable** Cube。执行 **Tools → AvidScript → Build And Bind C# ActorLifecycle Script**，然后进入 **Play**。样例会移动、旋转并放大 Cube。
+
+只构建样例 WASM：
+
+```powershell
+pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
+```
+
+## C# 示例
+
+[ActorLifecycleScript.cs](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) 中的 `Tick` 每秒沿 X 轴移动 Actor 120 UE 单位：
 
 ```csharp
 [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
@@ -21,7 +49,7 @@ public static void Tick(float deltaSeconds)
 }
 ```
 
-[LatentGameplayScript.cs](Samples/CSharp/LatentGameplay/LatentGameplayScript.cs)：等待 0.25 秒后放大 Actor；`EndPlay` 取消尚未完成的等待。
+[LatentGameplayScript.cs](Samples/CSharp/LatentGameplay/LatentGameplayScript.cs) 在 `BeginPlay` 中等待 0.25 秒后放大 Actor；`EndPlay` 取消未完成的等待：
 
 ```csharp
 private static AvidCancellationSource LifetimeCancellation;
@@ -43,39 +71,11 @@ public static void EndPlay()
 }
 ```
 
-![等待完成与 EndPlay 取消](Docs/Assets/README/async-lifecycle.svg)
+![DelayAsync 完成与 EndPlay 取消的执行路径](Docs/Assets/README/async-lifecycle.svg)
 
-## 快速开始
+## 其他样例
 
-需要 UE 5.8 源码版、Visual Studio 2022（UE C++ 工作负载）、PowerShell 7 和 [global.json](global.json) 指定的 .NET SDK。以下命令在 `Plugins/AvidScript` 目录运行。
-
-1. 安装锁定版本的 Wasmtime：
-
-   ```powershell
-   pwsh -NoProfile -File Build/InstallWasmtimeDependency.ps1 -Mode Install
-   ```
-
-2. 构建模板工程的 Editor target。将 `UE_ROOT` 改为本机 UE 源码目录：
-
-   ```powershell
-   $env:UE_ROOT = 'C:\UnrealEngine'
-   $project = (Resolve-Path ../../AvidTPSTemplate.uproject).Path
-   & (Join-Path $env:UE_ROOT 'Engine\Build\BatchFiles\Build.bat') `
-     AvidTPSTemplateEditor Win64 Development "-Project=$project" `
-     -WaitMutex -NoHotReloadFromIDE
-   ```
-
-3. 打开 `AvidTPSTemplate.uproject`。在关卡中放置并选中一个 **Movable** Cube，执行 **Tools → AvidScript → Build And Bind C# ActorLifecycle Script**，再进入 **Play**。Cube 会移动、旋转并放大。
-
-只生成样例 WASM，不启动 Editor：
-
-```powershell
-pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
-```
-
-## 更多样例
-
-| 场景 | 源码与说明 |
+| 场景 | 代码 |
 | --- | --- |
 | Actor 生命周期、输入、碰撞 | [ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) |
 | Timer、异步加载、Latent、取消 | [LatentGameplay](Samples/CSharp/LatentGameplay/README.md) |
@@ -84,11 +84,11 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 | 调用项目 C++ API | [TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) |
 | C# 声明 Actor、Component、Subsystem | [ScriptDefinedTypes](Samples/CSharp/ScriptDefinedTypes/README.md) |
 
-## 当前限制
+## 限制
 
-- 编译器支持的是 C# 子集和部分 UE API；不能直接运行任意 .NET 项目或 NuGet 包。
-- `Task<int>` 可在同一脚本实例内等待，不能跨实例等待（[说明](Docs/Phase66/P66.C4_Task_Result_Contract.md)）。
-- 异常支持仍有限：同步 `throw/catch`、异步 `Task<int>` 故障和未处理异步错误的源码报告可用；`await` 后的 `catch/finally` 尚不支持（[说明](Docs/Phase66/P66.C5_Async_Language_Error_Contract.md)）。
+- 只支持部分 C# 语法和 UE API；不能直接运行任意 .NET 项目或 NuGet 包。
+- `Task<int>` 只能在同一脚本实例内等待，不能跨实例等待。见 [Task 结果合同](Docs/Phase66/P66.C4_Task_Result_Contract.md)。
+- `-LanguageErrors bounded` 支持同步 `throw/catch` 和受支持的 `async Task<int>` 故障；`await` 后的 `catch/finally` 尚不能执行。见 [异常合同](Docs/Phase66/P66.C5_Async_Language_Error_Contract.md)。
 - 修改 C# 声明的 `UClass`、`UProperty` 或 `UFunction` 后，需要重新构建并重启 Editor。
 
 ## 开发
@@ -100,7 +100,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
   --project Tools/AvidScript.CSharpGuest.Tests/AvidScript.CSharpGuest.Tests.csproj -c Release
 ```
 
-[Source/](Source/) 是 UE 插件，[Tools/](Tools/) 是 C# 工具链，[Build/](Build/) 是构建入口，[Samples/](Samples/) 是可运行样例，[Docs/](Docs/) 包含设计与验证记录。贡献和开发规则见 [AGENTS.md](AGENTS.md)。
+目录：[Source/](Source/)（UE 插件）、[Tools/](Tools/)（C# 工具链）、[Build/](Build/)（构建脚本）、[Samples/](Samples/)（样例）、[Docs/](Docs/)（设计与验证记录）。仓库开发规则见 [AGENTS.md](AGENTS.md)。
 
 ## 许可证
 
