@@ -21,7 +21,7 @@ bool FAvidScriptEditorBindingSchemaDefaultReflectionSmokeTest::RunTest(const FSt
 	TestTrue(TEXT("Default reflection schema generates"), FAvidScriptEditorBindingSchemaGenerator::GenerateDefault(FirstJson, FirstResult));
 	TestTrue(TEXT("Generation result succeeds"), FirstResult.bSucceeded);
 	TestEqual(TEXT("Default schema contains ten reflected bindings"), FirstResult.BindingCount, 10);
-	TestEqual(TEXT("Default schema contains fifteen host intrinsics"), FirstResult.IntrinsicCount, 15);
+	TestEqual(TEXT("Default schema contains sixteen host intrinsics"), FirstResult.IntrinsicCount, 16);
 
 	FString SecondJson;
 	FAvidScriptBindingSchemaGenerateResult SecondResult;
@@ -39,7 +39,7 @@ bool FAvidScriptEditorBindingSchemaDefaultReflectionSmokeTest::RunTest(const FSt
 	TestEqual(TEXT("Schema version is one"), Root->GetIntegerField(TEXT("schema_version")), 1);
 	TestEqual(TEXT("Schema source is UE reflection"), Root->GetStringField(TEXT("source")), FString(TEXT("ue_reflection")));
 	const TArray<TSharedPtr<FJsonValue>>& Intrinsics = Root->GetArrayField(TEXT("intrinsics"));
-	TestEqual(TEXT("Schema serializes fifteen intrinsic objects"), Intrinsics.Num(), 15);
+	TestEqual(TEXT("Schema serializes sixteen intrinsic objects"), Intrinsics.Num(), 16);
 	const auto CountIntrinsic = [&Intrinsics](
 		const FString& Module,
 		const FString& Name,
@@ -93,6 +93,10 @@ bool FAvidScriptEditorBindingSchemaDefaultReflectionSmokeTest::RunTest(const FSt
 	TestEqual(
 		TEXT("Schema contains continuation delay intrinsic"),
 		CountIntrinsic(TEXT("env"), TEXT("continuation_delay"), TEXT("(fi)I")),
+		1);
+	TestEqual(
+		TEXT("Schema contains versioned cancel-resume delay intrinsic"),
+		CountIntrinsic(TEXT("avidscript"), TEXT("avid_continuation_delay_cancel_resume_v1"), TEXT("(fi)I")),
 		1);
 	TestEqual(
 		TEXT("Schema contains async object-load intrinsic"),
@@ -156,6 +160,7 @@ bool FAvidScriptEditorBindingSchemaDefaultReflectionSmokeTest::RunTest(const FSt
 	TestTrue(TEXT("Schema includes owner generation intrinsic"), FirstJson.Contains(TEXT("owner_get_generation")) && FirstJson.Contains(TEXT("()i")));
 	TestTrue(TEXT("Schema includes owner slot intrinsic"), FirstJson.Contains(TEXT("owner_get_slot")));
 	TestTrue(TEXT("Schema includes continuation delay intrinsic"), FirstJson.Contains(TEXT("continuation_delay")) && FirstJson.Contains(TEXT("(fi)I")));
+	TestTrue(TEXT("Schema includes versioned cancel-resume delay intrinsic"), FirstJson.Contains(TEXT("avid_continuation_delay_cancel_resume_v1")));
 	TestTrue(TEXT("Schema includes continuation cancel intrinsic"), FirstJson.Contains(TEXT("continuation_cancel")) && FirstJson.Contains(TEXT("(I)i")));
 	TestTrue(TEXT("Schema includes async object-load intrinsic"), FirstJson.Contains(TEXT("continuation_load_object")) && FirstJson.Contains(TEXT("(ii)I")));
 	TestTrue(TEXT("Schema includes bulk continuation result intrinsic"), FirstJson.Contains(TEXT("continuation_result_read")) && FirstJson.Contains(TEXT("(iiiii)i")));
@@ -239,6 +244,25 @@ bool FAvidScriptEditorBindingSchemaManifestContractSmokeTest::RunTest(const FStr
 		FAvidScriptEditorBindingSchemaGenerator::ValidateManifestImports(InvalidManifestPath, InvalidResult));
 	TestEqual(TEXT("Unknown import reports contract mismatch"), InvalidResult.ErrorCategory, FString(TEXT("binding_contract_mismatch")));
 	TestTrue(TEXT("Unknown import identifies its source"), InvalidResult.ErrorSource.Contains(TEXT("env.missing_binding")));
+
+	const FString VersionedManifest = TEXT(R"json({"required_imports":[{"module":"avidscript","name":"avid_continuation_delay_cancel_resume_v1"}]})json");
+	TestTrue(TEXT("Versioned import manifest writes"),
+		FFileHelper::SaveStringToFile(VersionedManifest, *InvalidManifestPath));
+	FAvidScriptBindingSchemaGenerateResult VersionedResult;
+	TestTrue(TEXT("Versioned cancel-resume delay is supported"),
+		FAvidScriptEditorBindingSchemaGenerator::ValidateManifestImports(
+			InvalidManifestPath, VersionedResult));
+
+	const FString WrongNamespaceManifest = TEXT(R"json({"required_imports":[{"module":"env","name":"avid_continuation_delay_cancel_resume_v1"}]})json");
+	TestTrue(TEXT("Wrong-namespace manifest writes"),
+		FFileHelper::SaveStringToFile(WrongNamespaceManifest, *InvalidManifestPath));
+	FAvidScriptBindingSchemaGenerateResult WrongNamespaceResult;
+	TestFalse(TEXT("Versioned delay rejects an env alias"),
+		FAvidScriptEditorBindingSchemaGenerator::ValidateManifestImports(
+			InvalidManifestPath, WrongNamespaceResult));
+	TestEqual(TEXT("Wrong namespace reports contract mismatch"),
+		WrongNamespaceResult.ErrorCategory,
+		FString(TEXT("binding_contract_mismatch")));
 
 	const FString MalformedManifest = TEXT(R"json({"required_imports":[7]})json");
 	TestTrue(TEXT("Malformed manifest fixture writes"), FFileHelper::SaveStringToFile(MalformedManifest, *InvalidManifestPath));

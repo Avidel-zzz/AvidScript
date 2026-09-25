@@ -799,6 +799,9 @@ bool FAvidScriptVmContinuationImportContractTest::RunTest(
 	const FAvidScriptVmStaticHostImport& Delay =
 		GetAvidScriptVmStaticHostImport(
 			EAvidScriptHostBindingId::ContinuationDelay);
+	const FAvidScriptVmStaticHostImport& CancelResumeDelay =
+		GetAvidScriptVmStaticHostImport(
+			EAvidScriptHostBindingId::ContinuationDelayCancelResumeV1);
 	const FAvidScriptVmStaticHostImport& Cancel =
 		GetAvidScriptVmStaticHostImport(
 			EAvidScriptHostBindingId::ContinuationCancel);
@@ -834,6 +837,19 @@ bool FAvidScriptVmContinuationImportContractTest::RunTest(
 		TEXT("Continuation delay consumes f32 and i32 and returns i64"),
 		FString(UTF8_TO_TCHAR(Delay.Signature)),
 		FString(TEXT("(fi)I")));
+	TestEqual(
+		TEXT("Cancel-resume delay has an explicit versioned name"),
+		FString(UTF8_TO_TCHAR(CancelResumeDelay.ImportName)),
+		FString(TEXT("avid_continuation_delay_cancel_resume_v1")));
+	TestEqual(
+		TEXT("Cancel-resume delay preserves the delay ABI"),
+		FString(UTF8_TO_TCHAR(CancelResumeDelay.Signature)),
+		FString(TEXT("(fi)I")));
+	TestTrue(
+		TEXT("Cancel-resume delay is only in the avidscript namespace"),
+		!CancelResumeDelay.bSupportsEnvCompatibility
+			&& IsAvidScriptVmStaticHostImport(TEXT("avidscript"), TEXT("avid_continuation_delay_cancel_resume_v1"))
+			&& !IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("avid_continuation_delay_cancel_resume_v1")));
 	TestEqual(
 		TEXT("Continuation cancel uses the frozen env import name"),
 		FString(UTF8_TO_TCHAR(Cancel.ImportName)),
@@ -1293,8 +1309,10 @@ public:
 		switch (Call.BindingId)
 		{
 		case EAvidScriptHostBindingId::ContinuationDelay:
+		case EAvidScriptHostBindingId::ContinuationDelayCancelResumeV1:
 			DelaySeconds = Call.FloatArgs[0];
 			CallbackId = Call.IntArgs[0];
+			LastDelayBindingId = Call.BindingId;
 			OutResult.ReturnValueI64 = ContinuationToken;
 			return true;
 		case EAvidScriptHostBindingId::ContinuationCancel:
@@ -1316,6 +1334,7 @@ public:
 	static constexpr int64 LoadToken = 0x123456789abcdef0LL;
 	float DelaySeconds = 0.0f;
 	int32 CallbackId = 0;
+	EAvidScriptHostBindingId LastDelayBindingId = EAvidScriptHostBindingId::Invalid;
 	int64 CancelledToken = 0;
 	int32 ObjectPathId = 0;
 	int32 LoadCallbackId = 0;
@@ -1407,6 +1426,52 @@ bool FAvidScriptVmDebugProbeStaticInvocationTest::RunTest(const FString& Paramet
 		TEXT("Probe action is returned to the Guest"),
 		Result.I32,
 		static_cast<int32>(EAvidScriptDebugProbeAction::Pause));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmCancelResumeDelayStaticInvocationTest,
+	"AvidScript.Architecture.VM.CancelResumeDelayStaticInvocation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmCancelResumeDelayStaticInvocationTest::RunTest(
+	const FString& Parameters)
+{
+	const FAvidScriptVmStaticHostImport& Import =
+		GetAvidScriptVmStaticHostImport(
+			EAvidScriptHostBindingId::ContinuationDelayCancelResumeV1);
+	FAvidScriptVmAbiSignature Signature;
+	FString FailureDetails;
+	if (!TestTrue(TEXT("Cancel-resume delay signature parses"),
+			ParseAvidScriptVmAbiSignature(
+				UTF8_TO_TCHAR(Import.Signature), Signature, FailureDetails)))
+	{
+		return false;
+	}
+	FAvidScriptVmStaticValue Arguments[2];
+	Arguments[0].Kind = EAvidScriptVmValueKind::F32;
+	Arguments[0].F32 = 0.25f;
+	Arguments[1].Kind = EAvidScriptVmValueKind::I32;
+	Arguments[1].I32 = 47;
+	FAvidScriptVmContinuationHostDispatcher Dispatcher;
+	FAvidScriptNonBorrowingGuestMemory GuestMemory;
+	FAvidScriptVmStaticCallResult Result;
+	TestTrue(TEXT("Cancel-resume delay invokes the versioned binding"),
+		InvokeAvidScriptVmStaticHostImport(
+			Import, Signature, MakeArrayView(Arguments),
+			&Dispatcher, GuestMemory, Result, FailureDetails));
+	TestEqual(TEXT("Versioned delay keeps its own binding id"),
+		Dispatcher.LastDelayBindingId,
+		EAvidScriptHostBindingId::ContinuationDelayCancelResumeV1);
+	TestEqual(TEXT("Versioned delay forwards seconds"), Dispatcher.DelaySeconds, 0.25f);
+	TestEqual(TEXT("Versioned delay forwards callback"), Dispatcher.CallbackId, 47);
+	TestEqual(TEXT("Versioned delay returns the full token"),
+		Result.I64, FAvidScriptVmContinuationHostDispatcher::ContinuationToken);
+	Arguments[0].Kind = EAvidScriptVmValueKind::I32;
+	TestFalse(TEXT("Wrong delay argument kind fails closed"),
+		InvokeAvidScriptVmStaticHostImport(
+			Import, Signature, MakeArrayView(Arguments),
+			&Dispatcher, GuestMemory, Result, FailureDetails));
 	return true;
 }
 

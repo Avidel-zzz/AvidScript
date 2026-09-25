@@ -576,6 +576,8 @@ public:
 	int32 HandleTimerSetOnceImport(float DelaySeconds, int32 CallbackId);
 	int32 HandleTimerCancelImport(int32 TimerHandle);
 	int64 HandleContinuationDelayImport(float DelaySeconds, int32 CallbackId);
+	int64 HandleContinuationDelayCancelResumeV1Import(
+		float DelaySeconds, int32 CallbackId);
 	int64 HandleContinuationLoadObjectImport(
 		int32 Utf8ValueReference,
 		int32 CallbackId);

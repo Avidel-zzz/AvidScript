@@ -4844,6 +4844,24 @@ int64 FAvidScriptWasmRuntimeInstance::HandleContinuationDelayImport(
 	return Token;
 }
 
+int64 FAvidScriptWasmRuntimeInstance::HandleContinuationDelayCancelResumeV1Import(
+	const float DelaySeconds,
+	const int32 CallbackId)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	GetInstanceState().LastHostImportInput = CallbackId;
+	GetInstanceState().LastHostImportResult = 0;
+	++GetInstanceState().HostImportCallCount;
+
+	const int64 Token = HostContext.Continuations != nullptr
+		? HostContext.Continuations->ScheduleDelayWithCancelResume(
+			DelaySeconds, CallbackId)
+		: 0;
+	GetInstanceState().LastHostImportResult = Token != 0 ? 1 : 0;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return Token;
+}
+
 int64 FAvidScriptWasmRuntimeInstance::HandleContinuationLoadObjectImport(
 	const int32 Utf8ValueReference,
 	const int32 CallbackId)
@@ -8475,6 +8493,13 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 	case EAvidScriptHostBindingId::ContinuationDelay:
 	{
 		const int64 Value = HandleContinuationDelayImport(
+			Call.FloatArgs[0],
+			Call.IntArgs[0]);
+		return FinishI64(Value, true);
+	}
+	case EAvidScriptHostBindingId::ContinuationDelayCancelResumeV1:
+	{
+		const int64 Value = HandleContinuationDelayCancelResumeV1Import(
 			Call.FloatArgs[0],
 			Call.IntArgs[0]);
 		return FinishI64(Value, true);

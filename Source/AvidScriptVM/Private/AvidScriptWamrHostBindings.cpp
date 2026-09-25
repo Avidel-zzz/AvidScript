@@ -810,6 +810,23 @@ int64_t ContinuationDelay(wasm_exec_env_t ExecEnv, float DelaySeconds, int32_t C
 		: 0;
 }
 
+int64_t ContinuationDelayCancelResumeV1(
+	wasm_exec_env_t ExecEnv, float DelaySeconds, int32_t CallbackId)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::ContinuationDelayCancelResumeV1;
+	Call.FloatArgs[0] = DelaySeconds;
+	Call.IntArgs[0] = CallbackId;
+	FAvidScriptHostCallResult Result;
+	return Dispatch(
+		ExecEnv,
+		StaticImportName(EAvidScriptHostBindingId::ContinuationDelayCancelResumeV1),
+		Call,
+		Result)
+		? Result.ReturnValueI64
+		: 0;
+}
+
 int32_t ContinuationCancel(wasm_exec_env_t ExecEnv, int64_t ContinuationToken)
 {
 	FAvidScriptHostCall Call;
@@ -1461,6 +1478,7 @@ void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 	case EAvidScriptHostBindingId::TimerSetOnce: return reinterpret_cast<void*>(TimerSetOnce);
 	case EAvidScriptHostBindingId::TimerCancel: return reinterpret_cast<void*>(TimerCancel);
 	case EAvidScriptHostBindingId::ContinuationDelay: return reinterpret_cast<void*>(ContinuationDelay);
+	case EAvidScriptHostBindingId::ContinuationDelayCancelResumeV1: return reinterpret_cast<void*>(ContinuationDelayCancelResumeV1);
 	case EAvidScriptHostBindingId::ContinuationCancel: return reinterpret_cast<void*>(ContinuationCancel);
 	case EAvidScriptHostBindingId::ContinuationLoadObject: return reinterpret_cast<void*>(ContinuationLoadObject);
 	case EAvidScriptHostBindingId::ContinuationCancelSourceCreate: return reinterpret_cast<void*>(ContinuationCancelSourceCreate);

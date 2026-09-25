@@ -243,6 +243,9 @@ bool FAvidScriptEditorCSharpBindingEmitterDeterminismTest::RunTest(const FString
 	TestTrue(TEXT("NextTick uses zero-delay continuation scheduling"), FirstSource.Contains(TEXT("AvidScriptRuntimeNative.ContinuationDelay(0.0f, callbackId)")));
 	TestTrue(TEXT("Generated facade imports continuation delay"), FirstSource.Contains(TEXT("EntryPoint = \"continuation_delay\"")));
 	TestTrue(TEXT("Continuation delay import returns a long token"), FirstSource.Contains(TEXT("internal static extern long ContinuationDelay(float delaySeconds, int callbackId);")));
+	TestTrue(TEXT("Generated facade declares versioned cancel-resume delay"),
+		FirstSource.Contains(TEXT("EntryPoint = \"avid_continuation_delay_cancel_resume_v1\""))
+		&& FirstSource.Contains(TEXT("internal static extern long ContinuationDelayCancelResumeV1(float delaySeconds, int callbackId);")));
 	TestTrue(TEXT("Generated facade imports async object loading"), FirstSource.Contains(TEXT("EntryPoint = \"continuation_load_object\"")));
 	TestTrue(TEXT("Async object-load import returns a long token"), FirstSource.Contains(TEXT("internal static extern long ContinuationLoadObject(string assetPath, int callbackId);")));
 	TestTrue(TEXT("Generated facade imports continuation cancellation"), FirstSource.Contains(TEXT("EntryPoint = \"continuation_cancel\"")));

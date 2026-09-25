@@ -2771,7 +2771,8 @@ $CanonicalStaticImportNames = @(
     'avid_value_container_clear',
     'avid_value_container_find',
     'avid_value_container_upsert',
-    'avid_value_container_remove'
+    'avid_value_container_remove',
+    'avid_continuation_delay_cancel_resume_v1'
 )
 $CompatibilityStaticImportNames = @(
     $CanonicalStaticImportNames | Where-Object {
@@ -2800,7 +2801,8 @@ $CompatibilityStaticImportNames = @(
             'avid_value_container_clear',
             'avid_value_container_find',
             'avid_value_container_upsert',
-            'avid_value_container_remove')
+            'avid_value_container_remove',
+            'avid_continuation_delay_cancel_resume_v1')
     })
 
 $StaticHostCatalogRecords = @(
@@ -3076,6 +3078,7 @@ $AllowedFixedRendererImports = @(
     'timer_set_once',
     'timer_cancel',
     'continuation_delay',
+    'avid_continuation_delay_cancel_resume_v1',
     'continuation_cancel',
     'continuation_load_object',
     'continuation_result_read',

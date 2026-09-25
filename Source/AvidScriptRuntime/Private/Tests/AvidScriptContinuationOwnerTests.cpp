@@ -114,6 +114,15 @@ public:
 		return ExpectedToken;
 	}
 
+	int64 ScheduleDelayWithCancelResume(
+		const float DelaySeconds, const int32 CallbackId) override
+	{
+		LastDelaySeconds = DelaySeconds;
+		LastCallbackId = CallbackId;
+		++CancelResumeScheduleCount;
+		return ExpectedToken;
+	}
+
 	int64 ScheduleObjectLoad(
 		FString ObjectPath,
 		const int32 CallbackId) override
@@ -185,6 +194,7 @@ public:
 	int64 LastStateToken = 0;
 	TArray<uint8> StoredState;
 	int32 ScheduleCount = 0;
+	int32 CancelResumeScheduleCount = 0;
 	int32 ObjectLoadScheduleCount = 0;
 	int32 CancelCount = 0;
 	int32 CreateCancellationSourceCount = 0;
@@ -463,6 +473,15 @@ bool FAvidScriptContinuationHostBoundaryTest::RunTest(
 	TestEqual(TEXT("Runtime forwards the delay"), Host.LastDelaySeconds, 0.25f);
 	TestEqual(TEXT("Runtime forwards the callback id"), Host.LastCallbackId, 17);
 	TestEqual(TEXT("Schedule crosses the host boundary once"), Host.ScheduleCount, 1);
+	const int64 CancelResumeToken =
+		Runtime.HandleContinuationDelayCancelResumeV1Import(0.5f, 18);
+	TestEqual(TEXT("Versioned import preserves the full i64 token"),
+		CancelResumeToken, Host.ExpectedToken);
+	TestEqual(TEXT("Versioned import forwards the delay"), Host.LastDelaySeconds, 0.5f);
+	TestEqual(TEXT("Versioned import forwards the callback"), Host.LastCallbackId, 18);
+	TestEqual(TEXT("Versioned import uses only its opt-in host method"),
+		Host.CancelResumeScheduleCount, 1);
+	TestEqual(TEXT("Legacy delay was not called twice"), Host.ScheduleCount, 1);
 	TestEqual(
 		TEXT("Runtime forwards the full token to cancel"),
 		Runtime.HandleContinuationCancelImport(Token),
