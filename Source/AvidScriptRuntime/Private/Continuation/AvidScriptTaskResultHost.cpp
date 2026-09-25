@@ -84,7 +84,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchTaskFaultLanguageErrorCall(
 		static_cast<uint64>(Call.Int64Args[1]), OutResult);
 }
 
-bool FAvidScriptWasmRuntimeInstance::ReadTaskLanguageError(
+bool FAvidScriptWasmRuntimeInstance::FindTaskLanguageError(
 	const int64 TaskToken, FAvidScriptTaskLanguageError& OutError,
 	FAvidScriptHostCallResult& OutResult)
 {
@@ -128,16 +128,49 @@ bool FAvidScriptWasmRuntimeInstance::ReadTaskLanguageError(
 		return Fail(TEXT("task_language_error_catalog"),
 			TEXT("Task language-error payload is absent from the loaded module catalog."));
 	}
-	if (ManagedHeap->RootObjectInCurrentFrame(Error.ObjectToken, ManagedHeapFrameFloor)
-		!= AvidScript::Managed::EHeapError::Ok)
-	{
-		return Fail(TEXT("task_language_error_root"),
-			TEXT("Task language-error object could not be rooted in the current invocation."));
-	}
 	OutError = Error;
 	OutResult.ReturnValue = 1;
 	OutResult.ReturnValueI64 = 1;
 	OutResult.bSucceeded = true;
+	return true;
+}
+
+bool FAvidScriptWasmRuntimeInstance::ReadTaskLanguageError(
+	const int64 TaskToken, FAvidScriptTaskLanguageError& OutError,
+	FAvidScriptHostCallResult& OutResult)
+{
+	if (!FindTaskLanguageError(TaskToken, OutError, OutResult)) return false;
+	if (ManagedHeap->RootObjectInCurrentFrame(OutError.ObjectToken, ManagedHeapFrameFloor)
+		!= AvidScript::Managed::EHeapError::Ok)
+	{
+		OutError = {};
+		OutResult = {};
+		OutResult.ErrorCategory = TEXT("task_language_error_root");
+		OutResult.Details = TEXT("Task language-error object could not be rooted in the current invocation.");
+		return false;
+	}
+	return true;
+}
+
+bool FAvidScriptWasmRuntimeInstance::DispatchTaskLanguageErrorMetaCall(
+	const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult)
+{
+	FAvidScriptTaskLanguageError Error;
+	if (!FindTaskLanguageError(Call.Int64Args[0], Error, OutResult)) return false;
+	OutResult.ReturnValueI64 = static_cast<int64>(
+		(uint64(static_cast<uint32>(Error.TypeToken)) << 32)
+		| static_cast<uint32>(Error.SourceToken));
+	OutResult.ReturnValue = static_cast<int32>(OutResult.ReturnValueI64);
+	return true;
+}
+
+bool FAvidScriptWasmRuntimeInstance::DispatchTaskLanguageErrorRootCall(
+	const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult)
+{
+	FAvidScriptTaskLanguageError Error;
+	if (!ReadTaskLanguageError(Call.Int64Args[0], Error, OutResult)) return false;
+	OutResult.ReturnValueI64 = static_cast<int64>(Error.ObjectToken);
+	OutResult.ReturnValue = static_cast<int32>(OutResult.ReturnValueI64);
 	return true;
 }
 

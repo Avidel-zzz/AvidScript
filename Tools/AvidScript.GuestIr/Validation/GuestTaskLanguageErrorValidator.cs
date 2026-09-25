@@ -6,8 +6,8 @@ using System.Linq;
 namespace AvidScript.GuestIr;
 
 // IR 20 is the first version that can carry both a language-error catalog and
-// Task<int> imports. The fault import is only an admission path; reading and
-// rethrowing a task error after await requires a later Guest lowering contract.
+// Task<int> imports. Paired read imports expose catalog tokens and a frame-rooted
+// object; rethrowing after await still requires Guest lowering.
 internal static class GuestTaskLanguageErrorValidator
 {
     public const int SchemaVersion = 20;
@@ -16,6 +16,10 @@ internal static class GuestTaskLanguageErrorValidator
     public const string SemanticVersion = "1.49";
     public const string ImportId = "import:task_fault_language_error_v1";
     public const string ImportName = "avid_task_fault_language_error_v1";
+    public const string MetaImportId = "import:task_language_error_meta_v1";
+    public const string MetaImportName = "avid_task_language_error_meta_v1";
+    public const string RootImportId = "import:task_language_error_root_v1";
+    public const string RootImportName = "avid_task_language_error_root_v1";
     private const string DiagnosticCode = "ASIR1029";
 
     public static void Validate(GuestValidationContext context)
@@ -24,7 +28,12 @@ internal static class GuestTaskLanguageErrorValidator
         bool combinedVersion = module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion;
         GuestImport[] imports = module.Imports.Where(import =>
             import.Module == GuestTaskResultValidator.ImportModule && import.Name == ImportName).ToArray();
-        if (!combinedVersion && imports.Length == 0) return;
+        GuestImport[] metadataImports = module.Imports.Where(import =>
+            import.Name == MetaImportName).ToArray();
+        GuestImport[] rootImports = module.Imports.Where(import =>
+            import.Name == RootImportName).ToArray();
+        if (!combinedVersion && imports.Length == 0
+            && metadataImports.Length == 0 && rootImports.Length == 0) return;
         if (!combinedVersion || module.Language != "csharp"
             || module.Provenance.SemanticSchemaVersion != SemanticSchemaVersion
             || module.Provenance.SemanticVersion != SemanticVersion
@@ -61,7 +70,26 @@ internal static class GuestTaskLanguageErrorValidator
 
         if (module.LanguageErrorCatalog is { } catalog)
             ValidateCallTokens(context, fault, catalog);
+
+        if (metadataImports.Length == 0 && rootImports.Length == 0) return;
+        if (metadataImports.Length != 1 || rootImports.Length != 1)
+        {
+            Add(context, "Task language-error read imports must be declared as one metadata/root pair.");
+            return;
+        }
+        if (!IsReadImport(metadataImports[0], MetaImportId, MetaImportName, "type:int64")
+            || !IsReadImport(rootImports[0], RootImportId, RootImportName,
+                "type:language_error_root"))
+            Add(context, "Task language-error read imports have a noncanonical module, signature or binding contract.");
     }
+
+    private static bool IsReadImport(GuestImport import, string id, string name, string returnType) =>
+        import.Id == id && import.Module == GuestTaskResultValidator.ImportModule
+        && import.Name == name
+        && import.ParameterTypeIds.SequenceEqual(new[] { "type:int64" }, StringComparer.Ordinal)
+        && import.ReturnTypeId == returnType
+        && import.DispatchClass == "semantic" && import.OptimizationClass == "none"
+        && import.BindingOrdinal == -1;
 
     private static void ValidateCallTokens(GuestValidationContext context, GuestImport fault,
         GuestLanguageErrorCatalog catalog)

@@ -41,7 +41,50 @@ internal static class WasmTaskLanguageErrorTests
             SchemaVersion = 19,
             IrVersion = "1.18",
         }).Succeeded, "older IR cannot compile the combined import");
-        return 8;
+        GuestFunction reader = new("function:task_language_error_read",
+            new[] { new GuestRegister("task_token", "type:int64") },
+            new[]
+            {
+                new GuestRegister("error_metadata", "type:int64"),
+                new GuestRegister("error_root", "type:language_error_root"),
+                new GuestRegister("one", "type:int32"),
+            }, "type:int32", "entry", new[]
+            {
+                new GuestBasicBlock("entry", new GuestInstruction[]
+                {
+                    new("call", "error_metadata", new[] { "task_token" },
+                        "import:task_language_error_meta_v1", null, null),
+                    new("call", "error_root", new[] { "task_token" },
+                        "import:task_language_error_root_v1", null, null),
+                    new("constant", "one", Array.Empty<string>(), null, null,
+                        new GuestConstant("int32", "1")),
+                }, new GuestTerminator("return", null, null, null, "one")),
+            });
+        GuestModule readable = module with
+        {
+            Imports = module.Imports.Concat(new[]
+            {
+                new GuestImport("import:task_language_error_meta_v1", "avidscript",
+                    "avid_task_language_error_meta_v1", new[] { "type:int64" }, "type:int64"),
+                new GuestImport("import:task_language_error_root_v1", "avidscript",
+                    "avid_task_language_error_root_v1", new[] { "type:int64" },
+                    "type:language_error_root"),
+            }).ToArray(),
+            Functions = module.Functions.Append(reader).ToArray(),
+        };
+        Require(GuestModuleValidator.Validate(readable).Succeeded,
+            "paired Task error read imports validate in IR 20");
+        WasmCompilationResult readableWasm = WasmModuleCompiler.Compile(readable);
+        Require(readableWasm.Succeeded, string.Join(" | ",
+            readableWasm.Diagnostics.Select(diagnostic => diagnostic.Message)));
+        WasmArtifactInfo readableArtifact = WasmArtifactInspector.Inspect(readableWasm.Bytes);
+        Require(readableArtifact.Imports.Count == readable.Imports.Count
+            && readableArtifact.Imports.Any(import => import.Module == "avidscript"
+                && import.Name == "avid_task_language_error_meta_v1" && import.Kind == 0)
+            && readableArtifact.Imports.Any(import => import.Module == "avidscript"
+                && import.Name == "avid_task_language_error_root_v1" && import.Kind == 0),
+            "production WASM retains both Task error read imports");
+        return 11;
     }
 
     private static void Require(bool condition, string message)

@@ -607,6 +607,8 @@ bool FAvidScriptVmEventSubscriptionImportContractTest::RunTest(
 	const auto& TaskPropagateFailure = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::TaskPropagateFailureV1);
 	const auto& TaskRetainForContinuation = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::TaskRetainForContinuationV1);
 	const auto& TaskFaultLanguageError = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::TaskFaultLanguageErrorV1);
+	const auto& TaskLanguageErrorMeta = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::TaskLanguageErrorMetaV1);
+	const auto& TaskLanguageErrorRoot = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::TaskLanguageErrorRootV1);
 	for (const auto* Import : {&ManagedHeap, &ManagedStore, &ManagedRead, &EventStore, &EventRead, &LanguageStore, &LanguageLookup})
 	{
 		TestTrue(TEXT("Every heap-bearing import requires an invocation scope"), Import->bRequiresManagedInvocation
@@ -683,6 +685,30 @@ bool FAvidScriptVmEventSubscriptionImportContractTest::RunTest(
 		TaskFaultLanguageError.bSupportsEnvCompatibility
 		|| IsAvidScriptVmStaticHostImport(TEXT("env"),
 			UTF8_TO_TCHAR(AvidScript::TaskResult::Abi::FaultLanguageErrorImport)));
+	TestEqual(TEXT("Task language-error metadata import appends after fault"),
+		static_cast<uint16>(TaskLanguageErrorMeta.BindingId),
+		static_cast<uint16>(TaskFaultLanguageError.BindingId) + 1);
+	TestEqual(TEXT("Task language-error root import follows metadata"),
+		static_cast<uint16>(TaskLanguageErrorRoot.BindingId),
+		static_cast<uint16>(TaskLanguageErrorMeta.BindingId) + 1);
+	for (const auto* Import : {&TaskLanguageErrorMeta, &TaskLanguageErrorRoot})
+	{
+		TestEqual(TEXT("Task language-error read import uses full-width task/result tokens"),
+			FString(UTF8_TO_TCHAR(Import->Signature)), FString(TEXT("(I)I")));
+		TestTrue(TEXT("Task language-error read import requires an invocation scope"),
+			Import->bRequiresManagedInvocation
+			&& RequiresAvidScriptVmManagedInvocation(TEXT("avidscript"),
+				UTF8_TO_TCHAR(Import->ImportName)));
+		TestFalse(TEXT("Task language-error read import has no env compatibility alias"),
+			Import->bSupportsEnvCompatibility
+			|| IsAvidScriptVmStaticHostImport(TEXT("env"), UTF8_TO_TCHAR(Import->ImportName)));
+	}
+	TestEqual(TEXT("Task language-error metadata import name"),
+		FString(UTF8_TO_TCHAR(TaskLanguageErrorMeta.ImportName)),
+		FString(UTF8_TO_TCHAR(AvidScript::TaskResult::Abi::LanguageErrorMetaImport)));
+	TestEqual(TEXT("Task language-error root import name"),
+		FString(UTF8_TO_TCHAR(TaskLanguageErrorRoot.ImportName)),
+		FString(UTF8_TO_TCHAR(AvidScript::TaskResult::Abi::LanguageErrorRootImport)));
 	TestEqual(TEXT("Event state appends without renumbering"), static_cast<uint16>(EventStore.BindingId), static_cast<uint16>(ManagedRead.BindingId) + 1);
 	TestEqual(TEXT("Event state read follows subscribe"), static_cast<uint16>(EventRead.BindingId), static_cast<uint16>(EventStore.BindingId) + 1);
 	TestEqual(TEXT("Event state publication signature"), FString(UTF8_TO_TCHAR(EventStore.Signature)), FString(TEXT("(iiiiI)I")));

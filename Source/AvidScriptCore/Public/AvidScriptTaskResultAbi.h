@@ -12,6 +12,8 @@ inline constexpr char BindProducerImport[] = "avid_task_bind_producer_v1"; // (I
 inline constexpr char PropagateFailureImport[] = "avid_task_propagate_failure_v1"; // (II)i
 inline constexpr char RetainForContinuationImport[] = "avid_task_retain_for_continuation_v1"; // (II)i
 inline constexpr char FaultLanguageErrorImport[] = "avid_task_fault_language_error_v1"; // (IiiI)i
+inline constexpr char LanguageErrorMetaImport[] = "avid_task_language_error_meta_v1"; // (I)I
+inline constexpr char LanguageErrorRootImport[] = "avid_task_language_error_root_v1"; // (I)I
 inline constexpr char Int32TypeId[] = "type:int32";
 
 enum class ECommand : std::uint32_t

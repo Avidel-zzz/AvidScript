@@ -651,6 +651,8 @@ public:
 	bool DispatchTaskPropagateFailureCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	bool DispatchTaskRetainForContinuationCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	bool DispatchTaskFaultLanguageErrorCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
+	bool DispatchTaskLanguageErrorMetaCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
+	bool DispatchTaskLanguageErrorRootCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	// Native callers retain references extracted from a validated state layout.
 	// Failure leaves OutLease unchanged; use/release on the Game Thread.
 	bool CreateContinuationStateLease(TConstArrayView<uint64> Objects,
@@ -710,6 +712,8 @@ public:
 
 private:
 	enum class EInstanceLifecycleOperation : uint8 { Begin, Tick, End };
+	bool FindTaskLanguageError(int64 TaskToken,
+		FAvidScriptTaskLanguageError& OutError, FAvidScriptHostCallResult& OutResult);
 	bool DispatchEventManagedStateCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	int64 HandleEventSubscribeInternal(int32 Slot, int32 Generation, int32 EventOrdinal,
 		TConstArrayView<uint8> StateBytes, TUniquePtr<IAvidScriptManagedStateLease>* Lease,

@@ -3,6 +3,7 @@
 #include "AvidScriptLanguageErrorCatalog.h"
 #include "AvidScriptRuntimeBackendTestLanes.h"
 #include "AvidScriptRuntimeSession.h"
+#include "AvidScriptTaskResultAbi.h"
 #include "AvidScriptWasmRuntime.h"
 #include "Continuation/AvidScriptSessionContinuations.h"
 #include "Memory/AvidScriptManagedHeap.h"
@@ -171,6 +172,55 @@ TArray<uint8> TaskFaultImportModule(int32 GuestSchema)
 		0x42, 0, 0x41, 1, 0x41, 1, 0x42, 0,
 		0x10, 0, // call imported fault function
 		0x1a, // drop its result
+		0x0b
+	};
+	U32(Code, UE_ARRAY_COUNT(Body));
+	Code.Append(Body, UE_ARRAY_COUNT(Body));
+	WasmSection(Wasm, 10, Code);
+	Custom(Wasm, "avidscript.provenance", Provenance(GuestSchema));
+	const FString Metadata = Json(Document(GuestSchema));
+	Custom(Wasm, "avidscript.language_errors", Metadata);
+	return Wasm;
+}
+
+TArray<uint8> TaskReadImportModule(int32 GuestSchema, const ANSICHAR* ImportName)
+{
+	TArray<uint8> Wasm;
+	Wasm.Append(BaseWasm, 8);
+	TArray<uint8> Types;
+	const uint8 Signatures[] = {
+		2, 0x60, 1, 0x7e, 1, 0x7e, // (i64) -> i64
+		0x60, 0, 0 // () -> void
+	};
+	Types.Append(Signatures, UE_ARRAY_COUNT(Signatures));
+	WasmSection(Wasm, 1, Types);
+	TArray<uint8> Imports;
+	U32(Imports, 1);
+	WasmName(Imports, "avidscript");
+	WasmName(Imports, ImportName);
+	Imports.Add(0);
+	U32(Imports, 0);
+	WasmSection(Wasm, 2, Imports);
+	TArray<uint8> Functions;
+	U32(Functions, 1);
+	U32(Functions, 1);
+	WasmSection(Wasm, 3, Functions);
+	TArray<uint8> Exports;
+	U32(Exports, 2);
+	for (const ANSICHAR* Name : {"avid_on_begin_play", "avid_on_end_play"})
+	{
+		WasmName(Exports, Name);
+		Exports.Add(0);
+		U32(Exports, 1);
+	}
+	WasmSection(Wasm, 7, Exports);
+	TArray<uint8> Code;
+	U32(Code, 1);
+	const uint8 Body[] = {
+		0, // no locals
+		0x42, 0, // i64.const 0: missing Session task context
+		0x10, 0, // call imported read function
+		0x1a, // drop i64 result
 		0x0b
 	};
 	U32(Code, UE_ARRAY_COUNT(Body));
@@ -629,6 +679,39 @@ bool FAvidScriptTaskLanguageErrorVmImportTest::RunTest(const FString& Parameters
 			Runtime.Unload();
 		}
 	}
+	for (const ANSICHAR* ImportName : {
+		AvidScript::TaskResult::Abi::LanguageErrorMetaImport,
+		AvidScript::TaskResult::Abi::LanguageErrorRootImport })
+	{
+		for (const int32 GuestSchema : {20, 17})
+		{
+			const TArray<uint8> Wasm = TaskReadImportModule(GuestSchema, ImportName);
+			for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
+			{
+				FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
+				FAvidScriptWasmSmokeResult Result;
+				if (!TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("Task read import WASM loads")),
+					Runtime.LoadModule(Wasm.GetData(), Wasm.Num(), ModuleId, Result)))
+				{
+					AddError(Result.ErrorMessage);
+					continue;
+				}
+				TestAvidScriptRuntimeLaneIdentity(*this, Lane, Result);
+				TestFalse(TEXT("Task read import rejects missing Session task context"),
+					Runtime.BeginPlay(Result));
+				TestEqual(TEXT("Task read import preserves version or context rejection"),
+					Result.ErrorCategory, GuestSchema == 20
+						? FString(TEXT("task_result_context"))
+						: FString(TEXT("task_language_error_version")));
+				TestEqual(TEXT("VM reports the called Task read import"),
+					Result.ImportName, FString(UTF8_TO_TCHAR(ImportName)));
+				const AvidScript::Managed::FHeap* Heap = Runtime.GetManagedHeapForTesting();
+				TestTrue(TEXT("Rejected Task read import leaves no managed roots"), Heap
+					&& Heap->GetStats().ActiveFrames == 0 && Heap->GetStats().LiveRoots == 0);
+				Runtime.Unload();
+			}
+		}
+	}
 	return true;
 }
 
@@ -689,6 +772,14 @@ bool FAvidScriptTaskLanguageErrorAdmissionTest::RunTest(const FString& Parameter
 			Call.Int64Args[1] = static_cast<int64>(ObjectToken);
 			return Runtime.DispatchHostCall(Call, OutResult);
 		};
+		auto InvokeReadImport = [&Runtime](EAvidScriptHostBindingId BindingId,
+			int64 TaskToken, FAvidScriptHostCallResult& OutResult)
+		{
+			FAvidScriptHostCall Call;
+			Call.BindingId = BindingId;
+			Call.Int64Args[0] = TaskToken;
+			return Runtime.DispatchHostCall(Call, OutResult);
+		};
 		TestTrue(TEXT("Combined IR catalog authorizes Task error import"),
 			Runtime.GetLanguageErrorCatalog()
 			&& Runtime.GetLanguageErrorCatalog()->SupportsTaskLanguageErrorFault());
@@ -696,6 +787,10 @@ bool FAvidScriptTaskLanguageErrorAdmissionTest::RunTest(const FString& Parameter
 		TestFalse(TEXT("Outside VM invocation cannot read a Task error"),
 			Runtime.ReadTaskLanguageError(Task, ReadError, Result));
 		TestEqual(TEXT("Missing read invocation category"), Result.ErrorCategory,
+			FString(TEXT("task_result_context")));
+		TestFalse(TEXT("Outside VM invocation cannot read Task error metadata"),
+			InvokeReadImport(EAvidScriptHostBindingId::TaskLanguageErrorMetaV1, Task, Result));
+		TestEqual(TEXT("Metadata read needs an invocation"), Result.ErrorCategory,
 			FString(TEXT("task_result_context")));
 		TestFalse(TEXT("Outside VM invocation cannot fault a task"),
 			InvokeFaultImport(Task, 1, 1, 1, Result));
@@ -757,15 +852,30 @@ bool FAvidScriptTaskLanguageErrorAdmissionTest::RunTest(const FString& Parameter
 		TestTrue(TEXT("Session propagates rooted language error"),
 			Endpoint.PropagateTaskFailure(Task, Target, Waiters));
 		const uint32 RootsBeforeAcquisition = Heap->GetStats().LiveRoots;
+		TestTrue(TEXT("Task error metadata import returns catalog tokens"),
+			InvokeReadImport(EAvidScriptHostBindingId::TaskLanguageErrorMetaV1, Task, Result)
+			&& static_cast<uint64>(Result.ReturnValueI64) == ((uint64(1) << 32) | 1));
+		TestEqual(TEXT("Metadata read does not root the error object"),
+			Heap->GetStats().LiveRoots, RootsBeforeAcquisition);
+		TestTrue(TEXT("Task error root import returns the object"),
+			InvokeReadImport(EAvidScriptHostBindingId::TaskLanguageErrorRootV1, Task, Result)
+			&& static_cast<uint64>(Result.ReturnValueI64) == ErrorObject);
+		TestEqual(TEXT("Root import adds one invocation-owned root"),
+			Heap->GetStats().LiveRoots, RootsBeforeAcquisition + 1);
 		TestTrue(TEXT("Faulted Task error reads into current invocation"),
 			Runtime.ReadTaskLanguageError(Task, ReadError, Result)
 			&& ReadError.TypeToken == 1 && ReadError.SourceToken == 1
 			&& ReadError.ObjectToken == ErrorObject);
-		TestEqual(TEXT("Read adds one invocation-owned root"),
-			Heap->GetStats().LiveRoots, RootsBeforeAcquisition + 1);
+		TestEqual(TEXT("Native read adds one more invocation-owned root"),
+			Heap->GetStats().LiveRoots, RootsBeforeAcquisition + 2);
 		TestFalse(TEXT("Foreign Session Task error cannot be read"),
 			Runtime.ReadTaskLanguageError(ForeignTask, ReadError, Result));
 		TestEqual(TEXT("Foreign read has identity category"), Result.ErrorCategory,
+			FString(TEXT("task_result_identity")));
+		TestFalse(TEXT("Foreign Session Task metadata cannot be read"),
+			InvokeReadImport(EAvidScriptHostBindingId::TaskLanguageErrorMetaV1,
+				ForeignTask, Result));
+		TestEqual(TEXT("Foreign metadata read has identity category"), Result.ErrorCategory,
 			FString(TEXT("task_result_identity")));
 		Runtime.EndVmInvocation(Invocation);
 		TestTrue(TEXT("Older frame closes"), Heap->PopFrame(OuterFrame) == EHeapError::Ok);
@@ -776,6 +886,9 @@ bool FAvidScriptTaskLanguageErrorAdmissionTest::RunTest(const FString& Parameter
 			Heap->Collect() == EHeapError::Ok && Heap->IsAlive(ErrorObject));
 		const uint64 ReadInvocation = Runtime.BeginVmInvocation();
 		const uint32 RootsWithoutReadFrame = Heap->GetStats().LiveRoots;
+		TestTrue(TEXT("Metadata read needs no new object root"),
+			InvokeReadImport(EAvidScriptHostBindingId::TaskLanguageErrorMetaV1, Target, Result)
+			&& static_cast<uint64>(Result.ReturnValueI64) == ((uint64(1) << 32) | 1));
 		TestFalse(TEXT("Task error read needs a frame above the invocation floor"),
 			Runtime.ReadTaskLanguageError(Target, ReadError, Result));
 		TestEqual(TEXT("Missing frame read has root category"), Result.ErrorCategory,
@@ -785,10 +898,9 @@ bool FAvidScriptTaskLanguageErrorAdmissionTest::RunTest(const FString& Parameter
 		FToken ReadFrame = 0;
 		TestTrue(TEXT("Awaiter invocation frame starts"),
 			Heap->PushFrame(ReadFrame) == EHeapError::Ok);
-		TestTrue(TEXT("Propagated Task error reads into awaiter frame"),
-			Runtime.ReadTaskLanguageError(Target, ReadError, Result)
-			&& ReadError.TypeToken == 1 && ReadError.SourceToken == 1
-			&& ReadError.ObjectToken == ErrorObject);
+		TestTrue(TEXT("Propagated Task error root import enters awaiter frame"),
+			InvokeReadImport(EAvidScriptHostBindingId::TaskLanguageErrorRootV1, Target, Result)
+			&& static_cast<uint64>(Result.ReturnValueI64) == ErrorObject);
 		TestTrue(TEXT("Target task releases"), Endpoint.ReleaseTaskResult(Target));
 		TestTrue(TEXT("Awaiter frame keeps object alive after last Task release"),
 			Heap->Collect() == EHeapError::Ok && Heap->IsAlive(ErrorObject)

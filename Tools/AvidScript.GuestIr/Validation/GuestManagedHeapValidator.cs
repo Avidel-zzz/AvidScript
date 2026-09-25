@@ -68,8 +68,16 @@ internal static class GuestManagedHeapValidator
                     { "type:int64", "type:int32", "type:int32", "type:language_error_root" })
                 && import.ReturnTypeId == "type:int32"
                 && import.OptimizationClass == "none";
+            bool taskReadRoot = combinedVersion && module.LanguageErrorCatalog is not null
+                && import.Id == GuestTaskLanguageErrorValidator.RootImportId
+                && import.Module == GuestTaskResultValidator.ImportModule
+                && import.Name == GuestTaskLanguageErrorValidator.RootImportName
+                && import.ParameterTypeIds.SequenceEqual(new[] { "type:int64" })
+                && import.ReturnTypeId == "type:language_error_root"
+                && import.DispatchClass == "semantic" && import.OptimizationClass == "none"
+                && import.BindingOrdinal == -1;
             if ((Has(import.ReturnTypeId) || import.ParameterTypeIds.Any(Has))
-                && !report && !taskFault)
+                && !report && !taskFault && !taskReadRoot)
                 Add(context, $"Import '{import.Id}' cannot expose module-local managed references.");
         }
         foreach (GuestExport export in module.Exports)

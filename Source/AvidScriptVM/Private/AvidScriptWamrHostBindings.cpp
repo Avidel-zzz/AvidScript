@@ -1135,6 +1135,26 @@ int32_t TaskFaultLanguageErrorV1(wasm_exec_env_t ExecEnv,
 		? Result.ReturnValue : 0;
 }
 
+int64_t TaskLanguageErrorMetaV1(wasm_exec_env_t ExecEnv, int64_t TaskToken)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::TaskLanguageErrorMetaV1;
+	Call.Int64Args[0] = TaskToken;
+	FAvidScriptHostCallResult Result;
+	return Dispatch(ExecEnv, StaticImportName(Call.BindingId), Call, Result)
+		? Result.ReturnValueI64 : 0;
+}
+
+int64_t TaskLanguageErrorRootV1(wasm_exec_env_t ExecEnv, int64_t TaskToken)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::TaskLanguageErrorRootV1;
+	Call.Int64Args[0] = TaskToken;
+	FAvidScriptHostCallResult Result;
+	return Dispatch(ExecEnv, StaticImportName(Call.BindingId), Call, Result)
+		? Result.ReturnValueI64 : 0;
+}
+
 int32_t ContinuationStateStore(
 	wasm_exec_env_t ExecEnv,
 	int64_t ContinuationToken,
@@ -1467,6 +1487,8 @@ void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 	case EAvidScriptHostBindingId::TaskPropagateFailureV1: return reinterpret_cast<void*>(TaskPropagateFailureV1);
 	case EAvidScriptHostBindingId::TaskRetainForContinuationV1: return reinterpret_cast<void*>(TaskRetainForContinuationV1);
 	case EAvidScriptHostBindingId::TaskFaultLanguageErrorV1: return reinterpret_cast<void*>(TaskFaultLanguageErrorV1);
+	case EAvidScriptHostBindingId::TaskLanguageErrorMetaV1: return reinterpret_cast<void*>(TaskLanguageErrorMetaV1);
+	case EAvidScriptHostBindingId::TaskLanguageErrorRootV1: return reinterpret_cast<void*>(TaskLanguageErrorRootV1);
 	case EAvidScriptHostBindingId::DelegateOutputWrite: return reinterpret_cast<void*>(DelegateOutputWrite);
 	case EAvidScriptHostBindingId::DataLaneGetEpoch: return reinterpret_cast<void*>(DataLaneGetEpoch);
 	case EAvidScriptHostBindingId::DataLaneSubmit: return reinterpret_cast<void*>(DataLaneSubmit);

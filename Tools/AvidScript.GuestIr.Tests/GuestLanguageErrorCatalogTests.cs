@@ -243,6 +243,55 @@ internal static class GuestLanguageErrorCatalogTests
                         ? instruction with { Constant = new GuestConstant("int32", "2") }
                         : instruction).ToArray() },
             } } : function).ToArray() }, "ASIR1029");
+
+        GuestImport metadata = new("import:task_language_error_meta_v1",
+            "avidscript", "avid_task_language_error_meta_v1",
+            new[] { "type:int64" }, "type:int64");
+        GuestImport rootRead = new("import:task_language_error_root_v1",
+            "avidscript", "avid_task_language_error_root_v1",
+            new[] { "type:int64" }, "type:language_error_root");
+        GuestFunction reader = new("function:task_language_error_read",
+            new[] { new GuestRegister("read_task", "type:int64") },
+            new[]
+            {
+                new GuestRegister("read_metadata", "type:int64"),
+                new GuestRegister("read_root", "type:language_error_root"),
+                new GuestRegister("read_one", "type:int32"),
+            }, "type:int32", "entry", new[]
+            {
+                new GuestBasicBlock("entry", new GuestInstruction[]
+                {
+                    new("call", "read_metadata", new[] { "read_task" }, metadata.Id, null, null),
+                    new("call", "read_root", new[] { "read_task" }, rootRead.Id, null, null),
+                    new("constant", "read_one", Array.Empty<string>(), null, null,
+                        new GuestConstant("int32", "1")),
+                }, new GuestTerminator("return", null, null, null, "read_one")),
+            });
+        GuestModule readable = combined with
+        {
+            Imports = combined.Imports.Concat(new[] { metadata, rootRead }).ToArray(),
+            Functions = combined.Functions.Append(reader).ToArray(),
+        };
+        AssertValid(readable);
+        byte[] readableBytes = GuestIrSerializer.Serialize(readable);
+        Check(readableBytes.SequenceEqual(GuestIrSerializer.Serialize(
+                GuestIrSerializer.Deserialize(readableBytes))),
+            "paired Task error read imports must round-trip canonically");
+        AssertError(readable with { SchemaVersion = 19, IrVersion = "1.18" }, "ASIR1029");
+        AssertError(readable with { Imports = combined.Imports.Append(metadata).ToArray() }, "ASIR1029");
+        AssertError(readable with { Imports = combined.Imports.Append(rootRead).ToArray() }, "ASIR1029");
+        AssertError(readable with { Imports = combined.Imports.Concat(new[]
+        {
+            metadata with { Module = "env" }, rootRead,
+        }).ToArray() }, "ASIR1029");
+        AssertError(readable with { Imports = combined.Imports.Concat(new[]
+        {
+            metadata, rootRead with { ReturnTypeId = "type:int64" },
+        }).ToArray() }, "ASIR1029");
+        AssertError(readable with { Imports = combined.Imports.Concat(new[]
+        {
+            metadata, rootRead with { BindingOrdinal = 0 },
+        }).ToArray() }, "ASIR1029");
     }
 
     private static void AssertValid(GuestModule module)
