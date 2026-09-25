@@ -1297,7 +1297,7 @@ bool FAvidScriptCompiledIntegratedLanguageFlowTest::RunTest(const FString& Param
 
 	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime,
 		EAvidScriptVmBackendKind::Wamr})
-	for (const int32 Mode : {0, 1, 2})
+	for (const int32 Mode : {0, 1, 2, 3})
 	{
 		FAvidScriptVmBackendSelection Selection;
 		Selection.BackendKind = Backend;
@@ -1329,7 +1329,8 @@ bool FAvidScriptCompiledIntegratedLanguageFlowTest::RunTest(const FString& Param
 
 		int32 Resumes = 0;
 		bool bSawUncaught = false;
-		for (int32 Round = 0; Round < 8; ++Round)
+		bool bSawTrappedStatus = false;
+		for (int32 Round = 0; Round < 8 && !bSawTrappedStatus; ++Round)
 		{
 			World->Tick(LEVELTICK_All, 0.02f);
 			++GFrameCounter;
@@ -1337,8 +1338,25 @@ bool FAvidScriptCompiledIntegratedLanguageFlowTest::RunTest(const FString& Param
 			Owner->DrainReady(Ready);
 			for (const FAvidScriptContinuationCompletion& Completion : Ready)
 			{
-				const bool bDispatched = Runtime.DispatchContinuation(Completion, Result);
-				if (!bDispatched)
+				FAvidScriptContinuationCompletion Routed = Completion;
+				if (Mode == 3)
+				{
+					TestEqual(TEXT("Status-guard fixture has one resume"), Resumes, 0);
+					TestEqual(TEXT("Status-guard fixture starts completed"),
+						Completion.Status, EAvidScriptContinuationStatus::Completed);
+					Routed.Status = EAvidScriptContinuationStatus::Failed;
+				}
+				const bool bDispatched = Runtime.DispatchContinuation(Routed, Result);
+				if (Mode == 3)
+				{
+					TestFalse(TEXT("Abnormal void-payload status traps before resume"),
+						bDispatched);
+					TestEqual(TEXT("Abnormal status is a fatal VM failure"),
+						Result.ErrorCategory, Backend == EAvidScriptVmBackendKind::Wasmtime
+							? FString(TEXT("guest_trap")) : FString(TEXT("trap")));
+					bSawTrappedStatus = true;
+				}
+				else if (!bDispatched)
 				{
 					TestTrue(TEXT("Only unmatched mode may leave async void"),
 						Mode == 2 && Completion.Status == EAvidScriptContinuationStatus::Failed
@@ -1353,6 +1371,7 @@ bool FAvidScriptCompiledIntegratedLanguageFlowTest::RunTest(const FString& Param
 				TestTrue(TEXT("Integrated continuation finalizes"),
 					Owner->FinalizeDispatched(Completion.Token, bDispatched));
 				++Resumes;
+				if (bSawTrappedStatus) break;
 			}
 		}
 		auto ReadInt32 = [&](const int32 Offset) -> int32
@@ -1368,6 +1387,23 @@ bool FAvidScriptCompiledIntegratedLanguageFlowTest::RunTest(const FString& Param
 			FMemory::Memcpy(&Value, ValueBytes, sizeof(Value));
 			return Value;
 		};
+		if (Mode == 3)
+		{
+			TestEqual(TEXT("Abnormal status attempted exactly once"), Resumes, 1);
+			TestTrue(TEXT("Abnormal status was rejected"), bSawTrappedStatus);
+			TestEqual(TEXT("Abnormal status did not write result"),
+				ReadInt32(ResultOffset), 0);
+			TestEqual(TEXT("Abnormal status did not run finally"),
+				ReadInt32(CleanupOffset), 0);
+			Owner->Teardown();
+			TestEqual(TEXT("Status-guard teardown retires continuations"),
+				Owner->GetActiveCount(), 0);
+			TestEqual(TEXT("Status-guard teardown releases task results"),
+				Owner->GetTaskResultsForTesting().GetCount(), 0);
+			AddInfo(FString::Printf(TEXT("compiled continuation status guard backend=%d category=%s result=0 cleanup=0"),
+				static_cast<int32>(Backend), *Result.ErrorCategory));
+			continue;
+		}
 		TestEqual(TEXT("Integrated producer, consumer and outer await resume"),
 			Resumes, 3);
 		TestEqual(TEXT("Integrated unmatched error is reported once"),

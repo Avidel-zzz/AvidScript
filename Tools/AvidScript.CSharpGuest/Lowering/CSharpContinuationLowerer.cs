@@ -202,6 +202,35 @@ internal static class CSharpContinuationLowerer
                 },
                 new GuestTerminator("branch_if", condition.Id, callBlockId, falseBlockId, null)));
 
+            string invokeBlockId = callBlockId;
+            if (target.IsCompilerAsync
+                && target.PayloadKind == SemanticContinuationCallback.NonePayloadKind)
+            {
+                // A void-payload resume cannot inspect the host status itself.
+                // Unexpected failures must not continue after the await.
+                invokeBlockId = callBlockId + ":completed";
+                string rejectedBlockId = callBlockId + ":invalid_status";
+                GuestRegister completedStatus = Local(
+                    version2, target.CallbackId, "completed_status", int32Type.Id, locals);
+                GuestRegister statusAccepted = Local(
+                    version2, target.CallbackId, "status_accepted", int32Type.Id, locals);
+                blocks.Add(new GuestBasicBlock(
+                    callBlockId,
+                    new GuestInstruction[]
+                    {
+                        new("constant", completedStatus.Id, Array.Empty<string>(), null,
+                            null, new GuestConstant("int32", "1")),
+                        new("binary", statusAccepted.Id,
+                            new[] { status.Id, completedStatus.Id }, null, "equals", null),
+                    },
+                    new GuestTerminator("branch_if", statusAccepted.Id,
+                        invokeBlockId, rejectedBlockId, null)));
+                blocks.Add(new GuestBasicBlock(
+                    rejectedBlockId,
+                    Array.Empty<GuestInstruction>(),
+                    new GuestTerminator("trap", null, null, null, null)));
+            }
+
             List<GuestInstruction> callInstructions = new();
             string[] argumentIds = target.IsCompilerAsync
                 ? new[] { token.Id }
@@ -290,7 +319,7 @@ internal static class CSharpContinuationLowerer
                 null,
                 null));
             blocks.Add(new GuestBasicBlock(
-                callBlockId,
+                invokeBlockId,
                 callInstructions,
                 Return()));
         }

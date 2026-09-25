@@ -162,16 +162,18 @@ try {
             "compiled integrated language flow backend=$backend mode=0 result=16 cleanup=1 resumes=3"
             "compiled integrated language flow backend=$backend mode=1 result=17 cleanup=1 resumes=3"
             "compiled integrated language flow backend=$backend mode=2 result=0 cleanup=1 resumes=3"
+            $category = if ($backend -eq 1) { 'guest_trap' } else { 'trap' }
+            "compiled continuation status guard backend=$backend category=$category result=0 cleanup=0"
         }
     )
     $scenarios = @($markers | Where-Object {
         [regex]::Matches($log, [regex]::Escape($_)).Count -eq 1
     }).Count
     if ($found -ne 1 -or $success -ne 1 -or $failed -ne 0 -or
-        $complete -ne 1 -or $exit -lt 1 -or $scenarios -ne 6) {
+        $complete -ne 1 -or $exit -lt 1 -or $scenarios -ne 8) {
         throw "Integrated Automation evidence incomplete: found=$found success=$success scenarios=$scenarios failed=$failed complete=$complete exit=$exit log=$logPath"
     }
-    Write-Output "AvidScript.Runtime.Continuation.CompiledIntegratedLanguageFlow: 1/1 passed; .NET=3/3 negative=ASCS3002 Wasmtime/WAMR=6/6; log=$logPath"
+    Write-Output "AvidScript.Runtime.Continuation.CompiledIntegratedLanguageFlow: 1/1 passed; .NET=3/3 negative=ASCS3002 Wasmtime/WAMR=6/6 status-guard=2/2; log=$logPath"
 }
 finally {
     foreach ($name in $variables) {

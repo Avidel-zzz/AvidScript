@@ -735,6 +735,24 @@ internal static class CSharpGuestContinuationTests
             && routeTargets.SequenceEqual(callbackIds.Select(id =>
                 $"function:synthetic:async_resume:{id}")),
             "async await should lower to one exported entry and deterministic resume routes");
+        Assert(new[] { callbackIds[0], callbackIds[2] }.All(id =>
+            {
+                string callId = $"block:synthetic:continuation_v2:call:{id}";
+                GuestBasicBlock guard = router.Blocks.Single(block => block.Id == callId);
+                GuestBasicBlock completed = router.Blocks.Single(block =>
+                    block.Id == callId + ":completed");
+                GuestBasicBlock rejected = router.Blocks.Single(block =>
+                    block.Id == callId + ":invalid_status");
+                return guard.Terminator.Kind == "branch_if"
+                    && guard.Terminator.TargetBlockId == completed.Id
+                    && guard.Terminator.FalseTargetBlockId == rejected.Id
+                    && guard.Instructions.Any(instruction => instruction.OperandIds
+                        .Contains(router.Parameters[2].Id, StringComparer.Ordinal))
+                    && completed.Instructions.Any(instruction => instruction.Op == "call"
+                        && instruction.TargetId == $"function:synthetic:async_resume:{id}")
+                    && rejected.Terminator.Kind == "trap";
+            }),
+            "compiler-owned void-payload resumes must reject a non-completed host status before executing user code");
         Assert(module.Imports.Count(import => import.Name == "continuation_delay") == 1
             && module.Imports.Count(import => import.Name == "continuation_load_object") == 1
             && resumeFunctions.Single(function => function.Id.EndsWith(
