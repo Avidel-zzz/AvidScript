@@ -3,8 +3,9 @@
 const fs = require('node:fs');
 
 if (process.argv.length !== 3 && (process.argv.length !== 4
-  || process.argv[3] !== '--bounded-lifecycle')) {
-  throw new Error('Usage: node RunThrowProducerWasm.cjs <throw-producer.wasm> [--bounded-lifecycle]');
+  || process.argv[3] !== '--bounded-lifecycle')
+  && (process.argv.length !== 5 || process.argv[3] !== '--bounded-generated-type')) {
+  throw new Error('Usage: node RunThrowProducerWasm.cjs <throw-producer.wasm> [--bounded-lifecycle | --bounded-generated-type <type-manifest.json>]');
 }
 
 const wasmModule = new WebAssembly.Module(fs.readFileSync(process.argv[2]));
@@ -137,6 +138,34 @@ for (const entry of WebAssembly.Module.imports(wasmModule)) {
   (imports[entry.module] ??= {})[entry.name] = managedHeap;
 }
 instance = new WebAssembly.Instance(wasmModule, imports);
+if (process.argv[3] === '--bounded-generated-type') {
+  const manifest = JSON.parse(fs.readFileSync(process.argv[4], 'utf8'));
+  const functions = manifest.types.flatMap(type => type.functions);
+  const find = name => {
+    const match = functions.filter(item => item.name === name);
+    if (match.length !== 1 || typeof instance.exports[match[0].export_name] !== 'function') {
+      throw new Error(`Missing generated UFunction export: ${name}`);
+    }
+    return instance.exports[match[0].export_name];
+  };
+  const fallback = find('ReadOrFallback')(123n);
+  collect();
+  if (fallback !== 7 || reported || allocations !== 1
+    || frames.size !== 0 || roots.size !== 0 || objects.size !== 0) {
+    throw new Error(`Generated catch result/cleanup = ${fallback}/${reported}/${allocations}/${frames.size}/${roots.size}/${objects.size}`);
+  }
+  try {
+    find('RaiseUncaught')(123n);
+    throw new Error('Uncaught generated UFunction returned normally');
+  } catch (error) {
+    if (error.message !== 'uncaught-language-error' || !reported) throw error;
+  }
+  if (allocations !== 2 || frames.size === 0 || roots.size === 0) {
+    throw new Error(`Generated uncaught report root = ${allocations}/${frames.size}/${roots.size}`);
+  }
+  process.stdout.write('C# bounded generated UFunction WASM: 2/2 passed\n');
+  process.exit(0);
+}
 if (process.argv[3] === '--bounded-lifecycle') {
   if (typeof instance.exports.avid_on_begin_play !== 'function'
     || typeof instance.exports.avid_on_tick !== 'function') {

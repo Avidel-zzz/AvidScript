@@ -14,7 +14,8 @@ internal static class Program
             UeTypeGenerationResult result = UeTypeShellGenerator.Generate(
                 artifact,
                 commandLine.ModuleName,
-                commandLine.UnrealVersion);
+                commandLine.UnrealVersion,
+                commandLine.AllowBoundedLanguageErrors);
             UeTypePublishResult publication = UeTypeGenerationPublisher.Publish(
                 commandLine.OutputPath,
                 result);

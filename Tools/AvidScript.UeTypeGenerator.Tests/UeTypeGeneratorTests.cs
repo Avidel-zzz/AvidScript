@@ -16,8 +16,9 @@ internal static class UeTypeGeneratorTests
         FunctionDefaultsEnterMetadataManifestAndFingerprint();
         UnsupportedTypesFailClosedBeforePublication();
         InvalidMethodCatalogFailsBeforeGeneration();
+        BoundedExceptionArtifactPreservesNativeShellIdentity();
         AtomicPublisherPreservesCacheHits();
-        return 6;
+        return 7;
     }
 
     private static void GenerationIsByteDeterministicAndTopological()
@@ -359,6 +360,47 @@ internal static class UeTypeGeneratorTests
         }
     }
 
+    private static void BoundedExceptionArtifactPreservesNativeShellIdentity()
+    {
+        const string source = """
+            using System;
+            using AvidScript;
+            [UClass]
+            public partial class ErrorActor : AvidActor
+            {
+                [UFunction(BlueprintCallable = true)]
+                public int Read()
+                {
+                    try { return ThrowOne(); }
+                    catch (Exception) { return 7; }
+                }
+                private static int ThrowOne() { throw new Exception(); }
+            }
+            """;
+        byte[] semantic = Analyze(source, "Scripts/ErrorActor.cs");
+        SemanticDocument document = SemanticSerializer.Deserialize(semantic);
+        Assert(!document.Succeeded && document.ExceptionFlows is { Count: > 0 }
+            && document.Diagnostics.Where(item => item.Severity == "error")
+                .All(item => item.Code == "ASCS3001"),
+            "the fixture must use only the versioned exception-flow failure artifact");
+        AssertThrows(() => UeTypeShellGenerator.Generate(semantic, "AvidScriptGenerated", "5.8"),
+            "default generation must reject an exception-flow failure artifact");
+        UeTypeGenerationResult result = UeTypeShellGenerator.Generate(
+            semantic, "AvidScriptGenerated", "5.8", allowBoundedLanguageErrors: true);
+        Assert(result.Manifest.SemanticSchemaVersion == SemanticContract.ExceptionFlowSchemaVersion
+            && result.Manifest.SemanticVersion == SemanticContract.ExceptionFlowSemanticVersion
+            && result.Manifest.Types.Single().Functions.Single().Name == "Read",
+            "bounded generation must retain the original semantic identity and reflected UFunction");
+        SemanticDocument forged = document with { ExceptionFlows = Array.Empty<SemanticExceptionFlow>() };
+        AssertThrows(() => UeTypeShellGenerator.Generate(SemanticSerializer.Serialize(forged),
+                "AvidScriptGenerated", "5.8", allowBoundedLanguageErrors: true),
+            "bounded generation must reject missing exception-flow evidence");
+        AssertThrows(() => UeTypeShellGenerator.Generate(SemanticSerializer.Serialize(
+                document with { Diagnostics = Array.Empty<SemanticDiagnostic>() }),
+                "AvidScriptGenerated", "5.8", allowBoundedLanguageErrors: true),
+            "bounded generation must reject a failed artifact without the expected diagnostic");
+    }
+
     private static byte[] Analyze(string source, string sourceId)
     {
         string hash = FrontendAnalyzer.Analyze(source, sourceId).Source.Sha256;
@@ -381,6 +423,14 @@ internal static class UeTypeGeneratorTests
         {
             throw new InvalidOperationException(message);
         }
+    }
+
+    private static void AssertThrows(Action action, string message)
+    {
+        bool rejected = false;
+        try { action(); }
+        catch (InvalidOperationException) { rejected = true; }
+        Assert(rejected, message);
     }
 
     private const string Facade = """

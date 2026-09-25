@@ -27,6 +27,17 @@ public:
 	{
 		return Input;
 	}
+
+	UFUNCTION()
+	int32 ReadOrFallback() const
+	{
+		return 0;
+	}
+
+	UFUNCTION()
+	void RaiseUncaught() const
+	{
+	}
 };
 
 UCLASS()

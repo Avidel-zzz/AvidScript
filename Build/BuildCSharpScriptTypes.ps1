@@ -13,6 +13,8 @@ param(
     [string]$Configuration = "Release",
     [ValidateSet("Development", "Shipping")]
     [string]$PackageConfiguration = "Development",
+    [ValidateSet("disabled", "bounded")]
+    [string]$LanguageErrors = "disabled",
     [switch]$HeadlessRelease,
     [switch]$SkipRuntimePackage,
     [ValidateSet("Win64", "Android")]
@@ -37,6 +39,10 @@ $Utf8 = [System.Text.UTF8Encoding]::new($false)
 
 if ($TargetPlatform -ieq "Android" -and -not $HeadlessRelease) {
     throw "Android Generated Type packages require -HeadlessRelease."
+}
+if ($LanguageErrors -ceq "bounded" -and
+    ($HeadlessRelease -or $PackageConfiguration -ceq "Shipping" -or $SkipRuntimePackage)) {
+    throw "Bounded language errors in generated types require a Development Runtime build without -HeadlessRelease."
 }
 $ExpectedArchitecture = if ($TargetPlatform -ieq "Android") { "arm64" } else { "x86_64" }
 $ExpectedTargetTriple = if ($TargetPlatform -ieq "Android") {
@@ -150,14 +156,25 @@ if ($LASTEXITCODE -ne 0) {
     -OutputPath $SemanticPath `
     -ExecutableReferenceSourcePath $BindingPackage.ReferenceSourcePath `
     -Configuration $Configuration
-if ($LASTEXITCODE -ne 0) {
-    throw "C# semantic projection failed with exit code $LASTEXITCODE."
+$SemanticExitCode = $LASTEXITCODE
+if ($SemanticExitCode -ne 0 -and
+    -not ($LanguageErrors -ceq "bounded" -and $SemanticExitCode -eq 1)) {
+    throw "C# semantic projection failed with exit code $SemanticExitCode."
 }
 
 $Semantic = Get-Content -Raw -LiteralPath $SemanticPath | ConvertFrom-Json
-if (-not [bool]$Semantic.succeeded -or
+$SemanticErrors = @($Semantic.diagnostics | Where-Object { [string]$_.severity -ceq "error" })
+$BoundedSemanticArtifact = $LanguageErrors -ceq "bounded" -and
+    $SemanticExitCode -eq 1 -and
+    -not [bool]$Semantic.succeeded -and
+    [int]$Semantic.schema_version -eq 34 -and
+    [string]$Semantic.semantic_version -ceq "1.43" -and
+    @($Semantic.exception_flows | Where-Object { $null -ne $_ }).Count -gt 0 -and
+    $SemanticErrors.Count -gt 0 -and
+    @($SemanticErrors | Where-Object { [string]$_.code -cne "ASCS3001" }).Count -eq 0
+if ((-not [bool]$Semantic.succeeded -and -not $BoundedSemanticArtifact) -or
     @($Semantic.ue_type_declarations).Count -eq 0) {
-    throw "Semantic artifact must be successful and contain UE type declarations."
+    throw "Semantic artifact must be successful or a bounded exception-flow artifact, and contain UE type declarations."
 }
 
 $ToolHome = Join-Path $env:TEMP "AvidScriptUeTypeGenerator"
@@ -189,11 +206,16 @@ if (-not (Test-Path -LiteralPath $GeneratorDll -PathType Leaf)) {
     throw "UE type generator assembly is missing after build: $GeneratorDll"
 }
 
-& $DotNetPath $GeneratorDll `
-    --semantic $SemanticPath `
-    --output $OutputRoot `
-    --module $ModuleName `
-    --ue-version $UnrealVersion
+$GeneratorArguments = @(
+    "--semantic", $SemanticPath,
+    "--output", $OutputRoot,
+    "--module", $ModuleName,
+    "--ue-version", $UnrealVersion
+)
+if ($BoundedSemanticArtifact) {
+    $GeneratorArguments += @("--language-errors", "bounded")
+}
+& $DotNetPath $GeneratorDll @GeneratorArguments
 if ($LASTEXITCODE -ne 0) {
     throw "UE type generator failed with exit code $LASTEXITCODE."
 }
@@ -283,6 +305,7 @@ if (-not $SkipRuntimePackage) {
             -SourcePath $SourcePath `
             -ProjectPath $ProjectPath `
             -ModuleId $RuntimeModuleId `
+            -LanguageErrors $LanguageErrors `
             -ArtifactStem $RuntimeArtifactStem `
             -ManifestPath $RuntimeManifestPath `
             -BindingPackagePath $BindingPackageManifestPath `

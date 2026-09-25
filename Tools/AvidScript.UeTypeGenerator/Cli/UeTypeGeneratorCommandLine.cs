@@ -7,7 +7,8 @@ internal sealed record UeTypeGeneratorCommandLine(
     string SemanticPath,
     string OutputPath,
     string ModuleName,
-    string UnrealVersion)
+    string UnrealVersion,
+    bool AllowBoundedLanguageErrors)
 {
     public static UeTypeGeneratorCommandLine Parse(IReadOnlyList<string> arguments)
     {
@@ -27,11 +28,13 @@ internal sealed record UeTypeGeneratorCommandLine(
         string output = Required(values, "--output");
         string module = Required(values, "--module");
         string unreal = Required(values, "--ue-version");
-        if (values.Count != 4)
+        bool bounded = values.TryGetValue("--language-errors", out string? languageErrors)
+            && languageErrors == "bounded";
+        if (values.Count != (bounded ? 5 : 4))
         {
             throw new ArgumentException("Unknown UE type generator argument.");
         }
-        return new UeTypeGeneratorCommandLine(semantic, output, module, unreal);
+        return new UeTypeGeneratorCommandLine(semantic, output, module, unreal, bounded);
     }
 
     private static string Required(IReadOnlyDictionary<string, string> values, string name)
