@@ -67,6 +67,13 @@ internal static class SemanticAsyncTests
             && analysis.SlotsByAwaitSegment.TryGetValue(1, out var saved)
             && saved.Count == 1 && saved[0].SymbolId == localId,
             "the old value of an await assignment target must survive for a failure cleanup");
+        Assert(SemanticAsyncScopeValidator.GetEntries(segments, 0, new[] { 3 })
+                .SequenceEqual(new[] { new SemanticClosureEntry(1, 3) }),
+            "an await failure edge entering a lexical scope must allocate that scope");
+        Assert(SemanticAsyncScopeValidator.Targets(
+                new(SemanticAsyncMethod.AwaitTransferKind, null, 2))
+                .SequenceEqual(new[] { 2 }),
+            "older await transfers still have only a success edge");
 
         SemanticAsyncSegment[] invalid = (SemanticAsyncSegment[])segments.Clone();
         invalid[1] = segments[1] with

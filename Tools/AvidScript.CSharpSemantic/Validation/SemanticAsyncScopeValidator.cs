@@ -84,6 +84,8 @@ public static class SemanticAsyncScopeValidator
     {
         if (transfer.Kind is SemanticAsyncMethod.GotoTransferKind or SemanticAsyncMethod.AwaitTransferKind or SemanticAsyncMethod.BranchTransferKind)
             yield return transfer.PrimaryTarget;
-        if (transfer.Kind == SemanticAsyncMethod.BranchTransferKind) yield return transfer.SecondaryTarget;
+        if (transfer.Kind == SemanticAsyncMethod.BranchTransferKind
+            || transfer.Kind == SemanticAsyncMethod.AwaitTransferKind && transfer.SecondaryTarget >= 0)
+            yield return transfer.SecondaryTarget;
     }
 }
