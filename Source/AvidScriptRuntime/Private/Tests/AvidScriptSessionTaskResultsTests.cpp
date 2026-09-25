@@ -182,6 +182,11 @@ bool FAvidScriptSessionTaskLanguageErrorTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Caller releases root lease ownership"), !Lease.IsValid());
 	TestTrue(TEXT("Root survives after frame exit"), Heap.Collect() == EHeapError::Ok);
 	TestTrue(TEXT("Faulted source keeps error object"), Heap.IsAlive(ErrorObject));
+	TestTrue(TEXT("Suspended handler retains source task"), Host.RetainTaskResult(Source));
+	TestTrue(TEXT("Original caller releases source task"), Host.ReleaseTaskResult(Source));
+	TestTrue(TEXT("Retained task root survives another collection"),
+		Heap.Collect() == EHeapError::Ok);
+	TestTrue(TEXT("Suspended handler still owns error object"), Heap.IsAlive(ErrorObject));
 	TestTrue(TEXT("Fault propagates to target"),
 		Host.PropagateTaskFailure(Source, Target, Woken));
 	TestEqual(TEXT("Target waiter wakes once"), Woken.Num(), 1);
@@ -204,7 +209,9 @@ bool FAvidScriptSessionTaskLanguageErrorTest::RunTest(const FString& Parameters)
 	}
 	TestFalse(TEXT("Fault cannot propagate twice to completed target"),
 		Host.PropagateTaskFailure(Source, Target, Woken));
-	TestTrue(TEXT("Source reference releases"), Host.ReleaseTaskResult(Source));
+	TestTrue(TEXT("Suspended handler releases source lease"), Host.ReleaseTaskResult(Source));
+	TestFalse(TEXT("Source task expires after its final lease"),
+		Host.ReadTaskResult(Source, Snapshot));
 	TestTrue(TEXT("Target root survives source retirement"), Heap.Collect() == EHeapError::Ok);
 	TestTrue(TEXT("Target still owns error object"), Heap.IsAlive(ErrorObject));
 	TestTrue(TEXT("Producer releases target reference"), Host.ReleaseTaskResult(Target));
