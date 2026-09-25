@@ -18,8 +18,8 @@ enum class EAvidScriptTaskWaitRegistration : uint8
 };
 
 // Catalog tokens and managed object identity belong to the task's code
-// activation. A future Guest import must validate the catalog and current
-// invocation root before constructing this native error payload.
+// activation. Fault admission validates the catalog and the producer's frame
+// root; a reader must acquire its own frame root before releasing the task.
 struct FAvidScriptTaskLanguageError
 {
 	int32 TypeToken = 0;

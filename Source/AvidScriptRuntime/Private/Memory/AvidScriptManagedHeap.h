@@ -93,6 +93,9 @@ public:
 	// Native transfers grant only roots owned by the caller's current activation.
 	EHeapError ValidateRootTransfer(std::span<const FToken> InRoots, std::uint32_t InvocationFloor = 0) const;
 	bool IsObjectRootedInCurrentFrame(FToken Object, std::uint32_t InvocationFloor = 0) const;
+	// Gives a persistent task result's object a frame-owned root before the
+	// current invocation can release its last task reference.
+	EHeapError RootObjectInCurrentFrame(FToken Object, std::uint32_t InvocationFloor);
 	EHeapError ValidateGuestRootFrame(FToken Frame, std::uint32_t InvocationFloor) const;
 	EHeapError ValidateGuestRootAccess(FToken Root, std::uint32_t InvocationFloor,
 		std::span<const FToken> TransferredRoots, bool bAllowTransfer) const;

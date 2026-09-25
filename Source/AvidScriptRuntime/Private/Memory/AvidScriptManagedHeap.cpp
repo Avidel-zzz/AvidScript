@@ -207,6 +207,16 @@ bool FHeap::IsObjectRootedInCurrentFrame(FToken Object, std::uint32_t Invocation
 	return false;
 }
 
+EHeapError FHeap::RootObjectInCurrentFrame(FToken Object, std::uint32_t InvocationFloor)
+{
+	if (const auto State = Ready(); State != EHeapError::Ok) return State;
+	if (FrameStack.size() <= InvocationFloor) return EHeapError::RootAuthority;
+	if (ObjectIndex(Object) == InvalidIndex) return EHeapError::InvalidObject;
+	const auto Slot = FrameStack.back();
+	FToken Root = 0;
+	return CreateRoot(Token(ETokenKind::Frame, Slot, Frames[Slot].Generation), Object, Root);
+}
+
 EHeapError FHeap::ValidateGuestRootFrame(FToken Frame, std::uint32_t InvocationFloor) const
 {
 	if (const auto State = Ready(); State != EHeapError::Ok) return State;

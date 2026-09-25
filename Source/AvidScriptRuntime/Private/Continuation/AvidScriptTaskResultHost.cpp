@@ -84,6 +84,63 @@ bool FAvidScriptWasmRuntimeInstance::DispatchTaskFaultLanguageErrorCall(
 		static_cast<uint64>(Call.Int64Args[1]), OutResult);
 }
 
+bool FAvidScriptWasmRuntimeInstance::ReadTaskLanguageError(
+	const int64 TaskToken, FAvidScriptTaskLanguageError& OutError,
+	FAvidScriptHostCallResult& OutResult)
+{
+	OutError = {};
+	OutResult = {};
+	auto Fail = [&OutResult](const TCHAR* Category, const TCHAR* Details)
+	{
+		OutResult.ErrorCategory = Category;
+		OutResult.Details = Details;
+		return false;
+	};
+	if (!LanguageErrorCatalog || !LanguageErrorCatalog->SupportsTaskLanguageErrorFault())
+	{
+		return Fail(TEXT("task_language_error_version"),
+			TEXT("Task language-error read requires a catalog-bearing combined module."));
+	}
+	if (!IsInGameThread() || !IsLoaded() || ManagedHeapInvocationDepth == 0
+		|| !ManagedHeap || HostContext.Tasks == nullptr)
+	{
+		return Fail(TEXT("task_result_context"),
+			TEXT("Task language-error read requires a live Session and managed VM invocation."));
+	}
+	if (TaskToken <= 0 || !HostContext.Tasks->HasTaskResultType(TaskToken, TEXT("type:int32")))
+	{
+		return Fail(TEXT("task_result_identity"),
+			TEXT("Task token is stale, foreign or has the wrong result type."));
+	}
+	FAvidScriptTaskResultSnapshot Snapshot;
+	if (!HostContext.Tasks->ReadTaskResult(TaskToken, Snapshot)
+		|| Snapshot.TypeId != TEXT("type:int32")
+		|| Snapshot.State != EAvidScriptTaskResultState::Faulted
+		|| !Snapshot.LanguageError.IsSet())
+	{
+		return Fail(TEXT("task_language_error_read"),
+			TEXT("Task has no completed language-error payload."));
+	}
+	const FAvidScriptTaskLanguageError& Error = Snapshot.LanguageError.GetValue();
+	if (!LanguageErrorCatalog->FindType(Error.TypeToken)
+		|| !LanguageErrorCatalog->FindSource(Error.SourceToken))
+	{
+		return Fail(TEXT("task_language_error_catalog"),
+			TEXT("Task language-error payload is absent from the loaded module catalog."));
+	}
+	if (ManagedHeap->RootObjectInCurrentFrame(Error.ObjectToken, ManagedHeapFrameFloor)
+		!= AvidScript::Managed::EHeapError::Ok)
+	{
+		return Fail(TEXT("task_language_error_root"),
+			TEXT("Task language-error object could not be rooted in the current invocation."));
+	}
+	OutError = Error;
+	OutResult.ReturnValue = 1;
+	OutResult.ReturnValueI64 = 1;
+	OutResult.bSucceeded = true;
+	return true;
+}
+
 bool FAvidScriptWasmRuntimeInstance::DispatchTaskPropagateFailureCall(
 	const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult)
 {

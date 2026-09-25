@@ -692,6 +692,11 @@ bool FAvidScriptTaskLanguageErrorAdmissionTest::RunTest(const FString& Parameter
 		TestTrue(TEXT("Combined IR catalog authorizes Task error import"),
 			Runtime.GetLanguageErrorCatalog()
 			&& Runtime.GetLanguageErrorCatalog()->SupportsTaskLanguageErrorFault());
+		FAvidScriptTaskLanguageError ReadError;
+		TestFalse(TEXT("Outside VM invocation cannot read a Task error"),
+			Runtime.ReadTaskLanguageError(Task, ReadError, Result));
+		TestEqual(TEXT("Missing read invocation category"), Result.ErrorCategory,
+			FString(TEXT("task_result_context")));
 		TestFalse(TEXT("Outside VM invocation cannot fault a task"),
 			InvokeFaultImport(Task, 1, 1, 1, Result));
 		TestEqual(TEXT("Missing invocation category"), Result.ErrorCategory,
@@ -727,6 +732,11 @@ bool FAvidScriptTaskLanguageErrorAdmissionTest::RunTest(const FString& Parameter
 		FAvidScriptTaskResultSnapshot Snapshot;
 		TestFalse(TEXT("Rejected reports leave task running"),
 			Endpoint.ReadTaskResult(Task, Snapshot));
+		const uint32 RootsBeforeRead = Heap->GetStats().LiveRoots;
+		TestFalse(TEXT("Running Task has no language error to read"),
+			Runtime.ReadTaskLanguageError(Task, ReadError, Result));
+		TestEqual(TEXT("Rejected read preserves root count"),
+			Heap->GetStats().LiveRoots, RootsBeforeRead);
 		TestTrue(TEXT("Current frame root faults Task<int>"),
 			InvokeFaultImport(Task, 1, 1, ErrorObject, Result));
 		TestTrue(TEXT("Admission returns success"), Result.bSucceeded && Result.ReturnValue == 1);
@@ -746,6 +756,17 @@ bool FAvidScriptTaskLanguageErrorAdmissionTest::RunTest(const FString& Parameter
 		TArray<int64> Waiters;
 		TestTrue(TEXT("Session propagates rooted language error"),
 			Endpoint.PropagateTaskFailure(Task, Target, Waiters));
+		const uint32 RootsBeforeAcquisition = Heap->GetStats().LiveRoots;
+		TestTrue(TEXT("Faulted Task error reads into current invocation"),
+			Runtime.ReadTaskLanguageError(Task, ReadError, Result)
+			&& ReadError.TypeToken == 1 && ReadError.SourceToken == 1
+			&& ReadError.ObjectToken == ErrorObject);
+		TestEqual(TEXT("Read adds one invocation-owned root"),
+			Heap->GetStats().LiveRoots, RootsBeforeAcquisition + 1);
+		TestFalse(TEXT("Foreign Session Task error cannot be read"),
+			Runtime.ReadTaskLanguageError(ForeignTask, ReadError, Result));
+		TestEqual(TEXT("Foreign read has identity category"), Result.ErrorCategory,
+			FString(TEXT("task_result_identity")));
 		Runtime.EndVmInvocation(Invocation);
 		TestTrue(TEXT("Older frame closes"), Heap->PopFrame(OuterFrame) == EHeapError::Ok);
 		TestTrue(TEXT("Root survives invocation exit"), Heap->Collect() == EHeapError::Ok);
@@ -753,8 +774,27 @@ bool FAvidScriptTaskLanguageErrorAdmissionTest::RunTest(const FString& Parameter
 		TestTrue(TEXT("Source task releases"), Endpoint.ReleaseTaskResult(Task));
 		TestTrue(TEXT("Target retains root after source release"),
 			Heap->Collect() == EHeapError::Ok && Heap->IsAlive(ErrorObject));
+		const uint64 ReadInvocation = Runtime.BeginVmInvocation();
+		const uint32 RootsWithoutReadFrame = Heap->GetStats().LiveRoots;
+		TestFalse(TEXT("Task error read needs a frame above the invocation floor"),
+			Runtime.ReadTaskLanguageError(Target, ReadError, Result));
+		TestEqual(TEXT("Missing frame read has root category"), Result.ErrorCategory,
+			FString(TEXT("task_language_error_root")));
+		TestEqual(TEXT("Missing frame read leaves roots unchanged"),
+			Heap->GetStats().LiveRoots, RootsWithoutReadFrame);
+		FToken ReadFrame = 0;
+		TestTrue(TEXT("Awaiter invocation frame starts"),
+			Heap->PushFrame(ReadFrame) == EHeapError::Ok);
+		TestTrue(TEXT("Propagated Task error reads into awaiter frame"),
+			Runtime.ReadTaskLanguageError(Target, ReadError, Result)
+			&& ReadError.TypeToken == 1 && ReadError.SourceToken == 1
+			&& ReadError.ObjectToken == ErrorObject);
 		TestTrue(TEXT("Target task releases"), Endpoint.ReleaseTaskResult(Target));
-		TestTrue(TEXT("Last task releases error root"),
+		TestTrue(TEXT("Awaiter frame keeps object alive after last Task release"),
+			Heap->Collect() == EHeapError::Ok && Heap->IsAlive(ErrorObject)
+			&& Heap->GetStats().LiveRoots == 1);
+		Runtime.EndVmInvocation(ReadInvocation);
+		TestTrue(TEXT("Awaiter frame exit releases last language-error root"),
 			Heap->Collect() == EHeapError::Ok && !Heap->IsAlive(ErrorObject)
 			&& Heap->GetStats().LiveRoots == 0);
 		ForeignOwner->Teardown();

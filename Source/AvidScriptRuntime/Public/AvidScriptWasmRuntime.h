@@ -19,6 +19,7 @@
 
 class FAvidScriptWasmDebugMap;
 class IAvidScriptTaskHost;
+struct FAvidScriptTaskLanguageError;
 class FAvidScriptLanguageErrorCatalog;
 class FAvidScriptProfilerEventBuffer;
 class UWorld;
@@ -642,6 +643,10 @@ public:
 	// may call this only after its own ABI and IR contract has been validated.
 	bool AdmitTaskLanguageError(int64 TaskToken, int32 TypeToken, int32 SourceToken,
 		uint64 ObjectToken, FAvidScriptHostCallResult& OutResult);
+	// Copies a validated fault payload into this invocation and roots its object
+	// until the current managed frame ends, even if the task is released first.
+	bool ReadTaskLanguageError(int64 TaskToken,
+		FAvidScriptTaskLanguageError& OutError, FAvidScriptHostCallResult& OutResult);
 	bool DispatchTaskBindProducerCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	bool DispatchTaskPropagateFailureCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	bool DispatchTaskRetainForContinuationCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
