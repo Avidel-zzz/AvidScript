@@ -1,36 +1,36 @@
 # AvidScript
 
-![AvidScript: C# scripts for Unreal Engine](Docs/Assets/README/avidscript-hero.svg)
-
 ![UE 5.8](https://img.shields.io/badge/UE-5.8-313131?logo=unrealengine&logoColor=white) ![Win64](https://img.shields.io/badge/platform-Win64-0078D4?logo=windows&logoColor=white) [![MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-AvidScript 是 Unreal Engine 5.8 的 C# → WASM 脚本插件。脚本在构建时编译，运行时由 UE 插件加载。现阶段主要在 Win64 开发和测试。
+UE 5.8 的 C# → WASM 脚本插件。构建时使用 Roslyn 和 Guest IR；UE Runtime 不加载 CLR，通过 `ObjectHandle` 调用生成的引擎绑定。
 
-## 快速开始
+![C# 源码、WASM 与 UE Runtime 的关系](Docs/Assets/README/pipeline.svg)
 
-需要 UE 5.8 源码版、Visual Studio 2022（UE C++ 工作负载）、PowerShell 7 和 [.NET SDK 8.0.416](global.json)。在 `Plugins/AvidScript` 目录运行：
+## 运行样例
+
+要求：UE 5.8 源码版、Visual Studio 2022（UE C++ 工作负载）、PowerShell 7、[.NET SDK 8.0.416](global.json)。在 `Plugins/AvidScript` 目录执行：
 
 ```powershell
 pwsh -NoProfile -File Build/InstallWasmtimeDependency.ps1 -Mode Install
 
-$env:UE_ROOT = 'C:\UnrealEngine' # 改成你的 UE 源码目录
+$env:UE_ROOT = 'C:\UnrealEngine' # 换成你的 UE 源码目录
 $project = (Resolve-Path ../../AvidTPSTemplate.uproject).Path
 & (Join-Path $env:UE_ROOT 'Engine\Build\BatchFiles\Build.bat') `
   AvidTPSTemplateEditor Win64 Development "-Project=$project" `
   -WaitMutex -NoHotReloadFromIDE
 ```
 
-打开 `AvidTPSTemplate.uproject`，在关卡中放一个 **Movable** Cube 并选中它。运行 **Tools → AvidScript → Build And Bind C# ActorLifecycle Script**，然后点击 **Play**。Cube 会移动、旋转并放大。对应源码是 [ActorLifecycleScript.cs](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)。
+打开 `AvidTPSTemplate.uproject`，在关卡中放入并选中一个 **Movable** Cube。执行 **Tools → AvidScript → Build And Bind C# ActorLifecycle Script**，再点击 **Play**。Cube 会移动、旋转、放大；源码见 [ActorLifecycleScript.cs](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)。
 
-如果只想编译这个样例的 WASM：
+只构建该样例的 WASM：
 
 ```powershell
 pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 ```
 
-## C# 脚本示例
+## 代码
 
-`UE.Self` 是当前绑定的 Actor。下面摘自 [ActorLifecycleScript.cs](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)；每帧沿 X 轴移动 120 UE 单位/秒：
+`UE.Self` 指向当前绑定的 Actor。下面摘自 [ActorLifecycleScript.cs](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) 中的 `Tick`，沿 X 轴以 120 UE 单位/秒移动：
 
 ```csharp
 [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
@@ -41,7 +41,7 @@ public static void Tick(float deltaSeconds)
 }
 ```
 
-也可以在 `BeginPlay` 中等待 UE 的异步操作。这个片段简化自 [LatentGameplayScript.cs](Samples/CSharp/LatentGameplay/LatentGameplayScript.cs)；`EndPlay` 负责取消等待：
+异步等待与取消的例子来自 [LatentGameplayScript.cs](Samples/CSharp/LatentGameplay/LatentGameplayScript.cs)：
 
 ```csharp
 private static AvidCancellationSource LifetimeCancellation;
@@ -63,9 +63,9 @@ public static void EndPlay()
 }
 ```
 
-## 更多示例
+## 示例目录
 
-| 功能 | 样例 |
+| 需求 | 代码 |
 | --- | --- |
 | 输入、碰撞、Actor 生命周期 | [ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) |
 | Timer、异步加载、Latent 与取消 | [LatentGameplay](Samples/CSharp/LatentGameplay/README.md) |
@@ -74,19 +74,13 @@ public static void EndPlay()
 | 调用项目里的 C++ API | [TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) |
 | 用 C# 声明 Actor、Component、Subsystem | [ScriptDefinedTypes](Samples/CSharp/ScriptDefinedTypes/README.md) |
 
-## 工作原理
+## 支持范围
 
-![C# 源码、WASM 与 UE Runtime 的关系](Docs/Assets/README/pipeline.svg)
-
-Roslyn 只参与构建。运行时没有 CLR；WASM 通过生成的绑定和 `ObjectHandle` 访问 UE 对象。
-
-## 当前状态与限制
-
-- Win64 Editor、打包样例和独立进程网络样例有自动化测试；真实游戏流程、真实多人联机以及 Android/iOS 仍待验收。
-- 这是 C# 子集，不是通用 .NET 运行时。普通 .NET 项目和 NuGet 包不能直接放进来运行。
-- `Task<int>` 支持 `await`、赋值给已有的 `int` 局部变量或脚本静态字段、有限的别名；不支持任务变量重赋值和其他 `Task<T>`。[具体规则](Docs/Phase66/P66.C4_Task_Result_Contract.md)
-- 同步 `try/finally` 可用；正常构建仍不接受 `catch`、`throw`，也不支持在 `finally` 中 `await`。[具体规则](Docs/Phase66/P66.C3_Language_Error_Channel_Contract.md)
-- 改动 C# 声明的 `UClass`、`UProperty` 或 `UFunction` 后，需要重新构建并重启 Editor。
+- Win64 Editor、打包样例和独立进程网络样例有自动化测试；真实游戏流程、真实多人联机、Android/iOS 尚待验收。
+- 编译器支持已实现的 C# 和 UE API 子集，不能直接运行普通 .NET 项目或任意 NuGet 包。
+- `Task<int>` 支持直接 `await`、有限的任务局部变量和别名；其他 `Task<T>` 与任务变量重赋值未支持。见 [Task 结果合同](Docs/Phase66/P66.C4_Task_Result_Contract.md)。
+- 同步 `try/finally` 可用；普通脚本构建尚不接受 `catch`、`throw` 或 `finally` 中的 `await`。见 [语言错误合同](Docs/Phase66/P66.C3_Language_Error_Channel_Contract.md)。
+- C# 声明的 `UClass`、`UProperty`、`UFunction` 变更后，需要重新构建并重启 Editor。
 
 ## 开发
 
@@ -96,7 +90,7 @@ Roslyn 只参与构建。运行时没有 CLR；WASM 通过生成的绑定和 `Ob
 dotnet run --project Tools/AvidScript.CSharpGuest.Tests/AvidScript.CSharpGuest.Tests.csproj -c Release
 ```
 
-[Source/](Source/) 是 UE 插件，[Tools/](Tools/) 是 C# 工具链，[Build/](Build/) 是构建脚本。设计和验证记录在 [Docs/](Docs/)；修改代码前先读 [AGENTS.md](AGENTS.md)。
+代码位于 [Source/](Source/)（UE 插件）、[Tools/](Tools/)（C# 工具链）和 [Build/](Build/)（构建脚本）。设计与验证记录见 [Docs/](Docs/)；修改代码前阅读 [AGENTS.md](AGENTS.md)。
 
 ## License
 
