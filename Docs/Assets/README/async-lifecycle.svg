@@ -3,7 +3,7 @@
   <desc id="desc">BeginPlay 开始等待 0.25 秒；Actor 仍然有效时继续执行并放大。若 Actor 或 World 在等待期间销毁，则取消，不再访问对象。</desc>
   <rect width="1200" height="250" rx="16" fill="#0c151c"/>
   <g font-family="Consolas, 'Liberation Mono', monospace" font-size="15" fill="#97b5b7">
-    <text x="32" y="39">await AvidContinuations.DelayAsync(0.25f)</text>
+    <text x="32" y="39">await UKismetSystemLibrary.DelayAsync(0.25f).WithCancellation(LifetimeCancellation.Token)</text>
   </g>
   <path d="M 94 122 H 1132" fill="none" stroke="#3c595c" stroke-width="3"/>
   <path d="M 441 122 H 746" fill="none" stroke="#83f0ca" stroke-width="4"/>
