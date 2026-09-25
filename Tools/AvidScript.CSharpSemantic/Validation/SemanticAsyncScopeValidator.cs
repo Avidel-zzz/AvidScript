@@ -38,6 +38,7 @@ public static class SemanticAsyncScopeValidator
                 if (transfer.Kind is not (SemanticAsyncMethod.GotoTransferKind or SemanticAsyncMethod.BranchTransferKind
                     or SemanticAsyncMethod.AwaitTransferKind or SemanticAsyncMethod.ReturnTransferKind
                     or SemanticAsyncMethod.ThrowTransferKind)
+                    || transfer.CancellationTarget is not null
                     || Targets(transfer).Any(target => target < 0 || target >= method.Segments.Count)) return false;
             }
             HashSet<string> ids = new(StringComparer.Ordinal);
@@ -87,5 +88,8 @@ public static class SemanticAsyncScopeValidator
         if (transfer.Kind == SemanticAsyncMethod.BranchTransferKind
             || transfer.Kind == SemanticAsyncMethod.AwaitTransferKind && transfer.SecondaryTarget >= 0)
             yield return transfer.SecondaryTarget;
+        if (transfer.Kind == SemanticAsyncMethod.AwaitTransferKind
+            && transfer.CancellationTarget is int cancellationTarget)
+            yield return cancellationTarget;
     }
 }

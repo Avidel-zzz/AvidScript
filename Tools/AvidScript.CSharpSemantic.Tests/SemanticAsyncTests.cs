@@ -105,6 +105,25 @@ internal static class SemanticAsyncTests
             && preview.Segments[cursor].Transfer?.Kind
                 == SemanticAsyncMethod.PropagateFaultTransferKind,
             "fault propagation must execute inner then outer finally exactly once");
+        cursor = preview.Segments.Single(segment => segment.AwaitSite?.ProducerKind
+            == "task_call").Transfer!.CancellationTarget!.Value;
+        cleanupOrder.Clear();
+        visited.Clear();
+        while (visited.Add(cursor))
+        {
+            if (inner.Segments.Contains(cursor)) cleanupOrder.Add(inner.RoslynRegionOrdinal);
+            if (outer.Segments.Contains(cursor)) cleanupOrder.Add(outer.RoslynRegionOrdinal);
+            SemanticAsyncControlTransfer transfer = preview.Segments[cursor].Transfer!;
+            if (transfer.Kind == SemanticAsyncMethod.PropagateCancellationTransferKind) break;
+            Assert(transfer.Kind == SemanticAsyncMethod.GotoTransferKind,
+                "nested cancellation cleanup must not enter a catch decision");
+            cursor = transfer.PrimaryTarget;
+        }
+        Assert(cleanupOrder.SequenceEqual(new[] { inner.RoslynRegionOrdinal,
+                outer.RoslynRegionOrdinal })
+            && preview.Segments[cursor].Transfer?.Kind
+                == SemanticAsyncMethod.PropagateCancellationTransferKind,
+            "cancellation must execute inner then outer finally without becoming a language fault");
     }
 
     private static void AsyncCatchPreviewPreservesHandlerAndCleanupRoutes()
@@ -158,6 +177,11 @@ internal static class SemanticAsyncTests
         SemanticAsyncSegment awaited = preview!.Segments.Single(segment =>
             segment.AwaitSite?.ProducerKind == "task_call");
         SemanticAsyncSegment dispatch = preview.Segments[awaited.Transfer!.SecondaryTarget];
+        Assert(awaited.Transfer.CancellationTarget >= 0
+            && awaited.Transfer.CancellationTarget != awaited.Transfer.SecondaryTarget
+            && preview.Segments.Any(segment => segment.Transfer?.Kind
+                == SemanticAsyncMethod.PropagateCancellationTransferKind),
+            "Task cancellation needs its own successor and terminal outcome");
         Assert(preview.Regions.Count == 3
             && preview.Regions.Single(region => region.Kind == "try")
                 .Segments.Contains(awaited.Ordinal)
@@ -223,6 +247,27 @@ internal static class SemanticAsyncTests
             && ReachesAfterCleanup(dispatch.Transfer.SecondaryTarget,
                 SemanticAsyncMethod.ThrowTransferKind),
             "matched return, rethrow, unmatched fault, and replacement throw must traverse finally");
+        int cancellationStart = awaited.Transfer.CancellationTarget!.Value;
+        Queue<int> cancellationPending = new();
+        HashSet<int> cancellationVisited = new();
+        cancellationPending.Enqueue(cancellationStart);
+        while (cancellationPending.Count > 0)
+        {
+            int ordinal = cancellationPending.Dequeue();
+            if (!cancellationVisited.Add(ordinal)) continue;
+            SemanticAsyncControlTransfer transfer = preview.Segments[ordinal].Transfer!;
+            Assert(transfer.Kind != SemanticAsyncMethod.CatchMatchTransferKind,
+                "cancellation must never enter catch-match dispatch");
+            if (transfer.PrimaryTarget >= 0)
+                cancellationPending.Enqueue(transfer.PrimaryTarget);
+            if (transfer.SecondaryTarget >= 0)
+                cancellationPending.Enqueue(transfer.SecondaryTarget);
+        }
+        Assert(ReachesAfterCleanup(cancellationStart,
+                SemanticAsyncMethod.PropagateCancellationTransferKind)
+            && ReachesAfterCleanup(cancellationStart,
+                SemanticAsyncMethod.ThrowTransferKind),
+            "cancellation runs finally, then propagates or is replaced by its language throw");
         byte[] bytes = SemanticSerializer.Serialize(document);
         Assert(bytes.SequenceEqual(SemanticSerializer.Serialize(
             SemanticSerializer.Deserialize(bytes))),
@@ -404,6 +449,35 @@ internal static class SemanticAsyncTests
         Assert(SemanticAsyncStateFlowAnalyzer.AnalyzeControlFlow(invalid).Issues
                 .Any(issue => issue.Message.Contains("missing segment 99", StringComparison.Ordinal)),
             "a missing await failure successor must fail closed");
+        SemanticAsyncSegment[] cancellationOnly = segments
+            .Select(segment => segment.Ordinal == 1
+                ? segment with { Transfer = segment.Transfer! with
+                    { CancellationTarget = 4 } }
+                : segment.Ordinal == 3
+                    ? segment with { Transfer = new(
+                        SemanticAsyncMethod.ReturnTransferKind, Value("literal"), -1) }
+                    : segment)
+            .Append(new SemanticAsyncSegment(4,
+                new[] { new SemanticAsyncStatement(Value("local_reference", localId), null) },
+                null, span, new(SemanticAsyncMethod.GotoTransferKind, null, 5)))
+            .Append(new SemanticAsyncSegment(5, Array.Empty<SemanticAsyncStatement>(),
+                null, span, new(SemanticAsyncMethod.PropagateCancellationTransferKind,
+                    null, -1)))
+            .ToArray();
+        SemanticAsyncStateFlowAnalysis cancellationFlow =
+            SemanticAsyncStateFlowAnalyzer.AnalyzeControlFlow(cancellationOnly);
+        Assert(cancellationFlow.Issues.Count == 0
+            && cancellationFlow.SlotsByAwaitSegment[1].Single().SymbolId == localId
+            && SemanticAsyncScopeValidator.GetEntries(cancellationOnly, 0, new[] { 4 })
+                .SequenceEqual(new[] { new SemanticClosureEntry(1, 4) }),
+            "a cancellation-only cleanup local must survive the await and enter its lexical scope");
+        cancellationOnly[1] = cancellationOnly[1] with
+        {
+            Transfer = cancellationOnly[1].Transfer! with { CancellationTarget = 99 },
+        };
+        Assert(SemanticAsyncStateFlowAnalyzer.AnalyzeControlFlow(cancellationOnly).Issues
+                .Any(issue => issue.Message.Contains("missing segment 99", StringComparison.Ordinal)),
+            "a missing await cancellation successor must fail closed");
     }
 
     private static void TaskIntThrowPublishesVersionedErrorPlan()
@@ -461,6 +535,9 @@ internal static class SemanticAsyncTests
         Assert(bytes.SequenceEqual(SemanticSerializer.Serialize(
             SemanticSerializer.Deserialize(bytes))),
             "the async error plan must round-trip canonically");
+        Assert(!Encoding.UTF8.GetString(bytes).Contains("CancellationTarget",
+                StringComparison.Ordinal),
+            "schema 41 serialization must omit the preview-only cancellation field");
         Assert(!SemanticAsyncInvocationValidator.IsValid(document with
         {
             SchemaVersion = SemanticContract.TaskLanguageErrorSchemaVersion,
@@ -483,6 +560,21 @@ internal static class SemanticAsyncTests
                 }
                 : candidate).ToArray(),
         }), "the current executable async schema must reject preview-only catch metadata");
+        SemanticAsyncSegment awaitedSegment = method.Segments.Single(item =>
+            item.AwaitSite is not null);
+        Assert(!SemanticAsyncInvocationValidator.IsValid(document with
+        {
+            AsyncMethods = document.AsyncMethods.Select(candidate => candidate == method
+                ? candidate with
+                {
+                    Segments = candidate.Segments.Select(item =>
+                        item.Ordinal == awaitedSegment.Ordinal
+                            ? item with { Transfer = item.Transfer! with
+                                { CancellationTarget = method.EntrySegmentOrdinal } }
+                            : item).ToArray(),
+                }
+                : candidate).ToArray(),
+        }), "schema 41 must reject a preview-only cancellation edge");
         Assert(!SemanticAsyncInvocationValidator.IsValid(document with
         {
             AsyncMethods = new[] { method with

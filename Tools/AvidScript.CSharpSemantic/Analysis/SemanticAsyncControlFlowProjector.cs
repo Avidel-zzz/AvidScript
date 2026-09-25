@@ -80,6 +80,7 @@ internal static class SemanticAsyncControlFlowProjector
         private string? returnValueSymbolId;
         private int returnCleanupTarget = -1;
         private int faultCleanupTarget = -1;
+        private int cancellationCleanupTarget = -1;
         private int structuredNodeCount;
         private bool failed;
 
@@ -169,7 +170,9 @@ internal static class SemanticAsyncControlFlowProjector
                     draft.Transfer.Condition,
                     RemapTarget(draft.Transfer.PrimaryTarget, ordinalByDraft),
                     RemapTarget(draft.Transfer.SecondaryTarget, ordinalByDraft),
-                    draft.Transfer.ExceptionTypeId);
+                    draft.Transfer.ExceptionTypeId,
+                    draft.Transfer.CancellationTarget < 0 ? null
+                        : RemapTarget(draft.Transfer.CancellationTarget, ordinalByDraft));
                 segments.Add(new SemanticAsyncSegment(
                     ordinal,
                     draft.Statements,
@@ -299,7 +302,10 @@ internal static class SemanticAsyncControlFlowProjector
                         null,
                         successor,
                         awaitSite!.ProducerKind is "task_call" or "task_local"
-                            ? faultCleanupTarget : -1));
+                            ? faultCleanupTarget : -1,
+                        null,
+                        awaitSite.ProducerKind is "task_call" or "task_local"
+                            ? cancellationCleanupTarget : -1));
             }
 
             switch (statement)
@@ -573,10 +579,27 @@ internal static class SemanticAsyncControlFlowProjector
                     LoopTargets.None, depth + 1, cleanupDrafts);
             if (faultExit < 0) return -1;
 
+            int cancellationContinuation = cancellationCleanupTarget;
+            if (cancellationContinuation < 0)
+            {
+                cancellationContinuation = AddDraft(statement.Span,
+                    Array.Empty<SemanticAsyncStatement>(), null,
+                    new DraftTransfer(
+                        SemanticAsyncMethod.PropagateCancellationTransferKind,
+                        null, -1, -1));
+                if (cancellationContinuation < 0) return -1;
+            }
+            int cancellationExit = cleanup is null ? cancellationContinuation
+                : BuildPreviewRegionBlock(cleanup, cancellationContinuation,
+                    LoopTargets.None, depth + 1, cleanupDrafts);
+            if (cancellationExit < 0) return -1;
+
             int outerReturn = returnCleanupTarget;
             int outerFault = faultCleanupTarget;
+            int outerCancellation = cancellationCleanupTarget;
             returnCleanupTarget = returnExit;
             faultCleanupTarget = faultExit;
+            cancellationCleanupTarget = cancellationExit;
             int[] handlerEntries = new int[statement.Catches.Count];
             List<int>[] handlerDrafts = Enumerable.Range(0, statement.Catches.Count)
                 .Select(_ => new List<int>()).ToArray();
@@ -590,11 +613,13 @@ internal static class SemanticAsyncControlFlowProjector
                 {
                     returnCleanupTarget = outerReturn;
                     faultCleanupTarget = outerFault;
+                    cancellationCleanupTarget = outerCancellation;
                     return -1;
                 }
             }
             returnCleanupTarget = outerReturn;
             faultCleanupTarget = outerFault;
+            cancellationCleanupTarget = outerCancellation;
 
             int dispatch = faultExit;
             for (int index = statement.Catches.Count - 1; index >= 0; --index)
@@ -615,6 +640,7 @@ internal static class SemanticAsyncControlFlowProjector
 
             returnCleanupTarget = returnExit;
             faultCleanupTarget = dispatch;
+            cancellationCleanupTarget = cancellationExit;
             int firstProtectedDraft = drafts.Count;
             List<int> protectedDrafts = new();
             int entry = BuildPreviewRegionBlock(statement.Block, normalExit,
@@ -622,6 +648,7 @@ internal static class SemanticAsyncControlFlowProjector
                 protectedDrafts);
             returnCleanupTarget = outerReturn;
             faultCleanupTarget = outerFault;
+            cancellationCleanupTarget = outerCancellation;
             if (entry < 0) return -1;
             if (drafts.Skip(firstProtectedDraft).Any(draft => draft.AwaitSite is
                 { ProducerKind: not ("task_call" or "task_local") }))
@@ -698,6 +725,7 @@ internal static class SemanticAsyncControlFlowProjector
             if (targets.ContinueTarget >= 0 && continueCleanup < 0) return -1;
 
             int faultCleanup = faultCleanupTarget;
+            int cancellationCleanup = cancellationCleanupTarget;
             if (previewSuspendedFinally && suspended)
             {
                 if (faultCleanup < 0)
@@ -711,12 +739,27 @@ internal static class SemanticAsyncControlFlowProjector
                 faultCleanup = BuildPreviewRegionBlock(cleanup, faultCleanup,
                     LoopTargets.None, depth + 1, cleanupDrafts);
                 if (faultCleanup < 0) return -1;
+                if (cancellationCleanup < 0)
+                {
+                    cancellationCleanup = AddDraft(statement.Span,
+                        Array.Empty<SemanticAsyncStatement>(), null,
+                        new DraftTransfer(
+                            SemanticAsyncMethod.PropagateCancellationTransferKind,
+                            null, -1, -1));
+                    if (cancellationCleanup < 0) return -1;
+                }
+                cancellationCleanup = BuildPreviewRegionBlock(cleanup,
+                    cancellationCleanup, LoopTargets.None, depth + 1,
+                    cleanupDrafts);
+                if (cancellationCleanup < 0) return -1;
             }
 
             int outerReturnCleanup = returnCleanupTarget;
             int outerFaultCleanup = faultCleanupTarget;
+            int outerCancellationCleanup = cancellationCleanupTarget;
             returnCleanupTarget = returnCleanup;
             faultCleanupTarget = faultCleanup;
+            cancellationCleanupTarget = cancellationCleanup;
             int firstProtectedDraft = drafts.Count;
             List<int> protectedDrafts = new();
             int entry = BuildPreviewRegionBlock(statement.Block, normalCleanup,
@@ -724,6 +767,7 @@ internal static class SemanticAsyncControlFlowProjector
                 protectedDrafts);
             returnCleanupTarget = outerReturnCleanup;
             faultCleanupTarget = outerFaultCleanup;
+            cancellationCleanupTarget = outerCancellationCleanup;
             if (previewSuspendedFinally && drafts.Skip(firstProtectedDraft)
                 .Any(draft => draft.AwaitSite is { ProducerKind: not ("task_call" or "task_local") }))
             {
@@ -1591,6 +1635,10 @@ internal static class SemanticAsyncControlFlowProjector
                 {
                     pending.Push(transfer.SecondaryTarget);
                 }
+                if (transfer.CancellationTarget >= 0)
+                {
+                    pending.Push(transfer.CancellationTarget);
+                }
             }
             return reachable;
         }
@@ -1756,7 +1804,8 @@ internal static class SemanticAsyncControlFlowProjector
         SemanticOperation? Condition,
         int PrimaryTarget,
         int SecondaryTarget,
-        string? ExceptionTypeId = null);
+        string? ExceptionTypeId = null,
+        int CancellationTarget = -1);
 
     private sealed record SwitchCaseTarget(
         CaseSwitchLabelSyntax Label,

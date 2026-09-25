@@ -283,6 +283,11 @@ public static class SemanticAsyncStateFlowAnalyzer
                 slots.UnionWith(GetSuccessorLive(segment, transfer.SecondaryTarget,
                     liveIn, issues));
             }
+            if (transfer.CancellationTarget is int cancellationTarget)
+            {
+                slots.UnionWith(GetSuccessorLive(segment, cancellationTarget,
+                    liveIn, issues));
+            }
             slotsByAwait[segment.Ordinal] = slots
                 .Where(locals.ContainsKey)
                 .OrderBy(symbolId => symbolId, StringComparer.Ordinal)
@@ -324,6 +329,8 @@ public static class SemanticAsyncStateFlowAnalyzer
                     ? new HashSet<string>(StringComparer.Ordinal)
                     : TransferValue(transfer.Condition,
                         new HashSet<string>(StringComparer.Ordinal), localIds),
+            SemanticAsyncMethod.PropagateCancellationTransferKind =>
+                new HashSet<string>(StringComparer.Ordinal),
             SemanticAsyncMethod.GotoTransferKind =>
                 GetSuccessorLive(segment, transfer.PrimaryTarget, liveIn, issues),
             SemanticAsyncMethod.BranchTransferKind => TransferValue(
@@ -380,6 +387,11 @@ public static class SemanticAsyncStateFlowAnalyzer
         if (transfer.SecondaryTarget >= 0)
         {
             live.UnionWith(GetSuccessorLive(segment, transfer.SecondaryTarget,
+                liveIn, issues));
+        }
+        if (transfer.CancellationTarget is int cancellationTarget)
+        {
+            live.UnionWith(GetSuccessorLive(segment, cancellationTarget,
                 liveIn, issues));
         }
         if (segment.AwaitSite?.CancellationToken is { } cancellationToken)

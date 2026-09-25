@@ -1090,7 +1090,8 @@ internal static class CSharpSemanticInputValidator
             }
 
             SemanticAsyncControlTransfer transfer = segment.Transfer;
-            if (transfer.ExceptionTypeId is not null)
+            if (transfer.ExceptionTypeId is not null
+                || transfer.CancellationTarget is not null)
             {
                 return false;
             }

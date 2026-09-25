@@ -134,9 +134,11 @@ internal static class SemanticAsyncExceptionRegionBinder
                 != regions.Count
             || projection.Segments.Any(segment => segment.Transfer is
                 { Kind: SemanticAsyncMethod.AwaitTransferKind,
-                    SecondaryTarget: >= 0 }
-                && !regions.Any(region => region.Kind == "try"
-                    && region.Segments.Contains(segment.Ordinal)))) return false;
+                    SecondaryTarget: >= 0 } transfer
+                && (transfer.CancellationTarget is not >= 0
+                    || transfer.CancellationTarget == transfer.SecondaryTarget
+                    || !regions.Any(region => region.Kind == "try"
+                        && region.Segments.Contains(segment.Ordinal))))) return false;
         foreach (var (source, binding) in bindings)
         {
             TryStatementSyntax? parent = source.Ancestors()
