@@ -136,7 +136,23 @@ int64 FAvidScriptContinuationHostEndpoint::ScheduleDelay(
 			Lane,
 			ActivationSerial,
 			DelaySeconds,
-			CallbackId)
+			CallbackId,
+			false)
+		: 0;
+}
+
+int64 FAvidScriptContinuationHostEndpoint::ScheduleDelayWithCancelResume(
+	const float DelaySeconds,
+	const int32 CallbackId)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = Owner.Pin();
+	return bValid && PinnedOwner
+		? PinnedOwner->ScheduleDelay(
+			Lane,
+			ActivationSerial,
+			DelaySeconds,
+			CallbackId,
+			true)
 		: 0;
 }
 
@@ -1115,7 +1131,8 @@ int64 FAvidScriptSessionContinuations::ScheduleDelay(
 	const EAvidScriptContinuationLane Lane,
 	const uint64 ActivationSerial,
 	const float DelaySeconds,
-	const int32 CallbackId)
+	const int32 CallbackId,
+	const bool bResumeOnCancel)
 {
 	if (!IsInGameThread()
 		|| bTearingDown
@@ -1146,6 +1163,7 @@ int64 FAvidScriptSessionContinuations::ScheduleDelay(
 	Entry.CallbackId = CallbackId;
 	Entry.World = World;
 	Entry.ProducerKind = EProducerKind::Timer;
+	Entry.bResumeOnCancel = bResumeOnCancel;
 	const int64 Token = AllocateEntry(MoveTemp(Entry));
 	if (Token == 0)
 	{
@@ -2425,7 +2443,10 @@ bool FAvidScriptSessionContinuations::CancelEntry(
 
 	const bool bResumeOutcome = bDeliverTerminal
 		&& (Entry.LatentCompletion.ResumesOutcomeOnCancel()
-			|| Entry.ProducerKind == EProducerKind::AsyncAction);
+			|| Entry.ProducerKind == EProducerKind::AsyncAction
+			|| (Entry.ProducerKind == EProducerKind::Timer
+				&& Entry.bResumeOnCancel
+				&& IsEntryContextLive(Entry)));
 	CancelEntryProducer(Entry);
 	RemoveReadyToken(Entry.Token);
 	if (!bResumeOutcome)

@@ -36,6 +36,7 @@ public:
 		uint64 InActivationSerial);
 
 	int64 ScheduleDelay(float DelaySeconds, int32 CallbackId) override;
+	int64 ScheduleDelayWithCancelResume(float DelaySeconds, int32 CallbackId) override;
 	int64 ScheduleObjectLoad(FString ObjectPath, int32 CallbackId) override;
 	bool Cancel(int64 Token) override;
 	int64 CreateCancellationSource() override;
@@ -187,7 +188,8 @@ public:
 		EAvidScriptContinuationLane Lane,
 		uint64 ActivationSerial,
 		float DelaySeconds,
-		int32 CallbackId);
+		int32 CallbackId,
+		bool bResumeOnCancel);
 	int64 ScheduleObjectLoad(
 		EAvidScriptContinuationLane Lane,
 		uint64 ActivationSerial,
@@ -324,6 +326,7 @@ private:
 		bool bDispatchHasObjectResult = false;
 		bool bLatentCommitted = false;
 		bool bLatentCompletionPending = false;
+		bool bResumeOnCancel = false;
 		bool bCancelledTerminalQueued = false;
 		bool bStateConsumed = false;
 	};

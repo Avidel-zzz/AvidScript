@@ -743,6 +743,107 @@ bool FAvidScriptContinuationCancellationSourceTest::RunTest(
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptContinuationCancelResumeTest,
+	"AvidScript.Runtime.Continuation.CancelResume",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptContinuationCancelResumeTest::RunTest(
+	const FString& Parameters)
+{
+	UWorld* World = nullptr;
+	if (!TestTrue(
+			TEXT("Cancel-resume world is created"),
+			CreateContinuationWorld(World)))
+	{
+		return false;
+	}
+
+	const TSharedPtr<FAvidScriptSessionContinuations> Owner =
+		MakeShared<FAvidScriptSessionContinuations>();
+	FAvidScriptContinuationHostEndpoint& Host = Owner->ResetActive(World);
+	TArray<FAvidScriptContinuationCompletion> Completions;
+	const uint8 State[] = { 7, 3, 1 };
+
+	const int64 Task = Host.CreateTaskResult(TEXT("System.Int32"));
+	TestTrue(TEXT("Producer owns a task reference"), Host.RetainTaskResult(Task));
+	const int64 Token = Host.ScheduleDelayWithCancelResume(10.0f, 47);
+	TestNotEqual(TEXT("Opt-in delay is scheduled"), Token, 0LL);
+	TestTrue(TEXT("Producer task binds"), Host.BindTaskProducer(Task, Token));
+	TestTrue(TEXT("Cancel cleanup frame is stored"),
+		Host.StoreState(Token, MakeArrayView(State)));
+	const int64 Source = Host.CreateCancellationSource();
+	TestTrue(TEXT("Cancellation source binds"),
+		Host.BindCancellationSource(Source, Token));
+	TestTrue(TEXT("Active cancellation is accepted"),
+		Host.CancelCancellationSource(Source));
+	TestEqual(TEXT("Cancelled entry remains until cleanup dispatch"),
+		Owner->GetActiveCount(), 1);
+	FAvidScriptTaskResultSnapshot Snapshot;
+	TestFalse(TEXT("Producer task remains pending during cleanup"),
+		Host.ReadTaskResult(Task, Snapshot));
+	Owner->DrainReady(Completions);
+	if (TestEqual(TEXT("Cancelled await resumes once"), Completions.Num(), 1))
+	{
+		TestEqual(TEXT("Cancelled await preserves its token"),
+			Completions[0].Token, Token);
+		TestTrue(TEXT("Cancelled await exposes terminal status"),
+			Completions[0].Status == EAvidScriptContinuationStatus::Cancelled);
+		uint8 Restored[UE_ARRAY_COUNT(State)] = {};
+		TestTrue(TEXT("Cleanup reads its frame"),
+			Host.ReadState(Token, MakeArrayView(Restored)));
+		TestTrue(TEXT("Cleanup frame is preserved"),
+			FMemory::Memcmp(Restored, State, UE_ARRAY_COUNT(State)) == 0);
+		TestTrue(TEXT("Cleanup dispatch finalizes"),
+			Owner->FinalizeDispatched(Token, true));
+	}
+	TestFalse(TEXT("Terminal cancellation cannot queue twice"), Host.Cancel(Token));
+	Owner->DrainReady(Completions);
+	TestEqual(TEXT("Terminal cancellation is delivered only once"),
+		Completions.Num(), 0);
+	TestTrue(TEXT("Task result becomes readable after cleanup"),
+		Host.ReadTaskResult(Task, Snapshot));
+	TestTrue(TEXT("Cleanup completion cancels producer task"),
+		Snapshot.State == EAvidScriptTaskResultState::Cancelled);
+	TestTrue(TEXT("Caller releases cancelled task"), Host.ReleaseTaskResult(Task));
+	TestTrue(TEXT("Cancellation source releases"),
+		Host.ReleaseCancellationSource(Source));
+	TestEqual(TEXT("Cleanup releases its frame"),
+		Owner->GetStateFrameByteCountForTesting(), 0);
+
+	const int64 AlreadyCancelled = Host.CreateCancellationSource();
+	TestTrue(TEXT("Source can cancel before binding"),
+		Host.CancelCancellationSource(AlreadyCancelled));
+	const int64 LateToken = Host.ScheduleDelayWithCancelResume(10.0f, 48);
+	TestTrue(TEXT("Late cleanup frame is stored"),
+		Host.StoreState(LateToken, MakeArrayView(State)));
+	TestTrue(TEXT("Already-cancelled source queues cleanup"),
+		Host.BindCancellationSource(AlreadyCancelled, LateToken));
+	Owner->DrainReady(Completions);
+	if (TestEqual(TEXT("Late binding resumes once"), Completions.Num(), 1))
+	{
+		TestEqual(TEXT("Late binding uses Cancelled status"),
+			Completions[0].Status, EAvidScriptContinuationStatus::Cancelled);
+		TestTrue(TEXT("Late binding finalizes"),
+			Owner->FinalizeDispatched(LateToken, true));
+	}
+	TestTrue(TEXT("Late source releases"),
+		Host.ReleaseCancellationSource(AlreadyCancelled));
+
+	const int64 TeardownToken = Host.ScheduleDelayWithCancelResume(10.0f, 49);
+	TestTrue(TEXT("Teardown cleanup frame is stored"),
+		Host.StoreState(TeardownToken, MakeArrayView(State)));
+	Owner->Teardown();
+	Owner->DrainReady(Completions);
+	TestEqual(TEXT("Teardown never resumes Guest cleanup"), Completions.Num(), 0);
+	TestEqual(TEXT("Teardown releases opt-in continuation"),
+		Owner->GetActiveCount(), 0);
+	TestEqual(TEXT("Teardown releases opt-in frame"),
+		Owner->GetStateFrameByteCountForTesting(), 0);
+	DestroyContinuationWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptContinuationActiveLifecycleTest,
 	"AvidScript.Runtime.Continuation.ActiveLifecycle",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

@@ -38,6 +38,9 @@ public:
 	virtual ~IAvidScriptContinuationHost() = default;
 
 	virtual int64 ScheduleDelay(float DelaySeconds, int32 CallbackId) = 0;
+	// A compiler-owned await may resume on active cancellation to run its
+	// cleanup. Older hosts fail closed instead of silently dropping cleanup.
+	virtual int64 ScheduleDelayWithCancelResume(float, int32) { return 0; }
 	virtual int64 ScheduleObjectLoad(FString ObjectPath, int32 CallbackId) = 0;
 	virtual bool Cancel(int64 Token) = 0;
 	virtual int64 CreateCancellationSource() = 0;
