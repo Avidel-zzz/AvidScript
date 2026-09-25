@@ -916,6 +916,41 @@ int32 FAvidScriptSessionContinuations::GetActiveCount() const
 	return Count;
 }
 
+#if WITH_DEV_AUTOMATION_TESTS
+bool FAvidScriptSessionContinuations::GetPendingActiveTimerForTesting(
+	int64& OutContinuationToken, int64& OutProducerTaskToken) const
+{
+	OutContinuationToken = 0;
+	OutProducerTaskToken = 0;
+	if (!ActiveEndpoint)
+	{
+		return false;
+	}
+	const uint64 ActivationSerial = ActiveEndpoint->GetActivationSerial();
+	for (const FSlot& Slot : Slots)
+	{
+		if (!Slot.Entry.IsSet()
+			|| Slot.Entry->Lane != EAvidScriptContinuationLane::Active
+			|| Slot.Entry->ActivationSerial != ActivationSerial
+			|| Slot.Entry->ProducerKind != EProducerKind::Timer
+			|| Slot.Entry->bReady || Slot.Entry->bDispatching
+			|| Slot.Entry->ProducerTaskToken <= 0)
+		{
+			continue;
+		}
+		if (OutContinuationToken != 0)
+		{
+			OutContinuationToken = 0;
+			OutProducerTaskToken = 0;
+			return false;
+		}
+		OutContinuationToken = Slot.Entry->Token;
+		OutProducerTaskToken = Slot.Entry->ProducerTaskToken;
+	}
+	return OutContinuationToken > 0;
+}
+#endif
+
 int32 FAvidScriptSessionContinuations::GetPreparedCount() const
 {
 	if (!PreparedEndpoint)

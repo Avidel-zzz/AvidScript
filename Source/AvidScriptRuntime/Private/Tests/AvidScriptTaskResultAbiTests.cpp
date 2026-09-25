@@ -1085,6 +1085,130 @@ bool FAvidScriptCompiledAsyncExceptionFlowTest::RunTest(const FString& Parameter
 	}
 	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime,
 		EAvidScriptVmBackendKind::Wamr})
+	for (const bool bHostFault : {false, true})
+	{
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime
+			? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		FAvidScriptWasmRuntimeInstance Runtime(Selection);
+		FAvidScriptWasmSmokeResult Result;
+		if (!TestTrue(TEXT("IR 22 isolation module loads"),
+			Runtime.LoadModule(Bytes.GetData(), Bytes.Num(), ModuleId, Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		if (!TestTrue(TEXT("IR 22 isolation continuation export exists"),
+			Runtime.ValidateRequiredExports({TEXT("avid_on_continuation_v2")}, Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		const auto Owner = MakeShared<FAvidScriptSessionContinuations>();
+		auto& Endpoint = Owner->ResetActive(World);
+		FAvidScriptWasmHostContext Context;
+		Context.Tasks = &Endpoint;
+		Context.Continuations = &Endpoint;
+		Context.World = World;
+		Runtime.SetHostContext(Context);
+		const int32 Mode = 1;
+		uint8 ModeBytes[sizeof(int32)] = {};
+		FMemory::Memcpy(ModeBytes, &Mode, sizeof(Mode));
+		FString Error;
+		if (!TestTrue(TEXT("Inject catch-enabled isolation mode"),
+			Runtime.WriteStateBytes(ModeOffset, MakeArrayView(ModeBytes), Error)))
+		{ AddError(Error); return false; }
+		if (!TestTrue(TEXT("IR 22 isolation fixture suspends"),
+			Runtime.BeginPlay(Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		int64 TimerToken = 0;
+		int64 ProducerTaskToken = 0;
+		if (!TestTrue(TEXT("One pending Task<int> timer is available for isolation"),
+			Owner->GetPendingActiveTimerForTesting(TimerToken, ProducerTaskToken)))
+			return false;
+		if (bHostFault)
+		{
+			TArray<int64> Waiters;
+			if (!TestTrue(TEXT("Inject ordinary Host task fault"),
+				Endpoint.FaultTaskResult(ProducerTaskToken,
+					TEXT("injected_host_failure"), Waiters))) return false;
+			TestEqual(TEXT("Host task fault wakes the protected await"),
+				Waiters.Num(), 1);
+		}
+		if (!TestTrue(TEXT("Retire the pending timer while Session is active"),
+			Endpoint.Cancel(TimerToken))) return false;
+
+		int32 Resumes = 0;
+		int32 FailedDispatches = 0;
+		for (int32 Round = 0; Round < 8; ++Round)
+		{
+			World->Tick(LEVELTICK_All, 0.02f);
+			++GFrameCounter;
+			TArray<FAvidScriptContinuationCompletion> Ready;
+			Owner->DrainReady(Ready);
+			for (const FAvidScriptContinuationCompletion& Completion : Ready)
+			{
+				TestEqual(TEXT("Isolation preserves the task terminal status"),
+					Completion.Status, bHostFault
+						? EAvidScriptContinuationStatus::Failed
+						: EAvidScriptContinuationStatus::Cancelled);
+				const bool bDispatched = Runtime.DispatchContinuation(Completion, Result);
+				if (!bDispatched)
+				{
+					++FailedDispatches;
+					TestTrue(TEXT("Host and cancellation failures are not C# exceptions"),
+						Result.ErrorCategory != TEXT("language_error_uncaught"));
+					if (bHostFault)
+					{
+						TestEqual(TEXT("Ordinary Host fault has no language-error payload"),
+							Result.ErrorCategory, FString(TEXT("task_language_error_read")));
+					}
+					else
+					{
+						TestTrue(TEXT("Cancellation never reads a language-error payload"),
+							Result.ErrorCategory != TEXT("task_language_error_read"));
+					}
+				}
+				TestTrue(TEXT("Isolation continuation finalizes"),
+					Owner->FinalizeDispatched(Completion.Token, bDispatched));
+				++Resumes;
+			}
+		}
+		auto ReadInt32 = [&](const int32 Offset) -> int32
+		{
+			uint8 ValueBytes[sizeof(int32)] = {};
+			FString ReadError;
+			if (!Runtime.ReadStateBytes(Offset, MakeArrayView(ValueBytes), ReadError))
+			{
+				AddError(ReadError);
+				return MIN_int32;
+			}
+			int32 Value = 0;
+			FMemory::Memcpy(&Value, ValueBytes, sizeof(Value));
+			return Value;
+		};
+		TestEqual(TEXT("Isolation wakes the protected await and outer async void"),
+			Resumes, 2);
+		TestEqual(TEXT("Only the expected dispatches fail"),
+			FailedDispatches, bHostFault ? 2 : 1);
+		TestEqual(TEXT("Isolation does not return a handled language-error value"),
+			ReadInt32(ResultOffset), 0);
+		TestEqual(TEXT("Cancellation runs finally; Host fault does not enter script"),
+			ReadInt32(CleanupOffset), bHostFault ? 0 : 1);
+		TestEqual(TEXT("Isolation releases all Task<int> results"),
+			Owner->GetTaskResultsForTesting().GetCount(), 0);
+		TestEqual(TEXT("Isolation retires every continuation"),
+			Owner->GetActiveCount(), 0);
+		Owner->Teardown();
+		AvidScript::Managed::FHeap* Heap = Runtime.GetManagedHeapForTesting();
+		TestEqual(TEXT("Isolation releases language-error roots"),
+			Heap->GetStats().LiveRoots, static_cast<uint32>(0));
+		TestEqual(TEXT("Isolation managed GC succeeds"),
+			Heap->Collect(), AvidScript::Managed::EHeapError::Ok);
+		TestEqual(TEXT("Isolation GC leaves no managed objects"),
+			Heap->GetStats().LiveObjects, static_cast<uint32>(0));
+		AddInfo(FString::Printf(TEXT("compiled async exception flow isolation backend=%d case=%s result=%d cleanup=%d resumes=%d failures=%d"),
+			static_cast<int32>(Backend), bHostFault ? TEXT("host_fault") : TEXT("cancel"),
+			ReadInt32(ResultOffset), ReadInt32(CleanupOffset),
+			Resumes, FailedDispatches));
+	}
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime,
+		EAvidScriptVmBackendKind::Wamr})
 	{
 		FAvidScriptVmBackendSelection Selection;
 		Selection.BackendKind = Backend;

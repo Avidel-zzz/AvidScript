@@ -115,14 +115,23 @@ try {
     $exit = [regex]::Matches($log, 'RequestExitWithStatus\(1, 0,').Count
     $scenarios = [regex]::Matches($log,
         'compiled async exception flow backend=[01] mode=[0-5] result=(12|7|0) cleanup=(1|11)').Count
+    $isolationMarkers = @(
+        foreach ($backend in @(0, 1)) {
+            "compiled async exception flow isolation backend=$backend case=cancel result=0 cleanup=1 resumes=2 failures=1"
+            "compiled async exception flow isolation backend=$backend case=host_fault result=0 cleanup=0 resumes=2 failures=2"
+        }
+    )
+    $isolations = @($isolationMarkers | Where-Object {
+        [regex]::Matches($log, [regex]::Escape($_)).Count -eq 1
+    }).Count
     $teardowns = [regex]::Matches($log,
         'compiled async exception flow teardown backend=[01] ready=0 tasks=0').Count
     if ($found -ne 1 -or $success -ne 1 -or $failed -ne 0 -or
         $complete -ne 1 -or $exit -lt 1 -or $scenarios -ne 12 -or
-        $teardowns -ne 2) {
-        throw "IR 22 Automation evidence incomplete: found=$found success=$success scenarios=$scenarios teardowns=$teardowns failed=$failed complete=$complete exit=$exit log=$logPath"
+        $isolations -ne 4 -or $teardowns -ne 2) {
+        throw "IR 22 Automation evidence incomplete: found=$found success=$success scenarios=$scenarios isolations=$isolations teardowns=$teardowns failed=$failed complete=$complete exit=$exit log=$logPath"
     }
-    Write-Output "AvidScript.Runtime.Continuation.CompiledAsyncExceptionFlow: 1/1 passed; Wasmtime/WAMR scenarios=12/12 teardown=2/2; log=$logPath"
+    Write-Output "AvidScript.Runtime.Continuation.CompiledAsyncExceptionFlow: 1/1 passed; Wasmtime/WAMR scenarios=12/12 isolation=4/4 teardown=2/2; log=$logPath"
 }
 finally {
     foreach ($name in $variables) {

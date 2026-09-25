@@ -152,6 +152,8 @@ public:
 	int32 GetPreparedCount() const;
 #if WITH_DEV_AUTOMATION_TESTS
 	FAvidScriptSessionTaskResults& GetTaskResultsForTesting() { return TaskResults; }
+	bool GetPendingActiveTimerForTesting(
+		int64& OutContinuationToken, int64& OutProducerTaskToken) const;
 	int32 GetCancellationSourceCountForTesting() const
 	{
 		return OccupiedCancellationSourceCount;
