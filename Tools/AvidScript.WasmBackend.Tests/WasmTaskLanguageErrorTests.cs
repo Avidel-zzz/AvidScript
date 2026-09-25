@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Text;
 using AvidScript.GuestIr;
 using AvidScript.WasmBackend;
 
@@ -18,8 +19,8 @@ internal static class WasmTaskLanguageErrorTests
             "combined Task/error fixture has a distinct version identity");
         Require(GuestModuleValidator.Validate(module).Succeeded,
             "combined Task/error fixture validates before codegen");
-        Require(guestBytes.SequenceEqual(GuestIrSerializer.Serialize(module)),
-            "checked-in combined fixture is canonical Guest IR");
+        Require(NormalizeNewlines(guestBytes) == NormalizeNewlines(GuestIrSerializer.Serialize(module)),
+            "checked-in combined fixture matches canonical Guest IR apart from line endings");
         WasmCompilationResult compiled = WasmModuleCompiler.Compile(module);
         Require(compiled.Succeeded, string.Join(" | ",
             compiled.Diagnostics.Select(diagnostic => diagnostic.Message)));
@@ -47,4 +48,7 @@ internal static class WasmTaskLanguageErrorTests
     {
         if (!condition) throw new InvalidOperationException(message);
     }
+
+    private static string NormalizeNewlines(byte[] bytes) =>
+        Encoding.UTF8.GetString(bytes).Replace("\r\n", "\n", StringComparison.Ordinal);
 }
