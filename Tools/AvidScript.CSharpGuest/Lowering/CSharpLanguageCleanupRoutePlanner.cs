@@ -29,7 +29,7 @@ internal static class CSharpLanguageCleanupRoutePlanner
         routes = result;
         error = null;
         var staticContext = CSharpStaticExecutionContext.Find(semantic);
-        IReadOnlySet<string> exceptionMethodIds = semantic.ExceptionFlows!
+        IReadOnlySet<string> exceptionMethodIds = (semantic.ExceptionFlows ?? Array.Empty<SemanticExceptionFlow>())
             .Select(flow => flow.MethodSymbolId).ToHashSet(StringComparer.Ordinal);
         foreach (SemanticMethodBody body in semantic.Methods)
         {

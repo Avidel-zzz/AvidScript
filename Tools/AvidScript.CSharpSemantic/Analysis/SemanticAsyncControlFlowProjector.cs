@@ -254,6 +254,8 @@ internal static class SemanticAsyncControlFlowProjector
                         || segments.Any(segment => segment.AwaitSite?.MemberAssignment is { } assignment
                             && (assignment.ReceiverSymbolId == local.SymbolId
                                 || segment.AwaitSite.ResultSymbolId == local.SymbolId)))
+                    .Where(local => !local.SymbolId.StartsWith(SemanticAsyncCleanupLocals.Prefix(methodSymbolId), StringComparison.Ordinal)
+                        || segments.Any(segment => segment.Statements.Any(statement => SemanticAsyncCleanupLocals.IsDeclaration(statement, local.SymbolId))))
                     .OrderBy(local => local.SymbolId, StringComparer.Ordinal)
                     .ToArray(),
                 lexicalScopes.OrderBy(scope => scope.Id, StringComparer.Ordinal).ToArray(),
@@ -936,9 +938,47 @@ internal static class SemanticAsyncControlFlowProjector
             int entry = BuildStatement(block, successor, targets, depth);
             if (entry >= 0)
             {
+                // Each exit path owns a separate copy of finally. Locals declared
+                // inside that body belong to that copy, unlike captured outer
+                // locals and the pending return/exception storage.
+                if (block.Parent is FinallyClauseSyntax)
+                    CloneCleanupLocals(block, first);
                 for (int id = first; id < drafts.Count; ++id) members.Add(id);
             }
             return entry;
+        }
+
+        private void CloneCleanupLocals(BlockSyntax block, int first)
+        {
+            Dictionary<string, string> replacements = new(StringComparer.Ordinal);
+            foreach (VariableDeclaratorSyntax declaration in block.DescendantNodes().OfType<VariableDeclaratorSyntax>()
+                .Where(node => !node.Ancestors().TakeWhile(parent => parent != block).Any(parent =>
+                    parent is AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax)))
+            {
+                if (semanticModel.GetDeclaredSymbol(declaration) is not ILocalSymbol local) continue;
+                string sourceId = SemanticSymbolProjector.GetSymbolId(local);
+                string id = $"symbol:compiler_local:{methodSymbolId}:finally_local:{block.SpanStart}:{first}:{declaration.SpanStart}";
+                replacements.Add(sourceId, id);
+                compilerLocals.Add(new(id, SemanticAsyncCleanupLocals.Name(block.SpanStart, first, declaration.SpanStart, local.Name), typeRegistry.Register(local.Type),
+                    SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, declaration.Span)));
+            }
+            if (replacements.Count == 0) return;
+            SemanticOperation Rewrite(SemanticOperation operation) => operation with
+            {
+                SymbolId = operation.SymbolId is { } symbol ? replacements.GetValueOrDefault(symbol, symbol) : null,
+                Children = operation.Children.Select(Rewrite).ToArray(),
+            };
+            for (int id = first; id < drafts.Count; ++id)
+            {
+                var draft = drafts[id];
+                draft.Statements = draft.Statements.Select(statement => statement with
+                {
+                    Operation = Rewrite(statement.Operation),
+                    TargetSymbolId = statement.TargetSymbolId is { } symbol ? replacements.GetValueOrDefault(symbol, symbol) : null,
+                }).ToArray();
+                if (draft.Transfer.Condition is { } condition)
+                    draft.Transfer = draft.Transfer with { Condition = Rewrite(condition) };
+            }
         }
 
         private string EnsureReturnValueLocal(TextSpan span)
@@ -1937,7 +1977,7 @@ internal static class SemanticAsyncControlFlowProjector
         public int Id { get; }
         public int Sequence { get; }
         public TextSpan Span { get; }
-        public IReadOnlyList<SemanticAsyncStatement> Statements { get; }
+        public IReadOnlyList<SemanticAsyncStatement> Statements { get; set; }
         public SemanticAsyncAwaitSite? AwaitSite { get; }
         public DraftTransfer Transfer { get; set; }
         public int LexicalExceptionTarget { get; }

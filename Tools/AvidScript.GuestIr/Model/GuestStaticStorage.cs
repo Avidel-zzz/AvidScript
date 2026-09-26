@@ -12,12 +12,13 @@ public static class GuestStaticStorage
 
     public static bool IsVersion(GuestModule module) =>
         module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion
+        || GuestStaticAsyncExecution.IsVersion(module)
         || GuestTaskErrorTransfers.IsVersion(module) && module.StaticStorage is not null;
 
     // Reuse the complete existing execution contract, including its provenance
     // and ownership checks. The serialized module always retains its outer version.
     public static GuestModule ExecutionProfile(GuestModule module) =>
-        GuestAsyncSynchronousExceptions.IsVersion(module)
+        GuestAsyncSynchronousExceptions.IsVersion(module) || GuestStaticAsyncExecution.IsVersion(module)
             ? module with { SchemaVersion = GuestAsyncThrowRouteValidator.SchemaVersion, IrVersion = GuestAsyncThrowRouteValidator.IrVersion }
         : GuestTaskErrorTransfers.IsVersion(module) && module.TaskErrorTransfers is { BaseSchemaVersion: >= 20 and <= 26 } transfers
             ? module with { SchemaVersion = transfers.BaseSchemaVersion, IrVersion = transfers.BaseIrVersion }

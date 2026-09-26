@@ -1350,6 +1350,7 @@ internal static class CSharpSemanticInputValidator
         return method.CompilerLocals.Count <= SemanticAsyncMethod.MaximumControlFlowSegments * 2
             && method.CompilerLocals.All(local => local is not null
                 && (local.SymbolId.StartsWith(prefix, StringComparison.Ordinal)
+                    || SemanticAsyncCleanupLocals.IsValid(document, method, local)
                     || memberAssignments
                         && local.SymbolId.StartsWith(SemanticAsyncMemberAssignment.LocalPrefix(method.MethodSymbolId), StringComparison.Ordinal)
                     || CSharpTaskResultAbi.Supports(document)

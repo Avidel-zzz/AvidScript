@@ -16,10 +16,12 @@ public static class GuestTaskLocalLifetimeValidator
 
     public static bool IsVersion(GuestModule module) => module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion;
     internal static bool Supports(GuestModule module) => IsVersion(module) || GuestAsyncThrowRouteValidator.IsVersion(module);
-    internal static int ExpectedSemanticSchema(GuestModule module) => GuestAsyncSynchronousExceptions.HasSourceContract(module)
+    internal static int ExpectedSemanticSchema(GuestModule module) => GuestStaticAsyncExecution.HasSourceContract(module)
+        ? GuestStaticAsyncExecution.SemanticSchemaVersion : GuestAsyncSynchronousExceptions.HasSourceContract(module)
         ? GuestAsyncSynchronousExceptions.SemanticSchemaVersion : GuestAsyncThrowRouteValidator.IsVersion(module)
         ? GuestAsyncThrowRouteValidator.SemanticSchemaVersion : SemanticSchemaVersion;
-    internal static string ExpectedSemanticVersion(GuestModule module) => GuestAsyncSynchronousExceptions.HasSourceContract(module)
+    internal static string ExpectedSemanticVersion(GuestModule module) => GuestStaticAsyncExecution.HasSourceContract(module)
+        ? GuestStaticAsyncExecution.SemanticVersion : GuestAsyncSynchronousExceptions.HasSourceContract(module)
         ? GuestAsyncSynchronousExceptions.SemanticVersion : GuestAsyncThrowRouteValidator.IsVersion(module)
         ? GuestAsyncThrowRouteValidator.SemanticVersion : SemanticVersion;
     internal static bool HasErrors(GuestModule module) => Supports(module)

@@ -432,6 +432,8 @@ internal static class CSharpAsyncCfgLowerer
             return false;
         }
         if (!context.ShortCircuitFlow.Rewrite(context, blocks)
+            || CSharpStaticExecutionContext.Find(document) is { } staticContext
+                && !staticContext.GuardAsync(context, entry.FunctionId, functionEntryBlockId, parameters, blocks)
             || !CSharpAsyncSynchronousExceptionLowerer.Rewrite(context, method, entry.FunctionId, blocks)
             || !CSharpAsyncClosureAllocations.InsertEdges(context, method, blocks)
             || !CSharpTaskLocalLifetimes.InsertEdges(context, method, blocks, incomingSegment, functionEntryBlockId))

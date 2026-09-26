@@ -20,6 +20,7 @@ internal static class GuestLanguageOutcomeFlowValidator
             .ToHashSet(StringComparer.Ordinal);
         bool flowVersion = GuestTaskErrorTransfers.IsVersion(context.Artifact)
             || GuestAsyncSynchronousExceptions.IsVersion(context.Artifact)
+            || GuestStaticAsyncExecution.IsVersion(context.Artifact)
             || context.Module.SchemaVersion == SchemaVersion
                 && context.Module.IrVersion == IrVersion
             || context.Module.SchemaVersion == GuestLanguageErrorCatalogValidator.SchemaVersion

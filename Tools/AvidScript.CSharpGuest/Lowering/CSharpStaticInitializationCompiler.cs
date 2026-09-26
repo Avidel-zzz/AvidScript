@@ -13,7 +13,7 @@ public static class CSharpStaticInitializationCompiler
     {
         module = null;
         if (!CSharpStaticSourcePreparation.TryPrepare(source, out var ordinary, out var execution, out error)) return false;
-        if (ordinary!.ExceptionFlows is not null)
+        if (ordinary!.ExceptionFlows is not null || SemanticContract.HasAsyncSynchronousExceptions(ordinary))
         {
             if (!CSharpLanguageErrorCompiler.TryLower(ordinary, semanticSha256, out var compilation, out error)) return false;
             var restored = compilation!.Module with { Provenance = compilation.Module.Provenance with

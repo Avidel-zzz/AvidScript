@@ -21,18 +21,18 @@ public static class CSharpLanguageErrorCompiler
     {
         compilation = null;
         error = null;
+        var staticContext = semantic is null ? null : CSharpStaticExecutionContext.Find(semantic);
         bool implicitMemberErrors = semantic is not null && SemanticContract.HasAsyncSynchronousExceptions(semantic)
             && SemanticAsyncInvocationValidator.IsValid(semantic)
             && SemanticAsyncScopeValidator.IsValid(semantic)
             && CSharpAsyncMemberAssignmentLowerer.GuardSites(semantic).Count > 0;
-        if (semantic is null || semantic.ExceptionFlows is not { Count: > 0 } && !implicitMemberErrors
+        if (semantic is null || semantic.ExceptionFlows is not { Count: > 0 } && !implicitMemberErrors && staticContext is null
             || !SemanticExceptionFlowContractValidator.IsValid(semantic)
             || semantic.Diagnostics.Any(diagnostic => diagnostic.Severity == "error"
                 && diagnostic.Code != "ASCS3001"
                 && !(SemanticContract.HasAsyncSynchronousExceptions(semantic) && diagnostic.Code == "ASCS5422")))
             return Fail("Expected a validated exception-flow artifact without unrelated errors.", out error);
         IReadOnlyList<SemanticExceptionFlow> flows = semantic.ExceptionFlows ?? Array.Empty<SemanticExceptionFlow>();
-        var staticContext = CSharpStaticExecutionContext.Find(semantic);
         if (staticContext is not null)
             flows = flows.Where(flow => semantic.Callables.Any(callable => callable.MethodSymbolId == flow.MethodSymbolId
                 && callable.GenericTypeParameterIds is { Count: 0 })
@@ -94,7 +94,7 @@ public static class CSharpLanguageErrorCompiler
                 rethrows.Add(CSharpGuestIds.Function(handler.MethodSymbolId), rethrowSites);
         }
         SemanticLanguageErrorEffectPlan? effects = null;
-        bool effectsValid = flows.Count == 0 && implicitMemberErrors;
+        bool effectsValid = flows.Count == 0 && (implicitMemberErrors || staticContext is not null);
         if (effectsValid) effects = new(Array.Empty<string>());
         else effectsValid = SemanticLanguageErrorEffectPlanner.TryBuild(semantic, out effects);
         if (throwFlows.Any(item => semantic.Callables.Count(callable =>
@@ -113,6 +113,7 @@ public static class CSharpLanguageErrorCompiler
         // source-only direct-call discovery cannot see those calls beforehand.
         var outcomeMethods = staticContext is null ? effects.OutcomeMethodIds : semantic.Callables
             .Where(callable => callable.HasBody && callable.GenericTypeParameterIds is { Count: 0 }
+                && !semantic.AsyncMethods.Any(method => method.MethodSymbolId == callable.MethodSymbolId)
                 && (semantic.Reachability is null || semantic.Reachability.ReachableCallableIds.Contains(callable.MethodSymbolId)))
             .Select(callable => callable.MethodSymbolId).ToArray();
         IReadOnlySet<string> affected = outcomeMethods
@@ -123,7 +124,8 @@ public static class CSharpLanguageErrorCompiler
             && semantic.SemanticVersion == SemanticContract.TaskLanguageErrorSemanticVersion;
         bool synchronousAsync = SemanticContract.HasAsyncSynchronousExceptions(semantic);
         CSharpAsyncSynchronousExecutionContext? asyncContext = null;
-        if (synchronousAsync && !CSharpAsyncSynchronousExecutionContext.TryCreate(semantic, effects, out asyncContext))
+        if (synchronousAsync && !CSharpAsyncSynchronousExecutionContext.TryCreate(semantic,
+                new SemanticLanguageErrorEffectPlan(outcomeMethods.ToArray()), out asyncContext))
             return Fail("The synchronous/async composition requires validated source routes and a disjoint effect boundary.", out error);
         if (combinedTaskContract && semantic.AsyncMethods.Any(method =>
             effects.OutcomeMethodIds.Contains(method.MethodSymbolId)))
@@ -248,7 +250,7 @@ public static class CSharpLanguageErrorCompiler
             Diagnostics = semantic.Diagnostics.Where(diagnostic =>
                 diagnostic.Code != "ASCS3001" && !(synchronousAsync && diagnostic.Code == "ASCS5422")).ToArray(),
         };
-        if ((handlers.Length != 0 || implicitMemberErrors)
+        if ((handlers.Length != 0 || implicitMemberErrors || staticContext is not null)
             && ordinary.Reachability?.Mode != "all_callables_compatibility")
             ordinary = ordinary with
             {
@@ -256,7 +258,7 @@ public static class CSharpLanguageErrorCompiler
                     // Async lowering emits every validated continuation plan.
                     // Its accessor/receiver dependencies must be available even
                     // when no explicit synchronous throw expanded the closure.
-                    ordinary, outcomeMethods.Concat(implicitMemberErrors
+                    ordinary, outcomeMethods.Concat(implicitMemberErrors || synchronousAsync
                         ? semantic.AsyncMethods.Select(method => method.MethodSymbolId)
                         : Array.Empty<string>()).Distinct(StringComparer.Ordinal).ToArray()),
             };
@@ -321,17 +323,23 @@ public static class CSharpLanguageErrorCompiler
         }
         GuestModule candidate = outcomes with
         {
-            SchemaVersion = synchronousAsync ? GuestAsyncSynchronousExceptions.SchemaVersion
+            SchemaVersion = synchronousAsync && staticContext is not null ? GuestStaticAsyncExecution.SchemaVersion
+                : synchronousAsync ? GuestAsyncSynchronousExceptions.SchemaVersion
                 : outcomes.StaticStorage is null ? combinedTaskContract ? 20 : GuestLanguageErrorCatalog.SchemaVersion : GuestStaticStorage.SchemaVersion,
-            IrVersion = synchronousAsync ? GuestAsyncSynchronousExceptions.IrVersion
+            IrVersion = synchronousAsync && staticContext is not null ? GuestStaticAsyncExecution.IrVersion
+                : synchronousAsync ? GuestAsyncSynchronousExceptions.IrVersion
                 : outcomes.StaticStorage is null ? combinedTaskContract ? "1.19" : GuestLanguageErrorCatalog.IrVersion : GuestStaticStorage.IrVersion,
             StaticStorage = outcomes.StaticStorage is null ? null : outcomes.StaticStorage with
-            { BaseSchemaVersion = combinedTaskContract ? 20 : GuestLanguageErrorCatalog.SchemaVersion,
-                BaseIrVersion = combinedTaskContract ? "1.19" : GuestLanguageErrorCatalog.IrVersion },
+            { BaseSchemaVersion = synchronousAsync ? GuestAsyncSynchronousExceptions.SchemaVersion
+                    : combinedTaskContract ? 20 : GuestLanguageErrorCatalog.SchemaVersion,
+                BaseIrVersion = synchronousAsync ? GuestAsyncSynchronousExceptions.IrVersion
+                    : combinedTaskContract ? "1.19" : GuestLanguageErrorCatalog.IrVersion },
             Provenance = outcomes.Provenance with
             {
-                SemanticSchemaVersion = semantic.SchemaVersion,
-                SemanticVersion = semantic.SemanticVersion,
+                SemanticSchemaVersion = synchronousAsync && staticContext is not null
+                    ? GuestStaticAsyncExecution.SemanticSchemaVersion : semantic.SchemaVersion,
+                SemanticVersion = synchronousAsync && staticContext is not null
+                    ? GuestStaticAsyncExecution.SemanticVersion : semantic.SemanticVersion,
             },
             Functions = outcomes.Functions.Select(function =>
                 loweredProducers.TryGetValue(function.Id, out GuestFunction? producer)

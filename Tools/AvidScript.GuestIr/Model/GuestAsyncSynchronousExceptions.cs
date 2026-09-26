@@ -17,8 +17,9 @@ public static class GuestAsyncSynchronousExceptions
     // independently rejects this metadata on every other artifact version.
     internal static bool HasSourceContract(GuestModule module) =>
         module.AsyncSynchronousExceptions is not null
-        && module.Provenance.SemanticSchemaVersion == SemanticSchemaVersion
-        && module.Provenance.SemanticVersion == SemanticVersion;
+        && (module.Provenance.SemanticSchemaVersion == SemanticSchemaVersion
+            && module.Provenance.SemanticVersion == SemanticVersion
+            || GuestStaticAsyncExecution.HasSourceContract(module));
 }
 
 public sealed record GuestAsyncSynchronousExceptionPlan(

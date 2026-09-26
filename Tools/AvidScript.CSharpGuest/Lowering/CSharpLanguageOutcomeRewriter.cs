@@ -187,7 +187,9 @@ public static class CSharpLanguageOutcomeRewriter
                 : module.StaticStorage is null ? 16 : GuestStaticStorage.SchemaVersion,
             IrVersion = asyncContext is not null ? GuestAsyncSynchronousExceptions.IrVersion
                 : module.StaticStorage is null ? "1.15" : GuestStaticStorage.IrVersion,
-            StaticStorage = module.StaticStorage is null ? null : module.StaticStorage with { BaseSchemaVersion = 16, BaseIrVersion = "1.15" },
+            StaticStorage = module.StaticStorage is null ? null : module.StaticStorage with
+            { BaseSchemaVersion = asyncContext is not null ? GuestAsyncSynchronousExceptions.SchemaVersion : 16,
+                BaseIrVersion = asyncContext is not null ? GuestAsyncSynchronousExceptions.IrVersion : "1.15" },
             Types = typeLayout.Types,
             Imports = imports,
             Functions = rewrittenFunctions,

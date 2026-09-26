@@ -234,14 +234,17 @@ internal static class SemanticAsyncSynchronousExceptionTests
             bool rejected = false;
             try
             {
-                const string empty = "class Empty { }";
-                SemanticAnalyzer.Analyze(empty, "Empty.cs", FrontendAnalyzer.Analyze(empty, "Empty.cs").Source.Sha256,
+                const string empty = "class Empty { public static int Value; public static async System.Threading.Tasks.Task<int> Run() { return Value; } }";
+                var combined = SemanticAnalyzer.Analyze(empty, "Empty.cs", FrontendAnalyzer.Analyze(empty, "Empty.cs").Source.Sha256,
                     Array.Empty<SemanticReferenceSource>(), new SemanticCompilerWorkspace(),
                     enableAsyncExceptionFlow: true, enableAsyncCancellationFlow: staticInitialization,
                     enableStaticInitialization: staticInitialization, enableAsyncSynchronousExceptions: true);
+                Check(combined.SchemaVersion == 51 && combined.SemanticVersion == "1.60"
+                    && combined.StaticInitialization is { BaseSchemaVersion: 50, BaseSemanticVersion: "1.59" }
+                    && SemanticStaticInitializationValidator.IsValid(combined), "Static/async needs its exact new envelope");
             }
             catch (ArgumentException) { rejected = true; }
-            Check(rejected, "Missing cancellation contract or legacy static envelope must be rejected");
+            Check(rejected == !staticInitialization, "Cancellation remains mandatory; the new static envelope composes explicitly");
         }
 
         DirectoryInfo? root = new(AppContext.BaseDirectory);

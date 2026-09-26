@@ -122,8 +122,8 @@ public partial class Projectile : AvidActor
 
 - [静态字段初始化、静态构造函数](Docs/Phase66/P66.C10_Static_Object_Lifetime_Contract.md)：通过编译器 API 使用，普通构建脚本未接入。
 - [同步方法、属性访问器中的 `throw`](Docs/Phase66/P66.C8_Task_Local_Lifetime_Contract.md#generated-task-build)：仅支持部分用法，需开启实验性参数。
-- [同步异常传入 `async` 方法](Docs/Phase66/P66.C10_Synchronous_Error_Task_Transfer.md#c-源码到-vm-的执行验证)：尚不支持与静态初始化组合。
-- [`target.Value = await ReadAsync()`](Docs/Phase66/P66.C10_Await_Member_Assignment_Contract.md#guest-接入与补充执行验证)：支持普通 C# 对象的字段、属性；接口、静态初始化组合及生成 UE 类型尚未完成。
+- [同步异常传入 `async` 方法](Docs/Phase66/P66.C10_Static_Object_Lifetime_Contract.md#windows-专项验证)：包含静态初始化失败，通过编译器 API 使用。
+- [`target.Value = await ReadAsync()`](Docs/Phase66/P66.C10_Await_Member_Assignment_Contract.md#guest-接入与补充执行验证)：支持普通 C# 对象的字段、属性；接口及生成 UE 类型尚未完成。
 
 </details>
 

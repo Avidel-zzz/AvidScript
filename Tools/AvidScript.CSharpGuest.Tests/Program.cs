@@ -6,6 +6,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--static-async")
+            {
+                int focused = CSharpGuestStaticAsyncExecutionTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.StaticAsync: {focused}/{focused} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--await-member-assignments")
             {
                 int focused = CSharpGuestAsyncMemberAssignmentTests.Run();
@@ -231,6 +237,7 @@ internal static class Program
                 + CSharpGuestStaticInitializationGuardTests.Run()
                 + CSharpGuestStaticSourceExecutionTests.Run()
                 + CSharpGuestStaticSourceFailureTests.Run()
+                + CSharpGuestStaticAsyncExecutionTests.Run()
                 + CSharpGuestAsyncLanguageErrorTests.Run()
                 + CSharpGuestDirectAwaitTests.Run()
                 + CSharpGuestAsyncCancellationTests.Run()

@@ -77,6 +77,10 @@ public static class SemanticAsyncSynchronousExceptionValidator
                     : method.Segments[target].Transfer?.Kind != SemanticAsyncMethod.PropagateExceptionTransferKind)
                     return false;
             }
+            if (method.CompilerLocals is null || method.CompilerLocals.Any(local => local is null
+                || local.SymbolId is null || local.Span is null
+                || local.SymbolId.StartsWith(SemanticAsyncCleanupLocals.Prefix(method.MethodSymbolId), StringComparison.Ordinal)
+                    && !SemanticAsyncCleanupLocals.IsValid(document, method, local))) return false;
         }
         return true;
     }

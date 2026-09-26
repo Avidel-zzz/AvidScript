@@ -15,12 +15,13 @@ internal static class CSharpStaticSourcePreparation
         out CSharpStaticExecutionContext? execution, out string? error)
     {
         ordinary = null; execution = null; error = null;
-        if (!SemanticStaticInitializationValidator.IsValid(source)
-            || !source.Succeeded && source.ExceptionFlows is null
-            || source.AsyncMethods.Count != 0
+        bool asyncSource = source is not null && SemanticStaticInitialization.IsAsyncVersion(source);
+        if (source is null || !SemanticStaticInitializationValidator.IsValid(source)
+            || !source.Succeeded && source.ExceptionFlows is null && !asyncSource
+            || source.AsyncMethods.Count != 0 && !asyncSource
             || source.ExceptionFlows?.Any(flow => flow.Blocks is null) == true
             || source.RejectedAsyncExceptionFlows is not null || source.UeTypeDeclarations is not { Count: 0 })
-        { error = "Static source execution requires a valid synchronous source plan; async and generated UE routes are not connected yet."; return false; }
+        { error = "Static source execution requires its exact source plan; async requires Semantic 51 and generated UE routes are not connected yet."; return false; }
         // The static envelope validates ownership and initializer plans. Reuse
         // the base reader for every ordinary callable, symbol and CFG invariant
         // before building dictionaries or specializing any source body.
@@ -35,6 +36,7 @@ internal static class CSharpStaticSourcePreparation
             SemanticVersion = source.StaticInitialization.BaseSemanticVersion,
             StaticInitialization = null,
             Methods = source.Methods.Select(body => body with { Root = WithoutOwner(body.Root) }).ToArray(),
+            AsyncMethods = source.AsyncMethods.Select(method => MapAsync(method, WithoutOwner)).ToArray(),
             ControlFlowGraphs = source.ControlFlowGraphs.Select(graph => graph with { Blocks = graph.Blocks.Select(block => block with
             {
                 Operations = block.Operations.Select(WithoutOwner).ToArray(),
@@ -49,8 +51,11 @@ internal static class CSharpStaticSourcePreparation
         if (source.Callables.Select(item => item.MethodSymbolId).Any(string.IsNullOrWhiteSpace)
             || source.Callables.Select(item => item.MethodSymbolId).Distinct().Count() != source.Callables.Count
             || source.Methods.Select(item => item.MethodSymbolId).Distinct().Count() != source.Methods.Count
-            || source.Diagnostics is null || source.Diagnostics.Any(item => item.Severity == "error" && item.Code != "ASCS3001")
-            || (source.ExceptionFlows is null ? !CSharpSemanticInputValidator.IsValid(validationView)
+            || source.Diagnostics is null || source.Diagnostics.Any(item => item.Severity == "error"
+                && item.Code != "ASCS3001" && !(asyncSource && item.Code == "ASCS5422"))
+            || (asyncSource ? !SemanticExceptionFlowContractValidator.IsValid(validationView)
+                    || !SemanticAsyncInvocationValidator.IsValid(validationView) || !SemanticAsyncScopeValidator.IsValid(validationView)
+                : source.ExceptionFlows is null ? !CSharpSemanticInputValidator.IsValid(validationView)
                 : !SemanticExceptionFlowContractValidator.IsValid(validationView)))
         { error = "Static source has a malformed base Semantic contract."; return false; }
         var types = source.Types.ToDictionary(type => type.Id, StringComparer.Ordinal);
@@ -199,7 +204,8 @@ internal static class CSharpStaticSourcePreparation
             SemanticSpan span = firstField?.Span ?? declaration.Span;
             string bodyId = "$static:body:" + owner;
             owners.Add(new(owner, plan.BeforeFieldInit, bodyId, firstField?.SourceId ?? source.Source.SourceId,
-                firstField?.SourceLength ?? source.Source.Length, span));
+                firstField?.SourceLength ?? source.Source.Length, span,
+                !asyncSource || plan.ConstructorMethodId is not null || plan.Fields.Any(field => field.Initializer is not null)));
             List<SemanticOperation> calls = new();
             foreach (var field in plan.Fields.Where(field => field.Initializer is not null))
             {
@@ -222,6 +228,14 @@ internal static class CSharpStaticSourcePreparation
         var rewrittenBodies = source.Methods.Select(body => body with { Root = Rewrite(body.Root, emptyMap) }).ToArray();
         var rewrittenGraphs = source.ControlFlowGraphs.Select(graph => RewriteGraph(graph, graph.MethodSymbolId, emptyMap)).ToArray();
         var rewrittenFlows = source.ExceptionFlows?.Select(flow => RewriteFlow(flow, flow.MethodSymbolId, emptyMap)).ToArray();
+        string RewriteSymbol(string id)
+        {
+            var matching = fieldIds.Where(pair => pair.Key.Field == id).Select(pair => pair.Value).ToArray();
+            if (matching.Length > 1) failure ??= "Async static result storage needs an unambiguous closed owner: " + id;
+            return matching.Length == 1 ? matching[0] : id;
+        }
+        var rewrittenAsync = source.AsyncMethods.Select(method => MapAsync(method,
+            operation => Rewrite(operation, emptyMap), RewriteSymbol)).ToArray();
         if (failure is not null) { error = failure; return false; }
         ordinary = source with
         {
@@ -231,6 +245,7 @@ internal static class CSharpStaticSourcePreparation
                 .Concat(addedSymbols).OrderBy(symbol => symbol.Id, StringComparer.Ordinal).ToArray(),
             Callables = source.Callables.Concat(addedCallables).OrderBy(callable => callable.MethodSymbolId, StringComparer.Ordinal).ToArray(),
             Methods = rewrittenBodies.Concat(addedBodies).OrderBy(body => body.MethodSymbolId, StringComparer.Ordinal).ToArray(),
+            AsyncMethods = rewrittenAsync,
             ControlFlowGraphs = rewrittenGraphs.Concat(addedGraphs).OrderBy(graph => graph.MethodSymbolId, StringComparer.Ordinal).ToArray(),
             ExceptionFlows = rewrittenFlows?.Concat(addedFlows).OrderBy(flow => flow.MethodSymbolId, StringComparer.Ordinal).ToArray(),
             ClassTypes = source.ClassTypes.Select(type => type with { HasStaticInitialization = false }).ToArray(),
@@ -241,6 +256,28 @@ internal static class CSharpStaticSourcePreparation
         execution.Attach(ordinary);
         return true;
     }
+
+    private static SemanticAsyncMethod MapAsync(SemanticAsyncMethod method, Func<SemanticOperation, SemanticOperation> map,
+        Func<string, string>? symbol = null) => method with
+    {
+        Segments = method.Segments.Select(segment => segment with
+        {
+            Statements = segment.Statements.Select(statement => statement with
+            {
+                Operation = map(statement.Operation),
+                TargetSymbolId = statement.TargetSymbolId is { } target && symbol is not null ? symbol(target) : statement.TargetSymbolId,
+            }).ToArray(),
+            Transfer = segment.Transfer is { Condition: { } condition } transfer ? transfer with { Condition = map(condition) } : segment.Transfer,
+            AwaitSite = segment.AwaitSite is { } site ? site with
+            {
+                Arguments = site.Arguments.Select(map).ToArray(),
+                CancellationToken = site.CancellationToken is { } token ? map(token) : null,
+                ResultSymbolId = site.ResultStorageKind == "static_field" && site.ResultSymbolId is { } result && symbol is not null
+                    ? symbol(result) : site.ResultSymbolId,
+                MemberAssignment = site.MemberAssignment is { } member ? member with { Target = map(member.Target) } : null,
+            } : null,
+        }).ToArray(),
+    };
 
     private static SemanticOperation Call(string id, SemanticSpan span, IReadOnlyList<string>? arguments = null) => new("invocation", true, null, false, false, false, false,
         "type:void", id, arguments ?? Array.Empty<string>(), null, null, null, null, null, span, Array.Empty<SemanticOperation>(), new("static", null, false));

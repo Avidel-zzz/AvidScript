@@ -26,10 +26,14 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptAsyncMemberAssignmentsTest,
     "AvidScript.Runtime.Continuation.CompiledAsyncMemberAssignments",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptStaticAsyncTest,
+    "AvidScript.Runtime.Continuation.CompiledStaticAsync",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 namespace AvidScript::Tests::CompiledAsyncExceptions
 {
 static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 ExpectedScenarios, const TCHAR* LogPrefix,
-    bool CollectWhileSuspended = false)
+    bool CollectWhileSuspended = false, bool HasStaticStorage = false)
 {
     if (!GEngine) return false;
     const FString Directory = FPlatformMisc::GetEnvironmentVariable(FixtureVariable);
@@ -66,6 +70,9 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
                 && (*Scenario)->TryGetNumberField(TEXT("resultOffset"), Offset) && Offset >= 0 && Offset < 65536
                 && (*Scenario)->TryGetNumberField(TEXT("traceOffset"), TraceOffset) && TraceOffset >= 0 && TraceOffset < 65536)) return false;
             Names.Add(Name);
+            int32 StaticSlots = 0;
+            if (HasStaticStorage && !Test.TestTrue(TEXT("Static fixture declares bounded domain roots"),
+                (*Scenario)->TryGetNumberField(TEXT("staticSlots"), StaticSlots) && StaticSlots > 0 && StaticSlots <= 4096)) return false;
             TArray<uint8> Bytes;
             if (!Test.TestTrue(*Name, FFileHelper::LoadFileToArray(Bytes, *FPaths::Combine(Directory, Name + TEXT(".wasm"))))) return false;
             // Normal completion, teardown while initially suspended, teardown
@@ -147,12 +154,18 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
                 Test.TestEqual(*(Label + TEXT(" state frames")), Owner->GetStateFrameByteCountForTesting(), 0);
                 if (auto* Heap = Runtime.GetManagedHeapForTesting())
                 {
-                    Test.TestEqual(*(Label + TEXT(" roots")), Heap->GetStats().LiveRoots, static_cast<uint32>(0));
+                    Test.TestEqual(*(Label + TEXT(" domain roots")), Heap->GetStats().StaticRoots, static_cast<uint32>(StaticSlots));
+                    Test.TestEqual(*(Label + TEXT(" roots")), Heap->GetStats().LiveRoots, static_cast<uint32>(StaticSlots));
+                    Test.TestEqual(*(Label + TEXT(" heap frames")), Heap->GetStats().ActiveFrames, static_cast<uint32>(0));
                     Test.TestEqual(*Label, Heap->Collect(), AvidScript::Managed::EHeapError::Ok);
-                    Test.TestEqual(*(Label + TEXT(" objects")), Heap->GetStats().LiveObjects, static_cast<uint32>(0));
+                    if (!HasStaticStorage)
+                        Test.TestEqual(*(Label + TEXT(" objects")), Heap->GetStats().LiveObjects, static_cast<uint32>(0));
                 }
                 ++Cases;
                 Test.AddInfo(FString::Printf(TEXT("%s %s result=%d trace=%d resumes=%d"), LogPrefix, *Label, Read(Offset), Read(TraceOffset), Resumes));
+                Runtime.Unload();
+                Runtime.Unload();
+                Test.TestNull(*(Label + TEXT(" unload releases domain storage")), Runtime.GetManagedHeapForTesting());
             }
         }
     }
@@ -177,6 +190,12 @@ bool FAvidScriptAsyncMemberAssignmentsTest::RunTest(const FString& Parameters)
 {
     return AvidScript::Tests::CompiledAsyncExceptions::Run(*this,
         TEXT("AVIDSCRIPT_ASYNC_MEMBER_FIXTURE_DIR"), 47, TEXT("async-member"), true);
+}
+
+bool FAvidScriptStaticAsyncTest::RunTest(const FString& Parameters)
+{
+    return AvidScript::Tests::CompiledAsyncExceptions::Run(*this,
+        TEXT("AVIDSCRIPT_STATIC_ASYNC_FIXTURE_DIR"), 21, TEXT("static-async"), true, true);
 }
 
 #endif

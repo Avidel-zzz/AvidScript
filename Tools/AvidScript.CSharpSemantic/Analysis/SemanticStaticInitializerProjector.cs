@@ -73,7 +73,8 @@ internal static class SemanticStaticInitializerProjector
         // A synchronous initializer failure introduces this framework exception
         // even when the source only catches its base class. Keep the hierarchy
         // sourced from Roslyn so ordinary catch dispatch can resolve it.
-        if (document.ExceptionFlows is { Count: > 0 } && document.AsyncMethods.Count == 0
+        if ((document.ExceptionFlows is { Count: > 0 } && document.AsyncMethods.Count == 0
+                || SemanticContract.HasAsyncSynchronousExceptions(document))
             && context.Compilation.GetTypeByMetadataName("System.TypeInitializationException") is { } failureType)
             registry.Register(failureType);
         List<SemanticStaticTypeInitialization> plans = new();
@@ -93,8 +94,10 @@ internal static class SemanticStaticInitializerProjector
         }
         return document with
         {
-            SchemaVersion = SemanticStaticInitialization.SchemaVersion,
-            SemanticVersion = SemanticStaticInitialization.SemanticVersion,
+            SchemaVersion = SemanticContract.HasAsyncSynchronousExceptions(document)
+                ? SemanticStaticInitialization.AsyncSchemaVersion : SemanticStaticInitialization.SchemaVersion,
+            SemanticVersion = SemanticContract.HasAsyncSynchronousExceptions(document)
+                ? SemanticStaticInitialization.AsyncSemanticVersion : SemanticStaticInitialization.SemanticVersion,
             StaticInitialization = new(document.SchemaVersion, document.SemanticVersion, plans),
             Types = registry.Build(), TypeShapes = registry.BuildShapes(), ClassTypes = registry.BuildClassTypes(),
             Succeeded = document.Succeeded && diagnostics.All(item => item.Severity != "error"),

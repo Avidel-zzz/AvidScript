@@ -37,7 +37,10 @@ public static class CSharpStaticInitializationGuards
             || module.StaticStorage is { Slots: null })
             return Fail("Static storage must retain its original versioned envelope.", out error);
         GuestModule profile = GuestStaticStorage.ExecutionProfile(module);
-        if (profile.SchemaVersion != 17 || profile.IrVersion != "1.16"
+        bool staticAsync = GuestStaticAsyncExecution.IsVersion(module);
+        if (!(staticAsync ? profile.SchemaVersion == GuestAsyncThrowRouteValidator.SchemaVersion
+                    && profile.IrVersion == GuestAsyncThrowRouteValidator.IrVersion
+                : profile.SchemaVersion == 17 && profile.IrVersion == "1.16")
             || module.LanguageOutcomeTypes is not { Count: > 0 } outcomes
             || outcomes.Count(item => item.ValueTypeId is null) != 1
             || module.LanguageErrorCatalog is not { } catalog
@@ -84,8 +87,10 @@ public static class CSharpStaticInitializationGuards
         if (!layout.Succeeded || layout.Layout is null) return Fail("Initializer module layout could not be computed.", out error);
         GuestModule candidate = module with
         {
-            SchemaVersion = GuestStaticStorage.SchemaVersion, IrVersion = GuestStaticStorage.IrVersion,
-            StaticStorage = new(profile.SchemaVersion, profile.IrVersion, slots),
+            SchemaVersion = staticAsync ? GuestStaticAsyncExecution.SchemaVersion : GuestStaticStorage.SchemaVersion,
+            IrVersion = staticAsync ? GuestStaticAsyncExecution.IrVersion : GuestStaticStorage.IrVersion,
+            StaticStorage = new(staticAsync ? GuestAsyncSynchronousExceptions.SchemaVersion : profile.SchemaVersion,
+                staticAsync ? GuestAsyncSynchronousExceptions.IrVersion : profile.IrVersion, slots),
             Types = computed.Types, MemoryLayout = layout.Layout, DataSegments = layout.DataSegments,
             Functions = module.Functions.Concat(initializers.Select(item => Build(item, outcome, exceptionToken))).ToArray(),
         };

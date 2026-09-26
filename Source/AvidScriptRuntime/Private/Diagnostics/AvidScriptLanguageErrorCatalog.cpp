@@ -54,6 +54,7 @@ int32 ExecutionSchema(const FString& Profile)
 
 FString ExecutionProfile(const TMap<FString, FString>& Fields)
 {
+	if (Fields.FindRef(TEXT("guest_ir")) == TEXT("30/1.29")) return TEXT("26/1.25");
 	return (Fields.FindRef(TEXT("guest_ir")) == TEXT("27/1.26")
 		|| Fields.FindRef(TEXT("guest_ir")) == TEXT("28/1.27")
 		|| Fields.FindRef(TEXT("guest_ir")) == TEXT("29/1.28"))
@@ -78,13 +79,16 @@ bool ParseProvenance(TConstArrayView<uint8> Payload, TMap<FString, FString>& Out
 	const bool bStaticStorage = ArtifactProfile == TEXT("27/1.26");
 	const bool bTaskErrorTransfer = ArtifactProfile == TEXT("28/1.27");
 	const bool bSynchronousAsync = ArtifactProfile == TEXT("29/1.28");
-	const bool bEnvelope = bStaticStorage || bTaskErrorTransfer || bSynchronousAsync;
+	const bool bStaticAsync = ArtifactProfile == TEXT("30/1.29");
+	const bool bEnvelope = bStaticStorage || bTaskErrorTransfer || bSynchronousAsync || bStaticAsync;
 	const int32 BaseSchema = ExecutionSchema(OutFields.FindRef(TEXT("guest_ir_base")));
 	if ((ArtifactProfile.StartsWith(TEXT("27/"), ESearchCase::CaseSensitive) && !bStaticStorage)
 		|| (ArtifactProfile.StartsWith(TEXT("28/"), ESearchCase::CaseSensitive) && !bTaskErrorTransfer)
 		|| (ArtifactProfile.StartsWith(TEXT("29/"), ESearchCase::CaseSensitive) && !bSynchronousAsync)
+		|| (ArtifactProfile.StartsWith(TEXT("30/"), ESearchCase::CaseSensitive) && !bStaticAsync)
 		|| (bSynchronousAsync && BaseSchema != 26)
-		|| (bEnvelope && BaseSchema == 0) || (bTaskErrorTransfer && BaseSchema < 20)
+		|| (bStaticAsync && OutFields.FindRef(TEXT("guest_ir_base")) != TEXT("29/1.28"))
+		|| (bEnvelope && !bStaticAsync && BaseSchema == 0) || (bTaskErrorTransfer && BaseSchema < 20)
 		|| (!bEnvelope && OutFields.Contains(TEXT("guest_ir_base")))) return false;
 	const FString Profile = ExecutionProfile(OutFields);
 	const bool bRoutedThrow = Profile == TEXT("26/1.25");
@@ -221,7 +225,7 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 	const TArray<TSharedPtr<FJsonValue>>* Types = nullptr;
 	const TArray<TSharedPtr<FJsonValue>>* Sources = nullptr;
 	if (!CatalogPrivate::Number(*Document, TEXT("schema_version"), 1, 1, SectionVersion)
-		|| !CatalogPrivate::Number(*Document, TEXT("guest_ir_schema_version"), 17, 29, GuestSchema)
+		|| !CatalogPrivate::Number(*Document, TEXT("guest_ir_schema_version"), 17, 30, GuestSchema)
 		|| !Document->TryGetStringField(TEXT("guest_ir_version"), GuestVersion)
 		|| FString::Printf(TEXT("%d/%s"), GuestSchema, *GuestVersion) != ArtifactProfile
 		|| !Document->TryGetStringField(TEXT("module_id"), ModuleId) || ModuleId != ExpectedModuleId

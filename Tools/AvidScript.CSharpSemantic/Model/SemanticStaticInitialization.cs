@@ -7,6 +7,11 @@ public static class SemanticStaticInitialization
 {
     public const int SchemaVersion = 49;
     public const string SemanticVersion = "1.58";
+    public const int AsyncSchemaVersion = 51;
+    public const string AsyncSemanticVersion = "1.60";
+
+    public static bool IsAsyncVersion(SemanticDocument document) =>
+        document.SchemaVersion == AsyncSchemaVersion && document.SemanticVersion == AsyncSemanticVersion;
 
     public static string InitializerId(string fieldId) => "symbol:static_initializer:" + fieldId;
 }

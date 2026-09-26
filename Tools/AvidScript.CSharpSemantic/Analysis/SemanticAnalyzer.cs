@@ -49,8 +49,8 @@ public static class SemanticAnalyzer
         if (enableAsyncCancellationFlow && !enableAsyncExceptionFlow)
             throw new ArgumentException("Async cancellation flow requires async exception flow.",
                 nameof(enableAsyncCancellationFlow));
-        if (enableAsyncSynchronousExceptions && (!enableAsyncCancellationFlow || enableStaticInitialization))
-            throw new ArgumentException("Synchronous async exceptions require cancellation analysis and cannot use the legacy static-initialization envelope.",
+        if (enableAsyncSynchronousExceptions && !enableAsyncCancellationFlow)
+            throw new ArgumentException("Synchronous async exceptions require cancellation analysis.",
                 nameof(enableAsyncSynchronousExceptions));
 
         string sourceSha256 = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source))).ToLowerInvariant();

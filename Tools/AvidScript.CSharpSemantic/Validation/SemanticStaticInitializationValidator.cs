@@ -8,10 +8,15 @@ public static class SemanticStaticInitializationValidator
 {
     public static bool IsValid(SemanticDocument document)
     {
-        if (document is null || document.SchemaVersion != SemanticStaticInitialization.SchemaVersion
-            || document.SemanticVersion != SemanticStaticInitialization.SemanticVersion
+        if (document is null || !(document.SchemaVersion == SemanticStaticInitialization.SchemaVersion
+                && document.SemanticVersion == SemanticStaticInitialization.SemanticVersion
+                || SemanticStaticInitialization.IsAsyncVersion(document))
             || document.StaticInitialization is not { Types: { Count: > 0 } } plan
-            || !BaseVersion(plan) || document.Source is null || document.Types is null || document.Symbols is null || document.ClassTypes is null
+            || !(SemanticStaticInitialization.IsAsyncVersion(document)
+                ? plan.BaseSchemaVersion == SemanticContract.AsyncSynchronousExceptionSchemaVersion
+                    && plan.BaseSemanticVersion == SemanticContract.AsyncSynchronousExceptionSemanticVersion
+                : BaseVersion(plan))
+            || document.Source is null || document.Types is null || document.Symbols is null || document.ClassTypes is null
             || document.Callables is null || document.Methods is null || document.ControlFlowGraphs is null)
             return false;
         if (document.Language != "csharp" || string.IsNullOrWhiteSpace(document.Source.SourceId)

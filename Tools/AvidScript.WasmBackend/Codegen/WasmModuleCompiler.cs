@@ -226,7 +226,9 @@ public static class WasmModuleCompiler
                 $"guest_ir={module.SchemaVersion}/{module.IrVersion}");
             if (module.TaskLocalLifetimes is { } lifetimes)
                 payload += "\ntask_local_exception_model=" + lifetimes.ExceptionModel;
-            if (GuestAsyncSynchronousExceptions.IsVersion(module))
+            if (GuestStaticAsyncExecution.IsVersion(module))
+                payload += "\nguest_ir_base=29/1.28";
+            else if (GuestAsyncSynchronousExceptions.IsVersion(module))
                 payload += "\nguest_ir_base=26/1.25";
             else if (module.TaskErrorTransfers is { } transfers)
                 payload += $"\nguest_ir_base={transfers.BaseSchemaVersion}/{transfers.BaseIrVersion}";

@@ -13,8 +13,11 @@ internal static class GuestStaticStorageValidator
                 Add(context, "Static storage requires Guest IR 27/1.26.");
             return;
         }
-        if (artifact.StaticStorage is not { BaseSchemaVersion: >= 4 and <= 26,
-                Slots: { Count: > 0 and <= GuestManagedHeap.MaxStaticSlots } } storage)
+        if (artifact.StaticStorage is not { Slots: { Count: > 0 and <= GuestManagedHeap.MaxStaticSlots } } storage
+            || !(GuestStaticAsyncExecution.IsVersion(artifact)
+                ? storage.BaseSchemaVersion == GuestAsyncSynchronousExceptions.SchemaVersion
+                    && storage.BaseIrVersion == GuestAsyncSynchronousExceptions.IrVersion
+                : storage.BaseSchemaVersion is >= 4 and <= 26))
         {
             Add(context, "Static storage requires a bounded nonempty slot table and an existing execution profile.");
             return;
