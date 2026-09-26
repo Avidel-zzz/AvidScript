@@ -54,6 +54,9 @@ public sealed record GuestModule(
 
     [JsonPropertyOrder(22), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public GuestStaticStoragePlan? StaticStorage { get; init; }
+
+    [JsonPropertyOrder(23), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public GuestTaskErrorTransferPlan? TaskErrorTransfers { get; init; }
 }
 
 // IR 25 binds the new compiler ownership profile to the concrete release and

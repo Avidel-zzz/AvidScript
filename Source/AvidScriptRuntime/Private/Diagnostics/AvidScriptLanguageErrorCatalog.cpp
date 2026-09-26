@@ -54,7 +54,8 @@ int32 ExecutionSchema(const FString& Profile)
 
 FString ExecutionProfile(const TMap<FString, FString>& Fields)
 {
-	return Fields.FindRef(TEXT("guest_ir")) == TEXT("27/1.26")
+	return (Fields.FindRef(TEXT("guest_ir")) == TEXT("27/1.26")
+		|| Fields.FindRef(TEXT("guest_ir")) == TEXT("28/1.27"))
 		? Fields.FindRef(TEXT("guest_ir_base")) : Fields.FindRef(TEXT("guest_ir"));
 }
 
@@ -74,9 +75,13 @@ bool ParseProvenance(TConstArrayView<uint8> Payload, TMap<FString, FString>& Out
 	}
 	const FString ArtifactProfile = OutFields.FindRef(TEXT("guest_ir"));
 	const bool bStaticStorage = ArtifactProfile == TEXT("27/1.26");
+	const bool bTaskErrorTransfer = ArtifactProfile == TEXT("28/1.27");
+	const bool bEnvelope = bStaticStorage || bTaskErrorTransfer;
+	const int32 BaseSchema = ExecutionSchema(OutFields.FindRef(TEXT("guest_ir_base")));
 	if ((ArtifactProfile.StartsWith(TEXT("27/"), ESearchCase::CaseSensitive) && !bStaticStorage)
-		|| (bStaticStorage && ExecutionSchema(OutFields.FindRef(TEXT("guest_ir_base"))) == 0)
-		|| (!bStaticStorage && OutFields.Contains(TEXT("guest_ir_base")))) return false;
+		|| (ArtifactProfile.StartsWith(TEXT("28/"), ESearchCase::CaseSensitive) && !bTaskErrorTransfer)
+		|| (bEnvelope && BaseSchema == 0) || (bTaskErrorTransfer && BaseSchema < 20)
+		|| (!bEnvelope && OutFields.Contains(TEXT("guest_ir_base")))) return false;
 	const FString Profile = ExecutionProfile(OutFields);
 	const bool bRoutedThrow = Profile == TEXT("26/1.25");
 	const bool bLifetime = bRoutedThrow || Profile == TEXT("25/1.24");
@@ -84,7 +89,7 @@ bool ParseProvenance(TConstArrayView<uint8> Payload, TMap<FString, FString>& Out
 	const bool bLifetimeModelValid = LifetimeModel == TEXT("none") || LifetimeModel == TEXT("fault")
 		|| LifetimeModel == TEXT("exception") || LifetimeModel == TEXT("cleanup")
 		|| LifetimeModel == TEXT("cleanup_only") || LifetimeModel == TEXT("cancellation");
-	return OutFields.Num() == (bLifetime ? 7 : 6) + (bStaticStorage ? 1 : 0)
+	return OutFields.Num() == (bLifetime ? 7 : 6) + (bEnvelope ? 1 : 0)
 		&& (!bLifetime || bLifetimeModelValid)
 		&& (!bRoutedThrow || LifetimeModel == TEXT("cancellation"))
 		&& OutFields.Contains(TEXT("module_id"))
@@ -169,7 +174,8 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 	{
 		if (bValidProvenance && (Profile == TEXT("17/1.16") || Profile == TEXT("20/1.19")
 			|| Profile == TEXT("21/1.20") || Profile == TEXT("22/1.21")
-			|| Profile == TEXT("23/1.22") || Profile == TEXT("24/1.23") || bLifetimeErrors))
+			|| Profile == TEXT("23/1.22") || Profile == TEXT("24/1.23") || bLifetimeErrors
+			|| ArtifactProfile == TEXT("28/1.27")))
 		{
 			OutError = TEXT("Catalog-bearing Guest IR WASM is missing language-error metadata");
 			return false;
@@ -211,7 +217,7 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 	const TArray<TSharedPtr<FJsonValue>>* Types = nullptr;
 	const TArray<TSharedPtr<FJsonValue>>* Sources = nullptr;
 	if (!CatalogPrivate::Number(*Document, TEXT("schema_version"), 1, 1, SectionVersion)
-		|| !CatalogPrivate::Number(*Document, TEXT("guest_ir_schema_version"), 17, 27, GuestSchema)
+		|| !CatalogPrivate::Number(*Document, TEXT("guest_ir_schema_version"), 17, 28, GuestSchema)
 		|| !Document->TryGetStringField(TEXT("guest_ir_version"), GuestVersion)
 		|| FString::Printf(TEXT("%d/%s"), GuestSchema, *GuestVersion) != ArtifactProfile
 		|| !Document->TryGetStringField(TEXT("module_id"), ModuleId) || ModuleId != ExpectedModuleId
@@ -221,7 +227,8 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 		|| !Document->TryGetArrayField(TEXT("types"), Types) || Types->Num() > 256
 		|| !Document->TryGetArrayField(TEXT("sources"), Sources) || Sources->Num() > 1024
 		|| ((Types->IsEmpty() || Sources->IsEmpty())
-			&& ((ProfileSchema != 23 && !(ProfileSchema == 25 && LifetimeModel == TEXT("cleanup")))
+			&& (ArtifactProfile == TEXT("28/1.27")
+				|| (ProfileSchema != 23 && !(ProfileSchema == 25 && LifetimeModel == TEXT("cleanup")))
 				|| Types->Num() != Sources->Num())))
 	{
 		OutError = TEXT("language-error metadata identity or token counts are invalid");

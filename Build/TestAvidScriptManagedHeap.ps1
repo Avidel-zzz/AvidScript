@@ -23,10 +23,12 @@ if ($RuntimeAutomation) {
     $PreviousStaticGuardDirectory = $env:AVIDSCRIPT_STATIC_GUARD_WASM_DIR
     $PreviousStaticSourceDirectory = $env:AVIDSCRIPT_STATIC_SOURCE_WASM_DIR
     $PreviousStaticFailureDirectory = $env:AVIDSCRIPT_STATIC_FAILURE_WASM_DIR
+    $PreviousTransferDirectory = $env:AVIDSCRIPT_TASK_ERROR_TRANSFER_WASM_DIR
     $PreviousCliHome = $env:DOTNET_CLI_HOME
     Push-Location $PluginRoot
     try {
         $env:AVIDSCRIPT_MANAGED_HEAP_WASM_DIR = $GuestDirectory
+        $env:AVIDSCRIPT_TASK_ERROR_TRANSFER_WASM_DIR = Join-Path $ProjectRoot 'Saved/AvidScriptTaskErrorTransferTests/GuestFixtures'
         $env:DOTNET_CLI_HOME = Join-Path ([IO.Path]::GetTempPath()) 'avidscript-managed-heap-dotnet'
         $Sdk = & $Dotnet --version
         if ($LASTEXITCODE -ne 0 -or $Sdk -ne '8.0.416') { throw "Managed heap fixtures require SDK 8.0.416, got $Sdk" }
@@ -52,6 +54,7 @@ if ($RuntimeAutomation) {
         $env:AVIDSCRIPT_STATIC_GUARD_WASM_DIR = $PreviousStaticGuardDirectory
         $env:AVIDSCRIPT_STATIC_SOURCE_WASM_DIR = $PreviousStaticSourceDirectory
         $env:AVIDSCRIPT_STATIC_FAILURE_WASM_DIR = $PreviousStaticFailureDirectory
+        $env:AVIDSCRIPT_TASK_ERROR_TRANSFER_WASM_DIR = $PreviousTransferDirectory
         $env:DOTNET_CLI_HOME = $PreviousCliHome
         Pop-Location
     }
@@ -62,13 +65,13 @@ if ($RuntimeAutomation) {
     & $EditorExe $ProjectPath -unattended -nop4 -NullRHI -nosplash "-ExecCmds=Automation RunTests $TestName;Quit" '-TestExit=Automation Test Queue Empty' "-abslog=$LogPath"
     if ($LASTEXITCODE -ne 0) { throw "Managed heap Automation exited with $LASTEXITCODE. Log: $LogPath" }
     $Log = Get-Content -Raw -LiteralPath $LogPath
-    $Found = [regex]::Matches($Log, "Found 12 automation tests based on '$([regex]::Escape($TestName))'").Count
-    $Success = [regex]::Matches($Log, 'Test Completed\. Result=\{Success\} Name=\{(Ownership|HostAbi|StaticStorage|StaticGeneratedGuest|StaticTaskCancellation|StaticInitialization|StaticSourceInitialization|StaticSourceFailures|GeneratedGuest|CSharpClosures|GenericMembers|BorrowedReferences)\} Path=\{AvidScript\.Runtime\.ManagedHeap\.\1\}').Count
+    $Found = [regex]::Matches($Log, "Found 13 automation tests based on '$([regex]::Escape($TestName))'").Count
+    $Success = [regex]::Matches($Log, 'Test Completed\. Result=\{Success\} Name=\{(Ownership|HostAbi|StaticStorage|StaticGeneratedGuest|StaticTaskCancellation|TaskErrorTransfer|StaticInitialization|StaticSourceInitialization|StaticSourceFailures|GeneratedGuest|CSharpClosures|GenericMembers|BorrowedReferences)\} Path=\{AvidScript\.Runtime\.ManagedHeap\.\1\}').Count
     $Failed = [regex]::Matches($Log, 'Test Completed\. Result=\{Fail\}').Count
     $Complete = [regex]::Matches($Log, '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*\*').Count
     $Exit = [regex]::Matches($Log, 'RequestExitWithStatus\(1, 0,').Count
-    if ($Found -ne 1 -or $Success -ne 12 -or $Failed -ne 0 -or $Complete -ne 1 -or $Exit -lt 1) {
+    if ($Found -ne 1 -or $Success -ne 13 -or $Failed -ne 0 -or $Complete -ne 1 -or $Exit -lt 1) {
         throw "Managed heap Automation evidence incomplete: found=$Found passed=$Success failed=$Failed complete=$Complete exit=$Exit log=$LogPath"
     }
-    Write-Output "AvidScript.ManagedHeap.RuntimeAutomation: 12/12 passed; log=$LogPath"
+    Write-Output "AvidScript.ManagedHeap.RuntimeAutomation: 13/13 passed; log=$LogPath"
 }

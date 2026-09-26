@@ -29,6 +29,8 @@ internal sealed class GuestValidationContext
 
     public Dictionary<string, GuestFunction> Functions { get; }
 
+    public HashSet<(string FunctionId, string BlockId, int InstructionIndex)> CheckedTaskErrorTransfers { get; } = new();
+
     public IReadOnlyList<GuestDiagnostic> Diagnostics => diagnostics;
 
     public bool IsVoidType(string typeId)

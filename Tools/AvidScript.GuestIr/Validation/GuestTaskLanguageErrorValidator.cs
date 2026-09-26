@@ -143,15 +143,21 @@ public static class GuestTaskLanguageErrorValidator
         {
             GuestInstruction call = block.Instructions[index];
             if (call.Op != "call" || call.TargetId != fault.Id) continue;
-            if (call.OperandIds.Count != 4 || index < 2
-                || block.Instructions[index - 1] is not { Op: "managed_set" } set
-                || set.TargetId != "field:code" || set.OperandIds.Count != 2
-                || set.OperandIds[0] != call.OperandIds[3]
-                || set.OperandIds[1] != call.OperandIds[1]
-                || block.Instructions[index - 2] is not { Op: "managed_new" } create
-                || create.ResultId != call.OperandIds[3])
+            if (!HasFreshRoot(block, index)
+                && !context.CheckedTaskErrorTransfers.Contains((function.Id, block.Id, index)))
                 Add(context, $"Function '{function.Id}' must submit a fresh frame-rooted error object carrying the same type token to '{fault.Name}'.");
         }
+    }
+
+    internal static bool HasFreshRoot(GuestBasicBlock block, int index)
+    {
+        GuestInstruction call = block.Instructions[index];
+        return call.OperandIds.Count == 4 && index >= 2
+            && block.Instructions[index - 1] is { Op: "managed_set" } set
+            && set.TargetId == "field:code" && set.OperandIds.Count == 2
+            && set.OperandIds[0] == call.OperandIds[3] && set.OperandIds[1] == call.OperandIds[1]
+            && block.Instructions[index - 2] is { Op: "managed_new" } create
+            && create.ResultId == call.OperandIds[3];
     }
 
     internal static void ValidateCallTokens(GuestValidationContext context, GuestImport fault,

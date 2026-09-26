@@ -11,12 +11,15 @@ public static class GuestStaticStorage
     public const string SetOp = "managed_static_set";
 
     public static bool IsVersion(GuestModule module) =>
-        module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion;
+        module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion
+        || GuestTaskErrorTransfers.IsVersion(module) && module.StaticStorage is not null;
 
     // Reuse the complete existing execution contract, including its provenance
     // and ownership checks. The serialized module always retains its outer version.
     public static GuestModule ExecutionProfile(GuestModule module) =>
-        IsVersion(module) && module.StaticStorage is { BaseSchemaVersion: >= 4 and <= 26 } storage
+        GuestTaskErrorTransfers.IsVersion(module) && module.TaskErrorTransfers is { BaseSchemaVersion: >= 20 and <= 26 } transfers
+            ? module with { SchemaVersion = transfers.BaseSchemaVersion, IrVersion = transfers.BaseIrVersion }
+        : IsVersion(module) && module.StaticStorage is { BaseSchemaVersion: >= 4 and <= 26 } storage
             ? module with { SchemaVersion = storage.BaseSchemaVersion, IrVersion = storage.BaseIrVersion }
             : module;
 }

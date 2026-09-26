@@ -112,7 +112,7 @@ public static void Tick(float deltaSeconds)
 <summary>实验性编译器功能</summary>
 
 - 静态字段、静态构造和初始化失败后的异常缓存已通过同步执行测试。目前只通过[编译器 API](Docs/Phase66/P66.C10_Static_Object_Lifetime_Contract.md)使用，尚未接入普通构建。
-- 部分同步方法和属性访问器支持显式 `throw`，需要[实验性构建参数](Docs/Phase66/P66.C8_Task_Local_Lifetime_Contract.md#generated-task-build)。同步异常尚不能传播到异步方法。
+- 部分同步方法和属性访问器支持显式 `throw`，需要[实验性构建参数](Docs/Phase66/P66.C8_Task_Local_Lifetime_Contract.md#generated-task-build)。[同步异常进入异步 Task](Docs/Phase66/P66.C10_Synchronous_Error_Task_Transfer.md)的对象保活与释放已通过运行时测试，C# 编译接入仍在开发。
 
 </details>
 

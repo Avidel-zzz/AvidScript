@@ -21,7 +21,8 @@ internal static class GuestLanguageOutcomeTypeValidator
             return;
         }
 
-        bool validVersion = (context.Module.SchemaVersion == SchemaVersion && context.Module.IrVersion == IrVersion)
+        bool validVersion = GuestTaskErrorTransfers.IsVersion(context.Artifact)
+            || (context.Module.SchemaVersion == SchemaVersion && context.Module.IrVersion == IrVersion)
             || (context.Module.SchemaVersion == GuestLanguageOutcomeFlowValidator.SchemaVersion
                 && context.Module.IrVersion == GuestLanguageOutcomeFlowValidator.IrVersion)
             || (context.Module.SchemaVersion == GuestLanguageErrorCatalogValidator.SchemaVersion

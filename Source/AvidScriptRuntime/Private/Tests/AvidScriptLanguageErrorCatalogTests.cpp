@@ -330,6 +330,16 @@ bool FAvidScriptLanguageErrorCatalogRuntimeTest::RunTest(const FString& Paramete
 		TestNull(TEXT("No-error profile has no error capability"), Catalog.Get());
 	}
 	const FString StaticJson = Json(Document(27));
+	const FString TransferJson = Json(Document(28));
+	for (const int32 Base : {20, 21, 22, 23, 24, 25, 26})
+	{
+		TestTrue(TEXT("IR 28 retains the selected Task error execution profile"),
+			FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+				Module(&TransferJson, true, false, 28, TEXT("cancellation"), Base), ModuleId, Catalog, Error));
+		TestTrue(TEXT("Checked transfer profile authorizes Task faults"), Catalog && Catalog->SupportsTaskLanguageErrorFault());
+		TestEqual(TEXT("Transfer cannot grant cancellation to older profiles"),
+			Catalog && Catalog->SupportsTaskCancellationError(), Base >= 24);
+	}
 	for (const int32 Base : {17, 20, 21, 22, 23, 24, 25, 26})
 	{
 		TestTrue(TEXT("IR 27 retains each existing error execution profile"),
@@ -384,6 +394,25 @@ bool FAvidScriptLanguageErrorCatalogRuntimeTest::RunTest(const FString& Paramete
 	}
 
 	TArray<TPair<FString, TArray<uint8>>> Invalid;
+	Invalid.Emplace(TEXT("transfer profile requires base metadata"), Module(&TransferJson, true, false, 28));
+	for (const int32 Base : {19, 27, 28, 29})
+		Invalid.Emplace(TEXT("transfer base must be an existing Task error profile"), Module(&TransferJson, true, false, 28, TEXT("cancellation"), Base));
+	Invalid.Emplace(TEXT("transfer requires its catalog"), Module(nullptr, true, false, 28, TEXT("cancellation"), 24));
+	Invalid.Emplace(TEXT("no-error base cannot hide a missing transfer catalog"), Module(nullptr, true, false, 28, TEXT("none"), 25));
+	Invalid.Emplace(TEXT("transfer cannot use an older catalog identity"), Module(&CancellationJson, true, false, 28, TEXT("cancellation"), 24));
+	Invalid.Emplace(TEXT("transfer retains routed throw ownership restrictions"), Module(&TransferJson, true, false, 28, TEXT("fault"), 26));
+	auto TransferEmpty = Document(28);
+	TransferEmpty->SetArrayField(TEXT("types"), {});
+	TransferEmpty->SetArrayField(TEXT("sources"), {});
+	const FString TransferEmptyJson = Json(TransferEmpty);
+	Invalid.Emplace(TEXT("transfer requires nonempty catalog even with cleanup profile"), Module(&TransferEmptyJson, true, false, 28, TEXT("cleanup"), 23));
+	for (const FString& Metadata : {Provenance(28) + TEXT("\nguest_ir_base=24/1.22"),
+		Provenance(28, TEXT("cancellation"), 24).Replace(TEXT("guest_ir=28/1.27"), TEXT("guest_ir=28/1.26"))})
+	{
+		TArray<uint8> MismatchedTransfer = Module(&TransferJson, false);
+		Custom(MismatchedTransfer, "avidscript.provenance", Metadata);
+		Invalid.Emplace(TEXT("transfer outer and base version pairs must be exact"), MoveTemp(MismatchedTransfer));
+	}
 	Invalid.Emplace(TEXT("static profile requires base metadata"), Module(&StaticJson, true, false, 27));
 	Invalid.Emplace(TEXT("static base cannot be self-referential"), Module(&StaticJson, true, false, 27, TEXT("cancellation"), 27));
 	Invalid.Emplace(TEXT("static base cannot be a future version"), Module(&StaticJson, true, false, 27, TEXT("cancellation"), 28));
