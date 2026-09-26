@@ -26,15 +26,10 @@ internal static class UeTypeGenerationPlanner
 
     public static IReadOnlyList<UeTypeManifestEntry> Plan(
         SemanticDocument document,
-        string moduleName)
+        string moduleName,
+        bool allowBoundedLanguageErrors)
     {
-        if (document.SchemaVersion != SemanticContract.CurrentSchemaVersion
-            || document.SemanticVersion != SemanticContract.CurrentSemanticVersion
-            || !document.Succeeded
-            || document.Diagnostics.Any(diagnostic => diagnostic.Severity == "error"))
-        {
-            throw new InvalidOperationException("Semantic artifact is failed or does not match the current UE type generator contract.");
-        }
+        document = UeTypeGenerationInputValidator.Validate(document, allowBoundedLanguageErrors);
         if (!SemanticUeTypeContractValidator.TryValidate(document, out string validationError))
         {
             throw new InvalidOperationException("Semantic UE type contract is invalid: " + validationError);

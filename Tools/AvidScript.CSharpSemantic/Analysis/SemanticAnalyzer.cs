@@ -204,7 +204,10 @@ public static class SemanticAnalyzer
         bool hasExceptionFlows = controlFlowProjection.ExceptionFlows.Count > 0;
         bool exceptionFlowOnlyFailure = hasExceptionFlows && diagnostics.All(diagnostic =>
             diagnostic.Severity != "error" || diagnostic.Code == "ASCS3001");
-        SemanticUeMethodCatalog methodCatalog = succeeded || exceptionFlowOnlyFailure
+        bool asyncFlowOnlyFailure = asyncProjection.Methods.Any(method =>
+                method.ErrorPlan is not null || method.ExceptionPlan is not null)
+            && diagnostics.All(diagnostic => diagnostic.Severity != "error" || diagnostic.Code == "ASCS5422");
+        SemanticUeMethodCatalog methodCatalog = succeeded || exceptionFlowOnlyFailure || asyncFlowOnlyFailure
             ? SemanticUeMethodCatalogProjector.Project(context, typeRegistry, ueTypeProjection.Declarations, callableProjection.Callables)
             : SemanticUeMethodCatalog.Empty;
         bool hasTaskResults = asyncProjection.Methods.Any(method => method.TaskResultTypeId is not null

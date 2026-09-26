@@ -15,6 +15,9 @@ param(
     [string]$PackageConfiguration = "Development",
     [ValidateSet("disabled", "bounded")]
     [string]$LanguageErrors = "disabled",
+    [switch]$AsyncExceptionFlow,
+    [switch]$DirectAwaitCleanup,
+    [switch]$AsyncCancellationFlow,
     [switch]$HeadlessRelease,
     [switch]$SkipRuntimePackage,
     [ValidateSet("Win64", "Android")]
@@ -39,6 +42,15 @@ $Utf8 = [System.Text.UTF8Encoding]::new($false)
 
 if ($TargetPlatform -ieq "Android" -and -not $HeadlessRelease) {
     throw "Android Generated Type packages require -HeadlessRelease."
+}
+if ($AsyncExceptionFlow -and $LanguageErrors -cne "bounded") {
+    throw "Async exception flow requires -LanguageErrors bounded."
+}
+if ($DirectAwaitCleanup -and -not $AsyncExceptionFlow) {
+    throw "Direct await cleanup requires -AsyncExceptionFlow."
+}
+if ($AsyncCancellationFlow -and -not $AsyncExceptionFlow) {
+    throw "Async cancellation flow requires -AsyncExceptionFlow."
 }
 if ($LanguageErrors -ceq "bounded" -and
     ($HeadlessRelease -or $PackageConfiguration -ceq "Shipping" -or $SkipRuntimePackage)) {
@@ -155,6 +167,9 @@ if ($LASTEXITCODE -ne 0) {
     -FrontendPath $FrontendPath `
     -OutputPath $SemanticPath `
     -ExecutableReferenceSourcePath $BindingPackage.ReferenceSourcePath `
+    -AsyncExceptionFlow $(if ($AsyncExceptionFlow) { 'enabled' } else { 'disabled' }) `
+    -DirectAwaitCleanup $(if ($DirectAwaitCleanup) { 'enabled' } else { 'disabled' }) `
+    -AsyncCancellationFlow $(if ($AsyncCancellationFlow) { 'enabled' } else { 'disabled' }) `
     -Configuration $Configuration
 $SemanticExitCode = $LASTEXITCODE
 if ($SemanticExitCode -ne 0 -and
@@ -167,11 +182,11 @@ $SemanticErrors = @($Semantic.diagnostics | Where-Object { [string]$_.severity -
 $BoundedSemanticArtifact = $LanguageErrors -ceq "bounded" -and
     $SemanticExitCode -eq 1 -and
     -not [bool]$Semantic.succeeded -and
-    [int]$Semantic.schema_version -eq 34 -and
-    [string]$Semantic.semantic_version -ceq "1.43" -and
-    @($Semantic.exception_flows | Where-Object { $null -ne $_ }).Count -gt 0 -and
     $SemanticErrors.Count -gt 0 -and
-    @($SemanticErrors | Where-Object { [string]$_.code -cne "ASCS3001" }).Count -eq 0
+    (@($SemanticErrors | Where-Object { [string]$_.code -cne "ASCS3001" }).Count -eq 0 -or
+        @($SemanticErrors | Where-Object { [string]$_.code -cne "ASCS5422" }).Count -eq 0)
+# This is only the CLI exit/diagnostic gate. The type generator validates the
+# exact Semantic version, exception plans and Task lifetimes before publication.
 if ((-not [bool]$Semantic.succeeded -and -not $BoundedSemanticArtifact) -or
     @($Semantic.ue_type_declarations).Count -eq 0) {
     throw "Semantic artifact must be successful or a bounded exception-flow artifact, and contain UE type declarations."
@@ -212,7 +227,7 @@ $GeneratorArguments = @(
     "--module", $ModuleName,
     "--ue-version", $UnrealVersion
 )
-if ($BoundedSemanticArtifact) {
+if ($LanguageErrors -ceq "bounded") {
     $GeneratorArguments += @("--language-errors", "bounded")
 }
 & $DotNetPath $GeneratorDll @GeneratorArguments
@@ -306,6 +321,9 @@ if (-not $SkipRuntimePackage) {
             -ProjectPath $ProjectPath `
             -ModuleId $RuntimeModuleId `
             -LanguageErrors $LanguageErrors `
+            -AsyncExceptionFlow:$AsyncExceptionFlow `
+            -DirectAwaitCleanup:$DirectAwaitCleanup `
+            -AsyncCancellationFlow:$AsyncCancellationFlow `
             -ArtifactStem $RuntimeArtifactStem `
             -ManifestPath $RuntimeManifestPath `
             -BindingPackagePath $BindingPackageManifestPath `

@@ -18,7 +18,7 @@ internal static class UeTypeGeneratorTests
         InvalidMethodCatalogFailsBeforeGeneration();
         BoundedExceptionArtifactPreservesNativeShellIdentity();
         AtomicPublisherPreservesCacheHits();
-        return 7;
+        return 7 + UeTypeGeneratorAsyncTests.Run();
     }
 
     private static void GenerationIsByteDeterministicAndTopological()
@@ -433,7 +433,7 @@ internal static class UeTypeGeneratorTests
         Assert(rejected, message);
     }
 
-    private const string Facade = """
+    internal const string Facade = """
         using System;
         namespace AvidScript;
 

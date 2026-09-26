@@ -28,33 +28,10 @@ public static class UeTypeShellGenerator
 
         byte[] artifact = semanticArtifact.ToArray();
         SemanticDocument document = SemanticSerializer.Deserialize(artifact);
-        SemanticDocument shellDocument = document;
-        if (allowBoundedLanguageErrors && !document.Succeeded)
-        {
-            if (document.SchemaVersion != SemanticContract.ExceptionFlowSchemaVersion
-                || document.SemanticVersion != SemanticContract.ExceptionFlowSemanticVersion
-                || document.ExceptionFlows is not { Count: > 0 }
-                || !SemanticExceptionFlowContractValidator.IsValid(document)
-                || !document.Diagnostics.Any(diagnostic => diagnostic.Severity == "error"
-                    && diagnostic.Code == "ASCS3001")
-                || document.Diagnostics.Any(diagnostic => diagnostic.Severity == "error"
-                    && diagnostic.Code != "ASCS3001"))
-                throw new InvalidOperationException("Bounded language errors require a validated exception-flow artifact without unrelated errors.");
-            // Native shells use declarations and signatures only. The original
-            // failed artifact remains the identity passed to the Guest compiler.
-            shellDocument = document with
-            {
-                SchemaVersion = SemanticContract.CurrentSchemaVersion,
-                SemanticVersion = SemanticContract.CurrentSemanticVersion,
-                Succeeded = true,
-                ExceptionFlows = null,
-                Diagnostics = document.Diagnostics.Where(diagnostic =>
-                    diagnostic.Code != "ASCS3001").ToArray(),
-            };
-        }
         IReadOnlyList<UeTypeManifestEntry> types = UeTypeGenerationPlanner.Plan(
-            shellDocument,
-            moduleName);
+            document,
+            moduleName,
+            allowBoundedLanguageErrors);
         string artifactHash = Hash(artifact);
         string generationKey = Hash(Encoding.UTF8.GetBytes(string.Join("\n", new[]
         {
