@@ -15,6 +15,8 @@ public static class Script
     public static int CleanupCount;
     public static int CatchCount;
     public static int CleanupMode;
+    public static int ReloadMode;
+    public static int BeginCount;
     internal static AvidCancellationSource Lifetime;
 
     public static async Task<int> RunAsync()
@@ -41,13 +43,26 @@ public static class Script
     [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
     public static async void BeginPlay()
     {
+        BeginCount++;
         Lifetime = AvidCancellationSource.Create();
-        Result = await RunAsync();
+        Task<int> pending = RunAsync();
+        if (ReloadMode != 0) Lifetime.Cancel();
+        // A reload candidate can trap after owning a queued cancellation and a
+        // managed capture. CleanupCount is still zero before any resume occurs.
+        if (ReloadMode == 2) Result = 1 / CleanupCount;
+        Result = await pending;
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
     public static void Tick(float deltaSeconds)
     {
         if (deltaSeconds < 0.0f) Lifetime.Cancel();
+    }
+
+    [UnmanagedCallersOnly(EntryPoint = "avid_on_event")]
+    public static void OnEvent(int mode, float cancel)
+    {
+        ReloadMode = mode;
+        if (cancel < 0.0f) Lifetime.Cancel();
     }
 }

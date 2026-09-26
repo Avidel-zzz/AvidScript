@@ -174,6 +174,12 @@ public:
 #if WITH_DEV_AUTOMATION_TESTS
 	FAvidScriptWasmRuntimeInstance* GetLiveRuntimeForTesting() const { return LiveRuntime.Get(); }
 	TWeakPtr<FAvidScriptWasmRuntimeInstance> GetRuntimeLeaseForTesting() const { return LiveRuntime; }
+	FAvidScriptSessionContinuations* GetContinuationOwnerForTesting() const { return Continuations.Get(); }
+	void SetCandidateBeginPlayCompletionObserverForTesting(
+		TFunction<void(TWeakPtr<FAvidScriptWasmRuntimeInstance>, bool)> InObserver)
+	{
+		CandidateBeginPlayCompletionObserverForTesting = MoveTemp(InObserver);
+	}
 	void SetBackendSelectionForTesting(const FAvidScriptVmBackendSelection& InBackendSelection)
 	{
 		check(!LiveRuntime);
@@ -353,6 +359,8 @@ private:
 		ExecutionBudgetOverrideForTesting;
 	TFunction<void(IAvidScriptBindingHostEffectJournal*)>
 		CandidateBeginPlayObserverForTesting;
+	TFunction<void(TWeakPtr<FAvidScriptWasmRuntimeInstance>, bool)>
+		CandidateBeginPlayCompletionObserverForTesting;
 	TFunction<void()> LiveExecutionObserverForTesting;
 #endif
 };

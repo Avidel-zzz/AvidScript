@@ -44,15 +44,16 @@ namespace AvidScript
 
 internal static class Program
 {
-    private static void Main()
+    private static void Main(string[] args)
     {
+        int expectedResult = args.Length == 0 ? 16 : int.Parse(args[0]);
         foreach (bool cancel in new[] { false, true })
         foreach (bool cleanupThrows in new[] { false, true })
-            RunCase(cancel, cleanupThrows);
+            RunCase(cancel, cleanupThrows, expectedResult);
         Console.WriteLine("DirectAwaitCleanup.Reference: 4/4 passed");
     }
 
-    private static void RunCase(bool cancel, bool cleanupThrows)
+    private static void RunCase(bool cancel, bool cleanupThrows, int expectedResult)
     {
         Script.CleanupCount = 0;
         Script.CatchCount = 0;
@@ -73,7 +74,7 @@ internal static class Program
             bool valid = cleanupThrows
                 ? task.IsFaulted && failure is InvalidOperationException
                 : cancel ? task.IsCanceled && failure is OperationCanceledException
-                : task.IsCompletedSuccessfully && failure is null && result == 16;
+                : task.IsCompletedSuccessfully && failure is null && result == expectedResult;
             if (!valid)
                 throw new InvalidOperationException($"Unexpected result={result}, state={task.Status}, failure={failure?.GetType().Name}.");
             if (Script.CleanupCount != 1)

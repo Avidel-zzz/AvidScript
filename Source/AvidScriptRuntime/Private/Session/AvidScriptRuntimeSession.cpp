@@ -2797,6 +2797,13 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 	const bool bBegan = CandidateHostContext.InstanceExecutionState
 		? CandidateRuntime->BeginPlayInContext(CandidateHostContext, BeginPlayResult)
 		: CandidateRuntime->BeginPlay(BeginPlayResult);
+#if WITH_DEV_AUTOMATION_TESTS
+	if (CandidateBeginPlayCompletionObserverForTesting)
+	{
+		auto Observer = MoveTemp(CandidateBeginPlayCompletionObserverForTesting);
+		Observer(CandidateRuntime, bBegan);
+	}
+#endif
 	if (!bBegan)
 	{
 		CopyRuntimeFailure(BeginPlayResult, OutResult);

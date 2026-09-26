@@ -104,6 +104,44 @@ if ($report.result -cne 'direct_abi_built' -or -not $report.succeeded -or
     ([IO.FileInfo]$wasmPath).Length -le 8) {
     throw "Formal direct await contract is invalid: $outputRoot"
 }
+
+# Compile a second code generation through the same formal entrypoint. Only the
+# fixture's captured value changes; neither WASM nor manifests are edited.
+$nextSource = Join-Path $runRoot 'DirectAwaitCleanup.Next.cs'
+$sourceText = [IO.File]::ReadAllText((Join-Path $pluginRoot 'Fixtures/Phase66/DirectAwaitCleanup.cs'))
+if ([regex]::Matches($sourceText, [regex]::Escape('new AwaitValue(16)')).Count -ne 1) {
+    throw 'Reload fixture must contain exactly one versioned captured value.'
+}
+[IO.File]::WriteAllText($nextSource, $sourceText.Replace('new AwaitValue(16)', 'new AwaitValue(32)'), [Text.UTF8Encoding]::new($false))
+$nextReferenceProject = Join-Path $runRoot 'DirectAwaitCleanup.Next.Reference.csproj'
+[xml]$referenceProject = Get-Content -LiteralPath (Join-Path $pluginRoot 'Fixtures/Phase66/DirectAwaitCleanup.Reference.csproj') -Raw
+$referenceProject.SelectSingleNode('//Compile[@Include="DirectAwaitCleanup.cs"]').SetAttribute('Include', $nextSource)
+$referenceProject.SelectSingleNode('//Compile[@Include="DirectAwaitCleanup.Reference.cs"]').SetAttribute(
+    'Include', (Join-Path $pluginRoot 'Fixtures/Phase66/DirectAwaitCleanup.Reference.cs'))
+$referenceProject.Save($nextReferenceProject)
+$nextReferenceOutput = & $DotNetPath run --project $nextReferenceProject -c Release -- 32
+if ($LASTEXITCODE -ne 0 -or
+    @($nextReferenceOutput | Where-Object { $_ -ceq 'DirectAwaitCleanup.Reference: 4/4 passed' }).Count -ne 1) {
+    throw 'The next-generation same-source .NET comparison failed.'
+}
+$nextRoot = Join-Path $runRoot 'ReloadBuild'
+& (Join-Path $PSHOME 'pwsh.exe') -NoProfile -File (Join-Path $PSScriptRoot 'BuildCSharpActorLifecycle.ps1') `
+    -DotNetPath $DotNetPath -SourcePath $nextSource `
+    -ProjectPath (Join-Path $pluginRoot 'Fixtures/Phase66/DirectAwaitCleanup.csproj') `
+    -ProjectRoot $projectRoot -OutputRoot $nextRoot -BindingPackagePath $package `
+    -ModuleId ([string]$manifest.module_id) -ArtifactStem $stem `
+    -LanguageErrors bounded -AsyncExceptionFlow -DirectAwaitCleanup -CompilerWorkerMode disabled
+if ($LASTEXITCODE -ne 0) { throw 'The next-generation formal build failed.' }
+$nextManifestPath = Join-Path $nextRoot "$stem.avidscript.json"
+$nextManifest = Get-Content -LiteralPath $nextManifestPath -Raw | ConvertFrom-Json
+$nextReport = Get-Content -LiteralPath (Join-Path $nextRoot "$stem.csharp.report.json") -Raw | ConvertFrom-Json
+if ($nextReport.result -cne 'direct_abi_built' -or -not $nextReport.succeeded -or
+    $nextManifest.module_id -cne $manifest.module_id -or
+    $nextManifest.source.sha256 -ceq $manifest.source.sha256 -or
+    (Get-FileHash -LiteralPath (Join-Path $nextRoot "$stem.wasm")).Hash -ceq (Get-FileHash -LiteralPath $wasmPath).Hash) {
+    throw 'Reload must use different compiled code under the same module identity.'
+}
+$env:AVIDSCRIPT_DIRECT_AWAIT_NEXT_MANIFEST_PATH = $nextManifestPath
 $importOutput = & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -File `
     (Join-Path $PSScriptRoot 'Contracts/TestCompilerManagedImportContracts.ps1') -GuestIrPath $irPath
 if ($LASTEXITCODE -ne 0 -or
@@ -121,12 +159,15 @@ foreach ($field in @('Result', 'CleanupCount', 'CatchCount', 'CleanupMode')) {
 }
 $env:AVIDSCRIPT_DIRECT_AWAIT_WASM_PATH = $wasmPath
 $env:AVIDSCRIPT_DIRECT_AWAIT_MODULE_ID = [string]$manifest.module_id
+$env:AVIDSCRIPT_DIRECT_AWAIT_MANIFEST_PATH = $manifestPath
 $env:AVIDSCRIPT_DIRECT_AWAIT_RESULT_OFFSET = $offsets['Result']
 $env:AVIDSCRIPT_DIRECT_AWAIT_CLEANUP_OFFSET = $offsets['CleanupCount']
 $env:AVIDSCRIPT_DIRECT_AWAIT_CATCH_OFFSET = $offsets['CatchCount']
 $env:AVIDSCRIPT_DIRECT_AWAIT_MODE_OFFSET = $offsets['CleanupMode']
 $build = Join-Path $EngineRoot 'Engine/Build/BatchFiles/Build.bat'
-& $build AvidTPSTemplateEditor Win64 Development "-Project=$projectPath" -WaitMutex -NoHotReloadFromIDE
+# Refresh the source inventory so a cached UBT makefile cannot omit a newly
+# added Automation cpp. Existing object files and build outputs remain intact.
+& $build AvidTPSTemplateEditor Win64 Development "-Project=$projectPath" -WaitMutex -NoHotReloadFromIDE -NoUBTMakefiles
 if ($LASTEXITCODE -ne 0) { throw 'No-clean Win64 Editor build failed.' }
 $editor = Join-Path $EngineRoot 'Engine/Binaries/Win64/UnrealEditor-Cmd.exe'
 & $editor $projectPath -unattended -nop4 -NullRHI -nosplash `
@@ -134,9 +175,9 @@ $editor = Join-Path $EngineRoot 'Engine/Binaries/Win64/UnrealEditor-Cmd.exe'
     '-TestExit=Automation Test Queue Empty' "-abslog=$logPath"
 if ($LASTEXITCODE -ne 0) { throw "Direct await Automation failed: $logPath" }
 $log = Get-Content -LiteralPath $logPath -Raw
-$found = [regex]::Matches($log, "Found 2 automation tests based on '$([regex]::Escape($testName))'").Count
+$found = [regex]::Matches($log, "Found 3 automation tests based on '$([regex]::Escape($testName))'").Count
 $success = @(
-    foreach ($name in @('CompiledDirectAwaitCleanup', 'CompiledDirectAwaitCleanupLifecycle')) {
+    foreach ($name in @('CompiledDirectAwaitCleanup', 'CompiledDirectAwaitCleanupLifecycle', 'CompiledDirectAwaitCleanupReload')) {
         $pattern = 'Test Completed\. Result=\{Success\} Name=\{' + $name +
             '\} Path=\{AvidScript\.Runtime\.Continuation\.' + $name + '\}'
         if ([regex]::Matches($log, $pattern).Count -eq 1) { $name }
@@ -169,8 +210,23 @@ $lifecycleMarkers = @(
 $lifecycleScenarios = @($lifecycleMarkers | Where-Object {
     [regex]::Matches($log, [regex]::Escape($_)).Count -eq 1
 }).Count
-if ($found -ne 1 -or $success -ne 2 -or $failed -ne 0 -or
-    $complete -ne 1 -or $scenarios -ne 8 -or $lifecycleScenarios -ne 12) {
-    throw "Direct await Automation evidence incomplete: found=$found success=$success scenarios=$scenarios lifecycle=$lifecycleScenarios failed=$failed complete=$complete log=$logPath"
+$reloadMarkers = @(
+    foreach ($backend in @(0, 1)) {
+        foreach ($oldCancel in @(0, 1)) {
+            foreach ($mode in @(0, 1, 2)) {
+                $committed = if ($mode -eq 2) { 0 } else { 1 }
+                $survivorCancel = if ($mode -eq 2) { $oldCancel } elseif ($mode -eq 1) { 1 } else { 0 }
+                $result = if ($survivorCancel -eq 1) { 0 } elseif ($committed -eq 1) { 32 } else { 16 }
+                "compiled direct await reload backend=$backend old_cancel=$oldCancel mode=$mode committed=$committed survivor_cancel=$survivorCancel result=$result cleanup=1 tasks=0 frames=0 sources=0 bindings=0 runtimes=0"
+            }
+        }
+    }
+)
+$reloadScenarios = @($reloadMarkers | Where-Object {
+    [regex]::Matches($log, [regex]::Escape($_)).Count -eq 1
+}).Count
+if ($found -ne 1 -or $success -ne 3 -or $failed -ne 0 -or
+    $complete -ne 1 -or $scenarios -ne 8 -or $lifecycleScenarios -ne 12 -or $reloadScenarios -ne 12) {
+    throw "Direct await Automation evidence incomplete: found=$found success=$success scenarios=$scenarios lifecycle=$lifecycleScenarios reload=$reloadScenarios failed=$failed complete=$complete log=$logPath"
 }
-Write-Output "CompiledDirectAwaitCleanup: 2/2 passed; .NET=4/4 imports=54/54 default=ASCS3002 Win64 Wasmtime/WAMR=8/8 lifecycle=12/12; log=$logPath"
+Write-Output "CompiledDirectAwaitCleanup: 3/3 passed; .NET=8/8 imports=54/54 default=ASCS3002 Win64 Wasmtime/WAMR=8/8 lifecycle=12/12 reload=12/12; log=$logPath"

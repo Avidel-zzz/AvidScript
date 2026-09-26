@@ -109,7 +109,7 @@ public static void EndPlay()
 - 修改 C# 声明的 `UClass`、`UProperty` 或 `UFunction` 后，需要重新构建并重启 Editor。
 - Android、iOS、Shipping 和真实多人游戏尚未验收。
 
-相关文档：[跨 `await` 使用对象的测试脚本](Fixtures/Phase66/DirectAwaitCleanup.cs)（需上述预览开关） · [Task 说明](Docs/Phase66/P66.C4_Task_Result_Contract.md) · [测试命令与结果](Docs/Phase66/P66.C_Language_Execution_Plan.md)。
+相关文档：[跨 `await` 使用对象的测试脚本](Fixtures/Phase66/DirectAwaitCleanup.cs)（需上述预览开关） · [脚本热重载与失败回滚测试](Docs/Phase66/P66.C6_Direct_Continuation_Await_Contract.md#独立-session-的代码更新与回滚) · [Task 说明](Docs/Phase66/P66.C4_Task_Result_Contract.md) · [测试命令与结果](Docs/Phase66/P66.C_Language_Execution_Plan.md)。
 
 ## 构建与测试
 
