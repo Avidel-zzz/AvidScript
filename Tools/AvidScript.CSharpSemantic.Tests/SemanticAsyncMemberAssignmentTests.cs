@@ -176,11 +176,12 @@ internal static class SemanticAsyncMemberAssignmentTests
         return AnalyzeSource(source, sourceId);
     }
 
-    private static SemanticDocument AnalyzeSource(string source, string sourceId)
+    internal static SemanticDocument AnalyzeSource(string source, string sourceId, bool enableStaticInitialization = false)
     {
         return SemanticAnalyzer.Analyze(source, sourceId, FrontendAnalyzer.Analyze(source, sourceId).Source.Sha256,
             new[] { new SemanticReferenceSource(Facade, "generated://Continuation.cs", true) }, new SemanticCompilerWorkspace(),
-            enableAsyncExceptionFlow: true, enableDirectAwaitCleanup: true, enableAsyncCancellationFlow: true);
+            enableAsyncExceptionFlow: true, enableDirectAwaitCleanup: true, enableAsyncCancellationFlow: true,
+            enableStaticInitialization: enableStaticInitialization);
     }
 
     private const string Facade = """

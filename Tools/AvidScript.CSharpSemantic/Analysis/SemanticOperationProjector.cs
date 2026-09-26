@@ -66,8 +66,7 @@ internal static class SemanticOperationProjector
         ICollection<SemanticDiagnostic>? diagnostics,
         SemanticCaptureRegistry? captureRegistry = null)
     {
-        if (operation is IFieldInitializerOperation { InitializedFields.Length: 1 } initializer
-            && !initializer.InitializedFields[0].IsStatic)
+        if (operation is IFieldInitializerOperation { InitializedFields.Length: 1 } initializer)
         {
             IFieldSymbol field = initializer.InitializedFields[0];
             SemanticSpan fieldSpan = SemanticSpanFactory.Create(unit.SourceText,
@@ -77,8 +76,9 @@ internal static class SemanticOperationProjector
                     false, false, typeId, symbolId, Array.Empty<string>(), null, null,
                     null, null, null, fieldSpan, children);
             SemanticOperation target = Node("field_reference", typeRegistry.Register(field.Type),
-                SemanticSymbolProjector.GetSymbolId(field),
-                Node("instance_reference", typeRegistry.Register(field.ContainingType), null));
+                SemanticSymbolProjector.GetSymbolId(field), field.IsStatic
+                    ? System.Array.Empty<SemanticOperation>()
+                    : new[] { Node("instance_reference", typeRegistry.Register(field.ContainingType), null) });
             return Node("expression_statement", null, null,
                 Node("assignment", target.TypeId, null, target,
                     ProjectOperation(initializer.Value, unit, typeRegistry, diagnostics, captureRegistry)));

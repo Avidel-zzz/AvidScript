@@ -76,4 +76,7 @@ public sealed record SemanticDocument(
     [JsonPropertyOrder(26)]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<SemanticExceptionFlow>? RejectedAsyncExceptionFlows { get; init; }
+
+    [JsonPropertyOrder(27), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SemanticStaticInitializationPlan? StaticInitialization { get; init; }
 }

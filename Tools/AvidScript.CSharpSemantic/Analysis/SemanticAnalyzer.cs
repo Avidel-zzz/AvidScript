@@ -37,7 +37,8 @@ public static class SemanticAnalyzer
         SemanticCompilerWorkspace workspace,
         bool enableAsyncExceptionFlow = false,
         bool enableDirectAwaitCleanup = false,
-        bool enableAsyncCancellationFlow = false)
+        bool enableAsyncCancellationFlow = false,
+        bool enableStaticInitialization = false)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceId);
@@ -244,7 +245,7 @@ public static class SemanticAnalyzer
             && method.Segments.Any(segment => segment.AwaitSite?.ProducerKind is "delay" or "next_tick"
                 && segment.Transfer?.CancellationTarget is >= 0));
         bool hasTaskLanguageErrors = hasExceptionFlows && hasTaskResults;
-        return new SemanticDocument(
+        var document = new SemanticDocument(
             hasMemberAssignments ? SemanticContract.AsyncMemberAssignmentSchemaVersion
                 : hasAsyncThrowRouting ? SemanticContract.AsyncThrowRoutingSchemaVersion
                 : hasTaskLocalLifetimes ? SemanticContract.TaskLocalLifetimeSchemaVersion
@@ -304,6 +305,9 @@ public static class SemanticAnalyzer
             RejectedAsyncExceptionFlows = controlFlowProjection.RejectedAsyncExceptionFlows.Count > 0
                 ? controlFlowProjection.RejectedAsyncExceptionFlows : null,
         };
+        return enableStaticInitialization
+            ? SemanticStaticInitializerProjector.Project(context, typeRegistry, document)
+            : document;
     }
 
     private static SemanticDiagnostic ProjectDiagnostic(

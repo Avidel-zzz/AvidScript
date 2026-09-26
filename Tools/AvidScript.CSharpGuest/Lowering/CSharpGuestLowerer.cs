@@ -40,6 +40,11 @@ public static class CSharpGuestLowerer
         ArgumentNullException.ThrowIfNull(semanticSha256);
         ArgumentNullException.ThrowIfNull(substitutes);
 
+        if (document.StaticInitialization is not null
+            || document.SchemaVersion == SemanticStaticInitialization.SchemaVersion)
+            return Failure(new[] { new GuestDiagnostic("ASCG1025", "error",
+                "Static initialization requires executable type guards and failure retention before Guest publication.", null) });
+
         if (document.AsyncMethods is null)
             return Failure(new[] { new GuestDiagnostic("ASCG1004", "error", "Semantic async methods are missing.", null) });
 
