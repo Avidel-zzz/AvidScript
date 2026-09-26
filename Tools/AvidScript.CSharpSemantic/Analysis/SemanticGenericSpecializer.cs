@@ -91,6 +91,10 @@ internal static class SemanticGenericSpecializer
                             CancellationToken = segment.AwaitSite.CancellationToken is null ? null
                                 : RewriteOperation(segment.AwaitSite.CancellationToken,
                                     emptyTypes, emptySymbols, 0),
+                            MemberAssignment = segment.AwaitSite.MemberAssignment is not { } assignment ? null : assignment with
+                            {
+                                Target = RewriteOperation(assignment.Target, emptyTypes, emptySymbols, 0),
+                            },
                         },
                     }).ToArray(),
                 }).ToArray();

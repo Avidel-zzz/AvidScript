@@ -181,6 +181,11 @@ internal static class SemanticAsyncControlFlowProjector
                 SemanticAsyncAwaitSite? awaitSite = draft.AwaitSite is null
                     ? null
                     : draft.AwaitSite with { CallbackId = callbackByDraft[draft.Id] };
+                if (awaitSite?.MemberAssignment is { } memberAssignment)
+                    awaitSite = awaitSite with { MemberAssignment = memberAssignment with
+                    {
+                        WriteSegmentOrdinal = RemapTarget(memberAssignment.WriteSegmentOrdinal, ordinalByDraft),
+                    } };
                 SemanticAsyncControlTransfer transfer = new(
                     draft.Transfer.Kind,
                     draft.Transfer.Condition,
@@ -225,6 +230,10 @@ internal static class SemanticAsyncControlFlowProjector
                     .Where(local => local.SymbolId != returnValueSymbolId
                         || segments.Any(segment => segment.Statements.Any(statement =>
                             statement.TargetSymbolId == local.SymbolId)))
+                    .Where(local => !local.SymbolId.StartsWith(SemanticAsyncMemberAssignment.LocalPrefix(methodSymbolId), StringComparison.Ordinal)
+                        || segments.Any(segment => segment.AwaitSite?.MemberAssignment is { } assignment
+                            && (assignment.ReceiverSymbolId == local.SymbolId
+                                || segment.AwaitSite.ResultSymbolId == local.SymbolId)))
                     .OrderBy(local => local.SymbolId, StringComparer.Ordinal)
                     .ToArray(),
                 lexicalScopes.OrderBy(scope => scope.Id, StringComparer.Ordinal).ToArray(),
@@ -326,9 +335,31 @@ internal static class SemanticAsyncControlFlowProjector
                     failed = true;
                     return -1;
                 }
+                IReadOnlyList<SemanticAsyncStatement> capture = Array.Empty<SemanticAsyncStatement>();
+                if (awaitSite!.MemberAssignment is { } assignment)
+                {
+                    SemanticOperation receiver = assignment.Target.Children[0];
+                    compilerLocals.Add(new(assignment.ReceiverSymbolId,
+                        SemanticAsyncMemberAssignment.ReceiverName(awaitExpression!.SpanStart), receiver.TypeId!, receiver.Span));
+                    compilerLocals.Add(new(awaitSite.ResultSymbolId!,
+                        SemanticAsyncMemberAssignment.ResultName(awaitExpression.SpanStart), "type:int32", awaitSite.Span));
+                    SemanticOperation receiverLocal = CreateValueOperation("local_reference", receiver.TypeId!,
+                        assignment.ReceiverSymbolId, new TextSpan(receiver.Span.Start, receiver.Span.Length));
+                    SemanticOperation resultLocal = CreateValueOperation("local_reference", "type:int32",
+                        awaitSite.ResultSymbolId, awaitExpression.Span);
+                    SemanticOperation write = CreateValueOperation("assignment", "type:int32", null,
+                        statement.Span, new[] { assignment.Target with { Children = new[] { receiverLocal } }, resultLocal });
+                    int writeDraft = AddDraft(statement.Span,
+                        new[] { new SemanticAsyncStatement(write, null) }, null,
+                        new DraftTransfer(SemanticAsyncMethod.GotoTransferKind, null, successor, -1));
+                    if (writeDraft < 0) return -1;
+                    awaitSite = awaitSite with { MemberAssignment = assignment with { WriteSegmentOrdinal = writeDraft } };
+                    successor = writeDraft;
+                    capture = new[] { new SemanticAsyncStatement(receiver, assignment.ReceiverSymbolId) };
+                }
                 return AddDraft(
                     statement.Span,
-                    Array.Empty<SemanticAsyncStatement>(),
+                    capture,
                     awaitSite,
                     new DraftTransfer(
                         SemanticAsyncMethod.AwaitTransferKind,

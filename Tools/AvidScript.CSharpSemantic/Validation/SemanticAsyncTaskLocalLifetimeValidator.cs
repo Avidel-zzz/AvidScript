@@ -22,6 +22,8 @@ public static class SemanticAsyncTaskLocalLifetimeValidator
             && document.SemanticVersion != SemanticContract.TaskLocalLifetimeSemanticVersion
             && document.SchemaVersion != SemanticContract.AsyncThrowRoutingSchemaVersion
             && document.SemanticVersion != SemanticContract.AsyncThrowRoutingSemanticVersion
+            && document.SchemaVersion != SemanticContract.AsyncMemberAssignmentSchemaVersion
+            && document.SemanticVersion != SemanticContract.AsyncMemberAssignmentSemanticVersion
             && document.AsyncMethods.All(method => method is not null && method.TaskLocalLifetimes is null);
         if (!SemanticContract.HasAsyncThrowRouting(document)
                 && !document.AsyncMethods.Any(method => method?.TaskLocalLifetimes is not null)

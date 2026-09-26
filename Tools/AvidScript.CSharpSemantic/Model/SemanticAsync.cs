@@ -184,6 +184,23 @@ public sealed record SemanticAsyncAwaitSite(
 
     [JsonPropertyOrder(14), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ResultStorageKind { get; init; }
+
+    [JsonPropertyOrder(15), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SemanticAsyncMemberAssignment? MemberAssignment { get; init; }
+}
+
+// The original target is source evidence. Execution captures its receiver before
+// starting the producer, then writes through that capture only on success.
+public sealed record SemanticAsyncMemberAssignment(
+    [property: JsonPropertyOrder(0), JsonRequired] SemanticOperation Target,
+    [property: JsonPropertyOrder(1), JsonRequired] string ReceiverSymbolId,
+    [property: JsonPropertyOrder(2), JsonRequired] int WriteSegmentOrdinal)
+{
+    public static string LocalPrefix(string methodId) => $"symbol:compiler_local:{methodId}:await_assignment:";
+    public static string ReceiverSymbol(string methodId, int start) => LocalPrefix(methodId) + start + ":receiver";
+    public static string ResultSymbol(string methodId, int start) => LocalPrefix(methodId) + start + ":result";
+    public static string ReceiverName(int start) => $"<await_receiver_{start}>";
+    public static string ResultName(int start) => $"<await_result_{start}>";
 }
 
 public sealed record SemanticAsyncStateFrame(

@@ -41,7 +41,8 @@ public static class SemanticAsyncInvocationValidator
                 && document.SemanticVersion == SemanticContract.AsyncCancellationFlowSemanticVersion);
         if (!SemanticAsyncErrorPlanValidator.IsValid(document)
             || !SemanticAsyncExceptionPlanValidator.IsValid(document)
-            || !SemanticAsyncTaskLocalLifetimeValidator.IsValid(document)) return false;
+            || !SemanticAsyncTaskLocalLifetimeValidator.IsValid(document)
+            || !SemanticAsyncMemberAssignmentValidator.IsValid(document)) return false;
         if (taskResultContract && !document.AsyncMethods.Any(method => method?.TaskResultTypeId is not null
                 || method?.Segments?.Any(segment => segment?.AwaitSite?.TaskCallableId is not null) == true))
             return false;
@@ -170,7 +171,7 @@ public static class SemanticAsyncInvocationValidator
                             && producer.TaskResultTypeId == site.ResultTypeId)
                         || site.PayloadKind != "task_result"
                         || site.PayloadValueTypeId != site.ResultTypeId
-                        || site.ResultStorageKind is not (null or "static_field" or "existing_local")
+                        || site.ResultStorageKind is not (null or "static_field" or "existing_local" or "member_assignment")
                         || site.ResultStorageKind == "static_field"
                             && (!(taskAssignmentContract || taskExistingLocalContract || taskAliasContract || combinedContract) || site.ResultSymbolId is null
                                 || !IsWritableStaticResultField(document, callable,
@@ -221,7 +222,7 @@ public static class SemanticAsyncInvocationValidator
         && site.PayloadKind == "task_result" && site.ResultTypeId == "type:int32"
         && site.PayloadValueTypeId == site.ResultTypeId && site.CancellationToken is null
         && site.BindingOrdinal == -1 && site.PayloadDescriptorTypeId is null
-        && site.ResultStorageKind is (null or "static_field" or "existing_local")
+        && site.ResultStorageKind is (null or "static_field" or "existing_local" or "member_assignment")
         && (site.ResultStorageKind != "static_field" || site.ResultSymbolId is not null
             && IsWritableStaticResultField(document, callable, site.ResultSymbolId, site.ResultTypeId))
         && (site.ResultStorageKind != "existing_local" || site.ResultSymbolId is not null && HasEarlierResultLocal(method, site))

@@ -21,7 +21,8 @@ public static class SemanticAsyncExceptionPlanValidator
             && document.SemanticVersion == SemanticContract.AsyncCancellationFlowSemanticVersion;
         bool localLifetime = SemanticContract.HasTaskLocalLifetimes(document);
         bool routedThrows = SemanticContract.HasAsyncThrowRouting(document);
-        if (routedThrows && !document.AsyncMethods.Any(method => method?.Segments?.Any(segment =>
+        if (document.SchemaVersion == SemanticContract.AsyncThrowRoutingSchemaVersion
+            && !document.AsyncMethods.Any(method => method?.Segments?.Any(segment =>
             segment?.Transfer?.Kind == SemanticAsyncMethod.RaiseExceptionTransferKind) == true)) return false;
         languageCancellation |= localLifetime && document.AsyncMethods.Any(method => method?.ExceptionPlan?.CancellationTypeId is not null);
         directCleanup |= localLifetime && !languageCancellation && document.AsyncMethods.Any(method => method?.ExceptionPlan is not null

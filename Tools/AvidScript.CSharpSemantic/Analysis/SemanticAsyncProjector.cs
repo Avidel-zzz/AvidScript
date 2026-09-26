@@ -373,6 +373,17 @@ internal static class SemanticAsyncProjector
             && directAwait?.Span == awaitExpression.Span;
     }
 
+    internal static bool HasMemberAssignmentSource(SemanticCompilationContext context)
+    {
+        SemanticModel model = context.Compilation.GetSemanticModel(context.PrimaryUnit.SyntaxTree);
+        return context.PrimaryUnit.SyntaxTree.GetRoot().DescendantNodes().OfType<AssignmentExpressionSyntax>()
+            .Any(assignment => assignment.IsKind(SyntaxKind.SimpleAssignmentExpression)
+                && assignment.Right is AwaitExpressionSyntax
+                && model.GetOperation(assignment.Left) is
+                    IFieldReferenceOperation { Instance.Type.IsReferenceType: true }
+                    or IPropertyReferenceOperation { Instance.Type.IsReferenceType: true });
+    }
+
     internal static bool TryGetDirectAwait(
         StatementSyntax statement,
         out AwaitExpressionSyntax? awaitExpression,
@@ -723,6 +734,7 @@ internal static class SemanticAsyncProjector
 
             string? taskResultSymbolId = null;
             string? resultStorageKind = null;
+            SemanticAsyncMemberAssignment? memberAssignment = null;
             if (result is not null)
             {
                 if (semanticModel.GetDeclaredSymbol(result) is not ILocalSymbol local
@@ -754,6 +766,25 @@ internal static class SemanticAsyncProjector
                     taskResultSymbolId = SemanticSymbolProjector.GetSymbolId(local);
                     resultStorageKind = "existing_local";
                 }
+                else if (assignment.IsKind(SyntaxKind.SimpleAssignmentExpression)
+                    && containingMethod is not null
+                    && assignedTarget is IFieldReferenceOperation { Instance.Type.IsReferenceType: true,
+                        Field: { IsStatic: false, IsConst: false, IsReadOnly: false, IsVolatile: false } }
+                        or IPropertyReferenceOperation { Instance.Type.IsReferenceType: true,
+                            Property: { IsStatic: false, IsIndexer: false, ReturnsByRef: false,
+                                ReturnsByRefReadonly: false, SetMethod: not null }, Arguments.Length: 0 }
+                    && SymbolEqualityComparer.Default.Equals(assignedTarget.Type, taskResultType))
+                {
+                    SemanticOperation memberTarget = SemanticOperationProjector.ProjectAsyncStatementOperation(
+                        assignedTarget, context.PrimaryUnit, typeRegistry, diagnostics);
+                    if (!AllOperationsSupported(memberTarget) || memberTarget.Children.Count != 1)
+                        return false;
+                    string ownerId = SemanticSymbolProjector.GetSymbolId(containingMethod);
+                    taskResultSymbolId = SemanticAsyncMemberAssignment.ResultSymbol(ownerId, awaitExpression.SpanStart);
+                    resultStorageKind = "member_assignment";
+                    memberAssignment = new(memberTarget,
+                        SemanticAsyncMemberAssignment.ReceiverSymbol(ownerId, awaitExpression.SpanStart), -1);
+                }
                 else if (!assignment.IsKind(SyntaxKind.SimpleAssignmentExpression)
                     || assignedTarget is not IFieldReferenceOperation fieldReference
                     || fieldReference.Instance is not null
@@ -767,7 +798,7 @@ internal static class SemanticAsyncProjector
                     || field.DeclaringSyntaxReferences[0].SyntaxTree != context.PrimaryUnit.SyntaxTree)
                 {
                     diagnostics.Add(Error("ASCS5404",
-                        "Task<int> await assignment requires an exact int local or a writable static int field on the current script type.",
+                        "Task<int> await assignment requires an exact int local, a writable static int field on the current script type, or a writable int instance field/property with a reference-type receiver.",
                         SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, assignment.Left.Span)));
                     return false;
                 }
@@ -796,6 +827,7 @@ internal static class SemanticAsyncProjector
                 TaskLocalSymbolId = taskLocalReference is null
                     ? null : SemanticSymbolProjector.GetSymbolId(taskLocalReference.Local),
                 ResultStorageKind = resultStorageKind,
+                MemberAssignment = memberAssignment,
             };
             return true;
         }

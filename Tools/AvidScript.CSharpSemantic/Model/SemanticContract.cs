@@ -35,10 +35,17 @@ public static class SemanticContract
     public const string TaskLocalLifetimeSemanticVersion = "1.54";
     public const int AsyncThrowRoutingSchemaVersion = 46;
     public const string AsyncThrowRoutingSemanticVersion = "1.55";
+    public const int AsyncMemberAssignmentSchemaVersion = 47;
+    public const string AsyncMemberAssignmentSemanticVersion = "1.56";
+
+    public static bool HasAsyncMemberAssignments(SemanticDocument document) =>
+        document.SchemaVersion == AsyncMemberAssignmentSchemaVersion
+        && document.SemanticVersion == AsyncMemberAssignmentSemanticVersion;
 
     public static bool HasAsyncThrowRouting(SemanticDocument document) =>
         document.SchemaVersion == AsyncThrowRoutingSchemaVersion
-        && document.SemanticVersion == AsyncThrowRoutingSemanticVersion;
+        && document.SemanticVersion == AsyncThrowRoutingSemanticVersion
+        || HasAsyncMemberAssignments(document);
 
     public static bool HasTaskLocalLifetimes(SemanticDocument document) =>
         document.SchemaVersion == TaskLocalLifetimeSchemaVersion
@@ -79,5 +86,7 @@ public static class SemanticContract
         || (schemaVersion == TaskLocalLifetimeSchemaVersion
             && semanticVersion == TaskLocalLifetimeSemanticVersion)
         || (schemaVersion == AsyncThrowRoutingSchemaVersion
-            && semanticVersion == AsyncThrowRoutingSemanticVersion);
+            && semanticVersion == AsyncThrowRoutingSemanticVersion)
+        || (schemaVersion == AsyncMemberAssignmentSchemaVersion
+            && semanticVersion == AsyncMemberAssignmentSemanticVersion);
 }

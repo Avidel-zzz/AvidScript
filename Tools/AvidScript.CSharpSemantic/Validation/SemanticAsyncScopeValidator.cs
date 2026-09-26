@@ -40,7 +40,8 @@ public static class SemanticAsyncScopeValidator
                         or SemanticContract.DirectAwaitCleanupSchemaVersion
                         or SemanticContract.AsyncCancellationFlowSchemaVersion
                         or SemanticContract.TaskLocalLifetimeSchemaVersion
-                        or SemanticContract.AsyncThrowRoutingSchemaVersion)
+                        or SemanticContract.AsyncThrowRoutingSchemaVersion
+                        or SemanticContract.AsyncMemberAssignmentSchemaVersion)
                     && transfer.Kind is (SemanticAsyncMethod.CatchMatchTransferKind
                         or SemanticAsyncMethod.PropagateFaultTransferKind
                         or SemanticAsyncMethod.PropagateCancellationTransferKind

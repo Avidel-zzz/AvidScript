@@ -177,6 +177,10 @@ internal static class SemanticLexicalCaptureNormalizer
                     Arguments = site.Arguments.Select(op => Rewrite(op, method.MethodSymbolId)).ToArray(),
                     CancellationToken = site.CancellationToken is null ? null
                         : Rewrite(site.CancellationToken, method.MethodSymbolId),
+                    MemberAssignment = site.MemberAssignment is not { } assignment ? null : assignment with
+                    {
+                        Target = Rewrite(assignment.Target, method.MethodSymbolId),
+                    },
                 },
             }).ToArray();
             SemanticAsyncProjector.TryAttachStateFrames(segments, diagnostics,
