@@ -48,8 +48,10 @@ public static class CSharpLanguageErrorCompiler
         SemanticExceptionFlow[] producers = throwFlows.Where(item => item.Catches.Count == 0
             && !item.Regions.Any(region => region.Kind == "finally")
             && item.Throws.Count == 1 && item.Blocks is { Count: 3 }
+            && item.Blocks.All(block => block.Operations.Count == 0)
             && semantic.Callables.Any(callable => callable.MethodSymbolId == item.MethodSymbolId
-                && callable.Parameters.Count == 0)).ToArray();
+                && callable.IsStatic && callable.Parameters.Count == 0
+                && callable.ReturnTypeId is "type:int32" or "type:void")).ToArray();
         IReadOnlySet<string> producerMethodIds = producers.Select(item => item.MethodSymbolId)
             .ToHashSet(StringComparer.Ordinal);
         SemanticExceptionFlow[] handlers = flows.Where(item =>
@@ -66,7 +68,7 @@ public static class CSharpLanguageErrorCompiler
             if (callables.Length != 1)
                 return Fail("An exception method needs one source-backed callable.", out error);
             if (!CSharpExceptionGraphMaterializer.TryBuild(handler,
-                    callables[0].ReturnTypeId == "type:void",
+                    callables[0].ReturnTypeId,
                     out SemanticControlFlowGraph? graph, out IReadOnlyList<CSharpLocalThrowSite> sites,
                     out IReadOnlyList<CSharpNormalReturnCleanupSite> returnSites,
                     out IReadOnlyList<CSharpRethrowSite> rethrowSites,
@@ -82,11 +84,12 @@ public static class CSharpLanguageErrorCompiler
         }
         if (throwFlows.Any(item => semantic.Callables.Count(callable =>
                     callable.MethodSymbolId == item.MethodSymbolId
-                    && callable.HasBody && callable.IsStatic
-                    && callable.ReturnTypeId is "type:int32" or "type:void") != 1)
+                    && callable.HasBody && !callable.IsConstructor
+                    && (callable.ReturnTypeId is "type:int32" or "type:void"
+                        || CSharpReferenceObjects.Types(semantic).Contains(callable.ReturnTypeId))) != 1)
             || !SemanticLanguageErrorEffectPlanner.TryBuild(semantic, out var effects)
             || effects is null)
-            return Fail("The exception source needs supported static int32 or void methods and a complete direct-call effect plan.", out error);
+            return Fail("The exception source needs supported int32, void or source-class methods and a complete direct-call effect plan.", out error);
 
         IReadOnlySet<string> producerIds = producers.Select(item =>
             CSharpGuestIds.Function(item.MethodSymbolId)).ToHashSet(StringComparer.Ordinal);

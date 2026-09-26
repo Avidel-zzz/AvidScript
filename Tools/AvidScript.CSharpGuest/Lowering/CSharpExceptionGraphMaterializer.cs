@@ -9,7 +9,8 @@ internal sealed record CSharpLocalThrowSite(
     int BlockOrdinal, SemanticThrowSite Site,
     IReadOnlyList<int>? CleanupBlockOrdinals = null,
     int? ReplacesThrowBlockOrdinal = null,
-    CSharpBranchingCleanup? BranchingCleanup = null);
+    CSharpBranchingCleanup? BranchingCleanup = null,
+    bool HasStatementPrefix = false);
 internal sealed record CSharpBranchingCleanup(
     int EntryBlockOrdinal, int ExitBlockOrdinal,
     IReadOnlyList<int> BlockOrdinals);
@@ -26,7 +27,7 @@ internal sealed record CSharpRethrowSite(
 // local throw return placeholders are replaced before publishing the module.
 internal static class CSharpExceptionGraphMaterializer
 {
-    public static bool TryBuild(SemanticExceptionFlow flow, bool returnsVoid,
+    public static bool TryBuild(SemanticExceptionFlow flow, string returnTypeId,
         out SemanticControlFlowGraph? graph,
         out IReadOnlyList<CSharpLocalThrowSite> localThrows,
         out IReadOnlyList<CSharpNormalReturnCleanupSite> normalReturns,
@@ -38,6 +39,12 @@ internal static class CSharpExceptionGraphMaterializer
         normalReturns = Array.Empty<CSharpNormalReturnCleanupSite>();
         rethrows = Array.Empty<CSharpRethrowSite>();
         error = null;
+        bool returnsVoid = returnTypeId == "type:void";
+        // Cleanup materializers below still use int32 return storage. Keep that
+        // boundary explicit until their value-carrying exits are generalized.
+        if (returnTypeId is not ("type:int32" or "type:void")
+            && flow.Regions.Any(region => region.Kind == "finally"))
+            return Fail("A reference-returning exception method needs typed cleanup storage.", out error);
         if (flow.Catches.Count != 0 && flow.Regions.Any(region => region.Kind == "finally"))
             return TryBuildCatchFinally(flow, out graph, out localThrows,
                 out normalReturns, out rethrows, out error);
@@ -96,19 +103,13 @@ internal static class CSharpExceptionGraphMaterializer
             SemanticExceptionBlock block = blocks[branch.SourceBlockOrdinal];
             SemanticOperation? expression = block.BranchValue;
             SemanticThrowSite[] matches = flow.Throws.Where(site => site.Kind == "throw"
-                && site.ExceptionTypeId == CSharpThrowProducerLowerer.ExceptionTypeId
-                && expression is not null && site.Span.Start <= expression.Span.Start
-                && expression.Span.End <= site.Span.End).ToArray();
+                && CSharpThrowProducerLowerer.MatchesCreation(site, expression)).ToArray();
             if (branch.DestinationBlockOrdinal != -1
                 || flow.Branches.Count(item => item.SourceBlockOrdinal == block.Ordinal) != 1
-                || block.Operations.Count != 0
-                || expression is not { Kind: "object_creation", IsSupported: true }
-                || expression.TypeId != CSharpThrowProducerLowerer.ExceptionTypeId
-                || expression.SymbolId != CSharpThrowProducerLowerer.ExceptionConstructorId
-                || expression.Children.Count != 0 || matches.Length != 1
+                || matches.Length != 1
                 || branch.FinallyRegionOrdinals.Count != 0)
-                return Fail("Only a zero-argument System.Exception local throw without cleanup is executable.", out error);
-            projectedThrows.Add(new(block.Ordinal, matches[0]));
+                return Fail("Only a zero-argument supported framework exception without cleanup is executable.", out error);
+            projectedThrows.Add(new(block.Ordinal, matches[0], HasStatementPrefix: block.Operations.Count != 0));
         }
         List<CSharpRethrowSite> projectedRethrows = new();
         if (!SemanticExceptionDispatchPlanner.TryBuild(flow, out var dispatch)
@@ -155,9 +156,9 @@ internal static class CSharpExceptionGraphMaterializer
                 boundHandlers.ContainsKey(block.Ordinal)
                     ? Array.Empty<SemanticOperation>() : block.Operations,
                 throwBlocks.Contains(block.Ordinal)
-                    ? (returnsVoid ? null : ZeroPlaceholder(block.BranchValue!.Span))
+                    ? (returnsVoid ? null : ReturnPlaceholder(returnTypeId, block.BranchValue!.Span))
                     : rethrowSpans.TryGetValue(block.Ordinal, out SemanticSpan? span)
-                        ? (returnsVoid ? null : ZeroPlaceholder(span))
+                        ? (returnsVoid ? null : ReturnPlaceholder(returnTypeId, span))
                     : block.BranchValue,
                 edges.Where(edge => edge.DestinationBlockOrdinal == block.Ordinal).ToArray(),
                 edges.Where(edge => edge.SourceBlockOrdinal == block.Ordinal).ToArray()))
@@ -1076,6 +1077,12 @@ internal static class CSharpExceptionGraphMaterializer
         "type:int32", null, Array.Empty<string>(), new SemanticConstant("int32", "0"),
         null, null, null, null, span, Array.Empty<SemanticOperation>());
 
+    private static SemanticOperation ReturnPlaceholder(string typeId, SemanticSpan span) =>
+        typeId == "type:int32" ? ZeroPlaceholder(span) : new(
+            "literal", true, null, false, false, false, false,
+            typeId, null, Array.Empty<string>(), new SemanticConstant("null", null),
+            null, null, null, null, span, Array.Empty<SemanticOperation>());
+
     private static bool Supported(SemanticOperation operation) =>
         operation.IsSupported && operation.Children.All(Supported);
 
@@ -1091,7 +1098,7 @@ internal static class CSharpExceptionGraphMaterializer
                     or "greater_than" or "greater_than_or_equal" or "logical_and"
                     or "logical_or" or "bitwise_and" or "bitwise_or" or "bitwise_xor"),
             "unary" => operation.OperatorKind is "logical_not" or "bitwise_not",
-            "field_reference" or "local_reference" or "parameter_reference"
+            "field_reference" or "local_reference" or "parameter_reference" or "instance_reference"
                 or "literal" => true,
             _ => false,
         };

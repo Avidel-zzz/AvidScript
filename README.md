@@ -117,10 +117,10 @@ public static void Tick(float deltaSeconds)
 | 平台与发布 | Android、iOS、Shipping、真实多人游戏验收未完成 |
 
 <details>
-<summary>实验性 Task 异常与取消</summary>
+<summary>实验性异常处理</summary>
 
 通过[构建参数](Docs/Phase66/P66.C8_Task_Local_Lifetime_Contract.md#generated-task-build)启用。
-行为和测试记录见 [Task 异常与取消](Docs/Phase66/P66.C9_Async_Throw_Routing.md)。
+同步方法、getter/setter 中的显式 `throw` 见[成员异常示例](Tools/AvidScript.CSharpGuest.Tests/CSharpGuestMemberErrorTests.cs)；异步用法见 [Task 异常与取消](Docs/Phase66/P66.C9_Async_Throw_Routing.md)。同步异常跨入异步方法仍待支持。
 
 </details>
 

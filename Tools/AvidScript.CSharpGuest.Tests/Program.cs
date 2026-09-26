@@ -6,6 +6,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--member-errors")
+            {
+                int focusedCount = CSharpGuestMemberErrorTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.MemberErrors: {focusedCount}/{focusedCount} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--generated-async-throw")
             {
                 int focusedCount = CSharpGuestGeneratedAsyncThrowTests.Run();
@@ -177,6 +183,7 @@ internal static class Program
             int count = CSharpGuestLoweringTests.Run()
                 + CSharpGuestLanguageOutcomeTests.Run()
                 + CSharpGuestThrowProducerTests.Run()
+                + CSharpGuestMemberErrorTests.Run()
                 + CSharpGuestAsyncLanguageErrorTests.Run()
                 + CSharpGuestDirectAwaitTests.Run()
                 + CSharpGuestAsyncCancellationTests.Run()

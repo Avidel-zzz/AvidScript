@@ -283,6 +283,16 @@ internal static class CSharpLocalThrowLowerer
         foreach (CSharpLocalThrowSite site in sites)
         {
             string blockId = CSharpGuestIds.Block(flow.MethodSymbolId, site.BlockOrdinal);
+            string sourceBlockId = blockId;
+            IReadOnlyList<GuestInstruction> statementPrefix = Array.Empty<GuestInstruction>();
+            if (site.HasStatementPrefix)
+            {
+                if (site.CleanupBlockOrdinals is { Count: > 0 } || site.BranchingCleanup is not null
+                    || site.ReplacesThrowBlockOrdinal is not null
+                    || !TryTakeThrowPrefix(module, function, blocks, blockId,
+                        out blockId, out statementPrefix))
+                    return Fail("A local throw needs a verified success exit after its statement prefix.", out error);
+            }
             IReadOnlyList<int> cleanupOrdinals = site.CleanupBlockOrdinals
                 ?? Array.Empty<int>();
             if (cleanupOrdinals.Count > 16
@@ -332,7 +342,7 @@ internal static class CSharpLocalThrowLowerer
                     || !replacesLastCleanup && !replacesIntermediateCleanup
                     || original.Instructions.Any(instruction => instruction.Op is not
                         ("constant" or "global_load" or "binary" or "global_store")))
-                || replacedOutcome is null && original.Instructions.Any(instruction =>
+                || replacedOutcome is null && !site.HasStatementPrefix && original.Instructions.Any(instruction =>
                     instruction.Op is not ("constant" or "stack_alloc" or "field_store")
                     || instruction.Op == "field_store"
                     && instruction.TargetId is not ("field:status" or "field:value")))
@@ -343,7 +353,7 @@ internal static class CSharpLocalThrowLowerer
                 item.SourceId == flow.SourceId && item.Span == site.Site.Span);
             if (type is null || source is null)
                 return Fail("The local throw is absent from the source token catalog.", out error);
-            CSharpLanguageCatchMatch? catchMatch = routes.TryGetValue(blockId,
+            CSharpLanguageCatchMatch? catchMatch = routes.TryGetValue(sourceBlockId,
                     out CSharpLanguageCatchRoute? route)
                 ? route.Matches.SingleOrDefault(match => match.TypeToken == type.Token)
                 : null;
@@ -413,7 +423,7 @@ internal static class CSharpLocalThrowLowerer
             blocks[blockId] = original with
             {
                 Instructions = replacedOutcome is null
-                    ? instructions : original.Instructions.Concat(instructions).ToArray(),
+                    ? statementPrefix.Concat(instructions).ToArray() : original.Instructions.Concat(instructions).ToArray(),
                 Terminator = cleanupId is not null
                     ? new GuestTerminator("branch", null, cleanupId, null, null)
                     : handler is null
@@ -689,6 +699,48 @@ internal static class CSharpLocalThrowLowerer
                 return false;
         }
         return reached.Count == ids.Length;
+    }
+
+    private static bool TryTakeThrowPrefix(GuestModule module, GuestFunction function,
+        IReadOnlyDictionary<string, GuestBasicBlock> blocks, string sourceBlockId,
+        out string terminalBlockId, out IReadOnlyList<GuestInstruction> prefix)
+    {
+        terminalBlockId = sourceBlockId;
+        prefix = Array.Empty<GuestInstruction>();
+        HashSet<string> visited = new(StringComparer.Ordinal);
+        while (blocks.TryGetValue(terminalBlockId, out var block) && visited.Add(block.Id))
+        {
+            if (block.Terminator.Kind == "branch_if")
+            {
+                // The outcome pass may split earlier throwing calls. Follow
+                // only success; its failure branch must keep its original route.
+                if (block.Instructions.Count < 2
+                    || block.Instructions[^2] is not { Op: "call", ResultId: { } result, TargetId: { } target }
+                    || block.Instructions[^1] is not { Op: "field_load", TargetId: "field:status", ResultId: { } status } load
+                    || !load.OperandIds.SequenceEqual(new[] { result })
+                    || block.Terminator.ConditionValueId != status
+                    || block.Terminator.TargetBlockId is not { } failed || !blocks.ContainsKey(failed)
+                    || block.Terminator.FalseTargetBlockId is not { } success || success == failed
+                    || !module.Functions.Any(callee => callee.Id == target
+                        && module.LanguageOutcomeTypes!.Any(outcome => outcome.TypeId == callee.ReturnTypeId))) return false;
+                terminalBlockId = success;
+                continue;
+            }
+            var outcome = module.LanguageOutcomeTypes!.Single(item => item.TypeId == function.ReturnTypeId);
+            int tail = block.Instructions.Count - (outcome.ValueTypeId is null ? 3 : 4);
+            if (block.Terminator.Kind != "return" || tail < 0
+                || block.Terminator.ReturnValueId is not { } returned) return false;
+            var suffix = block.Instructions.Skip(tail).ToArray();
+            if (suffix[0] is not { Op: "stack_alloc" } || suffix[0].ResultId != returned
+                || suffix[1] is not { Op: "constant", Constant: { Kind: "int32", Value: "0" } }
+                || suffix[2] is not { Op: "field_store", TargetId: "field:status" }
+                || !suffix[2].OperandIds.SequenceEqual(new[] { returned, suffix[1].ResultId })
+                || suffix.Length == 4 && (suffix[3] is not { Op: "field_store", TargetId: "field:value", OperandIds.Count: 2 }
+                    || suffix[3].OperandIds[0] != returned)) return false;
+            prefix = block.Instructions.Take(tail).ToArray();
+            return true;
+        }
+        return false;
     }
 
     private static bool TryRewriteSyntheticCleanupReturn(

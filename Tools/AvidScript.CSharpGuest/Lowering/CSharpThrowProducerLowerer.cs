@@ -88,22 +88,7 @@ public static class CSharpThrowProducerLowerer
             return Fail("The throw method needs an unsupported branch, handler, or cleanup path.", out error);
         SemanticThrowSite site = flow.Throws[0];
         SemanticOperation? expression = blocks[1].BranchValue;
-        // Roslyn inserts an implicit reference upcast from a derived exception
-        // to System.Exception at a throw branch. It has no executable effect.
-        SemanticOperation? creation = expression;
-        if (expression is { Kind: "conversion", TypeId: ExceptionTypeId }
-            && expression.Conversion is
-                { Exists: true, IsImplicit: true, IsReference: true, IsUserDefined: false, MethodSymbolId: null }
-            && expression.Children.Count == 1)
-            creation = expression.Children[0];
-        if (site.Kind != "throw"
-            || !TryGetBuiltInConstructor(site.ExceptionTypeId, out string? constructorId)
-            || creation is not { Kind: "object_creation", IsSupported: true }
-            || creation.TypeId != site.ExceptionTypeId
-            || creation.SymbolId != constructorId
-            || creation.Children.Count != 0
-            || creation.Span.Start < site.Span.Start
-            || creation.Span.End > site.Span.End)
+        if (!MatchesCreation(site, expression))
             return Fail("Only a zero-argument supported framework exception constructor is executable.", out error);
 
         CSharpLanguageErrorTokenCatalog catalog = BuildCatalog(semantic.ExceptionFlows);
@@ -174,6 +159,25 @@ public static class CSharpThrowProducerLowerer
                 index + 1, item.SourceId, item.Span))
             .ToArray();
         return new(types, sources);
+    }
+
+    internal static bool MatchesCreation(SemanticThrowSite site, SemanticOperation? expression)
+    {
+        // Roslyn inserts an implicit reference upcast at derived throw sites.
+        // Only that conversion is inert; user conversions and constructor
+        // arguments may have side effects and must never be discarded here.
+        SemanticOperation? creation = expression;
+        if (expression is { Kind: "conversion", IsSupported: true, TypeId: ExceptionTypeId,
+                IsChecked: false, Children.Count: 1 }
+            && expression.Conversion is
+                { Exists: true, IsImplicit: true, IsReference: true, IsUserDefined: false, MethodSymbolId: null })
+            creation = expression.Children[0];
+        return site.Kind == "throw"
+            && TryGetBuiltInConstructor(site.ExceptionTypeId, out string? constructorId)
+            && creation is { Kind: "object_creation", IsSupported: true, Children.Count: 0 }
+            && creation.TypeId == site.ExceptionTypeId && creation.SymbolId == constructorId
+            && expression!.Span.Start >= site.Span.Start && expression.Span.End <= site.Span.End
+            && creation.Span.Start >= expression.Span.Start && creation.Span.End <= expression.Span.End;
     }
 
     private static bool TryGetBuiltInConstructor(string? typeId, out string? constructorId)
