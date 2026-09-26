@@ -52,7 +52,8 @@ internal static class GuestManagedHeapValidator
             || module.SchemaVersion == GuestTaskLanguageErrorValidator.ExceptionFlowSchemaVersion
             && module.IrVersion == GuestTaskLanguageErrorValidator.ExceptionFlowIrVersion
             || module.SchemaVersion == GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion
-            && module.IrVersion == GuestTaskLanguageErrorValidator.DirectCleanupIrVersion;
+            && module.IrVersion == GuestTaskLanguageErrorValidator.DirectCleanupIrVersion
+            || GuestTaskCancellationErrorValidator.IsVersion(module);
         bool catalogVersion = module.SchemaVersion == GuestLanguageErrorCatalogValidator.SchemaVersion
             && module.IrVersion == GuestLanguageErrorCatalogValidator.IrVersion;
         foreach (GuestImport import in module.Imports)
@@ -82,8 +83,12 @@ internal static class GuestManagedHeapValidator
                 && import.ReturnTypeId == "type:language_error_root"
                 && import.DispatchClass == "semantic" && import.OptimizationClass == "none"
                 && import.BindingOrdinal == -1;
+            bool cancellationReference = GuestTaskCancellationErrorValidator.IsVersion(module)
+                && module.LanguageErrorCatalog is not null
+                && (GuestTaskCancellationErrorValidator.IsCancellationImport(import)
+                    || GuestTaskCancellationErrorValidator.IsTerminalRootImport(import));
             if ((Has(import.ReturnTypeId) || import.ParameterTypeIds.Any(Has))
-                && !report && !taskFault && !taskReadRoot)
+                && !report && !taskFault && !taskReadRoot && !cancellationReference)
                 Add(context, $"Import '{import.Id}' cannot expose module-local managed references.");
         }
         foreach (GuestExport export in module.Exports)

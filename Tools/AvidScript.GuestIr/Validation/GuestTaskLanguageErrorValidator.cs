@@ -44,6 +44,7 @@ public static class GuestTaskLanguageErrorValidator
             && module.IrVersion == ExceptionFlowIrVersion;
         bool directCleanupVersion = module.SchemaVersion == DirectCleanupSchemaVersion
             && module.IrVersion == DirectCleanupIrVersion;
+        bool cancellationVersion = GuestTaskCancellationErrorValidator.IsVersion(module);
         GuestImport[] imports = module.Imports.Where(import =>
             import.Module == GuestTaskResultValidator.ImportModule && import.Name == ImportName).ToArray();
         GuestImport[] metadataImports = module.Imports.Where(import =>
@@ -54,23 +55,25 @@ public static class GuestTaskLanguageErrorValidator
             && imports.Length == 0 && metadataImports.Length == 0
             && rootImports.Length == 0) return;
         if (!combinedVersion && !asyncVersion && !exceptionFlowVersion
-            && !directCleanupVersion && imports.Length == 0
+            && !directCleanupVersion && !cancellationVersion && imports.Length == 0
             && metadataImports.Length == 0 && rootImports.Length == 0) return;
         if ((!combinedVersion && !asyncVersion && !exceptionFlowVersion
-                && !directCleanupVersion) || module.Language != "csharp"
+                && !directCleanupVersion && !cancellationVersion) || module.Language != "csharp"
             || module.Provenance.SemanticSchemaVersion
-                != (directCleanupVersion ? DirectCleanupSemanticSchemaVersion
+                != (cancellationVersion ? GuestTaskCancellationErrorValidator.SemanticSchemaVersion
+                    : directCleanupVersion ? DirectCleanupSemanticSchemaVersion
                     : exceptionFlowVersion ? ExceptionFlowSemanticSchemaVersion
                     : asyncVersion ? AsyncSemanticSchemaVersion : SemanticSchemaVersion)
             || module.Provenance.SemanticVersion
-                != (directCleanupVersion ? DirectCleanupSemanticVersion
+                != (cancellationVersion ? GuestTaskCancellationErrorValidator.SemanticVersion
+                    : directCleanupVersion ? DirectCleanupSemanticVersion
                     : exceptionFlowVersion ? ExceptionFlowSemanticVersion
                     : asyncVersion ? AsyncSemanticVersion : SemanticVersion)
             || module.LanguageErrorCatalog is null
             || combinedVersion && module.LanguageOutcomeTypes is null
             || imports.Length != 1)
         {
-            Add(context, "Task language errors require paired Semantic 40-43/IR 20-23, a catalog and exactly one fault import.");
+            Add(context, "Task language errors require paired Semantic 40-44/IR 20-24, a catalog and exactly one fault import.");
             return;
         }
 
@@ -100,8 +103,8 @@ public static class GuestTaskLanguageErrorValidator
 
         if (module.LanguageErrorCatalog is { } catalog)
             ValidateCallTokens(context, fault, catalog);
-        if (asyncVersion || exceptionFlowVersion || directCleanupVersion)
-            ValidateAsyncFaultRoots(context, fault);
+        if (asyncVersion || exceptionFlowVersion || directCleanupVersion || cancellationVersion)
+            ValidateFreshRoots(context, fault);
 
         if (metadataImports.Length == 0 && rootImports.Length == 0)
         {
@@ -128,7 +131,7 @@ public static class GuestTaskLanguageErrorValidator
         && import.DispatchClass == "semantic" && import.OptimizationClass == "none"
         && import.BindingOrdinal == -1;
 
-    private static void ValidateAsyncFaultRoots(GuestValidationContext context,
+    internal static void ValidateFreshRoots(GuestValidationContext context,
         GuestImport fault)
     {
         foreach (GuestFunction function in context.Module.Functions)
@@ -144,11 +147,11 @@ public static class GuestTaskLanguageErrorValidator
                 || set.OperandIds[1] != call.OperandIds[1]
                 || block.Instructions[index - 2] is not { Op: "managed_new" } create
                 || create.ResultId != call.OperandIds[3])
-                Add(context, $"Function '{function.Id}' must fault with a fresh frame-rooted error object carrying the same type token.");
+                Add(context, $"Function '{function.Id}' must submit a fresh frame-rooted error object carrying the same type token to '{fault.Name}'.");
         }
     }
 
-    private static void ValidateCallTokens(GuestValidationContext context, GuestImport fault,
+    internal static void ValidateCallTokens(GuestValidationContext context, GuestImport fault,
         GuestLanguageErrorCatalog catalog)
     {
         HashSet<int> types = catalog.Types.Select(item => item.Token).ToHashSet();

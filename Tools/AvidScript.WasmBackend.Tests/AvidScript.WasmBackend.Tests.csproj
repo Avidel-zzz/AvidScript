@@ -12,9 +12,10 @@
     <ProjectReference Include="../AvidScript.WasmBackend/AvidScript.WasmBackend.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="../../Tests/Fixtures/WasmBackend/P66_TaskLanguageError.guestir.json"
-          Link="Fixtures/P66_TaskLanguageError.guestir.json" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="../../Tests/Fixtures/WasmBackend/P66_TaskLanguageError.wasm"
-          Link="Fixtures/P66_TaskLanguageError.wasm" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../Tests/Fixtures/WasmBackend/P66_TaskLanguageError.guestir.json" Link="Fixtures/P66_TaskLanguageError.guestir.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../Tests/Fixtures/WasmBackend/P66_TaskLanguageError.wasm" Link="Fixtures/P66_TaskLanguageError.wasm" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../AvidScript.GuestIr.Tests/GuestTaskCancellationFixture.cs" Link="GuestTaskCancellationFixture.cs" />
   </ItemGroup>
 </Project>

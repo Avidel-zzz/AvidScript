@@ -23,7 +23,8 @@ internal static class GuestLanguageErrorCatalogValidator
             || module.SchemaVersion == GuestTaskLanguageErrorValidator.ExceptionFlowSchemaVersion
                 && module.IrVersion == GuestTaskLanguageErrorValidator.ExceptionFlowIrVersion
             || module.SchemaVersion == GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion
-                && module.IrVersion == GuestTaskLanguageErrorValidator.DirectCleanupIrVersion;
+                && module.IrVersion == GuestTaskLanguageErrorValidator.DirectCleanupIrVersion
+            || GuestTaskCancellationErrorValidator.IsVersion(module);
         if (catalog is null)
         {
             if (correctVersion && module.SchemaVersion
@@ -161,11 +162,14 @@ internal static class GuestLanguageErrorCatalogValidator
                 || context.Module.SchemaVersion == GuestTaskLanguageErrorValidator.ExceptionFlowSchemaVersion
                 && context.Module.IrVersion == GuestTaskLanguageErrorValidator.ExceptionFlowIrVersion
                 || context.Module.SchemaVersion == GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion
-                && context.Module.IrVersion == GuestTaskLanguageErrorValidator.DirectCleanupIrVersion)
+                && context.Module.IrVersion == GuestTaskLanguageErrorValidator.DirectCleanupIrVersion
+                || GuestTaskCancellationErrorValidator.IsVersion(context.Module))
             {
                 foreach (GuestInstruction call in function.Blocks.SelectMany(block => block.Instructions)
                     .Where(instruction => instruction.Op == "call"
-                        && instruction.TargetId == GuestTaskLanguageErrorValidator.ImportId))
+                        && (instruction.TargetId == GuestTaskLanguageErrorValidator.ImportId
+                            || GuestTaskCancellationErrorValidator.IsVersion(context.Module)
+                                && instruction.TargetId == GuestTaskCancellationErrorValidator.ImportId)))
                 {
                     if (call.OperandIds.Count != 4
                         || !LiteralToken(call.OperandIds[1], typeTokens, definitions,

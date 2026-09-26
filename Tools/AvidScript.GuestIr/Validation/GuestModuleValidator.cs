@@ -36,6 +36,7 @@ public static class GuestModuleValidator
         ValidateImports(context);
         GuestTaskResultValidator.Validate(context);
         GuestTaskLanguageErrorValidator.Validate(context);
+        GuestTaskCancellationErrorValidator.Validate(context);
         GuestFunctionReferenceValidator.ValidateContracts(context);
         GuestManagedHeapValidator.ValidateContracts(context);
         GuestBorrowedReferenceValidator.ValidateContracts(context);
@@ -99,7 +100,7 @@ public static class GuestModuleValidator
                 && !isLanguageErrorCatalogVersion && !isTaskResultVersion
                 && !isTaskLocalVersion && !isTaskLanguageErrorVersion
                 && !isAsyncLanguageErrorVersion && !isAsyncExceptionFlowVersion
-                && !isDirectCleanupVersion
+                && !isDirectCleanupVersion && !GuestTaskCancellationErrorValidator.IsVersion(module)
                 && !isLegacyVersion)
             || string.IsNullOrWhiteSpace(module.ModuleId)
             || string.IsNullOrWhiteSpace(module.Language)
