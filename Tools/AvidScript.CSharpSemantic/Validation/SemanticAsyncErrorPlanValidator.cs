@@ -26,7 +26,7 @@ public static class SemanticAsyncErrorPlanValidator
             || document.Types is null) return false;
         bool originalContract = document.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion
             && document.SemanticVersion == SemanticContract.AsyncLanguageErrorSemanticVersion;
-        bool enabled = originalContract
+        bool enabled = originalContract || SemanticContract.HasTaskLocalLifetimes(document)
             || document.SchemaVersion == SemanticContract.AsyncExceptionFlowSchemaVersion
                 && document.SemanticVersion == SemanticContract.AsyncExceptionFlowSemanticVersion
             || document.SchemaVersion == SemanticContract.DirectAwaitCleanupSchemaVersion

@@ -19,7 +19,12 @@ public static class SemanticAsyncExceptionPlanValidator
             && document.SemanticVersion == SemanticContract.DirectAwaitCleanupSemanticVersion;
         bool languageCancellation = document.SchemaVersion == SemanticContract.AsyncCancellationFlowSchemaVersion
             && document.SemanticVersion == SemanticContract.AsyncCancellationFlowSemanticVersion;
-        enabled |= directCleanup || languageCancellation;
+        bool localLifetime = SemanticContract.HasTaskLocalLifetimes(document);
+        languageCancellation |= localLifetime && document.AsyncMethods.Any(method => method?.ExceptionPlan?.CancellationTypeId is not null);
+        directCleanup |= localLifetime && !languageCancellation && document.AsyncMethods.Any(method => method?.ExceptionPlan is not null
+            && method.Segments.Any(segment => segment?.AwaitSite?.ProducerKind is "delay" or "next_tick"
+                && segment.Transfer?.CancellationTarget is >= 0));
+        enabled |= directCleanup || languageCancellation || localLifetime;
         if (!enabled)
             return document.SchemaVersion != SemanticContract.AsyncExceptionFlowSchemaVersion
                 && document.SemanticVersion != SemanticContract.AsyncExceptionFlowSemanticVersion
@@ -34,7 +39,7 @@ public static class SemanticAsyncExceptionPlanValidator
                             || segment.Transfer.CancellationTarget is null
                                 && segment.Transfer.ExceptionTypeId is null
                                 && !IsExceptionTransfer(segment.Transfer.Kind))));
-        if (!document.AsyncMethods.Any(method => method?.ExceptionPlan is not null))
+        if (!localLifetime && !document.AsyncMethods.Any(method => method?.ExceptionPlan is not null))
             return false;
         if (directCleanup && !document.AsyncMethods.Any(method => method?.ExceptionPlan is not null
             && method.Segments.Any(segment => segment?.AwaitSite?.ProducerKind is "delay" or "next_tick"
@@ -65,7 +70,7 @@ public static class SemanticAsyncExceptionPlanValidator
                 || method.Segments.Where((segment, ordinal) => segment is null
                     || segment.Ordinal != ordinal || segment.Transfer is null).Any())
                 return false;
-            if (languageCancellation
+            if ((languageCancellation || localLifetime && plan.CancellationTypeId is not null)
                 ? !SemanticAsyncCancellationPlanValidator.IsValid(document, method)
                 : plan.CancellationTypeId is not null || plan.ExceptionScopes is not null)
                 return false;
@@ -91,7 +96,7 @@ public static class SemanticAsyncExceptionPlanValidator
                 if (region.Kind == "try")
                     hasProtectedAwait |= region.Segments.Any(ordinal =>
                         method.Segments[ordinal].AwaitSite is { ProducerKind: "task_call" or "task_local" }
-                        || (directCleanup || languageCancellation) && method.Segments[ordinal].AwaitSite is
+                        || (directCleanup || languageCancellation || localLifetime) && method.Segments[ordinal].AwaitSite is
                             { ProducerKind: "delay" or "next_tick" });
             }
             if (!hasProtectedAwait || !plan.Regions.Any(region => region.Kind == "try")

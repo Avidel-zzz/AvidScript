@@ -31,6 +31,12 @@ public static class SemanticContract
     public const string DirectAwaitCleanupSemanticVersion = "1.52";
     public const int AsyncCancellationFlowSchemaVersion = 44;
     public const string AsyncCancellationFlowSemanticVersion = "1.53";
+    public const int TaskLocalLifetimeSchemaVersion = 45;
+    public const string TaskLocalLifetimeSemanticVersion = "1.54";
+
+    public static bool HasTaskLocalLifetimes(SemanticDocument document) =>
+        document.SchemaVersion == TaskLocalLifetimeSchemaVersion
+        && document.SemanticVersion == TaskLocalLifetimeSemanticVersion;
 
     public static string GenericInstanceId(string definitionId, IReadOnlyList<string> arguments)
     {
@@ -62,5 +68,7 @@ public static class SemanticContract
         || (schemaVersion == DirectAwaitCleanupSchemaVersion
             && semanticVersion == DirectAwaitCleanupSemanticVersion)
         || (schemaVersion == AsyncCancellationFlowSchemaVersion
-            && semanticVersion == AsyncCancellationFlowSemanticVersion);
+            && semanticVersion == AsyncCancellationFlowSemanticVersion)
+        || (schemaVersion == TaskLocalLifetimeSchemaVersion
+            && semanticVersion == TaskLocalLifetimeSemanticVersion);
 }

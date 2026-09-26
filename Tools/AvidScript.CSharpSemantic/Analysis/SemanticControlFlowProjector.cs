@@ -160,6 +160,8 @@ internal static class SemanticControlFlowProjector
                                                 TaskResultTypeId = typeRegistry.Register(resultType!),
                                                 TaskLocalSymbolIds = SemanticAsyncProjector.GetTaskAliasLocalIds(
                                                     context, semanticModel, asyncBody),
+                                                TaskLocalLifetimes = SemanticAsyncTaskLocalProjector.ProjectLifetimes(
+                                                    context, semanticModel, asyncBody, preview.LexicalScopes),
                                                 ErrorPlan = preview.ErrorPlan,
                                                 ExceptionPlan = new(
                                                     sourceFlow.SourceId,

@@ -39,6 +39,11 @@ public sealed record SemanticAsyncMethod(
     [JsonPropertyOrder(12), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public SemanticAsyncExceptionPlan? ExceptionPlan { get; init; }
 
+    // Schema 45: source locals own references until their lexical scope exits.
+    // Data-flow states and releases are derived, never serialized separately.
+    [JsonPropertyOrder(13), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<SemanticAsyncTaskLocalLifetime>? TaskLocalLifetimes { get; init; }
+
     public static string ReceiverSymbol(string methodSymbolId) => "receiver:" + methodSymbolId;
 
     public const string ReentrantZeroHeapCpsLowering = "reentrant_zero_heap_cps";
@@ -69,6 +74,10 @@ public sealed record SemanticAsyncMethod(
     public const int MaximumStructuredFlowDepth = 8;
     public const int MaximumControlFlowSegments = 64;
 }
+
+public sealed record SemanticAsyncTaskLocalLifetime(
+    [property: JsonPropertyOrder(0)] string SymbolId,
+    [property: JsonPropertyOrder(1)] string ScopeId);
 
 // A source-backed plan for language errors in one controlled async method.
 // Handler and cleanup routing will be added before this plan is executable.

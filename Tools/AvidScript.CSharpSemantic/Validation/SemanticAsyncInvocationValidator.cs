@@ -28,7 +28,7 @@ public static class SemanticAsyncInvocationValidator
             && document.SemanticVersion == SemanticContract.TaskExistingLocalSemanticVersion;
         bool taskAliasContract = document.SchemaVersion == SemanticContract.TaskAliasSchemaVersion
             && document.SemanticVersion == SemanticContract.TaskAliasSemanticVersion;
-        bool combinedContract =
+        bool combinedContract = SemanticContract.HasTaskLocalLifetimes(document) ||
             (document.SchemaVersion == SemanticContract.TaskLanguageErrorSchemaVersion
                 && document.SemanticVersion == SemanticContract.TaskLanguageErrorSemanticVersion)
             || (document.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion
@@ -40,7 +40,8 @@ public static class SemanticAsyncInvocationValidator
             || (document.SchemaVersion == SemanticContract.AsyncCancellationFlowSchemaVersion
                 && document.SemanticVersion == SemanticContract.AsyncCancellationFlowSemanticVersion);
         if (!SemanticAsyncErrorPlanValidator.IsValid(document)
-            || !SemanticAsyncExceptionPlanValidator.IsValid(document)) return false;
+            || !SemanticAsyncExceptionPlanValidator.IsValid(document)
+            || !SemanticAsyncTaskLocalLifetimeValidator.IsValid(document)) return false;
         if (taskResultContract && !document.AsyncMethods.Any(method => method?.TaskResultTypeId is not null
                 || method?.Segments?.Any(segment => segment?.AwaitSite?.TaskCallableId is not null) == true))
             return false;
@@ -88,7 +89,7 @@ public static class SemanticAsyncInvocationValidator
             {
                 if (string.IsNullOrWhiteSpace(method.ExportName) || !callable.IsStatic
                     || callable.Parameters.Count != 0 || method.InvocationInputs.Count != 0) return false;
-                continue;
+                if (method.TaskLocalLifetimes is null) continue;
             }
             if (method.Lowering != SemanticAsyncMethod.ContinuationCfgLowering
                 || callable.Parameters.Any(parameter => parameter.RefKind != "none")
@@ -128,7 +129,7 @@ public static class SemanticAsyncInvocationValidator
                     || method.TaskLocalSymbolIds is { } listed
                         && (listed.Count == 0 || listed.Distinct(StringComparer.Ordinal).Count() != listed.Count
                             || !(taskAliasContract || combinedContract))) return false;
-                if (ownedTasks.Length != 0)
+                if (ownedTasks.Length != 0 && method.TaskLocalLifetimes is null)
                 {
                     if (!TryGetTaskLocalBindings(method, ownedTasks,
                             taskAliasContract || method.TaskLocalSymbolIds is not null,
@@ -153,6 +154,11 @@ public static class SemanticAsyncInvocationValidator
             {
                 if (expected.Length != 0 && (site.StateFrame?.Slots is null
                     || expected.Any(slot => site.StateFrame.Slots.Count(candidate => candidate == slot) != 1))) return false;
+                if (method.TaskLocalLifetimes is not null && site.ProducerKind == "task_local")
+                {
+                    if (!IsValidLifetimeAwait(document, method, callable, site)) return false;
+                    continue;
+                }
                 if (site.ProducerKind is "task_call" or "task_local")
                 {
                     if (!(taskResultContract || taskLocalContract || taskAssignmentContract || taskExistingLocalContract || taskAliasContract || combinedContract)
@@ -209,6 +215,20 @@ public static class SemanticAsyncInvocationValidator
         }
         return true;
     }
+
+    private static bool IsValidLifetimeAwait(SemanticDocument document, SemanticAsyncMethod method,
+        SemanticCallable callable, SemanticAsyncAwaitSite site) => site.TaskCallableId is null
+        && site.PayloadKind == "task_result" && site.ResultTypeId == "type:int32"
+        && site.PayloadValueTypeId == site.ResultTypeId && site.CancellationToken is null
+        && site.BindingOrdinal == -1 && site.PayloadDescriptorTypeId is null
+        && site.ResultStorageKind is (null or "static_field" or "existing_local")
+        && (site.ResultStorageKind != "static_field" || site.ResultSymbolId is not null
+            && IsWritableStaticResultField(document, callable, site.ResultSymbolId, site.ResultTypeId))
+        && (site.ResultStorageKind != "existing_local" || site.ResultSymbolId is not null && HasEarlierResultLocal(method, site))
+        && (site.ResultStorageKind is not null || site.ResultSymbolId is null
+            || document.Symbols.Any(symbol => symbol?.Id == site.ResultSymbolId
+                && symbol.Kind == "local" && symbol.TypeId == site.ResultTypeId
+                && symbol.ContainingSymbolId == method.MethodSymbolId));
 
     private static bool ContainsReference(SemanticOperation operation, string symbolId) =>
         operation.Kind == "local_reference" && operation.SymbolId == symbolId

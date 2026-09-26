@@ -111,7 +111,35 @@ internal static class CSharpGuestAsyncInvocationTests
         return count + TaskResultSemanticCompilesToWasm()
             + TaskLocalSemanticCompilesToWasm() + TaskConditionalLocalsCompileToWasm()
             + TaskParallelLocalsCompileToWasm()
-            + TaskFieldAssignmentCompilesToWasm() + TaskIntegratedCompilesToWasm();
+            + TaskFieldAssignmentCompilesToWasm() + TaskIntegratedCompilesToWasm()
+            + TaskLocalLifetimesRequireNewLowering();
+    }
+
+    private static int TaskLocalLifetimesRequireNewLowering()
+    {
+        const string source = """
+            using AvidScript; using System.Threading.Tasks;
+            public static class Script {
+                public static async Task<int> Child() { await AvidContinuations.NextTickAsync(); return 1; }
+                public static async Task<int> Run() {
+                    Task<int> pending = Child(); pending = Child();
+                    int result = await pending; return result;
+                }
+            }
+            """;
+        var document = CSharpGuestContinuationTests.Analyze(source, "Scripts/TaskLocalLifetime.cs");
+        Check(document.Succeeded && SemanticAsyncInvocationValidator.IsValid(document),
+            "lifetime source reaches the independently validated Semantic contract");
+        foreach (var input in new[] { document,
+            document with { SchemaVersion = 44, SemanticVersion = "1.53" },
+            document with { SchemaVersion = 39, SemanticVersion = "1.48" } })
+        {
+            var lowered = CSharpGuestLowerer.Lower(input, new string('d', 64), enableAsyncLanguageErrors: true);
+            Check(!lowered.Succeeded && lowered.Module is null && lowered.Diagnostics.Any(diagnostic =>
+                diagnostic.Code == "ASCG1004" && diagnostic.Message.Contains("scope-exit lowering", StringComparison.Ordinal)),
+                "new lifetime ownership cannot silently use legacy Guest lowering");
+        }
+        return 4;
     }
 
     private static int TaskFieldAssignmentCompilesToWasm()

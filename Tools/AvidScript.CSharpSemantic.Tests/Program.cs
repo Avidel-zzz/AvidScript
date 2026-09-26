@@ -6,6 +6,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--task-local-lifetime")
+            {
+                int focused = SemanticAsyncTaskLocalLifetimeTests.Run();
+                Console.WriteLine($"AvidScript.CSharpSemantic.Tests.TaskLocalLifetime: {focused}/{focused} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--task-owner-flow")
             {
                 int focused = SemanticAsyncTaskOwnerFlowTests.Run();
@@ -50,7 +56,8 @@ internal static class Program
                 SemanticAsyncTests.Run() + SemanticAsyncScopeTests.Run() + SemanticAsyncInvocationTests.Run() + SemanticUeTypeDeclarationTests.Run() +
                 SemanticCompilerWorkspaceTests.Run() + SemanticLocalFunctionTests.Run() + SemanticDelegateTypeTests.Run() + SemanticClosureTests.Run()
                 + SemanticClosureAllocationTests.Run() + SemanticClassTypeTests.Run() + SemanticDispatchTests.Run() + SemanticUeMethodCatalogTests.Run()
-                + SemanticExceptionFlowTests.Run() + SemanticAsyncCancellationTests.Run() + SemanticAsyncTaskOwnerFlowTests.Run();
+                + SemanticExceptionFlowTests.Run() + SemanticAsyncCancellationTests.Run() + SemanticAsyncTaskOwnerFlowTests.Run()
+                + SemanticAsyncTaskLocalLifetimeTests.Run();
             Console.WriteLine($"AvidScript.CSharpSemantic.Tests: {count}/{count} passed");
             return 0;
         }

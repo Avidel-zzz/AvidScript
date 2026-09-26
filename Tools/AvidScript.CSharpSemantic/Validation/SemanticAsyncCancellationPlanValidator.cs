@@ -14,8 +14,9 @@ public static class SemanticAsyncCancellationPlanValidator
     public static bool IsValid(SemanticDocument document, SemanticAsyncMethod method)
     {
         if (document is null || method is null
-            || document.SchemaVersion != SemanticContract.AsyncCancellationFlowSchemaVersion
-            || document.SemanticVersion != SemanticContract.AsyncCancellationFlowSemanticVersion
+            || !(document.SchemaVersion == SemanticContract.AsyncCancellationFlowSchemaVersion
+                && document.SemanticVersion == SemanticContract.AsyncCancellationFlowSemanticVersion
+                || SemanticContract.HasTaskLocalLifetimes(document))
             || method.ExceptionPlan is not { } plan
             || plan.CancellationTypeId != CancellationTypeId
             || plan.ExceptionScopes is not { Count: > 0 and <= 64 } scopes

@@ -216,6 +216,7 @@ public static class SemanticAnalyzer
         bool hasTaskExistingLocalAssignments = asyncProjection.Methods.Any(method => method.Segments.Any(segment =>
             segment.AwaitSite?.ResultStorageKind == "existing_local"));
         bool hasTaskAliases = asyncProjection.Methods.Any(method => method.TaskLocalSymbolIds is not null);
+        bool hasTaskLocalLifetimes = asyncProjection.Methods.Any(method => method.TaskLocalLifetimes is not null);
         bool hasAsyncLanguageErrors = asyncProjection.Methods.Any(method => method.ErrorPlan is not null);
         bool hasAsyncExceptionPlans = asyncProjection.Methods.Any(method => method.ExceptionPlan is not null);
         bool hasAsyncCancellationFlow = asyncProjection.Methods.Any(method =>
@@ -225,7 +226,8 @@ public static class SemanticAnalyzer
                 && segment.Transfer?.CancellationTarget is >= 0));
         bool hasTaskLanguageErrors = hasExceptionFlows && hasTaskResults;
         return new SemanticDocument(
-            hasAsyncCancellationFlow ? SemanticContract.AsyncCancellationFlowSchemaVersion
+            hasTaskLocalLifetimes ? SemanticContract.TaskLocalLifetimeSchemaVersion
+                : hasAsyncCancellationFlow ? SemanticContract.AsyncCancellationFlowSchemaVersion
                 : hasDirectAwaitCleanup ? SemanticContract.DirectAwaitCleanupSchemaVersion
                 : hasAsyncExceptionPlans ? SemanticContract.AsyncExceptionFlowSchemaVersion
                 : hasAsyncLanguageErrors ? SemanticContract.AsyncLanguageErrorSchemaVersion
@@ -238,7 +240,8 @@ public static class SemanticAnalyzer
                 : hasTaskResults ? SemanticContract.TaskResultSchemaVersion
                 : SemanticContract.CurrentSchemaVersion,
             "csharp",
-            hasAsyncCancellationFlow ? SemanticContract.AsyncCancellationFlowSemanticVersion
+            hasTaskLocalLifetimes ? SemanticContract.TaskLocalLifetimeSemanticVersion
+                : hasAsyncCancellationFlow ? SemanticContract.AsyncCancellationFlowSemanticVersion
                 : hasDirectAwaitCleanup ? SemanticContract.DirectAwaitCleanupSemanticVersion
                 : hasAsyncExceptionPlans ? SemanticContract.AsyncExceptionFlowSemanticVersion
                 : hasAsyncLanguageErrors ? SemanticContract.AsyncLanguageErrorSemanticVersion

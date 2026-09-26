@@ -208,7 +208,8 @@ internal static class SemanticAsyncProjector
         }
         bool hasLexicalFunctions = declaration.Body.DescendantNodes().Any(node =>
             node is AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax);
-        bool requiresControlFlowCfg = callable.Export is null || hasLexicalFunctions || awaits.Any(awaitExpression =>
+        bool hasTaskLifetimes = SemanticAsyncTaskLocalProjector.RequiresLifetime(context, semanticModel, declaration.Body);
+        bool requiresControlFlowCfg = callable.Export is null || hasLexicalFunctions || hasTaskLifetimes || awaits.Any(awaitExpression =>
                 !IsDirectMethodBodyAwait(declaration.Body, awaitExpression))
             || awaits.Any(awaitExpression =>
                 semanticModel.GetOperation(awaitExpression) is IAwaitOperation
@@ -254,9 +255,11 @@ internal static class SemanticAsyncProjector
             {
                 CompilerLocals = flowProjection.CompilerLocals,
                 InvocationInputs = invocationInputs,
-                LexicalScopes = hasLexicalFunctions ? flowProjection.LexicalScopes : Array.Empty<SemanticAsyncLexicalScope>(),
+                LexicalScopes = hasLexicalFunctions || hasTaskLifetimes ? flowProjection.LexicalScopes : Array.Empty<SemanticAsyncLexicalScope>(),
                 TaskResultTypeId = hasTaskResult ? typeRegistry.Register(taskResultType!) : null,
                 TaskLocalSymbolIds = GetTaskAliasLocalIds(context, semanticModel, declaration.Body),
+                TaskLocalLifetimes = SemanticAsyncTaskLocalProjector.ProjectLifetimes(
+                    context, semanticModel, declaration.Body, flowProjection.LexicalScopes),
                 ErrorPlan = flowProjection.ErrorPlan,
             };
             if (!ValidateTaskLocalOwnership(context, semanticModel,
@@ -466,7 +469,14 @@ internal static class SemanticAsyncProjector
             { Declaration.Variables.Count: 1 } taskDeclaration
             && semanticModel.GetDeclaredSymbol(taskDeclaration.Declaration.Variables[0]) is ILocalSymbol taskLocal
             && TryGetTaskLocalProducer(context, semanticModel, taskLocal, out _);
-        if (ContainsAsyncHelperOrTask(operation) && !taskLocalDeclaration)
+        bool taskLocalAssignment = operation is IExpressionStatementOperation
+            { Operation: ISimpleAssignmentOperation { Target: ILocalReferenceOperation assignedTask } }
+            && TryGetSupportedTaskResult(context.Compilation, assignedTask.Local.Type, out _)
+            && assignedTask.Local.DeclaringSyntaxReferences.SingleOrDefault()?.GetSyntax()
+                .Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault()?.Body is { } taskBody
+            && SemanticAsyncTaskLocalProjector.RequiresLifetime(context, semanticModel, taskBody)
+            && SemanticAsyncTaskLocalProjector.TryAnalyze(context, semanticModel, taskBody, out _);
+        if (ContainsAsyncHelperOrTask(operation) && !taskLocalDeclaration && !taskLocalAssignment)
         {
             diagnostics.Add(Error(
                 "ASCS5403",
@@ -779,7 +789,10 @@ internal static class SemanticAsyncProjector
                 SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, awaitExpression.Span),
                 PayloadValueTypeId: taskResultTypeId)
             {
-                TaskCallableId = SemanticSymbolProjector.GetSymbolId(target),
+                TaskCallableId = taskLocalReference is not null
+                    && awaitExpression.Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault()?.Body is { } taskBody
+                    && SemanticAsyncTaskLocalProjector.RequiresLifetime(context, semanticModel, taskBody)
+                        ? null : SemanticSymbolProjector.GetSymbolId(target),
                 TaskLocalSymbolId = taskLocalReference is null
                     ? null : SemanticSymbolProjector.GetSymbolId(taskLocalReference.Local),
                 ResultStorageKind = resultStorageKind,
@@ -1171,6 +1184,13 @@ internal static class SemanticAsyncProjector
             return false;
         MethodDeclarationSyntax? owner = variable.Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault();
         if (owner?.Body is null) return false;
+        if (SemanticAsyncTaskLocalProjector.RequiresLifetime(context, semanticModel, owner.Body))
+        {
+            if (!SemanticAsyncTaskLocalProjector.TryAnalyze(context, semanticModel, owner.Body, out var plan)
+                || !plan!.LocalIds.Contains(SemanticSymbolProjector.GetSymbolId(local))) return false;
+            producer = plan.Representative;
+            return true;
+        }
         VariableDeclaratorSyntax[] taskDeclarations = GetTaskLocalDeclarations(
             context, semanticModel, owner.Body);
         if (taskDeclarations.Length < 1
@@ -1280,6 +1300,9 @@ internal static class SemanticAsyncProjector
     {
         VariableDeclaratorSyntax[] declarations = GetTaskLocalDeclarations(
             context, semanticModel, body);
+        if (SemanticAsyncTaskLocalProjector.RequiresLifetime(context, semanticModel, body))
+            return declarations.Select(variable => SemanticSymbolProjector.GetSymbolId(
+                (ILocalSymbol)semanticModel.GetDeclaredSymbol(variable)!)).ToArray();
         if (!declarations.Any(variable => variable.Initializer?.Value is IdentifierNameSyntax identifier
             && semanticModel.GetOperation(identifier) is ILocalReferenceOperation)) return null;
         return declarations.Select(variable => SemanticSymbolProjector.GetSymbolId(
@@ -1290,6 +1313,15 @@ internal static class SemanticAsyncProjector
         SemanticModel semanticModel, BlockSyntax body, SemanticAsyncMethod method,
         ICollection<SemanticDiagnostic> diagnostics)
     {
+        if (SemanticAsyncTaskLocalProjector.RequiresLifetime(context, semanticModel, body))
+        {
+            if (SemanticAsyncTaskLocalProjector.TryAnalyze(context, semanticModel, body, out _)
+                && SemanticAsyncTaskLocalLifetimeValidator.TryAnalyze(method, out _)) return true;
+            diagnostics.Add(Error("ASCS5423",
+                "Task<int> local writes require supported producers, definite initialization before reads, and a lexical scope for every owner.",
+                SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, body.Span)));
+            return false;
+        }
         VariableDeclaratorSyntax[] declarations = GetTaskLocalDeclarations(context, semanticModel, body);
         string[] locals = declarations.Select(variable => SemanticSymbolProjector.GetSymbolId(
             (ILocalSymbol)semanticModel.GetDeclaredSymbol(variable)!)).ToArray();

@@ -40,6 +40,15 @@ public static class CSharpGuestLowerer
         ArgumentNullException.ThrowIfNull(semanticSha256);
         ArgumentNullException.ThrowIfNull(substitutes);
 
+        // Keep the analysis contract explicit until replacement and scope-edge
+        // reference releases are emitted. Never reinterpret it as legacy IR.
+        if (document.AsyncMethods is null)
+            return Failure(new[] { new GuestDiagnostic("ASCG1004", "error", "Semantic async methods are missing.", null) });
+        if (document.SchemaVersion == SemanticContract.TaskLocalLifetimeSchemaVersion
+            || document.AsyncMethods.Any(method => method?.TaskLocalLifetimes is not null))
+            return Failure(new[] { new GuestDiagnostic("ASCG1004", "error",
+                "Task local lifetimes require Guest reference replacement and scope-exit lowering, which is not yet implemented.", null) });
+
         List<GuestDiagnostic> diagnostics = new();
         bool cancellationFlow = CSharpTaskResultAbi.SupportsCancellation(document);
         bool directCleanup = document.SchemaVersion == SemanticContract.DirectAwaitCleanupSchemaVersion

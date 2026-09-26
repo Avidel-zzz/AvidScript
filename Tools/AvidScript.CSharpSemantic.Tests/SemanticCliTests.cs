@@ -16,7 +16,28 @@ internal static class SemanticCliTests
         DeepFrontendArtifactIsAccepted();
         MalformedFrontendReturnsArtifactError();
         InvalidArgumentsReturnUsageExitCode();
-        return 7;
+        TaskLocalLifetimeCliWritesVersionedArtifact();
+        return 8;
+    }
+
+    private static void TaskLocalLifetimeCliWritesVersionedArtifact()
+    {
+        const string source = """
+            using System.Threading.Tasks;
+            public static class Script {
+                public static async Task<int> First() { return 1; }
+                public static async Task<int> Second() { return 2; }
+                public static async Task<int> Run() {
+                    Task<int> pending; pending = First(); pending = Second();
+                    int value = await pending; return value;
+                }
+            }
+            """;
+        using TempSemanticWorkspace workspace = TempSemanticWorkspace.Create(source, "Scripts/TaskLocalLifetime.cs");
+        Assert(SemanticCommandLine.Run(workspace.CreateArguments()) == 0, "CLI projects Task local lifetimes");
+        var document = SemanticSerializer.Deserialize(File.ReadAllBytes(workspace.OutputPath));
+        Assert(SemanticContract.HasTaskLocalLifetimes(document)
+            && SemanticAsyncInvocationValidator.IsValid(document), "CLI writes the same versioned reader contract");
     }
 
     private static void SuccessfulCliWritesSemanticArtifact()

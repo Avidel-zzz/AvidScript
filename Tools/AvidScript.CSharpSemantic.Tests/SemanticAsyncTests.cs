@@ -947,8 +947,9 @@ internal static class SemanticAsyncTests
         SemanticDocument reassignment = Analyze(source.Replace("Task<int> last = alias;",
             "Task<int> last = alias; last = original;", StringComparison.Ordinal),
             "Scripts/TaskIntReassignedAlias.cs");
-        Assert(!reassignment.Succeeded && reassignment.Diagnostics.Any(item => item.Code == "ASCS5403"),
-            "reassignment remains rejected until path-dependent ownership is represented");
+        Assert(reassignment.Succeeded && SemanticContract.HasTaskLocalLifetimes(reassignment)
+            && SemanticAsyncInvocationValidator.IsValid(reassignment),
+            "reassignment uses the versioned local lifetime contract");
     }
 
     private static void TaskIntExistingLocalAssignmentPreservesStorage()
