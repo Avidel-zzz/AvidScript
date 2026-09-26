@@ -6,27 +6,27 @@
 
 ![UE 5.8](https://img.shields.io/badge/UE-5.8-313131?logo=unrealengine&logoColor=white) ![C# → WASM](https://img.shields.io/badge/C%23-%E2%86%92%20WASM-512BD4?logo=csharp&logoColor=white) ![Win64](https://img.shields.io/badge/Win64-Editor%20%2F%20Development-0078D4?logo=windows&logoColor=white) [![MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-Unreal Engine 的 C# 脚本插件。使用 Roslyn 将 C# 编译为 WebAssembly，UE 运行时不加载 CLR。
+Unreal Engine 的 C# 脚本插件。C# 通过 Roslyn 编译为 WebAssembly，在 UE 中执行，不依赖 CLR。
 
-> Development preview · UE 5.8 · Win64 Editor / Development。C# 与平台限制见 [Limitations](#limitations)。
+目前为开发预览版，主要测试环境是 **UE 5.8 / Win64 Editor / Development**。使用前请查看[已知限制](#limitations)。
 
-[Usage](#usage) · [Installation](#installation) · [Examples](#examples) · [Limitations](#limitations) · [Development](#development)
+[快速开始](#installation) · [示例](#examples) · [已知限制](#limitations) · [构建与测试](#development)
 
 ## Usage
 
-Actor 的 Tick 回调：
+在 C# 中处理 Actor 的 Tick：
 
 ```csharp
 [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
 public static void Tick(float deltaSeconds)
 {
-    // X 轴移动，120 cm/s
+    // 沿 X 轴移动，速度 120 cm/s。
     UE.Self.AddActorWorldOffset(new FVector(120.0f * deltaSeconds, 0.0f, 0.0f));
 }
 ```
 
-`UE.Self` 指向挂载脚本的 Actor；`avid_on_tick` 导出为 UE Tick 回调。
-上面的代码可替换 [ActorLifecycleScript.cs](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) 中的 `Tick`。
+`UE.Self` 是挂载脚本的 Actor，`avid_on_tick` 对应 UE 的 Tick 回调。
+这段代码可替换 [ActorLifecycleScript.cs](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) 中的 `Tick` 方法；安装后可直接运行该示例。
 
 <a id="快速开始"></a>
 <a id="安装"></a>
@@ -36,11 +36,11 @@ public static void Tick(float deltaSeconds)
 
 <a id="requirements"></a>
 
-依赖：UE 5.8 源码版、Visual Studio 2022（UE C++ 工具）、PowerShell 7、.NET SDK [8.0.416](global.json)。
+需要 UE 5.8 源码版、Visual Studio 2022（UE C++ 工具）、PowerShell 7 和 .NET SDK [8.0.416](global.json)。
 
 <a id="install"></a>
 
-在 UE 工程根目录安装：
+在 UE 工程根目录执行：
 
 ```powershell
 git clone https://github.com/Avidel-zzz/AvidScript.git Plugins/AvidScript
@@ -49,14 +49,14 @@ Set-Location Plugins/AvidScript
 pwsh -NoProfile -File Build/InstallWasmtimeDependency.ps1 -Mode Install
 ```
 
-构建 Editor。按项目修改引擎路径、`.uproject` 和 Editor target：
+构建 Editor。将引擎路径、`MyGame.uproject` 和 `MyGameEditor` 替换为自己的配置：
 
 ```powershell
 $ueRoot = 'C:\UnrealEngine'
-$project = (Resolve-Path ../../AvidTPSTemplate.uproject).Path
+$project = (Resolve-Path '../../MyGame.uproject').Path
 
 & (Join-Path $ueRoot 'Engine\Build\BatchFiles\Build.bat') `
-  AvidTPSTemplateEditor Win64 Development "-Project=$project" `
+  MyGameEditor Win64 Development "-Project=$project" `
   -WaitMutex -NoHotReloadFromIDE
 ```
 
@@ -66,33 +66,45 @@ $project = (Resolve-Path ../../AvidTPSTemplate.uproject).Path
 2. 选中 Cube，执行 **Tools → AvidScript → Build And Bind C# ActorLifecycle Script**。
 3. 点击 **Play**，Cube 会移动、旋转和缩放。
 
-修改 `Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs` 后，重新执行 **Build And Bind**。
+要修改脚本，编辑 `Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs`，然后重新执行 **Build And Bind**。
 
 <a id="示例"></a>
 
 ## Examples
 
-| 示例 | 内容 |
+| 示例 | 用法 |
 | --- | --- |
-| [ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) | `BeginPlay` / `Tick` / `EndPlay`、输入、碰撞 |
-| [LatentGameplay](Samples/CSharp/LatentGameplay/README.md) | `async` / `await`、延迟、取消 |
-| [NetworkRpc](Samples/CSharp/NetworkRpc/README.md) | 客户端 / 服务器 RPC |
-| [ReplicatedProperty](Samples/CSharp/ReplicatedProperty/README.md) | 属性同步、`RepNotify` 回调 |
-| [UiSaveDemo](Samples/CSharp/UiSaveDemo/README.md) | UI、存档 |
+| [ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) | 处理 `BeginPlay`、`Tick`、`EndPlay`、输入和碰撞 |
+| [LatentGameplay](Samples/CSharp/LatentGameplay/README.md) | 用 `await` 等待延迟，用取消令牌结束等待 |
+| [NetworkRpc](Samples/CSharp/NetworkRpc/README.md) | 在客户端和服务器之间调用 RPC |
+| [ReplicatedProperty](Samples/CSharp/ReplicatedProperty/README.md) | 同步属性，在 `RepNotify` 中处理更新 |
+| [UiSaveDemo](Samples/CSharp/UiSaveDemo/README.md) | 更新 UI、读写存档 |
 | [TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) | 调用项目 C++ API |
 | [ScriptDefinedTypes](Samples/CSharp/ScriptDefinedTypes/README.md) | C# 声明 Actor、Component、Subsystem |
 
-`LatentGameplayScript.BeginPlay` 片段：
+C# 声明 Actor，并向蓝图暴露属性和方法（节选自 [ScriptDefinedTypes.cs](Samples/CSharp/ScriptDefinedTypes/ScriptDefinedTypes.cs)）：
 
 ```csharp
-// 等待 0.25 秒后缩放 Actor；取消时结束等待
-await UKismetSystemLibrary.DelayAsync(0.25f)
-    .WithCancellation(LifetimeCancellation.Token);
+using AvidScript;
 
-UE.Self.SetActorScale3D(new FVector(1.25f, 1.25f, 1.25f));
+namespace AvidScriptSamples;
+
+[UClass(Blueprintable = true, BlueprintType = true)]
+public partial class Projectile : AvidActor
+{
+    [UProperty(BlueprintReadWrite = true, Category = "Projectile")]
+    public float LaunchSpeed { get; set; } = 1200.0f;
+
+    [UFunction(BlueprintCallable = true, Category = "Projectile")]
+    public async void SetLaunchSpeedNextTick(float speed)
+    {
+        await AvidContinuations.NextTickAsync();
+        LaunchSpeed = speed;
+    }
+}
 ```
 
-[完整脚本](Samples/CSharp/LatentGameplay/LatentGameplayScript.cs)包含取消源初始化和 `EndPlay` 清理。
+生成并编译这个类型后，蓝图可以继承 `Projectile`、读写 `LaunchSpeed`，或调用 `SetLaunchSpeedNextTick` 在下一帧修改速度。修改类型声明需要重新构建 Editor。
 
 <a id="当前边界"></a>
 <a id="已知限制"></a>
@@ -100,12 +112,14 @@ UE.Self.SetActorScale3D(new FVector(1.25f, 1.25f, 1.25f));
 
 ## Limitations
 
-| 范围 | 当前限制 |
+| 范围 | 限制 |
 | --- | --- |
-| C# / .NET | 仅支持部分 C# 语法，不能直接运行任意 .NET 程序或 NuGet 包。见[语言支持计划](Docs/Phase66/P66.C_Language_Execution_Plan.md)。 |
-| 异步 | `catch`、`finally` 中不支持 `await`。Task 值限于 `Task<int>`；支持[重赋值、循环和销毁/热重载清理](Docs/Phase66/P66.C8_Task_Local_Lifetime_Contract.md)。异步异常和取消需[显式构建参数](Docs/Phase66/P66.C8_Task_Local_Lifetime_Contract.md#generated-task-build)，仍处于预览阶段。 |
-| UE 类型声明 | 修改 `UClass`、`UProperty`、`UFunction` 声明后，需要重新构建并重启 Editor。 |
-| 平台与发布 | Android、iOS、Shipping 和真实多人游戏尚未验收。 |
+| C# / .NET | 支持部分 C# 语法，不能直接运行任意 .NET 程序或 NuGet 包。[语言支持范围](Docs/Phase66/P66.C_Language_Execution_Plan.md) |
+| `async` / `await` | Task 值限于 `Task<int>`；`catch`、`finally` 中不能使用 `await`。[异步支持范围与构建参数](Docs/Phase66/P66.C8_Task_Local_Lifetime_Contract.md#generated-task-build) |
+| UE 类型声明 | 修改 `[UClass]`、`[UProperty]`、`[UFunction]` 声明后，需要重新构建并重启 Editor。 |
+| 平台与发布 | Android、iOS、Shipping 和真实多人游戏尚未完成验收。 |
+
+生成 UE 类型中的 Task 异常与取消流程仍属预览功能，需要通过构建参数显式启用。
 
 <a id="构建与测试"></a>
 <a id="开发"></a>
@@ -114,7 +128,7 @@ UE.Self.SetActorScale3D(new FVector(1.25f, 1.25f, 1.25f));
 
 ## Development
 
-工作目录：`Plugins/AvidScript`。
+以下命令均在 `Plugins/AvidScript` 下执行：
 
 ```powershell
 # 构建示例 WASM
@@ -128,24 +142,24 @@ dotnet run --project Tools/AvidScript.CSharpGuest.Tests/AvidScript.CSharpGuest.T
 <a id="internals"></a>
 <a id="layout"></a>
 
-<details>
-<summary>Repository layout</summary>
-
-```text
-Source/   UE 插件模块
-Tools/    C# 编译器与 WASM 生成工具
-Build/    构建与测试脚本
-Samples/  示例
-Docs/     文档
-```
-
-</details>
-
 <a id="architecture"></a>
 
-![C# 源码经编译器生成 WASM，再由 UE 运行时访问引擎对象](Docs/Assets/README/pipeline.svg)
+<details>
+<summary>源码结构与编译流程</summary>
 
-编译链：`C# → Roslyn → Guest IR → WASM`。Guest IR 是编译器的中间表示；脚本通过 `ObjectHandle` 句柄访问 UE 对象。
+| 目录 | 内容 |
+| --- | --- |
+| `Source/` | UE 插件模块 |
+| `Tools/` | C# 编译器、WASM 生成工具 |
+| `Build/` | 构建与测试脚本 |
+| `Samples/` | 示例脚本 |
+| `Docs/` | 设计文档与测试记录 |
+
+![C# 到 UE 的编译与运行流程](Docs/Assets/README/pipeline.svg)
+
+Roslyn 分析 C# 源码，编译器将中间表示 Guest IR 转换为 WASM。UE 运行时加载 WASM；脚本通过 `ObjectHandle` 句柄访问 UE 对象。
+
+</details>
 
 <a id="许可"></a>
 
