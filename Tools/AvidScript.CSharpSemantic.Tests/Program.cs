@@ -6,6 +6,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--async-throw-routing")
+            {
+                int focused = SemanticAsyncThrowRoutingTests.Run();
+                Console.WriteLine($"AvidScript.CSharpSemantic.Tests.AsyncThrowRouting: {focused}/{focused} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--task-local-lifetime")
             {
                 int focused = SemanticAsyncTaskLocalLifetimeTests.Run();
@@ -57,7 +63,7 @@ internal static class Program
                 SemanticCompilerWorkspaceTests.Run() + SemanticLocalFunctionTests.Run() + SemanticDelegateTypeTests.Run() + SemanticClosureTests.Run()
                 + SemanticClosureAllocationTests.Run() + SemanticClassTypeTests.Run() + SemanticDispatchTests.Run() + SemanticUeMethodCatalogTests.Run()
                 + SemanticExceptionFlowTests.Run() + SemanticAsyncCancellationTests.Run() + SemanticAsyncTaskOwnerFlowTests.Run()
-                + SemanticAsyncTaskLocalLifetimeTests.Run();
+                + SemanticAsyncTaskLocalLifetimeTests.Run() + SemanticAsyncThrowRoutingTests.Run();
             Console.WriteLine($"AvidScript.CSharpSemantic.Tests: {count}/{count} passed");
             return 0;
         }

@@ -84,6 +84,11 @@ public static class SemanticAnalyzer
             sourceId,
             referenceSources,
             workspace);
+        context = context with
+        {
+            RequireTaskLocalLifetimes = enableAsyncCancellationFlow
+                && SemanticAsyncTaskLocalProjector.HasRoutedThrowSource(context),
+        };
         SemanticTypeRegistry typeRegistry = new();
         IReadOnlyList<SemanticSymbol> symbols = SemanticSymbolProjector.Project(context, typeRegistry);
         SemanticStateContractProjection stateContractProjection = SemanticStateContractProjector.Project(
@@ -220,6 +225,8 @@ public static class SemanticAnalyzer
             segment.AwaitSite?.ResultStorageKind == "existing_local"));
         bool hasTaskAliases = asyncProjection.Methods.Any(method => method.TaskLocalSymbolIds is not null);
         bool hasTaskLocalLifetimes = asyncProjection.Methods.Any(method => method.TaskLocalLifetimes is not null);
+        bool hasAsyncThrowRouting = asyncProjection.Methods.Any(method => method.Segments.Any(segment =>
+            segment.Transfer?.Kind == SemanticAsyncMethod.RaiseExceptionTransferKind));
         bool hasAsyncLanguageErrors = asyncProjection.Methods.Any(method => method.ErrorPlan is not null);
         bool hasAsyncExceptionPlans = asyncProjection.Methods.Any(method => method.ExceptionPlan is not null);
         bool hasAsyncCancellationFlow = asyncProjection.Methods.Any(method =>
@@ -229,7 +236,8 @@ public static class SemanticAnalyzer
                 && segment.Transfer?.CancellationTarget is >= 0));
         bool hasTaskLanguageErrors = hasExceptionFlows && hasTaskResults;
         return new SemanticDocument(
-            hasTaskLocalLifetimes ? SemanticContract.TaskLocalLifetimeSchemaVersion
+            hasAsyncThrowRouting ? SemanticContract.AsyncThrowRoutingSchemaVersion
+                : hasTaskLocalLifetimes ? SemanticContract.TaskLocalLifetimeSchemaVersion
                 : hasAsyncCancellationFlow ? SemanticContract.AsyncCancellationFlowSchemaVersion
                 : hasDirectAwaitCleanup ? SemanticContract.DirectAwaitCleanupSchemaVersion
                 : hasAsyncExceptionPlans ? SemanticContract.AsyncExceptionFlowSchemaVersion
@@ -243,7 +251,8 @@ public static class SemanticAnalyzer
                 : hasTaskResults ? SemanticContract.TaskResultSchemaVersion
                 : SemanticContract.CurrentSchemaVersion,
             "csharp",
-            hasTaskLocalLifetimes ? SemanticContract.TaskLocalLifetimeSemanticVersion
+            hasAsyncThrowRouting ? SemanticContract.AsyncThrowRoutingSemanticVersion
+                : hasTaskLocalLifetimes ? SemanticContract.TaskLocalLifetimeSemanticVersion
                 : hasAsyncCancellationFlow ? SemanticContract.AsyncCancellationFlowSemanticVersion
                 : hasDirectAwaitCleanup ? SemanticContract.DirectAwaitCleanupSemanticVersion
                 : hasAsyncExceptionPlans ? SemanticContract.AsyncExceptionFlowSemanticVersion

@@ -87,6 +87,9 @@ public static class SemanticAsyncCancellationPlanValidator
         {
             var transfer = segment.Transfer!;
             if (transfer.Kind == SemanticAsyncMethod.ThrowTransferKind) return false;
+            if (transfer.Kind == SemanticAsyncMethod.RaiseExceptionTransferKind
+                && (!SemanticContract.HasAsyncThrowRouting(document)
+                    || !ValidRaise(method, segment, scopes, regions))) return false;
             if (segment.AwaitSite is not null)
             {
                 var scope = scopes.Where(candidate => regions[candidate.ProtectedRegionOrdinal]
@@ -110,6 +113,32 @@ public static class SemanticAsyncCancellationPlanValidator
     private static bool Contains(SemanticSpan outer, SemanticSpan inner) =>
         outer.Start <= inner.Start && (long)outer.Start + outer.Length >= (long)inner.Start + inner.Length;
 
+    // Use the innermost source-owned region, not just a containing try: a
+    // handler must unwind its sibling finally, and that finally must leave it.
+    private static bool ValidRaise(SemanticAsyncMethod method, SemanticAsyncSegment segment,
+        IReadOnlyList<SemanticAsyncExceptionScope> scopes,
+        IReadOnlyDictionary<int, SemanticAsyncExceptionRegion> regions)
+    {
+        int target = segment.Transfer!.PrimaryTarget;
+        if (target < 0 || target >= method.Segments.Count) return false;
+        // Unlike synthetic dispatch/cleanup exits, a raise has an exact source
+        // throw span. Every copied occurrence must retain the same region owner.
+        if (regions.Values.Any(item => Contains(item.SourceSpan, segment.Span)
+            != item.Segments.Contains(segment.Ordinal))) return false;
+        var region = regions.Values.Where(item => item.Segments.Contains(segment.Ordinal))
+            .OrderBy(item => item.SourceSpan.Length).FirstOrDefault();
+        var scope = region is null ? null : scopes.SingleOrDefault(item =>
+            item.ProtectedRegionOrdinal == region.RoslynRegionOrdinal
+            || item.CatchRegionOrdinals.Contains(region.RoslynRegionOrdinal)
+            || item.FinallyRegionOrdinal == region.RoslynRegionOrdinal);
+        if (scope is not null && region!.Kind == "try") return target == scope.DispatchTarget;
+        if (scope is not null && region!.Kind == "catch") return target == scope.UnwindTarget;
+        var parent = scope?.ParentProtectedRegionOrdinal is int parentOrdinal
+            ? scopes.Single(item => item.ProtectedRegionOrdinal == parentOrdinal) : null;
+        return parent is not null ? target == parent.DispatchTarget
+            : method.Segments[target].Transfer?.Kind == SemanticAsyncMethod.PropagateExceptionTransferKind;
+    }
+
     private static bool ValidUnwind(SemanticAsyncMethod method, SemanticAsyncExceptionScope scope,
         int? parentDispatch, IReadOnlyDictionary<int, SemanticAsyncExceptionRegion> regions)
     {
@@ -132,7 +161,7 @@ public static class SemanticAsyncCancellationPlanValidator
                 continue;
             }
             if (!cleanup.Contains(ordinal)) return false;
-            if (transfer.Kind == SemanticAsyncMethod.GotoTransferKind)
+            if (transfer.Kind is SemanticAsyncMethod.GotoTransferKind or SemanticAsyncMethod.RaiseExceptionTransferKind)
                 pending.Push(transfer.PrimaryTarget);
             else if (transfer.Kind == SemanticAsyncMethod.BranchTransferKind)
             {

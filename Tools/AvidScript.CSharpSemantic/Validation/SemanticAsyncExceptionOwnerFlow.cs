@@ -103,6 +103,10 @@ public static class SemanticAsyncExceptionOwnerFlow
                     break;
                 case SemanticAsyncMethod.ThrowTransferKind:
                     break;
+                case SemanticAsyncMethod.RaiseExceptionTransferKind:
+                    if (!languageCancellation) return false;
+                    pending.Enqueue((transfer.PrimaryTarget, SemanticAsyncExceptionOwnerState.Fault));
+                    break;
                 default:
                     return false;
             }

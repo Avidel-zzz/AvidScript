@@ -256,7 +256,8 @@ internal static class SemanticAsyncControlFlowProjector
         private SemanticAsyncErrorPlan? BuildErrorPlan(IReadOnlyList<SemanticAsyncSegment> segments)
         {
             SemanticAsyncThrowSite[] sites = segments
-                .Where(segment => segment.Transfer?.Kind == SemanticAsyncMethod.ThrowTransferKind)
+                .Where(segment => segment.Transfer?.Kind is SemanticAsyncMethod.ThrowTransferKind
+                    or SemanticAsyncMethod.RaiseExceptionTransferKind)
                 .Select(segment => new SemanticAsyncThrowSite(
                     segment.Ordinal,
                     segment.Transfer!.Condition!.TypeId!,
@@ -434,6 +435,15 @@ internal static class SemanticAsyncControlFlowProjector
                             statement.Span,
                             "ASCS5421");
                     }
+                    if (allowAsyncCancellationFlow && previewSuspendedFinally)
+                    {
+                        int target = faultCleanupTarget;
+                        if (target < 0)
+                            target = AddDraft(statement.Span, Array.Empty<SemanticAsyncStatement>(), null,
+                                new DraftTransfer(SemanticAsyncMethod.PropagateExceptionTransferKind, null, -1, -1));
+                        return AddDraft(statement.Span, Array.Empty<SemanticAsyncStatement>(), null,
+                            new DraftTransfer(SemanticAsyncMethod.RaiseExceptionTransferKind, thrown, target, -1));
+                    }
                     return AddDraft(statement.Span,
                         Array.Empty<SemanticAsyncStatement>(), null,
                         new DraftTransfer(SemanticAsyncMethod.ThrowTransferKind,
@@ -536,17 +546,14 @@ internal static class SemanticAsyncControlFlowProjector
             LoopTargets targets,
             int depth)
         {
-            // Schema 44 initially owns one live exception packet. Nested handlers
-            // inside a handler/cleanup and replacement throws need a stacked owner
-            // contract; reject them until lowering and validation support it.
+            // A replacement throw consumes the previous packet. Nested handlers
+            // inside catch/finally additionally need a stack of suspended packets.
             if (allowAsyncCancellationFlow && (
-                statement.DescendantNodes().OfType<ThrowStatementSyntax>().Any(node =>
-                    node.Expression is not null)
-                || statement.Catches.Any(clause => clause.Block.DescendantNodes()
+                statement.Catches.Any(clause => clause.Block.DescendantNodes()
                     .OfType<TryStatementSyntax>().Any())
                 || statement.Finally?.Block.DescendantNodes()
                     .OfType<TryStatementSyntax>().Any() == true))
-                return Reject("Cancellation flow preview does not yet support replacement throws or nested handlers inside catch/finally.",
+                return Reject("Cancellation flow preview does not yet support nested handlers inside catch/finally.",
                     statement.Span, "ASCS5420");
             if (!allowValueReturns || statement.Catches.Any(clause =>
                     clause.Filter is not null
@@ -555,11 +562,11 @@ internal static class SemanticAsyncControlFlowProjector
                     .OfType<AwaitExpressionSyntax>().Any() == true
                 || statement.Catches.Any(clause => clause.Block.DescendantNodes()
                     .OfType<AwaitExpressionSyntax>().Any())
-                || statement.Block.DescendantNodes().OfType<ThrowStatementSyntax>()
+                || !allowAsyncCancellationFlow && statement.Block.DescendantNodes().OfType<ThrowStatementSyntax>()
                     .Any(node => node.Expression is not null && node.Ancestors()
                         .FirstOrDefault(SemanticExecutableBodyResolver.IsExecutableDeclaration)
                             == declaration)
-                || statement.Catches.Any(clause => clause.Block.DescendantNodes()
+                || !allowAsyncCancellationFlow && statement.Catches.Any(clause => clause.Block.DescendantNodes()
                     .OfType<ThrowStatementSyntax>().Any(node =>
                         node.Expression is not null && node.Ancestors()
                             .FirstOrDefault(SemanticExecutableBodyResolver.IsExecutableDeclaration)

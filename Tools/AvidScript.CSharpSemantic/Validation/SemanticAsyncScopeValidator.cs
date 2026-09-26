@@ -39,13 +39,15 @@ public static class SemanticAsyncScopeValidator
                     && document.SchemaVersion is (SemanticContract.AsyncExceptionFlowSchemaVersion
                         or SemanticContract.DirectAwaitCleanupSchemaVersion
                         or SemanticContract.AsyncCancellationFlowSchemaVersion
-                        or SemanticContract.TaskLocalLifetimeSchemaVersion)
+                        or SemanticContract.TaskLocalLifetimeSchemaVersion
+                        or SemanticContract.AsyncThrowRoutingSchemaVersion)
                     && transfer.Kind is (SemanticAsyncMethod.CatchMatchTransferKind
                         or SemanticAsyncMethod.PropagateFaultTransferKind
                         or SemanticAsyncMethod.PropagateCancellationTransferKind
                         or SemanticAsyncMethod.PropagateExceptionTransferKind
                         or SemanticAsyncMethod.RethrowTransferKind
-                        or SemanticAsyncMethod.EndCatchTransferKind);
+                        or SemanticAsyncMethod.EndCatchTransferKind
+                        or SemanticAsyncMethod.RaiseExceptionTransferKind);
                 if (!exceptionTransfer && transfer.Kind is not
                     (SemanticAsyncMethod.GotoTransferKind or SemanticAsyncMethod.BranchTransferKind
                         or SemanticAsyncMethod.AwaitTransferKind or SemanticAsyncMethod.ReturnTransferKind
@@ -97,7 +99,8 @@ public static class SemanticAsyncScopeValidator
     {
         if (transfer.Kind is SemanticAsyncMethod.GotoTransferKind or SemanticAsyncMethod.AwaitTransferKind
             or SemanticAsyncMethod.BranchTransferKind or SemanticAsyncMethod.CatchMatchTransferKind
-            or SemanticAsyncMethod.RethrowTransferKind or SemanticAsyncMethod.EndCatchTransferKind)
+            or SemanticAsyncMethod.RethrowTransferKind or SemanticAsyncMethod.EndCatchTransferKind
+            or SemanticAsyncMethod.RaiseExceptionTransferKind)
             yield return transfer.PrimaryTarget;
         if (transfer.Kind is SemanticAsyncMethod.BranchTransferKind or SemanticAsyncMethod.CatchMatchTransferKind
             || transfer.Kind == SemanticAsyncMethod.AwaitTransferKind && transfer.SecondaryTarget >= 0)

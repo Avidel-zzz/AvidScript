@@ -33,10 +33,17 @@ public static class SemanticContract
     public const string AsyncCancellationFlowSemanticVersion = "1.53";
     public const int TaskLocalLifetimeSchemaVersion = 45;
     public const string TaskLocalLifetimeSemanticVersion = "1.54";
+    public const int AsyncThrowRoutingSchemaVersion = 46;
+    public const string AsyncThrowRoutingSemanticVersion = "1.55";
+
+    public static bool HasAsyncThrowRouting(SemanticDocument document) =>
+        document.SchemaVersion == AsyncThrowRoutingSchemaVersion
+        && document.SemanticVersion == AsyncThrowRoutingSemanticVersion;
 
     public static bool HasTaskLocalLifetimes(SemanticDocument document) =>
         document.SchemaVersion == TaskLocalLifetimeSchemaVersion
-        && document.SemanticVersion == TaskLocalLifetimeSemanticVersion;
+        && document.SemanticVersion == TaskLocalLifetimeSemanticVersion
+        || HasAsyncThrowRouting(document);
 
     public static string GenericInstanceId(string definitionId, IReadOnlyList<string> arguments)
     {
@@ -70,5 +77,7 @@ public static class SemanticContract
         || (schemaVersion == AsyncCancellationFlowSchemaVersion
             && semanticVersion == AsyncCancellationFlowSemanticVersion)
         || (schemaVersion == TaskLocalLifetimeSchemaVersion
-            && semanticVersion == TaskLocalLifetimeSemanticVersion);
+            && semanticVersion == TaskLocalLifetimeSemanticVersion)
+        || (schemaVersion == AsyncThrowRoutingSchemaVersion
+            && semanticVersion == AsyncThrowRoutingSemanticVersion);
 }

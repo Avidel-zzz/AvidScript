@@ -20,8 +20,11 @@ public static class SemanticAsyncTaskLocalLifetimeValidator
         bool enabled = SemanticContract.HasTaskLocalLifetimes(document);
         if (!enabled) return document.SchemaVersion != SemanticContract.TaskLocalLifetimeSchemaVersion
             && document.SemanticVersion != SemanticContract.TaskLocalLifetimeSemanticVersion
+            && document.SchemaVersion != SemanticContract.AsyncThrowRoutingSchemaVersion
+            && document.SemanticVersion != SemanticContract.AsyncThrowRoutingSemanticVersion
             && document.AsyncMethods.All(method => method is not null && method.TaskLocalLifetimes is null);
-        if (!document.AsyncMethods.Any(method => method?.TaskLocalLifetimes is not null)
+        if (!SemanticContract.HasAsyncThrowRouting(document)
+                && !document.AsyncMethods.Any(method => method?.TaskLocalLifetimes is not null)
             || !SemanticAsyncScopeValidator.IsValid(document)) return false;
         var taskTypes = document.Types.Where(type => type?.CanonicalName == "global::System.Threading.Tasks.Task<int>")
             .Select(type => type.Id).ToHashSet(StringComparer.Ordinal);

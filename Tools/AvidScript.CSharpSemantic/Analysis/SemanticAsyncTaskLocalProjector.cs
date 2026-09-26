@@ -18,11 +18,21 @@ internal static class SemanticAsyncTaskLocalProjector
         SemanticModel model, BlockSyntax body)
     {
         if (Declarations(context, model, body).Length == 0) return false;
+        if (context.RequireTaskLocalLifetimes) return true;
         // Schema selection belongs to the module. Once one method needs the new
         // contract, every Task-owning method records its complete lifetime plan.
         return context.PrimaryUnit.SyntaxTree.GetRoot().DescendantNodes().OfType<MethodDeclarationSyntax>()
             .Any(method => method.Body is { } candidate && RequiresNewContract(context, model, candidate));
     }
+
+    public static bool HasRoutedThrowSource(SemanticCompilationContext context) =>
+        context.SyntaxTree.GetRoot().DescendantNodes().OfType<MethodDeclarationSyntax>()
+            .Any(method => method.Modifiers.Any(token => token.ValueText == "async")
+                && method.Body is { } body
+                && body.DescendantNodes().OfType<TryStatementSyntax>().Any()
+                && body.DescendantNodes().OfType<ThrowStatementSyntax>().Any(statement =>
+                    statement.Expression is not null
+                    && statement.Ancestors().FirstOrDefault(SemanticExecutableBodyResolver.IsExecutableDeclaration) == method));
 
     private static bool RequiresNewContract(SemanticCompilationContext context,
         SemanticModel model, BlockSyntax body)

@@ -18,6 +18,10 @@ internal sealed record SemanticCompilationContext(
     public SyntaxTree SyntaxTree => PrimaryUnit.SyntaxTree;
 
     public SourceText SourceText => PrimaryUnit.SourceText;
+
+    // New exception edges require a lexical lifetime for every Task local in
+    // the module, including methods that do not themselves raise an exception.
+    public bool RequireTaskLocalLifetimes { get; init; }
 }
 
 internal static class SemanticCompilationFactory

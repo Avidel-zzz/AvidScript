@@ -20,6 +20,9 @@ public static class SemanticAsyncExceptionPlanValidator
         bool languageCancellation = document.SchemaVersion == SemanticContract.AsyncCancellationFlowSchemaVersion
             && document.SemanticVersion == SemanticContract.AsyncCancellationFlowSemanticVersion;
         bool localLifetime = SemanticContract.HasTaskLocalLifetimes(document);
+        bool routedThrows = SemanticContract.HasAsyncThrowRouting(document);
+        if (routedThrows && !document.AsyncMethods.Any(method => method?.Segments?.Any(segment =>
+            segment?.Transfer?.Kind == SemanticAsyncMethod.RaiseExceptionTransferKind) == true)) return false;
         languageCancellation |= localLifetime && document.AsyncMethods.Any(method => method?.ExceptionPlan?.CancellationTypeId is not null);
         directCleanup |= localLifetime && !languageCancellation && document.AsyncMethods.Any(method => method?.ExceptionPlan is not null
             && method.Segments.Any(segment => segment?.AwaitSite?.ProducerKind is "delay" or "next_tick"
@@ -32,6 +35,8 @@ public static class SemanticAsyncExceptionPlanValidator
                 && document.SemanticVersion != SemanticContract.DirectAwaitCleanupSemanticVersion
                 && document.SchemaVersion != SemanticContract.AsyncCancellationFlowSchemaVersion
                 && document.SemanticVersion != SemanticContract.AsyncCancellationFlowSemanticVersion
+                && document.SchemaVersion != SemanticContract.AsyncThrowRoutingSchemaVersion
+                && document.SemanticVersion != SemanticContract.AsyncThrowRoutingSemanticVersion
                 && document.AsyncMethods.All(method => method is not null
                     && method.ExceptionPlan is null && method.Segments is not null
                     && method.Segments.All(segment => segment is not null
@@ -97,7 +102,9 @@ public static class SemanticAsyncExceptionPlanValidator
                     hasProtectedAwait |= region.Segments.Any(ordinal =>
                         method.Segments[ordinal].AwaitSite is { ProducerKind: "task_call" or "task_local" }
                         || (directCleanup || languageCancellation || localLifetime) && method.Segments[ordinal].AwaitSite is
-                            { ProducerKind: "delay" or "next_tick" });
+                            { ProducerKind: "delay" or "next_tick" }
+                        || routedThrows && method.Segments[ordinal].Transfer?.Kind
+                            == SemanticAsyncMethod.RaiseExceptionTransferKind);
             }
             if (!hasProtectedAwait || !plan.Regions.Any(region => region.Kind == "try")
                 || !plan.Regions.Any(region => region.Kind is "catch" or "finally")
@@ -215,6 +222,11 @@ public static class SemanticAsyncExceptionPlanValidator
                             || transfer.PrimaryTarget != -1 || transfer.SecondaryTarget != -1)
                             return false;
                         break;
+                    case SemanticAsyncMethod.RaiseExceptionTransferKind:
+                        if (!routedThrows || !languageCancellation || segment.AwaitSite is not null
+                            || transfer.Condition is not { Kind: "object_creation", IsSupported: true }
+                            || transfer.PrimaryTarget < 0 || transfer.SecondaryTarget != -1) return false;
+                        break;
                     default:
                         return false;
                 }
@@ -263,5 +275,6 @@ public static class SemanticAsyncExceptionPlanValidator
             or SemanticAsyncMethod.PropagateCancellationTransferKind
             or SemanticAsyncMethod.PropagateExceptionTransferKind
             or SemanticAsyncMethod.RethrowTransferKind
-            or SemanticAsyncMethod.EndCatchTransferKind;
+            or SemanticAsyncMethod.EndCatchTransferKind
+            or SemanticAsyncMethod.RaiseExceptionTransferKind;
 }

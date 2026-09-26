@@ -39,7 +39,8 @@ public static class SemanticAsyncErrorPlanValidator
         {
             if (method is null || method.Segments is null) return false;
             SemanticAsyncSegment[] throwSegments = method.Segments.Where(segment =>
-                segment?.Transfer?.Kind == SemanticAsyncMethod.ThrowTransferKind).ToArray();
+                segment?.Transfer?.Kind is SemanticAsyncMethod.ThrowTransferKind
+                    or SemanticAsyncMethod.RaiseExceptionTransferKind).ToArray();
             if (!enabled)
             {
                 if (method.ErrorPlan is not null || throwSegments.Length != 0) return false;
@@ -82,7 +83,12 @@ public static class SemanticAsyncErrorPlanValidator
                     || (long)site.Span.Start + site.Span.Length > plan.SourceLength
                     || segment.AwaitSite is not null
                     || segment.Statements is not { Count: 0 }
-                    || transfer.PrimaryTarget != -1 || transfer.SecondaryTarget != -1
+                    || (transfer.Kind == SemanticAsyncMethod.RaiseExceptionTransferKind
+                        ? !SemanticContract.HasAsyncThrowRouting(document) || method.ExceptionPlan is null
+                            || transfer.PrimaryTarget < 0 || transfer.PrimaryTarget >= method.Segments.Count
+                        : transfer.PrimaryTarget != -1)
+                    || transfer.SecondaryTarget != -1 || transfer.CancellationTarget is not null
+                    || transfer.ExceptionTypeId is not null
                     || !TryGetConstructor(site.ExceptionTypeId, out string? constructor)
                     || constructor != site.ConstructorSymbolId
                     || !document.Types.Any(type => type?.Id == site.ExceptionTypeId)

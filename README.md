@@ -119,7 +119,7 @@ public partial class Projectile : AvidActor
 | UE 类型声明 | 修改 `[UClass]`、`[UProperty]`、`[UFunction]` 声明后，需要重新构建并重启 Editor。 |
 | 平台与发布 | Android、iOS、Shipping 和真实多人游戏尚未完成验收。 |
 
-生成 UE 类型中的 Task 异常与取消流程仍属预览功能，需要通过构建参数显式启用。
+生成 UE 类型中的 Task 异常与取消流程仍属预览功能，需要通过构建参数显式启用。[取消过程中显式抛错](Docs/Phase66/P66.C9_Async_Throw_Routing.md)的组合尚不能编译运行。
 
 <a id="构建与测试"></a>
 <a id="开发"></a>

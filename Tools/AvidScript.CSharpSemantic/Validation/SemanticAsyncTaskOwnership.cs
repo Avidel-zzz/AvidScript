@@ -118,7 +118,8 @@ public static class SemanticAsyncTaskOwnership
     private static int[]? Successors(SemanticAsyncControlTransfer? transfer) => transfer?.Kind switch
     {
         SemanticAsyncMethod.GotoTransferKind or SemanticAsyncMethod.EndCatchTransferKind
-            or SemanticAsyncMethod.RethrowTransferKind when transfer.PrimaryTarget >= 0 => new[] { transfer.PrimaryTarget },
+            or SemanticAsyncMethod.RethrowTransferKind or SemanticAsyncMethod.RaiseExceptionTransferKind
+            when transfer.PrimaryTarget >= 0 => new[] { transfer.PrimaryTarget },
         SemanticAsyncMethod.AwaitTransferKind when transfer.PrimaryTarget >= 0 && transfer.SecondaryTarget >= -1
             && (transfer.CancellationTarget is null or >= 0) => new[] {
                 transfer.PrimaryTarget, transfer.SecondaryTarget, transfer.CancellationTarget ?? -1 }

@@ -53,6 +53,7 @@ public sealed record SemanticAsyncMethod(
     public const string AwaitTransferKind = "await";
     public const string ReturnTransferKind = "return";
     public const string ThrowTransferKind = "throw";
+    public const string RaiseExceptionTransferKind = "raise_exception";
     // Diagnostic preview only until the versioned async exception contract lands.
     public const string PropagateFaultTransferKind = "propagate_fault";
     public const string PropagateCancellationTransferKind = "propagate_cancellation";

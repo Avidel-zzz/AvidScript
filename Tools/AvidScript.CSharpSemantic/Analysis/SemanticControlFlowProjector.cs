@@ -110,7 +110,9 @@ internal static class SemanticControlFlowProjector
                                             SecondaryTarget: >= 0 }
                                         || enableDirectAwaitCleanup && segment.Transfer is
                                             { Kind: SemanticAsyncMethod.AwaitTransferKind,
-                                                CancellationTarget: >= 0 }))
+                                                CancellationTarget: >= 0 }
+                                        || enableAsyncCancellationFlow && segment.Transfer?.Kind
+                                            == SemanticAsyncMethod.RaiseExceptionTransferKind))
                                 {
                                     SemanticAsyncStateSlot[] inputs = body.Method.Parameters
                                         .Select(parameter => new SemanticAsyncStateSlot(
