@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="TaskLocalLifetimeLifecycle.cs" />
+    <Compile Include="TaskLocalLifetimeLifecycle.Guest.cs" />
+  </ItemGroup>
+</Project>

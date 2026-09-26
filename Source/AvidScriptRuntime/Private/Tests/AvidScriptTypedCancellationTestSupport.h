@@ -21,7 +21,8 @@ struct FFixture
 	TArray<uint8> Bytes;
 	TMap<FString, int32> Offsets;
 
-	bool Load(FAutomationTestBase& Test, const FString& Path)
+	bool Load(FAutomationTestBase& Test, const FString& Path, int32 Schema = 24,
+		const TCHAR* EntryOwner = TEXT("CancellationLifecycleEntry"), const TCHAR* Stem = TEXT("cancellation_lifecycle"))
 	{
 		FAvidScriptWasmReloadManifestLoadResult Result;
 		if (!Test.TestTrue(TEXT("Formal manifest verifies the executed bytes"),
@@ -29,13 +30,13 @@ struct FFixture
 		{ Test.AddError(Result.ErrorMessage); return false; }
 		if (!Test.TestTrue(TEXT("Fixture has formal state migration"), Manifest.StateMigration.IsEnabled())
 			|| !Test.TestEqual(TEXT("Migration covers the exported owner"), Manifest.StateMigration.OwnerTypeId,
-				FString(TEXT("type:global::CancellationLifecycleEntry")))
+				FString(TEXT("type:global::")) + EntryOwner)
 			|| !Test.TestEqual(TEXT("Only entry fields migrate"), Manifest.StateMigration.Slots.Num(), 3)) return false;
 
 		// Helper statics have observable memory slots but are not migration fields.
 		// Read the exact IR named by this formal fixture, verified against its manifest.
 		TArray<uint8> IrBytes;
-		const FString IrPath = FPaths::GetPath(Path) / TEXT("cancellation_lifecycle.guestir.json");
+		const FString IrPath = FPaths::GetPath(Path) / (FString(Stem) + TEXT(".guestir.json"));
 		if (!Test.TestTrue(TEXT("Compiler IR exists"), FFileHelper::LoadFileToArray(IrBytes, *IrPath))
 			|| !Test.TestEqual(TEXT("Readback layout matches verified compiler provenance"),
 				FAvidScriptHash::Sha256Hex(IrBytes), Manifest.DebugProvenance.GuestIrSha256)) return false;
@@ -44,7 +45,9 @@ struct FFixture
 		TSharedPtr<FJsonObject> Ir;
 		if (!Test.TestTrue(TEXT("Compiler IR parses"), FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), Ir))
 			|| !Ir.IsValid()
-			|| !Test.TestEqual(TEXT("Compiler cancellation IR version"), Ir->GetIntegerField(TEXT("schema_version")), 24)
+			|| !Test.TestEqual(TEXT("Compiler cancellation IR version"), Ir->GetIntegerField(TEXT("schema_version")), Schema)
+			|| !Test.TestEqual(TEXT("Compiler cancellation IR semantic version"), Ir->GetStringField(TEXT("ir_version")),
+				FString(Schema == 25 ? TEXT("1.24") : TEXT("1.23")))
 			|| !Test.TestEqual(TEXT("IR and executable share module identity"), Ir->GetStringField(TEXT("module_id")), Manifest.ModuleId)) return false;
 		Offsets.Reset();
 		for (const auto& Value : Ir->GetObjectField(TEXT("memory_layout"))->GetArrayField(TEXT("state_slots")))
@@ -59,10 +62,10 @@ struct FFixture
 		}
 		for (const TCHAR* Field : {TEXT("BeginCount"), TEXT("ReloadMode"), TEXT("Result")})
 		{
-			const FString Id = FString::Printf(TEXT("state:type:global::CancellationLifecycleEntry:%s"), Field);
+			const FString Id = FString::Printf(TEXT("state:type:global::%s:%s"), EntryOwner, Field);
 			const auto* Slot = Manifest.StateMigration.Slots.FindByPredicate(
 				[&](const FAvidScriptWasmStateSlot& Item) { return Item.StableId == Id; });
-			const int32* Offset = Offsets.Find(GlobalId(TEXT("CancellationLifecycleEntry"), Field));
+			const int32* Offset = Offsets.Find(GlobalId(EntryOwner, Field));
 			if (!Test.TestTrue(TEXT("Migrated field matches compiler memory layout"), Slot && Offset
 				&& Slot->Offset == static_cast<uint32>(*Offset) && Slot->Size == sizeof(int32))) return false;
 		}
