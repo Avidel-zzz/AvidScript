@@ -27,7 +27,8 @@ internal static class SemanticGenericSpecializer
         IReadOnlyList<SemanticMethodBody> sourceMethods,
         IReadOnlyList<SemanticControlFlowGraph> sourceGraphs,
         IReadOnlyList<SemanticAsyncMethod> sourceAsyncMethods,
-        IReadOnlySet<string> reachableSourceIds)
+        IReadOnlySet<string> reachableSourceIds,
+        SemanticTypeRegistry? registry = null)
     {
         Dictionary<string, SemanticCallable> definitions = sourceCallables
             .Where(callable => callable.GenericTypeParameterIds?.Count > 0)
@@ -151,8 +152,15 @@ internal static class SemanticGenericSpecializer
             if (typeId is null) return null;
             if (!SemanticGenericTypeSubstitution.TryClose(
                     typeId, typeMap, typesById, shapesById, out string closed))
-                diagnostics.Add(new SemanticDiagnostic("ASCS1064", "error",
+            {
+                if (registry is not null && registry.TryClose(typeId, typeMap, out closed))
+                {
+                    foreach (var type in registry.Build()) typesById[type.Id] = type;
+                    foreach (var shape in registry.BuildShapes()) shapesById[shape.TypeId] = shape;
+                }
+                else diagnostics.Add(new SemanticDiagnostic("ASCS1064", "error",
                     $"Generic type '{typeId}' needs a structured closed type layout.", span));
+            }
             return closed;
         }
 
@@ -240,6 +248,7 @@ internal static class SemanticGenericSpecializer
             return operation with
             {
                 TypeId = MapType(operation.TypeId, typeMap, operation.Span),
+                StaticFieldOwnerTypeId = MapType(operation.StaticFieldOwnerTypeId, typeMap, operation.Span),
                 SymbolId = symbolId,
                 TypeArgumentIds = typeArguments,
                 Children = operation.Children.Select(child =>

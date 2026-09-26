@@ -45,7 +45,8 @@ internal static class CSharpSemanticInputValidator
 
     public static bool IsValid(SemanticDocument document)
     {
-        if (document.ExceptionFlows is not null
+        if (document.StaticInitialization is not null
+            || document.ExceptionFlows is not null
             || document.RejectedAsyncExceptionFlows is not null
             || document.Source is null
             || document.Types is null
@@ -70,7 +71,8 @@ internal static class CSharpSemanticInputValidator
             return false;
         }
 
-        return ValidateTypes(document.Types)
+        return SemanticStaticFieldAccessValidator.IsValid(document, requireOwners: false)
+            && ValidateTypes(document.Types)
             && ValidateTypeShapes(document.SemanticVersion, document.Types, document.TypeShapes)
             && SemanticDelegateContractValidator.IsValid(document)
             && SemanticClassContractValidator.IsValid(document)

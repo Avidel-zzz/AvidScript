@@ -112,7 +112,7 @@ Win64 Editor / Development 是当前测试目标。Shipping、Android、iOS 和�
 
 | 项目 | 当前限制 |
 | --- | --- |
-| C# | [静态对象字段](Docs/Phase66/P66.C10_Static_Object_Lifetime_Contract.md)尚未接通 C# → WASM 编译执行。 |
+| C# | [静态对象字段与静态构造函数](Docs/Phase66/P66.C10_Static_Object_Lifetime_Contract.md)尚未接通 C# → WASM 编译执行。 |
 | .NET | 仅支持部分 API，不能直接使用任意 NuGet 包。 |
 | `async` / `await` | 泛型 Task 仅支持 `Task<int>`；不支持在 `catch` / `finally` 中 `await`。 |
 | 异常 | 部分同步方法和属性访问器支持显式 `throw`，需启用[实验性构建参数](Docs/Phase66/P66.C8_Task_Local_Lifetime_Contract.md#generated-task-build)。同步异常尚不能向异步方法传播。 |

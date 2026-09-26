@@ -12,6 +12,18 @@ namespace AvidScript.CSharpSemantic;
 
 internal static class SemanticStaticInitializerProjector
 {
+    public static bool IsRequired(SemanticCompilationContext context) =>
+        !context.Compilation.GetDiagnostics().Any(item => item.Severity == DiagnosticSeverity.Error)
+        && context.ProjectionUnits.Any(unit => unit.SyntaxTree.GetRoot().DescendantNodes()
+            .OfType<BaseTypeDeclarationSyntax>().Any(declaration =>
+                context.Compilation.GetSemanticModel(unit.SyntaxTree).GetDeclaredSymbol(declaration)
+                    is INamedTypeSymbol type && HasStorage(type)));
+
+    private static bool HasStorage(INamedTypeSymbol type) =>
+        type.TypeKind is TypeKind.Class or TypeKind.Struct
+        && (type.StaticConstructors.Length != 0
+            || type.GetMembers().OfType<IFieldSymbol>().Any(field => field.IsStatic && !field.IsConst));
+
     public static SemanticDocument Project(SemanticCompilationContext context,
         SemanticTypeRegistry registry, SemanticDocument document)
     {
@@ -27,8 +39,7 @@ internal static class SemanticStaticInitializerProjector
             foreach (BaseTypeDeclarationSyntax declaration in unit.SyntaxTree.GetRoot().DescendantNodes().OfType<BaseTypeDeclarationSyntax>())
             {
                 if (model.GetDeclaredSymbol(declaration) is not INamedTypeSymbol type
-                    || type.TypeKind is not (TypeKind.Class or TypeKind.Struct)
-                    || type.StaticConstructors.Length == 0) continue;
+                    || !HasStorage(type)) continue;
                 string id = registry.Register(type);
                 types.TryAdd(id, type);
                 fields.TryAdd(id, new());
@@ -69,9 +80,10 @@ internal static class SemanticStaticInitializerProjector
                 diagnostics.Add(new("ASCS1071", "error",
                     "Every static field requires an executable source declaration; implicit storage and metadata-only partial fields cannot be omitted.",
                     SemanticSpanFactory.Empty));
-            IMethodSymbol constructor = type.StaticConstructors.Single();
-            plans.Add(new(entry.Key, constructor.IsImplicitlyDeclared,
-                constructor.IsImplicitlyDeclared ? null : SemanticSymbolProjector.GetSymbolId(constructor), initializers));
+            IMethodSymbol? constructor = type.StaticConstructors.SingleOrDefault();
+            bool beforeFieldInit = constructor is null || constructor.IsImplicitlyDeclared;
+            plans.Add(new(entry.Key, beforeFieldInit,
+                beforeFieldInit ? null : SemanticSymbolProjector.GetSymbolId(constructor!), initializers));
         }
         return document with
         {

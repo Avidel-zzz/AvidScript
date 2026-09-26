@@ -23,7 +23,7 @@ internal static class SemanticStaticInitializationTests
         SemanticDocument Project(string source, SemanticReferenceSource[]? references = null)
         {
             var document = Analyze(source, references);
-            Check(document.SchemaVersion == 48 && document.SemanticVersion == "1.57", "outer identity");
+            Check(document.SchemaVersion == 49 && document.SemanticVersion == "1.58", "outer identity");
             Check(document.Diagnostics.All(item => item.Severity != "error" || item.Code == "ASCS3001"),
                 string.Join(" | ", document.Diagnostics.Select(item => item.Code + ": " + item.Message)));
             Check(SemanticStaticInitializationValidator.IsValid(document), "source plan validation: " + source);
@@ -48,7 +48,9 @@ internal static class SemanticStaticInitializationTests
             """;
         SemanticDocument baseline = Project(source);
         var plan = baseline.StaticInitialization!;
-        var type = plan.Types.Single();
+        var type = plan.Types.Single(item => item.TypeId == "type:global::Cache");
+        Check(plan.Types.Single(item => item.TypeId == "type:global::Log").Fields.Single().Initializer is null,
+            "default-only storage participates without a generated constructor");
         Check(!type.BeforeFieldInit && type.ConstructorMethodId is not null, "explicit constructor trigger");
         Check(type.Fields.Select(field => baseline.Symbols.Single(symbol => symbol.Id == field.FieldSymbolId).Name)
             .SequenceEqual(new[] { "Z", "A", "Empty", "Alias" }), "source declaration order and const exclusion");
@@ -75,15 +77,17 @@ internal static class SemanticStaticInitializationTests
         Check(Analyze("public class Cache { public static int Value { get; set; } = 1; }").Diagnostics.Any(item => item.Code == "ASCS1071"),
             "implicit static storage is not silently dropped");
         var constants = Analyze("public static class Cache { public const int Value = 4; }");
-        Check(constants.StaticInitialization is null && constants.SchemaVersion != 48, "constant-only source needs no initializer contract");
+        Check(constants.StaticInitialization is null && constants.SchemaVersion != 49, "constant-only source needs no initializer contract");
         var legacy = SemanticAnalyzer.Analyze(source, "Scripts/Static.cs", baseline.Source.Sha256);
         Check(legacy.StaticInitialization is null && !JsonNode.Parse(SemanticSerializer.Serialize(legacy))!.AsObject().ContainsKey("static_initialization"),
             "default API retains old serialized shape");
 
-        SemanticDocument With(SemanticStaticTypeInitialization value) => baseline with { StaticInitialization = plan with { Types = new[] { value } } };
+        SemanticDocument With(SemanticStaticTypeInitialization value) => baseline with { StaticInitialization = plan with {
+            Types = plan.Types.Select(item => item.TypeId == type.TypeId ? value : item).ToArray() } };
         SemanticDocument Field(SemanticStaticFieldInitialization value) => With(type with { Fields = new[] { value }.Concat(type.Fields.Skip(1)).ToArray() });
         foreach (SemanticDocument invalid in new[] {
             baseline with { SchemaVersion = plan.BaseSchemaVersion, SemanticVersion = plan.BaseSemanticVersion },
+            baseline with { SchemaVersion = 48, SemanticVersion = "1.57" },
             baseline with { SemanticVersion = "1.56" }, baseline with { StaticInitialization = null },
             baseline with { StaticInitialization = plan with { BaseSchemaVersion = 48, BaseSemanticVersion = "1.57" } },
             baseline with { StaticInitialization = plan with { BaseSchemaVersion = 49, BaseSemanticVersion = "1.58" } },
@@ -106,6 +110,54 @@ internal static class SemanticStaticInitializationTests
             Field(type.Fields[0] with { ControlFlowGraph = type.Fields[0].ControlFlowGraph! with {
                 Blocks = type.Fields[0].ControlFlowGraph!.Blocks.Select(block => block with { Operations = Array.Empty<SemanticOperation>() }).ToArray() } }),
         }) Check(!SemanticStaticInitializationValidator.IsValid(invalid), "malformed plan accepted");
+        var defaults = Project("public class Cache<T> { public static T Value; } public static class Script { public static int Main() { Cache<int>.Value = 4; Cache<long>.Value = 8; return Cache<int>.Value + (int)Cache<long>.Value; } }");
+        var accesses = defaults.Methods.SelectMany(method => Operations(method.Root))
+            .Where(operation => operation.Kind == "field_reference").ToArray();
+        Check(accesses.Select(operation => operation.StaticFieldOwnerTypeId).Distinct().Count() == 2
+            && accesses.Select(operation => operation.SymbolId).Distinct().Count() == 1,
+            "closed owners are distinct while the field declaration remains shared");
+        Check(defaults.StaticInitialization!.Types.Single().BeforeFieldInit
+            && defaults.StaticInitialization.Types.Single().Fields.Single().Initializer is null,
+            "generic default storage needs no synthetic initializer");
+        Check(defaults.Types.Any(item => item.Id == "type:global::Cache<int>")
+            && defaults.Types.Any(item => item.Id == "type:global::Cache<long>"), "closed owner types are registered");
+        var generic = Project("public class Cache<T> { public static int Value; } public static class Script { public static int Read<T>() { return Cache<T>.Value; } public static int Main() { return Read<int>() + Read<long>(); } }");
+        var specialized = generic.Callables.Where(item => item.GenericDefinitionSymbolId is not null).ToArray();
+        Check(specialized.Length == 2, "both generic callers specialize");
+        Check(generic.Methods.Where(method => specialized.Any(callable => callable.MethodSymbolId == method.MethodSymbolId))
+            .SelectMany(method => Operations(method.Root)).Where(operation => operation.Kind == "field_reference")
+            .Select(operation => operation.StaticFieldOwnerTypeId).ToHashSet().SetEquals(new[] {
+                "type:global::Cache<int>", "type:global::Cache<long>" }), "generic body closes static owner through Roslyn");
+        Project("public class Cache<T> { public static T Value; public static T Read() { return Value; } } public static class Script { public static int Main() { return Cache<int>.Read() + (int)Cache<long>.Read(); } }");
+        Project("public class Base<T> { public static T Value; } public class Derived : Base<int> {} public static class Script { public static int Main() { return Derived.Value; } }");
+        Project("public class Cache<T> { public static T Value; } public static class Script { public static int Read<T>() { return Cache<T[]>.Value.Length; } public static int Main() { return Read<int>(); } }");
+        foreach (var owner in new string?[] { null, "", "type:missing", "type:global::Script", "type:global::Cache<long>" })
+        {
+            SemanticOperation Change(SemanticOperation operation) => operation with {
+                StaticFieldOwnerTypeId = operation.Kind == "field_reference" && operation.TypeId == "type:int32"
+                    ? owner : operation.StaticFieldOwnerTypeId,
+                Children = operation.Children.Select(Change).ToArray() };
+            Check(!SemanticStaticInitializationValidator.IsValid(defaults with {
+                Methods = defaults.Methods.Select(method => method with { Root = Change(method.Root) }).ToArray() }),
+                "missing, unknown, unrelated or incorrectly substituted field owner accepted: " + owner);
+            Check(!SemanticStaticInitializationValidator.IsValid(defaults with {
+                ControlFlowGraphs = defaults.ControlFlowGraphs.Select(graph => graph with { Blocks = graph.Blocks.Select(block => block with {
+                    Operations = block.Operations.Select(Change).ToArray(),
+                    BranchValue = block.BranchValue is null ? null : Change(block.BranchValue) }).ToArray() }).ToArray() }),
+                "CFG owner validation cannot be bypassed: " + owner);
+        }
+        Check(!SemanticStaticFieldAccessValidator.IsValid(defaults, requireOwners: false), "legacy readers reject owner metadata");
+        Check(SemanticStaticFieldAccessValidator.IsValid(legacy, requireOwners: false)
+            && !Encoding.UTF8.GetString(SemanticSerializer.Serialize(legacy)).Contains("static_field_owner_type_id", StringComparison.Ordinal),
+            "default compilation omits owner metadata byte-for-byte");
+        var ordinaryFields = Project("public class Cache { public static int Shared; public const int Constant = 2; public int Value; public int Read() { return Value + Constant; } }");
+        foreach (var operation in ordinaryFields.Methods.SelectMany(method => Operations(method.Root))
+            .Where(operation => operation.Kind == "field_reference"))
+        {
+            var invalidMethod = ordinaryFields.Methods.First() with { Root = operation with { StaticFieldOwnerTypeId = "type:global::Cache" } };
+            Check(!SemanticStaticInitializationValidator.IsValid(ordinaryFields with { Methods = new[] { invalidMethod } }),
+                "instance and constant fields cannot claim static storage");
+        }
         foreach (string key in new[] { "base_schema_version", "base_semantic_version", "types" })
         {
             JsonNode node = JsonNode.Parse(SemanticSerializer.Serialize(baseline))!;
@@ -123,6 +175,10 @@ internal static class SemanticStaticInitializationTests
         var original = SemanticAsyncMemberAssignmentTests.AnalyzeSource(fixtureSource, fixtureId);
         var combined = SemanticAsyncMemberAssignmentTests.AnalyzeSource(fixtureSource, fixtureId, enableStaticInitialization: true);
         Check(SemanticStaticInitializationValidator.IsValid(combined), "original C10 static initialization plan");
+        foreach (string surface in new[] { "methods", "control_flow_graphs", "async_methods", "static_initialization" })
+            RejectOwnerMutation(combined, surface);
+        var throwing = Project("public class Cache { public static int Value; static Cache() { Value = 1; throw new System.InvalidOperationException(); } }");
+        RejectOwnerMutation(throwing, "exception_flows");
         var storage = combined.StaticInitialization!;
         Check(storage.BaseSchemaVersion == 47 && storage.BaseSemanticVersion == "1.56", "C10 member assignment profile preserved");
         var execution = combined with { SchemaVersion = storage.BaseSchemaVersion,
@@ -130,9 +186,50 @@ internal static class SemanticStaticInitializationTests
         Check(SemanticAsyncMemberAssignmentValidator.IsValid(execution) && SemanticAsyncInvocationValidator.IsValid(execution)
             && execution.AsyncMethods.SelectMany(method => method.Segments).Count(segment => segment.AwaitSite?.MemberAssignment is not null) == 9,
             "all nine original member await sites preserve their contracts");
+        JsonNode stripped = JsonNode.Parse(SemanticSerializer.Serialize(execution))!;
+        void StripOwners(JsonNode? node)
+        {
+            if (node is JsonObject obj)
+            {
+                obj.Remove("static_field_owner_type_id");
+                foreach (var property in obj) StripOwners(property.Value);
+            }
+            else if (node is JsonArray array) foreach (var child in array) StripOwners(child);
+        }
+        StripOwners(stripped);
         Check(execution.Source.Sha256 == original.Source.Sha256
-            && SemanticSerializer.Serialize(execution).SequenceEqual(SemanticSerializer.Serialize(original)),
-            "static plan leaves the original C10 execution profile unchanged");
+            && SemanticSerializer.Serialize(SemanticSerializer.Deserialize(Encoding.UTF8.GetBytes(stripped.ToJsonString())))
+                .SequenceEqual(SemanticSerializer.Serialize(original)),
+            "only the versioned static owner annotations extend the original C10 execution profile");
         return count;
+
+        void RejectOwnerMutation(SemanticDocument document, string surface)
+        {
+            JsonNode node = JsonNode.Parse(SemanticSerializer.Serialize(document))!;
+            var access = Objects(node[surface]).First(item => item.ContainsKey("static_field_owner_type_id"));
+            access.Remove("static_field_owner_type_id");
+            Check(!SemanticStaticInitializationValidator.IsValid(SemanticSerializer.Deserialize(Encoding.UTF8.GetBytes(node.ToJsonString()))),
+                "missing owner on " + surface + " must not hide behind other operation copies");
+        }
+    }
+
+    private static IEnumerable<SemanticOperation> Operations(SemanticOperation operation)
+    {
+        yield return operation;
+        foreach (var child in operation.Children)
+            foreach (var nested in Operations(child)) yield return nested;
+    }
+
+    private static IEnumerable<JsonObject> Objects(JsonNode? node)
+    {
+        if (node is JsonObject obj)
+        {
+            yield return obj;
+            foreach (var property in obj)
+                foreach (var nested in Objects(property.Value)) yield return nested;
+        }
+        else if (node is JsonArray array)
+            foreach (var child in array)
+                foreach (var nested in Objects(child)) yield return nested;
     }
 }

@@ -25,7 +25,13 @@ public sealed record SemanticOperation(
     [property: JsonPropertyOrder(14)] string? CaptureId,
     [property: JsonPropertyOrder(15)] SemanticSpan Span,
     [property: JsonPropertyOrder(16)] IReadOnlyList<SemanticOperation> Children,
-    [property: JsonPropertyOrder(17)] SemanticMethodDispatch? Dispatch = null);
+    [property: JsonPropertyOrder(17)] SemanticMethodDispatch? Dispatch = null)
+{
+    // The field symbol identifies the declaration; storage belongs to this
+    // constructed type (Cache<int> and Cache<long> must never share a slot).
+    [JsonPropertyOrder(18), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? StaticFieldOwnerTypeId { get; init; }
+}
 
 public sealed record SemanticMethodDispatch(
     [property: JsonPropertyOrder(0), JsonRequired] string Kind,

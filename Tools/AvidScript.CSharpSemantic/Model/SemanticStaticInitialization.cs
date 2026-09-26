@@ -5,8 +5,8 @@ namespace AvidScript.CSharpSemantic;
 
 public static class SemanticStaticInitialization
 {
-    public const int SchemaVersion = 48;
-    public const string SemanticVersion = "1.57";
+    public const int SchemaVersion = 49;
+    public const string SemanticVersion = "1.58";
 
     public static string InitializerId(string fieldId) => "symbol:static_initializer:" + fieldId;
 }

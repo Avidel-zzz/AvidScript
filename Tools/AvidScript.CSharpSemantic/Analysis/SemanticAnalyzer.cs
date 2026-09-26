@@ -91,7 +91,11 @@ public static class SemanticAnalyzer
                 && SemanticAsyncTaskLocalProjector.HasRoutedThrowSource(context)
                 || SemanticAsyncProjector.HasMemberAssignmentSource(context),
         };
-        SemanticTypeRegistry typeRegistry = new();
+        SemanticTypeRegistry typeRegistry = new()
+        {
+            StaticFieldOwners = enableStaticInitialization && SemanticStaticInitializerProjector.IsRequired(context),
+            Compilation = context.Compilation,
+        };
         IReadOnlyList<SemanticSymbol> symbols = SemanticSymbolProjector.Project(context, typeRegistry);
         SemanticStateContractProjection stateContractProjection = SemanticStateContractProjector.Project(
             context,
@@ -148,7 +152,8 @@ public static class SemanticAnalyzer
         SemanticGenericProjection genericProjection = SemanticGenericSpecializer.Project(
             typeRegistry.Build(), typeRegistry.BuildShapes(), symbols, callableProjection.Callables,
             operationProjection.Methods, controlFlowProjection.Graphs, asyncProjection.Methods,
-            sourceReachability.ReachableCallableIds.ToHashSet(StringComparer.Ordinal));
+            sourceReachability.ReachableCallableIds.ToHashSet(StringComparer.Ordinal),
+            typeRegistry.StaticFieldOwners ? typeRegistry : null);
         symbols = genericProjection.Symbols;
         callableProjection = callableProjection with { Callables = genericProjection.Callables };
         operationProjection = operationProjection with { Methods = genericProjection.Methods };

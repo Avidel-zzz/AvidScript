@@ -76,12 +76,17 @@ internal static class CSharpGuestStaticInitializationContractTests
             Check(SemanticStaticInitializationValidator.IsValid(restored), name + " serialized source contract");
             foreach (var candidate in new[] { restored,
                 restored with { SchemaVersion = restored.StaticInitialization!.BaseSchemaVersion, SemanticVersion = restored.StaticInitialization.BaseSemanticVersion },
-                restored with { StaticInitialization = null }, restored with { SchemaVersion = 49, SemanticVersion = "1.58" } })
+                restored with { StaticInitialization = null }, restored with { SchemaVersion = 48, SemanticVersion = "1.57" } })
             {
                 var result = CSharpGuestLowerer.Lower(candidate, new string('a', 64), enableAsyncLanguageErrors: true);
                 Check(!result.Succeeded && result.Module is null && result.Diagnostics.Any(item => item.Code == "ASCG1025"),
                     name + " unfinished initializer contract reached Guest publication");
             }
+            var downgraded = restored with { SchemaVersion = restored.StaticInitialization!.BaseSchemaVersion,
+                SemanticVersion = restored.StaticInitialization.BaseSemanticVersion, StaticInitialization = null };
+            var rejected = CSharpGuestLowerer.Lower(downgraded, new string('a', 64), enableAsyncLanguageErrors: true);
+            Check(!rejected.Succeeded && rejected.Module is null,
+                name + " stripping the envelope must not collapse closed static storage");
             var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator)
                 .Select(path => MetadataReference.CreateFromFile(path));
             var compilation = CSharpCompilation.Create("StaticInitializationOracle", new[] { CSharpSyntaxTree.ParseText(source) },

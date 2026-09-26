@@ -11,11 +11,16 @@ internal sealed class SemanticTypeRegistry
     private readonly Dictionary<string, SemanticTypeShape> shapes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, SemanticDelegateType> delegateTypes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, SemanticClassType> classTypes = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ITypeSymbol> sourceTypes = new(StringComparer.Ordinal);
+
+    internal bool StaticFieldOwners { get; init; }
+    internal Compilation? Compilation { get; init; }
 
     public string Register(ITypeSymbol type)
     {
         string canonicalName = GetCanonicalName(type);
         string id = "type:" + canonicalName;
+        sourceTypes.TryAdd(id, type);
         if (!types.TryAdd(id, new SemanticType(
             id,
             canonicalName,
@@ -71,6 +76,44 @@ internal sealed class SemanticTypeRegistry
         if (type is INamedTypeSymbol { TypeKind: TypeKind.Class } classType && GetKind(type) == "class")
             classTypes.Add(id, SemanticClassTypeProjector.Project(classType, id, this));
         return id;
+    }
+
+    // Construct through Roslyn, never by replacing fragments of a printed name.
+    // This also registers closed types used only inside a generic method body.
+    internal bool TryClose(string typeId, IReadOnlyDictionary<string, string> arguments, out string closedId)
+    {
+        closedId = typeId;
+        if (!sourceTypes.TryGetValue(typeId, out var source)) return false;
+        ITypeSymbol? Substitute(ITypeSymbol type, int depth)
+        {
+            if (depth > 32) return null;
+            string id = "type:" + GetCanonicalName(type);
+            if (arguments.TryGetValue(id, out var replacement))
+                return sourceTypes.GetValueOrDefault(replacement);
+            if (type is ITypeParameterSymbol) return null;
+            if (type is IArrayTypeSymbol array)
+                return Substitute(array.ElementType, depth + 1) is { } element
+                    ? Compilation?.CreateArrayTypeSymbol(element, array.Rank) : null;
+            if (type is not INamedTypeSymbol named) return type;
+            INamedTypeSymbol definition = named.OriginalDefinition;
+            if (named.ContainingType is { } parent)
+            {
+                if (Substitute(parent, depth + 1) is not INamedTypeSymbol closedParent) return null;
+                definition = closedParent.GetTypeMembers(named.Name, named.Arity).SingleOrDefault()!;
+                if (definition is null) return null;
+            }
+            if (named.Arity == 0) return definition;
+            ITypeSymbol[] closedArguments = new ITypeSymbol[named.TypeArguments.Length];
+            for (int index = 0; index < closedArguments.Length; ++index)
+            {
+                if (Substitute(named.TypeArguments[index], depth + 1) is not { } argument) return null;
+                closedArguments[index] = argument;
+            }
+            return definition.Construct(closedArguments);
+        }
+        if (Substitute(source, 0) is not { } closed) return false;
+        closedId = Register(closed);
+        return true;
     }
 
     public IReadOnlyList<SemanticType> Build()

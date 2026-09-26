@@ -99,12 +99,17 @@ public static class SemanticStaticInitializationValidator
                     || !document.ControlFlowGraphs.Any(item => item.MethodSymbolId == id)
                         && document.ExceptionFlows?.Any(item => item.MethodSymbolId == id) != true) return false;
             }
-            else if (!type.Fields.Any(field => field.Initializer is not null)) return false;
+            else if (type.Fields.Count == 0) return false;
         }
         if (document.ClassTypes.Any(type => type.IsSourceDeclared && type.HasStaticInitialization
             && document.Symbols.Any(symbol => symbol.Kind == "type" && symbol.TypeId == type.TypeId)
             && !owners.Contains(type.TypeId))) return false;
-        return true;
+        // Default-initialized fields also own storage, including each closed
+        // generic type even when Roslyn does not generate a .cctor.
+        if (document.Symbols.Any(field => field.Kind == "field" && field.IsStatic && !field.IsConst
+            && field.ContainingSymbolId is { } id && symbols.TryGetValue(id, out var owner)
+            && owner.Kind == "type" && owner.TypeId is { } typeId && !owners.Contains(typeId))) return false;
+        return SemanticStaticFieldAccessValidator.IsValid(document, requireOwners: true);
     }
 
     private static bool BaseVersion(SemanticStaticInitializationPlan plan) =>

@@ -78,7 +78,11 @@ internal static class SemanticOperationProjector
             SemanticOperation target = Node("field_reference", typeRegistry.Register(field.Type),
                 SemanticSymbolProjector.GetSymbolId(field), field.IsStatic
                     ? System.Array.Empty<SemanticOperation>()
-                    : new[] { Node("instance_reference", typeRegistry.Register(field.ContainingType), null) });
+                    : new[] { Node("instance_reference", typeRegistry.Register(field.ContainingType), null) }) with
+            {
+                StaticFieldOwnerTypeId = typeRegistry.StaticFieldOwners && field.IsStatic
+                    ? typeRegistry.Register(field.ContainingType) : null,
+            };
             return Node("expression_statement", null, null,
                 Node("assignment", target.TypeId, null, target,
                     ProjectOperation(initializer.Value, unit, typeRegistry, diagnostics, captureRegistry)));
@@ -129,7 +133,12 @@ internal static class SemanticOperationProjector
                 .Where(child => child is not ILocalFunctionOperation)
                 .Select(child => ProjectOperation(child, unit, typeRegistry, diagnostics, captureRegistry))
                 .ToArray(),
-            SemanticDispatchProjector.Project(operation));
+            SemanticDispatchProjector.Project(operation))
+        {
+            StaticFieldOwnerTypeId = typeRegistry.StaticFieldOwners
+                && operation is IFieldReferenceOperation { Field: { IsStatic: true, IsConst: false } staticField }
+                    ? typeRegistry.Register(staticField.ContainingType) : null,
+        };
     }
 
     private static (string Kind, bool IsSupported) DescribeOperation(IOperation operation)
