@@ -249,10 +249,24 @@ internal static class CSharpTaskAwaitLowerer
         if (faultedState is null || faulted is null) return false;
         instructions.Add(new("binary", faulted.Id,
             new[] { state.Id, faultedState.Id }, null, "equals", null));
+        GuestRegister hasLanguageError = faulted;
+        if (CSharpTaskResultAbi.SupportsCancellation(context.Document))
+        {
+            GuestRegister? cancelledState = CSharpTaskResultAbi.Constant(context,
+                CSharpTaskResultAbi.TokenTypeId, 3, block, instructions);
+            GuestRegister? cancelled = context.CreateTemporary(CSharpTaskResultAbi.IntTypeId, block);
+            GuestRegister? terminalError = context.CreateTemporary(CSharpTaskResultAbi.IntTypeId, block);
+            if (cancelledState is null || cancelled is null || terminalError is null) return false;
+            instructions.Add(new("binary", cancelled.Id,
+                new[] { state.Id, cancelledState.Id }, null, "equals", null));
+            instructions.Add(new("binary", terminalError.Id,
+                new[] { faulted.Id, cancelled.Id }, null, "bitwise_or", null));
+            hasLanguageError = terminalError;
+        }
         string languageErrorBlock = failedBlockId + ":language_error";
         string otherFailureBlock = failedBlockId + ":other_failure";
         blocks.Add(new(failedBlockId, instructions,
-            new("branch_if", faulted.Id, languageErrorBlock, otherFailureBlock, null)));
+            new("branch_if", hasLanguageError.Id, languageErrorBlock, otherFailureBlock, null)));
 
         List<GuestInstruction> report = new();
         CSharpTaskLanguageError? error = CSharpTaskResultAbi.ReadLanguageError(

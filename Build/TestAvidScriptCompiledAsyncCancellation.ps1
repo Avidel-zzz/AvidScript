@@ -163,14 +163,14 @@ try {
     $success = [regex]::Matches($log, 'Test Completed\. Result=\{Success\} Name=\{CompiledAsyncCancellation\} Path=\{AvidScript\.Runtime\.Continuation\.CompiledAsyncCancellation\}').Count
     $failed = [regex]::Matches($log, 'Test Completed\. Result=\{Fail\}').Count
     $complete = [regex]::Matches($log, '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*\*').Count
-    $cases = [regex]::Matches($log, 'compiled cancellation backend=[01] cancel=[01] case=[0-5] result=\d+ trace=\d+ resumes=\d+ cancelled=\d+').Value | Sort-Object -Unique
-    if ($found -ne 1 -or $success -ne 1 -or $failed -ne 0 -or $complete -ne 1 -or @($cases).Count -ne 24 -or
-        -not $log.Contains('CompiledAsyncCancellation: 24/24 passed')) {
+    $cases = [regex]::Matches($log, 'compiled cancellation backend=[01] cancel=[01] case=[0-7] result=\d+ trace=\d+ resumes=\d+ cancelled=\d+').Value | Sort-Object -Unique
+    if ($found -ne 1 -or $success -ne 1 -or $failed -ne 0 -or $complete -ne 1 -or @($cases).Count -ne 32 -or
+        -not $log.Contains('CompiledAsyncCancellation: 32/32 passed')) {
         throw "Compiled cancellation evidence incomplete: found=$found success=$success failed=$failed complete=$complete cases=$(@($cases).Count) log=$logPath"
     }
     [ordered]@{
-        passed = 24
-        total = 24
+        passed = 32
+        total = 32
         reference_passed = 12
         import_contracts_passed = 42
         managed_import_contracts_passed = 54
@@ -182,7 +182,7 @@ try {
         manifest = Join-Path $outputRoot 'cancellation.avidscript.json'
         log = $logPath
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $runRoot 'results.json') -Encoding utf8NoBOM
-    Write-Output "Formal C# cancellation: 24/24 passed; .NET=12/12 imports=42/42 build=4/4; wasm_sha256=$wasmHash; evidence=$runRoot; log=$logPath"
+    Write-Output "Formal C# cancellation: 32/32 passed; .NET=12/12 imports=42/42 build=4/4; wasm_sha256=$wasmHash; evidence=$runRoot; log=$logPath"
 }
 finally {
     $env:DOTNET_CLI_HOME = $priorCliHome

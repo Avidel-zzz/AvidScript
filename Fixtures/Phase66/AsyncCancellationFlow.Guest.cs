@@ -15,8 +15,26 @@ public static class CancellationGuestEntry
             Result = await CancellationScript.UnhandledAsync();
         else if (TestCase == 4)
             Result = await CancellationScript.NestedAsync();
-        else
+        else if (TestCase == 5)
             Result = await CancellationScript.CatchAllAsync();
+        else if (TestCase == 6)
+        {
+            // Hold a Task local until both child callbacks have completed. The
+            // final await must take the ready path without another callback.
+            System.Threading.Tasks.Task<int> terminal = CancellationScript.UnhandledAsync();
+            await AvidScript.AvidContinuations.NextTickAsync();
+            await AvidScript.AvidContinuations.NextTickAsync();
+            await AvidScript.AvidContinuations.NextTickAsync();
+            Result = await terminal;
+            return;
+        }
+        else
+        {
+            // A real VM trap after a successful await must not acquire the
+            // language diagnostic of an earlier, already handled cancellation.
+            int value = await CancellationScript.OuterAsync(0);
+            Result = value / (TestCase - 7);
+        }
     }
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
