@@ -197,7 +197,8 @@ enum class EAvidScriptHostBindingId : uint16
 	ContinuationDelayCancelResumeV1,
 	TaskCancelLanguageErrorV1,
 	TaskTerminalErrorMetaV1,
-	TaskTerminalErrorRootV1
+	TaskTerminalErrorRootV1,
+	ContinuationCancelStatusV1
 };
 
 struct FAvidScriptVmStackFrame

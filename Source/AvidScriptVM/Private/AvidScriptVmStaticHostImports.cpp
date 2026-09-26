@@ -1,4 +1,5 @@
 #include "AvidScriptVmStaticHostImports.h"
+#include "AvidScriptContinuationCancellationAbi.h"
 #include "AvidScriptManagedHeapAbi.h"
 #include "AvidScriptContinuationStateAbi.h"
 #include "AvidScriptEventStateAbi.h"
@@ -86,11 +87,12 @@ const FAvidScriptVmStaticHostImport GStaticHostImports[] = {
 	{ EAvidScriptHostBindingId::ContinuationDelayCancelResumeV1, "avid_continuation_delay_cancel_resume_v1", "(fi)I", false },
 	{ EAvidScriptHostBindingId::TaskCancelLanguageErrorV1, AvidScript::TaskResult::Abi::CancelLanguageErrorImport, "(IiiI)i", false, true },
 	{ EAvidScriptHostBindingId::TaskTerminalErrorMetaV1, AvidScript::TaskResult::Abi::TerminalErrorMetaImport, "(I)I", false, true },
-	{ EAvidScriptHostBindingId::TaskTerminalErrorRootV1, AvidScript::TaskResult::Abi::TerminalErrorRootImport, "(I)I", false, true }
+	{ EAvidScriptHostBindingId::TaskTerminalErrorRootV1, AvidScript::TaskResult::Abi::TerminalErrorRootImport, "(I)I", false, true },
+	{ EAvidScriptHostBindingId::ContinuationCancelStatusV1, AvidScript::ContinuationCancellation::Abi::StatusImport, "(I)i", false }
 };
 
 static_assert(
-	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::TaskTerminalErrorRootV1),
+	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::ContinuationCancelStatusV1),
 	"Static host catalog must remain dense and ordered by binding id.");
 
 bool FailStaticCall(FString& OutFailureDetails, const TCHAR* Details)
@@ -408,6 +410,7 @@ bool InvokeAvidScriptVmStaticHostImport(
 	case EAvidScriptHostBindingId::ContinuationCancel:
 	case EAvidScriptHostBindingId::ContinuationCancelSourceCancel:
 	case EAvidScriptHostBindingId::ContinuationCancelSourceRelease:
+	case EAvidScriptHostBindingId::ContinuationCancelStatusV1:
 	case EAvidScriptHostBindingId::DebugProbe:
 		Call.Int64Args[0] = Arguments[0].I64;
 		break;

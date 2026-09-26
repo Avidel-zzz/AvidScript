@@ -131,6 +131,8 @@ public partial class Projectile : AvidActor
 | 在 `async` 方法中捕获同步异常 | [包括静态初始化异常](Docs/Phase66/P66.C10_Static_Object_Lifetime_Contract.md#windows-专项验证) |
 | `target.Value = await ReadAsync();` | [普通 C# 对象的字段、属性](Docs/Phase66/P66.C10_Await_Member_Assignment_Contract.md#guest-接入与补充执行验证)；接口属性、生成的 UE 类型尚不支持 |
 
+预览编译器仍有[预取消时序问题](Docs/Phase66/P66.C10_PreCancelled_Await_Contract.md)：token 已取消时，`finally` 可能延后一轮回调执行。
+
 </details>
 
 <a id="development"></a>

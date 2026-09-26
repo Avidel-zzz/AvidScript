@@ -185,6 +185,19 @@ int64 FAvidScriptContinuationHostEndpoint::CreateCancellationSource()
 		: 0;
 }
 
+EAvidScriptCancellationSourceStatus FAvidScriptContinuationHostEndpoint::GetCancellationSourceStatus(
+	const int64 SourceToken) const
+{
+	if (!IsInGameThread() || !bValid)
+	{
+		return EAvidScriptCancellationSourceStatus::Invalid;
+	}
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = Owner.Pin();
+	return PinnedOwner
+		? PinnedOwner->GetCancellationSourceStatus(Lane, ActivationSerial, SourceToken)
+		: EAvidScriptCancellationSourceStatus::Invalid;
+}
+
 bool FAvidScriptContinuationHostEndpoint::CancelCancellationSource(
 	const int64 SourceToken)
 {
@@ -1357,6 +1370,34 @@ int64 FAvidScriptSessionContinuations::CreateCancellationSource(
 	Entry.Lane = Lane;
 	Entry.ActivationSerial = ActivationSerial;
 	return AllocateCancellationSource(MoveTemp(Entry));
+}
+
+EAvidScriptCancellationSourceStatus FAvidScriptSessionContinuations::GetCancellationSourceStatus(
+	const EAvidScriptContinuationLane Lane,
+	const uint64 ActivationSerial,
+	const int64 SourceToken) const
+{
+	if (!IsInGameThread() || bTearingDown
+		|| !MatchesCurrentEndpoint(Lane, ActivationSerial) || !IsLaneContextLive(Lane))
+	{
+		return EAvidScriptCancellationSourceStatus::Invalid;
+	}
+	uint32 SlotIndex = 0;
+	uint32 Generation = 0;
+	if (!UnpackCancellationSourceToken(SourceToken, SlotIndex, Generation)
+		|| !CancellationSourceSlots.IsValidIndex(static_cast<int32>(SlotIndex)))
+	{
+		return EAvidScriptCancellationSourceStatus::Invalid;
+	}
+	const FCancellationSourceSlot& Slot = CancellationSourceSlots[SlotIndex];
+	if (Slot.Generation != Generation || !Slot.Entry.IsSet()
+		|| Slot.Entry->Lane != Lane || Slot.Entry->ActivationSerial != ActivationSerial)
+	{
+		return EAvidScriptCancellationSourceStatus::Invalid;
+	}
+	return Slot.Entry->State == ECancellationSourceState::Cancelled
+		? EAvidScriptCancellationSourceStatus::Cancelled
+		: EAvidScriptCancellationSourceStatus::Open;
 }
 
 bool FAvidScriptSessionContinuations::CancelCancellationSource(

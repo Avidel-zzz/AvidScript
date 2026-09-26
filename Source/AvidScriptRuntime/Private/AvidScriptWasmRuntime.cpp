@@ -4944,6 +4944,19 @@ int64 FAvidScriptWasmRuntimeInstance::HandleContinuationCancelSourceCreateImport
 	return Token;
 }
 
+int32 FAvidScriptWasmRuntimeInstance::HandleContinuationCancelStatusV1Import(
+	const int64 SourceToken)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	GetInstanceState().LastHostImportInput = 0;
+	GetInstanceState().LastHostImportResult = static_cast<int32>(HostContext.Continuations != nullptr
+		? HostContext.Continuations->GetCancellationSourceStatus(SourceToken)
+		: EAvidScriptCancellationSourceStatus::Invalid);
+	++GetInstanceState().HostImportCallCount;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return GetInstanceState().LastHostImportResult;
+}
+
 int32 FAvidScriptWasmRuntimeInstance::HandleContinuationCancelSourceCancelImport(
 	const int64 SourceToken)
 {
@@ -8534,6 +8547,10 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 		const int32 Value = HandleContinuationCancelSourceCancelImport(
 			Call.Int64Args[0]);
 		return Finish(Value, true);
+	}
+	case EAvidScriptHostBindingId::ContinuationCancelStatusV1:
+	{
+		return Finish(HandleContinuationCancelStatusV1Import(Call.Int64Args[0]), true);
 	}
 	case EAvidScriptHostBindingId::ContinuationCancelSourceRelease:
 	{

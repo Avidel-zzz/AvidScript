@@ -40,6 +40,7 @@ public:
 	int64 ScheduleObjectLoad(FString ObjectPath, int32 CallbackId) override;
 	bool Cancel(int64 Token) override;
 	int64 CreateCancellationSource() override;
+	EAvidScriptCancellationSourceStatus GetCancellationSourceStatus(int64 SourceToken) const override;
 	bool CancelCancellationSource(int64 SourceToken) override;
 	bool ReleaseCancellationSource(int64 SourceToken) override;
 	bool BindCancellationSource(
@@ -222,6 +223,10 @@ public:
 	int64 CreateCancellationSource(
 		EAvidScriptContinuationLane Lane,
 		uint64 ActivationSerial);
+	EAvidScriptCancellationSourceStatus GetCancellationSourceStatus(
+		EAvidScriptContinuationLane Lane,
+		uint64 ActivationSerial,
+		int64 SourceToken) const;
 	bool CancelCancellationSource(
 		EAvidScriptContinuationLane Lane,
 		uint64 ActivationSerial,

@@ -583,6 +583,7 @@ public:
 		int32 CallbackId);
 	int32 HandleContinuationCancelImport(int64 ContinuationToken);
 	int64 HandleContinuationCancelSourceCreateImport();
+	int32 HandleContinuationCancelStatusV1Import(int64 SourceToken);
 	int32 HandleContinuationCancelSourceCancelImport(int64 SourceToken);
 	int32 HandleContinuationCancelSourceReleaseImport(int64 SourceToken);
 	int32 HandleContinuationBindCancelImport(

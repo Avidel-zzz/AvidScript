@@ -12,28 +12,26 @@ $projectRoot = Split-Path -Parent (Split-Path -Parent $pluginRoot)
 $projectPath = Join-Path $projectRoot 'AvidTPSTemplate.uproject'
 $runId = [DateTimeOffset]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')
 $logPath = Join-Path $projectRoot "Saved/Logs/AvidScript_TaskCancellation_$runId.log"
-$testFilter = @(
-    'AvidScript.Runtime.Continuation.Task'
-    'AvidScript.Runtime.LanguageErrorCatalog.LoadAndReject'
-    'AvidScript.Runtime.LanguageErrorCatalog.TaskFaultVmImport'
-    'AvidScript.Architecture.VM.EventSubscriptionImportContract'
-) -join '+'
 $expected = @(
     foreach ($name in @(
         'TaskCancellationAbi', 'TaskCancellationAdmission', 'TaskCancellationImportVersion',
         'TaskLanguageErrorAdmission', 'TaskLanguageError', 'TaskResults', 'TaskResultAbi',
-        'TaskEndpoint', 'TaskDispatch', 'TaskProducerBinding', 'TaskContinuationOwnership'
+        'TaskEndpoint', 'TaskDispatch', 'TaskProducerBinding', 'TaskContinuationOwnership',
+        'CancellationStatus', 'CancellationSource', 'CancelResume', 'HostBoundary'
     )) {
         "AvidScript.Runtime.Continuation.$name"
     }
     'AvidScript.Runtime.LanguageErrorCatalog.LoadAndReject'
     'AvidScript.Runtime.LanguageErrorCatalog.TaskFaultVmImport'
     'AvidScript.Architecture.VM.EventSubscriptionImportContract'
+    'AvidScript.Architecture.VM.CancellationStatus'
 )
+# A broad Task prefix also selects lifecycle suites that require separate manifests.
+$testFilter = $expected -join '+'
 if (-not $SkipBuild) {
     $build = Join-Path $EngineRoot 'Engine/Build/BatchFiles/Build.bat'
     & $build AvidTPSTemplateEditor Win64 Development "-Project=$projectPath" `
-        -WaitMutex -NoHotReloadFromIDE -NoUBTMakefiles
+        -WaitMutex -NoHotReloadFromIDE -NoUBTMakefiles -MaxParallelActions=1
     if ($LASTEXITCODE -ne 0) { throw 'No-clean Win64 Editor build failed.' }
 }
 $editor = Join-Path $EngineRoot 'Engine/Binaries/Win64/UnrealEditor-Cmd.exe'
@@ -56,4 +54,4 @@ $complete = [regex]::Matches($log, '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*
 if ($found -ne 1 -or $success -ne $expected.Count -or $failed -ne 0 -or $complete -ne 1) {
     throw "Task cancellation evidence incomplete: found=$found success=$success failed=$failed complete=$complete log=$logPath"
 }
-Write-Output "Native Task cancellation: $success/$($expected.Count) passed; Wasmtime/WAMR ABI, admission, ownership and compatibility; C# cancellation lowering still pending; log=$logPath"
+Write-Output "Native Task cancellation: $success/$($expected.Count) passed; Wasmtime/WAMR ABI, status query, ownership and compatibility; compiler pre-cancel fast path is tracked separately in P66.C10; log=$logPath"

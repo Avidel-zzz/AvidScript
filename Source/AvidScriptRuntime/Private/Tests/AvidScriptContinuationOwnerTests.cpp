@@ -8,6 +8,7 @@
 #include "Ownership/AvidScriptSessionObjectOwnership.h"
 
 #include "Containers/StringConv.h"
+#include "Async/Async.h"
 #include "CoreGlobals.h"
 #include "Engine/Engine.h"
 #include "Engine/LatentActionManager.h"
@@ -758,6 +759,85 @@ bool FAvidScriptContinuationCancellationSourceTest::RunTest(
 	TestEqual(TEXT("Teardown leaves no cancellation sources"), Owner->GetCancellationSourceCountForTesting(), 0);
 	TestEqual(TEXT("Teardown leaves no cancellation bindings"), Owner->GetCancellationBindingCountForTesting(), 0);
 	DestroyContinuationWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptContinuationCancellationStatusTest,
+	"AvidScript.Runtime.Continuation.CancellationStatus",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptContinuationCancellationStatusTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = nullptr;
+	if (!TestTrue(TEXT("Cancellation status world is created"), CreateContinuationWorld(World))) return false;
+	ON_SCOPE_EXIT { DestroyContinuationWorld(World); };
+	const TSharedPtr<FAvidScriptSessionContinuations> Owner = MakeShared<FAvidScriptSessionContinuations>();
+	FAvidScriptContinuationHostEndpoint& Host = Owner->ResetActive(World);
+	FAvidScriptContinuationHostEndpoint OldEndpoint(Owner, EAvidScriptContinuationLane::Active, Host.GetActivationSerial());
+	const int64 Source = Host.CreateCancellationSource();
+	using Status = EAvidScriptCancellationSourceStatus;
+	TestEqual(TEXT("Open source is queryable"), Host.GetCancellationSourceStatus(Source), Status::Open);
+	TestEqual(TEXT("Zero source is invalid, not open"), Host.GetCancellationSourceStatus(0), Status::Invalid);
+	TestEqual(TEXT("Forged source is invalid"), Host.GetCancellationSourceStatus(Source ^ (1LL << 32)), Status::Invalid);
+	const int64 Timer = Host.ScheduleDelayWithCancelResume(10.0f, 49);
+	TestEqual(TEXT("Continuation token is not a cancellation source"), Host.GetCancellationSourceStatus(Timer), Status::Invalid);
+	TestTrue(TEXT("Timer binds to source"), Host.BindCancellationSource(Source, Timer));
+	for (int32 Index = 0; Index != 4; ++Index)
+	{
+		TestEqual(TEXT("Repeated queries leave source open"), Host.GetCancellationSourceStatus(Source), Status::Open);
+	}
+	TestEqual(TEXT("Queries preserve pending timer"), Owner->GetActiveCount(), 1);
+	TestEqual(TEXT("Queries preserve reverse binding"), Owner->GetCancellationBindingCountForTesting(), 1);
+	TestEqual(TEXT("Off-thread query fails before accessing owner state"),
+		Async(EAsyncExecution::ThreadPool, [&Host, Source] { return Host.GetCancellationSourceStatus(Source); }).Get(), Status::Invalid);
+
+	FAvidScriptWasmRuntimeInstance Runtime;
+	FAvidScriptWasmHostContext Context;
+	Context.Continuations = &Host;
+	Runtime.SetHostContext(Context);
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::ContinuationCancelStatusV1;
+	Call.Int64Args[0] = Source;
+	FAvidScriptHostCallResult Result;
+	TestTrue(TEXT("Runtime routes the status query"), Runtime.DispatchHostCall(Call, Result));
+	TestEqual(TEXT("Runtime returns open status"), Result.ReturnValue, 1);
+	TestTrue(TEXT("Source cancellation succeeds"), Host.CancelCancellationSource(Source));
+	TestEqual(TEXT("Cancelled source is distinguishable from invalid"), Host.GetCancellationSourceStatus(Source), Status::Cancelled);
+	TestTrue(TEXT("Runtime routes cancelled status"), Runtime.DispatchHostCall(Call, Result));
+	TestEqual(TEXT("Runtime preserves cancelled status"), Result.ReturnValue, 2);
+	TestEqual(TEXT("Queries do not drain cancellation completion"), Owner->GetReadyCountForTesting(EAvidScriptContinuationLane::Active), 1);
+	TestTrue(TEXT("Source releases"), Host.ReleaseCancellationSource(Source));
+	TestEqual(TEXT("Released generation is invalid"), Host.GetCancellationSourceStatus(Source), Status::Invalid);
+	const int64 Replacement = Host.CreateCancellationSource();
+	TestNotEqual(TEXT("Reused slot receives a new generation"), Replacement, Source);
+	TestEqual(TEXT("Slot reuse does not revive old source"), Host.GetCancellationSourceStatus(Source), Status::Invalid);
+	TestEqual(TEXT("Replacement remains open"), Host.GetCancellationSourceStatus(Replacement), Status::Open);
+
+	FAvidScriptContinuationHostEndpoint& Prepared = Owner->BeginPrepared(World);
+	const int64 PreparedSource = Prepared.CreateCancellationSource();
+	TestEqual(TEXT("Active endpoint cannot read prepared source"), Host.GetCancellationSourceStatus(PreparedSource), Status::Invalid);
+	TestEqual(TEXT("Prepared endpoint cannot read active source"), Prepared.GetCancellationSourceStatus(Replacement), Status::Invalid);
+	TestEqual(TEXT("Prepared endpoint reads its own source"), Prepared.GetCancellationSourceStatus(PreparedSource), Status::Open);
+	Owner->DiscardPrepared();
+	TestEqual(TEXT("Discarded source stays invalid"), Host.GetCancellationSourceStatus(PreparedSource), Status::Invalid);
+	World->bIsTearingDown = true;
+	TestEqual(TEXT("World teardown rejects a still-allocated source"), Host.GetCancellationSourceStatus(Replacement), Status::Invalid);
+	World->bIsTearingDown = false;
+	TestEqual(TEXT("Query did not mutate source during teardown check"), Host.GetCancellationSourceStatus(Replacement), Status::Open);
+
+	FAvidScriptContinuationHostEndpoint& NewHost = Owner->ResetActive(World);
+	const int64 NewSource = NewHost.CreateCancellationSource();
+	TestEqual(TEXT("Retired activation cannot query a new source"), OldEndpoint.GetCancellationSourceStatus(NewSource), Status::Invalid);
+	TestEqual(TEXT("Old source cannot enter new activation"), NewHost.GetCancellationSourceStatus(Replacement), Status::Invalid);
+	FAvidScriptContinuationHostEndpoint NewEndpoint(Owner, EAvidScriptContinuationLane::Active, NewHost.GetActivationSerial());
+	Owner->Teardown();
+	TestEqual(TEXT("Session teardown rejects status queries"), NewEndpoint.GetCancellationSourceStatus(NewSource), Status::Invalid);
+	TestEqual(TEXT("Teardown reclaims all sources"), Owner->GetCancellationSourceCountForTesting(), 0);
+	TestEqual(TEXT("Teardown reclaims all bindings"), Owner->GetCancellationBindingCountForTesting(), 0);
+	TestEqual(TEXT("Teardown reclaims all continuations"), Owner->GetActiveCount(), 0);
+	Runtime.SetHostContext({});
+	TestEqual(TEXT("Absent host fails closed"), Runtime.HandleContinuationCancelStatusV1Import(NewSource), 0);
 	return true;
 }
 

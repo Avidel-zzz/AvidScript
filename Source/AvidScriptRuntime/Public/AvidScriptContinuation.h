@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AvidScriptBindingLatent.h"
+#include "AvidScriptContinuationCancellationAbi.h"
 #include "AvidScriptManagedStateLease.h"
 #include "CoreMinimal.h"
 
@@ -44,6 +45,10 @@ public:
 	virtual int64 ScheduleObjectLoad(FString ObjectPath, int32 CallbackId) = 0;
 	virtual bool Cancel(int64 Token) = 0;
 	virtual int64 CreateCancellationSource() = 0;
+	virtual EAvidScriptCancellationSourceStatus GetCancellationSourceStatus(int64) const
+	{
+		return EAvidScriptCancellationSourceStatus::Invalid;
+	}
 	virtual bool CancelCancellationSource(int64 SourceToken) = 0;
 	virtual bool ReleaseCancellationSource(int64 SourceToken) = 0;
 	virtual bool BindCancellationSource(
