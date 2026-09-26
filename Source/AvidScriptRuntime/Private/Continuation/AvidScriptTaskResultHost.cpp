@@ -19,6 +19,14 @@ bool FAvidScriptWasmRuntimeInstance::AdmitTaskLanguageError(
 	const int64 TaskToken, const int32 TypeToken, const int32 SourceToken,
 	const uint64 ObjectToken, FAvidScriptHostCallResult& OutResult)
 {
+	return AdmitTaskTerminalError(TaskToken, TypeToken, SourceToken,
+		ObjectToken, false, OutResult);
+}
+
+bool FAvidScriptWasmRuntimeInstance::AdmitTaskTerminalError(
+	const int64 TaskToken, const int32 TypeToken, const int32 SourceToken,
+	const uint64 ObjectToken, const bool bCancellation, FAvidScriptHostCallResult& OutResult)
+{
 	OutResult = {};
 	auto Fail = [&OutResult](const TCHAR* Category, const TCHAR* Details)
 	{
@@ -43,6 +51,11 @@ bool FAvidScriptWasmRuntimeInstance::AdmitTaskLanguageError(
 		return Fail(TEXT("task_language_error_catalog"),
 			TEXT("Task language error tokens must belong to the loaded module catalog."));
 	}
+	if (bCancellation && !LanguageErrorCatalog->IsCancellationType(TypeToken))
+	{
+		return Fail(TEXT("task_language_error_type"),
+			TEXT("Task cancellation requires a cataloged OperationCanceledException or TaskCanceledException."));
+	}
 	if (!ManagedHeap->IsObjectRootedInCurrentFrame(ObjectToken, ManagedHeapFrameFloor))
 	{
 		return Fail(TEXT("task_language_error_root"),
@@ -58,8 +71,11 @@ bool FAvidScriptWasmRuntimeInstance::AdmitTaskLanguageError(
 	TSharedPtr<IAvidScriptTaskLanguageErrorLease> Lease =
 		MakeShared<FAvidScriptTaskLanguageErrorHeapLease>(MoveTemp(Roots));
 	TArray<int64> Waiters;
-	if (!HostContext.Tasks->FaultTaskResultLanguageError(TaskToken,
-		{TypeToken, SourceToken, ObjectToken}, MoveTemp(Lease), Waiters))
+	const FAvidScriptTaskLanguageError Error{TypeToken, SourceToken, ObjectToken};
+	const bool bCompleted = bCancellation
+		? HostContext.Tasks->CancelTaskResultLanguageError(TaskToken, Error, MoveTemp(Lease), Waiters)
+		: HostContext.Tasks->FaultTaskResultLanguageError(TaskToken, Error, MoveTemp(Lease), Waiters);
+	if (!bCompleted)
 	{
 		return Fail(TEXT("task_result_complete"),
 			TEXT("Session rejected Task<int> language-error completion."));
@@ -77,16 +93,30 @@ bool FAvidScriptWasmRuntimeInstance::DispatchTaskFaultLanguageErrorCall(
 	if (!LanguageErrorCatalog || !LanguageErrorCatalog->SupportsTaskLanguageErrorFault())
 	{
 		OutResult.ErrorCategory = TEXT("task_language_error_version");
-		OutResult.Details = TEXT("Task language-error fault import requires catalog-bearing Guest IR 20/1.19, 21/1.20, 22/1.21, or 23/1.22.");
+		OutResult.Details = TEXT("Task language-error fault import requires catalog-bearing Guest IR 20 through 24.");
 		return false;
 	}
 	return AdmitTaskLanguageError(Call.Int64Args[0], Call.IntArgs[0], Call.IntArgs[1],
 		static_cast<uint64>(Call.Int64Args[1]), OutResult);
 }
 
+bool FAvidScriptWasmRuntimeInstance::DispatchTaskCancelLanguageErrorCall(
+	const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult)
+{
+	OutResult = {};
+	if (!LanguageErrorCatalog || !LanguageErrorCatalog->SupportsTaskCancellationError())
+	{
+		OutResult.ErrorCategory = TEXT("task_language_error_version");
+		OutResult.Details = TEXT("Task cancellation-error import requires catalog-bearing Guest IR 24/1.23.");
+		return false;
+	}
+	return AdmitTaskTerminalError(Call.Int64Args[0], Call.IntArgs[0], Call.IntArgs[1],
+		static_cast<uint64>(Call.Int64Args[1]), true, OutResult);
+}
+
 bool FAvidScriptWasmRuntimeInstance::FindTaskLanguageError(
 	const int64 TaskToken, FAvidScriptTaskLanguageError& OutError,
-	FAvidScriptHostCallResult& OutResult)
+	FAvidScriptHostCallResult& OutResult, const bool bIncludeCancellation)
 {
 	OutError = {};
 	OutResult = {};
@@ -96,7 +126,9 @@ bool FAvidScriptWasmRuntimeInstance::FindTaskLanguageError(
 		OutResult.Details = Details;
 		return false;
 	};
-	if (!LanguageErrorCatalog || !LanguageErrorCatalog->SupportsTaskLanguageErrorFault())
+	if (!LanguageErrorCatalog || (bIncludeCancellation
+		? !LanguageErrorCatalog->SupportsTaskCancellationError()
+		: !LanguageErrorCatalog->SupportsTaskLanguageErrorFault()))
 	{
 		return Fail(TEXT("task_language_error_version"),
 			TEXT("Task language-error read requires a catalog-bearing combined module."));
@@ -115,7 +147,8 @@ bool FAvidScriptWasmRuntimeInstance::FindTaskLanguageError(
 	FAvidScriptTaskResultSnapshot Snapshot;
 	if (!HostContext.Tasks->ReadTaskResult(TaskToken, Snapshot)
 		|| Snapshot.TypeId != TEXT("type:int32")
-		|| Snapshot.State != EAvidScriptTaskResultState::Faulted
+		|| (Snapshot.State != EAvidScriptTaskResultState::Faulted
+			&& !(bIncludeCancellation && Snapshot.State == EAvidScriptTaskResultState::Cancelled))
 		|| !Snapshot.LanguageError.IsSet())
 	{
 		return Fail(TEXT("task_language_error_read"),
@@ -128,6 +161,12 @@ bool FAvidScriptWasmRuntimeInstance::FindTaskLanguageError(
 		return Fail(TEXT("task_language_error_catalog"),
 			TEXT("Task language-error payload is absent from the loaded module catalog."));
 	}
+	if (Snapshot.State == EAvidScriptTaskResultState::Cancelled
+		&& !LanguageErrorCatalog->IsCancellationType(Error.TypeToken))
+	{
+		return Fail(TEXT("task_language_error_type"),
+			TEXT("Task cancellation payload must name a supported cancellation exception."));
+	}
 	OutError = Error;
 	OutResult.ReturnValue = 1;
 	OutResult.ReturnValueI64 = 1;
@@ -139,7 +178,14 @@ bool FAvidScriptWasmRuntimeInstance::ReadTaskLanguageError(
 	const int64 TaskToken, FAvidScriptTaskLanguageError& OutError,
 	FAvidScriptHostCallResult& OutResult)
 {
-	if (!FindTaskLanguageError(TaskToken, OutError, OutResult)) return false;
+	return ReadTaskTerminalError(TaskToken, OutError, OutResult, false);
+}
+
+bool FAvidScriptWasmRuntimeInstance::ReadTaskTerminalError(
+	const int64 TaskToken, FAvidScriptTaskLanguageError& OutError,
+	FAvidScriptHostCallResult& OutResult, const bool bIncludeCancellation)
+{
+	if (!FindTaskLanguageError(TaskToken, OutError, OutResult, bIncludeCancellation)) return false;
 	if (ManagedHeap->RootObjectInCurrentFrame(OutError.ObjectToken, ManagedHeapFrameFloor)
 		!= AvidScript::Managed::EHeapError::Ok)
 	{
@@ -156,7 +202,8 @@ bool FAvidScriptWasmRuntimeInstance::DispatchTaskLanguageErrorMetaCall(
 	const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult)
 {
 	FAvidScriptTaskLanguageError Error;
-	if (!FindTaskLanguageError(Call.Int64Args[0], Error, OutResult)) return false;
+	const bool bIncludeCancellation = Call.BindingId == EAvidScriptHostBindingId::TaskTerminalErrorMetaV1;
+	if (!FindTaskLanguageError(Call.Int64Args[0], Error, OutResult, bIncludeCancellation)) return false;
 	OutResult.ReturnValueI64 = static_cast<int64>(
 		(uint64(static_cast<uint32>(Error.TypeToken)) << 32)
 		| static_cast<uint32>(Error.SourceToken));
@@ -168,7 +215,8 @@ bool FAvidScriptWasmRuntimeInstance::DispatchTaskLanguageErrorRootCall(
 	const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult)
 {
 	FAvidScriptTaskLanguageError Error;
-	if (!ReadTaskLanguageError(Call.Int64Args[0], Error, OutResult)) return false;
+	const bool bIncludeCancellation = Call.BindingId == EAvidScriptHostBindingId::TaskTerminalErrorRootV1;
+	if (!ReadTaskTerminalError(Call.Int64Args[0], Error, OutResult, bIncludeCancellation)) return false;
 	OutResult.ReturnValueI64 = static_cast<int64>(Error.ObjectToken);
 	OutResult.ReturnValue = static_cast<int32>(OutResult.ReturnValueI64);
 	return true;
@@ -205,6 +253,11 @@ bool FAvidScriptWasmRuntimeInstance::DispatchTaskPropagateFailureCall(
 	{
 		return Fail(TEXT("task_result_read"),
 			TEXT("Source Task<int> has no readable terminal result."));
+	}
+	if (Source.State == EAvidScriptTaskResultState::Cancelled && Source.LanguageError.IsSet())
+	{
+		FAvidScriptTaskLanguageError Error;
+		if (!FindTaskLanguageError(SourceToken, Error, OutResult, true)) return false;
 	}
 	TArray<int64> Waiters;
 	const bool bPropagated = HostContext.Tasks->PropagateTaskFailure(

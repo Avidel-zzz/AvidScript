@@ -81,6 +81,10 @@ public:
 	bool PropagateTaskFailure(int64 SourceToken, int64 TargetToken,
 		TArray<int64>& OutWaiters) override;
 	bool CancelTaskResult(int64 Token, TArray<int64>& OutWaiters) override;
+	bool CancelTaskResultLanguageError(int64 Token,
+		FAvidScriptTaskLanguageError Error,
+		TSharedPtr<IAvidScriptTaskLanguageErrorLease> RootLease,
+		TArray<int64>& OutWaiters) override;
 	bool ReadTaskResult(int64 Token, FAvidScriptTaskResultSnapshot& OutSnapshot) const override;
 	bool BeginLatent(
 		int32 CallbackId,

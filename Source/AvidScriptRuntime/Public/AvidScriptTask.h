@@ -18,7 +18,7 @@ enum class EAvidScriptTaskWaitRegistration : uint8
 };
 
 // Catalog tokens and managed object identity belong to the task's code
-// activation. Fault admission validates the catalog and the producer's frame
+// activation. Error admission validates the catalog and the producer's frame
 // root; a reader must acquire its own frame root before releasing the task.
 struct FAvidScriptTaskLanguageError
 {
@@ -74,6 +74,10 @@ public:
 	virtual bool PropagateTaskFailure(int64 SourceToken, int64 TargetToken,
 		TArray<int64>& OutWaiters) = 0;
 	virtual bool CancelTaskResult(int64 Token, TArray<int64>& OutWaiters) = 0;
+	virtual bool CancelTaskResultLanguageError(int64 Token,
+		FAvidScriptTaskLanguageError Error,
+		TSharedPtr<IAvidScriptTaskLanguageErrorLease> RootLease,
+		TArray<int64>& OutWaiters) = 0;
 	virtual bool ReadTaskResult(int64 Token,
 		FAvidScriptTaskResultSnapshot& OutSnapshot) const = 0;
 };

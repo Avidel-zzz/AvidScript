@@ -83,11 +83,14 @@ const FAvidScriptVmStaticHostImport GStaticHostImports[] = {
 	{ EAvidScriptHostBindingId::TaskFaultLanguageErrorV1, AvidScript::TaskResult::Abi::FaultLanguageErrorImport, "(IiiI)i", false, true },
 	{ EAvidScriptHostBindingId::TaskLanguageErrorMetaV1, AvidScript::TaskResult::Abi::LanguageErrorMetaImport, "(I)I", false, true },
 	{ EAvidScriptHostBindingId::TaskLanguageErrorRootV1, AvidScript::TaskResult::Abi::LanguageErrorRootImport, "(I)I", false, true },
-	{ EAvidScriptHostBindingId::ContinuationDelayCancelResumeV1, "avid_continuation_delay_cancel_resume_v1", "(fi)I", false }
+	{ EAvidScriptHostBindingId::ContinuationDelayCancelResumeV1, "avid_continuation_delay_cancel_resume_v1", "(fi)I", false },
+	{ EAvidScriptHostBindingId::TaskCancelLanguageErrorV1, AvidScript::TaskResult::Abi::CancelLanguageErrorImport, "(IiiI)i", false, true },
+	{ EAvidScriptHostBindingId::TaskTerminalErrorMetaV1, AvidScript::TaskResult::Abi::TerminalErrorMetaImport, "(I)I", false, true },
+	{ EAvidScriptHostBindingId::TaskTerminalErrorRootV1, AvidScript::TaskResult::Abi::TerminalErrorRootImport, "(I)I", false, true }
 };
 
 static_assert(
-	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::ContinuationDelayCancelResumeV1),
+	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::TaskTerminalErrorRootV1),
 	"Static host catalog must remain dense and ordered by binding id.");
 
 bool FailStaticCall(FString& OutFailureDetails, const TCHAR* Details)
@@ -281,12 +284,15 @@ bool InvokeAvidScriptVmStaticHostImport(
 		Call.IntArgs[1] = Arguments[2].I32;
 		Call.IntArgs[2] = Arguments[3].I32;
 		break;
+	case EAvidScriptHostBindingId::TaskCancelLanguageErrorV1:
 	case EAvidScriptHostBindingId::TaskFaultLanguageErrorV1:
 		Call.Int64Args[0] = Arguments[0].I64;
 		Call.IntArgs[0] = Arguments[1].I32;
 		Call.IntArgs[1] = Arguments[2].I32;
 		Call.Int64Args[1] = Arguments[3].I64;
 		break;
+	case EAvidScriptHostBindingId::TaskTerminalErrorMetaV1:
+	case EAvidScriptHostBindingId::TaskTerminalErrorRootV1:
 	case EAvidScriptHostBindingId::TaskLanguageErrorMetaV1:
 	case EAvidScriptHostBindingId::TaskLanguageErrorRootV1:
 		Call.Int64Args[0] = Arguments[0].I64;

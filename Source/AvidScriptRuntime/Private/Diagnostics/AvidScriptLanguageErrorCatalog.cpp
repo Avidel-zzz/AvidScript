@@ -137,7 +137,8 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 			|| ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("20/1.19")
 			|| ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("21/1.20")
 			|| ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("22/1.21")
-			|| ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("23/1.22")))
+			|| ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("23/1.22")
+			|| ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("24/1.23")))
 		{
 			OutError = TEXT("Catalog-bearing Guest IR WASM is missing language-error metadata");
 			return false;
@@ -150,7 +151,8 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 			&& ProvenanceFields.FindRef(TEXT("guest_ir")) != TEXT("20/1.19")
 			&& ProvenanceFields.FindRef(TEXT("guest_ir")) != TEXT("21/1.20")
 			&& ProvenanceFields.FindRef(TEXT("guest_ir")) != TEXT("22/1.21")
-			&& ProvenanceFields.FindRef(TEXT("guest_ir")) != TEXT("23/1.22")))
+			&& ProvenanceFields.FindRef(TEXT("guest_ir")) != TEXT("23/1.22")
+			&& ProvenanceFields.FindRef(TEXT("guest_ir")) != TEXT("24/1.23")))
 	{
 		OutError = TEXT("language-error metadata has no matching versioned provenance");
 		return false;
@@ -181,7 +183,7 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 	const TArray<TSharedPtr<FJsonValue>>* Types = nullptr;
 	const TArray<TSharedPtr<FJsonValue>>* Sources = nullptr;
 	if (!CatalogPrivate::Number(*Document, TEXT("schema_version"), 1, 1, SectionVersion)
-		|| !CatalogPrivate::Number(*Document, TEXT("guest_ir_schema_version"), 17, 23, GuestSchema)
+		|| !CatalogPrivate::Number(*Document, TEXT("guest_ir_schema_version"), 17, 24, GuestSchema)
 		|| !Document->TryGetStringField(TEXT("guest_ir_version"), GuestVersion)
 		|| !((GuestSchema == 17 && GuestVersion == TEXT("1.16")
 			&& ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("17/1.16"))
@@ -192,7 +194,9 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 			|| (GuestSchema == 22 && GuestVersion == TEXT("1.21")
 				&& ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("22/1.21"))
 			|| (GuestSchema == 23 && GuestVersion == TEXT("1.22")
-				&& ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("23/1.22")))
+				&& ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("23/1.22"))
+			|| (GuestSchema == 24 && GuestVersion == TEXT("1.23")
+				&& ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("24/1.23")))
 		|| !Document->TryGetStringField(TEXT("module_id"), ModuleId) || ModuleId != ExpectedModuleId
 		|| !Document->TryGetStringField(TEXT("source_sha256"), SourceSha256)
 		|| !CatalogPrivate::IsLowerSha256(SourceSha256)
@@ -285,6 +289,16 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 const FString* FAvidScriptLanguageErrorCatalog::FindType(int32 Token) const
 {
 	return Token > 0 && Token <= TypeIds.Num() ? &TypeIds[Token - 1] : nullptr;
+}
+
+bool FAvidScriptLanguageErrorCatalog::IsCancellationType(int32 Token) const
+{
+	const FString* Type = FindType(Token);
+	return SupportsTaskCancellationError() && Type
+		&& (Type->Equals(TEXT("type:global::System.Threading.Tasks.TaskCanceledException"),
+			ESearchCase::CaseSensitive)
+			|| Type->Equals(TEXT("type:global::System.OperationCanceledException"),
+				ESearchCase::CaseSensitive));
 }
 
 const FAvidScriptLanguageErrorSource* FAvidScriptLanguageErrorCatalog::FindSource(int32 Token) const

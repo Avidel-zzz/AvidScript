@@ -14,6 +14,11 @@ inline constexpr char RetainForContinuationImport[] = "avid_task_retain_for_cont
 inline constexpr char FaultLanguageErrorImport[] = "avid_task_fault_language_error_v1"; // (IiiI)i
 inline constexpr char LanguageErrorMetaImport[] = "avid_task_language_error_meta_v1"; // (I)I
 inline constexpr char LanguageErrorRootImport[] = "avid_task_language_error_root_v1"; // (I)I
+// IR 24 terminal-error APIs preserve Cancelled separately from Faulted. The
+// original language_error reads remain fault-only, including in new modules.
+inline constexpr char CancelLanguageErrorImport[] = "avid_task_cancel_language_error_v1"; // (IiiI)i
+inline constexpr char TerminalErrorMetaImport[] = "avid_task_terminal_error_meta_v1"; // (I)I
+inline constexpr char TerminalErrorRootImport[] = "avid_task_terminal_error_root_v1"; // (I)I
 inline constexpr char Int32TypeId[] = "type:int32";
 
 enum class ECommand : std::uint32_t

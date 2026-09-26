@@ -653,6 +653,7 @@ public:
 	bool DispatchTaskPropagateFailureCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	bool DispatchTaskRetainForContinuationCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	bool DispatchTaskFaultLanguageErrorCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
+	bool DispatchTaskCancelLanguageErrorCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	bool DispatchTaskLanguageErrorMetaCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	bool DispatchTaskLanguageErrorRootCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	// Native callers retain references extracted from a validated state layout.
@@ -714,8 +715,14 @@ public:
 
 private:
 	enum class EInstanceLifecycleOperation : uint8 { Begin, Tick, End };
+	bool AdmitTaskTerminalError(int64 TaskToken, int32 TypeToken, int32 SourceToken,
+		uint64 ObjectToken, bool bCancellation, FAvidScriptHostCallResult& OutResult);
 	bool FindTaskLanguageError(int64 TaskToken,
-		FAvidScriptTaskLanguageError& OutError, FAvidScriptHostCallResult& OutResult);
+		FAvidScriptTaskLanguageError& OutError, FAvidScriptHostCallResult& OutResult,
+		bool bIncludeCancellation = false);
+	bool ReadTaskTerminalError(int64 TaskToken,
+		FAvidScriptTaskLanguageError& OutError, FAvidScriptHostCallResult& OutResult,
+		bool bIncludeCancellation);
 	bool DispatchEventManagedStateCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	int64 HandleEventSubscribeInternal(int32 Slot, int32 Generation, int32 EventOrdinal,
 		TConstArrayView<uint8> StateBytes, TUniquePtr<IAvidScriptManagedStateLease>* Lease,

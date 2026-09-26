@@ -77,7 +77,8 @@ void WasmSection(TArray<uint8>& Module, uint8 Id, const TArray<uint8>& Payload)
 
 FString Provenance(int32 GuestSchema = 17)
 {
-	const FString GuestVersion = GuestSchema == 23 ? TEXT("1.22")
+	const FString GuestVersion = GuestSchema == 24 ? TEXT("1.23")
+		: GuestSchema == 23 ? TEXT("1.22")
 		: GuestSchema == 22 ? TEXT("1.21")
 		: GuestSchema == 21 ? TEXT("1.20")
 		: GuestSchema == 20 ? TEXT("1.19") : TEXT("1.16");
@@ -93,7 +94,8 @@ TSharedRef<FJsonObject> Document(int32 GuestSchema = 17)
 	Root->SetNumberField(TEXT("schema_version"), 1);
 	Root->SetNumberField(TEXT("guest_ir_schema_version"), GuestSchema);
 	Root->SetStringField(TEXT("guest_ir_version"),
-		GuestSchema == 23 ? TEXT("1.22")
+		GuestSchema == 24 ? TEXT("1.23")
+			: GuestSchema == 23 ? TEXT("1.22")
 			: GuestSchema == 22 ? TEXT("1.21")
 			: GuestSchema == 21 ? TEXT("1.20")
 			: GuestSchema == 20 ? TEXT("1.19") : TEXT("1.16"));
@@ -140,7 +142,8 @@ TArray<uint8> Module(const FString* Metadata, bool bProvenance = true,
 	return Wasm;
 }
 
-TArray<uint8> TaskFaultImportModule(int32 GuestSchema)
+TArray<uint8> TaskFaultImportModule(int32 GuestSchema,
+	const ANSICHAR* ImportName = AvidScript::TaskResult::Abi::FaultLanguageErrorImport)
 {
 	TArray<uint8> Wasm;
 	Wasm.Append(BaseWasm, 8); // magic and WASM version only
@@ -154,7 +157,7 @@ TArray<uint8> TaskFaultImportModule(int32 GuestSchema)
 	TArray<uint8> Imports;
 	U32(Imports, 1);
 	WasmName(Imports, "avidscript");
-	WasmName(Imports, "avid_task_fault_language_error_v1");
+	WasmName(Imports, ImportName);
 	Imports.Add(0); // function import
 	U32(Imports, 0); // (i64, i32, i32, i64) -> i32
 	WasmSection(Wasm, 2, Imports);
@@ -294,6 +297,20 @@ bool FAvidScriptLanguageErrorCatalogRuntimeTest::RunTest(const FString& Paramete
 			DirectEmptyWasm, ModuleId, Catalog, Error));
 	TestTrue(TEXT("IR 23 empty catalog retains Task fault ABI"),
 		Catalog && Catalog->SupportsTaskLanguageErrorFault());
+	TestFalse(TEXT("IR 23 does not authorize cancellation payloads"),
+		Catalog && Catalog->SupportsTaskCancellationError());
+	auto CancellationDocument = Document(24);
+	CancellationDocument->GetArrayField(TEXT("types"))[0]->AsObject()->SetStringField(
+		TEXT("type_id"), TEXT("type:global::System.Threading.Tasks.TaskCanceledException"));
+	const FString CancellationJson = Json(CancellationDocument);
+	TestTrue(TEXT("IR 24 cancellation catalog loads"),
+		FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+			Module(&CancellationJson, true, false, 24), ModuleId, Catalog, Error));
+	TestTrue(TEXT("IR 24 authorizes typed cancellation and existing fault ABI"),
+		Catalog && Catalog->SupportsTaskCancellationError()
+		&& Catalog->SupportsTaskLanguageErrorFault() && Catalog->IsCancellationType(1));
+	TestFalse(TEXT("Unknown cancellation type token is rejected"),
+		Catalog && Catalog->IsCancellationType(2));
 
 	for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
 	{
@@ -343,6 +360,17 @@ bool FAvidScriptLanguageErrorCatalogRuntimeTest::RunTest(const FString& Paramete
 	Invalid.Emplace(TEXT("missing IR 20 catalog"), Module(nullptr, true, false, 20));
 	Invalid.Emplace(TEXT("missing IR 22 catalog"), Module(nullptr, true, false, 22));
 	Invalid.Emplace(TEXT("missing IR 23 catalog"), Module(nullptr, true, false, 23));
+	Invalid.Emplace(TEXT("missing IR 24 catalog"), Module(nullptr, true, false, 24));
+	Invalid.Emplace(TEXT("IR 24 catalog cannot use IR 23 provenance"),
+		Module(&CancellationJson, true, false, 23));
+	Invalid.Emplace(TEXT("IR 23 catalog cannot use IR 24 provenance"),
+		Module(&DirectEmptyJson, true, false, 24));
+	auto FutureGuest = Document(24);
+	FutureGuest->SetNumberField(TEXT("guest_ir_schema_version"), 25);
+	FutureGuest->SetStringField(TEXT("guest_ir_version"), TEXT("1.24"));
+	const FString FutureGuestJson = Json(FutureGuest);
+	Invalid.Emplace(TEXT("unknown Guest version remains rejected"),
+		Module(&FutureGuestJson, true, false, 24));
 	auto OldEmpty = Document(22);
 	OldEmpty->SetArrayField(TEXT("types"), {});
 	OldEmpty->SetArrayField(TEXT("sources"), {});
@@ -693,7 +721,7 @@ bool FAvidScriptTaskLanguageErrorVmImportTest::RunTest(const FString& Parameters
 			&& Runtime.GetLanguageErrorCatalog()->SupportsTaskLanguageErrorFault());
 		Runtime.Unload();
 	}
-	for (const int32 GuestSchema : {20, 21, 22, 23, 17})
+	for (const int32 GuestSchema : {20, 21, 22, 23, 24, 17})
 	{
 		const TArray<uint8> Wasm = TaskFaultImportModule(GuestSchema);
 		for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
@@ -707,7 +735,7 @@ bool FAvidScriptTaskLanguageErrorVmImportTest::RunTest(const FString& Parameters
 				continue;
 			}
 			TestAvidScriptRuntimeLaneIdentity(*this, Lane, Result);
-			const bool bAllowedVersion = GuestSchema >= 20 && GuestSchema <= 23;
+			const bool bAllowedVersion = GuestSchema >= 20 && GuestSchema <= 24;
 			TestEqual(TEXT("catalog gates the imported function by IR version"),
 				Runtime.GetLanguageErrorCatalog()->SupportsTaskLanguageErrorFault(), bAllowedVersion);
 			TestFalse(TEXT("WASM call rejects missing Session task context"),
@@ -728,7 +756,7 @@ bool FAvidScriptTaskLanguageErrorVmImportTest::RunTest(const FString& Parameters
 		AvidScript::TaskResult::Abi::LanguageErrorMetaImport,
 		AvidScript::TaskResult::Abi::LanguageErrorRootImport })
 	{
-		for (const int32 GuestSchema : {20, 21, 22, 23, 17})
+		for (const int32 GuestSchema : {20, 21, 22, 23, 24, 17})
 		{
 			const TArray<uint8> Wasm = TaskReadImportModule(GuestSchema, ImportName);
 			for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
@@ -745,7 +773,7 @@ bool FAvidScriptTaskLanguageErrorVmImportTest::RunTest(const FString& Parameters
 				TestFalse(TEXT("Task read import rejects missing Session task context"),
 					Runtime.BeginPlay(Result));
 				TestEqual(TEXT("Task read import preserves version or context rejection"),
-					Result.ErrorCategory, GuestSchema >= 20 && GuestSchema <= 23
+					Result.ErrorCategory, GuestSchema >= 20 && GuestSchema <= 24
 						? FString(TEXT("task_result_context"))
 						: FString(TEXT("task_language_error_version")));
 				TestEqual(TEXT("VM reports the called Task read import"),
@@ -764,6 +792,51 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptTaskLanguageErrorAdmissionTest,
 	"AvidScript.Runtime.Continuation.TaskLanguageErrorAdmission",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptTaskCancellationImportVersionTest,
+	"AvidScript.Runtime.Continuation.TaskCancellationImportVersion",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptTaskCancellationImportVersionTest::RunTest(const FString& Parameters)
+{
+	using namespace AvidScriptLanguageErrorCatalogTests;
+	using namespace AvidScript::TaskResult::Abi;
+	for (const ANSICHAR* ImportName : {
+		CancelLanguageErrorImport, TerminalErrorMetaImport, TerminalErrorRootImport})
+	{
+		for (const int32 GuestSchema : {17, 20, 21, 22, 23, 24})
+		{
+			const TArray<uint8> Wasm = FCStringAnsi::Strcmp(ImportName, CancelLanguageErrorImport) == 0
+				? TaskFaultImportModule(GuestSchema, ImportName)
+				: TaskReadImportModule(GuestSchema, ImportName);
+			for (const auto& Lane : GetAvidScriptRuntimeBackendTestLanes())
+			{
+				FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
+				FAvidScriptWasmSmokeResult Result;
+				if (!TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("cancellation import links")),
+					Runtime.LoadModule(Wasm.GetData(), Wasm.Num(), ModuleId, Result)))
+				{
+					AddError(Result.ErrorMessage);
+					return false;
+				}
+				TestAvidScriptRuntimeLaneIdentity(*this, Lane, Result);
+				TestFalse(TEXT("Cancellation import rejects invalid version or missing context"),
+					Runtime.BeginPlay(Result));
+				TestEqual(TEXT("Only IR 24 reaches context validation"), Result.ErrorCategory,
+					GuestSchema == 24 ? FString(TEXT("task_result_context"))
+						: FString(TEXT("task_language_error_version")));
+				TestEqual(TEXT("VM reports the exact cancellation import"), Result.ImportName,
+					FString(UTF8_TO_TCHAR(ImportName)));
+				const auto* Heap = Runtime.GetManagedHeapForTesting();
+				TestTrue(TEXT("Rejected cancellation leaves no invocation roots"), Heap
+					&& Heap->GetStats().LiveRoots == 0 && Heap->GetStats().ActiveFrames == 0);
+				Runtime.Unload();
+			}
+		}
+	}
+	return true;
+}
 
 bool FAvidScriptTaskLanguageErrorAdmissionTest::RunTest(const FString& Parameters)
 {

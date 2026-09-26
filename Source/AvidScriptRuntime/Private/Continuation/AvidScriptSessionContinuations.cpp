@@ -399,6 +399,22 @@ bool FAvidScriptContinuationHostEndpoint::ReadTaskResult(
 	return PinnedOwner && PinnedOwner->TaskResults.Read(Token, OutSnapshot);
 }
 
+bool FAvidScriptContinuationHostEndpoint::CancelTaskResultLanguageError(
+	const int64 Token, const FAvidScriptTaskLanguageError Error,
+	TSharedPtr<IAvidScriptTaskLanguageErrorLease> RootLease,
+	TArray<int64>& OutWaiters)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = PinTaskOwner(Token);
+	if (!PinnedOwner || !PinnedOwner->TaskResults.CancelLanguageError(
+		Token, Error, MoveTemp(RootLease), OutWaiters))
+	{
+		return false;
+	}
+	PinnedOwner->QueueTaskWaiters(
+		Token, EAvidScriptTaskResultState::Cancelled, OutWaiters);
+	return true;
+}
+
 bool FAvidScriptContinuationHostEndpoint::ConsumeResult(
 	const int64 ContinuationToken,
 	const int32 Slot,

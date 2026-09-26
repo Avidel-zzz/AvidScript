@@ -14,11 +14,11 @@ struct FAvidScriptLanguageErrorSource
 	int32 EndColumn = 0;
 };
 
-// Language-error tokens are local to one canonical IR 17 or 20-23 WASM module.
+// Language-error tokens are local to one canonical IR 17 or 20-24 WASM module.
 class AVIDSCRIPTRUNTIME_API FAvidScriptLanguageErrorCatalog final
 {
 public:
-	// A missing section is valid for old modules. Catalog-bearing IR 17 and 20-23 require one.
+	// A missing section is valid for old modules. Catalog-bearing IR 17 and 20-24 require one.
 	static bool ReadFromCanonicalWasm(
 		TConstArrayView<uint8> CanonicalWasm,
 		const FString& ExpectedModuleId,
@@ -29,8 +29,10 @@ public:
 	const FAvidScriptLanguageErrorSource* FindSource(int32 Token) const;
 	bool SupportsTaskLanguageErrorFault() const
 	{
-		return GuestIrSchemaVersion >= 20 && GuestIrSchemaVersion <= 23;
+		return GuestIrSchemaVersion >= 20 && GuestIrSchemaVersion <= 24;
 	}
+	bool SupportsTaskCancellationError() const { return GuestIrSchemaVersion == 24; }
+	bool IsCancellationType(int32 Token) const;
 
 private:
 	int32 GuestIrSchemaVersion = 0;

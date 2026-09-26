@@ -8292,12 +8292,20 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 		ProfileScope.SetSucceeded(bSucceeded);
 		return bSucceeded;
 	}
+	case EAvidScriptHostBindingId::TaskCancelLanguageErrorV1:
+	{
+		const bool bSucceeded = DispatchTaskCancelLanguageErrorCall(Call, OutResult);
+		ProfileScope.SetSucceeded(bSucceeded);
+		return bSucceeded;
+	}
+	case EAvidScriptHostBindingId::TaskTerminalErrorMetaV1:
 	case EAvidScriptHostBindingId::TaskLanguageErrorMetaV1:
 	{
 		const bool bSucceeded = DispatchTaskLanguageErrorMetaCall(Call, OutResult);
 		ProfileScope.SetSucceeded(bSucceeded);
 		return bSucceeded;
 	}
+	case EAvidScriptHostBindingId::TaskTerminalErrorRootV1:
 	case EAvidScriptHostBindingId::TaskLanguageErrorRootV1:
 	{
 		const bool bSucceeded = DispatchTaskLanguageErrorRootCall(Call, OutResult);

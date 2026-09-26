@@ -173,7 +173,8 @@ bool FAvidScriptSessionTaskResults::Finish(
 		|| Value.Num() > MaximumValueBytes
 		|| (State == EAvidScriptTaskResultState::Faulted && ErrorCode.IsEmpty())
 		|| LanguageError.IsSet() != RootLease.IsValid()
-		|| (LanguageError.IsSet() && State != EAvidScriptTaskResultState::Faulted))
+		|| (LanguageError.IsSet() && State != EAvidScriptTaskResultState::Faulted
+			&& State != EAvidScriptTaskResultState::Cancelled))
 	{
 		return false;
 	}
@@ -248,15 +249,12 @@ bool FAvidScriptSessionTaskResults::PropagateFailure(
 	{
 		return false;
 	}
-	if (Source.State == EAvidScriptTaskResultState::Cancelled)
-	{
-		return Cancel(TargetToken, OutWaiters);
-	}
-	if (Source.State != EAvidScriptTaskResultState::Faulted)
+	if (Source.State != EAvidScriptTaskResultState::Faulted
+		&& Source.State != EAvidScriptTaskResultState::Cancelled)
 	{
 		return false;
 	}
-	return Finish(TargetToken, EAvidScriptTaskResultState::Faulted, {},
+	return Finish(TargetToken, Source.State, {},
 		Source.ErrorCode, OutWaiters, Source.LanguageError,
 		Source.LanguageErrorRoot);
 }
@@ -265,6 +263,20 @@ bool FAvidScriptSessionTaskResults::Cancel(
 	const int64 Token, TArray<int64>& OutWaiters)
 {
 	return Finish(Token, EAvidScriptTaskResultState::Cancelled, {}, {}, OutWaiters);
+}
+
+bool FAvidScriptSessionTaskResults::CancelLanguageError(
+	const int64 Token, const FAvidScriptTaskLanguageError Error,
+	TSharedPtr<IAvidScriptTaskLanguageErrorLease> RootLease,
+	TArray<int64>& OutWaiters)
+{
+	if (Error.TypeToken <= 0 || Error.SourceToken <= 0 || Error.ObjectToken == 0
+		|| !RootLease.IsValid())
+	{
+		return false;
+	}
+	return Finish(Token, EAvidScriptTaskResultState::Cancelled, {}, {},
+		OutWaiters, Error, MoveTemp(RootLease));
 }
 
 bool FAvidScriptSessionTaskResults::Read(

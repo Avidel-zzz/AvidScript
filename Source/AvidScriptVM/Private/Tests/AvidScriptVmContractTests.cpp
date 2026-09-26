@@ -609,6 +609,34 @@ bool FAvidScriptVmEventSubscriptionImportContractTest::RunTest(
 	const auto& TaskFaultLanguageError = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::TaskFaultLanguageErrorV1);
 	const auto& TaskLanguageErrorMeta = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::TaskLanguageErrorMetaV1);
 	const auto& TaskLanguageErrorRoot = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::TaskLanguageErrorRootV1);
+	const auto& TaskCancelError = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::TaskCancelLanguageErrorV1);
+	const auto& TaskTerminalMeta = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::TaskTerminalErrorMetaV1);
+	const auto& TaskTerminalRoot = GetAvidScriptVmStaticHostImport(EAvidScriptHostBindingId::TaskTerminalErrorRootV1);
+	TestEqual(TEXT("Cancellation error appends after existing imports"),
+		static_cast<uint16>(TaskCancelError.BindingId),
+		static_cast<uint16>(EAvidScriptHostBindingId::ContinuationDelayCancelResumeV1) + 1);
+	TestEqual(TEXT("Terminal metadata follows cancellation error"),
+		static_cast<uint16>(TaskTerminalMeta.BindingId), static_cast<uint16>(TaskCancelError.BindingId) + 1);
+	TestEqual(TEXT("Terminal root follows metadata"),
+		static_cast<uint16>(TaskTerminalRoot.BindingId), static_cast<uint16>(TaskTerminalMeta.BindingId) + 1);
+	for (const auto* Import : {&TaskCancelError, &TaskTerminalMeta, &TaskTerminalRoot})
+	{
+		TestEqual(TEXT("Cancellation imports preserve fixed-width signatures"),
+			FString(UTF8_TO_TCHAR(Import->Signature)), Import == &TaskCancelError
+				? FString(TEXT("(IiiI)i")) : FString(TEXT("(I)I")));
+		TestTrue(TEXT("Cancellation imports require managed invocations"),
+			Import->bRequiresManagedInvocation
+			&& RequiresAvidScriptVmManagedInvocation(TEXT("avidscript"), UTF8_TO_TCHAR(Import->ImportName)));
+		TestFalse(TEXT("Cancellation imports reject the legacy env alias"),
+			Import->bSupportsEnvCompatibility
+			|| IsAvidScriptVmStaticHostImport(TEXT("env"), UTF8_TO_TCHAR(Import->ImportName)));
+	}
+	TestEqual(TEXT("Cancellation import name"), FString(UTF8_TO_TCHAR(TaskCancelError.ImportName)),
+		FString(UTF8_TO_TCHAR(AvidScript::TaskResult::Abi::CancelLanguageErrorImport)));
+	TestEqual(TEXT("Terminal metadata import name"), FString(UTF8_TO_TCHAR(TaskTerminalMeta.ImportName)),
+		FString(UTF8_TO_TCHAR(AvidScript::TaskResult::Abi::TerminalErrorMetaImport)));
+	TestEqual(TEXT("Terminal root import name"), FString(UTF8_TO_TCHAR(TaskTerminalRoot.ImportName)),
+		FString(UTF8_TO_TCHAR(AvidScript::TaskResult::Abi::TerminalErrorRootImport)));
 	for (const auto* Import : {&ManagedHeap, &ManagedStore, &ManagedRead, &EventStore, &EventRead, &LanguageStore, &LanguageLookup})
 	{
 		TestTrue(TEXT("Every heap-bearing import requires an invocation scope"), Import->bRequiresManagedInvocation

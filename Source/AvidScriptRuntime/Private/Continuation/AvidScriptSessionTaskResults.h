@@ -28,6 +28,9 @@ public:
 	bool PropagateFailure(int64 SourceToken, int64 TargetToken,
 		TArray<int64>& OutWaiters);
 	bool Cancel(int64 Token, TArray<int64>& OutWaiters);
+	bool CancelLanguageError(int64 Token, FAvidScriptTaskLanguageError Error,
+		TSharedPtr<IAvidScriptTaskLanguageErrorLease> RootLease,
+		TArray<int64>& OutWaiters);
 	bool Read(int64 Token, FAvidScriptTaskResultSnapshot& OutSnapshot) const;
 	bool MatchesOwner(int64 Token, EAvidScriptContinuationLane Lane,
 		uint64 ActivationSerial) const;
