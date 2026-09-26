@@ -23,7 +23,8 @@ public static class SemanticExceptionFlowContractValidator
             (document.SchemaVersion == SemanticContract.TaskLanguageErrorSchemaVersion
                 && document.SemanticVersion == SemanticContract.TaskLanguageErrorSemanticVersion)
             || (document.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion
-                && document.SemanticVersion == SemanticContract.AsyncLanguageErrorSemanticVersion);
+                && document.SemanticVersion == SemanticContract.AsyncLanguageErrorSemanticVersion)
+            || SemanticContract.HasAsyncSynchronousExceptions(document);
         if (!(exceptionContract || combinedContract)
             || document.Succeeded || document.ControlFlowGraphs is null
             || flows.Count is 0 or > 256

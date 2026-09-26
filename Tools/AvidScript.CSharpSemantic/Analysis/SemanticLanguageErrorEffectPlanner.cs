@@ -4,9 +4,13 @@ using System.Linq;
 
 namespace AvidScript.CSharpSemantic;
 
-// Derived planning data only. The Guest cannot execute exception flows yet.
+// Derived planning data, not a serialized execution contract. Async methods keep
+// their Task ABI and consume synchronous outcomes at their own exception routes.
 public sealed record SemanticLanguageErrorEffectPlan(
-    IReadOnlyList<string> OutcomeMethodIds);
+    IReadOnlyList<string> OutcomeMethodIds)
+{
+    public IReadOnlyList<string> AsyncBoundaryMethodIds { get; init; } = Array.Empty<string>();
+}
 
 public static class SemanticLanguageErrorEffectPlanner
 {
@@ -76,12 +80,20 @@ public static class SemanticLanguageErrorEffectPlanner
         HashSet<string> affected = document.ExceptionFlows
             .Select(flow => flow.MethodSymbolId)
             .ToHashSet(StringComparer.Ordinal);
+        HashSet<string> asyncMethods = SemanticContract.HasAsyncSynchronousExceptions(document)
+            ? document.AsyncMethods.Select(method => method.MethodSymbolId).ToHashSet(StringComparer.Ordinal)
+            : new(StringComparer.Ordinal);
+        HashSet<string> asyncBoundaries = new(StringComparer.Ordinal);
         Queue<string> pendingCallers = new(affected.OrderBy(id => id, StringComparer.Ordinal));
         while (pendingCallers.TryDequeue(out string? target))
             if (callersByTarget.TryGetValue(target, out List<string>? callers))
                 foreach (string caller in callers)
-                    if (affected.Add(caller)) pendingCallers.Enqueue(caller);
-        plan = new(affected.OrderBy(id => id, StringComparer.Ordinal).ToArray());
+                    if (asyncMethods.Contains(caller)) asyncBoundaries.Add(caller);
+                    else if (affected.Add(caller)) pendingCallers.Enqueue(caller);
+        plan = new(affected.OrderBy(id => id, StringComparer.Ordinal).ToArray())
+        {
+            AsyncBoundaryMethodIds = asyncBoundaries.OrderBy(id => id, StringComparer.Ordinal).ToArray(),
+        };
         return true;
     }
 

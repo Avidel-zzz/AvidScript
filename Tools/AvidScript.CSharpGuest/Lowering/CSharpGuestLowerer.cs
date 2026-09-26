@@ -86,6 +86,11 @@ public static class CSharpGuestLowerer
             return Failure(diagnostics);
         }
 
+        GuestLanguageErrorCatalog? asyncCatalog = null;
+        if (asyncLanguageErrors && !CSharpLanguageErrorCatalogBuilder.TryToGuest(document,
+                CSharpAsyncLanguageErrorCatalog.Build(document), out asyncCatalog, out string? catalogError))
+            return Failure(new[] { new GuestDiagnostic("ASCG1004", "error", catalogError!, null) });
+
         document = CSharpUeDispatch.ExpandReachability(document);
         CSharpTypeLoweringResult typeResult = CSharpTypeLowerer.Lower(document);
         if (!typeResult.Succeeded)
@@ -382,9 +387,7 @@ public static class CSharpGuestLowerer
                     : asyncExceptionFlow ? "exception" : asyncLanguageErrors ? "fault" : "none") : null,
             FunctionReferences = CSharpManagedDelegateLowerer.BuildContracts(document, moduleTypes, functions),
             FramedExports = framedExports,
-            LanguageErrorCatalog = asyncLanguageErrors
-                ? CSharpAsyncLanguageErrorCatalog.ToGuest(document,
-                    CSharpAsyncLanguageErrorCatalog.Build(document)) : null,
+            LanguageErrorCatalog = asyncCatalog,
             AsyncExceptionRoutes = asyncExceptionFlow
                 ? document.AsyncMethods.Where(method => method.ExceptionPlan is not null)
                     .SelectMany(method => method.Segments

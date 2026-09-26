@@ -93,7 +93,8 @@ public static class CSharpThrowProducerLowerer
         if (!MatchesCreation(site, expression))
             return Fail("Only a zero-argument supported framework exception constructor is executable.", out error);
 
-        CSharpLanguageErrorTokenCatalog catalog = suppliedCatalog ?? BuildCatalog(semantic.ExceptionFlows);
+        CSharpLanguageErrorTokenCatalog catalog = suppliedCatalog
+            ?? CSharpLanguageErrorCatalogBuilder.ForSynchronous(semantic, semantic.ExceptionFlows);
         int typeToken = catalog.Types.Single(item => item.TypeId == site.ExceptionTypeId).Token;
         int sourceToken = catalog.Sources.Single(item => item.SourceId == flow.SourceId
             && item.Span.Start == site.Span.Start && item.Span.Length == site.Span.Length).Token;

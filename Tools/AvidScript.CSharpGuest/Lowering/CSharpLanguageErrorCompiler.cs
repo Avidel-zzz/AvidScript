@@ -155,22 +155,9 @@ public static class CSharpLanguageErrorCompiler
                     : Array.Empty<CSharpLanguageCleanupRoute>();
             cleanupRoutes.Add(functionId, returnRoutes.Concat(rethrowRoutes).ToArray());
         }
-        CSharpLanguageErrorTokenCatalog tokens = staticContext?.Catalog(flows) ?? CSharpThrowProducerLowerer.BuildCatalog(flows);
-        Dictionary<string, int> sourceLengths = new(StringComparer.Ordinal);
-        foreach (SemanticExceptionFlow item in flows)
-        {
-            if (sourceLengths.TryGetValue(item.SourceId, out int length)
-                && length != item.SourceLength)
-                return Fail("Exception flows disagree on a source unit's length.", out error);
-            sourceLengths[item.SourceId] = item.SourceLength;
-        }
-        if (staticContext is not null)
-            foreach (var type in staticContext.Types)
-            {
-                if (sourceLengths.TryGetValue(type.SourceId, out int length) && length != type.SourceLength)
-                    return Fail("Static initialization and exception flows disagree on source length.", out error);
-                sourceLengths[type.SourceId] = type.SourceLength;
-            }
+        CSharpLanguageErrorTokenCatalog tokens = CSharpLanguageErrorCatalogBuilder.ForSynchronous(semantic, flows);
+        if (!CSharpLanguageErrorCatalogBuilder.TryToGuest(semantic, tokens, out var guestCatalog, out error))
+            return false;
         Dictionary<string, IReadOnlyList<CSharpLanguageCatchRoute>> catchRoutes = new(StringComparer.Ordinal);
         foreach (SemanticExceptionFlow handler in handlers)
         {
@@ -333,14 +320,7 @@ public static class CSharpLanguageErrorCompiler
                 .Append(CSharpTaskResultAbi.LanguageErrorMetaImport())
                 .Append(CSharpTaskResultAbi.LanguageErrorRootImport()).ToArray()
                 : outcomes.Imports,
-            LanguageErrorCatalog = new GuestLanguageErrorCatalog(
-                tokens.Types.Select(entry =>
-                    new GuestLanguageErrorTypeToken(entry.Token, entry.TypeId)).ToArray(),
-                tokens.Sources.Select(entry =>
-                    new GuestLanguageErrorSourceToken(entry.Token, entry.SourceId,
-                        sourceLengths[entry.SourceId], entry.Span.Start, entry.Span.Length,
-                        entry.Span.Line, entry.Span.Column,
-                        entry.Span.EndLine, entry.Span.EndColumn)).ToArray()),
+            LanguageErrorCatalog = guestCatalog,
         };
         if (staticContext is not null)
         {

@@ -255,7 +255,77 @@ internal static class SemanticAsyncSynchronousExceptionTests
             && SemanticAsyncInvocationValidator.IsValid(original) && SemanticAsyncScopeValidator.IsValid(original),
             "The original 29-case source must retain all nine member await sites and validated failure routes: "
                 + string.Join(" | ", original.Diagnostics.Select(item => item.Code + ": " + item.Message)));
+        Check(SemanticExceptionFlowContractValidator.IsValid(original)
+            && SemanticLanguageErrorEffectPlanner.TryBuild(original, out var originalEffects)
+            && originalEffects is { AsyncBoundaryMethodIds.Count: > 0 }
+            && !originalEffects.OutcomeMethodIds.Intersect(original.AsyncMethods.Select(item => item.MethodSymbolId)).Any(),
+            "Original C10 synchronous effects must stop at Task method boundaries");
+        CheckEffectBoundaries(Check);
         return passed;
+    }
+
+    private static void CheckEffectBoundaries(Action<bool, string> check)
+    {
+        var document = Analyze("""
+            using System; using System.Threading.Tasks;
+            public static class Script {
+                public static int Fail() { throw new ArgumentException(); }
+                public static int Left(int n) { return n == 0 ? Fail() : Right(n - 1); }
+                public static int Right(int n) { return Left(n); }
+                public static int Value { get { return 1; } set { if (value < 0) Fail(); } }
+                public static async Task<int> Run(int n) { Value = n; return Left(n); }
+                public static async Task<int> Outer(int n) { int value = await Run(n); return value; }
+                public static Task<int> Factory(int n) { return Run(n); }
+                public static Task<int> ThrowingFactory(int n) { if (n < 0) Fail(); return Run(n); }
+                public static int Good() { return 42; }
+            }
+            """);
+        check(SemanticContract.HasAsyncSynchronousExceptions(document)
+            && SemanticExceptionFlowContractValidator.IsValid(document), "Combined synchronous and async contracts must both validate: "
+                + string.Join(" | ", document.Diagnostics.Select(item => item.Code + ":" + item.Message)));
+        check(SemanticLanguageErrorEffectPlanner.TryBuild(document, out var plan) && plan is not null,
+            "Mixed source must produce an effect plan");
+        string Id(string name) => document.Callables.Single(callable =>
+            callable.MethodSymbolId.Contains("." + name + "(", StringComparison.Ordinal)).MethodSymbolId;
+        check(plan!.OutcomeMethodIds.ToHashSet(StringComparer.Ordinal).SetEquals(new[]
+            { Id("Fail"), Id("Left"), Id("Right"), Id("set_Value"), Id("ThrowingFactory") }),
+            "Recursion, setters and independently throwing factories need outcomes, while ordinary Task factories do not: "
+                + string.Join(" | ", plan.OutcomeMethodIds) + " async=" + string.Join(" | ", document.AsyncMethods.Select(method => method.MethodSymbolId))
+                + " diagnostics=" + string.Join(" | ", document.Diagnostics.Select(item => item.Code + ":" + item.Message)));
+        check(plan.AsyncBoundaryMethodIds.SequenceEqual(new[] { Id("Run") }),
+            "Only the Task method calling throwing synchronous code is an outcome boundary");
+        var shuffled = document with { Methods = document.Methods.Reverse().ToArray(),
+            Callables = document.Callables.Reverse().ToArray(), ExceptionFlows = document.ExceptionFlows!.Reverse().ToArray() };
+        check(SemanticLanguageErrorEffectPlanner.TryBuild(shuffled, out var reordered)
+            && reordered!.OutcomeMethodIds.SequenceEqual(plan.OutcomeMethodIds)
+            && reordered.AsyncBoundaryMethodIds.SequenceEqual(plan.AsyncBoundaryMethodIds),
+            "Effect ordering must be independent of source collection enumeration");
+        foreach (var broken in new[]
+        {
+            document with { Succeeded = true },
+            document with { SchemaVersion = 47, SemanticVersion = "1.56" },
+            document with { SemanticVersion = "1.58" },
+            document with { AsyncMethods = document.AsyncMethods.Select(method => method with
+            {
+                Segments = method.Segments.Select(segment => segment with { SynchronousExceptionTarget = null }).ToArray(),
+            }).ToArray() },
+            document with { ExceptionFlows = document.ExceptionFlows!.Select(flow => flow with { MethodSymbolId = Id("Run") }).ToArray() },
+        }) check(!SemanticExceptionFlowContractValidator.IsValid(broken)
+            && !SemanticLanguageErrorEffectPlanner.TryBuild(broken, out _),
+            "Effect composition must reject damaged async routes, sync flow identity and provenance");
+        var legacy = Analyze("""
+            using System; using System.Threading.Tasks;
+            public static class Script {
+                public static int Fail() { throw new ArgumentException(); }
+                public static async Task<int> Run() { return Fail(); }
+                public static Task<int> Factory() { return Run(); }
+            }
+            """, enabled: false);
+        check(SemanticLanguageErrorEffectPlanner.TryBuild(legacy, out var oldPlan)
+            && oldPlan!.AsyncBoundaryMethodIds.Count == 0
+            && oldPlan.OutcomeMethodIds.Any(id => id.Contains(".Run(", StringComparison.Ordinal))
+            && oldPlan.OutcomeMethodIds.Any(id => id.Contains(".Factory(", StringComparison.Ordinal)),
+            "Legacy effect closure must retain its old rejection behavior instead of adopting new Task semantics");
     }
 
     private static string Source(string body) => """
