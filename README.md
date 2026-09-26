@@ -6,35 +6,29 @@
 
 ![UE 5.8](https://img.shields.io/badge/UE-5.8-313131?logo=unrealengine&logoColor=white) ![C# → WASM](https://img.shields.io/badge/C%23-%E2%86%92%20WASM-512BD4?logo=csharp&logoColor=white) ![Win64](https://img.shields.io/badge/Win64-Editor%20%2F%20Development-0078D4?logo=windows&logoColor=white) [![MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-AvidScript 将 C# 脚本编译为 WebAssembly，在 Unreal Engine 中运行。通过生成的 C# 绑定调用 UE API，运行时不依赖 CLR。
+AvidScript 是 Unreal Engine 的 C# 脚本插件。C# 源码编译为 WebAssembly，通过生成的绑定调用 UE API，运行时不依赖 CLR。
 
-Development preview · UE 5.8 · Win64 Editor / Development
+**开发预览** · 当前测试平台为 UE 5.8 / Win64 Editor、Development。C# 支持范围见[已知限制](#limitations)。
 
-[Quick start](#quick-start) · [Examples](#examples) · [Limitations](#limitations) · [Development](#development)
-
-```csharp
-// Tick：沿 X 轴移动，每秒 120 UE 单位。
-[UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
-public static void Tick(float deltaSeconds)
-{
-    FVector currentLocation = UE.Self.GetActorLocation();
-    UE.Self.SetActorLocation(currentLocation + new FVector(120.0f * deltaSeconds, 0.0f, 0.0f));
-}
-```
-
-`UE.Self` 是绑定脚本的 Actor。完整示例：[ActorLifecycleScript.cs](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)。
+[安装](#installation) · [用法](#usage) · [示例](#examples) · [已知限制](#limitations) · [构建与测试](#build-and-test)
 
 <a id="快速开始"></a>
 <a id="安装"></a>
+<a id="quick-start"></a>
 
-## Quick start
+## Installation
 
-需要 UE **5.8 源码版**、Visual Studio 2022（UE C++ 工具）、PowerShell 7 和 .NET SDK [**8.0.416**](global.json)。
+依赖：
 
-以下使用 `AvidTPSTemplate` 工程。插件放在 `Plugins/AvidScript`，命令从插件目录执行：
+- Unreal Engine **5.8 源码版**
+- Visual Studio 2022，安装 UE C++ 开发工具
+- PowerShell 7
+- .NET SDK **8.0.416**（[global.json](global.json)）
+
+将仓库放到工程的 `Plugins/AvidScript`。以下命令从插件目录执行，以 `AvidTPSTemplate` 为例；其他工程需替换 `.uproject` 路径和 `AvidTPSTemplateEditor` target。
 
 ```powershell
-# 安装运行库
+# 安装 Wasmtime
 pwsh -NoProfile -File Build/InstallWasmtimeDependency.ps1 -Mode Install
 
 # 构建 Editor
@@ -50,23 +44,28 @@ $project = (Resolve-Path ../../AvidTPSTemplate.uproject).Path
 3. 执行 **Tools → AvidScript → Build And Bind C# ActorLifecycle Script**。
 4. 点击 **Play**，Cube 会移动、旋转、放大。
 
-编辑上面的 `ActorLifecycleScript.cs`，再次执行菜单命令即可重新编译并绑定。
+修改 [ActorLifecycleScript.cs](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) 后，再次执行菜单命令即可重新编译并绑定。
 
-<a id="示例"></a>
+## Usage
 
-## Examples
+### 每帧移动 Actor
 
-| 示例 | 内容 |
-| --- | --- |
-| [ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) | `BeginPlay`、`Tick`、输入和碰撞回调 |
-| [LatentGameplay](Samples/CSharp/LatentGameplay/README.md) | `DelayAsync`、`WithCancellation` |
-| [NetworkRpc](Samples/CSharp/NetworkRpc/README.md) | 客户端与服务器 RPC |
-| [ReplicatedProperty](Samples/CSharp/ReplicatedProperty/README.md) | 属性复制与 `RepNotify` 回调 |
-| [UiSaveDemo](Samples/CSharp/UiSaveDemo/README.md) | UI 与存档 |
-| [TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) | C++ API 绑定、类型转换 |
-| [ScriptDefinedTypes](Samples/CSharp/ScriptDefinedTypes/README.md) | C# 声明 Actor、Component、Subsystem |
+`UE.Self` 是绑定脚本的 Actor。`avid_on_tick` 由 UE 每帧调用，`deltaSeconds` 为帧间隔，单位为秒。
 
-例如，在 `BeginPlay` 中等待 0.25 秒，再缩放 Actor（[函数体节选](Samples/CSharp/LatentGameplay/LatentGameplayScript.cs)）：
+```csharp
+[UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
+public static void Tick(float deltaSeconds)
+{
+    FVector currentLocation = UE.Self.GetActorLocation();
+    UE.Self.SetActorLocation(currentLocation + new FVector(120.0f * deltaSeconds, 0.0f, 0.0f));
+}
+```
+
+这段代码让 Actor 沿 X 轴以每秒 120 UE 单位移动。完整脚本：[ActorLifecycleScript.cs](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs)。
+
+### 延迟执行
+
+在 `BeginPlay` 中等待 0.25 秒，再缩放 Actor：
 
 ```csharp
 LifetimeCancellation = AvidCancellationSource.Create();
@@ -76,7 +75,21 @@ await UKismetSystemLibrary.DelayAsync(0.25f)
 UE.Self.SetActorScale3D(new FVector(1.25f, 1.25f, 1.25f));
 ```
 
-完整示例在 `EndPlay` 中调用 `Cancel()` 和 `Release()`，取消等待并释放取消源。
+摘自 [LatentGameplayScript.cs](Samples/CSharp/LatentGameplay/LatentGameplayScript.cs) 的 `BeginPlay` 函数体。`LifetimeCancellation` 是脚本字段，在 `EndPlay` 中调用 `Cancel()` 和 `Release()`，取消等待并释放取消源。
+
+<a id="示例"></a>
+
+## Examples
+
+| 示例 | API / 用途 |
+| --- | --- |
+| [ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) | `BeginPlay`、`Tick`、输入和碰撞回调 |
+| [LatentGameplay](Samples/CSharp/LatentGameplay/README.md) | `DelayAsync`、取消等待 |
+| [NetworkRpc](Samples/CSharp/NetworkRpc/README.md) | 客户端与服务器 RPC |
+| [ReplicatedProperty](Samples/CSharp/ReplicatedProperty/README.md) | 属性复制与 `RepNotify` 回调 |
+| [UiSaveDemo](Samples/CSharp/UiSaveDemo/README.md) | UI 与存档 |
+| [TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) | 调用项目中的 C++ API |
+| [ScriptDefinedTypes](Samples/CSharp/ScriptDefinedTypes/README.md) | C# 声明 Actor、Component、Subsystem |
 
 <a id="当前边界"></a>
 <a id="已知限制"></a>
@@ -84,7 +97,7 @@ UE.Self.SetActorScale3D(new FVector(1.25f, 1.25f, 1.25f));
 
 ## Limitations
 
-- 编译器支持 C# 子集，不能直接运行任意 .NET 程序或 NuGet 包。
+- 仅支持 C# 子集，不能直接运行任意 .NET 程序或 NuGet 包。
 - `Task<int>` 只能在同一脚本实例内等待。`catch` 尚不能捕获[异步取消](Docs/Phase66/P66.C7_Async_Cancellation_Language_Contract.md)，外层 `await` 可能中止脚本。
 - `try` 中使用 `await` 需要[预览开关](Docs/Phase66/P66.C6_Direct_Continuation_Await_Contract.md)；`catch`、`finally` 中暂不支持 `await`。
 - 修改 C# 声明的 `UClass`、`UProperty`、`UFunction` 后，需要重新构建并重启 Editor。
@@ -92,8 +105,9 @@ UE.Self.SetActorScale3D(new FVector(1.25f, 1.25f, 1.25f));
 
 <a id="构建与测试"></a>
 <a id="开发"></a>
+<a id="development"></a>
 
-## Development
+## Build and test
 
 从插件目录执行：
 
@@ -107,6 +121,8 @@ dotnet run --project Tools/AvidScript.CSharpGuest.Tests/AvidScript.CSharpGuest.T
 
 <a id="项目结构"></a>
 
+## Internals
+
 ![C# 源码经编译器生成 WASM，再由 UE 运行时访问引擎对象](Docs/Assets/README/pipeline.svg)
 
 ```text
@@ -117,7 +133,7 @@ Samples/   示例脚本
 Docs/      使用说明、设计与测试记录
 ```
 
-编译器支持范围与测试记录见[语言实现文档](Docs/Phase66/P66.C_Language_Execution_Plan.md)。
+Roslyn 负责 C# 语法和类型分析，编译工具生成 `.wasm`，UE 插件负责加载和执行。编译器支持范围与测试记录见[语言实现文档](Docs/Phase66/P66.C_Language_Execution_Plan.md)。
 
 <a id="许可"></a>
 
