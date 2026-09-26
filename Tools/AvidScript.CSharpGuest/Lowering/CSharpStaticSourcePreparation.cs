@@ -250,8 +250,12 @@ internal static class CSharpStaticSourcePreparation
             ExceptionFlows = rewrittenFlows?.Concat(addedFlows).OrderBy(flow => flow.MethodSymbolId, StringComparer.Ordinal).ToArray(),
             ClassTypes = source.ClassTypes.Select(type => type with { HasStaticInitialization = false }).ToArray(),
         };
+        // Async lowering emits every validated continuation plan. Include their
+        // synchronous dependencies before the language-error compiler computes
+        // its outcome closure, not only when lowering the final functions.
         ordinary = ordinary with { Reachability = SemanticReachability.ExpandForExecution(ordinary,
-            addedCallables.Select(callable => callable.MethodSymbolId).ToArray()) };
+            addedCallables.Select(callable => callable.MethodSymbolId)
+                .Concat(rewrittenAsync.Select(method => method.MethodSymbolId)).ToArray()) };
         execution = new(fields, owners);
         execution.Attach(ordinary);
         return true;

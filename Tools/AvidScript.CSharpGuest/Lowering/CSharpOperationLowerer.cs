@@ -64,6 +64,7 @@ internal static class CSharpOperationLowerer
             "assignment" => LowerAssignment(context, operation, blockOrdinal, instructions),
             "binary" => LowerBinary(context, operation, blockOrdinal, instructions),
             "compound_assignment" => LowerCompoundAssignment(context, operation, blockOrdinal, instructions),
+            "conditional" => CSharpConditionalOperationLowerer.Lower(context, operation, blockOrdinal, instructions),
             "conversion" => LowerConversion(context, operation, blockOrdinal, instructions),
             "declaration_expression" => LowerAddress(context, operation, blockOrdinal, instructions),
             "delegate_creation" => CSharpManagedDelegateLowerer.LowerCreation(context, operation, blockOrdinal, instructions),

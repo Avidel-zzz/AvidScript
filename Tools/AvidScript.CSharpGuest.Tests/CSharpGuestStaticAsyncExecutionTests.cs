@@ -33,6 +33,14 @@ internal static class CSharpGuestStaticAsyncExecutionTests
             ("producer-reassign", "public static class Producer { static Producer() { Script.Mark(4); throw new InvalidOperationException(); } public static async Task<int> Read(int value) { Script.Mark(9); await AvidContinuations.NextTickAsync(); return value; } }", "Task<int> pending = Read(7); try { pending = Producer.Read(Mark(1)); } catch (TypeInitializationException) { Mark(5); } int value = await pending; return value;"),
             ("finally-local", cache, "try { int value = await Read(7); return value; } finally { int saved = Cache.Current.Value; Mark(saved); }"),
             ("finally-failure", broken, "try { try { int value = await Read(7); return value; } finally { int unused = Broken.Value; Mark(9); } } catch (TypeInitializationException) { return 44; }"),
+            ("conditional-argument", cache, "int value = await Read(Mark(1) > 0 ? Mark(4) : Mark(9)); return value;"),
+            ("conditional-nested", cache, "int value = await Read(7); return Mark(1) > 0 && (Mark(2) > 0 ? Mark(3) > 0 : Mark(9) > 0) ? Mark(4) : Mark(5);"),
+            ("conditional-failure", broken, "int value = await Read(7); try { return Mark(1) > 0 ? Broken.Value : Mark(9); } catch (TypeInitializationException) { return 45; } finally { Mark(8); }"),
+            ("conditional-skipped-failure", broken, "int value = await Read(7); try { return Mark(1) < 0 ? Broken.Value : Mark(9); } finally { Mark(8); }"),
+            ("conditional-reference", cache, "Target first = Cache.Current; Target second = new Target(); int value = await Read(7); Target chosen = Mark(1) > 0 ? first : second; chosen.Value = await Read(9); return first.Value * 100 + second.Value;"),
+            ("conditional-reference-false", cache, "Target first = Cache.Current; Target second = new Target(); int value = await Read(7); Target chosen = Mark(1) < 0 ? first : second; chosen.Value = await Read(9); return first.Value * 100 + second.Value;"),
+            ("conditional-struct", "public struct Pair { public int Value; public Pair(int value) { Value = value; } }", "Pair first = new Pair(4); Pair second = new Pair(9); int value = await Read(7); Pair chosen = Mark(1) > 0 ? first : second; return chosen.Value;"),
+            ("conditional-struct-false", "public struct Pair { public int Value; public Pair(int value) { Value = value; } }", "Pair first = new Pair(4); Pair second = new Pair(9); int value = await Read(7); Pair chosen = Mark(1) < 0 ? first : second; return chosen.Value;"),
         }) Compile(scenario.Item1 + (deferred ? "-deferred" : "-ready"), Source(scenario.Item2, scenario.Item3, deferred));
         Compile("member-cancel", Source(cache, "try { Cache.Current.Value = await Read(7); return 0; } catch (OperationCanceledException) { return Cache.Current.Value; } finally { Mark(8); }", true), true);
         if (!string.IsNullOrWhiteSpace(directory))
@@ -63,7 +71,10 @@ internal static class CSharpGuestStaticAsyncExecutionTests
             Check(!CSharpGuestLowerer.Lower(semantic, hash).Succeeded, name + " ordinary entry must reject envelope");
             Check(CSharpStaticInitializationCompiler.TryLower(semantic, hash, out var module, out string? error)
                 && module is not null, name + " lowering: " + error);
-            Check(module!.SchemaVersion == 30 && module.IrVersion == "1.29"
+            bool readiness = semantic.AsyncMethods.SelectMany(method => method.Segments)
+                .Any(segment => segment.AwaitSite?.CancellationToken is not null);
+            Check(module!.SchemaVersion == (readiness ? 31 : 30) && module.IrVersion == (readiness ? "1.30" : "1.29")
+                && (!readiness || module.DirectAwaitReadiness is { BaseSchemaVersion: 30, BaseIrVersion: "1.29" })
                 && module.StaticStorage is { BaseSchemaVersion: 29, BaseIrVersion: "1.28" }
                 && module.Provenance.SemanticSchemaVersion == 51 && module.Provenance.SemanticVersion == "1.60"
                 && module.Provenance.SemanticSha256 == hash && module.AsyncSynchronousExceptions is not null
@@ -76,7 +87,8 @@ internal static class CSharpGuestStaticAsyncExecutionTests
             var roundTrip = GuestIrSerializer.Deserialize(json);
             Check(json.SequenceEqual(GuestIrSerializer.Serialize(roundTrip))
                 && wasm.Bytes.SequenceEqual(WasmModuleCompiler.Compile(roundTrip).Bytes), name + " canonical execution artifact");
-            Check(Encoding.UTF8.GetString(wasm.Bytes).Contains("guest_ir_base=29/1.28", StringComparison.Ordinal), name + " WASM provenance");
+            Check(Encoding.UTF8.GetString(wasm.Bytes).Contains(readiness ? "guest_ir_base=30/1.29" : "guest_ir_base=29/1.28",
+                StringComparison.Ordinal), name + " WASM provenance");
             if (name == "member-deferred") Mutations(semantic, module);
             if (name == "finally-local-deferred")
             {

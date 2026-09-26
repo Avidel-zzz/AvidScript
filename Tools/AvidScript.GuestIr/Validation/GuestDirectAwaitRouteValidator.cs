@@ -33,7 +33,7 @@ internal static class GuestDirectAwaitRouteValidator
         HashSet<int> callbacks = module.AsyncExceptionRoutes?
             .Select(route => route.CallbackId).ToHashSet() ?? new HashSet<int>();
         HashSet<string> awaitBlocks = new(StringComparer.Ordinal);
-        HashSet<(string Function, string Block)> cancellationProducers = new();
+        HashSet<(string Function, string Block)> cancellationProducers = new(context.CheckedDirectCancellationProducers);
         int previous = -1;
         foreach (GuestDirectAwaitRoute route in routes)
         {
@@ -79,9 +79,7 @@ internal static class GuestDirectAwaitRouteValidator
                 .Where(function => function.Blocks.Any(block => block.Id == route.AwaitBlockId))
                 .ToArray();
             if (schedulers.Length == 0 || schedulers.Any(function =>
-                    function.Blocks.First(block => block.Id == route.AwaitBlockId)
-                        .Instructions.Count(instruction => instruction.Op == "call"
-                            && instruction.TargetId == route.ScheduleImportId) != 1))
+                    !HasSchedule(function, route)))
                 Add(context, $"Direct await callback {route.CallbackId} does not use its cancel-resume Timer import.");
         }
         if (module.Imports.Count(import => import.Module == "avidscript"
@@ -98,6 +96,20 @@ internal static class GuestDirectAwaitRouteValidator
                     && instruction.TargetId == GuestTaskCancellationErrorValidator.ImportId)
                 && !cancellationProducers.Contains((function.Id, block.Id)))))
             Add(context, "IR 24 contains an unlisted typed cancellation producer.");
+    }
+
+    private static bool HasSchedule(GuestFunction function, GuestDirectAwaitRoute route)
+    {
+        var calls = function.Blocks.First(block => block.Id == route.AwaitBlockId).Instructions
+            .Where(instruction => instruction.Op == "call" && instruction.TargetId == route.ScheduleImportId).ToArray();
+        if (calls.Length != 1 || calls[0].OperandIds.Count != 2) return false;
+        string callback = calls[0].OperandIds[1];
+        var instructions = function.Blocks.SelectMany(block => block.Instructions).ToArray();
+        var definitions = instructions.Where(instruction => instruction.ResultId == callback).ToArray();
+        return definitions.Length == 1 && definitions[0].Op == "constant"
+            && definitions[0].Constant is { Kind: "int32" } literal
+            && literal.Value == route.CallbackId.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            && instructions.All(instruction => instruction.TargetId != callback);
     }
 
     private static bool HasStatusRoutes(GuestModule module, GuestFunction resume,

@@ -30,10 +30,14 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptStaticAsyncTest,
     "AvidScript.Runtime.Continuation.CompiledStaticAsync",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptOriginalAsyncMemberTest,
+    "AvidScript.Runtime.Continuation.CompiledOriginalAsyncMember",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 namespace AvidScript::Tests::CompiledAsyncExceptions
 {
 static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 ExpectedScenarios, const TCHAR* LogPrefix,
-    bool CollectWhileSuspended = false, bool HasStaticStorage = false)
+    bool CollectWhileSuspended = false, bool HasStaticStorage = false, int32 ExpectedObservations = 0)
 {
     if (!GEngine) return false;
     const FString Directory = FPlatformMisc::GetEnvironmentVariable(FixtureVariable);
@@ -73,6 +77,27 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
             int32 StaticSlots = 0;
             if (HasStaticStorage && !Test.TestTrue(TEXT("Static fixture declares bounded domain roots"),
                 (*Scenario)->TryGetNumberField(TEXT("staticSlots"), StaticSlots) && StaticSlots > 0 && StaticSlots <= 4096)) return false;
+            struct FObservation { FString Name; int32 Offset = -1; int32 Expected = 0; };
+            TArray<FObservation> Observations;
+            if (ExpectedObservations > 0)
+            {
+                const TArray<TSharedPtr<FJsonValue>>* Entries = nullptr;
+                if (!Test.TestTrue(TEXT("Original fixture has all observation fields"),
+                    (*Scenario)->TryGetArrayField(TEXT("observations"), Entries) && Entries && Entries->Num() == ExpectedObservations)) return false;
+                TSet<FString> ObservationNames;
+                for (const auto& Entry : *Entries)
+                {
+                    const TSharedPtr<FJsonObject>* Object = nullptr;
+                    FObservation Observation;
+                    if (!Test.TestTrue(TEXT("Observation identity, address and expected value"), Entry && Entry->TryGetObject(Object)
+                        && Object && Object->IsValid() && (*Object)->TryGetStringField(TEXT("name"), Observation.Name)
+                        && !Observation.Name.IsEmpty() && !ObservationNames.Contains(Observation.Name)
+                        && (*Object)->TryGetNumberField(TEXT("offset"), Observation.Offset) && Observation.Offset >= 0 && Observation.Offset < 65536
+                        && (*Object)->TryGetNumberField(TEXT("expected"), Observation.Expected))) return false;
+                    ObservationNames.Add(Observation.Name);
+                    Observations.Add(Observation);
+                }
+            }
             TArray<uint8> Bytes;
             if (!Test.TestTrue(*Name, FFileHelper::LoadFileToArray(Bytes, *FPaths::Combine(Directory, Name + TEXT(".wasm"))))) return false;
             // Normal completion, teardown while initially suspended, teardown
@@ -116,6 +141,12 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
                 };
                 bool Stopped = Mode == 1;
                 int32 StoppedResult = Read(Offset), StoppedTrace = Read(TraceOffset), Resumes = 0;
+                TArray<int32> StoppedObservations;
+                auto SnapshotObservations = [&]() {
+                    StoppedObservations.Reset();
+                    for (const auto& Observation : Observations) StoppedObservations.Add(Read(Observation.Offset));
+                };
+                SnapshotObservations();
                 if (Stopped) Owner->Teardown();
                 else if (Cancel)
                 {
@@ -142,12 +173,16 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
                     {
                         StoppedResult = Read(Offset);
                         StoppedTrace = Read(TraceOffset);
+                        SnapshotObservations();
                         Owner->Teardown();
                         Stopped = true;
                     }
                 }
                 Test.TestEqual(*Label, Read(Offset), Stopped ? StoppedResult : Expected);
                 Test.TestEqual(*(Label + TEXT(" cleanup order")), Read(TraceOffset), Stopped ? StoppedTrace : ExpectedTrace);
+                for (int32 Index = 0; Index < Observations.Num(); ++Index)
+                    Test.TestEqual(*(Label + TEXT(" ") + Observations[Index].Name), Read(Observations[Index].Offset),
+                        Stopped ? StoppedObservations[Index] : Observations[Index].Expected);
                 Test.TestEqual(*(Label + TEXT(" tasks")), Owner->GetTaskResultsForTesting().GetCount(), 0);
                 Test.TestEqual(*(Label + TEXT(" waiters")), Owner->GetTaskResultsForTesting().GetWaiterCount(), 0);
                 Test.TestEqual(*(Label + TEXT(" continuations")), Owner->GetActiveCount(), 0);
@@ -195,7 +230,13 @@ bool FAvidScriptAsyncMemberAssignmentsTest::RunTest(const FString& Parameters)
 bool FAvidScriptStaticAsyncTest::RunTest(const FString& Parameters)
 {
     return AvidScript::Tests::CompiledAsyncExceptions::Run(*this,
-        TEXT("AVIDSCRIPT_STATIC_ASYNC_FIXTURE_DIR"), 21, TEXT("static-async"), true, true);
+        TEXT("AVIDSCRIPT_STATIC_ASYNC_FIXTURE_DIR"), 37, TEXT("static-async"), true, true);
+}
+
+bool FAvidScriptOriginalAsyncMemberTest::RunTest(const FString& Parameters)
+{
+    return AvidScript::Tests::CompiledAsyncExceptions::Run(*this,
+        TEXT("AVIDSCRIPT_ORIGINAL_ASYNC_MEMBER_DIR"), 29, TEXT("original-async-member"), true, true, 18);
 }
 
 #endif

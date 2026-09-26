@@ -9,8 +9,9 @@ internal sealed class GuestValidationContext
 
     public GuestValidationContext(GuestModule module)
     {
-        Artifact = module;
-        Module = GuestStaticStorage.ExecutionProfile(module);
+        InputArtifact = module;
+        Artifact = GuestDirectAwaitReadiness.BaseProfile(module);
+        Module = GuestStaticStorage.ExecutionProfile(Artifact);
         diagnostics = new List<GuestDiagnostic>(module.Diagnostics);
         Types = new Dictionary<string, GuestType>(StringComparer.Ordinal);
         Imports = new Dictionary<string, GuestImport>(StringComparer.Ordinal);
@@ -20,6 +21,10 @@ internal sealed class GuestValidationContext
     public GuestModule Module { get; }
 
     public GuestModule Artifact { get; }
+
+    public GuestModule InputArtifact { get; }
+
+    public HashSet<(string Function, string Block)> CheckedDirectCancellationProducers { get; } = new();
 
     public Dictionary<string, GuestStaticSlot> StaticSlots { get; } = new(StringComparer.Ordinal);
 

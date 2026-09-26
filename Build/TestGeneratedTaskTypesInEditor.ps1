@@ -44,7 +44,7 @@ function Invoke-NativeBuild([string]$Name, [string]$Suite) {
     $log = Join-Path $runRoot "$Name.log"
     # The suite is a command-line input to UBT's makefile identity.
     & (Join-Path $EngineRoot 'Engine/Build/BatchFiles/Build.bat') AvidTPSTemplateEditor Win64 Development `
-        "-Project=$project" "-AvidScriptGeneratedTestSuite=$Suite" -WaitMutex -NoHotReloadFromIDE -NoUBTMakefiles -gather *> $log
+        "-Project=$project" "-AvidScriptGeneratedTestSuite=$Suite" -WaitMutex -NoHotReloadFromIDE -NoUBTMakefiles -gather -MaxParallelActions=1 *> $log
     if ($LASTEXITCODE -ne 0) {
         Get-Content $log -Tail 45
         throw "No-clean native build failed: $log"
@@ -100,10 +100,12 @@ function Invoke-GuestBuild([string]$Name, [string]$Source, [string]$Output) {
         $runtimeRoot = Split-Path -Parent $runtimePath
         $ir = Get-Content -LiteralPath (Join-Path $runtimeRoot 'generated_types.guestir.json') -Raw | ConvertFrom-Json
         $wasmHash = (Get-FileHash -LiteralPath (Join-Path $runtimeRoot 'generated_types.wasm') -Algorithm SHA256).Hash.ToLowerInvariant()
-        if ($ir.schema_version -ne 26 -or $ir.ir_version -cne '1.25' -or
+        if ($ir.schema_version -ne 31 -or $ir.ir_version -cne '1.30' -or
+            $ir.direct_await_readiness.base_schema_version -ne 26 -or $ir.direct_await_readiness.base_ir_version -cne '1.25' -or
+            @($ir.direct_await_readiness.guards).Count -eq 0 -or
             $runtime.wasm.sha256 -cne $wasmHash -or $runtime.module_id -cne $runtimeModuleId -or
             $ir.task_local_lifetimes.exception_model -cne 'cancellation') {
-            throw 'Generated throw Runtime must publish exact IR 26/1.25 and matching WASM'
+            throw 'Generated throw Runtime must publish exact IR 31/1.30 with base 26/1.25 and matching WASM'
         }
     }
     foreach ($entry in $types.outputs) {

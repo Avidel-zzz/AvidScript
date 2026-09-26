@@ -16,9 +16,13 @@ foreach ($name in @('Test-CompilerInjectedBindingImport', 'Test-BindingPackageIm
     . ([scriptblock]::Create($definitions[0].Extent.Text))
 }
 $ir = Get-Content -LiteralPath $GuestIrPath -Raw | ConvertFrom-Json
-if ($ir.schema_version -ne 24 -or $ir.ir_version -cne '1.23') { throw 'Expected compiled IR 24/1.23.' }
+if ($ir.schema_version -ne 31 -or $ir.ir_version -cne '1.30' -or
+    $ir.direct_await_readiness.base_schema_version -ne 24 -or $ir.direct_await_readiness.base_ir_version -cne '1.23') {
+    throw 'Expected compiled IR 31/1.30 with cancellation base 24/1.23.'
+}
 $passed = 0
-foreach ($name in @('avid_task_cancel_language_error_v1', 'avid_task_terminal_error_meta_v1', 'avid_task_terminal_error_root_v1')) {
+foreach ($name in @('avid_task_cancel_language_error_v1', 'avid_task_terminal_error_meta_v1', 'avid_task_terminal_error_root_v1',
+    'avid_continuation_cancel_status_v1')) {
     $imports = @($ir.imports | Where-Object name -CEQ $name)
     if ($imports.Count -ne 1) { throw "Expected one cancellation import: $name" }
     $original = $imports[0]
@@ -61,5 +65,5 @@ foreach ($name in @('avid_task_cancel_language_error_v1', 'avid_task_terminal_er
         $passed++
     }
 }
-if ($passed -ne 42) { throw "Cancellation import coverage changed: $passed" }
-Write-Output 'AsyncCancellationImportContracts: 42/42 passed'
+if ($passed -ne 56) { throw "Cancellation import coverage changed: $passed" }
+Write-Output 'AsyncCancellationImportContracts: 56/56 passed'

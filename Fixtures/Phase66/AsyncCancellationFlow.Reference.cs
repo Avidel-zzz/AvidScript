@@ -42,6 +42,7 @@ namespace AvidScript
 
 internal static class Program
 {
+    private static int readinessChecks;
     // Keep source continuations and next-tick completions on one driver thread,
     // like the UE Game Thread. A thread-pool race must not complete a new tick
     // while its caller is still attaching an already-cancelled token.
@@ -99,7 +100,43 @@ internal static class Program
                 passed++;
             }
         }
+        VerifyPreCancelledTask();
         Console.WriteLine($"AsyncCancellationFlow.Reference: {passed}/28 passed");
+        Console.WriteLine($"AsyncCancellationFlow.Readiness: {readinessChecks}/2 passed");
+    }
+
+    private static void VerifyPreCancelledTask()
+    {
+        CancellationScript.Trace = 0;
+        CancellationScript.InnerCatch = 0;
+        CancellationScript.WrongCatch = 0;
+        CancellationScript.Lifetime = AvidScript.AvidCancellationSource.Create();
+        try
+        {
+            CancellationScript.Lifetime.Cancel();
+            Task<int> task = CancellationScript.InnerAsync(2);
+            if (!task.IsCanceled || CancellationScript.Trace != 1
+                || CancellationScript.InnerCatch != 1 || CancellationScript.WrongCatch != 0)
+                throw new InvalidOperationException("Pre-cancelled child must finish catch/finally before returning its Task.");
+            Exception? first = null;
+            for (int attempt = 0; attempt < 2; ++attempt)
+            {
+                Exception? error = null;
+                try { task.GetAwaiter().GetResult(); }
+                catch (Exception caught) { error = caught; }
+                if (error is not TaskCanceledException cancelled
+                    || cancelled.CancellationToken != CancellationScript.Lifetime.Token
+                    || (attempt != 0 && !ReferenceEquals(first, error)))
+                    throw new InvalidOperationException("Pre-cancelled Task must preserve exception and cancellation-token identity.");
+                first = error;
+            }
+            ++readinessChecks;
+        }
+        finally
+        {
+            CancellationScript.Lifetime.Release();
+            AvidScript.AvidContinuations.DiscardPending();
+        }
     }
 
     private static void RunCase(string name, Func<Task<int>> start, bool cancel,
@@ -122,10 +159,24 @@ internal static class Program
             if (task.IsCompleted) throw new InvalidOperationException("Expected a suspended task.");
             if (cancel) CancellationScript.Lifetime.Cancel();
             Stopwatch timer = Stopwatch.StartNew();
+            int resumes = 0;
+            bool checkFirstResume = cancel && name == "conditional:1";
             while (!task.IsCompleted && timer.Elapsed < TimeSpan.FromSeconds(5))
             {
-                if (!scheduler.AdvanceNext() && !AvidScript.AvidContinuations.AdvanceNext()) Thread.Yield();
+                if (scheduler.AdvanceNext())
+                {
+                    if (++resumes == 1 && checkFirstResume)
+                    {
+                        if (CancellationScript.Trace != 1 || CancellationScript.InnerCatch != 1
+                            || CancellationScript.OuterCatch != 1 || CancellationScript.ConditionalTrace != 1
+                            || task.IsCompleted)
+                            throw new InvalidOperationException("Pre-cancelled child catch/finally must finish in the first resumer, before the next suspension.");
+                        ++readinessChecks;
+                    }
+                }
+                else if (!AvidScript.AvidContinuations.AdvanceNext()) Thread.Yield();
             }
+            if (checkFirstResume && resumes == 0) throw new InvalidOperationException("First resumer was not observed.");
             if (!task.IsCompleted) throw new TimeoutException(name);
             int result = 0;
             Exception? error = null;

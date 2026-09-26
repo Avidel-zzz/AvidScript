@@ -24,6 +24,10 @@ internal static class GuestRequiredGraphValidator
         }
 
         GuestProvenance provenance = module.Provenance;
+        if (module.DirectAwaitReadiness is { } readiness
+            && (readiness.BaseIrVersion is null || readiness.Guards is null
+                || readiness.Guards.Any(guard => guard is null || HasNull(guard.FunctionId,
+                    guard.CheckBlockId, guard.ScheduleBlockId, guard.CancellationBlockId)))) return false;
         if (module.AsyncSynchronousExceptions is { } synchronous
             && (synchronous.Sites is null || synchronous.Sites.Any(site => site is null
                 || HasNull(site.MethodFunctionId, site.FunctionId, site.CallBlockId,

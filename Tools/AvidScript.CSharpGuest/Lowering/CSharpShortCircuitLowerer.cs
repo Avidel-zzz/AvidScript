@@ -17,8 +17,17 @@ internal sealed class CSharpShortCircuitLowerer
         int rightInstructionCount,
         bool isAnd)
     {
-        expressions.Add(result.Id, new Expression(
-            result, left, right, merge, rightInstructionCount, isAnd));
+        expressions.Add(result.Id, new Expression(result, left,
+            isAnd ? right : left, isAnd ? left : right, merge,
+            isAnd ? rightInstructionCount : 0, isAnd ? 0 : rightInstructionCount, isAnd));
+    }
+
+    public void RecordConditional(GuestRegister result, GuestRegister condition,
+        GuestRegister whenTrue, GuestRegister whenFalse, GuestRegister merge,
+        int trueInstructionCount, int falseInstructionCount)
+    {
+        expressions.Add(result.Id, new Expression(result, condition, whenTrue, whenFalse,
+            merge, trueInstructionCount, falseInstructionCount, null));
     }
 
     public bool Rewrite(CSharpFunctionLoweringContext context, List<GuestBasicBlock> blocks)
@@ -42,9 +51,11 @@ internal sealed class CSharpShortCircuitLowerer
                 {
                     continue;
                 }
-                int start = index - expression.RightInstructionCount;
-                if (start < 0 || instruction.Op != "binary"
-                    || instruction.OperatorKind != (expression.IsAnd ? "logical_and" : "logical_or")
+                int start = index - expression.TrueInstructionCount - expression.FalseInstructionCount;
+                bool validMarker = expression.ShortCircuitAnd is { } isAnd
+                    ? instruction.Op == "binary" && instruction.OperatorKind == (isAnd ? "logical_and" : "logical_or")
+                    : instruction.Op == "local_load" && instruction.TargetId == expression.Merge.Id;
+                if (start < 0 || !validMarker
                     || !consumed.Add(resultId))
                 {
                     return Fail(context);
@@ -57,8 +68,9 @@ internal sealed class CSharpShortCircuitLowerer
                 continue;
             }
 
-            // Ranges describe existing instructions, not an additional IR opcode. The outer
-            // RHS comes first when nested expressions begin at the same instruction.
+            // Private instruction ranges cover both ?: arms or the lazy operand
+            // of && / ||. Nested choices share this pass so splitting one does not
+            // strand another expression's instructions in different blocks.
             ranges = ranges.OrderBy(range => range.Start).ThenByDescending(range => range.End).ToList();
             int nextRange = 0;
             string currentId = block.Id;
@@ -82,32 +94,38 @@ internal sealed class CSharpShortCircuitLowerer
                     Expression expression = range.Expression;
                     GuestDebugLocation? location = block.Instructions[range.End].DebugLocation;
                     string prefix = $"{block.Id}:short_circuit_{nextBlockOrdinal++}";
-                    string rightId = prefix + ":right";
+                    string trueId = prefix + ":true";
+                    string falseId = prefix + ":false";
                     string joinId = prefix + ":join";
-                    current.Add(new GuestInstruction(
-                        "local_store", null, new[] { expression.Left.Id }, expression.Merge.Id,
-                        null, null));
                     rewritten.Add(new GuestBasicBlock(currentId, current.ToArray(),
-                        new GuestTerminator("branch_if", expression.Left.Id,
-                            expression.IsAnd ? rightId : joinId,
-                            expression.IsAnd ? joinId : rightId, null)));
+                        new GuestTerminator("branch_if", expression.Condition.Id, trueId, falseId, null)));
 
-                    currentId = rightId;
+                    if (!context.TryGetGuestType(expression.Result.TypeId, out GuestType type)) return false;
+                    GuestInstruction Store(GuestRegister value) => type.Storage == "memory"
+                        ? new("memory_copy", null, new[] { expression.Merge.Id, value.Id }, type.Id, null, null, location)
+                        : new("local_store", null, new[] { value.Id }, expression.Merge.Id, null, null, location);
+                    int falseStart = range.Start + expression.TrueInstructionCount;
+                    currentId = trueId;
                     current = new List<GuestInstruction>();
-                    if (!Emit(range.Start, range.End))
+                    if (!Emit(range.Start, falseStart))
                     {
                         return false;
                     }
-                    current.Add(new GuestInstruction(
-                        "local_store", null, new[] { expression.Right.Id }, expression.Merge.Id,
-                        null, null));
+                    current.Add(Store(expression.WhenTrue));
+                    rewritten.Add(new GuestBasicBlock(currentId, current.ToArray(),
+                        new GuestTerminator("branch", null, joinId, null, null)));
+                    currentId = falseId;
+                    current = new List<GuestInstruction>();
+                    if (!Emit(falseStart, range.End)) return false;
+                    current.Add(Store(expression.WhenFalse));
                     rewritten.Add(new GuestBasicBlock(currentId, current.ToArray(),
                         new GuestTerminator("branch", null, joinId, null, null)));
                     currentId = joinId;
                     current = new List<GuestInstruction>
                     {
-                        new("local_load", expression.Result.Id, Array.Empty<string>(),
-                            expression.Merge.Id, null, null, location),
+                        type.Storage == "memory"
+                            ? new("memory_copy", null, new[] { expression.Result.Id, expression.Merge.Id }, type.Id, null, null, location)
+                            : new("local_load", expression.Result.Id, Array.Empty<string>(), expression.Merge.Id, null, null, location),
                     };
                     index = range.End + 1;
                 }
@@ -131,17 +149,19 @@ internal sealed class CSharpShortCircuitLowerer
 
     private static bool Fail(CSharpFunctionLoweringContext context)
     {
-        context.Add("ASCG1004", "Short-circuit expression instructions do not form nested ranges within a basic block.");
+        context.Add("ASCG1004", "Conditional expression instructions do not form nested ranges within a basic block.");
         return false;
     }
 
     private sealed record Expression(
         GuestRegister Result,
-        GuestRegister Left,
-        GuestRegister Right,
+        GuestRegister Condition,
+        GuestRegister WhenTrue,
+        GuestRegister WhenFalse,
         GuestRegister Merge,
-        int RightInstructionCount,
-        bool IsAnd);
+        int TrueInstructionCount,
+        int FalseInstructionCount,
+        bool? ShortCircuitAnd);
 
     private sealed record Range(int Start, int End, Expression Expression);
 }

@@ -39,7 +39,8 @@ internal static class CSharpGuestAsyncCancellationTests
         Check(lowered.Succeeded && lowered.Module is not null,
             "Cancellation lowering: " + string.Join(" | ", lowered.Diagnostics.Select(item => item.Code + ": " + item.Message)));
         GuestModule module = lowered.Module!;
-        Check(module.SchemaVersion == 24 && module.IrVersion == "1.23"
+        Check(module.SchemaVersion == 31 && module.IrVersion == "1.30"
+            && module.DirectAwaitReadiness is { BaseSchemaVersion: 24, BaseIrVersion: "1.23", Guards.Count: > 0 }
             && module.DirectAwaitRoutes is { Count: 10 } && module.AsyncExceptionRoutes is { Count: 8 }
             && module.AsyncExceptionTransfers is { Count: > 0 }, "Cancellation routes and transfers must be explicit.");
         int checks = 6;
@@ -166,8 +167,9 @@ internal static class CSharpGuestAsyncCancellationTests
             Check(GuestCommandLine.Run(guestArgs) == 1 && !File.Exists(guestPath),
                 "Guest CLI must require bounded errors.");
             Check(GuestCommandLine.Run(guestArgs.Concat(new[] { "--language-errors", "bounded" }).ToArray()) == 0
-                && GuestIrSerializer.Deserialize(File.ReadAllBytes(guestPath)).SchemaVersion == 24,
-                "Guest CLI must publish IR 24.");
+                && GuestIrSerializer.Deserialize(File.ReadAllBytes(guestPath)) is
+                    { SchemaVersion: 31, IrVersion: "1.30", DirectAwaitReadiness.BaseSchemaVersion: 24 },
+                "Guest CLI must publish IR 31 with the cancellation base contract.");
             Check(GuestCommandLine.Run(guestArgs.Concat(new[] { "--language-errors", "bounded", "--debug-instrumentation", "enabled" }).ToArray()) == 2
                 && !File.Exists(guestPath), "Unsupported instrumentation must remove earlier Guest output.");
             return 9;

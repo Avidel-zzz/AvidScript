@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AvidScriptWasmRuntime.h"
+#include "AvidScriptCancellationTaskObserver.h"
 #include "Continuation/AvidScriptSessionContinuations.h"
 #include "Memory/AvidScriptManagedHeap.h"
 #include "Dom/JsonObject.h"
@@ -33,7 +34,18 @@ bool FAvidScriptCompiledAsyncCancellationTest::RunTest(const FString& Parameters
 		|| !TestTrue(TEXT("Compiler IR parses"), FJsonSerializer::Deserialize(
 			TJsonReaderFactory<>::Create(Json), Ir)) || !Ir.IsValid()) return false;
 	if (!TestEqual(TEXT("Compiler cancellation IR version"),
-		Ir->GetIntegerField(TEXT("schema_version")), 24)) return false;
+		Ir->GetIntegerField(TEXT("schema_version")), 31)
+		|| !TestEqual(TEXT("Compiler cancellation IR semantic version"),
+			Ir->GetStringField(TEXT("ir_version")), FString(TEXT("1.30")))) return false;
+	const TSharedPtr<FJsonObject>* Readiness = nullptr;
+	if (!TestTrue(TEXT("Compiler cancellation readiness metadata exists"),
+		Ir->TryGetObjectField(TEXT("direct_await_readiness"), Readiness)) || !Readiness || !Readiness->IsValid()) return false;
+	if (!TestEqual(TEXT("Compiler cancellation base schema"),
+		(*Readiness)->GetIntegerField(TEXT("base_schema_version")), 24)
+		|| !TestEqual(TEXT("Compiler cancellation base version"),
+			(*Readiness)->GetStringField(TEXT("base_ir_version")), FString(TEXT("1.23")))
+		|| !TestFalse(TEXT("Compiler cancellation guards are present"),
+			(*Readiness)->GetArrayField(TEXT("guards")).IsEmpty())) return false;
 	const FString ModuleId = Ir->GetStringField(TEXT("module_id"));
 	TMap<FString, int32> Offsets;
 	for (const auto& Value : Ir->GetObjectField(TEXT("memory_layout"))->GetArrayField(TEXT("state_slots")))
@@ -61,11 +73,23 @@ bool FAvidScriptCompiledAsyncCancellationTest::RunTest(const FString& Parameters
 	const int32 ConditionalOffset = Offset(TEXT("CancellationScript"), TEXT("ConditionalTrace"));
 	if (HasAnyErrors()) return false;
 	FString ExpectedCancellationDiagnostic;
+	int32 ExpectedCancellationType = 0;
+	int32 ExpectedCancellationSource = 0;
+	TSet<int32> SourceBoundCallbacks;
+	for (const auto& GuardValue : (*Readiness)->GetArrayField(TEXT("guards")))
+		SourceBoundCallbacks.Add(GuardValue->AsObject()->GetIntegerField(TEXT("callback_id")));
+	int32 OriginalCancellationRoutes = 0;
 	for (const auto& RouteValue : Ir->GetArrayField(TEXT("direct_await_routes")))
 	{
 		const auto Route = RouteValue->AsObject();
 		if (!Route->GetStringField(TEXT("method_function_id")).Contains(TEXT("CancellationScript.InnerAsync("))) continue;
+		// InnerAsync also awaits again after handling cancellation. Only the
+		// source-bound await can originate the cancellation tested below.
+		if (!SourceBoundCallbacks.Contains(Route->GetIntegerField(TEXT("callback_id")))) continue;
+		++OriginalCancellationRoutes;
 		const auto Cancellation = Route->GetObjectField(TEXT("cancellation"));
+		ExpectedCancellationType = Cancellation->GetIntegerField(TEXT("type_token"));
+		ExpectedCancellationSource = Cancellation->GetIntegerField(TEXT("source_token"));
 		const auto Catalog = Ir->GetObjectField(TEXT("language_error_catalog"));
 		FString TypeId;
 		for (const auto& TypeValue : Catalog->GetArrayField(TEXT("types")))
@@ -87,7 +111,8 @@ bool FAvidScriptCompiledAsyncCancellationTest::RunTest(const FString& Parameters
 					Source->GetIntegerField(TEXT("length")));
 		}
 	}
-	if (!TestFalse(TEXT("Original cancellation source is available"), ExpectedCancellationDiagnostic.IsEmpty())) return false;
+	if (!TestEqual(TEXT("Original source-bound cancellation route is unique"), OriginalCancellationRoutes, 1)
+		|| !TestFalse(TEXT("Original cancellation source is available"), ExpectedCancellationDiagnostic.IsEmpty())) return false;
 
 	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false,
 		TEXT("AvidScriptCompiledAsyncCancellationWorld"));
@@ -116,14 +141,24 @@ bool FAvidScriptCompiledAsyncCancellationTest::RunTest(const FString& Parameters
 		const auto Owner = MakeShared<FAvidScriptSessionContinuations>();
 		auto& Endpoint = Owner->ResetActive(World);
 		ON_SCOPE_EXIT { Owner->Teardown(); };
+		AvidScript::Tests::CompiledCancellation::FTaskObserver TaskObserver(Endpoint);
 		FAvidScriptWasmHostContext Context;
-		Context.Tasks = &Endpoint;
+		Context.Tasks = &TaskObserver;
 		Context.Continuations = &Endpoint;
 		Context.World = World;
 		Runtime.SetHostContext(Context);
 		uint8 ModeBytes[sizeof(int32)];
 		FMemory::Memcpy(ModeBytes, &Case, sizeof(Case));
 		FString Error;
+		auto Read = [&](int32 Address) -> int32
+		{
+			uint8 Data[sizeof(int32)];
+			if (!Runtime.ReadStateBytes(Address, MakeArrayView(Data), Error))
+			{ AddError(Error); return MIN_int32; }
+			int32 Value;
+			FMemory::Memcpy(&Value, Data, sizeof(Value));
+			return Value;
+		};
 		if (!TestTrue(TEXT("Set compiler fixture case"),
 			Runtime.WriteStateBytes(ModeOffset, MakeArrayView(ModeBytes), Error)))
 		{ AddError(Error); return false; }
@@ -150,6 +185,19 @@ bool FAvidScriptCompiledAsyncCancellationTest::RunTest(const FString& Parameters
 			{
 				if (Completion.Status == EAvidScriptContinuationStatus::Cancelled) ++Cancelled;
 				const bool bDispatched = Runtime.DispatchContinuation(Completion, Result);
+				if (bCancel && Case == 13 && Resumes == 0)
+				{
+					// ConditionalAsync first waits without a token, then calls InnerAsync
+					// with an already-cancelled source. Its catch/finally must run now.
+					TestEqual(TEXT("Pre-cancelled child finishes in the first resumer"),
+						TaskObserver.CountAwaited(EAvidScriptTaskResultState::Cancelled), 1);
+					TestEqual(TEXT("Pre-cancelled child is awaited through the ready path"), TaskObserver.ReadyCancelledAwaits, 1);
+					TestEqual(TEXT("Inner catch runs before the first resumer returns"), Read(InnerOffset), 1);
+					TestEqual(TEXT("Inner finally runs before the first resumer returns"), Read(TraceOffset), 1);
+					TestEqual(TEXT("Outer catch runs before the first resumer returns"), Read(OuterOffset), 1);
+					TestEqual(TEXT("Conditional finally runs before the next suspension"), Read(ConditionalOffset), 1);
+					TestEqual(TEXT("Final result still waits for the next tick"), Read(ResultOffset), 0);
+				}
 				if (!bDispatched)
 				{
 					++Failures;
@@ -172,19 +220,11 @@ bool FAvidScriptCompiledAsyncCancellationTest::RunTest(const FString& Parameters
 			}
 			if (Owner->GetActiveCount() == 0) break;
 		}
-		auto Read = [&](int32 Address) -> int32
-		{
-			uint8 Data[sizeof(int32)];
-			if (!Runtime.ReadStateBytes(Address, MakeArrayView(Data), Error))
-			{ AddError(Error); return MIN_int32; }
-			int32 Value;
-			FMemory::Memcpy(&Value, Data, sizeof(Value));
-			return Value;
-		};
 		const int32 NormalResults[] = {16, 16, 16, 16, 16, 16, 16, 0, 32, 32, 32, 32, 16, 16, 5, 32};
 		const int32 CancelResults[] = {18, 17, 20, 0, 21, 22, 0, 0, 40, 40, 21, 0, 30, 30, 5, 30};
 		const int32 OuterCatches[] = {0, 0, 1, 0, 1, 0, 0, 0, 2, 2, 1, 1, 1, 1, 0, 1};
-		const int32 CancelledCallbacks[] = {1, 1, 2, 3, 1, 1, 2, 1, 2, 1, 2, 3, 2, 2, 0, 2};
+		const int32 CancelledCallbacks[] = {1, 1, 2, 3, 1, 1, 2, 1, 2, 1, 2, 3, 2, 0, 0, 2};
+		const int32 CancelledTasks[] = {0, 0, 1, 2, 0, 0, 2, 0, 1, 1, 1, 2, 1, 1, 0, 1};
 		const int32 ExpectedResult = bCancel ? CancelResults[Case] : NormalResults[Case];
 		TestEqual(TEXT("Same-source .NET result"), Read(ResultOffset), ExpectedResult);
 		TestEqual(TEXT("Finally order and count"), Read(TraceOffset), Case == 14 ? 0 : Case == 5 || Case >= 8 ? 1 : 12);
@@ -196,16 +236,36 @@ bool FAvidScriptCompiledAsyncCancellationTest::RunTest(const FString& Parameters
 			bCancel ? OuterCatches[Case] : 0);
 		TestEqual(TEXT("Later or incompatible catch is skipped"), Read(WrongOffset), 0);
 		TestEqual(TEXT("Only unhandled cancellation or the explicit VM trap fails"), Failures, bUnhandled || bVmTrap ? 1 : 0);
-		TestEqual(TEXT("Cancelled Task state survives propagation"), Cancelled,
+		TestEqual(TEXT("Only suspended cancellation paths dispatch callbacks"), Cancelled,
 			bCancel ? CancelledCallbacks[Case] : 0);
+		TestEqual(TEXT("Observed Task terminal state is Cancelled"),
+			TaskObserver.CountAwaited(EAvidScriptTaskResultState::Cancelled), bCancel ? CancelledTasks[Case] : 0);
+		TestEqual(TEXT("Cancellation never becomes a Faulted Task"),
+			TaskObserver.CountAwaited(EAvidScriptTaskResultState::Faulted), 0);
+		TestTrue(TEXT("Task state and error identity survive repeated reads and GC"), TaskObserver.bStableTerminalReads);
+		uint64 OriginalErrorObject = 0;
+		for (const auto& Entry : TaskObserver.TerminalSnapshots)
+		{
+			const auto& Snapshot = Entry.Value;
+			if (!TaskObserver.WasAwaited(Entry.Key) || Snapshot.State != EAvidScriptTaskResultState::Cancelled) continue;
+			if (!TestTrue(TEXT("Cancelled Task retains a typed error"), Snapshot.LanguageError.IsSet())) return false;
+			TestEqual(TEXT("Cancelled Task preserves original error type"), Snapshot.LanguageError->TypeToken, ExpectedCancellationType);
+			TestEqual(TEXT("Cancelled Task preserves original source"), Snapshot.LanguageError->SourceToken, ExpectedCancellationSource);
+			TestTrue(TEXT("Cancelled Task has an exception object"), Snapshot.LanguageError->ObjectToken != 0);
+			if (OriginalErrorObject == 0) OriginalErrorObject = Snapshot.LanguageError->ObjectToken;
+			TestEqual(TEXT("Propagation preserves exception object identity"), Snapshot.LanguageError->ObjectToken, OriginalErrorObject);
+		}
 		TestTrue(TEXT("Compiler callbacks actually executed"), Resumes >= 2);
 		if (Case == 6) TestEqual(TEXT("Ready Task await does not schedule a sixth callback"), Resumes, 5);
 		if (bRepeated) TestEqual(TEXT("Repeated ready Task awaits add no callbacks"), Resumes,
 			Case == 9 ? 6 : bCancel && Case >= 10 ? 3 : 4);
 		if (bConditional) TestEqual(TEXT("Conditional Task awaits schedule only the selected path"), Resumes,
-			Case == 13 ? 5 : Case == 14 ? 2 : 4);
+			Case == 13 ? bCancel ? 3 : 5 : Case == 14 ? 2 : 4);
 		TestEqual(TEXT("Continuations retire before teardown"), Owner->GetActiveCount(), 0);
 		TestEqual(TEXT("Tasks release before teardown"), Owner->GetTaskResultsForTesting().GetCount(), 0);
+		TestEqual(TEXT("Task waiters release before teardown"), Owner->GetTaskResultsForTesting().GetWaiterCount(), 0);
+		TestEqual(TEXT("Continuation frames release before teardown"), Owner->GetStateFrameByteCountForTesting(), 0);
+		TestEqual(TEXT("Cancellation bindings release before teardown"), Owner->GetCancellationBindingCountForTesting(), 0);
 		const auto Stats = Runtime.GetManagedHeapForTesting()->GetStats();
 		TestEqual(TEXT("Exception roots release before teardown"), Stats.LiveRoots, static_cast<uint32>(0));
 		TestEqual(TEXT("Unowned objects collect before teardown"), Stats.LiveObjects, static_cast<uint32>(0));

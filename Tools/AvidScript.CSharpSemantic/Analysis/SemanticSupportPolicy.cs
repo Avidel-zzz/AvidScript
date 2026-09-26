@@ -55,6 +55,11 @@ internal static class SemanticSupportPolicy
                 "Unsafe pointer and function-pointer semantics are not supported by the current AvidScript semantic profile.");
         }
 
+        if (operation is IConditionalOperation { IsRef: true })
+        {
+            return Unsupported("ASCS2001", "Conditional ref expressions require an address-lifetime contract and are not supported.");
+        }
+
         return hasStableProjection
             ? new SemanticSupportDecision(true, null, null)
             : Unsupported(

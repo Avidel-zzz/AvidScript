@@ -83,7 +83,9 @@ FString Provenance(int32 GuestSchema = 17, const TCHAR* LifetimeModel = TEXT("ca
 		*ModuleId, *SourceSha256, *FString::ChrN(64, 'b'), *FString::ChrN(64, 'c'),
 		GuestSchema, *GuestVersion);
 	if (StaticBaseSchema) Result += FString::Printf(TEXT("\nguest_ir_base=%d/1.%d"), StaticBaseSchema, StaticBaseSchema - 1);
-	const int32 ProfileSchema = GuestSchema == 30 ? 26 : StaticBaseSchema ? StaticBaseSchema : GuestSchema;
+	const int32 ProfileSchema = GuestSchema == 30
+		|| (GuestSchema == 31 && (StaticBaseSchema == 29 || StaticBaseSchema == 30))
+		? 26 : StaticBaseSchema ? StaticBaseSchema : GuestSchema;
 	if (ProfileSchema == 25 || ProfileSchema == 26) Result += FString::Printf(TEXT("\ntask_local_exception_model=%s"), LifetimeModel);
 	return Result;
 }
@@ -333,6 +335,19 @@ bool FAvidScriptLanguageErrorCatalogRuntimeTest::RunTest(const FString& Paramete
 	const FString TransferJson = Json(Document(28));
 	const FString SynchronousAsyncJson = Json(Document(29));
 	const FString StaticAsyncJson = Json(Document(30));
+	auto ReadinessDocument = Document(31);
+	ReadinessDocument->GetArrayField(TEXT("types"))[0]->AsObject()->SetStringField(
+		TEXT("type_id"), TEXT("type:global::System.Threading.Tasks.TaskCanceledException"));
+	const FString ReadinessJson = Json(ReadinessDocument);
+	for (const int32 Base : {24, 25, 26, 29, 30})
+	{
+		TestTrue(TEXT("IR 31 loads each supported cancellation execution profile"),
+			FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+				Module(&ReadinessJson, true, false, 31, TEXT("cancellation"), Base), ModuleId, Catalog, Error));
+		TestTrue(TEXT("IR 31 preserves language faults and typed cancellation"),
+			Catalog && Catalog->SupportsTaskLanguageErrorFault() && Catalog->SupportsTaskCancellationError()
+			&& Catalog->IsCancellationType(1));
+	}
 	TestTrue(TEXT("IR 30 static/async composition requires IR 29 base"),
 		FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 			Module(&StaticAsyncJson, true, false, 30, TEXT("cancellation"), 29), ModuleId, Catalog, Error));
@@ -413,6 +428,35 @@ bool FAvidScriptLanguageErrorCatalogRuntimeTest::RunTest(const FString& Paramete
 	}
 
 	TArray<TPair<FString, TArray<uint8>>> Invalid;
+	Invalid.Emplace(TEXT("IR 31 requires a base execution profile"), Module(&ReadinessJson, true, false, 31));
+	for (const int32 Base : {4, 17, 20, 21, 22, 23, 27, 28, 31, 32})
+		Invalid.Emplace(TEXT("IR 31 rejects unsupported base profiles"), Module(&ReadinessJson, true, false, 31, TEXT("cancellation"), Base));
+	auto ReadinessEmpty = Document(31);
+	ReadinessEmpty->SetArrayField(TEXT("types"), {});
+	ReadinessEmpty->SetArrayField(TEXT("sources"), {});
+	const FString ReadinessEmptyJson = Json(ReadinessEmpty);
+	for (const int32 Base : {24, 25, 26, 29, 30})
+	{
+		Invalid.Emplace(TEXT("IR 31 requires its catalog"), Module(nullptr, true, false, 31, TEXT("cancellation"), Base));
+		Invalid.Emplace(TEXT("IR 31 rejects empty cancellation catalogs"), Module(&ReadinessEmptyJson, true, false, 31, TEXT("cancellation"), Base));
+		const FString BaseJson = Json(Document(Base));
+		Invalid.Emplace(TEXT("IR 31 cannot use its base catalog identity"), Module(&BaseJson, true, false, 31, TEXT("cancellation"), Base));
+		const int32 InnerBase = Base == 30 ? 29 : Base == 29 ? 26 : 0;
+		Invalid.Emplace(TEXT("IR 31 catalog cannot be downgraded"), Module(&ReadinessJson, true, false, Base, TEXT("cancellation"), InnerBase));
+		if (Base != 24)
+			for (const TCHAR* Model : {TEXT("none"), TEXT("fault"), TEXT("exception"), TEXT("cleanup"), TEXT("cleanup_only"), TEXT("unknown")})
+				Invalid.Emplace(TEXT("IR 31 retains cancellation ownership"), Module(&ReadinessJson, true, false, 31, Model, Base));
+		const FString Metadata = Provenance(31, TEXT("cancellation"), Base);
+		for (const FString& MismatchedMetadata : {
+			Metadata.Replace(TEXT("guest_ir=31/1.30"), TEXT("guest_ir=31/1.29")),
+			Metadata.Replace(*FString::Printf(TEXT("guest_ir_base=%d/1.%d"), Base, Base - 1),
+				*FString::Printf(TEXT("guest_ir_base=%d/1.%d"), Base, Base - 2))})
+		{
+			TArray<uint8> Mismatched = Module(&ReadinessJson, false);
+			Custom(Mismatched, "avidscript.provenance", MismatchedMetadata);
+			Invalid.Emplace(TEXT("IR 31 requires exact outer and base versions"), MoveTemp(Mismatched));
+		}
+	}
 	Invalid.Emplace(TEXT("IR 30 requires its execution profile"), Module(&StaticAsyncJson, true, false, 30));
 	Invalid.Emplace(TEXT("IR 30 requires its catalog"), Module(nullptr, true, false, 30, TEXT("cancellation"), 29));
 	Invalid.Emplace(TEXT("IR 30 cannot load an older catalog"), Module(&SynchronousAsyncJson, true, false, 30, TEXT("cancellation"), 29));

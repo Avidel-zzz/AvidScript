@@ -50,7 +50,8 @@ try {
         $referenceProject.Save($referencePath)
         $reference = & $DotNetPath run --project $referencePath -c Release -- $value
         $reference | Set-Content -LiteralPath (Join-Path $directory 'reference.log') -Encoding utf8NoBOM
-        if ($LASTEXITCODE -ne 0 -or @($reference | Where-Object { $_ -ceq 'AsyncCancellationFlow.Reference: 28/28 passed' }).Count -ne 1) {
+        if ($LASTEXITCODE -ne 0 -or @($reference | Where-Object { $_ -ceq 'AsyncCancellationFlow.Reference: 28/28 passed' }).Count -ne 1 -or
+            @($reference | Where-Object { $_ -ceq 'AsyncCancellationFlow.Readiness: 2/2 passed' }).Count -ne 1) {
             throw "The same-source .NET reference failed for value $value."
         }
         $outputRoot = Join-Path $directory 'FormalBuild'
@@ -70,7 +71,9 @@ try {
         $semanticHash = (Get-FileHash -LiteralPath "$prefix.csharp.semantic.json" -Algorithm SHA256).Hash.ToLowerInvariant()
         if (-not $report.succeeded -or $report.result -cne 'direct_abi_built' -or
             $report.semantic.schema_version -ne 44 -or $report.semantic.version -cne '1.53' -or
-            $ir.schema_version -ne 24 -or $ir.ir_version -cne '1.23' -or -not $ir.succeeded -or
+            $ir.schema_version -ne 31 -or $ir.ir_version -cne '1.30' -or -not $ir.succeeded -or
+            $ir.direct_await_readiness.base_schema_version -ne 24 -or $ir.direct_await_readiness.base_ir_version -cne '1.23' -or
+            @($ir.direct_await_readiness.guards).Count -eq 0 -or
             $report.compilation.language_errors -cne 'bounded' -or -not $report.compilation.async_cancellation_flow -or
             $report.compiler_worker.mode -cne 'disabled' -or $report.compiler_worker.used -or
             $report.semantic_cache.enabled -or $report.compilation_cache.enabled -or
@@ -82,11 +85,11 @@ try {
             throw "Formal lifecycle identity/preview contract failed: $directory"
         }
         $imports = & (Join-Path $PSScriptRoot 'Contracts/TestAsyncCancellationImportContracts.ps1') -GuestIrPath "$prefix.guestir.json"
-        if ($LASTEXITCODE -ne 0 -or @($imports | Where-Object { $_ -ceq 'AsyncCancellationImportContracts: 42/42 passed' }).Count -ne 1) {
+        if ($LASTEXITCODE -ne 0 -or @($imports | Where-Object { $_ -ceq 'AsyncCancellationImportContracts: 56/56 passed' }).Count -ne 1) {
             throw "Typed cancellation import contracts failed for value $value."
         }
         $artifacts += [pscustomobject]@{ value = $value; manifest = "$prefix.avidscript.json"; wasm_sha256 = $wasmHash }
-        Write-Output "PASS formal lifecycle value=$value; .NET=28/28 imports=42/42 wasm=$wasmHash"
+        Write-Output "PASS formal lifecycle value=$value; .NET=28/28 readiness=2/2 imports=56/56 wasm=$wasmHash"
     }
     if ($artifacts[0].wasm_sha256 -ceq $artifacts[1].wasm_sha256) { throw 'Reload generations must contain different code.' }
     $env:AVIDSCRIPT_TYPED_CANCELLATION_MANIFEST = $artifacts[0].manifest
@@ -113,6 +116,8 @@ try {
         throw "Typed cancellation evidence incomplete: found=$found success=$success failed=$failed complete=$complete lifecycle=$lifecycle reload=$reload log=$logPath"
     }
     [ordered]@{ passed = 60; total = 60; lifecycle_passed = 36; reload_passed = 24; reference_passed = 56;
+        reference_readiness_passed = 4; import_contracts_passed = 112;
+        guest_ir_version = '31/1.30'; guest_ir_base_version = '24/1.23';
         automation_passed = 2; artifacts = $artifacts; log = $logPath } |
         ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $runRoot 'results.json') -Encoding utf8NoBOM
     Write-Output "Typed cancellation lifecycle: 60/60 passed; .NET=56/56 Automation=2/2; evidence=$runRoot; log=$logPath"

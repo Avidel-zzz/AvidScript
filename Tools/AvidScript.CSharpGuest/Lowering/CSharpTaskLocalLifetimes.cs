@@ -127,8 +127,19 @@ internal static class CSharpTaskLocalLifetimes
                 && (blocks[index].Terminator.TargetBlockId == target || blocks[index].Terminator.FalseTargetBlockId == target)).ToArray();
             // Direct awaits have no synchronous successor; their callback entry
             // below carries this edge. Other reachable edges must be present.
-            if (predecessors.Length == 0) return !resumed
-                && method.Segments[sourceOrdinal].Transfer!.Kind == SemanticAsyncMethod.AwaitTransferKind;
+            if (predecessors.Length == 0)
+            {
+                // Source effects conservatively include static field access.
+                // A default-only static owner emits no throwing guard, so that
+                // segment has no synchronous error edge on which to release.
+                if (synchronousFailure && !blocks.Any(block => HasPrefix(block.Id, prefix)
+                        && CSharpAsyncSynchronousExecutionContext.Find(context.Document)?.FailurePublishBlocks.Contains(block.Id) == true))
+                    return true;
+                if (!resumed && method.Segments[sourceOrdinal].Transfer!.Kind == SemanticAsyncMethod.AwaitTransferKind)
+                    return true;
+                context.Add("ASCG1026", $"Task scope exit {sourceOrdinal}->{targetOrdinal} has no emitted {(synchronousFailure ? "synchronous error" : "normal")} edge.");
+                return false;
+            }
             string bridge = prefix + ":$task:exit:" + (synchronousFailure ? "synchronous:" : "") + targetOrdinal;
             List<GuestInstruction> instructions = new();
             foreach (string owner in owners)

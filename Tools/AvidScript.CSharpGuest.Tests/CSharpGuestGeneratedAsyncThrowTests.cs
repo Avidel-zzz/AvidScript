@@ -35,7 +35,8 @@ internal static class CSharpGuestGeneratedAsyncThrowTests
             var lowered = CSharpGuestLowerer.Lower(semantic, hash, enableAsyncLanguageErrors: true);
             Check(lowered.Succeeded, "Generated throw lowering: " + string.Join(" | ", lowered.Diagnostics.Select(item => item.Message)));
             var module = lowered.Module!;
-            Check(module.SchemaVersion == 26 && module.IrVersion == "1.25"
+            Check(module is { SchemaVersion: 31, IrVersion: "1.30",
+                    DirectAwaitReadiness: { BaseSchemaVersion: 26, BaseIrVersion: "1.25", Guards.Count: > 0 } }
                 && module.AsyncExceptionTransfers!.Where(item => item.Raise is not null)
                     .Select(item => item.Raise!.SourceToken).Distinct().Count() == 3,
                 "Generated throws preserve all three source throw sites");

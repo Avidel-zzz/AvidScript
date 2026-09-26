@@ -408,7 +408,7 @@ internal static class CSharpAsyncCfgLowerer
                 entryTargets.Add(cancellationTarget);
         }
         foreach (SemanticAsyncSegment segment in entryTargets
-            .SelectMany(target => CollectSynchronousReachable(method, target))
+            .SelectMany(target => CollectSynchronousReachable(document, method, target))
             .DistinctBy(item => item.Ordinal)
             .OrderBy(item => item.Ordinal))
         {
@@ -908,6 +908,26 @@ internal static class CSharpAsyncCfgLowerer
                 awaitSite.CallbackId),
             "await");
 
+        if (scheduledToken is null) return false;
+        if (CSharpDirectAwaitReadinessLowerer.NeedsGuard(context.Document, method, segment))
+        {
+            if (!CSharpDirectAwaitReadinessLowerer.Emit(context, method, segment, scheduledToken,
+                    abi.BindCancellationImportId, blocks, ref activeBlockId, ref instructions)) return false;
+            if (CSharpAsyncCancellationLowerer.NeedsImplicitPropagation(context.Document, method, segment))
+            {
+                string cancellationTarget = CSharpAsyncCancellationLowerer.ImplicitPropagationBlock(method, awaitSite);
+                // A loop can also reach the incoming await's cancellation path.
+                if (!blocks.Any(block => block.Id == cancellationTarget))
+                {
+                    string propagation = cancellationTarget + ":propagate_exception";
+                    blocks.Add(new(cancellationTarget, Array.Empty<GuestInstruction>(),
+                        new("branch", null, propagation, null, null)));
+                    if (!TryLowerExceptionPropagation(method, segment, context, initialEntry,
+                            propagation, new List<GuestInstruction>(), blocks)) return false;
+                }
+            }
+        }
+
         GuestRegister? stateStoreAccepted = null;
         if (CSharpAsyncClosureState.Frame(context.Document, method, awaitSite) is { } outgoingFrame
             && !CSharpAsyncLowerer.EmitOutgoingState(
@@ -1039,6 +1059,7 @@ internal static class CSharpAsyncCfgLowerer
     }
 
     private static IReadOnlyList<SemanticAsyncSegment> CollectSynchronousReachable(
+        SemanticDocument document,
         SemanticAsyncMethod method,
         int entryOrdinal)
     {
@@ -1082,6 +1103,9 @@ internal static class CSharpAsyncCfgLowerer
                     pending.Push(cancellationTarget);
             }
             if (segment.SynchronousExceptionTarget is int synchronousTarget) pending.Push(synchronousTarget);
+            if (CSharpDirectAwaitReadinessLowerer.NeedsGuard(document, method, segment)
+                && segment.Transfer.CancellationTarget is int directCancellationTarget)
+                pending.Push(directCancellationTarget);
         }
         return reachable.Select(ordinal => segments[ordinal]).ToArray();
     }

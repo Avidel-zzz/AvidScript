@@ -6,6 +6,18 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--conditional-values")
+            {
+                int focused = CSharpGuestShortCircuitTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.ConditionalValues: {focused}/{focused} passed");
+                return 0;
+            }
+            if (args.Length == 1 && args[0] == "--original-async-member")
+            {
+                int focused = CSharpGuestOriginalAsyncMemberTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.OriginalAsyncMember: {focused}/{focused} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--static-async")
             {
                 int focused = CSharpGuestStaticAsyncExecutionTests.Run();
@@ -238,6 +250,7 @@ internal static class Program
                 + CSharpGuestStaticSourceExecutionTests.Run()
                 + CSharpGuestStaticSourceFailureTests.Run()
                 + CSharpGuestStaticAsyncExecutionTests.Run()
+                + CSharpGuestOriginalAsyncMemberTests.Run()
                 + CSharpGuestAsyncLanguageErrorTests.Run()
                 + CSharpGuestDirectAwaitTests.Run()
                 + CSharpGuestAsyncCancellationTests.Run()

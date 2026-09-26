@@ -18,6 +18,8 @@ internal static class CSharpGuestShortCircuitTests
             StructuredAndResumableLoopsPreserveOrder,
             EagerOperatorsAndSkippedFailuresRemainDistinct,
             MalformedConditionalOperatorsFailClosed,
+            ConditionalArmsComposeWithShortCircuitOperands,
+            MalformedConditionalValuesFailClosed,
         };
         foreach (Action test in tests)
         {
@@ -145,6 +147,53 @@ internal static class CSharpGuestShortCircuitTests
             Assert(!result.Succeeded && result.Module is null && result.Diagnostics.Count > 0,
                 "malformed or lifted conditional operators must not publish a module");
         }
+    }
+
+    private static void ConditionalArmsComposeWithShortCircuitOperands()
+    {
+        Execute("await AvidContinuations.NextTickAsync(); Ready = Mark(1, true) ? Mark(2, true) : Fail();",
+            new[] { 1, 2 }, true);
+        Execute("await AvidContinuations.NextTickAsync(); Ready = Mark(1, false) ? Fail() : Mark(3, false);",
+            new[] { 1, 3 }, false);
+        Execute("await AvidContinuations.NextTickAsync(); Consume(Argument(1), Mark(2, false) ? Fail() : Mark(3, true), Argument(4));",
+            new[] { 1, 2, 3, 4 }, true);
+        Execute("await AvidContinuations.NextTickAsync(); Ready = (Mark(1, false) || Mark(2, true)) ? (Mark(3, false) ? Fail() : Mark(4, true)) : Fail();",
+            new[] { 1, 2, 3, 4 }, true);
+        Execute("await AvidContinuations.NextTickAsync(); Ready = Mark(1, false) && (Mark(2, true) ? Fail() : Mark(3, true));",
+            new[] { 1 }, false);
+        Execute("await AvidContinuations.NextTickAsync(); Ready = (Mark(1, false) ? Argument(2) : Argument(3)) == 3;",
+            new[] { 1, 3 }, true);
+    }
+
+    private static void MalformedConditionalValuesFailClosed()
+    {
+        var document = Analyze("await AvidContinuations.NextTickAsync(); Ready = Mark(1, true) ? Mark(2, true) : Mark(3, false);");
+        foreach (int mutation in Enumerable.Range(0, 4))
+        {
+            SemanticOperation Rewrite(SemanticOperation operation)
+            {
+                if (operation.Kind != "conditional") return operation with { Children = operation.Children.Select(Rewrite).ToArray() };
+                return mutation switch
+                {
+                    0 => operation with { Children = operation.Children.Take(2).ToArray() },
+                    1 => operation with { Children = operation.Children.Select((child, index) => index == 0 ? child with { TypeId = "type:int32" } : child).ToArray() },
+                    2 => operation with { TypeId = "type:int32" },
+                    _ => operation with { IsLifted = true },
+                };
+            }
+            var malformed = document with { AsyncMethods = document.AsyncMethods.Select(method => method with {
+                Segments = method.Segments.Select(segment => segment with { Statements = segment.Statements.Select(statement =>
+                    statement with { Operation = Rewrite(statement.Operation) }).ToArray() }).ToArray() }).ToArray() };
+            Assert(!CSharpGuestLowerer.Lower(malformed, new string('a', 64)).Succeeded,
+                "malformed conditional must not publish an eagerly evaluated value");
+        }
+        const string refSource = "public static class Choice { public static int A; public static int B; public static int Read(bool choose) => (choose ? ref A : ref B); }";
+        const string refId = "Scripts/ConditionalRef.cs";
+        var byRef = SemanticAnalyzer.Analyze(refSource, refId,
+            AvidScript.CSharpFrontend.FrontendAnalyzer.Analyze(refSource, refId).Source.Sha256);
+        Assert(byRef.Diagnostics.Any(item => item.Code == "ASCS2001" && item.Message.Contains("Conditional ref", StringComparison.Ordinal))
+            && !CSharpGuestLowerer.Lower(byRef, new string('a', 64)).Succeeded,
+            "conditional ref storage must not be replaced by a copied value");
     }
 
     private static SemanticDocument Analyze(string body)

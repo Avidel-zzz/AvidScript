@@ -452,9 +452,13 @@ public static class CSharpGuestLowerer
         };
         if (CSharpStaticExecutionContext.Find(document) is { } staticContext)
             module = staticContext.Apply(document, module);
+        if (!CSharpDirectAwaitRouteBinder.TryBind(module, out module, out string? routeError))
+            return Failure(new[] { new GuestDiagnostic("ASCG1026", "error", routeError!, null) });
         // Only the internal source composition pass may receive this unfinished
         // module. Its sync callees still need outcome bodies and final validation.
         if (synchronousAsync is not null) return new(true, module, Array.Empty<GuestDiagnostic>());
+        if (!CSharpDirectAwaitReadinessLowerer.TryWrap(module, out module, out string? readinessError))
+            return Failure(new[] { new GuestDiagnostic("ASCG1026", "error", readinessError!, null) });
         GuestValidationResult validation = GuestModuleValidator.Validate(module);
         if (!validation.Succeeded)
         {

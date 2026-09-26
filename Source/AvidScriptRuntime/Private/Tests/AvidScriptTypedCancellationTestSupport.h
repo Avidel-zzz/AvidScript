@@ -44,11 +44,22 @@ struct FFixture
 		FFileHelper::BufferToString(Json, IrBytes.GetData(), IrBytes.Num());
 		TSharedPtr<FJsonObject> Ir;
 		if (!Test.TestTrue(TEXT("Compiler IR parses"), FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), Ir))
-			|| !Ir.IsValid()
-			|| !Test.TestEqual(TEXT("Compiler cancellation IR version"), Ir->GetIntegerField(TEXT("schema_version")), Schema)
+			|| !Ir.IsValid()) return false;
+		const bool bReadiness = Ir->GetIntegerField(TEXT("schema_version")) == 31;
+		const FString BaseVersion = Schema == 25 ? TEXT("1.24") : TEXT("1.23");
+		if (!Test.TestEqual(TEXT("Compiler cancellation IR version"), Ir->GetIntegerField(TEXT("schema_version")), bReadiness ? 31 : Schema)
 			|| !Test.TestEqual(TEXT("Compiler cancellation IR semantic version"), Ir->GetStringField(TEXT("ir_version")),
-				FString(Schema == 25 ? TEXT("1.24") : TEXT("1.23")))
+				bReadiness ? FString(TEXT("1.30")) : BaseVersion)
 			|| !Test.TestEqual(TEXT("IR and executable share module identity"), Ir->GetStringField(TEXT("module_id")), Manifest.ModuleId)) return false;
+		if (bReadiness)
+		{
+			const TSharedPtr<FJsonObject>* Plan = nullptr;
+			if (!Test.TestTrue(TEXT("Compiler readiness plan exists"), Ir->TryGetObjectField(TEXT("direct_await_readiness"), Plan))
+				|| !Plan || !Plan->IsValid()
+				|| !Test.TestEqual(TEXT("Compiler cancellation base schema"), (*Plan)->GetIntegerField(TEXT("base_schema_version")), Schema)
+				|| !Test.TestEqual(TEXT("Compiler cancellation base version"), (*Plan)->GetStringField(TEXT("base_ir_version")), BaseVersion)
+				|| !Test.TestFalse(TEXT("Compiler readiness guards exist"), (*Plan)->GetArrayField(TEXT("guards")).IsEmpty())) return false;
+		}
 		Offsets.Reset();
 		for (const auto& Value : Ir->GetObjectField(TEXT("memory_layout"))->GetArrayField(TEXT("state_slots")))
 		{

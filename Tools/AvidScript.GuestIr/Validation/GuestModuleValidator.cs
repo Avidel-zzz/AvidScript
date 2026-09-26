@@ -50,6 +50,7 @@ public static class GuestModuleValidator
         GuestMemoryLayoutValidator.Validate(context);
         ValidateFunctions(context);
         GuestAsyncExceptionRouteValidator.Validate(context);
+        GuestDirectAwaitReadinessValidator.Validate(context);
         GuestDirectAwaitRouteValidator.Validate(context);
         GuestAsyncExceptionTransferValidator.Validate(context);
         ValidateExports(context);

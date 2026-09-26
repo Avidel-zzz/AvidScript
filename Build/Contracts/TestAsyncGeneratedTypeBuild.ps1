@@ -53,7 +53,9 @@ function Read-VerifiedPackage {
         $descriptor.runtime_manifest.sha256 -cne (Get-FileHash $runtimePath -Algorithm SHA256).Hash.ToLowerInvariant() -or
         $runtime.wasm.sha256 -cne (Get-FileHash $wasm -Algorithm SHA256).Hash.ToLowerInvariant() -or
         $runtime.module_id -cne $descriptor.runtime_module_id -or
-        $ir.schema_version -ne 25 -or $ir.ir_version -cne '1.24' -or
+        $ir.schema_version -ne 31 -or $ir.ir_version -cne '1.30' -or
+        $ir.direct_await_readiness.base_schema_version -ne 25 -or $ir.direct_await_readiness.base_ir_version -cne '1.24' -or
+        @($ir.direct_await_readiness.guards).Count -eq 0 -or
         $ir.task_local_lifetimes.exception_model -cne 'cancellation' -or
         -not $report.succeeded -or -not $report.compilation.async_cancellation_flow -or
         -not $report.compilation.async_exception_flow -or -not $report.compilation.direct_await_cleanup -or
@@ -80,7 +82,7 @@ Copy-Item -LiteralPath $initialCase.Native -Destination $initialArchive -Recurse
 $initial = Read-VerifiedPackage ([pscustomobject]@{ ExitCode = 0; Native = $initialArchive;
     Descriptor = Join-Path $initialArchive 'AvidScriptGeneratedPackage.json' })
 $checks++
-Write-Output 'PASS Task cancellation source -> native shell + Semantic 45 -> IR 25 -> WASM package'
+Write-Output 'PASS Task cancellation source -> native shell + Semantic 45 -> IR 31/base 25 -> WASM package'
 
 $nextSource = Join-Path $runRoot 'SharedTaskLifetimeNext.cs'
 $text = [IO.File]::ReadAllText($source)

@@ -65,7 +65,9 @@ try {
         $semanticHash = (Get-FileHash "$prefix.csharp.semantic.json" -Algorithm SHA256).Hash.ToLowerInvariant()
         if (-not $report.succeeded -or $report.result -cne 'direct_abi_built' -or
             $report.semantic.schema_version -ne 45 -or $report.semantic.version -cne '1.54' -or
-            $ir.schema_version -ne 25 -or $ir.ir_version -cne '1.24' -or -not $ir.succeeded -or
+            $ir.schema_version -ne 31 -or $ir.ir_version -cne '1.30' -or -not $ir.succeeded -or
+            $ir.direct_await_readiness.base_schema_version -ne 25 -or $ir.direct_await_readiness.base_ir_version -cne '1.24' -or
+            @($ir.direct_await_readiness.guards).Count -eq 0 -or
             $ir.task_local_lifetimes.exception_model -cne 'cancellation' -or
             @($ir.task_local_lifetimes.functions | ForEach-Object { $_.scope_exits }).Count -eq 0 -or
             $report.semantic_cache.enabled -or $report.compilation_cache.enabled -or $report.compiler_worker.used -or
@@ -77,7 +79,7 @@ try {
             throw "Task lifetime formal contract failed: $directory"
         }
         $artifacts += [pscustomobject]@{ seed = $seed; manifest = "$prefix.avidscript.json"; wasm_sha256 = $wasmHash }
-        Write-Output "PASS formal lifecycle seed=$seed; .NET=2/2; IR=25/1.24; wasm=$wasmHash"
+        Write-Output "PASS formal lifecycle seed=$seed; .NET=2/2; IR=31/1.30 base=25/1.24; wasm=$wasmHash"
     }
     if ($artifacts[0].wasm_sha256 -ceq $artifacts[1].wasm_sha256) { throw 'Reload must use different executable code.' }
     $env:AVIDSCRIPT_TASK_LIFETIME_MANIFEST = $artifacts[0].manifest
@@ -102,7 +104,8 @@ try {
         -not $log.Contains('TaskLocalLifetimeLifecycle: 48/48 passed')) {
         throw "Lifecycle evidence incomplete: found=$found success=$success failed=$failed complete=$complete cases=$cases log=$logPath"
     }
-    [ordered]@{ passed = 48; total = 48; reference_passed = 4; automation_passed = 1; artifacts = $artifacts; log = $logPath } |
+    [ordered]@{ passed = 48; total = 48; reference_passed = 4; automation_passed = 1;
+        guest_ir_version = '31/1.30'; guest_ir_base_version = '25/1.24'; artifacts = $artifacts; log = $logPath } |
         ConvertTo-Json -Depth 6 | Set-Content (Join-Path $runRoot 'results.json') -Encoding utf8NoBOM
     Write-Output "Task lifetime lifecycle: 48/48 passed; .NET=4/4 Automation=1/1; evidence=$runRoot"
 }

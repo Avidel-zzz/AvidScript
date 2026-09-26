@@ -57,8 +57,8 @@ function Assert-FormalArtifact {
     $report = $Build.Report
     $semanticSchema = if ($Typed) { 44 } else { 43 }
     $semanticVersion = if ($Typed) { '1.53' } else { '1.52' }
-    $irSchema = if ($Typed) { 24 } else { 23 }
-    $irVersion = if ($Typed) { '1.23' } else { '1.22' }
+    $irSchema = if ($Typed) { 31 } else { 23 }
+    $irVersion = if ($Typed) { '1.30' } else { '1.22' }
     foreach ($extension in @('wasm', 'avidscript.json', 'guestir.json', 'state.json', 'csharp.semantic.json')) {
         if (-not (Test-Path -LiteralPath (Join-Path $outputRoot "cancellation.$extension") -PathType Leaf)) {
             throw "Formal artifact missing: $extension in $runRoot"
@@ -78,6 +78,10 @@ function Assert-FormalArtifact {
         $report.compiler_worker.request_count -ne 0) {
         throw "Incorrect formal preview contract: typed=$Typed in $runRoot"
     }
+    if ($Typed -and ($ir.direct_await_readiness.base_schema_version -ne 24 -or
+        $ir.direct_await_readiness.base_ir_version -cne '1.23' -or @($ir.direct_await_readiness.guards).Count -eq 0)) {
+        throw "Missing cancellation readiness base contract: $runRoot"
+    }
     foreach ($cache in @($report.semantic_cache, $report.compilation_cache)) {
         if ($cache.enabled -or $cache.lookup -cne 'disabled' -or $cache.published -or $cache.key -cne '') {
             throw "Preview reused or published cached artifacts: $runRoot"
@@ -90,8 +94,8 @@ function Assert-FormalArtifact {
         if ($report.build_reuse.$reuse) { throw "Unexpected prepared artifact reuse: $reuse" }
     }
     $reserved = @($ir.imports | Where-Object name -CIn @('avid_task_cancel_language_error_v1',
-        'avid_task_terminal_error_meta_v1', 'avid_task_terminal_error_root_v1'))
-    if (($Typed -and ($reserved.Count -ne 3 -or @($ir.async_exception_transfers).Count -eq 0)) -or
+        'avid_task_terminal_error_meta_v1', 'avid_task_terminal_error_root_v1', 'avid_continuation_cancel_status_v1'))
+    if (($Typed -and ($reserved.Count -ne 4 -or @($ir.async_exception_transfers).Count -eq 0)) -or
         (-not $Typed -and $reserved.Count -ne 0)) { throw "Incorrect cancellation imports or transfers: $runRoot" }
     $wasmHash = (Get-FileHash -LiteralPath (Join-Path $outputRoot 'cancellation.wasm') -Algorithm SHA256).Hash.ToLowerInvariant()
     $irHash = (Get-FileHash -LiteralPath (Join-Path $outputRoot 'cancellation.guestir.json') -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -118,7 +122,8 @@ try {
     [IO.File]::WriteAllText($sourcePath, $sharedSource + "`n" + $adapter, [Text.UTF8Encoding]::new($false))
     $reference = & $DotNetPath run --project Fixtures/Phase66/AsyncCancellationFlow.Reference.csproj -c Release
     $reference | Write-Output
-    if ($LASTEXITCODE -ne 0 -or @($reference | Where-Object { $_ -ceq 'AsyncCancellationFlow.Reference: 28/28 passed' }).Count -ne 1) {
+    if ($LASTEXITCODE -ne 0 -or @($reference | Where-Object { $_ -ceq 'AsyncCancellationFlow.Reference: 28/28 passed' }).Count -ne 1 -or
+        @($reference | Where-Object { $_ -ceq 'AsyncCancellationFlow.Readiness: 2/2 passed' }).Count -ne 1) {
         throw 'The same-source .NET reference failed.'
     }
     $compiler = & $DotNetPath run --project Tools/AvidScript.CSharpGuest.Tests/AvidScript.CSharpGuest.Tests.csproj -c Release -- --async-cancellation
@@ -133,7 +138,7 @@ try {
     Write-Output 'PASS formal Semantic 43 / IR 23 compatibility'
     $positive = Invoke-FormalBuild -Mode typed -Name 'typed_cancellation'
     $firstHash = Assert-FormalArtifact -Build $positive -Typed $true
-    Write-Output 'PASS formal Semantic 44 / IR 24; caches and worker disabled'
+    Write-Output 'PASS formal Semantic 44 / IR 31 with IR 24 base; caches and worker disabled'
     $negative = Invoke-FormalBuild -Mode default -Name 'default_rejects'
     if ($negative.ExitCode -ne 1 -or $negative.Report.succeeded -or
         $negative.Report.result -cne 'semantic_failed' -or
@@ -172,17 +177,19 @@ try {
         passed = 64
         total = 64
         reference_passed = 28
-        import_contracts_passed = 42
+        reference_readiness_passed = 2
+        import_contracts_passed = 56
         managed_import_contracts_passed = 54
         formal_build_contracts_passed = 4
         semantic_version = '44/1.53'
-        guest_ir_version = '24/1.23'
+        guest_ir_version = '31/1.30'
+        guest_ir_base_version = '24/1.23'
         wasm_sha256 = $wasmHash
         legacy_wasm_sha256 = $legacyHash
         manifest = Join-Path $outputRoot 'cancellation.avidscript.json'
         log = $logPath
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $runRoot 'results.json') -Encoding utf8NoBOM
-    Write-Output "Formal C# cancellation: 64/64 passed; .NET=28/28 imports=42/42 build=4/4; wasm_sha256=$wasmHash; evidence=$runRoot; log=$logPath"
+    Write-Output "Formal C# cancellation: 64/64 passed; .NET=28/28 imports=56/56 build=4/4; wasm_sha256=$wasmHash; evidence=$runRoot; log=$logPath"
 }
 finally {
     $env:DOTNET_CLI_HOME = $priorCliHome

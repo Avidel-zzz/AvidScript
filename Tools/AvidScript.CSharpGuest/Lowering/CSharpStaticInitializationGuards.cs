@@ -94,6 +94,7 @@ public static class CSharpStaticInitializationGuards
             Types = computed.Types, MemoryLayout = layout.Layout, DataSegments = layout.DataSegments,
             Functions = module.Functions.Concat(initializers.Select(item => Build(item, outcome, exceptionToken))).ToArray(),
         };
+        if (!CSharpDirectAwaitReadinessLowerer.TryWrap(candidate, out candidate, out error)) return false;
         var validation = GuestModuleValidator.Validate(candidate);
         if (!validation.Succeeded) return Fail("Static initialization composition failed: "
             + string.Join(" | ", validation.Diagnostics.Select(item => item.Message)), out error);

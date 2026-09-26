@@ -365,6 +365,7 @@ public static class CSharpLanguageErrorCompiler
             || adapted is null)
             return false;
         candidate = adapted;
+        if (!CSharpDirectAwaitReadinessLowerer.TryWrap(candidate, out candidate, out error)) return false;
         GuestValidationResult validation = GuestModuleValidator.Validate(candidate);
         if (!validation.Succeeded)
             return Fail("The composed language-error module failed validation: "

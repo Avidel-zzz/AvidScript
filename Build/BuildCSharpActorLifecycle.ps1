@@ -506,6 +506,7 @@ function Test-CompilerInjectedBindingImport {
         )
         if ($AllowAsyncCancellationFlow) {
             $LanguageErrorBridges += @(
+                @{ Id = 'import:$async:cancel_status_v1'; Name = 'avid_continuation_cancel_status_v1'; Parameters = @('type:int64'); Result = 'type:int32' }
                 @{ Id = 'import:task_cancel_language_error_v1'; Name = 'avid_task_cancel_language_error_v1'; Parameters = @('type:int64', 'type:int32', 'type:int32', 'type:language_error_root'); Result = 'type:int32' }
                 @{ Id = 'import:task_terminal_error_meta_v1'; Name = 'avid_task_terminal_error_meta_v1'; Parameters = @('type:int64'); Result = 'type:int64' }
                 @{ Id = 'import:task_terminal_error_root_v1'; Name = 'avid_task_terminal_error_root_v1'; Parameters = @('type:int64'); Result = 'type:language_error_root' }
@@ -664,6 +665,7 @@ function Test-BindingPackageImports {
         if (($AllowBoundedLanguageErrors -and
             [string]$Import.name -cin @('avid_managed_heap_v1', 'avid_language_error_report_v1')) -or
             [string]$Import.name -cin @('avid_task_cancel_language_error_v1',
+                'avid_continuation_cancel_status_v1',
                 'avid_task_terminal_error_meta_v1', 'avid_task_terminal_error_root_v1',
                 'avid_task_i32_v1', 'avid_task_bind_producer_v1', 'avid_task_propagate_failure_v1',
                 'avid_task_retain_for_continuation_v1')) {
@@ -2237,8 +2239,43 @@ $ExpectedGuestVersion = if ($AsyncThrowRoutingSemanticArtifact) { "1.25" }
     elseif ($BoundedAsyncSemanticArtifact) { "1.20" }
     elseif ($BoundedSemanticArtifact -and [int]$SemanticModel.schema_version -eq 40) { "1.19" }
     elseif ($BoundedSemanticArtifact) { "1.16" } else { "1.13" }
+$ReadinessExpected = $false
+if ($ExpectedGuestSchema -in @(24, 25, 26)) {
+    $SupportsCancellation = $ExpectedGuestSchema -eq 24 -or @($SemanticModel.async_methods | Where-Object {
+        $null -ne $_.PSObject.Properties['exception_plan'] -and $null -ne $_.exception_plan -and
+        $null -ne $_.exception_plan.PSObject.Properties['cancellation_type_id'] -and
+        $null -ne $_.exception_plan.cancellation_type_id
+    }).Count -gt 0
+    if ($SupportsCancellation) {
+        foreach ($Method in $SemanticModel.async_methods) {
+            foreach ($Segment in $Method.segments) {
+                if ($null -ne $Segment.PSObject.Properties['await_site'] -and $null -ne $Segment.await_site -and
+                    $Segment.await_site.producer_kind -cin @('delay', 'next_tick') -and
+                    $null -ne $Segment.await_site.PSObject.Properties['cancellation_token'] -and
+                    $null -ne $Segment.await_site.cancellation_token -and
+                    (($null -ne $Method.PSObject.Properties['task_result_type_id'] -and $null -ne $Method.task_result_type_id) -or
+                        ($null -ne $Segment.PSObject.Properties['transfer'] -and $null -ne $Segment.transfer -and
+                            $null -ne $Segment.transfer.PSObject.Properties['cancellation_target'] -and
+                            $null -ne $Segment.transfer.cancellation_target -and [int]$Segment.transfer.cancellation_target -ge 0))) {
+                    $ReadinessExpected = $true
+                }
+            }
+        }
+    }
+}
+$ReadinessProperty = $GuestIrModel.PSObject.Properties['direct_await_readiness']
+$ReadinessContractValid = if ($ReadinessExpected) {
+    $null -ne $ReadinessProperty -and $null -ne $ReadinessProperty.Value -and
+        (Test-JsonObjectHasProperties -Value $ReadinessProperty.Value -RequiredProperties @('base_schema_version', 'base_ir_version', 'guards')) -and
+        $ReadinessProperty.Value.base_schema_version -eq $ExpectedGuestSchema -and
+        $ReadinessProperty.Value.base_ir_version -ceq $ExpectedGuestVersion -and
+        $ReadinessProperty.Value.guards -is [System.Array] -and
+        @($ReadinessProperty.Value.guards).Count -gt 0
+} else { $null -eq $ReadinessProperty -or $null -eq $ReadinessProperty.Value }
+if ($ReadinessExpected) { $ExpectedGuestSchema = 31; $ExpectedGuestVersion = '1.30' }
 $GuestContractValid = [int]$GuestIrModel.schema_version -eq $ExpectedGuestSchema -and
     [string]$GuestIrModel.ir_version -ceq $ExpectedGuestVersion -and
+    $ReadinessContractValid -and
     (-not $TaskLocalLifetimeSemanticArtifact -or
         ($null -ne $GuestIrModel.PSObject.Properties['task_local_lifetimes'] -and $null -ne $GuestIrModel.task_local_lifetimes)) -and
     (-not $AsyncThrowRoutingSemanticArtifact -or
