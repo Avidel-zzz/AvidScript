@@ -6,42 +6,33 @@
 
 ![UE 5.8](https://img.shields.io/badge/UE-5.8-313131?logo=unrealengine&logoColor=white) ![C# → WASM](https://img.shields.io/badge/C%23-%E2%86%92%20WASM-512BD4?logo=csharp&logoColor=white) ![Win64](https://img.shields.io/badge/Win64-Editor%20%2F%20Development-0078D4?logo=windows&logoColor=white) [![MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-AvidScript 是 Unreal Engine 的 C# 脚本插件，使用 Roslyn 编译到 WebAssembly，运行于 Wasmtime / WAMR，不依赖 CLR。
+AvidScript 让你用 C# 编写 Unreal Engine 游戏逻辑。脚本编译为 WebAssembly，由 Wasmtime / WAMR 执行，运行时不加载 CLR。
 
-> **Development preview** · UE 5.8 · Win64 Editor / Development。C# 和 .NET 支持范围见 [Limitations](#limitations)。
+支持调用 UE API、处理 Actor 事件，以及用 C# 声明 Actor、Component 和 Subsystem。
+
+> 开发中，当前以 UE 5.8 / Win64 为主。仅支持部分 C# 和 .NET API，使用前请查看 [Limitations](#limitations)。
 
 [Installation](#installation) · [Usage](#usage) · [Examples](#examples) · [Limitations](#limitations) · [Development](#development)
 
 ## Example
 
-C# 声明 Actor、蓝图属性和函数：
+让 Actor 每秒沿 X 轴移动 120 cm：
 
 ```csharp
-using AvidScript;
-
-namespace AvidScriptSamples;
-
-[UClass(Blueprintable = true, BlueprintType = true)]
-public partial class Projectile : AvidActor
+[UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
+public static void Tick(float deltaSeconds)
 {
-    [UProperty(BlueprintReadWrite = true, Category = "Projectile")]
-    public float LaunchSpeed { get; set; } = 1200.0f;
-
-    [UFunction(BlueprintPure = true, Category = "Projectile")]
-    public float GetLaunchSpeed()
-    {
-        return LaunchSpeed;
-    }
+    UE.Self.AddActorWorldOffset(new FVector(120.0f * deltaSeconds, 0.0f, 0.0f));
 }
 ```
 
-蓝图可继承 `Projectile`，读写 `LaunchSpeed`，调用 `GetLaunchSpeed()`。[完整源码](Samples/CSharp/ScriptDefinedTypes/ScriptDefinedTypes.cs) · [构建方法](Samples/CSharp/ScriptDefinedTypes/README.md)
+`UE.Self` 是绑定当前脚本的 Actor；`avid_on_tick` 由插件每帧调用。这段代码可替换 [ActorLifecycleScript.cs](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) 中的 `Tick` 方法。
 
 <a id="quick-start"></a>
 
 ## Installation
 
-依赖：UE 5.8 源码版、Visual Studio 2022（UE C++ 工具链）、PowerShell 7、[.NET SDK 8.0.416](global.json)。
+需要 UE 5.8 源码版、Visual Studio 2022（UE C++ 工具链）、PowerShell 7 和 [.NET SDK 8.0.416](global.json)。
 
 在 UE C++ 工程根目录安装：
 
@@ -65,24 +56,13 @@ $project = (Resolve-Path '../../MyGame.uproject').Path
 
 ## Usage
 
-将 [ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) 绑定到关卡中的 Actor：
+编译完成后打开 Editor：
 
-1. 放置 Cube，设置 `Mobility = Movable`。
-2. 选中 Cube，执行 **Tools → AvidScript → Build And Bind C# ActorLifecycle Script**。
+1. 在关卡中放置 Cube，设置 `Mobility = Movable`。
+2. 选中 Cube，执行 **Tools → AvidScript → Build And Bind C# ActorLifecycle Script**，等待构建完成。
 3. 点击 **Play**。Cube 会移动、旋转和缩放。
 
-修改示例中的 `Tick`，可调整每帧行为：
-
-```csharp
-[UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
-public static void Tick(float deltaSeconds)
-{
-    // 当前 Actor 沿 X 轴移动，速度 120 cm/s。
-    UE.Self.AddActorWorldOffset(new FVector(120.0f * deltaSeconds, 0.0f, 0.0f));
-}
-```
-
-保存后再次执行 **Build And Bind**。
+修改 `ActorLifecycleScript.cs` 后，再次执行同一菜单命令。换成上面的 `Tick` 后，会去掉示例的每帧旋转和缩放。
 
 <a id="samples"></a>
 
@@ -98,23 +78,50 @@ public static void Tick(float deltaSeconds)
 | [TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) | 调用项目 C++ API |
 | [ScriptDefinedTypes](Samples/CSharp/ScriptDefinedTypes/README.md) | C# 定义 Actor / Component / Subsystem |
 
+<details>
+<summary>C# 声明 Actor、蓝图属性和函数</summary>
+
+```csharp
+using AvidScript;
+
+namespace AvidScriptSamples;
+
+[UClass(Blueprintable = true, BlueprintType = true)]
+public partial class Projectile : AvidActor
+{
+    [UProperty(BlueprintReadWrite = true, Category = "Projectile")]
+    public float LaunchSpeed { get; set; } = 1200.0f;
+
+    [UFunction(BlueprintPure = true, Category = "Projectile")]
+    public float GetLaunchSpeed()
+    {
+        return LaunchSpeed;
+    }
+}
+```
+
+生成并编译后，蓝图可继承 `Projectile`，读写 `LaunchSpeed`，调用 `GetLaunchSpeed()`。
+完整源码和构建说明见 [ScriptDefinedTypes](Samples/CSharp/ScriptDefinedTypes/README.md)。
+
+</details>
+
 <a id="当前边界"></a>
 <a id="known-limitations"></a>
 <a id="status"></a>
 
 ## Limitations
 
-- 支持部分 C# 语法和 .NET API，不能直接使用任意 NuGet 包。见[语言支持清单](Docs/Phase66/P66.C_Language_Execution_Plan.md)。
+- 不能直接使用任意 NuGet 包。C# 语法和 .NET API 的支持范围见[语言支持清单](Docs/Phase66/P66.C_Language_Execution_Plan.md)。
 - 泛型 Task 仅支持 `Task<int>`；`catch` / `finally` 中不支持 `await`。见[异常与取消](Docs/Phase66/P66.C9_Async_Throw_Routing.md)。
 - 方法体可热重载。新增 UE 类型、属性、函数或修改反射签名，需要重新编译并重启 Editor。
 - Shipping、Android、iOS 和真实多人游戏验收未完成。
 
 <details>
-<summary>Experimental</summary>
+<summary>实验性功能</summary>
 
-- 静态字段、静态构造函数及初始化失败后的异常缓存：已通过同步执行测试，仅限[编译器 API](Docs/Phase66/P66.C10_Static_Object_Lifetime_Contract.md)，尚未接入普通构建。
-- 同步方法、属性访问器中的显式 `throw`：部分支持，需[实验性构建参数](Docs/Phase66/P66.C8_Task_Local_Lifetime_Contract.md#generated-task-build)。
-- 同步调用抛出的异常传入异步 Task：已有运行时测试与源码分析支持，[WASM 编译接入](Docs/Phase66/P66.C10_Synchronous_Error_Task_Transfer.md)尚未完成。
+- 静态字段初始化和静态构造函数：目前仅限[编译器 API](Docs/Phase66/P66.C10_Static_Object_Lifetime_Contract.md)，普通构建脚本尚未接入。
+- 同步方法和属性访问器中的显式 `throw`：需启用[实验性构建参数](Docs/Phase66/P66.C8_Task_Local_Lifetime_Contract.md#generated-task-build)，支持范围有限。
+- 同步方法抛出的异常还不能传给调用它的 `async` 方法。相关限制见[异常处理说明](Docs/Phase66/P66.C10_Synchronous_Error_Task_Transfer.md)。
 
 </details>
 
@@ -132,10 +139,10 @@ dotnet run --project Tools/AvidScript.CSharpGuest.Tests/AvidScript.CSharpGuest.T
 
 ![C# 到 UE 的编译与运行流程](Docs/Assets/README/pipeline.svg)
 
-Roslyn 只参与编译。运行时通过 `ObjectHandle` 访问 UE 对象，不向脚本暴露 `UObject*`。
+Roslyn 用于编译期的 C# 分析。运行时通过 `ObjectHandle`（对象句柄）访问 UE 对象，不向脚本暴露 `UObject*`。
 
 <details>
-<summary>Repository layout</summary>
+<summary>目录结构</summary>
 
 ```text
 Source/    UE 插件模块
