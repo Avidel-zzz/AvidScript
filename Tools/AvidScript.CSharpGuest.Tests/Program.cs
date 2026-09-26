@@ -12,6 +12,12 @@ internal static class Program
                 Console.WriteLine($"AvidScript.CSharpGuest.Tests.ConditionalValues: {focused}/{focused} passed");
                 return 0;
             }
+            if (args.Length == 1 && args[0] == "--await-readiness-evaluation")
+            {
+                int focused = CSharpGuestAwaitReadinessEvaluationTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.AwaitReadinessEvaluation: {focused}/{focused} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--original-async-member")
             {
                 int focused = CSharpGuestOriginalAsyncMemberTests.Run();
@@ -251,6 +257,7 @@ internal static class Program
                 + CSharpGuestStaticSourceFailureTests.Run()
                 + CSharpGuestStaticAsyncExecutionTests.Run()
                 + CSharpGuestOriginalAsyncMemberTests.Run()
+                + CSharpGuestAwaitReadinessEvaluationTests.Run()
                 + CSharpGuestAsyncLanguageErrorTests.Run()
                 + CSharpGuestDirectAwaitTests.Run()
                 + CSharpGuestAsyncCancellationTests.Run()

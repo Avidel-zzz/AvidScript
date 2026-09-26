@@ -34,10 +34,15 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptOriginalAsyncMemberTest,
     "AvidScript.Runtime.Continuation.CompiledOriginalAsyncMember",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptAwaitReadinessEvaluationTest,
+    "AvidScript.Runtime.Continuation.CompiledAwaitReadinessEvaluation",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 namespace AvidScript::Tests::CompiledAsyncExceptions
 {
 static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 ExpectedScenarios, const TCHAR* LogPrefix,
-    bool CollectWhileSuspended = false, bool HasStaticStorage = false, int32 ExpectedObservations = 0)
+    bool CollectWhileSuspended = false, bool HasStaticStorage = false, int32 ExpectedObservations = 0,
+    int32 ExpectedResumeObservations = 0)
 {
     if (!GEngine) return false;
     const FString Directory = FPlatformMisc::GetEnvironmentVariable(FixtureVariable);
@@ -78,12 +83,12 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
             if (HasStaticStorage && !Test.TestTrue(TEXT("Static fixture declares bounded domain roots"),
                 (*Scenario)->TryGetNumberField(TEXT("staticSlots"), StaticSlots) && StaticSlots > 0 && StaticSlots <= 4096)) return false;
             struct FObservation { FString Name; int32 Offset = -1; int32 Expected = 0; };
-            TArray<FObservation> Observations;
-            if (ExpectedObservations > 0)
-            {
+            TArray<FObservation> Observations, ResumeObservations;
+            auto ReadObservations = [&](const TCHAR* Field, int32 Count, TArray<FObservation>& Output) -> bool {
+                if (Count == 0) return true;
                 const TArray<TSharedPtr<FJsonValue>>* Entries = nullptr;
-                if (!Test.TestTrue(TEXT("Original fixture has all observation fields"),
-                    (*Scenario)->TryGetArrayField(TEXT("observations"), Entries) && Entries && Entries->Num() == ExpectedObservations)) return false;
+                if (!Test.TestTrue(TEXT("Fixture has all observation fields"),
+                    (*Scenario)->TryGetArrayField(Field, Entries) && Entries && Entries->Num() == Count)) return false;
                 TSet<FString> ObservationNames;
                 for (const auto& Entry : *Entries)
                 {
@@ -95,9 +100,12 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
                         && (*Object)->TryGetNumberField(TEXT("offset"), Observation.Offset) && Observation.Offset >= 0 && Observation.Offset < 65536
                         && (*Object)->TryGetNumberField(TEXT("expected"), Observation.Expected))) return false;
                     ObservationNames.Add(Observation.Name);
-                    Observations.Add(Observation);
+                    Output.Add(Observation);
                 }
-            }
+                return true;
+            };
+            if (!ReadObservations(TEXT("observations"), ExpectedObservations, Observations)
+                || !ReadObservations(TEXT("firstResumeObservations"), ExpectedResumeObservations, ResumeObservations)) return false;
             TArray<uint8> Bytes;
             if (!Test.TestTrue(*Name, FFileHelper::LoadFileToArray(Bytes, *FPaths::Combine(Directory, Name + TEXT(".wasm"))))) return false;
             // Normal completion, teardown while initially suspended, teardown
@@ -139,6 +147,13 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
                     FMemory::Memcpy(&Value, Data, sizeof(Value));
                     return Value;
                 };
+                bool CheckedFirstResume = false;
+                auto CheckFirstResume = [&]() {
+                    for (const auto& Observation : ResumeObservations)
+                        Test.TestEqual(*(Label + TEXT(" first resume ") + Observation.Name),
+                            Read(Observation.Offset), Observation.Expected);
+                    CheckedFirstResume = true;
+                };
                 bool Stopped = Mode == 1;
                 int32 StoppedResult = Read(Offset), StoppedTrace = Read(TraceOffset), Resumes = 0;
                 TArray<int32> StoppedObservations;
@@ -168,6 +183,7 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
                         Test.TestTrue(*Label, Owner->FinalizeDispatched(Completion.Token, true));
                         if (!Collect()) return false;
                         ++Resumes;
+                        if (!CheckedFirstResume) CheckFirstResume();
                     }
                     if (Mode == 2 && Resumes > 0)
                     {
@@ -178,6 +194,9 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
                         Stopped = true;
                     }
                 }
+                // A pre-cancelled entry can finish without scheduling anything.
+                // It must already have the reference side effects in that case.
+                if (!Stopped && !CheckedFirstResume) CheckFirstResume();
                 Test.TestEqual(*Label, Read(Offset), Stopped ? StoppedResult : Expected);
                 Test.TestEqual(*(Label + TEXT(" cleanup order")), Read(TraceOffset), Stopped ? StoppedTrace : ExpectedTrace);
                 for (int32 Index = 0; Index < Observations.Num(); ++Index)
@@ -237,6 +256,12 @@ bool FAvidScriptOriginalAsyncMemberTest::RunTest(const FString& Parameters)
 {
     return AvidScript::Tests::CompiledAsyncExceptions::Run(*this,
         TEXT("AVIDSCRIPT_ORIGINAL_ASYNC_MEMBER_DIR"), 29, TEXT("original-async-member"), true, true, 18);
+}
+
+bool FAvidScriptAwaitReadinessEvaluationTest::RunTest(const FString& Parameters)
+{
+    return AvidScript::Tests::CompiledAsyncExceptions::Run(*this,
+        TEXT("AVIDSCRIPT_AWAIT_READINESS_DIR"), 18, TEXT("await-readiness"), true, false, 9, 4);
 }
 
 #endif

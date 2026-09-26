@@ -155,7 +155,7 @@ Docs/       设计文档与测试记录
 | 同步方法和属性访问器中的 `throw` | [支持范围与构建参数](Docs/Phase66/P66.C8_Task_Local_Lifetime_Contract.md#generated-task-build) |
 | `target.Value = await GetValueAsync();` | [异步成员赋值](Docs/Phase66/P66.C10_Await_Member_Assignment_Contract.md#guest-接入与补充执行验证)，暂不支持接口属性和生成的 UE 类型 |
 
-`NextTickAsync().WithCancellation(token)` 已支持预取消时同步完成，见[验证范围](Docs/Phase66/P66.C10_PreCancelled_Await_Contract.md)。
+`DelayAsync(ReadDelay()).WithCancellation(ReadToken())` 按从左到右各求值一次；token 已取消时在当前调用内执行取消清理。见[支持范围](Docs/Phase66/P66.C10_PreCancelled_Await_Contract.md)。
 
 </details>
 

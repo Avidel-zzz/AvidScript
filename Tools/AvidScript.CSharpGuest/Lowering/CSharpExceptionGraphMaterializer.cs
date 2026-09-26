@@ -44,7 +44,7 @@ internal static class CSharpExceptionGraphMaterializer
         // boundary explicit until their value-carrying exits are generalized.
         if (returnTypeId is not ("type:int32" or "type:void")
             && flow.Regions.Any(region => region.Kind == "finally"))
-            return Fail("A reference-returning exception method needs typed cleanup storage.", out error);
+            return Fail("An exception method returning a non-int32 value needs typed cleanup storage.", out error);
         if (flow.Catches.Count != 0 && flow.Regions.Any(region => region.Kind == "finally"))
             return TryBuildCatchFinally(flow, out graph, out localThrows,
                 out normalReturns, out rethrows, out error);
@@ -1079,8 +1079,8 @@ internal static class CSharpExceptionGraphMaterializer
 
     private static SemanticOperation ReturnPlaceholder(string typeId, SemanticSpan span) =>
         typeId == "type:int32" ? ZeroPlaceholder(span) : new(
-            "literal", true, null, false, false, false, false,
-            typeId, null, Array.Empty<string>(), new SemanticConstant("null", null),
+            "default_value", true, null, false, false, false, false,
+            typeId, null, Array.Empty<string>(), null,
             null, null, null, null, span, Array.Empty<SemanticOperation>());
 
     private static bool Supported(SemanticOperation operation) =>

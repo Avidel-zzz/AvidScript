@@ -97,14 +97,19 @@ public static class CSharpLanguageErrorCompiler
         bool effectsValid = flows.Count == 0 && (implicitMemberErrors || staticContext is not null);
         if (effectsValid) effects = new(Array.Empty<string>());
         else effectsValid = SemanticLanguageErrorEffectPlanner.TryBuild(semantic, out effects);
+        // Outcome layouts already carry typed values. Ordinary type lowering and
+        // IR validation still reject unrepresentable results; the CFG bridge
+        // separately enforces its typed-finally boundary.
         if (throwFlows.Any(item => semantic.Callables.Count(callable =>
                     callable.MethodSymbolId == item.MethodSymbolId
                     && callable.HasBody && (!callable.IsConstructor || staticContext is not null && callable.IsStatic)
                     && (callable.ReturnTypeId is "type:int32" or "type:void"
-                        || CSharpReferenceObjects.Types(semantic).Contains(callable.ReturnTypeId))) != 1)
+                        || CSharpReferenceObjects.Types(semantic).Contains(callable.ReturnTypeId)
+                        || semantic.Types.Any(type => type.Id == callable.ReturnTypeId && type.IsValueType
+                            && !type.IsNullable && type.Kind is "primitive" or "enum" or "struct"))) != 1)
             || !effectsValid
             || effects is null)
-            return Fail("The exception source needs supported int32, void or source-class methods and a complete direct-call effect plan.", out error);
+            return Fail("The exception source needs a representable value, void or source-class result and a complete direct-call effect plan.", out error);
 
         IReadOnlySet<string> producerIds = producers.Select(item =>
             CSharpGuestIds.Function(item.MethodSymbolId)).ToHashSet(StringComparer.Ordinal);
