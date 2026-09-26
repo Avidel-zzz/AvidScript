@@ -1596,18 +1596,28 @@ elseif (-not $SemanticCacheHit) {
         }).Count -gt 0 -and
         $SemanticErrors.Count -gt 0 -and
         @($SemanticErrors | Where-Object { [string]$_.code -cne "ASCS5422" }).Count -eq 0
-    $DirectAwaitSemanticArtifact = $DirectAwaitCleanup -and
+    $DirectAwaitSemanticProfile = $DirectAwaitCleanup -and
         $null -ne $SemanticModel -and
         [int]$SemanticModel.schema_version -eq 43 -and
         [string]$SemanticModel.semantic_version -ceq '1.52' -and
-        [bool]$SemanticModel.succeeded -and
-        $SemanticExitCode -eq 0 -and
-        $SemanticErrors.Count -eq 0
+        @($SemanticModel.async_methods | Where-Object {
+            $null -ne $_.PSObject.Properties['exception_plan'] -and
+            $null -ne $_.exception_plan
+        }).Count -gt 0
+    $BoundedDirectAwaitSemanticArtifact = $DirectAwaitSemanticProfile -and
+        @($SemanticModel.async_methods | Where-Object {
+            $null -ne $_.PSObject.Properties['error_plan'] -and $null -ne $_.error_plan
+        }).Count -gt 0 -and
+        $SemanticErrors.Count -gt 0 -and
+        @($SemanticErrors | Where-Object { [string]$_.code -cne "ASCS5422" }).Count -eq 0
+    $DirectAwaitSemanticArtifact = $DirectAwaitSemanticProfile -and
+        (($SemanticExitCode -eq 0 -and [bool]$SemanticModel.succeeded -and
+            $SemanticErrors.Count -eq 0) -or $BoundedDirectAwaitSemanticArtifact)
     $BoundedSemanticArtifact = $LanguageErrors -ceq "bounded" -and
         $SemanticExitCode -eq 1 -and
         $null -ne $SemanticModel -and -not [bool]$SemanticModel.succeeded -and
         ($BoundedSyncSemanticArtifact -or $BoundedAsyncSemanticArtifact -or
-            $BoundedAsyncExceptionSemanticArtifact)
+            $BoundedAsyncExceptionSemanticArtifact -or $BoundedDirectAwaitSemanticArtifact)
     if ($SemanticExitCode -ne 0 -and -not $BoundedSemanticArtifact -or
         $null -eq $SemanticModel -or
         -not [bool]$SemanticModel.succeeded -and -not $BoundedSemanticArtifact) {
@@ -1632,7 +1642,8 @@ elseif (-not $SemanticCacheHit) {
     if ($BoundedSemanticArtifact) {
         $Diagnostics = @($Diagnostics | Where-Object {
             [string]$_.code -cne $(if ($BoundedAsyncSemanticArtifact -or
-                $BoundedAsyncExceptionSemanticArtifact) { 'ASCS5422' } else { 'ASCS3001' })
+                $BoundedAsyncExceptionSemanticArtifact -or
+                $BoundedDirectAwaitSemanticArtifact) { 'ASCS5422' } else { 'ASCS3001' })
         })
     }
 }

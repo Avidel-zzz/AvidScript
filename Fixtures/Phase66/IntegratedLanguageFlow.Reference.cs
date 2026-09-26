@@ -32,8 +32,9 @@ internal static class Program
     {
         RunCase(0, "16");
         RunCase(1, "17");
-        RunCase(2, nameof(ArgumentException));
-        Console.WriteLine("IntegratedLanguageFlow.Reference: 3/3 passed");
+        RunCase(2, "17");
+        RunCase(4, nameof(Exception));
+        Console.WriteLine("IntegratedLanguageFlow.Reference: 4/4 passed");
     }
 
     private static void RunCase(int mode, string expected)

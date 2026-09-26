@@ -231,6 +231,7 @@ internal static class CSharpAsyncCfgLowerer
                 out GuestRegister? stateReadAccepted,
                 out IReadOnlyList<GuestInstruction>? restoreInstructions))
             {
+                Add(diagnostics, method, $"Continuation '{entry.FunctionId}' could not restore its state frame.");
                 return false;
             }
             string acceptedBlockId = functionEntryBlockId + ":state_accepted";
@@ -301,7 +302,10 @@ internal static class CSharpAsyncCfgLowerer
             if (!CSharpTaskAwaitLowerer.EmitIncoming(context, method, incoming,
                 entry.SegmentOrdinal, prefixInstructions, blocks,
                 ref activePrefixBlockId, out List<GuestInstruction>? resumedPrefix))
+            {
+                Add(diagnostics, method, $"Continuation '{entry.FunctionId}' could not read its Task result.");
                 return false;
+            }
             prefixInstructions = resumedPrefix!;
         }
         int? incomingSegment = incoming is null ? null : method.Segments.Single(segment => segment.AwaitSite?.CallbackId == incoming.CallbackId).Ordinal;
@@ -395,6 +399,7 @@ internal static class CSharpAsyncCfgLowerer
                 blocks,
                 diagnostics))
             {
+                Add(diagnostics, method, $"Continuation '{entry.FunctionId}' could not lower segment {segment.Ordinal}.");
                 return false;
             }
         }
@@ -407,6 +412,7 @@ internal static class CSharpAsyncCfgLowerer
         if (!context.ShortCircuitFlow.Rewrite(context, blocks)
             || !CSharpAsyncClosureAllocations.InsertEdges(context, method, blocks))
         {
+            Add(diagnostics, method, $"Continuation '{entry.FunctionId}' could not finalize its control-flow blocks.");
             return false;
         }
         function = new GuestFunction(

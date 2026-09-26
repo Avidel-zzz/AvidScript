@@ -41,8 +41,8 @@ try {
         $reference = & $DotNetPath run --project `
             'Fixtures/Phase66/IntegratedLanguageFlow.Reference.csproj' -c Release
         if ($LASTEXITCODE -ne 0 -or
-            @($reference | Where-Object { $_ -match 'IntegratedLanguageFlow.Reference: 3/3 passed' }).Count -ne 1) {
-            throw 'Integrated .NET reference did not complete 3/3 cases.'
+            @($reference | Where-Object { $_ -match 'IntegratedLanguageFlow.Reference: 4/4 passed' }).Count -ne 1) {
+            throw 'Integrated .NET reference did not complete 4/4 cases.'
         }
         & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -File 'Build/BuildCSharpActorLifecycle.ps1' `
             -DotNetPath $DotNetPath `
@@ -80,6 +80,7 @@ try {
             -ArtifactStem integrated_language_flow `
             -LanguageErrors bounded `
             -AsyncExceptionFlow `
+            -DirectAwaitCleanup `
             -CompilerWorkerMode disabled
         if ($LASTEXITCODE -ne 0) {
             throw "Formal integrated language-flow build failed: $outputRoot"
@@ -109,10 +110,11 @@ try {
     })
     if ($report.result -cne 'direct_abi_built' -or -not $report.succeeded -or
         @($report.diagnostics | Where-Object { [string]$_.severity -ceq 'error' }).Count -ne 0 -or
-        [int]$report.semantic.schema_version -ne 42 -or
-        [string]$report.semantic.version -cne '1.51' -or
-        [int]$ir.schema_version -ne 22 -or [string]$ir.ir_version -cne '1.21' -or
+        [int]$report.semantic.schema_version -ne 43 -or
+        [string]$report.semantic.version -cne '1.52' -or
+        [int]$ir.schema_version -ne 23 -or [string]$ir.ir_version -cne '1.22' -or
         @($ir.async_exception_routes).Count -ne 1 -or
+        @($ir.direct_await_routes).Count -ne 1 -or
         $arrayImports.Count -ne 2 -or
         [string]$manifest.module_id -cne [string]$ir.module_id -or
         ([IO.FileInfo]$wasmPath).Length -le 8) {
@@ -159,9 +161,10 @@ try {
     $exit = [regex]::Matches($log, 'RequestExitWithStatus\(1, 0,').Count
     $markers = @(
         foreach ($backend in @(0, 1)) {
-            "compiled integrated language flow backend=$backend mode=0 result=16 cleanup=1 resumes=3"
-            "compiled integrated language flow backend=$backend mode=1 result=17 cleanup=1 resumes=3"
-            "compiled integrated language flow backend=$backend mode=2 result=0 cleanup=1 resumes=3"
+            "compiled integrated language flow backend=$backend mode=0 result=16 cleanup=1 resumes=4"
+            "compiled integrated language flow backend=$backend mode=1 result=17 cleanup=1 resumes=4"
+            "compiled integrated language flow backend=$backend mode=2 result=17 cleanup=1 resumes=4"
+            "compiled integrated language flow backend=$backend mode=4 result=0 cleanup=1 resumes=4"
             $category = if ($backend -eq 1) { 'guest_trap' } else { 'trap' }
             "compiled continuation status guard backend=$backend category=$category result=0 cleanup=0"
         }
@@ -170,10 +173,10 @@ try {
         [regex]::Matches($log, [regex]::Escape($_)).Count -eq 1
     }).Count
     if ($found -ne 1 -or $success -ne 1 -or $failed -ne 0 -or
-        $complete -ne 1 -or $exit -lt 1 -or $scenarios -ne 8) {
+        $complete -ne 1 -or $exit -lt 1 -or $scenarios -ne 10) {
         throw "Integrated Automation evidence incomplete: found=$found success=$success scenarios=$scenarios failed=$failed complete=$complete exit=$exit log=$logPath"
     }
-    Write-Output "AvidScript.Runtime.Continuation.CompiledIntegratedLanguageFlow: 1/1 passed; .NET=3/3 negative=ASCS3002 Wasmtime/WAMR=6/6 status-guard=2/2; log=$logPath"
+    Write-Output "AvidScript.Runtime.Continuation.CompiledIntegratedLanguageFlow: 1/1 passed; .NET=4/4 negative=ASCS3002 direct-await=1 Wasmtime/WAMR=8/8 status-guard=2/2; log=$logPath"
 }
 finally {
     foreach ($name in $variables) {

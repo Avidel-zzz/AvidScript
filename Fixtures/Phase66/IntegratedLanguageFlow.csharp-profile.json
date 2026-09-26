@@ -1,0 +1,24 @@
+{
+  "schema_version": 2,
+  "language": "csharp",
+  "source_path": "Plugins/AvidScript/Fixtures/Phase66/IntegratedLanguageFlow.cs",
+  "project_path": "Plugins/AvidScript/Fixtures/Phase66/IntegratedLanguageFlow.csproj",
+  "module_id": "integrated_language_flow",
+  "artifact_stem": "integrated_language_flow",
+  "output_root": "Saved/AvidScriptCSharpGuest/Profiles/integrated_language_flow",
+  "report_path": "Saved/AvidScriptCSharpGuest/Profiles/integrated_language_flow/integrated_language_flow.csharp.report.json",
+  "manifest_path": "Saved/AvidScriptCSharpGuest/Profiles/integrated_language_flow/integrated_language_flow.avidscript.json",
+  "build_script_path": "Plugins/AvidScript/Build/BuildCSharpActorLifecycle.ps1",
+  "configuration": "Release",
+  "binding_profile": {
+    "package_name": "avidscript.fixture.integrated_language_flow",
+    "classes": [
+      {
+        "class_path": "/Script/Engine.Actor",
+        "include_functions": [
+          "GetAllChildActors"
+        ]
+      }
+    ]
+  }
+}

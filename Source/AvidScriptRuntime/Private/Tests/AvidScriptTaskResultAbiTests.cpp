@@ -1297,7 +1297,7 @@ bool FAvidScriptCompiledIntegratedLanguageFlowTest::RunTest(const FString& Param
 
 	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime,
 		EAvidScriptVmBackendKind::Wamr})
-	for (const int32 Mode : {0, 1, 2, 3})
+	for (const int32 Mode : {0, 1, 2, 3, 4})
 	{
 		FAvidScriptVmBackendSelection Selection;
 		Selection.BackendKind = Backend;
@@ -1359,12 +1359,12 @@ bool FAvidScriptCompiledIntegratedLanguageFlowTest::RunTest(const FString& Param
 				else if (!bDispatched)
 				{
 					TestTrue(TEXT("Only unmatched mode may leave async void"),
-						Mode == 2 && Completion.Status == EAvidScriptContinuationStatus::Failed
+						Mode == 4 && Completion.Status == EAvidScriptContinuationStatus::Failed
 						&& !bSawUncaught);
 					TestEqual(TEXT("Integrated unmatched error keeps its category"),
 						Result.ErrorCategory, FString(TEXT("language_error_uncaught")));
 					TestTrue(TEXT("Integrated unmatched error names type and source"),
-						Result.ErrorMessage.Contains(TEXT("ArgumentException"))
+						Result.ErrorMessage.Contains(TEXT("type:global::System.Exception"))
 						&& Result.ErrorMessage.Contains(TEXT("IntegratedLanguageFlow.cs")));
 					bSawUncaught = true;
 				}
@@ -1404,12 +1404,12 @@ bool FAvidScriptCompiledIntegratedLanguageFlowTest::RunTest(const FString& Param
 				static_cast<int32>(Backend), *Result.ErrorCategory));
 			continue;
 		}
-		TestEqual(TEXT("Integrated producer, consumer and outer await resume"),
-			Resumes, 3);
+		TestEqual(TEXT("Integrated direct, producer, consumer and outer await resume"),
+			Resumes, 4);
 		TestEqual(TEXT("Integrated unmatched error is reported once"),
-			bSawUncaught, Mode == 2);
+			bSawUncaught, Mode == 4);
 		TestEqual(TEXT("Integrated result matches .NET"),
-			ReadInt32(ResultOffset), Mode == 0 ? 16 : Mode == 1 ? 17 : 0);
+			ReadInt32(ResultOffset), Mode == 0 ? 16 : Mode == 1 || Mode == 2 ? 17 : 0);
 		TestEqual(TEXT("Integrated finally executes once"),
 			ReadInt32(CleanupOffset), 1);
 		TestEqual(TEXT("Integrated task results are released"),

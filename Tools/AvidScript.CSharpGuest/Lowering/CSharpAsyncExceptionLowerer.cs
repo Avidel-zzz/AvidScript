@@ -92,28 +92,68 @@ internal static class CSharpAsyncExceptionLowerer
         int block, string blockId, List<GuestInstruction> instructions,
         List<GuestBasicBlock> blocks)
     {
-        if (transfer.ExceptionTypeId is null
-            || !context.TryGetStorage(CSharpTaskResultAbi.ExceptionTypeSlot(method),
+        if (!context.TryGetStorage(CSharpTaskResultAbi.ExceptionTypeSlot(method),
                 out GuestRegister typeStorage)) return false;
-        CSharpLanguageErrorTypeToken? expected = CSharpAsyncLanguageErrorCatalog
-            .Build(context.Document).Types.SingleOrDefault(item =>
-                item.TypeId == transfer.ExceptionTypeId);
-        if (expected is null) return false;
+        string matchedTarget = CSharpGuestIds.AsyncSegmentBlock(
+            method.MethodSymbolId, transfer.PrimaryTarget);
+        string unmatchedTarget = CSharpGuestIds.AsyncSegmentBlock(
+            method.MethodSymbolId, transfer.SecondaryTarget);
+        if (transfer.ExceptionTypeId is null)
+        {
+            blocks.Add(new(blockId, instructions,
+                new("branch", null, matchedTarget, null, null)));
+            return true;
+        }
+        Dictionary<string, SemanticClassType> classes = context.Document.ClassTypes
+            .ToDictionary(type => type.TypeId, StringComparer.Ordinal);
+        List<CSharpLanguageErrorTypeToken> matchingTypes = new();
+        foreach (CSharpLanguageErrorTypeToken candidate in CSharpAsyncLanguageErrorCatalog
+            .Build(context.Document).Types)
+        {
+            HashSet<string> visited = new(StringComparer.Ordinal);
+            string? current = candidate.TypeId;
+            while (current is not null && current != "type:object")
+            {
+                if (!visited.Add(current)) return false;
+                if (current == transfer.ExceptionTypeId)
+                {
+                    matchingTypes.Add(candidate);
+                    break;
+                }
+                if (!classes.TryGetValue(current, out SemanticClassType? type))
+                    return false;
+                current = type.BaseTypeId;
+            }
+        }
+        // The catalog covers every language-fault producer in this module.
+        // A handler with no compatible producer is a valid non-matching catch;
+        // do not invent a throw-site token just to compile it.
+        if (matchingTypes.Count == 0)
+        {
+            blocks.Add(new(blockId, instructions,
+                new("branch", null, unmatchedTarget, null, null)));
+            return true;
+        }
         GuestRegister? actual = context.CreateTemporary(CSharpTaskResultAbi.IntTypeId, block);
-        GuestRegister? token = CSharpTaskResultAbi.Constant(context,
-            CSharpTaskResultAbi.IntTypeId, expected.Token, block, instructions);
-        GuestRegister? matches = context.CreateTemporary(CSharpTaskResultAbi.IntTypeId, block);
-        if (actual is null || token is null || matches is null) return false;
+        if (actual is null) return false;
         instructions.Add(new("local_load", actual.Id, Array.Empty<string>(),
             typeStorage.Id, null, null));
-        instructions.Add(new("binary", matches.Id,
-            new[] { actual.Id, token.Id }, null, "equals", null));
-        blocks.Add(new(blockId, instructions,
-            new("branch_if", matches.Id,
-                CSharpGuestIds.AsyncSegmentBlock(method.MethodSymbolId,
-                    transfer.PrimaryTarget),
-                CSharpGuestIds.AsyncSegmentBlock(method.MethodSymbolId,
-                    transfer.SecondaryTarget), null)));
+        string dispatchBlockId = blockId;
+        for (int index = 0; index < matchingTypes.Count; ++index)
+        {
+            GuestRegister? token = CSharpTaskResultAbi.Constant(context,
+                CSharpTaskResultAbi.IntTypeId, matchingTypes[index].Token, block, instructions);
+            GuestRegister? matches = context.CreateTemporary(CSharpTaskResultAbi.IntTypeId, block);
+            if (token is null || matches is null) return false;
+            instructions.Add(new("binary", matches.Id,
+                new[] { actual.Id, token.Id }, null, "equals", null));
+            string nextBlock = index + 1 == matchingTypes.Count ? unmatchedTarget
+                : dispatchBlockId + ":catch_type:" + (index + 1);
+            blocks.Add(new(blockId, instructions,
+                new("branch_if", matches.Id, matchedTarget, nextBlock, null)));
+            blockId = nextBlock;
+            instructions = new List<GuestInstruction>();
+        }
         return true;
     }
 

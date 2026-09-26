@@ -37,12 +37,15 @@ bool FAvidScriptCompiledDirectAwaitCleanupTest::RunTest(const FString& Parameter
 	};
 	int32 ResultOffset = -1;
 	int32 CleanupOffset = -1;
+	int32 CatchOffset = -1;
 	if (!TestFalse(TEXT("Direct await WASM path set"), Fixture.IsEmpty())
 		|| !TestFalse(TEXT("Direct await module id set"), ModuleId.IsEmpty())
 		|| !TestTrue(TEXT("Result offset valid"),
 			ReadOffset(TEXT("AVIDSCRIPT_DIRECT_AWAIT_RESULT_OFFSET"), ResultOffset))
 		|| !TestTrue(TEXT("Cleanup offset valid"),
-			ReadOffset(TEXT("AVIDSCRIPT_DIRECT_AWAIT_CLEANUP_OFFSET"), CleanupOffset)))
+			ReadOffset(TEXT("AVIDSCRIPT_DIRECT_AWAIT_CLEANUP_OFFSET"), CleanupOffset))
+		|| !TestTrue(TEXT("Catch offset valid"),
+			ReadOffset(TEXT("AVIDSCRIPT_DIRECT_AWAIT_CATCH_OFFSET"), CatchOffset)))
 		return false;
 	TArray<uint8> Bytes;
 	if (!TestTrue(TEXT("Direct await WASM exists"),
@@ -129,6 +132,8 @@ bool FAvidScriptCompiledDirectAwaitCleanupTest::RunTest(const FString& Parameter
 			ReadInt32(ResultOffset), bCancel ? 0 : 16);
 		TestEqual(TEXT("Direct await finally runs exactly once"),
 			ReadInt32(CleanupOffset), 1);
+		TestEqual(TEXT("Direct await cancellation skips catch"),
+			ReadInt32(CatchOffset), 0);
 		TestEqual(TEXT("Direct await cancellation status"),
 			Cancelled > 0, bCancel);
 		TestEqual(TEXT("Uncaught outer await is isolated"),
@@ -141,9 +146,10 @@ bool FAvidScriptCompiledDirectAwaitCleanupTest::RunTest(const FString& Parameter
 		AvidScript::Managed::FHeap* Heap = Runtime.GetManagedHeapForTesting();
 		TestEqual(TEXT("Direct await managed roots release"),
 			Heap->GetStats().LiveRoots, static_cast<uint32>(0));
-		AddInfo(FString::Printf(TEXT("compiled direct await backend=%d cancel=%d result=%d cleanup=%d resumes=%d cancelled=%d"),
+		AddInfo(FString::Printf(TEXT("compiled direct await backend=%d cancel=%d result=%d cleanup=%d catch=%d resumes=%d cancelled=%d"),
 			static_cast<int32>(Backend), bCancel ? 1 : 0,
-			ReadInt32(ResultOffset), ReadInt32(CleanupOffset), Resumes, Cancelled));
+			ReadInt32(ResultOffset), ReadInt32(CleanupOffset), ReadInt32(CatchOffset),
+			Resumes, Cancelled));
 	}
 	return true;
 }

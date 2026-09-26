@@ -12,6 +12,7 @@ internal static class CSharpGuestDirectAwaitTests
     {
         const string source = """
             using AvidScript;
+            using System;
             using System.Runtime.InteropServices;
             using System.Threading.Tasks;
             public static class Script
@@ -21,6 +22,7 @@ internal static class CSharpGuestDirectAwaitTests
                 public static async Task<int> RunAsync()
                 {
                     try { await AvidContinuations.NextTickAsync(); return 16; }
+                    catch (InvalidOperationException) { return 17; }
                     finally { CleanupCount++; }
                 }
                 [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
@@ -134,7 +136,94 @@ internal static class CSharpGuestDirectAwaitTests
         Check(wasm.Succeeded && wasm.Bytes.Length > 8,
             "IR 23 must compile to WASM: " + string.Join(" | ",
                 wasm.Diagnostics.Select(item => item.Message)));
-        return 1;
+
+        const string mixedSource = """
+            using AvidScript;
+            using System;
+            using System.Runtime.InteropServices;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static int Cleanups;
+                private static async Task<int> LoadAsync(bool fail)
+                {
+                    await AvidContinuations.NextTickAsync();
+                    if (fail) throw new InvalidOperationException();
+                    return 16;
+                }
+                public static async Task<int> RunAsync()
+                {
+                    try
+                    {
+                        await AvidContinuations.NextTickAsync();
+                        int value = await LoadAsync(true);
+                        return value;
+                    }
+                    catch (InvalidOperationException) { return 17; }
+                    finally { Cleanups++; }
+                }
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay() { await RunAsync(); }
+            }
+            """;
+        const string mixedSourceId = "Scripts/DirectAndTaskAwaitCatch.cs";
+        FrontendDocument mixedFrontend = FrontendAnalyzer.Analyze(
+            mixedSource, mixedSourceId);
+        SemanticDocument mixedSemantic = SemanticAnalyzer.Analyze(
+            mixedSource, mixedSourceId, mixedFrontend.Source.Sha256,
+            new[] { new SemanticReferenceSource(
+                CSharpGuestContinuationTests.ReferenceFacade + additionalFacade,
+                "generated://AvidScript.Continuations.generated.cs", true) },
+            new SemanticCompilerWorkspace(), enableAsyncExceptionFlow: true,
+            enableDirectAwaitCleanup: true);
+        Check(mixedSemantic.SchemaVersion == SemanticContract.DirectAwaitCleanupSchemaVersion
+            && mixedSemantic.AsyncMethods.Any(method => method.ErrorPlan?.Throws.Count > 0)
+            && mixedSemantic.Diagnostics.Where(item => item.Severity == "error")
+                .All(item => item.Code == "ASCS5422"),
+            "mixed direct and Task awaits must preserve a bounded throw plan: " + string.Join(" | ",
+                mixedSemantic.Diagnostics.Select(item => item.Code + ":" + item.Message)));
+        CSharpGuestLoweringResult mixedLowered = CSharpGuestLowerer.Lower(
+            mixedSemantic, new string('b', 64), enableAsyncLanguageErrors: true);
+        Check(mixedLowered.Succeeded && mixedLowered.Module is { } mixedModule
+            && mixedModule.DirectAwaitRoutes is { Count: 1 }
+            && mixedModule.AsyncExceptionRoutes is { Count: 1 }
+            && GuestModuleValidator.Validate(mixedModule).Succeeded
+            && WasmModuleCompiler.Compile(mixedModule).Succeeded,
+            "a direct cancellation route and Task catch route must coexist in executable WASM: "
+                + string.Join(" | ", mixedLowered.Diagnostics.Select(item =>
+                    item.Code + ":" + item.Message)) + " segments="
+                + string.Join(" | ", mixedSemantic.AsyncMethods.Single(method =>
+                    method.MethodSymbolId.Contains(".RunAsync(", StringComparison.Ordinal))
+                    .Segments.Select(segment => $"{segment.Ordinal}:"
+                        + $"{segment.Transfer?.Kind}:"
+                        + $"{segment.Transfer?.PrimaryTarget}/"
+                        + $"{segment.Transfer?.SecondaryTarget}/"
+                        + $"{segment.Transfer?.CancellationTarget}")));
+        foreach (string variant in new[]
+        {
+            mixedSource.Replace("if (fail) throw new InvalidOperationException();", ""),
+            mixedSource.Replace("throw new InvalidOperationException();", "throw new ArgumentException();"),
+            mixedSource.Replace("catch (InvalidOperationException)", "catch (Exception)"),
+        })
+        {
+            FrontendDocument variantFrontend = FrontendAnalyzer.Analyze(variant, mixedSourceId);
+            SemanticDocument variantSemantic = SemanticAnalyzer.Analyze(variant, mixedSourceId,
+                variantFrontend.Source.Sha256,
+                new[] { new SemanticReferenceSource(
+                    CSharpGuestContinuationTests.ReferenceFacade + additionalFacade,
+                    "generated://AvidScript.Continuations.generated.cs", true) },
+                new SemanticCompilerWorkspace(), enableAsyncExceptionFlow: true,
+                enableDirectAwaitCleanup: true);
+            CSharpGuestLoweringResult variantLowered = CSharpGuestLowerer.Lower(
+                variantSemantic, new string('c', 64), enableAsyncLanguageErrors: true);
+            Check(variantLowered.Succeeded && variantLowered.Module is { } variantModule
+                && GuestModuleValidator.Validate(variantModule).Succeeded
+                && WasmModuleCompiler.Compile(variantModule).Succeeded,
+                "catches must compile with absent, unrelated or derived throw types: "
+                    + string.Join(" | ", variantLowered.Diagnostics.Select(item =>
+                        item.Code + ":" + item.Message)));
+        }
+        return 5;
     }
 
     private static void Check(bool condition, string message)

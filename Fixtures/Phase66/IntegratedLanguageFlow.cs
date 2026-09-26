@@ -27,6 +27,10 @@ public static class Script
         {
             throw new ArgumentException();
         }
+        if (mode == 4)
+        {
+            throw new Exception();
+        }
         return sum;
     }
 
@@ -34,10 +38,15 @@ public static class Script
     {
         try
         {
+            await AvidContinuations.NextTickAsync();
             int value = await LoadAsync(mode);
             return value;
         }
-        catch (InvalidOperationException)
+        catch (ArgumentNullException)
+        {
+            return 99;
+        }
+        catch (SystemException)
         {
             return 17;
         }

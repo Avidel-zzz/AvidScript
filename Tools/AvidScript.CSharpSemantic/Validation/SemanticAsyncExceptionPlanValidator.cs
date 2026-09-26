@@ -94,6 +94,15 @@ public static class SemanticAsyncExceptionPlanValidator
                     || !catchRegions.TryGetValue(handler.RegionOrdinal,
                         out SemanticAsyncExceptionRegion? region)
                     || handler.Span != region.SourceSpan)) return false;
+            // Roslyn preserves a source catch even when this preview has no
+            // language-fault producer and prunes its executable segments.
+            int executableCatchCount = plan.Catches.Count(handler =>
+                catchRegions[handler.RegionOrdinal].Segments.Count > 0);
+            if (executableCatchCount != plan.Catches.Count
+                && (!directCleanup || method.Segments.Any(segment =>
+                    segment.AwaitSite?.ProducerKind is "task_call" or "task_local"
+                    || segment.Transfer?.Kind == SemanticAsyncMethod.ThrowTransferKind)))
+                return false;
             HashSet<int> catchDecisionSegments = new();
             foreach (SemanticAsyncSegment segment in method.Segments)
             {
@@ -178,7 +187,7 @@ public static class SemanticAsyncExceptionPlanValidator
                         return false;
                 }
             }
-            if (plan.Catches.Count != catchDecisionSegments.Count
+            if (executableCatchCount != catchDecisionSegments.Count
                 || !SemanticAsyncExceptionOwnerFlow.TryAnalyze(method, out _)) return false;
         }
         return true;

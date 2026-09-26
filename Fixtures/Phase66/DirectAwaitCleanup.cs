@@ -1,3 +1,4 @@
+using System;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using AvidScript;
@@ -6,7 +7,8 @@ public static class Script
 {
     public static int Result;
     public static int CleanupCount;
-    private static AvidCancellationSource Lifetime;
+    public static int CatchCount;
+    internal static AvidCancellationSource Lifetime;
 
     public static async Task<int> RunAsync()
     {
@@ -15,6 +17,11 @@ public static class Script
             await AvidContinuations.NextTickAsync()
                 .WithCancellation(Lifetime.Token);
             return 16;
+        }
+        catch (InvalidOperationException)
+        {
+            CatchCount++;
+            return 17;
         }
         finally
         {

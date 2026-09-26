@@ -662,8 +662,10 @@ internal static class SemanticAsyncControlFlowProjector
             cancellationCleanupTarget = outerCancellation;
             if (entry < 0) return -1;
             if (drafts.Skip(firstProtectedDraft).Any(draft => draft.AwaitSite is
-                { ProducerKind: not ("task_call" or "task_local") }))
-                return Reject("Async exception preview requires Task<int> await sites.",
+                { ProducerKind: not ("task_call" or "task_local") } site
+                    && !(allowDirectAwaitCleanup
+                        && (site.ProducerKind is "delay" or "next_tick"))))
+                return Reject("Async exception preview requires Task<int> await sites or opt-in direct await cleanup.",
                     statement.Span, "ASCS5420");
             previewRegions.Add(("try", statement.Span, statement.Block.Span,
                 protectedDrafts));

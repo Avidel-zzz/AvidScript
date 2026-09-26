@@ -35,6 +35,8 @@ internal static class SemanticAsyncTests
         TaskIntSuspendedCleanupFailsClosed();
         AsyncExceptionPlanPublishesVersionedSegments();
         DirectAwaitCleanupPublishesCancellationOnlyRoute();
+        DirectAwaitCatchPreviewKeepsCancellationOutOfHandlers();
+        DirectAwaitAndTaskFaultShareProtectedRegion();
         AsyncExceptionFixturePublishesAllMethods();
         AwaitFailureSuccessorKeepsCleanupLocalAlive();
         RejectedAsyncExceptionRetainsRoslynRegions();
@@ -43,7 +45,139 @@ internal static class SemanticAsyncTests
         NestedSuspendedCleanupBindsDistinctRoslynRegions();
         TaskAndExceptionPlansKeepBothContracts();
         TaskIntThrowPublishesVersionedErrorPlan();
-        return 31;
+        return 33;
+    }
+
+    private static void DirectAwaitAndTaskFaultShareProtectedRegion()
+    {
+        const string source = """
+            using AvidScript;
+            using System;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static int Cleanups;
+                private static async Task<int> LoadAsync()
+                {
+                    await AvidContinuations.NextTickAsync();
+                    return 16;
+                }
+                public static async Task<int> RunAsync()
+                {
+                    try
+                    {
+                        await AvidContinuations.NextTickAsync();
+                        int value = await LoadAsync();
+                        return value;
+                    }
+                    catch (InvalidOperationException) { return 17; }
+                    finally { Cleanups++; }
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/DirectAndTaskAwaitCatch.cs",
+            enableAsyncExceptionFlow: true, enableDirectAwaitCleanup: true);
+        SemanticAsyncMethod? method = document.AsyncMethods.SingleOrDefault(item =>
+            item.MethodSymbolId.Contains(".RunAsync(", StringComparison.Ordinal));
+        SemanticAsyncSegment? direct = method?.Segments.SingleOrDefault(segment =>
+            segment.AwaitSite?.ProducerKind == "next_tick");
+        SemanticAsyncSegment? task = method?.Segments.SingleOrDefault(segment =>
+            segment.AwaitSite?.ProducerKind == "task_call");
+        SemanticAsyncExceptionRegion? handler = method?.ExceptionPlan?.Regions
+            .SingleOrDefault(region => region.Kind == "catch");
+        SemanticAsyncExceptionRegion? cleanup = method?.ExceptionPlan?.Regions
+            .SingleOrDefault(region => region.Kind == "finally");
+        Assert(document.Succeeded && method?.ExceptionPlan is
+                { Regions.Count: 3, Catches.Count: 1 }
+            && direct?.Transfer is { SecondaryTarget: -1, CancellationTarget: >= 0 }
+            && task?.Transfer is { SecondaryTarget: >= 0, CancellationTarget: >= 0 }
+            && handler is { Segments.Count: > 0 } && cleanup is not null
+            && cleanup.Segments.Contains(direct.Transfer.CancellationTarget!.Value)
+            && method.Segments.Any(segment => segment.Transfer is
+                { Kind: SemanticAsyncMethod.CatchMatchTransferKind }
+                && handler.Segments.Contains(segment.Transfer.PrimaryTarget))
+            && SemanticAsyncExceptionPlanValidator.IsValid(document),
+            "direct cancellation and Task language fault must remain separate: "
+                + string.Join(" | ", document.Diagnostics.Select(item =>
+                    item.Code + ":" + item.Message)));
+    }
+
+    private static void DirectAwaitCatchPreviewKeepsCancellationOutOfHandlers()
+    {
+        const string source = """
+            using AvidScript;
+            using System;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static int Cleanups;
+                public static async Task<int> RunAsync()
+                {
+                    try { await AvidContinuations.NextTickAsync(); return 16; }
+                    catch (InvalidOperationException) { return 17; }
+                    finally { Cleanups++; }
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/DirectAwaitCatch.cs",
+            enableAsyncExceptionFlow: true, enableDirectAwaitCleanup: true);
+        SemanticAsyncMethod? method = document.AsyncMethods.SingleOrDefault(item =>
+            item.MethodSymbolId.Contains(".RunAsync(", StringComparison.Ordinal));
+        SemanticAsyncSegment? awaited = method?.Segments.SingleOrDefault(segment =>
+            segment.AwaitSite?.ProducerKind == "next_tick");
+        SemanticAsyncExceptionRegion? cleanup = method?.ExceptionPlan?.Regions
+            .SingleOrDefault(region => region.Kind == "finally");
+        SemanticAsyncExceptionRegion? handler = method?.ExceptionPlan?.Regions
+            .SingleOrDefault(region => region.Kind == "catch");
+        Assert(document.Succeeded,
+            "direct await catch preview must project: "
+                + string.Join(" | ", document.Diagnostics.Select(item =>
+                    item.Code + ":" + item.Message)));
+        Assert(document.SchemaVersion == SemanticContract.DirectAwaitCleanupSchemaVersion
+            && document.SemanticVersion == SemanticContract.DirectAwaitCleanupSemanticVersion,
+            $"direct await catch preview must use schema 43: {document.SchemaVersion}/{document.SemanticVersion}");
+        Assert(method?.ExceptionPlan is { Regions.Count: 3, Catches.Count: 1 }
+            && awaited?.Transfer is { SecondaryTarget: -1, CancellationTarget: >= 0 }
+            && cleanup is not null && handler is not null,
+            "direct await catch preview must publish a handler, cleanup and cancellation route");
+        Assert(cleanup!.Segments.Contains(awaited!.Transfer!.CancellationTarget!.Value)
+            && !handler!.Segments.Contains(awaited.Transfer.CancellationTarget.Value),
+            "direct await cancellation must enter finally without dispatching catch");
+        Assert(SemanticAsyncExceptionOwnerFlow.TryAnalyze(method!, out _),
+            "direct await catch/finally owner flow must remain valid: "
+                + string.Join(" | ", method!.Segments.Select(segment =>
+                    $"{segment.Ordinal}:{segment.Transfer?.Kind}:"
+                    + $"{segment.Transfer?.PrimaryTarget}/"
+                    + $"{segment.Transfer?.SecondaryTarget}/"
+                    + $"{segment.Transfer?.CancellationTarget}")));
+        Assert(SemanticAsyncExceptionPlanValidator.IsValid(document),
+            "reader must accept the direct await catch/finally plan: "
+                + string.Join(" | ", method.Segments.Select(segment =>
+                    $"{segment.Ordinal}:{segment.Transfer?.Kind}:"
+                    + $"{segment.Transfer?.PrimaryTarget}/"
+                    + $"{segment.Transfer?.SecondaryTarget}/"
+                    + $"{segment.Transfer?.CancellationTarget}:"
+                    + $"{segment.AwaitSite?.ProducerKind}"))
+                + " regions=" + string.Join(" | ", method.ExceptionPlan!.Regions
+                    .Select(region => $"{region.Kind}:{region.RoslynRegionOrdinal}:"
+                        + string.Join(",", region.Segments))));
+        byte[] serialized = SemanticSerializer.Serialize(document);
+        Assert(serialized.SequenceEqual(SemanticSerializer.Serialize(
+            SemanticSerializer.Deserialize(serialized))),
+            "direct await with catch/finally must round-trip canonically");
+        Assert(!SemanticAsyncExceptionPlanValidator.IsValid(document with
+        {
+            AsyncMethods = document.AsyncMethods.Select(item => item == method
+                ? item with { Segments = item.Segments.Select(segment => segment == awaited
+                    ? segment with { Transfer = segment.Transfer! with
+                        { SecondaryTarget = segment.Transfer.CancellationTarget!.Value } }
+                    : segment).ToArray() }
+                : item).ToArray(),
+        }), "direct Timer failure must not be forged into a language catch route");
+        SemanticDocument gated = Analyze(source, "Scripts/DirectAwaitCatch.cs",
+            enableAsyncExceptionFlow: true);
+        Assert(!gated.Succeeded && gated.Diagnostics.Any(item => item.Code == "ASCS3002"),
+            "direct await in catch/finally must remain behind the cleanup opt-in");
     }
 
     private static void DirectAwaitCleanupPublishesCancellationOnlyRoute()
