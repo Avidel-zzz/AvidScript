@@ -24,7 +24,7 @@ internal static class CSharpTaskAwaitLowerer
         if (site is null || (!taskLocal && target is null) || abi.TaskResultImportId is null
             || segment.Transfer?.Kind != SemanticAsyncMethod.AwaitTransferKind
             || (taskLocal ? site.Arguments.Count != 1
-                : site.Arguments.Count != target!.Parameters.Count)
+                : site.Arguments.Count != target!.Parameters.Count + (target.IsStatic ? 0 : 1))
             || !context.TryGetStorage(CSharpTaskResultAbi.AwaitSlot(site), out GuestRegister storage))
         {
             context.Add("ASCG1010", "Task<int> await has no validated target or state storage.");
@@ -48,9 +48,12 @@ internal static class CSharpTaskAwaitLowerer
             {
                 GuestRegister? argument = CSharpOperationLowerer.LowerValue(
                     context, site.Arguments[index], segment.Ordinal, instructions);
-                if (argument is null || argument.TypeId != parameters[index].TypeId) return false;
+                string expectedType = !target.IsStatic && index == 0 ? target.ContainingTypeId
+                    : parameters[index - (target.IsStatic ? 0 : 1)].TypeId;
+                if (argument is null || argument.TypeId != expectedType) return false;
                 arguments.Add(argument.Id);
             }
+            if (!target.IsStatic && !CSharpAsyncMemberAssignmentLowerer.CheckTaskReceiver(context, method, site, arguments[0], instructions)) return false;
             instructions.Add(new("call", taskValue.Id, arguments,
                 CSharpGuestIds.Function(target.MethodSymbolId), null, null));
             instructions.Add(new("convert", token.Id, new[] { taskValue.Id }, null, null, null));
@@ -327,7 +330,7 @@ internal static class CSharpTaskAwaitLowerer
             instructions.Add(new("global_store", null, new[] { value.Id }, globalId, null, null));
             return true;
         }
-        return (site.ResultStorageKind is null or "existing_local")
+        return (site.ResultStorageKind is null or "existing_local" or "member_assignment")
             && CSharpOperationLowerer.StoreLocal(context, site.ResultSymbolId,
                 value, block, instructions);
     }

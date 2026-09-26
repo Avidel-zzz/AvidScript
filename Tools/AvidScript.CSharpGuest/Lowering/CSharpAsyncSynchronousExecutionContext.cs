@@ -15,6 +15,7 @@ internal sealed class CSharpAsyncSynchronousExecutionContext
     internal CSharpLanguageErrorTokenCatalog Catalog { get; }
     internal GuestLanguageErrorCatalog GuestCatalog { get; }
     internal IReadOnlyDictionary<string, string> OutcomeValues { get; }
+    internal IReadOnlyList<GuestFunction> MemberGuards { get; }
     internal List<GuestAsyncSynchronousExceptionSite> Sites { get; } = new();
     internal HashSet<string> FailurePublishBlocks { get; } = new(StringComparer.Ordinal);
 
@@ -23,8 +24,11 @@ internal sealed class CSharpAsyncSynchronousExecutionContext
     {
         Catalog = catalog;
         GuestCatalog = guestCatalog;
+        MemberGuards = CSharpAsyncMemberAssignmentLowerer.BuildGuards(source, catalog);
         OutcomeValues = source.Callables.Where(callable => effects.OutcomeMethodIds.Contains(callable.MethodSymbolId))
             .ToDictionary(callable => CSharpGuestIds.Function(callable.MethodSymbolId), callable => callable.ReturnTypeId, StringComparer.Ordinal);
+        OutcomeValues = OutcomeValues.Concat(MemberGuards.Select(guard => new KeyValuePair<string, string>(guard.Id, "type:void")))
+            .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
     }
 
     internal static bool TryCreate(SemanticDocument source, SemanticLanguageErrorEffectPlan effects,
@@ -36,7 +40,7 @@ internal sealed class CSharpAsyncSynchronousExecutionContext
             || !SemanticExceptionFlowContractValidator.IsValid(source)
             || !SemanticAsyncScopeValidator.IsValid(source)
             || source.AsyncMethods.Any(method => effects.OutcomeMethodIds.Contains(method.MethodSymbolId))) return false;
-        var catalog = CSharpLanguageErrorCatalogBuilder.ForSynchronous(source, source.ExceptionFlows!);
+        var catalog = CSharpLanguageErrorCatalogBuilder.ForSynchronous(source, source.ExceptionFlows ?? Array.Empty<SemanticExceptionFlow>());
         if (!CSharpLanguageErrorCatalogBuilder.TryToGuest(source, catalog, out var guestCatalog, out _)) return false;
         context = new(source, effects, catalog, guestCatalog!);
         return true;

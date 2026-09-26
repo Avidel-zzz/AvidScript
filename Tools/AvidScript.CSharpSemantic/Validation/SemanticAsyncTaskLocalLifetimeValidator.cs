@@ -68,15 +68,20 @@ public static class SemanticAsyncTaskLocalLifetimeValidator
                 var targets = document.Callables.Where(callable => callable?.MethodSymbolId == write.Value.SymbolId).ToArray();
                 if (targets.Length != 1) return false;
                 var target = targets[0];
-                if (!target.IsStatic || !target.HasBody || target.Import is not null || target.Export is not null
+                int receiverOffset = target.IsStatic ? 0 : 1;
+                if (!target.IsStatic && (!SemanticContract.HasAsyncSynchronousExceptions(document)
+                        || write.Value.Dispatch?.Kind != "direct"
+                        || write.Value.Children.Count == 0 || write.Value.Children[0].TypeId != target.ContainingTypeId
+                        || !document.Types.Any(type => type.Id == target.ContainingTypeId && type.Kind == "class"))
+                    || !target.HasBody || target.Import is not null || target.Export is not null
                     || target.IsConstructor || target.ReturnTypeId != write.Value.TypeId
                     || target.Parameters is null || !document.AsyncMethods.Any(producer =>
                         producer.MethodSymbolId == target.MethodSymbolId && producer.TaskResultTypeId == "type:int32")
-                    || write.Value.Children.Count != target.Parameters.Count
+                    || write.Value.Children.Count != target.Parameters.Count + receiverOffset
                     || write.Value.Children.Any(ContainsTaskValue)) return false;
                 for (int index = 0; index < target.Parameters.Count; index++)
                 {
-                    var argument = write.Value.Children[index];
+                    var argument = write.Value.Children[index + receiverOffset];
                     var parameter = target.Parameters[index];
                     if (parameter.RefKind != "none" || argument.Kind != "argument"
                         || argument.SymbolId != parameter.SymbolId || argument.Children.Count != 1

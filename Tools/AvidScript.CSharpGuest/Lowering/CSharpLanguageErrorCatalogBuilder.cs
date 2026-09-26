@@ -75,6 +75,9 @@ internal static class CSharpLanguageErrorCatalogBuilder
     private static IEnumerable<(string SourceId, string TypeId, SemanticSpan Span)> AsyncSites(
         SemanticDocument document)
     {
+        if (SemanticContract.HasAsyncSynchronousExceptions(document))
+            foreach (var guard in CSharpAsyncMemberAssignmentLowerer.GuardSites(document))
+                yield return (document.Source.SourceId, CSharpAsyncMemberAssignmentLowerer.NullReferenceType, guard.Span);
         foreach (var method in document.AsyncMethods)
         {
             if (method.ErrorPlan is { } errors)

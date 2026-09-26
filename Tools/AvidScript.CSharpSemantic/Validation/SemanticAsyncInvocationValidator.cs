@@ -166,7 +166,8 @@ public static class SemanticAsyncInvocationValidator
                     if (!(taskResultContract || taskLocalContract || taskAssignmentContract || taskExistingLocalContract || taskAliasContract || combinedContract)
                         || site.TaskCallableId is null
                         || !callables.TryGetValue(site.TaskCallableId, out SemanticCallable? target)
-                        || !target.IsStatic
+                        || !target.IsStatic && (!SemanticContract.HasAsyncSynchronousExceptions(document)
+                            || !document.Types.Any(type => type.Id == target.ContainingTypeId && type.Kind == "class"))
                         || !IsSupportedTaskResult(document, target.ReturnTypeId, site.ResultTypeId ?? "")
                         || !document.AsyncMethods.Any(producer => producer.MethodSymbolId == site.TaskCallableId
                             && producer.TaskResultTypeId == site.ResultTypeId)
@@ -192,10 +193,12 @@ public static class SemanticAsyncInvocationValidator
                     if (site.ProducerKind == "task_call")
                     {
                         if (site.TaskLocalSymbolId is not null
-                            || site.Arguments.Count != target.Parameters.Count
+                            || site.Arguments.Count != target.Parameters.Count + (target.IsStatic ? 0 : 1)
                             || site.Arguments.Where((argument, index) => argument is null
-                                || target.Parameters[index].RefKind != "none"
-                                || argument.TypeId != target.Parameters[index].TypeId).Any()) return false;
+                                || (!target.IsStatic && index == 0
+                                    ? argument.TypeId != target.ContainingTypeId
+                                    : target.Parameters[index - (target.IsStatic ? 0 : 1)].RefKind != "none"
+                                        || argument.TypeId != target.Parameters[index - (target.IsStatic ? 0 : 1)].TypeId)).Any()) return false;
                     }
                     else
                     {

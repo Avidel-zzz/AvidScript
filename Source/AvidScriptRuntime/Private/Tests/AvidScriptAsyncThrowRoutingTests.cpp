@@ -22,9 +22,14 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptAsyncSynchronousExceptionsTest,
     "AvidScript.Runtime.Continuation.CompiledAsyncSynchronousExceptions",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptAsyncMemberAssignmentsTest,
+    "AvidScript.Runtime.Continuation.CompiledAsyncMemberAssignments",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 namespace AvidScript::Tests::CompiledAsyncExceptions
 {
-static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 ExpectedScenarios, const TCHAR* LogPrefix)
+static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 ExpectedScenarios, const TCHAR* LogPrefix,
+    bool CollectWhileSuspended = false)
 {
     if (!GEngine) return false;
     const FString Directory = FPlatformMisc::GetEnvironmentVariable(FixtureVariable);
@@ -87,6 +92,13 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
                 Runtime.SetHostContext(Context);
                 ON_SCOPE_EXIT { Owner->Teardown(); };
                 if (!Test.TestTrue(*Label, Runtime.BeginPlay(Result))) { Test.AddError(Result.ErrorMessage); return false; }
+                auto Collect = [&]() -> bool {
+                    if (!CollectWhileSuspended) return true;
+                    auto* Heap = Runtime.GetManagedHeapForTesting();
+                    return Test.TestNotNull(*(Label + TEXT(" managed heap")), Heap)
+                        && Test.TestEqual(*(Label + TEXT(" suspended collection")), Heap->Collect(), AvidScript::Managed::EHeapError::Ok);
+                };
+                if (!Collect()) return false;
                 auto Read = [&](int32 Address) -> int32 {
                     uint8 Data[4] = {};
                     FString Error;
@@ -112,9 +124,11 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
                     if (Stopped) { Test.TestEqual(*Label, Ready.Num(), 0); continue; }
                     for (const auto& Completion : Ready)
                     {
+                        if (!Collect()) return false;
                         if (!Test.TestTrue(*Label, Runtime.DispatchContinuation(Completion, Result)))
                         { Test.AddError(Result.ErrorMessage); return false; }
                         Test.TestTrue(*Label, Owner->FinalizeDispatched(Completion.Token, true));
+                        if (!Collect()) return false;
                         ++Resumes;
                     }
                     if (Mode == 2 && Resumes > 0)
@@ -157,6 +171,12 @@ bool FAvidScriptAsyncSynchronousExceptionsTest::RunTest(const FString& Parameter
 {
     return AvidScript::Tests::CompiledAsyncExceptions::Run(*this,
         TEXT("AVIDSCRIPT_ASYNC_SYNCHRONOUS_FIXTURE_DIR"), 31, TEXT("async-synchronous"));
+}
+
+bool FAvidScriptAsyncMemberAssignmentsTest::RunTest(const FString& Parameters)
+{
+    return AvidScript::Tests::CompiledAsyncExceptions::Run(*this,
+        TEXT("AVIDSCRIPT_ASYNC_MEMBER_FIXTURE_DIR"), 47, TEXT("async-member"), true);
 }
 
 #endif

@@ -741,7 +741,12 @@ internal static class CSharpSemanticInputValidator
                 document.SchemaVersion is (SemanticContract.AsyncExceptionFlowSchemaVersion
                     or SemanticContract.DirectAwaitCleanupSchemaVersion or SemanticContract.AsyncCancellationFlowSchemaVersion or SemanticContract.TaskLocalLifetimeSchemaVersion or SemanticContract.AsyncThrowRoutingSchemaVersion or SemanticContract.AsyncSynchronousExceptionSchemaVersion)
                     ? document.AsyncMethods.OrderBy(method =>
-                            method.ExceptionPlan is null ? 0 : 1)
+                            // Semantic 50 gives ordinary Task methods an empty
+                            // exception plan too; only source try regions belong
+                            // to the later exception-projector callback range.
+                            SemanticContract.HasAsyncSynchronousExceptions(document)
+                                ? method.ExceptionPlan?.Regions.Count > 0 ? 1 : 0
+                                : method.ExceptionPlan is null ? 0 : 1)
                         .ThenBy(method => method.Span.Start)
                     : document.AsyncMethods.OrderBy(method => method.Span.Start)))
         {
@@ -1218,7 +1223,7 @@ internal static class CSharpSemanticInputValidator
                     return false;
                 }
                 if (awaitSite is { ResultSymbolId: { } resultSymbolId,
-                        ResultStorageKind: null }
+                        ResultStorageKind: null or "member_assignment" }
                     && !TryAddMethodLocal(
                         symbolsById,
                         method.MethodSymbolId,
@@ -1340,9 +1345,13 @@ internal static class CSharpSemanticInputValidator
         }
         string prefix = $"symbol:compiler_local:{method.MethodSymbolId}:foreach:";
         string returnValueId = $"symbol:compiler_local:{method.MethodSymbolId}:finally_return";
+        bool memberAssignments = SemanticContract.HasAsyncSynchronousExceptions(document)
+            && SemanticAsyncMemberAssignmentValidator.IsValid(document);
         return method.CompilerLocals.Count <= SemanticAsyncMethod.MaximumControlFlowSegments * 2
             && method.CompilerLocals.All(local => local is not null
                 && (local.SymbolId.StartsWith(prefix, StringComparison.Ordinal)
+                    || memberAssignments
+                        && local.SymbolId.StartsWith(SemanticAsyncMemberAssignment.LocalPrefix(method.MethodSymbolId), StringComparison.Ordinal)
                     || CSharpTaskResultAbi.Supports(document)
                         && method.TaskResultTypeId is not null
                         && local.SymbolId == returnValueId
@@ -1438,7 +1447,7 @@ internal static class CSharpSemanticInputValidator
                         && document.Types.Any(type => type.Id == ownedType && type.CanonicalName == "global::System.Threading.Tasks.Task<int>")
                     : awaitSite.TaskCallableId is { } targetId
                 && callables.Count(callable => callable.MethodSymbolId == targetId
-                    && callable.HasBody && callable.IsStatic
+                    && callable.HasBody && (callable.IsStatic || SemanticContract.HasAsyncSynchronousExceptions(document))
                     && (taskLocal
                         ? awaitSite.TaskLocalSymbolId is { } localId
                             && awaitSite.Arguments.Count == 1
@@ -1448,10 +1457,11 @@ internal static class CSharpSemanticInputValidator
                             && IsMethodLocal(symbolsById, localId, methodSymbolId,
                                 callable.ReturnTypeId)
                         : awaitSite.TaskLocalSymbolId is null
-                            && callable.Parameters.Count == awaitSite.Arguments.Count
+                            && callable.Parameters.Count + (callable.IsStatic ? 0 : 1) == awaitSite.Arguments.Count
+                            && (callable.IsStatic || awaitSite.Arguments[0].TypeId == callable.ContainingTypeId)
                             && callable.Parameters.OrderBy(parameter => parameter.Ordinal)
                                 .Select((parameter, index) => parameter.RefKind == "none"
-                                    && parameter.TypeId == awaitSite.Arguments[index].TypeId)
+                                    && parameter.TypeId == awaitSite.Arguments[index + (callable.IsStatic ? 0 : 1)].TypeId)
                                 .All(matches => matches))) == 1
                 && document.AsyncMethods.Any(producer => producer.MethodSymbolId == targetId
                     && producer.TaskResultTypeId == "type:int32"))
@@ -1481,6 +1491,9 @@ internal static class CSharpSemanticInputValidator
                         && awaitSite.ResultSymbolId is { } localId
                         && IsMethodLocal(symbolsById, methodSymbolId: methodSymbolId,
                             symbolId: localId, expectedTypeId: "type:int32"),
+                    "member_assignment" => SemanticContract.HasAsyncSynchronousExceptions(document)
+                        && awaitSite.MemberAssignment is not null
+                        && SemanticAsyncMemberAssignmentValidator.IsValid(document),
                     _ => false,
                 });
         }

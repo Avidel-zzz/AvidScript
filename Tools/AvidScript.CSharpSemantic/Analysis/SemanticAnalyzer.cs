@@ -91,6 +91,7 @@ public static class SemanticAnalyzer
             workspace);
         context = context with
         {
+            EnableAsyncSynchronousExceptions = enableAsyncSynchronousExceptions,
             RequireTaskLocalLifetimes = enableAsyncSynchronousExceptions || enableAsyncCancellationFlow
                 && SemanticAsyncTaskLocalProjector.HasRoutedThrowSource(context)
                 || SemanticAsyncProjector.HasMemberAssignmentSource(context),
@@ -133,6 +134,16 @@ public static class SemanticAnalyzer
             Methods = asyncProjection.Methods.Concat(
                 controlFlowProjection.AsyncExceptionMethods).ToArray(),
         };
+        // Receiver checks can throw without an explicit source reference to the
+        // exception. Register its Roslyn hierarchy before freezing the type set,
+        // so typed catches can accept or exclude the implicit failure normally.
+        if (enableAsyncSynchronousExceptions
+            && (asyncProjection.Methods.Any(method => method.Segments.Any(segment =>
+                    segment.AwaitSite?.MemberAssignment is not null))
+                || callableProjection.Callables.Any(callable => !callable.IsStatic
+                    && asyncProjection.Methods.Any(method => method.MethodSymbolId == callable.MethodSymbolId)))
+            && context.Compilation.GetTypeByMetadataName("System.NullReferenceException") is { } nullReferenceType)
+            typeRegistry.Register(nullReferenceType);
         symbols = symbols.Concat(controlFlowProjection.CompilerLocalSymbols)
             .OrderBy(symbol => symbol.Id, StringComparer.Ordinal)
             .ToArray();

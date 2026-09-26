@@ -38,6 +38,7 @@ internal static class CSharpCallOperationLowerer
         {
             return null;
         }
+        if (!CSharpAsyncMemberAssignmentLowerer.CheckInvocationReceiver(context, operation, callable, operands, instructions)) return null;
 
         return CSharpOperationLowerer.EmitCall(
             context,
@@ -114,7 +115,6 @@ internal static class CSharpCallOperationLowerer
         {
             return null;
         }
-
         return CSharpOperationLowerer.EmitCall(
             context,
             callable,

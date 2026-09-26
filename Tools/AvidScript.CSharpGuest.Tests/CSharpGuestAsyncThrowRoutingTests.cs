@@ -171,9 +171,17 @@ internal static class CSharpGuestAsyncThrowRoutingTests
         const string facade = """
             namespace AvidScript { public static class AvidContinuations {
                 public static bool Cancel;
+                private static readonly System.Collections.Generic.Queue<System.Threading.Tasks.TaskCompletionSource> Pending = new();
                 public static System.Threading.Tasks.Task NextTickAsync() {
                     if (Cancel) { Cancel = false; return System.Threading.Tasks.Task.FromCanceled(new System.Threading.CancellationToken(true)); }
-                    return System.Threading.Tasks.Task.Delay(1);
+                    var completion = new System.Threading.Tasks.TaskCompletionSource();
+                    Pending.Enqueue(completion);
+                    return completion.Task;
+                }
+                public static bool Step() {
+                    if (!Pending.TryDequeue(out var completion)) return false;
+                    completion.SetResult();
+                    return true;
                 }
             } }
             """;
@@ -186,15 +194,28 @@ internal static class CSharpGuestAsyncThrowRoutingTests
         if (!emitted.Success) throw new InvalidOperationException(string.Join(" | ", emitted.Diagnostics));
         bytes.Position = 0;
         var context = new AssemblyLoadContext("async-throw-reference", isCollectible: true);
+        var previousSynchronizationContext = System.Threading.SynchronizationContext.Current;
         try
         {
+            // Tick completions and their inline .NET continuations all execute
+            // on this thread. Task.Delay made source Trace writes race across
+            // thread-pool workers and was not a Game Thread reference model.
+            System.Threading.SynchronizationContext.SetSynchronizationContext(null);
             var assembly = context.LoadFromStream(bytes);
-            assembly.GetType("AvidScript.AvidContinuations")!.GetField("Cancel")!.SetValue(null, cancel);
+            var scheduler = assembly.GetType("AvidScript.AvidContinuations")!;
+            scheduler.GetField("Cancel")!.SetValue(null, cancel);
+            var step = scheduler.GetMethod("Step")!;
             var script = assembly.GetType("Script")!;
             var task = (Task<int>)script.GetMethod("Run")!.Invoke(null, null)!;
-            if (!task.Wait(TimeSpan.FromSeconds(5))) throw new InvalidOperationException("Async throw .NET reference timed out.");
+            for (int tick = 0; !task.IsCompleted && tick < 256; tick++)
+                if (!(bool)step.Invoke(null, null)!) throw new InvalidOperationException("Async .NET reference stalled without a pending tick.");
+            if (!task.IsCompleted) throw new InvalidOperationException("Async .NET reference exceeded its tick budget.");
             return (task.GetAwaiter().GetResult(), (int)script.GetField("Trace")!.GetValue(null)!);
         }
-        finally { context.Unload(); }
+        finally
+        {
+            System.Threading.SynchronizationContext.SetSynchronizationContext(previousSynchronizationContext);
+            context.Unload();
+        }
     }
 }

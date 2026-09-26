@@ -695,7 +695,8 @@ internal static class SemanticAsyncProjector
             IArgumentOperation[] taskArguments = invocation.Arguments.ToArray();
             if (cancellationTokenOperation is not null
                 || !ReferenceEquals(invocation, candidateInvocation)
-                || !target.IsStatic
+                || !target.IsStatic && (!context.EnableAsyncSynchronousExceptions
+                    || !target.ContainingType.IsReferenceType || invocation.Instance is null)
                 || taskArguments.Length != target.Parameters.Length
                 || taskArguments.Where((argument, index) =>
                     argument.ArgumentKind != ArgumentKind.Explicit
@@ -709,7 +710,7 @@ internal static class SemanticAsyncProjector
                 || !SymbolEqualityComparer.Default.Equals(awaitOperation.Type, taskResultType))
             {
                 diagnostics.Add(Error("ASCS5403",
-                    "Task<int> await requires a direct static source method call with explicit value arguments in parameter order.",
+                    "Task<int> await requires a direct source method with explicit value arguments; instance producers require synchronous exception analysis.",
                     SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, awaitExpression.Span)));
                 return false;
             }
@@ -723,6 +724,9 @@ internal static class SemanticAsyncProjector
             }
             else
             {
+                if (!target.IsStatic)
+                    projectedTaskArguments.Add(SemanticOperationProjector.ProjectAsyncStatementOperation(
+                        invocation.Instance!, context.PrimaryUnit, typeRegistry, diagnostics));
                 foreach (IArgumentOperation argument in taskArguments)
                 {
                     projectedTaskArguments.Add(SemanticOperationProjector.ProjectAsyncStatementOperation(
@@ -733,7 +737,8 @@ internal static class SemanticAsyncProjector
                 || (taskLocalReference is null
                     ? projectedTaskArguments.Where((argument, index) =>
                         !AllOperationsSupported(argument)
-                        || argument.TypeId != typeRegistry.Register(target.Parameters[index].Type)).Any()
+                        || argument.TypeId != typeRegistry.Register(!target.IsStatic && index == 0
+                            ? target.ContainingType : target.Parameters[index - (target.IsStatic ? 0 : 1)].Type)).Any()
                     : projectedTaskArguments.Count != 1
                         || !AllOperationsSupported(projectedTaskArguments[0])
                         || projectedTaskArguments[0].Kind != "local_reference"

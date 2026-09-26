@@ -462,6 +462,7 @@ internal static class CSharpAsyncCfgLowerer
         string activeBlockId = FlowBlockId(method, segment.Ordinal);
         List<GuestInstruction> instructions = new();
         bool activeReachable = true;
+        if (!CSharpAsyncMemberAssignmentLowerer.CheckReceiver(context, method, segment, instructions)) return false;
         CSharpAsyncControlFlowLowerer structuredFlow = new(
             context,
             segment.Ordinal,

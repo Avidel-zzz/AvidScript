@@ -22,6 +22,7 @@ internal sealed record SemanticCompilationContext(
     // New exception edges require a lexical lifetime for every Task local in
     // the module, including methods that do not themselves raise an exception.
     public bool RequireTaskLocalLifetimes { get; init; }
+    public bool EnableAsyncSynchronousExceptions { get; init; }
 }
 
 internal static class SemanticCompilationFactory

@@ -64,7 +64,9 @@ internal static class SemanticAsyncTaskLocalProjector
             if (value is ILocalReferenceOperation alias) return IsOwned(alias.Local);
             if (value is not IInvocationOperation call
                 || !SemanticAsyncProjector.TryGetSupportedTaskResult(context.Compilation, call.Type!, out _)
-                || !call.TargetMethod.IsAsync || !call.TargetMethod.IsStatic
+                || !call.TargetMethod.IsAsync
+                || !call.TargetMethod.IsStatic && (!context.EnableAsyncSynchronousExceptions
+                    || !call.TargetMethod.ContainingType.IsReferenceType || call.Instance is null)
                 || call.TargetMethod.IsGenericMethod || call.TargetMethod.ContainingType.IsGenericType
                 || call.TargetMethod.IsVirtual || call.TargetMethod.IsOverride || call.TargetMethod.IsAbstract
                 || call.TargetMethod.DeclaringSyntaxReferences.Length != 1

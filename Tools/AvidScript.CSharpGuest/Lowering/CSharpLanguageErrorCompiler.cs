@@ -21,12 +21,17 @@ public static class CSharpLanguageErrorCompiler
     {
         compilation = null;
         error = null;
-        if (semantic is null || semantic.ExceptionFlows is not { Count: > 0 } flows
+        bool implicitMemberErrors = semantic is not null && SemanticContract.HasAsyncSynchronousExceptions(semantic)
+            && SemanticAsyncInvocationValidator.IsValid(semantic)
+            && SemanticAsyncScopeValidator.IsValid(semantic)
+            && CSharpAsyncMemberAssignmentLowerer.GuardSites(semantic).Count > 0;
+        if (semantic is null || semantic.ExceptionFlows is not { Count: > 0 } && !implicitMemberErrors
             || !SemanticExceptionFlowContractValidator.IsValid(semantic)
             || semantic.Diagnostics.Any(diagnostic => diagnostic.Severity == "error"
                 && diagnostic.Code != "ASCS3001"
                 && !(SemanticContract.HasAsyncSynchronousExceptions(semantic) && diagnostic.Code == "ASCS5422")))
             return Fail("Expected a validated exception-flow artifact without unrelated errors.", out error);
+        IReadOnlyList<SemanticExceptionFlow> flows = semantic.ExceptionFlows ?? Array.Empty<SemanticExceptionFlow>();
         var staticContext = CSharpStaticExecutionContext.Find(semantic);
         if (staticContext is not null)
             flows = flows.Where(flow => semantic.Callables.Any(callable => callable.MethodSymbolId == flow.MethodSymbolId
@@ -47,7 +52,7 @@ public static class CSharpLanguageErrorCompiler
                     StringComparer.Ordinal).Any(group => group.Count() != 1))
             return Fail("A catch variable needs a unique System.Exception local symbol.", out error);
         SemanticExceptionFlow[] throwFlows = flows.Where(item => item.Throws.Count > 0).ToArray();
-        if (throwFlows.Length == 0 && staticContext is null)
+        if (throwFlows.Length == 0 && staticContext is null && !implicitMemberErrors)
             return Fail("At least one supported throw site is required.", out error);
         // The standalone producer only models an unconditional, argument-free
         // throw. Conditional guards and parameterized methods retain their CFG.
@@ -88,12 +93,16 @@ public static class CSharpLanguageErrorCompiler
             if (rethrowSites.Count != 0)
                 rethrows.Add(CSharpGuestIds.Function(handler.MethodSymbolId), rethrowSites);
         }
+        SemanticLanguageErrorEffectPlan? effects = null;
+        bool effectsValid = flows.Count == 0 && implicitMemberErrors;
+        if (effectsValid) effects = new(Array.Empty<string>());
+        else effectsValid = SemanticLanguageErrorEffectPlanner.TryBuild(semantic, out effects);
         if (throwFlows.Any(item => semantic.Callables.Count(callable =>
                     callable.MethodSymbolId == item.MethodSymbolId
                     && callable.HasBody && (!callable.IsConstructor || staticContext is not null && callable.IsStatic)
                     && (callable.ReturnTypeId is "type:int32" or "type:void"
                         || CSharpReferenceObjects.Types(semantic).Contains(callable.ReturnTypeId))) != 1)
-            || !SemanticLanguageErrorEffectPlanner.TryBuild(semantic, out var effects)
+            || !effectsValid
             || effects is null)
             return Fail("The exception source needs supported int32, void or source-class methods and a complete direct-call effect plan.", out error);
 
@@ -119,8 +128,10 @@ public static class CSharpLanguageErrorCompiler
         if (combinedTaskContract && semantic.AsyncMethods.Any(method =>
             effects.OutcomeMethodIds.Contains(method.MethodSymbolId)))
             return Fail("An async Task method cannot enter the synchronous language-error effect closure.", out error);
-        if (!CSharpLanguageCleanupRoutePlanner.TryBuild(semantic, affected,
-                out IReadOnlyDictionary<string, IReadOnlyList<CSharpLanguageCleanupRoute>> plannedCleanups,
+        IReadOnlyDictionary<string, IReadOnlyList<CSharpLanguageCleanupRoute>> plannedCleanups =
+            new Dictionary<string, IReadOnlyList<CSharpLanguageCleanupRoute>>(StringComparer.Ordinal);
+        if (affected.Count > 0 && !CSharpLanguageCleanupRoutePlanner.TryBuild(semantic, affected,
+                out plannedCleanups,
                 out error))
             return false;
         Dictionary<string, IReadOnlyList<CSharpLanguageCleanupRoute>> cleanupRoutes =
@@ -237,12 +248,17 @@ public static class CSharpLanguageErrorCompiler
             Diagnostics = semantic.Diagnostics.Where(diagnostic =>
                 diagnostic.Code != "ASCS3001" && !(synchronousAsync && diagnostic.Code == "ASCS5422")).ToArray(),
         };
-        if (handlers.Length != 0
+        if ((handlers.Length != 0 || implicitMemberErrors)
             && ordinary.Reachability?.Mode != "all_callables_compatibility")
             ordinary = ordinary with
             {
                 Reachability = SemanticReachability.ExpandForExecution(
-                    ordinary, outcomeMethods.ToArray()),
+                    // Async lowering emits every validated continuation plan.
+                    // Its accessor/receiver dependencies must be available even
+                    // when no explicit synchronous throw expanded the closure.
+                    ordinary, outcomeMethods.Concat(implicitMemberErrors
+                        ? semantic.AsyncMethods.Select(method => method.MethodSymbolId)
+                        : Array.Empty<string>()).Distinct(StringComparer.Ordinal).ToArray()),
             };
         staticContext?.Attach(ordinary);
         asyncContext?.Attach(ordinary);
@@ -261,6 +277,7 @@ public static class CSharpLanguageErrorCompiler
         GuestModule internalModule = lowered.Module with
         {
             Exports = lowered.Module.Exports.Except(affectedExports).ToArray(),
+            Functions = lowered.Module.Functions.Concat(asyncContext?.MemberGuards ?? Array.Empty<GuestFunction>()).ToArray(),
         };
         if (!CSharpLanguageOutcomeRewriter.TryRewriteWithHandlers(ordinary, internalModule,
                 affected, producerIds, catchRoutes, cleanupRoutes,

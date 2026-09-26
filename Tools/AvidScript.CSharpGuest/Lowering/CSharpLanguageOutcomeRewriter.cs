@@ -74,7 +74,8 @@ public static class CSharpLanguageOutcomeRewriter
         rewritten = null;
         error = null;
         var asyncContext = semantic is null ? null : CSharpAsyncSynchronousExecutionContext.Find(semantic);
-        if (semantic is null || module is null || affectedFunctionIds is null || affectedFunctionIds.Count == 0
+        if (semantic is null || module is null || affectedFunctionIds is null
+            || affectedFunctionIds.Count == 0 && asyncContext?.MemberGuards.Count is not > 0
             || catchRoutes is null || catchRoutes.Keys.Any(id => !affectedFunctionIds.Contains(id)
                 || producerFunctionIds.Contains(id))
             || cleanupRoutes is null || cleanupRoutes.Keys.Any(id => !affectedFunctionIds.Contains(id)
@@ -142,6 +143,7 @@ public static class CSharpLanguageOutcomeRewriter
         }
         Dictionary<string, string> outcomeByValueType = new(StringComparer.Ordinal);
         foreach (string valueType in affectedFunctionIds.Select(id => functions[id].ReturnTypeId)
+            .Concat(asyncContext?.OutcomeValues.Values ?? Array.Empty<string>())
             .Distinct(StringComparer.Ordinal).OrderBy(id => id, StringComparer.Ordinal))
         {
             string outcomeId = CSharpLanguageOutcomeTypes.Id(valueType);
