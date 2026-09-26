@@ -687,6 +687,44 @@ bool FAvidScriptSessionTaskContinuationOwnershipTest::RunTest(const FString& Par
 		Host.ReleaseTaskResult(ResumedTask));
 	TestEqual(TEXT("Completed path releases every task"), Tasks.GetCount(), 0);
 
+	for (const bool PreCancelled : {false, true})
+	{
+		const int64 Captured = Host.CreateTaskResult(TEXT("System.Int32"));
+		int64 ReadyToken = 0;
+		if (PreCancelled)
+		{
+			const int64 Source = Host.CreateCancellationSource();
+			TestTrue(TEXT("Source is cancelled before registration"), Host.CancelCancellationSource(Source));
+			ReadyToken = Host.ScheduleDelayWithCancelResume(30.0f, 405);
+			TestTrue(TEXT("Binding pre-cancelled source queues terminal delivery"), Host.BindCancellationSource(Source, ReadyToken));
+			TestTrue(TEXT("Cancelled source releases"), Host.ReleaseCancellationSource(Source));
+		}
+		else
+		{
+			const int64 TriggerTask = Host.CreateTaskResult(TEXT("System.Int32"));
+			TestTrue(TEXT("Waiter registers before trigger completion"),
+				Host.AwaitTaskResult(TriggerTask, 406, ReadyToken) == EAvidScriptTaskWaitRegistration::Queued);
+			TestTrue(TEXT("Trigger completes before frame registration"), Host.SucceedTaskResult(TriggerTask, ValueBytes, Woken));
+			TestTrue(TEXT("Trigger caller releases"), Host.ReleaseTaskResult(TriggerTask));
+		}
+		TestFalse(TEXT("Ready continuation still requires a stored frame"), Host.RetainTaskForContinuation(Captured, ReadyToken));
+		TestTrue(TEXT("Ready continuation accepts its outgoing frame"), Host.StoreState(ReadyToken, StateBytes));
+		TestTrue(TEXT("Ready continuation accepts first Task local"), Host.RetainTaskForContinuation(Captured, ReadyToken));
+		TestTrue(TEXT("Ready continuation accepts an alias"), Host.RetainTaskForContinuation(Captured, ReadyToken));
+		TestTrue(TEXT("Caller transfers Task ownership to ready continuation"), Host.ReleaseTaskResult(Captured));
+		TestTrue(TEXT("Captured producer completes while aliases remain owned"), Host.SucceedTaskResult(Captured, ValueBytes, Woken));
+		Owner->DrainReady(Ready);
+		if (!TestEqual(TEXT("Queued terminal dispatches exactly once"), Ready.Num(), 1)) return false;
+		TestTrue(TEXT("Ready status preserved"), Ready[0].Status == (PreCancelled
+			? EAvidScriptContinuationStatus::Cancelled : EAvidScriptContinuationStatus::Completed));
+		TestFalse(TEXT("Dispatch closes Task registration"), Host.RetainTaskForContinuation(Captured, ReadyToken));
+		TestTrue(TEXT("Ready continuation finalizes its aliases"), Owner->FinalizeDispatched(ReadyToken, true));
+		TestEqual(TEXT("Ready path releases all task aliases"), Tasks.GetCount(), 0);
+		TestFalse(TEXT("Retired ready token rejects retention"), Host.RetainTaskForContinuation(Captured, ReadyToken));
+		Owner->DrainReady(Ready);
+		TestEqual(TEXT("Ready terminal is not delivered twice"), Ready.Num(), 0);
+	}
+
 	const int64 ActiveTask = Host.CreateTaskResult(TEXT("System.Int32"));
 	const int64 ActiveContinuation = Host.ScheduleDelay(30.0f, 403);
 	TestTrue(TEXT("Active continuation stores its frame"),

@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$BindingPackageManifestPath,
+    [ValidateSet('SharedTask', 'AsyncThrow')][string]$Fixture = 'SharedTask',
     [string]$EngineRoot = 'C:\UnrealEngine',
     [string]$DotNetPath = (Join-Path $env:USERPROFILE '.dotnet/dotnet.exe')
 )
@@ -14,7 +15,19 @@ $nativeRoot = Join-Path $pluginRoot 'Source/AvidScriptGenerated'
 $runRoot = Join-Path $projectRoot ('Saved/AvidScript/GeneratedTaskEditor/' + [DateTimeOffset]::UtcNow.ToString('yyyyMMddTHHmmssfffZ'))
 $backupRoot = Join-Path $runRoot 'Original'
 $candidateRoot = Join-Path $runRoot 'Candidate'
-$source = Join-Path $pluginRoot 'Fixtures/Phase66/SharedTaskLifetime.cs'
+$isThrow = $Fixture -ceq 'AsyncThrow'
+$fixtureName = if ($isThrow) { 'GeneratedAsyncThrow' } else { 'SharedTaskLifetime' }
+$sourceId = "Fixtures/Phase66/$fixtureName.cs"
+$source = Join-Path $pluginRoot $sourceId
+$fixtureProject = Join-Path $pluginRoot "Fixtures/Phase66/$fixtureName.csproj"
+$engineName = if ($isThrow) { 'AsyncThrowActor' } else { 'SharedTaskActor' }
+$suite = if ($isThrow) { 'async_throw' } else { 'shared_task' }
+$test = if ($isThrow) { 'AvidScript.GeneratedTypes.AsyncThrowLifecycle' } else { 'AvidScript.GeneratedTypes.TaskUhtLifecycle' }
+$caseCount = if ($isThrow) { 108 } else { 12 }
+$automationCount = if ($isThrow) { 5 } else { 3 }
+$casePattern = if ($isThrow) { 'generated async throw passed scenario=[0-5] mode=[0-5] point=[0-2]' } else { 'generated Task UHT passed mode=[0-5] cancel=[01]' }
+$summaryName = if ($isThrow) { 'GeneratedAsyncThrowLifecycle' } else { 'GeneratedTaskUhtLifecycle' }
+$runtimeModuleId = if ($isThrow) { 'avidscript.fixture.generated_async_throw' } else { 'avidscript.fixture.shared_task_types' }
 $build = Join-Path $pluginRoot 'Build/BuildCSharpScriptTypes.ps1'
 $package = (Resolve-Path -LiteralPath $BindingPackageManifestPath).Path
 $editor = Join-Path $EngineRoot 'Engine/Binaries/Win64/UnrealEditor-Cmd.exe'
@@ -54,8 +67,8 @@ function Invoke-EditorTest([string]$Name, [string]$Test, [int]$Cases = 0) {
         Get-Content $log -Tail 35
         throw "Editor test failed or incomplete: $log (exit=$exitCode)"
     }
-    if ($Cases -gt 0 -and (@([regex]::Matches($text, 'generated Task UHT passed mode=[0-5] cancel=[01]').Value | Sort-Object -Unique).Count -ne $Cases -or
-        -not $text.Contains("GeneratedTaskUhtLifecycle: $Cases/12 passed"))) {
+    if ($Cases -gt 0 -and (@([regex]::Matches($text, $casePattern).Value | Sort-Object -Unique).Count -ne $Cases -or
+        -not $text.Contains("${summaryName}: $Cases/$caseCount passed"))) {
         throw "Editor Task scenario count mismatch: $log"
     }
     Write-Output "PASS $Test"
@@ -63,11 +76,10 @@ function Invoke-EditorTest([string]$Name, [string]$Test, [int]$Cases = 0) {
 
 function Invoke-GuestBuild([string]$Name, [string]$Source, [string]$Output) {
     & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -File $build -DotNetPath $DotNetPath `
-        -SourcePath $Source -SourceId Fixtures/Phase66/SharedTaskLifetime.cs `
-        -ProjectPath (Join-Path $pluginRoot 'Fixtures/Phase66/SharedTaskLifetime.csproj') `
+        -SourcePath $Source -SourceId $sourceId -ProjectPath $fixtureProject `
         -BindingPackageManifestPath $package -OutputRoot $Output `
         -ArtifactRoot (Join-Path $runRoot "$Name/Artifacts") -CookOutputRoot (Join-Path $runRoot "$Name/Cook") `
-        -RuntimeModuleId avidscript.fixture.shared_task_types `
+        -RuntimeModuleId $runtimeModuleId `
         -LanguageErrors bounded -AsyncExceptionFlow -DirectAwaitCleanup -AsyncCancellationFlow *> (Join-Path $runRoot "$Name.log")
     if ($LASTEXITCODE -ne 0) { throw "Formal generated Task build failed: $runRoot/$Name.log" }
     $descriptorPath = Join-Path $Output 'AvidScriptGeneratedPackage.json'
@@ -78,7 +90,22 @@ function Invoke-GuestBuild([string]$Name, [string]$Source, [string]$Output) {
         }
     }
     $types = Get-Content -LiteralPath (Join-Path $Output $descriptor.type_manifest.file) -Raw | ConvertFrom-Json
-    if (@($types.types).Count -ne 1 -or $types.types[0].engine_name -cne 'SharedTaskActor') { throw 'Unexpected generated fixture' }
+    if (@($types.types).Count -ne 1 -or $types.types[0].engine_name -cne $engineName) { throw 'Unexpected generated fixture' }
+    if ($isThrow -and ($types.semantic_schema_version -ne 46 -or $types.semantic_version -cne '1.55')) {
+        throw 'Generated throw fixture must use Semantic 46/1.55'
+    }
+    if ($isThrow) {
+        $runtimePath = Join-Path $Output $descriptor.runtime_manifest.file
+        $runtime = Get-Content -LiteralPath $runtimePath -Raw | ConvertFrom-Json
+        $runtimeRoot = Split-Path -Parent $runtimePath
+        $ir = Get-Content -LiteralPath (Join-Path $runtimeRoot 'generated_types.guestir.json') -Raw | ConvertFrom-Json
+        $wasmHash = (Get-FileHash -LiteralPath (Join-Path $runtimeRoot 'generated_types.wasm') -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($ir.schema_version -ne 26 -or $ir.ir_version -cne '1.25' -or
+            $runtime.wasm.sha256 -cne $wasmHash -or $runtime.module_id -cne $runtimeModuleId -or
+            $ir.task_local_lifetimes.exception_model -cne 'cancellation') {
+            throw 'Generated throw Runtime must publish exact IR 26/1.25 and matching WASM'
+        }
+    }
     foreach ($entry in $types.outputs) {
         if ((Get-FileHash -LiteralPath (Join-Path $Output $entry.relative_path) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $entry.sha256) {
             throw 'Generated native source hash mismatch'
@@ -101,6 +128,14 @@ try {
     $env:DOTNET_CLI_HOME = Join-Path ([IO.Path]::GetTempPath()) 'AvidScriptGeneratedTaskCliHome'
     $null = New-Item -ItemType Directory -Path $backupRoot -Force
     Write-Output "Generated Task Editor evidence: $runRoot"
+    if ($isThrow) {
+        & $DotNetPath run --project (Join-Path $pluginRoot 'Tools/AvidScript.CSharpGuest.Tests/AvidScript.CSharpGuest.Tests.csproj') `
+            -c Release -- --generated-async-throw *> (Join-Path $runRoot 'managed-reference.log')
+        if ($LASTEXITCODE -ne 0 -or
+            (Get-Content -LiteralPath (Join-Path $runRoot 'managed-reference.log') -Raw) -notmatch 'GeneratedAsyncThrow: 48/48 passed') {
+            throw 'Same-source .NET/compiler reference failed'
+        }
+    }
     # Require a complete original installation. Never delete an unknown or
     # partially installed project to make this fixture fit.
     foreach ($file in $files) {
@@ -124,7 +159,7 @@ try {
         $null = New-Item -ItemType Directory -Path (Split-Path -Parent $archive) -Force
         Copy-Item -LiteralPath (Join-Path $nativeRoot $file) -Destination $archive
     }
-    $nextSource = Join-Path $runRoot 'SharedTaskLifetimeNext.cs'
+    $nextSource = Join-Path $runRoot "${fixtureName}Next.cs"
     $sourceText = [IO.File]::ReadAllText($source)
     if ([regex]::Matches($sourceText, [regex]::Escape('const int CodeOffset = 0;')).Count -ne 1) { throw 'Expected one code generation constant' }
     [IO.File]::WriteAllText($nextSource, $sourceText.Replace('const int CodeOffset = 0;', 'const int CodeOffset = 16;'), [Text.UTF8Encoding]::new($false))
@@ -136,8 +171,12 @@ try {
     $env:AVIDSCRIPT_GENERATED_TASK_CANDIDATE = Join-Path $candidateRoot 'AvidScriptGeneratedPackage.json'
     Invoke-NativeBuild 'custom-default-build' 'none'
     Invoke-EditorTest 'custom-reflection' 'AvidScript.GeneratedTypes.Reflection'
-    Invoke-NativeBuild 'task-suite-build' 'shared_task'
-    Invoke-EditorTest 'task-lifecycle' 'AvidScript.GeneratedTypes.TaskUhtLifecycle' 12
+    Invoke-NativeBuild 'task-suite-build' $suite
+    if ($isThrow) {
+        Invoke-EditorTest 'task-ownership' 'AvidScript.Runtime.Continuation.TaskContinuationOwnership'
+        Invoke-EditorTest 'task-abi' 'AvidScript.Runtime.Continuation.TaskResultAbi'
+    }
+    Invoke-EditorTest 'task-lifecycle' $test $caseCount
 }
 catch { $failure = $_ }
 finally {
@@ -162,7 +201,7 @@ finally {
     }
 }
 if ($failure) { throw $failure }
-[ordered]@{ passed = 12; total = 12; automation_passed = 3; canonical_restored = $restored;
+[ordered]@{ fixture = $Fixture; passed = $caseCount; total = $caseCount; automation_passed = $automationCount; canonical_restored = $restored;
     initial_package_id = $initial.package_id; candidate_package_id = $next.package_id; evidence = $runRoot } |
     ConvertTo-Json | Set-Content (Join-Path $runRoot 'results.json') -Encoding utf8NoBOM
-Write-Output "Generated Task UHT: 12/12; Automation=3/3; canonical restored=$restored; evidence=$runRoot"
+Write-Output "Generated Task UHT ($Fixture): $caseCount/$caseCount; Automation=$automationCount/$automationCount; canonical restored=$restored; evidence=$runRoot"

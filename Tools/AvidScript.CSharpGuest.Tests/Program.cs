@@ -6,6 +6,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--generated-async-throw")
+            {
+                int focusedCount = CSharpGuestGeneratedAsyncThrowTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.GeneratedAsyncThrow: {focusedCount}/{focusedCount} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--async-throw-routing")
             {
                 int focusedCount = CSharpGuestAsyncThrowRoutingTests.Run();
@@ -201,6 +207,7 @@ internal static class Program
                 + CSharpGuestAsyncInvocationTests.Run()
                 + CSharpGuestTaskLocalLifetimeTests.Run()
                 + CSharpGuestSharedTaskLifetimeTests.Run()
+                + CSharpGuestGeneratedAsyncThrowTests.Run()
                 + CSharpGuestUeAsyncTests.Run()
                 + CSharpGuestShortCircuitTests.Run()
                 + CSharpGuestUeTypeTests.Run()

@@ -23,6 +23,10 @@
 #include "UObject/UObjectGlobals.h"
 #include "Validation/AvidScriptWasmImportPolicy.h"
 
+#if WITH_DEV_AUTOMATION_TESTS
+#include "Memory/AvidScriptManagedHeap.h"
+#endif
+
 DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptRuntimeSession, Log, All);
 
 struct FAvidScriptPreparedRuntimeActivation
@@ -2257,7 +2261,24 @@ FAvidScriptRuntimeSessionTestSnapshot FAvidScriptRuntimeSession::GetTestSnapshot
 	Snapshot.HostContext = HostContext;
 	Snapshot.LiveRuntimeIdentity = LiveRuntime.Get();
 	Snapshot.bSchedulerAttached = LiveRuntime.IsValid() && Scheduler->IsAttachedTo(LiveRuntime.Get());
+	Snapshot.TaskCount = Continuations->GetTaskResultsForTesting().GetCount();
+	Snapshot.TaskWaiterCount = Continuations->GetTaskResultsForTesting().GetWaiterCount();
+	Snapshot.ContinuationStateBytes = Continuations->GetStateFrameByteCountForTesting();
+	Snapshot.ReadyContinuationCount = Continuations->GetReadyCountForTesting(EAvidScriptContinuationLane::Active);
+	if (LiveRuntime.IsValid())
+		if (const auto* Heap = LiveRuntime->GetManagedHeapForTesting())
+		{
+			Snapshot.ManagedLiveRoots = Heap->GetStats().LiveRoots;
+			Snapshot.ManagedLiveObjects = Heap->GetStats().LiveObjects;
+		}
 	return Snapshot;
+}
+
+bool FAvidScriptRuntimeSession::CollectManagedHeapForTesting() const
+{
+	if (!LiveRuntime.IsValid()) return false;
+	auto* Heap = LiveRuntime->GetManagedHeapForTesting();
+	return Heap && Heap->Collect() == AvidScript::Managed::EHeapError::Ok;
 }
 
 bool FAvidScriptRuntimeSession::PrepareDelegateSubscriptionsForTesting(

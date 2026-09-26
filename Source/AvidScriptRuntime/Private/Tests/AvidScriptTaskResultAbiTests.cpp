@@ -502,47 +502,67 @@ bool FAvidScriptTaskResultAbiTest::RunTest(const FString& Parameters)
 		RejectedOwner->Teardown();
 
 		const TArray<uint8> RetainBytes = BuildTwoTokenCall(RetainForContinuationImport);
-		FAvidScriptWasmRuntimeInstance Retain(Selection);
-		if (!TestTrue(TEXT("Task continuation retention fixture loads in both VMs"),
-			Retain.LoadModule(RetainBytes.GetData(), RetainBytes.Num(),
-				TEXT("task_retain_for_continuation"), Result)))
-		{ AddError(Result.ErrorMessage); return false; }
-		const auto RetainOwner = MakeShared<FAvidScriptSessionContinuations>();
-		auto& RetainEndpoint = RetainOwner->ResetActive(World);
-		const int64 RetainedTask = RetainEndpoint.CreateTaskResult(TEXT("type:int32"));
-		const int64 RetainedContinuation = RetainEndpoint.ScheduleDelay(30.0f, 92);
-		const TArray<uint8> RetainedState{1};
-		if (!TestTrue(TEXT("Retention fixture stores a continuation frame"),
-			RetainEndpoint.StoreState(RetainedContinuation, RetainedState))) return false;
-		Context.Tasks = &RetainEndpoint;
-		Context.Continuations = &RetainEndpoint;
-		Retain.SetHostContext(Context);
-		uint8 RetainMemory[28] = {};
-		FMemory::Memcpy(RetainMemory + 8, &RetainedTask, sizeof(RetainedTask));
-		FMemory::Memcpy(RetainMemory + 16, &RetainedContinuation,
-			sizeof(RetainedContinuation));
-		if (!TestTrue(TEXT("Retention fixture supplies full-width tokens"),
-			Retain.WriteStateBytes(0, MakeArrayView(RetainMemory), Error))) return false;
-		if (!TestTrue(TEXT("WASM retains task for a pending continuation"),
-			Retain.BeginPlay(Result)))
-		{ AddError(Result.ErrorMessage); return false; }
-		if (!TestTrue(TEXT("Read retention import result"),
-			Retain.ReadStateBytes(0, MakeArrayView(RetainMemory), Error))) return false;
-		int32 RetainAccepted = 0;
-		FMemory::Memcpy(&RetainAccepted, RetainMemory + 24, sizeof(RetainAccepted));
-		TestEqual(TEXT("Retention import returns accepted"), RetainAccepted, 1);
-		TestTrue(TEXT("Guest owner releases its task reference"),
-			RetainEndpoint.ReleaseTaskResult(RetainedTask));
-		const uint8 RetainedValue[4] = {19, 0, 0, 0};
-		TArray<int64> RetainWaiters;
-		TestTrue(TEXT("Captured task completes after Guest release"),
-			RetainEndpoint.SucceedTaskResult(RetainedTask,
-				MakeArrayView(RetainedValue), RetainWaiters));
-		TestTrue(TEXT("Continuation cancellation releases captured task"),
-			RetainEndpoint.Cancel(RetainedContinuation));
-		TestEqual(TEXT("WASM retention path leaves no task result"),
-			RetainOwner->GetTaskResultsForTesting().GetCount(), 0);
-		RetainOwner->Teardown();
+		for (const bool PreCancelled : {false, true})
+		{
+			FAvidScriptWasmRuntimeInstance Retain(Selection);
+			if (!TestTrue(TEXT("Task continuation retention fixture loads in both VMs"),
+				Retain.LoadModule(RetainBytes.GetData(), RetainBytes.Num(),
+					TEXT("task_retain_for_continuation"), Result)))
+			{ AddError(Result.ErrorMessage); return false; }
+			const auto RetainOwner = MakeShared<FAvidScriptSessionContinuations>();
+			auto& RetainEndpoint = RetainOwner->ResetActive(World);
+			const int64 RetainedTask = RetainEndpoint.CreateTaskResult(TEXT("type:int32"));
+			const int64 RetainedContinuation = PreCancelled
+				? RetainEndpoint.ScheduleDelayWithCancelResume(30.0f, 92)
+				: RetainEndpoint.ScheduleDelay(30.0f, 92);
+			if (PreCancelled)
+			{
+				const int64 Source = RetainEndpoint.CreateCancellationSource();
+				TestTrue(TEXT("ABI source cancels before binding"), RetainEndpoint.CancelCancellationSource(Source));
+				TestTrue(TEXT("ABI bind queues terminal before frame registration"), RetainEndpoint.BindCancellationSource(Source, RetainedContinuation));
+				TestTrue(TEXT("ABI source releases"), RetainEndpoint.ReleaseCancellationSource(Source));
+			}
+			const TArray<uint8> RetainedState{1};
+			if (!TestTrue(TEXT("Retention fixture stores a continuation frame"),
+				RetainEndpoint.StoreState(RetainedContinuation, RetainedState))) return false;
+			Context.Tasks = &RetainEndpoint;
+			Context.Continuations = &RetainEndpoint;
+			Retain.SetHostContext(Context);
+			uint8 RetainMemory[28] = {};
+			FMemory::Memcpy(RetainMemory + 8, &RetainedTask, sizeof(RetainedTask));
+			FMemory::Memcpy(RetainMemory + 16, &RetainedContinuation,
+				sizeof(RetainedContinuation));
+			if (!TestTrue(TEXT("Retention fixture supplies full-width tokens"),
+				Retain.WriteStateBytes(0, MakeArrayView(RetainMemory), Error))) return false;
+			if (!TestTrue(TEXT("WASM retains task for a pending continuation"),
+				Retain.BeginPlay(Result)))
+			{ AddError(Result.ErrorMessage); return false; }
+			if (!TestTrue(TEXT("Read retention import result"),
+				Retain.ReadStateBytes(0, MakeArrayView(RetainMemory), Error))) return false;
+			int32 RetainAccepted = 0;
+			FMemory::Memcpy(&RetainAccepted, RetainMemory + 24, sizeof(RetainAccepted));
+			TestEqual(TEXT("Retention import returns accepted"), RetainAccepted, 1);
+			TestTrue(TEXT("Guest owner releases its task reference"),
+				RetainEndpoint.ReleaseTaskResult(RetainedTask));
+			const uint8 RetainedValue[4] = {19, 0, 0, 0};
+			TArray<int64> RetainWaiters;
+			TestTrue(TEXT("Captured task completes after Guest release"),
+				RetainEndpoint.SucceedTaskResult(RetainedTask,
+					MakeArrayView(RetainedValue), RetainWaiters));
+			if (PreCancelled)
+			{
+				TArray<FAvidScriptContinuationCompletion> CancelReady;
+				RetainOwner->DrainReady(CancelReady);
+				if (!TestEqual(TEXT("ABI cancelled terminal resumes once"), CancelReady.Num(), 1)) return false;
+				TestTrue(TEXT("ABI preserves cancelled status"), CancelReady[0].Status == EAvidScriptContinuationStatus::Cancelled);
+				TestTrue(TEXT("ABI ready continuation finalizes captured task"), RetainOwner->FinalizeDispatched(RetainedContinuation, true));
+			}
+			else
+				TestTrue(TEXT("Continuation cancellation releases captured task"), RetainEndpoint.Cancel(RetainedContinuation));
+			TestEqual(TEXT("WASM retention path leaves no task result"),
+				RetainOwner->GetTaskResultsForTesting().GetCount(), 0);
+			RetainOwner->Teardown();
+		}
 
 		const TArray<uint8> BadRetainBytes = BuildTwoTokenCall(
 			RetainForContinuationImport, true);

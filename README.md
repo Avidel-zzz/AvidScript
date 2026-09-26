@@ -108,7 +108,7 @@ public static void Tick(float deltaSeconds)
 <summary>Task 异常与取消：实验性支持</summary>
 
 需要显式启用[构建参数](Docs/Phase66/P66.C8_Task_Local_Lifetime_Contract.md#generated-task-build)。
-[取消时抛出新异常](Docs/Phase66/P66.C9_Async_Throw_Routing.md)已通过编译器与 WASM 后端测试；与生成 UE 类型、对象销毁、热重载组合使用仍待验证。
+[取消时抛出新异常](Docs/Phase66/P66.C9_Async_Throw_Routing.md)已通过编译器、WASM 后端及 Win64 Editor 生成 Actor 的销毁与热重载测试；真实 Play 和打包运行仍待验收。
 
 </details>
 

@@ -1131,7 +1131,7 @@ bool FAvidScriptSessionContinuations::RetainTaskForContinuation(
 	if (Slot.Generation != Generation || !Slot.Entry.IsSet()
 		|| Slot.Entry->Lane != Lane
 		|| Slot.Entry->ActivationSerial != ActivationSerial
-		|| Slot.Entry->bReady || Slot.Entry->bDispatching
+		|| Slot.Entry->bDispatching
 		|| Slot.Entry->bStateConsumed || Slot.Entry->StateFrame.IsEmpty()
 		|| Slot.Entry->ProducerTaskToken == TaskToken
 		|| Slot.Entry->RetainedTaskTokens.Num() >= MaximumTaskReferencesPerContinuation
@@ -1139,6 +1139,9 @@ bool FAvidScriptSessionContinuations::RetainTaskForContinuation(
 	{
 		return false;
 	}
+	// Binding an already-cancelled source can queue completion before the
+	// compiler stores its frame and transfers Task locals. As with StoreState,
+	// readiness does not close registration; dispatch/consumption does.
 	Slot.Entry->RetainedTaskTokens.Add(TaskToken);
 	return true;
 }

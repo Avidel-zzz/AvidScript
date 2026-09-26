@@ -63,6 +63,12 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeSessionTestSnapshot
 	FAvidScriptWasmHostContext HostContext;
 	const FAvidScriptWasmRuntimeInstance* LiveRuntimeIdentity = nullptr;
 	bool bSchedulerAttached = false;
+	int32 TaskCount = 0;
+	int32 TaskWaiterCount = 0;
+	int32 ContinuationStateBytes = 0;
+	int32 ReadyContinuationCount = 0;
+	uint32 ManagedLiveRoots = 0;
+	uint32 ManagedLiveObjects = 0;
 };
 #endif
 
@@ -209,6 +215,7 @@ public:
 		LiveExecutionObserverForTesting = MoveTemp(InObserver);
 	}
 	FAvidScriptRuntimeSessionTestSnapshot GetTestSnapshot() const;
+	bool CollectManagedHeapForTesting() const;
 	bool PrepareDelegateSubscriptionsForTesting(
 		UObject* Source,
 		TConstArrayView<FAvidScriptPreparedDelegateEvent> Events,
