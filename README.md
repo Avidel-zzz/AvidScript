@@ -113,6 +113,7 @@ public static void EndPlay()
 
 - **C# / .NET**：支持的语法见[语言支持文档](Docs/Phase66/P66.C_Language_Execution_Plan.md)。不能直接运行任意 .NET 程序或 NuGet 包。
 - **async / await**：`catch`、`finally` 内不能 `await`；异步异常处理需显式启用。配置与支持范围见 [UE 异步等待](Docs/Phase66/P66.C6_Direct_Continuation_Await_Contract.md)、[Task 取消与生命周期](Docs/Phase66/P66.C7_Async_Cancellation_Language_Contract.md)。
+- **Task 局部变量**：暂不支持重赋值和循环内声明（[实现进度](Docs/Phase66/P66.C8_Task_Local_Lifetime_Contract.md)）。
 - **UE 类型声明**：修改 C# 声明的 `UClass`、`UProperty`、`UFunction` 后，需要重新构建并重启 Editor。
 - **平台**：Android、iOS、Shipping 和真实多人游戏尚未验收。
 

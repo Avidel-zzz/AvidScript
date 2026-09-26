@@ -86,41 +86,14 @@ public static class SemanticAsyncTaskOwnership
                 cursor = source;
             }
         }
-        Dictionary<int, List<int>> predecessors = reachable.ToDictionary(id => id, _ => new List<int>());
-        foreach (int ordinal in reachable)
-            foreach (int target in edges[ordinal]) predecessors[target].Add(ordinal);
-        var possibleIn = reachable.ToDictionary(id => id, _ => new HashSet<string>(StringComparer.Ordinal));
-        var possibleOut = reachable.ToDictionary(id => id, _ => new HashSet<string>(StringComparer.Ordinal));
-        var definiteIn = reachable.ToDictionary(id => id, _ => new HashSet<string>(owned, StringComparer.Ordinal));
-        var definiteOut = reachable.ToDictionary(id => id, _ => new HashSet<string>(owned, StringComparer.Ordinal));
-        bool converged = false;
-        // Each bit can be added to may or removed from must only once.
-        int limit = 2 * reachable.Count * (owned.Count + 1) + 1;
-        for (int iteration = 0; iteration < limit; ++iteration)
-        {
-            bool changed = false;
-            foreach (int ordinal in reachable)
-            {
-                HashSet<string> may = new(StringComparer.Ordinal);
-                HashSet<string> must = ordinal == method.EntrySegmentOrdinal
-                    ? new(StringComparer.Ordinal) : new(owned, StringComparer.Ordinal);
-                foreach (int predecessor in predecessors[ordinal])
-                {
-                    may.UnionWith(possibleOut[predecessor]);
-                    must.IntersectWith(definiteOut[predecessor]);
-                }
-                changed |= Replace(possibleIn, ordinal, may);
-                changed |= Replace(definiteIn, ordinal, must);
-                may = new(may, StringComparer.Ordinal);
-                must = new(must, StringComparer.Ordinal);
-                may.UnionWith(generated[ordinal]);
-                must.UnionWith(generated[ordinal]);
-                changed |= Replace(possibleOut, ordinal, may);
-                changed |= Replace(definiteOut, ordinal, must);
-            }
-            if (!changed) { converged = true; break; }
-        }
-        if (!converged) return false;
+        if (!SemanticAsyncTaskOwnerFlowSolver.TrySolve(method.EntrySegmentOrdinal, localIds,
+                reachable.Select(ordinal => new SemanticAsyncTaskOwnerBlock(ordinal,
+                    generated[ordinal].ToArray(), edges[ordinal])).ToArray(),
+                new Dictionary<SemanticAsyncTaskOwnerEdge, IReadOnlyList<string>>(), out var states)) return false;
+        var possibleIn = states!.PossibleAtEntry;
+        var possibleOut = states.PossibleAtExit;
+        var definiteIn = states.DefiniteAtEntry;
+        var definiteOut = states.DefiniteAtExit;
         foreach (int ordinal in reachable)
         {
             HashSet<string> available = new(definiteIn[ordinal], StringComparer.Ordinal);
@@ -136,22 +109,11 @@ public static class SemanticAsyncTaskOwnership
             if (segments[ordinal].AwaitSite?.TaskLocalSymbolId is { } awaited
                 && !available.Contains(awaited)) return false;
         }
-        flow = new(roots, aliases, Snapshot(possibleIn), Snapshot(possibleOut),
-            Snapshot(definiteIn), Snapshot(definiteOut), reachable.Any(ordinal =>
-                !possibleIn[ordinal].SetEquals(definiteIn[ordinal])
-                    || !possibleOut[ordinal].SetEquals(definiteOut[ordinal])));
+        flow = new(roots, aliases, possibleIn, possibleOut, definiteIn, definiteOut, reachable.Any(ordinal =>
+                !possibleIn[ordinal].SequenceEqual(definiteIn[ordinal])
+                    || !possibleOut[ordinal].SequenceEqual(definiteOut[ordinal])));
         return true;
     }
-
-    private static bool Replace(Dictionary<int, HashSet<string>> states, int ordinal, HashSet<string> value)
-    {
-        if (states[ordinal].SetEquals(value)) return false;
-        states[ordinal] = value;
-        return true;
-    }
-
-    private static IReadOnlyDictionary<int, IReadOnlyList<string>> Snapshot(Dictionary<int, HashSet<string>> states) =>
-        states.ToDictionary(pair => pair.Key, pair => (IReadOnlyList<string>)pair.Value.OrderBy(id => id, StringComparer.Ordinal).ToArray());
 
     private static int[]? Successors(SemanticAsyncControlTransfer? transfer) => transfer?.Kind switch
     {
