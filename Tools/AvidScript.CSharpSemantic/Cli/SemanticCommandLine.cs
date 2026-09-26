@@ -51,8 +51,13 @@ public static class SemanticCommandLine
             bool enableDirectAwaitCleanup = options.TryGetValue(
                     "--direct-await-cleanup", out string? cleanupMode)
                 && string.Equals(cleanupMode, "enabled", StringComparison.Ordinal);
+            bool enableAsyncCancellationFlow = options.TryGetValue(
+                    "--async-cancellation-flow", out string? cancellationMode)
+                && string.Equals(cancellationMode, "enabled", StringComparison.Ordinal);
             if (enableDirectAwaitCleanup && !enableAsyncExceptionFlow)
                 throw new ArgumentException("Direct await cleanup requires async exception flow.");
+            if (enableAsyncCancellationFlow && !enableAsyncExceptionFlow)
+                throw new ArgumentException("Async cancellation flow requires async exception flow.");
             SemanticDocument document = SemanticAnalyzer.Analyze(
                 source,
                 sourceId,
@@ -60,7 +65,8 @@ public static class SemanticCommandLine
                 referenceSources,
                 workspace,
                 enableAsyncExceptionFlow,
-                enableDirectAwaitCleanup);
+                enableDirectAwaitCleanup,
+                enableAsyncCancellationFlow);
             SemanticArtifactWriter.WriteAtomic(outputPath, SemanticSerializer.Serialize(document));
             return document.Succeeded ? 0 : 1;
         }
@@ -93,7 +99,7 @@ public static class SemanticCommandLine
         referenceSourceOptions = new List<ReferenceSourceOption>();
         if (args.Length == 0 || args.Length % 2 != 0)
         {
-            throw new ArgumentException("Usage: --source <path> --source-id <id> --frontend <path> --output <path> [--reference-source <path>]... [--executable-reference-source <path>]... [--async-exception-flow enabled|disabled] [--direct-await-cleanup enabled|disabled]");
+            throw new ArgumentException("Usage: --source <path> --source-id <id> --frontend <path> --output <path> [--reference-source <path>]... [--executable-reference-source <path>]... [--async-exception-flow enabled|disabled] [--direct-await-cleanup enabled|disabled] [--async-cancellation-flow enabled|disabled]");
         }
 
         Dictionary<string, string> options = new(StringComparer.Ordinal);
@@ -115,7 +121,7 @@ public static class SemanticCommandLine
             }
 
             if (Array.IndexOf(RequiredOptions, option) < 0
-                && option is not ("--async-exception-flow" or "--direct-await-cleanup"))
+                && option is not ("--async-exception-flow" or "--direct-await-cleanup" or "--async-cancellation-flow"))
             {
                 throw new ArgumentException($"Unknown option: {option}");
             }
@@ -125,6 +131,9 @@ public static class SemanticCommandLine
             if (option == "--direct-await-cleanup"
                 && value is not ("enabled" or "disabled"))
                 throw new ArgumentException("--direct-await-cleanup must be enabled or disabled.");
+            if (option == "--async-cancellation-flow"
+                && value is not ("enabled" or "disabled"))
+                throw new ArgumentException("--async-cancellation-flow must be enabled or disabled.");
 
             if (string.IsNullOrWhiteSpace(value) || !options.TryAdd(option, value))
             {

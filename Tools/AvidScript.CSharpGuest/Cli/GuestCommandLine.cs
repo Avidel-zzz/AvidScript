@@ -67,7 +67,8 @@ public static class GuestCommandLine
                     && document.AsyncMethods.Any(method => method.ErrorPlan is not null)
                 || document.SchemaVersion
                     is (SemanticContract.AsyncExceptionFlowSchemaVersion
-                        or SemanticContract.DirectAwaitCleanupSchemaVersion)
+                        or SemanticContract.DirectAwaitCleanupSchemaVersion
+                        or SemanticContract.AsyncCancellationFlowSchemaVersion)
                     && document.AsyncMethods.Any(method => method.ExceptionPlan is not null);
             if (boundedLanguageErrors && (document.ExceptionFlows is { Count: > 0 }
                     || asyncLanguageErrors)

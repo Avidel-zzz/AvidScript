@@ -115,7 +115,7 @@ public static void EndPlay()
 | --- | --- |
 | C# / .NET | C# 子集，不能直接运行任意 .NET 程序或 NuGet 包 |
 | `Task<int>` | 仅支持同一脚本实例内等待 |
-| 异步取消 | `catch` / `throw;` 为[内部预览](Docs/Phase66/P66.C7_Async_Cancellation_Language_Contract.md)；未捕获取消仍可能中止脚本 |
+| 异步取消 | `catch` / `throw;` 需显式启用 [`-AsyncCancellationFlow`](Docs/Phase66/P66.C7_Async_Cancellation_Language_Contract.md) 预览；未捕获取消仍可能中止脚本 |
 | `try` / `await` | 需要[预览开关](Docs/Phase66/P66.C6_Direct_Continuation_Await_Contract.md)；`catch`、`finally` 内不支持 `await` |
 | C# 声明 UE 类型 | 修改 `UClass`、`UProperty`、`UFunction` 后需重新构建并重启 Editor |
 | 平台 / 发布 | Android、iOS、Shipping、真实多人游戏尚未验收 |

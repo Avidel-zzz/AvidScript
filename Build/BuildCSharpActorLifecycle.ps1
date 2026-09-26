@@ -22,6 +22,7 @@ param(
     [string]$LanguageErrors = "disabled",
     [switch]$AsyncExceptionFlow,
     [switch]$DirectAwaitCleanup,
+    [switch]$AsyncCancellationFlow,
     [ValidateSet("auto", "enabled", "disabled")]
     [string]$DebugInstrumentation = "auto",
     [switch]$AllowGeneratedTypeImports,
@@ -86,6 +87,9 @@ if ($AsyncExceptionFlow -and $LanguageErrors -cne "bounded") {
 }
 if ($DirectAwaitCleanup -and -not $AsyncExceptionFlow) {
     throw "Direct await cleanup requires -AsyncExceptionFlow."
+}
+if ($AsyncCancellationFlow -and -not $AsyncExceptionFlow) {
+    throw "Async cancellation flow requires -AsyncExceptionFlow."
 }
 $CompilationCacheDisabledForBuild =
     [bool]$DisableCompilationCache -or [bool]$CooperativeSafepoints
@@ -452,7 +456,8 @@ function Test-CompilerInjectedBindingImport {
         [Parameter(Mandatory = $true)][bool]$AllowGeneratedTypeImports,
         [Parameter(Mandatory = $true)][bool]$AllowDebugImports,
         [Parameter(Mandatory = $true)][bool]$AllowBoundedLanguageErrors,
-        [Parameter(Mandatory = $true)][bool]$AllowDirectAwaitCleanup
+        [Parameter(Mandatory = $true)][bool]$AllowDirectAwaitCleanup,
+        [bool]$AllowAsyncCancellationFlow = $false
     )
 
     if ([string]$Import.module -cne "avidscript" -or
@@ -499,6 +504,13 @@ function Test-CompilerInjectedBindingImport {
             @{ Id = 'import:task_language_error_meta_v1'; Name = 'avid_task_language_error_meta_v1'; Parameters = @('type:int64'); Result = 'type:int64' }
             @{ Id = 'import:task_language_error_root_v1'; Name = 'avid_task_language_error_root_v1'; Parameters = @('type:int64'); Result = 'type:language_error_root' }
         )
+        if ($AllowAsyncCancellationFlow) {
+            $LanguageErrorBridges += @(
+                @{ Id = 'import:task_cancel_language_error_v1'; Name = 'avid_task_cancel_language_error_v1'; Parameters = @('type:int64', 'type:int32', 'type:int32', 'type:language_error_root'); Result = 'type:int32' }
+                @{ Id = 'import:task_terminal_error_meta_v1'; Name = 'avid_task_terminal_error_meta_v1'; Parameters = @('type:int64'); Result = 'type:int64' }
+                @{ Id = 'import:task_terminal_error_root_v1'; Name = 'avid_task_terminal_error_root_v1'; Parameters = @('type:int64'); Result = 'type:language_error_root' }
+            )
+        }
         foreach ($Bridge in $LanguageErrorBridges) {
             if ([string]$Import.name -ceq $Bridge.Name) {
                 return [string]$Import.id -ceq $Bridge.Id -and
@@ -631,7 +643,8 @@ function Test-BindingPackageImports {
         [bool]$AllowGeneratedTypeImports = $false,
         [bool]$AllowDebugImports = $false,
         [bool]$AllowBoundedLanguageErrors = $false,
-        [bool]$AllowDirectAwaitCleanup = $false
+        [bool]$AllowDirectAwaitCleanup = $false,
+        [bool]$AllowAsyncCancellationFlow = $false
     )
 
     $DeclaredByKey = [System.Collections.Generic.Dictionary[string, object]]::new(
@@ -648,15 +661,18 @@ function Test-BindingPackageImports {
     foreach ($Import in @($GuestImports | Where-Object { [string]$_.module -eq "avidscript" })) {
         $Key = "$([string]$Import.module)`n$([string]$Import.name)"
         [void]$ObservedKeys.Add($Key)
-        if ($AllowBoundedLanguageErrors -and
-            [string]$Import.name -cin @('avid_managed_heap_v1', 'avid_language_error_report_v1')) {
+        if (($AllowBoundedLanguageErrors -and
+            [string]$Import.name -cin @('avid_managed_heap_v1', 'avid_language_error_report_v1')) -or
+            [string]$Import.name -cin @('avid_task_cancel_language_error_v1',
+                'avid_task_terminal_error_meta_v1', 'avid_task_terminal_error_root_v1')) {
             if (-not (Test-CompilerInjectedBindingImport `
                 -Import $Import `
                 -AllowDataLaneImports $AllowDataLaneImports `
                 -AllowGeneratedTypeImports $AllowGeneratedTypeImports `
                 -AllowDebugImports $AllowDebugImports `
-                -AllowBoundedLanguageErrors $true `
-                -AllowDirectAwaitCleanup $AllowDirectAwaitCleanup)) {
+                -AllowBoundedLanguageErrors $AllowBoundedLanguageErrors `
+                -AllowDirectAwaitCleanup $AllowDirectAwaitCleanup `
+                -AllowAsyncCancellationFlow $AllowAsyncCancellationFlow)) {
                 $UnexpectedImports += "$([string]$Import.module).$([string]$Import.name)"
             }
             continue
@@ -668,7 +684,8 @@ function Test-BindingPackageImports {
                 -AllowGeneratedTypeImports $AllowGeneratedTypeImports `
                 -AllowDebugImports $AllowDebugImports `
                 -AllowBoundedLanguageErrors $AllowBoundedLanguageErrors `
-                -AllowDirectAwaitCleanup $AllowDirectAwaitCleanup)) {
+                -AllowDirectAwaitCleanup $AllowDirectAwaitCleanup `
+                -AllowAsyncCancellationFlow $AllowAsyncCancellationFlow)) {
             $UnexpectedImports += "$([string]$Import.module).$([string]$Import.name)"
         }
     }
@@ -858,6 +875,9 @@ function Write-BuildReport {
             data_lane_fusion = $DataLaneFusion
             debug_instrumentation = $ResolvedDebugInstrumentation
             language_errors = $LanguageErrors
+            async_exception_flow = [bool]$AsyncExceptionFlow
+            direct_await_cleanup = [bool]$DirectAwaitCleanup
+            async_cancellation_flow = [bool]$AsyncCancellationFlow
         }
         build_reuse = $BuildReuse
         semantic_cache = $SemanticCache
@@ -1171,6 +1191,7 @@ $BoundedSemanticArtifact = $false
 $BoundedAsyncSemanticArtifact = $false
 $BoundedAsyncExceptionSemanticArtifact = $false
 $DirectAwaitSemanticArtifact = $false
+$AsyncCancellationSemanticArtifact = $false
 $GuestIrModel = $null
 $DebugMapModel = $null
 $StateSchemaModel = $null
@@ -1574,6 +1595,9 @@ elseif (-not $SemanticCacheHit) {
         if ($DirectAwaitCleanup) {
             $SemanticArguments += @("-DirectAwaitCleanup", "enabled")
         }
+        if ($AsyncCancellationFlow) {
+            $SemanticArguments += @("-AsyncCancellationFlow", "enabled")
+        }
         $SemanticInvocation = Invoke-AvidScriptPowerShell -Arguments $SemanticArguments
         $SemanticOutput = @($SemanticInvocation.Output)
         $SemanticExitCode = [int]$SemanticInvocation.ExitCode
@@ -1629,6 +1653,13 @@ elseif (-not $SemanticCacheHit) {
     $DirectAwaitSemanticArtifact = $DirectAwaitSemanticProfile -and
         (($SemanticExitCode -eq 0 -and [bool]$SemanticModel.succeeded -and
             $SemanticErrors.Count -eq 0) -or $BoundedDirectAwaitSemanticArtifact)
+    $AsyncCancellationSemanticArtifact = $AsyncCancellationFlow -and
+        $null -ne $SemanticModel -and [int]$SemanticModel.schema_version -eq 44 -and
+        [string]$SemanticModel.semantic_version -ceq '1.53' -and
+        $SemanticExitCode -eq 0 -and [bool]$SemanticModel.succeeded -and $SemanticErrors.Count -eq 0 -and
+        @($SemanticModel.async_methods | Where-Object {
+            $null -ne $_.PSObject.Properties['exception_plan'] -and $null -ne $_.exception_plan
+        }).Count -gt 0
     $BoundedSemanticArtifact = $LanguageErrors -ceq "bounded" -and
         $SemanticExitCode -eq 1 -and
         $null -ne $SemanticModel -and -not [bool]$SemanticModel.succeeded -and
@@ -1644,12 +1675,13 @@ elseif (-not $SemanticCacheHit) {
         Write-Output "[AvidScript][CSharp][Semantic] result=semantic_failed exit_code=$SemanticExitCode report=$ReportPath"
         exit 1
     }
-    if ($AsyncExceptionFlow -and -not ($BoundedAsyncExceptionSemanticArtifact -or
-        $DirectAwaitSemanticArtifact)) {
+    if (($AsyncCancellationFlow -and -not $AsyncCancellationSemanticArtifact) -or
+        ($AsyncExceptionFlow -and -not ($BoundedAsyncExceptionSemanticArtifact -or
+            $DirectAwaitSemanticArtifact -or $AsyncCancellationSemanticArtifact))) {
         $Diagnostics += [ordered]@{
-            code = "async_exception_flow_unavailable"
+            code = if ($AsyncCancellationFlow) { "async_cancellation_flow_unavailable" } else { "async_exception_flow_unavailable" }
             severity = "error"
-            message = "The source did not produce a supported Semantic 42 async exception plan or gated Semantic 43 direct await cleanup plan."
+            message = "The source did not produce a supported Semantic 42, 43 or 44 async exception plan with its required preview switches."
             file = $SourceId
         }
         Write-BuildReport -Result "semantic_failed" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics
@@ -1988,8 +2020,9 @@ if ($UsesBindingPackage) {
         -AllowDataLaneImports ($DataLaneFusion -ceq "enabled") `
         -AllowGeneratedTypeImports ([bool]$AllowGeneratedTypeImports) `
         -AllowDebugImports ($ResolvedDebugInstrumentation -ceq "enabled") `
-        -AllowBoundedLanguageErrors ([bool]($BoundedSemanticArtifact -or $DirectAwaitSemanticArtifact)) `
-        -AllowDirectAwaitCleanup ([bool]$DirectAwaitSemanticArtifact)
+        -AllowBoundedLanguageErrors ([bool]($BoundedSemanticArtifact -or $DirectAwaitSemanticArtifact -or $AsyncCancellationSemanticArtifact)) `
+        -AllowDirectAwaitCleanup ([bool]($DirectAwaitSemanticArtifact -or ($AsyncCancellationSemanticArtifact -and $DirectAwaitCleanup))) `
+        -AllowAsyncCancellationFlow ([bool]$AsyncCancellationSemanticArtifact)
     $UsedAuthorizationBindingImports = @($AuthorizationValidation.UsedImports)
     if (@($AuthorizationValidation.UnexpectedImports).Count -gt 0) {
         Remove-LoadableArtifacts
@@ -2010,8 +2043,9 @@ if ($UsesBindingPackage) {
         -AllowDataLaneImports ($DataLaneFusion -ceq "enabled") `
         -AllowGeneratedTypeImports ([bool]$AllowGeneratedTypeImports) `
         -AllowDebugImports ($ResolvedDebugInstrumentation -ceq "enabled") `
-        -AllowBoundedLanguageErrors ([bool]($BoundedSemanticArtifact -or $DirectAwaitSemanticArtifact)) `
-        -AllowDirectAwaitCleanup ([bool]$DirectAwaitSemanticArtifact)
+        -AllowBoundedLanguageErrors ([bool]($BoundedSemanticArtifact -or $DirectAwaitSemanticArtifact -or $AsyncCancellationSemanticArtifact)) `
+        -AllowDirectAwaitCleanup ([bool]($DirectAwaitSemanticArtifact -or ($AsyncCancellationSemanticArtifact -and $DirectAwaitCleanup))) `
+        -AllowAsyncCancellationFlow ([bool]$AsyncCancellationSemanticArtifact)
     $UsedRuntimeBindingImports = @($RuntimeValidation.UsedImports)
     $RuntimeIdentityMismatch = @()
     $RuntimeUsedByKey = [System.Collections.Generic.Dictionary[string, object]]::new(
@@ -2143,12 +2177,14 @@ $MissingObservedExports = @($ExpectedObservedExports | Where-Object { $ObservedE
 $UnexpectedObservedExports = @($ObservedExports | Where-Object { $ExpectedObservedExports -notcontains $_ })
 # This entry publishes the current compiler contract. Keep the exact pair aligned
 # with GuestModuleValidator; TestCSharpGuestBuildContracts exercises real output.
-$ExpectedGuestSchema = if ($DirectAwaitSemanticArtifact) { 23 }
+$ExpectedGuestSchema = if ($AsyncCancellationSemanticArtifact) { 24 }
+    elseif ($DirectAwaitSemanticArtifact) { 23 }
     elseif ($BoundedAsyncExceptionSemanticArtifact) { 22 }
     elseif ($BoundedAsyncSemanticArtifact) { 21 }
     elseif ($BoundedSemanticArtifact -and [int]$SemanticModel.schema_version -eq 40) { 20 }
     elseif ($BoundedSemanticArtifact) { 17 } else { 14 }
-$ExpectedGuestVersion = if ($DirectAwaitSemanticArtifact) { "1.22" }
+$ExpectedGuestVersion = if ($AsyncCancellationSemanticArtifact) { "1.23" }
+    elseif ($DirectAwaitSemanticArtifact) { "1.22" }
     elseif ($BoundedAsyncExceptionSemanticArtifact) { "1.21" }
     elseif ($BoundedAsyncSemanticArtifact) { "1.20" }
     elseif ($BoundedSemanticArtifact -and [int]$SemanticModel.schema_version -eq 40) { "1.19" }
@@ -2157,6 +2193,9 @@ $GuestContractValid = [int]$GuestIrModel.schema_version -eq $ExpectedGuestSchema
     [string]$GuestIrModel.ir_version -ceq $ExpectedGuestVersion -and
     (-not $BoundedSemanticArtifact -or $null -ne $GuestIrModel.language_error_catalog) -and
     (-not $DirectAwaitSemanticArtifact -or @($GuestIrModel.direct_await_routes).Count -gt 0) -and
+    (-not $AsyncCancellationSemanticArtifact -or
+        ($null -ne $GuestIrModel.language_error_catalog -and
+            @($GuestIrModel.async_exception_transfers).Count -gt 0)) -and
     [bool]$GuestIrModel.succeeded -and
     [string]$GuestIrModel.provenance.semantic_sha256 -eq $SemanticSha256 -and
     [string]$GuestIrModel.provenance.source_sha256 -eq [string]$FrontendModel.source.sha256

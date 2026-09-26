@@ -91,10 +91,11 @@ internal static class CSharpGuestAsyncCancellationTests
         {
             Directory.CreateDirectory(directory);
             File.WriteAllBytes(Path.Combine(directory, "cancellation.semantic.json"), SemanticSerializer.Serialize(semantic));
-            File.WriteAllBytes(Path.Combine(directory, "cancellation.guest-ir.json"), json);
+            File.WriteAllBytes(Path.Combine(directory, "cancellation.guestir.json"), json);
             File.WriteAllBytes(Path.Combine(directory, "cancellation.wasm"), compiled.Bytes);
         }
-        return checks;
+        return checks + RunCli(source, sourceId, frontend,
+            CSharpGuestContinuationTests.ReferenceFacade + additionalFacade);
 
         void Reject(GuestModule candidate, string code, string reason)
         {
@@ -110,6 +111,52 @@ internal static class CSharpGuestAsyncCancellationTests
             return module with { Functions = module.Functions.Select(function => function with
             { Blocks = function.Blocks.Select(block => block.Id == blockId ? update(block) : block).ToArray() }).ToArray() };
         }
+    }
+
+    private static int RunCli(string source, string sourceId, FrontendDocument frontend, string facade)
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "avidscript-cancellation-cli-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string sourcePath = Path.Combine(directory, "flow.cs");
+            string frontendPath = Path.Combine(directory, "flow.frontend.json");
+            string facadePath = Path.Combine(directory, "continuations.generated.cs");
+            string semanticPath = Path.Combine(directory, "flow.semantic.json");
+            string guestPath = Path.Combine(directory, "flow.guestir.json");
+            File.WriteAllText(sourcePath, source);
+            File.WriteAllBytes(frontendPath, FrontendSerializer.Serialize(frontend));
+            File.WriteAllText(facadePath, facade);
+            string[] basic = { "--source", sourcePath, "--source-id", sourceId,
+                "--frontend", frontendPath, "--output", semanticPath, "--executable-reference-source", facadePath };
+            foreach (string[] invalid in new[]
+            {
+                new[] { "--async-cancellation-flow", "enabled" },
+                new[] { "--async-exception-flow", "enabled", "--async-cancellation-flow", "yes" },
+                new[] { "--async-exception-flow", "enabled", "--async-cancellation-flow", "enabled", "--async-cancellation-flow", "disabled" },
+            })
+                Check(SemanticCommandLine.Run(basic.Concat(invalid).ToArray()) == 2
+                    && !File.Exists(semanticPath), "Invalid cancellation CLI options must not publish an artifact.");
+            string[] features = { "--async-exception-flow", "enabled", "--direct-await-cleanup", "enabled" };
+            Check(SemanticCommandLine.Run(basic) == 1,
+                "Protected awaits must remain rejected without preview switches.");
+            Check(SemanticCommandLine.Run(basic.Concat(features).Concat(new[] { "--async-cancellation-flow", "disabled" }).ToArray()) == 0
+                && SemanticSerializer.Deserialize(File.ReadAllBytes(semanticPath)).SchemaVersion == 43,
+                "Disabling typed cancellation must retain the old cleanup-only contract.");
+            Check(SemanticCommandLine.Run(basic.Concat(features).Concat(new[] { "--async-cancellation-flow", "enabled" }).ToArray()) == 0
+                && SemanticSerializer.Deserialize(File.ReadAllBytes(semanticPath)).SchemaVersion == 44,
+                "Semantic CLI must publish the explicit cancellation contract.");
+            string[] guestArgs = { "--semantic", semanticPath, "--output", guestPath };
+            Check(GuestCommandLine.Run(guestArgs) == 1 && !File.Exists(guestPath),
+                "Guest CLI must require bounded errors.");
+            Check(GuestCommandLine.Run(guestArgs.Concat(new[] { "--language-errors", "bounded" }).ToArray()) == 0
+                && GuestIrSerializer.Deserialize(File.ReadAllBytes(guestPath)).SchemaVersion == 24,
+                "Guest CLI must publish IR 24.");
+            Check(GuestCommandLine.Run(guestArgs.Concat(new[] { "--language-errors", "bounded", "--debug-instrumentation", "enabled" }).ToArray()) == 2
+                && !File.Exists(guestPath), "Unsupported instrumentation must remove earlier Guest output.");
+            return 9;
+        }
+        finally { Directory.Delete(directory, recursive: true); }
     }
 
     private static void Check(bool condition, string message)

@@ -10,6 +10,8 @@ param(
     [string]$AsyncExceptionFlow = "disabled",
     [ValidateSet("enabled", "disabled")]
     [string]$DirectAwaitCleanup = "disabled",
+    [ValidateSet("enabled", "disabled")]
+    [string]$AsyncCancellationFlow = "disabled",
     [string]$Configuration = "Release"
 )
 
@@ -85,6 +87,9 @@ try {
         }
         if ($DirectAwaitCleanup -ceq "enabled") {
             $SemanticArguments += @("--direct-await-cleanup", "enabled")
+        }
+        if ($AsyncCancellationFlow -ceq "enabled") {
+            $SemanticArguments += @("--async-cancellation-flow", "enabled")
         }
         & $DotNetPath $SemanticDll @SemanticArguments
         $ExitCode = $LASTEXITCODE

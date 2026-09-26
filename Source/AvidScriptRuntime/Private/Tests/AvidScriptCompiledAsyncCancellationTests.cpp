@@ -29,7 +29,7 @@ bool FAvidScriptCompiledAsyncCancellationTest::RunTest(const FString& Parameters
 		|| !TestTrue(TEXT("Compiler WASM exists"), FFileHelper::LoadFileToArray(
 			Bytes, *(Directory / TEXT("cancellation.wasm"))))
 		|| !TestTrue(TEXT("Compiler IR exists"), FFileHelper::LoadFileToString(
-			Json, *(Directory / TEXT("cancellation.guest-ir.json"))))
+			Json, *(Directory / TEXT("cancellation.guestir.json"))))
 		|| !TestTrue(TEXT("Compiler IR parses"), FJsonSerializer::Deserialize(
 			TJsonReaderFactory<>::Create(Json), Ir)) || !Ir.IsValid()) return false;
 	if (!TestEqual(TEXT("Compiler cancellation IR version"),
