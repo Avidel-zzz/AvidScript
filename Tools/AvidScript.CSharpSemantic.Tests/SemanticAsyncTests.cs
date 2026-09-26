@@ -37,6 +37,7 @@ internal static class SemanticAsyncTests
         DirectAwaitCleanupPublishesCancellationOnlyRoute();
         DirectAwaitCatchPreviewKeepsCancellationOutOfHandlers();
         DirectAwaitAndTaskFaultShareProtectedRegion();
+        DirectAwaitCleanupThrowDoesNotActivateSiblingCatch();
         AsyncExceptionFixturePublishesAllMethods();
         AwaitFailureSuccessorKeepsCleanupLocalAlive();
         RejectedAsyncExceptionRetainsRoslynRegions();
@@ -45,7 +46,61 @@ internal static class SemanticAsyncTests
         NestedSuspendedCleanupBindsDistinctRoslynRegions();
         TaskAndExceptionPlansKeepBothContracts();
         TaskIntThrowPublishesVersionedErrorPlan();
-        return 33;
+        return 34;
+    }
+
+    private static void DirectAwaitCleanupThrowDoesNotActivateSiblingCatch()
+    {
+        const string source = """
+            using AvidScript;
+            using System;
+            using System.Threading.Tasks;
+            public static class Script
+            {
+                public static int CleanupCount;
+                public static int Mode;
+                public static async Task<int> RunAsync()
+                {
+                    try { await AvidContinuations.NextTickAsync(); return 16; }
+                    catch (InvalidOperationException) { return 17; }
+                    finally
+                    {
+                        CleanupCount++;
+                        if (Mode == 1) throw new InvalidOperationException();
+                    }
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/DirectAwaitCleanupThrow.cs",
+            enableAsyncExceptionFlow: true, enableDirectAwaitCleanup: true);
+        SemanticAsyncMethod? method = document.AsyncMethods.SingleOrDefault(item =>
+            item.MethodSymbolId.Contains(".RunAsync(", StringComparison.Ordinal));
+        Assert(document.SchemaVersion == SemanticContract.DirectAwaitCleanupSchemaVersion
+            && document.Diagnostics.Any(item => item.Code == "ASCS5422")
+            && document.Diagnostics.Where(item => item.Severity == "error")
+                .All(item => item.Code == "ASCS5422")
+            && method?.ErrorPlan is { Throws.Count: > 0 }
+            && method.ExceptionPlan!.Regions.Where(region => region.Kind == "catch")
+                .All(region => region.Segments.Count == 0)
+            && SemanticAsyncExceptionPlanValidator.IsValid(document),
+            "a finally throw must remain outside its sibling catch on normal and cancelled exits: "
+                + string.Join(" | ", document.Diagnostics.Select(item =>
+                    item.Code + ":" + item.Message)));
+        byte[] serialized = SemanticSerializer.Serialize(document);
+        Assert(serialized.SequenceEqual(SemanticSerializer.Serialize(
+            SemanticSerializer.Deserialize(serialized))),
+            "direct cleanup throw plan must round-trip canonically");
+        int throwSegment = method!.ErrorPlan!.Throws[0].SegmentOrdinal;
+        Assert(!SemanticAsyncExceptionPlanValidator.IsValid(document with
+        {
+            AsyncMethods = document.AsyncMethods.Select(item => item != method ? item
+                : item with { ExceptionPlan = item.ExceptionPlan! with
+                {
+                    Regions = item.ExceptionPlan!.Regions.Select(region => region.Kind != "try"
+                        ? region : region with { Segments = region.Segments.Append(throwSegment)
+                            .Distinct().Order().ToArray() }).ToArray(),
+                } }).ToArray(),
+        }), "a protected throw must not bypass its pruned catch by claiming to be cleanup");
     }
 
     private static void DirectAwaitAndTaskFaultShareProtectedRegion()

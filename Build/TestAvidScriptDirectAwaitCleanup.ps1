@@ -33,7 +33,7 @@ $referenceOutput = & $DotNetPath run `
     --project (Join-Path $pluginRoot 'Fixtures/Phase66/DirectAwaitCleanup.Reference.csproj') `
     -c Release
 if ($LASTEXITCODE -ne 0 -or
-    @($referenceOutput | Where-Object { $_ -ceq 'DirectAwaitCleanup.Reference: 2/2 passed' }).Count -ne 1) {
+    @($referenceOutput | Where-Object { $_ -ceq 'DirectAwaitCleanup.Reference: 4/4 passed' }).Count -ne 1) {
     throw 'The same-source .NET direct await comparison failed.'
 }
 
@@ -105,7 +105,7 @@ if ($report.result -cne 'direct_abi_built' -or -not $report.succeeded -or
     throw "Formal direct await contract is invalid: $outputRoot"
 }
 $offsets = @{}
-foreach ($field in @('Result', 'CleanupCount', 'CatchCount')) {
+foreach ($field in @('Result', 'CleanupCount', 'CatchCount', 'CleanupMode')) {
     $slot = @($state.slots | Where-Object stable_id -ceq "state:type:global::Script:$field")
     if ($slot.Count -ne 1 -or [int]$slot[0].size -ne 4 -or
         [int]$slot[0].offset -lt 0 -or [int]$slot[0].offset -ge 65536) {
@@ -118,6 +118,7 @@ $env:AVIDSCRIPT_DIRECT_AWAIT_MODULE_ID = [string]$manifest.module_id
 $env:AVIDSCRIPT_DIRECT_AWAIT_RESULT_OFFSET = $offsets['Result']
 $env:AVIDSCRIPT_DIRECT_AWAIT_CLEANUP_OFFSET = $offsets['CleanupCount']
 $env:AVIDSCRIPT_DIRECT_AWAIT_CATCH_OFFSET = $offsets['CatchCount']
+$env:AVIDSCRIPT_DIRECT_AWAIT_MODE_OFFSET = $offsets['CleanupMode']
 $build = Join-Path $EngineRoot 'Engine/Build/BatchFiles/Build.bat'
 & $build AvidTPSTemplateEditor Win64 Development "-Project=$projectPath" -WaitMutex -NoHotReloadFromIDE
 if ($LASTEXITCODE -ne 0) { throw 'No-clean Win64 Editor build failed.' }
@@ -134,15 +135,17 @@ $failed = [regex]::Matches($log, 'Test Completed\. Result=\{Fail\}').Count
 $complete = [regex]::Matches($log, '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*\*').Count
 $markers = @(
     foreach ($backend in @(0, 1)) {
-        "compiled direct await backend=$backend cancel=0 result=16 cleanup=1 catch=0 resumes=2 cancelled=0"
-        "compiled direct await backend=$backend cancel=1 result=0 cleanup=1 catch=0 resumes=2 cancelled=2"
+        "compiled direct await backend=$backend cancel=0 cleanup_throw=0 result=16 cleanup=1 catch=0 resumes=2 cancelled=0"
+        "compiled direct await backend=$backend cancel=1 cleanup_throw=0 result=0 cleanup=1 catch=0 resumes=2 cancelled=2"
+        "compiled direct await backend=$backend cancel=0 cleanup_throw=1 result=0 cleanup=1 catch=0 resumes=2 cancelled=0"
+        "compiled direct await backend=$backend cancel=1 cleanup_throw=1 result=0 cleanup=1 catch=0 resumes=2 cancelled=1"
     }
 )
 $scenarios = @($markers | Where-Object {
     [regex]::Matches($log, [regex]::Escape($_)).Count -eq 1
 }).Count
 if ($found -ne 1 -or $success -ne 1 -or $failed -ne 0 -or
-    $complete -ne 1 -or $scenarios -ne 4) {
+    $complete -ne 1 -or $scenarios -ne 8) {
     throw "Direct await Automation evidence incomplete: found=$found success=$success scenarios=$scenarios failed=$failed complete=$complete log=$logPath"
 }
-Write-Output "CompiledDirectAwaitCleanup: 1/1 passed; .NET=2/2 default=ASCS3002 Win64 Wasmtime/WAMR=4/4; log=$logPath"
+Write-Output "CompiledDirectAwaitCleanup: 1/1 passed; .NET=4/4 default=ASCS3002 Win64 Wasmtime/WAMR=8/8; log=$logPath"

@@ -98,7 +98,7 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 - 修改 C# 声明的 `UClass`、`UProperty` 或 `UFunction` 后，需要重新构建并重启 Editor。
 - Android、iOS、Shipping 和真实多人游戏尚未验收。
 
-直接 `await` 与 Task 的 `try/catch/finally` 组合可通过[预览开关](Docs/Phase66/P66.C6_Direct_Continuation_Await_Contract.md)使用。其他异步限制见 [Task 结果](Docs/Phase66/P66.C4_Task_Result_Contract.md)；Win64 Wasmtime / WAMR 的异步、数组、泛型组合测试见[验证记录](Docs/Phase66/P66.C_Language_Execution_Plan.md)。
+直接 `await` 与 Task 的 `try/catch/finally` 组合可通过[预览开关](Docs/Phase66/P66.C6_Direct_Continuation_Await_Contract.md)使用；取消清理中的异常会传给外层等待者。其他异步限制见 [Task 结果](Docs/Phase66/P66.C4_Task_Result_Contract.md)；Win64 Wasmtime / WAMR 的异步、数组、泛型组合测试见[验证记录](Docs/Phase66/P66.C_Language_Execution_Plan.md)。
 
 ## 开发
 

@@ -38,6 +38,7 @@ bool FAvidScriptCompiledDirectAwaitCleanupTest::RunTest(const FString& Parameter
 	int32 ResultOffset = -1;
 	int32 CleanupOffset = -1;
 	int32 CatchOffset = -1;
+	int32 ModeOffset = -1;
 	if (!TestFalse(TEXT("Direct await WASM path set"), Fixture.IsEmpty())
 		|| !TestFalse(TEXT("Direct await module id set"), ModuleId.IsEmpty())
 		|| !TestTrue(TEXT("Result offset valid"),
@@ -45,7 +46,9 @@ bool FAvidScriptCompiledDirectAwaitCleanupTest::RunTest(const FString& Parameter
 		|| !TestTrue(TEXT("Cleanup offset valid"),
 			ReadOffset(TEXT("AVIDSCRIPT_DIRECT_AWAIT_CLEANUP_OFFSET"), CleanupOffset))
 		|| !TestTrue(TEXT("Catch offset valid"),
-			ReadOffset(TEXT("AVIDSCRIPT_DIRECT_AWAIT_CATCH_OFFSET"), CatchOffset)))
+			ReadOffset(TEXT("AVIDSCRIPT_DIRECT_AWAIT_CATCH_OFFSET"), CatchOffset))
+		|| !TestTrue(TEXT("Cleanup mode offset valid"),
+			ReadOffset(TEXT("AVIDSCRIPT_DIRECT_AWAIT_MODE_OFFSET"), ModeOffset)))
 		return false;
 	TArray<uint8> Bytes;
 	if (!TestTrue(TEXT("Direct await WASM exists"),
@@ -54,6 +57,7 @@ bool FAvidScriptCompiledDirectAwaitCleanupTest::RunTest(const FString& Parameter
 	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime,
 		EAvidScriptVmBackendKind::Wamr})
 	for (const bool bCancel : {false, true})
+	for (const bool bCleanupThrows : {false, true})
 	{
 		FAvidScriptVmBackendSelection Selection;
 		Selection.BackendKind = Backend;
@@ -75,6 +79,13 @@ bool FAvidScriptCompiledDirectAwaitCleanupTest::RunTest(const FString& Parameter
 		Context.Continuations = &Endpoint;
 		Context.World = World;
 		Runtime.SetHostContext(Context);
+		const int32 CleanupMode = bCleanupThrows ? 1 : 0;
+		uint8 ModeBytes[sizeof(int32)] = {};
+		FMemory::Memcpy(ModeBytes, &CleanupMode, sizeof(CleanupMode));
+		FString StateError;
+		if (!TestTrue(TEXT("Inject cleanup failure mode"),
+			Runtime.WriteStateBytes(ModeOffset, MakeArrayView(ModeBytes), StateError)))
+		{ AddError(StateError); return false; }
 		if (!TestTrue(TEXT("Direct await BeginPlay suspends"), Runtime.BeginPlay(Result)))
 		{ AddError(Result.ErrorMessage); return false; }
 		if (bCancel && !TestTrue(TEXT("Script requests active cancellation"),
@@ -83,7 +94,7 @@ bool FAvidScriptCompiledDirectAwaitCleanupTest::RunTest(const FString& Parameter
 
 		int32 Resumes = 0;
 		int32 Cancelled = 0;
-		bool bSawUncaughtOuterCancellation = false;
+		bool bSawUncaughtOuterFailure = false;
 		for (int32 Round = 0; Round < 8; ++Round)
 		{
 			if (!bCancel)
@@ -103,11 +114,22 @@ bool FAvidScriptCompiledDirectAwaitCleanupTest::RunTest(const FString& Parameter
 						bDispatched);
 				if (!bDispatched)
 				{
-					TestTrue(TEXT("Only the uncaught outer await may trap"), bCancel);
-					TestEqual(TEXT("Uncaught outer cancellation remains a VM failure"),
-						Result.ErrorCategory, Backend == EAvidScriptVmBackendKind::Wasmtime
-							? FString(TEXT("guest_trap")) : FString(TEXT("trap")));
-					bSawUncaughtOuterCancellation = true;
+					TestTrue(TEXT("Only the uncaught outer await may fail"),
+						(bCancel || bCleanupThrows) && Resumes == 1 && !bSawUncaughtOuterFailure);
+					if (bCleanupThrows)
+					{
+						TestEqual(TEXT("Cleanup exception replaces cancellation or return"),
+							Result.ErrorCategory, FString(TEXT("language_error_uncaught")));
+						TestTrue(TEXT("Cleanup fault reaches the outer waiter"),
+							Completion.Status == EAvidScriptContinuationStatus::Failed
+							&& Result.ErrorMessage.Contains(TEXT("InvalidOperationException"))
+							&& Result.ErrorMessage.Contains(TEXT("DirectAwaitCleanup.cs")));
+					}
+					else
+						TestEqual(TEXT("Uncaught outer cancellation remains a VM failure"),
+							Result.ErrorCategory, Backend == EAvidScriptVmBackendKind::Wasmtime
+								? FString(TEXT("guest_trap")) : FString(TEXT("trap")));
+					bSawUncaughtOuterFailure = true;
 				}
 				TestTrue(TEXT("Direct await completion finalizes"),
 					Owner->FinalizeDispatched(Completion.Token, bDispatched));
@@ -129,7 +151,7 @@ bool FAvidScriptCompiledDirectAwaitCleanupTest::RunTest(const FString& Parameter
 			return Value;
 		};
 		TestEqual(TEXT("Direct await normal result"),
-			ReadInt32(ResultOffset), bCancel ? 0 : 16);
+			ReadInt32(ResultOffset), bCancel || bCleanupThrows ? 0 : 16);
 		TestEqual(TEXT("Direct await finally runs exactly once"),
 			ReadInt32(CleanupOffset), 1);
 		TestEqual(TEXT("Direct await cancellation skips catch"),
@@ -137,7 +159,9 @@ bool FAvidScriptCompiledDirectAwaitCleanupTest::RunTest(const FString& Parameter
 		TestEqual(TEXT("Direct await cancellation status"),
 			Cancelled > 0, bCancel);
 		TestEqual(TEXT("Uncaught outer await is isolated"),
-			bSawUncaughtOuterCancellation, bCancel);
+			bSawUncaughtOuterFailure, bCancel || bCleanupThrows);
+		TestEqual(TEXT("Task cancellation is replaced only by a cleanup fault"),
+			Cancelled, bCancel ? (bCleanupThrows ? 1 : 2) : 0);
 		TestEqual(TEXT("Direct await continuations retire"),
 			Owner->GetActiveCount(), 0);
 		TestEqual(TEXT("Direct await tasks release"),
@@ -146,8 +170,8 @@ bool FAvidScriptCompiledDirectAwaitCleanupTest::RunTest(const FString& Parameter
 		AvidScript::Managed::FHeap* Heap = Runtime.GetManagedHeapForTesting();
 		TestEqual(TEXT("Direct await managed roots release"),
 			Heap->GetStats().LiveRoots, static_cast<uint32>(0));
-		AddInfo(FString::Printf(TEXT("compiled direct await backend=%d cancel=%d result=%d cleanup=%d catch=%d resumes=%d cancelled=%d"),
-			static_cast<int32>(Backend), bCancel ? 1 : 0,
+		AddInfo(FString::Printf(TEXT("compiled direct await backend=%d cancel=%d cleanup_throw=%d result=%d cleanup=%d catch=%d resumes=%d cancelled=%d"),
+			static_cast<int32>(Backend), bCancel ? 1 : 0, bCleanupThrows ? 1 : 0,
 			ReadInt32(ResultOffset), ReadInt32(CleanupOffset), ReadInt32(CatchOffset),
 			Resumes, Cancelled));
 	}

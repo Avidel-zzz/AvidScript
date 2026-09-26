@@ -8,6 +8,7 @@ public static class Script
     public static int Result;
     public static int CleanupCount;
     public static int CatchCount;
+    public static int CleanupMode;
     internal static AvidCancellationSource Lifetime;
 
     public static async Task<int> RunAsync()
@@ -26,6 +27,7 @@ public static class Script
         finally
         {
             CleanupCount++;
+            if (CleanupMode != 0) throw new InvalidOperationException();
         }
     }
 

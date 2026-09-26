@@ -204,6 +204,8 @@ internal static class CSharpGuestDirectAwaitTests
             mixedSource.Replace("if (fail) throw new InvalidOperationException();", ""),
             mixedSource.Replace("throw new InvalidOperationException();", "throw new ArgumentException();"),
             mixedSource.Replace("catch (InvalidOperationException)", "catch (Exception)"),
+            source.Replace("finally { CleanupCount++; }",
+                "finally { CleanupCount++; if (Result == 0) throw new InvalidOperationException(); }"),
         })
         {
             FrontendDocument variantFrontend = FrontendAnalyzer.Analyze(variant, mixedSourceId);
@@ -219,11 +221,11 @@ internal static class CSharpGuestDirectAwaitTests
             Check(variantLowered.Succeeded && variantLowered.Module is { } variantModule
                 && GuestModuleValidator.Validate(variantModule).Succeeded
                 && WasmModuleCompiler.Compile(variantModule).Succeeded,
-                "catches must compile with absent, unrelated or derived throw types: "
+                "catches must compile with absent, unrelated, derived or cleanup throw types: "
                     + string.Join(" | ", variantLowered.Diagnostics.Select(item =>
                         item.Code + ":" + item.Message)));
         }
-        return 5;
+        return 6;
     }
 
     private static void Check(bool condition, string message)

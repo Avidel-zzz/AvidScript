@@ -94,14 +94,16 @@ public static class SemanticAsyncExceptionPlanValidator
                     || !catchRegions.TryGetValue(handler.RegionOrdinal,
                         out SemanticAsyncExceptionRegion? region)
                     || handler.Span != region.SourceSpan)) return false;
-            // Roslyn preserves a source catch even when this preview has no
-            // language-fault producer and prunes its executable segments.
+            // A throw in finally is outside its sibling catch. Only producers
+            // within protected try regions can make a pruned catch necessary.
             int executableCatchCount = plan.Catches.Count(handler =>
                 catchRegions[handler.RegionOrdinal].Segments.Count > 0);
             if (executableCatchCount != plan.Catches.Count
                 && (!directCleanup || method.Segments.Any(segment =>
                     segment.AwaitSite?.ProducerKind is "task_call" or "task_local"
-                    || segment.Transfer?.Kind == SemanticAsyncMethod.ThrowTransferKind)))
+                    || segment.Transfer?.Kind == SemanticAsyncMethod.ThrowTransferKind
+                        && plan.Regions.Any(region => region.Kind == "try"
+                            && region.Segments.Contains(segment.Ordinal)))))
                 return false;
             HashSet<int> catchDecisionSegments = new();
             foreach (SemanticAsyncSegment segment in method.Segments)
