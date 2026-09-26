@@ -15,20 +15,25 @@ public static class GuestTaskLocalLifetimeValidator
     private const string DiagnosticCode = "ASIR1033";
 
     public static bool IsVersion(GuestModule module) => module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion;
-    internal static bool HasErrors(GuestModule module) => IsVersion(module)
+    internal static bool Supports(GuestModule module) => IsVersion(module) || GuestAsyncThrowRouteValidator.IsVersion(module);
+    internal static int ExpectedSemanticSchema(GuestModule module) => GuestAsyncThrowRouteValidator.IsVersion(module)
+        ? GuestAsyncThrowRouteValidator.SemanticSchemaVersion : SemanticSchemaVersion;
+    internal static string ExpectedSemanticVersion(GuestModule module) => GuestAsyncThrowRouteValidator.IsVersion(module)
+        ? GuestAsyncThrowRouteValidator.SemanticVersion : SemanticVersion;
+    internal static bool HasErrors(GuestModule module) => Supports(module)
         && module.TaskLocalLifetimes?.ExceptionModel is "fault" or "exception" or "cleanup" or "cancellation";
-    internal static bool HasExceptionFlow(GuestModule module) => IsVersion(module)
+    internal static bool HasExceptionFlow(GuestModule module) => Supports(module)
         && module.TaskLocalLifetimes?.ExceptionModel is "exception" or "cleanup" or "cleanup_only" or "cancellation";
-    internal static bool HasDirectCleanup(GuestModule module) => IsVersion(module)
+    internal static bool HasDirectCleanup(GuestModule module) => Supports(module)
         && module.TaskLocalLifetimes?.ExceptionModel is "cleanup" or "cleanup_only" or "cancellation";
-    internal static bool HasCancellation(GuestModule module) => IsVersion(module)
+    internal static bool HasCancellation(GuestModule module) => Supports(module)
         && module.TaskLocalLifetimes?.ExceptionModel == "cancellation";
 
     // Route validators still prove the original exception protocol. They may
     // cross exactly one independently checked, release-only scope-exit block.
     internal static GuestFunction ResolveScopeExitRoutes(GuestModule module, GuestFunction function)
     {
-        if (!IsVersion(module) || module.TaskLocalLifetimes?.Functions is not { } entries) return function;
+        if (!Supports(module) || module.TaskLocalLifetimes?.Functions is not { } entries) return function;
         var owners = entries.Where(entry => entry?.FunctionId == function.Id).ToArray();
         if (owners.Length != 1 || owners[0].Releases is null) return function;
         string? Resolve(string? target)
@@ -52,16 +57,17 @@ public static class GuestTaskLocalLifetimeValidator
     internal static void Validate(GuestValidationContext context)
     {
         var module = context.Module;
-        if (!IsVersion(module))
+        if (!Supports(module))
         {
             if (module.TaskLocalLifetimes is not null || module.Provenance.SemanticSchemaVersion == SemanticSchemaVersion
                 || module.Provenance.SemanticVersion == SemanticVersion)
                 context.Add(DiagnosticCode, "Task local lifetimes require paired Semantic 45/1.54 and IR 25/1.24.");
             return;
         }
-        if (module.Provenance.SemanticSchemaVersion != SemanticSchemaVersion
-            || module.Provenance.SemanticVersion != SemanticVersion || module.Language != "csharp"
-            || module.TaskLocalLifetimes is not { Functions.Count: > 0 } plan
+        if (module.Provenance.SemanticSchemaVersion != ExpectedSemanticSchema(module)
+            || module.Provenance.SemanticVersion != ExpectedSemanticVersion(module) || module.Language != "csharp"
+            || module.TaskLocalLifetimes is not { Functions: { } } plan
+            || IsVersion(module) && plan.Functions.Count == 0
             || plan.ExceptionModel is not ("none" or "fault" or "exception" or "cleanup" or "cleanup_only" or "cancellation")
             || plan.Functions.Any(function => function is null || function.OwnerLocalIds is not { Count: > 0 and <= 8 }
                 || function.Releases is null || function.Releases.Any(site => site is null)
@@ -113,8 +119,10 @@ public static class GuestTaskLocalLifetimeValidator
                 instruction.Op == "call" && instruction.TargetId is RetainFunctionId or ReleaseFunctionId or TransferFunctionId)
             && !plan.Functions.Any(owner => owner.FunctionId == function.Id)))
             context.Add(DiagnosticCode, "Every function using Task owner helpers requires a lifetime plan.");
-        if (!CheckedGuard(module, ReleaseFunctionId, "3") || !CheckedGuard(module, RetainFunctionId, "2")
-            || !CheckedGuard(module, TransferFunctionId, "3", transfer: true))
+        bool hasGuards = module.Functions.Any(function => function.Id is RetainFunctionId or ReleaseFunctionId or TransferFunctionId);
+        if ((plan.Functions.Count > 0 || hasGuards)
+            && (!CheckedGuard(module, ReleaseFunctionId, "3") || !CheckedGuard(module, RetainFunctionId, "2")
+                || !CheckedGuard(module, TransferFunctionId, "3", transfer: true)))
             context.Add(DiagnosticCode, "Task ownership requires zero-aware retain/release helpers that trap when a nonzero token is rejected.");
         if (HasErrors(module) != (module.LanguageErrorCatalog is not null)
             || HasExceptionFlow(module) != (module.AsyncExceptionRoutes is not null)

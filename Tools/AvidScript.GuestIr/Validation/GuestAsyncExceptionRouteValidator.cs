@@ -107,11 +107,13 @@ internal static class GuestAsyncExceptionRouteValidator
             {
                 if (function.Blocks.Any(block =>
                         block.Id.EndsWith(":task_failed", StringComparison.Ordinal)
-                        && !failures.Contains(block.Id))
+                        && !failures.Contains(block.Id)
+                        && !GuestAsyncThrowRouteValidator.IsTerminalTaskFailure(module, function, block))
                     || function.Id.StartsWith(ResumeFunctionPrefix,
                             StringComparison.Ordinal)
                         && function.Blocks.Any(block => block.Id.EndsWith(
-                            ":task_read_rejected", StringComparison.Ordinal))
+                            ":task_read_rejected", StringComparison.Ordinal)
+                            && !GuestAsyncThrowRouteValidator.IsTerminalTaskFailure(module, function, block))
                         && !resumes.Contains(function.Id))
                     Add(context, $"Method '{methodRoutes.Key}' has an unlisted protected await.");
                 }
@@ -132,9 +134,11 @@ internal static class GuestAsyncExceptionRouteValidator
                 local.Id.StartsWith("value:local:$async:exception_source:", StringComparison.Ordinal))))
             {
                 if (function.Blocks.Any(block => block.Id.EndsWith(":task_failed", StringComparison.Ordinal)
-                        && !failures.Contains(block.Id))
+                        && !failures.Contains(block.Id)
+                        && !GuestAsyncThrowRouteValidator.IsTerminalTaskFailure(module, function, block))
                     || function.Id.StartsWith(ResumeFunctionPrefix, StringComparison.Ordinal)
-                        && function.Blocks.Any(block => block.Id.EndsWith(":task_read_rejected", StringComparison.Ordinal))
+                        && function.Blocks.Any(block => block.Id.EndsWith(":task_read_rejected", StringComparison.Ordinal)
+                            && !GuestAsyncThrowRouteValidator.IsTerminalTaskFailure(module, function, block))
                         && !resumes.Contains(function.Id))
                     Add(context, "IR 24 contains an unlisted protected Task await.");
             }

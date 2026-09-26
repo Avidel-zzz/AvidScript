@@ -39,7 +39,9 @@ internal static class GuestAsyncExceptionTransferValidator
             previous = (transfer.MethodFunctionId, transfer.BlockId);
             if (!ordered || !identities.Add((transfer.MethodFunctionId, transfer.BlockId))
                 || !context.Functions.ContainsKey(transfer.MethodFunctionId)
-                || transfer.Kind is not ("end_catch" or "rethrow" or "propagate_exception")
+                || (transfer.Kind is not ("end_catch" or "rethrow" or "propagate_exception")
+                    && !(GuestAsyncThrowRouteValidator.IsVersion(module) && transfer.Kind == "raise_exception"))
+                || (transfer.Kind == "raise_exception" ? transfer.Raise is null : transfer.Raise is not null)
                 || (transfer.Kind == "propagate_exception" ? transfer.TargetBlockId is not null
                     : string.IsNullOrWhiteSpace(transfer.TargetBlockId)))
             {
@@ -52,7 +54,7 @@ internal static class GuestAsyncExceptionTransferValidator
             GuestFunction[] functions = module.Functions.Where(function =>
                 function.Blocks.Any(block => block.Id == transfer.BlockId)).ToArray();
             if (functions.Length == 0 || functions.Any(function =>
-                    !Matches(function, transfer, marker)))
+                    !Matches(GuestTaskLocalLifetimeValidator.ResolveScopeExitRoutes(module, function), transfer, marker)))
                 Add(context, $"Exception transfer '{transfer.BlockId}' does not preserve its owner or successor.");
         }
         if (module.Functions.SelectMany(function => function.Locals).Any(local =>
@@ -60,7 +62,8 @@ internal static class GuestAsyncExceptionTransferValidator
             || module.Functions.SelectMany(function => function.Blocks).Any(block =>
                 (block.Id.EndsWith(":end_catch", StringComparison.Ordinal)
                     || block.Id.EndsWith(":rethrow", StringComparison.Ordinal)
-                    || block.Id.EndsWith(":propagate_exception", StringComparison.Ordinal))
+                    || block.Id.EndsWith(":propagate_exception", StringComparison.Ordinal)
+                    || block.Id.EndsWith(":raise_exception", StringComparison.Ordinal))
                 && !markers.Contains(block.Id)))
             Add(context, "Cancellation control flow contains an unlisted owner or transfer.");
     }
@@ -78,6 +81,8 @@ internal static class GuestAsyncExceptionTransferValidator
             || transfer.TargetBlockId is { } target && !blocks.ContainsKey(target)) return false;
         if (transfer.Kind == "rethrow")
             return body.Instructions.Count == 0 && Branch(body, transfer.TargetBlockId!);
+        if (transfer.Kind == "raise_exception")
+            return GuestAsyncThrowRouteValidator.Matches(function, transfer, marker);
         if (transfer.Kind == "end_catch")
             return Release(blocks, body, transfer, out GuestBasicBlock? released)
                 && Branch(released!, transfer.TargetBlockId!);
@@ -98,7 +103,7 @@ internal static class GuestAsyncExceptionTransferValidator
             && terminal!.Terminator.Kind == "return";
     }
 
-    private static bool Release(IReadOnlyDictionary<string, GuestBasicBlock> blocks,
+    internal static bool Release(IReadOnlyDictionary<string, GuestBasicBlock> blocks,
         GuestBasicBlock entry, GuestAsyncExceptionTransfer transfer, out GuestBasicBlock? released)
     {
         released = null;

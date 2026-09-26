@@ -105,7 +105,15 @@ public sealed record GuestAsyncExceptionTransfer(
     [property: JsonPropertyOrder(2)] string Kind,
     [property: JsonPropertyOrder(3)] string? TargetBlockId,
     [property: JsonPropertyOrder(4)] string OwnerLocalId,
-    [property: JsonPropertyOrder(5)] string TypeLocalId);
+    [property: JsonPropertyOrder(5)] string TypeLocalId)
+{
+    [JsonPropertyOrder(6), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public GuestAsyncRaise? Raise { get; init; }
+}
+
+public sealed record GuestAsyncRaise(
+    [property: JsonPropertyOrder(0)] int TypeToken,
+    [property: JsonPropertyOrder(1)] int SourceToken);
 
 // IR 22 binds each protected Task await to all three executable successors.
 // The local identities name the retained source Task and the fault type token.

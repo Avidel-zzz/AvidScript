@@ -61,13 +61,13 @@ public static class GuestTaskLanguageErrorValidator
         if ((!combinedVersion && !asyncVersion && !exceptionFlowVersion
                 && !directCleanupVersion && !cancellationVersion && !lifetimeErrors) || module.Language != "csharp"
             || module.Provenance.SemanticSchemaVersion
-                != (lifetimeErrors ? GuestTaskLocalLifetimeValidator.SemanticSchemaVersion
+                != (lifetimeErrors ? GuestTaskLocalLifetimeValidator.ExpectedSemanticSchema(module)
                     : cancellationVersion ? GuestTaskCancellationErrorValidator.SemanticSchemaVersion
                     : directCleanupVersion ? DirectCleanupSemanticSchemaVersion
                     : exceptionFlowVersion ? ExceptionFlowSemanticSchemaVersion
                     : asyncVersion ? AsyncSemanticSchemaVersion : SemanticSchemaVersion)
             || module.Provenance.SemanticVersion
-                != (lifetimeErrors ? GuestTaskLocalLifetimeValidator.SemanticVersion
+                != (lifetimeErrors ? GuestTaskLocalLifetimeValidator.ExpectedSemanticVersion(module)
                     : cancellationVersion ? GuestTaskCancellationErrorValidator.SemanticVersion
                     : directCleanupVersion ? DirectCleanupSemanticVersion
                     : exceptionFlowVersion ? ExceptionFlowSemanticVersion

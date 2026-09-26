@@ -67,9 +67,9 @@ internal static class GuestTaskResultValidator
                 == GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion
             && module.IrVersion == GuestTaskLanguageErrorValidator.DirectCleanupIrVersion;
         bool cancellationIr = GuestTaskCancellationErrorValidator.IsVersion(module);
-        bool lifetimeIr = GuestTaskLocalLifetimeValidator.IsVersion(module);
-        bool lifetimeSemantic = module.Provenance.SemanticSchemaVersion == GuestTaskLocalLifetimeValidator.SemanticSchemaVersion
-            && module.Provenance.SemanticVersion == GuestTaskLocalLifetimeValidator.SemanticVersion;
+        bool lifetimeIr = GuestTaskLocalLifetimeValidator.Supports(module);
+        bool lifetimeSemantic = module.Provenance.SemanticSchemaVersion == GuestTaskLocalLifetimeValidator.ExpectedSemanticSchema(module)
+            && module.Provenance.SemanticVersion == GuestTaskLocalLifetimeValidator.ExpectedSemanticVersion(module);
         bool cancellationSemantic = module.Provenance.SemanticSchemaVersion
                 == GuestTaskCancellationErrorValidator.SemanticSchemaVersion
             && module.Provenance.SemanticVersion

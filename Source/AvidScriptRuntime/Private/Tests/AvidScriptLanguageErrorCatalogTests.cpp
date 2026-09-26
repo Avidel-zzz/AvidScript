@@ -77,7 +77,7 @@ void WasmSection(TArray<uint8>& Module, uint8 Id, const TArray<uint8>& Payload)
 
 FString Provenance(int32 GuestSchema = 17, const TCHAR* LifetimeModel = TEXT("cancellation"))
 {
-	const FString GuestVersion = GuestSchema == 25 ? TEXT("1.24") : GuestSchema == 24 ? TEXT("1.23")
+	const FString GuestVersion = GuestSchema == 26 ? TEXT("1.25") : GuestSchema == 25 ? TEXT("1.24") : GuestSchema == 24 ? TEXT("1.23")
 		: GuestSchema == 23 ? TEXT("1.22")
 		: GuestSchema == 22 ? TEXT("1.21")
 		: GuestSchema == 21 ? TEXT("1.20")
@@ -86,7 +86,7 @@ FString Provenance(int32 GuestSchema = 17, const TCHAR* LifetimeModel = TEXT("ca
 		TEXT("frontend_sha256=%s\nsemantic_sha256=%s\nguest_ir=%d/%s"),
 		*ModuleId, *SourceSha256, *FString::ChrN(64, 'b'), *FString::ChrN(64, 'c'),
 		GuestSchema, *GuestVersion);
-	if (GuestSchema == 25) Result += FString::Printf(TEXT("\ntask_local_exception_model=%s"), LifetimeModel);
+	if (GuestSchema == 25 || GuestSchema == 26) Result += FString::Printf(TEXT("\ntask_local_exception_model=%s"), LifetimeModel);
 	return Result;
 }
 
@@ -96,7 +96,7 @@ TSharedRef<FJsonObject> Document(int32 GuestSchema = 17)
 	Root->SetNumberField(TEXT("schema_version"), 1);
 	Root->SetNumberField(TEXT("guest_ir_schema_version"), GuestSchema);
 	Root->SetStringField(TEXT("guest_ir_version"),
-		GuestSchema == 25 ? TEXT("1.24") : GuestSchema == 24 ? TEXT("1.23")
+		GuestSchema == 26 ? TEXT("1.25") : GuestSchema == 25 ? TEXT("1.24") : GuestSchema == 24 ? TEXT("1.23")
 			: GuestSchema == 23 ? TEXT("1.22")
 			: GuestSchema == 22 ? TEXT("1.21")
 			: GuestSchema == 21 ? TEXT("1.20")
@@ -314,6 +314,12 @@ bool FAvidScriptLanguageErrorCatalogRuntimeTest::RunTest(const FString& Paramete
 	TestFalse(TEXT("Unknown cancellation type token is rejected"),
 		Catalog && Catalog->IsCancellationType(2));
 	const FString LifetimeJson = Json(Document(25));
+	const FString RoutedThrowJson = Json(Document(26));
+	TestTrue(TEXT("IR 26 routed throws load with the cancellation ownership profile"),
+		FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+			Module(&RoutedThrowJson, true, false, 26), ModuleId, Catalog, Error));
+	TestTrue(TEXT("IR 26 authorizes language faults and typed cancellation"),
+		Catalog && Catalog->SupportsTaskLanguageErrorFault() && Catalog->SupportsTaskCancellationError());
 	for (const TCHAR* Model : {TEXT("fault"), TEXT("exception"), TEXT("cleanup"), TEXT("cancellation")})
 	{
 		TestTrue(TEXT("IR 25 catalog loads with its explicit exception profile"),
@@ -359,6 +365,11 @@ bool FAvidScriptLanguageErrorCatalogRuntimeTest::RunTest(const FString& Paramete
 	}
 
 	TArray<TPair<FString, TArray<uint8>>> Invalid;
+	Invalid.Emplace(TEXT("IR 26 requires its catalog"), Module(nullptr, true, false, 26));
+	Invalid.Emplace(TEXT("IR 26 catalog cannot use IR 25 provenance"), Module(&RoutedThrowJson, true, false, 25));
+	Invalid.Emplace(TEXT("IR 25 catalog cannot use IR 26 provenance"), Module(&LifetimeJson, true, false, 26));
+	for (const TCHAR* Model : {TEXT("none"), TEXT("fault"), TEXT("exception"), TEXT("cleanup"), TEXT("cleanup_only"), TEXT("unknown")})
+		Invalid.Emplace(TEXT("IR 26 requires cancellation ownership"), Module(&RoutedThrowJson, true, false, 26, Model));
 	Invalid.Emplace(TEXT("IR 25 fault profile requires its catalog"), Module(nullptr, true, false, 25, TEXT("fault")));
 	Invalid.Emplace(TEXT("IR 25 unknown profile rejected"), Module(&LifetimeJson, true, false, 25, TEXT("unknown")));
 	Invalid.Emplace(TEXT("IR 25 none profile rejects an error catalog"), Module(&LifetimeJson, true, false, 25, TEXT("none")));
@@ -390,8 +401,8 @@ bool FAvidScriptLanguageErrorCatalogRuntimeTest::RunTest(const FString& Paramete
 	Invalid.Emplace(TEXT("IR 23 catalog cannot use IR 24 provenance"),
 		Module(&DirectEmptyJson, true, false, 24));
 	auto FutureGuest = Document(25);
-	FutureGuest->SetNumberField(TEXT("guest_ir_schema_version"), 26);
-	FutureGuest->SetStringField(TEXT("guest_ir_version"), TEXT("1.25"));
+	FutureGuest->SetNumberField(TEXT("guest_ir_schema_version"), 27);
+	FutureGuest->SetStringField(TEXT("guest_ir_version"), TEXT("1.26"));
 	const FString FutureGuestJson = Json(FutureGuest);
 	Invalid.Emplace(TEXT("unknown Guest version remains rejected"),
 		Module(&FutureGuestJson, true, false, 24));
@@ -745,7 +756,7 @@ bool FAvidScriptTaskLanguageErrorVmImportTest::RunTest(const FString& Parameters
 			&& Runtime.GetLanguageErrorCatalog()->SupportsTaskLanguageErrorFault());
 		Runtime.Unload();
 	}
-	for (const int32 GuestSchema : {20, 21, 22, 23, 24, 25, 17})
+	for (const int32 GuestSchema : {20, 21, 22, 23, 24, 25, 26, 17})
 	{
 		const TArray<uint8> Wasm = TaskFaultImportModule(GuestSchema);
 		for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
@@ -759,7 +770,7 @@ bool FAvidScriptTaskLanguageErrorVmImportTest::RunTest(const FString& Parameters
 				continue;
 			}
 			TestAvidScriptRuntimeLaneIdentity(*this, Lane, Result);
-			const bool bAllowedVersion = GuestSchema >= 20 && GuestSchema <= 25;
+			const bool bAllowedVersion = GuestSchema >= 20 && GuestSchema <= 26;
 			TestEqual(TEXT("catalog gates the imported function by IR version"),
 				Runtime.GetLanguageErrorCatalog()->SupportsTaskLanguageErrorFault(), bAllowedVersion);
 			TestFalse(TEXT("WASM call rejects missing Session task context"),
@@ -780,7 +791,7 @@ bool FAvidScriptTaskLanguageErrorVmImportTest::RunTest(const FString& Parameters
 		AvidScript::TaskResult::Abi::LanguageErrorMetaImport,
 		AvidScript::TaskResult::Abi::LanguageErrorRootImport })
 	{
-		for (const int32 GuestSchema : {20, 21, 22, 23, 24, 25, 17})
+		for (const int32 GuestSchema : {20, 21, 22, 23, 24, 25, 26, 17})
 		{
 			const TArray<uint8> Wasm = TaskReadImportModule(GuestSchema, ImportName);
 			for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
@@ -797,7 +808,7 @@ bool FAvidScriptTaskLanguageErrorVmImportTest::RunTest(const FString& Parameters
 				TestFalse(TEXT("Task read import rejects missing Session task context"),
 					Runtime.BeginPlay(Result));
 				TestEqual(TEXT("Task read import preserves version or context rejection"),
-					Result.ErrorCategory, GuestSchema >= 20 && GuestSchema <= 25
+					Result.ErrorCategory, GuestSchema >= 20 && GuestSchema <= 26
 						? FString(TEXT("task_result_context"))
 						: FString(TEXT("task_language_error_version")));
 				TestEqual(TEXT("VM reports the called Task read import"),
@@ -829,7 +840,7 @@ bool FAvidScriptTaskCancellationImportVersionTest::RunTest(const FString& Parame
 	for (const ANSICHAR* ImportName : {
 		CancelLanguageErrorImport, TerminalErrorMetaImport, TerminalErrorRootImport})
 	{
-		for (const int32 GuestSchema : {17, 20, 21, 22, 23, 24, 25})
+		for (const int32 GuestSchema : {17, 20, 21, 22, 23, 24, 25, 26})
 		{
 			const TArray<uint8> Wasm = FCStringAnsi::Strcmp(ImportName, CancelLanguageErrorImport) == 0
 				? TaskFaultImportModule(GuestSchema, ImportName)
@@ -848,7 +859,7 @@ bool FAvidScriptTaskCancellationImportVersionTest::RunTest(const FString& Parame
 				TestFalse(TEXT("Cancellation import rejects invalid version or missing context"),
 					Runtime.BeginPlay(Result));
 				TestEqual(TEXT("Only cancellation-enabled IR reaches context validation"), Result.ErrorCategory,
-					(GuestSchema == 24 || GuestSchema == 25) ? FString(TEXT("task_result_context"))
+					(GuestSchema == 24 || GuestSchema == 25 || GuestSchema == 26) ? FString(TEXT("task_result_context"))
 						: FString(TEXT("task_language_error_version")));
 				TestEqual(TEXT("VM reports the exact cancellation import"), Result.ImportName,
 					FString(UTF8_TO_TCHAR(ImportName)));

@@ -115,7 +115,7 @@ $project = (Resolve-Path '../../MyGame.uproject').Path
 | UE 类型声明 | 方法体支持热重载；修改类型、属性、函数签名或反射标记需重新构建并重启 Editor。 |
 | 平台与发布 | Android、iOS、Shipping、真实多人游戏验收待完成。 |
 
-生成 UE 类型中的 Task 异常与取消流程仍属预览功能，需要通过构建参数显式启用。[取消过程中显式抛错](Docs/Phase66/P66.C9_Async_Throw_Routing.md)的组合尚不能编译运行。
+Task 异常与取消处理需显式启用。已支持[取消时抛出新异常](Docs/Phase66/P66.C9_Async_Throw_Routing.md)；生成 UE 类型、对象销毁和热重载中的该组合仍待验证。
 
 ## Development
 

@@ -322,7 +322,8 @@ public static class CSharpGuestLowerer
         }
 
         GuestModule module = new(
-            taskLifetimes ? GuestTaskLocalLifetimeValidator.SchemaVersion
+            SemanticContract.HasAsyncThrowRouting(document) ? GuestAsyncThrowRouteValidator.SchemaVersion
+                : taskLifetimes ? GuestTaskLocalLifetimeValidator.SchemaVersion
                 : cancellationFlow ? GuestTaskCancellationErrorValidator.SchemaVersion
                 : directCleanup ? GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion
                 : asyncExceptionFlow ? GuestTaskLanguageErrorValidator.ExceptionFlowSchemaVersion
@@ -333,7 +334,8 @@ public static class CSharpGuestLowerer
                 or SemanticContract.TaskAliasSchemaVersion
                 ? 19 : CSharpTaskResultAbi.Supports(document)
                     ? 18 : GuestModuleValidator.CurrentSchemaVersion,
-            taskLifetimes ? GuestTaskLocalLifetimeValidator.IrVersion
+            SemanticContract.HasAsyncThrowRouting(document) ? GuestAsyncThrowRouteValidator.IrVersion
+                : taskLifetimes ? GuestTaskLocalLifetimeValidator.IrVersion
                 : cancellationFlow ? GuestTaskCancellationErrorValidator.IrVersion
                 : directCleanup ? GuestTaskLanguageErrorValidator.DirectCleanupIrVersion
                 : asyncExceptionFlow ? GuestTaskLanguageErrorValidator.ExceptionFlowIrVersion

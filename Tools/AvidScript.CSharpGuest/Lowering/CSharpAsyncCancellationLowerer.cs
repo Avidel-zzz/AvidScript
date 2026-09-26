@@ -32,7 +32,7 @@ internal static class CSharpAsyncCancellationLowerer
         document.AsyncMethods.Where(method => method.ExceptionPlan is not null)
             .SelectMany(method => method.Segments.Where(segment => segment.Transfer?.Kind is
                 SemanticAsyncMethod.EndCatchTransferKind or SemanticAsyncMethod.RethrowTransferKind
-                    or SemanticAsyncMethod.PropagateExceptionTransferKind)
+                    or SemanticAsyncMethod.PropagateExceptionTransferKind or SemanticAsyncMethod.RaiseExceptionTransferKind)
                 .Select(segment => new GuestAsyncExceptionTransfer(
                     CSharpGuestIds.Function(method.MethodSymbolId),
                     CSharpGuestIds.AsyncSegmentBlock(method.MethodSymbolId, segment.Ordinal),
@@ -40,7 +40,11 @@ internal static class CSharpAsyncCancellationLowerer
                     segment.Transfer.PrimaryTarget >= 0
                         ? CSharpGuestIds.AsyncSegmentBlock(method.MethodSymbolId, segment.Transfer.PrimaryTarget) : null,
                     CSharpGuestIds.Local(CSharpTaskResultAbi.ExceptionSourceSlot(method)),
-                    CSharpGuestIds.Local(CSharpTaskResultAbi.ExceptionTypeSlot(method)))))
+                    CSharpGuestIds.Local(CSharpTaskResultAbi.ExceptionTypeSlot(method)))
+                    {
+                        Raise = segment.Transfer.Kind == SemanticAsyncMethod.RaiseExceptionTransferKind
+                            ? CSharpAsyncThrowLowerer.Route(document, method, segment) : null,
+                    }))
             .Concat(document.AsyncMethods.SelectMany(method => method.Segments
                 .Where(segment => NeedsImplicitPropagation(document, method, segment))
                 .Select(segment => new GuestAsyncExceptionTransfer(

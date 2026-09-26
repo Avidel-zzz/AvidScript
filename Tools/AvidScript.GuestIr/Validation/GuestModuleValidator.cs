@@ -37,6 +37,7 @@ public static class GuestModuleValidator
         GuestTaskResultValidator.Validate(context);
         GuestTaskLanguageErrorValidator.Validate(context);
         GuestTaskCancellationErrorValidator.Validate(context);
+        GuestAsyncThrowRouteValidator.Validate(context);
         GuestTaskLocalLifetimeValidator.Validate(context);
         GuestFunctionReferenceValidator.ValidateContracts(context);
         GuestManagedHeapValidator.ValidateContracts(context);
@@ -104,6 +105,7 @@ public static class GuestModuleValidator
                 && !isAsyncLanguageErrorVersion && !isAsyncExceptionFlowVersion
                 && !isDirectCleanupVersion && !GuestTaskCancellationErrorValidator.IsVersion(module)
                 && !GuestTaskLocalLifetimeValidator.IsVersion(module)
+                && !GuestAsyncThrowRouteValidator.IsVersion(module)
                 && !isLegacyVersion)
             || string.IsNullOrWhiteSpace(module.ModuleId)
             || string.IsNullOrWhiteSpace(module.Language)

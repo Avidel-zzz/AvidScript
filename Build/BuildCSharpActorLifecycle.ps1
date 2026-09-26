@@ -1196,6 +1196,7 @@ $DirectAwaitSemanticArtifact = $false
 $AsyncCancellationSemanticArtifact = $false
 $TaskLocalLifetimeSemanticArtifact = $false
 $TaskLocalLifetimeErrorProfile = $false
+$AsyncThrowRoutingSemanticArtifact = $false
 $GuestIrModel = $null
 $DebugMapModel = $null
 $StateSchemaModel = $null
@@ -1664,8 +1665,11 @@ elseif (-not $SemanticCacheHit) {
         @($SemanticModel.async_methods | Where-Object {
             $null -ne $_.PSObject.Properties['exception_plan'] -and $null -ne $_.exception_plan
         }).Count -gt 0
-    $TaskLocalLifetimeProfile = $null -ne $SemanticModel -and
-        [int]$SemanticModel.schema_version -eq 45 -and [string]$SemanticModel.semantic_version -ceq '1.54'
+    $AsyncThrowRoutingSemanticArtifact = $null -ne $SemanticModel -and
+        [int]$SemanticModel.schema_version -eq 46 -and [string]$SemanticModel.semantic_version -ceq '1.55' -and
+        $AsyncCancellationFlow -and $DirectAwaitCleanup -and $AsyncExceptionFlow -and $LanguageErrors -ceq 'bounded'
+    $TaskLocalLifetimeProfile = $AsyncThrowRoutingSemanticArtifact -or ($null -ne $SemanticModel -and
+        [int]$SemanticModel.schema_version -eq 45 -and [string]$SemanticModel.semantic_version -ceq '1.54')
     $BoundedTaskLocalLifetimeArtifact = $TaskLocalLifetimeProfile -and $LanguageErrors -ceq 'bounded' -and
         $SemanticExitCode -eq 1 -and -not [bool]$SemanticModel.succeeded -and $SemanticErrors.Count -gt 0 -and
         @($SemanticErrors | Where-Object { [string]$_.code -cne 'ASCS5422' }).Count -eq 0
@@ -1713,7 +1717,7 @@ elseif (-not $SemanticCacheHit) {
         $Diagnostics += [ordered]@{
             code = if ($AsyncCancellationFlow) { "async_cancellation_flow_unavailable" } else { "async_exception_flow_unavailable" }
             severity = "error"
-            message = "The source did not produce a supported Semantic 42-45 async exception plan with its required preview switches."
+            message = "The source did not produce a supported Semantic 42-46 async exception plan with its required preview switches."
             file = $SourceId
         }
         Write-BuildReport -Result "semantic_failed" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics
@@ -2217,14 +2221,16 @@ $MissingObservedExports = @($ExpectedObservedExports | Where-Object { $ObservedE
 $UnexpectedObservedExports = @($ObservedExports | Where-Object { $ExpectedObservedExports -notcontains $_ })
 # This entry publishes the current compiler contract. Keep the exact pair aligned
 # with GuestModuleValidator; TestCSharpGuestBuildContracts exercises real output.
-$ExpectedGuestSchema = if ($TaskLocalLifetimeSemanticArtifact) { 25 }
+$ExpectedGuestSchema = if ($AsyncThrowRoutingSemanticArtifact) { 26 }
+    elseif ($TaskLocalLifetimeSemanticArtifact) { 25 }
     elseif ($AsyncCancellationSemanticArtifact) { 24 }
     elseif ($DirectAwaitSemanticArtifact) { 23 }
     elseif ($BoundedAsyncExceptionSemanticArtifact) { 22 }
     elseif ($BoundedAsyncSemanticArtifact) { 21 }
     elseif ($BoundedSemanticArtifact -and [int]$SemanticModel.schema_version -eq 40) { 20 }
     elseif ($BoundedSemanticArtifact) { 17 } else { 14 }
-$ExpectedGuestVersion = if ($TaskLocalLifetimeSemanticArtifact) { "1.24" }
+$ExpectedGuestVersion = if ($AsyncThrowRoutingSemanticArtifact) { "1.25" }
+    elseif ($TaskLocalLifetimeSemanticArtifact) { "1.24" }
     elseif ($AsyncCancellationSemanticArtifact) { "1.23" }
     elseif ($DirectAwaitSemanticArtifact) { "1.22" }
     elseif ($BoundedAsyncExceptionSemanticArtifact) { "1.21" }
@@ -2235,6 +2241,9 @@ $GuestContractValid = [int]$GuestIrModel.schema_version -eq $ExpectedGuestSchema
     [string]$GuestIrModel.ir_version -ceq $ExpectedGuestVersion -and
     (-not $TaskLocalLifetimeSemanticArtifact -or
         ($null -ne $GuestIrModel.PSObject.Properties['task_local_lifetimes'] -and $null -ne $GuestIrModel.task_local_lifetimes)) -and
+    (-not $AsyncThrowRoutingSemanticArtifact -or
+        ([string]$GuestIrModel.task_local_lifetimes.exception_model -ceq 'cancellation' -and
+            @($GuestIrModel.async_exception_transfers | Where-Object { [string]$_.kind -ceq 'raise_exception' }).Count -gt 0)) -and
     (-not $BoundedSemanticArtifact -or $null -ne $GuestIrModel.language_error_catalog) -and
     (-not $DirectAwaitSemanticArtifact -or @($GuestIrModel.direct_await_routes).Count -gt 0) -and
     (-not $AsyncCancellationSemanticArtifact -or

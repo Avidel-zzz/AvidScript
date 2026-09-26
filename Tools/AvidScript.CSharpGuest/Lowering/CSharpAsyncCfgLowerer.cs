@@ -546,6 +546,8 @@ internal static class CSharpAsyncCfgLowerer
         SemanticAsyncControlTransfer transfer = segment.Transfer;
         switch (transfer.Kind)
         {
+            case SemanticAsyncMethod.RaiseExceptionTransferKind:
+                return CSharpAsyncThrowLowerer.Emit(context, method, segment, activeBlockId, instructions, blocks);
             case SemanticAsyncMethod.EndCatchTransferKind:
                 blocks.Add(new(activeBlockId, instructions,
                     new("branch", null, activeBlockId + ":end_catch", null, null)));
@@ -711,7 +713,8 @@ internal static class CSharpAsyncCfgLowerer
                     or SemanticContract.AsyncExceptionFlowSchemaVersion
                     or SemanticContract.DirectAwaitCleanupSchemaVersion
                     or SemanticContract.AsyncCancellationFlowSchemaVersion
-                    or SemanticContract.TaskLocalLifetimeSchemaVersion))
+                    or SemanticContract.TaskLocalLifetimeSchemaVersion
+                    or SemanticContract.AsyncThrowRoutingSchemaVersion))
         {
             Add(diagnostics, method, "Async throw has no validated Task<int> language-error site.");
             return false;
@@ -1043,7 +1046,8 @@ internal static class CSharpAsyncCfgLowerer
                 continue;
             }
             if (segment.Transfer.Kind is SemanticAsyncMethod.GotoTransferKind
-                or SemanticAsyncMethod.EndCatchTransferKind or SemanticAsyncMethod.RethrowTransferKind)
+                or SemanticAsyncMethod.EndCatchTransferKind or SemanticAsyncMethod.RethrowTransferKind
+                or SemanticAsyncMethod.RaiseExceptionTransferKind)
             {
                 pending.Push(segment.Transfer.PrimaryTarget);
             }

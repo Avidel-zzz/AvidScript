@@ -17,7 +17,8 @@ internal static class CSharpTaskAwaitLowerer
         // Protected await routes own a temporary Task reference, independently
         // of the source local. This preserves the existing IR route contract:
         // a ready result releases it; suspension hands it to the continuation.
-        bool ownsAwaitToken = !taskLocal || method.ExceptionPlan is not null;
+        bool protectedAwait = method.ExceptionPlan is not null && segment.Transfer?.SecondaryTarget is >= 0;
+        bool ownsAwaitToken = !taskLocal || protectedAwait;
         SemanticCallable? target = context.Document.Callables.SingleOrDefault(callable =>
             callable.MethodSymbolId == site?.TaskCallableId);
         if (site is null || (!taskLocal && target is null) || abi.TaskResultImportId is null
@@ -82,7 +83,7 @@ internal static class CSharpTaskAwaitLowerer
         blocks.Add(new(readyBlock, readyInstructions,
             new("branch_if", succeeded!.Id, valueBlock, failedBlock, null)));
         List<GuestInstruction> failedInstructions = new();
-        if (method.ExceptionPlan is not null)
+        if (protectedAwait)
         {
             if (!CSharpAsyncExceptionLowerer.EmitFailure(context, method,
                     segment.Transfer!, token, state!, segment.Ordinal,
@@ -214,7 +215,7 @@ internal static class CSharpTaskAwaitLowerer
         List<GuestInstruction> rejectedInstructions = new();
         SemanticAsyncSegment? incomingSegment = method.Segments.SingleOrDefault(segment =>
             segment.AwaitSite?.CallbackId == site.CallbackId);
-        if (method.ExceptionPlan is not null)
+        if (method.ExceptionPlan is not null && incomingSegment?.Transfer?.SecondaryTarget is >= 0)
         {
             if (incomingSegment?.Transfer is not { } transfer
                 // The continuation still owns the saved locals. Handler code
