@@ -63,18 +63,29 @@ internal static class Program
             RunCase("catch-all", CancellationScript.CatchAllAsync, cancel, cancel ? 22 : 16,
                 1, cancel ? 1 : 0, 0);
             passed += 3;
+            for (int mode = 0; mode < 4; ++mode)
+            {
+                int selectedMode = mode;
+                RunCase($"repeated:{mode}", () => CancellationScript.RepeatedAsync(selectedMode), cancel,
+                    cancel ? mode == 2 ? 21 : 40 : 32,
+                    1, cancel ? 1 : 0, cancel ? mode >= 2 ? 1 : 2 : 0,
+                    expectCancelled: cancel && mode == 3,
+                    expectedRepeatTrace: cancel && mode >= 2 ? 1 : 12);
+                passed++;
+            }
         }
-        Console.WriteLine($"AsyncCancellationFlow.Reference: {passed}/12 passed");
+        Console.WriteLine($"AsyncCancellationFlow.Reference: {passed}/20 passed");
     }
 
     private static void RunCase(string name, Func<Task<int>> start, bool cancel,
         int expectedResult, int expectedTrace, int expectedInner, int expectedOuter,
-        bool expectCancelled = false)
+        bool expectCancelled = false, int expectedRepeatTrace = 0)
     {
         CancellationScript.Trace = 0;
         CancellationScript.InnerCatch = 0;
         CancellationScript.OuterCatch = 0;
         CancellationScript.WrongCatch = 0;
+        CancellationScript.RepeatTrace = 0;
         CancellationScript.Lifetime = AvidScript.AvidCancellationSource.Create();
         try
         {
@@ -97,7 +108,8 @@ internal static class Program
                 : task.IsCompletedSuccessfully && error is null && result == expectedResult;
             if (!terminalMatches || CancellationScript.Trace != expectedTrace
                 || CancellationScript.InnerCatch != expectedInner
-                || CancellationScript.OuterCatch != expectedOuter || CancellationScript.WrongCatch != 0)
+                || CancellationScript.OuterCatch != expectedOuter || CancellationScript.WrongCatch != 0
+                || CancellationScript.RepeatTrace != expectedRepeatTrace)
                 throw new InvalidOperationException($"{name}: result={result}, state={task.Status}, error={error?.GetType().Name}, trace={CancellationScript.Trace}, inner={CancellationScript.InnerCatch}, outer={CancellationScript.OuterCatch}, wrong={CancellationScript.WrongCatch}");
             if (expectCancelled)
             {

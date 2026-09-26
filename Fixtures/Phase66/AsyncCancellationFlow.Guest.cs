@@ -28,13 +28,15 @@ public static class CancellationGuestEntry
             Result = await terminal;
             return;
         }
-        else
+        else if (TestCase == 7)
         {
             // A real VM trap after a successful await must not acquire the
             // language diagnostic of an earlier, already handled cancellation.
             int value = await CancellationScript.OuterAsync(0);
             Result = value / (TestCase - 7);
         }
+        else
+            Result = await CancellationScript.RepeatedAsync(TestCase - 8);
     }
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]

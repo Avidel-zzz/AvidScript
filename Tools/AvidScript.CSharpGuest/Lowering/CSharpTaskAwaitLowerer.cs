@@ -14,6 +14,10 @@ internal static class CSharpTaskAwaitLowerer
     {
         SemanticAsyncAwaitSite? site = segment.AwaitSite;
         bool taskLocal = site?.ProducerKind == "task_local";
+        // Protected await routes own a temporary Task reference, independently
+        // of the source local. This preserves the existing IR route contract:
+        // a ready result releases it; suspension hands it to the continuation.
+        bool ownsAwaitToken = !taskLocal || method.ExceptionPlan is not null;
         SemanticCallable? target = context.Document.Callables.SingleOrDefault(callable =>
             callable.MethodSymbolId == site?.TaskCallableId);
         if (site is null || target is null || abi.TaskResultImportId is null
@@ -51,6 +55,8 @@ internal static class CSharpTaskAwaitLowerer
             instructions.Add(new("convert", token.Id, new[] { taskValue.Id }, null, null, null));
         }
         if (token is null) return false;
+        if (taskLocal && ownsAwaitToken && CSharpTaskResultAbi.Call(context,
+                CSharpTaskResultAbi.Retain, token, null, segment.Ordinal, instructions) is null) return false;
         instructions.Add(new("local_store", null, new[] { token.Id }, storage.Id, null, null));
         GuestRegister? callback = CSharpTaskResultAbi.Constant(context,
             CSharpTaskResultAbi.IntTypeId, site.CallbackId, segment.Ordinal, instructions);
@@ -81,21 +87,21 @@ internal static class CSharpTaskAwaitLowerer
             if (!CSharpAsyncExceptionLowerer.EmitFailure(context, method,
                     segment.Transfer!, token, state!, segment.Ordinal,
                     failedBlock, failedInstructions, blocks,
-                    releaseDirectToken: !taskLocal)) return false;
+                    releaseDirectToken: ownsAwaitToken)) return false;
         }
         else if (method.TaskResultTypeId is null
             && ReportsUnhandledLanguageError(context.Document))
         {
             if (!EmitUnhandledFailure(context, method, token, state!, segment.Ordinal,
                     failedBlock, failedInstructions, blocks,
-                    releaseDirectToken: !taskLocal, releaseTaskLocals: true)) return false;
+                    releaseDirectToken: ownsAwaitToken, releaseTaskLocals: true)) return false;
         }
         else
         {
             if (method.TaskResultTypeId is not null
                 && CSharpTaskResultAbi.PropagateFailure(context, method, token,
                     segment.Ordinal, failedInstructions) is null) return false;
-            if ((!taskLocal && CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release,
+            if ((ownsAwaitToken && CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release,
                     token, null, segment.Ordinal, failedInstructions) is null)
                 || !CSharpTaskResultAbi.ReleaseTaskLocal(context, method,
                     segment.Ordinal, failedInstructions)) return false;
@@ -117,7 +123,7 @@ internal static class CSharpTaskAwaitLowerer
         }
         List<GuestInstruction> valueInstructions = new();
         if (!StoreResult(context, site, value!, segment.Ordinal, valueInstructions)) return false;
-        if (!taskLocal && CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release,
+        if (ownsAwaitToken && CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release,
                 token, null, segment.Ordinal, valueInstructions) is null) return false;
         blocks.Add(new(valueBlock, valueInstructions,
             new("branch", null,
@@ -149,7 +155,7 @@ internal static class CSharpTaskAwaitLowerer
         List<GuestInstruction> acceptedInstructions = new();
         if (!CSharpTaskResultAbi.TransferTaskLocalToContinuation(context,
                 method, scheduled, segment.Ordinal, acceptedInstructions)
-            || !taskLocal && CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release,
+            || ownsAwaitToken && CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release,
                 token, null, segment.Ordinal, acceptedInstructions) is null) return false;
         if (method.TaskResultTypeId is not null && initialEntry)
         {
@@ -177,7 +183,7 @@ internal static class CSharpTaskAwaitLowerer
             rejectedInstructions.Add(new("call", ignored.Id,
                 new[] { scheduled.Id }, abi.CancelImportId, null, null));
         }
-        if ((!taskLocal && CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release,
+        if ((ownsAwaitToken && CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release,
                 token, null, segment.Ordinal, rejectedInstructions) is null)
             || !CSharpTaskResultAbi.ReleaseTaskLocal(context, method,
                 segment.Ordinal, rejectedInstructions)) return false;
@@ -211,6 +217,11 @@ internal static class CSharpTaskAwaitLowerer
         if (method.ExceptionPlan is not null)
         {
             if (incomingSegment?.Transfer is not { } transfer
+                // The continuation still owns the saved locals. Handler code
+                // needs its own references before it can return or suspend;
+                // the successful resume branch acquires these separately.
+                || !CSharpTaskResultAbi.RetainTaskLocal(context, method,
+                    block, rejectedInstructions)
                 || !CSharpAsyncExceptionLowerer.EmitFailure(context, method,
                     transfer, token, state!, block, rejected,
                     rejectedInstructions, blocks, releaseDirectToken: false)) return false;

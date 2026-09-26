@@ -146,15 +146,9 @@ internal static class SemanticControlFlowProjector
                                             && !body.Method.IsGenericMethod
                                             && !body.Method.ContainingType.IsGenericType
                                             && body.Method.ContainingType.TypeKind
-                                                == TypeKind.Class
-                                            && !asyncBody.DescendantNodes()
-                                                .OfType<VariableDeclaratorSyntax>()
-                                                .Any(variable => semanticModel.GetDeclaredSymbol(variable)
-                                                    is ILocalSymbol local
-                                                    && SemanticAsyncProjector.TryGetSupportedTaskResult(
-                                                        context.Compilation, local.Type, out _)))
+                                                == TypeKind.Class)
                                         {
-                                            asyncExceptionMethods.Add(new SemanticAsyncMethod(
+                                            SemanticAsyncMethod exceptionMethod = new(
                                                 sourceFlow.MethodSymbolId, null,
                                                 SemanticAsyncMethod.ContinuationCfgLowering,
                                                 framed, bodySpan,
@@ -164,6 +158,8 @@ internal static class SemanticControlFlowProjector
                                                 InvocationInputs = inputs,
                                                 LexicalScopes = preview.LexicalScopes,
                                                 TaskResultTypeId = typeRegistry.Register(resultType!),
+                                                TaskLocalSymbolIds = SemanticAsyncProjector.GetTaskAliasLocalIds(
+                                                    context, semanticModel, asyncBody),
                                                 ErrorPlan = preview.ErrorPlan,
                                                 ExceptionPlan = new(
                                                     sourceFlow.SourceId,
@@ -181,9 +177,14 @@ internal static class SemanticControlFlowProjector
                                                             "System.Threading.Tasks.TaskCanceledException")!) : null,
                                                     ExceptionScopes = enableAsyncCancellationFlow ? boundScopes : null,
                                                 },
-                                            });
-                                            nextAsyncCallbackId = previewCallbackId;
-                                            continue;
+                                            };
+                                            if (SemanticAsyncProjector.ValidateTaskLocalOwnership(
+                                                    context, semanticModel, asyncBody, exceptionMethod, diagnostics))
+                                            {
+                                                asyncExceptionMethods.Add(exceptionMethod);
+                                                nextAsyncCallbackId = previewCallbackId;
+                                                continue;
+                                            }
                                         }
                                         sourceFlow = sourceFlow with
                                         {

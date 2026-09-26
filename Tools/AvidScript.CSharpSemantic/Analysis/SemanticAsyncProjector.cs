@@ -259,19 +259,9 @@ internal static class SemanticAsyncProjector
                 TaskLocalSymbolIds = GetTaskAliasLocalIds(context, semanticModel, declaration.Body),
                 ErrorPlan = flowProjection.ErrorPlan,
             };
-            VariableDeclaratorSyntax[] taskDeclarations = GetTaskLocalDeclarations(
-                context, semanticModel, declaration.Body);
-            string[] taskLocals = taskDeclarations
-                .Select(variable => SemanticSymbolProjector.GetSymbolId(
-                    (ILocalSymbol)semanticModel.GetDeclaredSymbol(variable)!)).ToArray();
-            if (taskLocals.Length != 0 && !SemanticAsyncInvocationValidator.TryGetTaskLocalBindings(
-                    projected, taskLocals, projected.TaskLocalSymbolIds is not null,
-                    out _, out _))
+            if (!ValidateTaskLocalOwnership(context, semanticModel,
+                    declaration.Body, projected, diagnostics))
             {
-                diagnostics.Add(Error("ASCS5403",
-                    "Task<int> locals require a definite owner on every control-flow path.",
-                    SemanticSpanFactory.Create(context.PrimaryUnit.SourceText,
-                        taskDeclarations[^1].Span)));
                 projected = null;
                 return false;
             }
@@ -1285,7 +1275,7 @@ internal static class SemanticAsyncProjector
                 && TryGetSupportedTaskResult(context.Compilation, symbol.Type, out _))
             .Select(statement => statement.Declaration.Variables[0]).ToArray();
 
-    private static IReadOnlyList<string>? GetTaskAliasLocalIds(
+    internal static IReadOnlyList<string>? GetTaskAliasLocalIds(
         SemanticCompilationContext context, SemanticModel semanticModel, BlockSyntax body)
     {
         VariableDeclaratorSyntax[] declarations = GetTaskLocalDeclarations(
@@ -1294,6 +1284,21 @@ internal static class SemanticAsyncProjector
             && semanticModel.GetOperation(identifier) is ILocalReferenceOperation)) return null;
         return declarations.Select(variable => SemanticSymbolProjector.GetSymbolId(
             (ILocalSymbol)semanticModel.GetDeclaredSymbol(variable)!)).ToArray();
+    }
+
+    internal static bool ValidateTaskLocalOwnership(SemanticCompilationContext context,
+        SemanticModel semanticModel, BlockSyntax body, SemanticAsyncMethod method,
+        ICollection<SemanticDiagnostic> diagnostics)
+    {
+        VariableDeclaratorSyntax[] declarations = GetTaskLocalDeclarations(context, semanticModel, body);
+        string[] locals = declarations.Select(variable => SemanticSymbolProjector.GetSymbolId(
+            (ILocalSymbol)semanticModel.GetDeclaredSymbol(variable)!)).ToArray();
+        if (locals.Length == 0 || SemanticAsyncInvocationValidator.TryGetTaskLocalBindings(
+                method, locals, method.TaskLocalSymbolIds is not null, out _, out _)) return true;
+        diagnostics.Add(Error("ASCS5403",
+            "Task<int> locals require a definite owner on every control-flow path.",
+            SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, declarations[^1].Span)));
+        return false;
     }
 
     private static bool IsAwaitableType(ITypeSymbol? type)

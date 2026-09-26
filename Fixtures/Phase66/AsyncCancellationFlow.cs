@@ -8,6 +8,7 @@ public static class CancellationScript
     public static int InnerCatch;
     public static int OuterCatch;
     public static int WrongCatch;
+    public static int RepeatTrace;
     internal static AvidCancellationSource Lifetime;
 
     public static async Task<int> InnerAsync(int mode)
@@ -83,5 +84,40 @@ public static class CancellationScript
         }
         catch { InnerCatch++; return 22; }
         finally { Trace = Trace * 10 + 1; }
+    }
+
+    public static async Task<int> RepeatedAsync(int mode)
+    {
+        Task<int> pending = InnerAsync(2);
+        Task<int> alias = pending;
+        int result = 0;
+        if (mode == 1)
+        {
+            // Exercise the ready path as well as the pending Task callback.
+            await AvidContinuations.NextTickAsync();
+            await AvidContinuations.NextTickAsync();
+            await AvidContinuations.NextTickAsync();
+        }
+        try { result = await pending; }
+        catch (TaskCanceledException)
+        {
+            OuterCatch++;
+            if (mode == 2) return 21;
+            if (mode == 3) throw;
+            result = 20;
+        }
+        finally { RepeatTrace = RepeatTrace * 10 + 1; }
+
+        // The catch owner has been released, but the local and its alias still
+        // own the same Task while this unrelated continuation is suspended.
+        await AvidContinuations.NextTickAsync();
+        try
+        {
+            int again = await alias;
+            result += again;
+        }
+        catch (OperationCanceledException) { OuterCatch++; result += 20; }
+        finally { RepeatTrace = RepeatTrace * 10 + 2; }
+        return result;
     }
 }

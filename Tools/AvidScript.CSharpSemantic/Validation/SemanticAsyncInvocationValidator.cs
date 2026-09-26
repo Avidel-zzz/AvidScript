@@ -315,11 +315,18 @@ public static class SemanticAsyncInvocationValidator
             if (segment.Transfer is null) return false;
             int[] successors = segment.Transfer.Kind switch
             {
-                SemanticAsyncMethod.GotoTransferKind or SemanticAsyncMethod.AwaitTransferKind =>
+                SemanticAsyncMethod.GotoTransferKind or SemanticAsyncMethod.EndCatchTransferKind
+                    or SemanticAsyncMethod.RethrowTransferKind =>
                     new[] { segment.Transfer.PrimaryTarget },
-                SemanticAsyncMethod.BranchTransferKind =>
+                SemanticAsyncMethod.AwaitTransferKind when segment.Transfer.PrimaryTarget >= 0 =>
+                    new[] { segment.Transfer.PrimaryTarget, segment.Transfer.SecondaryTarget,
+                        segment.Transfer.CancellationTarget ?? -1 }.Where(target => target >= 0).Distinct().ToArray(),
+                SemanticAsyncMethod.BranchTransferKind or SemanticAsyncMethod.CatchMatchTransferKind =>
                     new[] { segment.Transfer.PrimaryTarget, segment.Transfer.SecondaryTarget },
-                SemanticAsyncMethod.ReturnTransferKind or SemanticAsyncMethod.ThrowTransferKind =>
+                SemanticAsyncMethod.ReturnTransferKind or SemanticAsyncMethod.ThrowTransferKind
+                    or SemanticAsyncMethod.PropagateFaultTransferKind
+                    or SemanticAsyncMethod.PropagateCancellationTransferKind
+                    or SemanticAsyncMethod.PropagateExceptionTransferKind =>
                     Array.Empty<int>(),
                 _ => null!,
             };

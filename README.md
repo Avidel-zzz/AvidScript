@@ -125,7 +125,7 @@ public static void EndPlay()
 ## Limitations
 
 - **C# / .NET**：不支持完整 C#，不能直接运行任意 .NET 程序或 NuGet 包。
-- **异步**：`Task<int>` 只能在同一脚本实例内等待；`catch`、`finally` 内不支持 `await`。异常处理需要下方的预览开关。
+- **异步**：`Task<int>` 支持同一脚本实例内重复等待；`catch`、`finally` 内不支持 `await`。异常处理需要下方的预览开关。
 - **UE 类型声明**：修改 C# 声明的 `UClass`、`UProperty`、`UFunction` 后，需要重新构建并重启 Editor。
 - **平台与发布**：Android、iOS、Shipping、真实多人游戏尚未验收。
 

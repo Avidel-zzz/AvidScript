@@ -14,7 +14,7 @@ internal static class SemanticAsyncCancellationTests
         SemanticDocument document = Analyze(source);
         Check(document.Succeeded && document.SchemaVersion == 44 && document.SemanticVersion == "1.53",
             "versioned cancellation projection: " + string.Join("; ", document.Diagnostics.Select(d => d.Code + ": " + d.Message)));
-        Check(document.AsyncMethods.Count == 5 && document.RejectedAsyncExceptionFlows is null,
+        Check(document.AsyncMethods.Count == 6 && document.RejectedAsyncExceptionFlows is null,
             "every source method must be projected");
         Check(SemanticAsyncInvocationValidator.IsValid(document)
             && SemanticAsyncScopeValidator.IsValid(document), "invocation and lexical contracts");
@@ -69,6 +69,32 @@ internal static class SemanticAsyncCancellationTests
         var taskAwait = outer.Segments.Single(segment => segment.AwaitSite is not null);
         Check(taskAwait.Transfer!.SecondaryTarget == taskAwait.Transfer.CancellationTarget,
             "Task cancellation and language faults enter the same ordered dispatch");
+        var repeated = Method(document, ".RepeatedAsync(");
+        Check(repeated.TaskLocalSymbolIds is { Count: 2 }
+            && SemanticAsyncInvocationValidator.TryGetTaskLocalFlow(repeated,
+                repeated.TaskLocalSymbolIds, true, out var producers, out var aliases,
+                out var before, out var after)
+            && aliases.Count == 1 && producers.Values.Distinct().Count() == 1
+            && repeated.Segments.Where(segment => segment.Transfer!.Kind is
+                SemanticAsyncMethod.CatchMatchTransferKind or SemanticAsyncMethod.EndCatchTransferKind
+                or SemanticAsyncMethod.RethrowTransferKind or SemanticAsyncMethod.PropagateExceptionTransferKind)
+                .All(segment => before[segment.Ordinal].Count == 2 && after[segment.Ordinal].Count == 2),
+            "normal, handler and propagation paths preserve both local owners");
+        ReplaceAndReject(document, repeated with { TaskLocalSymbolIds = null },
+            "omitted Task alias ownership");
+        string withoutAlias = source.Replace("Task<int> alias = pending;", "")
+            .Replace("await alias", "await pending");
+        var repeatedLocal = Analyze(withoutAlias);
+        Check(repeatedLocal.Succeeded && SemanticAsyncInvocationValidator.IsValid(repeatedLocal)
+            && Method(repeatedLocal, ".RepeatedAsync(").TaskLocalSymbolIds is null,
+            "repeated await also works without an alias list");
+        string conditional = source.Replace("Task<int> alias = pending;", "")
+            .Replace("try { result = await pending; }",
+                "try { result = await pending; Task<int> local = pending; result = await local; }")
+            .Replace("await alias", "await pending");
+        var ambiguous = Analyze(conditional);
+        Check(!ambiguous.Succeeded && ambiguous.Diagnostics.Any(item => item.Code == "ASCS5403"),
+            "different local owners at exception propagation joins must remain rejected");
         var scope = nested.ExceptionPlan!.ExceptionScopes!.Single(item => item.ParentProtectedRegionOrdinal is not null);
         ReplaceAndReject(document, nested with { ExceptionPlan = nested.ExceptionPlan with
             { ExceptionScopes = nested.ExceptionPlan.ExceptionScopes.Select(item => item == scope
