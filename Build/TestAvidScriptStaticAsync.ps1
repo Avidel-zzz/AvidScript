@@ -69,11 +69,22 @@ try {
     $cases = [regex]::Matches($log, 'static-async backend=\d+ scenario=[a-z-]+ mode=\d+ result=-?\d+ trace=-?\d+ resumes=\d+').Count
     $memberCases = [regex]::Matches($log, '(?<![a-z-])async-member backend=\d+ scenario=[a-z0-9-]+ mode=\d+ result=-?\d+ trace=-?\d+ resumes=\d+').Count
     $originalCases = [regex]::Matches($log, 'original-async-member backend=\d+ scenario=[a-z0-9-]+ mode=\d+ result=-?\d+ trace=-?\d+ resumes=\d+').Count
+    $taskOracles = [regex]::Matches($log, 'original-task-oracle backend=(\d+) scenario=([a-z0-9-]+) mode=0 tasks=(\d+) loop-suspensions=(\d+)')
+    $taskStates = 0
+    $loopSuspensions = 0
+    $oracleKeys = @()
+    foreach ($oracle in $taskOracles) {
+        $oracleKeys += $oracle.Groups[1].Value + ':' + $oracle.Groups[2].Value
+        $taskStates += [int]$oracle.Groups[3].Value
+        $loopSuspensions += [int]$oracle.Groups[4].Value
+    }
     if ($passed -ne $tests.Count -or $cases -ne 222 -or $memberCases -ne 282 -or $originalCases -ne 174 -or
+        $taskOracles.Count -ne 58 -or @($oracleKeys | Sort-Object -Unique).Count -ne 58 -or
+        $taskStates -ne 62 -or $loopSuspensions -ne 8 -or
         [regex]::Matches($log, 'Test Completed\. Result=\{Fail\}').Count -ne 0 -or
         [regex]::Matches($log, '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*\*').Count -ne 1 -or
         [regex]::Matches($log, "Found 4 automation tests based on '$([regex]::Escape($filter))'").Count -ne 1) {
-        throw "Static async evidence incomplete: tests=$passed cases=$cases member=$memberCases original=$originalCases log=$logPath"
+        throw "Static async evidence incomplete: tests=$passed cases=$cases member=$memberCases original=$originalCases tasks=$taskStates loops=$loopSuspensions log=$logPath"
     }
     $fixtureDirectories = [ordered]@{
         static_async = $env:AVIDSCRIPT_STATIC_ASYNC_FIXTURE_DIR
@@ -87,7 +98,7 @@ try {
         }
     })
     [ordered]@{
-        schema_version = 2
+        schema_version = 3
         semantic_version = '51/1.60'
         guest_ir_versions = @($irVersions | Sort-Object -Unique)
         managed = $managedResults
@@ -96,6 +107,11 @@ try {
         member_vm_modes_passed = $memberCases
         original_member_vm_modes_passed = $originalCases
         original_observations_per_case = 18
+        original_source_tasks_observed = $taskStates
+        original_loop_suspensions_observed = $loopSuspensions
+        original_loop_fields_per_suspension = 13
+        original_task_entry_and_terminal_states_match = $true
+        original_cancellation_token_identity_verified = $false
         collect_while_suspended = $true
         original_c10_completed = $false
         fixtures = @(foreach ($suite in $fixtureDirectories.Keys) {
@@ -105,7 +121,7 @@ try {
         })
         automation_log = $logPath
     } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $runRoot 'results.json') -Encoding utf8
-    Write-Output "Static async: native=$passed/4, Wasmtime/WAMR=$cases/222, member=$memberCases/282, original=$originalCases/174; evidence=$runRoot"
+    Write-Output "Static async: native=$passed/4, Wasmtime/WAMR=$cases/222, member=$memberCases/282, original=$originalCases/174, tasks=$taskStates/62, loop-suspensions=$loopSuspensions/8; evidence=$runRoot"
 }
 finally {
     Pop-Location

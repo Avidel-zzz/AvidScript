@@ -11,7 +11,12 @@ class FTaskObserver final : public IAvidScriptTaskHost
 public:
 	explicit FTaskObserver(IAvidScriptTaskHost& InHost) : Host(InHost) {}
 
-	int64 CreateTaskResult(FString TypeId) override { return Host.CreateTaskResult(MoveTemp(TypeId)); }
+	int64 CreateTaskResult(FString TypeId) override
+	{
+		const int64 Token = Host.CreateTaskResult(TypeId);
+		if (Token != 0) CreatedTasks.Add(Token, MoveTemp(TypeId));
+		return Token;
+	}
 	bool RetainTaskResult(int64 Token) override { return Host.RetainTaskResult(Token); }
 	bool ReleaseTaskResult(int64 Token) override
 	{
@@ -24,7 +29,11 @@ public:
 	EAvidScriptTaskWaitRegistration AwaitTaskResult(int64 Token, int32 CallbackId, int64& OutToken) override
 	{
 		const auto Registration = Host.AwaitTaskResult(Token, CallbackId, OutToken);
-		if (Registration != EAvidScriptTaskWaitRegistration::Invalid) AwaitedTasks.Add(Token);
+		if (Registration != EAvidScriptTaskWaitRegistration::Invalid)
+		{
+			AwaitedTasks.Add(Token);
+			AwaitRegistrations.Add({Token, CallbackId, Registration});
+		}
 		FAvidScriptTaskResultSnapshot Snapshot;
 		if (Registration == EAvidScriptTaskWaitRegistration::Ready && ReadTaskResult(Token, Snapshot)
 			&& Snapshot.State == EAvidScriptTaskResultState::Cancelled) ++ReadyCancelledAwaits;
@@ -75,12 +84,35 @@ public:
 		return Result;
 	}
 	bool WasAwaited(int64 Token) const { return AwaitedTasks.Contains(Token); }
+	// Called once after the entry invocation, before advancing the World. A
+	// later source await identifies its Task even if it completed synchronously
+	// or the guest released its last reference during that entry invocation.
+	void CaptureEntryStates()
+	{
+		EntryStates.Reset();
+		for (const auto& Entry : CreatedTasks)
+		{
+			FAvidScriptTaskResultSnapshot Snapshot;
+			if (ReadTaskResult(Entry.Key, Snapshot)) EntryStates.Add(Entry.Key, Snapshot.State);
+			else if (const auto* Terminal = TerminalSnapshots.Find(Entry.Key)) EntryStates.Add(Entry.Key, Terminal->State);
+			else if (Host.HasTaskResultType(Entry.Key, Entry.Value)) EntryStates.Add(Entry.Key, EAvidScriptTaskResultState::Running);
+		}
+	}
+	struct FAwaitRegistration
+	{
+		int64 Token = 0;
+		int32 CallbackId = 0;
+		EAvidScriptTaskWaitRegistration Registration = EAvidScriptTaskWaitRegistration::Invalid;
+	};
 
 	mutable TMap<int64, FAvidScriptTaskResultSnapshot> TerminalSnapshots;
+	TMap<int64, EAvidScriptTaskResultState> EntryStates;
+	TArray<FAwaitRegistration> AwaitRegistrations;
 	mutable bool bStableTerminalReads = true;
 	int32 ReadyCancelledAwaits = 0;
 private:
 	IAvidScriptTaskHost& Host;
 	TSet<int64> AwaitedTasks;
+	TMap<int64, FString> CreatedTasks;
 };
 }

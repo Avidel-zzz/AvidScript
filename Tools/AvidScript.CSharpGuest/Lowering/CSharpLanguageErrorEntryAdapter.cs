@@ -20,8 +20,15 @@ internal static class CSharpLanguageErrorEntryAdapter
         adapted = null;
         error = null;
         if (affectedExports.Count == 0) { adapted = module; return true; }
-        if (module.Imports.Any(import => import.Id == ImportId
-            || import.Module == ImportModule && import.Name == ImportName))
+        GuestImport reportImport = CSharpTaskResultAbi.LanguageErrorReportImport();
+        var existing = module.Imports.Where(import => import.Id == ImportId
+            || import.Module == ImportModule && import.Name == ImportName).ToArray();
+        // Async entry lowering may already own this same boundary import. Reuse
+        // its complete ABI; aliases, duplicates and signature collisions still fail.
+        if (existing.Length > 1 || existing.Length == 1 && (existing[0].Id != reportImport.Id
+            || existing[0].Module != reportImport.Module || existing[0].Name != reportImport.Name
+            || existing[0].ReturnTypeId != reportImport.ReturnTypeId
+            || !existing[0].ParameterTypeIds.SequenceEqual(reportImport.ParameterTypeIds)))
         {
             error = "The language-error report import identity is already occupied.";
             return false;
@@ -95,9 +102,7 @@ internal static class CSharpLanguageErrorEntryAdapter
         }
         adapted = module with
         {
-            Imports = module.Imports.Append(new GuestImport(ImportId, ImportModule, ImportName,
-                new[] { "type:int32", "type:int32", "type:language_error_root" },
-                "type:int32")).ToArray(),
+            Imports = existing.Length == 0 ? module.Imports.Append(reportImport).ToArray() : module.Imports,
             Functions = functions,
             Exports = exports.OrderBy(export => export.Name, StringComparer.Ordinal).ToArray(),
         };

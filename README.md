@@ -135,7 +135,7 @@ dotnet run --project Tools/AvidScript.CSharpGuest.Tests/AvidScript.CSharpGuest.T
 
 | 语法 | 支持范围 |
 | --- | --- |
-| `static int Count = InitCount();` | [静态字段初始化与对象生命周期](Docs/Phase66/P66.C10_Static_Object_Lifetime_Contract.md) |
+| `static int Count = InitCount();` | [静态字段初始化](Docs/Phase66/P66.C10_Static_Object_Lifetime_Contract.md)；可与同步 / async 入口组合 |
 | 同步方法和属性访问器中的 `throw` | [同步异常与构建参数](Docs/Phase66/P66.C8_Task_Local_Lifetime_Contract.md#generated-task-build) |
 | `target.Value = await GetValueAsync();` | [异步成员赋值](Docs/Phase66/P66.C10_Await_Member_Assignment_Contract.md#guest-接入与补充执行验证)；暂不支持接口属性和生成的 UE 类型 |
 | `DelayAsync(ReadDelay()).WithCancellation(ReadToken())` | [取消与求值顺序](Docs/Phase66/P66.C10_PreCancelled_Await_Contract.md)；参数从左到右各求值一次，已取消时同步执行取消清理 |

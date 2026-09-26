@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AvidScriptWasmRuntime.h"
+#include "AvidScriptOriginalAsyncMemberOracle.h"
 #include "Continuation/AvidScriptSessionContinuations.h"
 #include "Memory/AvidScriptManagedHeap.h"
 #include "Dom/JsonObject.h"
@@ -42,7 +43,7 @@ namespace AvidScript::Tests::CompiledAsyncExceptions
 {
 static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 ExpectedScenarios, const TCHAR* LogPrefix,
     bool CollectWhileSuspended = false, bool HasStaticStorage = false, int32 ExpectedObservations = 0,
-    int32 ExpectedResumeObservations = 0)
+    int32 ExpectedResumeObservations = 0, bool ObserveOriginalTasks = false)
 {
     if (!GEngine) return false;
     const FString Directory = FPlatformMisc::GetEnvironmentVariable(FixtureVariable);
@@ -79,6 +80,8 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
                 && (*Scenario)->TryGetNumberField(TEXT("resultOffset"), Offset) && Offset >= 0 && Offset < 65536
                 && (*Scenario)->TryGetNumberField(TEXT("traceOffset"), TraceOffset) && TraceOffset >= 0 && TraceOffset < 65536)) return false;
             Names.Add(Name);
+            OriginalAsyncMember::FOracle SourceOracle;
+            if (ObserveOriginalTasks && !SourceOracle.Read(Test, *Scenario, Name)) return false;
             int32 StaticSlots = 0;
             if (HasStaticStorage && !Test.TestTrue(TEXT("Static fixture declares bounded domain roots"),
                 (*Scenario)->TryGetNumberField(TEXT("staticSlots"), StaticSlots) && StaticSlots > 0 && StaticSlots <= 4096)) return false;
@@ -125,13 +128,16 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
                 { Test.AddError(Result.ErrorMessage); return false; }
                 const auto Owner = MakeShared<FAvidScriptSessionContinuations>();
                 auto& Endpoint = Owner->ResetActive(World);
+                CompiledCancellation::FTaskObserver TaskObserver(Endpoint);
+                auto Oracle = SourceOracle;
                 FAvidScriptWasmHostContext Context;
-                Context.Tasks = &Endpoint;
+                Context.Tasks = ObserveOriginalTasks ? static_cast<IAvidScriptTaskHost*>(&TaskObserver) : &Endpoint;
                 Context.Continuations = &Endpoint;
                 Context.World = World;
                 Runtime.SetHostContext(Context);
                 ON_SCOPE_EXIT { Owner->Teardown(); };
                 if (!Test.TestTrue(*Label, Runtime.BeginPlay(Result))) { Test.AddError(Result.ErrorMessage); return false; }
+                if (ObserveOriginalTasks) TaskObserver.CaptureEntryStates();
                 auto Collect = [&]() -> bool {
                     if (!CollectWhileSuspended) return true;
                     auto* Heap = Runtime.GetManagedHeapForTesting();
@@ -139,6 +145,7 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
                         && Test.TestEqual(*(Label + TEXT(" suspended collection")), Heap->Collect(), AvidScript::Managed::EHeapError::Ok);
                 };
                 if (!Collect()) return false;
+                if (ObserveOriginalTasks && Mode == 0 && !Oracle.CheckSuspension(Test, Label, TaskObserver, Runtime)) return false;
                 auto Read = [&](int32 Address) -> int32 {
                     uint8 Data[4] = {};
                     FString Error;
@@ -183,6 +190,7 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
                         Test.TestTrue(*Label, Owner->FinalizeDispatched(Completion.Token, true));
                         if (!Collect()) return false;
                         ++Resumes;
+                        if (ObserveOriginalTasks && Mode == 0 && !Oracle.CheckSuspension(Test, Label, TaskObserver, Runtime)) return false;
                         if (!CheckedFirstResume) CheckFirstResume();
                     }
                     if (Mode == 2 && Resumes > 0)
@@ -197,6 +205,7 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
                 // A pre-cancelled entry can finish without scheduling anything.
                 // It must already have the reference side effects in that case.
                 if (!Stopped && !CheckedFirstResume) CheckFirstResume();
+                if (ObserveOriginalTasks && Mode == 0 && !Oracle.CheckFinal(Test, Label, TaskObserver)) return false;
                 Test.TestEqual(*Label, Read(Offset), Stopped ? StoppedResult : Expected);
                 Test.TestEqual(*(Label + TEXT(" cleanup order")), Read(TraceOffset), Stopped ? StoppedTrace : ExpectedTrace);
                 for (int32 Index = 0; Index < Observations.Num(); ++Index)
@@ -255,7 +264,7 @@ bool FAvidScriptStaticAsyncTest::RunTest(const FString& Parameters)
 bool FAvidScriptOriginalAsyncMemberTest::RunTest(const FString& Parameters)
 {
     return AvidScript::Tests::CompiledAsyncExceptions::Run(*this,
-        TEXT("AVIDSCRIPT_ORIGINAL_ASYNC_MEMBER_DIR"), 29, TEXT("original-async-member"), true, true, 18);
+        TEXT("AVIDSCRIPT_ORIGINAL_ASYNC_MEMBER_DIR"), 29, TEXT("original-async-member"), true, true, 18, 0, true);
 }
 
 bool FAvidScriptAwaitReadinessEvaluationTest::RunTest(const FString& Parameters)
