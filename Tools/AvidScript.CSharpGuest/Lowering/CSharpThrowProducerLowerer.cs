@@ -43,9 +43,10 @@ public static class CSharpThrowProducerLowerer
         GuestModule module,
         out CSharpThrowProducerResult? result,
         out string? error,
-        bool deferValidation = false) =>
+        bool deferValidation = false,
+        CSharpLanguageErrorTokenCatalog? catalog = null) =>
         TryLowerCore(semantic, flow, module, replaceExisting: true, out result, out error,
-            deferValidation);
+            deferValidation, catalog);
 
     private static bool TryLowerCore(
         SemanticDocument semantic,
@@ -54,7 +55,8 @@ public static class CSharpThrowProducerLowerer
         bool replaceExisting,
         out CSharpThrowProducerResult? result,
         out string? error,
-        bool deferValidation = false)
+        bool deferValidation = false,
+        CSharpLanguageErrorTokenCatalog? suppliedCatalog = null)
     {
         result = null;
         error = null;
@@ -91,7 +93,7 @@ public static class CSharpThrowProducerLowerer
         if (!MatchesCreation(site, expression))
             return Fail("Only a zero-argument supported framework exception constructor is executable.", out error);
 
-        CSharpLanguageErrorTokenCatalog catalog = BuildCatalog(semantic.ExceptionFlows);
+        CSharpLanguageErrorTokenCatalog catalog = suppliedCatalog ?? BuildCatalog(semantic.ExceptionFlows);
         int typeToken = catalog.Types.Single(item => item.TypeId == site.ExceptionTypeId).Token;
         int sourceToken = catalog.Sources.Single(item => item.SourceId == flow.SourceId
             && item.Span.Start == site.Span.Start && item.Span.Length == site.Span.Length).Token;
@@ -138,12 +140,15 @@ public static class CSharpThrowProducerLowerer
     }
 
     internal static CSharpLanguageErrorTokenCatalog BuildCatalog(
-        IReadOnlyList<SemanticExceptionFlow> flows)
+        IReadOnlyList<SemanticExceptionFlow> flows,
+        IEnumerable<string>? additionalTypes = null,
+        IEnumerable<(string SourceId, SemanticSpan Span)>? additionalSources = null)
     {
         CSharpLanguageErrorTypeToken[] types = flows
             .SelectMany(flow => flow.Throws.Where(site => site.Kind == "throw")
                 .Select(site => site.ExceptionTypeId))
             .Where(id => id is not null)
+            .Concat(additionalTypes ?? Array.Empty<string>())
             .Distinct(StringComparer.Ordinal)
             .OrderBy(id => id, StringComparer.Ordinal)
             .Select((id, index) => new CSharpLanguageErrorTypeToken(index + 1, id!))
@@ -151,6 +156,7 @@ public static class CSharpThrowProducerLowerer
         CSharpLanguageErrorSourceToken[] sources = flows
             .SelectMany(flow => flow.Throws.Where(site => site.Kind == "throw")
                 .Select(site => (flow.SourceId, site.Span)))
+            .Concat(additionalSources ?? Array.Empty<(string SourceId, SemanticSpan Span)>())
             .Distinct()
             .OrderBy(item => item.SourceId, StringComparer.Ordinal)
             .ThenBy(item => item.Span.Start)

@@ -15,10 +15,12 @@ internal static class CSharpStaticSourcePreparation
         out CSharpStaticExecutionContext? execution, out string? error)
     {
         ordinary = null; execution = null; error = null;
-        if (!SemanticStaticInitializationValidator.IsValid(source) || !source.Succeeded
-            || source.AsyncMethods.Count != 0 || source.ExceptionFlows is not null
+        if (!SemanticStaticInitializationValidator.IsValid(source)
+            || !source.Succeeded && source.ExceptionFlows is null
+            || source.AsyncMethods.Count != 0
+            || source.ExceptionFlows?.Any(flow => flow.Blocks is null) == true
             || source.RejectedAsyncExceptionFlows is not null || source.UeTypeDeclarations is not { Count: 0 })
-        { error = "Static source execution requires a valid synchronous source plan; async, exception and generated UE routes are not connected yet."; return false; }
+        { error = "Static source execution requires a valid synchronous source plan; async and generated UE routes are not connected yet."; return false; }
         // The static envelope validates ownership and initializer plans. Reuse
         // the base reader for every ordinary callable, symbol and CFG invariant
         // before building dictionaries or specializing any source body.
@@ -38,8 +40,18 @@ internal static class CSharpStaticSourcePreparation
                 Operations = block.Operations.Select(WithoutOwner).ToArray(),
                 BranchValue = block.BranchValue is null ? null : WithoutOwner(block.BranchValue),
             }).ToArray() }).ToArray(),
+            ExceptionFlows = source.ExceptionFlows?.Select(flow => flow with { Blocks = flow.Blocks!.Select(block => block with
+            {
+                Operations = block.Operations.Select(WithoutOwner).ToArray(),
+                BranchValue = block.BranchValue is null ? null : WithoutOwner(block.BranchValue),
+            }).ToArray() }).ToArray(),
         };
-        if (!CSharpSemanticInputValidator.IsValid(validationView))
+        if (source.Callables.Select(item => item.MethodSymbolId).Any(string.IsNullOrWhiteSpace)
+            || source.Callables.Select(item => item.MethodSymbolId).Distinct().Count() != source.Callables.Count
+            || source.Methods.Select(item => item.MethodSymbolId).Distinct().Count() != source.Methods.Count
+            || source.Diagnostics is null || source.Diagnostics.Any(item => item.Severity == "error" && item.Code != "ASCS3001")
+            || (source.ExceptionFlows is null ? !CSharpSemanticInputValidator.IsValid(validationView)
+                : !SemanticExceptionFlowContractValidator.IsValid(validationView)))
         { error = "Static source has a malformed base Semantic contract."; return false; }
         var types = source.Types.ToDictionary(type => type.Id, StringComparer.Ordinal);
         var shapes = source.TypeShapes.ToDictionary(shape => shape.TypeId, StringComparer.Ordinal);
@@ -48,10 +60,12 @@ internal static class CSharpStaticSourcePreparation
         var callables = source.Callables.ToDictionary(callable => callable.MethodSymbolId, StringComparer.Ordinal);
         var bodies = source.Methods.ToDictionary(body => body.MethodSymbolId, StringComparer.Ordinal);
         var graphs = source.ControlFlowGraphs.ToDictionary(graph => graph.MethodSymbolId, StringComparer.Ordinal);
+        var exceptionFlows = source.ExceptionFlows?.ToDictionary(flow => flow.MethodSymbolId, StringComparer.Ordinal) ?? new();
         List<SemanticSymbol> addedSymbols = new();
         List<SemanticCallable> addedCallables = new();
         List<SemanticMethodBody> addedBodies = new();
         List<SemanticControlFlowGraph> addedGraphs = new();
+        List<SemanticExceptionFlow> addedFlows = new();
         List<CSharpStaticField> fields = new();
         List<CSharpStaticSourceType> owners = new();
         string? failure = null;
@@ -127,13 +141,31 @@ internal static class CSharpStaticSourcePreparation
             }).ToArray(),
         };
         var instances = source.Callables.Select(callable => callable.MethodSymbolId).ToHashSet(StringComparer.Ordinal);
+        SemanticExceptionFlow RewriteFlow(SemanticExceptionFlow flow, string id,
+            IReadOnlyDictionary<string, string> map, IReadOnlyDictionary<string, string>? locals = null) => flow with
+        {
+            MethodSymbolId = id,
+            Blocks = flow.Blocks!.Select(block => block with
+            {
+                Operations = block.Operations.Select(operation => Rewrite(operation, map, locals)).ToArray(),
+                BranchValue = block.BranchValue is null ? null : Rewrite(block.BranchValue, map, locals),
+            }).ToArray(),
+            Regions = flow.Regions.Select(region => region with { ExceptionTypeId = MapType(region.ExceptionTypeId, map) }).ToArray(),
+            Throws = flow.Throws.Select(site => site with { ExceptionTypeId = MapType(site.ExceptionTypeId, map) }).ToArray(),
+            Catches = flow.Catches.Select(handler => handler with
+            {
+                ExceptionTypeId = MapType(handler.ExceptionTypeId, map),
+                ExceptionVariableSymbolId = handler.ExceptionVariableSymbolId is { } local && locals?.TryGetValue(local, out var mapped) == true
+                    ? mapped : handler.ExceptionVariableSymbolId,
+            }).ToArray(),
+        };
         string Specialize(SemanticCallable definition, IReadOnlyList<string> arguments)
         {
             string id = SemanticContract.GenericInstanceId(definition.MethodSymbolId, arguments);
             if (instances.Contains(id)) return id;
             if (instances.Count > 4096 || definition.GenericTypeParameterIds!.Count != arguments.Count
                 || !bodies.TryGetValue(definition.MethodSymbolId, out var body)
-                || !graphs.TryGetValue(definition.MethodSymbolId, out var graph))
+                || !graphs.ContainsKey(definition.MethodSymbolId) && !exceptionFlows.ContainsKey(definition.MethodSymbolId))
             { failure ??= "Generic initializer call has no executable source body: " + definition.MethodSymbolId; return id; }
             instances.Add(id);
             var map = definition.GenericTypeParameterIds.Zip(arguments).ToDictionary(pair => pair.First, pair => pair.Second, StringComparer.Ordinal);
@@ -147,7 +179,8 @@ internal static class CSharpStaticSourcePreparation
                 GenericDefinitionSymbolId = definition.MethodSymbolId, GenericArgumentTypeIds = arguments,
                 Parameters = definition.Parameters.Select(parameter => parameter with { SymbolId = locals[parameter.SymbolId], TypeId = MapType(parameter.TypeId, map)! }).ToArray() });
             addedBodies.Add(body with { MethodSymbolId = id, Root = Rewrite(body.Root, map, locals) });
-            addedGraphs.Add(RewriteGraph(graph, id, map, locals));
+            if (graphs.TryGetValue(definition.MethodSymbolId, out var graph)) addedGraphs.Add(RewriteGraph(graph, id, map, locals));
+            if (exceptionFlows.TryGetValue(definition.MethodSymbolId, out var flow)) addedFlows.Add(RewriteFlow(flow, id, map, locals));
             return id;
         }
         void AddMethod(string id, string owner, SemanticOperation body, SemanticControlFlowGraph graph)
@@ -188,6 +221,7 @@ internal static class CSharpStaticSourcePreparation
         }
         var rewrittenBodies = source.Methods.Select(body => body with { Root = Rewrite(body.Root, emptyMap) }).ToArray();
         var rewrittenGraphs = source.ControlFlowGraphs.Select(graph => RewriteGraph(graph, graph.MethodSymbolId, emptyMap)).ToArray();
+        var rewrittenFlows = source.ExceptionFlows?.Select(flow => RewriteFlow(flow, flow.MethodSymbolId, emptyMap)).ToArray();
         if (failure is not null) { error = failure; return false; }
         ordinary = source with
         {
@@ -198,6 +232,7 @@ internal static class CSharpStaticSourcePreparation
             Callables = source.Callables.Concat(addedCallables).OrderBy(callable => callable.MethodSymbolId, StringComparer.Ordinal).ToArray(),
             Methods = rewrittenBodies.Concat(addedBodies).OrderBy(body => body.MethodSymbolId, StringComparer.Ordinal).ToArray(),
             ControlFlowGraphs = rewrittenGraphs.Concat(addedGraphs).OrderBy(graph => graph.MethodSymbolId, StringComparer.Ordinal).ToArray(),
+            ExceptionFlows = rewrittenFlows?.Concat(addedFlows).OrderBy(flow => flow.MethodSymbolId, StringComparer.Ordinal).ToArray(),
             ClassTypes = source.ClassTypes.Select(type => type with { HasStaticInitialization = false }).ToArray(),
         };
         ordinary = ordinary with { Reachability = SemanticReachability.ExpandForExecution(ordinary,

@@ -14,7 +14,8 @@ internal static class SemanticReachabilityProjector
         IReadOnlyList<SemanticContinuationCallback> continuationCallbacks,
         IReadOnlyList<SemanticUeTypeDeclaration> ueTypeDeclarations,
         IReadOnlyList<SemanticAsyncMethod> asyncMethods,
-        IReadOnlyList<string>? additionalRootIds = null)
+        IReadOnlyList<string>? additionalRootIds = null,
+        IReadOnlyList<SemanticExceptionFlow>? exceptionFlows = null)
     {
         Dictionary<string, SemanticCallable> callablesById = callables.ToDictionary(
             callable => callable.MethodSymbolId,
@@ -57,6 +58,8 @@ internal static class SemanticReachabilityProjector
         Dictionary<string, SemanticAsyncMethod> asyncMethodsById = asyncMethods.ToDictionary(
             method => method.MethodSymbolId,
             StringComparer.Ordinal);
+        var exceptionFlowsById = (exceptionFlows ?? Array.Empty<SemanticExceptionFlow>())
+            .ToDictionary(flow => flow.MethodSymbolId, StringComparer.Ordinal);
         Dictionary<string, AssociatedAccessorTargets> accessorsByAssociatedSymbolId = callables
             .Where(callable => callable.AssociatedSymbolId is not null)
             .GroupBy(callable => callable.AssociatedSymbolId!, StringComparer.Ordinal)
@@ -101,6 +104,19 @@ internal static class SemanticReachabilityProjector
                         pending);
                 }
             }
+
+            // Exception bodies are absent from ordinary CFGs. Execution consumers
+            // must also retain calls in try/catch/finally before materializing them.
+            if (exceptionFlowsById.TryGetValue(current, out var flow))
+                foreach (var block in flow.Blocks!.Where(block => block.IsReachable))
+                {
+                    foreach (var operation in block.Operations)
+                        QueueOperationTargets(operation, PropertyAccess.Read, callablesById,
+                            accessorsByAssociatedSymbolId, reachable, pending);
+                    if (block.BranchValue is { } value)
+                        QueueOperationTargets(value, PropertyAccess.Read, callablesById,
+                            accessorsByAssociatedSymbolId, reachable, pending);
+                }
 
             if (asyncMethodsById.TryGetValue(current, out SemanticAsyncMethod? asyncMethod))
             {

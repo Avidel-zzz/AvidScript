@@ -117,7 +117,7 @@ public static void Tick(float deltaSeconds)
 | 范围 | 当前支持 / 限制 |
 | --- | --- |
 | C# / .NET | 支持部分语言特性和 .NET API，不能直接使用任意 NuGet 包。见[支持清单](Docs/Phase66/P66.C_Language_Execution_Plan.md)。 |
-| 静态初始化 | 静态对象字段、静态构造函数已通过同步执行测试；仅开放[编译器 API 预览](Docs/Phase66/P66.C10_Static_Object_Lifetime_Contract.md)，尚未接入普通构建。 |
+| 静态初始化 | 静态字段、静态构造及失败后的异常缓存已通过同步执行测试；仅开放[编译器 API 预览](Docs/Phase66/P66.C10_Static_Object_Lifetime_Contract.md)，尚未接入普通构建。 |
 | `async` / `await` | 泛型 Task 仅支持 `Task<int>`；不支持在 `catch` / `finally` 中 `await`。 |
 | `throw` / `catch` | 部分同步方法和属性访问器支持显式 `throw`，需[实验性构建参数](Docs/Phase66/P66.C8_Task_Local_Lifetime_Contract.md#generated-task-build)；同步异常尚不能传播到异步方法。 |
 | 热重载 | 支持方法体修改；新增 UE 类型、属性、函数或修改反射签名，需重新编译并重启 Editor。 |

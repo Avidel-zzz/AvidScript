@@ -487,11 +487,15 @@ internal static class CSharpLocalThrowLowerer
         {
             string blockId = CSharpGuestIds.Block(flow.MethodSymbolId, site.BlockOrdinal);
             string capture = CSharpLanguageCatchContext.OutcomeRegister(blockId);
-            CSharpLanguageCatchMatch? outerMatch = routes.TryGetValue(blockId,
-                    out CSharpLanguageCatchRoute? outerRoute)
-                ? outerRoute.Matches.SingleOrDefault(match =>
-                    catalog.Types.Count == 1 && match.TypeToken == catalog.Types[0].Token)
-                : null;
+            routes.TryGetValue(blockId, out CSharpLanguageCatchRoute? outerRoute);
+            var incomingTypes = routes.Values.SelectMany(route => route.Matches)
+                .Where(match => match.HandlerBlockId == blockId && match.CaptureError)
+                .Select(match => match.TypeToken).Distinct().ToArray();
+            var outerMatches = incomingTypes.Select(token =>
+                outerRoute?.Matches.SingleOrDefault(match => match.TypeToken == token)).ToArray();
+            if (outerMatches.Select(match => (match?.HandlerBlockId, match?.CaptureError)).Distinct().Count() > 1)
+                return Fail("The rethrow needs type-dependent outer catch dispatch.", out error);
+            CSharpLanguageCatchMatch? outerMatch = outerMatches.FirstOrDefault();
             string? cleanupId = site.CleanupBlockOrdinal is { } cleanupOrdinal
                 ? CSharpGuestIds.Block(flow.MethodSymbolId, cleanupOrdinal) : null;
             if (!blocks.TryGetValue(blockId, out GuestBasicBlock? original)
@@ -503,7 +507,6 @@ internal static class CSharpLocalThrowLowerer
                         && instruction.TargetId is not ("field:status" or "field:value"))
                 || !locals.Any(register => register.Id == capture
                     && register.TypeId == function.ReturnTypeId)
-                || catalog.Types.Count != 1
                 || cleanupId is not null && outerMatch is not null
                 || !routes.Values.SelectMany(route => route.Matches).Any(match =>
                     match.HandlerBlockId == blockId && match.CaptureError))

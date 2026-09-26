@@ -12,7 +12,38 @@ internal static class SemanticReachabilityTests
         PropertyReadRetainsOnlyGetterAccessor();
         PropertyReadModifyWriteRetainsBothAccessors();
         InputsWithoutExportsPreserveAllCallablesForAnalysis();
-        return 5;
+        ExceptionExecutionRetainsTransitiveCallsAndAccessors();
+        return 6;
+    }
+
+    private static void ExceptionExecutionRetainsTransitiveCallsAndAccessors()
+    {
+        const string source = """
+            using System;
+            using System.Runtime.InteropServices;
+            public static class Script {
+                [UnmanagedCallersOnly(EntryPoint = "run")]
+                public static int Run() { try { return Helper(); } catch (Exception) { return Recovery.Value; } }
+                private static int Helper() { throw new InvalidOperationException(); }
+                public static int Unused() { return Native.Unused(); }
+            }
+            public static class Recovery { public static int Value { get { return Native.Used(); } } }
+            public static class Native {
+                [DllImport("env", EntryPoint = "used")] public static extern int Used();
+                [DllImport("env", EntryPoint = "unused")] public static extern int Unused();
+            }
+            """;
+        const string id = "Scripts/ExceptionReachability.cs";
+        var document = SemanticAnalyzer.Analyze(source, id, FrontendAnalyzer.Analyze(source, id).Source.Sha256);
+        Assert(SemanticExceptionFlowContractValidator.IsValid(document), "exception reachability needs a valid source artifact");
+        byte[] before = SemanticSerializer.Serialize(document);
+        var execution = SemanticReachability.ExpandForExecution(document, Array.Empty<string>());
+        Assert(execution.ReachableImports.Select(item => item.Name).SequenceEqual(new[] { "used" }),
+            "execution includes catch getter imports but excludes uncalled methods and imports");
+        Assert(execution.ReachableCallableIds.Any(item => item.Contains(".Helper(", StringComparison.Ordinal)),
+            "execution follows direct calls from try blocks");
+        Assert(execution.RootCallableIds.SequenceEqual(document.Reachability!.RootCallableIds)
+            && before.SequenceEqual(SemanticSerializer.Serialize(document)), "execution expansion preserves published artifact identity");
     }
 
     private static void ExportRootsRetainOnlyReachableFacadeAndPropertyImports()

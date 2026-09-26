@@ -67,6 +67,9 @@ internal static class SemanticStaticInitializationTests
         Check(conditional.StaticInitialization!.Types.Single().Fields[1].ControlFlowGraph!.Blocks.Any(block => block.BranchValue is not null),
             "initializer keeps conditional CFG");
         Project("public class Cache { public static int Value = 5; static Cache() { throw new System.InvalidOperationException(); } }");
+        var failure = Project("public class Cache { public static int Value; static Cache() { throw new System.InvalidOperationException(); } public static int Read() { try { return Value; } catch (System.Exception) { return -1; } } }");
+        Check(failure.ClassTypes.Single(item => item.TypeId == "type:global::System.TypeInitializationException").BaseTypeId
+            == "type:global::System.SystemException", "implicit initialization error retains Roslyn base type for catch dispatch");
         const string partial = "public partial class Cache { public static int Z = 1; static Cache() {} }";
         var additional = new[] { new SemanticReferenceSource("public partial class Cache { public static int A = 2; }", "Scripts/Part.cs", true) };
         var partialDoc = Project(partial, additional);

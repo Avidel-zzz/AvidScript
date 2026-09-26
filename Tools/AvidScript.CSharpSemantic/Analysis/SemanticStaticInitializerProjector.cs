@@ -70,6 +70,12 @@ internal static class SemanticStaticInitializerProjector
             }
         }
         if (types.Count == 0) return document;
+        // A synchronous initializer failure introduces this framework exception
+        // even when the source only catches its base class. Keep the hierarchy
+        // sourced from Roslyn so ordinary catch dispatch can resolve it.
+        if (document.ExceptionFlows is { Count: > 0 } && document.AsyncMethods.Count == 0
+            && context.Compilation.GetTypeByMetadataName("System.TypeInitializationException") is { } failureType)
+            registry.Register(failureType);
         List<SemanticStaticTypeInitialization> plans = new();
         foreach (var entry in types.OrderBy(item => item.Key, StringComparer.Ordinal))
         {

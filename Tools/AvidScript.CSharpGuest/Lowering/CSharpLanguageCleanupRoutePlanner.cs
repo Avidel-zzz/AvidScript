@@ -14,7 +14,8 @@ internal sealed record CSharpLanguageCleanupRoute(
 }
 
 // Identifies bounded, forward-only finally graphs that an exceptional direct
-// call must execute. Calls that may raise a language error inside cleanup fail closed.
+// call must execute. Cleanup failures replace the pending error and still run
+// enclosing finally regions.
 internal static class CSharpLanguageCleanupRoutePlanner
 {
     public static bool TryBuild(
@@ -27,6 +28,7 @@ internal static class CSharpLanguageCleanupRoutePlanner
             new(StringComparer.Ordinal);
         routes = result;
         error = null;
+        var staticContext = CSharpStaticExecutionContext.Find(semantic);
         IReadOnlySet<string> exceptionMethodIds = semantic.ExceptionFlows!
             .Select(flow => flow.MethodSymbolId).ToHashSet(StringComparer.Ordinal);
         foreach (SemanticMethodBody body in semantic.Methods)
@@ -83,16 +85,24 @@ internal static class CSharpLanguageCleanupRoutePlanner
                         ? Array.Empty<SemanticOperation>() : Descendants(block.BranchValue))
                     .Where(operation => operation.Kind == "invocation"
                         && operation.SymbolId is { } symbolId
-                        && affectedFunctionIds.Contains(CSharpGuestIds.Function(symbolId)))
+                        && affectedFunctionIds.Contains(CSharpGuestIds.Function(symbolId))
+                        || staticContext is not null && (operation.Kind == "field_reference"
+                            && staticContext.Owns(operation.SymbolId)
+                            || operation.Kind == "object_creation" && staticContext.Types.Any(type =>
+                                type.TypeId == operation.TypeId && !type.BeforeFieldInit)))
                     .ToArray();
-                if (calls.Length == 0) continue;
+                if (calls.Length == 0)
+                {
+                    // Exact-init method guards execute before entering source try scopes.
+                    if (staticContext is not null && block.Ordinal == graph.EntryBlockOrdinal)
+                        functionRoutes.Add(new(CSharpGuestIds.Block(body.MethodSymbolId, block.Ordinal),
+                            Array.Empty<CSharpLanguageCleanupRegion>()));
+                    continue;
+                }
                 CSharpLanguageCleanupRegion[][] paths = new CSharpLanguageCleanupRegion[calls.Length][];
                 for (int index = 0; index < calls.Length; ++index)
                 {
                     SemanticOperation call = calls[index];
-                    if (tries.Any(statement => Contains(statement.Children[1].Span, call.Span)))
-                        return Fail($"Function '{body.MethodSymbolId}' may throw while executing finally.",
-                            out error);
                     paths[index] = tries.Where(statement =>
                             Contains(statement.Children[0].Span, call.Span))
                         .OrderBy(statement => statement.Children[0].Span.Length)

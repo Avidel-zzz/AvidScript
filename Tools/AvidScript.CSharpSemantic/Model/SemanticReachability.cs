@@ -15,7 +15,7 @@ public sealed record SemanticReachability(
     {
         SemanticReachability expanded = SemanticReachabilityProjector.Project(document.Callables, document.ControlFlowGraphs,
             document.GameplayEventCallbacks, document.DelegateEventCallbacks, document.ContinuationCallbacks,
-            document.UeTypeDeclarations, document.AsyncMethods, additionalTargets);
+            document.UeTypeDeclarations, document.AsyncMethods, additionalTargets, document.ExceptionFlows);
         return expanded with { RootCallableIds = document.Reachability!.RootCallableIds, Mode = document.Reachability.Mode };
     }
 }

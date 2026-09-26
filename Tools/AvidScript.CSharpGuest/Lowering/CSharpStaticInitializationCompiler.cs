@@ -13,6 +13,16 @@ public static class CSharpStaticInitializationCompiler
     {
         module = null;
         if (!CSharpStaticSourcePreparation.TryPrepare(source, out var ordinary, out var execution, out error)) return false;
+        if (ordinary!.ExceptionFlows is not null)
+        {
+            if (!CSharpLanguageErrorCompiler.TryLower(ordinary, semanticSha256, out var compilation, out error)) return false;
+            var restored = compilation!.Module with { Provenance = compilation.Module.Provenance with
+            { SemanticSchemaVersion = source.SchemaVersion, SemanticVersion = source.SemanticVersion } };
+            if (!GuestModuleValidator.Validate(restored).Succeeded)
+            { error = "Static language-error module failed original-provenance validation."; return false; }
+            module = restored;
+            return true;
+        }
         var lowered = CSharpGuestLowerer.Lower(ordinary!, semanticSha256);
         if (!lowered.Succeeded || lowered.Module is not { } input)
         { error = "Static initializer source lowering failed: " + string.Join(" | ", lowered.Diagnostics.Select(item => item.Message)); return false; }

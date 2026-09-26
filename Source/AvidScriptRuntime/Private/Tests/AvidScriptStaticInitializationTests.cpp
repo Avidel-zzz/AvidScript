@@ -146,4 +146,77 @@ bool FAvidScriptStaticSourceInitializationTest::RunTest(const FString& Parameter
     }
     return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptStaticSourceFailuresTest,
+    "AvidScript.Runtime.ManagedHeap.StaticSourceFailures",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptStaticSourceFailuresTest::RunTest(const FString& Parameters)
+{
+    static_cast<void>(Parameters);
+    using namespace AvidScript::Managed;
+    struct FCase { const TCHAR* Name; uint32 First; uint32 Increment; uint32 Roots; uint32 Objects; };
+    // First and second values are independently checked by executing the same C#
+    // with .NET. Repeated calls then exercise cached identity and cleanup effects.
+    const FCase Cases[] = {
+        {TEXT("field"), 11, 0, 2, 4}, {TEXT("cctor"), 12, 0, 2, 4},
+        {TEXT("nested"), 13, 0, 3, 6}, {TEXT("identity"), 14, 0, 4, 5},
+        {TEXT("generic"), 20, 0, 3, 7}, {TEXT("finally"), 11, 10, 3, 5},
+        {TEXT("finally-call"), 11, 10, 2, 4}, {TEXT("finally-normal"), 10, 10, 1, 1},
+        {TEXT("nested-finally-call"), 1101, 1001, 3, 5}, {TEXT("finally-static"), 111, 0, 3, 7},
+        {TEXT("rethrow"), 15, 0, 2, 4}, {TEXT("caught-inside"), 71, 0, 2, 2},
+        {TEXT("published-alias"), 71, 0, 5, 6},
+    };
+    const FString Directory = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("AvidScriptManagedHeapTests/GuestFixtures"));
+    for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+    for (const bool bCooperative : {false, true})
+    {
+        if (Backend == EAvidScriptVmBackendKind::Wamr && bCooperative) continue;
+        for (const FCase& Case : Cases)
+        {
+            AddInfo(FString::Printf(TEXT("Static source failure: case=%s backend=%d cooperative=%d"), Case.Name, static_cast<int32>(Backend), bCooperative));
+            const FString Filename = FString::Printf(TEXT("static-failure-%s%s.wasm"), Case.Name, bCooperative ? TEXT("-cooperative") : TEXT(""));
+            const FString ModuleId = FString::Printf(TEXT("csharp:Scripts/StaticFailure-%s.cs"), Case.Name);
+            TArray<uint8> Wasm;
+            if (!TestTrue(TEXT("Read source failure fixture"), FFileHelper::LoadFileToArray(Wasm, *(Directory / Filename)))) return false;
+            FAvidScriptVmBackendSelection Selection;
+            Selection.BackendKind = Backend;
+            Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime ? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+            FAvidScriptWasmRuntimeInstance Runtime(Selection);
+            FAvidScriptWasmSmokeResult Result;
+            for (int32 Domain = 0; Domain < 2; ++Domain)
+            {
+                if (!TestTrue(TEXT("Load fresh source failure domain"), Runtime.LoadModule(Wasm.GetData(), Wasm.Num(), ModuleId, Result)))
+                { AddError(Result.ErrorMessage); return false; }
+                TestEqual(TEXT("Failure source backend"), Runtime.GetActiveBackendInfo().Kind, Backend);
+                TestEqual(TEXT("Failure source mode"), Runtime.GetActiveBackendInfo().ExecutionMode, Selection.ExecutionMode);
+                if (!TestTrue(TEXT("Begin source failure domain"), Runtime.BeginPlay(Result))) { AddError(Result.ErrorMessage); return false; }
+                FAvidScriptVmPreparedExportCall Prepared;
+                FString Error;
+                if (!TestTrue(TEXT("Prepare source failure call"), Runtime.PrepareNamedExportCall(TEXT("run"), Prepared, Error)))
+                { AddError(Error); return false; }
+                for (uint32 Iteration = 0; Iteration < 16; ++Iteration)
+                {
+                    FAvidScriptVmCallFrame Frame;
+                    Frame.CellCount = 0;
+                    FAvidScriptVmCallResult Value;
+                    FAvidScriptVmError VmError;
+                    if (!TestTrue(TEXT("Run source failure case"), Prepared.Call(Frame, VmError, &Value)))
+                    { AddError(VmError.Details); return false; }
+                    TestEqual(TEXT("Source failure matches C# result and cleanup ordering"), Value.Cells[0], Case.First + Case.Increment * Iteration);
+                    FHeap* Heap = Runtime.GetManagedHeapForTesting();
+                    if (!TestNotNull(TEXT("Failure domain owns a heap"), Heap)) return false;
+                    TestTrue(TEXT("Collect between failure calls"), Heap->Collect() == EHeapError::Ok);
+                    TestEqual(TEXT("Cached error and source static roots"), Heap->GetStats().StaticRoots, Case.Roots);
+                    TestEqual(TEXT("Only domain roots survive failure calls"), Heap->GetStats().LiveRoots, Case.Roots);
+                    TestEqual(TEXT("Error propagation releases frames"), Heap->GetStats().ActiveFrames, 0u);
+                    TestEqual(TEXT("Retain wrapper, inner errors and published aliases only"), Heap->GetStats().LiveObjects, Case.Objects);
+                }
+                Runtime.Unload();
+                Runtime.Unload();
+                TestNull(TEXT("Unload releases cached source failures"), Runtime.GetManagedHeapForTesting());
+            }
+        }
+    }
+    return true;
+}
 #endif

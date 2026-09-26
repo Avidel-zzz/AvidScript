@@ -29,6 +29,22 @@ internal sealed class CSharpStaticExecutionContext
         Find(context.Document)?.Owns(symbolId) == true
         && context.TryGetGuestType(typeId, out var type) && type.Kind == "managed_ref";
 
+    internal CSharpLanguageErrorTokenCatalog Catalog(IReadOnlyList<SemanticExceptionFlow> flows) =>
+        CSharpThrowProducerLowerer.BuildCatalog(flows, new[] { CSharpStaticInitializationGuards.ExceptionType },
+            Types.Select(type => (type.SourceId, type.Span)));
+
+    internal bool TryCompose(GuestModule module, out GuestModule? guarded, out string? error)
+    {
+        var guardIds = Types.Select(type => CSharpStaticInitializationGuards.FunctionId(type.TypeId)).ToHashSet(StringComparer.Ordinal);
+        var bodies = Types.Select(type => new CSharpStaticInitializer(type.TypeId, CSharpGuestIds.Function(type.BodyId),
+            module.LanguageErrorCatalog!.Sources.Single(site => site.SourceId == type.SourceId
+                && site.Start == type.Span.Start && site.Length == type.Span.Length).Token)).ToArray();
+        return CSharpStaticInitializationGuards.TryCompose(module with
+        {
+            Functions = module.Functions.Where(function => !guardIds.Contains(function.Id)).ToArray(),
+        }, bodies, out guarded, out error);
+    }
+
     internal GuestModule Apply(SemanticDocument document, GuestModule module)
     {
         var types = module.Types.ToDictionary(type => type.Id, StringComparer.Ordinal);

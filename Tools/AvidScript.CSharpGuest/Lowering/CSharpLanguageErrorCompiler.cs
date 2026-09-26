@@ -26,6 +26,11 @@ public static class CSharpLanguageErrorCompiler
             || semantic.Diagnostics.Any(diagnostic => diagnostic.Severity == "error"
                 && diagnostic.Code != "ASCS3001"))
             return Fail("Expected a validated exception-flow artifact without unrelated errors.", out error);
+        var staticContext = CSharpStaticExecutionContext.Find(semantic);
+        if (staticContext is not null)
+            flows = flows.Where(flow => semantic.Callables.Any(callable => callable.MethodSymbolId == flow.MethodSymbolId
+                && callable.GenericTypeParameterIds is { Count: 0 })
+                && (semantic.Reachability is null || semantic.Reachability.ReachableCallableIds.Contains(flow.MethodSymbolId))).ToArray();
         bool hasCatchVariables = flows.Any(flow => flow.Catches.Any(handler =>
             handler.ExceptionVariableSymbolId is not null));
         if (flows.Any(flow => flow.Catches.Any(handler =>
@@ -41,7 +46,7 @@ public static class CSharpLanguageErrorCompiler
                     StringComparer.Ordinal).Any(group => group.Count() != 1))
             return Fail("A catch variable needs a unique System.Exception local symbol.", out error);
         SemanticExceptionFlow[] throwFlows = flows.Where(item => item.Throws.Count > 0).ToArray();
-        if (throwFlows.Length == 0)
+        if (throwFlows.Length == 0 && staticContext is null)
             return Fail("At least one supported throw site is required.", out error);
         // The standalone producer only models an unconditional, argument-free
         // throw. Conditional guards and parameterized methods retain their CFG.
@@ -84,7 +89,7 @@ public static class CSharpLanguageErrorCompiler
         }
         if (throwFlows.Any(item => semantic.Callables.Count(callable =>
                     callable.MethodSymbolId == item.MethodSymbolId
-                    && callable.HasBody && !callable.IsConstructor
+                    && callable.HasBody && (!callable.IsConstructor || staticContext is not null && callable.IsStatic)
                     && (callable.ReturnTypeId is "type:int32" or "type:void"
                         || CSharpReferenceObjects.Types(semantic).Contains(callable.ReturnTypeId))) != 1)
             || !SemanticLanguageErrorEffectPlanner.TryBuild(semantic, out var effects)
@@ -93,7 +98,14 @@ public static class CSharpLanguageErrorCompiler
 
         IReadOnlySet<string> producerIds = producers.Select(item =>
             CSharpGuestIds.Function(item.MethodSymbolId)).ToHashSet(StringComparer.Ordinal);
-        IReadOnlySet<string> affected = effects.OutcomeMethodIds
+        // Static field access is also an error-producing operation. The private
+        // static preparation pass inserts guard calls during ordinary lowering;
+        // source-only direct-call discovery cannot see those calls beforehand.
+        var outcomeMethods = staticContext is null ? effects.OutcomeMethodIds : semantic.Callables
+            .Where(callable => callable.HasBody && callable.GenericTypeParameterIds is { Count: 0 }
+                && (semantic.Reachability is null || semantic.Reachability.ReachableCallableIds.Contains(callable.MethodSymbolId)))
+            .Select(callable => callable.MethodSymbolId).ToArray();
+        IReadOnlySet<string> affected = outcomeMethods
             .Select(CSharpGuestIds.Function).ToHashSet(StringComparer.Ordinal);
         if (producerIds.Any(id => !affected.Contains(id)))
             return Fail("An exception producer is absent from its effect closure.", out error);
@@ -143,7 +155,7 @@ public static class CSharpLanguageErrorCompiler
                     : Array.Empty<CSharpLanguageCleanupRoute>();
             cleanupRoutes.Add(functionId, returnRoutes.Concat(rethrowRoutes).ToArray());
         }
-        CSharpLanguageErrorTokenCatalog tokens = CSharpThrowProducerLowerer.BuildCatalog(flows);
+        CSharpLanguageErrorTokenCatalog tokens = staticContext?.Catalog(flows) ?? CSharpThrowProducerLowerer.BuildCatalog(flows);
         Dictionary<string, int> sourceLengths = new(StringComparer.Ordinal);
         foreach (SemanticExceptionFlow item in flows)
         {
@@ -152,6 +164,13 @@ public static class CSharpLanguageErrorCompiler
                 return Fail("Exception flows disagree on a source unit's length.", out error);
             sourceLengths[item.SourceId] = item.SourceLength;
         }
+        if (staticContext is not null)
+            foreach (var type in staticContext.Types)
+            {
+                if (sourceLengths.TryGetValue(type.SourceId, out int length) && length != type.SourceLength)
+                    return Fail("Static initialization and exception flows disagree on source length.", out error);
+                sourceLengths[type.SourceId] = type.SourceLength;
+            }
         Dictionary<string, IReadOnlyList<CSharpLanguageCatchRoute>> catchRoutes = new(StringComparer.Ordinal);
         foreach (SemanticExceptionFlow handler in handlers)
         {
@@ -231,8 +250,9 @@ public static class CSharpLanguageErrorCompiler
             ordinary = ordinary with
             {
                 Reachability = SemanticReachability.ExpandForExecution(
-                    ordinary, effects.OutcomeMethodIds.ToArray()),
+                    ordinary, outcomeMethods.ToArray()),
             };
+        staticContext?.Attach(ordinary);
         GuestFunction[] substitutes = producerIds.OrderBy(id => id, StringComparer.Ordinal)
             .Select(id => CreateProducerSubstitute(id, semantic.Callables.Single(callable =>
                 CSharpGuestIds.Function(callable.MethodSymbolId) == id).ReturnTypeId)).ToArray();
@@ -266,7 +286,7 @@ public static class CSharpLanguageErrorCompiler
         {
             if (!CSharpThrowProducerLowerer.TryLowerReplacing(semantic, item, outcomes,
                     out CSharpThrowProducerResult? producer, out error,
-                    combinedTaskContract)
+                    combinedTaskContract, tokens)
                 || producer is null)
                 return false;
             loweredProducers.Add(producer.Function.Id, producer.Function);
@@ -291,8 +311,11 @@ public static class CSharpLanguageErrorCompiler
         }
         GuestModule candidate = outcomes with
         {
-            SchemaVersion = combinedTaskContract ? 20 : GuestLanguageErrorCatalog.SchemaVersion,
-            IrVersion = combinedTaskContract ? "1.19" : GuestLanguageErrorCatalog.IrVersion,
+            SchemaVersion = outcomes.StaticStorage is null ? combinedTaskContract ? 20 : GuestLanguageErrorCatalog.SchemaVersion : GuestStaticStorage.SchemaVersion,
+            IrVersion = outcomes.StaticStorage is null ? combinedTaskContract ? "1.19" : GuestLanguageErrorCatalog.IrVersion : GuestStaticStorage.IrVersion,
+            StaticStorage = outcomes.StaticStorage is null ? null : outcomes.StaticStorage with
+            { BaseSchemaVersion = combinedTaskContract ? 20 : GuestLanguageErrorCatalog.SchemaVersion,
+                BaseIrVersion = combinedTaskContract ? "1.19" : GuestLanguageErrorCatalog.IrVersion },
             Provenance = outcomes.Provenance with
             {
                 SemanticSchemaVersion = semantic.SchemaVersion,
@@ -319,6 +342,11 @@ public static class CSharpLanguageErrorCompiler
                         entry.Span.Line, entry.Span.Column,
                         entry.Span.EndLine, entry.Span.EndColumn)).ToArray()),
         };
+        if (staticContext is not null)
+        {
+            if (!staticContext.TryCompose(candidate, out var guarded, out error)) return false;
+            candidate = guarded!;
+        }
         if (!CSharpLanguageErrorEntryAdapter.TryAdd(candidate, affectedExports,
                 originalFunctions, out GuestModule? adapted, out error)
             || adapted is null)

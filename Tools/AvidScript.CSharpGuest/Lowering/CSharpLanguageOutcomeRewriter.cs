@@ -361,37 +361,30 @@ public static class CSharpLanguageOutcomeRewriter
                     }
                     unhandledBlock = testBlock;
                 }
+                // Keep a mutable pending error while unwinding. A failure in a
+                // finally replaces it, skips that region's remaining statements,
+                // and proceeds through the remaining outer cleanup regions.
+                string pendingError = Register(outcomeType);
+                string cleanupEntry = Block();
+                blocks.Add(new GuestBasicBlock(unhandledBlock,
+                    new[] { new GuestInstruction("stack_alloc", pendingError,
+                        Array.Empty<string>(), null, null, null) }
+                        .Concat(CopyError(result, pendingError, Register, int32TypeId, rootTypeId)).ToArray(),
+                    new GuestTerminator("branch", null, cleanupEntry, null, null)));
+                unhandledBlock = cleanupEntry;
                 if (cleanupByBlock.TryGetValue(source.Id, out CSharpLanguageCleanupRoute? cleanupRoute))
                 {
                     foreach (CSharpLanguageCleanupRegion region in cleanupRoute.Regions)
                     {
                         if (!TryCopyCleanupRegion(function.Id, region, sourceBlocks,
-                                affected, registerTypes, Register, Block, unhandledBlock,
+                                affected, functions, outcomeByValueType, registerTypes,
+                                Register, Block, unhandledBlock, pendingError, int32TypeId, rootTypeId,
                                 blocks, out string nextBlock, out error)) return false;
                         unhandledBlock = nextBlock;
                     }
                 }
-                if (calledOutcome != outcomeType)
-                {
-                    string ownError = Register(outcomeType);
-                    string errorType = Register(int32TypeId), sourceId = Register(int32TypeId);
-                    string errorRoot = Register(rootTypeId);
-                    string one = Register(int32TypeId);
-                    blocks.Add(new GuestBasicBlock(unhandledBlock, new GuestInstruction[]
-                    {
-                        new("field_load", errorType, new[] { result }, "field:error_type", null, null),
-                        new("field_load", sourceId, new[] { result }, "field:source", null, null),
-                        new("field_load", errorRoot, new[] { result }, "field:error_root", null, null),
-                        new("stack_alloc", ownError, Array.Empty<string>(), null, null, null),
-                        new("constant", one, Array.Empty<string>(), null, null, new GuestConstant("int32", "1")),
-                        Store(ownError, "status", one),
-                        Store(ownError, "error_type", errorType),
-                        Store(ownError, "source", sourceId),
-                        Store(ownError, "error_root", errorRoot),
-                    }, new GuestTerminator("return", null, null, null, ownError)));
-                }
-                else blocks.Add(new GuestBasicBlock(unhandledBlock,
-                    Array.Empty<GuestInstruction>(), new GuestTerminator("return", null, null, null, result)));
+                blocks.Add(new GuestBasicBlock(unhandledBlock,
+                    Array.Empty<GuestInstruction>(), new GuestTerminator("return", null, null, null, pendingError)));
                 currentId = successBlock;
                 instructions = new();
                 if (instruction.ResultId is { } originalResult)
@@ -424,10 +417,15 @@ public static class CSharpLanguageOutcomeRewriter
         CSharpLanguageCleanupRegion region,
         IReadOnlyDictionary<string, GuestBasicBlock> sourceBlocks,
         IReadOnlySet<string> affected,
+        IReadOnlyDictionary<string, GuestFunction> functions,
+        IReadOnlyDictionary<string, string> outcomeByValueType,
         IReadOnlyDictionary<string, string> registerTypes,
         Func<string, string> register,
         Func<string> block,
         string entryBlockId,
+        string pendingError,
+        string int32TypeId,
+        string rootTypeId,
         List<GuestBasicBlock> output,
         out string nextBlockId,
         out string? error)
@@ -478,10 +476,8 @@ public static class CSharpLanguageOutcomeRewriter
                 _ => false,
             }))
                 return Fail($"Function '{functionId}' has an invalid finally control flow.", out error);
-            if (instructions.Any(item => item.Op == "call_indirect"
-                    || item.Op == "call" && item.TargetId is { } called
-                        && affected.Contains(called)))
-                return Fail($"Function '{functionId}' may throw while executing finally.", out error);
+            if (instructions.Any(item => item.Op == "call_indirect"))
+                return Fail($"Function '{functionId}' has an unresolved finally call.", out error);
             foreach (GuestInstruction item in instructions)
             {
                 if (item.ResultId is not { } oldResult || renamed.ContainsKey(oldResult)) continue;
@@ -518,10 +514,49 @@ public static class CSharpLanguageOutcomeRewriter
                     FalseTargetBlockId = terminator.FalseTargetBlockId is { } falseTarget
                         ? MapTarget(falseTarget) : null,
                 };
-            output.Add(new GuestBasicBlock(copiedBlocks[ids[index]], copied,
-                copiedTerminator));
+            string currentId = copiedBlocks[ids[index]];
+            List<GuestInstruction> instructions = new();
+            foreach (GuestInstruction instruction in copied)
+            {
+                if (instruction.Op != "call" || instruction.TargetId is not { } target
+                    || !affected.Contains(target))
+                {
+                    instructions.Add(instruction);
+                    continue;
+                }
+                string result = register(outcomeByValueType[functions[target].ReturnTypeId]);
+                string status = register(int32TypeId);
+                string failed = block(), succeeded = block();
+                instructions.Add(instruction with { ResultId = result });
+                instructions.Add(new("field_load", status, new[] { result }, "field:status", null, null));
+                output.Add(new(currentId, instructions,
+                    new("branch_if", status, failed, succeeded, null)));
+                output.Add(new(failed, CopyError(result, pendingError, register, int32TypeId, rootTypeId),
+                    new("branch", null, nextBlockId, null, null)));
+                currentId = succeeded;
+                instructions = new();
+                if (instruction.ResultId is { } originalResult)
+                    instructions.Add(new("field_load", originalResult, new[] { result }, "field:value", null, null));
+            }
+            output.Add(new GuestBasicBlock(currentId, instructions, copiedTerminator));
         }
         return true;
+    }
+
+    private static GuestInstruction[] CopyError(string source, string destination,
+        Func<string, string> register, string int32TypeId, string rootTypeId)
+    {
+        string errorType = register(int32TypeId), sourceId = register(int32TypeId);
+        string errorRoot = register(rootTypeId), one = register(int32TypeId);
+        return new GuestInstruction[]
+        {
+            new("field_load", errorType, new[] { source }, "field:error_type", null, null),
+            new("field_load", sourceId, new[] { source }, "field:source", null, null),
+            new("field_load", errorRoot, new[] { source }, "field:error_root", null, null),
+            new("constant", one, Array.Empty<string>(), null, null, new GuestConstant("int32", "1")),
+            Store(destination, "status", one), Store(destination, "error_type", errorType),
+            Store(destination, "source", sourceId), Store(destination, "error_root", errorRoot),
+        };
     }
 
     private static GuestInstruction Store(string owner, string field, string value) =>
