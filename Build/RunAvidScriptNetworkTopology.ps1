@@ -6,7 +6,9 @@ param(
     [string]$EngineRoot = 'C:\UnrealEngine',
     [string]$ProjectPath = '',
     [int]$TimeoutSeconds = 75,
-    [switch]$SkipProfileBuild
+    [switch]$SkipProfileBuild,
+    # Only when the installed binaries already include script_defined_types tests.
+    [switch]$SkipNativeBuild
 )
 
 $ErrorActionPreference = 'Stop'
@@ -85,6 +87,15 @@ function Invoke-ProfileBuild {
         log_path = $LogPath
         log_sha256 = Get-FileSha256 $LogPath
     }
+}
+
+function Build-GeneratedTypeHarness {
+    $LogPath = Join-Path $RunRoot 'generated-native-build.log'
+    $EditorTarget = [IO.Path]::GetFileNameWithoutExtension($ProjectPath) + 'Editor'
+    & (Join-Path $EngineRoot 'Engine/Build/BatchFiles/Build.bat') $EditorTarget Win64 Development `
+        "-Project=$ProjectPath" -AvidScriptGeneratedTestSuite=script_defined_types `
+        -WaitMutex -NoHotReloadFromIDE -NoUBTMakefiles -gather *> $LogPath
+    if ($LASTEXITCODE -ne 0) { throw "Generated network harness build failed: $LogPath" }
 }
 
 function Start-TopologyProcess {
@@ -393,6 +404,9 @@ function Invoke-Topology {
 $ProfileBuild = $null
 $TopologyResults = [System.Collections.Generic.List[object]]::new()
 try {
+    if ($Contract -eq 'GeneratedTypes' -and -not $SkipNativeBuild) {
+        Build-GeneratedTypeHarness
+    }
     if ($Contract -eq 'RuntimeComponent' -and -not $SkipProfileBuild) {
         $ProfileBuild = Invoke-ProfileBuild
     }

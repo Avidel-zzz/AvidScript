@@ -10,6 +10,18 @@
 
 方法体变化可自动热重载；类型、属性、函数、签名或反射 flag 变化需要 no-clean UBT 并重启 Editor。
 
+## 运行仓库测试
+
+生成模块默认只编译项目自己的类型。依赖本示例中 `Projectile` 等类的测试需要在 **UBT 构建时**传入
+`-AvidScriptGeneratedTestSuite=script_defined_types`。其他项目无需传入该参数。
+测试集参数参与 UBT 缓存身份；只在启动 Editor 时传入不能启用尚未编译的测试。
+
+`Build/Contracts/TestGeneratedCSharpEventVersionReload.ps1` 和
+`Build/RunAvidScriptNetworkTopology.ps1 -Contract GeneratedTypes` 会自动构建对应测试集。
+只有确认现有二进制已包含该测试集时，才可传入 `-SkipNativeBuild`。
+
+## 示例行为
+
 例如 `Projectile` 的 `LaunchSpeed` 是新声明的蓝图可读写属性，默认值为 `1200`；调用
 `ConfigureLaunch(900.0f, false, 3)` 后，C# 方法会把它更新为 `900`，`GetLaunchSpeed()`
 可从生成的 UE 函数返回新值。新增这两个反射成员时，构建链会报告

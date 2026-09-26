@@ -1371,6 +1371,35 @@ bool FAvidScriptRuntimeSession::TickHot(
 	return bCompleted;
 }
 
+bool FAvidScriptRuntimeSession::PumpGeneratedContinuations(FAvidScriptWasmSmokeResult& OutResult)
+{
+	if (!GeneratedTypeInstance || !LiveRuntime || bLifecycleInvalidated || bFaultQuarantined
+		|| bApplicationSuspended || IsOperationActive() || IsDebugExecutionSuspended()
+		|| (!Continuations->NeedsTickPump() && !InboundHandlers->NeedsDeferredPump()))
+	{
+		return true;
+	}
+	if (!CanEnterGuest(TEXT("avid_on_continuation_v2"), OutResult))
+	{
+		return false;
+	}
+	bool bSucceeded = true;
+	{
+		TGuardValue<int32> GuestCallGuard(ActiveGuestCallDepth, ActiveGuestCallDepth + 1);
+		if (Continuations->NeedsTickPump())
+		{
+			bSucceeded = PumpReadyContinuations(OutResult);
+		}
+	}
+	const bool bCompleted = bSucceeded && (IsDebugExecutionSuspended()
+		|| !InboundHandlers->NeedsDeferredPump() || InboundHandlers->PumpDeferred(OutResult));
+	if (!bCompleted)
+	{
+		QuarantineFaultedRuntime(OutResult);
+	}
+	return bCompleted;
+}
+
 bool FAvidScriptRuntimeSession::PumpReadyContinuations(
 	FAvidScriptWasmSmokeResult& OutResult)
 {

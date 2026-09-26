@@ -8,6 +8,7 @@
 #include "Session/AvidScriptRuntimeExecutionDomain.h"
 #include "Containers/Ticker.h"
 #include "Dom/JsonObject.h"
+#include "Engine/World.h"
 #include "HAL/FileManager.h"
 #include "Misc/CommandLine.h"
 #include "Misc/FileHelper.h"
@@ -309,6 +310,7 @@ struct FAvidScriptGeneratedTypeRuntimeHost::FImpl
 	FAvidScriptObjectRegistry ObjectRegistry;
 	TMap<FObjectKey, TUniquePtr<FGeneratedTypeRuntimeInstance>> Instances;
 	FDelegateHandle PostGarbageCollectHandle;
+	FDelegateHandle WorldPostActorTickHandle;
 	FTSTicker::FDelegateHandle CollectedSweepTickerHandle;
 #if WITH_DEV_AUTOMATION_TESTS
 	int32 ReloadFailureAfterInstanceCountForTesting = INDEX_NONE;
@@ -434,6 +436,30 @@ bool FAvidScriptGeneratedTypeRuntimeHost::SweepCollectedInstances(float DeltaTim
 
 FAvidScriptGeneratedTypeRuntimeHost::FAvidScriptGeneratedTypeRuntimeHost() = default;
 
+void FAvidScriptGeneratedTypeRuntimeHost::PumpWorldContinuations(UWorld& World)
+{
+	if (!Impl || !Impl->bStarted || Impl->bTeardownPending || World.bIsTearingDown
+		|| !World.IsGameWorld() || !World.HasBegunPlay()) return;
+	FString GuardError;
+	if (!CanMutateInstances(GuardError)) return;
+	// Do not retain a receiver or allocate a per-frame snapshot. Host mutation is
+	// blocked while Guest callbacks run, just as during package transactions.
+	TGuardValue<bool> MutationGuard(Impl->bMutationInProgress, true);
+	for (const auto& Pair : Impl->Instances)
+	{
+		const auto& Instance = Pair.Value;
+		if (!Instance || !Instance->Receiver.IsValid() || !Instance->Session
+			|| Instance->Session->HostContext.World.Get() != &World) continue;
+		FAvidScriptWasmSmokeResult Result;
+		if (!Instance->Session->PumpGeneratedContinuations(Result))
+		{
+			UE_LOG(LogAvidScriptGeneratedTypeRuntimeHost, Warning,
+				TEXT("Generated async dispatch failed: %s"), *Result.ErrorMessage);
+		}
+	}
+	QueueCollectedInstanceSweep();
+}
+
 FAvidScriptGeneratedTypeRuntimeHost::~FAvidScriptGeneratedTypeRuntimeHost()
 {
 	ensureMsgf(!Impl, TEXT("Generated type Runtime host must shut down before static destruction."));
@@ -453,6 +479,11 @@ bool FAvidScriptGeneratedTypeRuntimeHost::Startup()
 	Impl->bStarted = true;
 	Impl->PostGarbageCollectHandle = FCoreUObjectDelegates::GetPostGarbageCollect().AddRaw(
 		this, &FAvidScriptGeneratedTypeRuntimeHost::QueueCollectedInstanceSweep);
+	Impl->WorldPostActorTickHandle = FWorldDelegates::OnWorldPostActorTick.AddLambda(
+		[this](UWorld* World, ELevelTick TickType, float DeltaSeconds)
+		{
+			if (World && TickType == LEVELTICK_All) PumpWorldContinuations(*World);
+		});
 	return true;
 }
 
@@ -485,6 +516,7 @@ void FAvidScriptGeneratedTypeRuntimeHost::Shutdown()
 		return;
 	}
 	FCoreUObjectDelegates::GetPostGarbageCollect().Remove(Impl->PostGarbageCollectHandle);
+	FWorldDelegates::OnWorldPostActorTick.Remove(Impl->WorldPostActorTickHandle);
 	if (Impl->CollectedSweepTickerHandle.IsValid())
 	{
 		FTSTicker::GetCoreTicker().RemoveTicker(Impl->CollectedSweepTickerHandle);

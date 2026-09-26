@@ -6,6 +6,7 @@ struct FAvidScriptRuntimeArtifact;
 class FAvidScriptGeneratedTypeRegistrySnapshot;
 class FAvidScriptRuntimeSession;
 class UObject;
+class UWorld;
 
 enum class EAvidScriptGeneratedTypePackageReloadDisposition : uint8
 {
@@ -73,6 +74,7 @@ private:
 	bool CanMutateInstances(FString& OutError) const;
 	void QueueCollectedInstanceSweep();
 	bool SweepCollectedInstances(float DeltaTime);
+	void PumpWorldContinuations(UWorld& World);
 	bool LoadPackageFromDescriptorFile(
 		const FString& DescriptorPath,
 		TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot>& OutRegistry,

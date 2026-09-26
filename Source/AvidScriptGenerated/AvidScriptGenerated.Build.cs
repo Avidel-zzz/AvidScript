@@ -56,6 +56,25 @@ public class AvidScriptGenerated : ModuleRules
 		bool bHasGeneratedTypes = bHasGeneratedHeader && bHasGeneratedSource;
 		PrivateDefinitions.Add(
 			$"AVIDSCRIPT_WITH_GENERATED_TYPES={(bHasGeneratedTypes ? 1 : 0)}");
+
+		// Fixture tests reference the types installed by their own test runner.
+		// A user's generated module must not require any repository sample class.
+		// UBT includes additional command-line arguments in its makefile identity.
+		// An environment-only switch can silently reuse another fixture's defines.
+		CommandLineArguments Arguments = new CommandLineArguments(Environment.GetCommandLineArgs());
+		string TestSuite = Arguments.GetStringOrDefault("-AvidScriptGeneratedTestSuite=", "none");
+		if (TestSuite != "none" && TestSuite != "script_defined_types" && TestSuite != "shared_task")
+		{
+			throw new BuildException("Unknown -AvidScriptGeneratedTestSuite; expected none, script_defined_types or shared_task.");
+		}
+		if (TestSuite != "none" && !bHasGeneratedTypes)
+		{
+			throw new BuildException("Generated fixture tests require their generated header and source to be installed first.");
+		}
+		PrivateDefinitions.Add(
+			$"AVIDSCRIPT_WITH_GENERATED_SAMPLE_TESTS={(TestSuite == "script_defined_types" ? 1 : 0)}");
+		PrivateDefinitions.Add(
+			$"AVIDSCRIPT_WITH_GENERATED_TASK_TESTS={(TestSuite == "shared_task" ? 1 : 0)}");
 	}
 
 	private void StageGeneratedTypeCookPackage(ReadOnlyTargetRules Target)

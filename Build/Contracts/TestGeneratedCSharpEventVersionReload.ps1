@@ -1,7 +1,9 @@
 param(
     [Parameter(Mandatory = $true)][string]$BindingPackageManifestPath,
     [string]$DotNetPath = (Join-Path $env:USERPROFILE '.dotnet/dotnet.exe'),
-    [string]$EditorCmdPath = 'C:\UnrealEngine\Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
+    [string]$EditorCmdPath = 'C:\UnrealEngine\Engine\Binaries\Win64\UnrealEditor-Cmd.exe',
+    # Only when the installed binaries already include script_defined_types tests.
+    [switch]$SkipNativeBuild
 )
 
 $ErrorActionPreference = 'Stop'
@@ -70,6 +72,13 @@ $PreviousDescriptor = [Environment]::GetEnvironmentVariable(
 $PreviousPieWorld = [Environment]::GetEnvironmentVariable(
     'AVIDSCRIPT_GENERATED_EVENT_TEST_PIE_WORLD', 'Process')
 try {
+    if (-not $SkipNativeBuild) {
+        $NativeBuildScript = [IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $EditorCmdPath) '../../Build/BatchFiles/Build.bat'))
+        $NativeLog = Join-Path $RunRoot 'native-build.log'
+        & $NativeBuildScript AvidTPSTemplateEditor Win64 Development "-Project=$ProjectPath" `
+            -AvidScriptGeneratedTestSuite=script_defined_types -WaitMutex -NoHotReloadFromIDE -NoUBTMakefiles -gather *> $NativeLog
+        if ($LASTEXITCODE -ne 0) { throw "Generated sample test build failed: $NativeLog" }
+    }
     [Environment]::SetEnvironmentVariable(
         'AVIDSCRIPT_GENERATED_EVENT_CANDIDATE_DESCRIPTOR', $DescriptorPath, 'Process')
     foreach ($WorldCase in @(

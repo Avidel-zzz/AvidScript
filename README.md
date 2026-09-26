@@ -104,7 +104,7 @@ public partial class Projectile : AvidActor
 }
 ```
 
-生成并编译这个类型后，蓝图可以继承 `Projectile`、读写 `LaunchSpeed`，或调用 `SetLaunchSpeedNextTick` 在下一帧修改速度。修改类型声明需要重新构建 Editor。
+生成并编译这个类型后，蓝图可以继承 `Projectile`、读写 `LaunchSpeed`，或调用 `SetLaunchSpeedNextTick` 在下一帧修改速度。等待不需要另外实现 `Tick`。修改类型声明需要重新构建 Editor。
 
 <a id="当前边界"></a>
 <a id="已知限制"></a>

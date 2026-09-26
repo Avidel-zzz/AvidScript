@@ -654,6 +654,9 @@ foreach ($RequiredGeneratedAvailabilityContract in @(
     'ConfigureGeneratedTypeCompilation',
     'bHasGeneratedHeader != bHasGeneratedSource',
     'AVIDSCRIPT_WITH_GENERATED_TYPES=',
+    '-AvidScriptGeneratedTestSuite=',
+    'AVIDSCRIPT_WITH_GENERATED_SAMPLE_TESTS=',
+    'AVIDSCRIPT_WITH_GENERATED_TASK_TESTS=',
     'ExternalDependencies.Add(GeneratedHeader)',
     'ExternalDependencies.Add(GeneratedSource)')) {
     if (-not $GeneratedBuild.Contains($RequiredGeneratedAvailabilityContract)) {
@@ -674,6 +677,7 @@ $GeneratedTypeWasmRuntimeHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Pu
 $RuntimeModuleSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptRuntimeModule.cpp'
 $CSharpScriptTypeBuildSource = Read-RequiredFile 'Build/BuildCSharpScriptTypes.ps1'
 $UeTypeGenerationPlannerSource = Read-RequiredFile 'Tools/AvidScript.UeTypeGenerator/Generation/UeTypeGenerationPlanner.cs'
+$UeTypeGenerationInputValidatorSource = Read-RequiredFile 'Tools/AvidScript.UeTypeGenerator/Generation/UeTypeGenerationInputValidator.cs'
 $GeneratedTypeReloadClassificationSource = Read-RequiredFile 'Build/AvidScriptGeneratedTypeReloadClassification.ps1'
 $GeneratedTypeCookPackageSource = Read-RequiredFile 'Build/AvidScriptGeneratedTypeCookPackage.ps1'
 $GeneratedTypeCookPackageContractSource = Read-RequiredFile 'Build/Contracts/TestGeneratedTypeCookPackage.ps1'
@@ -699,8 +703,8 @@ foreach ($GeneratedTypeOptionalTestSource in @(
     $GeneratedTypeRuntimeTestsSource,
     $GeneratedTypeNetworkHarnessSource)) {
     if (-not $GeneratedTypeOptionalTestSource.Contains(
-            '#if WITH_DEV_AUTOMATION_TESTS && AVIDSCRIPT_WITH_GENERATED_TYPES')) {
-        Add-Violation 'project-specific generated type tests must be disabled in a clean checkout'
+            '#if WITH_DEV_AUTOMATION_TESTS && AVIDSCRIPT_WITH_GENERATED_TYPES && AVIDSCRIPT_WITH_GENERATED_SAMPLE_TESTS')) {
+        Add-Violation 'sample-specific generated type tests must be explicitly enabled for their installed fixture'
     }
 }
 foreach ($RequiredGeneratedDispatchContract in @(
@@ -833,11 +837,19 @@ foreach ($RequiredScriptTypeBuildContract in @(
         Add-Violation "C# script type build pipeline is missing $RequiredScriptTypeBuildContract"
     }
 }
+Test-RequiredTokenSequence -Source $UeTypeGenerationPlannerSource -Tokens @(
+    'UeTypeGenerationInputValidator.Validate(document, allowBoundedLanguageErrors)',
+    'SemanticUeTypeContractValidator.TryValidate(document',
+    'SemanticUeMethodCatalogValidator.IsValid(document)') -Description 'UE type generator input validation'
 foreach ($RequiredUeGeneratorVersionContract in @(
-    'document.SchemaVersion != SemanticContract.CurrentSchemaVersion',
-    'document.SemanticVersion != SemanticContract.CurrentSemanticVersion')) {
-    if (-not $UeTypeGenerationPlannerSource.Contains($RequiredUeGeneratorVersionContract)) {
-        Add-Violation "UE type generator must validate the current Semantic contract: $RequiredUeGeneratorVersionContract"
+    'document.SchemaVersion == SemanticContract.ExceptionFlowSchemaVersion',
+    'document.SemanticVersion == SemanticContract.ExceptionFlowSemanticVersion',
+    '!legacyException && !SemanticContract.IsCurrentOrPrevious(document.SchemaVersion, document.SemanticVersion)',
+    '!SemanticExceptionFlowContractValidator.IsValid(document)',
+    '!SemanticAsyncInvocationValidator.IsValid(document)',
+    'throw new InvalidOperationException')) {
+    if (-not $UeTypeGenerationInputValidatorSource.Contains($RequiredUeGeneratorVersionContract)) {
+        Add-Violation "UE type generator must validate supported Semantic contracts: $RequiredUeGeneratorVersionContract"
     }
 }
 foreach ($RequiredGeneratedFunctionDefaultContract in @(

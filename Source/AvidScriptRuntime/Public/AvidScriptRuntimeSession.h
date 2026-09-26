@@ -301,6 +301,8 @@ private:
 		FString& OutError) const;
 	void SetRuntimeBaseContext(FAvidScriptWasmRuntimeInstance& Runtime, const FAvidScriptWasmHostContext& Context) const;
 	bool PumpReadyContinuations(FAvidScriptWasmSmokeResult& OutResult);
+	// Host-owned World scheduling for generated instances; does not synthesize a script Tick.
+	bool PumpGeneratedContinuations(FAvidScriptWasmSmokeResult& OutResult);
 	bool CanEnterGuest(
 		FStringView ExportName,
 		FAvidScriptWasmSmokeResult& OutResult,
