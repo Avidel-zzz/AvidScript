@@ -5,14 +5,19 @@ using System.Text.Json;
 using AvidScript.CSharpFrontend;
 using AvidScript.CSharpGuest;
 using AvidScript.CSharpSemantic;
+using AvidScript.GuestIr;
+using AvidScript.WasmBackend;
 
 internal static class CSharpGuestAsyncSynchronousExceptionTests
 {
     public static int Run()
     {
         const string source = """
-            using System; using System.Threading.Tasks;
+            using System; using System.Threading.Tasks; using System.Runtime.InteropServices;
             public static class Script {
+                public static int Result;
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay() { Result = await Run(1); }
                 public static int Read(int mode) { if (mode == 0) throw new ArgumentException(); return 7; }
                 public static async Task<int> Run(int mode) { return Read(mode); }
             }
@@ -20,7 +25,8 @@ internal static class CSharpGuestAsyncSynchronousExceptionTests
         const string sourceId = "Scripts/SynchronousExceptionPublication.cs";
         string hash = FrontendAnalyzer.Analyze(source, sourceId).Source.Sha256;
         var document = SemanticAnalyzer.Analyze(source, sourceId, hash,
-            Array.Empty<SemanticReferenceSource>(), new SemanticCompilerWorkspace(),
+            new[] { new SemanticReferenceSource(CSharpGuestContinuationTests.ReferenceFacade,
+                "generated://AvidScript.Continuations.generated.cs", true) }, new SemanticCompilerWorkspace(),
             enableAsyncExceptionFlow: true, enableAsyncCancellationFlow: true,
             enableAsyncSynchronousExceptions: true);
         int count = 0;
@@ -47,8 +53,18 @@ internal static class CSharpGuestAsyncSynchronousExceptionTests
             Check(!result.Succeeded && result.Module is null && result.Diagnostics.Any(item => item.Code == "ASCG1026"),
                 "Unintegrated or disguised routes must never publish a Guest module");
         }
+        string compiledHash = Convert.ToHexString(SHA256.HashData(SemanticSerializer.Serialize(document))).ToLowerInvariant();
+        Check(CSharpLanguageErrorCompiler.TryLower(document, compiledHash, out var compiled, out string? compileError)
+            && compiled is not null, "Source synchronous-to-Task composition failed: " + compileError);
+        Check(compiled!.Module.SchemaVersion == 29 && compiled.Module.IrVersion == "1.28"
+            && compiled.Module.Provenance.SemanticSchemaVersion == 50
+            && compiled.Module.AsyncSynchronousExceptions is { Sites.Count: > 0 }
+            && GuestModuleValidator.Validate(compiled.Module).Succeeded,
+            "Source composition must retain its own IR and Semantic provenance with checked transfer sites");
+        var wasm = WasmModuleCompiler.Compile(compiled.Module);
+        Check(wasm.Succeeded, "Source synchronous exception WASM: " + string.Join(" | ", wasm.Diagnostics.Select(item => item.Message)));
         CheckSharedCatalog(Check);
-        return count;
+        return count + CSharpGuestAsyncSynchronousExecutionTests.Run();
     }
 
     private static void CheckSharedCatalog(Action<bool, string> check)

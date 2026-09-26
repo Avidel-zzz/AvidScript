@@ -106,26 +106,30 @@ internal static class CSharpTaskLocalLifetimes
             {
                 if (!Bridge(segment.Ordinal, target, source, false)) return false;
             }
+            if (segment.SynchronousExceptionTarget is int failure
+                && !Bridge(segment.Ordinal, failure, source, false, synchronousFailure: true)) return false;
         }
         if (incomingSegment is { } incoming)
             foreach (int target in SemanticAsyncScopeValidator.Targets(method.Segments[incoming].Transfer!).Distinct())
                 if (!Bridge(incoming, target, entryPrefix, true)) return false;
         return true;
 
-        bool Bridge(int sourceOrdinal, int targetOrdinal, string prefix, bool resumed)
+        bool Bridge(int sourceOrdinal, int targetOrdinal, string prefix, bool resumed, bool synchronousFailure = false)
         {
-            if (!flow!.States.ReleasedOnEdge.TryGetValue(new(sourceOrdinal, targetOrdinal), out var owners)) return false;
+            var released = synchronousFailure ? flow!.States.ReleasedOnSynchronousException : flow!.States.ReleasedOnEdge;
+            if (!released.TryGetValue(new(sourceOrdinal, targetOrdinal), out var owners)) return false;
             if (owners.Count == 0) return true;
             string target = CSharpGuestIds.AsyncSegmentBlock(method.MethodSymbolId, targetOrdinal);
             bool HasPrefix(string id, string parent) => id == parent || id.StartsWith(parent + ":", StringComparison.Ordinal);
             int[] predecessors = Enumerable.Range(0, blocks.Count).Where(index =>
                 HasPrefix(blocks[index].Id, prefix) && (resumed || !HasPrefix(blocks[index].Id, entryPrefix))
+                && (CSharpAsyncSynchronousExecutionContext.Find(context.Document)?.FailurePublishBlocks.Contains(blocks[index].Id) == true) == synchronousFailure
                 && (blocks[index].Terminator.TargetBlockId == target || blocks[index].Terminator.FalseTargetBlockId == target)).ToArray();
             // Direct awaits have no synchronous successor; their callback entry
             // below carries this edge. Other reachable edges must be present.
             if (predecessors.Length == 0) return !resumed
                 && method.Segments[sourceOrdinal].Transfer!.Kind == SemanticAsyncMethod.AwaitTransferKind;
-            string bridge = prefix + ":$task:exit:" + targetOrdinal;
+            string bridge = prefix + ":$task:exit:" + (synchronousFailure ? "synchronous:" : "") + targetOrdinal;
             List<GuestInstruction> instructions = new();
             foreach (string owner in owners)
                 if (!ReleaseAndClear(context, method, owner, sourceOrdinal, instructions)) return false;

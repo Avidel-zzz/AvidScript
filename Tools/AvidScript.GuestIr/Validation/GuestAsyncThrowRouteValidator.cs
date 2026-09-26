@@ -27,9 +27,10 @@ public static class GuestAsyncThrowRouteValidator
                 context.Add("ASIR1034", "Routed throws require paired Semantic 46/1.55 and IR 26/1.25.");
             return;
         }
-        if (module.Language != "csharp" || module.Provenance.SemanticSchemaVersion != SemanticSchemaVersion
-            || module.Provenance.SemanticVersion != SemanticVersion
-            || module.TaskLocalLifetimes?.ExceptionModel != "cancellation" || raises.Length == 0
+        bool synchronous = GuestAsyncSynchronousExceptions.HasSourceContract(module);
+        if (module.Language != "csharp" || module.Provenance.SemanticSchemaVersion != GuestTaskLocalLifetimeValidator.ExpectedSemanticSchema(module)
+            || module.Provenance.SemanticVersion != GuestTaskLocalLifetimeValidator.ExpectedSemanticVersion(module)
+            || module.TaskLocalLifetimes?.ExceptionModel != "cancellation" || !synchronous && raises.Length == 0
             || raises.Any(item => item.Kind != "raise_exception" || item.Raise is not { } route
                 || module.LanguageErrorCatalog?.Types.Any(type => type.Token == route.TypeToken) != true
                 || module.LanguageErrorCatalog?.Sources.Any(source => source.Token == route.SourceToken) != true))

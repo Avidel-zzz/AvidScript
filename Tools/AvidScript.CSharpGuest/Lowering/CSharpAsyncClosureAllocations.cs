@@ -29,7 +29,7 @@ internal static class CSharpAsyncClosureAllocations
         {
             string source = CSharpGuestIds.AsyncSegmentBlock(method.MethodSymbolId, segment.Ordinal);
             if (!blocks.Any(block => block.Id == source)) continue; // Different continuation entry's region.
-            foreach (int targetOrdinal in SemanticAsyncScopeValidator.Targets(segment.Transfer!).Distinct())
+            foreach (int targetOrdinal in SemanticAsyncScopeValidator.Successors(segment).Distinct())
             {
                 List<GuestInstruction> instructions = new();
                 Transition(context, method, segment.Ordinal, targetOrdinal, instructions);

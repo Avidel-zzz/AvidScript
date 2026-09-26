@@ -331,6 +331,19 @@ bool FAvidScriptLanguageErrorCatalogRuntimeTest::RunTest(const FString& Paramete
 	}
 	const FString StaticJson = Json(Document(27));
 	const FString TransferJson = Json(Document(28));
+	const FString SynchronousAsyncJson = Json(Document(29));
+	TestTrue(TEXT("IR 29 source exceptions use the exact routed cancellation profile"),
+		FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+			Module(&SynchronousAsyncJson, true, false, 29, TEXT("cancellation"), 26), ModuleId, Catalog, Error));
+	TestTrue(TEXT("IR 29 preserves fault and cancellation capabilities"),
+		Catalog && Catalog->SupportsTaskLanguageErrorFault() && Catalog->SupportsTaskCancellationError());
+	auto SynchronousAsyncEmpty = Document(29);
+	SynchronousAsyncEmpty->SetArrayField(TEXT("types"), {});
+	SynchronousAsyncEmpty->SetArrayField(TEXT("sources"), {});
+	const FString SynchronousAsyncEmptyJson = Json(SynchronousAsyncEmpty);
+	TestTrue(TEXT("IR 29 accepts a validated source profile without throw sites"),
+		FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+			Module(&SynchronousAsyncEmptyJson, true, false, 29, TEXT("cancellation"), 26), ModuleId, Catalog, Error));
 	for (const int32 Base : {20, 21, 22, 23, 24, 25, 26})
 	{
 		TestTrue(TEXT("IR 28 retains the selected Task error execution profile"),
@@ -394,6 +407,21 @@ bool FAvidScriptLanguageErrorCatalogRuntimeTest::RunTest(const FString& Paramete
 	}
 
 	TArray<TPair<FString, TArray<uint8>>> Invalid;
+	Invalid.Emplace(TEXT("IR 29 requires its execution profile"), Module(&SynchronousAsyncJson, true, false, 29));
+	Invalid.Emplace(TEXT("IR 29 requires its catalog"), Module(nullptr, true, false, 29, TEXT("cancellation"), 26));
+	Invalid.Emplace(TEXT("IR 29 cannot load an older catalog"), Module(&RoutedThrowJson, true, false, 29, TEXT("cancellation"), 26));
+	Invalid.Emplace(TEXT("IR 29 cannot disguise a new catalog as IR 26"), Module(&SynchronousAsyncJson, true, false, 26));
+	for (const int32 Base : {17, 20, 21, 22, 23, 24, 25, 27, 28, 29, 30})
+		Invalid.Emplace(TEXT("IR 29 base must be exactly IR 26"), Module(&SynchronousAsyncJson, true, false, 29, TEXT("cancellation"), Base));
+	for (const TCHAR* Model : {TEXT("none"), TEXT("fault"), TEXT("exception"), TEXT("cleanup"), TEXT("cleanup_only"), TEXT("unknown")})
+		Invalid.Emplace(TEXT("IR 29 requires cancellation ownership"), Module(&SynchronousAsyncJson, true, false, 29, Model, 26));
+	for (const FString& Metadata : {Provenance(29, TEXT("cancellation"), 26).Replace(TEXT("guest_ir_base=26/1.25"), TEXT("guest_ir_base=26/1.24")),
+		Provenance(29, TEXT("cancellation"), 26).Replace(TEXT("guest_ir=29/1.28"), TEXT("guest_ir=29/1.27"))})
+	{
+		TArray<uint8> MismatchedSource = Module(&SynchronousAsyncJson, false);
+		Custom(MismatchedSource, "avidscript.provenance", Metadata);
+		Invalid.Emplace(TEXT("IR 29 outer and base version pairs must be exact"), MoveTemp(MismatchedSource));
+	}
 	Invalid.Emplace(TEXT("transfer profile requires base metadata"), Module(&TransferJson, true, false, 28));
 	for (const int32 Base : {19, 27, 28, 29})
 		Invalid.Emplace(TEXT("transfer base must be an existing Task error profile"), Module(&TransferJson, true, false, 28, TEXT("cancellation"), Base));

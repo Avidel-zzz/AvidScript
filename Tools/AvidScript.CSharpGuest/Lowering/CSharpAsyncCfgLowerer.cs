@@ -432,6 +432,7 @@ internal static class CSharpAsyncCfgLowerer
             return false;
         }
         if (!context.ShortCircuitFlow.Rewrite(context, blocks)
+            || !CSharpAsyncSynchronousExceptionLowerer.Rewrite(context, method, entry.FunctionId, blocks)
             || !CSharpAsyncClosureAllocations.InsertEdges(context, method, blocks)
             || !CSharpTaskLocalLifetimes.InsertEdges(context, method, blocks, incomingSegment, functionEntryBlockId))
         {
@@ -612,6 +613,13 @@ internal static class CSharpAsyncCfgLowerer
             }
 
             case SemanticAsyncMethod.ReturnTransferKind:
+                GuestRegister? evaluatedReturn = null;
+                if (CSharpAsyncSynchronousExecutionContext.Find(context.Document) is not null && method.TaskResultTypeId is not null)
+                {
+                    if (transfer.Condition is null) return false;
+                    evaluatedReturn = CSharpOperationLowerer.LowerValue(context, transfer.Condition, segment.Ordinal, instructions);
+                    if (evaluatedReturn is null) return false;
+                }
                 if (!CSharpAsyncExceptionLowerer.ReleaseIfHeld(context, method,
                         segment.Ordinal, blocks, ref activeBlockId,
                         ref instructions)) return false;
@@ -619,7 +627,7 @@ internal static class CSharpAsyncCfgLowerer
                 if (method.TaskResultTypeId is not null)
                 {
                     if (abi.TaskResultImportId is null || transfer.Condition is null) return false;
-                    GuestRegister? value = CSharpOperationLowerer.LowerValue(
+                    GuestRegister? value = evaluatedReturn ?? CSharpOperationLowerer.LowerValue(
                         context, transfer.Condition, segment.Ordinal, instructions);
                     GuestRegister? task = CSharpTaskResultAbi.LoadProducerToken(
                         context, method, segment.Ordinal, instructions);
@@ -1070,6 +1078,7 @@ internal static class CSharpAsyncCfgLowerer
                 if (segment.Transfer.CancellationTarget is int cancellationTarget)
                     pending.Push(cancellationTarget);
             }
+            if (segment.SynchronousExceptionTarget is int synchronousTarget) pending.Push(synchronousTarget);
         }
         return reachable.Select(ordinal => segments[ordinal]).ToArray();
     }

@@ -24,7 +24,8 @@ public static class CSharpLanguageErrorCompiler
         if (semantic is null || semantic.ExceptionFlows is not { Count: > 0 } flows
             || !SemanticExceptionFlowContractValidator.IsValid(semantic)
             || semantic.Diagnostics.Any(diagnostic => diagnostic.Severity == "error"
-                && diagnostic.Code != "ASCS3001"))
+                && diagnostic.Code != "ASCS3001"
+                && !(SemanticContract.HasAsyncSynchronousExceptions(semantic) && diagnostic.Code == "ASCS5422")))
             return Fail("Expected a validated exception-flow artifact without unrelated errors.", out error);
         var staticContext = CSharpStaticExecutionContext.Find(semantic);
         if (staticContext is not null)
@@ -111,6 +112,10 @@ public static class CSharpLanguageErrorCompiler
             return Fail("An exception producer is absent from its effect closure.", out error);
         bool combinedTaskContract = semantic.SchemaVersion == SemanticContract.TaskLanguageErrorSchemaVersion
             && semantic.SemanticVersion == SemanticContract.TaskLanguageErrorSemanticVersion;
+        bool synchronousAsync = SemanticContract.HasAsyncSynchronousExceptions(semantic);
+        CSharpAsyncSynchronousExecutionContext? asyncContext = null;
+        if (synchronousAsync && !CSharpAsyncSynchronousExecutionContext.TryCreate(semantic, effects, out asyncContext))
+            return Fail("The synchronous/async composition requires validated source routes and a disjoint effect boundary.", out error);
         if (combinedTaskContract && semantic.AsyncMethods.Any(method =>
             effects.OutcomeMethodIds.Contains(method.MethodSymbolId)))
             return Fail("An async Task method cannot enter the synchronous language-error effect closure.", out error);
@@ -221,16 +226,16 @@ public static class CSharpLanguageErrorCompiler
         }
         SemanticDocument ordinary = semantic with
         {
-            SchemaVersion = combinedTaskContract ? OrdinaryTaskSchema(semantic)
+            SchemaVersion = synchronousAsync ? semantic.SchemaVersion : combinedTaskContract ? OrdinaryTaskSchema(semantic)
                 : SemanticContract.CurrentSchemaVersion,
-            SemanticVersion = combinedTaskContract ? OrdinaryTaskVersion(semantic)
+            SemanticVersion = synchronousAsync ? semantic.SemanticVersion : combinedTaskContract ? OrdinaryTaskVersion(semantic)
                 : SemanticContract.CurrentSemanticVersion,
             Succeeded = true,
             ExceptionFlows = null,
             ControlFlowGraphs = semantic.ControlFlowGraphs.Concat(handlerGraphs)
                 .OrderBy(graph => graph.MethodSymbolId, StringComparer.Ordinal).ToArray(),
             Diagnostics = semantic.Diagnostics.Where(diagnostic =>
-                diagnostic.Code != "ASCS3001").ToArray(),
+                diagnostic.Code != "ASCS3001" && !(synchronousAsync && diagnostic.Code == "ASCS5422")).ToArray(),
         };
         if (handlers.Length != 0
             && ordinary.Reachability?.Mode != "all_callables_compatibility")
@@ -240,11 +245,12 @@ public static class CSharpLanguageErrorCompiler
                     ordinary, outcomeMethods.ToArray()),
             };
         staticContext?.Attach(ordinary);
+        asyncContext?.Attach(ordinary);
         GuestFunction[] substitutes = producerIds.OrderBy(id => id, StringComparer.Ordinal)
             .Select(id => CreateProducerSubstitute(id, semantic.Callables.Single(callable =>
                 CSharpGuestIds.Function(callable.MethodSymbolId) == id).ReturnTypeId)).ToArray();
         CSharpGuestLoweringResult lowered = CSharpGuestLowerer.LowerWithFunctionSubstitutes(
-            ordinary, semanticSha256, substitutes, hasCatchVariables);
+            ordinary, semanticSha256, substitutes, hasCatchVariables, synchronousAsync);
         if (!lowered.Succeeded || lowered.Module is null)
             return Fail("The ordinary methods could not be lowered: "
                 + string.Join(" | ", lowered.Diagnostics.Select(diagnostic => diagnostic.Message)), out error);
@@ -258,7 +264,7 @@ public static class CSharpLanguageErrorCompiler
         };
         if (!CSharpLanguageOutcomeRewriter.TryRewriteWithHandlers(ordinary, internalModule,
                 affected, producerIds, catchRoutes, cleanupRoutes,
-                out GuestModule? outcomes, out error, combinedTaskContract)
+                out GuestModule? outcomes, out error, combinedTaskContract || synchronousAsync)
             || outcomes is null)
             return false;
         if (hasCatchVariables)
@@ -273,7 +279,7 @@ public static class CSharpLanguageErrorCompiler
         {
             if (!CSharpThrowProducerLowerer.TryLowerReplacing(semantic, item, outcomes,
                     out CSharpThrowProducerResult? producer, out error,
-                    combinedTaskContract, tokens)
+                    combinedTaskContract || synchronousAsync, tokens)
                 || producer is null)
                 return false;
             loweredProducers.Add(producer.Function.Id, producer.Function);
@@ -298,8 +304,10 @@ public static class CSharpLanguageErrorCompiler
         }
         GuestModule candidate = outcomes with
         {
-            SchemaVersion = outcomes.StaticStorage is null ? combinedTaskContract ? 20 : GuestLanguageErrorCatalog.SchemaVersion : GuestStaticStorage.SchemaVersion,
-            IrVersion = outcomes.StaticStorage is null ? combinedTaskContract ? "1.19" : GuestLanguageErrorCatalog.IrVersion : GuestStaticStorage.IrVersion,
+            SchemaVersion = synchronousAsync ? GuestAsyncSynchronousExceptions.SchemaVersion
+                : outcomes.StaticStorage is null ? combinedTaskContract ? 20 : GuestLanguageErrorCatalog.SchemaVersion : GuestStaticStorage.SchemaVersion,
+            IrVersion = synchronousAsync ? GuestAsyncSynchronousExceptions.IrVersion
+                : outcomes.StaticStorage is null ? combinedTaskContract ? "1.19" : GuestLanguageErrorCatalog.IrVersion : GuestStaticStorage.IrVersion,
             StaticStorage = outcomes.StaticStorage is null ? null : outcomes.StaticStorage with
             { BaseSchemaVersion = combinedTaskContract ? 20 : GuestLanguageErrorCatalog.SchemaVersion,
                 BaseIrVersion = combinedTaskContract ? "1.19" : GuestLanguageErrorCatalog.IrVersion },

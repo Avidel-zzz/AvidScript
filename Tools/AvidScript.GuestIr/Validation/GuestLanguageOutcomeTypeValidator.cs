@@ -22,6 +22,7 @@ internal static class GuestLanguageOutcomeTypeValidator
         }
 
         bool validVersion = GuestTaskErrorTransfers.IsVersion(context.Artifact)
+            || GuestAsyncSynchronousExceptions.IsVersion(context.Artifact)
             || (context.Module.SchemaVersion == SchemaVersion && context.Module.IrVersion == IrVersion)
             || (context.Module.SchemaVersion == GuestLanguageOutcomeFlowValidator.SchemaVersion
                 && context.Module.IrVersion == GuestLanguageOutcomeFlowValidator.IrVersion)

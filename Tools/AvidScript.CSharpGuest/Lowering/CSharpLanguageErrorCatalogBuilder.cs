@@ -15,7 +15,8 @@ internal static class CSharpLanguageErrorCatalogBuilder
         Build(document, flows, SemanticContract.HasAsyncSynchronousExceptions(document));
 
     internal static CSharpLanguageErrorTokenCatalog ForAsync(SemanticDocument document) =>
-        Build(document, SemanticContract.HasAsyncSynchronousExceptions(document)
+        CSharpAsyncSynchronousExecutionContext.Find(document)?.Catalog
+        ?? Build(document, SemanticContract.HasAsyncSynchronousExceptions(document)
             ? document.ExceptionFlows ?? Array.Empty<SemanticExceptionFlow>()
             : Array.Empty<SemanticExceptionFlow>(), includeAsync: true);
 

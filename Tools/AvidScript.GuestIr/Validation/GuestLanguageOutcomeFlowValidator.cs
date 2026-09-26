@@ -19,6 +19,7 @@ internal static class GuestLanguageOutcomeFlowValidator
         HashSet<string> outcomeTypes = declarations.Select(item => item.TypeId)
             .ToHashSet(StringComparer.Ordinal);
         bool flowVersion = GuestTaskErrorTransfers.IsVersion(context.Artifact)
+            || GuestAsyncSynchronousExceptions.IsVersion(context.Artifact)
             || context.Module.SchemaVersion == SchemaVersion
                 && context.Module.IrVersion == IrVersion
             || context.Module.SchemaVersion == GuestLanguageErrorCatalogValidator.SchemaVersion
@@ -121,8 +122,10 @@ internal static class GuestLanguageOutcomeFlowValidator
         string resultId,
         GuestType outcome)
     {
-        HashSet<string> errorReach = Reachable(blocks, callBlock.Terminator.TargetBlockId!);
-        HashSet<string> successReach = Reachable(blocks, callBlock.Terminator.FalseTargetBlockId!);
+        // Returning to the producer executes a new call and replaces this
+        // outcome. Its next iteration is qualified by a new status check.
+        HashSet<string> errorReach = Reachable(blocks, callBlock.Terminator.TargetBlockId!, callBlock.Id);
+        HashSet<string> successReach = Reachable(blocks, callBlock.Terminator.FalseTargetBlockId!, callBlock.Id);
         for (int blockIndex = 0; blockIndex < function.Blocks.Count; ++blockIndex)
         {
             GuestBasicBlock block = function.Blocks[blockIndex];
@@ -149,14 +152,14 @@ internal static class GuestLanguageOutcomeFlowValidator
 
     private static HashSet<string> Reachable(
         IReadOnlyDictionary<string, GuestBasicBlock> blocks,
-        string start)
+        string start, string producer)
     {
         HashSet<string> visited = new(StringComparer.Ordinal);
         Stack<string> pending = new();
         pending.Push(start);
         while (pending.TryPop(out string? id))
         {
-            if (!visited.Add(id) || !blocks.TryGetValue(id, out GuestBasicBlock? block)) continue;
+            if (id == producer || !visited.Add(id) || !blocks.TryGetValue(id, out GuestBasicBlock? block)) continue;
             if (block.Terminator.Kind is "branch" or "branch_if"
                 && block.Terminator.TargetBlockId is { } target) pending.Push(target);
             if (block.Terminator.Kind == "branch_if"

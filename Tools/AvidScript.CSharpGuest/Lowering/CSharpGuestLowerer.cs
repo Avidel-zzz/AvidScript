@@ -22,10 +22,11 @@ public static class CSharpGuestLowerer
         SemanticDocument document,
         string semanticSha256,
         IReadOnlyList<GuestFunction> substitutes,
-        bool includeLanguageExceptionReference = false) =>
+        bool includeLanguageExceptionReference = false,
+        bool enableAsyncLanguageErrors = false) =>
         LowerCore(document, semanticSha256, enableDataLaneFusion: true,
             enableDebugInstrumentation: false, substitutes,
-            includeLanguageExceptionReference, enableAsyncLanguageErrors: false);
+            includeLanguageExceptionReference, enableAsyncLanguageErrors);
 
     private static CSharpGuestLoweringResult LowerCore(
         SemanticDocument document,
@@ -40,10 +41,11 @@ public static class CSharpGuestLowerer
         ArgumentNullException.ThrowIfNull(semanticSha256);
         ArgumentNullException.ThrowIfNull(substitutes);
 
-        if (document.SchemaVersion == SemanticContract.AsyncSynchronousExceptionSchemaVersion
+        var synchronousAsync = CSharpAsyncSynchronousExecutionContext.Find(document);
+        if (synchronousAsync is null && (document.SchemaVersion == SemanticContract.AsyncSynchronousExceptionSchemaVersion
             || document.SemanticVersion == SemanticContract.AsyncSynchronousExceptionSemanticVersion
             || document.AsyncMethods?.Any(method => method?.Segments?.Any(segment =>
-                segment?.SynchronousExceptionTarget is not null) == true) == true)
+                segment?.SynchronousExceptionTarget is not null) == true) == true))
             return Failure(new[] { new GuestDiagnostic("ASCG1026", "error",
                 "Synchronous async exception routes require integrated outcome lowering before Guest publication.", null) });
 
@@ -67,7 +69,7 @@ public static class CSharpGuestLowerer
                 && document.SemanticVersion == SemanticContract.AsyncExceptionFlowSemanticVersion
                 || directCleanup || cancellationFlow
                 || taskLifetimes && document.AsyncMethods.Any(method => method?.ExceptionPlan is not null));
-        bool asyncLanguageErrors = enableAsyncLanguageErrors && (
+        bool asyncLanguageErrors = enableAsyncLanguageErrors && (synchronousAsync is not null ||
             asyncExceptionFlow && (!directCleanup || document.AsyncMethods.Any(method =>
                 method.ErrorPlan is not null || method.Segments.Any(segment =>
                     segment.AwaitSite?.ProducerKind is "task_call" or "task_local")))
@@ -86,12 +88,13 @@ public static class CSharpGuestLowerer
             return Failure(diagnostics);
         }
 
-        GuestLanguageErrorCatalog? asyncCatalog = null;
-        if (asyncLanguageErrors && !CSharpLanguageErrorCatalogBuilder.TryToGuest(document,
+        GuestLanguageErrorCatalog? asyncCatalog = synchronousAsync?.GuestCatalog;
+        if (asyncLanguageErrors && asyncCatalog is null && !CSharpLanguageErrorCatalogBuilder.TryToGuest(document,
                 CSharpAsyncLanguageErrorCatalog.Build(document), out asyncCatalog, out string? catalogError))
             return Failure(new[] { new GuestDiagnostic("ASCG1004", "error", catalogError!, null) });
 
         document = CSharpUeDispatch.ExpandReachability(document);
+        synchronousAsync?.Attach(document);
         CSharpTypeLoweringResult typeResult = CSharpTypeLowerer.Lower(document);
         if (!typeResult.Succeeded)
         {
@@ -132,6 +135,14 @@ public static class CSharpGuestLowerer
                 moduleTypes = moduleTypes.Append(new GuestType(
                     "type:object", "managed_ref", "i64",
                     Array.Empty<GuestField>(), null, null, 8, 8)).ToArray();
+        }
+        if (synchronousAsync is not null)
+        {
+            var outcomeTypes = GuestDataLayout.ComputeTypes(moduleTypes.Concat(synchronousAsync.OutcomeValues.Values
+                .Distinct(StringComparer.Ordinal).OrderBy(id => id, StringComparer.Ordinal)
+                .Select(CSharpLanguageOutcomeTypes.Create)).ToArray());
+            if (!outcomeTypes.Succeeded) return Failure(outcomeTypes.Diagnostics);
+            moduleTypes = outcomeTypes.Types;
         }
         Dictionary<string, GuestType> guestTypes = moduleTypes.ToDictionary(
             type => type.Id, StringComparer.Ordinal);
@@ -339,7 +350,8 @@ public static class CSharpGuestLowerer
         }
 
         GuestModule module = new(
-            SemanticContract.HasAsyncThrowRouting(document) ? GuestAsyncThrowRouteValidator.SchemaVersion
+            synchronousAsync is not null ? GuestAsyncSynchronousExceptions.SchemaVersion
+                : SemanticContract.HasAsyncThrowRouting(document) ? GuestAsyncThrowRouteValidator.SchemaVersion
                 : taskLifetimes ? GuestTaskLocalLifetimeValidator.SchemaVersion
                 : cancellationFlow ? GuestTaskCancellationErrorValidator.SchemaVersion
                 : directCleanup ? GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion
@@ -351,7 +363,8 @@ public static class CSharpGuestLowerer
                 or SemanticContract.TaskAliasSchemaVersion
                 ? 19 : CSharpTaskResultAbi.Supports(document)
                     ? 18 : GuestModuleValidator.CurrentSchemaVersion,
-            SemanticContract.HasAsyncThrowRouting(document) ? GuestAsyncThrowRouteValidator.IrVersion
+            synchronousAsync is not null ? GuestAsyncSynchronousExceptions.IrVersion
+                : SemanticContract.HasAsyncThrowRouting(document) ? GuestAsyncThrowRouteValidator.IrVersion
                 : taskLifetimes ? GuestTaskLocalLifetimeValidator.IrVersion
                 : cancellationFlow ? GuestTaskCancellationErrorValidator.IrVersion
                 : directCleanup ? GuestTaskLanguageErrorValidator.DirectCleanupIrVersion
@@ -382,6 +395,7 @@ public static class CSharpGuestLowerer
             exports,
             Array.Empty<GuestDiagnostic>())
         {
+            AsyncSynchronousExceptions = synchronousAsync?.Plan(),
             TaskLocalLifetimes = taskLifetimes ? CSharpTaskLocalLifetimes.BuildPlan(document, functions,
                 cancellationFlow ? "cancellation" : directCleanup ? (asyncLanguageErrors ? "cleanup" : "cleanup_only")
                     : asyncExceptionFlow ? "exception" : asyncLanguageErrors ? "fault" : "none") : null,
@@ -438,6 +452,9 @@ public static class CSharpGuestLowerer
         };
         if (CSharpStaticExecutionContext.Find(document) is { } staticContext)
             module = staticContext.Apply(document, module);
+        // Only the internal source composition pass may receive this unfinished
+        // module. Its sync callees still need outcome bodies and final validation.
+        if (synchronousAsync is not null) return new(true, module, Array.Empty<GuestDiagnostic>());
         GuestValidationResult validation = GuestModuleValidator.Validate(module);
         if (!validation.Succeeded)
         {

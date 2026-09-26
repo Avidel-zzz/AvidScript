@@ -125,7 +125,7 @@ public partial class Projectile : AvidActor
 | --- | --- |
 | 静态字段初始化、静态构造函数 | 仅[编译器 API](Docs/Phase66/P66.C10_Static_Object_Lifetime_Contract.md)可用，普通构建脚本尚未接入 |
 | 同步方法、属性访问器中的显式 `throw` | 需开启[实验性参数](Docs/Phase66/P66.C8_Task_Local_Lifetime_Contract.md#generated-task-build)，仅支持部分用法 |
-| 同步异常传入调用方的 `async` 方法 | [实现中](Docs/Phase66/P66.C10_Synchronous_Error_Task_Transfer.md)，尚未完成运行时验证 |
+| 同步异常传入调用方的 `async` 方法 | [编译器 API 预览](Docs/Phase66/P66.C10_Synchronous_Error_Task_Transfer.md#c-源码到-vm-的执行验证)已通过 Win64 测试；成员 `await` 写回与静态初始化组合尚未支持 |
 
 </details>
 

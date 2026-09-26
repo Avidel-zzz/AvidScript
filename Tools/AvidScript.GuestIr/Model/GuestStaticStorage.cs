@@ -17,7 +17,9 @@ public static class GuestStaticStorage
     // Reuse the complete existing execution contract, including its provenance
     // and ownership checks. The serialized module always retains its outer version.
     public static GuestModule ExecutionProfile(GuestModule module) =>
-        GuestTaskErrorTransfers.IsVersion(module) && module.TaskErrorTransfers is { BaseSchemaVersion: >= 20 and <= 26 } transfers
+        GuestAsyncSynchronousExceptions.IsVersion(module)
+            ? module with { SchemaVersion = GuestAsyncThrowRouteValidator.SchemaVersion, IrVersion = GuestAsyncThrowRouteValidator.IrVersion }
+        : GuestTaskErrorTransfers.IsVersion(module) && module.TaskErrorTransfers is { BaseSchemaVersion: >= 20 and <= 26 } transfers
             ? module with { SchemaVersion = transfers.BaseSchemaVersion, IrVersion = transfers.BaseIrVersion }
         : IsVersion(module) && module.StaticStorage is { BaseSchemaVersion: >= 4 and <= 26 } storage
             ? module with { SchemaVersion = storage.BaseSchemaVersion, IrVersion = storage.BaseIrVersion }

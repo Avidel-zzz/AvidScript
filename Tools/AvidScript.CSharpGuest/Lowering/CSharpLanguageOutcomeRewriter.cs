@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Security.Cryptography;
-using System.Text;
 using AvidScript.CSharpSemantic;
 using AvidScript.GuestIr;
 
@@ -75,6 +73,7 @@ public static class CSharpLanguageOutcomeRewriter
     {
         rewritten = null;
         error = null;
+        var asyncContext = semantic is null ? null : CSharpAsyncSynchronousExecutionContext.Find(semantic);
         if (semantic is null || module is null || affectedFunctionIds is null || affectedFunctionIds.Count == 0
             || catchRoutes is null || catchRoutes.Keys.Any(id => !affectedFunctionIds.Contains(id)
                 || producerFunctionIds.Contains(id))
@@ -86,7 +85,7 @@ public static class CSharpLanguageOutcomeRewriter
             || !CSharpSemanticInputValidator.IsValid(semantic))
             return Fail("The Semantic input is not an executable ordinary artifact.", out error);
         GuestValidationResult sourceValidation = GuestModuleValidator.Validate(module);
-        if (!sourceValidation.Succeeded)
+        if (!sourceValidation.Succeeded && !(deferValidation && asyncContext is not null))
             return Fail("The ordinary Guest module failed validation.", out error);
         if (semantic.Source.SourceId != module.Provenance.SourceId
             || semantic.Source.Sha256 != module.Provenance.SourceSha256
@@ -122,7 +121,8 @@ public static class CSharpLanguageOutcomeRewriter
                 && function.Blocks.SelectMany(block => block.Instructions)
                     .Any(instruction => instruction.Op == "call"
                         && instruction.TargetId is { } target
-                        && affectedFunctionIds.Contains(target)))
+                        && affectedFunctionIds.Contains(target))
+                && !(asyncContext is not null && asyncContext.Sites.Any(site => site.FunctionId == function.Id)))
                 return Fail($"Caller '{function.Id}' is missing from the outcome effect closure.", out error);
 
         GuestType? int32 = module.Types.FirstOrDefault(type => type.Id == "type:int32"
@@ -130,32 +130,24 @@ public static class CSharpLanguageOutcomeRewriter
         if (int32 is null) return Fail("The outcome status has no canonical int32 type.", out error);
         const string payloadId = "type:language_error_payload";
         const string rootId = "type:language_error_root";
-        if (module.Types.Any(type => type.Id is payloadId or rootId))
+        if (asyncContext is null && module.Types.Any(type => type.Id is payloadId or rootId))
             return Fail("The language-error root type identity is already occupied.", out error);
         List<GuestType> rawTypes = module.Types.ToList();
-        rawTypes.Add(new GuestType(payloadId, "struct", "memory",
-            new[] { new GuestField("field:code", "code", int32.Id, 0) }, null, null, 0, 1));
-        rawTypes.Add(new GuestType(rootId, "managed_ref", "i64",
-            Array.Empty<GuestField>(), payloadId, null, 8, 8));
+        if (asyncContext is null)
+        {
+            rawTypes.Add(new GuestType(payloadId, "struct", "memory",
+                new[] { new GuestField("field:code", "code", int32.Id, 0) }, null, null, 0, 1));
+            rawTypes.Add(new GuestType(rootId, "managed_ref", "i64",
+                Array.Empty<GuestField>(), payloadId, null, 8, 8));
+        }
         Dictionary<string, string> outcomeByValueType = new(StringComparer.Ordinal);
         foreach (string valueType in affectedFunctionIds.Select(id => functions[id].ReturnTypeId)
             .Distinct(StringComparer.Ordinal).OrderBy(id => id, StringComparer.Ordinal))
         {
-            bool hasValue = valueType != "type:void";
-            string outcomeId = "type:language_outcome:" + Convert.ToHexString(
-                SHA256.HashData(Encoding.UTF8.GetBytes(valueType))).ToLowerInvariant();
-            if (module.Types.Any(type => type.Id == outcomeId))
+            string outcomeId = CSharpLanguageOutcomeTypes.Id(valueType);
+            if (asyncContext is null && module.Types.Any(type => type.Id == outcomeId))
                 return Fail($"Outcome type identity for '{valueType}' is already occupied.", out error);
-            GuestField[] fields =
-            {
-                new("field:status", "status", int32.Id, 0),
-                new("field:error_type", "error_type", int32.Id, 0),
-                new("field:source", "source", int32.Id, 0),
-                new("field:error_root", "error_root", rootId, 0),
-            };
-            rawTypes.Add(new GuestType(outcomeId, "struct", "memory",
-                hasValue ? fields.Append(new GuestField("field:value", "value", valueType, 0)).ToArray() : fields,
-                null, null, 0, 1));
+            if (asyncContext is null) rawTypes.Add(CSharpLanguageOutcomeTypes.Create(valueType));
             outcomeByValueType.Add(valueType, outcomeId);
         }
         GuestTypeLayoutResult typeLayout = GuestDataLayout.ComputeTypes(rawTypes);
@@ -189,8 +181,10 @@ public static class CSharpLanguageOutcomeRewriter
             return Fail("The language-outcome module layout is invalid.", out error);
         GuestModule candidate = module with
         {
-            SchemaVersion = module.StaticStorage is null ? 16 : GuestStaticStorage.SchemaVersion,
-            IrVersion = module.StaticStorage is null ? "1.15" : GuestStaticStorage.IrVersion,
+            SchemaVersion = asyncContext is not null ? GuestAsyncSynchronousExceptions.SchemaVersion
+                : module.StaticStorage is null ? 16 : GuestStaticStorage.SchemaVersion,
+            IrVersion = asyncContext is not null ? GuestAsyncSynchronousExceptions.IrVersion
+                : module.StaticStorage is null ? "1.15" : GuestStaticStorage.IrVersion,
             StaticStorage = module.StaticStorage is null ? null : module.StaticStorage with { BaseSchemaVersion = 16, BaseIrVersion = "1.15" },
             Types = typeLayout.Types,
             Imports = imports,

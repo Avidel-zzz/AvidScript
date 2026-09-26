@@ -146,7 +146,7 @@ internal static class CSharpGuestAsyncThrowRoutingTests
         }
     }
 
-    private const string CancelFacade = """
+    internal const string CancelFacade = """
 
         internal static class CancelResumeHost {
             [System.Runtime.InteropServices.DllImport("avidscript", EntryPoint = "avid_continuation_delay_cancel_resume_v1")]
@@ -165,7 +165,7 @@ internal static class CSharpGuestAsyncThrowRoutingTests
             ? "public static async Task<int> Failing() { try { int value = await Read(3); return value; } finally { Trace = Trace * 10 + 1; throw new ArgumentException(); } } " : "")
         + "}";
 
-    private static (int Result, int Trace) Reference(string source, bool cancel)
+    internal static (int Result, int Trace) Reference(string source, bool cancel)
     {
         // The scheduler is the only adapter; all user code and handlers are identical.
         const string facade = """

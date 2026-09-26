@@ -33,6 +33,7 @@ public static class GuestModuleValidator
         GuestLanguageOutcomeTypeValidator.Validate(context);
         GuestLanguageOutcomeFlowValidator.Validate(context);
         GuestTaskErrorTransferValidator.Validate(context);
+        GuestAsyncSynchronousExceptionValidator.Validate(context);
         GuestLanguageErrorCatalogValidator.Validate(context);
         ValidateImports(context);
         GuestTaskResultValidator.Validate(context);

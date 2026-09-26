@@ -55,7 +55,8 @@ int32 ExecutionSchema(const FString& Profile)
 FString ExecutionProfile(const TMap<FString, FString>& Fields)
 {
 	return (Fields.FindRef(TEXT("guest_ir")) == TEXT("27/1.26")
-		|| Fields.FindRef(TEXT("guest_ir")) == TEXT("28/1.27"))
+		|| Fields.FindRef(TEXT("guest_ir")) == TEXT("28/1.27")
+		|| Fields.FindRef(TEXT("guest_ir")) == TEXT("29/1.28"))
 		? Fields.FindRef(TEXT("guest_ir_base")) : Fields.FindRef(TEXT("guest_ir"));
 }
 
@@ -76,10 +77,13 @@ bool ParseProvenance(TConstArrayView<uint8> Payload, TMap<FString, FString>& Out
 	const FString ArtifactProfile = OutFields.FindRef(TEXT("guest_ir"));
 	const bool bStaticStorage = ArtifactProfile == TEXT("27/1.26");
 	const bool bTaskErrorTransfer = ArtifactProfile == TEXT("28/1.27");
-	const bool bEnvelope = bStaticStorage || bTaskErrorTransfer;
+	const bool bSynchronousAsync = ArtifactProfile == TEXT("29/1.28");
+	const bool bEnvelope = bStaticStorage || bTaskErrorTransfer || bSynchronousAsync;
 	const int32 BaseSchema = ExecutionSchema(OutFields.FindRef(TEXT("guest_ir_base")));
 	if ((ArtifactProfile.StartsWith(TEXT("27/"), ESearchCase::CaseSensitive) && !bStaticStorage)
 		|| (ArtifactProfile.StartsWith(TEXT("28/"), ESearchCase::CaseSensitive) && !bTaskErrorTransfer)
+		|| (ArtifactProfile.StartsWith(TEXT("29/"), ESearchCase::CaseSensitive) && !bSynchronousAsync)
+		|| (bSynchronousAsync && BaseSchema != 26)
 		|| (bEnvelope && BaseSchema == 0) || (bTaskErrorTransfer && BaseSchema < 20)
 		|| (!bEnvelope && OutFields.Contains(TEXT("guest_ir_base")))) return false;
 	const FString Profile = ExecutionProfile(OutFields);
@@ -217,7 +221,7 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 	const TArray<TSharedPtr<FJsonValue>>* Types = nullptr;
 	const TArray<TSharedPtr<FJsonValue>>* Sources = nullptr;
 	if (!CatalogPrivate::Number(*Document, TEXT("schema_version"), 1, 1, SectionVersion)
-		|| !CatalogPrivate::Number(*Document, TEXT("guest_ir_schema_version"), 17, 28, GuestSchema)
+		|| !CatalogPrivate::Number(*Document, TEXT("guest_ir_schema_version"), 17, 29, GuestSchema)
 		|| !Document->TryGetStringField(TEXT("guest_ir_version"), GuestVersion)
 		|| FString::Printf(TEXT("%d/%s"), GuestSchema, *GuestVersion) != ArtifactProfile
 		|| !Document->TryGetStringField(TEXT("module_id"), ModuleId) || ModuleId != ExpectedModuleId
@@ -228,7 +232,8 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 		|| !Document->TryGetArrayField(TEXT("sources"), Sources) || Sources->Num() > 1024
 		|| ((Types->IsEmpty() || Sources->IsEmpty())
 			&& (ArtifactProfile == TEXT("28/1.27")
-				|| (ProfileSchema != 23 && !(ProfileSchema == 25 && LifetimeModel == TEXT("cleanup")))
+				|| (ProfileSchema != 23 && !(ProfileSchema == 25 && LifetimeModel == TEXT("cleanup"))
+					&& ArtifactProfile != TEXT("29/1.28"))
 				|| Types->Num() != Sources->Num())))
 	{
 		OutError = TEXT("language-error metadata identity or token counts are invalid");
