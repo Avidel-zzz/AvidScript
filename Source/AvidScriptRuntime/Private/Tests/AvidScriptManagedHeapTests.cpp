@@ -1,11 +1,15 @@
 #if WITH_DEV_AUTOMATION_TESTS
 #include "AvidScriptWasmRuntime.h"
 #include "AvidScriptRuntimeSession.h"
+#include "AvidScriptLanguageErrorCatalog.h"
+#include "Continuation/AvidScriptSessionContinuations.h"
+#include "Engine/World.h"
 #include "Memory/AvidScriptManagedHeap.h"
 #include "AvidScriptManagedHeapAbi.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "UObject/StrongObjectPtr.h"
 #include <array>
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptManagedHeapOwnershipTest,
@@ -406,6 +410,143 @@ bool FAvidScriptManagedHeapStaticStorageTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Static object survives function trap until domain closes"), TrapHeap.GetStats().LiveObjects, 1u);
 		Trapping.Unload();
 		TestNull(TEXT("Trapped domain unload releases heap"), Trapping.GetManagedHeapForTesting());
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptManagedHeapStaticGeneratedGuestTest,
+	"AvidScript.Runtime.ManagedHeap.StaticGeneratedGuest",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptManagedHeapStaticGeneratedGuestTest::RunTest(const FString& Parameters)
+{
+	using namespace AvidScript::Managed;
+	const FString Directory = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("AvidScriptManagedHeapTests/GuestFixtures"));
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	for (const TCHAR* File : {TEXT("managed-static.wasm"), TEXT("managed-static-cooperative.wasm")})
+	{
+		if (Backend == EAvidScriptVmBackendKind::Wamr && FString(File).Contains(TEXT("cooperative"))) continue;
+		AddInfo(FString::Printf(TEXT("Generated static storage: backend=%d fixture=%s"), static_cast<int32>(Backend), File));
+		TArray<uint8> Wasm;
+		if (!TestTrue(TEXT("Read current generated static fixture"), FFileHelper::LoadFileToArray(Wasm, *(Directory / File)))) return false;
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime ? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		FAvidScriptWasmRuntimeInstance Runtime(Selection);
+		FAvidScriptWasmSmokeResult Result;
+		if (!TestTrue(TEXT("Generated static module loads"), Runtime.LoadModule(Wasm.GetData(), Wasm.Num(), TEXT("managed-static"), Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		TestEqual(TEXT("Generated static module uses requested backend"), Runtime.GetActiveBackendInfo().Kind, Backend);
+		TestEqual(TEXT("Generated static module uses requested mode"), Runtime.GetActiveBackendInfo().ExecutionMode, Selection.ExecutionMode);
+		if (!TestTrue(TEXT("Generated static module enters Running state"), Runtime.BeginPlay(Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		auto Call = [this, &Runtime](const TCHAR* Name, uint32 Cells, uint32 Expected)
+		{
+			FAvidScriptVmPreparedExportCall Prepared;
+			FString Error;
+			if (!TestTrue(Name, Runtime.PrepareNamedExportCall(Name, Prepared, Error))) { AddError(Error); return false; }
+			FAvidScriptVmCallFrame Frame; Frame.CellCount = Cells;
+			FAvidScriptVmCallResult Value; FAvidScriptVmError VmError;
+			if (!TestTrue(Name, Prepared.Call(Frame, VmError, &Value))) { AddError(VmError.Details); return false; }
+			return TestEqual(Name, Value.Cells[0], Expected);
+		};
+		if (!Call(TEXT("static_default"), 0, 1)) return false;
+		FHeap& Heap = *Runtime.GetManagedHeapForTesting();
+		TestEqual(TEXT("First managed export initializes three null static roots"), Heap.GetStats().StaticRoots, 3u);
+		TestEqual(TEXT("Lazy configuration allocates no objects"), Heap.GetStats().Allocations, uint64(0));
+		FToken Previous = 0, Current = 0;
+		for (int32 Index = 0; Index < 12; ++Index)
+		{
+			if (!TestTrue(TEXT("Tick creates a new static cycle"), Runtime.Tick(0.01f, Result))) { AddError(Result.ErrorMessage); return false; }
+			TestTrue(TEXT("Collect between generated exports"), Heap.Collect() == EHeapError::Ok);
+			FToken Alias = 0, Erased = 0;
+			TestTrue(TEXT("Typed and erased static aliases retain the same object"),
+				Heap.ReadStaticSlot(1, 1, Current) == EHeapError::Ok
+				&& Heap.ReadStaticSlot(2, 1, Alias) == EHeapError::Ok
+				&& Heap.ReadStaticSlot(3, 0, Erased) == EHeapError::Ok
+				&& Current != 0 && Current == Alias && Current == Erased);
+			TestTrue(TEXT("Replaced cycle is reclaimed"), Heap.IsAlive(Current) && !Heap.IsAlive(Previous));
+			TestEqual(TEXT("Only the current cycle survives"), Heap.GetStats().LiveObjects, 2u);
+			if (!Call(TEXT("static_read"), 2, 42)) return false;
+			TestEqual(TEXT("Read does not rebuild the object graph"), Heap.GetStats().Allocations, uint64((Index + 1) * 2));
+			TestEqual(TEXT("Exports release frame roots"), Heap.GetStats().ActiveFrames, 0u);
+			TestEqual(TEXT("Only static roots remain"), Heap.GetStats().LiveRoots, 3u);
+			Previous = Current;
+		}
+		if (!Call(TEXT("static_hold"), 0, 42)) return false;
+		TestTrue(TEXT("Local read survives clearing all static aliases and in-call GC"), Heap.IsAlive(Current));
+		TestTrue(TEXT("Collect after local frame exits"), Heap.Collect() == EHeapError::Ok);
+		TestEqual(TEXT("Unrooted cycle is fully reclaimed"), Heap.GetStats().LiveObjects, 0u);
+		if (!Call(TEXT("static_default"), 0, 1)) return false;
+		TestEqual(TEXT("Repeated prologue preserves configured storage"), Heap.GetStats().StaticRoots, 3u);
+		Runtime.Unload(); Runtime.Unload();
+		TestNull(TEXT("Unload releases the static domain heap"), Runtime.GetManagedHeapForTesting());
+		if (!TestTrue(TEXT("Reload same generated module"), Runtime.LoadModule(Wasm.GetData(), Wasm.Num(), TEXT("managed-static"), Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		if (!Call(TEXT("static_default"), 0, 1)) return false;
+		TestTrue(TEXT("Prior domain identity cannot enter fresh static storage"),
+			Runtime.GetManagedHeapForTesting()->WriteStaticSlot(1, 1, Current) == EHeapError::InvalidObject);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptManagedHeapStaticTaskCancellationTest,
+	"AvidScript.Runtime.ManagedHeap.StaticTaskCancellation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptManagedHeapStaticTaskCancellationTest::RunTest(const FString& Parameters)
+{
+	using namespace AvidScript::Managed;
+	TArray<uint8> Wasm;
+	const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("AvidScriptManagedHeapTests/GuestFixtures/managed-static-cancellation.wasm"));
+	if (!TestTrue(TEXT("Read generated static cancellation fixture"), FFileHelper::LoadFileToArray(Wasm, *Path))) return false;
+	TStrongObjectPtr<UWorld> World(NewObject<UWorld>());
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	{
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime ? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		FAvidScriptWasmRuntimeInstance Runtime(Selection); FAvidScriptWasmSmokeResult Result;
+		if (!TestTrue(TEXT("Static cancellation module loads"), Runtime.LoadModule(Wasm.GetData(), Wasm.Num(), TEXT("csharp:Scripts/Cancellation.cs"), Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		TestEqual(TEXT("Static Task module uses requested backend"), Runtime.GetActiveBackendInfo().Kind, Backend);
+		TestTrue(TEXT("Outer IR 27 retains base IR 24 Task capabilities"), Runtime.GetLanguageErrorCatalog()
+			&& Runtime.GetLanguageErrorCatalog()->SupportsTaskCancellationError()
+			&& Runtime.GetLanguageErrorCatalog()->SupportsTaskLanguageErrorFault());
+		const auto Owner = MakeShared<FAvidScriptSessionContinuations>();
+		auto& Endpoint = Owner->ResetActive(World.Get());
+		FAvidScriptWasmHostContext Context; Context.World = World.Get(); Context.Tasks = &Endpoint; Context.Continuations = &Endpoint;
+		Runtime.SetHostContext(Context);
+		FHeap& Heap = *Runtime.GetManagedHeapForTesting();
+		for (const TCHAR* Export : {TEXT("cancel"), TEXT("fault")})
+		{
+			const int64 Task = Endpoint.CreateTaskResult(TEXT("type:int32"));
+			if (!TestTrue(TEXT("Create Task for combined static profile"), Task > 0)) return false;
+			FAvidScriptVmPreparedExportCall Prepared; FString Error;
+			if (!TestTrue(TEXT("Prepare generated Task producer"), Runtime.PrepareNamedExportCall(Export, Prepared, Error))) { AddError(Error); return false; }
+			FAvidScriptVmCallFrame Frame; Frame.CellCount = 2; FMemory::Memcpy(Frame.Cells, &Task, sizeof(Task));
+			FAvidScriptVmCallResult Value; FAvidScriptVmError VmError;
+			const uint64 Invocation = Runtime.BeginVmInvocation();
+			const bool bCalled = Prepared.Call(Frame, VmError, &Value);
+			Runtime.EndVmInvocation(Invocation);
+			if (!TestTrue(TEXT("Generated producer submits its fresh rooted error"), bCalled)) { AddError(VmError.Details); return false; }
+			TestEqual(TEXT("Task completion accepted"), Value.Cells[0], 1u);
+			FAvidScriptTaskResultSnapshot Snapshot;
+			if (!TestTrue(TEXT("Task retains typed error"), Endpoint.ReadTaskResult(Task, Snapshot) && Snapshot.LanguageError.IsSet())) return false;
+			TestEqual(TEXT("Base profile preserves terminal state"), Snapshot.State,
+				FString(Export) == TEXT("cancel") ? EAvidScriptTaskResultState::Cancelled : EAvidScriptTaskResultState::Faulted);
+			FToken Cached = 0;
+			TestTrue(TEXT("Static cache is distinct from the Task error"), Heap.ReadStaticSlot(1, 1, Cached) == EHeapError::Ok
+				&& Cached != 0 && Cached != Snapshot.LanguageError->ObjectToken);
+			TestTrue(TEXT("Both ownership paths survive invocation exit"), Heap.Collect() == EHeapError::Ok && Heap.GetStats().LiveObjects == 2);
+			TestTrue(TEXT("Task releases its owned error"), Endpoint.ReleaseTaskResult(Task));
+			TestTrue(TEXT("Static object survives Task release"), Heap.Collect() == EHeapError::Ok
+				&& Heap.GetStats().LiveObjects == 1 && Heap.IsAlive(Cached) && !Heap.IsAlive(Snapshot.LanguageError->ObjectToken));
+			TestEqual(TEXT("No invocation frames leak"), Heap.GetStats().ActiveFrames, 0u);
+		}
+		Owner->Teardown();
+		Runtime.Unload();
+		TestNull(TEXT("Domain unload releases static cache"), Runtime.GetManagedHeapForTesting());
 	}
 	return true;
 }

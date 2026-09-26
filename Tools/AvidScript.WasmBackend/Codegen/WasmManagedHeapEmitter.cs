@@ -41,6 +41,11 @@ internal sealed partial class WasmFunctionCompiler
         body.WriteByte(0x04); body.WriteByte(0x40);
         WriteI32Constant(body, plan.ConfigurationAddress); WriteI32Constant(body, plan.Configuration.Length);
         WriteI32Constant(body, 0); WriteI32Constant(body, 0); ManagedHostCall(body);
+        if (plan.StaticConfiguration.Length != 0)
+        {
+            WriteI32Constant(body, plan.StaticConfigurationAddress); WriteI32Constant(body, plan.StaticConfiguration.Length);
+            WriteI32Constant(body, 0); WriteI32Constant(body, 0); ManagedHostCall(body);
+        }
         WriteI32Constant(body, 1); WriteGlobalSet(body, plan.InitializedGlobalIndex); body.WriteByte(0x0b);
 
         // Each activation owns its value copies. Unassigned aggregate reference fields
@@ -99,6 +104,22 @@ internal sealed partial class WasmFunctionCompiler
 
     private void CompileManagedInstruction(WasmBinaryWriter body, GuestInstruction instruction)
     {
+        if (instruction.Op is GuestStaticStorage.GetOp or GuestStaticStorage.SetOp)
+        {
+            bool readStatic = instruction.Op == GuestStaticStorage.GetOp;
+            var slot = moduleLayout.ManagedHeap.StaticSlots[instruction.TargetId!];
+            ManagedHeader(body, readStatic ? GuestManagedHeapCommand.ReadStaticSlot : GuestManagedHeapCommand.WriteStaticSlot);
+            ManagedStoreI32(body, 8, slot.Ordinal); ManagedStoreI32(body, 12, slot.TypeOrdinal);
+            if (!readStatic) ManagedStoreToken(body, 16, writer => WriteLocalGet(writer, localIndices[instruction.OperandIds[0]]));
+            ManagedPacketCall(body, readStatic ? 16 : 24, readStatic ? 8 : 0);
+            if (readStatic)
+            {
+                ManagedLoadToken(body, localIndices[instruction.ResultId!]);
+                StoreAddressTakenSlot(body, instruction.ResultId!);
+                FlushManagedRoots(body);
+            }
+            return;
+        }
         if (instruction.Op is GuestEventState.SubscribeOp or GuestEventState.ReadOp
             or GuestEventState.LanguageSubscribeOp or GuestEventState.LanguageLookupOp)
         {

@@ -14,7 +14,8 @@ struct FAvidScriptLanguageErrorSource
 	int32 EndColumn = 0;
 };
 
-// Language-error tokens are local to one canonical IR 17 or 20-26 WASM module.
+// Language-error tokens are local to one canonical IR 17 or 20-26 execution
+// profile, including the same profile inside IR 27 static storage.
 class AVIDSCRIPTRUNTIME_API FAvidScriptLanguageErrorCatalog final
 {
 public:

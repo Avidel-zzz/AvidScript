@@ -226,6 +226,8 @@ public static class WasmModuleCompiler
                 $"guest_ir={module.SchemaVersion}/{module.IrVersion}");
             if (module.TaskLocalLifetimes is { } lifetimes)
                 payload += "\ntask_local_exception_model=" + lifetimes.ExceptionModel;
+            if (module.StaticStorage is { } storage)
+                payload += $"\nguest_ir_base={storage.BaseSchemaVersion}/{storage.BaseIrVersion}";
             section.WriteBytes(Encoding.UTF8.GetBytes(payload));
         });
     }
@@ -474,6 +476,8 @@ public static class WasmModuleCompiler
         List<WasmDataInitializer> initializers = new();
         if (layout.ManagedHeap.Enabled)
             initializers.Add(new WasmDataInitializer("$managed_heap_configuration", layout.ManagedHeap.ConfigurationAddress, layout.ManagedHeap.Configuration));
+        if (layout.ManagedHeap.StaticConfiguration.Length != 0)
+            initializers.Add(new WasmDataInitializer("$managed_static_configuration", layout.ManagedHeap.StaticConfigurationAddress, layout.ManagedHeap.StaticConfiguration));
         foreach (GuestGlobal global in module.Globals)
         {
             GuestStateSlot slot = module.MemoryLayout.StateSlots.Single(

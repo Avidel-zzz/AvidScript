@@ -32,6 +32,8 @@ internal static class GuestInstructionValidator
             case "managed_get":
             case "managed_set":
             case "managed_collect":
+            case GuestStaticStorage.GetOp:
+            case GuestStaticStorage.SetOp:
             case GuestContinuationState.StoreOp:
             case GuestContinuationState.ReadOp:
             case GuestEventState.SubscribeOp:

@@ -75,18 +75,16 @@ void WasmSection(TArray<uint8>& Module, uint8 Id, const TArray<uint8>& Payload)
 	Module.Append(Payload);
 }
 
-FString Provenance(int32 GuestSchema = 17, const TCHAR* LifetimeModel = TEXT("cancellation"))
+FString Provenance(int32 GuestSchema = 17, const TCHAR* LifetimeModel = TEXT("cancellation"), int32 StaticBaseSchema = 0)
 {
-	const FString GuestVersion = GuestSchema == 26 ? TEXT("1.25") : GuestSchema == 25 ? TEXT("1.24") : GuestSchema == 24 ? TEXT("1.23")
-		: GuestSchema == 23 ? TEXT("1.22")
-		: GuestSchema == 22 ? TEXT("1.21")
-		: GuestSchema == 21 ? TEXT("1.20")
-		: GuestSchema == 20 ? TEXT("1.19") : TEXT("1.16");
+	const FString GuestVersion = FString::Printf(TEXT("1.%d"), GuestSchema - 1);
 	FString Result = FString::Printf(TEXT("module_id=%s\nsource_id=Scripts/SourceThrow.cs\nsource_sha256=%s\n")
 		TEXT("frontend_sha256=%s\nsemantic_sha256=%s\nguest_ir=%d/%s"),
 		*ModuleId, *SourceSha256, *FString::ChrN(64, 'b'), *FString::ChrN(64, 'c'),
 		GuestSchema, *GuestVersion);
-	if (GuestSchema == 25 || GuestSchema == 26) Result += FString::Printf(TEXT("\ntask_local_exception_model=%s"), LifetimeModel);
+	if (StaticBaseSchema) Result += FString::Printf(TEXT("\nguest_ir_base=%d/1.%d"), StaticBaseSchema, StaticBaseSchema - 1);
+	const int32 ProfileSchema = StaticBaseSchema ? StaticBaseSchema : GuestSchema;
+	if (ProfileSchema == 25 || ProfileSchema == 26) Result += FString::Printf(TEXT("\ntask_local_exception_model=%s"), LifetimeModel);
 	return Result;
 }
 
@@ -95,12 +93,7 @@ TSharedRef<FJsonObject> Document(int32 GuestSchema = 17)
 	auto Root = MakeShared<FJsonObject>();
 	Root->SetNumberField(TEXT("schema_version"), 1);
 	Root->SetNumberField(TEXT("guest_ir_schema_version"), GuestSchema);
-	Root->SetStringField(TEXT("guest_ir_version"),
-		GuestSchema == 26 ? TEXT("1.25") : GuestSchema == 25 ? TEXT("1.24") : GuestSchema == 24 ? TEXT("1.23")
-			: GuestSchema == 23 ? TEXT("1.22")
-			: GuestSchema == 22 ? TEXT("1.21")
-			: GuestSchema == 21 ? TEXT("1.20")
-			: GuestSchema == 20 ? TEXT("1.19") : TEXT("1.16"));
+	Root->SetStringField(TEXT("guest_ir_version"), FString::Printf(TEXT("1.%d"), GuestSchema - 1));
 	Root->SetStringField(TEXT("module_id"), ModuleId);
 	Root->SetStringField(TEXT("source_sha256"), SourceSha256);
 	auto Type = MakeShared<FJsonObject>();
@@ -131,11 +124,11 @@ FString Json(const TSharedRef<FJsonObject>& Root)
 }
 
 TArray<uint8> Module(const FString* Metadata, bool bProvenance = true,
-	bool bDuplicate = false, int32 GuestSchema = 17, const TCHAR* LifetimeModel = TEXT("cancellation"))
+	bool bDuplicate = false, int32 GuestSchema = 17, const TCHAR* LifetimeModel = TEXT("cancellation"), int32 StaticBaseSchema = 0)
 {
 	TArray<uint8> Wasm;
 	Wasm.Append(BaseWasm, UE_ARRAY_COUNT(BaseWasm));
-	if (bProvenance) Custom(Wasm, "avidscript.provenance", Provenance(GuestSchema, LifetimeModel));
+	if (bProvenance) Custom(Wasm, "avidscript.provenance", Provenance(GuestSchema, LifetimeModel, StaticBaseSchema));
 	if (Metadata)
 	{
 		Custom(Wasm, "avidscript.language_errors", *Metadata);
@@ -336,6 +329,32 @@ bool FAvidScriptLanguageErrorCatalogRuntimeTest::RunTest(const FString& Paramete
 				Module(nullptr, true, false, 25, Model), ModuleId, Catalog, Error));
 		TestNull(TEXT("No-error profile has no error capability"), Catalog.Get());
 	}
+	const FString StaticJson = Json(Document(27));
+	for (const int32 Base : {17, 20, 21, 22, 23, 24, 25, 26})
+	{
+		TestTrue(TEXT("IR 27 retains each existing error execution profile"),
+			FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+				Module(&StaticJson, true, false, 27, TEXT("cancellation"), Base), ModuleId, Catalog, Error));
+		TestEqual(TEXT("Static storage cannot grant Task faults to IR 17"),
+			Catalog && Catalog->SupportsTaskLanguageErrorFault(), Base >= 20);
+		TestEqual(TEXT("Static storage cannot grant cancellation to older profiles"),
+			Catalog && Catalog->SupportsTaskCancellationError(), Base >= 24);
+	}
+	for (const int32 Base : {4, 14, 18, 19, 25})
+	{
+		TestTrue(TEXT("Static storage retains no-error profiles without a catalog"),
+			FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+				Module(nullptr, true, false, 27, TEXT("none"), Base), ModuleId, Catalog, Error));
+		TestNull(TEXT("No-error static profile has no Task error capability"), Catalog.Get());
+	}
+	auto StaticEmpty = Document(27);
+	StaticEmpty->SetArrayField(TEXT("types"), {});
+	StaticEmpty->SetArrayField(TEXT("sources"), {});
+	const FString StaticEmptyJson = Json(StaticEmpty);
+	for (const int32 Base : {23, 25})
+		TestTrue(TEXT("Static storage retains cleanup-only empty catalogs"),
+			FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+				Module(&StaticEmptyJson, true, false, 27, TEXT("cleanup"), Base), ModuleId, Catalog, Error));
 
 	for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
 	{
@@ -365,6 +384,19 @@ bool FAvidScriptLanguageErrorCatalogRuntimeTest::RunTest(const FString& Paramete
 	}
 
 	TArray<TPair<FString, TArray<uint8>>> Invalid;
+	Invalid.Emplace(TEXT("static profile requires base metadata"), Module(&StaticJson, true, false, 27));
+	Invalid.Emplace(TEXT("static base cannot be self-referential"), Module(&StaticJson, true, false, 27, TEXT("cancellation"), 27));
+	Invalid.Emplace(TEXT("static base cannot be a future version"), Module(&StaticJson, true, false, 27, TEXT("cancellation"), 28));
+	Invalid.Emplace(TEXT("static base cannot predate managed heap"), Module(&StaticJson, true, false, 27, TEXT("cancellation"), 3));
+	Invalid.Emplace(TEXT("old artifact cannot carry static base metadata"), Module(&CancellationJson, true, false, 24, TEXT("cancellation"), 24));
+	Invalid.Emplace(TEXT("static base cannot bypass required catalog"), Module(nullptr, true, false, 27, TEXT("cancellation"), 24));
+	Invalid.Emplace(TEXT("static catalog must retain outer artifact identity"), Module(&CancellationJson, true, false, 27, TEXT("cancellation"), 24));
+	Invalid.Emplace(TEXT("static catalog cannot authorize downgraded execution profile"), Module(&StaticJson, true, false, 27, TEXT("cancellation"), 14));
+	Invalid.Emplace(TEXT("static profile retains routed throw ownership restrictions"), Module(&StaticJson, true, false, 27, TEXT("fault"), 26));
+	Invalid.Emplace(TEXT("static profile retains nonempty catalog restrictions"), Module(&StaticEmptyJson, true, false, 27, TEXT("cancellation"), 24));
+	TArray<uint8> MismatchedStaticBase = Module(&StaticJson, false);
+	Custom(MismatchedStaticBase, "avidscript.provenance", Provenance(27) + TEXT("\nguest_ir_base=24/1.22"));
+	Invalid.Emplace(TEXT("static base version pair must match"), MoveTemp(MismatchedStaticBase));
 	Invalid.Emplace(TEXT("IR 26 requires its catalog"), Module(nullptr, true, false, 26));
 	Invalid.Emplace(TEXT("IR 26 catalog cannot use IR 25 provenance"), Module(&RoutedThrowJson, true, false, 25));
 	Invalid.Emplace(TEXT("IR 25 catalog cannot use IR 26 provenance"), Module(&LifetimeJson, true, false, 26));

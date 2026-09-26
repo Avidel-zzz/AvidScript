@@ -11,6 +11,9 @@ internal sealed class WasmManagedHeapPlan
     public Dictionary<string, int> TypeOrdinals { get; } = new(StringComparer.Ordinal);
     public byte[] Configuration { get; private init; } = Array.Empty<byte>();
     public int ConfigurationAddress { get; private init; }
+    public byte[] StaticConfiguration { get; private init; } = Array.Empty<byte>();
+    public int StaticConfigurationAddress { get; private init; }
+    public Dictionary<string, (int Ordinal, int TypeOrdinal)> StaticSlots { get; private init; } = new(StringComparer.Ordinal);
     public int StackStart { get; private init; }
     public uint InitializedGlobalIndex { get; private init; }
     public string? ImportId { get; private init; }
@@ -39,11 +42,28 @@ internal sealed class WasmManagedHeapPlan
             U32((uint)plan.TypeOrdinals[reference.Id]); U32((uint)payload.Size); U32((uint)edges.Length);
             foreach (GuestManagedLeaf edge in edges) { U32((uint)edge.Offset); U32((uint)plan.TypeOrdinals[edge.Type.Id]); }
         }
+        byte[] configuration = bytes.ToArray();
+        bytes.Clear();
+        if (module.StaticStorage is { } storage)
+        {
+            U32(GuestManagedHeap.Magic); U32((uint)GuestManagedHeapCommand.ConfigureStaticSlots);
+            U32((uint)storage.Slots.Count);
+            foreach (GuestStaticSlot slot in storage.Slots)
+            {
+                int type = plan.TypeOrdinals[slot.TypeId];
+                plan.StaticSlots.Add(slot.Id, (plan.StaticSlots.Count + 1, type));
+                U32((uint)type);
+            }
+        }
+        int staticAddress = checked(module.MemoryLayout.HeapStart + configuration.Length);
         return new WasmManagedHeapPlan
         {
-            Configuration = bytes.ToArray(),
+            Configuration = configuration,
             ConfigurationAddress = module.MemoryLayout.HeapStart,
-            StackStart = checked((module.MemoryLayout.HeapStart + bytes.Count + 15) & -16),
+            StaticConfiguration = bytes.ToArray(),
+            StaticConfigurationAddress = staticAddress,
+            StaticSlots = plan.StaticSlots,
+            StackStart = checked((staticAddress + bytes.Count + 15) & -16),
             InitializedGlobalIndex = plan.InitializedGlobalIndex,
             ImportId = module.Imports.Single(import => import.Module == GuestManagedHeap.ImportModule && import.Name == GuestManagedHeap.ImportName).Id,
             // Dictionary contents are copied below to retain one deterministic owner.

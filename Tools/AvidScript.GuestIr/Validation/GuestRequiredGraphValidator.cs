@@ -24,6 +24,10 @@ internal static class GuestRequiredGraphValidator
         }
 
         GuestProvenance provenance = module.Provenance;
+        if (module.StaticStorage is { } storage
+            && (storage.BaseIrVersion is null || storage.Slots is null
+                || storage.Slots.Any(slot => slot is null || HasNull(slot.Id, slot.TypeId))))
+            return false;
         if (module.LanguageOutcomeTypes is { } outcomeTypes
             && outcomeTypes.Any(outcome => outcome is null
                 || HasNull(outcome.TypeId)))

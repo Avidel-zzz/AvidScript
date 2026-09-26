@@ -45,6 +45,19 @@ bool IsSourceId(const FString& Value)
 	return true;
 }
 
+int32 ExecutionSchema(const FString& Profile)
+{
+	for (int32 Schema = 4; Schema <= 26; ++Schema)
+		if (Profile == FString::Printf(TEXT("%d/1.%d"), Schema, Schema - 1)) return Schema;
+	return 0;
+}
+
+FString ExecutionProfile(const TMap<FString, FString>& Fields)
+{
+	return Fields.FindRef(TEXT("guest_ir")) == TEXT("27/1.26")
+		? Fields.FindRef(TEXT("guest_ir_base")) : Fields.FindRef(TEXT("guest_ir"));
+}
+
 bool ParseProvenance(TConstArrayView<uint8> Payload, TMap<FString, FString>& OutFields)
 {
 	if (Payload.IsEmpty()) return false;
@@ -59,13 +72,19 @@ bool ParseProvenance(TConstArrayView<uint8> Payload, TMap<FString, FString>& Out
 		if (OutFields.Contains(Key)) return false;
 		OutFields.Add(MoveTemp(Key), Line.Mid(Separator + 1));
 	}
-	const bool bRoutedThrow = OutFields.FindRef(TEXT("guest_ir")) == TEXT("26/1.25");
-	const bool bLifetime = bRoutedThrow || OutFields.FindRef(TEXT("guest_ir")) == TEXT("25/1.24");
+	const FString ArtifactProfile = OutFields.FindRef(TEXT("guest_ir"));
+	const bool bStaticStorage = ArtifactProfile == TEXT("27/1.26");
+	if ((ArtifactProfile.StartsWith(TEXT("27/"), ESearchCase::CaseSensitive) && !bStaticStorage)
+		|| (bStaticStorage && ExecutionSchema(OutFields.FindRef(TEXT("guest_ir_base"))) == 0)
+		|| (!bStaticStorage && OutFields.Contains(TEXT("guest_ir_base")))) return false;
+	const FString Profile = ExecutionProfile(OutFields);
+	const bool bRoutedThrow = Profile == TEXT("26/1.25");
+	const bool bLifetime = bRoutedThrow || Profile == TEXT("25/1.24");
 	const FString LifetimeModel = OutFields.FindRef(TEXT("task_local_exception_model"));
 	const bool bLifetimeModelValid = LifetimeModel == TEXT("none") || LifetimeModel == TEXT("fault")
 		|| LifetimeModel == TEXT("exception") || LifetimeModel == TEXT("cleanup")
 		|| LifetimeModel == TEXT("cleanup_only") || LifetimeModel == TEXT("cancellation");
-	return OutFields.Num() == (bLifetime ? 7 : 6)
+	return OutFields.Num() == (bLifetime ? 7 : 6) + (bStaticStorage ? 1 : 0)
 		&& (!bLifetime || bLifetimeModelValid)
 		&& (!bRoutedThrow || LifetimeModel == TEXT("cancellation"))
 		&& OutFields.Contains(TEXT("module_id"))
@@ -139,18 +158,18 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 		OutError = TEXT("WASM provenance metadata is malformed");
 		return false;
 	}
-	const bool bRoutedThrow = ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("26/1.25");
-	const bool bLifetime = bRoutedThrow || ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("25/1.24");
+	const FString ArtifactProfile = ProvenanceFields.FindRef(TEXT("guest_ir"));
+	const FString Profile = CatalogPrivate::ExecutionProfile(ProvenanceFields);
+	const int32 ProfileSchema = CatalogPrivate::ExecutionSchema(Profile);
+	const bool bRoutedThrow = Profile == TEXT("26/1.25");
+	const bool bLifetime = bRoutedThrow || Profile == TEXT("25/1.24");
 	const FString LifetimeModel = ProvenanceFields.FindRef(TEXT("task_local_exception_model"));
 	const bool bLifetimeErrors = bLifetime && LifetimeModel != TEXT("none") && LifetimeModel != TEXT("cleanup_only");
 	if (!bFound)
 	{
-		if (bValidProvenance && (ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("17/1.16")
-			|| ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("20/1.19")
-			|| ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("21/1.20")
-			|| ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("22/1.21")
-			|| ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("23/1.22")
-			|| ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("24/1.23") || bLifetimeErrors))
+		if (bValidProvenance && (Profile == TEXT("17/1.16") || Profile == TEXT("20/1.19")
+			|| Profile == TEXT("21/1.20") || Profile == TEXT("22/1.21")
+			|| Profile == TEXT("23/1.22") || Profile == TEXT("24/1.23") || bLifetimeErrors))
 		{
 			OutError = TEXT("Catalog-bearing Guest IR WASM is missing language-error metadata");
 			return false;
@@ -159,12 +178,9 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 	}
 	if (!bValidProvenance || ExpectedModuleId.IsEmpty()
 		|| ProvenanceFields.FindRef(TEXT("module_id")) != ExpectedModuleId
-		|| (ProvenanceFields.FindRef(TEXT("guest_ir")) != TEXT("17/1.16")
-			&& ProvenanceFields.FindRef(TEXT("guest_ir")) != TEXT("20/1.19")
-			&& ProvenanceFields.FindRef(TEXT("guest_ir")) != TEXT("21/1.20")
-			&& ProvenanceFields.FindRef(TEXT("guest_ir")) != TEXT("22/1.21")
-			&& ProvenanceFields.FindRef(TEXT("guest_ir")) != TEXT("23/1.22")
-			&& ProvenanceFields.FindRef(TEXT("guest_ir")) != TEXT("24/1.23") && !bLifetimeErrors))
+		|| (Profile != TEXT("17/1.16") && Profile != TEXT("20/1.19")
+			&& Profile != TEXT("21/1.20") && Profile != TEXT("22/1.21")
+			&& Profile != TEXT("23/1.22") && Profile != TEXT("24/1.23") && !bLifetimeErrors))
 	{
 		OutError = TEXT("language-error metadata has no matching versioned provenance");
 		return false;
@@ -195,22 +211,9 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 	const TArray<TSharedPtr<FJsonValue>>* Types = nullptr;
 	const TArray<TSharedPtr<FJsonValue>>* Sources = nullptr;
 	if (!CatalogPrivate::Number(*Document, TEXT("schema_version"), 1, 1, SectionVersion)
-		|| !CatalogPrivate::Number(*Document, TEXT("guest_ir_schema_version"), 17, 26, GuestSchema)
+		|| !CatalogPrivate::Number(*Document, TEXT("guest_ir_schema_version"), 17, 27, GuestSchema)
 		|| !Document->TryGetStringField(TEXT("guest_ir_version"), GuestVersion)
-		|| !((GuestSchema == 17 && GuestVersion == TEXT("1.16")
-			&& ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("17/1.16"))
-			|| (GuestSchema == 20 && GuestVersion == TEXT("1.19")
-				&& ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("20/1.19"))
-			|| (GuestSchema == 21 && GuestVersion == TEXT("1.20")
-				&& ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("21/1.20"))
-			|| (GuestSchema == 22 && GuestVersion == TEXT("1.21")
-				&& ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("22/1.21"))
-			|| (GuestSchema == 23 && GuestVersion == TEXT("1.22")
-				&& ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("23/1.22"))
-			|| (GuestSchema == 24 && GuestVersion == TEXT("1.23")
-				&& ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("24/1.23"))
-			|| (GuestSchema == 25 && GuestVersion == TEXT("1.24") && bLifetimeErrors && !bRoutedThrow)
-			|| (GuestSchema == 26 && GuestVersion == TEXT("1.25") && bRoutedThrow))
+		|| FString::Printf(TEXT("%d/%s"), GuestSchema, *GuestVersion) != ArtifactProfile
 		|| !Document->TryGetStringField(TEXT("module_id"), ModuleId) || ModuleId != ExpectedModuleId
 		|| !Document->TryGetStringField(TEXT("source_sha256"), SourceSha256)
 		|| !CatalogPrivate::IsLowerSha256(SourceSha256)
@@ -218,7 +221,7 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 		|| !Document->TryGetArrayField(TEXT("types"), Types) || Types->Num() > 256
 		|| !Document->TryGetArrayField(TEXT("sources"), Sources) || Sources->Num() > 1024
 		|| ((Types->IsEmpty() || Sources->IsEmpty())
-			&& ((GuestSchema != 23 && !(GuestSchema == 25 && LifetimeModel == TEXT("cleanup")))
+			&& ((ProfileSchema != 23 && !(ProfileSchema == 25 && LifetimeModel == TEXT("cleanup")))
 				|| Types->Num() != Sources->Num())))
 	{
 		OutError = TEXT("language-error metadata identity or token counts are invalid");
@@ -226,8 +229,8 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 	}
 
 	auto Candidate = MakeUnique<FAvidScriptLanguageErrorCatalog>();
-	Candidate->GuestIrSchemaVersion = GuestSchema;
-	Candidate->bTaskLifetimeCancellation = (GuestSchema == 25 || GuestSchema == 26) && LifetimeModel == TEXT("cancellation");
+	Candidate->GuestIrSchemaVersion = ProfileSchema;
+	Candidate->bTaskLifetimeCancellation = (ProfileSchema == 25 || ProfileSchema == 26) && LifetimeModel == TEXT("cancellation");
 	Candidate->TypeIds.Reserve(Types->Num());
 	for (const TSharedPtr<FJsonValue>& Entry : *Types)
 	{

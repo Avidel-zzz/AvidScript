@@ -103,6 +103,11 @@ internal static class GuestManagedHeapValidator
         IReadOnlyDictionary<string, GuestRegister> values)
     {
         bool Has(string? id) => id is not null && GuestManagedHeap.ContainsReferences(context.Types, id);
+        if (instruction.Op is GuestStaticStorage.GetOp or GuestStaticStorage.SetOp)
+        {
+            GuestStaticStorageValidator.ValidateInstruction(context, function, instruction, result, operands);
+            return;
+        }
         if (instruction.Op == "address_of" && instruction.TargetId is not null && values.TryGetValue(instruction.TargetId, out GuestRegister? target) && Has(target.TypeId)
             || instruction.Op is "indirect_load" or "indirect_store" or "convert" && (Has(result?.TypeId) || operands.Any(operand => Has(operand?.TypeId))))
             Add(context, $"Function '{function.Id}' cannot expose an untraced address alias of managed storage.");

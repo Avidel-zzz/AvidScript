@@ -41,6 +41,7 @@ public static class GuestModuleValidator
         GuestTaskLocalLifetimeValidator.Validate(context);
         GuestFunctionReferenceValidator.ValidateContracts(context);
         GuestManagedHeapValidator.ValidateContracts(context);
+        GuestStaticStorageValidator.ValidateContracts(context);
         GuestBorrowedReferenceValidator.ValidateContracts(context);
         GuestFramedCallValidator.ValidateContracts(context);
         ValidateGlobals(context);
@@ -139,6 +140,13 @@ public static class GuestModuleValidator
         {
             AddTopLevelId(context, ids, global.Id, "global");
         }
+
+        if (context.Module.StaticStorage is { Slots.Count: <= GuestManagedHeap.MaxStaticSlots } storage)
+            foreach (GuestStaticSlot slot in storage.Slots)
+            {
+                AddTopLevelId(context, ids, slot.Id, "static slot");
+                context.StaticSlots.TryAdd(slot.Id, slot);
+            }
 
         foreach (GuestDataSegment segment in context.Module.DataSegments)
         {

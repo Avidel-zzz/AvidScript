@@ -302,6 +302,7 @@ internal sealed partial class WasmFunctionCompiler
     {
         RefreshAddressTakenSlots(body);
         if (instruction.Op is "call" or "call_indirect" or "call_framed" or "managed_new" or "managed_collect"
+            or GuestStaticStorage.GetOp or GuestStaticStorage.SetOp
             or GuestContinuationState.StoreOp or GuestContinuationState.ReadOp
             or GuestEventState.SubscribeOp or GuestEventState.ReadOp
             or GuestEventState.LanguageSubscribeOp or GuestEventState.LanguageLookupOp
@@ -322,6 +323,8 @@ internal sealed partial class WasmFunctionCompiler
             case "managed_get":
             case "managed_set":
             case "managed_collect":
+            case GuestStaticStorage.GetOp:
+            case GuestStaticStorage.SetOp:
             case GuestContinuationState.StoreOp:
             case GuestContinuationState.ReadOp:
             case GuestEventState.SubscribeOp:
