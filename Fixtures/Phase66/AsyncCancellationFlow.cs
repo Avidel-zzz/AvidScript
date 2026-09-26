@@ -9,6 +9,7 @@ public static class CancellationScript
     public static int OuterCatch;
     public static int WrongCatch;
     public static int RepeatTrace;
+    public static int ConditionalTrace;
     internal static AvidCancellationSource Lifetime;
 
     public static async Task<int> InnerAsync(int mode)
@@ -118,6 +119,43 @@ public static class CancellationScript
         }
         catch (OperationCanceledException) { OuterCatch++; result += 20; }
         finally { RepeatTrace = RepeatTrace * 10 + 2; }
+        return result;
+    }
+
+    public static async Task<int> ConditionalAsync(int mode)
+    {
+        int result = 0;
+        try
+        {
+            if (mode == 0)
+            {
+                Task<int> left = InnerAsync(2);
+                Task<int> copied = left;
+                result = await copied;
+            }
+            else if (mode == 1)
+            {
+                await AvidContinuations.NextTickAsync();
+                Task<int> right = InnerAsync(2);
+                result = await right;
+            }
+            else if (mode == 2)
+                result = 5;
+            else
+            {
+                Task<int> pending = InnerAsync(2);
+                result = await pending;
+                // Cancellation of the first await skips this declaration.
+                Task<int> late = pending;
+                int again = await late;
+                result += again;
+            }
+        }
+        catch (TaskCanceledException) { OuterCatch++; result = 30; }
+        finally { ConditionalTrace = 1; }
+
+        await AvidContinuations.NextTickAsync();
+        ConditionalTrace = ConditionalTrace * 10 + 2;
         return result;
     }
 }

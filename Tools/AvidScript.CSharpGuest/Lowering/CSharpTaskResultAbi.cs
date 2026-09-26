@@ -183,7 +183,7 @@ internal static class CSharpTaskResultAbi
         foreach (string symbolId in active)
         {
             GuestRegister? token = LoadTaskLocalToken(context, symbolId, block, instructions);
-            if (token is null || Call(context, Release, token, null, block, instructions) is null)
+            if (token is null || !CSharpTaskOwnerGuards.Call(context, method, Release, token, block, instructions))
                 return false;
         }
         return true;
@@ -197,7 +197,7 @@ internal static class CSharpTaskResultAbi
         foreach (string symbolId in active)
         {
             GuestRegister? token = LoadTaskLocalToken(context, symbolId, block, instructions);
-            if (token is null || Call(context, Retain, token, null, block, instructions) is null)
+            if (token is null || !CSharpTaskOwnerGuards.Call(context, method, Retain, token, block, instructions))
                 return false;
         }
         return true;
@@ -212,6 +212,12 @@ internal static class CSharpTaskResultAbi
         foreach (string symbolId in active)
         {
             GuestRegister? token = LoadTaskLocalToken(context, symbolId, block, instructions);
+            if (token is null) return false;
+            if (CSharpTaskOwnerGuards.Required(method))
+            {
+                CSharpTaskOwnerGuards.Transfer(token, continuationToken, instructions);
+                continue;
+            }
             GuestRegister? accepted = context.CreateTemporary(IntTypeId, block);
             if (token is null || accepted is null) return false;
             instructions.Add(new("call", accepted.Id, new[] { token.Id, continuationToken.Id },

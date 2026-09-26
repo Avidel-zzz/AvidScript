@@ -131,7 +131,8 @@ public static void EndPlay()
 ## Limitations
 
 - 仅支持 C# 子集，不能直接运行任意 .NET 程序或 NuGet 包。
-- `Task<int>` 可在同一脚本实例内重复等待。`catch`、`finally` 内暂不支持 `await`。
+- `Task<int>` 支持分支内创建和重复等待；暂不支持局部 Task 重新赋值或循环内反复声明。
+- `catch`、`finally` 内暂不支持 `await`。
 - 异步异常处理默认关闭。在 `try` 中 [await UE 异步操作](Docs/Phase66/P66.C6_Direct_Continuation_Await_Contract.md)、[捕获 Task 取消异常](Docs/Phase66/P66.C7_Async_Cancellation_Language_Contract.md) 时，需按文档启用编译选项。
 - 修改 C# 声明的 `UClass`、`UProperty`、`UFunction` 后，需要重新构建并重启 Editor。
 - Android、iOS、Shipping 和真实多人游戏尚未验收。

@@ -58,6 +58,7 @@ bool FAvidScriptCompiledAsyncCancellationTest::RunTest(const FString& Parameters
 	const int32 OuterOffset = Offset(TEXT("CancellationScript"), TEXT("OuterCatch"));
 	const int32 WrongOffset = Offset(TEXT("CancellationScript"), TEXT("WrongCatch"));
 	const int32 RepeatOffset = Offset(TEXT("CancellationScript"), TEXT("RepeatTrace"));
+	const int32 ConditionalOffset = Offset(TEXT("CancellationScript"), TEXT("ConditionalTrace"));
 	if (HasAnyErrors()) return false;
 	FString ExpectedCancellationDiagnostic;
 	for (const auto& RouteValue : Ir->GetArrayField(TEXT("direct_await_routes")))
@@ -97,7 +98,7 @@ bool FAvidScriptCompiledAsyncCancellationTest::RunTest(const FString& Parameters
 
 	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
 	for (const bool bCancel : {false, true})
-	for (int32 Case = 0; Case < 12; ++Case)
+	for (int32 Case = 0; Case < 16; ++Case)
 	{
 		FAvidScriptVmBackendSelection Selection;
 		Selection.BackendKind = Backend;
@@ -133,7 +134,8 @@ bool FAvidScriptCompiledAsyncCancellationTest::RunTest(const FString& Parameters
 
 		const bool bUnhandled = bCancel && (Case == 3 || Case == 6 || Case == 11);
 		const bool bVmTrap = Case == 7;
-		const bool bRepeated = Case >= 8;
+		const bool bRepeated = Case >= 8 && Case < 12;
+		const bool bConditional = Case >= 12;
 		int32 Failures = 0;
 		int32 Cancelled = 0;
 		int32 Resumes = 0;
@@ -179,23 +181,29 @@ bool FAvidScriptCompiledAsyncCancellationTest::RunTest(const FString& Parameters
 			FMemory::Memcpy(&Value, Data, sizeof(Value));
 			return Value;
 		};
-		const int32 CancelResults[] = {18, 17, 20, 0, 21, 22, 0, 0, 40, 40, 21, 0};
-		const int32 ExpectedResult = bCancel ? CancelResults[Case] : bVmTrap ? 0 : bRepeated ? 32 : 16;
+		const int32 NormalResults[] = {16, 16, 16, 16, 16, 16, 16, 0, 32, 32, 32, 32, 16, 16, 5, 32};
+		const int32 CancelResults[] = {18, 17, 20, 0, 21, 22, 0, 0, 40, 40, 21, 0, 30, 30, 5, 30};
+		const int32 OuterCatches[] = {0, 0, 1, 0, 1, 0, 0, 0, 2, 2, 1, 1, 1, 1, 0, 1};
+		const int32 CancelledCallbacks[] = {1, 1, 2, 3, 1, 1, 2, 1, 2, 1, 2, 3, 2, 2, 0, 2};
+		const int32 ExpectedResult = bCancel ? CancelResults[Case] : NormalResults[Case];
 		TestEqual(TEXT("Same-source .NET result"), Read(ResultOffset), ExpectedResult);
-		TestEqual(TEXT("Finally order and count"), Read(TraceOffset), Case == 5 || bRepeated ? 1 : 12);
+		TestEqual(TEXT("Finally order and count"), Read(TraceOffset), Case == 14 ? 0 : Case == 5 || Case >= 8 ? 1 : 12);
 		TestEqual(TEXT("Repeated await finally order"), Read(RepeatOffset),
 			bRepeated ? bCancel && Case >= 10 ? 1 : 12 : 0);
-		TestEqual(TEXT("First matching catch"), Read(InnerOffset), bCancel ? 1 : 0);
+		TestEqual(TEXT("Conditional branch finally order"), Read(ConditionalOffset), bConditional ? 12 : 0);
+		TestEqual(TEXT("First matching catch"), Read(InnerOffset), bCancel && Case != 14 ? 1 : 0);
 		TestEqual(TEXT("Rethrow and repeated awaits reach matching catches"), Read(OuterOffset),
-			bCancel ? bRepeated ? Case >= 10 ? 1 : 2 : Case == 2 || Case == 4 ? 1 : 0 : 0);
+			bCancel ? OuterCatches[Case] : 0);
 		TestEqual(TEXT("Later or incompatible catch is skipped"), Read(WrongOffset), 0);
 		TestEqual(TEXT("Only unhandled cancellation or the explicit VM trap fails"), Failures, bUnhandled || bVmTrap ? 1 : 0);
 		TestEqual(TEXT("Cancelled Task state survives propagation"), Cancelled,
-			bCancel ? (Case == 3 || Case == 11 ? 3 : Case == 2 || Case == 6 || Case == 8 || Case == 10 ? 2 : 1) : 0);
+			bCancel ? CancelledCallbacks[Case] : 0);
 		TestTrue(TEXT("Compiler callbacks actually executed"), Resumes >= 2);
 		if (Case == 6) TestEqual(TEXT("Ready Task await does not schedule a sixth callback"), Resumes, 5);
 		if (bRepeated) TestEqual(TEXT("Repeated ready Task awaits add no callbacks"), Resumes,
 			Case == 9 ? 6 : bCancel && Case >= 10 ? 3 : 4);
+		if (bConditional) TestEqual(TEXT("Conditional Task awaits schedule only the selected path"), Resumes,
+			Case == 13 ? 5 : Case == 14 ? 2 : 4);
 		TestEqual(TEXT("Continuations retire before teardown"), Owner->GetActiveCount(), 0);
 		TestEqual(TEXT("Tasks release before teardown"), Owner->GetTaskResultsForTesting().GetCount(), 0);
 		const auto Stats = Runtime.GetManagedHeapForTesting()->GetStats();
@@ -207,7 +215,7 @@ bool FAvidScriptCompiledAsyncCancellationTest::RunTest(const FString& Parameters
 			static_cast<int32>(Backend), bCancel ? 1 : 0, Case, Read(ResultOffset), Read(TraceOffset), Resumes, Cancelled));
 		if (HasAnyErrors()) return false;
 	}
-	AddInfo(TEXT("CompiledAsyncCancellation: 48/48 passed"));
+	AddInfo(TEXT("CompiledAsyncCancellation: 64/64 passed"));
 	return true;
 }
 

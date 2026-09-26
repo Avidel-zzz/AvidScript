@@ -1280,8 +1280,8 @@ internal static class SemanticAsyncTests
             }
             """;
         SemanticDocument merging = Analyze(mergingSource, "Scripts/TaskIntMergingOwners.cs");
-        Assert(!merging.Succeeded && merging.Diagnostics.Any(item => item.Code == "ASCS5403"),
-            "branches with different live Task owners must be rejected at their join");
+        Assert(merging.Succeeded && SemanticAsyncInvocationValidator.IsValid(merging),
+            "branches with different live Task owners must merge with conditional ownership");
     }
 
     private static void TaskIntSuspendedCleanupFailsClosed()

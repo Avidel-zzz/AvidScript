@@ -42,6 +42,21 @@ namespace AvidScript
 
 internal static class Program
 {
+    // Keep source continuations and next-tick completions on one driver thread,
+    // like the UE Game Thread. A thread-pool race must not complete a new tick
+    // while its caller is still attaching an already-cancelled token.
+    private sealed class ReferenceSynchronizationContext : SynchronizationContext
+    {
+        private readonly ConcurrentQueue<(SendOrPostCallback Callback, object? State)> ready = new();
+        public override void Post(SendOrPostCallback callback, object? state) => ready.Enqueue((callback, state));
+        public bool AdvanceNext()
+        {
+            if (!ready.TryDequeue(out var continuation)) return false;
+            continuation.Callback(continuation.State);
+            return true;
+        }
+    }
+
     private static void Main()
     {
         int passed = 0;
@@ -73,20 +88,33 @@ internal static class Program
                     expectedRepeatTrace: cancel && mode >= 2 ? 1 : 12);
                 passed++;
             }
+            for (int mode = 0; mode < 4; ++mode)
+            {
+                int selectedMode = mode;
+                RunCase($"conditional:{mode}", () => CancellationScript.ConditionalAsync(selectedMode), cancel,
+                    mode == 2 ? 5 : cancel ? 30 : mode == 3 ? 32 : 16,
+                    mode == 2 ? 0 : 1, cancel && mode != 2 ? 1 : 0, cancel && mode != 2 ? 1 : 0,
+                    expectedConditionalTrace: 12);
+                passed++;
+            }
         }
-        Console.WriteLine($"AsyncCancellationFlow.Reference: {passed}/20 passed");
+        Console.WriteLine($"AsyncCancellationFlow.Reference: {passed}/28 passed");
     }
 
     private static void RunCase(string name, Func<Task<int>> start, bool cancel,
         int expectedResult, int expectedTrace, int expectedInner, int expectedOuter,
-        bool expectCancelled = false, int expectedRepeatTrace = 0)
+        bool expectCancelled = false, int expectedRepeatTrace = 0, int expectedConditionalTrace = 0)
     {
         CancellationScript.Trace = 0;
         CancellationScript.InnerCatch = 0;
         CancellationScript.OuterCatch = 0;
         CancellationScript.WrongCatch = 0;
         CancellationScript.RepeatTrace = 0;
+        CancellationScript.ConditionalTrace = 0;
         CancellationScript.Lifetime = AvidScript.AvidCancellationSource.Create();
+        SynchronizationContext? priorContext = SynchronizationContext.Current;
+        ReferenceSynchronizationContext scheduler = new();
+        SynchronizationContext.SetSynchronizationContext(scheduler);
         try
         {
             Task<int> task = start();
@@ -95,7 +123,7 @@ internal static class Program
             Stopwatch timer = Stopwatch.StartNew();
             while (!task.IsCompleted && timer.Elapsed < TimeSpan.FromSeconds(5))
             {
-                if (!AvidScript.AvidContinuations.AdvanceNext()) Thread.Yield();
+                if (!scheduler.AdvanceNext() && !AvidScript.AvidContinuations.AdvanceNext()) Thread.Yield();
             }
             if (!task.IsCompleted) throw new TimeoutException(name);
             int result = 0;
@@ -109,7 +137,8 @@ internal static class Program
             if (!terminalMatches || CancellationScript.Trace != expectedTrace
                 || CancellationScript.InnerCatch != expectedInner
                 || CancellationScript.OuterCatch != expectedOuter || CancellationScript.WrongCatch != 0
-                || CancellationScript.RepeatTrace != expectedRepeatTrace)
+                || CancellationScript.RepeatTrace != expectedRepeatTrace
+                || CancellationScript.ConditionalTrace != expectedConditionalTrace)
                 throw new InvalidOperationException($"{name}: result={result}, state={task.Status}, error={error?.GetType().Name}, trace={CancellationScript.Trace}, inner={CancellationScript.InnerCatch}, outer={CancellationScript.OuterCatch}, wrong={CancellationScript.WrongCatch}");
             if (expectCancelled)
             {
@@ -123,6 +152,7 @@ internal static class Program
         }
         finally
         {
+            SynchronizationContext.SetSynchronizationContext(priorContext);
             CancellationScript.Lifetime.Release();
             AvidScript.AvidContinuations.DiscardPending();
         }

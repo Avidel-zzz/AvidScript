@@ -35,8 +35,10 @@ public static class CancellationGuestEntry
             int value = await CancellationScript.OuterAsync(0);
             Result = value / (TestCase - 7);
         }
-        else
+        else if (TestCase < 12)
             Result = await CancellationScript.RepeatedAsync(TestCase - 8);
+        else
+            Result = await CancellationScript.ConditionalAsync(TestCase - 12);
     }
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]

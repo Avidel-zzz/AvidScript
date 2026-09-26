@@ -14,7 +14,7 @@ internal static class SemanticAsyncCancellationTests
         SemanticDocument document = Analyze(source);
         Check(document.Succeeded && document.SchemaVersion == 44 && document.SemanticVersion == "1.53",
             "versioned cancellation projection: " + string.Join("; ", document.Diagnostics.Select(d => d.Code + ": " + d.Message)));
-        Check(document.AsyncMethods.Count == 6 && document.RejectedAsyncExceptionFlows is null,
+        Check(document.AsyncMethods.Count == 7 && document.RejectedAsyncExceptionFlows is null,
             "every source method must be projected");
         Check(SemanticAsyncInvocationValidator.IsValid(document)
             && SemanticAsyncScopeValidator.IsValid(document), "invocation and lexical contracts");
@@ -92,9 +92,41 @@ internal static class SemanticAsyncCancellationTests
             .Replace("try { result = await pending; }",
                 "try { result = await pending; Task<int> local = pending; result = await local; }")
             .Replace("await alias", "await pending");
-        var ambiguous = Analyze(conditional);
-        Check(!ambiguous.Succeeded && ambiguous.Diagnostics.Any(item => item.Code == "ASCS5403"),
-            "different local owners at exception propagation joins must remain rejected");
+        var conditionalLocal = Analyze(conditional);
+        Check(conditionalLocal.Succeeded && SemanticAsyncInvocationValidator.IsValid(conditionalLocal),
+            "a skipped late alias can merge at exception dispatch with guarded ownership");
+        var branches = Method(document, ".ConditionalAsync(");
+        Check(branches.CompilerLocals.Count == 0,
+            "return outside try/finally must not retain an unreachable cleanup return slot");
+        Check(SemanticAsyncTaskOwnership.TryAnalyze(branches, branches.TaskLocalSymbolIds!, true, out var ownership)
+            && ownership!.RequiresGuards && ownership.PossibleAtEntry.Any(pair => pair.Value.Count == 5
+                && ownership.DefiniteAtEntry[pair.Key].Count == 0),
+            "branch join distinguishes possible owners from definitely initialized locals");
+        string rightId = document.Symbols.Single(symbol => symbol.ContainingSymbolId == branches.MethodSymbolId
+            && symbol.Name == "right").Id;
+        var leftAwait = branches.Segments.First(segment => segment.AwaitSite?.ProducerKind == "task_local");
+        var invalidRead = branches with { Segments = branches.Segments.Select(segment => segment == leftAwait
+            ? segment with { AwaitSite = segment.AwaitSite! with { TaskLocalSymbolId = rightId,
+                Arguments = new[] { segment.AwaitSite!.Arguments[0] with { SymbolId = rightId } } } }
+            : segment).ToArray() };
+        Check(!SemanticAsyncTaskOwnership.TryAnalyze(invalidRead, branches.TaskLocalSymbolIds!, true, out _),
+            "a possibly present owner cannot authorize an await on a different branch");
+        ReplaceAndReject(document, invalidRead, "conditional owner used without definite initialization");
+        var copied = branches.Segments.Single(segment => segment.Statements.Any(statement =>
+            statement.TargetSymbolId is { } id && document.Symbols.Any(symbol => symbol.Id == id && symbol.Name == "copied")));
+        var alias = copied.Statements.Single();
+        foreach (string sourceId in new[] { rightId, alias.TargetSymbolId! })
+        {
+            var invalidAlias = branches with { Segments = branches.Segments.Select(segment => segment == copied
+                ? segment with { Statements = new[] { alias with { Operation = alias.Operation with { SymbolId = sourceId } } } }
+                : segment).ToArray() };
+            Check(!SemanticAsyncTaskOwnership.TryAnalyze(invalidAlias, branches.TaskLocalSymbolIds!, true, out _),
+                "aliases must reject an uninitialized branch source or an ownership cycle");
+        }
+        var reentry = branches with { Segments = branches.Segments.Select(segment => segment == leftAwait
+            ? segment with { Transfer = segment.Transfer! with { PrimaryTarget = copied.Ordinal } } : segment).ToArray() };
+        Check(!SemanticAsyncTaskOwnership.TryAnalyze(reentry, branches.TaskLocalSymbolIds!, true, out _),
+            "re-entering an owned declaration must not overwrite a live Task token");
         var scope = nested.ExceptionPlan!.ExceptionScopes!.Single(item => item.ParentProtectedRegionOrdinal is not null);
         ReplaceAndReject(document, nested with { ExceptionPlan = nested.ExceptionPlan with
             { ExceptionScopes = nested.ExceptionPlan.ExceptionScopes.Select(item => item == scope

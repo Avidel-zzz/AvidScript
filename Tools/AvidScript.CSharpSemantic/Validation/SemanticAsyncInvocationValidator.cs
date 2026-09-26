@@ -259,97 +259,12 @@ public static class SemanticAsyncInvocationValidator
         out IReadOnlyDictionary<int, IReadOnlyList<string>> activeAtEntry,
         out IReadOnlyDictionary<int, IReadOnlyList<string>> activeAtExit)
     {
-        Dictionary<string, string> roots = new(StringComparer.Ordinal);
-        Dictionary<string, string> sources = new(StringComparer.Ordinal);
-        Dictionary<int, IReadOnlyList<string>> before = new();
-        Dictionary<int, IReadOnlyList<string>> after = new();
-        producers = roots;
-        aliases = sources;
-        activeAtEntry = before;
-        activeAtExit = after;
-        if (localIds.Count < 1 || localIds.Count > MaximumTaskLocalsPerMethod) return false;
-        HashSet<string> owned = localIds.ToHashSet(StringComparer.Ordinal);
-        if (owned.Count != localIds.Count) return false;
-        Dictionary<int, SemanticAsyncSegment> segments = new();
-        foreach (SemanticAsyncSegment segment in method.Segments)
-        {
-            if (!segments.TryAdd(segment.Ordinal, segment)) return false;
-        }
-        if (!segments.ContainsKey(method.EntrySegmentOrdinal)) return false;
-        Dictionary<int, HashSet<string>> incoming = new()
-        {
-            [method.EntrySegmentOrdinal] = new(StringComparer.Ordinal),
-        };
-        Queue<int> pending = new();
-        pending.Enqueue(method.EntrySegmentOrdinal);
-        HashSet<string> declarations = new(StringComparer.Ordinal);
-        List<(int Start, string Id)> declarationOrder = new(localIds.Count);
-        while (pending.Count != 0)
-        {
-            int ordinal = pending.Dequeue();
-            SemanticAsyncSegment segment = segments[ordinal];
-            HashSet<string> active = new(incoming[ordinal], StringComparer.Ordinal);
-            before.Add(ordinal, active.OrderBy(id => id, StringComparer.Ordinal).ToArray());
-            foreach (SemanticAsyncStatement statement in segment.Statements)
-            {
-                if (statement.TargetSymbolId is not { } id || !owned.Contains(id))
-                    continue;
-                if (active.Contains(id) || !declarations.Add(id)) return false;
-                if (statement.Operation is { Kind: "invocation", SymbolId: { } callableId })
-                    roots.Add(id, callableId);
-                else if (allowAliases && statement.Operation is
-                    { Kind: "local_reference", SymbolId: { } sourceId, Children.Count: 0 }
-                    && active.Contains(sourceId)
-                    && roots.TryGetValue(sourceId, out string? rootId))
-                {
-                    roots.Add(id, rootId);
-                    sources.Add(id, sourceId);
-                }
-                else return false;
-                active.Add(id);
-                declarationOrder.Add((statement.Operation.Span.Start, id));
-            }
-            if (segment.AwaitSite?.TaskLocalSymbolId is { } awaited
-                && !active.Contains(awaited)) return false;
-            after.Add(ordinal, active.OrderBy(id => id, StringComparer.Ordinal).ToArray());
-            if (segment.Transfer is null) return false;
-            int[] successors = segment.Transfer.Kind switch
-            {
-                SemanticAsyncMethod.GotoTransferKind or SemanticAsyncMethod.EndCatchTransferKind
-                    or SemanticAsyncMethod.RethrowTransferKind =>
-                    new[] { segment.Transfer.PrimaryTarget },
-                SemanticAsyncMethod.AwaitTransferKind when segment.Transfer.PrimaryTarget >= 0 =>
-                    new[] { segment.Transfer.PrimaryTarget, segment.Transfer.SecondaryTarget,
-                        segment.Transfer.CancellationTarget ?? -1 }.Where(target => target >= 0).Distinct().ToArray(),
-                SemanticAsyncMethod.BranchTransferKind or SemanticAsyncMethod.CatchMatchTransferKind =>
-                    new[] { segment.Transfer.PrimaryTarget, segment.Transfer.SecondaryTarget },
-                SemanticAsyncMethod.ReturnTransferKind or SemanticAsyncMethod.ThrowTransferKind
-                    or SemanticAsyncMethod.PropagateFaultTransferKind
-                    or SemanticAsyncMethod.PropagateCancellationTransferKind
-                    or SemanticAsyncMethod.PropagateExceptionTransferKind =>
-                    Array.Empty<int>(),
-                _ => null!,
-            };
-            if (successors is null) return false;
-            foreach (int successor in successors)
-            {
-                if (!segments.ContainsKey(successor)) return false;
-                if (incoming.TryGetValue(successor, out HashSet<string>? established))
-                {
-                    // The Guest cannot guess which owners exist at a CFG join.
-                    if (!established.SetEquals(active)) return false;
-                }
-                else
-                {
-                    incoming.Add(successor, new(active, StringComparer.Ordinal));
-                    pending.Enqueue(successor);
-                }
-            }
-        }
-        return declarations.SetEquals(owned)
-            && (method.TaskLocalSymbolIds is null
-                || declarationOrder.OrderBy(item => item.Start)
-                    .Select(item => item.Id).SequenceEqual(method.TaskLocalSymbolIds));
+        bool valid = SemanticAsyncTaskOwnership.TryAnalyze(method, localIds, allowAliases, out var flow);
+        producers = flow?.Producers ?? new Dictionary<string, string>();
+        aliases = flow?.Aliases ?? new Dictionary<string, string>();
+        activeAtEntry = flow?.PossibleAtEntry ?? new Dictionary<int, IReadOnlyList<string>>();
+        activeAtExit = flow?.PossibleAtExit ?? new Dictionary<int, IReadOnlyList<string>>();
+        return valid;
     }
 
     public static bool AllTaskLocalsReachAwait(IReadOnlyCollection<string> awaited,

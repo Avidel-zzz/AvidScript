@@ -220,6 +220,11 @@ internal static class SemanticAsyncControlFlowProjector
                 segments,
                 ordinalByDraft[entry],
                 compilerLocals
+                    // Cleanup drafts reserve a return slot even when no source
+                    // return reaches them. Prune its declaration with those drafts.
+                    .Where(local => local.SymbolId != returnValueSymbolId
+                        || segments.Any(segment => segment.Statements.Any(statement =>
+                            statement.TargetSymbolId == local.SymbolId)))
                     .OrderBy(local => local.SymbolId, StringComparer.Ordinal)
                     .ToArray(),
                 lexicalScopes.OrderBy(scope => scope.Id, StringComparer.Ordinal).ToArray(),

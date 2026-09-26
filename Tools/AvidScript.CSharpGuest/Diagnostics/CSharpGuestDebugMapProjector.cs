@@ -19,6 +19,9 @@ public static class CSharpGuestDebugMapProjector
         CSharpGuestIds.UeBeginPlayCompatibilityFunctionId,
         CSharpGuestIds.UeTickCompatibilityFunctionId,
         CSharpGuestIds.UeEndPlayCompatibilityFunctionId,
+        CSharpTaskOwnerGuards.RetainFunctionId,
+        CSharpTaskOwnerGuards.ReleaseFunctionId,
+        CSharpTaskOwnerGuards.TransferFunctionId,
     };
     private static readonly string[] SourceLessGeneratedFunctionPrefixes =
     {

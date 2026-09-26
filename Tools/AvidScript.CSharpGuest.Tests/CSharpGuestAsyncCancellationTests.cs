@@ -40,9 +40,17 @@ internal static class CSharpGuestAsyncCancellationTests
             "Cancellation lowering: " + string.Join(" | ", lowered.Diagnostics.Select(item => item.Code + ": " + item.Message)));
         GuestModule module = lowered.Module!;
         Check(module.SchemaVersion == 24 && module.IrVersion == "1.23"
-            && module.DirectAwaitRoutes is { Count: 3 } && module.AsyncExceptionRoutes is { Count: 4 }
+            && module.DirectAwaitRoutes is { Count: 4 } && module.AsyncExceptionRoutes is { Count: 8 }
             && module.AsyncExceptionTransfers is { Count: > 0 }, "Cancellation routes and transfers must be explicit.");
         int checks = 6;
+        SemanticAsyncMethod conditional = semantic.AsyncMethods.Single(method => method.MethodSymbolId.Contains(".ConditionalAsync("));
+        SemanticDocument orphanedReturn = semantic with { AsyncMethods = semantic.AsyncMethods.Select(method => method == conditional
+            ? method with { CompilerLocals = new[] { new SemanticAsyncCompilerLocal(
+                "symbol:compiler_local:" + method.MethodSymbolId + ":finally_return", "<finally_return>", "type:int32", method.Span) } }
+            : method).ToArray() };
+        Check(CSharpGuestLowerer.Lower(orphanedReturn, hash, enableAsyncLanguageErrors: true).Diagnostics
+            .Any(item => item.Code == "ASCG1001"), "Reader must still reject an orphaned cleanup return slot.");
+        ++checks;
         Reject(module with { AsyncExceptionTransfers = null }, "ASIR1033", "missing exception ownership metadata");
         Reject(module with { DirectAwaitRoutes = module.DirectAwaitRoutes!.Skip(1).ToArray() },
             "ASIR1031", "omitted direct cancellation producer");
@@ -84,6 +92,14 @@ internal static class CSharpGuestAsyncCancellationTests
         byte[] json = GuestIrSerializer.Serialize(module);
         Check(json.SequenceEqual(GuestIrSerializer.Serialize(GuestIrSerializer.Deserialize(json))),
             "Cancellation IR must round trip canonically.");
+        string irHash = Convert.ToHexString(SHA256.HashData(json)).ToLowerInvariant();
+        string frontendHash = Convert.ToHexString(SHA256.HashData(FrontendSerializer.Serialize(frontend))).ToLowerInvariant();
+        CSharpGuestDebugMap debugMap = CSharpGuestDebugMapProjector.Project(semantic, module, irHash, frontendHash);
+        Check(debugMap.DefinedFunctionCount == module.Functions.Count + module.FramedExports.Count
+            && debugMap.Functions.All(function => !function.GuestFunctionId.StartsWith("function:$async:task_owner:")
+                && module.Functions[function.WasmFunctionIndex - debugMap.ImportedFunctionCount].Id == function.GuestFunctionId),
+            "Generated ownership helpers retain WASM index space without invented source locations.");
+        ++checks;
         WasmCompilationResult compiled = WasmModuleCompiler.Compile(module);
         Check(compiled.Succeeded, "Cancellation codegen: " + string.Join(" | ", compiled.Diagnostics.Select(item => item.Message)));
         string? directory = Environment.GetEnvironmentVariable("AVIDSCRIPT_CSHARP_CANCELLATION_WASM_DIR");

@@ -206,6 +206,8 @@ internal static class CSharpAsyncCfgLowerer
         string activePrefixBlockId = functionEntryBlockId;
         List<GuestInstruction> prefixInstructions = new();
         List<GuestBasicBlock> blocks = new();
+        if (incoming is null && !CSharpTaskOwnerGuards.Initialize(context, method,
+                entry.SegmentOrdinal, prefixInstructions)) return false;
         if (incoming is null && method.TaskResultTypeId is not null)
         {
             if (abi.TaskResultImportId is null

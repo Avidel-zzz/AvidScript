@@ -155,6 +155,7 @@ public static class CSharpGuestLowerer
             dataPool,
             diagnostics);
         functions.AddRange(asyncMethods.Functions);
+        functions.AddRange(CSharpTaskOwnerGuards.Build(document));
         if (CSharpTaskResultAbi.Supports(document))
             imports = imports.Append(CSharpTaskResultAbi.Import())
                 .Append(CSharpTaskResultAbi.BindProducerImport())

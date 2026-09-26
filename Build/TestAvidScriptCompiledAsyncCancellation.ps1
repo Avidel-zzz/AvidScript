@@ -118,7 +118,7 @@ try {
     [IO.File]::WriteAllText($sourcePath, $sharedSource + "`n" + $adapter, [Text.UTF8Encoding]::new($false))
     $reference = & $DotNetPath run --project Fixtures/Phase66/AsyncCancellationFlow.Reference.csproj -c Release
     $reference | Write-Output
-    if ($LASTEXITCODE -ne 0 -or @($reference | Where-Object { $_ -ceq 'AsyncCancellationFlow.Reference: 20/20 passed' }).Count -ne 1) {
+    if ($LASTEXITCODE -ne 0 -or @($reference | Where-Object { $_ -ceq 'AsyncCancellationFlow.Reference: 28/28 passed' }).Count -ne 1) {
         throw 'The same-source .NET reference failed.'
     }
     $compiler = & $DotNetPath run --project Tools/AvidScript.CSharpGuest.Tests/AvidScript.CSharpGuest.Tests.csproj -c Release -- --async-cancellation
@@ -163,15 +163,15 @@ try {
     $success = [regex]::Matches($log, 'Test Completed\. Result=\{Success\} Name=\{CompiledAsyncCancellation\} Path=\{AvidScript\.Runtime\.Continuation\.CompiledAsyncCancellation\}').Count
     $failed = [regex]::Matches($log, 'Test Completed\. Result=\{Fail\}').Count
     $complete = [regex]::Matches($log, '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*\*').Count
-    $cases = [regex]::Matches($log, 'compiled cancellation backend=[01] cancel=[01] case=(?:[0-9]|1[01]) result=\d+ trace=\d+ resumes=\d+ cancelled=\d+').Value | Sort-Object -Unique
-    if ($found -ne 1 -or $success -ne 1 -or $failed -ne 0 -or $complete -ne 1 -or @($cases).Count -ne 48 -or
-        -not $log.Contains('CompiledAsyncCancellation: 48/48 passed')) {
+    $cases = [regex]::Matches($log, 'compiled cancellation backend=[01] cancel=[01] case=(?:[0-9]|1[0-5]) result=\d+ trace=\d+ resumes=\d+ cancelled=\d+').Value | Sort-Object -Unique
+    if ($found -ne 1 -or $success -ne 1 -or $failed -ne 0 -or $complete -ne 1 -or @($cases).Count -ne 64 -or
+        -not $log.Contains('CompiledAsyncCancellation: 64/64 passed')) {
         throw "Compiled cancellation evidence incomplete: found=$found success=$success failed=$failed complete=$complete cases=$(@($cases).Count) log=$logPath"
     }
     [ordered]@{
-        passed = 48
-        total = 48
-        reference_passed = 20
+        passed = 64
+        total = 64
+        reference_passed = 28
         import_contracts_passed = 42
         managed_import_contracts_passed = 54
         formal_build_contracts_passed = 4
@@ -182,7 +182,7 @@ try {
         manifest = Join-Path $outputRoot 'cancellation.avidscript.json'
         log = $logPath
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $runRoot 'results.json') -Encoding utf8NoBOM
-    Write-Output "Formal C# cancellation: 48/48 passed; .NET=20/20 imports=42/42 build=4/4; wasm_sha256=$wasmHash; evidence=$runRoot; log=$logPath"
+    Write-Output "Formal C# cancellation: 64/64 passed; .NET=28/28 imports=42/42 build=4/4; wasm_sha256=$wasmHash; evidence=$runRoot; log=$logPath"
 }
 finally {
     $env:DOTNET_CLI_HOME = $priorCliHome
