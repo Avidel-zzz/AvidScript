@@ -843,7 +843,7 @@ internal static class CSharpOperationLowerer
                 Array.Empty<string>(),
                 null,
                 null,
-                new GuestConstant("zero", null)));
+                new GuestConstant(type.Kind == "managed_ref" ? "null" : "zero", null)));
         }
         return result;
     }

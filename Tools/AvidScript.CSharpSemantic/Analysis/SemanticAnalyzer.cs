@@ -127,6 +127,11 @@ public static class SemanticAnalyzer
         symbols = symbols.Concat(controlFlowProjection.CompilerLocalSymbols)
             .OrderBy(symbol => symbol.Id, StringComparer.Ordinal)
             .ToArray();
+        SemanticInstanceInitializerProjection initializers = SemanticInstanceInitializerNormalizer.Normalize(
+            context, typeRegistry, callableProjection.Callables, operationProjection.Methods, controlFlowProjection.Graphs);
+        callableProjection = callableProjection with { Callables = initializers.Callables };
+        operationProjection = operationProjection with { Methods = initializers.Methods };
+        controlFlowProjection = controlFlowProjection with { Graphs = initializers.Graphs };
         SemanticLexicalCaptureProjection lexicalCaptures = SemanticLexicalCaptureNormalizer.Normalize(
             context, symbols, callableProjection.Callables, operationProjection.Methods,
             controlFlowProjection.Graphs, asyncProjection.Methods);
@@ -156,6 +161,7 @@ public static class SemanticAnalyzer
                 site.Span))
             .ToArray();
         IReadOnlyList<SemanticDiagnostic> supportDiagnostics = supportProjection.Diagnostics
+            .Concat(initializers.Diagnostics)
             .Concat(lexicalCaptures.Diagnostics)
             .Concat(genericProjection.Diagnostics)
             .Concat(operationProjection.Diagnostics)

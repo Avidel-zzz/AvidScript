@@ -443,7 +443,7 @@ internal static class SemanticControlFlowProjector
         }
     }
 
-    private static SemanticControlFlowGraph ProjectGraph(
+    internal static SemanticControlFlowGraph ProjectGraph(
         ControlFlowGraph graph,
         IMethodSymbol method,
         SemanticCompilationUnit unit,

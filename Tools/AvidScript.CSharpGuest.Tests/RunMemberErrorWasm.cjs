@@ -44,13 +44,14 @@ for (const fixture of fixtures) {
                 const id = u32(cursor), size = u32(cursor + 4), count = u32(cursor + 8);
                 cursor += 12;
                 assert.ok(id > 0 && size > 0 && !layouts.has(id));
-                const references = [];
+                const references = [], targets = new Map();
                 for (let edge = 0; edge < count; edge++, cursor += 8) {
                     const offset = u32(cursor);
                     assert.ok(offset + 8 <= size);
                     references.push(offset);
+                    targets.set(offset, u32(cursor + 4));
                 }
-                layouts.set(id, { size, references });
+                layouts.set(id, { size, references, targets });
             }
             assert.equal(cursor, input + inputBytes);
         } else if (command === 2) {
@@ -87,12 +88,30 @@ for (const fixture of fixtures) {
             const object = objects.get(u64(input + 8));
             const layout = u32(input + 16), offset = u32(input + 20), size = u32(input + 24);
             assert.ok(object && (layout === 0 || layout === object.layout) && offset + size <= object.bytes.length);
+            assert.ok(layouts.get(object.layout).references.every(edge => offset + size <= edge || offset >= edge + 8),
+                'raw byte access must not overlap a reference field');
             if (command === 8) {
                 assert.equal(inputBytes, 28); assert.equal(outputBytes, size);
                 new Uint8Array(memory, output, size).set(object.bytes.subarray(offset, offset + size));
             } else {
                 assert.equal(inputBytes, 28 + size); assert.equal(outputBytes, 0);
                 object.bytes.set(new Uint8Array(memory, input + 28, size), offset);
+            }
+        } else if (command === 10 || command === 11) {
+            const object = objects.get(u64(input + 8));
+            const layout = u32(input + 16), offset = u32(input + 20);
+            assert.ok(object && (layout === 0 || layout === object.layout));
+            const descriptor = layouts.get(object.layout);
+            assert.ok(descriptor.targets.has(offset));
+            const storage = new DataView(object.bytes.buffer);
+            if (command === 10) {
+                assert.equal(inputBytes, 24); assert.equal(outputBytes, 8);
+                put64(storage.getBigUint64(offset, true));
+            } else {
+                assert.equal(inputBytes, 32); assert.equal(outputBytes, 0);
+                const value = u64(input + 24), target = descriptor.targets.get(offset);
+                assert.ok(value === 0n || objects.has(value) && (target === 0 || objects.get(value).layout === target));
+                storage.setBigUint64(offset, value, true);
             }
         } else if (command === 12) collect();
         else throw new Error('Unsupported heap command ' + command);
@@ -120,4 +139,4 @@ for (const fixture of fixtures) {
     }
     assert.ok(collections > fixture.cases.length * 3);
 }
-console.log(`AvidScript.MemberErrors.WasmExecution: ${passed}/${fixtures.reduce((total, fixture) => total + fixture.cases.length * 3, 0)} passed`);
+console.log(`AvidScript.ManagedFixtures.WasmExecution: ${passed}/${fixtures.reduce((total, fixture) => total + fixture.cases.length * 3, 0)} passed`);

@@ -109,7 +109,6 @@ internal static class CSharpGuestReferenceObjectTests
         }
         int count = 5 + Faults(directory);
         foreach (string declaration in new[] {
-            "public class Node { public int Count = 7; }",
             "public class Node { public virtual int Read() => 7; }",
             "public class Parent {} public class Node : Parent {}",
             "public interface IValue {} public class Node : IValue {}",

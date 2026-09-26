@@ -54,6 +54,8 @@ internal static class CSharpReferenceObjects
             }
             if (!document.Symbols.Any(symbol => symbol.Kind == "type" && symbol.TypeId == definitionId))
                 continue;
+            if (type.HasInstanceInitializers
+                && !SemanticInstanceInitializerContract.IsNormalized(document, definitionId)) continue;
             candidates.Add(type.TypeId, new Layout(definitionId, arguments));
         }
         bool Reachable(string id) => document.Reachability is null || document.Reachability.ReachableCallableIds.Contains(id);
@@ -153,7 +155,7 @@ internal static class CSharpReferenceObjects
 
     private static bool Eligible(SemanticClassType type) => type.IsSourceDeclared
         && !type.IsStatic && !type.IsAbstract && !type.IsRecord && !type.HasPrimaryConstructor
-        && !type.HasInstanceInitializers && !type.HasStaticInitialization
+        && !type.HasStaticInitialization
         && !type.HasImplicitInstanceStorage && !type.HasVirtualMembers && !type.HasFinalizer
         && type.BaseTypeId == "type:object"
         && (type.InterfaceTypeIds.Count == 0

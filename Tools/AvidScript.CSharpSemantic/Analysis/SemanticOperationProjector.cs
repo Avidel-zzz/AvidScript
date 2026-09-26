@@ -66,6 +66,23 @@ internal static class SemanticOperationProjector
         ICollection<SemanticDiagnostic>? diagnostics,
         SemanticCaptureRegistry? captureRegistry = null)
     {
+        if (operation is IFieldInitializerOperation { InitializedFields.Length: 1 } initializer
+            && !initializer.InitializedFields[0].IsStatic)
+        {
+            IFieldSymbol field = initializer.InitializedFields[0];
+            SemanticSpan fieldSpan = SemanticSpanFactory.Create(unit.SourceText,
+                field.DeclaringSyntaxReferences.Single().Span);
+            SemanticOperation Node(string kind, string? typeId, string? symbolId,
+                params SemanticOperation[] children) => new(kind, true, null, false, false,
+                    false, false, typeId, symbolId, Array.Empty<string>(), null, null,
+                    null, null, null, fieldSpan, children);
+            SemanticOperation target = Node("field_reference", typeRegistry.Register(field.Type),
+                SemanticSymbolProjector.GetSymbolId(field),
+                Node("instance_reference", typeRegistry.Register(field.ContainingType), null));
+            return Node("expression_statement", null, null,
+                Node("assignment", target.TypeId, null, target,
+                    ProjectOperation(initializer.Value, unit, typeRegistry, diagnostics, captureRegistry)));
+        }
         (string kind, bool hasStableProjection) = DescribeOperation(operation);
         SemanticSupportDecision support = SemanticSupportPolicy.EvaluateOperation(
             operation,

@@ -114,7 +114,7 @@ public static void Tick(float deltaSeconds)
 
 | 项目 | 限制 |
 | --- | --- |
-| C# / .NET | 仅支持部分语法和类库，不能直接使用任意 NuGet 包。[支持范围](Docs/Phase66/P66.C_Language_Execution_Plan.md) |
+| C# / .NET | 支持部分语法，含普通类的字段初始化和构造函数链；不能直接使用任意 NuGet 包。[支持范围](Docs/Phase66/P66.C_Language_Execution_Plan.md) |
 | `async` / `await` | 带返回值的 Task 仅支持 `Task<int>`；`catch` / `finally` 中不支持 `await` |
 | 热重载 | 支持方法体修改；新增属性、修改函数签名需重新编译并重启 Editor |
 | 平台 | Android、iOS 验收未完成 |
