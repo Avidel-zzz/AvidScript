@@ -52,6 +52,9 @@ public sealed record SemanticAsyncMethod(
     public const string PropagateFaultTransferKind = "propagate_fault";
     public const string PropagateCancellationTransferKind = "propagate_cancellation";
     public const string CatchMatchTransferKind = "catch_match";
+    public const string PropagateExceptionTransferKind = "propagate_exception";
+    public const string RethrowTransferKind = "rethrow";
+    public const string EndCatchTransferKind = "end_catch";
     public const string EarlyReturnGuardOperationKind = "async_early_return_guard";
     public const string BlockOperationKind = "async_block";
     public const string LocalDeclarationOperationKind = "async_local_declaration";
@@ -86,7 +89,24 @@ public sealed record SemanticAsyncExceptionPlan(
     [property: JsonPropertyOrder(0)] string SourceId,
     [property: JsonPropertyOrder(1)] int SourceLength,
     [property: JsonPropertyOrder(2)] IReadOnlyList<SemanticAsyncExceptionRegion> Regions,
-    [property: JsonPropertyOrder(3)] IReadOnlyList<SemanticCatchHandler> Catches);
+    [property: JsonPropertyOrder(3)] IReadOnlyList<SemanticCatchHandler> Catches)
+{
+    // Schema 44 preserves cancellation as a typed exception and a distinct Task
+    // terminal state. Older contracts must not reinterpret this owner model.
+    [JsonPropertyOrder(4), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CancellationTypeId { get; init; }
+
+    [JsonPropertyOrder(5), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<SemanticAsyncExceptionScope>? ExceptionScopes { get; init; }
+}
+
+public sealed record SemanticAsyncExceptionScope(
+    [property: JsonPropertyOrder(0)] int ProtectedRegionOrdinal,
+    [property: JsonPropertyOrder(1)] IReadOnlyList<int> CatchRegionOrdinals,
+    [property: JsonPropertyOrder(2)] int? FinallyRegionOrdinal,
+    [property: JsonPropertyOrder(3)] int? ParentProtectedRegionOrdinal,
+    [property: JsonPropertyOrder(4)] int DispatchTarget,
+    [property: JsonPropertyOrder(5)] int UnwindTarget);
 
 public sealed record SemanticAsyncExceptionRegion(
     [property: JsonPropertyOrder(0)] string Kind,

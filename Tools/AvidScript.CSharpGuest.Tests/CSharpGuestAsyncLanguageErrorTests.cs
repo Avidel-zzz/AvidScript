@@ -73,6 +73,24 @@ internal static class CSharpGuestAsyncLanguageErrorTests
             && handlerSemantic.AsyncMethods.Any(method => method.ExceptionPlan is not null)
             && !CSharpGuestLowerer.Lower(handlerSemantic, new string('a', 64)).Succeeded,
             "default Guest compilation must reject an opt-in Semantic 42 handler plan");
+        SemanticDocument cancellationSemantic = SemanticAnalyzer.Analyze(handlerSource,
+            "Scripts/AsyncHandlerVersion.cs", handlerFrontend.Source.Sha256,
+            new[] { new SemanticReferenceSource(CSharpGuestContinuationTests.ReferenceFacade,
+                "generated://AvidScript.Continuations.generated.cs", true) },
+            new SemanticCompilerWorkspace(), enableAsyncExceptionFlow: true,
+            enableAsyncCancellationFlow: true);
+        Check(cancellationSemantic.Succeeded && cancellationSemantic.SchemaVersion == 44
+            && SemanticAsyncInvocationValidator.IsValid(cancellationSemantic),
+            "Task-only cancellation projection must have a valid Semantic 44 identity");
+        foreach (bool bounded in new[] { false, true })
+        {
+            CSharpGuestLoweringResult preview = CSharpGuestLowerer.Lower(cancellationSemantic,
+                new string('a', 64), enableAsyncLanguageErrors: bounded);
+            Check(!preview.Succeeded && preview.Module is null
+                && preview.Diagnostics.Any(item => item.Code == "ASCG1004"
+                    && item.Message.Contains("cancellation owners", StringComparison.Ordinal)),
+                "Semantic 44 cannot execute before Guest cancellation owners are implemented");
+        }
         string exceptionSource = File.ReadAllText(Path.Combine(
             Directory.GetCurrentDirectory(), "Fixtures", "Phase66", "AsyncExceptionFlow.cs"));
         const string exceptionSourceId = "Fixtures/Phase66/AsyncExceptionFlow.cs";
@@ -369,7 +387,7 @@ internal static class CSharpGuestAsyncLanguageErrorTests
         {
             Directory.Delete(directory, recursive: true);
         }
-        return 2;
+        return 3;
     }
 
     private static void Check(bool condition, string message)

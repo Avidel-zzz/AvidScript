@@ -17,12 +17,16 @@ public static class SemanticAsyncExceptionPlanValidator
             && document.SemanticVersion == SemanticContract.AsyncExceptionFlowSemanticVersion;
         bool directCleanup = document.SchemaVersion == SemanticContract.DirectAwaitCleanupSchemaVersion
             && document.SemanticVersion == SemanticContract.DirectAwaitCleanupSemanticVersion;
-        enabled |= directCleanup;
+        bool languageCancellation = document.SchemaVersion == SemanticContract.AsyncCancellationFlowSchemaVersion
+            && document.SemanticVersion == SemanticContract.AsyncCancellationFlowSemanticVersion;
+        enabled |= directCleanup || languageCancellation;
         if (!enabled)
             return document.SchemaVersion != SemanticContract.AsyncExceptionFlowSchemaVersion
                 && document.SemanticVersion != SemanticContract.AsyncExceptionFlowSemanticVersion
                 && document.SchemaVersion != SemanticContract.DirectAwaitCleanupSchemaVersion
                 && document.SemanticVersion != SemanticContract.DirectAwaitCleanupSemanticVersion
+                && document.SchemaVersion != SemanticContract.AsyncCancellationFlowSchemaVersion
+                && document.SemanticVersion != SemanticContract.AsyncCancellationFlowSemanticVersion
                 && document.AsyncMethods.All(method => method is not null
                     && method.ExceptionPlan is null && method.Segments is not null
                     && method.Segments.All(segment => segment is not null
@@ -61,6 +65,10 @@ public static class SemanticAsyncExceptionPlanValidator
                 || method.Segments.Where((segment, ordinal) => segment is null
                     || segment.Ordinal != ordinal || segment.Transfer is null).Any())
                 return false;
+            if (languageCancellation
+                ? !SemanticAsyncCancellationPlanValidator.IsValid(document, method)
+                : plan.CancellationTypeId is not null || plan.ExceptionScopes is not null)
+                return false;
             HashSet<int> regionOrdinals = new();
             Dictionary<int, SemanticAsyncExceptionRegion> catchRegions = new();
             bool hasProtectedAwait = false;
@@ -83,7 +91,7 @@ public static class SemanticAsyncExceptionPlanValidator
                 if (region.Kind == "try")
                     hasProtectedAwait |= region.Segments.Any(ordinal =>
                         method.Segments[ordinal].AwaitSite is { ProducerKind: "task_call" or "task_local" }
-                        || directCleanup && method.Segments[ordinal].AwaitSite is
+                        || (directCleanup || languageCancellation) && method.Segments[ordinal].AwaitSite is
                             { ProducerKind: "delay" or "next_tick" });
             }
             if (!hasProtectedAwait || !plan.Regions.Any(region => region.Kind == "try")
@@ -117,18 +125,26 @@ public static class SemanticAsyncExceptionPlanValidator
                         || transfer.CancellationTarget >= 0
                             && transfer.CancellationTarget < method.Segments.Count);
                 if (!validTargets) return false;
+                if (transfer.Kind != SemanticAsyncMethod.AwaitTransferKind
+                        && transfer.CancellationTarget is not null
+                    || transfer.Kind != SemanticAsyncMethod.CatchMatchTransferKind
+                        && transfer.ExceptionTypeId is not null) return false;
                 switch (transfer.Kind)
                 {
                     case SemanticAsyncMethod.AwaitTransferKind:
                         bool taskAwait = segment.AwaitSite?.ProducerKind is "task_call" or "task_local";
-                        bool directAwait = directCleanup && segment.AwaitSite?.ProducerKind is "delay" or "next_tick";
+                        bool directAwait = (directCleanup || languageCancellation)
+                            && segment.AwaitSite?.ProducerKind is "delay" or "next_tick";
                         bool protectedAwait = plan.Regions.Any(region => region.Kind == "try"
                             && region.Segments.Contains(segment.Ordinal));
                         if (segment.AwaitSite is null || transfer.PrimaryTarget < 0
                             || transfer.ExceptionTypeId is not null
                             || taskAwait && ((transfer.SecondaryTarget >= 0) !=
                                 (transfer.CancellationTarget is >= 0)
-                                || transfer.SecondaryTarget == transfer.CancellationTarget)
+                                || (languageCancellation
+                                    ? transfer.SecondaryTarget >= 0
+                                        && transfer.SecondaryTarget != transfer.CancellationTarget
+                                    : transfer.SecondaryTarget == transfer.CancellationTarget))
                             || directAwait && transfer.SecondaryTarget >= 0
                             || !taskAwait && !directAwait && transfer.CancellationTarget is not null)
                             return false;
@@ -140,10 +156,10 @@ public static class SemanticAsyncExceptionPlanValidator
                         if (transfer.SecondaryTarget >= 0
                             && !protectedAwait || transfer.CancellationTarget is not null
                             && !protectedAwait) return false;
-                        if (directAwait && transfer.CancellationTarget is int directCancellation
+                        if (!languageCancellation && directAwait && transfer.CancellationTarget is int directCancellation
                             && !plan.Regions.Any(region => region.Kind == "finally"
                                 && region.Segments.Contains(directCancellation))) return false;
-                        if (transfer.CancellationTarget is int cancellationTarget
+                        if (!languageCancellation && transfer.CancellationTarget is int cancellationTarget
                             && !ValidCancellationPath(method, cancellationTarget)) return false;
                         break;
                     case SemanticAsyncMethod.CatchMatchTransferKind:
@@ -157,12 +173,21 @@ public static class SemanticAsyncExceptionPlanValidator
                         break;
                     case SemanticAsyncMethod.PropagateFaultTransferKind:
                     case SemanticAsyncMethod.PropagateCancellationTransferKind:
+                        if (languageCancellation) return false;
+                        goto case SemanticAsyncMethod.PropagateExceptionTransferKind;
+                    case SemanticAsyncMethod.PropagateExceptionTransferKind:
+                        if (transfer.Kind == SemanticAsyncMethod.PropagateExceptionTransferKind
+                            && !languageCancellation) return false;
                         if (segment.AwaitSite is not null || transfer.Condition is not null
                             || transfer.PrimaryTarget != -1 || transfer.SecondaryTarget != -1
                             || transfer.CancellationTarget is not null
                             || transfer.ExceptionTypeId is not null) return false;
                         break;
                     case SemanticAsyncMethod.GotoTransferKind:
+                    case SemanticAsyncMethod.RethrowTransferKind:
+                    case SemanticAsyncMethod.EndCatchTransferKind:
+                        if (transfer.Kind != SemanticAsyncMethod.GotoTransferKind
+                            && !languageCancellation) return false;
                         if (segment.AwaitSite is not null || transfer.Condition is not null
                             || transfer.PrimaryTarget < 0 || transfer.SecondaryTarget != -1)
                             return false;
@@ -230,5 +255,8 @@ public static class SemanticAsyncExceptionPlanValidator
     private static bool IsExceptionTransfer(string kind) =>
         kind is SemanticAsyncMethod.CatchMatchTransferKind
             or SemanticAsyncMethod.PropagateFaultTransferKind
-            or SemanticAsyncMethod.PropagateCancellationTransferKind;
+            or SemanticAsyncMethod.PropagateCancellationTransferKind
+            or SemanticAsyncMethod.PropagateExceptionTransferKind
+            or SemanticAsyncMethod.RethrowTransferKind
+            or SemanticAsyncMethod.EndCatchTransferKind;
 }

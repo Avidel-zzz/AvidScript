@@ -30,7 +30,9 @@ public static class SemanticAsyncErrorPlanValidator
             || document.SchemaVersion == SemanticContract.AsyncExceptionFlowSchemaVersion
                 && document.SemanticVersion == SemanticContract.AsyncExceptionFlowSemanticVersion
             || document.SchemaVersion == SemanticContract.DirectAwaitCleanupSchemaVersion
-                && document.SemanticVersion == SemanticContract.DirectAwaitCleanupSemanticVersion;
+                && document.SemanticVersion == SemanticContract.DirectAwaitCleanupSemanticVersion
+            || document.SchemaVersion == SemanticContract.AsyncCancellationFlowSchemaVersion
+                && document.SemanticVersion == SemanticContract.AsyncCancellationFlowSemanticVersion;
         if (originalContract && !document.AsyncMethods.Any(method => method?.ErrorPlan is not null))
             return false;
         foreach (SemanticAsyncMethod? method in document.AsyncMethods)

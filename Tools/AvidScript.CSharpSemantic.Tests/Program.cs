@@ -6,6 +6,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--async-cancellation")
+            {
+                int focused = SemanticAsyncCancellationTests.Run();
+                Console.WriteLine($"AvidScript.CSharpSemantic.Tests.AsyncCancellation: {focused}/{focused} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--async-invocation")
             {
                 int focused = SemanticAsyncInvocationTests.Run();
@@ -38,7 +44,7 @@ internal static class Program
                 SemanticAsyncTests.Run() + SemanticAsyncScopeTests.Run() + SemanticAsyncInvocationTests.Run() + SemanticUeTypeDeclarationTests.Run() +
                 SemanticCompilerWorkspaceTests.Run() + SemanticLocalFunctionTests.Run() + SemanticDelegateTypeTests.Run() + SemanticClosureTests.Run()
                 + SemanticClosureAllocationTests.Run() + SemanticClassTypeTests.Run() + SemanticDispatchTests.Run() + SemanticUeMethodCatalogTests.Run()
-                + SemanticExceptionFlowTests.Run();
+                + SemanticExceptionFlowTests.Run() + SemanticAsyncCancellationTests.Run();
             Console.WriteLine($"AvidScript.CSharpSemantic.Tests: {count}/{count} passed");
             return 0;
         }

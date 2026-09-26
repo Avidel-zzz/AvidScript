@@ -36,13 +36,17 @@ public static class SemanticAnalyzer
         IReadOnlyList<SemanticReferenceSource> referenceSources,
         SemanticCompilerWorkspace workspace,
         bool enableAsyncExceptionFlow = false,
-        bool enableDirectAwaitCleanup = false)
+        bool enableDirectAwaitCleanup = false,
+        bool enableAsyncCancellationFlow = false)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceId);
         ArgumentException.ThrowIfNullOrWhiteSpace(frontendSourceSha256);
         ArgumentNullException.ThrowIfNull(referenceSources);
         ArgumentNullException.ThrowIfNull(workspace);
+        if (enableAsyncCancellationFlow && !enableAsyncExceptionFlow)
+            throw new ArgumentException("Async cancellation flow requires async exception flow.",
+                nameof(enableAsyncCancellationFlow));
 
         string sourceSha256 = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source))).ToLowerInvariant();
         SemanticSource semanticSource = new(sourceId, sourceSha256, frontendSourceSha256, source.Length);
@@ -107,7 +111,8 @@ public static class SemanticAnalyzer
             asyncProjection.Methods,
             callableProjection.Callables,
             enableAsyncExceptionFlow,
-            enableDirectAwaitCleanup);
+            enableDirectAwaitCleanup,
+            enableAsyncCancellationFlow);
         asyncProjection = asyncProjection with
         {
             Methods = asyncProjection.Methods.Concat(
@@ -213,12 +218,15 @@ public static class SemanticAnalyzer
         bool hasTaskAliases = asyncProjection.Methods.Any(method => method.TaskLocalSymbolIds is not null);
         bool hasAsyncLanguageErrors = asyncProjection.Methods.Any(method => method.ErrorPlan is not null);
         bool hasAsyncExceptionPlans = asyncProjection.Methods.Any(method => method.ExceptionPlan is not null);
+        bool hasAsyncCancellationFlow = asyncProjection.Methods.Any(method =>
+            method.ExceptionPlan?.CancellationTypeId is not null);
         bool hasDirectAwaitCleanup = asyncProjection.Methods.Any(method => method.ExceptionPlan is not null
             && method.Segments.Any(segment => segment.AwaitSite?.ProducerKind is "delay" or "next_tick"
                 && segment.Transfer?.CancellationTarget is >= 0));
         bool hasTaskLanguageErrors = hasExceptionFlows && hasTaskResults;
         return new SemanticDocument(
-            hasDirectAwaitCleanup ? SemanticContract.DirectAwaitCleanupSchemaVersion
+            hasAsyncCancellationFlow ? SemanticContract.AsyncCancellationFlowSchemaVersion
+                : hasDirectAwaitCleanup ? SemanticContract.DirectAwaitCleanupSchemaVersion
                 : hasAsyncExceptionPlans ? SemanticContract.AsyncExceptionFlowSchemaVersion
                 : hasAsyncLanguageErrors ? SemanticContract.AsyncLanguageErrorSchemaVersion
                 : hasTaskLanguageErrors ? SemanticContract.TaskLanguageErrorSchemaVersion
@@ -230,7 +238,8 @@ public static class SemanticAnalyzer
                 : hasTaskResults ? SemanticContract.TaskResultSchemaVersion
                 : SemanticContract.CurrentSchemaVersion,
             "csharp",
-            hasDirectAwaitCleanup ? SemanticContract.DirectAwaitCleanupSemanticVersion
+            hasAsyncCancellationFlow ? SemanticContract.AsyncCancellationFlowSemanticVersion
+                : hasDirectAwaitCleanup ? SemanticContract.DirectAwaitCleanupSemanticVersion
                 : hasAsyncExceptionPlans ? SemanticContract.AsyncExceptionFlowSemanticVersion
                 : hasAsyncLanguageErrors ? SemanticContract.AsyncLanguageErrorSemanticVersion
                 : hasTaskLanguageErrors ? SemanticContract.TaskLanguageErrorSemanticVersion

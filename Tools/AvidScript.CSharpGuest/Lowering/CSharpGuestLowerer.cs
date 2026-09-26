@@ -41,6 +41,10 @@ public static class CSharpGuestLowerer
         ArgumentNullException.ThrowIfNull(substitutes);
 
         List<GuestDiagnostic> diagnostics = new();
+        if (document.SchemaVersion == SemanticContract.AsyncCancellationFlowSchemaVersion
+            || document.SemanticVersion == SemanticContract.AsyncCancellationFlowSemanticVersion)
+            return Failure(new[] { new GuestDiagnostic("ASCG1004", "error",
+                "Async cancellation flow is a Semantic preview; versioned Guest cancellation owners are not implemented yet.", null) });
         bool directCleanup = document.SchemaVersion == SemanticContract.DirectAwaitCleanupSchemaVersion
             && document.SemanticVersion == SemanticContract.DirectAwaitCleanupSemanticVersion;
         bool asyncExceptionFlow = enableAsyncLanguageErrors

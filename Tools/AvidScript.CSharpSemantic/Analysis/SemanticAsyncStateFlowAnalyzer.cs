@@ -329,9 +329,11 @@ public static class SemanticAsyncStateFlowAnalyzer
                     ? new HashSet<string>(StringComparer.Ordinal)
                     : TransferValue(transfer.Condition,
                         new HashSet<string>(StringComparer.Ordinal), localIds),
-            SemanticAsyncMethod.PropagateCancellationTransferKind =>
+            SemanticAsyncMethod.PropagateCancellationTransferKind
+                or SemanticAsyncMethod.PropagateExceptionTransferKind =>
                 new HashSet<string>(StringComparer.Ordinal),
-            SemanticAsyncMethod.GotoTransferKind =>
+            SemanticAsyncMethod.GotoTransferKind or SemanticAsyncMethod.EndCatchTransferKind
+                or SemanticAsyncMethod.RethrowTransferKind =>
                 GetSuccessorLive(segment, transfer.PrimaryTarget, liveIn, issues),
             SemanticAsyncMethod.BranchTransferKind => TransferValue(
                 transfer.Condition!,

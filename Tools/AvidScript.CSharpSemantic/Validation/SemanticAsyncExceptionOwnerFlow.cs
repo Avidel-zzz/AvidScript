@@ -11,6 +11,7 @@ public enum SemanticAsyncExceptionOwnerState
     Fault = 2,
     HandledFault = 4,
     Cancellation = 8,
+    HandledCancellation = 16,
 }
 
 // The source Task remains an owner on every fault/cancel path until a terminal
@@ -29,6 +30,7 @@ public static class SemanticAsyncExceptionOwnerFlow
 
         SemanticAsyncExceptionOwnerState[] states =
             new SemanticAsyncExceptionOwnerState[method.Segments.Count];
+        bool languageCancellation = method.ExceptionPlan.CancellationTypeId is not null;
         Queue<(int Ordinal, SemanticAsyncExceptionOwnerState State)> pending = new();
         pending.Enqueue((method.EntrySegmentOrdinal, SemanticAsyncExceptionOwnerState.Normal));
         while (pending.Count > 0)
@@ -60,10 +62,31 @@ public static class SemanticAsyncExceptionOwnerFlow
                             SemanticAsyncExceptionOwnerState.Cancellation));
                     break;
                 case SemanticAsyncMethod.CatchMatchTransferKind:
-                    if (state != SemanticAsyncExceptionOwnerState.Fault) return false;
+                    if (state != SemanticAsyncExceptionOwnerState.Fault
+                        && !(languageCancellation && state == SemanticAsyncExceptionOwnerState.Cancellation))
+                        return false;
                     pending.Enqueue((transfer.PrimaryTarget,
-                        SemanticAsyncExceptionOwnerState.HandledFault));
+                        state == SemanticAsyncExceptionOwnerState.Fault
+                            ? SemanticAsyncExceptionOwnerState.HandledFault
+                            : SemanticAsyncExceptionOwnerState.HandledCancellation));
                     pending.Enqueue((transfer.SecondaryTarget, state));
+                    break;
+                case SemanticAsyncMethod.EndCatchTransferKind:
+                case SemanticAsyncMethod.RethrowTransferKind:
+                    if (!languageCancellation || state is not
+                        (SemanticAsyncExceptionOwnerState.HandledFault
+                            or SemanticAsyncExceptionOwnerState.HandledCancellation)) return false;
+                    pending.Enqueue((transfer.PrimaryTarget,
+                        transfer.Kind == SemanticAsyncMethod.EndCatchTransferKind
+                            ? SemanticAsyncExceptionOwnerState.Normal
+                            : state == SemanticAsyncExceptionOwnerState.HandledFault
+                                ? SemanticAsyncExceptionOwnerState.Fault
+                                : SemanticAsyncExceptionOwnerState.Cancellation));
+                    break;
+                case SemanticAsyncMethod.PropagateExceptionTransferKind:
+                    if (!languageCancellation || state is not
+                        (SemanticAsyncExceptionOwnerState.Fault
+                            or SemanticAsyncExceptionOwnerState.Cancellation)) return false;
                     break;
                 case SemanticAsyncMethod.PropagateFaultTransferKind:
                     if (state is not (SemanticAsyncExceptionOwnerState.Fault
@@ -74,7 +97,9 @@ public static class SemanticAsyncExceptionOwnerFlow
                     break;
                 case SemanticAsyncMethod.ReturnTransferKind:
                     if (state is not (SemanticAsyncExceptionOwnerState.Normal
-                        or SemanticAsyncExceptionOwnerState.HandledFault)) return false;
+                        or SemanticAsyncExceptionOwnerState.HandledFault)
+                        && !(languageCancellation
+                            && state == SemanticAsyncExceptionOwnerState.HandledCancellation)) return false;
                     break;
                 case SemanticAsyncMethod.ThrowTransferKind:
                     break;

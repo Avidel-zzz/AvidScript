@@ -16,9 +16,11 @@ internal static class SemanticAsyncExceptionRegionBinder
         MethodDeclarationSyntax declaration,
         SemanticExceptionFlow flow,
         SemanticAsyncControlFlowProjection projection,
-        out IReadOnlyList<SemanticAsyncExceptionPreviewRegion> bound)
+        out IReadOnlyList<SemanticAsyncExceptionPreviewRegion> bound,
+        out IReadOnlyList<SemanticAsyncExceptionScope> scopes)
     {
         bound = Array.Empty<SemanticAsyncExceptionPreviewRegion>();
+        scopes = Array.Empty<SemanticAsyncExceptionScope>();
         if (flow.Regions is null || flow.Catches is null
             || projection.PreviewRegions.Count == 0) return false;
 
@@ -136,7 +138,8 @@ internal static class SemanticAsyncExceptionRegionBinder
                 { Kind: SemanticAsyncMethod.AwaitTransferKind,
                     SecondaryTarget: >= 0 } transfer
                 && (transfer.CancellationTarget is not >= 0
-                    || transfer.CancellationTarget == transfer.SecondaryTarget
+                    || projection.ExceptionScopes.Count == 0
+                        && transfer.CancellationTarget == transfer.SecondaryTarget
                     || !regions.Any(region => region.Kind == "try"
                         && region.Segments.Contains(segment.Ordinal))))) return false;
         foreach (var (source, binding) in bindings)
@@ -161,6 +164,21 @@ internal static class SemanticAsyncExceptionRegionBinder
         bound = regions.OrderBy(region => region.SourceSpan.Start)
             .ThenBy(region => region.Kind, StringComparer.Ordinal)
             .ToArray();
+        List<SemanticAsyncExceptionScope> exceptionScopes = new();
+        foreach (SemanticAsyncExceptionScopeDraft draft in projection.ExceptionScopes)
+        {
+            TryStatementSyntax? source = bindings.Keys.SingleOrDefault(item => item.Span == draft.TrySpan);
+            if (source is null) return false;
+            var binding = bindings[source];
+            TryStatementSyntax? parent = source.Ancestors().OfType<TryStatementSyntax>()
+                .FirstOrDefault(bindings.ContainsKey);
+            if (parent is not null && !parent.Block.Span.Contains(source.Span)) return false;
+            exceptionScopes.Add(new(binding.Protected, binding.Catches,
+                binding.Finally < 0 ? null : binding.Finally,
+                parent is null ? null : bindings[parent].Protected,
+                draft.DispatchTarget, draft.UnwindTarget));
+        }
+        scopes = exceptionScopes.OrderBy(scope => scope.ProtectedRegionOrdinal).ToArray();
         return true;
     }
 

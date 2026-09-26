@@ -18,7 +18,12 @@ internal sealed record SemanticAsyncControlFlowProjection(
 {
     public IReadOnlyList<SemanticAsyncPreviewRegionDraft> PreviewRegions { get; init; } =
         Array.Empty<SemanticAsyncPreviewRegionDraft>();
+    public IReadOnlyList<SemanticAsyncExceptionScopeDraft> ExceptionScopes { get; init; } =
+        Array.Empty<SemanticAsyncExceptionScopeDraft>();
 }
+
+internal sealed record SemanticAsyncExceptionScopeDraft(
+    TextSpan TrySpan, int DispatchTarget, int UnwindTarget);
 
 // Membership is captured while the structured CFG owns draft identities.
 // A later binder pairs the source construct with Roslyn's region ordinal.
@@ -42,7 +47,8 @@ internal static class SemanticAsyncControlFlowProjector
         bool allowValueReturns = false,
         ITypeSymbol? resultType = null,
         bool previewSuspendedFinally = false,
-        bool allowDirectAwaitCleanup = false)
+        bool allowDirectAwaitCleanup = false,
+        bool allowAsyncCancellationFlow = false)
     {
         Builder builder = new(
             context,
@@ -53,7 +59,8 @@ internal static class SemanticAsyncControlFlowProjector
             allowValueReturns,
             resultType,
             previewSuspendedFinally,
-            allowDirectAwaitCleanup);
+            allowDirectAwaitCleanup,
+            allowAsyncCancellationFlow);
         if (!builder.TryBuild(body, ref nextCallbackId, out projected))
         {
             projected = null;
@@ -73,6 +80,8 @@ internal static class SemanticAsyncControlFlowProjector
         private readonly ITypeSymbol? resultType;
         private readonly bool previewSuspendedFinally;
         private readonly bool allowDirectAwaitCleanup;
+        private readonly bool allowAsyncCancellationFlow;
+        private readonly List<SemanticAsyncExceptionScopeDraft> exceptionScopes = new();
         private readonly List<DraftSegment> drafts = new();
         private readonly List<(string Kind, TextSpan TrySpan, TextSpan PartSpan,
             IReadOnlyList<int> DraftIds)> previewRegions = new();
@@ -96,7 +105,8 @@ internal static class SemanticAsyncControlFlowProjector
             bool allowValueReturns,
             ITypeSymbol? resultType,
             bool previewSuspendedFinally,
-            bool allowDirectAwaitCleanup)
+            bool allowDirectAwaitCleanup,
+            bool allowAsyncCancellationFlow)
         {
             this.context = context;
             this.semanticModel = semanticModel;
@@ -107,6 +117,7 @@ internal static class SemanticAsyncControlFlowProjector
             this.resultType = resultType;
             this.previewSuspendedFinally = previewSuspendedFinally;
             this.allowDirectAwaitCleanup = allowDirectAwaitCleanup;
+            this.allowAsyncCancellationFlow = allowAsyncCancellationFlow;
         }
 
         public bool TryBuild(
@@ -214,6 +225,13 @@ internal static class SemanticAsyncControlFlowProjector
                 lexicalScopes.OrderBy(scope => scope.Id, StringComparer.Ordinal).ToArray(),
                 BuildErrorPlan(segments))
             {
+                ExceptionScopes = exceptionScopes
+                    .OrderBy(scope => scope.TrySpan.Start)
+                    .Select(scope => scope with
+                    {
+                        DispatchTarget = RemapTarget(scope.DispatchTarget, ordinalByDraft),
+                        UnwindTarget = RemapTarget(scope.UnwindTarget, ordinalByDraft),
+                    }).ToArray(),
                 PreviewRegions = previewRegions
                     .OrderBy(region => region.TrySpan.Start)
                     .ThenBy(region => region.Kind == "try" ? 0
@@ -350,7 +368,8 @@ internal static class SemanticAsyncControlFlowProjector
                     return BuildForEach(loop, successor, targets, depth);
 
                 case TryStatementSyntax tryStatement:
-                    return previewSuspendedFinally && tryStatement.Catches.Count > 0
+                    return previewSuspendedFinally
+                        && (tryStatement.Catches.Count > 0 || allowAsyncCancellationFlow)
                         ? BuildTryCatchPreview(tryStatement, successor, targets, depth)
                         : BuildTryFinally(tryStatement, successor, targets, depth);
 
@@ -418,7 +437,11 @@ internal static class SemanticAsyncControlFlowProjector
 
                 case ThrowStatementSyntax { Expression: null } when previewSuspendedFinally:
                     return faultCleanupTarget >= 0
-                        ? AddGoto(statement.Span, faultCleanupTarget)
+                        ? allowAsyncCancellationFlow
+                            ? AddDraft(statement.Span, Array.Empty<SemanticAsyncStatement>(), null,
+                                new DraftTransfer(SemanticAsyncMethod.RethrowTransferKind,
+                                    null, faultCleanupTarget, -1))
+                            : AddGoto(statement.Span, faultCleanupTarget)
                         : Reject("Rethrow has no enclosing async error owner.", statement.Span,
                             "ASCS5420");
 
@@ -508,6 +531,18 @@ internal static class SemanticAsyncControlFlowProjector
             LoopTargets targets,
             int depth)
         {
+            // Schema 44 initially owns one live exception packet. Nested handlers
+            // inside a handler/cleanup and replacement throws need a stacked owner
+            // contract; reject them until lowering and validation support it.
+            if (allowAsyncCancellationFlow && (
+                statement.DescendantNodes().OfType<ThrowStatementSyntax>().Any(node =>
+                    node.Expression is not null)
+                || statement.Catches.Any(clause => clause.Block.DescendantNodes()
+                    .OfType<TryStatementSyntax>().Any())
+                || statement.Finally?.Block.DescendantNodes()
+                    .OfType<TryStatementSyntax>().Any() == true))
+                return Reject("Cancellation flow preview does not yet support replacement throws or nested handlers inside catch/finally.",
+                    statement.Span, "ASCS5420");
             if (!allowValueReturns || statement.Catches.Any(clause =>
                     clause.Filter is not null
                     || !string.IsNullOrEmpty(clause.Declaration?.Identifier.ValueText))
@@ -581,7 +616,9 @@ internal static class SemanticAsyncControlFlowProjector
             {
                 faultContinuation = AddDraft(statement.Span,
                     Array.Empty<SemanticAsyncStatement>(), null,
-                    new DraftTransfer(SemanticAsyncMethod.PropagateFaultTransferKind,
+                    new DraftTransfer(allowAsyncCancellationFlow
+                            ? SemanticAsyncMethod.PropagateExceptionTransferKind
+                            : SemanticAsyncMethod.PropagateFaultTransferKind,
                         null, -1, -1));
                 if (faultContinuation < 0) return -1;
             }
@@ -590,7 +627,7 @@ internal static class SemanticAsyncControlFlowProjector
                     LoopTargets.None, depth + 1, cleanupDrafts);
             if (faultExit < 0) return -1;
 
-            int cancellationContinuation = cancellationCleanupTarget;
+            int cancellationContinuation = allowAsyncCancellationFlow ? faultExit : cancellationCleanupTarget;
             if (cancellationContinuation < 0)
             {
                 cancellationContinuation = AddDraft(statement.Span,
@@ -600,7 +637,7 @@ internal static class SemanticAsyncControlFlowProjector
                         null, -1, -1));
                 if (cancellationContinuation < 0) return -1;
             }
-            int cancellationExit = cleanup is null ? cancellationContinuation
+            int cancellationExit = allowAsyncCancellationFlow || cleanup is null ? cancellationContinuation
                 : BuildPreviewRegionBlock(cleanup, cancellationContinuation,
                     LoopTargets.None, depth + 1, cleanupDrafts);
             if (cancellationExit < 0) return -1;
@@ -608,7 +645,8 @@ internal static class SemanticAsyncControlFlowProjector
             int outerReturn = returnCleanupTarget;
             int outerFault = faultCleanupTarget;
             int outerCancellation = cancellationCleanupTarget;
-            returnCleanupTarget = returnExit;
+            returnCleanupTarget = allowAsyncCancellationFlow && returnExit >= 0
+                ? AddEndCatch(statement.Span, returnExit) : returnExit;
             faultCleanupTarget = faultExit;
             cancellationCleanupTarget = cancellationExit;
             int[] handlerEntries = new int[statement.Catches.Count];
@@ -616,10 +654,25 @@ internal static class SemanticAsyncControlFlowProjector
                 .Select(_ => new List<int>()).ToArray();
             for (int index = statement.Catches.Count - 1; index >= 0; --index)
             {
+                BlockSyntax handlerBlock = statement.Catches[index].Block;
+                int handlerExit = allowAsyncCancellationFlow
+                    ? AddEndCatch(handlerBlock.Span, normalExit) : normalExit;
+                int handlerBreak = allowAsyncCancellationFlow && breakExit >= 0
+                    ? AddEndCatch(handlerBlock.Span, breakExit) : breakExit;
+                int handlerContinue = allowAsyncCancellationFlow && continueExit >= 0
+                    ? AddEndCatch(handlerBlock.Span, continueExit) : continueExit;
                 handlerEntries[index] = BuildPreviewRegionBlock(
-                    statement.Catches[index].Block, normalExit,
-                    new LoopTargets(breakExit, continueExit), depth + 1,
+                    handlerBlock, handlerExit,
+                    new LoopTargets(handlerBreak, handlerContinue), depth + 1,
                     handlerDrafts[index]);
+                if (allowAsyncCancellationFlow)
+                {
+                    int[] exits = new[] { handlerExit, handlerBreak, handlerContinue }
+                        .Where(id => id >= 0 && drafts[id].Transfer.Kind == SemanticAsyncMethod.EndCatchTransferKind)
+                        .Distinct().ToArray();
+                    handlerDrafts[index].AddRange(exits);
+                    scopes.Add((handlerBlock, "block_entry", exits));
+                }
                 if (handlerEntries[index] < 0)
                 {
                     returnCleanupTarget = outerReturn;
@@ -651,7 +704,7 @@ internal static class SemanticAsyncControlFlowProjector
 
             returnCleanupTarget = returnExit;
             faultCleanupTarget = dispatch;
-            cancellationCleanupTarget = cancellationExit;
+            cancellationCleanupTarget = allowAsyncCancellationFlow ? dispatch : cancellationExit;
             int firstProtectedDraft = drafts.Count;
             List<int> protectedDrafts = new();
             int entry = BuildPreviewRegionBlock(statement.Block, normalExit,
@@ -675,8 +728,14 @@ internal static class SemanticAsyncControlFlowProjector
             if (statement.Finally is not null)
                 previewRegions.Add(("finally", statement.Span,
                     statement.Finally.Span, cleanupDrafts));
+            if (allowAsyncCancellationFlow)
+                exceptionScopes.Add(new(statement.Span, dispatch, faultExit));
             return entry;
         }
+
+        private int AddEndCatch(TextSpan span, int successor) =>
+            AddDraft(span, Array.Empty<SemanticAsyncStatement>(), null,
+                new DraftTransfer(SemanticAsyncMethod.EndCatchTransferKind, null, successor, -1));
 
         private int BuildTryFinally(
             TryStatementSyntax statement,

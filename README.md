@@ -103,7 +103,7 @@ public static void EndPlay()
 ## 已知限制
 
 - 仅支持部分 C# 语法，不能直接运行任意 .NET 程序或 NuGet 包。
-- [`Task<int>`](Docs/Phase66/P66.C4_Task_Result_Contract.md) 仅支持同一脚本实例内等待；外层 `await` 未处理的取消仍可能中止脚本执行。
+- [`Task<int>`](Docs/Phase66/P66.C4_Task_Result_Contract.md) 仅支持同一脚本实例内等待。`catch` 还不能捕获异步取消，外层 `await` 可能因此中止脚本；[取消处理](Docs/Phase66/P66.C7_Async_Cancellation_Language_Contract.md)正在实现。
 - 在 `try` 中直接 `await` 需要[预览开关](Docs/Phase66/P66.C6_Direct_Continuation_Await_Contract.md)；`catch`、`finally` 内尚不支持 `await`。
 - 修改 C# 声明的 `UClass`、`UProperty` 或 `UFunction` 后，需要重新构建并重启 Editor。
 - Android、iOS、Shipping 和真实多人游戏尚未验收。

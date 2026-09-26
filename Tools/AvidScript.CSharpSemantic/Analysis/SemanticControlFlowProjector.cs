@@ -25,7 +25,8 @@ internal static class SemanticControlFlowProjector
         IReadOnlyList<SemanticAsyncMethod> controlledAsyncMethods,
         IReadOnlyList<SemanticCallable> callables,
         bool enableAsyncExceptionFlow = false,
-        bool enableDirectAwaitCleanup = false)
+        bool enableDirectAwaitCleanup = false,
+        bool enableAsyncCancellationFlow = false)
     {
         List<SemanticDiagnostic> diagnostics = new();
         List<SemanticControlFlowGraph> graphs = new();
@@ -101,7 +102,8 @@ internal static class SemanticControlFlowProjector
                                         out SemanticAsyncControlFlowProjection? preview,
                                         allowValueReturns: true, resultType: resultType,
                                         previewSuspendedFinally: true,
-                                        allowDirectAwaitCleanup: enableDirectAwaitCleanup)
+                                        allowDirectAwaitCleanup: enableDirectAwaitCleanup,
+                                        allowAsyncCancellationFlow: enableAsyncCancellationFlow)
                                     && preview is not null
                                     && preview.Segments.Any(segment => segment.Transfer is
                                         { Kind: SemanticAsyncMethod.AwaitTransferKind,
@@ -130,7 +132,8 @@ internal static class SemanticControlFlowProjector
                                             context, (MethodDeclarationSyntax)body.Declaration,
                                             sourceFlow, preview,
                                             out IReadOnlyList<SemanticAsyncExceptionPreviewRegion>
-                                                boundRegions))
+                                                boundRegions,
+                                            out IReadOnlyList<SemanticAsyncExceptionScope> boundScopes))
                                     {
                                         if (enableAsyncExceptionFlow
                                             && callables.Any(callable =>
@@ -171,7 +174,13 @@ internal static class SemanticControlFlowProjector
                                                             region.RoslynRegionOrdinal,
                                                             region.SourceSpan,
                                                             region.Segments)).ToArray(),
-                                                    sourceFlow.Catches),
+                                                    sourceFlow.Catches)
+                                                {
+                                                    CancellationTypeId = enableAsyncCancellationFlow
+                                                        ? typeRegistry.Register(context.Compilation.GetTypeByMetadataName(
+                                                            "System.Threading.Tasks.TaskCanceledException")!) : null,
+                                                    ExceptionScopes = enableAsyncCancellationFlow ? boundScopes : null,
+                                                },
                                             });
                                             nextAsyncCallbackId = previewCallbackId;
                                             continue;
