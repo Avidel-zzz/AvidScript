@@ -6,6 +6,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--static-guards")
+            {
+                int focused = CSharpGuestStaticInitializationGuardTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.StaticGuards: {focused}/{focused} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--static-initialization")
             {
                 int focusedCount = CSharpGuestStaticInitializationContractTests.Run();
@@ -198,6 +204,7 @@ internal static class Program
                 + CSharpGuestMemberErrorTests.Run()
                 + CSharpGuestInstanceInitializerTests.Run()
                 + CSharpGuestStaticInitializationContractTests.Run()
+                + CSharpGuestStaticInitializationGuardTests.Run()
                 + CSharpGuestAsyncLanguageErrorTests.Run()
                 + CSharpGuestDirectAwaitTests.Run()
                 + CSharpGuestAsyncCancellationTests.Run()
