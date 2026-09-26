@@ -104,6 +104,12 @@ if ($report.result -cne 'direct_abi_built' -or -not $report.succeeded -or
     ([IO.FileInfo]$wasmPath).Length -le 8) {
     throw "Formal direct await contract is invalid: $outputRoot"
 }
+$importOutput = & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -File `
+    (Join-Path $PSScriptRoot 'Contracts/TestCompilerManagedImportContracts.ps1') -GuestIrPath $irPath
+if ($LASTEXITCODE -ne 0 -or
+    @($importOutput | Where-Object { $_ -ceq 'CompilerManagedImportContracts: 54/54 passed' }).Count -ne 1) {
+    throw 'Compiler-managed import authorization contracts failed.'
+}
 $offsets = @{}
 foreach ($field in @('Result', 'CleanupCount', 'CatchCount', 'CleanupMode')) {
     $slot = @($state.slots | Where-Object stable_id -ceq "state:type:global::Script:$field")
@@ -128,9 +134,14 @@ $editor = Join-Path $EngineRoot 'Engine/Binaries/Win64/UnrealEditor-Cmd.exe'
     '-TestExit=Automation Test Queue Empty' "-abslog=$logPath"
 if ($LASTEXITCODE -ne 0) { throw "Direct await Automation failed: $logPath" }
 $log = Get-Content -LiteralPath $logPath -Raw
-$found = [regex]::Matches($log, "Found 1 automation tests based on '$([regex]::Escape($testName))'").Count
-$success = [regex]::Matches($log,
-    'Test Completed\. Result=\{Success\} Name=\{CompiledDirectAwaitCleanup\} Path=\{AvidScript\.Runtime\.Continuation\.CompiledDirectAwaitCleanup\}').Count
+$found = [regex]::Matches($log, "Found 2 automation tests based on '$([regex]::Escape($testName))'").Count
+$success = @(
+    foreach ($name in @('CompiledDirectAwaitCleanup', 'CompiledDirectAwaitCleanupLifecycle')) {
+        $pattern = 'Test Completed\. Result=\{Success\} Name=\{' + $name +
+            '\} Path=\{AvidScript\.Runtime\.Continuation\.' + $name + '\}'
+        if ([regex]::Matches($log, $pattern).Count -eq 1) { $name }
+    }
+).Count
 $failed = [regex]::Matches($log, 'Test Completed\. Result=\{Fail\}').Count
 $complete = [regex]::Matches($log, '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*\*').Count
 $markers = @(
@@ -144,8 +155,22 @@ $markers = @(
 $scenarios = @($markers | Where-Object {
     [regex]::Matches($log, [regex]::Escape($_)).Count -eq 1
 }).Count
-if ($found -ne 1 -or $success -ne 1 -or $failed -ne 0 -or
-    $complete -ne 1 -or $scenarios -ne 8) {
-    throw "Direct await Automation evidence incomplete: found=$found success=$success scenarios=$scenarios failed=$failed complete=$complete log=$logPath"
+$lifecycleMarkers = @(
+    foreach ($backend in @(0, 1)) {
+        foreach ($scenario in @('session', 'world', 'object', 'discard', 'commit', 'commit_cancelled')) {
+            $activeCleanup = if ($scenario -ceq 'discard') { 1 } else { 0 }
+            $candidateCleanup = if ($scenario -in @('commit', 'commit_cancelled')) { 1 } elseif ($scenario -ceq 'discard') { 0 } else { -1 }
+            $resumes = if ($scenario -in @('discard', 'commit', 'commit_cancelled')) { 2 } else { 0 }
+            $cancelled = if ($scenario -ceq 'commit_cancelled') { 2 } else { 0 }
+            "compiled direct await lifecycle backend=$backend scenario=$scenario active_cleanup=$activeCleanup candidate_cleanup=$candidateCleanup resumes=$resumes cancelled=$cancelled roots=0 tasks=0 frames=0 sources=0 bindings=0"
+        }
+    }
+)
+$lifecycleScenarios = @($lifecycleMarkers | Where-Object {
+    [regex]::Matches($log, [regex]::Escape($_)).Count -eq 1
+}).Count
+if ($found -ne 1 -or $success -ne 2 -or $failed -ne 0 -or
+    $complete -ne 1 -or $scenarios -ne 8 -or $lifecycleScenarios -ne 12) {
+    throw "Direct await Automation evidence incomplete: found=$found success=$success scenarios=$scenarios lifecycle=$lifecycleScenarios failed=$failed complete=$complete log=$logPath"
 }
-Write-Output "CompiledDirectAwaitCleanup: 1/1 passed; .NET=4/4 default=ASCS3002 Win64 Wasmtime/WAMR=8/8; log=$logPath"
+Write-Output "CompiledDirectAwaitCleanup: 2/2 passed; .NET=4/4 imports=54/54 default=ASCS3002 Win64 Wasmtime/WAMR=8/8 lifecycle=12/12; log=$logPath"

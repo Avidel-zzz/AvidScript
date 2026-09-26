@@ -462,6 +462,23 @@ function Test-CompilerInjectedBindingImport {
     }
 
     $ParameterTypes = @($Import.parameter_type_ids | ForEach-Object { [string]$_ })
+    if ([string]$Import.dispatch_class -ceq "semantic") {
+        # Managed objects and suspended frames are compiler-owned, including in
+        # ordinary scripts without generated UE types. A DllImport with the same
+        # exported name must not acquire this exemption: match identity and ABI.
+        $ManagedBridges = @(
+            @{ Id = 'import:$closure:heap'; Name = 'avid_managed_heap_v1'; Parameters = @('type:address', 'type:address', 'type:address', 'type:address'); Result = 'type:address' }
+            @{ Id = 'import:$async:managed_state_store'; Name = 'avid_continuation_state_store_v1'; Parameters = @('type:int64', 'type:int32', 'type:int64'); Result = 'type:int32' }
+            @{ Id = 'import:$async:managed_state_read'; Name = 'avid_continuation_state_read_v1'; Parameters = @('type:int64', 'type:int32'); Result = 'type:int64' }
+        )
+        foreach ($Bridge in $ManagedBridges) {
+            if ([string]$Import.id -ceq $Bridge.Id) {
+                return [string]$Import.name -ceq $Bridge.Name -and
+                    [string]$Import.return_type_id -ceq $Bridge.Result -and
+                    [string]::Join("`n", $ParameterTypes) -ceq [string]::Join("`n", [string[]]$Bridge.Parameters)
+            }
+        }
+    }
     if ($AllowDirectAwaitCleanup -and
         [string]$Import.dispatch_class -ceq "semantic" -and
         [string]$Import.id -ceq 'import:symbol:method:global::AvidScript.AvidScriptRuntimeNative.ContinuationDelayCancelResumeV1(float32,int32):int64' -and
@@ -517,7 +534,6 @@ function Test-CompilerInjectedBindingImport {
             @{ Id = 'import:$event:language:subscribe'; Name = 'avid_event_language_subscribe_v1'; Parameters = @('type:int32', 'type:int32', 'type:int32', 'type:int32', 'type:int64'); Result = 'type:int64' }
             @{ Id = 'import:$event:language:lookup'; Name = 'avid_event_language_lookup_v1'; Parameters = @('type:int32', 'type:int32', 'type:int32', 'type:int32'); Result = 'type:int64' }
             @{ Id = 'import:$event:language:cancel'; Name = 'event_unsubscribe'; Parameters = @('type:int64'); Result = 'type:int32' }
-            @{ Id = 'import:$closure:heap'; Name = 'avid_managed_heap_v1'; Parameters = @('type:address', 'type:address', 'type:address', 'type:address'); Result = 'type:address' }
             @{ Id = 'import:$ue:receiver:type'; Name = 'avid_ue_receiver_type_v1'; Parameters = @('type:uint64'); Result = 'type:int32' }
         )
         foreach ($Bridge in $CompilerBridges) {

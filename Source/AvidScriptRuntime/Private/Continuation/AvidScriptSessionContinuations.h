@@ -153,6 +153,15 @@ public:
 	int32 GetPreparedCount() const;
 #if WITH_DEV_AUTOMATION_TESTS
 	FAvidScriptSessionTaskResults& GetTaskResultsForTesting() { return TaskResults; }
+	int32 GetReadyCountForTesting(EAvidScriptContinuationLane Lane) const
+	{
+		int32 Count = 0;
+		for (const FReadyCompletion& Ready : ReadyCompletions)
+		{
+			Count += Ready.Lane == Lane ? 1 : 0;
+		}
+		return Count;
+	}
 	bool GetPendingActiveTimerForTesting(
 		int64& OutContinuationToken, int64& OutProducerTaskToken) const;
 	int32 GetCancellationSourceCountForTesting() const

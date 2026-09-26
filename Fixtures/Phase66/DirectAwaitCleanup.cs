@@ -3,6 +3,12 @@ using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using AvidScript;
 
+public sealed class AwaitValue
+{
+    public int Value;
+    public AwaitValue(int value) { Value = value; }
+}
+
 public static class Script
 {
     public static int Result;
@@ -13,11 +19,12 @@ public static class Script
 
     public static async Task<int> RunAsync()
     {
+        AwaitValue captured = new AwaitValue(16);
         try
         {
             await AvidContinuations.NextTickAsync()
                 .WithCancellation(Lifetime.Token);
-            return 16;
+            return captured.Value;
         }
         catch (InvalidOperationException)
         {
