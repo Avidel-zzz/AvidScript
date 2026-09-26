@@ -24,7 +24,8 @@ internal static class GuestLanguageErrorCatalogValidator
                 && module.IrVersion == GuestTaskLanguageErrorValidator.ExceptionFlowIrVersion
             || module.SchemaVersion == GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion
                 && module.IrVersion == GuestTaskLanguageErrorValidator.DirectCleanupIrVersion
-            || GuestTaskCancellationErrorValidator.IsVersion(module);
+            || GuestTaskCancellationErrorValidator.Supports(module)
+            || GuestTaskLocalLifetimeValidator.HasErrors(module);
         if (catalog is null)
         {
             if (correctVersion && module.SchemaVersion
@@ -37,8 +38,9 @@ internal static class GuestLanguageErrorCatalogValidator
             Add(context, "Language-error tokens require Guest IR 17/1.16 or the combined Task/error version.");
             return;
         }
-        bool emptyDirectCatalog = module.SchemaVersion
+        bool emptyDirectCatalog = (module.SchemaVersion
             == GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion
+            || GuestTaskLocalLifetimeValidator.HasDirectCleanup(module))
             && catalog.Types.Count == 0 && catalog.Sources.Count == 0;
         if (!emptyDirectCatalog && (catalog.Types.Count is 0 or > 256
             || catalog.Sources.Count is 0 or > 1024))
@@ -163,12 +165,13 @@ internal static class GuestLanguageErrorCatalogValidator
                 && context.Module.IrVersion == GuestTaskLanguageErrorValidator.ExceptionFlowIrVersion
                 || context.Module.SchemaVersion == GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion
                 && context.Module.IrVersion == GuestTaskLanguageErrorValidator.DirectCleanupIrVersion
-                || GuestTaskCancellationErrorValidator.IsVersion(context.Module))
+                || GuestTaskCancellationErrorValidator.Supports(context.Module)
+                || GuestTaskLocalLifetimeValidator.HasErrors(context.Module))
             {
                 foreach (GuestInstruction call in function.Blocks.SelectMany(block => block.Instructions)
                     .Where(instruction => instruction.Op == "call"
                         && (instruction.TargetId == GuestTaskLanguageErrorValidator.ImportId
-                            || GuestTaskCancellationErrorValidator.IsVersion(context.Module)
+                            || GuestTaskCancellationErrorValidator.Supports(context.Module)
                                 && instruction.TargetId == GuestTaskCancellationErrorValidator.ImportId)))
                 {
                     if (call.OperandIds.Count != 4

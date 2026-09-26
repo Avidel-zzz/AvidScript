@@ -355,15 +355,20 @@ function Import-AvidScriptCSharpPreparedSemantic {
         -Code "ASBI4403" `
         -Message "Prepared frontend artifact contract is invalid."
     # The Semantic schema names the Frontend source hash frontend_sha256; it is not the artifact file hash.
+    # Successful Task lifetime sources use their own exact pair. Error-preview
+    # artifacts remain ineligible; do not accept an arbitrary version range.
+    $SupportedSemanticPair =
+        ([int]$SemanticModel.schema_version -eq 31 -and [string]$SemanticModel.semantic_version -ceq '1.40') -or
+        ([int]$SemanticModel.schema_version -eq 45 -and [string]$SemanticModel.semantic_version -ceq '1.54')
     Assert-AvidScriptPreparedSemantic `
-        -Condition ([int]$PreparedReport.semantic.schema_version -eq 31 -and
-            [string]$PreparedReport.semantic.version -ceq "1.40" -and
+        -Condition ($SupportedSemanticPair -and
+            [int]$PreparedReport.semantic.schema_version -eq [int]$SemanticModel.schema_version -and
+            [string]$PreparedReport.semantic.version -ceq [string]$SemanticModel.semantic_version -and
             [bool]$PreparedReport.semantic.succeeded -and
             [string]$PreparedReport.semantic.source_sha256 -ceq $ExpectedSourceSha256 -and
             [string]$PreparedReport.semantic.frontend_sha256 -ceq $ExpectedSourceSha256 -and
-            [int]$SemanticModel.schema_version -eq 31 -and
-            [string]$SemanticModel.semantic_version -ceq "1.40" -and
             [bool]$SemanticModel.succeeded -and
+            @($SemanticModel.diagnostics | Where-Object { [string]$_.severity -ceq 'error' }).Count -eq 0 -and
             [string]$SemanticModel.source.sha256 -ceq $ExpectedSourceSha256 -and
             [string]$SemanticModel.source.frontend_sha256 -ceq $ExpectedSourceSha256 -and
             [string]$SemanticModel.source.source_id -ceq [string]$PreparedReport.source.file) `

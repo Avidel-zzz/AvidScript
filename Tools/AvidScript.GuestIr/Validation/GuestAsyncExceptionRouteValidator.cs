@@ -19,9 +19,9 @@ internal static class GuestAsyncExceptionRouteValidator
             && module.IrVersion == GuestTaskLanguageErrorValidator.ExceptionFlowIrVersion;
         bool ir23 = module.SchemaVersion == GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion
             && module.IrVersion == GuestTaskLanguageErrorValidator.DirectCleanupIrVersion;
-        bool ir24 = GuestTaskCancellationErrorValidator.IsVersion(module)
+        bool ir24 = GuestTaskCancellationErrorValidator.Supports(module)
             && module.AsyncExceptionTransfers is { Count: > 0 };
-        if (!ir22 && !ir23 && !ir24)
+        if (!ir22 && !ir23 && !ir24 && !GuestTaskLocalLifetimeValidator.HasExceptionFlow(module))
         {
             if (module.AsyncExceptionRoutes is not null)
                 Add(context, "Async exception routes require IR 22.");
@@ -65,10 +65,12 @@ internal static class GuestAsyncExceptionRouteValidator
                 Add(context, $"Await callback {route.CallbackId} has no matching resume function, targets or owner slots.");
                 continue;
             }
+            resume = GuestTaskLocalLifetimeValidator.ResolveScopeExitRoutes(module, resume);
             GuestFunction[] sourceFunctions = module.Functions
                 .Where(function => function.Id == route.MethodFunctionId
                     || function.Id.StartsWith(ResumeFunctionPrefix, StringComparison.Ordinal))
                 .Where(function => function.Blocks.Any(block => block.Id == route.AwaitBlockId))
+                .Select(function => GuestTaskLocalLifetimeValidator.ResolveScopeExitRoutes(module, function))
                 .ToArray();
             if (sourceFunctions.Length == 0
                 || sourceFunctions.Any(function => !HasTargetsAndLocals(function, route)

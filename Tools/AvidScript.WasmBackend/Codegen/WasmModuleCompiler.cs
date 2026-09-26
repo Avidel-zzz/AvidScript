@@ -224,6 +224,8 @@ public static class WasmModuleCompiler
                 $"frontend_sha256={module.Provenance.FrontendSha256}",
                 $"semantic_sha256={module.Provenance.SemanticSha256}",
                 $"guest_ir={module.SchemaVersion}/{module.IrVersion}");
+            if (module.TaskLocalLifetimes is { } lifetimes)
+                payload += "\ntask_local_exception_model=" + lifetimes.ExceptionModel;
             section.WriteBytes(Encoding.UTF8.GetBytes(payload));
         });
     }

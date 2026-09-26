@@ -468,13 +468,17 @@ function Test-CompilerInjectedBindingImport {
 
     $ParameterTypes = @($Import.parameter_type_ids | ForEach-Object { [string]$_ })
     if ([string]$Import.dispatch_class -ceq "semantic") {
-        # Managed objects and suspended frames are compiler-owned, including in
-        # ordinary scripts without generated UE types. A DllImport with the same
-        # exported name must not acquire this exemption: match identity and ABI.
+        # Managed objects, Task references and suspended frames are compiler-owned,
+        # including without generated UE types or language-error previews. A user
+        # DllImport must not acquire this exemption: match identity and full ABI.
         $ManagedBridges = @(
             @{ Id = 'import:$closure:heap'; Name = 'avid_managed_heap_v1'; Parameters = @('type:address', 'type:address', 'type:address', 'type:address'); Result = 'type:address' }
             @{ Id = 'import:$async:managed_state_store'; Name = 'avid_continuation_state_store_v1'; Parameters = @('type:int64', 'type:int32', 'type:int64'); Result = 'type:int32' }
             @{ Id = 'import:$async:managed_state_read'; Name = 'avid_continuation_state_read_v1'; Parameters = @('type:int64', 'type:int32'); Result = 'type:int64' }
+            @{ Id = 'import:$async:task_i32_v1'; Name = 'avid_task_i32_v1'; Parameters = @('type:int32', 'type:int64', 'type:int32', 'type:int32'); Result = 'type:int64' }
+            @{ Id = 'import:$async:task_bind_producer_v1'; Name = 'avid_task_bind_producer_v1'; Parameters = @('type:int64', 'type:int64'); Result = 'type:int32' }
+            @{ Id = 'import:$async:task_propagate_failure_v1'; Name = 'avid_task_propagate_failure_v1'; Parameters = @('type:int64', 'type:int64'); Result = 'type:int32' }
+            @{ Id = 'import:$async:task_retain_for_continuation_v1'; Name = 'avid_task_retain_for_continuation_v1'; Parameters = @('type:int64', 'type:int64'); Result = 'type:int32' }
         )
         foreach ($Bridge in $ManagedBridges) {
             if ([string]$Import.id -ceq $Bridge.Id) {
@@ -496,10 +500,6 @@ function Test-CompilerInjectedBindingImport {
         $LanguageErrorBridges = @(
             @{ Id = 'import:language_error_heap'; Name = 'avid_managed_heap_v1'; Parameters = @('type:int32', 'type:int32', 'type:int32', 'type:int32'); Result = 'type:int32' }
             @{ Id = 'import:language_error_report_v1'; Name = 'avid_language_error_report_v1'; Parameters = @('type:int32', 'type:int32', 'type:language_error_root'); Result = 'type:int32' }
-            @{ Id = 'import:$async:task_i32_v1'; Name = 'avid_task_i32_v1'; Parameters = @('type:int32', 'type:int64', 'type:int32', 'type:int32'); Result = 'type:int64' }
-            @{ Id = 'import:$async:task_bind_producer_v1'; Name = 'avid_task_bind_producer_v1'; Parameters = @('type:int64', 'type:int64'); Result = 'type:int32' }
-            @{ Id = 'import:$async:task_propagate_failure_v1'; Name = 'avid_task_propagate_failure_v1'; Parameters = @('type:int64', 'type:int64'); Result = 'type:int32' }
-            @{ Id = 'import:$async:task_retain_for_continuation_v1'; Name = 'avid_task_retain_for_continuation_v1'; Parameters = @('type:int64', 'type:int64'); Result = 'type:int32' }
             @{ Id = 'import:task_fault_language_error_v1'; Name = 'avid_task_fault_language_error_v1'; Parameters = @('type:int64', 'type:int32', 'type:int32', 'type:language_error_root'); Result = 'type:int32' }
             @{ Id = 'import:task_language_error_meta_v1'; Name = 'avid_task_language_error_meta_v1'; Parameters = @('type:int64'); Result = 'type:int64' }
             @{ Id = 'import:task_language_error_root_v1'; Name = 'avid_task_language_error_root_v1'; Parameters = @('type:int64'); Result = 'type:language_error_root' }
@@ -664,7 +664,9 @@ function Test-BindingPackageImports {
         if (($AllowBoundedLanguageErrors -and
             [string]$Import.name -cin @('avid_managed_heap_v1', 'avid_language_error_report_v1')) -or
             [string]$Import.name -cin @('avid_task_cancel_language_error_v1',
-                'avid_task_terminal_error_meta_v1', 'avid_task_terminal_error_root_v1')) {
+                'avid_task_terminal_error_meta_v1', 'avid_task_terminal_error_root_v1',
+                'avid_task_i32_v1', 'avid_task_bind_producer_v1', 'avid_task_propagate_failure_v1',
+                'avid_task_retain_for_continuation_v1')) {
             if (-not (Test-CompilerInjectedBindingImport `
                 -Import $Import `
                 -AllowDataLaneImports $AllowDataLaneImports `
@@ -1192,6 +1194,8 @@ $BoundedAsyncSemanticArtifact = $false
 $BoundedAsyncExceptionSemanticArtifact = $false
 $DirectAwaitSemanticArtifact = $false
 $AsyncCancellationSemanticArtifact = $false
+$TaskLocalLifetimeSemanticArtifact = $false
+$TaskLocalLifetimeErrorProfile = $false
 $GuestIrModel = $null
 $DebugMapModel = $null
 $StateSchemaModel = $null
@@ -1660,11 +1664,39 @@ elseif (-not $SemanticCacheHit) {
         @($SemanticModel.async_methods | Where-Object {
             $null -ne $_.PSObject.Properties['exception_plan'] -and $null -ne $_.exception_plan
         }).Count -gt 0
+    $TaskLocalLifetimeProfile = $null -ne $SemanticModel -and
+        [int]$SemanticModel.schema_version -eq 45 -and [string]$SemanticModel.semantic_version -ceq '1.54'
+    $BoundedTaskLocalLifetimeArtifact = $TaskLocalLifetimeProfile -and $LanguageErrors -ceq 'bounded' -and
+        $SemanticExitCode -eq 1 -and -not [bool]$SemanticModel.succeeded -and $SemanticErrors.Count -gt 0 -and
+        @($SemanticErrors | Where-Object { [string]$_.code -cne 'ASCS5422' }).Count -eq 0
+    $TaskLocalLifetimeSemanticArtifact = $TaskLocalLifetimeProfile -and
+        (($SemanticExitCode -eq 0 -and [bool]$SemanticModel.succeeded -and $SemanticErrors.Count -eq 0) -or
+            $BoundedTaskLocalLifetimeArtifact)
+    $TaskLocalLifetimeExceptionProfile = $TaskLocalLifetimeSemanticArtifact -and $AsyncExceptionFlow -and
+        @($SemanticModel.async_methods | Where-Object {
+            $null -ne $_.PSObject.Properties['exception_plan'] -and $null -ne $_.exception_plan
+        }).Count -gt 0
+    $TaskLocalLifetimeErrorProfile = $TaskLocalLifetimeSemanticArtifact -and $LanguageErrors -ceq 'bounded' -and
+        ($BoundedTaskLocalLifetimeArtifact -or $TaskLocalLifetimeExceptionProfile)
+    if ($TaskLocalLifetimeExceptionProfile) {
+        $DirectAwaitSemanticArtifact = $DirectAwaitSemanticArtifact -or ($DirectAwaitCleanup -and
+            @($SemanticModel.async_methods | Where-Object {
+                $null -ne $_.PSObject.Properties['exception_plan'] -and $null -ne $_.exception_plan
+            } | ForEach-Object { $_.segments } | Where-Object {
+                $null -ne $_.await_site -and [string]$_.await_site.producer_kind -cin @('delay', 'next_tick')
+            }).Count -gt 0)
+        $AsyncCancellationSemanticArtifact = $AsyncCancellationSemanticArtifact -or ($AsyncCancellationFlow -and
+            @($SemanticModel.async_methods | Where-Object {
+                $null -ne $_.PSObject.Properties['exception_plan'] -and $null -ne $_.exception_plan -and
+                $null -ne $_.exception_plan.PSObject.Properties['cancellation_type_id'] -and
+                $null -ne $_.exception_plan.cancellation_type_id
+            }).Count -gt 0)
+    }
     $BoundedSemanticArtifact = $LanguageErrors -ceq "bounded" -and
         $SemanticExitCode -eq 1 -and
         $null -ne $SemanticModel -and -not [bool]$SemanticModel.succeeded -and
         ($BoundedSyncSemanticArtifact -or $BoundedAsyncSemanticArtifact -or
-            $BoundedAsyncExceptionSemanticArtifact -or $BoundedDirectAwaitSemanticArtifact)
+            $BoundedAsyncExceptionSemanticArtifact -or $BoundedDirectAwaitSemanticArtifact -or $BoundedTaskLocalLifetimeArtifact)
     if ($SemanticExitCode -ne 0 -and -not $BoundedSemanticArtifact -or
         $null -eq $SemanticModel -or
         -not [bool]$SemanticModel.succeeded -and -not $BoundedSemanticArtifact) {
@@ -1677,11 +1709,11 @@ elseif (-not $SemanticCacheHit) {
     }
     if (($AsyncCancellationFlow -and -not $AsyncCancellationSemanticArtifact) -or
         ($AsyncExceptionFlow -and -not ($BoundedAsyncExceptionSemanticArtifact -or
-            $DirectAwaitSemanticArtifact -or $AsyncCancellationSemanticArtifact))) {
+            $DirectAwaitSemanticArtifact -or $AsyncCancellationSemanticArtifact -or $TaskLocalLifetimeExceptionProfile))) {
         $Diagnostics += [ordered]@{
             code = if ($AsyncCancellationFlow) { "async_cancellation_flow_unavailable" } else { "async_exception_flow_unavailable" }
             severity = "error"
-            message = "The source did not produce a supported Semantic 42, 43 or 44 async exception plan with its required preview switches."
+            message = "The source did not produce a supported Semantic 42-45 async exception plan with its required preview switches."
             file = $SourceId
         }
         Write-BuildReport -Result "semantic_failed" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics
@@ -1691,11 +1723,19 @@ elseif (-not $SemanticCacheHit) {
         $Diagnostics = @($Diagnostics | Where-Object {
             [string]$_.code -cne $(if ($BoundedAsyncSemanticArtifact -or
                 $BoundedAsyncExceptionSemanticArtifact -or
-                $BoundedDirectAwaitSemanticArtifact) { 'ASCS5422' } else { 'ASCS3001' })
+                $BoundedDirectAwaitSemanticArtifact -or $BoundedTaskLocalLifetimeArtifact) { 'ASCS5422' } else { 'ASCS3001' })
         })
     }
 }
 
+
+# Successful ordinary lifetime artifacts may come from the semantic cache or
+# prepared input, bypassing the fresh-compiler branch above. Their IR version
+# still derives from the validated artifact rather than the execution path.
+$TaskLocalLifetimeSemanticArtifact = $TaskLocalLifetimeSemanticArtifact -or (
+    $null -ne $SemanticModel -and [int]$SemanticModel.schema_version -eq 45 -and
+    [string]$SemanticModel.semantic_version -ceq '1.54' -and [bool]$SemanticModel.succeeded -and
+    @($SemanticModel.diagnostics | Where-Object { [string]$_.severity -ceq 'error' }).Count -eq 0)
 
 $FrontendArtifactSha256 = Get-Sha256Hex $FrontendArtifactPath
 $SemanticSha256 = Get-Sha256Hex $SemanticArtifactPath
@@ -2020,7 +2060,7 @@ if ($UsesBindingPackage) {
         -AllowDataLaneImports ($DataLaneFusion -ceq "enabled") `
         -AllowGeneratedTypeImports ([bool]$AllowGeneratedTypeImports) `
         -AllowDebugImports ($ResolvedDebugInstrumentation -ceq "enabled") `
-        -AllowBoundedLanguageErrors ([bool]($BoundedSemanticArtifact -or $DirectAwaitSemanticArtifact -or $AsyncCancellationSemanticArtifact)) `
+        -AllowBoundedLanguageErrors ([bool]($BoundedSemanticArtifact -or $DirectAwaitSemanticArtifact -or $AsyncCancellationSemanticArtifact -or $TaskLocalLifetimeErrorProfile)) `
         -AllowDirectAwaitCleanup ([bool]($DirectAwaitSemanticArtifact -or ($AsyncCancellationSemanticArtifact -and $DirectAwaitCleanup))) `
         -AllowAsyncCancellationFlow ([bool]$AsyncCancellationSemanticArtifact)
     $UsedAuthorizationBindingImports = @($AuthorizationValidation.UsedImports)
@@ -2043,7 +2083,7 @@ if ($UsesBindingPackage) {
         -AllowDataLaneImports ($DataLaneFusion -ceq "enabled") `
         -AllowGeneratedTypeImports ([bool]$AllowGeneratedTypeImports) `
         -AllowDebugImports ($ResolvedDebugInstrumentation -ceq "enabled") `
-        -AllowBoundedLanguageErrors ([bool]($BoundedSemanticArtifact -or $DirectAwaitSemanticArtifact -or $AsyncCancellationSemanticArtifact)) `
+        -AllowBoundedLanguageErrors ([bool]($BoundedSemanticArtifact -or $DirectAwaitSemanticArtifact -or $AsyncCancellationSemanticArtifact -or $TaskLocalLifetimeErrorProfile)) `
         -AllowDirectAwaitCleanup ([bool]($DirectAwaitSemanticArtifact -or ($AsyncCancellationSemanticArtifact -and $DirectAwaitCleanup))) `
         -AllowAsyncCancellationFlow ([bool]$AsyncCancellationSemanticArtifact)
     $UsedRuntimeBindingImports = @($RuntimeValidation.UsedImports)
@@ -2177,13 +2217,15 @@ $MissingObservedExports = @($ExpectedObservedExports | Where-Object { $ObservedE
 $UnexpectedObservedExports = @($ObservedExports | Where-Object { $ExpectedObservedExports -notcontains $_ })
 # This entry publishes the current compiler contract. Keep the exact pair aligned
 # with GuestModuleValidator; TestCSharpGuestBuildContracts exercises real output.
-$ExpectedGuestSchema = if ($AsyncCancellationSemanticArtifact) { 24 }
+$ExpectedGuestSchema = if ($TaskLocalLifetimeSemanticArtifact) { 25 }
+    elseif ($AsyncCancellationSemanticArtifact) { 24 }
     elseif ($DirectAwaitSemanticArtifact) { 23 }
     elseif ($BoundedAsyncExceptionSemanticArtifact) { 22 }
     elseif ($BoundedAsyncSemanticArtifact) { 21 }
     elseif ($BoundedSemanticArtifact -and [int]$SemanticModel.schema_version -eq 40) { 20 }
     elseif ($BoundedSemanticArtifact) { 17 } else { 14 }
-$ExpectedGuestVersion = if ($AsyncCancellationSemanticArtifact) { "1.23" }
+$ExpectedGuestVersion = if ($TaskLocalLifetimeSemanticArtifact) { "1.24" }
+    elseif ($AsyncCancellationSemanticArtifact) { "1.23" }
     elseif ($DirectAwaitSemanticArtifact) { "1.22" }
     elseif ($BoundedAsyncExceptionSemanticArtifact) { "1.21" }
     elseif ($BoundedAsyncSemanticArtifact) { "1.20" }
@@ -2191,6 +2233,8 @@ $ExpectedGuestVersion = if ($AsyncCancellationSemanticArtifact) { "1.23" }
     elseif ($BoundedSemanticArtifact) { "1.16" } else { "1.13" }
 $GuestContractValid = [int]$GuestIrModel.schema_version -eq $ExpectedGuestSchema -and
     [string]$GuestIrModel.ir_version -ceq $ExpectedGuestVersion -and
+    (-not $TaskLocalLifetimeSemanticArtifact -or
+        ($null -ne $GuestIrModel.PSObject.Properties['task_local_lifetimes'] -and $null -ne $GuestIrModel.task_local_lifetimes)) -and
     (-not $BoundedSemanticArtifact -or $null -ne $GuestIrModel.language_error_catalog) -and
     (-not $DirectAwaitSemanticArtifact -or @($GuestIrModel.direct_await_routes).Count -gt 0) -and
     (-not $AsyncCancellationSemanticArtifact -or

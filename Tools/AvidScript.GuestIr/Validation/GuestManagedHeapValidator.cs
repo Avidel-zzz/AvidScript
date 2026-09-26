@@ -53,7 +53,8 @@ internal static class GuestManagedHeapValidator
             && module.IrVersion == GuestTaskLanguageErrorValidator.ExceptionFlowIrVersion
             || module.SchemaVersion == GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion
             && module.IrVersion == GuestTaskLanguageErrorValidator.DirectCleanupIrVersion
-            || GuestTaskCancellationErrorValidator.IsVersion(module);
+            || GuestTaskCancellationErrorValidator.Supports(module)
+            || GuestTaskLocalLifetimeValidator.HasErrors(module);
         bool catalogVersion = module.SchemaVersion == GuestLanguageErrorCatalogValidator.SchemaVersion
             && module.IrVersion == GuestLanguageErrorCatalogValidator.IrVersion;
         foreach (GuestImport import in module.Imports)
@@ -83,7 +84,7 @@ internal static class GuestManagedHeapValidator
                 && import.ReturnTypeId == "type:language_error_root"
                 && import.DispatchClass == "semantic" && import.OptimizationClass == "none"
                 && import.BindingOrdinal == -1;
-            bool cancellationReference = GuestTaskCancellationErrorValidator.IsVersion(module)
+            bool cancellationReference = GuestTaskCancellationErrorValidator.Supports(module)
                 && module.LanguageErrorCatalog is not null
                 && (GuestTaskCancellationErrorValidator.IsCancellationImport(import)
                     || GuestTaskCancellationErrorValidator.IsTerminalRootImport(import));

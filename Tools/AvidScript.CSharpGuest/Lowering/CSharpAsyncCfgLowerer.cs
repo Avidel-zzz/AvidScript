@@ -318,8 +318,8 @@ internal static class CSharpAsyncCfgLowerer
                 CSharpUeReceivers.Require(context, receiver, entry.SegmentOrdinal, prefixInstructions);
             else CSharpReferenceObjects.Require(receiver, prefixInstructions);
         }
-        if (!statusAware && incoming is not null && !CSharpTaskResultAbi.RetainTaskLocal(
-                context, method, entry.SegmentOrdinal, prefixInstructions)) return false;
+        if (!statusAware && incoming is not null && !CSharpTaskResultAbi.RetainIncomingTaskLocals(
+                context, method, incoming, entry.SegmentOrdinal, prefixInstructions)) return false;
         if (!statusAware)
             CSharpAsyncClosureAllocations.Transition(context, method, incomingSegment,
                 entry.SegmentOrdinal, prefixInstructions);
@@ -359,15 +359,15 @@ internal static class CSharpAsyncCfgLowerer
             blocks.Add(new(invalidStatus, Array.Empty<GuestInstruction>(),
                 new("trap", null, null, null, null)));
             List<GuestInstruction> normalInstructions = new();
-            if (!CSharpTaskResultAbi.RetainTaskLocal(context, method,
-                    entry.SegmentOrdinal, normalInstructions)) return false;
+            if (!CSharpTaskResultAbi.RetainIncomingTaskLocals(context, method,
+                    incoming!, entry.SegmentOrdinal, normalInstructions)) return false;
             CSharpAsyncClosureAllocations.Transition(context, method,
                 incomingSegment, entry.SegmentOrdinal, normalInstructions);
             blocks.Add(new(normalPath, normalInstructions,
                 new("branch", null, firstFlowBlockId, null, null)));
             List<GuestInstruction> cancellationInstructions = new();
-            if (!CSharpTaskResultAbi.RetainTaskLocal(context, method,
-                    cancellationTarget, cancellationInstructions)) return false;
+            if (!CSharpTaskResultAbi.RetainIncomingTaskLocals(context, method,
+                    incoming!, cancellationTarget, cancellationInstructions)) return false;
             CSharpAsyncClosureAllocations.Transition(context, method,
                 incomingSegment, cancellationTarget, cancellationInstructions);
             if (CSharpTaskResultAbi.SupportsCancellation(document))
@@ -419,7 +419,8 @@ internal static class CSharpAsyncCfgLowerer
             return false;
         }
         if (!context.ShortCircuitFlow.Rewrite(context, blocks)
-            || !CSharpAsyncClosureAllocations.InsertEdges(context, method, blocks))
+            || !CSharpAsyncClosureAllocations.InsertEdges(context, method, blocks)
+            || !CSharpTaskLocalLifetimes.InsertEdges(context, method, blocks, incomingSegment, functionEntryBlockId))
         {
             Add(diagnostics, method, $"Continuation '{entry.FunctionId}' could not finalize its control-flow blocks.");
             return false;
@@ -458,6 +459,14 @@ internal static class CSharpAsyncCfgLowerer
             ++statementOrdinal)
         {
             SemanticAsyncStatement statement = segment.Statements[statementOrdinal];
+            int taskInstructionStart = instructions.Count;
+            if (!CSharpTaskLocalLifetimes.LowerWrite(context, method, segment, statementOrdinal, instructions, out bool taskWrite)) return false;
+            if (taskWrite)
+            {
+                CSharpGuestDebugTagger.TagFirstEmitted(instructions, taskInstructionStart, statement.Operation,
+                    CSharpGuestDebugTagger.OperationId(method.MethodSymbolId, $"async:{segment.Ordinal}", statementOrdinal));
+                continue;
+            }
             if (CSharpAsyncControlFlowLowerer.IsStructuredFlow(statement.Operation))
             {
                 if (!structuredFlow.Emit(
@@ -687,7 +696,9 @@ internal static class CSharpAsyncCfgLowerer
             || context.Document.SchemaVersion is not
                 (SemanticContract.AsyncLanguageErrorSchemaVersion
                     or SemanticContract.AsyncExceptionFlowSchemaVersion
-                    or SemanticContract.DirectAwaitCleanupSchemaVersion))
+                    or SemanticContract.DirectAwaitCleanupSchemaVersion
+                    or SemanticContract.AsyncCancellationFlowSchemaVersion
+                    or SemanticContract.TaskLocalLifetimeSchemaVersion))
         {
             Add(diagnostics, method, "Async throw has no validated Task<int> language-error site.");
             return false;

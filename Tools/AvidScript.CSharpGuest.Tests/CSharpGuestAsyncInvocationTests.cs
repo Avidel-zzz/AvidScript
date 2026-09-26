@@ -112,14 +112,17 @@ internal static class CSharpGuestAsyncInvocationTests
             + TaskLocalSemanticCompilesToWasm() + TaskConditionalLocalsCompileToWasm()
             + TaskParallelLocalsCompileToWasm()
             + TaskFieldAssignmentCompilesToWasm() + TaskIntegratedCompilesToWasm()
-            + TaskLocalLifetimesRequireNewLowering();
+            + TaskLocalLifetimesCompileToWasm();
     }
 
-    private static int TaskLocalLifetimesRequireNewLowering()
+    private static int TaskLocalLifetimesCompileToWasm()
     {
         const string source = """
-            using AvidScript; using System.Threading.Tasks;
+            using AvidScript; using System.Threading.Tasks; using System.Runtime.InteropServices;
             public static class Script {
+                public static int Result;
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay() { Result = await Run(); }
                 public static async Task<int> Child() { await AvidContinuations.NextTickAsync(); return 1; }
                 public static async Task<int> Run() {
                     Task<int> pending = Child(); pending = Child();
@@ -130,16 +133,19 @@ internal static class CSharpGuestAsyncInvocationTests
         var document = CSharpGuestContinuationTests.Analyze(source, "Scripts/TaskLocalLifetime.cs");
         Check(document.Succeeded && SemanticAsyncInvocationValidator.IsValid(document),
             "lifetime source reaches the independently validated Semantic contract");
-        foreach (var input in new[] { document,
+        var result = CSharpGuestLowerer.Lower(document, new string('d', 64));
+        Check(result.Succeeded, string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Message)));
+        Check(result.Module is { SchemaVersion: 25, IrVersion: "1.24", TaskLocalLifetimes.Functions.Count: > 0 }
+            && WasmModuleCompiler.Compile(result.Module).Succeeded, "scoped Task locals compile through IR 25 to WASM");
+        foreach (var input in new[] {
             document with { SchemaVersion = 44, SemanticVersion = "1.53" },
             document with { SchemaVersion = 39, SemanticVersion = "1.48" } })
         {
             var lowered = CSharpGuestLowerer.Lower(input, new string('d', 64), enableAsyncLanguageErrors: true);
-            Check(!lowered.Succeeded && lowered.Module is null && lowered.Diagnostics.Any(diagnostic =>
-                diagnostic.Code == "ASCG1004" && diagnostic.Message.Contains("scope-exit lowering", StringComparison.Ordinal)),
+            Check(!lowered.Succeeded && lowered.Module is null && lowered.Diagnostics.Count > 0,
                 "new lifetime ownership cannot silently use legacy Guest lowering");
         }
-        return 4;
+        return 5;
     }
 
     private static int TaskFieldAssignmentCompilesToWasm()

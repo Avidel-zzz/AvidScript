@@ -40,29 +40,28 @@ public static class CSharpGuestLowerer
         ArgumentNullException.ThrowIfNull(semanticSha256);
         ArgumentNullException.ThrowIfNull(substitutes);
 
-        // Keep the analysis contract explicit until replacement and scope-edge
-        // reference releases are emitted. Never reinterpret it as legacy IR.
         if (document.AsyncMethods is null)
             return Failure(new[] { new GuestDiagnostic("ASCG1004", "error", "Semantic async methods are missing.", null) });
-        if (document.SchemaVersion == SemanticContract.TaskLocalLifetimeSchemaVersion
-            || document.AsyncMethods.Any(method => method?.TaskLocalLifetimes is not null))
-            return Failure(new[] { new GuestDiagnostic("ASCG1004", "error",
-                "Task local lifetimes require Guest reference replacement and scope-exit lowering, which is not yet implemented.", null) });
 
         List<GuestDiagnostic> diagnostics = new();
+        bool taskLifetimes = SemanticContract.HasTaskLocalLifetimes(document);
         bool cancellationFlow = CSharpTaskResultAbi.SupportsCancellation(document);
         bool directCleanup = document.SchemaVersion == SemanticContract.DirectAwaitCleanupSchemaVersion
-            && document.SemanticVersion == SemanticContract.DirectAwaitCleanupSemanticVersion;
+            && document.SemanticVersion == SemanticContract.DirectAwaitCleanupSemanticVersion
+            || taskLifetimes && document.AsyncMethods.Any(method => method?.ExceptionPlan is not null
+                && method.Segments.Any(segment => segment.AwaitSite?.ProducerKind is "delay" or "next_tick"));
         bool asyncExceptionFlow = enableAsyncLanguageErrors
             && (document.SchemaVersion == SemanticContract.AsyncExceptionFlowSchemaVersion
                 && document.SemanticVersion == SemanticContract.AsyncExceptionFlowSemanticVersion
-                || directCleanup || cancellationFlow);
+                || directCleanup || cancellationFlow
+                || taskLifetimes && document.AsyncMethods.Any(method => method?.ExceptionPlan is not null));
         bool asyncLanguageErrors = enableAsyncLanguageErrors && (
             asyncExceptionFlow && (!directCleanup || document.AsyncMethods.Any(method =>
                 method.ErrorPlan is not null || method.Segments.Any(segment =>
                     segment.AwaitSite?.ProducerKind is "task_call" or "task_local")))
             || document.SchemaVersion == SemanticContract.AsyncLanguageErrorSchemaVersion
-                && document.SemanticVersion == SemanticContract.AsyncLanguageErrorSemanticVersion);
+                && document.SemanticVersion == SemanticContract.AsyncLanguageErrorSemanticVersion
+            || taskLifetimes && document.AsyncMethods.Any(method => method?.ErrorPlan is not null));
         ValidateInput(document, semanticSha256, asyncLanguageErrors, diagnostics);
         if ((directCleanup || cancellationFlow) && !enableAsyncLanguageErrors)
             Add(diagnostics, "ASCG1004", "Direct await cleanup requires bounded language-error mode.");
@@ -184,7 +183,8 @@ public static class CSharpGuestLowerer
         if (document.SchemaVersion is SemanticContract.TaskLocalSchemaVersion
             or SemanticContract.TaskAssignmentSchemaVersion
             or SemanticContract.TaskExistingLocalSchemaVersion
-            or SemanticContract.TaskAliasSchemaVersion)
+            or SemanticContract.TaskAliasSchemaVersion
+            || taskLifetimes && !asyncLanguageErrors && !directCleanup)
             imports = imports.Append(CSharpTaskResultAbi.RetainForContinuationImport()).ToArray();
         functions.AddRange(CSharpClosureDelegateLowerer.BuildThunks(document, functions));
         functions.AddRange(CSharpDelegateIdentityLowerer.Build(document, functions));
@@ -322,7 +322,8 @@ public static class CSharpGuestLowerer
         }
 
         GuestModule module = new(
-            cancellationFlow ? GuestTaskCancellationErrorValidator.SchemaVersion
+            taskLifetimes ? GuestTaskLocalLifetimeValidator.SchemaVersion
+                : cancellationFlow ? GuestTaskCancellationErrorValidator.SchemaVersion
                 : directCleanup ? GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion
                 : asyncExceptionFlow ? GuestTaskLanguageErrorValidator.ExceptionFlowSchemaVersion
                 : asyncLanguageErrors ? GuestTaskLanguageErrorValidator.AsyncSchemaVersion
@@ -332,7 +333,8 @@ public static class CSharpGuestLowerer
                 or SemanticContract.TaskAliasSchemaVersion
                 ? 19 : CSharpTaskResultAbi.Supports(document)
                     ? 18 : GuestModuleValidator.CurrentSchemaVersion,
-            cancellationFlow ? GuestTaskCancellationErrorValidator.IrVersion
+            taskLifetimes ? GuestTaskLocalLifetimeValidator.IrVersion
+                : cancellationFlow ? GuestTaskCancellationErrorValidator.IrVersion
                 : directCleanup ? GuestTaskLanguageErrorValidator.DirectCleanupIrVersion
                 : asyncExceptionFlow ? GuestTaskLanguageErrorValidator.ExceptionFlowIrVersion
                 : asyncLanguageErrors ? GuestTaskLanguageErrorValidator.AsyncIrVersion
@@ -361,6 +363,9 @@ public static class CSharpGuestLowerer
             exports,
             Array.Empty<GuestDiagnostic>())
         {
+            TaskLocalLifetimes = taskLifetimes ? CSharpTaskLocalLifetimes.BuildPlan(document, functions,
+                cancellationFlow ? "cancellation" : directCleanup ? (asyncLanguageErrors ? "cleanup" : "cleanup_only")
+                    : asyncExceptionFlow ? "exception" : asyncLanguageErrors ? "fault" : "none") : null,
             FunctionReferences = CSharpManagedDelegateLowerer.BuildContracts(document, moduleTypes, functions),
             FramedExports = framedExports,
             LanguageErrorCatalog = asyncLanguageErrors

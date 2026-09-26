@@ -60,11 +60,14 @@ internal static class CSharpTaskResultAbi
             && document.SemanticVersion == SemanticContract.AsyncExceptionFlowSemanticVersion)
         || (document.SchemaVersion == SemanticContract.DirectAwaitCleanupSchemaVersion
             && document.SemanticVersion == SemanticContract.DirectAwaitCleanupSemanticVersion)
+        || SemanticContract.HasTaskLocalLifetimes(document)
         || SupportsCancellation(document);
 
     public static bool SupportsCancellation(SemanticDocument document) =>
         document.SchemaVersion == SemanticContract.AsyncCancellationFlowSchemaVersion
-        && document.SemanticVersion == SemanticContract.AsyncCancellationFlowSemanticVersion;
+        && document.SemanticVersion == SemanticContract.AsyncCancellationFlowSemanticVersion
+        || SemanticContract.HasTaskLocalLifetimes(document)
+            && document.AsyncMethods.Any(method => method?.ExceptionPlan?.CancellationTypeId is not null);
 
     public static string[] TaskLocalSymbols(SemanticAsyncMethod method) =>
         (method.TaskLocalSymbolIds ?? method.Segments
@@ -78,6 +81,12 @@ internal static class CSharpTaskResultAbi
     {
         string[] owned = TaskLocalSymbols(method);
         if (owned.Length == 0) return Array.Empty<string>();
+        if (method.TaskLocalLifetimes is not null)
+        {
+            if (!SemanticAsyncTaskLocalLifetimeValidator.TryAnalyze(method, out var flow)) return null;
+            var activeStates = atEntry ? flow!.States.PossibleAtEntry : flow!.States.PossibleAtExit;
+            return activeStates.TryGetValue(segmentOrdinal, out var activeOwners) ? activeOwners : null;
+        }
         if (!SemanticAsyncInvocationValidator.TryGetTaskLocalFlow(
                 method, owned, method.TaskLocalSymbolIds is not null,
                 out _, out _,
@@ -182,6 +191,11 @@ internal static class CSharpTaskResultAbi
         if (active is null) return false;
         foreach (string symbolId in active)
         {
+            if (method.TaskLocalLifetimes is not null)
+            {
+                if (!CSharpTaskLocalLifetimes.ReleaseAndClear(context, method, symbolId, block, instructions)) return false;
+                continue;
+            }
             GuestRegister? token = LoadTaskLocalToken(context, symbolId, block, instructions);
             if (token is null || !CSharpTaskOwnerGuards.Call(context, method, Release, token, block, instructions))
                 return false;
@@ -199,6 +213,21 @@ internal static class CSharpTaskResultAbi
             GuestRegister? token = LoadTaskLocalToken(context, symbolId, block, instructions);
             if (token is null || !CSharpTaskOwnerGuards.Call(context, method, Retain, token, block, instructions))
                 return false;
+        }
+        return true;
+    }
+
+    public static bool RetainIncomingTaskLocals(CSharpFunctionLoweringContext context,
+        SemanticAsyncMethod method, SemanticAsyncAwaitSite incoming, int block, List<GuestInstruction> instructions)
+    {
+        if (method.TaskLocalLifetimes is null) return RetainTaskLocal(context, method, block, instructions);
+        int source = method.Segments.Single(segment => segment.AwaitSite?.CallbackId == incoming.CallbackId).Ordinal;
+        var active = ActiveTaskLocalSymbols(method, source, false);
+        if (active is null) return false;
+        foreach (string symbol in active)
+        {
+            var token = LoadTaskLocalToken(context, symbol, block, instructions);
+            if (token is null || !CSharpTaskOwnerGuards.Call(context, method, Retain, token, block, instructions)) return false;
         }
         return true;
     }

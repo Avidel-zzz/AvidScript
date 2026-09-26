@@ -23,7 +23,7 @@ internal static class CSharpTaskOwnerGuards
     };
 
     public static bool Required(SemanticAsyncMethod method) =>
-        SemanticAsyncTaskOwnership.TryAnalyze(method, CSharpTaskResultAbi.TaskLocalSymbols(method),
+        method.TaskLocalLifetimes is not null || SemanticAsyncTaskOwnership.TryAnalyze(method, CSharpTaskResultAbi.TaskLocalSymbols(method),
             method.TaskLocalSymbolIds is not null, out var flow) && flow!.RequiresGuards;
 
     public static bool Initialize(CSharpFunctionLoweringContext context, SemanticAsyncMethod method,

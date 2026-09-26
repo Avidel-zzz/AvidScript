@@ -20,10 +20,10 @@ internal static class CSharpTaskAwaitLowerer
         bool ownsAwaitToken = !taskLocal || method.ExceptionPlan is not null;
         SemanticCallable? target = context.Document.Callables.SingleOrDefault(callable =>
             callable.MethodSymbolId == site?.TaskCallableId);
-        if (site is null || target is null || abi.TaskResultImportId is null
+        if (site is null || (!taskLocal && target is null) || abi.TaskResultImportId is null
             || segment.Transfer?.Kind != SemanticAsyncMethod.AwaitTransferKind
             || (taskLocal ? site.Arguments.Count != 1
-                : site.Arguments.Count != target.Parameters.Count)
+                : site.Arguments.Count != target!.Parameters.Count)
             || !context.TryGetStorage(CSharpTaskResultAbi.AwaitSlot(site), out GuestRegister storage))
         {
             context.Add("ASCG1010", "Task<int> await has no validated target or state storage.");
@@ -38,7 +38,7 @@ internal static class CSharpTaskAwaitLowerer
         }
         else
         {
-            GuestRegister? taskValue = context.CreateTemporary(target.ReturnTypeId, segment.Ordinal);
+            GuestRegister? taskValue = context.CreateTemporary(target!.ReturnTypeId, segment.Ordinal);
             token = context.CreateTemporary(CSharpTaskResultAbi.TokenTypeId, segment.Ordinal);
             if (taskValue is null || token is null) return false;
             List<string> arguments = new(site.Arguments.Count);
@@ -220,8 +220,8 @@ internal static class CSharpTaskAwaitLowerer
                 // The continuation still owns the saved locals. Handler code
                 // needs its own references before it can return or suspend;
                 // the successful resume branch acquires these separately.
-                || !CSharpTaskResultAbi.RetainTaskLocal(context, method,
-                    block, rejectedInstructions)
+                || !CSharpTaskResultAbi.RetainIncomingTaskLocals(context, method,
+                    site, block, rejectedInstructions)
                 || !CSharpAsyncExceptionLowerer.EmitFailure(context, method,
                     transfer, token, state!, block, rejected,
                     rejectedInstructions, blocks, releaseDirectToken: false)) return false;
@@ -311,7 +311,9 @@ internal static class CSharpTaskAwaitLowerer
             && document.SemanticVersion == SemanticContract.AsyncExceptionFlowSemanticVersion)
         || (document.SchemaVersion == SemanticContract.DirectAwaitCleanupSchemaVersion
             && document.SemanticVersion == SemanticContract.DirectAwaitCleanupSemanticVersion)
-        || CSharpTaskResultAbi.SupportsCancellation(document);
+        || CSharpTaskResultAbi.SupportsCancellation(document)
+        || SemanticContract.HasTaskLocalLifetimes(document)
+            && document.AsyncMethods.Any(method => method.ErrorPlan is not null || method.ExceptionPlan is not null);
 
     private static bool StoreResult(CSharpFunctionLoweringContext context,
         SemanticAsyncAwaitSite site, GuestRegister value, int block,

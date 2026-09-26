@@ -48,7 +48,33 @@ public sealed record GuestModule(
     [JsonPropertyOrder(20)]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<GuestAsyncExceptionTransfer>? AsyncExceptionTransfers { get; init; }
+
+    [JsonPropertyOrder(21), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public GuestTaskLocalLifetimePlan? TaskLocalLifetimes { get; init; }
 }
+
+// IR 25 binds the new compiler ownership profile to the concrete release and
+// zeroing instructions. Removing cleanup from those sites invalidates the IR.
+public sealed record GuestTaskLocalLifetimePlan(
+    [property: JsonPropertyOrder(0)] string ExceptionModel,
+    [property: JsonPropertyOrder(1)] IReadOnlyList<GuestTaskLocalLifetimeFunction> Functions);
+
+public sealed record GuestTaskLocalLifetimeFunction(
+    [property: JsonPropertyOrder(0)] string FunctionId,
+    [property: JsonPropertyOrder(1)] IReadOnlyList<string> OwnerLocalIds,
+    [property: JsonPropertyOrder(2)] IReadOnlyList<GuestTaskLocalReleaseSite> Releases,
+    [property: JsonPropertyOrder(3)] IReadOnlyList<GuestTaskLocalScopeExit> ScopeExits);
+
+public sealed record GuestTaskLocalScopeExit(
+    [property: JsonPropertyOrder(0)] string SourceBlockId,
+    [property: JsonPropertyOrder(1)] string ExitBlockId,
+    [property: JsonPropertyOrder(2)] string TargetBlockId);
+
+public sealed record GuestTaskLocalReleaseSite(
+    [property: JsonPropertyOrder(0)] string BlockId,
+    [property: JsonPropertyOrder(1)] string OwnerLocalId,
+    [property: JsonPropertyOrder(2)] string TokenRegisterId,
+    [property: JsonPropertyOrder(3)] string ClearedValueRegisterId);
 
 // IR 23 binds a protected Timer await to a status-aware resume. There is no
 // language-fault successor or source Task error lease on this route.

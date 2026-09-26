@@ -44,7 +44,8 @@ public static class GuestTaskLanguageErrorValidator
             && module.IrVersion == ExceptionFlowIrVersion;
         bool directCleanupVersion = module.SchemaVersion == DirectCleanupSchemaVersion
             && module.IrVersion == DirectCleanupIrVersion;
-        bool cancellationVersion = GuestTaskCancellationErrorValidator.IsVersion(module);
+        bool cancellationVersion = GuestTaskCancellationErrorValidator.Supports(module);
+        bool lifetimeErrors = GuestTaskLocalLifetimeValidator.HasErrors(module);
         GuestImport[] imports = module.Imports.Where(import =>
             import.Module == GuestTaskResultValidator.ImportModule && import.Name == ImportName).ToArray();
         GuestImport[] metadataImports = module.Imports.Where(import =>
@@ -55,17 +56,19 @@ public static class GuestTaskLanguageErrorValidator
             && imports.Length == 0 && metadataImports.Length == 0
             && rootImports.Length == 0) return;
         if (!combinedVersion && !asyncVersion && !exceptionFlowVersion
-            && !directCleanupVersion && !cancellationVersion && imports.Length == 0
+            && !directCleanupVersion && !cancellationVersion && !lifetimeErrors && imports.Length == 0
             && metadataImports.Length == 0 && rootImports.Length == 0) return;
         if ((!combinedVersion && !asyncVersion && !exceptionFlowVersion
-                && !directCleanupVersion && !cancellationVersion) || module.Language != "csharp"
+                && !directCleanupVersion && !cancellationVersion && !lifetimeErrors) || module.Language != "csharp"
             || module.Provenance.SemanticSchemaVersion
-                != (cancellationVersion ? GuestTaskCancellationErrorValidator.SemanticSchemaVersion
+                != (lifetimeErrors ? GuestTaskLocalLifetimeValidator.SemanticSchemaVersion
+                    : cancellationVersion ? GuestTaskCancellationErrorValidator.SemanticSchemaVersion
                     : directCleanupVersion ? DirectCleanupSemanticSchemaVersion
                     : exceptionFlowVersion ? ExceptionFlowSemanticSchemaVersion
                     : asyncVersion ? AsyncSemanticSchemaVersion : SemanticSchemaVersion)
             || module.Provenance.SemanticVersion
-                != (cancellationVersion ? GuestTaskCancellationErrorValidator.SemanticVersion
+                != (lifetimeErrors ? GuestTaskLocalLifetimeValidator.SemanticVersion
+                    : cancellationVersion ? GuestTaskCancellationErrorValidator.SemanticVersion
                     : directCleanupVersion ? DirectCleanupSemanticVersion
                     : exceptionFlowVersion ? ExceptionFlowSemanticVersion
                     : asyncVersion ? AsyncSemanticVersion : SemanticVersion)
@@ -103,12 +106,12 @@ public static class GuestTaskLanguageErrorValidator
 
         if (module.LanguageErrorCatalog is { } catalog)
             ValidateCallTokens(context, fault, catalog);
-        if (asyncVersion || exceptionFlowVersion || directCleanupVersion || cancellationVersion)
+        if (asyncVersion || exceptionFlowVersion || directCleanupVersion || cancellationVersion || lifetimeErrors)
             ValidateFreshRoots(context, fault);
 
         if (metadataImports.Length == 0 && rootImports.Length == 0)
         {
-            if (asyncVersion || exceptionFlowVersion || directCleanupVersion)
+            if (asyncVersion || exceptionFlowVersion || directCleanupVersion || lifetimeErrors && !cancellationVersion)
                 Add(context, "Async Task language errors require the metadata/root read import pair.");
             return;
         }

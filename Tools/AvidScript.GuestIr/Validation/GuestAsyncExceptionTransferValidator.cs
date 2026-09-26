@@ -12,7 +12,7 @@ internal static class GuestAsyncExceptionTransferValidator
     public static void Validate(GuestValidationContext context)
     {
         GuestModule module = context.Module;
-        if (!GuestTaskCancellationErrorValidator.IsVersion(module))
+        if (!GuestTaskCancellationErrorValidator.Supports(module))
         {
             if (module.AsyncExceptionTransfers is not null) Add(context, "Exception owner transfers require IR 24/1.23.");
             return;

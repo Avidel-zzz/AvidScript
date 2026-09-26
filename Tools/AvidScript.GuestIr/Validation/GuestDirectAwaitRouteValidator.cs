@@ -16,9 +16,9 @@ internal static class GuestDirectAwaitRouteValidator
         GuestModule module = context.Module;
         bool ir23 = module.SchemaVersion == GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion
             && module.IrVersion == GuestTaskLanguageErrorValidator.DirectCleanupIrVersion;
-        bool ir24 = GuestTaskCancellationErrorValidator.IsVersion(module)
+        bool ir24 = GuestTaskCancellationErrorValidator.Supports(module)
             && module.AsyncExceptionTransfers is { Count: > 0 };
-        if (!ir23 && !ir24)
+        if (!ir23 && !ir24 && !GuestTaskLocalLifetimeValidator.HasDirectCleanup(module))
         {
             if (module.DirectAwaitRoutes is not null)
                 Add(context, "Direct await routes require IR 23/1.22.");
@@ -68,7 +68,7 @@ internal static class GuestDirectAwaitRouteValidator
                 || resume.Parameters[0].TypeId != "type:int64"
                 || resume.Parameters[1].TypeId != "type:int32"
                 || resume.EntryBlockId != route.NormalTargetBlockId + ":entry"
-                || !HasStatusRoutes(module, resume, route, ir24))
+                || !HasStatusRoutes(module, GuestTaskLocalLifetimeValidator.ResolveScopeExitRoutes(module, resume), route, ir24))
             {
                 Add(context, $"Direct await callback {route.CallbackId} has no validated status-aware resume.");
                 continue;

@@ -24,18 +24,21 @@ public static class GuestTaskCancellationErrorValidator
     internal static bool IsVersion(GuestModule module) =>
         module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion;
 
+    internal static bool Supports(GuestModule module) => IsVersion(module)
+        || GuestTaskLocalLifetimeValidator.HasCancellation(module);
+
     internal static void Validate(GuestValidationContext context)
     {
         GuestModule module = context.Module;
         GuestImport[] cancellation = Find(module, ImportId, ImportName);
         GuestImport[] metadata = Find(module, MetaImportId, MetaImportName);
         GuestImport[] roots = Find(module, RootImportId, RootImportName);
-        if (!IsVersion(module) && cancellation.Length == 0
+        if (!Supports(module) && cancellation.Length == 0
             && metadata.Length == 0 && roots.Length == 0) return;
 
-        if (!IsVersion(module) || module.Language != "csharp"
-            || module.Provenance.SemanticSchemaVersion != SemanticSchemaVersion
-            || module.Provenance.SemanticVersion != SemanticVersion
+        if (!Supports(module) || module.Language != "csharp"
+            || module.Provenance.SemanticSchemaVersion != (IsVersion(module) ? SemanticSchemaVersion : GuestTaskLocalLifetimeValidator.SemanticSchemaVersion)
+            || module.Provenance.SemanticVersion != (IsVersion(module) ? SemanticVersion : GuestTaskLocalLifetimeValidator.SemanticVersion)
             || module.LanguageErrorCatalog is not { Types.Count: > 0, Sources.Count: > 0 }
             || cancellation.Length != 1 || metadata.Length != 1 || roots.Length != 1)
         {

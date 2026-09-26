@@ -67,6 +67,9 @@ internal static class GuestTaskResultValidator
                 == GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion
             && module.IrVersion == GuestTaskLanguageErrorValidator.DirectCleanupIrVersion;
         bool cancellationIr = GuestTaskCancellationErrorValidator.IsVersion(module);
+        bool lifetimeIr = GuestTaskLocalLifetimeValidator.IsVersion(module);
+        bool lifetimeSemantic = module.Provenance.SemanticSchemaVersion == GuestTaskLocalLifetimeValidator.SemanticSchemaVersion
+            && module.Provenance.SemanticVersion == GuestTaskLocalLifetimeValidator.SemanticVersion;
         bool cancellationSemantic = module.Provenance.SemanticSchemaVersion
                 == GuestTaskCancellationErrorValidator.SemanticSchemaVersion
             && module.Provenance.SemanticVersion
@@ -76,7 +79,7 @@ internal static class GuestTaskResultValidator
             && !combinedSemantic && !combinedIr && !asyncErrorSemantic && !asyncErrorIr
             && !exceptionFlowSemantic && !exceptionFlowIr
             && !directCleanupSemantic && !directCleanupIr
-            && !cancellationSemantic && !cancellationIr
+            && !cancellationSemantic && !cancellationIr && !lifetimeSemantic && !lifetimeIr
             && taskImports.Length == 0 && producerImports.Length == 0
             && failureImports.Length == 0 && retainedImports.Length == 0) return;
 
@@ -87,7 +90,8 @@ internal static class GuestTaskResultValidator
             || (asyncErrorSemantic && asyncErrorIr)
             || (exceptionFlowSemantic && exceptionFlowIr)
             || (directCleanupSemantic && directCleanupIr)
-            || (cancellationSemantic && cancellationIr))
+            || (cancellationSemantic && cancellationIr)
+            || (lifetimeSemantic && lifetimeIr))
             || module.Language != "csharp"
             || taskImports.Length != 1)
         {
@@ -97,7 +101,7 @@ internal static class GuestTaskResultValidator
         }
 
         if (retainedImports.Length != (taskLocalIr || combinedIr || asyncErrorIr
-            || exceptionFlowIr || directCleanupIr || cancellationIr ? 1 : 0))
+            || exceptionFlowIr || directCleanupIr || cancellationIr || lifetimeIr ? 1 : 0))
             context.Add(DiagnosticCode,
                 "Task continuation retention requires exactly one import in Guest IR 19/1.18 or the combined version, and none in older IR.");
 

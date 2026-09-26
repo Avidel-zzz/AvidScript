@@ -59,7 +59,13 @@ bool ParseProvenance(TConstArrayView<uint8> Payload, TMap<FString, FString>& Out
 		if (OutFields.Contains(Key)) return false;
 		OutFields.Add(MoveTemp(Key), Line.Mid(Separator + 1));
 	}
-	return OutFields.Num() == 6
+	const bool bLifetime = OutFields.FindRef(TEXT("guest_ir")) == TEXT("25/1.24");
+	const FString LifetimeModel = OutFields.FindRef(TEXT("task_local_exception_model"));
+	const bool bLifetimeModelValid = LifetimeModel == TEXT("none") || LifetimeModel == TEXT("fault")
+		|| LifetimeModel == TEXT("exception") || LifetimeModel == TEXT("cleanup")
+		|| LifetimeModel == TEXT("cleanup_only") || LifetimeModel == TEXT("cancellation");
+	return OutFields.Num() == (bLifetime ? 7 : 6)
+		&& (!bLifetime || bLifetimeModelValid)
 		&& OutFields.Contains(TEXT("module_id"))
 		&& OutFields.Contains(TEXT("source_id"))
 		&& OutFields.Contains(TEXT("source_sha256"))
@@ -131,6 +137,9 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 		OutError = TEXT("WASM provenance metadata is malformed");
 		return false;
 	}
+	const bool bLifetime = ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("25/1.24");
+	const FString LifetimeModel = ProvenanceFields.FindRef(TEXT("task_local_exception_model"));
+	const bool bLifetimeErrors = bLifetime && LifetimeModel != TEXT("none") && LifetimeModel != TEXT("cleanup_only");
 	if (!bFound)
 	{
 		if (bValidProvenance && (ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("17/1.16")
@@ -138,7 +147,7 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 			|| ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("21/1.20")
 			|| ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("22/1.21")
 			|| ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("23/1.22")
-			|| ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("24/1.23")))
+			|| ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("24/1.23") || bLifetimeErrors))
 		{
 			OutError = TEXT("Catalog-bearing Guest IR WASM is missing language-error metadata");
 			return false;
@@ -152,7 +161,7 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 			&& ProvenanceFields.FindRef(TEXT("guest_ir")) != TEXT("21/1.20")
 			&& ProvenanceFields.FindRef(TEXT("guest_ir")) != TEXT("22/1.21")
 			&& ProvenanceFields.FindRef(TEXT("guest_ir")) != TEXT("23/1.22")
-			&& ProvenanceFields.FindRef(TEXT("guest_ir")) != TEXT("24/1.23")))
+			&& ProvenanceFields.FindRef(TEXT("guest_ir")) != TEXT("24/1.23") && !bLifetimeErrors))
 	{
 		OutError = TEXT("language-error metadata has no matching versioned provenance");
 		return false;
@@ -183,7 +192,7 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 	const TArray<TSharedPtr<FJsonValue>>* Types = nullptr;
 	const TArray<TSharedPtr<FJsonValue>>* Sources = nullptr;
 	if (!CatalogPrivate::Number(*Document, TEXT("schema_version"), 1, 1, SectionVersion)
-		|| !CatalogPrivate::Number(*Document, TEXT("guest_ir_schema_version"), 17, 24, GuestSchema)
+		|| !CatalogPrivate::Number(*Document, TEXT("guest_ir_schema_version"), 17, 25, GuestSchema)
 		|| !Document->TryGetStringField(TEXT("guest_ir_version"), GuestVersion)
 		|| !((GuestSchema == 17 && GuestVersion == TEXT("1.16")
 			&& ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("17/1.16"))
@@ -196,7 +205,8 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 			|| (GuestSchema == 23 && GuestVersion == TEXT("1.22")
 				&& ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("23/1.22"))
 			|| (GuestSchema == 24 && GuestVersion == TEXT("1.23")
-				&& ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("24/1.23")))
+				&& ProvenanceFields.FindRef(TEXT("guest_ir")) == TEXT("24/1.23"))
+			|| (GuestSchema == 25 && GuestVersion == TEXT("1.24") && bLifetimeErrors))
 		|| !Document->TryGetStringField(TEXT("module_id"), ModuleId) || ModuleId != ExpectedModuleId
 		|| !Document->TryGetStringField(TEXT("source_sha256"), SourceSha256)
 		|| !CatalogPrivate::IsLowerSha256(SourceSha256)
@@ -204,7 +214,8 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 		|| !Document->TryGetArrayField(TEXT("types"), Types) || Types->Num() > 256
 		|| !Document->TryGetArrayField(TEXT("sources"), Sources) || Sources->Num() > 1024
 		|| ((Types->IsEmpty() || Sources->IsEmpty())
-			&& (GuestSchema != 23 || Types->Num() != Sources->Num())))
+			&& ((GuestSchema != 23 && !(GuestSchema == 25 && LifetimeModel == TEXT("cleanup")))
+				|| Types->Num() != Sources->Num())))
 	{
 		OutError = TEXT("language-error metadata identity or token counts are invalid");
 		return false;
@@ -212,6 +223,7 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 
 	auto Candidate = MakeUnique<FAvidScriptLanguageErrorCatalog>();
 	Candidate->GuestIrSchemaVersion = GuestSchema;
+	Candidate->bTaskLifetimeCancellation = GuestSchema == 25 && LifetimeModel == TEXT("cancellation");
 	Candidate->TypeIds.Reserve(Types->Num());
 	for (const TSharedPtr<FJsonValue>& Entry : *Types)
 	{
