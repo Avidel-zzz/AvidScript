@@ -13,13 +13,15 @@ inline constexpr std::uint32_t MaxResponseBytes = 64 * 1024;
 inline constexpr std::uint32_t MaxLayouts = 1024;
 inline constexpr std::uint32_t MaxReferencesPerLayout = 256;
 inline constexpr std::uint32_t MaxTotalReferences = 65536;
+inline constexpr std::uint32_t MaxStaticSlots = 4096;
 
 enum class ECommand : std::uint32_t
 {
 	Configure = 1, PushFrame = 2, PopFrame = 3, CreateRoot = 4,
 	SetRoot = 5, ReleaseRoot = 6, Allocate = 7, ReadBytes = 8,
 	WriteBytes = 9, ReadReference = 10, WriteReference = 11, Collect = 12,
-	ConfigureRootsOnly = 13
+	ConfigureRootsOnly = 13, ConfigureStaticSlots = 14,
+	ReadStaticSlot = 15, WriteStaticSlot = 16
 };
 
 // Signed lengths are accepted from i32 WASM arguments; addresses retain all 32 bits.

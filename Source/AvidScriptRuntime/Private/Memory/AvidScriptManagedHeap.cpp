@@ -141,6 +141,48 @@ EHeapError FHeap::Configure(std::span<const FHeapLayout> InLayouts)
 	return EHeapError::Ok;
 }
 
+EHeapError FHeap::ConfigureStaticSlots(std::span<const std::uint32_t> TargetTypes)
+{
+	if (const auto State = Ready(); State != EHeapError::Ok) return State;
+	if (!StaticSlots.empty()) return EHeapError::AlreadyConfigured;
+	if (TargetTypes.empty()) return EHeapError::InvalidLayout;
+	if (TargetTypes.size() > Limits.MaxRoots - Stats.LiveRoots) return EHeapError::RootLimit;
+	for (const auto Type : TargetTypes)
+		if (Type && LayoutIndex(Type) == InvalidIndex) return EHeapError::InvalidType;
+	std::vector<FStaticSlot> Candidate;
+	Candidate.reserve(TargetTypes.size());
+	for (const auto Type : TargetTypes) Candidate.push_back({Type, 0});
+	StaticSlots = std::move(Candidate);
+	Stats.StaticRoots = static_cast<std::uint32_t>(StaticSlots.size());
+	Stats.LiveRoots += Stats.StaticRoots;
+	return EHeapError::Ok;
+}
+
+EHeapError FHeap::ReadStaticSlot(std::uint32_t Slot, std::uint32_t ExpectedType, FToken& OutObject) const
+{
+	OutObject = 0;
+	if (const auto State = Ready(); State != EHeapError::Ok) return State;
+	if (StaticSlots.empty()) return EHeapError::StaticStorageNotConfigured;
+	if (!Slot || Slot > StaticSlots.size()) return EHeapError::InvalidStaticSlot;
+	const auto& Value = StaticSlots[Slot - 1];
+	if (Value.TypeId != ExpectedType) return EHeapError::ReferenceTypeMismatch;
+	OutObject = Value.Object;
+	return EHeapError::Ok;
+}
+
+EHeapError FHeap::WriteStaticSlot(std::uint32_t Slot, std::uint32_t ExpectedType, FToken Object)
+{
+	if (const auto State = Ready(); State != EHeapError::Ok) return State;
+	if (StaticSlots.empty()) return EHeapError::StaticStorageNotConfigured;
+	if (!Slot || Slot > StaticSlots.size()) return EHeapError::InvalidStaticSlot;
+	auto& Value = StaticSlots[Slot - 1];
+	if (Value.TypeId != ExpectedType) return EHeapError::ReferenceTypeMismatch;
+	if (Object && ObjectIndex(Object) == InvalidIndex) return EHeapError::InvalidObject;
+	if (Object && Value.TypeId && ObjectIndex(Object, Value.TypeId) == InvalidIndex) return EHeapError::ReferenceTypeMismatch;
+	Value.Object = Object;
+	return EHeapError::Ok;
+}
+
 FToken FHeap::Token(ETokenKind Kind, std::uint32_t Slot, std::uint32_t Generation) const
 {
 	return (FToken(Owner) << 40) | (FToken(Kind) << 38) | (FToken(Generation) << 16) | (Slot + 1);
@@ -287,6 +329,7 @@ EHeapError FHeap::CreateRoot(FToken Frame, FToken InitialObject, FToken& OutRoot
 	const auto OwnerFrame = Frame ? FrameIndex(Frame) : InvalidIndex;
 	if (Frame && OwnerFrame == InvalidIndex) return EHeapError::InvalidFrame;
 	if (InitialObject && ObjectIndex(InitialObject) == InvalidIndex) return EHeapError::InvalidObject;
+	if (Stats.LiveRoots >= Limits.MaxRoots) return EHeapError::RootLimit;
 	const auto Slot = Acquire(Roots, FreeRoots, Limits.MaxRoots);
 	if (Slot == InvalidIndex) return EHeapError::RootLimit;
 	FRootSlot& Root = Roots[Slot];
@@ -424,6 +467,7 @@ EHeapError FHeap::Collect()
 		return true;
 	};
 	for (const auto& Root : Roots) if (Root.Live && !Mark(Root.Object)) return EHeapError::InvalidObject;
+	for (const auto& Slot : StaticSlots) if (!Mark(Slot.Object)) return EHeapError::InvalidObject;
 	while (!Work.empty())
 	{
 		const auto Slot = Work.back();
@@ -454,11 +498,12 @@ void FHeap::Close()
 	Lifetime->Heap = nullptr;
 	bClosed = true;
 	Stats.ReclaimedObjects += Stats.LiveObjects;
-	Stats.LiveObjects = Stats.LiveRoots = Stats.ActiveFrames = 0;
+	Stats.LiveObjects = Stats.LiveRoots = Stats.ActiveFrames = Stats.StaticRoots = 0;
 	Stats.LiveBytes = 0;
 	std::vector<FObjectSlot>().swap(Objects);
 	std::vector<FRootSlot>().swap(Roots);
 	std::vector<FFrameSlot>().swap(Frames);
+	std::vector<FStaticSlot>().swap(StaticSlots);
 	std::vector<FHeapLayout>().swap(Layouts);
 	std::vector<std::uint32_t>().swap(FreeObjects);
 	std::vector<std::uint32_t>().swap(FreeRoots);

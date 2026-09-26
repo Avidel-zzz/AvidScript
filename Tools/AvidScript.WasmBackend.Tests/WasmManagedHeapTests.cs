@@ -133,7 +133,8 @@ internal static class WasmManagedHeapTests
         Require(header.Contains($"ImportName[] = \"{GuestManagedHeap.ImportName}\"", StringComparison.Ordinal), "heap import identity drift");
         Require(Regex.IsMatch(header, $@"\bMagic\s*=\s*0x{GuestManagedHeap.Magic:x}\s*;", RegexOptions.IgnoreCase), "heap magic drift");
         foreach (var (name, value) in new[] { ("MaxLayouts", GuestManagedHeap.MaxLayouts),
-                     ("MaxReferencesPerLayout", GuestManagedHeap.MaxReferencesPerLayout), ("MaxTotalReferences", GuestManagedHeap.MaxTotalReferences) })
+                     ("MaxReferencesPerLayout", GuestManagedHeap.MaxReferencesPerLayout), ("MaxTotalReferences", GuestManagedHeap.MaxTotalReferences),
+                     ("MaxStaticSlots", GuestManagedHeap.MaxStaticSlots) })
             Require(Regex.IsMatch(header, $@"\b{name}\s*=\s*{value}\s*;"), $"heap {name} drift");
         foreach (GuestManagedHeapCommand command in Enum.GetValues<GuestManagedHeapCommand>())
             Require(Regex.IsMatch(header, $@"\b{command}\s*=\s*{(int)command}\s*[,}}]"), $"heap command {command} drift");

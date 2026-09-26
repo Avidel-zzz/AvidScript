@@ -78,6 +78,14 @@ bool FAvidScriptManagedHeapOwnershipTest::RunTest(const FString& Parameters)
 	FToken SessionRoot = 0, SessionObject = 0;
 	TestTrue(TEXT("Session root"), OriginalHeap->CreateRoot(0, 0, SessionRoot) == EHeapError::Ok);
 	TestTrue(TEXT("Session allocation"), OriginalHeap->Allocate(1, SessionRoot, SessionObject) == EHeapError::Ok);
+	const std::array<std::uint32_t, 1> StaticTypes{1};
+	TestTrue(TEXT("Session declares static storage"), OriginalHeap->ConfigureStaticSlots(StaticTypes) == EHeapError::Ok);
+	TestTrue(TEXT("Session stores static object"), OriginalHeap->WriteStaticSlot(1, 1, SessionObject) == EHeapError::Ok);
+	TestTrue(TEXT("Release temporary persistent root"), OriginalHeap->ReleaseRoot(SessionRoot) == EHeapError::Ok);
+	TestTrue(TEXT("Collect before reload"), OriginalHeap->Collect() == EHeapError::Ok);
+	TestEqual(TEXT("Only static root owns Session object"), OriginalHeap->GetStats().LiveRoots, 1u);
+	TestEqual(TEXT("Session static root count"), OriginalHeap->GetStats().StaticRoots, 1u);
+	TestTrue(TEXT("Static object survives before reload"), OriginalHeap->IsAlive(SessionObject));
 	const uint8 BeginTrap[] = {
 		0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
 		0x01, 0x08, 0x02, 0x60, 0x00, 0x00, 0x60, 0x01,
@@ -89,10 +97,13 @@ bool FAvidScriptManagedHeapOwnershipTest::RunTest(const FString& Parameters)
 		0x74, 0x69, 0x63, 0x6b, 0x00, 0x01, 0x0a, 0x08,
 		0x02, 0x03, 0x00, 0x00, 0x0b, 0x02, 0x00, 0x0b
 	};
-	TestFalse(TEXT("Candidate BeginPlay trap rejects reload"), Session.ReloadModule(BeginTrap, UE_ARRAY_COUNT(BeginTrap),
-		FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("heap_begin_trap")), ReloadResult));
-	TestTrue(TEXT("Rollback preserves live runtime identity"), ReloadResult.bRollbackPreservedLiveRuntime && Session.GetLiveRuntimeForTesting() == OriginalRuntime);
+	if (!TestFalse(TEXT("Candidate BeginPlay trap rejects reload"), Session.ReloadModule(BeginTrap, UE_ARRAY_COUNT(BeginTrap),
+		FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("heap_begin_trap")), ReloadResult))) return false;
+	if (!TestTrue(TEXT("Rollback preserves live runtime identity"), ReloadResult.bRollbackPreservedLiveRuntime && Session.GetLiveRuntimeForTesting() == OriginalRuntime)) return false;
 	TestTrue(TEXT("Rollback preserves live environment"), OriginalHeap->IsAlive(SessionObject));
+	FToken StaticObject = 0;
+	TestTrue(TEXT("Rollback retains static storage"), OriginalHeap->ReadStaticSlot(1, 1, StaticObject) == EHeapError::Ok);
+	TestEqual(TEXT("Rollback retains exact static object identity"), StaticObject, SessionObject);
 	TArray<uint8> Recover(BeginTrap, UE_ARRAY_COUNT(BeginTrap));
 	Recover[UE_ARRAY_COUNT(BeginTrap) - 5] = 0x01; // Replace unreachable with nop in BeginPlay.
 	if (!TestTrue(TEXT("Compatible candidate commits"), Session.ReloadModule(Recover.GetData(), Recover.Num(),
@@ -101,6 +112,11 @@ bool FAvidScriptManagedHeapOwnershipTest::RunTest(const FString& Parameters)
 	if (!TestNotNull(TEXT("Committed runtime owns heap"), CommittedHeap)) return false;
 	TestTrue(TEXT("Committed heap configure"), CommittedHeap->Configure(Layouts) == EHeapError::Ok);
 	TestFalse(TEXT("Committed module rejects old environment"), CommittedHeap->IsAlive(SessionObject));
+	TestTrue(TEXT("Committed module declares fresh static storage"), CommittedHeap->ConfigureStaticSlots(StaticTypes) == EHeapError::Ok);
+	TestTrue(TEXT("Read committed static storage"), CommittedHeap->ReadStaticSlot(1, 1, StaticObject) == EHeapError::Ok);
+	TestEqual(TEXT("Commit does not migrate raw static token"), StaticObject, FToken(0));
+	TestTrue(TEXT("Old static token cannot enter committed domain"),
+		CommittedHeap->WriteStaticSlot(1, 1, SessionObject) == EHeapError::InvalidObject);
 	TestTrue(TEXT("Session stop succeeds"), Session.StopAndUnload(Result));
 	TestNull(TEXT("Session stop releases runtime and heap"), Session.GetLiveRuntimeForTesting());
 	return true;
@@ -143,7 +159,7 @@ void CopyToken(TArray<uint8>& Out, int32 Source, int32 Destination)
 	Constant(Out, Destination); Constant(Out, Source);
 	Out.Append({0x29, 0x00, 0x00, 0x37, 0x00, 0x00}); // unaligned i64.load/store
 }
-TArray<uint8> Build(EFault Fault, const char* ImportModule = "avidscript", bool BadSignature = false)
+TArray<uint8> Build(EFault Fault, const char* ImportModule = "avidscript", bool BadSignature = false, bool StaticStorage = false)
 {
 	using namespace AvidScript::Managed;
 	TArray<uint8> Module{0, 0x61, 0x73, 0x6d, 1, 0, 0, 0};
@@ -159,7 +175,9 @@ TArray<uint8> Build(EFault Fault, const char* ImportModule = "avidscript", bool 
 	Name(Exports, "avid_on_tick"); Exports.Append({0, 2});
 	Name(Exports, "heap_pair"); Exports.Append({0, 3});
 	Name(Exports, "heap_event"); Exports.Append({0, 4}); Section(Module, 7, Exports);
-	TArray<uint8> Init{0}; Host(Init, 64, 24); Init.Add(0x0b);
+	TArray<uint8> Init{0}; Host(Init, 64, 24);
+	if (StaticStorage) Host(Init, 320, 16);
+	Init.Add(0x0b);
 	TArray<uint8> Run{0};
 	Host(Run, 128, 8, Fault == EFault::OutputBounds ? 0x7ffffffc : Fault == EFault::Overlap ? 132 : 512,
 		Fault == EFault::ShortOutput ? 7 : 8);
@@ -167,14 +185,22 @@ TArray<uint8> Build(EFault Fault, const char* ImportModule = "avidscript", bool 
 	CopyToken(Run, 520, 204); Host(Run, 192, 20, 528, 8);
 	if (Fault != EFault::ForeignObject) CopyToken(Run, 528, 232);
 	Host(Run, 224, 32);
+	if (StaticStorage) { CopyToken(Run, 528, 400); Host(Run, 384, 24); }
 	CopyToken(Run, 528, 280); Host(Run, 272, 28, 536, 4);
 	if (Fault == EFault::Trap) Run.Add(0x00);
 	TArray<uint8> Void = Run; Void.Add(0x0b);
-	TArray<uint8> Pair = Run; Constant(Pair, 536); Pair.Append({0x28, 0, 0, 0x0b});
+	TArray<uint8> Pair = StaticStorage ? TArray<uint8>{0} : Run;
+	if (StaticStorage)
+	{
+		Host(Pair, 352, 16, 544, 8); CopyToken(Pair, 544, 280); Host(Pair, 272, 28, 536, 4);
+	}
+	Constant(Pair, 536); Pair.Append({0x28, 0, 0, 0x0b});
+	TArray<uint8> Event = Void;
+	if (StaticStorage) { Event = {0}; Host(Event, 384, 24); Event.Add(0x0b); }
 	TArray<uint8> Code{4};
-	for (const auto* Body : {&Init, &Void, &Pair, &Void}) { U32(Code, Body->Num()); Code.Append(*Body); }
+	for (const auto* Body : {&Init, &Void, &Pair, &Event}) { U32(Code, Body->Num()); Code.Append(*Body); }
 	Section(Module, 10, Code);
-	TArray<uint8> Memory; Memory.SetNumZeroed(320);
+	TArray<uint8> Memory; Memory.SetNumZeroed(StaticStorage ? 408 : 320);
 	auto Put = [&Memory](int32 Address, uint32 Value)
 	{
 		for (unsigned I = 0; I < 4; ++I) Memory[Address + I] = static_cast<uint8>(Value >> (I * 8));
@@ -189,6 +215,12 @@ TArray<uint8> Build(EFault Fault, const char* ImportModule = "avidscript", bool 
 	Header(160, Abi::ECommand::CreateRoot); Header(192, Abi::ECommand::Allocate); Put(200, 1);
 	Header(224, Abi::ECommand::WriteBytes); Put(240, 1); Put(244, 0); Put(248, 4); Put(252, 42);
 	Header(272, Abi::ECommand::ReadBytes); Put(288, 1); Put(292, 0); Put(296, 4);
+	if (StaticStorage)
+	{
+		Header(320, Abi::ECommand::ConfigureStaticSlots); Put(328, 1); Put(332, 1);
+		Header(352, Abi::ECommand::ReadStaticSlot); Put(360, 1); Put(364, 1);
+		Header(384, Abi::ECommand::WriteStaticSlot); Put(392, 1); Put(396, 1);
+	}
 	TArray<uint8> Data{1, 0}; Constant(Data, 0); Data.Add(0x0b); U32(Data, Memory.Num()); Data.Append(Memory);
 	Section(Module, 11, Data); return Module;
 }
@@ -278,6 +310,102 @@ bool FAvidScriptManagedHeapHostAbiTest::RunTest(const FString& Parameters)
 		const auto Wasm = Build(EFault::None);
 		TestFalse(TEXT("Heap ABI requires invocation cleanup owner"), Unscoped->Load(MakeArrayView(Wasm), TEXT("heap_without_scope"), {}, Error));
 		TestEqual(TEXT("Missing owner diagnostic"), Error.Category, FString(TEXT("managed_heap_scope_required")));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptManagedHeapStaticStorageTest,
+	"AvidScript.Runtime.ManagedHeap.StaticStorage",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptManagedHeapStaticStorageTest::RunTest(const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	using namespace AvidScript::Managed;
+	using namespace ManagedHeapFixture;
+	for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+	{
+		AddInfo(Backend == EAvidScriptVmBackendKind::Wasmtime ? TEXT("Static storage: Wasmtime JIT") : TEXT("Static storage: WAMR interpreter"));
+		FAvidScriptVmBackendSelection Selection;
+		Selection.BackendKind = Backend;
+		Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime ? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+		FAvidScriptWasmRuntimeInstance Runtime(Selection); FAvidScriptWasmSmokeResult Result;
+		const auto Wasm = Build(EFault::None, "avidscript", false, true);
+		if (!TestTrue(TEXT("Static fixture loads"), Runtime.LoadModule(Wasm.GetData(), Wasm.Num(), TEXT("heap_static"), Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		TestEqual(TEXT("Static fixture uses requested backend"), Runtime.GetActiveBackendInfo().Kind, Backend);
+		TestEqual(TEXT("Static fixture uses requested execution mode"), Runtime.GetActiveBackendInfo().ExecutionMode, Selection.ExecutionMode);
+		if (!TestTrue(TEXT("WASM declares static storage"), Runtime.BeginPlay(Result))) { AddError(Result.ErrorMessage); return false; }
+		FHeap& Heap = *Runtime.GetManagedHeapForTesting();
+		FToken Current = 99, Previous = 0;
+		TestTrue(TEXT("Read default static value"), Heap.ReadStaticSlot(1, 1, Current) == EHeapError::Ok);
+		TestEqual(TEXT("Initial static value is null"), Current, FToken(0));
+		TestEqual(TEXT("Null static slot reserves root budget"), Heap.GetStats().StaticRoots, 1u);
+		FAvidScriptVmPreparedExportCall Read, Write;
+		FString Error;
+		if (!TestTrue(TEXT("Prepare static reader"), Runtime.PrepareNamedExportCall(TEXT("heap_pair"), Read, Error))
+			|| !TestTrue(TEXT("Prepare static writer"), Runtime.PrepareNamedExportCall(TEXT("heap_event"), Write, Error)))
+		{ AddError(Error); return false; }
+		FAvidScriptVmCallFrame CallFrame; CallFrame.CellCount = 2;
+		FAvidScriptVmError VmError;
+		for (int32 Invocation = 0; Invocation < 8; ++Invocation)
+		{
+			FToken CallerFrame = 0, CallerRoot = 0;
+			TestTrue(TEXT("Caller frame"), Heap.PushFrame(CallerFrame) == EHeapError::Ok);
+			TestTrue(TEXT("Caller root"), Heap.CreateRoot(CallerFrame, 0, CallerRoot) == EHeapError::Ok);
+			if (!TestTrue(TEXT("WASM stores a new static object"), Runtime.Tick(0.01f, Result))) { AddError(Result.ErrorMessage); return false; }
+			TestEqual(TEXT("Tick preserves caller frame"), Heap.GetStats().ActiveFrames, 1u);
+			TestEqual(TEXT("Tick retains only caller and static roots"), Heap.GetStats().LiveRoots, 2u);
+			TestTrue(TEXT("Return from caller"), Heap.PopFrame(CallerFrame) == EHeapError::Ok);
+			TestTrue(TEXT("Collect between exports"), Heap.Collect() == EHeapError::Ok);
+			TestTrue(TEXT("Read static object identity"), Heap.ReadStaticSlot(1, 1, Current) == EHeapError::Ok);
+			TestTrue(TEXT("Only current static object survives"), Heap.IsAlive(Current) && !Heap.IsAlive(Previous));
+			TestEqual(TEXT("Replacement does not retain old objects"), Heap.GetStats().LiveObjects, 1u);
+			FAvidScriptVmCallResult Return;
+			if (!TestTrue(TEXT("Separate WASM export reads retained object"), Read.Call(CallFrame, VmError, &Return)))
+			{ AddError(VmError.Details); return false; }
+			TestEqual(TEXT("Retained object still contains its value"), Return.Cells[0], 42u);
+			TestEqual(TEXT("Reader allocates no replacement object"), Heap.GetStats().Allocations, uint64(Invocation + 1));
+			TestEqual(TEXT("Static access leaves no invocation frames"), Heap.GetStats().ActiveFrames, 0u);
+			TestEqual(TEXT("Static access leaves only domain root"), Heap.GetStats().LiveRoots, 1u);
+			if (Invocation != 7) Previous = Current;
+		}
+		uint8 Bytes[8];
+		for (unsigned I = 0; I < 8; ++I) Bytes[I] = static_cast<uint8>(Previous >> (I * 8));
+		TestTrue(TEXT("Inject stale static assignment"), Runtime.WriteStateBytes(400, MakeArrayView(Bytes), Error));
+		TestFalse(TEXT("Host rejects stale static object"), Write.Call(CallFrame, VmError));
+		TestEqual(TEXT("Stale static write diagnostic"), VmError.Category, FString(TEXT("managed_heap_rejected")));
+		FToken AfterFailure = 0;
+		TestTrue(TEXT("Static value remains readable after rejection"), Heap.ReadStaticSlot(1, 1, AfterFailure) == EHeapError::Ok);
+		TestEqual(TEXT("Failed write preserves prior identity"), AfterFailure, Current);
+		TestTrue(TEXT("Collect after rejected write"), Heap.Collect() == EHeapError::Ok);
+		TestTrue(TEXT("Rejected call does not retire domain static root"), Heap.IsAlive(Current));
+		for (auto& Byte : Bytes) Byte = 0;
+		TestTrue(TEXT("Write null static assignment packet"), Runtime.WriteStateBytes(400, MakeArrayView(Bytes), Error));
+		if (!TestTrue(TEXT("WASM clears static reference"), Write.Call(CallFrame, VmError))) { AddError(VmError.Details); return false; }
+		TestTrue(TEXT("Collect cleared static object"), Heap.Collect() == EHeapError::Ok);
+		TestEqual(TEXT("Clear releases last object"), Heap.GetStats().LiveObjects, 0u);
+		TestEqual(TEXT("Clear keeps declared static storage"), Heap.GetStats().LiveRoots, 1u);
+		Runtime.Unload(); Runtime.Unload();
+		TestNull(TEXT("Unload releases static heap"), Runtime.GetManagedHeapForTesting());
+		if (!TestTrue(TEXT("Static module reloads fresh"), Runtime.LoadModule(Wasm.GetData(), Wasm.Num(), TEXT("heap_static_fresh"), Result))
+			|| !TestTrue(TEXT("Fresh WASM declares static storage"), Runtime.BeginPlay(Result))) { AddError(Result.ErrorMessage); return false; }
+		FHeap& Fresh = *Runtime.GetManagedHeapForTesting();
+		TestTrue(TEXT("Fresh storage is null"), Fresh.ReadStaticSlot(1, 1, AfterFailure) == EHeapError::Ok && AfterFailure == 0);
+		TestTrue(TEXT("Prior domain token cannot enter fresh slot"), Fresh.WriteStaticSlot(1, 1, Current) == EHeapError::InvalidObject);
+
+		FAvidScriptWasmRuntimeInstance Trapping(Selection);
+		const auto TrapWasm = Build(EFault::Trap, "avidscript", false, true);
+		if (!TestTrue(TEXT("Static trap fixture loads"), Trapping.LoadModule(TrapWasm.GetData(), TrapWasm.Num(), TEXT("heap_static_trap"), Result))
+			|| !TestTrue(TEXT("Trap fixture initializes"), Trapping.BeginPlay(Result))) { AddError(Result.ErrorMessage); return false; }
+		TestFalse(TEXT("Tick traps after storing static object"), Trapping.Tick(0.01f, Result));
+		FHeap& TrapHeap = *Trapping.GetManagedHeapForTesting();
+		TestTrue(TEXT("Collect after trap"), TrapHeap.Collect() == EHeapError::Ok);
+		TestEqual(TEXT("Trap unwinds function frames"), TrapHeap.GetStats().ActiveFrames, 0u);
+		TestEqual(TEXT("Trap preserves domain static storage"), TrapHeap.GetStats().StaticRoots, 1u);
+		TestEqual(TEXT("Static object survives function trap until domain closes"), TrapHeap.GetStats().LiveObjects, 1u);
+		Trapping.Unload();
+		TestNull(TEXT("Trapped domain unload releases heap"), Trapping.GetManagedHeapForTesting());
 	}
 	return true;
 }

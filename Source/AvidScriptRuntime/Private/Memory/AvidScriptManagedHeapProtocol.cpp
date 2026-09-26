@@ -48,6 +48,17 @@ FHeapProtocolResult ExecuteHeapCommand(FHeap& Heap, std::span<const std::uint8_t
 		if (!Response.empty()) return Failure(EHeapProtocolError::InvalidOutput);
 		return FromHeap(Heap.ConfigureRootsOnly());
 	}
+	if (Command == Abi::ECommand::ConfigureStaticSlots)
+	{
+		if (!Response.empty()) return Failure(EHeapProtocolError::InvalidOutput);
+		const auto Count = Reader.ReadUint32();
+		if (!Reader.Valid || Count == 0) return Failure(EHeapProtocolError::InvalidPacket);
+		if (Count > Abi::MaxStaticSlots) return Failure(EHeapProtocolError::LimitExceeded);
+		if (std::uint64_t(Count) * 4 != Request.size() - Reader.Position) return Failure(EHeapProtocolError::InvalidPacket);
+		std::vector<std::uint32_t> Types; Types.reserve(Count);
+		for (std::uint32_t I = 0; I < Count; ++I) Types.push_back(Reader.ReadUint32());
+		return FromHeap(Heap.ConfigureStaticSlots(Types));
+	}
 	if (Command == Abi::ECommand::Configure)
 	{
 		if (!Response.empty()) return Failure(EHeapProtocolError::InvalidOutput);
@@ -80,7 +91,7 @@ FHeapProtocolResult ExecuteHeapCommand(FHeap& Heap, std::span<const std::uint8_t
 	}
 
 	FToken First = 0, Second = 0;
-	std::uint32_t Type = 0, Offset = 0, Count = 0;
+	std::uint32_t Type = 0, Offset = 0, Count = 0, StaticSlot = 0;
 	std::size_t OutputSize = 0;
 	switch (Command)
 	{
@@ -102,6 +113,12 @@ FHeapProtocolResult ExecuteHeapCommand(FHeap& Heap, std::span<const std::uint8_t
 	case Abi::ECommand::WriteReference:
 		First = Reader.ReadToken(); Type = Reader.ReadUint32(); Offset = Reader.ReadUint32();
 		if (Command == Abi::ECommand::ReadReference) OutputSize = 8;
+		else Second = Reader.ReadToken();
+		break;
+	case Abi::ECommand::ReadStaticSlot:
+	case Abi::ECommand::WriteStaticSlot:
+		StaticSlot = Reader.ReadUint32(); Type = Reader.ReadUint32();
+		if (Command == Abi::ECommand::ReadStaticSlot) OutputSize = 8;
 		else Second = Reader.ReadToken();
 		break;
 	case Abi::ECommand::Collect: break;
@@ -134,6 +151,8 @@ FHeapProtocolResult ExecuteHeapCommand(FHeap& Heap, std::span<const std::uint8_t
 	case Abi::ECommand::WriteBytes: Error = Heap.WriteBytes(First, Type, Offset, Request.last(Count)); break;
 	case Abi::ECommand::ReadReference: Error = Heap.ReadReference(First, Type, Offset, Token); break;
 	case Abi::ECommand::WriteReference: Error = Heap.WriteReference(First, Type, Offset, Second); break;
+	case Abi::ECommand::ReadStaticSlot: Error = Heap.ReadStaticSlot(StaticSlot, Type, Token); break;
+	case Abi::ECommand::WriteStaticSlot: Error = Heap.WriteStaticSlot(StaticSlot, Type, Second); break;
 	case Abi::ECommand::Collect: Error = Heap.Collect(); break;
 	default: return Failure(EHeapProtocolError::UnknownCommand);
 	}
@@ -166,6 +185,7 @@ const char* HeapErrorName(EHeapError Error)
 	AVID_HEAP_NAME(InvalidRange) AVID_HEAP_NAME(ReferenceOverlap) AVID_HEAP_NAME(InvalidReferenceField)
 	AVID_HEAP_NAME(ReferenceTypeMismatch)
 	AVID_HEAP_NAME(RootAuthority)
+	AVID_HEAP_NAME(StaticStorageNotConfigured) AVID_HEAP_NAME(InvalidStaticSlot)
 #undef AVID_HEAP_NAME
 	}
 	return "UnknownHeapError";

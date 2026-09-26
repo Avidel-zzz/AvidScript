@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 project(AvidScriptManagedHeapTests LANGUAGES CXX)
 add_executable(AvidScriptManagedHeapTests
     AvidScriptManagedHeapTests.cpp
+    AvidScriptManagedStaticTests.cpp
     ../../Source/AvidScriptRuntime/Private/Memory/AvidScriptManagedHeap.cpp
     ../../Source/AvidScriptRuntime/Private/Memory/AvidScriptManagedHeapProtocol.cpp)
 target_include_directories(AvidScriptManagedHeapTests PRIVATE ../../Source/AvidScriptRuntime/Private)

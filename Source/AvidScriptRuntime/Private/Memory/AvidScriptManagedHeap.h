@@ -16,7 +16,8 @@ enum class EHeapError : std::uint8_t
 	Ok, Closed, InvalidLimits, OwnerExhausted, NotConfigured, AlreadyConfigured,
 	InvalidLayout, InvalidType, InvalidObject, InvalidRoot, InvalidFrame, FrameOrder,
 	ObjectLimit, ByteLimit, RootLimit, FrameLimit, InvalidRange, ReferenceOverlap,
-	InvalidReferenceField, ReferenceTypeMismatch, RootAuthority
+	InvalidReferenceField, ReferenceTypeMismatch, RootAuthority,
+	StaticStorageNotConfigured, InvalidStaticSlot
 };
 
 struct FHeapLimits
@@ -50,6 +51,8 @@ struct FHeapStats
 	std::uint32_t LiveObjects = 0;
 	std::uint32_t LiveRoots = 0;
 	std::uint32_t ActiveFrames = 0;
+	// Included in LiveRoots; survives frame unwind until the execution domain closes.
+	std::uint32_t StaticRoots = 0;
 	std::uint64_t LiveBytes = 0;
 	std::uint64_t PeakLiveBytes = 0;
 	std::uint64_t Allocations = 0;
@@ -90,6 +93,11 @@ public:
 	EHeapError Configure(std::span<const FHeapLayout> InLayouts);
 	// No object allocation authority; only frames and null roots are available.
 	EHeapError ConfigureRootsOnly();
+	// Slots are native GC roots, never ordinary root tokens or linear-memory state.
+	// Configuration is atomic and may succeed only once per heap.
+	EHeapError ConfigureStaticSlots(std::span<const std::uint32_t> TargetTypes);
+	EHeapError ReadStaticSlot(std::uint32_t Slot, std::uint32_t ExpectedType, FToken& OutObject) const;
+	EHeapError WriteStaticSlot(std::uint32_t Slot, std::uint32_t ExpectedType, FToken Object);
 	// Native transfers grant only roots owned by the caller's current activation.
 	EHeapError ValidateRootTransfer(std::span<const FToken> InRoots, std::uint32_t InvocationFloor = 0) const;
 	bool IsObjectRootedInCurrentFrame(FToken Object, std::uint32_t InvocationFloor = 0) const;
@@ -128,6 +136,7 @@ private:
 	struct FObjectSlot : FSlot { std::uint32_t LayoutIndex = 0; bool Marked = false; std::vector<std::uint8_t> Bytes; };
 	struct FRootSlot : FSlot { FToken Object = 0; std::uint32_t Frame = InvalidIndex; std::uint32_t Previous = InvalidIndex; std::uint32_t Next = InvalidIndex; };
 	struct FFrameSlot : FSlot { std::uint32_t FirstRoot = InvalidIndex; std::uint32_t Depth = 0; };
+	struct FStaticSlot { std::uint32_t TypeId = 0; FToken Object = 0; };
 	FToken Token(ETokenKind Kind, std::uint32_t Index, std::uint32_t Generation) const;
 	std::uint32_t Index(FToken Value, ETokenKind Kind) const;
 	std::uint32_t ObjectIndex(FToken Value, std::uint32_t ExpectedType = 0) const;
@@ -152,6 +161,7 @@ private:
 	std::vector<FObjectSlot> Objects;
 	std::vector<FRootSlot> Roots;
 	std::vector<FFrameSlot> Frames;
+	std::vector<FStaticSlot> StaticSlots;
 	std::vector<std::uint32_t> FreeObjects, FreeRoots, FreeFrames, FrameStack;
 };
 }

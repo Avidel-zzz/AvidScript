@@ -12,6 +12,7 @@ public static class GuestManagedHeap
     public const uint Magic = 0x3150484d;
     public const int MaxLayouts = 1024, MaxReferencesPerLayout = 256, MaxTotalReferences = 65536;
     public const int MaxObjectBytes = 65536;
+    public const int MaxStaticSlots = 4096;
 
     public static bool ContainsReferences(IReadOnlyDictionary<string, GuestType> types, string id)
     {
@@ -57,4 +58,5 @@ public enum GuestManagedHeapCommand
     SetRoot = 5, ReleaseRoot = 6, Allocate = 7, ReadBytes = 8,
     WriteBytes = 9, ReadReference = 10, WriteReference = 11, Collect = 12,
     ConfigureRootsOnly = 13,
+    ConfigureStaticSlots = 14, ReadStaticSlot = 15, WriteStaticSlot = 16,
 }
