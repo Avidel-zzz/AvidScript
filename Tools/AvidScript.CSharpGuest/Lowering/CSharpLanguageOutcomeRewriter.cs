@@ -189,8 +189,9 @@ public static class CSharpLanguageOutcomeRewriter
             return Fail("The language-outcome module layout is invalid.", out error);
         GuestModule candidate = module with
         {
-            SchemaVersion = 16,
-            IrVersion = "1.15",
+            SchemaVersion = module.StaticStorage is null ? 16 : GuestStaticStorage.SchemaVersion,
+            IrVersion = module.StaticStorage is null ? "1.15" : GuestStaticStorage.IrVersion,
+            StaticStorage = module.StaticStorage is null ? null : module.StaticStorage with { BaseSchemaVersion = 16, BaseIrVersion = "1.15" },
             Types = typeLayout.Types,
             Imports = imports,
             Functions = rewrittenFunctions,

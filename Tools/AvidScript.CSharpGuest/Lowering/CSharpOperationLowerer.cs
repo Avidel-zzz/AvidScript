@@ -1004,8 +1004,10 @@ internal static class CSharpOperationLowerer
             return null;
         }
 
+        bool staticSlot = CSharpStaticExecutionContext.UsesSlot(context, operation.SymbolId, operation.TypeId);
         instructions.Add(new GuestInstruction(
-            "global_load", result.Id, Array.Empty<string>(), globalId, null, null));
+            staticSlot ? GuestStaticStorage.GetOp : "global_load", result.Id, Array.Empty<string>(),
+            staticSlot ? CSharpStaticExecutionContext.Slot(operation.SymbolId!) : globalId, null, null));
         return result;
     }
     public static GuestRegister? LowerAddress(
@@ -1345,8 +1347,10 @@ internal static class CSharpOperationLowerer
 
             if (context.TryGetGlobal(target.SymbolId, out string globalId))
             {
+                bool staticSlot = CSharpStaticExecutionContext.UsesSlot(context, target.SymbolId, target.TypeId);
                 instructions.Add(new GuestInstruction(
-                    "global_store", null, new[] { value.Id }, globalId, null, null));
+                    staticSlot ? GuestStaticStorage.SetOp : "global_store", null, new[] { value.Id },
+                    staticSlot ? CSharpStaticExecutionContext.Slot(target.SymbolId!) : globalId, null, null));
                 return true;
             }
         }

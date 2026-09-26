@@ -6,6 +6,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--static-source")
+            {
+                int focused = CSharpGuestStaticSourceExecutionTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.StaticSource: {focused}/{focused} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--static-guards")
             {
                 int focused = CSharpGuestStaticInitializationGuardTests.Run();
@@ -205,6 +211,7 @@ internal static class Program
                 + CSharpGuestInstanceInitializerTests.Run()
                 + CSharpGuestStaticInitializationContractTests.Run()
                 + CSharpGuestStaticInitializationGuardTests.Run()
+                + CSharpGuestStaticSourceExecutionTests.Run()
                 + CSharpGuestAsyncLanguageErrorTests.Run()
                 + CSharpGuestDirectAwaitTests.Run()
                 + CSharpGuestAsyncCancellationTests.Run()

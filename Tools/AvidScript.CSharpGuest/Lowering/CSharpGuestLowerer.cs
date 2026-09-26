@@ -426,6 +426,8 @@ public static class CSharpGuestLowerer
                         }))
                     .OrderBy(route => route.CallbackId).ToArray() : null,
         };
+        if (CSharpStaticExecutionContext.Find(document) is { } staticContext)
+            module = staticContext.Apply(document, module);
         GuestValidationResult validation = GuestModuleValidator.Validate(module);
         if (!validation.Succeeded)
         {
@@ -497,6 +499,8 @@ public static class CSharpGuestLowerer
                 Add(diagnostics, "ASCG1003", $"Static field '{symbol.Id}' has no Guest value type.");
                 continue;
             }
+            if (guestTypes[symbol.TypeId].Kind == "managed_ref"
+                && CSharpStaticExecutionContext.Find(document)?.Owns(symbol.Id) == true) continue;
             if (guestTypes[symbol.TypeId].Kind is "factory_ref" or "object_type_ref" or "composite_ref"
                 || CSharpManagedDelegateLowerer.ContainsReference(symbol.TypeId, guestTypes))
             {

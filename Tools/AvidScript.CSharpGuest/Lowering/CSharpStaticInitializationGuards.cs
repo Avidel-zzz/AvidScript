@@ -9,7 +9,7 @@ namespace AvidScript.CSharpGuest;
 public sealed record CSharpStaticInitializer(string TypeId, string BodyFunctionId, int SourceToken);
 
 // Composes already lowered initializer bodies. Source triggers and closed-type
-// specialization belong to the caller; this does not admit Semantic 48 by itself.
+// specialization belong to the caller; this does not admit source plans by itself.
 public static class CSharpStaticInitializationGuards
 {
     public const string ExceptionType = "type:global::System.TypeInitializationException";
@@ -62,7 +62,9 @@ public static class CSharpStaticInitializationGuards
         if (slots.Length > GuestManagedHeap.MaxStaticSlots || slots.Any(slot => slot is null)
             || slots.Select(slot => slot.Id).Distinct().Count() != slots.Length)
             return Fail("Initializer state slots exceed the budget or collide with existing static storage.", out error);
-        var types = module.Types.Select(type => type.Id != Payload ? type : type with
+        var inputTypes = module.Types.Any(type => type.Id == B) ? module.Types
+            : module.Types.Append(new GuestType(B, "scalar", "i32", Array.Empty<GuestField>(), null, null, 1, 1)).ToArray();
+        var types = inputTypes.Select(type => type.Id != Payload ? type : type with
         {
             Fields = type.Fields.Concat(new[] {
                 new GuestField("field:inner_root", "inner_root", Root, 0),

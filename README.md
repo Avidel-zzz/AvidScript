@@ -113,7 +113,7 @@ public partial class Projectile : AvidActor
 
 支持范围还在补全：
 
-- **C#：**[静态对象字段与静态构造函数](Docs/Phase66/P66.C10_Static_Object_Lifetime_Contract.md)的 C# → WASM 支持尚未完成。仅支持部分 .NET API，不能直接使用任意 NuGet 包。
+- **C#：**[静态对象字段与静态构造函数](Docs/Phase66/P66.C10_Static_Object_Lifetime_Contract.md)已通过同步执行测试，但仍是编译 API 预览，普通构建尚未开放。仅支持部分 .NET API，不能直接使用任意 NuGet 包。
 - **异步：**泛型 Task 目前只有 `Task<int>`；不能在 `catch` / `finally` 中使用 `await`。
 - **异常：**部分同步方法和属性访问器可使用显式 `throw`，需要[实验性构建参数](Docs/Phase66/P66.C8_Task_Local_Lifetime_Contract.md#generated-task-build)。同步异常还不能向异步方法传播。
 - **热重载：**新增 UE 类型、属性、函数，或修改反射签名，需要重新编译并重启 Editor。
