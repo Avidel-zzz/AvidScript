@@ -368,8 +368,15 @@ internal static class CSharpAsyncCfgLowerer
                     cancellationTarget, cancellationInstructions)) return false;
             CSharpAsyncClosureAllocations.Transition(context, method,
                 incomingSegment, cancellationTarget, cancellationInstructions);
-            blocks.Add(new(cancellationPath, cancellationInstructions,
-                new("branch", null, FlowBlockId(method, cancellationTarget), null, null)));
+            if (CSharpTaskResultAbi.SupportsCancellation(document))
+            {
+                if (!CSharpAsyncCancellationLowerer.EmitDirect(context, method, incoming!,
+                        entry.SegmentOrdinal, cancellationPath,
+                        FlowBlockId(method, cancellationTarget), cancellationInstructions, blocks)) return false;
+            }
+            else
+                blocks.Add(new(cancellationPath, cancellationInstructions,
+                    new("branch", null, FlowBlockId(method, cancellationTarget), null, null)));
         }
         else
         {
@@ -515,6 +522,24 @@ internal static class CSharpAsyncCfgLowerer
         SemanticAsyncControlTransfer transfer = segment.Transfer;
         switch (transfer.Kind)
         {
+            case SemanticAsyncMethod.EndCatchTransferKind:
+                blocks.Add(new(activeBlockId, instructions,
+                    new("branch", null, activeBlockId + ":end_catch", null, null)));
+                activeBlockId += ":end_catch";
+                instructions = new List<GuestInstruction>();
+                if (!CSharpAsyncExceptionLowerer.ReleaseIfHeld(context, method,
+                        segment.Ordinal, blocks, ref activeBlockId, ref instructions)) return false;
+                blocks.Add(new(activeBlockId, instructions,
+                    new("branch", null, FlowBlockId(method, transfer.PrimaryTarget), null, null)));
+                return true;
+
+            case SemanticAsyncMethod.RethrowTransferKind:
+                blocks.Add(new(activeBlockId, instructions,
+                    new("branch", null, activeBlockId + ":rethrow", null, null)));
+                blocks.Add(new(activeBlockId + ":rethrow", Array.Empty<GuestInstruction>(),
+                    new("branch", null, FlowBlockId(method, transfer.PrimaryTarget), null, null)));
+                return true;
+
             case SemanticAsyncMethod.GotoTransferKind:
                 blocks.Add(new GuestBasicBlock(
                     activeBlockId,
@@ -631,6 +656,12 @@ internal static class CSharpAsyncCfgLowerer
             case SemanticAsyncMethod.PropagateCancellationTransferKind:
                 return TryLowerExceptionPropagation(method, segment, context,
                     initialEntry, activeBlockId, instructions, blocks);
+
+            case SemanticAsyncMethod.PropagateExceptionTransferKind:
+                blocks.Add(new(activeBlockId, instructions,
+                    new("branch", null, activeBlockId + ":propagate_exception", null, null)));
+                return TryLowerExceptionPropagation(method, segment, context,
+                    initialEntry, activeBlockId + ":propagate_exception", new List<GuestInstruction>(), blocks);
 
             default:
                 Add(diagnostics, method, $"Continuation CFG segment {segment.Ordinal} has unknown transfer '{transfer.Kind}'.");
@@ -986,7 +1017,8 @@ internal static class CSharpAsyncCfgLowerer
             {
                 continue;
             }
-            if (segment.Transfer.Kind == SemanticAsyncMethod.GotoTransferKind)
+            if (segment.Transfer.Kind is SemanticAsyncMethod.GotoTransferKind
+                or SemanticAsyncMethod.EndCatchTransferKind or SemanticAsyncMethod.RethrowTransferKind)
             {
                 pending.Push(segment.Transfer.PrimaryTarget);
             }

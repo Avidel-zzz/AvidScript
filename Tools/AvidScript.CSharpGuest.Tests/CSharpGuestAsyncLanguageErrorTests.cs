@@ -82,15 +82,11 @@ internal static class CSharpGuestAsyncLanguageErrorTests
         Check(cancellationSemantic.Succeeded && cancellationSemantic.SchemaVersion == 44
             && SemanticAsyncInvocationValidator.IsValid(cancellationSemantic),
             "Task-only cancellation projection must have a valid Semantic 44 identity");
-        foreach (bool bounded in new[] { false, true })
-        {
-            CSharpGuestLoweringResult preview = CSharpGuestLowerer.Lower(cancellationSemantic,
-                new string('a', 64), enableAsyncLanguageErrors: bounded);
-            Check(!preview.Succeeded && preview.Module is null
-                && preview.Diagnostics.Any(item => item.Code == "ASCG1004"
-                    && item.Message.Contains("cancellation owners", StringComparison.Ordinal)),
-                "Semantic 44 cannot execute before Guest cancellation owners are implemented");
-        }
+        CSharpGuestLoweringResult preview = CSharpGuestLowerer.Lower(cancellationSemantic,
+            new string('a', 64));
+        Check(!preview.Succeeded && preview.Module is null
+            && preview.Diagnostics.Any(item => item.Code == "ASCG1004"),
+            "Semantic 44 still requires explicit bounded language-error compilation");
         string exceptionSource = File.ReadAllText(Path.Combine(
             Directory.GetCurrentDirectory(), "Fixtures", "Phase66", "AsyncExceptionFlow.cs"));
         const string exceptionSourceId = "Fixtures/Phase66/AsyncExceptionFlow.cs";

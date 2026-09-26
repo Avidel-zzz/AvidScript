@@ -44,6 +44,10 @@ public sealed record GuestModule(
     [JsonPropertyOrder(19)]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<GuestDirectAwaitRoute>? DirectAwaitRoutes { get; init; }
+
+    [JsonPropertyOrder(20)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<GuestAsyncExceptionTransfer>? AsyncExceptionTransfers { get; init; }
 }
 
 // IR 23 binds a protected Timer await to a status-aware resume. There is no
@@ -55,7 +59,27 @@ public sealed record GuestDirectAwaitRoute(
     [property: JsonPropertyOrder(3)] string AwaitBlockId,
     [property: JsonPropertyOrder(4)] string NormalTargetBlockId,
     [property: JsonPropertyOrder(5)] string CancellationTargetBlockId,
-    [property: JsonPropertyOrder(6)] string ScheduleImportId);
+    [property: JsonPropertyOrder(6)] string ScheduleImportId)
+{
+    // IR 24 gives a directly cancelled Timer a typed Task error owner.
+    [JsonPropertyOrder(7)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public GuestDirectAwaitCancellation? Cancellation { get; init; }
+}
+
+public sealed record GuestDirectAwaitCancellation(
+    [property: JsonPropertyOrder(0)] string OwnerLocalId,
+    [property: JsonPropertyOrder(1)] string TypeLocalId,
+    [property: JsonPropertyOrder(2)] int TypeToken,
+    [property: JsonPropertyOrder(3)] int SourceToken);
+
+public sealed record GuestAsyncExceptionTransfer(
+    [property: JsonPropertyOrder(0)] string MethodFunctionId,
+    [property: JsonPropertyOrder(1)] string BlockId,
+    [property: JsonPropertyOrder(2)] string Kind,
+    [property: JsonPropertyOrder(3)] string? TargetBlockId,
+    [property: JsonPropertyOrder(4)] string OwnerLocalId,
+    [property: JsonPropertyOrder(5)] string TypeLocalId);
 
 // IR 22 binds each protected Task await to all three executable successors.
 // The local identities name the retained source Task and the fault type token.

@@ -59,7 +59,12 @@ internal static class CSharpTaskResultAbi
         || (document.SchemaVersion == SemanticContract.AsyncExceptionFlowSchemaVersion
             && document.SemanticVersion == SemanticContract.AsyncExceptionFlowSemanticVersion)
         || (document.SchemaVersion == SemanticContract.DirectAwaitCleanupSchemaVersion
-            && document.SemanticVersion == SemanticContract.DirectAwaitCleanupSemanticVersion);
+            && document.SemanticVersion == SemanticContract.DirectAwaitCleanupSemanticVersion)
+        || SupportsCancellation(document);
+
+    public static bool SupportsCancellation(SemanticDocument document) =>
+        document.SchemaVersion == SemanticContract.AsyncCancellationFlowSchemaVersion
+        && document.SemanticVersion == SemanticContract.AsyncCancellationFlowSemanticVersion;
 
     public static string[] TaskLocalSymbols(SemanticAsyncMethod method) =>
         (method.TaskLocalSymbolIds ?? method.Segments
@@ -115,6 +120,20 @@ internal static class CSharpTaskResultAbi
         "avidscript", "avid_language_error_report_v1",
         new[] { IntTypeId, IntTypeId, "type:language_error_root" }, IntTypeId);
 
+    public static GuestImport CancelLanguageErrorImport() => new(
+        GuestTaskCancellationErrorValidator.ImportId, "avidscript",
+        GuestTaskCancellationErrorValidator.ImportName,
+        new[] { TokenTypeId, IntTypeId, IntTypeId, "type:language_error_root" }, IntTypeId);
+
+    public static GuestImport TerminalErrorMetaImport() => new(
+        GuestTaskCancellationErrorValidator.MetaImportId, "avidscript",
+        GuestTaskCancellationErrorValidator.MetaImportName, new[] { TokenTypeId }, TokenTypeId);
+
+    public static GuestImport TerminalErrorRootImport() => new(
+        GuestTaskCancellationErrorValidator.RootImportId, "avidscript",
+        GuestTaskCancellationErrorValidator.RootImportName,
+        new[] { TokenTypeId }, "type:language_error_root");
+
     // The source task must remain owned until both imports have validated its
     // language-error payload and transferred the root into this call frame.
     public static CSharpTaskLanguageError? ReadLanguageError(
@@ -130,7 +149,8 @@ internal static class CSharpTaskResultAbi
         if (metadata is null || shift is null || typePacked is null
             || typeToken is null || sourceToken is null || root is null) return null;
         instructions.Add(new("call", metadata.Id, new[] { sourceTask.Id },
-            LanguageErrorMetaImportId, null, null));
+            SupportsCancellation(context.Document)
+                ? GuestTaskCancellationErrorValidator.MetaImportId : LanguageErrorMetaImportId, null, null));
         instructions.Add(new("binary", typePacked.Id,
             new[] { metadata.Id, shift.Id }, null, "right_shift", null));
         instructions.Add(new("convert", typeToken.Id,
@@ -138,7 +158,8 @@ internal static class CSharpTaskResultAbi
         instructions.Add(new("convert", sourceToken.Id,
             new[] { metadata.Id }, null, null, null));
         instructions.Add(new("call", root.Id, new[] { sourceTask.Id },
-            LanguageErrorRootImportId, null, null));
+            SupportsCancellation(context.Document)
+                ? GuestTaskCancellationErrorValidator.RootImportId : LanguageErrorRootImportId, null, null));
         return new CSharpTaskLanguageError(typeToken, sourceToken, root);
     }
 

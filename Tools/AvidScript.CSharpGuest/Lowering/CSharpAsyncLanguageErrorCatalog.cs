@@ -13,15 +13,24 @@ internal static class CSharpAsyncLanguageErrorCatalog
             .SelectMany(method => method.ErrorPlan?.Throws.Select(site =>
                 (method.ErrorPlan.SourceId, Site: site))
                 ?? Array.Empty<(string SourceId, SemanticAsyncThrowSite Site)>())
+            .Select(item => (item.SourceId, item.Site.ExceptionTypeId, item.Site.Span))
+            .Concat(CSharpTaskResultAbi.SupportsCancellation(document)
+                ? document.AsyncMethods.Where(method => method.ExceptionPlan?.CancellationTypeId is not null)
+                    .SelectMany(method => method.Segments.Where(segment =>
+                        segment.AwaitSite?.ProducerKind is "delay" or "next_tick"
+                        && segment.Transfer?.CancellationTarget is >= 0)
+                        .Select(segment => (SourceId: document.Source.SourceId,
+                            ExceptionTypeId: method.ExceptionPlan!.CancellationTypeId!, Span: segment.AwaitSite!.Span)))
+                : Array.Empty<(string SourceId, string ExceptionTypeId, SemanticSpan Span)>())
             .ToArray();
         CSharpLanguageErrorTypeToken[] types = sites
-            .Select(item => item.Site.ExceptionTypeId)
+            .Select(item => item.ExceptionTypeId)
             .Distinct(StringComparer.Ordinal)
             .OrderBy(id => id, StringComparer.Ordinal)
             .Select((id, index) => new CSharpLanguageErrorTypeToken(index + 1, id))
             .ToArray();
         CSharpLanguageErrorSourceToken[] sources = sites
-            .Select(item => (item.SourceId, item.Site.Span))
+            .Select(item => (item.SourceId, item.Span))
             .Distinct()
             .OrderBy(item => item.SourceId, StringComparer.Ordinal)
             .ThenBy(item => item.Span.Start)

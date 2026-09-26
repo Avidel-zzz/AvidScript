@@ -6,6 +6,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--async-cancellation")
+            {
+                int focusedCount = CSharpGuestAsyncCancellationTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.AsyncCancellation: {focusedCount}/{focusedCount} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--async-invocation")
             {
                 int focusedCount = CSharpGuestAsyncInvocationTests.Run() + CSharpGuestUeAsyncTests.Run();
@@ -149,6 +155,7 @@ internal static class Program
                 + CSharpGuestThrowProducerTests.Run()
                 + CSharpGuestAsyncLanguageErrorTests.Run()
                 + CSharpGuestDirectAwaitTests.Run()
+                + CSharpGuestAsyncCancellationTests.Run()
                 + CSharpGuestGenericMethodTests.Run()
                 + CSharpGuestFinallyTests.Run()
                 + CSharpGuestEnumeratorTests.Run()

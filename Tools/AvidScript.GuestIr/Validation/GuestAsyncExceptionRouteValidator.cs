@@ -19,7 +19,9 @@ internal static class GuestAsyncExceptionRouteValidator
             && module.IrVersion == GuestTaskLanguageErrorValidator.ExceptionFlowIrVersion;
         bool ir23 = module.SchemaVersion == GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion
             && module.IrVersion == GuestTaskLanguageErrorValidator.DirectCleanupIrVersion;
-        if (!ir22 && !ir23)
+        bool ir24 = GuestTaskCancellationErrorValidator.IsVersion(module)
+            && module.AsyncExceptionTransfers is { Count: > 0 };
+        if (!ir22 && !ir23 && !ir24)
         {
             if (module.AsyncExceptionRoutes is not null)
                 Add(context, "Async exception routes require IR 22.");
@@ -44,8 +46,10 @@ internal static class GuestAsyncExceptionRouteValidator
                 || string.IsNullOrWhiteSpace(route.CancellationTargetBlockId)
                 || string.IsNullOrWhiteSpace(route.OwnerLocalId)
                 || string.IsNullOrWhiteSpace(route.TypeLocalId)
-                || new[] { route.NormalTargetBlockId, route.FaultTargetBlockId,
-                    route.CancellationTargetBlockId }.Distinct(StringComparer.Ordinal).Count() != 3)
+                || (ir24 ? route.FaultTargetBlockId != route.CancellationTargetBlockId
+                        || route.NormalTargetBlockId == route.FaultTargetBlockId
+                    : new[] { route.NormalTargetBlockId, route.FaultTargetBlockId,
+                        route.CancellationTargetBlockId }.Distinct(StringComparer.Ordinal).Count() != 3))
             {
                 Add(context, "IR 22 has an invalid or unordered await route.");
                 continue;
@@ -70,7 +74,7 @@ internal static class GuestAsyncExceptionRouteValidator
                 || sourceFunctions.Any(function => !HasTargetsAndLocals(function, route)
                     || !HasFailureFlow(function,
                         route.AwaitBlockId + ":task_failed", route,
-                        releaseDirectToken: true)))
+                        releaseDirectToken: true, cancellationErrors: ir24)))
             {
                 Add(context, $"Await callback {route.CallbackId} has an invalid immediate failure route.");
             }
@@ -79,7 +83,7 @@ internal static class GuestAsyncExceptionRouteValidator
                     StringComparison.Ordinal)).ToArray();
             if (resumedFailureBlocks.Length != 1
                 || !HasFailureFlow(resume, resumedFailureBlocks[0].Id, route,
-                    releaseDirectToken: false))
+                    releaseDirectToken: false, cancellationErrors: ir24))
             {
                 Add(context, $"Await callback {route.CallbackId} has an invalid resumed failure route.");
             }
@@ -116,6 +120,23 @@ internal static class GuestAsyncExceptionRouteValidator
             local.Id.StartsWith("value:local:$async:exception_source:",
                 StringComparison.Ordinal) && !listedOwners.Contains(local.Id)))
             Add(context, "IR 22 has a protected method without await routes.");
+        if (ir24)
+        {
+            HashSet<string> failures = routes.Select(route => route.AwaitBlockId + ":task_failed")
+                .ToHashSet(StringComparer.Ordinal);
+            HashSet<string> resumes = routes.Select(route => ResumeFunctionPrefix + route.CallbackId)
+                .ToHashSet(StringComparer.Ordinal);
+            foreach (GuestFunction function in module.Functions.Where(function => function.Locals.Any(local =>
+                local.Id.StartsWith("value:local:$async:exception_source:", StringComparison.Ordinal))))
+            {
+                if (function.Blocks.Any(block => block.Id.EndsWith(":task_failed", StringComparison.Ordinal)
+                        && !failures.Contains(block.Id))
+                    || function.Id.StartsWith(ResumeFunctionPrefix, StringComparison.Ordinal)
+                        && function.Blocks.Any(block => block.Id.EndsWith(":task_read_rejected", StringComparison.Ordinal))
+                        && !resumes.Contains(function.Id))
+                    Add(context, "IR 24 contains an unlisted protected Task await.");
+            }
+        }
     }
 
     private static bool HasTargetsAndLocals(GuestFunction function,
@@ -131,7 +152,7 @@ internal static class GuestAsyncExceptionRouteValidator
     }
 
     private static bool HasFailureFlow(GuestFunction function, string failedId,
-        GuestAsyncExceptionRoute route, bool releaseDirectToken)
+        GuestAsyncExceptionRoute route, bool releaseDirectToken, bool cancellationErrors)
     {
         Dictionary<string, GuestBasicBlock> blocks = function.Blocks
             .GroupBy(block => block.Id, StringComparer.Ordinal)
@@ -153,11 +174,13 @@ internal static class GuestAsyncExceptionRouteValidator
             return false;
         GuestInstruction[] metadata = fault.Instructions.Where(instruction =>
             instruction.Op == "call"
-                && instruction.TargetId == GuestTaskLanguageErrorValidator.MetaImportId)
+                && instruction.TargetId == (cancellationErrors
+                    ? GuestTaskCancellationErrorValidator.MetaImportId : GuestTaskLanguageErrorValidator.MetaImportId))
             .Take(2).ToArray();
         GuestInstruction[] roots = fault.Instructions.Where(instruction =>
             instruction.Op == "call"
-                && instruction.TargetId == GuestTaskLanguageErrorValidator.RootImportId)
+                && instruction.TargetId == (cancellationErrors
+                    ? GuestTaskCancellationErrorValidator.RootImportId : GuestTaskLanguageErrorValidator.RootImportId))
             .Take(2).ToArray();
         if (metadata.Length != 1 || roots.Length != 1
             || metadata[0] is not { OperandIds.Count: 1 }
@@ -168,6 +191,22 @@ internal static class GuestAsyncExceptionRouteValidator
             || RetainedSource(cancelled) != metadata[0].OperandIds[0])
             return false;
         string? typeToken = TypeTokenFromMetadata(fault, metadata[0].ResultId);
+        string? cancelledType = null;
+        if (cancellationErrors)
+        {
+            GuestInstruction[] cancelledMetadata = cancelled.Instructions.Where(instruction =>
+                instruction.Op == "call" && instruction.TargetId == GuestTaskCancellationErrorValidator.MetaImportId).ToArray();
+            GuestInstruction[] cancelledRoots = cancelled.Instructions.Where(instruction =>
+                instruction.Op == "call" && instruction.TargetId == GuestTaskCancellationErrorValidator.RootImportId).ToArray();
+            if (cancelledMetadata.Length != 1 || cancelledRoots.Length != 1
+                || !cancelledMetadata[0].OperandIds.SequenceEqual(metadata[0].OperandIds)
+                || !cancelledRoots[0].OperandIds.SequenceEqual(metadata[0].OperandIds)
+                || !ChecksState(blocks[failedId], "2", out string? state)
+                || !ChecksState(blocks[otherId], "3", out string? cancelledState)
+                || state != cancelledState) return false;
+            cancelledType = TypeTokenFromMetadata(cancelled, cancelledMetadata[0].ResultId);
+            if (cancelledType is null) return false;
+        }
         return typeToken is not null
             && OwnedBranch(blocks, faultId + ":retained",
                 route.FaultTargetBlockId, route.OwnerLocalId,
@@ -175,7 +214,21 @@ internal static class GuestAsyncExceptionRouteValidator
                 releaseDirectToken)
             && OwnedBranch(blocks, cancelledId + ":retained",
                 route.CancellationTargetBlockId, route.OwnerLocalId,
-                metadata[0].OperandIds[0], null, null, releaseDirectToken);
+                metadata[0].OperandIds[0], cancellationErrors ? route.TypeLocalId : null,
+                cancelledType, releaseDirectToken);
+    }
+
+    private static bool ChecksState(GuestBasicBlock block, string expected, out string? state)
+    {
+        GuestInstruction? compare = block.Instructions.FirstOrDefault(instruction =>
+            instruction.Op == "binary" && instruction.OperatorKind == "equals"
+            && instruction.ResultId == block.Terminator.ConditionValueId
+            && instruction.OperandIds.Count == 2
+            && block.Instructions.Any(value => value.Op == "constant"
+                && value.ResultId == instruction.OperandIds[1]
+                && value.Constant is { Kind: "int64", Value: var text } && text == expected));
+        state = compare?.OperandIds[0];
+        return state is not null;
     }
 
     private static string? RetainedSource(GuestBasicBlock block)

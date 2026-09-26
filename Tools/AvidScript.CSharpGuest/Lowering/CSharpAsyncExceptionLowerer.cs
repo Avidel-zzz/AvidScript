@@ -74,10 +74,20 @@ internal static class CSharpAsyncExceptionLowerer
         string invalidBlock = blockId + ":invalid_state";
         blocks.Add(new(otherBlock, otherInstructions,
             new("branch_if", isCancelled.Id, cancelledBlock, invalidBlock, null)));
+        List<GuestInstruction> cancelledInstructions = new();
+        CSharpTaskLanguageError? cancellation = null;
+        if (CSharpTaskResultAbi.SupportsCancellation(context.Document))
+        {
+            cancellation = CSharpTaskResultAbi.ReadLanguageError(context,
+                sourceTask, block, cancelledInstructions);
+            if (cancellation is null) return false;
+        }
         if (!RetainAndRoute(context, sourceTask, block, cancelledBlock,
-                new List<GuestInstruction>(), blocks, ownerStorage,
+                cancelledInstructions, blocks, ownerStorage,
                 CSharpGuestIds.AsyncSegmentBlock(method.MethodSymbolId,
-                    cancellationTarget), releaseDirectToken, null, null)) return false;
+                    cancellationTarget), releaseDirectToken,
+                cancellation is null ? null : typeStorage,
+                cancellation?.TypeToken)) return false;
         List<GuestInstruction> invalidInstructions = new();
         if (releaseDirectToken && CSharpTaskResultAbi.Call(context,
                 CSharpTaskResultAbi.Release, sourceTask, null, block,
@@ -189,7 +199,8 @@ internal static class CSharpAsyncExceptionLowerer
             new("trap", null, null, null, null)));
         activeBlockId = nextBlock;
         instructions = new List<GuestInstruction>();
-        return true;
+        return !CSharpTaskResultAbi.SupportsCancellation(context.Document)
+            || Initialize(context, method, block, instructions);
     }
 
     public static GuestRegister? LoadOwner(CSharpFunctionLoweringContext context,

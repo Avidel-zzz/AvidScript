@@ -285,7 +285,8 @@ internal static class CSharpTaskAwaitLowerer
         || (document.SchemaVersion == SemanticContract.AsyncExceptionFlowSchemaVersion
             && document.SemanticVersion == SemanticContract.AsyncExceptionFlowSemanticVersion)
         || (document.SchemaVersion == SemanticContract.DirectAwaitCleanupSchemaVersion
-            && document.SemanticVersion == SemanticContract.DirectAwaitCleanupSemanticVersion);
+            && document.SemanticVersion == SemanticContract.DirectAwaitCleanupSemanticVersion)
+        || CSharpTaskResultAbi.SupportsCancellation(document);
 
     private static bool StoreResult(CSharpFunctionLoweringContext context,
         SemanticAsyncAwaitSite site, GuestRegister value, int block,

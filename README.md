@@ -98,7 +98,7 @@ UE.Self.SetActorScale3D(new FVector(1.25f, 1.25f, 1.25f));
 ## Limitations
 
 - 仅支持 C# 子集，不能直接运行任意 .NET 程序或 NuGet 包。
-- `Task<int>` 只能在同一脚本实例内等待。`catch` 尚不能捕获[异步取消](Docs/Phase66/P66.C7_Async_Cancellation_Language_Contract.md)，外层 `await` 可能中止脚本。
+- `Task<int>` 只能在同一脚本实例内等待。异步取消的 `catch` / `throw;` 处于[内部预览](Docs/Phase66/P66.C7_Async_Cancellation_Language_Contract.md)，尚未接入正式构建入口；未捕获取消仍可能中止脚本。
 - `try` 中使用 `await` 需要[预览开关](Docs/Phase66/P66.C6_Direct_Continuation_Await_Contract.md)；`catch`、`finally` 中暂不支持 `await`。
 - 修改 C# 声明的 `UClass`、`UProperty`、`UFunction` 后，需要重新构建并重启 Editor。
 - Android、iOS、Shipping 和真实多人游戏尚未验收。
