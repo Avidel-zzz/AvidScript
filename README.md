@@ -114,7 +114,7 @@ public static void Tick(float deltaSeconds)
 
 - 静态字段、静态构造函数及初始化失败后的异常缓存：已通过同步执行测试，仅限[编译器 API](Docs/Phase66/P66.C10_Static_Object_Lifetime_Contract.md)，尚未接入普通构建。
 - 同步方法、属性访问器中的显式 `throw`：部分支持，需[实验性构建参数](Docs/Phase66/P66.C8_Task_Local_Lifetime_Contract.md#generated-task-build)。
-- 同步调用抛出的异常传入异步 Task：运行时测试已通过，[C# 编译接入](Docs/Phase66/P66.C10_Synchronous_Error_Task_Transfer.md)尚未完成。
+- 同步调用抛出的异常传入异步 Task：已有运行时测试与源码分析支持，[WASM 编译接入](Docs/Phase66/P66.C10_Synchronous_Error_Task_Transfer.md)尚未完成。
 
 </details>
 

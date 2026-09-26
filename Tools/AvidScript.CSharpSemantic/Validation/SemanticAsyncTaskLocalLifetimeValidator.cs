@@ -188,10 +188,16 @@ public static class SemanticAsyncTaskLocalLifetimeValidator
                 if (site.CancellationToken is { } token && (!WellFormed(token) || ReferencesOwner(token, owned))) return false;
             }
             if (!writesBySegment.TryAdd(segment.Ordinal, writes)) return false;
+            // Each source Task write is one commit point. A segment with several
+            // writes would need separate failure edges for each committed prefix.
+            if (segment.SynchronousExceptionTarget is not null && writes.Count > 1) return false;
             int[] targets = SemanticAsyncScopeValidator.Targets(segment.Transfer).Distinct().ToArray();
             blocks.Add(new(segment.Ordinal, writes.Where(write => write.Value is not null)
-                .Select(write => write.SymbolId).Distinct(StringComparer.Ordinal).ToArray(), targets));
-            foreach (int target in targets)
+                .Select(write => write.SymbolId).Distinct(StringComparer.Ordinal).ToArray(), targets)
+            {
+                SynchronousExceptionTarget = segment.SynchronousExceptionTarget,
+            });
+            foreach (int target in SemanticAsyncScopeValidator.Successors(segment).Distinct())
                 releases.Add(new(segment.Ordinal, target), ids.Where(id => memberships[id].Contains(segment.Ordinal)
                     && !memberships[id].Contains(target)).ToArray());
         }
@@ -210,6 +216,7 @@ public static class SemanticAsyncTaskLocalLifetimeValidator
             }
             if (segment.AwaitSite?.TaskLocalSymbolId is { } awaited && !available.Contains(awaited)) return false;
         }
+        // A return expression can fail and still has a normal terminal path.
         flow = new(states!, writesBySegment, blocks.Where(block => block.Successors.Count == 0
             && states!.PossibleAtExit.ContainsKey(block.Ordinal)).ToDictionary(block => block.Ordinal,
                 block => states!.PossibleAtExit[block.Ordinal]));

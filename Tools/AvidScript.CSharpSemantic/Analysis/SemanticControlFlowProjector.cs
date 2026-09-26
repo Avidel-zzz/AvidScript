@@ -26,7 +26,8 @@ internal static class SemanticControlFlowProjector
         IReadOnlyList<SemanticCallable> callables,
         bool enableAsyncExceptionFlow = false,
         bool enableDirectAwaitCleanup = false,
-        bool enableAsyncCancellationFlow = false)
+        bool enableAsyncCancellationFlow = false,
+        bool enableAsyncSynchronousExceptions = false)
     {
         List<SemanticDiagnostic> diagnostics = new();
         List<SemanticControlFlowGraph> graphs = new();
@@ -103,7 +104,8 @@ internal static class SemanticControlFlowProjector
                                         allowValueReturns: true, resultType: resultType,
                                         previewSuspendedFinally: true,
                                         allowDirectAwaitCleanup: enableDirectAwaitCleanup,
-                                        allowAsyncCancellationFlow: enableAsyncCancellationFlow)
+                                        allowAsyncCancellationFlow: enableAsyncCancellationFlow,
+                                        allowSynchronousExceptions: enableAsyncSynchronousExceptions)
                                     && preview is not null
                                     && preview.Segments.Any(segment => segment.Transfer is
                                         { Kind: SemanticAsyncMethod.AwaitTransferKind,
@@ -112,7 +114,8 @@ internal static class SemanticControlFlowProjector
                                             { Kind: SemanticAsyncMethod.AwaitTransferKind,
                                                 CancellationTarget: >= 0 }
                                         || enableAsyncCancellationFlow && segment.Transfer?.Kind
-                                            == SemanticAsyncMethod.RaiseExceptionTransferKind))
+                                            == SemanticAsyncMethod.RaiseExceptionTransferKind
+                                        || enableAsyncSynchronousExceptions && segment.SynchronousExceptionTarget is not null))
                                 {
                                     SemanticAsyncStateSlot[] inputs = body.Method.Parameters
                                         .Select(parameter => new SemanticAsyncStateSlot(

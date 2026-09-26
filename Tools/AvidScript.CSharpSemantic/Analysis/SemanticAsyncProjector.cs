@@ -48,7 +48,8 @@ internal static class SemanticAsyncProjector
         SemanticCompilationContext context,
         SemanticTypeRegistry typeRegistry,
         IReadOnlyList<SemanticCallable> callables,
-        bool enableAsyncExceptionFlow = false)
+        bool enableAsyncExceptionFlow = false,
+        bool enableAsyncSynchronousExceptions = false)
     {
         SemanticModel semanticModel = context.Compilation.GetSemanticModel(
             context.PrimaryUnit.SyntaxTree,
@@ -97,7 +98,7 @@ internal static class SemanticAsyncProjector
                 typeRegistry,
                 diagnostics,
                 ref nextCallbackId,
-                out SemanticAsyncMethod? projected))
+                out SemanticAsyncMethod? projected, enableAsyncSynchronousExceptions))
             {
                 methods.Add(projected!);
                 controlledMethodIds.Add(projected!.MethodSymbolId);
@@ -148,7 +149,8 @@ internal static class SemanticAsyncProjector
         SemanticTypeRegistry typeRegistry,
         ICollection<SemanticDiagnostic> diagnostics,
         ref int nextCallbackId,
-        out SemanticAsyncMethod? projected)
+        out SemanticAsyncMethod? projected,
+        bool enableAsyncSynchronousExceptions)
     {
         projected = null;
         string methodSymbolId = SemanticSymbolProjector.GetSymbolId(method);
@@ -234,7 +236,10 @@ internal static class SemanticAsyncProjector
                 ref nextCallbackId,
                 out SemanticAsyncControlFlowProjection? flowProjection,
                 allowValueReturns: hasTaskResult,
-                resultType: taskResultType)
+                resultType: taskResultType,
+                previewSuspendedFinally: hasTaskResult && enableAsyncSynchronousExceptions,
+                allowAsyncCancellationFlow: hasTaskResult && enableAsyncSynchronousExceptions,
+                allowSynchronousExceptions: hasTaskResult && enableAsyncSynchronousExceptions)
                 || !TryAttachStateFrames(
                     flowProjection!.Segments,
                     diagnostics,
@@ -255,12 +260,22 @@ internal static class SemanticAsyncProjector
             {
                 CompilerLocals = flowProjection.CompilerLocals,
                 InvocationInputs = invocationInputs,
-                LexicalScopes = hasLexicalFunctions || hasTaskLifetimes ? flowProjection.LexicalScopes : Array.Empty<SemanticAsyncLexicalScope>(),
+                LexicalScopes = hasLexicalFunctions || hasTaskLifetimes || hasTaskResult && enableAsyncSynchronousExceptions
+                    ? flowProjection.LexicalScopes : Array.Empty<SemanticAsyncLexicalScope>(),
                 TaskResultTypeId = hasTaskResult ? typeRegistry.Register(taskResultType!) : null,
                 TaskLocalSymbolIds = GetTaskAliasLocalIds(context, semanticModel, declaration.Body),
                 TaskLocalLifetimes = SemanticAsyncTaskLocalProjector.ProjectLifetimes(
                     context, semanticModel, declaration.Body, flowProjection.LexicalScopes),
                 ErrorPlan = flowProjection.ErrorPlan,
+                ExceptionPlan = hasTaskResult && enableAsyncSynchronousExceptions
+                    ? new SemanticAsyncExceptionPlan(context.PrimaryUnit.SyntaxTree.FilePath,
+                        context.PrimaryUnit.SourceText.Length,
+                        Array.Empty<SemanticAsyncExceptionRegion>(), Array.Empty<SemanticCatchHandler>())
+                    {
+                        CancellationTypeId = typeRegistry.Register(context.Compilation.GetTypeByMetadataName(
+                            "System.Threading.Tasks.TaskCanceledException")!),
+                        ExceptionScopes = Array.Empty<SemanticAsyncExceptionScope>(),
+                    } : null,
             };
             if (!ValidateTaskLocalOwnership(context, semanticModel,
                     declaration.Body, projected, diagnostics))

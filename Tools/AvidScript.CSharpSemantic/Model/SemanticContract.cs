@@ -37,10 +37,17 @@ public static class SemanticContract
     public const string AsyncThrowRoutingSemanticVersion = "1.55";
     public const int AsyncMemberAssignmentSchemaVersion = 47;
     public const string AsyncMemberAssignmentSemanticVersion = "1.56";
+    public const int AsyncSynchronousExceptionSchemaVersion = 50;
+    public const string AsyncSynchronousExceptionSemanticVersion = "1.59";
+
+    public static bool HasAsyncSynchronousExceptions(SemanticDocument document) =>
+        document.SchemaVersion == AsyncSynchronousExceptionSchemaVersion
+        && document.SemanticVersion == AsyncSynchronousExceptionSemanticVersion;
 
     public static bool HasAsyncMemberAssignments(SemanticDocument document) =>
         document.SchemaVersion == AsyncMemberAssignmentSchemaVersion
-        && document.SemanticVersion == AsyncMemberAssignmentSemanticVersion;
+        && document.SemanticVersion == AsyncMemberAssignmentSemanticVersion
+        || HasAsyncSynchronousExceptions(document);
 
     public static bool HasAsyncThrowRouting(SemanticDocument document) =>
         document.SchemaVersion == AsyncThrowRoutingSchemaVersion
@@ -88,5 +95,7 @@ public static class SemanticContract
         || (schemaVersion == AsyncThrowRoutingSchemaVersion
             && semanticVersion == AsyncThrowRoutingSemanticVersion)
         || (schemaVersion == AsyncMemberAssignmentSchemaVersion
-            && semanticVersion == AsyncMemberAssignmentSemanticVersion);
+            && semanticVersion == AsyncMemberAssignmentSemanticVersion)
+        || (schemaVersion == AsyncSynchronousExceptionSchemaVersion
+            && semanticVersion == AsyncSynchronousExceptionSemanticVersion);
 }

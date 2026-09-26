@@ -38,7 +38,8 @@ public static class SemanticAnalyzer
         bool enableAsyncExceptionFlow = false,
         bool enableDirectAwaitCleanup = false,
         bool enableAsyncCancellationFlow = false,
-        bool enableStaticInitialization = false)
+        bool enableStaticInitialization = false,
+        bool enableAsyncSynchronousExceptions = false)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceId);
@@ -48,6 +49,9 @@ public static class SemanticAnalyzer
         if (enableAsyncCancellationFlow && !enableAsyncExceptionFlow)
             throw new ArgumentException("Async cancellation flow requires async exception flow.",
                 nameof(enableAsyncCancellationFlow));
+        if (enableAsyncSynchronousExceptions && (!enableAsyncCancellationFlow || enableStaticInitialization))
+            throw new ArgumentException("Synchronous async exceptions require cancellation analysis and cannot use the legacy static-initialization envelope.",
+                nameof(enableAsyncSynchronousExceptions));
 
         string sourceSha256 = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source))).ToLowerInvariant();
         SemanticSource semanticSource = new(sourceId, sourceSha256, frontendSourceSha256, source.Length);
@@ -87,7 +91,7 @@ public static class SemanticAnalyzer
             workspace);
         context = context with
         {
-            RequireTaskLocalLifetimes = enableAsyncCancellationFlow
+            RequireTaskLocalLifetimes = enableAsyncSynchronousExceptions || enableAsyncCancellationFlow
                 && SemanticAsyncTaskLocalProjector.HasRoutedThrowSource(context)
                 || SemanticAsyncProjector.HasMemberAssignmentSource(context),
         };
@@ -114,7 +118,7 @@ public static class SemanticAnalyzer
             context,
             typeRegistry,
             callableProjection.Callables,
-            enableAsyncExceptionFlow);
+            enableAsyncExceptionFlow, enableAsyncSynchronousExceptions);
         SemanticControlFlowProjection controlFlowProjection = SemanticControlFlowProjector.Project(
             context,
             typeRegistry,
@@ -123,7 +127,7 @@ public static class SemanticAnalyzer
             callableProjection.Callables,
             enableAsyncExceptionFlow,
             enableDirectAwaitCleanup,
-            enableAsyncCancellationFlow);
+            enableAsyncCancellationFlow, enableAsyncSynchronousExceptions);
         asyncProjection = asyncProjection with
         {
             Methods = asyncProjection.Methods.Concat(
@@ -224,7 +228,8 @@ public static class SemanticAnalyzer
             diagnostic.Severity != "error" || diagnostic.Code == "ASCS3001");
         bool asyncFlowOnlyFailure = asyncProjection.Methods.Any(method =>
                 method.ErrorPlan is not null || method.ExceptionPlan is not null)
-            && diagnostics.All(diagnostic => diagnostic.Severity != "error" || diagnostic.Code == "ASCS5422");
+            && diagnostics.All(diagnostic => diagnostic.Severity != "error" || diagnostic.Code == "ASCS5422"
+                || enableAsyncSynchronousExceptions && diagnostic.Code == "ASCS3001");
         SemanticUeMethodCatalog methodCatalog = succeeded || exceptionFlowOnlyFailure || asyncFlowOnlyFailure
             ? SemanticUeMethodCatalogProjector.Project(context, typeRegistry, ueTypeProjection.Declarations, callableProjection.Callables)
             : SemanticUeMethodCatalog.Empty;
@@ -250,8 +255,10 @@ public static class SemanticAnalyzer
             && method.Segments.Any(segment => segment.AwaitSite?.ProducerKind is "delay" or "next_tick"
                 && segment.Transfer?.CancellationTarget is >= 0));
         bool hasTaskLanguageErrors = hasExceptionFlows && hasTaskResults;
+        bool synchronousExceptions = enableAsyncSynchronousExceptions && hasTaskResults;
         var document = new SemanticDocument(
-            hasMemberAssignments ? SemanticContract.AsyncMemberAssignmentSchemaVersion
+            synchronousExceptions ? SemanticContract.AsyncSynchronousExceptionSchemaVersion
+                : hasMemberAssignments ? SemanticContract.AsyncMemberAssignmentSchemaVersion
                 : hasAsyncThrowRouting ? SemanticContract.AsyncThrowRoutingSchemaVersion
                 : hasTaskLocalLifetimes ? SemanticContract.TaskLocalLifetimeSchemaVersion
                 : hasAsyncCancellationFlow ? SemanticContract.AsyncCancellationFlowSchemaVersion
@@ -267,7 +274,8 @@ public static class SemanticAnalyzer
                 : hasTaskResults ? SemanticContract.TaskResultSchemaVersion
                 : SemanticContract.CurrentSchemaVersion,
             "csharp",
-            hasMemberAssignments ? SemanticContract.AsyncMemberAssignmentSemanticVersion
+            synchronousExceptions ? SemanticContract.AsyncSynchronousExceptionSemanticVersion
+                : hasMemberAssignments ? SemanticContract.AsyncMemberAssignmentSemanticVersion
                 : hasAsyncThrowRouting ? SemanticContract.AsyncThrowRoutingSemanticVersion
                 : hasTaskLocalLifetimes ? SemanticContract.TaskLocalLifetimeSemanticVersion
                 : hasAsyncCancellationFlow ? SemanticContract.AsyncCancellationFlowSemanticVersion

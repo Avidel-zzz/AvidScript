@@ -146,7 +146,13 @@ public sealed record SemanticAsyncSegment(
     [property: JsonPropertyOrder(1)] IReadOnlyList<SemanticAsyncStatement> Statements,
     [property: JsonPropertyOrder(2)] SemanticAsyncAwaitSite? AwaitSite,
     [property: JsonPropertyOrder(3)] SemanticSpan Span,
-    [property: JsonPropertyOrder(4)] SemanticAsyncControlTransfer? Transfer = null);
+    [property: JsonPropertyOrder(4)] SemanticAsyncControlTransfer? Transfer = null)
+{
+    // Evaluation fails before the normal transfer and before a destination
+    // local acquires its result. Distinct from an awaited Task failing later.
+    [JsonPropertyOrder(5), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? SynchronousExceptionTarget { get; init; }
+}
 
 public sealed record SemanticAsyncControlTransfer(
     [property: JsonPropertyOrder(0)] string Kind,

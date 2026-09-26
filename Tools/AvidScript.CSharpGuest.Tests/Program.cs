@@ -6,6 +6,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--async-synchronous-exceptions")
+            {
+                int focused = CSharpGuestAsyncSynchronousExceptionTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.AsyncSynchronousExceptions: {focused}/{focused} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--static-failures")
             {
                 int focused = CSharpGuestStaticSourceFailureTests.Run();
@@ -223,6 +229,7 @@ internal static class Program
                 + CSharpGuestDirectAwaitTests.Run()
                 + CSharpGuestAsyncCancellationTests.Run()
                 + CSharpGuestAsyncThrowRoutingTests.Run()
+                + CSharpGuestAsyncSynchronousExceptionTests.Run()
                 + CSharpGuestGenericMethodTests.Run()
                 + CSharpGuestFinallyTests.Run()
                 + CSharpGuestEnumeratorTests.Run()

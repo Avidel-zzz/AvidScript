@@ -355,6 +355,12 @@ public static class SemanticAsyncStateFlowAnalyzer
             _ => new HashSet<string>(StringComparer.Ordinal),
         };
 
+        // Failure occurs before a destination is committed. Reintroduce the
+        // handler's reads after normal-path kills, retaining the previous value.
+        HashSet<string> exceptional = segment.SynchronousExceptionTarget is int target
+            ? GetSuccessorLive(segment, target, liveIn, issues)
+            : new(StringComparer.Ordinal);
+        live.UnionWith(exceptional);
         for (int index = segment.Statements.Count - 1; index >= 0; --index)
         {
             SemanticAsyncStatement statement = segment.Statements[index];
@@ -369,6 +375,9 @@ public static class SemanticAsyncStateFlowAnalyzer
                 live = TransferFlow(statement.Operation, live, localIds, FlowTargets.Method);
             }
         }
+        // A compound expression may fail before any of its writes.
+        // Keeping these values is conservative even when a prefix commits.
+        live.UnionWith(exceptional);
         return live;
     }
 

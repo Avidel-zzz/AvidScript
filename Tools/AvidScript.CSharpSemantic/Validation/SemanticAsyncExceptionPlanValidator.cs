@@ -21,6 +21,7 @@ public static class SemanticAsyncExceptionPlanValidator
             && document.SemanticVersion == SemanticContract.AsyncCancellationFlowSemanticVersion;
         bool localLifetime = SemanticContract.HasTaskLocalLifetimes(document);
         bool routedThrows = SemanticContract.HasAsyncThrowRouting(document);
+        bool synchronousExceptions = SemanticContract.HasAsyncSynchronousExceptions(document);
         if (document.SchemaVersion == SemanticContract.AsyncThrowRoutingSchemaVersion
             && !document.AsyncMethods.Any(method => method?.Segments?.Any(segment =>
             segment?.Transfer?.Kind == SemanticAsyncMethod.RaiseExceptionTransferKind) == true)) return false;
@@ -68,7 +69,8 @@ public static class SemanticAsyncExceptionPlanValidator
                 || method.ExportName is not null
                 || plan.SourceId != document.Source.SourceId
                 || plan.SourceLength != document.Source.Length
-                || plan.Regions is not { Count: > 0 and <= 64 }
+                || plan.Regions is not { Count: <= 64 }
+                || plan.Regions.Count == 0 && !synchronousExceptions
                 || plan.Catches is null || plan.Catches.Count > 32
                 || method.Segments.Count is 0 or > SemanticAsyncMethod.MaximumControlFlowSegments
                 || method.EntrySegmentOrdinal < 0
@@ -105,10 +107,12 @@ public static class SemanticAsyncExceptionPlanValidator
                         || (directCleanup || languageCancellation || localLifetime) && method.Segments[ordinal].AwaitSite is
                             { ProducerKind: "delay" or "next_tick" }
                         || routedThrows && method.Segments[ordinal].Transfer?.Kind
-                            == SemanticAsyncMethod.RaiseExceptionTransferKind);
+                            == SemanticAsyncMethod.RaiseExceptionTransferKind
+                        || synchronousExceptions && method.Segments[ordinal].SynchronousExceptionTarget is not null);
             }
-            if (!hasProtectedAwait || !plan.Regions.Any(region => region.Kind == "try")
-                || !plan.Regions.Any(region => region.Kind is "catch" or "finally")
+            if (!(synchronousExceptions && plan.Regions.Count == 0)
+                && (!hasProtectedAwait || !plan.Regions.Any(region => region.Kind == "try")
+                    || !plan.Regions.Any(region => region.Kind is "catch" or "finally"))
                 || catchRegions.Count != plan.Catches.Count
                 || plan.Catches.Any(handler => handler is null || handler.HasFilter
                     || handler.ExceptionVariableSymbolId is not null

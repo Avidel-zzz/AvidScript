@@ -6,6 +6,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--async-synchronous-exceptions")
+            {
+                int focused = SemanticAsyncSynchronousExceptionTests.Run();
+                Console.WriteLine($"AvidScript.CSharpSemantic.Tests.AsyncSynchronousExceptions: {focused}/{focused} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--static-initialization")
             {
                 int focused = SemanticStaticInitializationTests.Run();
@@ -76,7 +82,8 @@ internal static class Program
                 + SemanticClosureAllocationTests.Run() + SemanticClassTypeTests.Run() + SemanticDispatchTests.Run() + SemanticUeMethodCatalogTests.Run()
                 + SemanticExceptionFlowTests.Run() + SemanticAsyncCancellationTests.Run() + SemanticAsyncTaskOwnerFlowTests.Run()
                 + SemanticAsyncTaskLocalLifetimeTests.Run() + SemanticAsyncThrowRoutingTests.Run()
-                + SemanticAsyncMemberAssignmentTests.Run() + SemanticStaticInitializationTests.Run();
+                + SemanticAsyncMemberAssignmentTests.Run() + SemanticStaticInitializationTests.Run()
+                + SemanticAsyncSynchronousExceptionTests.Run();
             Console.WriteLine($"AvidScript.CSharpSemantic.Tests: {count}/{count} passed");
             return 0;
         }

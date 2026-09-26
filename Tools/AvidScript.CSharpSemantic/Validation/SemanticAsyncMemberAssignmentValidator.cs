@@ -57,7 +57,8 @@ public static class SemanticAsyncMemberAssignmentValidator
                 }
             }
         }
-        return enabled ? found : document.SchemaVersion != SemanticContract.AsyncMemberAssignmentSchemaVersion
+        return enabled ? found || SemanticContract.HasAsyncSynchronousExceptions(document)
+            : document.SchemaVersion != SemanticContract.AsyncMemberAssignmentSchemaVersion
             && document.SemanticVersion != SemanticContract.AsyncMemberAssignmentSemanticVersion;
     }
 
@@ -136,7 +137,8 @@ public static class SemanticAsyncMemberAssignmentValidator
                 if (candidate.Ordinal != segment.Ordinal) return false;
                 incoming++;
             }
-            if (edge.SecondaryTarget == write.Ordinal || edge.CancellationTarget == write.Ordinal) return false;
+            if (edge.SecondaryTarget == write.Ordinal || edge.CancellationTarget == write.Ordinal
+                || candidate.SynchronousExceptionTarget == write.Ordinal) return false;
             foreach (var statement in candidate.Statements)
             {
                 if (statement.TargetSymbolId == site.ResultSymbolId

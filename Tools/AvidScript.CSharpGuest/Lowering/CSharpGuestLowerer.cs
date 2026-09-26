@@ -40,6 +40,13 @@ public static class CSharpGuestLowerer
         ArgumentNullException.ThrowIfNull(semanticSha256);
         ArgumentNullException.ThrowIfNull(substitutes);
 
+        if (document.SchemaVersion == SemanticContract.AsyncSynchronousExceptionSchemaVersion
+            || document.SemanticVersion == SemanticContract.AsyncSynchronousExceptionSemanticVersion
+            || document.AsyncMethods?.Any(method => method?.Segments?.Any(segment =>
+                segment?.SynchronousExceptionTarget is not null) == true) == true)
+            return Failure(new[] { new GuestDiagnostic("ASCG1026", "error",
+                "Synchronous async exception routes require integrated outcome lowering before Guest publication.", null) });
+
         if (document.StaticInitialization is not null
             || document.SchemaVersion == SemanticStaticInitialization.SchemaVersion)
             return Failure(new[] { new GuestDiagnostic("ASCG1025", "error",

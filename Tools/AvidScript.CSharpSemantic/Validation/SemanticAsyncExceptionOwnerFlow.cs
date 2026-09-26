@@ -42,6 +42,14 @@ public static class SemanticAsyncExceptionOwnerFlow
             SemanticAsyncSegment? segment = method.Segments[ordinal];
             SemanticAsyncControlTransfer? transfer = segment?.Transfer;
             if (transfer is null) return false;
+            if (segment!.SynchronousExceptionTarget is int synchronousTarget)
+            {
+                // A new error replaces the current owner, including errors
+                // thrown by a handler or by cleanup during cancellation.
+                pending.Enqueue((synchronousTarget, SemanticAsyncExceptionOwnerState.Fault));
+                if (languageCancellation)
+                    pending.Enqueue((synchronousTarget, SemanticAsyncExceptionOwnerState.Cancellation));
+            }
             switch (transfer.Kind)
             {
                 case SemanticAsyncMethod.GotoTransferKind:

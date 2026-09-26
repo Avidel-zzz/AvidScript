@@ -7,7 +7,13 @@ namespace AvidScript.CSharpSemantic;
 // Derived facts only. The source adapter owns statement order and lexical scope
 // validation; this solver never authorizes a read from the possible-owner set.
 public sealed record SemanticAsyncTaskOwnerBlock(
-    int Ordinal, IReadOnlyList<string> GeneratedOwners, IReadOnlyList<int> Successors);
+    int Ordinal, IReadOnlyList<string> GeneratedOwners, IReadOnlyList<int> Successors)
+{
+    // Separate from normal edges: RHS failure does not commit a Task write.
+    public int? SynchronousExceptionTarget { get; init; }
+    public IEnumerable<int> AllTargets => SynchronousExceptionTarget is int target
+        ? Successors.Append(target).Distinct() : Successors;
+}
 
 public readonly record struct SemanticAsyncTaskOwnerEdge(int Source, int Target);
 
@@ -16,7 +22,11 @@ public sealed record SemanticAsyncTaskOwnerStates(
     IReadOnlyDictionary<int, IReadOnlyList<string>> PossibleAtExit,
     IReadOnlyDictionary<int, IReadOnlyList<string>> DefiniteAtEntry,
     IReadOnlyDictionary<int, IReadOnlyList<string>> DefiniteAtExit,
-    IReadOnlyDictionary<SemanticAsyncTaskOwnerEdge, IReadOnlyList<string>> ReleasedOnEdge);
+    IReadOnlyDictionary<SemanticAsyncTaskOwnerEdge, IReadOnlyList<string>> ReleasedOnEdge)
+{
+    public IReadOnlyDictionary<SemanticAsyncTaskOwnerEdge, IReadOnlyList<string>> ReleasedOnSynchronousException { get; init; } =
+        new Dictionary<SemanticAsyncTaskOwnerEdge, IReadOnlyList<string>>();
+}
 
 public static class SemanticAsyncTaskOwnerFlowSolver
 {
@@ -40,11 +50,11 @@ public static class SemanticAsyncTaskOwnerFlowSolver
                 || block.GeneratedOwners.Any(id => id is null || !owned.Contains(id))
                 || block.Successors.Distinct().Count() != block.Successors.Count) return false;
         }
-        if (!nodes.ContainsKey(entry) || nodes.Values.SelectMany(node => node.Successors)
+        if (!nodes.ContainsKey(entry) || nodes.Values.SelectMany(node => node.AllTargets)
             .Any(target => !nodes.ContainsKey(target))) return false;
         foreach (var pair in releases)
         {
-            if (!nodes.TryGetValue(pair.Key.Source, out var source) || !source.Successors.Contains(pair.Key.Target)
+            if (!nodes.TryGetValue(pair.Key.Source, out var source) || !source.AllTargets.Contains(pair.Key.Target)
                 || pair.Value is null || pair.Value.Distinct(StringComparer.Ordinal).Count() != pair.Value.Count
                 || pair.Value.Any(id => id is null || !owned.Contains(id))) return false;
         }
@@ -57,11 +67,15 @@ public static class SemanticAsyncTaskOwnerFlowSolver
         {
             if (!visited.Add(ordinal)) continue;
             reachable.Add(ordinal);
-            foreach (int target in nodes[ordinal].Successors) pending.Enqueue(target);
+            foreach (int target in nodes[ordinal].AllTargets) pending.Enqueue(target);
         }
-        var predecessors = reachable.ToDictionary(id => id, _ => new List<int>());
+        var predecessors = reachable.ToDictionary(id => id, _ => new List<(int Source, bool Exceptional)>());
         foreach (int ordinal in reachable)
-            foreach (int target in nodes[ordinal].Successors) predecessors[target].Add(ordinal);
+        {
+            foreach (int target in nodes[ordinal].Successors) predecessors[target].Add((ordinal, false));
+            if (nodes[ordinal].SynchronousExceptionTarget is int exceptionalTarget)
+                predecessors[exceptionalTarget].Add((ordinal, true));
+        }
         var possibleIn = reachable.ToDictionary(id => id, _ => new HashSet<string>(StringComparer.Ordinal));
         var possibleOut = reachable.ToDictionary(id => id, _ => new HashSet<string>(StringComparer.Ordinal));
         var definiteIn = reachable.ToDictionary(id => id, _ => new HashSet<string>(owned, StringComparer.Ordinal));
@@ -77,12 +91,12 @@ public static class SemanticAsyncTaskOwnerFlowSolver
                 HashSet<string> may = new(StringComparer.Ordinal);
                 HashSet<string> must = ordinal == entry
                     ? new(StringComparer.Ordinal) : new(owned, StringComparer.Ordinal);
-                foreach (int predecessor in predecessors[ordinal])
+                foreach (var (predecessor, exceptional) in predecessors[ordinal])
                 {
                     var edge = new SemanticAsyncTaskOwnerEdge(predecessor, ordinal);
                     var killed = releases.GetValueOrDefault(edge) ?? Array.Empty<string>();
-                    may.UnionWith(possibleOut[predecessor].Except(killed, StringComparer.Ordinal));
-                    must.IntersectWith(definiteOut[predecessor].Except(killed, StringComparer.Ordinal));
+                    may.UnionWith((exceptional ? possibleIn : possibleOut)[predecessor].Except(killed, StringComparer.Ordinal));
+                    must.IntersectWith((exceptional ? definiteIn : definiteOut)[predecessor].Except(killed, StringComparer.Ordinal));
                 }
                 changed |= Replace(possibleIn, ordinal, may);
                 changed |= Replace(definiteIn, ordinal, must);
@@ -105,7 +119,19 @@ public static class SemanticAsyncTaskOwnerFlowSolver
                     .Intersect(releases.GetValueOrDefault(edge) ?? Array.Empty<string>(), StringComparer.Ordinal)
                     .OrderBy(id => id, StringComparer.Ordinal).ToArray());
             }
-        result = new(Snapshot(possibleIn), Snapshot(possibleOut), Snapshot(definiteIn), Snapshot(definiteOut), edgeReleases);
+        var exceptionalReleases = new Dictionary<SemanticAsyncTaskOwnerEdge, IReadOnlyList<string>>();
+        foreach (int ordinal in reachable)
+            if (nodes[ordinal].SynchronousExceptionTarget is int target)
+            {
+                var edge = new SemanticAsyncTaskOwnerEdge(ordinal, target);
+                exceptionalReleases.Add(edge, possibleIn[ordinal]
+                    .Intersect(releases.GetValueOrDefault(edge) ?? Array.Empty<string>(), StringComparer.Ordinal)
+                    .OrderBy(id => id, StringComparer.Ordinal).ToArray());
+            }
+        result = new(Snapshot(possibleIn), Snapshot(possibleOut), Snapshot(definiteIn), Snapshot(definiteOut), edgeReleases)
+        {
+            ReleasedOnSynchronousException = exceptionalReleases,
+        };
         return true;
     }
 

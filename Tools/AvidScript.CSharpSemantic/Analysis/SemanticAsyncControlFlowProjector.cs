@@ -48,7 +48,8 @@ internal static class SemanticAsyncControlFlowProjector
         ITypeSymbol? resultType = null,
         bool previewSuspendedFinally = false,
         bool allowDirectAwaitCleanup = false,
-        bool allowAsyncCancellationFlow = false)
+        bool allowAsyncCancellationFlow = false,
+        bool allowSynchronousExceptions = false)
     {
         Builder builder = new(
             context,
@@ -60,7 +61,7 @@ internal static class SemanticAsyncControlFlowProjector
             resultType,
             previewSuspendedFinally,
             allowDirectAwaitCleanup,
-            allowAsyncCancellationFlow);
+            allowAsyncCancellationFlow, allowSynchronousExceptions);
         if (!builder.TryBuild(body, ref nextCallbackId, out projected))
         {
             projected = null;
@@ -81,6 +82,7 @@ internal static class SemanticAsyncControlFlowProjector
         private readonly bool previewSuspendedFinally;
         private readonly bool allowDirectAwaitCleanup;
         private readonly bool allowAsyncCancellationFlow;
+        private readonly bool allowSynchronousExceptions;
         private readonly List<SemanticAsyncExceptionScopeDraft> exceptionScopes = new();
         private readonly List<DraftSegment> drafts = new();
         private readonly List<(string Kind, TextSpan TrySpan, TextSpan PartSpan,
@@ -106,7 +108,8 @@ internal static class SemanticAsyncControlFlowProjector
             ITypeSymbol? resultType,
             bool previewSuspendedFinally,
             bool allowDirectAwaitCleanup,
-            bool allowAsyncCancellationFlow)
+            bool allowAsyncCancellationFlow,
+            bool allowSynchronousExceptions)
         {
             this.context = context;
             this.semanticModel = semanticModel;
@@ -118,6 +121,7 @@ internal static class SemanticAsyncControlFlowProjector
             this.previewSuspendedFinally = previewSuspendedFinally;
             this.allowDirectAwaitCleanup = allowDirectAwaitCleanup;
             this.allowAsyncCancellationFlow = allowAsyncCancellationFlow;
+            this.allowSynchronousExceptions = allowSynchronousExceptions;
         }
 
         public bool TryBuild(
@@ -130,6 +134,10 @@ internal static class SemanticAsyncControlFlowProjector
             {
                 returnTypeId = typeRegistry.Register(resultType ?? method.ReturnType);
             }
+            if (allowSynchronousExceptions)
+                faultCleanupTarget = AddDraft(body.CloseBraceToken.Span,
+                    Array.Empty<SemanticAsyncStatement>(), null,
+                    new DraftTransfer(SemanticAsyncMethod.PropagateExceptionTransferKind, null, -1, -1));
             int exit = AddDraft(
                 body.CloseBraceToken.Span,
                 Array.Empty<SemanticAsyncStatement>(),
@@ -146,6 +154,14 @@ internal static class SemanticAsyncControlFlowProjector
                 return false;
             }
 
+            // Loop headers start as placeholders. Classify effects only after
+            // their final condition is installed, using the captured scope.
+            foreach (DraftSegment draft in drafts)
+                if (allowSynchronousExceptions && SemanticAsyncSynchronousExceptions.RequiresRoute(
+                    new SemanticAsyncSegment(draft.Id, draft.Statements, draft.AwaitSite,
+                        SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, draft.Span),
+                        new SemanticAsyncControlTransfer(draft.Transfer.Kind, draft.Transfer.Condition, -1))))
+                    draft.SynchronousExceptionTarget = draft.LexicalExceptionTarget;
             HashSet<int> reachable = CollectReachable(entry);
             DraftSegment[] ordered = drafts
                 .Where(draft => reachable.Contains(draft.Id))
@@ -199,7 +215,11 @@ internal static class SemanticAsyncControlFlowProjector
                     draft.Statements,
                     awaitSite,
                     SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, draft.Span),
-                    transfer));
+                    transfer)
+                {
+                    SynchronousExceptionTarget = draft.SynchronousExceptionTarget is int target
+                        ? RemapTarget(target, ordinalByDraft) : null,
+                });
             }
 
             scopes.Add((declaration, "activation", drafts.Select(draft => draft.Id).ToArray()));
@@ -366,6 +386,7 @@ internal static class SemanticAsyncControlFlowProjector
                         null,
                         successor,
                         awaitSite!.ProducerKind is "task_call" or "task_local"
+                            && (!allowSynchronousExceptions || cancellationCleanupTarget >= 0)
                             ? faultCleanupTarget : -1,
                         null,
                         awaitSite.ProducerKind is "task_call" or "task_local"
@@ -1721,7 +1742,7 @@ internal static class SemanticAsyncControlFlowProjector
                 span,
                 statements,
                 awaitSite,
-                transfer));
+                transfer, faultCleanupTarget));
             return id;
         }
 
@@ -1745,6 +1766,8 @@ internal static class SemanticAsyncControlFlowProjector
                     continue;
                 }
                 DraftTransfer transfer = drafts[current].Transfer;
+                if (drafts[current].SynchronousExceptionTarget is int synchronousTarget)
+                    pending.Push(synchronousTarget);
                 if (transfer.PrimaryTarget >= 0)
                 {
                     pending.Push(transfer.PrimaryTarget);
@@ -1899,7 +1922,8 @@ internal static class SemanticAsyncControlFlowProjector
             TextSpan span,
             IReadOnlyList<SemanticAsyncStatement> statements,
             SemanticAsyncAwaitSite? awaitSite,
-            DraftTransfer transfer)
+            DraftTransfer transfer,
+            int lexicalExceptionTarget)
         {
             Id = id;
             Sequence = sequence;
@@ -1907,6 +1931,7 @@ internal static class SemanticAsyncControlFlowProjector
             Statements = statements;
             AwaitSite = awaitSite;
             Transfer = transfer;
+            LexicalExceptionTarget = lexicalExceptionTarget;
         }
 
         public int Id { get; }
@@ -1915,6 +1940,8 @@ internal static class SemanticAsyncControlFlowProjector
         public IReadOnlyList<SemanticAsyncStatement> Statements { get; }
         public SemanticAsyncAwaitSite? AwaitSite { get; }
         public DraftTransfer Transfer { get; set; }
+        public int LexicalExceptionTarget { get; }
+        public int? SynchronousExceptionTarget { get; set; }
     }
 
     private sealed record DraftTransfer(

@@ -39,7 +39,8 @@ public static class SemanticAsyncInvocationValidator
                 && document.SemanticVersion == SemanticContract.DirectAwaitCleanupSemanticVersion)
             || (document.SchemaVersion == SemanticContract.AsyncCancellationFlowSchemaVersion
                 && document.SemanticVersion == SemanticContract.AsyncCancellationFlowSemanticVersion);
-        if (!SemanticAsyncErrorPlanValidator.IsValid(document)
+        if (!SemanticAsyncSynchronousExceptionValidator.IsValid(document)
+            || !SemanticAsyncErrorPlanValidator.IsValid(document)
             || !SemanticAsyncExceptionPlanValidator.IsValid(document)
             || !SemanticAsyncTaskLocalLifetimeValidator.IsValid(document)
             || !SemanticAsyncMemberAssignmentValidator.IsValid(document)) return false;

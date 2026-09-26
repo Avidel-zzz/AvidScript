@@ -19,7 +19,8 @@ public static class SemanticAsyncCancellationPlanValidator
                 || SemanticContract.HasTaskLocalLifetimes(document))
             || method.ExceptionPlan is not { } plan
             || plan.CancellationTypeId != CancellationTypeId
-            || plan.ExceptionScopes is not { Count: > 0 and <= 64 } scopes
+            || plan.ExceptionScopes is not { Count: <= 64 } scopes
+            || scopes.Count == 0 && !SemanticContract.HasAsyncSynchronousExceptions(document)
             || plan.Regions is null || plan.Catches is null || method.Segments is null
             || plan.Regions.Any(region => region is null || region.SourceSpan is null
                 || region.Segments is null)

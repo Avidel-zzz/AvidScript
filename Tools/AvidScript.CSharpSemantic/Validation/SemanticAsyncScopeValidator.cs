@@ -8,7 +8,8 @@ public static class SemanticAsyncScopeValidator
 {
     public static bool IsValid(SemanticDocument document)
     {
-        if (document.AsyncMethods is null || document.ClosureEnvironments is null) return false;
+        if (document.AsyncMethods is null || document.ClosureEnvironments is null
+            || !SemanticAsyncSynchronousExceptionValidator.IsValid(document)) return false;
         foreach (SemanticAsyncMethod method in document.AsyncMethods)
         {
             if (method is null || method.LexicalScopes is null) return false;
@@ -41,7 +42,8 @@ public static class SemanticAsyncScopeValidator
                         or SemanticContract.AsyncCancellationFlowSchemaVersion
                         or SemanticContract.TaskLocalLifetimeSchemaVersion
                         or SemanticContract.AsyncThrowRoutingSchemaVersion
-                        or SemanticContract.AsyncMemberAssignmentSchemaVersion)
+                        or SemanticContract.AsyncMemberAssignmentSchemaVersion
+                        or SemanticContract.AsyncSynchronousExceptionSchemaVersion)
                     && transfer.Kind is (SemanticAsyncMethod.CatchMatchTransferKind
                         or SemanticAsyncMethod.PropagateFaultTransferKind
                         or SemanticAsyncMethod.PropagateCancellationTransferKind
@@ -54,7 +56,7 @@ public static class SemanticAsyncScopeValidator
                         or SemanticAsyncMethod.AwaitTransferKind or SemanticAsyncMethod.ReturnTransferKind
                         or SemanticAsyncMethod.ThrowTransferKind)
                     || method.ExceptionPlan is null && transfer.CancellationTarget is not null
-                    || Targets(transfer).Any(target => target < 0 || target >= method.Segments.Count)) return false;
+                    || Successors(segment).Any(target => target < 0 || target >= method.Segments.Count)) return false;
             }
             HashSet<string> ids = new(StringComparer.Ordinal);
             foreach (SemanticAsyncLexicalScope scope in method.LexicalScopes)
@@ -90,11 +92,16 @@ public static class SemanticAsyncScopeValidator
     {
         HashSet<int> inside = members.ToHashSet();
         IEnumerable<SemanticClosureEntry> edges = segments.Where(segment => !inside.Contains(segment.Ordinal))
-            .SelectMany(segment => Targets(segment.Transfer!).Where(inside.Contains)
+            .SelectMany(segment => Successors(segment).Where(inside.Contains)
                 .Select(target => new SemanticClosureEntry(segment.Ordinal, target)));
         if (inside.Contains(entry)) edges = edges.Append(new(null, entry));
         return edges.Distinct().OrderBy(edge => edge.SourceBlockOrdinal).ThenBy(edge => edge.DestinationBlockOrdinal).ToArray();
     }
+
+    public static IEnumerable<int> Successors(SemanticAsyncSegment segment) =>
+        segment.SynchronousExceptionTarget is int target
+            ? Targets(segment.Transfer!).Append(target).Distinct()
+            : Targets(segment.Transfer!);
 
     public static IEnumerable<int> Targets(SemanticAsyncControlTransfer transfer)
     {
