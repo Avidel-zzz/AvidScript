@@ -171,7 +171,7 @@ internal static class CSharpAsyncExceptionLowerer
         SemanticAsyncMethod method, int block, List<GuestBasicBlock> blocks,
         ref string activeBlockId, ref List<GuestInstruction> instructions)
     {
-        if (method.ExceptionPlan is null) return true;
+        if (!CSharpAsyncCancellationLowerer.HasExceptionStorage(context.Document, method)) return true;
         GuestRegister? owner = LoadOwner(context, method, block, instructions);
         GuestRegister? zero = CSharpTaskResultAbi.Constant(context,
             CSharpTaskResultAbi.TokenTypeId, 0, block, instructions);

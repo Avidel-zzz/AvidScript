@@ -8,6 +8,26 @@ namespace AvidScript.CSharpGuest;
 
 internal static class CSharpAsyncCancellationLowerer
 {
+    // An unprotected await still faults its returned Task on cancellation. The
+    // source already supplies the producer, token and span; no synthetic source
+    // try/catch or Roslyn region is needed to lower that terminal operation.
+    public static bool NeedsImplicitPropagation(SemanticDocument document,
+        SemanticAsyncMethod method, SemanticAsyncSegment segment) =>
+        CSharpTaskResultAbi.SupportsCancellation(document) && method.TaskResultTypeId is not null
+        && segment.AwaitSite?.ProducerKind is "delay" or "next_tick"
+        && segment.Transfer?.CancellationTarget is null;
+
+    public static bool IsStatusAware(SemanticDocument document,
+        SemanticAsyncMethod method, SemanticAsyncSegment segment) =>
+        segment.AwaitSite?.ProducerKind is "delay" or "next_tick"
+        && (segment.Transfer?.CancellationTarget is >= 0 || NeedsImplicitPropagation(document, method, segment));
+
+    public static bool HasExceptionStorage(SemanticDocument document, SemanticAsyncMethod method) =>
+        method.ExceptionPlan is not null || method.Segments.Any(segment => NeedsImplicitPropagation(document, method, segment));
+
+    public static string ImplicitPropagationBlock(SemanticAsyncMethod method, SemanticAsyncAwaitSite site) =>
+        CSharpGuestIds.Function(method.MethodSymbolId) + ":cancel_at:" + site.CallbackId;
+
     public static IReadOnlyList<GuestAsyncExceptionTransfer> Transfers(SemanticDocument document) =>
         document.AsyncMethods.Where(method => method.ExceptionPlan is not null)
             .SelectMany(method => method.Segments.Where(segment => segment.Transfer?.Kind is
@@ -21,6 +41,13 @@ internal static class CSharpAsyncCancellationLowerer
                         ? CSharpGuestIds.AsyncSegmentBlock(method.MethodSymbolId, segment.Transfer.PrimaryTarget) : null,
                     CSharpGuestIds.Local(CSharpTaskResultAbi.ExceptionSourceSlot(method)),
                     CSharpGuestIds.Local(CSharpTaskResultAbi.ExceptionTypeSlot(method)))))
+            .Concat(document.AsyncMethods.SelectMany(method => method.Segments
+                .Where(segment => NeedsImplicitPropagation(document, method, segment))
+                .Select(segment => new GuestAsyncExceptionTransfer(
+                    CSharpGuestIds.Function(method.MethodSymbolId), ImplicitPropagationBlock(method, segment.AwaitSite!),
+                    SemanticAsyncMethod.PropagateExceptionTransferKind, null,
+                    CSharpGuestIds.Local(CSharpTaskResultAbi.ExceptionSourceSlot(method)),
+                    CSharpGuestIds.Local(CSharpTaskResultAbi.ExceptionTypeSlot(method))))))
             .OrderBy(transfer => transfer.MethodFunctionId, StringComparer.Ordinal)
             .ThenBy(transfer => transfer.BlockId, StringComparer.Ordinal).ToArray();
 
@@ -31,7 +58,8 @@ internal static class CSharpAsyncCancellationLowerer
         return new(
             CSharpGuestIds.Local(CSharpTaskResultAbi.ExceptionSourceSlot(method)),
             CSharpGuestIds.Local(CSharpTaskResultAbi.ExceptionTypeSlot(method)),
-            catalog.Types.Single(item => item.TypeId == method.ExceptionPlan!.CancellationTypeId).Token,
+            catalog.Types.Single(item => item.TypeId == (method.ExceptionPlan?.CancellationTypeId
+                ?? SemanticAsyncCancellationPlanValidator.CancellationTypeId)).Token,
             catalog.Sources.Single(item => item.SourceId == document.Source.SourceId
                 && item.Span == site.Span).Token);
     }

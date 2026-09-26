@@ -6,6 +6,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--shared-task-lifetime")
+            {
+                int focusedCount = CSharpGuestSharedTaskLifetimeTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.SharedTaskLifetime: {focusedCount}/{focusedCount} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--task-local-lifetime")
             {
                 int focusedCount = CSharpGuestTaskLocalLifetimeTests.Run();
@@ -187,6 +193,7 @@ internal static class Program
                 + CSharpGuestManagedAsyncTests.Run()
                 + CSharpGuestAsyncInvocationTests.Run()
                 + CSharpGuestTaskLocalLifetimeTests.Run()
+                + CSharpGuestSharedTaskLifetimeTests.Run()
                 + CSharpGuestUeAsyncTests.Run()
                 + CSharpGuestShortCircuitTests.Run()
                 + CSharpGuestUeTypeTests.Run()

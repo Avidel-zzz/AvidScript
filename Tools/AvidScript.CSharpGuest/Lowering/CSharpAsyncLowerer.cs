@@ -56,14 +56,11 @@ internal static class CSharpAsyncLowerer
             "env",
             "continuation_state_read");
         string? cancelImportId = FindImport(document, "env", "continuation_cancel");
-        bool needsDelayImport = document.AsyncMethods
-            .SelectMany(method => method.Segments)
+        bool needsDelayImport = document.AsyncMethods.Any(method => method.Segments
             .Any(segment => segment.AwaitSite?.ProducerKind is "delay" or "next_tick"
-                && segment.Transfer?.CancellationTarget is null);
-        bool needsCancelResumeDelayImport = document.AsyncMethods
-            .SelectMany(method => method.Segments)
-            .Any(segment => segment.AwaitSite?.ProducerKind is "delay" or "next_tick"
-                && segment.Transfer?.CancellationTarget is >= 0);
+                && !CSharpAsyncCancellationLowerer.IsStatusAware(document, method, segment)));
+        bool needsCancelResumeDelayImport = document.AsyncMethods.Any(method => method.Segments
+            .Any(segment => CSharpAsyncCancellationLowerer.IsStatusAware(document, method, segment)));
         bool needsObjectLoadImport = document.AsyncMethods
             .SelectMany(method => method.Segments)
             .Any(segment => segment.AwaitSite?.ProducerKind == "object_load");

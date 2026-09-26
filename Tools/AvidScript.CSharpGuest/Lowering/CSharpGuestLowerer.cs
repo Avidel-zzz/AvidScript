@@ -395,10 +395,9 @@ public static class CSharpGuestLowerer
             AsyncExceptionTransfers = cancellationFlow
                 ? CSharpAsyncCancellationLowerer.Transfers(document) : null,
             DirectAwaitRoutes = directCleanup || cancellationFlow
-                ? document.AsyncMethods.Where(method => method.ExceptionPlan is not null)
+                ? document.AsyncMethods
                     .SelectMany(method => method.Segments
-                        .Where(segment => segment.AwaitSite?.ProducerKind is "delay" or "next_tick"
-                            && segment.Transfer?.CancellationTarget is >= 0)
+                        .Where(segment => CSharpAsyncCancellationLowerer.IsStatusAware(document, method, segment))
                         .Select(segment => new GuestDirectAwaitRoute(
                             CSharpGuestIds.Function(method.MethodSymbolId),
                             segment.AwaitSite!.CallbackId,
@@ -407,8 +406,9 @@ public static class CSharpGuestLowerer
                                 segment.Ordinal),
                             CSharpGuestIds.AsyncSegmentBlock(method.MethodSymbolId,
                                 segment.Transfer!.PrimaryTarget),
-                            CSharpGuestIds.AsyncSegmentBlock(method.MethodSymbolId,
-                                segment.Transfer.CancellationTarget!.Value),
+                            segment.Transfer.CancellationTarget is int cancellationTarget
+                                ? CSharpGuestIds.AsyncSegmentBlock(method.MethodSymbolId, cancellationTarget)
+                                : CSharpAsyncCancellationLowerer.ImplicitPropagationBlock(method, segment.AwaitSite),
                             CSharpGuestIds.Import(document.Callables.Single(callable =>
                                 callable.Import is { Module: "avidscript",
                                     Name: "avid_continuation_delay_cancel_resume_v1" })
@@ -786,18 +786,15 @@ public static class CSharpGuestLowerer
 		}
 	if (import.Module == "env" && import.Name == "continuation_delay")
 	{
-		return document.AsyncMethods
-			.SelectMany(method => method.Segments)
+		return document.AsyncMethods.Any(method => method.Segments
 			.Any(segment => segment.AwaitSite?.ProducerKind is "delay" or "next_tick"
-				&& segment.Transfer?.CancellationTarget is null);
+				&& !CSharpAsyncCancellationLowerer.IsStatusAware(document, method, segment)));
 	}
 	if (import.Module == "avidscript"
 		&& import.Name == "avid_continuation_delay_cancel_resume_v1")
 	{
-		return document.AsyncMethods
-			.SelectMany(method => method.Segments)
-			.Any(segment => segment.AwaitSite?.ProducerKind is "delay" or "next_tick"
-				&& segment.Transfer?.CancellationTarget is >= 0);
+		return document.AsyncMethods.Any(method => method.Segments
+			.Any(segment => CSharpAsyncCancellationLowerer.IsStatusAware(document, method, segment)));
 	}
 		if (import.Module == "env" && import.Name == "continuation_load_object")
 		{

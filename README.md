@@ -103,7 +103,7 @@ UE.Self.SetActorScale3D(new FVector(1.25f, 1.25f, 1.25f));
 | 范围 | 当前限制 |
 | --- | --- |
 | C# / .NET | 仅支持部分 C# 语法，不能直接运行任意 .NET 程序或 NuGet 包。见[语言支持计划](Docs/Phase66/P66.C_Language_Execution_Plan.md)。 |
-| 异步 | `catch`、`finally` 中不支持 `await`；异步异常处理需[显式启用](Docs/Phase66/P66.C6_Direct_Continuation_Await_Contract.md)。Task 值限于 `Task<int>`；[重赋值、循环及独立实例的销毁/热重载清理](Docs/Phase66/P66.C8_Task_Local_Lifetime_Contract.md)已通过验证。 |
+| 异步 | `catch`、`finally` 中不支持 `await`；异步异常处理需[显式启用](Docs/Phase66/P66.C6_Direct_Continuation_Await_Contract.md)。Task 值限于 `Task<int>`；支持[重赋值、循环和销毁/热重载清理](Docs/Phase66/P66.C8_Task_Local_Lifetime_Contract.md)。生成类型的 Task/取消组合已通过 Runtime 测试，正式构建入口仍待接通。 |
 | UE 类型声明 | 修改 `UClass`、`UProperty`、`UFunction` 声明后，需要重新构建并重启 Editor。 |
 | 平台与发布 | Android、iOS、Shipping 和真实多人游戏尚未验收。 |
 

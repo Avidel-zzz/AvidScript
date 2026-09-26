@@ -15,12 +15,12 @@ internal static class CSharpAsyncLanguageErrorCatalog
                 ?? Array.Empty<(string SourceId, SemanticAsyncThrowSite Site)>())
             .Select(item => (item.SourceId, item.Site.ExceptionTypeId, item.Site.Span))
             .Concat(CSharpTaskResultAbi.SupportsCancellation(document)
-                ? document.AsyncMethods.Where(method => method.ExceptionPlan?.CancellationTypeId is not null)
+                ? document.AsyncMethods
                     .SelectMany(method => method.Segments.Where(segment =>
-                        segment.AwaitSite?.ProducerKind is "delay" or "next_tick"
-                        && segment.Transfer?.CancellationTarget is >= 0)
+                        CSharpAsyncCancellationLowerer.IsStatusAware(document, method, segment))
                         .Select(segment => (SourceId: document.Source.SourceId,
-                            ExceptionTypeId: method.ExceptionPlan!.CancellationTypeId!, Span: segment.AwaitSite!.Span)))
+                            ExceptionTypeId: method.ExceptionPlan?.CancellationTypeId
+                                ?? SemanticAsyncCancellationPlanValidator.CancellationTypeId, Span: segment.AwaitSite!.Span)))
                 : Array.Empty<(string SourceId, string ExceptionTypeId, SemanticSpan Span)>())
             .ToArray();
         CSharpLanguageErrorTypeToken[] types = sites

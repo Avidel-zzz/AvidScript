@@ -40,7 +40,7 @@ internal static class CSharpGuestAsyncCancellationTests
             "Cancellation lowering: " + string.Join(" | ", lowered.Diagnostics.Select(item => item.Code + ": " + item.Message)));
         GuestModule module = lowered.Module!;
         Check(module.SchemaVersion == 24 && module.IrVersion == "1.23"
-            && module.DirectAwaitRoutes is { Count: 4 } && module.AsyncExceptionRoutes is { Count: 8 }
+            && module.DirectAwaitRoutes is { Count: 10 } && module.AsyncExceptionRoutes is { Count: 8 }
             && module.AsyncExceptionTransfers is { Count: > 0 }, "Cancellation routes and transfers must be explicit.");
         int checks = 6;
         SemanticAsyncMethod conditional = semantic.AsyncMethods.Single(method => method.MethodSymbolId.Contains(".ConditionalAsync("));

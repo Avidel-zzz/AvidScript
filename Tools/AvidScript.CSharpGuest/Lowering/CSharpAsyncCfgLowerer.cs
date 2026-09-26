@@ -53,8 +53,7 @@ internal static class CSharpAsyncCfgLowerer
                 awaitSite.PayloadKind,
                 CSharpGuestIds.AsyncResumeFunction(awaitSite.CallbackId),
                 method.Segments.Any(segment => segment.AwaitSite?.CallbackId
-                    == awaitSite.CallbackId && segment.Transfer?.CancellationTarget is >= 0
-                    && segment.AwaitSite.ProducerKind is "delay" or "next_tick")));
+                    == awaitSite.CallbackId && CSharpAsyncCancellationLowerer.IsStatusAware(document, method, segment))));
         }
 
         List<EntryPoint> entries = new()
@@ -120,8 +119,11 @@ internal static class CSharpAsyncCfgLowerer
         SemanticAsyncControlTransfer? incomingTransfer = incoming is null ? null
             : method.Segments.Single(segment => segment.AwaitSite?.CallbackId
                 == incoming.CallbackId).Transfer;
+        bool implicitCancellation = incoming is not null && method.Segments.Any(segment =>
+            segment.AwaitSite?.CallbackId == incoming.CallbackId
+                && CSharpAsyncCancellationLowerer.NeedsImplicitPropagation(document, method, segment));
         bool statusAware = incoming is { ProducerKind: "delay" or "next_tick" }
-            && incomingTransfer?.CancellationTarget is >= 0;
+            && (incomingTransfer?.CancellationTarget is >= 0 || implicitCancellation);
         GuestRegister? directStatus = null;
         if (incoming is not null)
         {
@@ -181,7 +183,7 @@ internal static class CSharpAsyncCfgLowerer
             && context.CreateInternalStorage(CSharpTaskResultAbi.ProducerSlot(method),
                 CSharpTaskResultAbi.TokenTypeId) is null)
             return false;
-        if (method.ExceptionPlan is not null
+        if (CSharpAsyncCancellationLowerer.HasExceptionStorage(document, method)
             && (context.CreateInternalStorage(CSharpTaskResultAbi.ExceptionSourceSlot(method),
                     CSharpTaskResultAbi.TokenTypeId) is null
                 || context.CreateInternalStorage(CSharpTaskResultAbi.ExceptionTypeSlot(method),
@@ -296,7 +298,7 @@ internal static class CSharpAsyncCfgLowerer
             activePrefixBlockId = acceptedBlockId;
             prefixInstructions = new List<GuestInstruction>();
         }
-        if (method.ExceptionPlan is not null
+        if (CSharpAsyncCancellationLowerer.HasExceptionStorage(document, method)
             && !CSharpAsyncExceptionLowerer.Initialize(context, method,
                 entry.SegmentOrdinal, prefixInstructions)) return false;
         if (incoming?.ProducerKind is "task_call" or "task_local")
@@ -330,7 +332,10 @@ internal static class CSharpAsyncCfgLowerer
         }
         if (statusAware)
         {
-            int cancellationTarget = incomingTransfer!.CancellationTarget!.Value;
+            int cancellationTarget = incomingTransfer!.CancellationTarget ?? -1;
+            string cancellationTargetBlock = implicitCancellation
+                ? CSharpAsyncCancellationLowerer.ImplicitPropagationBlock(method, incoming!)
+                : FlowBlockId(method, cancellationTarget);
             GuestRegister? completed = CSharpTaskResultAbi.Constant(context,
                 abi.Int32Type.Id, 1, entry.SegmentOrdinal, prefixInstructions);
             GuestRegister? isCompleted = context.CreateTemporary(abi.Int32Type.Id,
@@ -367,14 +372,22 @@ internal static class CSharpAsyncCfgLowerer
                 new("branch", null, firstFlowBlockId, null, null)));
             List<GuestInstruction> cancellationInstructions = new();
             if (!CSharpTaskResultAbi.RetainIncomingTaskLocals(context, method,
-                    incoming!, cancellationTarget, cancellationInstructions)) return false;
+                    incoming!, implicitCancellation ? entry.SegmentOrdinal : cancellationTarget, cancellationInstructions)) return false;
             CSharpAsyncClosureAllocations.Transition(context, method,
                 incomingSegment, cancellationTarget, cancellationInstructions);
             if (CSharpTaskResultAbi.SupportsCancellation(document))
             {
                 if (!CSharpAsyncCancellationLowerer.EmitDirect(context, method, incoming!,
                         entry.SegmentOrdinal, cancellationPath,
-                        FlowBlockId(method, cancellationTarget), cancellationInstructions, blocks)) return false;
+                        cancellationTargetBlock, cancellationInstructions, blocks)) return false;
+                if (implicitCancellation)
+                {
+                    string propagation = cancellationTargetBlock + ":propagate_exception";
+                    blocks.Add(new(cancellationTargetBlock, Array.Empty<GuestInstruction>(),
+                        new("branch", null, propagation, null, null)));
+                    if (!TryLowerExceptionPropagation(method, method.Segments[incomingSegment!.Value], context,
+                            false, propagation, new List<GuestInstruction>(), blocks)) return false;
+                }
             }
             else
                 blocks.Add(new(cancellationPath, cancellationInstructions,
@@ -762,7 +775,7 @@ internal static class CSharpAsyncCfgLowerer
         string activeBlockId, List<GuestInstruction> instructions,
         List<GuestBasicBlock> blocks)
     {
-        if (method.ExceptionPlan is null || method.TaskResultTypeId is null)
+        if (!CSharpAsyncCancellationLowerer.HasExceptionStorage(context.Document, method) || method.TaskResultTypeId is null)
             return false;
         GuestRegister? owner = CSharpAsyncExceptionLowerer.LoadOwner(context,
             method, segment.Ordinal, instructions);
@@ -860,8 +873,7 @@ internal static class CSharpAsyncCfgLowerer
                 awaitSite,
                 abi.DelayImportId,
                 abi.CancelResumeDelayImportId,
-                segment.Transfer?.CancellationTarget is >= 0
-                    && awaitSite.ProducerKind is "delay" or "next_tick",
+                CSharpAsyncCancellationLowerer.IsStatusAware(context.Document, method, segment),
                 abi.ObjectLoadImportId,
                 abi.BindCancellationImportId,
                 abi.Int32Type,
