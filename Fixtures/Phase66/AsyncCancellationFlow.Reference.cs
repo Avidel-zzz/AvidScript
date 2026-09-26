@@ -57,8 +57,9 @@ internal static class Program
         }
     }
 
-    private static void Main()
+    private static void Main(string[] args)
     {
+        int completionValue = args.Length == 0 ? 16 : int.Parse(args[0]);
         int passed = 0;
         foreach (bool cancel in new[] { false, true })
         {
@@ -66,23 +67,23 @@ internal static class Program
             {
                 int selectedMode = mode;
                 RunCase($"outer:{mode}", () => CancellationScript.OuterAsync(selectedMode), cancel,
-                    cancel ? mode == 0 ? 18 : mode == 1 ? 17 : 20 : 16,
+                    cancel ? mode == 0 ? 18 : mode == 1 ? 17 : 20 : completionValue,
                     expectedTrace: 12, expectedInner: cancel ? 1 : 0,
                     expectedOuter: cancel && mode == 2 ? 1 : 0);
                 passed++;
             }
-            RunCase("unhandled", CancellationScript.UnhandledAsync, cancel, 16,
+            RunCase("unhandled", CancellationScript.UnhandledAsync, cancel, completionValue,
                 12, cancel ? 1 : 0, 0, expectCancelled: cancel);
-            RunCase("nested", CancellationScript.NestedAsync, cancel, cancel ? 21 : 16,
+            RunCase("nested", CancellationScript.NestedAsync, cancel, cancel ? 21 : completionValue,
                 12, cancel ? 1 : 0, cancel ? 1 : 0);
-            RunCase("catch-all", CancellationScript.CatchAllAsync, cancel, cancel ? 22 : 16,
+            RunCase("catch-all", CancellationScript.CatchAllAsync, cancel, cancel ? 22 : completionValue,
                 1, cancel ? 1 : 0, 0);
             passed += 3;
             for (int mode = 0; mode < 4; ++mode)
             {
                 int selectedMode = mode;
                 RunCase($"repeated:{mode}", () => CancellationScript.RepeatedAsync(selectedMode), cancel,
-                    cancel ? mode == 2 ? 21 : 40 : 32,
+                    cancel ? mode == 2 ? 21 : 40 : 2 * completionValue,
                     1, cancel ? 1 : 0, cancel ? mode >= 2 ? 1 : 2 : 0,
                     expectCancelled: cancel && mode == 3,
                     expectedRepeatTrace: cancel && mode >= 2 ? 1 : 12);
@@ -92,7 +93,7 @@ internal static class Program
             {
                 int selectedMode = mode;
                 RunCase($"conditional:{mode}", () => CancellationScript.ConditionalAsync(selectedMode), cancel,
-                    mode == 2 ? 5 : cancel ? 30 : mode == 3 ? 32 : 16,
+                    mode == 2 ? 5 : cancel ? 30 : mode == 3 ? 2 * completionValue : completionValue,
                     mode == 2 ? 0 : 1, cancel && mode != 2 ? 1 : 0, cancel && mode != 2 ? 1 : 0,
                     expectedConditionalTrace: 12);
                 passed++;
