@@ -1211,6 +1211,16 @@ int64_t TaskCancellationTokenV1(wasm_exec_env_t ExecEnv, int64_t TaskToken)
 		? Result.ReturnValueI64 : 0;
 }
 
+int64_t ExceptionCancellationTokenV1(wasm_exec_env_t ExecEnv, int64_t ErrorObject)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::ExceptionCancellationTokenV1;
+	Call.Int64Args[0] = ErrorObject;
+	FAvidScriptHostCallResult Result;
+	return Dispatch(ExecEnv, StaticImportName(Call.BindingId), Call, Result)
+		? Result.ReturnValueI64 : 0;
+}
+
 int64_t TaskTerminalErrorMetaV1(wasm_exec_env_t ExecEnv, int64_t TaskToken)
 {
 	FAvidScriptHostCall Call;
@@ -1580,6 +1590,7 @@ void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 	case EAvidScriptHostBindingId::TaskCancelLanguageErrorV1: return reinterpret_cast<void*>(TaskCancelLanguageErrorV1);
 	case EAvidScriptHostBindingId::TaskCancelLanguageErrorV2: return reinterpret_cast<void*>(TaskCancelLanguageErrorV2);
 	case EAvidScriptHostBindingId::TaskCancellationTokenV1: return reinterpret_cast<void*>(TaskCancellationTokenV1);
+	case EAvidScriptHostBindingId::ExceptionCancellationTokenV1: return reinterpret_cast<void*>(ExceptionCancellationTokenV1);
 	case EAvidScriptHostBindingId::TaskTerminalErrorMetaV1: return reinterpret_cast<void*>(TaskTerminalErrorMetaV1);
 	case EAvidScriptHostBindingId::TaskTerminalErrorRootV1: return reinterpret_cast<void*>(TaskTerminalErrorRootV1);
 	case EAvidScriptHostBindingId::DelegateOutputWrite: return reinterpret_cast<void*>(DelegateOutputWrite);

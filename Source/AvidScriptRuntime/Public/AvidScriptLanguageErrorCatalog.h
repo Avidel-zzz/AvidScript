@@ -34,12 +34,14 @@ public:
 	}
 	bool SupportsTaskCancellationError() const { return GuestIrSchemaVersion == 24 || bTaskLifetimeCancellation; }
 	bool SupportsTaskCancellationIdentity() const { return bTaskCancellationIdentity; }
+	bool SupportsExceptionCancellationToken() const { return bExceptionCancellationToken; }
 	bool IsCancellationType(int32 Token) const;
 
 private:
 	int32 GuestIrSchemaVersion = 0;
 	bool bTaskLifetimeCancellation = false;
 	bool bTaskCancellationIdentity = false;
+	bool bExceptionCancellationToken = false;
 	TArray<FString> TypeIds;
 	TArray<FAvidScriptLanguageErrorSource> Sources;
 };

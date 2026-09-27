@@ -43,11 +43,15 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptAsyncCatchValuesTest,
     "AvidScript.Runtime.Continuation.CompiledAsyncCatchValues",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptCompiledCancellationTokenValuesTest,
+    "AvidScript.Runtime.Continuation.CompiledCancellationTokenValues",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 namespace AvidScript::Tests::CompiledAsyncExceptions
 {
 static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 ExpectedScenarios, const TCHAR* LogPrefix,
     bool CollectWhileSuspended = false, bool HasStaticStorage = false, int32 ExpectedObservations = 0,
-    int32 ExpectedResumeObservations = 0, bool ObserveOriginalTasks = false)
+    int32 ExpectedResumeObservations = 0, bool ObserveOriginalTasks = false, bool TokenValues = false)
 {
     if (!GEngine) return false;
     const FString Directory = FPlatformMisc::GetEnvironmentVariable(FixtureVariable);
@@ -72,17 +76,18 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
             const TSharedPtr<FJsonObject>* Scenario = nullptr;
             FString Name, ModuleId;
             int32 Expected = 0, ExpectedTrace = 0, Offset = -1, TraceOffset = -1;
-            bool Cancel = false;
+            bool Cancel = false, Asynchronous = true;
             if (!Test.TestTrue(TEXT("Fixture metadata has result, trace and cancellation expectations"),
                 ScenarioValue && ScenarioValue->TryGetObject(Scenario) && Scenario && Scenario->IsValid()
                 && (*Scenario)->TryGetStringField(TEXT("name"), Name) && !Name.IsEmpty()
                 && FPaths::GetCleanFilename(Name) == Name && !Names.Contains(Name)
                 && (*Scenario)->TryGetStringField(TEXT("moduleId"), ModuleId)
-                && (*Scenario)->TryGetBoolField(TEXT("cancel"), Cancel)
+                && (TokenValues ? (*Scenario)->TryGetBoolField(TEXT("asynchronous"), Asynchronous)
+                    : (*Scenario)->TryGetBoolField(TEXT("cancel"), Cancel))
                 && (*Scenario)->TryGetNumberField(TEXT("expected"), Expected)
                 && (*Scenario)->TryGetNumberField(TEXT("trace"), ExpectedTrace)
-                && (*Scenario)->TryGetNumberField(TEXT("resultOffset"), Offset) && Offset >= 0 && Offset < 65536
-                && (*Scenario)->TryGetNumberField(TEXT("traceOffset"), TraceOffset) && TraceOffset >= 0 && TraceOffset < 65536)) return false;
+                && (!Asynchronous || ((*Scenario)->TryGetNumberField(TEXT("resultOffset"), Offset) && Offset >= 0 && Offset < 65536
+                    && (*Scenario)->TryGetNumberField(TEXT("traceOffset"), TraceOffset) && TraceOffset >= 0 && TraceOffset < 65536)))) return false;
             Names.Add(Name);
             OriginalAsyncMember::FOracle SourceOracle;
             if (ObserveOriginalTasks && !SourceOracle.Read(Test, *Scenario, Name)) return false;
@@ -117,7 +122,7 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
             if (!Test.TestTrue(*Name, FFileHelper::LoadFileToArray(Bytes, *FPaths::Combine(Directory, Name + TEXT(".wasm"))))) return false;
             // Normal completion, teardown while initially suspended, teardown
             // after the first resume. All three must retire every Task owner.
-            for (int32 Mode = 0; Mode < 3; ++Mode)
+            for (int32 Mode = 0; Mode < (Asynchronous ? 3 : 1); ++Mode)
             {
                 const FString Label = FString::Printf(TEXT("backend=%d scenario=%s mode=%d"), static_cast<int32>(Backend), *Name, Mode);
                 FAvidScriptVmBackendSelection Selection;
@@ -128,7 +133,7 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
                 FAvidScriptWasmSmokeResult Result;
                 if (!Test.TestTrue(*Label, Runtime.LoadModule(Bytes.GetData(), Bytes.Num(), ModuleId, Result)))
                 { Test.AddError(Result.ErrorMessage); return false; }
-                if (!Test.TestTrue(*Label, Runtime.ValidateRequiredExports({TEXT("avid_on_continuation_v2")}, Result)))
+                if (Asynchronous && !Test.TestTrue(*Label, Runtime.ValidateRequiredExports({TEXT("avid_on_continuation_v2")}, Result)))
                 { Test.AddError(Result.ErrorMessage); return false; }
                 const auto Owner = MakeShared<FAvidScriptSessionContinuations>();
                 auto& Endpoint = Owner->ResetActive(World);
@@ -140,6 +145,34 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
                 Context.World = World;
                 Runtime.SetHostContext(Context);
                 ON_SCOPE_EXIT { Owner->Teardown(); };
+                if (!Asynchronous)
+                {
+                    FAvidScriptVmPreparedExportCall Call;
+                    FAvidScriptVmCallResult Value;
+                    FAvidScriptVmError CallError;
+                    FString Error;
+                    if (!Test.TestTrue(*Label, Runtime.PrepareNamedExportCall(TEXT("token_main"), Call, Error)))
+                    { Test.AddError(Error); return false; }
+                    if (!Test.TestTrue(*Label, Call.Call({}, CallError, &Value)))
+                    { Test.AddError(CallError.Details); return false; }
+                    Test.TestEqual(*(Label + TEXT(" return cells")), Value.CellCount, 1u);
+                    Test.TestEqual(*Label, static_cast<int32>(Value.Cells[0]), Expected);
+                    if (auto* Heap = Runtime.GetManagedHeapForTesting())
+                    {
+                        const auto Collection = Heap->Collect();
+                        Test.TestTrue(*(Label + TEXT(" collection or roots-only state")),
+                            Collection == AvidScript::Managed::EHeapError::Ok
+                                || Collection == AvidScript::Managed::EHeapError::NotConfigured);
+                        Test.TestEqual(*(Label + TEXT(" roots")), Heap->GetStats().LiveRoots, 0u);
+                        Test.TestEqual(*(Label + TEXT(" frames")), Heap->GetStats().ActiveFrames, 0u);
+                        Test.TestEqual(*(Label + TEXT(" objects")), Heap->GetStats().LiveObjects, 0u);
+                    }
+                    Test.AddInfo(FString::Printf(TEXT("%s %s result=%d trace=0 resumes=0"), LogPrefix, *Label,
+                        static_cast<int32>(Value.Cells[0])));
+                    ++Cases;
+                    Runtime.Unload();
+                    continue;
+                }
                 if (!Test.TestTrue(*Label, Runtime.BeginPlay(Result))) { Test.AddError(Result.ErrorMessage); return false; }
                 if (ObserveOriginalTasks) TaskObserver.CaptureEntryStates();
                 auto Collect = [&]() -> bool {
@@ -219,6 +252,13 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
                 Test.TestEqual(*(Label + TEXT(" waiters")), Owner->GetTaskResultsForTesting().GetWaiterCount(), 0);
                 Test.TestEqual(*(Label + TEXT(" continuations")), Owner->GetActiveCount(), 0);
                 Test.TestEqual(*(Label + TEXT(" state frames")), Owner->GetStateFrameByteCountForTesting(), 0);
+                if (TokenValues)
+                {
+                    const int32 ExpectedLiveSources = !Stopped
+                        && (Name == TEXT("async-catch-token") || Name == TEXT("async-task-catch-token")) ? 1 : 0;
+                    Test.TestEqual(*(Label + TEXT(" cancellation sources before teardown")),
+                        Owner->GetCancellationSourceCountForTesting(), ExpectedLiveSources);
+                }
                 if (auto* Heap = Runtime.GetManagedHeapForTesting())
                 {
                     Test.TestEqual(*(Label + TEXT(" domain roots")), Heap->GetStats().StaticRoots, static_cast<uint32>(StaticSlots));
@@ -230,13 +270,27 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
                 }
                 ++Cases;
                 Test.AddInfo(FString::Printf(TEXT("%s %s result=%d trace=%d resumes=%d"), LogPrefix, *Label, Read(Offset), Read(TraceOffset), Resumes));
+                if (TokenValues)
+                {
+                    Owner->Teardown();
+                    Test.TestEqual(*(Label + TEXT(" cancellation sources after teardown")),
+                        Owner->GetCancellationSourceCountForTesting(), 0);
+                    Test.TestEqual(*(Label + TEXT(" waiters after teardown")),
+                        Owner->GetTaskResultsForTesting().GetWaiterCount(), 0);
+                    if (auto* Heap = Runtime.GetManagedHeapForTesting())
+                    {
+                        Test.TestEqual(*(Label + TEXT(" teardown collection")),
+                            Heap->Collect(), AvidScript::Managed::EHeapError::Ok);
+                        Test.TestEqual(*(Label + TEXT(" teardown native bytes")), Heap->GetStats().NativeDataBytes, uint64(0));
+                    }
+                }
                 Runtime.Unload();
                 Runtime.Unload();
                 Test.TestNull(*(Label + TEXT(" unload releases domain storage")), Runtime.GetManagedHeapForTesting());
             }
         }
     }
-    Test.TestEqual(TEXT("Async exception scenario count"), Cases, ExpectedScenarios * 6);
+    Test.TestEqual(TEXT("Exception scenario count"), Cases, TokenValues ? 82 : ExpectedScenarios * 6);
     return true;
 }
 }
@@ -281,6 +335,12 @@ bool FAvidScriptAsyncCatchValuesTest::RunTest(const FString& Parameters)
 {
     return AvidScript::Tests::CompiledAsyncExceptions::Run(*this,
         TEXT("AVIDSCRIPT_ASYNC_CATCH_FIXTURE_DIR"), 12, TEXT("async-catch"), true);
+}
+
+bool FAvidScriptCompiledCancellationTokenValuesTest::RunTest(const FString& Parameters)
+{
+    return AvidScript::Tests::CompiledAsyncExceptions::Run(*this,
+        TEXT("AVIDSCRIPT_CSHARP_TOKEN_FIXTURE_DIR"), 21, TEXT("cancellation-token"), true, false, 0, 0, false, true);
 }
 
 #endif

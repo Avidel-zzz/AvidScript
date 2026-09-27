@@ -4333,7 +4333,9 @@ if (-not $CSharpSemanticInputValidatorSource.Contains('CSharpLatentStoragePlanne
 }
 foreach ($RequiredCancellationValidationContract in @(
     'awaitSite.CancellationToken',
-    'AvidCancellationToken',
+    'SemanticCancellationTokens.AvidTypeId',
+    'SemanticCancellationTokens.TypeId',
+    'SemanticContract.HasCancellationTokens(document)',
     'CSharpLatentStoragePlanner.TryBuildSingleValue',
     'continuation_bind_cancel'
 )) {

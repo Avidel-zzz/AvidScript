@@ -35,6 +35,8 @@ public:
 		EAvidScriptContinuationLane InLane,
 		uint64 InActivationSerial);
 
+	bool IsInvocationContextLive(const UWorld* ExpectedWorld) const override;
+	bool AcceptUnboundContinuation(int64 ContinuationToken) const override;
 	int64 ScheduleDelay(float DelaySeconds, int32 CallbackId) override;
 	int64 ScheduleDelayWithCancelResume(float DelaySeconds, int32 CallbackId) override;
 	int64 ScheduleObjectLoad(FString ObjectPath, int32 CallbackId) override;

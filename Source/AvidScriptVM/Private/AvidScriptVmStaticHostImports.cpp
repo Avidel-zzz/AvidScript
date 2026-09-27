@@ -90,11 +90,12 @@ const FAvidScriptVmStaticHostImport GStaticHostImports[] = {
 	{ EAvidScriptHostBindingId::TaskTerminalErrorRootV1, AvidScript::TaskResult::Abi::TerminalErrorRootImport, "(I)I", false, true },
 	{ EAvidScriptHostBindingId::ContinuationCancelStatusV1, AvidScript::ContinuationCancellation::Abi::StatusImport, "(I)i", false },
 	{ EAvidScriptHostBindingId::TaskCancelLanguageErrorV2, AvidScript::TaskResult::Abi::CancelLanguageErrorV2Import, "(IiiII)i", false, true },
-	{ EAvidScriptHostBindingId::TaskCancellationTokenV1, AvidScript::TaskResult::Abi::CancellationTokenImport, "(I)I", false, true }
+	{ EAvidScriptHostBindingId::TaskCancellationTokenV1, AvidScript::TaskResult::Abi::CancellationTokenImport, "(I)I", false, true },
+	{ EAvidScriptHostBindingId::ExceptionCancellationTokenV1, AvidScript::TaskResult::Abi::ExceptionCancellationTokenImport, "(I)I", false, true }
 };
 
 static_assert(
-	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::TaskCancellationTokenV1),
+	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::ExceptionCancellationTokenV1),
 	"Static host catalog must remain dense and ordered by binding id.");
 
 bool FailStaticCall(FString& OutFailureDetails, const TCHAR* Details)
@@ -298,6 +299,7 @@ bool InvokeAvidScriptVmStaticHostImport(
 		Call.IntArgs[1] = Arguments[2].I32;
 		Call.Int64Args[1] = Arguments[3].I64;
 		break;
+	case EAvidScriptHostBindingId::ExceptionCancellationTokenV1:
 	case EAvidScriptHostBindingId::TaskCancellationTokenV1:
 	case EAvidScriptHostBindingId::TaskTerminalErrorMetaV1:
 	case EAvidScriptHostBindingId::TaskTerminalErrorRootV1:

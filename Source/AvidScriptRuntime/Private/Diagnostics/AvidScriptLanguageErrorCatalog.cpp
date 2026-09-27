@@ -56,7 +56,8 @@ FString ExecutionProfile(const TMap<FString, FString>& Fields)
 {
 	if (Fields.FindRef(TEXT("guest_ir")) == TEXT("31/1.30")
 		|| Fields.FindRef(TEXT("guest_ir")) == TEXT("32/1.31")
-		|| Fields.FindRef(TEXT("guest_ir")) == TEXT("33/1.32"))
+		|| Fields.FindRef(TEXT("guest_ir")) == TEXT("33/1.32")
+		|| Fields.FindRef(TEXT("guest_ir")) == TEXT("34/1.33"))
 	{
 		const FString Base = Fields.FindRef(TEXT("guest_ir_base"));
 		return Base == TEXT("29/1.28") || Base == TEXT("30/1.29") ? TEXT("26/1.25") : Base;
@@ -90,8 +91,9 @@ bool ParseProvenance(TConstArrayView<uint8> Payload, TMap<FString, FString>& Out
 	const bool bAwaitReadiness = ArtifactProfile == TEXT("31/1.30");
 	const bool bCancellationIdentity = ArtifactProfile == TEXT("32/1.31");
 	const bool bExceptionValues = ArtifactProfile == TEXT("33/1.32");
+	const bool bCancellationTokens = ArtifactProfile == TEXT("34/1.33");
 	const bool bDirectAwaitEnvelope = bAwaitReadiness || bCancellationIdentity || bExceptionValues;
-	const bool bEnvelope = bStaticStorage || bTaskErrorTransfer || bSynchronousAsync || bStaticAsync || bDirectAwaitEnvelope;
+	const bool bEnvelope = bStaticStorage || bTaskErrorTransfer || bSynchronousAsync || bStaticAsync || bDirectAwaitEnvelope || bCancellationTokens;
 	const FString BaseProfile = OutFields.FindRef(TEXT("guest_ir_base"));
 	const int32 BaseSchema = ExecutionSchema(BaseProfile);
 	const bool bReadinessBase = BaseSchema == 24 || BaseSchema == 25 || BaseSchema == 26
@@ -103,11 +105,14 @@ bool ParseProvenance(TConstArrayView<uint8> Payload, TMap<FString, FString>& Out
 		|| (ArtifactProfile.StartsWith(TEXT("31/"), ESearchCase::CaseSensitive) && !bAwaitReadiness)
 		|| (ArtifactProfile.StartsWith(TEXT("32/"), ESearchCase::CaseSensitive) && !bCancellationIdentity)
 		|| (ArtifactProfile.StartsWith(TEXT("33/"), ESearchCase::CaseSensitive) && !bExceptionValues)
+		|| (ArtifactProfile.StartsWith(TEXT("34/"), ESearchCase::CaseSensitive) && !bCancellationTokens)
+		|| (bCancellationTokens && ((BaseProfile != TEXT("14/1.13") && BaseProfile != TEXT("17/1.16")
+			&& BaseProfile != TEXT("29/1.28")) || OutFields.FindRef(TEXT("semantic")) != TEXT("53/1.62")))
 		|| (bExceptionValues && (BaseProfile != TEXT("29/1.28") || OutFields.FindRef(TEXT("semantic")) != TEXT("52/1.61")))
 		|| (bSynchronousAsync && BaseSchema != 26)
 		|| (bStaticAsync && OutFields.FindRef(TEXT("guest_ir_base")) != TEXT("29/1.28"))
 		|| (bDirectAwaitEnvelope && !bReadinessBase)
-		|| (bEnvelope && !bStaticAsync && !bDirectAwaitEnvelope && BaseSchema == 0) || (bTaskErrorTransfer && BaseSchema < 20)
+		|| (bEnvelope && !bStaticAsync && !bDirectAwaitEnvelope && !bCancellationTokens && BaseSchema == 0) || (bTaskErrorTransfer && BaseSchema < 20)
 		|| (!bEnvelope && OutFields.Contains(TEXT("guest_ir_base")))) return false;
 	const FString Profile = ExecutionProfile(OutFields);
 	const bool bRoutedThrow = Profile == TEXT("26/1.25");
@@ -116,7 +121,7 @@ bool ParseProvenance(TConstArrayView<uint8> Payload, TMap<FString, FString>& Out
 	const bool bLifetimeModelValid = LifetimeModel == TEXT("none") || LifetimeModel == TEXT("fault")
 		|| LifetimeModel == TEXT("exception") || LifetimeModel == TEXT("cleanup")
 		|| LifetimeModel == TEXT("cleanup_only") || LifetimeModel == TEXT("cancellation");
-	return OutFields.Num() == (bLifetime ? 7 : 6) + (bEnvelope ? 1 : 0) + (bExceptionValues ? 1 : 0)
+	return OutFields.Num() == (bLifetime ? 7 : 6) + (bEnvelope ? 1 : 0) + (bExceptionValues || bCancellationTokens ? 1 : 0)
 		&& (!bLifetime || bLifetimeModelValid)
 		&& (!bRoutedThrow || LifetimeModel == TEXT("cancellation"))
 		&& (!bDirectAwaitEnvelope || !bLifetime || LifetimeModel == TEXT("cancellation"))
@@ -245,7 +250,7 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 	const TArray<TSharedPtr<FJsonValue>>* Types = nullptr;
 	const TArray<TSharedPtr<FJsonValue>>* Sources = nullptr;
 	if (!CatalogPrivate::Number(*Document, TEXT("schema_version"), 1, 1, SectionVersion)
-		|| !CatalogPrivate::Number(*Document, TEXT("guest_ir_schema_version"), 17, 33, GuestSchema)
+		|| !CatalogPrivate::Number(*Document, TEXT("guest_ir_schema_version"), 17, 34, GuestSchema)
 		|| !Document->TryGetStringField(TEXT("guest_ir_version"), GuestVersion)
 		|| FString::Printf(TEXT("%d/%s"), GuestSchema, *GuestVersion) != ArtifactProfile
 		|| !Document->TryGetStringField(TEXT("module_id"), ModuleId) || ModuleId != ExpectedModuleId
@@ -257,7 +262,8 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 		|| ((Types->IsEmpty() || Sources->IsEmpty())
 			&& (ArtifactProfile == TEXT("28/1.27")
 				|| (ProfileSchema != 23 && !(ProfileSchema == 25 && LifetimeModel == TEXT("cleanup"))
-					&& ArtifactProfile != TEXT("29/1.28"))
+					&& ArtifactProfile != TEXT("29/1.28")
+					&& !(ArtifactProfile == TEXT("34/1.33") && ProfileSchema == 26))
 				|| Types->Num() != Sources->Num())))
 	{
 		OutError = TEXT("language-error metadata identity or token counts are invalid");
@@ -267,7 +273,9 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 	auto Candidate = MakeUnique<FAvidScriptLanguageErrorCatalog>();
 	Candidate->GuestIrSchemaVersion = ProfileSchema;
 	Candidate->bTaskLifetimeCancellation = (ProfileSchema == 25 || ProfileSchema == 26) && LifetimeModel == TEXT("cancellation");
-	Candidate->bTaskCancellationIdentity = ArtifactProfile == TEXT("32/1.31") || ArtifactProfile == TEXT("33/1.32");
+	Candidate->bExceptionCancellationToken = ArtifactProfile == TEXT("34/1.33");
+	Candidate->bTaskCancellationIdentity = ArtifactProfile == TEXT("32/1.31") || ArtifactProfile == TEXT("33/1.32")
+		|| (Candidate->bExceptionCancellationToken && ProfileSchema == 26);
 	Candidate->TypeIds.Reserve(Types->Num());
 	for (const TSharedPtr<FJsonValue>& Entry : *Types)
 	{
@@ -350,7 +358,7 @@ const FString* FAvidScriptLanguageErrorCatalog::FindType(int32 Token) const
 bool FAvidScriptLanguageErrorCatalog::IsCancellationType(int32 Token) const
 {
 	const FString* Type = FindType(Token);
-	return SupportsTaskCancellationError() && Type
+	return (SupportsTaskCancellationError() || SupportsExceptionCancellationToken()) && Type
 		&& (Type->Equals(TEXT("type:global::System.Threading.Tasks.TaskCanceledException"),
 			ESearchCase::CaseSensitive)
 			|| Type->Equals(TEXT("type:global::System.OperationCanceledException"),

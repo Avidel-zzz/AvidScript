@@ -122,7 +122,7 @@ public partial class Projectile : AvidActor
 | C# | 支持项目实现的语法与部分 .NET API；不能直接使用任意 NuGet 包。 |
 | UE 类型 | 可通过 `[UClass]`、`[UProperty]`、`[UFunction]` 生成类型。方法体可热重载；类型或签名变化需要重编译并重启 Editor。 |
 | 异步 | 支持示例中的 Timer / latent / 资源加载等待；泛型 Task 目前仅支持 `Task<int>`，不能在 `catch` / `finally` 内 `await`。 |
-| 异常与取消 | 标准 `CancellationToken` 和异常值仍在接入；默认入口尚不能读取 `catch` 异常对象或 `OperationCanceledException.CancellationToken`。见[实现进度](Docs/Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)。 |
+| 异常与取消 | 显式编译入口的 `CancellationToken` 属性已通过双 VM 专项测试；默认构建入口尚未开放，不能直接按完整 .NET 支持使用。见[实现进度](Docs/Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)。 |
 | 网络 | RPC、属性复制和 `RepNotify` 有专项样例与自动化；真实项目的多人玩法仍需自行验收。 |
 | 发布平台 | Shipping、Android、iOS 尚未完成验收。 |
 

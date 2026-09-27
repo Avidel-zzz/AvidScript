@@ -657,6 +657,7 @@ public:
 	bool DispatchTaskCancelLanguageErrorCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	bool DispatchTaskCancelLanguageErrorV2Call(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	bool DispatchTaskCancellationTokenCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
+	bool DispatchExceptionCancellationTokenCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	bool DispatchTaskLanguageErrorMetaCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	bool DispatchTaskLanguageErrorRootCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	// Native callers retain references extracted from a validated state layout.

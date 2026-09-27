@@ -1,6 +1,6 @@
 # AvidScript 后续迭代：语言、编辑体验与性能
 
-更新：2026-09-28。工作基线：`ecade3cc`。Windows 优先，Android/iOS 真机验收按用户要求延期。
+更新：2026-09-28。进度以 [Phase 66 状态](../Phase66/Phase66_State.json)和各专项证据为准。Windows 优先，Android/iOS 真机验收按用户要求延期。
 
 目标是让开发者用熟悉的语言编写 UE 玩法，在运行中修改和排障，并获得可测量的性能优势。这里规定后续交付与判定方式，不宣称已经领先，也不修改已冻结的 [P66 架构](../Phase66/P66.0_Developer_Experience_Architecture.md)或已完成批次。
 
@@ -8,7 +8,7 @@
 
 仍是开发者预览。P66.A、P66.B 已完成，P66.C、P66.D 未完成，以 [Phase 状态](../Phase66/Phase66_State.json)为准。已有跨对象调用、闭包、事件和异步执行基础；普通语言组合、结构热重载、完整调试、Windows 发布工作流仍需完成。测试数量不能作为成熟百分比。
 
-最近的 [C10 取消身份实现](../Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)已连接 Session、双 VM 导入和 IR 32 编译产物。IR 33 已接通异步 `catch` 对象：别名可跨 await/GC，重复等待与 rethrow 保持对象身份；专项 Win64 双后端运行 72/72。标准 token 已通过显式编译 API 从 Semantic 53 生成 IR 34/WASM，覆盖值传递、比较、跨 await 和异常 getter；纯值源码的 WASM 已实际执行。getter 的真实 UE 执行、双 VM 对象快照 reader、静态初始化组合和默认构建入口仍待完成。
+最近的 [C10 取消身份实现](../Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)已连接 Session、IR 32/33 与双 VM；异步 `catch` 对象别名可跨 await/GC，重复等待与 rethrow 保持对象身份。显式编译 API 已从 Semantic 53 生成 IR 34/WASM；异常 getter 和对象快照 reader 已在 Win64 两个 VM 上运行，21 份 C# 源码产生 82/82 组执行观察。静态初始化组合、原始 29 案例、默认构建入口和真实 Editor 玩法仍待完成。
 
 WASM 是执行载体，不自动带来完整语言支持、零开销或多语言互通。C# 前端与多种 VM 后端也不等于多个语言可以在同一个项目中共同开发。
 
@@ -47,9 +47,9 @@ WASM 是执行载体，不自动带来完整语言支持、零开销或多语言
 4. **接入正常入口。** 编译、缓存、generated facade、UHT 类型壳、Editor Build And Bind 和包发布读取同一份能力合同；支持的组合不长期依赖测试专用开关。
 5. **P66.D 综合样例与集中验收。** 接入下方完整技能流程，检查状态、顺序、取消、GC、重入、重载失败和资源释放。同步冻结 P67 类型实验、P68 帧接口和跨语言模块原型的输入要求。
 
-当前命名 catch 已通过完整异常编译路径及专项双后端运行；普通 lowering 仍拒绝绕过该路径发布。对象身份验证不等于取消 token 属性已实现，也不替代第 2 项的原始业务组合矩阵。
+命名 catch 与 token 属性已有完整异常编译路径及专项双后端运行；普通 lowering 仍拒绝绕过显式路径发布。这些专项结果不替代第 2 项的原始业务组合矩阵。
 
-下一批先开放 IR 34 的原生版本准入与异常对象 reader，再运行本次生成的 token 源码产物。双后端必须核对预取消、挂起取消、source 释放、异常别名跨 GC、重复 await、teardown 与实例隔离；之后组合静态初始化和原始 29 案例，最后才把已验证能力接入正式构建。纯值测试、编译通过和 .NET 参考结果不替代 UE 执行证据。
+IR 34 的原生版本准入、异常对象 reader 与 21 份同源 C# 专项源码现已通过双后端聚焦执行；验证覆盖预取消、挂起取消、source 释放、别名跨 GC、重复 await 和 teardown。下一批先组合静态初始化与原始 29 案例，并补真实 Actor/World、reload 与实例隔离；再把通过的能力接入正常 CLI、generated facade、Editor Build And Bind 和包发布。专项 Automation 不替代完整玩法或默认入口证据。
 
 ## 跨语言边界
 
@@ -104,6 +104,6 @@ Editor 与 Shipping 分开比较。明确每种 VM 的 JIT/AOT/interpreter 配�
 
 ## 下一步交付
 
-异常对象保活、取消身份快照和标准 token 的语义/IR 合同已有独立证据。下一步按依赖接通：标准 token 值与属性的 C# 降低（包括可捕获的空引用错误）→ Wasmtime/WAMR 从异常对象读取快照 → 同源 .NET 与原始 29 案例组合 → 正常构建入口。IR fixture 和纯值 WASM 不替代 UE 对象生命周期、双 VM 或完整业务验收；P66 仍未完成。
+异常对象保活、取消身份快照、标准 token 的 Semantic/IR/WASM、两个 VM 的对象读取与专项同源 C# 执行已有独立证据。下一交付顺序是：原始 29 案例与静态初始化组合 → 默认构建入口及准确诊断 → P66.D 完整技能流程和真实 Editor Play → P67 结构热重载原型与 P68 调试帧接口。每一步同时记录正确性、开发时间、调用成本和失败路径；只在同需求、同平台、同正确性前提下与 Puerts/AngelScript 比较。P66 仍未完成。
 
 后续阶段的设计冻结必须给出具体 API、模块写集、兼容规则、错误恢复和可复现验收命令。Windows 完成后再恢复移动端计划；移动平台的暂停验收不等于取消其架构要求。

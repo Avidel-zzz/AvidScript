@@ -84,10 +84,11 @@ FString Provenance(int32 GuestSchema = 17, const TCHAR* LifetimeModel = TEXT("ca
 		GuestSchema, *GuestVersion);
 	if (StaticBaseSchema) Result += FString::Printf(TEXT("\nguest_ir_base=%d/1.%d"), StaticBaseSchema, StaticBaseSchema - 1);
 	const int32 ProfileSchema = GuestSchema == 30
-		|| ((GuestSchema == 31 || GuestSchema == 32 || GuestSchema == 33) && (StaticBaseSchema == 29 || StaticBaseSchema == 30))
+		|| ((GuestSchema >= 31 && GuestSchema <= 34) && (StaticBaseSchema == 29 || StaticBaseSchema == 30))
 		? 26 : StaticBaseSchema ? StaticBaseSchema : GuestSchema;
 	if (ProfileSchema == 25 || ProfileSchema == 26) Result += FString::Printf(TEXT("\ntask_local_exception_model=%s"), LifetimeModel);
 	if (GuestSchema == 33) Result += TEXT("\nsemantic=52/1.61");
+	if (GuestSchema == 34) Result += TEXT("\nsemantic=53/1.62");
 	return Result;
 }
 
@@ -372,6 +373,47 @@ bool FAvidScriptLanguageErrorCatalogRuntimeTest::RunTest(const FString& Paramete
 	}
 	TestFalse(TEXT("IR 33 requires its language error catalog"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 		Module(nullptr, true, false, 33, TEXT("cancellation"), 29), ModuleId, Catalog, Error));
+	auto TokenDocument = Document(34);
+	TokenDocument->GetArrayField(TEXT("types"))[0]->AsObject()->SetStringField(
+		TEXT("type_id"), TEXT("type:global::System.OperationCanceledException"));
+	const FString TokenJson = Json(TokenDocument);
+	TestTrue(TEXT("IR 34 pure values need no language catalog"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+		Module(nullptr, true, false, 34, TEXT("cancellation"), 14), ModuleId, Catalog, Error));
+	TestNull(TEXT("Pure token values grant no error capability"), Catalog.Get());
+	TestFalse(TEXT("IR 34 pure values cannot carry an error catalog"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+		Module(&TokenJson, true, false, 34, TEXT("cancellation"), 14), ModuleId, Catalog, Error));
+	for (const int32 Base : {17, 29})
+	{
+		TestTrue(TEXT("IR 34 exact error base loads"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+			Module(&TokenJson, true, false, 34, TEXT("cancellation"), Base), ModuleId, Catalog, Error));
+		TestTrue(TEXT("IR 34 authorizes exception object tokens"), Catalog && Catalog->SupportsExceptionCancellationToken()
+			&& Catalog->IsCancellationType(1));
+		TestEqual(TEXT("Only asynchronous token base authorizes Task identity"),
+			Catalog && Catalog->SupportsTaskCancellationIdentity(), Base == 29);
+		TestEqual(TEXT("Only asynchronous token base authorizes Task faults"),
+			Catalog && Catalog->SupportsTaskLanguageErrorFault(), Base == 29);
+		TestFalse(TEXT("IR 34 error base requires a catalog"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+			Module(nullptr, true, false, 34, TEXT("cancellation"), Base), ModuleId, Catalog, Error));
+	}
+	for (const int32 Base : {0, 4, 16, 20, 24, 26, 30, 31, 32, 33, 34})
+		TestFalse(TEXT("IR 34 rejects unsupported bases"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+			Module(&TokenJson, true, false, 34, TEXT("cancellation"), Base), ModuleId, Catalog, Error));
+	for (const int32 Base : {14, 17, 29})
+	for (const FString& Metadata : {
+		Provenance(34, TEXT("cancellation"), Base).Replace(TEXT("semantic=53/1.62"), TEXT("semantic=52/1.61")),
+		Provenance(34, TEXT("cancellation"), Base).Replace(TEXT("\nsemantic=53/1.62"), TEXT("")),
+		Provenance(34, TEXT("cancellation"), Base).Replace(TEXT("guest_ir=34/1.33"), TEXT("guest_ir=34/1.32")),
+		Provenance(34, TEXT("cancellation"), Base) + TEXT("\nsemantic=53/1.62"),
+		Provenance(34, TEXT("cancellation"), Base) + TEXT("\nunknown=1")})
+	{
+		TArray<uint8> Mismatched = Module(Base == 14 ? nullptr : &TokenJson, false);
+		Custom(Mismatched, "avidscript.provenance", Metadata);
+		TestFalse(TEXT("IR 34 rejects wrong versions, source, duplicate and extra fields"),
+			FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(Mismatched, ModuleId, Catalog, Error));
+	}
+	for (const TCHAR* Model : {TEXT("none"), TEXT("fault"), TEXT("cleanup"), TEXT("cleanup_only"), TEXT("unknown")})
+		TestFalse(TEXT("IR 34 asynchronous base keeps cancellation lifetime ownership"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+			Module(&TokenJson, true, false, 34, Model, 29), ModuleId, Catalog, Error));
 	IdentityDocument->GetArrayField(TEXT("types"))[0]->AsObject()->SetStringField(
 		TEXT("type_id"), TEXT("type:global::System.Threading.Tasks.TaskCanceledException"));
 	const FString IdentityJson = Json(IdentityDocument);

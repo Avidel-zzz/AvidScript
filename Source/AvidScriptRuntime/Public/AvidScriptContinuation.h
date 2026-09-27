@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 
 class FAvidScriptWasmRuntimeInstance;
+class UWorld;
 
 // Native-only ownership. A lease must not extend the lifetime of its Runtime.
 class AVIDSCRIPTRUNTIME_API IAvidScriptContinuationStateLease : public IAvidScriptManagedStateLease
@@ -38,6 +39,11 @@ class AVIDSCRIPTRUNTIME_API IAvidScriptContinuationHost
 public:
 	virtual ~IAvidScriptContinuationHost() = default;
 
+	// Validate the current Session activation without querying a Task or source.
+	virtual bool IsInvocationContextLive(const UWorld* ExpectedWorld) const { return false; }
+	// IR 34 CancellationToken.None has no source to bind, but its scheduled
+	// continuation still needs the same activation and ownership checks.
+	virtual bool AcceptUnboundContinuation(int64 ContinuationToken) const { return false; }
 	virtual int64 ScheduleDelay(float DelaySeconds, int32 CallbackId) = 0;
 	// A compiler-owned await may resume on active cancellation to run its
 	// cleanup. Older hosts fail closed instead of silently dropping cleanup.

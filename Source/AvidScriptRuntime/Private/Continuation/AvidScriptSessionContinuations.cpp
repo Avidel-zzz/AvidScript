@@ -126,6 +126,24 @@ FAvidScriptContinuationHostEndpoint::PinTaskOwner(const int64 Token) const
 	return PinnedOwner;
 }
 
+bool FAvidScriptContinuationHostEndpoint::IsInvocationContextLive(const UWorld* ExpectedWorld) const
+{
+	const auto PinnedOwner = PinTaskOwner();
+	return PinnedOwner && PinnedOwner->GetWorldForLane(Lane) == ExpectedWorld;
+}
+
+bool FAvidScriptContinuationHostEndpoint::AcceptUnboundContinuation(const int64 ContinuationToken) const
+{
+	const auto PinnedOwner = PinTaskOwner();
+	uint32 SlotIndex = 0, Generation = 0;
+	if (!PinnedOwner || !PinnedOwner->UnpackToken(ContinuationToken, SlotIndex, Generation)
+		|| !PinnedOwner->Slots.IsValidIndex(static_cast<int32>(SlotIndex))) return false;
+	const auto& Slot = PinnedOwner->Slots[SlotIndex];
+	return Slot.Generation == Generation && Slot.Entry.IsSet()
+		&& Slot.Entry->Lane == Lane && Slot.Entry->ActivationSerial == ActivationSerial
+		&& !Slot.Entry->bDispatching && !Slot.Entry->bCancelledTerminalQueued;
+}
+
 int64 FAvidScriptContinuationHostEndpoint::ScheduleDelay(
 	const float DelaySeconds,
 	const int32 CallbackId)

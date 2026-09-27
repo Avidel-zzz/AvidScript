@@ -22,6 +22,7 @@ inline constexpr char TerminalErrorRootImport[] = "avid_task_terminal_error_root
 // IR 32 records the validated cancellation identity separately from the source span.
 inline constexpr char CancelLanguageErrorV2Import[] = "avid_task_cancel_language_error_v2"; // (IiiII)i
 inline constexpr char CancellationTokenImport[] = "avid_task_cancellation_token_v1"; // (I)I
+inline constexpr char ExceptionCancellationTokenImport[] = "avid_exception_cancellation_token_v1"; // (I)I
 inline constexpr char Int32TypeId[] = "type:int32";
 
 enum class ECommand : std::uint32_t

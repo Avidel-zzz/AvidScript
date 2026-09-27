@@ -84,7 +84,15 @@ void ReadIdentity(TArray<uint8>& Out, int32 TaskAddress, int32 Output)
 {
     I32(Out, Output); Load64(Out, TaskAddress); Out.Append({0x10, 2, 0x37, 3, 0});
 }
-void CancelAndPropagate(TArray<uint8>& Out)
+void ReadExceptionIdentity(TArray<uint8>& Out)
+{
+    HeapCall(Out, Managed::Abi::ECommand::PushFrame, 8, Frame);
+    Copy64(Out, Request + 8, Frame);
+    Copy64(Out, Request + 16, Object);
+    HeapCall(Out, Managed::Abi::ECommand::CreateRoot, 24, Root);
+    ReadIdentity(Out, Object, RepeatedIdentity);
+}
+void CancelAndPropagate(TArray<uint8>& Out, bool bObjectReader = false)
 {
     HeapCall(Out, Managed::Abi::ECommand::PushFrame, 8, Frame);
     Copy64(Out, Request + 8, Frame);
@@ -96,8 +104,8 @@ void CancelAndPropagate(TArray<uint8>& Out)
     Out.Append({0x10, 1, 0x1a});
     Load64(Out, SourceTask); Load64(Out, TargetTask); Out.Append({0x10, 3, 0x1a});
     Load64(Out, TargetTask); Load64(Out, FinalTask); Out.Append({0x10, 3, 0x1a});
-    ReadIdentity(Out, SourceTask, SourceIdentity);
-    ReadIdentity(Out, FinalTask, TargetIdentity);
+    ReadIdentity(Out, bObjectReader ? Object : SourceTask, SourceIdentity);
+    ReadIdentity(Out, bObjectReader ? Object : FinalTask, TargetIdentity);
 }
 FString Catalog(int32 Schema)
 {
@@ -132,7 +140,9 @@ FString Catalog(int32 Schema)
 }
 TArray<uint8> Module(bool bPending = true, int32 Schema = 32,
     const ANSICHAR* CancelImport = TaskResult::Abi::CancelLanguageErrorV2Import,
-    const ANSICHAR* CancelModule = "avidscript")
+    const ANSICHAR* CancelModule = "avidscript", bool bObjectReader = false,
+    const ANSICHAR* ReaderName = nullptr, const ANSICHAR* ReaderModule = "avidscript",
+    uint8 ReaderTypeIndex = 2)
 {
     TArray<uint8> Bytes{0, 0x61, 0x73, 0x6d, 1, 0, 0, 0};
     Section(Bytes, 1, {7,
@@ -144,9 +154,11 @@ TArray<uint8> Module(bool bPending = true, int32 Schema = 32,
     TArray<uint8> Imports{4};
     uint8 Index = 0;
     for (const ANSICHAR* Import : {Managed::Abi::ImportName, CancelImport,
-        TaskResult::Abi::CancellationTokenImport, TaskResult::Abi::PropagateFailureImport})
+        ReaderName ? ReaderName : bObjectReader ? TaskResult::Abi::ExceptionCancellationTokenImport
+            : TaskResult::Abi::CancellationTokenImport, TaskResult::Abi::PropagateFailureImport})
     {
-        Name(Imports, Index == 1 ? CancelModule : "avidscript"); Name(Imports, Import); Imports.Append({0, Index++});
+        Name(Imports, Index == 1 ? CancelModule : Index == 2 ? ReaderModule : "avidscript");
+        Name(Imports, Import); Imports.Append({0, Index == 2 ? ReaderTypeIndex : Index}); ++Index;
     }
     Section(Bytes, 2, Imports);
     Section(Bytes, 3, {4, 4, 5, 4, 6});
@@ -160,12 +172,17 @@ TArray<uint8> Module(bool bPending = true, int32 Schema = 32,
     }
     Section(Bytes, 7, Exports);
     TArray<uint8> Begin{0}, Read{0}, Resume{0};
-    if (!bPending) CancelAndPropagate(Begin);
+    if (!bPending) CancelAndPropagate(Begin, bObjectReader);
     Begin.Add(0x0b);
-    ReadIdentity(Read, FinalTask, RepeatedIdentity); Read.Add(0x0b);
+    if (bObjectReader) ReadExceptionIdentity(Read);
+    else ReadIdentity(Read, FinalTask, RepeatedIdentity);
+    Read.Add(0x0b);
     Resume.Append({0x20, 0}); I32(Resume, 41); Resume.Append({0x46, 0x04, 0x40});
-    CancelAndPropagate(Resume);
-    Resume.Add(0x05); ReadIdentity(Resume, FinalTask, RepeatedIdentity); Resume.Append({0x0b, 0x0b});
+    CancelAndPropagate(Resume, bObjectReader);
+    Resume.Add(0x05);
+    if (bObjectReader) ReadExceptionIdentity(Resume);
+    else ReadIdentity(Resume, FinalTask, RepeatedIdentity);
+    Resume.Append({0x0b, 0x0b});
     TArray<uint8> Code{4};
     for (const TArray<uint8>& Body : {Begin, Read, TArray<uint8>{0, 0x0b}, Resume})
     {
@@ -176,6 +193,7 @@ TArray<uint8> Module(bool bPending = true, int32 Schema = 32,
         TEXT("frontend_sha256=%s\nsemantic_sha256=%s\nguest_ir=%d/1.%d"),
         ModuleId, *FString::ChrN(64, 'a'), *FString::ChrN(64, 'b'), *FString::ChrN(64, 'c'), Schema, Schema - 1);
     if (Schema == 31 || Schema == 32) Provenance += TEXT("\nguest_ir_base=24/1.23");
+    if (Schema == 34) Provenance += TEXT("\nguest_ir_base=29/1.28\nsemantic=53/1.62\ntask_local_exception_model=cancellation");
     Custom(Bytes, "avidscript.provenance", Provenance);
     Custom(Bytes, "avidscript.language_errors", Catalog(Schema));
     return Bytes;
@@ -224,6 +242,13 @@ bool Read(FAvidScriptWasmRuntimeInstance& Runtime, int64 Task, FAvidScriptHostCa
     Call.BindingId = EAvidScriptHostBindingId::TaskCancellationTokenV1; Call.Int64Args[0] = Task;
     return Runtime.DispatchHostCall(Call, Result);
 }
+bool ReadObject(FAvidScriptWasmRuntimeInstance& Runtime, uint64 ObjectToken, FAvidScriptHostCallResult& Result)
+{
+    FAvidScriptHostCall Call;
+    Call.BindingId = EAvidScriptHostBindingId::ExceptionCancellationTokenV1;
+    Call.Int64Args[0] = static_cast<int64>(ObjectToken);
+    return Runtime.DispatchHostCall(Call, Result);
+}
 uint64 Allocate(FAutomationTestBase& Test, FAvidScriptWasmRuntimeInstance& Runtime)
 {
     auto* Heap = Runtime.GetManagedHeapForTesting();
@@ -246,11 +271,13 @@ bool FAvidScriptTaskCancellationIdentityAbiTest::RunTest(const FString& Paramete
     const auto Lanes = GetAvidScriptRuntimeBackendTestLanes();
     if (!TestEqual(TEXT("Both VM backends are required"), Lanes.Num(), 2)) return false;
     for (const auto& Lane : Lanes)
+    for (const bool bObjectReader : {false, true})
     for (int32 Mode = 0; Mode != 3; ++Mode)
     {
         TStrongObjectPtr<UWorld> World(NewObject<UWorld>());
         FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
-        if (!Configure(*this, Runtime, Module(Mode != 0), Lane)) return false;
+        if (!Configure(*this, Runtime, Module(Mode != 0, bObjectReader ? 34 : 32,
+            AvidScript::TaskResult::Abi::CancelLanguageErrorV2Import, "avidscript", bObjectReader), Lane)) return false;
         auto* Heap = Runtime.GetManagedHeapForTesting();
         const auto Owner = MakeShared<FAvidScriptSessionContinuations>();
         auto& Active = Owner->ResetActive(World.Get());
@@ -338,6 +365,13 @@ bool FAvidScriptTaskCancellationIdentityAbiTest::RunTest(const FString& Paramete
         const auto* EscapedIdentity = AvidScript::Continuation::FExceptionCancellationIdentity::Find(*Heap, ErrorObject);
         TestTrue(TEXT("Object keeps complete identity after Task release and GC"), EscapedIdentity
             && static_cast<uint64>(EscapedIdentity->Source) == Expected && EscapedIdentity->ExceptionType == 3);
+        if (bObjectReader)
+        {
+            TestTrue(TEXT("Actual WASM reads escaped exception with no Task or source"), Runtime.Tick(0.01f, Result));
+            TestTrue(TEXT("Escaped identity output reads"), Runtime.ReadStateBytes(0, Memory, Error));
+            TestEqual(TEXT("Object-only reader preserves full identity"), Get64(Memory, RepeatedIdentity), Expected);
+            TestEqual(TEXT("Object-only read retains only the caller alias"), Heap->GetStats().LiveRoots, 1u);
+        }
         EscapedException.Reset();
         TestTrue(TEXT("Final alias release collects error object"), Heap->Collect() == EHeapError::Ok && !Heap->IsAlive(ErrorObject));
         TestEqual(TEXT("No native object data remains"), Heap->GetStats().NativeDataBytes, uint64(0));
@@ -346,7 +380,98 @@ bool FAvidScriptTaskCancellationIdentityAbiTest::RunTest(const FString& Paramete
         TestEqual(TEXT("No source remains"), Owner->GetCancellationSourceCountForTesting(), 0);
         TestEqual(TEXT("No continuation remains"), Owner->GetActiveCount(), 0);
         Owner->Teardown(); Runtime.Unload();
-        AddInfo(AvidScriptRuntimeLaneLabel(Lane, *FString::Printf(TEXT("cancellation identity mode=%d"), Mode)));
+        AddInfo(AvidScriptRuntimeLaneLabel(Lane, *FString::Printf(TEXT("cancellation identity mode=%d object_reader=%d"), Mode, bObjectReader)));
+    }
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptExceptionCancellationObjectReaderTest,
+    "AvidScript.Runtime.Continuation.ExceptionCancellationObjectReader",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptExceptionCancellationObjectReaderTest::RunTest(const FString& Parameters)
+{
+    using namespace AvidScript::Tests::CancellationIdentity;
+    using namespace AvidScript::Managed;
+    const auto Lanes = GetAvidScriptRuntimeBackendTestLanes();
+    if (!TestEqual(TEXT("Both VM backends are required"), Lanes.Num(), 2)) return false;
+    for (const auto& Lane : Lanes)
+    {
+        TStrongObjectPtr<UWorld> World(NewObject<UWorld>());
+        FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
+        if (!Configure(*this, Runtime, Module(true, 34,
+            AvidScript::TaskResult::Abi::CancelLanguageErrorV2Import, "avidscript", true), Lane)) return false;
+        auto* Heap = Runtime.GetManagedHeapForTesting();
+        const auto Owner = MakeShared<FAvidScriptSessionContinuations>();
+        auto& Active = Owner->ResetActive(World.Get());
+        Bind(Runtime, World.Get(), Active);
+        FAvidScriptHostCallResult Result;
+        TestFalse(TEXT("Reader rejects calls without a VM activation"), ReadObject(Runtime, 0, Result));
+        TestEqual(TEXT("Outside activation reports context"), Result.ErrorCategory,
+            FString(TEXT("exception_cancellation_context")));
+        const int64 Source = Active.CreateCancellationSource();
+        const int64 Task = Active.CreateTaskResult(TEXT("type:int32"));
+        if (!TestTrue(TEXT("Cancellation source and Task exist"), Source < 0 && Task > 0)) return false;
+        const uint64 Invocation = Runtime.BeginVmInvocation();
+        const uint64 Object = Allocate(*this, Runtime);
+        if (!Object) return false;
+        TestFalse(TEXT("Rooted exception without a snapshot is not None"), ReadObject(Runtime, Object, Result));
+        TestEqual(TEXT("Missing snapshot has identity error"), Result.ErrorCategory,
+            FString(TEXT("exception_cancellation_identity")));
+        TestFalse(TEXT("Forged object token is rejected"), ReadObject(Runtime, Object ^ (1ULL << 32), Result));
+        TestEqual(TEXT("Forged object is not current-frame rooted"), Result.ErrorCategory,
+            FString(TEXT("exception_cancellation_root")));
+        TestTrue(TEXT("Live source cancels"), Active.CancelCancellationSource(Source));
+        if (!TestTrue(TEXT("v2 writer publishes a valid object snapshot"),
+            Complete(Runtime, Task, Object, Source, Result))) return false;
+        TestTrue(TEXT("Reader returns full signed i64"), ReadObject(Runtime, Object, Result));
+        TestEqual(TEXT("Reader does not truncate identity"), Result.ReturnValueI64, Source);
+        const uint64 Forged = Allocate(*this, Runtime);
+        FPendingNativeData Pending;
+        TestEqual(TEXT("Native-only invalid source can be injected for rejection"),
+            Heap->PrepareNativeData(Forged,
+                std::make_unique<AvidScript::Continuation::FExceptionCancellationIdentity>(3, 1), Pending),
+            EHeapError::Ok);
+        TestEqual(TEXT("Invalid snapshot publishes only for the negative test"), Pending.Commit(), EHeapError::Ok);
+        TestFalse(TEXT("Positive source never becomes a cancellation token"), ReadObject(Runtime, Forged, Result));
+        TestEqual(TEXT("Invalid snapshot retains identity category"), Result.ErrorCategory,
+            FString(TEXT("exception_cancellation_identity")));
+        FPersistentRoots Escaped;
+        if (!TestTrue(TEXT("Object alias retains its own root"), Heap->RetainPersistent({&Object, 1}, Escaped) == EHeapError::Ok)) return false;
+        TestTrue(TEXT("Task and source can release before object read"),
+            Active.ReleaseTaskResult(Task) && Active.ReleaseCancellationSource(Source));
+        Runtime.EndVmInvocation(Invocation);
+        TestTrue(TEXT("Collection keeps only the escaped exception"), Heap->Collect() == EHeapError::Ok
+            && Heap->IsAlive(Object) && !Heap->IsAlive(Forged)
+            && Owner->GetTaskResultsForTesting().GetCount() == 0
+            && Owner->GetCancellationSourceCountForTesting() == 0);
+        const uint64 ReadInvocation = Runtime.BeginVmInvocation();
+        TestFalse(TEXT("Persistent ownership alone does not grant frame access"), ReadObject(Runtime, Object, Result));
+        TestEqual(TEXT("Frame access has a distinct failure"), Result.ErrorCategory,
+            FString(TEXT("exception_cancellation_root")));
+        FToken Frame = 0, Root = 0;
+        TestEqual(TEXT("Reader frame opens"), Heap->PushFrame(Frame), EHeapError::Ok);
+        TestEqual(TEXT("Reader captures live exception alias"), Heap->CreateRoot(Frame, Object, Root), EHeapError::Ok);
+        const auto RootsBeforeRead = Heap->GetStats().LiveRoots;
+        TestTrue(TEXT("Object read succeeds after Task/source release and GC"), ReadObject(Runtime, Object, Result));
+        TestEqual(TEXT("Escaped value keeps original identity"), Result.ReturnValueI64, Source);
+        TestEqual(TEXT("Reader acquires no new root"), Heap->GetStats().LiveRoots, RootsBeforeRead);
+        const bool bThreadRejected = Async(EAsyncExecution::ThreadPool, [&Runtime, Object]()
+        {
+            FAvidScriptHostCallResult ThreadResult;
+            return !ReadObject(Runtime, Object, ThreadResult)
+                && ThreadResult.ErrorCategory == TEXT("exception_cancellation_context");
+        }).Get();
+        TestTrue(TEXT("Off-thread reads fail before heap access"), bThreadRejected);
+        World->bIsTearingDown = true;
+        TestFalse(TEXT("World teardown rejects a rooted exception"), ReadObject(Runtime, Object, Result));
+        TestEqual(TEXT("World teardown fails context"), Result.ErrorCategory,
+            FString(TEXT("exception_cancellation_context")));
+        Runtime.EndVmInvocation(ReadInvocation);
+        Owner->Teardown(); Escaped.Reset();
+        TestTrue(TEXT("Teardown drops the last object snapshot"), Heap->Collect() == EHeapError::Ok
+            && Heap->GetStats().LiveRoots == 0 && Heap->GetStats().NativeDataBytes == 0);
+        Runtime.Unload();
     }
     return true;
 }
@@ -539,6 +664,37 @@ bool FAvidScriptTaskCancellationIdentityVersionTest::RunTest(const FString& Para
         FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
         FAvidScriptWasmSmokeResult Result;
         TestFalse(TEXT("Future import, wrong signature and env alias are rejected"),
+            Runtime.LoadModule(Bytes.GetData(), Bytes.Num(), ModuleId, Result));
+    }
+    for (const auto& Lane : Lanes)
+    {
+        FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
+        if (!Configure(*this, Runtime, Module(true, 32, AvidScript::TaskResult::Abi::CancelLanguageErrorV2Import,
+            "avidscript", true), Lane)) return false;
+        FAvidScriptHostCallResult Result;
+        const uint64 Invocation = Runtime.BeginVmInvocation();
+        TestFalse(TEXT("Old IR cannot read exception token"), ReadObject(Runtime, 0, Result));
+        TestEqual(TEXT("Exception reader fails at version gate"), Result.ErrorCategory,
+            FString(TEXT("exception_cancellation_version")));
+        Runtime.EndVmInvocation(Invocation);
+        FAvidScriptWasmSmokeResult Smoke;
+        TestTrue(TEXT("Old reader fixture begins before import use"), Runtime.BeginPlay(Smoke));
+        TestFalse(TEXT("Old IR WASM reader call traps"), Runtime.Tick(0.01f, Smoke));
+        TestTrue(TEXT("Old IR trap keeps exception version diagnostic"),
+            Smoke.ErrorMessage.Contains(TEXT("exception_cancellation_version")));
+        Runtime.Unload();
+    }
+    for (const auto& Lane : Lanes)
+    for (int32 Invalid = 0; Invalid != 3; ++Invalid)
+    {
+        const TArray<uint8> Bytes = Module(true, 34, AvidScript::TaskResult::Abi::CancelLanguageErrorV2Import,
+            "avidscript", true,
+            Invalid == 0 ? "avid_exception_cancellation_token_v2"
+                : AvidScript::TaskResult::Abi::ExceptionCancellationTokenImport,
+            Invalid == 2 ? "env" : "avidscript", Invalid == 1 ? 3 : 2);
+        FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
+        FAvidScriptWasmSmokeResult Result;
+        TestFalse(TEXT("Future exception reader, wrong signature and env alias are rejected"),
             Runtime.LoadModule(Bytes.GetData(), Bytes.Num(), ModuleId, Result));
     }
     return true;

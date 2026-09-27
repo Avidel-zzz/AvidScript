@@ -4949,9 +4949,16 @@ int32 FAvidScriptWasmRuntimeInstance::HandleContinuationCancelStatusV1Import(
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
 	GetInstanceState().LastHostImportInput = 0;
-	GetInstanceState().LastHostImportResult = static_cast<int32>(HostContext.Continuations != nullptr
-		? HostContext.Continuations->GetCancellationSourceStatus(SourceToken)
-		: EAvidScriptCancellationSourceStatus::Invalid);
+	const bool bNone = SourceToken == 0 && LanguageErrorCatalog
+		&& LanguageErrorCatalog->SupportsExceptionCancellationToken()
+		&& LanguageErrorCatalog->SupportsTaskCancellationIdentity()
+		&& HostContext.Continuations
+		&& HostContext.Continuations->IsInvocationContextLive(HostContext.World.Get());
+	GetInstanceState().LastHostImportResult = static_cast<int32>(bNone
+		? EAvidScriptCancellationSourceStatus::Open
+		: HostContext.Continuations != nullptr
+			? HostContext.Continuations->GetCancellationSourceStatus(SourceToken)
+			: EAvidScriptCancellationSourceStatus::Invalid);
 	++GetInstanceState().HostImportCallCount;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return GetInstanceState().LastHostImportResult;
@@ -4991,10 +4998,14 @@ int32 FAvidScriptWasmRuntimeInstance::HandleContinuationBindCancelImport(
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
 	GetInstanceState().LastHostImportInput = 0;
+	const bool bNone = SourceToken == 0 && LanguageErrorCatalog
+		&& LanguageErrorCatalog->SupportsExceptionCancellationToken()
+		&& LanguageErrorCatalog->SupportsTaskCancellationIdentity();
 	GetInstanceState().LastHostImportResult = HostContext.Continuations != nullptr
-		&& HostContext.Continuations->BindCancellationSource(
-			SourceToken,
-			ContinuationToken)
+		&& (bNone
+			? HostContext.Continuations->IsInvocationContextLive(HostContext.World.Get())
+				&& HostContext.Continuations->AcceptUnboundContinuation(ContinuationToken)
+			: HostContext.Continuations->BindCancellationSource(SourceToken, ContinuationToken))
 		? 1
 		: 0;
 	++GetInstanceState().HostImportCallCount;
@@ -8320,6 +8331,12 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 	case EAvidScriptHostBindingId::TaskCancellationTokenV1:
 	{
 		const bool bSucceeded = DispatchTaskCancellationTokenCall(Call, OutResult);
+		ProfileScope.SetSucceeded(bSucceeded);
+		return bSucceeded;
+	}
+	case EAvidScriptHostBindingId::ExceptionCancellationTokenV1:
+	{
+		const bool bSucceeded = DispatchExceptionCancellationTokenCall(Call, OutResult);
 		ProfileScope.SetSucceeded(bSucceeded);
 		return bSucceeded;
 	}
