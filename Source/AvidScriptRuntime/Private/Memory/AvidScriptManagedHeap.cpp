@@ -3,10 +3,39 @@
 #include <algorithm>
 #include <atomic>
 #include <cstring>
+#include <utility>
 
 namespace AvidScript::Managed
 {
 struct FHeapLifetime { FHeap* Heap = nullptr; };
+
+FPendingNativeData::~FPendingNativeData() { Reset(); }
+FPendingNativeData::FPendingNativeData(FPendingNativeData&& Other) noexcept
+	: Lifetime(std::move(Other.Lifetime)), Object(std::exchange(Other.Object, 0)) {}
+FPendingNativeData& FPendingNativeData::operator=(FPendingNativeData&& Other) noexcept
+{
+	if (this != &Other)
+	{
+		Reset();
+		Lifetime = std::move(Other.Lifetime);
+		Object = std::exchange(Other.Object, 0);
+	}
+	return *this;
+}
+void FPendingNativeData::Reset()
+{
+	if (const auto Owner = Lifetime.lock(); Owner && Owner->Heap && Object)
+		Owner->Heap->DiscardPendingNativeData(Object);
+	Object = 0; Lifetime.reset();
+}
+EHeapError FPendingNativeData::Commit()
+{
+	const auto Owner = Lifetime.lock();
+	if (!Owner || !Owner->Heap) return EHeapError::Closed;
+	const auto Error = Owner->Heap->PublishNativeData(Object);
+	if (Error == EHeapError::Ok) { Object = 0; Lifetime.reset(); }
+	return Error;
+}
 
 FPersistentRoots::~FPersistentRoots() { Reset(); }
 FPersistentRoots::FPersistentRoots(FPersistentRoots&& Other) noexcept
@@ -480,6 +509,7 @@ EHeapError FHeap::Collect()
 		auto& Object = Objects[Slot];
 		if (!Object.Live || Object.Marked) continue;
 		Stats.LiveBytes -= Object.Bytes.size();
+		ReleaseNativeData(Slot);
 		std::vector<std::uint8_t>().swap(Object.Bytes);
 		Retire(Object, Slot, FreeObjects);
 		--Stats.LiveObjects;
@@ -500,6 +530,8 @@ void FHeap::Close()
 	Stats.ReclaimedObjects += Stats.LiveObjects;
 	Stats.LiveObjects = Stats.LiveRoots = Stats.ActiveFrames = Stats.StaticRoots = 0;
 	Stats.LiveBytes = 0;
+	Stats.NativeDataObjects = 0;
+	Stats.NativeDataBytes = 0;
 	std::vector<FObjectSlot>().swap(Objects);
 	std::vector<FRootSlot>().swap(Roots);
 	std::vector<FFrameSlot>().swap(Frames);

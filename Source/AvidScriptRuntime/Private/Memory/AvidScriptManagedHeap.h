@@ -17,7 +17,7 @@ enum class EHeapError : std::uint8_t
 	InvalidLayout, InvalidType, InvalidObject, InvalidRoot, InvalidFrame, FrameOrder,
 	ObjectLimit, ByteLimit, RootLimit, FrameLimit, InvalidRange, ReferenceOverlap,
 	InvalidReferenceField, ReferenceTypeMismatch, RootAuthority,
-	StaticStorageNotConfigured, InvalidStaticSlot
+	StaticStorageNotConfigured, InvalidStaticSlot, InvalidNativeData, NativeDataConflict
 };
 
 struct FHeapLimits
@@ -58,10 +58,50 @@ struct FHeapStats
 	std::uint64_t Allocations = 0;
 	std::uint64_t ReclaimedObjects = 0;
 	std::uint64_t Collections = 0;
+	// Native payloads are included in LiveBytes, including unpublished reservations.
+	std::uint32_t NativeDataObjects = 0;
+	std::uint64_t NativeDataBytes = 0;
 };
 
 class FHeap;
 struct FHeapLifetime;
+
+// Native-only immutable payload. ByteSize includes the derived record and any
+// owned buffers. Records must not hide managed references or reenter the heap.
+class FNativeObjectData
+{
+public:
+	virtual ~FNativeObjectData() = default;
+	std::uint32_t GetKind() const { return KindId; }
+	std::uint32_t GetByteSize() const { return ByteSize; }
+protected:
+	FNativeObjectData(std::uint32_t InKind, std::uint32_t InByteSize)
+		: KindId(InKind), ByteSize(InByteSize) {}
+private:
+	friend class FHeap;
+	const std::uint32_t KindId;
+	const std::uint32_t ByteSize;
+	bool bPublished = false;
+};
+
+// Does not root the object. Destruction rolls back an unpublished reservation;
+// Commit makes it visible without allocation. Both follow the heap's thread rule.
+class FPendingNativeData final
+{
+public:
+	FPendingNativeData() = default;
+	~FPendingNativeData();
+	FPendingNativeData(const FPendingNativeData&) = delete;
+	FPendingNativeData& operator=(const FPendingNativeData&) = delete;
+	FPendingNativeData(FPendingNativeData&& Other) noexcept;
+	FPendingNativeData& operator=(FPendingNativeData&& Other) noexcept;
+	EHeapError Commit();
+	void Reset();
+private:
+	friend class FHeap;
+	std::weak_ptr<FHeapLifetime> Lifetime;
+	FToken Object = 0;
+};
 
 // Native ownership only. Does not expose root tokens or grant Guest mutation.
 // Like FHeap, leases are used and destroyed on the owning execution thread.
@@ -119,6 +159,11 @@ public:
 	EHeapError RetainPersistent(std::span<const FToken> Objects, FPersistentRoots& OutRoots);
 	// Allocation publishes into an existing root atomically, including across GC.
 	EHeapError Allocate(std::uint32_t TypeId, FToken Root, FToken& OutObject);
+	// Failure preserves OutPublication. Only one payload is allowed per object.
+	EHeapError PrepareNativeData(FToken Object, std::unique_ptr<FNativeObjectData> Data,
+		FPendingNativeData& OutPublication);
+	// Borrowed until collection/close; null for invalid, absent or unpublished data.
+	const FNativeObjectData* FindNativeData(FToken Object, std::uint32_t Kind) const;
 	EHeapError ReadBytes(FToken Object, std::uint32_t ExpectedType, std::uint32_t Offset, std::span<std::uint8_t> OutBytes) const;
 	EHeapError WriteBytes(FToken Object, std::uint32_t ExpectedType, std::uint32_t Offset, std::span<const std::uint8_t> Bytes);
 	EHeapError ReadReference(FToken Object, std::uint32_t ExpectedType, std::uint32_t Offset, FToken& OutReference) const;
@@ -129,11 +174,21 @@ public:
 	FHeapStats GetStats() const { return Stats; }
 
 private:
+	friend class FPendingNativeData;
+	EHeapError PublishNativeData(FToken Object);
+	void DiscardPendingNativeData(FToken Object);
+	void ReleaseNativeData(std::uint32_t Slot);
 	static constexpr std::uint32_t InvalidIndex = 0xffffffffu;
 	static constexpr std::uint32_t MaxGeneration = (1u << 22) - 1;
 	enum class ETokenKind : std::uint32_t { Object = 1, Root = 2, Frame = 3 };
 	struct FSlot { std::uint32_t Generation = 1; bool Live = false; };
-	struct FObjectSlot : FSlot { std::uint32_t LayoutIndex = 0; bool Marked = false; std::vector<std::uint8_t> Bytes; };
+	struct FObjectSlot : FSlot
+	{
+		std::uint32_t LayoutIndex = 0;
+		bool Marked = false;
+		std::vector<std::uint8_t> Bytes;
+		std::unique_ptr<FNativeObjectData> NativeData;
+	};
 	struct FRootSlot : FSlot { FToken Object = 0; std::uint32_t Frame = InvalidIndex; std::uint32_t Previous = InvalidIndex; std::uint32_t Next = InvalidIndex; };
 	struct FFrameSlot : FSlot { std::uint32_t FirstRoot = InvalidIndex; std::uint32_t Depth = 0; };
 	struct FStaticSlot { std::uint32_t TypeId = 0; FToken Object = 0; };

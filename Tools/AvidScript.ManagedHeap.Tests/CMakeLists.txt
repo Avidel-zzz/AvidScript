@@ -3,7 +3,9 @@ project(AvidScriptManagedHeapTests LANGUAGES CXX)
 add_executable(AvidScriptManagedHeapTests
     AvidScriptManagedHeapTests.cpp
     AvidScriptManagedStaticTests.cpp
+    AvidScriptManagedNativeDataTests.cpp
     ../../Source/AvidScriptRuntime/Private/Memory/AvidScriptManagedHeap.cpp
+    ../../Source/AvidScriptRuntime/Private/Memory/AvidScriptManagedHeapNativeData.cpp
     ../../Source/AvidScriptRuntime/Private/Memory/AvidScriptManagedHeapProtocol.cpp)
 target_include_directories(AvidScriptManagedHeapTests PRIVATE ../../Source/AvidScriptRuntime/Private)
 target_include_directories(AvidScriptManagedHeapTests PRIVATE ../../Source/AvidScriptCore/Public)

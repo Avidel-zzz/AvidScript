@@ -161,7 +161,7 @@ Docs/      使用说明与设计文档
 | --- | --- |
 | C# / .NET | 部分语法和 API 需要单独启用；不能直接使用任意 NuGet 包。 |
 | `async` / `await` | 泛型 Task 仅支持 `Task<int>`；`catch` / `finally` 内不能 `await`；命名 `catch` 尚未接入默认构建。 |
-| 取消 | 暂不支持从 C# 读取 `OperationCanceledException.CancellationToken`。 |
+| 取消 | 异常对象已保存取消源身份；C# 的 `OperationCanceledException.CancellationToken` 属性尚未接入。 |
 | 热重载 | 支持方法体更新；新增 UE 类型、属性、函数或修改签名后，需重新编译并重启 Editor。 |
 | 平台与打包 | Shipping、Android、iOS 和完整多人游戏流程仍待验收。 |
 

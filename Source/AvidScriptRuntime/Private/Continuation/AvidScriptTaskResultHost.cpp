@@ -1,6 +1,7 @@
 #include "AvidScriptWasmRuntime.h"
 #include "AvidScriptLanguageErrorCatalog.h"
 #include "AvidScriptTaskResultAbi.h"
+#include "AvidScriptExceptionCancellationIdentity.h"
 #include "Memory/AvidScriptManagedHeap.h"
 
 namespace
@@ -69,6 +70,27 @@ bool FAvidScriptWasmRuntimeInstance::AdmitTaskTerminalError(
 		return Fail(TEXT("task_language_error_root"),
 			TEXT("Task language error root could not be retained."));
 	}
+	AvidScript::Managed::FPendingNativeData PendingIdentity;
+	bool bPublishIdentity = false;
+	if (bCancellation && CancellationSourceToken.IsSet())
+	{
+		using AvidScript::Continuation::FExceptionCancellationIdentity;
+		if (const auto* Existing = FExceptionCancellationIdentity::Find(*ManagedHeap, ObjectToken))
+		{
+			if (Existing->ExceptionType != TypeToken || Existing->Source != CancellationSourceToken.GetValue())
+				return Fail(TEXT("task_cancellation_identity"),
+					TEXT("The exception already belongs to a different cancellation identity."));
+		}
+		else
+		{
+			if (ManagedHeap->PrepareNativeData(ObjectToken,
+				std::make_unique<FExceptionCancellationIdentity>(TypeToken, CancellationSourceToken.GetValue()),
+				PendingIdentity) != AvidScript::Managed::EHeapError::Ok)
+				return Fail(TEXT("task_cancellation_identity"),
+					TEXT("The exception cancellation identity could not reserve object storage."));
+			bPublishIdentity = true;
+		}
+	}
 	TSharedPtr<IAvidScriptTaskLanguageErrorLease> Lease =
 		MakeShared<FAvidScriptTaskLanguageErrorHeapLease>(MoveTemp(Roots));
 	TArray<int64> Waiters;
@@ -81,6 +103,10 @@ bool FAvidScriptWasmRuntimeInstance::AdmitTaskTerminalError(
 		return Fail(TEXT("task_result_complete"),
 			TEXT("Session rejected Task<int> language-error completion."));
 	}
+	// Completion queues waiters without reentering Guest. The current frame and
+	// the successful Task lease keep the object alive through this allocation-free publication.
+	if (bPublishIdentity && PendingIdentity.Commit() != AvidScript::Managed::EHeapError::Ok)
+		return Fail(TEXT("task_cancellation_identity"), TEXT("Exception identity publication lost its owning heap."));
 	OutResult.ReturnValue = 1;
 	OutResult.ReturnValueI64 = 1;
 	OutResult.bSucceeded = true;

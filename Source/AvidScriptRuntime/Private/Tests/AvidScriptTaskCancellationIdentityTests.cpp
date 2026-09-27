@@ -5,6 +5,7 @@
 #include "AvidScriptTaskResultAbi.h"
 #include "AvidScriptWasmRuntime.h"
 #include "Continuation/AvidScriptSessionContinuations.h"
+#include "Continuation/AvidScriptExceptionCancellationIdentity.h"
 #include "Memory/AvidScriptManagedHeap.h"
 #include "Async/Async.h"
 #include "Dom/JsonObject.h"
@@ -293,6 +294,10 @@ bool FAvidScriptTaskCancellationIdentityAbiTest::RunTest(const FString& Paramete
         TestEqual(TEXT("Two propagation hops retain the same identity"), Get64(Memory, TargetIdentity), Expected);
         TestTrue(TEXT("Source identity has high bits"), static_cast<uint64>(Source) > MAX_uint32);
         const uint64 ErrorObject = Get64(Memory, Object);
+        const auto* ObjectIdentity = AvidScript::Continuation::FExceptionCancellationIdentity::Find(*Heap, ErrorObject);
+        if (!TestTrue(TEXT("Actual WASM cancellation publishes immutable object identity"), ObjectIdentity
+            && ObjectIdentity->ExceptionType == 3 && static_cast<uint64>(ObjectIdentity->Source) == Expected)) return false;
+        TestEqual(TEXT("Propagation shares one object record"), Heap->GetStats().NativeDataObjects, 1u);
         FAvidScriptTaskResultSnapshot Snapshot;
         for (const int64 Task : Tasks)
         {
@@ -315,6 +320,11 @@ bool FAvidScriptTaskCancellationIdentityAbiTest::RunTest(const FString& Paramete
             TestTrue(TEXT("Completed Task awaits immediately"), Active.AwaitTaskResult(Tasks[2], 43, ReadyToken) == EAvidScriptTaskWaitRegistration::Ready);
             TestEqual(TEXT("Ready await schedules no new callback"), ReadyToken, 0LL);
         }
+        // Native alias models an exception reference that escaped its catch. The
+        // separate compiled catch suite tests actual C# aliases across await/GC.
+        FPersistentRoots EscapedException;
+        TestTrue(TEXT("Escaped exception acquires independent ownership"), Heap->RetainPersistent(
+            {&ErrorObject, 1}, EscapedException) == EHeapError::Ok);
         TestTrue(TEXT("Last external owner releases"), Active.ReleaseTaskResult(Tasks[2]));
         TArray<FAvidScriptContinuationCompletion> Ready;
         Owner->DrainReady(Ready);
@@ -322,7 +332,15 @@ bool FAvidScriptTaskCancellationIdentityAbiTest::RunTest(const FString& Paramete
         TestEqual(TEXT("Expected waiter resumes"), Ready[0].Token, Waiter);
         TestTrue(TEXT("Waiter reads identity using its own retained Task"), Runtime.DispatchContinuation(Ready[0], Result));
         TestTrue(TEXT("Waiter finalizes"), Owner->FinalizeDispatched(Waiter, true));
-        TestTrue(TEXT("Final release collects error object"), Heap->Collect() == EHeapError::Ok && !Heap->IsAlive(ErrorObject));
+        TestTrue(TEXT("Escaped exception survives all Task and source owners"), Heap->Collect() == EHeapError::Ok
+            && Heap->IsAlive(ErrorObject) && Owner->GetTaskResultsForTesting().GetCount() == 0
+            && Owner->GetCancellationSourceCountForTesting() == 0);
+        const auto* EscapedIdentity = AvidScript::Continuation::FExceptionCancellationIdentity::Find(*Heap, ErrorObject);
+        TestTrue(TEXT("Object keeps complete identity after Task release and GC"), EscapedIdentity
+            && static_cast<uint64>(EscapedIdentity->Source) == Expected && EscapedIdentity->ExceptionType == 3);
+        EscapedException.Reset();
+        TestTrue(TEXT("Final alias release collects error object"), Heap->Collect() == EHeapError::Ok && !Heap->IsAlive(ErrorObject));
+        TestEqual(TEXT("No native object data remains"), Heap->GetStats().NativeDataBytes, uint64(0));
         TestEqual(TEXT("No root remains"), Heap->GetStats().LiveRoots, 0u);
         TestEqual(TEXT("No Task remains"), Owner->GetTaskResultsForTesting().GetCount(), 0);
         TestEqual(TEXT("No source remains"), Owner->GetCancellationSourceCountForTesting(), 0);
@@ -400,13 +418,44 @@ bool FAvidScriptTaskCancellationIdentityAdmissionTest::RunTest(const FString& Pa
         TestFalse(TEXT("Rejected native records leave Task pending"), Active.ReadTaskResult(NativeRejectedTask, Snapshot));
         TestEqual(TEXT("Rejected native records wake no waiter"), NativeWaiters.Num(), 0);
         TestTrue(TEXT("Valid immediate proof is admitted"), Complete(Runtime, Task, ErrorObject, Source, Result));
+        using AvidScript::Continuation::FExceptionCancellationIdentity;
+        const auto* Identity = FExceptionCancellationIdentity::Find(*Heap, ErrorObject);
+        if (!TestTrue(TEXT("Verified cause belongs to the exception"), Identity && Identity->Source == Source
+            && Identity->ExceptionType == 3)) return false;
         const uint32 CompletedRoots = Heap->GetStats().LiveRoots;
         TestFalse(TEXT("Duplicate completion cannot replace cause"), Complete(Runtime, Task, ErrorObject, Source, Result));
         TestEqual(TEXT("Failed duplicate releases attempted root lease"), Heap->GetStats().LiveRoots, CompletedRoots);
+
+        const uint64 RejectedObject = Allocate(*this, Runtime);
+        // Allocate opens a new Guest frame. Capture the original exception into
+        // that frame through the same Host operation used by compiled catch bindings.
+        FAvidScriptHostCall Capture;
+        Capture.BindingId = EAvidScriptHostBindingId::TaskTerminalErrorRootV1;
+        Capture.Int64Args[0] = Task;
+        if (!TestTrue(TEXT("Existing exception is captured into the new current frame"), Runtime.DispatchHostCall(Capture, Result)
+            && static_cast<uint64>(Result.ReturnValueI64) == ErrorObject)) return false;
+        const auto BeforeRejected = Heap->GetStats();
+        TestFalse(TEXT("Completed Task cannot publish a different exception"), Complete(Runtime, Task, RejectedObject, Source, Result));
+        TestTrue(TEXT("Failed completion rolls back unpublished object identity"), !FExceptionCancellationIdentity::Find(*Heap, RejectedObject)
+            && Heap->GetStats().NativeDataBytes == BeforeRejected.NativeDataBytes
+            && Heap->GetStats().LiveBytes == BeforeRejected.LiveBytes && Heap->GetStats().LiveRoots == BeforeRejected.LiveRoots);
+        const int64 ReusedTask = Active.CreateTaskResult(TEXT("type:int32"));
+        const int64 DifferentSource = Active.CreateCancellationSource();
+        TestTrue(TEXT("Independent source cancels"), Active.CancelCancellationSource(DifferentSource));
+        TestFalse(TEXT("Same exception cannot be relabeled with another source"), Complete(Runtime, ReusedTask, ErrorObject, DifferentSource, Result));
+        TestEqual(TEXT("Conflicting source reports identity failure"), Result.ErrorCategory, FString(TEXT("task_cancellation_identity")));
+        TestFalse(TEXT("Same exception cannot change concrete type"), Complete(Runtime, ReusedTask, ErrorObject, Source, Result, 2));
+        TestFalse(TEXT("Conflicting object identity leaves target pending"), Active.ReadTaskResult(ReusedTask, Snapshot));
+        TestTrue(TEXT("Same object and same identity may belong to another Task"), Complete(Runtime, ReusedTask, ErrorObject, Source, Result));
+        TestEqual(TEXT("Repeated admission does not allocate another record"), Heap->GetStats().NativeDataObjects, 1u);
+        TestTrue(TEXT("Independent owner and source release"), Active.ReleaseTaskResult(ReusedTask) && Active.ReleaseCancellationSource(DifferentSource));
+        std::array<uint8, 8> ForgedBytes; ForgedBytes.fill(0xff);
+        TestTrue(TEXT("Guest-visible bytes remain writable without changing identity"), Heap->WriteBytes(ErrorObject, 1, 0, ForgedBytes) == EHeapError::Ok
+            && FExceptionCancellationIdentity::Find(*Heap, ErrorObject)->Source == Source);
         TestTrue(TEXT("Source release does not erase identity"), Active.ReleaseCancellationSource(Source));
         TestTrue(TEXT("Identity reads after source release"), Read(Runtime, Task, Result));
         TestEqual(TEXT("Read is full i64"), Result.ReturnValueI64, Source);
-        TestEqual(TEXT("Read has no root side effect"), Heap->GetStats().LiveRoots, CompletedRoots);
+        TestEqual(TEXT("Read has no root side effect"), Heap->GetStats().LiveRoots, BeforeRejected.LiveRoots);
         for (const auto Binding : {EAvidScriptHostBindingId::TaskCancelLanguageErrorV1, EAvidScriptHostBindingId::TaskFaultLanguageErrorV1})
         {
             const int64 Legacy = Active.CreateTaskResult(TEXT("type:int32"));
@@ -419,6 +468,12 @@ bool FAvidScriptTaskCancellationIdentityAdmissionTest::RunTest(const FString& Pa
             TestFalse(TEXT("Unknown identity read is not successful zero"), Result.bSucceeded);
             TestTrue(TEXT("Legacy metadata stays unset"), Active.ReadTaskResult(Copy, Snapshot)
                 && Snapshot.LanguageError.IsSet() && !Snapshot.LanguageError->CancellationSourceToken.IsSet());
+            TestTrue(TEXT("Legacy Task metadata does not overwrite existing object identity"),
+                FExceptionCancellationIdentity::Find(*Heap, ErrorObject)->Source == Source);
+            const int64 FreshLegacy = Active.CreateTaskResult(TEXT("type:int32"));
+            TestTrue(TEXT("Fresh legacy object remains supported"), Complete(Runtime, FreshLegacy, RejectedObject, 0, Result, 3, 1, Binding));
+            TestFalse(TEXT("Fresh legacy object does not invent cancellation identity"), FExceptionCancellationIdentity::Find(*Heap, RejectedObject) != nullptr);
+            TestTrue(TEXT("Fresh legacy owner releases"), Active.ReleaseTaskResult(FreshLegacy));
             TestTrue(TEXT("Legacy owners release"), Active.ReleaseTaskResult(Legacy) && Active.ReleaseTaskResult(Copy));
         }
         const int64 Bare = Active.CreateTaskResult(TEXT("type:int32"));
@@ -442,6 +497,7 @@ bool FAvidScriptTaskCancellationIdentityAdmissionTest::RunTest(const FString& Pa
         Owner->Teardown(); ForeignOwner->Teardown();
         TestTrue(TEXT("Teardown drops all persistent roots"), Heap->Collect() == EHeapError::Ok
             && Heap->GetStats().LiveRoots == 0 && Heap->GetStats().ActiveFrames == 0 && !Heap->IsAlive(ErrorObject));
+        TestEqual(TEXT("Rejected and admitted records leave no native bytes"), Heap->GetStats().NativeDataBytes, uint64(0));
         Runtime.Unload();
     }
     return true;
@@ -556,6 +612,7 @@ bool FAvidScriptTaskCancellationIdentityLifecycleTest::RunTest(const FString& Pa
         TestFalse(TEXT("Rolled back identity becomes inaccessible"), Read(Runtime, FailedTask, Result));
         Runtime.EndVmInvocation(Invocation);
         TestTrue(TEXT("Rollback releases only candidate root"), Heap->Collect() == EHeapError::Ok && Heap->GetStats().LiveRoots == 1);
+        TestEqual(TEXT("Rollback reclaims candidate object data"), Heap->GetStats().NativeDataObjects, 1u);
         auto& Published = Owner->BeginPrepared(Scope.World);
         FAvidScriptContinuationHostEndpoint PreparedAlias(Owner, EAvidScriptContinuationLane::Prepared, Published.GetActivationSerial());
         const int64 PublishedTask = CreateCancelled(Published, PublishedSource);
@@ -570,11 +627,13 @@ bool FAvidScriptTaskCancellationIdentityLifecycleTest::RunTest(const FString& Pa
         TestFalse(TEXT("Old active alias cannot read promoted Task"), OldAlias.ReadTaskResult(PublishedTask, Snapshot));
         TestFalse(TEXT("Old prepared alias cannot read promoted Task"), PreparedAlias.ReadTaskResult(PublishedTask, Snapshot));
         TestTrue(TEXT("Publication drops old root"), Heap->Collect() == EHeapError::Ok && Heap->GetStats().LiveRoots == 1);
+        TestEqual(TEXT("Publication keeps only promoted object data"), Heap->GetStats().NativeDataObjects, 1u);
         Scope.Destroy();
         TestFalse(TEXT("Destroyed World rejects identity before object GC"), Read(Runtime, PublishedTask, Result));
         Runtime.EndVmInvocation(Invocation);
         Owner->Teardown(); Owner->Teardown();
         TestTrue(TEXT("Teardown releases all error leases"), Heap->Collect() == EHeapError::Ok && Heap->GetStats().LiveRoots == 0);
+        TestEqual(TEXT("World teardown releases object metadata"), Heap->GetStats().NativeDataBytes, uint64(0));
         TestEqual(TEXT("Teardown releases every Task"), Owner->GetTaskResultsForTesting().GetCount(), 0);
         TestEqual(TEXT("Teardown releases every source"), Owner->GetCancellationSourceCountForTesting(), 0);
         Runtime.Unload();
