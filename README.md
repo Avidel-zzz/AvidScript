@@ -11,16 +11,18 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License"></a>
 </p>
 
-AvidScript 为 Unreal Engine 提供 C# 脚本支持。C# 编译为 WebAssembly，通过生成的绑定调用 UE API，运行在 Wasmtime / WAMR 中。UE 进程不加载 CLR。
+AvidScript 是 Unreal Engine 的 C# 脚本插件。C# 源码编译为 `.wasm`，通过生成的绑定调用 UE API。运行时使用 Wasmtime / WAMR，不依赖 CLR。
 
-> 开发中。当前以 UE 5.8 源码版、Win64 Editor / Development 为测试环境，仅支持部分 C# 语法和 .NET API。见[已知限制](#limitations)。
+**开发中** · UE 5.8 源码版 · Win64 Editor / Development · [已知限制](#limitations)
 
-[Quick start](#quick-start) · [Examples](#examples) · [Build & test](#development) · [Limitations](#limitations) · [Docs](#docs)
+[安装](#installation) · [用法](#usage) · [示例](#examples) · [开发](#development) · [文档](#docs)
 
 <a id="用法"></a>
 <a id="usage"></a>
 
-例如，在 `Tick` 中移动脚本绑定的 Actor：
+## 用法
+
+每帧移动 Actor：
 
 ```csharp
 [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
@@ -31,24 +33,20 @@ public static void Tick(float deltaSeconds)
 }
 ```
 
-`UE.Self` 指向当前 Actor；`avid_on_tick` 每帧调用一次。上面的代码让 Actor 沿 X 轴以 120 cm/s 移动。
+`UE.Self` 是绑定脚本的 Actor。这个 `Tick` 让它沿 X 轴以 120 cm/s 移动。
+
+将 [ActorLifecycleScript.cs](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) 中的 `Tick` 替换为上面的代码，按下面的步骤运行。
 
 <a id="getting-started"></a>
 <a id="quick-start"></a>
 
-## Quick start
-
-### Requirements
-
-- Unreal Engine 5.8 源码版、UE C++ 工程
-- Visual Studio 2022，已安装 UE C++ 工具链
-- PowerShell 7、[.NET SDK 8.0.416](global.json)
-
 <a id="installation"></a>
 
-### Install
+## 安装
 
-在 UE 工程根目录执行：
+需要 UE 5.8 源码版、UE C++ 工程、Visual Studio 2022（UE C++ 工具链）、PowerShell 7 和 [.NET SDK 8.0.416](global.json)。
+
+在工程根目录执行：
 
 ```powershell
 git clone https://github.com/Avidel-zzz/AvidScript.git Plugins/AvidScript
@@ -56,7 +54,7 @@ cd Plugins/AvidScript
 pwsh -NoProfile -File Build/InstallWasmtimeDependency.ps1 -Mode Install
 ```
 
-编译工程的 Editor target。以下路径和 `MyGameEditor` 按自己的工程修改：
+编译 Editor，替换为自己的引擎路径、工程名和 Editor target：
 
 ```powershell
 $ueRoot = 'C:\UnrealEngine'
@@ -69,32 +67,32 @@ $project = (Resolve-Path '../../MyGame.uproject').Path
 
 <a id="运行示例"></a>
 
-### Run
+### 运行
 
-1. 将 [ActorLifecycleScript.cs](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) 中的 `Tick` 替换为上面的代码。
-2. 打开 Editor，在关卡中选中一个 Cube，设置 **Mobility → Movable**。
-3. 执行 **Tools → AvidScript → Build And Bind C# ActorLifecycle Script**，构建成功后点击 **Play**。
+1. 打开 Editor，选中关卡里的 Cube，将 **Mobility** 设为 **Movable**。
+2. 执行 **Tools → AvidScript → Build And Bind C# ActorLifecycle Script**。
+3. 构建成功后点击 **Play**。
 
-修改此示例后，停止 Play，再次执行 **Build And Bind**，然后 Play。
+修改此示例：停止 Play → 修改 `.cs` → Build And Bind → Play。
 
 <a id="示例目录"></a>
 <a id="samples"></a>
 <a id="examples"></a>
 
-## Examples
+## 示例
 
-| 功能 | 示例 |
+| 示例 | 内容 |
 | --- | --- |
-| `BeginPlay` / `Tick`、输入与碰撞回调 | [ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) |
-| `[UClass]` / `[UProperty]` / `[UFunction]`、蓝图继承 | [ScriptDefinedTypes](Samples/CSharp/ScriptDefinedTypes/README.md) |
-| `await` 等待定时器、异步加载资源 | [LatentGameplay](Samples/CSharp/LatentGameplay/README.md) |
-| 客户端与服务器 RPC | [NetworkRpc](Samples/CSharp/NetworkRpc/README.md) |
-| 属性复制与 `RepNotify` 回调 | [ReplicatedProperty](Samples/CSharp/ReplicatedProperty/README.md) |
-| UI 更新与存档读写 | [UiSaveDemo](Samples/CSharp/UiSaveDemo/README.md) |
-| 生成项目 C++ API 的 C# 绑定 | [TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) |
+| [ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) | 移动 Actor，处理输入和碰撞 |
+| [ScriptDefinedTypes](Samples/CSharp/ScriptDefinedTypes/README.md) | 用 C# 定义 Actor，让蓝图继承并读写属性 |
+| [LatentGameplay](Samples/CSharp/LatentGameplay/README.md) | 用 `await` 等待定时器、加载资源 |
+| [NetworkRpc](Samples/CSharp/NetworkRpc/README.md) | 在客户端与服务器之间调用函数（RPC） |
+| [ReplicatedProperty](Samples/CSharp/ReplicatedProperty/README.md) | 同步属性，在客户端接收 `RepNotify` 回调 |
+| [UiSaveDemo](Samples/CSharp/UiSaveDemo/README.md) | 更新 UI，保存和读取存档 |
+| [TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) | 从 C# 调用项目里的 C++ API |
 
 <details>
-<summary><code>UClass</code> 示例</summary>
+<summary>代码：用 C# 定义蓝图可继承的 Actor</summary>
 
 ```csharp
 using AvidScript;
@@ -115,14 +113,14 @@ public partial class Projectile : AvidActor
 }
 ```
 
-生成 UE 类型并编译 Editor 后，蓝图可继承 `Projectile`，读写 `LaunchSpeed` 并调用 `GetLaunchSpeed()`。类型声明变化需要重新编译并重启 Editor，步骤见 [ScriptDefinedTypes](Samples/CSharp/ScriptDefinedTypes/README.md)。
+蓝图可继承 `Projectile`，读写 `LaunchSpeed`，调用 `GetLaunchSpeed()`。新增或修改这些 UE 类型声明后，需要生成代码、重新编译并重启 Editor。构建步骤见 [ScriptDefinedTypes](Samples/CSharp/ScriptDefinedTypes/README.md)。
 
 </details>
 
 <a id="开发"></a>
 <a id="development"></a>
 
-## Build & test
+## 开发
 
 在插件根目录执行：
 
@@ -134,7 +132,13 @@ pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
 dotnet run --project Tools/AvidScript.CSharpGuest.Tests/AvidScript.CSharpGuest.Tests.csproj -c Release
 ```
 
-编译器在 `Tools/`，UE 插件模块在 `Source/`，构建脚本在 `Build/`。
+```text
+Source/    UE 插件模块
+Tools/     C# 编译器、代码生成器与测试
+Build/     构建脚本
+Samples/   示例源码
+Docs/      文档
+```
 
 <a id="已知限制"></a>
 <a id="当前边界"></a>
@@ -142,26 +146,24 @@ dotnet run --project Tools/AvidScript.CSharpGuest.Tests/AvidScript.CSharpGuest.T
 <a id="status"></a>
 <a id="limitations"></a>
 
-## Limitations
+## 已知限制
 
-| 功能 | 当前限制 |
-| --- | --- |
-| C# / .NET | 尚未覆盖完整 C# 语法与 .NET 标准库，不能直接使用任意 NuGet 包。 |
-| `async` / `await` | 泛型 Task 仅支持 `Task<int>`；`catch` / `finally` 内不能 `await`。 |
-| 异常与取消 | 默认构建暂不支持在 `async` 方法中使用 `catch (Exception error)` 的异常变量；尚不支持读取 `OperationCanceledException.CancellationToken`。 |
-| 热重载 | 支持修改方法体；新增 UE 类型、属性、函数或修改签名，需要重新编译并重启 Editor。 |
-| 平台与打包 | 当前主要测试 Win64 Editor / Development。Shipping、Android、iOS 和完整多人游戏流程仍待验收。 |
+以下针对默认构建；实验性编译选项的进度见[异步异常与取消](Docs/Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)。
 
-异常与取消的实现进度见[异步异常文档](Docs/Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)。
+- **C# / .NET**：仅支持部分语法和标准库 API，不能直接使用任意 NuGet 包。
+- **`async` / `await`**：泛型 Task 仅支持 `Task<int>`；不支持在 `catch` / `finally` 内 `await`。
+- **异常与取消**：`async` 方法尚不支持读取 `catch (Exception error)` 中的 `error`，也不支持读取 `OperationCanceledException.CancellationToken`。
+- **热重载**：支持修改方法体。新增 UE 类型、属性、函数或修改签名，需要重新编译并重启 Editor。
+- **平台**：Shipping、Android、iOS 和完整多人游戏流程尚未完成验收。
 
 <a id="docs"></a>
 
-## Docs
+## 文档
 
 ![C# 编译为 WASM，再由 UE 运行时加载并访问 UObject](Docs/Assets/README/pipeline.svg)
 
 - [模块架构](Docs/Architecture/AvidScript_Module_Architecture.md)
-- [C# 语法与执行支持](Docs/Phase66/P66.C_Language_Execution_Plan.md)
+- [C# 支持范围与实现进度](Docs/Phase66/P66.C_Language_Execution_Plan.md)
 - [开发路线图](Docs/Architecture/AvidScript_Iteration_Roadmap.md)
 
 ## License
