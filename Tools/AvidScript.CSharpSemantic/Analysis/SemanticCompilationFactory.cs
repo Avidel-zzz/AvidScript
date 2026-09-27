@@ -23,6 +23,7 @@ internal sealed record SemanticCompilationContext(
     // the module, including methods that do not themselves raise an exception.
     public bool RequireTaskLocalLifetimes { get; init; }
     public bool EnableAsyncSynchronousExceptions { get; init; }
+    public bool EnableAsyncCatchVariables { get; init; }
 }
 
 internal static class SemanticCompilationFactory

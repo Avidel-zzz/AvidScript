@@ -41,6 +41,11 @@ public static class CSharpGuestLowerer
         ArgumentNullException.ThrowIfNull(semanticSha256);
         ArgumentNullException.ThrowIfNull(substitutes);
 
+        if (document.SchemaVersion == SemanticContract.AsyncCatchVariableSchemaVersion
+            || document.SemanticVersion == SemanticContract.AsyncCatchVariableSemanticVersion)
+            return Failure(new[] { new GuestDiagnostic("ASCG1027", "error",
+                "Async catch variables require owned exception-value lowering before Guest publication.", null) });
+
         var synchronousAsync = CSharpAsyncSynchronousExecutionContext.Find(document);
         if (synchronousAsync is null && (document.SchemaVersion == SemanticContract.AsyncSynchronousExceptionSchemaVersion
             || document.SemanticVersion == SemanticContract.AsyncSynchronousExceptionSemanticVersion

@@ -611,7 +611,7 @@ internal static class SemanticAsyncControlFlowProjector
                     statement.Span, "ASCS5420");
             if (!allowValueReturns || statement.Catches.Any(clause =>
                     clause.Filter is not null
-                    || !string.IsNullOrEmpty(clause.Declaration?.Identifier.ValueText))
+                    || !context.EnableAsyncCatchVariables && !string.IsNullOrEmpty(clause.Declaration?.Identifier.ValueText))
                 || statement.Finally?.Block.DescendantNodes()
                     .OfType<AwaitExpressionSyntax>().Any() == true
                 || statement.Catches.Any(clause => clause.Block.DescendantNodes()
@@ -731,6 +731,24 @@ internal static class SemanticAsyncControlFlowProjector
                     handlerBlock, handlerExit,
                     new LoopTargets(handlerBreak, handlerContinue), depth + 1,
                     handlerDrafts[index]);
+                if (handlerEntries[index] >= 0 && statement.Catches[index].Declaration is { } declaration
+                    && !string.IsNullOrEmpty(declaration.Identifier.ValueText))
+                {
+                    if (!context.EnableAsyncCatchVariables || semanticModel.GetDeclaredSymbol(declaration) is not ILocalSymbol local)
+                        return Reject("Async catch variable could not be bound to its Roslyn local.", declaration.Span, "ASCS5420");
+                    string variableId = SemanticSymbolProjector.GetSymbolId(local);
+                    var span = SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, declaration.Span);
+                    var caught = new SemanticOperation(SemanticAsyncCatchVariableValidator.BindingOperationKind,
+                        true, null, false, false, false, false, typeRegistry.Register(local.Type), variableId,
+                        Array.Empty<string>(), null, null, null, null, null, span, Array.Empty<SemanticOperation>());
+                    int binding = AddDraft(declaration.Span, new[] { new SemanticAsyncStatement(caught, variableId) }, null,
+                        new DraftTransfer(SemanticAsyncMethod.GotoTransferKind, null, handlerEntries[index], -1));
+                    if (binding < 0) return -1;
+                    handlerEntries[index] = binding;
+                    handlerDrafts[index].Add(binding);
+                    // The declaration belongs to the catch region, before the
+                    // handler's block scope begins at its opening brace.
+                }
                 if (allowAsyncCancellationFlow)
                 {
                     int[] exits = new[] { handlerExit, handlerBreak, handlerContinue }

@@ -21,6 +21,9 @@ public static class CSharpLanguageErrorCompiler
     {
         compilation = null;
         error = null;
+        if (semantic is not null && (semantic.SchemaVersion == SemanticContract.AsyncCatchVariableSchemaVersion
+            || semantic.SemanticVersion == SemanticContract.AsyncCatchVariableSemanticVersion))
+            return Fail("Async catch variables require owned exception-value lowering before Guest publication.", out error);
         var staticContext = semantic is null ? null : CSharpStaticExecutionContext.Find(semantic);
         bool implicitMemberErrors = semantic is not null && SemanticContract.HasAsyncSynchronousExceptions(semantic)
             && SemanticAsyncInvocationValidator.IsValid(semantic)

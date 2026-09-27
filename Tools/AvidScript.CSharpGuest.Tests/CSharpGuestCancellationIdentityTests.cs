@@ -138,6 +138,40 @@ internal static class CSharpGuestCancellationIdentityTests
             catch (InvalidDataException) { rejected = true; }
             Check(rejected, "Serializer rejects missing or unknown identity member: " + member);
         }
+        const string catchSource = """
+            using System;
+            using System.Threading.Tasks;
+            using AvidScript;
+            public static class Script {
+                public static async Task<int> Run() {
+                    try { await AvidContinuations.NextTickAsync(); return 1; }
+                    catch (OperationCanceledException error) { return error == null ? 0 : 7; }
+                }
+            }
+            """;
+        const string catchSourceId = "Scripts/AsyncCatchVariables.cs";
+        var catchSemantic = SemanticAnalyzer.Analyze(catchSource, catchSourceId,
+            FrontendAnalyzer.Analyze(catchSource, catchSourceId).Source.Sha256,
+            new[] { new SemanticReferenceSource(CSharpGuestContinuationTests.ReferenceFacade,
+                "generated://Continuations.cs", true) }, new SemanticCompilerWorkspace(),
+            enableAsyncExceptionFlow: true, enableDirectAwaitCleanup: true, enableAsyncCancellationFlow: true,
+            enableAsyncSynchronousExceptions: true, enableAsyncCatchVariables: true);
+        Check(SemanticContract.HasAsyncCatchVariables(catchSemantic)
+            && SemanticAsyncInvocationValidator.IsValid(catchSemantic), "Catch variable source has a validated semantic contract");
+        foreach (var artifact in new[] { catchSemantic, catchSemantic with { SemanticVersion = "1.59" },
+            catchSemantic with { SchemaVersion = 50 } })
+        {
+            string catchHash = Convert.ToHexString(SHA256.HashData(SemanticSerializer.Serialize(artifact))).ToLowerInvariant();
+            foreach (bool languageErrors in new[] { false, true })
+            {
+                var rejected = CSharpGuestLowerer.Lower(artifact, catchHash, enableAsyncLanguageErrors: languageErrors);
+                Check(!rejected.Succeeded && rejected.Module is null && rejected.Diagnostics.Any(d => d.Code == "ASCG1027"),
+                    "Catch variable publication requires owned exception values in both lowering modes");
+            }
+            Check(!CSharpLanguageErrorCompiler.TryLower(artifact, catchHash, out var rejectedError, out var catchError)
+                && rejectedError is null && catchError?.Contains("owned exception-value", StringComparison.Ordinal) == true,
+                "Direct language-error lowering cannot bypass the catch publication boundary");
+        }
         return count;
     }
 }

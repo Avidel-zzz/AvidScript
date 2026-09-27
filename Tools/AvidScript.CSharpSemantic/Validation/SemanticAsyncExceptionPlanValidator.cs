@@ -13,6 +13,7 @@ public static class SemanticAsyncExceptionPlanValidator
     {
         if (document?.AsyncMethods is null || document.Source is null)
             return false;
+        if (!SemanticAsyncCatchVariableValidator.IsValid(document)) return false;
         bool enabled = document.SchemaVersion == SemanticContract.AsyncExceptionFlowSchemaVersion
             && document.SemanticVersion == SemanticContract.AsyncExceptionFlowSemanticVersion;
         bool directCleanup = document.SchemaVersion == SemanticContract.DirectAwaitCleanupSchemaVersion
@@ -115,7 +116,7 @@ public static class SemanticAsyncExceptionPlanValidator
                     || !plan.Regions.Any(region => region.Kind is "catch" or "finally"))
                 || catchRegions.Count != plan.Catches.Count
                 || plan.Catches.Any(handler => handler is null || handler.HasFilter
-                    || handler.ExceptionVariableSymbolId is not null
+                    || handler.ExceptionVariableSymbolId is not null && !SemanticContract.HasAsyncCatchVariables(document)
                     || !catchRegions.TryGetValue(handler.RegionOrdinal,
                         out SemanticAsyncExceptionRegion? region)
                     || handler.Span != region.SourceSpan)) return false;

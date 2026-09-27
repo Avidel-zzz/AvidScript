@@ -39,10 +39,17 @@ public static class SemanticContract
     public const string AsyncMemberAssignmentSemanticVersion = "1.56";
     public const int AsyncSynchronousExceptionSchemaVersion = 50;
     public const string AsyncSynchronousExceptionSemanticVersion = "1.59";
+    public const int AsyncCatchVariableSchemaVersion = 52;
+    public const string AsyncCatchVariableSemanticVersion = "1.61";
+
+    public static bool HasAsyncCatchVariables(SemanticDocument document) =>
+        document.SchemaVersion == AsyncCatchVariableSchemaVersion
+        && document.SemanticVersion == AsyncCatchVariableSemanticVersion;
 
     public static bool HasAsyncSynchronousExceptions(SemanticDocument document) =>
         document.SchemaVersion == AsyncSynchronousExceptionSchemaVersion
-        && document.SemanticVersion == AsyncSynchronousExceptionSemanticVersion;
+        && document.SemanticVersion == AsyncSynchronousExceptionSemanticVersion
+        || HasAsyncCatchVariables(document);
 
     public static bool HasAsyncMemberAssignments(SemanticDocument document) =>
         document.SchemaVersion == AsyncMemberAssignmentSchemaVersion
@@ -97,5 +104,7 @@ public static class SemanticContract
         || (schemaVersion == AsyncMemberAssignmentSchemaVersion
             && semanticVersion == AsyncMemberAssignmentSemanticVersion)
         || (schemaVersion == AsyncSynchronousExceptionSchemaVersion
-            && semanticVersion == AsyncSynchronousExceptionSemanticVersion);
+            && semanticVersion == AsyncSynchronousExceptionSemanticVersion)
+        || (schemaVersion == AsyncCatchVariableSchemaVersion
+            && semanticVersion == AsyncCatchVariableSemanticVersion);
 }
