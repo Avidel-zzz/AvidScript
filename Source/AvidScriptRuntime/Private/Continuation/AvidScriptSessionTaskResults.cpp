@@ -174,7 +174,10 @@ bool FAvidScriptSessionTaskResults::Finish(
 		|| (State == EAvidScriptTaskResultState::Faulted && ErrorCode.IsEmpty())
 		|| LanguageError.IsSet() != RootLease.IsValid()
 		|| (LanguageError.IsSet() && State != EAvidScriptTaskResultState::Faulted
-			&& State != EAvidScriptTaskResultState::Cancelled))
+			&& State != EAvidScriptTaskResultState::Cancelled)
+		|| (LanguageError.IsSet() && LanguageError->CancellationSourceToken.IsSet()
+			&& (State != EAvidScriptTaskResultState::Cancelled
+				|| LanguageError->CancellationSourceToken.GetValue() > 0)))
 	{
 		return false;
 	}

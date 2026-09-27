@@ -1186,6 +1186,31 @@ int32_t TaskCancelLanguageErrorV1(wasm_exec_env_t ExecEnv,
 		? Result.ReturnValue : 0;
 }
 
+int32_t TaskCancelLanguageErrorV2(wasm_exec_env_t ExecEnv,
+	int64_t TaskToken, int32_t TypeToken, int32_t SourceToken, int64_t ErrorObject, int64_t SourceProof)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::TaskCancelLanguageErrorV2;
+	Call.Int64Args[0] = TaskToken;
+	Call.IntArgs[0] = TypeToken;
+	Call.IntArgs[1] = SourceToken;
+	Call.Int64Args[1] = ErrorObject;
+	Call.Int64Args[2] = SourceProof;
+	FAvidScriptHostCallResult Result;
+	return Dispatch(ExecEnv, StaticImportName(Call.BindingId), Call, Result)
+		? Result.ReturnValue : 0;
+}
+
+int64_t TaskCancellationTokenV1(wasm_exec_env_t ExecEnv, int64_t TaskToken)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::TaskCancellationTokenV1;
+	Call.Int64Args[0] = TaskToken;
+	FAvidScriptHostCallResult Result;
+	return Dispatch(ExecEnv, StaticImportName(Call.BindingId), Call, Result)
+		? Result.ReturnValueI64 : 0;
+}
+
 int64_t TaskTerminalErrorMetaV1(wasm_exec_env_t ExecEnv, int64_t TaskToken)
 {
 	FAvidScriptHostCall Call;
@@ -1553,6 +1578,8 @@ void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 	case EAvidScriptHostBindingId::TaskLanguageErrorMetaV1: return reinterpret_cast<void*>(TaskLanguageErrorMetaV1);
 	case EAvidScriptHostBindingId::TaskLanguageErrorRootV1: return reinterpret_cast<void*>(TaskLanguageErrorRootV1);
 	case EAvidScriptHostBindingId::TaskCancelLanguageErrorV1: return reinterpret_cast<void*>(TaskCancelLanguageErrorV1);
+	case EAvidScriptHostBindingId::TaskCancelLanguageErrorV2: return reinterpret_cast<void*>(TaskCancelLanguageErrorV2);
+	case EAvidScriptHostBindingId::TaskCancellationTokenV1: return reinterpret_cast<void*>(TaskCancellationTokenV1);
 	case EAvidScriptHostBindingId::TaskTerminalErrorMetaV1: return reinterpret_cast<void*>(TaskTerminalErrorMetaV1);
 	case EAvidScriptHostBindingId::TaskTerminalErrorRootV1: return reinterpret_cast<void*>(TaskTerminalErrorRootV1);
 	case EAvidScriptHostBindingId::DelegateOutputWrite: return reinterpret_cast<void*>(DelegateOutputWrite);

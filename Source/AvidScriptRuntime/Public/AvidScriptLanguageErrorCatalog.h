@@ -33,11 +33,13 @@ public:
 		return GuestIrSchemaVersion >= 20 && GuestIrSchemaVersion <= 26;
 	}
 	bool SupportsTaskCancellationError() const { return GuestIrSchemaVersion == 24 || bTaskLifetimeCancellation; }
+	bool SupportsTaskCancellationIdentity() const { return bTaskCancellationIdentity; }
 	bool IsCancellationType(int32 Token) const;
 
 private:
 	int32 GuestIrSchemaVersion = 0;
 	bool bTaskLifetimeCancellation = false;
+	bool bTaskCancellationIdentity = false;
 	TArray<FString> TypeIds;
 	TArray<FAvidScriptLanguageErrorSource> Sources;
 };

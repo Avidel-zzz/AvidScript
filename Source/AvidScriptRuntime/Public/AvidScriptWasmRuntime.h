@@ -655,6 +655,8 @@ public:
 	bool DispatchTaskRetainForContinuationCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	bool DispatchTaskFaultLanguageErrorCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	bool DispatchTaskCancelLanguageErrorCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
+	bool DispatchTaskCancelLanguageErrorV2Call(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
+	bool DispatchTaskCancellationTokenCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	bool DispatchTaskLanguageErrorMetaCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	bool DispatchTaskLanguageErrorRootCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult);
 	// Native callers retain references extracted from a validated state layout.
@@ -717,7 +719,8 @@ public:
 private:
 	enum class EInstanceLifecycleOperation : uint8 { Begin, Tick, End };
 	bool AdmitTaskTerminalError(int64 TaskToken, int32 TypeToken, int32 SourceToken,
-		uint64 ObjectToken, bool bCancellation, FAvidScriptHostCallResult& OutResult);
+		uint64 ObjectToken, bool bCancellation, FAvidScriptHostCallResult& OutResult,
+		TOptional<int64> CancellationSourceToken = {});
 	bool FindTaskLanguageError(int64 TaskToken,
 		FAvidScriptTaskLanguageError& OutError, FAvidScriptHostCallResult& OutResult,
 		bool bIncludeCancellation = false);

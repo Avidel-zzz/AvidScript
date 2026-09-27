@@ -84,7 +84,7 @@ FString Provenance(int32 GuestSchema = 17, const TCHAR* LifetimeModel = TEXT("ca
 		GuestSchema, *GuestVersion);
 	if (StaticBaseSchema) Result += FString::Printf(TEXT("\nguest_ir_base=%d/1.%d"), StaticBaseSchema, StaticBaseSchema - 1);
 	const int32 ProfileSchema = GuestSchema == 30
-		|| (GuestSchema == 31 && (StaticBaseSchema == 29 || StaticBaseSchema == 30))
+		|| ((GuestSchema == 31 || GuestSchema == 32) && (StaticBaseSchema == 29 || StaticBaseSchema == 30))
 		? 26 : StaticBaseSchema ? StaticBaseSchema : GuestSchema;
 	if (ProfileSchema == 25 || ProfileSchema == 26) Result += FString::Printf(TEXT("\ntask_local_exception_model=%s"), LifetimeModel);
 	return Result;
@@ -347,7 +347,50 @@ bool FAvidScriptLanguageErrorCatalogRuntimeTest::RunTest(const FString& Paramete
 		TestTrue(TEXT("IR 31 preserves language faults and typed cancellation"),
 			Catalog && Catalog->SupportsTaskLanguageErrorFault() && Catalog->SupportsTaskCancellationError()
 			&& Catalog->IsCancellationType(1));
+		TestFalse(TEXT("IR 31 does not authorize cancellation identity"),
+			Catalog && Catalog->SupportsTaskCancellationIdentity());
 	}
+	auto IdentityDocument = Document(32);
+	IdentityDocument->GetArrayField(TEXT("types"))[0]->AsObject()->SetStringField(
+		TEXT("type_id"), TEXT("type:global::System.Threading.Tasks.TaskCanceledException"));
+	const FString IdentityJson = Json(IdentityDocument);
+	for (const int32 Base : {24, 25, 26, 29, 30})
+	{
+		TestTrue(TEXT("IR 32 supports each frozen cancellation base"),
+			FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+				Module(&IdentityJson, true, false, 32, TEXT("cancellation"), Base), ModuleId, Catalog, Error));
+		TestTrue(TEXT("IR 32 authorizes cancellation identity and previous terminal APIs"),
+			Catalog && Catalog->SupportsTaskCancellationIdentity() && Catalog->SupportsTaskCancellationError()
+			&& Catalog->SupportsTaskLanguageErrorFault() && Catalog->IsCancellationType(1));
+		TestFalse(TEXT("IR 32 requires its catalog"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+			Module(nullptr, true, false, 32, TEXT("cancellation"), Base), ModuleId, Catalog, Error));
+		TestFalse(TEXT("An IR 31 catalog cannot authorize IR 32"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+			Module(&ReadinessJson, true, false, 32, TEXT("cancellation"), Base), ModuleId, Catalog, Error));
+		TestFalse(TEXT("IR 32 catalog cannot hide in IR 31"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+			Module(&IdentityJson, true, false, 31, TEXT("cancellation"), Base), ModuleId, Catalog, Error));
+		if (Base != 24)
+			for (const TCHAR* Model : {TEXT("none"), TEXT("fault"), TEXT("exception"), TEXT("cleanup"), TEXT("cleanup_only"), TEXT("unknown")})
+				TestFalse(TEXT("IR 32 keeps cancellation lifetime ownership"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+					Module(&IdentityJson, true, false, 32, Model, Base), ModuleId, Catalog, Error));
+		for (const FString& Metadata : {
+			Provenance(32, TEXT("cancellation"), Base).Replace(TEXT("guest_ir=32/1.31"), TEXT("guest_ir=32/1.30")),
+			Provenance(32, TEXT("cancellation"), Base).Replace(*FString::Printf(TEXT("guest_ir_base=%d/1.%d"), Base, Base - 1),
+				*FString::Printf(TEXT("guest_ir_base=%d/1.%d"), Base, Base - 2))})
+		{
+			TArray<uint8> Mismatched = Module(&IdentityJson, false);
+			Custom(Mismatched, "avidscript.provenance", Metadata);
+			TestFalse(TEXT("IR 32 rejects mismatched version pairs"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+				Mismatched, ModuleId, Catalog, Error));
+		}
+	}
+	for (const int32 Base : {0, 17, 20, 23, 27, 28, 31, 32, 33})
+		TestFalse(TEXT("IR 32 rejects unsupported or missing base"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+			Module(&IdentityJson, true, false, 32, TEXT("cancellation"), Base), ModuleId, Catalog, Error));
+	IdentityDocument->SetArrayField(TEXT("types"), {});
+	IdentityDocument->SetArrayField(TEXT("sources"), {});
+	const FString EmptyIdentityJson = Json(IdentityDocument);
+	TestFalse(TEXT("IR 32 requires a nonempty cancellation catalog"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+		Module(&EmptyIdentityJson, true, false, 32, TEXT("cancellation"), 24), ModuleId, Catalog, Error));
 	TestTrue(TEXT("IR 30 static/async composition requires IR 29 base"),
 		FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 			Module(&StaticAsyncJson, true, false, 30, TEXT("cancellation"), 29), ModuleId, Catalog, Error));

@@ -54,7 +54,8 @@ int32 ExecutionSchema(const FString& Profile)
 
 FString ExecutionProfile(const TMap<FString, FString>& Fields)
 {
-	if (Fields.FindRef(TEXT("guest_ir")) == TEXT("31/1.30"))
+	if (Fields.FindRef(TEXT("guest_ir")) == TEXT("31/1.30")
+		|| Fields.FindRef(TEXT("guest_ir")) == TEXT("32/1.31"))
 	{
 		const FString Base = Fields.FindRef(TEXT("guest_ir_base"));
 		return Base == TEXT("29/1.28") || Base == TEXT("30/1.29") ? TEXT("26/1.25") : Base;
@@ -86,7 +87,9 @@ bool ParseProvenance(TConstArrayView<uint8> Payload, TMap<FString, FString>& Out
 	const bool bSynchronousAsync = ArtifactProfile == TEXT("29/1.28");
 	const bool bStaticAsync = ArtifactProfile == TEXT("30/1.29");
 	const bool bAwaitReadiness = ArtifactProfile == TEXT("31/1.30");
-	const bool bEnvelope = bStaticStorage || bTaskErrorTransfer || bSynchronousAsync || bStaticAsync || bAwaitReadiness;
+	const bool bCancellationIdentity = ArtifactProfile == TEXT("32/1.31");
+	const bool bDirectAwaitEnvelope = bAwaitReadiness || bCancellationIdentity;
+	const bool bEnvelope = bStaticStorage || bTaskErrorTransfer || bSynchronousAsync || bStaticAsync || bDirectAwaitEnvelope;
 	const FString BaseProfile = OutFields.FindRef(TEXT("guest_ir_base"));
 	const int32 BaseSchema = ExecutionSchema(BaseProfile);
 	const bool bReadinessBase = BaseSchema == 24 || BaseSchema == 25 || BaseSchema == 26
@@ -96,10 +99,11 @@ bool ParseProvenance(TConstArrayView<uint8> Payload, TMap<FString, FString>& Out
 		|| (ArtifactProfile.StartsWith(TEXT("29/"), ESearchCase::CaseSensitive) && !bSynchronousAsync)
 		|| (ArtifactProfile.StartsWith(TEXT("30/"), ESearchCase::CaseSensitive) && !bStaticAsync)
 		|| (ArtifactProfile.StartsWith(TEXT("31/"), ESearchCase::CaseSensitive) && !bAwaitReadiness)
+		|| (ArtifactProfile.StartsWith(TEXT("32/"), ESearchCase::CaseSensitive) && !bCancellationIdentity)
 		|| (bSynchronousAsync && BaseSchema != 26)
 		|| (bStaticAsync && OutFields.FindRef(TEXT("guest_ir_base")) != TEXT("29/1.28"))
-		|| (bAwaitReadiness && !bReadinessBase)
-		|| (bEnvelope && !bStaticAsync && !bAwaitReadiness && BaseSchema == 0) || (bTaskErrorTransfer && BaseSchema < 20)
+		|| (bDirectAwaitEnvelope && !bReadinessBase)
+		|| (bEnvelope && !bStaticAsync && !bDirectAwaitEnvelope && BaseSchema == 0) || (bTaskErrorTransfer && BaseSchema < 20)
 		|| (!bEnvelope && OutFields.Contains(TEXT("guest_ir_base")))) return false;
 	const FString Profile = ExecutionProfile(OutFields);
 	const bool bRoutedThrow = Profile == TEXT("26/1.25");
@@ -111,7 +115,7 @@ bool ParseProvenance(TConstArrayView<uint8> Payload, TMap<FString, FString>& Out
 	return OutFields.Num() == (bLifetime ? 7 : 6) + (bEnvelope ? 1 : 0)
 		&& (!bLifetime || bLifetimeModelValid)
 		&& (!bRoutedThrow || LifetimeModel == TEXT("cancellation"))
-		&& (!bAwaitReadiness || !bLifetime || LifetimeModel == TEXT("cancellation"))
+		&& (!bDirectAwaitEnvelope || !bLifetime || LifetimeModel == TEXT("cancellation"))
 		&& OutFields.Contains(TEXT("module_id"))
 		&& OutFields.Contains(TEXT("source_id"))
 		&& OutFields.Contains(TEXT("source_sha256"))
@@ -237,7 +241,7 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 	const TArray<TSharedPtr<FJsonValue>>* Types = nullptr;
 	const TArray<TSharedPtr<FJsonValue>>* Sources = nullptr;
 	if (!CatalogPrivate::Number(*Document, TEXT("schema_version"), 1, 1, SectionVersion)
-		|| !CatalogPrivate::Number(*Document, TEXT("guest_ir_schema_version"), 17, 31, GuestSchema)
+		|| !CatalogPrivate::Number(*Document, TEXT("guest_ir_schema_version"), 17, 32, GuestSchema)
 		|| !Document->TryGetStringField(TEXT("guest_ir_version"), GuestVersion)
 		|| FString::Printf(TEXT("%d/%s"), GuestSchema, *GuestVersion) != ArtifactProfile
 		|| !Document->TryGetStringField(TEXT("module_id"), ModuleId) || ModuleId != ExpectedModuleId
@@ -259,6 +263,7 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 	auto Candidate = MakeUnique<FAvidScriptLanguageErrorCatalog>();
 	Candidate->GuestIrSchemaVersion = ProfileSchema;
 	Candidate->bTaskLifetimeCancellation = (ProfileSchema == 25 || ProfileSchema == 26) && LifetimeModel == TEXT("cancellation");
+	Candidate->bTaskCancellationIdentity = ArtifactProfile == TEXT("32/1.31");
 	Candidate->TypeIds.Reserve(Types->Num());
 	for (const TSharedPtr<FJsonValue>& Entry : *Types)
 	{

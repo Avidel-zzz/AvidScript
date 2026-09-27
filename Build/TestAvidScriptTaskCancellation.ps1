@@ -15,6 +15,8 @@ $logPath = Join-Path $projectRoot "Saved/Logs/AvidScript_TaskCancellation_$runId
 $expected = @(
     foreach ($name in @(
         'TaskCancellationAbi', 'TaskCancellationAdmission', 'TaskCancellationImportVersion',
+        'TaskCancellationIdentityAbi', 'TaskCancellationIdentityAdmission', 'TaskCancellationIdentityVersion',
+        'TaskCancellationIdentityLifecycle',
         'TaskLanguageErrorAdmission', 'TaskLanguageError', 'TaskResults', 'TaskResultAbi',
         'TaskEndpoint', 'TaskDispatch', 'TaskProducerBinding', 'TaskContinuationOwnership',
         'CancellationStatus', 'CancellationSource', 'CancelResume', 'HostBoundary',
@@ -57,4 +59,4 @@ $complete = [regex]::Matches($log, '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*
 if ($found -ne 1 -or $success -ne $expected.Count -or $failed -ne 0 -or $complete -ne 1) {
     throw "Task cancellation evidence incomplete: found=$found success=$success failed=$failed complete=$complete log=$logPath"
 }
-Write-Output "Native Task cancellation: $success/$($expected.Count) passed; Wasmtime/WAMR ABI, source status, native cancellation cause, ownership and compatibility; Guest cancellation-token identity is tracked separately in P66.C10; log=$logPath"
+Write-Output "Native Task cancellation: $success/$($expected.Count) passed; Wasmtime/WAMR cancellation identity ABI, source status, ownership and compatibility; C# cancellation-token property acceptance is tracked separately in P66.C10; log=$logPath"

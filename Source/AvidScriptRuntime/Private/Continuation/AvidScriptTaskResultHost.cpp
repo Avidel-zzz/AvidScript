@@ -25,7 +25,8 @@ bool FAvidScriptWasmRuntimeInstance::AdmitTaskLanguageError(
 
 bool FAvidScriptWasmRuntimeInstance::AdmitTaskTerminalError(
 	const int64 TaskToken, const int32 TypeToken, const int32 SourceToken,
-	const uint64 ObjectToken, const bool bCancellation, FAvidScriptHostCallResult& OutResult)
+	const uint64 ObjectToken, const bool bCancellation, FAvidScriptHostCallResult& OutResult,
+	const TOptional<int64> CancellationSourceToken)
 {
 	OutResult = {};
 	auto Fail = [&OutResult](const TCHAR* Category, const TCHAR* Details)
@@ -71,7 +72,7 @@ bool FAvidScriptWasmRuntimeInstance::AdmitTaskTerminalError(
 	TSharedPtr<IAvidScriptTaskLanguageErrorLease> Lease =
 		MakeShared<FAvidScriptTaskLanguageErrorHeapLease>(MoveTemp(Roots));
 	TArray<int64> Waiters;
-	const FAvidScriptTaskLanguageError Error{TypeToken, SourceToken, ObjectToken};
+	const FAvidScriptTaskLanguageError Error{TypeToken, SourceToken, ObjectToken, CancellationSourceToken};
 	const bool bCompleted = bCancellation
 		? HostContext.Tasks->CancelTaskResultLanguageError(TaskToken, Error, MoveTemp(Lease), Waiters)
 		: HostContext.Tasks->FaultTaskResultLanguageError(TaskToken, Error, MoveTemp(Lease), Waiters);
@@ -112,6 +113,76 @@ bool FAvidScriptWasmRuntimeInstance::DispatchTaskCancelLanguageErrorCall(
 	}
 	return AdmitTaskTerminalError(Call.Int64Args[0], Call.IntArgs[0], Call.IntArgs[1],
 		static_cast<uint64>(Call.Int64Args[1]), true, OutResult);
+}
+
+bool FAvidScriptWasmRuntimeInstance::DispatchTaskCancelLanguageErrorV2Call(
+	const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult)
+{
+	OutResult = {};
+	auto Fail = [&OutResult](const TCHAR* Category, const TCHAR* Details)
+	{
+		OutResult.ErrorCategory = Category;
+		OutResult.Details = Details;
+		return false;
+	};
+	if (!LanguageErrorCatalog || !LanguageErrorCatalog->SupportsTaskCancellationIdentity())
+	{
+		return Fail(TEXT("task_language_error_version"),
+			TEXT("Cancellation identity requires catalog-bearing Guest IR 32/1.31."));
+	}
+	if (!IsInGameThread() || !IsLoaded() || ManagedHeapInvocationDepth == 0
+		|| !ManagedHeap || HostContext.Tasks == nullptr || HostContext.Continuations == nullptr)
+	{
+		return Fail(TEXT("task_result_context"),
+			TEXT("Cancellation identity requires a live Session and managed VM invocation."));
+	}
+	const int64 SourceProof = Call.Int64Args[2];
+	int64 CauseSourceToken = 0;
+	if (SourceProof == 0)
+	{
+		if (!bContinuationDispatchActive || ActiveContinuationStatus != EAvidScriptContinuationStatus::Cancelled
+			|| !HostContext.Continuations->ReadCancellationCause(ActiveContinuationToken, CauseSourceToken))
+		{
+			return Fail(TEXT("task_cancellation_source"),
+				TEXT("Cancellation identity requires the current directly cancelled continuation."));
+		}
+	}
+	else
+	{
+		if (SourceProof > 0 || HostContext.Continuations->GetCancellationSourceStatus(SourceProof)
+			!= EAvidScriptCancellationSourceStatus::Cancelled)
+		{
+			return Fail(TEXT("task_cancellation_source"),
+				TEXT("Immediate cancellation requires a live cancelled source in this Session activation."));
+		}
+		CauseSourceToken = SourceProof;
+	}
+	return AdmitTaskTerminalError(Call.Int64Args[0], Call.IntArgs[0], Call.IntArgs[1],
+		static_cast<uint64>(Call.Int64Args[1]), true, OutResult, CauseSourceToken);
+}
+
+bool FAvidScriptWasmRuntimeInstance::DispatchTaskCancellationTokenCall(
+	const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult)
+{
+	OutResult = {};
+	if (!LanguageErrorCatalog || !LanguageErrorCatalog->SupportsTaskCancellationIdentity())
+	{
+		OutResult.ErrorCategory = TEXT("task_language_error_version");
+		OutResult.Details = TEXT("Cancellation identity requires catalog-bearing Guest IR 32/1.31.");
+		return false;
+	}
+	FAvidScriptTaskLanguageError Error;
+	if (!FindTaskLanguageError(Call.Int64Args[0], Error, OutResult, true)) return false;
+	if (!Error.CancellationSourceToken.IsSet())
+	{
+		OutResult = {};
+		OutResult.ErrorCategory = TEXT("task_cancellation_identity");
+		OutResult.Details = TEXT("Task has no recorded cancellation identity; unknown is not a source-less cancellation.");
+		return false;
+	}
+	OutResult.ReturnValueI64 = Error.CancellationSourceToken.GetValue();
+	OutResult.ReturnValue = static_cast<int32>(OutResult.ReturnValueI64);
+	return true;
 }
 
 bool FAvidScriptWasmRuntimeInstance::FindTaskLanguageError(
@@ -155,6 +226,12 @@ bool FAvidScriptWasmRuntimeInstance::FindTaskLanguageError(
 			TEXT("Task has no completed language-error payload."));
 	}
 	const FAvidScriptTaskLanguageError& Error = Snapshot.LanguageError.GetValue();
+	if (Error.CancellationSourceToken.IsSet()
+		&& (Snapshot.State != EAvidScriptTaskResultState::Cancelled || Error.CancellationSourceToken.GetValue() > 0))
+	{
+		return Fail(TEXT("task_cancellation_identity"),
+			TEXT("Cancellation identity may only accompany a cancelled result."));
+	}
 	if (!LanguageErrorCatalog->FindType(Error.TypeToken)
 		|| !LanguageErrorCatalog->FindSource(Error.SourceToken))
 	{

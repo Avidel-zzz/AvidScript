@@ -153,7 +153,7 @@ C# 源码由 Roslyn 分析后，转换为插件的中间表示（Guest IR），�
 | `target.Value = await GetValueAsync();` | [异步赋值](Docs/Phase66/P66.C10_Await_Member_Assignment_Contract.md#guest-接入与补充执行验证)；暂不支持接口属性和生成的 UE 类型 |
 | `DelayAsync(ReadDelay()).WithCancellation(ReadToken())` | [取消处理与参数求值顺序](Docs/Phase66/P66.C10_PreCancelled_Await_Contract.md) |
 
-暂不能在 C# 中读取 `OperationCanceledException.CancellationToken`，见[实现进度](Docs/Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)。
+取消来源已在运行时保存并随 Task 传播；C# 暂不能读取 `OperationCanceledException.CancellationToken`。见[实现进度](Docs/Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)。
 
 </details>
 

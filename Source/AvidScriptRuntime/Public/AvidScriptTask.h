@@ -25,6 +25,9 @@ struct FAvidScriptTaskLanguageError
 	int32 TypeToken = 0;
 	int32 SourceToken = 0;
 	uint64 ObjectToken = 0;
+	// Unset means legacy/unknown; set zero is a validated source-less cancellation.
+	// This immutable identity does not retain or authorize access to the source.
+	TOptional<int64> CancellationSourceToken;
 };
 
 class AVIDSCRIPTRUNTIME_API IAvidScriptTaskLanguageErrorLease

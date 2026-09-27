@@ -198,7 +198,9 @@ enum class EAvidScriptHostBindingId : uint16
 	TaskCancelLanguageErrorV1,
 	TaskTerminalErrorMetaV1,
 	TaskTerminalErrorRootV1,
-	ContinuationCancelStatusV1
+	ContinuationCancelStatusV1,
+	TaskCancelLanguageErrorV2,
+	TaskCancellationTokenV1
 };
 
 struct FAvidScriptVmStackFrame
@@ -323,7 +325,7 @@ struct FAvidScriptHostCall
 {
 	EAvidScriptHostBindingId BindingId = EAvidScriptHostBindingId::Invalid;
 	int32 IntArgs[4] = {};
-	int64 Int64Args[2] = {};
+	int64 Int64Args[3] = {};
 	float FloatArgs[4] = {};
 	uint32 GuestAddress = 0;
 
