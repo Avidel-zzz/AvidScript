@@ -19,6 +19,10 @@ internal static class CSharpAsyncCatchValues
                 .Where(handler => handler.ExceptionTypeId is not null).Select(handler => handler.ExceptionTypeId!)
                 ?? Array.Empty<string>()))
             .Append(CSharpThrowProducerLowerer.ExceptionTypeId).Append("type:object")
+            .Concat(SemanticContract.HasCancellationTokens(source) ? source.Methods
+                .SelectMany(method => CSharpCancellationTokenExecutionContext.Operations(method.Root))
+                .Where(operation => operation.Kind == SemanticCancellationTokens.Read)
+                .Select(operation => operation.Children[0].TypeId!) : Array.Empty<string>())
             .ToHashSet(StringComparer.Ordinal);
         var classes = source.ClassTypes.ToDictionary(type => type.TypeId, StringComparer.Ordinal);
         var pending = new Queue<string>(ids);
@@ -48,11 +52,15 @@ internal static class CSharpAsyncCatchValues
         module = input;
         error = null;
         // Existing execution validators check the completed base implementation.
-        // This private view never escapes: the published envelope keeps Semantic 52.
+        // This private view never escapes: publication keeps the source contract.
         var execution = input with { Provenance = input.Provenance with {
             SemanticSchemaVersion = GuestAsyncSynchronousExceptions.SemanticSchemaVersion,
             SemanticVersion = GuestAsyncSynchronousExceptions.SemanticVersion } };
-        if (!CSharpCancellationIdentityCompiler.TryUpgrade(execution, out var upgraded, out error)) return false;
+        var tokenContext = CSharpCancellationTokenExecutionContext.Find(source);
+        GuestModule? upgraded;
+        if (!(tokenContext is null
+            ? CSharpCancellationIdentityCompiler.TryUpgrade(execution, out upgraded, out error)
+            : CSharpCancellationIdentityCompiler.TryUpgradeForTokens(tokenContext, execution, out upgraded, out error))) return false;
         var sources = source.AsyncMethods.SelectMany(method => method.Segments
             .Where(segment => segment.Statements.Count == 1
                 && segment.Statements[0].Operation.Kind == SemanticAsyncCatchVariableValidator.BindingOperationKind)
@@ -94,8 +102,9 @@ internal static class CSharpAsyncCatchValues
             IrVersion = GuestExceptionValues.IrVersion,
             Provenance = input.Provenance,
             Functions = functions,
-            ExceptionValues = new(bindings.OrderBy(binding => binding.FunctionId, StringComparer.Ordinal)
-                .ThenBy(binding => binding.BlockId, StringComparer.Ordinal).ToArray()),
+            ExceptionValues = bindings.Count == 0 && tokenContext is not null ? null
+                : new(bindings.OrderBy(binding => binding.FunctionId, StringComparer.Ordinal)
+                    .ThenBy(binding => binding.BlockId, StringComparer.Ordinal).ToArray()),
         };
         return true;
     }

@@ -117,12 +117,16 @@ public static class CSharpLanguageOutcomeRewriter
             || module.FramedExports.Any(export => affectedFunctionIds.Contains(export.FunctionId))
             || module.FunctionReferences.Any(reference => reference.TargetFunctionIds.Any(affectedFunctionIds.Contains)))
             return Fail("An affected function has no body or needs a Host/function-reference adapter.", out error);
+        var callValueTypes = affectedFunctionIds.ToDictionary(id => id, id => functions[id].ReturnTypeId, StringComparer.Ordinal);
+        foreach (var guard in asyncContext?.MemberGuards ?? Array.Empty<GuestFunction>())
+            callValueTypes.Add(guard.Id, "type:void");
+        var affectedCalls = callValueTypes.Keys.ToHashSet(StringComparer.Ordinal);
         foreach (GuestFunction function in module.Functions)
             if (!affectedFunctionIds.Contains(function.Id)
                 && function.Blocks.SelectMany(block => block.Instructions)
                     .Any(instruction => instruction.Op == "call"
                         && instruction.TargetId is { } target
-                        && affectedFunctionIds.Contains(target))
+                        && affectedCalls.Contains(target))
                 && !(asyncContext is not null && asyncContext.Sites.Any(site => site.FunctionId == function.Id)))
                 return Fail($"Caller '{function.Id}' is missing from the outcome effect closure.", out error);
 
@@ -169,7 +173,7 @@ public static class CSharpLanguageOutcomeRewriter
                 rewrittenFunctions.Add(function);
                 continue;
             }
-            if (!TryRewriteFunction(function, functions, affectedFunctionIds, outcomeByValueType,
+            if (!TryRewriteFunction(function, callValueTypes, affectedCalls, outcomeByValueType,
                 catchRoutes.TryGetValue(function.Id, out var routes) ? routes : Array.Empty<CSharpLanguageCatchRoute>(),
                 cleanupRoutes.TryGetValue(function.Id, out var cleanups)
                     ? cleanups : Array.Empty<CSharpLanguageCleanupRoute>(),
@@ -211,7 +215,7 @@ public static class CSharpLanguageOutcomeRewriter
 
     private static bool TryRewriteFunction(
         GuestFunction function,
-        IReadOnlyDictionary<string, GuestFunction> functions,
+        IReadOnlyDictionary<string, string> callValueTypes,
         IReadOnlySet<string> affected,
         IReadOnlyDictionary<string, string> outcomeByValueType,
         IReadOnlyList<CSharpLanguageCatchRoute> catchRoutes,
@@ -301,10 +305,9 @@ public static class CSharpLanguageOutcomeRewriter
                     instructions.Add(instruction);
                     continue;
                 }
-                GuestFunction callee = functions[target];
                 if (requireCleanupCoverage && !cleanupByBlock.ContainsKey(source.Id))
                     return Fail($"Function '{function.Id}' has an unchecked error cleanup path.", out error);
-                string calledOutcome = outcomeByValueType[callee.ReturnTypeId];
+                string calledOutcome = outcomeByValueType[callValueTypes[target]];
                 string result = Register(calledOutcome);
                 string status = Register(int32TypeId);
                 string errorBlock = Block(), successBlock = Block();
@@ -375,7 +378,7 @@ public static class CSharpLanguageOutcomeRewriter
                     foreach (CSharpLanguageCleanupRegion region in cleanupRoute.Regions)
                     {
                         if (!TryCopyCleanupRegion(function.Id, region, sourceBlocks,
-                                affected, functions, outcomeByValueType, registerTypes,
+                                affected, callValueTypes, outcomeByValueType, registerTypes,
                                 Register, Block, unhandledBlock, pendingError, int32TypeId, rootTypeId,
                                 blocks, out string nextBlock, out error)) return false;
                         unhandledBlock = nextBlock;
@@ -415,7 +418,7 @@ public static class CSharpLanguageOutcomeRewriter
         CSharpLanguageCleanupRegion region,
         IReadOnlyDictionary<string, GuestBasicBlock> sourceBlocks,
         IReadOnlySet<string> affected,
-        IReadOnlyDictionary<string, GuestFunction> functions,
+        IReadOnlyDictionary<string, string> callValueTypes,
         IReadOnlyDictionary<string, string> outcomeByValueType,
         IReadOnlyDictionary<string, string> registerTypes,
         Func<string, string> register,
@@ -522,7 +525,7 @@ public static class CSharpLanguageOutcomeRewriter
                     instructions.Add(instruction);
                     continue;
                 }
-                string result = register(outcomeByValueType[functions[target].ReturnTypeId]);
+                string result = register(outcomeByValueType[callValueTypes[target]]);
                 string status = register(int32TypeId);
                 string failed = block(), succeeded = block();
                 instructions.Add(instruction with { ResultId = result });

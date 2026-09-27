@@ -44,6 +44,7 @@ internal static class CSharpTaskResultAbi
         "$async:exception_type:" + method.MethodSymbolId;
 
     public static bool Supports(SemanticDocument document) =>
+        (!SemanticContract.HasCancellationTokens(document) || document.AsyncMethods.Count != 0) && (
         (document.SchemaVersion == SemanticContract.TaskResultSchemaVersion
             && document.SemanticVersion == SemanticContract.TaskResultSemanticVersion)
         || (document.SchemaVersion == SemanticContract.TaskLocalSchemaVersion
@@ -61,7 +62,7 @@ internal static class CSharpTaskResultAbi
         || (document.SchemaVersion == SemanticContract.DirectAwaitCleanupSchemaVersion
             && document.SemanticVersion == SemanticContract.DirectAwaitCleanupSemanticVersion)
         || SemanticContract.HasTaskLocalLifetimes(document)
-        || SupportsCancellation(document);
+        || SupportsCancellation(document));
 
     public static bool SupportsCancellation(SemanticDocument document) =>
         document.SchemaVersion == SemanticContract.AsyncCancellationFlowSchemaVersion

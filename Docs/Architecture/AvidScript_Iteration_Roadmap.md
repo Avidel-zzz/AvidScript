@@ -1,6 +1,6 @@
 # AvidScript 后续迭代：语言、编辑体验与性能
 
-更新：2026-09-28。工作基线：`d638b19f`。Windows 优先，Android/iOS 真机验收按用户要求延期。
+更新：2026-09-28。工作基线：`ecade3cc`。Windows 优先，Android/iOS 真机验收按用户要求延期。
 
 目标是让开发者用熟悉的语言编写 UE 玩法，在运行中修改和排障，并获得可测量的性能优势。这里规定后续交付与判定方式，不宣称已经领先，也不修改已冻结的 [P66 架构](../Phase66/P66.0_Developer_Experience_Architecture.md)或已完成批次。
 
@@ -8,7 +8,7 @@
 
 仍是开发者预览。P66.A、P66.B 已完成，P66.C、P66.D 未完成，以 [Phase 状态](../Phase66/Phase66_State.json)为准。已有跨对象调用、闭包、事件和异步执行基础；普通语言组合、结构热重载、完整调试、Windows 发布工作流仍需完成。测试数量不能作为成熟百分比。
 
-最近的 [C10 取消身份实现](../Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)已连接 Session、双 VM 导入和 IR 32 编译产物。IR 33 已接通异步 `catch` 对象：别名可跨 await/GC，重复等待与 rethrow 保持对象身份；专项 Win64 双后端运行 72/72。标准 token 的 Semantic 53 投影、IR 34 值布局和 WASM 生成已接入；纯值 WASM 已执行验证。`OperationCanceledException.CancellationToken` 的源码降低、双 VM 对象快照 reader、静态初始化组合和默认构建入口仍待完成。
+最近的 [C10 取消身份实现](../Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)已连接 Session、双 VM 导入和 IR 32 编译产物。IR 33 已接通异步 `catch` 对象：别名可跨 await/GC，重复等待与 rethrow 保持对象身份；专项 Win64 双后端运行 72/72。标准 token 已通过显式编译 API 从 Semantic 53 生成 IR 34/WASM，覆盖值传递、比较、跨 await 和异常 getter；纯值源码的 WASM 已实际执行。getter 的真实 UE 执行、双 VM 对象快照 reader、静态初始化组合和默认构建入口仍待完成。
 
 WASM 是执行载体，不自动带来完整语言支持、零开销或多语言互通。C# 前端与多种 VM 后端也不等于多个语言可以在同一个项目中共同开发。
 
@@ -48,6 +48,8 @@ WASM 是执行载体，不自动带来完整语言支持、零开销或多语言
 5. **P66.D 综合样例与集中验收。** 接入下方完整技能流程，检查状态、顺序、取消、GC、重入、重载失败和资源释放。同步冻结 P67 类型实验、P68 帧接口和跨语言模块原型的输入要求。
 
 当前命名 catch 已通过完整异常编译路径及专项双后端运行；普通 lowering 仍拒绝绕过该路径发布。对象身份验证不等于取消 token 属性已实现，也不替代第 2 项的原始业务组合矩阵。
+
+下一批先开放 IR 34 的原生版本准入与异常对象 reader，再运行本次生成的 token 源码产物。双后端必须核对预取消、挂起取消、source 释放、异常别名跨 GC、重复 await、teardown 与实例隔离；之后组合静态初始化和原始 29 案例，最后才把已验证能力接入正式构建。纯值测试、编译通过和 .NET 参考结果不替代 UE 执行证据。
 
 ## 跨语言边界
 

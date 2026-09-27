@@ -35,6 +35,13 @@ internal static class CSharpLatentStoragePlanner
         string storageTypeId,
         out CSharpLatentStorageArgumentPlan argumentPlan)
     {
+        if (SemanticContract.HasCancellationTokens(document) && value.TypeId == SemanticCancellationTokens.TypeId
+            && storageTypeId == "type:int64")
+        {
+            argumentPlan = new(new[] { new CSharpLatentStorageCell(CSharpLatentStorageCellKind.Field,
+                "type:int64", storageTypeId, new[] { AvidScript.GuestIr.GuestCancellationTokens.FieldId }) });
+            return true;
+        }
         SemanticCallableParameter storage = new(
             0,
             "compiler:storage",

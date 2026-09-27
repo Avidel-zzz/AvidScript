@@ -42,6 +42,12 @@ public static class CSharpGuestLowerer
         ArgumentNullException.ThrowIfNull(substitutes);
 
         var synchronousAsync = CSharpAsyncSynchronousExecutionContext.Find(document);
+        var tokenContext = CSharpCancellationTokenExecutionContext.Find(document);
+        if ((document.SchemaVersion == GuestCancellationTokens.SemanticSchemaVersion
+            || document.SemanticVersion == GuestCancellationTokens.SemanticVersion)
+            && (tokenContext is null || !SemanticContract.HasCancellationTokens(document)))
+            return Failure(new[] { new GuestDiagnostic("ASCG1028", "error",
+                "Cancellation token values require the composed token execution compiler.", null) });
         if ((document.SchemaVersion == SemanticContract.AsyncCatchVariableSchemaVersion
             || document.SemanticVersion == SemanticContract.AsyncCatchVariableSemanticVersion)
             && (synchronousAsync is null || !SemanticContract.HasAsyncCatchVariables(document)))
@@ -64,7 +70,7 @@ public static class CSharpGuestLowerer
             return Failure(new[] { new GuestDiagnostic("ASCG1004", "error", "Semantic async methods are missing.", null) });
 
         List<GuestDiagnostic> diagnostics = new();
-        bool taskLifetimes = SemanticContract.HasTaskLocalLifetimes(document);
+        bool taskLifetimes = SemanticContract.HasTaskLocalLifetimes(document) && (tokenContext is null || tokenContext.HasAsync);
         bool cancellationFlow = CSharpTaskResultAbi.SupportsCancellation(document);
         bool directCleanup = document.SchemaVersion == SemanticContract.DirectAwaitCleanupSchemaVersion
             && document.SemanticVersion == SemanticContract.DirectAwaitCleanupSemanticVersion
@@ -101,6 +107,7 @@ public static class CSharpGuestLowerer
 
         document = CSharpUeDispatch.ExpandReachability(document);
         synchronousAsync?.Attach(document);
+        tokenContext?.Attach(document);
         CSharpTypeLoweringResult typeResult = CSharpTypeLowerer.Lower(document);
         if (!typeResult.Succeeded)
         {
@@ -170,6 +177,7 @@ public static class CSharpGuestLowerer
         if (diagnostics.Count != 0) return Failure(diagnostics);
         GuestGlobal[] globals = LowerGlobals(document, guestTypes, diagnostics);
         GuestImport[] imports = LowerImports(document, reachableCallableIds, guestTypes, diagnostics);
+        if (tokenContext?.HasReader == true) imports = imports.Append(GuestCancellationTokens.Reader()).ToArray();
         CSharpGuestDataPool dataPool = new(moduleTypes);
         List<GuestFunction> functions = LowerFunctions(
             document,
@@ -205,7 +213,7 @@ public static class CSharpGuestLowerer
             imports = imports.Append(CSharpTaskResultAbi.Import())
                 .Append(CSharpTaskResultAbi.BindProducerImport())
                 .Append(CSharpTaskResultAbi.PropagateFailureImport()).ToArray();
-        if (asyncLanguageErrors)
+        if (asyncLanguageErrors && (tokenContext is null || tokenContext.HasAsync))
             imports = imports.Append(CSharpTaskResultAbi.RetainForContinuationImport())
                 .Append(CSharpTaskResultAbi.FaultLanguageErrorImport())
                 .Append(cancellationFlow ? CSharpTaskResultAbi.TerminalErrorMetaImport()
@@ -359,7 +367,7 @@ public static class CSharpGuestLowerer
         }
 
         GuestModule module = new(
-            synchronousAsync is not null ? GuestAsyncSynchronousExceptions.SchemaVersion
+            tokenContext is { HasAsync: false } ? 14 : synchronousAsync is not null ? GuestAsyncSynchronousExceptions.SchemaVersion
                 : SemanticContract.HasAsyncThrowRouting(document) ? GuestAsyncThrowRouteValidator.SchemaVersion
                 : taskLifetimes ? GuestTaskLocalLifetimeValidator.SchemaVersion
                 : cancellationFlow ? GuestTaskCancellationErrorValidator.SchemaVersion
@@ -372,7 +380,7 @@ public static class CSharpGuestLowerer
                 or SemanticContract.TaskAliasSchemaVersion
                 ? 19 : CSharpTaskResultAbi.Supports(document)
                     ? 18 : GuestModuleValidator.CurrentSchemaVersion,
-            synchronousAsync is not null ? GuestAsyncSynchronousExceptions.IrVersion
+            tokenContext is { HasAsync: false } ? "1.13" : synchronousAsync is not null ? GuestAsyncSynchronousExceptions.IrVersion
                 : SemanticContract.HasAsyncThrowRouting(document) ? GuestAsyncThrowRouteValidator.IrVersion
                 : taskLifetimes ? GuestTaskLocalLifetimeValidator.IrVersion
                 : cancellationFlow ? GuestTaskCancellationErrorValidator.IrVersion
@@ -404,7 +412,7 @@ public static class CSharpGuestLowerer
             exports,
             Array.Empty<GuestDiagnostic>())
         {
-            AsyncSynchronousExceptions = synchronousAsync?.Plan(),
+            AsyncSynchronousExceptions = tokenContext is { HasAsync: false } ? null : synchronousAsync?.Plan(),
             TaskLocalLifetimes = taskLifetimes ? CSharpTaskLocalLifetimes.BuildPlan(document, functions,
                 cancellationFlow ? "cancellation" : directCleanup ? (asyncLanguageErrors ? "cleanup" : "cleanup_only")
                     : asyncExceptionFlow ? "exception" : asyncLanguageErrors ? "fault" : "none") : null,
@@ -465,7 +473,7 @@ public static class CSharpGuestLowerer
             return Failure(new[] { new GuestDiagnostic("ASCG1026", "error", routeError!, null) });
         // Only the internal source composition pass may receive this unfinished
         // module. Its sync callees still need outcome bodies and final validation.
-        if (synchronousAsync is not null) return new(true, module, Array.Empty<GuestDiagnostic>());
+        if (synchronousAsync is not null || tokenContext is not null) return new(true, module, Array.Empty<GuestDiagnostic>());
         if (!CSharpDirectAwaitReadinessLowerer.TryWrap(module, out module, out string? readinessError))
             return Failure(new[] { new GuestDiagnostic("ASCG1026", "error", readinessError!, null) });
         GuestValidationResult validation = GuestModuleValidator.Validate(module);

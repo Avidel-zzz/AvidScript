@@ -19,6 +19,33 @@ public static class CSharpCancellationIdentityCompiler
             error = "Invalid cancellation input: " + string.Join(" | ", validation.Diagnostics.Select(d => d.Code + ": " + d.Message));
             return false;
         }
+        if (!TryUpgradeCore(input, out var candidate, out error)) return false;
+        validation = GuestModuleValidator.Validate(candidate!);
+        if (!validation.Succeeded)
+        {
+            error = "Invalid cancellation identity output: " + string.Join(" | ", validation.Diagnostics.Select(d => d.Code + ": " + d.Message));
+            return false;
+        }
+        module = candidate;
+        return true;
+    }
+
+    // Only compiler-owned source composition can pass through a module whose
+    // token layout belongs to the final IR34 contract. Publication still runs
+    // all independent validators after the identity/catch plans are complete.
+    internal static bool TryUpgradeForTokens(CSharpCancellationTokenExecutionContext context, GuestModule input,
+        out GuestModule? module, out string? error)
+    {
+        module = null;
+        error = null;
+        if (!context.HasAsync) { error = "Token identity composition requires an async execution context."; return false; }
+        return TryUpgradeCore(input, out module, out error);
+    }
+
+    private static bool TryUpgradeCore(GuestModule input, out GuestModule? module, out string? error)
+    {
+        module = null;
+        error = null;
         if (GuestTaskCancellationIdentity.IsVersion(input))
         {
             module = input;
@@ -96,12 +123,6 @@ public static class CSharpCancellationIdentityCompiler
                 : import).Append(new GuestImport(GuestTaskCancellationIdentity.ReadImportId, "avidscript",
                     GuestTaskCancellationIdentity.ReadImportName, new[] { "type:int64" }, "type:int64")).ToArray(),
         };
-        validation = GuestModuleValidator.Validate(candidate);
-        if (!validation.Succeeded)
-        {
-            error = "Invalid cancellation identity output: " + string.Join(" | ", validation.Diagnostics.Select(d => d.Code + ": " + d.Message));
-            return false;
-        }
         module = candidate;
         return true;
     }

@@ -86,6 +86,8 @@ internal static class CSharpLanguageCleanupRoutePlanner
                     .Where(operation => operation.Kind == "invocation"
                         && operation.SymbolId is { } symbolId
                         && affectedFunctionIds.Contains(CSharpGuestIds.Function(symbolId))
+                        || SemanticContract.HasCancellationTokens(semantic)
+                            && operation.Kind == SemanticCancellationTokens.Read
                         || staticContext is not null && (operation.Kind == "field_reference"
                             && staticContext.Owns(operation.SymbolId)
                             || operation.Kind == "object_creation" && staticContext.Types.Any(type =>

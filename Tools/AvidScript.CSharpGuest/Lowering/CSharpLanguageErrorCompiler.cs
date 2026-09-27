@@ -21,6 +21,10 @@ public static class CSharpLanguageErrorCompiler
     {
         compilation = null;
         error = null;
+        var tokenContext = semantic is null ? null : CSharpCancellationTokenExecutionContext.Find(semantic);
+        if (semantic is not null && (semantic.SchemaVersion == GuestCancellationTokens.SemanticSchemaVersion
+            || semantic.SemanticVersion == GuestCancellationTokens.SemanticVersion) && tokenContext is null)
+            return Fail("Cancellation token source requires its composed execution compiler.", out error);
         if (semantic is not null && (semantic.SchemaVersion == SemanticContract.AsyncCatchVariableSchemaVersion
             || semantic.SemanticVersion == SemanticContract.AsyncCatchVariableSemanticVersion)
             && !SemanticContract.HasAsyncCatchVariables(semantic))
@@ -100,7 +104,7 @@ public static class CSharpLanguageErrorCompiler
                 rethrows.Add(CSharpGuestIds.Function(handler.MethodSymbolId), rethrowSites);
         }
         SemanticLanguageErrorEffectPlan? effects = null;
-        bool effectsValid = flows.Count == 0 && (implicitMemberErrors || asyncCatchValues || staticContext is not null);
+        bool effectsValid = tokenContext is null && flows.Count == 0 && (implicitMemberErrors || asyncCatchValues || staticContext is not null);
         if (effectsValid) effects = new(Array.Empty<string>());
         else effectsValid = SemanticLanguageErrorEffectPlanner.TryBuild(semantic, out effects);
         // Outcome layouts already carry typed values. Ordinary type lowering and
@@ -250,9 +254,9 @@ public static class CSharpLanguageErrorCompiler
         }
         SemanticDocument ordinary = semantic with
         {
-            SchemaVersion = synchronousAsync ? semantic.SchemaVersion : combinedTaskContract ? OrdinaryTaskSchema(semantic)
+            SchemaVersion = synchronousAsync || tokenContext is not null ? semantic.SchemaVersion : combinedTaskContract ? OrdinaryTaskSchema(semantic)
                 : SemanticContract.CurrentSchemaVersion,
-            SemanticVersion = synchronousAsync ? semantic.SemanticVersion : combinedTaskContract ? OrdinaryTaskVersion(semantic)
+            SemanticVersion = synchronousAsync || tokenContext is not null ? semantic.SemanticVersion : combinedTaskContract ? OrdinaryTaskVersion(semantic)
                 : SemanticContract.CurrentSemanticVersion,
             Succeeded = true,
             ExceptionFlows = null,
@@ -275,6 +279,7 @@ public static class CSharpLanguageErrorCompiler
             };
         staticContext?.Attach(ordinary);
         asyncContext?.Attach(ordinary);
+        tokenContext?.Attach(ordinary);
         GuestFunction[] substitutes = producerIds.OrderBy(id => id, StringComparer.Ordinal)
             .Select(id => CreateProducerSubstitute(id, semantic.Callables.Single(callable =>
                 CSharpGuestIds.Function(callable.MethodSymbolId) == id).ReturnTypeId)).ToArray();
@@ -336,10 +341,10 @@ public static class CSharpLanguageErrorCompiler
         }
         GuestModule candidate = outcomes with
         {
-            SchemaVersion = synchronousAsync && staticContext is not null ? GuestStaticAsyncExecution.SchemaVersion
+            SchemaVersion = tokenContext is { HasAsync: false } ? 17 : synchronousAsync && staticContext is not null ? GuestStaticAsyncExecution.SchemaVersion
                 : synchronousAsync ? GuestAsyncSynchronousExceptions.SchemaVersion
                 : outcomes.StaticStorage is null ? combinedTaskContract ? 20 : GuestLanguageErrorCatalog.SchemaVersion : GuestStaticStorage.SchemaVersion,
-            IrVersion = synchronousAsync && staticContext is not null ? GuestStaticAsyncExecution.IrVersion
+            IrVersion = tokenContext is { HasAsync: false } ? "1.16" : synchronousAsync && staticContext is not null ? GuestStaticAsyncExecution.IrVersion
                 : synchronousAsync ? GuestAsyncSynchronousExceptions.IrVersion
                 : outcomes.StaticStorage is null ? combinedTaskContract ? "1.19" : GuestLanguageErrorCatalog.IrVersion : GuestStaticStorage.IrVersion,
             StaticStorage = outcomes.StaticStorage is null ? null : outcomes.StaticStorage with
@@ -379,8 +384,9 @@ public static class CSharpLanguageErrorCompiler
             return false;
         candidate = adapted;
         if (!CSharpDirectAwaitReadinessLowerer.TryWrap(candidate, out candidate, out error)) return false;
-        if (SemanticContract.HasAsyncCatchVariables(semantic)
+        if (SemanticContract.HasAsyncCatchVariables(semantic) && (tokenContext is null || tokenContext.HasAsync)
             && !CSharpAsyncCatchValues.TryWrap(semantic, candidate, out candidate, out error)) return false;
+        if (tokenContext is not null) candidate = tokenContext.Wrap(candidate);
         GuestValidationResult validation = GuestModuleValidator.Validate(candidate);
         if (!validation.Succeeded)
             return Fail("The composed language-error module failed validation: "

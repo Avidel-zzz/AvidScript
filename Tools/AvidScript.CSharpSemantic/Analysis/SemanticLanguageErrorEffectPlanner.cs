@@ -17,12 +17,13 @@ public static class SemanticLanguageErrorEffectPlanner
     public static bool TryBuild(SemanticDocument document, out SemanticLanguageErrorEffectPlan? plan)
     {
         plan = null;
-        if (document is null || document.ExceptionFlows is not { Count: > 0 }
+        if (document is null || document.ExceptionFlows is not { Count: > 0 } && !SemanticContract.HasCancellationTokens(document)
             || document.Callables is null || document.Methods is null
             || document.Callables.Count > 4096 || document.Methods.Count > 4096
             || document.Callables.Any(callable => callable is null
                 || string.IsNullOrWhiteSpace(callable.MethodSymbolId))
-            || !SemanticExceptionFlowContractValidator.IsValid(document))
+            || !SemanticExceptionFlowContractValidator.IsValid(document)
+            || SemanticContract.HasCancellationTokens(document) && !SemanticCancellationTokenValidator.IsValid(document))
             return false;
 
         HashSet<string> callableIds = document.Callables
@@ -37,6 +38,7 @@ public static class SemanticLanguageErrorEffectPlanner
                     .OrderBy(id => id, StringComparer.Ordinal).ToArray(),
                 StringComparer.Ordinal);
         Dictionary<string, HashSet<string>> callees = new(StringComparer.Ordinal);
+        HashSet<string> implicitErrors = new(StringComparer.Ordinal);
         int operationCount = 0;
         foreach (SemanticMethodBody body in document.Methods)
         {
@@ -55,6 +57,7 @@ public static class SemanticLanguageErrorEffectPlanner
                 if (operation.Kind == "invocation"
                     && operation.Dispatch?.Kind is not ("static" or "direct"))
                     return false;
+                if (operation.Kind == SemanticCancellationTokens.Read) implicitErrors.Add(body.MethodSymbolId);
                 AddTarget(operation.SymbolId, targets, callableIds);
                 AddTarget(operation.Conversion?.MethodSymbolId, targets, callableIds);
                 AddTarget(operation.InputConversion?.MethodSymbolId, targets, callableIds);
@@ -77,13 +80,16 @@ public static class SemanticLanguageErrorEffectPlanner
                 callers.Add(caller);
             }
         }
-        HashSet<string> affected = document.ExceptionFlows
+        HashSet<string> affected = (document.ExceptionFlows ?? Array.Empty<SemanticExceptionFlow>())
             .Select(flow => flow.MethodSymbolId)
             .ToHashSet(StringComparer.Ordinal);
         HashSet<string> asyncMethods = SemanticContract.HasAsyncSynchronousExceptions(document)
             ? document.AsyncMethods.Select(method => method.MethodSymbolId).ToHashSet(StringComparer.Ordinal)
             : new(StringComparer.Ordinal);
         HashSet<string> asyncBoundaries = new(StringComparer.Ordinal);
+        foreach (string method in implicitErrors)
+            if (asyncMethods.Contains(method)) asyncBoundaries.Add(method);
+            else affected.Add(method);
         Queue<string> pendingCallers = new(affected.OrderBy(id => id, StringComparer.Ordinal));
         while (pendingCallers.TryDequeue(out string? target))
             if (callersByTarget.TryGetValue(target, out List<string>? callers))

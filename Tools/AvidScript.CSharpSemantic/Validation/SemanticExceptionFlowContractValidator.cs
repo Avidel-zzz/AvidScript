@@ -31,10 +31,10 @@ public static class SemanticExceptionFlowContractValidator
             || document.Callables is null || document.Types is null)
             return false;
         if (exceptionContract && document.AsyncMethods is not { Count: 0 }) return false;
-        if (combinedContract && (document.AsyncMethods is not { Count: > 0 }
+        if (combinedContract && (!SemanticContract.HasCancellationTokens(document) && (document.AsyncMethods is not { Count: > 0 }
             || !document.AsyncMethods.Any(method => method is not null
                 && (method.TaskResultTypeId is not null
-                    || method.Segments?.Any(segment => segment?.AwaitSite?.TaskCallableId is not null) == true))
+                    || method.Segments?.Any(segment => segment?.AwaitSite?.TaskCallableId is not null) == true)))
             || !SemanticAsyncInvocationValidator.IsValid(document))) return false;
 
         HashSet<string> methods = document.Callables.Select(callable => callable.MethodSymbolId)

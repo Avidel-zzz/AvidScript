@@ -148,7 +148,7 @@ Docs/      文档
 
 ## 已知限制
 
-以下针对默认构建；实验性编译选项的进度见[异步异常与取消](Docs/Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)。
+以下针对默认构建。标准 token 已支持实验性编译，UE 执行尚未接通；进度见[异步异常与取消](Docs/Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)。
 
 - **C# / .NET**：仅支持部分语法和标准库 API，不能直接使用任意 NuGet 包。
 - **`async` / `await`**：泛型 Task 仅支持 `Task<int>`；不支持在 `catch` / `finally` 内 `await`。

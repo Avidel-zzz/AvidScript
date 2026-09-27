@@ -56,6 +56,8 @@ internal static class CSharpOperationLowerer
 
         return operation.Kind switch
         {
+            SemanticCancellationTokens.None or SemanticCancellationTokens.Read or SemanticCancellationTokens.FromAvid
+                or SemanticCancellationTokens.Compare => CSharpCancellationTokenLowerer.Lower(context, operation, blockOrdinal, instructions),
             "argument" or "expression_statement" or "parenthesized" => LowerWrapper(
                 context, operation, blockOrdinal, instructions),
             "array_creation" => LowerConstantArray(context, operation, blockOrdinal, instructions),

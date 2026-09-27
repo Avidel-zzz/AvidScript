@@ -31,7 +31,7 @@ internal static class CSharpGuestMalformedTests
         if (!document.Succeeded || !SemanticContract.HasCancellationTokens(document)
             || !SemanticAsyncInvocationValidator.IsValid(document))
             throw new InvalidOperationException("Token boundary fixture must be a valid Semantic 53 document.");
-        AssertRejected(document, "Semantic 53 requires its own Guest execution contract");
+        AssertRejected(document, "Semantic 53 requires its own Guest execution contract", "ASCG1028");
         if (CSharpLanguageErrorCompiler.TryLower(document, SemanticHash, out _, out _))
             throw new InvalidOperationException("The existing bounded-error compiler must not silently execute token values under an older contract.");
     }
@@ -204,7 +204,7 @@ internal static class CSharpGuestMalformedTests
         return semantic;
     }
 
-    private static void AssertRejected(SemanticDocument document, string message)
+    private static void AssertRejected(SemanticDocument document, string message, string diagnosticCode = "ASCG1001")
     {
         CSharpGuestLoweringResult result;
         try
@@ -218,7 +218,7 @@ internal static class CSharpGuestMalformedTests
 
         Assert(!result.Succeeded
             && result.Module is null
-            && result.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCG1001"),
+            && result.Diagnostics.Any(diagnostic => diagnostic.Code == diagnosticCode),
             message);
     }
 

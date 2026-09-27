@@ -17,11 +17,17 @@ internal static class CSharpAsyncMemberAssignmentLowerer
     private static string GuardId(SemanticAsyncMethod method, SemanticAsyncAwaitSite site) =>
         "function:$async:member_receiver:" + method.MethodSymbolId + ":" + site.CallbackId;
     private static string TaskGuardId(string method, int start) => "function:$async:task_receiver:" + method + ":" + start;
+    private static string TokenGuardId(string method, int start) => "function:$token:exception_receiver:" + method + ":" + start;
     internal sealed record GuardSite(string Id, string ReceiverType, SemanticSpan Span);
 
     internal static IReadOnlyList<GuardSite> GuardSites(SemanticDocument source)
     {
         var sites = new List<GuardSite>();
+        if (SemanticContract.HasCancellationTokens(source))
+            foreach (var method in source.Methods)
+            foreach (var operation in CSharpCancellationTokenExecutionContext.Operations(method.Root)
+                .Where(operation => operation.Kind == SemanticCancellationTokens.Read))
+                sites.Add(new(TokenGuardId(method.MethodSymbolId, operation.Span.Start), operation.Children[0].TypeId!, operation.Span));
         var producers = source.AsyncMethods.Select(method => method.MethodSymbolId).ToHashSet(StringComparer.Ordinal);
         var calls = source.Callables.Where(callable => !callable.IsStatic && producers.Contains(callable.MethodSymbolId))
             .ToDictionary(callable => callable.MethodSymbolId, StringComparer.Ordinal);
@@ -44,6 +50,10 @@ internal static class CSharpAsyncMemberAssignmentLowerer
         SemanticAsyncAwaitSite site, string receiver, List<GuestInstruction> instructions) =>
         EmitTaskGuard(context, TaskGuardId(method.MethodSymbolId, site.Span.Start), receiver, instructions);
 
+    internal static bool CheckTokenReceiver(CSharpFunctionLoweringContext context, SemanticOperation operation,
+        string receiver, List<GuestInstruction> instructions) => EmitTaskGuard(context,
+            TokenGuardId(context.Callable.MethodSymbolId, operation.Span.Start), receiver, instructions);
+
     internal static bool CheckInvocationReceiver(CSharpFunctionLoweringContext context, SemanticOperation operation,
         SemanticCallable target, IReadOnlyList<string> operands, List<GuestInstruction> instructions)
     {
@@ -59,7 +69,7 @@ internal static class CSharpAsyncMemberAssignmentLowerer
         var execution = CSharpAsyncSynchronousExecutionContext.Find(context.Document);
         if (execution?.MemberGuards.Any(guard => guard.Id == guardId) != true)
         {
-            context.Add("ASCG1026", "Instance Task invocation has no validated synchronous receiver guard.");
+            context.Add("ASCG1026", "Receiver access has no validated synchronous null guard.");
             return false;
         }
         instructions.Add(new("call", null, new[] { receiver }, guardId, null, null));
