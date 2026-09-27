@@ -500,7 +500,9 @@ internal static class CSharpAsyncCfgLowerer
             else
             {
                 int instructionStart = instructions.Count;
-                GuestRegister? value = CSharpOperationLowerer.LowerValue(
+                GuestRegister? value = statement.Operation.Kind == SemanticAsyncCatchVariableValidator.BindingOperationKind
+                    ? CSharpAsyncCatchValues.Read(context, method, statement.Operation, segment.Ordinal, instructions)
+                    : CSharpOperationLowerer.LowerValue(
                     context,
                     statement.Operation,
                     segment.Ordinal,

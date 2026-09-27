@@ -10,7 +10,7 @@ internal static class GuestDirectAwaitReadinessValidator
 
     internal static void Validate(GuestValidationContext context)
     {
-        var artifact = context.InputArtifact;
+        var artifact = GuestExceptionValues.BaseProfile(context.InputArtifact);
         var queryImports = artifact.Imports.Where(import => import.Id == GuestDirectAwaitReadiness.ImportId
             || import.Name == GuestDirectAwaitReadiness.ImportName).ToArray();
         bool identity = GuestTaskCancellationIdentity.IsVersion(artifact);

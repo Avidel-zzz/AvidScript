@@ -137,7 +137,7 @@ dotnet run --project Tools/AvidScript.CSharpGuest.Tests/AvidScript.CSharpGuest.T
 ## 已知限制
 
 - **C# / .NET**：支持部分语法和 API，不能直接使用任意 NuGet 包；部分功能需要单独启用。
-- **异步**：泛型 Task 仅支持 `Task<int>`；`catch` / `finally` 内不能 `await`。详见[异步异常](Docs/Phase66/P66.C9_Async_Throw_Routing.md)。
+- **异步**：泛型 Task 仅支持 `Task<int>`；`catch` / `finally` 内不能 `await`。命名 `catch` 已通过[专项编译与运行测试](Docs/Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)，尚未接入默认构建。
 - **取消**：暂不能从 C# 读取 [`OperationCanceledException.CancellationToken`](Docs/Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)。
 - **热重载**：支持方法体更新。新增 UE 类型、属性、函数或修改签名后，需要重新编译并重启 Editor。
 - **平台**：主要测试 UE 5.8 / Win64。Shipping、Android、iOS 和完整多人游戏流程仍待验收。

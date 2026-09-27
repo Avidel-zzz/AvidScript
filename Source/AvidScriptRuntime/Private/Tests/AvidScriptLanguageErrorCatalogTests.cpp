@@ -84,9 +84,10 @@ FString Provenance(int32 GuestSchema = 17, const TCHAR* LifetimeModel = TEXT("ca
 		GuestSchema, *GuestVersion);
 	if (StaticBaseSchema) Result += FString::Printf(TEXT("\nguest_ir_base=%d/1.%d"), StaticBaseSchema, StaticBaseSchema - 1);
 	const int32 ProfileSchema = GuestSchema == 30
-		|| ((GuestSchema == 31 || GuestSchema == 32) && (StaticBaseSchema == 29 || StaticBaseSchema == 30))
+		|| ((GuestSchema == 31 || GuestSchema == 32 || GuestSchema == 33) && (StaticBaseSchema == 29 || StaticBaseSchema == 30))
 		? 26 : StaticBaseSchema ? StaticBaseSchema : GuestSchema;
 	if (ProfileSchema == 25 || ProfileSchema == 26) Result += FString::Printf(TEXT("\ntask_local_exception_model=%s"), LifetimeModel);
+	if (GuestSchema == 33) Result += TEXT("\nsemantic=52/1.61");
 	return Result;
 }
 
@@ -351,6 +352,26 @@ bool FAvidScriptLanguageErrorCatalogRuntimeTest::RunTest(const FString& Paramete
 			Catalog && Catalog->SupportsTaskCancellationIdentity());
 	}
 	auto IdentityDocument = Document(32);
+	const FString CatchJson = Json(Document(33));
+	TestTrue(TEXT("IR 33 admits owned catch values with the exact base and source"),
+		FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+			Module(&CatchJson, true, false, 33, TEXT("cancellation"), 29), ModuleId, Catalog, Error));
+	TestTrue(TEXT("Catch values preserve cancellation identity authorization"), Catalog && Catalog->SupportsTaskCancellationIdentity());
+	for (const int32 Base : {0, 24, 25, 26, 30, 31, 32, 33})
+		TestFalse(TEXT("IR 33 rejects another execution base"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+			Module(&CatchJson, true, false, 33, TEXT("cancellation"), Base), ModuleId, Catalog, Error));
+	for (const FString& Metadata : {
+		Provenance(33, TEXT("cancellation"), 29).Replace(TEXT("semantic=52/1.61"), TEXT("semantic=50/1.59")),
+		Provenance(33, TEXT("cancellation"), 29).Replace(TEXT("\nsemantic=52/1.61"), TEXT("")),
+		Provenance(33, TEXT("cancellation"), 29).Replace(TEXT("guest_ir=33/1.32"), TEXT("guest_ir=33/1.31"))})
+	{
+		TArray<uint8> Mismatched = Module(&CatchJson, false);
+		Custom(Mismatched, "avidscript.provenance", Metadata);
+		TestFalse(TEXT("IR 33 rejects missing or mismatched identity"),
+			FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(Mismatched, ModuleId, Catalog, Error));
+	}
+	TestFalse(TEXT("IR 33 requires its language error catalog"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+		Module(nullptr, true, false, 33, TEXT("cancellation"), 29), ModuleId, Catalog, Error));
 	IdentityDocument->GetArrayField(TEXT("types"))[0]->AsObject()->SetStringField(
 		TEXT("type_id"), TEXT("type:global::System.Threading.Tasks.TaskCanceledException"));
 	const FString IdentityJson = Json(IdentityDocument);

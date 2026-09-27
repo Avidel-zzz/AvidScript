@@ -140,9 +140,13 @@ internal static class CSharpGuestCancellationIdentityTests
         }
         const string catchSource = """
             using System;
+            using System.Runtime.InteropServices;
             using System.Threading.Tasks;
             using AvidScript;
             public static class Script {
+                public static int Result;
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay() { Result = await Run(); }
                 public static async Task<int> Run() {
                     try { await AvidContinuations.NextTickAsync(); return 1; }
                     catch (OperationCanceledException error) { return error == null ? 0 : 7; }
@@ -152,7 +156,7 @@ internal static class CSharpGuestCancellationIdentityTests
         const string catchSourceId = "Scripts/AsyncCatchVariables.cs";
         var catchSemantic = SemanticAnalyzer.Analyze(catchSource, catchSourceId,
             FrontendAnalyzer.Analyze(catchSource, catchSourceId).Source.Sha256,
-            new[] { new SemanticReferenceSource(CSharpGuestContinuationTests.ReferenceFacade,
+            new[] { new SemanticReferenceSource(CSharpGuestContinuationTests.ReferenceFacade + CSharpGuestAsyncThrowRoutingTests.CancelFacade,
                 "generated://Continuations.cs", true) }, new SemanticCompilerWorkspace(),
             enableAsyncExceptionFlow: true, enableDirectAwaitCleanup: true, enableAsyncCancellationFlow: true,
             enableAsyncSynchronousExceptions: true, enableAsyncCatchVariables: true);
@@ -168,9 +172,11 @@ internal static class CSharpGuestCancellationIdentityTests
                 Check(!rejected.Succeeded && rejected.Module is null && rejected.Diagnostics.Any(d => d.Code == "ASCG1027"),
                     "Catch variable publication requires owned exception values in both lowering modes");
             }
-            Check(!CSharpLanguageErrorCompiler.TryLower(artifact, catchHash, out var rejectedError, out var catchError)
-                && rejectedError is null && catchError?.Contains("owned exception-value", StringComparison.Ordinal) == true,
-                "Direct language-error lowering cannot bypass the catch publication boundary");
+            bool compiled = CSharpLanguageErrorCompiler.TryLower(artifact, catchHash, out var caught, out var catchError);
+            Check(artifact == catchSemantic
+                    ? compiled && caught is not null && GuestExceptionValues.IsVersion(caught.Module)
+                    : !compiled && caught is null,
+                "Integrated catch lowering requires the exact source contract: " + catchError);
         }
         return count;
     }

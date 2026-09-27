@@ -6,6 +6,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--async-catch-values")
+            {
+                int focused = CSharpGuestAsyncCatchValueTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.AsyncCatchValues: {focused}/{focused} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--cancellation-identity")
             {
                 int focused = CSharpGuestCancellationIdentityTests.Run();
@@ -274,6 +280,7 @@ internal static class Program
                 + CSharpGuestDirectAwaitTests.Run()
                 + CSharpGuestAsyncCancellationTests.Run()
                 + CSharpGuestCancellationIdentityTests.Run()
+                + CSharpGuestAsyncCatchValueTests.Run()
                 + CSharpGuestAsyncThrowRoutingTests.Run()
                 + CSharpGuestAsyncSynchronousExceptionTests.Run()
                 + CSharpGuestAsyncMemberAssignmentTests.Run()

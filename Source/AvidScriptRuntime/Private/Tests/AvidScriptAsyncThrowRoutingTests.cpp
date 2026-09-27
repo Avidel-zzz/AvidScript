@@ -39,6 +39,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptAwaitReadinessEvaluationTest,
     "AvidScript.Runtime.Continuation.CompiledAwaitReadinessEvaluation",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptAsyncCatchValuesTest,
+    "AvidScript.Runtime.Continuation.CompiledAsyncCatchValues",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 namespace AvidScript::Tests::CompiledAsyncExceptions
 {
 static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 ExpectedScenarios, const TCHAR* LogPrefix,
@@ -271,6 +275,12 @@ bool FAvidScriptAwaitReadinessEvaluationTest::RunTest(const FString& Parameters)
 {
     return AvidScript::Tests::CompiledAsyncExceptions::Run(*this,
         TEXT("AVIDSCRIPT_AWAIT_READINESS_DIR"), 18, TEXT("await-readiness"), true, false, 9, 4);
+}
+
+bool FAvidScriptAsyncCatchValuesTest::RunTest(const FString& Parameters)
+{
+    return AvidScript::Tests::CompiledAsyncExceptions::Run(*this,
+        TEXT("AVIDSCRIPT_ASYNC_CATCH_FIXTURE_DIR"), 12, TEXT("async-catch"), true);
 }
 
 #endif

@@ -22,14 +22,17 @@ public static class CSharpLanguageErrorCompiler
         compilation = null;
         error = null;
         if (semantic is not null && (semantic.SchemaVersion == SemanticContract.AsyncCatchVariableSchemaVersion
-            || semantic.SemanticVersion == SemanticContract.AsyncCatchVariableSemanticVersion))
-            return Fail("Async catch variables require owned exception-value lowering before Guest publication.", out error);
+            || semantic.SemanticVersion == SemanticContract.AsyncCatchVariableSemanticVersion)
+            && !SemanticContract.HasAsyncCatchVariables(semantic))
+            return Fail("Async catch variables require the paired source contract.", out error);
         var staticContext = semantic is null ? null : CSharpStaticExecutionContext.Find(semantic);
+        bool asyncCatchValues = semantic is not null && SemanticContract.HasAsyncCatchVariables(semantic)
+            && SemanticAsyncCatchVariableValidator.IsValid(semantic);
         bool implicitMemberErrors = semantic is not null && SemanticContract.HasAsyncSynchronousExceptions(semantic)
             && SemanticAsyncInvocationValidator.IsValid(semantic)
             && SemanticAsyncScopeValidator.IsValid(semantic)
             && CSharpAsyncMemberAssignmentLowerer.GuardSites(semantic).Count > 0;
-        if (semantic is null || semantic.ExceptionFlows is not { Count: > 0 } && !implicitMemberErrors && staticContext is null
+        if (semantic is null || semantic.ExceptionFlows is not { Count: > 0 } && !implicitMemberErrors && !asyncCatchValues && staticContext is null
             || !SemanticExceptionFlowContractValidator.IsValid(semantic)
             || semantic.Diagnostics.Any(diagnostic => diagnostic.Severity == "error"
                 && diagnostic.Code != "ASCS3001"
@@ -55,7 +58,7 @@ public static class CSharpLanguageErrorCompiler
                     StringComparer.Ordinal).Any(group => group.Count() != 1))
             return Fail("A catch variable needs a unique System.Exception local symbol.", out error);
         SemanticExceptionFlow[] throwFlows = flows.Where(item => item.Throws.Count > 0).ToArray();
-        if (throwFlows.Length == 0 && staticContext is null && !implicitMemberErrors)
+        if (throwFlows.Length == 0 && staticContext is null && !implicitMemberErrors && !asyncCatchValues)
             return Fail("At least one supported throw site is required.", out error);
         // The standalone producer only models an unconditional, argument-free
         // throw. Conditional guards and parameterized methods retain their CFG.
@@ -97,7 +100,7 @@ public static class CSharpLanguageErrorCompiler
                 rethrows.Add(CSharpGuestIds.Function(handler.MethodSymbolId), rethrowSites);
         }
         SemanticLanguageErrorEffectPlan? effects = null;
-        bool effectsValid = flows.Count == 0 && (implicitMemberErrors || staticContext is not null);
+        bool effectsValid = flows.Count == 0 && (implicitMemberErrors || asyncCatchValues || staticContext is not null);
         if (effectsValid) effects = new(Array.Empty<string>());
         else effectsValid = SemanticLanguageErrorEffectPlanner.TryBuild(semantic, out effects);
         // Outcome layouts already carry typed values. Ordinary type lowering and
@@ -289,15 +292,17 @@ public static class CSharpLanguageErrorCompiler
             Exports = lowered.Module.Exports.Except(affectedExports).ToArray(),
             Functions = lowered.Module.Functions.Concat(asyncContext?.MemberGuards ?? Array.Empty<GuestFunction>()).ToArray(),
         };
-        if (!CSharpLanguageOutcomeRewriter.TryRewriteWithHandlers(ordinary, internalModule,
+        GuestModule? outcomes = internalModule with { LanguageOutcomeTypes = Array.Empty<GuestLanguageOutcomeType>() };
+        if ((affected.Count != 0 || asyncContext?.MemberGuards.Count > 0)
+            && (!CSharpLanguageOutcomeRewriter.TryRewriteWithHandlers(ordinary, internalModule,
                 affected, producerIds, catchRoutes, cleanupRoutes,
-                out GuestModule? outcomes, out error, combinedTaskContract || synchronousAsync)
-            || outcomes is null)
+                out outcomes, out error, combinedTaskContract || synchronousAsync)
+            || outcomes is null))
             return false;
         if (hasCatchVariables)
         {
             if (!TryBindCatchVariables(flows, outcomes,
-                    out GuestModule? bound, out error) || bound is null)
+                    out GuestModule? bound, out error, synchronousAsync) || bound is null)
                 return false;
             outcomes = bound;
         }
@@ -374,6 +379,8 @@ public static class CSharpLanguageErrorCompiler
             return false;
         candidate = adapted;
         if (!CSharpDirectAwaitReadinessLowerer.TryWrap(candidate, out candidate, out error)) return false;
+        if (SemanticContract.HasAsyncCatchVariables(semantic)
+            && !CSharpAsyncCatchValues.TryWrap(semantic, candidate, out candidate, out error)) return false;
         GuestValidationResult validation = GuestModuleValidator.Validate(candidate);
         if (!validation.Succeeded)
             return Fail("The composed language-error module failed validation: "
@@ -432,7 +439,8 @@ public static class CSharpLanguageErrorCompiler
         IReadOnlyList<SemanticExceptionFlow> flows,
         GuestModule module,
         out GuestModule? bound,
-        out string? error)
+        out string? error,
+        bool deferValidation)
     {
         bound = null;
         error = null;
@@ -495,7 +503,7 @@ public static class CSharpLanguageErrorCompiler
             Functions = module.Functions.Select(function => functions[function.Id]).ToArray(),
         };
         GuestValidationResult validation = GuestModuleValidator.Validate(candidate);
-        if (!validation.Succeeded)
+        if (!validation.Succeeded && !deferValidation)
             return Fail("The catch variable binding failed Guest validation: "
                 + string.Join(" | ", validation.Diagnostics.Select(item => item.Message)), out error);
         bound = candidate;

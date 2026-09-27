@@ -8,7 +8,7 @@
 
 仍是开发者预览。P66.A、P66.B 已完成，P66.C、P66.D 未完成，以 [Phase 状态](../Phase66/Phase66_State.json)为准。已有跨对象调用、闭包、事件和异步执行基础；普通语言组合、结构热重载、完整调试、Windows 发布工作流仍需完成。测试数量不能作为成熟百分比。
 
-最近的 [C10 取消身份实现](../Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)已连接 Session、双 VM 导入和 IR 32 编译产物。异步 `catch` 变量已有显式初始化与作用域合同，异常值的实际所有权及 `OperationCanceledException.CancellationToken` 读取尚未打通。这是当前可直接推进的缺口。
+最近的 [C10 取消身份实现](../Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)已连接 Session、双 VM 导入和 IR 32 编译产物。IR 33 已接通异步 `catch` 对象：别名可跨 await/GC，重复等待与 rethrow 保持对象身份；专项 Win64 双后端运行 72/72。`OperationCanceledException.CancellationToken` 读取、静态初始化组合和默认构建入口仍待完成，这是下一步的直接缺口。
 
 WASM 是执行载体，不自动带来完整语言支持、零开销或多语言互通。C# 前端与多种 VM 后端也不等于多个语言可以在同一个项目中共同开发。
 
@@ -47,7 +47,7 @@ WASM 是执行载体，不自动带来完整语言支持、零开销或多语言
 4. **接入正常入口。** 编译、缓存、generated facade、UHT 类型壳、Editor Build And Bind 和包发布读取同一份能力合同；支持的组合不长期依赖测试专用开关。
 5. **P66.D 综合样例与集中验收。** 接入下方完整技能流程，检查状态、顺序、取消、GC、重入、重载失败和资源释放。同步冻结 P67 类型实验、P68 帧接口和跨语言模块原型的输入要求。
 
-当前异步 catch 的语义合同仅是第 1 项的前置工作。即使独立校验通过，在异常值 lowering 和真实运行验证完成前，仍拒绝发布这类 Guest 产物。
+当前命名 catch 已通过完整异常编译路径及专项双后端运行；普通 lowering 仍拒绝绕过该路径发布。对象身份验证不等于取消 token 属性已实现，也不替代第 2 项的原始业务组合矩阵。
 
 ## 跨语言边界
 

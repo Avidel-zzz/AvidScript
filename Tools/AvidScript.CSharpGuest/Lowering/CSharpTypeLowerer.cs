@@ -76,6 +76,9 @@ internal static class CSharpTypeLowerer
                 4));
         }
 
+        foreach (GuestType reference in CSharpAsyncCatchValues.ReferenceTypes(document))
+            AddTypeIfMissing(rawTypes, reference);
+
         foreach (SemanticAsyncStateFrame frame in CSharpAsyncClosureState.Frames(document)
             .OrderBy(frame => frame.TypeId, StringComparer.Ordinal))
         {

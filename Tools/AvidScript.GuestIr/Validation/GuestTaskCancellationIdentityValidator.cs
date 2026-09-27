@@ -9,7 +9,7 @@ internal static class GuestTaskCancellationIdentityValidator
 
     internal static void Validate(GuestValidationContext context)
     {
-        GuestModule artifact = context.InputArtifact;
+        GuestModule artifact = GuestExceptionValues.BaseProfile(context.InputArtifact);
         var reserved = artifact.Imports.Where(import =>
             import.Id.StartsWith("import:task_cancel_language_error_", StringComparison.Ordinal)
             || import.Name.StartsWith("avid_task_cancel_language_error_", StringComparison.Ordinal)

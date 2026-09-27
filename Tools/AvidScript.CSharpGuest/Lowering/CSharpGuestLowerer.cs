@@ -41,12 +41,13 @@ public static class CSharpGuestLowerer
         ArgumentNullException.ThrowIfNull(semanticSha256);
         ArgumentNullException.ThrowIfNull(substitutes);
 
-        if (document.SchemaVersion == SemanticContract.AsyncCatchVariableSchemaVersion
+        var synchronousAsync = CSharpAsyncSynchronousExecutionContext.Find(document);
+        if ((document.SchemaVersion == SemanticContract.AsyncCatchVariableSchemaVersion
             || document.SemanticVersion == SemanticContract.AsyncCatchVariableSemanticVersion)
+            && (synchronousAsync is null || !SemanticContract.HasAsyncCatchVariables(document)))
             return Failure(new[] { new GuestDiagnostic("ASCG1027", "error",
                 "Async catch variables require owned exception-value lowering before Guest publication.", null) });
 
-        var synchronousAsync = CSharpAsyncSynchronousExecutionContext.Find(document);
         if (synchronousAsync is null && (document.SchemaVersion == SemanticContract.AsyncSynchronousExceptionSchemaVersion
             || document.SemanticVersion == SemanticContract.AsyncSynchronousExceptionSemanticVersion
             || document.AsyncMethods?.Any(method => method?.Segments?.Any(segment =>
@@ -128,14 +129,17 @@ public static class CSharpGuestLowerer
         }
         if (includeLanguageExceptionReference)
         {
+            var exceptionReference = moduleTypes.SingleOrDefault(type => type.Id == CSharpThrowProducerLowerer.ExceptionTypeId);
             if (!document.Types.Any(type => type.Id == CSharpThrowProducerLowerer.ExceptionTypeId
                     && type.Kind == "class" && !type.IsValueType)
-                || moduleTypes.Any(type => type.Id == CSharpThrowProducerLowerer.ExceptionTypeId))
+                || exceptionReference is not null && exceptionReference is not
+                    { Kind: "managed_ref", Storage: "i64", ElementTypeId: null, Size: 8, Alignment: 8 })
                 return Failure(new[] { new GuestDiagnostic("ASCG1003", "error",
                     "The language exception reference has no unique class type.", null) });
-            moduleTypes = moduleTypes.Append(new GuestType(
-                CSharpThrowProducerLowerer.ExceptionTypeId, "managed_ref", "i64",
-                Array.Empty<GuestField>(), null, null, 8, 8)).ToArray();
+            if (exceptionReference is null)
+                moduleTypes = moduleTypes.Append(new GuestType(
+                    CSharpThrowProducerLowerer.ExceptionTypeId, "managed_ref", "i64",
+                    Array.Empty<GuestField>(), null, null, 8, 8)).ToArray();
             if (!moduleTypes.Any(type => type.Id == "type:object"))
                 moduleTypes = moduleTypes.Append(new GuestType(
                     "type:object", "managed_ref", "i64",
