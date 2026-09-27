@@ -1,6 +1,6 @@
 # AvidScript 后续迭代：语言、编辑体验与性能
 
-更新：2026-09-28。工作基线：`85ce1646`。Windows 优先，Android/iOS 真机验收按用户要求延期。
+更新：2026-09-28。工作基线：`d638b19f`。Windows 优先，Android/iOS 真机验收按用户要求延期。
 
 目标是让开发者用熟悉的语言编写 UE 玩法，在运行中修改和排障，并获得可测量的性能优势。这里规定后续交付与判定方式，不宣称已经领先，也不修改已冻结的 [P66 架构](../Phase66/P66.0_Developer_Experience_Architecture.md)或已完成批次。
 
@@ -8,7 +8,7 @@
 
 仍是开发者预览。P66.A、P66.B 已完成，P66.C、P66.D 未完成，以 [Phase 状态](../Phase66/Phase66_State.json)为准。已有跨对象调用、闭包、事件和异步执行基础；普通语言组合、结构热重载、完整调试、Windows 发布工作流仍需完成。测试数量不能作为成熟百分比。
 
-最近的 [C10 取消身份实现](../Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)已连接 Session、双 VM 导入和 IR 32 编译产物。IR 33 已接通异步 `catch` 对象：别名可跨 await/GC，重复等待与 rethrow 保持对象身份；专项 Win64 双后端运行 72/72。`OperationCanceledException.CancellationToken` 读取、静态初始化组合和默认构建入口仍待完成，这是下一步的直接缺口。
+最近的 [C10 取消身份实现](../Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)已连接 Session、双 VM 导入和 IR 32 编译产物。IR 33 已接通异步 `catch` 对象：别名可跨 await/GC，重复等待与 rethrow 保持对象身份；专项 Win64 双后端运行 72/72。标准 token 的 Semantic 53 投影、IR 34 值布局和 WASM 生成已接入；纯值 WASM 已执行验证。`OperationCanceledException.CancellationToken` 的源码降低、双 VM 对象快照 reader、静态初始化组合和默认构建入口仍待完成。
 
 WASM 是执行载体，不自动带来完整语言支持、零开销或多语言互通。C# 前端与多种 VM 后端也不等于多个语言可以在同一个项目中共同开发。
 
@@ -102,6 +102,6 @@ Editor 与 Shipping 分开比较。明确每种 VM 的 JIT/AOT/interpreter 配�
 
 ## 下一步交付
 
-异步 catch 的语义合同及发布限制已通过本轮托管回归；接下来实现异常值保活与 token 属性读取，跑回原始业务矩阵，再接正常编译入口。规划文档不会代替这些工作，也不会把 P66 标记完成。
+异常对象保活、取消身份快照和标准 token 的语义/IR 合同已有独立证据。下一步按依赖接通：标准 token 值与属性的 C# 降低（包括可捕获的空引用错误）→ Wasmtime/WAMR 从异常对象读取快照 → 同源 .NET 与原始 29 案例组合 → 正常构建入口。IR fixture 和纯值 WASM 不替代 UE 对象生命周期、双 VM 或完整业务验收；P66 仍未完成。
 
 后续阶段的设计冻结必须给出具体 API、模块写集、兼容规则、错误恢复和可复现验收命令。Windows 完成后再恢复移动端计划；移动平台的暂停验收不等于取消其架构要求。

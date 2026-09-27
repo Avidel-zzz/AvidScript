@@ -17,7 +17,10 @@ public static class GuestExceptionValues
 
     // A private validation/execution view. Serialized provenance keeps the
     // original source contract; the outer validator checks it before admission.
-    public static GuestModule BaseProfile(GuestModule module) => IsVersion(module)
+    public static GuestModule BaseProfile(GuestModule module)
+    {
+        module = GuestCancellationTokens.BaseProfile(module);
+        return IsVersion(module)
         && module.ExceptionValues is not null
         && module.Provenance.SemanticSchemaVersion == SemanticSchemaVersion
         && module.Provenance.SemanticVersion == SemanticVersion
@@ -29,6 +32,7 @@ public static class GuestExceptionValues
                 SemanticVersion = GuestAsyncSynchronousExceptions.SemanticVersion,
             },
         } : module;
+    }
 }
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]

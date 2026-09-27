@@ -29,6 +29,7 @@ internal static class GuestRequiredGraphValidator
                 || HasNull(binding.MethodFunctionId, binding.FunctionId, binding.BlockId,
                     binding.OwnerLocalId, binding.VariableLocalId, binding.ReferenceTypeId)))) return false;
         if (module.CancellationIdentity is { BaseIrVersion: null }) return false;
+        if (module.CancellationTokens is { BaseIrVersion: null }) return false;
         if (module.DirectAwaitReadiness is { } readiness
             && (readiness.BaseIrVersion is null || readiness.Guards is null
                 || readiness.Guards.Any(guard => guard is null || HasNull(guard.FunctionId,

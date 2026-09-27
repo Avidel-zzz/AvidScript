@@ -88,8 +88,10 @@ internal static class GuestManagedHeapValidator
                 && module.LanguageErrorCatalog is not null
                 && (GuestTaskCancellationErrorValidator.IsCancellationImport(import, module.CancellationIdentity is not null)
                     || GuestTaskCancellationErrorValidator.IsTerminalRootImport(import));
+            bool exceptionTokenReader = GuestCancellationTokens.HasReaderProfile(context.InputArtifact)
+                && module.LanguageErrorCatalog is not null && GuestCancellationTokens.IsReader(import);
             if ((Has(import.ReturnTypeId) || import.ParameterTypeIds.Any(Has))
-                && !report && !taskFault && !taskReadRoot && !cancellationReference)
+                && !report && !taskFault && !taskReadRoot && !cancellationReference && !exceptionTokenReader)
                 Add(context, $"Import '{import.Id}' cannot expose module-local managed references.");
         }
         foreach (GuestExport export in module.Exports)

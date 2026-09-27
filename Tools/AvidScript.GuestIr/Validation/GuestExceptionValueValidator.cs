@@ -8,7 +8,7 @@ internal static class GuestExceptionValueValidator
 {
     internal static void Validate(GuestValidationContext context)
     {
-        var artifact = context.InputArtifact;
+        var artifact = GuestCancellationTokens.BaseProfile(context.InputArtifact);
         bool reserved = artifact.Functions.SelectMany(function => function.Locals)
             .Any(local => local.Id.StartsWith(GuestExceptionValues.CapturePrefix, StringComparison.Ordinal));
         if (!GuestExceptionValues.IsVersion(artifact))

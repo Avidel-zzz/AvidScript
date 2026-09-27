@@ -226,7 +226,9 @@ public static class WasmModuleCompiler
                 $"guest_ir={module.SchemaVersion}/{module.IrVersion}");
             if (module.TaskLocalLifetimes is { } lifetimes)
                 payload += "\ntask_local_exception_model=" + lifetimes.ExceptionModel;
-            if (GuestExceptionValues.IsVersion(module))
+            if (GuestCancellationTokens.IsVersion(module) && module.CancellationTokens is { } tokens)
+                payload += $"\nguest_ir_base={tokens.BaseSchemaVersion}/{tokens.BaseIrVersion}\nsemantic=53/1.62";
+            else if (GuestExceptionValues.IsVersion(module))
                 payload += "\nguest_ir_base=29/1.28\nsemantic=52/1.61";
             else if (GuestTaskCancellationIdentity.IsVersion(module) && module.CancellationIdentity is { } identity)
                 payload += $"\nguest_ir_base={identity.BaseSchemaVersion}/{identity.BaseIrVersion}";

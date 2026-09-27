@@ -57,6 +57,7 @@ internal static class CSharpGuestAsyncCatchValueTests
             Check(provenance.Split('\n').Contains("guest_ir=33/1.32") && provenance.Split('\n').Contains("guest_ir_base=29/1.28")
                 && provenance.Split('\n').Contains("semantic=52/1.61"), name + " WASM source and execution contract");
             if (name == "value-deferred") CheckRejectedMutations(module, Check);
+            CheckTokenComposition(module, Check);
             if (string.IsNullOrWhiteSpace(directory)) continue;
             Directory.CreateDirectory(directory);
             File.WriteAllText(Path.Combine(directory, name + ".cs"), source);
@@ -67,9 +68,74 @@ internal static class CSharpGuestAsyncCatchValueTests
                 resultOffset = module.MemoryLayout.StateSlots.Single(slot => slot.GlobalId.Contains(".Result:", StringComparison.Ordinal)).Offset,
                 traceOffset = module.MemoryLayout.StateSlots.Single(slot => slot.GlobalId.Contains(".Trace:", StringComparison.Ordinal)).Offset });
         }
+        CheckUnnamedCatchTokenComposition(Check);
         if (!string.IsNullOrWhiteSpace(directory))
             File.WriteAllText(Path.Combine(directory, "cases.json"), JsonSerializer.Serialize(fixtures, new JsonSerializerOptions { WriteIndented = true }));
         return count;
+    }
+
+    // A real compiled async/catch module supplies the ownership graph. This
+    // composition check does not claim that Semantic 53 lowering is available.
+    private static void CheckTokenComposition(GuestModule original, Action<bool, string> check)
+    {
+        var reader = new GuestFunction("token:read", new[] { new GuestRegister("root", GuestCancellationTokens.RootTypeId) },
+            new[] { new GuestRegister("identity", "type:int64") }, "type:int64", "entry", new[] {
+                new GuestBasicBlock("entry", new[] { new GuestInstruction("call", "identity", new[] { "root" },
+                    GuestCancellationTokens.ReadImportId, null, null) }, new("return", null, null, null, "identity")),
+            });
+        var module = original with {
+            SchemaVersion = 34, IrVersion = "1.33", CancellationTokens = new(29, "1.28"),
+            Provenance = original.Provenance with { SemanticSchemaVersion = 53, SemanticVersion = "1.62" },
+            Types = original.Types.Append(GuestCancellationTokens.ValueType()).ToArray(),
+            Imports = original.Imports.Append(GuestCancellationTokens.Reader()).ToArray(),
+            Functions = original.Functions.Append(reader).ToArray(),
+        };
+        var valid = GuestModuleValidator.Validate(module);
+        check(valid.Succeeded, "IR34 async composition: " + string.Join(" | ", valid.Diagnostics.Select(item => item.Code + ": " + item.Message)));
+        var wasm = WasmModuleCompiler.Compile(module);
+        check(wasm.Succeeded, "IR34 async WASM: " + string.Join(" | ", wasm.Diagnostics.Select(item => item.Message)));
+        var json = GuestIrSerializer.Serialize(module);
+        check(json.SequenceEqual(GuestIrSerializer.Serialize(GuestIrSerializer.Deserialize(json)))
+            && wasm.Bytes.SequenceEqual(WasmModuleCompiler.Compile(GuestIrSerializer.Deserialize(json)).Bytes), "IR34 async deterministic round trip");
+        var provenance = WasmArtifactInspector.Inspect(wasm.Bytes).CustomSections.Single(item => item.Name == "avidscript.provenance").PayloadText.Split('\n');
+        check(provenance.Contains("guest_ir=34/1.33") && provenance.Contains("guest_ir_base=29/1.28")
+            && provenance.Contains("semantic=53/1.62"), "IR34 async provenance");
+        void Reject(GuestModule invalid, string reason) => check(!GuestModuleValidator.Validate(invalid).Succeeded
+            && !WasmModuleCompiler.Compile(invalid).Succeeded, "IR34 async composition accepted " + reason);
+        Reject(module with { CancellationIdentity = null }, "missing cancellation identity");
+        if (module.ExceptionValues is not null)
+            Reject(module with { ExceptionValues = null }, "missing exception bindings");
+        else
+            check(GuestIrSerializer.Deserialize(json).ExceptionValues is null, "Token values must not invent named catch bindings");
+        Reject(module with { AsyncSynchronousExceptions = null }, "missing synchronous error plan");
+        Reject(module with { TaskLocalLifetimes = null }, "missing Task ownership");
+        Reject(module with { CancellationTokens = new(17, "1.16") }, "downgraded execution base");
+        Reject(module with { CancellationIdentity = module.CancellationIdentity! with { BaseSchemaVersion = 25, BaseIrVersion = "1.24" } }, "mismatched identity base");
+        if (module.ExceptionValues is not { } bindings) return;
+        var binding = bindings.Bindings[0];
+        Reject(module with { ExceptionValues = new(module.ExceptionValues.Bindings.Select(item => item == binding
+            ? item with { OwnerLocalId = binding.VariableLocalId } : item).ToArray()) }, "forged catch owner");
+        Reject(module with { Functions = module.Functions.Select(function => function.Id == binding.FunctionId ? function with {
+            Blocks = function.Blocks.Select(block => block.Id == binding.BlockId ? block with {
+                Instructions = block.Instructions.Skip(1).ToArray() } : block).ToArray() } : function).ToArray() }, "missing root acquisition");
+    }
+
+    private static void CheckUnnamedCatchTokenComposition(Action<bool, string> check)
+    {
+        string source = Source("try { await AvidContinuations.NextTickAsync(); } catch (OperationCanceledException) { return 6; } return 1;", true);
+        const string sourceId = "Scripts/TokenUnnamedCatch.cs";
+        var semantic = SemanticAnalyzer.Analyze(source, sourceId, FrontendAnalyzer.Analyze(source, sourceId).Source.Sha256,
+            new[] { new SemanticReferenceSource(CSharpGuestContinuationTests.ReferenceFacade + CSharpGuestAsyncThrowRoutingTests.CancelFacade,
+                "generated://Continuations.cs", true) }, new SemanticCompilerWorkspace(),
+            enableAsyncExceptionFlow: true, enableDirectAwaitCleanup: true, enableAsyncCancellationFlow: true,
+            enableAsyncSynchronousExceptions: true);
+        string hash = Convert.ToHexString(SHA256.HashData(SemanticSerializer.Serialize(semantic))).ToLowerInvariant();
+        check(CSharpLanguageErrorCompiler.TryLower(semantic, hash, out var compiled, out var error)
+            && compiled is not null, "Unnamed catch source lowering: " + error);
+        check(compiled!.Module is { ExceptionValues: null, SchemaVersion: 29 }, "Unnamed catch uses the existing IR29 execution base");
+        check(CSharpCancellationIdentityCompiler.TryUpgrade(compiled.Module, out var identity, out error)
+            && identity is not null, "Unnamed catch identity upgrade: " + error);
+        CheckTokenComposition(identity!, check);
     }
 
     private static void CheckRejectedMutations(GuestModule module, Action<bool, string> check)
