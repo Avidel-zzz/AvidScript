@@ -10,18 +10,20 @@
 
 最近的 [C10 取消身份实现](../Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)已连接 Session、IR 32/33 与双 VM；异步 `catch` 对象别名可跨 await/GC，重复等待与 rethrow 保持对象身份。显式编译 API 已从 Semantic 53 生成 IR 34/WASM；异常 getter 和对象快照 reader 已在 Win64 两个 VM 上运行，21 份 C# 源码产生 82/82 组执行观察。静态初始化组合、原始 29 案例、默认构建入口和真实 Editor 玩法仍待完成。
 
+直接阻塞是能力组合方式，而不是再补一个孤立 API：Semantic 53/IR 34 的 token 路径不能与 Semantic 51/IR 31 的静态初始化路径生成同一个模块。[可组合能力合同](AvidScript_Composable_Capability_Contract.md)规定下一版 Semantic/IR 的能力列表、旧版兼容、Host 准入和原始 29 案例验收；先完成它，再打开默认构建入口。
+
 WASM 是执行载体，不自动带来完整语言支持、零开销或多语言互通。C# 前端与多种 VM 后端也不等于多个语言可以在同一个项目中共同开发。
 
 ## 竞品基线
 
-官方资料复核于 2026-09-27；没有在本轮实际操作或计时竞品。以下用于选择验收项目。
+官方资料复核于 2026-09-28；没有在本轮实际操作或计时竞品。以下用于选择验收项目。
 
 | 对照 | 已有能力 | AvidScript 的比较要求 |
 | --- | --- | --- |
-| Unreal AngelScript | 脚本变更可不重启 Editor；PIE 中支持非结构变更；Blueprint 子类、VS Code 调试；Shipping 可使用转译脚本 | 编辑流程分别计入退出 PIE、重启 Editor 和构建时间；性能对照必须包含它的 Shipping 转译路径 |
-| Puerts UE | 反射 API、TypeScript 类型声明、自动绑定、调试，以及非反射 C++ 的静态绑定 | 测试常见 UE API 是否直接可用、需要多少手写桥接；性能分别测 reflection 与 static binding |
+| Unreal AngelScript | 脚本变更可不重启 Editor；PIE 中支持非结构变更；Blueprint 子类、VS Code 调试；Shipping 可使用预编译/转译脚本 | 编辑流程分别计入退出 PIE、重启 Editor 和构建时间；性能对照必须包含它的 Shipping 优化路径 |
+| Puerts UE | 反射 API、TypeScript 类型声明、自动绑定/热重载、调试，以及非反射 C++ 的静态绑定 | 测试常见 UE API 是否直接可用、需要多少手写桥接；性能分别测 reflection 与 static binding |
 
-来源：[AngelScript 官方概览](https://angelscript.hazelight.se/)、[Puerts UE 手册](https://puerts.github.io/en/docs/puerts/unreal/manual/)、[Puerts 静态绑定](https://puerts.github.io/en/docs/puerts/unreal/template_binding/)。Puerts 仓库另列 Lua/Python 为 Unity 后端，不能计作当前 UE 多语言能力：[官方仓库](https://github.com/Tencent/puerts)。
+来源：[AngelScript 官方概览](https://angelscript.hazelight.se/)、[预编译脚本说明](https://angelscript.hazelight.se/cpp-bindings/precompiled-data/)、[Puerts UE 手册](https://puerts.github.io/en/docs/puerts/unreal/manual/)、[自动绑定](https://puerts.github.io/en/docs/puerts/unreal/uclass_extends/)和[静态绑定](https://puerts.github.io/en/docs/puerts/unreal/template_binding/)。Puerts 仓库另列 Lua/Python 为 Unity 后端，不能计作当前 UE 多语言能力：[官方仓库](https://github.com/Tencent/puerts)。
 
 ## 迭代顺序
 
@@ -29,7 +31,7 @@ WASM 是执行载体，不自动带来完整语言支持、零开销或多语言
 
 | 顺序 | 要交付的东西 | 完成证据与失败处理 |
 | --- | --- | --- |
-| **1. P66.C/D：日常玩法可以自然表达** | 取消与异常对象、集合/泛型、事件和异步组合；受支持能力接入正常构建入口 | 同一业务源码的 .NET 与 WASM 结果、身份、顺序和释放一致；真实生成类型运行于两个 VM。失败就修执行语义，不能通过改写样例避开缺口 |
+| **1. P66.C/D：日常玩法可以自然表达** | 先把静态状态、await、异常与 token 放进一个可验证的能力合同，再接集合/泛型、事件和正常构建入口 | 同一业务源码的 .NET 与 WASM 结果、身份、顺序和释放一致；真实生成类型运行于两个 VM。失败就修执行语义，不能通过改写样例避开缺口 |
 | **2. P67：修改结构不重启 Editor** | 新增字段/函数的动态类型或稳定外壳原型，实例状态迁移，候选失败恢复 | 覆盖 Blueprint 子类、CDO、GC、复制、Cook。先要求不重启 Editor，再明确哪些修改仍需退出 PIE；原型不成立时先调整类型表示 |
 | **3. P68：源码级调试完整可用** | 内部函数、返回值、闭包、异步调用链；版本对应的断点和变量 | 在 IDE 中设置断点、步进、检查并恢复真实玩法；暂停期间 GC、owner 销毁、重载均有明确处理 |
 | **4. 跨语言模块产品化** | 一份接口生成 C# 与第二语言 SDK，同一 UE 项目混合运行、调用、取消和重载 | 第二语言试验先选 Rust；必须有双向调用、复杂数据、回调、异步及故障隔离证据。一个标量 WASM 函数不算完成 |
@@ -42,7 +44,7 @@ WASM 是执行载体，不自动带来完整语言支持、零开销或多语言
 按依赖推进以下工作，不新增另一套并行状态机：
 
 1. **异常值与取消身份。** 明确 `catch` 变量初始化、异常根、别名、离开 handler 后的保活和释放；读取 token 时保留原始身份，不延长 source 生命周期。随后验证重复 await、rethrow、清理再次抛错与 Task 结果传播。
-2. **完成原始业务矩阵。** 使用 [C10 原始 29 案例](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)，不修改业务预期。把静态初始化、同步错误、await 求值顺序和异常变量组合起来；不能把各自的绿色测试拼成组合完成结论。
+2. **先合并能力合同，再完成原始业务矩阵。** 按[可组合能力合同](AvidScript_Composable_Capability_Contract.md)处理静态初始化与标准 token 的版本、依赖、验证和原生准入。使用 [C10 原始 29 案例](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)，不修改业务源码或预期；测试适配层另补标准 token 属性身份观察。不能把各自的绿色测试拼成组合完成结论。
 3. **补语言兼容清单。** 逐项记录自然玩法所需的 `Task<T>` 值类型/引用类型、集合枚举与释放、泛型成员、嵌套异常处理及 handler 内 await；每项附正例、明确拒绝和运行证据。完整 .NET/NuGet 兼容不是当前事实，缺少常用 API 时必须给出支持计划或准确诊断。
 4. **接入正常入口。** 编译、缓存、generated facade、UHT 类型壳、Editor Build And Bind 和包发布读取同一份能力合同；支持的组合不长期依赖测试专用开关。
 5. **P66.D 综合样例与集中验收。** 接入下方完整技能流程，检查状态、顺序、取消、GC、重入、重载失败和资源释放。同步冻结 P67 类型实验、P68 帧接口和跨语言模块原型的输入要求。
@@ -53,7 +55,7 @@ IR 34 的原生版本准入、异常对象 reader 与 21 份同源 C# 专项源�
 
 ## 跨语言边界
 
-建议对接单位是有类型的模块接口。C# 内部保留 C# 对象与异常语义，其他语言保留自己的语义；跨模块仅交换显式可表示的数据和受管资源，不把任一语言的堆布局变成公共 ABI。
+建议对接单位是有类型的模块接口。C# 内部保留 C# 对象与异常语义，其他语言保留自己的语义；跨模块仅交换显式可表示的数据和受管资源，不把任一语言的堆布局变成公共 ABI。Guest IR 的执行能力可由不同前端声明，但第二语言必须保留自己的前端来源，不能伪造 C# Semantic 版本；见[组合合同](AvidScript_Composable_Capability_Contract.md#合同边界)。
 
 | 接口部分 | 要求 |
 | --- | --- |
@@ -104,6 +106,6 @@ Editor 与 Shipping 分开比较。明确每种 VM 的 JIT/AOT/interpreter 配�
 
 ## 下一步交付
 
-异常对象保活、取消身份快照、标准 token 的 Semantic/IR/WASM、两个 VM 的对象读取与专项同源 C# 执行已有独立证据。下一交付顺序是：原始 29 案例与静态初始化组合 → 默认构建入口及准确诊断 → P66.D 完整技能流程和真实 Editor Play → P67 结构热重载原型与 P68 调试帧接口。每一步同时记录正确性、开发时间、调用成本和失败路径；只在同需求、同平台、同正确性前提下与 Puerts/AngelScript 比较。P66 仍未完成。
+异常对象保活、取消身份快照、标准 token 的 Semantic/IR/WASM、两个 VM 的对象读取与专项同源 C# 执行已有独立证据。下一交付顺序是：可组合能力合同及旧版兼容 → 原始 29 案例与静态初始化/token 同模块运行 → 默认构建入口及准确诊断 → P66.D 完整技能流程和真实 Editor Play → P67 结构热重载原型与 P68 调试帧接口。每一步同时记录正确性、开发时间、调用成本和失败路径；只在同需求、同平台、同正确性前提下与 Puerts/AngelScript 比较。P66 仍未完成。
 
 后续阶段的设计冻结必须给出具体 API、模块写集、兼容规则、错误恢复和可复现验收命令。Windows 完成后再恢复移动端计划；移动平台的暂停验收不等于取消其架构要求。
