@@ -992,8 +992,13 @@ internal static class SemanticAsyncProjector
             && SymbolEqualityComparer.Default.Equals(method.ReturnType, method.ContainingType)
             && method.Parameters.Length == 1
             && method.Parameters[0].RefKind == RefKind.None
-            && method.Parameters[0].Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+            && (method.Parameters[0].Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
                 == CancellationTokenTypeName
+                || context.EnableCancellationTokens
+                    && SemanticCancellationTokenProjector.IsFrameworkType(method.Parameters[0].Type,
+                        context.Compilation, SemanticCancellationTokens.MetadataName)
+                    && context.ProjectionUnits.Any(unit => !unit.IsPrimary
+                        && unit.SyntaxTree == method.DeclaringSyntaxReferences[0].SyntaxTree))
             && marker.Arguments.Length == 1;
         if (!validContract
             || UnwrapTransparentOperation(marker.Instance) is not IInvocationOperation wrappedProducer)

@@ -37,14 +37,10 @@ public static class SemanticAsyncScopeValidator
             {
                 SemanticAsyncControlTransfer transfer = segment.Transfer!;
                 bool exceptionTransfer = method.ExceptionPlan is not null
-                    && document.SchemaVersion is (SemanticContract.AsyncExceptionFlowSchemaVersion
+                    && (SemanticContract.HasTaskLocalLifetimes(document)
+                        || document.SchemaVersion is (SemanticContract.AsyncExceptionFlowSchemaVersion
                         or SemanticContract.DirectAwaitCleanupSchemaVersion
-                        or SemanticContract.AsyncCancellationFlowSchemaVersion
-                        or SemanticContract.TaskLocalLifetimeSchemaVersion
-                        or SemanticContract.AsyncThrowRoutingSchemaVersion
-                        or SemanticContract.AsyncMemberAssignmentSchemaVersion
-                        or SemanticContract.AsyncSynchronousExceptionSchemaVersion
-                        or SemanticContract.AsyncCatchVariableSchemaVersion)
+                        or SemanticContract.AsyncCancellationFlowSchemaVersion))
                     && transfer.Kind is (SemanticAsyncMethod.CatchMatchTransferKind
                         or SemanticAsyncMethod.PropagateFaultTransferKind
                         or SemanticAsyncMethod.PropagateCancellationTransferKind

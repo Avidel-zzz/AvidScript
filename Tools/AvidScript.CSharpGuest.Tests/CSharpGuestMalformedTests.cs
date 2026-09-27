@@ -16,7 +16,24 @@ internal static class CSharpGuestMalformedTests
         GameplayCallbackDescriptorMismatchFailsClosed();
         DuplicateGameplayPayloadFieldsFailClosedWithoutThrowing();
         ForgedUeTypeDeclarationsFailClosed();
-        return 6;
+        TokenSemanticRequiresExecutionContract();
+        return 7;
+    }
+
+    private static void TokenSemanticRequiresExecutionContract()
+    {
+        const string source = "using System.Threading; public static class Script { public static int Main() { CancellationToken token = CancellationToken.None; return token.Equals(default(CancellationToken)) ? 1 : 0; } }";
+        const string sourceId = "Scripts/TokenSemanticBoundary.cs";
+        var document = SemanticAnalyzer.Analyze(source, sourceId, FrontendAnalyzer.Analyze(source, sourceId).Source.Sha256,
+            Array.Empty<SemanticReferenceSource>(), new SemanticCompilerWorkspace(),
+            enableAsyncExceptionFlow: true, enableDirectAwaitCleanup: true, enableAsyncCancellationFlow: true,
+            enableAsyncSynchronousExceptions: true, enableAsyncCatchVariables: true, enableCancellationTokens: true);
+        if (!document.Succeeded || !SemanticContract.HasCancellationTokens(document)
+            || !SemanticAsyncInvocationValidator.IsValid(document))
+            throw new InvalidOperationException("Token boundary fixture must be a valid Semantic 53 document.");
+        AssertRejected(document, "Semantic 53 requires its own Guest execution contract");
+        if (CSharpLanguageErrorCompiler.TryLower(document, SemanticHash, out _, out _))
+            throw new InvalidOperationException("The existing bounded-error compiler must not silently execute token values under an older contract.");
     }
 
     private static void FutureAndMismatchedSemanticVersionsFailClosed()

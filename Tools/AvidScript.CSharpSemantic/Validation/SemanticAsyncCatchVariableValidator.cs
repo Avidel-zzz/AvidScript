@@ -12,7 +12,8 @@ public static class SemanticAsyncCatchVariableValidator
 
     public static bool IsValid(SemanticDocument document)
     {
-        if (document?.AsyncMethods is null || document.Symbols is null
+        if (!SemanticCancellationTokenValidator.IsValid(document)
+            || document?.AsyncMethods is null || document.Symbols is null
             || document.Symbols.Any(symbol => symbol is null || symbol.Span is null)) return false;
         bool enabled = SemanticContract.HasAsyncCatchVariables(document);
         if (!enabled && (document.SchemaVersion == SemanticContract.AsyncCatchVariableSchemaVersion
@@ -91,7 +92,7 @@ public static class SemanticAsyncCatchVariableValidator
                 bindings++;
             }
         }
-        return !enabled || bindings > 0;
+        return !enabled || bindings > 0 || SemanticContract.HasCancellationTokens(document);
     }
 
     private static bool Canonical(SemanticOperation operation, SemanticSymbol symbol) =>

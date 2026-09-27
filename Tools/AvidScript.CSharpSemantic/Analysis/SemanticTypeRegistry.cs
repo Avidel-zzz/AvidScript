@@ -15,6 +15,8 @@ internal sealed class SemanticTypeRegistry
 
     internal bool StaticFieldOwners { get; init; }
     internal Compilation? Compilation { get; init; }
+    internal SemanticCompilationContext? CancellationTokenContext { get; init; }
+    internal bool HasCancellationTokens { get; private set; }
 
     public string Register(ITypeSymbol type)
     {
@@ -28,6 +30,14 @@ internal sealed class SemanticTypeRegistry
             GetKind(type),
             type.IsValueType,
             type.NullableAnnotation == NullableAnnotation.Annotated))) return id;
+        if (CancellationTokenContext is { EnableCancellationTokens: true } context
+            && SemanticCancellationTokenProjector.IsFrameworkType(type, context.Compilation,
+                SemanticCancellationTokens.MetadataName))
+        {
+            HasCancellationTokens = true;
+            Register(context.Compilation.GetSpecialType(SpecialType.System_Int64));
+            Register(context.Compilation.GetSpecialType(SpecialType.System_Boolean));
+        }
         if (type is IArrayTypeSymbol array)
         {
             shapes.TryAdd(id, new SemanticTypeShape(id, Register(array.ElementType), null));

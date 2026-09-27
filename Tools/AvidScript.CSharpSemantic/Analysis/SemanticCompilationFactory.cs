@@ -24,6 +24,7 @@ internal sealed record SemanticCompilationContext(
     public bool RequireTaskLocalLifetimes { get; init; }
     public bool EnableAsyncSynchronousExceptions { get; init; }
     public bool EnableAsyncCatchVariables { get; init; }
+    public bool EnableCancellationTokens { get; init; }
 }
 
 internal static class SemanticCompilationFactory

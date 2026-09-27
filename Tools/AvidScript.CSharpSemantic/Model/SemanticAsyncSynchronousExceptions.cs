@@ -18,5 +18,6 @@ public static class SemanticAsyncSynchronousExceptions
     public static bool CanFail(SemanticOperation operation) =>
         operation.Kind is "invocation" or "property_reference" or "field_reference"
             or "object_creation" or "array_creation" or "array_element_reference"
+            or SemanticCancellationTokens.Read
         || operation.Children.Any(CanFail);
 }

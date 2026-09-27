@@ -40,7 +40,8 @@ public static class SemanticAnalyzer
         bool enableAsyncCancellationFlow = false,
         bool enableStaticInitialization = false,
         bool enableAsyncSynchronousExceptions = false,
-        bool enableAsyncCatchVariables = false)
+        bool enableAsyncCatchVariables = false,
+        bool enableCancellationTokens = false)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceId);
@@ -56,6 +57,9 @@ public static class SemanticAnalyzer
         if (enableAsyncCatchVariables && (!enableAsyncSynchronousExceptions || enableStaticInitialization))
             throw new ArgumentException("Async catch variables require synchronous exception analysis; static initialization composition is not available yet.",
                 nameof(enableAsyncCatchVariables));
+        if (enableCancellationTokens && !enableAsyncCatchVariables)
+            throw new ArgumentException("Cancellation token values require async catch variable analysis.",
+                nameof(enableCancellationTokens));
 
         string sourceSha256 = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source))).ToLowerInvariant();
         SemanticSource semanticSource = new(sourceId, sourceSha256, frontendSourceSha256, source.Length);
@@ -97,6 +101,7 @@ public static class SemanticAnalyzer
         {
             EnableAsyncSynchronousExceptions = enableAsyncSynchronousExceptions,
             EnableAsyncCatchVariables = enableAsyncCatchVariables,
+            EnableCancellationTokens = enableCancellationTokens,
             RequireTaskLocalLifetimes = enableAsyncSynchronousExceptions || enableAsyncCancellationFlow
                 && SemanticAsyncTaskLocalProjector.HasRoutedThrowSource(context)
                 || SemanticAsyncProjector.HasMemberAssignmentSource(context),
@@ -105,6 +110,7 @@ public static class SemanticAnalyzer
         {
             StaticFieldOwners = enableStaticInitialization && SemanticStaticInitializerProjector.IsRequired(context),
             Compilation = context.Compilation,
+            CancellationTokenContext = context,
         };
         IReadOnlyList<SemanticSymbol> symbols = SemanticSymbolProjector.Project(context, typeRegistry);
         SemanticStateContractProjection stateContractProjection = SemanticStateContractProjector.Project(
@@ -143,7 +149,8 @@ public static class SemanticAnalyzer
         // exception. Register its Roslyn hierarchy before freezing the type set,
         // so typed catches can accept or exclude the implicit failure normally.
         if (enableAsyncSynchronousExceptions
-            && (asyncProjection.Methods.Any(method => method.Segments.Any(segment =>
+            && (typeRegistry.HasCancellationTokens
+                || asyncProjection.Methods.Any(method => method.Segments.Any(segment =>
                     segment.AwaitSite?.MemberAssignment is not null))
                 || callableProjection.Callables.Any(callable => !callable.IsStatic
                     && asyncProjection.Methods.Any(method => method.MethodSymbolId == callable.MethodSymbolId)))
@@ -275,7 +282,8 @@ public static class SemanticAnalyzer
         bool catchVariables = enableAsyncCatchVariables && asyncProjection.Methods.Any(method =>
             method.ExceptionPlan?.Catches.Any(handler => handler.ExceptionVariableSymbolId is not null) == true);
         var document = new SemanticDocument(
-            catchVariables ? SemanticContract.AsyncCatchVariableSchemaVersion
+            typeRegistry.HasCancellationTokens ? SemanticContract.CancellationTokenSchemaVersion
+                : catchVariables ? SemanticContract.AsyncCatchVariableSchemaVersion
                 : synchronousExceptions ? SemanticContract.AsyncSynchronousExceptionSchemaVersion
                 : hasMemberAssignments ? SemanticContract.AsyncMemberAssignmentSchemaVersion
                 : hasAsyncThrowRouting ? SemanticContract.AsyncThrowRoutingSchemaVersion
@@ -293,7 +301,8 @@ public static class SemanticAnalyzer
                 : hasTaskResults ? SemanticContract.TaskResultSchemaVersion
                 : SemanticContract.CurrentSchemaVersion,
             "csharp",
-            catchVariables ? SemanticContract.AsyncCatchVariableSemanticVersion
+            typeRegistry.HasCancellationTokens ? SemanticContract.CancellationTokenSemanticVersion
+                : catchVariables ? SemanticContract.AsyncCatchVariableSemanticVersion
                 : synchronousExceptions ? SemanticContract.AsyncSynchronousExceptionSemanticVersion
                 : hasMemberAssignments ? SemanticContract.AsyncMemberAssignmentSemanticVersion
                 : hasAsyncThrowRouting ? SemanticContract.AsyncThrowRoutingSemanticVersion

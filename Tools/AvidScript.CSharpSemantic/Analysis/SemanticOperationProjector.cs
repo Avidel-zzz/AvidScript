@@ -66,6 +66,10 @@ internal static class SemanticOperationProjector
         ICollection<SemanticDiagnostic>? diagnostics,
         SemanticCaptureRegistry? captureRegistry = null)
     {
+        if (SemanticCancellationTokenProjector.TryProject(operation, unit, typeRegistry,
+            child => ProjectOperation(child, unit, typeRegistry, diagnostics, captureRegistry),
+            diagnostics, out SemanticOperation? cancellationToken))
+            return cancellationToken!;
         if (operation is IFieldInitializerOperation { InitializedFields.Length: 1 } initializer)
         {
             IFieldSymbol field = initializer.InitializedFields[0];
