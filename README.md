@@ -145,6 +145,8 @@ dotnet run --project Tools/AvidScript.CSharpGuest.Tests/AvidScript.CSharpGuest.T
 - [异步成员赋值](Docs/Phase66/P66.C10_Await_Member_Assignment_Contract.md#guest-接入与补充执行验证)：`target.Value = await GetValueAsync();`，暂不支持接口属性和生成的 UE 类型。
 - [取消与求值顺序](Docs/Phase66/P66.C10_PreCancelled_Await_Contract.md)：`DelayAsync(ReadDelay()).WithCancellation(ReadToken())`，参数按从左到右顺序各求值一次，已取消时同步执行取消清理。
 
+`OperationCanceledException.CancellationToken` 尚未接入 C# / Guest API，进度见[取消身份](Docs/Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)。
+
 </details>
 
 ## License

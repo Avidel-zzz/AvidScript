@@ -39,6 +39,7 @@ public:
 	int64 ScheduleDelayWithCancelResume(float DelaySeconds, int32 CallbackId) override;
 	int64 ScheduleObjectLoad(FString ObjectPath, int32 CallbackId) override;
 	bool Cancel(int64 Token) override;
+	bool ReadCancellationCause(int64 ContinuationToken, int64& OutSourceToken) const override;
 	int64 CreateCancellationSource() override;
 	EAvidScriptCancellationSourceStatus GetCancellationSourceStatus(int64 SourceToken) const override;
 	bool CancelCancellationSource(int64 SourceToken) override;
@@ -220,6 +221,8 @@ public:
 		EAvidScriptContinuationLane Lane,
 		uint64 ActivationSerial,
 		int64 Token);
+	bool ReadCancellationCause(EAvidScriptContinuationLane Lane,
+		uint64 ActivationSerial, int64 ContinuationToken, int64& OutSourceToken) const;
 	int64 CreateCancellationSource(
 		EAvidScriptContinuationLane Lane,
 		uint64 ActivationSerial);
@@ -318,6 +321,9 @@ private:
 		int64 ProducerTaskToken = 0;
 		TArray<int64> RetainedTaskTokens;
 		int64 CancellationSourceToken = 0;
+		// Immutable provenance of the winning direct cancellation, not a
+		// reverse binding or an owning reference to a cancellation source.
+		int64 CancellationCauseSourceToken = 0;
 		TWeakObjectPtr<UWorld> World;
 		FTimerHandle TimerHandle;
 		TSharedPtr<IAvidScriptAsyncObjectLoadHandle> AsyncLoadHandle;
@@ -421,7 +427,9 @@ private:
 	void ReleaseResultSlot(uint32 Slot);
 	void ReleaseEntryResult(FEntry& Entry);
 	void UnbindEntryFromCancellationSource(FEntry& Entry);
-	bool CancelEntry(uint32 SlotIndex, bool bDeliverTerminal);
+	bool CancelWithCause(EAvidScriptContinuationLane Lane, uint64 ActivationSerial,
+		int64 Token, int64 CauseSourceToken);
+	bool CancelEntry(uint32 SlotIndex, bool bDeliverTerminal, int64 CauseSourceToken = 0);
 	void FinishBoundProducerTask(FEntry& Entry, bool bFault);
 	void HandleTimerCompletion(int64 Token);
 	void HandleObjectLoadCompletion(int64 Token, UObject* LoadedObject);

@@ -17,7 +17,10 @@ $expected = @(
         'TaskCancellationAbi', 'TaskCancellationAdmission', 'TaskCancellationImportVersion',
         'TaskLanguageErrorAdmission', 'TaskLanguageError', 'TaskResults', 'TaskResultAbi',
         'TaskEndpoint', 'TaskDispatch', 'TaskProducerBinding', 'TaskContinuationOwnership',
-        'CancellationStatus', 'CancellationSource', 'CancelResume', 'HostBoundary'
+        'CancellationStatus', 'CancellationSource', 'CancelResume', 'HostBoundary',
+        'CancellationCauseCapture', 'CancellationCauseWinner', 'CancellationCauseActivation', 'CancellationCauseContext',
+        'StateFrame', 'ManagedState', 'ManagedStateAbi', 'ActiveLifecycle', 'PreparedTransaction', 'ActivationLiveness',
+        'AsyncObjectProducer', 'LatentProducer', 'BlueprintAsyncAction', 'LatentResultSlot'
     )) {
         "AvidScript.Runtime.Continuation.$name"
     }
@@ -54,4 +57,4 @@ $complete = [regex]::Matches($log, '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*
 if ($found -ne 1 -or $success -ne $expected.Count -or $failed -ne 0 -or $complete -ne 1) {
     throw "Task cancellation evidence incomplete: found=$found success=$success failed=$failed complete=$complete log=$logPath"
 }
-Write-Output "Native Task cancellation: $success/$($expected.Count) passed; Wasmtime/WAMR ABI, status query, ownership and compatibility; compiler pre-cancel fast path is tracked separately in P66.C10; log=$logPath"
+Write-Output "Native Task cancellation: $success/$($expected.Count) passed; Wasmtime/WAMR ABI, source status, native cancellation cause, ownership and compatibility; Guest cancellation-token identity is tracked separately in P66.C10; log=$logPath"

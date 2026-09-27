@@ -44,6 +44,14 @@ public:
 	virtual int64 ScheduleDelayWithCancelResume(float, int32) { return 0; }
 	virtual int64 ScheduleObjectLoad(FString ObjectPath, int32 CallbackId) = 0;
 	virtual bool Cancel(int64 Token) = 0;
+	// Native-only observation during dispatch of a directly cancelled await.
+	// Success with zero means cancellation without a source. The returned
+	// identity grants no source access and may outlive that source's release.
+	virtual bool ReadCancellationCause(int64, int64& OutSourceToken) const
+	{
+		OutSourceToken = 0;
+		return false;
+	}
 	virtual int64 CreateCancellationSource() = 0;
 	virtual EAvidScriptCancellationSourceStatus GetCancellationSourceStatus(int64) const
 	{

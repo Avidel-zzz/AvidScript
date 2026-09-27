@@ -4459,7 +4459,7 @@ foreach ($RequiredCancellationOwnershipContract in @(
     'CreateCancellationSource',
     'BindCancellationSource',
     'UnbindEntryFromCancellationSource',
-	'CancelEntry(uint32 SlotIndex, bool bDeliverTerminal)',
+	'CancelEntry(uint32 SlotIndex, bool bDeliverTerminal, int64 CauseSourceToken = 0)',
 	'Entry.LatentCompletion.ResumesOutcomeOnCancel()',
 	'EAvidScriptContinuationStatus::Cancelled',
     'ReleaseCancellationSourcesForLane'

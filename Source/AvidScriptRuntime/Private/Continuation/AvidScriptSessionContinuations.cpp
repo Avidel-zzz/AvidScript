@@ -177,6 +177,16 @@ bool FAvidScriptContinuationHostEndpoint::Cancel(const int64 Token)
 		&& PinnedOwner->Cancel(Lane, ActivationSerial, Token);
 }
 
+bool FAvidScriptContinuationHostEndpoint::ReadCancellationCause(
+	const int64 ContinuationToken, int64& OutSourceToken) const
+{
+	OutSourceToken = 0;
+	if (!IsInGameThread() || !bValid) return false;
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = Owner.Pin();
+	return PinnedOwner && PinnedOwner->ReadCancellationCause(
+		Lane, ActivationSerial, ContinuationToken, OutSourceToken);
+}
+
 int64 FAvidScriptContinuationHostEndpoint::CreateCancellationSource()
 {
 	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = Owner.Pin();
@@ -1326,6 +1336,15 @@ bool FAvidScriptSessionContinuations::Cancel(
 	const uint64 ActivationSerial,
 	const int64 Token)
 {
+	return CancelWithCause(Lane, ActivationSerial, Token, 0);
+}
+
+bool FAvidScriptSessionContinuations::CancelWithCause(
+	const EAvidScriptContinuationLane Lane,
+	const uint64 ActivationSerial,
+	const int64 Token,
+	const int64 CauseSourceToken)
+{
 	if (!IsInGameThread() || !MatchesCurrentEndpoint(Lane, ActivationSerial))
 	{
 		return false;
@@ -1346,7 +1365,27 @@ bool FAvidScriptSessionContinuations::Cancel(
 	{
 		return false;
 	}
-	return CancelEntry(SlotIndex, true);
+	return CancelEntry(SlotIndex, true, CauseSourceToken);
+}
+
+bool FAvidScriptSessionContinuations::ReadCancellationCause(
+	const EAvidScriptContinuationLane Lane,
+	const uint64 ActivationSerial,
+	const int64 ContinuationToken,
+	int64& OutSourceToken) const
+{
+	OutSourceToken = 0;
+	if (!IsInGameThread() || bTearingDown || !MatchesCurrentEndpoint(Lane, ActivationSerial)
+		|| !IsLaneContextLive(Lane)) return false;
+	uint32 SlotIndex = 0, Generation = 0;
+	if (!UnpackToken(ContinuationToken, SlotIndex, Generation)
+		|| !Slots.IsValidIndex(static_cast<int32>(SlotIndex))) return false;
+	const FSlot& Slot = Slots[SlotIndex];
+	if (Slot.Generation != Generation || !Slot.Entry.IsSet()
+		|| Slot.Entry->Lane != Lane || Slot.Entry->ActivationSerial != ActivationSerial
+		|| !Slot.Entry->bDispatching || !Slot.Entry->bCancelledTerminalQueued) return false;
+	OutSourceToken = Slot.Entry->CancellationCauseSourceToken;
+	return true;
 }
 
 int64 FAvidScriptSessionContinuations::CreateCancellationSource(
@@ -1436,7 +1475,7 @@ bool FAvidScriptSessionContinuations::CancelCancellationSource(
 	Bindings.Sort();
 	for (const int64 ContinuationToken : Bindings)
 	{
-		Cancel(Lane, ActivationSerial, ContinuationToken);
+		CancelWithCause(Lane, ActivationSerial, ContinuationToken, SourceToken);
 	}
 	return true;
 }
@@ -1524,7 +1563,8 @@ bool FAvidScriptSessionContinuations::BindCancellationSource(
 		|| !ContinuationSlot.Entry.IsSet()
 		|| ContinuationSlot.Entry->Lane != Lane
 		|| ContinuationSlot.Entry->ActivationSerial != ActivationSerial
-		|| ContinuationSlot.Entry->bDispatching)
+		|| ContinuationSlot.Entry->bDispatching
+		|| ContinuationSlot.Entry->bCancelledTerminalQueued)
 	{
 		return false;
 	}
@@ -1552,7 +1592,7 @@ bool FAvidScriptSessionContinuations::BindCancellationSource(
 
 	if (SourceSlot->Entry->State == ECancellationSourceState::Cancelled)
 	{
-		return Cancel(Lane, ActivationSerial, ContinuationToken);
+		return CancelWithCause(Lane, ActivationSerial, ContinuationToken, SourceToken);
 	}
 	if (CancellationBindingCount >= MaximumCancellationBindings)
 	{
@@ -2486,7 +2526,8 @@ void FAvidScriptSessionContinuations::FinishBoundProducerTask(
 
 bool FAvidScriptSessionContinuations::CancelEntry(
 	const uint32 SlotIndex,
-	const bool bDeliverTerminal)
+	const bool bDeliverTerminal,
+	const int64 CauseSourceToken)
 {
 	check(IsInGameThread());
 	if (!Slots.IsValidIndex(static_cast<int32>(SlotIndex))
@@ -2518,6 +2559,7 @@ bool FAvidScriptSessionContinuations::CancelEntry(
 
 	ReleaseEntryResult(Entry);
 	UnbindEntryFromCancellationSource(Entry);
+	Entry.CancellationCauseSourceToken = CauseSourceToken;
 	Entry.bReady = true;
 	Entry.bCancelledTerminalQueued = true;
 	FAvidScriptContinuationCompletion Completion;
@@ -3126,7 +3168,10 @@ bool FAvidScriptSessionContinuations::IsLaneContextLive(
 	const EAvidScriptContinuationLane Lane) const
 {
 	UWorld* const World = GetWorldForLane(Lane);
-	if (!IsValid(World) || World->bIsTearingDown)
+	// Preserve construction-time task setup before the first World init,
+	// but reject an initialized World after CleanupWorld even before GC.
+	if (!IsValid(World) || World->bIsTearingDown
+		|| (World->HasEverBeenInitialized() && !World->IsInitialized()))
 	{
 		return false;
 	}
