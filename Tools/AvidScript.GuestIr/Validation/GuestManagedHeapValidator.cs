@@ -86,7 +86,7 @@ internal static class GuestManagedHeapValidator
                 && import.BindingOrdinal == -1;
             bool cancellationReference = GuestTaskCancellationErrorValidator.Supports(module)
                 && module.LanguageErrorCatalog is not null
-                && (GuestTaskCancellationErrorValidator.IsCancellationImport(import)
+                && (GuestTaskCancellationErrorValidator.IsCancellationImport(import, module.CancellationIdentity is not null)
                     || GuestTaskCancellationErrorValidator.IsTerminalRootImport(import));
             if ((Has(import.ReturnTypeId) || import.ParameterTypeIds.Any(Has))
                 && !report && !taskFault && !taskReadRoot && !cancellationReference)

@@ -44,6 +44,7 @@ internal static class CSharpGuestAsyncCancellationTests
             && module.DirectAwaitRoutes is { Count: 10 } && module.AsyncExceptionRoutes is { Count: 8 }
             && module.AsyncExceptionTransfers is { Count: > 0 }, "Cancellation routes and transfers must be explicit.");
         int checks = 6;
+        checks += CSharpGuestCancellationIdentityTests.CheckUpgrade(module, out _);
         SemanticAsyncMethod conditional = semantic.AsyncMethods.Single(method => method.MethodSymbolId.Contains(".ConditionalAsync("));
         SemanticDocument orphanedReturn = semantic with { AsyncMethods = semantic.AsyncMethods.Select(method => method == conditional
             ? method with { CompilerLocals = new[] { new SemanticAsyncCompilerLocal(

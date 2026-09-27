@@ -19,7 +19,7 @@ public static class GuestStaticStorage
     // and ownership checks. The serialized module always retains its outer version.
     public static GuestModule ExecutionProfile(GuestModule module)
     {
-        module = GuestDirectAwaitReadiness.BaseProfile(module);
+        module = GuestDirectAwaitReadiness.BaseProfile(GuestTaskCancellationIdentity.BaseProfile(module));
         return GuestAsyncSynchronousExceptions.IsVersion(module) || GuestStaticAsyncExecution.IsVersion(module)
             ? module with { SchemaVersion = GuestAsyncThrowRouteValidator.SchemaVersion, IrVersion = GuestAsyncThrowRouteValidator.IrVersion }
         : GuestTaskErrorTransfers.IsVersion(module) && module.TaskErrorTransfers is { BaseSchemaVersion: >= 20 and <= 26 } transfers

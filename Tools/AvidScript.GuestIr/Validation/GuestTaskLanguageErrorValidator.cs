@@ -143,16 +143,18 @@ public static class GuestTaskLanguageErrorValidator
         {
             GuestInstruction call = block.Instructions[index];
             if (call.Op != "call" || call.TargetId != fault.Id) continue;
-            if (!HasFreshRoot(block, index)
+            int operandCount = fault.Id == GuestTaskCancellationIdentity.CancelImportId
+                && context.Module.CancellationIdentity is not null ? 5 : 4;
+            if (!HasFreshRoot(block, index, operandCount)
                 && !context.CheckedTaskErrorTransfers.Contains((function.Id, block.Id, index)))
                 Add(context, $"Function '{function.Id}' must submit a fresh frame-rooted error object carrying the same type token to '{fault.Name}'.");
         }
     }
 
-    internal static bool HasFreshRoot(GuestBasicBlock block, int index)
+    internal static bool HasFreshRoot(GuestBasicBlock block, int index, int operandCount = 4)
     {
         GuestInstruction call = block.Instructions[index];
-        return call.OperandIds.Count == 4 && index >= 2
+        return call.OperandIds.Count == operandCount && index >= 2
             && block.Instructions[index - 1] is { Op: "managed_set" } set
             && set.TargetId == "field:code" && set.OperandIds.Count == 2
             && set.OperandIds[0] == call.OperandIds[3] && set.OperandIds[1] == call.OperandIds[1]
@@ -191,7 +193,9 @@ public static class GuestTaskLanguageErrorValidator
             foreach (GuestInstruction call in function.Blocks.SelectMany(block => block.Instructions)
                 .Where(instruction => instruction.Op == "call" && instruction.TargetId == fault.Id))
             {
-                if (call.OperandIds.Count != 4
+                int operandCount = fault.Id == GuestTaskCancellationIdentity.CancelImportId
+                    && context.Module.CancellationIdentity is not null ? 5 : 4;
+                if (call.OperandIds.Count != operandCount
                     || !IsCatalogToken(call.OperandIds[1], true, types, outcomes,
                         registerTypes, definitions, ambiguous)
                     || !IsCatalogToken(call.OperandIds[2], false, sources, outcomes,

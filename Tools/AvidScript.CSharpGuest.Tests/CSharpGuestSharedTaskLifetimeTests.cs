@@ -40,6 +40,7 @@ internal static class CSharpGuestSharedTaskLifetimeTests
             var lowered = CSharpGuestLowerer.Lower(semantic, hash, enableAsyncLanguageErrors: true);
             Check(lowered.Succeeded, "Shared Task lowering: " + string.Join(" | ", lowered.Diagnostics.Select(d => d.Code + ": " + d.Message)));
             var module = lowered.Module!;
+            checks += CSharpGuestCancellationIdentityTests.CheckUpgrade(module, out _);
             Check(module is { SchemaVersion: 31, IrVersion: "1.30",
                     DirectAwaitReadiness: { BaseSchemaVersion: 25, BaseIrVersion: "1.24", Guards.Count: > 0 } }
                 && module.TaskLocalLifetimes?.ExceptionModel == "cancellation",

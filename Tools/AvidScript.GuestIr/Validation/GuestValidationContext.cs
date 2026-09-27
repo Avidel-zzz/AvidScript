@@ -10,7 +10,7 @@ internal sealed class GuestValidationContext
     public GuestValidationContext(GuestModule module)
     {
         InputArtifact = module;
-        Artifact = GuestDirectAwaitReadiness.BaseProfile(module);
+        Artifact = GuestDirectAwaitReadiness.BaseProfile(GuestTaskCancellationIdentity.BaseProfile(module));
         Module = GuestStaticStorage.ExecutionProfile(Artifact);
         diagnostics = new List<GuestDiagnostic>(module.Diagnostics);
         Types = new Dictionary<string, GuestType>(StringComparer.Ordinal);

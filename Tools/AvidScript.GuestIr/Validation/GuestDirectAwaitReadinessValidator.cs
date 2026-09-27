@@ -13,14 +13,18 @@ internal static class GuestDirectAwaitReadinessValidator
         var artifact = context.InputArtifact;
         var queryImports = artifact.Imports.Where(import => import.Id == GuestDirectAwaitReadiness.ImportId
             || import.Name == GuestDirectAwaitReadiness.ImportName).ToArray();
-        if (!GuestDirectAwaitReadiness.IsVersion(artifact))
+        bool identity = GuestTaskCancellationIdentity.IsVersion(artifact);
+        if (!GuestDirectAwaitReadiness.IsVersion(artifact) && !identity)
         {
             if (artifact.DirectAwaitReadiness is not null || queryImports.Length != 0)
                 Add(context, "Direct await readiness requires Guest IR 31/1.30.");
             return;
         }
+        if (identity && artifact.DirectAwaitReadiness is null && queryImports.Length == 0) return;
         if (artifact.DirectAwaitReadiness is not { Guards.Count: > 0 and <= 4096 } plan
             || !GuestDirectAwaitReadiness.IsBase(plan.BaseSchemaVersion, plan.BaseIrVersion)
+            || identity && (artifact.CancellationIdentity is null || artifact.CancellationIdentity.BaseSchemaVersion != plan.BaseSchemaVersion
+                || artifact.CancellationIdentity.BaseIrVersion != plan.BaseIrVersion)
             || artifact.Language != "csharp" || !GuestTaskCancellationErrorValidator.Supports(context.Module)
             || artifact.DirectAwaitRoutes is null || queryImports.Length != 1
             || queryImports[0] is not { Id: GuestDirectAwaitReadiness.ImportId, Module: "avidscript",

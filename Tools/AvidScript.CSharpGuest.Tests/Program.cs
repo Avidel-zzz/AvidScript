@@ -6,6 +6,18 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--cancellation-identity")
+            {
+                int focused = CSharpGuestCancellationIdentityTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.CancellationIdentity: {focused}/{focused} passed");
+                return 0;
+            }
+            if (args.Length == 1 && args[0] == "--await-readiness-identity")
+            {
+                int focused = CSharpGuestAwaitReadinessEvaluationTests.Run(cancellationIdentity: true);
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.AwaitReadinessEvaluation: {focused}/{focused} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--conditional-values")
             {
                 int focused = CSharpGuestShortCircuitTests.Run();
@@ -261,6 +273,7 @@ internal static class Program
                 + CSharpGuestAsyncLanguageErrorTests.Run()
                 + CSharpGuestDirectAwaitTests.Run()
                 + CSharpGuestAsyncCancellationTests.Run()
+                + CSharpGuestCancellationIdentityTests.Run()
                 + CSharpGuestAsyncThrowRoutingTests.Run()
                 + CSharpGuestAsyncSynchronousExceptionTests.Run()
                 + CSharpGuestAsyncMemberAssignmentTests.Run()

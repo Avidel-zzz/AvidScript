@@ -20,7 +20,7 @@ internal static class CSharpGuestAwaitReadinessEvaluationTests
 {
     private sealed record ReferenceResult(SortedDictionary<string, int> Final, SortedDictionary<string, int> FirstResume);
 
-    public static int Run()
+    public static int Run(bool cancellationIdentity = false)
     {
         int count = 0;
         void Check(bool valid, string reason) { if (!valid) throw new InvalidOperationException(reason); count++; }
@@ -69,6 +69,8 @@ internal static class CSharpGuestAwaitReadinessEvaluationTests
             var module = compilation!.Module;
             Check(module.SchemaVersion == 31 && module.DirectAwaitReadiness?.BaseSchemaVersion == 29
                 && GuestModuleValidator.Validate(module).Succeeded, name + " validated readiness with synchronous exceptions");
+            count += CSharpGuestCancellationIdentityTests.CheckUpgrade(module, out var identityModule);
+            if (cancellationIdentity) module = identityModule;
             var wasm = WasmModuleCompiler.Compile(module);
             Check(wasm.Succeeded, name + " WASM: " + string.Join(" | ", wasm.Diagnostics.Select(item => item.Message)));
             byte[] ir = GuestIrSerializer.Serialize(module);

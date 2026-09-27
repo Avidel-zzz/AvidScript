@@ -52,6 +52,7 @@ public static class GuestModuleValidator
         GuestAsyncExceptionRouteValidator.Validate(context);
         GuestDirectAwaitReadinessValidator.Validate(context);
         GuestDirectAwaitRouteValidator.Validate(context);
+        GuestTaskCancellationIdentityValidator.Validate(context);
         GuestAsyncExceptionTransferValidator.Validate(context);
         ValidateExports(context);
         ValidateReportedStatus(context);

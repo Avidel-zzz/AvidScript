@@ -81,6 +81,8 @@ internal static class GuestDirectAwaitRouteValidator
             if (schedulers.Length == 0 || schedulers.Any(function =>
                     !HasSchedule(function, route)))
                 Add(context, $"Direct await callback {route.CallbackId} does not use its cancel-resume Timer import.");
+            else context.CheckedDirectCancellationProducers.Add((ResumePrefix + route.CallbackId,
+                route.NormalTargetBlockId + ":entry:cancel_path:task_created"));
         }
         if (module.Imports.Count(import => import.Module == "avidscript"
                 && import.Name == "avid_continuation_delay_cancel_resume_v1") != (routes.Count > 0 ? 1 : 0)
@@ -93,7 +95,7 @@ internal static class GuestDirectAwaitRouteValidator
             Add(context, "IR 23 contains an unlisted cancel-resume Timer call.");
         if (ir24 && module.Functions.Any(function => function.Blocks.Any(block =>
                 block.Instructions.Any(instruction => instruction.Op == "call"
-                    && instruction.TargetId == GuestTaskCancellationErrorValidator.ImportId)
+                    && instruction.TargetId == GuestTaskCancellationIdentity.CancellationImportId(module))
                 && !cancellationProducers.Contains((function.Id, block.Id)))))
             Add(context, "IR 24 contains an unlisted typed cancellation producer.");
     }

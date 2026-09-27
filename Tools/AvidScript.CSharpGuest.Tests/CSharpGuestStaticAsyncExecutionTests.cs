@@ -79,6 +79,7 @@ internal static class CSharpGuestStaticAsyncExecutionTests
                 && module.Provenance.SemanticSchemaVersion == 51 && module.Provenance.SemanticVersion == "1.60"
                 && module.Provenance.SemanticSha256 == hash && module.AsyncSynchronousExceptions is not null
                 && GuestModuleValidator.Validate(module).Succeeded, name + " execution envelope");
+            count += CSharpGuestCancellationIdentityTests.CheckUpgrade(module, out _);
             byte[] json = GuestIrSerializer.Serialize(module);
             Check(CSharpStaticInitializationCompiler.TryLower(SemanticSerializer.Deserialize(sourceBytes), hash, out var again, out error)
                 && json.SequenceEqual(GuestIrSerializer.Serialize(again!)), name + " deterministic source compilation: " + error);

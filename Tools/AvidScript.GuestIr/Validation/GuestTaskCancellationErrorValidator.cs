@@ -30,7 +30,9 @@ public static class GuestTaskCancellationErrorValidator
     internal static void Validate(GuestValidationContext context)
     {
         GuestModule module = context.Module;
-        GuestImport[] cancellation = Find(module, ImportId, ImportName);
+        bool identity = module.CancellationIdentity is not null;
+        GuestImport[] cancellation = Find(module, identity ? GuestTaskCancellationIdentity.CancelImportId : ImportId,
+            identity ? GuestTaskCancellationIdentity.CancelImportName : ImportName);
         GuestImport[] metadata = Find(module, MetaImportId, MetaImportName);
         GuestImport[] roots = Find(module, RootImportId, RootImportName);
         if (!Supports(module) && cancellation.Length == 0
@@ -45,7 +47,7 @@ public static class GuestTaskCancellationErrorValidator
             Add(context, "Task cancellation errors require paired Semantic 44/1.53 and IR 24/1.23, a nonempty catalog and the complete cancellation/terminal-read import set.");
             return;
         }
-        if (!IsCancellationImport(cancellation[0])
+        if (!IsCancellationImport(cancellation[0], identity)
             || !IsImport(metadata[0], MetaImportId, MetaImportName,
                 new[] { "type:int64" }, "type:int64")
             || !IsTerminalRootImport(roots[0]))
@@ -57,8 +59,10 @@ public static class GuestTaskCancellationErrorValidator
         ValidateCancellationTypes(context, cancellation[0]);
     }
 
-    internal static bool IsCancellationImport(GuestImport import) =>
-        IsImport(import, ImportId, ImportName, new[]
+    internal static bool IsCancellationImport(GuestImport import, bool identity = false) => identity
+        ? IsImport(import, GuestTaskCancellationIdentity.CancelImportId, GuestTaskCancellationIdentity.CancelImportName, new[]
+            { "type:int64", "type:int32", "type:int32", "type:language_error_root", "type:int64" }, "type:int32")
+        : IsImport(import, ImportId, ImportName, new[]
             { "type:int64", "type:int32", "type:int32", "type:language_error_root" },
             "type:int32");
 
@@ -101,7 +105,7 @@ public static class GuestTaskCancellationErrorValidator
                     && int.TryParse(literal.Constant.Value, NumberStyles.None,
                         CultureInfo.InvariantCulture, out token);
             }
-            if (call.OperandIds.Count != 4
+            if (call.OperandIds.Count != (context.Module.CancellationIdentity is null ? 4 : 5)
                 || !LiteralBefore(call.OperandIds[1], out int typeToken)
                 || !allowed.Contains(typeToken)
                 || !LiteralBefore(call.OperandIds[2], out _))

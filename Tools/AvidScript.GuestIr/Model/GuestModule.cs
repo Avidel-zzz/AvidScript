@@ -63,6 +63,9 @@ public sealed record GuestModule(
 
     [JsonPropertyOrder(25), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public GuestDirectAwaitReadinessPlan? DirectAwaitReadiness { get; init; }
+
+    [JsonPropertyOrder(26), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public GuestTaskCancellationIdentityPlan? CancellationIdentity { get; init; }
 }
 
 // IR 25 binds the new compiler ownership profile to the concrete release and

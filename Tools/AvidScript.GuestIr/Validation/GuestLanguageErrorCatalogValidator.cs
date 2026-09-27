@@ -174,11 +174,13 @@ internal static class GuestLanguageErrorCatalogValidator
                     GuestInstruction call = block.Instructions[index];
                     if (call.Op != "call" || (call.TargetId != GuestTaskLanguageErrorValidator.ImportId
                         && !(GuestTaskCancellationErrorValidator.Supports(context.Module)
-                            && call.TargetId == GuestTaskCancellationErrorValidator.ImportId))) continue;
+                            && call.TargetId == GuestTaskCancellationIdentity.CancellationImportId(context.Module)))) continue;
                     // Checked transfers read the tokens from a validated outcome producer.
                     // Its literal stores above remain responsible for catalog coverage.
                     if (context.CheckedTaskErrorTransfers.Contains((function.Id, block.Id, index))) continue;
-                    if (call.OperandIds.Count != 4
+                    int operandCount = context.Module.CancellationIdentity is not null
+                        && call.TargetId == GuestTaskCancellationIdentity.CancelImportId ? 5 : 4;
+                    if (call.OperandIds.Count != operandCount
                         || !LiteralToken(call.OperandIds[1], typeTokens, definitions,
                             ambiguous, out int typeToken)
                         || !LiteralToken(call.OperandIds[2], sourceTokens, definitions,

@@ -37,8 +37,9 @@ internal static class GuestDirectAwaitCancellationValidator
             || !Nonzero(create, task, "int64")
             || !Branches(create, cancel.Id, invalid.Id)) return false;
         GuestInstruction[] calls = cancel.Instructions.Where(instruction => instruction.Op == "call"
-            && instruction.TargetId == GuestTaskCancellationErrorValidator.ImportId).ToArray();
-        if (calls.Length != 1 || calls[0] is not { OperandIds.Count: 4, ResultId: { } accepted }
+            && instruction.TargetId == GuestTaskCancellationIdentity.CancellationImportId(module)).ToArray();
+        if (calls.Length != 1 || calls[0] is not { ResultId: { } accepted }
+            || calls[0].OperandIds.Count != (module.CancellationIdentity is null ? 4 : 5)
             || calls[0].OperandIds[0] != task
             || !Literal(cancel, calls[0].OperandIds[1], "int32", cancellation.TypeToken)
             || !Literal(cancel, calls[0].OperandIds[2], "int32", cancellation.SourceToken)

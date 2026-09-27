@@ -2,6 +2,7 @@
 param(
     [string]$EngineRoot = 'C:\UnrealEngine',
     [string]$DotNetPath = (Join-Path $env:USERPROFILE '.dotnet/dotnet.exe'),
+    [switch]$CancellationIdentity,
     [switch]$SkipBuild
 )
 
@@ -23,7 +24,8 @@ try {
     $env:AVIDSCRIPT_AWAIT_READINESS_DIR = Join-Path $runRoot 'Fixtures'
     $sdk = & $DotNetPath --version
     if ($LASTEXITCODE -ne 0 -or $sdk -cne '8.0.416') { throw "Expected SDK 8.0.416, got $sdk" }
-    $managed = @(& $DotNetPath run --project Tools/AvidScript.CSharpGuest.Tests/AvidScript.CSharpGuest.Tests.csproj -c Release -- --await-readiness-evaluation 2>&1)
+    $managedMode = if ($CancellationIdentity) { '--await-readiness-identity' } else { '--await-readiness-evaluation' }
+    $managed = @(& $DotNetPath run --project Tools/AvidScript.CSharpGuest.Tests/AvidScript.CSharpGuest.Tests.csproj -c Release -- $managedMode 2>&1)
     $managedExit = $LASTEXITCODE
     $managed | Set-Content -LiteralPath (Join-Path $runRoot 'managed.log') -Encoding utf8
     $match = [regex]::Match(($managed -join "`n"), 'AvidScript.CSharpGuest.Tests.AwaitReadinessEvaluation: (\d+)/(\d+) passed')
@@ -53,6 +55,7 @@ try {
     }
     [ordered]@{
         schema_version = 1
+        cancellation_identity = [bool]$CancellationIdentity
         managed_passed = [int]$match.Groups[1].Value
         scenarios = 18
         vm_modes_passed = $cases
