@@ -14,9 +14,9 @@ C# 静态初始化不能简单映射到上述 14/1.13 夹具：现有编译器�
 
 ## 现有阻塞
 
-[SemanticAnalyzer](../../Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs)可投射特定的静态初始化 + async + token 组合；C# Guest 和双 VM 目前只执行同步两能力的同源 IR 35。异步同源探针已通过私有 Semantic 53 执行副本完成静态字段改写、异常/取消 lowering，并构造含五项能力清单的 IR 35 候选；最终 [GuestModuleValidator](../../Tools/AvidScript.GuestIr/Validation/GuestModuleValidator.cs)按真实 IR 35 输入拒绝，编译器不发布模块。当前拒绝包括任务/异常路由、静态槽、取消身份与 token 计划基线不一致、托管根 import。原始 [29 个成员 await 场景](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)需要静态对象初始化，当前可执行的是 Semantic 51 → IR 31；标准 token 专项使用 Semantic 53 → IR 34。两组通过不能证明同一个异步业务模块能同时使用这些能力。
+[SemanticAnalyzer](../../Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs)可投射特定的静态初始化 + async + token 组合；C# Guest 和双 VM 目前只执行同步两能力的同源 IR 35。异步同源探针已通过私有 Semantic 53 执行副本完成静态字段改写、异常/取消 lowering，并构造含五项能力清单的 IR 35 候选；最终 [GuestModuleValidator](../../Tools/AvidScript.GuestIr/Validation/GuestModuleValidator.cs)按真实 IR 35 输入拒绝，编译器不发布模块。当前拒绝包括任务/异常路由、静态槽与托管根 import。原始 [29 个成员 await 场景](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)需要静态对象初始化，当前可执行的是 Semantic 51 → IR 31；标准 token 专项使用 Semantic 53 → IR 34。两组通过不能证明同一个异步业务模块能同时使用这些能力。
 
-token reader 验证器现可在真实 IR 35 输入上识别 29/1.28、Semantic 54、异常值与 token 值两项声明的组合，并拒绝缺声明、旧来源或同步 token 计划。此处只是 reader 的局部合同：同源候选的取消身份计划仍与 token 计划不一致，完整五能力模块仍被拒绝；不能据此宣布异步执行可用。
+token reader 验证器现可在真实 IR 35 输入上识别 29/1.28、Semantic 54、异常值与 token 值两项声明的组合，并拒绝缺声明、旧来源或同步 token 计划。同源候选先核对旧包装生成的静态、readiness、取消身份、token 与异常计划链，再把 readiness 和取消身份计划统一标记为 29/1.28；最终验证仍拒绝未开放的五能力模块。这里没有把计划字段一致当作执行正确性的证明。
 
 旧版组合依靠外层版本和 `BaseProfile` 回退到旧执行版本；IR 35 的同步组合已经由 [GuestValidationContext](../../Tools/AvidScript.GuestIr/Validation/GuestValidationContext.cs)直接验证真实输入，并由 [WASM provenance](../../Tools/AvidScript.WasmBackend/Codegen/WasmModuleCompiler.cs)及[原生读取者](../../Source/AvidScriptRuntime/Private/Diagnostics/AvidScriptLanguageErrorCatalog.cpp)编码执行基线与能力清单。异步基线 29/1.28 的完整模块尚未采用这条直接验证路径；继续增加外层版本会使前端、缓存和 Host 的组合数量随能力增长。
 
@@ -25,7 +25,7 @@ token reader 验证器现可在真实 IR 35 输入上识别 29/1.28、Semantic 5
 | 顺序 | 必须完成的合同 | 验收 |
 | --- | --- | --- |
 | 1. 来源与恢复边 | 同源 Semantic 54 形成私有执行副本；静态 guard 在 exported async 入口和恢复段都有异常目标与 owner；无目标的调用继续拒绝 | 静态初始化成功/失败、await 前后访问及导出入口均能保留正确错误路由 |
-| 2. 统一执行基线 | 静态槽、readiness、取消身份、异常值和 token reader 全部标记 29/1.28；当前 readiness 旧包装会标记 30/1.29，不能直接改数字而跳过其实际前提 | 计划的 base 一致，旧 IR 31/34 序列化与执行不变，错 base 负例拒绝 |
+| 2. 统一执行基线 | 静态槽、readiness、取消身份、异常值和 token reader 全部标记 29/1.28；私有候选已核对旧包装的 29/30 计划链并统一 base，执行正确性仍须由真实 IR 35 验证 | 计划的 base 一致，旧 IR 31/34 序列化与执行不变，错 base 负例拒绝 |
 | 3. IR 35 直接验证 | outcome/catalog、Task 结果与错误、async route/transfer、静态堆、托管根 import、reader 和五项增量在同一个 artifact 上逐项校验 | 正例完整通过；移除任一计划/import、错签名、伪造来源或旧版夹带能力均拒绝 |
 | 4. WASM 与原生准入 | emitter 和 Host reader 接受准确的 29/1.28 五能力 provenance；两 VM 执行相同字节 | 先跑同源最小模块，再跑原始 29 场景与独立 token 身份观察，检查取消、错误、重载和根释放 |
 

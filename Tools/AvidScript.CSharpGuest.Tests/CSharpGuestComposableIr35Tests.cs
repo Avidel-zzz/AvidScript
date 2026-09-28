@@ -134,7 +134,8 @@ internal static class CSharpGuestComposableIr35Tests
                 out var asyncModule, out var asyncError) && asyncModule is null
             && asyncError?.Contains("ASIR1042", StringComparison.Ordinal) == true
             && asyncError.Contains("ASIR1037", StringComparison.Ordinal)
-            && asyncError.Contains("ASIR1041: Cancellation identity and token value execution bases must agree.",
+            && !asyncError.Contains("ASIR1041", StringComparison.Ordinal)
+            && !asyncError.Contains("Every carried plan must name the same exact execution base.",
                 StringComparison.Ordinal),
             "unvalidated async IR 35 must remain unpublished after private source preparation: " + asyncError);
         Check(!CSharpStaticInitializationCompiler.TryLower(asyncSemantic with { CapabilityManifest =

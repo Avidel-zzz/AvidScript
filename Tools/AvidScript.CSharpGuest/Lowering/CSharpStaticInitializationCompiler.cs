@@ -25,10 +25,31 @@ public static class CSharpStaticInitializationCompiler
             GuestModule restored = compilation!.Module with { Provenance = compilation.Module.Provenance with
             { SemanticSchemaVersion = source.SchemaVersion, SemanticVersion = source.SemanticVersion } };
             if (asynchronousTokenComposition)
+            {
+                // The legacy wrappers were built around IR 30. IR 35 declares
+                // their shared IR 29 execution base only after the expected
+                // source-derived plans exist. Final validation still owns admission.
+                if (restored is not {
+                    SchemaVersion: GuestCancellationTokens.SchemaVersion,
+                    IrVersion: GuestCancellationTokens.IrVersion,
+                    StaticStorage: { BaseSchemaVersion: 29, BaseIrVersion: "1.28" },
+                    DirectAwaitReadiness: { BaseSchemaVersion: 30, BaseIrVersion: "1.29", Guards.Count: > 0 },
+                    CancellationIdentity: { BaseSchemaVersion: 30, BaseIrVersion: "1.29" },
+                    CancellationTokens: { BaseSchemaVersion: 29, BaseIrVersion: "1.28" },
+                    ExceptionValues: not null,
+                })
+                {
+                    error = "Async capability composition requires the complete source-derived IR 29/30 plan chain.";
+                    return false;
+                }
                 restored = restored with
                 {
                     SchemaVersion = GuestComposableCapabilities.SchemaVersion,
                     IrVersion = GuestComposableCapabilities.IrVersion,
+                    DirectAwaitReadiness = restored.DirectAwaitReadiness with
+                        { BaseSchemaVersion = 29, BaseIrVersion = "1.28" },
+                    CancellationIdentity = restored.CancellationIdentity with
+                        { BaseSchemaVersion = 29, BaseIrVersion = "1.28" },
                     CapabilityManifest = GuestCapabilityManifest.Create(29, "1.28", new[] {
                         new GuestCapability(GuestComposableCapabilities.StaticStorage, 1),
                         new GuestCapability(GuestComposableCapabilities.AwaitReadiness, 1),
@@ -37,6 +58,7 @@ public static class CSharpStaticInitializationCompiler
                         new GuestCapability(GuestComposableCapabilities.CancellationTokenValue, 1),
                     }),
                 };
+            }
             var restoredValidation = GuestModuleValidator.Validate(restored);
             if (!restoredValidation.Succeeded)
             { error = "Static language-error module failed original-provenance validation: "
