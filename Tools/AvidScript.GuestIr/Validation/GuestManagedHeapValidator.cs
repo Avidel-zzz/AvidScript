@@ -45,6 +45,18 @@ internal static class GuestManagedHeapValidator
         if (module.Globals.Any(value => Has(value.TypeId)) || module.DataSegments.Any(value => Has(value.TypeId))
             || module.Types.Any(type => type.Kind == "array" && type.ElementTypeId is not null && Has(type.ElementTypeId)))
             Add(context, "Managed references cannot enter untraced globals, static data or array storage.");
+        bool composableAsync = GuestComposableCapabilities.HasExecutionBase(context.InputArtifact, 29, "1.28")
+            && module.Language == "csharp" && module.Provenance is { SemanticSchemaVersion: 54, SemanticVersion: "1.63" }
+            && GuestComposableCapabilities.Has(module, GuestComposableCapabilities.StaticStorage)
+            && GuestComposableCapabilities.Has(module, GuestComposableCapabilities.AwaitReadiness)
+            && GuestComposableCapabilities.Has(module, GuestComposableCapabilities.CancellationIdentity)
+            && GuestComposableCapabilities.Has(module, GuestComposableCapabilities.ExceptionValues)
+            && GuestComposableCapabilities.Has(module, GuestComposableCapabilities.CancellationTokenValue)
+            && module.StaticStorage is { BaseSchemaVersion: 29, BaseIrVersion: "1.28" }
+            && module.DirectAwaitReadiness is { BaseSchemaVersion: 29, BaseIrVersion: "1.28" }
+            && module.CancellationIdentity is { BaseSchemaVersion: 29, BaseIrVersion: "1.28" }
+            && module.CancellationTokens is { BaseSchemaVersion: 29, BaseIrVersion: "1.28" }
+            && module.ExceptionValues is not null;
         bool combinedVersion = module.SchemaVersion == GuestTaskLanguageErrorValidator.SchemaVersion
             && module.IrVersion == GuestTaskLanguageErrorValidator.IrVersion
             || module.SchemaVersion == GuestTaskLanguageErrorValidator.AsyncSchemaVersion
@@ -54,10 +66,11 @@ internal static class GuestManagedHeapValidator
             || module.SchemaVersion == GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion
             && module.IrVersion == GuestTaskLanguageErrorValidator.DirectCleanupIrVersion
             || GuestTaskCancellationErrorValidator.Supports(module)
-            || GuestTaskLocalLifetimeValidator.HasErrors(module);
+            || GuestTaskLocalLifetimeValidator.HasErrors(module) || composableAsync;
         bool catalogVersion = module.SchemaVersion == GuestLanguageErrorCatalogValidator.SchemaVersion
             && module.IrVersion == GuestLanguageErrorCatalogValidator.IrVersion
-            || GuestComposableCapabilities.HasExecutionBase(context.InputArtifact, 17, "1.16");
+            || GuestComposableCapabilities.HasExecutionBase(context.InputArtifact, 17, "1.16")
+            || composableAsync;
         foreach (GuestImport import in module.Imports)
         {
             bool report = (catalogVersion || combinedVersion)
@@ -69,7 +82,7 @@ internal static class GuestManagedHeapValidator
                     { "type:int32", "type:int32", "type:language_error_root" })
                 && import.ReturnTypeId == "type:int32"
                 && import.OptimizationClass == "none";
-            if (GuestComposableCapabilities.HasExecutionBase(context.InputArtifact, 17, "1.16")
+            if ((GuestComposableCapabilities.HasExecutionBase(context.InputArtifact, 17, "1.16") || composableAsync)
                 && (import.Id == "import:language_error_report_v1"
                     || import.Name == "avid_language_error_report_v1")
                 && (!report || import.DispatchClass != "semantic" || import.BindingOrdinal != -1))
@@ -81,7 +94,8 @@ internal static class GuestManagedHeapValidator
                 && import.ParameterTypeIds.SequenceEqual(new[]
                     { "type:int64", "type:int32", "type:int32", "type:language_error_root" })
                 && import.ReturnTypeId == "type:int32"
-                && import.OptimizationClass == "none";
+                && import.OptimizationClass == "none"
+                && (!composableAsync || import.DispatchClass == "semantic" && import.BindingOrdinal == -1);
             bool taskReadRoot = combinedVersion && module.LanguageErrorCatalog is not null
                 && import.Id == GuestTaskLanguageErrorValidator.RootImportId
                 && import.Module == GuestTaskResultValidator.ImportModule
@@ -90,7 +104,7 @@ internal static class GuestManagedHeapValidator
                 && import.ReturnTypeId == "type:language_error_root"
                 && import.DispatchClass == "semantic" && import.OptimizationClass == "none"
                 && import.BindingOrdinal == -1;
-            bool cancellationReference = GuestTaskCancellationErrorValidator.Supports(module)
+            bool cancellationReference = (GuestTaskCancellationErrorValidator.Supports(module) || composableAsync)
                 && module.LanguageErrorCatalog is not null
                 && (GuestTaskCancellationErrorValidator.IsCancellationImport(import, module.CancellationIdentity is not null)
                     || GuestTaskCancellationErrorValidator.IsTerminalRootImport(import));

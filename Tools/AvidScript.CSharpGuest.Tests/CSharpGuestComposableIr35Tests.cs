@@ -136,6 +136,7 @@ internal static class CSharpGuestComposableIr35Tests
             && asyncError.Contains("ASIR1037", StringComparison.Ordinal)
             && !asyncError.Contains("ASIR1041", StringComparison.Ordinal)
             && !asyncError.Contains("ASIR1035", StringComparison.Ordinal)
+            && !asyncError.Contains("ASIR1013", StringComparison.Ordinal)
             && !asyncError.Contains("Every carried plan must name the same exact execution base.",
                 StringComparison.Ordinal),
             "unvalidated async IR 35 must remain unpublished after private source preparation: " + asyncError);

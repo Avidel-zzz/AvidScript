@@ -57,6 +57,36 @@ internal static class GuestCancellationTokenTests
             "async token reader with old Semantic provenance");
         Reject(asyncReader with { CancellationTokens = new(17, "1.16") },
             "async token reader with a synchronous token plan");
+        GuestImport[] rootImports = {
+            new("import:language_error_report_v1", "avidscript", "avid_language_error_report_v1",
+                new[] { "type:int32", "type:int32", GuestCancellationTokens.RootTypeId }, "type:int32"),
+            new(GuestTaskLanguageErrorValidator.ImportId, "avidscript", GuestTaskLanguageErrorValidator.ImportName,
+                new[] { "type:int64", "type:int32", "type:int32", GuestCancellationTokens.RootTypeId }, "type:int32"),
+            new(GuestTaskLanguageErrorValidator.RootImportId, "avidscript", GuestTaskLanguageErrorValidator.RootImportName,
+                new[] { "type:int64" }, GuestCancellationTokens.RootTypeId),
+            new(GuestTaskCancellationIdentity.CancelImportId, "avidscript", GuestTaskCancellationIdentity.CancelImportName,
+                new[] { "type:int64", "type:int32", "type:int32", GuestCancellationTokens.RootTypeId, "type:int64" }, "type:int32"),
+            new(GuestTaskCancellationErrorValidator.RootImportId, "avidscript", GuestTaskCancellationErrorValidator.RootImportName,
+                new[] { "type:int64" }, GuestCancellationTokens.RootTypeId),
+        };
+        GuestModule managedAsync = asyncReader with {
+            StaticStorage = new(29, "1.28", new[] { new GuestStaticSlot("static:error", GuestCancellationTokens.RootTypeId) }),
+            DirectAwaitReadiness = new(29, "1.28", Array.Empty<GuestDirectAwaitReadinessGuard>()),
+            CancellationIdentity = new(29, "1.28"),
+            ExceptionValues = new(Array.Empty<GuestExceptionValueBinding>()),
+            Imports = asyncReader.Imports.Concat(rootImports).ToArray(),
+        };
+        var managedPending = GuestModuleValidator.Validate(managedAsync);
+        Check(!managedPending.Succeeded && managedPending.Diagnostics.All(item => item.Code != "ASIR1013"),
+            "IR 35 base 29 recognizes only canonical managed-root imports while the async module remains incomplete");
+        foreach (GuestImport canonical in rootImports)
+            Reject(managedAsync with { Imports = managedAsync.Imports.Select(import => import.Id == canonical.Id
+                ? import with { Name = import.Name + "_alias" } : import).ToArray() },
+                "async managed-root import alias " + canonical.Id, "ASIR1013");
+        foreach (GuestImport canonical in rootImports.Take(2))
+            Reject(managedAsync with { Imports = managedAsync.Imports.Select(import => import.Id == canonical.Id
+                ? import with { DispatchClass = "binding" } : import).ToArray() },
+                "async managed-root import dispatch " + canonical.Id, "ASIR1013");
         Reject(reader with { CancellationTokens = new(29, "1.28"),
             TaskErrorTransfers = new(29, "1.28", Array.Empty<GuestTaskErrorTransferSite>()) },
             "legacy IR 34 cannot gain task transfers through an IR 35 reader rule");
