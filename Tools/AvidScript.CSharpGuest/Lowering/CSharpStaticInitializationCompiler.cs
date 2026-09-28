@@ -15,14 +15,32 @@ public static class CSharpStaticInitializationCompiler
         if (!CSharpStaticSourcePreparation.TryPrepare(source, out var ordinary, out var execution, out error)) return false;
         bool synchronousTokenComposition = SemanticComposableCapabilities.IsVersion(source)
             && source.AsyncMethods.Count == 0;
+        bool asynchronousTokenComposition = SemanticComposableCapabilities.IsVersion(source)
+            && source.AsyncMethods.Count != 0;
         if (ordinary!.ExceptionFlows is not null
             || !synchronousTokenComposition && SemanticContract.HasAsyncSynchronousExceptions(ordinary))
         {
-            if (!CSharpLanguageErrorCompiler.TryLower(ordinary, semanticSha256, out var compilation, out error)) return false;
-            var restored = compilation!.Module with { Provenance = compilation.Module.Provenance with
+            if (!CSharpLanguageErrorCompiler.TryLower(ordinary, semanticSha256, out var compilation,
+                    out error, deferComposedValidation: asynchronousTokenComposition)) return false;
+            GuestModule restored = compilation!.Module with { Provenance = compilation.Module.Provenance with
             { SemanticSchemaVersion = source.SchemaVersion, SemanticVersion = source.SemanticVersion } };
-            if (!GuestModuleValidator.Validate(restored).Succeeded)
-            { error = "Static language-error module failed original-provenance validation."; return false; }
+            if (asynchronousTokenComposition)
+                restored = restored with
+                {
+                    SchemaVersion = GuestComposableCapabilities.SchemaVersion,
+                    IrVersion = GuestComposableCapabilities.IrVersion,
+                    CapabilityManifest = GuestCapabilityManifest.Create(29, "1.28", new[] {
+                        new GuestCapability(GuestComposableCapabilities.StaticStorage, 1),
+                        new GuestCapability(GuestComposableCapabilities.AwaitReadiness, 1),
+                        new GuestCapability(GuestComposableCapabilities.CancellationIdentity, 1),
+                        new GuestCapability(GuestComposableCapabilities.ExceptionValues, 1),
+                        new GuestCapability(GuestComposableCapabilities.CancellationTokenValue, 1),
+                    }),
+                };
+            var restoredValidation = GuestModuleValidator.Validate(restored);
+            if (!restoredValidation.Succeeded)
+            { error = "Static language-error module failed original-provenance validation: "
+                + string.Join(" | ", restoredValidation.Diagnostics.Select(item => item.Code + ": " + item.Message)); return false; }
             module = restored;
             return true;
         }
@@ -60,7 +78,7 @@ public static class CSharpStaticInitializationCompiler
             Array.FindIndex(sourceSites, site => site == (type.SourceId, type.SourceLength, type.Span)) + 1)).ToArray();
         GuestModule? guarded;
         if (synchronousTokenComposition
-            ? !CSharpStaticInitializationGuards.TryComposeForStaticTokenComposition(candidate, initializers,
+            ? !CSharpStaticInitializationGuards.TryComposeDeferred(candidate, initializers,
                 out guarded, out error)
             : !CSharpStaticInitializationGuards.TryCompose(candidate, initializers,
                 out guarded, out error)) return false;

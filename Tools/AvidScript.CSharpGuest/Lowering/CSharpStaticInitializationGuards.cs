@@ -26,7 +26,7 @@ public static class CSharpStaticInitializationGuards
         out GuestModule? result, out string? error) =>
         TryComposeCore(module, initializers, out result, out error, deferValidation: false);
 
-    internal static bool TryComposeForStaticTokenComposition(GuestModule module,
+    internal static bool TryComposeDeferred(GuestModule module,
         IReadOnlyList<CSharpStaticInitializer> initializers,
         out GuestModule? result, out string? error) =>
         TryComposeCore(module, initializers, out result, out error, deferValidation: true);

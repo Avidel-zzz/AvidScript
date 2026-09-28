@@ -15,16 +15,17 @@ internal static class CSharpStaticSourcePreparation
         out CSharpStaticExecutionContext? execution, out string? error)
     {
         ordinary = null; execution = null; error = null;
-        bool asyncSource = source is not null && SemanticStaticInitialization.IsAsyncVersion(source);
+        bool asyncSource = source is not null && (SemanticStaticInitialization.IsAsyncVersion(source)
+            || SemanticComposableCapabilities.IsVersion(source) && source.AsyncMethods.Count != 0);
         bool composedTokenSource = source is not null && SemanticComposableCapabilities.IsVersion(source)
-            && source.AsyncMethods is { Count: 0 } && SemanticCancellationTokenValidator.IsValid(source);
+            && SemanticCancellationTokenValidator.IsValid(source);
         if (source is null || !SemanticStaticInitializationValidator.IsValid(source)
             || SemanticComposableCapabilities.IsVersion(source) && !composedTokenSource
             || !source.Succeeded && source.ExceptionFlows is null && !asyncSource
             || source.AsyncMethods.Count != 0 && !asyncSource
             || source.ExceptionFlows?.Any(flow => flow.Blocks is null) == true
             || source.RejectedAsyncExceptionFlows is not null || source.UeTypeDeclarations is not { Count: 0 })
-        { error = "Static source execution requires its exact source plan; async requires Semantic 51 and generated UE routes are not connected yet."; return false; }
+        { error = "Static source execution requires a validated Semantic 49/51 or composable Semantic 54 plan; generated UE routes are not connected yet."; return false; }
         // The static envelope validates ownership and initializer plans. Reuse
         // the base reader for every ordinary callable, symbol and CFG invariant
         // before building dictionaries or specializing any source body.

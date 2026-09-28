@@ -90,6 +90,56 @@ internal static class CSharpGuestComposableIr35Tests
             "same-source IR 35 emits deterministic WASM bytes");
         Check(sameSource.ModuleId == "csharp:" + combinedId,
             "same-source module keeps its canonical C# source identity");
+
+        const string asyncSource = """
+            using System; using System.Runtime.InteropServices; using System.Threading; using System.Threading.Tasks; using AvidScript;
+            public static class Cache { public static int State = 1; }
+            public static class Script {
+                public static int Result;
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay() { Result = await Run(); }
+                public static async Task<int> Run() {
+                    CancellationToken token = CancellationToken.None;
+                    try {
+                        await AvidContinuations.NextTickAsync().WithCancellation(token);
+                        return Cache.State;
+                    }
+                    catch (OperationCanceledException error) {
+                        return error.CancellationToken == token ? 7 : 9;
+                    }
+                }
+            }
+            """;
+        string asyncFacade = CSharpGuestContinuationTests.ReferenceFacade
+            .Replace("internal AvidCancellationToken(long value) { Value = value; }",
+                "internal AvidCancellationToken(long value) { Value = value; } [MethodImpl(MethodImplOptions.InternalCall)] public static extern implicit operator System.Threading.CancellationToken(AvidCancellationToken token);", StringComparison.Ordinal)
+            .Replace("public AvidDelayAwaitable WithCancellation(AvidCancellationToken token) => default;",
+                "public AvidDelayAwaitable WithCancellation(AvidCancellationToken token) => default; public AvidDelayAwaitable WithCancellation(System.Threading.CancellationToken token) => default;", StringComparison.Ordinal)
+            + CSharpGuestAsyncThrowRoutingTests.CancelFacade;
+        const string asyncId = "Scripts/ComposableAsyncStaticToken.cs";
+        var asyncSemantic = SemanticAnalyzer.Analyze(asyncSource, asyncId,
+            FrontendAnalyzer.Analyze(asyncSource, asyncId).Source.Sha256,
+            new[] { new SemanticReferenceSource(asyncFacade, "generated://Continuation.cs", true) },
+            new SemanticCompilerWorkspace(), enableAsyncExceptionFlow: true,
+            enableDirectAwaitCleanup: true, enableAsyncCancellationFlow: true,
+            enableStaticInitialization: true, enableAsyncSynchronousExceptions: true,
+            enableAsyncCatchVariables: true, enableCancellationTokens: true);
+        Check(SemanticComposableCapabilities.IsVersion(asyncSemantic)
+            && asyncSemantic.CapabilityManifest?.Capabilities.Count == 5
+            && SemanticStaticInitializationValidator.IsValid(asyncSemantic)
+            && SemanticCancellationTokenValidator.IsValid(asyncSemantic),
+            "one async C# source carries five validated Semantic capabilities");
+        string asyncHash = Convert.ToHexString(SHA256.HashData(SemanticSerializer.Serialize(asyncSemantic))).ToLowerInvariant();
+        Check(!CSharpStaticInitializationCompiler.TryLower(asyncSemantic, asyncHash,
+                out var asyncModule, out var asyncError) && asyncModule is null
+            && asyncError?.Contains("ASIR1042", StringComparison.Ordinal) == true
+            && asyncError.Contains("ASIR1037", StringComparison.Ordinal),
+            "unvalidated async IR 35 must remain unpublished after private source preparation: " + asyncError);
+        Check(!CSharpStaticInitializationCompiler.TryLower(asyncSemantic with { CapabilityManifest =
+                asyncSemantic.CapabilityManifest! with { Capabilities = Array.Empty<SemanticCapability>() } },
+                asyncHash, out var omittedModule, out _)
+            && omittedModule is null,
+            "private async execution cannot skip a missing five-capability source declaration");
         string? fixtureDirectory = Environment.GetEnvironmentVariable("AVIDSCRIPT_COMPOSABLE_IR35_FIXTURE_DIR");
         if (!string.IsNullOrWhiteSpace(fixtureDirectory))
         {

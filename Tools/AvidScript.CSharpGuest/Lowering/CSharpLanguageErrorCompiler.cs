@@ -17,7 +17,17 @@ public static class CSharpLanguageErrorCompiler
         SemanticDocument semantic,
         string semanticSha256,
         out CSharpLanguageErrorCompilation? compilation,
-        out string? error)
+        out string? error) => TryLower(semantic, semanticSha256, out compilation, out error,
+            deferComposedValidation: false);
+
+    // Only the validated static source compiler uses this private path. Its
+    // intermediate envelope is never published before final IR 35 validation.
+    internal static bool TryLower(
+        SemanticDocument semantic,
+        string semanticSha256,
+        out CSharpLanguageErrorCompilation? compilation,
+        out string? error,
+        bool deferComposedValidation)
     {
         compilation = null;
         error = null;
@@ -375,7 +385,8 @@ public static class CSharpLanguageErrorCompiler
         };
         if (staticContext is not null)
         {
-            if (!staticContext.TryCompose(candidate, out var guarded, out error)) return false;
+            if (!staticContext.TryCompose(candidate, out var guarded, out error,
+                    deferValidation: deferComposedValidation)) return false;
             candidate = guarded!;
         }
         if (!CSharpLanguageErrorEntryAdapter.TryAdd(candidate, affectedExports,
@@ -387,10 +398,13 @@ public static class CSharpLanguageErrorCompiler
         if (SemanticContract.HasAsyncCatchVariables(semantic) && (tokenContext is null || tokenContext.HasAsync)
             && !CSharpAsyncCatchValues.TryWrap(semantic, candidate, out candidate, out error)) return false;
         if (tokenContext is not null) candidate = tokenContext.Wrap(candidate);
-        GuestValidationResult validation = GuestModuleValidator.Validate(candidate);
-        if (!validation.Succeeded)
-            return Fail("The composed language-error module failed validation: "
-                + string.Join(" | ", validation.Diagnostics.Select(item => item.Message)), out error);
+        if (!deferComposedValidation)
+        {
+            GuestValidationResult validation = GuestModuleValidator.Validate(candidate);
+            if (!validation.Succeeded)
+                return Fail("The composed language-error module failed validation: "
+                    + string.Join(" | ", validation.Diagnostics.Select(item => item.Message)), out error);
+        }
         compilation = new(candidate);
         return true;
     }
