@@ -84,7 +84,9 @@ try {
         'AvidScript.Runtime.ManagedHeap.ComposableIr35StaticToken',
         'AvidScript.Runtime.ManagedHeap.ComposableIr35AsyncExecution',
         'AvidScript.Runtime.Continuation.ComposableOriginalAsyncMember',
-        'AvidScript.Component.ComposableOriginalTeardown'
+        'AvidScript.Component.ComposableOriginalTeardown',
+        'AvidScript.Component.ComposableOriginalTwoActors',
+        'AvidScript.Component.ComposableOriginalSuspendedReload'
     )
     $filter = $tests -join '+'
     $logPath = Join-Path $runRoot 'automation.log'
@@ -131,13 +133,30 @@ try {
         }
     }
     $expectedComponentObservations = 4 * $originalCases.Count
+    $fieldMode = @($originalCases | Where-Object { $_.name -ceq 'field-mode-0' })
+    if ($fieldMode.Count -ne 1) { throw 'Missing unique field-mode-0 oracle for dual-Actor evidence' }
+    $dualObservations = 0
+    foreach ($backend in @(0, 1)) {
+        $pattern = "original-ir35-two-actors backend=$backend result=$($fieldMode[0].expected) trace=$($fieldMode[0].trace) retired=1 survivor_released=1"
+        if ([regex]::Matches($log, $pattern).Count -eq 1) { $dualObservations++ }
+    }
+    $newFieldMode = @($originalCases | Where-Object { $_.name -ceq 'field-mode-1' })
+    if ($newFieldMode.Count -ne 1) { throw 'Missing unique field-mode-1 oracle for reload evidence' }
+    $reloadObservations = 0
+    foreach ($backend in @(0, 1)) {
+        $pattern = "original-ir35-reload backend=$backend new_result=$($newFieldMode[0].expected) new_trace=$($newFieldMode[0].trace) old_result=$($fieldMode[0].expected) old_trace=$($fieldMode[0].trace) loader_rejected=1 validation_rejected=1 applied=1 released=1"
+        if ([regex]::Matches($log, [regex]::Escape($pattern)).Count -eq 1) { $reloadObservations++ }
+    }
     if ($passed -ne $tests.Count -or $observations -ne 4 -or $asyncObservations -ne 6 -or
         $originalObservations -ne 174 -or $componentObservations -ne $expectedComponentObservations -or
+        $dualObservations -ne 2 -or $reloadObservations -ne 2 -or
         [regex]::Matches($log, 'original-ir35-component scenario=').Count -ne $expectedComponentObservations -or
+        [regex]::Matches($log, 'original-ir35-two-actors backend=').Count -ne 2 -or
+        [regex]::Matches($log, 'original-ir35-reload backend=').Count -ne 2 -or
         [regex]::Matches($log, 'Test Completed\. Result=\{Fail\}').Count -ne 0 -or
         [regex]::Matches($log, '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*\*').Count -ne 1 -or
         [regex]::Matches($log, "Found $($tests.Count) automation tests based on '$([regex]::Escape($filter))'").Count -ne 1) {
-        throw "IR 35 Automation evidence incomplete: tests=$passed observations=$observations async_observations=$asyncObservations original_observations=$originalObservations component_observations=$componentObservations log=$logPath"
+        throw "IR 35 Automation evidence incomplete: tests=$passed observations=$observations async_observations=$asyncObservations original_observations=$originalObservations component_observations=$componentObservations dual_observations=$dualObservations reload_observations=$reloadObservations log=$logPath"
     }
     [ordered]@{
         schema_version = 1
@@ -152,10 +171,12 @@ try {
         async_vm_observations = $asyncObservations
         original_vm_observations = $originalObservations
         component_teardown_observations = $componentObservations
+        dual_instance_observations = $dualObservations
+        suspended_reload_observations = $reloadObservations
         automation_passed = $passed
         automation_log = $logPath
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $runRoot 'results.json') -Encoding utf8
-    Write-Output "Composable IR 35: sync observations $observations/4; async observations $asyncObservations/6; original observations $originalObservations/174; component teardown $componentObservations/$expectedComponentObservations; Automation $passed/$($tests.Count); evidence=$runRoot"
+    Write-Output "Composable IR 35: sync observations $observations/4; async observations $asyncObservations/6; original observations $originalObservations/174; component teardown $componentObservations/$expectedComponentObservations; dual instance $dualObservations/2; suspended reload $reloadObservations/2; Automation $passed/$($tests.Count); evidence=$runRoot"
 }
 finally {
     Pop-Location

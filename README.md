@@ -78,7 +78,7 @@ dotnet run --project Tools/AvidScript.CSharpGuest.Tests/AvidScript.CSharpGuest.T
 ## Current limits
 
 - 只支持已实现的 C# / .NET 子集，不能直接运行任意 NuGet 包。目前 `Task<T>` 只覆盖 `Task<int>`；`catch` 和 `finally` 中不能 `await`。
-- 方法体可以热重载；修改脚本定义类型的反射签名后，需要重新编译并重启 Editor。标准 `CancellationToken` 的组合用法还没有进入默认 Build And Bind。
+- 方法体可以热重载；独立 Actor 挂起任务的版本切换已有 Win64 自动化覆盖。修改脚本定义类型的反射签名后，仍需重新编译并重启 Editor。标准 `CancellationToken` 的组合用法还没有进入默认 Build And Bind。
 - 网络路径有自动化测试，真实多人游戏尚未验收；Shipping、Android 和 iOS 也尚未验收。
 
 详细支持范围见[语言执行计划](Docs/Phase66/P66.C_Language_Execution_Plan.md)和[异步能力合同](Docs/Architecture/AvidScript_Composable_Capability_Contract.md)。

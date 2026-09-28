@@ -28,9 +28,11 @@ C# 静态初始化不能简单映射到上述 14/1.13 夹具：现有编译器�
 
 第十一切片为 29 个原始场景各生成与实际 WASM 的 import/export 和 SHA-256 匹配的 manifest，并让全部场景走正式 `UAvidScriptComponent`。Win64 Automation 为每个场景创建真实 Actor 和测试 World，分别销毁 Actor、结束 World；WAMR 字节码与 Wasmtime serialized AOT 各覆盖两种销毁，共 **116/116** 条 Component 路径。按同源 Task oracle 区分初始挂起与已终态，分别为 **76** 和 **40** 条；挂起路径确认 Task、等待者、continuation 和状态帧非零。所有路径在销毁后确认 Component 收到 EndPlay、Session 释放、旧 VM 租约失效；Actor 销毁后额外推进 4 帧，没有新的脚本 Tick。同轮原始 29 场景独立 Session 对照 **174/174**、固定 SDK 组合专项 **72/72**、聚焦 Automation **5/5**，Win64 no-clean Editor 构建通过；证据在工程 `Saved/AvidScriptComposableIr35/20260928T112919316Z/`。Component 矩阵验证的是加载与销毁，不替代独立 Session 的字段/Task 终态对照；双实例、reload、`async void` 未处理错误、默认 Build And Bind 和真实 Editor Play 仍未完成。
 
+第十二切片在正式 `UAvidScriptComponent` 上使用原始业务源码的 `field-mode-0/1` 两份测试适配产物。双 Actor 起始各有独立、挂起的 Task/VM；销毁其中一个后，另一个继续运行并得到 .NET 预期 `Result=7, Trace=1238`。挂起态重载另验证两种失败位置：候选 WASM 哈希错误在加载时拒绝，哈希正确但缺少必需导出在 VM 校验时拒绝。两次拒绝都保留原 Session、VM、Task、等待者和状态帧；只经历校验失败的 Actor 随后完成旧版本，仍得到 `7/1238`。另一 Actor 成功切换到 `field-mode-1`，旧 VM 租约失效，新版本得到 `7/128`；结束 World 后两边租约均失效。WAMR bytecode 和 Wasmtime serialized AOT 分别通过双实例 **2/2**、挂起重载 **2/2**，完整原始矩阵 **174/174**、Component 销毁 **116/116**、固定 SDK 专项 **72/72**、Automation **7/7**；同一候选源码的 Win64 no-clean Editor 构建通过。证据在工程 `Saved/AvidScriptComposableIr35/20260928T121505140Z/`，入口为 `Build/TestAvidScriptComposableIr35.ps1`。这里的失败发生在加载/VM 校验阶段；没有证明候选 `BeginPlay` 已执行后失败的回滚、辅助类静态状态迁移、生成类型共享执行域或真实 Editor Play。
+
 ## 现有阻塞
 
-[SemanticAnalyzer](../../Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs)可投射特定的静态初始化 + async + token 组合。同一份 C# 源码现通过私有 Semantic 53 执行副本完成静态字段改写、异常/取消 lowering，发布保留 Semantic 54 来源的 IR 35 五能力模块，并生成确定性 WASM。原生 Host 已读取这份产物的来源和错误目录，双 VM 已执行正常完成、取消身份、独立 Session EndPlay，以及原始 [29 个成员 await 场景](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)全部的同源对照与挂起态 owner teardown。全部 29 场景也已走正式 Component 的双 VM Actor/World 销毁矩阵；双实例、reload 和真实玩法仍待验证。
+[SemanticAnalyzer](../../Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs)可投射特定的静态初始化 + async + token 组合。同一份 C# 源码现通过私有 Semantic 53 执行副本完成静态字段改写、异常/取消 lowering，发布保留 Semantic 54 来源的 IR 35 五能力模块，并生成确定性 WASM。原生 Host 已读取这份产物的来源和错误目录，双 VM 已执行正常完成、取消身份、独立 Session EndPlay，以及原始 [29 个成员 await 场景](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)全部的同源对照与挂起态 owner teardown。全部 29 场景也已走正式 Component 的双 VM Actor/World 销毁矩阵；独立双 Actor 和加载/VM 校验失败及成功重载已有专项证据，候选执行失败回滚、共享生成类型、默认入口和真实玩法仍待验证。
 
 本次还暴露了独立语言缺口：现行同步异常合同只为 `Task<int>` 方法建立异常 owner；`async void` 导出入口中直接调用可能产生语言错误的 `AvidCancellationSource.Create()` 会被 `ASCG1026` 拒绝。不能只跳过该调用的 outcome 检查，也不能把未处理异常默默转成正常返回。后续需版本化 `async void` 的本地 catch、跨 await 错误根和未处理错误向 Session 报告的合同，再用同一入口源码验证。当前可运行场景把取消源创建放在实际业务 `Task<int>` 方法中，由导出入口等待它。
 
@@ -63,7 +65,7 @@ Task local 生命周期验证器现以 Semantic 54/1.63 为来源直接检查 IR
 | 1. 来源与恢复边 | 同源 Semantic 54 形成私有执行副本；静态 guard 在 exported async 入口和恢复段都有异常目标与 owner；无目标的调用继续拒绝 | 静态初始化成功/失败、await 前后访问及导出入口均能保留正确错误路由 |
 | 2. 统一执行基线 | 静态槽、readiness、取消身份与 token reader 全部标记 29/1.28；原始 29 场景已用真实 IR 35 直接验证 | 计划的 base 一致，旧 IR 31/34 序列化与执行不变，错 base 负例拒绝 |
 | 3. IR 35 直接验证 | outcome/catalog、Task 结果与错误、async route/transfer、静态堆、托管根 import、reader 和五项增量在同一个 artifact 上逐项校验 | 原始 29 场景已通过；仍需扩展移除计划/import、错签名、伪造来源及旧版夹带能力的组合负例 |
-| 4. WASM 与原生准入 | emitter 和 Host reader 接受准确的 29/1.28 五能力 provenance；两 VM 执行相同字节 | 原始 29 场景及独立 token 身份观察已通过；继续验证真实销毁、reload、错误快照和实例隔离 |
+| 4. WASM 与原生准入 | emitter 和 Host reader 接受准确的 29/1.28 五能力 provenance；两 VM 执行相同字节 | 原始 29 场景、独立 token 身份、Component 销毁、双实例及加载/VM 校验阶段重载已通过；继续验证候选执行失败、生成类型共享域、错误快照和默认入口 |
 
 ## 合同边界
 

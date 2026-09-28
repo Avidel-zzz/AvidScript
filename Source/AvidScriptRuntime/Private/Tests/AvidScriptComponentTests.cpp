@@ -211,6 +211,54 @@ bool BuildComposableComponentPrecompiledManifest(
 	return FFileHelper::SaveStringToFile(PrecompiledManifestJson, *OutManifestPath);
 }
 
+bool BuildComposableComponentBadHashManifest(
+	const FString& CandidateManifestPath,
+	const FString& OutManifestPath)
+{
+	FString ManifestJson;
+	TSharedPtr<FJsonObject> ManifestObject;
+	const TSharedPtr<FJsonObject>* WasmObject = nullptr;
+	if (!FFileHelper::LoadFileToString(ManifestJson, *CandidateManifestPath)
+		|| !FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(ManifestJson), ManifestObject)
+		|| !ManifestObject.IsValid()
+		|| !ManifestObject->TryGetObjectField(TEXT("wasm"), WasmObject)
+		|| WasmObject == nullptr || !WasmObject->IsValid())
+	{
+		return false;
+	}
+	(*WasmObject)->SetStringField(TEXT("sha256"), FString::ChrN(64, '0'));
+	FString InvalidManifestJson;
+	return FJsonSerializer::Serialize(
+			ManifestObject.ToSharedRef(),
+			TJsonWriterFactory<>::Create(&InvalidManifestJson))
+		&& FFileHelper::SaveStringToFile(InvalidManifestJson, *OutManifestPath);
+}
+
+bool BuildComposableComponentMissingExportManifest(
+	const FString& CandidateManifestPath,
+	const FString& OutManifestPath)
+{
+	FString ManifestJson;
+	TSharedPtr<FJsonObject> ManifestObject;
+	const TArray<TSharedPtr<FJsonValue>>* RequiredExports = nullptr;
+	if (!FFileHelper::LoadFileToString(ManifestJson, *CandidateManifestPath)
+		|| !FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(ManifestJson), ManifestObject)
+		|| !ManifestObject.IsValid()
+		|| !ManifestObject->TryGetArrayField(TEXT("required_exports"), RequiredExports)
+		|| RequiredExports == nullptr)
+	{
+		return false;
+	}
+	TArray<TSharedPtr<FJsonValue>> InvalidExports = *RequiredExports;
+	InvalidExports.Add(MakeShared<FJsonValueString>(TEXT("avid_missing_export_for_reload_rejection")));
+	ManifestObject->SetArrayField(TEXT("required_exports"), MoveTemp(InvalidExports));
+	FString InvalidManifestJson;
+	return FJsonSerializer::Serialize(
+			ManifestObject.ToSharedRef(),
+			TJsonWriterFactory<>::Create(&InvalidManifestJson))
+		&& FFileHelper::SaveStringToFile(InvalidManifestJson, *OutManifestPath);
+}
+
 bool CreateComponentWorld(UWorld*& OutWorld)
 {
 	OutWorld = nullptr;
@@ -928,6 +976,461 @@ bool FAvidScriptComponentComposableOriginalTeardownTest::RunTest(const FString& 
 				*Name, Backend, *Teardown, bExpectedSuspended ? 1 : 0,
 				Suspended.TaskCount, Suspended.TaskWaiterCount));
 		}
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptComponentComposableOriginalTwoActorsTest,
+	"AvidScript.Component.ComposableOriginalTwoActors",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptComponentComposableOriginalTwoActorsTest::RunTest(const FString& Parameters)
+{
+	const FString FixtureDirectory = FPlatformMisc::GetEnvironmentVariable(
+		TEXT("AVIDSCRIPT_COMPOSABLE_ORIGINAL_DIR"));
+	FString CasesJson;
+	TArray<TSharedPtr<FJsonValue>> Cases;
+	if (!TestTrue(TEXT("The original C# Task oracle is present"),
+		!FixtureDirectory.IsEmpty()
+			&& FFileHelper::LoadFileToString(
+				CasesJson, *FPaths::Combine(FixtureDirectory, TEXT("cases.json")))
+			&& FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(CasesJson), Cases)))
+	{
+		return false;
+	}
+	int32 ExpectedResult = 0;
+	int32 ExpectedTrace = 0;
+	int32 ResultOffset = -1;
+	int32 TraceOffset = -1;
+	bool bFoundOracle = false;
+	for (const TSharedPtr<FJsonValue>& CaseValue : Cases)
+	{
+		const TSharedPtr<FJsonObject>* CaseObject = nullptr;
+		FString Name;
+		if (CaseValue.IsValid() && CaseValue->TryGetObject(CaseObject)
+			&& CaseObject != nullptr && CaseObject->IsValid()
+			&& (*CaseObject)->TryGetStringField(TEXT("name"), Name)
+			&& Name == TEXT("field-mode-0"))
+		{
+			bFoundOracle = (*CaseObject)->TryGetNumberField(TEXT("expected"), ExpectedResult)
+				&& (*CaseObject)->TryGetNumberField(TEXT("trace"), ExpectedTrace)
+				&& (*CaseObject)->TryGetNumberField(TEXT("resultOffset"), ResultOffset)
+				&& (*CaseObject)->TryGetNumberField(TEXT("traceOffset"), TraceOffset)
+				&& ResultOffset >= 0 && ResultOffset < 65532
+				&& TraceOffset >= 0 && TraceOffset < 65532;
+			break;
+		}
+	}
+	if (!TestTrue(TEXT("The original field-mode-0 result and trace oracle is valid"), bFoundOracle))
+	{
+		return false;
+	}
+	const FString ManifestPath = FPaths::Combine(
+		FixtureDirectory, TEXT("field-mode-0.avidscript.json"));
+	FString PrecompiledManifestPath;
+	if (!TestTrue(TEXT("The original C# module has a serialized Wasmtime candidate"),
+		FPaths::FileExists(ManifestPath)
+			&& BuildComposableComponentPrecompiledManifest(
+				FixtureDirectory, TEXT("field-mode-0"), ManifestPath,
+				PrecompiledManifestPath)))
+	{
+		return false;
+	}
+	for (int32 Backend = 0; Backend < 2; ++Backend)
+	{
+		const FString Label = FString::Printf(TEXT("backend=%d"), Backend);
+		const FString& ActiveManifest = Backend == 0
+			? ManifestPath : PrecompiledManifestPath;
+		UWorld* World = nullptr;
+		if (!TestTrue(*(Label + TEXT(" world is created")), CreateComponentWorld(World)))
+		{
+			return false;
+		}
+		ON_SCOPE_EXIT { DestroyComponentWorld(World); };
+		if (!TestTrue(*(Label + TEXT(" world begins play")), BeginComponentWorld(World)))
+		{
+			return false;
+		}
+		AActor* RetiringActor = World->SpawnActor<AAvidScriptActorBindingTestActor>();
+		AActor* SurvivingActor = World->SpawnActor<AAvidScriptActorBindingTestActor>();
+		if (!TestNotNull(*(Label + TEXT(" retiring actor spawns")), RetiringActor)
+			|| !TestNotNull(*(Label + TEXT(" surviving actor spawns")), SurvivingActor))
+		{
+			return false;
+		}
+		UAvidScriptComponent* Retiring = AddAvidScriptComponent(RetiringActor, ActiveManifest);
+		UAvidScriptComponent* Surviving = AddAvidScriptComponent(SurvivingActor, ActiveManifest);
+		if (!TestNotNull(*(Label + TEXT(" retiring component loads")), Retiring)
+			|| !TestNotNull(*(Label + TEXT(" surviving component loads")), Surviving))
+		{
+			return false;
+		}
+		FAvidScriptRuntimeSession* RetiringSession = Retiring->GetRuntimeSessionForTesting();
+		FAvidScriptRuntimeSession* SurvivingSession = Surviving->GetRuntimeSessionForTesting();
+		if (!TestNotNull(*(Label + TEXT(" retiring Session is active")), RetiringSession)
+			|| !TestNotNull(*(Label + TEXT(" surviving Session is active")), SurvivingSession))
+		{
+			AddError(Retiring->GetRuntimeStats().LastErrorMessage);
+			AddError(Surviving->GetRuntimeStats().LastErrorMessage);
+			return false;
+		}
+		const auto RetiringLease = RetiringSession->GetRuntimeLeaseForTesting();
+		const auto SurvivingLease = SurvivingSession->GetRuntimeLeaseForTesting();
+		const auto RetiringSnapshot = RetiringSession->GetTestSnapshot();
+		const auto SurvivingSnapshot = SurvivingSession->GetTestSnapshot();
+		if (!TestTrue(*(Label + TEXT(" the two Actors own distinct live VMs")),
+			RetiringLease.IsValid() && SurvivingLease.IsValid()
+				&& RetiringLease.Pin().Get() != SurvivingLease.Pin().Get()
+				&& RetiringSession != SurvivingSession)
+			|| !TestTrue(*(Label + TEXT(" both original Tasks are suspended")),
+				RetiringSnapshot.TaskCount > 0 && RetiringSnapshot.TaskWaiterCount > 0
+				&& SurvivingSnapshot.TaskCount > 0 && SurvivingSnapshot.TaskWaiterCount > 0))
+		{
+			return false;
+		}
+		if (!TestTrue(*(Label + TEXT(" one actual Actor is destroyed")),
+			World->DestroyActor(RetiringActor))
+			|| !TestNull(*(Label + TEXT(" only its Session is released")),
+				Retiring->GetRuntimeSessionForTesting())
+			|| !TestFalse(*(Label + TEXT(" its VM lease expires")), RetiringLease.IsValid())
+			|| !TestTrue(*(Label + TEXT(" the other Session retains its VM")),
+				Surviving->GetRuntimeSessionForTesting() == SurvivingSession
+					&& SurvivingLease.IsValid()
+					&& Surviving->GetRuntimeStats().bRuntimeLoaded))
+		{
+			return false;
+		}
+		for (int32 Round = 0; Round < 64; ++Round)
+		{
+			World->Tick(LEVELTICK_All, 0.02f);
+			++GFrameCounter;
+		}
+		auto ReadState = [&](int32 Offset, int32& OutValue) -> bool
+		{
+			uint8 Bytes[4] = {};
+			FString Error;
+			FAvidScriptWasmRuntimeInstance* Runtime = SurvivingSession->GetLiveRuntimeForTesting();
+			if (Runtime == nullptr || !Runtime->ReadStateBytes(Offset, MakeArrayView(Bytes), Error))
+			{
+				AddError(Error.IsEmpty() ? TEXT("Surviving Runtime is unavailable") : Error);
+				return false;
+			}
+			FMemory::Memcpy(&OutValue, Bytes, sizeof(OutValue));
+			return true;
+		};
+		int32 Result = 0;
+		int32 Trace = 0;
+		if (!TestTrue(*(Label + TEXT(" surviving C# state is readable")),
+			ReadState(ResultOffset, Result) && ReadState(TraceOffset, Trace))
+			|| !TestEqual(*(Label + TEXT(" surviving result matches .NET")),
+				Result, ExpectedResult)
+			|| !TestEqual(*(Label + TEXT(" surviving trace matches .NET")),
+				Trace, ExpectedTrace))
+		{
+			return false;
+		}
+		const auto Completed = SurvivingSession->GetTestSnapshot();
+		if (!TestTrue(*(Label + TEXT(" surviving Task and continuation finish")),
+			Completed.TaskCount == 0 && Completed.TaskWaiterCount == 0
+				&& Completed.Runtime.PendingContinuationCount == 0
+				&& Completed.ContinuationStateBytes == 0))
+		{
+			return false;
+		}
+		if (!TestTrue(*(Label + TEXT(" World ends play")), World->EndPlay(EEndPlayReason::Quit))
+			|| !TestNull(*(Label + TEXT(" surviving Session releases")),
+				Surviving->GetRuntimeSessionForTesting())
+			|| !TestFalse(*(Label + TEXT(" surviving VM lease expires")),
+				SurvivingLease.IsValid()))
+		{
+			return false;
+		}
+		AddInfo(FString::Printf(
+			TEXT("original-ir35-two-actors backend=%d result=%d trace=%d retired=1 survivor_released=1"),
+			Backend, Result, Trace));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptComponentComposableOriginalSuspendedReloadTest,
+	"AvidScript.Component.ComposableOriginalSuspendedReload",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptComponentComposableOriginalSuspendedReloadTest::RunTest(const FString& Parameters)
+{
+	const FString FixtureDirectory = FPlatformMisc::GetEnvironmentVariable(
+		TEXT("AVIDSCRIPT_COMPOSABLE_ORIGINAL_DIR"));
+	FString CasesJson;
+	TArray<TSharedPtr<FJsonValue>> Cases;
+	if (!TestTrue(TEXT("Original C# reload oracles are present"),
+		!FixtureDirectory.IsEmpty()
+			&& FFileHelper::LoadFileToString(
+				CasesJson, *FPaths::Combine(FixtureDirectory, TEXT("cases.json")))
+			&& FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(CasesJson), Cases)))
+	{
+		return false;
+	}
+	struct FOriginalOracle
+	{
+		int32 Result = 0;
+		int32 Trace = 0;
+		int32 ResultOffset = -1;
+		int32 TraceOffset = -1;
+	};
+	auto FindOracle = [&](const FString& Name, FOriginalOracle& OutOracle) -> bool
+	{
+		for (const TSharedPtr<FJsonValue>& CaseValue : Cases)
+		{
+			const TSharedPtr<FJsonObject>* CaseObject = nullptr;
+			FString CaseName;
+			if (!CaseValue.IsValid() || !CaseValue->TryGetObject(CaseObject)
+				|| CaseObject == nullptr || !CaseObject->IsValid()
+				|| !(*CaseObject)->TryGetStringField(TEXT("name"), CaseName)
+				|| CaseName != Name)
+			{
+				continue;
+			}
+			return (*CaseObject)->TryGetNumberField(TEXT("expected"), OutOracle.Result)
+				&& (*CaseObject)->TryGetNumberField(TEXT("trace"), OutOracle.Trace)
+				&& (*CaseObject)->TryGetNumberField(TEXT("resultOffset"), OutOracle.ResultOffset)
+				&& (*CaseObject)->TryGetNumberField(TEXT("traceOffset"), OutOracle.TraceOffset)
+				&& OutOracle.ResultOffset >= 0 && OutOracle.ResultOffset < 65532
+				&& OutOracle.TraceOffset >= 0 && OutOracle.TraceOffset < 65532;
+		}
+		return false;
+	};
+	FOriginalOracle OldOracle;
+	FOriginalOracle NewOracle;
+	if (!TestTrue(TEXT("Both original C# versions have .NET result and trace oracles"),
+		FindOracle(TEXT("field-mode-0"), OldOracle)
+			&& FindOracle(TEXT("field-mode-1"), NewOracle)
+			&& OldOracle.Trace != NewOracle.Trace))
+	{
+		return false;
+	}
+	const FString OldManifest = FPaths::Combine(
+		FixtureDirectory, TEXT("field-mode-0.avidscript.json"));
+	const FString NewManifest = FPaths::Combine(
+		FixtureDirectory, TEXT("field-mode-1.avidscript.json"));
+	FString OldAotManifest;
+	FString NewAotManifest;
+	if (!TestTrue(TEXT("Both original C# versions have Win64 VM artifacts"),
+		FPaths::FileExists(OldManifest) && FPaths::FileExists(NewManifest)
+			&& BuildComposableComponentPrecompiledManifest(
+				FixtureDirectory, TEXT("field-mode-0"), OldManifest, OldAotManifest)
+			&& BuildComposableComponentPrecompiledManifest(
+				FixtureDirectory, TEXT("field-mode-1"), NewManifest, NewAotManifest)))
+	{
+		return false;
+	}
+	for (int32 Backend = 0; Backend < 2; ++Backend)
+	{
+		const FString Label = FString::Printf(TEXT("backend=%d"), Backend);
+		const FString& ActiveManifest = Backend == 0 ? OldManifest : OldAotManifest;
+		const FString& CandidateManifest = Backend == 0 ? NewManifest : NewAotManifest;
+		FString NormalizedActiveManifest = ActiveManifest;
+		FString NormalizedCandidateManifest = CandidateManifest;
+		FPaths::NormalizeFilename(NormalizedActiveManifest);
+		FPaths::NormalizeFilename(NormalizedCandidateManifest);
+		const FString InvalidManifest = FPaths::Combine(
+			FixtureDirectory,
+			FString::Printf(TEXT("field-mode-1-bad-hash-%d.avidscript.json"), Backend));
+		const FString MissingExportManifest = FPaths::Combine(
+			FixtureDirectory,
+			FString::Printf(TEXT("field-mode-1-missing-export-%d.avidscript.json"), Backend));
+		if (!TestTrue(*(Label + TEXT(" invalid candidate manifest is written")),
+			BuildComposableComponentBadHashManifest(CandidateManifest, InvalidManifest))
+			|| !TestTrue(*(Label + TEXT(" candidate validation failure is written")),
+				BuildComposableComponentMissingExportManifest(CandidateManifest, MissingExportManifest)))
+		{
+			return false;
+		}
+		UWorld* World = nullptr;
+		if (!TestTrue(*(Label + TEXT(" world is created")), CreateComponentWorld(World)))
+		{
+			return false;
+		}
+		ON_SCOPE_EXIT { DestroyComponentWorld(World); };
+		if (!TestTrue(*(Label + TEXT(" world begins play")), BeginComponentWorld(World)))
+		{
+			return false;
+		}
+		AActor* UpdatingActor = World->SpawnActor<AAvidScriptActorBindingTestActor>();
+		AActor* UnchangedActor = World->SpawnActor<AAvidScriptActorBindingTestActor>();
+		if (!TestNotNull(*(Label + TEXT(" updating Actor spawns")), UpdatingActor)
+			|| !TestNotNull(*(Label + TEXT(" unchanged Actor spawns")), UnchangedActor))
+		{
+			return false;
+		}
+		UAvidScriptComponent* Updating = AddAvidScriptComponent(UpdatingActor, ActiveManifest);
+		UAvidScriptComponent* Unchanged = AddAvidScriptComponent(UnchangedActor, ActiveManifest);
+		if (!TestNotNull(*(Label + TEXT(" updating Component loads")), Updating)
+			|| !TestNotNull(*(Label + TEXT(" unchanged Component loads")), Unchanged))
+		{
+			return false;
+		}
+		FAvidScriptRuntimeSession* UpdatingSession = Updating->GetRuntimeSessionForTesting();
+		FAvidScriptRuntimeSession* UnchangedSession = Unchanged->GetRuntimeSessionForTesting();
+		if (!TestNotNull(*(Label + TEXT(" updating Session is active")), UpdatingSession)
+			|| !TestNotNull(*(Label + TEXT(" unchanged Session is active")), UnchangedSession))
+		{
+			AddError(Updating->GetRuntimeStats().LastErrorMessage);
+			AddError(Unchanged->GetRuntimeStats().LastErrorMessage);
+			return false;
+		}
+		const auto OldLease = UpdatingSession->GetRuntimeLeaseForTesting();
+		const auto UnchangedLease = UnchangedSession->GetRuntimeLeaseForTesting();
+		const auto Suspended = UpdatingSession->GetTestSnapshot();
+		const auto OtherSuspended = UnchangedSession->GetTestSnapshot();
+		if (!TestTrue(*(Label + TEXT(" both VMs are distinct and suspended")),
+			OldLease.IsValid() && UnchangedLease.IsValid()
+				&& OldLease.Pin().Get() != UnchangedLease.Pin().Get()
+				&& Suspended.TaskCount > 0 && Suspended.TaskWaiterCount > 0
+				&& Suspended.Runtime.PendingContinuationCount > 0
+				&& OtherSuspended.TaskCount > 0 && OtherSuspended.TaskWaiterCount > 0))
+		{
+			return false;
+		}
+		Updating->SetScriptManifestPath(InvalidManifest);
+		FAvidScriptWasmReloadResult ReloadResult;
+		const bool bRejected = Updating->ReloadConfiguredScript(ReloadResult);
+		bool bPreserved = TestFalse(
+			*(Label + TEXT(" invalid artifact reload is rejected")), bRejected);
+		bPreserved &= TestTrue(
+			*(Label + TEXT(" rejection reports rollback")), ReloadResult.bRollbackPreservedLiveRuntime);
+		bPreserved &= TestFalse(
+			*(Label + TEXT(" rejected candidate is not applied")), ReloadResult.bReloadApplied);
+		bPreserved &= TestFalse(
+			*(Label + TEXT(" rejection identifies its error")), ReloadResult.ErrorCategory.IsEmpty());
+		bPreserved &= TestTrue(
+			*(Label + TEXT(" original Session survives")), Updating->GetRuntimeSessionForTesting() == UpdatingSession);
+		bPreserved &= TestTrue(
+			*(Label + TEXT(" original VM lease survives")),
+			UpdatingSession->GetRuntimeLeaseForTesting().Pin().Get() == OldLease.Pin().Get());
+		bPreserved &= TestEqual(
+			*(Label + TEXT(" active manifest remains the original")), Updating->GetRuntimeStats().ScriptManifestPath, NormalizedActiveManifest);
+		bPreserved &= TestEqual(
+			*(Label + TEXT(" rejected reload is counted")), Updating->GetRuntimeStats().RejectedReloadCount, 1);
+		if (!bPreserved)
+		{
+			return false;
+		}
+		const auto Rejected = UpdatingSession->GetTestSnapshot();
+		if (!TestTrue(*(Label + TEXT(" pending Task survives candidate rejection")),
+			Rejected.TaskCount == Suspended.TaskCount
+				&& Rejected.TaskWaiterCount == Suspended.TaskWaiterCount
+				&& Rejected.ContinuationStateBytes == Suspended.ContinuationStateBytes
+				&& Rejected.Runtime.PendingContinuationCount == Suspended.Runtime.PendingContinuationCount
+				&& UnchangedSession->GetRuntimeLeaseForTesting().Pin().Get() == UnchangedLease.Pin().Get()))
+		{
+			return false;
+		}
+		Unchanged->SetScriptManifestPath(MissingExportManifest);
+		FAvidScriptWasmReloadResult ValidationFailure;
+		const bool bValidationApplied = Unchanged->ReloadConfiguredScript(ValidationFailure);
+		bool bValidationPreserved = TestFalse(
+			*(Label + TEXT(" VM validation rejects the candidate")), bValidationApplied);
+		bValidationPreserved &= TestEqual(
+			*(Label + TEXT(" candidate lacks the required export")),
+			ValidationFailure.ErrorCategory, FString(TEXT("missing_export")));
+		bValidationPreserved &= TestTrue(
+			*(Label + TEXT(" VM validation rolls back")),
+			ValidationFailure.bRollbackPreservedLiveRuntime && !ValidationFailure.bReloadApplied
+				&& Unchanged->GetRuntimeSessionForTesting() == UnchangedSession
+				&& UnchangedSession->GetRuntimeLeaseForTesting().Pin().Get() == UnchangedLease.Pin().Get()
+				&& Unchanged->GetRuntimeStats().RejectedReloadCount == 1
+				&& Unchanged->GetRuntimeStats().ScriptManifestPath == NormalizedActiveManifest);
+		const auto ValidationRejected = UnchangedSession->GetTestSnapshot();
+		bValidationPreserved &= TestTrue(
+			*(Label + TEXT(" old Task survives VM validation")),
+			ValidationRejected.TaskCount == OtherSuspended.TaskCount
+				&& ValidationRejected.TaskWaiterCount == OtherSuspended.TaskWaiterCount
+				&& ValidationRejected.ContinuationStateBytes == OtherSuspended.ContinuationStateBytes
+				&& ValidationRejected.Runtime.PendingContinuationCount == OtherSuspended.Runtime.PendingContinuationCount);
+		if (!bValidationPreserved)
+		{
+			return false;
+		}
+		Updating->SetScriptManifestPath(CandidateManifest);
+		if (!TestTrue(*(Label + TEXT(" original C# update is applied")),
+			Updating->ReloadConfiguredScript(ReloadResult)))
+		{
+			AddError(ReloadResult.ErrorMessage);
+			return false;
+		}
+		const auto NewLease = UpdatingSession->GetRuntimeLeaseForTesting();
+		if (!TestTrue(*(Label + TEXT(" commit replaces only one VM")),
+			ReloadResult.bReloadApplied
+				&& Updating->GetRuntimeSessionForTesting() == UpdatingSession
+				&& !OldLease.IsValid() && NewLease.IsValid()
+				&& NewLease.Pin().Get() != UnchangedLease.Pin().Get()
+				&& UnchangedLease.IsValid()
+				&& Updating->GetRuntimeStats().ScriptManifestPath == NormalizedCandidateManifest
+				&& Updating->GetRuntimeStats().SuccessfulReloadCount == 1))
+		{
+			return false;
+		}
+		for (int32 Round = 0; Round < 64; ++Round)
+		{
+			World->Tick(LEVELTICK_All, 0.02f);
+			++GFrameCounter;
+		}
+		auto ReadValue = [&](FAvidScriptRuntimeSession* Session, int32 Offset, int32& OutValue) -> bool
+		{
+			uint8 Bytes[4] = {};
+			FString Error;
+			FAvidScriptWasmRuntimeInstance* Runtime = Session->GetLiveRuntimeForTesting();
+			if (Runtime == nullptr || !Runtime->ReadStateBytes(Offset, MakeArrayView(Bytes), Error))
+			{
+				AddError(Error.IsEmpty() ? TEXT("Runtime state is unavailable") : Error);
+				return false;
+			}
+			FMemory::Memcpy(&OutValue, Bytes, sizeof(OutValue));
+			return true;
+		};
+		int32 NewResult = 0;
+		int32 NewTrace = 0;
+		int32 OldResult = 0;
+		int32 OldTrace = 0;
+		if (!TestTrue(*(Label + TEXT(" both C# VM states are readable")),
+			ReadValue(UpdatingSession, NewOracle.ResultOffset, NewResult)
+				&& ReadValue(UpdatingSession, NewOracle.TraceOffset, NewTrace)
+				&& ReadValue(UnchangedSession, OldOracle.ResultOffset, OldResult)
+				&& ReadValue(UnchangedSession, OldOracle.TraceOffset, OldTrace))
+			|| !TestEqual(*(Label + TEXT(" new result matches .NET")), NewResult, NewOracle.Result)
+			|| !TestEqual(*(Label + TEXT(" new trace matches .NET")), NewTrace, NewOracle.Trace)
+			|| !TestEqual(*(Label + TEXT(" old result matches .NET")), OldResult, OldOracle.Result)
+			|| !TestEqual(*(Label + TEXT(" old trace matches .NET")), OldTrace, OldOracle.Trace))
+		{
+			return false;
+		}
+		const auto Updated = UpdatingSession->GetTestSnapshot();
+		const auto UnchangedDone = UnchangedSession->GetTestSnapshot();
+		if (!TestTrue(*(Label + TEXT(" both Task graphs are released")),
+			Updated.TaskCount == 0 && Updated.TaskWaiterCount == 0
+				&& Updated.Runtime.PendingContinuationCount == 0
+				&& Updated.ContinuationStateBytes == 0
+				&& UnchangedDone.TaskCount == 0 && UnchangedDone.TaskWaiterCount == 0
+				&& UnchangedDone.Runtime.PendingContinuationCount == 0
+				&& UnchangedDone.ContinuationStateBytes == 0))
+		{
+			return false;
+		}
+		if (!TestTrue(*(Label + TEXT(" world ends play")), World->EndPlay(EEndPlayReason::Quit))
+			|| !TestNull(*(Label + TEXT(" updated Session releases")),
+				Updating->GetRuntimeSessionForTesting())
+			|| !TestNull(*(Label + TEXT(" unchanged Session releases")),
+				Unchanged->GetRuntimeSessionForTesting())
+			|| !TestFalse(*(Label + TEXT(" updated VM lease expires")), NewLease.IsValid())
+			|| !TestFalse(*(Label + TEXT(" unchanged VM lease expires")), UnchangedLease.IsValid()))
+		{
+			return false;
+		}
+		AddInfo(FString::Printf(
+			TEXT("original-ir35-reload backend=%d new_result=%d new_trace=%d old_result=%d old_trace=%d loader_rejected=1 validation_rejected=1 applied=1 released=1"),
+			Backend, NewResult, NewTrace, OldResult, OldTrace));
 	}
 	return true;
 }
