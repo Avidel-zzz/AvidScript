@@ -11,7 +11,7 @@ internal static class Program
                 + GuestArrayInstructionTests.Run() + GuestLanguageOutcomeTypeTests.Run()
                 + GuestLanguageOutcomeFlowTests.Run() + GuestLanguageErrorCatalogTests.Run()
                 + GuestTaskCancellationErrorTests.Run() + GuestStaticStorageTests.Run() + GuestTaskErrorTransferTests.Run()
-                + GuestCancellationTokenTests.Run();
+                + GuestCancellationTokenTests.Run() + GuestComposableCapabilityTests.Run();
             Console.WriteLine($"AvidScript.GuestIr.Tests: {count}/{count} passed");
             return 0;
         }

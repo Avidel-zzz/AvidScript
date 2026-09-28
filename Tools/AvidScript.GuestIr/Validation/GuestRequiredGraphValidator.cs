@@ -24,6 +24,10 @@ internal static class GuestRequiredGraphValidator
         }
 
         GuestProvenance provenance = module.Provenance;
+        if (module.CapabilityManifest is { } manifest
+            && (manifest.ExecutionBaseIrVersion is null || manifest.Capabilities is null
+                || manifest.Capabilities.Any(capability => capability is null || capability.Id is null)))
+            return false;
         if (module.ExceptionValues is { } values
             && (values.Bindings is null || values.Bindings.Any(binding => binding is null
                 || HasNull(binding.MethodFunctionId, binding.FunctionId, binding.BlockId,

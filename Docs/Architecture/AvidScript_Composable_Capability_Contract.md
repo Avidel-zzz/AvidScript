@@ -2,6 +2,8 @@
 
 状态：P66.C 设计增量，2026-09-28。本文规定下一段实现与验收，不改变已完成的 P66.A/B、既有 Phase 状态或已发布的 IR 1–34 产物。目标版本暂定 C# Semantic 54/1.63、Guest IR 35/1.34；实施前若编号已分配，必须另取新版本，不能重解释旧字节。
 
+首个实现切片已在 Guest IR 中加入可选清单字段、精确执行基线/能力 ID 校验及 IR 35 严格 JSON 读取。旧版本不能携带新清单；IR 35 即使清单结构有效，仍由现有执行版本准入拒绝，直到 Semantic、WASM emitter 和原生读取者同步接入。固定 SDK 的 Guest IR 398/398、WASM Backend 415/415、C# Guest 4490/4490 通过。这是格式与负例的进度，不是静态初始化 + token 已可执行。
+
 ## 现有阻塞
 
 [SemanticAnalyzer](../../Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs)在启用 async catch 变量时拒绝静态初始化；标准 token 又依赖 catch 变量。[GuestCancellationTokenValidator](../../Tools/AvidScript.GuestIr/Validation/GuestCancellationTokenValidator.cs)拒绝 IR 34 中的 `StaticStorage`。原始 [29 个成员 await 场景](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)需要静态对象初始化，当前通过的是 Semantic 51 → IR 31；标准 token 专项使用 Semantic 53 → IR 34。两组通过不能证明同一个业务模块能同时使用两种能力。
@@ -18,6 +20,8 @@
 | 跨语言模块接口 | 另行定义数据、资源、调用、异步和错误的稳定交换合同 | 不直接共享各语言的 Task、异常对象、GC 根或闭包内存 |
 
 IR 35 将 `execution_base` 与**排序、去重、版本化**的 `capabilities` 列表分开。首版显式允许经验证的 14/1.13、17/1.16 与 29/1.28 基线；本次静态初始化 + async + token 组合使用 29/1.28，纯计算或同步模块不被迫携带 async 基线。基础指令集与能力版本是两条轴：后续增加一个可独立验证的能力，不再为所有已有能力的排列新增外层 IR。现有计划结构可以在首轮复用，但其 `BaseSchemaVersion/BaseIrVersion` 必须全部等于所选执行基线；新合同不允许多个互相矛盾的 base。规范化后只用真实输入模块做授权与所有权验证，不通过改写版本字段的临时视图绕开新组合。
+
+`execution_base` 自身已有任务、错误、所有权和指令合同；能力列表只列可独立组合的增量，不把 IR 29 固有计划重新声明一遍。新验证器最终仍须检查基线与增量的全部计划、指令和 import，不能因为一项未列在增量清单中就跳过基线校验。
 
 首轮已知能力及依赖：
 

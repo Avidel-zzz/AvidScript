@@ -27,6 +27,7 @@ public static class GuestModuleValidator
 
         GuestValidationContext context = new(module);
         ValidateHeader(context);
+        GuestComposableCapabilityValidator.Validate(context);
         IndexTopLevelIds(context);
         ValidateTypes(context);
         GuestCanonicalTypeValidator.Validate(context);
