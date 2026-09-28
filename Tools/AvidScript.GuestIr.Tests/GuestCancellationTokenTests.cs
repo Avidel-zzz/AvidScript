@@ -114,6 +114,7 @@ internal static class GuestCancellationTokenTests
         var taskPending = GuestModuleValidator.Validate(managedTaskAsync);
         Check(!taskPending.Succeeded && taskPending.Diagnostics.All(item => item.Code is not ("ASIR1028" or "ASIR1029" or "ASIR1032")),
             "IR 35 validates exact Task, fault and cancellation imports while the incomplete async module remains rejected");
+        Reject(managedTaskAsync, "IR 35 declared async base without Task owner lifetime metadata", "ASIR1033");
         Reject(managedTaskAsync, "IR 35 declared async base with no readiness guards", "ASIR1038");
         Reject(managedTaskAsync with { Imports = managedTaskAsync.Imports.Where(import =>
             import.Id != GuestTaskCancellationErrorValidator.MetaImportId).ToArray() },

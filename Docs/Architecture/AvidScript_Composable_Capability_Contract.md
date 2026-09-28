@@ -26,9 +26,11 @@ token reader 验证器现可在真实 IR 35 输入上识别 29/1.28、Semantic 5
 
 Task<int> 与 Task 语言错误验证器现按同一 IR 35 声明检查 Host 导入和错误根签名。同源候选通过这两项；缺失或错误签名的 Task/fault 导入仍拒绝。取消错误使用 terminal read 导入对，不强制附加旧式 Task read 导入对；terminal read 的完整性仍须由取消验证器单独核对。
 
-异步异常路由、直接 `await` 路由和 readiness guard 现可在真实 IR 35 候选上校验恢复函数、状态分支、类型化取消 owner 与取消写入。readiness guard 验证通过后才把其取消写入登记为已检查的 producer；直接路由验证器继续拒绝未登记写入。同源候选不再报 `ASIR1030/1031/1038`，但完整模块仍因 Task local 生命周期、取消身份、异常值及五能力准入合同被拒绝，不能发布或运行异步 IR 35。
+异步异常路由、直接 `await` 路由和 readiness guard 现可在真实 IR 35 候选上校验恢复函数、状态分支、类型化取消 owner 与取消写入。readiness guard 验证通过后才把其取消写入登记为已检查的 producer；直接路由验证器继续拒绝未登记写入。同源候选不再报 `ASIR1030/1031/1038`，但完整模块仍因取消身份、异常值及五能力准入合同被拒绝，不能发布或运行异步 IR 35。
 
-取消错误验证器现直接核查 IR 35 的 v2 取消写入、terminal metadata/root 导入、目录 token 和新根；同源候选不再报 `ASIR1032`。缺少 terminal metadata 或写入签名错误的 IR 35 负例仍被拒绝。Task local 生命周期、取消身份、异常值与完整五能力准入尚未开放。
+取消错误验证器现直接核查 IR 35 的 v2 取消写入、terminal metadata/root 导入、目录 token 和新根；同源候选不再报 `ASIR1032`。缺少 terminal metadata 或写入签名错误的 IR 35 负例仍被拒绝。取消身份、异常值与完整五能力准入尚未开放。
+
+Task local 生命周期验证器现以 Semantic 54/1.63 为来源直接检查 IR 35 的 owner 槽、retain/release/transfer helper、释放位置及 scope-exit 边；异常转移验证器使用已核对的同一执行模块。同源候选不再报 `ASIR1033`，缺 Task lifetime 计划的 IR 35 仍被拒绝。取消身份、异常值和完整五能力准入继续关闭。
 
 旧版组合依靠外层版本和 `BaseProfile` 回退到旧执行版本；IR 35 的同步组合已经由 [GuestValidationContext](../../Tools/AvidScript.GuestIr/Validation/GuestValidationContext.cs)直接验证真实输入，并由 [WASM provenance](../../Tools/AvidScript.WasmBackend/Codegen/WasmModuleCompiler.cs)及[原生读取者](../../Source/AvidScriptRuntime/Private/Diagnostics/AvidScriptLanguageErrorCatalog.cpp)编码执行基线与能力清单。异步基线 29/1.28 的完整模块尚未采用这条直接验证路径；继续增加外层版本会使前端、缓存和 Host 的组合数量随能力增长。
 

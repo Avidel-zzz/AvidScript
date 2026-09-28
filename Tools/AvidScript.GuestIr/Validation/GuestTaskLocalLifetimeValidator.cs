@@ -15,12 +15,15 @@ public static class GuestTaskLocalLifetimeValidator
     private const string DiagnosticCode = "ASIR1033";
 
     public static bool IsVersion(GuestModule module) => module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion;
-    internal static bool Supports(GuestModule module) => IsVersion(module) || GuestAsyncThrowRouteValidator.IsVersion(module);
-    internal static int ExpectedSemanticSchema(GuestModule module) => GuestStaticAsyncExecution.HasSourceContract(module)
+    internal static bool Supports(GuestModule module) => IsVersion(module) || GuestAsyncThrowRouteValidator.IsVersion(module)
+        || GuestComposableCapabilities.HasDeclaredAsyncBase29(module);
+    internal static int ExpectedSemanticSchema(GuestModule module) => GuestComposableCapabilities.HasDeclaredAsyncBase29(module)
+        ? 54 : GuestStaticAsyncExecution.HasSourceContract(module)
         ? GuestStaticAsyncExecution.SemanticSchemaVersion : GuestAsyncSynchronousExceptions.HasSourceContract(module)
         ? GuestAsyncSynchronousExceptions.SemanticSchemaVersion : GuestAsyncThrowRouteValidator.IsVersion(module)
         ? GuestAsyncThrowRouteValidator.SemanticSchemaVersion : SemanticSchemaVersion;
-    internal static string ExpectedSemanticVersion(GuestModule module) => GuestStaticAsyncExecution.HasSourceContract(module)
+    internal static string ExpectedSemanticVersion(GuestModule module) => GuestComposableCapabilities.HasDeclaredAsyncBase29(module)
+        ? "1.63" : GuestStaticAsyncExecution.HasSourceContract(module)
         ? GuestStaticAsyncExecution.SemanticVersion : GuestAsyncSynchronousExceptions.HasSourceContract(module)
         ? GuestAsyncSynchronousExceptions.SemanticVersion : GuestAsyncThrowRouteValidator.IsVersion(module)
         ? GuestAsyncThrowRouteValidator.SemanticVersion : SemanticVersion;
