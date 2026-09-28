@@ -14,9 +14,11 @@ C# 静态初始化不能简单映射到上述 14/1.13 夹具：现有编译器�
 
 ## 现有阻塞
 
-[SemanticAnalyzer](../../Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs)可投射特定的静态初始化 + async + token 组合；C# Guest 和双 VM 目前只执行同步两能力的同源 IR 35。异步同源探针已通过私有 Semantic 53 执行副本完成静态字段改写、异常/取消 lowering，并构造含五项能力清单的 IR 35 候选；最终 [GuestModuleValidator](../../Tools/AvidScript.GuestIr/Validation/GuestModuleValidator.cs)按真实 IR 35 输入拒绝，编译器不发布模块。当前拒绝包括任务/异常路由、静态槽与托管根 import。原始 [29 个成员 await 场景](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)需要静态对象初始化，当前可执行的是 Semantic 51 → IR 31；标准 token 专项使用 Semantic 53 → IR 34。两组通过不能证明同一个异步业务模块能同时使用这些能力。
+[SemanticAnalyzer](../../Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs)可投射特定的静态初始化 + async + token 组合；C# Guest 和双 VM 目前只执行同步两能力的同源 IR 35。异步同源探针已通过私有 Semantic 53 执行副本完成静态字段改写、异常/取消 lowering，并构造含五项能力清单的 IR 35 候选；最终 [GuestModuleValidator](../../Tools/AvidScript.GuestIr/Validation/GuestModuleValidator.cs)按真实 IR 35 输入拒绝，编译器不发布模块。当前拒绝包括任务/异常路由与托管根 import。原始 [29 个成员 await 场景](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)需要静态对象初始化，当前可执行的是 Semantic 51 → IR 31；标准 token 专项使用 Semantic 53 → IR 34。两组通过不能证明同一个异步业务模块能同时使用这些能力。
 
 token reader 验证器现可在真实 IR 35 输入上识别 29/1.28、Semantic 54、异常值与 token 值两项声明的组合，并拒绝缺声明、旧来源或同步 token 计划。同源候选先核对旧包装生成的静态、readiness、取消身份、token 与异常计划链，再把 readiness 和取消身份计划统一标记为 29/1.28；最终验证仍拒绝未开放的五能力模块。这里没有把计划字段一致当作执行正确性的证明。
+
+静态槽验证器也已在 IR 35 上检查 29/1.28 的非空有界槽表与引用类型，并拒绝错配基线。该局部通过不覆盖异步初始化 guard 的错误路由和 owner 验证。
 
 旧版组合依靠外层版本和 `BaseProfile` 回退到旧执行版本；IR 35 的同步组合已经由 [GuestValidationContext](../../Tools/AvidScript.GuestIr/Validation/GuestValidationContext.cs)直接验证真实输入，并由 [WASM provenance](../../Tools/AvidScript.WasmBackend/Codegen/WasmModuleCompiler.cs)及[原生读取者](../../Source/AvidScriptRuntime/Private/Diagnostics/AvidScriptLanguageErrorCatalog.cpp)编码执行基线与能力清单。异步基线 29/1.28 的完整模块尚未采用这条直接验证路径；继续增加外层版本会使前端、缓存和 Host 的组合数量随能力增长。
 

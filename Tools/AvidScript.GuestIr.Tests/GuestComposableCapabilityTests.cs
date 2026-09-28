@@ -66,6 +66,22 @@ internal static class GuestComposableCapabilityTests
             "The admitted composition has canonical bytes.");
         Check(GuestModuleValidator.Validate(GuestIrSerializer.Deserialize(composedBytes)).Succeeded,
             "Canonical IR 35 bytes validate on the real module after deserialization.");
+        GuestModule asyncStorage = composed with {
+            CapabilityManifest = GuestCapabilityManifest.Create(29, "1.28", new[] {
+                new GuestCapability(GuestComposableCapabilities.StaticStorage, 1),
+                new GuestCapability(GuestComposableCapabilities.AwaitReadiness, 1),
+                new GuestCapability(GuestComposableCapabilities.CancellationIdentity, 1),
+                new GuestCapability(GuestComposableCapabilities.ExceptionValues, 1),
+                new GuestCapability(GuestComposableCapabilities.CancellationTokenValue, 1),
+            }),
+            StaticStorage = composed.StaticStorage! with { BaseSchemaVersion = 29, BaseIrVersion = "1.28" },
+            CancellationTokens = new(29, "1.28"),
+        };
+        var partialAsyncStorage = GuestModuleValidator.Validate(asyncStorage);
+        Check(!partialAsyncStorage.Succeeded && partialAsyncStorage.Diagnostics.All(item => item.Code != "ASIR1035"),
+            "IR 35 checks base 29 static slots while rejecting the incomplete async module");
+        Reject(asyncStorage with { StaticStorage = asyncStorage.StaticStorage! with { BaseIrVersion = "1.27" } },
+            "IR 35 static slots with a mismatched base pair", "ASIR1035");
         Reject(composed with { Language = "unregistered-language" },
             "An unknown frontend cannot publish IR 35 under the C# contract");
         Reject(composed with { CancellationTokens = null }, "missing token plan in a real composite module");

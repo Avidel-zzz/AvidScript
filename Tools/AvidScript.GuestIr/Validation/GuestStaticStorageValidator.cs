@@ -22,7 +22,7 @@ internal static class GuestStaticStorageValidator
             return;
         }
         bool supportedBase = composable
-            ? (storage.BaseSchemaVersion, storage.BaseIrVersion) is (14, "1.13") or (17, "1.16")
+            ? (storage.BaseSchemaVersion, storage.BaseIrVersion) is (14, "1.13") or (17, "1.16") or (29, "1.28")
             : GuestStaticAsyncExecution.IsVersion(artifact)
                 ? storage.BaseSchemaVersion == GuestAsyncSynchronousExceptions.SchemaVersion
                     && storage.BaseIrVersion == GuestAsyncSynchronousExceptions.IrVersion
