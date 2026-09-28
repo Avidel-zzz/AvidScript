@@ -13,7 +13,10 @@ public static class CSharpStaticInitializationCompiler
     {
         module = null;
         if (!CSharpStaticSourcePreparation.TryPrepare(source, out var ordinary, out var execution, out error)) return false;
-        if (ordinary!.ExceptionFlows is not null || SemanticContract.HasAsyncSynchronousExceptions(ordinary))
+        bool synchronousTokenComposition = SemanticComposableCapabilities.IsVersion(source)
+            && source.AsyncMethods.Count == 0;
+        if (ordinary!.ExceptionFlows is not null
+            || !synchronousTokenComposition && SemanticContract.HasAsyncSynchronousExceptions(ordinary))
         {
             if (!CSharpLanguageErrorCompiler.TryLower(ordinary, semanticSha256, out var compilation, out error)) return false;
             var restored = compilation!.Module with { Provenance = compilation.Module.Provenance with
@@ -31,8 +34,13 @@ public static class CSharpStaticInitializationCompiler
         var affected = input.Functions.Where(function => sourceIds.Contains(function.Id)).Select(function => function.Id).ToHashSet(StringComparer.Ordinal);
         var exports = input.Exports.Where(export => affected.Contains(export.FunctionId)).ToArray();
         var originals = input.Functions.ToDictionary(function => function.Id, StringComparer.Ordinal);
-        if (!CSharpLanguageOutcomeRewriter.TryRewrite(ordinary, input with { Exports = input.Exports.Except(exports).ToArray() },
-                affected, out var outcomes, out error)) return false;
+        GuestModule? outcomes;
+        GuestModule unexported = input with { Exports = input.Exports.Except(exports).ToArray() };
+        if (synchronousTokenComposition
+            ? !CSharpLanguageOutcomeRewriter.TryRewriteForStaticTokenComposition(ordinary, unexported,
+                affected, out outcomes, out error)
+            : !CSharpLanguageOutcomeRewriter.TryRewrite(ordinary, unexported,
+                affected, out outcomes, out error)) return false;
         var sourceSites = execution!.Types.Select(type => (type.SourceId, type.SourceLength, type.Span)).Distinct()
             .OrderBy(site => site.SourceId, StringComparer.Ordinal).ThenBy(site => site.Span.Start).ThenBy(site => site.Span.Length).ToArray();
         var catalog = new GuestLanguageErrorCatalog(new[] { new GuestLanguageErrorTypeToken(1, CSharpStaticInitializationGuards.ExceptionType) },
@@ -50,8 +58,24 @@ public static class CSharpStaticInitializationCompiler
         };
         var initializers = execution.Types.Select(type => new CSharpStaticInitializer(type.TypeId, CSharpGuestIds.Function(type.BodyId),
             Array.FindIndex(sourceSites, site => site == (type.SourceId, type.SourceLength, type.Span)) + 1)).ToArray();
-        if (!CSharpStaticInitializationGuards.TryCompose(candidate, initializers, out var guarded, out error)
-            || !CSharpLanguageErrorEntryAdapter.TryAdd(guarded!, exports, originals, out var adapted, out error)) return false;
+        GuestModule? guarded;
+        if (synchronousTokenComposition
+            ? !CSharpStaticInitializationGuards.TryComposeForStaticTokenComposition(candidate, initializers,
+                out guarded, out error)
+            : !CSharpStaticInitializationGuards.TryCompose(candidate, initializers,
+                out guarded, out error)) return false;
+        if (!CSharpLanguageErrorEntryAdapter.TryAdd(guarded!, exports, originals, out var adapted, out error)) return false;
+        if (synchronousTokenComposition)
+            adapted = adapted! with
+            {
+                SchemaVersion = GuestComposableCapabilities.SchemaVersion,
+                IrVersion = GuestComposableCapabilities.IrVersion,
+                CancellationTokens = new(17, "1.16"),
+                CapabilityManifest = GuestCapabilityManifest.Create(17, "1.16", new[] {
+                    new GuestCapability(GuestComposableCapabilities.StaticStorage, 1),
+                    new GuestCapability(GuestComposableCapabilities.CancellationTokenValue, 1),
+                }),
+            };
         var validation = GuestModuleValidator.Validate(adapted!);
         if (!validation.Succeeded)
         { error = "Static source module failed final validation: " + string.Join(" | ", validation.Diagnostics.Select(item => item.Message)); return false; }

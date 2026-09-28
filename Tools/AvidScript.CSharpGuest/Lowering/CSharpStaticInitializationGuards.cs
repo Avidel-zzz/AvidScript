@@ -23,7 +23,16 @@ public static class CSharpStaticInitializationGuards
     public static string SlotId(string typeId) => "static:$initialization:" + typeId;
 
     public static bool TryCompose(GuestModule module, IReadOnlyList<CSharpStaticInitializer> initializers,
-        out GuestModule? result, out string? error)
+        out GuestModule? result, out string? error) =>
+        TryComposeCore(module, initializers, out result, out error, deferValidation: false);
+
+    internal static bool TryComposeForStaticTokenComposition(GuestModule module,
+        IReadOnlyList<CSharpStaticInitializer> initializers,
+        out GuestModule? result, out string? error) =>
+        TryComposeCore(module, initializers, out result, out error, deferValidation: true);
+
+    private static bool TryComposeCore(GuestModule module, IReadOnlyList<CSharpStaticInitializer> initializers,
+        out GuestModule? result, out string? error, bool deferValidation)
     {
         result = null;
         error = null;
@@ -95,9 +104,12 @@ public static class CSharpStaticInitializationGuards
             Functions = module.Functions.Concat(initializers.Select(item => Build(item, outcome, exceptionToken))).ToArray(),
         };
         if (!CSharpDirectAwaitReadinessLowerer.TryWrap(candidate, out candidate, out error)) return false;
-        var validation = GuestModuleValidator.Validate(candidate);
-        if (!validation.Succeeded) return Fail("Static initialization composition failed: "
-            + string.Join(" | ", validation.Diagnostics.Select(item => item.Message)), out error);
+        if (!deferValidation)
+        {
+            var validation = GuestModuleValidator.Validate(candidate);
+            if (!validation.Succeeded) return Fail("Static initialization composition failed: "
+                + string.Join(" | ", validation.Diagnostics.Select(item => item.Message)), out error);
+        }
         result = candidate;
         return true;
     }

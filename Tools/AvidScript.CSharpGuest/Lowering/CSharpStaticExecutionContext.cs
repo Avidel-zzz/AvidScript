@@ -58,7 +58,8 @@ internal sealed class CSharpStaticExecutionContext
                 function.Parameters.Concat(function.Locals), callable, function.EntryBlockId,
                 id => types.GetValueOrDefault(id)?.Kind, includeEntry: true) };
         }).ToArray();
-        bool asyncSource = SemanticContract.HasAsyncSynchronousExceptions(document);
+        bool asyncSource = document.AsyncMethods.Count != 0
+            && SemanticContract.HasAsyncSynchronousExceptions(document);
         return module with
         {
             SchemaVersion = asyncSource ? GuestStaticAsyncExecution.SchemaVersion

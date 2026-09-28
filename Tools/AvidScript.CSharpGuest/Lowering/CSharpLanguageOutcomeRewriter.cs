@@ -60,6 +60,20 @@ public static class CSharpLanguageOutcomeRewriter
             producerFunctionIds, catchRoutes, cleanupRoutes, out rewritten, out error,
             deferValidation);
 
+    internal static bool TryRewriteForStaticTokenComposition(
+        SemanticDocument semantic, GuestModule module, IReadOnlySet<string> affectedFunctionIds,
+        out GuestModule? rewritten, out string? error)
+    {
+        rewritten = null;
+        if (semantic is null || CSharpCancellationTokenExecutionContext.Find(semantic) is not { HasAsync: false })
+            return Fail("Static/token outcomes require a compiler-owned synchronous token context.", out error);
+        return TryRewriteCore(semantic, module, affectedFunctionIds,
+            new HashSet<string>(StringComparer.Ordinal),
+            new Dictionary<string, IReadOnlyList<CSharpLanguageCatchRoute>>(StringComparer.Ordinal),
+            new Dictionary<string, IReadOnlyList<CSharpLanguageCleanupRoute>>(StringComparer.Ordinal),
+            out rewritten, out error, deferValidation: true);
+    }
+
     private static bool TryRewriteCore(
         SemanticDocument semantic,
         GuestModule module,
@@ -74,6 +88,7 @@ public static class CSharpLanguageOutcomeRewriter
         rewritten = null;
         error = null;
         var asyncContext = semantic is null ? null : CSharpAsyncSynchronousExecutionContext.Find(semantic);
+        var tokenContext = semantic is null ? null : CSharpCancellationTokenExecutionContext.Find(semantic);
         if (semantic is null || module is null || affectedFunctionIds is null
             || affectedFunctionIds.Count == 0 && asyncContext?.MemberGuards.Count is not > 0
             || catchRoutes is null || catchRoutes.Keys.Any(id => !affectedFunctionIds.Contains(id)
@@ -86,7 +101,8 @@ public static class CSharpLanguageOutcomeRewriter
             || !CSharpSemanticInputValidator.IsValid(semantic))
             return Fail("The Semantic input is not an executable ordinary artifact.", out error);
         GuestValidationResult sourceValidation = GuestModuleValidator.Validate(module);
-        if (!sourceValidation.Succeeded && !(deferValidation && asyncContext is not null))
+        if (!sourceValidation.Succeeded && !(deferValidation
+                && (asyncContext is not null || tokenContext is { HasAsync: false })))
             return Fail("The ordinary Guest module failed validation.", out error);
         if (semantic.Source.SourceId != module.Provenance.SourceId
             || semantic.Source.Sha256 != module.Provenance.SourceSha256

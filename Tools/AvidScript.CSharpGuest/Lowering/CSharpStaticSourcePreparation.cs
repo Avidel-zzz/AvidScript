@@ -16,7 +16,10 @@ internal static class CSharpStaticSourcePreparation
     {
         ordinary = null; execution = null; error = null;
         bool asyncSource = source is not null && SemanticStaticInitialization.IsAsyncVersion(source);
+        bool composedTokenSource = source is not null && SemanticComposableCapabilities.IsVersion(source)
+            && source.AsyncMethods is { Count: 0 } && SemanticCancellationTokenValidator.IsValid(source);
         if (source is null || !SemanticStaticInitializationValidator.IsValid(source)
+            || SemanticComposableCapabilities.IsVersion(source) && !composedTokenSource
             || !source.Succeeded && source.ExceptionFlows is null && !asyncSource
             || source.AsyncMethods.Count != 0 && !asyncSource
             || source.ExceptionFlows?.Any(flow => flow.Blocks is null) == true
@@ -32,9 +35,15 @@ internal static class CSharpStaticSourcePreparation
         };
         var validationView = source with
         {
-            SchemaVersion = source.StaticInitialization!.BaseSchemaVersion,
-            SemanticVersion = source.StaticInitialization.BaseSemanticVersion,
+            // The original Semantic 54 envelope was checked above. Its private
+            // token view uses the paired Semantic 53 reader after removing
+            // static ownership; the published module retains Semantic 54.
+            SchemaVersion = composedTokenSource ? SemanticContract.CancellationTokenSchemaVersion
+                : source.StaticInitialization!.BaseSchemaVersion,
+            SemanticVersion = composedTokenSource ? SemanticContract.CancellationTokenSemanticVersion
+                : source.StaticInitialization!.BaseSemanticVersion,
             StaticInitialization = null,
+            CapabilityManifest = null,
             Methods = source.Methods.Select(body => body with { Root = WithoutOwner(body.Root) }).ToArray(),
             AsyncMethods = source.AsyncMethods.Select(method => MapAsync(method, WithoutOwner)).ToArray(),
             ControlFlowGraphs = source.ControlFlowGraphs.Select(graph => graph with { Blocks = graph.Blocks.Select(block => block with
@@ -48,6 +57,13 @@ internal static class CSharpStaticSourcePreparation
                 BranchValue = block.BranchValue is null ? null : WithoutOwner(block.BranchValue),
             }).ToArray() }).ToArray(),
         };
+        if (composedTokenSource)
+        {
+            if (!CSharpCancellationTokenExecutionContext.TryCreate(validationView,
+                    out var tokenValidationView, out _))
+            { error = "Static/token source has no valid private token execution view."; return false; }
+            validationView = tokenValidationView!;
+        }
         if (source.Callables.Select(item => item.MethodSymbolId).Any(string.IsNullOrWhiteSpace)
             || source.Callables.Select(item => item.MethodSymbolId).Distinct().Count() != source.Callables.Count
             || source.Methods.Select(item => item.MethodSymbolId).Distinct().Count() != source.Methods.Count
@@ -237,10 +253,20 @@ internal static class CSharpStaticSourcePreparation
         var rewrittenAsync = source.AsyncMethods.Select(method => MapAsync(method,
             operation => Rewrite(operation, emptyMap), RewriteSymbol)).ToArray();
         if (failure is not null) { error = failure; return false; }
+        // Synthetic field/body/guard functions return void even when the source
+        // has no void callable. Add the canonical type only to this execution copy.
+        var executionTypes = source.Types.Any(type => type.Id == "type:void") ? source.Types
+            : source.Types.Append(new SemanticType("type:void", "void", "void", "primitive", true, false))
+                .OrderBy(type => type.Id, StringComparer.Ordinal).ToArray();
         ordinary = source with
         {
-            SchemaVersion = source.StaticInitialization.BaseSchemaVersion, SemanticVersion = source.StaticInitialization.BaseSemanticVersion,
+            SchemaVersion = composedTokenSource ? SemanticContract.CancellationTokenSchemaVersion
+                : source.StaticInitialization.BaseSchemaVersion,
+            SemanticVersion = composedTokenSource ? SemanticContract.CancellationTokenSemanticVersion
+                : source.StaticInitialization.BaseSemanticVersion,
             StaticInitialization = null,
+            CapabilityManifest = null,
+            Types = executionTypes,
             Symbols = source.Symbols.Where(symbol => !(symbol.Kind == "field" && symbol.IsStatic && !symbol.IsConst))
                 .Concat(addedSymbols).OrderBy(symbol => symbol.Id, StringComparer.Ordinal).ToArray(),
             Callables = source.Callables.Concat(addedCallables).OrderBy(callable => callable.MethodSymbolId, StringComparer.Ordinal).ToArray(),
@@ -256,8 +282,15 @@ internal static class CSharpStaticSourcePreparation
         ordinary = ordinary with { Reachability = SemanticReachability.ExpandForExecution(ordinary,
             addedCallables.Select(callable => callable.MethodSymbolId)
                 .Concat(rewrittenAsync.Select(method => method.MethodSymbolId)).ToArray()) };
+        if (composedTokenSource)
+        {
+            if (!CSharpCancellationTokenExecutionContext.TryCreate(ordinary,
+                    out var tokenExecutionView, out _))
+            { error = "Static/token source cannot lower its private execution view."; return false; }
+            ordinary = tokenExecutionView!;
+        }
         execution = new(fields, owners);
-        execution.Attach(ordinary);
+        execution.Attach(ordinary!);
         return true;
     }
 

@@ -18,6 +18,56 @@ internal static class CSharpGuestComposableIr35Tests
             count++;
         }
 
+        const string combinedSource = """
+            using System.Runtime.InteropServices;
+            using System.Threading;
+            public static class Script {
+                static int State = 1;
+                [UnmanagedCallersOnly(EntryPoint = "run")]
+                public static int Run() => CancellationToken.None == CancellationToken.None ? State : 0;
+            }
+            """;
+        const string combinedId = "Scripts/ComposableStaticToken.cs";
+        var combinedSemantic = SemanticAnalyzer.Analyze(combinedSource, combinedId,
+            FrontendAnalyzer.Analyze(combinedSource, combinedId).Source.Sha256,
+            Array.Empty<SemanticReferenceSource>(), new SemanticCompilerWorkspace(),
+            enableAsyncExceptionFlow: true, enableDirectAwaitCleanup: true,
+            enableAsyncCancellationFlow: true, enableStaticInitialization: true,
+            enableAsyncSynchronousExceptions: true, enableAsyncCatchVariables: true,
+            enableCancellationTokens: true);
+        Check(SemanticComposableCapabilities.IsVersion(combinedSemantic)
+            && SemanticStaticInitializationValidator.IsValid(combinedSemantic)
+            && SemanticCancellationTokenValidator.IsValid(combinedSemantic),
+            "one C# source has a validated static-plus-token Semantic 54 contract");
+        byte[] combinedSemanticBytes = SemanticSerializer.Serialize(combinedSemantic);
+        string combinedHash = Convert.ToHexString(SHA256.HashData(combinedSemanticBytes)).ToLowerInvariant();
+        Check(CSharpStaticInitializationCompiler.TryLower(combinedSemantic, combinedHash,
+            out var sameSource, out string? combinedError) && sameSource is not null,
+            "same-source static/token lowering: " + combinedError);
+        Check(sameSource!.SchemaVersion == GuestComposableCapabilities.SchemaVersion
+            && sameSource.Provenance.SemanticSchemaVersion == SemanticComposableCapabilities.SchemaVersion
+            && sameSource.CapabilityManifest?.Capabilities.Count == 2
+            && GuestModuleValidator.Validate(sameSource).Succeeded,
+            "same-source IR 35 preserves composition and source provenance");
+        Check(sameSource.StaticStorage?.Slots.Any(slot => slot.Id.StartsWith("static:$initialization:", StringComparison.Ordinal)) == true
+            && sameSource.Types.Any(type => type.Id == GuestCancellationTokens.TypeId)
+            && sameSource.Functions.SelectMany(function => function.Blocks)
+                .SelectMany(block => block.Instructions).Any(instruction => instruction.TargetId == GuestCancellationTokens.FieldId),
+            "the lowered module carries executable static guards and token-value operations");
+        byte[] sameSourceBytes = GuestIrSerializer.Serialize(sameSource);
+        Check(GuestModuleValidator.Validate(GuestIrSerializer.Deserialize(sameSourceBytes)).Succeeded
+            && sameSourceBytes.SequenceEqual(GuestIrSerializer.Serialize(GuestIrSerializer.Deserialize(sameSourceBytes)))
+            && CSharpStaticInitializationCompiler.TryLower(SemanticSerializer.Deserialize(combinedSemanticBytes), combinedHash,
+                out var repeated, out combinedError)
+            && sameSourceBytes.SequenceEqual(GuestIrSerializer.Serialize(repeated!)),
+            "same-source composition is canonical and deterministic: " + combinedError);
+        Check(!CSharpStaticInitializationCompiler.TryLower(combinedSemantic with { CapabilityManifest =
+                combinedSemantic.CapabilityManifest! with { Capabilities = Array.Empty<SemanticCapability>() } },
+                combinedHash, out var rejected, out _) && rejected is null,
+            "the compiler rejects a source manifest that omits either capability");
+        Check(!WasmModuleCompiler.Compile(sameSource).Succeeded,
+            "same-source IR 35 remains closed to WASM emission until backend support lands");
+
         const string source = """
             using System.Runtime.InteropServices;
             public class Cache<T> { public static int Value; }

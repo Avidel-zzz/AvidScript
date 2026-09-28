@@ -18,6 +18,14 @@ internal static class CSharpGuestStaticSourceExecutionTests
         int count = 0;
         void Check(bool value, string message) { if (!value) throw new InvalidOperationException("Static source execution: " + message); count++; }
         const string trace = "public static class Trace { public static int Count; public static int Mark(int value) { Count = Count * 10 + value; return value; } }";
+        Verify("no-void-source", """
+            using System.Runtime.InteropServices;
+            public static class Script {
+                static int State = 1;
+                [UnmanagedCallersOnly(EntryPoint = "run")] public static int ExportRun() => Run();
+                public static int Run() => State;
+            }
+            """, 1, 1);
         Verify("objects", """
             using System.Runtime.InteropServices;
             public class Node { public int Value; public Node(int value) { Value = value; } }

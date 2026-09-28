@@ -92,7 +92,7 @@ public partial class Projectile : AvidActor
 | 网络 | RPC、复制属性和 `RepNotify` 有样例及自动化验证；真实多人玩法仍需项目内测试。 |
 | 平台 | 主要验证 Win64 Editor / Development；Shipping、Android、iOS 尚未验收。 |
 
-标准 `CancellationToken` 尚未接入默认构建入口；“静态字段 + token”组合目前也不能从同一 C# 源码生成可运行 WASM。实现进度见[能力组合合同](Docs/Architecture/AvidScript_Composable_Capability_Contract.md)。
+标准 `CancellationToken` 尚未接入默认构建入口。“静态字段 + token”现可从同一 C# 源码生成已验证的 Guest IR，WASM 输出和 UE 加载仍未接通。实现进度见[能力组合合同](Docs/Architecture/AvidScript_Composable_Capability_Contract.md)。
 
 ## 开发
 

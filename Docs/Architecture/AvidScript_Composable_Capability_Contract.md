@@ -6,11 +6,13 @@
 
 C# 静态初始化不能简单映射到上述 14/1.13 夹具：现有编译器为“一次初始化、失败保留和边界报错”生成 IR 27、以 17/1.16 为基线，即使静态字段是 `int` 也带类型状态槽。IR 35 现在还可直接验证这个 17/1.16 基线的静态初始化模块与独立加入的 token 值操作，检查 outcome、错误目录和报告 import 的精确签名；专项 **13/13** 通过。该夹具保留原 IR 27 的来源身份并标为 `guest-ir`，不是从同一份 Semantic 54 C# 源码 lowering 的产物。
 
-第二切片已让 C# 前端在显式启用静态初始化、async 异常和标准 token 分析时，从同一份源码投射 Semantic 54/1.63。能力清单按实际投射的字段和操作生成，不因 generated facade 的未调用签名登记了 token 类型就声明 token 能力。同步静态字段 + token 源码使用两项能力及 Semantic 31/1.40 基线；含 await、取消身份与异常计划的源码使用五项能力及 Semantic 50/1.59 基线。清单和静态计划的基线必须一致；其他尚未验证的组合显式拒绝。旧 Semantic 53 不写清单；Semantic 54 的未知/重复 JSON 字段、旧版夹带清单、缺失能力和冲突基线均拒绝。固定 SDK 的 Semantic 全量 1516/1516、Guest IR 409/409、WASM backend 417/417、C# Guest 回归 4506/4506 通过。C# Guest lowering、WASM emitter 和原生读取者仍未准入 IR 35，因此这仍不是静态初始化 + token 可执行的证据。
+第二切片已让 C# 前端在显式启用静态初始化、async 异常和标准 token 分析时，从同一份源码投射 Semantic 54/1.63。能力清单按实际投射的字段和操作生成，不因 generated facade 的未调用签名登记了 token 类型就声明 token 能力。同步静态字段 + token 源码使用两项能力及 Semantic 31/1.40 基线；含 await、取消身份与异常计划的源码使用五项能力及 Semantic 50/1.59 基线。清单和静态计划的基线必须一致；其他尚未验证的组合显式拒绝。旧 Semantic 53 不写清单；Semantic 54 的未知/重复 JSON 字段、旧版夹带清单、缺失能力和冲突基线均拒绝。该切片固定 SDK 的 Semantic 全量 1516/1516、Guest IR 409/409、WASM backend 417/417、C# Guest 回归 4506/4506 通过。
+
+第三切片让同一份**同步** C# 源码中的静态字段初始化和 `CancellationToken.None` 值操作降到 Guest IR 35/1.34、17/1.16 执行基线。编译器先验证原始 Semantic 54，再在私有执行副本中补齐合成初始化方法的 `void` 类型、静态 guard 和 token 值布局；发布的 IR 保留原始 Semantic 54 的来源 hash 和两项能力清单。规范序列化、反序列化、重复编译与缺能力负例均通过；原始源码不含 `void` 方法的静态字段回归还检查了原有 IR 27 的 WASM 编译。固定 SDK 的同源专项 **20/20**、静态源码专项 **223/223**、C# Guest 全量 **4533/4533** 通过。IR 35 的 WASM emitter 仍拒绝输出，原生 reader 未开放，异步五能力组合也未准入；这里尚无双 VM 或 UE 执行证据。
 
 ## 现有阻塞
 
-[SemanticAnalyzer](../../Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs)现可投射特定的静态初始化 + async + token 组合；IR 35 的同步两能力模块已可验证，但 C# Guest 尚未把同一份 Semantic 54 源码降到 IR 35。[GuestCancellationTokenValidator](../../Tools/AvidScript.GuestIr/Validation/GuestCancellationTokenValidator.cs)仍拒绝 IR 34 中的 `StaticStorage`，IR 35 的异步五能力组合和整个执行路径也未开放。原始 [29 个成员 await 场景](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)需要静态对象初始化，当前可执行的是 Semantic 51 → IR 31；标准 token 专项使用 Semantic 53 → IR 34。两组通过不能证明同一个业务模块能同时使用两种能力。
+[SemanticAnalyzer](../../Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs)可投射特定的静态初始化 + async + token 组合；C# Guest 目前只完成同步两能力的同源 IR 35 lowering。[GuestCancellationTokenValidator](../../Tools/AvidScript.GuestIr/Validation/GuestCancellationTokenValidator.cs)仍拒绝 IR 34 中的 `StaticStorage`；IR 35 的 WASM emitter、原生 reader 和异步五能力组合未开放。原始 [29 个成员 await 场景](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)需要静态对象初始化，当前可执行的是 Semantic 51 → IR 31；标准 token 专项使用 Semantic 53 → IR 34。两组通过不能证明同一个业务模块能同时使用两种能力。
 
 当前每个新组合靠一个外层版本和 `BaseProfile` 视图回退到旧执行版本。[GuestValidationContext](../../Tools/AvidScript.GuestIr/Validation/GuestValidationContext.cs)与 [GuestStaticStorage](../../Tools/AvidScript.GuestIr/Model/GuestStaticStorage.cs)已有多重视图；[WASM provenance](../../Tools/AvidScript.WasmBackend/Codegen/WasmModuleCompiler.cs)和[原生读取者](../../Source/AvidScriptRuntime/Private/Diagnostics/AvidScriptLanguageErrorCatalog.cpp)只编码单个外层版本与 base。继续给每种组合套一个版本，会让语言前端、缓存和 Host 的组合数量随能力增长。
 
