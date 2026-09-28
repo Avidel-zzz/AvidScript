@@ -66,6 +66,8 @@ internal static class GuestComposableCapabilityTests
             "The admitted composition has canonical bytes.");
         Check(GuestModuleValidator.Validate(GuestIrSerializer.Deserialize(composedBytes)).Succeeded,
             "Canonical IR 35 bytes validate on the real module after deserialization.");
+        Reject(composed with { Language = "unregistered-language" },
+            "An unknown frontend cannot publish IR 35 under the C# contract");
         Reject(composed with { CancellationTokens = null }, "missing token plan in a real composite module");
         Reject(composed with { StaticStorage = null }, "missing static plan in a real composite module");
         Reject(composed with { DirectAwaitRoutes = Array.Empty<GuestDirectAwaitRoute>() },

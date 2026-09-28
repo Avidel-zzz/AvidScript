@@ -146,6 +146,66 @@ bool FAvidScriptStaticSourceInitializationTest::RunTest(const FString& Parameter
     }
     return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptComposableIr35StaticTokenTest,
+    "AvidScript.Runtime.ManagedHeap.ComposableIr35StaticToken",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptComposableIr35StaticTokenTest::RunTest(const FString& Parameters)
+{
+    static_cast<void>(Parameters);
+    using namespace AvidScript::Managed;
+    const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(),
+        TEXT("AvidScriptComposableIr35/GuestFixtures/composable-static-token.wasm"));
+    TArray<uint8> Wasm;
+    if (!TestTrue(TEXT("Read same-source IR 35 WASM fixture"), FFileHelper::LoadFileToArray(Wasm, *Path))) return false;
+
+    for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+    {
+        FAvidScriptVmBackendSelection Selection;
+        Selection.BackendKind = Backend;
+        Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime
+            ? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+        FAvidScriptWasmRuntimeInstance Runtime(Selection);
+        for (int32 Domain = 0; Domain < 2; ++Domain)
+        {
+            FAvidScriptWasmSmokeResult Result;
+            if (!TestTrue(TEXT("Load canonical IR 35 module"), Runtime.LoadModule(
+                Wasm.GetData(), Wasm.Num(), TEXT("csharp:Scripts/ComposableStaticToken.cs"), Result)))
+            { AddError(Result.ErrorMessage); return false; }
+            TestEqual(TEXT("IR 35 uses requested backend"), Runtime.GetActiveBackendInfo().Kind, Backend);
+            TestEqual(TEXT("IR 35 uses requested execution mode"),
+                Runtime.GetActiveBackendInfo().ExecutionMode, Selection.ExecutionMode);
+            if (!TestTrue(TEXT("Begin IR 35 static domain"), Runtime.BeginPlay(Result)))
+            { AddError(Result.ErrorMessage); return false; }
+            FAvidScriptVmPreparedExportCall Prepared;
+            FString Error;
+            if (!TestTrue(TEXT("Prepare IR 35 run export"), Runtime.PrepareNamedExportCall(
+                TEXT("run"), Prepared, Error)))
+            { AddError(Error); return false; }
+            for (const uint32 Expected : {2u, 3u})
+            {
+                FAvidScriptVmCallFrame Frame;
+                Frame.CellCount = 0;
+                FAvidScriptVmCallResult Value;
+                FAvidScriptVmError VmError;
+                if (!TestTrue(TEXT("Execute combined static/token source"), Prepared.Call(Frame, VmError, &Value)))
+                { AddError(VmError.Details); return false; }
+                if (!TestEqual(TEXT("Static state and token equality match source"), Value.Cells[0], Expected)) return false;
+            }
+            FHeap* Heap = Runtime.GetManagedHeapForTesting();
+            if (!TestNotNull(TEXT("IR 35 static domain owns a heap"), Heap)) return false;
+            TestTrue(TEXT("Collect after combined execution"), Heap->Collect() == EHeapError::Ok);
+            TestEqual(TEXT("Combined source leaves no active frames"), Heap->GetStats().ActiveFrames, 0u);
+            TestEqual(TEXT("Only domain roots remain"), Heap->GetStats().LiveRoots, Heap->GetStats().StaticRoots);
+            UE_LOG(LogTemp, Display, TEXT("composable-ir35 backend=%d domain=%d first=2 second=3 roots=%u"),
+                static_cast<int32>(Backend), Domain, Heap->GetStats().StaticRoots);
+            TestTrue(TEXT("End IR 35 static domain"), Runtime.EndPlay(Result));
+            Runtime.Unload();
+            TestNull(TEXT("IR 35 unload releases static heap"), Runtime.GetManagedHeapForTesting());
+        }
+    }
+    return true;
+}
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptStaticSourceFailuresTest,
     "AvidScript.Runtime.ManagedHeap.StaticSourceFailures",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

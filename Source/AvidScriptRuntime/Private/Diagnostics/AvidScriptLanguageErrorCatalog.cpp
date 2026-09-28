@@ -54,6 +54,8 @@ int32 ExecutionSchema(const FString& Profile)
 
 FString ExecutionProfile(const TMap<FString, FString>& Fields)
 {
+	if (Fields.FindRef(TEXT("guest_ir")) == TEXT("35/1.34"))
+		return Fields.FindRef(TEXT("execution_base"));
 	if (Fields.FindRef(TEXT("guest_ir")) == TEXT("31/1.30")
 		|| Fields.FindRef(TEXT("guest_ir")) == TEXT("32/1.31")
 		|| Fields.FindRef(TEXT("guest_ir")) == TEXT("33/1.32")
@@ -67,6 +69,18 @@ FString ExecutionProfile(const TMap<FString, FString>& Fields)
 		|| Fields.FindRef(TEXT("guest_ir")) == TEXT("28/1.27")
 		|| Fields.FindRef(TEXT("guest_ir")) == TEXT("29/1.28"))
 		? Fields.FindRef(TEXT("guest_ir_base")) : Fields.FindRef(TEXT("guest_ir"));
+}
+
+bool IsVersionIdentity(const FString& Value)
+{
+	FString Schema, Version;
+	if (Value.Len() > 32 || !Value.Split(TEXT("/"), &Schema, &Version)
+		|| Schema.IsEmpty() || !Version.StartsWith(TEXT("1.")) || Version.Len() <= 2) return false;
+	for (const TCHAR Character : Schema)
+		if (Character < '0' || Character > '9') return false;
+	for (int32 Index = 2; Index < Version.Len(); ++Index)
+		if (Version[Index] < '0' || Version[Index] > '9') return false;
+	return true;
 }
 
 bool ParseProvenance(TConstArrayView<uint8> Payload, TMap<FString, FString>& OutFields)
@@ -84,6 +98,25 @@ bool ParseProvenance(TConstArrayView<uint8> Payload, TMap<FString, FString>& Out
 		OutFields.Add(MoveTemp(Key), Line.Mid(Separator + 1));
 	}
 	const FString ArtifactProfile = OutFields.FindRef(TEXT("guest_ir"));
+	if (ArtifactProfile.StartsWith(TEXT("35/"), ESearchCase::CaseSensitive))
+	{
+		const FString SourceLanguage = OutFields.FindRef(TEXT("source_language"));
+		const FString Semantic = OutFields.FindRef(TEXT("semantic"));
+		const bool bKnownSource = (SourceLanguage == TEXT("csharp") && Semantic == TEXT("54/1.63"))
+			|| (SourceLanguage == TEXT("guest-ir") && IsVersionIdentity(Semantic));
+		return ArtifactProfile == TEXT("35/1.34")
+			&& OutFields.Num() == 10
+			&& (OutFields.FindRef(TEXT("execution_base")) == TEXT("14/1.13")
+				|| OutFields.FindRef(TEXT("execution_base")) == TEXT("17/1.16"))
+			&& OutFields.FindRef(TEXT("capabilities"))
+				== TEXT("error.cancellation_token_value@1,managed.static_storage@1")
+			&& bKnownSource
+			&& !OutFields.FindRef(TEXT("module_id")).IsEmpty()
+			&& IsSourceId(OutFields.FindRef(TEXT("source_id")))
+			&& IsLowerSha256(OutFields.FindRef(TEXT("source_sha256")))
+			&& IsLowerSha256(OutFields.FindRef(TEXT("frontend_sha256")))
+			&& IsLowerSha256(OutFields.FindRef(TEXT("semantic_sha256")));
+	}
 	const bool bStaticStorage = ArtifactProfile == TEXT("27/1.26");
 	const bool bTaskErrorTransfer = ArtifactProfile == TEXT("28/1.27");
 	const bool bSynchronousAsync = ArtifactProfile == TEXT("29/1.28");
@@ -197,6 +230,12 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 		return false;
 	}
 	const FString ArtifactProfile = ProvenanceFields.FindRef(TEXT("guest_ir"));
+	if (ArtifactProfile == TEXT("35/1.34")
+		&& (ExpectedModuleId.IsEmpty() || ProvenanceFields.FindRef(TEXT("module_id")) != ExpectedModuleId))
+	{
+		OutError = TEXT("IR 35 provenance module identity does not match the loaded artifact");
+		return false;
+	}
 	const FString Profile = CatalogPrivate::ExecutionProfile(ProvenanceFields);
 	const int32 ProfileSchema = CatalogPrivate::ExecutionSchema(Profile);
 	const bool bRoutedThrow = Profile == TEXT("26/1.25");
@@ -250,7 +289,7 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 	const TArray<TSharedPtr<FJsonValue>>* Types = nullptr;
 	const TArray<TSharedPtr<FJsonValue>>* Sources = nullptr;
 	if (!CatalogPrivate::Number(*Document, TEXT("schema_version"), 1, 1, SectionVersion)
-		|| !CatalogPrivate::Number(*Document, TEXT("guest_ir_schema_version"), 17, 34, GuestSchema)
+		|| !CatalogPrivate::Number(*Document, TEXT("guest_ir_schema_version"), 17, 35, GuestSchema)
 		|| !Document->TryGetStringField(TEXT("guest_ir_version"), GuestVersion)
 		|| FString::Printf(TEXT("%d/%s"), GuestSchema, *GuestVersion) != ArtifactProfile
 		|| !Document->TryGetStringField(TEXT("module_id"), ModuleId) || ModuleId != ExpectedModuleId

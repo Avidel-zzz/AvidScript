@@ -2,17 +2,19 @@
 
 状态：P66.C 实现中，2026-09-28。本文规定下一段实现与验收，不改变已完成的 P66.A/B、既有 Phase 状态或已发布的 IR 1–34 产物。已预留 C# Semantic 54/1.63、Guest IR 35/1.34；不能重解释旧字节。
 
-首个实现切片已在 Guest IR 中加入可选清单字段、精确执行基线/能力 ID 校验及 IR 35 严格 JSON 读取。旧版本不能携带新清单。Guest 验证器现在可在未改写版本的手写 IR 35 夹具上核对同步 `managed.static_storage` + `error.cancellation_token_value`、14/1.13 基线、两种指令和 token 类型布局；缺计划、错基线、伪造静态槽、额外异步元数据及异常 token reader 均拒绝。其他 IR 35 能力组合尚未准入，WASM emitter 仍明确拒绝 IR 35。
+首个实现切片已在 Guest IR 中加入可选清单字段、精确执行基线/能力 ID 校验及 IR 35 严格 JSON 读取。旧版本不能携带新清单。Guest 验证器在未改写版本的手写 IR 35 夹具上核对同步 `managed.static_storage` + `error.cancellation_token_value`、14/1.13 基线、两种指令和 token 类型布局；缺计划、错基线、伪造静态槽、额外异步元数据及异常 token reader 均拒绝。其他 IR 35 能力组合尚未准入。
 
 C# 静态初始化不能简单映射到上述 14/1.13 夹具：现有编译器为“一次初始化、失败保留和边界报错”生成 IR 27、以 17/1.16 为基线，即使静态字段是 `int` 也带类型状态槽。IR 35 现在还可直接验证这个 17/1.16 基线的静态初始化模块与独立加入的 token 值操作，检查 outcome、错误目录和报告 import 的精确签名；专项 **13/13** 通过。该夹具保留原 IR 27 的来源身份并标为 `guest-ir`，不是从同一份 Semantic 54 C# 源码 lowering 的产物。
 
 第二切片已让 C# 前端在显式启用静态初始化、async 异常和标准 token 分析时，从同一份源码投射 Semantic 54/1.63。能力清单按实际投射的字段和操作生成，不因 generated facade 的未调用签名登记了 token 类型就声明 token 能力。同步静态字段 + token 源码使用两项能力及 Semantic 31/1.40 基线；含 await、取消身份与异常计划的源码使用五项能力及 Semantic 50/1.59 基线。清单和静态计划的基线必须一致；其他尚未验证的组合显式拒绝。旧 Semantic 53 不写清单；Semantic 54 的未知/重复 JSON 字段、旧版夹带清单、缺失能力和冲突基线均拒绝。该切片固定 SDK 的 Semantic 全量 1516/1516、Guest IR 409/409、WASM backend 417/417、C# Guest 回归 4506/4506 通过。
 
-第三切片让同一份**同步** C# 源码中的静态字段初始化和 `CancellationToken.None` 值操作降到 Guest IR 35/1.34、17/1.16 执行基线。编译器先验证原始 Semantic 54，再在私有执行副本中补齐合成初始化方法的 `void` 类型、静态 guard 和 token 值布局；发布的 IR 保留原始 Semantic 54 的来源 hash 和两项能力清单。规范序列化、反序列化、重复编译与缺能力负例均通过；原始源码不含 `void` 方法的静态字段回归还检查了原有 IR 27 的 WASM 编译。固定 SDK 的同源专项 **20/20**、静态源码专项 **223/223**、C# Guest 全量 **4533/4533** 通过。IR 35 的 WASM emitter 仍拒绝输出，原生 reader 未开放，异步五能力组合也未准入；这里尚无双 VM 或 UE 执行证据。
+第三切片让同一份**同步** C# 源码中的静态字段初始化和 `CancellationToken.None` 值操作降到 Guest IR 35/1.34、17/1.16 执行基线。编译器先验证原始 Semantic 54，再在私有执行副本中补齐合成初始化方法的 `void` 类型、静态 guard 和 token 值布局；发布的 IR 保留原始 Semantic 54 的来源 hash 和两项能力清单。规范序列化、反序列化、重复编译与缺能力负例均通过；原始源码不含 `void` 方法的静态字段回归还检查了原有 IR 27 的 WASM 编译。该切片完成时固定 SDK 的同源专项 **20/20**、静态源码专项 **223/223**、C# Guest 全量 **4533/4533** 通过。
+
+第四切片接通 IR 35 的 WASM emitter 和原生 provenance reader。新产物写入 `guest_ir=35/1.34`、`execution_base`、规范能力清单、`source_language` 和源语义版本；原生读取只准入 14/1.13 或 17/1.16 上的两项同步能力，检查模块身份、来源 hash、精确字段集和错误目录。固定 SDK 的 Guest IR **410/410**、C# Guest **4537/4537**、WASM backend **419/419**、Win64 no-clean Editor 构建及聚焦 Automation **2/2** 通过。同源 17/1.16 WASM SHA-256 为 `f98ca31778c5c6691e1caade3dc52e33fb8f28f7665564576b199176abf59516`；Wasmtime JIT 与 WAMR Interpreter 各在两个新执行域中连续返回 `2`、`3`，共 **4/4** 次观察，卸载后堆释放。可用 `Build/TestAvidScriptComposableIr35.ps1` 重现，原始日志位于工程 `Saved/AvidScriptComposableIr35/20260928T022220003Z/`。这仍未覆盖异步五能力、正常编辑器构建入口或真实 Play。
 
 ## 现有阻塞
 
-[SemanticAnalyzer](../../Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs)可投射特定的静态初始化 + async + token 组合；C# Guest 目前只完成同步两能力的同源 IR 35 lowering。[GuestCancellationTokenValidator](../../Tools/AvidScript.GuestIr/Validation/GuestCancellationTokenValidator.cs)仍拒绝 IR 34 中的 `StaticStorage`；IR 35 的 WASM emitter、原生 reader 和异步五能力组合未开放。原始 [29 个成员 await 场景](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)需要静态对象初始化，当前可执行的是 Semantic 51 → IR 31；标准 token 专项使用 Semantic 53 → IR 34。两组通过不能证明同一个业务模块能同时使用两种能力。
+[SemanticAnalyzer](../../Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs)可投射特定的静态初始化 + async + token 组合；C# Guest 和双 VM 目前只执行同步两能力的同源 IR 35。[GuestCancellationTokenValidator](../../Tools/AvidScript.GuestIr/Validation/GuestCancellationTokenValidator.cs)仍拒绝 IR 34 中的 `StaticStorage`；IR 35 的异步五能力组合未开放。原始 [29 个成员 await 场景](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)需要静态对象初始化，当前可执行的是 Semantic 51 → IR 31；标准 token 专项使用 Semantic 53 → IR 34。两组通过不能证明同一个异步业务模块能同时使用这些能力。
 
 当前每个新组合靠一个外层版本和 `BaseProfile` 视图回退到旧执行版本。[GuestValidationContext](../../Tools/AvidScript.GuestIr/Validation/GuestValidationContext.cs)与 [GuestStaticStorage](../../Tools/AvidScript.GuestIr/Model/GuestStaticStorage.cs)已有多重视图；[WASM provenance](../../Tools/AvidScript.WasmBackend/Codegen/WasmModuleCompiler.cs)和[原生读取者](../../Source/AvidScriptRuntime/Private/Diagnostics/AvidScriptLanguageErrorCatalog.cpp)只编码单个外层版本与 base。继续给每种组合套一个版本，会让语言前端、缓存和 Host 的组合数量随能力增长。
 
@@ -43,7 +45,7 @@ IR 35 将 `execution_base` 与**排序、去重、版本化**的 `capabilities` 
 
 Semantic 54 的 C# 文档记录已实际投射的语言能力与源码 hash；IR 35 记录执行能力与对应 Semantic hash。第二语言可产出同一 IR 能力，却必须保留自己的前端种类与版本，不能伪装成 C# Semantic 54。默认 CLI、缓存、generated facade、Editor Build And Bind 与包发布读取同一份能力判定；禁止一个入口接受组合而另一个入口默默退回旧版。
 
-WASM 的新 provenance 同时记录 `guest_ir=35/1.34`、`execution_base=29/1.28`、规范能力列表及前端合同。原生读取者对 IR 35 使用严格新格式，对 IR 1–34 保持原有精确解析；不能把新字段塞进旧 IR，也不能把旧版 reader 当成新版本。Host 验证实际加载的 WASM 与包中已审核的 hash、provenance 和 import 表一致，再按 Session、World、线程、根与代际检查执行。未知必需能力、未来版本、错误签名、别名 import 和能力/计划/导入不一致均 fail closed。
+WASM 的新 provenance 同时记录 `guest_ir=35/1.34`、`execution_base`、规范能力列表、`source_language` 和 `semantic`。当前原生读取者只准入 14/1.13 与 17/1.16 的同步两能力组合；29/1.28 的异步组合仍关闭。旧 IR 1–34 保持原有读取格式，不能把新字段塞进旧 IR。Host 验证实际加载的 WASM 与包中已审核的 hash、provenance 和 import 表一致，再按 Session、World、线程、根与代际检查执行。未知必需能力、未来版本、错误签名、别名 import 和能力/计划/导入不一致均 fail closed。
 
 ## 落地顺序与验收
 

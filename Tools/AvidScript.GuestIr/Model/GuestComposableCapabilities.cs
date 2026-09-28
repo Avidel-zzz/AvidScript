@@ -5,8 +5,8 @@ using System.Text.Json.Serialization;
 
 namespace AvidScript.GuestIr;
 
-// IR 35 reserves a versioned feature list. Admission remains closed until
-// the Semantic, emitter, and native readers implement this exact contract.
+// IR 35 carries a versioned feature list. The validator currently admits the
+// synchronous static-storage plus token-value pair; async combinations remain closed.
 public static class GuestComposableCapabilities
 {
     public const int SchemaVersion = 35;

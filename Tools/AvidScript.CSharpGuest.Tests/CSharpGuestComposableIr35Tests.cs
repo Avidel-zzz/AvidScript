@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using AvidScript.CSharpFrontend;
@@ -23,8 +24,15 @@ internal static class CSharpGuestComposableIr35Tests
             using System.Threading;
             public static class Script {
                 static int State = 1;
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static void Begin() {}
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_end_play")]
+                public static void End() {}
                 [UnmanagedCallersOnly(EntryPoint = "run")]
-                public static int Run() => CancellationToken.None == CancellationToken.None ? State : 0;
+                public static int Run() {
+                    State += 1;
+                    return CancellationToken.None == CancellationToken.None ? State : 0;
+                }
             }
             """;
         const string combinedId = "Scripts/ComposableStaticToken.cs";
@@ -65,8 +73,32 @@ internal static class CSharpGuestComposableIr35Tests
                 combinedSemantic.CapabilityManifest! with { Capabilities = Array.Empty<SemanticCapability>() } },
                 combinedHash, out var rejected, out _) && rejected is null,
             "the compiler rejects a source manifest that omits either capability");
-        Check(!WasmModuleCompiler.Compile(sameSource).Succeeded,
-            "same-source IR 35 remains closed to WASM emission until backend support lands");
+        WasmCompilationResult sameSourceWasm = WasmModuleCompiler.Compile(sameSource);
+        Check(sameSourceWasm.Succeeded,
+            "same-source IR 35 emits WASM: " + string.Join(" | ",
+                sameSourceWasm.Diagnostics.Select(item => item.Code + ": " + item.Message)));
+        string sameSourceProvenance = WasmArtifactInspector.Inspect(sameSourceWasm.Bytes)
+            .CustomSections.Single(section => section.Name == "avidscript.provenance").PayloadText;
+        Check(sameSourceProvenance.Contains("guest_ir=35/1.34\nexecution_base=17/1.16\n", StringComparison.Ordinal)
+            && sameSourceProvenance.Contains(
+                "capabilities=error.cancellation_token_value@1,managed.static_storage@1\nsource_language=csharp\nsemantic=54/1.63",
+                StringComparison.Ordinal)
+            && WasmArtifactInspector.Inspect(sameSourceWasm.Bytes).CustomSections.Any(
+                section => section.Name == "avidscript.language_errors"),
+            "same-source WASM binds the exact execution base, capabilities, source contract and error catalog");
+        Check(sameSourceWasm.Bytes.SequenceEqual(WasmModuleCompiler.Compile(sameSource).Bytes),
+            "same-source IR 35 emits deterministic WASM bytes");
+        Check(sameSource.ModuleId == "csharp:" + combinedId,
+            "same-source module keeps its canonical C# source identity");
+        string? fixtureDirectory = Environment.GetEnvironmentVariable("AVIDSCRIPT_COMPOSABLE_IR35_FIXTURE_DIR");
+        if (!string.IsNullOrWhiteSpace(fixtureDirectory))
+        {
+            Directory.CreateDirectory(fixtureDirectory);
+            File.WriteAllText(Path.Combine(fixtureDirectory, "composable-static-token.cs"), combinedSource);
+            File.WriteAllBytes(Path.Combine(fixtureDirectory, "composable-static-token.semantic.json"), combinedSemanticBytes);
+            File.WriteAllBytes(Path.Combine(fixtureDirectory, "composable-static-token.guestir.json"), sameSourceBytes);
+            File.WriteAllBytes(Path.Combine(fixtureDirectory, "composable-static-token.wasm"), sameSourceWasm.Bytes);
+        }
 
         const string source = """
             using System.Runtime.InteropServices;
@@ -155,8 +187,14 @@ internal static class CSharpGuestComposableIr35Tests
             { Sources = composed.LanguageErrorCatalog.Sources.Select((site, index) =>
                 index == 0 ? site with { Start = -1 } : site).ToArray() } }).Diagnostics.Any(item => item.Code == "ASIR1027"),
             "base 17 cannot bypass language-error source bounds");
-        Check(!WasmModuleCompiler.Compile(composed).Succeeded,
-            "WASM publication remains closed until IR 35 provenance and native loading are implemented");
+        WasmCompilationResult composedWasm = WasmModuleCompiler.Compile(composed);
+        Check(composedWasm.Succeeded,
+            "validated guest-ir IR 35 emits WASM: " + string.Join(" | ",
+                composedWasm.Diagnostics.Select(item => item.Code + ": " + item.Message)));
+        Check(WasmArtifactInspector.Inspect(composedWasm.Bytes).CustomSections.Single(
+                section => section.Name == "avidscript.provenance").PayloadText.Contains(
+                "source_language=guest-ir\nsemantic=", StringComparison.Ordinal),
+            "hand-composed guest IR retains its own source-language identity");
         return count;
     }
 }

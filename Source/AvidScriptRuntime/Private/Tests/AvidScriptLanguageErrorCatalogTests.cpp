@@ -82,13 +82,21 @@ FString Provenance(int32 GuestSchema = 17, const TCHAR* LifetimeModel = TEXT("ca
 		TEXT("frontend_sha256=%s\nsemantic_sha256=%s\nguest_ir=%d/%s"),
 		*ModuleId, *SourceSha256, *FString::ChrN(64, 'b'), *FString::ChrN(64, 'c'),
 		GuestSchema, *GuestVersion);
-	if (StaticBaseSchema) Result += FString::Printf(TEXT("\nguest_ir_base=%d/1.%d"), StaticBaseSchema, StaticBaseSchema - 1);
+	if (StaticBaseSchema)
+	{
+		if (GuestSchema == 35)
+			Result += FString::Printf(TEXT("\nexecution_base=%d/1.%d"), StaticBaseSchema, StaticBaseSchema - 1);
+		else
+			Result += FString::Printf(TEXT("\nguest_ir_base=%d/1.%d"), StaticBaseSchema, StaticBaseSchema - 1);
+	}
 	const int32 ProfileSchema = GuestSchema == 30
 		|| ((GuestSchema >= 31 && GuestSchema <= 34) && (StaticBaseSchema == 29 || StaticBaseSchema == 30))
 		? 26 : StaticBaseSchema ? StaticBaseSchema : GuestSchema;
 	if (ProfileSchema == 25 || ProfileSchema == 26) Result += FString::Printf(TEXT("\ntask_local_exception_model=%s"), LifetimeModel);
 	if (GuestSchema == 33) Result += TEXT("\nsemantic=52/1.61");
 	if (GuestSchema == 34) Result += TEXT("\nsemantic=53/1.62");
+	if (GuestSchema == 35) Result += TEXT("\ncapabilities=error.cancellation_token_value@1,managed.static_storage@1")
+		TEXT("\nsource_language=csharp\nsemantic=54/1.63");
 	return Result;
 }
 
@@ -414,6 +422,43 @@ bool FAvidScriptLanguageErrorCatalogRuntimeTest::RunTest(const FString& Paramete
 	for (const TCHAR* Model : {TEXT("none"), TEXT("fault"), TEXT("cleanup"), TEXT("cleanup_only"), TEXT("unknown")})
 		TestFalse(TEXT("IR 34 asynchronous base keeps cancellation lifetime ownership"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 			Module(&TokenJson, true, false, 34, Model, 29), ModuleId, Catalog, Error));
+	const FString ComposableJson = Json(Document(35));
+	TestTrue(TEXT("IR 35 pure static/token values load without a language catalog"),
+		FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+			Module(nullptr, true, false, 35, TEXT("cancellation"), 14), ModuleId, Catalog, Error));
+	TestNull(TEXT("IR 35 pure values grant no language error capability"), Catalog.Get());
+	TestFalse(TEXT("IR 35 pure values reject a language catalog"),
+		FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+			Module(&ComposableJson, true, false, 35, TEXT("cancellation"), 14), ModuleId, Catalog, Error));
+	TestTrue(TEXT("IR 35 static initializer base loads its language catalog"),
+		FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+			Module(&ComposableJson, true, false, 35, TEXT("cancellation"), 17), ModuleId, Catalog, Error));
+	TestTrue(TEXT("IR 35 static initializer preserves only its execution-base error profile"),
+		Catalog && Catalog->FindType(1) && !Catalog->SupportsExceptionCancellationToken()
+			&& !Catalog->SupportsTaskCancellationIdentity());
+	TestFalse(TEXT("IR 35 static initializer base requires its catalog"),
+		FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+			Module(nullptr, true, false, 35, TEXT("cancellation"), 17), ModuleId, Catalog, Error));
+	TestFalse(TEXT("IR 35 pure values bind the expected module identity"),
+		FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+			Module(nullptr, true, false, 35, TEXT("cancellation"), 14),
+			TEXT("different_module"), Catalog, Error));
+	for (const FString& Metadata : {
+		Provenance(35, TEXT("cancellation"), 17).Replace(TEXT("guest_ir=35/1.34"), TEXT("guest_ir=35/1.33")),
+		Provenance(35, TEXT("cancellation"), 17).Replace(TEXT("execution_base=17/1.16"), TEXT("execution_base=29/1.28")),
+		Provenance(35, TEXT("cancellation"), 17).Replace(TEXT("managed.static_storage@1"), TEXT("managed.static_storage@2")),
+		Provenance(35, TEXT("cancellation"), 17).Replace(
+			TEXT("error.cancellation_token_value@1,managed.static_storage@1"),
+			TEXT("managed.static_storage@1,error.cancellation_token_value@1")),
+		Provenance(35, TEXT("cancellation"), 17).Replace(TEXT("\nsource_language=csharp"), TEXT("")),
+		Provenance(35, TEXT("cancellation"), 17).Replace(TEXT("semantic=54/1.63"), TEXT("semantic=53/1.62")),
+		Provenance(35, TEXT("cancellation"), 17) + TEXT("\nunknown=1")})
+	{
+		TArray<uint8> Mismatched = Module(&ComposableJson, false);
+		Custom(Mismatched, "avidscript.provenance", Metadata);
+		TestFalse(TEXT("IR 35 rejects wrong versions, capability order and unknown fields"),
+			FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(Mismatched, ModuleId, Catalog, Error));
+	}
 	IdentityDocument->GetArrayField(TEXT("types"))[0]->AsObject()->SetStringField(
 		TEXT("type_id"), TEXT("type:global::System.Threading.Tasks.TaskCanceledException"));
 	const FString IdentityJson = Json(IdentityDocument);

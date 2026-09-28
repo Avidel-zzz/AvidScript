@@ -34,15 +34,6 @@ public static class WasmModuleCompiler
                 new[] { diagnostic });
         }
 
-        if (GuestComposableCapabilities.IsVersion(module))
-        {
-            WasmDiagnostic diagnostic = new(
-                "ASWB1003", "error",
-                "IR 35 capability provenance and native loading are not yet supported by the WASM emitter.");
-            return new WasmCompilationResult(
-                false, Array.Empty<byte>(), Array.Empty<GuestWasmDebugOffset>(), new[] { diagnostic });
-        }
-
         try
         {
             WasmCompilationOptions effectiveOptions = options ?? new WasmCompilationOptions();
@@ -235,7 +226,15 @@ public static class WasmModuleCompiler
                 $"guest_ir={module.SchemaVersion}/{module.IrVersion}");
             if (module.TaskLocalLifetimes is { } lifetimes)
                 payload += "\ntask_local_exception_model=" + lifetimes.ExceptionModel;
-            if (GuestCancellationTokens.IsVersion(module) && module.CancellationTokens is { } tokens)
+            if (GuestComposableCapabilities.IsVersion(module) && module.CapabilityManifest is { } manifest)
+            {
+                payload += $"\nexecution_base={manifest.ExecutionBaseSchemaVersion}/{manifest.ExecutionBaseIrVersion}";
+                payload += "\ncapabilities=" + string.Join(",",
+                    manifest.Capabilities.Select(capability => $"{capability.Id}@{capability.Version}"));
+                payload += $"\nsource_language={module.Language}";
+                payload += $"\nsemantic={module.Provenance.SemanticSchemaVersion}/{module.Provenance.SemanticVersion}";
+            }
+            else if (GuestCancellationTokens.IsVersion(module) && module.CancellationTokens is { } tokens)
                 payload += $"\nguest_ir_base={tokens.BaseSchemaVersion}/{tokens.BaseIrVersion}\nsemantic=53/1.62";
             else if (GuestExceptionValues.IsVersion(module))
                 payload += "\nguest_ir_base=29/1.28\nsemantic=52/1.61";

@@ -49,10 +49,22 @@ internal static class WasmCancellationTokenTests
         var composed = GuestComposableCapabilityFixture.SynchronousStaticToken();
         Check(GuestModuleValidator.Validate(composed).Succeeded,
             "IR 35 static/token composition must reach the emitter boundary as a validated module");
-        var pending = WasmModuleCompiler.Compile(composed);
-        Check(!pending.Succeeded && pending.Bytes.Length == 0
-            && pending.Diagnostics.Any(item => item.Code == "ASWB1003"),
-            "IR 35 cannot emit WASM without capability provenance and native reader support");
+        var combined = WasmModuleCompiler.Compile(composed);
+        Check(combined.Succeeded, "IR 35 static/token composition emits WASM: "
+            + string.Join(" | ", combined.Diagnostics.Select(item => item.Message)));
+        var combinedArtifact = WasmArtifactInspector.Inspect(combined.Bytes);
+        var combinedProvenance = combinedArtifact.CustomSections.Single(
+            section => section.Name == "avidscript.provenance").PayloadText.Split('\n');
+        Check(combinedProvenance.Contains("guest_ir=35/1.34")
+            && combinedProvenance.Contains("execution_base=14/1.13")
+            && combinedProvenance.Contains(
+                "capabilities=error.cancellation_token_value@1,managed.static_storage@1")
+            && combinedProvenance.Contains("source_language=csharp")
+            && combinedProvenance.Contains("semantic=54/1.63"),
+            "IR 35 WASM carries its exact capability and frontend contract");
+        Check(combined.Bytes.SequenceEqual(WasmModuleCompiler.Compile(
+                GuestIrSerializer.Deserialize(GuestIrSerializer.Serialize(composed))).Bytes),
+            "IR 35 WASM remains byte deterministic across canonical JSON");
         return count;
     }
 }

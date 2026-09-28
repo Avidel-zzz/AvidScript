@@ -28,6 +28,9 @@ internal static class GuestComposableCapabilityValidator
                 manifest.ExecutionBaseSchemaVersion, manifest.ExecutionBaseIrVersion))
             Add("The execution base must be an exact supported schema/version pair.");
 
+        if (module.Language is not ("csharp" or "guest-ir"))
+            Add("IR 35 requires a recognized source language until its frontend contract is defined.");
+
         if (module.Language == "csharp"
             && (module.Provenance.SemanticSchemaVersion != 54
                 || module.Provenance.SemanticVersion != "1.63"))
