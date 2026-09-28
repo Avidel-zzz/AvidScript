@@ -1,4 +1,5 @@
 #if WITH_DEV_AUTOMATION_TESTS
+#include "AvidScriptLanguageErrorCatalog.h"
 #include "AvidScriptWasmRuntime.h"
 #include "Memory/AvidScriptManagedHeap.h"
 #include "Misc/AutomationTest.h"
@@ -206,6 +207,41 @@ bool FAvidScriptComposableIr35StaticTokenTest::RunTest(const FString& Parameters
     }
     return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptComposableIr35AsyncLoadTest,
+    "AvidScript.Runtime.ManagedHeap.ComposableIr35AsyncLoad",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptComposableIr35AsyncLoadTest::RunTest(const FString& Parameters)
+{
+    static_cast<void>(Parameters);
+    const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(),
+        TEXT("AvidScriptComposableIr35/GuestFixtures/composable-async-static-token.wasm"));
+    TArray<uint8> Wasm;
+    if (!TestTrue(TEXT("Read same-source async IR 35 WASM fixture"), FFileHelper::LoadFileToArray(Wasm, *Path))) return false;
+
+    for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+    {
+        FAvidScriptVmBackendSelection Selection;
+        Selection.BackendKind = Backend;
+        Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime
+            ? EAvidScriptVmExecutionMode::Jit : EAvidScriptVmExecutionMode::Interpreter;
+        FAvidScriptWasmRuntimeInstance Runtime(Selection);
+        FAvidScriptWasmSmokeResult Result;
+        if (!TestTrue(TEXT("Load same-source async IR 35 module"), Runtime.LoadModule(
+            Wasm.GetData(), Wasm.Num(), TEXT("csharp:Scripts/ComposableAsyncStaticToken.cs"), Result)))
+        { AddError(Result.ErrorMessage); return false; }
+        TestEqual(TEXT("Async IR 35 uses requested backend"), Runtime.GetActiveBackendInfo().Kind, Backend);
+        const FAvidScriptLanguageErrorCatalog* Catalog = Runtime.GetLanguageErrorCatalog();
+        TestTrue(TEXT("Async IR 35 authorizes fault, cancellation identity and exception token"), Catalog
+            && Catalog->SupportsTaskLanguageErrorFault() && Catalog->SupportsTaskCancellationError()
+            && Catalog->SupportsTaskCancellationIdentity() && Catalog->SupportsExceptionCancellationToken());
+        Runtime.Unload();
+        TestNull(TEXT("Async IR 35 unload releases heap"), Runtime.GetManagedHeapForTesting());
+    }
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptStaticSourceFailuresTest,
     "AvidScript.Runtime.ManagedHeap.StaticSourceFailures",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

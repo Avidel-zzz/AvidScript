@@ -10,7 +10,7 @@
 
 最近的 [C10 取消身份实现](../Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)已连接 Session、IR 32/33 与双 VM；异步 `catch` 对象别名可跨 await/GC，重复等待与 rethrow 保持对象身份。显式编译 API 已从 Semantic 53 生成 IR 34/WASM；异常 getter 和对象快照 reader 已在 Win64 两个 VM 上运行，21 份 C# 源码产生 82/82 组执行观察。同步静态初始化/token 组合已运行；异步五能力组合、原始 29 案例、默认构建入口和真实 Editor 玩法仍待完成。
 
-直接阻塞是异步能力组合执行，而不是再补一个孤立 API：同一份 C# 源码中的同步静态初始化与 `CancellationToken.None` 已生成 Semantic 54 → IR 35 → WASM，并在 Win64 两个 VM 上连续执行。静态状态、await、异常和 token 的五能力组合现已通过 Guest IR 验证、WASM 生成及原生来源/错误目录读取，但还未在 VM 中执行。[可组合能力合同](AvidScript_Composable_Capability_Contract.md)规定剩余的执行、旧版兼容和原始 29 案例验收；完成这些证据后才能打开默认构建入口。
+直接阻塞是异步能力组合执行，而不是再补一个孤立 API：同一份 C# 源码中的同步静态初始化与 `CancellationToken.None` 已生成 Semantic 54 → IR 35 → WASM，并在 Win64 两个 VM 上连续执行。静态状态、await、异常和 token 的五能力组合现已通过 Guest IR 验证、WASM 生成、原生来源/错误目录读取与双 VM 加载，但还未运行异步入口。[可组合能力合同](AvidScript_Composable_Capability_Contract.md)规定剩余的执行、旧版兼容和原始 29 案例验收；完成这些证据后才能打开默认构建入口。
 
 WASM 是执行载体，不自动带来完整语言支持、零开销或多语言互通。C# 前端与多种 VM 后端也不等于多个语言可以在同一个项目中共同开发。
 
@@ -51,7 +51,7 @@ WASM 是执行载体，不自动带来完整语言支持、零开销或多语言
 
 命名 catch 与 token 属性已有完整异常编译路径及专项双后端运行；普通 lowering 仍拒绝绕过显式路径发布。这些专项结果不替代第 2 项的原始业务组合矩阵。
 
-IR 34 的原生版本准入、异常对象 reader 与 21 份同源 C# 专项源码现已通过双后端聚焦执行；验证覆盖预取消、挂起取消、source 释放、别名跨 GC、重复 await 和 teardown。IR 35 的同步静态/token 组合也已通过同源双 VM 执行；异步五能力同源 WASM 已通过原生错误目录读取。下一批先让这份异步 WASM 在双 VM 中加载、挂起、恢复和取消，再用于原始 29 案例，并补真实 Actor/World、reload 与实例隔离；之后接入正常 CLI、generated facade、Editor Build And Bind 和包发布。专项 Automation 不替代完整玩法或默认入口证据。
+IR 34 的原生版本准入、异常对象 reader 与 21 份同源 C# 专项源码现已通过双后端聚焦执行；验证覆盖预取消、挂起取消、source 释放、别名跨 GC、重复 await 和 teardown。IR 35 的同步静态/token 组合也已通过同源双 VM 执行；异步五能力同源 WASM 已通过原生错误目录读取和双 VM 加载。下一批让这份异步 WASM 挂起、恢复和取消，再用于原始 29 案例，并补真实 Actor/World、reload 与实例隔离；之后接入正常 CLI、generated facade、Editor Build And Bind 和包发布。专项 Automation 不替代完整玩法或默认入口证据。
 
 ## 跨语言边界
 
@@ -106,6 +106,6 @@ Editor 与 Shipping 分开比较。明确每种 VM 的 JIT/AOT/interpreter 配�
 
 ## 下一步交付
 
-异常对象保活、取消身份快照、标准 token 的 Semantic/IR/WASM、两个 VM 的对象读取与专项同源 C# 执行已有独立证据；同步静态初始化/token 的同源 IR 35 双 VM 运行也已完成。异步五能力 IR 35 已到原生来源/错误目录读取，尚未双 VM 执行。下一交付顺序是：异步模块双 VM 执行及原始 29 案例 → 默认构建入口及准确诊断 → P66.D 完整技能流程和真实 Editor Play → P67 结构热重载原型与 P68 调试帧接口。每一步同时记录正确性、开发时间、调用成本和失败路径；只在同需求、同平台、同正确性前提下与 Puerts/AngelScript 比较。P66 仍未完成。
+异常对象保活、取消身份快照、标准 token 的 Semantic/IR/WASM、两个 VM 的对象读取与专项同源 C# 执行已有独立证据；同步静态初始化/token 的同源 IR 35 双 VM 运行也已完成。异步五能力 IR 35 已通过原生来源/错误目录读取和双 VM 加载，尚未执行异步入口。下一交付顺序是：异步模块双 VM 执行及原始 29 案例 → 默认构建入口及准确诊断 → P66.D 完整技能流程和真实 Editor Play → P67 结构热重载原型与 P68 调试帧接口。每一步同时记录正确性、开发时间、调用成本和失败路径；只在同需求、同平台、同正确性前提下与 Puerts/AngelScript 比较。P66 仍未完成。
 
 后续阶段的设计冻结必须给出具体 API、模块写集、兼容规则、错误恢复和可复现验收命令。Windows 完成后再恢复移动端计划；移动平台的暂停验收不等于取消其架构要求。

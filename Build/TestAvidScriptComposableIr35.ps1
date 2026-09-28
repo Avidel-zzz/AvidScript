@@ -61,7 +61,8 @@ try {
 
     $tests = @(
         'AvidScript.Runtime.LanguageErrorCatalog.LoadAndReject',
-        'AvidScript.Runtime.ManagedHeap.ComposableIr35StaticToken'
+        'AvidScript.Runtime.ManagedHeap.ComposableIr35StaticToken',
+        'AvidScript.Runtime.ManagedHeap.ComposableIr35AsyncLoad'
     )
     $filter = $tests -join '+'
     $logPath = Join-Path $runRoot 'automation.log'
@@ -78,10 +79,10 @@ try {
         if ([regex]::Matches($log, $pattern).Count -eq 1) { $passed++ }
     }
     $observations = [regex]::Matches($log, 'composable-ir35 backend=\d+ domain=\d+ first=2 second=3 roots=\d+').Count
-    if ($passed -ne 2 -or $observations -ne 4 -or
+    if ($passed -ne $tests.Count -or $observations -ne 4 -or
         [regex]::Matches($log, 'Test Completed\. Result=\{Fail\}').Count -ne 0 -or
         [regex]::Matches($log, '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*\*').Count -ne 1 -or
-        [regex]::Matches($log, "Found 2 automation tests based on '$([regex]::Escape($filter))'").Count -ne 1) {
+        [regex]::Matches($log, "Found $($tests.Count) automation tests based on '$([regex]::Escape($filter))'").Count -ne 1) {
         throw "IR 35 Automation evidence incomplete: tests=$passed observations=$observations log=$logPath"
     }
     [ordered]@{
@@ -96,7 +97,7 @@ try {
         automation_passed = $passed
         automation_log = $logPath
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $runRoot 'results.json') -Encoding utf8
-    Write-Output "Composable IR 35: dual-VM observations $observations/4; Automation $passed/2; evidence=$runRoot"
+    Write-Output "Composable IR 35: dual-VM observations $observations/4; Automation $passed/$($tests.Count); evidence=$runRoot"
 }
 finally {
     Pop-Location
