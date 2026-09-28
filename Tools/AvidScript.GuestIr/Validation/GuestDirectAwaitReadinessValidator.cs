@@ -14,7 +14,8 @@ internal static class GuestDirectAwaitReadinessValidator
         var queryImports = artifact.Imports.Where(import => import.Id == GuestDirectAwaitReadiness.ImportId
             || import.Name == GuestDirectAwaitReadiness.ImportName).ToArray();
         bool identity = GuestTaskCancellationIdentity.IsVersion(artifact);
-        if (!GuestDirectAwaitReadiness.IsVersion(artifact) && !identity)
+        bool composableAsync = GuestComposableCapabilities.HasDeclaredAsyncBase29(context.InputArtifact);
+        if (!GuestDirectAwaitReadiness.IsVersion(artifact) && !identity && !composableAsync)
         {
             if (artifact.DirectAwaitReadiness is not null || queryImports.Length != 0)
                 Add(context, "Direct await readiness requires Guest IR 31/1.30.");
@@ -25,7 +26,8 @@ internal static class GuestDirectAwaitReadinessValidator
             || !GuestDirectAwaitReadiness.IsBase(plan.BaseSchemaVersion, plan.BaseIrVersion)
             || identity && (artifact.CancellationIdentity is null || artifact.CancellationIdentity.BaseSchemaVersion != plan.BaseSchemaVersion
                 || artifact.CancellationIdentity.BaseIrVersion != plan.BaseIrVersion)
-            || artifact.Language != "csharp" || !GuestTaskCancellationErrorValidator.Supports(context.Module)
+            || artifact.Language != "csharp"
+            || !(GuestTaskCancellationErrorValidator.Supports(context.Module) || composableAsync)
             || artifact.DirectAwaitRoutes is null || queryImports.Length != 1
             || queryImports[0] is not { Id: GuestDirectAwaitReadiness.ImportId, Module: "avidscript",
                 Name: GuestDirectAwaitReadiness.ImportName, ReturnTypeId: "type:int32",

@@ -19,9 +19,10 @@ internal static class GuestAsyncExceptionRouteValidator
             && module.IrVersion == GuestTaskLanguageErrorValidator.ExceptionFlowIrVersion;
         bool ir23 = module.SchemaVersion == GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion
             && module.IrVersion == GuestTaskLanguageErrorValidator.DirectCleanupIrVersion;
-        bool ir24 = GuestTaskCancellationErrorValidator.Supports(module)
+        bool typedCancellationRoutes = (GuestTaskCancellationErrorValidator.Supports(module)
+                || GuestComposableCapabilities.HasDeclaredAsyncBase29(context.InputArtifact))
             && module.AsyncExceptionTransfers is { Count: > 0 };
-        if (!ir22 && !ir23 && !ir24 && !GuestTaskLocalLifetimeValidator.HasExceptionFlow(module))
+        if (!ir22 && !ir23 && !typedCancellationRoutes && !GuestTaskLocalLifetimeValidator.HasExceptionFlow(module))
         {
             if (module.AsyncExceptionRoutes is not null)
                 Add(context, "Async exception routes require IR 22.");
@@ -46,7 +47,7 @@ internal static class GuestAsyncExceptionRouteValidator
                 || string.IsNullOrWhiteSpace(route.CancellationTargetBlockId)
                 || string.IsNullOrWhiteSpace(route.OwnerLocalId)
                 || string.IsNullOrWhiteSpace(route.TypeLocalId)
-                || (ir24 ? route.FaultTargetBlockId != route.CancellationTargetBlockId
+                || (typedCancellationRoutes ? route.FaultTargetBlockId != route.CancellationTargetBlockId
                         || route.NormalTargetBlockId == route.FaultTargetBlockId
                     : new[] { route.NormalTargetBlockId, route.FaultTargetBlockId,
                         route.CancellationTargetBlockId }.Distinct(StringComparer.Ordinal).Count() != 3))
@@ -76,7 +77,7 @@ internal static class GuestAsyncExceptionRouteValidator
                 || sourceFunctions.Any(function => !HasTargetsAndLocals(function, route)
                     || !HasFailureFlow(function,
                         route.AwaitBlockId + ":task_failed", route,
-                        releaseDirectToken: true, cancellationErrors: ir24)))
+                        releaseDirectToken: true, cancellationErrors: typedCancellationRoutes)))
             {
                 Add(context, $"Await callback {route.CallbackId} has an invalid immediate failure route.");
             }
@@ -85,7 +86,7 @@ internal static class GuestAsyncExceptionRouteValidator
                     StringComparison.Ordinal)).ToArray();
             if (resumedFailureBlocks.Length != 1
                 || !HasFailureFlow(resume, resumedFailureBlocks[0].Id, route,
-                    releaseDirectToken: false, cancellationErrors: ir24))
+                    releaseDirectToken: false, cancellationErrors: typedCancellationRoutes))
             {
                 Add(context, $"Await callback {route.CallbackId} has an invalid resumed failure route.");
             }
@@ -124,7 +125,7 @@ internal static class GuestAsyncExceptionRouteValidator
             local.Id.StartsWith("value:local:$async:exception_source:",
                 StringComparison.Ordinal) && !listedOwners.Contains(local.Id)))
             Add(context, "IR 22 has a protected method without await routes.");
-        if (ir24)
+        if (typedCancellationRoutes)
         {
             HashSet<string> failures = routes.Select(route => route.AwaitBlockId + ":task_failed")
                 .ToHashSet(StringComparer.Ordinal);

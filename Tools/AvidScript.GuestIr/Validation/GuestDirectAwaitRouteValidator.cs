@@ -16,9 +16,10 @@ internal static class GuestDirectAwaitRouteValidator
         GuestModule module = context.Module;
         bool ir23 = module.SchemaVersion == GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion
             && module.IrVersion == GuestTaskLanguageErrorValidator.DirectCleanupIrVersion;
-        bool ir24 = GuestTaskCancellationErrorValidator.Supports(module)
+        bool typedCancellationRoutes = (GuestTaskCancellationErrorValidator.Supports(module)
+                || GuestComposableCapabilities.HasDeclaredAsyncBase29(context.InputArtifact))
             && module.AsyncExceptionTransfers is { Count: > 0 };
-        if (!ir23 && !ir24 && !GuestTaskLocalLifetimeValidator.HasDirectCleanup(module))
+        if (!ir23 && !typedCancellationRoutes && !GuestTaskLocalLifetimeValidator.HasDirectCleanup(module))
         {
             if (module.DirectAwaitRoutes is not null)
                 Add(context, "Direct await routes require IR 23/1.22.");
@@ -42,7 +43,7 @@ internal static class GuestDirectAwaitRouteValidator
                 || !awaitBlocks.Add(route.AwaitBlockId)
                 || route.ProducerKind is not ("delay" or "next_tick")
                 || route.NormalTargetBlockId == route.CancellationTargetBlockId
-                || (ir24 ? route.Cancellation is null : route.Cancellation is not null)
+                || (typedCancellationRoutes ? route.Cancellation is null : route.Cancellation is not null)
                 || !context.Imports.TryGetValue(route.ScheduleImportId,
                     out GuestImport? schedule)
                 || schedule.Module != "avidscript"
@@ -68,7 +69,7 @@ internal static class GuestDirectAwaitRouteValidator
                 || resume.Parameters[0].TypeId != "type:int64"
                 || resume.Parameters[1].TypeId != "type:int32"
                 || resume.EntryBlockId != route.NormalTargetBlockId + ":entry"
-                || !HasStatusRoutes(module, GuestTaskLocalLifetimeValidator.ResolveScopeExitRoutes(module, resume), route, ir24))
+                || !HasStatusRoutes(module, GuestTaskLocalLifetimeValidator.ResolveScopeExitRoutes(module, resume), route, typedCancellationRoutes))
             {
                 Add(context, $"Direct await callback {route.CallbackId} has no validated status-aware resume.");
                 continue;
@@ -93,11 +94,16 @@ internal static class GuestDirectAwaitRouteValidator
                     && import.Name == "avid_continuation_delay_cancel_resume_v1")
                     && !awaitBlocks.Contains(block.Id)))
             Add(context, "IR 23 contains an unlisted cancel-resume Timer call.");
-        if (ir24 && module.Functions.Any(function => function.Blocks.Any(block =>
-                block.Instructions.Any(instruction => instruction.Op == "call"
-                    && instruction.TargetId == GuestTaskCancellationIdentity.CancellationImportId(module))
-                && !cancellationProducers.Contains((function.Id, block.Id)))))
-            Add(context, "IR 24 contains an unlisted typed cancellation producer.");
+        if (typedCancellationRoutes)
+        {
+            var unlisted = module.Functions.SelectMany(function => function.Blocks
+                    .Where(block => block.Instructions.Any(instruction => instruction.Op == "call"
+                        && instruction.TargetId == GuestTaskCancellationIdentity.CancellationImportId(module)))
+                    .Select(block => new { FunctionId = function.Id, BlockId = block.Id }))
+                .FirstOrDefault(producer => !cancellationProducers.Contains((producer.FunctionId, producer.BlockId)));
+            if (unlisted is not null)
+                Add(context, $"IR 24 contains an unlisted typed cancellation producer: {unlisted.FunctionId}/{unlisted.BlockId}.");
+        }
     }
 
     private static bool HasSchedule(GuestFunction function, GuestDirectAwaitRoute route)
