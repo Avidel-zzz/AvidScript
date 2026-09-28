@@ -135,7 +135,8 @@ internal static class CSharpReferenceObjects
             types.Add(new(id, "managed_ref", "i64", Array.Empty<GuestField>(), Payload(id), null, 8, 8));
         }
         if (Types(document).Count == 0) return true;
-        types.Add(new("type:object", "managed_ref", "i64", Array.Empty<GuestField>(), null, null, 8, 8));
+        if (types.All(type => type.Id != "type:object"))
+            types.Add(new("type:object", "managed_ref", "i64", Array.Empty<GuestField>(), null, null, 8, 8));
         if (types.All(type => type.Id != "type:bool")) types.Add(new("type:bool", "scalar", "i32", Array.Empty<GuestField>(), null, null, 4, 4));
         if (types.All(type => type.Id != "type:void")) types.Add(new("type:void", "void", "none", Array.Empty<GuestField>(), null, null, 0, 1));
         return true;

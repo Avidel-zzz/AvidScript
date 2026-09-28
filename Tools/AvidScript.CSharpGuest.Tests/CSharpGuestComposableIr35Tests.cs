@@ -183,6 +183,60 @@ internal static class CSharpGuestComposableIr35Tests
                 asyncHash, out var omittedModule, out _)
             && omittedModule is null,
             "private async execution cannot skip a missing five-capability source declaration");
+
+        const string originalId = "Fixtures/Phase66/AwaitMemberAssignment.cs";
+        DirectoryInfo? repository = new(AppContext.BaseDirectory);
+        while (repository is not null && !File.Exists(Path.Combine(repository.FullName, originalId)))
+            repository = repository.Parent;
+        Check(repository is not null, "the original C10 business source is available");
+        byte[] originalBusiness = File.ReadAllBytes(Path.Combine(repository!.FullName, originalId));
+        Check(Convert.ToHexString(SHA256.HashData(originalBusiness)).Equals(
+            "265a7e71e2c744681d099ee6b11a93fcf94b151980205cddf155c46f602249d9",
+            StringComparison.OrdinalIgnoreCase), "the original 29-scenario business bytes are unchanged");
+        string originalSource = System.Text.Encoding.UTF8.GetString(originalBusiness) + "\n"
+            + CSharpGuestOriginalAsyncMemberTests.FirstScenarioAdapter() + "\n" + """
+            public static class OriginalTokenProbe {
+                [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_token_probe")]
+                public static int Read() {
+                    System.Threading.CancellationToken token = AwaitMemberAssignment.Lifetime.Token;
+                    return token != System.Threading.CancellationToken.None ? 1 : 0;
+                }
+            }
+            """;
+        var originalSemantic = SemanticAnalyzer.Analyze(originalSource, originalId,
+            FrontendAnalyzer.Analyze(originalSource, originalId).Source.Sha256,
+            new[] { new SemanticReferenceSource(asyncFacade, "generated://Continuation.cs", true) },
+            new SemanticCompilerWorkspace(), enableAsyncExceptionFlow: true,
+            enableDirectAwaitCleanup: true, enableAsyncCancellationFlow: true,
+            enableStaticInitialization: true, enableAsyncSynchronousExceptions: true,
+            enableAsyncCatchVariables: true, enableCancellationTokens: true);
+        Check(SemanticComposableCapabilities.IsVersion(originalSemantic)
+            && originalSemantic.CapabilityManifest?.Capabilities.Count == 5
+            && SemanticStaticInitializationValidator.IsValid(originalSemantic)
+            && SemanticCancellationTokenValidator.IsValid(originalSemantic)
+            && originalSemantic.AsyncMethods.SelectMany(method => method.Segments)
+                .Count(segment => segment.AwaitSite?.MemberAssignment is not null) == 9,
+            "original C10 field scenario projects five Semantic capabilities: "
+                + string.Join(" | ", originalSemantic.Diagnostics.Select(item => item.Code + ": " + item.Message)));
+        byte[] originalSemanticBytes = SemanticSerializer.Serialize(originalSemantic);
+        string originalHash = Convert.ToHexString(SHA256.HashData(originalSemanticBytes)).ToLowerInvariant();
+        Check(CSharpStaticInitializationCompiler.TryLower(originalSemantic, originalHash,
+                out var originalModule, out var originalError) && originalModule is not null
+            && originalModule.SchemaVersion == GuestComposableCapabilities.SchemaVersion
+            && GuestModuleValidator.Validate(originalModule).Succeeded,
+            "original C10 field scenario lowers to directly validated IR 35: " + originalError);
+        Check(originalModule!.ExceptionValues?.Bindings.Count > 0
+            && originalModule.AsyncExceptionTransfers?.Any(transfer => transfer.Kind == "raise_exception") == true,
+            "original C10 module carries source-derived exception values and explicit throw routes");
+        var omittedRaise = originalModule with { AsyncExceptionTransfers = originalModule.AsyncExceptionTransfers!
+            .Where(transfer => transfer.Kind != "raise_exception").ToArray() };
+        Check(GuestModuleValidator.Validate(omittedRaise).Diagnostics.Any(item => item.Code == "ASIR1033")
+            && !WasmModuleCompiler.Compile(omittedRaise).Succeeded,
+            "IR 35 rejects original C10 source when explicit throw ownership routes are omitted");
+        WasmCompilationResult originalWasm = WasmModuleCompiler.Compile(originalModule!);
+        Check(originalWasm.Succeeded && originalModule!.Exports.Any(export => export.Name == "avid_token_probe"),
+            "original C10 field scenario emits a WASM module with a separate token reader: "
+                + string.Join(" | ", originalWasm.Diagnostics.Select(item => item.Code + ": " + item.Message)));
         string? fixtureDirectory = Environment.GetEnvironmentVariable("AVIDSCRIPT_COMPOSABLE_IR35_FIXTURE_DIR");
         if (!string.IsNullOrWhiteSpace(fixtureDirectory))
         {
@@ -196,6 +250,15 @@ internal static class CSharpGuestComposableIr35Tests
                 SemanticSerializer.Serialize(asyncSemantic));
             File.WriteAllBytes(Path.Combine(fixtureDirectory, "composable-async-static-token.guestir.json"), asyncBytes);
             File.WriteAllBytes(Path.Combine(fixtureDirectory, "composable-async-static-token.wasm"), asyncWasm.Bytes);
+            string originalFixtureDirectory = Path.Combine(fixtureDirectory, "original-ir35");
+            Directory.CreateDirectory(originalFixtureDirectory);
+            File.WriteAllText(Path.Combine(originalFixtureDirectory, "field-mode-0.cs"), originalSource);
+            File.WriteAllBytes(Path.Combine(originalFixtureDirectory, "field-mode-0.semantic.json"), originalSemanticBytes);
+            File.WriteAllBytes(Path.Combine(originalFixtureDirectory, "field-mode-0.guestir.json"),
+                GuestIrSerializer.Serialize(originalModule!));
+            File.WriteAllBytes(Path.Combine(originalFixtureDirectory, "field-mode-0.wasm"), originalWasm.Bytes);
+            File.WriteAllText(Path.Combine(originalFixtureDirectory, "cases.json"),
+                CSharpGuestOriginalAsyncMemberTests.FirstScenarioManifest(originalSource, originalSemantic, originalModule!));
         }
 
         const string source = """

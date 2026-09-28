@@ -24,6 +24,35 @@ internal static class CSharpGuestOriginalAsyncMemberTests
     private sealed record ReferenceResult(SortedDictionary<string, int> Fields, TaskObservation[] Tasks,
         IReadOnlyList<SortedDictionary<string, int>> LoopSuspensions);
 
+    internal static string FirstScenarioAdapter() =>
+        Entry(new Scenario("field-mode-0", "AwaitMemberAssignment.Assign(false, 0)"), observeCancellationError: true);
+
+    internal static string FirstScenarioManifest(string source, SemanticDocument semantic, GuestModule module)
+    {
+        DirectoryInfo? root = new(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName,
+                   "Fixtures/Phase66/AwaitMemberAssignment.Reference.cs"))) root = root.Parent;
+        if (root is null) throw new InvalidOperationException("Original C10 reference facade is unavailable.");
+        var expected = Reference(source, File.ReadAllText(Path.Combine(root.FullName,
+            "Fixtures/Phase66/AwaitMemberAssignment.Reference.cs")), observeLoop: false);
+        int Offset(string name)
+        {
+            var field = semantic.Symbols.Single(symbol => symbol.Kind == "field" && symbol.Name == name
+                && symbol.ContainingSymbolId == "symbol:type:global::Script");
+            var owner = semantic.StaticInitialization!.Types.Single(type => type.Fields.Any(item => item.FieldSymbolId == field.Id));
+            string suffix = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(owner.TypeId + "\n" + field.Id))).ToLowerInvariant();
+            return module.MemoryLayout.StateSlots.Single(slot => slot.GlobalId == "global:symbol:field:$static:" + suffix).Offset;
+        }
+        return JsonSerializer.Serialize(new[] { new {
+            name = "field-mode-0", moduleId = module.ModuleId, staticSlots = module.StaticStorage!.Slots.Count,
+            cancel = false, expected = expected.Fields["Result"], trace = expected.Fields["Trace"],
+            resultOffset = Offset("Result"), traceOffset = Offset("Trace"),
+            observations = expected.Fields.Select(field => new {
+                name = field.Key, expected = field.Value, offset = Offset(field.Key)
+            }).ToArray()
+        } }, new JsonSerializerOptions { WriteIndented = true });
+    }
+
     private static readonly string[] BusinessFields = {
         "Trace", "ReceiverCalls", "ProducerCalls", "CleanupCount", "OriginalField", "OriginalValue", "OriginalSetters",
         "ReplacementField", "ReplacementValue", "ReplacementSetters", "TotalSetters", "LastId", "LastValue"
@@ -161,7 +190,7 @@ internal static class CSharpGuestOriginalAsyncMemberTests
         return count;
     }
 
-    private static string Entry(Scenario scenario) => $$"""
+    private static string Entry(Scenario scenario, bool observeCancellationError = false) => $$"""
         public static class Script {
             public static int Result; public static int Status; public static int SecondResult;
             public static int InitialTrace; public static int InitialCleanup;
@@ -192,7 +221,9 @@ internal static class CSharpGuestOriginalAsyncMemberTests
                     Status = 1;
                     return result;
                 } catch (ArgumentException) { Status = 2; return 0; }
-                  catch (OperationCanceledException) { Status = 3; return 0; }
+                  {{(observeCancellationError
+                      ? "catch (OperationCanceledException error) { Status = error.CancellationToken == AwaitMemberAssignment.Lifetime.Token ? 3 : 9; return 0; }"
+                      : "catch (OperationCanceledException) { Status = 3; return 0; }")}}
                   catch (NullReferenceException) { Status = 4; return 0; }
                   catch (InvalidOperationException) { Status = 5; return 0; }
                 finally { Snapshot(); AwaitMemberAssignment.Lifetime.Release(); }

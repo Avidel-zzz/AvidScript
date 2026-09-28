@@ -8,7 +8,7 @@
 
 仍是开发者预览。P66.A、P66.B 已完成，P66.C、P66.D 未完成，以 [Phase 状态](../Phase66/Phase66_State.json)为准。已有跨对象调用、闭包、事件和异步执行基础；普通语言组合、结构热重载、完整调试、Windows 发布工作流仍需完成。测试数量不能作为成熟百分比。
 
-最近的 [C10 取消身份实现](../Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)已连接 Session、IR 32/33 与双 VM；异步 `catch` 对象别名可跨 await/GC，重复等待与 rethrow 保持对象身份。显式编译 API 已从 Semantic 53 生成 IR 34/WASM；异常 getter 和对象快照 reader 已在 Win64 两个 VM 上运行，21 份 C# 源码产生 82/82 组执行观察。同步静态初始化/token 组合及异步五能力的正常、取消分支已运行；原始 29 案例、默认构建入口和真实 Editor 玩法仍待完成。
+最近的 [C10 取消身份实现](../Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)已连接 Session、IR 32/33 与双 VM；异步 `catch` 对象别名可跨 await/GC，重复等待与 rethrow 保持对象身份。显式编译 API 已从 Semantic 53 生成 IR 34/WASM；异常 getter 和对象快照 reader 已在 Win64 两个 VM 上运行，21 份 C# 源码产生 82/82 组执行观察。同步静态初始化/token 组合及异步五能力的正常、取消分支已运行；原始 29 案例中的首例也已完成 IR 35 双 VM 对照。余下 28 例、默认构建入口和真实 Editor 玩法仍待完成。
 
 直接阻塞是异步能力组合的完整执行，而不是再补一个孤立 API：同一份 C# 源码中的同步静态初始化与 `CancellationToken.None` 已生成 Semantic 54 → IR 35 → WASM，并在 Win64 两个 VM 上连续执行。静态状态、await、异常和 token 的五能力组合现已通过 Guest IR 验证、WASM 生成、原生来源/错误目录读取与双 VM 正常和取消恢复；取消分支中的 token 身份与静态初始化也已同路径运行。[可组合能力合同](AvidScript_Composable_Capability_Contract.md)规定剩余的异常形态、旧版兼容和原始 29 案例验收；完成这些证据后才能打开默认构建入口。
 

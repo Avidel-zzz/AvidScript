@@ -40,7 +40,7 @@ internal static class GuestAsyncExceptionTransferValidator
             if (!ordered || !identities.Add((transfer.MethodFunctionId, transfer.BlockId))
                 || !context.Functions.ContainsKey(transfer.MethodFunctionId)
                 || (transfer.Kind is not ("end_catch" or "rethrow" or "propagate_exception")
-                    && !(GuestAsyncThrowRouteValidator.IsVersion(module) && transfer.Kind == "raise_exception"))
+                    && !(GuestAsyncThrowRouteValidator.Supports(module) && transfer.Kind == "raise_exception"))
                 || (transfer.Kind == "raise_exception" ? transfer.Raise is null : transfer.Raise is not null)
                 || (transfer.Kind == "propagate_exception" ? transfer.TargetBlockId is not null
                     : string.IsNullOrWhiteSpace(transfer.TargetBlockId)))

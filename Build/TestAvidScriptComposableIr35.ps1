@@ -15,7 +15,8 @@ $fixtureRoot = Join-Path $artifactRoot 'GuestFixtures'
 $runRoot = Join-Path $artifactRoot ([DateTimeOffset]::UtcNow.ToString('yyyyMMddTHHmmssfffZ'))
 $null = New-Item -ItemType Directory -Path $runRoot -Force
 $oldEnvironment = @{}
-foreach ($name in @('DOTNET_CLI_HOME', 'NUGET_PACKAGES', 'AVIDSCRIPT_COMPOSABLE_IR35_FIXTURE_DIR')) {
+foreach ($name in @('DOTNET_CLI_HOME', 'NUGET_PACKAGES', 'AVIDSCRIPT_COMPOSABLE_IR35_FIXTURE_DIR',
+        'AVIDSCRIPT_COMPOSABLE_ORIGINAL_DIR')) {
     $oldEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
 
@@ -24,6 +25,7 @@ try {
     $env:DOTNET_CLI_HOME = Join-Path $runRoot 'dotnet-home'
     $env:NUGET_PACKAGES = if ($oldEnvironment.NUGET_PACKAGES) { $oldEnvironment.NUGET_PACKAGES } else { Join-Path $env:USERPROFILE '.nuget/packages' }
     $env:AVIDSCRIPT_COMPOSABLE_IR35_FIXTURE_DIR = $fixtureRoot
+    $env:AVIDSCRIPT_COMPOSABLE_ORIGINAL_DIR = Join-Path $fixtureRoot 'original-ir35'
     $sdk = & $DotNetPath --version
     if ($LASTEXITCODE -ne 0 -or $sdk -cne '8.0.416') { throw "Expected SDK 8.0.416, got $sdk" }
 
@@ -39,7 +41,10 @@ try {
     foreach ($name in @('composable-static-token.cs', 'composable-static-token.semantic.json',
         'composable-static-token.guestir.json', 'composable-static-token.wasm',
         'composable-async-static-token.cs', 'composable-async-static-token.semantic.json',
-        'composable-async-static-token.guestir.json', 'composable-async-static-token.wasm')) {
+        'composable-async-static-token.guestir.json', 'composable-async-static-token.wasm',
+        'original-ir35/cases.json', 'original-ir35/field-mode-0.cs',
+        'original-ir35/field-mode-0.semantic.json', 'original-ir35/field-mode-0.guestir.json',
+        'original-ir35/field-mode-0.wasm')) {
         if (-not (Test-Path -LiteralPath (Join-Path $fixtureRoot $name))) {
             throw "Missing IR 35 fixture: $name"
         }
@@ -47,9 +52,10 @@ try {
     $wasmPath = Join-Path $fixtureRoot 'composable-static-token.wasm'
     $wasmHash = (Get-FileHash -LiteralPath $wasmPath -Algorithm SHA256).Hash.ToLowerInvariant()
     $asyncWasmHash = (Get-FileHash -LiteralPath (Join-Path $fixtureRoot 'composable-async-static-token.wasm') -Algorithm SHA256).Hash.ToLowerInvariant()
+    $originalWasmHash = (Get-FileHash -LiteralPath (Join-Path $fixtureRoot 'original-ir35/field-mode-0.wasm') -Algorithm SHA256).Hash.ToLowerInvariant()
     $semanticHash = (Get-FileHash -LiteralPath (Join-Path $fixtureRoot 'composable-static-token.semantic.json') -Algorithm SHA256).Hash.ToLowerInvariant()
     $guestIrHash = (Get-FileHash -LiteralPath (Join-Path $fixtureRoot 'composable-static-token.guestir.json') -Algorithm SHA256).Hash.ToLowerInvariant()
-    Write-Output "Composable IR 35 managed: $($match.Groups[1].Value)/$($match.Groups[2].Value); wasm_sha256=$wasmHash; async_wasm_sha256=$asyncWasmHash"
+    Write-Output "Composable IR 35 managed: $($match.Groups[1].Value)/$($match.Groups[2].Value); wasm_sha256=$wasmHash; async_wasm_sha256=$asyncWasmHash; original_wasm_sha256=$originalWasmHash"
 
     $env:DOTNET_CLI_HOME = $oldEnvironment.DOTNET_CLI_HOME
     if (-not $SkipBuild) {
@@ -62,7 +68,8 @@ try {
     $tests = @(
         'AvidScript.Runtime.LanguageErrorCatalog.LoadAndReject',
         'AvidScript.Runtime.ManagedHeap.ComposableIr35StaticToken',
-        'AvidScript.Runtime.ManagedHeap.ComposableIr35AsyncExecution'
+        'AvidScript.Runtime.ManagedHeap.ComposableIr35AsyncExecution',
+        'AvidScript.Runtime.Continuation.ComposableOriginalAsyncMember'
     )
     $filter = $tests -join '+'
     $logPath = Join-Path $runRoot 'automation.log'
@@ -87,11 +94,13 @@ try {
             if ([regex]::Matches($log, [regex]::Escape($pattern)).Count -eq 1) { $asyncObservations++ }
         }
     }
-    if ($passed -ne $tests.Count -or $observations -ne 4 -or $asyncObservations -ne 6 -or
+    $originalObservations = [regex]::Matches($log,
+        'original-ir35 backend=\d+ scenario=field-mode-0 mode=[012] result=-?\d+ trace=-?\d+ resumes=\d+').Count
+    if ($passed -ne $tests.Count -or $observations -ne 4 -or $asyncObservations -ne 6 -or $originalObservations -ne 6 -or
         [regex]::Matches($log, 'Test Completed\. Result=\{Fail\}').Count -ne 0 -or
         [regex]::Matches($log, '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*\*').Count -ne 1 -or
         [regex]::Matches($log, "Found $($tests.Count) automation tests based on '$([regex]::Escape($filter))'").Count -ne 1) {
-        throw "IR 35 Automation evidence incomplete: tests=$passed observations=$observations async_observations=$asyncObservations log=$logPath"
+        throw "IR 35 Automation evidence incomplete: tests=$passed observations=$observations async_observations=$asyncObservations original_observations=$originalObservations log=$logPath"
     }
     [ordered]@{
         schema_version = 1
@@ -101,12 +110,14 @@ try {
         guest_ir_sha256 = $guestIrHash
         wasm_sha256 = $wasmHash
         async_wasm_sha256 = $asyncWasmHash
+        original_wasm_sha256 = $originalWasmHash
         vm_observations = $observations
         async_vm_observations = $asyncObservations
+        original_vm_observations = $originalObservations
         automation_passed = $passed
         automation_log = $logPath
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $runRoot 'results.json') -Encoding utf8
-    Write-Output "Composable IR 35: sync observations $observations/4; async observations $asyncObservations/6; Automation $passed/$($tests.Count); evidence=$runRoot"
+    Write-Output "Composable IR 35: sync observations $observations/4; async observations $asyncObservations/6; original observations $originalObservations/6; Automation $passed/$($tests.Count); evidence=$runRoot"
 }
 finally {
     Pop-Location

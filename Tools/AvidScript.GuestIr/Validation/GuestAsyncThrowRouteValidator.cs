@@ -15,19 +15,23 @@ public static class GuestAsyncThrowRouteValidator
     public static bool IsVersion(GuestModule module) =>
         module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion;
 
+    internal static bool Supports(GuestModule module) => IsVersion(module)
+        || GuestComposableCapabilities.HasDeclaredAsyncBase29(module);
+
     internal static void Validate(GuestValidationContext context)
     {
         var module = context.Module;
         var raises = module.AsyncExceptionTransfers?.Where(item => item.Kind == "raise_exception" || item.Raise is not null).ToArray()
             ?? Array.Empty<GuestAsyncExceptionTransfer>();
-        if (!IsVersion(module))
+        if (!Supports(module))
         {
             if (raises.Length != 0 || module.Provenance.SemanticSchemaVersion == SemanticSchemaVersion
                 || module.Provenance.SemanticVersion == SemanticVersion)
                 context.Add("ASIR1034", "Routed throws require paired Semantic 46/1.55 and IR 26/1.25.");
             return;
         }
-        bool synchronous = GuestAsyncSynchronousExceptions.HasSourceContract(module);
+        bool synchronous = GuestAsyncSynchronousExceptions.HasSourceContract(module)
+            || GuestComposableCapabilities.HasDeclaredAsyncBase29(module);
         if (module.Language != "csharp" || module.Provenance.SemanticSchemaVersion != GuestTaskLocalLifetimeValidator.ExpectedSemanticSchema(module)
             || module.Provenance.SemanticVersion != GuestTaskLocalLifetimeValidator.ExpectedSemanticVersion(module)
             || module.TaskLocalLifetimes?.ExceptionModel != "cancellation" || !synchronous && raises.Length == 0
@@ -89,7 +93,7 @@ public static class GuestAsyncThrowRouteValidator
     // Do not infer protection from the mere presence of exception owner locals.
     internal static bool IsTerminalTaskFailure(GuestModule module, GuestFunction function, GuestBasicBlock block)
     {
-        if (!IsVersion(module) || block.Terminator.Kind != "return") return false;
+        if (!Supports(module) || block.Terminator.Kind != "return") return false;
         var calls = block.Instructions.Where(item => item.Op == "call"
             && item.TargetId == "import:$async:task_propagate_failure_v1").ToArray();
         if (calls.Length != 1 || calls[0].OperandIds.Count != 2) return false;

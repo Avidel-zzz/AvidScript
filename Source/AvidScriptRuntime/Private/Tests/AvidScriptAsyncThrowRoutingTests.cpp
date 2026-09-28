@@ -35,6 +35,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptOriginalAsyncMemberTest,
     "AvidScript.Runtime.Continuation.CompiledOriginalAsyncMember",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptComposableOriginalAsyncMemberTest,
+    "AvidScript.Runtime.Continuation.ComposableOriginalAsyncMember",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptAwaitReadinessEvaluationTest,
     "AvidScript.Runtime.Continuation.CompiledAwaitReadinessEvaluation",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -51,7 +55,8 @@ namespace AvidScript::Tests::CompiledAsyncExceptions
 {
 static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 ExpectedScenarios, const TCHAR* LogPrefix,
     bool CollectWhileSuspended = false, bool HasStaticStorage = false, int32 ExpectedObservations = 0,
-    int32 ExpectedResumeObservations = 0, bool ObserveOriginalTasks = false, bool TokenValues = false)
+    int32 ExpectedResumeObservations = 0, bool ObserveOriginalTasks = false, bool TokenValues = false,
+    bool ProbeToken = false)
 {
     if (!GEngine) return false;
     const FString Directory = FPlatformMisc::GetEnvironmentVariable(FixtureVariable);
@@ -174,6 +179,21 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
                     continue;
                 }
                 if (!Test.TestTrue(*Label, Runtime.BeginPlay(Result))) { Test.AddError(Result.ErrorMessage); return false; }
+                if (ProbeToken)
+                {
+                    FAvidScriptVmPreparedExportCall Probe;
+                    FString Error;
+                    if (!Test.TestTrue(*(Label + TEXT(" token probe export")),
+                        Runtime.PrepareNamedExportCall(TEXT("avid_token_probe"), Probe, Error)))
+                    { Test.AddError(Error); return false; }
+                    FAvidScriptVmCallResult Value;
+                    FAvidScriptVmError VmError;
+                    if (!Test.TestTrue(*(Label + TEXT(" token probe execution")), Probe.Call({}, VmError, &Value)))
+                    { Test.AddError(VmError.Details); return false; }
+                    if (!Test.TestEqual(*(Label + TEXT(" token probe returns one cell")), Value.CellCount, 1u)
+                        || !Test.TestEqual(*(Label + TEXT(" live cancellation token differs from None")),
+                            static_cast<int32>(Value.Cells[0]), 1)) return false;
+                }
                 if (ObserveOriginalTasks) TaskObserver.CaptureEntryStates();
                 auto Collect = [&]() -> bool {
                     if (!CollectWhileSuspended) return true;
@@ -323,6 +343,12 @@ bool FAvidScriptOriginalAsyncMemberTest::RunTest(const FString& Parameters)
 {
     return AvidScript::Tests::CompiledAsyncExceptions::Run(*this,
         TEXT("AVIDSCRIPT_ORIGINAL_ASYNC_MEMBER_DIR"), 29, TEXT("original-async-member"), true, true, 18, 0, true);
+}
+
+bool FAvidScriptComposableOriginalAsyncMemberTest::RunTest(const FString& Parameters)
+{
+    return AvidScript::Tests::CompiledAsyncExceptions::Run(*this,
+        TEXT("AVIDSCRIPT_COMPOSABLE_ORIGINAL_DIR"), 1, TEXT("original-ir35"), true, true, 18, 0, false, false, true);
 }
 
 bool FAvidScriptAwaitReadinessEvaluationTest::RunTest(const FString& Parameters)
