@@ -10,12 +10,13 @@ internal static class GuestTaskCancellationIdentityValidator
     internal static void Validate(GuestValidationContext context)
     {
         GuestModule artifact = GuestExceptionValues.BaseProfile(context.InputArtifact);
+        bool composableAsync = GuestComposableCapabilities.HasDeclaredAsyncBase29(context.InputArtifact);
         var reserved = artifact.Imports.Where(import =>
             import.Id.StartsWith("import:task_cancel_language_error_", StringComparison.Ordinal)
             || import.Name.StartsWith("avid_task_cancel_language_error_", StringComparison.Ordinal)
             || import.Id.StartsWith("import:task_cancellation_token_", StringComparison.Ordinal)
             || import.Name.StartsWith("avid_task_cancellation_token_", StringComparison.Ordinal)).ToArray();
-        if (!GuestTaskCancellationIdentity.IsVersion(artifact))
+        if (!GuestTaskCancellationIdentity.IsVersion(artifact) && !composableAsync)
         {
             if (artifact.CancellationIdentity is not null || reserved.Any(import =>
                 import.Id != GuestTaskCancellationErrorValidator.ImportId || import.Name != GuestTaskCancellationErrorValidator.ImportName))
@@ -24,7 +25,8 @@ internal static class GuestTaskCancellationIdentityValidator
         }
         if (artifact.CancellationIdentity is not { } plan
             || !GuestTaskCancellationIdentity.IsBase(plan.BaseSchemaVersion, plan.BaseIrVersion)
-            || artifact.Language != "csharp" || !GuestTaskCancellationErrorValidator.Supports(context.Module)
+            || artifact.Language != "csharp"
+            || !(GuestTaskCancellationErrorValidator.Supports(context.Module) || composableAsync)
             || artifact.LanguageErrorCatalog is not { Types.Count: > 0, Sources.Count: > 0 }
             || artifact.TaskLocalLifetimes is { ExceptionModel: not "cancellation" }
             || artifact.DirectAwaitReadiness is { } readiness
