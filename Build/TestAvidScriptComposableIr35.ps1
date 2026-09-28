@@ -79,8 +79,14 @@ try {
         if ([regex]::Matches($log, $pattern).Count -eq 1) { $passed++ }
     }
     $observations = [regex]::Matches($log, 'composable-ir35 backend=\d+ domain=\d+ first=2 second=3 roots=\d+').Count
-    $asyncObservations = [regex]::Matches($log, 'composable-ir35-async backend=\d+ result=1 continuations=0').Count
-    if ($passed -ne $tests.Count -or $observations -ne 4 -or $asyncObservations -ne 2 -or
+    $asyncObservations = 0
+    foreach ($backend in @(0, 1)) {
+        foreach ($case in @(@{ Mode = 'complete'; Result = 1 }, @{ Mode = 'cancel'; Result = 7 })) {
+            $pattern = "composable-ir35-async backend=$backend mode=$($case.Mode) result=$($case.Result) continuations=0 tasks=0 sources=0"
+            if ([regex]::Matches($log, [regex]::Escape($pattern)).Count -eq 1) { $asyncObservations++ }
+        }
+    }
+    if ($passed -ne $tests.Count -or $observations -ne 4 -or $asyncObservations -ne 4 -or
         [regex]::Matches($log, 'Test Completed\. Result=\{Fail\}').Count -ne 0 -or
         [regex]::Matches($log, '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*\*').Count -ne 1 -or
         [regex]::Matches($log, "Found $($tests.Count) automation tests based on '$([regex]::Escape($filter))'").Count -ne 1) {
@@ -99,7 +105,7 @@ try {
         automation_passed = $passed
         automation_log = $logPath
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $runRoot 'results.json') -Encoding utf8
-    Write-Output "Composable IR 35: sync observations $observations/4; async observations $asyncObservations/2; Automation $passed/$($tests.Count); evidence=$runRoot"
+    Write-Output "Composable IR 35: sync observations $observations/4; async observations $asyncObservations/4; Automation $passed/$($tests.Count); evidence=$runRoot"
 }
 finally {
     Pop-Location

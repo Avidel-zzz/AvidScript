@@ -231,6 +231,7 @@ bool FAvidScriptComposableIr35AsyncExecutionTest::RunTest(const FString& Paramet
     ON_SCOPE_EXIT { GEngine->DestroyWorldContext(World); World->DestroyWorld(false); };
 
     for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
+    for (const bool bCancelBeforeTick : {false, true})
     {
         FAvidScriptVmBackendSelection Selection;
         Selection.BackendKind = Backend;
@@ -246,8 +247,9 @@ bool FAvidScriptComposableIr35AsyncExecutionTest::RunTest(const FString& Paramet
         TestTrue(TEXT("Async IR 35 authorizes fault, cancellation identity and exception token"), Catalog
             && Catalog->SupportsTaskLanguageErrorFault() && Catalog->SupportsTaskCancellationError()
             && Catalog->SupportsTaskCancellationIdentity() && Catalog->SupportsExceptionCancellationToken());
-        if (!TestTrue(TEXT("Async IR 35 exports entry, resumer and result"), Runtime.ValidateRequiredExports(
-            {TEXT("avid_on_begin_play"), TEXT("avid_on_continuation_v2"), TEXT("avid_get_result")}, Result)))
+        if (!TestTrue(TEXT("Async IR 35 exports entry, resumer, cancellation and result"), Runtime.ValidateRequiredExports(
+            {TEXT("avid_on_begin_play"), TEXT("avid_on_continuation_v2"), TEXT("avid_on_end_play"),
+                TEXT("avid_cancel"), TEXT("avid_get_result")}, Result)))
         { AddError(Result.ErrorMessage); return false; }
         const auto Owner = MakeShared<FAvidScriptSessionContinuations>();
         auto& Endpoint = Owner->ResetActive(World);
@@ -276,10 +278,27 @@ bool FAvidScriptComposableIr35AsyncExecutionTest::RunTest(const FString& Paramet
         { AddError(Result.ErrorMessage); return false; }
         TestEqual(TEXT("Async result waits for the next tick"), ReadResult(), 0);
         TestTrue(TEXT("Async source registered a continuation"), Owner->GetActiveCount() > 0);
+        if (bCancelBeforeTick)
+        {
+            FAvidScriptVmPreparedExportCall CancelCall;
+            if (!TestTrue(TEXT("Prepare async IR 35 cancellation export"),
+                Runtime.PrepareNamedExportCall(TEXT("avid_cancel"), CancelCall, Error)))
+            { AddError(Error); return false; }
+            FAvidScriptVmCallFrame Frame;
+            Frame.CellCount = 0;
+            FAvidScriptVmCallResult Value;
+            FAvidScriptVmError VmError;
+            if (!TestTrue(TEXT("Cancel async IR 35 source before the next tick"),
+                CancelCall.Call(Frame, VmError, &Value)))
+            { AddError(VmError.Details); return false; }
+        }
         for (int32 Round = 0; Round < 4 && Owner->GetActiveCount() > 0; ++Round)
         {
-            World->Tick(LEVELTICK_All, 0.02f);
-            ++GFrameCounter;
+            if (!bCancelBeforeTick)
+            {
+                World->Tick(LEVELTICK_All, 0.02f);
+                ++GFrameCounter;
+            }
             TArray<FAvidScriptContinuationCompletion> Ready;
             Owner->DrainReady(Ready);
             for (const auto& Completion : Ready)
@@ -293,15 +312,21 @@ bool FAvidScriptComposableIr35AsyncExecutionTest::RunTest(const FString& Paramet
         }
         const int32 CompletedResult = ReadResult();
         const int32 RemainingContinuations = Owner->GetActiveCount();
-        TestEqual(TEXT("Async IR 35 completes with initialized static state"), CompletedResult, 1);
+        TestEqual(TEXT("Async IR 35 completes or catches cancellation with matching token"),
+            CompletedResult, bCancelBeforeTick ? 7 : 1);
         TestEqual(TEXT("Async IR 35 releases its continuations"), RemainingContinuations, 0);
         TestTrue(TEXT("Async IR 35 releases invocation frames"),
             Runtime.GetManagedHeapForTesting()
                 && Runtime.GetManagedHeapForTesting()->GetStats().ActiveFrames == 0);
-        UE_LOG(LogTemp, Display, TEXT("composable-ir35-async backend=%d result=%d continuations=%d"),
-            static_cast<int32>(Backend), CompletedResult, RemainingContinuations);
         if (!TestTrue(TEXT("End async IR 35 domain"), Runtime.EndPlay(Result)))
         { AddError(Result.ErrorMessage); return false; }
+        const int32 RemainingTasks = Owner->GetTaskResultsForTesting().GetCount();
+        const int32 RemainingSources = Owner->GetCancellationSourceCountForTesting();
+        TestEqual(TEXT("Async IR 35 releases task results"), RemainingTasks, 0);
+        TestEqual(TEXT("Async IR 35 releases cancellation sources"), RemainingSources, 0);
+        UE_LOG(LogTemp, Display, TEXT("composable-ir35-async backend=%d mode=%s result=%d continuations=%d tasks=%d sources=%d"),
+            static_cast<int32>(Backend), bCancelBeforeTick ? TEXT("cancel") : TEXT("complete"),
+            CompletedResult, RemainingContinuations, RemainingTasks, RemainingSources);
         Runtime.Unload();
         TestNull(TEXT("Async IR 35 unload releases heap"), Runtime.GetManagedHeapForTesting());
     }

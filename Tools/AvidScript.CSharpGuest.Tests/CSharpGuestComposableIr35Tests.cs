@@ -96,18 +96,24 @@ internal static class CSharpGuestComposableIr35Tests
             public static class Cache { public static int State = 1; }
             public static class Script {
                 public static int Result;
+                [AvidTransient] private static AvidCancellationSource Source;
                 [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
                 public static async void BeginPlay() { Result = await Run(); }
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_end_play")]
+                public static void EndPlay() { Source.Cancel(); Source.Release(); }
+                [UnmanagedCallersOnly(EntryPoint = "avid_cancel")]
+                public static void Cancel() { Source.Cancel(); }
                 [UnmanagedCallersOnly(EntryPoint = "avid_get_result")]
                 public static int GetResult() => Result;
                 public static async Task<int> Run() {
-                    CancellationToken token = CancellationToken.None;
+                    Source = AvidCancellationSource.Create();
+                    CancellationToken token = Source.Token;
                     try {
                         await AvidContinuations.NextTickAsync().WithCancellation(token);
                         return Cache.State;
                     }
                     catch (OperationCanceledException error) {
-                        return error.CancellationToken == token ? 7 : 9;
+                        return error.CancellationToken == token ? 6 + Cache.State : 9;
                     }
                 }
             }
@@ -139,8 +145,10 @@ internal static class CSharpGuestComposableIr35Tests
             && GuestModuleValidator.Validate(asyncModule).Succeeded,
             "same-source async IR 35 must pass direct validation: " + asyncError);
         GuestModule acceptedAsync = asyncModule!;
-        Check(acceptedAsync.Exports.Any(export => export.Name == "avid_get_result"),
-            "same-source async fixture exposes its completed result for native execution checks");
+        Check(acceptedAsync.Exports.Any(export => export.Name == "avid_get_result")
+            && acceptedAsync.Exports.Any(export => export.Name == "avid_cancel")
+            && acceptedAsync.Exports.Any(export => export.Name == "avid_on_end_play"),
+            "same-source async fixture exposes result, cancellation and teardown for native execution checks");
         byte[] asyncBytes = GuestIrSerializer.Serialize(acceptedAsync);
         Check(GuestModuleValidator.Validate(GuestIrSerializer.Deserialize(asyncBytes)).Succeeded
             && asyncBytes.SequenceEqual(GuestIrSerializer.Serialize(GuestIrSerializer.Deserialize(asyncBytes))),
