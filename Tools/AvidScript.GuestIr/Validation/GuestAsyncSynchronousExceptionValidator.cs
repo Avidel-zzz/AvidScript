@@ -12,7 +12,8 @@ internal static class GuestAsyncSynchronousExceptionValidator
     {
         var artifact = context.Artifact;
         bool staticAsync = GuestStaticAsyncExecution.IsVersion(artifact);
-        if (!GuestAsyncSynchronousExceptions.IsVersion(artifact) && !staticAsync)
+        bool composableAsync = GuestComposableCapabilities.HasDeclaredAsyncBase29(context.InputArtifact);
+        if (!GuestAsyncSynchronousExceptions.IsVersion(artifact) && !staticAsync && !composableAsync)
         {
             if (artifact.AsyncSynchronousExceptions is not null
                 || artifact.Provenance.SemanticSchemaVersion == GuestAsyncSynchronousExceptions.SemanticSchemaVersion
@@ -22,11 +23,12 @@ internal static class GuestAsyncSynchronousExceptionValidator
                 Add(context, "Synchronous async execution requires paired Semantic 50/1.59 and IR 29/1.28.");
             return;
         }
-        if (!(staticAsync ? GuestStaticAsyncExecution.HasSourceContract(artifact)
+        if (!(composableAsync || (staticAsync ? GuestStaticAsyncExecution.HasSourceContract(artifact)
                 : artifact.Provenance.SemanticSchemaVersion == GuestAsyncSynchronousExceptions.SemanticSchemaVersion
-                    && artifact.Provenance.SemanticVersion == GuestAsyncSynchronousExceptions.SemanticVersion)
+                    && artifact.Provenance.SemanticVersion == GuestAsyncSynchronousExceptions.SemanticVersion))
             || artifact.Language != "csharp"
-            || !staticAsync && artifact.StaticStorage is not null || artifact.TaskErrorTransfers is not null
+            || !staticAsync && !composableAsync && artifact.StaticStorage is not null
+            || artifact.TaskErrorTransfers is not null
             || artifact.AsyncSynchronousExceptions is not { Sites.Count: <= 4096 } plan
             || artifact.TaskLocalLifetimes?.ExceptionModel != "cancellation"
             || artifact.LanguageOutcomeTypes is null || artifact.LanguageErrorCatalog is null)

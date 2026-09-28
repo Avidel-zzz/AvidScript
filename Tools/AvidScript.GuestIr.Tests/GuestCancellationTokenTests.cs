@@ -89,6 +89,13 @@ internal static class GuestCancellationTokenTests
             "old Semantic provenance cannot claim the async error catalog", "ASIR1027");
         Reject(managedAsync with { CancellationIdentity = new(30, "1.29") },
             "conflicting identity base cannot claim the async error catalog", "ASIR1027");
+        Reject(managedAsync, "declared async base without a synchronous-to-Task exception plan", "ASIR1037");
+        Reject(managedAsync with {
+            TaskLocalLifetimes = new("cancellation", Array.Empty<GuestTaskLocalLifetimeFunction>()),
+            AsyncSynchronousExceptions = new(new[] { new GuestAsyncSynchronousExceptionSite(
+                "function:missing", "function:missing", "block:missing", 0,
+                "block:target", "value:owner", "value:type") }),
+        }, "declared async base with a forged synchronous-to-Task exception site", "ASIR1037");
         foreach (GuestImport canonical in rootImports)
             Reject(managedAsync with { Imports = managedAsync.Imports.Select(import => import.Id == canonical.Id
                 ? import with { Name = import.Name + "_alias" } : import).ToArray() },
