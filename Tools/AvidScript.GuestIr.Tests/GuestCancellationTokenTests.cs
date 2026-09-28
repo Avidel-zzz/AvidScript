@@ -107,12 +107,21 @@ internal static class GuestCancellationTokenTests
                 new[] { "type:int64", "type:int64" }, "type:int32"),
             new(GuestTaskLanguageErrorValidator.MetaImportId, "avidscript", GuestTaskLanguageErrorValidator.MetaImportName,
                 new[] { "type:int64" }, "type:int64"),
+            new(GuestTaskCancellationErrorValidator.MetaImportId, "avidscript", GuestTaskCancellationErrorValidator.MetaImportName,
+                new[] { "type:int64" }, "type:int64"),
         };
         GuestModule managedTaskAsync = managedAsync with { Imports = managedAsync.Imports.Concat(taskImports).ToArray() };
         var taskPending = GuestModuleValidator.Validate(managedTaskAsync);
-        Check(!taskPending.Succeeded && taskPending.Diagnostics.All(item => item.Code is not ("ASIR1028" or "ASIR1029")),
-            "IR 35 validates exact Task and language-error imports while the incomplete async module remains rejected");
+        Check(!taskPending.Succeeded && taskPending.Diagnostics.All(item => item.Code is not ("ASIR1028" or "ASIR1029" or "ASIR1032")),
+            "IR 35 validates exact Task, fault and cancellation imports while the incomplete async module remains rejected");
         Reject(managedTaskAsync, "IR 35 declared async base with no readiness guards", "ASIR1038");
+        Reject(managedTaskAsync with { Imports = managedTaskAsync.Imports.Where(import =>
+            import.Id != GuestTaskCancellationErrorValidator.MetaImportId).ToArray() },
+            "IR 35 missing terminal error metadata import", "ASIR1032");
+        Reject(managedTaskAsync with { Imports = managedTaskAsync.Imports.Select(import =>
+            import.Id == GuestTaskCancellationIdentity.CancelImportId
+                ? import with { ReturnTypeId = "type:int64" } : import).ToArray() },
+            "IR 35 cancellation writer with wrong result type", "ASIR1032");
         Reject(managedTaskAsync with { Imports = managedTaskAsync.Imports.Where(import =>
             import.Id != taskImports[0].Id).ToArray() }, "IR 35 missing Task host import", "ASIR1028");
         Reject(managedTaskAsync with { Imports = managedTaskAsync.Imports.Select(import => import.Id == taskImports[0].Id

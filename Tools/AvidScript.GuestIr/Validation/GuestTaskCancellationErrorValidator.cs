@@ -30,17 +30,18 @@ public static class GuestTaskCancellationErrorValidator
     internal static void Validate(GuestValidationContext context)
     {
         GuestModule module = context.Module;
+        bool composableAsync = GuestComposableCapabilities.HasDeclaredAsyncBase29(context.InputArtifact);
         bool identity = module.CancellationIdentity is not null;
         GuestImport[] cancellation = Find(module, identity ? GuestTaskCancellationIdentity.CancelImportId : ImportId,
             identity ? GuestTaskCancellationIdentity.CancelImportName : ImportName);
         GuestImport[] metadata = Find(module, MetaImportId, MetaImportName);
         GuestImport[] roots = Find(module, RootImportId, RootImportName);
-        if (!Supports(module) && cancellation.Length == 0
+        if (!Supports(module) && !composableAsync && cancellation.Length == 0
             && metadata.Length == 0 && roots.Length == 0) return;
 
-        if (!Supports(module) || module.Language != "csharp"
-            || module.Provenance.SemanticSchemaVersion != (IsVersion(module) ? SemanticSchemaVersion : GuestTaskLocalLifetimeValidator.ExpectedSemanticSchema(module))
-            || module.Provenance.SemanticVersion != (IsVersion(module) ? SemanticVersion : GuestTaskLocalLifetimeValidator.ExpectedSemanticVersion(module))
+        if (!(Supports(module) || composableAsync) || module.Language != "csharp"
+            || module.Provenance.SemanticSchemaVersion != (composableAsync ? 54 : IsVersion(module) ? SemanticSchemaVersion : GuestTaskLocalLifetimeValidator.ExpectedSemanticSchema(module))
+            || module.Provenance.SemanticVersion != (composableAsync ? "1.63" : IsVersion(module) ? SemanticVersion : GuestTaskLocalLifetimeValidator.ExpectedSemanticVersion(module))
             || module.LanguageErrorCatalog is not { Types.Count: > 0, Sources.Count: > 0 }
             || cancellation.Length != 1 || metadata.Length != 1 || roots.Length != 1)
         {

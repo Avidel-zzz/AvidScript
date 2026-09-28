@@ -136,6 +136,7 @@ internal static class CSharpGuestComposableIr35Tests
             && !asyncError.Contains("ASIR1037", StringComparison.Ordinal)
             && !asyncError.Contains("ASIR1030", StringComparison.Ordinal)
             && !asyncError.Contains("ASIR1031", StringComparison.Ordinal)
+            && !asyncError.Contains("ASIR1032", StringComparison.Ordinal)
             && !asyncError.Contains("ASIR1038", StringComparison.Ordinal)
             && !asyncError.Contains("ASIR1041", StringComparison.Ordinal)
             && !asyncError.Contains("ASIR1035", StringComparison.Ordinal)
