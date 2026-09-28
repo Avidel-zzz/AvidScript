@@ -54,8 +54,9 @@ public static class SemanticAnalyzer
         if (enableAsyncSynchronousExceptions && !enableAsyncCancellationFlow)
             throw new ArgumentException("Synchronous async exceptions require cancellation analysis.",
                 nameof(enableAsyncSynchronousExceptions));
-        if (enableAsyncCatchVariables && (!enableAsyncSynchronousExceptions || enableStaticInitialization))
-            throw new ArgumentException("Async catch variables require synchronous exception analysis; static initialization composition is not available yet.",
+        if (enableAsyncCatchVariables && (!enableAsyncSynchronousExceptions
+                || enableStaticInitialization && !enableCancellationTokens))
+            throw new ArgumentException("Async catch variables require synchronous exception analysis; static composition requires cancellation token values.",
                 nameof(enableAsyncCatchVariables));
         if (enableCancellationTokens && !enableAsyncCatchVariables)
             throw new ArgumentException("Cancellation token values require async catch variable analysis.",
@@ -347,9 +348,25 @@ public static class SemanticAnalyzer
             RejectedAsyncExceptionFlows = controlFlowProjection.RejectedAsyncExceptionFlows.Count > 0
                 ? controlFlowProjection.RejectedAsyncExceptionFlows : null,
         };
-        return enableStaticInitialization
-            ? SemanticStaticInitializerProjector.Project(context, typeRegistry, document)
-            : document;
+        if (!enableStaticInitialization) return document;
+        SemanticDocument projected = SemanticStaticInitializerProjector.Project(context, typeRegistry, document);
+        if (!enableCancellationTokens || projected.StaticInitialization is null) return projected;
+        SemanticCapabilityManifest manifest = SemanticComposableCapabilities.FromProjectedSource(projected);
+        if (manifest.Capabilities.Count != 5)
+            throw new ArgumentException(
+                "Static initialization with cancellation token values currently requires an async await, cancellation identity, and exception plan.",
+                nameof(enableStaticInitialization));
+        return projected with
+        {
+            SchemaVersion = SemanticComposableCapabilities.SchemaVersion,
+            SemanticVersion = SemanticComposableCapabilities.SemanticVersion,
+            StaticInitialization = projected.StaticInitialization with
+            {
+                BaseSchemaVersion = manifest.BaseSchemaVersion,
+                BaseSemanticVersion = manifest.BaseSemanticVersion,
+            },
+            CapabilityManifest = manifest,
+        };
     }
 
     private static SemanticDiagnostic ProjectDiagnostic(

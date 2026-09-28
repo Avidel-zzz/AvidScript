@@ -12,10 +12,12 @@ public static class SemanticCancellationTokenValidator
         if (document?.Methods is null || document.ControlFlowGraphs is null || document.AsyncMethods is null
             || document.Types is null || document.Symbols is null || document.Callables is null
             || document.TypeShapes is null || document.ClassTypes is null) return false;
+        if (!SemanticComposableCapabilityValidator.IsValid(document)) return false;
         bool enabled = SemanticContract.HasCancellationTokens(document);
         if (!enabled && (document.SchemaVersion == SemanticContract.CancellationTokenSchemaVersion
             || document.SemanticVersion == SemanticContract.CancellationTokenSemanticVersion)) return false;
         if (enabled && (document.StaticInitialization is not null
+                && !SemanticComposableCapabilities.IsVersion(document)
             || document.Types.Any(type => type is null || string.IsNullOrWhiteSpace(type.Id))
             || document.Types.Select(type => type.Id).Distinct(StringComparer.Ordinal).Count() != document.Types.Count
             || document.Types.Count(type => type?.Id == SemanticCancellationTokens.TypeId

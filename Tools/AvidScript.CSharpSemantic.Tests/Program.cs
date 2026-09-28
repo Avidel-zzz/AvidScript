@@ -6,6 +6,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--composable-capabilities")
+            {
+                int focused = SemanticComposableCapabilityTests.Run();
+                Console.WriteLine($"AvidScript.CSharpSemantic.Tests.ComposableCapabilities: {focused}/{focused} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--cancellation-token-values")
             {
                 int focused = SemanticCancellationTokenTests.Run();
@@ -96,7 +102,7 @@ internal static class Program
                 + SemanticAsyncTaskLocalLifetimeTests.Run() + SemanticAsyncThrowRoutingTests.Run()
                 + SemanticAsyncMemberAssignmentTests.Run() + SemanticStaticInitializationTests.Run()
                 + SemanticAsyncSynchronousExceptionTests.Run() + SemanticAsyncCatchVariableTests.Run()
-                + SemanticCancellationTokenTests.Run();
+                + SemanticCancellationTokenTests.Run() + SemanticComposableCapabilityTests.Run();
             Console.WriteLine($"AvidScript.CSharpSemantic.Tests: {count}/{count} passed");
             return 0;
         }

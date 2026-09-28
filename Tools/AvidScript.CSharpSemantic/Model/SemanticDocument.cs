@@ -79,4 +79,7 @@ public sealed record SemanticDocument(
 
     [JsonPropertyOrder(27), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public SemanticStaticInitializationPlan? StaticInitialization { get; init; }
+
+    [JsonPropertyOrder(28), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SemanticCapabilityManifest? CapabilityManifest { get; init; }
 }

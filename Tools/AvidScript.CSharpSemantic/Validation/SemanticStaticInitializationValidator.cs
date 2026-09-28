@@ -10,9 +10,14 @@ public static class SemanticStaticInitializationValidator
     {
         if (document is null || !(document.SchemaVersion == SemanticStaticInitialization.SchemaVersion
                 && document.SemanticVersion == SemanticStaticInitialization.SemanticVersion
-                || SemanticStaticInitialization.IsAsyncVersion(document))
+                || SemanticStaticInitialization.IsAsyncVersion(document)
+                || SemanticComposableCapabilities.IsVersion(document))
             || document.StaticInitialization is not { Types: { Count: > 0 } } plan
-            || !(SemanticStaticInitialization.IsAsyncVersion(document)
+            || !SemanticComposableCapabilityValidator.IsValid(document)
+            || !(SemanticComposableCapabilities.IsVersion(document)
+                ? plan.BaseSchemaVersion == SemanticComposableCapabilities.BaseSchemaVersion
+                    && plan.BaseSemanticVersion == SemanticComposableCapabilities.BaseSemanticVersion
+                : SemanticStaticInitialization.IsAsyncVersion(document)
                 ? plan.BaseSchemaVersion == SemanticContract.AsyncSynchronousExceptionSchemaVersion
                     && plan.BaseSemanticVersion == SemanticContract.AsyncSynchronousExceptionSemanticVersion
                 : BaseVersion(plan))

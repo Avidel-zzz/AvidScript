@@ -46,7 +46,8 @@ public static class SemanticContract
 
     public static bool HasCancellationTokens(SemanticDocument document) =>
         document.SchemaVersion == CancellationTokenSchemaVersion
-        && document.SemanticVersion == CancellationTokenSemanticVersion;
+        && document.SemanticVersion == CancellationTokenSemanticVersion
+        || SemanticComposableCapabilities.Has(document, SemanticComposableCapabilities.CancellationTokenValue);
 
     public static bool HasAsyncCatchVariables(SemanticDocument document) =>
         document.SchemaVersion == AsyncCatchVariableSchemaVersion
@@ -115,5 +116,7 @@ public static class SemanticContract
         || (schemaVersion == AsyncCatchVariableSchemaVersion
             && semanticVersion == AsyncCatchVariableSemanticVersion)
         || (schemaVersion == CancellationTokenSchemaVersion
-            && semanticVersion == CancellationTokenSemanticVersion);
+            && semanticVersion == CancellationTokenSemanticVersion)
+        || (schemaVersion == SemanticComposableCapabilities.SchemaVersion
+            && semanticVersion == SemanticComposableCapabilities.SemanticVersion);
 }

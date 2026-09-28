@@ -19,6 +19,7 @@ public static class SemanticAsyncSynchronousExceptionValidator
                 && document.AsyncMethods.All(method => method.Segments.All(segment =>
                     segment.SynchronousExceptionTarget is null));
         if (document.StaticInitialization is not null
+                && !SemanticComposableCapabilities.IsVersion(document)
             || !SemanticContract.HasCancellationTokens(document)
                 && !document.AsyncMethods.Any(method => method.TaskResultTypeId == "type:int32")) return false;
         foreach (var method in document.AsyncMethods)

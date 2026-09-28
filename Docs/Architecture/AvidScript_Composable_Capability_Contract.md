@@ -1,12 +1,14 @@
 # 可组合语言能力合同：P66.C 到跨语言模块
 
-状态：P66.C 设计增量，2026-09-28。本文规定下一段实现与验收，不改变已完成的 P66.A/B、既有 Phase 状态或已发布的 IR 1–34 产物。目标版本暂定 C# Semantic 54/1.63、Guest IR 35/1.34；实施前若编号已分配，必须另取新版本，不能重解释旧字节。
+状态：P66.C 实现中，2026-09-28。本文规定下一段实现与验收，不改变已完成的 P66.A/B、既有 Phase 状态或已发布的 IR 1–34 产物。已预留 C# Semantic 54/1.63、Guest IR 35/1.34；不能重解释旧字节。
 
-首个实现切片已在 Guest IR 中加入可选清单字段、精确执行基线/能力 ID 校验及 IR 35 严格 JSON 读取。旧版本不能携带新清单；IR 35 即使清单结构有效，仍由现有执行版本准入拒绝，直到 Semantic、WASM emitter 和原生读取者同步接入。固定 SDK 的 Guest IR 398/398、WASM Backend 415/415、C# Guest 4490/4490 通过。这是格式与负例的进度，不是静态初始化 + token 已可执行。
+首个实现切片已在 Guest IR 中加入可选清单字段、精确执行基线/能力 ID 校验及 IR 35 严格 JSON 读取。旧版本不能携带新清单；IR 35 即使清单结构有效，仍由现有执行版本准入拒绝。
+
+第二切片已让 C# 前端在显式启用静态初始化、async 异常和标准 token 分析时，从同一份源码投射 Semantic 54/1.63。新文档携带排序的五项能力与统一的 Semantic 50/1.59 基线；静态计划、await、取消身份、异常计划和 token 类型均从投射结果核对，旧 Semantic 53 不写清单。Semantic 54 的未知/重复 JSON 字段、旧版夹带清单、缺失能力和冲突基线均拒绝。固定 SDK 的 Semantic 全量 1509/1509、C# Guest 全量 4493/4493，token 下游拒绝专项 315/315 通过。当前只覆盖五项能力齐备的组合源；缺少必要计划会显式拒绝。Guest lowering、WASM emitter 和原生读取者仍未准入 IR 35，因此这仍不是静态初始化 + token 可执行的证据。
 
 ## 现有阻塞
 
-[SemanticAnalyzer](../../Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs)在启用 async catch 变量时拒绝静态初始化；标准 token 又依赖 catch 变量。[GuestCancellationTokenValidator](../../Tools/AvidScript.GuestIr/Validation/GuestCancellationTokenValidator.cs)拒绝 IR 34 中的 `StaticStorage`。原始 [29 个成员 await 场景](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)需要静态对象初始化，当前通过的是 Semantic 51 → IR 31；标准 token 专项使用 Semantic 53 → IR 34。两组通过不能证明同一个业务模块能同时使用两种能力。
+[SemanticAnalyzer](../../Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs)现可投射特定的静态初始化 + async + token 组合，但 [GuestCancellationTokenValidator](../../Tools/AvidScript.GuestIr/Validation/GuestCancellationTokenValidator.cs)仍拒绝 IR 34 中的 `StaticStorage`，IR 35 也尚未开放执行。原始 [29 个成员 await 场景](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)需要静态对象初始化，当前可执行的是 Semantic 51 → IR 31；标准 token 专项使用 Semantic 53 → IR 34。两组通过不能证明同一个业务模块能同时使用两种能力。
 
 当前每个新组合靠一个外层版本和 `BaseProfile` 视图回退到旧执行版本。[GuestValidationContext](../../Tools/AvidScript.GuestIr/Validation/GuestValidationContext.cs)与 [GuestStaticStorage](../../Tools/AvidScript.GuestIr/Model/GuestStaticStorage.cs)已有多重视图；[WASM provenance](../../Tools/AvidScript.WasmBackend/Codegen/WasmModuleCompiler.cs)和[原生读取者](../../Source/AvidScriptRuntime/Private/Diagnostics/AvidScriptLanguageErrorCatalog.cpp)只编码单个外层版本与 base。继续给每种组合套一个版本，会让语言前端、缓存和 Host 的组合数量随能力增长。
 

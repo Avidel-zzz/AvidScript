@@ -100,6 +100,9 @@ internal static class CSharpGuestCancellationTokenTests
         Reject(source with { Callables = null! }, "missing callables");
         Reject(source with { Symbols = null! }, "missing symbols");
         Reject(source with { Diagnostics = null! }, "missing diagnostics");
+        Reject(source with { CapabilityManifest = new(50, "1.59", new[] {
+            new SemanticCapability(SemanticComposableCapabilities.CancellationTokenValue, 1) }) },
+            "capability manifest on Semantic 53");
         Reject(source with { ControlFlowGraphs = null! }, "missing control flow");
         Reject(source with { AsyncMethods = null! }, "missing async methods");
         Reject(source with { Methods = source.Methods.Append(null!).ToArray() }, "null method");

@@ -10,7 +10,7 @@
 
 最近的 [C10 取消身份实现](../Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)已连接 Session、IR 32/33 与双 VM；异步 `catch` 对象别名可跨 await/GC，重复等待与 rethrow 保持对象身份。显式编译 API 已从 Semantic 53 生成 IR 34/WASM；异常 getter 和对象快照 reader 已在 Win64 两个 VM 上运行，21 份 C# 源码产生 82/82 组执行观察。静态初始化组合、原始 29 案例、默认构建入口和真实 Editor 玩法仍待完成。
 
-直接阻塞是能力组合方式，而不是再补一个孤立 API：Semantic 53/IR 34 的 token 路径不能与 Semantic 51/IR 31 的静态初始化路径生成同一个模块。[可组合能力合同](AvidScript_Composable_Capability_Contract.md)规定下一版 Semantic/IR 的能力列表、旧版兼容、Host 准入和原始 29 案例验收；先完成它，再打开默认构建入口。
+直接阻塞是能力组合执行，而不是再补一个孤立 API：前端现能从同一份源码生成 Semantic 54 能力清单，Guest IR 35 仍只验证格式并拒绝执行；Semantic 53/IR 34 的 token 路径与 Semantic 51/IR 31 的静态初始化路径尚不能生成同一个可运行模块。[可组合能力合同](AvidScript_Composable_Capability_Contract.md)规定剩余的 Guest lowering、WASM/Host 准入、旧版兼容和原始 29 案例验收；完成这些证据后才能打开默认构建入口。
 
 WASM 是执行载体，不自动带来完整语言支持、零开销或多语言互通。C# 前端与多种 VM 后端也不等于多个语言可以在同一个项目中共同开发。
 
