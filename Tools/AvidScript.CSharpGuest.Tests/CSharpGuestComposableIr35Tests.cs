@@ -98,6 +98,8 @@ internal static class CSharpGuestComposableIr35Tests
                 public static int Result;
                 [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
                 public static async void BeginPlay() { Result = await Run(); }
+                [UnmanagedCallersOnly(EntryPoint = "avid_get_result")]
+                public static int GetResult() => Result;
                 public static async Task<int> Run() {
                     CancellationToken token = CancellationToken.None;
                     try {
@@ -137,6 +139,8 @@ internal static class CSharpGuestComposableIr35Tests
             && GuestModuleValidator.Validate(asyncModule).Succeeded,
             "same-source async IR 35 must pass direct validation: " + asyncError);
         GuestModule acceptedAsync = asyncModule!;
+        Check(acceptedAsync.Exports.Any(export => export.Name == "avid_get_result"),
+            "same-source async fixture exposes its completed result for native execution checks");
         byte[] asyncBytes = GuestIrSerializer.Serialize(acceptedAsync);
         Check(GuestModuleValidator.Validate(GuestIrSerializer.Deserialize(asyncBytes)).Succeeded
             && asyncBytes.SequenceEqual(GuestIrSerializer.Serialize(GuestIrSerializer.Deserialize(asyncBytes))),

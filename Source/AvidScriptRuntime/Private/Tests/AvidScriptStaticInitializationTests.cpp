@@ -1,10 +1,14 @@
 #if WITH_DEV_AUTOMATION_TESTS
 #include "AvidScriptLanguageErrorCatalog.h"
 #include "AvidScriptWasmRuntime.h"
+#include "Continuation/AvidScriptSessionContinuations.h"
 #include "Memory/AvidScriptManagedHeap.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptStaticInitializationGuardsTest,
     "AvidScript.Runtime.ManagedHeap.StaticInitialization",
@@ -208,17 +212,23 @@ bool FAvidScriptComposableIr35StaticTokenTest::RunTest(const FString& Parameters
     return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptComposableIr35AsyncLoadTest,
-    "AvidScript.Runtime.ManagedHeap.ComposableIr35AsyncLoad",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptComposableIr35AsyncExecutionTest,
+    "AvidScript.Runtime.ManagedHeap.ComposableIr35AsyncExecution",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FAvidScriptComposableIr35AsyncLoadTest::RunTest(const FString& Parameters)
+bool FAvidScriptComposableIr35AsyncExecutionTest::RunTest(const FString& Parameters)
 {
     static_cast<void>(Parameters);
+    if (!TestNotNull(TEXT("Create async IR 35 test World with GEngine"), GEngine)) return false;
     const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(),
         TEXT("AvidScriptComposableIr35/GuestFixtures/composable-async-static-token.wasm"));
     TArray<uint8> Wasm;
     if (!TestTrue(TEXT("Read same-source async IR 35 WASM fixture"), FFileHelper::LoadFileToArray(Wasm, *Path))) return false;
+    UWorld* World = UWorld::CreateWorld(EWorldType::Game, false, TEXT("AvidScriptComposableIr35World"));
+    if (!TestNotNull(TEXT("Async IR 35 test World created"), World)) return false;
+    GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+    World->InitializeActorsForPlay(FURL());
+    ON_SCOPE_EXIT { GEngine->DestroyWorldContext(World); World->DestroyWorld(false); };
 
     for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
     {
@@ -236,6 +246,62 @@ bool FAvidScriptComposableIr35AsyncLoadTest::RunTest(const FString& Parameters)
         TestTrue(TEXT("Async IR 35 authorizes fault, cancellation identity and exception token"), Catalog
             && Catalog->SupportsTaskLanguageErrorFault() && Catalog->SupportsTaskCancellationError()
             && Catalog->SupportsTaskCancellationIdentity() && Catalog->SupportsExceptionCancellationToken());
+        if (!TestTrue(TEXT("Async IR 35 exports entry, resumer and result"), Runtime.ValidateRequiredExports(
+            {TEXT("avid_on_begin_play"), TEXT("avid_on_continuation_v2"), TEXT("avid_get_result")}, Result)))
+        { AddError(Result.ErrorMessage); return false; }
+        const auto Owner = MakeShared<FAvidScriptSessionContinuations>();
+        auto& Endpoint = Owner->ResetActive(World);
+        FAvidScriptWasmHostContext Context;
+        Context.Tasks = &Endpoint;
+        Context.Continuations = &Endpoint;
+        Context.World = World;
+        Runtime.SetHostContext(Context);
+        ON_SCOPE_EXIT { Runtime.SetHostContext({}); Owner->Teardown(); Runtime.Unload(); };
+        FAvidScriptVmPreparedExportCall ResultCall;
+        FString Error;
+        if (!TestTrue(TEXT("Prepare async IR 35 result export"),
+            Runtime.PrepareNamedExportCall(TEXT("avid_get_result"), ResultCall, Error)))
+        { AddError(Error); return false; }
+        auto ReadResult = [&]() -> int32
+        {
+            FAvidScriptVmCallFrame Frame;
+            Frame.CellCount = 0;
+            FAvidScriptVmCallResult Value;
+            FAvidScriptVmError VmError;
+            if (!ResultCall.Call(Frame, VmError, &Value))
+            { AddError(VmError.Details); return MIN_int32; }
+            return static_cast<int32>(Value.Cells[0]);
+        };
+        if (!TestTrue(TEXT("BeginPlay suspends async IR 35 source"), Runtime.BeginPlay(Result)))
+        { AddError(Result.ErrorMessage); return false; }
+        TestEqual(TEXT("Async result waits for the next tick"), ReadResult(), 0);
+        TestTrue(TEXT("Async source registered a continuation"), Owner->GetActiveCount() > 0);
+        for (int32 Round = 0; Round < 4 && Owner->GetActiveCount() > 0; ++Round)
+        {
+            World->Tick(LEVELTICK_All, 0.02f);
+            ++GFrameCounter;
+            TArray<FAvidScriptContinuationCompletion> Ready;
+            Owner->DrainReady(Ready);
+            for (const auto& Completion : Ready)
+            {
+                const bool bDispatched = Runtime.DispatchContinuation(Completion, Result);
+                if (!TestTrue(TEXT("Async IR 35 continuation resumes"), bDispatched))
+                { AddError(Result.ErrorMessage); return false; }
+                if (!TestTrue(TEXT("Async IR 35 continuation finalizes"),
+                    Owner->FinalizeDispatched(Completion.Token, bDispatched))) return false;
+            }
+        }
+        const int32 CompletedResult = ReadResult();
+        const int32 RemainingContinuations = Owner->GetActiveCount();
+        TestEqual(TEXT("Async IR 35 completes with initialized static state"), CompletedResult, 1);
+        TestEqual(TEXT("Async IR 35 releases its continuations"), RemainingContinuations, 0);
+        TestTrue(TEXT("Async IR 35 releases invocation frames"),
+            Runtime.GetManagedHeapForTesting()
+                && Runtime.GetManagedHeapForTesting()->GetStats().ActiveFrames == 0);
+        UE_LOG(LogTemp, Display, TEXT("composable-ir35-async backend=%d result=%d continuations=%d"),
+            static_cast<int32>(Backend), CompletedResult, RemainingContinuations);
+        if (!TestTrue(TEXT("End async IR 35 domain"), Runtime.EndPlay(Result)))
+        { AddError(Result.ErrorMessage); return false; }
         Runtime.Unload();
         TestNull(TEXT("Async IR 35 unload releases heap"), Runtime.GetManagedHeapForTesting());
     }

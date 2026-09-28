@@ -62,7 +62,7 @@ try {
     $tests = @(
         'AvidScript.Runtime.LanguageErrorCatalog.LoadAndReject',
         'AvidScript.Runtime.ManagedHeap.ComposableIr35StaticToken',
-        'AvidScript.Runtime.ManagedHeap.ComposableIr35AsyncLoad'
+        'AvidScript.Runtime.ManagedHeap.ComposableIr35AsyncExecution'
     )
     $filter = $tests -join '+'
     $logPath = Join-Path $runRoot 'automation.log'
@@ -79,11 +79,12 @@ try {
         if ([regex]::Matches($log, $pattern).Count -eq 1) { $passed++ }
     }
     $observations = [regex]::Matches($log, 'composable-ir35 backend=\d+ domain=\d+ first=2 second=3 roots=\d+').Count
-    if ($passed -ne $tests.Count -or $observations -ne 4 -or
+    $asyncObservations = [regex]::Matches($log, 'composable-ir35-async backend=\d+ result=1 continuations=0').Count
+    if ($passed -ne $tests.Count -or $observations -ne 4 -or $asyncObservations -ne 2 -or
         [regex]::Matches($log, 'Test Completed\. Result=\{Fail\}').Count -ne 0 -or
         [regex]::Matches($log, '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*\*').Count -ne 1 -or
         [regex]::Matches($log, "Found $($tests.Count) automation tests based on '$([regex]::Escape($filter))'").Count -ne 1) {
-        throw "IR 35 Automation evidence incomplete: tests=$passed observations=$observations log=$logPath"
+        throw "IR 35 Automation evidence incomplete: tests=$passed observations=$observations async_observations=$asyncObservations log=$logPath"
     }
     [ordered]@{
         schema_version = 1
@@ -94,10 +95,11 @@ try {
         wasm_sha256 = $wasmHash
         async_wasm_sha256 = $asyncWasmHash
         vm_observations = $observations
+        async_vm_observations = $asyncObservations
         automation_passed = $passed
         automation_log = $logPath
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $runRoot 'results.json') -Encoding utf8
-    Write-Output "Composable IR 35: dual-VM observations $observations/4; Automation $passed/$($tests.Count); evidence=$runRoot"
+    Write-Output "Composable IR 35: sync observations $observations/4; async observations $asyncObservations/2; Automation $passed/$($tests.Count); evidence=$runRoot"
 }
 finally {
     Pop-Location
