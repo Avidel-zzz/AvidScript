@@ -55,7 +55,10 @@ int32 ExecutionSchema(const FString& Profile)
 FString ExecutionProfile(const TMap<FString, FString>& Fields)
 {
 	if (Fields.FindRef(TEXT("guest_ir")) == TEXT("35/1.34"))
-		return Fields.FindRef(TEXT("execution_base"));
+	{
+		const FString Base = Fields.FindRef(TEXT("execution_base"));
+		return Base == TEXT("29/1.28") ? TEXT("26/1.25") : Base;
+	}
 	if (Fields.FindRef(TEXT("guest_ir")) == TEXT("31/1.30")
 		|| Fields.FindRef(TEXT("guest_ir")) == TEXT("32/1.31")
 		|| Fields.FindRef(TEXT("guest_ir")) == TEXT("33/1.32")
@@ -102,15 +105,21 @@ bool ParseProvenance(TConstArrayView<uint8> Payload, TMap<FString, FString>& Out
 	{
 		const FString SourceLanguage = OutFields.FindRef(TEXT("source_language"));
 		const FString Semantic = OutFields.FindRef(TEXT("semantic"));
+		const FString Base = OutFields.FindRef(TEXT("execution_base"));
+		const FString Capabilities = OutFields.FindRef(TEXT("capabilities"));
 		const bool bKnownSource = (SourceLanguage == TEXT("csharp") && Semantic == TEXT("54/1.63"))
 			|| (SourceLanguage == TEXT("guest-ir") && IsVersionIdentity(Semantic));
+		const bool bSynchronous = OutFields.Num() == 10
+			&& (Base == TEXT("14/1.13") || Base == TEXT("17/1.16"))
+			&& Capabilities == TEXT("error.cancellation_token_value@1,managed.static_storage@1")
+			&& bKnownSource;
+		const bool bAsynchronous = OutFields.Num() == 11
+			&& Base == TEXT("29/1.28")
+			&& Capabilities == TEXT("async.await_readiness@1,async.cancellation_identity@1,error.cancellation_token_value@1,error.exception_values@1,managed.static_storage@1")
+			&& SourceLanguage == TEXT("csharp") && Semantic == TEXT("54/1.63")
+			&& OutFields.FindRef(TEXT("task_local_exception_model")) == TEXT("cancellation");
 		return ArtifactProfile == TEXT("35/1.34")
-			&& OutFields.Num() == 10
-			&& (OutFields.FindRef(TEXT("execution_base")) == TEXT("14/1.13")
-				|| OutFields.FindRef(TEXT("execution_base")) == TEXT("17/1.16"))
-			&& OutFields.FindRef(TEXT("capabilities"))
-				== TEXT("error.cancellation_token_value@1,managed.static_storage@1")
-			&& bKnownSource
+			&& (bSynchronous || bAsynchronous)
 			&& !OutFields.FindRef(TEXT("module_id")).IsEmpty()
 			&& IsSourceId(OutFields.FindRef(TEXT("source_id")))
 			&& IsLowerSha256(OutFields.FindRef(TEXT("source_sha256")))
@@ -312,7 +321,9 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 	auto Candidate = MakeUnique<FAvidScriptLanguageErrorCatalog>();
 	Candidate->GuestIrSchemaVersion = ProfileSchema;
 	Candidate->bTaskLifetimeCancellation = (ProfileSchema == 25 || ProfileSchema == 26) && LifetimeModel == TEXT("cancellation");
-	Candidate->bExceptionCancellationToken = ArtifactProfile == TEXT("34/1.33");
+	const bool bComposableAsync = ArtifactProfile == TEXT("35/1.34")
+		&& ProvenanceFields.FindRef(TEXT("execution_base")) == TEXT("29/1.28");
+	Candidate->bExceptionCancellationToken = ArtifactProfile == TEXT("34/1.33") || bComposableAsync;
 	Candidate->bTaskCancellationIdentity = ArtifactProfile == TEXT("32/1.31") || ArtifactProfile == TEXT("33/1.32")
 		|| (Candidate->bExceptionCancellationToken && ProfileSchema == 26);
 	Candidate->TypeIds.Reserve(Types->Num());

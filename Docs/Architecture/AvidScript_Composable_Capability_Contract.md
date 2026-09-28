@@ -12,9 +12,11 @@ C# 静态初始化不能简单映射到上述 14/1.13 夹具：现有编译器�
 
 第四切片接通 IR 35 的 WASM emitter 和原生 provenance reader。新产物写入 `guest_ir=35/1.34`、`execution_base`、规范能力清单、`source_language` 和源语义版本；原生读取只准入 14/1.13 或 17/1.16 上的两项同步能力，检查模块身份、来源 hash、精确字段集和错误目录。固定 SDK 的 Guest IR **410/410**、C# Guest **4537/4537**、WASM backend **419/419**、Win64 no-clean Editor 构建及聚焦 Automation **2/2** 通过。同源 17/1.16 WASM SHA-256 为 `f98ca31778c5c6691e1caade3dc52e33fb8f28f7665564576b199176abf59516`；Wasmtime JIT 与 WAMR Interpreter 各在两个新执行域中连续返回 `2`、`3`，共 **4/4** 次观察，卸载后堆释放。可用 `Build/TestAvidScriptComposableIr35.ps1` 重现，原始日志位于工程 `Saved/AvidScriptComposableIr35/20260928T022220003Z/`。这仍未覆盖异步五能力、正常编辑器构建入口或真实 Play。
 
+第五切片让原生 provenance reader 准入**精确**的 29/1.28 五能力、C# Semantic 54/1.63 和取消生命周期字段；缺能力、乱序、错基线、错来源、错模块身份、缺错误目录及未知字段均拒绝。`Build/TestAvidScriptComposableIr35.ps1` 重新生成的异步 WASM（SHA-256 `cf49263136f63d5e5d2322ab6f67773d7415c781f32700287808b700c66732e8`）已通过原生错误目录读取和授权测试；固定 SDK 的组合专项 **33/33**、Win64 no-clean Editor 构建、聚焦 Automation **2/2** 通过，同一轮的同步双 VM 观察仍为 **4/4**。原始证据在工程 `Saved/AvidScriptComposableIr35/20260928T083904291Z/`。这只证明真实异步产物的原生读取，尚未证明其 VM 加载、执行或玩法语义。
+
 ## 现有阻塞
 
-[SemanticAnalyzer](../../Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs)可投射特定的静态初始化 + async + token 组合。同一份 C# 源码现通过私有 Semantic 53 执行副本完成静态字段改写、异常/取消 lowering，发布保留 Semantic 54 来源的 IR 35 五能力模块，并生成确定性 WASM。此证据只到 Guest IR / WASM；原生 Host 仍只准入同步两能力，双 VM 未执行异步五能力模块。原始 [29 个成员 await 场景](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)和真实玩法仍待同源组合验证。
+[SemanticAnalyzer](../../Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs)可投射特定的静态初始化 + async + token 组合。同一份 C# 源码现通过私有 Semantic 53 执行副本完成静态字段改写、异常/取消 lowering，发布保留 Semantic 54 来源的 IR 35 五能力模块，并生成确定性 WASM。原生 Host 已读取这份产物的来源和错误目录；双 VM 尚未执行异步五能力模块。原始 [29 个成员 await 场景](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)和真实玩法仍待同源组合验证。
 
 token reader 验证器现可在真实 IR 35 输入上识别 29/1.28、Semantic 54、异常值与 token 值两项声明的组合，并拒绝缺声明、旧来源或同步 token 计划。同源候选先核对旧包装生成的静态、readiness、取消身份、token 与异常计划链，再把 readiness 和取消身份计划统一标记为 29/1.28；各独立验证器随后按原始 IR 35 模块检查执行路径。计划字段一致本身不能替代这一步。
 
@@ -34,9 +36,9 @@ Task local 生命周期验证器现以 Semantic 54/1.63 为来源直接检查 IR
 
 取消身份验证器现按 IR 35 的 29/1.28 计划核对 v2 writer、v1 reader、已验证取消 producer 和 readiness token；同源候选不再报 `ASIR1039`。缺 reader 或参数类型不符的 IR 35 负例仍被拒绝。
 
-异常值验证器现允许有准确五能力声明的 IR 35 同时携带静态存储，仍逐项校验捕获块、Task 错误根、类型匹配和引用别名。同源候选不再报 `ASIR1040`；空绑定或伪造捕获点被拒绝。精确五能力清单、完整 async 元数据和 29/1.28 基线通过 `ASIR1042`，缺能力或缺异常转移计划被拒绝。同源模块可规范往返，重复编译的 Guest IR / WASM 字节一致；原生准入与执行尚未验证。
+异常值验证器现允许有准确五能力声明的 IR 35 同时携带静态存储，仍逐项校验捕获块、Task 错误根、类型匹配和引用别名。同源候选不再报 `ASIR1040`；空绑定或伪造捕获点被拒绝。精确五能力清单、完整 async 元数据和 29/1.28 基线通过 `ASIR1042`，缺能力或缺异常转移计划被拒绝。同源模块可规范往返，重复编译的 Guest IR / WASM 字节一致；原生 provenance 与错误目录读取已验证，VM 执行尚未验证。
 
-旧版组合依靠外层版本和 `BaseProfile` 回退到旧执行版本；IR 35 同步及精确异步五能力模块已由 [GuestValidationContext](../../Tools/AvidScript.GuestIr/Validation/GuestValidationContext.cs)直接验证真实输入，并由 [WASM provenance](../../Tools/AvidScript.WasmBackend/Codegen/WasmModuleCompiler.cs)写入执行基线与能力清单。[原生读取者](../../Source/AvidScriptRuntime/Private/Diagnostics/AvidScriptLanguageErrorCatalog.cpp)目前仍只接受同步两能力。继续增加外层版本会使前端、缓存和 Host 的组合数量随能力增长。
+旧版组合依靠外层版本和 `BaseProfile` 回退到旧执行版本；IR 35 同步及精确异步五能力模块已由 [GuestValidationContext](../../Tools/AvidScript.GuestIr/Validation/GuestValidationContext.cs)直接验证真实输入，并由 [WASM provenance](../../Tools/AvidScript.WasmBackend/Codegen/WasmModuleCompiler.cs)写入执行基线与能力清单。[原生读取者](../../Source/AvidScriptRuntime/Private/Diagnostics/AvidScriptLanguageErrorCatalog.cpp)已接受同步两能力及精确异步五能力的来源/错误目录，其他组合仍拒绝。继续增加外层版本会使前端、缓存和 Host 的组合数量随能力增长。
 
 异步组合按以下依赖推进；每一行在真实 IR 35 上验证，不通过改写版本字段取得旧验证器的通过结果：
 
@@ -74,7 +76,7 @@ IR 35 将 `execution_base` 与**排序、去重、版本化**的 `capabilities` 
 
 Semantic 54 的 C# 文档记录已实际投射的语言能力与源码 hash；IR 35 记录执行能力与对应 Semantic hash。第二语言可产出同一 IR 能力，却必须保留自己的前端种类与版本，不能伪装成 C# Semantic 54。默认 CLI、缓存、generated facade、Editor Build And Bind 与包发布读取同一份能力判定；禁止一个入口接受组合而另一个入口默默退回旧版。
 
-WASM 的新 provenance 同时记录 `guest_ir=35/1.34`、`execution_base`、规范能力列表、`source_language` 和 `semantic`。当前原生读取者只准入 14/1.13 与 17/1.16 的同步两能力组合；29/1.28 的异步组合仍关闭。旧 IR 1–34 保持原有读取格式，不能把新字段塞进旧 IR。Host 验证实际加载的 WASM 与包中已审核的 hash、provenance 和 import 表一致，再按 Session、World、线程、根与代际检查执行。未知必需能力、未来版本、错误签名、别名 import 和能力/计划/导入不一致均 fail closed。
+WASM 的新 provenance 同时记录 `guest_ir=35/1.34`、`execution_base`、规范能力列表、`source_language` 和 `semantic`。原生错误目录读取者准入 14/1.13 与 17/1.16 的同步两能力组合，以及 29/1.28 上的精确异步五能力组合；完整 Host import/VM 执行仍须验证。旧 IR 1–34 保持原有读取格式，不能把新字段塞进旧 IR。Host 验证实际加载的 WASM 与包中已审核的 hash、provenance 和 import 表一致，再按 Session、World、线程、根与代际检查执行。未知必需能力、未来版本、错误签名、别名 import 和能力/计划/导入不一致均 fail closed。
 
 ## 落地顺序与验收
 

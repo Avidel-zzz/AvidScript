@@ -37,16 +37,19 @@ try {
         throw "IR 35 C# fixture generation failed: $runRoot"
     }
     foreach ($name in @('composable-static-token.cs', 'composable-static-token.semantic.json',
-        'composable-static-token.guestir.json', 'composable-static-token.wasm')) {
+        'composable-static-token.guestir.json', 'composable-static-token.wasm',
+        'composable-async-static-token.cs', 'composable-async-static-token.semantic.json',
+        'composable-async-static-token.guestir.json', 'composable-async-static-token.wasm')) {
         if (-not (Test-Path -LiteralPath (Join-Path $fixtureRoot $name))) {
             throw "Missing IR 35 fixture: $name"
         }
     }
     $wasmPath = Join-Path $fixtureRoot 'composable-static-token.wasm'
     $wasmHash = (Get-FileHash -LiteralPath $wasmPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $asyncWasmHash = (Get-FileHash -LiteralPath (Join-Path $fixtureRoot 'composable-async-static-token.wasm') -Algorithm SHA256).Hash.ToLowerInvariant()
     $semanticHash = (Get-FileHash -LiteralPath (Join-Path $fixtureRoot 'composable-static-token.semantic.json') -Algorithm SHA256).Hash.ToLowerInvariant()
     $guestIrHash = (Get-FileHash -LiteralPath (Join-Path $fixtureRoot 'composable-static-token.guestir.json') -Algorithm SHA256).Hash.ToLowerInvariant()
-    Write-Output "Composable IR 35 managed: $($match.Groups[1].Value)/$($match.Groups[2].Value); wasm_sha256=$wasmHash"
+    Write-Output "Composable IR 35 managed: $($match.Groups[1].Value)/$($match.Groups[2].Value); wasm_sha256=$wasmHash; async_wasm_sha256=$asyncWasmHash"
 
     $env:DOTNET_CLI_HOME = $oldEnvironment.DOTNET_CLI_HOME
     if (-not $SkipBuild) {
@@ -88,6 +91,7 @@ try {
         semantic_sha256 = $semanticHash
         guest_ir_sha256 = $guestIrHash
         wasm_sha256 = $wasmHash
+        async_wasm_sha256 = $asyncWasmHash
         vm_observations = $observations
         automation_passed = $passed
         automation_log = $logPath
