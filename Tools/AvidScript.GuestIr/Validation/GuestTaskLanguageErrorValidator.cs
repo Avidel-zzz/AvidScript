@@ -46,6 +46,7 @@ public static class GuestTaskLanguageErrorValidator
             && module.IrVersion == DirectCleanupIrVersion;
         bool cancellationVersion = GuestTaskCancellationErrorValidator.Supports(module);
         bool lifetimeErrors = GuestTaskLocalLifetimeValidator.HasErrors(module);
+        bool composableAsync = GuestComposableCapabilities.HasDeclaredAsyncBase29(context.InputArtifact);
         GuestImport[] imports = module.Imports.Where(import =>
             import.Module == GuestTaskResultValidator.ImportModule && import.Name == ImportName).ToArray();
         GuestImport[] metadataImports = module.Imports.Where(import =>
@@ -56,11 +57,11 @@ public static class GuestTaskLanguageErrorValidator
             && imports.Length == 0 && metadataImports.Length == 0
             && rootImports.Length == 0) return;
         if (!combinedVersion && !asyncVersion && !exceptionFlowVersion
-            && !directCleanupVersion && !cancellationVersion && !lifetimeErrors && imports.Length == 0
+            && !directCleanupVersion && !cancellationVersion && !lifetimeErrors && !composableAsync && imports.Length == 0
             && metadataImports.Length == 0 && rootImports.Length == 0) return;
         if ((!combinedVersion && !asyncVersion && !exceptionFlowVersion
-                && !directCleanupVersion && !cancellationVersion && !lifetimeErrors) || module.Language != "csharp"
-            || module.Provenance.SemanticSchemaVersion
+                && !directCleanupVersion && !cancellationVersion && !lifetimeErrors && !composableAsync) || module.Language != "csharp"
+            || !composableAsync && (module.Provenance.SemanticSchemaVersion
                 != (lifetimeErrors ? GuestTaskLocalLifetimeValidator.ExpectedSemanticSchema(module)
                     : cancellationVersion ? GuestTaskCancellationErrorValidator.SemanticSchemaVersion
                     : directCleanupVersion ? DirectCleanupSemanticSchemaVersion
@@ -71,9 +72,9 @@ public static class GuestTaskLanguageErrorValidator
                     : cancellationVersion ? GuestTaskCancellationErrorValidator.SemanticVersion
                     : directCleanupVersion ? DirectCleanupSemanticVersion
                     : exceptionFlowVersion ? ExceptionFlowSemanticVersion
-                    : asyncVersion ? AsyncSemanticVersion : SemanticVersion)
+                    : asyncVersion ? AsyncSemanticVersion : SemanticVersion))
             || module.LanguageErrorCatalog is null
-            || combinedVersion && module.LanguageOutcomeTypes is null
+            || (combinedVersion || composableAsync) && module.LanguageOutcomeTypes is null
             || imports.Length != 1)
         {
             Add(context, "Task language errors require paired Semantic 40-44/IR 20-24, a catalog and exactly one fault import.");
@@ -106,12 +107,13 @@ public static class GuestTaskLanguageErrorValidator
 
         if (module.LanguageErrorCatalog is { } catalog)
             ValidateCallTokens(context, fault, catalog);
-        if (asyncVersion || exceptionFlowVersion || directCleanupVersion || cancellationVersion || lifetimeErrors)
+        if (asyncVersion || exceptionFlowVersion || directCleanupVersion || cancellationVersion || lifetimeErrors || composableAsync)
             ValidateFreshRoots(context, fault);
 
         if (metadataImports.Length == 0 && rootImports.Length == 0)
         {
-            if (asyncVersion || exceptionFlowVersion || directCleanupVersion || lifetimeErrors && !cancellationVersion)
+            if (asyncVersion || exceptionFlowVersion || directCleanupVersion
+                || lifetimeErrors && !cancellationVersion)
                 Add(context, "Async Task language errors require the metadata/root read import pair.");
             return;
         }

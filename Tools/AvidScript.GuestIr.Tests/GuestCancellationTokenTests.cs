@@ -96,6 +96,34 @@ internal static class GuestCancellationTokenTests
                 "function:missing", "function:missing", "block:missing", 0,
                 "block:target", "value:owner", "value:type") }),
         }, "declared async base with a forged synchronous-to-Task exception site", "ASIR1037");
+        GuestImport[] taskImports = {
+            new("import:$async:task_i32_v1", "avidscript", "avid_task_i32_v1",
+                new[] { "type:int32", "type:int64", "type:int32", "type:int32" }, "type:int64"),
+            new("import:$async:task_bind_producer_v1", "avidscript", "avid_task_bind_producer_v1",
+                new[] { "type:int64", "type:int64" }, "type:int32"),
+            new("import:$async:task_propagate_failure_v1", "avidscript", "avid_task_propagate_failure_v1",
+                new[] { "type:int64", "type:int64" }, "type:int32"),
+            new("import:$async:task_retain_for_continuation_v1", "avidscript", "avid_task_retain_for_continuation_v1",
+                new[] { "type:int64", "type:int64" }, "type:int32"),
+            new(GuestTaskLanguageErrorValidator.MetaImportId, "avidscript", GuestTaskLanguageErrorValidator.MetaImportName,
+                new[] { "type:int64" }, "type:int64"),
+        };
+        GuestModule managedTaskAsync = managedAsync with { Imports = managedAsync.Imports.Concat(taskImports).ToArray() };
+        var taskPending = GuestModuleValidator.Validate(managedTaskAsync);
+        Check(!taskPending.Succeeded && taskPending.Diagnostics.All(item => item.Code is not ("ASIR1028" or "ASIR1029")),
+            "IR 35 validates exact Task and language-error imports while the incomplete async module remains rejected");
+        Reject(managedTaskAsync with { Imports = managedTaskAsync.Imports.Where(import =>
+            import.Id != taskImports[0].Id).ToArray() }, "IR 35 missing Task host import", "ASIR1028");
+        Reject(managedTaskAsync with { Imports = managedTaskAsync.Imports.Select(import => import.Id == taskImports[0].Id
+            ? import with { ReturnTypeId = "type:int32" } : import).ToArray() },
+            "IR 35 Task host import with wrong result type", "ASIR1028");
+        Reject(managedTaskAsync with { Imports = managedTaskAsync.Imports.Where(import =>
+            import.Id != GuestTaskLanguageErrorValidator.ImportId).ToArray() },
+            "IR 35 missing Task fault import", "ASIR1029");
+        Reject(managedTaskAsync with { Imports = managedTaskAsync.Imports.Select(import =>
+            import.Id == GuestTaskLanguageErrorValidator.ImportId
+                ? import with { DispatchClass = "binding" } : import).ToArray() },
+            "IR 35 Task fault import with wrong dispatch", "ASIR1029");
         foreach (GuestImport canonical in rootImports)
             Reject(managedAsync with { Imports = managedAsync.Imports.Select(import => import.Id == canonical.Id
                 ? import with { Name = import.Name + "_alias" } : import).ToArray() },
