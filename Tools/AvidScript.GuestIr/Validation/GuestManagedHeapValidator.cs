@@ -56,7 +56,8 @@ internal static class GuestManagedHeapValidator
             || GuestTaskCancellationErrorValidator.Supports(module)
             || GuestTaskLocalLifetimeValidator.HasErrors(module);
         bool catalogVersion = module.SchemaVersion == GuestLanguageErrorCatalogValidator.SchemaVersion
-            && module.IrVersion == GuestLanguageErrorCatalogValidator.IrVersion;
+            && module.IrVersion == GuestLanguageErrorCatalogValidator.IrVersion
+            || GuestComposableCapabilities.HasExecutionBase(context.InputArtifact, 17, "1.16");
         foreach (GuestImport import in module.Imports)
         {
             bool report = (catalogVersion || combinedVersion)
@@ -68,6 +69,11 @@ internal static class GuestManagedHeapValidator
                     { "type:int32", "type:int32", "type:language_error_root" })
                 && import.ReturnTypeId == "type:int32"
                 && import.OptimizationClass == "none";
+            if (GuestComposableCapabilities.HasExecutionBase(context.InputArtifact, 17, "1.16")
+                && (import.Id == "import:language_error_report_v1"
+                    || import.Name == "avid_language_error_report_v1")
+                && (!report || import.DispatchClass != "semantic" || import.BindingOrdinal != -1))
+                Add(context, "IR 35 error reporting requires the canonical managed-root import signature.");
             bool taskFault = combinedVersion && module.LanguageErrorCatalog is not null
                 && import.Id == GuestTaskLanguageErrorValidator.ImportId
                 && import.Module == GuestTaskResultValidator.ImportModule

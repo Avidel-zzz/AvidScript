@@ -18,7 +18,8 @@ internal static class GuestLanguageOutcomeFlowValidator
         if (declarations is null || declarations.Count == 0) return;
         HashSet<string> outcomeTypes = declarations.Select(item => item.TypeId)
             .ToHashSet(StringComparer.Ordinal);
-        bool flowVersion = GuestTaskErrorTransfers.IsVersion(context.Artifact)
+        bool flowVersion = GuestComposableCapabilities.HasExecutionBase(context.InputArtifact, 17, "1.16")
+            || GuestTaskErrorTransfers.IsVersion(context.Artifact)
             || GuestAsyncSynchronousExceptions.IsVersion(context.Artifact)
             || GuestStaticAsyncExecution.IsVersion(context.Artifact)
             || context.Module.SchemaVersion == SchemaVersion

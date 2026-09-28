@@ -6,6 +6,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--composable-ir35")
+            {
+                int focused = CSharpGuestComposableIr35Tests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.ComposableIr35: {focused}/{focused} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--cancellation-token-values")
             {
                 int focused = CSharpGuestCancellationTokenTests.Run();
@@ -288,6 +294,7 @@ internal static class Program
                 + CSharpGuestCancellationIdentityTests.Run()
                 + CSharpGuestAsyncCatchValueTests.Run()
                 + CSharpGuestCancellationTokenTests.Run()
+                + CSharpGuestComposableIr35Tests.Run()
                 + CSharpGuestAsyncThrowRoutingTests.Run()
                 + CSharpGuestAsyncSynchronousExceptionTests.Run()
                 + CSharpGuestAsyncMemberAssignmentTests.Run()

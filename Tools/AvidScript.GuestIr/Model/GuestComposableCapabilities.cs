@@ -25,6 +25,11 @@ public static class GuestComposableCapabilities
         IsVersion(module) && module.CapabilityManifest?.Capabilities?.Any(capability =>
             capability is { Version: 1 } && capability.Id == capabilityId) == true;
 
+    public static bool HasExecutionBase(GuestModule module, int schema, string version) =>
+        IsVersion(module) && module.CapabilityManifest is { } manifest
+        && manifest.ExecutionBaseSchemaVersion == schema
+        && manifest.ExecutionBaseIrVersion == version;
+
     public static bool IsExecutionBase(int schema, string version) =>
         (schema, version) is (14, "1.13") or (17, "1.16") or (29, "1.28");
 }

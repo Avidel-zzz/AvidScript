@@ -30,7 +30,7 @@ internal static class GuestCancellationTokenValidator
             || !composable && (module.Provenance.SemanticSchemaVersion != GuestCancellationTokens.SemanticSchemaVersion
                 || module.Provenance.SemanticVersion != GuestCancellationTokens.SemanticVersion
                 || module.StaticStorage is not null)
-            || composable && (plan.BaseSchemaVersion != 14 || plan.BaseIrVersion != "1.13")
+            || composable && (plan.BaseSchemaVersion, plan.BaseIrVersion) is not ((14, "1.13") or (17, "1.16"))
             || module.TaskErrorTransfers is not null)
         {
             Add("Token values require their exact source contract and a supported execution base.");

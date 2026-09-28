@@ -15,7 +15,8 @@ internal static class GuestLanguageErrorCatalogValidator
     {
         GuestModule module = context.Module;
         GuestLanguageErrorCatalog? catalog = module.LanguageErrorCatalog;
-        bool correctVersion = module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion
+        bool correctVersion = GuestComposableCapabilities.HasExecutionBase(context.InputArtifact, 17, "1.16")
+            || module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion
             || module.SchemaVersion == GuestTaskLanguageErrorValidator.SchemaVersion
                 && module.IrVersion == GuestTaskLanguageErrorValidator.IrVersion
             || module.SchemaVersion == GuestTaskLanguageErrorValidator.AsyncSchemaVersion

@@ -86,16 +86,19 @@ internal static class GuestComposableCapabilityValidator
         // Only this complete instruction/plan pair is admitted by the real-module
         // validators. Async composition remains closed until its ownership and
         // exception plans can be checked on the unmodified IR 35 artifact.
-        if (baseSchema != 14 || baseVersion != "1.13"
+        if ((baseSchema, baseVersion) is not ((14, "1.13") or (17, "1.16"))
             || declared.Count != 2
             || !declared.Contains(GuestComposableCapabilities.StaticStorage)
             || !declared.Contains(GuestComposableCapabilities.CancellationTokenValue))
-            Add("IR 35 currently validates only synchronous static storage with token values on base 14/1.13.");
-        if (module.LanguageOutcomeTypes is not null || module.LanguageErrorCatalog is not null
-            || module.AsyncExceptionRoutes is not null || module.DirectAwaitRoutes is not null
+            Add("IR 35 currently validates only synchronous static storage with token values on base 14/1.13 or 17/1.16.");
+        if (baseSchema == 14 && (module.LanguageOutcomeTypes is not null || module.LanguageErrorCatalog is not null)
+            || baseSchema == 17 && (module.LanguageOutcomeTypes is not { Count: > 0 }
+                || module.LanguageErrorCatalog is null))
+            Add("The execution base requires its exact language-error outcome and catalog profile.");
+        if (module.AsyncExceptionRoutes is not null || module.DirectAwaitRoutes is not null
             || module.AsyncExceptionTransfers is not null || module.TaskLocalLifetimes is not null
             || module.TaskErrorTransfers is not null || module.AsyncSynchronousExceptions is not null)
-            Add("The synchronous IR 35 base cannot carry undeclared async or language-error metadata.");
+            Add("The synchronous IR 35 base cannot carry undeclared async metadata.");
 
         void RequirePlan(string id, bool present)
         {
