@@ -130,28 +130,42 @@ internal static class CSharpGuestComposableIr35Tests
             && SemanticCancellationTokenValidator.IsValid(asyncSemantic),
             "one async C# source carries five validated Semantic capabilities");
         string asyncHash = Convert.ToHexString(SHA256.HashData(SemanticSerializer.Serialize(asyncSemantic))).ToLowerInvariant();
-        Check(!CSharpStaticInitializationCompiler.TryLower(asyncSemantic, asyncHash,
-                out var asyncModule, out var asyncError) && asyncModule is null
-            && asyncError?.Contains("ASIR1042", StringComparison.Ordinal) == true
-            && !asyncError.Contains("ASIR1037", StringComparison.Ordinal)
-            && !asyncError.Contains("ASIR1030", StringComparison.Ordinal)
-            && !asyncError.Contains("ASIR1031", StringComparison.Ordinal)
-            && !asyncError.Contains("ASIR1032", StringComparison.Ordinal)
-            && !asyncError.Contains("ASIR1033", StringComparison.Ordinal)
-            && !asyncError.Contains("ASIR1038", StringComparison.Ordinal)
-            && !asyncError.Contains("ASIR1039", StringComparison.Ordinal)
-            && !asyncError.Contains("ASIR1040", StringComparison.Ordinal)
-            && !asyncError.Contains("ASIR1041", StringComparison.Ordinal)
-            && !asyncError.Contains("ASIR1035", StringComparison.Ordinal)
-            && !asyncError.Contains("ASIR1013", StringComparison.Ordinal)
-            && !asyncError.Contains("ASIR1024", StringComparison.Ordinal)
-            && !asyncError.Contains("ASIR1025", StringComparison.Ordinal)
-            && !asyncError.Contains("ASIR1027", StringComparison.Ordinal)
-            && !asyncError.Contains("ASIR1028", StringComparison.Ordinal)
-            && !asyncError.Contains("ASIR1029", StringComparison.Ordinal)
-            && !asyncError.Contains("Every carried plan must name the same exact execution base.",
-                StringComparison.Ordinal),
-            "unvalidated async IR 35 must remain unpublished after private source preparation: " + asyncError);
+        Check(CSharpStaticInitializationCompiler.TryLower(asyncSemantic, asyncHash,
+                out var asyncModule, out var asyncError) && asyncModule is not null
+            && asyncModule.CapabilityManifest is { ExecutionBaseSchemaVersion: 29, ExecutionBaseIrVersion: "1.28" }
+            && asyncModule.CapabilityManifest.Capabilities.Count == 5
+            && GuestModuleValidator.Validate(asyncModule).Succeeded,
+            "same-source async IR 35 must pass direct validation: " + asyncError);
+        GuestModule acceptedAsync = asyncModule!;
+        byte[] asyncBytes = GuestIrSerializer.Serialize(acceptedAsync);
+        Check(GuestModuleValidator.Validate(GuestIrSerializer.Deserialize(asyncBytes)).Succeeded
+            && asyncBytes.SequenceEqual(GuestIrSerializer.Serialize(GuestIrSerializer.Deserialize(asyncBytes))),
+            "same-source async IR 35 keeps a canonical validated round trip");
+        var missingExceptionCapability = GuestModuleValidator.Validate(acceptedAsync with { CapabilityManifest =
+            acceptedAsync.CapabilityManifest! with { Capabilities = acceptedAsync.CapabilityManifest.Capabilities
+                .Where(capability => capability.Id != GuestComposableCapabilities.ExceptionValues).ToArray() } });
+        Check(!missingExceptionCapability.Succeeded
+            && missingExceptionCapability.Diagnostics.Any(item => item.Code == "ASIR1042"),
+            "a published async module cannot omit its exception-value capability");
+        Check(GuestModuleValidator.Validate(acceptedAsync with { AsyncExceptionTransfers = null })
+            .Diagnostics.Any(item => item.Code == "ASIR1042"),
+            "IR 35 async base requires exception transfer metadata");
+        Check(CSharpStaticInitializationCompiler.TryLower(SemanticSerializer.Deserialize(
+                SemanticSerializer.Serialize(asyncSemantic)), asyncHash, out var repeatedAsync, out asyncError)
+            && asyncBytes.SequenceEqual(GuestIrSerializer.Serialize(repeatedAsync!)),
+            "same-source async IR 35 lowering is deterministic: " + asyncError);
+        WasmCompilationResult asyncWasm = WasmModuleCompiler.Compile(acceptedAsync);
+        Check(asyncWasm.Succeeded,
+            "same-source async IR 35 emits WASM: " + string.Join(" | ",
+                asyncWasm.Diagnostics.Select(item => item.Code + ": " + item.Message)));
+        string asyncProvenance = WasmArtifactInspector.Inspect(asyncWasm.Bytes)
+            .CustomSections.Single(section => section.Name == "avidscript.provenance").PayloadText;
+        Check(asyncProvenance.Contains("guest_ir=35/1.34\ntask_local_exception_model=cancellation\nexecution_base=29/1.28\n",
+                StringComparison.Ordinal)
+            && asyncProvenance.Contains("capabilities=async.await_readiness@1,async.cancellation_identity@1,error.cancellation_token_value@1,error.exception_values@1,managed.static_storage@1\nsource_language=csharp\nsemantic=54/1.63",
+                StringComparison.Ordinal)
+            && asyncWasm.Bytes.SequenceEqual(WasmModuleCompiler.Compile(acceptedAsync).Bytes),
+            "same-source async WASM preserves its five capabilities and deterministic bytes");
         Check(!CSharpStaticInitializationCompiler.TryLower(asyncSemantic with { CapabilityManifest =
                 asyncSemantic.CapabilityManifest! with { Capabilities = Array.Empty<SemanticCapability>() } },
                 asyncHash, out var omittedModule, out _)
@@ -165,6 +179,11 @@ internal static class CSharpGuestComposableIr35Tests
             File.WriteAllBytes(Path.Combine(fixtureDirectory, "composable-static-token.semantic.json"), combinedSemanticBytes);
             File.WriteAllBytes(Path.Combine(fixtureDirectory, "composable-static-token.guestir.json"), sameSourceBytes);
             File.WriteAllBytes(Path.Combine(fixtureDirectory, "composable-static-token.wasm"), sameSourceWasm.Bytes);
+            File.WriteAllText(Path.Combine(fixtureDirectory, "composable-async-static-token.cs"), asyncSource);
+            File.WriteAllBytes(Path.Combine(fixtureDirectory, "composable-async-static-token.semantic.json"),
+                SemanticSerializer.Serialize(asyncSemantic));
+            File.WriteAllBytes(Path.Combine(fixtureDirectory, "composable-async-static-token.guestir.json"), asyncBytes);
+            File.WriteAllBytes(Path.Combine(fixtureDirectory, "composable-async-static-token.wasm"), asyncWasm.Bytes);
         }
 
         const string source = """
