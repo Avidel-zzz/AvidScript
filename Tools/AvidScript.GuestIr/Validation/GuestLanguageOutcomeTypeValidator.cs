@@ -18,12 +18,19 @@ internal static class GuestLanguageOutcomeTypeValidator
                 or GuestLanguageErrorCatalogValidator.SchemaVersion
                 or GuestTaskLanguageErrorValidator.SchemaVersion)
                 context.Add("ASIR1024", "Language-outcome IR requires an explicit outcome type list.");
-            if (GuestComposableCapabilities.HasExecutionBase(context.InputArtifact, 17, "1.16"))
-                context.Add("ASIR1024", "IR 35 base 17 requires an explicit outcome type list.");
+            if (GuestComposableCapabilities.HasExecutionBase(context.InputArtifact, 17, "1.16")
+                || GuestComposableCapabilities.HasDeclaredAsyncBase29(context.InputArtifact))
+                context.Add("ASIR1024", "IR 35 error execution requires an explicit outcome type list.");
+            return;
+        }
+        if (declarations.Count == 0 && GuestComposableCapabilities.HasDeclaredAsyncBase29(context.InputArtifact))
+        {
+            context.Add("ASIR1024", "IR 35 async error execution requires a nonempty outcome type list.");
             return;
         }
 
         bool validVersion = GuestComposableCapabilities.HasExecutionBase(context.InputArtifact, 17, "1.16")
+            || GuestComposableCapabilities.HasDeclaredAsyncBase29(context.InputArtifact)
             || GuestTaskErrorTransfers.IsVersion(context.Artifact)
             || GuestAsyncSynchronousExceptions.IsVersion(context.Artifact)
             || GuestStaticAsyncExecution.IsVersion(context.Artifact)

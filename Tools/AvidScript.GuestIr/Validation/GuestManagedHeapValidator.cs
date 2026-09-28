@@ -45,18 +45,7 @@ internal static class GuestManagedHeapValidator
         if (module.Globals.Any(value => Has(value.TypeId)) || module.DataSegments.Any(value => Has(value.TypeId))
             || module.Types.Any(type => type.Kind == "array" && type.ElementTypeId is not null && Has(type.ElementTypeId)))
             Add(context, "Managed references cannot enter untraced globals, static data or array storage.");
-        bool composableAsync = GuestComposableCapabilities.HasExecutionBase(context.InputArtifact, 29, "1.28")
-            && module.Language == "csharp" && module.Provenance is { SemanticSchemaVersion: 54, SemanticVersion: "1.63" }
-            && GuestComposableCapabilities.Has(module, GuestComposableCapabilities.StaticStorage)
-            && GuestComposableCapabilities.Has(module, GuestComposableCapabilities.AwaitReadiness)
-            && GuestComposableCapabilities.Has(module, GuestComposableCapabilities.CancellationIdentity)
-            && GuestComposableCapabilities.Has(module, GuestComposableCapabilities.ExceptionValues)
-            && GuestComposableCapabilities.Has(module, GuestComposableCapabilities.CancellationTokenValue)
-            && module.StaticStorage is { BaseSchemaVersion: 29, BaseIrVersion: "1.28" }
-            && module.DirectAwaitReadiness is { BaseSchemaVersion: 29, BaseIrVersion: "1.28" }
-            && module.CancellationIdentity is { BaseSchemaVersion: 29, BaseIrVersion: "1.28" }
-            && module.CancellationTokens is { BaseSchemaVersion: 29, BaseIrVersion: "1.28" }
-            && module.ExceptionValues is not null;
+        bool composableAsync = GuestComposableCapabilities.HasDeclaredAsyncBase29(context.InputArtifact);
         bool combinedVersion = module.SchemaVersion == GuestTaskLanguageErrorValidator.SchemaVersion
             && module.IrVersion == GuestTaskLanguageErrorValidator.IrVersion
             || module.SchemaVersion == GuestTaskLanguageErrorValidator.AsyncSchemaVersion

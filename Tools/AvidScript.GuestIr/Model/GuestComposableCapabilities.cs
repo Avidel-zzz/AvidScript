@@ -30,6 +30,21 @@ public static class GuestComposableCapabilities
         && manifest.ExecutionBaseSchemaVersion == schema
         && manifest.ExecutionBaseIrVersion == version;
 
+    // This recognizes a declaration and its plan bases. Independent validators
+    // must still check every plan, instruction, import and ownership edge.
+    public static bool HasDeclaredAsyncBase29(GuestModule module) =>
+        HasExecutionBase(module, 29, "1.28")
+        && module.Language == "csharp"
+        && module.Provenance is { SemanticSchemaVersion: 54, SemanticVersion: "1.63" }
+        && Has(module, StaticStorage) && Has(module, AwaitReadiness)
+        && Has(module, CancellationIdentity) && Has(module, ExceptionValues)
+        && Has(module, CancellationTokenValue)
+        && module.StaticStorage is { BaseSchemaVersion: 29, BaseIrVersion: "1.28" }
+        && module.DirectAwaitReadiness is { BaseSchemaVersion: 29, BaseIrVersion: "1.28" }
+        && module.CancellationIdentity is { BaseSchemaVersion: 29, BaseIrVersion: "1.28" }
+        && module.CancellationTokens is { BaseSchemaVersion: 29, BaseIrVersion: "1.28" }
+        && module.ExceptionValues is not null;
+
     public static bool IsExecutionBase(int schema, string version) =>
         (schema, version) is (14, "1.13") or (17, "1.16") or (29, "1.28");
 }

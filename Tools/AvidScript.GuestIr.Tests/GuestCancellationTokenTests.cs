@@ -79,6 +79,16 @@ internal static class GuestCancellationTokenTests
         var managedPending = GuestModuleValidator.Validate(managedAsync);
         Check(!managedPending.Succeeded && managedPending.Diagnostics.All(item => item.Code != "ASIR1013"),
             "IR 35 base 29 recognizes only canonical managed-root imports while the async module remains incomplete");
+        Reject(managedAsync with { LanguageErrorCatalog = null },
+            "declared async base without an error catalog", "ASIR1027");
+        Reject(managedAsync with { LanguageOutcomeTypes = null },
+            "declared async base without outcome types", "ASIR1024");
+        Reject(managedAsync with { LanguageOutcomeTypes = Array.Empty<GuestLanguageOutcomeType>() },
+            "declared async base with an empty outcome type list", "ASIR1024");
+        Reject(managedAsync with { Provenance = reader.Provenance },
+            "old Semantic provenance cannot claim the async error catalog", "ASIR1027");
+        Reject(managedAsync with { CancellationIdentity = new(30, "1.29") },
+            "conflicting identity base cannot claim the async error catalog", "ASIR1027");
         foreach (GuestImport canonical in rootImports)
             Reject(managedAsync with { Imports = managedAsync.Imports.Select(import => import.Id == canonical.Id
                 ? import with { Name = import.Name + "_alias" } : import).ToArray() },

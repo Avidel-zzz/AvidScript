@@ -16,6 +16,7 @@ internal static class GuestLanguageErrorCatalogValidator
         GuestModule module = context.Module;
         GuestLanguageErrorCatalog? catalog = module.LanguageErrorCatalog;
         bool correctVersion = GuestComposableCapabilities.HasExecutionBase(context.InputArtifact, 17, "1.16")
+            || GuestComposableCapabilities.HasDeclaredAsyncBase29(context.InputArtifact)
             || module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion
             || module.SchemaVersion == GuestTaskLanguageErrorValidator.SchemaVersion
                 && module.IrVersion == GuestTaskLanguageErrorValidator.IrVersion
@@ -101,6 +102,7 @@ internal static class GuestLanguageErrorCatalogValidator
         GuestValidationContext context,
         GuestLanguageErrorCatalog catalog)
     {
+        bool composableAsync = GuestComposableCapabilities.HasDeclaredAsyncBase29(context.InputArtifact);
         HashSet<int> typeTokens = catalog.Types.Select(entry => entry.Token).ToHashSet();
         HashSet<int> sourceTokens = catalog.Sources.Select(entry => entry.Token).ToHashSet();
         HashSet<int> usedTypes = new(), usedSources = new();
@@ -167,14 +169,14 @@ internal static class GuestLanguageErrorCatalogValidator
                 || context.Module.SchemaVersion == GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion
                 && context.Module.IrVersion == GuestTaskLanguageErrorValidator.DirectCleanupIrVersion
                 || GuestTaskCancellationErrorValidator.Supports(context.Module)
-                || GuestTaskLocalLifetimeValidator.HasErrors(context.Module))
+                || GuestTaskLocalLifetimeValidator.HasErrors(context.Module) || composableAsync)
             {
                 foreach (GuestBasicBlock block in function.Blocks)
                 for (int index = 0; index < block.Instructions.Count; ++index)
                 {
                     GuestInstruction call = block.Instructions[index];
                     if (call.Op != "call" || (call.TargetId != GuestTaskLanguageErrorValidator.ImportId
-                        && !(GuestTaskCancellationErrorValidator.Supports(context.Module)
+                        && !((GuestTaskCancellationErrorValidator.Supports(context.Module) || composableAsync)
                             && call.TargetId == GuestTaskCancellationIdentity.CancellationImportId(context.Module)))) continue;
                     // Checked transfers read the tokens from a validated outcome producer.
                     // Its literal stores above remain responsible for catalog coverage.
