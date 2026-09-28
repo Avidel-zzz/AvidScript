@@ -23,9 +23,18 @@ public static class GuestCancellationTokens
     public static bool IsVersion(GuestModule module) => module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion;
     public static bool IsBase(int schema, string version) => (schema, version) is (14, "1.13") or (17, "1.16") or (29, "1.28");
 
-    public static bool HasReaderProfile(GuestModule module) => IsVersion(module) && module.Language == "csharp"
-        && module.Provenance.SemanticSchemaVersion == SemanticSchemaVersion && module.Provenance.SemanticVersion == SemanticVersion
-        && module.CancellationTokens is { } plan && plan.BaseSchemaVersion != 14 && IsBase(plan.BaseSchemaVersion, plan.BaseIrVersion);
+    public static bool HasReaderProfile(GuestModule module) => module.Language == "csharp"
+        && module.CancellationTokens is { } plan && plan.BaseSchemaVersion != 14
+        && IsBase(plan.BaseSchemaVersion, plan.BaseIrVersion)
+        && ((IsVersion(module)
+                && module.Provenance.SemanticSchemaVersion == SemanticSchemaVersion
+                && module.Provenance.SemanticVersion == SemanticVersion)
+            || (GuestComposableCapabilities.HasExecutionBase(module, 29, "1.28")
+                && GuestComposableCapabilities.Has(module, GuestComposableCapabilities.CancellationTokenValue)
+                && GuestComposableCapabilities.Has(module, GuestComposableCapabilities.ExceptionValues)
+                && module.Provenance.SemanticSchemaVersion == 54
+                && module.Provenance.SemanticVersion == "1.63"
+                && plan.BaseSchemaVersion == 29 && plan.BaseIrVersion == "1.28"));
 
     public static bool IsReader(GuestImport import) => import is {
         Id: ReadImportId, Module: "avidscript", Name: ReadImportName, ReturnTypeId: "type:int64",

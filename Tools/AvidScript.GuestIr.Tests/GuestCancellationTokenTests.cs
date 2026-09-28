@@ -33,6 +33,33 @@ internal static class GuestCancellationTokenTests
         }
         Check(!Encoding.UTF8.GetString(GuestIrSerializer.Serialize(GuestModuleValidationTests.CreateMinimalModule()))
             .Contains("cancellation_tokens", StringComparison.Ordinal), "Old JSON shape changed");
+        GuestModule asyncReader = reader with {
+            SchemaVersion = GuestComposableCapabilities.SchemaVersion,
+            IrVersion = GuestComposableCapabilities.IrVersion,
+            Provenance = reader.Provenance with { SemanticSchemaVersion = 54, SemanticVersion = "1.63" },
+            CancellationTokens = new(29, "1.28"),
+            CapabilityManifest = GuestCapabilityManifest.Create(29, "1.28", new[] {
+                new GuestCapability(GuestComposableCapabilities.StaticStorage, 1),
+                new GuestCapability(GuestComposableCapabilities.AwaitReadiness, 1),
+                new GuestCapability(GuestComposableCapabilities.CancellationIdentity, 1),
+                new GuestCapability(GuestComposableCapabilities.ExceptionValues, 1),
+                new GuestCapability(GuestComposableCapabilities.CancellationTokenValue, 1),
+            }),
+        };
+        var pendingAsync = GuestModuleValidator.Validate(asyncReader);
+        Check(!pendingAsync.Succeeded && pendingAsync.Diagnostics.All(item => item.Code != "ASIR1041"),
+            "IR 35 base 29 recognizes a canonical exception token reader but still rejects the incomplete async module");
+        Reject(asyncReader with { CapabilityManifest = asyncReader.CapabilityManifest! with {
+            Capabilities = asyncReader.CapabilityManifest.Capabilities.Where(capability =>
+                capability.Id != GuestComposableCapabilities.ExceptionValues).ToArray() } },
+            "async token reader without its exception-value capability");
+        Reject(asyncReader with { Provenance = reader.Provenance },
+            "async token reader with old Semantic provenance");
+        Reject(asyncReader with { CancellationTokens = new(17, "1.16") },
+            "async token reader with a synchronous token plan");
+        Reject(reader with { CancellationTokens = new(29, "1.28"),
+            TaskErrorTransfers = new(29, "1.28", Array.Empty<GuestTaskErrorTransferSite>()) },
+            "legacy IR 34 cannot gain task transfers through an IR 35 reader rule");
         foreach (var (schema, version) in new[] { (14, "1.13"), (17, "1.16"), (29, "1.28"), (33, "1.32"), (35, "1.34") })
             Reject(plain with { SchemaVersion = schema, IrVersion = version }, "outer version " + schema);
         Reject(plain with { IrVersion = "1.34" }, "mismatched outer version");

@@ -71,7 +71,7 @@ $project = (Resolve-Path '../../MyGame.uproject').Path
 | 网络 | RPC、复制属性和 `RepNotify` 有示例及自动化验证；真实多人玩法仍需项目内测试。 |
 | 平台 | 主要验证 Win64 Editor / Development；Shipping、Android、iOS 尚未验收。 |
 
-标准 `CancellationToken` 尚未接入上述默认构建流程。静态字段与 token 值的同步组合已有 Win64 双 VM 验证；异步组合仍在开发，详见[能力组合合同](Docs/Architecture/AvidScript_Composable_Capability_Contract.md)。
+标准 `CancellationToken` 尚未接入上述默认构建流程。静态字段与 token 值的同步组合已有 Win64 双 VM 验证。IR 35 的异步 token reader 已通过局部验证；五能力模块尚未通过完整验证，详见[能力组合合同](Docs/Architecture/AvidScript_Composable_Capability_Contract.md)。
 
 ## 开发
 
