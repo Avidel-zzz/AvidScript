@@ -144,7 +144,7 @@ try {
     if ($newFieldMode.Count -ne 1) { throw 'Missing unique field-mode-1 oracle for reload evidence' }
     $reloadObservations = 0
     foreach ($backend in @(0, 1)) {
-        $pattern = "original-ir35-reload backend=$backend new_result=$($newFieldMode[0].expected) new_trace=$($newFieldMode[0].trace) old_result=$($fieldMode[0].expected) old_trace=$($fieldMode[0].trace) loader_rejected=1 validation_rejected=1 applied=1 released=1"
+        $pattern = "original-ir35-reload backend=$backend new_result=$($newFieldMode[0].expected) new_trace=$($newFieldMode[0].trace) old_result=$($fieldMode[0].expected) old_trace=$($fieldMode[0].trace) loader_rejected=1 validation_rejected=1 execution_rejected=1 effects_restored=1 applied=1 released=1"
         if ([regex]::Matches($log, [regex]::Escape($pattern)).Count -eq 1) { $reloadObservations++ }
     }
     if ($passed -ne $tests.Count -or $observations -ne 4 -or $asyncObservations -ne 6 -or

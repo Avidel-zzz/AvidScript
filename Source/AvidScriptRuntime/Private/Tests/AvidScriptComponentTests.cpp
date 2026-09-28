@@ -2,6 +2,7 @@
 
 #include "AvidScriptComponent.h"
 
+#include "AvidScriptBindingReloadEffect.h"
 #include "AvidScriptObjectRegistryTestTypes.h"
 #include "AvidScriptVmArtifact.h"
 #include "Async/Async.h"
@@ -1353,6 +1354,68 @@ bool FAvidScriptComponentComposableOriginalSuspendedReloadTest::RunTest(const FS
 		{
 			return false;
 		}
+		const FVector OriginalLocation(25.0, 50.0, 75.0);
+		const FVector CandidateLocation(500.0, 600.0, 700.0);
+		if (!TestTrue(*(Label + TEXT(" old Actor location is set before candidate execution")),
+			UpdatingActor->SetActorLocation(OriginalLocation)))
+		{
+			return false;
+		}
+		const auto EffectContext = UpdatingSession->GetTestSnapshot().HostContext;
+		bool bEffectCaptured = false;
+		bool bCandidateBegan = false;
+		TWeakPtr<FAvidScriptWasmRuntimeInstance> RejectedCandidateLease;
+		UpdatingSession->SetCandidateBeginPlayObserverForTesting(
+			[&](IAvidScriptBindingHostEffectJournal* Journal)
+			{
+				FAvidScriptBindingHostEffectPrepareResult Effect;
+				bEffectCaptured = Journal != nullptr && EffectContext.ObjectRegistry != nullptr
+					&& Journal->PrepareEffect(*EffectContext.ObjectRegistry,
+						EffectContext.OwnerHandle, *UpdatingActor,
+						EAvidScriptBindingReloadEffect::ActorTransform, Effect);
+				if (bEffectCaptured) UpdatingActor->SetActorLocation(CandidateLocation);
+			});
+		UpdatingSession->SetCandidateBeginPlayCompletionObserverForTesting(
+			[&](TWeakPtr<FAvidScriptWasmRuntimeInstance> Candidate, bool bBegan)
+			{
+				bCandidateBegan = bBegan;
+				RejectedCandidateLease = Candidate;
+				if (auto Runtime = Candidate.Pin()) Runtime->Unload();
+			});
+		Updating->SetScriptManifestPath(CandidateManifest);
+		FAvidScriptWasmReloadResult ExecutionFailure;
+		const bool bExecutionApplied = Updating->ReloadConfiguredScript(ExecutionFailure);
+		const auto ExecutionRejected = UpdatingSession->GetTestSnapshot();
+		if (!TestFalse(*(Label + TEXT(" executed candidate is rejected before publication")), bExecutionApplied)
+			|| !TestTrue(*(Label + TEXT(" original C# candidate BeginPlay executed")), bCandidateBegan)
+			|| !TestTrue(*(Label + TEXT(" candidate native effect was captured")), bEffectCaptured)
+			|| !TestTrue(*(Label + TEXT(" candidate effect transaction was rolled back")),
+				ExecutionFailure.bHostEffectTransactionAttempted
+					&& ExecutionFailure.bHostEffectRollbackAttempted
+					&& ExecutionFailure.bHostEffectRollbackSucceeded
+					&& !ExecutionFailure.bHostEffectTransactionCommitted
+					&& ExecutionFailure.HostEffectCapturedObjectCount == 1
+					&& ExecutionFailure.HostEffectRestoredObjectCount == 1
+					&& ExecutionFailure.HostEffectFailedObjectCount == 0)
+			|| !TestTrue(*(Label + TEXT(" candidate Actor location is restored")),
+				UpdatingActor->GetActorLocation().Equals(OriginalLocation, 0.01))
+			|| !TestTrue(*(Label + TEXT(" candidate VM is retired; old VM and Task remain")),
+				!RejectedCandidateLease.IsValid()
+					&& ExecutionFailure.bRollbackPreservedLiveRuntime
+					&& !ExecutionFailure.bReloadApplied
+					&& Updating->GetRuntimeSessionForTesting() == UpdatingSession
+					&& UpdatingSession->GetRuntimeLeaseForTesting().Pin().Get() == OldLease.Pin().Get()
+					&& ExecutionRejected.TaskCount == Suspended.TaskCount
+					&& ExecutionRejected.TaskWaiterCount == Suspended.TaskWaiterCount
+					&& ExecutionRejected.ContinuationStateBytes == Suspended.ContinuationStateBytes
+					&& ExecutionRejected.Runtime.PendingContinuationCount == Suspended.Runtime.PendingContinuationCount
+					&& Updating->GetRuntimeStats().ScriptManifestPath == NormalizedActiveManifest
+					&& Updating->GetRuntimeStats().RejectedReloadCount == 2
+					&& UnchangedSession->GetRuntimeLeaseForTesting().Pin().Get() == UnchangedLease.Pin().Get()))
+		{
+			AddError(ExecutionFailure.ErrorMessage);
+			return false;
+		}
 		Updating->SetScriptManifestPath(CandidateManifest);
 		if (!TestTrue(*(Label + TEXT(" original C# update is applied")),
 			Updating->ReloadConfiguredScript(ReloadResult)))
@@ -1429,7 +1492,7 @@ bool FAvidScriptComponentComposableOriginalSuspendedReloadTest::RunTest(const FS
 			return false;
 		}
 		AddInfo(FString::Printf(
-			TEXT("original-ir35-reload backend=%d new_result=%d new_trace=%d old_result=%d old_trace=%d loader_rejected=1 validation_rejected=1 applied=1 released=1"),
+			TEXT("original-ir35-reload backend=%d new_result=%d new_trace=%d old_result=%d old_trace=%d loader_rejected=1 validation_rejected=1 execution_rejected=1 effects_restored=1 applied=1 released=1"),
 			Backend, NewResult, NewTrace, OldResult, OldTrace));
 	}
 	return true;

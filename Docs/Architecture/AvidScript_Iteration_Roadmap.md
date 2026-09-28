@@ -60,7 +60,7 @@ WASM 是执行载体，不自动带来完整语言支持、零开销或多语言
 按依赖推进以下工作，不新增另一套并行状态机：
 
 1. **异常值与取消身份。** 明确 `catch` 变量初始化、异常根、别名、离开 handler 后的保活和释放；读取 token 时保留原始身份，不延长 source 生命周期。五能力组合的取消分支已做首次同路径执行，仍要验证重复 await、rethrow、清理再次抛错与 Task 结果传播。`async void` 导出入口中的语言错误需要独立的 owner/Session 报告合同，不能借 `Task<int>` 的通过数放行。
-2. **收敛生产双实例与重载。** [可组合能力合同](AvidScript_Composable_Capability_Contract.md)下的 [C10 原始 29 案例](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)保持业务源码与预期不变，IR 35 双 VM 三模式 **174/174**，正式 Component 的 Actor/World 销毁 **116/116**。新增两个真实 Actor 的挂起任务隔离、一个销毁后另一个正常完成，以及加载/VM 校验失败保留旧任务、成功切换新版本的结果与租约断言；两种后端各通过一次。下一步在候选 `BeginPlay` 已执行后注入失败，验证 Host 副作用回滚与旧任务继续，再覆盖生成类型共享域和状态迁移。现有测试不证明这些更深的事务边界。
+2. **收敛生产双实例与重载。** [可组合能力合同](AvidScript_Composable_Capability_Contract.md)下的 [C10 原始 29 案例](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)保持业务源码与预期不变，IR 35 双 VM 三模式 **174/174**，正式 Component 的 Actor/World 销毁 **116/116**。两个真实 Actor 的挂起任务隔离、加载/VM 校验失败和成功切换新版本均有两后端断言。测试现还在候选 C# `BeginPlay` 执行后注入发布失效：Host effect journal 恢复 Actor 位置，旧 VM 与挂起任务继续。下一步用真正的 `async void` 语言错误触发同一回滚，再覆盖 Guest 发起的 UE 变更、生成类型共享域和状态迁移；测试钩子不能代替这些边界。
 3. **补语言兼容清单。** 逐项记录自然玩法所需的 `Task<T>` 值类型/引用类型、集合枚举与释放、泛型成员、嵌套异常处理及 handler 内 await；每项附正例、明确拒绝和运行证据。完整 .NET/NuGet 兼容不是当前事实，缺少常用 API 时必须给出支持计划或准确诊断。
 4. **接入正常入口。** 编译、缓存、generated facade、UHT 类型壳、Editor Build And Bind 和包发布读取同一份能力合同；支持的组合不长期依赖测试专用开关。
 5. **P66.D 综合样例与集中验收。** 接入下方完整技能流程，检查状态、顺序、取消、GC、重入、重载失败和资源释放。同步冻结 P67 类型实验、P68 帧接口和跨语言模块原型的输入要求。
