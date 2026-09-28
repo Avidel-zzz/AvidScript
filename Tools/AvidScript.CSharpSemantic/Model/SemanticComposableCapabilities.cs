@@ -11,8 +11,10 @@ public static class SemanticComposableCapabilities
 {
     public const int SchemaVersion = 54;
     public const string SemanticVersion = "1.63";
-    public const int BaseSchemaVersion = SemanticContract.AsyncSynchronousExceptionSchemaVersion;
-    public const string BaseSemanticVersion = SemanticContract.AsyncSynchronousExceptionSemanticVersion;
+    public const int SynchronousBaseSchemaVersion = SemanticContract.CurrentSchemaVersion;
+    public const string SynchronousBaseSemanticVersion = SemanticContract.CurrentSemanticVersion;
+    public const int AsyncBaseSchemaVersion = SemanticContract.AsyncSynchronousExceptionSchemaVersion;
+    public const string AsyncBaseSemanticVersion = SemanticContract.AsyncSynchronousExceptionSemanticVersion;
 
     public const string StaticStorage = "managed.static_storage";
     public const string AwaitReadiness = "async.await_readiness";
@@ -39,10 +41,56 @@ public static class SemanticComposableCapabilities
             capabilities.Add(new(CancellationIdentity, 1));
         if (document.AsyncMethods.Any(method => method.ExceptionPlan is not null))
             capabilities.Add(new(ExceptionValues, 1));
-        if (document.Types.Any(type => type.Id == SemanticCancellationTokens.TypeId))
+        if (UsesTokenValues(document.Symbols, document.Methods, document.AsyncMethods))
             capabilities.Add(new(CancellationTokenValue, 1));
-        return new(BaseSchemaVersion, BaseSemanticVersion,
+        bool asynchronous = document.AsyncMethods.Count != 0;
+        return new(asynchronous ? AsyncBaseSchemaVersion : SynchronousBaseSchemaVersion,
+            asynchronous ? AsyncBaseSemanticVersion : SynchronousBaseSemanticVersion,
             capabilities.OrderBy(capability => capability.Id, StringComparer.Ordinal).ToArray());
+    }
+
+    internal static bool UsesTokenValues(
+        IReadOnlyList<SemanticSymbol> symbols,
+        IReadOnlyList<SemanticMethodBody> methods,
+        IReadOnlyList<SemanticAsyncMethod> asyncMethods)
+    {
+        if (symbols.Any(symbol => symbol is { Kind: "field", TypeId: SemanticCancellationTokens.TypeId }))
+            return true;
+        var pending = new Stack<SemanticOperation>();
+        foreach (SemanticMethodBody method in methods)
+            if (method?.Root is { } root) pending.Push(root);
+        foreach (SemanticAsyncMethod method in asyncMethods)
+        {
+            if (method?.Segments is null) continue;
+            foreach (SemanticAsyncSegment segment in method.Segments)
+            {
+                if (segment?.Statements is null) continue;
+                foreach (SemanticAsyncStatement statement in segment.Statements)
+                    if (statement?.Operation is { } operation) pending.Push(operation);
+                if (segment.Transfer?.Condition is { } condition) pending.Push(condition);
+                if (segment.AwaitSite is { } site)
+                {
+                    if (site.CancellationToken is { } token) pending.Push(token);
+                    if (site.Arguments is not null)
+                        foreach (SemanticOperation argument in site.Arguments)
+                            if (argument is not null) pending.Push(argument);
+                }
+            }
+        }
+        var seen = new HashSet<SemanticOperation>(ReferenceEqualityComparer.Instance);
+        while (pending.Count != 0)
+        {
+            SemanticOperation node = pending.Pop();
+            if (!seen.Add(node)) continue;
+            if (seen.Count > 250_000) return false;
+            if (node.TypeId == SemanticCancellationTokens.TypeId
+                || node.Kind?.StartsWith("cancellation_token_", StringComparison.Ordinal) == true)
+                return true;
+            if (node.Children is not null)
+                foreach (SemanticOperation child in node.Children)
+                    if (child is not null) pending.Push(child);
+        }
+        return false;
     }
 }
 

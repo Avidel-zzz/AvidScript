@@ -15,8 +15,8 @@ public static class SemanticStaticInitializationValidator
             || document.StaticInitialization is not { Types: { Count: > 0 } } plan
             || !SemanticComposableCapabilityValidator.IsValid(document)
             || !(SemanticComposableCapabilities.IsVersion(document)
-                ? plan.BaseSchemaVersion == SemanticComposableCapabilities.BaseSchemaVersion
-                    && plan.BaseSemanticVersion == SemanticComposableCapabilities.BaseSemanticVersion
+                ? plan.BaseSchemaVersion == document.CapabilityManifest!.BaseSchemaVersion
+                    && plan.BaseSemanticVersion == document.CapabilityManifest.BaseSemanticVersion
                 : SemanticStaticInitialization.IsAsyncVersion(document)
                 ? plan.BaseSchemaVersion == SemanticContract.AsyncSynchronousExceptionSchemaVersion
                     && plan.BaseSemanticVersion == SemanticContract.AsyncSynchronousExceptionSemanticVersion

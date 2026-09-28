@@ -44,8 +44,8 @@ internal static class SemanticComposableCapabilityTests
         }.OrderBy(id => id, StringComparer.Ordinal).ToArray();
         Check(document.CapabilityManifest!.Capabilities.Select(capability => capability.Id).SequenceEqual(ids),
             "capabilities are ordered by ordinal ID");
-        Check(document.CapabilityManifest.BaseSchemaVersion == SemanticComposableCapabilities.BaseSchemaVersion
-            && document.StaticInitialization!.BaseSchemaVersion == SemanticComposableCapabilities.BaseSchemaVersion,
+        Check(document.CapabilityManifest.BaseSchemaVersion == SemanticComposableCapabilities.AsyncBaseSchemaVersion
+            && document.StaticInitialization!.BaseSchemaVersion == SemanticComposableCapabilities.AsyncBaseSchemaVersion,
             "source and static plan share the execution base");
         byte[] bytes = SemanticSerializer.Serialize(document);
         Check(bytes.SequenceEqual(SemanticSerializer.Serialize(Analyze(Source)))
@@ -74,6 +74,8 @@ internal static class SemanticComposableCapabilityTests
             && !SemanticComposableCapabilityValidator.IsValid(document with { Types =
                 document.Types.Where(type => type.Id != SemanticCancellationTokens.TypeId).ToArray() }),
             "conflicting base and missing token type reject");
+        Check(!SemanticComposableCapabilityValidator.IsValid(document with { Types =
+                document.Types.Append(null!).ToArray() }), "malformed type graph rejects without dereferencing null");
         string json = Encoding.UTF8.GetString(bytes);
         bool RejectJson(string artifact)
         {
@@ -89,13 +91,43 @@ internal static class SemanticComposableCapabilityTests
         Check(old.CapabilityManifest is null && old.SchemaVersion == SemanticContract.CancellationTokenSchemaVersion
             && !json.Equals(Encoding.UTF8.GetString(SemanticSerializer.Serialize(old)), StringComparison.Ordinal),
             "existing token-only output remains on Semantic 53 without a manifest");
-        bool unsupportedRejected = false;
-        try
-        {
-            Analyze("using System.Threading; public static class Script { static int State = 1; public static bool Run() => CancellationToken.None == CancellationToken.None; }");
-        }
-        catch (ArgumentException) { unsupportedRejected = true; }
-        Check(unsupportedRejected, "incomplete composition fails instead of downgrading away token semantics");
+        var staticOnly = Analyze("public static class Script { public static int State = 1; }");
+        Check(staticOnly.CapabilityManifest is null
+            && staticOnly.SchemaVersion == SemanticStaticInitialization.SchemaVersion
+            && SemanticStaticInitializationValidator.IsValid(staticOnly),
+            "enabling token analysis does not invent a token capability when source has none: schema="
+                + staticOnly.SchemaVersion + " diagnostics=" + string.Join(" | ", staticOnly.Diagnostics.Select(d => d.Message)));
+        var tokenOnly = Analyze("using System.Threading; public static class Script { public static bool Run() => CancellationToken.None == CancellationToken.None; }");
+        Check(tokenOnly.CapabilityManifest is null
+            && tokenOnly.SchemaVersion == SemanticContract.CancellationTokenSchemaVersion
+            && SemanticCancellationTokenValidator.IsValid(tokenOnly),
+            "enabling static analysis does not invent static storage when source has none");
+        const string synchronousSource = "using System.Threading; public static class Script { static int State = 1; public static bool Run() => CancellationToken.None == CancellationToken.None && State == 1; }";
+        var synchronous = Analyze(synchronousSource);
+        Check(SemanticComposableCapabilities.IsVersion(synchronous)
+            && synchronous.CapabilityManifest?.Capabilities.Select(capability => capability.Id)
+                .SequenceEqual(new[] { SemanticComposableCapabilities.CancellationTokenValue,
+                    SemanticComposableCapabilities.StaticStorage }.OrderBy(id => id, StringComparer.Ordinal)) == true,
+            "synchronous static and token source carries only its two projected capabilities");
+        Check(synchronous.CapabilityManifest!.BaseSchemaVersion == SemanticComposableCapabilities.SynchronousBaseSchemaVersion
+            && synchronous.StaticInitialization!.BaseSchemaVersion == SemanticComposableCapabilities.SynchronousBaseSchemaVersion
+            && !SemanticContract.HasAsyncCatchVariables(synchronous)
+            && !SemanticContract.HasAsyncSynchronousExceptions(synchronous),
+            "synchronous token values do not inherit an async base or async exception semantics");
+        Check(SemanticComposableCapabilityValidator.IsValid(synchronous)
+            && SemanticStaticInitializationValidator.IsValid(synchronous)
+            && SemanticCancellationTokenValidator.IsValid(synchronous)
+            && SemanticAsyncInvocationValidator.IsValid(synchronous),
+            "synchronous composition validates across the source contracts");
+        Check(!SemanticComposableCapabilityValidator.IsValid(synchronous with { CapabilityManifest =
+                synchronous.CapabilityManifest with { BaseSchemaVersion = SemanticComposableCapabilities.AsyncBaseSchemaVersion } })
+            && !SemanticComposableCapabilityValidator.IsValid(synchronous with { CapabilityManifest =
+                synchronous.CapabilityManifest with { Capabilities = document.CapabilityManifest.Capabilities } }),
+            "synchronous source cannot claim an async base or plans");
+        byte[] synchronousBytes = SemanticSerializer.Serialize(synchronous);
+        Check(synchronousBytes.SequenceEqual(SemanticSerializer.Serialize(Analyze(synchronousSource)))
+            && synchronousBytes.SequenceEqual(SemanticSerializer.Serialize(SemanticSerializer.Deserialize(synchronousBytes))),
+            "synchronous combination has deterministic canonical bytes");
         return count;
     }
 

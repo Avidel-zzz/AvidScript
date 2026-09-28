@@ -282,8 +282,11 @@ public static class SemanticAnalyzer
         bool synchronousExceptions = enableAsyncSynchronousExceptions && hasTaskResults;
         bool catchVariables = enableAsyncCatchVariables && asyncProjection.Methods.Any(method =>
             method.ExceptionPlan?.Catches.Any(handler => handler.ExceptionVariableSymbolId is not null) == true);
+        bool tokenValues = typeRegistry.HasCancellationTokens
+            && SemanticComposableCapabilities.UsesTokenValues(
+                symbols, operationProjection.Methods, asyncProjection.Methods);
         var document = new SemanticDocument(
-            typeRegistry.HasCancellationTokens ? SemanticContract.CancellationTokenSchemaVersion
+            tokenValues ? SemanticContract.CancellationTokenSchemaVersion
                 : catchVariables ? SemanticContract.AsyncCatchVariableSchemaVersion
                 : synchronousExceptions ? SemanticContract.AsyncSynchronousExceptionSchemaVersion
                 : hasMemberAssignments ? SemanticContract.AsyncMemberAssignmentSchemaVersion
@@ -302,7 +305,7 @@ public static class SemanticAnalyzer
                 : hasTaskResults ? SemanticContract.TaskResultSchemaVersion
                 : SemanticContract.CurrentSchemaVersion,
             "csharp",
-            typeRegistry.HasCancellationTokens ? SemanticContract.CancellationTokenSemanticVersion
+            tokenValues ? SemanticContract.CancellationTokenSemanticVersion
                 : catchVariables ? SemanticContract.AsyncCatchVariableSemanticVersion
                 : synchronousExceptions ? SemanticContract.AsyncSynchronousExceptionSemanticVersion
                 : hasMemberAssignments ? SemanticContract.AsyncMemberAssignmentSemanticVersion
@@ -350,11 +353,12 @@ public static class SemanticAnalyzer
         };
         if (!enableStaticInitialization) return document;
         SemanticDocument projected = SemanticStaticInitializerProjector.Project(context, typeRegistry, document);
-        if (!enableCancellationTokens || projected.StaticInitialization is null) return projected;
+        if (!enableCancellationTokens || !tokenValues
+            || projected.StaticInitialization is null) return projected;
         SemanticCapabilityManifest manifest = SemanticComposableCapabilities.FromProjectedSource(projected);
-        if (manifest.Capabilities.Count != 5)
+        if (manifest.Capabilities.Count is not (2 or 5))
             throw new ArgumentException(
-                "Static initialization with cancellation token values currently requires an async await, cancellation identity, and exception plan.",
+                "Static initialization with cancellation token values requires a synchronous token-only source or an async await, cancellation identity, and exception plan.",
                 nameof(enableStaticInitialization));
         return projected with
         {

@@ -52,12 +52,18 @@ public static class SemanticContract
     public static bool HasAsyncCatchVariables(SemanticDocument document) =>
         document.SchemaVersion == AsyncCatchVariableSchemaVersion
         && document.SemanticVersion == AsyncCatchVariableSemanticVersion
-        || HasCancellationTokens(document);
+        || document.SchemaVersion == CancellationTokenSchemaVersion
+            && document.SemanticVersion == CancellationTokenSemanticVersion
+        || SemanticComposableCapabilities.Has(document, SemanticComposableCapabilities.ExceptionValues);
 
     public static bool HasAsyncSynchronousExceptions(SemanticDocument document) =>
         document.SchemaVersion == AsyncSynchronousExceptionSchemaVersion
         && document.SemanticVersion == AsyncSynchronousExceptionSemanticVersion
-        || HasAsyncCatchVariables(document);
+        || document.SchemaVersion == AsyncCatchVariableSchemaVersion
+            && document.SemanticVersion == AsyncCatchVariableSemanticVersion
+        || document.SchemaVersion == CancellationTokenSchemaVersion
+            && document.SemanticVersion == CancellationTokenSemanticVersion
+        || SemanticComposableCapabilities.Has(document, SemanticComposableCapabilities.ExceptionValues);
 
     public static bool HasAsyncMemberAssignments(SemanticDocument document) =>
         document.SchemaVersion == AsyncMemberAssignmentSchemaVersion

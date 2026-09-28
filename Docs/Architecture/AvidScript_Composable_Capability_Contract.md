@@ -4,7 +4,7 @@
 
 首个实现切片已在 Guest IR 中加入可选清单字段、精确执行基线/能力 ID 校验及 IR 35 严格 JSON 读取。旧版本不能携带新清单；IR 35 即使清单结构有效，仍由现有执行版本准入拒绝。
 
-第二切片已让 C# 前端在显式启用静态初始化、async 异常和标准 token 分析时，从同一份源码投射 Semantic 54/1.63。新文档携带排序的五项能力与统一的 Semantic 50/1.59 基线；静态计划、await、取消身份、异常计划和 token 类型均从投射结果核对，旧 Semantic 53 不写清单。Semantic 54 的未知/重复 JSON 字段、旧版夹带清单、缺失能力和冲突基线均拒绝。固定 SDK 的 Semantic 全量 1509/1509、C# Guest 全量 4493/4493，token 下游拒绝专项 315/315 通过。当前只覆盖五项能力齐备的组合源；缺少必要计划会显式拒绝。Guest lowering、WASM emitter 和原生读取者仍未准入 IR 35，因此这仍不是静态初始化 + token 可执行的证据。
+第二切片已让 C# 前端在显式启用静态初始化、async 异常和标准 token 分析时，从同一份源码投射 Semantic 54/1.63。能力清单按实际投射的字段和操作生成，不因 generated facade 的未调用签名登记了 token 类型就声明 token 能力。同步静态字段 + token 源码使用两项能力及 Semantic 31/1.40 基线；含 await、取消身份与异常计划的源码使用五项能力及 Semantic 50/1.59 基线。清单和静态计划的基线必须一致；其他尚未验证的组合显式拒绝。旧 Semantic 53 不写清单；Semantic 54 的未知/重复 JSON 字段、旧版夹带清单、缺失能力和冲突基线均拒绝。固定 SDK 的 Semantic 全量 1516/1516 通过。Guest lowering、WASM emitter 和原生读取者仍未准入 IR 35，因此这仍不是静态初始化 + token 可执行的证据。
 
 ## 现有阻塞
 
