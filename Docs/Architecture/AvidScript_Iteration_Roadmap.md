@@ -16,26 +16,29 @@ WASM 是执行载体，不自动带来完整语言支持、零开销或多语言
 
 ## 竞品基线
 
-官方资料复核于 2026-09-28；没有在本轮实际操作或计时竞品。以下用于选择验收项目。
+官方资料复核于 2026-09-28；本次路线复核没有新跑竞品。仓库内已有 [P65.D37 同语义正确性](../Phase65/P65.D37_AngelScript_Same_Semantics.md)（AngelScript 264/264，拒绝检查 17/17）、[P65.D38 单框架计时](../Phase65/P65.D38_AngelScript_Timing_Host.md)（AngelScript Editor VM 五进程）和 [P65.D39 六路径诊断](../Phase65/P65.D39_Isolated_Editor_Six_Lane_Preparation.md)（Native、Puerts、AvidScript 单进程）。这些不是同一最终构建上的三框架正式对测；P65 性能债务仍未关闭。
 
 | 对照 | 已有能力 | AvidScript 的比较要求 |
 | --- | --- | --- |
-| Unreal AngelScript | 脚本变更可不重启 Editor；PIE 中支持非结构变更；Blueprint 子类、VS Code 调试；Shipping 可使用预编译/转译脚本 | 编辑流程分别计入退出 PIE、重启 Editor 和构建时间；性能对照必须包含它的 Shipping 优化路径 |
+| Unreal AngelScript | 脚本变更可不重启 Editor；PIE 中支持非结构变更；Blueprint 子类、VS Code 调试；Shipping 可使用预编译/转译脚本；官方开发状态列出 UE Interface 限制 | 编辑流程分别计入退出 PIE、重启 Editor 和构建时间；性能对照必须包含它的 Shipping 优化路径；接口场景先比正确性再比速度 |
 | Puerts UE | 反射 API、TypeScript 类型声明、自动绑定/热重载、调试，以及非反射 C++ 的静态绑定 | 测试常见 UE API 是否直接可用、需要多少手写桥接；性能分别测 reflection 与 static binding |
 
-来源：[AngelScript 官方概览](https://angelscript.hazelight.se/)、[预编译脚本说明](https://angelscript.hazelight.se/cpp-bindings/precompiled-data/)、[Puerts UE 手册](https://puerts.github.io/en/docs/puerts/unreal/manual/)、[自动绑定](https://puerts.github.io/en/docs/puerts/unreal/uclass_extends/)和[静态绑定](https://puerts.github.io/en/docs/puerts/unreal/template_binding/)。Puerts 仓库另列 Lua/Python 为 Unity 后端，不能计作当前 UE 多语言能力：[官方仓库](https://github.com/Tencent/puerts)。
+来源：[AngelScript 官方概览](https://angelscript.hazelight.se/)、[开发状态](https://angelscript.hazelight.se/project/development-status/)、[预编译脚本说明](https://angelscript.hazelight.se/cpp-bindings/precompiled-data/)、[Puerts UE 入门](https://github.com/Tencent/puerts/blob/master/doc/unreal/en/getting_started.md)、[静态绑定](https://puerts.github.io/en/docs/puerts/unreal/template_binding/)和[调试](https://puerts.github.io/en/docs/puerts/unreal/vscode_debug/)。Puerts 官方仓库目前说明 UE 只支持 JavaScript/TypeScript；Lua/Python 是 Unity 后端，不能计作当前 UE 多语言能力：[官方仓库](https://github.com/Tencent/puerts)。
 
 ## 迭代顺序
 
-保留 P66–P69 顺序。跨语言接口和性能测量从 P66.D 开始形成原型与基线，后续独立冻结实现，避免等所有编辑工具完成才发现 ABI 只能服务 C#。
+保留 P66–P69 顺序。P66.D 从真实玩法抽取跨语言接口需求；随后以独立原型验证公共 ABI，再冻结正式实现，不把 Rust 原型追加进已冻结的 Phase 66 Gate。性能测量从 P66.D 的玩法基线开始，避免等所有编辑工具完成才发现 ABI 只能服务 C#。
+
+[跨语言交付合同](AvidScript_Cross_Language_Delivery_Contract.md)把第二语言定义为独立源码、独立编译器和同一生产 Host 内的双向调用；两种 WASM VM 或两套 C# API 都不算跨语言。它列出各阶段的输入、退出门槛和失败后的架构决策。本路线图只负责顺序，不用未来原型替代 P66/P65 的未完成 Gate。
 
 | 顺序 | 要交付的东西 | 完成证据与失败处理 |
 | --- | --- | --- |
 | **1. P66.C/D：日常玩法可以自然表达** | 先把静态状态、await、异常与 token 放进一个可验证的能力合同，再接集合/泛型、事件和正常构建入口 | 同一业务源码的 .NET 与 WASM 结果、身份、顺序和释放一致；真实生成类型运行于两个 VM。失败就修执行语义，不能通过改写样例避开缺口 |
-| **2. P67：修改结构不重启 Editor** | 新增字段/函数的动态类型或稳定外壳原型，实例状态迁移，候选失败恢复 | 覆盖 Blueprint 子类、CDO、GC、复制、Cook。先要求不重启 Editor，再明确哪些修改仍需退出 PIE；原型不成立时先调整类型表示 |
-| **3. P68：源码级调试完整可用** | 内部函数、返回值、闭包、异步调用链；版本对应的断点和变量 | 在 IDE 中设置断点、步进、检查并恢复真实玩法；暂停期间 GC、owner 销毁、重载均有明确处理 |
-| **4. 跨语言模块产品化** | 一份接口生成 C# 与第二语言 SDK，同一 UE 项目混合运行、调用、取消和重载 | 第二语言试验先选 Rust；必须有双向调用、复杂数据、回调、异步及故障隔离证据。一个标量 WASM 函数不算完成 |
-| **5. P69 + Windows 发布** | 技能、UI、网络和存档组成连续玩法；安装、Cook、Shipping、迁移与长跑 | 独立开发者按公开文档完成安装到发布；和两种竞品完成同需求对测，保留失败尝试与全部原始数据 |
+| **2. P66.D 后：独立跨语言原型** | 从真实玩法抽取接口，一份定义生成 C# 与 Rust SDK，经过生产 Host 双向调用 | 复杂值、回调、异步、取消和故障隔离在两 VM 可执行；结果在 P67 冻结类型表示前给出。一个标量 WASM 函数不算完成 |
+| **3. P67：修改结构不重启 Editor** | 新增字段/函数的动态类型或稳定外壳原型，实例状态迁移，候选失败恢复 | 覆盖 Blueprint 子类、CDO、GC、复制、Cook。先要求不重启 Editor，再明确哪些修改仍需退出 PIE；原型不成立时先调整类型表示 |
+| **4. P68：源码级调试完整可用** | 内部函数、返回值、闭包、异步调用链；版本对应的断点和变量 | 在 IDE 中设置断点、步进、检查并恢复真实玩法；暂停期间 GC、owner 销毁、重载均有明确处理 |
+| **5. P69 前：跨语言模块产品化** | 把原型变成可安装、可 Cook、可版本化的 C#/Rust SDK 和包，同一 UE 项目混合运行、取消与重载 | 不要求开发者维护逐函数桥接；接口升级、候选失败和过期对象均有负例；Win64 Shipping 可重建 |
+| **6. P69：真实游戏与 Windows 发布** | C# 与第二语言共同完成技能、UI、网络和存档的连续玩法；安装、Cook、Shipping、迁移与长跑 | 独立开发者按公开文档完成安装到发布；和两种竞品完成同需求对测，保留失败尝试与全部原始数据 |
 
 性能是每个迭代的验收项。先建立相同玩法的正确性和成本基线，再优化最贵的路径；不能等到最后统一补性能，也不能用 microbenchmark 代替完整流程。
 
