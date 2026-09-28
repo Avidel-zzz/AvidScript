@@ -10,7 +10,7 @@
 
 最近的 [C10 取消身份实现](../Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)已连接 Session、IR 32/33 与双 VM；异步 `catch` 对象别名可跨 await/GC，重复等待与 rethrow 保持对象身份。显式编译 API 已从 Semantic 53 生成 IR 34/WASM；异常 getter 和对象快照 reader 已在 Win64 两个 VM 上运行，21 份 C# 源码产生 82/82 组执行观察。同步静态初始化/token 组合及异步五能力的正常、取消分支已运行；原始 29 案例也已完成 IR 35 的 174/174 条双 VM 对照。默认构建入口和真实 Editor 玩法仍待完成。
 
-当前阻塞转向生产生命周期的完整矩阵和日常构建入口：静态状态、await、异常和 token 的五能力组合已通过 Semantic 54 → IR 35 → WASM、原生来源/错误目录读取及 Win64 双 VM 执行。原始 29 案例已逐项对照 .NET 的字段、Task 与挂起快照；其中 `field-mode-0` 还通过正式 Component 的双 VM Actor/World 销毁 **4/4**。其余 28 场景的 Component 路径、双实例、reload、`async void` 错误路由和默认 Build And Bind 仍需验证；专项 Automation 不能代替真实 Editor Play。
+当前阻塞转向生产双实例、重载和日常构建入口：静态状态、await、异常和 token 的五能力组合已通过 Semantic 54 → IR 35 → WASM、原生来源/错误目录读取及 Win64 双 VM 执行。原始 29 案例已逐项对照 .NET 的字段、Task 与挂起快照，并全部通过正式 Component 的双 VM Actor/World 销毁 **116/116**。双实例、reload、`async void` 错误路由和默认 Build And Bind 仍需验证；专项 Automation 不能代替真实 Editor Play。
 
 WASM 是执行载体，不自动带来完整语言支持、零开销或多语言互通。C# 前端与多种 VM 后端也不等于多个语言可以在同一个项目中共同开发。
 
@@ -47,14 +47,14 @@ WASM 是执行载体，不自动带来完整语言支持、零开销或多语言
 按依赖推进以下工作，不新增另一套并行状态机：
 
 1. **异常值与取消身份。** 明确 `catch` 变量初始化、异常根、别名、离开 handler 后的保活和释放；读取 token 时保留原始身份，不延长 source 生命周期。五能力组合的取消分支已做首次同路径执行，仍要验证重复 await、rethrow、清理再次抛错与 Task 结果传播。`async void` 导出入口中的语言错误需要独立的 owner/Session 报告合同，不能借 `Task<int>` 的通过数放行。
-2. **把已通过的原始业务矩阵接到生产入口。** [可组合能力合同](AvidScript_Composable_Capability_Contract.md)下的 [C10 原始 29 案例](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)已保持业务源码与预期不变，通过 IR 35 双 VM 三模式 **174/174**；测试适配层独立观察标准 token 身份。下一步让更多原始场景经正式 Component、双实例和 reload 执行，并对照相同的 Task、字段与释放结果。不能把独立 Session 的全矩阵当作生产入口的全矩阵。
+2. **从生产销毁矩阵推进到双实例与重载。** [可组合能力合同](AvidScript_Composable_Capability_Contract.md)下的 [C10 原始 29 案例](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)已保持业务源码与预期不变，通过 IR 35 双 VM 三模式 **174/174**；正式 Component 的双 VM Actor/World 销毁另通过 **116/116**。下一步用同一业务源码验证两个 Actor 的状态/取消隔离、reload 成功与失败时的挂起任务、字段和版本身份。Component 销毁矩阵只验证加载及释放，不能替代这些运行中切换断言。
 3. **补语言兼容清单。** 逐项记录自然玩法所需的 `Task<T>` 值类型/引用类型、集合枚举与释放、泛型成员、嵌套异常处理及 handler 内 await；每项附正例、明确拒绝和运行证据。完整 .NET/NuGet 兼容不是当前事实，缺少常用 API 时必须给出支持计划或准确诊断。
 4. **接入正常入口。** 编译、缓存、generated facade、UHT 类型壳、Editor Build And Bind 和包发布读取同一份能力合同；支持的组合不长期依赖测试专用开关。
 5. **P66.D 综合样例与集中验收。** 接入下方完整技能流程，检查状态、顺序、取消、GC、重入、重载失败和资源释放。同步冻结 P67 类型实验、P68 帧接口和跨语言模块原型的输入要求。
 
-命名 catch 与 token 属性已有完整异常编译路径及专项双后端运行；普通 lowering 仍拒绝绕过显式路径发布。原始业务矩阵已有独立 Session 证据，但不替代第 2 项的生产 Component、双实例和 reload 验收。
+命名 catch 与 token 属性已有完整异常编译路径及专项双后端运行；普通 lowering 仍拒绝绕过显式路径发布。原始业务矩阵已有独立 Session 和生产 Component 销毁证据，但不替代第 2 项的双实例和 reload 验收。
 
-IR 34 的原生版本准入、异常对象 reader 与 21 份同源 C# 专项源码现已通过双后端聚焦执行；验证覆盖预取消、挂起取消、source 释放、别名跨 GC、重复 await 和 teardown。IR 35 的同步静态/token 组合及原始 29 场景已通过双 VM 执行，29 场景共 **174/174** 条正常及 owner teardown 路径。`field-mode-0` 额外通过正式 Component 的 Actor/World 销毁 **4/4**。下一批扩展 Component 场景矩阵、双实例、reload 与实例隔离，再接正常 CLI、generated facade、Editor Build And Bind 和包发布；另行冻结 `async void` 错误路由。专项 Automation 不替代完整玩法或默认入口证据。
+IR 34 的原生版本准入、异常对象 reader 与 21 份同源 C# 专项源码现已通过双后端聚焦执行；验证覆盖预取消、挂起取消、source 释放、别名跨 GC、重复 await 和 teardown。IR 35 的同步静态/token 组合及原始 29 场景已通过双 VM 执行，29 场景共 **174/174** 条正常及 owner teardown 路径；正式 Component 的 Actor/World 销毁另通过 **116/116**。下一批验证双实例、reload 与实例隔离，再接正常 CLI、generated facade、Editor Build And Bind 和包发布；另行冻结 `async void` 错误路由。专项 Automation 不替代完整玩法或默认入口证据。
 
 ## 跨语言边界
 
@@ -109,6 +109,6 @@ Editor 与 Shipping 分开比较。明确每种 VM 的 JIT/AOT/interpreter 配�
 
 ## 下一步交付
 
-异常对象保活、取消身份快照、标准 token 的 Semantic/IR/WASM、两个 VM 的对象读取与专项同源 C# 执行已有独立证据；同步静态初始化/token 的同源 IR 35 双 VM 运行也已完成。异步五能力 IR 35 已通过原生来源/错误目录读取、原始 29 场景的双 VM 对照，以及一个正式 Component 场景的 Actor/World 销毁。下一交付顺序是：扩展生产 Component 生命周期矩阵、双实例和 reload，补 `async void` 错误路由 → 默认构建入口及准确诊断 → P66.D 完整技能流程和真实 Editor Play → P67 结构热重载原型与 P68 调试帧接口。每一步同时记录正确性、开发时间、调用成本和失败路径；只在同需求、同平台、同正确性前提下与 Puerts/AngelScript 比较。P66 仍未完成。
+异常对象保活、取消身份快照、标准 token 的 Semantic/IR/WASM、两个 VM 的对象读取与专项同源 C# 执行已有独立证据；同步静态初始化/token 的同源 IR 35 双 VM 运行也已完成。异步五能力 IR 35 已通过原生来源/错误目录读取、原始 29 场景的双 VM 对照及正式 Component 的完整 Actor/World 销毁矩阵。下一交付顺序是：生产双实例和 reload，补 `async void` 错误路由 → 默认构建入口及准确诊断 → P66.D 完整技能流程和真实 Editor Play → P67 结构热重载原型与 P68 调试帧接口。每一步同时记录正确性、开发时间、调用成本和失败路径；只在同需求、同平台、同正确性前提下与 Puerts/AngelScript 比较。P66 仍未完成。
 
 后续阶段的设计冻结必须给出具体 API、模块写集、兼容规则、错误恢复和可复现验收命令。Windows 完成后再恢复移动端计划；移动平台的暂停验收不等于取消其架构要求。

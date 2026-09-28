@@ -119,14 +119,21 @@ try {
         }
     }
     $componentObservations = 0
-    foreach ($backend in @(0, 1)) {
-        foreach ($mode in @('actor', 'world')) {
-            $pattern = "original-ir35-component backend=$backend teardown=$mode tasks_before=\d+ waiters_before=\d+ released=1"
-            if ([regex]::Matches($log, $pattern).Count -eq 1) { $componentObservations++ }
+    foreach ($case in $originalCases) {
+        $name = [regex]::Escape([string]$case.name)
+        $suspended = @($case.taskObservations | Where-Object { $_.initialState -ceq 'running' }).Count -gt 0
+        $countPattern = if ($suspended) { '[1-9]\d*' } else { '\d+' }
+        foreach ($backend in @(0, 1)) {
+            foreach ($mode in @('actor', 'world')) {
+                $pattern = "original-ir35-component scenario=$name backend=$backend teardown=$mode suspended=$([int]$suspended) tasks_before=$countPattern waiters_before=$countPattern released=1"
+                if ([regex]::Matches($log, $pattern).Count -eq 1) { $componentObservations++ }
+            }
         }
     }
+    $expectedComponentObservations = 4 * $originalCases.Count
     if ($passed -ne $tests.Count -or $observations -ne 4 -or $asyncObservations -ne 6 -or
-        $originalObservations -ne 174 -or $componentObservations -ne 4 -or
+        $originalObservations -ne 174 -or $componentObservations -ne $expectedComponentObservations -or
+        [regex]::Matches($log, 'original-ir35-component scenario=').Count -ne $expectedComponentObservations -or
         [regex]::Matches($log, 'Test Completed\. Result=\{Fail\}').Count -ne 0 -or
         [regex]::Matches($log, '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*\*').Count -ne 1 -or
         [regex]::Matches($log, "Found $($tests.Count) automation tests based on '$([regex]::Escape($filter))'").Count -ne 1) {
@@ -148,7 +155,7 @@ try {
         automation_passed = $passed
         automation_log = $logPath
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $runRoot 'results.json') -Encoding utf8
-    Write-Output "Composable IR 35: sync observations $observations/4; async observations $asyncObservations/6; original observations $originalObservations/174; component teardown $componentObservations/4; Automation $passed/$($tests.Count); evidence=$runRoot"
+    Write-Output "Composable IR 35: sync observations $observations/4; async observations $asyncObservations/6; original observations $originalObservations/174; component teardown $componentObservations/$expectedComponentObservations; Automation $passed/$($tests.Count); evidence=$runRoot"
 }
 finally {
     Pop-Location
