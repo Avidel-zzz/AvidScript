@@ -64,7 +64,38 @@ internal static class CSharpGuestAsyncSynchronousExceptionTests
         var wasm = WasmModuleCompiler.Compile(compiled.Module);
         Check(wasm.Succeeded, "Source synchronous exception WASM: " + string.Join(" | ", wasm.Diagnostics.Select(item => item.Message)));
         CheckSharedCatalog(Check);
+        CheckExportedAsyncVoidBoundary(Check);
         return count + CSharpGuestAsyncSynchronousExecutionTests.Run();
+    }
+
+    private static void CheckExportedAsyncVoidBoundary(Action<bool, string> check)
+    {
+        const string source = """
+            using System; using System.Threading.Tasks; using System.Runtime.InteropServices;
+            public static class Script {
+                public static int Result;
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay() { Result = Read(0); Result = await Run(1); }
+                public static int Read(int mode) { if (mode == 0) throw new ArgumentException(); return 1; }
+                public static async Task<int> Run(int mode) { return mode; }
+            }
+            """;
+        const string sourceId = "Scripts/ExportedAsyncVoidErrorOwner.cs";
+        string hash = FrontendAnalyzer.Analyze(source, sourceId).Source.Sha256;
+        var document = SemanticAnalyzer.Analyze(source, sourceId, hash,
+            new[] { new SemanticReferenceSource(CSharpGuestContinuationTests.ReferenceFacade,
+                "generated://AvidScript.Continuations.generated.cs", true) }, new SemanticCompilerWorkspace(),
+            enableAsyncExceptionFlow: true, enableAsyncCancellationFlow: true,
+            enableAsyncSynchronousExceptions: true);
+        check(document.AsyncMethods.Any(method => method.ExportName == "avid_on_begin_play"
+            && method.TaskResultTypeId is null),
+            "The source must retain its exported async void owner rather than moving the throw into a Task method: "
+                + string.Join(" | ", document.Diagnostics.Select(item => item.Code + ":" + item.Message)));
+        string semanticHash = Convert.ToHexString(SHA256.HashData(SemanticSerializer.Serialize(document))).ToLowerInvariant();
+        check(!CSharpLanguageErrorCompiler.TryLower(document, semanticHash, out var compiled, out string? error)
+            && compiled is null && error is not null
+            && error.Contains("validated async exception target or owner", StringComparison.Ordinal),
+            "A direct synchronous error in exported async void must not publish without a validated owner: " + error);
     }
 
     private static void CheckSharedCatalog(Action<bool, string> check)

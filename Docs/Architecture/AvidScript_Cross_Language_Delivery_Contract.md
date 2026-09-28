@@ -52,7 +52,7 @@ P66.D 先提供完整技能的源码、调用图、对象/任务 owner 和不可
 
 | 交付 | 必须产出 | 可复现的出口证据 |
 | --- | --- | --- |
-| **P66.C：自然 C# 语义** | 原始业务源码的静态状态、await、异常、token 组合；真实 Actor/World 销毁、reload、`async void` 错误路由；默认 Build And Bind | 同源 .NET 对照、Semantic→IR→WASM、两 VM 的正常/取消/销毁结果及零残留；正式 Editor 入口不能依赖测试专用开关。已有 29 场景 174/174 是专项证据，不覆盖这些未验项 |
+| **P66.C：自然 C# 语义** | 原始业务源码的静态状态、await、异常、token 组合；真实 Actor/World 销毁、reload、[C11 `async void` 错误 owner](../Phase66/P66.C11_Async_Void_Error_Owner_Contract.md)；默认 Build And Bind | 同源 .NET 对照、Semantic→IR→WASM、两 VM 的正常/取消/销毁结果及零残留；正式 Editor 入口不能依赖测试专用开关。已有 29 场景 174/174 与候选执行后注入回滚是专项证据，不等于语言错误自然触发或默认入口已通过 |
 | **P66.D：单语言完整玩法** | 一段 C# 技能、UI、网络、存档流程在真实 Editor Play 连续运行；从这个流程抽取跨语言接口需求与成本基线 | 记录自然源码、缺失语义、构建/修改时间；沿已冻结 P66 Gate 收尾，不把第二语言实现追加为本 Phase 的完成条件 |
 | **P66.D 后独立原型** | 接口定义、C#/Rust SDK 生成器与最小纵向链；在 P67 类型合同冻结前给出结论 | C#→Rust→C#→UE 通过生产 Host 的两 VM 正反例，包含复杂数据、回调、取消、回滚和来源诊断。失败先修公共 ABI，不绕过 Host |
 | **P67：结构修改** | C# 定义的 Actor/Component/Subsystem 与 Blueprint 子类增字段/函数的迁移；接口版本升级策略 | 原始实例、CDO、GC、复制、Cook、失败回滚；明确哪些变化可在 PIE 中应用，哪些只需退出 PIE，哪些仍需重启 Editor。跨语言等待和旧接口调用不得悬空 |

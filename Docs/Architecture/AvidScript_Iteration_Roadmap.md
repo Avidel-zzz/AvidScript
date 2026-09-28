@@ -10,7 +10,7 @@
 
 最近的 [C10 取消身份实现](../Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)已连接 Session、IR 32/33 与双 VM；异步 `catch` 对象别名可跨 await/GC，重复等待与 rethrow 保持对象身份。显式编译 API 已从 Semantic 53 生成 IR 34/WASM；异常 getter 和对象快照 reader 已在 Win64 两个 VM 上运行，21 份 C# 源码产生 82/82 组执行观察。同步静态初始化/token 组合及异步五能力的正常、取消分支已运行；原始 29 案例也已完成 IR 35 的 174/174 条双 VM 对照。默认构建入口和真实 Editor 玩法仍待完成。
 
-当前阻塞转向候选执行失败、`async void` 错误路由和日常构建入口：静态状态、await、异常和 token 的五能力组合已通过 Semantic 54 → IR 35 → WASM、原生来源/错误目录读取及 Win64 双 VM 执行。原始 29 案例已逐项对照 .NET 的字段、Task 与挂起快照，正式 Component 的双 VM Actor/World 销毁为 **116/116**。双 Actor 隔离、挂起时的哈希/VM 导出校验拒绝和成功重载已分别通过两种后端；候选 `BeginPlay` 执行失败回滚、生成类型共享域、默认 Build And Bind 和真实 Editor Play 仍待验证。
+当前阻塞转向 `async void` 错误路由、生成类型共享域和日常构建入口：静态状态、await、异常和 token 的五能力组合已通过 Semantic 54 → IR 35 → WASM、原生来源/错误目录读取及 Win64 双 VM 执行。原始 29 案例已逐项对照 .NET 的字段、Task 与挂起快照，正式 Component 的双 VM Actor/World 销毁为 **116/116**。双 Actor 隔离、加载/VM 导出校验拒绝、候选 C# `BeginPlay` 执行后**注入**失效与 Host Transform 回滚、成功重载均已在两个后端验证。真正由 C# 语言错误触发的候选失败、默认 Build And Bind 和真实 Editor Play 仍待验证。
 
 WASM 是执行载体，不自动带来完整语言支持、零开销或多语言互通。C# 前端与多种 VM 后端也不等于多个语言可以在同一个项目中共同开发。
 
@@ -59,15 +59,15 @@ WASM 是执行载体，不自动带来完整语言支持、零开销或多语言
 
 按依赖推进以下工作，不新增另一套并行状态机：
 
-1. **异常值与取消身份。** 明确 `catch` 变量初始化、异常根、别名、离开 handler 后的保活和释放；读取 token 时保留原始身份，不延长 source 生命周期。五能力组合的取消分支已做首次同路径执行，仍要验证重复 await、rethrow、清理再次抛错与 Task 结果传播。`async void` 导出入口中的语言错误需要独立的 owner/Session 报告合同，不能借 `Task<int>` 的通过数放行。
+1. **异常值与取消身份。** 明确 `catch` 变量初始化、异常根、别名、离开 handler 后的保活和释放；读取 token 时保留原始身份，不延长 source 生命周期。五能力组合的取消分支已做首次同路径执行，仍要验证重复 await、rethrow、清理再次抛错与 Task 结果传播。`async void` 导出入口中的语言错误按 [C11 owner 合同](../Phase66/P66.C11_Async_Void_Error_Owner_Contract.md)分别验证本地处理、未处理报告与候选发布前/后的失败；不能借 `Task<int>` 的通过数放行。
 2. **收敛生产双实例与重载。** [可组合能力合同](AvidScript_Composable_Capability_Contract.md)下的 [C10 原始 29 案例](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)保持业务源码与预期不变，IR 35 双 VM 三模式 **174/174**，正式 Component 的 Actor/World 销毁 **116/116**。两个真实 Actor 的挂起任务隔离、加载/VM 校验失败和成功切换新版本均有两后端断言。测试现还在候选 C# `BeginPlay` 执行后注入发布失效：Host effect journal 恢复 Actor 位置，旧 VM 与挂起任务继续。下一步用真正的 `async void` 语言错误触发同一回滚，再覆盖 Guest 发起的 UE 变更、生成类型共享域和状态迁移；测试钩子不能代替这些边界。
 3. **补语言兼容清单。** 逐项记录自然玩法所需的 `Task<T>` 值类型/引用类型、集合枚举与释放、泛型成员、嵌套异常处理及 handler 内 await；每项附正例、明确拒绝和运行证据。完整 .NET/NuGet 兼容不是当前事实，缺少常用 API 时必须给出支持计划或准确诊断。
 4. **接入正常入口。** 编译、缓存、generated facade、UHT 类型壳、Editor Build And Bind 和包发布读取同一份能力合同；支持的组合不长期依赖测试专用开关。
 5. **P66.D 综合样例与集中验收。** 接入下方完整技能流程，检查状态、顺序、取消、GC、重入、重载失败和资源释放。同步冻结 P67 类型实验、P68 帧接口和跨语言模块原型的输入要求。
 
-命名 catch 与 token 属性已有完整异常编译路径及专项双后端运行；普通 lowering 仍拒绝绕过显式路径发布。原始业务矩阵已有独立 Session、生产 Component 销毁、双实例与预执行阶段重载证据；候选执行失败、共享生成类型及真实玩法仍分别验收。
+命名 catch 与 token 属性已有完整异常编译路径及专项双后端运行；普通 lowering 仍拒绝绕过显式路径发布。原始业务矩阵已有独立 Session、生产 Component 销毁、双实例、预执行阶段重载及候选执行后的测试注入回滚证据；语言错误自然触发的候选失败、共享生成类型及真实玩法仍分别验收。
 
-IR 34 的原生版本准入、异常对象 reader 与 21 份同源 C# 专项源码现已通过双后端聚焦执行；验证覆盖预取消、挂起取消、source 释放、别名跨 GC、重复 await 和 teardown。IR 35 的同步静态/token 组合及原始 29 场景已通过双 VM 执行，29 场景共 **174/174** 条正常及 owner teardown 路径；正式 Component 的 Actor/World 销毁另通过 **116/116**，双实例及挂起重载各 **2/2**。下一批补候选执行失败和 `async void` 错误路由，再接正常 CLI、generated facade、Editor Build And Bind 和包发布。专项 Automation 不替代完整玩法或默认入口证据。
+IR 34 的原生版本准入、异常对象 reader 与 21 份同源 C# 专项源码现已通过双后端聚焦执行；验证覆盖预取消、挂起取消、source 释放、别名跨 GC、重复 await 和 teardown。IR 35 的同步静态/token 组合及原始 29 场景已通过双 VM 执行，29 场景共 **174/174** 条正常及 owner teardown 路径；正式 Component 的 Actor/World 销毁另通过 **116/116**，双实例及挂起重载各 **2/2**，其中候选执行后注入失效与 Transform 回滚已覆盖。下一批补 `async void` 语言错误的 Session 归属和自然触发的候选失败，再接正常 CLI、generated facade、Editor Build And Bind 和包发布。专项 Automation 不替代完整玩法或默认入口证据。
 
 ## 跨语言边界
 
@@ -122,6 +122,6 @@ Editor 与 Shipping 分开比较。明确每种 VM 的 JIT/AOT/interpreter 配�
 
 ## 下一步交付
 
-异常对象保活、取消身份快照、标准 token 的 Semantic/IR/WASM、两个 VM 的对象读取与专项同源 C# 执行已有独立证据；同步静态初始化/token 的同源 IR 35 双 VM 运行也已完成。异步五能力 IR 35 已通过原生来源/错误目录读取、原始 29 场景的双 VM 对照、正式 Component 的 Actor/World 销毁、双实例和预执行阶段重载。下一交付顺序是：候选执行失败回滚及 `async void` 错误路由 → 默认构建入口及准确诊断 → P66.D 完整技能流程和真实 Editor Play → P67 结构热重载原型与 P68 调试帧接口。每一步同时记录正确性、开发时间、调用成本和失败路径；只在同需求、同平台、同正确性前提下与 Puerts/AngelScript 比较。P66 仍未完成。
+异常对象保活、取消身份快照、标准 token 的 Semantic/IR/WASM、两个 VM 的对象读取与专项同源 C# 执行已有独立证据；同步静态初始化/token 的同源 IR 35 双 VM 运行也已完成。异步五能力 IR 35 已通过原生来源/错误目录读取、原始 29 场景的双 VM 对照、正式 Component 的 Actor/World 销毁、双实例、预执行阶段重载及执行后注入失效回滚。下一交付顺序是：[C11 `async void` 错误 owner](../Phase66/P66.C11_Async_Void_Error_Owner_Contract.md)与自然触发的候选回滚 → 默认构建入口及准确诊断 → P66.D 完整技能流程和真实 Editor Play → 独立 C#/Rust 接口原型 → P67 结构热重载与 P68 调试帧。性能门槛沿用[跨语言交付合同](AvidScript_Cross_Language_Delivery_Contract.md#三种比较如何执行)与 P65 正式协议，不能把现有单框架诊断拼接为领先结论。P66 仍未完成。
 
 后续阶段的设计冻结必须给出具体 API、模块写集、兼容规则、错误恢复和可复现验收命令。Windows 完成后再恢复移动端计划；移动平台的暂停验收不等于取消其架构要求。
