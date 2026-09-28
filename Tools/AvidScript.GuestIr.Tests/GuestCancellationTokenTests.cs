@@ -125,6 +125,11 @@ internal static class GuestCancellationTokenTests
             import.Id == GuestTaskCancellationIdentity.ReadImportId
                 ? import with { ParameterTypeIds = new[] { "type:int32" } } : import).ToArray() },
             "IR 35 identity reader with wrong argument type", "ASIR1039");
+        Reject(managedTaskAsync, "IR 35 declared exception values without catch bindings", "ASIR1040");
+        Reject(managedTaskAsync with { ExceptionValues = new(new[] { new GuestExceptionValueBinding(
+            "function:missing", "function:missing", "block:missing", "value:owner",
+            "value:variable", GuestCancellationTokens.RootTypeId) }) },
+            "IR 35 forged exception-value capture binding", "ASIR1040");
         Reject(managedTaskAsync with { Imports = managedTaskAsync.Imports.Where(import =>
             import.Id != GuestTaskCancellationErrorValidator.MetaImportId).ToArray() },
             "IR 35 missing terminal error metadata import", "ASIR1032");

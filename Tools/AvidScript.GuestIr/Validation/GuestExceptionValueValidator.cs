@@ -9,9 +9,10 @@ internal static class GuestExceptionValueValidator
     internal static void Validate(GuestValidationContext context)
     {
         var artifact = GuestCancellationTokens.BaseProfile(context.InputArtifact);
+        bool composableAsync = GuestComposableCapabilities.HasDeclaredAsyncBase29(context.InputArtifact);
         bool reserved = artifact.Functions.SelectMany(function => function.Locals)
             .Any(local => local.Id.StartsWith(GuestExceptionValues.CapturePrefix, StringComparison.Ordinal));
-        if (!GuestExceptionValues.IsVersion(artifact))
+        if (!GuestExceptionValues.IsVersion(artifact) && !composableAsync)
         {
             if (artifact.ExceptionValues is not null || reserved
                 || artifact.Provenance.SemanticSchemaVersion == GuestExceptionValues.SemanticSchemaVersion
@@ -20,10 +21,11 @@ internal static class GuestExceptionValueValidator
             return;
         }
         if (artifact.Language != "csharp" || artifact.ExceptionValues?.Bindings is not { Count: > 0 and <= 4096 } bindings
-            || artifact.Provenance.SemanticSchemaVersion != GuestExceptionValues.SemanticSchemaVersion
-            || artifact.Provenance.SemanticVersion != GuestExceptionValues.SemanticVersion
+            || artifact.Provenance.SemanticSchemaVersion != (composableAsync ? 54 : GuestExceptionValues.SemanticSchemaVersion)
+            || artifact.Provenance.SemanticVersion != (composableAsync ? "1.63" : GuestExceptionValues.SemanticVersion)
             || artifact.CancellationIdentity is not { BaseSchemaVersion: 29, BaseIrVersion: "1.28" }
-            || artifact.StaticStorage is not null || artifact.AsyncSynchronousExceptions is null)
+            || !composableAsync && artifact.StaticStorage is not null
+            || artifact.AsyncSynchronousExceptions is null)
         {
             Add("Exception values require their source contract, bindings and cancellation-aware synchronous async execution profile.");
             return;
