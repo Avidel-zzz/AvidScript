@@ -179,7 +179,7 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
                     continue;
                 }
                 if (!Test.TestTrue(*Label, Runtime.BeginPlay(Result))) { Test.AddError(Result.ErrorMessage); return false; }
-                if (ProbeToken)
+                if (ProbeToken && Name == TEXT("field-mode-0"))
                 {
                     FAvidScriptVmPreparedExportCall Probe;
                     FString Error;
@@ -348,7 +348,7 @@ bool FAvidScriptOriginalAsyncMemberTest::RunTest(const FString& Parameters)
 bool FAvidScriptComposableOriginalAsyncMemberTest::RunTest(const FString& Parameters)
 {
     return AvidScript::Tests::CompiledAsyncExceptions::Run(*this,
-        TEXT("AVIDSCRIPT_COMPOSABLE_ORIGINAL_DIR"), 1, TEXT("original-ir35"), true, true, 18, 0, false, false, true);
+        TEXT("AVIDSCRIPT_COMPOSABLE_ORIGINAL_DIR"), 29, TEXT("original-ir35"), true, true, 18, 0, true, false, true);
 }
 
 bool FAvidScriptAwaitReadinessEvaluationTest::RunTest(const FString& Parameters)

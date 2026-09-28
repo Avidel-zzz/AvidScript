@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -193,8 +194,7 @@ internal static class CSharpGuestComposableIr35Tests
         Check(Convert.ToHexString(SHA256.HashData(originalBusiness)).Equals(
             "265a7e71e2c744681d099ee6b11a93fcf94b151980205cddf155c46f602249d9",
             StringComparison.OrdinalIgnoreCase), "the original 29-scenario business bytes are unchanged");
-        string originalSource = System.Text.Encoding.UTF8.GetString(originalBusiness) + "\n"
-            + CSharpGuestOriginalAsyncMemberTests.FirstScenarioAdapter() + "\n" + """
+        const string originalTokenProbe = """
             public static class OriginalTokenProbe {
                 [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = "avid_token_probe")]
                 public static int Read() {
@@ -203,6 +203,9 @@ internal static class CSharpGuestComposableIr35Tests
                 }
             }
             """;
+        string originalSource = System.Text.Encoding.UTF8.GetString(originalBusiness) + "\n"
+            + CSharpGuestOriginalAsyncMemberTests.ComposableScenarioAdapter("field-mode-0") + "\n"
+            + originalTokenProbe;
         var originalSemantic = SemanticAnalyzer.Analyze(originalSource, originalId,
             FrontendAnalyzer.Analyze(originalSource, originalId).Source.Sha256,
             new[] { new SemanticReferenceSource(asyncFacade, "generated://Continuation.cs", true) },
@@ -237,6 +240,64 @@ internal static class CSharpGuestComposableIr35Tests
         Check(originalWasm.Succeeded && originalModule!.Exports.Any(export => export.Name == "avid_token_probe"),
             "original C10 field scenario emits a WASM module with a separate token reader: "
                 + string.Join(" | ", originalWasm.Diagnostics.Select(item => item.Code + ": " + item.Message)));
+        var originalNames = CSharpGuestOriginalAsyncMemberTests.ComposableScenarioNames();
+        Check(originalNames.Count == 29 && originalNames[0] == "field-mode-0",
+            "the composable matrix uses all original 29 named business scenarios");
+        List<string> originalFailures = new();
+        List<(string Name, string Source, SemanticDocument Semantic, GuestModule Module,
+            WasmCompilationResult Wasm)> originalCases = new() {
+                ("field-mode-0", originalSource, originalSemantic, originalModule!, originalWasm)
+            };
+        foreach (string name in originalNames.Skip(1))
+        {
+            string caseSource = System.Text.Encoding.UTF8.GetString(originalBusiness) + "\n"
+                + CSharpGuestOriginalAsyncMemberTests.ComposableScenarioAdapter(name) + "\n" + originalTokenProbe;
+            var caseSemantic = SemanticAnalyzer.Analyze(caseSource, originalId,
+                FrontendAnalyzer.Analyze(caseSource, originalId).Source.Sha256,
+                new[] { new SemanticReferenceSource(asyncFacade, "generated://Continuation.cs", true) },
+                new SemanticCompilerWorkspace(), enableAsyncExceptionFlow: true,
+                enableDirectAwaitCleanup: true, enableAsyncCancellationFlow: true,
+                enableStaticInitialization: true, enableAsyncSynchronousExceptions: true,
+                enableAsyncCatchVariables: true, enableCancellationTokens: true);
+            if (!SemanticComposableCapabilities.IsVersion(caseSemantic)
+                || caseSemantic.CapabilityManifest?.Capabilities.Count != 5
+                || !SemanticStaticInitializationValidator.IsValid(caseSemantic)
+                || !SemanticCancellationTokenValidator.IsValid(caseSemantic)
+                || caseSemantic.AsyncMethods.SelectMany(method => method.Segments)
+                    .Count(segment => segment.AwaitSite?.MemberAssignment is not null) != 9)
+            {
+                originalFailures.Add(name + " semantic: " + string.Join(" | ",
+                    caseSemantic.Diagnostics.Select(item => item.Code + ": " + item.Message)));
+                continue;
+            }
+            byte[] caseSemanticBytes = SemanticSerializer.Serialize(caseSemantic);
+            string caseHash = Convert.ToHexString(SHA256.HashData(caseSemanticBytes)).ToLowerInvariant();
+            if (!CSharpStaticInitializationCompiler.TryLower(caseSemantic, caseHash,
+                    out var caseModule, out var caseError) || caseModule is null)
+            {
+                originalFailures.Add(name + " lowering: " + caseError);
+                continue;
+            }
+            var caseValidation = GuestModuleValidator.Validate(caseModule);
+            if (!caseValidation.Succeeded)
+            {
+                originalFailures.Add(name + " IR: " + string.Join(" | ",
+                    caseValidation.Diagnostics.Select(item => item.Code + ": " + item.Message)));
+                continue;
+            }
+            var caseWasm = WasmModuleCompiler.Compile(caseModule);
+            if (!caseWasm.Succeeded)
+            {
+                originalFailures.Add(name + " WASM: " + string.Join(" | ",
+                    caseWasm.Diagnostics.Select(item => item.Code + ": " + item.Message)));
+                continue;
+            }
+            originalCases.Add((name, caseSource, caseSemantic, caseModule, caseWasm));
+        }
+        Check(originalCases.Count == 29, $"original C10 IR 35 matrix compiled {originalCases.Count}/29: "
+            + string.Join(" || ", originalFailures.Take(8)));
+        string originalManifest = CSharpGuestOriginalAsyncMemberTests.ComposableManifest(originalCases
+            .Select(item => (item.Name, item.Source, item.Semantic, item.Module)));
         string? fixtureDirectory = Environment.GetEnvironmentVariable("AVIDSCRIPT_COMPOSABLE_IR35_FIXTURE_DIR");
         if (!string.IsNullOrWhiteSpace(fixtureDirectory))
         {
@@ -252,13 +313,16 @@ internal static class CSharpGuestComposableIr35Tests
             File.WriteAllBytes(Path.Combine(fixtureDirectory, "composable-async-static-token.wasm"), asyncWasm.Bytes);
             string originalFixtureDirectory = Path.Combine(fixtureDirectory, "original-ir35");
             Directory.CreateDirectory(originalFixtureDirectory);
-            File.WriteAllText(Path.Combine(originalFixtureDirectory, "field-mode-0.cs"), originalSource);
-            File.WriteAllBytes(Path.Combine(originalFixtureDirectory, "field-mode-0.semantic.json"), originalSemanticBytes);
-            File.WriteAllBytes(Path.Combine(originalFixtureDirectory, "field-mode-0.guestir.json"),
-                GuestIrSerializer.Serialize(originalModule!));
-            File.WriteAllBytes(Path.Combine(originalFixtureDirectory, "field-mode-0.wasm"), originalWasm.Bytes);
-            File.WriteAllText(Path.Combine(originalFixtureDirectory, "cases.json"),
-                CSharpGuestOriginalAsyncMemberTests.FirstScenarioManifest(originalSource, originalSemantic, originalModule!));
+            foreach (var item in originalCases)
+            {
+                File.WriteAllText(Path.Combine(originalFixtureDirectory, item.Name + ".cs"), item.Source);
+                File.WriteAllBytes(Path.Combine(originalFixtureDirectory, item.Name + ".semantic.json"),
+                    SemanticSerializer.Serialize(item.Semantic));
+                File.WriteAllBytes(Path.Combine(originalFixtureDirectory, item.Name + ".guestir.json"),
+                    GuestIrSerializer.Serialize(item.Module));
+                File.WriteAllBytes(Path.Combine(originalFixtureDirectory, item.Name + ".wasm"), item.Wasm.Bytes);
+            }
+            File.WriteAllText(Path.Combine(originalFixtureDirectory, "cases.json"), originalManifest);
         }
 
         const string source = """

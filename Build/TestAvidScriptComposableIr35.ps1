@@ -49,6 +49,20 @@ try {
             throw "Missing IR 35 fixture: $name"
         }
     }
+    $originalCases = @(Get-Content -LiteralPath (Join-Path $fixtureRoot 'original-ir35/cases.json') -Raw | ConvertFrom-Json)
+    if ($originalCases.Count -ne 29) { throw "Expected all 29 original IR 35 cases, found $($originalCases.Count)" }
+    $originalNames = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($case in $originalCases) {
+        $name = [string]$case.name
+        if ($name -cnotmatch '^[a-z0-9-]+$' -or -not $originalNames.Add($name)) {
+            throw "Invalid or duplicate original IR 35 case name: $name"
+        }
+        foreach ($extension in @('cs', 'semantic.json', 'guestir.json', 'wasm')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $fixtureRoot "original-ir35/$name.$extension"))) {
+                throw "Missing original IR 35 fixture: $name.$extension"
+            }
+        }
+    }
     $wasmPath = Join-Path $fixtureRoot 'composable-static-token.wasm'
     $wasmHash = (Get-FileHash -LiteralPath $wasmPath -Algorithm SHA256).Hash.ToLowerInvariant()
     $asyncWasmHash = (Get-FileHash -LiteralPath (Join-Path $fixtureRoot 'composable-async-static-token.wasm') -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -94,9 +108,16 @@ try {
             if ([regex]::Matches($log, [regex]::Escape($pattern)).Count -eq 1) { $asyncObservations++ }
         }
     }
-    $originalObservations = [regex]::Matches($log,
-        'original-ir35 backend=\d+ scenario=field-mode-0 mode=[012] result=-?\d+ trace=-?\d+ resumes=\d+').Count
-    if ($passed -ne $tests.Count -or $observations -ne 4 -or $asyncObservations -ne 6 -or $originalObservations -ne 6 -or
+    $originalObservations = 0
+    foreach ($case in $originalCases) {
+        foreach ($backend in @(0, 1)) {
+            foreach ($mode in @(0, 1, 2)) {
+                $pattern = "original-ir35 backend=$backend scenario=$($case.name) mode=$mode result=-?\d+ trace=-?\d+ resumes=\d+"
+                if ([regex]::Matches($log, $pattern).Count -eq 1) { $originalObservations++ }
+            }
+        }
+    }
+    if ($passed -ne $tests.Count -or $observations -ne 4 -or $asyncObservations -ne 6 -or $originalObservations -ne 174 -or
         [regex]::Matches($log, 'Test Completed\. Result=\{Fail\}').Count -ne 0 -or
         [regex]::Matches($log, '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*\*').Count -ne 1 -or
         [regex]::Matches($log, "Found $($tests.Count) automation tests based on '$([regex]::Escape($filter))'").Count -ne 1) {
@@ -117,7 +138,7 @@ try {
         automation_passed = $passed
         automation_log = $logPath
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $runRoot 'results.json') -Encoding utf8
-    Write-Output "Composable IR 35: sync observations $observations/4; async observations $asyncObservations/6; original observations $originalObservations/6; Automation $passed/$($tests.Count); evidence=$runRoot"
+    Write-Output "Composable IR 35: sync observations $observations/4; async observations $asyncObservations/6; original observations $originalObservations/174; Automation $passed/$($tests.Count); evidence=$runRoot"
 }
 finally {
     Pop-Location

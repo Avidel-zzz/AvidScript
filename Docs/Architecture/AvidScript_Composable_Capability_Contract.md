@@ -24,9 +24,11 @@ C# 静态初始化不能简单映射到上述 14/1.13 夹具：现有编译器�
 
 第九切片保留 `AwaitMemberAssignment.cs` 原始业务字节，先将 `field-mode-0` 接入 Semantic 54 → IR 35。测试适配层单独加入异常对象及标准 token 读取，使五项能力都由源码产生。修正了同时存在源声明 `object` 与托管引用时的重复类型登记，并让 IR 35 直接核查原源码中的显式 throw owner/transfer；删除这些 transfer 的负例被拒绝。该场景的 9 个成员 await 经编译，.NET 参考值 `Result=7`、`Trace=1238` 与 18 个字段在 Win64 Wasmtime JIT/WAMR Interpreter 的正常执行一致；两个 VM 还实际读取到非 `None` token，挂起及首次恢复后 teardown 也通过，共 **6/6** 次观察。固定 SDK 组合专项 **41/41**、no-clean Editor 构建、聚焦 Automation **4/4** 通过，证据在工程 `Saved/AvidScriptComposableIr35/20260928T101002432Z/`。这是原始 29 场景中的 **1 个**；其他 28 个、Task 终态逐项对照和真实 Actor/World 生命周期尚未完成。
 
+第十切片将同一份未改动的业务源码与 29 个原始执行适配场景全部投射为 Semantic 54 五能力、直接验证 IR 35 并编译 WASM；适配层新增的命名 `catch` 保持原返回值与 `Status`，标准 token 探针独立于业务路径。.NET oracle 为每例提供 18 个字段、Task 初始/终态与异常类型、循环挂起快照。Win64 Wasmtime JIT/WAMR Interpreter 在正常执行、初始挂起 teardown、首次恢复后 teardown 上完成 **174/174** 条路径，聚焦 Automation **4/4**、固定 SDK 组合专项 **43/43**、旧 IR 31 原始矩阵 **391/391** 通过；证据在工程 `Saved/AvidScriptComposableIr35/20260928T102443457Z/`。这些模式使用独立 Session 与测试 World，尚不证明真实 Actor/World 销毁、reload、`async void` 未处理错误或默认 Build And Bind。
+
 ## 现有阻塞
 
-[SemanticAnalyzer](../../Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs)可投射特定的静态初始化 + async + token 组合。同一份 C# 源码现通过私有 Semantic 53 执行副本完成静态字段改写、异常/取消 lowering，发布保留 Semantic 54 来源的 IR 35 五能力模块，并生成确定性 WASM。原生 Host 已读取这份产物的来源和错误目录，双 VM 已执行正常完成、取消身份、独立 Session EndPlay，以及原始 [29 个成员 await 场景](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)中的首例；余下 28 个、Actor/World 销毁、reload 和真实玩法仍待验证。
+[SemanticAnalyzer](../../Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs)可投射特定的静态初始化 + async + token 组合。同一份 C# 源码现通过私有 Semantic 53 执行副本完成静态字段改写、异常/取消 lowering，发布保留 Semantic 54 来源的 IR 35 五能力模块，并生成确定性 WASM。原生 Host 已读取这份产物的来源和错误目录，双 VM 已执行正常完成、取消身份、独立 Session EndPlay，以及原始 [29 个成员 await 场景](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)全部的同源对照与挂起态 owner teardown；Actor/World 销毁、reload 和真实玩法仍待验证。
 
 本次还暴露了独立语言缺口：现行同步异常合同只为 `Task<int>` 方法建立异常 owner；`async void` 导出入口中直接调用可能产生语言错误的 `AvidCancellationSource.Create()` 会被 `ASCG1026` 拒绝。不能只跳过该调用的 outcome 检查，也不能把未处理异常默默转成正常返回。后续需版本化 `async void` 的本地 catch、跨 await 错误根和未处理错误向 Session 报告的合同，再用同一入口源码验证。当前可运行场景把取消源创建放在实际业务 `Task<int>` 方法中，由导出入口等待它。
 
@@ -57,9 +59,9 @@ Task local 生命周期验证器现以 Semantic 54/1.63 为来源直接检查 IR
 | 顺序 | 必须完成的合同 | 验收 |
 | --- | --- | --- |
 | 1. 来源与恢复边 | 同源 Semantic 54 形成私有执行副本；静态 guard 在 exported async 入口和恢复段都有异常目标与 owner；无目标的调用继续拒绝 | 静态初始化成功/失败、await 前后访问及导出入口均能保留正确错误路由 |
-| 2. 统一执行基线 | 静态槽、readiness、取消身份与 token reader 全部标记 29/1.28；同源最小模块已用原始 IR 35 直接验证，原始 29 场景仍待验证 | 计划的 base 一致，旧 IR 31/34 序列化与执行不变，错 base 负例拒绝 |
-| 3. IR 35 直接验证 | outcome/catalog、Task 结果与错误、async route/transfer、静态堆、托管根 import、reader 和五项增量在同一个 artifact 上逐项校验 | 同源最小正例已通过；继续覆盖原始 29 场景、移除计划/import、错签名、伪造来源及旧版夹带能力 |
-| 4. WASM 与原生准入 | emitter 和 Host reader 接受准确的 29/1.28 五能力 provenance；两 VM 执行相同字节 | 先跑同源最小模块，再跑原始 29 场景与独立 token 身份观察，检查取消、错误、重载和根释放 |
+| 2. 统一执行基线 | 静态槽、readiness、取消身份与 token reader 全部标记 29/1.28；原始 29 场景已用真实 IR 35 直接验证 | 计划的 base 一致，旧 IR 31/34 序列化与执行不变，错 base 负例拒绝 |
+| 3. IR 35 直接验证 | outcome/catalog、Task 结果与错误、async route/transfer、静态堆、托管根 import、reader 和五项增量在同一个 artifact 上逐项校验 | 原始 29 场景已通过；仍需扩展移除计划/import、错签名、伪造来源及旧版夹带能力的组合负例 |
+| 4. WASM 与原生准入 | emitter 和 Host reader 接受准确的 29/1.28 五能力 provenance；两 VM 执行相同字节 | 原始 29 场景及独立 token 身份观察已通过；继续验证真实销毁、reload、错误快照和实例隔离 |
 
 ## 合同边界
 
@@ -70,7 +72,7 @@ Task local 生命周期验证器现以 Semantic 54/1.63 为来源直接检查 IR
 | WASM/Host | 将已验证能力写入产物与 provenance；Runtime 按产物版本和授权导入执行 | 不从 WASM 名称猜能力，也不允许未知导入试探 |
 | 跨语言模块接口 | 另行定义数据、资源、调用、异步和错误的稳定交换合同 | 不直接共享各语言的 Task、异常对象、GC 根或闭包内存 |
 
-IR 35 将 `execution_base` 与**排序、去重、版本化**的 `capabilities` 列表分开。清单结构识别 14/1.13、17/1.16 与 29/1.28 基线；同步静态状态 + token 的 14/1.13 槽夹具、17/1.16 静态初始化夹具及 29/1.28 的同源异步最小模块已通过真实模块验证，原始 29 场景仍待覆盖。纯计算或同步模块不被迫携带 async 基线。基础指令集与能力版本是两条轴：后续增加一个可独立验证的能力，不再为所有已有能力的排列新增外层 IR。现有计划结构可以在首轮复用，但其 `BaseSchemaVersion/BaseIrVersion` 必须全部等于所选执行基线；新合同不允许多个互相矛盾的 base。规范化后只用真实输入模块做授权与所有权验证，不通过改写版本字段的临时视图绕开新组合。
+IR 35 将 `execution_base` 与**排序、去重、版本化**的 `capabilities` 列表分开。清单结构识别 14/1.13、17/1.16 与 29/1.28 基线；同步静态状态 + token 的 14/1.13 槽夹具、17/1.16 静态初始化夹具及 29/1.28 的原始 29 场景已通过真实模块验证和双 VM 执行。纯计算或同步模块不被迫携带 async 基线。基础指令集与能力版本是两条轴：后续增加一个可独立验证的能力，不再为所有已有能力的排列新增外层 IR。现有计划结构可以在首轮复用，但其 `BaseSchemaVersion/BaseIrVersion` 必须全部等于所选执行基线；新合同不允许多个互相矛盾的 base。规范化后只用真实输入模块做授权与所有权验证，不通过改写版本字段的临时视图绕开新组合。
 
 `execution_base` 自身已有任务、错误、所有权和指令合同；能力列表只列可独立组合的增量，不把 IR 29 固有计划重新声明一遍。各验证器仍检查基线与增量的全部计划、指令和 import，不能因为一项未列在增量清单中就跳过基线校验。
 

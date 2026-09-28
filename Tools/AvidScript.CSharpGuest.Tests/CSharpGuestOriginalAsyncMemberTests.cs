@@ -24,33 +24,37 @@ internal static class CSharpGuestOriginalAsyncMemberTests
     private sealed record ReferenceResult(SortedDictionary<string, int> Fields, TaskObservation[] Tasks,
         IReadOnlyList<SortedDictionary<string, int>> LoopSuspensions);
 
-    internal static string FirstScenarioAdapter() =>
-        Entry(new Scenario("field-mode-0", "AwaitMemberAssignment.Assign(false, 0)"), observeCancellationError: true);
+    internal static IReadOnlyList<string> ComposableScenarioNames() =>
+        Cases().Select(scenario => scenario.Name).ToArray();
 
-    internal static string FirstScenarioManifest(string source, SemanticDocument semantic, GuestModule module)
+    internal static string ComposableScenarioAdapter(string name) =>
+        Entry(Cases().Single(scenario => scenario.Name == name), observeCancellationError: true);
+
+    internal static string ComposableManifest(
+        IEnumerable<(string Name, string Source, SemanticDocument Semantic, GuestModule Module)> cases)
     {
         DirectoryInfo? root = new(AppContext.BaseDirectory);
         while (root is not null && !File.Exists(Path.Combine(root.FullName,
                    "Fixtures/Phase66/AwaitMemberAssignment.Reference.cs"))) root = root.Parent;
         if (root is null) throw new InvalidOperationException("Original C10 reference facade is unavailable.");
-        var expected = Reference(source, File.ReadAllText(Path.Combine(root.FullName,
-            "Fixtures/Phase66/AwaitMemberAssignment.Reference.cs")), observeLoop: false);
-        int Offset(string name)
+        string reference = File.ReadAllText(Path.Combine(root.FullName,
+            "Fixtures/Phase66/AwaitMemberAssignment.Reference.cs"));
+        var scenarios = Cases().ToDictionary(scenario => scenario.Name, StringComparer.Ordinal);
+        List<object> entries = new();
+        foreach (var item in cases)
         {
-            var field = semantic.Symbols.Single(symbol => symbol.Kind == "field" && symbol.Name == name
-                && symbol.ContainingSymbolId == "symbol:type:global::Script");
-            var owner = semantic.StaticInitialization!.Types.Single(type => type.Fields.Any(item => item.FieldSymbolId == field.Id));
-            string suffix = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(owner.TypeId + "\n" + field.Id))).ToLowerInvariant();
-            return module.MemoryLayout.StateSlots.Single(slot => slot.GlobalId == "global:symbol:field:$static:" + suffix).Offset;
+            Scenario scenario = scenarios[item.Name];
+            bool loop = item.Name.EndsWith("-loop", StringComparison.Ordinal);
+            ReferenceResult expected = Reference(item.Source, reference, loop);
+            void Check(bool valid, string reason)
+            {
+                if (!valid) throw new InvalidOperationException(item.Name + ": " + reason);
+            }
+            Check(expected.Tasks.Length == (scenario.Second.Length == 0 ? 1 : 2), "source Task count differs");
+            Check(expected.LoopSuspensions.Count == (loop ? 2 : 0), "loop suspension count differs");
+            entries.Add(ManifestEntry(scenario, expected, item.Semantic, item.Module, Check));
         }
-        return JsonSerializer.Serialize(new[] { new {
-            name = "field-mode-0", moduleId = module.ModuleId, staticSlots = module.StaticStorage!.Slots.Count,
-            cancel = false, expected = expected.Fields["Result"], trace = expected.Fields["Trace"],
-            resultOffset = Offset("Result"), traceOffset = Offset("Trace"),
-            observations = expected.Fields.Select(field => new {
-                name = field.Key, expected = field.Value, offset = Offset(field.Key)
-            }).ToArray()
-        } }, new JsonSerializerOptions { WriteIndented = true });
+        return JsonSerializer.Serialize(entries, new JsonSerializerOptions { WriteIndented = true });
     }
 
     private static readonly string[] BusinessFields = {
@@ -58,19 +62,8 @@ internal static class CSharpGuestOriginalAsyncMemberTests
         "ReplacementField", "ReplacementValue", "ReplacementSetters", "TotalSetters", "LastId", "LastValue"
     };
 
-    public static int Run()
+    private static IReadOnlyList<Scenario> Cases()
     {
-        int count = 0;
-        void Check(bool valid, string reason) { if (!valid) throw new InvalidOperationException(reason); count++; }
-        const string fixture = "Fixtures/Phase66/AwaitMemberAssignment.cs";
-        DirectoryInfo? root = new(AppContext.BaseDirectory);
-        while (root is not null && !File.Exists(Path.Combine(root.FullName, fixture))) root = root.Parent;
-        Check(root is not null, "Original C10 fixture must be available");
-        byte[] bytes = File.ReadAllBytes(Path.Combine(root!.FullName, fixture));
-        Check(Convert.ToHexString(SHA256.HashData(bytes)).Equals(
-            "265a7e71e2c744681d099ee6b11a93fcf94b151980205cddf155c46f602249d9", StringComparison.OrdinalIgnoreCase),
-            "Original C10 business source must remain unchanged");
-        string reference = File.ReadAllText(Path.Combine(root.FullName, "Fixtures/Phase66/AwaitMemberAssignment.Reference.cs"));
         List<Scenario> cases = new();
         foreach (bool property in new[] { false, true })
         {
@@ -92,6 +85,23 @@ internal static class CSharpGuestOriginalAsyncMemberTests
             "AwaitMemberAssignment.Original.ThrowOnSet = true;"));
         cases.Add(new("temporary", "AwaitMemberAssignment.AssignTemporary()"));
         cases.Add(new("temporary-cancel", "AwaitMemberAssignment.AssignTemporary()", After: "AwaitMemberAssignment.Lifetime.Cancel();"));
+        return cases;
+    }
+
+    public static int Run()
+    {
+        int count = 0;
+        void Check(bool valid, string reason) { if (!valid) throw new InvalidOperationException(reason); count++; }
+        const string fixture = "Fixtures/Phase66/AwaitMemberAssignment.cs";
+        DirectoryInfo? root = new(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, fixture))) root = root.Parent;
+        Check(root is not null, "Original C10 fixture must be available");
+        byte[] bytes = File.ReadAllBytes(Path.Combine(root!.FullName, fixture));
+        Check(Convert.ToHexString(SHA256.HashData(bytes)).Equals(
+            "265a7e71e2c744681d099ee6b11a93fcf94b151980205cddf155c46f602249d9", StringComparison.OrdinalIgnoreCase),
+            "Original C10 business source must remain unchanged");
+        string reference = File.ReadAllText(Path.Combine(root.FullName, "Fixtures/Phase66/AwaitMemberAssignment.Reference.cs"));
+        IReadOnlyList<Scenario> cases = Cases();
         Check(cases.Count == 29, "All original reference scenarios must be compiled");
         string? directory = Environment.GetEnvironmentVariable("AVIDSCRIPT_ORIGINAL_ASYNC_MEMBER_DIR");
         if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
@@ -136,53 +146,13 @@ internal static class CSharpGuestOriginalAsyncMemberTests
                 CheckReadinessMutations(module, Check);
                 CheckEntryImportComposition(module, Check);
             }
-            int Offset(string name)
-            {
-                var field = semantic.Symbols.Single(symbol => symbol.Kind == "field" && symbol.Name == name
-                    && symbol.ContainingSymbolId == "symbol:type:global::Script");
-                var owner = semantic.StaticInitialization!.Types.Single(type => type.Fields.Any(item => item.FieldSymbolId == field.Id));
-                string suffix = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(owner.TypeId + "\n" + field.Id))).ToLowerInvariant();
-                return module.MemoryLayout.StateSlots.Single(slot => slot.GlobalId == "global:symbol:field:$static:" + suffix).Offset;
-            }
-            var adapterMethod = semantic.Symbols.Single(symbol => symbol.Kind == "method" && symbol.Name == "Run"
-                && symbol.ContainingSymbolId == "symbol:type:global::Script");
-            var adapterAwaits = semantic.AsyncMethods.Single(method => method.MethodSymbolId == adapterMethod.Id).Segments
-                .Where(segment => segment.AwaitSite?.TaskLocalSymbolId is not null).Select(segment => segment.AwaitSite!).ToArray();
-            var taskObservations = expected.Tasks.Select(task => {
-                var local = semantic.Symbols.Single(symbol => symbol.Kind == "local" && symbol.Name == task.Name
-                    && symbol.ContainingSymbolId == adapterMethod.Id);
-                int callback = adapterAwaits.Single(site => site.TaskLocalSymbolId == local.Id).CallbackId;
-                Check(module.AsyncExceptionRoutes!.Count(route => route.CallbackId == callback) == 1,
-                    scenario.Name + ":" + task.Name + " is identified by its validated source await route");
-                // The original reference uses IsInstanceOfType: cancellation
-                // accepts TaskCanceledException as an OperationCanceledException.
-                Type? errorClass = task.ErrorType is null ? null : Type.GetType(task.ErrorType, throwOnError: true);
-                int[] errorTypes = errorClass is null ? Array.Empty<int>() : module.LanguageErrorCatalog!.Types
-                    .Where(type => type.TypeId.StartsWith("type:global::", StringComparison.Ordinal)
-                        && errorClass.IsAssignableFrom(Type.GetType(type.TypeId["type:global::".Length..])))
-                    .Select(type => type.Token).ToArray();
-                Check(errorClass is null || errorTypes.Length > 0, scenario.Name + " source exception type is represented");
-                return new { name = task.Name, callbackId = callback, initialState = task.InitialState,
-                    terminalState = task.TerminalState, result = task.Result, errorType = task.ErrorType, errorTypeTokens = errorTypes };
-            }).ToArray();
-            int[] loopCallbacks = loop ? semantic.AsyncMethods.Single(method => method.MethodSymbolId == semantic.Symbols
-                .Single(symbol => symbol.Kind == "method" && symbol.Name == "AssignTwice").Id).Segments
-                .Where(segment => segment.AwaitSite?.MemberAssignment is not null)
-                .Select(segment => segment.AwaitSite!.CallbackId).OrderBy(id => id).ToArray() : Array.Empty<int>();
-            Check(loopCallbacks.Length == (loop ? 2 : 0) && loopCallbacks.All(callback =>
-                module.AsyncExceptionRoutes!.Count(route => route.CallbackId == callback) == 1),
-                scenario.Name + " loop checkpoints use validated field/property await routes");
+            object manifestEntry = ManifestEntry(scenario, expected, semantic, module, Check);
             if (!string.IsNullOrWhiteSpace(directory))
             {
                 File.WriteAllText(Path.Combine(directory, scenario.Name + ".cs"), source);
                 File.WriteAllBytes(Path.Combine(directory, scenario.Name + ".guest-ir.json"), ir);
                 File.WriteAllBytes(Path.Combine(directory, scenario.Name + ".wasm"), wasm.Bytes);
-                fixtures.Add(new { name = scenario.Name, moduleId = module.ModuleId, staticSlots = module.StaticStorage!.Slots.Count,
-                    cancel = false, expected = expected.Fields["Result"], trace = expected.Fields["Trace"], resultOffset = Offset("Result"), traceOffset = Offset("Trace"),
-                    observations = expected.Fields.Select(item => new { name = item.Key, expected = item.Value, offset = Offset(item.Key) }).ToArray(),
-                    taskObservations, loopCallbacks,
-                    loopSuspensions = expected.LoopSuspensions.Select(fields => fields.Select(item =>
-                        new { name = item.Key, expected = item.Value, offset = Offset(item.Key) }).ToArray()).ToArray() });
+                fixtures.Add(manifestEntry);
             }
         }
         if (!string.IsNullOrWhiteSpace(directory))
@@ -222,7 +192,7 @@ internal static class CSharpGuestOriginalAsyncMemberTests
                     return result;
                 } catch (ArgumentException) { Status = 2; return 0; }
                   {{(observeCancellationError
-                      ? "catch (OperationCanceledException error) { Status = error.CancellationToken == AwaitMemberAssignment.Lifetime.Token ? 3 : 9; return 0; }"
+                      ? "catch (OperationCanceledException error) { Status = 3; return 0; }"
                       : "catch (OperationCanceledException) { Status = 3; return 0; }")}}
                   catch (NullReferenceException) { Status = 4; return 0; }
                   catch (InvalidOperationException) { Status = 5; return 0; }
@@ -304,6 +274,54 @@ internal static class CSharpGuestOriginalAsyncMemberTests
                 .ToDictionary(field => field.Name, field => (int)field.GetValue(null)!), StringComparer.Ordinal), tasks, loopSuspensions);
         }
         finally { System.Threading.SynchronizationContext.SetSynchronizationContext(previous); context.Unload(); }
+    }
+
+    private static object ManifestEntry(Scenario scenario, ReferenceResult expected,
+        SemanticDocument semantic, GuestModule module, Action<bool, string> check)
+    {
+        int Offset(string name)
+        {
+            var field = semantic.Symbols.Single(symbol => symbol.Kind == "field" && symbol.Name == name
+                && symbol.ContainingSymbolId == "symbol:type:global::Script");
+            var owner = semantic.StaticInitialization!.Types.Single(type => type.Fields.Any(item => item.FieldSymbolId == field.Id));
+            string suffix = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(owner.TypeId + "\n" + field.Id))).ToLowerInvariant();
+            return module.MemoryLayout.StateSlots.Single(slot => slot.GlobalId == "global:symbol:field:$static:" + suffix).Offset;
+        }
+        var adapterMethod = semantic.Symbols.Single(symbol => symbol.Kind == "method" && symbol.Name == "Run"
+            && symbol.ContainingSymbolId == "symbol:type:global::Script");
+        var adapterAwaits = semantic.AsyncMethods.Single(method => method.MethodSymbolId == adapterMethod.Id).Segments
+            .Where(segment => segment.AwaitSite?.TaskLocalSymbolId is not null).Select(segment => segment.AwaitSite!).ToArray();
+        var taskObservations = expected.Tasks.Select(task => {
+            var local = semantic.Symbols.Single(symbol => symbol.Kind == "local" && symbol.Name == task.Name
+                && symbol.ContainingSymbolId == adapterMethod.Id);
+            int callback = adapterAwaits.Single(site => site.TaskLocalSymbolId == local.Id).CallbackId;
+            check(module.AsyncExceptionRoutes!.Count(route => route.CallbackId == callback) == 1,
+                scenario.Name + ":" + task.Name + " is identified by its validated source await route");
+            // Cancellation accepts TaskCanceledException as OperationCanceledException.
+            Type? errorClass = task.ErrorType is null ? null : Type.GetType(task.ErrorType, throwOnError: true);
+            int[] errorTypes = errorClass is null ? Array.Empty<int>() : module.LanguageErrorCatalog!.Types
+                .Where(type => type.TypeId.StartsWith("type:global::", StringComparison.Ordinal)
+                    && errorClass.IsAssignableFrom(Type.GetType(type.TypeId["type:global::".Length..])))
+                .Select(type => type.Token).ToArray();
+            check(errorClass is null || errorTypes.Length > 0, scenario.Name + " source exception type is represented");
+            return new { name = task.Name, callbackId = callback, initialState = task.InitialState,
+                terminalState = task.TerminalState, result = task.Result, errorType = task.ErrorType, errorTypeTokens = errorTypes };
+        }).ToArray();
+        bool loop = scenario.Name.EndsWith("-loop", StringComparison.Ordinal);
+        int[] loopCallbacks = loop ? semantic.AsyncMethods.Single(method => method.MethodSymbolId == semantic.Symbols
+            .Single(symbol => symbol.Kind == "method" && symbol.Name == "AssignTwice").Id).Segments
+            .Where(segment => segment.AwaitSite?.MemberAssignment is not null)
+            .Select(segment => segment.AwaitSite!.CallbackId).OrderBy(id => id).ToArray() : Array.Empty<int>();
+        check(loopCallbacks.Length == (loop ? 2 : 0) && loopCallbacks.All(callback =>
+            module.AsyncExceptionRoutes!.Count(route => route.CallbackId == callback) == 1),
+            scenario.Name + " loop checkpoints use validated field/property await routes");
+        return new { name = scenario.Name, moduleId = module.ModuleId, staticSlots = module.StaticStorage!.Slots.Count,
+            cancel = false, expected = expected.Fields["Result"], trace = expected.Fields["Trace"],
+            resultOffset = Offset("Result"), traceOffset = Offset("Trace"),
+            observations = expected.Fields.Select(item => new { name = item.Key, expected = item.Value, offset = Offset(item.Key) }).ToArray(),
+            taskObservations, loopCallbacks,
+            loopSuspensions = expected.LoopSuspensions.Select(fields => fields.Select(item =>
+                new { name = item.Key, expected = item.Value, offset = Offset(item.Key) }).ToArray()).ToArray() };
     }
 
     private static void CheckEntryImportComposition(GuestModule module, Action<bool, string> check)
