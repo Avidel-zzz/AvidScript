@@ -5,12 +5,18 @@
 #include "AvidScriptObjectRegistryTestTypes.h"
 #include "AvidScriptVmArtifact.h"
 #include "Async/Async.h"
+#include "Dom/JsonObject.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformMisc.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 #include "Ssl.h"
 
 THIRD_PARTY_INCLUDES_START
@@ -156,6 +162,52 @@ bool BuildComponentPrecompiledExecutionFixture(
 		*Result.Artifact.TargetTriple,
 		*Result.Artifact.AttestationId);
 	return true;
+}
+
+bool BuildComposableComponentPrecompiledManifest(
+	const FString& FixtureDirectory,
+	const FString& CanonicalManifestPath,
+	FString& OutManifestPath)
+{
+	TArray<uint8> Wasm;
+	FString ManifestJson;
+	if (!FFileHelper::LoadFileToArray(
+			Wasm,
+			*FPaths::Combine(FixtureDirectory, TEXT("field-mode-0.wasm")))
+		|| !FFileHelper::LoadFileToString(ManifestJson, *CanonicalManifestPath))
+	{
+		return false;
+	}
+	FString ExecutionJson;
+	if (!BuildComponentPrecompiledExecutionFixture(
+			FixtureDirectory,
+			TEXT("field-mode-0-component-aot"),
+			MakeArrayView(Wasm),
+			ExecutionJson)
+		|| ExecutionJson.IsEmpty())
+	{
+		return false;
+	}
+	TSharedPtr<FJsonObject> ManifestObject;
+	TSharedPtr<FJsonObject> ExecutionObject;
+	if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(ManifestJson), ManifestObject)
+		|| !ManifestObject.IsValid()
+		|| !FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(ExecutionJson), ExecutionObject)
+		|| !ExecutionObject.IsValid())
+	{
+		return false;
+	}
+	ManifestObject->SetObjectField(TEXT("execution"), ExecutionObject);
+	FString PrecompiledManifestJson;
+	if (!FJsonSerializer::Serialize(
+			ManifestObject.ToSharedRef(),
+			TJsonWriterFactory<>::Create(&PrecompiledManifestJson)))
+	{
+		return false;
+	}
+	OutManifestPath = FPaths::Combine(
+		FixtureDirectory, TEXT("field-mode-0-component-aot.avidscript.json"));
+	return FFileHelper::SaveStringToFile(PrecompiledManifestJson, *OutManifestPath);
 }
 
 bool CreateComponentWorld(UWorld*& OutWorld)
@@ -701,6 +753,131 @@ bool FAvidScriptComponentCSharpManifestLifecycleSmokeTest::RunTest(const FString
 	TestTrue(TEXT("Component records the C# guest EndPlay export"), StatsAfterEndPlay.bEndPlayCalled);
 
 	DestroyComponentWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptComponentComposableOriginalTeardownTest,
+	"AvidScript.Component.ComposableOriginalTeardown",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptComponentComposableOriginalTeardownTest::RunTest(const FString& Parameters)
+{
+	const FString FixtureDirectory = FPlatformMisc::GetEnvironmentVariable(
+		TEXT("AVIDSCRIPT_COMPOSABLE_ORIGINAL_DIR"));
+	const FString ManifestPath = FPaths::Combine(
+		FixtureDirectory, TEXT("field-mode-0.avidscript.json"));
+	if (!TestTrue(TEXT("The original IR35 manifest exists"),
+		!FixtureDirectory.IsEmpty() && FPaths::FileExists(ManifestPath)))
+	{
+		return false;
+	}
+	FString PrecompiledManifestPath;
+	if (!TestTrue(TEXT("The same original IR35 WASM has a Wasmtime serialized manifest"),
+		BuildComposableComponentPrecompiledManifest(
+			FixtureDirectory, ManifestPath, PrecompiledManifestPath)))
+	{
+		return false;
+	}
+
+	for (int32 Scenario = 0; Scenario < 4; ++Scenario)
+	{
+		const int32 Backend = Scenario / 2;
+		const int32 Mode = Scenario % 2;
+		const FString Teardown = Mode == 0 ? TEXT("actor") : TEXT("world");
+		const FString Label = FString::Printf(
+			TEXT("backend=%d teardown=%s"), Backend, *Teardown);
+		const FString& ActiveManifestPath = Backend == 0
+			? ManifestPath : PrecompiledManifestPath;
+		UWorld* World = nullptr;
+		if (!TestTrue(*(Label + TEXT(" world is created")), CreateComponentWorld(World)))
+		{
+			return false;
+		}
+		ON_SCOPE_EXIT { DestroyComponentWorld(World); };
+		if (!TestTrue(*(Label + TEXT(" world begins play")), BeginComponentWorld(World)))
+		{
+			return false;
+		}
+		AActor* Actor = World->SpawnActor<AAvidScriptActorBindingTestActor>();
+		if (!TestNotNull(*(Label + TEXT(" actor spawns")), Actor))
+		{
+			return false;
+		}
+		UAvidScriptComponent* Component = AddAvidScriptComponent(Actor, ActiveManifestPath);
+		if (!TestNotNull(*(Label + TEXT(" production component is registered")), Component))
+		{
+			return false;
+		}
+		FAvidScriptRuntimeSession* Session = Component->GetRuntimeSessionForTesting();
+		if (!TestNotNull(*(Label + TEXT(" production Session is active")), Session))
+		{
+			AddError(Component->GetRuntimeStats().LastErrorMessage);
+			return false;
+		}
+		const FAvidScriptRuntimeSessionTestSnapshot Suspended = Session->GetTestSnapshot();
+		FAvidScriptRuntimeSessionSnapshot RuntimeSnapshot;
+		FAvidScriptVmBackendInfo BackendInfo;
+		if (!TestTrue(*(Label + TEXT(" backend identity is available")),
+			Component->CaptureRuntimeDiagnostics(RuntimeSnapshot, BackendInfo)))
+		{
+			return false;
+		}
+		TestEqual(*(Label + TEXT(" selects the requested VM")), BackendInfo.Kind,
+			Backend == 0 ? EAvidScriptVmBackendKind::Wamr : EAvidScriptVmBackendKind::Wasmtime);
+		TestEqual(*(Label + TEXT(" selects the requested artifact")), BackendInfo.ArtifactFormat,
+			Backend == 0 ? EAvidScriptVmArtifactFormat::WasmBytecode
+				: EAvidScriptVmArtifactFormat::WasmtimeSerialized);
+		if (!TestTrue(*(Label + TEXT(" original C# BeginPlay loaded")),
+			Component->GetRuntimeStats().bRuntimeLoaded
+				&& Component->GetRuntimeStats().bBeginPlayCalled
+				&& Suspended.Runtime.bHasActiveRuntime)
+			|| !TestTrue(*(Label + TEXT(" original Task is suspended")),
+				Suspended.TaskCount > 0 && Suspended.TaskWaiterCount > 0
+				&& Suspended.Runtime.PendingContinuationCount > 0
+				&& Suspended.ContinuationStateBytes > 0))
+		{
+			AddError(Component->GetRuntimeStats().LastErrorMessage);
+			return false;
+		}
+
+		const auto RuntimeLease = Session->GetRuntimeLeaseForTesting();
+		const int32 TicksBefore = Component->GetRuntimeStats().TickCallCount;
+		if (Mode == 0)
+		{
+			if (!TestTrue(TEXT("The actual Actor is destroyed"), World->DestroyActor(Actor)))
+			{
+				return false;
+			}
+		}
+		else if (!TestTrue(TEXT("The actual World ends play"), World->EndPlay(EEndPlayReason::Quit)))
+		{
+			return false;
+		}
+		if (!TestTrue(*(Label + TEXT(" component observed EndPlay")),
+			Component->GetRuntimeStats().bComponentEndPlayObserved)
+			|| !TestFalse(*(Label + TEXT(" component runtime is unloaded")),
+				Component->GetRuntimeStats().bRuntimeLoaded)
+			|| !TestNull(*(Label + TEXT(" Session is released")),
+				Component->GetRuntimeSessionForTesting())
+			|| !TestFalse(*(Label + TEXT(" old VM lease has expired")), RuntimeLease.IsValid()))
+		{
+			return false;
+		}
+		if (Mode == 0)
+		{
+			for (int32 Round = 0; Round < 4; ++Round)
+			{
+				World->Tick(LEVELTICK_All, 0.02f);
+				++GFrameCounter;
+			}
+			TestEqual(TEXT("Destroyed Actor receives no later script Tick"),
+				Component->GetRuntimeStats().TickCallCount, TicksBefore);
+		}
+		AddInfo(FString::Printf(
+			TEXT("original-ir35-component backend=%d teardown=%s tasks_before=%d waiters_before=%d released=1"),
+			Backend, *Teardown, Suspended.TaskCount, Suspended.TaskWaiterCount));
+	}
 	return true;
 }
 

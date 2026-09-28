@@ -321,6 +321,32 @@ internal static class CSharpGuestComposableIr35Tests
                 File.WriteAllBytes(Path.Combine(originalFixtureDirectory, item.Name + ".guestir.json"),
                     GuestIrSerializer.Serialize(item.Module));
                 File.WriteAllBytes(Path.Combine(originalFixtureDirectory, item.Name + ".wasm"), item.Wasm.Bytes);
+                WasmArtifactInfo wasmInfo = WasmArtifactInspector.Inspect(item.Wasm.Bytes);
+                string[] requiredExports = { "avid_on_begin_play", "avid_on_tick", "avid_on_continuation_v2" };
+                Check(requiredExports.All(name => wasmInfo.Exports.Any(exported =>
+                        exported.Kind == 0 && exported.Name == name)),
+                    item.Name + " retains the production lifecycle exports");
+                var runtimeManifest = new
+                {
+                    schema_version = 1,
+                    module_id = item.Module.ModuleId,
+                    abi_version = 1,
+                    language = "csharp",
+                    wasm = new
+                    {
+                        file = item.Name + ".wasm",
+                        sha256 = Convert.ToHexString(SHA256.HashData(item.Wasm.Bytes)).ToLowerInvariant(),
+                    },
+                    required_exports = requiredExports,
+                    required_imports = wasmInfo.Imports.Where(imported => imported.Kind == 0)
+                        .OrderBy(imported => imported.Module, StringComparer.Ordinal)
+                        .ThenBy(imported => imported.Name, StringComparer.Ordinal)
+                        .Select(imported => new { module = imported.Module, name = imported.Name })
+                        .ToArray(),
+                };
+                File.WriteAllText(Path.Combine(originalFixtureDirectory, item.Name + ".avidscript.json"),
+                    System.Text.Json.JsonSerializer.Serialize(runtimeManifest,
+                        new System.Text.Json.JsonSerializerOptions { WriteIndented = true }) + "\n");
             }
             File.WriteAllText(Path.Combine(originalFixtureDirectory, "cases.json"), originalManifest);
         }

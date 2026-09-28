@@ -44,7 +44,7 @@ try {
         'composable-async-static-token.guestir.json', 'composable-async-static-token.wasm',
         'original-ir35/cases.json', 'original-ir35/field-mode-0.cs',
         'original-ir35/field-mode-0.semantic.json', 'original-ir35/field-mode-0.guestir.json',
-        'original-ir35/field-mode-0.wasm')) {
+        'original-ir35/field-mode-0.wasm', 'original-ir35/field-mode-0.avidscript.json')) {
         if (-not (Test-Path -LiteralPath (Join-Path $fixtureRoot $name))) {
             throw "Missing IR 35 fixture: $name"
         }
@@ -57,7 +57,7 @@ try {
         if ($name -cnotmatch '^[a-z0-9-]+$' -or -not $originalNames.Add($name)) {
             throw "Invalid or duplicate original IR 35 case name: $name"
         }
-        foreach ($extension in @('cs', 'semantic.json', 'guestir.json', 'wasm')) {
+        foreach ($extension in @('cs', 'semantic.json', 'guestir.json', 'wasm', 'avidscript.json')) {
             if (-not (Test-Path -LiteralPath (Join-Path $fixtureRoot "original-ir35/$name.$extension"))) {
                 throw "Missing original IR 35 fixture: $name.$extension"
             }
@@ -83,7 +83,8 @@ try {
         'AvidScript.Runtime.LanguageErrorCatalog.LoadAndReject',
         'AvidScript.Runtime.ManagedHeap.ComposableIr35StaticToken',
         'AvidScript.Runtime.ManagedHeap.ComposableIr35AsyncExecution',
-        'AvidScript.Runtime.Continuation.ComposableOriginalAsyncMember'
+        'AvidScript.Runtime.Continuation.ComposableOriginalAsyncMember',
+        'AvidScript.Component.ComposableOriginalTeardown'
     )
     $filter = $tests -join '+'
     $logPath = Join-Path $runRoot 'automation.log'
@@ -117,11 +118,19 @@ try {
             }
         }
     }
-    if ($passed -ne $tests.Count -or $observations -ne 4 -or $asyncObservations -ne 6 -or $originalObservations -ne 174 -or
+    $componentObservations = 0
+    foreach ($backend in @(0, 1)) {
+        foreach ($mode in @('actor', 'world')) {
+            $pattern = "original-ir35-component backend=$backend teardown=$mode tasks_before=\d+ waiters_before=\d+ released=1"
+            if ([regex]::Matches($log, $pattern).Count -eq 1) { $componentObservations++ }
+        }
+    }
+    if ($passed -ne $tests.Count -or $observations -ne 4 -or $asyncObservations -ne 6 -or
+        $originalObservations -ne 174 -or $componentObservations -ne 4 -or
         [regex]::Matches($log, 'Test Completed\. Result=\{Fail\}').Count -ne 0 -or
         [regex]::Matches($log, '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*\*').Count -ne 1 -or
         [regex]::Matches($log, "Found $($tests.Count) automation tests based on '$([regex]::Escape($filter))'").Count -ne 1) {
-        throw "IR 35 Automation evidence incomplete: tests=$passed observations=$observations async_observations=$asyncObservations original_observations=$originalObservations log=$logPath"
+        throw "IR 35 Automation evidence incomplete: tests=$passed observations=$observations async_observations=$asyncObservations original_observations=$originalObservations component_observations=$componentObservations log=$logPath"
     }
     [ordered]@{
         schema_version = 1
@@ -135,10 +144,11 @@ try {
         vm_observations = $observations
         async_vm_observations = $asyncObservations
         original_vm_observations = $originalObservations
+        component_teardown_observations = $componentObservations
         automation_passed = $passed
         automation_log = $logPath
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $runRoot 'results.json') -Encoding utf8
-    Write-Output "Composable IR 35: sync observations $observations/4; async observations $asyncObservations/6; original observations $originalObservations/174; Automation $passed/$($tests.Count); evidence=$runRoot"
+    Write-Output "Composable IR 35: sync observations $observations/4; async observations $asyncObservations/6; original observations $originalObservations/174; component teardown $componentObservations/4; Automation $passed/$($tests.Count); evidence=$runRoot"
 }
 finally {
     Pop-Location

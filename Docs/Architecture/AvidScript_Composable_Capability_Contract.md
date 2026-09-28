@@ -26,9 +26,11 @@ C# 静态初始化不能简单映射到上述 14/1.13 夹具：现有编译器�
 
 第十切片将同一份未改动的业务源码与 29 个原始执行适配场景全部投射为 Semantic 54 五能力、直接验证 IR 35 并编译 WASM；适配层新增的命名 `catch` 保持原返回值与 `Status`，标准 token 探针独立于业务路径。.NET oracle 为每例提供 18 个字段、Task 初始/终态与异常类型、循环挂起快照。Win64 Wasmtime JIT/WAMR Interpreter 在正常执行、初始挂起 teardown、首次恢复后 teardown 上完成 **174/174** 条路径，聚焦 Automation **4/4**、固定 SDK 组合专项 **43/43**、旧 IR 31 原始矩阵 **391/391** 通过；证据在工程 `Saved/AvidScriptComposableIr35/20260928T102443457Z/`。这些模式使用独立 Session 与测试 World，尚不证明真实 Actor/World 销毁、reload、`async void` 未处理错误或默认 Build And Bind。
 
+第十一切片为 29 个原始场景各生成与实际 WASM 的 import/export 和 SHA-256 匹配的 manifest，并取 `field-mode-0` 走正式 `UAvidScriptComponent` 加载。Win64 Automation 创建真实 Actor 和测试 World，在 Task 挂起时分别销毁 Actor、结束 World；WAMR 字节码与 Wasmtime serialized AOT 各覆盖两种销毁，**4/4** 条 Component 路径通过。每条路径在销毁前有 3 个 Task、3 个等待者，销毁后 Component 已收到 EndPlay、Session 已释放、旧 VM 租约失效；Actor 销毁后额外推进 4 帧，没有新的脚本 Tick。同轮原始 29 场景独立 Session 对照 **174/174**、固定 SDK 组合专项 **72/72**、聚焦 Automation **5/5**，Win64 no-clean Editor 构建通过；证据在工程 `Saved/AvidScriptComposableIr35/20260928T110029582Z/`。Component 生命周期只运行了 29 场景中的 **1 个**；其余场景的 Component 矩阵、双实例、reload、`async void` 未处理错误、默认 Build And Bind 和真实 Editor Play 仍未完成。
+
 ## 现有阻塞
 
-[SemanticAnalyzer](../../Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs)可投射特定的静态初始化 + async + token 组合。同一份 C# 源码现通过私有 Semantic 53 执行副本完成静态字段改写、异常/取消 lowering，发布保留 Semantic 54 来源的 IR 35 五能力模块，并生成确定性 WASM。原生 Host 已读取这份产物的来源和错误目录，双 VM 已执行正常完成、取消身份、独立 Session EndPlay，以及原始 [29 个成员 await 场景](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)全部的同源对照与挂起态 owner teardown；Actor/World 销毁、reload 和真实玩法仍待验证。
+[SemanticAnalyzer](../../Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs)可投射特定的静态初始化 + async + token 组合。同一份 C# 源码现通过私有 Semantic 53 执行副本完成静态字段改写、异常/取消 lowering，发布保留 Semantic 54 来源的 IR 35 五能力模块，并生成确定性 WASM。原生 Host 已读取这份产物的来源和错误目录，双 VM 已执行正常完成、取消身份、独立 Session EndPlay，以及原始 [29 个成员 await 场景](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)全部的同源对照与挂起态 owner teardown。正式 Component 的代表场景也已完成 Actor/World 销毁；完整 Component 矩阵、reload 和真实玩法仍待验证。
 
 本次还暴露了独立语言缺口：现行同步异常合同只为 `Task<int>` 方法建立异常 owner；`async void` 导出入口中直接调用可能产生语言错误的 `AvidCancellationSource.Create()` 会被 `ASCG1026` 拒绝。不能只跳过该调用的 outcome 检查，也不能把未处理异常默默转成正常返回。后续需版本化 `async void` 的本地 catch、跨 await 错误根和未处理错误向 Session 报告的合同，再用同一入口源码验证。当前可运行场景把取消源创建放在实际业务 `Task<int>` 方法中，由导出入口等待它。
 
