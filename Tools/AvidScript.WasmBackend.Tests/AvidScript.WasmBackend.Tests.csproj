@@ -20,5 +20,6 @@
     <Compile Include="../AvidScript.GuestIr.Tests/GuestStaticStorageFixture.cs" Link="GuestStaticStorageFixture.cs" />
     <Compile Include="../AvidScript.GuestIr.Tests/GuestTaskErrorTransferFixture.cs" Link="GuestTaskErrorTransferFixture.cs" />
     <Compile Include="../AvidScript.GuestIr.Tests/GuestCancellationTokenFixture.cs" Link="GuestCancellationTokenFixture.cs" />
+    <Compile Include="../AvidScript.GuestIr.Tests/GuestComposableCapabilityFixture.cs" Link="GuestComposableCapabilityFixture.cs" />
   </ItemGroup>
 </Project>

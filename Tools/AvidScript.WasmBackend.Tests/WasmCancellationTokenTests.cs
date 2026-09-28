@@ -46,6 +46,13 @@ internal static class WasmCancellationTokenTests
                 File.WriteAllBytes(Path.Combine(directory, name + ".wasm"), compiled.Bytes);
             }
         }
+        var composed = GuestComposableCapabilityFixture.SynchronousStaticToken();
+        Check(GuestModuleValidator.Validate(composed).Succeeded,
+            "IR 35 static/token composition must reach the emitter boundary as a validated module");
+        var pending = WasmModuleCompiler.Compile(composed);
+        Check(!pending.Succeeded && pending.Bytes.Length == 0
+            && pending.Diagnostics.Any(item => item.Code == "ASWB1003"),
+            "IR 35 cannot emit WASM without capability provenance and native reader support");
         return count;
     }
 }

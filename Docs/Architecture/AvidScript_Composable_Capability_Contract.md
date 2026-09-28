@@ -2,13 +2,13 @@
 
 状态：P66.C 实现中，2026-09-28。本文规定下一段实现与验收，不改变已完成的 P66.A/B、既有 Phase 状态或已发布的 IR 1–34 产物。已预留 C# Semantic 54/1.63、Guest IR 35/1.34；不能重解释旧字节。
 
-首个实现切片已在 Guest IR 中加入可选清单字段、精确执行基线/能力 ID 校验及 IR 35 严格 JSON 读取。旧版本不能携带新清单；IR 35 即使清单结构有效，仍由现有执行版本准入拒绝。
+首个实现切片已在 Guest IR 中加入可选清单字段、精确执行基线/能力 ID 校验及 IR 35 严格 JSON 读取。旧版本不能携带新清单。Guest 验证器现在可在未改写版本的手写 IR 35 夹具上核对同步 `managed.static_storage` + `error.cancellation_token_value`、14/1.13 基线、两种指令和 token 类型布局；缺计划、错基线、伪造静态槽、额外异步元数据及异常 token reader 均拒绝。其他 IR 35 能力组合尚未准入，WASM emitter 仍明确拒绝 IR 35。
 
-第二切片已让 C# 前端在显式启用静态初始化、async 异常和标准 token 分析时，从同一份源码投射 Semantic 54/1.63。能力清单按实际投射的字段和操作生成，不因 generated facade 的未调用签名登记了 token 类型就声明 token 能力。同步静态字段 + token 源码使用两项能力及 Semantic 31/1.40 基线；含 await、取消身份与异常计划的源码使用五项能力及 Semantic 50/1.59 基线。清单和静态计划的基线必须一致；其他尚未验证的组合显式拒绝。旧 Semantic 53 不写清单；Semantic 54 的未知/重复 JSON 字段、旧版夹带清单、缺失能力和冲突基线均拒绝。固定 SDK 的 Semantic 全量 1516/1516 通过。Guest lowering、WASM emitter 和原生读取者仍未准入 IR 35，因此这仍不是静态初始化 + token 可执行的证据。
+第二切片已让 C# 前端在显式启用静态初始化、async 异常和标准 token 分析时，从同一份源码投射 Semantic 54/1.63。能力清单按实际投射的字段和操作生成，不因 generated facade 的未调用签名登记了 token 类型就声明 token 能力。同步静态字段 + token 源码使用两项能力及 Semantic 31/1.40 基线；含 await、取消身份与异常计划的源码使用五项能力及 Semantic 50/1.59 基线。清单和静态计划的基线必须一致；其他尚未验证的组合显式拒绝。旧 Semantic 53 不写清单；Semantic 54 的未知/重复 JSON 字段、旧版夹带清单、缺失能力和冲突基线均拒绝。固定 SDK 的 Semantic 全量 1516/1516、Guest IR 409/409、WASM backend 417/417、既有 C# Guest 回归 4493/4493 通过。C# Guest lowering、WASM emitter 和原生读取者仍未准入 IR 35，因此这仍不是静态初始化 + token 可执行的证据。
 
 ## 现有阻塞
 
-[SemanticAnalyzer](../../Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs)现可投射特定的静态初始化 + async + token 组合，但 [GuestCancellationTokenValidator](../../Tools/AvidScript.GuestIr/Validation/GuestCancellationTokenValidator.cs)仍拒绝 IR 34 中的 `StaticStorage`，IR 35 也尚未开放执行。原始 [29 个成员 await 场景](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)需要静态对象初始化，当前可执行的是 Semantic 51 → IR 31；标准 token 专项使用 Semantic 53 → IR 34。两组通过不能证明同一个业务模块能同时使用两种能力。
+[SemanticAnalyzer](../../Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs)现可投射特定的静态初始化 + async + token 组合；IR 35 的同步两能力模块已可验证，但 [GuestCancellationTokenValidator](../../Tools/AvidScript.GuestIr/Validation/GuestCancellationTokenValidator.cs)仍拒绝 IR 34 中的 `StaticStorage`，IR 35 的异步五能力组合和整个执行路径仍未开放。原始 [29 个成员 await 场景](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)需要静态对象初始化，当前可执行的是 Semantic 51 → IR 31；标准 token 专项使用 Semantic 53 → IR 34。两组通过不能证明同一个业务模块能同时使用两种能力。
 
 当前每个新组合靠一个外层版本和 `BaseProfile` 视图回退到旧执行版本。[GuestValidationContext](../../Tools/AvidScript.GuestIr/Validation/GuestValidationContext.cs)与 [GuestStaticStorage](../../Tools/AvidScript.GuestIr/Model/GuestStaticStorage.cs)已有多重视图；[WASM provenance](../../Tools/AvidScript.WasmBackend/Codegen/WasmModuleCompiler.cs)和[原生读取者](../../Source/AvidScriptRuntime/Private/Diagnostics/AvidScriptLanguageErrorCatalog.cpp)只编码单个外层版本与 base。继续给每种组合套一个版本，会让语言前端、缓存和 Host 的组合数量随能力增长。
 
@@ -21,7 +21,7 @@
 | WASM/Host | 将已验证能力写入产物与 provenance；Runtime 按产物版本和授权导入执行 | 不从 WASM 名称猜能力，也不允许未知导入试探 |
 | 跨语言模块接口 | 另行定义数据、资源、调用、异步和错误的稳定交换合同 | 不直接共享各语言的 Task、异常对象、GC 根或闭包内存 |
 
-IR 35 将 `execution_base` 与**排序、去重、版本化**的 `capabilities` 列表分开。首版显式允许经验证的 14/1.13、17/1.16 与 29/1.28 基线；本次静态初始化 + async + token 组合使用 29/1.28，纯计算或同步模块不被迫携带 async 基线。基础指令集与能力版本是两条轴：后续增加一个可独立验证的能力，不再为所有已有能力的排列新增外层 IR。现有计划结构可以在首轮复用，但其 `BaseSchemaVersion/BaseIrVersion` 必须全部等于所选执行基线；新合同不允许多个互相矛盾的 base。规范化后只用真实输入模块做授权与所有权验证，不通过改写版本字段的临时视图绕开新组合。
+IR 35 将 `execution_base` 与**排序、去重、版本化**的 `capabilities` 列表分开。清单结构识别 14/1.13、17/1.16 与 29/1.28 基线；目前仅同步静态状态 + token 的 14/1.13 模块通过真实模块验证。后续静态初始化 + async + token 组合使用 29/1.28，纯计算或同步模块不被迫携带 async 基线。基础指令集与能力版本是两条轴：后续增加一个可独立验证的能力，不再为所有已有能力的排列新增外层 IR。现有计划结构可以在首轮复用，但其 `BaseSchemaVersion/BaseIrVersion` 必须全部等于所选执行基线；新合同不允许多个互相矛盾的 base。规范化后只用真实输入模块做授权与所有权验证，不通过改写版本字段的临时视图绕开新组合。
 
 `execution_base` 自身已有任务、错误、所有权和指令合同；能力列表只列可独立组合的增量，不把 IR 29 固有计划重新声明一遍。新验证器最终仍须检查基线与增量的全部计划、指令和 import，不能因为一项未列在增量清单中就跳过基线校验。
 

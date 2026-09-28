@@ -10,8 +10,12 @@ internal sealed class GuestValidationContext
     public GuestValidationContext(GuestModule module)
     {
         InputArtifact = module;
-        Artifact = GuestDirectAwaitReadiness.BaseProfile(GuestTaskCancellationIdentity.BaseProfile(GuestExceptionValues.BaseProfile(module)));
-        Module = GuestStaticStorage.ExecutionProfile(Artifact);
+        // IR 35 validators inspect the serialized artifact itself. Legacy
+        // envelopes retain their historical execution views for compatibility.
+        Artifact = GuestComposableCapabilities.IsVersion(module) ? module
+            : GuestDirectAwaitReadiness.BaseProfile(GuestTaskCancellationIdentity.BaseProfile(GuestExceptionValues.BaseProfile(module)));
+        Module = GuestComposableCapabilities.IsVersion(module) ? module
+            : GuestStaticStorage.ExecutionProfile(Artifact);
         diagnostics = new List<GuestDiagnostic>(module.Diagnostics);
         Types = new Dictionary<string, GuestType>(StringComparer.Ordinal);
         Imports = new Dictionary<string, GuestImport>(StringComparer.Ordinal);

@@ -14,19 +14,24 @@ internal static class GuestCancellationTokenValidator
             || import.Name.StartsWith("avid_exception_cancellation_token_", StringComparison.Ordinal)).ToArray();
         var fields = module.Types.SelectMany(type => type.Fields.Select(field => (Owner: type.Id, Field: field)))
             .Where(item => item.Field.Id.StartsWith("field:$cancellation_token:", StringComparison.Ordinal)).ToArray();
-        if (!GuestCancellationTokens.IsVersion(module))
+        bool composable = GuestComposableCapabilities.Has(module, GuestComposableCapabilities.CancellationTokenValue);
+        if (!GuestCancellationTokens.IsVersion(module) && !composable)
         {
             if (module.CancellationTokens is not null || types.Length != 0 || readers.Length != 0 || fields.Length != 0
                 || module.Provenance.SemanticSchemaVersion == GuestCancellationTokens.SemanticSchemaVersion
                 || module.Provenance.SemanticVersion == GuestCancellationTokens.SemanticVersion)
-                Add("Cancellation token values require paired Semantic 53/1.62 and Guest IR 34/1.33.");
+                Add(GuestComposableCapabilities.IsVersion(module)
+                    ? "IR 35 token values require their declared capability and canonical plan."
+                    : "Cancellation token values require paired Semantic 53/1.62 and Guest IR 34/1.33.");
             return;
         }
-        if (module.Language != "csharp" || module.CancellationTokens is not { } plan
+        if ((!composable && module.Language != "csharp") || module.CancellationTokens is not { } plan
             || !GuestCancellationTokens.IsBase(plan.BaseSchemaVersion, plan.BaseIrVersion)
-            || module.Provenance.SemanticSchemaVersion != GuestCancellationTokens.SemanticSchemaVersion
-            || module.Provenance.SemanticVersion != GuestCancellationTokens.SemanticVersion
-            || module.StaticStorage is not null || module.TaskErrorTransfers is not null)
+            || !composable && (module.Provenance.SemanticSchemaVersion != GuestCancellationTokens.SemanticSchemaVersion
+                || module.Provenance.SemanticVersion != GuestCancellationTokens.SemanticVersion
+                || module.StaticStorage is not null)
+            || composable && (plan.BaseSchemaVersion != 14 || plan.BaseIrVersion != "1.13")
+            || module.TaskErrorTransfers is not null)
         {
             Add("Token values require their exact source contract and a supported execution base.");
             return;

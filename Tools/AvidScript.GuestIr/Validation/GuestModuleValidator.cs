@@ -93,6 +93,7 @@ public static class GuestModuleValidator
             && string.Equals(module.IrVersion, GuestTaskLanguageErrorValidator.ExceptionFlowIrVersion, StringComparison.Ordinal);
         bool isDirectCleanupVersion = module.SchemaVersion == GuestTaskLanguageErrorValidator.DirectCleanupSchemaVersion
             && string.Equals(module.IrVersion, GuestTaskLanguageErrorValidator.DirectCleanupIrVersion, StringComparison.Ordinal);
+        bool isComposableVersion = GuestComposableCapabilities.IsVersion(module);
         bool isLegacyVersion = (module.SchemaVersion == LegacySchemaVersion
             && string.Equals(module.IrVersion, LegacyIrVersion, StringComparison.Ordinal))
             || (module.SchemaVersion == 2 && module.IrVersion == "1.1")
@@ -114,6 +115,7 @@ public static class GuestModuleValidator
                 && !isDirectCleanupVersion && !GuestTaskCancellationErrorValidator.IsVersion(module)
                 && !GuestTaskLocalLifetimeValidator.IsVersion(module)
                 && !GuestAsyncThrowRouteValidator.IsVersion(module)
+                && !isComposableVersion
                 && !isLegacyVersion)
             || string.IsNullOrWhiteSpace(module.ModuleId)
             || string.IsNullOrWhiteSpace(module.Language)

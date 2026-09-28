@@ -39,9 +39,8 @@ internal static class GuestComposableCapabilityTests
             CapabilityManifest = new(14, "1.13", Array.Empty<GuestCapability>()),
         };
         var pending = GuestModuleValidator.Validate(candidate);
-        Check(!pending.Succeeded && pending.Diagnostics.Any(item => item.Code == "ASIR1001")
-            && !pending.Diagnostics.Any(item => item.Code == "ASIR1042"),
-            "A well-formed IR 35 manifest is parsed but execution admission remains closed.");
+        Check(!pending.Succeeded && pending.Diagnostics.Any(item => item.Code == "ASIR1042"),
+            "An empty IR 35 capability set remains outside the admitted synchronous composition.");
         byte[] bytes = GuestIrSerializer.Serialize(candidate);
         Check(Encoding.UTF8.GetString(bytes).Contains("\"capability_manifest\"", StringComparison.Ordinal),
             "The new manifest must appear only in IR 35 artifacts.");
@@ -56,6 +55,37 @@ internal static class GuestComposableCapabilityTests
         Check(GuestIrSerializer.Serialize(candidate with { CapabilityManifest = ascending })
             .SequenceEqual(GuestIrSerializer.Serialize(candidate with { CapabilityManifest = descending })),
             "Capability construction sorts equivalent input sets to the same canonical bytes.");
+
+        GuestModule composed = GuestComposableCapabilityFixture.SynchronousStaticToken();
+        GuestValidationResult composition = GuestModuleValidator.Validate(composed);
+        Check(composition.Succeeded,
+            "A real IR 35 module validates static and token instructions together: "
+                + string.Join(" | ", composition.Diagnostics.Select(item => item.Code + ": " + item.Message)));
+        byte[] composedBytes = GuestIrSerializer.Serialize(composed);
+        Check(composedBytes.SequenceEqual(GuestIrSerializer.Serialize(GuestIrSerializer.Deserialize(composedBytes))),
+            "The admitted composition has canonical bytes.");
+        Check(GuestModuleValidator.Validate(GuestIrSerializer.Deserialize(composedBytes)).Succeeded,
+            "Canonical IR 35 bytes validate on the real module after deserialization.");
+        Reject(composed with { CancellationTokens = null }, "missing token plan in a real composite module");
+        Reject(composed with { StaticStorage = null }, "missing static plan in a real composite module");
+        Reject(composed with { DirectAwaitRoutes = Array.Empty<GuestDirectAwaitRoute>() },
+            "unlisted async route metadata in a synchronous composite module");
+        Reject(composed with { LanguageOutcomeTypes = Array.Empty<GuestLanguageOutcomeType>() },
+            "unlisted language-error metadata in a synchronous composite module");
+        Reject(composed with { CapabilityManifest = composed.CapabilityManifest! with { ExecutionBaseSchemaVersion = 17 } },
+            "real composite module with conflicting execution base");
+        Reject(composed with { Types = composed.Types.Where(type => type.Id != GuestCancellationTokens.TypeId).ToArray() },
+            "real composite module without its token value type", "ASIR1041");
+        Reject(composed with { Functions = composed.Functions.Select(function => function.Id == "read" ? function with
+        {
+            Blocks = function.Blocks.Select(block => block with
+            {
+                Instructions = block.Instructions.Select(instruction => instruction.Op == GuestStaticStorage.GetOp
+                    ? instruction with { TargetId = "static:missing" } : instruction).ToArray(),
+            }).ToArray(),
+        } : function).ToArray() }, "real composite module with an invalid static access", "ASIR1035");
+        Reject(composed with { Imports = composed.Imports.Append(GuestCancellationTokens.Reader()).ToArray() },
+            "exception-token reader in a synchronous composition", "ASIR1041");
 
         Reject(old with { CapabilityManifest = candidate.CapabilityManifest }, "old IR with new metadata");
         Reject(candidate with { SchemaVersion = 36 }, "future IR with this manifest");

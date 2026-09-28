@@ -102,7 +102,7 @@ public partial class Projectile : AvidActor
 
 标准 `CancellationToken` 属性已有双 VM 专项验证，尚未进入默认构建入口；见 [取消语义合同](Docs/Phase66/P66.C10_Cancellation_Token_Identity_Contract.md)。
 
-前端现可生成“静态字段 + `CancellationToken`”的 Semantic 54 能力清单；Guest IR 35 尚未执行该组合。当前合同见 [能力组合](Docs/Architecture/AvidScript_Composable_Capability_Contract.md)。
+前端可生成“静态字段 + `CancellationToken`”的 Semantic 54 能力清单；Guest IR 35 的同步组合已通过独立 IR 夹具验证。C# Guest lowering、WASM 输出和 UE 加载尚未接通；见 [能力组合合同](Docs/Architecture/AvidScript_Composable_Capability_Contract.md)。
 
 ## 开发
 

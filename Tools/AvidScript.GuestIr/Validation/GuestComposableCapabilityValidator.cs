@@ -83,6 +83,20 @@ internal static class GuestComposableCapabilityValidator
             && !declared.Contains(GuestComposableCapabilities.AwaitReadiness))
             Add("Cancellation identity requires await readiness.");
 
+        // Only this complete instruction/plan pair is admitted by the real-module
+        // validators. Async composition remains closed until its ownership and
+        // exception plans can be checked on the unmodified IR 35 artifact.
+        if (baseSchema != 14 || baseVersion != "1.13"
+            || declared.Count != 2
+            || !declared.Contains(GuestComposableCapabilities.StaticStorage)
+            || !declared.Contains(GuestComposableCapabilities.CancellationTokenValue))
+            Add("IR 35 currently validates only synchronous static storage with token values on base 14/1.13.");
+        if (module.LanguageOutcomeTypes is not null || module.LanguageErrorCatalog is not null
+            || module.AsyncExceptionRoutes is not null || module.DirectAwaitRoutes is not null
+            || module.AsyncExceptionTransfers is not null || module.TaskLocalLifetimes is not null
+            || module.TaskErrorTransfers is not null || module.AsyncSynchronousExceptions is not null)
+            Add("The synchronous IR 35 base cannot carry undeclared async or language-error metadata.");
+
         void RequirePlan(string id, bool present)
         {
             if (declared.Contains(id) != present)

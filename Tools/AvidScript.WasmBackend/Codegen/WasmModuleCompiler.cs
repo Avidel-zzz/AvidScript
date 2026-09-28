@@ -34,6 +34,15 @@ public static class WasmModuleCompiler
                 new[] { diagnostic });
         }
 
+        if (GuestComposableCapabilities.IsVersion(module))
+        {
+            WasmDiagnostic diagnostic = new(
+                "ASWB1003", "error",
+                "IR 35 capability provenance and native loading are not yet supported by the WASM emitter.");
+            return new WasmCompilationResult(
+                false, Array.Empty<byte>(), Array.Empty<GuestWasmDebugOffset>(), new[] { diagnostic });
+        }
+
         try
         {
             WasmCompilationOptions effectiveOptions = options ?? new WasmCompilationOptions();
