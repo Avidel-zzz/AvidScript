@@ -51,7 +51,7 @@ WASM 是执行载体，不自动带来完整语言支持、零开销或多语言
 
 命名 catch 与 token 属性已有完整异常编译路径及专项双后端运行；普通 lowering 仍拒绝绕过显式路径发布。这些专项结果不替代第 2 项的原始业务组合矩阵。
 
-IR 34 的原生版本准入、异常对象 reader 与 21 份同源 C# 专项源码现已通过双后端聚焦执行；验证覆盖预取消、挂起取消、source 释放、别名跨 GC、重复 await 和 teardown。IR 35 的同步静态/token 组合也已通过同源双 VM 执行；异步五能力同源 WASM 已通过原生错误目录读取及双 VM 正常和取消分支，后者在 `catch` 中读取静态字段并核对原 token。下一批用于原始 29 案例、挂起态 teardown、reload 与实例隔离，再接正常 CLI、generated facade、Editor Build And Bind 和包发布；另行冻结 `async void` 错误路由。专项 Automation 不替代完整玩法或默认入口证据。
+IR 34 的原生版本准入、异常对象 reader 与 21 份同源 C# 专项源码现已通过双后端聚焦执行；验证覆盖预取消、挂起取消、source 释放、别名跨 GC、重复 await 和 teardown。IR 35 的同步静态/token 组合也已通过同源双 VM 执行；异步五能力同源 WASM 已通过原生错误目录读取及双 VM 正常、显式取消、独立 Session EndPlay 三条路径，取消分支在 `catch` 中读取静态字段并核对原 token。下一批用于原始 29 案例、真实 Actor/World 销毁、reload 与实例隔离，再接正常 CLI、generated facade、Editor Build And Bind 和包发布；另行冻结 `async void` 错误路由。专项 Automation 不替代完整玩法或默认入口证据。
 
 ## 跨语言边界
 
@@ -106,6 +106,6 @@ Editor 与 Shipping 分开比较。明确每种 VM 的 JIT/AOT/interpreter 配�
 
 ## 下一步交付
 
-异常对象保活、取消身份快照、标准 token 的 Semantic/IR/WASM、两个 VM 的对象读取与专项同源 C# 执行已有独立证据；同步静态初始化/token 的同源 IR 35 双 VM 运行也已完成。异步五能力 IR 35 已通过原生来源/错误目录读取及双 VM 正常、取消分支。下一交付顺序是：原始 29 案例与挂起态生命周期、`async void` 错误路由 → 默认构建入口及准确诊断 → P66.D 完整技能流程和真实 Editor Play → P67 结构热重载原型与 P68 调试帧接口。每一步同时记录正确性、开发时间、调用成本和失败路径；只在同需求、同平台、同正确性前提下与 Puerts/AngelScript 比较。P66 仍未完成。
+异常对象保活、取消身份快照、标准 token 的 Semantic/IR/WASM、两个 VM 的对象读取与专项同源 C# 执行已有独立证据；同步静态初始化/token 的同源 IR 35 双 VM 运行也已完成。异步五能力 IR 35 已通过原生来源/错误目录读取及双 VM 正常、取消、独立 Session EndPlay 分支。下一交付顺序是：原始 29 案例与真实 Actor/World 生命周期、`async void` 错误路由 → 默认构建入口及准确诊断 → P66.D 完整技能流程和真实 Editor Play → P67 结构热重载原型与 P68 调试帧接口。每一步同时记录正确性、开发时间、调用成本和失败路径；只在同需求、同平台、同正确性前提下与 Puerts/AngelScript 比较。P66 仍未完成。
 
 后续阶段的设计冻结必须给出具体 API、模块写集、兼容规则、错误恢复和可复现验收命令。Windows 完成后再恢复移动端计划；移动平台的暂停验收不等于取消其架构要求。

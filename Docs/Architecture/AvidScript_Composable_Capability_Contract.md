@@ -18,11 +18,13 @@ C# 静态初始化不能简单映射到上述 14/1.13 夹具：现有编译器�
 
 第六切片在同一业务源码中追加只读结果导出，异步 WASM SHA-256 变为 `46262e2708beff31d26e95ac642549f62d20eb38644b8f7e6d46a616a6efda06`。Win64 Wasmtime JIT 与 WAMR Interpreter 各自调用 `BeginPlay`，观察挂起时结果 `0`，通过真实 World/Session 下一帧恢复后读到初始化静态状态 `1`，continuation 和调用帧归零；异步观察 **2/2**，原同步观察 **4/4**。固定 SDK 组合专项 **34/34**、no-clean Editor 构建、聚焦 Automation **3/3** 通过，结果与日志位于工程 `Saved/AvidScriptComposableIr35/20260928T090545205Z/`。本轮只覆盖正常完成路径，取消、异常、reload、原始 29 场景和真实玩法仍待验收。
 
-第七切片在同一源码的 `Task<int> Run` 中创建取消源、读取标准 `CancellationToken` 并等待下一帧。正常完成返回静态字段 `1`；在恢复前取消时，`catch (OperationCanceledException)` 比对原 token，再首次读取静态字段并返回 `7`，身份不符会返回 `9`。Win64 Wasmtime JIT/WAMR Interpreter 各执行两条路径，**4/4** 观察得到 `1/7`，EndPlay 后 continuation、Task 和取消源均为零。固定 SDK 组合专项 **34/34**、no-clean Editor 构建、聚焦 Automation **3/3** 通过；最终 WASM SHA-256 为 `510cbba5323649c4996dc4e22d7da663d009c5e484327dceaae77fa5d4e01498`，证据在工程 `Saved/AvidScriptComposableIr35/20260928T093521654Z/`。这验证了同一条取消执行路径上的 token 身份、异常捕获和静态初始化，不代表原始 29 场景、teardown 挂起态、reload 或默认构建入口已通过。
+第七切片在同一源码的 `Task<int> Run` 中创建取消源、读取标准 `CancellationToken` 并等待下一帧。正常完成返回静态字段 `1`；在恢复前取消时，`catch (OperationCanceledException)` 比对原 token，再首次读取静态字段并返回 `7`，身份不符会返回 `9`。Win64 Wasmtime JIT/WAMR Interpreter 各执行两条路径，**4/4** 观察得到 `1/7`，EndPlay 后 continuation、Task 和取消源均为零。固定 SDK 组合专项 **34/34**、no-clean Editor 构建、聚焦 Automation **3/3** 通过；最终 WASM SHA-256 为 `510cbba5323649c4996dc4e22d7da663d009c5e484327dceaae77fa5d4e01498`，证据在工程 `Saved/AvidScriptComposableIr35/20260928T093521654Z/`。这验证了同一条取消执行路径上的 token 身份、异常捕获和静态初始化，不代表原始 29 场景、挂起态 teardown、reload 或默认构建入口已通过。
+
+第八切片在同一 WASM 中增加第三条执行路径：`BeginPlay` 挂起后立即调用 `EndPlay` 并 teardown Session，不派发取消完成。两个 VM 均在挂起时观察结果 `0`，teardown 后 ready callback、continuation、Task、取消源和调用帧为零；加上正常与显式取消，共 **6/6** 次异步观察。固定 SDK 组合专项 **34/34**、no-clean Editor 构建和聚焦 Automation **3/3** 通过，证据在工程 `Saved/AvidScriptComposableIr35/20260928T094600201Z/`。这是独立 Session 的 EndPlay 路径；真实 Actor 销毁、World teardown、生成类型共享域和 reload 仍需分别验证。
 
 ## 现有阻塞
 
-[SemanticAnalyzer](../../Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs)可投射特定的静态初始化 + async + token 组合。同一份 C# 源码现通过私有 Semantic 53 执行副本完成静态字段改写、异常/取消 lowering，发布保留 Semantic 54 来源的 IR 35 五能力模块，并生成确定性 WASM。原生 Host 已读取这份产物的来源和错误目录，双 VM 已执行正常完成和取消身份分支；未覆盖原始 [29 个成员 await 场景](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)、挂起态 teardown、reload 和真实玩法。
+[SemanticAnalyzer](../../Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs)可投射特定的静态初始化 + async + token 组合。同一份 C# 源码现通过私有 Semantic 53 执行副本完成静态字段改写、异常/取消 lowering，发布保留 Semantic 54 来源的 IR 35 五能力模块，并生成确定性 WASM。原生 Host 已读取这份产物的来源和错误目录，双 VM 已执行正常完成、取消身份和独立 Session EndPlay 路径；未覆盖原始 [29 个成员 await 场景](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)、Actor/World 销毁、reload 和真实玩法。
 
 本次还暴露了独立语言缺口：现行同步异常合同只为 `Task<int>` 方法建立异常 owner；`async void` 导出入口中直接调用可能产生语言错误的 `AvidCancellationSource.Create()` 会被 `ASCG1026` 拒绝。不能只跳过该调用的 outcome 检查，也不能把未处理异常默默转成正常返回。后续需版本化 `async void` 的本地 catch、跨 await 错误根和未处理错误向 Session 报告的合同，再用同一入口源码验证。当前可运行场景把取消源创建放在实际业务 `Task<int>` 方法中，由导出入口等待它。
 

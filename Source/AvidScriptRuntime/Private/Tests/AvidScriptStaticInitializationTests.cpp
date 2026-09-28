@@ -231,8 +231,10 @@ bool FAvidScriptComposableIr35AsyncExecutionTest::RunTest(const FString& Paramet
     ON_SCOPE_EXIT { GEngine->DestroyWorldContext(World); World->DestroyWorld(false); };
 
     for (const auto Backend : {EAvidScriptVmBackendKind::Wasmtime, EAvidScriptVmBackendKind::Wamr})
-    for (const bool bCancelBeforeTick : {false, true})
+    for (int32 Scenario = 0; Scenario < 3; ++Scenario)
     {
+        const bool bCancelBeforeTick = Scenario == 1;
+        const bool bTeardownBeforeTick = Scenario == 2;
         FAvidScriptVmBackendSelection Selection;
         Selection.BackendKind = Backend;
         Selection.ExecutionMode = Backend == EAvidScriptVmBackendKind::Wasmtime
@@ -276,8 +278,32 @@ bool FAvidScriptComposableIr35AsyncExecutionTest::RunTest(const FString& Paramet
         };
         if (!TestTrue(TEXT("BeginPlay suspends async IR 35 source"), Runtime.BeginPlay(Result)))
         { AddError(Result.ErrorMessage); return false; }
-        TestEqual(TEXT("Async result waits for the next tick"), ReadResult(), 0);
+        const int32 PendingResult = ReadResult();
+        TestEqual(TEXT("Async result waits for the next tick"), PendingResult, 0);
         TestTrue(TEXT("Async source registered a continuation"), Owner->GetActiveCount() > 0);
+        if (bTeardownBeforeTick)
+        {
+            if (!TestTrue(TEXT("End async IR 35 domain while suspended"), Runtime.EndPlay(Result)))
+            { AddError(Result.ErrorMessage); return false; }
+            Owner->Teardown();
+            TArray<FAvidScriptContinuationCompletion> Ready;
+            Owner->DrainReady(Ready);
+            const int32 RemainingContinuations = Owner->GetActiveCount();
+            const int32 RemainingTasks = Owner->GetTaskResultsForTesting().GetCount();
+            const int32 RemainingSources = Owner->GetCancellationSourceCountForTesting();
+            TestEqual(TEXT("Suspended IR 35 teardown discards ready callbacks"), Ready.Num(), 0);
+            TestEqual(TEXT("Suspended IR 35 teardown releases continuations"), RemainingContinuations, 0);
+            TestEqual(TEXT("Suspended IR 35 teardown releases task results"), RemainingTasks, 0);
+            TestEqual(TEXT("Suspended IR 35 teardown releases cancellation sources"), RemainingSources, 0);
+            TestTrue(TEXT("Suspended IR 35 teardown releases invocation frames"),
+                Runtime.GetManagedHeapForTesting()
+                    && Runtime.GetManagedHeapForTesting()->GetStats().ActiveFrames == 0);
+            UE_LOG(LogTemp, Display, TEXT("composable-ir35-async backend=%d mode=teardown result=%d continuations=%d tasks=%d sources=%d"),
+                static_cast<int32>(Backend), PendingResult, RemainingContinuations, RemainingTasks, RemainingSources);
+            Runtime.Unload();
+            TestNull(TEXT("Suspended async IR 35 unload releases heap"), Runtime.GetManagedHeapForTesting());
+            continue;
+        }
         if (bCancelBeforeTick)
         {
             FAvidScriptVmPreparedExportCall CancelCall;
