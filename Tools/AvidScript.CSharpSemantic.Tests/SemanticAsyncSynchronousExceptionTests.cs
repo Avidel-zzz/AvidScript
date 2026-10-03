@@ -264,7 +264,126 @@ internal static class SemanticAsyncSynchronousExceptionTests
             && !originalEffects.OutcomeMethodIds.Intersect(original.AsyncMethods.Select(item => item.MethodSymbolId)).Any(),
             "Original C10 synchronous effects must stop at Task method boundaries");
         CheckEffectBoundaries(Check);
+        CheckAsyncVoidErrorOwner(Check);
         return passed;
+    }
+
+    private static void CheckAsyncVoidErrorOwner(Action<bool, string> check)
+    {
+        const string source = """
+            using System;
+            using System.Runtime.InteropServices;
+            using AvidScript;
+            public static class Script {
+                public static int Read(int mode) { if (mode == 0) throw new ArgumentException(); return mode; }
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay() {
+                    int value = Read(0);
+                    await AvidContinuations.NextTickAsync();
+                }
+            }
+            """;
+        SemanticDocument document = Analyze(source, sourceId: "Scripts/AsyncVoidOwner.cs", asyncVoidOwner: true);
+        check(SemanticContract.HasAsyncVoidErrorOwner(document)
+            && document.Diagnostics.All(item => item.Severity != "error" || item.Code == "ASCS3001")
+            && document.AsyncMethods.Count == 1,
+            "Async void source must project schema 55: "
+                + string.Join(" | ", document.Diagnostics.Select(item => item.Code + ":" + item.Message)));
+        SemanticAsyncMethod method = document.AsyncMethods.Single();
+        check(method.ExportName == "avid_on_begin_play"
+            && method.TaskResultTypeId is null
+            && method.VoidErrorOwner is { OwnerKind: SemanticAsyncVoidErrorOwner.PrivateCarrier,
+                UnhandledPolicy: SemanticAsyncVoidErrorOwner.ReportToSession }
+            && method.Segments.Any(segment => segment.SynchronousExceptionTarget
+                == method.VoidErrorOwner.UnhandledExitSegmentOrdinal),
+            "Exported async void must own synchronous error routes and a Session report exit");
+        check(SemanticAsyncInvocationValidator.IsValid(document),
+            "Schema 55 async invocation must validate: owner=" + SemanticAsyncVoidErrorOwnerValidator.IsValid(document)
+                + " sync=" + SemanticAsyncSynchronousExceptionValidator.IsValid(document)
+                + " error=" + SemanticAsyncErrorPlanValidator.IsValid(document)
+                + " plan=" + SemanticAsyncExceptionPlanValidator.IsValid(document)
+                + " lifetime=" + SemanticAsyncTaskLocalLifetimeValidator.IsValid(document)
+                + " member=" + SemanticAsyncMemberAssignmentValidator.IsValid(document)
+                + " token=" + SemanticCancellationTokenValidator.IsValid(document)
+                + " cancellation=" + SemanticAsyncCancellationPlanValidator.IsValid(document, method)
+                + " flow=" + SemanticAsyncExceptionOwnerFlow.TryAnalyze(method, out _)
+                + " segments=" + string.Join(";", method.Segments.Select(segment =>
+                    segment.Ordinal + ":" + segment.Transfer!.Kind + ":" + segment.Transfer.PrimaryTarget
+                    + ":" + segment.Transfer.SecondaryTarget + ":" + segment.Transfer.CancellationTarget)));
+        check(SemanticExceptionFlowContractValidator.IsValid(document),
+            "Schema 55 synchronous exception effects must validate");
+        byte[] canonical = SemanticSerializer.Serialize(document);
+        check(canonical.SequenceEqual(SemanticSerializer.Serialize(SemanticSerializer.Deserialize(canonical))),
+            "Schema 55 must round-trip canonically");
+        check(!SemanticAsyncInvocationValidator.IsValid(document with
+        {
+            SchemaVersion = SemanticContract.AsyncSynchronousExceptionSchemaVersion,
+            SemanticVersion = SemanticContract.AsyncSynchronousExceptionSemanticVersion,
+        }), "An older Semantic version must reject a void owner");
+        check(!SemanticAsyncInvocationValidator.IsValid(document with
+        {
+            AsyncMethods = new[] { method with { VoidErrorOwner = null } },
+        }), "A void error route without its owner must be rejected");
+        check(!SemanticAsyncInvocationValidator.IsValid(document with
+        {
+            AsyncMethods = new[] { method with
+            {
+                VoidErrorOwner = method.VoidErrorOwner! with { UnhandledExitSegmentOrdinal = method.EntrySegmentOrdinal },
+            } },
+        }), "The unhandled exit must not be interchangeable with the entry");
+
+        foreach (string body in new[]
+        {
+            "await AvidContinuations.NextTickAsync(); Read(0);",
+            "try { Read(0); } catch (ArgumentException) { Trace++; } await AvidContinuations.NextTickAsync();",
+            "try { await AvidContinuations.NextTickAsync(); Read(0); } catch (ArgumentException error) { Trace++; }",
+            "try { await AvidContinuations.NextTickAsync(); Read(0); } catch (ArgumentException) { throw; }",
+            "try { await AvidContinuations.NextTickAsync(); Read(0); } finally { Read(1); }",
+            "try { try { Read(0); await AvidContinuations.NextTickAsync(); } finally { Read(0); } } catch (Exception) { Trace++; }",
+            "await ReadAsync(0);",
+            "await AvidContinuations.NextTickAsync();",
+            "await AvidContinuations.NextTickAsync(); throw new ArgumentException();",
+        })
+        {
+            string variant = """
+                using System; using System.Threading.Tasks; using System.Runtime.InteropServices; using AvidScript;
+                public static class Script {
+                    public static int Trace;
+                    public static int Read(int mode) { if (mode == 0) throw new ArgumentException(); return mode; }
+                    public static async Task<int> ReadAsync(int mode) { await AvidContinuations.NextTickAsync(); return Read(mode); }
+                    [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                    public static async void BeginPlay() {
+                """ + body + "} }";
+            SemanticDocument candidate = Analyze(variant, sourceId: "Scripts/AsyncVoidOwner.cs", asyncVoidOwner: true);
+            check(SemanticContract.HasAsyncVoidErrorOwner(candidate)
+                && candidate.Diagnostics.All(item => item.Severity != "error" || item.Code is "ASCS3001" or "ASCS5422"),
+                "Async void variant must project: " + body + " | " + string.Join(" | ", candidate.Diagnostics.Select(item => item.Code + ":" + item.Message)));
+            check(SemanticAsyncInvocationValidator.IsValid(candidate)
+                && SemanticExceptionFlowContractValidator.IsValid(candidate), "Async void variant must validate: " + body);
+            byte[] bytes = SemanticSerializer.Serialize(candidate);
+            check(bytes.SequenceEqual(SemanticSerializer.Serialize(SemanticSerializer.Deserialize(bytes)))
+                && bytes.SequenceEqual(SemanticSerializer.Serialize(Analyze(variant, sourceId: "Scripts/AsyncVoidOwner.cs", asyncVoidOwner: true))),
+                "Async void variant must remain deterministic: " + body);
+        }
+        foreach (SemanticAsyncVoidErrorOwner owner in new[]
+        {
+            method.VoidErrorOwner! with { OwnerKind = "public_task" },
+            method.VoidErrorOwner! with { UnhandledPolicy = "ignore" },
+            method.VoidErrorOwner! with { UnhandledExitSegmentOrdinal = -1 },
+            method.VoidErrorOwner! with { UnhandledExitSegmentOrdinal = method.Segments.Count },
+        }) check(!SemanticAsyncInvocationValidator.IsValid(document with
+        {
+            AsyncMethods = new[] { method with { VoidErrorOwner = owner } },
+        }), "Invalid error ownership must fail closed");
+        int exit = method.VoidErrorOwner!.UnhandledExitSegmentOrdinal;
+        check(!SemanticAsyncInvocationValidator.IsValid(document with
+        {
+            AsyncMethods = new[] { method with { Segments = method.Segments.Select(segment =>
+                segment.Ordinal == exit ? segment with { Statements = null! } : segment).ToArray() } },
+        }), "Missing exit statements must be rejected without throwing");
+        check(!SemanticAsyncInvocationValidator.IsValid(document with { SemanticVersion = "1.63" })
+            && !SemanticAsyncInvocationValidator.IsValid(document with { SchemaVersion = 54 }),
+            "Both halves of the async void owner version must agree");
     }
 
     private static void CheckEffectBoundaries(Action<bool, string> check)
@@ -342,11 +461,12 @@ internal static class SemanticAsyncSynchronousExceptionTests
             public static async Task<int> Run(Target target, int mode) {
         """ + body + "} }";
 
-    private static SemanticDocument Analyze(string source, bool enabled = true, string sourceId = "Scripts/AsyncSynchronousExceptions.cs") =>
+    private static SemanticDocument Analyze(string source, bool enabled = true,
+        string sourceId = "Scripts/AsyncSynchronousExceptions.cs", bool asyncVoidOwner = false) =>
         SemanticAnalyzer.Analyze(source, sourceId, FrontendAnalyzer.Analyze(source, sourceId).Source.Sha256,
             new[] { new SemanticReferenceSource(Facade, "generated://Continuation.cs", true) }, new SemanticCompilerWorkspace(),
             enableAsyncExceptionFlow: true, enableDirectAwaitCleanup: true, enableAsyncCancellationFlow: true,
-            enableAsyncSynchronousExceptions: enabled);
+            enableAsyncSynchronousExceptions: enabled, enableAsyncVoidErrorOwner: asyncVoidOwner);
 
     private const string Facade = """
         using System; using System.Runtime.CompilerServices;

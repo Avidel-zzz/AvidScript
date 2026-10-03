@@ -65,9 +65,12 @@ public static class SemanticAsyncExceptionPlanValidator
                             || IsExceptionTransfer(transfer.Kind)))) return false;
                 continue;
             }
-            if (method.TaskResultTypeId != "type:int32"
+            bool voidErrorOwner = SemanticContract.HasAsyncVoidErrorOwner(document)
+                && method.VoidErrorOwner is not null;
+            if (method.TaskResultTypeId != "type:int32" && !voidErrorOwner
+                || voidErrorOwner && method.TaskResultTypeId is not null
                 || method.Lowering != SemanticAsyncMethod.ContinuationCfgLowering
-                || method.ExportName is not null
+                || method.ExportName is not null && !voidErrorOwner
                 || plan.SourceId != document.Source.SourceId
                 || plan.SourceLength != document.Source.Length
                 || plan.Regions is not { Count: <= 64 }
@@ -171,9 +174,12 @@ public static class SemanticAsyncExceptionPlanValidator
                             || !taskAwait && !directAwait)) return false;
                         if (directAwait && transfer.CancellationTarget == transfer.PrimaryTarget)
                             return false;
-                        if (transfer.SecondaryTarget >= 0
-                            && !protectedAwait || transfer.CancellationTarget is not null
-                            && !protectedAwait) return false;
+                        bool unprotectedOwnerAwait = voidErrorOwner && !protectedAwait
+                            && transfer.CancellationTarget == method.VoidErrorOwner!.UnhandledExitSegmentOrdinal
+                            && (transfer.SecondaryTarget == -1
+                                || transfer.SecondaryTarget == method.VoidErrorOwner.UnhandledExitSegmentOrdinal);
+                        if ((transfer.SecondaryTarget >= 0 || transfer.CancellationTarget is not null)
+                            && !protectedAwait && !unprotectedOwnerAwait) return false;
                         if (!languageCancellation && directAwait && transfer.CancellationTarget is int directCancellation
                             && !plan.Regions.Any(region => region.Kind == "finally"
                                 && region.Segments.Contains(directCancellation))) return false;

@@ -33,7 +33,7 @@ public static class SemanticExceptionFlowContractValidator
         if (exceptionContract && document.AsyncMethods is not { Count: 0 }) return false;
         if (combinedContract && (!SemanticContract.HasCancellationTokens(document) && (document.AsyncMethods is not { Count: > 0 }
             || !document.AsyncMethods.Any(method => method is not null
-                && (method.TaskResultTypeId is not null
+                && (method.TaskResultTypeId is not null || method.VoidErrorOwner is not null
                     || method.Segments?.Any(segment => segment?.AwaitSite?.TaskCallableId is not null) == true)))
             || !SemanticAsyncInvocationValidator.IsValid(document))) return false;
 

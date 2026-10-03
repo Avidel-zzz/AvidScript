@@ -39,7 +39,8 @@ public static class SemanticAsyncInvocationValidator
                 && document.SemanticVersion == SemanticContract.DirectAwaitCleanupSemanticVersion)
             || (document.SchemaVersion == SemanticContract.AsyncCancellationFlowSchemaVersion
                 && document.SemanticVersion == SemanticContract.AsyncCancellationFlowSemanticVersion);
-        if (!SemanticCancellationTokenValidator.IsValid(document)
+        if (!SemanticAsyncVoidErrorOwnerValidator.IsValid(document)
+            || !SemanticCancellationTokenValidator.IsValid(document)
             || !SemanticAsyncSynchronousExceptionValidator.IsValid(document)
             || !SemanticAsyncErrorPlanValidator.IsValid(document)
             || !SemanticAsyncExceptionPlanValidator.IsValid(document)
@@ -92,7 +93,7 @@ public static class SemanticAsyncInvocationValidator
             {
                 if (string.IsNullOrWhiteSpace(method.ExportName) || !callable.IsStatic
                     || callable.Parameters.Count != 0 || method.InvocationInputs.Count != 0) return false;
-                if (method.TaskLocalLifetimes is null) continue;
+                if (method.TaskLocalLifetimes is null && method.VoidErrorOwner is null) continue;
             }
             if (method.Lowering != SemanticAsyncMethod.ContinuationCfgLowering
                 || callable.Parameters.Any(parameter => parameter.RefKind != "none")

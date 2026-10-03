@@ -56,7 +56,10 @@ public static class SemanticAsyncErrorPlanValidator
                 || method.Segments.Where((segment, ordinal) =>
                     segment is null || segment.Ordinal != ordinal || segment.Transfer is null).Any())
                 return false;
-            if (method.TaskResultTypeId != "type:int32" || method.ExportName is not null
+            bool voidErrorOwner = SemanticContract.HasAsyncVoidErrorOwner(document)
+                && method.VoidErrorOwner is not null;
+            if (method.TaskResultTypeId != "type:int32" && !voidErrorOwner
+                || method.ExportName is not null && !voidErrorOwner
                 || method.Lowering != SemanticAsyncMethod.ContinuationCfgLowering
                 || plan.SourceId != document.Source.SourceId
                 || plan.SourceLength != document.Source.Length

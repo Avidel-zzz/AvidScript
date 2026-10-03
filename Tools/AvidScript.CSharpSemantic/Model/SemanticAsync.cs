@@ -44,6 +44,11 @@ public sealed record SemanticAsyncMethod(
     [JsonPropertyOrder(13), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<SemanticAsyncTaskLocalLifetime>? TaskLocalLifetimes { get; init; }
 
+    // Schema 55: an async void invocation owns a private error carrier until
+    // the error is handled or reported to its Session at this unique exit.
+    [JsonPropertyOrder(14), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SemanticAsyncVoidErrorOwner? VoidErrorOwner { get; init; }
+
     public static string ReceiverSymbol(string methodSymbolId) => "receiver:" + methodSymbolId;
 
     public const string ReentrantZeroHeapCpsLowering = "reentrant_zero_heap_cps";
@@ -74,6 +79,15 @@ public sealed record SemanticAsyncMethod(
     public const int MaximumStructuredFlowNodes = 256;
     public const int MaximumStructuredFlowDepth = 8;
     public const int MaximumControlFlowSegments = 64;
+}
+
+public sealed record SemanticAsyncVoidErrorOwner(
+    [property: JsonPropertyOrder(0)] string OwnerKind,
+    [property: JsonPropertyOrder(1)] string UnhandledPolicy,
+    [property: JsonPropertyOrder(2)] int UnhandledExitSegmentOrdinal)
+{
+    public const string PrivateCarrier = "private_carrier";
+    public const string ReportToSession = "report_to_session";
 }
 
 public sealed record SemanticAsyncTaskLocalLifetime(

@@ -43,6 +43,12 @@ public static class SemanticContract
     public const string AsyncCatchVariableSemanticVersion = "1.61";
     public const int CancellationTokenSchemaVersion = 53;
     public const string CancellationTokenSemanticVersion = "1.62";
+    public const int AsyncVoidErrorOwnerSchemaVersion = 55;
+    public const string AsyncVoidErrorOwnerSemanticVersion = "1.64";
+
+    public static bool HasAsyncVoidErrorOwner(SemanticDocument document) =>
+        document.SchemaVersion == AsyncVoidErrorOwnerSchemaVersion
+        && document.SemanticVersion == AsyncVoidErrorOwnerSemanticVersion;
 
     public static bool HasCancellationTokens(SemanticDocument document) =>
         document.SchemaVersion == CancellationTokenSchemaVersion
@@ -54,7 +60,8 @@ public static class SemanticContract
         && document.SemanticVersion == AsyncCatchVariableSemanticVersion
         || document.SchemaVersion == CancellationTokenSchemaVersion
             && document.SemanticVersion == CancellationTokenSemanticVersion
-        || SemanticComposableCapabilities.Has(document, SemanticComposableCapabilities.ExceptionValues);
+        || SemanticComposableCapabilities.Has(document, SemanticComposableCapabilities.ExceptionValues)
+        || HasAsyncVoidErrorOwner(document);
 
     public static bool HasAsyncSynchronousExceptions(SemanticDocument document) =>
         document.SchemaVersion == AsyncSynchronousExceptionSchemaVersion
@@ -63,7 +70,8 @@ public static class SemanticContract
             && document.SemanticVersion == AsyncCatchVariableSemanticVersion
         || document.SchemaVersion == CancellationTokenSchemaVersion
             && document.SemanticVersion == CancellationTokenSemanticVersion
-        || SemanticComposableCapabilities.Has(document, SemanticComposableCapabilities.ExceptionValues);
+        || SemanticComposableCapabilities.Has(document, SemanticComposableCapabilities.ExceptionValues)
+        || HasAsyncVoidErrorOwner(document);
 
     public static bool HasAsyncMemberAssignments(SemanticDocument document) =>
         document.SchemaVersion == AsyncMemberAssignmentSchemaVersion
@@ -124,5 +132,7 @@ public static class SemanticContract
         || (schemaVersion == CancellationTokenSchemaVersion
             && semanticVersion == CancellationTokenSemanticVersion)
         || (schemaVersion == SemanticComposableCapabilities.SchemaVersion
-            && semanticVersion == SemanticComposableCapabilities.SemanticVersion);
+            && semanticVersion == SemanticComposableCapabilities.SemanticVersion)
+        || (schemaVersion == AsyncVoidErrorOwnerSchemaVersion
+            && semanticVersion == AsyncVoidErrorOwnerSemanticVersion);
 }

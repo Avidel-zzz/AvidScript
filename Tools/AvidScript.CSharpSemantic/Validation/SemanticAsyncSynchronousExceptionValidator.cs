@@ -21,15 +21,18 @@ public static class SemanticAsyncSynchronousExceptionValidator
         if (document.StaticInitialization is not null
                 && !SemanticComposableCapabilities.IsVersion(document)
             || !SemanticContract.HasCancellationTokens(document)
-                && !document.AsyncMethods.Any(method => method.TaskResultTypeId == "type:int32")) return false;
+                && !document.AsyncMethods.Any(method => method.TaskResultTypeId == "type:int32"
+                    || method.VoidErrorOwner is not null)) return false;
         foreach (var method in document.AsyncMethods)
         {
-            if (method.TaskResultTypeId is null)
+            if (method.TaskResultTypeId is null && method.VoidErrorOwner is null)
             {
                 if (method.Segments.Any(segment => segment.SynchronousExceptionTarget is not null)) return false;
                 continue;
             }
             if (method.TaskResultTypeId != "type:int32"
+                    && !(SemanticContract.HasAsyncVoidErrorOwner(document)
+                        && method.TaskResultTypeId is null && method.VoidErrorOwner is not null)
                 || method.Lowering != SemanticAsyncMethod.ContinuationCfgLowering
                 || method.Segments.Count is 0 or > SemanticAsyncMethod.MaximumControlFlowSegments
                 || method.ExceptionPlan is not { Regions: { Count: <= 64 } regions, ExceptionScopes: { Count: <= 64 } scopes }

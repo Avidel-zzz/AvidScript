@@ -27,7 +27,8 @@ internal static class SemanticControlFlowProjector
         bool enableAsyncExceptionFlow = false,
         bool enableDirectAwaitCleanup = false,
         bool enableAsyncCancellationFlow = false,
-        bool enableAsyncSynchronousExceptions = false)
+        bool enableAsyncSynchronousExceptions = false,
+        bool enableAsyncVoidErrorOwner = false)
     {
         List<SemanticDiagnostic> diagnostics = new();
         List<SemanticControlFlowGraph> graphs = new();
@@ -90,9 +91,10 @@ internal static class SemanticControlFlowProjector
                         {
                             if (body.Unit.SyntaxTree == context.SyntaxTree
                                 && body.Declaration is MethodDeclarationSyntax { Body: { } asyncBody }
-                                && SemanticAsyncProjector.TryGetSupportedTaskResult(
+                                && (SemanticAsyncProjector.TryGetSupportedTaskResult(
                                     context.Compilation, body.Method.ReturnType,
-                                    out ITypeSymbol? resultType))
+                                    out ITypeSymbol? resultType)
+                                    || enableAsyncVoidErrorOwner && body.Method.ReturnsVoid))
                             {
                                 List<SemanticDiagnostic> previewDiagnostics = new();
                                 int previewCallbackId = nextAsyncCallbackId;
@@ -101,9 +103,9 @@ internal static class SemanticControlFlowProjector
                                         sourceFlow.MethodSymbolId, typeRegistry,
                                         previewDiagnostics, ref previewCallbackId,
                                         out SemanticAsyncControlFlowProjection? preview,
-                                        allowValueReturns: true, resultType: resultType,
+                                        allowValueReturns: resultType is not null, resultType: resultType,
                                         previewSuspendedFinally: true,
-                                        allowDirectAwaitCleanup: enableDirectAwaitCleanup,
+                                        allowDirectAwaitCleanup: enableDirectAwaitCleanup || enableAsyncVoidErrorOwner,
                                         allowAsyncCancellationFlow: enableAsyncCancellationFlow,
                                         allowSynchronousExceptions: enableAsyncSynchronousExceptions)
                                     && preview is not null
@@ -140,12 +142,12 @@ internal static class SemanticControlFlowProjector
                                                 boundRegions,
                                             out IReadOnlyList<SemanticAsyncExceptionScope> boundScopes))
                                     {
+                                        SemanticCallable? asyncCallable = callables.SingleOrDefault(callable =>
+                                            callable.MethodSymbolId == sourceFlow.MethodSymbolId);
+                                        bool voidErrorOwner = enableAsyncVoidErrorOwner && body.Method.ReturnsVoid;
                                         if (enableAsyncExceptionFlow
-                                            && callables.Any(callable =>
-                                                callable.MethodSymbolId == sourceFlow.MethodSymbolId
-                                                && callable.HasBody && !callable.IsConstructor
-                                                && callable.Export is null
-                                                && callable.Import is null)
+                                            && asyncCallable is { HasBody: true, IsConstructor: false, Import: null }
+                                            && (asyncCallable.Export is null || voidErrorOwner)
                                             && body.Method.Parameters.All(parameter =>
                                                 parameter.RefKind == RefKind.None)
                                             && !body.Method.IsGenericMethod
@@ -154,7 +156,7 @@ internal static class SemanticControlFlowProjector
                                                 == TypeKind.Class)
                                         {
                                             SemanticAsyncMethod exceptionMethod = new(
-                                                sourceFlow.MethodSymbolId, null,
+                                                sourceFlow.MethodSymbolId, asyncCallable.Export?.Name,
                                                 SemanticAsyncMethod.ContinuationCfgLowering,
                                                 framed, bodySpan,
                                                 preview.EntrySegmentOrdinal)
@@ -162,7 +164,12 @@ internal static class SemanticControlFlowProjector
                                                 CompilerLocals = preview.CompilerLocals,
                                                 InvocationInputs = inputs,
                                                 LexicalScopes = preview.LexicalScopes,
-                                                TaskResultTypeId = typeRegistry.Register(resultType!),
+                                                TaskResultTypeId = resultType is null ? null : typeRegistry.Register(resultType),
+                                                VoidErrorOwner = voidErrorOwner ? new SemanticAsyncVoidErrorOwner(
+                                                    SemanticAsyncVoidErrorOwner.PrivateCarrier,
+                                                    SemanticAsyncVoidErrorOwner.ReportToSession,
+                                                    framed.SingleOrDefault(segment => segment.Transfer?.Kind
+                                                        == SemanticAsyncMethod.PropagateExceptionTransferKind)?.Ordinal ?? -1) : null,
                                                 TaskLocalSymbolIds = SemanticAsyncProjector.GetTaskAliasLocalIds(
                                                     context, semanticModel, asyncBody),
                                                 TaskLocalLifetimes = SemanticAsyncTaskLocalProjector.ProjectLifetimes(

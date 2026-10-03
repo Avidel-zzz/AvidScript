@@ -31,6 +31,12 @@ public static class CSharpLanguageErrorCompiler
     {
         compilation = null;
         error = null;
+        if (semantic is null || semantic.AsyncMethods is null)
+            return Fail("Expected a validated exception-flow artifact without unrelated errors.", out error);
+        if (semantic is not null && (semantic.SchemaVersion == SemanticContract.AsyncVoidErrorOwnerSchemaVersion
+            || semantic.SemanticVersion == SemanticContract.AsyncVoidErrorOwnerSemanticVersion
+            || semantic.AsyncMethods.Any(method => method?.VoidErrorOwner is not null)))
+            return Fail("Async void error owners require IR 36 execution and report lowering before Guest publication.", out error);
         var tokenContext = semantic is null ? null : CSharpCancellationTokenExecutionContext.Find(semantic);
         if (semantic is not null && (semantic.SchemaVersion == GuestCancellationTokens.SemanticSchemaVersion
             || semantic.SemanticVersion == GuestCancellationTokens.SemanticVersion) && tokenContext is null)

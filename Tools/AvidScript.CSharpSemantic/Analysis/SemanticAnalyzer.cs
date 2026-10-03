@@ -41,7 +41,8 @@ public static class SemanticAnalyzer
         bool enableStaticInitialization = false,
         bool enableAsyncSynchronousExceptions = false,
         bool enableAsyncCatchVariables = false,
-        bool enableCancellationTokens = false)
+        bool enableCancellationTokens = false,
+        bool enableAsyncVoidErrorOwner = false)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceId);
@@ -61,6 +62,10 @@ public static class SemanticAnalyzer
         if (enableCancellationTokens && !enableAsyncCatchVariables)
             throw new ArgumentException("Cancellation token values require async catch variable analysis.",
                 nameof(enableCancellationTokens));
+        if (enableAsyncVoidErrorOwner && (!enableAsyncSynchronousExceptions
+                || enableStaticInitialization || enableCancellationTokens))
+            throw new ArgumentException("The async void error owner source contract requires synchronous async exception analysis and currently excludes static/token composition.",
+                nameof(enableAsyncVoidErrorOwner));
 
         string sourceSha256 = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source))).ToLowerInvariant();
         SemanticSource semanticSource = new(sourceId, sourceSha256, frontendSourceSha256, source.Length);
@@ -101,7 +106,7 @@ public static class SemanticAnalyzer
         context = context with
         {
             EnableAsyncSynchronousExceptions = enableAsyncSynchronousExceptions,
-            EnableAsyncCatchVariables = enableAsyncCatchVariables,
+            EnableAsyncCatchVariables = enableAsyncCatchVariables || enableAsyncVoidErrorOwner,
             EnableCancellationTokens = enableCancellationTokens,
             RequireTaskLocalLifetimes = enableAsyncSynchronousExceptions || enableAsyncCancellationFlow
                 && SemanticAsyncTaskLocalProjector.HasRoutedThrowSource(context)
@@ -131,7 +136,8 @@ public static class SemanticAnalyzer
             context,
             typeRegistry,
             callableProjection.Callables,
-            enableAsyncExceptionFlow, enableAsyncSynchronousExceptions);
+            enableAsyncExceptionFlow, enableAsyncSynchronousExceptions,
+            enableAsyncVoidErrorOwner);
         SemanticControlFlowProjection controlFlowProjection = SemanticControlFlowProjector.Project(
             context,
             typeRegistry,
@@ -140,7 +146,8 @@ public static class SemanticAnalyzer
             callableProjection.Callables,
             enableAsyncExceptionFlow,
             enableDirectAwaitCleanup,
-            enableAsyncCancellationFlow, enableAsyncSynchronousExceptions);
+            enableAsyncCancellationFlow, enableAsyncSynchronousExceptions,
+            enableAsyncVoidErrorOwner);
         asyncProjection = asyncProjection with
         {
             Methods = asyncProjection.Methods.Concat(
@@ -278,15 +285,17 @@ public static class SemanticAnalyzer
         bool hasDirectAwaitCleanup = asyncProjection.Methods.Any(method => method.ExceptionPlan is not null
             && method.Segments.Any(segment => segment.AwaitSite?.ProducerKind is "delay" or "next_tick"
                 && segment.Transfer?.CancellationTarget is >= 0));
-        bool hasTaskLanguageErrors = hasExceptionFlows && hasTaskResults;
-        bool synchronousExceptions = enableAsyncSynchronousExceptions && hasTaskResults;
-        bool catchVariables = enableAsyncCatchVariables && asyncProjection.Methods.Any(method =>
+        bool hasVoidErrorOwners = asyncProjection.Methods.Any(method => method.VoidErrorOwner is not null);
+        bool hasTaskLanguageErrors = hasExceptionFlows && (hasTaskResults || hasVoidErrorOwners);
+        bool synchronousExceptions = enableAsyncSynchronousExceptions && (hasTaskResults || hasVoidErrorOwners);
+        bool catchVariables = (enableAsyncCatchVariables || enableAsyncVoidErrorOwner) && asyncProjection.Methods.Any(method =>
             method.ExceptionPlan?.Catches.Any(handler => handler.ExceptionVariableSymbolId is not null) == true);
         bool tokenValues = typeRegistry.HasCancellationTokens
             && SemanticComposableCapabilities.UsesTokenValues(
                 symbols, operationProjection.Methods, asyncProjection.Methods);
         var document = new SemanticDocument(
-            tokenValues ? SemanticContract.CancellationTokenSchemaVersion
+            hasVoidErrorOwners ? SemanticContract.AsyncVoidErrorOwnerSchemaVersion
+                : tokenValues ? SemanticContract.CancellationTokenSchemaVersion
                 : catchVariables ? SemanticContract.AsyncCatchVariableSchemaVersion
                 : synchronousExceptions ? SemanticContract.AsyncSynchronousExceptionSchemaVersion
                 : hasMemberAssignments ? SemanticContract.AsyncMemberAssignmentSchemaVersion
@@ -305,7 +314,8 @@ public static class SemanticAnalyzer
                 : hasTaskResults ? SemanticContract.TaskResultSchemaVersion
                 : SemanticContract.CurrentSchemaVersion,
             "csharp",
-            tokenValues ? SemanticContract.CancellationTokenSemanticVersion
+            hasVoidErrorOwners ? SemanticContract.AsyncVoidErrorOwnerSemanticVersion
+                : tokenValues ? SemanticContract.CancellationTokenSemanticVersion
                 : catchVariables ? SemanticContract.AsyncCatchVariableSemanticVersion
                 : synchronousExceptions ? SemanticContract.AsyncSynchronousExceptionSemanticVersion
                 : hasMemberAssignments ? SemanticContract.AsyncMemberAssignmentSemanticVersion

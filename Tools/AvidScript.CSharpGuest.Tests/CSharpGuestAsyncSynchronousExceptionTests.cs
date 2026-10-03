@@ -96,6 +96,30 @@ internal static class CSharpGuestAsyncSynchronousExceptionTests
             && compiled is null && error is not null
             && error.Contains("validated async exception target or owner", StringComparison.Ordinal),
             "A direct synchronous error in exported async void must not publish without a validated owner: " + error);
+
+        var preview = SemanticAnalyzer.Analyze(source, sourceId, hash,
+            new[] { new SemanticReferenceSource(CSharpGuestContinuationTests.ReferenceFacade,
+                "generated://AvidScript.Continuations.generated.cs", true) }, new SemanticCompilerWorkspace(),
+            enableAsyncExceptionFlow: true, enableAsyncCancellationFlow: true,
+            enableAsyncSynchronousExceptions: true, enableAsyncVoidErrorOwner: true);
+        check(SemanticContract.HasAsyncVoidErrorOwner(preview)
+            && SemanticAsyncInvocationValidator.IsValid(preview), "The new async void source owner must validate.");
+        foreach (var candidate in new[]
+        {
+            preview,
+            preview with { SchemaVersion = 50, SemanticVersion = "1.59" },
+            preview with { SchemaVersion = 54 },
+            preview with { SemanticVersion = "1.63" },
+        })
+        {
+            string candidateHash = Convert.ToHexString(SHA256.HashData(SemanticSerializer.Serialize(candidate))).ToLowerInvariant();
+            var result = CSharpGuestLowerer.Lower(candidate, candidateHash, enableAsyncLanguageErrors: true);
+            check(!result.Succeeded && result.Module is null && result.Diagnostics.Any(item => item.Code == "ASCG1030"),
+                "Neither a preview nor a disguised async void owner can enter legacy Guest IR.");
+            check(!CSharpLanguageErrorCompiler.TryLower(candidate, candidateHash, out var pending, out string? pendingError)
+                && pending is null && pendingError is not null && pendingError.Contains("IR 36", StringComparison.Ordinal),
+                "The language-error compiler cannot publish a partially implemented void owner.");
+        }
     }
 
     private static void CheckSharedCatalog(Action<bool, string> check)

@@ -138,6 +138,8 @@ internal static class SemanticAsyncControlFlowProjector
                 faultCleanupTarget = AddDraft(body.CloseBraceToken.Span,
                     Array.Empty<SemanticAsyncStatement>(), null,
                     new DraftTransfer(SemanticAsyncMethod.PropagateExceptionTransferKind, null, -1, -1));
+            if (allowSynchronousExceptions && !allowValueReturns)
+                cancellationCleanupTarget = faultCleanupTarget;
             int exit = AddDraft(
                 body.CloseBraceToken.Span,
                 Array.Empty<SemanticAsyncStatement>(),
@@ -475,7 +477,7 @@ internal static class SemanticAsyncControlFlowProjector
                             -1,
                             -1));
 
-                case ThrowStatementSyntax { Expression: { } exception } when allowValueReturns:
+                case ThrowStatementSyntax { Expression: { } exception } when allowValueReturns || allowSynchronousExceptions:
                 {
                     if (!TryProjectValue(exception, out SemanticOperation? thrown)) return -1;
                     if (thrown is not
@@ -485,7 +487,7 @@ internal static class SemanticAsyncControlFlowProjector
                         || thrown.SymbolId != constructor)
                     {
                         return Reject(
-                            "Async Task<int> throw requires a supported zero-argument framework exception constructor.",
+                            "Controlled async throw requires a supported zero-argument framework exception constructor.",
                             statement.Span,
                             "ASCS5421");
                     }
@@ -609,7 +611,7 @@ internal static class SemanticAsyncControlFlowProjector
                     .OfType<TryStatementSyntax>().Any() == true))
                 return Reject("Cancellation flow preview does not yet support nested handlers inside catch/finally.",
                     statement.Span, "ASCS5420");
-            if (!allowValueReturns || statement.Catches.Any(clause =>
+            if (!allowValueReturns && !allowSynchronousExceptions || statement.Catches.Any(clause =>
                     clause.Filter is not null
                     || !context.EnableAsyncCatchVariables && !string.IsNullOrEmpty(clause.Declaration?.Identifier.ValueText))
                 || statement.Finally?.Block.DescendantNodes()
@@ -827,7 +829,8 @@ internal static class SemanticAsyncControlFlowProjector
             LoopTargets targets,
             int depth)
         {
-            if (!allowValueReturns || statement.Catches.Count != 0 || statement.Finally is null)
+            if (!allowValueReturns && !allowSynchronousExceptions
+                || statement.Catches.Count != 0 || statement.Finally is null)
             {
                 return Reject(
                     "Structured cleanup requires a synchronous try/finally without catch clauses.",

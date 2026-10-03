@@ -92,7 +92,8 @@ public static class SemanticAsyncCatchVariableValidator
                 bindings++;
             }
         }
-        return !enabled || bindings > 0 || SemanticContract.HasCancellationTokens(document);
+        return !enabled || bindings > 0 || SemanticContract.HasCancellationTokens(document)
+            || SemanticContract.HasAsyncVoidErrorOwner(document);
     }
 
     private static bool Canonical(SemanticOperation operation, SemanticSymbol symbol) =>
