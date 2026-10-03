@@ -132,6 +132,21 @@ TSharedRef<FJsonObject> Document(int32 GuestSchema = 17)
 	return Root;
 }
 
+FString VoidOwnerProvenance(const TCHAR* Capabilities = TEXT("error.async_void_owner@1"))
+{
+	return Provenance(36) + FString::Printf(TEXT("\nexecution_base=29/1.28\ntask_local_exception_model=cancellation")
+		TEXT("\ncapabilities=%s\nsource_language=csharp\nsemantic=55/1.64"), Capabilities);
+}
+
+TArray<uint8> VoidOwnerModule(const FString* Metadata, const FString& ProvenanceText = VoidOwnerProvenance())
+{
+	TArray<uint8> Wasm;
+	Wasm.Append(BaseWasm, UE_ARRAY_COUNT(BaseWasm));
+	Custom(Wasm, "avidscript.provenance", ProvenanceText);
+	if (Metadata) Custom(Wasm, "avidscript.language_errors", *Metadata);
+	return Wasm;
+}
+
 FString Json(const TSharedRef<FJsonObject>& Root)
 {
 	FString Text;
@@ -1432,6 +1447,144 @@ bool FAvidScriptTaskLanguageErrorAdmissionTest::RunTest(const FString& Parameter
 			&& Heap->GetStats().LiveRoots == 0);
 		ForeignOwner->Teardown();
 		Owner->Teardown();
+		Runtime.Unload();
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptAsyncVoidCatalogTest,
+	"AvidScript.Runtime.LanguageErrorCatalog.AsyncVoidAdmission",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptAsyncVoidCatalogTest::RunTest(const FString& Parameters)
+{
+	using namespace AvidScriptLanguageErrorCatalogTests;
+	const FString Metadata = Json(Document(36));
+	TUniquePtr<FAvidScriptLanguageErrorCatalog> Catalog;
+	FString Error;
+	TestTrue(TEXT("IR36 owner-only catalog admits the exact source contract"),
+		FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(VoidOwnerModule(&Metadata), ModuleId, Catalog, Error));
+	TestTrue(TEXT("Owner-only contract grants fault and lifetime cancellation, without optional APIs"),
+		Catalog && Catalog->SupportsAsyncVoidErrorOwner() && Catalog->SupportsTaskLanguageErrorFault()
+			&& Catalog->SupportsTaskCancellationError() && !Catalog->SupportsTaskCancellationIdentity()
+			&& !Catalog->SupportsExceptionCancellationToken());
+	for (const TCHAR* Capabilities : {TEXT("async.cancellation_identity@1,error.async_void_owner@1"),
+		TEXT("error.async_void_owner@1,error.cancellation_token_value@1"),
+		TEXT("async.await_readiness@1,async.cancellation_identity@1,error.async_void_owner@1,error.exception_values@1")})
+	{
+		if (!TestTrue(TEXT("IR36 actual optional capabilities admit independently"),
+			FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+				VoidOwnerModule(&Metadata, VoidOwnerProvenance(Capabilities)), ModuleId, Catalog, Error))) return false;
+		const FString Declared(Capabilities);
+		TestEqual(TEXT("Identity API requires its actual declaration"), Catalog->SupportsTaskCancellationIdentity(),
+			Declared.Contains(TEXT("async.cancellation_identity@1")));
+		TestEqual(TEXT("Token API requires its actual declaration"), Catalog->SupportsExceptionCancellationToken(),
+			Declared.Contains(TEXT("error.cancellation_token_value@1")));
+	}
+	TestFalse(TEXT("IR36 requires its catalog"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+		VoidOwnerModule(nullptr), ModuleId, Catalog, Error));
+	TestFalse(TEXT("IR36 binds the loaded module identity"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+		VoidOwnerModule(&Metadata), TEXT("other_module"), Catalog, Error));
+	const FString LegacyMetadata = Json(Document(35));
+	TestFalse(TEXT("IR35 catalog cannot authorize IR36 bytes"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+		VoidOwnerModule(&LegacyMetadata), ModuleId, Catalog, Error));
+	for (const FString& Invalid : {
+		VoidOwnerProvenance(TEXT("")), VoidOwnerProvenance(TEXT("async.await_readiness@1")),
+		VoidOwnerProvenance(TEXT("error.async_void_owner@2")),
+		VoidOwnerProvenance(TEXT("error.async_void_owner@1,error.async_void_owner@1")),
+		VoidOwnerProvenance(TEXT("managed.static_storage@1,error.async_void_owner@1")),
+		VoidOwnerProvenance(TEXT("error.async_void_owner@1,")),
+		VoidOwnerProvenance(TEXT("error.async_void_owner@1,error.exception_values@1")),
+		VoidOwnerProvenance().Replace(TEXT("guest_ir=36/1.35"), TEXT("guest_ir=36/1.36")),
+		VoidOwnerProvenance().Replace(TEXT("semantic=55/1.64"), TEXT("semantic=54/1.63")),
+		VoidOwnerProvenance().Replace(TEXT("execution_base=29/1.28"), TEXT("execution_base=26/1.25")),
+		VoidOwnerProvenance().Replace(TEXT("task_local_exception_model=cancellation"), TEXT("task_local_exception_model=none")),
+		VoidOwnerProvenance().Replace(TEXT("source_language=csharp"), TEXT("source_language=guest-ir")),
+		VoidOwnerProvenance().Replace(*(TEXT("source_sha256=") + SourceSha256), TEXT("source_sha256=bad")),
+		VoidOwnerProvenance() + TEXT("\nunknown=1")})
+	{
+		TestFalse(TEXT("IR36 rejects malformed capability, version, provenance and ownership contracts"),
+			FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(VoidOwnerModule(&Metadata, Invalid), ModuleId, Catalog, Error));
+		TestFalse(TEXT("Rejected contract publishes no catalog"), Catalog != nullptr);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptAsyncVoidReportTest,
+	"AvidScript.Runtime.LanguageErrorCatalog.AsyncVoidCheckedReport",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptAsyncVoidReportTest::RunTest(const FString& Parameters)
+{
+	using namespace AvidScriptLanguageErrorCatalogTests;
+	using namespace AvidScript::Managed;
+	for (const auto& Lane : GetAvidScriptRuntimeBackendTestLanes())
+	{
+		FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
+		FAvidScriptWasmSmokeResult Result;
+		const FString Metadata = Json(Document(36));
+		const auto Wasm = VoidOwnerModule(&Metadata);
+		if (!TestTrue(TEXT("Checked-report module loads"), Runtime.LoadModule(Wasm.GetData(), Wasm.Num(), ModuleId, Result)))
+		{ AddError(Result.ErrorMessage); return false; }
+		auto* Heap = Runtime.GetManagedHeapForTesting();
+		const std::array<FHeapLayout, 1> Layouts{{{1, 8, {}}}};
+		if (!TestTrue(TEXT("Report heap configures"), Heap && Heap->Configure(Layouts) == EHeapError::Ok)) return false;
+		auto Report = [&](FToken Object, int32 Type = 1, int32 Source = 1) {
+			FAvidScriptHostCall Call;
+			Call.BindingId = EAvidScriptHostBindingId::LanguageErrorReportV1;
+			Call.IntArgs[0] = Type; Call.IntArgs[1] = Source; Call.Int64Args[0] = static_cast<int64>(Object);
+			FAvidScriptHostCallResult CallResult;
+			(void)Runtime.DispatchHostCall(Call, CallResult);
+			return CallResult;
+		};
+		auto Allocate = [&]() -> FToken {
+			FToken Frame = 0, Root = 0, Object = 0;
+			TestEqual(TEXT("Report frame starts"), Heap->PushFrame(Frame), EHeapError::Ok);
+			TestEqual(TEXT("Report root starts"), Heap->CreateRoot(Frame, 0, Root), EHeapError::Ok);
+			TestEqual(TEXT("Report object allocates"), Heap->Allocate(1, Root, Object), EHeapError::Ok);
+			return Object;
+		};
+		const uint64 Invocation = Runtime.BeginVmInvocation();
+		const auto Object = Allocate();
+		TestEqual(TEXT("An arbitrary VM entry cannot defer an error without a typed callback"),
+			Report(Object).ErrorCategory, FString(TEXT("language_error_report_context")));
+		Runtime.BeginTypedCallbackEpochForTesting();
+		TestEqual(TEXT("Unknown type report fails immediately"), Report(Object, 2).ErrorCategory,
+			FString(TEXT("language_error_invalid_report")));
+		TestEqual(TEXT("Unknown source report fails immediately"), Report(Object, 1, 2).ErrorCategory,
+			FString(TEXT("language_error_invalid_report")));
+		TestEqual(TEXT("An unrooted object fails immediately"), Report(0).ErrorCategory,
+			FString(TEXT("language_error_invalid_report")));
+		const auto Accepted = Report(Object);
+		TestTrue(TEXT("Valid report accepts exactly once before Guest cleanup"), Accepted.bSucceeded && Accepted.ReturnValue == 1);
+		Runtime.EndVmInvocation(Invocation);
+		TestEqual(TEXT("Diagnostic holds no managed roots"), Heap->GetStats().LiveRoots, 0u);
+		TestEqual(TEXT("Diagnostic holds no managed frames"), Heap->GetStats().ActiveFrames, 0u);
+		TestEqual(TEXT("Reported object can collect before diagnostic delivery"), Heap->Collect(), EHeapError::Ok);
+		TestEqual(TEXT("Reported object is not retained by the callback"), Heap->GetStats().LiveObjects, 0u);
+		FAvidScriptVmError Error;
+		TestFalse(TEXT("Accepted error makes the complete callback fail"), Runtime.EndTypedCallbackEpochForTesting(Error));
+		TestEqual(TEXT("Uncaught category survives delayed delivery"), Error.Category, FString(TEXT("language_error_uncaught")));
+		TestTrue(TEXT("Delayed diagnostic retains type and source span"), Error.Details.Contains(TEXT("System.Exception"))
+			&& Error.Details.Contains(TEXT("Scripts/SourceThrow.cs:1:5")));
+		TestEqual(TEXT("Delayed diagnostic names the report import"), Error.ImportName, FString(TEXT("avid_language_error_report_v1")));
+		Runtime.BeginTypedCallbackEpochForTesting();
+		Error.Reset();
+		TestTrue(TEXT("Following callback cannot inherit a stale report"), Runtime.EndTypedCallbackEpochForTesting(Error));
+		TestTrue(TEXT("Following callback diagnostic is empty"), Error.Category.IsEmpty());
+
+		const uint64 DuplicateInvocation = Runtime.BeginVmInvocation();
+		const auto DuplicateObject = Allocate();
+		Runtime.BeginTypedCallbackEpochForTesting();
+		TestTrue(TEXT("First duplicate probe report accepts"), Report(DuplicateObject).bSucceeded);
+		TestEqual(TEXT("Second report is a hard Host failure"), Report(DuplicateObject).ErrorCategory,
+			FString(TEXT("language_error_duplicate_report")));
+		Runtime.EndVmInvocation(DuplicateInvocation);
+		Error.Category = TEXT("language_error_duplicate_report");
+		TestFalse(TEXT("Duplicate probe callback cannot commit"), Runtime.EndTypedCallbackEpochForTesting(Error));
+		TestEqual(TEXT("A later hard failure is not masked by the accepted report"), Error.Category,
+			FString(TEXT("language_error_duplicate_report")));
+		TestEqual(TEXT("Duplicate unwind collects"), Heap->Collect(), EHeapError::Ok);
 		Runtime.Unload();
 	}
 	return true;

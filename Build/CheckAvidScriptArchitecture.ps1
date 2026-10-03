@@ -3939,7 +3939,7 @@ foreach ($RequiredCompositeCapabilityProvenanceContract in @(
 }
 foreach ($RequiredControlledAsyncSemanticContract in @(
     'SemanticAsyncProjector.Project',
-    'hasTaskLanguageErrors = hasExceptionFlows && hasTaskResults',
+    'hasTaskLanguageErrors = hasExceptionFlows && (hasTaskResults || hasVoidErrorOwners)',
     'AsyncMethods = hasExceptionFlows && !hasTaskLanguageErrors'
 )) {
     if (-not $SemanticAnalyzerSource.Contains($RequiredControlledAsyncSemanticContract)) {

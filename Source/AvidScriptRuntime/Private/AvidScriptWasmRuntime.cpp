@@ -1613,7 +1613,7 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlayInternal(FAvidScriptWasmSmokeResul
 
 	const double BeginPlayStartSeconds = FPlatformTime::Seconds();
 	BeginTypedCallbackEpoch();
-	const bool bBeginPlayCalled = CallVmExport(
+	bool bBeginPlayCalled = CallVmExport(
 		VmBackend.Get(),
 		BeginPlayExport,
 		ModuleId,
@@ -1622,7 +1622,13 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlayInternal(FAvidScriptWasmSmokeResul
 		nullptr,
 		DebugMap.Get(),
 		OutResult);
-	EndTypedCallbackEpoch();
+	FAvidScriptVmError BeginPlayError;
+	const bool bBeginPlayEpochEnded = EndTypedCallbackEpoch(BeginPlayError);
+	if (bBeginPlayCalled && !bBeginPlayEpochEnded)
+	{
+		bBeginPlayCalled = false;
+		SetFailureFromVmError(OutResult, ModuleId, AvidScriptBeginPlayExportName, BeginPlayError, DebugMap.Get());
+	}
 	if (!bBeginPlayCalled)
 	{
 		Metrics.BeginPlayCallMs = MeasureElapsedMs(BeginPlayStartSeconds);
@@ -1788,8 +1794,8 @@ bool FAvidScriptWasmRuntimeInstance::TickInternal(
 				TickArgs,
 				DebugMap.Get(),
 				OutResult);
-		EndTypedCallbackEpoch();
-		if (bTickCalled && !ValidateContextCallbackCommit(TickError))
+		const bool bTickEpochEnded = EndTypedCallbackEpoch(TickError);
+		if (bTickCalled && (!bTickEpochEnded || !ValidateContextCallbackCommit(TickError)))
 		{
 			bTickCalled = false;
 			if (!bHotFailureOnly)
@@ -1932,14 +1938,15 @@ bool FAvidScriptWasmRuntimeInstance::InvokeI32PairExportHotForTesting(
 	};
 	BeginTypedCallbackEpoch();
 	FAvidScriptVmError Error;
-	const bool bCalled = InvokeVmExport(
+	bool bCalled = InvokeVmExport(
 		VmBackend.Get(),
 		TestingI32PairExport,
 		ExportName,
 		UE_ARRAY_COUNT(Arguments),
 		Arguments,
 		Error);
-	EndTypedCallbackEpoch();
+	const bool bEpochEnded = EndTypedCallbackEpoch(Error);
+	bCalled = bCalled && bEpochEnded;
 	if (!bCalled)
 	{
 		CaptureSnapshot(OutFailure);
@@ -2017,7 +2024,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchEventInternal(
 		: 0.0;
 	BeginTypedCallbackEpoch();
 	FAvidScriptVmError EventError;
-	const bool bEventCalled = bHotFailureOnly
+	bool bEventCalled = bHotFailureOnly
 		? InvokeVmExport(
 			VmBackend.Get(),
 			EventExport,
@@ -2034,7 +2041,13 @@ bool FAvidScriptWasmRuntimeInstance::DispatchEventInternal(
 			EventArgs,
 			DebugMap.Get(),
 			OutResult);
-	EndTypedCallbackEpoch();
+	const bool bEventEpochEnded = EndTypedCallbackEpoch(EventError);
+	if (bEventCalled && !bEventEpochEnded)
+	{
+		bEventCalled = false;
+		if (!bHotFailureOnly)
+			SetFailureFromVmError(OutResult, ModuleId, AvidScriptEventExportName, EventError, DebugMap.Get());
+	}
 	if (!bEventCalled)
 	{
 		if (bMeasureCallback)
@@ -2403,7 +2416,8 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEventInternal(
 		? ScopedCall->Call(Frame, EventError)
 		: InvokeVmExport(VmBackend.Get(), DelegateEventExports.FindOrAdd(Event.StableId),
 			Event.ExportName, Frame.CellCount, Frame.Cells, EventError);
-	EndTypedCallbackEpoch();
+	const bool bEpochEnded = EndTypedCallbackEpoch(EventError);
+	bCalled = bCalled && bEpochEnded;
 	BindingInvocationContext.ScopedObjectCapabilities = PreviousScopedCapabilities;
 	// An inner scoped failure may have been ignored by a native callback. Never
 	// commit ref/out effects from an invocation chain that has already failed.
@@ -2513,7 +2527,8 @@ bool FAvidScriptWasmRuntimeInstance::DispatchContinuationInternal(
 	bool bCalled = ScopedCall != nullptr
 		? ScopedCall->Call(Frame, Error)
 		: InvokeVmExport(VmBackend.Get(), CachedExport, ExportName, Frame.CellCount, Frame.Cells, Error);
-	EndTypedCallbackEpoch();
+	const bool bEpochEnded = EndTypedCallbackEpoch(Error);
+	bCalled = bCalled && bEpochEnded;
 	if (bCalled) bCalled = ValidateContextCallbackCommit(Error);
 	if (bCalled)
 	{
@@ -2580,14 +2595,15 @@ bool FAvidScriptWasmRuntimeInstance::DispatchDebugResumeInternal(
 
 	BeginTypedCallbackEpoch();
 	FAvidScriptVmError Error;
-	const bool bCalled = InvokeVmExport(
+	bool bCalled = InvokeVmExport(
 		VmBackend.Get(),
 		DebugResumeExport,
 		AvidScriptDebugResumeExportName,
 		UE_ARRAY_COUNT(Args),
 		Args,
 		Error);
-	EndTypedCallbackEpoch();
+	const bool bEpochEnded = EndTypedCallbackEpoch(Error);
+	bCalled = bCalled && bEpochEnded;
 	if (!bCalled)
 	{
 		SetFailureFromVmError(
@@ -2745,7 +2761,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEventInternal(
 	BindingInvocationContext.ScopedObjectCapabilities = CallbackCapabilities;
 	BeginTypedCallbackEpoch();
 	FAvidScriptVmError EventError;
-	const bool bGameplayEventCalled = bHotFailureOnly
+	bool bGameplayEventCalled = bHotFailureOnly
 		? InvokeVmExport(
 			VmBackend.Get(),
 			GameplayEventExport,
@@ -2762,7 +2778,13 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEventInternal(
 			EventArgs,
 			DebugMap.Get(),
 			OutResult);
-	EndTypedCallbackEpoch();
+	const bool bEventEpochEnded = EndTypedCallbackEpoch(EventError);
+	if (bGameplayEventCalled && !bEventEpochEnded)
+	{
+		bGameplayEventCalled = false;
+		if (!bHotFailureOnly)
+			SetFailureFromVmError(OutResult, ModuleId, AvidScriptGameplayEventExportName, EventError, DebugMap.Get());
+	}
 	BindingInvocationContext.ScopedObjectCapabilities = PreviousScopedCapabilities;
 	if (!bGameplayEventCalled)
 	{
@@ -2901,7 +2923,7 @@ bool FAvidScriptWasmRuntimeInstance::EndPlayInternal(FAvidScriptWasmSmokeResult&
 
 	const double EndPlayStartSeconds = FPlatformTime::Seconds();
 	BeginTypedCallbackEpoch();
-	const bool bEndPlayCalled = CallVmExport(
+	bool bEndPlayCalled = CallVmExport(
 		VmBackend.Get(),
 		EndPlayExport,
 		ModuleId,
@@ -2910,7 +2932,13 @@ bool FAvidScriptWasmRuntimeInstance::EndPlayInternal(FAvidScriptWasmSmokeResult&
 		nullptr,
 		DebugMap.Get(),
 		OutResult);
-	EndTypedCallbackEpoch();
+	FAvidScriptVmError EndPlayError;
+	const bool bEndPlayEpochEnded = EndTypedCallbackEpoch(EndPlayError);
+	if (bEndPlayCalled && !bEndPlayEpochEnded)
+	{
+		bEndPlayCalled = false;
+		SetFailureFromVmError(OutResult, ModuleId, AvidScriptEndPlayExportName, EndPlayError, DebugMap.Get());
+	}
 	if (!bEndPlayCalled)
 	{
 		Metrics.EndPlayCallMs = MeasureElapsedMs(EndPlayStartSeconds);
@@ -5363,14 +5391,15 @@ bool FAvidScriptWasmRuntimeInstance::ExecuteDueTimerCallbacks(
 		};
 		const double CallbackStartSeconds = FPlatformTime::Seconds();
 		BeginTypedCallbackEpoch();
-		const bool bTimerCalled = InvokeVmExport(
+		bool bTimerCalled = InvokeVmExport(
 			VmBackend.Get(),
 			TimerExport,
 			AvidScriptTimerExportName,
 			UE_ARRAY_COUNT(TimerArgs),
 			TimerArgs,
 			OutError);
-		EndTypedCallbackEpoch();
+		const bool bEpochEnded = EndTypedCallbackEpoch(OutError);
+		bTimerCalled = bTimerCalled && bEpochEnded;
 		if (!bTimerCalled || !ValidateContextCallbackCommit(OutError))
 		{
 			Metrics.TimerCallbackCallMs += MeasureElapsedMs(CallbackStartSeconds);
@@ -5614,12 +5643,19 @@ void FAvidScriptWasmRuntimeInstance::InvalidateSelfCapability()
 	}
 }
 
-void FAvidScriptWasmRuntimeInstance::EndTypedCallbackEpoch()
+bool FAvidScriptWasmRuntimeInstance::EndTypedCallbackEpoch(FAvidScriptVmError& OutError)
 {
-	if (!FusedCallbackFrameStack.IsEmpty())
+	if (FusedCallbackFrameStack.IsEmpty()) return true;
+	FAvidScriptVmError& Report = FusedCallbackFrameStack.Last().ReportedLanguageError;
+	const bool bSucceeded = Report.Category.IsEmpty();
+	// Preserve an actual VM/Host failure if execution failed after the report.
+	// The diagnostic owns no Guest reference; all Guest cleanup has now finished.
+	if (!bSucceeded && OutError.Category.IsEmpty())
 	{
-		FusedCallbackFrameStack.Pop(EAllowShrinking::No);
+		OutError = MoveTemp(Report);
 	}
+	FusedCallbackFrameStack.Pop(EAllowShrinking::No);
+	return bSucceeded;
 }
 
 bool FAvidScriptWasmRuntimeInstance::ResolveSelfCapability(
@@ -8372,10 +8408,35 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 		}
 		else
 		{
+			const FString Details = FString::Printf(TEXT("Uncaught %s at %s:%d:%d (UTF-16 span %d+%d)."),
+				**Type, *Source->SourceId, Source->Line, Source->Column, Source->Start, Source->Length);
+			if (LanguageErrorCatalog->SupportsAsyncVoidErrorOwner())
+			{
+				if (FusedCallbackFrameStack.IsEmpty())
+				{
+					SetPendingHostImportFailure(TEXT("avidscript"), TEXT("avid_language_error_report_v1"),
+						TEXT("Async void error report requires an active typed callback."),
+						TEXT("language_error_report_context"));
+					return Finish(0, false);
+				}
+				FAvidScriptVmError& Report = FusedCallbackFrameStack.Last().ReportedLanguageError;
+				if (!Report.Category.IsEmpty())
+				{
+					SetPendingHostImportFailure(TEXT("avidscript"), TEXT("avid_language_error_report_v1"),
+						TEXT("A typed callback may submit only one uncaught language error."),
+						TEXT("language_error_duplicate_report"));
+					return Finish(0, false);
+				}
+				Report.Category = TEXT("language_error_uncaught");
+				Report.Details = Details;
+				Report.ImportModuleName = TEXT("avidscript");
+				Report.ImportName = TEXT("avid_language_error_report_v1");
+				// Acceptance permits the checked Guest owner-release exit. It does
+				// not authorize committing the enclosing callback's effects.
+				return Finish(1, true);
+			}
 			SetPendingHostImportFailure(TEXT("avidscript"), TEXT("avid_language_error_report_v1"),
-				FString::Printf(TEXT("Uncaught %s at %s:%d:%d (UTF-16 span %d+%d)."),
-					**Type, *Source->SourceId, Source->Line, Source->Column,
-					Source->Start, Source->Length), TEXT("language_error_uncaught"));
+				Details, TEXT("language_error_uncaught"));
 		}
 		return Finish(0, false);
 	}

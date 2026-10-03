@@ -991,7 +991,7 @@ int32 FAvidScriptSessionContinuations::GetActiveCount() const
 
 #if WITH_DEV_AUTOMATION_TESTS
 bool FAvidScriptSessionContinuations::GetPendingActiveTimerForTesting(
-	int64& OutContinuationToken, int64& OutProducerTaskToken) const
+	int64& OutContinuationToken, int64& OutProducerTaskToken, const bool bIncludeUnbound) const
 {
 	OutContinuationToken = 0;
 	OutProducerTaskToken = 0;
@@ -1007,7 +1007,7 @@ bool FAvidScriptSessionContinuations::GetPendingActiveTimerForTesting(
 			|| Slot.Entry->ActivationSerial != ActivationSerial
 			|| Slot.Entry->ProducerKind != EProducerKind::Timer
 			|| Slot.Entry->bReady || Slot.Entry->bDispatching
-			|| Slot.Entry->ProducerTaskToken <= 0)
+			|| (!bIncludeUnbound && Slot.Entry->ProducerTaskToken <= 0))
 		{
 			continue;
 		}

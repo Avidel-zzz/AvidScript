@@ -35,6 +35,7 @@ public:
 	bool SupportsTaskCancellationError() const { return GuestIrSchemaVersion == 24 || bTaskLifetimeCancellation; }
 	bool SupportsTaskCancellationIdentity() const { return bTaskCancellationIdentity; }
 	bool SupportsExceptionCancellationToken() const { return bExceptionCancellationToken; }
+	bool SupportsAsyncVoidErrorOwner() const { return bAsyncVoidErrorOwner; }
 	bool IsCancellationType(int32 Token) const;
 
 private:
@@ -42,6 +43,7 @@ private:
 	bool bTaskLifetimeCancellation = false;
 	bool bTaskCancellationIdentity = false;
 	bool bExceptionCancellationToken = false;
+	bool bAsyncVoidErrorOwner = false;
 	TArray<FString> TypeIds;
 	TArray<FAvidScriptLanguageErrorSource> Sources;
 };

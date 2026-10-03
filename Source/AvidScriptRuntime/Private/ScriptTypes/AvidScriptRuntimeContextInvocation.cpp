@@ -212,13 +212,13 @@ bool FAvidScriptWasmRuntimeInstance::InvokeContextOperation(
 	BeginTypedCallbackEpoch();
 	ON_SCOPE_EXIT
 	{
-		EndTypedCallbackEpoch();
 		ApplyHostContext(PreviousHostContext);
 		BindingInvocationContext = PreviousBindingContext;
 		if (!bRoot) BindingInvocationScratch = MoveTemp(PreviousScratch);
 	};
 	const bool bCalled = Operation(OutError);
-	if (!bCalled)
+	const bool bEpochEnded = EndTypedCallbackEpoch(OutError);
+	if (!bCalled || !bEpochEnded)
 	{
 		if (OutError.Category.IsEmpty()) OutError.Category = TEXT("context_invocation_failed");
 		LatchContextInvocationFailure(OutError);
@@ -284,6 +284,8 @@ bool FAvidScriptWasmRuntimeInstance::DispatchContinuationInContext(
 		if (DispatchContinuationInternal(Completion, OutResult, &Prepared.Call)) return true;
 		Failure.Category = OutResult.ErrorCategory;
 		Failure.Details = OutResult.ErrorMessage;
+		Failure.ImportModuleName = OutResult.ImportModuleName;
+		Failure.ImportName = OutResult.ImportName;
 		return false;
 	}, Error);
 	if (!bSucceeded) RecordContextualFailure(Context, Prepared.ExportName, Error, OutResult);
@@ -319,6 +321,8 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEventInContext(
 		if (DispatchPreparedDelegateEventInternal(Event, NativeParameters, OutResult, &Prepared.Call)) return true;
 		Failure.Category = OutResult.ErrorCategory;
 		Failure.Details = OutResult.ErrorMessage;
+		Failure.ImportModuleName = OutResult.ImportModuleName;
+		Failure.ImportName = OutResult.ImportName;
 		return false;
 	}, Error);
 	if (!bSucceeded) RecordContextualFailure(Context, Event.ExportName, Error, OutResult);

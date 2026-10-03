@@ -171,7 +171,7 @@ public:
 		return Count;
 	}
 	bool GetPendingActiveTimerForTesting(
-		int64& OutContinuationToken, int64& OutProducerTaskToken) const;
+		int64& OutContinuationToken, int64& OutProducerTaskToken, bool bIncludeUnbound = false) const;
 	int32 GetCancellationSourceCountForTesting() const
 	{
 		return OccupiedCancellationSourceCount;

@@ -209,6 +209,8 @@ struct FAvidScriptFusedCallbackFrame
 	uint64 RegistryRevision = 0;
 	const void* PreparedReflectionGuardIdentity = nullptr;
 	bool bPreparedReflectionNativeGuardAllowed = false;
+	// Delivered when this callback finishes, after Guest error-owner cleanup.
+	FAvidScriptVmError ReportedLanguageError;
 };
 
 struct FAvidScriptCachedVmExport
@@ -439,7 +441,8 @@ public:
 		return PrepareDelegateEventExports(InOutEvents, OutError);
 	}
 	void BeginTypedCallbackEpochForTesting() { BeginTypedCallbackEpoch(); }
-	void EndTypedCallbackEpochForTesting() { EndTypedCallbackEpoch(); }
+	void EndTypedCallbackEpochForTesting() { FAvidScriptVmError Ignored; (void)EndTypedCallbackEpoch(Ignored); }
+	bool EndTypedCallbackEpochForTesting(FAvidScriptVmError& OutError) { return EndTypedCallbackEpoch(OutError); }
 	void SetBindingPackageForTesting(
 		const TSharedPtr<const FAvidScriptBindingPackage>& InBindingPackage)
 	{
@@ -989,7 +992,7 @@ private:
 		FAvidScriptPreparedGeneratedHostCall& Call,
 		UObject& Receiver);
 	void BeginTypedCallbackEpoch();
-	void EndTypedCallbackEpoch();
+	[[nodiscard]] bool EndTypedCallbackEpoch(FAvidScriptVmError& OutError);
 	void InvalidateSelfCapability();
 	bool ResolveSelfCapability(
 		int32 SelfSlot,

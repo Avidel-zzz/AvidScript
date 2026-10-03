@@ -54,7 +54,8 @@ int32 ExecutionSchema(const FString& Profile)
 
 FString ExecutionProfile(const TMap<FString, FString>& Fields)
 {
-	if (Fields.FindRef(TEXT("guest_ir")) == TEXT("35/1.34"))
+	if (Fields.FindRef(TEXT("guest_ir")) == TEXT("35/1.34")
+		|| Fields.FindRef(TEXT("guest_ir")) == TEXT("36/1.35"))
 	{
 		const FString Base = Fields.FindRef(TEXT("execution_base"));
 		return Base == TEXT("29/1.28") ? TEXT("26/1.25") : Base;
@@ -101,6 +102,40 @@ bool ParseProvenance(TConstArrayView<uint8> Payload, TMap<FString, FString>& Out
 		OutFields.Add(MoveTemp(Key), Line.Mid(Separator + 1));
 	}
 	const FString ArtifactProfile = OutFields.FindRef(TEXT("guest_ir"));
+	if (ArtifactProfile.StartsWith(TEXT("36/"), ESearchCase::CaseSensitive))
+	{
+		const FString RawCapabilities = OutFields.FindRef(TEXT("capabilities"));
+		if (RawCapabilities.IsEmpty() || RawCapabilities.StartsWith(TEXT(",")) || RawCapabilities.EndsWith(TEXT(","))) return false;
+		TArray<FString> Capabilities;
+		RawCapabilities.ParseIntoArray(Capabilities, TEXT(","), false);
+		TSet<FString> Declared;
+		FString Previous;
+		for (const FString& Capability : Capabilities)
+		{
+			if (Previous.Compare(Capability, ESearchCase::CaseSensitive) >= 0
+				|| (Capability != TEXT("async.await_readiness@1")
+					&& Capability != TEXT("async.cancellation_identity@1")
+					&& Capability != TEXT("error.async_void_owner@1")
+					&& Capability != TEXT("error.cancellation_token_value@1")
+					&& Capability != TEXT("error.exception_values@1")
+					&& Capability != TEXT("managed.static_storage@1"))) return false;
+			Declared.Add(Capability);
+			Previous = Capability;
+		}
+		return ArtifactProfile == TEXT("36/1.35") && OutFields.Num() == 11
+			&& OutFields.FindRef(TEXT("execution_base")) == TEXT("29/1.28")
+			&& OutFields.FindRef(TEXT("source_language")) == TEXT("csharp")
+			&& OutFields.FindRef(TEXT("semantic")) == TEXT("55/1.64")
+			&& OutFields.FindRef(TEXT("task_local_exception_model")) == TEXT("cancellation")
+			&& Declared.Contains(TEXT("error.async_void_owner@1"))
+			&& (!Declared.Contains(TEXT("error.exception_values@1"))
+				|| Declared.Contains(TEXT("async.cancellation_identity@1")))
+			&& !OutFields.FindRef(TEXT("module_id")).IsEmpty()
+			&& IsSourceId(OutFields.FindRef(TEXT("source_id")))
+			&& IsLowerSha256(OutFields.FindRef(TEXT("source_sha256")))
+			&& IsLowerSha256(OutFields.FindRef(TEXT("frontend_sha256")))
+			&& IsLowerSha256(OutFields.FindRef(TEXT("semantic_sha256")));
+	}
 	if (ArtifactProfile.StartsWith(TEXT("35/"), ESearchCase::CaseSensitive))
 	{
 		const FString SourceLanguage = OutFields.FindRef(TEXT("source_language"));
@@ -239,10 +274,10 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 		return false;
 	}
 	const FString ArtifactProfile = ProvenanceFields.FindRef(TEXT("guest_ir"));
-	if (ArtifactProfile == TEXT("35/1.34")
+	if ((ArtifactProfile == TEXT("35/1.34") || ArtifactProfile == TEXT("36/1.35"))
 		&& (ExpectedModuleId.IsEmpty() || ProvenanceFields.FindRef(TEXT("module_id")) != ExpectedModuleId))
 	{
-		OutError = TEXT("IR 35 provenance module identity does not match the loaded artifact");
+		OutError = TEXT("Composed IR provenance module identity does not match the loaded artifact");
 		return false;
 	}
 	const FString Profile = CatalogPrivate::ExecutionProfile(ProvenanceFields);
@@ -298,7 +333,7 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 	const TArray<TSharedPtr<FJsonValue>>* Types = nullptr;
 	const TArray<TSharedPtr<FJsonValue>>* Sources = nullptr;
 	if (!CatalogPrivate::Number(*Document, TEXT("schema_version"), 1, 1, SectionVersion)
-		|| !CatalogPrivate::Number(*Document, TEXT("guest_ir_schema_version"), 17, 35, GuestSchema)
+		|| !CatalogPrivate::Number(*Document, TEXT("guest_ir_schema_version"), 17, 36, GuestSchema)
 		|| !Document->TryGetStringField(TEXT("guest_ir_version"), GuestVersion)
 		|| FString::Printf(TEXT("%d/%s"), GuestSchema, *GuestVersion) != ArtifactProfile
 		|| !Document->TryGetStringField(TEXT("module_id"), ModuleId) || ModuleId != ExpectedModuleId
@@ -324,8 +359,14 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 	const bool bComposableAsync = ArtifactProfile == TEXT("35/1.34")
 		&& ProvenanceFields.FindRef(TEXT("execution_base")) == TEXT("29/1.28");
 	Candidate->bExceptionCancellationToken = ArtifactProfile == TEXT("34/1.33") || bComposableAsync;
+	const bool bVoidOwners = ArtifactProfile == TEXT("36/1.35");
+	TArray<FString> Declared;
+	if (bVoidOwners) ProvenanceFields.FindRef(TEXT("capabilities")).ParseIntoArray(Declared, TEXT(","), false);
+	Candidate->bAsyncVoidErrorOwner = bVoidOwners;
+	Candidate->bExceptionCancellationToken |= bVoidOwners && Declared.Contains(TEXT("error.cancellation_token_value@1"));
 	Candidate->bTaskCancellationIdentity = ArtifactProfile == TEXT("32/1.31") || ArtifactProfile == TEXT("33/1.32")
-		|| (Candidate->bExceptionCancellationToken && ProfileSchema == 26);
+		|| (!bVoidOwners && Candidate->bExceptionCancellationToken && ProfileSchema == 26)
+		|| (bVoidOwners && Declared.Contains(TEXT("async.cancellation_identity@1")));
 	Candidate->TypeIds.Reserve(Types->Num());
 	for (const TSharedPtr<FJsonValue>& Entry : *Types)
 	{
