@@ -10,6 +10,7 @@ namespace AvidScript.CSharpGuest;
 internal sealed record CSharpStaticField(string SymbolId, string OwnerTypeId, string TypeId);
 internal sealed record CSharpStaticSourceType(string TypeId, bool BeforeFieldInit, string BodyId,
     string SourceId, int SourceLength, SemanticSpan Span, bool RequiresInitialization = true);
+internal sealed record CSharpStaticDebugTarget(string MethodId, string DisplayName, string SourceId, SemanticSpan Span);
 
 // Only the validated source preparation pass can associate this transient
 // compiler context with an ordinary document. It is never a serialized opt-out.
@@ -19,9 +20,11 @@ internal sealed class CSharpStaticExecutionContext
     private readonly HashSet<string> guardedAsyncFunctions = new(StringComparer.Ordinal);
     public IReadOnlyList<CSharpStaticField> Fields { get; }
     public IReadOnlyList<CSharpStaticSourceType> Types { get; }
+    internal IReadOnlyList<CSharpStaticDebugTarget> DebugTargets { get; }
     public static string Slot(string symbolId) => "static:field:" + symbolId;
-    internal CSharpStaticExecutionContext(IReadOnlyList<CSharpStaticField> fields, IReadOnlyList<CSharpStaticSourceType> types)
-    { Fields = fields; Types = types; }
+    internal CSharpStaticExecutionContext(IReadOnlyList<CSharpStaticField> fields, IReadOnlyList<CSharpStaticSourceType> types,
+        IReadOnlyList<CSharpStaticDebugTarget>? debugTargets = null)
+    { Fields = fields; Types = types; DebugTargets = debugTargets ?? Array.Empty<CSharpStaticDebugTarget>(); }
     internal void Attach(SemanticDocument document) => Contexts.Add(document, this);
     internal static CSharpStaticExecutionContext? Find(SemanticDocument document) =>
         Contexts.TryGetValue(document, out var context) ? context : null;

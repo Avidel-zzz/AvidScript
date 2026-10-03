@@ -52,6 +52,18 @@ public static class CSharpGuestDebugMapProjector
                 nameof(implicitFunctionImportCount));
         }
 
+        var staticTargets = new Dictionary<string, CSharpStaticDebugTarget>(StringComparer.Ordinal);
+        var staticGuards = new HashSet<string>(StringComparer.Ordinal);
+        if (document.StaticInitialization is not null)
+        {
+            if (!CSharpStaticSourcePreparation.TryPrepare(document, out var prepared, out var context, out var error))
+                throw new InvalidDataException("ASDEBUG1003: Invalid static source preparation: " + error);
+            foreach (var target in context!.DebugTargets)
+                staticTargets.Add(CSharpGuestIds.Function(target.MethodId), target);
+            foreach (var type in context.Types) staticGuards.Add(CSharpStaticInitializationGuards.FunctionId(type.TypeId));
+            document = prepared!;
+        }
+
         int importedFunctionCount = checked(
             module.Imports.Count + implicitFunctionImportCount);
 
@@ -84,6 +96,10 @@ public static class CSharpGuestDebugMapProjector
             .Select(entry => CSharpGuestIds.Function(entry.MethodSymbolId))
             .ToHashSet(StringComparer.Ordinal);
         Dictionary<string, AsyncResumeDebugTarget> asyncResumeTargets = BuildAsyncResumeTargets(document);
+        HashSet<string> sourceGuards = SemanticContract.HasAsyncSynchronousExceptions(document)
+            && SemanticAsyncScopeValidator.IsValid(document)
+            ? CSharpAsyncMemberAssignmentLowerer.GuardSites(document).Select(site => site.Id).ToHashSet(StringComparer.Ordinal)
+            : new(StringComparer.Ordinal);
         HashSet<string> functionIds = new(StringComparer.Ordinal);
         HashSet<string> methodIds = new(StringComparer.Ordinal);
         HashSet<string> probeIds = new(StringComparer.Ordinal);
@@ -105,7 +121,8 @@ public static class CSharpGuestDebugMapProjector
             }
 
             int closureThunk = function.Id.IndexOf(":$closure:thunk:", StringComparison.Ordinal);
-            if (generatedFrame || SourceLessGeneratedFunctionIds.Contains(function.Id)
+            if (generatedFrame || staticGuards.Contains(function.Id) || sourceGuards.Contains(function.Id)
+                || SourceLessGeneratedFunctionIds.Contains(function.Id)
                 || generatedSubscriptionFunctionIds.Contains(function.Id)
                 || SourceLessGeneratedFunctionPrefixes.Any(prefix => function.Id.StartsWith(prefix, StringComparison.Ordinal))
                 || (closureThunk > FunctionPrefix.Length
@@ -115,6 +132,17 @@ public static class CSharpGuestDebugMapProjector
             }
 
             int functionIndex = checked(importedFunctionCount + ordinal);
+            if (staticTargets.TryGetValue(function.Id, out var staticTarget))
+            {
+                if (!methodIds.Add(staticTarget.MethodId) || !IsValidSpan(staticTarget.Span)
+                    || staticTarget.SourceId != document.Source.SourceId
+                    || !callables.TryGetValue(staticTarget.MethodId, out var staticCallable))
+                    throw new InvalidDataException("ASDEBUG1003: Static initializer needs a unique source mapping in this debug source unit.");
+                functions.Add(new(functionIndex, function.Id, staticTarget.MethodId, staticTarget.DisplayName,
+                    staticTarget.Span, BuildSequencePoints(module.ModuleId, function, probeIds),
+                    BuildFrameLayout(document, module, function, staticCallable, staticTarget.Span)));
+                continue;
+            }
             if (asyncResumeTargets.TryGetValue(function.Id, out AsyncResumeDebugTarget? resumeTarget))
             {
                 AddAsyncResumeFunction(

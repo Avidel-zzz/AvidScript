@@ -33,8 +33,16 @@ internal static class CSharpTypeLowerer
         {
             Scalar(CSharpGuestIds.AddressTypeId, "i32", 4, 4),
         };
+        // Framework signatures can register this type without any source token
+        // value. Such metadata must not grant an execution capability or leave
+        // a reserved token layout in a module which does not declare token use.
+        bool metadataOnlyToken = CSharpCancellationTokenExecutionContext.Find(document) is null
+            && document.Types.Any(type => type.Id == SemanticCancellationTokens.TypeId)
+            && !SemanticComposableCapabilities.FromProjectedSource(document).Capabilities
+                .Any(capability => capability.Id == SemanticComposableCapabilities.CancellationTokenValue);
         foreach (SemanticType type in document.Types.OrderBy(type => type.Id, StringComparer.Ordinal))
         {
+            if (metadataOnlyToken && type.Id == SemanticCancellationTokens.TypeId) continue;
             if (type.Id == SemanticCancellationTokens.TypeId && CSharpCancellationTokenExecutionContext.Find(document) is not null)
             {
                 rawTypes.Add(GuestCancellationTokens.ValueType());

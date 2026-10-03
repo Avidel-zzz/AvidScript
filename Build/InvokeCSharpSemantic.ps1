@@ -12,6 +12,16 @@ param(
     [string]$DirectAwaitCleanup = "disabled",
     [ValidateSet("enabled", "disabled")]
     [string]$AsyncCancellationFlow = "disabled",
+    [ValidateSet("enabled", "disabled")]
+    [string]$AsyncSynchronousExceptions = "disabled",
+    [ValidateSet("enabled", "disabled")]
+    [string]$StaticInitialization = "disabled",
+    [ValidateSet("enabled", "disabled")]
+    [string]$AsyncCatchVariables = "disabled",
+    [ValidateSet("enabled", "disabled")]
+    [string]$CancellationTokens = "disabled",
+    [ValidateSet("enabled", "disabled")]
+    [string]$AsyncVoidErrorOwner = "disabled",
     [string]$Configuration = "Release"
 )
 
@@ -94,6 +104,16 @@ try {
         }
         if ($AsyncCancellationFlow -ceq "enabled") {
             $SemanticArguments += @("--async-cancellation-flow", "enabled")
+        }
+        $capabilityOptions = [ordered]@{
+            '--async-synchronous-exceptions' = $AsyncSynchronousExceptions
+            '--static-initialization' = $StaticInitialization
+            '--async-catch-variables' = $AsyncCatchVariables
+            '--cancellation-tokens' = $CancellationTokens
+            '--async-void-error-owner' = $AsyncVoidErrorOwner
+        }
+        foreach ($option in $capabilityOptions.GetEnumerator()) {
+            if ($option.Value -ceq 'enabled') { $SemanticArguments += @($option.Key, 'enabled') }
         }
         & $DotNetPath $SemanticDll @SemanticArguments
         $ExitCode = $LASTEXITCODE

@@ -6,6 +6,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--capability-cli")
+            {
+                int focused = CSharpGuestCapabilityCliTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.CapabilityCli: {focused}/{focused} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--async-void-composition")
             {
                 int focused = CSharpGuestAsyncVoidCompositionTests.Run();
@@ -329,6 +335,7 @@ internal static class Program
                 + CSharpGuestDataTests.Run()
                 + CSharpGuestReferenceTests.Run()
                 + CSharpGuestCliTests.Run()
+                + CSharpGuestCapabilityCliTests.Run()
                 + CSharpGuestStateSchemaTests.Run()
                 + CSharpGuestDebugMapTests.Run()
                 + CSharpGuestDebugResumableTests.Run()

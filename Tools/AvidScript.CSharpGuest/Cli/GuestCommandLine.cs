@@ -62,6 +62,7 @@ public static class GuestCommandLine
             string semanticSha256 = Convert.ToHexString(SHA256.HashData(artifact)).ToLowerInvariant();
             SemanticDocument document = SemanticArtifactReader.Deserialize(artifact);
             GuestModule? module;
+            bool capabilityCompilerRequired = CSharpLanguageCapabilityCompiler.IsRequired(document);
             bool asyncLanguageErrors = document.SchemaVersion
                     == SemanticContract.AsyncLanguageErrorSchemaVersion
                     && document.AsyncMethods.Any(method => method.ErrorPlan is not null)
@@ -73,11 +74,25 @@ public static class GuestCommandLine
                         or SemanticContract.AsyncThrowRoutingSchemaVersion)
                     && document.AsyncMethods.Any(method => method.ExceptionPlan is not null);
             if (boundedLanguageErrors && (document.ExceptionFlows is { Count: > 0 }
-                    || asyncLanguageErrors)
+                    || asyncLanguageErrors || capabilityCompilerRequired)
                 && (!dataLaneFusionEnabled || debugInstrumentationEnabled))
                 throw new ArgumentException(
                     "Bounded language errors require data-lane fusion enabled and debug instrumentation disabled.");
-            if (boundedLanguageErrors && document.ExceptionFlows is { Count: > 0 }
+            if (capabilityCompilerRequired)
+            {
+                module = null;
+                string? error = null;
+                if (!boundedLanguageErrors || !CSharpLanguageCapabilityCompiler.TryLower(document, semanticSha256,
+                        out module, out error) || module is null)
+                {
+                    DeletePublishedArtifacts(outputPath, stateSchemaPath, debugMapPath);
+                    Console.Error.WriteLine($"ASCG1004: {(!boundedLanguageErrors
+                        ? "Language capability execution requires --language-errors bounded."
+                        : error ?? "Language capability lowering failed.")}");
+                    return 1;
+                }
+            }
+            else if (boundedLanguageErrors && document.ExceptionFlows is { Count: > 0 }
                 && !asyncLanguageErrors)
             {
                 if (!CSharpLanguageErrorCompiler.TryLower(document, semanticSha256,

@@ -219,6 +219,7 @@ internal static class CSharpStaticSourcePreparation
                 Dispatch: new(false, false, false, false, null, null, Array.Empty<string>()), GenericTypeParameterIds: Array.Empty<string>()));
             addedBodies.Add(new(id, body)); addedGraphs.Add(graph);
         }
+        var debugTargets = new List<CSharpStaticDebugTarget>();
         foreach (var (owner, plan, arguments) in closedOwners)
         {
             var declaration = source.Symbols.Single(symbol => symbol.Kind == "type" && symbol.TypeId == plan.TypeId);
@@ -227,6 +228,13 @@ internal static class CSharpStaticSourcePreparation
             { failure ??= "A fieldless reference-source initializer needs explicit source-unit provenance."; continue; }
             SemanticSpan span = firstField?.Span ?? declaration.Span;
             string bodyId = "$static:body:" + owner;
+            string displayOwner = owner.StartsWith("type:global::", StringComparison.Ordinal) ? owner[13..] : owner;
+            var debugConstructor = plan.ConstructorMethodId is { } constructorId
+                ? source.Symbols.Single(symbol => symbol.Id == constructorId) : null;
+            debugTargets.Add(new(bodyId, displayOwner + " static initialization",
+                debugConstructor is null ? firstField?.SourceId ?? source.Source.SourceId
+                    : debugConstructor.IsExecutableReferenceSource ? "" : source.Source.SourceId,
+                debugConstructor?.Span ?? span));
             owners.Add(new(owner, plan.BeforeFieldInit, bodyId, firstField?.SourceId ?? source.Source.SourceId,
                 firstField?.SourceLength ?? source.Source.Length, span,
                 !asyncSource || plan.ConstructorMethodId is not null || plan.Fields.Any(field => field.Initializer is not null)));
@@ -234,6 +242,8 @@ internal static class CSharpStaticSourcePreparation
             foreach (var field in plan.Fields.Where(field => field.Initializer is not null))
             {
                 string id = "$static:field_init:" + fieldIds[(field.FieldSymbolId, owner)];
+                string fieldName = source.Symbols.Single(symbol => symbol.Id == field.FieldSymbolId).Name;
+                debugTargets.Add(new(id, displayOwner + "." + fieldName + " initializer", field.SourceId, field.Span));
                 AddMethod(id, owner, Rewrite(field.Initializer!, arguments), RewriteGraph(field.ControlFlowGraph!, id, arguments));
                 calls.Add(Call(id, span));
             }
@@ -301,7 +311,7 @@ internal static class CSharpStaticSourcePreparation
             { error = "Static/token source cannot lower its private execution view."; return false; }
             ordinary = tokenExecutionView!;
         }
-        execution = new(fields, owners);
+        execution = new(fields, owners, debugTargets);
         execution.Attach(ordinary!);
         return true;
     }

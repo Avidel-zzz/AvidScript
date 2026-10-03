@@ -92,8 +92,8 @@ internal static class CSharpGuestAsyncVoidCompositionTests
         return count;
     }
 
-    private sealed record Scenario(string Name, string Body, string Error, int Trace, bool CacheFault = false, bool CacheDeferred = false);
-    private static IEnumerable<Scenario> Cases(bool tokens, bool statics)
+    internal sealed record Scenario(string Name, string Body, string Error, int Trace, bool CacheFault = false, bool CacheDeferred = false);
+    internal static IEnumerable<Scenario> Cases(bool tokens, bool statics)
     {
         string wait = tokens ? "await AvidContinuations.NextTickAsync().WithCancellation(token);" : "await AvidContinuations.NextTickAsync();";
         string value = statics ? "Cache.Value" : "Sync(7)";
@@ -118,7 +118,7 @@ internal static class CSharpGuestAsyncVoidCompositionTests
         }
     }
 
-    private static string Source(string body, bool statics, bool tokens) =>
+    internal static string Source(string body, bool statics, bool tokens) =>
         "using AvidScript; using System; using System.Threading; using System.Threading.Tasks; using System.Runtime.InteropServices; "
         + "public static class Script { public static int Trace; "
         + "[UnmanagedCallersOnly(EntryPoint = \"avid_on_begin_play\")] public static void BeginPlay() { Run(); } "
@@ -155,7 +155,7 @@ internal static class CSharpGuestAsyncVoidCompositionTests
     }
 
     private static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
-    private static (string Error, int Trace) Reference(string source)
+    internal static (string Error, int Trace) Reference(string source)
     {
         var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator)
             .Select(path => MetadataReference.CreateFromFile(path));

@@ -95,7 +95,7 @@ $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = '0'
 
 - 支持的是已实现的 C# / .NET 子集，不能直接运行任意 NuGet 包。`Task<T>` 目前只覆盖 `Task<int>`，`catch` 和 `finally` 中不能 `await`。
 - 方法体热重载已有自动化覆盖；脚本定义类型的反射签名变化仍需重新编译并重启 Editor。标准 `CancellationToken` 的组合用法尚未进入默认 Build And Bind。
-- `async void` 的异常报告、独立 Session 候选回滚，以及[静态初始化 / CancellationToken 组合](Docs/Phase66/P66.C12_Async_Void_Composition_Contract.md)已通过 Win64 双 VM 测试；默认构建、共享类型域回滚和 Actor/World teardown 的专项验证仍在推进。
+- `async void` 异常报告、Session 候选回滚和[静态 / token 组合](Docs/Phase66/P66.C12_Async_Void_Composition_Contract.md)已有 Win64 双 VM 测试。[公共 CLI](Docs/Phase66/P66.C13_Default_Language_Pipeline_Contract.md)也能生成对应 WASM、状态布局和调试映射；默认构建、共享类型域回滚与 Actor/World teardown 仍在推进。
 - 网络路径有自动化测试，真实多人游戏尚未验收；Shipping、Android 和 iOS 也尚未验收。
 
 语言边界见 [P66.C 执行计划](Docs/Phase66/P66.C_Language_Execution_Plan.md)和[异步能力合同](Docs/Architecture/AvidScript_Composable_Capability_Contract.md)。

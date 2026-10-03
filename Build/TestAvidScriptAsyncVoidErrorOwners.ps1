@@ -3,7 +3,8 @@ param(
     [string]$EngineRoot = 'C:\UnrealEngine',
     [string]$DotNetPath = (Join-Path $env:USERPROFILE '.dotnet/dotnet.exe'),
     [switch]$SkipBuild,
-    [switch]$Composition
+    [switch]$Composition,
+    [switch]$PublicCli
 )
 
 $ErrorActionPreference = 'Stop'
@@ -47,8 +48,8 @@ try {
     & $DotNetPath build $testProject -c Release --no-restore --disable-build-servers -m:1 -nodeReuse:false `
         -p:UseSharedCompilation=false --nologo -v quiet
     if ($LASTEXITCODE -ne 0) { throw 'Single-node managed build failed. No SDK or workload installation was attempted.' }
-    $managedArgument = if ($Composition) { '--async-void-composition' } else { '--async-void-error-owners' }
-    $managedLabel = if ($Composition) { 'AsyncVoidComposition' } else { 'AsyncVoidErrorOwners' }
+    $managedArgument = if ($PublicCli) { '--capability-cli' } elseif ($Composition) { '--async-void-composition' } else { '--async-void-error-owners' }
+    $managedLabel = if ($PublicCli) { 'CapabilityCli' } elseif ($Composition) { 'AsyncVoidComposition' } else { 'AsyncVoidErrorOwners' }
     $managed = @(& $DotNetPath run --project $testProject -c Release --no-build --no-restore -- $managedArgument)
     $managedExit = $LASTEXITCODE
     $managed | Set-Content -LiteralPath (Join-Path $runRoot 'managed.log') -Encoding utf8
@@ -116,8 +117,9 @@ try {
     }
     [ordered]@{
         schema_version = 1
-        semantic_version = $(if ($Composition) { '56/1.65' } else { '55/1.64' })
-        guest_ir_version = $(if ($Composition) { '37/1.36' } else { '36/1.35' })
+        semantic_version = $(if ($Composition -or $PublicCli) { '56/1.65' } else { '55/1.64' })
+        guest_ir_version = $(if ($Composition -or $PublicCli) { '37/1.36' } else { '36/1.35' })
+        source_entry = $(if ($PublicCli) { 'public-cli' } else { 'compiler-api' })
         sdk = $sdk
         managed_passed = [int]$match.Groups[1].Value
         native_tests_passed = $passed
