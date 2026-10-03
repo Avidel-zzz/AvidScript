@@ -54,7 +54,7 @@ internal static class GuestAsyncExceptionTransferValidator
             GuestFunction[] functions = module.Functions.Where(function =>
                 function.Blocks.Any(block => block.Id == transfer.BlockId)).ToArray();
             if (functions.Length == 0 || functions.Any(function =>
-                    !Matches(GuestTaskLocalLifetimeValidator.ResolveScopeExitRoutes(module, function), transfer, marker)))
+                    !Matches(module, GuestTaskLocalLifetimeValidator.ResolveScopeExitRoutes(module, function), transfer, marker)))
                 Add(context, $"Exception transfer '{transfer.BlockId}' does not preserve its owner or successor.");
         }
         if (module.Functions.SelectMany(function => function.Locals).Any(local =>
@@ -68,7 +68,7 @@ internal static class GuestAsyncExceptionTransferValidator
             Add(context, "Cancellation control flow contains an unlisted owner or transfer.");
     }
 
-    private static bool Matches(GuestFunction function, GuestAsyncExceptionTransfer transfer, string marker)
+    private static bool Matches(GuestModule module, GuestFunction function, GuestAsyncExceptionTransfer transfer, string marker)
     {
         if ((function.Id != transfer.MethodFunctionId
                 && !function.Id.StartsWith("function:synthetic:async_resume:", StringComparison.Ordinal))
@@ -86,6 +86,9 @@ internal static class GuestAsyncExceptionTransferValidator
         if (transfer.Kind == "end_catch")
             return Release(blocks, body, transfer, out GuestBasicBlock? released)
                 && Branch(released!, transfer.TargetBlockId!);
+        if (GuestAsyncVoidErrorOwners.IsVersion(module)
+            && module.AsyncVoidErrorOwners?.Owners.Any(owner => owner.MethodFunctionId == transfer.MethodFunctionId) == true)
+            return GuestAsyncVoidErrorOwnerValidator.Matches(function, transfer);
 
         GuestInstruction[] calls = body.Instructions.Where(instruction => instruction.Op == "call"
             && instruction.TargetId == "import:$async:task_propagate_failure_v1").ToArray();

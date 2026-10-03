@@ -18,12 +18,12 @@ public static class GuestTaskLocalLifetimeValidator
     internal static bool Supports(GuestModule module) => IsVersion(module) || GuestAsyncThrowRouteValidator.IsVersion(module)
         || GuestComposableCapabilities.HasDeclaredAsyncBase29(module);
     internal static int ExpectedSemanticSchema(GuestModule module) => GuestComposableCapabilities.HasDeclaredAsyncBase29(module)
-        ? 54 : GuestStaticAsyncExecution.HasSourceContract(module)
+        ? GuestComposableCapabilities.ExpectedSemanticSchema(module) : GuestStaticAsyncExecution.HasSourceContract(module)
         ? GuestStaticAsyncExecution.SemanticSchemaVersion : GuestAsyncSynchronousExceptions.HasSourceContract(module)
         ? GuestAsyncSynchronousExceptions.SemanticSchemaVersion : GuestAsyncThrowRouteValidator.IsVersion(module)
         ? GuestAsyncThrowRouteValidator.SemanticSchemaVersion : SemanticSchemaVersion;
     internal static string ExpectedSemanticVersion(GuestModule module) => GuestComposableCapabilities.HasDeclaredAsyncBase29(module)
-        ? "1.63" : GuestStaticAsyncExecution.HasSourceContract(module)
+        ? GuestComposableCapabilities.ExpectedSemanticVersion(module) : GuestStaticAsyncExecution.HasSourceContract(module)
         ? GuestStaticAsyncExecution.SemanticVersion : GuestAsyncSynchronousExceptions.HasSourceContract(module)
         ? GuestAsyncSynchronousExceptions.SemanticVersion : GuestAsyncThrowRouteValidator.IsVersion(module)
         ? GuestAsyncThrowRouteValidator.SemanticVersion : SemanticVersion;

@@ -57,6 +57,7 @@ public static class GuestModuleValidator
         GuestExceptionValueValidator.Validate(context);
         GuestCancellationTokenValidator.Validate(context);
         GuestAsyncExceptionTransferValidator.Validate(context);
+        GuestAsyncVoidErrorOwnerValidator.Validate(context);
         ValidateExports(context);
         ValidateReportedStatus(context);
 

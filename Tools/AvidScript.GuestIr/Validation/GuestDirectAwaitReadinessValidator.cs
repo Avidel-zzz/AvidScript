@@ -21,7 +21,8 @@ internal static class GuestDirectAwaitReadinessValidator
                 Add(context, "Direct await readiness requires Guest IR 31/1.30.");
             return;
         }
-        if (identity && artifact.DirectAwaitReadiness is null && queryImports.Length == 0) return;
+        if ((identity || GuestAsyncVoidErrorOwners.IsVersion(artifact))
+            && artifact.DirectAwaitReadiness is null && queryImports.Length == 0) return;
         if (artifact.DirectAwaitReadiness is not { Guards.Count: > 0 and <= 4096 } plan
             || !GuestDirectAwaitReadiness.IsBase(plan.BaseSchemaVersion, plan.BaseIrVersion)
             || identity && (artifact.CancellationIdentity is null || artifact.CancellationIdentity.BaseSchemaVersion != plan.BaseSchemaVersion

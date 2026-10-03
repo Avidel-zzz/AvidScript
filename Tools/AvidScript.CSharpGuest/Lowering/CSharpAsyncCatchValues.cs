@@ -47,7 +47,7 @@ internal static class CSharpAsyncCatchValues
     }
 
     internal static bool TryWrap(SemanticDocument source, GuestModule input,
-        out GuestModule module, out string? error)
+        out GuestModule module, out string? error, CSharpAsyncSynchronousExecutionContext? asyncContext = null)
     {
         module = input;
         error = null;
@@ -58,7 +58,9 @@ internal static class CSharpAsyncCatchValues
             SemanticVersion = GuestAsyncSynchronousExceptions.SemanticVersion } };
         var tokenContext = CSharpCancellationTokenExecutionContext.Find(source);
         GuestModule? upgraded;
-        if (!(tokenContext is null
+        if (!(asyncContext is { HasVoidErrorOwners: true }
+            ? CSharpCancellationIdentityCompiler.TryUpgradeForVoidOwners(asyncContext, execution, out upgraded, out error)
+            : tokenContext is null
             ? CSharpCancellationIdentityCompiler.TryUpgrade(execution, out upgraded, out error)
             : CSharpCancellationIdentityCompiler.TryUpgradeForTokens(tokenContext, execution, out upgraded, out error))) return false;
         var sources = source.AsyncMethods.SelectMany(method => method.Segments
@@ -102,7 +104,7 @@ internal static class CSharpAsyncCatchValues
             IrVersion = GuestExceptionValues.IrVersion,
             Provenance = input.Provenance,
             Functions = functions,
-            ExceptionValues = bindings.Count == 0 && tokenContext is not null ? null
+            ExceptionValues = bindings.Count == 0 && (tokenContext is not null || asyncContext is { HasVoidErrorOwners: true }) ? null
                 : new(bindings.OrderBy(binding => binding.FunctionId, StringComparer.Ordinal)
                     .ThenBy(binding => binding.BlockId, StringComparer.Ordinal).ToArray()),
         };

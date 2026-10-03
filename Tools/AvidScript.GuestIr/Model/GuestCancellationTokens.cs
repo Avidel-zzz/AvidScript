@@ -32,8 +32,8 @@ public static class GuestCancellationTokens
             || (GuestComposableCapabilities.HasExecutionBase(module, 29, "1.28")
                 && GuestComposableCapabilities.Has(module, GuestComposableCapabilities.CancellationTokenValue)
                 && GuestComposableCapabilities.Has(module, GuestComposableCapabilities.ExceptionValues)
-                && module.Provenance.SemanticSchemaVersion == 54
-                && module.Provenance.SemanticVersion == "1.63"
+                && module.Provenance.SemanticSchemaVersion == GuestComposableCapabilities.ExpectedSemanticSchema(module)
+                && module.Provenance.SemanticVersion == GuestComposableCapabilities.ExpectedSemanticVersion(module)
                 && plan.BaseSchemaVersion == 29 && plan.BaseIrVersion == "1.28"));
 
     public static bool IsReader(GuestImport import) => import is {

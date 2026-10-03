@@ -14,6 +14,7 @@ internal sealed class CSharpAsyncSynchronousExecutionContext
     private static readonly ConditionalWeakTable<SemanticDocument, CSharpAsyncSynchronousExecutionContext> Contexts = new();
     internal CSharpLanguageErrorTokenCatalog Catalog { get; }
     internal GuestLanguageErrorCatalog GuestCatalog { get; }
+    internal bool HasVoidErrorOwners { get; }
     internal IReadOnlyDictionary<string, string> OutcomeValues { get; }
     internal IReadOnlyList<GuestFunction> MemberGuards { get; }
     internal List<GuestAsyncSynchronousExceptionSite> Sites { get; } = new();
@@ -24,6 +25,8 @@ internal sealed class CSharpAsyncSynchronousExecutionContext
     {
         Catalog = catalog;
         GuestCatalog = guestCatalog;
+        HasVoidErrorOwners = SemanticContract.HasAsyncVoidErrorOwner(source)
+            && SemanticAsyncVoidErrorOwnerValidator.IsValid(source);
         MemberGuards = CSharpAsyncMemberAssignmentLowerer.BuildGuards(source, catalog);
         OutcomeValues = source.Callables.Where(callable => effects.OutcomeMethodIds.Contains(callable.MethodSymbolId))
             .ToDictionary(callable => CSharpGuestIds.Function(callable.MethodSymbolId), callable => callable.ReturnTypeId, StringComparer.Ordinal);

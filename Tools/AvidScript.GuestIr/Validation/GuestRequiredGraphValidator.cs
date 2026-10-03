@@ -24,6 +24,11 @@ internal static class GuestRequiredGraphValidator
         }
 
         GuestProvenance provenance = module.Provenance;
+        if (module.AsyncVoidErrorOwners is { } voidOwners
+            && (voidOwners.Owners is null || voidOwners.Owners.Any(owner => owner is null
+                || HasNull(owner.MethodFunctionId, owner.OwnerLocalId, owner.TypeLocalId, owner.UnhandledBlockId)
+                || owner.Reports is null || owner.Reports.Any(report => report is null
+                    || HasNull(report.FunctionId, report.BlockId))))) return false;
         if (module.CapabilityManifest is { } manifest
             && (manifest.ExecutionBaseIrVersion is null || manifest.Capabilities is null
                 || manifest.Capabilities.Any(capability => capability is null || capability.Id is null)))

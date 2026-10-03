@@ -40,8 +40,8 @@ public static class GuestTaskCancellationErrorValidator
             && metadata.Length == 0 && roots.Length == 0) return;
 
         if (!(Supports(module) || composableAsync) || module.Language != "csharp"
-            || module.Provenance.SemanticSchemaVersion != (composableAsync ? 54 : IsVersion(module) ? SemanticSchemaVersion : GuestTaskLocalLifetimeValidator.ExpectedSemanticSchema(module))
-            || module.Provenance.SemanticVersion != (composableAsync ? "1.63" : IsVersion(module) ? SemanticVersion : GuestTaskLocalLifetimeValidator.ExpectedSemanticVersion(module))
+            || module.Provenance.SemanticSchemaVersion != (composableAsync ? GuestComposableCapabilities.ExpectedSemanticSchema(module) : IsVersion(module) ? SemanticSchemaVersion : GuestTaskLocalLifetimeValidator.ExpectedSemanticSchema(module))
+            || module.Provenance.SemanticVersion != (composableAsync ? GuestComposableCapabilities.ExpectedSemanticVersion(module) : IsVersion(module) ? SemanticVersion : GuestTaskLocalLifetimeValidator.ExpectedSemanticVersion(module))
             || module.LanguageErrorCatalog is not { Types.Count: > 0, Sources.Count: > 0 }
             || cancellation.Length != 1 || metadata.Length != 1 || roots.Length != 1)
         {

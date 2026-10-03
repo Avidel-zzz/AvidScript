@@ -42,6 +42,17 @@ public static class CSharpCancellationIdentityCompiler
         return TryUpgradeCore(input, out module, out error);
     }
 
+    // A validated, compiler-owned IR36 source context is the only admission.
+    // The completed artifact still passes every independent IR validator.
+    internal static bool TryUpgradeForVoidOwners(CSharpAsyncSynchronousExecutionContext context, GuestModule input,
+        out GuestModule? module, out string? error)
+    {
+        module = null;
+        error = null;
+        if (!context.HasVoidErrorOwners) { error = "Async void identity composition requires its owned source context."; return false; }
+        return TryUpgradeCore(input, out module, out error);
+    }
+
     private static bool TryUpgradeCore(GuestModule input, out GuestModule? module, out string? error)
     {
         module = null;

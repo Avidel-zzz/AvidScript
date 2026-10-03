@@ -41,13 +41,14 @@ public static class CSharpGuestLowerer
         ArgumentNullException.ThrowIfNull(semanticSha256);
         ArgumentNullException.ThrowIfNull(substitutes);
 
-        if (document.SchemaVersion == SemanticContract.AsyncVoidErrorOwnerSchemaVersion
+        var synchronousAsync = CSharpAsyncSynchronousExecutionContext.Find(document);
+        if ((document.SchemaVersion == SemanticContract.AsyncVoidErrorOwnerSchemaVersion
             || document.SemanticVersion == SemanticContract.AsyncVoidErrorOwnerSemanticVersion
             || document.AsyncMethods?.Any(method => method?.VoidErrorOwner is not null) == true)
+            && synchronousAsync is not { HasVoidErrorOwners: true })
             return Failure(new[] { new GuestDiagnostic("ASCG1030", "error",
                 "Async void error owners require IR 36 execution and report lowering before Guest publication.", null) });
 
-        var synchronousAsync = CSharpAsyncSynchronousExecutionContext.Find(document);
         var tokenContext = CSharpCancellationTokenExecutionContext.Find(document);
         if ((document.SchemaVersion == GuestCancellationTokens.SemanticSchemaVersion
             || document.SemanticVersion == GuestCancellationTokens.SemanticVersion)

@@ -5,8 +5,7 @@ using System.Text.Json.Serialization;
 
 namespace AvidScript.GuestIr;
 
-// IR 35 carries a versioned feature list. The validator currently admits the
-// synchronous static-storage plus token-value pair; async combinations remain closed.
+// Composed envelopes keep their actual version and every independent plan.
 public static class GuestComposableCapabilities
 {
     public const int SchemaVersion = 35;
@@ -19,7 +18,14 @@ public static class GuestComposableCapabilities
     public const string CancellationTokenValue = "error.cancellation_token_value";
 
     public static bool IsVersion(GuestModule module) =>
-        module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion;
+        module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion
+        || GuestAsyncVoidErrorOwners.IsVersion(module);
+
+    public static int ExpectedSemanticSchema(GuestModule module) =>
+        GuestAsyncVoidErrorOwners.IsVersion(module) ? GuestAsyncVoidErrorOwners.SemanticSchemaVersion : 54;
+
+    public static string ExpectedSemanticVersion(GuestModule module) =>
+        GuestAsyncVoidErrorOwners.IsVersion(module) ? GuestAsyncVoidErrorOwners.SemanticVersion : "1.63";
 
     public static bool Has(GuestModule module, string capabilityId) =>
         IsVersion(module) && module.CapabilityManifest?.Capabilities?.Any(capability =>
@@ -35,15 +41,18 @@ public static class GuestComposableCapabilities
     public static bool HasDeclaredAsyncBase29(GuestModule module) =>
         HasExecutionBase(module, 29, "1.28")
         && module.Language == "csharp"
-        && module.Provenance is { SemanticSchemaVersion: 54, SemanticVersion: "1.63" }
-        && Has(module, StaticStorage) && Has(module, AwaitReadiness)
+        && module.Provenance.SemanticSchemaVersion == ExpectedSemanticSchema(module)
+        && module.Provenance.SemanticVersion == ExpectedSemanticVersion(module)
+        && (GuestAsyncVoidErrorOwners.IsVersion(module)
+            ? Has(module, GuestAsyncVoidErrorOwners.CapabilityId) && module.AsyncVoidErrorOwners is not null
+            : Has(module, StaticStorage) && Has(module, AwaitReadiness)
         && Has(module, CancellationIdentity) && Has(module, ExceptionValues)
         && Has(module, CancellationTokenValue)
         && module.StaticStorage is { BaseSchemaVersion: 29, BaseIrVersion: "1.28" }
         && module.DirectAwaitReadiness is { BaseSchemaVersion: 29, BaseIrVersion: "1.28" }
         && module.CancellationIdentity is { BaseSchemaVersion: 29, BaseIrVersion: "1.28" }
         && module.CancellationTokens is { BaseSchemaVersion: 29, BaseIrVersion: "1.28" }
-        && module.ExceptionValues is not null;
+        && module.ExceptionValues is not null);
 
     public static bool IsExecutionBase(int schema, string version) =>
         (schema, version) is (14, "1.13") or (17, "1.16") or (29, "1.28");

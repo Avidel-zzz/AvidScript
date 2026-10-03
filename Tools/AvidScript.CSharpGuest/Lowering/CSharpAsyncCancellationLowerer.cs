@@ -23,7 +23,15 @@ internal static class CSharpAsyncCancellationLowerer
         && (segment.Transfer?.CancellationTarget is >= 0 || NeedsImplicitPropagation(document, method, segment));
 
     public static bool HasExceptionStorage(SemanticDocument document, SemanticAsyncMethod method) =>
-        method.ExceptionPlan is not null || method.Segments.Any(segment => NeedsImplicitPropagation(document, method, segment));
+        method.ExceptionPlan is not null && (!SemanticContract.HasAsyncVoidErrorOwner(document)
+            || method.VoidErrorOwner is not null || method.Segments.Any(segment =>
+                segment.SynchronousExceptionTarget is not null
+                || segment.AwaitSite is not null && segment.Transfer?.SecondaryTarget >= 0
+                || segment.Transfer?.CancellationTarget is not null
+                || segment.Transfer?.Kind is SemanticAsyncMethod.RaiseExceptionTransferKind
+                    or SemanticAsyncMethod.PropagateExceptionTransferKind or SemanticAsyncMethod.CatchMatchTransferKind
+                    or SemanticAsyncMethod.EndCatchTransferKind or SemanticAsyncMethod.RethrowTransferKind))
+        || method.Segments.Any(segment => NeedsImplicitPropagation(document, method, segment));
 
     public static string ImplicitPropagationBlock(SemanticAsyncMethod method, SemanticAsyncAwaitSite site) =>
         CSharpGuestIds.Function(method.MethodSymbolId) + ":cancel_at:" + site.CallbackId;

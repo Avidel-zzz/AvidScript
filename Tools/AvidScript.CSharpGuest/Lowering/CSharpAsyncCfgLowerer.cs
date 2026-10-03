@@ -791,6 +791,9 @@ internal static class CSharpAsyncCfgLowerer
         string activeBlockId, List<GuestInstruction> instructions,
         List<GuestBasicBlock> blocks)
     {
+        if (method.VoidErrorOwner is not null)
+            return CSharpAsyncVoidErrorLowerer.EmitPropagation(context, method, segment.Ordinal,
+                activeBlockId, instructions, blocks);
         if (!CSharpAsyncCancellationLowerer.HasExceptionStorage(context.Document, method) || method.TaskResultTypeId is null)
             return false;
         GuestRegister? owner = CSharpAsyncExceptionLowerer.LoadOwner(context,

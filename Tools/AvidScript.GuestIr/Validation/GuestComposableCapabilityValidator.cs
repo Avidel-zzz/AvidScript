@@ -10,6 +10,7 @@ internal static class GuestComposableCapabilityValidator
     internal static void Validate(GuestValidationContext context)
     {
         GuestModule module = context.InputArtifact;
+        bool voidOwners = GuestAsyncVoidErrorOwners.IsVersion(module);
         GuestCapabilityManifest? manifest = module.CapabilityManifest;
         if (!GuestComposableCapabilities.IsVersion(module))
         {
@@ -32,9 +33,9 @@ internal static class GuestComposableCapabilityValidator
             Add("IR 35 requires a recognized source language until its frontend contract is defined.");
 
         if (module.Language == "csharp"
-            && (module.Provenance.SemanticSchemaVersion != 54
-                || module.Provenance.SemanticVersion != "1.63"))
-            Add("C# IR 35 requires the paired Semantic 54/1.63 source contract.");
+            && (module.Provenance.SemanticSchemaVersion != GuestComposableCapabilities.ExpectedSemanticSchema(module)
+                || module.Provenance.SemanticVersion != GuestComposableCapabilities.ExpectedSemanticVersion(module)))
+            Add("Composed C# IR requires its exact paired Semantic source contract.");
 
         IReadOnlyList<GuestCapability> capabilities = manifest.Capabilities;
         if (capabilities.Count > MaximumCapabilities)
@@ -53,7 +54,8 @@ internal static class GuestComposableCapabilityValidator
                     or GuestComposableCapabilities.AwaitReadiness
                     or GuestComposableCapabilities.CancellationIdentity
                     or GuestComposableCapabilities.ExceptionValues
-                    or GuestComposableCapabilities.CancellationTokenValue))
+                    or GuestComposableCapabilities.CancellationTokenValue)
+                && !(voidOwners && capability.Id == GuestAsyncVoidErrorOwners.CapabilityId))
                 Add("The capability list contains an unknown name or version.");
             if (string.CompareOrdinal(previous, capability.Id) >= 0 || !declared.Add(capability.Id))
                 Add("Capabilities must be unique and ordered by ordinal ID.");
@@ -65,6 +67,7 @@ internal static class GuestComposableCapabilityValidator
         RequirePlan(GuestComposableCapabilities.CancellationIdentity, module.CancellationIdentity is not null);
         RequirePlan(GuestComposableCapabilities.ExceptionValues, module.ExceptionValues is not null);
         RequirePlan(GuestComposableCapabilities.CancellationTokenValue, module.CancellationTokens is not null);
+        RequirePlan(GuestAsyncVoidErrorOwners.CapabilityId, module.AsyncVoidErrorOwners is not null);
 
         int baseSchema = manifest.ExecutionBaseSchemaVersion;
         string baseVersion = manifest.ExecutionBaseIrVersion;
@@ -82,7 +85,7 @@ internal static class GuestComposableCapabilityValidator
             || declared.Contains(GuestComposableCapabilities.CancellationIdentity)
             || declared.Contains(GuestComposableCapabilities.ExceptionValues)))
             Add("Async readiness, cancellation identity, and exception values require base 29/1.28.");
-        if (declared.Contains(GuestComposableCapabilities.CancellationIdentity)
+        if (!voidOwners && declared.Contains(GuestComposableCapabilities.CancellationIdentity)
             && !declared.Contains(GuestComposableCapabilities.AwaitReadiness))
             Add("Cancellation identity requires await readiness.");
 
@@ -91,12 +94,12 @@ internal static class GuestComposableCapabilityValidator
             && declared.Contains(GuestComposableCapabilities.StaticStorage)
             && declared.Contains(GuestComposableCapabilities.CancellationTokenValue);
         bool asynchronousProfile = GuestComposableCapabilities.HasDeclaredAsyncBase29(module)
-            && declared.Count == 5;
-        if (!synchronousProfile && !asynchronousProfile)
+            && (voidOwners || declared.Count == 5);
+        if (voidOwners ? !asynchronousProfile : !synchronousProfile && !asynchronousProfile)
             Add("IR 35 requires the exact synchronous static/token pair or the five-capability async base 29 profile.");
         if (baseSchema == 14 && (module.LanguageOutcomeTypes is not null || module.LanguageErrorCatalog is not null)
-            || (baseSchema is 17 or 29) && (module.LanguageOutcomeTypes is not { Count: > 0 }
-                || module.LanguageErrorCatalog is null))
+            || (baseSchema is 17 or 29) && (module.LanguageOutcomeTypes is null
+                || !voidOwners && module.LanguageOutcomeTypes.Count == 0 || module.LanguageErrorCatalog is null))
             Add("The execution base requires its exact language-error outcome and catalog profile.");
         if (baseSchema == 29)
         {

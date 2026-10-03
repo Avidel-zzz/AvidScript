@@ -33,10 +33,11 @@ public static class CSharpLanguageErrorCompiler
         error = null;
         if (semantic is null || semantic.AsyncMethods is null)
             return Fail("Expected a validated exception-flow artifact without unrelated errors.", out error);
-        if (semantic is not null && (semantic.SchemaVersion == SemanticContract.AsyncVoidErrorOwnerSchemaVersion
+        if ((semantic.SchemaVersion == SemanticContract.AsyncVoidErrorOwnerSchemaVersion
             || semantic.SemanticVersion == SemanticContract.AsyncVoidErrorOwnerSemanticVersion
-            || semantic.AsyncMethods.Any(method => method?.VoidErrorOwner is not null)))
-            return Fail("Async void error owners require IR 36 execution and report lowering before Guest publication.", out error);
+            || semantic.AsyncMethods.Any(method => method?.VoidErrorOwner is not null))
+            && !SemanticAsyncVoidErrorOwnerValidator.IsValid(semantic))
+            return Fail("Async void error owners require the complete paired source contract.", out error);
         var tokenContext = semantic is null ? null : CSharpCancellationTokenExecutionContext.Find(semantic);
         if (semantic is not null && (semantic.SchemaVersion == GuestCancellationTokens.SemanticSchemaVersion
             || semantic.SemanticVersion == GuestCancellationTokens.SemanticVersion) && tokenContext is null)
@@ -281,7 +282,7 @@ public static class CSharpLanguageErrorCompiler
             Diagnostics = semantic.Diagnostics.Where(diagnostic =>
                 diagnostic.Code != "ASCS3001" && !(synchronousAsync && diagnostic.Code == "ASCS5422")).ToArray(),
         };
-        if ((handlers.Length != 0 || implicitMemberErrors || staticContext is not null)
+        if ((handlers.Length != 0 || implicitMemberErrors || synchronousAsync || staticContext is not null)
             && ordinary.Reachability?.Mode != "all_callables_compatibility")
             ordinary = ordinary with
             {
@@ -402,8 +403,9 @@ public static class CSharpLanguageErrorCompiler
         candidate = adapted;
         if (!CSharpDirectAwaitReadinessLowerer.TryWrap(candidate, out candidate, out error)) return false;
         if (SemanticContract.HasAsyncCatchVariables(semantic) && (tokenContext is null || tokenContext.HasAsync)
-            && !CSharpAsyncCatchValues.TryWrap(semantic, candidate, out candidate, out error)) return false;
+            && !CSharpAsyncCatchValues.TryWrap(semantic, candidate, out candidate, out error, asyncContext)) return false;
         if (tokenContext is not null) candidate = tokenContext.Wrap(candidate);
+        if (asyncContext is { HasVoidErrorOwners: true }) candidate = CSharpAsyncVoidErrorLowerer.Wrap(semantic, candidate);
         if (!deferComposedValidation)
         {
             GuestValidationResult validation = GuestModuleValidator.Validate(candidate);

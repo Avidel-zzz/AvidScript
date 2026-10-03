@@ -116,9 +116,12 @@ internal static class CSharpGuestAsyncSynchronousExceptionTests
             var result = CSharpGuestLowerer.Lower(candidate, candidateHash, enableAsyncLanguageErrors: true);
             check(!result.Succeeded && result.Module is null && result.Diagnostics.Any(item => item.Code == "ASCG1030"),
                 "Neither a preview nor a disguised async void owner can enter legacy Guest IR.");
-            check(!CSharpLanguageErrorCompiler.TryLower(candidate, candidateHash, out var pending, out string? pendingError)
-                && pending is null && pendingError is not null && pendingError.Contains("IR 36", StringComparison.Ordinal),
-                "The language-error compiler cannot publish a partially implemented void owner.");
+            bool lowered = CSharpLanguageErrorCompiler.TryLower(candidate, candidateHash, out var pending, out string? pendingError);
+            check(candidate == preview
+                ? lowered && pending?.Module.SchemaVersion == GuestAsyncVoidErrorOwners.SchemaVersion
+                    && GuestModuleValidator.Validate(pending.Module).Succeeded
+                : !lowered && pending is null && pendingError is not null,
+                "Only the complete paired void owner can publish IR 36: " + pendingError);
         }
     }
 
