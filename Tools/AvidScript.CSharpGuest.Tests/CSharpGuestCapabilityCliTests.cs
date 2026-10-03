@@ -57,7 +57,7 @@ internal static class CSharpGuestCapabilityCliTests
         return count;
     }
 
-    private static string TaskSource(bool named, bool token, bool statics) =>
+    internal static string TaskSource(bool named, bool token, bool statics) =>
         "using AvidScript; using System; using System.Threading; using System.Threading.Tasks; using System.Runtime.InteropServices; public static class Script { "
         + "[UnmanagedCallersOnly(EntryPoint = \"avid_on_begin_play\")] public static void BeginPlay() { Run(); } "
         + "public static int Sync(int value) { if (value < 0) throw new ArgumentException(); return value; } "

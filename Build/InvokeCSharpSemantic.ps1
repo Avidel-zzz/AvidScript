@@ -22,10 +22,17 @@ param(
     [string]$CancellationTokens = "disabled",
     [ValidateSet("enabled", "disabled")]
     [string]$AsyncVoidErrorOwner = "disabled",
+    [string]$LanguageProfile = "",
     [string]$Configuration = "Release"
 )
 
 $ErrorActionPreference = "Stop"
+if (-not [string]::IsNullOrWhiteSpace($LanguageProfile)) {
+    foreach ($name in @('AsyncExceptionFlow', 'DirectAwaitCleanup', 'AsyncCancellationFlow',
+        'AsyncSynchronousExceptions', 'StaticInitialization', 'AsyncCatchVariables', 'CancellationTokens', 'AsyncVoidErrorOwner')) {
+        if ($PSBoundParameters.ContainsKey($name)) { throw 'A language profile cannot be combined with explicit semantic analysis options.' }
+    }
+}
 $BuildDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PluginRoot = Split-Path -Parent $BuildDir
 $SemanticProject = Join-Path $PluginRoot "Tools\AvidScript.CSharpSemantic\AvidScript.CSharpSemantic.csproj"
@@ -90,6 +97,9 @@ try {
             "--frontend", $FrontendPath,
             "--output", $OutputPath
         )
+        if (-not [string]::IsNullOrWhiteSpace($LanguageProfile)) {
+            $SemanticArguments += @('--language-profile', $LanguageProfile)
+        }
         if (-not [string]::IsNullOrWhiteSpace($ReferenceSourcePath)) {
             $SemanticArguments += @("--reference-source", $ReferenceSourcePath)
         }

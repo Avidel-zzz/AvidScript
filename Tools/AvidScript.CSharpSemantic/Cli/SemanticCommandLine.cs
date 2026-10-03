@@ -27,7 +27,13 @@ public static class SemanticCommandLine
         ArgumentNullException.ThrowIfNull(workspace);
         try
         {
+            if (args.Length == 2 && args[0] == "--describe-language-profile")
+            {
+                Console.WriteLine(CSharpLanguageProfile.Resolve(args[1]).DescribeJson());
+                return 0;
+            }
             IReadOnlyDictionary<string, string> options = ParseOptions(args, out List<ReferenceSourceOption> referenceSourceOptions);
+            CSharpLanguageProfile? profile = CSharpLanguageProfile.FromSemanticOptions(options);
             string sourcePath = GetRequiredOption(options, "--source");
             string sourceId = GetRequiredOption(options, "--source-id");
             string frontendPath = GetRequiredOption(options, "--frontend");
@@ -45,16 +51,11 @@ public static class SemanticCommandLine
             string source = File.ReadAllText(sourcePath);
             string frontendSourceSha256 = ReadFrontendSourceSha256(frontendPath);
             IReadOnlyList<SemanticReferenceSource> referenceSources = LoadReferenceSources(referenceSourceOptions);
-            bool enableAsyncExceptionFlow = options.TryGetValue(
-                    "--async-exception-flow", out string? flowMode)
-                && string.Equals(flowMode, "enabled", StringComparison.Ordinal);
-            bool enableDirectAwaitCleanup = options.TryGetValue(
-                    "--direct-await-cleanup", out string? cleanupMode)
-                && string.Equals(cleanupMode, "enabled", StringComparison.Ordinal);
-            bool enableAsyncCancellationFlow = options.TryGetValue(
-                    "--async-cancellation-flow", out string? cancellationMode)
-                && string.Equals(cancellationMode, "enabled", StringComparison.Ordinal);
-            bool Enabled(string option) => options.TryGetValue(option, out string? value) && value == "enabled";
+            bool Enabled(string option) => profile is not null ? profile.Enables(option)
+                : options.TryGetValue(option, out string? value) && value == "enabled";
+            bool enableAsyncExceptionFlow = Enabled("--async-exception-flow");
+            bool enableDirectAwaitCleanup = Enabled("--direct-await-cleanup");
+            bool enableAsyncCancellationFlow = Enabled("--async-cancellation-flow");
             if (enableDirectAwaitCleanup && !enableAsyncExceptionFlow)
                 throw new ArgumentException("Direct await cleanup requires async exception flow.");
             if (enableAsyncCancellationFlow && !enableAsyncExceptionFlow)
@@ -129,7 +130,7 @@ public static class SemanticCommandLine
             if (Array.IndexOf(RequiredOptions, option) < 0
                 && option is not ("--async-exception-flow" or "--direct-await-cleanup" or "--async-cancellation-flow"
                     or "--async-synchronous-exceptions" or "--static-initialization" or "--async-catch-variables"
-                    or "--cancellation-tokens" or "--async-void-error-owner"))
+                    or "--cancellation-tokens" or "--async-void-error-owner" or "--language-profile"))
             {
                 throw new ArgumentException($"Unknown option: {option}");
             }

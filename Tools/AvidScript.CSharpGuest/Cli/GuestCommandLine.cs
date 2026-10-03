@@ -33,9 +33,10 @@ public static class GuestCommandLine
             options.TryGetValue("--state-schema", out stateSchemaPath);
             options.TryGetValue("--debug-map", out debugMapPath);
             options.TryGetValue("--frontend-artifact-sha256", out string? frontendArtifactSha256);
-            bool dataLaneFusionEnabled = ParseDataLaneFusion(options);
-            bool debugInstrumentationEnabled = ParseDebugInstrumentation(options);
-            bool boundedLanguageErrors = ParseLanguageErrors(options);
+            CSharpLanguageProfile? profile = CSharpLanguageProfile.FromGuestOptions(options);
+            bool dataLaneFusionEnabled = profile is not null || ParseDataLaneFusion(options);
+            bool debugInstrumentationEnabled = profile is null && ParseDebugInstrumentation(options);
+            bool boundedLanguageErrors = profile is not null || ParseLanguageErrors(options);
             options.TryGetValue("--module-id", out string? requestedModuleId);
             int implicitFunctionImportCount =
                 ParseImplicitFunctionImportCount(options);
@@ -206,7 +207,8 @@ public static class GuestCommandLine
                     && name != "--debug-instrumentation"
                     && name != "--implicit-function-import-count"
                     && name != "--language-errors"
-                    && name != "--module-id")
+                    && name != "--module-id"
+                    && name != "--language-profile")
                 || string.IsNullOrWhiteSpace(value)
                 || !options.TryAdd(name, value))
             {

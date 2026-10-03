@@ -15,6 +15,7 @@ param(
     [ValidateSet("disabled", "bounded")]
     [string]$LanguageErrors = "disabled",
     [string]$ModuleId = "",
+    [string]$LanguageProfile = "",
     [switch]$CooperativeSafepoints,
     [ValidateRange(1, 65536)]
     [int]$SafepointInterval = 256,
@@ -117,6 +118,12 @@ try {
     }
     if ($LanguageErrors -ceq "bounded") {
         $GuestArguments += @("--language-errors", "bounded")
+    }
+    if (-not [string]::IsNullOrWhiteSpace($LanguageProfile)) {
+        if ($PSBoundParameters.ContainsKey('LanguageErrors') -and $LanguageErrors -cne 'bounded') {
+            throw 'LanguageErrors conflicts with the requested language profile.'
+        }
+        $GuestArguments += @('--language-profile', $LanguageProfile)
     }
     if (-not [string]::IsNullOrWhiteSpace($ModuleId)) {
         $GuestArguments += @("--module-id", $ModuleId)

@@ -51,6 +51,7 @@ public sealed class CompilerStageExecutor
         stopwatch.Stop();
         return new CompilerWorkerResponse
         {
+            ProtocolVersion = request.ProtocolVersion,
             RequestId = request.RequestId,
             WorkerInstanceId = workerInstanceId,
             ToolchainFingerprint = toolchainFingerprint,
@@ -60,6 +61,7 @@ public sealed class CompilerStageExecutor
             DurationMs = stopwatch.Elapsed.TotalMilliseconds,
             Diagnostics = NormalizeDiagnostics(diagnostics),
             Workspace = GetWorkspaceMetrics(),
+            LanguageProfile = request.LanguageProfile is null ? null : CSharpLanguageProfile.Gameplay.Identity,
         };
     }
 
@@ -92,6 +94,11 @@ public sealed class CompilerStageExecutor
             arguments.Add("--executable-reference-source");
             arguments.Add(request.ExecutableReferenceSourcePath);
         }
+        if (request.LanguageProfile is not null)
+        {
+            arguments.Add("--language-profile");
+            arguments.Add(CSharpLanguageProfile.Resolve(request.LanguageProfile.Name).Name);
+        }
         return SemanticCommandLine.Run(arguments.ToArray(), semanticWorkspace);
     }
 
@@ -99,7 +106,7 @@ public sealed class CompilerStageExecutor
     {
         string debugOffsetPath = request.DebugMapPath + ".offsets.json";
         File.Delete(debugOffsetPath);
-        int exitCode = GuestCommandLine.Run(new[]
+        List<string> arguments = new()
         {
             "--semantic", request.SemanticPath,
             "--output", request.GuestIrPath,
@@ -108,7 +115,13 @@ public sealed class CompilerStageExecutor
             "--frontend-artifact-sha256", request.FrontendArtifactSha256,
             "--data-lane-fusion", request.DataLaneFusion,
             "--debug-instrumentation", request.DebugInstrumentation,
-        });
+        };
+        if (request.LanguageProfile is not null)
+        {
+            arguments.AddRange(new[] { "--language-profile", CSharpLanguageProfile.Resolve(request.LanguageProfile.Name).Name,
+                "--module-id", request.ModuleId! });
+        }
+        int exitCode = GuestCommandLine.Run(arguments.ToArray());
         if (exitCode != 0)
         {
             return exitCode;

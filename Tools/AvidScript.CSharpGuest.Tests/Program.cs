@@ -6,6 +6,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--language-profile")
+            {
+                int focused = CSharpGuestLanguageProfileTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.LanguageProfile: {focused}/{focused} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--static-async-values")
             {
                 int focused = CSharpGuestStaticAsyncValueTests.Run();
@@ -349,6 +355,7 @@ internal static class Program
                 + CSharpGuestCliTests.Run()
                 + CSharpGuestCapabilityCliTests.Run()
                 + CSharpGuestCapabilityCliTests.RunGameplayCoverage()
+                + CSharpGuestLanguageProfileTests.Run()
                 + CSharpGuestStaticAsyncValueTests.Run()
                 + CSharpGuestStateSchemaTests.Run()
                 + CSharpGuestDebugMapTests.Run()

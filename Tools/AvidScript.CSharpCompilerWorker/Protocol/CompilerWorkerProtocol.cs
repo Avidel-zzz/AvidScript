@@ -2,12 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AvidScript.CSharpSemantic;
 
 namespace AvidScript.CSharpCompilerWorker;
 
 public static class CompilerWorkerProtocol
 {
     public const int Version = 1;
+    public const int LanguageProfileVersion = 2;
     public const int MaximumMessageCharacters = 1024 * 1024;
     public const int MaximumDiagnostics = 128;
     public const int MaximumDiagnosticCharacters = 4096;
@@ -52,6 +54,12 @@ public sealed record CompilerWorkerRequest
     public string ReferenceSourcePath { get; init; } = string.Empty;
 
     public string ExecutableReferenceSourcePath { get; init; } = string.Empty;
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public CSharpLanguageProfileIdentity? LanguageProfile { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ModuleId { get; init; }
 }
 
 public sealed record CompilerWorkerResponse
@@ -77,6 +85,9 @@ public sealed record CompilerWorkerResponse
     public IReadOnlyList<string> Diagnostics { get; init; } = Array.Empty<string>();
 
     public CompilerWorkerWorkspaceMetrics Workspace { get; init; } = new();
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public CSharpLanguageProfileIdentity? LanguageProfile { get; init; }
 }
 
 public sealed record CompilerWorkerWorkspaceMetrics

@@ -104,6 +104,7 @@ public sealed class CompilerWorkerServer
 
         string requestId = string.Empty;
         string stage = string.Empty;
+        int protocolVersion = CompilerWorkerProtocol.Version;
         CompilerWorkerResponse response;
         bool shouldShutdown = false;
         Stopwatch stopwatch = Stopwatch.StartNew();
@@ -117,6 +118,8 @@ public sealed class CompilerWorkerServer
             CompilerWorkerRequest request = CompilerWorkerJson.DeserializeRequest(line);
             requestId = request.RequestId;
             stage = request.Stage;
+            if (request.ProtocolVersion == CompilerWorkerProtocol.LanguageProfileVersion)
+                protocolVersion = request.ProtocolVersion;
             response = executor.Execute(
                 request,
                 workerInstanceId,
@@ -131,6 +134,7 @@ public sealed class CompilerWorkerServer
             stopwatch.Stop();
             response = new CompilerWorkerResponse
             {
+                ProtocolVersion = protocolVersion,
                 RequestId = requestId,
                 WorkerInstanceId = workerInstanceId,
                 ToolchainFingerprint = options.ToolchainFingerprint,

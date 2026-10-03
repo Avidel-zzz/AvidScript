@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
+using AvidScript.CSharpSemantic;
 
 namespace AvidScript.CSharpCompilerWorker;
 
@@ -19,7 +20,7 @@ public static partial class CompilerWorkerRequestValidator
     public static void Validate(CompilerWorkerRequest request, string expectedToolchainFingerprint)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (request.ProtocolVersion != CompilerWorkerProtocol.Version)
+        if (request.ProtocolVersion is not (CompilerWorkerProtocol.Version or CompilerWorkerProtocol.LanguageProfileVersion))
         {
             throw new ArgumentException("ASCW1001: Compiler worker protocol version is unsupported.");
         }
@@ -37,6 +38,23 @@ public static partial class CompilerWorkerRequestValidator
         if (!Stages.Contains(request.Stage))
         {
             throw new ArgumentException("ASCW1004: Compiler worker stage is unsupported.");
+        }
+        if (request.ProtocolVersion == CompilerWorkerProtocol.Version)
+        {
+            if (request.LanguageProfile is not null || request.ModuleId is not null)
+                throw new ArgumentException("ASCW1011: Protocol 1 cannot authorize language profile fields.");
+        }
+        else
+        {
+            if (request.Stage is not ("semantic" or "guest")
+                || request.LanguageProfile != CSharpLanguageProfile.Gameplay.Identity)
+                throw new ArgumentException("ASCW1011: Protocol 2 requires an exact supported language profile identity and stage.");
+            if (request.Stage == "semantic" && request.ModuleId is not null)
+                throw new ArgumentException("ASCW1011: Semantic stage cannot select a Guest module identity.");
+            if (request.Stage == "guest" && (string.IsNullOrWhiteSpace(request.ModuleId)
+                || request.ModuleId.Length > 1024 || request.DataLaneFusion != CSharpLanguageProfile.Gameplay.DataLaneFusion
+                || request.DebugInstrumentation != CSharpLanguageProfile.Gameplay.DebugInstrumentation))
+                throw new ArgumentException("ASCW1011: Gameplay Guest execution requires its module identity and exact execution policy.");
         }
 
         switch (request.Stage)

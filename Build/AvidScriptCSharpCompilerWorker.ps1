@@ -205,6 +205,7 @@ function New-AvidScriptCompilerWorkerRequest {
         }
         $Request[$Entry.Key] = $Entry.Value
     }
+    if ($Fields.ContainsKey('language_profile')) { $Request.protocol_version = 2 }
     return $Request
 }
 
@@ -268,6 +269,16 @@ function Invoke-AvidScriptCompilerWorkerRaw {
         $Pipe.Dispose()
     }
 
+    Assert-AvidScriptCompilerWorkerResponseIdentity -Context $Context -Request $Request -Response $Response
+    return $Response
+}
+
+function Assert-AvidScriptCompilerWorkerResponseIdentity {
+    param(
+        [Parameter(Mandatory = $true)]$Context,
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Request,
+        [Parameter(Mandatory = $true)]$Response
+    )
     foreach ($FieldName in @(
         "protocol_version",
         "request_id",
@@ -284,7 +295,7 @@ function Invoke-AvidScriptCompilerWorkerRaw {
             throw "ASCW3006: Compiler worker response is missing field: $FieldName"
         }
     }
-    if ([int]$Response.protocol_version -ne [int]$Context.ProtocolVersion -or
+    if ([int]$Response.protocol_version -ne [int]$Request.protocol_version -or
         [string]$Response.request_id -cne [string]$Request.request_id -or
         [string]$Response.toolchain_fingerprint -cne [string]$Context.ToolchainFingerprint -or
         [string]$Response.stage -cne [string]$Request.stage -or
@@ -292,7 +303,18 @@ function Invoke-AvidScriptCompilerWorkerRaw {
         [int]$Response.worker_process_id -le 0) {
         throw "ASCW3006: Compiler worker response identity is invalid."
     }
-    return $Response
+    $HasResponseProfile = $Response.PSObject.Properties.Name -contains 'language_profile'
+    if ([int]$Request.protocol_version -eq 1 -and $HasResponseProfile -and $null -ne $Response.language_profile) {
+        throw 'ASCW3006: Protocol 1 response cannot authorize a language profile.'
+    }
+    if ([int]$Request.protocol_version -eq 2 -and
+        ([bool]$Response.succeeded -or [int]$Response.exit_code -eq 1 -or $HasResponseProfile)) {
+        if (-not $HasResponseProfile -or $null -eq $Response.language_profile -or
+            [string]$Response.language_profile.name -cne [string]$Request.language_profile.name -or
+            [string]$Response.language_profile.contract_sha256 -cne [string]$Request.language_profile.contract_sha256) {
+            throw 'ASCW3006: Compiler worker response language profile differs from the request.'
+        }
+    }
 }
 
 function Start-AvidScriptCompilerWorkerProcess {
